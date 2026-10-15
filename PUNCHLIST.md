@@ -10177,8 +10177,9 @@ Plan: `docs/superpowers/plans/2026-10-01-approver-send-and-lead-estimator.md`.
   lead, and the Quotes hub row adds "· prepared by <first name>" when they differ.
 
 **Follow-ups.**
-1. Should the lead estimator / Prepared by freeze after send? Today both can change on a sent quote (a PDF re-render
-   moves the printed revision date).
+1. ~~Should the lead estimator / Prepared by freeze after send? Today both can change on a sent quote (a PDF re-render
+   moves the printed revision date).~~ **ANSWERED 2026-10-15 (Jeff): they lock at the first send; an approver can still
+   change them. Built in #352 (D1127).**
 2. Settings → Team still decides who can approve, and so who can send others' quotes; check who holds `approve`.
 
 ---
@@ -10349,11 +10350,13 @@ are additive JSONB that older code ignores. Rotating `AUTH_SECRET` also kills ev
 - The online header date is Chicago time while the document body uses server time (UTC on Vercel); align them.
 
 **For Jeff.**
-- Open questions in spec §12: photo side, datasheet thumbnails as photos, default presentation, who manages intros.
+- Open questions in spec §12: ~~photo side~~ (**ANSWERED 2026-10-15: photos alternate right, left, right — #352,
+  D1129**), datasheet thumbnails as photos, default presentation, who manages intros.
 - Toggle title says "every narrative system's" though By-section prints every system — reword?
 - Paragraphs live on catalog parts, so take `npm run db:export` before Clear catalog price list or the go-live wipe.
 - Preview deploys share the production DB, so a paragraph or intro saved on a preview is a production write.
-- Spec §12 q7 — vendor-quote lines are left out of Load system; say if you'd rather carry them with their files.
+- ~~Spec §12 q7 — vendor-quote lines are left out of Load system; say if you'd rather carry them with their files.~~
+  **ANSWERED 2026-10-15 (Jeff): bring them, flagged "Old vendor price — re-quote". Built in #352 (D1130).**
 - Portal-built quotes are excluded from the library — keep that?
 - Should a won quote recalled after its last send load the last SENT version (current) or the version that won?
 - Client links: copy them from production only. Preview deploys share the production DB, so a link copied there
@@ -10877,9 +10880,11 @@ disappear. Rotating `AUTH_SECRET` kills every link, as before.
 **For Jeff.**
 1. **Fill Settings → Sales & Rewards → Estimate output** (the Not included list and the website). Until then a new quote's
    Not included starts empty and the cover footer has no web address.
-2. **Rev numbering.** Two sends both print "Rev 1" on the PDF and online (the #293 D567 rule); the panel now shows send
-   times to tell them apart. Fix the numbering?
-3. **BOM quantities** show on the package page even when the estimate PDF hides them. Keep?
+2. ~~**Rev numbering.** Two sends both print "Rev 1" on the PDF and online (the #293 D567 rule); the panel now shows send
+   times to tell them apart. Fix the numbering?~~ **ANSWERED 2026-10-15 (Jeff): every send gets the next Rev. Built in
+   #352 (D1123).**
+3. ~~**BOM quantities** show on the package page even when the estimate PDF hides them. Keep?~~ **ANSWERED 2026-10-15
+   (Jeff): the package-page BOM follows the PDF's quantities setting. Built in #352 (D1124).**
 4. **Per-scope heading on the cover.** The price line names the scope ("Lighting scope: $28,500.00"); there is no separate
    heading. Want one?
 5. **Letterhead on page 1 only**; the footer repeats on every page. OK?
@@ -10905,8 +10910,9 @@ disappear. Rotating `AUTH_SECRET` kills every link, as before.
   doesn't clear it. Invalidate on those writes.
 - **`gridProjectForQuote` performance.** It scans every Grid project per call (once per panel open and per Generate); index
   by quote id if it shows up.
-- **Spec builder vs the zip.** The zip's `Specifications.docx` is the D94 generator's output; the Specs builder's saved
-  `SP-####` documents (D329–D332) are a different docx. Decide which the client should get, or include both.
+- ~~**Spec builder vs the zip.** The zip's `Specifications.docx` is the D94 generator's output; the Specs builder's saved
+  `SP-####` documents (D329–D332) are a different docx. Decide which the client should get, or include both.~~
+  **ANSWERED 2026-10-15 (Jeff): the SP-#### file when the estimate has one. Built in #352 (D1126).**
 - Minor review notes not fixed: a cover selection longer than 1,500 chars is silently capped; the cover has Attn and Venue
   rows beyond the brief; whitespace-only goals count as present; a `Q 1` / `Q_1` quote id could collide in the zip cache key
   (irrelevant for `Q-####`).
@@ -11830,7 +11836,8 @@ Won … Jeff Chesebro (lead) 100% — $52.88", Reports listed it, and the projec
 - (a) Settings → Team: check who holds `approve` — they edit the split and the alternates after Won.
 - (b) Open one real draft on production and confirm its new price: drafts rise (5% now on the whole system cost, plus the
   new 2%).
-- (c) Decide whether the 5% and 2% rates should become Settings (they are constants today).
+- ~~(c) Decide whether the 5% and 2% rates should become Settings (they are constants today).~~ **ANSWERED 2026-10-15
+  (Jeff): Estimating Rules, new drafts only. Built in #352 (D1128).**
 - (d) The 5% pool payout itself happens outside the app.
 - (e) Codebase-wide CSV formula-injection guard (none of the app's exports have one).
 
@@ -11846,8 +11853,10 @@ a Branding logo set. 3e8316f1.
 
 **Remaining (Jeff-gated):**
 - (a) Check the letterhead on a real estimate PDF and Cover PDF on production with the Branding logo uploaded.
-- (b) **Open question:** should the estimate package zip's `Specifications.docx` and `Datasheets.pdf` cover, and the
-  client-style curtain cut sheets, switch to the full sheet too? They still follow the uploaded-logo ladder.
+- ~~(b) **Open question:** should the estimate package zip's `Specifications.docx` and `Datasheets.pdf` cover, and the
+  client-style curtain cut sheets, switch to the full sheet too? They still follow the uploaded-logo ladder.~~
+  **ANSWERED 2026-10-15 (Jeff): the Datasheets.pdf cover and client cut sheets yes, Specifications.docx no. Built in #352
+  (D1122).**
 
 ## 332. Assembly lines carry their members' datasheets and photos — BUILT 2026-10-12 on `feat/331-333-package` (D854–D856)
 
@@ -12396,7 +12405,7 @@ Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-
 **Queued (spec §10):**
 - Slice 2a ✅ built (D1074–D1078): bid details (due date, addenda), a Bidders card on Send & track (add GC/EC, submit via email or their bid site, per-bidder link, GC bid #, Mark submitted, Award / Undo award), Bid chip, Quotes hub "Out to bid" filter, ⌘K by bidder name, Morning triage "bid due", the project's Bill to. The owner stays the customer.
 - Slice 2b-i ✅ built (D1079–D1082): customer documents addressed to the awarded bidder ("Prepared for <GC>", Owner line, bid line; venue from the owner), bid is content once awarded with an Award/Undo re-render, and a per-bidder PDF (signed `?bidder=` print variant, on-demand, Download PDF on the Bidders card).
-- Slice 2b-ii ✅ built (D1086–D1096): Send / Retry per email bidder and **Send to all bidders** (one server call per bidder, progress, Stop), each email carrying its own bidder PDF and its own v3 link ("Prepared for <bidder>", Owner line, tagged responses, per-bidder "Opened N×", closed pages for lost / withdrew), Copy link, revised-bid subjects and Send revision to bidders. Open for Jeff: do bidders see the owner's Rewards perks / credit line; bidders share the 30/day response budget; acknowledging an addendum after a send means Draft → Send revision.
+- Slice 2b-ii ✅ built (D1086–D1096): Send / Retry per email bidder and **Send to all bidders** (one server call per bidder, progress, Stop), each email carrying its own bidder PDF and its own v3 link ("Prepared for <bidder>", Owner line, tagged responses, per-bidder "Opened N×", closed pages for lost / withdrew), Copy link, revised-bid subjects and Send revision to bidders. Open for Jeff: do bidders see the owner's Rewards perks / credit line; bidders share the 30/day response budget; acknowledging an addendum after a send means Draft → Send revision. **ANSWERED 2026-10-15 (Jeff): each bidder gets its own response budget; a new addendum after a send puts the estimate back to Draft and Send revision goes to every bidder; the first bidder send marks it Sent. Built in #352 (D1118–D1120).**
 - **Prod check additions (2b-ii):** from a Gmail-connected account, Send to all for two email bidders (two separate emails, each with its own PDF and link); open one link in a private window ("Prepared for <bidder>", Owner line); the row shows Opened 1×; Revoke kills the link.
 - **Prod check additions (2b-i):** Download a bidder PDF from the Bidders card (header shows the bidder, Owner line and bid line); after Award the estimate PDF reads "Prepared for <GC>" with the Owner line.
 
@@ -12488,3 +12497,33 @@ The app is safe before step 4: ownership already resolves the same way lazily (G
 - Tell the team: an email you assign as a task becomes readable (read-only) by the assignee; estimate replies are readable by everyone who opens the quote.
 - On production: grant portal access to yourself with Gmail connected and check the email lands from your mailbox (and Resend link); try Ask AI's ✦ on a phone and in the native app; a Reviewer-only account no longer pulls field data (a Reviewer editing a field record offline still saves).
 - Pick a real dismissed Start here email and confirm it returns after the customer writes again.
+
+## 352. Jeff's 2026-10-15 decisions — Batch 2 (Estimating & client output) — DONE 2026-10-15 on `worktree-assist-layer` (D1118–D1131)
+
+**Asked (Jeff, 2026-10-15 decision session — `docs/decisions/2026-10-15-jeff-decisions.md`, items 2, 3, 4, 6, 12–15, 17–22).**
+
+**Done:**
+- **#2 Per-bidder response budget (D1118):** a bidder's v3 link has its own 30/day client-response limit and its own 200-response cap; the owner's link keeps the quote's.
+- **#3 Addendum after a send (D1119):** a new addendum on a sent bid estimate moves it back to Draft (the normal revise; the next send is a new Rev, approval gate as any revise); the Bid chip says so, the Bidders card offers **Send revision to all bidders** (every pending email bidder, through the per-bidder send).
+- **#4 First bidder send marks Sent (D1120):** already so — pinned.
+- **#6 Review limit (D1121):** the amount compared with the owner's limit is the base bid + the largest Alternate group.
+- **#12 Letterhead (D1122):** the full baked Peak letterhead on every estimate Datasheets.pdf cover (zip, share page, staff download, Quotes-hub package) and on Client-style cut sheets; Specifications.docx and the submittal cut sheets unchanged.
+- **#13 Rev numbering (D1123):** Rev is the send number — a revised draft prints the next one, every send stamps max + 1; old sends keep the Rev they printed. Fixes "two sends both print Rev 1".
+- **#14 BOM quantities (D1124):** the online / package-page BOM follows the PDF's Qty switch.
+- **#15 Online Accept (D1125):** the share page's accept and the portal Accept require the signer's name and title, take an optional PO # (never a card number), store them, and the Lead estimator gets a to-do "Accepted by <name>, <title> — PO <po>" — not an email: there is no system mailbox to send from.
+- **#17 SP files in the zip (D1126):** the client zip carries the Specs-builder SP-#### Word files written for the estimate, else the D94 Specifications.docx as before.
+- **#18 People lock at send (D1127):** after the first send only an approver can change Lead estimator / Prepared by (server-refused, read-only in the Estimator).
+- **#19 Bonus rates (D1128):** Estimating Rules → Estimator bonuses (5 % / 2 %, 0–20 %); drafts take the current rates, sent / won / lost keep theirs.
+- **#20 Photo sides (D1129):** narrative photos alternate right, left, right (PDF, online, package page); the Build package document's product image gains Auto (the default), an explicit Left / Right / Full wins.
+- **#21 Load system vendor lines (D1130):** brought in at their last price, flagged "Old vendor price — re-quote" (internal note).
+- **#22 Online cut sheets (D1131):** when the sent PDF carries cut sheets, the portal, share and package pages show them too.
+
+**Tests:** new `scripts/test-oct15-estimating.ts` (pure + DB, in test:specs; `npx tsx scripts/test-oct15-estimating.ts` runs the pure half, with `PGLITE_PATH` the DB half). Harness expectations updated where the decisions changed behaviour: #293t Rev scenarios and the #222 / #P4 Rev pins (#13), the #293t BOM view (#14), the #301 zip pins (#12/#17), #301 / #P2b accept fixtures (signed accepts, #15), #245 / #248 portal accepts (#15), #293s Load system (#21), #312 image defaults and the mfr-images render (#20), #bonus pins (#19), bid-send's label (#3). The #P2b no-alternates outputs stay byte-identical. No migration, no env var.
+
+**Rollback:** safe — additive JSON (`ClientResponse.po`, `portalAcceptance.signerName/signerTitle/poNumber`, `SpecItem.bonusPct`, revision `docFields.revNo` at the cut, product-image align `auto`) that older code ignores (an Auto image reads as Right). Rolling back restores the old Rev rule for drafts.
+
+**Remaining (Jeff-gated):**
+- Check on production: revise a sent estimate and send again — the PDF and online page say Rev 2; add an addendum to a sent bid and send the revision to all bidders; accept a portal quote and a client link with a PO # and see the Lead estimator's to-do; download a package zip for an estimate with an SP-#### spec; look at the letterhead on a Datasheets.pdf cover and a client cut sheet; a narrative estimate with three photos.
+- Emailing the acceptance notice needs a sender (system) mailbox — say if you want one.
+- Bonus rates: change them only in Estimating Rules; a draft re-figures on its next save.
+- Zip cache: every cached package zip re-builds once (the book letterhead changed its key).
