@@ -12191,7 +12191,7 @@ link/archive paths a person would.
 - **Slice 3 — Rigging inspection:** S2 full intake depth replaces the `RI` rubric capture; `ISSUE_LIBRARY` becomes Settings data; the RI reports read the register; L1/L2 renewals stay. The legacy rating map (D963) applies here.
 - **Slice 4 — Flame test, service checks, re-inspection:** per-curtain inventory → flame-test results, fire-curtain and emergency-lighting checks, re-inspection of open findings, status driven by repair jobs (D965).
 - **Slice 5 — Portal and reminders:** customer register, acknowledgment, immediate-hazard alerts, next-due reminders (fire curtain 90 days, emergency lighting, flame cert, E1.47 rigging) (D966).
-- **Open questions:** (a) S2 as one scope with a screen/full depth toggle (assumed) or two scopes — revisit in slice 3; (b) reminder lead times and recipients; (c) whether outside specialists use the app directly or only receive the findings PDF (slice 1 assumes the latter; Peak staff enter the specialist rating).
+- **Open questions:** ~~(a) S2 as one scope with a screen/full depth toggle (assumed) or two scopes — revisit in slice 3; (b) reminder lead times and recipients; (c) whether outside specialists use the app directly or only receive the findings PDF (slice 1 assumes the latter; Peak staff enter the specialist rating).~~ **ANSWERED 2026-10-15 (Jeff):** (a) one scope with a Quick check / Full inspection toggle — built in #353 (D1138); (b) 30 days ahead, to the venue's account rep — built in #353 (D1139); (c) specialists don't use the app, they receive the PDF (kept).
 
 ## 341. Email thread visibility — own, assigned or deliberately linked only — DONE 2026-10-14 on `worktree-assist-layer` (D1004–D1016)
 
@@ -12532,3 +12532,26 @@ The app is safe before step 4: ownership already resolves the same way lazily (G
 - Emailing the acceptance notice needs a sender (system) mailbox — say if you want one.
 - Bonus rates: change them only in Estimating Rules; a draft re-figures on its next save.
 - Zip cache: every cached package zip re-builds once (the book letterhead changed its key).
+
+## 353. Jeff's 2026-10-15 decisions — Batch 3 (Lists, pipelines, field) — DONE 2026-10-15 on `worktree-assist-layer` (D1134–D1139)
+
+**Asked (Jeff, 2026-10-15 decision session — `docs/decisions/2026-10-15-jeff-decisions.md`, items 8, 10, 11, 34, 35, 42).**
+
+**Done:**
+- **#11 Lists, 50 a page (D1134):** Companies, Quotes and Venues page 50 rows at a time — Prev / Next and "Page X of Y", the page in `?page=` (one `ListPager`, `src/lib/list-paging.ts`), replacing #224's Show more. Every filter, chip count, sort, stat tile and the search run over every record before the page is cut (pure `quotesHubView`, `filterCompanyDirectory`). The Quotes hub reads a slim SQL projection of every quote and only the page's 50 in full; a `?id=` link opens on its row's page. Companies reads companies + venues without contacts, and its search also matches contacts' names, titles and emails in SQL. Venues reads its activity as projections. Measured on a scratch DB (1,700 companies, 2,000 quotes, warm dev server): `/quotes` 10,082 KiB / 5.5 s → 306 KiB / 0.44 s; `/companies` (already capped by #224) 268 KiB / 544 ms → 270 KiB / 523 ms; `/venues` (already capped) 512 KiB / 808 ms → 514 KiB / 823 ms.
+- **#42 BID SPEC Lead / Qualify (D1135):** a plain Draft stage before Collect Information in the seed, and a one-time, idempotent ensure (`pipelineFixes` marker, under the settings lock) that adds it to a stored pipeline list without ever duplicating it; a later delete in Settings sticks. Quotes keep their stage. Answers MASTER-QUESTIONS O1.
+- **#35 Visit edit rights (D1136):** only the visit lead (#349's unique-name rule) or an approver can edit, re-lead, re-time or delete a scheduled visit — refused on the server before any write; read-only Edit / Delete on the company record for everyone else. Latent while everyone holds `approve`. Answers MASTER-QUESTIONS T1.
+- **#34 Consulting phases (D1137):** "+ New consulting project" has a Phases checklist, all ticked; only ticked phases are seeded (so only they get tasks and milestones). Answers MASTER-QUESTIONS E7.
+- **#8 Rigging depth (D1138):** S2 asks Quick check / Full inspection in the form (`rigging.depth`, a fixed list); R6 / R7 read it through `evaluate()`, unanswered = the visit type's default, so existing assessments evaluate as before; defVersion stays 1 (additive). Full inspection adds only R7's dimensions, install history, line set schedule and hardware inventory; answers carry over both ways. Answers #340 open question (a).
+- **#10 Assessment reminders (D1139):** a task 30 days before each live finding's next-due date and each venue's next assessment date, to the company owner (account rep), else the assessment's creator; deterministic `T-asr-…` ids, so idempotent and a deleted reminder stays deleted. Runs first in the daily drive cron (10 s) and lazily from the Assessments page. New minimal field `venue_profiles.nextAssessmentAt`, set on the venue page's Assessments card. Answers #340 open question (b).
+
+**Tests:** new `scripts/test-oct15-batch3.ts` (pure + DB, chained into test:specs; `npx tsx scripts/test-oct15-batch3.ts` runs the pure half, with `PGLITE_PATH` the DB half): paging and full-set filter / search correctness, the projection, the SQL contact search, the pipeline ensure's idempotency, visit edit rights, the phase picker, evaluate with depth and answer carry-over, reminder planning and idempotency. Harness expectations updated where behaviour changed: #224 paging pins, #223 search pins, the popout row-link pin, the bid-spec seed / switch / Daylite unmapped-stage checks, the assessment report's depth label. No migration, no env var.
+
+**Rollback:** safe. New JSON only (`settings.pipelineFixes`, the stored BID SPEC stage, `venue_profiles.nextAssessmentAt`, `rigging.depth` answers, `T-asr-…` tasks), which older code ignores; the Lead / Qualify stage stays in a stored list after a rollback (harmless — a Draft stage).
+
+**Remaining (Jeff-gated):**
+- Owners: reminders go to the company's Owner — set owners on the companies whose venues get assessed, or the reminder falls back to whoever started the assessment.
+- Set a "Next assessment" date on a real venue and close a finding with a next-due date; the next morning's drive cron (or opening Assessments) creates the tasks.
+- Try `/quotes` and `/companies` on production (Prev / Next, a search for a contact's email, a bell link to an old quote).
+- Look at BID SPEC in Settings → Pipelines once after deploy (Lead / Qualify should sit before Collect Information exactly once).
+
