@@ -11,7 +11,12 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const timer = setTimeout(() => reject(new Error("image timeout")), 15_000);
-    img.onload = () => { clearTimeout(timer); resolve(img); };
+    img.onload = () => {
+      clearTimeout(timer);
+      // decode() makes sure the bitmap is ready before drawImage (Safari can paint an SVG blank otherwise)
+      const ready = typeof img.decode === "function" ? img.decode().catch(() => undefined) : Promise.resolve();
+      ready.then(() => resolve(img), () => resolve(img));
+    };
     img.onerror = () => { clearTimeout(timer); reject(new Error("image failed")); };
     img.src = src;
   });
@@ -22,7 +27,8 @@ function toJpeg(w: number, h: number, k: number, doc: InkDoc, img: HTMLImageElem
   c.width = w;
   c.height = h;
   const ctx = c.getContext("2d");
-  if (!ctx) return Promise.reject(new Error("no canvas"));
+  const release = () => { c.width = 0; c.height = 0; }; // free the backing store now (iOS caps total canvas memory)
+  if (!ctx) { release(); return Promise.reject(new Error("no canvas")); }
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, w, h);
   if (img) ctx.drawImage(img, 0, 0, w, h);
@@ -31,8 +37,9 @@ function toJpeg(w: number, h: number, k: number, doc: InkDoc, img: HTMLImageElem
   ctx.restore();
   return new Promise((resolve, reject) => {
     try {
-      c.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))), "image/jpeg", 0.85);
+      c.toBlob((b) => { release(); if (b) resolve(b); else reject(new Error("toBlob returned null")); }, "image/jpeg", 0.85);
     } catch (err) {
+      release();
       reject(err); // a tainted (cross-origin) canvas throws here
     }
   });

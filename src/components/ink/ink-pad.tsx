@@ -7,11 +7,11 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent, type Ref } from "react";
 import { createPortal, flushSync } from "react-dom";
-import { INK_CAPS, INK_COLORS, createHistory, emptyInk, eraseAt, inkId, moveLabel, renderInk, simplify, type InkDoc, type InkLabel } from "@/lib/ink/model";
+import { INK_CAPS, INK_COLORS, createHistory, emptyInk, eraseAt, fitInkTo, inkCapHit, inkId, moveLabel, renderInk, simplify, type InkDoc, type InkLabel } from "@/lib/ink/model";
 import { flattenInk, type InkBackground } from "./flatten";
 import {
   approxLabelWidth, clampView, docToScreen, eraserRadius, fitScale, fitView, hitLabel, isDoubleTap, isTap,
-  labelSizeFor, penWidthFor, pinchView, pointPressure, pointerRole, screenToDoc, svgDataUrl, zoomAt, type Pt, type Tap, type View,
+  labelSizeFor, panStarted, penWidthFor, pinchView, pointPressure, pointerRole, refitView, screenToDoc, svgDataUrl, zoomAt, type Pt, type Tap, type View,
 } from "@/lib/ink/view";
 
 export type { InkBackground };
@@ -21,7 +21,8 @@ export type InkPadProps = {
   background: InkBackground;
   initial?: InkDoc;
   onCancel: () => void;
-  onDone: (result: { doc: InkDoc; jpeg: Blob }) => void;
+  /** May return a Promise; the pad stays "Saving…" until it settles (if the parent keeps it open). */
+  onDone: (result: { doc: InkDoc; jpeg: Blob }) => void | Promise<unknown>;
 };
 
 type Tool = "pen" | "eraser" | "text";
@@ -30,8 +31,10 @@ type Gesture =
   | { kind: "erase"; id: number; ptype: string; doc: InkDoc; r: number }
   | { kind: "label"; id: number; ptype: string; labelId: string; dx: number; dy: number; doc: InkDoc; down: Pt; moved: boolean }
   | { kind: "place"; id: number; ptype: string; at: Pt; down: Pt }
-  | { kind: "pan"; id: number; view: View; sx: number; sy: number; down: Tap }
-  | { kind: "pinch"; a: number; b: number; view: View; a0: Pt; b0: Pt };
+  /* `origin`: the view before this run of touches began — restored when the Pencil takes over from a palm. */
+  | { kind: "pan"; id: number; view: View; origin: View; sx: number; sy: number; down: Tap; started: boolean }
+  | { kind: "pinch"; a: number; b: number; view: View; origin: View; a0: Pt; b0: Pt };
+type CapAdd = { pts?: number; label?: boolean };
 type Editing = { x: number; y: number; value: string };
 
 const COLOR_NAMES = ["Black", "Red", "Blue"];
@@ -51,7 +54,7 @@ export default InkPad;
 function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadProps) {
   const titleId = useId();
   const dw = background.w, dh = background.h;
-  const [startDoc] = useState<InkDoc>(() => initial ?? emptyInk(dw, dh));
+  const [startDoc] = useState<InkDoc>(() => (initial ? fitInkTo(initial, dw, dh) : emptyInk(dw, dh)));
   const [hist] = useState(() => createHistory(startDoc));
   const histRef = useRef(hist); // read inside memoised painters (the compiler can't track hist.current)
   const [doc, setDoc] = useState<InkDoc>(startDoc);
@@ -78,6 +81,9 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
   const rectRef = useRef<DOMRect | null>(null);
   const gestureRef = useRef<Gesture | null>(null);
   const touchesRef = useRef(new Map<number, Pt>());
+  /** Pointers consumed until they lift: palms the Pencil took over from, a press that committed a label. */
+  const ignoredRef = useRef(new Set<number>());
+  const capRef = useRef<CapAdd | null>(null);
   const lastTapRef = useRef<Tap | null>(null);
   const selRef = useRef<string | null>(null);
   const editingRef = useRef<Editing | null>(null);
@@ -160,19 +166,22 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
 
   useLayoutEffect(() => { paint(); }, [doc, view, stage, selected, paint]);
 
-  /* Stage size → canvas backing store (DPR ≤ 2) and a fitted view; re-fits on rotation. */
+  /* Stage size → canvas backing store (DPR ≤ 2) and the view. */
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
       const r = el.getBoundingClientRect();
+      rectRef.current = r;
       if (r.width < 1 || r.height < 1) return;
       const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const was = sizeRef.current, pv = viewRef.current;
       sizeRef.current = { w: r.width, h: r.height };
       dprRef.current = dpr;
       const c = canvasRef.current;
       if (c) { c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr); }
-      const v = fitView(r.width, r.height, dw, dh);
+      // First size fits; later ones (rotation, toolbar re-wrap) keep the zoom and the centred doc point.
+      const v = was && pv ? refitView(pv, was.w, was.h, r.width, r.height, dw, dh) : fitView(r.width, r.height, dw, dh);
       viewRef.current = v;
       setStage({ w: r.width, h: r.height });
       setViewState(v);
@@ -213,8 +222,27 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
 
   useEffect(() => { if (confirm === "discard") keepBtnRef.current?.focus(); }, [confirm]);
 
+  /* Release the stage canvas's backing store on close (iOS caps total canvas memory). */
+  useEffect(() => {
+    const c = canvasRef.current;
+    return () => { if (c) { c.width = 0; c.height = 0; } };
+  }, []);
+
   /* ── edits ── */
-  const sync = () => { setDoc(hist.current); paint(); };
+  const sync = () => {
+    const cur = hist.current;
+    if (capRef.current && !inkCapHit(cur, capRef.current)) { capRef.current = null; setNote(null); } // back under the cap
+    setDoc(cur);
+    paint();
+  };
+  const capNote = (before: InkDoc, add: CapAdd) => {
+    const why = inkCapHit(before, add);
+    if (!why) return;
+    capRef.current = add;
+    setNote(why === "labels" ? `A drawing holds up to ${INK_CAPS.labels} labels.`
+      : why === "strokes" ? `This drawing is full (${INK_CAPS.strokes.toLocaleString()} strokes) — erase or undo to keep drawing.`
+      : "This drawing is full (too much ink) — erase or undo to keep drawing.");
+  };
   const select = (id: string | null) => { selRef.current = id; setSelected(id); };
   const undo = () => { if (gestureRef.current || busy) return; hist.undo(); select(null); sync(); };
   const redo = () => { if (gestureRef.current || busy) return; hist.redo(); select(null); sync(); };
@@ -242,7 +270,7 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
     if (!text) return;
     const before = hist.current;
     hist.do({ t: "label", label: { id: inkId(), x: e.x, y: e.y, text, color, size: labelSize } });
-    if (hist.current === before) setNote(`A drawing holds up to ${INK_CAPS.labels} labels.`);
+    if (hist.current === before) capNote(before, { label: true });
     sync();
   };
   const cancelEdit = () => { editingRef.current = null; setEditing(null); refocus(); };
@@ -263,13 +291,15 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
     commitEdit();
     setBusy(true);
     setNote(null);
+    capRef.current = null;
     try {
       const d = hist.current;
       const jpeg = await flattenInk(background, d);
-      onDone({ doc: d, jpeg });
+      await onDone({ doc: d, jpeg });
     } catch {
       setNote("Couldn't save the drawing — try Done again.");
-      setBusy(false);
+    } finally {
+      setBusy(false); // a parent that keeps the pad open never leaves it stuck on "Saving…"
     }
   };
 
@@ -283,49 +313,58 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
     if (!sz || !v) return sp;
     return screenToDoc(v, fitScale(sz.w, sz.h, dw, dh), sp.x, sp.y);
   };
-  /** Drop a gesture without committing (second finger, cancel, pen arriving over a palm stroke). */
+  /** Drop a gesture without committing (second finger, cancel, pen arriving over a finger stroke). */
   const abortGesture = () => {
     const g = gestureRef.current;
     gestureRef.current = null;
     if (g && g.kind !== "pan" && g.kind !== "pinch" && g.kind !== "place") paint();
   };
 
+  /** The Pencil wins: a palm's pan/pinch is undone and every finger on the glass is ignored until it lifts. */
+  const penTakeover = () => {
+    const g = gestureRef.current;
+    if (g && (g.kind === "pan" || g.kind === "pinch")) { gestureRef.current = null; setView(g.origin); }
+    else if (g && g.ptype === "touch") abortGesture();
+    for (const id of touchesRef.current.keys()) ignoredRef.current.add(id);
+    touchesRef.current.clear();
+  };
+
   const onDown = (e: RPointerEvent<HTMLDivElement>) => {
     if (busy || confirm === "discard" || !viewRef.current) return;
-    const type = e.pointerType;
-    if (type === "pen" && !hasPen()) {
-      notePen();
-      setPen(true);
-      const g = gestureRef.current;
-      if (g && "ptype" in g && g.ptype !== "pen") abortGesture();
+    const type = e.pointerType, id = e.pointerId;
+    if (type === "mouse" && e.button !== 0) return; // right / middle click never draws
+    ignoredRef.current.delete(id); // a fresh press from an id whose pointerup was lost
+    if (type === "pen") {
+      if (!hasPen()) { notePen(); setPen(true); }
+      penTakeover();
     }
     rectRef.current = stageRef.current!.getBoundingClientRect();
     const sp = stagePt(e);
     const stale = gestureRef.current;
-    if (stale && "id" in stale && stale.id === e.pointerId) abortGesture(); // its pointerup never arrived
+    if (stale && "id" in stale && stale.id === id) abortGesture(); // its pointerup never arrived
+    const role = pointerRole(type, hasPen());
+    // A drawing press commits an open label and ends there; a finger pan in Pencil mode leaves the field open.
+    if (editingRef.current && role === "draw") { commitEdit(); ignoredRef.current.add(id); return; }
     const g = gestureRef.current;
-    if (editingRef.current) commitEdit();
     if (type === "touch") {
-      if (g && "ptype" in g && g.ptype === "pen") return; // palm while the Pencil is down
+      if (g && "ptype" in g && g.ptype === "pen") { ignoredRef.current.add(id); return; } // palm while the Pencil is down
       const touches = touchesRef.current;
-      touches.set(e.pointerId, sp);
+      touches.set(id, sp);
       if (touches.size === 2) {
+        const v = viewRef.current, origin = g?.kind === "pan" ? g.origin : v;
         abortGesture();
         const [a, b] = [...touches.keys()];
-        gestureRef.current = { kind: "pinch", a, b, view: viewRef.current, a0: touches.get(a)!, b0: touches.get(b)! };
-        try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* already released */ }
+        gestureRef.current = { kind: "pinch", a, b, view: v, origin, a0: touches.get(a)!, b0: touches.get(b)! };
+        try { e.currentTarget.setPointerCapture(id); } catch { /* already released */ }
         return;
       }
       if (touches.size > 2) return;
     }
-    if (g) {
-      if (type === "pen" && (g.kind === "pan" || g.kind === "pinch")) gestureRef.current = null; // the pen wins
-      else return;
-    }
-    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* capture is best-effort */ }
-    if (pointerRole(type, hasPen()) === "nav") {
+    if (gestureRef.current) return;
+    try { e.currentTarget.setPointerCapture(id); } catch { /* capture is best-effort */ }
+    if (role === "nav") {
       const v = viewRef.current;
-      gestureRef.current = { kind: "pan", id: e.pointerId, view: v, sx: sp.x, sy: sp.y, down: { t: e.timeStamp, ...sp } };
+      gestureRef.current = { kind: "pan", id, view: v, origin: v, sx: sp.x, sy: sp.y, down: { t: e.timeStamp, ...sp }, started: false };
       return;
     }
     const d = docPt(sp);
@@ -348,6 +387,7 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
   };
 
   const onMove = (e: RPointerEvent<HTMLDivElement>) => {
+    if (ignoredRef.current.has(e.pointerId)) return;
     const g = gestureRef.current;
     if (e.pointerType === "touch" && touchesRef.current.has(e.pointerId)) touchesRef.current.set(e.pointerId, stagePt(e));
     if (!g) return;
@@ -360,6 +400,8 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
     if (e.pointerId !== g.id) return;
     if (g.kind === "pan") {
       const sp = stagePt(e);
+      if (!g.started && !panStarted(sp.x - g.sx, sp.y - g.sy)) return; // a resting palm doesn't nudge the view
+      g.started = true;
       setView({ z: g.view.z, x: g.view.x + sp.x - g.sx, y: g.view.y + sp.y - g.sy });
       return;
     }
@@ -394,12 +436,13 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
     const g = gestureRef.current;
     const touches = touchesRef.current;
     touches.delete(e.pointerId);
-    if (!g) return;
+    if (ignoredRef.current.delete(e.pointerId) || !g) return;
     if (g.kind === "pinch") {
       if (e.pointerId !== g.a && e.pointerId !== g.b) return;
       const rest = e.pointerId === g.a ? g.b : g.a;
       const p = touches.get(rest);
-      gestureRef.current = p && viewRef.current ? { kind: "pan", id: rest, view: viewRef.current, sx: p.x, sy: p.y, down: { t: -Infinity, ...p } } : null;
+      const v = viewRef.current;
+      gestureRef.current = p && v ? { kind: "pan", id: rest, view: v, origin: v, sx: p.x, sy: p.y, down: { t: -Infinity, ...p }, started: true } : null;
       return;
     }
     if (e.pointerId !== g.id) return;
@@ -416,7 +459,7 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
       const before = hist.current;
       const pts = simplify(g.pts, Math.max(0.25, 0.6 / scaleNow()));
       hist.do({ t: "stroke", stroke: { id: inkId(), tool: "pen", color: g.color, width: g.width, pts } });
-      if (hist.current === before) setNote(`This drawing is full (${INK_CAPS.strokes.toLocaleString()} strokes).`);
+      if (hist.current === before) capNote(before, { pts: pts.length });
       sync();
     } else if (g.kind === "erase") {
       if (g.doc !== hist.current) hist.do({ t: "replace", doc: g.doc });
@@ -435,6 +478,7 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
 
   const onCancelPointer = (e: RPointerEvent<HTMLDivElement>) => {
     touchesRef.current.delete(e.pointerId);
+    if (ignoredRef.current.delete(e.pointerId)) return;
     const g = gestureRef.current;
     if (!g) return;
     if (g.kind === "pinch" ? e.pointerId === g.a || e.pointerId === g.b : e.pointerId === g.id) abortGesture();
@@ -489,35 +533,39 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
   return (
     <div ref={rootRef} className="ink-root" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
       <style>{INK_CSS}</style>
-      <div className="ink-bar" role="toolbar" aria-label="Drawing tools">
+      <div className="ink-bar">
         <h2 id={titleId} className="ink-title">{title}</h2>
-        <div className="ink-group">
-          {toolBtn("pen", "Pen", firstBtnRef)}
-          {INK_COLORS.map((c, i) => (
-            <button key={c} type="button" className="ink-swatch" aria-label={`${COLOR_NAMES[i] ?? c} ink`} aria-pressed={color === c} disabled={busy}
-              onClick={() => { setColor(c); if (tool === "eraser") setTool("pen"); }} style={{ background: c }} />
-          ))}
-          {toolBtn("eraser", "Eraser")}
-          {toolBtn("text", "Text")}
-        </div>
-        <div className="ink-group">
-          <button type="button" className="ink-btn" onClick={undo} disabled={busy || !hist.canUndo} aria-label="Undo">↶ Undo</button>
-          <button type="button" className="ink-btn" onClick={redo} disabled={busy || !hist.canRedo} aria-label="Redo">↷ Redo</button>
-          {selected && <button type="button" className="ink-btn" onClick={removeSelected} aria-label="Remove label">✕ Label</button>}
-          {confirm === "clear" ? (
-            <span className="ink-confirm" role="group" aria-label="Confirm clear">
-              Clear all?
-              <button type="button" className="ink-btn ink-danger" onClick={clearAll}>Clear</button>
-              <button type="button" className="ink-btn" onClick={() => setConfirm(null)}>Keep</button>
-            </span>
-          ) : (
-            <button type="button" className="ink-btn" onClick={() => setConfirm("clear")} disabled={busy || (!doc.strokes.length && !doc.labels.length)}>Clear</button>
-          )}
-          <button type="button" className="ink-btn" onClick={() => stage && setView(fitView(stage.w, stage.h, dw, dh))} aria-label="Fit to screen">Fit</button>
-        </div>
-        <div className="ink-group ink-end">
-          <button type="button" className="ink-btn" onClick={requestCancel} disabled={busy}>Cancel</button>
-          <button type="button" className="ink-btn ink-primary" onClick={done} disabled={busy}>{busy ? "Saving…" : "Done"}</button>
+        <div className="ink-tools" role="toolbar" aria-label="Drawing tools">
+          <div className="ink-group">
+            {toolBtn("pen", "Pen", firstBtnRef)}
+            {INK_COLORS.map((c, i) => (
+              <button key={c} type="button" className="ink-swatch" aria-label={`${COLOR_NAMES[i] ?? c} ink`} aria-pressed={color === c} disabled={busy}
+                onClick={() => { setColor(c); if (tool === "eraser") setTool("pen"); }} style={{ background: c }} />
+            ))}
+            {toolBtn("eraser", "Eraser")}
+            {toolBtn("text", "Text")}
+          </div>
+          <div className="ink-group">
+            <button type="button" className="ink-btn" onClick={undo} disabled={busy || !hist.canUndo} aria-label="Undo">↶ Undo</button>
+            <button type="button" className="ink-btn" onClick={redo} disabled={busy || !hist.canRedo} aria-label="Redo">↷ Redo</button>
+            {/* Always laid out (hidden when nothing is selected) so selecting a label never re-wraps the toolbar. */}
+            <button type="button" className="ink-btn" onClick={removeSelected} aria-label="Remove label" disabled={!selected || busy}
+              aria-hidden={!selected} style={{ visibility: selected ? "visible" : "hidden" }}>✕ Label</button>
+            {confirm === "clear" ? (
+              <span className="ink-confirm" role="group" aria-label="Confirm clear">
+                Clear all?
+                <button type="button" className="ink-btn ink-danger" onClick={clearAll}>Clear</button>
+                <button type="button" className="ink-btn" onClick={() => setConfirm(null)}>Keep</button>
+              </span>
+            ) : (
+              <button type="button" className="ink-btn" onClick={() => setConfirm("clear")} disabled={busy || (!doc.strokes.length && !doc.labels.length)}>Clear</button>
+            )}
+            <button type="button" className="ink-btn" onClick={() => stage && setView(fitView(stage.w, stage.h, dw, dh))} aria-label="Fit to screen">Fit</button>
+          </div>
+          <div className="ink-group ink-end">
+            <button type="button" className="ink-btn" onClick={requestCancel} disabled={busy}>Cancel</button>
+            <button type="button" className="ink-btn ink-primary" onClick={done} disabled={busy}>{busy ? "Saving…" : "Done"}</button>
+          </div>
         </div>
       </div>
       <div className="ink-hint" aria-live="polite">
@@ -559,10 +607,11 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
             onBlur={commitEdit}
             onPointerDown={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); commitEdit(); }
+              if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); commitEdit(); } // not mid-IME
               else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelEdit(); }
             }}
-            style={{ left: editAt.x, top: editAt.y, color, fontSize: Math.max(12, labelSize * s) }}
+            // ≥ 16px so iOS Safari doesn't zoom the page on focus; the committed label draws at its real size.
+            style={{ left: editAt.x, top: editAt.y, color, fontSize: Math.max(16, labelSize * s) }}
           />
         )}
       </div>
@@ -572,9 +621,11 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
 
 const INK_CSS = `
 .ink-root { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; background: #2b2e35;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); outline: none; }
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); outline: none;
+  touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .ink-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 12px; background: #fff; border-bottom: 1px solid #e2e4ea; }
 .ink-title { font-size: 15px; font-weight: 700; margin: 0; color: #16181d; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ink-tools { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-width: 0; }
 .ink-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .ink-end { margin-left: auto; }
 .ink-btn { min-height: 40px; min-width: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #d4d7de; background: #fff; color: #16181d;
@@ -593,5 +644,5 @@ const INK_CSS = `
 .ink-bg { position: absolute; max-width: none; background: #fff; pointer-events: none; user-select: none; box-shadow: 0 2px 12px rgba(0,0,0,.18); }
 .ink-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .ink-label-input { position: absolute; min-width: 8ch; padding: 0 2px; border: 1px dashed #5b6170; background: rgba(255,255,255,.85);
-  font-family: sans-serif; line-height: 1.2; outline: none; }
+  font-family: sans-serif; line-height: 1.2; outline: none; -webkit-user-select: text; user-select: text; touch-action: manipulation; }
 `;

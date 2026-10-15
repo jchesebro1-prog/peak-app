@@ -151,6 +151,28 @@ export function clearInk(doc: InkDoc): InkDoc {
   return doc.strokes.length || doc.labels.length ? { ...doc, strokes: [], labels: [] } : doc;
 }
 
+/** Which cap refuses the next stroke (`pts` numbers) or label, or null when it fits. */
+export function inkCapHit(doc: InkDoc, add: { pts?: number; label?: boolean }): "strokes" | "numbers" | "labels" | null {
+  if (add.label) return doc.labels.length >= INK_CAPS.labels ? "labels" : null;
+  if (doc.strokes.length >= INK_CAPS.strokes) return "strokes";
+  return numbersIn(doc) + (add.pts ?? 0) > INK_CAPS.numbers ? "numbers" : null;
+}
+
+/** Rescale a doc saved at other dims onto a w × h background: each axis apart, widths and
+    label sizes by the geometric mean. Same doc back when the (clamped) dims already match. */
+export function fitInkTo(doc: InkDoc, w: number, h: number): InkDoc {
+  const t = emptyInk(w, h);
+  if (doc.w === t.w && doc.h === t.h) return doc;
+  const kx = doc.w > 0 ? t.w / doc.w : 1, ky = doc.h > 0 ? t.h / doc.h : 1, k = Math.sqrt(kx * ky);
+  const strokes = doc.strokes.map((s) => {
+    const pts = s.pts.slice();
+    for (let i = 0; i + 1 < pts.length; i += 3) { pts[i] = r05(pts[i] * kx); pts[i + 1] = r05(pts[i + 1] * ky); }
+    return { ...s, pts, width: clampNum(s.width * k, INK_LIMITS.width[0], INK_LIMITS.width[1], 2) };
+  });
+  const labels = doc.labels.map((l) => ({ ...l, x: r05(l.x * kx), y: r05(l.y * ky), size: clampNum(l.size * k, INK_LIMITS.labelSize[0], INK_LIMITS.labelSize[1], 16) }));
+  return { ...t, strokes, labels };
+}
+
 export type InkOp =
   | { t: "stroke"; stroke: Stroke }
   | { t: "erase"; x: number; y: number; radius: number }

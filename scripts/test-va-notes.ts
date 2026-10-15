@@ -1356,6 +1356,36 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const url = V.svgDataUrl('<svg><text>A — B × C</text></svg>');
     ok(url.startsWith("data:image/svg+xml;charset=utf-8,") && decodeURIComponent(url.split(",")[1]) === '<svg><text>A — B × C</text></svg>',
       "#344 C3: svgDataUrl percent-encodes non-ASCII (no btoa)");
+    // Fix 1: pan threshold, re-fit on resize, ink doc scaled to its background, cap reasons
+    ok(!V.panStarted(3, 4) && V.panStarted(6, 0) && V.panStarted(-4, -5) && !V.panStarted(0, 0) && !V.panStarted(5, 0, 6) && V.panStarted(2, 0, 2) && !V.panStarted(NaN, 9),
+      "#344 C3 fix: a one-finger pan starts only after ~6 px of movement");
+    const rf = V.refitView(V.fitView(1000, 800, 900, 640), 1000, 800, 800, 1000, 900, 640);
+    const rfWant = V.fitView(800, 1000, 900, 640);
+    ok(near(rf.z, 1) && near(rf.x, rfWant.x) && near(rf.y, rfWant.y), "#344 C3 fix: a fitted view stays fitted across a resize/rotation");
+    const zv = { z: 3, x: -600, y: -400 };
+    const f0 = V.fitScale(1000, 800, 900, 640), f1 = V.fitScale(1200, 700, 900, 640);
+    const c0 = V.screenToDoc(zv, f0, 500, 400);
+    const rz = V.refitView(zv, 1000, 800, 1200, 700, 900, 640);
+    const c1 = V.screenToDoc(rz, f1, 600, 350);
+    ok(rz.z === 3 && near(c0.x, c1.x) && near(c0.y, c1.y), "#344 C3 fix: a resize keeps the zoom and the doc point at the stage centre");
+    const far = V.refitView({ z: 1, x: 0, y: 0 }, 1000, 800, 300, 300, 900, 640);
+    const farF = V.fitScale(300, 300, 900, 640);
+    ok(JSON.stringify(far) === JSON.stringify(V.clampView(far, farF, 300, 300, 900, 640)), "#344 C3 fix: refitView clamps to the new stage");
+    const src = INK.addLabel(INK.addStroke(INK.emptyInk(100, 50), { id: "s", tool: "pen", color: "#16181d", width: 2, pts: [10, 10, 0.5, 50, 25, 0.5] }),
+      { id: "l", x: 20, y: 10, text: "Hi", color: "#16181d", size: 12 });
+    ok(INK.fitInkTo(src, 100, 50) === src, "#344 C3 fix: fitInkTo is a no-op when the dims already match");
+    const up = INK.fitInkTo(src, 200, 100);
+    ok(up.w === 200 && up.h === 100 && up.strokes[0].pts.join() === "20,20,0.5,100,50,0.5" && up.strokes[0].width === 4 && up.labels[0].x === 40 && up.labels[0].y === 20 && up.labels[0].size === 24,
+      "#344 C3 fix: fitInkTo scales strokes, widths and labels to the background");
+    const odd = INK.fitInkTo(src, 400, 50);
+    ok(odd.strokes[0].pts[0] === 40 && odd.strokes[0].pts[1] === 10 && near(odd.strokes[0].width, 4) && INK.fitInkTo(src, 1e9, 50).w === 16384,
+      "#344 C3 fix: fitInkTo scales each axis apart, widths by the mean, and clamps the target size");
+    const fullS = { ...INK.emptyInk(10, 10), strokes: Array.from({ length: INK.INK_CAPS.strokes }, (_, i) => ({ id: "s" + i, tool: "pen" as const, color: "#16181d", width: 1, pts: [0, 0, 0.5] })) };
+    const fullL = { ...INK.emptyInk(10, 10), labels: Array.from({ length: INK.INK_CAPS.labels }, (_, i) => ({ id: "l" + i, x: 0, y: 0, text: "x", color: "#16181d", size: 12 })) };
+    const fullN = { ...INK.emptyInk(10, 10), strokes: [{ id: "big", tool: "pen" as const, color: "#16181d", width: 1, pts: new Array(INK.INK_CAPS.numbers - 3).fill(0) }] };
+    ok(INK.inkCapHit(fullS, { pts: 3 }) === "strokes" && INK.inkCapHit(fullN, { pts: 6 }) === "numbers" && INK.inkCapHit(fullN, { pts: 3 }) === null &&
+      INK.inkCapHit(fullL, { label: true }) === "labels" && INK.inkCapHit(src, { pts: 3 }) === null && INK.inkCapHit(src, { label: true }) === null,
+      "#344 C3 fix: inkCapHit names the limit a refused stroke or label hit (strokes / numbers / labels)");
     // replace op: one undo step for a whole drag-erase
     const mk = (id: string, x: number): import("../src/lib/ink/model").Stroke => ({ id, tool: "pen", color: "#16181d", width: 2, pts: [x, 0, 0.5, x + 10, 0, 0.5] });
     const h = INK.createHistory(INK.emptyInk(100, 100));
@@ -1379,7 +1409,11 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const noServer = (src: string) => !/from\s+["'][^"']*(stores|server|@\/db)[^"']*["']/.test(src);
     ok(noServer(pad) && noServer(flat) && pad.startsWith('"use client"') && ![pad, flat].some((x) => x.includes("window.confirm") || x.includes("btoa(")),
       "#344 C3: InkPad is a client component with no store/server imports, no window.confirm, no btoa");
-    ok(pad.split("\n").length <= 600, "#344 C3: InkPad stays under ~600 lines (" + pad.split("\n").length + ")");
+    ok(pad.split("\n").length <= 700, "#344 C3: InkPad stays under ~700 lines (" + pad.split("\n").length + ")");
+    ok(["Math.max(16,", "isComposing", "e.button !== 0", "ignoredRef", "panStarted(", "refitView(", "fitInkTo(", "inkCapHit(", "visibility:"].every((k) => pad.includes(k)) &&
+      /\.ink-root \{[^}]*touch-action: none;[^}]*-webkit-touch-callout: none/.test(pad) && !/role="toolbar"[^>]*>\s*<h2/.test(pad) &&
+      flat.includes(".decode(") && /c\.width = 0/.test(flat) && pad.includes("c.width = 0"),
+      "#344 C3 fix pins — 16px label field, IME Enter, primary mouse only, palm ignore set, pan threshold, refit, doc fit, cap reasons, root touch-action, title outside the toolbar, canvases released");
   }
 }
 

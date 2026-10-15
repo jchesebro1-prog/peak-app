@@ -76,6 +76,20 @@ export function clampView(v: View, fit: number, sw: number, sh: number, dw: numb
   return { z: v.z, x: axis(finite(v.x, 0), dw * s, sw), y: axis(finite(v.y, 0), dh * s, sh) };
 }
 
+/** After a resize/rotation: keep the zoom (relative to fit) and the doc point at the stage centre, then clamp. */
+export function refitView(v: View, osw: number, osh: number, nsw: number, nsh: number, dw: number, dh: number, pad = 12): View {
+  const nf = fitScale(nsw, nsh, dw, dh, pad);
+  const c = screenToDoc(v, fitScale(osw, osh, dw, dh, pad), osw / 2, osh / 2);
+  const s = nf * v.z;
+  return clampView({ z: v.z, x: nsw / 2 - c.x * s, y: nsh / 2 - c.y * s }, nf, nsw, nsh, dw, dh);
+}
+
+/** A one-finger pan begins only once the finger has moved `threshold` px (a resting palm stays put). */
+export function panStarted(dx: number, dy: number, threshold = 6): boolean {
+  const d = Math.hypot(dx, dy);
+  return Number.isFinite(d) && d >= threshold;
+}
+
 export type Tap = { t: number; x: number; y: number };
 /** A short touch that barely moved. */
 export function isTap(down: Tap, up: Tap, maxMs = 250, maxPx = 10): boolean {
