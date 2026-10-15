@@ -245,9 +245,16 @@ export async function listDocsFiltered<T extends Doc = Doc>(
   const order = opts.orderByNumericDesc
     ? desc(sql`(${t.doc}->>${opts.orderByNumericDesc})::numeric`)
     : asc(t.id);
+  // #353 review M2: the projection reads the document ONCE per row. `doc->'f'` per field detoasts (decompresses) a
+  // large document again for every field; `jsonb_to_record` over one `doc` reference pulls every wanted field in
+  // one call, each kept as jsonb (so a value's JSON type is untouched and JSON null still strips), giving the same
+  // object the per-field build did.
   const doc = opts.fields?.length
-    ? sql`jsonb_strip_nulls(jsonb_build_object(${sql.join(
-        opts.fields.map((f) => sql`${f}::text, ${t.doc}->${f}`),
+    ? sql`(SELECT jsonb_strip_nulls(jsonb_build_object(${sql.join(
+        opts.fields.map((f) => sql`${f}::text, x.${sql.identifier(f)}`),
+        sql`, `
+      )})) FROM jsonb_to_record(${t.doc}) AS x(${sql.join(
+        opts.fields.map((f) => sql`${sql.identifier(f)} jsonb`),
         sql`, `
       )}))`
     : t.doc;
