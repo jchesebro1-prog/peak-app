@@ -246,13 +246,24 @@ const asText = (v: unknown): string => (typeof v === "string" ? v : typeof v ===
  * inline file of the right kind when `blobEnabled` is false. Owning ids: a photo's `file` → its `p_` id; its markup's
  * `image` → `markup.id` (`m_`), `strokes` → `k_` + the markup's hex; a sketch's `image` → its `s_` id, `strokes` →
  * `k_` + its hex. A bad or wrong-letter owning id downgrades its slots. Only the finalize creates finished slots.
+ * A non-list `photoRefs` / non-object `sketches` falls back to `opts.stored`'s value (dropped when none is stored).
  * Photo refs are also shaped (#344 C5): a ref without a valid `p_` id is dropped, the list keeps the oldest
  * SURVEY_PHOTO_CAP, `section` / `by` are strings, `takenAt` a finite number, and a caption goes through `cleanCaption`.
  * Pure: the input is not mutated; everything else is returned as sent.
  */
-export function sanitizeIncomingFileSlots<T extends Record<string, unknown>>(doc: T, surveyId: string, opts: { blobEnabled: boolean }): T {
+export function sanitizeIncomingFileSlots<T extends Record<string, unknown>>(
+  doc: T,
+  surveyId: string,
+  opts: { blobEnabled: boolean; stored?: Record<string, unknown> | null },
+): T {
   const blob = opts.blobEnabled;
   const out: Record<string, unknown> = { ...doc };
+  const stored = isObj(opts.stored) ? opts.stored : null;
+  if ("photoRefs" in doc && doc.photoRefs !== undefined && !Array.isArray(doc.photoRefs)) {
+    // #344 C6 fix: anything but a list keeps the stored refs (never wipes them); with none stored it is dropped
+    if (stored && Array.isArray(stored.photoRefs)) out.photoRefs = stored.photoRefs;
+    else delete out.photoRefs;
+  }
   if (Array.isArray(doc.photoRefs)) {
     // #344 C5: a ref without a valid p_ id is dropped; the list is capped at SURVEY_PHOTO_CAP, keeping the oldest (new
     // refs append at the end); section / by are strings, takenAt a finite number, a caption is cleanCaption'd
@@ -295,7 +306,9 @@ export function sanitizeIncomingFileSlots<T extends Record<string, unknown>>(doc
     }
     out.sketches = sk;
   } else if ("sketches" in doc && doc.sketches !== undefined) {
-    delete out.sketches; // #344 C6: anything but a keyed object is dropped
+    // #344 C6: anything but a keyed object keeps the stored sketches (never wipes them); with none stored it is dropped
+    if (stored && isObj(stored.sketches)) out.sketches = stored.sketches;
+    else delete out.sketches;
   }
   return out as T;
 }
@@ -513,4 +526,36 @@ export function withNewSketch(
   if (!idWith(sketchId, "s")) throw new Error("A sketch needs its own s_ id");
   if (!isSketchKey(key)) throw new Error("That sketch pad isn't known");
   return { ...(isObj(sketches) ? sketches : {}), [key]: { id: sketchId, image: { pending: true }, strokes: { pending: true }, updatedAt: at, by } };
+}
+
+/** Discarding a failed upload of `fileId` (a sketch's `s_` image or `k_` strokes) when that sketch's image never
+ *  finished: the sketch is removed (its tile goes back to Draw) and both its files are dropped from the device.
+ *  Null when no sketch owns the file or its image is finished (only that one queued file goes). Pure. */
+export function sketchAfterDiscard(
+  sketches: Record<string, SketchRef> | null | undefined,
+  fileId: string,
+): { key: string; sketches: Record<string, SketchRef>; drop: string[] } | null {
+  if (!isObj(sketches) || typeof fileId !== "string" || !/^[sk]_/.test(fileId)) return null;
+  const sid = `s_${fileId.slice(2)}`;
+  const key = Object.keys(sketches).find((k) => isObj(sketches[k]) && sketches[k].id === sid);
+  if (!key || slotFinished(sketches[key].image)) return null;
+  const rest = { ...sketches };
+  const ref = rest[key];
+  delete rest[key];
+  return { key, sketches: rest, drop: sketchFileIds(ref) };
+}
+
+/** Undo a re-draw that never reached the device queue: `key` goes back to `prev` (removed when there was none) —
+ *  only while it still holds `newId` (a newer drawing is left alone, same object back). Pure. */
+export function withSketchRestored(
+  sketches: Record<string, SketchRef>,
+  key: string,
+  newId: string,
+  prev: SketchRef | null | undefined,
+): Record<string, SketchRef> {
+  if (!isObj(sketches) || sketches[key]?.id !== newId) return sketches;
+  const next = { ...sketches };
+  if (prev) next[key] = prev;
+  else delete next[key];
+  return next;
 }

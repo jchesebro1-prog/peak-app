@@ -49,6 +49,10 @@ export type SectionPhotosOptions = {
   sectionTitle: (sectionId: string) => string;
   /** #344 C6 — a finished file no photo owns (a sketch's) is handed on: one queue configuration per editor */
   foldOther?: (fileId: string, slot: FinishedSlot) => boolean;
+  /** #344 C6 — Discard on a failed upload no photo owns (a sketch's): true when the other owner handled it */
+  discardOther?: (fileId: string) => Promise<boolean>;
+  /** #344 C6 — the failed-uploads label of a file no photo owns (names the sketch pad), or null */
+  describeOther?: (fileId: string) => string | null;
 };
 
 export type SectionPhotos = {
@@ -410,9 +414,12 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
     if (fileId.startsWith("m_") || fileId.startsWith("k_")) {
       const r = o.refs.find((x) => x.markup?.id === `m_${hex}`);
       if (r) return `Markup on a photo in ${title(r)}`;
-      return fileId.startsWith("m_") ? "An earlier markup" : "Drawing strokes";
     }
-    return fileId.startsWith("s_") ? "Sketch" : "File";
+    const other = o.describeOther?.(fileId);
+    if (other) return other;
+    if (fileId.startsWith("m_")) return "An earlier markup";
+    if (fileId.startsWith("k_")) return "Drawing strokes";
+    return fileId.startsWith("s_") ? "An earlier sketch" : "File";
   }
   async function onRetry(fileId: string) {
     setFailBusy(fileId);
@@ -436,7 +443,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
       const marked = refsRef.current.find((r) => r.markup?.id === `m_${hex}`);
       if (owner) await deletePhoto(owner.id);
       else if (marked && (fileId.startsWith("m_") || fileId.startsWith("k_"))) await removeMarkup(marked.id);
-      else await dropQueued([fileId]);
+      else if (!(await optsRef.current.discardOther?.(fileId))) await dropQueued([fileId]);
     } finally {
       setFailBusy(null);
     }

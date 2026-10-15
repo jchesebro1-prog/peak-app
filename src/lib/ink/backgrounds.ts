@@ -85,7 +85,8 @@ function fmtFt(ft: number): string {
 }
 
 type M = Record<string, string | boolean>;
-type Out = { svg: string; w: number; h: number };
+export type PadBackground = { svg: string; w: number; h: number };
+type Out = PadBackground;
 
 const MIN_W = 900;
 const MIN_H = 600;
@@ -234,11 +235,22 @@ function gridSheet(heading: string, cols: number, rows: number, cell: number): O
 
 const COL_W = [50, 90, 150, 50, 70, 70, 120, 100, 90, 80, 80, 80, 220];
 
+/** The line set sheet's row geometry — one home for the generator and `linesetRowsForHeight`. */
+const LS_ROW_H = 40, LS_HEAD_H = 44, LS_TITLE_H = 40, LS_FOOT_H = 30;
+
+/** The rows a line set sheet of height `h` holds (its own geometry inverted), clamped to 1…LINESET_ROWS_PER_PAGE.
+ *  A saved sheet reopens at the rows it was drawn on, so its handwriting is never stretched off them. Pure. */
+export function linesetRowsForHeight(h: number): number {
+  if (!Number.isFinite(h)) return Number.isNaN(h) ? LINESET_ROWS_PER_PAGE : h > 0 ? LINESET_ROWS_PER_PAGE : 1;
+  const rows = Math.round((h - LS_TITLE_H - LS_HEAD_H - LS_FOOT_H) / LS_ROW_H);
+  return Math.max(1, Math.min(LINESET_ROWS_PER_PAGE, rows));
+}
+
 function linesetSheet(page: number, rowsOnPage: number): Out {
-  const rows = Math.max(1, Math.min(LINESET_ROWS_PER_PAGE, Math.floor(rowsOnPage)));
-  const rowH = 40, headH = 44, titleH = 40;
+  const rows = Math.max(1, Math.min(LINESET_ROWS_PER_PAGE, Math.floor(rowsOnPage) || 1));
+  const rowH = LS_ROW_H, headH = LS_HEAD_H, titleH = LS_TITLE_H;
   const tw = COL_W.reduce((a, b) => a + b, 0);
-  const w = tw + 40, h = titleH + headH + rows * rowH + 30;
+  const w = tw + 40, h = titleH + headH + rows * rowH + LS_FOOT_H;
   let body = text(20, 26, `LINE SET SCHEDULE — PAGE ${page}`, "start");
   const y0 = titleH, x0 = 20;
   body += rect(x0, y0, tw, headH + rows * rowH);
@@ -274,4 +286,21 @@ export function backgroundFor(key: SketchKey, m: M, opts?: { linesetRows?: numbe
     case "brick": return gridSheet("BRICK DRAWING", 40, 28, 20);
     default: return gridSheet("SKETCH", 40, 28, 20);
   }
+}
+
+/**
+ * The background a pad opens over, given the strokes saved on it (`saved`, null for a fresh pad). A line set sheet
+ * with saved strokes is built at the saved height's rows (`linesetRowsForHeight`) — not the current quantity — and
+ * `fit` is false: its handwriting sits on rows, so it is never scaled. Every other pad fits the saved strokes to the
+ * (measurement-driven) background (`fit` true). Pure.
+ */
+export function padBackground(
+  key: SketchKey,
+  m: M,
+  opts: { linesetRows?: number; page?: number },
+  saved: { w: number; h: number } | null | undefined,
+): { bg: PadBackground; fit: boolean } {
+  if (linesetSheetPage(key) == null) return { bg: backgroundFor(key, m, opts), fit: true };
+  const rows = saved ? linesetRowsForHeight(saved.h) : opts.linesetRows;
+  return { bg: backgroundFor(key, m, { ...opts, linesetRows: rows }), fit: false };
 }

@@ -562,7 +562,7 @@ async function updateUnlocked(id: string, patch: Partial<SurveyRecord>): Promise
       rev: (s.rev || 1) + 1,
     }) as Record<string, unknown>;
     delete next.legacyNotes;
-    return mergeSurveyFileRefs(stored, sanitizeIncomingFileSlots(next, id, { blobEnabled: blobEnabled() })) as SurveyRecord;
+    return mergeSurveyFileRefs(stored, sanitizeIncomingFileSlots(next, id, { blobEnabled: blobEnabled(), stored })) as SurveyRecord;
   });
 }
 
@@ -661,7 +661,10 @@ export async function pushSurvey(rec: { id: string; rev?: number; doc: Record<st
       const existing = await db.select().from(t).where(eq(t.id, id)).limit(1);
       const at = Date.now();
       // A pushed copy never mints a finished slot (only the finalize does); then a stored finished slot always wins.
-      const doc: Record<string, unknown> = sanitizeIncomingFileSlots({ ...rec.doc, id }, id, { blobEnabled: blobEnabled() });
+      const doc: Record<string, unknown> = sanitizeIncomingFileSlots({ ...rec.doc, id }, id, {
+        blobEnabled: blobEnabled(),
+        stored: (existing[0]?.doc as Record<string, unknown> | undefined) ?? null,
+      });
       delete doc.legacyNotes;
       if (!existing.length) {
         await db.insert(t).values({ id, doc, rev: rec.rev ?? 1, updatedAt: at, receivedAt: at, review: { state: "new" }, deleted: false });

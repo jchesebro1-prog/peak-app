@@ -860,8 +860,8 @@ export default function SurveyEditor({
   const revSeen = useRef(0);
   /** Once photos change in this session, every save carries photoRefs (even an empty list). */
   const photosTouched = useRef(false);
-  /** A photo save failed and nothing has saved since — the pill says so instead of "Saved". */
-  const [photoUnsaved, setPhotoUnsaved] = useState(false);
+  /** A photo (true) or sketch ("drawing") save failed and nothing has saved since — the pill says so instead of "Saved". */
+  const [photoUnsaved, setPhotoUnsaved] = useState<boolean | "drawing">(false);
   /** Save changes, stage moves and photo saves run one at a time (each reads the newest refs when it runs). */
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
   function serialSave<T>(fn: () => Promise<T>): Promise<T> {
@@ -871,7 +871,7 @@ export default function SurveyEditor({
   }
   /** A photo change saves the LAST-SAVED draft + the current refs: the user's unsaved edits stay unsaved (and dirty),
    *  and are never saved half-typed or past validate(). */
-  async function savePhotoRefs() {
+  async function savePhotoRefs(kind: "photo" | "drawing" = "photo") {
     try {
       await serialSave(async () => {
         const sent: Draft = { ...lastSaved.current, photoRefs: refsNow.current, sketches: sketchesNow.current };
@@ -886,7 +886,8 @@ export default function SurveyEditor({
         setPhotoUnsaved(false);
       });
     } catch (e) {
-      setPhotoUnsaved(true);
+      if (kind === "drawing") setPhotoUnsaved("drawing");
+      else setPhotoUnsaved(true);
       throw e;
     }
   }
@@ -900,7 +901,7 @@ export default function SurveyEditor({
       sketchesNow.current = next;
       setDraft((d) => ({ ...d, sketches: next }));
     },
-    save: savePhotoRefs,
+    save: () => savePhotoRefs("drawing"),
   });
   const sectionPhotos = useSectionPhotos({
     recordId: record.id,
@@ -912,12 +913,14 @@ export default function SurveyEditor({
       photosTouched.current = true;
       setDraft((d) => ({ ...d, photoRefs: next }));
     },
-    save: savePhotoRefs,
+    save: () => savePhotoRefs("photo"),
     onRev: (rev) => {
       if (rev > revSeen.current) revSeen.current = rev;
     },
     sectionTitle: (id) => sections.find((s) => s.id === id)?.title ?? "another section",
     foldOther: (fileId, slot) => sectionSketches.fold(fileId, slot),
+    discardOther: (fileId) => sectionSketches.discard(fileId),
+    describeOther: (fileId) => sectionSketches.describe(fileId),
   });
   const photoCounts = photoCountsBySection(draft.photoRefs);
 
@@ -935,7 +938,7 @@ export default function SurveyEditor({
     savePillBg = "#fbf3dd";
     savePillInk = "#9a6a1f";
   } else if (photoUnsaved) {
-    savePillLabel = "Photo not saved yet";
+    savePillLabel = photoUnsaved === "drawing" ? "Drawing not saved yet" : "Photo not saved yet";
     savePillBg = "#fbf3dd";
     savePillInk = "#9a6a1f";
   } else {

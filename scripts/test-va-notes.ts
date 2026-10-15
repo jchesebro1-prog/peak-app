@@ -1828,7 +1828,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       sv.indexOf("await persist(") > 0 && sv.indexOf("await persist(") < sv.indexOf("enqueuePhoto(") && sv.indexOf("sketchFilesToDiscard(") >= 0 && st.includes("discardPhoto(") &&
       st.includes("serializeInk(") && st.includes('"application/json"'),
       "#344 C6: Done mints a NEW s_ + k_, saves the pending ref, THEN enqueues the JPEG + strokes, and discards the superseded sketch's queued files");
-    ok(st.includes("visibleSketchPads(") && st.includes("backgroundFor(") && /kind: "svg"/.test(st) && st.includes("parseInk(") && st.includes("fitInkTo(") &&
+    ok(st.includes("visibleSketchPads(") && st.includes("padBackground(") && /kind: "svg"/.test(st) && st.includes("parseInk(") && st.includes("fitInkTo(") &&
       st.includes("queuedPhotoBlob(") && st.includes("URL.revokeObjectURL(") && st.includes("<InkPad") && st.includes("couldn't load"),
       "#344 C6: a tile opens the InkPad over the generated background, starting from the saved strokes (device copy while pending, fitted), else empty with a note");
     ok(st.includes(">Draw<") && st.includes("Uploading") && st.includes("/api/surveys/") && st.includes("cwElevationOnFile") && st.includes("brickDrawingOnFile"),
@@ -1847,6 +1847,64 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       "#344 C6: sketch saves send the last-saved draft + current photos + current sketches (never unsaved edits); Save changes sends the current sketches; a patch may carry sketches");
     ok(/from "\.\.\/ink\/backgrounds"/.test(fls) && fls.includes("isSketchKey(") && fls.includes("SURVEY_SKETCH_CAP"),
       "#344 C6: the server's sanitize validates sketch keys against the pad registry");
+
+    /* ---- C6 fix 1 ---- */
+    {
+      const h = (rows: number) => BG.backgroundFor("linesetSheet", {}, { linesetRows: rows }).h;
+      ok([1, 5, 12, 29, 30].every((n) => BG.linesetRowsForHeight(h(n)) === n) &&
+        [NaN, 0, -40, 1e9, Infinity].every((v) => { const r = BG.linesetRowsForHeight(v); return r >= 1 && r <= BG.LINESET_ROWS_PER_PAGE; }),
+        "#344 C6 fix: linesetRowsForHeight inverts the line set sheet's own row geometry (1…30, junk clamps)");
+      const at30 = BG.backgroundFor("linesetSheet", {}, { linesetRows: 30 });
+      const reopened = BG.padBackground("linesetSheet", {}, { linesetRows: 12, page: 1 }, { w: at30.w, h: at30.h });
+      const fresh = BG.padBackground("linesetSheet", {}, { linesetRows: 12, page: 1 }, null);
+      const p2 = BG.padBackground("linesetSheet2", {}, { linesetRows: 5, page: 2 }, { w: at30.w, h: h(18) });
+      const beams = BG.padBackground("beams", {}, {}, { w: 10, h: 10 });
+      ok(reopened.bg.h === at30.h && reopened.bg.w === at30.w && !reopened.fit && BG.linesetRowsForHeight(reopened.bg.h) === 30 &&
+        fresh.bg.h === h(12) && !fresh.fit && p2.bg.h === h(18) && p2.bg.svg.includes("PAGE 2") && !p2.fit && beams.fit && beams.bg.svg === BG.backgroundFor("beams", {}).svg,
+        "#344 C6 fix: line set handwriting is never stretched — saved strokes at 30 rows reopen at 30 rows when the quantity is 12; a fresh pad uses the current quantity; other pads fit");
+
+      const pendS: SRef = { id: "s_cccccccccccc", image: pend, strokes: pend, updatedAt: 1, by: "u" };
+      const doneS: SRef = { id: "s_dddddddddddd", image: { blobPath: "surveys/FS-1/s_dddddddddddd.jpg" }, strokes: pend, updatedAt: 1, by: "u" };
+      const sks = { beams: pendS, brick: doneS };
+      const snap = JSON.stringify(sks);
+      const viaS = FF.sketchAfterDiscard(sks, "s_cccccccccccc");
+      const viaK = FF.sketchAfterDiscard(sks, "k_cccccccccccc");
+      ok(!!viaS && viaS.key === "beams" && !("beams" in viaS.sketches) && viaS.sketches.brick === doneS && viaS.drop.join() === "s_cccccccccccc,k_cccccccccccc" &&
+        !!viaK && viaK.key === "beams" && JSON.stringify(viaK.sketches) === JSON.stringify(viaS.sketches) &&
+        FF.sketchAfterDiscard(sks, "k_dddddddddddd") === null && FF.sketchAfterDiscard(sks, "s_eeeeeeeeeeee") === null &&
+        FF.sketchAfterDiscard(sks, "p_cccccccccccc") === null && FF.sketchAfterDiscard(null, "s_cccccccccccc") === null && JSON.stringify(sks) === snap,
+        "#344 C6 fix: sketchAfterDiscard — discarding a never-finished sketch's s_ or k_ removes that sketch (tile back to Draw) and drops both files; a finished image or another id leaves it; pure");
+      const drawn = FF.withNewSketch(sks, "beams", "s_ffffffffffff", "u", 2);
+      const back = FF.withSketchRestored(drawn, "beams", "s_ffffffffffff", pendS);
+      const gone = FF.withSketchRestored(FF.withNewSketch(sks, "stagePlan", "s_ffffffffffff", "u", 2), "stagePlan", "s_ffffffffffff", undefined);
+      const moved = FF.withSketchRestored(drawn, "beams", "s_999999999999", pendS);
+      ok(back.beams === pendS && back.brick === doneS && !("stagePlan" in gone) && moved === drawn,
+        "#344 C6 fix: withSketchRestored puts the previous sketch back after a failed enqueue (or removes a first drawing); a newer drawing is left alone");
+
+      const storedSk = { beams: doneS };
+      const storedRefs = [{ id: "p_111111111111", section: "x", takenAt: 1, by: "u", file: pend }];
+      const fb = FF.sanitizeIncomingFileSlots({ notes: "n", sketches: ["x"], photoRefs: "junk" } as Record<string, unknown>, "FS-1",
+        { blobEnabled: true, stored: { sketches: storedSk, photoRefs: storedRefs } });
+      const none = FF.sanitizeIncomingFileSlots({ sketches: 5, photoRefs: { a: 1 } } as Record<string, unknown>, "FS-1", { blobEnabled: true, stored: {} });
+      ok(fb.sketches === storedSk && fb.photoRefs === storedRefs && (fb as { notes?: string }).notes === "n" && !("sketches" in none) && !("photoRefs" in none),
+        "#344 C6 fix: a non-object incoming sketches (or non-array photoRefs) falls back to the stored value instead of deleting it");
+      const svs = read("src/lib/stores/surveys.ts");
+      ok(svs.includes("sanitizeIncomingFileSlots(next, id, { blobEnabled: blobEnabled(), stored })") && /sanitizeIncomingFileSlots\(\{ \.\.\.rec\.doc, id \}, id, \{[\s\S]{0,80}stored: \(existing\[0\]\?\.doc/.test(svs),
+        "#344 C6 fix: both survey write paths hand the stored doc to sanitize");
+
+      const op = st.slice(st.indexOf("async function openPad"), st.indexOf("async function saveSketch"));
+      ok(op.includes("padBackground(") && op.indexOf("loadStrokes(") < op.indexOf("padBackground(") && /\.fit \? fitInkTo\(/.test(op) &&
+        st.includes("new AbortController()") && st.includes(".abort()") && st.includes("fetch(slot.inline") && !st.includes("atob(") &&
+        /function addLocalUrl[\s\S]{0,120}mounted\.current/.test(st),
+        "#344 C6 fix: the pad's background is built from the saved strokes' size (line set sheets never fitted); the strokes fetch aborts on unmount; inline strokes read with fetch");
+      const sv2 = st.slice(st.indexOf("async function saveSketch"), st.indexOf("/* ---------- rendering"));
+      ok(sv2.includes("withSketchRestored(") && sv2.indexOf("withSketchRestored(") < sv2.indexOf("await dropQueued(stale)") && /catch \(e\) \{[\s\S]{0,900}throw e;/.test(sv2) &&
+        st.includes("That sketch never finished uploading — draw it again.") && st.includes("sketchAfterDiscard(") && st.includes("Replace the drawing you can't see?"),
+        "#344 C6 fix: a failed enqueue restores the previous sketch and keeps the pad open; a discarded unfinished sketch goes back to Draw; Done over unloaded strokes asks first");
+      ok(sp.includes("discardOther?:") && sp.includes("describeOther?:") && /optsRef\.current\.discardOther\?\.\(fileId\)/.test(sp) && sp.includes("o.describeOther?.(fileId)") &&
+        ctl.includes("discardOther:") && ctl.includes("describeOther:") && ctl.includes('"Drawing not saved yet"'),
+        "#344 C6 fix: failed sketch uploads are named by pad and discarded through the sketch hook; a failed sketch save says Drawing not saved yet");
+    }
   }
 }
 

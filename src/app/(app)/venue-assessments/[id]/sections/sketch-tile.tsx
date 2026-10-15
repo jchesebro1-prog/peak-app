@@ -21,13 +21,15 @@
  * ============================================================ */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { InkPad, type InkBackground } from "@/components/ink/ink-pad";
 import { fitInkTo, parseInk, serializeInk, type InkDoc } from "@/lib/ink/model";
-import { SKETCH_PADS, backgroundFor, linesetSheetPage, type SketchKey } from "@/lib/ink/backgrounds";
+import { SKETCH_PADS, linesetSheetPage, padBackground, type SketchKey } from "@/lib/ink/backgrounds";
 import { visibleSketchPads, type FlowSlice, type SketchPadView } from "@/lib/survey-flow";
 import { discardPhoto, enqueuePhoto, queuedPhotoBlob } from "@/lib/assessments/photo-queue";
 import {
-  foldFileSlot, newFileId, siblingId, sketchFilesToDiscard, slotFinished, withNewSketch, type FinishedSlot, type SketchRef,
+  foldFileSlot, newFileId, siblingId, sketchAfterDiscard, sketchFilesToDiscard, slotFinished, withNewSketch, withSketchRestored,
+  type FinishedSlot, type SketchRef,
 } from "@/lib/field-files/files";
 import type { HandSheet } from "./linesets";
 import { ACCENT_BORDER_LT, ACCENT_INK, ACCENT_SOFT } from "./styles";
@@ -59,25 +61,30 @@ export type SectionSketches = {
   linesetSheet: () => HandSheet | undefined;
   /** fold a finished file into a sketch (the queue's onDone, for files no photo owns); true when one owned it */
   fold: (fileId: string, slot: FinishedSlot) => boolean;
+  /** Discard on a failed upload no photo owns: a sketch whose image never finished is removed (tile back to Draw),
+   *  saved, and both its queued files dropped. False when no such sketch owns the file (the caller drops just it). */
+  discard: (fileId: string) => Promise<boolean>;
+  /** the failed-uploads label of a sketch's file (names the pad), or null when no sketch owns it */
+  describe: (fileId: string) => string | null;
   /** styles + the pad — render once */
   overlay: ReactNode;
 };
 
-type Ink = { key: SketchKey; title: string; background: InkBackground; initial?: InkDoc };
+/** `lost`: a sketch is stored but its strokes couldn't load — Done asks before replacing the drawing. */
+type Ink = { key: SketchKey; title: string; background: InkBackground; initial?: InkDoc; lost: boolean };
+type Done = { doc: InkDoc; jpeg: Blob };
+type LostConfirm = { key: SketchKey; result: Done; resolve: () => void; reject: (e: unknown) => void };
 type Msg = { text: string; section: string };
 
 const nowMs = () => Date.now();
 const fileUrl = (recordId: string, fileId: string) => `/api/surveys/${encodeURIComponent(recordId)}/files/${encodeURIComponent(fileId)}`;
 const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
 const sectionOf = (key: string) => (linesetSheetPage(key) != null ? "linesets" : SKETCH_PADS.find((p) => p.key === key)?.section ?? "");
-
-/** A JSON data URL's text (inline strokes in local dev). */
-function dataUrlText(url: string): string {
-  const comma = url.indexOf(",");
-  const bin = atob(url.slice(comma + 1));
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new TextDecoder().decode(bytes);
+/** A pad's name for messages and the failed-uploads list. */
+function padTitle(key: string): string {
+  const page = linesetSheetPage(key);
+  if (page != null) return page > 1 ? `Line set schedule sheet, page ${page}` : "Line set schedule sheet";
+  return SKETCH_PADS.find((p) => p.key === key)?.title ?? "Sketch";
 }
 
 const SK_CSS = `
@@ -95,6 +102,11 @@ const SK_CSS = `
   .sk-tile.compact .sk-img { height: 64px; }
   .sk-aside { flex-shrink: 0; display: flex; }
   .sk-msg { border: 1px solid #f0d6cd; background: #fbeeea; color: #8c3b26; border-radius: 9px; padding: 9px 12px; font-size: 12.5px; display: flex; gap: 10px; align-items: flex-start; margin: 2px 0 12px; }
+  .sk-confirm-bg { position: fixed; inset: 0; z-index: 1001; background: rgba(16,18,22,.45); display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .sk-confirm { background: #fff; border-radius: 12px; padding: 16px; width: min(420px, 100%); box-shadow: 0 20px 60px rgba(0,0,0,.35); display: grid; gap: 12px; font-size: 13.5px; color: #2b2e35; }
+  .sk-confirm-row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .sk-confirm button { font: inherit; font-size: 13px; font-weight: 600; border-radius: 8px; padding: 7px 12px; cursor: pointer; border: 1px solid #e4e7ec; background: #fff; color: #5b616e; min-height: 36px; }
+  .sk-confirm button.sk-danger { color: #fff; background: #b4543a; border-color: #b4543a; }
   .sk-msg button { font: inherit; font-size: 12px; font-weight: 600; color: #5b616e; background: #fff; border: 1px solid #e4e7ec; border-radius: 8px; padding: 4px 10px; cursor: pointer; }
 `;
 
@@ -114,6 +126,10 @@ export function useSectionSketches(o: SectionSketchesOptions): SectionSketches {
   const setMsg = (text: string | null, section = "") => setMsgState(text ? { text, section } : null);
   const [ink, setInk] = useState<Ink | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
+  const [lostConfirm, setLostConfirm] = useState<LostConfirm | null>(null);
+  // Unmounted: no object URLs are created, no state set; an in-flight strokes fetch is aborted.
+  const mounted = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   /* ---------- the draft + save ---------- */
   function commit(next: Record<string, SketchRef>) {
@@ -139,7 +155,7 @@ export function useSectionSketches(o: SectionSketchesOptions): SectionSketches {
   const urlsRef = useRef<Record<string, string>>({});
   const [localUrls, setLocalUrls] = useState<Record<string, string>>({});
   function addLocalUrl(fileId: string, blob: Blob) {
-    if (urlsRef.current[fileId]) return;
+    if (!mounted.current || urlsRef.current[fileId]) return;
     urlsRef.current = { ...urlsRef.current, [fileId]: URL.createObjectURL(blob) };
     setLocalUrls(urlsRef.current);
   }
@@ -178,13 +194,15 @@ export function useSectionSketches(o: SectionSketchesOptions): SectionSketches {
       alive = false;
     };
   }, [o.sketches, recordId]);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      abortRef.current?.abort();
       for (const u of Object.values(urlsRef.current)) URL.revokeObjectURL(u);
       urlsRef.current = {};
-    },
-    [],
-  );
+    };
+  }, []);
 
   /** The queue finished a file no photo owns: land it on its sketch (the store's own fold rule). */
   function fold(fileId: string, slot: FinishedSlot): boolean {
@@ -206,15 +224,18 @@ export function useSectionSketches(o: SectionSketchesOptions): SectionSketches {
   }
 
   /** The saved strokes of a sketch: this device's queued copy while pending, the bytes route once uploaded, the
-   *  data URL inline. Null when they can't be read (the pad then starts empty, and says so). */
-  async function loadStrokes(ref: SketchRef): Promise<InkDoc | null> {
+   *  data URL inline (read with fetch, whatever its encoding). Null when they can't be read (the pad then starts
+   *  empty, and says so). */
+  async function loadStrokes(ref: SketchRef, signal: AbortSignal): Promise<InkDoc | null> {
     try {
       const k = siblingId(ref.id, "k");
       const slot = ref.strokes ?? {};
       let text: string | null = null;
-      if (slot.inline) text = dataUrlText(slot.inline);
-      else if (slot.blobPath) {
-        const res = await fetch(fileUrl(recordId, k), { cache: "no-store" });
+      if (slot.inline) {
+        const res = await fetch(slot.inline, { signal });
+        text = res.ok ? await res.text() : null;
+      } else if (slot.blobPath) {
+        const res = await fetch(fileUrl(recordId, k), { cache: "no-store", signal });
         text = res.ok ? await res.text() : null;
       } else {
         const blob = await queuedPhotoBlob(recordId, k);
@@ -230,30 +251,35 @@ export function useSectionSketches(o: SectionSketchesOptions): SectionSketches {
     if (opening || ink) return;
     setOpening(view.key);
     const section = sectionOf(view.key);
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
     try {
-      const bg = backgroundFor(view.key, optsRef.current.survey.measurements, { linesetRows: view.rows, page: view.page });
       const cur = sketchesRef.current[view.key];
-      let initial: InkDoc | undefined;
+      const doc = cur ? await loadStrokes(cur, ac.signal) : null;
+      if (!mounted.current || ac.signal.aborted) return;
+      // The background follows the saved strokes: a line set sheet reopens at the rows it was drawn on (its
+      // handwriting is never stretched); every other pad fits the strokes to today's measurements.
+      const plan = padBackground(view.key, optsRef.current.survey.measurements, { linesetRows: view.rows, page: view.page }, doc);
+      const initial = doc ? (plan.fit ? fitInkTo(doc, plan.bg.w, plan.bg.h) : doc) : undefined;
+      const lost = !!cur && !doc;
       let title = view.title;
-      if (cur) {
-        const doc = await loadStrokes(cur);
-        if (doc) initial = fitInkTo(doc, bg.w, bg.h);
-        else {
-          title = `${view.title} — the earlier strokes couldn't load; Done replaces the drawing`;
-          setMsg("The earlier strokes of this sketch couldn't load here (still uploading from another device, or offline) — the pad started empty.", section);
-        }
+      if (lost) {
+        title = `${view.title} — the earlier strokes couldn't load; Done replaces the drawing`;
+        setMsg("The earlier strokes of this sketch couldn't load here (still uploading from another device, or offline) — the pad started empty.", section);
       }
-      setInk({ key: view.key, title, background: { kind: "svg", svg: bg.svg, w: bg.w, h: bg.h }, initial });
+      setInk({ key: view.key, title, background: { kind: "svg", svg: plan.bg.svg, w: plan.bg.w, h: plan.bg.h }, initial, lost });
     } catch {
-      setMsg("That sketch pad couldn't be opened.", section);
+      if (mounted.current) setMsg("That sketch pad couldn't be opened.", section);
     } finally {
-      setOpening(null);
+      if (abortRef.current === ac) abortRef.current = null;
+      if (mounted.current) setOpening(null);
     }
   }
 
   /** Done in the pad: a NEW s_ id + its k_, the sketch saved with both slots pending, THEN both files queued; the
    *  superseded sketch's queued files are dropped. Returned to the pad, so Done stays "Saving…" until it settles. */
-  async function saveSketch(key: SketchKey, result: { doc: InkDoc; jpeg: Blob }) {
+  async function saveSketch(key: SketchKey, result: Done) {
     const section = sectionOf(key);
     const cur = sketchesRef.current[key];
     const s = newFileId("s");
@@ -267,12 +293,51 @@ export function useSectionSketches(o: SectionSketchesOptions): SectionSketches {
       await enqueuePhoto(recordId, s, result.jpeg);
       await enqueuePhoto(recordId, k, new Blob([serializeInk(result.doc)], { type: "application/json" }));
     } catch (e) {
-      setMsg(`The sketch couldn't be kept on this device: ${errText(e, "storage refused it")}`, section);
+      // The new drawing isn't safely on this device: put the previous sketch back (its queued files untouched), save
+      // that, drop whatever of the new one did queue, and reject — the pad stays open with the strokes intact.
+      commit(withSketchRestored(sketchesRef.current, key, s, cur));
+      await dropQueued([s, k]);
+      await persist(section);
+      setMsg(`The sketch couldn't be kept on this device (${errText(e, "storage refused it")}) — the earlier drawing is kept. Try Done again.`, section);
+      throw e;
     }
     await dropQueued(stale);
     // Uploaded files of a re-drawn sketch stay in Blob as orphans (harmless; nothing refers to them).
     if (stale.length) console.info("[venue-assessments] sketch re-drawn; any uploaded files of the old one stay as orphans", recordId, stale.join(", "));
     setInk(null);
+  }
+
+  /** Done in the pad: straight to saveSketch, unless the stored strokes couldn't load — then ask first (Cancel keeps
+   *  the pad open with what was drawn). */
+  function onPadDone(cur: Ink, result: Done): Promise<void> {
+    if (!cur.lost) return saveSketch(cur.key, result);
+    return new Promise<void>((resolve, reject) => setLostConfirm({ key: cur.key, result, resolve, reject }));
+  }
+  function answerLost(replace: boolean) {
+    const c = lostConfirm;
+    if (!c) return;
+    setLostConfirm(null);
+    if (!replace) c.resolve();
+    else saveSketch(c.key, c.result).then(c.resolve, c.reject);
+  }
+
+  /** Discard on a failed upload of a sketch's file whose image never finished: remove that sketch (tile back to Draw),
+   *  drop both its queued files and save. False when no such sketch owns it. */
+  async function discard(fileId: string): Promise<boolean> {
+    const d = sketchAfterDiscard(sketchesRef.current, fileId);
+    if (!d) return false;
+    const section = sectionOf(d.key);
+    commit(d.sketches);
+    await dropQueued(d.drop);
+    if (await persist(section)) setMsg("That sketch never finished uploading — draw it again.", section);
+    return true;
+  }
+  function describe(fileId: string): string | null {
+    if (!/^[sk]_/.test(fileId)) return null;
+    const sid = `s_${fileId.slice(2)}`;
+    const key = Object.keys(o.sketches).find((k2) => o.sketches[k2]?.id === sid);
+    if (!key) return null;
+    return fileId.startsWith("s_") ? `Sketch: ${padTitle(key)}` : `Sketch strokes: ${padTitle(key)}`;
   }
 
   /* ---------- rendering ---------- */
@@ -377,11 +442,27 @@ export function useSectionSketches(o: SectionSketchesOptions): SectionSketches {
           background={ink.background}
           initial={ink.initial}
           onCancel={() => setInk(null)}
-          onDone={(result) => saveSketch(ink.key, result)}
+          onDone={(result) => onPadDone(ink, result)}
         />
       )}
+      {lostConfirm && typeof document !== "undefined" &&
+        createPortal(
+          <div className="sk-confirm-bg">
+            <div className="sk-confirm" role="alertdialog" aria-modal="true" aria-label="Replace the drawing">
+              <span>
+                <strong>{"Replace the drawing you can't see?"}</strong>{" "}
+                {`The earlier strokes of the ${padTitle(lostConfirm.key)} didn't load here — this saves only what is on the pad now.`}
+              </span>
+              <div className="sk-confirm-row">
+                <button type="button" onClick={() => answerLost(false)} autoFocus>Keep drawing</button>
+                <button type="button" className="sk-danger" onClick={() => answerLost(true)}>Replace it</button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </>
   );
 
-  return { tiles, aside, linesetSheet, fold, overlay };
+  return { tiles, aside, linesetSheet, fold, discard, describe, overlay };
 }
