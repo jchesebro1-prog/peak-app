@@ -9,6 +9,7 @@ import { productBlockInBom } from "./gaps";
 import { linePlaceholder } from "./print";
 import { clampPhotoWidth, LIST_START_MAX } from "./schema";
 import type { LineAnchor, PackageDoc, PDBlock, PDBulletList, PDInline, PDMark, PDListItem, PDOrderedList, PDParagraph, PDProductBlock, PDProductImage, PhotoAlign } from "./types";
+import { nextLastSide, resolveAutoAlign, type Side } from "./photo-sides";
 
 /**
  * Estimator Phase 5 — the package document resolved for a CLIENT output:
@@ -179,13 +180,14 @@ export function resolvePackageDoc(doc: PackageDoc, ctx: PackageDocCtx): Resolved
   const blocks: RBlock[] = [];
   // Jeff 2026-10-15 #20: an "auto" product image floats opposite the last printed side photo (the first one right),
   // so photos alternate right, left, right; an explicit Left / Right (image or product-block photo) sets the side.
-  let last: "left" | "right" | null = null;
+  // One rule with the editor's preview (photo-sides.ts).
+  let last: Side | null = null;
   for (const b of doc && Array.isArray(doc.content) ? doc.content : []) {
-    const r: RBlock | null = b?.type === "productImage" ? productImageOf(b, ctx, last === "right" ? "left" : "right") : block(b, ctx);
+    const r: RBlock | null = b?.type === "productImage" ? productImageOf(b, ctx, resolveAutoAlign("auto", last) as Side) : block(b, ctx);
     if (!r) continue;
     blocks.push(r);
     const ph: RPhoto | null = r.t === "image" || r.t === "product" ? r.photo : null;
-    if (ph && (ph.align === "left" || ph.align === "right")) last = ph.align;
+    if (ph) last = nextLastSide(last, ph.align);
   }
   return { blocks };
 }

@@ -42,6 +42,7 @@ import { resolvePackageDoc } from "../src/lib/package-doc/resolve";
 import { productImageFor } from "../src/lib/package-doc/seed";
 import { sanitizePackageDoc } from "../src/lib/package-doc/sanitize";
 import { DEFAULT_IMAGE } from "../src/lib/package-doc/schema";
+import { walkPhotoSides } from "../src/lib/package-doc/photo-sides";
 import { onlineShowsCutSheets } from "../src/lib/curtain-cut-sheets/online";
 import { acceptanceLine, cleanPoNumber, sanitizeClientResponse, responseNoteText, responseRows, cleanClientResponses, CLIENT_ACTION_COPY } from "../src/lib/estimate-output/responses";
 import { notifyPortalAcceptance, ACCEPT_SIGNER_NAME_COPY, ACCEPT_SIGNER_TITLE_COPY, ACCEPT_PO_NUMBER_COPY } from "../src/lib/portal-quotes";
@@ -133,6 +134,11 @@ export async function oct15PureChecks(ok: Ok) {
     const saneOld = sanitizePackageDoc({ type: "doc", version: 1, content: [{ type: "productImage", attrs: { sectionId: "s1", lineKey: "1", sku: "A", align: "right", width: 34 } }] });
     ok(!!saneOld && (saneOld as { content: Array<{ attrs: { align: string } }> }).content[0].attrs.align === "right", "oct15 #20: an existing image's stored Right is kept (older documents print as before)");
     ok(rd("src/components/package-doc/editor/product-image-view.tsx").includes('[["auto", "Auto"], ["left", "Left"], ["right", "Right"], ["full", "Full"]]'), "oct15 #20: the image strip offers Auto");
+    ok(JSON.stringify(walkPhotoSides(["auto", null, "auto", "right", "auto", "full", "auto"])) === JSON.stringify(["right", null, "left", "right", "left", "full", "right"]),
+      "M4: one alternation rule — Auto opposite the last printed side, an explicit side sets it, Full and photo-less blocks leave it");
+    const piv = rd("src/components/package-doc/editor/product-image-view.tsx");
+    ok(piv.includes("walkPhotoSides(items)[at]") && piv.includes("...wrapperStyle(shown),") && rd("src/lib/package-doc/resolve.ts").includes("resolveAutoAlign(\"auto\", last)"),
+      "M4: the editor previews an Auto image on the side the print gives it (the same walk as resolvePackageDoc)");
   }
   /* ---- #21 — Load system brings vendor-quoted lines, flagged "Old vendor price — re-quote" ---- */
   {
