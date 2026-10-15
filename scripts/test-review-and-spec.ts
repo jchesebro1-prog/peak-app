@@ -67292,7 +67292,7 @@ async function gridNotes9Checks(): Promise<void> {
   await serve9(true);
   ok(/-h0-c[0-9a-f]{8}-v3\.zip$/.test(got9[0]) && /-h1-c[0-9a-f]{8}-v3\.zip$/.test(got9[1]) && built9.join() === "false,true", "Grid notes #9 review: a download reads the cache under its resolved header and builds with exactly that header");
   const zsrc9 = src9("src/lib/estimate-output/package-zip-server.ts");
-  ok(zsrc9.includes("resolvePeakHeader(q.packagePeakHeader, await loadPeakHeaderDefault())") && zsrc9.includes("const frontKey = zipFrontKey(front);") && zsrc9.includes("packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader, specKey ?") && zsrc9.includes("d.build(pkg.q, pkg.rev, peakHeader, front)"),
+  ok(zsrc9.includes("resolvePeakHeader(q.packagePeakHeader, await loadPeakHeaderDefault())") && zsrc9.includes("const frontKey = zipFrontKey(front);") && zsrc9.includes("packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader, zipKeyWithSpecs(frontKey, specKey))") && zsrc9.includes("d.build(pkg.q, pkg.rev, peakHeader, front)"),
     "Grid notes #9 review: servePackageZip resolves the header once (estimate's choice ?? company default) for both the cache key and the build");
 
   // Toggle actions: a boolean or null only, the D94 toggle gated on create; the Grid menu never guesses ON.
