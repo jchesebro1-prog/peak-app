@@ -117,6 +117,7 @@ export type AssistVM = {
   ask: AskReport;
   /** Ask AI's two models in effect (env overrides applied) — the card's model hint. */
   askModels: { ask: string; askHard: string };
+  vendorPdfModels: { vendorpdf: string; vendorpdfHard: string };
   /** #335 Inbox organization — the month's filing / court / promise rows,
    *  the company-wide sender rules and the own-domain override. */
   org: {

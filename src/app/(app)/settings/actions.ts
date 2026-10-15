@@ -21,6 +21,7 @@ import { permsFor, ROLES } from "@/lib/team";
 import { ASSIST_FEATURES, cleanApiKey } from "@/lib/assist/config";
 import { clearAssistKey, getAssistEnv, saveAssistKey } from "@/lib/assist/key-store";
 import { pingAnthropicKey } from "@/lib/assist/anthropic";
+import type { AssistFeature } from "@/lib/assist/types";
 import { invalidateOrgContext } from "@/lib/inbox-org/pipeline";
 import { FREEMAIL_DOMAINS } from "@/lib/inbox-org/internal";
 import { removeSenderRule, setOwnDomainOverride } from "@/lib/stores/inbox-org";
@@ -756,7 +757,7 @@ export async function setRecordingsBetaUsersAction(userIds: string[]) {
  *  switches and the monthly spend cap. Each field is optional; omitted = untouched. */
 export async function setAssistSettingsAction(patch: {
   users?: string[];
-  features?: Partial<Record<"tasks" | "reply" | "estimate" | "file" | "promise" | "brief" | "ask", boolean>>;
+  features?: Partial<Record<AssistFeature, boolean>>;
   capUsd?: number;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   await requirePerm("manage_users");

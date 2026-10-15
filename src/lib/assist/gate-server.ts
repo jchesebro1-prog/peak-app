@@ -32,3 +32,13 @@ export async function askGateFor(userId: string, deps: Pick<RunDeps, "settings" 
   if (refused) return refused;
   return (env.ANTHROPIC_API_KEY || "").trim() ? null : ASK_NO_KEY_TEXT;
 }
+
+export const VENDOR_PDF_NO_KEY_TEXT = "Read the PDF needs the Claude API key.";
+
+/** #348 slice 5 — gateFor("vendorpdf") AND a Claude key in the effective env (Claude-only, like Ask AI). Null = allowed. */
+export async function vendorPdfGateFor(userId: string, deps: Pick<RunDeps, "settings" | "env"> = {}): Promise<string | null> {
+  const env = deps.env ?? (await getAssistEnv());
+  const refused = await gateFor("vendorpdf", userId, { settings: deps.settings, env });
+  if (refused) return refused;
+  return (env.ANTHROPIC_API_KEY || "").trim() ? null : VENDOR_PDF_NO_KEY_TEXT;
+}

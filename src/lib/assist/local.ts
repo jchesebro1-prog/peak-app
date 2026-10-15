@@ -22,6 +22,8 @@ export function localProvider(env: Env = process.env): AssistProvider {
   return {
     name: "local",
     async complete(req: ProviderRequest): Promise<ProviderResult> {
+      // #348 slice 5 — the local model can't read a PDF; refuse before any fetch (not "unreachable": no fallback).
+      if (req.document) return { ok: false, error: "The local model can't read PDFs.", model: req.model, usage: null, stopReason: null, unreachable: false };
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), timeout);
       try {

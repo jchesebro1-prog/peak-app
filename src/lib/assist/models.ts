@@ -14,6 +14,9 @@ export const DEFAULT_MODELS = {
   /** Ask AI — Haiku answers; Try harder re-asks with Sonnet. */
   ask: "claude-haiku-5-5",
   askHard: "claude-sonnet-5-5",
+  /** #348 slice 5 Read the PDF — Haiku reads; Try harder re-reads with Sonnet. */
+  vendorpdf: "claude-haiku-5-5",
+  vendorpdfHard: "claude-sonnet-5-5",
 } as const;
 export type ModelSlot = keyof typeof DEFAULT_MODELS;
 
@@ -27,6 +30,8 @@ const ENV_KEY: Record<ModelSlot, string> = {
   brief: "ASSIST_MODEL_BRIEF",
   ask: "ASSIST_MODEL_ASK",
   askHard: "ASSIST_MODEL_ASK_HARD",
+  vendorpdf: "ASSIST_MODEL_VENDORPDF",
+  vendorpdfHard: "ASSIST_MODEL_VENDORPDF_HARD",
 };
 
 /** The Mac-mini fallback always runs on Haiku (Jeff, 2026-10-12). */
@@ -60,6 +65,9 @@ export const SLOT_SETTINGS: Record<ModelSlot, SlotSettings> = {
   // (each round gets the time left), no SDK retries.
   ask: { effort: "low", maxTokens: 4000, timeoutMs: 60_000, maxRetries: 0, stream: true },
   askHard: { effort: "medium", maxTokens: 4000, timeoutMs: 90_000, maxRetries: 0, stream: true },
+  // #348 slice 5 — Read the PDF: one call inside the Estimator page's 120 s, no retries.
+  vendorpdf: { effort: "low", maxTokens: 8000, timeoutMs: 80_000, maxRetries: 0, stream: false },
+  vendorpdfHard: { effort: "medium", maxTokens: 16000, timeoutMs: 95_000, maxRetries: 0, stream: true },
 };
 
 /** Pure — the SDK per-request options for a slot. */

@@ -6,13 +6,14 @@ import { rateLimit } from "@/lib/rate-limit";
 import { createRun, monthSpend, newRunId, type AssistRun } from "@/lib/stores/assist-runs";
 import { assistGate, assistSettingsOf, monthKeyChicago } from "./config";
 import { claudeCostUsd, FALLBACK_HAIKU, modelFor, SLOT_SETTINGS, wantsFallbacks, type ModelSlot } from "./models";
+import { anthropicProvider } from "./anthropic";
 import { pickProvider } from "./provider";
 import { getAssistEnv } from "./key-store";
 import { ZERO_USAGE, type AssistFeature, type AssistProvider, type AssistSettings, type AssistStep, type Env, type ProviderRequest } from "./types";
 
 /** Per user per hour. `file` / `promise` run in background sync passes (#335);
  *  `brief` covers the brief summary and quiet-quote nudges (Rebuild has its own 3/h). */
-export const RATE_LIMITS: Record<AssistFeature, number> = { tasks: 60, reply: 60, estimate: 20, file: 600, promise: 600, brief: 60, ask: 60 };
+export const RATE_LIMITS: Record<AssistFeature, number> = { tasks: 60, reply: 60, estimate: 20, file: 600, promise: 600, brief: 60, ask: 60, vendorpdf: 30 };
 
 /** zod → JSON Schema for output_config.format; `$schema` dropped. */
 export function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
@@ -34,6 +35,8 @@ export type RunArgs<T> = {
   countRate?: boolean;
   /** Background callers (the brief's draft queue): cap this call below the slot's own timeout / retries. */
   limits?: CallLimits;
+  /** #348 slice 5 — one PDF sent to Claude as a document block. Never routed to the local model. */
+  document?: { base64: string };
 };
 /** Caps only ever shorten a slot's SLOT_SETTINGS values, never lengthen them. */
 export type CallLimits = { timeoutMs?: number; maxRetries?: number };
@@ -68,7 +71,12 @@ export async function runAssist<T = string>(args: RunArgs<T>, deps: RunDeps = {}
     return { ok: false, runId: null, error: "Too many Assist requests — try again in a bit." };
   }
 
-  const picked = deps.provider ? { primary: deps.provider, fallback: deps.fallback ?? null } : pickProvider(env);
+  // A PDF never goes to the local model: no local primary, no fallback.
+  const picked = deps.provider
+    ? { primary: deps.provider, fallback: deps.fallback ?? null }
+    : args.document
+      ? { primary: anthropicProvider(env), fallback: null }
+      : pickProvider(env);
   const requestedModel = modelFor(args.slot, env);
   const s = SLOT_SETTINGS[args.slot];
   const req: ProviderRequest = {
@@ -82,6 +90,7 @@ export async function runAssist<T = string>(args: RunArgs<T>, deps: RunDeps = {}
     timeoutMs: capAt(s.timeoutMs, args.limits?.timeoutMs, 1),
     maxRetries: capAt(s.maxRetries, args.limits?.maxRetries, 0),
     stream: s.stream,
+    ...(args.document ? { document: { mediaType: "application/pdf" as const, base64: args.document.base64 } } : {}),
   };
 
   const t0 = Date.now();
@@ -135,7 +144,9 @@ export async function runAssist<T = string>(args: RunArgs<T>, deps: RunDeps = {}
     // Claude (and the test fake) bill by billedPrice: answered → requested → dearest row. Local is $0.
     costUsd: provider.name === "local" ? 0 : claudeCostUsd(res.model, sentModel, usage),
     latencyMs,
-    inputHash: createHash("sha256").update(args.system + "\n" + args.userText).digest("hex"),
+    inputHash: createHash("sha256")
+      .update(args.system + "\n" + args.userText + (args.document ? "\n" + createHash("sha256").update(args.document.base64).digest("hex") : ""))
+      .digest("hex"),
     output: res.ok ? res.text : "",
     ok,
     error,

@@ -27,6 +27,7 @@ const FEATURES = [
   { key: "promise", label: "Promise tasks" },
   { key: "brief", label: "Daily brief" },
   { key: "ask", label: "Ask AI" },
+  { key: "vendorpdf", label: "Read the PDF" },
 ] as const;
 type FeatureKey = (typeof FEATURES)[number]["key"];
 
@@ -374,10 +375,13 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
         ))}
       </div>
       <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 4 }}>
-        Inbox organization, Promise tasks, Daily brief and Ask AI start off — turn them on for the pilot users above.
+        Inbox organization, Promise tasks, Daily brief, Ask AI and Read the PDF start off — turn them on for the pilot users above.
       </div>
       <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 2 }}>
         Ask AI (in ⌘K search) answers with {assist.askModels.ask}; Try harder re-asks with {assist.askModels.askHard}. It needs a Claude API key, reads only what each person can open, and changes nothing until they confirm a card.
+      </div>
+      <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 2 }}>
+        Read the PDF (vendor quote form) reads with {assist.vendorPdfModels.vendorpdf}; Try harder with {assist.vendorPdfModels.vendorpdfHard}. It needs a Claude API key and only fills the form — nothing saves until the estimate is saved.
       </div>
 
       {/* Monthly cap */}

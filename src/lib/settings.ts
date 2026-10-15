@@ -178,8 +178,8 @@ export type AppSettingsData = {
   /** #334 Assist pilot (Settings → Beta): allow-listed user ids. Empty = NOBODY (unlike recordingsBetaUsers). Read via assistSettingsOf(). */
   assistUsers?: string[];
   /** #334: per-feature switches; a missing key counts as on, except the
-   *  opt-in ones (file, promise, brief, ask — OPT_IN_FEATURES), which count as off. */
-  assistFeatures?: { tasks?: boolean; reply?: boolean; estimate?: boolean; file?: boolean; promise?: boolean; brief?: boolean; ask?: boolean };
+   *  opt-in ones (file, promise, brief, ask, vendorpdf — OPT_IN_FEATURES), which count as off. */
+  assistFeatures?: { tasks?: boolean; reply?: boolean; estimate?: boolean; file?: boolean; promise?: boolean; brief?: boolean; ask?: boolean; vendorpdf?: boolean };
   /** #334: monthly API spend cap in dollars (default 200). */
   assistMonthlyCapUsd?: number;
   /** Outcome of the last nightly archive pass (lib/krisp/archive.ts) — shown

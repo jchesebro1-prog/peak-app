@@ -77,6 +77,7 @@ export async function loadAssistVM(settings: AppSettingsData, monthParam?: strin
     brief: briefReport(runs, await loadBriefBuilds(month)),
     ask: askReport(runs),
     askModels: { ask: modelFor("ask", env), askHard: modelFor("askHard", env) },
+    vendorPdfModels: { vendorpdf: modelFor("vendorpdf", env), vendorpdfHard: modelFor("vendorpdfHard", env) },
     org,
   };
 }
