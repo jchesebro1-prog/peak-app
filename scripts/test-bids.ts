@@ -1144,9 +1144,12 @@ export async function bidFollowupChecks(ok: Ok) {
   ok(addedAddendumNos(undefined, [A(1)]).join() === "1", "followup: the first addendum on a bid with none counts");
   ok(addendumMovesToDraft("sent", [2]) && !addendumMovesToDraft("sent", []) && !addendumMovesToDraft("draft", [2]) && !addendumMovesToDraft("won", [2]),
     "followup: only a sent estimate with an added addendum moves to Draft");
-  ok(addendumDraftNote([2]) === "Addendum 2 added — the estimate is back in Draft. Send revision to bidders when it's ready." && addendumDraftNote([2, 3]).startsWith("Addenda 2, 3 added"),
+  ok(addendumDraftNote([2]) === "Addendum 2 added — the estimate is back in Draft. Send revision to bidders when it's ready. The customer's and bidders' links show it as being revised until then." && addendumDraftNote([2, 3]).startsWith("Addenda 2, 3 added"),
     "followup: the Bid chip note");
   const chip = readFileSync(join(process.cwd(), "src/app/(app)/estimator/bid-chip.tsx"), "utf8");
+  ok(chip.includes('postChanged("quote", quoteId)') && chip.indexOf('postChanged("quote", quoteId)') > chip.indexOf("onSync?.(r.sync)"), "followup: a status sync posts the LiveSync change so other windows refresh");
+  const bidsStore = readFileSync(join(process.cwd(), "src/lib/stores/bids.ts"), "utf8");
+  ok(bidsStore.includes("statusMoveFailed = true") && bidsStore.includes("if (statusMoveFailed) return") && bidsStore.includes("Couldn't save the bid details — try again."), "followup: only a failed status move reports the status message; other failures are neutral");
   ok(chip.includes("setNotice(r.note)") && chip.includes("onSync?.(r.sync)") && chip.includes('source: "chip"'), "followup: the Bid chip shows the note, syncs the header and tells the Bidders card");
 }
 

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { bidPanelAction, setBidDetailsAction, type BidDetailsResult } from "./bid-actions";
+import { postChanged } from "@/lib/popout/channel";
 import type { BidAddendum } from "@/lib/parties/bids";
 import type { BidPanelVM } from "@/lib/parties/bid-vm";
 
@@ -166,7 +167,10 @@ export default function BidChip({
         seq.current++; // an older in-flight load must not overwrite this fresher panel
         lastLoaded.current = Date.now();
         setPanel(r.panel);
-        if (r.sync) onSync?.(r.sync);
+        if (r.sync) {
+          onSync?.(r.sync);
+          postChanged("quote", quoteId); // the status moved — other windows refresh (as changeStatus does)
+        }
         // The Bidders card (Send & track) reloads its plan: "Send revision to bidders" now applies.
         window.dispatchEvent(new CustomEvent("peak:bid-changed", { detail: { quoteId, source: "chip" } }));
         if (r.note) {

@@ -72,7 +72,7 @@ export function addendumMovesToDraft(status: string, added: ReadonlyArray<number
 /** The note the Bid chip shows after a save that moved the estimate back to Draft. */
 export function addendumDraftNote(nos: ReadonlyArray<number>): string {
   const which = nos.length === 1 ? `Addendum ${nos[0]}` : `Addenda ${nos.join(", ")}`;
-  return `${which} added — the estimate is back in Draft. Send revision to bidders when it's ready.`;
+  return `${which} added — the estimate is back in Draft. Send revision to bidders when it's ready. The customer's and bidders' links show it as being revised until then.`;
 }
 
 export function sanitizeBidSiteUrl(raw: unknown): { ok: true; value: string | null } | { ok: false; error: string } {

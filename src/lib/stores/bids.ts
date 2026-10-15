@@ -37,6 +37,7 @@ export async function setBidDetails(
   const clean = sanitizeBidDetails(raw);
   if (!clean.ok) return clean;
   const { dueAt, addenda } = clean.value;
+  let statusMoveFailed = false; // only a failed setStatus reports the status-change message
   try {
     return await withQuoteRowLock(quoteId, async () => {
       const q = await getQuote(quoteId);
@@ -50,11 +51,18 @@ export async function setBidDetails(
       }));
       if (!saved?.bid) return { ok: false as const, error: "That estimate wasn't found." };
       if (!addendumMovesToDraft(q.status, added)) return { ok: true as const, bid: saved.bid };
-      await setStatus(quoteId, "draft", by ?? null);
+      try {
+        await setStatus(quoteId, "draft", by ?? null);
+      } catch (e) {
+        statusMoveFailed = true;
+        throw e; // rethrown so the whole lock transaction rolls back
+      }
       return { ok: true as const, bid: saved.bid, backToDraft: added };
     });
   } catch (e) {
-    return { ok: false, error: statusFailureMessage(e, `bids setBidDetails(${quoteId}): moving back to draft failed`) };
+    if (statusMoveFailed) return { ok: false, error: statusFailureMessage(e, `bids setBidDetails(${quoteId}): moving back to draft failed`) };
+    console.error(`bids setBidDetails(${quoteId}) failed`, e);
+    return { ok: false, error: "Couldn't save the bid details — try again." };
   }
 }
 

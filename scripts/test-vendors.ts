@@ -126,6 +126,9 @@ export async function vendorChecks(ok: Ok) {
   const broker = readFileSync("src/lib/vendor-quotes/thread-attachment-server.ts", "utf8");
   const seeAt = broker.indexOf("canSeeThread(t, viewer)");
   ok(seeAt > 0 && seeAt < broker.indexOf("dataUrlToBytes(") && seeAt < broker.indexOf("fetchMessageAttachment("), "gmail attachments: the broker checks canSeeThread before reading any bytes");
+  const copyBody = broker.slice(broker.indexOf("export async function copyToVendorQuoteBlob("));
+  ok(copyBody.indexOf("putBlob(") > 0 && copyBody.indexOf("ownsVendorQuoteBlobPath(stored.pathname, vqId)") > copyBody.indexOf("putBlob(") && copyBody.indexOf("throw new Error(", copyBody.indexOf("ownsVendorQuoteBlobPath(")) > 0,
+    "broker copy: the stored pathname is asserted to be the record's own before it is returned");
   const bridge = readFileSync("src/lib/gmail/bridge.ts", "utf8");
   const recBody = bridge.slice(bridge.indexOf("export async function recordMessage("), bridge.indexOf("// attach to an existing thread"));
   ok(recBody.includes("attsListed: true") && recBody.includes("gmailPartId: a.partId"), "gmail attachments: recordMessage stores attachments by reference and stamps attsListed");

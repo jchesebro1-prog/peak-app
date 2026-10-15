@@ -3,7 +3,7 @@
    else, and a missing thread answers exactly like an invisible one. Bytes come from the stored data-URL, Gmail (by the
    stored part id — never stored on import), or the quote / assessment PDF store. Server-only. */
 import { dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
-import { VENDOR_QUOTE_BLOB_PREFIX, VENDOR_QUOTE_ID_RE } from "@/lib/vendor-quote-file";
+import { VENDOR_QUOTE_BLOB_PREFIX, VENDOR_QUOTE_ID_RE, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
 import { gmailEnabled } from "@/lib/gmail/config";
 import { readPdfForThread } from "@/lib/thread-pdf-read";
 import { canSeeThread, get as getThread, type CommAttachment, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
@@ -78,5 +78,7 @@ export async function readThreadAttachment(
 export async function copyToVendorQuoteBlob(vqId: string, name: string, mime: string, bytes: Buffer): Promise<{ blobPath: string }> {
   if (!VENDOR_QUOTE_ID_RE.test(vqId)) throw new Error("Bad vendor quote id.");
   const stored = await putBlob(`${VENDOR_QUOTE_BLOB_PREFIX}${vqId}-${safeName(name || "quote.pdf")}`, bytes, mime || "application/pdf");
+  // A name that slipped a ".." (or any shape the owner check refuses) fails here, not later at read time.
+  if (!ownsVendorQuoteBlobPath(stored.pathname, vqId)) throw new Error("The stored file path isn't a valid vendor quote path.");
   return { blobPath: stored.pathname };
 }
