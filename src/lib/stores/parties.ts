@@ -8,7 +8,7 @@ import type { LeadRecord } from "@/lib/stores/leads";
 import type { ProjectRecord } from "@/lib/stores/projects";
 import {
   carriesTo, normalizePartyInput, ownerConflict, partyInputProblem, sortParties,
-  type Party, type PartyInput, type PartyRecordType, type PartyRole,
+  type BidderState, type Party, type PartyInput, type PartyRecordType, type PartyRole,
 } from "@/lib/parties/rules";
 
 /**
@@ -193,4 +193,12 @@ export async function copyParties(
     n++;
   }
   return n;
+}
+
+/** #348 slice 2a — the ONLY writer of `Party.bid` (bid state on a quote GC/EC row). */
+export async function setPartyBid(id: string, bid: BidderState | null): Promise<Party | null> {
+  return patchDoc<Party>("record_parties", id, (d) => {
+    d.bid = bid;
+    d.updatedAt = Date.now();
+  });
 }

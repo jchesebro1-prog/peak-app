@@ -211,6 +211,8 @@ export type ProjectRecord = {
   name: string;
   customer: string;
   customerId: string | null;
+  /** #348 — the awarded bidder's company (the GC/EC Peak contracts with); the customer stays the owner. */
+  billToCompanyId?: string | null;
   locationId: string | null;
   owner: string;
   /** Estimator bonuses — the 5% package-bonus cost carried from the won quote's
@@ -787,6 +789,9 @@ export async function createProjectFromQuote(
       await withSavepoint(async () => {
         const { copyParties } = await import("@/lib/stores/parties");
         await copyParties({ type: "quote", id: quoteId }, { type: "project", id: p.id }, q.owner || DEFAULT_ACTOR);
+        const awardedId = (q.bid as { awardedPartyId?: string | null } | null | undefined)?.awardedPartyId;
+        const awarded = awardedId ? await getDoc<{ id: string; companyId?: string }>("record_parties", awardedId) : null;
+        if (awarded?.companyId) await patchDoc<ProjectRecord>("projects", p.id, (d) => { d.billToCompanyId = awarded.companyId!; });
       });
     } catch (e) {
       console.error("projects.createProjectFromQuote: copying parties failed", quoteId, e);

@@ -6,6 +6,17 @@ import {
   markSubmittedState, currentRev, needsRev, awardPlan, undoAwardPlan, canAward, canUndoAward, bidderStatusText, bidDueText, bidDueDays, isOpenBid,
 } from "../src/lib/parties/bids";
 import type { BidderState } from "../src/lib/parties/rules";
+import { like } from "drizzle-orm";
+import { getDb } from "../src/db";
+import { companies, contacts as contactsTable } from "../src/db/schema";
+import { saveCompany } from "../src/lib/identity/companies";
+import { saveContact } from "../src/lib/identity/contacts";
+import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
+import { buildQuote, get as getQuote, setStatus } from "../src/lib/stores/quotes";
+import { getProjectByQuote } from "../src/lib/stores/projects";
+import { autoTaskId } from "../src/lib/stores/tasks";
+import { listFor } from "../src/lib/stores/parties";
+import { addBidder, awardBid, listBidders, markSubmitted, setBidDetails, undoAward, updateBidder } from "../src/lib/stores/bids";
 
 const T1 = Date.UTC(2026, 9, 1);
 const B = (over: Partial<BidderState> = {}): BidderState => ({ ...newBidderState("email"), ...over });
@@ -128,8 +139,100 @@ export async function bidChecks(ok: Ok) {
   ok(frozen.gcBidNo === "1" && frozen.submitVia === "email" && patched.gcBidNo === undefined && patched.submitVia === "website", "bids: applyBidderPatch doesn't mutate its input");
 }
 
+const BID_FIX = { gc1: fixtureId(348, "bgc1"), gc2: fixtureId(348, "bgc2"), own: fixtureId(348, "bown"), ct1: fixtureId(348, "bct1") };
+async function dropBidIdentityFixtures() {
+  const db = await getDb();
+  await db.delete(contactsTable).where(like(contactsTable.id, "TEST348:b%"));
+  await db.delete(companies).where(like(companies.id, "TEST348:b%"));
+}
+
 export async function bidDbChecks(ok: Ok) {
-  void ok; // Task 2 fills this in.
+  const { gc1, gc2, own, ct1 } = BID_FIX;
+  const q = fixtureId(348, "bq"), qWon = fixtureId(348, "bqwon"), lead = fixtureId(348, "blead");
+  const regAll = async () => {
+    for (const [t, id] of [["quote", q], ["quote", qWon], ["lead", lead]] as const) for (const p of await listFor(t, id)) registerFixture("record_parties", p.id);
+    const proj = await getProjectByQuote(q).catch(() => null);
+    if (proj) {
+      registerFixture("projects", proj.id);
+      registerFixture("tasks", autoTaskId(`item16:sold:${proj.id}`));
+      for (const p of await listFor("project", proj.id)) registerFixture("record_parties", p.id);
+    }
+  };
+  try {
+    await dropBidIdentityFixtures();
+    await saveCompany({ id: gc1, name: "Bid GC One", type: "customer", lifecycle: "active", deleted: false });
+    await saveCompany({ id: gc2, name: "Bid GC Two", type: "customer", lifecycle: "active", deleted: false });
+    await saveCompany({ id: own, name: "Bid Owner", type: "customer", lifecycle: "active", deleted: false });
+    await saveContact({ id: ct1, firstName: "Gee", lastName: "Ceeone", homeCompanyId: gc1 });
+    const NOW = Date.now();
+    await createFixture("leads", { id: lead, org: "Bid lead", contact: "Pat", stage: "new", source: "web", customerId: own, value: 0, activities: [], createdAt: NOW, updatedAt: NOW, lastActivityAt: NOW } as never);
+    await createFixture("quotes", buildQuote(q, { name: "Bid quote", customer: "Bid Owner", customerId: own, value: 1000, leadId: lead } as never, "system", null, NOW) as never);
+    await createFixture("quotes", { ...buildQuote(qWon, { name: "Bid won", customer: "Bid Owner", customerId: own, value: 1000 }, "system", null, NOW), status: "won" } as never);
+
+    // details
+    const T = Date.UTC(2026, 9, 28, 19, 0), T0 = Date.UTC(2026, 9, 20, 15, 0);
+    const d = await setBidDetails(q, { dueAt: T, addenda: [{ no: 1, receivedAt: T0, note: "a" }] });
+    const q1 = await getQuote(q);
+    ok(d.ok && q1?.bid?.dueAt === T && q1.bid.addenda.length === 1 && q1.bid.awardedPartyId === null, "bids db: bid details saved on the quote");
+    const bad = await setBidDetails(q, { dueAt: -1, addenda: [] });
+    ok(!bad.ok && (await getQuote(q))?.bid?.dueAt === T, "bids db: bad details refused and nothing written");
+    ok(!(await setBidDetails(fixtureId(348, "bmissing"), { dueAt: null, addenda: [] })).ok, "bids db: details on a missing estimate refused");
+
+    // bidders
+    const a1 = await addBidder({ quoteId: q, companyId: gc1, contactId: ct1, role: "gc" }, "u");
+    ok(a1.ok && a1.party.bid?.result === "pending" && a1.party.bid.submitVia === "email" && a1.party.contactId === ct1, "bids db: add a GC bidder (pending, email)");
+    const a1b = await addBidder({ quoteId: q, companyId: gc1, role: "gc" }, "u");
+    ok(a1.ok && a1b.ok && a1b.party.id === a1.party.id && (await listBidders(q)).length === 1, "bids db: adding the same bidder again keeps one row");
+    const a2 = await addBidder({ quoteId: q, companyId: gc2, role: "gc", submitVia: "website" }, "u");
+    ok(a2.ok && a2.party.bid?.submitVia === "website", "bids db: a bidder can submit via website");
+    await regAll();
+    const onQuote = await listFor("quote", q), onLead = await listFor("lead", lead);
+    ok(onQuote.filter((p) => p.role === "owner").length === 1 && onQuote.find((p) => p.role === "owner")?.companyId === own, "bids db: the owner party was added to the estimate");
+    ok(onLead.filter((p) => p.role === "gc").length === 2 && onLead.every((p) => p.bid === null), "bids db: the lead lists both GCs, without bid state");
+    const arch = await addBidder({ quoteId: q, companyId: gc1, role: "architect" as never }, "u");
+    ok(!arch.ok && arch.error === "Bidders are GCs or ECs.", "bids db: only GCs or ECs bid");
+    const closed = await addBidder({ quoteId: qWon, companyId: gc1, role: "gc" }, "u");
+    ok(!closed.ok && closed.error === "This estimate is closed.", "bids db: a won estimate takes no new bidders");
+
+    if (!a1.ok || !a2.ok) throw new Error("bidders missing");
+    const g1 = a1.party.id, g2 = a2.party.id;
+    const up = await updateBidder(g2, { gcBidNo: "24-117", bidSiteUrl: "https://bc.test/x" });
+    ok(up.ok && up.party.bid?.gcBidNo === "24-117" && up.party.bid.bidSiteUrl === "https://bc.test/x", "bids db: bidder details stored");
+    ok(!(await updateBidder(g2, { result: "awarded" })).ok, "bids db: awarded can't be typed in");
+    const ms = await markSubmitted(g2, "u", "CONF-1");
+    ok(ms.ok && ms.party.bid?.revSent === 1 && ms.party.bid.confirmation === "CONF-1" && ms.party.bid.sentBy === "u", "bids db: mark submitted stamps rev, confirmation, sender");
+
+    // award
+    const before = await getQuote(q);
+    const aw = await awardBid(q, g1);
+    const after = await getQuote(q);
+    const bidders = await listBidders(q);
+    ok(aw.ok && after?.bid?.awardedPartyId === g1, "bids db: award stamps the quote");
+    ok(bidders.find((b) => b.id === g1)?.bid.result === "awarded" && bidders.find((b) => b.id === g2)?.bid.result === "lost" && bidders.find((b) => b.id === g2)?.bid.lostByAward === true, "bids db: winner awarded, the rest lost by award");
+    ok(after?.customerId === before?.customerId && after?.pricingTier === before?.pricingTier && after?.tierMargin === before?.tierMargin && after?.customer === before?.customer, "bids db: award never changes the customer or tier");
+    const again = await awardBid(q, g1);
+    ok(!again.ok && /already awarded/.test(again.error), "bids db: a second award is refused");
+    const wd = await updateBidder(g1, { result: "withdrew" });
+    ok(!wd.ok && wd.error === "Undo the award first.", "bids db: an awarded bidder can't be edited to withdrew");
+
+    // undo
+    const un = await undoAward(q);
+    const afterUndo = await listBidders(q);
+    ok(un.ok && afterUndo.every((b) => b.bid.result === "pending" && !("lostByAward" in b.bid)) && (await getQuote(q))?.bid?.awardedPartyId === null, "bids db: undo returns every bidder to pending");
+
+    // won → project Bill to, undo refused
+    ok((await awardBid(q, g1)).ok, "bids db: award again");
+    await setStatus(q, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    await regAll();
+    const proj = await getProjectByQuote(q);
+    ok(!!proj && proj.billToCompanyId === gc1 && proj.customerId === own, "bids db: the project bills the awarded GC; the customer stays the owner");
+    const noUndo = await undoAward(q);
+    ok(!noUndo.ok && noUndo.error === "The estimate is won — the award can't be undone.", "bids db: a won estimate's award can't be undone");
+  } finally {
+    try { await regAll(); } catch {}
+    await dropFixtures(348);
+    await dropBidIdentityFixtures();
+  }
 }
 
 if (process.argv[1]?.endsWith("test-bids.ts")) {

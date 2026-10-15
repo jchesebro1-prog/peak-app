@@ -1,3 +1,4 @@
+import { EMPTY_BID, type QuoteBid } from "@/lib/parties/bids";
 import { checkSelectionPatch, DEFAULT_PACKAGE_SELECTION, mergePackageSelection, normalizePackageSelection, type PackageSelection } from "@/lib/estimate-output/package-selection";
 import {
   getDoc,
@@ -380,6 +381,9 @@ export type Quote = {
    *  Branding). Written only by setPackagePeakHeader (update() drops it);
    *  never content, never snapshotted — read when a package is built. */
   packagePeakHeader?: boolean | null;
+  /** #348 slice 2a — bid details (due date, addenda, the awarded bidder's party id). Written only by
+   *  patchQuoteBid under the row lock; update() drops it. Content (prints on the estimate in slice 2b). */
+  bid?: QuoteBid | null;
   /** Estimator Phase 3 — the comms threads this estimate was emailed on
    *  (spec §10.1 step 6), oldest first, ≤ 50, one per threadId. Written only
    *  by recordEstimateEmail under the row lock; update() drops it so an
@@ -480,6 +484,8 @@ export const QUOTE_CONTENT_FIELDS = [
   "pdfOptions",
   // #245: a firm portal quote prints "Valid until <date>".
   "portalFirm",
+  // #348: the bid's due date / addenda / awarded bidder print in slice 2b.
+  "bid",
 ] as const;
 
 /** A comparable key of what the customer document shows. Pure. */
@@ -908,6 +914,8 @@ export async function update(
     delete clean.estimatorBonusSplit;
     // Grid notes #9: the package header choice is setPackagePeakHeader's alone.
     delete clean.packagePeakHeader;
+    // #348: bid details are patchQuoteBid's alone.
+    delete clean.bid;
     // Phase 3: the emailed-thread list is recordEstimateEmail's alone.
     delete clean.estimateEmails;
     // #333 review (B): the package selection is setPackageSelection's alone — a
@@ -2353,6 +2361,15 @@ export async function setPackagePeakHeader(id: string, on: boolean | null): Prom
   return patchQuote(id, (doc) => {
     if (typeof on === "boolean") doc.packagePeakHeader = on;
     else delete doc.packagePeakHeader;
+  });
+}
+
+/** #348 slice 2a — the ONLY writer of `Quote.bid`. `mutate` gets the current bid (EMPTY_BID when none) and
+ *  returns the next one; runs under the row lock. Bumps updatedAt: the due date and addenda print. */
+export async function patchQuoteBid(id: string, mutate: (bid: QuoteBid) => QuoteBid): Promise<Quote | null> {
+  return patchQuote(id, (doc) => {
+    doc.bid = mutate(doc.bid ? { ...doc.bid, addenda: [...doc.bid.addenda] } : { ...EMPTY_BID, addenda: [] });
+    doc.updatedAt = Date.now();
   });
 }
 
