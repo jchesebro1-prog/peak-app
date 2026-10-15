@@ -4,6 +4,8 @@
  * `window.speechSynthesis` by the card. Pure, client-safe.
  */
 import { chicagoParts } from "@/lib/triage/clock";
+import type { TriageSource } from "@/lib/triage/types";
+import { BRIEF_BLOCK_TITLE, blockOfKey, rowSource, rowsByBlock, type BriefBlockId } from "./blocks";
 import { stripLinksAndTags } from "./sanitize";
 import type { Brief } from "./types";
 
@@ -40,7 +42,9 @@ export function spokenDuration(totalMin: number): string {
 }
 
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
-const ORDINAL = ["First", "Second", "Third", "Fourth", "Fifth"];
+
+/** "One customer is" / "Three customers are". */
+const are = (count: number, one: string, many: string) => `${cap1(spellNumber(count))} ${count === 1 ? `${one} is` : `${many} are`}`;
 
 /** Text for the voice: links read as their text, HTML tags and `[ ] < >` vanish, symbols become pauses, markdown marks vanish, every sentence ends with a stop. */
 function speakable(raw: string): string {
@@ -55,13 +59,21 @@ function speakable(raw: string): string {
   return /[.!?]$/.test(s) ? s : `${s}.`;
 }
 
+/** A visible snapshot row, as the card has it (only what Listen reads). */
+export type SpeechRow = { key: string; source?: unknown; title: string };
+
 /**
- * The brief as one paragraph of short sentences. `titles` maps a
- * Do-these-first key to its row title (from the snapshot); an item with no
- * title reads its why, and one with neither is skipped — a raw key is never
- * read aloud.
+ * The brief as one paragraph of short sentences: the greeting, the
+ * afternoon's since line, the summary, then the card's three blocks in its
+ * order — Emails, Estimates, Tasks (`blocks.ts`). Each block opens with its
+ * ★ picks ("Start with …", "Then …": the row title, then the why), then its
+ * counts in the card's order; a block with nothing to say is skipped.
+ * `rows` are the slot's visible rows (null = the snapshot couldn't be read:
+ * the picks are read by their why, and no row counts are given). A pick
+ * whose row is gone is skipped, as the card drops it; an item with no title
+ * and no why is skipped — a raw key is never read aloud.
  */
-export function briefSpeech(brief: Brief, titles: Readonly<Record<string, string>> = {}): string {
+export function briefSpeech(brief: Brief, rows: readonly SpeechRow[] | null = null): string {
   const out: string[] = [];
   const morning = brief.slot === "morning";
   out.push(morning ? "Good morning. Here is your morning brief." : "Good afternoon. Here is your afternoon brief.");
@@ -72,34 +84,63 @@ export function briefSpeech(brief: Brief, titles: Readonly<Record<string, string
   const summary = speakable(brief.summary);
   if (summary) out.push(summary);
 
-  const items: string[] = [];
+  const titleOf = new Map((rows ?? []).map((r) => [r.key, r.title]));
+  const grouped = rowsByBlock(rows ?? []);
+  const count = (id: BriefBlockId, ...sources: TriageSource[]) => grouped[id].filter((r) => sources.includes(rowSource(r)!)).length;
+
+  const picks: Record<BriefBlockId, string[]> = { emails: [], estimates: [], tasks: [] };
   for (const d of brief.doFirst) {
-    const title = speakable(titles[d.key] || "");
+    const block = blockOfKey(d.key);
+    if (!block) continue;
+    if (rows && !titleOf.has(d.key)) continue;
+    const title = speakable(titleOf.get(d.key) || "");
     const why = speakable(d.why || "");
     if (!title && !why) continue;
-    if (items.length >= ORDINAL.length) break;
-    items.push(`${ORDINAL[items.length]}, ${title || why}${title && why ? ` ${why}` : ""}`);
+    picks[block].push(`${picks[block].length ? "Then" : "Start with"} ${title || why}${title && why ? ` ${why}` : ""}`);
   }
-  if (items.length) out.push(`Do these first. ${items.join(" ")}`);
 
-  const t = brief.today;
-  if (t.visits > 0) {
-    out.push(`You have ${unit(t.visits, "site visit", "site visits")} today.`);
-    if (t.firstVisitAt) out.push(`${t.visits === 1 ? "It is" : "The first is"} at ${spokenTime(t.firstVisitAt)}`);
-  }
-  if (t.driveMin && t.driveMin > 0) out.push(`About ${spokenDuration(t.driveMin)} of driving.`);
-  if (t.tasksDue > 0) out.push(`${cap1(spellNumber(t.tasksDue))} ${t.tasksDue === 1 ? "task is" : "tasks are"} on today's plan.`);
-  if (brief.approvals > 0) out.push(`${cap1(spellNumber(brief.approvals))} ${brief.approvals === 1 ? "quote is" : "quotes are"} waiting on your approval.`);
-  if (brief.quiet.length > 0) out.push(`${cap1(spellNumber(brief.quiet.length))} sent ${brief.quiet.length === 1 ? "quote has" : "quotes have"} gone quiet.`);
+  const say = (id: BriefBlockId, lines: string[]) => {
+    const all = [...picks[id], ...lines];
+    if (all.length) out.push(`${BRIEF_BLOCK_TITLE[id]}. ${all.join(" ")}`);
+  };
+
+  // Emails — customers waiting on a reply, then Organize.
+  const emails: string[] = [];
+  const waiting = count("emails", "email");
+  if (waiting > 0) emails.push(`${are(waiting, "customer", "customers")} waiting on a reply.`);
   const o = brief.organize;
   if (o.toFile > 0) {
     const strong = o.strong > 0 ? `, ${spellNumber(o.strong)} of them strong` : "";
     const noise = o.noise > 0 ? `, and ${spellNumber(o.noise)} noise` : "";
-    out.push(`${cap1(unit(o.toFile, "thread", "threads"))} to file${strong}${noise}.`);
+    emails.push(`${cap1(unit(o.toFile, "thread", "threads"))} to file${strong}${noise}.`);
   } else if (o.noise > 0) {
-    out.push(`${cap1(unit(o.noise, "noise thread", "noise threads"))} in the inbox.`);
+    emails.push(`${cap1(unit(o.noise, "noise thread", "noise threads"))} in the inbox.`);
   }
+  say("emails", emails);
+
+  // Estimates — approvals, quiet quotes, leads ready to quote, renewals.
+  const est: string[] = [];
+  if (brief.approvals > 0) est.push(`${are(brief.approvals, "quote", "quotes")} waiting on your approval.`);
+  if (brief.quiet.length > 0) est.push(`${cap1(spellNumber(brief.quiet.length))} sent ${brief.quiet.length === 1 ? "quote has" : "quotes have"} gone quiet.`);
+  const leads = count("estimates", "lead");
+  if (leads > 0) est.push(`${are(leads, "lead", "leads")} ready to quote.`);
+  const renewals = count("estimates", "renewal");
+  if (renewals > 0) est.push(`${are(renewals, "renewal", "renewals")} coming up.`);
+  say("estimates", est);
+
+  // Tasks — the list's tasks, promise-tasks, then today's plan.
+  const tasks: string[] = [];
+  const onList = count("tasks", "task", "assignment", "call");
+  if (onList > 0) tasks.push(`${are(onList, "task", "tasks")} on your list.`);
   const p = brief.newPromiseTasks.length;
-  if (p > 0) out.push(`${cap1(spellNumber(p))} new ${p === 1 ? "task from a promise" : "tasks from promises"}.`);
+  if (p > 0) tasks.push(`${cap1(spellNumber(p))} new ${p === 1 ? "task from a promise" : "tasks from promises"}.`);
+  const t = brief.today;
+  if (t.visits > 0) {
+    tasks.push(`You have ${unit(t.visits, "site visit", "site visits")} today.`);
+    if (t.firstVisitAt) tasks.push(`${t.visits === 1 ? "It is" : "The first is"} at ${spokenTime(t.firstVisitAt)}`); // "a.m." / "p.m." ends the sentence
+  }
+  if (t.driveMin && t.driveMin > 0) tasks.push(`About ${spokenDuration(t.driveMin)} of driving.`);
+  if (t.tasksDue > 0) tasks.push(`${cap1(spellNumber(t.tasksDue))} ${t.tasksDue === 1 ? "task is" : "tasks are"} on today's plan.`);
+  say("tasks", tasks);
   return out.join(" ");
 }
