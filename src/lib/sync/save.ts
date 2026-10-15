@@ -40,8 +40,9 @@ export async function saveThroughOutbox(opts: {
   doc: Record<string, unknown>;
   action: () => Promise<void | ServerSaveResult>;
   /** After a successful online save: true keeps this record's existing outbox entry (the save didn't carry all of
-   *  it) for the sync push instead of clearing it. Omitted, the entry is cleared as before. */
-  keepOutbox?: (entryDoc: Record<string, unknown>) => boolean;
+   *  it) for the sync push instead of clearing it. Omitted, the entry is cleared as before. `state` is the entry's
+   *  outbox state (#344 C-final F: `error` = parked). */
+  keepOutbox?: (entryDoc: Record<string, unknown>, state?: "pending" | "error") => boolean;
   /** #344 C-final B: an online action that hasn't answered within this many ms is treated like a lost connection —
    *  the doc goes to the outbox (the late answer, if any, is ignored). Omitted = no limit. */
   timeoutMs?: number;

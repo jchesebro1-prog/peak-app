@@ -36,7 +36,7 @@ import Venue3D from "./venue-3d";
 import SuggestEstimate from "@/components/assist/suggest-estimate";
 import { saveThroughOutbox } from "@/lib/sync/save";
 import { SAVE_ACTION_TIMEOUT_MS } from "@/lib/sync/save-timeout";
-import { holdsUnsentFieldEdits, newEditorId, pendingStageSettled, type SaveStamp } from "@/lib/field-files/save-stamp";
+import { keepOutboxAfterFileSave, newEditorId, pendingStageSettled, type SaveStamp } from "@/lib/field-files/save-stamp";
 import { RecordingsStrip, type RecordingStripItem } from "@/components/recordings/recordings-strip";
 import { FromRecordingPanel, type FromRecordingPanelData } from "@/components/recordings/from-recording-panel";
 import type { Draft, EditorCustomer, EditorMeta, FieldDef, SectionDef } from "./sections/types";
@@ -327,11 +327,18 @@ export default function SurveyEditor({
    *  later. An editor that hasn't moved the stage never sends one. */
   const pendingStage = useRef<SurveyStage | null>(null);
   const pendingFrom = useRef<SurveyStage | null>(null);
+  /** #344 C-final F: every target this editor has sent while moves were pending and not had confirmed. A refresh that
+   *  shows one of them is our own earlier move landing late (Onsite → Completed timed out, then back → Onsite: move 1
+   *  lands, the server shows Completed) — never "a later stage set elsewhere", so it doesn't settle the newer move.
+   *  Cleared whenever the pending stage clears. A new move starts from the pending target (else the record's stage). */
+  const unconfirmedTargets = useRef<Set<SurveyStage>>(new Set());
   /** #344 C-final E: the stamp seq of the save whose outbox entry holds field edits no online save has carried yet (a
    *  Save changes / stage move that went to the outbox, or a later save whose whole-doc copy replaced that entry), else
-   *  null. A file-only save that lands online keeps only that entry (`holdsUnsentFieldEdits`). Cleared when a field save
-   *  or stage move lands online (it carried the whole draft). The engine doesn't report an entry's push to the editor;
-   *  a stale value is harmless — the predicate matches only an entry stamped with that exact seq by this mount. */
+   *  null. A file-only save that lands online keeps that entry, plus any other mount's / tab's entry carrying field
+   *  edits and any parked one (`keepOutboxAfterFileSave`, #344 C-final F). Cleared when a field save or stage move lands
+   *  online (it carried the whole draft). The engine doesn't report an entry's push to the editor, so a value can
+   *  outlive its entry; a later queued photo save then takes it over and that copy (already-saved fields) is kept by
+   *  the next file-only success — it pushes through the rev check like any queued whole doc. */
   const unsentFieldSeq = useRef<number | null>(null);
   useEffect(() => {
     lastSaved.current = adoptedBase;
@@ -347,9 +354,10 @@ export default function SurveyEditor({
   // #344 C-final E: a refreshed record shows the server confirmed this editor's pending stage move, or moved past it
   // elsewhere — stop re-sending it
   useEffect(() => {
-    if (pendingStageSettled(pendingStage.current, pendingFrom.current, initial.stage)) {
+    if (pendingStageSettled(pendingStage.current, pendingFrom.current, initial.stage, unconfirmedTargets.current)) {
       pendingStage.current = null;
       pendingFrom.current = null;
+      unconfirmedTargets.current.clear();
     }
   }, [initial]);
   useEffect(() => {
@@ -863,6 +871,7 @@ export default function SurveyEditor({
           if (carried !== null && pendingStage.current === carried) {
             pendingStage.current = null;
             pendingFrom.current = null;
+            unconfirmedTargets.current.clear();
           }
         }
         lastSaved.current = sent;
@@ -891,9 +900,12 @@ export default function SurveyEditor({
       const { queued } = await serialSave(async () => {
         const sent: Draft = { ...edits, photoRefs: refsNow.current, sketches: sketchesNow.current };
         const seq = stampNow.current?.seq ?? null;
-        // until a save carrying the stage lands online, or the server shows it (#344 C-final D/E)
+        // until a save carrying the stage lands online, or the server shows it (#344 C-final D/E). #344 C-final F: a move
+        // made while another is pending starts from that one's target (record.stage may predate it), and every sent
+        // target is remembered so its late landing isn't read as a stage set elsewhere
+        pendingFrom.current = pendingStage.current ?? (record.stage || "requested") as SurveyStage;
         pendingStage.current = target;
-        pendingFrom.current = (record.stage || "requested") as SurveyStage;
+        unconfirmedTargets.current.add(target);
         const patch = buildPatch({ stage: target }, sent);
         const res = await saveThroughOutbox({
           collection: "surveys",
@@ -908,6 +920,7 @@ export default function SurveyEditor({
           if (pendingStage.current === target) {
             pendingStage.current = null;
             pendingFrom.current = null;
+            unconfirmedTargets.current.clear();
           }
         }
         lastSaved.current = { ...sent, stage: target };
@@ -1012,11 +1025,12 @@ export default function SurveyEditor({
           id: record.id,
           doc: buildFullDoc(undefined, sent),
           action: () => saveSurvey(record.id, filePatch),
-          // #344 C-final D/E: this online save carried only the file keys — the queued entry holding this editor's unsent
+          // #344 C-final D/E/F: this online save carried only the file keys — the queued entry holding this editor's unsent
           // field edits (a timed-out Save changes / stage move) stays for the sync push (the store applies its fields
-          // and leaves the newer file lists alone; file-only saves don't bump rev, so it still pushes cleanly). Any
-          // other entry (a timed-out photo save's copy of already-saved fields) is cleared.
-          keepOutbox: (entryDoc) => holdsUnsentFieldEdits(entryDoc, editorId, unsentFieldSeq.current),
+          // and leaves the newer file lists alone; file-only saves don't bump rev, so it still pushes cleanly). So does
+          // another mount's / tab's entry carrying field edits (one entry per record, shared on the device) and a parked
+          // one. This mount's other entries (a timed-out photo save's copy of already-saved fields) are cleared.
+          keepOutbox: (entryDoc, state) => keepOutboxAfterFileSave(entryDoc, state, editorId, unsentFieldSeq.current),
           timeoutMs: SAVE_ACTION_TIMEOUT_MS,
         });
         // queued while field edits were unsent: its whole-doc copy (lastSaved = that save's draft) replaced their entry

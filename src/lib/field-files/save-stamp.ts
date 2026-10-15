@@ -135,12 +135,24 @@ export const SURVEY_STAGE_ORDER = ["requested", "scheduled", "onsite", "complete
  * when the server has moved on past it — a stage other than the one the move started from AND later in the lifecycle
  * (a move made elsewhere after ours; re-sending ours would move it backwards). A server still at `from`, or at an
  * earlier stage than `pending` (an earlier move of ours landing late), leaves it pending. Pure.
+ *
+ * #344 C-final F — `unconfirmed`: every target this editor has sent while moves were pending and not had confirmed. A
+ * server stage in it is one of OUR earlier moves landing late (e.g. Onsite → Completed timed out, then back → Onsite:
+ * move 1 lands and the server shows Completed), never "set elsewhere" — it leaves the move pending whatever its place
+ * in the lifecycle. Only the pending target itself confirms. Omitted = the E rule.
  */
-export function pendingStageSettled(pending: string | null, from: string | null, server: string | null | undefined): boolean {
+export function pendingStageSettled(
+  pending: string | null,
+  from: string | null,
+  server: string | null | undefined,
+  unconfirmed: ReadonlySet<string> | readonly string[] = [],
+): boolean {
   if (pending === null) return false;
   const srv = server || "requested";
   if (srv === pending) return true;
   if (srv === (from || "requested")) return false;
+  const ours = Array.isArray(unconfirmed) ? unconfirmed.includes(srv) : (unconfirmed as ReadonlySet<string>).has(srv);
+  if (ours) return false;
   const order: readonly string[] = SURVEY_STAGE_ORDER;
   const i = order.indexOf(srv);
   const j = order.indexOf(pending);
@@ -158,4 +170,32 @@ export function holdsUnsentFieldEdits(entryDoc: Record<string, unknown> | null |
   if (unsentSeq === null || !entryDoc) return false;
   const st = parseSaveStamp(entryDoc[SAVE_STAMP_FIELD]);
   return !!st && st.editor === editor && st.seq === unsentSeq;
+}
+
+/** The outbox entry states the sync engine keeps (`error` = parked: refused, or retried too often). */
+export type OutboxEntryState = "pending" | "error";
+
+/**
+ * #344 C-final F — after a file-only save lands online, which queued outbox entry for this record survives. The outbox
+ * holds ONE entry per record, shared by every mount / tab on the device, so only this mount's own entries can be judged
+ * by seq:
+ * - a parked (`error`) entry is always kept — it is shown to the surveyor and only a re-save replaces it;
+ * - stamped by THIS editor mount: kept only when it is the save holding the unsent field edits (`holdsUnsentFieldEdits`)
+ *   — a timed-out photo save's copy of already-saved fields is cleared, as in C-final E;
+ * - stamped by another editor (a previous mount after a reload / PWA relaunch, or a second tab) or unstamped: this mount
+ *   can't know what it holds, so it is kept whenever it carries field edits (`carriesFieldEdits`, the C-final D rule)
+ *   and pushes through the server's stamp / rev checks; a file-only one is cleared (the online save wrote newer files).
+ * `state` omitted (a caller that can't see it) = judged by the doc alone. Pure.
+ */
+export function keepOutboxAfterFileSave(
+  entryDoc: Record<string, unknown> | null | undefined,
+  state: OutboxEntryState | string | undefined,
+  editor: string,
+  unsentSeq: number | null,
+): boolean {
+  if (state === "error") return true;
+  if (!entryDoc) return false;
+  const st = parseSaveStamp(entryDoc[SAVE_STAMP_FIELD]);
+  if (st && st.editor === editor) return holdsUnsentFieldEdits(entryDoc, editor, unsentSeq);
+  return carriesFieldEdits(entryDoc);
 }

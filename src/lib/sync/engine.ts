@@ -270,13 +270,14 @@ class SyncEngine {
     id: string,
     doc: Record<string, unknown>,
     rev = 1,
-    opts?: { keepEntry?: (entryDoc: Record<string, unknown>) => boolean }
+    opts?: { keepEntry?: (entryDoc: Record<string, unknown>, state?: "pending" | "error") => boolean }
   ): Promise<void> {
     const key = outboxKey(collection, id);
     // #340 final review (I1): a caller that knows the save did NOT carry everything the entry holds keeps it for
-    // the sync push, instead of losing a capture the online save never sent.
+    // the sync push, instead of losing a capture the online save never sent. #344 C-final F: the entry's state rides
+    // along (a parked entry may need keeping); a callback that ignores it behaves as before.
     const entry = opts?.keepEntry ? await idb.get<OutboxEntry>("outbox", key) : undefined;
-    if (!entry || !opts?.keepEntry?.(entry.doc)) await idb.delete("outbox", key);
+    if (!entry || !opts?.keepEntry?.(entry.doc, entry.state)) await idb.delete("outbox", key);
     await this.writeMirror(collection, id, doc, rev, false);
     await this.refreshCounts();
   }

@@ -2450,7 +2450,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       /if \(carried !== null && pendingStage\.current === carried\) \{\s*pendingStage\.current = null/.test(sav),
       "#344 C-final D: a stage move marks the stage unconfirmed until a save carrying it lands online");
     const psr = ctl.slice(ctl.indexOf("async function savePhotoRefs("), ctl.indexOf("async function savePhotoRefs(") + 1500);
-    ok(/keepOutbox: \(entryDoc\) => holdsUnsentFieldEdits\(entryDoc, editorId, unsentFieldSeq\.current\)/.test(psr),
+    ok(/keepOutbox: \(entryDoc, state\) => keepOutboxAfterFileSave\(entryDoc, state, editorId, unsentFieldSeq\.current\)/.test(psr),
       "#344 C-final D: a photo / sketch save keeps a queued outbox entry that carries field edits (a file-only success never clears it)");
     ok(/!res\.applied/.test(act) && /verdict/.test(sto.slice(sto.indexOf("async function updateUnlocked"), sto.indexOf("export async function update("))) &&
       /withoutFileKeys/.test(sto.slice(sto.indexOf("export async function pushSurvey"), sto.indexOf("export async function setStage"))),
@@ -2499,17 +2499,17 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       /const pendingStage = useRef<SurveyStage \| null>\(null\)/.test(ctl) && !/stageUnconfirmed/.test(ctl),
       "#344 C-final E: buildPatch sends the pending move's own target (the ref), never draft.stage");
     const initEff = ctl.slice(ctl.indexOf("if (pendingStageSettled("), ctl.indexOf("const u = unionUnseenFileRefs("));
-    ok(/useEffect\(\(\) => \{\s*if \(pendingStageSettled\(pendingStage\.current, pendingFrom\.current, initial\.stage\)\) \{\s*pendingStage\.current = null;\s*pendingFrom\.current = null;\s*\}\s*\}, \[initial\]\);/.test(ctl) &&
+    ok(/useEffect\(\(\) => \{\s*if \(pendingStageSettled\(pendingStage\.current, pendingFrom\.current, initial\.stage, unconfirmedTargets\.current\)\) \{\s*pendingStage\.current = null;\s*pendingFrom\.current = null;\s*unconfirmedTargets\.current\.clear\(\);\s*\}\s*\}, \[initial\]\);/.test(ctl) &&
       /\}, \[initial\]\);/.test(initEff),
       "#344 C-final E: the [initial] effect clears the pending stage when the server confirms it or has moved past it");
     const adv = ctl.slice(ctl.indexOf("async function advanceStage("), ctl.indexOf("async function onCreateQuote("));
     const sav = ctl.slice(ctl.indexOf("async function onSave("), ctl.indexOf("async function advanceStage("));
     const psr = ctl.slice(ctl.indexOf("async function savePhotoRefs("), ctl.indexOf("// #344 C6 — sketch pads save through"));
-    ok(/pendingFrom\.current = \(record\.stage \|\| "requested"\)/.test(adv) && /doc: buildFullDoc\(\{ stage: target \}, sent\)/.test(adv) &&
+    ok(/pendingFrom\.current = pendingStage\.current \?\? \(record\.stage \|\| "requested"\)/.test(adv) && /doc: buildFullDoc\(\{ stage: target \}, sent\)/.test(adv) &&
       /if \(res\.queued\) unsentFieldSeq\.current = seq;/.test(adv) && /if \(res\.queued\) unsentFieldSeq\.current = seq;/.test(sav) &&
       /unsentFieldSeq\.current = null;/.test(adv) && /unsentFieldSeq\.current = null;/.test(sav),
       "#344 C-final E: a queued Save changes / stage move records its seq as holding unsent fields (the move's outbox copy carries the stage); an online one clears it");
-    ok(/keepOutbox: \(entryDoc\) => holdsUnsentFieldEdits\(entryDoc, editorId, unsentFieldSeq\.current\)/.test(psr) && !/carriesFieldEdits/.test(ctl) &&
+    ok(/keepOutbox: \(entryDoc, state\) => keepOutboxAfterFileSave\(entryDoc, state, editorId, unsentFieldSeq\.current\)/.test(psr) && !/carriesFieldEdits/.test(ctl) &&
       /if \(res\.queued && unsentFieldSeq\.current !== null\) unsentFieldSeq\.current = seq;/.test(psr),
       "#344 C-final E: a file-only success keeps only the unsent-fields entry; a queued photo save that replaced it takes over its seq");
     ok(/two\s+or more field writes/.test(ctl.slice(ctl.indexOf("function buildFullDoc("), ctl.indexOf("async function onSave("))),
@@ -2519,6 +2519,63 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     ok(/rev: carries \? \(storedRev \|\| 1\) \+ 1 : storedRev/.test(uu) && /\{ bumpRev: carries \}/.test(uu) && bumpUsers === 1 &&
       /opts\?\.bumpRev === false \? \{\} : \{ rev: sql`\$\{t\.rev\} \+ 1` \}/.test(ds),
       "#344 C-final E: updateUnlocked bumps rev (doc + row) only for field edits, judged server-side; patchDoc bumps unless told not to");
+  }
+  /* ---- C-final F: a file-only success never drops another mount's queued edits; a late own move never clears a newer one ---- */
+  {
+    const read = (rel: string) => { try { return readFileSync(join(process.cwd(), rel), "utf8"); } catch { return ""; } };
+    const ctl = read("src/app/(app)/venue-assessments/[id]/controls.tsx");
+    const eng = read("src/lib/sync/engine.ts");
+    const sav = read("src/lib/sync/save.ts");
+    const SS = (await import("../src/lib/field-files/save-stamp")) as Record<string, unknown>;
+    type Keep = (d: Record<string, unknown> | null | undefined, st: string | undefined, e: string, q: number | null) => boolean;
+    const keep = SS.keepOutboxAfterFileSave as Keep | undefined;
+    const E = "editoraaaa01";
+    const O = "editorbbbb02";
+    const fileOnly = { photoRefs: [], sketches: {}, photoRefIdsSeen: [], sketchIdsSeen: [], id: "FS-1", rev: 2, updatedAt: 1, syncState: "synced" };
+    ok(!!keep &&
+      keep({ notes: "n", saveStamp: { editor: E, seq: 4 } }, "pending", E, 4) === true &&      // own entry, the unsent field save
+      keep({ notes: "n", saveStamp: { editor: E, seq: 3 } }, "pending", E, 4) === false &&     // own stale copy (a timed-out photo save)
+      keep({ notes: "n", saveStamp: { editor: E, seq: 4 } }, "pending", E, null) === false &&  // own, nothing unsent
+      keep({ notes: "n", saveStamp: { editor: O, seq: 9 } }, "pending", E, 4) === true &&      // another mount / tab, with field edits
+      keep({ notes: "n", saveStamp: { editor: O, seq: 9 } }, "pending", E, null) === true &&
+      keep({ ...fileOnly, saveStamp: { editor: O, seq: 9 } }, "pending", E, 4) === false &&    // another mount, file-only
+      keep({ notes: "n" }, "pending", E, null) === true &&                                     // unstamped, with field edits
+      keep({ ...fileOnly }, "pending", E, 4) === false &&                                      // unstamped, file-only
+      keep({ notes: "n", saveStamp: { editor: E, seq: 3 } }, "error", E, 4) === true &&        // parked: always kept
+      keep({ ...fileOnly }, "error", E, null) === true &&
+      keep({ notes: "n", saveStamp: { editor: O, seq: 9 } }, undefined, E, 4) === true &&      // no state given: judged by the doc
+      keep(null, "pending", E, 4) === false,
+      "#344 C-final F: keepOutboxAfterFileSave — own entry only at the unsent seq; another mount's / unstamped entry kept when it carries field edits; an error entry always kept");
+    type Settle = (p: string | null, f: string | null, s: string | null | undefined, u?: ReadonlySet<string> | readonly string[]) => boolean;
+    const settled = SS.pendingStageSettled as Settle | undefined;
+    ok(!!settled &&
+      // two moves timing out: Onsite → Completed (move 1) → Onsite (move 2, from = Completed); move 1 lands late
+      settled("onsite", "completed", "completed", new Set(["completed", "onsite"])) === false &&
+      // same, with from still the stale record stage (Onsite): the set alone keeps it pending
+      settled("onsite", "onsite", "completed", new Set(["completed", "onsite"])) === false &&
+      // move 2 lands: confirmed
+      settled("onsite", "completed", "onsite", new Set(["completed", "onsite"])) === true &&
+      // the office moves to a stage this editor never sent, later in the lifecycle: settled
+      settled("onsite", "scheduled", "completed", new Set(["onsite"])) === true &&
+      // an own earlier move (in the set) landing late, even later in the lifecycle than the pending one: not "elsewhere"
+      settled("scheduled", "onsite", "completed", ["completed", "onsite", "scheduled"]) === false &&
+      // no set given: the E rule unchanged
+      settled("onsite", "scheduled", "completed") === true && settled(null, null, "completed", new Set(["completed"])) === false,
+      "#344 C-final F: pendingStageSettled — a stage this editor sent but hasn't had confirmed (or the move's start) is never \"set elsewhere\"; only the pending target confirms");
+    const psr = ctl.slice(ctl.indexOf("async function savePhotoRefs("), ctl.indexOf("// #344 C6 — sketch pads save through"));
+    ok(/keepOutbox: \(entryDoc, state\) => keepOutboxAfterFileSave\(entryDoc, state, editorId, unsentFieldSeq\.current\)/.test(psr) &&
+      /keepEntry\?: \(entryDoc: Record<string, unknown>, state\?: "pending" \| "error"\) => boolean/.test(eng) &&
+      /!opts\?\.keepEntry\?\.\(entry\.doc, entry\.state\)/.test(eng) &&
+      /keepOutbox\?: \(entryDoc: Record<string, unknown>, state\?: "pending" \| "error"\) => boolean/.test(sav),
+      "#344 C-final F: a file-only success judges the entry with its state (recordSynced passes entry.state to keepEntry)");
+    const adv = ctl.slice(ctl.indexOf("async function advanceStage("), ctl.indexOf("async function onCreateQuote("));
+    const onSave = ctl.slice(ctl.indexOf("async function onSave("), ctl.indexOf("async function advanceStage("));
+    const clears = (s: string) => [...s.matchAll(/pendingStage\.current = null;\s*pendingFrom\.current = null;\s*unconfirmedTargets\.current\.clear\(\);/g)].length;
+    ok(/const unconfirmedTargets = useRef<Set<SurveyStage>>\(new Set\(\)\)/.test(ctl) &&
+      /pendingFrom\.current = pendingStage\.current \?\? \(record\.stage \|\| "requested"\) as SurveyStage;\s*pendingStage\.current = target;\s*unconfirmedTargets\.current\.add\(target\);/.test(adv) &&
+      /pendingStageSettled\(pendingStage\.current, pendingFrom\.current, initial\.stage, unconfirmedTargets\.current\)/.test(ctl) &&
+      clears(adv) === 1 && clears(onSave) === 1 && [...ctl.matchAll(/pendingStage\.current = null;/g)].length === 3 && clears(ctl) === 3,
+      "#344 C-final F: a move starts from the pending target (else the record), adds its target to unconfirmedTargets, and every clear of the pending stage clears the set");
   }
 }
 
