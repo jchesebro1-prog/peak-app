@@ -12381,7 +12381,7 @@ Jeff (Oct 14) chose "My real Gmail labels" for the #346 Labels card: pick from y
   - The brief's live counts read only your mailbox.
 - User display names are not unique (only email is). Two active users with the same name would share each other's mailbox ownership (#341's `visibleTo` matches names). Worth a uniqueness check in Settings → Team.
 
-## 348. Estimate parties, bids & vendor links — slice 1 (parties core) BUILT 2026-10-14 on `feat/348-estimate-parties` (D1058–D1062), slices 2–6 queued
+## 348. Estimate parties, bids & vendor links — slices 1 + 2a BUILT on `feat/348-estimate-parties` (D1058–D1062, D1074–D1078); 2b next (per-bidder PDFs, client links, send to all), then 3–6
 
 Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-parties-and-bids-design.md`. An estimate links to exactly one company; real bid jobs involve an owner, several GCs and ECs, an architect, consultants and vendors.
 
@@ -12395,13 +12395,15 @@ Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-
 - **Tests:** `scripts/test-parties.ts` (in test:specs).
 
 **Queued (spec §10):**
-- Slice 2: bids (per-bidder PDFs and links, send-to-all, award / undo, due dates).
+- Slice 2a ✅ built (D1074–D1078): bid details (due date, addenda), a Bidders card on Send & track (add GC/EC, submit via email or their bid site, per-bidder link, GC bid #, Mark submitted, Award / Undo award), Bid chip, Quotes hub "Out to bid" filter, ⌘K by bidder name, Morning triage "bid due", the project's Bill to. The owner stays the customer.
+- Slice 2b: per-bidder PDFs, client links, send to all.
+
 - Slice 3: split systems into a new estimate.
 - Slice 4: vendors (vendor company on vendor quotes, File to estimate / project, Procurement).
 - Slice 5: Read the PDF (Assist `vendorpdf`).
 - Slice 6: portal bidder view and Reports → Bids by GC/EC.
 
-**Not on a preview:** do not deploy a Vercel preview of this branch. Previews share the production Neon DB and skip migrations, so `record_parties` doesn't exist there and every company page (Bids & roles card), the lead drawer card, the project card and company delete would throw. **Post-merge production check** (after the merge deploy applies 0041), on a throwaway customer: link an owner and a GC on a lead; convert it / save an estimate from it (the owner carries, the GC doesn't); mark it Won so a project spawns; confirm the project lists the owner. This is the only real run of the postgres-js savepoint path. Then delete the test records.
+**Not on a preview:** do not deploy a Vercel preview of this branch. Previews share the production Neon DB and skip migrations, so `record_parties` doesn't exist there and every company page (Bids & roles card), the lead drawer card, the project card and company delete would throw. **Post-merge production check** (after the merge deploy applies 0041), on a throwaway customer: link an owner and a GC on a lead; convert it / save an estimate from it (the owner carries, the GC doesn't); mark it Won so a project spawns; confirm the project lists the owner. This is the only real run of the postgres-js savepoint path. For 2a on the same estimate: set a Bid due date, add two bidders (GC + EC), Award one, mark Won → the project shows Bill to the awarded bidder. Then delete the test records.
 
 **Notes:** `addParty`'s one-owner check is not locked, so two simultaneous first-owner adds could both land. Renumber migration 0041 at merge if another branch lands one first.
 

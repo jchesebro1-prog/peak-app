@@ -12926,3 +12926,23 @@ A newly imported thread on a personal key is stamped `mailboxOwnerId = userIdOfK
 - **Before a rename** (`updateMemberAction`, only when the trimmed, whitespace-collapsed name actually changes — a case-only rename saves; the fold is only the duplicate check): the OLD name's unstamped, key-less personal threads (`mailboxUser` exactly the old name) get `mailboxOwnerId = this user` when the name was theirs alone, else the tombstone; name-only assignments to the old name get `assignedToId` the same way. Then the new name is retired (below), then the name changes.
 - **Before a name becomes held** (`addUserAction`, a rename TO it, and the Import hub's team rows): any unstamped, key-less thread or name-only assignment already carrying that name (any case) belongs to no current user — names are unique (D1070) — so it is tombstoned. A newcomer who takes a former teammate's name inherits nothing.
 After a stamp, a rename transfers nothing: the thread follows the id.
+
+## D1074. Award keeps the owner as the customer (#348 slice 2a, 2026-10-15)
+
+Jeff, 2026-10-15. Spec §3.4 first had an award move the estimate to the winning GC as its customer. Instead the owner stays `Quote.customerId`, because venue ids (`Quote.locationId`) are per customer company, and tier, history and reports all key off `customerId`; moving it would orphan the venue and re-tier the quote. The winner is recorded as `Quote.bid.awardedPartyId`. Awarding marks that bidder `awarded` and every other still-pending bidder `lost` with `lostByAward`, which Undo award reverses until the quote is Won. When the quote is marked Won the new project stamps `billToCompanyId` (the awarded bidder's company) in its own savepoint, so a failed stamp never undoes the win, and the project page shows Bill to. Documents addressed to the awarded bidder arrive in 2b and the portal in slice 6. Adding a bidder after an award is refused.
+
+## D1075. Bid data shape: quote content on `Quote.bid`, bidder state on party rows (#348 slice 2a, 2026-10-15)
+
+`Quote.bid` is `{ dueAt, addenda, awardedPartyId }`. It is content (it prints in 2b), so its single writer `patchQuoteBid` bumps `updatedAt`: an approver or sender holding an older version gets "changed since". Approval fingerprints are unaffected. Per-bidder state (submit via, bid-site link, GC bid #, submissions, result) lives on the quote's GC/EC party rows through `setPartyBid`. `src/lib/stores/bids.ts` composes the two (add, update, submit, award, undo); pure rules are in `src/lib/parties/` (details, bidder edits, award/undo plans, revs, due dates).
+
+## D1076. Every bid write takes the quote row lock first (#348 slice 2a, 2026-10-15)
+
+`withQuoteRowLock` (new in `quotes.ts`) takes the quote's row lock in the same order `setStatus` does, so an award can never land on a quote that is already won and cannot invert against the Won spawn's advisory lock. Bidder edits re-check their guards (still a bidder, not awarded or lost, quote status) under that lock. Removing a bidder is refused while it is awarded ("Undo the award first"), and removing one with bid history asks for confirmation.
+
+## D1077. Website submissions and "Mark submitted" are a manual stamp (#348 slice 2a, 2026-10-15)
+
+A bidder submitted through its own bid website can't be tracked by the app, so **Mark submitted** stamps "Rev N" plus an optional confirmation number against that bidder, where the current revision is `max(1, revisions.length)`. It is also the stand-in for emailed bids until 2b's send-to-all exists. A bidder whose last stamp is an older revision shows "Needs Rev N" in amber.
+
+## D1078. Per-bidder bid links only; surfacing (#348 slice 2a, 2026-10-15)
+
+A company-level default bid-site link is deferred: the company editor doesn't edit `website` either, and adding it is about ten touch points plus a migration. Each bidder carries its own link instead. Surfacing: a Bid chip with a due-date and addenda dialog in the Estimator header; a Bidders card on Send & track; an "Out to bid" Quotes hub filter and badge; ⌘K matches a quote by bidder name; and Morning triage gains a "bid due" fact (source quote, owner by name, today / tomorrow / past due, dropped 14 days after the due date, and no due date on closed bids).
