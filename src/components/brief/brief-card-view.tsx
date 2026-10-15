@@ -232,15 +232,25 @@ function FullVariant({ vm }: { vm: BriefCardVM }) {
         </>
       )}
 
-      {vm.organize && (
+      {(vm.organize || vm.organizeCleanup) && (
         <>
           <div style={H}>Inbox organization</div>
-          <div style={{ fontSize: 13, color: "#3a3f4a" }}>
-            {vm.organize.label} →{" "}
-            <Link href={vm.organize.href} className="pkb-link">
-              Review
-            </Link>
-          </div>
+          {vm.organize && (
+            <div data-brief-organize style={{ fontSize: 13, color: "#3a3f4a" }}>
+              {vm.organize.label} —{" "}
+              <Link href={vm.organize.href} className="pkb-link">
+                Review
+              </Link>
+            </div>
+          )}
+          {vm.organizeCleanup && (
+            <div data-brief-organize-cleanup style={{ fontSize: 12.5, color: "#5b616e", marginTop: vm.organize ? 4 : 0 }}>
+              <Link href={vm.organizeCleanup.href} className="pkb-link">
+                {vm.organizeCleanup.label} →
+              </Link>{" "}
+              {vm.organizeCleanup.detail}
+            </div>
+          )}
         </>
       )}
 
@@ -329,6 +339,20 @@ function BigVariant({ vm }: { vm: BriefCardVM }) {
             </li>
           ))}
         </ul>
+      )}
+      {(vm.organize || vm.organizeCleanup) && (
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 10, fontSize: 16 }}>
+          {vm.organize && (
+            <Link href={vm.organize.href} className="pkb-link">
+              Review inbox →
+            </Link>
+          )}
+          {vm.organizeCleanup && (
+            <Link href={vm.organizeCleanup.href} className="pkb-link">
+              {vm.organizeCleanup.label} →
+            </Link>
+          )}
+        </div>
       )}
     </div>
   );

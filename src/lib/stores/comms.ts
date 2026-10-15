@@ -2078,7 +2078,10 @@ export async function resolveCustomerId(
   t: CommThread | null | undefined
 ): Promise<string | null> {
   if (!t) return null;
-  if (t.customerId) return t.customerId;
+  const { placeholderCompanyIds } = await import("@/lib/identity/companies");
+  // #345 — an AUTOMATIC stored link to a placeholder company ("UNKNOWN" …)
+  // reads as none; a deliberate one (`linkedBy`) is history and stands
+  if (t.customerId && (t.linkedBy || !(await placeholderCompanyIds([t.customerId])).has(t.customerId))) return t.customerId;
   // #125 — the picked identity message's address, else the counterpart.
   // I follow-up review — no selfEmail here: this store-level helper has no
   // "current user"/mailbox in hand (it's called from many contexts, some
@@ -2092,7 +2095,9 @@ export async function resolveCustomerId(
   const { contactByEmail } = await import("@/lib/identity/lookup");
   const hit = await contactByEmail(email);
   // Two live customers on one address is never a silent pick (#96).
-  return hit && !("ambiguous" in hit) ? hit.customerId : null;
+  if (!hit || "ambiguous" in hit) return null;
+  // #345 — a contact parked under a placeholder company ("UNKNOWN" …) has no customer
+  return (await placeholderCompanyIds([hit.customerId])).has(hit.customerId) ? null : hit.customerId;
 }
 
 /* ---- time formatting -------------------------------------------------------------- */

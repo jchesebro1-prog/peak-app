@@ -52,6 +52,8 @@ import type { FolderId, MailboxId } from "@/lib/stores/comms";
 import ThreadReader from "./thread-reader";
 import { meetingsTickAction } from "./meetings/actions";
 import { organizeHref, ORGANIZE_BASE_HREF, type OrganizeTab } from "./organize/format";
+import OrganizeEntryBar from "./organize/entry-bar";
+import type { OrganizeEntryVM } from "./organize/entry";
 import ComposeModal from "./compose-modal";
 import LogModal from "./log-modal";
 import PopoutButton from "@/components/popout/popout-button";
@@ -115,6 +117,7 @@ export default function InboxShell({
   meetings = null,
   organize = null,
   organizeTab = "to-file",
+  organizeEntry = null,
   assist = NO_ASSIST,
   askCompose = null,
 }: {
@@ -148,6 +151,9 @@ export default function InboxShell({
   organize?: { list: ReactNode } | null;
   /** #335 — the Organize tab, kept on the URL while a thread is open */
   organizeTab?: OrganizeTab;
+  /** #345 — the tab row (Inbox · Organize · Noise) and the filing banner at
+   *  the top of the list column; null where they don't apply. */
+  organizeEntry?: OrganizeEntryVM | null;
   /** #334 — which Assist buttons this user sees (all off unless gated in). */
   assist?: AssistFlags;
   /** Ask AI — /inbox?compose=ask&n=<nonce>: open the composer pre-filled from
@@ -1094,6 +1100,7 @@ export default function InboxShell({
             minHeight: 0,
           }}
         >
+          {organize && organizeEntry ? <OrganizeEntryBar vm={organizeEntry} /> : null}
           <div style={{ padding: "11px 15px 0", flexShrink: 0 }} className="ib-boxsel">
             <select
               value={meetings ? "meetings" : "organize"}
@@ -1123,6 +1130,7 @@ export default function InboxShell({
         </div>
       ) : (
       <ThreadList
+        top={organizeEntry ? <OrganizeEntryBar vm={organizeEntry} /> : null}
         list={list}
         selectedId={reader && !narrow ? reader.id : explicitSelected && reader ? reader.id : null}
         readIds={effectiveReadIds}

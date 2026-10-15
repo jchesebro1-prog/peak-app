@@ -58,11 +58,14 @@ export default function OrganizeBox({
   vm,
   selectedId,
   cleanup = null,
+  cleanupPrompt = false,
 }: {
   vm: OrganizeVM;
   selectedId: string | null;
   /** "Organize my inbox" (spec §6) — set only for Assist pilot users */
   cleanup?: { state: CleanupVM | null } | null;
+  /** #345 — arrived from the brief's "Organize my inbox" link: call the button out */
+  cleanupPrompt?: boolean;
 }) {
   const [pending, start] = useTransition();
   const [note, setNote] = useState<Note | null>(null);
@@ -142,7 +145,7 @@ export default function OrganizeBox({
         </div>
         {cleanup && (
           <div style={{ marginTop: 8 }}>
-            <CleanupButton cleanup={cleanup.state} />
+            <CleanupButton cleanup={cleanup.state} prompt={cleanupPrompt} />
           </div>
         )}
 

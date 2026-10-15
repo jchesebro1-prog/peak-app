@@ -59,6 +59,7 @@ export default function ThreadList({
   onOpenResult,
   rowActions,
   width = 392,
+  top = null,
 }: {
   list: ListVM;
   selectedId: string | null;
@@ -84,6 +85,8 @@ export default function ThreadList({
   onOpenResult: (id: string) => void;
   rowActions: RowActions;
   width?: number;
+  /** #345 — the Organize entry bar (tab row + banner), above everything */
+  top?: React.ReactNode;
 }) {
   const rows = list.rows;
 
@@ -127,6 +130,7 @@ export default function ThreadList({
         minHeight: 0,
       }}
     >
+      {top}
       {/* command bar (bulk actions + filter/sort) */}
       {commandBar}
 

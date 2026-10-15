@@ -96,7 +96,10 @@ import { loadMeetingReader, loadMeetingsBox, toFileCount } from "./meetings/load
 import { meetingsReadOr } from "@/lib/meetings/safe-read";
 import { MEETINGS_BASE_HREF, meetingsHref, meetingsTabOf } from "./meetings/format";
 import OrganizeBox from "./organize/organize-box";
-import { buildReaderOrg, loadOrganize, organizeToFileCount } from "./organize/load";
+import { buildReaderOrg, loadOrganize, organizeEntryCounts } from "./organize/load";
+import { organizeEntryVM } from "./organize/entry";
+import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
+import { isPlaceholderCompany, withoutPlaceholderLink } from "@/lib/inbox-org/placeholder";
 import { cleanupVMOf, getCleanupState } from "@/lib/inbox-org/cleanup";
 import { ORGANIZE_BASE_HREF, organizeTabOf } from "./organize/format";
 import { getTask } from "@/lib/stores/tasks";
@@ -334,7 +337,7 @@ export default async function InboxPage({
     customers,
     labelOptions,
     meetingsToFile,
-    organizeToFile,
+    organizeCounts,
   ] = await Promise.all([
     Promise.resolve(mailboxes(me, boxOpts)),
     folderCounts("personal", me),
@@ -358,9 +361,9 @@ export default async function InboxPage({
     allCustomers(),
     labelOptionsFor(box, user.id),
     meetingsReadOr(toFileCount(user.id), 0, "inbox count"),
-    organizeToFileCount(user).catch((err) => {
+    organizeEntryCounts(user).catch((err) => {
       console.error("[inbox-org] To file count failed", err);
-      return 0;
+      return { toFile: 0, strong: 0, noise: 0 };
     }),
   ]);
 
@@ -493,7 +496,7 @@ export default async function InboxPage({
         key: "organize",
         label: "Organize",
         active: isOrganize,
-        count: organizeToFile,
+        count: organizeCounts.toFile,
         badge: "accent",
         href: viewHref("organize"),
         icon: "archived",
@@ -688,11 +691,16 @@ export default async function InboxPage({
     ? threads.find((t) => t.status !== "draft") || null
     : null;
   // Organize opens only the thread a row points at — and only one of mine
-  const sel = isMeetings
+  const selRaw = isMeetings
     ? null
     : isOrganize
       ? explicitThread && visibleTo(explicitThread, me) && !explicitThread.deleted ? explicitThread : null
       : explicitThread ?? autoThread;
+  // #345 — a link the contact matcher stamped to a placeholder company
+  // ("UNKNOWN" …) before it learned to skip them reads as no customer here;
+  // the stored thread is left as it is
+  const placeholderNames = new Map(customers.map((c) => [c.id, c.name]));
+  const sel = selRaw ? withoutPlaceholderLink(selRaw, (id) => isPlaceholderCompany(placeholderNames.get(id))) : null;
 
   let reader: ReaderVM | null = null;
   if (sel) {
@@ -1275,9 +1283,33 @@ export default async function InboxPage({
     organizeSlot = {
       // keyed by tab: a tab switch remounts the box, so its confirm / rule
       // offer / note state never carries over to another tab
-      list: <OrganizeBox key={`organize-list-${vm.tab}`} vm={vm} selectedId={reader ? reader.id : null} cleanup={cleanup} />,
+      list: (
+        <OrganizeBox
+          key={`organize-list-${vm.tab}`}
+          vm={vm}
+          selectedId={reader ? reader.id : null}
+          cleanup={cleanup}
+          // #345 — the brief's "Organize my inbox" link calls the button out
+          cleanupPrompt={str(params.cleanup) === "1" && vm.tab === "to-file"}
+        />
+      ),
     };
   }
+
+  // #345 — Organize's entry points above the list (tab row + banner): on the
+  // plain inbox and inside Organize, whenever Organize is available (everyone,
+  // unless INBOX_ORG_DISABLED). The banner says "N emails to file · S ready to approve".
+  const organizeEntry = organizeEntryVM({
+    available: !inboxOrgDisabled(),
+    toFile: organizeCounts.toFile,
+    strong: organizeCounts.strong,
+    noise: organizeCounts.noise,
+    where: isOrganize
+      ? { kind: "organize", tab: organizeTab }
+      : !isView && box === "personal" && folder === "inbox"
+        ? { kind: "inbox" }
+        : { kind: "other" },
+  });
 
   return (
     <>
@@ -1342,6 +1374,7 @@ export default async function InboxPage({
             meetings={meetingsSlot}
             organize={organizeSlot}
             organizeTab={organizeTab}
+            organizeEntry={organizeEntry}
             assist={assistFlags}
             askCompose={askCompose && !initialCompose ? str(params.n).slice(0, 24) || "1" : null}
           />

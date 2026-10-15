@@ -34,7 +34,7 @@ function lastRunLine(c: CleanupVM | null): string | null {
   return null;
 }
 
-export default function CleanupButton({ cleanup }: { cleanup: CleanupVM | null }) {
+export default function CleanupButton({ cleanup, prompt = false }: { cleanup: CleanupVM | null; prompt?: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [line, setLine] = useState<{ text: string; bad: boolean } | null>(null);
@@ -69,20 +69,27 @@ export default function CleanupButton({ cleanup }: { cleanup: CleanupVM | null }
     });
 
   const idle = lastRunLine(cleanup);
+  // #345 — from the brief's link: outline the button and say what it does
+  // (it never starts by itself — a link must not launch a 90-day run)
+  const callOut = prompt && !pending && !line && !(cleanup?.done);
   return (
     <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
       <button
         type="button"
-        style={{ ...BTN, opacity: pending ? 0.6 : 1 }}
+        style={{
+          ...BTN,
+          opacity: pending ? 0.6 : 1,
+          ...(callOut ? { color: "#fff", background: "var(--accent)", border: "1px solid transparent", boxShadow: "0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent)" } : {}),
+        }}
         disabled={pending}
         onClick={go}
         title="Suggest a filing for every inbox thread from the last 90 days — nothing is filed until you approve it"
       >
         {pending ? "Organizing…" : "Organize my inbox"}
       </button>
-      {(line || idle) && (
+      {(line || idle || callOut) && (
         <span role="status" style={{ fontSize: 11.5, color: line?.bad ? "#b4543a" : "#5b616e" }}>
-          {line ? line.text : idle}
+          {line ? line.text : callOut && !idle ? "Press to check the last 90 days of mail — it only suggests; nothing is filed until you approve it." : idle}
         </span>
       )}
     </span>

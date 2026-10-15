@@ -35,6 +35,10 @@ export type BriefCardInput = {
   /** Lead id → its suggestion state — present only when Suggest estimate is
    *  on for this user (pilot + `estimate`); absent = the old "Open lead" cue. */
   leads?: Readonly<Record<string, CardLeadSuggest>>;
+  /** #345 — Organize's availability (everyone unless INBOX_ORG_DISABLED; absent = available) and the
+   *  90-day cleanup's state for "Organize my inbox" — null when the user can't run it (not pilot +
+   *  Inbox organization), else "never" run, "unfinished" or "done". */
+  organizeEntry?: { available: boolean; cleanup: "never" | "unfinished" | "done" | null };
 };
 
 export type BriefCardDoFirst = {
@@ -76,7 +80,10 @@ export type BriefCardVM = {
   summary: string;
   since: string | null;
   doFirst: BriefCardDoFirst[];
+  /** "5 emails to file · 3 noise" → Review (`/inbox?view=organize`) */
   organize: { label: string; href: string } | null;
+  /** #345 — "Organize my inbox" offered while the 90-day cleanup was never run or isn't finished */
+  organizeCleanup: { label: string; detail: string; href: string } | null;
   promises: Array<{ taskId: string; title: string; dueLabel: string | null }>;
   today: string | null;
   approvals: string | null;
@@ -88,6 +95,8 @@ export type BriefCardVM = {
 };
 
 export const ORGANIZE_HREF = "/inbox?view=organize";
+/** #345 — Organize's To file tab with the "Organize my inbox" button called out (it never starts by itself). */
+export const ORGANIZE_CLEANUP_HREF = "/inbox?view=organize&tab=to-file&cleanup=1";
 
 const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
@@ -123,10 +132,23 @@ export function briefCardVM(input: BriefCardInput): BriefCardVM {
     };
   });
 
+  // #345 — one clear action: "N emails to file · M noise — Review"
   const o = b.organize;
+  const entry = input.organizeEntry ?? { available: true, cleanup: null };
   const organize =
-    o.toFile > 0 || o.noise > 0
-      ? { label: [o.toFile > 0 ? `${o.toFile} to file${o.strong > 0 ? ` (${o.strong} strong)` : ""}` : "", o.noise > 0 ? `${o.noise} noise` : ""].filter(Boolean).join(" · "), href: ORGANIZE_HREF }
+    entry.available && (o.toFile > 0 || o.noise > 0)
+      ? { label: [o.toFile > 0 ? `${n(o.toFile, "email", "emails")} to file` : "", o.noise > 0 ? `${o.noise} noise` : ""].filter(Boolean).join(" · "), href: ORGANIZE_HREF }
+      : null;
+  const organizeCleanup =
+    entry.available && (entry.cleanup === "never" || entry.cleanup === "unfinished")
+      ? {
+          label: entry.cleanup === "never" ? "Organize my inbox" : "Finish organizing my inbox",
+          detail:
+            entry.cleanup === "never"
+              ? "Suggests a filing for the last 90 days of mail — nothing is filed until you approve it."
+              : "The 90-day cleanup stopped part-way — it picks up where it left off.",
+          href: ORGANIZE_CLEANUP_HREF,
+        }
       : null;
 
   const t = b.today;
@@ -169,6 +191,7 @@ export function briefCardVM(input: BriefCardInput): BriefCardVM {
     since,
     doFirst,
     organize,
+    organizeCleanup,
     promises: b.newPromiseTasks.map((p) => ({ taskId: p.taskId, title: p.title, dueLabel: p.due ? chicagoShortDate(p.due) : null })),
     today,
     approvals,

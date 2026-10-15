@@ -49,6 +49,7 @@ import {
   type OrgContext,
 } from "./pipeline";
 import { inboxOrgDisabled } from "./kill-switch";
+import { isPlaceholderCompany } from "./placeholder";
 import type { Court, CourtOwner, Filing, FilingAction, FilingApplied, SenderRule } from "./types";
 
 const lc = (s: string | null | undefined) => String(s ?? "").trim().toLowerCase();
@@ -158,11 +159,17 @@ async function resolveTarget(target: FilingTarget, keepLabel?: string): Promise<
   if (customerId) {
     const c = await getCustomer(customerId);
     if (!c) return null;
-    customerName = c.name || "";
-    const site = String(target.siteId || "").trim();
-    if (site) {
-      if (!(c.locations || []).some((l) => l.id === site)) return null;
-      siteId = site;
+    if (isPlaceholderCompany(c.name)) {
+      // #345 — a placeholder company ("UNKNOWN" …) is never filed under: the
+      // work record (if any) is filed alone, else there is nothing to file
+      customerId = null;
+    } else {
+      customerName = c.name || "";
+      const site = String(target.siteId || "").trim();
+      if (site) {
+        if (!(c.locations || []).some((l) => l.id === site)) return null;
+        siteId = site;
+      }
     }
   } else if (target.siteId) return null;
   if (!customerId && !work) return null;

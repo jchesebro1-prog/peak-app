@@ -1,5 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { CODE_RE } from "@/lib/assessments/codes";
+import { isPlaceholderCompany } from "@/lib/inbox-org/placeholder";
 import { getDb } from "@/db";
 import {
   companies,
@@ -23,6 +24,49 @@ export async function allCompanies(opts?: {
     ? await db.select().from(companies)
     : await db.select().from(companies).where(eq(companies.deleted, false));
   return rows.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+}
+
+/** #345 — which of `ids` are placeholder companies ("UNKNOWN", "TBD" …,
+ *  `isPlaceholderCompany`), one query. Deleted rows count by name too: a
+ *  placeholder is never a link target either way. */
+export async function placeholderCompanyIds(ids: readonly (string | null | undefined)[]): Promise<Set<string>> {
+  const want = ids.filter((x): x is string => !!x);
+  if (!want.length) return new Set();
+  const all = await allPlaceholderIds();
+  return new Set(want.filter((id) => all.has(id)));
+}
+
+/** #345 — is this one company id a placeholder (cached, see below)? */
+export async function isPlaceholderCompanyId(id: string | null | undefined): Promise<boolean> {
+  return !!id && (await allPlaceholderIds()).has(id);
+}
+
+/** Every placeholder company id, memoised per process for
+ *  PLACEHOLDER_CACHE_MS so the 90-day import and resweeps don't re-read
+ *  company names per sender. Writes through this module drop it at once
+ *  (`invalidatePlaceholderCompanies`); any other writer is at most a minute
+ *  stale. */
+export const PLACEHOLDER_CACHE_MS = 60_000;
+let placeholderCache: { at: number; ids: Promise<Set<string>> } | null = null;
+
+function allPlaceholderIds(): Promise<Set<string>> {
+  const now = Date.now();
+  if (placeholderCache && now - placeholderCache.at < PLACEHOLDER_CACHE_MS) return placeholderCache.ids;
+  const ids = (async () => {
+    const db = await getDb();
+    const rows = await db.select({ id: companies.id, name: companies.name }).from(companies);
+    return new Set(rows.filter((r) => isPlaceholderCompany(r.name)).map((r) => r.id));
+  })();
+  const entry = { at: now, ids };
+  placeholderCache = entry;
+  ids.catch(() => {
+    if (placeholderCache === entry) placeholderCache = null;
+  });
+  return ids;
+}
+
+export function invalidatePlaceholderCompanies(): void {
+  placeholderCache = null;
 }
 
 export async function getCompany(
@@ -94,6 +138,8 @@ export async function saveCompany(
       target: companies.id,
       set: { ...rest, deleted: rest.deleted ?? false, updatedAt: t },
     });
+  // #345 — a new or renamed company may be (or stop being) a placeholder
+  invalidatePlaceholderCompanies();
 }
 
 /** Postgres unique_violation, seen directly or one level down (drizzle wraps driver errors in `cause`). */
