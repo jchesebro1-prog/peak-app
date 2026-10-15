@@ -1088,6 +1088,131 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       return a.linesetQty === 1 && b.linesetQty === 12;
     });
   }
+
+  // ─── C1: pure ink model ───
+  {
+    const INK = await import("../src/lib/ink/model");
+    const mk = (id: string, pts: number[], width = 2, color = "#16181d"): import("../src/lib/ink/model").Stroke => ({ id, tool: "pen", color, width, pts });
+    const line = [0, 0, 0.5, 5, 0.2, 0.5, 10, 0, 0.5, 20, 0, 0.9];
+    const sp = INK.simplify(line);
+    ok(sp.length === 6 && sp[0] === 0 && sp[3] === 20 && sp[2] === 0.5 && sp[5] === 0.9,
+      "#344 C1: simplify keeps endpoints (with pressure) and drops collinear points");
+    const bent = INK.simplify([0, 0, 1, 10, 10, 0.5, 20, 0, 1]);
+    ok(bent.length === 9 && bent[2] === 1 && bent[5] === 0.5, "#344 C1: simplify keeps a corner point with its pressure");
+    ok(INK.simplify([1, 2, 0.3]).length === 3 && INK.simplify([]).length === 0, "#344 C1: simplify handles 0/1 points");
+
+    let d = INK.emptyInk(100, 80);
+    d = INK.addStroke(d, mk("a", [10.3, 10.74, 1.7, 50, 10, -2]));
+    ok(d.strokes.length === 1 && d.strokes[0].pts.join() === "10.5,10.5,1,50,10,0",
+      "#344 C1: addStroke rounds x/y to 0.5 and clamps pressure to [0,1] at 2 decimals");
+    ok(INK.addStroke(d, mk("bad", [1, 2])) === d && INK.addStroke(d, mk("bad", [1, 2, NaN])) === d,
+      "#344 C1: addStroke ignores malformed pts");
+    d = INK.addStroke(d, mk("b", [10, 40, 0.5, 50, 40, 0.5]));
+    const hit = INK.eraseAt(d, 30, 12, 3);
+    ok(hit.strokes.length === 1 && hit.strokes[0].id === "b", "#344 C1: eraseAt removes only the stroke within radius");
+    ok(INK.eraseAt(d, 30, 25, 3) === d, "#344 C1: eraseAt returns the same doc on a miss");
+    const dot = INK.addStroke(INK.emptyInk(10, 10), mk("dot", [5, 5, 0.5]));
+    ok(INK.eraseAt(dot, 6, 5, 2).strokes.length === 0 && INK.eraseAt(dot, 9, 5, 2) === dot, "#344 C1: eraseAt works on a single-point stroke");
+
+    // labels
+    const lab = { id: "l1", x: 5.3, y: 6, text: "x".repeat(300), color: "#c0392b", size: 14 };
+    const ld = INK.addLabel(INK.emptyInk(100, 100), lab);
+    ok(ld.labels.length === 1 && ld.labels[0].text.length === INK.INK_CAPS.labelChars && ld.labels[0].x === 5.5,
+      "#344 C1: addLabel trims text to 120 chars and rounds position");
+    ok(INK.addLabel(ld, { ...lab, id: "l2", text: "   " }) === ld, "#344 C1: addLabel ignores blank text");
+    const moved = INK.moveLabel(ld, "l1", 40, 41);
+    ok(moved.labels[0].x === 40 && ld.labels[0].x === 5.5 && INK.moveLabel(ld, "nope", 1, 1) === ld, "#344 C1: moveLabel moves immutably; unknown id is a no-op");
+    ok(INK.removeLabel(moved, "l1").labels.length === 0 && INK.removeLabel(moved, "z") === moved, "#344 C1: removeLabel");
+    let full = INK.emptyInk(100, 100);
+    for (let i = 0; i < 205; i++) full = INK.addLabel(full, { ...lab, id: "q" + i, text: "t" });
+    ok(full.labels.length === INK.INK_CAPS.labels, "#344 C1: addLabel caps at 200 labels");
+    ok(INK.clearInk(d).strokes.length === 0 && INK.clearInk(INK.emptyInk(1, 1)).labels.length === 0, "#344 C1: clearInk empties strokes and labels");
+
+    // caps via parseInk
+    const many = Array.from({ length: 5001 }, (_, i) => ({ id: "s" + i, tool: "pen", color: "#16181d", width: 2, pts: [i % 50, 1, 0.5, (i % 50) + 1, 2, 0.5] }));
+    const capped = INK.parseInk({ v: 1, w: 10, h: 10, strokes: many, labels: [] });
+    ok(!!capped && capped.strokes.length === 5000, "#344 C1: parseInk caps 5001 strokes to 5000");
+    const mixed = INK.parseInk({
+      v: 1, w: 10, h: 10, labels: [{ id: "x", x: 1, y: 1, text: "ok", color: "javascript:1", size: 10 }, { id: "y", x: NaN, y: 1, text: "bad", color: "#000", size: 10 }],
+      strokes: [
+        { id: "odd", tool: "pen", color: "#16181d", width: 2, pts: [1, 2, 0.5, 3] },
+        { id: "nan", tool: "pen", color: "#16181d", width: 2, pts: [1, 2, NaN] },
+        { id: "good", tool: "pen", color: "url(x)", width: 2, pts: [1, 2, 0.5, 3, 4, 0.5] },
+        null, 7,
+      ],
+    });
+    ok(!!mixed && mixed.strokes.length === 1 && mixed.strokes[0].id === "good" && mixed.strokes[0].color === "#16181d" &&
+      mixed.labels.length === 1 && mixed.labels[0].color === "#16181d",
+      "#344 C1: parseInk drops odd-length/NaN strokes and bad labels; non-hex colours fall back to ink");
+    const bigPts = Array.from({ length: 3 * 100_000 }, (_, i) => (i % 3 === 2 ? 0.5 : i));
+    const numCap = INK.parseInk({ v: 1, w: 10, h: 10, strokes: [0, 1, 2, 3, 4].map((i) => ({ id: "n" + i, tool: "pen", color: "#16181d", width: 2, pts: bigPts })), labels: [] });
+    ok(!!numCap && numCap.strokes.length === 1, "#344 C1: parseInk enforces the 400,000-number cap (300k each → one stroke fits)");
+    ok(INK.parseInk(null) === null && INK.parseInk(5) === null && INK.parseInk([]) === null && INK.parseInk("{nope") === null &&
+      INK.parseInk({ v: 1, strokes: [] }) === null, "#344 C1: parseInk returns null for non-objects and size-less docs");
+
+    // serialize round trip
+    let rt = INK.emptyInk(300, 200);
+    rt = INK.addStroke(rt, mk("r1", [1.25, 2, 0.333, 9, 9.9, 0.8, 30, 31, 1]));
+    rt = INK.addLabel(rt, { id: "rl", x: 4, y: 5, text: "FOH", color: "#1f5f9a", size: 12 });
+    const back = INK.parseInk(INK.serializeInk(rt));
+    ok(!!back && JSON.stringify(back) === JSON.stringify(rt) && JSON.stringify(INK.parseInk(JSON.parse(INK.serializeInk(rt)))) === JSON.stringify(rt),
+      "#344 C1: serialize → parse round trip is identical (string and object input)");
+
+    // history
+    const h = INK.createHistory(INK.emptyInk(50, 50));
+    ok(!h.canUndo && !h.canRedo, "#344 C1: history starts with nothing to undo/redo");
+    h.do({ t: "stroke", stroke: mk("h1", [1, 1, 0.5, 5, 5, 0.5]) });
+    h.do({ t: "stroke", stroke: mk("h2", [10, 1, 0.5, 15, 5, 0.5]) });
+    ok(h.current.strokes.length === 2 && h.canUndo && !h.canRedo, "#344 C1: history do applies ops");
+    h.undo();
+    ok(h.current.strokes.length === 1 && h.canRedo, "#344 C1: history undo steps back");
+    h.redo();
+    ok(h.current.strokes.length === 2 && !h.canRedo, "#344 C1: history redo steps forward");
+    h.undo();
+    h.do({ t: "label", label: { id: "hl", x: 1, y: 1, text: "A", color: "#16181d", size: 10 } });
+    ok(!h.canRedo && h.current.labels.length === 1, "#344 C1: a new op after undo clears redo");
+    const before = h.current;
+    h.do({ t: "erase", x: 40, y: 40, radius: 1 });
+    ok(h.current === before, "#344 C1: a no-op (erase miss) adds no history entry");
+    h.do({ t: "clear" });
+    ok(h.current.strokes.length === 0 && h.current.labels.length === 0, "#344 C1: clear op empties; undo restores");
+    h.undo();
+    ok(h.current.strokes.length === 1 && h.current.labels.length === 1, "#344 C1: undo after clear restores strokes and labels");
+    const ch = INK.createHistory(INK.emptyInk(50, 50), 3);
+    for (let i = 0; i < 6; i++) ch.do({ t: "stroke", stroke: mk("c" + i, [i, 1, 0.5, i + 2, 3, 0.5]) });
+    let undone = 0;
+    while (ch.canUndo) { ch.undo(); undone++; }
+    ok(undone === 3 && ch.current.strokes.length === 3, "#344 C1: history cap keeps only the last 3 undo steps");
+
+    // render against a fake ctx
+    const calls: Array<[string, ...unknown[]]> = [];
+    const widths: number[] = [];
+    const fake = {
+      strokeStyle: "" as unknown, fillStyle: "" as unknown, lineCap: "" as unknown, lineJoin: "" as unknown, font: "", textBaseline: "" as unknown,
+      _lw: 0,
+      get lineWidth() { return this._lw; },
+      set lineWidth(v: number) { this._lw = v; },
+      beginPath() { calls.push(["beginPath"]); },
+      moveTo(x: number, y: number) { calls.push(["moveTo", x, y]); },
+      lineTo(x: number, y: number) { calls.push(["lineTo", x, y]); },
+      quadraticCurveTo(a: number, b: number, c: number, e: number) { calls.push(["quadraticCurveTo", a, b, c, e]); },
+      stroke() { widths.push(this._lw); calls.push(["stroke"]); },
+      fillText(t: string, x: number, y: number) { calls.push(["fillText", t, x, y, this.font, this.fillStyle]); },
+    };
+    let rd = INK.emptyInk(100, 100);
+    rd = INK.addStroke(rd, mk("rs", [0, 0, 1, 10, 0, 1, 20, 10, 0, 30, 10, 0], 4, "#c0392b"));
+    rd = INK.addLabel(rd, { id: "rl", x: 5, y: 6, text: "Hi", color: "#1f5f9a", size: 10 });
+    INK.renderInk(fake, rd, 2);
+    const names = calls.map((c) => c[0]);
+    ok(names.includes("moveTo") && names.includes("quadraticCurveTo") && names.includes("lineTo") && names.includes("stroke") && names.includes("fillText"),
+      "#344 C1: renderInk issues moveTo/quadraticCurveTo/lineTo/stroke/fillText");
+    ok(widths.length === 3 && widths[0] === 4 * 2 * 1.5 && widths[1] === 4 * 2 * 1 && widths[2] === 4 * 2 * 0.5,
+      "#344 C1: renderInk scales width × scale × (0.5 + p) per segment (" + widths.join(",") + ")");
+    const ft = calls.find((c) => c[0] === "fillText")!;
+    ok(ft[1] === "Hi" && ft[2] === 10 && ft[3] === 12 && ft[4] === "20px sans-serif" && ft[5] === "#1f5f9a" && fake.strokeStyle === "#c0392b" && fake.lineCap === "round",
+      "#344 C1: renderInk draws labels at scaled position/size and strokes in colour with round caps");
+    ok(typeof INK.inkId() === "string" && /^[0-9a-z]{8,10}$/.test(INK.inkId()) && INK.inkId() !== INK.inkId(), "#344 C1: inkId is short base-36 and unique");
+  }
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
