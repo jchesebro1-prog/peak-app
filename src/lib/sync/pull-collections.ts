@@ -1,4 +1,15 @@
 import { SYNCABLE_COLLECTIONS, SYNCABLE_SET, type CollectionName } from "@/db/doc-tables";
+import { can } from "@/lib/team";
+
+/**
+ * Jeff 2026-10-15 #39 — only field roles pull the offline field set:
+ * estimators, managers and admins, i.e. whoever holds `create` (ROLE_PERMS:
+ * Admin / Manager / Estimator all do, a Reviewer-only user does not). Anyone
+ * else gets 403 and the client engine stops pulling for the page's life.
+ */
+export function mayPullFieldData(roles: string[] | null | undefined): boolean {
+  return can("create", roles);
+}
 
 /**
  * #323 final review — the collections GET /api/sync/pull may serve: the offline

@@ -396,7 +396,7 @@ export async function setTaskStatusAction(formData: FormData) {
 }
 
 export async function updateTaskAction(formData: FormData) {
-  await requireUser();
+  const me = await requireUser();
   const taskId = String(formData.get("taskId") || "");
   if (!taskId) return;
   let projectId = str(formData, "id");
@@ -416,6 +416,11 @@ export async function updateTaskAction(formData: FormData) {
     Object.assign(patch, readTierSize(formData));
     if (!await updateTask(taskId, patch)) {
       projectErrorPath(projectId, formTab(formData, "tasks"), "That task could not be updated — please refresh and try again.");
+    }
+    // #351 review — a re-assign never moves an email share; only the thread's owner re-stamps it
+    if ("assigneeUserId" in patch) {
+      const { reshareTaskThread } = await import("@/lib/task-thread-share");
+      await reshareTaskThread(taskId, me);
     }
   } catch (error) {
     console.error("updateTaskAction failed", error);

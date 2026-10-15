@@ -85,7 +85,12 @@ export async function listDeletedDocs<T extends Doc = Doc>(coll: CollectionName)
  *  - `filled: "text"`: a non-empty string; `filled: "array"`: a non-empty
  *    JSON array;
  *  - `empty: "text"` (#349): the text at path, absent / null read as "", is
- *    "" (the exact complement of `filled: "text"`).
+ *    "" (the exact complement of `filled: "text"`);
+ *  - `in` (Jeff 2026-10-15 #26): the text at path is one of the values
+ *    (null/absent never matches; no values never matches);
+ *  - `idIn` (#351 review): the ROW id is one of the values (the id column
+ *    when the caller passes it — every doc-store reader does — else the
+ *    document's own `id`); no values never matches.
  * `all` of nothing is true; `any` of nothing is false.
  */
 export type DocCond =
@@ -95,7 +100,9 @@ export type DocCond =
   | { path: readonly string[]; isNot: string }
   | { path: readonly string[]; isFolded: string }
   | { path: readonly string[]; filled: "text" | "array" }
-  | { path: readonly string[]; empty: "text" };
+  | { path: readonly string[]; empty: "text" }
+  | { path: readonly string[]; in: readonly string[] }
+  | { idIn: readonly string[] };
 
 /** JS whitespace `trim()` strips, for the SQL btrim in `isFolded`. */
 const TRIM_CHARS = " \t\n\r\f\v\u00a0\ufeff";
@@ -111,10 +118,19 @@ function textAtPath(doc: SQLWrapper, path: readonly string[]): SQL {
   return sql`(${jsonAtPath(doc, path.slice(0, -1))} ->> ${path[path.length - 1]})`;
 }
 
-export function docCondSql(doc: SQLWrapper, c: DocCond): SQL {
-  if ("all" in c) return c.all.length ? sql`(${sql.join(c.all.map((x) => docCondSql(doc, x)), sql` AND `)})` : sql`TRUE`;
-  if ("any" in c) return c.any.length ? sql`(${sql.join(c.any.map((x) => docCondSql(doc, x)), sql` OR `)})` : sql`FALSE`;
+export function docCondSql(doc: SQLWrapper, c: DocCond, rowId?: SQLWrapper): SQL {
+  if ("all" in c) return c.all.length ? sql`(${sql.join(c.all.map((x) => docCondSql(doc, x, rowId)), sql` AND `)})` : sql`TRUE`;
+  if ("any" in c) return c.any.length ? sql`(${sql.join(c.any.map((x) => docCondSql(doc, x, rowId)), sql` OR `)})` : sql`FALSE`;
+  if ("idIn" in c) {
+    if (!c.idIn.length) return sql`FALSE`;
+    const target = rowId ? sql`${rowId}` : sql`(${doc} ->> 'id')`;
+    return sql`(${target} IN (${sql.join(c.idIn.map((v) => sql`${v}`), sql`, `)}))`;
+  }
   if ("is" in c) return sql`(${textAtPath(doc, c.path)} = ${c.is})`;
+  if ("in" in c) {
+    if (!c.in.length) return sql`FALSE`;
+    return sql`(${textAtPath(doc, c.path)} IN (${sql.join(c.in.map((v) => sql`${v}`), sql`, `)}))`;
+  }
   if ("isNot" in c) return sql`(coalesce(${textAtPath(doc, c.path)}, '') <> ${c.isNot})`;
   if ("isFolded" in c) {
     if (!c.isFolded) return sql`FALSE`;
@@ -163,7 +179,7 @@ export async function searchDocs<T extends Doc = Doc>(
   // Escape LIKE metacharacters so a user typing % or _ isn't a wildcard.
   const pattern = "%" + q.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
   const eqs = Object.entries(opts.fieldEquals ?? {}).map(([f, v]) => sql`${t.doc}->>${f} = ${v}`);
-  const extra = opts.where ? [docCondSql(t.doc, opts.where)] : [];
+  const extra = opts.where ? [docCondSql(t.doc, opts.where, t.id)] : [];
   const rows = await db
     .select()
     .from(t)
@@ -333,7 +349,7 @@ export async function listDocsByField<T extends Doc = Doc>(
 export async function listDocsWhere<T extends Doc = Doc>(coll: CollectionName, where: DocCond, opts: { limit?: number } = {}): Promise<T[]> {
   const db = await getDb();
   const t = table(coll);
-  const q = db.select().from(t).where(and(eq(t.deleted, false), docCondSql(t.doc, where))).orderBy(asc(t.id));
+  const q = db.select().from(t).where(and(eq(t.deleted, false), docCondSql(t.doc, where, t.id))).orderBy(asc(t.id));
   const rows = opts.limit != null ? await q.limit(opts.limit) : await q;
   return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
 }
@@ -425,7 +441,7 @@ export async function casDocKeyWhere(coll: CollectionName, where: DocCond, key: 
   const rows = await db
     .update(t)
     .set({ doc: sql`(${t.doc} || jsonb_build_object(${key}::text, ${JSON.stringify(value)}::jsonb))`, rev: sql`${t.rev} + 1`, updatedAt: now, receivedAt: now })
-    .where(and(eq(t.deleted, false), docCondSql(t.doc, where), sql`((${t.doc}->${key}) IS NULL OR jsonb_typeof(${t.doc}->${key}) = 'null')`))
+    .where(and(eq(t.deleted, false), docCondSql(t.doc, where, t.id), sql`((${t.doc}->${key}) IS NULL OR jsonb_typeof(${t.doc}->${key}) = 'null')`))
     .returning({ id: t.id });
   return rows.map((r) => r.id);
 }

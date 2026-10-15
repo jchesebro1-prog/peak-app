@@ -23,19 +23,21 @@ export function selectQuotes(
 ): TriageCandidate[] {
   const me = ctx.me.name;
   const byKey = new Map<string, TriageCandidate>();
-  const add = (q: Quote, fact: TriageFact, href: string, since: number, sub: string) => {
+  const add = (q: Quote, fact: TriageFact, href: string, since: number, sub: string, escalatedAt?: number) => {
     const key = triageKey.quote(q.id);
     const cur = byKey.get(key);
     if (cur) {
       cur.facts.push(fact);
+      if (escalatedAt && escalatedAt > (cur.escalatedAt ?? 0)) cur.escalatedAt = escalatedAt;
       return;
     }
-    byKey.set(key, { key, source: "quote", title: q.name || displayQuoteNumber(q), sub, href, since, facts: [fact] });
+    byKey.set(key, { key, source: "quote", title: q.name || displayQuoteNumber(q), sub, href, since, facts: [fact], ...(escalatedAt ? { escalatedAt } : {}) });
   };
   for (const q of quotes) {
     if (quoteAwaitsApprovalBy(q, me, ctx.me.canApprove)) {
+      // #37 — a (re)submit for approval after a "Not mine" brings it back
       add(q, { kind: "quote_awaiting_approval" }, quoteBuilderHref(q), q.review?.submittedAt || q.updatedAt || 0,
-        `${displayQuoteNumber(q)} · ${q.customer || ""} · from ${firstName(q.review?.submittedBy || q.owner || "")}`);
+        `${displayQuoteNumber(q)} · ${q.customer || ""} · from ${firstName(q.review?.submittedBy || q.owner || "")}`, q.review?.submittedAt || undefined);
     }
     if (quoteBackFromReview(q, me) === "changes") {
       add(q, { kind: "quote_sent_back" }, quoteBuilderHref(q), q.updatedAt || 0,

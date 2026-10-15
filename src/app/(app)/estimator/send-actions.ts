@@ -144,8 +144,9 @@ export async function estimateEmailDefaultsAction(quoteId: string): Promise<Esti
  * §10.4 — the Activity card: the quote's tracked emails (newest first), the
  * client-link opens and the unread-reply count. Anyone who can see the
  * estimate may read it (the shareLinkStatusAction rule); only threads
- * recorded on THIS quote are ever returned, and the message text only to the
- * thread's owner, send|approve holders and the quote's Lead estimator.
+ * recorded on THIS quote are ever returned, message text included (Jeff
+ * 2026-10-15 #25: anyone who can open the quote reads the replies;
+ * Reply and Mark read stay the mailbox owner's).
  */
 export async function sendTrackAction(quoteId: string): Promise<TrackResult> {
   const user = await requireUser();

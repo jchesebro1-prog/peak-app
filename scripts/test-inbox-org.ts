@@ -2110,10 +2110,10 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   ok(ra.suggestion === "Lincoln HS → EST-1042 Main curtain" && ra.strength === "strong" && ra.canApprove && ra.href === "/inbox?view=organize&tab=to-file&thread=a", "ui vm: a row carries its suggestion, strength and reader link");
   ok(vmT.rows.find((r) => r.id === "b")!.needsReply && vmT.rows.find((r) => r.id === "c")!.archived && !vmT.rows.find((r) => r.id === "b")!.archived, "ui vm: the needs-reply dot and the Archived chip (archived-on-reply only)");
   ok(!vmT.rows.find((r) => r.id === "d")!.canApprove && vmT.rows.find((r) => r.id === "d")!.suggestion === null, "ui vm: a suggestion with nothing to file under can't be approved");
-  ok(vmT.isAdmin && vmT.noiseInInboxIds.length === 0, "ui vm: admin flag passes through; no Noise ids on To file");
+  ok(vmT.isAdmin && vmT.noiseShownIds.length === 0, "ui vm: admin flag passes through; no Noise ids on To file");
   const vmN = buildOrganizeVM(threads, { tab: "noise", now: NOW, customerName: names });
   ok(vmN.rows.map((r) => r.id).join(",") === "n,f,e" && vmN.rows[0].reason === "Newsletter" && vmN.rows[1].reason === "No-reply sender" && vmN.rows[2].reason === "Promotions", "polish: Noise lists everything flagged as noise (moved and tagged-only), newest first, each with its reason; rescued left out");
-  ok(vmN.noiseInInboxIds.join(",") === "n,f" && vmN.strongIds.length === 0 && !vmN.isAdmin, "polish: Archive all shown takes the noise still in the inbox (a tagged-only thread included)");
+  ok(vmN.noiseShownIds.join(",") === "n,f,e" && vmN.strongIds.length === 0 && !vmN.isAdmin, "Jeff 10-15 #29: Archive all shown takes every Noise row shown — still in the inbox or already archived");
   const vmF = buildOrganizeVM(threads, { tab: "filed", now: NOW, customerName: names });
   ok(vmF.rows.map((r) => r.id).join(",") === "i,g" && vmF.rows[0].filedBy === "approved" && vmF.rows[1].filedBy === "on reply" && !!vmF.rows[0].filedWhen, "ui vm: Filed lists the last 14 days, newest filing first, with how it was filed");
   const many = Array.from({ length: 205 }, (_, i) => th(`m${i}`, { filing: fil({ state: "filed", filedAt: NOW - i * 1000 }) }));
@@ -3010,6 +3010,28 @@ export async function inboxOrgArchiveLabelChecks(ok: Ok): Promise<void> {
     const forged = await undoArchiveFromOrganize({ threadId: lb, unarchive: true, unskip: true, unclear: true }, me);
     ok(forged.ok && (await read(lb)).archived === false && (await read(lb)).filing?.state === "suggested", "archive #346: Undo reverses only what is still there (a never-archived thread is left as it is)");
     ok(ORGANIZE_ARCHIVE_MAX === 500, "archive #346: one Archive takes at most 500 threads");
+
+    /* Jeff 2026-10-15 #29 — Noise "Archive all shown": every row shown, a row's own Archive each, one Undo */
+    const ns1 = await mk("ns-tagged");
+    await setOrg(ns1, { filing: sugg({ noise: true, customerId: null, source: "noise-rule", strength: "strong" }), noise: { flagged: true, reason: "Promotions", moved: false } });
+    const ns2 = await mk("ns-moved", { archived: true });
+    await setOrg(ns2, { filing: sugg({ noise: true, customerId: null, source: "noise-rule", strength: "strong" }), noise: { flagged: true, reason: "Newsletter", moved: true } });
+    const ns3 = await mk("ns-dismissed", { archived: true });
+    await setOrg(ns3, { filing: sugg({ noise: true, customerId: null, state: "dismissed", source: "noise-rule" }), noise: { flagged: true, reason: "Marked as noise", moved: true } });
+    const nsIds = [ns1, ns2, ns3];
+    const vmBefore = buildOrganizeVM(await Promise.all(nsIds.map(read)), { tab: "noise", now: Date.now(), customerName: () => null });
+    ok(nsIds.every((x) => vmBefore.noiseShownIds.includes(x)), "Jeff 10-15 #29: (setup) Archive all shown carries every Noise row shown — in the inbox, moved and marked-noise");
+    const batch = [];
+    for (const x of vmBefore.noiseShownIds) batch.push(await archiveFromOrganize(x, "noise", me));
+    const after = await Promise.all(nsIds.map(read));
+    ok(batch.every((r) => r.ok) && after.every((t) => t.archived === true && t.noise?.cleared === true && !isNoiseRow(t)), "Jeff 10-15 #29: every row shown is archived AND cleared off the Noise tab");
+    ok(buildOrganizeVM(after, { tab: "noise", now: Date.now(), customerName: () => null }).rows.length === 0, "Jeff 10-15 #29: after Archive all shown the Noise tab shows none of them");
+    ok(after[2].filing?.state === "dismissed" && after[0].filing?.state === "skipped", "Jeff 10-15 #29: a marked-noise (dismissed) row keeps its filing; a suggested one is skipped — a row's own Archive, unchanged");
+    const undos = batch.flatMap((r) => (r.ok ? [r.undo] : []));
+    for (const u of undos) await undoArchiveFromOrganize(u, me);
+    const undone = await Promise.all(nsIds.map(read));
+    ok(undone.every((t) => isNoiseRow(t)) && undone[0].archived === false && undone[1].archived === true && undone[2].archived === true && undone[0].filing?.state === "suggested",
+      "Jeff 10-15 #29: the batch's one Undo puts every row back on Noise — only the one that was in the inbox is re-inboxed");
   } finally {
     await dropFixtures(346);
     if (logBefore) await db.update(blobs).set({ data: logBefore.data, updatedAt: logBefore.updatedAt }).where(eq(blobs.id, FILING_LOG_BLOB));
@@ -3029,6 +3051,10 @@ export async function inboxOrgArchiveLabelChecks(ok: Ok): Promise<void> {
   ok(ob.includes(`window.addEventListener(ORGANIZE_ARCHIVED_EVENT, on)`) && ob.includes("undoArchiveFromOrganizeAction(undo)") && ob.includes("data-organize-undo") && ob.includes("data-organize-archive") && ob.includes("archiveFromOrganizeAction(ids, tab)"), "archive #346: the Organize box shows Archived … Undo (its own row Archive and the reader's) and each row has Archive");
   ok(/for \(const id of ids\) postChanged\("thread", id\);/.test(ob) && /for \(const u of undo\) postChanged\("thread", u\.threadId\);/.test(ob), "archive #346: Archive and Undo post changed for each thread");
   ok(ob.includes("approveAllStrongAction(vm.strongIds)"), "archive #346: Approve all strong is still there");
+  ok(/try \{\s*const r = await archiveFromOrganize\(id, t, me\);\s*if \(r\.ok\) undo\.push\(r\.undo\);\s*else refused\+\+;\s*\} catch \(e\) \{[\s\S]{0,160}refused\+\+;\s*\}/.test(oa) && ob.includes("(r.refused ? ` · ${r.refused} couldn't be archived` : \"\")"),
+    "#351 M7: a row that throws counts as refused — the rows that archived keep their Undo, and the note names the rest");
+  ok(/const archiveShown = \(\) => archiveRows\(vm\.noiseShownIds\);/.test(ob) && !ob.includes("bulkArchiveAction") && ob.includes('(r.more ? " · press again for the rest" : "")'), "Jeff 10-15 #29: Noise's Archive all shown runs the rows' own Archive (archiveFromOrganizeAction) over every row shown, with the one Undo note");
+  ok(/const more = Array\.isArray\(threadIds\) && new Set\(threadIds\.map\(\(x\) => str\(x\)\)\.filter\(Boolean\)\)\.size > list\.length;\s*return \{ ok: true as const, archived: undo\.length, refused, undo, more \};/.test(oa), "Jeff 10-15 #29: past the 500 cap the action says there is more");
   ok(ORGANIZE_ARCHIVED_EVENT === "peak:organize-archived", "archive #346: the reader → box event name");
   const page = src("src/app/(app)/inbox/page.tsx");
   ok(page.includes("if (reader && !reader.readOnly) reader = { ...reader, organize: organizeArchiveTarget(vm, reader.id) };"), "archive #346: only my own thread's reader gets the Organize Archive");

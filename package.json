@@ -49,6 +49,8 @@
     "test:brief": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-brief.ts; s=$?; rm -rf \"$TEST_DB\"; exit $s",
     "test:suggest": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-suggest.ts; s=$?; rm -rf \"$TEST_DB\"; exit $s",
     "test:ask": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-ask.ts; s=$?; rm -rf \"$TEST_DB\"; exit $s",
+    "test:morning-triage": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-morning-triage.ts; s=$?; rm -rf \"$TEST_DB\"; exit $s",
+    "test:portal-invite": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-portal-invite.ts; s=$?; rm -rf \"$TEST_DB\"; exit $s",
     "test:thread-visibility": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-thread-visibility.ts; s=$?; rm -rf \"$TEST_DB\"; exit $s",
     "test:settings-race": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-settings-race.ts; s=$?; rm -rf \"$TEST_DB\"; exit $s",
     "test:smoke:upload": "tsx scripts/smoke-upload.ts",

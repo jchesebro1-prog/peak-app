@@ -13,8 +13,17 @@ export function snoozeUntil(day: string): string {
   return slotOrdinal(n.day, n.slot);
 }
 
-export function markHides(m: Pick<TriageMark, "kind" | "snapshotId" | "until">, cur: SlotRef): boolean {
-  if (m.kind === "dismiss") return true;
+/** Jeff 2026-10-15 #37 — a "Not mine" stops counting once the item escalated
+ *  after it was marked (a new customer message, a resubmit for approval, an
+ *  SLA breach): the row's `escalatedAt` is later than the mark. Pure. */
+export function dismissLapsed(m: Pick<TriageMark, "kind" | "at">, row: Pick<SnapshotRow, "escalatedAt"> | null | undefined): boolean {
+  if (m.kind !== "dismiss") return false;
+  const esc = row?.escalatedAt;
+  return typeof esc === "number" && Number.isFinite(esc) && typeof m.at === "number" && esc > m.at;
+}
+
+export function markHides(m: Pick<TriageMark, "kind" | "snapshotId" | "until"> & Partial<Pick<TriageMark, "at">>, cur: SlotRef, row?: Pick<SnapshotRow, "escalatedAt"> | null): boolean {
+  if (m.kind === "dismiss") return !dismissLapsed({ kind: m.kind, at: m.at ?? Number.POSITIVE_INFINITY }, row);
   if (m.kind === "done") return m.snapshotId === cur.snapshotId;
   return !!m.until && slotOrdinal(cur.day, cur.slot) < m.until;
 }
@@ -29,6 +38,6 @@ export function visibleRows(
   return rows.filter((r) => {
     if (closed.has(r.key)) return false;
     const m = byKey.get(r.key);
-    return !(m && markHides(m, cur));
+    return !(m && markHides(m, cur, r));
   });
 }

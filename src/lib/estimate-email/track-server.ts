@@ -1,5 +1,4 @@
 import { cleanOpens } from "@/lib/estimate-output/opens";
-import { leadEstimator } from "@/lib/estimate-output/responses";
 import { get as getThreadLive, markRead as markReadLive, reply as replyLive } from "@/lib/stores/comms";
 import { get as getQuoteLive, type Quote } from "@/lib/stores/quotes";
 import { can } from "@/lib/team";
@@ -55,19 +54,19 @@ export type TrackDeps = {
   markRead: (threadId: string) => Promise<unknown | null>;
   /** Hold the thread's latest outbound email back from later bridge sends (I1). */
   holdBack: (threadId: string, delivery: Exclude<EmailDelivery, "gmail">) => Promise<void>;
-  /** The team roster, any status — the quote's Lead estimator (shared
-   *  leadEstimator rule, active members only) and (#349) whether a legacy
-   *  name-only thread's owner name is unique. */
+  /** The team roster, any status — (#349) whether a legacy name-only
+   *  thread's owner name is unique. */
   roster: () => Promise<RosterUser[]>;
 };
 
 export type TrackOpens = { total: number; byRev: Record<string, number> };
 
 /**
- * One tracked email as a viewer may see it. Metadata (subject, recipient, sent
- * time, rev, delivery, unread count) is for everyone who can see the estimate;
- * the message text only for the thread's owner, send|approve holders and the
- * quote's Lead estimator — otherwise `messages` is empty and `textHidden` set.
+ * One tracked email as a viewer may see it. Metadata and the message text
+ * (subject, recipient, sent time, rev, delivery, unread count, every message)
+ * are for everyone who can open the estimate (Jeff 2026-10-15 #25);
+ * before it the text was the owner's, send|approve holders' and the
+ * Lead estimator's only. Reply and Mark read stay the owner's (#349).
  */
 export type TrackedEmail = ThreadSummary & {
   /** The estimate revision this email carried (from the recorded entry). */
@@ -77,7 +76,6 @@ export type TrackedEmail = ThreadSummary & {
   /** The viewer is the owner (Reply / Mark read are theirs alone) and the
    *  email was actually sent to someone (never a draft — final review I2). */
   canReply: boolean;
-  textHidden: boolean;
 };
 
 export type TrackViewer = Pick<SendActor, "id" | "name" | "roles">;
@@ -129,20 +127,6 @@ function replyable(raw: unknown): boolean {
   return msgs.some((m) => m?.direction === "out");
 }
 
-/** The quote's Lead estimator's user id (owner, else preparedBy when the
- *  owner isn't an active team member) — estimate-output/responses
- *  leadEstimator, which returns the roster entry. #349 review: compared by id,
- *  never by display name; a failed roster read is nobody. */
-async function leadIdOf(deps: TrackDeps, q: Pick<Quote, "owner" | "preparedBy">): Promise<string> {
-  try {
-    const active = (await deps.roster()).filter((u) => (u.status ?? "active") === "active");
-    return leadEstimator(q.owner, q.preparedBy, active)?.id ?? "";
-  } catch (e) {
-    console.error("[estimate-email] track: roster read failed", e);
-    return "";
-  }
-}
-
 /** The mailbox a raw comms thread lives in, for display (a person's name;
  *  "" = not personal). Never an ownership test — that is `ownedBy`. */
 function mailboxOwnerOf(raw: unknown): string {
@@ -176,7 +160,7 @@ function ownedBy(raw: unknown, viewer: MailboxViewer): boolean {
  * The quote's tracked emails, newest first (by when each went out; the
  * later-recorded wins a tie), threads that no longer exist skipped, plus the
  * link-open totals and the count of unread customer replies across them. The
- * message text follows the viewer (see TrackedEmail).
+ * message text goes to every viewer (Jeff 2026-10-15 #25); Reply follows the owner.
  */
 export async function trackEstimate(deps: TrackDeps, viewer: TrackViewer, quoteId: string): Promise<TrackResult> {
   const id = String(quoteId || "");
@@ -187,13 +171,12 @@ export async function trackEstimate(deps: TrackDeps, viewer: TrackViewer, quoteI
   for (const e of Array.isArray(q.estimateEmails) ? q.estimateEmails : []) {
     if (e && typeof e.threadId === "string" && Number.isFinite(e.rev)) revOf.set(e.threadId, e.rev);
   }
-  const holdsPerm = can("send", viewer.roles) || can("approve", viewer.roles);
-  const leadId = await leadIdOf(deps, q);
-  const isLead = !!leadId && leadId === viewer.id; // #349 review — by id
   const me = await viewerOf(deps, viewer);
   const loaded = await Promise.all(ids.map(async (tid) => {
     try {
       const raw = await deps.getThread(tid);
+      // #351 review M5 — a thread in Deleted is not listed
+      if ((raw as { deleted?: unknown } | null)?.deleted) return null;
       const s = summarizeThread(raw);
       return s ? { s, owner: mailboxOwnerOf(raw), mine: ownedBy(raw, me), replyable: replyable(raw) } : null;
     } catch (e) {
@@ -207,14 +190,13 @@ export async function trackEstimate(deps: TrackDeps, viewer: TrackViewer, quoteI
     .sort((a, b) => b.x.s.sentAt - a.x.s.sentAt || a.i - b.i)
     .map(({ x }): TrackedEmail => {
       const isOwner = x.mine; // #349 — by identity, never the display name
-      const textHidden = !(isOwner || holdsPerm || isLead);
       return {
         ...x.s,
-        messages: textHidden ? [] : x.s.messages,
+        // Jeff 2026-10-15 #25 — the text is readable by anyone who can open the quote
+        messages: x.s.messages,
         rev: revOf.get(x.s.threadId) ?? 0,
         ownerName: x.owner,
         canReply: isOwner && x.replyable,
-        textHidden,
       };
     });
   return { ok: true, emails, opens: opensOf(q), newReplies: emails.reduce((n, e) => n + e.unread, 0) };
@@ -312,8 +294,8 @@ export function liveTrackDeps(): TrackDeps {
     reply: (threadId, body, me) => replyLive(threadId, { body, me }),
     markRead: markReadLive,
     holdBack: holdOutbound,
-    // #349 — every user (any status): leadNameOf keeps the active ones, and an
-    // archived namesake still makes a legacy owner name ambiguous
+    // #349 — every user (any status): an archived namesake still makes a
+    // legacy owner name ambiguous
     roster: async () => (await allUsers()).map((u) => ({ id: u.id, name: u.name, status: u.status })),
   };
 }

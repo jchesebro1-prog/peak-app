@@ -287,10 +287,12 @@ Estimating Rules — these just need real values before go-live)
   person → department scope → optional cross-links; to wire it I need the
   department per contact for real customers. ✦ org-wide is fine for beta
   ☐ department map: ______
-- **F16.** *(Jul 12 — customer portal)* Portal access links are copied
+- ~~**F16.** *(Jul 12 — customer portal)* Portal access links are copied
   manually from the customer record for now. Once Gmail is connected
   (GMAIL_ENABLED), should "Create access link" also **email it to the
-  contact automatically**? ✦ yes, auto-send ☐ keep manual copy.
+  contact automatically**? ✦ yes, auto-send ☐ keep manual copy.~~
+  **ANSWERED 2026-10-15 (Jeff): yes — from the granter's own mailbox, Copy
+  link kept as the fallback. Built in #351 (D1104).**
   *(Update, same day: the non-binding "Accept quote" button shipped — D64 —
   so the remaining portal slice is photo/document uploads on requests,
   which also needs the object-storage call from IDEAS #46.)*
@@ -450,10 +452,12 @@ project and opportunity history (D241–D242).
 The Start here card on Home and `/triage` rank what needs you each morning and
 midday (D707–D711).
 
-- **P1.** **Morning triage — "Not mine" is permanent per record.** A dismissed
+- ~~**P1.** **Morning triage — "Not mine" is permanent per record.** A dismissed
   quote later resubmitted for approval, or a dismissed lead that later
   breaches its SLA, never returns to your list. ✦ keep permanent ☐ let a new
-  event (resubmit / SLA breach) bring it back: ______
+  event (resubmit / SLA breach) bring it back: ______~~ **ANSWERED 2026-10-15
+  (Jeff): it comes back when it escalates — a new customer message, a resubmit
+  or an SLA breach. Built in #351 (D1102).**
 
 ## Q. Address verification + drive time (built 2026-10-10, #325)
 
