@@ -9,7 +9,10 @@ import {
   acceptRuleOffer,
   approveAllStrong,
   approveFiling,
+  archiveFromOrganize,
   changeFiling,
+  ORGANIZE_ARCHIVE_MAX,
+  undoArchiveFromOrganize,
   markNoise,
   notNoise,
   overrideCourt,
@@ -21,7 +24,7 @@ import {
   type RuleChoice,
   type RuleOffer,
 } from "@/lib/inbox-org/apply";
-import type { CourtOwner, Filing } from "@/lib/inbox-org/types";
+import type { CourtOwner, Filing, OrganizeArchiveTab, OrganizeArchiveUndo } from "@/lib/inbox-org/types";
 import { customerRecordCandidates, likelyFilingCustomer } from "@/lib/inbox-org/ai-filing";
 import { filingSenderOf } from "@/lib/inbox-org/pipeline";
 import { get as getThread, visibleTo } from "@/lib/stores/comms";
@@ -104,6 +107,42 @@ export async function undoFilingAction(threadId: string) {
   const r = await undoFiling(str(threadId), await actor());
   revalidate();
   return r;
+}
+
+/** #346 — Archive from the Organize view (the reader's Archive, a row's
+ *  Archive): one or more of my own threads, each through archiveFromOrganize
+ *  (owner-checked there). Returns the Undo record for what it changed. */
+export async function archiveFromOrganizeAction(threadIds: string[], tab: string) {
+  const me = await actor();
+  const t: OrganizeArchiveTab = tab === "noise" || tab === "filed" ? tab : "to-file";
+  const list = Array.isArray(threadIds) ? [...new Set(threadIds.map((x) => str(x)).filter(Boolean))].slice(0, ORGANIZE_ARCHIVE_MAX) : [];
+  const undo: OrganizeArchiveUndo[] = [];
+  let refused = 0;
+  for (const id of list) {
+    const r = await archiveFromOrganize(id, t, me);
+    if (r.ok) undo.push(r.undo);
+    else refused++;
+  }
+  revalidate();
+  return { ok: true as const, archived: undo.length, refused, undo };
+}
+
+/** #346 — Undo an Organize Archive. Each entry is re-checked (my own thread,
+ *  and only a change that is still there) by undoArchiveFromOrganize. */
+export async function undoArchiveFromOrganizeAction(list: OrganizeArchiveUndo[]) {
+  const me = await actor();
+  const items = Array.isArray(list) ? list.slice(0, ORGANIZE_ARCHIVE_MAX) : [];
+  let restored = 0;
+  for (const u of items) {
+    if (!u || typeof u !== "object") continue;
+    const r = await undoArchiveFromOrganize(
+      { threadId: str(u.threadId), unarchive: u.unarchive === true, unskip: u.unskip === true, unclear: u.unclear === true },
+      me
+    );
+    if (r.ok) restored++;
+  }
+  revalidate();
+  return { ok: true as const, restored };
 }
 
 /** `ids`: the rows the person sees, or "all-visible" for their whole To file

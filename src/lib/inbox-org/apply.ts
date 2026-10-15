@@ -50,7 +50,17 @@ import {
 } from "./pipeline";
 import { inboxOrgDisabled } from "./kill-switch";
 import { isPlaceholderCompany } from "./placeholder";
-import type { Court, CourtOwner, Filing, FilingAction, FilingApplied, SenderRule } from "./types";
+import type {
+  Court,
+  CourtOwner,
+  Filing,
+  FilingAction,
+  FilingApplied,
+  NoiseFlag,
+  OrganizeArchiveTab,
+  OrganizeArchiveUndo,
+  SenderRule,
+} from "./types";
 
 const lc = (s: string | null | undefined) => String(s ?? "").trim().toLowerCase();
 
@@ -487,6 +497,70 @@ export async function undoFiling(threadId: string, me: OrgActor, now: number = D
   return { ok: true, filing };
 }
 
+/* ---- archive from Organize (#346) -------------------------------------------------- */
+
+/** The most threads one Organize Archive (or its Undo) takes. */
+export const ORGANIZE_ARCHIVE_MAX = 500;
+
+/** Archive from the Organize view: the Inbox's own archive (`comms.archive`
+ *  — Gmail follows through the inbox-state sync). On To file and Noise it
+ *  also takes the row off that list the way Skip does: a waiting suggestion
+ *  becomes `skipped` (logged like Skip — the AI run's outcome `discarded`),
+ *  and a Noise row is `cleared`; new mail brings either back. On Filed it
+ *  only archives — the filing is left as it is. Returns what it changed, for
+ *  Undo. */
+export async function archiveFromOrganize(
+  threadId: string,
+  tab: OrganizeArchiveTab,
+  me: OrgActor,
+  now: number = Date.now()
+): Promise<{ ok: true; undo: OrganizeArchiveUndo } | ApplyFail> {
+  const t = await myThread(threadId, me);
+  if (!t) return NOT_FOUND();
+  const f = t.filing;
+  let unskip = false;
+  let unclear = false;
+  if (tab !== "filed") {
+    if (f && f.state === "suggested") {
+      await setOrg(t.id, { filing: { ...settled(f), state: "skipped" } });
+      await logAction(t, f, "skipped", { userId: me.id, outcome: "discarded", state: "skipped", now });
+      unskip = true;
+    }
+    if (tab === "noise" && t.noise?.flagged && !t.noise.rescued && !t.noise.cleared) {
+      await setOrg(t.id, { noise: { ...t.noise, cleared: true } });
+      unclear = true;
+    }
+  }
+  const unarchiveIt = !t.archived;
+  if (unarchiveIt) await archive(t.id);
+  return { ok: true, undo: { threadId: t.id, unarchive: unarchiveIt, unskip, unclear } };
+}
+
+/** Undo an Organize Archive: put back each part it changed, only while that
+ *  change is still there (a suggestion new mail has already reset, or a
+ *  thread someone un-archived since, is left alone). The skip's undo is
+ *  logged like Undo. */
+export async function undoArchiveFromOrganize(
+  u: OrganizeArchiveUndo,
+  me: OrgActor,
+  now: number = Date.now()
+): Promise<{ ok: true } | ApplyFail> {
+  const t = await myThread(u.threadId, me);
+  if (!t) return NOT_FOUND();
+  const f = t.filing;
+  if (u.unskip && f && f.state === "skipped") {
+    await setOrg(t.id, { filing: { ...f, state: "suggested", at: now } });
+    await logAction(t, f, "undone", { userId: me.id, outcome: "undo", state: "suggested", now });
+  }
+  if (u.unclear && t.noise?.cleared) {
+    const noise: NoiseFlag = { ...t.noise };
+    delete noise.cleared;
+    await setOrg(t.id, { noise });
+  }
+  if (u.unarchive && t.archived) await unarchive(t.id);
+  return { ok: true };
+}
+
 /* ---- approve all strong ---------------------------------------------------------- */
 
 export const APPROVE_ALL_MAX = 500;
@@ -522,9 +596,11 @@ export function isToFileRow(t: CommThread): boolean {
 
 /** The Organize view's Noise tab rule (spec §2 "everything flagged as noise"):
  *  flagged and not rescued — moved (archived) or only tagged and still in the
- *  inbox. Shared with the daily brief's Organize counts. */
+ *  inbox. Shared with the daily brief's Organize counts. #346 — a row
+ *  archived from the Noise tab (`cleared`) is off it until new mail
+ *  re-flags the thread. */
 export function isNoiseRow(t: CommThread): boolean {
-  return t.mailbox === "personal" && !t.deleted && t.status !== "draft" && !!t.noise?.flagged && !t.noise.rescued;
+  return t.mailbox === "personal" && !t.deleted && t.status !== "draft" && !!t.noise?.flagged && !t.noise.rescued && !t.noise.cleared;
 }
 
 /** The person's To file list (spec §2), newest first. Task 6's selector. */

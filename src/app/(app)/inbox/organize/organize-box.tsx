@@ -9,18 +9,22 @@
  * `changed` (postChanged) on BroadcastChannel("peak") (spec §9); the actions
  * revalidate this page themselves.
  */
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { RuleOffer } from "@/lib/inbox-org/apply";
+import type { OrganizeArchiveUndo } from "@/lib/inbox-org/types";
 import { postChanged } from "@/lib/popout/channel";
 import type { OrganizeRowVM, OrganizeVM } from "./load";
-import { FILED_CAP, FILED_DAYS, organizeHref, type OrganizeTab } from "./format";
+import { FILED_CAP, FILED_DAYS, ORGANIZE_ARCHIVED_EVENT, organizeArchiveNote, organizeHref, type OrganizeTab } from "./format";
 import {
   approveAllStrongAction,
   approveFilingAction,
+  archiveFromOrganizeAction,
   markNoiseAction,
   notNoiseAction,
   skipFilingAction,
+  undoArchiveFromOrganizeAction,
   undoFilingAction,
 } from "../organize-actions";
 import { bulkArchiveAction } from "../actions";
@@ -51,7 +55,8 @@ const BTN: React.CSSProperties = {
 };
 const PRIMARY: React.CSSProperties = { ...BTN, color: "#fff", background: "var(--accent)", border: "1px solid transparent" };
 
-type Note = { text: string; bad: boolean };
+/** `undo`: an Organize Archive's Undo record (#346) — the note offers Undo. */
+type Note = { text: string; bad: boolean; undo?: OrganizeArchiveUndo[] };
 type Offer = { offer: RuleOffer; threadId: string };
 
 export default function OrganizeBox({
@@ -75,7 +80,56 @@ export default function OrganizeBox({
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const tab = vm.tab;
-  const count = tab === "to-file" ? vm.counts.toFile : tab === "noise" ? vm.counts.noise : vm.counts.filed;
+  const router = useRouter();
+
+  // #346 — the reader's Archive (same page) reports here, so its Undo shows
+  // in this note like a row's own Archive
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ undo?: OrganizeArchiveUndo[]; text?: string }>).detail;
+      if (d && Array.isArray(d.undo) && d.undo.length) setNote({ text: d.text || "Archived", bad: false, undo: d.undo });
+    };
+    window.addEventListener(ORGANIZE_ARCHIVED_EVENT, on);
+    return () => window.removeEventListener(ORGANIZE_ARCHIVED_EVENT, on);
+  }, []);
+
+  /** #346 — Archive rows (on To file / Noise, also off the list, like Skip);
+   *  an open row hands the selection to the next row, else clears it. */
+  const archiveRows = (ids: string[]) =>
+    start(async () => {
+      setNote(null);
+      if (ids.length === 1) setBusyId(ids[0]);
+      try {
+        const r = await archiveFromOrganizeAction(ids, tab);
+        for (const id of ids) postChanged("thread", id);
+        if (!r.archived) setNote({ text: "Couldn't archive — try again.", bad: true });
+        else setNote({ text: organizeArchiveNote(tab, r.archived), bad: false, undo: r.undo });
+        if (tab !== "filed" && selectedId && ids.includes(selectedId)) {
+          const i = vm.rows.findIndex((x) => x.id === selectedId);
+          const next = vm.rows.slice(i + 1).find((x) => !ids.includes(x.id));
+          router.push(next ? next.href : organizeHref(vm.baseHref, tab));
+        }
+      } catch {
+        setNote({ text: "Something went wrong — try again.", bad: true });
+      } finally {
+        setBusyId(null);
+      }
+    });
+
+  const undoArchive = (undo: OrganizeArchiveUndo[]) =>
+    start(async () => {
+      try {
+        const r = await undoArchiveFromOrganizeAction(undo);
+        for (const u of undo) postChanged("thread", u.threadId);
+        setNote({ text: r.restored ? "Undone" : "Nothing to undo", bad: false });
+        // one row back → open it again
+        if (r.restored && undo.length === 1) router.push(organizeHref(vm.baseHref, tab, undo[0].threadId));
+      } catch {
+        setNote({ text: "Something went wrong — try again.", bad: true });
+      }
+    });
+
+  const count =tab === "to-file" ? vm.counts.toFile : tab === "noise" ? vm.counts.noise : vm.counts.filed;
 
   /** One row action: run it, post the change, show the note (and the offer). */
   const act = (
@@ -189,8 +243,19 @@ export default function OrganizeBox({
         )}
 
         {note && (
-          <div role="status" style={{ fontSize: 11.5, marginTop: 7, color: note.bad ? "#b4543a" : "#5b616e" }}>
-            {note.text}
+          <div role="status" style={{ fontSize: 11.5, marginTop: 7, color: note.bad ? "#b4543a" : "#5b616e", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span>{note.text}</span>
+            {note.undo && note.undo.length > 0 && (
+              <button
+                type="button"
+                data-organize-undo
+                style={{ ...BTN, padding: "2px 8px" }}
+                disabled={pending}
+                onClick={() => undoArchive(note.undo!)}
+              >
+                Undo
+              </button>
+            )}
           </div>
         )}
         {offer && (
@@ -261,6 +326,7 @@ export default function OrganizeBox({
                 onSkip={() => act(r.id, () => skipFilingAction(r.id), "Skipped — it comes back on new mail")}
                 onNotNoise={() => act(r.id, () => notNoiseAction(r.id), "Back in your inbox")}
                 onUndo={() => act(r.id, () => undoFilingAction(r.id), "Undone — back in To file")}
+                onArchive={() => archiveRows([r.id])}
               />
             ))}
             {tab === "filed" && vm.counts.filed > vm.rows.length && (
@@ -312,6 +378,7 @@ function Row({
   onSkip,
   onNotNoise,
   onUndo,
+  onArchive,
 }: {
   r: OrganizeRowVM;
   tab: OrganizeTab;
@@ -326,6 +393,7 @@ function Row({
   onSkip: () => void;
   onNotNoise: () => void;
   onUndo: () => void;
+  onArchive: () => void;
 }) {
   return (
     <div
@@ -401,6 +469,19 @@ function Row({
         {tab === "filed" && (
           <button type="button" style={BTN} disabled={disabled} onClick={onUndo}>
             Undo
+          </button>
+        )}
+        {/* #346 — every tab; on Filed only while it is still in the inbox */}
+        {(tab !== "filed" || r.inInbox) && (
+          <button
+            type="button"
+            style={BTN}
+            disabled={disabled}
+            onClick={onArchive}
+            data-organize-archive
+            title={tab === "filed" ? "Archive (the filing stays)" : "Archive — off this list until new mail"}
+          >
+            Archive
           </button>
         )}
       </div>

@@ -86,3 +86,44 @@ export function cleanupProgressText(checked: number, total: number): string {
 export function cleanupSummaryText(s: { suggested: number; noise: number; skipped: number; waitingAi: number }): string {
   return `Done: ${s.suggested} suggested · ${s.noise} noise · ${s.skipped} skipped${s.waitingAi ? ` · ${s.waitingAi} still with AI` : ""}`;
 }
+
+/** #346 — the reader's Archive when the thread was opened from the Organize
+ *  view: the tab (To file / Noise take the row off the list, Filed only
+ *  archives), whether the thread is a row of it, and where the selection
+ *  goes after a row leaves the list — the next row, else none (the tab with
+ *  nothing open). */
+export type OrganizeArchiveTarget = {
+  tab: OrganizeTab;
+  inList: boolean;
+  nextHref: string | null;
+  closeHref: string;
+};
+
+export function organizeArchiveTarget(
+  vm: { tab: OrganizeTab; baseHref: string; rows: ReadonlyArray<{ id: string; href: string }> },
+  threadId: string
+): OrganizeArchiveTarget {
+  const i = vm.rows.findIndex((r) => r.id === threadId);
+  return {
+    tab: vm.tab,
+    inList: i >= 0,
+    nextHref: i >= 0 ? (vm.rows[i + 1]?.href ?? null) : null,
+    closeHref: organizeHref(vm.baseHref, vm.tab),
+  };
+}
+
+/** #346 — the reader's Archive takes the row off the Organize list (To file /
+ *  Noise) instead of toggling Archive / Unarchive. */
+export function organizeArchiveRemoves(t: Pick<OrganizeArchiveTarget, "tab" | "inList"> | null | undefined): boolean {
+  return !!t && t.inList && t.tab !== "filed";
+}
+
+/** #346 — the Organize note after an Archive. */
+export function organizeArchiveNote(tab: OrganizeTab, n: number): string {
+  const what = n === 1 ? "Archived" : `Archived ${n}`;
+  return tab === "filed" ? what : `${what} — ${n === 1 ? "it comes" : "they come"} back on new mail`;
+}
+
+/** #346 — the reader tells the Organize box (same page) that it archived, so
+ *  the box shows the note with Undo. */
+export const ORGANIZE_ARCHIVED_EVENT = "peak:organize-archived";

@@ -2826,6 +2826,185 @@ export async function inboxOrgPlaceholderChecks(ok: Ok): Promise<void> {
   }
 }
 
+/* ---------- #346: Archive + Labels from the Organize view ---------- */
+
+export async function inboxOrgArchiveLabelChecks(ok: Ok): Promise<void> {
+  const { archiveFromOrganize, undoArchiveFromOrganize, isToFileRow, ORGANIZE_ARCHIVE_MAX } = await import("@/lib/inbox-org/apply");
+  const { setCategory, CATEGORIES } = await import("@/lib/stores/comms");
+  const { threadGmailLabels } = await import("@/app/(app)/inbox/row-labels");
+  const { organizeArchiveTarget, organizeArchiveRemoves, organizeArchiveNote, ORGANIZE_ARCHIVED_EVENT } = await import("@/app/(app)/inbox/organize/format");
+  const { isPlaceholderCompany } = await import("@/lib/inbox-org/placeholder");
+  const src = (p: string) => readFileSync(p, "utf8");
+
+  /* pure: where the selection goes, and what the reader's Archive does */
+  const rows = [
+    { id: "a", href: "/inbox?view=organize&tab=to-file&thread=a" },
+    { id: "b", href: "/inbox?view=organize&tab=to-file&thread=b" },
+  ];
+  const ta = organizeArchiveTarget({ tab: "to-file", baseHref: ORGANIZE_BASE_HREF, rows }, "a");
+  const tb = organizeArchiveTarget({ tab: "to-file", baseHref: ORGANIZE_BASE_HREF, rows }, "b");
+  const tx = organizeArchiveTarget({ tab: "noise", baseHref: ORGANIZE_BASE_HREF, rows }, "zz");
+  ok(ta.inList && ta.nextHref === rows[1].href && tb.nextHref === null && tb.closeHref === "/inbox?view=organize&tab=to-file", "archive #346: after an Archive the selection moves to the next row, else clears (the tab, nothing open)");
+  ok(organizeArchiveRemoves(ta) && !organizeArchiveRemoves({ tab: "filed", inList: true }) && !organizeArchiveRemoves(tx) && !organizeArchiveRemoves(null), "archive #346: the reader's Archive leaves the list on To file / Noise only (Filed only archives; a thread not in the list toggles as in the Inbox)");
+  ok(organizeArchiveNote("to-file", 1) === "Archived — it comes back on new mail" && organizeArchiveNote("filed", 2) === "Archived 2", "archive #346: the note says a skipped row comes back on new mail");
+
+  /* pure: a cleared Noise row is off the Noise tab (and its counts) */
+  const NOW = Date.now();
+  const thv = (id: string, o: Partial<CommThread>): CommThread =>
+    ({ id, mailbox: "personal", mailboxUser: "TEST346 Vm", status: "waiting_us", archived: true, deleted: false, subject: id, updatedAt: NOW, messages: [], ...o }) as unknown as CommThread;
+  const nz = [thv("n1", { noise: { flagged: true, reason: "Promo", moved: true } }), thv("n2", { noise: { flagged: true, reason: "Promo", moved: true, cleared: true } })];
+  const vmN = buildOrganizeVM(nz, { tab: "noise", now: NOW, customerName: () => null });
+  ok(vmN.rows.map((r) => r.id).join(",") === "n1" && vmN.counts.noise === 1 && !isNoiseRow(nz[1]), "archive #346: a Noise row archived from Organize (cleared) is off the Noise tab and its count");
+
+  /* pure: labels — the Inbox's categories; Gmail chips skip placeholder labels */
+  const opts = [
+    { id: "L1", name: "Peak/Customers/UNKNOWN", type: "user" as const, textColor: null, backgroundColor: null },
+    { id: "L2", name: "Clients", type: "user" as const, textColor: null, backgroundColor: null },
+    { id: "INBOX", name: "INBOX", type: "system" as const, textColor: null, backgroundColor: null },
+  ];
+  const msgs = [{ gmailLabelIds: ["L1", "L2", "INBOX"] }];
+  ok(threadGmailLabels(msgs, opts, { skipPlaceholders: true }).map((l) => l.id).join(",") === "L2", "labels #346: the Labels card never shows a placeholder Peak/Customers label (or Gmail's routing labels)");
+  ok(threadGmailLabels(msgs, opts).map((l) => l.id).join(",") === "L1,L2", "labels #346: the Inbox row keeps its chips as before (shared helper)");
+  ok(CATEGORIES.length > 0 && CATEGORIES.every((c) => !isPlaceholderCompany(c.label) && !isPlaceholderCompany(c.key)), "labels #346: the labels offered are the Inbox's category presets — never a placeholder");
+
+  /* db */
+  const ME = "TEST346 Ann Archive";
+  const me = { id: "TEST346-u-ann", name: ME, roles: ["Estimator"] };
+  let n = 0;
+  const T0 = Date.now() - 3_600_000;
+  const msg = (o: Partial<CommMessage> = {}): CommMessage =>
+    ({ id: `ar${++n}`, at: T0 + n * 60_000, direction: "in", channel: "email", author: "Pat", body: "Can you send the price?", fromEmail: "pat@archive-346.test", ...o }) as CommMessage;
+  const mk = async (slug: string, o: Partial<CommThread> = {}): Promise<string> => {
+    const id = fixtureId(346, "ar-" + slug);
+    await createFixture("comms", {
+      id, mailbox: "personal", mailboxUser: ME, unread: false, archived: false, customerId: null, customer: "", contactName: "Pat",
+      contactEmail: "pat@archive-346.test", cc: "", subject: "Hello", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [msg()], createdAt: T0, updatedAt: T0 + 5, resolution: "unknown", ...o,
+    } as unknown as CommThread);
+    return id;
+  };
+  const read = async (id: string) => (await getDoc<CommThread>("comms", id))!;
+  const sugg = (o: Partial<Filing> = {}): Filing => ({ customerId: "TEST346-cust", work: null, noise: false, source: "identity", reason: "Known contact", strength: "weak", needsReply: true, state: "suggested", at: T0, ...o });
+  const db = await getDb();
+  const logBefore = (await db.select().from(blobs).where(eq(blobs.id, FILING_LOG_BLOB)).limit(1))[0];
+  try {
+    /* To file: archive = archive + skip; Undo puts back both */
+    const tf = await mk("to-file");
+    await setOrg(tf, { filing: sugg() });
+    ok(isToFileRow(await read(tf)), "archive #346: (setup) a To file row");
+    const r1 = await archiveFromOrganize(tf, "to-file", me);
+    const a1 = await read(tf);
+    ok(r1.ok && a1.archived === true && a1.filing?.state === "skipped" && !isToFileRow(a1), "archive #346: Archive from To file archives the thread and skips the suggestion (off the list)");
+    ok(r1.ok && r1.undo.threadId === tf && r1.undo.unarchive && r1.undo.unskip && !r1.undo.unclear, "archive #346: …and hands back what it changed for Undo");
+    ok((await getFilingLog()).some((e) => e.threadId === tf && e.action === "skipped"), "archive #346: logged like Skip (filing log 'skipped')");
+    if (r1.ok) await undoArchiveFromOrganize(r1.undo, me);
+    const u1 = await read(tf);
+    ok(u1.archived === false && u1.filing?.state === "suggested" && isToFileRow(u1), "archive #346: Undo un-archives and returns the suggestion to To file");
+    ok((await getFilingLog()).some((e) => e.threadId === tf && e.action === "undone"), "archive #346: Undo is logged like Undo");
+    const r1b = await archiveFromOrganize(tf, "to-file", me);
+    await addMessage(tf, { direction: "in", body: "Any update?" });
+    await organizeThread(tf);
+    ok(r1b.ok && (await read(tf)).filing?.state === "suggested", "archive #346: new outside mail brings an archived To file row's suggestion back (like Skip)");
+
+    /* the AI outcome is recorded the way Skip records it */
+    const ai = await mk("ai");
+    const RUN = fixtureId(346, "ar-run");
+    await upsertDoc("assist_runs" as never, { id: RUN, feature: "file", step: null, userId: me.id, userName: ME, provider: "fake", model: "m", requestedModel: "m", fellBack: false, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, latencyMs: 0, inputHash: "h", output: "", ok: true, error: null, stopReason: null, contextRef: "thread:" + ai, monthKey: "2026-10", outcome: null, outcomeDetail: null, outcomeAt: null, createdAt: Date.now() - 1000 } as never);
+    registerFixture("assist_runs" as never, RUN);
+    await setOrg(ai, { filing: sugg({ source: "ai", runId: RUN, strength: "strong" }) });
+    await archiveFromOrganize(ai, "to-file", me);
+    ok((await getRun(RUN))?.outcome === "discarded" && (await getRun(RUN))?.outcomeDetail?.action === "skipped", "archive #346: an AI suggestion archived from To file sets the run's outcome 'discarded' (action skipped), as Skip does");
+
+    /* Filed: archive only — the filing stays */
+    const fd = await mk("filed");
+    const filed = sugg({ state: "filed", filedBy: "approved", filedAt: NOW, customerId: "TEST346-cust" });
+    await setOrg(fd, { filing: filed });
+    const filedBefore = JSON.stringify((await read(fd)).filing);
+    const r2 = await archiveFromOrganize(fd, "filed", me);
+    const a2 = await read(fd);
+    ok(r2.ok && a2.archived === true && JSON.stringify(a2.filing) === filedBefore && a2.filing?.state === "filed" && a2.filing.filedBy === "approved" && !r2.undo.unskip, "archive #346: Archive from Filed only archives — the filing is untouched");
+    if (r2.ok) await undoArchiveFromOrganize(r2.undo, me);
+    ok((await read(fd)).archived === false && (await read(fd)).filing?.state === "filed", "archive #346: Undo on Filed un-archives; still filed");
+
+    /* Noise: tagged (in the inbox) and moved (already archived) */
+    const nt = await mk("noise-tagged");
+    await setOrg(nt, { filing: sugg({ noise: true, customerId: null, source: "noise-rule", strength: "strong" }), noise: { flagged: true, reason: "Promotions", moved: false } });
+    ok(isNoiseRow(await read(nt)), "archive #346: (setup) a tagged Noise row");
+    const r3 = await archiveFromOrganize(nt, "noise", me);
+    const a3 = await read(nt);
+    ok(r3.ok && a3.archived === true && a3.noise?.cleared === true && a3.filing?.state === "skipped" && !isNoiseRow(a3) && r3.undo.unclear && r3.undo.unskip, "archive #346: Archive from Noise archives, takes the row off Noise (cleared) and skips its suggestion");
+    if (r3.ok) await undoArchiveFromOrganize(r3.undo, me);
+    const u3 = await read(nt);
+    ok(u3.archived === false && u3.noise?.cleared === undefined && u3.noise?.flagged === true && u3.filing?.state === "suggested" && isNoiseRow(u3), "archive #346: Undo puts the Noise row back (in the inbox, flagged, suggested)");
+    const nm = await mk("noise-moved", { archived: true });
+    const dismissed = sugg({ noise: true, customerId: null, state: "dismissed", source: "noise-rule" });
+    await setOrg(nm, { filing: dismissed, noise: { flagged: true, reason: "Marked as noise", moved: true } });
+    const r4 = await archiveFromOrganize(nm, "noise", me);
+    ok(r4.ok && !r4.undo.unarchive && !r4.undo.unskip && r4.undo.unclear && (await read(nm)).filing?.state === "dismissed" && !isNoiseRow(await read(nm)), "archive #346: a moved (already archived) Noise row is only cleared — still dismissed, nothing to un-archive");
+
+    /* label: the Inbox's category action leaves the filing alone */
+    const lb = await mk("label");
+    await setOrg(lb, { filing: sugg() });
+    const before = JSON.stringify((await read(lb)).filing);
+    await setCategory(lb, "red");
+    ok((await read(lb)).category === "red" && JSON.stringify((await read(lb)).filing) === before && isToFileRow(await read(lb)), "labels #346: applying a label sets the category and leaves the filing (still in To file)");
+    await setCategory(lb, null);
+    ok(!(await read(lb)).category && JSON.stringify((await read(lb)).filing) === before, "labels #346: removing it (✕) leaves the filing too");
+
+    /* several at once: the action's loop over two rows */
+    const b1 = await mk("bulk-1");
+    const b2 = await mk("bulk-2");
+    for (const id of [b1, b2]) await setOrg(id, { filing: sugg() });
+    const rb = await Promise.all([b1, b2].map((id) => archiveFromOrganize(id, "to-file", me)));
+    ok(rb.every((r) => r.ok) && (await read(b1)).filing?.state === "skipped" && (await read(b2)).archived === true, "archive #346: two rows archive and skip independently (bulk)");
+    for (const id of [b1, b2]) await setCategory(id, "blue");
+    ok((await read(b1)).category === "blue" && (await read(b2)).filing?.state === "skipped", "labels #346: a label on several rows (bulkCategoryAction's loop) leaves each filing alone");
+
+    /* never a teammate's thread */
+    const other = await mk("other", { mailboxUser: "TEST346 Ben Other" });
+    await setOrg(other, { filing: sugg() });
+    const ro = await archiveFromOrganize(other, "to-file", me);
+    const ru = await undoArchiveFromOrganize({ threadId: other, unarchive: true, unskip: true, unclear: true }, me);
+    ok(!ro.ok && ro.error === "not-found" && !ru.ok && (await read(other)).archived === false && (await read(other)).filing?.state === "suggested", "archive #346: someone else's thread is refused (Archive and Undo) and left untouched");
+    const forged = await undoArchiveFromOrganize({ threadId: lb, unarchive: true, unskip: true, unclear: true }, me);
+    ok(forged.ok && (await read(lb)).archived === false && (await read(lb)).filing?.state === "suggested", "archive #346: Undo reverses only what is still there (a never-archived thread is left as it is)");
+    ok(ORGANIZE_ARCHIVE_MAX === 500, "archive #346: one Archive takes at most 500 threads");
+  } finally {
+    await dropFixtures(346);
+    if (logBefore) await db.update(blobs).set({ data: logBefore.data, updatedAt: logBefore.updatedAt }).where(eq(blobs.id, FILING_LOG_BLOB));
+    else await db.delete(blobs).where(eq(blobs.id, FILING_LOG_BLOB));
+  }
+
+  /* source pins: actions, reader, sidebar, Organize box */
+  const oa = src("src/app/(app)/inbox/organize-actions.ts");
+  ok(/export async function archiveFromOrganizeAction\(threadIds: string\[\], tab: string\)[\s\S]*?const me = await actor\(\);[\s\S]*?await archiveFromOrganize\(id, t, me\)[\s\S]*?revalidate\(\);/.test(oa), "archive #346: archiveFromOrganizeAction loops my own threads through archiveFromOrganize, then revalidates");
+  ok(/export async function undoArchiveFromOrganizeAction\(list: OrganizeArchiveUndo\[\]\)[\s\S]*?await undoArchiveFromOrganize\([\s\S]*?u\.unarchive === true/.test(oa), "archive #346: the Undo action re-reads each flag as a strict boolean");
+  const ap = src("src/lib/inbox-org/apply.ts");
+  ok(/export async function archiveFromOrganize\([\s\S]*?const t = await myThread\(threadId, me\);\s*if \(!t\) return NOT_FOUND\(\);[\s\S]*?if \(unarchiveIt\) await archive\(t\.id\);/.test(ap), "archive #346: archiveFromOrganize is owner-checked (myThread) and archives through comms.archive (Gmail follows)");
+  const tr = src("src/app/(app)/inbox/thread-reader.tsx");
+  ok(tr.includes("await archiveFromOrganizeAction([vm.id], org.tab);") && tr.includes("router.push(org.nextHref ?? org.closeHref)") && tr.includes("new CustomEvent(ORGANIZE_ARCHIVED_EVENT") && tr.includes('postChanged("thread", vm.id);'), "archive #346: the reader's bottom Archive, opened from Organize, archives through the Organize action, posts changed, tells the box (Undo) and moves to the next row");
+  ok(/if \(vm\.archived\) await unarchiveAction\(vm\.id\);\s*else await archiveAction\(vm\.id\);/.test(tr), "archive #346: outside Organize the reader's Archive / Unarchive is the Inbox's own");
+  const ob = src("src/app/(app)/inbox/organize/organize-box.tsx");
+  ok(ob.includes(`window.addEventListener(ORGANIZE_ARCHIVED_EVENT, on)`) && ob.includes("undoArchiveFromOrganizeAction(undo)") && ob.includes("data-organize-undo") && ob.includes("data-organize-archive") && ob.includes("archiveFromOrganizeAction(ids, tab)"), "archive #346: the Organize box shows Archived … Undo (its own row Archive and the reader's) and each row has Archive");
+  ok(/for \(const id of ids\) postChanged\("thread", id\);/.test(ob) && /for \(const u of undo\) postChanged\("thread", u\.threadId\);/.test(ob), "archive #346: Archive and Undo post changed for each thread");
+  ok(ob.includes("approveAllStrongAction(vm.strongIds)"), "archive #346: Approve all strong is still there");
+  ok(ORGANIZE_ARCHIVED_EVENT === "peak:organize-archived", "archive #346: the reader → box event name");
+  const page = src("src/app/(app)/inbox/page.tsx");
+  ok(page.includes("if (reader && !reader.readOnly) reader = { ...reader, organize: organizeArchiveTarget(vm, reader.id) };"), "archive #346: only my own thread's reader gets the Organize Archive");
+  ok(/labels: readOnly\s*\?\s*null/.test(page) && page.includes("threadGmailLabels(sel.messages || [], labelOptions, { max: 12, skipPlaceholders: true })") && page.includes("labels: threadGmailLabels(t.messages || [], labelOptions),"), "labels #346: the reader VM carries labels for my own thread only (null when read-only); the Inbox row's chips use the same helper");
+  const ls = src("src/app/(app)/inbox/link-sidebar.tsx");
+  ok(ls.includes("<LabelsCard vm={vm} />"), "labels #346: the reader's sidebar has a Labels card");
+  const lc = src("src/app/(app)/inbox/labels-card.tsx");
+  ok(lc.startsWith('"use client";') && lc.includes("await categoryAction(vm.id, key);") && lc.includes('postChanged("thread", vm.id);') && lc.includes("if (!labels || vm.readOnly) return null;") && lc.includes("apply(null)") && lc.includes("<CategoryMenu"), "labels #346: the Labels card applies / removes (✕) through the Inbox's categoryAction, posts changed, and shows nothing on a read-only thread");
+  ok(!valueImports(lc).some((p) => /^@\/(db\b|lib\/stores\/|lib\/inbox-org\/)/.test(p)), "labels #346: labels-card imports no store, db or server module");
+  const cb = src("src/app/(app)/inbox/command-bar.tsx");
+  ok(cb.includes("export function CategoryMenu(") && /<CategoryMenu\s+trigger=\{<ActBtnInner icon=\{<TagIcon size=\{14\} \/>\} label="Categorize" caret \/>\}/.test(cb), "labels #346: the Inbox's Categorize ▾ and the Labels card share one CategoryMenu");
+  const act = src("src/app/(app)/inbox/actions.ts");
+  ok(/export async function categoryAction\(id: string, key: string \| null\) \{\s*const user = await requireUser\(\);\s*if \(!\(await ownThread\(id, user\.name\)\)\) return;/.test(act), "labels #346: categoryAction stays owner-checked (#341)");
+  const ld = src("src/app/(app)/inbox/organize/load.ts");
+  ok(ld.includes("const mine = (await allThreads()).filter((t) => visibleTo(t, me.name));"), "archive #346: Organize lists only my own threads — a read-only #341 thread never shows there");
+}
+
 export async function inboxOrgPureChecks(ok: Ok): Promise<void> {
   numberChecks(ok);
   noiseChecks(ok);
@@ -2858,6 +3037,7 @@ if (process.argv[1] && /test-inbox-org\.ts$/.test(process.argv[1])) {
     await inboxOrgCleanupChecks(ok);
     await inboxOrgEntryChecks(ok);
     await inboxOrgPlaceholderChecks(ok);
+    await inboxOrgArchiveLabelChecks(ok);
     // later tasks append: await inboxOrgXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall inbox-org checks passed");
     process.exit(fail ? 1 : 0);

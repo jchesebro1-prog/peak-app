@@ -114,7 +114,32 @@ export type Court = {
 
 /** `CommThread.noise`. `moved` = held out of the inbox (pilot users only);
  *  everyone else just sees the "Looks like noise" tag. */
-export type NoiseFlag = { flagged: boolean; reason: string; moved: boolean; rescued?: boolean };
+export type NoiseFlag = {
+  flagged: boolean;
+  reason: string;
+  moved: boolean;
+  rescued?: boolean;
+  /** #346 — archived from the Organize view's Noise tab: off the Noise list.
+   *  New mail that re-flags the thread writes a fresh flag without it, so it
+   *  comes back (like Skip). */
+  cleared?: boolean;
+};
+
+/** #346 — the Organize tab an Archive came from. */
+export type OrganizeArchiveTab = "to-file" | "noise" | "filed";
+
+/** #346 — what one Archive from the Organize view changed, handed back to
+ *  the client for Undo. Each part is re-checked against the thread before it
+ *  is put back (Undo only reverses a change that is still there). */
+export type OrganizeArchiveUndo = {
+  threadId: string;
+  /** the thread was in the app inbox — Undo un-archives it */
+  unarchive: boolean;
+  /** the suggestion was skipped — Undo returns it to "suggested" */
+  unskip: boolean;
+  /** the Noise row was cleared — Undo puts it back on the Noise tab */
+  unclear: boolean;
+};
 
 /** One saved rule in the `inbox_sender_rules` blob (spec §5). */
 export type SenderRule = {
