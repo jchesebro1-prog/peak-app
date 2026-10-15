@@ -6,7 +6,7 @@
 import type { Answer, Answers } from "./answers";
 import type { AssessmentDef, Category, QuestionDef, Rating, ScopeCode } from "./defs/types";
 import { allModules, allQuestions } from "./defs";
-import { evaluate, type EvalResult, type ScopeSel } from "./evaluate";
+import { evaluate, riggingDepth, type EvalResult, type ScopeSel } from "./evaluate";
 import { answerHasContent, flagsForScope, formatValue, optionsFor, photosForQuestions, type PicklistExtrasVM } from "./editor-model";
 import { CATEGORY_ROUTING, liveMergeTarget, resolvedPromptIds, type Finding } from "./findings-model";
 import { CATEGORIES, PRIORITY_LABEL, RATINGS, RATING_LABEL, STATUS_LABEL, buildingAndSpace, compareRegister, dayLabel, findingLabel } from "./register";
@@ -151,7 +151,8 @@ export interface ReportInput {
   now: number;
 }
 
-const DEPTH_LABEL: Record<string, string> = { screen: "Screening", full: "Full" };
+/** Jeff 2026-10-15 #8 — rigging's depth reads Quick check / Full inspection. */
+const DEPTH_LABEL: Record<string, string> = { screen: "Quick check", full: "Full inspection" };
 const LOCKOUT_LABEL: Record<string, string> = { locked: "Locked out", tagged: "Tagged", none: "Not locked out or tagged" };
 
 /** "Mar 3, 2026" for an epoch-ms date answer / visit date (they are stored as UTC midnight). */
@@ -272,7 +273,8 @@ export function buildAssessmentReport(input: ReportInput): AssessmentReportModel
     .filter((s) => s.code === "S0" || a.scopes.find((x) => x.code === s.code)?.on)
     .map((s) => {
       const sel = a.scopes.find((x) => x.code === s.code);
-      return sel?.depth ? { title: s.title, depth: DEPTH_LABEL[sel.depth] ?? sel.depth } : { title: s.title };
+      const depth = s.code === "S2" ? riggingDepth(res.visible.has("rigging.depth") ? a.answers : {}, a.scopes) : sel?.depth;
+      return depth ? { title: s.title, depth: DEPTH_LABEL[depth] ?? depth } : { title: s.title };
     });
 
   // 5. Findings register (and 3's counts) — live findings only.
@@ -314,7 +316,8 @@ export function buildAssessmentReport(input: ReportInput): AssessmentReportModel
       if (mod) mod.photoIds.push(p.id);
     }
     const kept = mods.filter((x) => x.rows.length || x.photoIds.length);
-    scopes.push({ code: s.code, title: s.title, ...(sel?.depth ? { depth: DEPTH_LABEL[sel.depth] ?? sel.depth } : {}), flags: flagsForScope(def, res, s.code).map((f) => f.text), modules: kept });
+    const depth = s.code === "S2" ? riggingDepth(res.visible.has("rigging.depth") ? a.answers : {}, a.scopes) : sel?.depth;
+    scopes.push({ code: s.code, title: s.title, ...(depth ? { depth: DEPTH_LABEL[depth] ?? depth } : {}), flags: flagsForScope(def, res, s.code).map((f) => f.text), modules: kept });
   }
 
   // 6. Follow-up

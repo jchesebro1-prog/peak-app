@@ -26,6 +26,11 @@ import { generateSchedule, withEngagementPhaseIds } from "../src/lib/consulting-
 import { phaseWeightsFor } from "../src/lib/settings";
 import { createManualEngagement, DEFAULT_CONSULTING_PHASES } from "../src/lib/stores/engagements";
 import { canChangeVisit, isVisitLead, VISIT_EDIT_REFUSAL } from "../src/lib/visit-edit-rights";
+import { ASSESSMENT_DEF, allQuestions } from "../src/lib/assessments/defs";
+import { FIXED_PICK_LISTS } from "../src/lib/assessments/defs/picklists";
+import { evaluate, riggingDepth, type EvalInput } from "../src/lib/assessments/evaluate";
+import type { Answer, Answers } from "../src/lib/assessments/answers";
+import { addPicklistValue } from "../src/lib/stores/assessment-picklists";
 
 const ROOT = join(__dirname, "..");
 const src = (p: string) => readFileSync(join(ROOT, p), "utf8");
@@ -315,6 +320,61 @@ function visitRightsChecks(ok: Ok) {
   ok(!/from "@\/lib\/stores|from "@\/db/.test(src("src/lib/visit-edit-rights.ts")), "b3 #35 pin: the rule module is store-free");
 }
 
+/* ------------------------------------------------------------------ #8 rigging depth ------------------------------------------------------------------ */
+
+async function rigDepthChecks(ok: Ok) {
+  const def = ASSESSMENT_DEF;
+  const rig = def.scopes.find((x) => x.code === "S2")!;
+  const sys = rig.modules.find((m) => m.id === "rigging.system")!;
+  ok(sys.questions[0].key === "rigging.depth" && sys.questions[0].type === "one" && sys.questions[0].options === "rig_depth" && !sys.questions[0].required,
+    "b3 #8: rigging asks its depth first, in the form (one scope, a toggle — not two scopes)");
+  ok(def.pickLists.rig_depth.map((o) => o.value + "=" + o.label).join() === "screen=Quick check,full=Full inspection" && FIXED_PICK_LISTS.has("rig_depth"),
+    "b3 #8: Quick check / Full inspection, a fixed list (values match the scope depth)");
+  const refused = await addPicklistValue("rig_depth", "Medium");
+  ok(!refused.ok && refused.error === "This list is fixed", "b3 #8: an admin can't add a third depth");
+  ok(def.version === 1 && def.rules.some((r) => r.id === "R6") && def.rules.some((r) => r.id === "R7") && allQuestions(def).get("rigging.depth")?.scope === "S2",
+    "b3 #8: additive change — defVersion stays 1, R6 / R7 keep their ids, the key is new");
+
+  const base = { def, visitType: "condition", profile: {}, photos: [], dismissed: [], resolved: [], now: Date.UTC(2026, 9, 15) };
+  const sc = def.visitTypes.find((v) => v.key === "condition")!.scopes.map((x) => ({ ...x }));
+  const A = (v: unknown): Answer => ({ v, state: "answered", at: 1, by: "u1" });
+  const ev = (answers: Answers, extra: Partial<EvalInput> = {}) => evaluate({ ...base, scopes: sc, answers, ...extra });
+  const FULL = ["rigging.dimensions", "rigging.lineset_schedule", "rigging.hardware_inventory"];
+  const QUICK = ["rigging.system", "rigging.screen", "rigging.counterweight", "rigging.wire_rope"];
+  const cw = { "rigging.overhead": A("counterweight") };
+  const legacy = ev(cw);
+  ok(legacy.visible.has("rigging.depth") && FULL.every((m) => !legacy.visibleModules.has(m)) && QUICK.every((m) => legacy.visibleModules.has(m)),
+    "b3 #8: no depth answered on a Condition assessment = Quick check (as every assessment before the toggle evaluated)");
+  const quick = ev({ ...cw, "rigging.depth": A("screen") });
+  ok([...quick.visibleModules].sort().join() === [...legacy.visibleModules].sort().join() && [...quick.visible].sort().join() === [...legacy.visible].sort().join(),
+    "b3 #8: answering Quick check evaluates exactly like no answer (existing assessments unchanged)");
+  const full = ev({ ...cw, "rigging.depth": A("full") });
+  ok(FULL.every((m) => full.visibleModules.has(m)) && QUICK.every((m) => full.visibleModules.has(m)) && full.visible.has("rigging.plaster_to_rear") && full.visible.has("rigging.lineset_table"),
+    "b3 #8: Full inspection adds R7's modules (dimensions, install history, line set schedule, hardware inventory) on top of the quick check");
+  const scFull = sc.map((x) => (x.code === "S2" ? { ...x, depth: "full" as const } : x));
+  ok(FULL.every((m) => ev(cw, { scopes: scFull }).visibleModules.has(m)) && FULL.every((m) => !ev({ ...cw, "rigging.depth": A("screen") }, { scopes: scFull }).visibleModules.has(m)),
+    "b3 #8: unanswered reads the scope's own depth (a visit type's default); the answer wins over it");
+  ok(!ev({ "rigging.overhead": A("none"), "rigging.depth": A("full") }).visibleModules.has("rigging.lineset_schedule") && !ev({ "rigging.overhead": A("none") }).visible.has("rigging.depth"),
+    "b3 #8: with no overhead rigging (R1) the depth isn't asked and full-inspection modules stay skipped");
+
+  // Answers carry over when a quick check becomes a full inspection (and back).
+  const table = A([{ set: "1", distance: "2'0\"", hangs: "Main valance" }]);
+  const fullAnswers: Answers = { ...cw, "rigging.depth": A("full"), "rigging.lineset_table": table, "rigging.plaster_to_rear": A(480), "rigging.total_sets": A(30) };
+  const asQuick: Answers = { ...fullAnswers, "rigging.depth": A("screen") };
+  const q1 = ev(asQuick);
+  ok(!q1.visible.has("rigging.lineset_table") && !q1.visible.has("rigging.plaster_to_rear") && q1.visible.has("rigging.total_sets") && asQuick["rigging.lineset_table"] === table,
+    "b3 #8: switching to Quick check hides the full-inspection answers but keeps them stored");
+  const back = ev({ ...asQuick, "rigging.depth": A("full") });
+  ok(back.visible.has("rigging.lineset_table") && back.visible.has("rigging.plaster_to_rear") && back.progress.rigging.done > q1.progress.rigging.done,
+    "b3 #8: switching back to Full inspection brings them back answered (they count toward progress again)");
+  ok(riggingDepth({}, sc) === "screen" && riggingDepth({ "rigging.depth": A("full") }, sc) === "full" && riggingDepth({}, scFull) === "full" && riggingDepth({ "rigging.depth": A("screen") }, scFull) === "screen",
+    "b3 #8: riggingDepth — the answer, else the scope default");
+  const rm = src("src/lib/assessments/report-model.ts");
+  ok(rm.includes('{ screen: "Quick check", full: "Full inspection" }') && /s\.code === "S2" \? riggingDepth\(/.test(rm), "b3 #8 pin: the report names the depth in force: Quick check / Full inspection");
+  ok(/Quick check = everything the brief's R6 keeps/.test(src("src/lib/assessments/defs/scopes/rigging.ts")),
+    "b3 #8: the quick/full split is documented in the S2 definition");
+}
+
 /* ------------------------------------------------------------------ entry points ------------------------------------------------------------------ */
 
 export async function batch3PureChecks(ok: Ok) {
@@ -322,6 +382,7 @@ export async function batch3PureChecks(ok: Ok) {
   pipelineChecks(ok);
   phasePickerChecks(ok);
   visitRightsChecks(ok);
+  await rigDepthChecks(ok);
 }
 
 export async function batch3DbChecks(ok: Ok) {
