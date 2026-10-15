@@ -125,7 +125,9 @@ export async function archiveFromOrganizeAction(threadIds: string[], tab: string
     else refused++;
   }
   revalidate();
-  return { ok: true as const, archived: undo.length, refused, undo };
+  // Jeff 2026-10-15 #29 — Archive all shown sends every Noise row; past the cap the rest wait for another press
+  const more = Array.isArray(threadIds) && new Set(threadIds.map((x) => str(x)).filter(Boolean)).size > list.length;
+  return { ok: true as const, archived: undo.length, refused, undo, more };
 }
 
 /** #346 — Undo an Organize Archive. Each entry is re-checked (my own thread,

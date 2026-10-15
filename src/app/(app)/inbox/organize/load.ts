@@ -54,7 +54,7 @@ export type OrganizeRowVM = {
   canApprove: boolean;
   /** an archived-on-reply To file row (the "Archived" chip) */
   archived: boolean;
-  /** still in the inbox (app and Gmail side) — Noise's Archive all shown */
+  /** still in the inbox (app and Gmail side) */
   inInbox: boolean;
   /** Filed tab: "approved" / "on reply" / "sender rule" / "teammate reply" */
   filedBy: string | null;
@@ -67,8 +67,9 @@ export type OrganizeVM = {
   counts: { toFile: number; noise: number; filed: number };
   /** the To file rows Approve all strong takes */
   strongIds: string[];
-  /** Noise rows still in the inbox */
-  noiseInInboxIds: string[];
+  /** Jeff 2026-10-15 #29 — every Noise row shown: Archive all shown archives
+   *  AND clears each (a row's own Archive, batched), with one Undo */
+  noiseShownIds: string[];
   /** company-wide sender rules (rule offer checkbox) */
   isAdmin: boolean;
   baseHref: string;
@@ -152,7 +153,7 @@ export function buildOrganizeVM(
     rows,
     counts: { toFile: toFile.length, noise: noise.length, filed: filed.length },
     strongIds: tab === "to-file" ? toFile.filter((t) => isStrongRow(effective(t))).map((t) => t.id) : [],
-    noiseInInboxIds: tab === "noise" ? rows.filter((r) => r.inInbox).map((r) => r.id) : [],
+    noiseShownIds: tab === "noise" ? rows.map((r) => r.id) : [],
     isAdmin: !!opts.isAdmin,
     baseHref,
   };
