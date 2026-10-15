@@ -13,22 +13,21 @@
  * Anything else → the reader's live Draft reply / Suggest tasks paths.
  */
 import { onMyCourt } from "@/lib/triage/feeds/email";
-import { sameName } from "@/lib/quote-approval-rules";
 import { chicagoTime } from "@/lib/triage/clock";
-import type { CommThread } from "@/lib/stores/comms";
+import { isAssignedTo, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
 import { preDraftFreshFor } from "./fresh";
 import type { ReaderPreDraftVM } from "./types";
 
-type ThreadLike = Pick<CommThread, "court" | "status" | "noise" | "messages" | "assignedTo" | "preDraft">;
+type ThreadLike = Pick<CommThread, "court" | "status" | "noise" | "messages" | "assignedTo" | "preDraft"> & Partial<Pick<CommThread, "assignedToId">>;
 
 export function readerPreDraft(
   t: ThreadLike,
-  me: { id: string; name: string },
+  me: MailboxViewer,
   env?: Record<string, string | undefined>
 ): ReaderPreDraftVM | null {
   const pd = t.preDraft;
   if (!pd || !preDraftFreshFor(t, me.id)) return null;
-  if (!sameName(t.assignedTo, me.name) || !onMyCourt(t, env)) return null;
+  if (!isAssignedTo(t, me) || !onMyCourt(t, env)) return null; // #349 — by identity
   const body = typeof pd.body === "string" ? pd.body : "";
   const reply = body.trim() ? { body, runId: pd.runId ?? null } : null;
   // An empty stored list never replaces the live Suggest tasks call.

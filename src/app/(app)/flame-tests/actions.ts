@@ -184,7 +184,7 @@ export async function startFlameRenewalOutreach(
   const user = await requireUser();
   const id = String(formData.get("id") || "");
   if (!id) return;
-  const res = await flameRenewalOutreach(id, user.name);
+  const res = await flameRenewalOutreach(id, { id: user.id, name: user.name });
   revalidatePath("/", "layout");
   if (res)
     redirect(

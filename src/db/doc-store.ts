@@ -83,7 +83,9 @@ export async function listDeletedDocs<T extends Doc = Doc>(coll: CollectionName)
  *  - `isFolded`: the text at path, trimmed and lower-cased, equals the value
  *    (pass the value already folded; "" never matches);
  *  - `filled: "text"`: a non-empty string; `filled: "array"`: a non-empty
- *    JSON array.
+ *    JSON array;
+ *  - `empty: "text"` (#349): the text at path, absent / null read as "", is
+ *    "" (the exact complement of `filled: "text"`).
  * `all` of nothing is true; `any` of nothing is false.
  */
 export type DocCond =
@@ -92,7 +94,8 @@ export type DocCond =
   | { path: readonly string[]; is: string }
   | { path: readonly string[]; isNot: string }
   | { path: readonly string[]; isFolded: string }
-  | { path: readonly string[]; filled: "text" | "array" };
+  | { path: readonly string[]; filled: "text" | "array" }
+  | { path: readonly string[]; empty: "text" };
 
 /** JS whitespace `trim()` strips, for the SQL btrim in `isFolded`. */
 const TRIM_CHARS = " \t\n\r\f\v\u00a0\ufeff";
@@ -118,6 +121,7 @@ export function docCondSql(doc: SQLWrapper, c: DocCond): SQL {
     return sql`(lower(btrim(coalesce(${textAtPath(doc, c.path)}, ''), ${TRIM_CHARS})) = ${c.isFolded})`;
   }
   if (!c.path.length) throw new Error("DocCond: empty path");
+  if ("empty" in c) return sql`(coalesce(${textAtPath(doc, c.path)}, '') = '')`;
   if (c.filled === "array") {
     const j = jsonAtPath(doc, c.path);
     // CASE, not AND: Postgres doesn't promise AND short-circuits, and
@@ -319,6 +323,19 @@ export async function listDocsByField<T extends Doc = Doc>(
     for (const r of rows) out.push({ ...(r.doc as T), id: r.id });
   }
   return out;
+}
+
+/**
+ * #349 — live rows matching one `DocCond` (the thread-ownership predicate),
+ * filtered in SQL, in id order; `limit` caps the rows. Every path segment and
+ * value is a bound parameter (docCondSql).
+ */
+export async function listDocsWhere<T extends Doc = Doc>(coll: CollectionName, where: DocCond, opts: { limit?: number } = {}): Promise<T[]> {
+  const db = await getDb();
+  const t = table(coll);
+  const q = db.select().from(t).where(and(eq(t.deleted, false), docCondSql(t.doc, where))).orderBy(asc(t.id));
+  const rows = opts.limit != null ? await q.limit(opts.limit) : await q;
+  return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
 }
 
 /**

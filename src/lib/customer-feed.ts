@@ -23,6 +23,7 @@ import {
   visitFeedRows,
   type FeedRow,
 } from "@/lib/customer-feed-rows";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 /**
  * #21 customer Activity feed loader — SERVER-ONLY (fans out over the doc
@@ -48,9 +49,11 @@ export const FEED_CAP = 60;
 export async function loadCustomerFeed(
   cust: { id: string; name: string },
   viewerId?: string,
-  /** #341 — the viewer's name: their own threads on this company show too */
-  viewerName?: string
+  /** #341 — the viewer: their own threads on this company show too (#349 —
+   *  by identity, so it carries the id and name) */
+  viewer?: { id: string; name: string }
 ): Promise<FeedRow[]> {
+  const mailbox = viewer?.id ? await mailboxViewer(viewer) : null;
   const [notes, quotes, threads, visits, flames, repairs, inspections, surveys, projects, pipes, meetings] =
     await Promise.all([
       notesForCustomer(cust.id),
@@ -82,7 +85,7 @@ export async function loadCustomerFeed(
   // the company summary): shared threads only (isSharedThread). A thread on
   // this customer only through the automatic sender match is private to its
   // mailbox. The rows open the Inbox reader, read-only for anyone but the owner.
-  const seen = viewerName ? (t: (typeof threads)[number]) => canSeeThread(t, viewerName) : isSharedThread;
+  const seen = mailbox ? (t: (typeof threads)[number]) => canSeeThread(t, mailbox) : isSharedThread;
   for (const t of threads.filter(seen)) rows.push(...commFeedRows(t));
   for (const v of visits) rows.push(...visitFeedRows(v));
 

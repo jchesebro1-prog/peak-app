@@ -186,7 +186,7 @@ export async function replyToEstimateEmailAction(quoteId: string, threadId: stri
 /** §10.4 — Mark read: clears unread on one of the quote's estimate emails (the thread owner's alone). */
 export async function markEstimateEmailReadAction(quoteId: string, threadId: string): Promise<TrackReadResult> {
   const user = await requireUser();
-  const r = await markEstimateEmailRead(liveTrackDeps(), { name: user.name }, String(quoteId || ""), String(threadId || ""));
+  const r = await markEstimateEmailRead(liveTrackDeps(), { id: user.id, name: user.name }, String(quoteId || ""), String(threadId || ""));
   if (r.ok) revalidatePath("/", "layout");
   return r;
 }

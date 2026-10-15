@@ -117,7 +117,7 @@ export async function mailboxLabels(
  *  a thread whose Gmail account is anyone else's (or unstamped) is refused,
  *  whatever its display mailbox says. */
 async function myGmailThread(threadId: string, me: Me): Promise<{ t: CommThread; key: string } | LabelFail> {
-  const t = await ownThread(threadId, me.name);
+  const t = await ownThread(threadId, me);
   if (!t || t.deleted || t.status === "draft") return failWith("not-found");
   const key = personalKey(me.id);
   if (t.mailbox !== "personal" || !t.gmailThreadId || t.gmailAccountKey !== key) return failWith("no-gmail");

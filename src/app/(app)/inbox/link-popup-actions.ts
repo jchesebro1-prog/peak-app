@@ -52,6 +52,7 @@ import {
   type LinkTargetKind,
 } from "@/lib/inbox-link-targets";
 import type { LinkPopupData, PopupParticipant } from "./types";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 type R = { ok: true; note?: string } | { ok: false; error: string };
 type DataR = { ok: true; data: LinkPopupData } | { ok: false; error: string };
@@ -90,7 +91,7 @@ type Loaded = { ok: true; t: CommThread; m: CommMessage } | { ok: false; error: 
 
 async function loadThread(threadId: string, messageId: string, me: SessionUser): Promise<Loaded> {
   const t = await getThread(threadId);
-  if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
+  if (!t || !visibleTo(t, await mailboxViewer(me))) return { ok: false, error: "Thread not found." };
   const m = (t.messages || []).find((x) => x.id === messageId);
   if (!m) return { ok: false, error: "That message isn't on this thread." };
   return { ok: true, t, m };
@@ -242,7 +243,7 @@ export async function setThreadContactsAction(
 ): Promise<R> {
   const me = await requireUser();
   const t = await getThread(threadId);
-  if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
+  if (!t || !visibleTo(t, await mailboxViewer(me))) return { ok: false, error: "Thread not found." };
   const c = on ? await getContact(contactId) : null;
   if (on && !c) return { ok: false, error: "Person not found." };
   const pre = applyContactLink(t, contactId, on);

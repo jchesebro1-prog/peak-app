@@ -25,10 +25,14 @@ import {
   setLink,
   setOrg,
   setStatus,
+  resolveMailboxOwnerId,
+  stampMailboxOwner,
   unarchive,
   visibleTo,
   type CommThread,
+  type MailboxViewer,
 } from "@/lib/stores/comms";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { linkThread, restoreThreadIdentity, setThreadSite } from "@/lib/gmail/linking";
 import { domainOf, isPublicDomain } from "@/lib/gmail/config";
 import { get as getCustomer } from "@/lib/stores/customers";
@@ -109,10 +113,14 @@ export type RuleOffer = {
 /* ---- shared helpers ------------------------------------------------------------ */
 
 /** The thread, when it exists and is `me`'s own (and not a draft or in
- *  Deleted). */
+ *  Deleted). #349 — by identity; an action path, so a thread owned through
+ *  its Gmail key or a unique legacy name is stamped with its owner. */
 async function myThread(threadId: string, me: OrgActor): Promise<CommThread | null> {
   const t = await getThread(threadId);
-  if (!t || t.deleted || t.status === "draft" || !visibleTo(t, me.name)) return null;
+  if (!t || t.deleted || t.status === "draft") return null;
+  const viewer = await mailboxViewer(me);
+  if (!visibleTo(t, viewer)) return null;
+  await stampMailboxOwner(t, viewer);
   return t;
 }
 
@@ -197,9 +205,10 @@ function settled(f: Filing): Filing {
   return out;
 }
 
+/** #349 — the owner's id by identity (the stamp, else the Gmail key, else a
+ *  unique legacy name — never a shared name). */
 function ownerIdOf(t: CommThread, ctx: OrgContext): string | null {
-  const u = ctx.users.find((x) => lc(x.name) === lc(t.mailboxUser));
-  return u?.id ?? null;
+  return resolveMailboxOwnerId(t, ctx.nameRoster);
 }
 
 /** Log an action on a suggestion: for an AI suggestion, a person's action
@@ -652,9 +661,9 @@ export function isNoiseRow(t: CommThread): boolean {
 }
 
 /** The person's To file list (spec §2), newest first. Task 6's selector. */
-export async function toFileThreads(me: Pick<OrgActor, "name">): Promise<CommThread[]> {
+export async function toFileThreads(me: MailboxViewer): Promise<CommThread[]> {
   return (await listDocs<CommThread>("comms"))
-    .filter((t) => visibleTo(t, me.name) && isToFileRow(t))
+    .filter((t) => visibleTo(t, me) && isToFileRow(t)) // #349 — by identity
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
@@ -670,7 +679,7 @@ export async function approveAllStrong(
   const budget = opts.budgetMs ?? APPROVE_ALL_BUDGET_MS;
   const list =
     ids === "all-visible"
-      ? (await toFileThreads(me)).filter(isStrongRow).map((t) => t.id)
+      ? (await toFileThreads(await mailboxViewer(me))).filter(isStrongRow).map((t) => t.id)
       : [...new Set(ids.map((x) => String(x || "").trim()).filter(Boolean))];
   let approved = 0;
   let skipped = 0;
@@ -774,6 +783,7 @@ async function sweepSender(
   const started = Date.now();
   const budget = opts.budgetMs ?? RULE_SWEEP_BUDGET_MS;
   const ctx = await loadOrgContext({ fresh: true });
+  const viewer = await mailboxViewer(me); // #349 — my mailbox by identity
   const all = await listDocs<CommThread>("comms");
   const candidates = all
     .filter(
@@ -781,7 +791,7 @@ async function sweepSender(
         t.mailbox === "personal" &&
         !t.deleted &&
         t.status !== "draft" &&
-        (rule.scope === "company" || visibleTo(t, me.name)) &&
+        (rule.scope === "company" || visibleTo(t, viewer)) &&
         t.filing?.state !== "filed" &&
         t.filing?.state !== "dismissed" &&
         (inInbox(t) || isToFileRow(t)) &&
@@ -797,7 +807,7 @@ async function sweepSender(
       break;
     }
     try {
-      const mine = visibleTo(t, me.name);
+      const mine = visibleTo(t, viewer);
       if (mine && t.filing?.state === "skipped") await setOrg(t.id, { filing: { ...t.filing, state: "suggested" } });
       await organizeThread(t.id, { ctx });
       checked++;
@@ -850,7 +860,7 @@ export async function archiveAfterReply(
   if (inboxOrgDisabled()) return { ok: true, archived: false, filed: false, skipped: "disabled" };
   const t = await getThread(threadId);
   if (!t || t.deleted || t.status === "draft" || t.mailbox !== "personal") return { ok: true, archived: false, filed: false, skipped: "not-applicable" };
-  if (me && !visibleTo(t, me.name)) return NOT_FOUND();
+  if (me && !visibleTo(t, await mailboxViewer(me))) return NOT_FOUND(); // #349 — by identity
   if (await keepInInbox(t.mailboxUser || "")) {
     if (by === "teammate-reply" && opts.wasArchived && !t.archived) {
       await archive(t.id, { quiet: true });

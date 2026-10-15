@@ -55683,10 +55683,10 @@ async function p3SendAsyncChecks(): Promise<void> {
       "#P3 send (fix round 2): happy path — the send claim first (after the cheap preflight), then signature, attachments, mark sent, the link, the email, record, the follow-up, and the claim released last");
     ok(f.st.released.length === 1 && f.st.released[0] === f.st.claims[0] && f.st.claims[0]?.by === "Sam Mills", "#P3 send fix: the claim taken is the claim released (on success)");
     ok(f.st.asOf.join() === "77", "#P3 send: mark sent passes the shown version (asOf) to the approval gate");
-    const t = f.st.threads[0] ?? ({ body: "", to: "", cc: "", mailboxUser: "", customerId: null, contactName: "", customer: "", subject: "", link: { type: "", id: "" }, attachments: [] } as P3sThread);
+    const t = f.st.threads[0] ?? ({ body: "", to: "", cc: "", mailboxUser: "", mailboxOwnerId: "", customerId: null, contactName: "", customer: "", subject: "", link: { type: "", id: "" }, attachments: [] } as P3sThread);
     ok(t.body === "Hi Pat,\n\nView it here: " + URL + "\n\nThanks,\nSam\n\n-- \nSam Mills · Peak" && !t.body.includes("{link}"), "#P3 send: {link} becomes the absolute client-link URL; the sender's signature is applied (Inbox rule)");
-    ok(t.to === "pat@school.org, ops@school.org" && t.cc === "lee@peak.com" && t.mailboxUser === "Sam Mills" && t.customerId === "co-1" && t.contactName === "Pat Rivera",
-      "#P3 send: the thread holds the FULL To line, the Cc, the sender's personal box and the quote's customer + contact");
+    ok(t.to === "pat@school.org, ops@school.org" && t.cc === "lee@peak.com" && t.mailboxUser === "Sam Mills" && t.mailboxOwnerId === "u1" && t.customerId === "co-1" && t.contactName === "Pat Rivera",
+      "#P3 send: the thread holds the FULL To line, the Cc, the sender's personal box (#349 — owned by the sender's id) and the quote's customer + contact");
     ok(t.link.type === "quote" && t.link.id === "Q-P3S" && t.link.label === "EST-1042 · North HS Auditorium", "#P3 send: the thread links the quote as `<EST number> · <project name>`");
     const [estA, covA] = t.attachments;
     ok(t.attachments.map((a) => a.name).join("|") === "EST-1042.pdf|EST-1042 Cover.pdf" && t.attachments.every((a) => a.mime === "application/pdf") &&
@@ -56170,7 +56170,6 @@ async function p3TrackAsyncChecks(): Promise<void> {
       getQuote: async (id) => (quote && id === quote.id ? quote : null),
       getThread: async (id) => threads.get(id) ?? null,
       applySignature: async (body) => { calls.push("applySignature"); return body + "\n\n-- \nSam Mills"; },
-      userIdByName: async (n) => (n === "Sam Mills" ? "u1" : null),
       gmailConnected: async () => gmail,
       reply: async (id, body, me) => {
         calls.push("reply"); replies.push({ id, body, me });
@@ -56363,7 +56362,6 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
       getQuote: async (id) => (id === "Q-P3F" ? quote() : null),
       getThread: async (id) => threads.get(id) ?? null,
       applySignature: async (b) => { calls.push("applySignature"); return b; },
-      userIdByName: async (n) => ({ "Sam Mills": "u1", "Eve Estimator": "u2" } as Record<string, string>)[n] ?? null,
       gmailConnected: async (uid) => { connectedFor.push(uid); return uid === "u1"; },
       reply: async (id, body, me) => {
         calls.push("reply");
@@ -56401,7 +56399,7 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
     const r = await p3tMarkReadAs(f.deps, SENDER, "Q-P3F", "C-A");
     ok(!r.ok && r.error === "Only Sam Mills can mark this read." && r.error === P3T.notOwnerRead("Sam Mills"), "#P3 track fix: a non-owner can't mark an email read — named refusal");
     ok(f.calls.length === 0 && f.threads.get("C-A")!.unread === true, "#P3 track fix: a refused non-owner mark read writes nothing");
-    const adm = await p3tMarkReadAs(f.deps, { name: "Ann Admin" }, "Q-P3F", "C-A");
+    const adm = await p3tMarkReadAs(f.deps, { id: "u5", name: "Ann Admin" }, "Q-P3F", "C-A");
     ok(!adm.ok && f.calls.length === 0, "#P3 track fix: an Admin can't mark someone else's mailbox read either");
     const gone = await p3tMarkReadAs(f.deps, SENDER, "Q-P3F", "C-NOPE");
     ok(!gone.ok && gone.error === "Not found." && f.calls.length === 0, "#P3 track fix: a foreign thread still reads Not found. (no oracle)");
@@ -56415,10 +56413,16 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
     const r = await p3tReply(f.deps, OWNER, "Q-P3F", "C-A", "On it.");
     ok(r.ok && r.delivery === "gmail" && f.connectedFor.join() === "u1" && f.threads.get("C-A")!.messages.length === 3 && f.threads.get("C-A")!.messages[2].author === "Sam Mills" && f.calls.join() === "applySignature,reply,markRead",
       "#P3 track fix: the owner's reply goes out as the owner, delivery looked up for the owner's id, thread read afterwards");
-    const g = fakes();
-    g.deps.userIdByName = async () => null;
+    // #349 — ownership is by identity: a thread stamped with the owner's id is theirs whatever its display name says
+    const g = fakes([{ ...mk("C-A", true, "Old Name"), mailbox: "personal", mailboxOwnerId: "u1" } as FThread, mk("C-B", false, "Sam Mills")]);
     const ru = await p3tReply(g.deps, OWNER, "Q-P3F", "C-A", "On it.");
-    ok(ru.ok && g.connectedFor.join() === "u1", "#P3 track fix: an owner name off the roster falls back to the actor's own id (the actor IS the owner)");
+    ok(ru.ok && g.connectedFor.join() === "u1", "#P3 track fix (#349): the owner by id (the stamp), delivery looked up for the owner's own id");
+    const dup = fakes();
+    dup.deps.roster = async () => [{ id: "u1", name: "Sam Mills", status: "active" }, { id: "u7", name: "Sam Mills", status: "archived" }, { id: "u4", name: "Lee Lead", status: "active" }];
+    const rd2 = await p3tReply(dup.deps, OWNER, "Q-P3F", "C-A", "On it.");
+    ok(!rd2.ok && rd2.error === P3T.notOwnerReply("Sam Mills") && dup.calls.length === 0, "#349: a legacy name-only thread whose name two users hold has no owner — even its namesake can't reply");
+    const imp = await p3tReply(fakes([{ ...mk("C-A", true, "Sam Mills"), mailbox: "personal", mailboxOwnerId: "u8" } as FThread, mk("C-B", false)]).deps, OWNER, "Q-P3F", "C-A", "Hi");
+    ok(!imp.ok && imp.error === P3T.notOwnerReply("Sam Mills"), "#349: a thread stamped with another user's id is not mine though it carries my name");
   }
 
   // Message text visibility.
@@ -56460,9 +56464,9 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
     const src = readFileSync(join(process.cwd(), "src/lib/estimate-email/send-server.ts"), "utf8");
     ok(src.includes("const delivery = await deliveryAfterSend(connected, () => getThread(draft.id));"), "#P3 track fix: createAndSendThread goes through the guarded helper");
     const track = readFileSync(join(process.cwd(), "src/lib/estimate-email/track-server.ts"), "utf8");
-    ok(track.includes("userIdByName") && track.includes("gmailConnected((await deps.userIdByName(owner)) ?? actor.id)"), "#P3 track fix: delivery is computed for the thread owner");
+    ok(!track.includes("userIdByName") && track.includes("gmailConnected(actor.id)") && track.includes("ownedBy(raw, await viewerOf(deps, actor))"), "#P3 track fix (#349): delivery is computed for the thread owner — the actor, checked by id");
     const act = readFileSync(join(process.cwd(), "src/app/(app)/estimator/send-actions.ts"), "utf8");
-    ok(act.includes("trackEstimate(liveTrackDeps(), { id: user.id, name: user.name, roles: user.roles }") && act.includes("markEstimateEmailRead(liveTrackDeps(), { name: user.name }"), "#P3 track fix: the wrappers pass the viewer / actor");
+    ok(act.includes("trackEstimate(liveTrackDeps(), { id: user.id, name: user.name, roles: user.roles }") && act.includes("markEstimateEmailRead(liveTrackDeps(), { id: user.id, name: user.name }"), "#P3 track fix: the wrappers pass the viewer / actor");
   }
 }
 
@@ -56759,7 +56763,6 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
         getQuote: async (id) => (id === q.id ? q : null),
         getThread: async (id) => threads.get(id) ?? null,
         applySignature: async (b) => { calls.push("applySignature"); return b; },
-        userIdByName: async () => "u1",
         gmailConnected: async () => true,
         reply: async (id, body, me) => { calls.push("reply"); const t = threads.get(id); if (!t) return null; t.messages.push({ direction: "out", at: 900, author: me, body, to: "pat@school.org", ...replyMsg }); return t; },
         markRead: async (id) => { calls.push("markRead"); return threads.get(id) ?? null; },

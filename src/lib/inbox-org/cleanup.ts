@@ -19,7 +19,8 @@
  * suggested during this run — are skipped.
  */
 import { getBlob, listBlobIds, setBlob } from "@/db/doc-store";
-import { get as getThread, getAll as allThreads, visibleTo, type CommThread } from "@/lib/stores/comms";
+import { get as getThread, getAll as allThreads, visibleTo, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { appendFilingLogs, type FilingLogEntry } from "@/lib/stores/inbox-org";
 import { AI_CALL_MARGIN_MS, callWorstCaseMs, runAiPass, type AiPassDeps } from "./ai-pass";
 import { inInbox } from "./apply";
@@ -95,10 +96,10 @@ export function lastActivityAt(t: CommThread): number {
 
 /** Still one of `me`'s cleanup threads: their own personal, live, in-the-inbox
  *  email thread, active in the window, not filed / dismissed. */
-export function isCleanupCandidate(t: CommThread, me: { name: string }, now: number): boolean {
+export function isCleanupCandidate(t: CommThread, me: MailboxViewer, now: number): boolean {
   const f = t.filing;
   return (
-    visibleTo(t, me.name) &&
+    visibleTo(t, me) && // #349 — by identity
     !t.deleted &&
     t.status !== "draft" &&
     inInbox(t) &&
@@ -109,7 +110,7 @@ export function isCleanupCandidate(t: CommThread, me: { name: string }, now: num
 }
 
 /** The run's thread ids, newest activity first (id as tie-break), capped. */
-export function cleanupCandidates(threads: CommThread[], me: { name: string }, now: number): string[] {
+export function cleanupCandidates(threads: CommThread[], me: MailboxViewer, now: number): string[] {
   return threads
     .filter((t) => isCleanupCandidate(t, me, now))
     .sort((a, b) => lastActivityAt(b) - lastActivityAt(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -203,6 +204,7 @@ export async function runCleanupBatch(
   const now = deps.now ?? Date.now();
   const ctx = deps.ctx ?? (await loadOrgContext());
   if (!isOrgPilot(me.id, "file", ctx)) return { ok: false, error: "Organize my inbox is part of the Assist pilot." };
+  const viewer = await mailboxViewer(me); // #349 — my mailbox by identity
 
   // The lease is a plain read-then-write, not atomic: two batches landing
   // in the same instant could both pass. Harmless — organizeThread is
@@ -216,7 +218,7 @@ export async function runCleanupBatch(
   }
   const lease = Date.now() + budgetMs + CLEANUP_LEASE_EXTRA_MS;
   if (!st || st.done || now - st.startedAt > CLEANUP_STALE_MS || st.cursor > st.ids.length) {
-    const ids = cleanupCandidates(await allThreads(), me, now);
+    const ids = cleanupCandidates(await allThreads(), viewer, now);
     st = { startedAt: now, cursor: 0, checked: 0, total: ids.length, done: false, ids, doneAt: null, summary: null, runningUntil: lease, ruleSuggestions: {} };
     await setBlob(blobId(me.id), st as unknown as Record<string, unknown>);
   } else {
@@ -237,7 +239,7 @@ export async function runCleanupBatch(
         const id = st.ids[i];
         const t = await getThread(id);
         const suggestedThisRun = t?.filing?.state === "suggested" && (t.filing.at || 0) >= st.startedAt;
-        if (t && isCleanupCandidate(t, me, now) && !suggestedThisRun) {
+        if (t && isCleanupCandidate(t, viewer, now) && !suggestedThisRun) {
           try {
             await organizeThread(id, { ctx, backlog: true, log, now });
           } catch (err) {

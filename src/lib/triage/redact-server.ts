@@ -6,13 +6,14 @@
  * that's gone (or tombstoned) is redacted too.
  */
 import { getDocRows } from "@/db/doc-store";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import type { CommThread } from "@/lib/stores/comms";
 import { emailRowThreadId, redactEmailRows } from "./thread-access";
 import type { SnapshotRow } from "./types";
 
-export async function redactRowsForViewer(rows: readonly SnapshotRow[], viewerName: string): Promise<SnapshotRow[]> {
+export async function redactRowsForViewer(rows: readonly SnapshotRow[], viewer: { id: string; name: string }): Promise<SnapshotRow[]> {
   const ids = rows.map(emailRowThreadId).filter((x): x is string => !!x);
   const found = ids.length ? await getDocRows<CommThread>("comms", ids) : [];
   const threads = new Map(found.filter((x) => !x.deleted).map((x) => [x.id, x.doc]));
-  return redactEmailRows(rows, threads, viewerName);
+  return redactEmailRows(rows, threads, await mailboxViewer(viewer));
 }

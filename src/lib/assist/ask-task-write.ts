@@ -63,7 +63,7 @@ export async function createAskTask(
     const raw = links[field];
     const id = typeof raw === "string" ? raw.trim() : "";
     if (!id || id.length > REF_ID_MAX) continue;
-    const linkable = kind === "thread" ? !!(await loadThreadFor(id, me.name)) : !!(await resolveAskRef(kind, id, me));
+    const linkable = kind === "thread" ? !!(await loadThreadFor(id, me)) : !!(await resolveAskRef(kind, id, me));
     if (linkable) (input as Record<string, unknown>)[field] = id;
   }
   // A venue rides only with its own company (the Inbox's rule: the thread's venue must be its company's).

@@ -1,8 +1,8 @@
-import { lastInbound, waitingSince, type CommThread } from "@/lib/stores/comms";
+import { isAssignedTo, lastInbound, waitingSince, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { courtIsCurrent } from "@/lib/inbox-org/court-current";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import { isOpen as leadIsOpen } from "@/lib/stores/leads";
-import { sameName } from "@/lib/quote-approval-rules";
 import { money } from "@/lib/format";
 import { businessMsBetween } from "../clock";
 import { triageKey } from "../keys";
@@ -58,10 +58,15 @@ export function onMyCourt(
  * side), not in Deleted.
  * ≥ 1 business day → "customer waiting"; younger → "customer message".
  */
-export function selectEmail(threads: readonly CommThread[], deals: DealIndex, ctx: Pick<FeedCtx, "me" | "now">): TriageCandidate[] {
+export function selectEmail(
+  threads: readonly CommThread[],
+  deals: DealIndex,
+  ctx: Pick<FeedCtx, "now"> & { viewer: MailboxViewer }
+): TriageCandidate[] {
   const out: TriageCandidate[] = [];
   for (const t of threads) {
-    if (!onMyCourt(t) || !sameName(t.assignedTo, ctx.me.name)) continue;
+    // #349 — assigned to me by identity (assignedToId, else a unique name)
+    if (!onMyCourt(t) || !isAssignedTo(t, ctx.viewer)) continue;
     if (t.archived || t.deleted || t.gmailInboxed === false) continue;
     const since = waitingSince(t) ?? lastInbound(t)?.at ?? t.updatedAt ?? 0;
     const biz = since ? businessMsBetween(since, ctx.now) : 0;
@@ -92,6 +97,6 @@ export const emailFeed: TriageFeed = {
       quotes: new Map(quotes.map((q) => [q.id, { status: q.status, value: Number(q.value) || 0 }])),
       leads: new Map(leads.map((l) => [l.id, { open: leadIsOpen(l), value: Number(l.value) || 0 }])),
     };
-    return { candidates: selectEmail(threads, deals, ctx) };
+    return { candidates: selectEmail(threads, deals, { now: ctx.now, viewer: await mailboxViewer(ctx.me) }) };
   },
 };

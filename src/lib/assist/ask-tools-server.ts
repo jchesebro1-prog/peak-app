@@ -32,7 +32,8 @@ import { allAssignments, getAssignment, type Assignment } from "@/lib/stores/ass
 import { get as getPart, type CatalogPart } from "@/lib/stores/catalog";
 import { getMeeting } from "@/lib/stores/meetings";
 import { resolveQuoteInput } from "@/lib/stores/estimate-numbers";
-import { canSeeThread, canSeeThreadCond, visibleTo, type CommThread } from "@/lib/stores/comms";
+import { canSeeThread, canSeeThreadCond, visibleTo, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import type { NoteRecord } from "@/lib/stores/notes";
 import { getSite, sitesForCompany } from "@/lib/identity/sites";
 import { displayName, getContact } from "@/lib/identity/contacts";
@@ -201,10 +202,11 @@ function mkRef(kind: RefKind, id: string, title: string, hint?: RefHrefHint): As
 const quoteTitle = (q: Pick<Quote, "id" | "name"> & Parameters<typeof displayQuoteNumber>[0]) => `${displayQuoteNumber(q)} ${q.name || ""}`.trim();
 const quoteRef = (q: Quote) => mkRef("quote", q.id, quoteTitle(q), { quoteType: q.quoteType ?? null });
 const companyRef = (c: { id: string; name?: string | null }) => mkRef("company", c.id, c.name || c.id);
-/** #341 — a thread ref, flagged readOnly when it isn't in my own mailbox. */
-const threadRef = (th: Pick<CommThread, "id" | "subject" | "mailbox" | "mailboxUser">, me: AskUser, title?: string): AskToolRef => {
+/** #341 — a thread ref, flagged readOnly when it isn't in my own mailbox
+ *  (#349 — by identity: `viewer` is mailboxViewer(me)). */
+const threadRef = (th: Pick<CommThread, "id" | "subject" | "mailbox" | "mailboxUser" | "mailboxOwnerId" | "gmailAccountKey">, viewer: MailboxViewer, title?: string): AskToolRef => {
   const r = mkRef("thread", th.id, title ?? (th.subject || th.id));
-  return visibleTo(th, me.name) ? r : { ...r, readOnly: true };
+  return visibleTo(th, viewer) ? r : { ...r, readOnly: true };
 };
 
 /** A long list: the first ASK_LIST_CAP rows, then "…N more". */
@@ -455,21 +457,22 @@ async function loadLead(id: string, me: AskUser): Promise<Loaded | null> {
   if (!l) return null;
   const refs: AskToolRef[] = [];
   const self = mkRef("lead", l.id, leadTitle(l));
+  const viewer = await mailboxViewer(me);
   const [cust, converted, quote, leadThreads] = await Promise.all([
     companyLink(l.customerId),
     l.convertedCustomerId && l.convertedCustomerId !== l.customerId ? companyLink(l.convertedCustomerId) : Promise.resolve(null),
     l.convertedQuoteId ? getQuote(l.convertedQuoteId) : Promise.resolve(null),
     // #341 — email threads I may see that mention the lead id (in SQL); the exact link is checked below
-    searchDocs<CommThread>("comms", l.id, 200, { fieldEquals: { channel: "email" }, where: canSeeThreadCond(me.name) }),
+    searchDocs<CommThread>("comms", l.id, 200, { fieldEquals: { channel: "email" }, where: canSeeThreadCond(viewer) }),
   ]);
   for (const x of [cust, converted]) if (x) refs.push(x.ref);
   if (quote) refs.push(quoteRef(quote));
   // #341 — every live email thread linked to this lead (a link makes it shared; canSeeThread re-checks)
   const threads = leadThreads
-    .filter((th) => th.channel === "email" && canSeeThread(th, me.name) && th.link?.type === "lead" && th.link.id === l.id)
+    .filter((th) => th.channel === "email" && canSeeThread(th, viewer) && th.link?.type === "lead" && th.link.id === l.id)
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
     .slice(0, 10);
-  for (const th of threads) refs.push(threadRef(th, me));
+  for (const th of threads) refs.push(threadRef(th, viewer));
   const s = sla(l);
   const emails = new Set<string>();
   pushEmail(emails, l.email);
@@ -535,10 +538,11 @@ async function loadProject(id: string): Promise<Loaded | null> {
 }
 
 async function loadThread(id: string, me: AskUser): Promise<Loaded | null> {
-  const th = await loadThreadReadable(id, me.name);
+  const viewer = await mailboxViewer(me);
+  const th = await loadThreadReadable(id, viewer);
   if (!th) return null;
   const refs: AskToolRef[] = [];
-  const self = threadRef(th, me);
+  const self = threadRef(th, viewer);
   const cust = await companyLink(th.customerId);
   if (cust) refs.push(cust.ref);
   const emails = new Set<string>();
@@ -688,9 +692,10 @@ async function runSearch(query: string, me: AskUser): Promise<Loaded> {
     for (const item of g.items) {
       if (kind === "thread") {
         // the read rule once more, row by row (loadThreadReadable)
-        const th = await loadThreadReadable(item.id, me.name);
+        const viewer = await mailboxViewer(me);
+        const th = await loadThreadReadable(item.id, viewer);
         if (!th) continue;
-        refs.push(threadRef(th, me, item.title));
+        refs.push(threadRef(th, viewer, item.title));
       } else if (kind === "quote") {
         const q = await getQuote(item.id);
         if (!q) continue;
@@ -942,8 +947,9 @@ export async function resolveAskRef(kind: RefKind, id: string, me: AskUser): Pro
       return p ? mkRef("project", p.id, p.name || p.id) : null;
     }
     case "thread": {
-      const th = await loadThreadReadable(id, me.name);
-      return th ? threadRef(th, me) : null;
+      const viewer = await mailboxViewer(me);
+      const th = await loadThreadReadable(id, viewer);
+      return th ? threadRef(th, viewer) : null;
     }
     case "meeting": {
       const m = await getMeeting(id).catch(() => null);

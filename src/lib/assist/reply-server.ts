@@ -18,6 +18,8 @@ import { limitsBefore, stricter } from "./call-budget";
 import type { ModelSlot } from "./models";
 import { loadThreadFor } from "./thread-access";
 import { gateFor } from "./gate-server";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
+import type { MailboxViewer } from "@/lib/stores/comms-visibility";
 
 export const REPLY_TONES = ["short", "normal", "formal"] as const;
 export type ReplyTone = (typeof REPLY_TONES)[number];
@@ -71,7 +73,7 @@ export async function draftReplyForThread(
 ): Promise<ReplyDraftResult> {
   const refused = await gateFor("reply", me.id, deps);
   if (refused) return { ok: false, error: refused, kind: "gate", runId: null };
-  const t = await loadThreadFor(threadId, me.name);
+  const t = await loadThreadFor(threadId, me);
   if (!t) return { ok: false, error: "That email isn't available.", kind: "thread", runId: null };
   const tone: ReplyTone = deps.tone && REPLY_TONES.includes(deps.tone) ? deps.tone : "normal";
   const pre = deps.preloaded ?? {};
@@ -85,7 +87,8 @@ export async function draftReplyForThread(
     quotes.map((q) => ({ ...q, number: displayQuoteNumber(q) })),
     customerId
   );
-  const examples = pickStyleExamples(threads, me.name, t.id, signature);
+  // #349 — my own sent mail by identity
+  const examples = pickStyleExamples(threads, "nameUnique" in me ? (me as MailboxViewer) : await mailboxViewer(me), t.id, signature);
   const messages = promptMessages(t).map((m) =>
     m.direction === "out" && signature ? { ...m, body: stripSignature(m.body, signature) } : m
   );

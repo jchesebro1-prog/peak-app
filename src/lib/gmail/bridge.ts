@@ -14,6 +14,7 @@ import {
   isAutoDeliverable,
   lastInbound,
   reinboxFromGmail,
+  resolveMailboxOwnerId,
   setGmailInboxed,
   statusFromDirection,
   type CommMessage,
@@ -29,6 +30,7 @@ import {
   IMPORT_WINDOW_DAYS,
   isPersonalKey,
   isRateLimit,
+  personalKey,
   userIdOfKey,
   type MailboxKey,
 } from "./config";
@@ -83,16 +85,18 @@ import { courtIsCurrent } from "@/lib/inbox-org/court-current";
 /* ---- mailbox resolution --------------------------------------------------- */
 
 /** Pure lookup half of keyForThread — takes an already-loaded user list so
- *  per-thread loops (the reconcile sweep) don't refetch users N times. */
+ *  per-thread loops (the reconcile sweep) don't refetch users N times.
+ *  #349 — the owner by identity (resolveMailboxOwnerId: the `mailboxOwnerId`
+ *  stamp, else the thread's own Gmail key, else a legacy name exactly one
+ *  user holds); a name two users share maps to no account, so mail is never
+ *  sent from (or reconciled against) the wrong person's Gmail. */
 function keyForThreadWith(
   t: CommThread,
   users: Awaited<ReturnType<typeof allUsers>>
 ): MailboxKey | null {
   if (t.mailbox && t.mailbox !== "personal") return t.mailbox; // shared box
-  const name = t.mailboxUser || "";
-  if (!name) return null;
-  const u = users.find((x) => x.name === name);
-  return u ? "personal:" + u.id : null;
+  const uid = resolveMailboxOwnerId(t, users);
+  return uid ? personalKey(uid) : null;
 }
 
 /** The connection key for the mailbox a thread lives in, or null (personal
@@ -286,8 +290,12 @@ export async function recordMessage(
     autoSubmitted: p.autoSubmitted || undefined,
   };
 
-  // attach to an existing thread sharing the Gmail thread id
-  const existing = all.find((t) => t.gmailThreadId === p.gmailThreadId);
+  // attach to an existing thread sharing the Gmail thread id — #349: in THIS
+  // account only (thread ids are per-account), so one person's mail never
+  // lands on a teammate's thread
+  const sameId = all.filter((t) => t.gmailThreadId === p.gmailThreadId);
+  const users = sameId.length ? await allUsers() : [];
+  const existing = sameId.find((t) => (t.gmailAccountKey ?? keyForThreadWith(t, users)) === key);
   if (existing) {
     let statusChanged = false;
     let wasArchived = false;
@@ -302,6 +310,8 @@ export async function recordMessage(
       // Which Gmail account owns this thread id — reconcile scopes by this
       // (thread ids are per-account; display-name lookups can misattribute).
       if (!d.gmailAccountKey) d.gmailAccountKey = key;
+      // #349 — the account's owner is the thread's owner (identity)
+      if (!d.mailboxOwnerId && d.mailbox === "personal" && userIdOfKey(key)) d.mailboxOwnerId = userIdOfKey(key);
       // New inbound resurfaces an archived thread — mirrors Gmail (a reply
       // puts the thread back in the inbox) and addMessage()'s semantics.
       if (dir === "in") {
@@ -332,6 +342,8 @@ export async function recordMessage(
     id,
     mailbox: box.mailbox,
     mailboxUser: isPersonalKey(key) ? await userNameOfKey(key) : null,
+    // #349 — owned by the account's user (identity), whatever the display name
+    ...(isPersonalKey(key) && userIdOfKey(key) ? { mailboxOwnerId: userIdOfKey(key) } : {}),
     unread: dir === "in",
     archived: false,
     customerId: null,
