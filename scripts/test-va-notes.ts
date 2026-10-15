@@ -1893,7 +1893,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       ok(fb.sketches === storedSk && fb.photoRefs === storedRefs && (fb as { notes?: string }).notes === "n" && !("sketches" in none) && !("photoRefs" in none),
         "#344 C6 fix: a non-object incoming sketches (or non-array photoRefs) falls back to the stored value instead of deleting it");
       const svs = read("src/lib/stores/surveys.ts");
-      ok(svs.includes("sanitizeIncomingFileSlots(next, id, { blobEnabled: blobEnabled(), stored })") && /sanitizeIncomingFileSlots\(\{ \.\.\.rec\.doc, id \}, id, \{[\s\S]{0,80}stored: \(existing\[0\]\?\.doc/.test(svs),
+      ok(svs.includes("sanitizeIncomingFileSlots(next, id, { blobEnabled: blobEnabled(), stored })") && /sanitizeIncomingFileSlots\(\{ \.\.\.(rec\.doc|body), id \}, id, \{[\s\S]{0,80}stored: \(existing\[0\]\?\.doc/.test(svs),
         "#344 C6 fix: both survey write paths hand the stored doc to sanitize");
 
       const op = st.slice(st.indexOf("async function openPad"), st.indexOf("async function saveSketch"));
@@ -2400,6 +2400,70 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     /* minor — the conflict comment is accurate */
     ok(/one intervening write/.test(ctl) && /two or more/.test(ctl), "#344 C-final C: the outbox rev comment says only two or more intervening writes conflict");
   }
+  /* ---- C-final D: staleness follows what the newer saves wrote (a file-only save never makes an older field edit stale) ---- */
+  {
+    const read = (rel: string) => { try { return readFileSync(join(process.cwd(), rel), "utf8"); } catch { return ""; } };
+    const ctl = read("src/app/(app)/venue-assessments/[id]/controls.tsx");
+    const act = read("src/app/(app)/venue-assessments/[id]/actions.ts");
+    const sto = read("src/lib/stores/surveys.ts");
+    const pullRoute = read("src/app/api/sync/pull/route.ts");
+    const SS = (await import("../src/lib/field-files/save-stamp")) as typeof import("../src/lib/field-files/save-stamp") & {
+      carriesFieldEdits?: (d: Record<string, unknown>) => boolean;
+      withoutFileKeys?: (d: Record<string, unknown>) => Record<string, unknown>;
+    };
+    type Chk = { stale: boolean; verdict?: string; seqs?: Record<string, { seq: number; fullSeq?: number }> };
+    const chk = SS.checkSaveStamp as unknown as (s: unknown, st: { editor: string; seq: number } | null, at: number, carries?: boolean) => Chk;
+    const E = "editoraaaa01";
+    // a file-only save (seq 2) lands first; the older field save (seq 1) arrives late
+    const f2 = chk(undefined, { editor: E, seq: 2 }, 10, false);
+    const late1 = chk(f2.seqs, { editor: E, seq: 1 }, 20, true);
+    const late1files = chk(f2.seqs, { editor: E, seq: 1 }, 20, false);
+    const again1 = chk(late1.seqs, { editor: E, seq: 1 }, 30, true);
+    ok(!f2.stale && f2.verdict === "apply" && f2.seqs?.[E]?.seq === 2 && f2.seqs?.[E]?.fullSeq === 0 &&
+      !late1.stale && late1.verdict === "fields" && late1.seqs?.[E]?.seq === 2 && late1.seqs?.[E]?.fullSeq === 1 &&
+      late1files.stale && again1.stale,
+      "#344 C-final D: an older field save after newer file-only saves applies its fields only (seq kept, fullSeq advances); an older file-only save, or the same one twice, is stale");
+    const full2 = chk(undefined, { editor: E, seq: 2 }, 10, true);
+    const full1 = chk(full2.seqs, { editor: E, seq: 1 }, 20, true);
+    const next3 = chk(full2.seqs, { editor: E, seq: 3 }, 20, false);
+    ok(full1.stale && full2.seqs?.[E]?.fullSeq === 2 && !next3.stale && next3.verdict === "apply" && next3.seqs?.[E]?.seq === 3 && next3.seqs?.[E]?.fullSeq === 2,
+      "#344 C-final D: an older save after a newer field save is stale (unchanged); a newer file-only save moves seq, not fullSeq");
+    const oldMap = { [E]: { seq: 3, at: 5 } };
+    const rd = SS.readSaveSeqs(oldMap) as Record<string, { seq: number; fullSeq?: number }>;
+    const badFull = SS.readSaveSeqs({ [E]: { seq: 3, fullSeq: 9, at: 5 } }) as Record<string, { fullSeq?: number }>;
+    ok(rd[E]?.fullSeq === 3 && chk(oldMap, { editor: E, seq: 2 }, 9, true).stale && chk(oldMap, { editor: E, seq: 4 }, 9, true).verdict === "apply" &&
+      badFull[E]?.fullSeq === 3,
+      "#344 C-final D: an old-format entry ({ seq, at }) reads as fullSeq = seq; a fullSeq above seq is clamped to seq");
+    ok(typeof SS.carriesFieldEdits === "function" &&
+      SS.carriesFieldEdits({ photoRefs: [], sketches: {}, photoRefIdsSeen: [], sketchIdsSeen: [], saveStamp: { editor: E, seq: 1 }, _saveSeqs: {}, id: "FS-1", rev: 2, updatedAt: 1, syncState: "synced", syncedAt: 1, legacyNotes: "x", notes: undefined }) === false &&
+      SS.carriesFieldEdits({ notes: "x" }) === true && SS.carriesFieldEdits({ stage: "completed" }) === true,
+      "#344 C-final D: carriesFieldEdits — file keys, seen lists, the stamp and transport fields don't count; any other key does");
+    const stripped = typeof SS.withoutFileKeys === "function" ? SS.withoutFileKeys({ notes: "n", photoRefs: [], sketches: {}, photoRefIdsSeen: [], sketchIdsSeen: [] }) : null;
+    ok(!!stripped && JSON.stringify(stripped) === '{"notes":"n"}', "#344 C-final D: withoutFileKeys drops the file lists and their seen ids");
+    // the editor: stage rides every save while a move is unconfirmed; file saves keep a queued whole-draft outbox entry
+    const bp = ctl.slice(ctl.indexOf("function buildPatch("), ctl.indexOf("function buildFullDoc("));
+    ok(/stageUnconfirmed\.current \? \{ stage: draft\.stage \} : \{\}/.test(bp) && bp.indexOf("stageUnconfirmed.current ?") < bp.indexOf("...over"),
+      "#344 C-final D: buildPatch carries stage: draft.stage while a stage move from this editor is unconfirmed (before ...over)");
+    const adv = ctl.slice(ctl.indexOf("async function advanceStage("), ctl.indexOf("async function onCreateQuote("));
+    const sav = ctl.slice(ctl.indexOf("async function onSave("), ctl.indexOf("async function advanceStage("));
+    ok(/stageUnconfirmed\.current = true/.test(adv) && /if \(!res\.queued\) stageUnconfirmed\.current = false/.test(adv) &&
+      /if \(carried && !res\.queued\) stageUnconfirmed\.current = false/.test(sav),
+      "#344 C-final D: a stage move marks the stage unconfirmed until a save carrying it lands online");
+    const psr = ctl.slice(ctl.indexOf("async function savePhotoRefs("), ctl.indexOf("async function savePhotoRefs(") + 1500);
+    ok(/keepOutbox: \(entryDoc\) => carriesFieldEdits\(entryDoc\)/.test(psr),
+      "#344 C-final D: a photo / sketch save keeps a queued outbox entry that carries field edits (a file-only success never clears it)");
+    ok(/!res\.applied/.test(act) && /verdict/.test(sto.slice(sto.indexOf("async function updateUnlocked"), sto.indexOf("export async function update("))) &&
+      /withoutFileKeys/.test(sto.slice(sto.indexOf("export async function pushSurvey"), sto.indexOf("export async function setStage"))),
+      "#344 C-final D: update() and pushSurvey apply a fields-only verdict without the file keys; a stage move proceeds whenever its save applied");
+    ok(/withoutSaveFields\(\{ \.\.\.\(existing\[0\]\.doc as object\), id \}/.test(sto) && /pulledChanges\(/.test(pullRoute),
+      "#344 C-final D: the conflict reply's server copy and /api/sync/pull never carry _saveSeqs");
+    const PC = (await import("../src/lib/sync/pull-collections")) as Record<string, unknown>;
+    const pc = PC.pulledChanges as ((c: string, ch: Array<{ id: string; doc: Record<string, unknown> }>) => Array<{ id: string; doc: Record<string, unknown> }>) | undefined;
+    const pcOut = pc ? pc("surveys", [{ id: "FS-1", doc: { id: "FS-1", notes: "n", _saveSeqs: { [E]: { seq: 1, at: 1 } } } }]) : [];
+    const pcOther = pc ? pc("assessments", [{ id: "AS-1", doc: { id: "AS-1", x: 1 } }]) : [];
+    ok(!!pc && pcOut.length === 1 && !("_saveSeqs" in pcOut[0].doc) && pcOut[0].doc.notes === "n" && pcOther[0]?.doc.x === 1,
+      "#344 C-final D: pulledChanges strips _saveSeqs from surveys and passes other collections through");
+  }
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
@@ -2708,6 +2772,112 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
     ok((raw2?._saveSeqs as Record<string, { seq: number }> | undefined)?.[ED]?.seq === 3 &&
       (rawN?._saveSeqs as Record<string, { seq: number }> | undefined)?.[ED]?.seq === 5 && !("saveStamp" in (rawN ?? {})),
       "#344 C-final C: a pushed _saveSeqs is ignored (the stored map wins); an inserted survey records its stamp");
+  }
+  /* C-final D: a file-only save never makes an older field save from the same editor stale */
+  {
+    const { getDoc, patchDoc, listSince } = await import("../src/db/doc-store");
+    const { getDb } = await import("../src/db");
+    const { DOC_TABLES } = await import("../src/db/doc-tables");
+    const { eq } = await import("drizzle-orm");
+    const FF = await import("../src/lib/field-files/files");
+    const db = await getDb();
+    const rowOf = async (id: string) => (await db.select().from(DOC_TABLES.surveys).where(eq(DOC_TABLES.surveys.id, id)).limit(1))[0];
+    const revOf = async (id: string) => (await rowOf(id))?.rev ?? 0;
+    const seqsOf = async (id: string) => ((await getDoc("surveys", id)) as Record<string, unknown> | null)?._saveSeqs as Record<string, { seq: number; fullSeq?: number }> | undefined;
+    const pend = { pending: true as const };
+    const pref = (id: string) => ({ id, section: "mBeams", takenAt: 1, by: "phone", file: pend });
+    const ids = (d: { photoRefs?: Array<{ id: string }> } | null | undefined) => (d?.photoRefs ?? []).map((r) => r.id).join(",");
+    const newSurvey = async () => { const sv = await S.create({ owner: "Sam Surveyor" } as never); registerFixture("surveys", sv.id); return sv; };
+
+    // Scenario A: save 1 (notes) times out; a photo save 2 lands with only file keys; save 1's late action lands
+    {
+      const sv = await newSurvey();
+      const E = "phoneeditor0001";
+      const A = FF.newFileId("p"), SK = FF.newFileId("s");
+      await S.update(sv.id, { photoRefs: [pref(A)], photoRefIdsSeen: [A], sketches: { stagePlan: { id: SK, image: pend, strokes: pend, updatedAt: 1, by: "phone" } }, sketchIdsSeen: [SK], saveStamp: { editor: E, seq: 2 } } as never);
+      // the late save's draft predates the photo; as if it had seen (and dropped) them, its file keys would delete both
+      const late = await S.updateChecked(sv.id, { notes: "late notes", photoRefs: [], photoRefIdsSeen: [A], sketches: {}, sketchIdsSeen: [SK], saveStamp: { editor: E, seq: 1 } } as never);
+      const got = await S.get(sv.id);
+      const seqs = await seqsOf(sv.id);
+      ok(late.applied && got?.notes === "late notes" && ids(got) === A && got?.sketches?.stagePlan?.id === SK && seqs?.[E]?.seq === 2 && seqs?.[E]?.fullSeq === 1,
+        "#344 C-final D: update(file-only, seq 2) then update({ notes }, seq 1) — the notes land and seq 2's photo and sketch stay");
+      const r = await revOf(sv.id);
+      const again = await S.updateChecked(sv.id, { notes: "late notes again", saveStamp: { editor: E, seq: 1 } } as never);
+      const filesLate = await S.updateChecked(sv.id, { photoRefs: [], photoRefIdsSeen: [A], saveStamp: { editor: E, seq: 1 } } as never);
+      ok(!again.applied && !filesLate.applied && (await revOf(sv.id)) === r && (await S.get(sv.id))?.notes === "late notes" && ids(await S.get(sv.id)) === A,
+        "#344 C-final D: the same late save again, or a late file-only save, is stale (no write, rev unchanged)");
+    }
+    // a full save 2 then a full save 1 — save 1 is dropped (unchanged behaviour)
+    {
+      const sv = await newSurvey();
+      const E = "phoneeditor0002";
+      await S.update(sv.id, { notes: "two", saveStamp: { editor: E, seq: 2 } } as never);
+      const r = await revOf(sv.id);
+      const one = await S.updateChecked(sv.id, { notes: "one", saveStamp: { editor: E, seq: 1 } } as never);
+      ok(!one.applied && (await S.get(sv.id))?.notes === "two" && (await revOf(sv.id)) === r,
+        "#344 C-final D: full save seq 2 then full save seq 1 — seq 1 is dropped");
+    }
+    // Scenario B: a stage move (seq 1) times out; a file-only save (seq 2) lands; the move's late action lands
+    {
+      const sv = await newSurvey();
+      const E = "phoneeditor0003";
+      const A = FF.newFileId("p");
+      await S.update(sv.id, { photoRefs: [pref(A)], photoRefIdsSeen: [A], saveStamp: { editor: E, seq: 2 } } as never);
+      // advanceSurveyStage: the stamped save (stage + assignment ride the patch), then the stage write when it applied
+      const mv = await S.updateChecked(sv.id, { notes: "on site", stage: "scheduled", assignedTo: "Sam Surveyor", scheduledDate: "2026-10-20", saveStamp: { editor: E, seq: 1 } } as never);
+      if (mv.applied) await S.assign(sv.id, "Sam Surveyor", "2026-10-20");
+      const got = await S.get(sv.id);
+      ok(mv.applied && got?.stage === "scheduled" && got?.assignedTo === "Sam Surveyor" && got?.scheduledDate === "2026-10-20" && ids(got) === A,
+        "#344 C-final D: a stage move stamped seq 1 arriving after a file-only seq 2 applies (stage + assignment; the photo stays)");
+    }
+    // the offline push of an older whole-doc save after a newer file-only save
+    {
+      const sv = await newSurvey();
+      const E = "phoneeditor0004";
+      const A = FF.newFileId("p");
+      const base = (await S.get(sv.id))!;
+      const n = await revOf(sv.id);
+      await S.update(sv.id, { photoRefs: [pref(A)], photoRefIdsSeen: [A], saveStamp: { editor: E, seq: 2 } } as never);
+      const p = await S.pushSurvey({ id: sv.id, rev: n + 1, doc: { ...(base as object), notes: "queued notes", stage: "completed", photoRefs: [], photoRefIdsSeen: [A], sketches: {}, sketchIdsSeen: [], saveStamp: { editor: E, seq: 1 } } as Record<string, unknown> });
+      const got = await S.get(sv.id);
+      const seqs = await seqsOf(sv.id);
+      const raw = (await getDoc("surveys", sv.id)) as Record<string, unknown> | null;
+      ok(p.status === "ok" && got?.notes === "queued notes" && got?.stage === "completed" && ids(got) === A && seqs?.[E]?.seq === 2 && seqs?.[E]?.fullSeq === 1 &&
+        !("saveStamp" in (raw ?? {})) && !("photoRefIdsSeen" in (raw ?? {})),
+        "#344 C-final D: pushSurvey with an older stamp after a newer file-only save — its fields apply, the stored photos stay");
+      const p2 = await S.pushSurvey({ id: sv.id, rev: await revOf(sv.id), doc: { ...(base as object), notes: "pushed twice", saveStamp: { editor: E, seq: 1 } } as Record<string, unknown> });
+      ok(p2.status === "ok" && (await S.get(sv.id))?.notes === "queued notes", "#344 C-final D: the same older push again is stale (replies ok, changes nothing)");
+    }
+    // an old-format _saveSeqs entry (no fullSeq) behaves as fullSeq = seq
+    {
+      const sv = await newSurvey();
+      const E = "phoneeditor0005";
+      await patchDoc("surveys", sv.id, (d) => { (d as Record<string, unknown>)._saveSeqs = { [E]: { seq: 3, at: 1 } }; });
+      const r = await revOf(sv.id);
+      const old2 = await S.updateChecked(sv.id, { notes: "older", saveStamp: { editor: E, seq: 2 } } as never);
+      const r2 = await revOf(sv.id);
+      const new4 = await S.updateChecked(sv.id, { notes: "newer", saveStamp: { editor: E, seq: 4 } } as never);
+      const seqs = await seqsOf(sv.id);
+      ok(!old2.applied && r2 === r && new4.applied && (await S.get(sv.id))?.notes === "newer" && seqs?.[E]?.seq === 4 && seqs?.[E]?.fullSeq === 4,
+        "#344 C-final D: an old-format entry { seq: 3 } makes a seq-2 field save stale (fullSeq = seq); a seq-4 save applies and records fullSeq");
+    }
+    // neither the conflict reply's server copy nor the pull carries _saveSeqs
+    {
+      const sv = await newSurvey();
+      const E = "phoneeditor0006";
+      await S.update(sv.id, { notes: "a", saveStamp: { editor: E, seq: 1 } } as never);
+      await S.update(sv.id, { notes: "b" } as never);
+      await S.update(sv.id, { notes: "c" } as never);
+      const conf = await S.pushSurvey({ id: sv.id, rev: 1, doc: { ...((await S.get(sv.id)) as object), notes: "stale device" } as Record<string, unknown> });
+      const row = await rowOf(sv.id);
+      const { pulledChanges } = (await import("../src/lib/sync/pull-collections")) as unknown as { pulledChanges?: (c: string, ch: Array<{ id: string; doc: Record<string, unknown> }>) => Array<{ id: string; doc: Record<string, unknown> }> };
+      const since = await listSince("surveys", Number(row?.seq ?? 1) - 1);
+      const mine = since.changes.filter((c) => c.id === sv.id);
+      const served = pulledChanges ? pulledChanges("surveys", mine as never) : [];
+      ok(conf.status === "conflict" && !!conf.server && !("_saveSeqs" in conf.server) && conf.server.notes === "c" &&
+        !!(row?.doc as Record<string, unknown>)?._saveSeqs && mine.length === 1 && served.length === 1 && !("_saveSeqs" in served[0].doc) && served[0].doc.notes === "c",
+        "#344 C-final D: the conflict reply's server copy and the pulled survey carry no _saveSeqs (the stored doc still holds it)");
+    }
   }
 }
 

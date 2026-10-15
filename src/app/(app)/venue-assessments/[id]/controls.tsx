@@ -36,7 +36,7 @@ import Venue3D from "./venue-3d";
 import SuggestEstimate from "@/components/assist/suggest-estimate";
 import { saveThroughOutbox } from "@/lib/sync/save";
 import { SAVE_ACTION_TIMEOUT_MS } from "@/lib/sync/save-timeout";
-import { newEditorId, type SaveStamp } from "@/lib/field-files/save-stamp";
+import { carriesFieldEdits, newEditorId, type SaveStamp } from "@/lib/field-files/save-stamp";
 import { RecordingsStrip, type RecordingStripItem } from "@/components/recordings/recordings-strip";
 import { FromRecordingPanel, type FromRecordingPanelData } from "@/components/recordings/from-recording-panel";
 import type { Draft, EditorCustomer, EditorMeta, FieldDef, SectionDef } from "./sections/types";
@@ -317,6 +317,13 @@ export default function SurveyEditor({
   const [editorId] = useState(() => newEditorId());
   const saveSeq = useRef(0);
   const stampNow = useRef<SaveStamp | null>(null);
+  /** #344 C-final D: a stage move from this editor hasn't been confirmed by an online save yet (it timed out to the
+   *  outbox, or is still running). While set, every save carries `stage: draft.stage` (the draft holds the move's
+   *  target), so a later field save — which makes the move's late action stale — re-carries the stage instead of losing
+   *  it, and a queued whole-doc copy never reverts it. Cleared once a save carrying it lands online. Only then, never
+   *  always: an editor that hasn't moved the stage must not send its draft's (possibly old) stage over a move made
+   *  elsewhere (the office scheduler, the list's Create quote, another device). */
+  const stageUnconfirmed = useRef(false);
   useEffect(() => {
     lastSaved.current = adoptedBase;
     refsNow.current = adoptedBase.photoRefs;
@@ -789,6 +796,8 @@ export default function SurveyEditor({
       // an unanswered scope stays unset (R2) so the read-time seed can still run
       scope: draft.scope.length ? draft.scope : undefined,
       internalTags: draft.internalTags,
+      // #344 C-final D: while this editor's stage move is unconfirmed, every save re-carries the stage it moved to
+      ...(stageUnconfirmed.current ? { stage: draft.stage } : {}),
       ...over,
     };
   }
@@ -820,6 +829,7 @@ export default function SurveyEditor({
     try {
       const { queued } = await serialSave(async () => {
         const sent: Draft = { ...edits, photoRefs: refsNow.current, sketches: sketchesNow.current };
+        const carried = stageUnconfirmed.current; // this save re-carries an unconfirmed stage move (#344 C-final D)
         const patch = buildPatch(undefined, sent);
         const res = await saveThroughOutbox({
           collection: "surveys",
@@ -828,6 +838,7 @@ export default function SurveyEditor({
           action: () => saveSurvey(record.id, patch),
           timeoutMs: SAVE_ACTION_TIMEOUT_MS,
         });
+        if (carried && !res.queued) stageUnconfirmed.current = false;
         lastSaved.current = sent;
         setPhotoUnsaved(false);
         return res;
@@ -853,6 +864,7 @@ export default function SurveyEditor({
     try {
       const { queued } = await serialSave(async () => {
         const sent: Draft = { ...edits, photoRefs: refsNow.current, sketches: sketchesNow.current };
+        stageUnconfirmed.current = true; // until a save carrying the stage lands online (#344 C-final D)
         const patch = buildPatch({ stage: target }, sent);
         const res = await saveThroughOutbox({
           collection: "surveys",
@@ -861,6 +873,7 @@ export default function SurveyEditor({
           action: () => advanceSurveyStage(record.id, patch, target),
           timeoutMs: SAVE_ACTION_TIMEOUT_MS,
         });
+        if (!res.queued) stageUnconfirmed.current = false;
         lastSaved.current = { ...sent, stage: target };
         setPhotoUnsaved(false);
         return res;
@@ -962,6 +975,10 @@ export default function SurveyEditor({
           id: record.id,
           doc: buildFullDoc(undefined, sent),
           action: () => saveSurvey(record.id, filePatch),
+          // #344 C-final D: this online save carried only the file keys — a queued whole-draft entry from an earlier
+          // save (a timed-out Save changes / stage move) still holds field edits, so it stays for the sync push (the
+          // store applies its fields and leaves the newer file lists alone)
+          keepOutbox: (entryDoc) => carriesFieldEdits(entryDoc),
           timeoutMs: SAVE_ACTION_TIMEOUT_MS,
         });
         lastSaved.current = { ...lastSaved.current, photoRefs: sent.photoRefs, sketches: sent.sketches };

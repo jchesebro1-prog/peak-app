@@ -151,7 +151,9 @@ export async function advanceSurveyStage(
   if (!existing) return;
   // #301 (R4): Client goals are trimmed and capped (≤ 1,000) on the way in.
   const res = await updateChecked(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);
-  // #344 C-final C: a stale stamped save (a newer save from this editor already landed) moves no stage either
+  // #344 C-final C/D: a stale stamped save — a newer save from this editor that wrote fields already landed (and, while
+  // this move is unconfirmed, every such save carries its stage too) — moves no stage either. A move that only
+  // file-only saves came after is NOT stale: its stage, assignment and fields apply (`fields` verdict, applied).
   if (!res.applied) {
     revalidatePath("/", "layout");
     return;

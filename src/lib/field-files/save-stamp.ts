@@ -1,9 +1,19 @@
 /* #344 C-final C — per-editor save order. Every Venue Assessment editor mount draws a random editor id; each save run
    it makes carries `saveStamp: { editor, seq }` (the server action's patch and its outbox copy carry the SAME stamp).
-   Under the survey lock the store keeps a server-only `_saveSeqs` map (editor → highest seq + when) on the stored doc:
-   a stamped write whose seq is not newer than that editor's stored seq is a no-op (a timed-out save landing after a
-   newer one from the same editor, or the action + its outbox copy both arriving). Unstamped writes apply as before.
-   `saveStamp` is transport-only and `_saveSeqs` is never shown — readers strip both. Pure: no I/O. */
+   Under the survey lock the store keeps a server-only `_saveSeqs` map (editor → { seq, fullSeq, at }) on the stored doc.
+   `saveStamp` is transport-only and `_saveSeqs` is never shown — readers strip both. Pure: no I/O.
+
+   #344 C-final D — "older ⇒ stale" only holds when the newer save wrote everything the older one did. A photo / sketch
+   save sends only the file keys, so `seq` is the newest save applied from that editor and `fullSeq` the newest one that
+   carried any field edit (a key outside the file keys and transport fields). For a stamped save with seq s:
+   - s > seq: applies as sent; seq = s (and fullSeq = s when it carries field edits).
+   - fullSeq < s ≤ seq, carrying field edits: only file-only saves came after it, so its field edits are still the
+     newest for those fields — it applies WITHOUT its file keys and seen lists (the newer file saves win those);
+     seq stays, fullSeq = s.
+   - otherwise (s ≤ fullSeq, or a file-only save no newer than seq): stale — a no-op.
+   An entry stored before fullSeq existed reads as fullSeq = seq (the old, conservative rule). */
+
+import { FILE_PATCH_KEYS } from "./files";
 
 export const SAVE_STAMP_FIELD = "saveStamp";
 export const SAVE_SEQS_FIELD = "_saveSeqs";
@@ -11,7 +21,33 @@ export const SAVE_SEQS_FIELD = "_saveSeqs";
 export const SAVE_SEQS_KEEP = 20;
 
 export type SaveStamp = { editor: string; seq: number };
-export type SaveSeqs = Record<string, { seq: number; at: number }>;
+export type SaveSeqEntry = { seq: number; fullSeq: number; at: number };
+export type SaveSeqs = Record<string, SaveSeqEntry>;
+/** What one stamped write does: `apply` as sent, apply its `fields` only (no file keys), or nothing (`stale`). */
+export type SaveVerdict = "apply" | "fields" | "stale";
+
+/** Keys that never count as a field edit: the file lists + their seen ids + the stamp, and the transport / bookkeeping
+ *  fields a whole-doc copy carries. */
+const NOT_FIELD_EDITS: ReadonlySet<string> = new Set<string>([
+  ...FILE_PATCH_KEYS, "_saveSeqs", "id", "rev", "updatedAt", "syncState", "syncedAt", "legacyNotes",
+]);
+/** The file keys a fields-only write leaves out (the stamp is stripped by the store separately). */
+const FILE_KEYS: readonly string[] = FILE_PATCH_KEYS.filter((k) => k !== "saveStamp");
+
+/** True when a save (patch or whole doc) carries any field edit — a defined key outside the file keys, the stamp and
+ *  the transport fields. A photo / sketch save's file-only patch carries none; a whole doc always does. */
+export function carriesFieldEdits(doc: Record<string, unknown> | null | undefined): boolean {
+  if (!doc || typeof doc !== "object") return false;
+  for (const [k, v] of Object.entries(doc)) if (v !== undefined && !NOT_FIELD_EDITS.has(k)) return true;
+  return false;
+}
+
+/** A copy without the file lists and their seen ids — what a `fields` verdict writes. */
+export function withoutFileKeys<T extends Record<string, unknown>>(doc: T): T {
+  const out = { ...doc } as Record<string, unknown>;
+  for (const k of FILE_KEYS) delete out[k];
+  return out as T;
+}
 
 const EDITOR_RE = /^[a-z0-9]{8,40}$/;
 
@@ -37,9 +73,11 @@ export function readSaveSeqs(v: unknown): SaveSeqs {
   if (!v || typeof v !== "object" || Array.isArray(v)) return out;
   for (const [k, e] of Object.entries(v as Record<string, unknown>)) {
     if (!EDITOR_RE.test(k) || !e || typeof e !== "object") continue;
-    const { seq, at } = e as Record<string, unknown>;
+    const { seq, fullSeq, at } = e as Record<string, unknown>;
     if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 1) continue;
-    out[k] = { seq, at: typeof at === "number" && Number.isFinite(at) ? at : 0 };
+    // #344 C-final D: an entry from before fullSeq (or a malformed one) reads as fullSeq = seq — the old rule
+    const full = typeof fullSeq === "number" && Number.isSafeInteger(fullSeq) && fullSeq >= 0 && fullSeq <= seq ? fullSeq : seq;
+    out[k] = { seq, fullSeq: full, at: typeof at === "number" && Number.isFinite(at) ? at : 0 };
   }
   return out;
 }
@@ -53,17 +91,30 @@ export function pruneSaveSeqs(seqs: SaveSeqs): SaveSeqs {
 }
 
 /**
- * The order check for one write. `stale` — the stamp's seq is not newer than its editor's stored seq (the write must
- * not apply). Otherwise `seqs` is the map to store: the stored one unchanged for an unstamped write (undefined when
- * there is none), or with this editor's seq recorded at `at`, pruned.
+ * The order check for one write (#344 C-final D rules in the header). `carriesFields` — the write carries a field edit
+ * (`carriesFieldEdits`); a whole doc always does. Returns the verdict, `stale` (= verdict "stale"), and `seqs`: the map
+ * to store — the stored one unchanged for an unstamped write (undefined when there is none), else with this editor's
+ * entry updated at `at`, pruned; undefined for a stale write (nothing is written).
  */
-export function checkSaveStamp(storedSeqs: unknown, stamp: SaveStamp | null, at: number): { stale: boolean; seqs: SaveSeqs | undefined } {
+export function checkSaveStamp(
+  storedSeqs: unknown,
+  stamp: SaveStamp | null,
+  at: number,
+  carriesFields = true,
+): { stale: boolean; verdict: SaveVerdict; seqs: SaveSeqs | undefined } {
   const cur = readSaveSeqs(storedSeqs);
-  if (!stamp) return { stale: false, seqs: Object.keys(cur).length ? pruneSaveSeqs(cur) : undefined };
+  if (!stamp) return { stale: false, verdict: "apply", seqs: Object.keys(cur).length ? pruneSaveSeqs(cur) : undefined };
   const prev = cur[stamp.editor];
-  if (prev && stamp.seq <= prev.seq) return { stale: true, seqs: undefined };
-  cur[stamp.editor] = { seq: stamp.seq, at };
-  return { stale: false, seqs: pruneSaveSeqs(cur) };
+  if (!prev || stamp.seq > prev.seq) {
+    cur[stamp.editor] = { seq: stamp.seq, fullSeq: carriesFields ? stamp.seq : (prev?.fullSeq ?? 0), at };
+    return { stale: false, verdict: "apply", seqs: pruneSaveSeqs(cur) };
+  }
+  if (carriesFields && stamp.seq > prev.fullSeq) {
+    // only file-only saves came after this one: its field edits are still the newest for those fields
+    cur[stamp.editor] = { seq: prev.seq, fullSeq: stamp.seq, at: Math.max(prev.at, at) };
+    return { stale: false, verdict: "fields", seqs: pruneSaveSeqs(cur) };
+  }
+  return { stale: true, verdict: "stale", seqs: undefined };
 }
 
 /** A copy without the stamp and the seq map — for anything a reader, a print or the client sees. */
