@@ -370,3 +370,85 @@ export function surveyInlineTotal(doc: RefsDoc): number {
   }
   return n;
 }
+
+/* ------------------------------------------------------------------ */
+/* the survey editor's per-section photos (#344 C5)                     */
+/* ------------------------------------------------------------------ */
+
+/** The most photo refs one survey holds. */
+export const SURVEY_PHOTO_CAP = 200;
+export const SURVEY_PHOTO_CAP_MESSAGE = `This survey already has ${SURVEY_PHOTO_CAP} photos — the most it can hold. Delete one to add another.`;
+/** A photo caption's length cap, in characters. */
+export const CAPTION_MAX = 500;
+
+/** How many more photos fit in a survey that already holds `count`. */
+export function photoRoom(count: number): number {
+  const n = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : SURVEY_PHOTO_CAP;
+  return Math.max(0, SURVEY_PHOTO_CAP - n);
+}
+
+/** Every file a photo ref owns: its original (`p_`), and its current markup's image (`m_`) + strokes (`k_`). */
+export function photoFileIds(ref: SurveyPhotoRef | null | undefined): string[] {
+  if (!isObj(ref)) return [];
+  const out: string[] = [];
+  if (typeof ref.id === "string" && FILE_ID_RE.test(ref.id)) out.push(ref.id);
+  const m = isObj(ref.markup) ? idWith(ref.markup.id, "m") : "";
+  if (m) out.push(m, strokesOf(m));
+  return out;
+}
+
+/** The files a device should stop uploading when a photo ref is replaced by `after` (a re-markup, a removed markup)
+ *  or removed (`after` absent): every file `before` owned that `after` no longer owns. A superseded markup's `m_` +
+ *  `k_`; all of a deleted photo's files. Their queued device copies would otherwise retry for 7 days. */
+export function filesToDiscard(before: SurveyPhotoRef | null | undefined, after?: SurveyPhotoRef | null): string[] {
+  const keep = new Set(photoFileIds(after));
+  return photoFileIds(before).filter((id) => !keep.has(id));
+}
+
+/** Photo refs per editor section id (the rail's photo badge). */
+export function photoCountsBySection(refs: readonly SurveyPhotoRef[] | null | undefined): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of Array.isArray(refs) ? refs : []) {
+    if (isObj(r) && typeof r.section === "string" && r.section) out[r.section] = (out[r.section] || 0) + 1;
+  }
+  return out;
+}
+
+/** A caption as stored: ends trimmed, at most CAPTION_MAX characters; blank = no caption (undefined). */
+export function cleanCaption(text: unknown): string | undefined {
+  if (typeof text !== "string") return undefined;
+  const t = text.trim().slice(0, CAPTION_MAX).trim();
+  return t ? t : undefined;
+}
+
+/** The ref with this caption (a blank one removes the key). Pure. */
+export function withCaption(ref: SurveyPhotoRef, text: unknown): SurveyPhotoRef {
+  const caption = cleanCaption(text);
+  const next: SurveyPhotoRef = { ...ref };
+  if (caption) next.caption = caption;
+  else delete next.caption;
+  return next;
+}
+
+/** The ref with a NEW markup (`markupId`, a fresh `m_` id from `newFileId("m")`): both slots pending until the device
+ *  queue uploads its image and strokes. The original `file` is untouched. Pure; throws on a non-`m_` id. */
+export function withNewMarkup(ref: SurveyPhotoRef, markupId: string, at: number): SurveyPhotoRef {
+  if (!idWith(markupId, "m")) throw new Error("A markup needs its own m_ id");
+  return { ...ref, markup: { id: markupId, image: { pending: true }, strokes: { pending: true }, updatedAt: at } };
+}
+
+/** The ref with its markup removed (the original stays). Pure. */
+export function withoutMarkup(ref: SurveyPhotoRef): SurveyPhotoRef {
+  const next: SurveyPhotoRef = { ...ref };
+  delete next.markup;
+  return next;
+}
+
+/** What a thumbnail / the viewer shows, in order of preference: the markup's image (unless `original`), then the
+ *  original. The caller takes the first one it has a source for (a finished slot, or this device's queued copy). */
+export function photoShows(ref: SurveyPhotoRef, original = false): Array<{ fileId: string; slot: FileSlot }> {
+  const out: Array<{ fileId: string; slot: FileSlot }> = [];
+  if (!original && isObj(ref.markup) && idWith(ref.markup.id, "m") && isObj(ref.markup.image)) out.push({ fileId: ref.markup.id, slot: ref.markup.image });
+  if (isObj(ref.file)) out.push({ fileId: ref.id, slot: ref.file });
+  return out;
+}

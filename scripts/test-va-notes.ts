@@ -1623,6 +1623,88 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const pr = readFileSync(join(process.cwd(), "src/app/api/sync/push/route.ts"), "utf8");
     ok(pr.includes('coll === "surveys"') && pr.includes("pushSurvey("), "#344 C4: the sync push route sends surveys through pushSurvey");
   }
+
+  /* ---- C5: per-section photos with caption and markup that keeps the original ---- */
+  {
+    const FF = await import("../src/lib/field-files/files");
+    type Ref = import("../src/lib/field-files/files").SurveyPhotoRef;
+    const pend = { pending: true as const };
+    const plain: Ref = { id: "p_abcdef123456", section: "mBeams", takenAt: 1, by: "u1", file: { blobPath: "surveys/FS-1/p_abcdef123456.jpg" } };
+    const marked: Ref = { ...plain, markup: { id: "m_111111111111", image: pend, strokes: pend, updatedAt: 2 } };
+    const remarked: Ref = { ...plain, markup: { id: "m_222222222222", image: pend, strokes: pend, updatedAt: 3 } };
+
+    ok(FF.SURVEY_PHOTO_CAP === 200 && FF.photoRoom(0) === 200 && FF.photoRoom(199) === 1 && FF.photoRoom(200) === 0 && FF.photoRoom(250) === 0 &&
+      FF.photoRoom(NaN) === 0 && FF.photoRoom(-3) === 200 && FF.SURVEY_PHOTO_CAP_MESSAGE.includes("200"),
+      "#344 C5: a survey holds at most 200 photo refs (photoRoom, with a clear message at the cap)");
+    ok(JSON.stringify(FF.photoFileIds(plain)) === '["p_abcdef123456"]' && JSON.stringify(FF.photoFileIds(marked)) === '["p_abcdef123456","m_111111111111","k_111111111111"]' &&
+      FF.photoFileIds(undefined).length === 0 && FF.photoFileIds({ ...plain, markup: { id: "x", image: pend, strokes: pend, updatedAt: 1 } }).length === 1,
+      "#344 C5: photoFileIds — the original, plus the current markup's m_ and its k_ (a bad markup id owns nothing)");
+    ok(JSON.stringify(FF.filesToDiscard(marked, remarked)) === '["m_111111111111","k_111111111111"]' &&
+      JSON.stringify(FF.filesToDiscard(marked, FF.withoutMarkup(marked))) === '["m_111111111111","k_111111111111"]' &&
+      JSON.stringify(FF.filesToDiscard(marked)) === '["p_abcdef123456","m_111111111111","k_111111111111"]' &&
+      FF.filesToDiscard(marked, marked).length === 0 && FF.filesToDiscard(plain, marked).length === 0 && FF.filesToDiscard(plain, FF.withCaption(plain, "x")).length === 0,
+      "#344 C5: filesToDiscard — a re-markup or removed markup drops the old m_ + k_; a deleted photo drops all its files; a caption or first markup drops nothing");
+    const snap = JSON.stringify(marked);
+    const nm = FF.withNewMarkup(marked, "m_333333333333", 9);
+    let threw = false;
+    try { FF.withNewMarkup(marked, "p_333333333333", 9); } catch { threw = true; }
+    ok(nm.markup?.id === "m_333333333333" && nm.markup.image.pending === true && nm.markup.strokes.pending === true && nm.markup.updatedAt === 9 &&
+      nm.file === marked.file && threw && JSON.stringify(marked) === snap && !("markup" in FF.withoutMarkup(marked)) && FF.withoutMarkup(marked).file === marked.file,
+      "#344 C5: withNewMarkup gives the ref a new m_ id with pending slots and never touches the original; withoutMarkup keeps the original");
+    ok(FF.cleanCaption("  Rusty clew  ") === "Rusty clew" && FF.cleanCaption("   ") === undefined && FF.cleanCaption(7) === undefined &&
+      FF.cleanCaption("x".repeat(600))!.length === FF.CAPTION_MAX && FF.CAPTION_MAX === 500 &&
+      FF.withCaption(plain, " Hi ").caption === "Hi" && !("caption" in FF.withCaption({ ...plain, caption: "old" }, "")) && !("caption" in plain),
+      "#344 C5: captions are trimmed, capped at 500, and a blank one removes the key");
+    ok(JSON.stringify(FF.photoCountsBySection([plain, marked, { ...plain, id: "p_999999999999", section: "dAv" }])) === '{"mBeams":2,"dAv":1}' &&
+      JSON.stringify(FF.photoCountsBySection(undefined)) === "{}",
+      "#344 C5: photoCountsBySection feeds the rail's photo badge");
+    ok(FF.photoShows(marked).map((x) => x.fileId).join() === "m_111111111111,p_abcdef123456" && FF.photoShows(marked, true).map((x) => x.fileId).join() === "p_abcdef123456" &&
+      FF.photoShows(plain).map((x) => x.fileId).join() === "p_abcdef123456",
+      "#344 C5: photoShows — the markup by default, View original shows the untouched original");
+    // the editor's fold is the store's fold: a finished slot lands on the right ref, a superseded markup's never does
+    const folded = FF.foldFileSlot({ photoRefs: [remarked] }, "m_222222222222", { blobPath: "surveys/FS-1/m_222222222222.jpg" });
+    ok(folded.status === "set" && folded.doc.photoRefs![0].markup!.image.blobPath === "surveys/FS-1/m_222222222222.jpg" &&
+      FF.foldFileSlot({ photoRefs: [remarked] }, "m_111111111111", { blobPath: "surveys/FS-1/m_111111111111.jpg" }).status === "missing",
+      "#344 C5: the editor folds a finished slot with foldFileSlot (the store's rule) — a superseded markup's file owns nothing");
+
+    const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+    const sp = read("src/app/(app)/venue-assessments/[id]/sections/section-photos.tsx");
+    const ctl = read("src/app/(app)/venue-assessments/[id]/controls.tsx");
+    const old = read("src/app/(app)/venue-assessments/[id]/sections/photos.tsx");
+    const pg = read("src/app/(app)/venue-assessments/[id]/page.tsx");
+    const act = read("src/app/(app)/venue-assessments/[id]/actions.ts");
+    const store = read("src/lib/stores/surveys.ts");
+    ok(sp.startsWith('"use client"') && !/from\s+["'][^"']*(stores|@\/db|lib\/blob|lib\/session)["']/.test(sp),
+      "#344 C5: section-photos is a client component with no store / server imports");
+    ok(/<input[^>]*type="file"[^>]*accept="image\/\*"[^>]*capture="environment"/.test(sp) && /<input[^>]*type="file"[^>]*accept="image\/\*"[^>]*multiple/.test(sp) && sp.includes("resizePhoto("),
+      "#344 C5: every section's Add photo has a camera input (capture=environment) and a library input (multiple), shrunk with the engine's resizePhoto");
+    const cap = sp.slice(sp.indexOf("async function addPhotos"));
+    ok(cap.length > 0 && sp.includes("async function addPhotos") && cap.indexOf("await persist(") > 0 && cap.indexOf("await persist(") < cap.indexOf("enqueuePhoto(") &&
+      sp.includes('newFileId("p")') && sp.includes("photoRoom(") && sp.includes("SURVEY_PHOTO_CAP_MESSAGE"),
+      "#344 C5: a capture adds the pending p_ ref, saves, THEN enqueues the bytes (cap 200)");
+    const mk = sp.slice(sp.indexOf("async function saveMarkup"));
+    ok(sp.includes("async function saveMarkup") && sp.includes('newFileId("m")') && sp.includes('siblingId(') && mk.indexOf("await persist(") > 0 &&
+      mk.indexOf("await persist(") < mk.indexOf("enqueuePhoto(") && sp.includes("serializeInk(") && sp.includes('"application/json"'),
+      "#344 C5: a markup gets a NEW m_ id + its k_, saves, THEN enqueues the flattened JPEG and the strokes JSON");
+    ok(/<InkPad[\s\S]{0,400}background=\{\{ kind: "image", url: originalUrl/.test(sp) && sp.includes("parseInk(") && sp.includes("queuedPhotoBlob("),
+      "#344 C5: the InkPad draws over the ORIGINAL photo, starting from the saved strokes (device copy while pending)");
+    ok(sp.includes("filesToDiscard(") && sp.includes("discardPhoto(") && sp.includes("View original") && sp.includes("Edit markup") && sp.includes("Remove markup") &&
+      sp.includes("Delete photo") && sp.includes("maxLength={CAPTION_MAX}") && sp.includes("onBlur="),
+      "#344 C5: the viewer — View original, caption saved on blur, Edit / Remove markup, Delete photo; superseded queued files are discarded");
+    ok(sp.includes("configurePhotoQueue(") && sp.includes("foldFileSlot(") && store.includes("foldFileSlot(") && sp.includes("recordId") &&
+      sp.includes("URL.revokeObjectURL(") && sp.includes("FailedPhotos") && sp.includes("retryPhoto("),
+      "#344 C5: the editor's queue onDone folds finished slots with the store's foldFileSlot; object URLs are revoked; failed uploads offer Retry / Discard");
+    ok(old.includes("Earlier photos") || ctl.includes('title: "Earlier photos"'),
+      "#344 C5: the old section is Earlier photos");
+    ok(old.includes("Taken before photos moved into each section") && !old.includes("<input") && !old.includes("onPhotos") && !old.includes("removePhoto"),
+      "#344 C5: Earlier photos is read-only with its note");
+    ok(!ctl.includes("readPhoto") && !/\bonPhotos\b/.test(ctl) && !/\bremovePhoto\b/.test(ctl) && /draft\.photos\.length > 0[\s\S]{0,200}id: "photos"/.test(ctl) &&
+      ctl.includes("photos={draft.photos}") && /tone: "photo"/.test(ctl) && ctl.includes("useSectionPhotos(") && ctl.includes("photoRefs: draft.photoRefs"),
+      "#344 C5: the editor drops the 8-photo inline path, shows Earlier photos only when there are any, keeps findings on draft.photos, badges photo counts, saves photoRefs");
+    ok(/\{meetingsSlot\}\s*\{visibleSections\.map\(/.test(ctl), "#344 C5: the meetings slot still sits right before the sections");
+    ok(/import \{ blobEnabled \} from "@\/lib\/blob"/.test(pg) && /blobEnabled=\{blobEnabled\(\)\}/.test(pg) && /\| "photoRefs"/.test(act),
+      "#344 C5: the page passes blobEnabled() to the editor; a save patch may carry photoRefs");
+  }
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {

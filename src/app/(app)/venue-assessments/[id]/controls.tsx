@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import type {
   SurveyRecord,
-  SurveyPhoto,
   SurveyStage,
   MeasureGroup,
 } from "@/lib/stores/surveys";
+import { photoCountsBySection, type SurveyPhotoRef } from "@/lib/field-files/files";
 import {
   VENUE_CLASSES,
   VISIT_PURPOSES,
@@ -49,6 +49,7 @@ import { RecapSection } from "./sections/recap";
 import { FinalThoughtsSection } from "./sections/final-thoughts";
 import { OlderNotes } from "./sections/older-notes";
 import { PhotosSection } from "./sections/photos";
+import { useSectionPhotos } from "./sections/section-photos";
 import { SystemsSection } from "./sections/systems";
 import { LinesetsSection } from "./sections/linesets";
 import { linesetsInUse } from "@/lib/stores/linesets";
@@ -73,12 +74,6 @@ const DISC_SECTION_ID: Record<DisciplineKey, string> = { rigging: "dRigging", cu
 /** Display label for a venue class — the derived `venueType` fallback. */
 function classLabel(cls: VenueClass): string {
   return (VENUE_CLASSES.find((c) => c.key === cls) || VENUE_CLASSES[0]).label;
-}
-
-let photoSeq = 0;
-function newPhotoId(): string {
-  photoSeq += 1;
-  return "p" + Date.now().toString(36) + photoSeq.toString(36);
 }
 
 function timeAgo(ts: number | null | undefined): string {
@@ -168,6 +163,7 @@ function toDraft(r: SurveyRecord, travel: TravelSuggestion = null): Draft {
     measurements: { ...(r.measurements || {}) },
     conditions: [...(r.conditions || [])],
     photos: [...(r.photos || [])],
+    photoRefs: Array.isArray(r.photoRefs) ? [...r.photoRefs] : [],
     auditoriumSize: r.auditoriumSize || "",
     yearBuilt: r.yearBuilt || "",
     systemsState: { ...blankSystemsState(), ...(r.systemsState || {}) },
@@ -244,6 +240,8 @@ export default function SurveyEditor({
   canSuggest = false,
   suggestionHref = null,
   travelSuggestion = null,
+  blobEnabled = false,
+  me = "",
 }: {
   record: SurveyRecord;
   customers: EditorCustomer[];
@@ -263,6 +261,10 @@ export default function SurveyEditor({
   suggestionHref?: string | null;
   /** #344 B5 — one-way drive to the venue's verified address, for a blank Travel time / Distance; null when none. */
   travelSuggestion?: TravelSuggestion;
+  /** #344 C5 — the server's Blob flag: photos upload to private Blob, else (local dev) inline */
+  blobEnabled?: boolean;
+  /** #344 C5 — the signed-in user's id, stamped on photos taken here */
+  me?: string;
 }) {
   const initial = useMemo<Draft>(() => toDraft(record, travelSuggestion), [record, travelSuggestion]);
   const [draft, setDraft] = useState<Draft>(initial);
@@ -440,62 +442,6 @@ export default function SurveyEditor({
     patchDraft(patch);
   }
 
-  /* ---------- photos (client-side downscale — metadata-only placeholder, no upload) ---------- */
-  function readPhoto(file: File): Promise<SurveyPhoto | null> {
-    return new Promise((resolve) => {
-      const fr = new FileReader();
-      fr.onload = () => {
-        const result = fr.result as string;
-        const img = new Image();
-        img.onload = () => {
-          const max = 1200;
-          let w = img.width;
-          let h = img.height;
-          if (w > max || h > max) {
-            const r = Math.min(max / w, max / h);
-            w = Math.round(w * r);
-            h = Math.round(h * r);
-          }
-          let url: string;
-          try {
-            const c = document.createElement("canvas");
-            c.width = w;
-            c.height = h;
-            c.getContext("2d")!.drawImage(img, 0, 0, w, h);
-            url = c.toDataURL("image/jpeg", 0.7);
-          } catch {
-            url = result;
-          }
-          resolve({ id: newPhotoId(), name: file.name || "photo.jpg", dataUrl: url });
-        };
-        img.onerror = () => resolve(null);
-        img.src = result;
-      };
-      fr.onerror = () => resolve(null);
-      fr.readAsDataURL(file);
-    });
-  }
-  async function onPhotos(e: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files || []);
-    try {
-      e.target.value = "";
-    } catch {}
-    if (!files.length) return;
-    const room = Math.max(0, 8 - draft.photos.length);
-    if (room <= 0) {
-      setSaveError("Up to 8 photos per survey. Remove one to add another.");
-      return;
-    }
-    const added: SurveyPhoto[] = [];
-    for (const f of files.slice(0, room)) {
-      const p = await readPhoto(f);
-      if (p) added.push(p);
-    }
-    setSaveError("");
-    patchDraft({ photos: draft.photos.concat(added) });
-  }
-  const removePhoto = (id: string) => patchDraft({ photos: draft.photos.filter((p) => p.id !== id) });
-
   /* ---------- sections ---------- */
   const sections = useMemo<SectionDef[]>(() => {
     // the quick measurement set is the venue class's own field set (D132)
@@ -633,7 +579,8 @@ export default function SurveyEditor({
     });
     secs.push({ id: "linesets", title: "Lineset schedule", subtitle: "Physical positions, loads, trim and condition", group: "intake", step: 3, advanced: true, kind: "linesets" });
     secs.push({ id: "assessmentToggle", title: "Condition & Needs assessment", subtitle: "Add an advisory layer when the customer needs Peak's opinion", group: "intake", step: 3, kind: "assessmentToggle" });
-    secs.push({ id: "photos", title: "Photos", subtitle: "Up to 8", group: "field", step: 4, kind: "photos" });
+    // #344 C5: photos live in each section now; the old inline photos stay readable (findings may link them)
+    if (draft.photos.length > 0) secs.push({ id: "photos", title: "Earlier photos", subtitle: "Read-only", group: "field", step: 4, kind: "photos" });
     secs.push({
       id: "notes", title: "Scope & notes", subtitle: "Free text", group: "field", step: 4, kind: "fields",
       fields: [
@@ -742,6 +689,8 @@ export default function SurveyEditor({
       measurements: draft.measurements as Record<string, string>,
       conditions: draft.conditions,
       photos: draft.photos,
+      // #344 C5 — whole list every save (a ref absent from a save is deleted); finished slots are kept by the store
+      ...(draft.photoRefs.length || Array.isArray(record.photoRefs) ? { photoRefs: draft.photoRefs } : {}),
       auditoriumSize: draft.auditoriumSize,
       yearBuilt: draft.yearBuilt,
       systemsState: draft.systemsState,
@@ -777,7 +726,7 @@ export default function SurveyEditor({
       ...rec,
       ...(buildPatch(over) as Record<string, unknown>),
       updatedAt: Date.now(),
-      rev: (record.rev || 1) + 1,
+      rev: Math.max(record.rev || 1, revSeen.current) + 1,
       syncState: "synced",
     };
   }
@@ -870,6 +819,33 @@ export default function SurveyEditor({
       setSaving(false);
     }
   }
+
+  /* ---------- per-section photos (#344 C5) ---------- */
+  // The survey's stored rev a finalize reported (a finalize never bumps it) — the next outbox save builds on it.
+  const revSeen = useRef(0);
+  /** A photo change saves through the same path as Save changes, carrying exactly these refs. */
+  async function savePhotoRefs(photoRefs: SurveyPhotoRef[]) {
+    const over: Partial<SurveyPatch> = { photoRefs };
+    await saveThroughOutbox({
+      collection: "surveys",
+      id: record.id,
+      doc: buildFullDoc(over),
+      action: () => saveSurvey(record.id, buildPatch(over)),
+    });
+  }
+  const sectionPhotos = useSectionPhotos({
+    recordId: record.id,
+    me,
+    blobEnabled,
+    refs: draft.photoRefs,
+    onRefs: (next) => setDraft((d) => ({ ...d, photoRefs: next })),
+    save: savePhotoRefs,
+    onRev: (rev) => {
+      if (rev > revSeen.current) revSeen.current = rev;
+    },
+    sectionTitle: (id) => sections.find((s) => s.id === id)?.title ?? "another section",
+  });
+  const photoCounts = photoCountsBySection(draft.photoRefs);
 
   /* ---------- derived ---------- */
   const stageKey = draft.stage || "requested";
@@ -1031,7 +1007,10 @@ export default function SurveyEditor({
       label: sec.title,
       done: p.done,
       total: p.total,
-      badges: p.gate ? [{ tone: "prompt", n: 1, title: LOCKED_MSG, text: "needs answers" }] : [],
+      badges: [
+        ...(p.gate ? [{ tone: "prompt" as const, n: 1, title: LOCKED_MSG, text: "needs answers" }] : []),
+        ...(photoCounts[sec.id] ? [{ tone: "photo" as const, n: photoCounts[sec.id], title: `${photoCounts[sec.id]} photo${photoCounts[sec.id] === 1 ? "" : "s"}`, text: `${photoCounts[sec.id]} photo${photoCounts[sec.id] === 1 ? "" : "s"}` }] : []),
+      ],
       muted: sec.kind === "discipline" && !tier1Done,
     };
   });
@@ -1137,6 +1116,7 @@ export default function SurveyEditor({
           )}
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {sectionPhotos.overlay}
               {meetingsSlot}
               {visibleSections.map((sec, secIdx) => {
                 const locked = sec.kind === "discipline" && !tier1Done;
@@ -1185,6 +1165,7 @@ export default function SurveyEditor({
                           {sec.subtitle && <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2 }}>{locked ? "Locked — answer the kill questions above first" : sec.subtitle}</div>}
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                          {!locked && sec.kind !== "photos" && sectionPhotos.addButton(sec.id)}
                           {locked && (
                             <span style={{ display: "inline-flex", color: "#aab0bb" }} title="Complete the kill questions to unlock">
                               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1199,6 +1180,7 @@ export default function SurveyEditor({
                         </div>
                       </div>
 
+                      {!locked && sectionPhotos.strip(sec.id)}
                       {open && (
                         <div id={"sec-body-" + sec.id} style={{ padding: "4px 18px 20px" }}>
                           {sec.kind === "custvenue" && (
@@ -1348,7 +1330,7 @@ export default function SurveyEditor({
                           )}
                           {sec.kind === "viz3d" && <Venue3D venueClass={draft.venueClass} venueSubtype={draft.venueSubtype} measurements={draft.measurements} />}
                           {sec.kind === "photos" && (
-                            <PhotosSection draft={draft} onPhotos={onPhotos} removePhoto={removePhoto} />
+                            <PhotosSection draft={draft} />
                           )}
                           <OlderNotes notes={draft.legacyNotes.filter((n) => n.section === sec.id)} />
                         </div>
