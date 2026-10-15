@@ -5,7 +5,7 @@ import { getAssistEnv } from "@/lib/assist/key-store";
 import { loadBriefView } from "@/lib/brief/build";
 import { briefCardVM, type BriefCardVM, type CardLeadSuggest, type CardQuoteInfo, type CardRow, type CardThreadReady } from "@/lib/brief/card-vm";
 import { suggestionReadyHrefs } from "@/lib/assist/suggest-entry-server";
-import { readerPreDraft } from "@/lib/brief/reader-predraft";
+import { homeCardPreDraft } from "@/lib/brief/reader-predraft";
 import { nudgePrefill } from "@/lib/inbox-compose-prefill";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { get as getThread } from "@/lib/stores/comms";
@@ -13,9 +13,14 @@ import { get as getQuote } from "@/lib/stores/quotes";
 import { snapshotId } from "@/lib/triage/clock";
 import { parseTriageKey } from "@/lib/triage/keys";
 import { getSnapshot } from "@/lib/triage/store";
+import { loadLiveState } from "@/lib/triage/live-state";
+import type { MailboxViewer } from "@/lib/stores/comms";
+import { visibleRows } from "@/lib/triage/view";
+import type { SnapshotRow } from "@/lib/triage/types";
+import { BLOCK_CAP } from "@/lib/brief/blocks";
 import { getCleanupState } from "@/lib/inbox-org/cleanup";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
-import { triageNow } from "@/lib/triage/service";
+import { triageNow, triageUserFromSession } from "@/lib/triage/service";
 import { organizeEntryCounts } from "@/app/(app)/inbox/organize/load";
 import BriefCardView from "./brief-card-view";
 import { mailboxViewer } from "@/lib/mailbox-viewer";
@@ -25,8 +30,9 @@ import { mailboxViewer } from "@/lib/mailbox-viewer";
  * (inside its own Suspense, "Preparing your brief…") only after the cheap
  * settings check — Assist pilot + Daily brief on; the Assist gate itself
  * (it reads the stored key) runs here, behind the Suspense. A missing brief
- * builds lazily (≤ 20 s). Server half: the stored brief, the snapshot rows
- * its Do-these-first keys point at, ready pre-drafts / nudges (a chip shows
+ * builds lazily (≤ 20 s). Server half: the stored brief, the slot's visible
+ * snapshot rows (the VM groups them into Emails / Estimates / Tasks and stars
+ * the Do-these-first picks), ready pre-drafts / nudges (a chip shows
  * only when the reader would offer that draft), and each quiet quote's
  * builder link.
  *
@@ -48,57 +54,89 @@ export default async function BriefCard({ user, settings }: { user: SessionUser;
   return vm ? <BriefCardView vm={vm} /> : null;
 }
 
+
 async function loadCardVM(user: SessionUser, settings: AssistSettings): Promise<BriefCardVM | null> {
   const flags = assistUiFlags(user.id, settings, await getAssistEnv());
   if (!flags.brief) return null;
-  const view = await loadBriefView(user, triageNow());
+  const now = triageNow();
+  const view = await loadBriefView(user, now);
   if (!view) return null;
   const b = view.brief;
 
-  const threadIds = new Set<string>();
-  const quoteIds = new Set<string>(b.quiet.map((q) => q.quoteId));
-  const leadIds = new Set<string>();
-  for (const d of b.doFirst) {
-    const k = parseTriageKey(d.key);
-    if (k?.source === "email") threadIds.add(k.id);
-    if (k?.source === "quote") quoteIds.add(k.id);
-    if (k?.source === "lead") leadIds.add(k.id);
-  }
-
-  // Estimate suggestion (spec 2026-10-13 §3): with Suggest estimate on, each
-  // lead row's cue becomes Suggest estimate / Suggestion ready (bounded by
-  // the Do-these-first list, and by SUGGEST_LOOKUP_MAX).
   // #345 — Organize's line + "Organize my inbox" (pilot with Inbox organization on, while the
   // 90-day cleanup was never run or is unfinished); a failed read just leaves the offer out
   const organizeAvailable = !inboxOrgDisabled();
   // #346 — the live Organize counts (the Inbox banner's), so an Archive or a
   // filing since the brief was built shows at once; a failed read keeps the
   // brief's stored counts
-  const [snap, threads, quotes, leadReady, cleanupState, organizeLive] = await Promise.all([
-    getSnapshot(snapshotId(b.userId, b.day, b.slot)).catch(() => null),
-    Promise.all([...threadIds].map((id) => getThread(id).catch(() => null))),
-    Promise.all([...quoteIds].map((id) => getQuote(id).catch(() => null))),
-    flags.estimate && leadIds.size ? suggestionReadyHrefs("lead", [...leadIds]) : Promise.resolve(null),
+  const sid = snapshotId(b.userId, b.day, b.slot);
+  const [snap, cleanupState, organizeLive] = await Promise.all([
+    getSnapshot(sid).catch(() => null),
     organizeAvailable && flags.file ? getCleanupState(user.id).catch(() => undefined) : Promise.resolve(undefined),
     organizeAvailable ? organizeEntryCounts(user).catch(() => null) : Promise.resolve(null),
   ]);
   const cleanup: "never" | "unfinished" | "done" | null =
     !organizeAvailable || !flags.file || cleanupState === undefined ? null : cleanupState === null ? "never" : cleanupState.done ? "done" : "unfinished";
+
+  // The blocks list the slot's rows as Start here shows them: marks (done /
+  // snooze / not mine) and liveness applied, through the same per-request
+  // load (React cache — Start here's loadTriageView shares it). Fail closed
+  // (#350 review): no snapshot (or a failed read) → null, and the card shows
+  // no rows and no picks; a failed liveness check drops the rows it could
+  // have hidden (loadLiveState).
+  const snapRows = Array.isArray(snap?.rows) ? snap.rows.filter((r) => r && typeof r.key === "string") : null;
+  let visible: SnapshotRow[] | null = null;
+  let viewer: MailboxViewer | null = null;
+  if (snapRows) {
+    const live = await loadLiveState(snapRows, triageUserFromSession(user), now);
+    viewer = live.viewer;
+    visible = visibleRows(snapRows, live.marks, live.closed, { snapshotId: sid, day: b.day, slot: b.slot });
+  }
+  const rows: CardRow[] | null = visible
+    ? visible.map((r) => ({ key: r.key, source: r.source, title: String(r.title || ""), href: String(r.href || ""), reason: String(r.reason || "") }))
+    : null;
+
+  // Pre-draft / nudge / suggestion lookups for the rows a block can show:
+  // the picks, plus the first BLOCK_CAP rows of each source (a superset of
+  // what the cap keeps, so every shown row has its chips).
+  const threadIds = new Set<string>();
+  const quoteIds = new Set<string>(b.quiet.map((q) => q.quoteId));
+  const leadIds = new Set<string>();
+  const perSource = new Map<string, number>();
+  const want = (key: string) => {
+    const k = parseTriageKey(key);
+    if (k?.source === "email") threadIds.add(k.id);
+    if (k?.source === "quote") quoteIds.add(k.id);
+    if (k?.source === "lead") leadIds.add(k.id);
+  };
+  if (rows) for (const d of b.doFirst) want(d.key);
+  for (const r of rows ?? []) {
+    const src = parseTriageKey(r.key)?.source;
+    if (!src) continue;
+    const seen = perSource.get(src) ?? 0;
+    if (seen >= BLOCK_CAP) continue;
+    perSource.set(src, seen + 1);
+    want(r.key);
+  }
+
+  // Estimate suggestion (spec 2026-10-13 §3): with Suggest estimate on, each
+  // lead row's cue becomes Suggest estimate / Suggestion ready (bounded by
+  // the lookup above, and by SUGGEST_LOOKUP_MAX).
+  const [threads, quotes, leadReady] = await Promise.all([
+    Promise.all([...threadIds].map((id) => getThread(id).catch(() => null))),
+    Promise.all([...quoteIds].map((id) => getQuote(id).catch(() => null))),
+    flags.estimate && leadIds.size ? suggestionReadyHrefs("lead", [...leadIds]) : Promise.resolve(null),
+  ]);
   const leads: Record<string, CardLeadSuggest> | undefined = leadReady
     ? Object.fromEntries(Object.entries(leadReady).map(([id, readyHref]) => [id, { readyHref }]))
     : undefined;
 
-  const rows: Record<string, CardRow> = {};
-  const want = new Set(b.doFirst.map((d) => d.key));
-  for (const r of Array.isArray(snap?.rows) ? snap.rows : []) {
-    if (r && want.has(r.key)) rows[r.key] = { title: String(r.title || ""), href: String(r.href || "") };
-  }
-
   const threadReady: Record<string, CardThreadReady> = {};
-  const viewer = await mailboxViewer(user); // #349 — assigned to me by identity
+  if (!viewer && threadIds.size) viewer = await mailboxViewer(user).catch(() => null); // #349 — by identity
   for (const t of threads) {
-    if (!t) continue;
-    const pd = readerPreDraft(t, viewer);
+    if (!t || !viewer) continue;
+    // a chip only when the reader would offer the draft: my own mailbox (#349), fresh, my court
+    const pd = homeCardPreDraft(t, viewer);
     threadReady[t.id] = { draft: flags.reply && !!pd?.reply, tasks: flags.tasks && !!pd?.tasks };
   }
 

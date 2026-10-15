@@ -12441,3 +12441,26 @@ The app is safe before step 4: ownership already resolves the same way lazily (G
   - **Test coverage.** The generated action audit only covers `inbox/*`; `quotes/new`, `estimator/send-actions` and `triage/actions` are guarded by source pins alone. The bridge's per-account attach and its import stamp are regex-pinned, with no behaviour test.
   - **AI-pass worklist (#335).** `pendingAiThreads` applies its SQL limit before the identity re-check, so a namesake's threads can fill a batch. Shared-name threads also never get their pending flag cleared. Both are harmless but untidy.
 - An unknown-name thread (its name held by no user) stays unowned until a newcomer's name retires it; the script only lists it.
+
+## 350. Daily brief leads with Emails, then Estimates, then Tasks — DONE 2026-10-15 on `worktree-assist-layer` (D1083–D1085)
+
+**Asked (Jeff, 2026-10-15):** "How do we get the morning brief to lead with emails, then estimates, then tasks?"
+
+**Done:**
+- **Three blocks:** the #337 Home brief card shows the summary, then **Emails**, **Estimates** and **Tasks** in that fixed order. An empty block is hidden. The block rules are pure, in `src/lib/brief/blocks.ts`.
+- **Emails:** customers waiting on a reply, each with "Draft reply ready · Use it" when its pre-draft is fresh. Then the Organize "N to file — Review" line and Organize my inbox.
+- **Estimates:** the approvals count and the quotes awaiting me, quiet quotes with Send nudge, leads ready to quote with Suggest estimate, and renewals.
+- **Tasks:** overdue, due-today and at-risk tasks and assignments, meeting call to-dos, new promise-tasks, then Today's plan (visits, driving) and today's visits.
+- **Picks:** the "Do these first" list is gone. Its picks show as ★ inside their own block, with their why. A pick whose row is done or gone, or whose key doesn't parse, is dropped.
+- **Cap:** 5 rows per block (★ always kept), then "N more · See all in Start here →".
+- **Same rows as Start here:** marks and liveness are applied, so done items don't show. The load is shared with Start here through one React `cache()` per request (D1085).
+- **Fails closed (D1085):** an unreadable snapshot shows no rows and no picks. A failed liveness check drops the rows it could hide, in Start here too. Draft / Tasks chips appear only on threads in my own mailbox.
+- **Phone and Listen:** the phone view (< 900 px) shows the same blocks in big text, still without drafts. Listen reads the summary, then the blocks in the card's own order.
+- **Summary order:** the Haiku prompt and the rule-built summary are written in the same Emails → Estimates → Tasks order. The prompt's counts are of the list the model sees.
+- **No data change:** nothing changes in storage, the build or the model output, and briefs stored earlier render in the new layout.
+- **Tests:** `npm run test:brief` (in test:specs) covers block grouping and order, ★ picks, hidden empty blocks, the cap and its links, an old stored brief with no snapshot, the fallback order, the prompt pins, the phone-view pins and the Listen order.
+- **Browser check:** done on a scratch DB, desktop and 375 px.
+
+**Review fixes (same day, D1085):** fail closed on a missing snapshot and on a liveness error (Start here too), owner-gated chips, one cached load shared with Start here, Listen's Estimates order matches the card, and prompt counts of the capped list. Tests: test:brief and the triage checks in test:specs.
+
+**Remaining (Jeff-gated):** look at a real morning's brief on production and confirm the block contents and order read right. Also confirm the call-to-do placement (Tasks, not Emails).

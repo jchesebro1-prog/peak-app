@@ -82,7 +82,7 @@ export function closedKeys(rows: readonly SnapshotRow[], docs: LiveDocs, me: Tri
 }
 
 /** One batched read per collection for just the ids on the list. */
-export async function loadClosedKeys(rows: readonly SnapshotRow[], me: TriageUser, now: number): Promise<Set<string>> {
+export async function loadClosedKeys(rows: readonly SnapshotRow[], me: TriageUser, now: number, viewerIn?: MailboxViewer): Promise<Set<string>> {
   const idsOf = (src: TriageSource) =>
     rows.flatMap((r) => {
       const k = parseTriageKey(r.key);
@@ -95,7 +95,7 @@ export async function loadClosedKeys(rows: readonly SnapshotRow[], me: TriageUse
     getDocRows<CommThread>("comms", idsOf("email")),
     getDocRows<RecordingRecord>("recordings", idsOf("call")),
     getDocRows<Quote>("quotes", idsOf("quote")),
-    mailboxViewer(me),
+    viewerIn ?? mailboxViewer(me),
   ]);
   const recordings = new Map([...liveMap(recs)].map(([id, d]) => [id, normalizeRecording(d)]));
   const liveQuotes = liveMap(quotes);
@@ -107,4 +107,22 @@ export async function loadClosedKeys(rows: readonly SnapshotRow[], me: TriageUse
     bidders = await listForRecords("quote", bidIds);
   }
   return closedKeys(rows, { tasks: liveMap(tasks), assignments: liveMap(assignments), threads: liveMap(threads), recordings, quotes: liveQuotes, bidders }, me, now, viewer);
+}
+
+/** The sources whose rows liveness can hide (a done task, a thread no longer
+ *  waiting on me, a decided call to-do, a quote no longer mine). */
+export const LIVENESS_SOURCES: ReadonlySet<TriageSource> = new Set<TriageSource>(["email", "task", "assignment", "call", "quote"]);
+
+/**
+ * #350 review — fail closed: when the liveness check itself fails, every row
+ * it could have hidden is treated as closed (dropped), never as still open.
+ * Lead / visit / renewal rows stay (liveness never hides them). Pure.
+ */
+export function failClosedKeys(rows: ReadonlyArray<Pick<SnapshotRow, "key">>): Set<string> {
+  const out = new Set<string>();
+  for (const r of rows) {
+    const k = parseTriageKey(r.key);
+    if (k && LIVENESS_SOURCES.has(k.source)) out.add(r.key);
+  }
+  return out;
 }

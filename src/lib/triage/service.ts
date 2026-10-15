@@ -6,8 +6,8 @@ import { FEEDS } from "./feeds";
 import type { FeedCtx, FeedData, TriageFeed } from "./feeds/context";
 import { createFeedData } from "./feeds/data";
 import { TRIAGE_HOOKS, type TriageHooks } from "./hooks";
-import { loadClosedKeys } from "./liveness";
-import { getSnapshot, insertSnapshotIfAbsent, marksFor } from "./store";
+import { loadLiveState, type LiveStateDeps } from "./live-state";
+import { getSnapshot, insertSnapshotIfAbsent } from "./store";
 import type { SnapshotRow, Slot, TriageSnapshot, TriageUser } from "./types";
 import { visibleRows } from "./view";
 
@@ -124,6 +124,8 @@ export async function loadTriageView(
     read?: (id: string) => Promise<TriageSnapshot | null>;
     /** This slot instead of the one `now` falls in (the brief's cron passes its slot explicitly, as buildSlotForAll does). */
     at?: { day: string; slot: Slot };
+    /** Marks / liveness / viewer loaders (test seam; bypasses the per-request cache). */
+    live?: LiveStateDeps;
   } = {}
 ): Promise<TriageView> {
   const { day, slot } = opts.at ?? slotAt(now);
@@ -162,15 +164,8 @@ export async function loadTriageView(
     }
   }
   const rows = snapshot.rows;
-  const [marks, closed] = await Promise.all([
-    marksFor(me.id).catch((err) => {
-      console.error("[triage] marks load failed", err);
-      return [];
-    }),
-    loadClosedKeys(rows, me, now).catch((err) => {
-      console.error("[triage] liveness check failed", err);
-      return new Set<string>();
-    }),
-  ]);
+  // #350 review: one per-request load (React cache, shared with the Home brief
+  // card); a failed liveness check drops the rows it could hide — fail closed.
+  const { marks, closed } = await loadLiveState(rows, me, now, opts.live);
   return { snapshot, rows: visibleRows(rows, marks, closed, { snapshotId: id, day, slot }), note };
 }

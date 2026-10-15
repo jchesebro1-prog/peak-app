@@ -51,7 +51,8 @@ import type { LeadRecord } from "@/lib/stores/leads";
 import { createFixture, fixtureId, registerFixture } from "./test-fixtures";
 import { getSnapshot, insertSnapshotIfAbsent, markId, marksFor, saveSnapshot, setMark } from "@/lib/triage/store";
 import { buildSlotForAll, computeSnapshot, LIVE_NOTE, loadTriageView, type TriageView } from "@/lib/triage/service";
-import { closedKeys } from "@/lib/triage/liveness";
+import { closedKeys, failClosedKeys } from "@/lib/triage/liveness";
+import { loadLiveState } from "@/lib/triage/live-state";
 import { markHides, snoozeUntil, visibleRows } from "@/lib/triage/view";
 import { gatherCandidates, MAX_SNAPSHOT_ROWS, toSnapshotRows } from "@/lib/triage/build";
 import { createFeedData, type FeedDataSources } from "@/lib/triage/feeds/data";
@@ -621,6 +622,30 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
   ok(
     live.note === LIVE_NOTE && live.snapshot.builtBy === "live" && live.rows.length > 0 && !(await getSnapshot(snapshotId(U2.id, "2026-10-12", "morning"))),
     "snapshot: when the lazy build can't be saved the list is computed live, with a note"
+  );
+
+  /* ---- #350 review: a failed liveness check fails closed ---- */
+  const ULIVE = { id: fixtureId("TRIAGE", "u-live350"), name: "Triage Live", canApprove: false };
+  registerFixture("triage_snapshots", snapshotId(ULIVE.id, "2026-10-12", "morning"));
+  const failedLive = await loadTriageView(ULIVE, MON_10, { feeds, live: { closedKeys: async () => { throw new Error("liveness down"); } } });
+  ok(
+    !keysOf(failedLive).includes(`task:${TASK}`) && ["l1", "l2", "l3"].every((s) => keysOf(failedLive).includes(L(s))) && failedLive.snapshot.rows.some((r) => r.key === `task:${TASK}`),
+    `liveness #350 review: Start here's loadTriageView drops the rows liveness could hide (task) when the check fails, and keeps leads (${keysOf(failedLive).join(",")})`
+  );
+  const failRows = ["email:E1", "task:T1", "asg:A1", "call:R1:k1", "quote:Q1", "lead:L1", "visit:V1", "renewal:flame:R1"].map((key) => ({ key }));
+  ok([...failClosedKeys(failRows)].sort().join(",") === "asg:A1,call:R1:k1,email:E1,quote:Q1,task:T1", "liveness #350 review: failClosedKeys is every email / task / assignment / call / quote row; leads, visits and renewals stay");
+  const st1 = await loadLiveState(failRows, ULIVE, MON_10, { marks: async () => [], viewer: async (me) => ({ id: me.id, name: me.name, nameUnique: true }), closedKeys: async () => { throw new Error("down"); } });
+  const st2 = await loadLiveState(failRows, ULIVE, MON_10, { marks: async () => [], viewer: async () => { throw new Error("roster down"); }, closedKeys: async () => new Set<string>() });
+  const st3 = await loadLiveState(failRows, ULIVE, MON_10, { marks: async () => { throw new Error("marks down"); }, viewer: async (me) => ({ id: me.id, name: me.name, nameUnique: true }), closedKeys: async () => new Set(["task:T1"]) });
+  ok(st1.livenessFailed && st1.closed.size === 5 && st2.livenessFailed && st2.viewer === null && st2.closed.size === 5 && !st3.livenessFailed && st3.marks.length === 0 && [...st3.closed].join(",") === "task:T1", "liveness #350 review: loadLiveState fails closed on a liveness or viewer error; a marks error only shows the rows");
+  const liveSrc = readFileSync("src/lib/triage/live-state.ts", "utf8");
+  const svcSrc = readFileSync("src/lib/triage/service.ts", "utf8");
+  const briefCardSrc = readFileSync("src/components/brief/brief-card.tsx", "utf8");
+  ok(
+    /import \{ cache \} from "react";/.test(liveSrc) && /const cachedCompute = cache\(async \(userId: string, userName: string, canApprove: boolean, keysJson: string, minute: number\)/.test(liveSrc) &&
+      svcSrc.includes("await loadLiveState(rows, me, now, opts.live)") && !svcSrc.includes("marksFor(") && !/new Set<string>\(\);\s*\}\)/.test(svcSrc) &&
+      briefCardSrc.includes("await loadLiveState(snapRows, triageUserFromSession(user), now)") && !briefCardSrc.includes("marksFor("),
+    "liveness #350 review: Start here and the brief card share one React cache()'d load of marks + closed keys + viewer per request"
   );
 
   /* ---- DB: lazy build never clobbers; a read failure never rewrites ---- */
