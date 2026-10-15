@@ -12756,7 +12756,7 @@ Follow-up to D1036. `resolveSender` (`src/lib/gmail/resolve.ts`) takes an option
 
 The contact lookups themselves (`contactByEmail`) are unchanged. The pipeline's "known contact" noise guard still sees a contact under UNKNOWN as known, so a real person's mail isn't called noise. Verified: `scripts/test-inbox-org.ts` (`inboxOrgPlaceholderChecks`, matcher block: pure resolver cases, `resolveForThread` / `applyResolution` / `resweepThreads` on a contact under a real "UNKNOWN" company, `resolveCustomerId` on a stamped thread, the reader view copy).
 
-## D1038. Fixed pick lists live in one file, and the Assessments engine builds from the same labels (#344 slice B, 2026-10-14 — notes 8, 9, 10, 12, 14)
+## D1038. Fixed pick lists live in one file, and the Assessments engine builds from the same labels (#344 slice B, 2026-10-14 — notes 4, 16, 18, 19)
 
 Jeff's lists (Oct 14) are fixed in `src/lib/field-lists.ts`: lift (Ladder >12ft, Scaffolding, Single Man Lift, Scissor >20ft / >40ft / >50ft), loading door types, track series (N/A, None, Lightweight, Standard, Curved), track operation (SL, SR), plug type, lighting positions, fixture positions, and console location (Booth, Stage, Other). The Assessments engine builds its new pick lists from the same labels, with codes made by `listSlug` — so a list is extended by adding labels, never by editing or removing one (that would change a stored code). The engine changes are strictly additive (`access.lift_type`, `access.lift_height`, `access.load_in_door_type`, `lighting.positions`, connector Mixed); `ASSESSMENT_DEF.version` stays 1.
 
@@ -12772,7 +12772,7 @@ The rule that came out of review: every read-time fill-in (migration steps, boun
 
 The field sheet, the findings text (the Estimator's Draft scope), Assist, Ask AI and the customer recap print only what the editor shows plus `legacyNotes` — never raw stored keys. The shared formatters are in `src/lib/survey-format.ts`; the measurement field definitions moved to the pure `src/lib/survey-measure-fields.ts` so those readers need no component code. The Estimator Draft scope deliberately leaves out Older notes, because a draft scope can become customer-facing.
 
-## D1042. Goals are lists (#344 slice B, 2026-10-14 — note 16)
+## D1042. Goals are lists (#344 slice B, 2026-10-14 — note 17)
 
 `disciplines[k].goals` is stored as `string[]`. The save sanitizer keeps at most 1,000 characters in total and never shortens an old goal of up to 1,000 characters (R1 overrides the spec's 20 × 300 save cap); the editor limits typing to 20 goals of 300 characters within the same 1,000. `goalsFromSurvey` still returns text (lines joined), so the Estimator, the cover and the package are unchanged; `goalListsFromSurvey` gives the arrays to the recap and the sheet. `src/lib/estimate-output/goals.ts`.
 
@@ -12788,26 +12788,26 @@ Deviation: the spec listed the pair as linked. `auditoriumSize` is a small / med
 
 Only for a venue verified under #325, only from a manual override or an already cached road route (no live routing on page load, no straight-line estimate), only once per survey (`travelAutoFilled`) and only into fields that are empty. `src/lib/survey-travel-server.ts`; text from `travelTimeText` / `distanceText`.
 
-## D1046. Access is reshaped (#344 slice B, 2026-10-14 — note 4)
+## D1046. Access is reshaped (#344 slice B, 2026-10-14 — notes 4, 5)
 
 Loading door type, location and width × height; "Lift needed?" with type, working height and who supplies it. The lift details show when the answer is Yes or something is already filled, and are skipped in print when the answer is No. An old lift supplier with no Lift needed answer implies Yes.
 
-## D1047. Beams drawing checks (#344 slice B, 2026-10-14 — note 5)
+## D1047. Beams drawing checks (#344 slice B, 2026-10-14 — note 10)
 
 "Structural drawing on file" hides the beam measurements (they are kept). "Brick drawing" and "CW Elevation sheet on file" show only for counterweight rigging and stay visible when a structural drawing is on file, because they are separate drawings. The old combined brick / structural check maps to Structural with a "check which drawing" note.
 
-## D1048. Curtain rows, track operation, general purpose pipes (#344 slice B, 2026-10-14 — notes 11, 13)
+## D1048. Curtain rows, track operation, general purpose pipes (#344 slice B, 2026-10-14 — note 16)
 
 One row per ticked curtain type: QTY, fabric (suggestions from catalog fabric parts — loaded only when curtains are in play, capped at 500, alphabetical), oz, track series, W × H, condition. Track operation SL / SR is asked once at branch level. "Fixed pipe" becomes "Additional general purpose / scenery pipes", with its quantity shown only while its chip is ticked. "Average trim height" did not exist, so Height above floor stays. Replace vs. reuse moved to a new wrap-up "Final questions" section, shown for curtain scope.
 
-## D1049. Lighting positions and the fixtures inventory (#344 slice B, 2026-10-14 — note 14)
+## D1049. Lighting positions and the fixtures inventory (#344 slice B, 2026-10-14 — notes 18, 19)
 
 Fixture quantity, fixture types, console, FOH text and circuit accessibility are removed from the form (they show as Older notes). Positions are a multi-select with one row each (circuits, length, trim, notes); the fixtures inventory gains a Position column with derived totals; console location is a select (with "Other — where?") and plug type is a select. `sections/lighting-positions.tsx`.
 
-## D1050. The line set schedule is quantity-first (#344 slice B, 2026-10-14 — note 18)
+## D1050. The line set schedule is quantity-first (#344 slice B, 2026-10-14 — note 22)
 
 Rows 1…N with stable ids. Shrinking the count asks before removing rows that hold data; "Add the missing sets" only adds. Fill down overwrites, but confirms when it would replace filled cells (a condition fill writes `null` and never re-seeds). Removing a row with data asks. `linesetsEnabled` is set when the schedule is used, and the field sheet prints line sets when enabled or when any are present.
 
-## D1051. Scope first, Other explains itself, None prints nothing (#344 slice B, 2026-10-14 — notes 15, 16)
+## D1051. Scope first, Other explains itself, None prints nothing (#344 slice B, 2026-10-14 — notes 15, 16, 19, 21)
 
 Every discipline asks its scope of interest first, and every scope list ends with Other plus an explain box; the Other text prints only while Other is ticked. A discipline marked Present: None prints nothing else — the editor, the field sheet and Assist agree. `sections/scope-chips.tsx`.
