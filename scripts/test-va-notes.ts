@@ -2442,15 +2442,15 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     ok(!!stripped && JSON.stringify(stripped) === '{"notes":"n"}', "#344 C-final D: withoutFileKeys drops the file lists and their seen ids");
     // the editor: stage rides every save while a move is unconfirmed; file saves keep a queued whole-draft outbox entry
     const bp = ctl.slice(ctl.indexOf("function buildPatch("), ctl.indexOf("function buildFullDoc("));
-    ok(/stageUnconfirmed\.current \? \{ stage: draft\.stage \} : \{\}/.test(bp) && bp.indexOf("stageUnconfirmed.current ?") < bp.indexOf("...over"),
+    ok(/pendingStage\.current \? \{ stage: pendingStage\.current \} : \{\}/.test(bp) && bp.indexOf("pendingStage.current ?") < bp.indexOf("...over"),
       "#344 C-final D: buildPatch carries stage: draft.stage while a stage move from this editor is unconfirmed (before ...over)");
     const adv = ctl.slice(ctl.indexOf("async function advanceStage("), ctl.indexOf("async function onCreateQuote("));
     const sav = ctl.slice(ctl.indexOf("async function onSave("), ctl.indexOf("async function advanceStage("));
-    ok(/stageUnconfirmed\.current = true/.test(adv) && /if \(!res\.queued\) stageUnconfirmed\.current = false/.test(adv) &&
-      /if \(carried && !res\.queued\) stageUnconfirmed\.current = false/.test(sav),
+    ok(/pendingStage\.current = target/.test(adv) && /if \(pendingStage\.current === target\) \{\s*pendingStage\.current = null/.test(adv) &&
+      /if \(carried !== null && pendingStage\.current === carried\) \{\s*pendingStage\.current = null/.test(sav),
       "#344 C-final D: a stage move marks the stage unconfirmed until a save carrying it lands online");
     const psr = ctl.slice(ctl.indexOf("async function savePhotoRefs("), ctl.indexOf("async function savePhotoRefs(") + 1500);
-    ok(/keepOutbox: \(entryDoc\) => carriesFieldEdits\(entryDoc\)/.test(psr),
+    ok(/keepOutbox: \(entryDoc\) => holdsUnsentFieldEdits\(entryDoc, editorId, unsentFieldSeq\.current\)/.test(psr),
       "#344 C-final D: a photo / sketch save keeps a queued outbox entry that carries field edits (a file-only success never clears it)");
     ok(/!res\.applied/.test(act) && /verdict/.test(sto.slice(sto.indexOf("async function updateUnlocked"), sto.indexOf("export async function update("))) &&
       /withoutFileKeys/.test(sto.slice(sto.indexOf("export async function pushSurvey"), sto.indexOf("export async function setStage"))),
@@ -2463,6 +2463,62 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const pcOther = pc ? pc("assessments", [{ id: "AS-1", doc: { id: "AS-1", x: 1 } }]) : [];
     ok(!!pc && pcOut.length === 1 && !("_saveSeqs" in pcOut[0].doc) && pcOut[0].doc.notes === "n" && pcOther[0]?.doc.x === 1,
       "#344 C-final D: pulledChanges strips _saveSeqs from surveys and passes other collections through");
+  }
+  /* ---- C-final E: a pending stage move never regresses a later move; only the unsent-fields entry survives a file save ---- */
+  {
+    const read = (rel: string) => { try { return readFileSync(join(process.cwd(), rel), "utf8"); } catch { return ""; } };
+    const ctl = read("src/app/(app)/venue-assessments/[id]/controls.tsx");
+    const sto = read("src/lib/stores/surveys.ts");
+    const ds = read("src/db/doc-store.ts");
+    const SS = (await import("../src/lib/field-files/save-stamp")) as Record<string, unknown>;
+    const settled = SS.pendingStageSettled as ((p: string | null, f: string | null, s: string | null | undefined) => boolean) | undefined;
+    const holds = SS.holdsUnsentFieldEdits as ((d: Record<string, unknown> | null | undefined, e: string, q: number | null) => boolean) | undefined;
+    const order = SS.SURVEY_STAGE_ORDER as readonly string[] | undefined;
+    ok(!!settled &&
+      settled("onsite", "scheduled", "onsite") === true &&        // the server confirmed the move
+      settled("onsite", "scheduled", "completed") === true &&     // moved on past it elsewhere (Create quote →)
+      settled("onsite", "scheduled", "scheduled") === false &&    // not landed yet
+      settled("completed", "scheduled", "onsite") === false &&    // an earlier move of ours landing late
+      settled("onsite", "completed", "completed") === false &&    // a backward move: the server still at its start
+      settled(null, null, "completed") === false,
+      "#344 C-final E: pendingStageSettled — confirmed, or moved past by a later stage set elsewhere; never while the server is still at the move's start or behind it");
+    const stagesBlock = sto.slice(sto.indexOf("export const STAGES"), sto.indexOf("export const STAGE_META"));
+    const storeOrder = [...stagesBlock.matchAll(/key: "([a-z]+)"/g)].map((m) => m[1]);
+    ok(!!order && storeOrder.length === 4 && JSON.stringify([...order]) === JSON.stringify(storeOrder),
+      "#344 C-final E: SURVEY_STAGE_ORDER matches the store's STAGES order");
+    const E = "editoraaaa01";
+    ok(!!holds &&
+      holds({ notes: "n", saveStamp: { editor: E, seq: 4 } }, E, 4) === true &&
+      holds({ notes: "n", saveStamp: { editor: E, seq: 3 } }, E, 4) === false &&       // a timed-out photo save's copy
+      holds({ notes: "n", saveStamp: { editor: E, seq: 4 } }, E, null) === false &&    // nothing unsent
+      holds({ notes: "n", saveStamp: { editor: "editorbbbb02", seq: 4 } }, E, 4) === false && // another mount's entry
+      holds({ notes: "n" }, E, 4) === false,
+      "#344 C-final E: holdsUnsentFieldEdits keeps only this mount's entry stamped with the unsent field save's seq");
+    const bp = ctl.slice(ctl.indexOf("function buildPatch("), ctl.indexOf("function buildFullDoc("));
+    ok(/\.\.\.\(pendingStage\.current \? \{ stage: pendingStage\.current \} : \{\}\)/.test(bp) && !/stage: draft\.stage/.test(bp) &&
+      /const pendingStage = useRef<SurveyStage \| null>\(null\)/.test(ctl) && !/stageUnconfirmed/.test(ctl),
+      "#344 C-final E: buildPatch sends the pending move's own target (the ref), never draft.stage");
+    const initEff = ctl.slice(ctl.indexOf("if (pendingStageSettled("), ctl.indexOf("const u = unionUnseenFileRefs("));
+    ok(/useEffect\(\(\) => \{\s*if \(pendingStageSettled\(pendingStage\.current, pendingFrom\.current, initial\.stage\)\) \{\s*pendingStage\.current = null;\s*pendingFrom\.current = null;\s*\}\s*\}, \[initial\]\);/.test(ctl) &&
+      /\}, \[initial\]\);/.test(initEff),
+      "#344 C-final E: the [initial] effect clears the pending stage when the server confirms it or has moved past it");
+    const adv = ctl.slice(ctl.indexOf("async function advanceStage("), ctl.indexOf("async function onCreateQuote("));
+    const sav = ctl.slice(ctl.indexOf("async function onSave("), ctl.indexOf("async function advanceStage("));
+    const psr = ctl.slice(ctl.indexOf("async function savePhotoRefs("), ctl.indexOf("// #344 C6 — sketch pads save through"));
+    ok(/pendingFrom\.current = \(record\.stage \|\| "requested"\)/.test(adv) && /doc: buildFullDoc\(\{ stage: target \}, sent\)/.test(adv) &&
+      /if \(res\.queued\) unsentFieldSeq\.current = seq;/.test(adv) && /if \(res\.queued\) unsentFieldSeq\.current = seq;/.test(sav) &&
+      /unsentFieldSeq\.current = null;/.test(adv) && /unsentFieldSeq\.current = null;/.test(sav),
+      "#344 C-final E: a queued Save changes / stage move records its seq as holding unsent fields (the move's outbox copy carries the stage); an online one clears it");
+    ok(/keepOutbox: \(entryDoc\) => holdsUnsentFieldEdits\(entryDoc, editorId, unsentFieldSeq\.current\)/.test(psr) && !/carriesFieldEdits/.test(ctl) &&
+      /if \(res\.queued && unsentFieldSeq\.current !== null\) unsentFieldSeq\.current = seq;/.test(psr),
+      "#344 C-final E: a file-only success keeps only the unsent-fields entry; a queued photo save that replaced it takes over its seq");
+    ok(/two\s+or more field writes/.test(ctl.slice(ctl.indexOf("function buildFullDoc("), ctl.indexOf("async function onSave("))),
+      "#344 C-final E: the buildFullDoc rev comment says two or more field writes conflict");
+    const uu = sto.slice(sto.indexOf("async function updateUnlocked"), sto.indexOf("export async function update("));
+    const bumpUsers = [...read("src/lib/stores/surveys.ts").matchAll(/bumpRev/g)].length;
+    ok(/rev: carries \? \(storedRev \|\| 1\) \+ 1 : storedRev/.test(uu) && /\{ bumpRev: carries \}/.test(uu) && bumpUsers === 1 &&
+      /opts\?\.bumpRev === false \? \{\} : \{ rev: sql`\$\{t\.rev\} \+ 1` \}/.test(ds),
+      "#344 C-final E: updateUnlocked bumps rev (doc + row) only for field edits, judged server-side; patchDoc bumps unless told not to");
   }
 }
 
@@ -2877,6 +2933,69 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
       ok(conf.status === "conflict" && !!conf.server && !("_saveSeqs" in conf.server) && conf.server.notes === "c" &&
         !!(row?.doc as Record<string, unknown>)?._saveSeqs && mine.length === 1 && served.length === 1 && !("_saveSeqs" in served[0].doc) && served[0].doc.notes === "c",
         "#344 C-final D: the conflict reply's server copy and the pulled survey carry no _saveSeqs (the stored doc still holds it)");
+    }
+  }
+  /* C-final E: file-only saves don't bump rev, so a queued field save still pushes after any number of them */
+  {
+    const { getDoc, listSince } = await import("../src/db/doc-store");
+    const { getDb } = await import("../src/db");
+    const { DOC_TABLES } = await import("../src/db/doc-tables");
+    const { eq } = await import("drizzle-orm");
+    const FF = await import("../src/lib/field-files/files");
+    const db = await getDb();
+    const rowOf = async (id: string) => (await db.select().from(DOC_TABLES.surveys).where(eq(DOC_TABLES.surveys.id, id)).limit(1))[0];
+    const pend = { pending: true as const };
+    const pref = (id: string) => ({ id, section: "mBeams", takenAt: 1, by: "phone", file: pend });
+    const ids = (d: { photoRefs?: Array<{ id: string }> } | null | undefined) => (d?.photoRefs ?? []).map((r) => r.id).sort().join(",");
+    const newSurvey = async () => { const sv = await S.create({ owner: "Sam Surveyor" } as never); registerFixture("surveys", sv.id); return sv; };
+    const docRev = async (id: string) => ((await getDoc("surveys", id)) as Record<string, unknown> | null)?.rev;
+
+    // the residual loss case: save 1 (notes) times out and never lands; photo saves 2 and 3 land; the outbox push
+    {
+      const sv = await newSurvey();
+      const E = "phoneeditor0011";
+      const A = FF.newFileId("p"), B = FF.newFileId("p");
+      const base = (await S.get(sv.id))!;
+      const n = (await rowOf(sv.id))!.rev;
+      await S.update(sv.id, { photoRefs: [pref(A)], photoRefIdsSeen: [A], saveStamp: { editor: E, seq: 2 } } as never);
+      await S.update(sv.id, { photoRefs: [pref(A), pref(B)], photoRefIdsSeen: [A, B], saveStamp: { editor: E, seq: 3 } } as never);
+      const p = await S.pushSurvey({ id: sv.id, rev: n + 1, doc: { ...(base as object), notes: "never-landed notes", photoRefs: [], photoRefIdsSeen: [], sketches: {}, sketchIdsSeen: [], rev: n + 1, saveStamp: { editor: E, seq: 1 } } as Record<string, unknown> });
+      const got = await S.get(sv.id);
+      ok(p.status === "ok" && got?.notes === "never-landed notes" && ids(got) === [A, B].sort().join(","),
+        "#344 C-final E: a field save that never landed + two file-only updates + pushSurvey at rev = base+1 → ok, notes applied, both photos kept");
+    }
+    // a file-only update leaves row + doc rev alone, but seq and updatedAt move (pull still sees it)
+    {
+      const sv = await newSurvey();
+      const E = "phoneeditor0012";
+      const A = FF.newFileId("p");
+      const before = (await rowOf(sv.id))!;
+      const dRev = await docRev(sv.id);
+      await new Promise((r) => setTimeout(r, 5));
+      await S.update(sv.id, { photoRefs: [pref(A)], photoRefIdsSeen: [A], saveStamp: { editor: E, seq: 1 } } as never);
+      const after = (await rowOf(sv.id))!;
+      const since = await listSince("surveys", Number(before.seq));
+      const pulled = since.changes.find((c) => c.id === sv.id);
+      ok(after.rev === before.rev && (await docRev(sv.id)) === dRev && Number(after.seq) > Number(before.seq) && after.updatedAt > before.updatedAt &&
+        !!pulled && ids(pulled.doc as never) === A && ids(await S.get(sv.id)) === A,
+        "#344 C-final E: a file-only update leaves row rev and doc rev unchanged; seq and updatedAt still move, so pull carries it");
+      // an unstamped file-only write (no field edits) is judged the same way
+      const r0 = (await rowOf(sv.id))!.rev;
+      await S.update(sv.id, { photoRefs: [], photoRefIdsSeen: [A] } as never);
+      ok((await rowOf(sv.id))!.rev === r0 && ids(await S.get(sv.id)) === "",
+        "#344 C-final E: an unstamped file-only update doesn't bump rev either (judged from the patch, server-side)");
+    }
+    // a field update still bumps rev (row + doc) — unchanged
+    {
+      const sv = await newSurvey();
+      const before = (await rowOf(sv.id))!;
+      const dRev = Number((await docRev(sv.id)) ?? 1);
+      await S.update(sv.id, { notes: "field edit", saveStamp: { editor: "phoneeditor0013", seq: 1 } } as never);
+      const mid = (await rowOf(sv.id))!;
+      await S.update(sv.id, { notes: "field edit 2", photoRefs: [] } as never);
+      const after = (await rowOf(sv.id))!;
+      ok(mid.rev === before.rev + 1 && after.rev === before.rev + 2 && (await docRev(sv.id)) === dRev + 2 && (await S.get(sv.id))?.notes === "field edit 2",
+        "#344 C-final E: a field update still bumps rev (row and doc), with or without file keys alongside");
     }
   }
 }

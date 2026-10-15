@@ -578,27 +578,34 @@ async function updateUnlocked(
   }
   // a `fields` verdict leaves the file lists (and their seen ids) as stored — the newer file-only saves own them
   const body = verdict === "fields" ? withoutFileKeys(rest) : rest;
+  // #344 C-final E: a write with no field edits (only the file lists, their seen ids, the stamp or transport fields —
+  // judged here, server-side, never trusted from the client) leaves rev alone, row and doc, the way a finalize does.
+  // A device's queued whole-doc save built at rev N+1 must still push cleanly after any number of photo / sketch
+  // saves; the merge keeps the files it never saw. The row's seq still moves (0012 trigger), so pull carries it.
   const rec = await patchDoc<SurveyRecord>("surveys", id, (s) => {
     const stored = { ...s } as Record<string, unknown>;
+    const storedRev = s.rev;
     const t = now();
     const chk = checkSaveStamp(stored[SAVE_SEQS_FIELD], stamp, t, carries);
     const next = Object.assign(s, body, {
       updatedAt: t,
       syncState: "synced" as SyncState,
       syncedAt: t,
-      rev: (s.rev || 1) + 1,
+      rev: carries ? (storedRev || 1) + 1 : storedRev,
     }) as Record<string, unknown>;
+    if (next.rev === undefined) delete next.rev;
     delete next.legacyNotes;
     delete next.saveStamp;
     if (chk.seqs) next[SAVE_SEQS_FIELD] = chk.seqs;
     else if (!stamp) delete next[SAVE_SEQS_FIELD];
     return mergeSurveyFileRefs(stored, sanitizeIncomingFileSlots(next, id, { blobEnabled: blobEnabled(), stored })) as SurveyRecord;
-  });
+  }, { bumpRev: carries });
   return { record: rec ? withoutSaveFields(rec) : null, applied: !!rec, verdict: rec ? verdict : "stale" };
 }
 
 /** Content update — bumps updatedAt + rev (prototype re-dirty). Under the survey lock, merging file refs (#344 C4).
- *  A stale stamped patch (#344 C-final C) changes nothing and returns the current record. */
+ *  A stale stamped patch (#344 C-final C) changes nothing and returns the current record. A file-only patch (no field
+ *  edits) bumps updatedAt + seq but not rev (#344 C-final E). */
 export async function update(
   id: string,
   patch: Partial<SurveyRecord>

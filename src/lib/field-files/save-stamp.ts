@@ -124,3 +124,38 @@ export function withoutSaveFields<T extends object>(doc: T): T {
   delete out[SAVE_SEQS_FIELD];
   return out as T;
 }
+
+/** #344 C-final E — the survey stages in lifecycle order (the store's STAGES; a test pins the two together). Kept here so
+ *  the client editor can order stages without importing the store. */
+export const SURVEY_STAGE_ORDER = ["requested", "scheduled", "onsite", "completed"] as const;
+
+/**
+ * #344 C-final E — a stage move from this editor (`pending`, made when the server stage was `from`) no longer needs
+ * re-carrying once the server shows `server`: it is settled when the server holds the moved-to stage (confirmed), or
+ * when the server has moved on past it — a stage other than the one the move started from AND later in the lifecycle
+ * (a move made elsewhere after ours; re-sending ours would move it backwards). A server still at `from`, or at an
+ * earlier stage than `pending` (an earlier move of ours landing late), leaves it pending. Pure.
+ */
+export function pendingStageSettled(pending: string | null, from: string | null, server: string | null | undefined): boolean {
+  if (pending === null) return false;
+  const srv = server || "requested";
+  if (srv === pending) return true;
+  if (srv === (from || "requested")) return false;
+  const order: readonly string[] = SURVEY_STAGE_ORDER;
+  const i = order.indexOf(srv);
+  const j = order.indexOf(pending);
+  return i >= 0 && j >= 0 && i > j;
+}
+
+/**
+ * #344 C-final E — after a file-only save lands online, keep this record's queued outbox entry only when it is the one
+ * holding this editor's unsent field edits: stamped by this editor mount with the seq of the newest field save (or a
+ * later save whose whole-doc copy re-carried it) that went to the outbox. Anything else — a timed-out photo save's
+ * copy of already-saved fields, an unstamped entry, another mount's entry — is cleared as before #344 C-final D, so a
+ * stale whole-doc copy never replays old fields over another device's write.
+ */
+export function holdsUnsentFieldEdits(entryDoc: Record<string, unknown> | null | undefined, editor: string, unsentSeq: number | null): boolean {
+  if (unsentSeq === null || !entryDoc) return false;
+  const st = parseSaveStamp(entryDoc[SAVE_STAMP_FIELD]);
+  return !!st && st.editor === editor && st.seq === unsentSeq;
+}
