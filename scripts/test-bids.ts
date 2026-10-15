@@ -8,6 +8,12 @@ import {
   markSubmittedState, currentRev, needsRev, awardPlan, undoAwardPlan, canAward, canUndoAward, bidderStatusText, bidDueText, bidDueDays, isOpenBid,
 } from "../src/lib/parties/bids";
 import type { BidderState } from "../src/lib/parties/rules";
+import { bidderSentState, bidderFailedState, nextBidderOpens, bidderOpensText } from "../src/lib/parties/bids";
+import {
+  isPartyId, latestSentRev, bidderPdfRev, bidderEmailNeed, bidderSendPlan, bidderAlreadyHas, addendaSinceRow, addendaAfterLatestSend,
+  bidderSubject, bidWalkSummary, BID_SEND_COPY, type SendRow,
+} from "../src/lib/parties/bid-send";
+import { bidderEmailDefaults, isBidderFileName, bidderFileOf } from "../src/lib/estimate-email/compose";
 import { addressedHeader, bidDocLine, bidderPdfFileName, ownerNameFromLine, sendDefaultsContact, type DocAddressee } from "../src/lib/parties/addressee";
 import { quoteAsOfRevision } from "../src/lib/quote-share/view";
 import { coverDocumentPropsFor } from "../src/lib/estimate-output/cover";
@@ -114,8 +120,8 @@ export async function bidChecks(ok: Ok) {
 
   const OCT21_2PM = Date.UTC(2026, 9, 21, 19, 0); // 2:00 PM CDT
   ok(bidDueText(OCT21_2PM) === "Oct 21, 2:00 PM", "bids: due text in Chicago");
-  ok(bidderStatusText(B(), 1) === "Not submitted", "bids: status — not submitted");
-  ok(bidderStatusText(B({ revSent: 1, sentAt: OCT21_2PM }), 1) === "Submitted Rev 1 · Oct 21", "bids: status — submitted");
+  ok(bidderStatusText(B({ submitVia: "website" }), 1) === "Not submitted", "bids: status — not submitted");
+  ok(bidderStatusText(B({ submitVia: "website", revSent: 1, sentAt: OCT21_2PM }), 1) === "Submitted Rev 1 · Oct 21", "bids: status — submitted");
   ok(bidderStatusText(B({ revSent: 1, sentAt: OCT21_2PM }), 2) === "Needs Rev 2", "bids: status — needs rev");
   ok(bidderStatusText(B({ result: "lost" }), 2) === "Lost the award" && bidderStatusText(B({ result: "awarded" }), 2) === "Awarded", "bids: status — result wins");
 
@@ -134,7 +140,7 @@ export async function bidChecks(ok: Ok) {
   ok(!sanitizeBidDetails({ dueAt: null, addenda: [{ no: 1, receivedAt: 1e16, note: "" }] }).ok, "bids: out-of-range addendum date refused");
   ok(bidDueText(1e16) === "", "bids: due text empty out of range");
   ok(bidDueDays(1e16, Date.UTC(2026, 9, 20, 15, 0)) === Infinity, "bids: due days infinite out of range");
-  ok(bidderStatusText(B({ revSent: 1, sentAt: 1e16 }), 1) === "Submitted Rev 1", "bids: status omits an out-of-range date");
+  ok(bidderStatusText(B({ submitVia: "website", revSent: 1, sentAt: 1e16 }), 1) === "Submitted Rev 1", "bids: status omits an out-of-range date");
   ok(bidDueDays(Date.UTC(2026, 9, 21, 4, 30), Date.UTC(2026, 9, 20, 15, 0)) === 0, "bids: late-evening Chicago due date is still today");
   ok(bidDueDays(Date.UTC(2026, 10, 2, 18, 0), Date.UTC(2026, 10, 1, 15, 0)) === 1, "bids: due days across the DST change");
   const upper = sanitizeBidSiteUrl("HTTPS://X.TEST/A");
@@ -250,6 +256,78 @@ async function dropBidIdentityFixtures() {
     await db.delete(contactsTable).where(like(contactsTable.id, pre));
   }
   await db.delete(companies).where(like(companies.id, "TEST348:b%"));
+}
+
+export async function bidSendChecks(ok: Ok) {
+  const R = (rev: number, reason: string) => ({ rev, reason, at: 1, by: "u" });
+  const OCT21_2PM = Date.UTC(2026, 9, 21, 19, 0);
+  ok(currentRev({ revisions: [R(1, "sent"), R(2, "manual")] }) === 1, "bid-send: currentRev = latest sent rev (1)");
+  ok(currentRev({ revisions: [R(1, "manual"), R(2, "sent"), R(3, "manual")] }) === 2, "bid-send: currentRev = latest sent rev (2)");
+  ok(currentRev({ revisions: [R(1, "manual"), R(2, "manual")] }) === 2, "bid-send: currentRev before any send = revisions.length");
+  ok(currentRev({ revisions: [1, 2, 3] }) === 3, "bid-send: currentRev non-object revisions fall back to length");
+  ok(bidderPdfRev({ status: "draft", revisions: [R(1, "sent")] }) === null, "bid-send: draft renders live");
+  ok(bidderPdfRev({ status: "sent", revisions: [R(1, "sent"), R(2, "manual")] }) === 1, "bid-send: sent pdf rev = latest sent");
+  ok(bidderPdfRev({ status: "won", revisions: [R(1, "sent"), R(3, "sent")] }) === 3, "bid-send: won pdf rev = latest sent");
+  ok(bidderPdfRev({ status: "sent", revisions: [] }) === null, "bid-send: sent with no revisions → null");
+  const row = (id: string, over: Partial<BidderState> = {}, email = "a@x.test"): SendRow => ({ id, bid: B(over), email });
+  const dq = { status: "draft", revisions: [] as unknown[] };
+  ok(bidderEmailNeed(dq, row("a")) === "send", "bid-send: draft never sent → send");
+  ok(bidderEmailNeed(dq, row("a", { revSent: 1 })) === "revision", "bid-send: draft revSent 1 → revision");
+  ok(bidderEmailNeed(dq, row("a", { failed: { at: 1, error: "x" } })) === "retry", "bid-send: failed → retry");
+  ok(bidderEmailNeed(dq, row("a", { submitVia: "website" })) === null, "bid-send: website → null");
+  ok(bidderEmailNeed(dq, row("a", {}, "  ")) === null, "bid-send: blank email → null");
+  ok(bidderEmailNeed(dq, row("a", { result: "withdrew" })) === null, "bid-send: withdrew → null");
+  ok(bidderEmailNeed({ status: "won", revisions: [] }, row("a")) === null, "bid-send: won → null");
+  const sq = { status: "sent", revisions: [R(1, "sent"), R(2, "sent")] };
+  ok(bidderEmailNeed(sq, row("a", { revSent: 2 })) === null, "bid-send: sent, up to date → null");
+  ok(bidderEmailNeed(sq, row("a", { revSent: 1 })) === "revision", "bid-send: sent, behind → revision");
+  const rows = [row("a"), row("b", { revSent: 1 }), row("c", { submitVia: "website" }), row("d", {}, ""), row("e", { failed: { at: 1, error: "t", unknown: true } })];
+  const plan = bidderSendPlan(sq, rows);
+  ok(plan.ids.join() === "a,b" && plan.label === "Send revision to bidders" && plan.noEmail === 1, "bid-send: plan ids/label/noEmail");
+  ok(bidderSendPlan(dq, [row("a")]).label === "Send to all bidders", "bid-send: plan label on a first send");
+  const done = bidderSendPlan(sq, [row("a", { revSent: 2 })]);
+  ok(done.ids.length === 0 && done.label === null, "bid-send: nothing to send → null label");
+  ok(bidderAlreadyHas(sq, B({ revSent: 2 })) === true && bidderAlreadyHas({ status: "draft", revisions: sq.revisions }, B({ revSent: 2 })) === false, "bid-send: already has");
+  const fr = (rev: number, addenda: number[] | null) => ({ rev, reason: "sent", at: 1, by: "u", ...(addenda ? { docFields: { bid: { dueAt: null, awardedPartyId: null, addenda: addenda.map((no) => ({ no, receivedAt: 1, note: "" })) } } } : {}) });
+  const live = (nos: number[]) => ({ dueAt: null, awardedPartyId: null, addenda: nos.map((no) => ({ no, receivedAt: 1, note: "" })) });
+  ok(addendaSinceRow({ bid: live([1, 2]), revisions: [fr(1, [1])] }, B({ revSent: 1 })).join() === "2", "bid-send: addenda since row");
+  ok(addendaSinceRow({ bid: live([1, 2]), revisions: [fr(1, [1])] }, B({ revSent: null })).length === 0, "bid-send: never sent → no addenda since");
+  const nb = { bid: { dueAt: null, awardedPartyId: null, addenda: [{ no: 3, receivedAt: 50, note: "" }] }, revisions: [fr(1, null)] };
+  ok(addendaSinceRow(nb, B({ revSent: 1, sentAt: 40 })).join() === "3" && addendaSinceRow(nb, B({ revSent: 1, sentAt: 60 })).length === 0, "bid-send: fallback by receivedAt vs sentAt");
+  ok(addendaAfterLatestSend({ bid: live([1, 2]), revisions: [fr(1, [1])] }).join() === "2", "bid-send: addenda after latest send");
+  ok(addendaAfterLatestSend({ bid: live([1, 2]), revisions: [] }).length === 0 && addendaAfterLatestSend({ bid: live([1, 2]), revisions: [fr(1, null)] }).length === 0, "bid-send: no sent revision / no frozen bid → none");
+  const base = "Bid — Gym (EST-1042)";
+  ok(bidderSubject(base, "Gym", []) === base, "bid-send: subject unchanged");
+  ok(bidderSubject(base, "Gym", [2]) === "Revised bid — Gym (Addendum 2)", "bid-send: subject one addendum");
+  ok(bidderSubject(base, "Gym", [2, 3]) === "Revised bid — Gym (Addenda 2, 3)", "bid-send: subject several addenda");
+  ok(bidderSubject(base, "x".repeat(400), [2]).length <= 300, "bid-send: subject ≤ 300");
+  const d = bidderEmailDefaults({ projectName: "Gym", estimateNumber: "EST-1042", senderName: "Sam Mills" });
+  ok(d.subject === "Bid — Gym (EST-1042)", "bid-send: bidder subject default");
+  ok(d.body === "Hello,\n\nAttached is our bid for Gym (EST-1042).\n\nYou can also view the full package online here: {link}\n\nLet me know if you have any questions.\n\nThanks,\nSam Mills", "bid-send: bidder body default");
+  ok(bidderEmailDefaults({ projectName: "", estimateNumber: "EST-1042", senderName: "Sam Mills" }).subject === "Bid — EST-1042", "bid-send: blank project subject");
+  const ss = bidderSentState(B({ failed: { at: 1, error: "x" } }), 4, "u1", "C-1", 99);
+  ok(ss.revSent === 4 && ss.sentAt === 99 && ss.sentBy === "u1" && ss.threadId === "C-1" && ss.failed === null, "bid-send: sent state");
+  const fs = bidderFailedState(B({ revSent: 2 }), { at: 5, error: "e", unknown: true }, "C-2");
+  ok(fs.revSent === 2 && fs.failed?.unknown === true && fs.threadId === "C-2", "bid-send: failed state keeps revSent");
+  ok(bidderFailedState(B(), { at: 5, error: "x".repeat(400) }).failed!.error.length === 300 && !("unknown" in bidderFailedState(B(), { at: 5, error: "e" }).failed!), "bid-send: failed error capped, no unknown key");
+  const o1 = nextBidderOpens(null, 10), o2 = nextBidderOpens({ count: 2, lastAt: 20 }, 15);
+  ok(o1?.count === 1 && o1.lastAt === 10 && o2?.count === 3 && o2.lastAt === 20 && nextBidderOpens(null, NaN) === null, "bid-send: opens counter");
+  ok(bidderOpensText({ count: 3, lastAt: OCT21_2PM }) === "Opened 3×" && bidderOpensText(null) === "", "bid-send: opens text");
+  ok(bidderStatusText(B(), 1) === "Not sent" && bidderStatusText(B({ submitVia: "website" }), 1) === "Not submitted", "bid-send: not sent / not submitted");
+  ok(bidderStatusText(B({ revSent: 1, sentAt: OCT21_2PM }), 1) === "Sent Rev 1 · Oct 21" && bidderStatusText(B({ submitVia: "website", revSent: 1, sentAt: OCT21_2PM }), 1) === "Submitted Rev 1 · Oct 21", "bid-send: sent / submitted text");
+  ok(bidderStatusText(B({ revSent: 1, failed: { at: 1, error: "x" } }), 2) === "Send failed", "bid-send: send failed");
+  ok(bidWalkSummary({ total: 3, sent: 3, failed: 0, local: 0 }) === "Sent to 3 bidders." && bidWalkSummary({ total: 1, sent: 1, failed: 0, local: 0 }) === "Sent to 1 bidder.", "bid-send: walk summary all sent");
+  ok(bidWalkSummary({ total: 4, sent: 3, failed: 1, local: 0 }) === "Sent to 3 of 4 bidders — 1 failed. Retry it below.", "bid-send: walk summary one failed");
+  ok(bidWalkSummary({ total: 4, sent: 2, failed: 2, local: 2 }) === "Sent to 2 of 4 bidders — 2 failed. Retry them below. Saved locally — Gmail isn’t connected.", "bid-send: walk summary local");
+  ok(bidWalkSummary({ total: 4, sent: 1, failed: 0, local: 0, stoppedError: "Needs approval." }) === "Stopped after 1 of 4: Needs approval.", "bid-send: walk summary stopped");
+  const f1 = "bidder-0123456789abcdef-r2-1760000000000.pdf";
+  ok(isBidderFileName(f1) && isBidderFileName("bidder-0123456789abcdef-r2-1760000000000-AbC123.pdf"), "bid-send: bidder file names");
+  ok(!isBidderFileName("bidder-0123-r2-1760000000000.pdf") && !isBidderFileName("../" + f1) && !isBidderFileName("cover-1760000000000.pdf"), "bid-send: bad bidder file names");
+  const bf = bidderFileOf(f1);
+  ok(bf?.partyId === "pty_0123456789abcdef" && bf.rev === 2 && bidderFileOf("x") === null, "bid-send: bidderFileOf");
+  ok(isPartyId("pty_0123456789abcdef") && !isPartyId("pty_xyz") && !isPartyId(5), "bid-send: isPartyId");
+  ok(latestSentRev({ revisions: [R(1, "sent"), R(2, "manual")] }) === 1 && latestSentRev({ revisions: [] }) === null, "bid-send: latestSentRev");
+  ok(BID_SEND_COPY.progress(2, 5) === "Sending 2 of 5…" && BID_SEND_COPY.sendN(1) === "Send to 1 bidder" && BID_SEND_COPY.recipients(["A", "B"]) === "To: A, B (2 bidders)", "bid-send: copy functions");
 }
 
 export async function bidDbChecks(ok: Ok) {
@@ -472,5 +550,6 @@ export async function bidDbChecks(ok: Ok) {
 
 if (process.argv[1]?.endsWith("test-bids.ts")) {
   let pass = 0, fail = 0;
-  bidChecks((c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } }).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
+  const okf: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
+  bidChecks(okf).then(() => bidSendChecks(okf)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
 }

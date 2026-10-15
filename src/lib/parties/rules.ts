@@ -38,7 +38,8 @@ export type BidderState = {
   sentBy?: string | null;
   confirmation?: string;
   threadId?: string | null;
-  failed?: { at: number; error: string } | null;
+  failed?: { at: number; error: string; unknown?: boolean } | null;
+  opens?: { count: number; lastAt: number } | null;
   lostByAward?: boolean;
 };
 

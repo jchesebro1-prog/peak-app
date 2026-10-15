@@ -116,8 +116,41 @@ export function markSubmittedState(bid: BidderState, rev: number, by: string, co
   return next;
 }
 
+/** The `rev` of the latest SENT revision; before any send, max(1, revisions.length). Inlined (no quote-pdf import). */
 export function currentRev(q: { revisions?: unknown[] | null }): number {
-  return Math.max(1, q.revisions?.length || 1);
+  const revs = Array.isArray(q.revisions) ? q.revisions : [];
+  for (let i = revs.length - 1; i >= 0; i--) {
+    const r = revs[i] as { reason?: unknown; rev?: unknown } | null;
+    if (r && typeof r === "object" && r.reason === "sent" && typeof r.rev === "number" && Number.isSafeInteger(r.rev)) return r.rev;
+  }
+  return Math.max(1, revs.length || 1);
+}
+
+export function bidderSentState(bid: BidderState, rev: number, by: string, threadId: string, at: number): BidderState {
+  return { ...bid, revSent: rev, sentAt: at, sentBy: by, threadId, failed: null };
+}
+
+export function bidderFailedState(bid: BidderState, f: { at: number; error: string; unknown?: boolean }, threadId?: string | null): BidderState {
+  const next: BidderState = { ...bid, failed: { at: f.at, error: String(f.error).slice(0, 300), ...(f.unknown ? { unknown: true } : {}) } };
+  if (threadId) next.threadId = threadId;
+  return next;
+}
+
+export function nextBidderOpens(prev: unknown, now: number): { count: number; lastAt: number } | null {
+  if (typeof now !== "number" || !Number.isFinite(now) || now <= 0) return null;
+  const p = prev as { count?: unknown; lastAt?: unknown } | null | undefined;
+  if (!p || typeof p !== "object" || typeof p.count !== "number" || !Number.isFinite(p.count) || typeof p.lastAt !== "number" || !Number.isFinite(p.lastAt)) {
+    return { count: 1, lastAt: now };
+  }
+  return { count: Math.min(p.count + 1, 1_000_000), lastAt: Math.max(p.lastAt, now) };
+}
+
+export function bidderOpensText(o: { count: number; lastAt: number } | null | undefined): string {
+  return o && o.count > 0 ? `Opened ${o.count}×` : "";
+}
+
+export function bidderOpensTitle(o: { count: number; lastAt: number } | null | undefined): string {
+  return o && o.count > 0 && isMs(o.lastAt) ? `Last opened ${chicagoShortDate(o.lastAt)}, ${chicagoTime(o.lastAt)}` : "";
 }
 
 export function needsRev(bid: BidderState | null, rev: number): boolean {
@@ -163,9 +196,11 @@ export function bidDueText(dueAt: number): string {
 
 export function bidderStatusText(bid: BidderState, rev: number): string {
   if (bid.result !== "pending") return BID_RESULT_LABEL[bid.result];
-  if (bid.revSent == null) return "Not submitted";
+  const website = bid.submitVia === "website";
+  if (bid.failed && (bid.revSent == null || bid.revSent < rev)) return "Send failed";
+  if (bid.revSent == null) return website ? "Not submitted" : "Not sent";
   if (bid.revSent < rev) return `Needs Rev ${rev}`;
-  return `Submitted Rev ${bid.revSent}${isMs(bid.sentAt) ? ` · ${chicagoShortDate(bid.sentAt)}` : ""}`;
+  return `${website ? "Submitted" : "Sent"} Rev ${bid.revSent}${isMs(bid.sentAt) ? ` · ${chicagoShortDate(bid.sentAt)}` : ""}`;
 }
 
 export function bidDueDays(dueAt: number, now: number): number {
