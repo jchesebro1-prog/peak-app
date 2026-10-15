@@ -1423,8 +1423,10 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const S = FF.newFileId("s");
     ok(/^p_[0-9a-f]{12}$/.test(P) && /^s_[0-9a-f]{12}$/.test(S) && FF.FILE_ID_RE.test(P) && FF.FILE_ID_RE.test(S) && FF.newFileId("p") !== P,
       "#344 C4: newFileId makes p_/s_ + 12 hex ids that match FILE_ID_RE");
-    ok(FF.siblingId(P, "m") === "m_" + P.slice(2) && FF.siblingId(S, "k") === "k_" + S.slice(2) && (() => { try { FF.siblingId("bad", "m"); return false; } catch { return true; } })(),
-      "#344 C4: siblingId keeps the hex (m_/k_) and refuses a bad id");
+    const MK = FF.newFileId("m");
+    ok(/^m_[0-9a-f]{12}$/.test(MK) && MK.slice(2) !== P.slice(2) && FF.siblingId(MK, "k") === "k_" + MK.slice(2) && FF.siblingId(S, "k") === "k_" + S.slice(2) &&
+      (() => { try { FF.siblingId("bad", "k"); return false; } catch { return true; } })(),
+      "#344 C4 fix: newFileId makes a markup its own m_ id; siblingId gives the strokes k_ the markup's / sketch's hex and refuses a bad id");
     ok(["p_abcdef12", "m_abcdef12", "k_abcdef12", "s_abcdef12"].every((x) => FF.FILE_ID_RE.test(x)) &&
       !["x_abcdef12", "p_abc", "p_abcdef12-x", "p_ABCDEF12", "p_" + "a".repeat(33)].some((x) => FF.FILE_ID_RE.test(x)),
       "#344 C4: FILE_ID_RE accepts p/m/k/s + 8–32 lowercase alnum, nothing with a dash");
@@ -1470,7 +1472,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       id: "FS-1", rev: 3,
       photoRefs: [
         { id: "p_aaaaaaaa", section: "mBeams", takenAt: 1, by: "u1", file: done("surveys/FS-1/p_aaaaaaaa.jpg"),
-          markup: { image: done("surveys/FS-1/m_aaaaaaaa.jpg"), strokes: done("surveys/FS-1/k_aaaaaaaa.json"), updatedAt: 5 } },
+          markup: { id: "m_a1a1a1a1", image: done("surveys/FS-1/m_a1a1a1a1.jpg"), strokes: done("surveys/FS-1/k_a1a1a1a1.json"), updatedAt: 5 } },
         { id: "p_bbbbbbbb", section: "mBeams", takenAt: 2, by: "u1", file: pend },
         { id: "p_cccccccc", section: "mHouse", takenAt: 3, by: "u1", file: done("surveys/FS-1/p_cccccccc.jpg") },
       ],
@@ -1482,7 +1484,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const incoming: Refs = {
       id: "FS-1", rev: 4, notes: "edited",
       photoRefs: [
-        { id: "p_aaaaaaaa", section: "mBeams", takenAt: 1, by: "u1", caption: "new caption", file: pend, markup: { image: pend, strokes: pend, updatedAt: 5 } },
+        { id: "p_aaaaaaaa", section: "mBeams", takenAt: 1, by: "u1", caption: "new caption", file: pend, markup: { id: "m_a1a1a1a1", image: pend, strokes: pend, updatedAt: 5 } },
         { id: "p_bbbbbbbb", section: "mBeams", takenAt: 2, by: "u1", file: { inline: jpegUrl } },
         { id: "p_ffffffff", section: "mHouse", takenAt: 9, by: "u1", file: pend },
       ],
@@ -1496,7 +1498,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const merged = FF.mergeSurveyFileRefs(stored, incoming) as typeof incoming;
     const refA = merged.photoRefs.find((r) => r.id === "p_aaaaaaaa")!;
     ok(refA.file.blobPath === "surveys/FS-1/p_aaaaaaaa.jpg" && !("pending" in refA.file) && refA.caption === "new caption" &&
-      refA.markup?.image.blobPath === "surveys/FS-1/m_aaaaaaaa.jpg" && refA.markup?.strokes.blobPath === "surveys/FS-1/k_aaaaaaaa.json",
+      refA.markup?.image.blobPath === "surveys/FS-1/m_a1a1a1a1.jpg" && refA.markup?.strokes.blobPath === "surveys/FS-1/k_a1a1a1a1.json",
       "#344 C4: merge — a finished slot survives an unfinished incoming one (file and markup), other incoming fields kept");
     ok((merged.photoRefs.find((r) => r.id === "p_bbbbbbbb")!.file as { inline?: string }).inline === jpegUrl, "#344 C4: merge — an incoming finished slot wins over a stored unfinished one");
     ok(!merged.photoRefs.some((r) => r.id === "p_cccccccc") && merged.photoRefs.some((r) => r.id === "p_ffffffff") && merged.photoRefs.length === 3,
@@ -1507,41 +1509,107 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       "#344 C4: merge — a re-drawn sketch (new id) keeps the incoming one");
     ok(JSON.stringify(stored) === snapS && JSON.stringify(incoming) === snapI && (merged as unknown) !== incoming, "#344 C4: merge — inputs are not mutated");
     ok((merged as { notes?: string }).notes === "edited" && merged.rev === 4, "#344 C4: merge — every other incoming field is kept as sent");
-    // a re-done markup (newer updatedAt, same m_/k_ ids) keeps its new pending slots; a stale older markup never rolls back a newer one
-    const redo = FF.mergeSurveyFileRefs(stored, { photoRefs: [{ ...incoming.photoRefs[0], markup: { image: pend, strokes: pend, updatedAt: 6 } }] }) as typeof incoming;
-    const older = FF.mergeSurveyFileRefs(stored, { photoRefs: [{ ...incoming.photoRefs[0], markup: { image: pend, strokes: pend, updatedAt: 4 } }] }) as typeof incoming;
-    ok("pending" in redo.photoRefs[0].markup!.image && redo.photoRefs[0].markup!.updatedAt === 6 &&
-      older.photoRefs[0].markup!.image.blobPath === "surveys/FS-1/m_aaaaaaaa.jpg" && older.photoRefs[0].markup!.updatedAt === 5,
-      "#344 C4: merge — a newer markup (same ids) keeps its pending slots; an older copy never replaces a newer stored markup");
+    // a re-done markup has its OWN new id: taken wholesale (its new pending slots); the same id keeps finished slots per slot,
+    // whatever its updatedAt says
+    const redo = FF.mergeSurveyFileRefs(stored, { photoRefs: [{ ...incoming.photoRefs[0], markup: { id: "m_b2b2b2b2", image: pend, strokes: pend, updatedAt: 6 } }] }) as typeof incoming;
+    const sameOlder = FF.mergeSurveyFileRefs(stored, { photoRefs: [{ ...incoming.photoRefs[0], markup: { id: "m_a1a1a1a1", image: pend, strokes: pend, updatedAt: 4 } }] }) as typeof incoming;
+    const sameNewer = FF.mergeSurveyFileRefs(stored, { photoRefs: [{ ...incoming.photoRefs[0], markup: { id: "m_a1a1a1a1", image: pend, strokes: pend, updatedAt: 9 } }] }) as typeof incoming;
+    ok(redo.photoRefs[0].markup!.id === "m_b2b2b2b2" && "pending" in redo.photoRefs[0].markup!.image && "pending" in redo.photoRefs[0].markup!.strokes && redo.photoRefs[0].markup!.updatedAt === 6,
+      "#344 C4 fix: merge — a re-markup (new m_ id) takes the incoming markup wholesale, its new slots pending");
+    ok(sameOlder.photoRefs[0].markup!.image.blobPath === "surveys/FS-1/m_a1a1a1a1.jpg" && sameOlder.photoRefs[0].markup!.updatedAt === 4 &&
+      sameNewer.photoRefs[0].markup!.strokes.blobPath === "surveys/FS-1/k_a1a1a1a1.json" && sameNewer.photoRefs[0].markup!.updatedAt === 9,
+      "#344 C4 fix: merge — the same markup id keeps finished slots per slot, with no updatedAt comparison");
+    // a stored finished slot always wins, even over a different finished incoming one
+    const twoDone = FF.mergeSurveyFileRefs(stored, { photoRefs: [{ ...incoming.photoRefs[0], file: done("surveys/FS-1/p_aaaaaaaa-Other.jpg"),
+      markup: { id: "m_a1a1a1a1", image: { inline: jpegUrl }, strokes: done("surveys/FS-1/k_a1a1a1a1-X.json"), updatedAt: 5 } }],
+      sketches: { stage: { id: "s_dddddddd", image: done("surveys/FS-1/s_dddddddd-Z.jpg"), strokes: done("surveys/FS-1/k_dddddddd.json"), updatedAt: 7, by: "u1" } } }) as typeof incoming;
+    ok(twoDone.photoRefs[0].file.blobPath === "surveys/FS-1/p_aaaaaaaa.jpg" && twoDone.photoRefs[0].markup!.image.blobPath === "surveys/FS-1/m_a1a1a1a1.jpg" &&
+      !twoDone.photoRefs[0].markup!.image.inline && twoDone.photoRefs[0].markup!.strokes.blobPath === "surveys/FS-1/k_a1a1a1a1.json" &&
+      twoDone.sketches.stage.image.blobPath === "surveys/FS-1/s_dddddddd.jpg" && twoDone.sketches.stage.strokes.inline === "data:application/json;base64,e30=",
+      "#344 C4 fix: merge — a stored finished slot is never replaced, even by a finished incoming one");
     const noMk = FF.mergeSurveyFileRefs(stored, { photoRefs: [{ ...incoming.photoRefs[0], markup: undefined }] }) as typeof incoming;
     ok(!noMk.photoRefs[0].markup, "#344 C4: merge — a removed markup stays removed");
     ok(JSON.stringify(FF.mergeSurveyFileRefs(stored, { notes: "x" })) === JSON.stringify({ notes: "x" }) && JSON.stringify(FF.mergeSurveyFileRefs({}, incoming)) === snapI,
       "#344 C4: merge — nothing to merge leaves the incoming copy as it is");
 
     /* the fold (one finished slot into the refs) */
-    const base: Refs = { photoRefs: [{ id: "p_abcdef12", section: "x", takenAt: 1, by: "u", file: pend, markup: { image: pend, strokes: pend, updatedAt: 1 } }],
+    const base: Refs = { photoRefs: [{ id: "p_abcdef12", section: "x", takenAt: 1, by: "u", file: pend, markup: { id: "m_fedcba98", image: pend, strokes: pend, updatedAt: 1 } }],
       sketches: { stage: { id: "s_12345678", image: pend, strokes: pend, updatedAt: 1, by: "u" } } };
     const f1 = FF.foldFileSlot(base, "p_abcdef12", { blobPath: "surveys/FS-1/p_abcdef12.jpg" });
-    const f2 = FF.foldFileSlot(base, "m_abcdef12", { inline: jpegUrl });
-    const f3 = FF.foldFileSlot(base, "k_abcdef12", { inline: jsonUrl });
+    const f2 = FF.foldFileSlot(base, "m_fedcba98", { inline: jpegUrl });
+    const f3 = FF.foldFileSlot(base, "k_fedcba98", { inline: jsonUrl });
     const f4 = FF.foldFileSlot(base, "k_12345678", { inline: jsonUrl });
     const f5 = FF.foldFileSlot(base, "s_12345678", { blobPath: "surveys/FS-1/s_12345678.jpg" });
     ok(f1.status === "set" && f1.doc.photoRefs![0].file.blobPath === "surveys/FS-1/p_abcdef12.jpg" && !("pending" in f1.doc.photoRefs![0].file) &&
       f2.status === "set" && f2.doc.photoRefs![0].markup!.image.inline === jpegUrl && f3.status === "set" && f3.doc.photoRefs![0].markup!.strokes.inline === jsonUrl &&
       f4.status === "set" && f4.doc.sketches!.stage.strokes.inline === jsonUrl && f5.status === "set" && f5.doc.sketches!.stage.image.blobPath === "surveys/FS-1/s_12345678.jpg" &&
       "pending" in base.photoRefs[0].file,
-      "#344 C4: foldFileSlot finds the owner (p_ file, m_ markup image, k_ markup or sketch strokes, s_ sketch image) without mutating");
+      "#344 C4: foldFileSlot finds the owner (p_ file, m_ markup image by markup.id, k_ markup or sketch strokes, s_ sketch image) without mutating");
+    // ownerOf: m_/k_ follow the markup's OWN id; the photo's hex owns nothing but its p_ file; a superseded markup id is missing
+    const fs = (d: Refs, id: string) => FF.fileSlotOf(d, id);
+    const remarked: Refs = { ...base, photoRefs: [{ ...base.photoRefs[0], markup: { id: "m_0a0a0a0a", image: pend, strokes: pend, updatedAt: 2 } }] };
+    ok(fs(base, "m_fedcba98") === base.photoRefs[0].markup!.image && fs(base, "k_fedcba98") === base.photoRefs[0].markup!.strokes &&
+      fs(base, "m_abcdef12") === null && fs(base, "k_abcdef12") === null && fs(base, "k_12345678") === base.sketches.stage.strokes && fs(base, "s_12345678") === base.sketches.stage.image &&
+      fs(base, "p_abcdef12") === base.photoRefs[0].file && fs(remarked, "m_fedcba98") === null && fs(remarked, "k_fedcba98") === null && fs(remarked, "k_0a0a0a0a") === remarked.photoRefs[0].markup!.strokes,
+      "#344 C4 fix: ownerOf — m_ is the photo whose markup.id matches, k_ that markup's hex else the sketch's, s_ the sketch; a superseded markup id owns nothing");
+    const late = FF.foldFileSlot(remarked, "m_fedcba98", { inline: jpegUrl });
+    const lateK = FF.foldFileSlot(remarked, "k_fedcba98", { inline: jsonUrl });
+    ok(late.status === "missing" && lateK.status === "missing" && "pending" in remarked.photoRefs[0].markup!.image && "pending" in remarked.photoRefs[0].markup!.strokes,
+      "#344 C4 fix: a late finalize of a superseded markup id is missing (retryable) and never fills the new markup's slots");
+    ok(FF.foldFileSlot({ photoRefs: [{ ...base.photoRefs[0], markup: { image: pend, strokes: pend, updatedAt: 1 } as never }] }, "m_fedcba98", { inline: jpegUrl }).status === "missing",
+      "#344 C4 fix: a markup with no id owns no file");
     const f6 = f1.status === "set" ? FF.foldFileSlot(f1.doc, "p_abcdef12", { blobPath: "surveys/FS-1/p_abcdef12-2.jpg" }) : null;
     ok(f6?.status === "already" && f6.slot.blobPath === "surveys/FS-1/p_abcdef12.jpg" && FF.foldFileSlot(base, "p_99999999", { blobPath: "x" }).status === "missing" &&
-      FF.foldFileSlot({ photoRefs: [{ ...base.photoRefs[0], markup: undefined }] }, "m_abcdef12", { inline: jpegUrl }).status === "missing",
+      FF.foldFileSlot({ photoRefs: [{ ...base.photoRefs[0], markup: undefined }] }, "m_fedcba98", { inline: jpegUrl }).status === "missing",
       "#344 C4: foldFileSlot — a finished slot is never replaced (already); an unknown owner is missing");
+
+    /* clients can't mint finished slots: only a path in this survey under the slot's own file id survives, inline only without Blob */
+    const SV = "FS-77";
+    const dirty = {
+      notes: "keep",
+      photoRefs: [
+        { id: "p_11111111", section: "a", takenAt: 1, by: "u", file: done(`surveys/${SV}/p_11111111-Ab1.jpg`),
+          markup: { id: "m_22222222", image: done(`surveys/${SV}/m_22222222.jpg`), strokes: done(`surveys/${SV}/k_22222222.json`), updatedAt: 1 } },
+        { id: "p_33333333", section: "a", takenAt: 1, by: "u", file: done(`surveys/${SV}/p_11111111.jpg`),
+          markup: { id: "m_44444444", image: done(`surveys/FS-78/m_44444444.jpg`), strokes: done(`surveys/${SV}/k_33333333.json`), updatedAt: 1 } },
+        { id: "p_55555555", section: "a", takenAt: 1, by: "u", file: { inline: jpegUrl }, markup: { id: "p_99999999", image: done(`surveys/${SV}/p_99999999.jpg`), strokes: pend, updatedAt: 1 } },
+      ],
+      sketches: {
+        stage: { id: "s_66666666", image: done(`surveys/${SV}/s_66666666.jpg`), strokes: done(`surveys/${SV}/k_66666666.json`), updatedAt: 1, by: "u" },
+        house: { id: "s_77777777", image: done(`surveys/${SV}/s_66666666.jpg`), strokes: { inline: jsonUrl }, updatedAt: 1, by: "u" },
+      },
+    } as unknown as Refs;
+    const snapD = JSON.stringify(dirty);
+    const dev = FF.sanitizeIncomingFileSlots(dirty, SV, { blobEnabled: false }) as unknown as Refs;
+    const prod = FF.sanitizeIncomingFileSlots(dirty, SV, { blobEnabled: true }) as unknown as Refs;
+    const isPend = (x: unknown) => JSON.stringify(x) === '{"pending":true}';
+    ok(dev.photoRefs[0].file.blobPath === `surveys/${SV}/p_11111111-Ab1.jpg` && dev.photoRefs[0].markup!.image.blobPath === `surveys/${SV}/m_22222222.jpg` &&
+      dev.photoRefs[0].markup!.strokes.blobPath === `surveys/${SV}/k_22222222.json` && dev.sketches.stage.image.blobPath === `surveys/${SV}/s_66666666.jpg` &&
+      dev.sketches.stage.strokes.blobPath === `surveys/${SV}/k_66666666.json` && (dev as unknown as { notes: string }).notes === "keep",
+      "#344 C4 fix: sanitize — a finished slot on its own file's path in this survey is kept (Blob's -suffix allowed)");
+    ok(isPend(dev.photoRefs[1].file) && isPend(dev.photoRefs[1].markup!.image) && isPend(dev.photoRefs[1].markup!.strokes) && isPend(dev.photoRefs[2].markup!.image) &&
+      isPend(dev.sketches.house.image),
+      "#344 C4 fix: sanitize — another file's path, another survey's path, strokes not under the markup's hex, or a bad owning id → pending");
+    ok(dev.photoRefs[2].file.inline === jpegUrl && dev.sketches.house.strokes.inline === jsonUrl && isPend(prod.photoRefs[2].file) && isPend(prod.sketches.house.strokes) &&
+      prod.photoRefs[0].file.blobPath === `surveys/${SV}/p_11111111-Ab1.jpg`,
+      "#344 C4 fix: sanitize — an incoming inline slot is kept only without Blob (a deployment with Blob downgrades it to pending)");
+    ok(isPend(FF.sanitizeIncomingFileSlots({ photoRefs: [{ ...dirty.photoRefs[0], file: { inline: "data:image/jpeg;base64,aGVsbG8=" } }] }, SV, { blobEnabled: false }).photoRefs![0].file),
+      "#344 C4 fix: sanitize — an inline slot that isn't a real file of its kind is pending");
+    ok(JSON.stringify(dirty) === snapD && JSON.stringify(FF.sanitizeIncomingFileSlots({ notes: "x" }, SV, { blobEnabled: true })) === '{"notes":"x"}',
+      "#344 C4 fix: sanitize — pure (input untouched); a doc without refs is unchanged");
+
+    /* the queue's route kind: a bad file id on a valid record is terminal (null), never retried for a week */
+    ok(FF.fileRouteKind("AS-1001", "p_abcdef12") === "assessment" && FF.fileRouteKind("AS-1001", "m_abcdef12") === null && FF.fileRouteKind("FS-1", "k_abcdef12") === "survey" &&
+      FF.fileRouteKind("FS-1", "p_abc") === null && FF.fileRouteKind("FS-1", "p_abcdef12-x") === null && FF.fileRouteKind("AS-1", "P_ABCDEF12") === null &&
+      FF.fileRouteKind("Q-1", "p_abcdef12") === null && FF.fileRouteKind("FS-1", 7 as never) === null,
+      "#344 C4 fix: fileRouteKind — a valid file id on an AS-/FS- record, else null (terminal)");
 
     /* source pins: the queue stays client-only and dispatches by kind; the server pieces mirror the engine */
     const q = readFileSync(join(process.cwd(), "src/lib/assessments/photo-queue.ts"), "utf8");
     ok(q.startsWith('"use client"') && q.includes('const DB_NAME = "peak-assessment-photos"') && q.includes("indexedDB.open(DB_NAME, 2)") &&
       q.includes("finalizeAssessmentPhoto(") && q.includes("finalizeSurveyFile(") && q.includes("fileBlobPath(") && q.includes("recordKind(") &&
       q.includes("/photos/upload") && q.includes("/files/upload") && /export const enqueueFile = enqueuePhoto/.test(q) &&
-      !/from\s+["'][^"']*(stores|server|@\/db|lib\/blob)["']/.test(q),
+      !/from\s+["'][^"']*(stores|server|@\/db|lib\/blob)["']/.test(q) && /const kind = fileRouteKind\(recordId, fileId\);/.test(q),
       "#344 C4: the photo queue is a client-only queue of files of a record — same IndexedDB, kind-dispatched broker + finalize");
     const fa = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/file-actions.ts"), "utf8");
     const br = readFileSync(join(process.cwd(), "src/app/api/surveys/[id]/files/upload/route.ts"), "utf8");
@@ -1595,18 +1663,24 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
       const jpegUrl = "data:image/jpeg;base64," + Buffer.from([0xff, 0xd8, 0xff, 0xe0, 9, 9, 9]).toString("base64");
       const jsonUrl = "data:application/json;base64," + Buffer.from('{"w":10,"h":10,"strokes":[]}').toString("base64");
       const P = FF.newFileId("p");
-      const M = FF.siblingId(P, "m");
-      const KP = FF.siblingId(P, "k");
+      const M = FF.newFileId("m");
+      const KP = FF.siblingId(M, "k");
       const SK = FF.newFileId("s");
       const KS = FF.siblingId(SK, "k");
       const pend = { pending: true as const };
       const sv = await S.create({ owner: "Sam Surveyor" } as never);
       registerFixture("surveys", sv.id);
       const refs = {
-        photoRefs: [{ id: P, section: "mBeams", takenAt: 1, by: "u1", file: pend, markup: { image: pend, strokes: pend, updatedAt: 5 } }],
+        photoRefs: [{ id: P, section: "mBeams", takenAt: 1, by: "u1", file: pend, markup: { id: M, image: pend, strokes: pend, updatedAt: 5 } }],
         sketches: { stage: { id: SK, image: pend, strokes: pend, updatedAt: 5, by: "u1" } },
       };
       await S.update(sv.id, refs as never);
+      const { getDb } = await import("../src/db");
+      const { DOC_TABLES } = await import("../src/db/doc-tables");
+      const { eq } = await import("drizzle-orm");
+      const db = await getDb();
+      const rowOf = async (id: string) => (await db.select().from(DOC_TABLES.surveys).where(eq(DOC_TABLES.surveys.id, id)).limit(1))[0];
+      const row0 = await rowOf(sv.id);
       const U = { id: "u1" };
       const r1 = await S.applyFinalizedSurveyFile(sv.id, P, { inline: jpegUrl }, U);
       const r2 = await S.applyFinalizedSurveyFile(sv.id, M, { inline: jpegUrl }, U);
@@ -1616,10 +1690,64 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
       const after = await S.get(sv.id);
       const pr = (after?.photoRefs ?? [])[0];
       const sk = after?.sketches?.stage;
+      const row1 = await rowOf(sv.id);
       ok(r1.ok && r2.ok && r3.ok && r4.ok && r5.ok && !!pr && pr.file.inline === jpegUrl && pr.markup?.image.inline === jpegUrl && pr.markup?.strokes.inline === jsonUrl &&
-        sk?.image.inline === jpegUrl && sk?.strokes.inline === jsonUrl && !("pending" in pr.file) && !("pending" in (sk?.image ?? {})) &&
-        r5.ok && r1.ok && r5.rev > r1.rev && after?.rev === r5.rev,
-        "#344 C4: applyFinalizedSurveyFile finishes p_, m_, k_ (markup and sketch) and s_ inline, bumping rev each time");
+        sk?.image.inline === jpegUrl && sk?.strokes.inline === jsonUrl && !("pending" in pr.file) && !("pending" in (sk?.image ?? {})),
+        "#344 C4: applyFinalizedSurveyFile finishes p_, m_ (by markup.id), k_ (markup and sketch) and s_ inline");
+      ok(!!row0 && !!row1 && row1.rev === row0.rev && after?.rev === (row0.doc as { rev?: number }).rev && r1.ok && r5.ok && r1.rev === row0.rev && r5.rev === row0.rev &&
+        Number(row1.seq) > Number(row0.seq),
+        "#344 C4 fix: a finalize never bumps the survey's rev (row or doc) — it returns the current rev, and seq still moves so pull sees it");
+      // an offline edit saved from rev N, pushed after two uploads finished, is NOT a conflict and keeps both
+      {
+        const sv2 = await S.create({ owner: "Sam Surveyor" } as never);
+        registerFixture("surveys", sv2.id);
+        const P3 = FF.newFileId("p");
+        const SK3 = FF.newFileId("s");
+        const refs3 = { photoRefs: [{ id: P3, section: "mBeams", takenAt: 1, by: "u1", file: pend }], sketches: { stage: { id: SK3, image: pend, strokes: pend, updatedAt: 1, by: "u1" } } };
+        await S.update(sv2.id, refs3 as never);
+        const n = (await rowOf(sv2.id))!.rev;
+        const docN = await S.get(sv2.id);
+        const fa = await S.applyFinalizedSurveyFile(sv2.id, P3, { inline: jpegUrl }, U);
+        const fb = await S.applyFinalizedSurveyFile(sv2.id, SK3, { inline: jpegUrl }, U);
+        const pushedN = await S.pushSurvey({ id: sv2.id, rev: n + 1, doc: { ...(docN as object), ...refs3, notes: "offline edit", rev: n + 1 } as Record<string, unknown> });
+        const fin3 = await S.get(sv2.id);
+        ok(fa.ok && fb.ok && pushedN.status === "ok" && fin3?.notes === "offline edit" && fin3?.photoRefs?.[0].file.inline === jpegUrl && fin3?.sketches?.stage.image.inline === jpegUrl &&
+          (await rowOf(sv2.id))!.rev === n + 1,
+          "#344 C4 fix: save at rev N → two finalizes → push at rev N+1 is ok (no conflict) and keeps the pushed edit and both finished slots");
+        // a re-markup (new m_ id) isn't overwritten by a late finalize of the old markup id
+        const Mold = FF.newFileId("m");
+        await S.update(sv2.id, { photoRefs: [{ ...fin3!.photoRefs![0], markup: { id: Mold, image: pend, strokes: pend, updatedAt: 2 } }] } as never);
+        const Mnew = FF.newFileId("m");
+        await S.update(sv2.id, { photoRefs: [{ ...fin3!.photoRefs![0], markup: { id: Mnew, image: pend, strokes: pend, updatedAt: 3 } }] } as never);
+        const lateM = await S.applyFinalizedSurveyFile(sv2.id, Mold, { inline: jpegUrl }, U);
+        const lateK = await S.applyFinalizedSurveyFile(sv2.id, FF.siblingId(Mold, "k"), { inline: jsonUrl }, U);
+        const mk = (await S.get(sv2.id))?.photoRefs?.[0].markup;
+        ok(!lateM.ok && !lateM.terminal && !lateK.ok && !lateK.terminal && mk?.id === Mnew && mk.image.pending === true && mk.strokes.pending === true,
+          "#344 C4 fix: a late finalize of a superseded markup id is retryable-missing and never fills the new markup's slots");
+        const newM = await S.applyFinalizedSurveyFile(sv2.id, Mnew, { inline: jpegUrl }, U);
+        await S.update(sv2.id, { photoRefs: [{ ...fin3!.photoRefs![0], markup: { id: Mnew, image: pend, strokes: pend, updatedAt: 1 } }] } as never);
+        const mk2 = (await S.get(sv2.id))?.photoRefs?.[0].markup;
+        ok(newM.ok && mk2?.id === Mnew && mk2.image.inline === jpegUrl && mk2.strokes.pending === true,
+          "#344 C4 fix: a save carrying the same markup id (any updatedAt) keeps its finished slot");
+        // clients can't mint finished slots through update() or the push
+        const Pf = FF.newFileId("p");
+        const cur3 = (await S.get(sv2.id))!;
+        await S.update(sv2.id, { photoRefs: [...cur3.photoRefs!, { id: Pf, section: "a", takenAt: 1, by: "u1", file: { blobPath: `surveys/${sv2.id}/${P3}.jpg` } }] } as never);
+        const minted1 = (await S.get(sv2.id))?.photoRefs?.find((r) => r.id === Pf)?.file;
+        const n2 = (await rowOf(sv2.id))!.rev;
+        const cur4 = (await S.get(sv2.id))!;
+        const pushMint = await S.pushSurvey({ id: sv2.id, rev: n2 + 1, doc: { ...(cur4 as object), photoRefs: cur4.photoRefs!.map((r) => (r.id === Pf ? { ...r, file: { blobPath: "surveys/FS-1/" + Pf + ".jpg" } } : r)) } as Record<string, unknown> });
+        const minted2 = (await S.get(sv2.id))?.photoRefs?.find((r) => r.id === Pf)?.file;
+        ok(JSON.stringify(minted1) === '{"pending":true}' && pushMint.status === "ok" && JSON.stringify(minted2) === '{"pending":true}' &&
+          (await S.get(sv2.id))?.photoRefs?.[0].file.inline === jpegUrl,
+          "#344 C4 fix: update() and pushSurvey downgrade an incoming finished slot that isn't its own file's path in this survey to pending");
+        const okPath = `surveys/${sv2.id}/${Pf}-Q7.jpg`;
+        const n3 = (await rowOf(sv2.id))!.rev;
+        const cur5 = (await S.get(sv2.id))!;
+        await S.pushSurvey({ id: sv2.id, rev: n3 + 1, doc: { ...(cur5 as object), photoRefs: cur5.photoRefs!.map((r) => (r.id === Pf ? { ...r, file: { blobPath: okPath } } : r)) } as Record<string, unknown> });
+        ok((await S.get(sv2.id))?.photoRefs?.find((r) => r.id === Pf)?.file.blobPath === okPath,
+          "#344 C4 fix: a slot on its own file's path in this survey passes the push (the device re-sending a finished slot it was handed)");
+      }
       // a stale editor save (all slots still pending) keeps every finished slot
       await S.update(sv.id, { ...refs, notes: "stale save" } as never);
       const kept = await S.get(sv.id);
@@ -1648,10 +1776,6 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
       await S.update(sv.id, { photoRefs: (await S.get(sv.id))?.photoRefs?.filter((r) => r.id !== P2) } as never);
       // the sync push keeps finished slots and never stores legacyNotes
       const cur = await S.get(sv.id);
-      const { getDb } = await import("../src/db");
-      const { DOC_TABLES } = await import("../src/db/doc-tables");
-      const { eq } = await import("drizzle-orm");
-      const db = await getDb();
       const tableRev = (await db.select().from(DOC_TABLES.surveys).where(eq(DOC_TABLES.surveys.id, sv.id)).limit(1))[0]?.rev ?? 0;
       const pushed = await S.pushSurvey({ id: sv.id, rev: tableRev + 1, doc: { ...(cur as object), ...refs, notes: "pushed", legacyNotes: [{ section: "x", label: "y", text: "z" }] } as Record<string, unknown> });
       const rawP = (await getDoc("surveys", sv.id)) as Record<string, unknown> | null;

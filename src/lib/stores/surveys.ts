@@ -18,6 +18,7 @@ import {
   foldFileSlot,
   inlineFileProblem,
   mergeSurveyFileRefs,
+  sanitizeIncomingFileSlots,
   slotFinished,
   surveyInlineTotal,
   type FinishedSlot,
@@ -547,8 +548,9 @@ function withSurveyLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
   return withAdvisoryLock(SURVEY_LOCK_NAMESPACE, surveyLockKey(id), fn);
 }
 
-/** The stored doc (read inside the lock) + the patch, stamped, with `mergeSurveyFileRefs` applied: a finished file
- *  slot is never replaced by an unfinished one from an older copy. `legacyNotes` is derived on read — never stored. */
+/** The stored doc (read inside the lock) + the patch, stamped, its file slots sanitized (a client never mints a
+ *  finished slot) and `mergeSurveyFileRefs` applied (a stored finished slot is never replaced). `legacyNotes` is
+ *  derived on read — never stored. */
 async function updateUnlocked(id: string, patch: Partial<SurveyRecord>): Promise<SurveyRecord | null> {
   return patchDoc<SurveyRecord>("surveys", id, (s) => {
     const stored = { ...s } as Record<string, unknown>;
@@ -560,7 +562,7 @@ async function updateUnlocked(id: string, patch: Partial<SurveyRecord>): Promise
       rev: (s.rev || 1) + 1,
     }) as Record<string, unknown>;
     delete next.legacyNotes;
-    return mergeSurveyFileRefs(stored, next) as SurveyRecord;
+    return mergeSurveyFileRefs(stored, sanitizeIncomingFileSlots(next, id, { blobEnabled: blobEnabled() })) as SurveyRecord;
   });
 }
 
@@ -577,12 +579,16 @@ const fileErr = (error: string, terminal?: boolean): SurveyFileErr => (terminal 
 
 /**
  * A survey file is uploaded (#344 C4): set its slot to `{ blobPath }` or (local dev without Blob) `{ inline }`,
- * dropping `pending`, and bump rev — under the survey lock, reading the stored doc inside it. The owning ref:
- * `p_` → that photo's `file`; `m_` → its `markup.image`; `k_` → `markup.strokes` of the photo with the same hex,
- * else the strokes of the sketch with that hex; `s_` → that sketch's `image`.
+ * dropping `pending` — under the survey lock, reading the stored row inside it. The rev is NOT bumped (row or doc):
+ * a device's offline edit saved before the upload finished must still push cleanly (a bumped rev would make it a
+ * `conflict` and the sync engine would drop the capture); the merge rule keeps the finished slot through that push,
+ * and the row's `seq` (re-drawn by the 0012 BEFORE UPDATE trigger) still moves so pull carries the file. The owning
+ * ref: `p_` → that photo's `file`; `m_` → the photo whose `markup.id` is that id → `markup.image`; `k_` → the
+ * strokes of the markup with that hex, else of the sketch with that hex; `s_` → that sketch's `image`.
  *
  * - An already-finished slot is never replaced: `{ ok, already: true }` with the stored slot and current rev.
- * - No ref owns the file yet → retryable (the capture save may not have synced).
+ * - No ref owns the file yet → retryable (the capture save may not have synced). A superseded markup's files land
+ *   here too (its id owns nothing any more); the queue's 7-day limit ends them.
  * - Survey missing / deleted, a bad id, a path outside the file's own name, an inline file on a Blob deployment, a bad
  *   inline file or one past INLINE_CAPS (each, or the survey's 1.5 MB total) → `terminal`.
  */
@@ -598,11 +604,15 @@ export async function applyFinalizedSurveyFile(
   const blobPath = typeof slot?.blobPath === "string" && slot.blobPath ? slot.blobPath : undefined;
   const inline = typeof slot?.inline === "string" && slot.inline ? slot.inline : undefined;
   return withSurveyLock(id, async () => {
-    const s = await getDoc<SurveyRecord>("surveys", id);
-    if (!s) return fileErr("Survey not found", true);
+    const db = await getDb();
+    const t = DOC_TABLES.surveys;
+    const row = (await db.select().from(t).where(eq(t.id, id)).limit(1))[0];
+    if (!row || row.deleted) return fileErr("Survey not found", true);
+    const s = { ...(row.doc as SurveyRecord), id };
+    const rev = row.rev;
     const cur = fileSlotOf(s, fileId);
     if (cur && slotFinished(cur)) {
-      return { ok: true as const, ref: cur.blobPath ? { blobPath: cur.blobPath } : { inline: cur.inline! }, rev: s.rev || 1, already: true as const };
+      return { ok: true as const, ref: cur.blobPath ? { blobPath: cur.blobPath } : { inline: cur.inline! }, rev, already: true as const };
     }
     if (!!blobPath === !!inline) return fileErr("A file needs a stored path or an inline copy, not both", true);
     if (blobPath && !filePathMatches(blobPath, id, fileId)) return fileErr("The file path isn't this file's own path in this survey", true);
@@ -616,12 +626,13 @@ export async function applyFinalizedSurveyFile(
     }
     const folded = foldFileSlot(s, fileId, blobPath ? { blobPath } : { inline: inline! });
     if (folded.status === "missing") return fileErr("That file isn't on this survey yet");
-    if (folded.status === "already") return { ok: true as const, ref: folded.slot, rev: s.rev || 1, already: true as const };
-    const t = now();
-    const next = { ...folded.doc, updatedAt: t, syncState: "synced" as SyncState, syncedAt: t, rev: (s.rev || 1) + 1 } as SurveyRecord;
+    if (folded.status === "already") return { ok: true as const, ref: folded.slot, rev, already: true as const };
+    const at = now();
+    const next = { ...folded.doc, updatedAt: at, syncState: "synced" as SyncState, syncedAt: at } as SurveyRecord; // doc.rev untouched
     delete next.legacyNotes;
-    await patchDoc<SurveyRecord>("surveys", id, () => next);
-    return { ok: true as const, ref: blobPath ? { blobPath } : { inline: inline! }, rev: next.rev };
+    // A direct write: no rev bump (patchDoc would add one). seq moves by the trigger.
+    await db.update(t).set({ doc: next, updatedAt: at, receivedAt: at }).where(eq(t.id, id));
+    return { ok: true as const, ref: blobPath ? { blobPath } : { inline: inline! }, rev };
   });
 }
 
@@ -635,9 +646,10 @@ export type SurveyPushResult = {
 
 /**
  * /api/sync/push branch for `surveys` (#344 C4) — the generic whole-document upsert, now under the survey lock with
- * the file-ref merge: an unknown id is inserted as sent; a stale rev is a `conflict` with the server copy; otherwise
- * the pushed doc replaces the stored one EXCEPT that a finished file slot is never replaced by the pushed copy's
- * unfinished one (`mergeSurveyFileRefs`). `legacyNotes` is never stored. Anything thrown (a lock timeout, a database
+ * the file-ref merge: the pushed copy's file slots are sanitized first (`sanitizeIncomingFileSlots` — a finished slot
+ * that isn't its own file's path in this survey, or an inline one on a Blob deployment, becomes pending); an unknown
+ * id is inserted; a stale rev is a `conflict` with the server copy; otherwise the pushed doc replaces the stored one
+ * EXCEPT that a stored finished file slot is never replaced (`mergeSurveyFileRefs`). `legacyNotes` is never stored. Anything thrown (a lock timeout, a database
  * error) replies `retry` so the device keeps the capture.
  */
 export async function pushSurvey(rec: { id: string; rev?: number; doc: Record<string, unknown> }): Promise<SurveyPushResult> {
@@ -648,7 +660,8 @@ export async function pushSurvey(rec: { id: string; rev?: number; doc: Record<st
       const t = DOC_TABLES.surveys;
       const existing = await db.select().from(t).where(eq(t.id, id)).limit(1);
       const at = Date.now();
-      const doc: Record<string, unknown> = { ...rec.doc, id };
+      // A pushed copy never mints a finished slot (only the finalize does); then a stored finished slot always wins.
+      const doc: Record<string, unknown> = sanitizeIncomingFileSlots({ ...rec.doc, id }, id, { blobEnabled: blobEnabled() });
       delete doc.legacyNotes;
       if (!existing.length) {
         await db.insert(t).values({ id, doc, rev: rec.rev ?? 1, updatedAt: at, receivedAt: at, review: { state: "new" }, deleted: false });

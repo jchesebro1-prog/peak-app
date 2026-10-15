@@ -8,11 +8,14 @@
  *
  * | File                              | Id                       | Path            | Type             |
  * | photo original                    | `p_<hex>`                | `<id>.jpg`      | image/jpeg       |
- * | photo markup (flattened)          | `m_<same hex as photo>`  | `<id>.jpg`      | image/jpeg       |
- * | strokes (photo markup or sketch)  | `k_<same hex>`           | `<id>.json`     | application/json |
+ * | photo markup (flattened)          | `m_<its own hex>`        | `<id>.jpg`      | image/jpeg       |
+ * | strokes (photo markup or sketch)  | `k_<markup/sketch hex>`  | `<id>.json`     | application/json |
  * | sketch (flattened)                | `s_<hex>`                | `<id>.jpg`      | image/jpeg       |
  *
  * Blob may add `-<suffix>` before the extension; ids never contain `-`, so one file can't alias another's blob.
+ *
+ * A photo markup gets a NEW `m_` id every time it is (re)done, stored on `ref.markup.id`, so a late upload of a
+ * superseded markup can never land in the new markup's slots (its id no longer owns anything).
  */
 
 export type RecordKind = "assessment" | "survey";
@@ -29,7 +32,7 @@ export type SurveyPhotoRef = {
   by: string;
   caption?: string;
   file: FileSlot;
-  markup?: { image: FileSlot; strokes: FileSlot; updatedAt: number };
+  markup?: { id: string /* m_<hex> */; image: FileSlot; strokes: FileSlot; updatedAt: number };
 };
 export type SketchRef = { id: string; image: FileSlot; strokes: FileSlot; updatedAt: number; by: string };
 
@@ -49,13 +52,13 @@ function hex12(): string {
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-/** A fresh photo (`p_`) or sketch (`s_`) id: 12 random lowercase hex. */
-export function newFileId(kind: "p" | "s"): string {
+/** A fresh photo (`p_`), markup (`m_`, new for every (re)markup) or sketch (`s_`) id: 12 random lowercase hex. */
+export function newFileId(kind: "p" | "m" | "s"): string {
   return `${kind}_${hex12()}`;
 }
 
-/** The markup image (`m_`) or strokes (`k_`) id that belongs to a photo / sketch: same hex. */
-export function siblingId(id: string, kind: "m" | "k"): string {
+/** The strokes (`k_`) id that belongs to a markup / sketch: same hex. */
+export function siblingId(id: string, kind: "k"): string {
   if (typeof id !== "string" || !FILE_ID_RE.test(id)) throw new Error("That file id isn't valid");
   return `${kind}_${id.slice(2)}`;
 }
@@ -65,6 +68,15 @@ export function recordKind(recordId: unknown): RecordKind | null {
   if (RECORD_RE.assessment.test(recordId)) return "assessment";
   if (RECORD_RE.survey.test(recordId)) return "survey";
   return null;
+}
+
+/** Which broker + finalize the device queue uses for a file: the record's kind when the file id is valid for it (an
+ *  assessment takes `p_` photos only), else null — terminal, so a bad id is never retried for a week. */
+export function fileRouteKind(recordId: unknown, fileId: unknown): RecordKind | null {
+  if (typeof fileId !== "string" || !FILE_ID_RE.test(fileId)) return null;
+  const kind = recordKind(recordId);
+  if (kind === "assessment") return fileId.startsWith("p_") ? kind : null;
+  return kind;
 }
 
 export function filePrefix(kind: RecordKind): string {
@@ -158,26 +170,24 @@ export function slotFinished(slot: unknown): boolean {
   return isObj(slot) && ((typeof slot.blobPath === "string" && !!slot.blobPath) || (typeof slot.inline === "string" && !!slot.inline));
 }
 
-/** The incoming slot, unless it is unfinished while the stored one is finished (then the stored one). */
+/** A stored finished slot always wins (only the finalize writes one, and it is never replaced); else the incoming. */
 function keepFinished(stored: unknown, incoming: unknown): unknown {
-  return slotFinished(stored) && !slotFinished(incoming) ? stored : incoming;
+  return slotFinished(stored) ? stored : incoming;
 }
 
+/** The sketch rule: the same markup id keeps finished slots per slot; a different id (a re-markup) is taken wholesale. */
 function mergeMarkup(stored: unknown, incoming: unknown): unknown {
   if (!isObj(incoming) || !isObj(stored)) return incoming; // removed markup stays removed; a first markup is the incoming one
-  const si = typeof stored.updatedAt === "number" ? stored.updatedAt : 0;
-  const ii = typeof incoming.updatedAt === "number" ? incoming.updatedAt : 0;
-  if (ii > si) return incoming; // a re-done markup (same m_/k_ ids): its own new, pending slots
-  if (ii < si) return stored; // an older copy never rolls a newer stored markup back
+  if (typeof incoming.id !== "string" || incoming.id !== stored.id) return incoming;
   return { ...incoming, image: keepFinished(stored.image, incoming.image), strokes: keepFinished(stored.strokes, incoming.strokes) };
 }
 
 /**
- * The survey write paths' merge rule: returns `incoming` with, for every photo ref / sketch present in both (same id),
- * each slot that is finished in `stored` and unfinished in `incoming` replaced by the stored slot — so a save made from
- * a copy older than an upload never loses the finished file. A sketch whose incoming id differs (a re-draw) keeps the
- * incoming one; refs absent from `incoming` stay absent (deleted). A photo's markup carries `updatedAt`: a newer
- * incoming markup (re-done, same ids) keeps its own slots, an older one never replaces the newer stored markup.
+ * The survey write paths' merge rule: returns `incoming` with, for every photo ref / sketch / markup present in both
+ * (same id), each slot that is finished in `stored` kept as stored — so a save made from a copy older than an upload
+ * never loses the finished file, and nothing the client sends replaces a finished file. A sketch or markup whose
+ * incoming id differs (a re-draw / re-markup) is taken as sent; refs absent from `incoming` stay absent (deleted).
+ * Callers pass `incoming` through `sanitizeIncomingFileSlots` first, so the client never mints a finished slot.
  * Pure: neither input is mutated.
  */
 export function mergeSurveyFileRefs(stored: Record<string, unknown>, incoming: Record<string, unknown>): Record<string, unknown> {
@@ -211,6 +221,58 @@ export function mergeSurveyFileRefs(stored: Record<string, unknown>, incoming: R
   return out;
 }
 
+/** An incoming finished slot, kept only when it is this file's own: a Blob path in this survey under `fileId`
+ *  (Blob's `-suffix` allowed), or — without Blob — a real inline file of its kind. Anything else is `{ pending }`. */
+function sanitizeSlot(slot: unknown, surveyId: string, fileId: string, blob: boolean): unknown {
+  if (!slotFinished(slot)) return slot;
+  const s = slot as Record<string, unknown>;
+  const valid = FILE_ID_RE.test(fileId);
+  if (typeof s.blobPath === "string" && s.blobPath) {
+    return valid && filePathMatches(s.blobPath, surveyId, fileId) ? { blobPath: s.blobPath } : { pending: true };
+  }
+  return valid && !blob && inlineFileProblem(fileId, s.inline) === null ? { inline: s.inline } : { pending: true };
+}
+
+const idWith = (id: unknown, letter: string): string => (typeof id === "string" && id.startsWith(`${letter}_`) && FILE_ID_RE.test(id) ? id : "");
+const strokesOf = (id: string): string => (id ? `k_${id.slice(2)}` : "");
+
+/**
+ * Before any client copy (an editor save, a sync push) is merged: every finished slot it carries is downgraded to
+ * `{ pending: true }` unless it is that slot's own file — `filePathMatches(path, surveyId, <the slot's file id>)`, or an
+ * inline file of the right kind when `blobEnabled` is false. Owning ids: a photo's `file` → its `p_` id; its markup's
+ * `image` → `markup.id` (`m_`), `strokes` → `k_` + the markup's hex; a sketch's `image` → its `s_` id, `strokes` →
+ * `k_` + its hex. A bad or wrong-letter owning id downgrades its slots. Only the finalize creates finished slots.
+ * Pure: the input is not mutated; everything but the slots is returned as sent.
+ */
+export function sanitizeIncomingFileSlots<T extends Record<string, unknown>>(doc: T, surveyId: string, opts: { blobEnabled: boolean }): T {
+  const blob = opts.blobEnabled;
+  const out: Record<string, unknown> = { ...doc };
+  if (Array.isArray(doc.photoRefs)) {
+    out.photoRefs = doc.photoRefs.map((r: unknown) => {
+      if (!isObj(r)) return r;
+      const next: Record<string, unknown> = { ...r, file: sanitizeSlot(r.file, surveyId, idWith(r.id, "p"), blob) };
+      if (isObj(r.markup)) {
+        const m = idWith(r.markup.id, "m");
+        next.markup = { ...r.markup, image: sanitizeSlot(r.markup.image, surveyId, m, blob), strokes: sanitizeSlot(r.markup.strokes, surveyId, strokesOf(m), blob) };
+      }
+      return next;
+    });
+  }
+  if (isObj(doc.sketches)) {
+    const sk: Record<string, unknown> = {};
+    for (const [key, r] of Object.entries(doc.sketches)) {
+      if (!isObj(r)) {
+        sk[key] = r;
+        continue;
+      }
+      const id = idWith(r.id, "s");
+      sk[key] = { ...r, image: sanitizeSlot(r.image, surveyId, id, blob), strokes: sanitizeSlot(r.strokes, surveyId, strokesOf(id), blob) };
+    }
+    out.sketches = sk;
+  }
+  return out as T;
+}
+
 type RefsDoc = { photoRefs?: SurveyPhotoRef[]; sketches?: Record<string, SketchRef> };
 
 /** Where a file's slot lives in a survey: `[kind, index or key, field]`, or null when no ref owns it (yet). */
@@ -221,16 +283,23 @@ function ownerOf(doc: RefsDoc, fileId: string): Owner | null {
   const hex = fileId.slice(2);
   const refs = Array.isArray(doc?.photoRefs) ? doc.photoRefs : [];
   const sketches = isObj(doc?.sketches) ? (doc.sketches as Record<string, SketchRef>) : {};
-  const photoAt = refs.findIndex((r) => isObj(r) && r.id === `p_${hex}`);
+  const photoAt = (id: string) => refs.findIndex((r) => isObj(r) && r.id === id);
+  const markupAt = (id: string) => refs.findIndex((r) => isObj(r) && isObj(r.markup) && r.markup.id === id);
   const sketchKey = Object.keys(sketches).find((k) => isObj(sketches[k]) && sketches[k].id === `s_${hex}`);
   switch (fileId[0]) {
-    case "p":
-      return photoAt >= 0 ? { at: "photo", i: photoAt, field: "file" } : null;
-    case "m":
-      return photoAt >= 0 && isObj(refs[photoAt].markup) ? { at: "photo", i: photoAt, field: "markupImage" } : null;
-    case "k":
-      if (photoAt >= 0 && isObj(refs[photoAt].markup)) return { at: "photo", i: photoAt, field: "markupStrokes" };
+    case "p": {
+      const i = photoAt(fileId);
+      return i >= 0 ? { at: "photo", i, field: "file" } : null;
+    }
+    case "m": {
+      const i = markupAt(fileId);
+      return i >= 0 ? { at: "photo", i, field: "markupImage" } : null;
+    }
+    case "k": {
+      const i = markupAt(`m_${hex}`);
+      if (i >= 0) return { at: "photo", i, field: "markupStrokes" };
       return sketchKey !== undefined ? { at: "sketch", key: sketchKey, field: "strokes" } : null;
+    }
     case "s":
       return sketchKey !== undefined ? { at: "sketch", key: sketchKey, field: "image" } : null;
   }

@@ -4,7 +4,7 @@ import { upload } from "@vercel/blob/client";
 import { finalizeAssessmentPhoto, removePendingPhotoAction } from "@/app/(app)/assessments/photo-actions";
 import { finalizeSurveyFile } from "@/app/(app)/venue-assessments/file-actions";
 import { INLINE_BLOB_MAX, photoBackoffMs, photoTooOld } from "./photos";
-import { INLINE_CAPS, fileBlobPath, fileContentType, inlinePrefix, recordKind } from "@/lib/field-files/files";
+import { INLINE_CAPS, fileBlobPath, fileContentType, fileRouteKind, inlinePrefix, recordKind } from "@/lib/field-files/files";
 import { shrinkForInline } from "./photo-resize";
 
 /*
@@ -347,8 +347,8 @@ class TerminalFailure extends Error {}
 
 /** The record kind's broker URL + client payload and its finalize action (#344 C4). Assessments: unchanged. */
 function routeFor(recordId: string, fileId: string) {
-  const kind = recordKind(recordId);
-  if (kind === "assessment" && fileId.startsWith("p_")) {
+  const kind = fileRouteKind(recordId, fileId); // a bad file id on a valid record → null: terminal, never retried for a week
+  if (kind === "assessment") {
     return {
       handleUploadUrl: `/api/assessments/${recordId}/photos/upload`,
       clientPayload: JSON.stringify({ photoId: fileId }),
