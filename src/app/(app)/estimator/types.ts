@@ -366,6 +366,8 @@ export type TrackDraft = {
   label: string;
   carrierSpacing: string;
   hangerSpacing: string;
+  /** Oct 15 #45 — walk-along only: two curtain halves (a walk-along bi-part). */
+  walkAlongBipart?: boolean;
 };
 
 /** #274: one catalog part a track series maps a role to, as the Estimator

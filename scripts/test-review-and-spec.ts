@@ -38738,8 +38738,8 @@ import {
 } from "@/lib/stores/track-series";
 import { getBlob as t274GetBlob } from "@/db/doc-store";
 
-// #291 added optional roles (ceiling splice, pipe clamp, lap clamp, one-way dead end); #274's fixture keeps its original twelve.
-const T274_V1_ROLES = t274Roles.filter((r) => !["ceilingSplice", "pipeClamp", "lapClamp", "deadPulleyOneWay"].includes(r));
+// #291 added optional roles (ceiling splice, pipe clamp, lap clamp, one-way dead end) and Oct 15 #45 two more (walk-along end stop, center pipe support); #274's fixture keeps its original twelve.
+const T274_V1_ROLES = t274Roles.filter((r) => !["ceilingSplice", "pipeClamp", "lapClamp", "deadPulleyOneWay", "walkAlongEndStop", "centerPipeSupport"].includes(r));
 const T274_ALL_PARTS: Partial<Record<T274Role, { sku: string }>> = Object.fromEntries(T274_V1_ROLES.map((r) => [r, { sku: `P-${r}` }]));
 function t274Series(over: Partial<T274Series> = {}): T274Series {
   return {
@@ -39095,7 +39095,7 @@ import type { SpecItem as T274bItem, SpecSection as T274bSection, TrackPart as T
 const T274B_COST: Record<T274Role, number> = {
   track: 50, curved: 70, splice: 5, carrier: 2, masterCarrier: 12, endStop: 4, battenClamp: 6, ceilingHanger: 8,
   livePulley: 30, deadPulley: 30, floorBlock: 40, operatingLine: 0.5,
-  ceilingSplice: 9, pipeClamp: 3, lapClamp: 7, deadPulleyOneWay: 25,
+  ceilingSplice: 9, pipeClamp: 3, lapClamp: 7, deadPulleyOneWay: 25, walkAlongEndStop: 4, centerPipeSupport: 11,
 };
 function t274bParts(over: Partial<Record<T274Role, Partial<T274bPart> | null>> = {}): Record<string, T274bPart> {
   const out: Record<string, T274bPart> = {};

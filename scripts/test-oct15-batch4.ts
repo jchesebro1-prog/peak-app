@@ -196,9 +196,64 @@ async function venueChecks(ok: Ok) {
   }
 }
 
+/* --- #45 ADC track extras --- */
+async function trackChecks(ok: Ok) {
+  const { trackQuantities } = await import("../src/lib/track-engine");
+  const { sanitizeTrackSeries, OPTIONAL_ROLES, activationProblems, hangerSpacingFor } = await import("../src/lib/track-series");
+  const TB = await import("../src/app/(app)/estimator/track-bom");
+  type Series = import("../src/lib/track-series").TrackSeries;
+  type Cfg = import("../src/lib/track-engine").TrackConfig;
+  const base = ["track", "splice", "carrier", "masterCarrier", "endStop", "battenClamp", "ceilingHanger", "livePulley", "deadPulley", "floorBlock", "operatingLine", "lapClamp"] as const;
+  const series = (over: Partial<Series> = {}, extra: string[] = []): Series => ({
+    id: "t45", name: "T45", manufacturer: "ADC", stickLengthFt: 20, carrierSpacingIn: 12, hangerSpacingFt: 5, overlapFt: 2,
+    parts: Object.fromEntries([...base, ...extra].map((r) => [r, { sku: `P-${r}` }])), active: true, ...over,
+  });
+  const cfg = (over: Partial<Cfg> = {}): Cfg => ({ seriesId: "t45", operation: "walkalong", runFt: 40, curved: false, mounting: "batten", qty: 1, ...over });
+  const map = (c: Cfg, s: Series) => Object.fromEntries(trackQuantities(c, s).rows.map((r) => [r.role, r.qty])) as Record<string, number>;
+
+  ok(OPTIONAL_ROLES.includes("walkAlongEndStop") && OPTIONAL_ROLES.includes("centerPipeSupport"), "#45: walk-along end stop and center pipe support are optional roles");
+  ok(activationProblems(series()).length === 0, "#45: neither new role is required for Active");
+  // Walk-along end stops.
+  const wa0 = map(cfg(), series());
+  ok(wa0.endStop === 2 && !wa0.walkAlongEndStop && wa0.masterCarrier === 1, "#45: walk-along with the role unmapped keeps 2 ordinary end stops (unchanged)");
+  const wa1 = map(cfg(), series({}, ["walkAlongEndStop"]));
+  ok(wa1.walkAlongEndStop === 2 && !wa1.endStop, "#45: walk-along with the role mapped prices 2 walk-along end stops instead");
+  const waBp = map(cfg({ walkAlongBipart: true }), series({}, ["walkAlongEndStop"]));
+  ok(waBp.walkAlongEndStop === 4 && !waBp.endStop && waBp.masterCarrier === 2 && waBp.lapClamp === 2 && waBp.track === 4 && waBp.splice === 2 && !waBp.livePulley && !waBp.operatingLine,
+    "#45: a walk-along bi-part has 4 end stops, 2 masters, two lapped legs with lap clamps, and no cord");
+  ok(map(cfg({ walkAlongBipart: true }), series()).endStop === 4, "#45: …4 ordinary end stops when the walk-along role is unmapped");
+  const bp = map(cfg({ operation: "biparting", walkAlongBipart: true }), series({}, ["walkAlongEndStop"]));
+  ok(bp.endStop === 2 && !bp.walkAlongEndStop, "#45: cord-operated tracks never use walk-along end stops (and ignore the walk-along flag)");
+  // Center pipe supports.
+  ok(!map(cfg({ operation: "biparting" }), series({}, ["centerPipeSupport"])).centerPipeSupport, "#45: center supports need the series' 'every' number (default off)");
+  ok(!map(cfg({ operation: "biparting" }), series({ centerSupportEveryFt: 20 })).centerPipeSupport, "#45: …and the role mapped");
+  ok(map(cfg({ operation: "biparting" }), series({ centerSupportEveryFt: 20 }, ["centerPipeSupport"])).centerPipeSupport === 2, "#45: a 42' bi-parting track (40' + 2' overlap) supported every 20' takes 2 center supports");
+  ok(map(cfg({ operation: "oneway", runFt: 40 }), series({ centerSupportEveryFt: 40 }, ["centerPipeSupport"])).centerPipeSupport === undefined, "#45: a track no longer than the span takes none");
+  ok(!map(cfg({ operation: "biparting", mounting: "ceiling" }), series({ centerSupportEveryFt: 20 }, ["centerPipeSupport"])).centerPipeSupport, "#45: center pipe supports are batten-only");
+  // Separate ceiling vs batten spacing.
+  const sp = series({ ceilingSpacingFt: 8, battenSpacingFt: 4 });
+  ok(map(cfg({ operation: "oneway" }), sp).battenClamp === 11 && map(cfg({ operation: "oneway", mounting: "ceiling" }), sp).ceilingHanger === 6, "#45: batten clamps use the batten spacing (40'/4' + 1), ceiling hangers the ceiling spacing (40'/8' + 1)");
+  ok(map(cfg({ operation: "oneway" }), series()).battenClamp === 9 && map(cfg({ operation: "oneway", mounting: "ceiling" }), series()).ceilingHanger === 9, "#45: both fall back to the shared spacing (unchanged series price the same)");
+  ok(map(cfg({ operation: "oneway", hangerSpacingFt: 10 }), sp).battenClamp === 5, "#45: a line's own spacing override still wins");
+  ok(hangerSpacingFor(sp, "ceiling") === 8 && hangerSpacingFor(series(), "ceiling") === 5, "#45: hangerSpacingFor reads the mounting's own spacing, else the shared one");
+  // Sanitize.
+  const s1 = sanitizeTrackSeries({ ...series(), ceilingSpacingFt: "7", battenSpacingFt: -1, centerSupportEveryFt: 1e9 })!;
+  ok(s1.ceilingSpacingFt === 7 && s1.battenSpacingFt === undefined && s1.centerSupportEveryFt === 100, "#45: sanitize keeps a valid spacing, drops a bad one, clamps center-support spacing to 100'");
+  const s2 = sanitizeTrackSeries({ ...series({}, ["walkAlongEndStop", "centerPipeSupport"]) })!;
+  ok(s2.parts.walkAlongEndStop?.sku === "P-walkAlongEndStop" && s2.parts.centerPipeSupport?.sku === "P-centerPipeSupport", "#45: sanitize keeps the new role mappings");
+  // The form and the line.
+  const c = cfg({ walkAlongBipart: true, label: "Main" });
+  ok(JSON.stringify(TB.trackConfigFromDraft(TB.trackDraftFromConfig(c))) === JSON.stringify(TB.cleanTrackConfig(c)), "#45 form: a walk-along bi-part round-trips through the form");
+  ok(TB.cleanTrackConfig(cfg({ operation: "oneway", walkAlongBipart: true })).walkAlongBipart === undefined, "#45 form: the flag is dropped off walk-along");
+  ok(TB.trackLineDesc(c, { name: "ADC 280" }) === "Main — ADC 280 walk-along bi-parting track, 40' run", "#45 line: the description says walk-along bi-parting");
+  ok(TB.spacingDefaults(sp, "ceiling").hanger === "8" && TB.spacingDefaults(sp, "batten").hanger === "4" && TB.spacingDefaults(series(), "ceiling").hanger === "5", "#45 form: the collapsed spacing shows the mounting's own default");
+  ok(TB.freshTrackDraft([]).walkAlongBipart === false, "#45 form: a new track starts as one half");
+}
+
 export async function batch4PureChecks(ok: Ok) {
   priceDateChecks(ok);
   await venueChecks(ok);
+  await trackChecks(ok);
 }
 
 export async function batch4DbChecks(ok: Ok) {
