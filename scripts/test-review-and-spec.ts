@@ -11351,7 +11351,7 @@ import { inboxOrgPureChecks, inboxOrgDbChecks, inboxOrgPipelineChecks, inboxOrgA
 import { popoutPureChecks } from "./test-popout";
 import { assessmentChecks, assessmentDbChecks } from "./test-assessments";
 import { partyChecks, partyDbChecks } from "./test-parties";
-import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
+import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, portalBidPureChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
 import { vendorChecks, vendorDbChecks, vendorPdfDbChecks, vendorPdfPureChecks, vendorPdfFillChecks } from "./test-vendors";
 import { oct15PureChecks, oct15DbChecks } from "./test-oct15-estimating";
 import { vaNotesChecks, vaNotesDbChecks } from "./test-va-notes";
@@ -11729,7 +11729,7 @@ seeded()
   .then(() => popoutPureChecks(ok))
   .then(() => assessmentChecks(ok)).then(() => assessmentDbChecks(ok))
   .then(() => partyChecks(ok)).then(() => partyDbChecks(ok))
-  .then(() => bidChecks(ok)).then(() => bidDbChecks(ok)).then(() => bidSendChecks(ok)).then(() => bidSendFakeChecks(ok)).then(() => bidSendDbChecks(ok)).then(() => bidFollowupChecks(ok)).then(() => bidFollowupDbChecks(ok)).then(() => vendorChecks(ok)).then(() => vendorDbChecks(ok)).then(() => vendorPdfDbChecks(ok)).then(() => vendorPdfPureChecks(ok)).then(() => vendorPdfFillChecks(ok))
+  .then(() => bidChecks(ok)).then(() => bidDbChecks(ok)).then(() => bidSendChecks(ok)).then(() => bidSendFakeChecks(ok)).then(() => bidSendDbChecks(ok)).then(() => bidFollowupChecks(ok)).then(() => bidFollowupDbChecks(ok)).then(() => vendorChecks(ok)).then(() => vendorDbChecks(ok)).then(() => vendorPdfDbChecks(ok)).then(() => vendorPdfPureChecks(ok)).then(() => vendorPdfFillChecks(ok)).then(() => portalBidPureChecks(ok))
   .then(() => oct15PureChecks(ok)).then(() => oct15DbChecks(ok))
   .then(() => vaNotesChecks(ok)).then(() => vaNotesDbChecks(ok))
   .then(() => batch3PureChecks(ok)).then(() => batch3DbChecks(ok))

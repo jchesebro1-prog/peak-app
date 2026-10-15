@@ -1,5 +1,7 @@
 import { isImportedHistoryQuote, portalListsQuote, type Quote } from "@/lib/stores/quotes";
 import { onlineEstimateState, type OnlineEstimateState } from "@/lib/quote-share/view";
+import type { QuoteRevision } from "@/lib/stores/quotes";
+import { portalBidState, type PortalBid, type PortalBidRow } from "@/lib/parties/portal-bid";
 import { portalPdfPreparing, portalPdfSource, portalPdfUnavailable } from "./state";
 
 /**
@@ -25,6 +27,8 @@ export function portalQuotePdfUnavailable(q: Quote, customerId: string): boolean
   return portalListsQuote(q, customerId) && portalPdfUnavailable(q);
 }
 
+export type PortalOnlineState = Exclude<OnlineEstimateState, { kind: "ok" }> | { kind: "ok"; rev: QuoteRevision; closed: boolean; bidder?: PortalBid };
+
 /**
  * #293 slice 3 — the portal estimate page's rule (spec §5.2, decision 16):
  * the quote must be this customer's and not Daylite history; then the one
@@ -32,10 +36,24 @@ export function portalQuotePdfUnavailable(q: Quote, customerId: string): boolean
  * the "being revised" card (no content) — portalListsQuote hides staff
  * drafts, so the list rule alone would call it unavailable. Content (ok)
  * still requires the portal's list rule.
+ *
+ * #348 slice 6 — any OTHER company is decided by the bidder rule over ITS bidder rows on this quote (`bids`, from
+ * portalBidRowsFor). No rows → unavailable (fails closed). The customer's answer is unchanged.
  */
-export function portalOnlineEstimateState(q: Quote, customerId: string): OnlineEstimateState {
-  if (!customerId || q.customerId !== customerId || isImportedHistoryQuote(q)) return { kind: "unavailable" };
-  const s = onlineEstimateState(q);
-  if (s.kind === "ok" && !portalListsQuote(q, customerId)) return { kind: "unavailable" };
-  return s;
+export function portalOnlineEstimateState(q: Quote, customerId: string, bids: readonly PortalBidRow[] = []): PortalOnlineState {
+  if (!customerId || isImportedHistoryQuote(q)) return { kind: "unavailable" };
+  if (q.customerId === customerId) {
+    const s = onlineEstimateState(q);
+    if (s.kind === "ok" && !portalListsQuote(q, customerId)) return { kind: "unavailable" };
+    return s;
+  }
+  const b = portalBidState(q, customerId, bids);
+  if (b.kind === "ok") return { kind: "ok", rev: b.bid.rev, closed: b.closed, bidder: b.bid };
+  return b;
+}
+
+/** #348 slice 6 — the bidder's own PDF: its ok state's party + revision (closed included), else null. Never for the customer. */
+export function portalBidPdfSource(q: Quote, cid: string, bids: readonly PortalBidRow[]): { partyId: string; rev: number; name: string } | null {
+  const b = portalBidState(q, cid, bids);
+  return b.kind === "ok" ? { partyId: b.bid.partyId, rev: b.bid.rev.rev, name: b.bid.rev.name || q.name } : null;
 }
