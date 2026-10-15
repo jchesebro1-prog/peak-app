@@ -129,6 +129,8 @@ export const BID_SEND_COPY = {
   unknownConfirm: (co: string) => `Gmail didn’t answer in time when this went to ${co}. Check your Gmail Sent folder first — send it again anyway?`,
   tooLarge: "The bidder PDF is over 15 MB — too large to email.",
   recordFailed: "Sent — but the bidder row couldn’t be updated. Check Activity before sending again.",
+  /** #348 (Jeff 2026-10-15): a fallback only — the Bid chip moves a sent estimate back to Draft itself when an addendum
+   *  is added; this shows when a sent estimate's addenda changed by another path. */
   addendumHint: (nos: number[]) => `Addendum ${nos.join(", ")} came in after the last send — move the estimate back to Draft, then Send revision to all bidders.`,
   linkCopied: "Link copied.",
 } as const;

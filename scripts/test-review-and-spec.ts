@@ -11351,7 +11351,8 @@ import { inboxOrgPureChecks, inboxOrgDbChecks, inboxOrgPipelineChecks, inboxOrgA
 import { popoutPureChecks } from "./test-popout";
 import { assessmentChecks, assessmentDbChecks } from "./test-assessments";
 import { partyChecks, partyDbChecks } from "./test-parties";
-import { bidChecks, bidDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
+import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
+import { vendorChecks, vendorDbChecks } from "./test-vendors";
 import { oct15PureChecks, oct15DbChecks } from "./test-oct15-estimating";
 import { vaNotesChecks, vaNotesDbChecks } from "./test-va-notes";
 import { briefPureChecks, briefDraftDbChecks, briefBuildDbChecks, briefCardChecks, briefReminderChecks } from "./test-brief";
@@ -11727,7 +11728,7 @@ seeded()
   .then(() => popoutPureChecks(ok))
   .then(() => assessmentChecks(ok)).then(() => assessmentDbChecks(ok))
   .then(() => partyChecks(ok)).then(() => partyDbChecks(ok))
-  .then(() => bidChecks(ok)).then(() => bidDbChecks(ok)).then(() => bidSendChecks(ok)).then(() => bidSendFakeChecks(ok)).then(() => bidSendDbChecks(ok))
+  .then(() => bidChecks(ok)).then(() => bidDbChecks(ok)).then(() => bidSendChecks(ok)).then(() => bidSendFakeChecks(ok)).then(() => bidSendDbChecks(ok)).then(() => bidFollowupChecks(ok)).then(() => bidFollowupDbChecks(ok)).then(() => vendorChecks(ok)).then(() => vendorDbChecks(ok))
   .then(() => oct15PureChecks(ok)).then(() => oct15DbChecks(ok))
   .then(() => vaNotesChecks(ok)).then(() => vaNotesDbChecks(ok))
   .then(() => briefPureChecks(ok))
@@ -56034,7 +56035,8 @@ async function p3SendAsyncChecks(): Promise<void> {
     const notB64 = await attachmentMimePart({ name: "b.txt", dataUrl: "data:text/plain,hi" }, fakeRead);
     ok(legacy?.dataBase64 === "QUJD" && notB64 === null && reads.length === 2, "#P3 send fix: data-URL attachments resolve exactly as before (non-base64 skipped, no storage read)");
     const bridge = readFileSync(join(process.cwd(), "src/lib/gmail/bridge.ts"), "utf8");
-    ok(bridge.includes("attachmentMimePart(a, readPdfForThread)") && bridge.includes("pdfPathFitsLink(path, t.link) ? readQuotePdf(path)") && bridge.includes("pdfStorage()"),
+    const threadPdf = readFileSync(join(process.cwd(), "src/lib/thread-pdf-read.ts"), "utf8");
+    ok(bridge.includes("attachmentMimePart(a, readPdfForThread)") && bridge.includes("readThreadPdf(path, t)") && threadPdf.includes("pdfPathFitsLink(path, t.link) ? readQuotePdf(path)") && threadPdf.includes("pdfStorage()"),
       "#P3 send fix: the Gmail bridge builds MIME parts through attachmentMimePart with the quote-PDF store, scoped to the thread's linked quote (fix round 2)");
     const { pdfPathFitsLink } = await import("@/lib/comms-attachments");
     ok(pdfPathFitsLink("quote-pdfs/Q-P3S/rev-4.pdf", { type: "quote", id: "Q-P3S" }) && !pdfPathFitsLink("quote-pdfs/Q-OTHER/rev-4.pdf", { type: "quote", id: "Q-P3S" }) &&
@@ -56512,10 +56514,10 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   ok(p3ui.canCompose("draft") && p3ui.canCompose("sent") && !p3ui.canCompose("won") && !p3ui.canCompose("lost"), "#P3 send UI: won/lost can't compose");
 
   const L = (st: "draft" | "sent" | "won" | "lost", pipe = true) => p3ui.sendStepLayout(st, pipe).join(",");
-  ok(L("draft") === "composer,bidders,status,pipeline,clientLink,tasks", "#P3 send UI: draft — composer first, then Status, Pipeline, Client link (+ responses), Tasks");
-  ok(L("sent") === "activity,bidders,composer,clientLink,tasks,pipeline,status", "#P3 send UI: sent — Activity first, then the re-send composer, Client link, Tasks, Pipeline, Status");
-  ok(L("won") === "activity,bidders,clientLink,tasks,pipeline,status" && L("lost") === L("won"), "#P3 send UI: won/lost — Activity first, no composer");
-  ok(L("draft", false) === "composer,bidders,status,clientLink,tasks" && !L("sent", false).includes("pipeline"), "#P3 send UI: no Pipeline card when the stage bar doesn't apply");
+  ok(L("draft") === "composer,bidders,vendors,status,pipeline,clientLink,tasks", "#P3 send UI: draft — composer first, then Status, Pipeline, Client link (+ responses), Tasks");
+  ok(L("sent") === "activity,bidders,vendors,composer,clientLink,tasks,pipeline,status", "#P3 send UI: sent — Activity first, then the re-send composer, Client link, Tasks, Pipeline, Status");
+  ok(L("won") === "activity,bidders,vendors,clientLink,tasks,pipeline,status" && L("lost") === L("won"), "#P3 send UI: won/lost — Activity first, no composer");
+  ok(L("draft", false) === "composer,bidders,vendors,status,clientLink,tasks" && !L("sent", false).includes("pipeline"), "#P3 send UI: no Pipeline card when the stage bar doesn't apply");
 
   const mGmail = p3ui.sendResultMessage({ ok: true, delivery: "gmail", status: "sent", next: null });
   const mLocal = p3ui.sendResultMessage({ ok: true, delivery: "local", status: "sent", warning: "Sent — but the follow-up task couldn’t be created. Add it by hand." });
@@ -56559,7 +56561,7 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   ok(comp.includes("{primaryLabel(status)}") && comp.includes("{SEND_UI_COPY.linkHint}") && comp.includes("SEND_UI_COPY.from(gmail.from) : SEND_UI_COPY.gmailOff") && comp.includes("FOLLOW_UP_OPTIONS.map("),
     "#P3 send UI: composer shows the primary label, the {link} hint, the Gmail line and the follow-up select");
   ok(comp.includes("{SEND_UI_COPY.sendAnother}") && comp.includes("useState(!collapsible)") && comp.includes("setOpen(false);"), "#P3 send UI: the re-send composer collapses to Send another email");
-  ok(step.includes("sendStepLayout(status, showStageBar).map((k) => cards[k])") && step.includes("collapsible={status !== \"draft\"}") && ['key="composer"', 'key="activity"', 'key="bidders"', 'key="status"', 'key="pipeline"', 'key="clientLink"', 'key="tasks"'].every((k) => step.includes(k)),
+  ok(step.includes("sendStepLayout(status, showStageBar).map((k) => cards[k])") && step.includes("collapsible={status !== \"draft\"}") && ['key="composer"', 'key="activity"', 'key="bidders"', 'key="vendors"', 'key="status"', 'key="pipeline"', 'key="clientLink"', 'key="tasks"'].every((k) => step.includes(k)),
     "#P3 send UI: the step renders its cards as one keyed list ordered by status");
   ok(step.includes("id={SEND_STEP_IDS.status}") && step.includes("id={SEND_STEP_IDS.statusSelect}") && step.includes("id={SEND_STEP_IDS.clientLink}"), "#P3 send UI: the hatches' targets carry their ids");
   ok(step.includes("<SendActivity quoteId={loadedId} refreshKey={trackKey} onTrack={setTrackSummary} />") && step.includes("onSent={() => setTrackKey((k) => k + 1)}"), "#P3 send UI: a send refreshes Activity; Activity reports to the hook");

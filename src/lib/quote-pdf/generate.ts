@@ -134,7 +134,7 @@ function isPendingFor(cur: QuotePdfState | null | undefined, savedAt: number): c
  * #293 slice 3 — the Rev N and date the file just rendered printed: the
  * print route's own rule (documentRevStamp, via quoteDocumentDataFor) over the
  * quote it read mid-render. Read before and after the render; both values
- * never go down — Rev is the send number (D1123: a revise moves it to the next
+ * never go down — Rev is the send number (D1125: a revise moves it to the next
  * send's, a send keeps it, so a send landing mid-render prints the same Rev
  * either side) and updatedAt only moves forward — so equal readings mean the
  * print route printed exactly them. A write that landed during

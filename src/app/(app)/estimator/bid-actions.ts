@@ -6,10 +6,12 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import type { BidPanelResult } from "@/lib/parties/bid-vm";
 import { loadBidPanel, viewerOf } from "@/lib/parties/bid-panel-server";
-import { addendumRevisedNote } from "@/lib/parties/bids";
 import { addBidder, awardBid, markSubmitted, setBidDetails, undoAward, updateBidder } from "@/lib/stores/bids";
-import { get as getQuote } from "@/lib/stores/quotes";
+import { get as getQuote, type QuoteStatus } from "@/lib/stores/quotes";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
+import { addendumDraftNote } from "@/lib/parties/bids";
+import { quoteNextStepFor } from "@/lib/quote-next-step-server";
+import type { QuoteNextStepView } from "@/lib/quote-next-step";
 
 /** #348 slice 2a — the Bidders card's server actions. Reads need a signed-in user; every mutation needs `create`. */
 export type { BidPanelResult };
@@ -52,13 +54,33 @@ async function quoteOfBidder(partyId: unknown): Promise<string | null> {
   return p && p.recordType === "quote" ? p.recordId : null;
 }
 
-export async function setBidDetailsAction(quoteId: string, raw: unknown): Promise<BidPanelResult> {
-  // Jeff 2026-10-15 #3: a new addendum on a sent estimate moves it back to Draft (setBidDetails) — say so.
-  return mutate(
+/** #348 (Jeff 2026-10-15): when the save added an addendum to a sent estimate, the store moved it back to Draft —
+ *  the result then carries the note and `sync` (the fresh status + next step) so the Estimator's header follows. */
+export type BidDetailsResult = BidPanelResult & { sync?: { status: QuoteStatus; next: QuoteNextStepView | null } };
+
+export async function setBidDetailsAction(quoteId: string, raw: unknown): Promise<BidDetailsResult> {
+  let moved: number[] | undefined;
+  const res = await mutate(
     quoteId,
-    (_uid, name) => setBidDetails(quoteId, raw, name).then((r) => (r.ok && r.revised?.length ? { ...r, note: addendumRevisedNote(r.revised) } : r)),
+    async (_uid, name) => {
+      const r = await setBidDetails(quoteId, raw, name);
+      if (r.ok && r.backToDraft?.length) {
+        moved = r.backToDraft;
+        return { ok: true, note: addendumDraftNote(r.backToDraft) };
+      }
+      return r;
+    },
     "if-awarded"
   );
+  if (!res.ok || !moved) return res;
+  try {
+    const user = await requireUser();
+    const q = await getQuote(quoteId);
+    return q ? { ...res, sync: { status: q.status, next: await quoteNextStepFor(q, user) } } : res;
+  } catch (e) {
+    console.error("[bid-details] next-step refresh failed", e);
+    return res;
+  }
 }
 
 export async function addBidderAction(

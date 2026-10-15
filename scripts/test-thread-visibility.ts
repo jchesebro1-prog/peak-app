@@ -709,6 +709,7 @@ const ACTION_FILES = [
   "src/app/(app)/inbox/site-visit-actions.ts",
   "src/app/(app)/inbox/task-actions.ts",
   "src/app/(app)/inbox/assist-actions.ts",
+  "src/app/(app)/inbox/vendor-file-actions.ts",
 ];
 /** A parameter list that carries a thread id. */
 const THREAD_PARAM = /\b(?:id|threadId|threadIds|ids|list)\??\s*:|\bthreadId\b|\bComposePayload\b|\bCreateSiteVisitInput\b|\bThreadTaskRequest\b/;
@@ -804,7 +805,7 @@ export function threadVisibilityPins(ok: Ok): void {
   const inbox = read("src/app/(app)/inbox/page.tsx");
   ok(
     /if \(readOnly\) \{\s*reader = \{/.test(inbox) &&
-      ["taskLinks: \\[\\]", "threadTasks: \\[\\]", "linkOptions: \\{ quote: \\[\\], lead: \\[\\], survey: \\[\\], inspection: \\[\\], project: \\[\\] \\}", "resolvedCustomerId: null", "customerCard: null", "linkedPeople: \\[\\]"].every((f) => new RegExp(f).test(inbox)) &&
+      ["taskLinks: \\[\\]", "threadTasks: \\[\\]", "linkOptions: \\{ quote: \\[\\], lead: \\[\\], survey: \\[\\], inspection: \\[\\], project: \\[\\] \\}", "resolvedCustomerId: null", "customerCard: null", "linkedPeople: \\[\\]", "vendorCompany: null"].every((f) => new RegExp(f).test(inbox)) &&
       /isThreadLinked\(sel\) && sel\.customerId \?/.test(inbox),
     "reader (#341): a read-only thread ships no task / link / customer-card data, and names its customer only when deliberately linked (sel.customerId, never resolveCustomerId)"
   );

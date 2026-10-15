@@ -24,6 +24,9 @@ import { completeThreadTaskAction } from "./task-actions";
 import ReaderOrgStrip from "./organize/reader-org";
 import { ORGANIZE_ARCHIVED_EVENT, organizeArchiveNote, organizeArchiveRemoves, shortTaskTitle } from "./organize/format";
 import { archiveFromOrganizeAction } from "./organize-actions";
+import { listThreadAttachmentsAction } from "./vendor-file-actions";
+import VendorQuoteDialog from "./vendor-quote-dialog";
+import { VENDOR_COPY } from "@/lib/vendor-quotes/rules";
 import { postChanged } from "@/lib/popout/channel";
 import { threadPopUrl } from "@/lib/popout/click";
 import PopoutButton from "@/components/popout/popout-button";
@@ -171,6 +174,7 @@ function ExpandedMessage({
   onLink,
   onOpenLinks,
   onTask,
+  onAddVendor,
   isEmail,
   readOnly = false,
 }: {
@@ -184,6 +188,8 @@ function ExpandedMessage({
   onOpenLinks: (opener: HTMLElement) => void;
   /** #215 — open the create-task dialog on this message */
   onTask: () => void;
+  /** #348 slice 4 — "Add as vendor quote…" on a PDF chip (a read, so it shows read-only too) */
+  onAddVendor: (a: { ref: string; name: string }) => void;
   /** #214 fix wave 1 — the old picker was gated to email threads only;
    *  "Link…" is hidden on a call/meeting thread for the same reason. */
   isEmail: boolean;
@@ -341,8 +347,8 @@ function ExpandedMessage({
               }}
             >
               {(m.attachments || []).map((a, i) => (
+                <span key={`${a.name}-${i}`} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                 <a
-                  key={`${a.name}-${i}`}
                   href={a.href || undefined}
                   download={a.name}
                   title="Download attachment"
@@ -366,6 +372,26 @@ function ExpandedMessage({
                     {sizeLabel(a.size)}
                   </span>
                 </a>
+                {a.pdf && a.ref && (
+                  <button
+                    type="button"
+                    onClick={() => onAddVendor({ ref: a.ref, name: a.name })}
+                    aria-label={`Add ${a.name} as a vendor quote`}
+                    style={{
+                      border: 0,
+                      background: "none",
+                      padding: "2px 3px",
+                      cursor: "pointer",
+                      fontFamily: "var(--font-ui)",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: ACCENT_INK,
+                    }}
+                  >
+                    {VENDOR_COPY.addButton}
+                  </button>
+                )}
+                </span>
               ))}
             </div>
           )}
@@ -384,6 +410,7 @@ function Conversation({
   onLink,
   onOpenLinks,
   onTask,
+  onAddVendor,
   isEmail,
   readOnly = false,
 }: {
@@ -394,6 +421,8 @@ function Conversation({
   onOpenLinks: (messageId: string, opener: HTMLElement) => void;
   /** #215 — a message header's "Task…" */
   onTask: (messageId: string) => void;
+  /** #348 slice 4 — "Add as vendor quote…" on a PDF chip */
+  onAddVendor: (a: { ref: string; name: string }) => void;
   /** #214 fix wave 1 — hide "Link…" on a non-email thread */
   isEmail: boolean;
   /** #341 — a read-only thread: no Link… / Task… / Link message… */
@@ -430,6 +459,7 @@ function Conversation({
         onLink={(link) => onLink(m.id, link)}
         onOpenLinks={(el) => onOpenLinks(m.id, el)}
         onTask={() => onTask(m.id)}
+        onAddVendor={onAddVendor}
         isEmail={isEmail}
         readOnly={readOnly}
       />
@@ -485,6 +515,7 @@ function Conversation({
             onLink={(link) => onLink(newest.id, link)}
             onOpenLinks={(el) => onOpenLinks(newest.id, el)}
             onTask={() => onTask(newest.id)}
+            onAddVendor={onAddVendor}
             isEmail={isEmail}
             readOnly={readOnly}
           />
@@ -557,6 +588,7 @@ export default function ThreadReader({
   const linkGuardRef = useRef<(() => boolean) | null>(null);
   // #215 — the create-task dialog; messageId = the message it was opened from
   const [taskFor, setTaskFor] = useState<{ messageId: string | null } | null>(null);
+  const [vendorFor, setVendorFor] = useState<{ ref: string; name: string } | null>(null);
   // #334 Assist — Suggest tasks: busy while the model runs, then the dialog.
   const [assistBusy, setAssistBusy] = useState(false);
   /** #346 — an Organize Archive in flight (one press, one archive) */
@@ -617,6 +649,23 @@ export default function ThreadReader({
   const [logDir, setLogDir] = useState<"in" | "out" | null>(null);
   const [logBody, setLogBody] = useState("");
   const [loggingNote, setLoggingNote] = useState(false);
+
+  // #348 slice 4 — mail imported before attachments were recorded: list them
+  // from Gmail once per thread (the server lists up to 10 messages per call and
+  // stamps each), then refresh when any turned up. Owner only (never read-only).
+  const pendingAttsId = vm?.attachmentsPending ? vm.id : null;
+  useEffect(() => {
+    if (!pendingAttsId) return;
+    let live = true;
+    listThreadAttachmentsAction(pendingAttsId)
+      .then((r) => {
+        if (live && r.ok && r.changed) router.refresh();
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [pendingAttsId, router]);
 
   if (!vm) {
     return (
@@ -1107,10 +1156,12 @@ export default function ThreadReader({
               setLinkFor({ messageId, fromHeader: true });
             }}
             onTask={(messageId) => openTask(messageId)}
+            onAddVendor={setVendorFor}
             isEmail={vm.isEmail}
             readOnly={vm.readOnly}
           />
         </div>
+        {vendorFor && <VendorQuoteDialog vm={vm} attachment={vendorFor} onClose={() => setVendorFor(null)} />}
 
         {/* actions + composer — #341: none on a read-only thread */}
         {!vm.readOnly && (

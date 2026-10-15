@@ -239,21 +239,37 @@ export function cleanClientResponses(raw: unknown): ClientResponse[] {
   return out;
 }
 
-/** The list with `r` appended, or null at the 200 cap.
- *  Jeff 2026-10-15 #2 — the stored cap counts per sender: the owner's link (no partyId) and each bidder's v3 link
- *  (its partyId) have their own MAX_CLIENT_RESPONSES, so one bidder filling its budget never closes the others'. */
+/** #348 (Jeff 2026-10-15) — who a response counts against: the bidder's party id, or "" for the owner's v2. */
+export const responderKey = (r: { partyId?: string }): string => r.partyId || "";
+
+/** How many stored responses belong to `partyId`'s responder (absent / "" = the owner). */
+export function responsesBy(list: unknown, partyId?: string): number {
+  const key = partyId || "";
+  return cleanClientResponses(list).filter((x) => responderKey(x) === key).length;
+}
+
+/** The list with `r` appended, or null at the 200 cap. #348: the cap is per responder — only responses from the
+ *  same responder (same `partyId`; the owner has none) count, so a bidder never spends the owner's or another
+ *  bidder's room. */
 export function appendResponseTo(list: unknown, r: ClientResponse): ClientResponse[] | null {
   const cur = cleanClientResponses(list);
+  // #352 review M1: the whole list (owner + every bidder) never passes 1,000 — refused, nothing old dropped.
   if (cur.length >= MAX_CLIENT_RESPONSES_TOTAL) return null;
-  const who = r.partyId ?? "";
-  if (cur.filter((x) => (x.partyId ?? "") === who).length >= MAX_CLIENT_RESPONSES) return null;
+  const key = responderKey(r);
+  if (cur.filter((x) => responderKey(x) === key).length >= MAX_CLIENT_RESPONSES) return null;
   return [...cur, r];
 }
 
-/** Jeff 2026-10-15 #2 — the per-quote daily rate-limit key: the owner's link keeps the quote's own budget; a
- *  bidder's v3 link (a pty_ id) counts on its own key, so each bidder gets RESPONSE_QUOTE_LIMIT a day. */
+/** #348 (Jeff 2026-10-15) — the per-quote daily response bucket: each bidder's v3 gets its own, the owner's v2
+ *  keeps the quote-wide key, so a bidder can never use up the owner's budget or another bidder's. */
+export function responseQuoteBucket(quoteId: string, partyId?: string | null): string {
+  return partyId ? `share-respond-quote:${quoteId}:${partyId}` : `share-respond-quote:${quoteId}`;
+}
+
+/** Jeff 2026-10-15 #2 (#352) — responseQuoteBucket for a validated party id: a malformed one falls back to the
+ *  quote-wide key. */
 export function responseQuoteLimitKey(quoteId: string, partyId?: string | null): string {
-  return typeof partyId === "string" && PARTY_ID_RE.test(partyId) ? `share-respond-quote:${quoteId}:${partyId}` : `share-respond-quote:${quoteId}`;
+  return responseQuoteBucket(quoteId, typeof partyId === "string" && PARTY_ID_RE.test(partyId) ? partyId : null);
 }
 
 /** #348 2b-ii — a bidder company name as it goes into a note, task title or response row: trimmed, every run of

@@ -1416,7 +1416,7 @@ See `.env.example`.
     list and the pick lists in `field-lists.ts`, tell the reps older surveys
     ask for Scope first, send the CW Elevation and line set schedule sheets,
     try a real assessment end to end. Punch item #344.
-62. 🚧 **Estimate parties — slices 1, 2a, 2b-i, 2b-ii + 3** (#348, D1058–D1062, D1074–D1097) — Jeff, Oct 14: an
+62. 🚧 **Estimate parties — slices 1, 2a, 2b-i, 2b-ii, 3 + 4** (#348, D1058–D1062, D1074–D1097, D1105–D1119) — Jeff, Oct 14: an
     estimate can name more than one company. Slice 1 is the parties core: a
     `record_parties` doc collection (migration 0041; id `pty_` + sha1 of
     record type, record id, company and role) with roles owner · gc · ec ·
@@ -1494,7 +1494,23 @@ See `.env.example`.
     ✅ Slice 3 (D1097, Oct 15) — split systems: Move system → New estimate
     (one system per move) puts the new estimate on the source's live lead
     and copies the source's non-bidder companies; Move → existing copies
-    nothing. Remaining: slices 4–6 (vendors, Read the PDF, portal + reports).
+    nothing.
+    ✅ Slice 4 (D1105–D1117, Oct 15) — vendors: a vendor quote links a vendor
+    company (live `vendor`/`manufacturer` or legacy spellings, validated on
+    save and on move/copy; the vendor party is added once, removal refused
+    while a live quote names it); Gmail attachments are listed by reference
+    and served through `/api/inbox/attachments/…`; the Inbox gains **Add as
+    vendor quote…** (the `?vq=<thread>~<message>~<index>` URL hand-off,
+    PDF-only, copied server-side under 25 MB and stripped from the URL before
+    the copy) and **File to estimate / project…**. A Vendors card (Build
+    package → BOM quote, Send & track), "Quotes we've received" and project
+    Procurement read vendor quotes and filed vendor threads. The broker rule:
+    reads use `canSeeThread` (SQL `canSeeThreadCond`, then JS; never a body,
+    snippet or count of an invisible thread), writes use `ownThread`.
+    ✅ Jeff's bid follow-ups (D1118–D1119, Oct 15): each bidder gets its own
+    response limit and cap, and an addendum added to a sent estimate moves it
+    back to Draft, so Send revision goes to every pending bidder.
+    Remaining: slices 5–6 (Read the PDF, portal + reports).
 
 63. ✅ **Mailbox identity** (#349, D1063–D1073) — mailbox ownership follows the user's id (`CommThread.mailboxOwnerId`; one rule `ownsMailbox`, stamp → Gmail key → a name only one user holds, else nobody; `ownMailboxCond` in SQL; viewers from `src/lib/mailbox-viewer.ts`), assignments carry `assignedToId`, creators refuse a blank owner, legacy threads stamp lazily in write guards and via `npm run comms:stamp-owners` (Jeff-gated prod run; shared names get the `"unresolved"` tombstone), a rename or new hire never moves mail (`src/lib/mailbox-names.ts`), and Settings → Team refuses duplicate names. Punch item #349.
 

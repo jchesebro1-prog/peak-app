@@ -21,7 +21,7 @@ import type { ZipFile } from "@/lib/zip";
  * was sent: only specs downloaded at or before the revision's send
  * (`downloadedAt <= rev.at`) — a downloaded spec is the finished one; a draft
  * never downloaded, or one first downloaded later, is left out. Residual risk
- * (D1126): an included spec's text still reads the library live, as its own
+ * (D1128): an included spec's text still reads the library live, as its own
  * Word download does. SERVER ONLY.
  */
 

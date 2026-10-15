@@ -9,31 +9,44 @@ import type { LinkTargetHit } from "@/lib/inbox-link-targets";
 const keyOf = (h: LinkTargetHit) => h.id;
 const passAll = () => true;
 const stable = () => 0;
+/** Slice 1's search — every company (the Inbox link sidebar's own action). */
+const searchAllCompanies = (q: string) => searchLinkTargetsAction(q, "company").then((g) => g.companies);
 
 export default function CompanySearch({
   placeholder,
   disabled,
   onPick,
+  search = searchAllCompanies,
+  inputId,
 }: {
   placeholder: string;
   disabled?: boolean;
   onPick: (c: { id: string; name: string }) => void;
+  /** #348 slice 4 — the server search to run (default: every company, unchanged for slice-1 callers). */
+  search?: (q: string) => Promise<LinkTargetHit[]>;
+  /** DOM id for the input, so a <label htmlFor> can name it. */
+  inputId?: string;
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<LinkTargetHit[]>([]);
   const [resultQuery, setResultQuery] = useState("");
   const [failed, setFailed] = useState(false);
   const seq = useRef(0);
+  /* Read through a ref so a caller passing a fresh function each render doesn't re-fire the debounce. */
+  const searchRef = useRef(search);
+  useEffect(() => {
+    searchRef.current = search;
+  }, [search]);
   useEffect(() => {
     const q = query.trim();
     if (q.length < 2) return;
     const my = ++seq.current;
     const t = setTimeout(() => {
       setFailed(false);
-      searchLinkTargetsAction(q, "company")
-        .then((g) => {
+      searchRef.current(q)
+        .then((hits) => {
           if (my !== seq.current) return;
-          setResults(g.companies);
+          setResults(hits);
           setResultQuery(q);
         })
         .catch(() => {
@@ -63,6 +76,7 @@ export default function CompanySearch({
       emptyText={failed ? "Search failed — try again." : trimmed.length < 2 ? "Type at least 2 letters." : fresh ? "Nothing matches." : "Searching…"}
       onQueryChange={setQuery}
       disabled={disabled}
+      inputId={inputId}
     />
   );
 }

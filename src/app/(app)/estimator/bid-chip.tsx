@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { bidPanelAction, setBidDetailsAction } from "./bid-actions";
-import { addendaAdded, addendumReviseConfirm, type BidAddendum } from "@/lib/parties/bids";
+import { bidPanelAction, setBidDetailsAction, type BidDetailsResult } from "./bid-actions";
+import { postChanged } from "@/lib/popout/channel";
+import { addedAddendumNos, addendumReviseConfirm, type BidAddendum } from "@/lib/parties/bids";
 import type { BidPanelVM } from "@/lib/parties/bid-vm";
 
 /*
@@ -49,15 +50,16 @@ function chipLabel(p: BidPanelVM | null): string {
   return parts.join(" · ");
 }
 
+/** #348 (Jeff 2026-10-15): `onSync` — an addendum saved on a sent estimate moved it back to Draft; the header applies
+ *  the fresh status + next step. */
 export default function BidChip({
   quoteId,
   canEdit,
-  onRevised,
+  onSync,
 }: {
   quoteId: string | null;
   canEdit: boolean;
-  /** Jeff 2026-10-15 #3 — a new addendum moved the sent estimate back to Draft: the Estimator re-syncs its status. */
-  onRevised?: () => void;
+  onSync?: (sync: NonNullable<BidDetailsResult["sync"]>) => void;
 }) {
   const [stored, setPanel] = useState<BidPanelVM | null>(null);
   // A panel for another estimate is never shown (the VM carries its quote id).
@@ -67,7 +69,8 @@ export default function BidChip({
   const [addenda, setAddenda] = useState<BidAddendum[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [note, setNote] = useState("");
+  /** The save's note (an addendum moved the estimate back to Draft) — shown in the dialog, which then stays open. */
+  const [notice, setNotice] = useState("");
   const dialog = useRef<HTMLDialogElement>(null);
   // Latest-response-wins: a slow reload for an old quote or an earlier request never overwrites a newer one.
   const seq = useRef(0);
@@ -115,7 +118,8 @@ export default function BidChip({
   useEffect(() => {
     if (!quoteId) return;
     const onChanged = (e: Event) => {
-      if ((e as CustomEvent<{ quoteId?: string }>).detail?.quoteId !== quoteId) return;
+      const detail = (e as CustomEvent<{ quoteId?: string; source?: string }>).detail;
+      if (detail?.quoteId !== quoteId || detail.source === "chip") return;
       void reload();
     };
     window.addEventListener("peak:bid-changed", onChanged);
@@ -131,7 +135,7 @@ export default function BidChip({
 
   const openDialog = async () => {
     setError("");
-    setNote("");
+    setNotice("");
     const fresh = (await reload()) ?? panel;
     setDueInput(toLocalInput(fresh?.dueAt ?? null));
     setAddenda(fresh?.addenda ?? []);
@@ -156,24 +160,28 @@ export default function BidChip({
     if (dueInput && due == null) return setError("Pick a valid due date.");
     setSaving(true);
     setError("");
+    setNotice("");
     try {
       const wasSent = panel.status === "sent";
       // #352 review M2: a new addendum on a sent, not-awarded bid reverts it to Draft — ask first.
-      const added = addendaAdded(panel.addenda, addenda);
+      const added = addedAddendumNos(panel.addenda, addenda);
       if (wasSent && !panel.awardedPartyId && added.length > 0 && !window.confirm(addendumReviseConfirm(added))) return;
       const r = await setBidDetailsAction(quoteId, { dueAt: due, addenda });
       if (r.ok) {
         seq.current++; // an older in-flight load must not overwrite this fresher panel
         lastLoaded.current = Date.now();
         setPanel(r.panel);
-        // #3: the addendum put the estimate back to Draft — keep the dialog open on the note; the Bidders card
-        // (peak:bid-revised) and the Estimator's own status follow.
-        setNote(r.note ?? "");
-        setOpen(!!r.note);
-        if (wasSent && r.panel.status === "draft") {
-          window.dispatchEvent(new CustomEvent("peak:bid-revised", { detail: { quoteId } }));
-          onRevised?.();
+        if (r.sync) {
+          onSync?.(r.sync);
+          postChanged("quote", quoteId); // the status moved — other windows refresh (as changeStatus does)
         }
+        // The Bidders card (Send & track) reloads its plan: "Send revision to all bidders" now applies.
+        window.dispatchEvent(new CustomEvent("peak:bid-changed", { detail: { quoteId, source: "chip" } }));
+        if (r.note) {
+          setDueInput(toLocalInput(r.panel.dueAt));
+          setAddenda(r.panel.addenda);
+          setNotice(r.note);
+        } else setOpen(false);
       } else setError(r.error);
     } catch {
       setError("Couldn't save — try again.");
@@ -282,18 +290,16 @@ export default function BidChip({
                 {error}
               </div>
             )}
-            {note && (
-              <div role="status" style={{ fontSize: 12, fontWeight: 600, color: "#9a6a00" }}>
-                {note}
-              </div>
-            )}
+            <div role="status" style={notice ? { fontSize: 12, fontWeight: 600, color: "#9a6a00" } : { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>
+              {notice}
+            </div>
             {!readOnly && (
               <div style={{ display: "flex", gap: 8 }}>
                 <button type="button" onClick={() => void save()} disabled={saving} style={{ ...btn, background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" }}>
                   {saving ? "Saving…" : "Save"}
                 </button>
                 <button type="button" onClick={() => setOpen(false)} disabled={saving} style={btn}>
-                  Cancel
+                  {notice ? "Close" : "Cancel"}
                 </button>
               </div>
             )}

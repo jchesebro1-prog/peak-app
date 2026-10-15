@@ -30,6 +30,7 @@ import { listIntros } from "@/lib/stores/narrative-intros";
 import { seriesSkus } from "@/lib/track-series";
 import { systemMatchKeys } from "@/lib/specs/records";
 import { blobEnabled } from "@/lib/blob";
+import { parseThreadAttachmentRef } from "@/lib/vendor-quotes/rules";
 import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { tasksForQuote } from "@/lib/stores/tasks";
 import { resolveTier } from "@/lib/pricing-tiers";
@@ -557,6 +558,9 @@ export default async function EstimatorPage({
     <ActionError message={one(sp.err)} />
     <EstimatorClient
       initial={initial}
+      // #348 slice 4: the Inbox "Add as vendor quote…" hand-off — a saved estimate + a well-formed attachment ref only;
+      // the client strips it from the URL and the action re-checks the thread's visibility.
+      vendorFromThread={q && parseThreadAttachmentRef(one(sp.vq)) ? one(sp.vq)! : null}
       pipelines={pipelines}
       companyName={settings.companyName || "Peak Systems Group"}
       logoDark={settings.logoDark || null}

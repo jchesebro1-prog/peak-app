@@ -31,6 +31,7 @@ import {
   isPersonalKey,
   isRateLimit,
   personalKey,
+  shouldStampCcFetched,
   userIdOfKey,
   type MailboxKey,
 } from "./config";
@@ -42,6 +43,7 @@ import {
   updateSyncState,
 } from "./connections";
 import {
+  getAttachment,
   getMessage,
   getMessageMetadata,
   getProfile,
@@ -54,13 +56,11 @@ import {
   GmailTimeoutError,
   type GmailLabelEvent,
 } from "./api";
-import { attachmentMimePart, pdfPathFitsLink } from "@/lib/comms-attachments";
+import { attachmentMimePart } from "@/lib/comms-attachments";
+import { readPdfForThread as readThreadPdf } from "@/lib/thread-pdf-read";
 import { icsMimeType } from "@/lib/ics";
 import { sendWithMailboxFallback, visitInviteGmailIds, type InviteVisitShape } from "@/lib/visit-invite-plan";
-import { pdfStorage } from "@/lib/quote-pdf/storage";
-import { assessmentIdOfPdfPath, assessmentPdfFitsThread, isAssessmentPdfPath } from "@/lib/assessments/report-pdf-path";
-import { readAssessmentPdf } from "@/lib/assessments/report-pdf-storage";
-import { buildRaw, headerValue, parseAddress, parseInbound, type ParsedInbound } from "./mime";
+import { buildRaw, findPart, headerValue, listAttachmentParts, parseAddress, parseInbound, type ParsedInbound } from "./mime";
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
 import { queueLabelSync, reconcilePeakLabelsForMailbox } from "./label-sync";
 import { interpretLabelEvents } from "./label-interpret";
@@ -113,12 +113,6 @@ function mailboxOfKey(key: MailboxKey): { mailbox: MailboxId; userName: string |
 
 /* ---- outbound ------------------------------------------------------------- */
 
-/** A by-reference attachment's bytes (storage guards the quote-PDF path). */
-async function readQuotePdf(path: string): Promise<Buffer | null> {
-  const store = pdfStorage();
-  return "unavailable" in store ? null : store.read(path);
-}
-
 /** I1 — how a send threw: no answer in time ("timeout": Gmail may have
  *  accepted it) vs anything else ("error"). */
 export function sendFailureKind(err: unknown): "timeout" | "error" {
@@ -152,16 +146,8 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
   const lastIn = lastInbound(t);
   const inReplyTo = lastIn?.gmailMessageId || undefined;
 
-  const readPdfForThread = async (path: string): Promise<Buffer | null> => {
-    // #340: an emailed assessment report rides by reference too — read only on a thread for that assessment's
-    // customer (or an unlinked one), streamed from Blob.
-    if (isAssessmentPdfPath(path)) {
-      const { getAssessment } = await import("@/lib/stores/assessments");
-      const a = await getAssessment(assessmentIdOfPdfPath(path) ?? "");
-      return assessmentPdfFitsThread(path, t, a?.customerId ?? null) ? readAssessmentPdf(path) : null;
-    }
-    return pdfPathFitsLink(path, t.link) ? readQuotePdf(path) : null;
-  };
+  // A quote-linked thread only reads that quote's own PDFs; an assessment report only its customer's (a refused path reads as missing → throws).
+  const readPdfForThread = (path: string): Promise<Buffer | null> => readThreadPdf(path, t);
   for (const m of pending) {
     try {
       // data-URL attachments → raw base64 MIME parts (IDEAS #36); a
@@ -288,6 +274,10 @@ export async function recordMessage(
     // both the existing-thread patch and the new-thread insert below.
     bulk: p.bulk || undefined,
     autoSubmitted: p.autoSubmitted || undefined,
+    // #348 slice 4 — named attachments by reference (name/mime/size + the
+    // Gmail part id; the bytes stay in Gmail), and the list is now known.
+    ...(p.attachments.length ? { attachments: p.attachments.map((a) => ({ name: a.name, mime: a.mime, size: a.size, gmailPartId: a.partId })) } : {}),
+    attsListed: true,
   };
 
   // attach to an existing thread sharing the Gmail thread id — #349: in THIS
@@ -621,6 +611,66 @@ export async function fetchMessageCc(threadId: string, messageId: string): Promi
     x.ccFetched = true;
   });
   return cc;
+}
+
+/**
+ * #348 slice 4 — the reader's one-time lazy attachment listing for a message
+ * imported before attachments were recorded: fetch the message, store its
+ * named parts by reference (only when the message has none stored) and stamp
+ * `attsListed` so it never runs twice. Returns the count found; null = nothing
+ * to do (no such message, not a Gmail message, already listed, or no
+ * connected mailbox for the thread). Mirrors fetchMessageCc.
+ */
+export async function listMessageAttachments(threadId: string, messageId: string): Promise<number | null> {
+  const t = await getDoc<CommThread>("comms", threadId);
+  const m = (t?.messages || []).find((x) => x.id === messageId);
+  if (!t || !m?.gmailId || m.attsListed) return null;
+  const key = t.gmailAccountKey ?? (await keyForThread(t));
+  if (!key) return null;
+  const full = await getMessage(key, m.gmailId);
+  const found = listAttachmentParts(full.payload);
+  await patchDoc<CommThread>("comms", threadId, (d) => {
+    const x = (d.messages || []).find((y) => y.id === messageId);
+    if (!x) return;
+    if (found.length && !(x.attachments || []).length) {
+      x.attachments = found.map((a) => ({ name: a.name, mime: a.mime, size: a.size, gmailPartId: a.partId }));
+    }
+    x.attsListed = true;
+  });
+  return found.length;
+}
+
+/**
+ * #348 slice 4 — one imported attachment's bytes, read from Gmail on demand.
+ * Keyed on the stored part id, never an attachment id: Gmail attachment ids
+ * aren't stable across fetches (D-next-5). Callers check visibility first
+ * (thread-attachment-server.ts readThreadAttachment).
+ */
+export async function fetchMessageAttachment(
+  threadId: string,
+  messageId: string,
+  partId: string,
+  maxBytes: number
+): Promise<Buffer | { error: "gone" | "too-big" | "no-mailbox" }> {
+  const t = await getDoc<CommThread>("comms", threadId);
+  const m = (t?.messages || []).find((x) => x.id === messageId);
+  if (!t || !m?.gmailId) return { error: "gone" };
+  const key = t.gmailAccountKey ?? (await keyForThread(t));
+  if (!key) return { error: "no-mailbox" };
+  try {
+    const full = await getMessage(key, m.gmailId);
+    const part = findPart(full.payload, partId);
+    if (!part || !part.body) return { error: "gone" };
+    if ((part.body.size || 0) > maxBytes) return { error: "too-big" };
+    const data = part.body.attachmentId ? (await getAttachment(key, m.gmailId, part.body.attachmentId)).data : part.body.data;
+    if (!data) return { error: "gone" };
+    const bytes = Buffer.from(data, "base64url");
+    if (bytes.length > maxBytes) return { error: "too-big" };
+    return bytes;
+  } catch (err) {
+    if (shouldStampCcFetched(err)) return { error: "gone" };
+    throw err;
+  }
 }
 
 /** Dedup set for the one-time history import: every Gmail message id already

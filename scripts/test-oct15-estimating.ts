@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import { evaluateReviewLimit, largestAlternateTotal, reviewAmount, autoSnapshotUnchanged } from "../src/lib/review-limits";
-import { addendaAdded, addendumRevisedNote, addendumReviseConfirm } from "../src/lib/parties/bids";
+import { addedAddendumNos, addendumDraftNote, addendumMovesToDraft, addendumReviseConfirm } from "../src/lib/parties/bids";
 import { MAX_CLIENT_RESPONSES_TOTAL } from "../src/lib/estimate-output/responses";
 import { awardBid } from "../src/lib/stores/bids";
 import { bidderSendPlan, BID_SEND_COPY } from "../src/lib/parties/bid-send";
@@ -202,9 +202,10 @@ export async function oct15PureChecks(ok: Ok) {
   }
   /* ---- #3 / #4 (pure + pins) ---- */
   {
-    ok(JSON.stringify(addendaAdded([{ no: 1 }], [{ no: 1 }, { no: 3 }, { no: 2 }])) === "[2,3]" && addendaAdded(null, []).length === 0 && addendaAdded([{ no: 1 }, { no: 2 }], [{ no: 1 }]).length === 0,
-      "oct15 #3: addendaAdded lists only new numbers (a removal adds none)");
-    ok(addendumRevisedNote([2]).startsWith("Addendum 2 added — the estimate is back in Draft.") && addendumRevisedNote([2, 3]).startsWith("Addenda 2, 3 added"), "oct15 #3: the chip's note");
+    ok(JSON.stringify(addedAddendumNos([{ no: 1 }], [{ no: 1 }, { no: 3 }, { no: 2 }])) === "[2,3]" && addedAddendumNos(null, []).length === 0 && addedAddendumNos([{ no: 1 }, { no: 2 }], [{ no: 1 }]).length === 0,
+      "oct15 #3: only new addendum numbers count (a removal adds none) — #348's addedAddendumNos");
+    ok(addendumDraftNote([2]).includes("Send revision to all bidders") && addendumMovesToDraft("sent", [2]) && !addendumMovesToDraft("sent", [2], true),
+      "oct15 #3 / M2: the chip's note names \"Send revision to all bidders\"; an awarded bid never moves to Draft");
     const chip0 = rd("src/app/(app)/estimator/bid-chip.tsx");
     ok(addendumReviseConfirm([2]).startsWith("Addendum 2 came in after this estimate was sent.") && chip0.includes("wasSent && !panel.awardedPartyId && added.length > 0 && !window.confirm(addendumReviseConfirm(added))"),
       "M2: the Bid chip asks before an addendum reverts a sent bid (not on an awarded one)");
@@ -213,10 +214,10 @@ export async function oct15PureChecks(ok: Ok) {
     const plan = bidderSendPlan(revs, [{ id: "a", bid: B(1), email: "a@e.test" }, { id: "b", bid: B(null), email: "b@e.test" }]);
     ok(plan.label === "Send revision to all bidders" && plan.label === BID_SEND_COPY.sendRevision && plan.ids.join() === "a,b", "oct15 #3: a revising bid sends the revision to every bidder (new ones too)");
     const st = rd("src/lib/stores/bids.ts");
-    ok(/q\.status === "sent" && added\.length > 0 && !q\.bid\?\.awardedPartyId\) \{\s*\/\/[^\n]*\n\s*await setStatus\(quoteId, "draft"/.test(st) && st.indexOf("withQuoteRowLock(quoteId") < st.indexOf('await setStatus(quoteId, "draft"'),
+    ok(st.includes("if (!addendumMovesToDraft(q.status, added, !!q.bid?.awardedPartyId)) return { ok: true as const, bid: saved.bid };") && st.indexOf("withQuoteRowLock(quoteId") < st.indexOf('await setStatus(quoteId, "draft"'),
       "oct15 #3: the revise is the normal setStatus(\"draft\") under the bid's row lock");
     const chip = rd("src/app/(app)/estimator/bid-chip.tsx");
-    ok(chip.includes('"peak:bid-revised"') && chip.includes("onRevised?.()") && rd("src/app/(app)/estimator/steps/bidders-card.tsx").includes('"peak:bid-revised"'),
+    ok(chip.includes("onSync?.(r.sync);") && chip.includes('source: "chip"') && rd("src/app/(app)/estimator/steps/bidders-card.tsx").includes('detail.source === "chip"'),
       "oct15 #3: the chip tells the Bidders card and the Estimator's status to follow");
     // #4 — already so: the first bidder send of a draft marks the estimate Sent through the normal path.
     const ss = rd("src/lib/estimate-email/send-server.ts");
@@ -247,7 +248,7 @@ export async function oct15PureChecks(ok: Ok) {
     ok(MAX_CLIENT_RESPONSES_TOTAL === 1000 && appendResponseTo(mixed, r(99_001, pty(11))) === null && appendResponseTo(mixed.slice(1), r(99_002, pty(11)))?.length === MAX_CLIENT_RESPONSES_TOTAL,
       "M1: the quote's whole list caps at 1,000 — a submit past it is refused, nothing old is dropped");
     const srv = rd("src/lib/estimate-output/responses-server.ts");
-    ok(srv.includes("rateLimit(responseQuoteLimitKey(hit.q.id, bidder?.partyId), RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS)") && !srv.includes("`share-respond-quote:${hit.q.id}`"),
+    ok(srv.includes("rateLimit(responseQuoteBucket(hit.q.id, bidder?.partyId), RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS)") && !srv.includes("`share-respond-quote:${hit.q.id}`"),
       "oct15 #2: submitClientResponse spends the bidder's own daily slot");
   }
 }
@@ -563,27 +564,27 @@ async function oct15BidDbChecks(ok: Ok) {
   const A1 = { no: 1, receivedAt: Date.UTC(2026, 9, 1, 17), note: "" };
   const A2 = { no: 2, receivedAt: Date.UTC(2026, 9, 3, 17), note: "" };
   const d0 = await setBidDetails(qid, { addenda: [A1] }, "Pat");
-  ok(d0.ok && !d0.revised && (await getQuote(qid))?.status === "draft", "oct15 #3: an addendum on a draft just saves");
+  ok(d0.ok && !d0.backToDraft && (await getQuote(qid))?.status === "draft", "oct15 #3: an addendum on a draft just saves");
   await setStatus(qid, "sent", "Pat", { bypassApprovalGate: "engine-owned-flow" });
   await recordBidderSend(qid, a.party.id, { threadId: "C-o15", rev: 1, at: NOW, by: "Pat", to: "gc@e.test" }, { kind: "sent" }, "u1");
   const d1 = await setBidDetails(qid, { dueAt: NOW + 86_400_000 }, "Pat");
-  ok(d1.ok && !d1.revised && (await getQuote(qid))?.status === "sent", "oct15 #3: a due-date change on a sent bid leaves it Sent");
+  ok(d1.ok && !d1.backToDraft && (await getQuote(qid))?.status === "sent", "oct15 #3: a due-date change on a sent bid leaves it Sent");
   const d2 = await setBidDetails(qid, { addenda: [A1, A2] }, "Pat");
   const q2 = await getQuote(qid);
-  ok(d2.ok && JSON.stringify(d2.revised) === "[2]" && q2?.status === "draft" && q2.history?.at(-1)?.from === "sent" && q2.history?.at(-1)?.to === "draft",
+  ok(d2.ok && JSON.stringify(d2.backToDraft) === "[2]" && q2?.status === "draft" && q2.history?.at(-1)?.from === "sent" && q2.history?.at(-1)?.to === "draft",
     "oct15 #3: a new addendum on a sent bid puts it back to Draft through setStatus (history sent → draft)");
   ok((q2?.revisions || []).filter((r) => r.reason === "sent").length === 1, "oct15 #3: the revise cuts no revision — the next send does");
   const panel = await loadBidPanel(qid, { canEdit: true, canSend: true, canLink: true });
   ok(panel.ok && panel.panel.plan.label === "Send revision to all bidders" && panel.panel.bidders[0]?.sendLabel === "Send revision",
     "oct15 #3: the Bidders card then offers \"Send revision to all bidders\": " + (panel.ok ? String(panel.panel.plan.label) : panel.error));
   const d3 = await setBidDetails(qid, { addenda: [A1, A2] }, "Pat");
-  ok(d3.ok && !d3.revised, "oct15 #3: re-saving the same addenda changes nothing");
+  ok(d3.ok && !d3.backToDraft, "oct15 #3: re-saving the same addenda changes nothing");
   // M2: on an awarded bid an addendum is recorded and the estimate stays Sent.
   await setStatus(qid, "sent", "Pat", { bypassApprovalGate: "engine-owned-flow" });
   const aw = await awardBid(qid, a.party.id);
   const A3 = { no: 3, receivedAt: Date.UTC(2026, 9, 5, 17), note: "" };
   const d4 = await setBidDetails(qid, { addenda: [A1, A2, A3] }, "Pat");
-  ok(aw.ok && d4.ok && !d4.revised && (await getQuote(qid))?.status === "sent" && (d4.ok ? d4.bid.addenda.length === 3 : false),
+  ok(aw.ok && d4.ok && !d4.backToDraft && (await getQuote(qid))?.status === "sent" && (d4.ok ? d4.bid.addenda.length === 3 : false),
     "M2 db: an addendum on an awarded bid is recorded and the estimate stays Sent (no revert)");
 }
 

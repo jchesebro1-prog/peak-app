@@ -56,6 +56,26 @@ export function sanitizeBidDetails(
   return { ok: true, value };
 }
 
+/** #348 (Jeff 2026-10-15) — the addendum numbers a bid-details save ADDS: in `after`, not in `before`, ascending.
+ *  A note edit, a date edit or a removal adds nothing. */
+export function addedAddendumNos(before: ReadonlyArray<{ no: number }> | null | undefined, after: ReadonlyArray<{ no: number }> | null | undefined): number[] {
+  const had = new Set((before || []).filter((a) => a && typeof a.no === "number").map((a) => a.no));
+  return [...new Set((after || []).filter((a) => a && typeof a.no === "number" && !had.has(a.no)).map((a) => a.no))].sort((a, b) => a - b);
+}
+
+/** #348 (Jeff 2026-10-15) — an addendum after a send puts the estimate back to Draft: only a `sent` estimate whose
+ *  save adds an addendum number moves. Draft stays draft; won / lost never reach a bid-details write. */
+export function addendumMovesToDraft(status: string, added: ReadonlyArray<number>, awarded = false): boolean {
+  // #352 review M2: an awarded bid is decided — an addendum is only recorded.
+  return status === "sent" && added.length > 0 && !awarded;
+}
+
+/** The note the Bid chip shows after a save that moved the estimate back to Draft. */
+export function addendumDraftNote(nos: ReadonlyArray<number>): string {
+  const which = nos.length === 1 ? `Addendum ${nos[0]}` : `Addenda ${nos.join(", ")}`;
+  return `${which} added — the estimate is back in Draft. Send revision to all bidders when it's ready. The customer's and bidders' links show it as being revised until then.`;
+}
+
 export function sanitizeBidSiteUrl(raw: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
   const s = typeof raw === "string" ? raw.trim() : "";
   if (!s) return { ok: true, value: null };
@@ -214,20 +234,8 @@ export function isOpenBid(q: { status?: string; bid?: QuoteBid | null }, bidders
   return bidders.some((b) => b.bid?.result === "pending");
 }
 
-/** Jeff 2026-10-15 #3 — the addendum numbers in `next` that `prev` didn't have (sorted). Pure. */
-export function addendaAdded(prev: ReadonlyArray<{ no: number }> | null | undefined, next: ReadonlyArray<{ no: number }> | null | undefined): number[] {
-  const had = new Set((prev || []).filter((a) => a && typeof a.no === "number").map((a) => a.no));
-  return [...new Set((next || []).filter((a) => a && typeof a.no === "number" && !had.has(a.no)).map((a) => a.no))].sort((a, b) => a - b);
-}
-
 /** #352 review M2 — the Bid chip's confirmation before a new addendum moves a sent (not awarded) bid back to Draft. */
 export function addendumReviseConfirm(nos: readonly number[]): string {
   const what = nos.length === 1 ? `Addendum ${nos[0]}` : `Addenda ${nos.join(", ")}`;
   return `${what} came in after this estimate was sent. Saving puts it back to Draft so you can send the revision to every bidder. Continue?`;
-}
-
-/** Jeff 2026-10-15 #3 — the note the Bid chip shows when a new addendum moved a sent estimate back to Draft. */
-export function addendumRevisedNote(nos: readonly number[]): string {
-  const what = nos.length === 1 ? `Addendum ${nos[0]}` : `Addenda ${nos.join(", ")}`;
-  return `${what} added — the estimate is back in Draft. Send revision to all bidders on Send & track when it's ready.`;
 }

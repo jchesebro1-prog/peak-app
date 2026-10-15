@@ -12,7 +12,7 @@ import type { QuoteStatus } from "@/lib/stores/quotes";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { NextStepSync } from "@/app/(app)/quotes/review-actions";
 import { carriesPipeline, firstStage, stageById } from "@/lib/pipelines";
-import { saveBonusAlternatesAction, saveBonusSplitAction, draftQuoteScopeAction, copySystemToEstimateAction, moveSystemToEstimateAction, resolveCatalogSkusAction, resolveTierAction, saveQuoteAction, searchQuotesAction, setQuotePipelineAction, setQuoteStageAction, setQuotePeopleAction, setStatusAction, quoteSyncAction, travelForSelectionAction, updateQuoteMetaAction, type CopySystemTarget, type MoveSystemTarget, type ReviewSync, type StageSync } from "./actions";
+import { saveBonusAlternatesAction, saveBonusSplitAction, draftQuoteScopeAction, copySystemToEstimateAction, moveSystemToEstimateAction, resolveCatalogSkusAction, resolveTierAction, saveQuoteAction, searchQuotesAction, setQuotePipelineAction, setQuoteStageAction, setQuotePeopleAction, setStatusAction, travelForSelectionAction, updateQuoteMetaAction, type CopySystemTarget, type MoveSystemTarget, type ReviewSync, type StageSync } from "./actions";
 import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewards/actions";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { defaultAlternatesTaken, normalizeSplit, type BonusRecord, type BonusSplit } from "@/lib/estimate-bonus/record";
@@ -24,7 +24,9 @@ import type { DraftedLine } from "./ai-scope-modal";
 import { DISC_LABEL, type SuggestPart } from "./estimator-data";
 import { backSolveExtSell, priceFromUnitSellEdit, repriceAtMargin, buildLaborItems, computeCurtain, computeLabor, lineMarginOf, makeLaborRate, repricedAtLineMargin, round2, clearSellOverride, parseSellOverride, SYSTEM_PRICE_STEP, systemSellTotal, totals, vendorTotalSeed, withPriceRound } from "./pricing";
 import type { PdfToggle } from "./preview-doc";
-import type { CurtainDraft, CustomDraft, EstimatorProps, FixtureDraft, LaborDraft, MobDraft, SpecItem, SpecMob, SpecSection, TrackDraft, TravelLite, VendorDraft, VendorLineDraft, VendorQuote } from "./types";
+import { vendorAttachmentLoad, type CurtainDraft, type CustomDraft, type EstimatorProps, type FixtureDraft, type LaborDraft, type MobDraft, type SpecItem, type SpecMob, type SpecSection, type TrackDraft, type TravelLite, type VendorDraft, type VendorLineDraft, type VendorQuote } from "./types";
+import { vendorQuoteFromThreadAction } from "./vendor-actions";
+import { VENDOR_COPY } from "@/lib/vendor-quotes/rules";
 import { sectionFreightDefault, applyAutoFreight } from "./freight-default";
 import { fixtureBomLine } from "./fixture-bom";
 import { applyAutoTrips as applyAutoTripsToMobs, applyLocalTrip, applyMobType, applyTravelTripTo, defaultLaborMobs, disciplineForSystemTitle, laborMob, roundTripMiles, typeMobMiles, setRouteMiles } from "./labor-defaults";
@@ -175,6 +177,8 @@ const freshVendor = (): VendorDraft => ({
   total: "",
   includesFreight: false,
   display: "single",
+  vendorCompanyId: null,
+  fromThreadId: null,
 });
 
 const freshLabor = (
@@ -618,6 +622,12 @@ export function useEstimatorState(props: EstimatorProps) {
      cleared by discardDraft, so an abandoned edit can never leak into the next
      plain "+ Vendor quote". */
   const vendorEditRef = useRef<string | null>(null);
+  /* #348 slice 4: the Inbox → Estimator hand-off (`?vq=`). `vendorSeedRef` is the blank draft the hand-off opens the
+     form on (its id is the one the PDF is copied under), consumed by seedDraft ahead of the edit seed; `vendorHandoff`
+     is the copy's live state (Add waits while it loads; its note shows under the file row). discardDraft clears both. */
+  const vendorSeedRef = useRef<VendorDraft | null>(null);
+  const [vendorHandoff, setVendorHandoff] = useState<{ status: "loading" | "done" | "failed"; note: string } | null>(null);
+  const vendorHandoffConsumedRef = useRef(false);
   /* #269: the labor group a "click the line to edit" open is seeding, set
      just before openInputMethod("labor") and consumed by seedDraft — the
      vendor-edit pattern above. `laborEdit` is that open's live state (the
@@ -693,6 +703,8 @@ export function useEstimatorState(props: EstimatorProps) {
       total: vendorTotalSeed(v.total, vendorLinesTotal(lines)),
       includesFreight: !!v.includesFreight,
       display: v.display,
+      vendorCompanyId: v.vendorCompanyId ?? null,
+      fromThreadId: v.fromThreadId ?? null,
     };
   };
   // Customer tier margin stamp (item 11, D87) — SEEDS the labor draft and
@@ -1297,17 +1309,6 @@ export function useEstimatorState(props: EstimatorProps) {
 
   /** Jeff 2026-10-15 #18 — Lead estimator / Prepared by are read-only for a non-approver once the quote has been sent. */
   const peopleLocked = !viewerCanApprove && (peopleSentOnce || status === "sent" || status === "won" || status === "lost");
-
-  /** Jeff 2026-10-15 #3 — the server moved the status (a new addendum on a sent bid → Draft): re-read and apply it. */
-  const resyncStatus = () => {
-    const id = loadedId;
-    if (!id) return;
-    void quoteSyncAction(id)
-      .then((r) => {
-        if (r.ok) applySync(r);
-      })
-      .catch(() => {});
-  };
 
   /** Same idea as applySync, for the Daylite stage bar's StageSync (Task 6) —
    *  a stage move can also change status/review (setQuoteStage runs setStatus
@@ -2337,6 +2338,9 @@ export function useEstimatorState(props: EstimatorProps) {
     else if (kind === "vendor") {
       // #144: an abandoned edit must not seed the next "+ Vendor quote".
       vendorEditRef.current = null;
+      // #348 slice 4: nor an abandoned email hand-off.
+      vendorSeedRef.current = null;
+      setVendorHandoff(null);
       setVendorDraft(freshVendor());
     } else if (kind === "labor") {
       // #269: an abandoned labor edit must not seed the next "+ Labor".
@@ -2373,10 +2377,13 @@ export function useEstimatorState(props: EstimatorProps) {
       /* #144: the pending edit seed, consumed and CLEARED here so it applies to
          exactly one open. With none set — or a record since deleted — this is
          the unchanged blank form. */
+      /* #348 slice 4: the email hand-off's blank draft comes first — consumed and cleared the same way. */
+      const handoffSeed = vendorSeedRef.current;
+      vendorSeedRef.current = null;
       const editId = vendorEditRef.current;
       vendorEditRef.current = null;
-      const rec = editId ? vendorQuotes.find((v) => v.id === editId) : undefined;
-      setVendorDraft(rec ? vendorDraftFromRecord(rec) : freshVendor());
+      const rec = !handoffSeed && editId ? vendorQuotes.find((v) => v.id === editId) : undefined;
+      setVendorDraft(handoffSeed || (rec ? vendorDraftFromRecord(rec) : freshVendor()));
     } else if (kind === "fixture") {
       // #246: the list now holds every kind (fixtures first); preselect the
       // first FIXTURE — today's pick — and nothing when there is none.
@@ -2428,6 +2435,9 @@ export function useEstimatorState(props: EstimatorProps) {
     openInputRef.current = null;
     openSeqRef.current++; // retires any callback still in flight for that open
     setOpenInput(null);
+    // #348 slice 4: the email hand-off never outlives the form it opened.
+    vendorSeedRef.current = null;
+    setVendorHandoff(null);
     if (cur) discardDraft(cur.kind, cur.secId);
   };
 
@@ -2459,6 +2469,80 @@ export function useEstimatorState(props: EstimatorProps) {
     vendorEditRef.current = vqId;
     openInputMethod("vendor", secId);
   };
+
+  /** #348 slice 4: the hand-off's "Add to system" — move the OPEN vendor form to another system without discarding
+   *  its draft (the PDF is already copied under the draft's id). A no-op unless a vendor form is open. */
+  const retargetVendor = (secId: string) => {
+    const cur = openInputRef.current;
+    if (!cur || cur.kind !== "vendor" || cur.secId === secId) return;
+    if (!sections.some((sec) => sec.id === secId)) return;
+    openInputRef.current = { kind: "vendor", secId };
+    setOpenInput({ kind: "vendor", secId });
+  };
+
+  /** #348 slice 4: pick (or, with null, unlink) the vendor company. A pick names the vendor; unlinking keeps the name. */
+  const setVendorCompany = (c: { id: string; name: string } | null) =>
+    setVendorDraft((d) => (c ? { ...d, vendorCompanyId: c.id, vendor: c.name } : { ...d, vendorCompanyId: null }));
+
+  /* #348 slice 4: the Inbox → Estimator hand-off, once per page. The `vq` param is stripped from the URL FIRST, so a
+     reload never copies the PDF twice; only ids ever rode it, and the action re-checks the thread's visibility. */
+  useEffect(() => {
+    const ref = props.vendorFromThread;
+    if (!ref || !loadedId || vendorHandoffConsumedRef.current) return;
+    vendorHandoffConsumedRef.current = true;
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.delete("vq"); // VENDOR_FROM_EMAIL_PARAM
+      window.history.replaceState(window.history.state, "", u.pathname + u.search + u.hash);
+    } catch {
+      /* ignore — the copy below still runs once (the consumed ref) */
+    }
+    const secId = sections.some((sec) => sec.id === activeId) ? (activeId as string) : sections[0]?.id;
+    if (!secId) {
+      setActionError(VENDOR_COPY.noSystem);
+      return;
+    }
+    const seed = freshVendor();
+    closeInput();
+    vendorSeedRef.current = seed;
+    openInputMethod("vendor", secId);
+    setVendorHandoff({ status: "loading", note: VENDOR_COPY.copying });
+    const quoteId = loadedId;
+    void (async () => {
+      try {
+        const r = await vendorQuoteFromThreadAction({
+          quoteId,
+          ref,
+          vendorQuoteId: seed.id,
+          attachedChars: vendorAttachmentLoad(vendorQuotes),
+        });
+        if (!r.ok) {
+          setVendorHandoff((h) => (h ? { status: "failed", note: r.error || VENDOR_COPY.copyFailed } : h));
+          return;
+        }
+        const p = r.prefill;
+        setVendorDraft((d) => {
+          // The user closed (or switched) the form meanwhile — this result belongs to no open draft.
+          if (d.id !== seed.id) return d;
+          /* Apply the vendor only while the draft's vendor is still the seeded blank — never over what the user
+             typed or picked while the PDF was copying. */
+          const blank = !(d.vendor || "").trim() && !d.vendorCompanyId;
+          return {
+            ...d,
+            ...(blank ? { vendor: p.vendor, vendorCompanyId: p.vendorCompanyId } : {}),
+            quoteNumber: d.quoteNumber || p.quoteNumber,
+            attachment: p.attachment ?? d.attachment,
+            attachmentPreview: p.attachment ? p.preview : d.attachmentPreview,
+            fromThreadId: p.fromThreadId,
+          };
+        });
+        setVendorHandoff((h) => (h ? { status: "done", note: p.note } : h));
+      } catch {
+        setVendorHandoff((h) => (h ? { status: "failed", note: VENDOR_COPY.copyFailed } : h));
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedId, sections.length]);
 
   /** #269: reopen the Labor configurator on the draft that built a labor
    *  group, from any of its lines. Same close-then-seed dance as
@@ -2718,6 +2802,8 @@ export function useEstimatorState(props: EstimatorProps) {
        edit rather than inherited — a stale vendor name on a re-quoted line is
        the failure this feature exists to prevent. */
     const lineDesc = vendor + " \u00b7 " + quoteNumber + " \u2014 " + description;
+    // #348 slice 4: addedAt is server-stamped; keep the client copy honest between saves.
+    const prevRec = vendorQuotes.find((v) => v.id === vqId);
     const record: VendorQuote = {
       id: vqId,
       vendor,
@@ -2742,6 +2828,9 @@ export function useEstimatorState(props: EstimatorProps) {
       totalSource: vendorDraftTotalSource(d),
       includesFreight: d.includesFreight,
       display: d.display,
+      ...(d.vendorCompanyId ? { vendorCompanyId: d.vendorCompanyId } : {}),
+      ...(d.fromThreadId ? { fromThreadId: d.fromThreadId } : {}),
+      ...(prevRec?.addedAt ? { addedAt: prevRec.addedAt } : {}),
     };
     /* Replaced IN PLACE on an edit — same id, same position — so the spawned
        line keeps resolving against it and the row order does not shuffle. */
@@ -3136,7 +3225,6 @@ export function useEstimatorState(props: EstimatorProps) {
     applyAutoMiles,
     applyCredit,
     applySync,
-    resyncStatus,
     applyTravelTrip,
     assumptionLibrary,
     assumptions,
@@ -3232,6 +3320,9 @@ export function useEstimatorState(props: EstimatorProps) {
     openTitle,
     openTrackEdit,
     openVendorEdit,
+    retargetVendor,
+    setVendorCompany,
+    vendorHandoff,
     ownerValue,
     partsBusy,
     paymentTerms,

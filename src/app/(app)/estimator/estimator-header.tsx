@@ -207,7 +207,7 @@ export function EstimatorHeader({
               </button>
               {/* #348 — canApplyCredit is can("create") */}
               <PartiesChip quoteId={s.loadedId} canEdit={s.canApplyCredit} />
-              <BidChip quoteId={s.loadedId} canEdit={s.canApplyCredit} onRevised={s.resyncStatus} />
+              <BidChip quoteId={s.loadedId} canEdit={s.canApplyCredit} onSync={(x) => applySync({ ok: true, review: null, status: x.status, next: x.next })} />
             </div>
           </div>
         </div>

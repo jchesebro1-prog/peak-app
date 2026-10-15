@@ -369,7 +369,7 @@ export type Quote = {
    *  `blobPath` never leaves the server (the page links /share/.../file/<id>). */
   packageFiles?: PackageFile[] | null;
   /** #301 slice C (D-m) — client scope selections and questions from the
-   *  package page, append-only, ≤ 200. Written only by appendClientResponse;
+   *  package page, append-only, ≤ 200 per responder (#348: the owner, and each bidder by partyId). Written only by appendClientResponse;
    *  update() drops it; never content, never snapshotted. Staff-only. */
   clientResponses?: ClientResponse[] | null;
   /** Estimator bonuses — the payout record written when the quote goes Won
@@ -1562,7 +1562,7 @@ export type ClientResponseWrite = { ok: true; response: ClientResponse } | { ok:
  * #301 slice C (D-m) — the ONLY writer of `Quote.clientResponses`. Under the
  * row lock the pinned revision must still be the latest sent one and the
  * quote must be `sent` (canAct — a recall, a re-send, a win or a loss since
- * the page loaded refuses). Append-only, ≤ 200. Never changes status, never
+ * the page loaded refuses). Append-only, ≤ 200 per responder (#348). Never changes status, never
  * bumps updatedAt.
  */
 export async function appendClientResponse(id: string, pinnedRev: number, r: CleanResponse, now: number, newId: string): Promise<ClientResponseWrite> {
@@ -2126,7 +2126,7 @@ export async function setStatus(
     if (autoStamp) doc.review = autoStamp;
     doc.history = doc.history || [];
     doc.history.push({ at: t, from: doc.status, to: status });
-    // #352 review I1: a revise — the document now prints the NEXT send's Rev (D1123).
+    // #352 review I1: a revise — the document now prints the NEXT send's Rev (D1125).
     if (status === "draft" && doc.status !== "draft") revised.value = true;
     doc.status = status;
     moved.value = true;

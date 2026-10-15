@@ -12,6 +12,7 @@ import { WaitingOnCustomerCard } from "@/components/meetings/waiting-on-card";
 import { DocumentsCard } from "@/components/documents/documents-card";
 import { AssessmentsCard, FindingsCard } from "@/components/assessments/assessment-cards";
 import { CompanyRolesCard } from "@/components/parties/company-roles-card";
+import { QuotesReceivedCard } from "@/components/vendors/quotes-received-card";
 import { RecordingCountBadge } from "@/components/recordings/record-control-link";
 import { recordingCountByParent } from "../../recordings/data";
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
@@ -792,6 +793,7 @@ export default async function CustomerDetailPage({
             <FindingsCard customerId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
             {/* #348 — leads / estimates / projects this company is on (owner, GC, EC, architect, vendor…) */}
             <CompanyRolesCard companyId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
+            <QuotesReceivedCard companyId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
 
             {/* ---- details (#23) — populated custom fields ---- */}
             {detailRows.length > 0 && (

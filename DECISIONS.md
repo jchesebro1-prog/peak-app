@@ -13060,7 +13060,7 @@ Email rows get Send / Retry; a row whose submission is by the bidder's website k
 
 ## D1095. Acknowledging an addendum after a send is a new revision (#348 slice 2b-ii, 2026-10-15)
 
-An acknowledgement doesn't re-send anything. To get it to a bidder: move the estimate back to Draft, then **Send revision to bidders**; the card hints at this. **Open for Jeff:** whether that should be one button.
+An acknowledgement doesn't re-send anything. To get it to a bidder: move the estimate back to Draft, then **Send revision to bidders**; the card hints at this. **Open for Jeff:** whether that should be one button. **Superseded by D1119** (Jeff 2026-10-15): adding an addendum to a sent estimate now moves it back to Draft itself; the card's hint stays only as a fallback.
 
 ## D1096. Local delivery stamps sent (#348 slice 2b-ii, 2026-10-15)
 
@@ -13112,62 +13112,122 @@ A dismiss mark stops hiding a row whose `escalatedAt` is later than the mark (pu
 
 `createPortalGrantAction` creates the grant, then `sendPortalInvite` (`src/lib/portal-invite.ts`) emails a short welcome note with the link from the signed-in user's own connected Gmail mailbox: a draft owned by their identity (#349) sent through the Inbox's `sendDraft` → Gmail bridge, signed with their signature. The link's origin is the request's (`requestWhere`, the same as the estimate email's). With Gmail off, no connected mailbox or no usable origin nothing is created and the card falls back to today's copy-to-clipboard with "Couldn’t email it — copy the link instead." A Gmail refusal is held back from later bridge sends and falls back the same way; a Gmail timeout says to check Sent before resending. Copy link stays on every row, and each active grant gains **Resend link** (`resendPortalLinkAction`: signed-in, an active grant of that customer only). The link and its token are never logged or returned in a message. The sent email in the granter's mailbox holds it, and its draft carries no `customerId`, so the thread is never shared with the team through a customer link (#351 review M1; any staff member can still copy the link from the company page). One email per grant per minute, claimed server-side under the grants blob's row lock (`claimGrantInvite`, `inviteSentAt`; "Just sent — wait a minute before resending.", #351 review M2).
 
-## D1118. Each bidder's client link has its own response budget (#352, Jeff 2026-10-15 item 2)
+## D1105. What a vendor company is (#348 slice 4, 2026-10-15)
 
-A client response from a bidder's v3 link counts on its own daily rate-limit key (`responseQuoteLimitKey(quoteId, partyId)` → `share-respond-quote:<quote>:<party>`, 30 a day), and the stored-response cap (`MAX_CLIENT_RESPONSES`, 200) counts per sender (`appendResponseTo` counts only responses with the same `partyId`). The owner's v2 link keeps the quote's own key and its own 200. The per-IP limit (5 / 10 min) is unchanged. The quote's whole list (owner + every bidder) is capped at 1,000 (`MAX_CLIENT_RESPONSES_TOTAL`); a submit past it is **refused** ("can't take more responses online"), never an old response dropped — the list is the record of what customers sent (#352 review M1). Answers #348 2b-ii's "bidders share the 30/day response budget".
+A live company typed `vendor` / `manufacturer`, or the legacy `Vendor` / `Manufacturer` spellings (case-insensitive), is a vendor company for the picker and for save validation. `/vendors` stays exact. A `vendorCompanyId` that isn't a live vendor company is dropped on save and the typed name stays; a kept typed name is never hidden by the field. A moved or copied system validates its vendor companies the same way before they are stored. Prod check: `SELECT DISTINCT type FROM companies` for the spellings in use.
 
-## D1119. A new addendum on a sent bid puts the estimate back to Draft; the revision goes to every bidder (#352, Jeff 2026-10-15 item 3)
+## D1106. The vendor party is added once (#348 slice 4, 2026-10-15)
 
-`setBidDetails` compares the saved addenda with the new list (`addendaAdded`, pure). When a new addendum number appears on a **sent, not-yet-awarded** estimate it runs the normal revise, `setStatus(id, "draft", <user>)`, inside the bid's own row lock (setStatus joins the transaction and re-locks the same row): a history entry, no revision cut, the approval record untouched — so the next send cuts a new sent revision with the next Rev (D1123) and the approval gate judges it like any revise (an approval still holds while its #284 snapshot matches). A due-date change, a removed addendum or an addendum on a draft changes nothing. The Bid chip keeps its dialog open on "Addendum N added — the estimate is back in Draft. Send revision to all bidders on Send & track when it's ready.", tells the Bidders card to reload (`peak:bid-revised`) and re-syncs the Estimator's status through a new read-only `quoteSyncAction`. The walk's label is "Send revision to all bidders"; it already planned every pending email bidder (new ones too) for a draft, through the per-bidder send. The Bid chip asks first ("Addendum N came in after this estimate was sent. Saving puts it back to Draft…"). **An awarded bid never reverts** (#352 review M2): the award is decided, so the addendum is only recorded and the estimate stays Sent — the alternative, sending the revision to the awarded bidder too, was not taken. Every revise (this one included) re-renders the PDF so Send waits for a file that prints the next Rev (#352 review I1, D1123). Answers #348 2b-ii's "acknowledging an addendum after a send means Draft → Send revision".
+A save, or a moved or copied system, adds the vendor party only when it introduces a company the estimate's saved vendor quotes didn't already name. It is idempotent by party id (`addParty` returns `existed`). A vendor removed on purpose isn't re-added unless a new vendor quote brings the company back. Removing a vendor party while a **live** vendor quote names it is refused ("… has a vendor quote on this estimate — delete that vendor quote first."). It runs under the save's `requireUser`, like slice 1's lead-party copy.
 
-## D1120. The first bidder send marks the estimate Sent — already so (#352, Jeff 2026-10-15 item 4)
+## D1107. `addedAt` is server-stamped; legacy quotes stay undated (#348 slice 4, 2026-10-15)
+
+A vendor quote's `addedAt` is written by the server on save, never taken from the browser. Legacy records have none and show "—".
+
+## D1108. Legacy vendor quotes are left alone (#348 slice 4, 2026-10-15)
+
+No name-matching backfill: vendor names are ambiguous ("Rose" vs "Rose Brand"). A quote with no `vendorCompanyId` lists under "Not linked to a vendor company" on the Vendors card, and Edit links it. Open note: older links are dropped on an unrelated save if the company is retyped.
+
+## D1109. Gmail attachments are listed by reference (#348 slice 4, 2026-10-15)
+
+The import lists each attachment (part id, name, mime, size); the bytes stay in Gmail. Older mail is listed lazily when its owner opens it (at most 10 messages per open, stamped `attsListed`). Downloads go through `/api/inbox/attachments/…` for anyone who can see the thread (`canSeeThread`), keyed by `partId` because Gmail attachment ids aren't stable. Inline signature images aren't attachments and are skipped. The route streams, labels anything off its type allowlist `application/octet-stream`, and sends `Cache-Control: private, no-store` with a safe filename. Missing and invisible threads get the same refusal (no oracle). **For Jeff:** imported Gmail attachments now count in the Inbox "has attachment" filter and in attachment-name search.
+
+## D1110. The Inbox → Estimator hand-off is a URL reference (#348 slice 4, 2026-10-15)
+
+"Add as vendor quote…" opens the Estimator at `?vq=<thread>~<message>~<index>`, resolved by a server broker when the Estimator opens. Chosen over Ask AI's sessionStorage hand-off (it dies with the tab, and would hold a Blob path before the user has seen the modal) and over a stored draft id (a new store, TTL and cleanup, and the visibility check would run at click time, not at copy time). The URL carries ids only; the broker re-checks `canSeeThread` at use, and `vq` is stripped before the copy runs so a reload never copies twice. The hand-off is PDF-only. Links in the dialogs open in a new tab.
+
+## D1111. Broker limits (#348 slice 4, 2026-10-15)
+
+The cap is 25 MB (Gmail's ceiling), checked on the stored size before the fetch and on the bytes after. Bytes are copied server-side from Gmail or the stored data-URL to `vendor-quotes/<vqId>-<name>` (ownership asserted on the path), so the 4.5 MB request ceiling never applies; the browser upload stays 4 MB. With no Blob, a data-URL is used only within the estimate's attachment budget. **For Jeff:** a cancelled Add-as-vendor-quote form leaves an orphaned Blob copy, the same as an abandoned upload. Prod check: a vendor email with a PDF over 5 MB, from a Gmail-connected account — the reader chip downloads and Add as vendor quote copies it (verifies streamed response size on Vercel).
+
+## D1112. Filing a thread to an estimate or project (#348 slice 4, 2026-10-15)
+
+**File to estimate / project…** needs the thread's owner (`ownThread`) and `can("create")`. It sets the work link, which **shares the thread with staff** (#341's deliberate link; the dialog says so), makes the vendor the thread's company (`linkThread(…, "user")`) and adds the vendor party. It replaces an existing link, with a warning showing the current one. A manual File also marks a pending #335 filing suggestion skipped, so an Approve can't overwrite the vendor; a sender-rule sweep or an explicit approve can still re-file it, and the Assist report counts the skip as "discarded" in its AI metrics. Inbox dialogs are StrictMode-safe, one submit at a time, and pins are owner-only.
+
+## D1113. Vendor threads on the card and on Procurement (#348 slice 4, 2026-10-15)
+
+A thread is listed when it is filed to the record, its company is one of the record's vendor companies (parties ∪ vendor-quote companies), `canSeeThread` holds (cut in SQL by `canSeeThreadCond`, then re-checked in JS), and it is not a draft or deleted. Rows show subject, last author and time, and unread only — never a body, messages or snippet. A thread the viewer can't see adds nothing, not even a count. An unfiled automatic sender match never appears.
+
+## D1114. Where the Vendors card lives (#348 slice 4, 2026-10-15)
+
+Build package → **BOM quote** (vendor quotes price the BOM; Client package is what goes to the client) and Send & track after Bidders.
+
+## D1115. "Quotes we've received" (#348 slice 4, 2026-10-15)
+
+Indexed by vendor party rows (one batched quote read), on the vendor page Overview and the company page: estimate number, job, quote #, total and date added.
+
+## D1116. Project Procurement reads vendor quotes and emails (#348 slice 4, 2026-10-15)
+
+The Procurement tab shows the source estimate's vendor quotes plus vendor threads filed to the estimate **or** the project. Vendor companies are the union of the project's and the estimate's vendor parties and the vendor-quote companies. Non-vendor threads filed to the project don't show here.
+
+## D1117. Who may add a vendor quote from an email (#348 slice 4, 2026-10-15)
+
+"Add as vendor quote…" is open to anyone who can see the thread (it only reads; the copy runs under the broker's `canSeeThread` check). "Also file" is the thread owner's only.
+
+## D1118. Each bidder has its own client-link response limit (#348, Jeff 2026-10-15 item 2)
+
+A bidder's v3 response spends its own daily bucket, `share-respond-quote:<quote>:<partyId>` (30 a day, as before); the owner's v2 keeps `share-respond-quote:<quote>`. The 200-response storage cap on `Quote.clientResponses` is per responder too: `appendResponseTo` counts only responses with the same `partyId` (the owner has none). A bidder can never use up the owner's budget or another bidder's. The per-IP limit (5 per 10 minutes) is unchanged and still shared by everyone on one address. Trade-off: the stored list can now grow to 200 × (bidders + 1).
+
+## D1119. An addendum after a send puts the estimate back to Draft (#348, Jeff 2026-10-15 item 3)
+
+When a Bid chip save adds an addendum number that wasn't on the stored list and the estimate is `sent`, `setBidDetails` moves it back to `draft` through `setStatus` under the same row lock and transaction. That is the same transition as the status select: history is stamped, the pipeline stage snaps, and Draft has no approval gate. The chip then shows "Addendum N added — the estimate is back in Draft. Send revision to bidders when it's ready." and the Estimator header picks up the new status. The Bidders card's plan already offers **Send revision to bidders** to every pending email bidder on a draft. A note or date edit, a removal or a due-date change never changes status. Re-adding a number removed after the send counts as added. Won and lost estimates still refuse bid details. The card's amber "move the estimate back to Draft" hint stays only as a fallback, for a sent estimate whose addenda changed some other way. Supersedes D1095's manual step.
+
+## D1120. Client responses cap at 1,000 per quote; the bidder key is validated (#352, Jeff 2026-10-15 item 2; builds on D1118)
+
+The per-bidder buckets and per-responder 200 cap are D1118 (#348's build of the same decision). This batch adds: the quote's whole list (owner + every bidder) is capped at 1,000 (`MAX_CLIENT_RESPONSES_TOTAL`, D1118's "200 × (bidders + 1)" trade-off bounded); a submit past it is **refused** ("can't take more responses online"), never an old response dropped — the list is the record of what customers sent (#352 review M1). `responseQuoteLimitKey` wraps D1118's `responseQuoteBucket` for a validated party id (a malformed one falls back to the quote-wide key). Answers #348 2b-ii's "bidders share the 30/day response budget".
+
+## D1121. The addendum revert asks first, never touches an awarded bid, and sends the revision to all bidders (#352, Jeff 2026-10-15 item 3; builds on D1119)
+
+D1119 (#348's build of the same decision) moves a sent estimate back to Draft when a Bid chip save adds an addendum, and syncs the header (`BidDetailsResult.sync`). This batch adds: the Bid chip **asks first** ("Addendum N came in after this estimate was sent. Saving puts it back to Draft so you can send the revision to every bidder. Continue?", `addendumReviseConfirm`); **an awarded bid never reverts** (`addendumMovesToDraft(status, added, awarded)` — the award is decided, so the addendum is only recorded and the estimate stays Sent; the alternative, sending the revision to the awarded bidder too, was not taken; #352 review M2); the walk's label and the chip's note say **"Send revision to all bidders"**; and the revise re-renders the PDF, so the next send prints the next Rev (#352 review I1, D1125). Answers #348 2b-ii's "acknowledging an addendum after a send means Draft → Send revision".
+
+## D1122. The first bidder send marks the estimate Sent — already so (#352, Jeff 2026-10-15 item 4)
 
 No change. `sendBidderEmail` runs the customer pipeline's own mark step: on a Draft, `markAndLink` calls `sendQuoteToCustomer` (send or approve permission, the version check, `checkApprovalGate(q, "sent")`, then `setStatus("sent")`), so the first bidder send cuts the sent revision and later bidders reuse it. Pinned in `scripts/test-oct15-estimating.ts`.
 
-## D1121. The review limit counts the base bid plus the largest alternate (#352, Jeff 2026-10-15 item 6)
+## D1123. The review limit counts the base bid plus the largest alternate (#352, Jeff 2026-10-15 item 6)
 
 `reviewAmount(q)` (`src/lib/review-limits.ts`, pure) = `value` (the base bid, which never includes an alternate) + `largestAlternateTotal(spec)`: the Estimator's alternate systems (`sec.alternate`) summed per Alternate group (`groupId`; an ungrouped alternate is its own group) by `systemSellTotal` — the price the PDF's Alternates block prints — and the biggest group taken. `evaluateReviewLimit` compares it with the owner's limit, the auto-approval snapshot stores it, and `autoSnapshotUnchanged` re-checks against it (a quote approved under the old rule whose largest alternate now pushes it past its snapshot is re-checked against the current limit). Quotes with no alternates, and every service quote, read exactly as before. With everyone holding `approve` (item 5) it only bites for a future non-approver.
 
-## D1122. The full Peak letterhead heads the estimate's Datasheets.pdf cover and the client cut sheets (#352, Jeff 2026-10-15 item 12; answers #331's open question)
+## D1124. The full Peak letterhead heads the estimate's Datasheets.pdf cover and the client cut sheets (#352, Jeff 2026-10-15 item 12; answers #331's open question)
 
 `fullDocumentLetterhead` / `loadEstimateBookLetterhead` (`src/lib/letterhead-server.ts`) give the baked Peak sheet, never the Branding logo; the Peak-header choice (the estimate's `packagePeakHeader` ?? the company default) still decides whether the cover carries one. Every **estimate** datasheet book uses it: the package zip's Datasheets.pdf, the share page's datasheets.pdf, the staff Build package download and the Quotes-hub client package. A Grid design's book keeps the ladder. **Specifications.docx is unchanged** — the zip now resolves its letterhead separately (`ZipBookFront.specLetterhead`), and the zip cache key folds it in (`zipFrontKey`), so a Branding logo change still re-keys a zip whose spec prints it; the book's new letterhead re-keys every cached zip once. Client-style curtain cut sheets head with the baked sheet (`letterheadSrc`, passed by each page so the component stays importable without an image loader); the submittal style keeps its title block.
 
-## D1123. Rev is the send number; every send gets the next one (#352, Jeff 2026-10-15 item 13; supersedes D567's counting rule)
+## D1125. Rev is the send number; every send gets the next one (#352, Jeff 2026-10-15 item 13; supersedes D567's counting rule)
 
 `documentRevStamp` (`src/lib/quote-pdf/state.ts`) — the one rule the PDF, the online pages and the Estimator header print: a quote shown as one sent revision prints that revision's Rev (`docRevNo`, set by `quoteAsOfRevision`); a sent / won / lost quote prints its latest send's Rev; anything else (a draft, a revise in progress) prints the **next** send's Rev — the highest Rev any send printed + 1 (`nextSendRevNo`; 1 before the first send). Manual and recall snapshots no longer move it. Every sent revision stamps `docFields.revNo` = max + 1 when it is cut (`pushRevision` — setStatus's send, a bidder send's cut, a portal price refresh); the PDF copy still overwrites the stamp with what the file printed. Older revisions keep what their PDFs printed (`sentRevNo`: the frozen stamp, else the old rule — the revisions before it), so two old sends that both printed Rev 1 keep Rev 1 and the next send is Rev 2. An unchanged re-send of a sent quote re-sends the same revision and keeps its Rev; a resend after a revise is a new send. The date rule is unchanged.
 
 **The copy step never reprints an old Rev (#352 review I1).** A revise resent with no edits used to copy the previous send's file (it printed the old Rev) onto the new revision and overwrite its stamp. Now: every revise (any path into Draft from sent / won / lost — `setStatus` itself) schedules the PDF, so Send waits for a render that prints the next Rev; and `copySentRevisionPdf` follows `revisionCopyPlan` — a pre-send file whose printed Rev differs from the revision's stamp is refused and re-rendered (while nothing printed changed since the send), a post-send re-render is copied only when it printed exactly the stamped Rev, and `setRevisionPdfPath` never records a file over a different stamped Rev.
 
-## D1124. The online and package-page BOM follow the PDF's Qty switch (#352, Jeff 2026-10-15 item 14; answers #301's "BOM quantities")
+## D1126. The online and package-page BOM follow the PDF's Qty switch (#352, Jeff 2026-10-15 item 14; answers #301's "BOM quantities")
 
 One switch, `pdfOptions.pdfQty`: `bomViewProps` (the v1 / portal online BOM view and the Estimator's BOM quote tab) keeps the quote's own `pdfQty` instead of forcing it on, and the package page's BOM drops its Qty column and quantities when the sent revision's PDF hides them (`PackageViewProps.showQty: false`, present only then, so a page showing quantities is byte-identical).
 
-## D1125. Online Accept is signed: name + title required, optional PO #; the Lead estimator gets a to-do (#352, Jeff 2026-10-15 item 15)
+## D1127. Online Accept is signed: name + title required, optional PO #; the Lead estimator gets a to-do (#352, Jeff 2026-10-15 item 15)
 
 **Share / package page** ("Choose your scopes", the accept): `sanitizeClientResponse` requires the title on an accept (after the scope check, so earlier refusals read as before) and takes an optional PO number — `cleanPoNumber`: one line, ≤ 60 characters, refused when any digit run in it is a card number — the portal's own `looksLikeCardNumber` (13–19 digits, spaces / dashes allowed, passing Luhn; #352 review I3), so a long PO that fails Luhn is kept. Stored on the response (`ClientResponse.po`), named in the quote note / lead activity / task notes ("Accepted by <name>, <title> — PO <po>", `acceptanceLine`) and on Client link's rows. **Portal Accept**: `acceptPortal` requires `signerName` and `signerTitle` (typed in the dialog) and takes `poNumber`, validated after the existing refusals and before the rate limit and the write, stored on `portalAcceptance`; the Estimator's Portal panel shows the line. **The notice**: the app has no system or sender mailbox — every outbound email is a person's own Gmail — so instead of an email the Lead estimator (else the active admins — `manage_users`, not every approver; #352 review M6) gets a to-do, "EST-#### accepted online — Accepted by <name>, <title> — PO <po>" (`notifyPortalAcceptance`; the share page's accept already gave them one). Emailing it needs a sender mailbox first.
 
-## D1126. The client zip carries the estimate's Specs-builder SP-#### files (#352, Jeff 2026-10-15 item 17; answers #301's "Spec builder vs the zip")
+## D1128. The client zip carries the estimate's Specs-builder SP-#### files (#352, Jeff 2026-10-15 item 17; answers #301's "Spec builder vs the zip")
 
 `src/lib/estimate-output/package-spec-docs-server.ts`: the specs the builder opened from this estimate (`source.quoteId` — the Quotes hub, the Grid or the engagement), oldest first, each built exactly as its own Word download (`loadAssembledSpec` → `buildSectionDocx`, the spec's own Peak-header choice, `specFileName`; a repeated name gets " (2)"). When there is at least one they replace the D94 `Specifications.docx`; without any the D94 file ships as before. A spec whose section left the library is named in LEFT OUT.txt (not cached).
 
 **Frozen per revision (#352 review I2, the coordinator's call):** a sent revision's zip carries only the specs downloaded at or before that revision's send (`downloadedAt <= rev.at`, `specDocumentsForRevision`) — a downloaded spec counts as the finished one; a spec never downloaded (a draft) or first downloaded after the send is left out of that revision's zip. The specs are read with one SQL-filtered query on their source quote (`specDocumentsWithQuoteSource`), never the whole collection. The zip cache key's spec part folds in each included spec's id, `downloadedAt`, last edit and the letterhead its Word file prints (the Branding logo / Peak-header stamp, `revisionSpecKey`). **Residual risk:** an included spec's text still reads the Spec Library live (Parts 1/3, matched records), exactly as its own Word download does, so a library edit after the send can change what a later download of that revision's zip contains; the cache key does not see library edits.
 
-## D1127. Lead estimator and Prepared by lock at the first send; approvers can still change them (#352, Jeff 2026-10-15 item 18; answers #287's "freeze both at send?")
+## D1129. Lead estimator and Prepared by lock at the first send; approvers can still change them (#352, Jeff 2026-10-15 item 18; answers #287's "freeze both at send?")
 
 `src/lib/quote-people-lock.ts` (pure): a quote has been sent once it has a sent revision, a status move to sent, or a status at/after sent (`quoteSentOnce`). From then on `setQuotePeopleAs` refuses a non-approver's change to either field ("Lead estimator and Prepared by are locked once the quote has been sent — ask an approver to change them."), and the Estimator shows both selects disabled for them with that hint. Approvers change them as before (#287's own hand-off rules still apply before the send). Latent while everyone holds `approve`.
 
-## D1128. The package and estimator bonus rates live in Estimating Rules, drafts only (#352, Jeff 2026-10-15 item 19; answers #330's "whether the rates become Settings")
+## D1130. The package and estimator bonus rates live in Estimating Rules, drafts only (#352, Jeff 2026-10-15 item 19; answers #330's "whether the rates become Settings")
 
 Estimating Rules → **Estimator bonuses** (the pricing registry's general blob, `bonus.packagePct` / `bonus.estimatorPct`, percent numbers, defaults 5 and 2, 0–20 %, clamped by the store). `canonicalBonusSections` (every server write) and the Estimator's live effect pass the current rates; `bonusRatesFor(status, sections, rates)` gives a draft (or a new estimate) the current rates and every other status the rate its lines were figured at, so a sent / won / lost quote never re-prices. A line records its rate (`SpecItem.bonusPct`, a fraction) only when it isn't the default, so default-rate lines stay byte-identical to #330's; its text names the rate ("Package bonus — 6% of system cost"). The Won record sums the lines as before. UI labels no longer name a percentage.
 
-## D1129. Narrative photos alternate right, left, right (#352, Jeff 2026-10-15 item 20; answers #293's "photo side")
+## D1131. Narrative photos alternate right, left, right (#352, Jeff 2026-10-15 item 20; answers #293's "photo side")
 
 The estimate document (PDF and online) numbers its printed key-product photos in the order they print — the body's narrative systems, then the Alternates block's — and floats every other one left (`alternatingPhotoSides`, `keyProductPhotoStyle`, `src/app/(app)/estimator/quote-document-view.ts`); a phone still stacks them. The package page does the same across its scopes (`PackageKeyProduct.side`, `pkg-kp-left`; the left-photo CSS prints only on a page that has one, so other pages are byte-identical). The Build package document's product image gains align **Auto** (`ImageAlign`), the new default for an inserted or seeded image: Auto images take the side opposite the last printed side photo (the first one right) in `resolvePackageDoc`; an explicit Left / Right / Full wins, and stored images keep their stored align, so older documents print as before. The image's strip offers Auto. The editor previews an Auto image on the side the print gives it — one walk for both (`src/lib/package-doc/photo-sides.ts`; the editor counts a photo by its preview source, which can differ from the print's only when a part's photo is missing — #352 review M4). **Older sent quotes:** their online pages render live from the sent revision, so a narrative estimate sent before this change with two or more key-product photos now shows them alternating online, while its frozen PDF keeps every photo on the right. Left as is (#352 review M4).
 
-## D1130. Load system brings vendor-quoted lines at their last price, flagged (#352, Jeff 2026-10-15 item 21; answers #293 spec §12 q7)
+## D1132. Load system brings vendor-quoted lines at their last price, flagged (#352, Jeff 2026-10-15 item 21; answers #293 spec §12 q7)
 
 `librarySectionForLoad` keeps vendor-quote lines (and their key-product blocks). After the usual re-price, `flagOldVendorLine` puts each one back at its last price (cost, sell and any typed extended sell), drops its link to the source estimate's vendor-quote record (that record stays with the source) and puts **"Old vendor price — re-quote"** in front of its internal note — internal only, never on a customer document. The Load notice counts them ("N vendor-quote lines at the old vendor price — re-quote").
 
-## D1131. The online estimate shows the cut sheets the PDF carries (#352, Jeff 2026-10-15 item 22)
+## D1133. The online estimate shows the cut sheets the PDF carries (#352, Jeff 2026-10-15 item 22)
 
 `onlineCutSheets` (`src/lib/curtain-cut-sheets/online.ts`): when the SENT revision's Cut sheets toggle is on, under the print route's own rule (nothing printed changed since that revision — the sheets are built from the live quote), the Client-style sheets load with their photos inlined (8 s cap; a slow or failed load drops them, never the page) and show under the v1 share page, the portal estimate page and the package page (a new `cutSheets` slot), owner-addressed like the PDF's, scrolling sideways on a phone (`OnlineCutSheets`).
