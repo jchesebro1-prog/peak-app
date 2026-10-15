@@ -5,6 +5,7 @@ import {
   DOC_VERSION,
   isChipKind,
   isPhotoAlign,
+  isImageAlign,
   LIST_START_MAX,
   LIST_START_MIN,
   MARK_NAMES,
@@ -235,7 +236,7 @@ export function sanitizePackageDoc(raw: unknown): PackageDoc | null {
         const anchors = productAnchors(r.attrs);
         if (!anchors) break;
         const a = isObj(r.attrs) ? r.attrs : {};
-        p.content.push({ type: "productImage", attrs: { ...anchors, align: isPhotoAlign(a.align) ? a.align : DEFAULT_IMAGE.align, width: clampPhotoWidth(a.width) } });
+        p.content.push({ type: "productImage", attrs: { ...anchors, align: isImageAlign(a.align) ? a.align : DEFAULT_IMAGE.align, width: clampPhotoWidth(a.width) } });
         count++;
         break;
       }

@@ -34,6 +34,11 @@ import { bonusRatesFor, withBonusLines, idCounterFrom } from "../src/lib/estimat
 import { canonicalBonusSections } from "../src/lib/estimate-bonus/canonical";
 import { GROUPS, setValue, loadBonusRates } from "../src/lib/stores/pricing";
 import { flagOldVendorLine, OLD_VENDOR_PRICE_NOTE } from "../src/lib/narrative/system-library";
+import { alternatingPhotoSides, keyProductPhotoStyle } from "../src/app/(app)/estimator/quote-document-view";
+import { resolvePackageDoc } from "../src/lib/package-doc/resolve";
+import { productImageFor } from "../src/lib/package-doc/seed";
+import { sanitizePackageDoc } from "../src/lib/package-doc/sanitize";
+import { DEFAULT_IMAGE } from "../src/lib/package-doc/schema";
 import { appendResponseTo, MAX_CLIENT_RESPONSES, responseQuoteLimitKey, type ClientResponse } from "../src/lib/estimate-output/responses";
 
 const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -45,6 +50,32 @@ export async function oct15PureChecks(ok: Ok) {
   oct15RevChecks(ok);
   await oct15LetterheadChecks(ok);
   oct15BonusRateChecks(ok);
+  /* ---- #20 — narrative photos alternate right, left, right ---- */
+  {
+    const sides = alternatingPhotoSides(["a|1", "a|2", "b|1", "a|1"]);
+    ok(sides.get("a|1") === "right" && sides.get("a|2") === "left" && sides.get("b|1") === "right" && sides.size === 3, "oct15 #20: printed photos alternate right, left, right in document order");
+    ok(keyProductPhotoStyle("right").float === "right" && keyProductPhotoStyle("right").margin === "0 0 8px 14px" && keyProductPhotoStyle("left").float === "left" && keyProductPhotoStyle("left").margin === "0 14px 8px 0",
+      "oct15 #20: the first photo keeps #293's right float; the next mirrors it");
+    const qd = rd("src/app/(app)/estimator/quote-document.tsx");
+    ok(qd.includes("style={keyProductPhotoStyle(photoSides?.get(ps.id + \"|\" + kp.sku) ?? \"right\")}") && qd.includes("[...previewSections, ...alternateGroups.flatMap((ag) => ag.systems.map((x) => x.ps))]"),
+      "oct15 #20: the PDF / online document numbers photos across the body's narrative systems, then the alternates");
+    const pv = rd("src/components/estimate-output/package-view.tsx");
+    ok(pv.includes(".pkg-kp.pkg-kp-left img { float: left;") && pv.includes('className={kp.side === "left" ? "pkg-kp pkg-kp-left" : "pkg-kp"}') && rd("src/lib/estimate-output/package-model.ts").includes("n++ % 2 === 1"),
+      "oct15 #20: the package page alternates too (stacked on a phone)");
+    // The TipTap document: a new image is "auto" and alternates; an explicit choice wins.
+    ok(DEFAULT_IMAGE.align === "auto" && productImageFor("s1", 1, "A").attrs.align === "auto" && productImageFor("s1", 1, "A", { align: "left" }).attrs.align === "left", "oct15 #20: a new document image defaults to Auto");
+    const photos = { A: { src: "/a", alt: "" }, B: { src: "/b", alt: "" }, C: { src: "/c", alt: "" }, D: { src: "/d", alt: "" } };
+    const sections = [{ id: "s1", name: "S", kind: "materials", mfr: "", freightPct: 0, items: ["A", "B", "C", "D"].map((sku, i) => ({ id: i + 1, sku, desc: sku, qty: 1, unit: "ea", cost: 1, price: 2 })) }];
+    const img = (sku: string, n: number, align?: "left" | "right" | "full" | "auto") => productImageFor("s1", n, sku, align ? { align } : undefined);
+    const ctx = { sections, t: { grand: 0, tax: 0, credit: 0 }, quoteId: "Q", photos } as never;
+    const aligns = (content: unknown[]) => resolvePackageDoc({ type: "doc", version: 1, content } as never, ctx).blocks.map((b) => (b as { photo?: { align: string } }).photo?.align).join();
+    ok(aligns([img("A", 1), img("B", 2), img("C", 3)]) === "right,left,right", "oct15 #20: Auto images alternate right, left, right");
+    ok(aligns([img("A", 1), img("B", 2, "right"), img("C", 3), img("D", 4, "full")]) === "right,right,left,full", "oct15 #20: an explicit choice wins and the next Auto image goes opposite it");
+    ok(aligns([img("A", 1, "left"), img("B", 2)]) === "left,right", "oct15 #20: after an explicit Left, Auto goes right");
+    const saneOld = sanitizePackageDoc({ type: "doc", version: 1, content: [{ type: "productImage", attrs: { sectionId: "s1", lineKey: "1", sku: "A", align: "right", width: 34 } }] });
+    ok(!!saneOld && (saneOld as { content: Array<{ attrs: { align: string } }> }).content[0].attrs.align === "right", "oct15 #20: an existing image's stored Right is kept (older documents print as before)");
+    ok(rd("src/components/package-doc/editor/product-image-view.tsx").includes('[["auto", "Auto"], ["left", "Left"], ["right", "Right"], ["full", "Full"]]'), "oct15 #20: the image strip offers Auto");
+  }
   /* ---- #21 — Load system brings vendor-quoted lines, flagged "Old vendor price — re-quote" ---- */
   {
     const orig = { id: 4, sku: "VQ-1", desc: "Vendor rig", qty: 2, unit: "ea", cost: 500, price: 700, extSellOverride: 1500, vendorQuoteId: "vq1", noFreight: true, internalNote: "from Acme" } as never;

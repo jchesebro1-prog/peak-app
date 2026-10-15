@@ -57744,7 +57744,7 @@ import type { SpecSection as P5Section } from "@/app/(app)/estimator/types";
     J(seeded.content[9]) === J({ type: "priceTable" }) && J(seeded.content[12]) === J(P("Alt words")),
     "#P5 model: seed — the intro follows narrativeBlocks (line breaks kept, '- ' bullets); a system with no narrative gets just its heading and price line");
   const kp1 = seeded.content[4] as P5PB, kp2 = seeded.content[5] as P5PB;
-  ok(J(seeded.content[3]) === J({ type: "productImage", attrs: { sectionId: "s1", lineKey: "1", sku: "SKU1", align: "right", width: 34 } }) &&
+  ok(J(seeded.content[3]) === J({ type: "productImage", attrs: { sectionId: "s1", lineKey: "1", sku: "SKU1", align: "auto", width: 34 } }) && // #20: auto
     J(kp1.attrs) === J({ sectionId: "s1", lineKey: "1", sku: "SKU1", photo: { show: false, align: "right", width: 34 } }) && kp2.attrs.photo.show === false && kp2.attrs.lineKey === "2" &&
     p5t.productBlockText(kp1) === "Fixture one paragraph.\n\nSecond para." && p5t.productBlockText(kp2) === "- f1\n- f2",
     "#P5 model: seed — product blocks for printable key products only (missing line skipped), words read back verbatim; #312: the photo is its own productImage (right, 34) before the words when kp.photo, the block's own photo hidden");
@@ -58504,7 +58504,7 @@ import type { PDBlock as P5lBlock } from "@/lib/package-doc/types";
   ok(valid(sys) && J(sys) === J([H("Lighting"), P(), { type: "systemTotal", attrs: { sectionId: "s2" } }]),
     "#P5 left pane: a system drops as a level-2 heading with its name + an empty paragraph (the cursor lands there) + its live price line (#312)");
   const line5 = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "5" }, secs, paraOf);
-  ok(valid(line5) && J(line5) === J([{ type: "productImage", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "right", width: 34 } }, { type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: false, align: "right", width: 34 } }, content: [P(T("First para.")), P(T("Second para."))] }]),
+  ok(valid(line5) && J(line5) === J([{ type: "productImage", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "auto", width: 34 } }, { type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: false, align: "right", width: 34 } }, content: [P(T("First para.")), P(T("Second para."))] }]),
     "#P5 left pane: a line drops as its productImage (right 34 %, #312) + a product block (sectionId / lineKey / sku, own photo hidden) holding its library paragraph split into paragraphs");
   const line6 = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "6" }, secs, paraOf);
   ok(valid(line6) && J((line6![1] as { content: unknown }).content) === J([P()]),
@@ -59278,7 +59278,7 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
   const blankSku = p5San(doc([IMG("s2", "5", "")]))!;
   const once = p5San(doc([IMG("s2", "5", "SKU-5"), PB("s2", "5", "SKU-5", "w", { show: false }), IMG("s2", "5", "SKU-5", "full", 80)]))!;
   ok(J(blankSku.content[0]) === J(IMG("s2", "5", "")) && J(p5San(once)) === J(once) && once.content.length === 3 &&
-     p5s.BLOCK_NODES.includes("productImage") && (p5s.NODE_NAMES as readonly string[]).includes("productImage") && J(p5s.DEFAULT_IMAGE) === J({ align: "right", width: 34 }),
+     p5s.BLOCK_NODES.includes("productImage") && (p5s.NODE_NAMES as readonly string[]).includes("productImage") && J(p5s.DEFAULT_IMAGE) === J({ align: "auto", width: 34 }), // Jeff 2026-10-15 #20: a new image alternates
     "#312 images: a blank sku is kept (like a product block); sanitize is idempotent; productImage is in the schema lists; the default image is right at 34 %");
 
   // (2) Resolver: own photo, kind placeholder, nothing.

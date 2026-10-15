@@ -56,6 +56,7 @@ export const PACKAGE_WEB_CSS = `
 .pkg-label { font-size: 11px; font-weight: 700; color: #5b616e; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
 .pkg-kp { overflow: hidden; margin-top: 14px; }
 .pkg-kp img { float: right; width: 34%; max-height: 2.4in; object-fit: contain; margin: 0 0 8px 14px; }
+.pkg-kp.pkg-kp-left img { float: left; margin: 0 14px 8px 0; }
 .pkg-bom-wrap { overflow-x: auto; }
 .pkg-bom { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pkg-bom th { white-space: nowrap; text-align: left; font-size: 11px; font-weight: 700; color: #5b616e; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #e4e7ec; padding: 6px 8px; }
@@ -69,7 +70,7 @@ export const PACKAGE_WEB_CSS = `
 @media (max-width: 600px) {
   .pkg-card { padding: 18px 16px; }
   .pkg-grand { text-align: left; }
-  .pkg-kp img { float: none; display: block; width: 100%; max-height: 3in; margin: 0 0 10px; }
+  .pkg-kp img, .pkg-kp.pkg-kp-left img { float: none; display: block; width: 100%; max-height: 3in; margin: 0 0 10px; }
 }
 @page { size: letter; margin: 0.6in; }
 @media print {
@@ -129,7 +130,7 @@ function Scope({ s, bom, extra, showQty = true }: { s: PackageScopeView; bom: bo
           <Blocks blocks={s.intro} />
           {s.fallback && <p className="pkg-p">{s.fallback}</p>}
           {s.keyProducts.map((kp) => (
-            <div key={kp.sku} className="pkg-kp">
+            <div key={kp.sku} className={kp.side === "left" ? "pkg-kp pkg-kp-left" : "pkg-kp"}>
               {kp.photo && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={kp.photo.src} alt={kp.photo.alt} />

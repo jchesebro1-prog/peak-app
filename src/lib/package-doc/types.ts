@@ -11,6 +11,9 @@ export type PDMark = { type: PDMarkType };
 
 export type ChipKind = "systemPrice" | "systemName" | "lineQty" | "quoteNumber" | "grandTotal";
 export type PhotoAlign = "left" | "right" | "full";
+/** Jeff 2026-10-15 #20 — a product image's align: "auto" (the default for a new image) alternates right, left, right
+ *  in document order when printed; left / right / full are the estimator's explicit choice and always win. */
+export type ImageAlign = PhotoAlign | "auto";
 
 export type PDText = { type: "text"; text: string; marks?: PDMark[] };
 export type PDHardBreak = { type: "hardBreak" };
@@ -41,7 +44,7 @@ export type LineAnchor = { sectionId: string; lineKey: string; sku: string };
 
 /** #312 — a product's photo as its own piece (atom): just the image, floated
  *  left / right (`width` % of the column) or full width, anchored like a product block. */
-export type PDProductImage = { type: "productImage"; attrs: LineAnchor & { align: PhotoAlign; /** 25–100 (% of the text column). */ width: number } };
+export type PDProductImage = { type: "productImage"; attrs: LineAnchor & { align: ImageAlign; /** 25–100 (% of the text column). */ width: number } };
 
 /** A system's live price line (atom): "<system name>  <sell total>", read at render. */
 export type PDSystemTotal = { type: "systemTotal"; attrs: { sectionId: string } };

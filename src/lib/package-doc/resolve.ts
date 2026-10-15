@@ -117,12 +117,13 @@ function product(b: PDProductBlock, ctx: PackageDocCtx): RProduct {
 }
 
 /** A product image: its photo source with its own align / width, or null
- *  (prints nothing) when no source resolves. */
-export function productImageOf(b: PDProductImage, ctx: Pick<PackageDocCtx, "sections" | "photos">): RImage | null {
+ *  (prints nothing) when no source resolves. Jeff 2026-10-15 #20: an "auto"
+ *  image takes `autoSide` (resolvePackageDoc alternates it in document order). */
+export function productImageOf(b: PDProductImage, ctx: Pick<PackageDocCtx, "sections" | "photos">, autoSide: "left" | "right" = "right"): RImage | null {
   const a = b?.attrs;
   if (!a) return null;
   const src = linePhotoSource(a, ctx);
-  return src ? { t: "image", sku: a.sku, photo: { src: src.src, alt: src.alt, align: alignOf(a.align), width: clampPhotoWidth(a.width) } } : null;
+  return src ? { t: "image", sku: a.sku, photo: { src: src.src, alt: src.alt, align: a.align === "auto" ? autoSide : alignOf(a.align), width: clampPhotoWidth(a.width) } } : null;
 }
 
 /** The live price table — the same numbers as QuoteDocument's totals block. */
@@ -176,9 +177,15 @@ function block(b: PDBlock, ctx: PackageDocCtx): RBlock | null {
 
 export function resolvePackageDoc(doc: PackageDoc, ctx: PackageDocCtx): ResolvedPackageDoc {
   const blocks: RBlock[] = [];
+  // Jeff 2026-10-15 #20: an "auto" product image floats opposite the last printed side photo (the first one right),
+  // so photos alternate right, left, right; an explicit Left / Right (image or product-block photo) sets the side.
+  let last: "left" | "right" | null = null;
   for (const b of doc && Array.isArray(doc.content) ? doc.content : []) {
-    const r = block(b, ctx);
-    if (r) blocks.push(r);
+    const r: RBlock | null = b?.type === "productImage" ? productImageOf(b, ctx, last === "right" ? "left" : "right") : block(b, ctx);
+    if (!r) continue;
+    blocks.push(r);
+    const ph: RPhoto | null = r.t === "image" || r.t === "product" ? r.photo : null;
+    if (ph && (ph.align === "left" || ph.align === "right")) last = ph.align;
   }
   return { blocks };
 }

@@ -4,10 +4,10 @@ import type { SpecSection } from "@/app/(app)/estimator/types";
 import { findLine, findSection } from "@/lib/package-doc/chips";
 import { productBlockInBom } from "@/lib/package-doc/gaps";
 import { linePlaceholder } from "@/lib/package-doc/print";
-import { clampPhotoWidth, DEFAULT_IMAGE, isPhotoAlign, MAX_BLOCK_TEXT, MAX_DEPTH, MAX_JSON_CHARS, MAX_NODES } from "@/lib/package-doc/schema";
+import { clampPhotoWidth, DEFAULT_IMAGE, isImageAlign, isPhotoAlign, MAX_BLOCK_TEXT, MAX_DEPTH, MAX_JSON_CHARS, MAX_NODES } from "@/lib/package-doc/schema";
 import { countNodes, sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import { normalizeProductText } from "@/lib/package-doc/text";
-import type { LineAnchor, PackageDoc, PDProductBlock, PhotoAlign, PhotoAttrs } from "@/lib/package-doc/types";
+import type { ImageAlign, LineAnchor, PackageDoc, PDProductBlock, PhotoAttrs } from "@/lib/package-doc/types";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 
 /**
@@ -103,12 +103,12 @@ export function withPhoto(photo: Partial<PhotoAttrs> | null | undefined, patch: 
   return { show: next.show !== false, align: isPhotoAlign(next.align) ? next.align : "right", width: clampPhotoWidth(next.width) };
 }
 
-export type ImageAttrs = { align: PhotoAlign; width: number };
+export type ImageAttrs = { align: ImageAlign; width: number };
 
-/** A product-image patch, clamped like the validator (width 25–100, align left/right/full). */
+/** A product-image patch, clamped like the validator (width 25–100, align auto/left/right/full — Jeff 2026-10-15 #20). */
 export function withImage(img: Partial<ImageAttrs> | null | undefined, patch: Partial<ImageAttrs>): ImageAttrs {
   const next = { ...DEFAULT_IMAGE, ...(img || {}), ...patch };
-  return { align: isPhotoAlign(next.align) ? next.align : DEFAULT_IMAGE.align, width: clampPhotoWidth(next.width) };
+  return { align: isImageAlign(next.align) ? next.align : DEFAULT_IMAGE.align, width: clampPhotoWidth(next.width) };
 }
 
 export type DocSizeState = {

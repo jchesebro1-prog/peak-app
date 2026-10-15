@@ -6,7 +6,7 @@ import { keyProductHeading } from "@/app/(app)/estimator/narrative";
 import { findLine, findSection } from "@/lib/package-doc/chips";
 import { lineAnchorInBom } from "@/lib/package-doc/gaps";
 import { clampPhotoWidth, PHOTO_WIDTH_MAX, PHOTO_WIDTH_MIN } from "@/lib/package-doc/schema";
-import type { LineAnchor, PhotoAlign } from "@/lib/package-doc/types";
+import type { ImageAlign, LineAnchor } from "@/lib/package-doc/types";
 import { AtomRemove } from "./atom-remove";
 import { usePackageDocEnv } from "./editor-context";
 import { setImageAttrs } from "./editor-commands";
@@ -26,7 +26,8 @@ import { isLineTokenSku, linePhotoPreview, withImage, type ImageAttrs } from "./
  */
 
 const BTN: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 11, fontWeight: 600, color: "#3a3f4a", background: "#f1f2f5", border: "none", borderRadius: 5, padding: "3px 7px", cursor: "pointer" };
-const ALIGNS: Array<[PhotoAlign, string]> = [["left", "Left"], ["right", "Right"], ["full", "Full"]];
+// Jeff 2026-10-15 #20: Auto (the default) alternates right, left, right when printed; the others are explicit.
+const ALIGNS: Array<[ImageAlign, string]> = [["auto", "Auto"], ["left", "Left"], ["right", "Right"], ["full", "Full"]];
 const AMBER = "#d9a63a";
 
 /** Where the image sits: the print's float (package-doc-view photoStyle), on the
@@ -59,7 +60,7 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
   const strip: CSSProperties = {
     position: "absolute",
     top: "calc(100% + 4px)",
-    ...(img.align === "right" ? { right: 0 } : img.align === "left" ? { left: 0 } : { left: "50%", transform: "translateX(-50%)" }),
+    ...(img.align === "right" || img.align === "auto" ? { right: 0 } : img.align === "left" ? { left: 0 } : { left: "50%", transform: "translateX(-50%)" }),
     zIndex: 4,
     display: "flex",
     alignItems: "center",

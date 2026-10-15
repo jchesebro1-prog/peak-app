@@ -5,7 +5,7 @@ import { systemSellTotal } from "./pricing";
 import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 import { narrativeBlocks, printableKeyProducts, type NarrativeBlock } from "./narrative";
-import { alternateGroupsForPrint, documentAppendixSystemIds, printedGroupHeadings } from "./quote-document-view";
+import { alternateGroupsForPrint, alternatingPhotoSides, documentAppendixSystemIds, keyProductPhotoStyle, printedGroupHeadings } from "./quote-document-view";
 import type { SystemGroup } from "@/lib/estimate-groups/groups";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 import PackageDocView from "@/components/package-doc/package-doc-view";
@@ -489,7 +489,14 @@ type DocSystem = ReturnType<typeof docSystem>;
 /** What prints under a system's band — its narrative + key products, its
  *  itemized lines, or (sectioned detail) a line-count row. Shared by the body
  *  and the Phase 2b Alternates block so the two can't drift. */
-function SystemBody({ ps, p, lineCols, freightRowLabel, alternate }: { ps: DocSystem; p: QuoteDocumentProps; lineCols: string; freightRowLabel: string; alternate?: boolean }) {
+/** The photo a key product prints (own photo, else its placeholder), or undefined — one rule for SystemBody and the
+ *  document-order alternation (Jeff 2026-10-15 #20). */
+function keyProductPhoto(kp: DocSystem["keyProducts"][number], p: QuoteDocumentProps) {
+  const own = kp.photo ? p.keyProductPhotos?.[kp.sku] : undefined;
+  return own ?? (kp.photo && kp.placeholder ? { src: PLACEHOLDER_SRC[kp.placeholder], alt: "" } : undefined);
+}
+
+function SystemBody({ ps, p, lineCols, freightRowLabel, alternate, photoSides }: { ps: DocSystem; p: QuoteDocumentProps; lineCols: string; freightRowLabel: string; alternate?: boolean; photoSides?: ReadonlyMap<string, "right" | "left"> }) {
   const isItemized = p.detail === "itemized";
   const showLines = p.pdfQty || p.pdfNotes || p.pdfPrices;
   return ps.presentation === "narrative" ? (
@@ -508,8 +515,7 @@ function SystemBody({ ps, p, lineCols, freightRowLabel, alternate }: { ps: DocSy
               // Own photo (or its manufacturer's image) first; an allowance /
               // custom line with neither prints its placeholder (a public
               // /placeholders/ URL — same origin for print, share and portal).
-              const own = kp.photo ? p.keyProductPhotos?.[kp.sku] : undefined;
-              const photo = own ?? (kp.photo && kp.placeholder ? { src: PLACEHOLDER_SRC[kp.placeholder], alt: "" } : undefined);
+              const photo = keyProductPhoto(kp, p);
               return (
                 <div key={"kp-" + kp.sku} className="est-kp" style={{ display: "flow-root", marginTop: blocks.length || ki ? 12 : 0 }}>
                   {photo ? (
@@ -518,7 +524,7 @@ function SystemBody({ ps, p, lineCols, freightRowLabel, alternate }: { ps: DocSy
                       <img
                         src={photo.src}
                         alt={photo.alt}
-                        style={{ float: "right", width: "34%", maxHeight: "2.4in", objectFit: "contain", margin: "0 0 8px 14px" }}
+                        style={keyProductPhotoStyle(photoSides?.get(ps.id + "|" + kp.sku) ?? "right")}
                       />
                     </>
                   ) : null}
@@ -615,6 +621,13 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
     systems: ag.sections.map((sec) => ({ ps: docSystem(sec, "A" + ++altNum, p), options: p.pdfOptions ? sec.items.filter((it) => it.option) : [] })),
   }));
   const altCount = altNum;
+  // Jeff 2026-10-15 #20: narrative photos alternate right, left, right in the order they print — the body's
+  // narrative systems, then the Alternates block's.
+  const photoSides = alternatingPhotoSides(
+    [...previewSections, ...alternateGroups.flatMap((ag) => ag.systems.map((x) => x.ps))]
+      .filter((ps) => ps.presentation === "narrative")
+      .flatMap((ps) => ps.keyProducts.filter((kp) => !!keyProductPhoto(kp, p)).map((kp) => ps.id + "|" + kp.sku))
+  );
   // The alternate systems that actually print in the Alternates block; an
   // alternate that doesn't (no sell, so nothing prints) can't carry its option
   // lines there, so they stay in the Optional additions box as before.
@@ -847,7 +860,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                   <GroupHeading name={groupHeadings.get(ps.id)!.name} subtotalLabel={fmt(groupHeadings.get(ps.id)!.subtotal)} />
                 )}
                 <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
-                <SystemBody ps={ps} p={p} lineCols={lineCols} freightRowLabel={freightRowLabel} />
+                <SystemBody ps={ps} p={p} lineCols={lineCols} freightRowLabel={freightRowLabel} photoSides={photoSides} />
               </div>
             ))
           )}
@@ -877,7 +890,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                   {ag.systems.map(({ ps, options }) => (
                     <div key={"alt-" + ps.id}>
                       <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
-                      <SystemBody ps={ps} p={p} lineCols={lineCols} freightRowLabel={freightRowLabel} alternate />
+                      <SystemBody ps={ps} p={p} lineCols={lineCols} freightRowLabel={freightRowLabel} alternate photoSides={photoSides} />
                       {options.length > 0 && (
                         <div style={{ padding: "0 13px", marginBottom: 6 }}>
                           {options.map((it) => (

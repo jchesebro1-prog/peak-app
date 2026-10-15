@@ -40,7 +40,8 @@ export function packagePhotoSections(sections: SpecSection[]): SpecSection[] {
   return (Array.isArray(sections) ? sections : []).map((s) => (s && (s.presentation || "itemized") !== "narrative" ? { ...s, presentation: "narrative" as const } : s));
 }
 
-export type PackageKeyProduct = { sku: string; heading: string; blocks: NarrativeBlock[]; photo: { src: string; alt: string } | null };
+/** `side` (Jeff 2026-10-15 #20): "left" on every other printed photo — the page alternates right, left, right. */
+export type PackageKeyProduct = { sku: string; heading: string; blocks: NarrativeBlock[]; photo: { src: string; alt: string } | null; side?: "left" };
 
 export type PackageScopeView = {
   id: string;
@@ -102,6 +103,15 @@ export type PackageViewInput = {
   bidClosed?: boolean;
 };
 
+/** Jeff 2026-10-15 #20 — the page's photos alternate right, left, right across the scopes, in order. Pure. */
+function withAlternatingSides(scopes: PackageScopeView[]): PackageScopeView[] {
+  let n = 0;
+  return scopes.map((s) => ({
+    ...s,
+    keyProducts: s.keyProducts.map((kp) => (kp.photo ? (n++ % 2 === 1 ? { ...kp, side: "left" as const } : kp) : kp)),
+  }));
+}
+
 export function packageViewModel(i: PackageViewInput): PackageViewProps {
   const d = i.doc;
   const scopes = outputScopes(d);
@@ -126,7 +136,7 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
     showQty: d.pdfQty !== false,
     narrativeHref: i.base,
     bomHref: i.base + "?view=bom",
-    scopes: scopes.map((s) => {
+    scopes: withAlternatingSides(scopes.map((s) => {
       const keyProducts: PackageKeyProduct[] = s.keyProducts.map((kp) => ({
         sku: kp.sku,
         heading: kp.heading,
@@ -147,7 +157,7 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
         // #14: with the PDF's Qty off, the online BOM carries no quantities either.
         bom: sec ? packageBomRows(sec, i.catalog, d.vendorQuotes || []).map((r) => (d.pdfQty === false ? { ...r, qty: null, unit: "" } : r)) : [],
       };
-    }),
+    })),
     totals: {
       creditLabel: t.creditLabel,
       creditAmount: t.credit > 0 ? "−" + fmt(t.credit) : null,
