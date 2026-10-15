@@ -36,6 +36,7 @@ import { bonusRatesFor, withBonusLines, idCounterFrom } from "../src/lib/estimat
 import { canonicalBonusSections } from "../src/lib/estimate-bonus/canonical";
 import { GROUPS, setValue, loadBonusRates } from "../src/lib/stores/pricing";
 import { flagOldVendorLine, OLD_VENDOR_PRICE_NOTE } from "../src/lib/narrative/system-library";
+import { estimateReadiness, requoteCount } from "../src/lib/estimate-steps/readiness";
 import { alternatingPhotoSides, keyProductPhotoStyle } from "../src/app/(app)/estimator/quote-document-view";
 import { resolvePackageDoc } from "../src/lib/package-doc/resolve";
 import { productImageFor } from "../src/lib/package-doc/seed";
@@ -142,6 +143,11 @@ export async function oct15PureChecks(ok: Ok) {
       "oct15 #21: a loaded vendor line keeps its last price (cost, sell, typed ext), drops the source's vendor-quote link, and is flagged");
     const g = flagOldVendorLine(f as never, f as never) as unknown as Record<string, unknown>;
     ok(OLD_VENDOR_PRICE_NOTE === "Old vendor price — re-quote" && g.internalNote === "Old vendor price — re-quote · from Acme", "oct15 #21: loading it again doesn't stack the flag");
+    ok(f.custom === true, "M3: a flagged vendor line becomes a custom line (no vendor-quote record behind it), keeping its note");
+    const secsRq = [{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [f, { ...(f as object), id: 5, internalNote: "" }, { id: 6, sku: "X", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2 }] }] as never;
+    const rdy = (status: string) => estimateReadiness({ saved: true, sections: secsRq, review: { label: "Approved", tone: "approved" }, status: status as never, revNum: 1 }).send;
+    ok(requoteCount(secsRq) === 1 && rdy("draft").state === "gaps" && rdy("draft").label === "Ready to send · ⚠ 1 line needs a re-quote" && rdy("sent").label.startsWith("Sent"),
+      "M3: Send & track's readiness line warns \"N lines need a re-quote\" on a draft (a warning, never a block); clearing the note clears it");
     ok(rd("src/lib/narrative/load-system.ts").includes("flagOldVendorLine(it, originals.get(it.id)!)") && !rd("src/lib/narrative/system-library.ts").includes("items.filter((it) => !it.vendorQuoteId)"),
       "oct15 #21: Load keeps vendor lines and flags each after re-pricing");
   }

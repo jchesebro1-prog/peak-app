@@ -5,6 +5,7 @@ import { displayQuoteNumber } from "@/lib/estimate-number";
 import { withoutGroupMeta } from "@/lib/estimate-groups/groups";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { OLD_VENDOR_PRICE_NOTE } from "./old-vendor-line";
 import { applyAutoFreight } from "@/app/(app)/estimator/freight-default";
 import {
   keyProductHeading,
@@ -278,8 +279,8 @@ export function loadNotice(r: Pick<LoadedLibrarySystem, "systemName" | "estNumbe
   return parts.join(" · ");
 }
 
-/** Jeff 2026-10-15 #21 — the internal note a loaded vendor-quoted line carries. */
-export const OLD_VENDOR_PRICE_NOTE = "Old vendor price — re-quote";
+/** Jeff 2026-10-15 #21 — the internal note a loaded vendor-quoted line carries (old-vendor-line.ts, client-safe). */
+export { OLD_VENDOR_PRICE_NOTE };
 
 /**
  * Jeff 2026-10-15 #21 — a vendor-quoted line as Load brings it in: its LAST
@@ -287,10 +288,12 @@ export const OLD_VENDOR_PRICE_NOTE = "Old vendor price — re-quote";
  * copy step never re-prices it), its link to the source estimate's vendor
  * quote dropped (that record stays with the source), and the internal note
  * OLD_VENDOR_PRICE_NOTE in front of any it had. Never shown to the customer
- * (internalNote). Pure.
+ * (internalNote). #352 review M3: it becomes a custom line (`custom: true` —
+ * no vendor-quote record behind it any more, never re-costed from the catalog),
+ * and Send & track's readiness line counts it until the note is cleared. Pure.
  */
 export function flagOldVendorLine(copied: SpecItem, original: SpecItem): SpecItem {
-  const out: SpecItem = { ...copied, cost: original.cost, price: original.price };
+  const out: SpecItem = { ...copied, cost: original.cost, price: original.price, custom: true };
   if (original.extSellOverride !== undefined) out.extSellOverride = original.extSellOverride;
   else delete out.extSellOverride;
   delete out.vendorQuoteId;

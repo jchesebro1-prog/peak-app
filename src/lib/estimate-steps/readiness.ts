@@ -5,6 +5,7 @@ import { docGaps } from "@/lib/package-doc/gaps";
 import { documentApplies } from "@/lib/package-doc/print";
 import type { PackageDoc } from "@/lib/package-doc/types";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { needsRequote } from "@/lib/narrative/old-vendor-line";
 import type { NextStepTone } from "@/lib/quote-next-step";
 import type { QuoteStatus } from "@/lib/stores/quotes";
 import type { EstimateStep } from "./steps";
@@ -77,7 +78,18 @@ function reviewBadge(review: ReadinessInput["review"]): StepBadge {
   return { state: "idle", label: review.label };
 }
 
+/** #352 review M3 — lines Load system flagged "Old vendor price — re-quote" (still carrying the note). */
+export function requoteCount(sections: SpecSection[]): number {
+  return sections.reduce((n, s) => n + s.items.filter((it) => !isRewardCreditItem(it) && needsRequote(it)).length, 0);
+}
+
 function sendBadge(i: ReadinessInput): StepBadge {
+  // #352 review M3: a draft about to go out warns about lines still at an old vendor price — never blocks Send.
+  const requote = i.status === "draft" ? requoteCount(i.sections) : 0;
+  if (requote > 0) {
+    const base = i.review?.tone === "approved" ? "Ready to send" : "";
+    return { state: "gaps", count: requote, label: [base, `⚠ ${plural(requote, "line needs", "lines need")} a re-quote`].filter(Boolean).join(" · ") };
+  }
   if (i.status === "sent") {
     const opens = i.track?.opens ?? 0;
     const replies = i.track?.newReplies ?? 0;
