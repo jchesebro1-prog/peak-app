@@ -73,6 +73,10 @@ export type AttachmentVM = {
   mime: string;
   size: number;
   href: string;
+  /** #348 slice 4 — `threadId~messageId~index` (lib/vendor-quotes/rules threadAttachmentRef) */
+  ref: string;
+  /** #348 slice 4 — a PDF that could be a vendor quote (never our own by-reference estimate PDF) */
+  pdf: boolean;
 };
 
 /** Composer-side attachment chip (no bytes shipped to the client). */
@@ -177,6 +181,11 @@ export type ReaderVM = {
   /** #341 — the customer a read-only thread is deliberately linked to ("" =
    *  none, or only an automatic sender match, which is never shown). */
   readOnlyLinkedTo: string;
+  /** #348 slice 4 — some Gmail message here was imported before attachments
+   *  were recorded: the reader runs the one-time lazy listing (owner only). */
+  attachmentsPending: boolean;
+  /** #348 slice 4 — the vendor company this thread is filed under (Task 6). */
+  vendorCompany: { id: string; name: string } | null;
   /** Thread is out of the inbox (locally archived OR archived on the Gmail
    *  side) — drives the Archive/Unarchive toggle. Unarchive clears the local
    *  flag and, with two-way archive (D74), pushes INBOX back onto the Gmail

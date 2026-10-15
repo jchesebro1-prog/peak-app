@@ -220,6 +220,8 @@ export type CommAttachment = {
   dataUrl?: string;
   pdfPath?: string;
   href?: string;
+  /** #348 slice 4 — an imported Gmail attachment, by reference (bytes stay in Gmail; lib/vendor-quotes/thread-attachment-server.ts reads them) */
+  gmailPartId?: string;
 };
 
 export type CommMessage = {
@@ -256,6 +258,8 @@ export type CommMessage = {
   /** #214 — set once that lazy Cc fetch has run (whether or not the
    *  message had a Cc), so it never runs twice. */
   ccFetched?: true;
+  /** #348 slice 4 — the attachment list was read from Gmail (import, or the reader's one-time lazy listing) */
+  attsListed?: true;
   /** Estimator Phase 3 final review (I1) — the Gmail bridge's last send of
    *  this message threw: "timeout" (Gmail didn't answer in time — it may
    *  have been accepted) or "error" (refused / couldn't be built). Cleared

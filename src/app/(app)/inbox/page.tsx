@@ -14,6 +14,7 @@ import { recordNudgeOpened } from "@/lib/brief/nudge-outcome";
 import { after } from "next/server";
 import { readerPreDraft } from "@/lib/brief/reader-predraft";
 import { attachmentHref } from "@/lib/comms-attachments";
+import { isPdfAttachment, threadAttachmentHref, threadAttachmentRef } from "@/lib/vendor-quotes/rules";
 import { groupCompanyOptions } from "@/lib/vendor-status";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { get as getQuote, getAll as allQuotes } from "@/lib/stores/quotes";
@@ -995,12 +996,19 @@ export default async function InboxPage({
       queued: !!m.queued,
       time: timeFull(m.at),
       body: m.body,
-      attachments: (m.attachments || []).map((a) => ({
-        name: a.name,
-        mime: a.mime,
-        size: a.size,
-        href: attachmentHref(a),
-      })),
+      attachments: (m.attachments || []).map((a, i) => {
+        const ref = { threadId: sel.id, messageId: m.id, index: i };
+        return {
+          name: a.name,
+          mime: a.mime,
+          size: a.size,
+          ref: threadAttachmentRef(ref),
+          pdf: isPdfAttachment(a) && !a.pdfPath,
+          // #348 slice 4 — an imported Gmail attachment downloads through the
+          // visibility-checked route (bytes stay in Gmail until asked for)
+          href: attachmentHref(a) || (a.gmailPartId ? threadAttachmentHref(ref) : ""),
+        };
+      }),
       link: m.link
         ? {
             type: m.link.type,
@@ -1105,6 +1113,9 @@ export default async function InboxPage({
       organize: null,
       // Estimate suggestion (spec 2026-10-13 §3): looked up only when the button shows.
       suggestionHref: !readOnly && assistFlags.estimate && sel.channel === "email" ? await suggestionReadyHref("thread", sel.id) : null,
+      attachmentsPending:
+        !readOnly && gmailEnabled() && (sel.messages || []).some((m) => m.gmailId && !m.attsListed && !(m.attachments || []).length),
+      vendorCompany: null,
       readOnlyLinkedTo: "",
       preDraft,
     };
@@ -1132,6 +1143,8 @@ export default async function InboxPage({
         contactOptions: [],
         customerOptions: [],
         customerOptionGroups: [],
+        attachmentsPending: false,
+        vendorCompany: null,
       };
     }
   }

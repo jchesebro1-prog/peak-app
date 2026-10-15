@@ -24,6 +24,7 @@ import { completeThreadTaskAction } from "./task-actions";
 import ReaderOrgStrip from "./organize/reader-org";
 import { ORGANIZE_ARCHIVED_EVENT, organizeArchiveNote, organizeArchiveRemoves, shortTaskTitle } from "./organize/format";
 import { archiveFromOrganizeAction } from "./organize-actions";
+import { listThreadAttachmentsAction } from "./vendor-file-actions";
 import { postChanged } from "@/lib/popout/channel";
 import { threadPopUrl } from "@/lib/popout/click";
 import PopoutButton from "@/components/popout/popout-button";
@@ -617,6 +618,23 @@ export default function ThreadReader({
   const [logDir, setLogDir] = useState<"in" | "out" | null>(null);
   const [logBody, setLogBody] = useState("");
   const [loggingNote, setLoggingNote] = useState(false);
+
+  // #348 slice 4 — mail imported before attachments were recorded: list them
+  // from Gmail once per thread (the server lists up to 10 messages per call and
+  // stamps each), then refresh when any turned up. Owner only (never read-only).
+  const pendingAttsId = vm?.attachmentsPending ? vm.id : null;
+  useEffect(() => {
+    if (!pendingAttsId) return;
+    let live = true;
+    listThreadAttachmentsAction(pendingAttsId)
+      .then((r) => {
+        if (live && r.ok && r.changed) router.refresh();
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [pendingAttsId, router]);
 
   if (!vm) {
     return (

@@ -705,6 +705,7 @@ const ACTION_FILES = [
   "src/app/(app)/inbox/site-visit-actions.ts",
   "src/app/(app)/inbox/task-actions.ts",
   "src/app/(app)/inbox/assist-actions.ts",
+  "src/app/(app)/inbox/vendor-file-actions.ts",
 ];
 /** A parameter list that carries a thread id. */
 const THREAD_PARAM = /\b(?:id|threadId|threadIds|ids|list)\??\s*:|\bthreadId\b|\bComposePayload\b|\bCreateSiteVisitInput\b|\bThreadTaskRequest\b/;

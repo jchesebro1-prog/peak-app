@@ -127,10 +127,13 @@ export async function listThreadIds(
 
 export type GmailHeader = { name: string; value: string };
 export type GmailPart = {
+  /** #348 slice 4 — Gmail's part path ("0", "1", "0.1"), the stable key an
+   *  imported attachment is stored by (attachment ids change per fetch). */
+  partId?: string;
   mimeType?: string;
   filename?: string;
   headers?: GmailHeader[];
-  body?: { data?: string; size?: number };
+  body?: { data?: string; size?: number; attachmentId?: string };
   parts?: GmailPart[];
 };
 export type GmailFullMessage = {
@@ -148,6 +151,16 @@ export async function getMessage(
   id: string
 ): Promise<GmailFullMessage> {
   return gapi(mailboxKey, "/messages/" + id + "?format=full");
+}
+
+/** #348 slice 4 — one attachment's bytes (base64url `data`), read by
+ *  reference when someone downloads or copies an imported attachment. */
+export async function getAttachment(
+  mailboxKey: string,
+  messageId: string,
+  attachmentId: string
+): Promise<{ data?: string; size?: number }> {
+  return gapi(mailboxKey, "/messages/" + encodeURIComponent(messageId) + "/attachments/" + encodeURIComponent(attachmentId));
 }
 
 /** #214 — headers only (format=metadata): the link panel's lazy Cc fetch

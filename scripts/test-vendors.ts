@@ -14,6 +14,12 @@ import { addParty, listFor, removeParty } from "../src/lib/stores/parties";
 import { displayQuoteNumber } from "../src/lib/estimate-number";
 import { prepareVendorQuotesForSave, addVendorPartiesForSave, vendorPartyRemovalRefusalFor, quotesReceivedFor } from "../src/lib/stores/vendor-quotes";
 import type { VendorQuoteLike } from "../src/lib/vendor-quotes/rules";
+import { readFileSync } from "node:fs";
+import { findPart, listAttachmentParts, parseInbound } from "../src/lib/gmail/mime";
+import type { GmailFullMessage, GmailPart } from "../src/lib/gmail/api";
+import type { CommThread } from "../src/lib/stores/comms";
+import type { MailboxViewer } from "../src/lib/stores/comms-visibility";
+import { readThreadAttachment } from "../src/lib/vendor-quotes/thread-attachment-server";
 import {
   VENDOR_COPY, VENDOR_FROM_EMAIL_MAX_BYTES, isVendorPickerType, asVendorQuotes, vendorCompanyIdsOf, newVendorCompanyIds, stampVendorQuotes,
   keepLiveVendorCompanies, liveVendorQuoteIds, vendorPartyRemovalRefusal, quoteNumberFromSubject, isPdfAttachment, threadAttachmentRef,
@@ -89,6 +95,31 @@ export async function vendorChecks(ok: Ok) {
   ok(rows.map((r) => r.key).join() === "Q2:c,Q1:a,Q2:d", "vendors: received rows newest first, undated last, other vendors excluded");
   ok(rows[1].job === "Gym — MPSD" && rows[0].job === "Aud" && rows[1].vendorQuoteNumber === "RB-1" && rows[1].total === 50 && rows[2].addedAt === null, "vendors: received row fields");
   ok(VENDOR_COPY.fileButton === "File to estimate / project…" && VENDOR_COPY.addButton === "Add as vendor quote…", "vendors: button copy");
+
+  // Task 3 — Gmail attachments by reference
+  const payload: GmailPart = {
+    mimeType: "multipart/mixed",
+    parts: [
+      { partId: "0", mimeType: "multipart/alternative", parts: [{ partId: "0.0", mimeType: "text/plain", body: { data: "aGk" } }] },
+      { partId: "1", mimeType: "application/pdf", filename: "Quote RB-88214.pdf", body: { attachmentId: "ANGjd", size: 48213 } },
+      { partId: "2", mimeType: "image/png", filename: "", body: { size: 10 } },
+    ],
+  };
+  ok(JSON.stringify(listAttachmentParts(payload)) === JSON.stringify([{ partId: "1", name: "Quote RB-88214.pdf", mime: "application/pdf", size: 48213 }]), "gmail attachments: named parts only, nested walk");
+  const many: GmailPart = { mimeType: "multipart/mixed", parts: Array.from({ length: 25 }, (_, i) => ({ partId: String(i), mimeType: "application/pdf", filename: `f${i}.pdf`, body: { size: 1 } })) };
+  ok(listAttachmentParts(many, 20).length === 20, "gmail attachments: capped at max");
+  ok(findPart(payload, "0.0")?.mimeType === "text/plain" && findPart(payload, "9") === null, "gmail attachments: findPart by part id (nested; missing → null)");
+  ok(parseInbound({ id: "g1", threadId: "t1", payload } as GmailFullMessage).attachments.length === 1, "gmail attachments: parseInbound lists them");
+
+  // pins
+  const route = readFileSync("src/app/api/inbox/attachments/[threadId]/[messageId]/[index]/route.ts", "utf8");
+  ok(route.includes("readThreadAttachment(") && route.includes("status: 404"), "gmail attachments: the download route goes through the broker and answers a plain 404");
+  const broker = readFileSync("src/lib/vendor-quotes/thread-attachment-server.ts", "utf8");
+  const seeAt = broker.indexOf("canSeeThread(t, viewer)");
+  ok(seeAt > 0 && seeAt < broker.indexOf("dataUrlToBytes(") && seeAt < broker.indexOf("fetchMessageAttachment("), "gmail attachments: the broker checks canSeeThread before reading any bytes");
+  const bridge = readFileSync("src/lib/gmail/bridge.ts", "utf8");
+  const recBody = bridge.slice(bridge.indexOf("export async function recordMessage("), bridge.indexOf("// attach to an existing thread"));
+  ok(recBody.includes("attsListed: true") && recBody.includes("gmailPartId: a.partId"), "gmail attachments: recordMessage stores attachments by reference and stamps attsListed");
 }
 
 export async function vendorDbChecks(ok: Ok) {
@@ -141,6 +172,34 @@ export async function vendorDbChecks(ok: Ok) {
     const recv = await quotesReceivedFor(vven1);
     ok(recv.length === 1 && recv[0].quoteId === q && recv[0].addedAt === 1234 && !!stored && recv[0].estimate === displayQuoteNumber(stored), "vendors db: quotes received lists the estimate with the vendor quote");
     ok((await quotesReceivedFor(vcust)).length === 0, "vendors db: a non-vendor company has no quotes received");
+
+    // part B — the attachment broker (Task 3)
+    const A: MailboxViewer = { id: fixtureId(348, "vua"), name: "Vee Alpha", nameUnique: true };
+    const B: MailboxViewer = { id: fixtureId(348, "vub"), name: "Vee Beta", nameUnique: true };
+    const T6 = fixtureId(348, "vt6");
+    const now = Date.now();
+    await createFixture("comms", {
+      id: T6, mailbox: "personal", mailboxUser: A.name, mailboxOwnerId: A.id, unread: false, customer: "", contactName: "", contactEmail: "rep@vendor.test",
+      subject: "Quote RB-1", channel: "email", status: "waiting_us", createdAt: now, updatedAt: now,
+      messages: [{
+        id: "m1", at: now, direction: "in", channel: "email", author: "Rep", body: "Attached.",
+        attachments: [
+          { name: "Quote RB-1.pdf", mime: "application/pdf", size: 9, dataUrl: "data:application/pdf;base64,JVBERi0xLjQK" },
+          { name: "EST.pdf", mime: "application/pdf", size: 5, pdfPath: "quote-pdfs/x/a.pdf" },
+          { name: "big.pdf", mime: "application/pdf", size: 26_214_401, dataUrl: "data:application/pdf;base64,AA==" },
+          { name: "g.pdf", mime: "application/pdf", size: 10, gmailPartId: "1" },
+        ],
+      }],
+    } as unknown as CommThread);
+    const errOf = (r: Awaited<ReturnType<typeof readThreadAttachment>>) => (r.ok ? "ok" : r.error);
+    ok(errOf(await readThreadAttachment({ threadId: T6, messageId: "m1", index: 0 }, B)) === "That email isn't available.", "broker: a thread B can't see is refused like a missing one");
+    ok(errOf(await readThreadAttachment({ threadId: "TEST348:vnone", messageId: "m1", index: 0 }, A)) === "That email isn't available.", "broker: a missing thread gets the same answer");
+    const own = await readThreadAttachment({ threadId: T6, messageId: "m1", index: 0 }, A);
+    ok(own.ok && own.bytes.length === 9 && own.name === "Quote RB-1.pdf", "broker: the owner reads a stored attachment's bytes");
+    ok(errOf(await readThreadAttachment({ threadId: T6, messageId: "m1", index: 7 }, A)) === "That attachment isn't on this email." && errOf(await readThreadAttachment({ threadId: T6, messageId: "m-other", index: 0 }, A)) === "That attachment isn't on this email.", "broker: a missing index or a message not on the thread is refused");
+    ok(errOf(await readThreadAttachment({ threadId: T6, messageId: "m1", index: 1 }, A, { vendorPdf: true })) === "That's one of our own estimate PDFs, not a vendor quote.", "broker: our own estimate PDF is not a vendor quote");
+    ok(errOf(await readThreadAttachment({ threadId: T6, messageId: "m1", index: 2 }, A)) === VENDOR_COPY.tooBig, "broker: over 25 MB refused on the stored size");
+    ok(errOf(await readThreadAttachment({ threadId: T6, messageId: "m1", index: 3 }, A)) === "Gmail isn't connected here — download the PDF and attach it by hand.", "broker: a Gmail attachment with Gmail off says so");
   } finally {
     // Party ids are pty_<hash> — not TEST348-prefixed, so dropFixtures(348) skips them: delete this quote's rows directly.
     // Direct SQL by recordId — includes soft-deleted rows, so a mid-test failure can't leak a pty_ row.
