@@ -21,7 +21,7 @@ import {
   type SysKey,
 } from "@/app/(app)/design/quick/engine";
 import { houseFields, type HouseField } from "@/lib/design/venue-templates/house-dims";
-import { effectiveTemplateFor, planKindTemplates, resolveBackground, sanitizeTemplateId, templateEntry } from "@/lib/design/venue-templates";
+import { effectiveTemplateFor, pickerTemplates, planKindTemplates, resolveBackground, sanitizeTemplateId, templateEntry } from "@/lib/design/venue-templates";
 import type { VenueType } from "@/lib/venue-types";
 import MovableFields from "./movable-fields";
 
@@ -208,7 +208,8 @@ export default function ScopeInputsPanel({
           {(() => {
             // #249/#255: the effective template's house / nave rows, and a drawing choice when the kind has more than one — Quick Design only (the Grid's base sheet is fixed at intake).
             const tplId = effectiveTemplateFor(venue.kind, value, venueTypes ?? []);
-            const choices = planKindTemplates(venue.kind);
+            // Oct 15 #46: a retired drawing is listed only while this design picked it.
+            const choices = pickerTemplates(planKindTemplates(venue.kind), sanitizeTemplateId(venue.kind, value.templateId));
             const f = showHouse ? houseFields(value, tplId) : null;
             const setHouse = (key: HouseField["key"], n: number, lim: [number, number]) => update({ [key]: clamp(Math.round(n), lim[0], lim[1]) } as Partial<QuickScopeInputs>);
             return (

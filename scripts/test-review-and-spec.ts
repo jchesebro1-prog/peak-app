@@ -35695,7 +35695,7 @@ import { SEED_VENUE_TYPES as c255T3Seed } from "@/lib/venue-types";
   }
 
   ok(c255T3Ids.slice().sort().join("|") === c255T3Reg.map((t) => t.id).sort().join("|") && c255T3KeysById("church-traditional@1") === K, "#255 T3: every registered template has its drawing and key lines");
-  ok(c255T3For("church").map((t) => t.id).join("|") === "church-traditional@1|church-contemporary@1" && c255T3For("arena").length === 1 && c255T3Default("proscenium") === "proscenium@1" && c255T3Default("arena") === "arena@1", "#255 T3: templates are listed per works-like kind, each kind with its default (two since Contemporary, T8; Arena has one since T14)");
+  ok(c255T3For("church").map((t) => t.id).join("|") === "church-traditional@1|church-contemporary@1|church-contemporary@2" && c255T3For("arena").length === 1 && c255T3Default("proscenium") === "proscenium@1" && c255T3Default("arena") === "arena@1", "#255 T3: templates are listed per works-like kind, each kind with its default (two since Contemporary, T8, plus its retired @1 since Oct 15 #46; Arena has one since T14)");
   ok(c255T3Sanitize("church", "church", "proscenium@1") === "church-traditional@1" && c255T3Sanitize("church", "church", "church-traditional@1") === "church-traditional@1" && c255T3Sanitize("arena", "arena", "x") === "arena@1", "#255 T3: a stored background not made for the type's kind falls back to its default");
   const seed = c255T3Seed.map((t) => ({ ...t, background: c255T3Default(t.worksLike, t.key) }));
   ok(c255T3Resolve(seed, null, "church") === "church-traditional@1" && c255T3Resolve(seed, null, "proscenium") === "proscenium@1" && c255T3Resolve(seed, null, "arena") === "arena@1", "#255 T3: a design with no venue follows its kind's built-in type");
@@ -36099,7 +36099,7 @@ import { venueTypesFrom as c255T8Types } from "@/lib/venue-types";
         });
     ok(cornersAtEnds, `#255 T8 ${tag}: a region corner at a wall end sits on that wall's redrawn end`);
   }
-  ok(c255T8For("church").map((t) => t.id).join("|") === "church-traditional@1|church-contemporary@1", "#255 T8: church has two drawings to choose from");
+  ok(c255T8For("church").map((t) => t.id).join("|") === "church-traditional@1|church-contemporary@1|church-contemporary@2", "#255 T8: church has two drawings to choose from (Oct 15 #46: plus Contemporary @1, retired but still drawing)");
   const types = c255T8Types([{ key: "church", label: "Worship / Church", worksLike: "church", background: "church-contemporary@1" }]);
   ok(c255T8Effective("church", { venueType: "church" }, types) === "church-contemporary@1" && c255T8Effective("church", { venueType: "church", templateId: "church-traditional@1" }, types) === "church-traditional@1", "#255 T8: a type set to Contemporary draws Contemporary; a design can still pick Traditional");
   const hd = (o: Record<string, number | null>) => c255T8House({ width: 43, wing: 0, ...o }, "church-contemporary@1");

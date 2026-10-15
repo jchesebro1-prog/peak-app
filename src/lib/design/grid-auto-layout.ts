@@ -52,6 +52,13 @@ export type VenueFrame = {
   aspect?: number;
   /** #255 review (arena only): the box every lot marker is pulled inside — the floor, inset past its round corners, so none lands in the bowl. */
   lotBox?: Rect;
+  /**
+   * Oct 15 #46 (church family): side lights hang just INSIDE the stage frame's side walls. A church's stage frame is
+   * the chancel / platform core, walled off from the side rooms beside it (Traditional's Choir and Electrical Rooms,
+   * Contemporary's Green and Electrical Rooms), so the proscenium rule (just outside the frame) put the upstage
+   * side lights in those rooms.
+   */
+  sideInside?: boolean;
 };
 export const EACH_CAP = 120;
 
@@ -80,7 +87,7 @@ export function venueFrame(a: AState, opts: { legacy?: boolean; template?: strin
       // splays and pointed front reach past the rooms beside it), the Nave, and the booth room or FOH mix position.
       const G = churchGeom(a, id);
       const n = W(G);
-      return { stage: n(G.stageBox), audience: n(G.nave), booth: n(G.booth) };
+      return { stage: n(G.stageBox), audience: n(G.nave), booth: n(G.booth), sideInside: true };
     }
     if (family === "blackbox") {
       const G = blackboxGeom(a, id);
@@ -248,11 +255,16 @@ function curtainPoints(itemKey: string, n: number, S: Rect): Point[] {
   });
 }
 
-function sidePoints(n: number, S: Rect): Point[] {
+/** How far beside the stage frame's side walls side lights hang (normalized). */
+const SIDE_OFFSET = 0.02;
+
+function sidePoints(n: number, S: Rect, inside = false): Point[] {
   const per = Math.max(1, Math.ceil(n / 2));
+  // Oct 15 #46: inside the frame (a church), never more than a quarter of its width in from each wall.
+  const d = inside ? -Math.min(SIDE_OFFSET, S.w / 4) : SIDE_OFFSET;
   return Array.from({ length: n }, (_, i) => {
     const k = Math.floor(i / 2);
-    return { x: clamp01(i % 2 === 0 ? S.x - 0.02 : S.x + S.w + 0.02), y: clamp01(S.y + ((k + 0.5) / per) * S.h) };
+    return { x: clamp01(i % 2 === 0 ? S.x - d : S.x + S.w + d), y: clamp01(S.y + ((k + 0.5) / per) * S.h) };
   });
 }
 
@@ -291,7 +303,7 @@ function eachPoints(line: AutoLine, n: number, f: VenueFrame, opts: { electrics:
     case "lighting:cyc":
       return spread(n, S.x, S.x + S.w, S.y + 0.05 * S.h);
     case "lighting:side":
-      return sidePoints(n, S);
+      return sidePoints(n, S, f.sideInside);
     case "audio:lineArray":
       return clusterPoints(n, S, f.room);
     case "audio:subwoofer":
