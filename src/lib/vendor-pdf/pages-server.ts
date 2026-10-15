@@ -17,17 +17,34 @@ export async function countPdfPages(bytes: Uint8Array): Promise<number | null> {
   return pageCountFromText(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("latin1"));
 }
 
-const OBJ_RE = /\bobj\b([\s\S]*?)\bendobj\b/g;
 const PAGES_RE = /\/Type\s*\/Pages(?![A-Za-z0-9])/;
 const COUNT_RE = /\/Count\s+(\d+)/;
 const PAGE_RE = /\/Type\s*\/Page(?![A-Za-z0-9])/g;
 
+const isWordChar = (c: number) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
+/** The next `word` at or after `from` that stands alone (\b on both sides, as a regex would), or -1. */
+function nextWord(s: string, word: string, from: number): number {
+  for (let i = s.indexOf(word, from); i !== -1; i = s.indexOf(word, i + 1)) {
+    const before = i === 0 ? false : isWordChar(s.charCodeAt(i - 1));
+    const after = i + word.length < s.length && isWordChar(s.charCodeAt(i + word.length));
+    if (!before && !after) return i;
+  }
+  return -1;
+}
+
 /** max(/Type /Pages … /Count N) over the file's objects if any, else the number of /Type /Page (not /Pages)
- *  objects; null when 0. Objects inside compressed object streams are invisible here (→ the API decides). */
+ *  objects; null when 0. Objects inside compressed object streams are invisible here (→ the API decides).
+ *  Linear in the file: each object body runs from a standalone `obj` to the next standalone `endobj`, and the
+ *  scan resumes after it — a hostile file of `obj` tokens with no `endobj` costs one pass, not one per token. */
 export function pageCountFromText(s: string): number | null {
   let max = 0;
-  for (const m of s.matchAll(OBJ_RE)) {
-    const body = m[1];
+  for (let pos = 0; ; ) {
+    const start = nextWord(s, "obj", pos);
+    if (start === -1) break;
+    const end = nextWord(s, "endobj", start + 3);
+    if (end === -1) break;
+    const body = s.slice(start + 3, end);
+    pos = end + 6;
     if (!PAGES_RE.test(body)) continue;
     const c = COUNT_RE.exec(body);
     if (c) max = Math.max(max, Number(c[1]));

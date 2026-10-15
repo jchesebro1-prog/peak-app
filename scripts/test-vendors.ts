@@ -21,7 +21,7 @@ import {
 } from "../src/lib/vendor-pdf/extraction";
 import type { VendorPdfExtraction, VendorPdfWireOut } from "../src/lib/vendor-pdf/extraction";
 import type { CatalogMatchPart } from "../src/lib/vendor-pdf/checks";
-import { catalogLookupKeys } from "../src/lib/vendor-pdf/checks";
+import { capTruncatedMatches, catalogLookupKeys } from "../src/lib/vendor-pdf/checks";
 import { readVendorPdf, vendorPdfErrorFor, VENDOR_PDF_DATA_URL_PREFIX, type ReadVendorPdfInput, type VendorPdfSource } from "../src/lib/vendor-pdf/read-server";
 import { countPdfPages, pageCountFromText } from "../src/lib/vendor-pdf/pages-server";
 import { partsByLooseKeys } from "../src/lib/stores/catalog";
@@ -931,18 +931,56 @@ export async function vendorPdfDbChecks(ok: Ok) {
     // 10. Catalog (SQL pre-filter) and vendor — no deps.parts / deps.companies.
     await createFixture("catalog_parts", { id: fixtureId(348, "hpart1"), sku: fixtureId(348, "hpart1"), desc: "Hexa tracker", category: "Rigging", unit: "ea", list: 10, cost: 5, mfr: "Hexa348", manufacturerModelNumber: "HXQ 9348", formerSkus: ["Old348:HXQ-OLD-9348"] } as never);
     await createFixture("catalog_parts", { id: fixtureId(348, "hpart2"), sku: fixtureId(348, "hpart2"), desc: "Wide", category: "Rigging", unit: "ea", list: 10, cost: 5, mfr: "Hexa348", manufacturerPartNumber: "ＷＸ－９３４８" } as never);
-    const byModel = await partsByLooseKeys(["HXQ9348"]);
-    const byFormer = await partsByLooseKeys(["HXQOLD9348"]);
-    const bySkuOrder = await partsByLooseKeys(["HPART1"]);
-    const byNfkc = await partsByLooseKeys(["WX9348"]);
+    const byModel = (await partsByLooseKeys(["HXQ9348"])).parts;
+    const byFormer = (await partsByLooseKeys(["HXQOLD9348"])).parts;
+    const bySkuOrder = (await partsByLooseKeys(["HPART1"])).parts;
+    const byNfkc = (await partsByLooseKeys(["WX9348"])).parts;
     ok(byModel.some((p) => p.sku === fixtureId(348, "hpart1") && p.manufacturerModelNumber === "HXQ 9348" && p.formerSkus?.[0] === "Old348:HXQ-OLD-9348" && p.mfr === "Hexa348"), "catalog pre-filter: by model # (loose), projected to the match fields");
     ok(byFormer.some((p) => p.sku === fixtureId(348, "hpart1")) && bySkuOrder.some((p) => p.sku === fixtureId(348, "hpart1")) && byNfkc.some((p) => p.sku === fixtureId(348, "hpart2")), "catalog pre-filter: by a former SKU's order #, the SKU's order #, and NFKC (full-width) text");
-    ok((await partsByLooseKeys([])).length === 0 && (await partsByLooseKeys(["ZZZNOPE348"])).length === 0, "catalog pre-filter: no keys / no hit → nothing read");
+    ok((await partsByLooseKeys([])).parts.length === 0 && (await partsByLooseKeys(["ZZZNOPE348"])).parts.length === 0, "catalog pre-filter: no keys / no hit → nothing read");
     ok(catalogLookupKeys({ lines: [{ mfrPartNumber: "hx-7700" }, { mfrPartNumber: "HX 7700" }, { mfrPartNumber: "ab" }, { mfrPartNumber: "---" }, { description: "x" }] }).join() === "HX7700", "catalog pre-filter: lookup keys are the loose keys of matchable printed numbers");
     const r10 = await readVendorPdf(input({ quoteId: "Q-348", source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, deps(pdfFake({ text: wire({ vendor: "Rose Brand 348, Inc.", lines: [L("Tracker", "HXQ-9348", 1, 10, 10), L("Wide", "WX 9348", 1, 5, 5)], total: 15 }) }, [])));
     ok(r10.ok && r10.checks.vendor.status === "one" && r10.checks.vendor.companyId === fixtureId(348, "hrose"), "read pdf: vendor match over live vendor-type companies only");
     ok(r10.ok && r10.checks.lines[0].catalog?.kind === "match" && r10.checks.lines[0].catalog.sku === fixtureId(348, "hpart1") && r10.checks.lines[1].catalog?.kind === "match" && r10.checks.lines[1].catalog.sku === fixtureId(348, "hpart2"), "read pdf: the server's catalog pre-filter finds the printed numbers' parts");
     ok(r10.ok && (await getRun(r10.runId))?.contextRef === "vendorquote:Q-348:vqhaaaa1", "read pdf: a saved estimate's id in the context ref");
+
+    // Fix round 1 — hardening.
+    // (a) A failed company load never sinks the paid read: no vendor match, the read comes back.
+    const fa = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, { ...deps(pdfFake({ text: happyWire }, [])), parts, loadCompanies: () => Promise.reject(new Error("companies down")) });
+    const faRow = fa.ok ? await getRun(fa.runId) : null;
+    ok(fa.ok && fa.checks.vendor.status === "none" && fa.data.lines?.length === 3 && (faRow?.outcomeDetail as Record<string, unknown>)?.dataHash !== undefined, "read pdf hardening: a company-load failure → the read still returns (no vendor match), run detail written");
+    // (b) A failed catalog lookup after a successful read → the read, checked against no parts.
+    const fb = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, { ...deps(pdfFake({ text: happyWire }, [])), loadParts: () => Promise.reject(new Error("catalog down")) });
+    ok(fb.ok && fb.data.lines?.length === 3 && fb.checks.lines.every((l) => l.catalog === null) && fb.checks.lines[1].math.status === "off" && fb.checks.vendor.status === "one", "read pdf hardening: a catalog-lookup failure → ok with data, no catalog chips");
+    // (c) Any other post-gate exception → couldNotRead, never a thrown error.
+    const throwing: AssistProvider = { name: "fake", async complete() { throw new Error("socket hang up"); } };
+    const fc = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, deps(throwing));
+    ok(!fc.ok && fc.error === VENDOR_PDF_COPY.couldNotRead, "read pdf hardening: a thrown error past the gate → couldNotRead");
+    ok(VENDOR_PDF_COPY.badRequest === "That read request isn't valid." && !bad.ok && bad.error === VENDOR_PDF_COPY.badRequest, "read pdf hardening: the bad-request text lives in VENDOR_PDF_COPY");
+    // (d) The per-key cap: a key 30 parts share doesn't crowd out another line's unique match.
+    for (let i = 1; i <= 30; i++) {
+      const id = fixtureId(348, `ha${String(i).padStart(2, "0")}`);
+      await createFixture("catalog_parts", { id, sku: id, desc: "Common", category: "Rigging", unit: "ea", list: 1, cost: 1, mfr: "Many348", manufacturerModelNumber: "N/A-348" } as never);
+    }
+    const capped = await partsByLooseKeys(["NA348", "HXQ9348"]);
+    ok(capped.parts.filter((p) => p.manufacturerModelNumber === "N/A-348").length === 25 && capped.parts.some((p) => p.sku === fixtureId(348, "hpart1")) && capped.truncated.NA348?.total === 30 && !capped.truncated.HXQ9348, "catalog pre-filter: capped per key (25 of 30), another key's part still read, the cut key's total reported");
+    const tiny = await partsByLooseKeys(["NA348", "HXQ9348"], { perKey: 2 });
+    ok(tiny.parts.length === 3 && tiny.truncated.NA348?.total === 30 && tiny.parts.some((p) => p.sku === fixtureId(348, "hpart1")), "catalog pre-filter: perKey 2 → 2 + the unique part");
+    const fd = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, deps(pdfFake({ text: wire({ lines: [L("Common", "N/A 348", 1, 1, 1), L("Tracker", "HXQ-9348", 1, 10, 10)], total: 11 }) }, [])));
+    ok(fd.ok && fd.checks.lines[0].catalog?.kind === "ambiguous" && fd.checks.lines[1].catalog?.kind === "match" && fd.checks.lines[1].catalog.sku === fixtureId(348, "hpart1"), "read pdf: a crowded key reads ambiguous, the other line still matches");
+    const one = vendorPdfChecks({ lines: [{ mfrPartNumber: "N/A 348" }] }, { parts: [{ sku: "A", manufacturerModelNumber: "NA-348" }], companies: [] });
+    const cut = capTruncatedMatches(one, { lines: [{ mfrPartNumber: "N/A 348" }] }, { NA348: { total: 30 } });
+    ok(one.lines[0].catalog?.kind === "match" && cut.lines[0].catalog?.kind === "ambiguous" && cut.lines[0].catalog.count === 30 && capTruncatedMatches(one, { lines: [{ mfrPartNumber: "N/A 348" }] }, {}).lines[0].catalog?.kind === "match", "capTruncatedMatches: a match on a cut-short key → ambiguous (total); untouched otherwise");
+    // (e) Page scan is linear on a hostile file.
+    const t0 = Date.now();
+    const hostile = pageCountFromText("%PDF-1.4\n" + "obj ".repeat(200_000));
+    const hostile2 = pageCountFromText("1 0 obj ".repeat(200_000) + "endobj");
+    const took = Date.now() - t0;
+    ok(hostile === null && hostile2 === null && took < 500, `pages: 200k 'obj' tokens (no endobj / one endobj) scan in ${took} ms (< 500)`);
+    // (f) Try harder discards only an earlier read of the SAME vendor quote.
+    const fOther = await readVendorPdf(input({ vendorQuoteId: "vqhbbbb2", source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, { ...deps(pdfFake({ text: happyWire }, [])), parts });
+    const fHard = fOther.ok ? await readVendorPdf(input({ hard: true, retryOf: fOther.runId, source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, { ...deps(pdfFake({ text: happyWire }, [])), parts }) : null;
+    ok(fOther.ok && !!fHard?.ok && (await getRun(fOther.runId))?.outcome === null, "read pdf: a retryOf for another vendor quote is not discarded");
 
     // 11. getBlobBytes.
     const blobSrc = readFileSync("src/lib/blob.ts", "utf8");

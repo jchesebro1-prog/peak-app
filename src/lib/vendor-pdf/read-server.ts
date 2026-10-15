@@ -22,7 +22,7 @@ import {
   VENDOR_PDF_COPY, VENDOR_PDF_MAX_FILE_BYTES, VENDOR_PDF_MAX_PAGES, VENDOR_PDF_SYSTEM, VENDOR_PDF_USER_TEXT, VendorPdfWire,
   canonicalJson, cleanExtraction, isEmptyExtraction,
 } from "./extraction";
-import { catalogLookupKeys, vendorPdfChecks, type CatalogMatchPart, type VendorCompanyLike } from "./checks";
+import { capTruncatedMatches, catalogLookupKeys, vendorPdfChecks, type CatalogKeyTruncation, type CatalogMatchPart, type VendorCompanyLike } from "./checks";
 import type { VendorPdfReadResult } from "./fill";
 import { countPdfPages } from "./pages-server";
 
@@ -37,8 +37,6 @@ export const VENDOR_PDF_DATA_URL_PREFIX = "data:application/pdf;base64,";
 export const VENDOR_PDF_DATA_URL_MAX = VENDOR_ATTACHMENT_BUDGET + 200;
 export const VENDOR_PDF_RUN_ID_RE = /^AR-[a-z0-9]{1,16}-[a-z0-9]{1,8}$/;
 export const VENDOR_PDF_QUOTE_ID_MAX = 64;
-/** A malformed request (never reachable from the form). */
-export const VENDOR_PDF_BAD_REQUEST = "That read request isn't valid.";
 
 type Bytes = { ok: true; bytes: Buffer } | { ok: false; error: string; tooLarge?: boolean };
 
@@ -60,7 +58,7 @@ export async function loadVendorPdfBytes(vendorQuoteId: string, source: VendorPd
       return { ok: false, error: VENDOR_PDF_COPY.notPdf };
     }
   } else {
-    return { ok: false, error: VENDOR_PDF_BAD_REQUEST };
+    return { ok: false, error: VENDOR_PDF_COPY.badRequest };
   }
   if (!bytes.subarray(0, 1024).includes("%PDF-")) return { ok: false, error: VENDOR_PDF_COPY.notPdf };
   if (bytes.length > VENDOR_PDF_MAX_FILE_BYTES) return { ok: false, error: VENDOR_PDF_COPY.tooLargeBytes, tooLarge: true };
@@ -90,16 +88,55 @@ async function liveVendorCompanies(): Promise<VendorCompanyLike[]> {
   return (await allCompanies()).filter((c) => !c.deleted && isVendorPickerType(c.type)).map((c) => ({ id: c.id, name: c.name, type: c.type }));
 }
 
+/** The catalog candidates for a read (deps.loadParts in tests). */
+export type VendorPdfPartsLookup = { parts: CatalogMatchPart[]; truncated: Record<string, CatalogKeyTruncation> };
+export type ReadVendorPdfDeps = AssistCallDeps & {
+  parts?: CatalogMatchPart[];
+  companies?: VendorCompanyLike[];
+  /** Test seams for the two loads (defaults: the live vendor companies; partsByLooseKeys). */
+  loadCompanies?: () => Promise<VendorCompanyLike[]>;
+  loadParts?: (keys: string[]) => Promise<VendorPdfPartsLookup>;
+};
+
+function logFailure(what: string, e: unknown): void {
+  console.error(`[vendor-pdf] ${what}:`, e instanceof Error ? e.message : e);
+}
+
+/** Best-effort write: a failure is logged, never thrown — the paid read still reaches the user. */
+async function tryWrite(what: string, fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn();
+  } catch (e) {
+    logFailure(what, e);
+  }
+}
+
 export async function readVendorPdf(
   input: ReadVendorPdfInput,
   me: { id: string; name: string },
-  deps: AssistCallDeps & { parts?: CatalogMatchPart[]; companies?: VendorCompanyLike[] } = {}
+  deps: ReadVendorPdfDeps = {}
 ): Promise<ReadVendorPdfResult> {
   // 1. Gate — before any byte is read.
   const refused = await vendorPdfGateFor(me.id, deps);
   if (refused) return { ok: false, error: refused, runId: null };
+  // Past the gate, nothing throws out of here: an outage reads as couldNotRead (with the run, when one was made).
+  const ran: { runId: string | null } = { runId: null };
+  try {
+    return await readAfterGate(input, me, deps, ran);
+  } catch (e) {
+    logFailure("read failed", e);
+    return { ok: false, error: VENDOR_PDF_COPY.couldNotRead, runId: ran.runId };
+  }
+}
+
+async function readAfterGate(
+  input: ReadVendorPdfInput,
+  me: { id: string; name: string },
+  deps: ReadVendorPdfDeps,
+  ran: { runId: string | null }
+): Promise<ReadVendorPdfResult> {
   // 2. Validate.
-  if (!validInput(input)) return { ok: false, error: VENDOR_PDF_BAD_REQUEST, runId: null };
+  if (!validInput(input)) return { ok: false, error: VENDOR_PDF_COPY.badRequest, runId: null };
   const { vendorQuoteId, quoteId, hard, retryOf } = input;
   // 3–4. Bytes, %PDF-, size.
   const loaded = await loadVendorPdfBytes(vendorQuoteId, input.source);
@@ -109,11 +146,18 @@ export async function readVendorPdf(
   const pages = await countPdfPages(bytes);
   if (pages !== null && pages > VENDOR_PDF_MAX_PAGES) return { ok: false, error: VENDOR_PDF_COPY.tooLargePages(pages), tooLarge: true, runId: null };
 
-  // 6. The call; the company load overlaps it (the catalog read needs the printed part numbers — after).
+  // 6. The call; the company load overlaps it and can't sink it (a failed load = no vendor match). The catalog
+  //    read needs the printed part numbers, so it follows.
   const slot = hard ? "vendorpdfHard" : "vendorpdf";
   const now = deps.now ?? Date.now();
   const split = splitCallDeps({ ...deps, now }, slot);
   if (!split) return { ok: false, error: VENDOR_PDF_COPY.couldNotRead, runId: null }; // only with a caller deadline
+  const companiesLoad: Promise<VendorCompanyLike[]> = deps.companies
+    ? Promise.resolve(deps.companies)
+    : (deps.loadCompanies ?? liveVendorCompanies)().catch((e: unknown) => {
+        logFailure("vendor companies load failed", e);
+        return [];
+      });
   const [r, companies] = await Promise.all([
     runAssist(
       {
@@ -129,35 +173,55 @@ export async function readVendorPdf(
       },
       split.run
     ),
-    deps.companies ?? liveVendorCompanies(),
+    companiesLoad,
   ]);
+  ran.runId = r.runId;
   const base = { vendorQuoteId, quoteId, hard, retryOf, pages, bytes: bytes.length };
   // 7. Failure → copy. A logged failed run still gets its detail (the report counts failed Try-harder runs).
   if (!r.ok) {
-    if (r.runId) await mergeRunDetail(r.runId, base);
-    return { ok: false, ...vendorPdfErrorFor(r.error), runId: r.runId };
+    const runId = r.runId;
+    if (runId) await tryWrite("run detail", () => mergeRunDetail(runId, base));
+    return { ok: false, ...vendorPdfErrorFor(r.error), runId };
   }
+  const runId = r.runId;
   // 8. Clean; an empty read stays logged with a null outcome.
   const data = cleanExtraction(r.value);
   if (isEmptyExtraction(data)) {
-    await mergeRunDetail(r.runId, { ...base, lines: 0, mathFlags: 0, empty: true });
-    return { ok: false, error: VENDOR_PDF_COPY.noQuote, runId: r.runId };
+    await tryWrite("run detail", () => mergeRunDetail(runId, { ...base, lines: 0, mathFlags: 0, empty: true }));
+    return { ok: false, error: VENDOR_PDF_COPY.noQuote, runId };
   }
-  // 9. Checks — the catalog is read only for the candidates of this read's part numbers.
-  const parts = deps.parts ?? (await partsByLooseKeys(catalogLookupKeys(data)));
-  const checks = vendorPdfChecks(data, { parts, companies });
+  // 9. Checks — the catalog is read only for the candidates of this read's part numbers. A failed catalog read
+  //    still returns the read, its checks run against no parts (no catalog chips).
+  let lookup: VendorPdfPartsLookup = { parts: [], truncated: {} };
+  if (deps.parts) lookup = { parts: deps.parts, truncated: {} };
+  else {
+    try {
+      lookup = await (deps.loadParts ?? partsByLooseKeys)(catalogLookupKeys(data));
+    } catch (e) {
+      logFailure("catalog lookup failed", e);
+    }
+  }
+  const checks = capTruncatedMatches(vendorPdfChecks(data, { parts: lookup.parts, companies }), data, lookup.truncated);
   // 10. Run detail.
-  await mergeRunDetail(r.runId, {
-    ...base,
-    lines: data.lines?.length ?? 0,
-    mathFlags: checks.mathFlags,
-    dataHash: createHash("sha256").update(canonicalJson(data)).digest("hex"),
-  });
-  // 11. Try harder replaces the earlier read: discarded unless it already has a score (first write wins).
+  await tryWrite("run detail", () =>
+    mergeRunDetail(runId, {
+      ...base,
+      lines: data.lines?.length ?? 0,
+      mathFlags: checks.mathFlags,
+      dataHash: createHash("sha256").update(canonicalJson(data)).digest("hex"),
+    })
+  );
+  // 11. Try harder replaces the earlier read of THIS vendor quote: discarded unless it already has a score
+  //     (first write wins). Another user's run, or a run for another vendor quote, is left alone.
   if (hard && retryOf) {
-    const prev = await getRun(retryOf);
-    if (prev?.feature === "vendorpdf" && prev.userId === me.id) await setRunOutcome(retryOf, me.id, "discarded", { replacedBy: r.runId });
+    await tryWrite("discard earlier read", async () => {
+      const prev = await getRun(retryOf);
+      const prevVq = (prev?.outcomeDetail as Record<string, unknown> | null | undefined)?.vendorQuoteId;
+      if (prev?.feature === "vendorpdf" && prev.userId === me.id && prevVq === vendorQuoteId) {
+        await setRunOutcome(retryOf, me.id, "discarded", { replacedBy: runId });
+      }
+    });
   }
   // 12.
-  return { ok: true, runId: r.runId, model: r.model, hard, at: now, data, checks, pages };
+  return { ok: true, runId, model: r.model, hard, at: now, data, checks, pages };
 }

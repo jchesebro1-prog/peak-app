@@ -157,12 +157,31 @@ export function catalogMatch(partNumber: string | undefined, parts: readonly Cat
 export function catalogLookupKeys(x: VendorPdfExtraction): string[] {
   const out = new Set<string>();
   for (const l of x.lines ?? []) {
-    const exact = exactKey(l.mfrPartNumber);
-    if (exact.length < 3) continue;
-    const loose = looseKey(exact);
-    if (loose) out.add(loose);
+    const k = catalogLookupKey(l.mfrPartNumber);
+    if (k) out.add(k);
   }
   return [...out].sort();
+}
+/** One printed part number's lookup key ("" when it can't match). */
+export function catalogLookupKey(partNumber: string | undefined): string {
+  const exact = exactKey(partNumber);
+  return exact.length < 3 ? "" : looseKey(exact);
+}
+
+/** A lookup key the server's per-key cap cut short: `total` parts answer to it (only the cap's worth were read). */
+export type CatalogKeyTruncation = { total: number };
+/** Under the per-key cap every part answering to a key is read, so catalogMatch is exactly the whole-catalog
+ *  answer. Over it, a rival the cap cut could have made a "match" ambiguous (or out-ranked it in an earlier
+ *  tier), so a match on a cut-short key reads as ambiguous (count = the key's total) — never a wrong chip.
+ *  An ambiguous result stays ambiguous — the conservative chip: it claims no part, whatever the cut rows held. */
+export function capTruncatedMatches(checks: VendorPdfChecks, x: VendorPdfExtraction, truncated: Readonly<Record<string, CatalogKeyTruncation>>): VendorPdfChecks {
+  const lines = (x.lines ?? []).map((l, i) => {
+    const c = checks.lines[i];
+    const t = truncated[catalogLookupKey(l.mfrPartNumber)];
+    if (!c || !t || c.catalog?.kind !== "match") return c;
+    return { ...c, catalog: { kind: "ambiguous" as const, count: t.total, by: c.catalog.by } };
+  });
+  return { ...checks, lines };
 }
 
 export type VendorCompanyLike = { id: string; name: string; type?: string | null };

@@ -138,6 +138,8 @@ export const VENDOR_PDF_COPY = {
   tooLargeBytes: "This PDF is too large to read; enter it by hand.",
   notPdf: "Only a PDF can be read.",
   notThisFile: "That file isn't this vendor quote's.",
+  /** A malformed request (never reachable from the form). */
+  badRequest: "That read request isn't valid.",
   fileMissing: "Couldn't find the file — attach it again.",
   couldNotRead: "Couldn't read that PDF — Try harder, or enter it by hand.",
   rejected: "Claude couldn't open that PDF (it may be password-protected) — enter it by hand.",
