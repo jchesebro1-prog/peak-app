@@ -49,6 +49,11 @@ import { bidderLinkPath, bidderSharePath, ensureShareLink, recordSharedOpen, res
 import { submitClientResponse } from "../src/lib/estimate-output/responses-server";
 import { CLIENT_ACTION_COPY, cleanBidderName, type ClientResponse } from "../src/lib/estimate-output/responses";
 import { loadPackageViewProps } from "../src/lib/estimate-output/package-loader";
+import {
+  EstimateEmailError, SEND_COPY, sendBidderEmail, sendEstimateEmail,
+  type BidderEmailDeps, type BidderEmailInput, type BidderTarget, type ThreadSpec,
+} from "../src/lib/estimate-email/send-server";
+import type { EstimateEmailClaim, EstimateEmailEntry } from "../src/lib/stores/quotes";
 
 const T1 = Date.UTC(2026, 9, 1);
 const B = (over: Partial<BidderState> = {}): BidderState => ({ ...newBidderState("email"), ...over });
@@ -790,8 +795,232 @@ export async function bidSendDbChecks(ok: Ok) {
   }
 }
 
+/** #348 2b-ii Task 6 — sendBidderEmail with fake deps (no DB): the order, the idempotency point, every scope. */
+export async function bidSendFakeChecks(ok: Ok) {
+  const NOW = Date.UTC(2026, 9, 7, 18, 0, 0);
+  const V3 = "https://app.test/share/quote/Q-P3S/v3tok";
+  const PID = "pty_0123456789abcdef";
+  const SAM = { id: "u1", name: "Sam Mills", roles: ["Admin"] };
+  const VIEWER = { id: "u9", name: "Vic Viewer", roles: ["Crew"] };
+  const baseQuote = (): Quote => ({
+    id: "Q-P3S", name: "North HS Auditorium", customer: "North HS", customerId: "co-1", locationId: null, contactName: "Pat Rivera",
+    value: 1000, margin: 0.3, status: "draft", source: "estimator", quoteType: "system", owner: "Lee Lead", estNo: 1042, leadId: "L-9",
+    review: { state: "none" }, createdAt: 1, updatedAt: 77, history: [], revisions: [],
+    pdf: { status: "ready", at: 20, savedAt: 20, blobPath: "quote-pdfs/Q-P3S/cur.pdf" }, contentChangedAt: 10,
+  } as unknown as Quote);
+  const target = (bid: Partial<BidderState> = {}, over: Partial<BidderTarget> = {}): BidderTarget => ({
+    partyId: PID, companyId: "co-gc", companyName: "Miron Construction", contactName: "Gee Ceeone", email: "gee@miron.test", bid: { ...newBidderState("email"), ...bid }, ...over,
+  });
+  type Outcome = { kind: "sent" } | { kind: "failed"; error: string; unknown?: boolean };
+  const fakes = (quote: Partial<Quote> = {}, over: Partial<BidderEmailDeps> = {}, t: BidderTarget | null | Array<BidderTarget | null> = target()) => {
+    const calls: string[] = [];
+    const st = {
+      q: { ...baseQuote(), ...quote } as Quote, threads: [] as ThreadSpec[], records: [] as Array<{ entry: EstimateEmailEntry; outcome: Outcome; by: string }>,
+      failed: [] as Array<{ at: number; error: string; unknown?: boolean; threadId?: string }>, tasks: 0, asOf: [] as Array<number | undefined>,
+      claims: [] as EstimateEmailClaim[], released: [] as EstimateEmailClaim[],
+    };
+    let bidderReads = 0;
+    const deps: BidderEmailDeps = {
+      now: () => NOW,
+      getQuote: async (id) => (id === st.q.id ? st.q : null),
+      readPdf: async (path) => { calls.push("readPdf:" + path); return Buffer.from("%PDF-estimate"); },
+      renderCoverPdf: async () => { calls.push("renderCoverPdf"); return Buffer.from("%PDF-cover"); },
+      storeCover: async (id, _b, now) => { calls.push("storeCover"); return `quote-pdfs/${id}/cover-${now}.pdf`; },
+      findInboxDraft: async () => { calls.push("findInboxDraft"); return null; },
+      claimSend: async (_id, by, now) => { calls.push("claimSend"); const claim = { by, until: now + 120_000 }; st.claims.push(claim); return { ok: true, claim }; },
+      releaseSend: async (_id, claim) => { calls.push("releaseSend"); st.released.push(claim); },
+      applySignature: async (body) => { calls.push("applySignature"); return body + "\n\n-- \nSam Mills · Peak"; },
+      sendQuote: async (_id, actor, asOf) => {
+        calls.push("sendQuote"); st.asOf.push(asOf);
+        st.q = { ...st.q, status: "sent", revisions: [...(st.q.revisions || []), { rev: 4, at: NOW, by: actor.name, reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-4.pdf" }] } as Quote;
+        return { ok: true };
+      },
+      ensureLink: async () => { calls.push("ensureLink"); return "https://app.test/share/quote/Q-P3S/v2tok"; },
+      createAndSendThread: async (spec) => { calls.push("createAndSendThread"); st.threads.push(spec); return { threadId: "C-9001", delivery: "local" as const }; },
+      createDraftThread: async () => { calls.push("createDraftThread"); return { threadId: "C-9002" }; },
+      recordEmail: async () => { calls.push("recordEmail"); return true; },
+      addFollowUpTask: async () => { calls.push("addFollowUpTask"); st.tasks++; },
+      roster: async () => [],
+      getBidder: async () => { calls.push("getBidder"); const v = Array.isArray(t) ? t[Math.min(bidderReads, t.length - 1)] : t; bidderReads++; return v ?? null; },
+      renderBidderPdf: async (_q, _p, rev) => { calls.push("renderBidderPdf:" + (rev ?? "live")); return { ok: true, pdf: Buffer.from("%PDF-bidder") }; },
+      storeBidderPdf: async (id, partyId, rev, _b, now) => { calls.push("storeBidderPdf"); return `quote-pdfs/${id}/bidder-${partyId.slice(4)}-r${rev}-${now}.pdf`; },
+      bidderLink: async (_id, _p, rev) => { calls.push("bidderLink:" + rev); return V3; },
+      recordBidderSend: async (_id, _p, entry, outcome, by) => { calls.push("recordBidderSend:" + outcome.kind); st.records.push({ entry, outcome, by }); return true; },
+      markBidderFailed: async (_id, _p, f) => { calls.push("markBidderFailed"); st.failed.push(f); return true; },
+      ...over,
+    };
+    return { deps, calls, st };
+  };
+  const input = (o: Partial<BidderEmailInput> = {}): BidderEmailInput => ({ subject: "North HS Auditorium — bid", body: "Hi Gee,\n\nYour link: {link}\n\nThanks", asOf: 77, ...o });
+  const sentRev2 = { status: "sent" as const, revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" }] as Quote["revisions"] };
+
+  // 1. Draft happy path.
+  {
+    const f = fakes();
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+    ok(r.ok && "rev" in r && !("skipped" in r) && r.rev === 4 && r.status === "sent" && r.delivery === "local" && r.partyId === PID, "send fake: draft happy path — ok, rev 4, sent, local");
+    ok(f.calls.join(" > ") === "getBidder > claimSend > getBidder > applySignature > renderBidderPdf:live > sendQuote > bidderLink:4 > storeBidderPdf > createAndSendThread > recordBidderSend:sent > releaseSend",
+      "send fake: the ordered pipeline — bidder read, claim, re-read, signature, render, mark sent, v3 link, store, email, record, release");
+    const t = f.st.threads[0];
+    ok(!!t && t.to === "gee@miron.test" && t.cc === "" && t.customerId === "co-gc" && t.customer === "Miron Construction" && t.contactName === "Gee Ceeone" && t.link.id === "Q-P3S",
+      "send fake: the thread goes to the bidder, filed under the bidder company, linked to the quote");
+    ok(!!t && t.body.includes(V3) && !t.body.includes("{link}") && t.subject === "North HS Auditorium — bid", "send fake: the v3 URL replaces {link}; the subject is the input base");
+    const a = t?.attachments[0];
+    ok(t?.attachments.length === 1 && a?.name === "Peak – North HS Auditorium – Miron Construction – Rev 4.pdf" && a.pdfPath === `quote-pdfs/Q-P3S/bidder-0123456789abcdef-r4-${NOW}.pdf` &&
+       a.href === `/api/quotes/Q-P3S/pdf?file=bidder-0123456789abcdef-r4-${NOW}.pdf&download=1` && a.dataUrl === undefined, "send fake: one bidder PDF, by reference");
+    ok(f.st.tasks === 0 && !f.calls.includes("addFollowUpTask") && f.st.released.length === 1 && f.st.released[0] === f.st.claims[0], "send fake: no follow-up task; the claim taken is released");
+    const e = f.st.records[0];
+    ok(!!e && e.entry.rev === 4 && e.entry.threadId === "C-9001" && e.entry.to === "gee@miron.test" && e.entry.by === "Sam Mills" && e.entry.at === NOW && e.by === "u1", "send fake: the record entry and the stamping user");
+    ok(f.st.asOf.join() === "77", "send fake: mark sent passes the shown version");
+  }
+  // 2. Re-send on a sent quote with an addendum since the row's rev.
+  {
+    const f = fakes({
+      status: "sent",
+      revisions: [
+        { rev: 1, at: 2, by: "Sam", reason: "sent", docFields: { bid: { addenda: [{ no: 1, receivedAt: 1, note: "" }] } } },
+        { rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" },
+      ] as unknown as Quote["revisions"],
+      bid: { dueAt: null, awardedPartyId: null, addenda: [{ no: 1, receivedAt: 1, note: "" }, { no: 2, receivedAt: 3, note: "" }] },
+    } as Partial<Quote>, {}, target({ revSent: 1, sentAt: 2 }));
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+    ok(r.ok && !f.calls.includes("sendQuote") && f.calls.includes("renderBidderPdf:2") && f.calls.includes("bidderLink:2"), "send fake: re-send — no mark, render + link at rev 2");
+    ok(f.st.threads[0]?.subject === "Revised bid — North HS Auditorium (Addendum 2)" && f.st.records[0]?.entry.rev === 2, "send fake: re-send subject names the new addendum; the entry is rev 2");
+  }
+  // 3. Already sent.
+  {
+    const f = fakes(sentRev2, {}, target({ revSent: 2 }));
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input({ asOf: undefined }));
+    ok(r.ok && "skipped" in r && r.skipped === true && r.rev === 2 && f.calls.join() === "getBidder", "send fake: a bidder who already has the latest rev is skipped before any claim");
+  }
+  // 4. Double click.
+  {
+    const f = fakes(sentRev2, {}, [target({ revSent: 1 }), target({ revSent: 2 })]);
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input({ asOf: undefined }));
+    ok(r.ok && "skipped" in r && f.calls.join(" > ") === "getBidder > claimSend > getBidder > releaseSend", "send fake: the re-read under the claim sees the first send's stamp — skipped, never emailed twice");
+  }
+  // 5. Row refusals.
+  {
+    const cases: Array<[string, BidderTarget | null, string, Partial<BidderEmailInput>]> = [
+      ["website", target({ submitVia: "website" }), BID_SEND_COPY.website, {}],
+      ["blank email", target({}, { email: "  " }), BID_SEND_COPY.noEmail("Gee Ceeone"), {}],
+      ["withdrew", target({ result: "withdrew" }), BID_SEND_COPY.notPending, {}],
+      ["gone", null, BID_SEND_COPY.gone, {}],
+      ["unknown without retry", target({ failed: { at: 1, error: "x", unknown: true } }), BID_SEND_COPY.unknownRetry, {}],
+    ];
+    for (const [label, t, error, inp] of cases) {
+      const f = fakes({}, {}, t);
+      const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input(inp));
+      ok(!r.ok && r.scope === "row" && r.error === error && !f.calls.includes("claimSend") && !f.calls.includes("markBidderFailed"), `send fake: row refusal — ${label}`);
+    }
+    const bad = fakes();
+    const rb = await sendBidderEmail(bad.deps, SAM, "Q-P3S", "pty_nope", input());
+    ok(!rb.ok && rb.scope === "row" && rb.error === BID_SEND_COPY.gone && bad.calls.length === 0, "send fake: a malformed party id is gone, nothing read");
+    const retry = fakes({}, {}, target({ failed: { at: 1, error: "x", unknown: true } }));
+    const rr = await sendBidderEmail(retry.deps, SAM, "Q-P3S", PID, input({ retryUnknown: true }));
+    ok(rr.ok && retry.st.threads.length === 1, "send fake: an unknown failure proceeds with retryUnknown");
+  }
+  // 6. Quote refusals.
+  {
+    const cases: Array<[string, Partial<Quote>, Partial<BidderEmailInput>, string, typeof SAM, Partial<BidderEmailDeps>]> = [
+      ["no permission", {}, {}, SEND_COPY.needsPerm, VIEWER, {}],
+      ["won", { status: "won" }, {}, SEND_COPY.closed, SAM, {}],
+      ["stale PDF", { contentChangedAt: 99 }, {}, SEND_COPY.pdfStale, SAM, {}],
+      ["stale view", {}, { asOf: 76 }, SEND_COPY.changedSince, SAM, {}],
+      ["busy claim", {}, {}, SEND_COPY.inProgress, SAM, { claimSend: async () => ({ ok: false as const, reason: "busy" as const }) }],
+    ];
+    for (const [label, q, inp, error, actor, over] of cases) {
+      const f = fakes(q, over);
+      const r = await sendBidderEmail(f.deps, actor, "Q-P3S", PID, input(inp));
+      ok(!r.ok && r.scope === "quote" && r.error === error && !f.st.claims.length && !f.calls.includes("markBidderFailed") && !f.calls.includes("recordBidderSend:sent") && !f.st.threads.length,
+        `send fake: quote refusal — ${label}`);
+    }
+  }
+  // 7–8. Render fails: row (stamped) vs quote (not stamped).
+  {
+    const err = "The bidder PDF couldn’t be rendered — try again.";
+    const f = fakes({}, { renderBidderPdf: async () => ({ ok: false, error: err, scope: "row" }) });
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+    ok(!r.ok && r.scope === "row" && r.error === err && f.st.failed[0]?.error === err && !f.calls.includes("sendQuote") && f.st.q.status === "draft" && f.st.released.length === 1,
+      "send fake: a row render failure stamps the bidder, marks nothing, releases the claim");
+    const g = fakes({}, { renderBidderPdf: async () => ({ ok: false, error: err, scope: "quote" }) });
+    const rg = await sendBidderEmail(g.deps, SAM, "Q-P3S", PID, input());
+    ok(!rg.ok && rg.scope === "quote" && !g.calls.includes("markBidderFailed") && g.st.q.status === "draft", "send fake: an unavailable renderer is a quote failure, no stamp");
+  }
+  // 9. Approval gate.
+  {
+    const f = fakes({}, { sendQuote: async () => ({ ok: false, error: "Needs approval first." }) });
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+    ok(!r.ok && r.scope === "quote" && r.error === "Needs approval first." && !f.st.threads.length && !f.st.records.length && !f.st.failed.length, "send fake: the approval gate refuses — no email, no stamp");
+  }
+  // 10. The email throws after mark sent.
+  {
+    const f = fakes({}, { createAndSendThread: async () => { throw new EstimateEmailError(SEND_COPY.notSent, "C-DRAFT"); } });
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+    ok(!r.ok && r.scope === "row" && r.markedSent === true && r.error === SEND_COPY.notSent && f.st.failed[0]?.error === SEND_COPY.notSent && f.st.failed[0]?.threadId === "C-DRAFT" && !f.st.records.length,
+      "send fake: a throw after mark sent stamps the bidder (with the leftover thread), markedSent carried");
+  }
+  // 11. Gmail refused / unknown.
+  {
+    const f = fakes({}, { createAndSendThread: async () => ({ threadId: "C-F", delivery: "failed" as const }) });
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+    const o = f.st.records[0]?.outcome;
+    ok(!r.ok && r.scope === "row" && f.calls.includes("recordBidderSend:failed") && o?.kind === "failed" && o.error === SEND_COPY.gmailFailedResend && !o.unknown && f.st.records[0]?.entry.threadId === "C-F",
+      "send fake: Gmail refused — recorded failed on the row");
+    const u = fakes({}, { createAndSendThread: async () => ({ threadId: "C-U", delivery: "unknown" as const }) });
+    const ru = await sendBidderEmail(u.deps, SAM, "Q-P3S", PID, input());
+    const ou = u.st.records[0]?.outcome;
+    ok(!ru.ok && ru.scope === "row" && ru.error === SEND_COPY.gmailUnknownResend && ou?.kind === "failed" && ou.error === SEND_COPY.gmailUnknownResend && ou.unknown === true,
+      "send fake: Gmail didn't answer — recorded unknown, never resent blind");
+  }
+  // 12. Revision guard.
+  {
+    const f = fakes(sentRev2, {}, target({ revSent: 1 }));
+    f.deps.renderBidderPdf = async (_q, _p, rev) => {
+      f.calls.push("renderBidderPdf:" + (rev ?? "live"));
+      f.st.q = { ...f.st.q, revisions: [...(f.st.q.revisions || []), { rev: 3, at: NOW, by: "Portal", reason: "sent" }] } as Quote;
+      return { ok: true, pdf: Buffer.from("%PDF-bidder") };
+    };
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input({ asOf: undefined }));
+    ok(!r.ok && r.scope === "quote" && r.error === SEND_COPY.changedSince && !f.calls.includes("createAndSendThread") && !f.calls.includes("storeBidderPdf"),
+      "send fake: a sent revision cut during the render refuses — nothing emailed");
+  }
+  // 13. Storage down.
+  {
+    const f = fakes({}, { storeBidderPdf: async () => null });
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+    const a = f.st.threads[0]?.attachments[0];
+    ok(r.ok && !!a && !!a.dataUrl?.startsWith("data:application/pdf;base64,") && a.pdfPath === undefined, "send fake: storage down — the bidder PDF rides inline");
+    const g = fakes({}, { storeBidderPdf: async () => { throw new Error("blob"); } });
+    const rg = await sendBidderEmail(g.deps, SAM, "Q-P3S", PID, input());
+    ok(rg.ok && !!g.st.threads[0]?.attachments[0]?.dataUrl, "send fake: a storage throw counts as null");
+  }
+  // 14. Too large.
+  {
+    const f = fakes({}, { renderBidderPdf: async () => ({ ok: true, pdf: Buffer.alloc(15 * 1024 * 1024 + 1) }) });
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+    ok(!r.ok && r.scope === "quote" && r.error === BID_SEND_COPY.tooLarge && !f.calls.includes("sendQuote") && f.st.q.status === "draft" && !f.st.failed.length, "send fake: over 15 MB — refused, nothing marked");
+  }
+  // 15. Record fails.
+  {
+    const f = fakes({}, { recordBidderSend: async () => false });
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+    ok(r.ok && "warning" in r && r.warning === BID_SEND_COPY.recordFailed, "send fake: a failed record is a warning on an ok send");
+    const g = fakes({}, { recordBidderSend: async () => { throw new Error("db"); } });
+    const rg = await sendBidderEmail(g.deps, SAM, "Q-P3S", PID, input());
+    ok(rg.ok && "warning" in rg && rg.warning === BID_SEND_COPY.recordFailed, "send fake: a thrown record is a warning too");
+  }
+  // 16. The customer path is untouched: same fakes, the #P3 order.
+  {
+    const f = fakes();
+    const r = await sendEstimateEmail(f.deps, SAM, "Q-P3S", { to: "pat@school.org", cc: "", subject: "S", body: "B {link}", attachEstimate: true, attachCover: true, followUpDays: 0, asOf: 77 });
+    ok(r.ok && f.calls.join(" > ") === "claimSend > applySignature > readPdf:quote-pdfs/Q-P3S/cur.pdf > renderCoverPdf > sendQuote > ensureLink > storeCover > createAndSendThread > recordEmail > releaseSend",
+      "send fake: the customer send keeps its own order (ensureLink, no bidder deps)");
+  }
+}
+
 if (process.argv[1]?.endsWith("test-bids.ts")) {
   let pass = 0, fail = 0;
   const okf: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
-  bidChecks(okf).then(() => bidSendChecks(okf)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
+  bidChecks(okf).then(() => bidSendChecks(okf)).then(() => bidSendFakeChecks(okf)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
 }

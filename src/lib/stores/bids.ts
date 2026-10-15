@@ -175,11 +175,12 @@ export async function recordBidderSend(
   });
 }
 
-/** A send that failed before any thread existed: stamp the failure on the bidder, nothing else. */
-export async function markBidderSendFailed(quoteId: string, partyId: string, f: { at: number; error: string; unknown?: boolean }): Promise<boolean> {
+/** A send that failed before the email went out: stamp the failure on the bidder, nothing else (plus the leftover
+ *  draft's `threadId` when one exists). */
+export async function markBidderSendFailed(quoteId: string, partyId: string, f: { at: number; error: string; unknown?: boolean; threadId?: string }): Promise<boolean> {
   return withQuoteRowLock(quoteId, async () => {
     const p = await bidderOnQuote(quoteId, partyId);
-    return p ? !!(await setPartyBid(partyId, bidderFailedState(p.bid, f))) : false;
+    return p ? !!(await setPartyBid(partyId, bidderFailedState(p.bid, f, f.threadId))) : false;
   });
 }
 
