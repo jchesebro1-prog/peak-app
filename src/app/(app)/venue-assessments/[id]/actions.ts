@@ -71,6 +71,8 @@ export type SurveyPatch = Partial<
     | "photos"
     // #344 C5 — per-section photo refs (file slots are sanitized + merged by the store)
     | "photoRefs"
+    // #344 C6 — sketch pads (file slots and keys are sanitized + merged by the store)
+    | "sketches"
     // Site Intake extension (IDEAS #45)
     | "auditoriumSize"
     | "yearBuilt"

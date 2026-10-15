@@ -3,6 +3,7 @@
    recap. Pure and client-safe: the editor, the field sheet, the findings text and the tests read it. */
 import { goalListsFromSurvey, splitGoalLines } from "./estimate-output/goals";
 import { DISCIPLINE_GROUPS, RIG_SYSTEMS, type DisciplineData, type DisciplineKey } from "./stores/survey-intake";
+import { LINESET_ROWS_PER_PAGE, LINESET_SHEET_MAX_PAGES, SKETCH_PADS, linesetSheetKey, linesetSheetPage, type SketchKey } from "./ink/backgrounds";
 
 export { RIG_SYSTEMS };
 
@@ -98,6 +99,45 @@ export function sectionVisible(s: FlowSlice, id: string): boolean {
     return rigSystems(s).length === 0 || hasLinesets(s);
   }
   return true;
+}
+
+/** One sketch pad a section shows (#344 C6). Line set sheets carry their page, the page count and the rows on it. */
+export type SketchPadView = { key: SketchKey; title: string; page?: number; pages?: number; rows?: number };
+
+/**
+ * The sketch pads a section shows (#344 C6): the registry's pads for that section, when the section itself shows
+ * (`sectionVisible`) and the pad's gate passes — CW elevation + Brick drawing only with a counterweight system, the
+ * line set sheet only with a line-set system. The line set sheet is one page up to 30 sets (rows = the quantity, 30
+ * when unknown), then `linesetSheet2`… — and a page already drawn stays listed when the quantity drops. Pure.
+ */
+export function visibleSketchPads(s: FlowSlice & { linesetQty?: unknown; sketches?: unknown }, sectionId: string): SketchPadView[] {
+  if (!sectionVisible(s, sectionId)) return [];
+  const out: SketchPadView[] = [];
+  for (const p of SKETCH_PADS) {
+    if (p.section !== sectionId) continue;
+    if (p.gate === "counterweight" && !hasCounterweight(s)) continue;
+    if (p.gate === "linesets" && !hasLinesets(s)) continue;
+    if (p.key !== "linesetSheet") {
+      out.push({ key: p.key, title: p.title });
+      continue;
+    }
+    const q = typeof s.linesetQty === "number" && Number.isFinite(s.linesetQty) && s.linesetQty > 0 ? Math.floor(s.linesetQty) : 0;
+    let pages = q > LINESET_ROWS_PER_PAGE ? Math.ceil(q / LINESET_ROWS_PER_PAGE) : 1;
+    const stored = s.sketches && typeof s.sketches === "object" && !Array.isArray(s.sketches) ? Object.keys(s.sketches) : [];
+    for (const k of stored) pages = Math.max(pages, linesetSheetPage(k) ?? 0);
+    pages = Math.min(pages, LINESET_SHEET_MAX_PAGES);
+    for (let page = 1; page <= pages; page++) {
+      const left = q - (page - 1) * LINESET_ROWS_PER_PAGE;
+      out.push({
+        key: linesetSheetKey(page),
+        title: pages > 1 ? `${p.title} — page ${page} of ${pages}` : p.title,
+        page,
+        pages,
+        rows: q > 0 && left > 0 ? Math.min(LINESET_ROWS_PER_PAGE, left) : LINESET_ROWS_PER_PAGE,
+      });
+    }
+  }
+  return out;
 }
 
 /** One goal per line — lives in estimate-output/goals.ts now (#344 B7); re-exported so existing imports keep working. */

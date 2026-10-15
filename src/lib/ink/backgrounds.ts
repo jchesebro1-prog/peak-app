@@ -22,6 +22,31 @@ export const LINESET_SHEET_COLUMNS = [
   "Trim low", "Trim high", "Condition", "Notes",
 ] as const;
 export const LINESET_ROWS_PER_PAGE = 30;
+/** The most line set sheet pages: LINESET_QTY_MAX (200) sets at 30 a page. */
+export const LINESET_SHEET_MAX_PAGES = 7;
+
+const PAD_KEYS = new Set<string>(SKETCH_PADS.map((p) => p.key));
+
+/** A line set sheet's key: page 1 is `linesetSheet`, then `linesetSheet2`… */
+export function linesetSheetKey(page: number): SketchKey {
+  const n = Math.max(1, Math.floor(page) || 1);
+  return n === 1 ? "linesetSheet" : `linesetSheet${n}`;
+}
+
+/** The page a line set sheet key names (1 for `linesetSheet`), or null for any other key. */
+export function linesetSheetPage(key: unknown): number | null {
+  if (key === "linesetSheet") return 1;
+  const m = typeof key === "string" ? /^linesetSheet([2-9]|[1-9]\d+)$/.exec(key) : null;
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/** A key a survey may store a sketch under: a registered pad, or line set sheet pages 2…LINESET_SHEET_MAX_PAGES. */
+export function isSketchKey(key: unknown): key is SketchKey {
+  if (typeof key !== "string") return false;
+  if (PAD_KEYS.has(key)) return true;
+  const page = linesetSheetPage(key);
+  return page != null && page <= LINESET_SHEET_MAX_PAGES;
+}
 
 const LINE = "#9aa0ab";
 const TEXT = "#8c919c";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import {
   LINESET_QTY_MAX,
   LINESET_TYPES,
@@ -19,7 +19,20 @@ import {
 import { ConditionSlider } from "./condition-slider";
 import { ACCENT_BORDER_LT, ACCENT_INK, ACCENT_SOFT, inpStyle, labelStyle, selStyle } from "./styles";
 
+/** #344 C6 — the hand-filled Line set schedule sheet: one sketch pad per page of 30 sets (the editor's sketch hook). */
+export type HandSheet = {
+  pages: Array<{ key: string; title: string; page: number }>;
+  /** a pad is opening */
+  busy: boolean;
+  /** open the page's pad */
+  onDraw: (key: string) => void;
+  /** the page's tile (its drawing, or Draw) */
+  tile: (key: string) => ReactNode;
+};
+
 type Props = {
+  /** #344 C6 — Fill in by hand (absent when the sheet doesn't show: no line-set rigging system) */
+  handSheet?: HandSheet;
   /** How many line sets (unset until answered or migrated) */
   qty: number | undefined;
   rows: LinesetRow[];
@@ -82,7 +95,35 @@ function TypeSelect({ value, onChange, label }: { value: string; onChange: (valu
   );
 }
 
-export function LinesetsSection({ qty, rows, onApply, onRemove, onChange }: Props) {
+/** Fill in by hand (#344 C6): the printed-style sheet drawn with the Pencil; a page picker past 30 sets. */
+function HandSheetBox({ sheet }: { sheet: HandSheet }) {
+  const [picked, setPicked] = useState<string>(sheet.pages[0]?.key ?? "linesetSheet");
+  const pageKey = sheet.pages.some((p) => p.key === picked) ? picked : sheet.pages[0]?.key ?? "linesetSheet";
+  return (
+    <div style={{ marginTop: 14, border: "1px solid #e4e7ec", borderRadius: 10, background: "#fafbfc", padding: "10px 12px", display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "grid", gap: 8, flex: "1 1 220px", minWidth: 0 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <button type="button" disabled={sheet.busy} onClick={() => sheet.onDraw(pageKey)} style={barBtn}>
+            Fill in by hand
+          </button>
+          {sheet.pages.length > 1 && (
+            <select aria-label="Line set sheet page" value={pageKey} onChange={(event) => setPicked(event.target.value)} style={{ ...selStyle, width: "auto", minWidth: 120, padding: "9px 10px" }}>
+              {sheet.pages.map((p) => (
+                <option key={p.key} value={p.key}>Page {p.page} of {sheet.pages.length}</option>
+              ))}
+            </select>
+          )}
+        </div>
+        <p style={{ margin: 0, fontSize: 12, color: "#5b616e" }}>
+          Draw on the printed-style sheet with the Pencil. Handwriting isn&apos;t read into the table — the handwritten sheet is the record unless the table below is typed in.
+        </p>
+      </div>
+      {sheet.tile(pageKey)}
+    </div>
+  );
+}
+
+export function LinesetsSection({ handSheet, qty, rows, onApply, onRemove, onChange }: Props) {
   // null = not being edited: the box shows the stored quantity
   const [typed, setTyped] = useState<string | null>(null);
   const [pendingQty, setPendingQty] = useState<number | null>(null);
@@ -237,6 +278,8 @@ export function LinesetsSection({ qty, rows, onApply, onRemove, onChange }: Prop
         </label>
         <p style={{ ...noteStyle, paddingBottom: 12 }}>Enter the count and the table below fills with that many sets, numbered 1 to N.</p>
       </div>
+
+      {handSheet && <HandSheetBox sheet={handSheet} />}
 
       {pendingPlan && pendingPlan.dropped.length > 0 && (
         <div role="alert" style={{ marginTop: 12, border: "1px solid #f0d6cd", background: "#f9ece8", borderRadius: 10, padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>

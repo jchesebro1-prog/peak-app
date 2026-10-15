@@ -18,6 +18,8 @@
  * superseded markup can never land in the new markup's slots (its id no longer owns anything).
  */
 
+import { isSketchKey, type SketchKey } from "../ink/backgrounds";
+
 export type RecordKind = "assessment" | "survey";
 
 /** A file slot: a private Blob path once uploaded, a small data URL (local dev without Blob), or still `pending`. */
@@ -273,16 +275,27 @@ export function sanitizeIncomingFileSlots<T extends Record<string, unknown>>(doc
     });
   }
   if (isObj(doc.sketches)) {
+    // #344 C6: only a registered pad's key (isSketchKey) holding a ref with a valid s_ id is kept, at most
+    // SURVEY_SKETCH_CAP of them; by is a string and updatedAt a finite number
     const sk: Record<string, unknown> = {};
+    let n = 0;
     for (const [key, r] of Object.entries(doc.sketches)) {
-      if (!isObj(r)) {
-        sk[key] = r;
-        continue;
-      }
+      if (!isSketchKey(key) || !isObj(r)) continue;
       const id = idWith(r.id, "s");
-      sk[key] = { ...r, image: sanitizeSlot(r.image, surveyId, id, blob), strokes: sanitizeSlot(r.strokes, surveyId, strokesOf(id), blob) };
+      if (!id) continue;
+      if (n >= SURVEY_SKETCH_CAP) break;
+      n++;
+      sk[key] = {
+        ...r,
+        by: asText(r.by),
+        updatedAt: Number.isFinite(Number(r.updatedAt)) && r.updatedAt !== null && r.updatedAt !== "" ? Number(r.updatedAt) : 0,
+        image: sanitizeSlot(r.image, surveyId, id, blob),
+        strokes: sanitizeSlot(r.strokes, surveyId, strokesOf(id), blob),
+      };
     }
     out.sketches = sk;
+  } else if ("sketches" in doc && doc.sketches !== undefined) {
+    delete out.sketches; // #344 C6: anything but a keyed object is dropped
   }
   return out as T;
 }
@@ -465,4 +478,39 @@ export function photoShows(ref: SurveyPhotoRef, original = false): Array<{ fileI
   if (!original && isObj(ref.markup) && idWith(ref.markup.id, "m") && isObj(ref.markup.image)) out.push({ fileId: ref.markup.id, slot: ref.markup.image });
   if (isObj(ref.file)) out.push({ fileId: ref.id, slot: ref.file });
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* the survey editor's sketch pads (#344 C6)                            */
+/* ------------------------------------------------------------------ */
+
+/** The most sketches one survey holds (every pad + every line set page fits well under it). */
+export const SURVEY_SKETCH_CAP = 40;
+
+/** Every file a sketch owns: its flattened image (`s_`) and its strokes (`k_`, same hex). */
+export function sketchFileIds(ref: SketchRef | null | undefined): string[] {
+  if (!isObj(ref)) return [];
+  const id = idWith(ref.id, "s");
+  return id ? [id, strokesOf(id)] : [];
+}
+
+/** The files a device should stop uploading when a sketch is re-drawn (`after`, a new s_ id) or removed: every file
+ *  `before` owned that `after` doesn't. Their queued copies would otherwise retry for 7 days. */
+export function sketchFilesToDiscard(before: SketchRef | null | undefined, after?: SketchRef | null): string[] {
+  const keep = new Set(sketchFileIds(after));
+  return sketchFileIds(before).filter((id) => !keep.has(id));
+}
+
+/** The sketches with `key` (re)drawn as a NEW sketch (`sketchId`, a fresh `s_` id from `newFileId("s")`): image and
+ *  strokes pending until the device queue uploads them. Pure; throws on a non-`s_` id or an unknown pad key. */
+export function withNewSketch(
+  sketches: Record<string, SketchRef> | null | undefined,
+  key: SketchKey,
+  sketchId: string,
+  by: string,
+  at: number,
+): Record<string, SketchRef> {
+  if (!idWith(sketchId, "s")) throw new Error("A sketch needs its own s_ id");
+  if (!isSketchKey(key)) throw new Error("That sketch pad isn't known");
+  return { ...(isObj(sketches) ? sketches : {}), [key]: { id: sketchId, image: { pending: true }, strokes: { pending: true }, updatedAt: at, by } };
 }

@@ -7,7 +7,7 @@ import type {
   SurveyStage,
   MeasureGroup,
 } from "@/lib/stores/surveys";
-import { photoCountsBySection, type SurveyPhotoRef } from "@/lib/field-files/files";
+import { photoCountsBySection, type SketchRef, type SurveyPhotoRef } from "@/lib/field-files/files";
 import {
   VENUE_CLASSES,
   VISIT_PURPOSES,
@@ -50,6 +50,7 @@ import { FinalThoughtsSection } from "./sections/final-thoughts";
 import { OlderNotes } from "./sections/older-notes";
 import { PhotosSection } from "./sections/photos";
 import { useSectionPhotos } from "./sections/section-photos";
+import { useSectionSketches } from "./sections/sketch-tile";
 import { SystemsSection } from "./sections/systems";
 import { LinesetsSection } from "./sections/linesets";
 import { linesetsInUse } from "@/lib/stores/linesets";
@@ -164,6 +165,7 @@ function toDraft(r: SurveyRecord, travel: TravelSuggestion = null): Draft {
     conditions: [...(r.conditions || [])],
     photos: [...(r.photos || [])],
     photoRefs: Array.isArray(r.photoRefs) ? [...r.photoRefs] : [],
+    sketches: r.sketches && typeof r.sketches === "object" && !Array.isArray(r.sketches) ? { ...r.sketches } : {},
     auditoriumSize: r.auditoriumSize || "",
     yearBuilt: r.yearBuilt || "",
     systemsState: { ...blankSystemsState(), ...(r.systemsState || {}) },
@@ -281,9 +283,11 @@ export default function SurveyEditor({
   const [adoptedBase, setAdoptedBase] = useState(initial);
   const lastSaved = useRef<Draft>(initial);
   const refsNow = useRef<SurveyPhotoRef[]>(initial.photoRefs);
+  const sketchesNow = useRef<Record<string, SketchRef>>(initial.sketches); // #344 C6: the current sketches, same rule
   useEffect(() => {
     lastSaved.current = adoptedBase;
     refsNow.current = adoptedBase.photoRefs;
+    sketchesNow.current = adoptedBase.sketches;
   }, [adoptedBase]);
   if (initial !== seenInitial) {
     setSeenInitial(initial);
@@ -705,6 +709,8 @@ export default function SurveyEditor({
       // #344 C5 — whole list every save (a ref absent from a save is deleted); finished slots are kept by the store
       // once photos were touched in this session they are always sent (deleting the only one must reach the server)
       ...(draft.photoRefs.length || Array.isArray(record.photoRefs) || photosTouched.current ? { photoRefs: draft.photoRefs } : {}),
+      // #344 C6 — sketch pads, sent whole once there are any (a stored finished slot is kept by the store)
+      ...(Object.keys(draft.sketches).length || (record.sketches && typeof record.sketches === "object") ? { sketches: draft.sketches } : {}),
       auditoriumSize: draft.auditoriumSize,
       yearBuilt: draft.yearBuilt,
       systemsState: draft.systemsState,
@@ -750,7 +756,7 @@ export default function SurveyEditor({
     const edits = draft; // the user's draft as of this click; the photo refs are read when the save runs
     try {
       const { queued } = await serialSave(async () => {
-        const sent: Draft = { ...edits, photoRefs: refsNow.current };
+        const sent: Draft = { ...edits, photoRefs: refsNow.current, sketches: sketchesNow.current };
         const patch = buildPatch(undefined, sent);
         const res = await saveThroughOutbox({
           collection: "surveys",
@@ -781,7 +787,7 @@ export default function SurveyEditor({
     const edits = draft;
     try {
       const { queued } = await serialSave(async () => {
-        const sent: Draft = { ...edits, photoRefs: refsNow.current };
+        const sent: Draft = { ...edits, photoRefs: refsNow.current, sketches: sketchesNow.current };
         const patch = buildPatch({ stage: target }, sent);
         const res = await saveThroughOutbox({
           collection: "surveys",
@@ -811,7 +817,7 @@ export default function SurveyEditor({
     setSaving(true);
     try {
       const edits = draft;
-      await serialSave(() => createQuoteFromSurvey(record.id, buildPatch({ stage: "completed" }, { ...edits, photoRefs: refsNow.current })));
+      await serialSave(() => createQuoteFromSurvey(record.id, buildPatch({ stage: "completed" }, { ...edits, photoRefs: refsNow.current, sketches: sketchesNow.current })));
       // redirect happens server-side
     } catch {
       setSaveError("Could not create the quote — please try again.");
@@ -834,7 +840,7 @@ export default function SurveyEditor({
     const preview = window.open("", "_blank");
     setSaving(true);
     try {
-      const result = await printSurveySheet(record.id, buildPatch(undefined, { ...draft, photoRefs: refsNow.current }));
+      const result = await printSurveySheet(record.id, buildPatch(undefined, { ...draft, photoRefs: refsNow.current, sketches: sketchesNow.current }));
       if (!result.ok) throw new Error(result.error);
       const bytes = Uint8Array.from(atob(result.base64), (char) => char.charCodeAt(0));
       const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
@@ -868,7 +874,7 @@ export default function SurveyEditor({
   async function savePhotoRefs() {
     try {
       await serialSave(async () => {
-        const sent: Draft = { ...lastSaved.current, photoRefs: refsNow.current };
+        const sent: Draft = { ...lastSaved.current, photoRefs: refsNow.current, sketches: sketchesNow.current };
         const patch = buildPatch(undefined, sent);
         await saveThroughOutbox({
           collection: "surveys",
@@ -876,7 +882,7 @@ export default function SurveyEditor({
           doc: buildFullDoc(undefined, sent),
           action: () => saveSurvey(record.id, patch),
         });
-        lastSaved.current = { ...lastSaved.current, photoRefs: sent.photoRefs };
+        lastSaved.current = { ...lastSaved.current, photoRefs: sent.photoRefs, sketches: sent.sketches };
         setPhotoUnsaved(false);
       });
     } catch (e) {
@@ -884,6 +890,18 @@ export default function SurveyEditor({
       throw e;
     }
   }
+  // #344 C6 — sketch pads save through the same file save (last-saved draft + current photos + current sketches)
+  const sectionSketches = useSectionSketches({
+    recordId: record.id,
+    me,
+    sketches: draft.sketches,
+    survey: draft,
+    onSketches: (next) => {
+      sketchesNow.current = next;
+      setDraft((d) => ({ ...d, sketches: next }));
+    },
+    save: savePhotoRefs,
+  });
   const sectionPhotos = useSectionPhotos({
     recordId: record.id,
     me,
@@ -899,6 +917,7 @@ export default function SurveyEditor({
       if (rev > revSeen.current) revSeen.current = rev;
     },
     sectionTitle: (id) => sections.find((s) => s.id === id)?.title ?? "another section",
+    foldOther: (fileId, slot) => sectionSketches.fold(fileId, slot),
   });
   const photoCounts = photoCountsBySection(draft.photoRefs);
 
@@ -1175,6 +1194,7 @@ export default function SurveyEditor({
           )}
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {sectionSketches.overlay}
               {sectionPhotos.overlay}
               {meetingsSlot}
               {visibleSections.map((sec, secIdx) => {
@@ -1242,6 +1262,7 @@ export default function SurveyEditor({
                       {!locked && sectionPhotos.strip(sec.id)}
                       {open && (
                         <div id={"sec-body-" + sec.id} style={{ padding: "4px 18px 20px" }}>
+                          {sectionSketches.tiles(sec.id, sec.kind === "fields" ? sec.fields.map((f) => f.key) : undefined)}
                           {sec.kind === "custvenue" && (
                             <CustVenueSection
                               draft={draft}
@@ -1270,6 +1291,7 @@ export default function SurveyEditor({
                               boxStyle={boxStyle}
                               dv={dv}
                               setDisc={setDisc}
+                              aside={sectionSketches.aside}
                             />
                           )}
                           {sec.id === "notes" && fromRecording.length > 0 && (
@@ -1351,6 +1373,7 @@ export default function SurveyEditor({
                           })()}
                           {sec.kind === "linesets" && (
                             <LinesetsSection
+                              handSheet={sectionSketches.linesetSheet()}
                               qty={draft.linesetQty}
                               rows={draft.linesets}
                               onApply={applyLinesets}

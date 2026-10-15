@@ -47,6 +47,8 @@ export type SectionPhotosOptions = {
   /** the survey's stored rev after a finalize (adopted for the next outbox save) */
   onRev: (rev: number) => void;
   sectionTitle: (sectionId: string) => string;
+  /** #344 C6 — a finished file no photo owns (a sketch's) is handed on: one queue configuration per editor */
+  foldOther?: (fileId: string, slot: FinishedSlot) => boolean;
 };
 
 export type SectionPhotos = {
@@ -210,6 +212,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
           if (slot) {
             const folded = foldFileSlot({ photoRefs: refsRef.current }, fileId, slot);
             if (folded.status === "set" && folded.doc.photoRefs) commit(folded.doc.photoRefs);
+            else if (folded.status === "missing") optsRef.current.foldOther?.(fileId, slot);
           }
           if (typeof rev === "number") optsRef.current.onRev(rev);
         },

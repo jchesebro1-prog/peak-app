@@ -1477,8 +1477,8 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
         { id: "p_cccccccc", section: "mHouse", takenAt: 3, by: "u1", file: done("surveys/FS-1/p_cccccccc.jpg") },
       ],
       sketches: {
-        stage: { id: "s_dddddddd", image: done("surveys/FS-1/s_dddddddd.jpg"), strokes: { inline: "data:application/json;base64,e30=" }, updatedAt: 7, by: "u1" },
-        house: { id: "s_eeeeeeee", image: done("surveys/FS-1/s_eeeeeeee.jpg"), strokes: done("surveys/FS-1/k_eeeeeeee.json"), updatedAt: 8, by: "u1" },
+        stagePlan: { id: "s_dddddddd", image: done("surveys/FS-1/s_dddddddd.jpg"), strokes: { inline: "data:application/json;base64,e30=" }, updatedAt: 7, by: "u1" },
+        housePlan: { id: "s_eeeeeeee", image: done("surveys/FS-1/s_eeeeeeee.jpg"), strokes: done("surveys/FS-1/k_eeeeeeee.json"), updatedAt: 8, by: "u1" },
       },
     };
     const incoming: Refs = {
@@ -1489,8 +1489,8 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
         { id: "p_ffffffff", section: "mHouse", takenAt: 9, by: "u1", file: pend },
       ],
       sketches: {
-        stage: { id: "s_dddddddd", image: pend, strokes: pend, updatedAt: 7, by: "u1" },
-        house: { id: "s_99999999", image: pend, strokes: pend, updatedAt: 10, by: "u1" },
+        stagePlan: { id: "s_dddddddd", image: pend, strokes: pend, updatedAt: 7, by: "u1" },
+        housePlan: { id: "s_99999999", image: pend, strokes: pend, updatedAt: 10, by: "u1" },
       },
     };
     const snapS = JSON.stringify(stored);
@@ -1503,9 +1503,9 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     ok((merged.photoRefs.find((r) => r.id === "p_bbbbbbbb")!.file as { inline?: string }).inline === jpegUrl, "#344 C4: merge — an incoming finished slot wins over a stored unfinished one");
     ok(!merged.photoRefs.some((r) => r.id === "p_cccccccc") && merged.photoRefs.some((r) => r.id === "p_ffffffff") && merged.photoRefs.length === 3,
       "#344 C4: merge — a ref missing from the incoming copy stays deleted; a new incoming ref is kept");
-    ok((merged.sketches.stage.image as { blobPath?: string }).blobPath === "surveys/FS-1/s_dddddddd.jpg" && (merged.sketches.stage.strokes as { inline?: string }).inline === "data:application/json;base64,e30=",
+    ok((merged.sketches.stagePlan.image as { blobPath?: string }).blobPath === "surveys/FS-1/s_dddddddd.jpg" && (merged.sketches.stagePlan.strokes as { inline?: string }).inline === "data:application/json;base64,e30=",
       "#344 C4: merge — a sketch with the same id keeps its finished image + strokes");
-    ok(merged.sketches.house.id === "s_99999999" && "pending" in merged.sketches.house.image && "pending" in merged.sketches.house.strokes,
+    ok(merged.sketches.housePlan.id === "s_99999999" && "pending" in merged.sketches.housePlan.image && "pending" in merged.sketches.housePlan.strokes,
       "#344 C4: merge — a re-drawn sketch (new id) keeps the incoming one");
     ok(JSON.stringify(stored) === snapS && JSON.stringify(incoming) === snapI && (merged as unknown) !== incoming, "#344 C4: merge — inputs are not mutated");
     ok((merged as { notes?: string }).notes === "edited" && merged.rev === 4, "#344 C4: merge — every other incoming field is kept as sent");
@@ -1522,10 +1522,10 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     // a stored finished slot always wins, even over a different finished incoming one
     const twoDone = FF.mergeSurveyFileRefs(stored, { photoRefs: [{ ...incoming.photoRefs[0], file: done("surveys/FS-1/p_aaaaaaaa-Other.jpg"),
       markup: { id: "m_a1a1a1a1", image: { inline: jpegUrl }, strokes: done("surveys/FS-1/k_a1a1a1a1-X.json"), updatedAt: 5 } }],
-      sketches: { stage: { id: "s_dddddddd", image: done("surveys/FS-1/s_dddddddd-Z.jpg"), strokes: done("surveys/FS-1/k_dddddddd.json"), updatedAt: 7, by: "u1" } } }) as typeof incoming;
+      sketches: { stagePlan: { id: "s_dddddddd", image: done("surveys/FS-1/s_dddddddd-Z.jpg"), strokes: done("surveys/FS-1/k_dddddddd.json"), updatedAt: 7, by: "u1" } } }) as typeof incoming;
     ok(twoDone.photoRefs[0].file.blobPath === "surveys/FS-1/p_aaaaaaaa.jpg" && twoDone.photoRefs[0].markup!.image.blobPath === "surveys/FS-1/m_a1a1a1a1.jpg" &&
       !twoDone.photoRefs[0].markup!.image.inline && twoDone.photoRefs[0].markup!.strokes.blobPath === "surveys/FS-1/k_a1a1a1a1.json" &&
-      twoDone.sketches.stage.image.blobPath === "surveys/FS-1/s_dddddddd.jpg" && twoDone.sketches.stage.strokes.inline === "data:application/json;base64,e30=",
+      twoDone.sketches.stagePlan.image.blobPath === "surveys/FS-1/s_dddddddd.jpg" && twoDone.sketches.stagePlan.strokes.inline === "data:application/json;base64,e30=",
       "#344 C4 fix: merge — a stored finished slot is never replaced, even by a finished incoming one");
     const noMk = FF.mergeSurveyFileRefs(stored, { photoRefs: [{ ...incoming.photoRefs[0], markup: undefined }] }) as typeof incoming;
     ok(!noMk.photoRefs[0].markup, "#344 C4: merge — a removed markup stays removed");
@@ -1534,7 +1534,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
 
     /* the fold (one finished slot into the refs) */
     const base: Refs = { photoRefs: [{ id: "p_abcdef12", section: "x", takenAt: 1, by: "u", file: pend, markup: { id: "m_fedcba98", image: pend, strokes: pend, updatedAt: 1 } }],
-      sketches: { stage: { id: "s_12345678", image: pend, strokes: pend, updatedAt: 1, by: "u" } } };
+      sketches: { stagePlan: { id: "s_12345678", image: pend, strokes: pend, updatedAt: 1, by: "u" } } };
     const f1 = FF.foldFileSlot(base, "p_abcdef12", { blobPath: "surveys/FS-1/p_abcdef12.jpg" });
     const f2 = FF.foldFileSlot(base, "m_fedcba98", { inline: jpegUrl });
     const f3 = FF.foldFileSlot(base, "k_fedcba98", { inline: jsonUrl });
@@ -1542,14 +1542,14 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const f5 = FF.foldFileSlot(base, "s_12345678", { blobPath: "surveys/FS-1/s_12345678.jpg" });
     ok(f1.status === "set" && f1.doc.photoRefs![0].file.blobPath === "surveys/FS-1/p_abcdef12.jpg" && !("pending" in f1.doc.photoRefs![0].file) &&
       f2.status === "set" && f2.doc.photoRefs![0].markup!.image.inline === jpegUrl && f3.status === "set" && f3.doc.photoRefs![0].markup!.strokes.inline === jsonUrl &&
-      f4.status === "set" && f4.doc.sketches!.stage.strokes.inline === jsonUrl && f5.status === "set" && f5.doc.sketches!.stage.image.blobPath === "surveys/FS-1/s_12345678.jpg" &&
+      f4.status === "set" && f4.doc.sketches!.stagePlan.strokes.inline === jsonUrl && f5.status === "set" && f5.doc.sketches!.stagePlan.image.blobPath === "surveys/FS-1/s_12345678.jpg" &&
       "pending" in base.photoRefs[0].file,
       "#344 C4: foldFileSlot finds the owner (p_ file, m_ markup image by markup.id, k_ markup or sketch strokes, s_ sketch image) without mutating");
     // ownerOf: m_/k_ follow the markup's OWN id; the photo's hex owns nothing but its p_ file; a superseded markup id is missing
     const fs = (d: Refs, id: string) => FF.fileSlotOf(d, id);
     const remarked: Refs = { ...base, photoRefs: [{ ...base.photoRefs[0], markup: { id: "m_0a0a0a0a", image: pend, strokes: pend, updatedAt: 2 } }] };
     ok(fs(base, "m_fedcba98") === base.photoRefs[0].markup!.image && fs(base, "k_fedcba98") === base.photoRefs[0].markup!.strokes &&
-      fs(base, "m_abcdef12") === null && fs(base, "k_abcdef12") === null && fs(base, "k_12345678") === base.sketches.stage.strokes && fs(base, "s_12345678") === base.sketches.stage.image &&
+      fs(base, "m_abcdef12") === null && fs(base, "k_abcdef12") === null && fs(base, "k_12345678") === base.sketches.stagePlan.strokes && fs(base, "s_12345678") === base.sketches.stagePlan.image &&
       fs(base, "p_abcdef12") === base.photoRefs[0].file && fs(remarked, "m_fedcba98") === null && fs(remarked, "k_fedcba98") === null && fs(remarked, "k_0a0a0a0a") === remarked.photoRefs[0].markup!.strokes,
       "#344 C4 fix: ownerOf — m_ is the photo whose markup.id matches, k_ that markup's hex else the sketch's, s_ the sketch; a superseded markup id owns nothing");
     const late = FF.foldFileSlot(remarked, "m_fedcba98", { inline: jpegUrl });
@@ -1575,8 +1575,8 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
         { id: "p_55555555", section: "a", takenAt: 1, by: "u", file: { inline: jpegUrl }, markup: { id: "p_99999999", image: done(`surveys/${SV}/p_99999999.jpg`), strokes: pend, updatedAt: 1 } },
       ],
       sketches: {
-        stage: { id: "s_66666666", image: done(`surveys/${SV}/s_66666666.jpg`), strokes: done(`surveys/${SV}/k_66666666.json`), updatedAt: 1, by: "u" },
-        house: { id: "s_77777777", image: done(`surveys/${SV}/s_66666666.jpg`), strokes: { inline: jsonUrl }, updatedAt: 1, by: "u" },
+        stagePlan: { id: "s_66666666", image: done(`surveys/${SV}/s_66666666.jpg`), strokes: done(`surveys/${SV}/k_66666666.json`), updatedAt: 1, by: "u" },
+        housePlan: { id: "s_77777777", image: done(`surveys/${SV}/s_66666666.jpg`), strokes: { inline: jsonUrl }, updatedAt: 1, by: "u" },
       },
     } as unknown as Refs;
     const snapD = JSON.stringify(dirty);
@@ -1584,13 +1584,13 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const prod = FF.sanitizeIncomingFileSlots(dirty, SV, { blobEnabled: true }) as unknown as Refs;
     const isPend = (x: unknown) => JSON.stringify(x) === '{"pending":true}';
     ok(dev.photoRefs[0].file.blobPath === `surveys/${SV}/p_11111111-Ab1.jpg` && dev.photoRefs[0].markup!.image.blobPath === `surveys/${SV}/m_22222222.jpg` &&
-      dev.photoRefs[0].markup!.strokes.blobPath === `surveys/${SV}/k_22222222.json` && dev.sketches.stage.image.blobPath === `surveys/${SV}/s_66666666.jpg` &&
-      dev.sketches.stage.strokes.blobPath === `surveys/${SV}/k_66666666.json` && (dev as unknown as { notes: string }).notes === "keep",
+      dev.photoRefs[0].markup!.strokes.blobPath === `surveys/${SV}/k_22222222.json` && dev.sketches.stagePlan.image.blobPath === `surveys/${SV}/s_66666666.jpg` &&
+      dev.sketches.stagePlan.strokes.blobPath === `surveys/${SV}/k_66666666.json` && (dev as unknown as { notes: string }).notes === "keep",
       "#344 C4 fix: sanitize — a finished slot on its own file's path in this survey is kept (Blob's -suffix allowed)");
     ok(isPend(dev.photoRefs[1].file) && isPend(dev.photoRefs[1].markup!.image) && isPend(dev.photoRefs[1].markup!.strokes) && isPend(dev.photoRefs[2].markup!.image) &&
-      isPend(dev.sketches.house.image),
+      isPend(dev.sketches.housePlan.image),
       "#344 C4 fix: sanitize — another file's path, another survey's path, strokes not under the markup's hex, or a bad owning id → pending");
-    ok(dev.photoRefs[2].file.inline === jpegUrl && dev.sketches.house.strokes.inline === jsonUrl && isPend(prod.photoRefs[2].file) && isPend(prod.sketches.house.strokes) &&
+    ok(dev.photoRefs[2].file.inline === jpegUrl && dev.sketches.housePlan.strokes.inline === jsonUrl && isPend(prod.photoRefs[2].file) && isPend(prod.sketches.housePlan.strokes) &&
       prod.photoRefs[0].file.blobPath === `surveys/${SV}/p_11111111-Ab1.jpg`,
       "#344 C4 fix: sanitize — an incoming inline slot is kept only without Blob (a deployment with Blob downgrades it to pending)");
     ok(isPend(FF.sanitizeIncomingFileSlots({ photoRefs: [{ ...dirty.photoRefs[0], file: { inline: "data:image/jpeg;base64,aGVsbG8=" } }] }, SV, { blobEnabled: false }).photoRefs![0].file),
@@ -1725,7 +1725,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     ok(/\{meetingsSlot\}\s*\{visibleSections\.map\(/.test(ctl), "#344 C5: the meetings slot still sits right before the sections");
     const psv = ctl.slice(ctl.indexOf("async function savePhotoRefs"), ctl.indexOf("const sectionPhotos = useSectionPhotos"));
     const osv = ctl.slice(ctl.indexOf("async function onSave"), ctl.indexOf("async function advanceStage"));
-    ok(psv.includes("serialSave(") && psv.includes("{ ...lastSaved.current, photoRefs: refsNow.current }") && !psv.includes("validate(") && !psv.includes("...draft") && psv.includes("buildPatch(undefined, sent)") &&
+    ok(psv.includes("serialSave(") && psv.includes("{ ...lastSaved.current, photoRefs: refsNow.current") && !psv.includes("validate(") && !psv.includes("...draft") && psv.includes("buildPatch(undefined, sent)") &&
       psv.includes("setPhotoUnsaved(true)") && osv.includes("serialSave(") && osv.includes("photoRefs: refsNow.current") && osv.includes("lastSaved.current = sent") &&
       ctl.includes('"Photo not saved yet"') && ctl.includes("photosTouched.current ? { photoRefs: draft.photoRefs }") && ctl.includes("setAdoptedBase(initial)") &&
       /function buildPatch\(over\?: Partial<SurveyPatch>, d: Draft = draft\)/.test(ctl) && /function buildFullDoc\(over\?: Partial<SurveyPatch>, d: Draft = draft\)/.test(ctl),
@@ -1735,6 +1735,118 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       "#344 C5 fix: Add photo / Library are keyboard-reachable; messages show beside their section; Discard on a failed original asks first");
     ok(/import \{ blobEnabled \} from "@\/lib\/blob"/.test(pg) && /blobEnabled=\{blobEnabled\(\)\}/.test(pg) && /\| "photoRefs"/.test(act),
       "#344 C5: the page passes blobEnabled() to the editor; a save patch may carry photoRefs");
+  }
+
+  /* ---- C6: sketch pads in sections ---- */
+  {
+    const FF = await import("../src/lib/field-files/files");
+    const BG = await import("../src/lib/ink/backgrounds");
+    const SF = await import("../src/lib/survey-flow");
+    type SRef = import("../src/lib/field-files/files").SketchRef;
+    const pend = { pending: true as const };
+    const keys = (s: Parameters<typeof SF.visibleSketchPads>[0], id: string) => SF.visibleSketchPads(s, id).map((p) => p.key).join(",");
+    const rig = (present: string[], extra: Record<string, unknown> = {}) => ({ disciplines: { rigging: { present } }, ...extra });
+
+    ok(keys({}, "mBeams") === "beams" && keys(rig(["Dead-hung"]), "mBeams") === "beams" && keys(rig(["Counterweight"]), "mBeams") === "beams,cwElevation,brick",
+      "#344 C6: visibleSketchPads — Beams always has its sketch; CW elevation + Brick drawing only with a counterweight system");
+    ok(keys({}, "mLayout") === "stagePlan" && keys({}, "mSection") === "stageSection" && keys({}, "mFOH") === "houseSection" && keys({}, "mHouse") === "housePlan" &&
+      keys({}, "dAv") === "" && keys({}, "nope") === "",
+      "#344 C6: visibleSketchPads — Stage plan, Stage section, House section and House plan sit in their measurement sections");
+    ok(keys(rig(["Counterweight"], { scope: ["av"] }), "mBeams") === "" && keys({ scope: ["rigging"] }, "mFOH") === "" && keys({ scope: ["lighting"] }, "mFOH") === "houseSection" &&
+      keys(rig(["Counterweight"], { scope: ["av"] }), "linesets") === "",
+      "#344 C6: visibleSketchPads — a section out of scope shows no pads");
+    ok(keys({}, "linesets") === "" && keys(rig(["Fixed points"]), "linesets") === "" && keys(rig(["Dead-hung"]), "linesets") === "linesetSheet" &&
+      keys(rig(["Fixed points"], { linesets: [{ id: "x" }] }), "linesets") === "",
+      "#344 C6: visibleSketchPads — the line set sheet only with a line-set rigging system");
+    const one = SF.visibleSketchPads(rig(["Hemp"], { linesetQty: 12 }), "linesets");
+    const unk = SF.visibleSketchPads(rig(["Hemp"]), "linesets");
+    const many = SF.visibleSketchPads(rig(["Motorized"], { linesetQty: 65 }), "linesets");
+    ok(one.length === 1 && one[0].rows === 12 && one[0].page === 1 && unk.length === 1 && unk[0].rows === BG.LINESET_ROWS_PER_PAGE &&
+      keys(rig(["Hemp"], { linesetQty: 30 }), "linesets") === "linesetSheet" &&
+      many.map((p) => p.key).join() === "linesetSheet,linesetSheet2,linesetSheet3" && many.map((p) => p.rows).join() === "30,30,5" &&
+      many[2].page === 3 && many[2].title.includes("page 3 of 3"),
+      "#344 C6: visibleSketchPads — line set pages: one up to 30 sets (rows = the quantity), linesetSheet2… past 30");
+    ok(keys(rig(["Hemp"], { linesetQty: 40, sketches: { linesetSheet4: {} } }), "linesets") === "linesetSheet,linesetSheet2,linesetSheet3,linesetSheet4" &&
+      keys(rig(["Hemp"], { linesetQty: 999 }), "linesets").split(",").length === BG.LINESET_SHEET_MAX_PAGES,
+      "#344 C6: visibleSketchPads — a page already drawn stays reachable when the quantity drops; never past the last page");
+
+    ok(BG.LINESET_SHEET_MAX_PAGES === Math.ceil(LSX.LINESET_QTY_MAX / BG.LINESET_ROWS_PER_PAGE) &&
+      BG.SKETCH_PADS.every((p) => BG.isSketchKey(p.key)) && BG.isSketchKey("linesetSheet2") && BG.isSketchKey(`linesetSheet${BG.LINESET_SHEET_MAX_PAGES}`) &&
+      ["stage", "house", "linesetSheet1", "linesetSheet02", `linesetSheet${BG.LINESET_SHEET_MAX_PAGES + 1}`, "__proto__", "", 7, null].every((k) => !BG.isSketchKey(k)),
+      "#344 C6: isSketchKey — the registry's keys and line set pages 2…7 only");
+
+    /* server: sanitize keeps valid sketch keys only, shapes refs, caps the count */
+    {
+      const sk = (id: string, extra: Record<string, unknown> = {}) => ({ id, image: pend, strokes: pend, updatedAt: 1, by: "u", ...extra });
+      const clean = FF.sanitizeIncomingFileSlots({ sketches: {
+        beams: sk("s_111111111111"), stage: sk("s_222222222222"), linesetSheet9: sk("s_333333333333"), __proto__x: sk("s_444444444444"),
+        housePlan: sk("p_555555555555"), stagePlan: "junk", brick: sk("s_666666666666", { by: 3, updatedAt: "8" }), cwElevation: sk("s_777777777777", { updatedAt: NaN }),
+      } } as Record<string, unknown>, "FS-1", { blobEnabled: true }).sketches as Record<string, SRef>;
+      ok(Object.keys(clean).sort().join() === "beams,brick,cwElevation" && clean.brick.by === "3" && clean.brick.updatedAt === 8 && clean.cwElevation.updatedAt === 0,
+        "#344 C6: sanitize drops sketches under an unknown key, non-object sketches and ones without a valid s_ id; by / updatedAt are shaped");
+      const odd = FF.sanitizeIncomingFileSlots({ notes: "n", sketches: ["x"] } as Record<string, unknown>, "FS-1", { blobEnabled: true });
+      ok(!("sketches" in odd) && (odd as { notes?: string }).notes === "n", "#344 C6: sanitize drops a sketches value that isn't a keyed object");
+      ok(FF.SURVEY_SKETCH_CAP === 40 && FF.SURVEY_SKETCH_CAP >= BG.SKETCH_PADS.length + BG.LINESET_SHEET_MAX_PAGES - 1,
+        "#344 C6: a survey holds at most 40 sketches (room for every pad and line set page)");
+    }
+
+    /* re-draw: new ids, pending slots; the superseded sketch's files are discarded from the device */
+    {
+      const a: SRef = { id: "s_aaaaaaaaaaaa", image: { blobPath: "surveys/FS-1/s_aaaaaaaaaaaa.jpg" }, strokes: pend, updatedAt: 1, by: "u1" };
+      const before = { beams: a };
+      const snap = JSON.stringify(before);
+      const next = FF.withNewSketch(before, "beams", "s_bbbbbbbbbbbb", "u2", 9);
+      let threw = 0;
+      try { FF.withNewSketch(before, "beams", "m_bbbbbbbbbbbb", "u2", 9); } catch { threw++; }
+      try { FF.withNewSketch(before, "stage" as never, "s_bbbbbbbbbbbb", "u2", 9); } catch { threw++; }
+      ok(next.beams.id === "s_bbbbbbbbbbbb" && next.beams.image.pending === true && next.beams.strokes.pending === true && next.beams.by === "u2" && next.beams.updatedAt === 9 &&
+        threw === 2 && JSON.stringify(before) === snap && next !== before,
+        "#344 C6: withNewSketch replaces the key's sketch with a NEW s_ id (pending image + strokes); refuses a non-s_ id or unknown key; pure");
+      ok(JSON.stringify(FF.sketchFileIds(a)) === '["s_aaaaaaaaaaaa","k_aaaaaaaaaaaa"]' && FF.sketchFileIds(undefined).length === 0 &&
+        JSON.stringify(FF.sketchFilesToDiscard(a, next.beams)) === '["s_aaaaaaaaaaaa","k_aaaaaaaaaaaa"]' && FF.sketchFilesToDiscard(a, a).length === 0 &&
+        FF.sketchFilesToDiscard(undefined, next.beams).length === 0 && FF.sketchFilesToDiscard(a).length === 2,
+        "#344 C6: sketchFilesToDiscard — a re-draw drops the old s_ + k_ from the device queue; a first drawing drops nothing");
+      const f = FF.foldFileSlot({ sketches: next }, "k_bbbbbbbbbbbb", { inline: "data:application/json;base64,e30=" });
+      ok(f.status === "set" && f.doc.sketches!.beams.strokes.inline === "data:application/json;base64,e30=" &&
+        FF.foldFileSlot({ sketches: next }, "s_aaaaaaaaaaaa", { blobPath: "x" }).status === "missing",
+        "#344 C6: the editor folds a finished sketch file with foldFileSlot — the superseded sketch's files own nothing");
+    }
+
+    /* source pins */
+    const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+    const st = read("src/app/(app)/venue-assessments/[id]/sections/sketch-tile.tsx");
+    const sp = read("src/app/(app)/venue-assessments/[id]/sections/section-photos.tsx");
+    const ls = read("src/app/(app)/venue-assessments/[id]/sections/linesets.tsx");
+    const fl = read("src/app/(app)/venue-assessments/[id]/sections/fields.tsx");
+    const ctl = read("src/app/(app)/venue-assessments/[id]/controls.tsx");
+    const act = read("src/app/(app)/venue-assessments/[id]/actions.ts");
+    const fls = read("src/lib/field-files/files.ts");
+    ok(st.startsWith('"use client"') && !/from\s+["'][^"']*(stores|@\/db|lib\/blob|lib\/session)["']/.test(st) && st.includes("export function useSectionSketches("),
+      "#344 C6: sketch-tile is a client hook with no store / server imports");
+    const sv = st.slice(st.indexOf("async function saveSketch"));
+    ok(st.includes("async function saveSketch") && sv.includes('newFileId("s")') && sv.includes("siblingId(") && sv.includes("withNewSketch(") &&
+      sv.indexOf("await persist(") > 0 && sv.indexOf("await persist(") < sv.indexOf("enqueuePhoto(") && sv.indexOf("sketchFilesToDiscard(") >= 0 && st.includes("discardPhoto(") &&
+      st.includes("serializeInk(") && st.includes('"application/json"'),
+      "#344 C6: Done mints a NEW s_ + k_, saves the pending ref, THEN enqueues the JPEG + strokes, and discards the superseded sketch's queued files");
+    ok(st.includes("visibleSketchPads(") && st.includes("backgroundFor(") && /kind: "svg"/.test(st) && st.includes("parseInk(") && st.includes("fitInkTo(") &&
+      st.includes("queuedPhotoBlob(") && st.includes("URL.revokeObjectURL(") && st.includes("<InkPad") && st.includes("couldn't load"),
+      "#344 C6: a tile opens the InkPad over the generated background, starting from the saved strokes (device copy while pending, fitted), else empty with a note");
+    ok(st.includes(">Draw<") && st.includes("Uploading") && st.includes("/api/surveys/") && st.includes("cwElevationOnFile") && st.includes("brickDrawingOnFile"),
+      "#344 C6: tiles — a thumbnail (device copy / bytes route / inline) or a Draw tile; CW elevation + Brick drawing sit beside their on-file checks");
+    ok(ls.includes("Fill in by hand") && ls.includes("handSheet") && /<select[\s\S]{0,300}aria-label="Line set sheet page"/.test(ls) && ls.includes("the handwritten sheet is the record"),
+      "#344 C6: Line set schedule — Fill in by hand opens the sheet pad (a page picker past 30 sets); the table stays; a note says the handwritten sheet is the record");
+    ok(fl.includes("aside?: (key: string) => ReactNode") && /checkMeasure[\s\S]{0,900}p\.aside\?\.\(f\.key\)/.test(fl),
+      "#344 C6: an on-file check can carry a pad beside it");
+    ok(sp.includes("foldOther") && /status === "missing"[\s\S]{0,120}foldOther/.test(sp) && (sp.match(/configurePhotoQueue\(/g) || []).length === 1 && !st.includes("configurePhotoQueue("),
+      "#344 C6: one queue configuration — the photos hook's onDone hands sketch files to the sketch hook");
+    const psv = ctl.slice(ctl.indexOf("async function savePhotoRefs"), ctl.indexOf("const sectionPhotos = useSectionPhotos"));
+    const osv = ctl.slice(ctl.indexOf("async function onSave"), ctl.indexOf("async function advanceStage"));
+    ok(ctl.includes("useSectionSketches(") && psv.includes("{ ...lastSaved.current, photoRefs: refsNow.current, sketches: sketchesNow.current }") &&
+      osv.includes("sketches: sketchesNow.current") && ctl.includes("sketches: draft.sketches") && ctl.includes("foldOther:") &&
+      /\{meetingsSlot\}\s*\{visibleSections\.map\(/.test(ctl) && /\| "sketches"/.test(act),
+      "#344 C6: sketch saves send the last-saved draft + current photos + current sketches (never unsaved edits); Save changes sends the current sketches; a patch may carry sketches");
+    ok(/from "\.\.\/ink\/backgrounds"/.test(fls) && fls.includes("isSketchKey(") && fls.includes("SURVEY_SKETCH_CAP"),
+      "#344 C6: the server's sanitize validates sketch keys against the pad registry");
   }
 }
 
@@ -1785,7 +1897,7 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
       registerFixture("surveys", sv.id);
       const refs = {
         photoRefs: [{ id: P, section: "mBeams", takenAt: 1, by: "u1", file: pend, markup: { id: M, image: pend, strokes: pend, updatedAt: 5 } }],
-        sketches: { stage: { id: SK, image: pend, strokes: pend, updatedAt: 5, by: "u1" } },
+        sketches: { stagePlan: { id: SK, image: pend, strokes: pend, updatedAt: 5, by: "u1" } },
       };
       await S.update(sv.id, refs as never);
       const { getDb } = await import("../src/db");
@@ -1802,7 +1914,7 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
       const r5 = await S.applyFinalizedSurveyFile(sv.id, KS, { inline: jsonUrl }, U);
       const after = await S.get(sv.id);
       const pr = (after?.photoRefs ?? [])[0];
-      const sk = after?.sketches?.stage;
+      const sk = after?.sketches?.stagePlan;
       const row1 = await rowOf(sv.id);
       ok(r1.ok && r2.ok && r3.ok && r4.ok && r5.ok && !!pr && pr.file.inline === jpegUrl && pr.markup?.image.inline === jpegUrl && pr.markup?.strokes.inline === jsonUrl &&
         sk?.image.inline === jpegUrl && sk?.strokes.inline === jsonUrl && !("pending" in pr.file) && !("pending" in (sk?.image ?? {})),
@@ -1816,7 +1928,7 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
         registerFixture("surveys", sv2.id);
         const P3 = FF.newFileId("p");
         const SK3 = FF.newFileId("s");
-        const refs3 = { photoRefs: [{ id: P3, section: "mBeams", takenAt: 1, by: "u1", file: pend }], sketches: { stage: { id: SK3, image: pend, strokes: pend, updatedAt: 1, by: "u1" } } };
+        const refs3 = { photoRefs: [{ id: P3, section: "mBeams", takenAt: 1, by: "u1", file: pend }], sketches: { stagePlan: { id: SK3, image: pend, strokes: pend, updatedAt: 1, by: "u1" } } };
         await S.update(sv2.id, refs3 as never);
         const n = (await rowOf(sv2.id))!.rev;
         const docN = await S.get(sv2.id);
@@ -1824,7 +1936,7 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
         const fb = await S.applyFinalizedSurveyFile(sv2.id, SK3, { inline: jpegUrl }, U);
         const pushedN = await S.pushSurvey({ id: sv2.id, rev: n + 1, doc: { ...(docN as object), ...refs3, notes: "offline edit", rev: n + 1 } as Record<string, unknown> });
         const fin3 = await S.get(sv2.id);
-        ok(fa.ok && fb.ok && pushedN.status === "ok" && fin3?.notes === "offline edit" && fin3?.photoRefs?.[0].file.inline === jpegUrl && fin3?.sketches?.stage.image.inline === jpegUrl &&
+        ok(fa.ok && fb.ok && pushedN.status === "ok" && fin3?.notes === "offline edit" && fin3?.photoRefs?.[0].file.inline === jpegUrl && fin3?.sketches?.stagePlan.image.inline === jpegUrl &&
           (await rowOf(sv2.id))!.rev === n + 1,
           "#344 C4 fix: save at rev N → two finalizes → push at rev N+1 is ok (no conflict) and keeps the pushed edit and both finished slots");
         // a re-markup (new m_ id) isn't overwritten by a late finalize of the old markup id
@@ -1866,7 +1978,7 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
       const kept = await S.get(sv.id);
       const kp = (kept?.photoRefs ?? [])[0];
       ok(kept?.notes === "stale save" && kp?.file.inline === jpegUrl && kp?.markup?.image.inline === jpegUrl && kp?.markup?.strokes.inline === jsonUrl &&
-        kept?.sketches?.stage.image.inline === jpegUrl && kept?.sketches?.stage.strokes.inline === jsonUrl,
+        kept?.sketches?.stagePlan.image.inline === jpegUrl && kept?.sketches?.stagePlan.strokes.inline === jsonUrl,
         "#344 C4: update() with stale pending slots keeps the finished ones (and the rest of the save lands)");
       const again = await S.applyFinalizedSurveyFile(sv.id, P, { inline: jpegUrl.replace("CQkJ", "CQkK") }, U);
       ok(again.ok && again.already === true && (await S.get(sv.id))?.photoRefs?.[0].file.inline === jpegUrl, "#344 C4: a second finalize of a finished file returns already and replaces nothing");
@@ -1893,7 +2005,7 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
       const pushed = await S.pushSurvey({ id: sv.id, rev: tableRev + 1, doc: { ...(cur as object), ...refs, notes: "pushed", legacyNotes: [{ section: "x", label: "y", text: "z" }] } as Record<string, unknown> });
       const rawP = (await getDoc("surveys", sv.id)) as Record<string, unknown> | null;
       const pp = ((rawP?.photoRefs ?? []) as Array<{ file: { inline?: string }; markup?: { strokes: { inline?: string } } }>)[0];
-      const ps = (rawP?.sketches as { stage?: { image: { inline?: string } } } | undefined)?.stage;
+      const ps = (rawP?.sketches as { stagePlan?: { image: { inline?: string } } } | undefined)?.stagePlan;
       ok(pushed.status === "ok" && rawP?.notes === "pushed" && pp?.file.inline === jpegUrl && pp?.markup?.strokes.inline === jsonUrl && ps?.image.inline === jpegUrl && !("legacyNotes" in (rawP ?? {})),
         "#344 C4: pushSurvey keeps finished slots from a stale pushed copy and never stores legacyNotes");
       const stalePush = await S.pushSurvey({ id: sv.id, rev: 1, doc: { ...(cur as object), notes: "older" } as Record<string, unknown> });
