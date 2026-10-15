@@ -39,6 +39,11 @@ export type BriefCardInput = {
    *  90-day cleanup's state for "Organize my inbox" — null when the user can't run it (not pilot +
    *  Inbox organization), else "never" run, "unfinished" or "done". */
   organizeEntry?: { available: boolean; cleanup: "never" | "unfinished" | "done" | null };
+  /** #346 — the live To file / Noise counts (the Inbox banner's own
+   *  `organizeEntryCounts`), laid over the stored brief's so an Archive or a
+   *  filing since the brief was built shows at once; absent / null = the
+   *  brief's stored counts (the live read failed). */
+  organizeLive?: { toFile: number; strong: number; noise: number } | null;
 };
 
 export type BriefCardDoFirst = {
@@ -133,7 +138,7 @@ export function briefCardVM(input: BriefCardInput): BriefCardVM {
   });
 
   // #345 — one clear action: "N emails to file · M noise — Review"
-  const o = b.organize;
+  const o = input.organizeLive ?? b.organize;
   const entry = input.organizeEntry ?? { available: true, cleanup: null };
   const organize =
     entry.available && (o.toFile > 0 || o.noise > 0)

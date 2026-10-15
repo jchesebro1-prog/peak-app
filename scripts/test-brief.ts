@@ -994,6 +994,12 @@ async function briefOrganizeEntryChecks(ok: Ok): Promise<void> {
   ok(off.organize === null && off.organizeCleanup === null, "brief #345: with Organize unavailable (INBOX_ORG_DISABLED) neither the line nor the offer shows");
   const nothing = briefCardVM({ ...base, brief: { ...BRIEF, organize: { toFile: 0, strong: 0, noise: 0 } }, organizeEntry: { available: true, cleanup: "never" } });
   ok(nothing.organize === null && nothing.organizeCleanup !== null, "brief #345: the cleanup offer shows even when nothing is waiting to be filed");
+  const live = briefCardVM({ ...base, brief: { ...BRIEF, organize: { toFile: 5, strong: 2, noise: 3 } }, organizeLive: { toFile: 4, strong: 1, noise: 0 } });
+  const stored = briefCardVM({ ...base, brief: { ...BRIEF, organize: { toFile: 5, strong: 2, noise: 3 } }, organizeLive: null });
+  const cleared = briefCardVM({ ...base, brief: { ...BRIEF, organize: { toFile: 1, strong: 0, noise: 0 } }, organizeLive: { toFile: 0, strong: 0, noise: 0 } });
+  ok(live.organize?.label === "4 emails to file" && stored.organize?.label === "5 emails to file · 3 noise" && cleared.organize === null, `brief #346: the live Organize counts (an Archive since the brief was built) win over the stored ones; a failed read keeps the stored (${live.organize?.label} / ${stored.organize?.label})`);
+  const cardSrc = readFileSync("src/components/brief/brief-card.tsx", "utf8");
+  ok(cardSrc.includes("organizeAvailable ? organizeEntryCounts(user).catch(() => null) : Promise.resolve(null)") && cardSrc.includes("organizeLive,"), "brief #346: the Home card reads the live counts the Inbox banner uses");
   const view = readFileSync("src/components/brief/brief-card-view.tsx", "utf8");
   ok(view.includes("data-brief-organize ") && view.includes("{vm.organize.label} —") && view.includes("Review") && view.includes("data-brief-organize-cleanup") && view.includes("vm.organizeCleanup.href"), "brief #345: the card prints 'N emails to file · M noise — Review' and the Organize my inbox link");
   const card = readFileSync("src/components/brief/brief-card.tsx", "utf8");

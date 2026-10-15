@@ -22,7 +22,8 @@ import SuggestEstimate from "@/components/assist/suggest-estimate";
 import { draftReplyAction, recordAssistOutcomeAction, suggestTasksAction } from "./assist-actions";
 import { completeThreadTaskAction } from "./task-actions";
 import ReaderOrgStrip from "./organize/reader-org";
-import { shortTaskTitle } from "./organize/format";
+import { ORGANIZE_ARCHIVED_EVENT, organizeArchiveNote, organizeArchiveRemoves, shortTaskTitle } from "./organize/format";
+import { archiveFromOrganizeAction } from "./organize-actions";
 import { postChanged } from "@/lib/popout/channel";
 import { threadPopUrl } from "@/lib/popout/click";
 import PopoutButton from "@/components/popout/popout-button";
@@ -558,6 +559,8 @@ export default function ThreadReader({
   const [taskFor, setTaskFor] = useState<{ messageId: string | null } | null>(null);
   // #334 Assist — Suggest tasks: busy while the model runs, then the dialog.
   const [assistBusy, setAssistBusy] = useState(false);
+  /** #346 — an Organize Archive in flight (one press, one archive) */
+  const [archiving, setArchiving] = useState(false);
   const [assistError, setAssistError] = useState<string | null>(null);
   const [assistTasks, setAssistTasks] = useState<Extract<SuggestTasksResult, { ok: true }> | null>(null);
   // #334 Assist — Draft reply: the draft in the composer, pending until it is
@@ -1245,7 +1248,30 @@ export default function ThreadReader({
             )}
             <ActionBtn
               colors={["#8c919c", "#fff", "#e4e7ec"]}
+              disabled={archiving}
               onClick={async () => {
+                if (archiving) return;
+                const org = vm.organize ?? null;
+                // #346 — opened from Organize: Archive goes through the
+                // Organize action (To file / Noise: also off the list, like
+                // Skip) and the box shows the note with Undo; Unarchive on
+                // Filed stays the Inbox's own
+                if (org && (organizeArchiveRemoves(org) || !vm.archived)) {
+                  setArchiving(true);
+                  try {
+                    const r = await archiveFromOrganizeAction([vm.id], org.tab);
+                    postChanged("thread", vm.id);
+                    if (r.archived)
+                      window.dispatchEvent(
+                        new CustomEvent(ORGANIZE_ARCHIVED_EVENT, { detail: { undo: r.undo, text: organizeArchiveNote(org.tab, 1) } })
+                      );
+                    if (organizeArchiveRemoves(org)) router.push(org.nextHref ?? org.closeHref);
+                    else router.refresh();
+                  } finally {
+                    setArchiving(false);
+                  }
+                  return;
+                }
                 if (vm.archived) await unarchiveAction(vm.id);
                 else await archiveAction(vm.id);
                 postChanged("thread", vm.id);
@@ -1253,7 +1279,7 @@ export default function ThreadReader({
                 else router.refresh();
               }}
             >
-              {vm.archived ? "Unarchive" : "Archive"}
+              {organizeArchiveRemoves(vm.organize) ? "Archive" : vm.archived ? "Unarchive" : "Archive"}
             </ActionBtn>
             {visitOpen && vm.visit && vm.resolvedCustomerId && (
               <SiteVisitModal

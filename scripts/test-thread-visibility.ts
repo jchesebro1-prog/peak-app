@@ -388,7 +388,7 @@ const THREAD_PARAM = /\b(?:id|threadId|threadIds|ids|list)\??\s*:|\bthreadId\b|\
 /** What counts as checking the owner before the write (directly, or by the
  *  one lib function the action hands the id to, each itself owner-checked). */
 const OWNER_CHECK =
-  /\bownThread\(|\bownThreadIds\(|await ids\(list\)|\bvisibleTo\(|\bloadThread\(|\bcreateTaskFromThread\(|\bsuggestTasksForThread\(|\bdraftReplyForThread\(|await (?:approveFiling|changeFiling|markNoise|notNoise|skipFiling|undoFiling|overrideCourt|undoPromiseTask|approveAllStrong)\(/;
+  /\bownThread\(|\bownThreadIds\(|await ids\(list\)|\bvisibleTo\(|\bloadThread\(|\bcreateTaskFromThread\(|\bsuggestTasksForThread\(|\bdraftReplyForThread\(|await (?:approveFiling|changeFiling|markNoise|notNoise|skipFiling|undoFiling|overrideCourt|undoPromiseTask|approveAllStrong|archiveFromOrganize|undoArchiveFromOrganize)\(/;
 
 /** Every `export async function` in `src`: name, its parameter list (`header`)
  *  and its body. */
@@ -435,7 +435,7 @@ export function threadVisibilityPins(ok: Ok): void {
     demoActs.length === 3 && THREAD_PARAM.test(demoActs[1].header) && !OWNER_CHECK.test(demoActs[1].body) && OWNER_CHECK.test(demoActs[0].body) && !THREAD_PARAM.test(demoActs[2].header),
     "inbox action audit (#341): the harness finds a new unguarded thread-id action (and skips a non-thread id)"
   );
-  ok(["markReadAction", "replyAction", "bulkArchiveAction", "linkThreadToCustomerAction", "createSiteVisitAction", "approveFilingAction", "createTaskFromThreadAction", "draftReplyAction"].every((n) => audited.includes(n)), "inbox action audit (#341): the generated list covers the known thread actions");
+  ok(["markReadAction", "replyAction", "bulkArchiveAction", "linkThreadToCustomerAction", "createSiteVisitAction", "approveFilingAction", "createTaskFromThreadAction", "draftReplyAction", "archiveFromOrganizeAction", "undoArchiveFromOrganizeAction"].every((n) => audited.includes(n)), "inbox action audit (#341): the generated list covers the known thread actions");
   const guard = read("src/lib/inbox-thread-guard.ts");
   ok(/return t && visibleTo\(t, me\) \? t : null;/.test(guard), "inbox guard (#341): ownThread is the mailbox owner check");
   const apply = read("src/lib/inbox-org/apply.ts");

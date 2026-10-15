@@ -134,35 +134,11 @@ export default function CommandBar({
                 label="Flag"
                 onClick={() => bulk.onFlag(true)}
               />
-              <Menu
+              <CategoryMenu
                 trigger={<ActBtnInner icon={<TagIcon size={14} />} label="Categorize" caret />}
-              >
-                {(close) => (
-                  <>
-                    {categoryOptions.map((c) => (
-                      <MenuItem
-                        key={c.key}
-                        onClick={() => {
-                          bulk.onCategory(c.key);
-                          close();
-                        }}
-                      >
-                        <span style={{ ...dot, background: c.color }} />
-                        {c.label}
-                      </MenuItem>
-                    ))}
-                    <MenuItem
-                      onClick={() => {
-                        bulk.onCategory(null);
-                        close();
-                      }}
-                    >
-                      <span style={{ ...dot, background: "transparent", border: "1.5px solid #c4c9d2" }} />
-                      None
-                    </MenuItem>
-                  </>
-                )}
-              </Menu>
+                categoryOptions={categoryOptions}
+                onCategory={bulk.onCategory}
+              />
             </>
           )}
         </>
@@ -313,6 +289,58 @@ export default function CommandBar({
         )}
       </Menu>
     </div>
+  );
+}
+
+/** The Inbox's label menu (Categorize ▾ on a selection; #346 the reader
+ *  sidebar's Labels card): the category presets, then None. `current` marks
+ *  the thread's own label. */
+export function CategoryMenu({
+  trigger,
+  categoryOptions,
+  onCategory,
+  current = null,
+  align = "left",
+  showNone = true,
+}: {
+  trigger: React.ReactNode;
+  categoryOptions: CategoryOpt[];
+  onCategory: (key: string | null) => void;
+  current?: string | null;
+  align?: "left" | "right";
+  showNone?: boolean;
+}) {
+  return (
+    <Menu trigger={trigger} align={align}>
+      {(close) => (
+        <>
+          {categoryOptions.map((c) => (
+            <MenuItem
+              key={c.key}
+              active={current === c.key}
+              onClick={() => {
+                onCategory(c.key);
+                close();
+              }}
+            >
+              <span style={{ ...dot, background: c.color }} />
+              {c.label}
+            </MenuItem>
+          ))}
+          {showNone && (
+            <MenuItem
+              onClick={() => {
+                onCategory(null);
+                close();
+              }}
+            >
+              <span style={{ ...dot, background: "transparent", border: "1.5px solid #c4c9d2" }} />
+              None
+            </MenuItem>
+          )}
+        </>
+      )}
+    </Menu>
   );
 }
 

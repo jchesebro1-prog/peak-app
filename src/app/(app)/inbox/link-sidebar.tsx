@@ -7,6 +7,7 @@
  * SUMMARY (300px in the pane) — what the thread is linked to:
  *   1. Edit links   — link mode on the identity message
  *   2. Work         — WorkLinkCard in summary mode (chip, ×, + New quote)
+ *      Labels       — (#346) the thread's label chip (✕) + Add / Change, Gmail labels
  *   3. Customer     — linked card / one-click suggested + ambiguous cards /
  *                     "Not linked" (the pickers live in the link panel)
  *   4. People       — (#214) chips for every linked person, primary first
@@ -33,6 +34,7 @@ import {
 import WorkLinkCard from "./work-link-card";
 import ThreadTasksCard from "./thread-tasks-card";
 import LinkPanel from "./link-panel";
+import LabelsCard from "./labels-card";
 import { ACCENT_BTN, BODY, BTN, CARD, CHECK_ROW, H, MONO, MUTED, PRIMARY } from "./sidebar-styles";
 
 type ActionResult = { ok: boolean; error?: string };
@@ -202,6 +204,9 @@ export default function LinkSidebar({
           </button>
 
           <WorkLinkCard vm={vm} mode="summary" />
+
+          {/* #346 — the thread's label (the Inbox's category) + Gmail labels */}
+          <LabelsCard vm={vm} />
 
           {/* ---- linked ---- */}
           {vm.resolution === "linked" && vm.customerCard && (

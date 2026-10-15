@@ -17,7 +17,7 @@
  * Nothing here sends mail. Results are typed; a refusal is
  * `{ ok: false, error, message }`, never a throw (except a DB failure).
  */
-import { getDoc, listDocs, listDocsByField } from "@/db/doc-store";
+import { casDocKey, getDoc, listDocs, listDocsByField } from "@/db/doc-store";
 import {
   archive,
   casOrg,
@@ -50,7 +50,17 @@ import {
 } from "./pipeline";
 import { inboxOrgDisabled } from "./kill-switch";
 import { isPlaceholderCompany } from "./placeholder";
-import type { Court, CourtOwner, Filing, FilingAction, FilingApplied, SenderRule } from "./types";
+import type {
+  Court,
+  CourtOwner,
+  Filing,
+  FilingAction,
+  FilingApplied,
+  NoiseFlag,
+  OrganizeArchiveTab,
+  OrganizeArchiveUndo,
+  SenderRule,
+} from "./types";
 
 const lc = (s: string | null | undefined) => String(s ?? "").trim().toLowerCase();
 
@@ -66,7 +76,9 @@ export type ApplyError =
   | "nothing-to-file"
   | "bad-target"
   | "forbidden"
-  | "bad-rule";
+  | "bad-rule"
+  /** #346 — a compare-and-set kept losing to other writes */
+  | "conflict";
 
 export type ApplyFail = { ok: false; error: ApplyError; message: string };
 
@@ -487,6 +499,116 @@ export async function undoFiling(threadId: string, me: OrgActor, now: number = D
   return { ok: true, filing };
 }
 
+/* ---- archive from Organize (#346) -------------------------------------------------- */
+
+/** The most threads one Organize Archive (or its Undo) takes. */
+export const ORGANIZE_ARCHIVE_MAX = 500;
+
+/** Archive from the Organize view: the Inbox's own archive (`comms.archive`
+ *  — Gmail follows through the inbox-state sync). On To file and Noise it
+ *  also takes the row off that list the way Skip does: a waiting suggestion
+ *  becomes `skipped` (logged like Skip — the AI run's outcome `discarded`),
+ *  and a Noise row is `cleared`; new mail brings either back. On Filed it
+ *  only archives — the filing is left as it is. Returns what it changed, for
+ *  Undo. */
+export async function archiveFromOrganize(
+  threadId: string,
+  tab: OrganizeArchiveTab,
+  me: OrgActor,
+  now: number = Date.now(),
+  deps: { cas?: FilingCas } = {}
+): Promise<{ ok: true; undo: OrganizeArchiveUndo } | ApplyFail> {
+  const t = await myThread(threadId, me);
+  if (!t) return NOT_FOUND();
+  let unskip = false;
+  let unclear = false;
+  if (tab !== "filed") {
+    // compare-and-set: a filing the pipeline / AI pass rewrote meanwhile is
+    // re-read, never overwritten
+    const sk = await casFiling(t.id, me, (f) => (f && f.state === "suggested" ? { ...settled(f), state: "skipped" } : null), deps.cas);
+    // the skip kept losing to other writes: say so — and archive nothing
+    if (sk === "conflict") return fail("conflict", "Couldn't update — try again.");
+    if (sk !== "none") {
+      await logAction(sk.thread, sk.prev, "skipped", { userId: me.id, outcome: "discarded", state: "skipped", now });
+      unskip = true;
+    }
+    if (tab === "noise") unclear = await casNoise(t.id, (n) => (n?.flagged && !n.rescued && !n.cleared ? { ...n, cleared: true } : null));
+  }
+  // already archived by the reader's rule (app or Gmail side): Undo never
+  // re-inboxes mail Gmail had already archived
+  const wasArchived = !!t.archived || t.gmailInboxed === false;
+  if (!t.archived) await archive(t.id);
+  return { ok: true, undo: { threadId: t.id, unarchive: !wasArchived, unskip, unclear } };
+}
+
+const CAS_TRIES = 3;
+
+/** The filing compare-and-set (comms.casOrg); a test passes its own. */
+export type FilingCas = (threadId: string, key: "filing", expected: Filing | undefined, next: Filing | undefined) => Promise<boolean>;
+
+/** Compare-and-set `filing` from the thread as read now: `next(current)`
+ *  (null = nothing to write). A conflicting write re-reads and retries. The
+ *  thread is re-checked as `me`'s own on every read. Returns the thread and
+ *  filing it replaced, "none" when there was nothing to write, or
+ *  "conflict" when every try lost to another write. */
+async function casFiling(
+  threadId: string,
+  me: OrgActor,
+  next: (f: Filing | undefined) => Filing | null,
+  cas: FilingCas = casOrg
+): Promise<{ thread: CommThread; prev: Filing } | "none" | "conflict"> {
+  for (let i = 0; i < CAS_TRIES; i++) {
+    const t = await myThread(threadId, me);
+    if (!t) return "none";
+    const want = next(t.filing);
+    if (!want || !t.filing) return "none";
+    if (await cas(t.id, "filing", t.filing, want)) return { thread: t, prev: t.filing };
+  }
+  return "conflict";
+}
+
+/** Compare-and-set `noise` the same way (a key-level CAS; re-read on conflict). */
+async function casNoise(threadId: string, next: (n: NoiseFlag | undefined) => NoiseFlag | null): Promise<boolean> {
+  for (let i = 0; i < CAS_TRIES; i++) {
+    const t = await getThread(threadId);
+    if (!t) return false;
+    const want = next(t.noise ?? undefined);
+    if (!want) return false;
+    if (await casDocKey("comms", t.id, "noise", t.noise ?? undefined, want)) return true;
+  }
+  return false;
+}
+
+/** Undo an Organize Archive: put back each part it changed, only while that
+ *  change is still there (a suggestion new mail has already reset, or a
+ *  thread someone un-archived since, is left alone). The skip's undo is
+ *  logged like Undo. */
+export async function undoArchiveFromOrganize(
+  u: OrganizeArchiveUndo,
+  me: OrgActor,
+  now: number = Date.now()
+): Promise<{ ok: true } | ApplyFail> {
+  const t = await myThread(u.threadId, me);
+  if (!t) return NOT_FOUND();
+  if (u.unskip) {
+    const us = await casFiling(t.id, me, (f) => (f && f.state === "skipped" ? { ...f, state: "suggested", at: now } : null));
+    if (us === "conflict") return fail("conflict", "Couldn't update — try again.");
+    if (us !== "none") await logAction(us.thread, us.prev, "undone", { userId: me.id, outcome: "undo", state: "suggested", now });
+  }
+  if (u.unclear)
+    await casNoise(t.id, (n) => {
+      if (!n?.cleared) return null;
+      const out: NoiseFlag = { ...n };
+      delete out.cleared;
+      return out;
+    });
+  if (u.unarchive) {
+    const cur = await getThread(t.id);
+    if (cur && (cur.archived || cur.gmailInboxed === false)) await unarchive(t.id);
+  }
+  return { ok: true };
+}
+
 /* ---- approve all strong ---------------------------------------------------------- */
 
 export const APPROVE_ALL_MAX = 500;
@@ -522,9 +644,11 @@ export function isToFileRow(t: CommThread): boolean {
 
 /** The Organize view's Noise tab rule (spec §2 "everything flagged as noise"):
  *  flagged and not rescued — moved (archived) or only tagged and still in the
- *  inbox. Shared with the daily brief's Organize counts. */
+ *  inbox. Shared with the daily brief's Organize counts. #346 — a row
+ *  archived from the Noise tab (`cleared`) is off it until new mail
+ *  re-flags the thread. */
 export function isNoiseRow(t: CommThread): boolean {
-  return t.mailbox === "personal" && !t.deleted && t.status !== "draft" && !!t.noise?.flagged && !t.noise.rescued;
+  return t.mailbox === "personal" && !t.deleted && t.status !== "draft" && !!t.noise?.flagged && !t.noise.rescued && !t.noise.cleared;
 }
 
 /** The person's To file list (spec §2), newest first. Task 6's selector. */

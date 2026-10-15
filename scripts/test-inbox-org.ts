@@ -2826,6 +2826,459 @@ export async function inboxOrgPlaceholderChecks(ok: Ok): Promise<void> {
   }
 }
 
+/* ---------- #346: Archive + Labels from the Organize view ---------- */
+
+export async function inboxOrgArchiveLabelChecks(ok: Ok): Promise<void> {
+  const { archiveFromOrganize, undoArchiveFromOrganize, isToFileRow, ORGANIZE_ARCHIVE_MAX } = await import("@/lib/inbox-org/apply");
+  const { setCategory, CATEGORIES } = await import("@/lib/stores/comms");
+  const { threadGmailLabels } = await import("@/app/(app)/inbox/row-labels");
+  const { organizeArchiveTarget, organizeArchiveRemoves, organizeArchiveNote, ORGANIZE_ARCHIVED_EVENT } = await import("@/app/(app)/inbox/organize/format");
+  const { isPlaceholderCompany } = await import("@/lib/inbox-org/placeholder");
+  const src = (p: string) => readFileSync(p, "utf8");
+
+  /* pure: where the selection goes, and what the reader's Archive does */
+  const rows = [
+    { id: "a", href: "/inbox?view=organize&tab=to-file&thread=a" },
+    { id: "b", href: "/inbox?view=organize&tab=to-file&thread=b" },
+  ];
+  const ta = organizeArchiveTarget({ tab: "to-file", baseHref: ORGANIZE_BASE_HREF, rows }, "a");
+  const tb = organizeArchiveTarget({ tab: "to-file", baseHref: ORGANIZE_BASE_HREF, rows }, "b");
+  const tx = organizeArchiveTarget({ tab: "noise", baseHref: ORGANIZE_BASE_HREF, rows }, "zz");
+  ok(ta.inList && ta.nextHref === rows[1].href && tb.nextHref === null && tb.closeHref === "/inbox?view=organize&tab=to-file", "archive #346: after an Archive the selection moves to the next row, else clears (the tab, nothing open)");
+  ok(organizeArchiveRemoves(ta) && !organizeArchiveRemoves({ tab: "filed", inList: true }) && !organizeArchiveRemoves(tx) && !organizeArchiveRemoves(null), "archive #346: the reader's Archive leaves the list on To file / Noise only (Filed only archives; a thread not in the list toggles as in the Inbox)");
+  ok(organizeArchiveNote("to-file", 1) === "Archived — it comes back on new mail" && organizeArchiveNote("filed", 2) === "Archived 2", "archive #346: the note says a skipped row comes back on new mail");
+
+  /* pure: a cleared Noise row is off the Noise tab (and its counts) */
+  const NOW = Date.now();
+  const thv = (id: string, o: Partial<CommThread>): CommThread =>
+    ({ id, mailbox: "personal", mailboxUser: "TEST346 Vm", status: "waiting_us", archived: true, deleted: false, subject: id, updatedAt: NOW, messages: [], ...o }) as unknown as CommThread;
+  const nz = [thv("n1", { noise: { flagged: true, reason: "Promo", moved: true } }), thv("n2", { noise: { flagged: true, reason: "Promo", moved: true, cleared: true } })];
+  const vmN = buildOrganizeVM(nz, { tab: "noise", now: NOW, customerName: () => null });
+  ok(vmN.rows.map((r) => r.id).join(",") === "n1" && vmN.counts.noise === 1 && !isNoiseRow(nz[1]), "archive #346: a Noise row archived from Organize (cleared) is off the Noise tab and its count");
+
+  /* pure: labels — the Inbox's categories; Gmail chips skip placeholder labels */
+  const opts = [
+    { id: "L1", name: "Peak/Customers/UNKNOWN", type: "user" as const, textColor: null, backgroundColor: null },
+    { id: "L2", name: "Clients", type: "user" as const, textColor: null, backgroundColor: null },
+    { id: "INBOX", name: "INBOX", type: "system" as const, textColor: null, backgroundColor: null },
+  ];
+  const msgs = [{ gmailLabelIds: ["L1", "L2", "INBOX"] }];
+  ok(threadGmailLabels(msgs, opts, { skipPlaceholders: true }).map((l) => l.id).join(",") === "L2", "labels #346: the Labels card never shows a placeholder Peak/Customers label (or Gmail's routing labels)");
+  ok(threadGmailLabels(msgs, opts).map((l) => l.id).join(",") === "L1,L2", "labels #346: the Inbox row keeps its chips as before (shared helper)");
+  ok(CATEGORIES.length > 0 && CATEGORIES.every((c) => !isPlaceholderCompany(c.label) && !isPlaceholderCompany(c.key)), "labels #346: the labels offered are the Inbox's category presets — never a placeholder");
+
+  /* db */
+  const ME = "TEST346 Ann Archive";
+  const me = { id: "TEST346-u-ann", name: ME, roles: ["Estimator"] };
+  let n = 0;
+  const T0 = Date.now() - 3_600_000;
+  const msg = (o: Partial<CommMessage> = {}): CommMessage =>
+    ({ id: `ar${++n}`, at: T0 + n * 60_000, direction: "in", channel: "email", author: "Pat", body: "Can you send the price?", fromEmail: "pat@archive-346.test", ...o }) as CommMessage;
+  const mk = async (slug: string, o: Partial<CommThread> = {}): Promise<string> => {
+    const id = fixtureId(346, "ar-" + slug);
+    await createFixture("comms", {
+      id, mailbox: "personal", mailboxUser: ME, unread: false, archived: false, customerId: null, customer: "", contactName: "Pat",
+      contactEmail: "pat@archive-346.test", cc: "", subject: "Hello", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [msg()], createdAt: T0, updatedAt: T0 + 5, resolution: "unknown", ...o,
+    } as unknown as CommThread);
+    return id;
+  };
+  const read = async (id: string) => (await getDoc<CommThread>("comms", id))!;
+  const sugg = (o: Partial<Filing> = {}): Filing => ({ customerId: "TEST346-cust", work: null, noise: false, source: "identity", reason: "Known contact", strength: "weak", needsReply: true, state: "suggested", at: T0, ...o });
+  const db = await getDb();
+  const logBefore = (await db.select().from(blobs).where(eq(blobs.id, FILING_LOG_BLOB)).limit(1))[0];
+  try {
+    /* To file: archive = archive + skip; Undo puts back both */
+    const tf = await mk("to-file");
+    await setOrg(tf, { filing: sugg() });
+    ok(isToFileRow(await read(tf)), "archive #346: (setup) a To file row");
+    const r1 = await archiveFromOrganize(tf, "to-file", me);
+    const a1 = await read(tf);
+    ok(r1.ok && a1.archived === true && a1.filing?.state === "skipped" && !isToFileRow(a1), "archive #346: Archive from To file archives the thread and skips the suggestion (off the list)");
+    ok(r1.ok && r1.undo.threadId === tf && r1.undo.unarchive && r1.undo.unskip && !r1.undo.unclear, "archive #346: …and hands back what it changed for Undo");
+    ok((await getFilingLog()).some((e) => e.threadId === tf && e.action === "skipped"), "archive #346: logged like Skip (filing log 'skipped')");
+    if (r1.ok) await undoArchiveFromOrganize(r1.undo, me);
+    const u1 = await read(tf);
+    ok(u1.archived === false && u1.filing?.state === "suggested" && isToFileRow(u1), "archive #346: Undo un-archives and returns the suggestion to To file");
+    ok((await getFilingLog()).some((e) => e.threadId === tf && e.action === "undone"), "archive #346: Undo is logged like Undo");
+    const r1b = await archiveFromOrganize(tf, "to-file", me);
+    await addMessage(tf, { direction: "in", body: "Any update?" });
+    await organizeThread(tf);
+    ok(r1b.ok && (await read(tf)).filing?.state === "suggested", "archive #346: new outside mail brings an archived To file row's suggestion back (like Skip)");
+
+    /* the AI outcome is recorded the way Skip records it */
+    const ai = await mk("ai");
+    const RUN = fixtureId(346, "ar-run");
+    await upsertDoc("assist_runs" as never, { id: RUN, feature: "file", step: null, userId: me.id, userName: ME, provider: "fake", model: "m", requestedModel: "m", fellBack: false, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, latencyMs: 0, inputHash: "h", output: "", ok: true, error: null, stopReason: null, contextRef: "thread:" + ai, monthKey: "2026-10", outcome: null, outcomeDetail: null, outcomeAt: null, createdAt: Date.now() - 1000 } as never);
+    registerFixture("assist_runs" as never, RUN);
+    await setOrg(ai, { filing: sugg({ source: "ai", runId: RUN, strength: "strong" }) });
+    await archiveFromOrganize(ai, "to-file", me);
+    ok((await getRun(RUN))?.outcome === "discarded" && (await getRun(RUN))?.outcomeDetail?.action === "skipped", "archive #346: an AI suggestion archived from To file sets the run's outcome 'discarded' (action skipped), as Skip does");
+
+    /* Filed: archive only — the filing stays */
+    const fd = await mk("filed");
+    const filed = sugg({ state: "filed", filedBy: "approved", filedAt: NOW, customerId: "TEST346-cust" });
+    await setOrg(fd, { filing: filed });
+    const filedBefore = JSON.stringify((await read(fd)).filing);
+    const r2 = await archiveFromOrganize(fd, "filed", me);
+    const a2 = await read(fd);
+    ok(r2.ok && a2.archived === true && JSON.stringify(a2.filing) === filedBefore && a2.filing?.state === "filed" && a2.filing.filedBy === "approved" && !r2.undo.unskip, "archive #346: Archive from Filed only archives — the filing is untouched");
+    if (r2.ok) await undoArchiveFromOrganize(r2.undo, me);
+    ok((await read(fd)).archived === false && (await read(fd)).filing?.state === "filed", "archive #346: Undo on Filed un-archives; still filed");
+
+    /* Noise: tagged (in the inbox) and moved (already archived) */
+    const nt = await mk("noise-tagged");
+    await setOrg(nt, { filing: sugg({ noise: true, customerId: null, source: "noise-rule", strength: "strong" }), noise: { flagged: true, reason: "Promotions", moved: false } });
+    ok(isNoiseRow(await read(nt)), "archive #346: (setup) a tagged Noise row");
+    const r3 = await archiveFromOrganize(nt, "noise", me);
+    const a3 = await read(nt);
+    ok(r3.ok && a3.archived === true && a3.noise?.cleared === true && a3.filing?.state === "skipped" && !isNoiseRow(a3) && r3.undo.unclear && r3.undo.unskip, "archive #346: Archive from Noise archives, takes the row off Noise (cleared) and skips its suggestion");
+    if (r3.ok) await undoArchiveFromOrganize(r3.undo, me);
+    const u3 = await read(nt);
+    ok(u3.archived === false && u3.noise?.cleared === undefined && u3.noise?.flagged === true && u3.filing?.state === "suggested" && isNoiseRow(u3), "archive #346: Undo puts the Noise row back (in the inbox, flagged, suggested)");
+    const nm = await mk("noise-moved", { archived: true });
+    const dismissed = sugg({ noise: true, customerId: null, state: "dismissed", source: "noise-rule", basis: (await read(nm)).messages[0].id });
+    await setOrg(nm, { filing: dismissed, noise: { flagged: true, reason: "Marked as noise", moved: true } });
+    const r4 = await archiveFromOrganize(nm, "noise", me);
+    ok(r4.ok && !r4.undo.unarchive && !r4.undo.unskip && r4.undo.unclear && (await read(nm)).filing?.state === "dismissed" && !isNoiseRow(await read(nm)), "archive #346: a moved (already archived) Noise row is only cleared — still dismissed, nothing to un-archive");
+    await organizeThread(nm);
+    ok(!isNoiseRow(await read(nm)) && (await read(nm)).noise?.cleared === true, "archive #346 review: with no new mail the cleared (dismissed) row stays off Noise");
+    await addMessage(nm, { direction: "in", body: "Actually — can you quote the stage drapes?" });
+    await organizeThread(nm);
+    const back = await read(nm);
+    ok(isNoiseRow(back) && back.noise?.cleared === undefined && back.filing?.state === "dismissed", "archive #346 review: new outside mail on an archived, dismissed (marked-noise) row brings it back to the Noise tab (cleared dropped, still marked)");
+    await setOrg(nm, { noise: { flagged: true, reason: "Marked as noise", moved: true, cleared: true } });
+    await patchDoc<CommThread>("comms", nm, (d) => {
+      d.archived = true;
+      d.gmailInboxed = false;
+    });
+    await reinboxFromGmail(nm);
+    const rein = await read(nm);
+    ok(rein.archived === false && rein.gmailInboxed === true && !rein.noise?.flagged && !rein.noise?.cleared, "archive #346 review: a Gmail re-inbox (D898 — Gmail puts a new reply back in INBOX) brings an archived, dismissed row back to the Inbox (rescued)");
+
+    /* Gmail had already archived it: Undo never re-inboxes */
+    const ga = await mk("gmail-archived", { gmailInboxed: false });
+    await setOrg(ga, { filing: sugg() });
+    const r5 = await archiveFromOrganize(ga, "to-file", me);
+    ok(r5.ok && !r5.undo.unarchive && r5.undo.unskip && (await read(ga)).archived === true, "archive #346 review: a thread Gmail had already archived (gmailInboxed false) counts as archived — nothing for Undo to un-archive");
+    if (r5.ok) await undoArchiveFromOrganize(r5.undo, me);
+    ok((await read(ga)).gmailInboxed === false && (await read(ga)).filing?.state === "suggested", "archive #346 review: …so Undo puts the suggestion back but never re-inboxes it in Gmail");
+
+    /* compare-and-set: a filing rewritten meanwhile is never clobbered */
+    const cs = await mk("cas");
+    await setOrg(cs, { filing: sugg() });
+    const fresh = sugg({ customerId: "TEST346-other", reason: "New mail", at: NOW + 5 });
+    const { casOrg: realCas } = await import("@/lib/stores/comms");
+    ok(!(await realCas(cs, "filing", sugg({ reason: "stale" }), { ...fresh, state: "skipped" })) && (await read(cs)).filing?.state === "suggested", "archive #346 review: (setup) casOrg refuses a stale expected filing");
+    await setOrg(cs, { filing: fresh });
+    const r6 = await archiveFromOrganize(cs, "to-file", me);
+    const a6 = await read(cs);
+    ok(r6.ok && a6.filing?.state === "skipped" && a6.filing.customerId === "TEST346-other" && a6.filing.reason === "New mail", "archive #346 review: skip writes over the filing as read now (compare-and-set), keeping what a concurrent write put there");
+    const lose = await mk("cas-lose");
+    await setOrg(lose, { filing: sugg() });
+    let tries = 0;
+    const rl = await archiveFromOrganize(lose, "to-file", me, Date.now(), { cas: async () => (tries++, false) });
+    const al = await read(lose);
+    ok(!rl.ok && rl.error === "conflict" && /Couldn.t update — try again/.test(rl.message) && tries === 3 && al.archived === false && al.filing?.state === "suggested", "archive #346 review 2: when the skip keeps losing (3 tries) Archive answers 'Couldn't update — try again' and archives nothing");
+    const apSrc = readFileSync("src/lib/inbox-org/apply.ts", "utf8");
+    ok(/if \(await cas\(t\.id, "filing", t\.filing, want\)\) return/.test(apSrc) && /cas: FilingCas = casOrg/.test(apSrc) && !/await setOrg\(t\.id, \{ filing: \{ \.\.\.settled\(f\), state: "skipped" \} \}\)/.test(apSrc.slice(apSrc.indexOf("export async function archiveFromOrganize("))), "archive #346 review: archive / undo write the filing only through casFiling (casOrg, re-read on conflict)");
+
+    /* label: the Inbox's category action leaves the filing alone */
+    const lb = await mk("label");
+    await setOrg(lb, { filing: sugg() });
+    const before = JSON.stringify((await read(lb)).filing);
+    await setCategory(lb, "red");
+    ok((await read(lb)).category === "red" && JSON.stringify((await read(lb)).filing) === before && isToFileRow(await read(lb)), "labels #346: applying a label sets the category and leaves the filing (still in To file)");
+    await setCategory(lb, null);
+    ok(!(await read(lb)).category && JSON.stringify((await read(lb)).filing) === before, "labels #346: removing it (✕) leaves the filing too");
+
+    /* several at once: the action's loop over two rows */
+    const b1 = await mk("bulk-1");
+    const b2 = await mk("bulk-2");
+    for (const id of [b1, b2]) await setOrg(id, { filing: sugg() });
+    const rb = await Promise.all([b1, b2].map((id) => archiveFromOrganize(id, "to-file", me)));
+    ok(rb.every((r) => r.ok) && (await read(b1)).filing?.state === "skipped" && (await read(b2)).archived === true, "archive #346: two rows archive and skip independently (bulk)");
+    for (const id of [b1, b2]) await setCategory(id, "blue");
+    ok((await read(b1)).category === "blue" && (await read(b2)).filing?.state === "skipped", "labels #346: a label on several rows (bulkCategoryAction's loop) leaves each filing alone");
+
+    /* never a teammate's thread */
+    const other = await mk("other", { mailboxUser: "TEST346 Ben Other" });
+    await setOrg(other, { filing: sugg() });
+    const ro = await archiveFromOrganize(other, "to-file", me);
+    const ru = await undoArchiveFromOrganize({ threadId: other, unarchive: true, unskip: true, unclear: true }, me);
+    ok(!ro.ok && ro.error === "not-found" && !ru.ok && (await read(other)).archived === false && (await read(other)).filing?.state === "suggested", "archive #346: someone else's thread is refused (Archive and Undo) and left untouched");
+    const forged = await undoArchiveFromOrganize({ threadId: lb, unarchive: true, unskip: true, unclear: true }, me);
+    ok(forged.ok && (await read(lb)).archived === false && (await read(lb)).filing?.state === "suggested", "archive #346: Undo reverses only what is still there (a never-archived thread is left as it is)");
+    ok(ORGANIZE_ARCHIVE_MAX === 500, "archive #346: one Archive takes at most 500 threads");
+  } finally {
+    await dropFixtures(346);
+    if (logBefore) await db.update(blobs).set({ data: logBefore.data, updatedAt: logBefore.updatedAt }).where(eq(blobs.id, FILING_LOG_BLOB));
+    else await db.delete(blobs).where(eq(blobs.id, FILING_LOG_BLOB));
+  }
+
+  /* source pins: actions, reader, sidebar, Organize box */
+  const oa = src("src/app/(app)/inbox/organize-actions.ts");
+  ok(/export async function archiveFromOrganizeAction\(threadIds: string\[\], tab: string\)[\s\S]*?const me = await actor\(\);[\s\S]*?await archiveFromOrganize\(id, t, me\)[\s\S]*?revalidate\(\);/.test(oa), "archive #346: archiveFromOrganizeAction loops my own threads through archiveFromOrganize, then revalidates");
+  ok(/export async function undoArchiveFromOrganizeAction\(list: OrganizeArchiveUndo\[\]\)[\s\S]*?await undoArchiveFromOrganize\([\s\S]*?u\.unarchive === true/.test(oa), "archive #346: the Undo action re-reads each flag as a strict boolean");
+  const ap = src("src/lib/inbox-org/apply.ts");
+  ok(/export async function archiveFromOrganize\([\s\S]*?const t = await myThread\(threadId, me\);\s*if \(!t\) return NOT_FOUND\(\);[\s\S]*?const wasArchived = !!t\.archived \|\| t\.gmailInboxed === false;\s*if \(!t\.archived\) await archive\(t\.id\);/.test(ap), "archive #346: archiveFromOrganize is owner-checked (myThread) and archives through comms.archive (Gmail follows)");
+  const tr = src("src/app/(app)/inbox/thread-reader.tsx");
+  ok(tr.includes("await archiveFromOrganizeAction([vm.id], org.tab);") && tr.includes("router.push(org.nextHref ?? org.closeHref)") && tr.includes("new CustomEvent(ORGANIZE_ARCHIVED_EVENT") && tr.includes('postChanged("thread", vm.id);'), "archive #346: the reader's bottom Archive, opened from Organize, archives through the Organize action, posts changed, tells the box (Undo) and moves to the next row");
+  ok(/if \(vm\.archived\) await unarchiveAction\(vm\.id\);\s*else await archiveAction\(vm\.id\);/.test(tr), "archive #346: outside Organize the reader's Archive / Unarchive is the Inbox's own");
+  const ob = src("src/app/(app)/inbox/organize/organize-box.tsx");
+  ok(ob.includes(`window.addEventListener(ORGANIZE_ARCHIVED_EVENT, on)`) && ob.includes("undoArchiveFromOrganizeAction(undo)") && ob.includes("data-organize-undo") && ob.includes("data-organize-archive") && ob.includes("archiveFromOrganizeAction(ids, tab)"), "archive #346: the Organize box shows Archived … Undo (its own row Archive and the reader's) and each row has Archive");
+  ok(/for \(const id of ids\) postChanged\("thread", id\);/.test(ob) && /for \(const u of undo\) postChanged\("thread", u\.threadId\);/.test(ob), "archive #346: Archive and Undo post changed for each thread");
+  ok(ob.includes("approveAllStrongAction(vm.strongIds)"), "archive #346: Approve all strong is still there");
+  ok(ORGANIZE_ARCHIVED_EVENT === "peak:organize-archived", "archive #346: the reader → box event name");
+  const page = src("src/app/(app)/inbox/page.tsx");
+  ok(page.includes("if (reader && !reader.readOnly) reader = { ...reader, organize: organizeArchiveTarget(vm, reader.id) };"), "archive #346: only my own thread's reader gets the Organize Archive");
+  ok(/labels: readOnly\s*\?\s*null/.test(page) && page.includes("gmail: cardGmailChips(") && page.includes('gmailEditable: sel.mailbox === "personal" && !!sel.gmailThreadId,') && page.includes("labels: threadGmailLabels(t.messages || [], labelOptions),"), "labels #346/#347: the reader VM carries labels for my own thread only (null when read-only), Gmail chips from cardGmailChips; the Inbox row's chips keep their helper");
+  const ls = src("src/app/(app)/inbox/link-sidebar.tsx");
+  ok(ls.includes("<LabelsCard vm={vm} />"), "labels #346: the reader's sidebar has a Labels card");
+  const lc = src("src/app/(app)/inbox/labels-card.tsx");
+  ok(lc.startsWith('"use client";') && lc.includes("run(() => categoryAction(vm.id, key))") && lc.includes("run(() => categoryAction(vm.id, null))") && lc.includes('postChanged("thread", vm.id);') && lc.includes("if (!labels || vm.readOnly) return null;") && lc.includes("<CategoryMenu") && lc.includes("data-colour-row"), "labels #346/#347: the Colour row applies / removes (✕) through the Inbox's categoryAction, posts changed, and the card shows nothing on a read-only thread");
+  ok(!valueImports(lc).some((p) => /^@\/(db\b|lib\/stores\/|lib\/inbox-org\/)/.test(p)), "labels #346: labels-card imports no store, db or server module");
+  const cb = src("src/app/(app)/inbox/command-bar.tsx");
+  ok(cb.includes("export function CategoryMenu(") && /<CategoryMenu\s+trigger=\{<ActBtnInner icon=\{<TagIcon size=\{14\} \/>\} label="Categorize" caret \/>\}/.test(cb), "labels #346: the Inbox's Categorize ▾ and the Labels card share one CategoryMenu");
+  const act = src("src/app/(app)/inbox/actions.ts");
+  ok(/export async function categoryAction\(id: string, key: string \| null\) \{\s*const user = await requireUser\(\);\s*if \(!\(await ownThread\(id, user\.name\)\)\) return;/.test(act), "labels #346: categoryAction stays owner-checked (#341)");
+  const ld = src("src/app/(app)/inbox/organize/load.ts");
+  ok(ld.includes("const mine = (await allThreads()).filter((t) => visibleTo(t, me.name));"), "archive #346: Organize lists only my own threads — a read-only #341 thread never shows there");
+}
+
+/* ---------- #347: the person's own Gmail labels on the Labels card ---------- */
+
+export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
+  const R = await import("@/lib/gmail/user-label-rules");
+  const U = await import("@/lib/gmail/user-labels");
+  const { isCardLabel, interpretLabelEvents } = await import("@/lib/gmail/label-interpret");
+  const { listCachedLabels, replaceLabels } = await import("@/lib/gmail/connections");
+  const { gmailLabels } = await import("@/db/schema");
+  const src = (p: string) => readFileSync(p, "utf8");
+
+  /* pure: picker, chips, names */
+  const cache = [
+    { labelId: "INBOX", name: "INBOX", type: "system" as const },
+    { labelId: "UNREAD", name: "UNREAD", type: "system" as const },
+    { labelId: "IMPORTANT", name: "IMPORTANT", type: "system" as const },
+    { labelId: "STARRED", name: "STARRED", type: "system" as const },
+    { labelId: "CATEGORY_PROMOTIONS", name: "CATEGORY_PROMOTIONS", type: "system" as const },
+    { labelId: "Label_1", name: "Clients", type: "user" as const, backgroundColor: "#16a766", textColor: "#ffffff" },
+    { labelId: "Label_2", name: "Bids/2026", type: "user" as const },
+    { labelId: "Label_3", name: "Peak/Customers/Lincoln HS", type: "user" as const },
+    { labelId: "Label_4", name: "Peak/Customers/UNKNOWN", type: "user" as const },
+    { labelId: "Label_5", name: "Peak", type: "user" as const },
+  ];
+  const pick = R.pickerLabels(cache);
+  ok(pick.map((l) => l.name).join(",") === "Starred,Important,Bids/2026,Clients", `labels #347: the picker offers Starred, Important, then my labels A→Z — never Peak/*, a placeholder or Gmail's other system labels (${pick.map((l) => l.name).join(",")})`);
+  const chips = R.cardGmailChips([{ gmailLabelIds: ["INBOX", "UNREAD", "Label_1", "Label_3", "Label_4", "STARRED"] }, { gmailLabelIds: ["Label_2"] }], cache);
+  ok(chips.map((c) => `${c.name}:${c.editable ? "e" : "r"}`).join(",") === "Starred:e,Bids/2026:e,Clients:e,Peak/Customers/Lincoln HS:r", `labels #347: chips — my labels and Starred editable, Peak/* read-only, a placeholder label never shown (${chips.map((c) => c.name).join(",")})`);
+  ok(chips.find((c) => c.id === "Label_1")?.backgroundColor === "#16a766", "labels #347: a chip keeps its Gmail colours");
+  const bad = ["", "  ", "x".repeat(226), "/Clients", "Clients/", "Clients//Lincoln", "Peak/Foo", "peak", "Inbox", "STARRED"];
+  ok(bad.every((n) => !R.validateLabelName(n).ok), "labels #347: names refused — empty, over 225, a leading / trailing slash, an empty nested part, under Peak/, a Gmail system name");
+  const good = R.validateLabelName("  Clients /  Lincoln HS ");
+  ok(R.isPeakLabelName("Peak /X") && R.isPeakLabelName(" peak/X") && R.isPeakLabelName("PEAK") && !R.isPeakLabelName("Peakwood/X") && !R.validateLabelName("Peak /X").ok && !R.validateLabelName(" peak/X").ok, "labels #347 review: 'Peak /X' and ' peak/X' are under Peak/ (the first segment, trimmed) — refused");
+  ok(R.pickerLabels([{ labelId: "L9", name: "Peak /Odd", type: "user" }, { labelId: "L8", name: " peak/x", type: "user" }]).length === 0, "labels #347 review: …and never offered in the picker");
+  ok(good.ok && good.name === "Clients/Lincoln HS" && R.validateLabelName("x".repeat(225)).ok && R.validateLabelName("Peakwood").ok, "labels #347: a nested or 225-char name is fine (whitespace tidied); 'Peakwood' isn't under Peak/");
+  ok(isCardLabel("Label_1", cache[5]) && !isCardLabel("Label_3", cache[7]) && isCardLabel("STARRED", cache[3]) && !isCardLabel("UNREAD", cache[1]) && isCardLabel("Label_99", undefined) && !isCardLabel("CATEGORY_X", undefined), "labels #347: the history import records my labels and Starred / Important (a not-yet-cached Label_ id too) — not Peak/*, UNREAD or categories");
+
+  /* a fake Gmail */
+  type Change = { addLabelIds?: string[]; removeLabelIds?: string[] };
+  const fake = () => {
+    const st = {
+      enabled: true,
+      canModify: true,
+      labels: cache.map((l) => ({ id: l.labelId, name: l.name, type: l.type })) as Array<{ id: string; name: string; type: "system" | "user" }>,
+      lists: 0,
+      creates: [] as string[],
+      modifies: [] as Array<{ key: string; thread: string; change: Change }>,
+      modifyError: null as Error | null,
+    };
+    const client: import("@/lib/gmail/user-labels").GmailLabelClient = {
+      enabled: () => st.enabled,
+      canModify: async () => st.canModify,
+      listLabels: async () => {
+        st.lists++;
+        return st.labels.map((l) => ({ ...l }));
+      },
+      createLabel: async (_k, name) => {
+        st.creates.push(name);
+        const l = { id: `Label_n${st.creates.length}`, name, type: "user" as const };
+        st.labels.push(l);
+        return l;
+      },
+      modifyThread: async (key, thread, change) => {
+        if (st.modifyError) throw st.modifyError;
+        st.modifies.push({ key, thread, change });
+      },
+    };
+    return { st, client };
+  };
+
+  const ME = "TEST347 Ann Labels";
+  const me = { id: "TEST347-u-ann", name: ME };
+  const KEY = "personal:TEST347-u-ann";
+  const NOW = Date.now();
+  const T0 = NOW - 3_600_000;
+  const mk = async (slug: string, o: Partial<CommThread> = {}): Promise<string> => {
+    const id = fixtureId(347, "lb-" + slug);
+    await createFixture("comms", {
+      id, mailbox: "personal", mailboxUser: ME, unread: false, archived: false, customerId: null, customer: "", contactName: "Pat",
+      contactEmail: "pat@labels-347.test", cc: "", subject: "Labels", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      gmailThreadId: "gt-" + slug, gmailAccountKey: KEY,
+      messages: [
+        { id: "m1-" + slug, at: T0, direction: "in", channel: "email", author: "Pat", body: "Hi", fromEmail: "pat@labels-347.test", gmailId: "g1-" + slug, gmailLabelIds: ["INBOX", "Label_3"] },
+        { id: "m2-" + slug, at: T0 + 60_000, direction: "out", channel: "email", author: ME, body: "Reply", gmailId: "g2-" + slug },
+        { id: "m3-" + slug, at: T0 + 120_000, direction: "note", channel: "email", author: ME, body: "A note" },
+      ],
+      createdAt: T0, updatedAt: T0, resolution: "unknown",
+      filing: { customerId: null, work: null, noise: false, source: "identity", reason: "x", strength: "weak", needsReply: false, state: "suggested", at: T0 },
+      ...o,
+    } as unknown as CommThread);
+    return id;
+  };
+  const read = async (id: string) => (await getDoc<CommThread>("comms", id))!;
+  const ids = (t: CommThread) => (t.messages || []).map((m) => (m.gmailLabelIds || []).join("+")).join("|");
+  const db = await getDb();
+  try {
+    await replaceLabels(KEY, cache.map((l) => ({ id: l.labelId, name: l.name, type: l.type })));
+
+    /* the cache: fresh → no Gmail call; stale (5 min) → refreshed; Gmail off → cache */
+    const f1 = fake();
+    await U.mailboxLabels(KEY, f1.client, { now: NOW });
+    ok(f1.st.lists === 0, "labels #347: a fresh label cache is used as is (no Gmail call)");
+    f1.st.labels.push({ id: "Label_6", name: "Warranty", type: "user" });
+    const stale = await U.mailboxLabels(KEY, f1.client, { now: NOW + U.LABEL_CACHE_MS + 1000 });
+    ok(f1.st.lists === 1 && stale.some((l) => l.labelId === "Label_6") && (await listCachedLabels(KEY)).some((r) => r.labelId === "Label_6"), "labels #347: a cache older than 5 minutes is refreshed from Gmail (users.labels.list) and stored");
+    const f0 = fake();
+    f0.st.enabled = false;
+    await U.mailboxLabels(KEY, f0.client, { now: NOW + 60 * U.LABEL_CACHE_MS });
+    ok(f0.st.lists === 0, "labels #347: with Gmail off the cache is used (no call)");
+
+    /* picker */
+    const t1 = await mk("apply");
+    const pk = await U.labelPicker(t1, me, f1.client, NOW);
+    ok(pk.ok && pk.labels.some((l) => l.name === "Warranty") && !pk.labels.some((l) => l.name.startsWith("Peak")), "labels #347: the picker lists my mailbox's labels, never Peak/*");
+    const other = await mk("other", { mailboxUser: "TEST347 Ben Other" });
+    ok(!(await U.labelPicker(other, me, f1.client, NOW)).ok, "labels #347: the picker refuses someone else's thread");
+    const local = await mk("local", { gmailThreadId: undefined });
+    const lp = await U.labelPicker(local, me, f1.client, NOW);
+    ok(!lp.ok && lp.error === "no-gmail", "labels #347: a thread not in Gmail can't take Gmail labels");
+
+    /* apply / remove */
+    const filingBefore = JSON.stringify((await read(t1)).filing);
+    const a = await U.setThreadLabel(t1, "Label_1", true, me, f1.client, NOW);
+    const ta = await read(t1);
+    ok(a.ok && f1.st.modifies.length === 1 && f1.st.modifies[0].thread === "gt-apply" && f1.st.modifies[0].key === KEY && f1.st.modifies[0].change.addLabelIds?.[0] === "Label_1", "labels #347: apply calls Gmail threads.modify (addLabelIds) on the thread's Gmail thread");
+    ok(ids(ta) === "INBOX+Label_3+Label_1|Label_1|" && ta.userLabelOps?.Label_1?.on === true && ta.userLabelOps.Label_1.at === NOW && JSON.stringify(ta.filing) === filingBefore, `labels #347: the stored gmailLabelIds follow at once on every Gmail message (a note untouched), the card's operation is stamped per label, the filing untouched (${ids(ta)})`);
+    const rm = await U.setThreadLabel(t1, "Label_1", false, me, f1.client, NOW);
+    ok(rm.ok && f1.st.modifies[1].change.removeLabelIds?.[0] === "Label_1" && ids(await read(t1)) === "INBOX+Label_3||", "labels #347: ✕ removes it in Gmail (removeLabelIds) and in the stored labels");
+    const st = await U.setThreadLabel(t1, "STARRED", true, me, f1.client, NOW);
+    ok(st.ok && f1.st.modifies[2].change.addLabelIds?.[0] === "STARRED", "labels #347: Starred can be set from the card");
+    const pk3 = await U.setThreadLabel(t1, "Label_3", false, me, f1.client, NOW);
+    ok(!pk3.ok && pk3.error === "bad-name" && f1.st.modifies.length === 3, "labels #347: a Peak/* label is never removed (or added) from the card");
+    const miss = await U.setThreadLabel(t1, "Label_gone", true, me, f1.client, NOW);
+    ok(!miss.ok && miss.error === "label-missing" && f1.st.modifies.length === 3, "labels #347: an unknown label id says the label is missing (the list is refreshed)");
+
+    /* refusals and Gmail errors */
+    const ro = await U.setThreadLabel(other, "Label_1", true, me, f1.client, NOW);
+    ok(!ro.ok && ro.error === "not-found" && f1.st.modifies.length === 3 && ids(await read(other)) === "INBOX+Label_3||", "labels #347: someone else's thread is refused — no Gmail call, nothing stored");
+    const f2 = fake();
+    f2.st.enabled = false;
+    const off = await U.setThreadLabel(t1, "Label_1", true, me, f2.client, NOW);
+    f2.st.enabled = true;
+    f2.st.canModify = false;
+    const scope = await U.setThreadLabel(t1, "Label_1", true, me, f2.client, NOW);
+    ok(!off.ok && off.error === "no-gmail" && !scope.ok && scope.error === "no-scope" && /reconnect/i.test(scope.message), "labels #347: Gmail off → 'no Gmail'; a connection without gmail.modify → reconnect");
+    f2.st.canModify = true;
+    f2.st.modifyError = new Error("Gmail API /threads/x/modify → 429 rateLimitExceeded");
+    const q = await U.setThreadLabel(t1, "Label_1", true, me, f2.client, NOW);
+    f2.st.modifyError = new Error("Gmail API /threads/x/modify → 404 Not Found");
+    const nf = await U.setThreadLabel(t1, "Label_1", true, me, f2.client, NOW);
+    ok(!q.ok && q.error === "quota" && !nf.ok && nf.error === "thread-missing" && /no longer in Gmail/.test(nf.message) && !ids(await read(t1)).includes("Label_1"), "labels #347 review: Gmail's quota error and a 404 on the thread ('That email is no longer in Gmail') show inline; nothing is stored when Gmail refuses");
+    ok(U.gmailError(new Error("Gmail API /labels/Label_9 → 404 Not Found")) === "label-missing" && U.gmailError(new Error("Gmail API /threads/t1/modify → 404 Not Found")) === "thread-missing" && U.gmailError(new Error("Gmail API /threads/t1/modify → 400 Invalid label: Label_9")) === "label-missing" && U.gmailError(new Error("Gmail API /messages → 404")) === "failed", "labels #347 review: a 404 is 'label missing' only on a labels endpoint; on a thread it is 'no longer in Gmail'");
+
+    /* review: the thread must be bridged through MY Gmail connection */
+    const foreignKey = await mk("foreign-key", { gmailAccountKey: "personal:TEST347-u-ben" });
+    const unstamped = await mk("unstamped", { gmailAccountKey: undefined });
+    const fk = await U.setThreadLabel(foreignKey, "Label_1", true, me, f1.client, NOW);
+    const us = await U.labelPicker(unstamped, me, f1.client, NOW);
+    ok(!fk.ok && fk.error === "no-gmail" && !us.ok && us.error === "no-gmail" && f1.st.modifies.length === 3, "labels #347 review: a thread in my mailbox bridged through another Gmail account (or unstamped) is refused — the token and label cache are personalKey(me.id)'s");
+
+    /* create */
+    const f3 = fake();
+    const c1 = await U.createThreadLabel(t1, "Warranty claims", me, f3.client, NOW);
+    ok(c1.ok && c1.created && f3.st.creates[0] === "Warranty claims" && f3.st.modifies[0]?.change.addLabelIds?.[0] === c1.label.id && ids(await read(t1)).includes(c1.label.id) && (await listCachedLabels(KEY)).some((r) => r.name === "Warranty claims"), "labels #347: Create makes the label in Gmail (users.labels.create), applies it and adds it to the cache");
+    const c2 = await U.createThreadLabel(t1, "clients", me, f3.client, NOW);
+    ok(c2.ok && !c2.created && f3.st.creates.length === 1 && c2.label.id === "Label_1", "labels #347: a name that already exists (any case) is applied, not created twice");
+    const c3 = await U.createThreadLabel(t1, "Peak/Customers/Mine", me, f3.client, NOW);
+    const c4 = await U.createThreadLabel(t1, "/Bad", me, f3.client, NOW);
+    ok(!c3.ok && c3.error === "bad-name" && !c4.ok && f3.st.creates.length === 1, "labels #347: Create refuses a Peak/* or badly formed name before calling Gmail");
+    ok(!(await U.createThreadLabel(other, "Fine name", me, f3.client, NOW)).ok && f3.st.creates.length === 1, "labels #347: Create refuses someone else's thread");
+
+    /* the history import: my label changed in Gmail flows into gmailLabelIds; the card's own echo is skipped */
+    const t2 = await mk("import");
+    await interpretLabelEvents(KEY, [{ messageId: "g1-import", threadId: "gt-import", added: ["Label_2", "UNREAD"], removed: [] }]);
+    ok(ids(await read(t2)) === "INBOX+Label_3+Label_2||", `labels #347: a label added in Gmail is recorded from the history import (UNREAD is not) (${ids(await read(t2))})`);
+    await interpretLabelEvents(KEY, [{ messageId: "g1-import", threadId: "gt-import", added: [], removed: ["Label_2"] }]);
+    ok(ids(await read(t2)) === "INBOX+Label_3||", "labels #347: …and one removed in Gmail is dropped");
+    // review 3: an event carrying a Peak/* label AND one of mine keeps mine
+    await interpretLabelEvents(KEY, [{ messageId: "g1-import", threadId: "gt-import", added: ["Label_3", "Label_2"], removed: [] }]);
+    ok(ids(await read(t2)) === "INBOX+Label_3+Label_2||", `labels #347 review: a mixed event (Peak/* + my label) still records my label (${ids(await read(t2))})`);
+    // history order: an add then a remove in one sync nets to removed
+    await interpretLabelEvents(KEY, [
+      { messageId: "g1-import", threadId: "gt-import", added: ["Label_1"], removed: [] },
+      { messageId: "g1-import", threadId: "gt-import", added: [], removed: ["Label_1", "Label_2"] },
+    ]);
+    ok(ids(await read(t2)) === "INBOX+Label_3||", "labels #347 review: within one sync, the last event for a label wins (added then removed → removed)");
+
+    // review 4: per-label echo guard — card add at t0, card remove at t1, then
+    // Gmail's stale add echo arrives: it must not re-add the label
+    const fe = fake();
+    await U.setThreadLabel(t2, "Label_1", true, me, fe.client, Date.now());
+    await U.setThreadLabel(t2, "Label_1", false, me, fe.client, Date.now() + 1);
+    ok(ids(await read(t2)) === "INBOX+Label_3||" && (await read(t2)).userLabelOps?.Label_1?.on === false, "labels #347 review: (setup) the card added then removed Label_1");
+    await interpretLabelEvents(KEY, [{ messageId: "g1-import", threadId: "gt-import", added: ["Label_1"], removed: [] }]);
+    ok(!ids(await read(t2)).includes("Label_1"), "labels #347 review: a stale add echo after the card's remove never re-adds the label");
+    await interpretLabelEvents(KEY, [{ messageId: "g1-import", threadId: "gt-import", added: ["Label_2"], removed: [] }]);
+    ok(ids(await read(t2)).includes("Label_2"), "labels #347 review: the guard is per label — a Gmail change to another label in the window still lands");
+    const I = await import("@/lib/gmail/label-interpret");
+    const msgs = [{ id: "a", gmailId: "g1", gmailLabelIds: ["X"] }, { id: "b" }] as unknown as CommMessage[];
+    const per = new Map([["g1", new Map([["Y", true], ["X", false]])]]);
+    const applied = I.applyUserLabelChanges(msgs, per, { X: { on: true, at: 1000 } }, 1000 + 60_000);
+    const later = I.applyUserLabelChanges(msgs, per, { X: { on: true, at: 1000 } }, 1000 + 10 * 60_000);
+    ok(JSON.stringify(applied?.[0].gmailLabelIds) === '["X","Y"]' && JSON.stringify(later?.[0].gmailLabelIds) === '["Y"]' && I.applyUserLabelChanges(msgs, new Map(), undefined, 0) === null, `labels #347 review: applyUserLabelChanges holds a label the card changed in the window, releases it after (${JSON.stringify(applied?.[0].gmailLabelIds)} / ${JSON.stringify(later?.[0].gmailLabelIds)})`);
+    ok(U.withLabel(msgs, "Z", true)?.[0].gmailLabelIds?.join() === "X,Z" && U.withLabel(msgs, "X", true) === null && (U.withLabel(msgs, "Z", true)?.[1] as { gmailLabelIds?: string[] }).gmailLabelIds === undefined, "labels #347 review: withLabel touches Gmail messages only, null when nothing changes");
+  } finally {
+    await dropFixtures(347);
+    await db.delete(gmailLabels).where(eq(gmailLabels.mailboxKey, KEY));
+  }
+
+  /* pins: actions, card */
+  const act = src("src/app/(app)/inbox/actions.ts");
+  for (const n of ["gmailLabelPickerAction", "setGmailLabelAction", "createGmailLabelAction"])
+    ok(new RegExp(`export async function ${n}\\(threadId: string[^)]*\\) \\{\\s*const user = await requireUser\\(\\);\\s*if \\(!\\(await ownThread\\(threadId, user\\.name\\)\\)\\)`).test(act), `labels #347: ${n} is owner-checked (#341) before Gmail is touched`);
+  const lc = src("src/app/(app)/inbox/labels-card.tsx");
+  ok(lc.includes("setGmailLabelAction(vm.id, g.id, false)") && lc.includes("setGmailLabelAction(vm.id, l.id, true)") && lc.includes("createGmailLabelAction(vm.id, name)") && lc.includes("gmailLabelPickerAction(threadId)"), "labels #347: the card removes (✕), applies and creates through the owner-checked actions; the picker loads when it opens");
+  ok(lc.includes("Create “{q.trim()}”") && lc.includes("validateLabelName(q)") && lc.includes('placeholder="Search or create a label…"') && lc.includes("data-peak-label") && lc.includes('role="alert"'), "labels #347: a searchable picker with Create '<typed>' at the bottom; Peak/* chips read-only; errors inline");
+  ok(lc.indexOf("data-gmail-label-add") < lc.indexOf("data-colour-row"), "labels #347: Gmail labels lead; Colour is a small row under them");
+  ok(!valueImports(lc).some((p) => /^@\/(db\b|lib\/stores\/|lib\/inbox-org\/)|^@\/lib\/gmail\/(?!user-label-rules)/.test(p)), "labels #347: the card imports only the pure label rules from lib/gmail (no store, db or Gmail client)");
+  const ul = src("src/lib/gmail/user-labels.ts");
+  ok(/casDocKey\("comms", threadId, "messages", t\.messages, next\)/.test(ul) && /casDocKey\("comms", threadId, "userLabelOps", prev, ops\)/.test(ul) && !/patchDoc/.test(ul), "labels #347 review: the label write is a compare-and-set on the messages key (re-read on conflict) — never a whole-doc rewrite that could drop a message appended meanwhile");
+  ok(/const t = await ownThread\(threadId, me\.name\);[\s\S]*?const key = personalKey\(me\.id\);\s*if \(t\.mailbox !== "personal" \|\| !t\.gmailThreadId \|\| t\.gmailAccountKey !== key\) return failWith\("no-gmail"\);/.test(ul), "labels #347 review: the Gmail key is personalKey(me.id), and the thread must be bridged through it");
+  ok(/async function writeCache[\s\S]*?try \{\s*await replaceLabels\(key, labels\);\s*\} catch/.test(ul) && /if \(created\) \{\s*try \{/.test(ul), "labels #347 review: a cache write failing after Gmail created the label is logged, and Create still applies the label and reports success");
+  const conn = src("src/lib/gmail/connections.ts");
+  ok(/export async function replaceLabels[\s\S]*?await withTransaction\(async \(\) => \{\s*const db = await getDb\(\);\s*await db\.delete\(gmailLabels\)/.test(conn), "labels #347 review: replaceLabels deletes and inserts in one transaction");
+  const li = src("src/lib/gmail/label-interpret.ts");
+  ok(/for \(const \[gThread, perMessage\] of userLabelChanges\(events, isCard\)\)/.test(li) && /casDocKey\("comms", t\.id, "messages", t\.messages, next\)/.test(li) && /const evAdded = ev\.added\.filter\(notCard\);/.test(li), "labels #347 review: my labels are recorded from every event (Peak/* or not) by an ordered CAS pass; the Peak/* branch leaves them to it");
+  const ld = src("src/app/(app)/inbox/organize/load.ts");
+  ok(/export async function organizeEntryCounts[\s\S]*?listDocsByField<CommThread>\("comms", "mailboxUser", \[me\.name\]\)/.test(ld), "brief #347 review: the live Organize counts read only my mailbox (SQL doc->>'mailboxUser'), never the whole collection");
+  const rules = src("src/lib/gmail/user-label-rules.ts");
+  ok(valueImports(rules).length === 0, "labels #347: user-label-rules.ts has no imports (client-safe)");
+  const cfg = src("src/lib/gmail/config.ts");
+  ok(/export const GMAIL_SCOPES = \[[\s\S]*?"https:\/\/www\.googleapis\.com\/auth\/gmail\.modify"/.test(cfg), "labels #347: the Gmail connect already asks for gmail.modify (labels need nothing new)");
+}
+
 export async function inboxOrgPureChecks(ok: Ok): Promise<void> {
   numberChecks(ok);
   noiseChecks(ok);
@@ -2858,6 +3311,8 @@ if (process.argv[1] && /test-inbox-org\.ts$/.test(process.argv[1])) {
     await inboxOrgCleanupChecks(ok);
     await inboxOrgEntryChecks(ok);
     await inboxOrgPlaceholderChecks(ok);
+    await inboxOrgArchiveLabelChecks(ok);
+    await inboxGmailLabelChecks(ok);
     // later tasks append: await inboxOrgXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall inbox-org checks passed");
     process.exit(fail ? 1 : 0);

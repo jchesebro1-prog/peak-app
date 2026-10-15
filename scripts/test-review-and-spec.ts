@@ -11347,7 +11347,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
 
 
 import { assistPureChecks, assistStoreChecks, assistProviderChecks, assistRunChecks, assistOutcomeChecks, assistTaskChecks, assistReplyChecks, assistEstimatePureChecks, assistEstimateDbChecks, assistReportChecks, assistKeyChecks, assistSettingsRaceChecks } from "./test-assist";
-import { inboxOrgPureChecks, inboxOrgDbChecks, inboxOrgPipelineChecks, inboxOrgAiChecks, inboxOrgApplyChecks, inboxOrgUiChecks, inboxOrgCleanupChecks, inboxOrgEntryChecks, inboxOrgPlaceholderChecks } from "./test-inbox-org";
+import { inboxOrgPureChecks, inboxOrgDbChecks, inboxOrgPipelineChecks, inboxOrgAiChecks, inboxOrgApplyChecks, inboxOrgUiChecks, inboxOrgCleanupChecks, inboxOrgEntryChecks, inboxOrgPlaceholderChecks, inboxOrgArchiveLabelChecks, inboxGmailLabelChecks } from "./test-inbox-org";
 import { popoutPureChecks } from "./test-popout";
 import { assessmentChecks, assessmentDbChecks } from "./test-assessments";
 import { partyChecks, partyDbChecks } from "./test-parties";
@@ -11718,6 +11718,8 @@ seeded()
   .then(() => inboxOrgCleanupChecks(ok))
   .then(() => inboxOrgEntryChecks(ok))
   .then(() => inboxOrgPlaceholderChecks(ok))
+  .then(() => inboxOrgArchiveLabelChecks(ok))
+  .then(() => inboxGmailLabelChecks(ok))
   .then(() => popoutPureChecks(ok))
   .then(() => assessmentChecks(ok)).then(() => assessmentDbChecks(ok))
   .then(() => partyChecks(ok)).then(() => partyDbChecks(ok))
