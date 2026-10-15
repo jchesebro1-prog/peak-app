@@ -2521,10 +2521,12 @@ export function useEstimatorState(props: EstimatorProps) {
         setVendorDraft((d) => {
           // The user closed (or switched) the form meanwhile — this result belongs to no open draft.
           if (d.id !== seed.id) return d;
+          /* Apply the vendor only while the draft's vendor is still the seeded blank — never over what the user
+             typed or picked while the PDF was copying. */
+          const blank = !(d.vendor || "").trim() && !d.vendorCompanyId;
           return {
             ...d,
-            vendor: p.vendor,
-            vendorCompanyId: p.vendorCompanyId,
+            ...(blank ? { vendor: p.vendor, vendorCompanyId: p.vendorCompanyId } : {}),
             quoteNumber: d.quoteNumber || p.quoteNumber,
             attachment: p.attachment ?? d.attachment,
             attachmentPreview: p.attachment ? p.preview : d.attachmentPreview,

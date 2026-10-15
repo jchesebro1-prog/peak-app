@@ -139,6 +139,11 @@ export async function vendorChecks(ok: Ok) {
   const stripAt = hook.indexOf('.delete("vq")');
   ok(stripAt > 0 && stripAt < hook.indexOf("vendorQuoteFromThreadAction("), "vendor hand-off: vq is stripped from the URL before the action runs");
   const field = readFileSync("src/components/vendors/vendor-company-field.tsx", "utf8");
+  ok(field.includes('setMode("typed"); // the kept name') && field.includes("Current: {vendor}") && field.includes("onTyped(\"\")") && field.includes("seenCompanyId"), "vendor field: unlink lands in typed with the name kept; search shows Current: <name> with a clear; mode re-derives on a company change");
+  ok(!/setMode\("search"\);\s*onUnlink/.test(field), "vendor field: unlinking never hides the kept name behind search");
+  ok(vqActions.includes("isPdfAttachment({ name: r.name, mime: r.mime })") && !vqActions.includes("data:${r.mime}") && vqActions.includes("data:application/pdf;base64"), "vendor hand-off: PDF-only, and the data-URL never interpolates the attachment's mime");
+  ok(/const blank = !\(d\.vendor \|\| ""\)\.trim\(\) && !d\.vendorCompanyId;/.test(hook) && hook.includes("...(blank ? { vendor: p.vendor, vendorCompanyId: p.vendorCompanyId } : {})"), "vendor hand-off: the prefill never overwrites a vendor the user typed or picked while copying");
+  ok(modal.includes('htmlFor="vendor-quote-vendor"') && modal.includes('inputId="vendor-quote-vendor"') && modal.includes("disabled={copying}"), "vendor modal: Vendor label tied to the field's input; field disabled while copying");
   const serverOnly = /from "[^"]*(?:stores\/|@\/db|node:|-server)[^"]*"/;
   ok(!serverOnly.test(field) && !serverOnly.test(modal), "vendor modal: no store / db / node / -server import in the client field or modal");
 }

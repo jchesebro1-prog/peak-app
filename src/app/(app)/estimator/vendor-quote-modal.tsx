@@ -421,7 +421,9 @@ export default function VendorQuoteModal({
       {/* vendor / quote number */}
       <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 12, marginBottom: 16 }}>
         <div>
-          <label style={LBL}>Vendor</label>
+          <label htmlFor="vendor-quote-vendor" style={LBL}>
+            Vendor
+          </label>
           <VendorCompanyField
             vendor={draft.vendor}
             vendorCompanyId={draft.vendorCompanyId}
@@ -429,6 +431,8 @@ export default function VendorQuoteModal({
             onPick={onPickVendor}
             onTyped={onTypedVendor}
             onUnlink={onUnlinkVendor}
+            disabled={copying}
+            inputId="vendor-quote-vendor"
           />
         </div>
         <div>
@@ -479,8 +483,8 @@ export default function VendorQuoteModal({
                 color: "#fff",
                 fontSize: 12.5,
                 fontWeight: 600,
-                cursor: uploading ? "default" : "pointer",
-                opacity: uploading ? 0.65 : 1,
+                cursor: busy ? "default" : "pointer",
+                opacity: busy ? 0.65 : 1,
               }}
             >
               {uploading ? "Uploading\u2026" : draft.attachment ? "Replace file" : "Select file"}
@@ -526,11 +530,13 @@ export default function VendorQuoteModal({
           {fileNote && (
             <div style={{ marginTop: 6, fontSize: 11.5, color: "#b4543a" }}>{fileNote}</div>
           )}
-          {handoff?.note && (
-            <div role="status" style={{ marginTop: 6, fontSize: 11.5, color: "#b4543a" }}>
-              {handoff.note}
-            </div>
-          )}
+          {/* Always rendered so assistive tech registers the live region before its text changes. */}
+          <div
+            role="status"
+            style={{ marginTop: handoff?.note ? 6 : 0, fontSize: 11.5, color: copying ? "#5b616e" : "#b4543a" }}
+          >
+            {handoff?.note || ""}
+          </div>
         </div>
         <div>
           <label style={LBL}>

@@ -42,6 +42,8 @@ export type TypeaheadProps<T> = {
    *  further picks: the native `disabled` on the input and every option
    *  button, so no click or keyboard pick can land mid-mutation. */
   disabled?: boolean;
+  /** DOM id for the input, so a <label htmlFor> can name it. */
+  inputId?: string;
 };
 
 export function Typeahead<T>({
@@ -62,6 +64,7 @@ export function Typeahead<T>({
   emptyText = "Nothing matches.",
   onQueryChange,
   disabled = false,
+  inputId,
 }: TypeaheadProps<T>) {
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -112,6 +115,7 @@ export function Typeahead<T>({
       }}
     >
       <input
+        id={inputId}
         role="combobox"
         aria-autocomplete="list"
         aria-expanded={open}

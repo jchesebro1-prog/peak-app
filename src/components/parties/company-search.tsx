@@ -17,12 +17,15 @@ export default function CompanySearch({
   disabled,
   onPick,
   search = searchAllCompanies,
+  inputId,
 }: {
   placeholder: string;
   disabled?: boolean;
   onPick: (c: { id: string; name: string }) => void;
   /** #348 slice 4 — the server search to run (default: every company, unchanged for slice-1 callers). */
   search?: (q: string) => Promise<LinkTargetHit[]>;
+  /** DOM id for the input, so a <label htmlFor> can name it. */
+  inputId?: string;
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<LinkTargetHit[]>([]);
@@ -73,6 +76,7 @@ export default function CompanySearch({
       emptyText={failed ? "Search failed — try again." : trimmed.length < 2 ? "Type at least 2 letters." : fresh ? "Nothing matches." : "Searching…"}
       onQueryChange={setQuery}
       disabled={disabled}
+      inputId={inputId}
     />
   );
 }

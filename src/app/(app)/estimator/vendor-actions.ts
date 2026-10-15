@@ -19,6 +19,7 @@ import { VENDOR_QUOTE_ID_RE } from "@/lib/vendor-quote-file";
 import { copyToVendorQuoteBlob, readThreadAttachment } from "@/lib/vendor-quotes/thread-attachment-server";
 import {
   VENDOR_COPY,
+  isPdfAttachment,
   isVendorPickerType,
   parseThreadAttachmentRef,
   quoteNumberFromSubject,
@@ -47,6 +48,7 @@ export async function vendorQuoteFromThreadAction(input: {
   // 2 — visibility + the bytes (never our own estimate PDF)
   const r = await readThreadAttachment(ref, await mailboxViewer(user), { vendorPdf: true });
   if (!r.ok) return r;
+  if (!isPdfAttachment({ name: r.name, mime: r.mime })) return { ok: false, error: "That attachment isn't a PDF." };
 
   // 3 — the vendor: the thread's company when it is a vendor company, else the name only
   const co = r.thread.customerId ? await getCompany(r.thread.customerId) : null;
@@ -62,14 +64,14 @@ export async function vendorQuoteFromThreadAction(input: {
   if (blobEnabled()) {
     try {
       const { blobPath } = await copyToVendorQuoteBlob(vendorQuoteId, r.name, r.mime, r.bytes);
-      attachment = { name: r.name, mime: r.mime, blobPath };
+      attachment = { name: r.name, mime: "application/pdf", blobPath };
     } catch (err) {
       console.error("[vendor-quotes] copy to Blob failed", ref.threadId, err);
       note = VENDOR_COPY.copyFailed;
     }
   } else {
-    const dataUrl = `data:${r.mime};base64,${r.bytes.toString("base64")}`;
-    if (dataUrl.length <= VENDOR_ATTACHMENT_BUDGET - attachedChars) attachment = { name: r.name, mime: r.mime, dataUrl };
+    const dataUrl = `data:application/pdf;base64,${r.bytes.toString("base64")}`;
+    if (dataUrl.length <= VENDOR_ATTACHMENT_BUDGET - attachedChars) attachment = { name: r.name, mime: "application/pdf", dataUrl };
     else note = VENDOR_COPY.noRoom;
   }
 
