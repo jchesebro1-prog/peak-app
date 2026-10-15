@@ -56440,19 +56440,19 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
       return r;
     };
     const rOwner = await seen(OWNER_PLAIN);
-    ok(rOwner.emails.length === 2 && rOwner.emails.every((e) => !e.textHidden && e.canReply && e.ownerName === "Sam Mills" && e.messages.length === 2 && e.messages[1].snippet === "Please add an option"),
+    ok(rOwner.emails.length === 2 && rOwner.emails.every((e) => e.canReply && e.ownerName === "Sam Mills" && e.messages.length === 2 && e.messages[1].snippet === "Please add an option"),
       "#P3 track fix: the thread owner sees every message and can reply (no permission needed)");
     const rAppr = await seen(APPROVER);
-    ok(rAppr.emails.every((e) => !e.textHidden && !e.canReply && e.messages.length === 2 && e.ownerName === "Sam Mills"), "#P3 track fix: an approver sees the text but can't reply");
+    ok(rAppr.emails.every((e) => !e.canReply && e.messages.length === 2 && e.ownerName === "Sam Mills"), "#P3 track fix: an approver sees the text but can't reply");
     const rSend = await seen(SENDER);
-    ok(rSend.emails.every((e) => !e.textHidden && !e.canReply && e.messages.length === 2), "#P3 track fix: a send-holder sees the text but can't reply");
+    ok(rSend.emails.every((e) => !e.canReply && e.messages.length === 2), "#P3 track fix: a send-holder sees the text but can't reply");
     const rLead = await seen(LEAD);
-    ok(rLead.emails.every((e) => !e.textHidden && !e.canReply && e.messages.length === 2), "#P3 track fix: the quote's Lead estimator (owner field) sees the text but can't reply");
+    ok(rLead.emails.every((e) => !e.canReply && e.messages.length === 2), "#P3 track fix: the quote's Lead estimator (owner field) sees the text but can't reply");
     const rPlain = await seen(PLAIN);
-    ok(rPlain.emails.length === 2 && rPlain.emails.every((e) => e.textHidden && !e.canReply && e.messages.length === 0), "#P3 track fix: a plain viewer gets textHidden with no messages and no Reply");
+    ok(rPlain.emails.length === 2 && rPlain.emails.every((e) => !e.canReply && e.messages.length === 2 && !("textHidden" in e)), "Jeff 10-15 #25: a plain viewer who can open the quote reads every message, still no Reply");
     const a = rPlain.emails.find((e) => e.threadId === "C-A")!;
-    ok(a.subject === "Estimate C-A" && a.to === "pat@school.org" && a.sentAt === 1000 && a.rev === 2 && a.delivered && a.unread === 1 && a.ownerName === "Sam Mills" && rPlain.newReplies === 1 && JSON.stringify(rPlain).indexOf("Please add an option") < 0,
-      "#P3 track fix: hidden-text emails still carry subject, recipient, sent time, rev, delivery and unread count — and the text appears nowhere in the payload");
+    ok(a.subject === "Estimate C-A" && a.to === "pat@school.org" && a.sentAt === 1000 && a.rev === 2 && a.delivered && a.unread === 1 && a.ownerName === "Sam Mills" && rPlain.newReplies === 1 && JSON.stringify(rPlain).indexOf("Please add an option") >= 0,
+      "Jeff 10-15 #25: a plain viewer's emails carry subject, recipient, sent time, rev, delivery, unread count and the reply text");
     ok(rPlain.emails.find((e) => e.threadId === "C-B")!.rev === 1, "#P3 track fix: each email carries its own rev");
     const none = fakes([mk("C-A", true), mk("C-B", false)]);
     const rn = await p3tTrackAs(none.deps, PLAIN, "Q-P3F");
@@ -56487,7 +56487,7 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   ok(C.linkHint === "Keep {link} where the client link should go." && C.attachEstimate === "Estimate PDF" && C.attachCover === "Cover PDF", "#P3 send UI: link hint and attachment labels");
   ok(C.gmailOff === "Gmail not connected — it will be saved as sent here; connect Gmail in Settings → Mailboxes" && C.from("sam@peak.com") === "From sam@peak.com", "#P3 send UI: Gmail state line");
   ok(C.sentGmail === "Sent through Gmail." && C.sentLocal === "Sent locally (Gmail not connected).", "#P3 send UI: delivery copy");
-  ok(C.textHidden("Sam Mills") === "Message text is visible to Sam Mills, approvers and the lead estimator." && C.textHidden("").includes("the mailbox owner"), "#P3 send UI: hidden-text explanation names the owner");
+  ok(!("textHidden" in C), "Jeff 10-15 #25: no hidden-text explanation — every viewer reads the replies");
   ok(p3ui.FOLLOW_UP_OPTIONS.map((o) => `${o.value}:${o.label}`).join("|") === "0:Off|2:2 days|3:3 days|5:5 days|7:7 days|14:14 days" && p3ui.FOLLOW_UP_DEFAULT === 5, "#P3 send UI: follow-up options Off, 2/3/5/7/14 days; default 5");
 
   const init = p3ui.composerInitial({ to: "pat@school.org", cc: "lee@peak.com", subject: "S", body: "B {link}" });
@@ -56554,7 +56554,7 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   ok(/trackSummary,\s+setTrackSummary,\s+(?:[A-Za-z]+,\s+){0,6}next,\s+\};\s+\}/.test(hook) && hook.includes("useState<{ opens: number; newReplies: number } | null>(null)"), "#P3 send UI: the hook holds trackSummary (next stays last in its return)");
   ok(act.includes("sendTrackAction(quoteId)") && act.includes('window.addEventListener("focus", refresh)') && act.includes("}, [quoteId, refreshKey]);"), "#P3 send UI: Activity reads on mount, on window focus and after a send");
   ok(act.includes("onTrackRef.current({ opens, newReplies: newRepliesOf(emails) })"), "#P3 send UI: Activity lifts opens + new replies to the shell");
-  ok(/e\.textHidden \? \(\s*<div[^>]*>\{SEND_UI_COPY\.textHidden\(e\.ownerName\)\}/.test(act), "#P3 send UI: hidden text shows the explanation instead of messages");
+  ok(!act.includes("textHidden") && act.includes("{e.messages.length > 0 && ("), "Jeff 10-15 #25: the Activity card always lists the messages");
   ok(act.includes("{e.canReply && (") && act.includes("{e.canReply && replyOpen && (") && /\{e\.canReply && \([\s\S]{0,400}\{SEND_UI_COPY\.reply\}[\s\S]{0,200}e\.unread > 0 &&[\s\S]{0,200}\{SEND_UI_COPY\.markRead\}/.test(act),
     "#P3 send UI: Reply and Mark read (unread > 0) only when canReply");
   ok(act.includes("replyToEstimateEmailAction(quoteId, e.threadId, text)") && act.includes("markEstimateEmailReadAction(quoteId, e.threadId)") && act.includes("onPatch(r.summary)") && act.includes("disabled={pending || !text.trim()}"),
@@ -56802,17 +56802,16 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
     const rg = await T.replyToEstimateEmail(gm.deps, SAM, "Q-P3FR", "C-SENT", "Hello");
     ok(rg.ok && rg.delivery === "gmail" && !rg.warning && !gm.calls.some((c) => c.startsWith("holdBack")), "#P3 final review (I1): a Gmail-delivered reply is never held back");
 
-    // M2 — the Lead estimator is the shared leadEstimator rule (owner, else preparedBy when the owner isn't active).
+    // Jeff 2026-10-15 #25 replaced M2's Lead-estimator text rule: anyone who can open the quote reads the text.
     const LEE = { id: "u4", name: "Lee Lead", roles: ["Crew"] };
     const seesText = async (q: import("@/lib/stores/quotes").Quote, roster?: Array<{ id: string; name: string; status: string }>) => {
       const r = await T.trackEstimate(mkDeps(q, roster).deps, LEE, "Q-P3FR");
-      return r.ok && r.emails.length > 0 && r.emails.every((e) => !e.textHidden);
+      return r.ok && r.emails.length > 0 && r.emails.every((e) => e.messages.length > 0 && !e.canReply);
     };
-    ok(await seesText(quote({ owner: "Lee Lead" })), "#P3 final review (M2): the active owner is the Lead estimator");
-    ok(await seesText(quote({ owner: "Gone Person", preparedBy: "Lee Lead" })), "#P3 final review (M2): an owner off the active roster falls back to preparedBy");
-    ok(!(await seesText(quote({ owner: "Lee Lead", preparedBy: "Sam Mills" }), [{ id: "u1", name: "Sam Mills", status: "active" }, { id: "u4", name: "Lee Lead", status: "inactive" }])),
-      "#P3 final review (M2): an inactive owner is not the Lead estimator (preparedBy is) — no text by that name alone");
-    ok(rd("src/lib/estimate-email/track-server.ts").includes("leadEstimator(q.owner, q.preparedBy, active)"), "#P3 final review (M2): track-server uses the shared leadEstimator helper");
+    ok(await seesText(quote({ owner: "Lee Lead" })), "Jeff 10-15 #25: the Lead estimator reads the text (no Reply)");
+    ok(await seesText(quote({ owner: "Sam Mills", preparedBy: "Sam Mills" }), [{ id: "u1", name: "Sam Mills", status: "active" }, { id: "u4", name: "Lee Lead", status: "inactive" }]),
+      "Jeff 10-15 #25: a viewer with no role on the quote still reads the text, never Reply");
+    ok(!rd("src/lib/estimate-email/track-server.ts").includes("textHidden") && !rd("src/lib/estimate-email/track-server.ts").includes("leadEstimator("), "Jeff 10-15 #25: track-server no longer gates the text by role");
   }
 
   // ---- I3: Inbox drafts must match the quote's latest sent revision ----

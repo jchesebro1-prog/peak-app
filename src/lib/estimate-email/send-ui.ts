@@ -45,7 +45,6 @@ export const SEND_UI_COPY = {
   deliveredDraft: "Draft in Inbox — not sent",
   replyTo: (subject: string) => `Reply to "${subject || "(no subject)"}"`,
   markReadOf: (subject: string) => `Mark read "${subject || "(no subject)"}"`,
-  textHidden: (owner: string) => `Message text is visible to ${owner || "the mailbox owner"}, approvers and the lead estimator.`,
   opens: (n: number) => `Client link opened ${n} time${n === 1 ? "" : "s"}`,
 } as const;
 
