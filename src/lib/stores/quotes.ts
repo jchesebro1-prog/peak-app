@@ -26,7 +26,7 @@ import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
-import { canHavePdf, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
+import { canHavePdf, nextSendRevNo, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
 import { SHARE_DEFAULT_TTL_MS, newShareNonce } from "@/lib/quote-share/token";
 import { nextOpens, type ShareOpens } from "@/lib/estimate-output/opens";
 import { appendPackageFile, cleanPackageFiles, type PackageFile } from "@/lib/estimate-output/package-files";
@@ -1083,6 +1083,9 @@ function pushRevision(
 ): QuoteRevision {
   const revs = Array.isArray(doc.revisions) ? doc.revisions : [];
   const r = snapshotOf(doc, revs.length + 1, by, reason, note);
+  // Jeff 2026-10-15 #13: every send stamps its Rev — the previous max + 1 — so two sends never print the
+  // same number. The PDF copy (setRevisionPdfPath) overwrites it with what the file really printed.
+  if (reason === "sent" && r.docFields) r.docFields = { ...r.docFields, revNo: nextSendRevNo(revs) };
   doc.revisions = [...revs, r];
   return r;
 }

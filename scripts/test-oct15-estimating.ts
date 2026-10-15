@@ -18,6 +18,9 @@ import { buildQuote, get as getQuote, setStatus } from "../src/lib/stores/quotes
 import { listFor } from "../src/lib/stores/parties";
 import { addBidder, setBidDetails, recordBidderSend } from "../src/lib/stores/bids";
 import { loadBidPanel } from "../src/lib/parties/bid-panel-server";
+import { documentRevStamp, maxSentRevNo, nextSendRevNo, sentRevNo } from "../src/lib/quote-pdf/state";
+import { quoteAsOfRevision, sentDocumentStamp } from "../src/lib/quote-share/view";
+import { addQuoteRevision } from "../src/lib/stores/quotes";
 import { appendResponseTo, MAX_CLIENT_RESPONSES, responseQuoteLimitKey, type ClientResponse } from "../src/lib/estimate-output/responses";
 
 const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -26,6 +29,7 @@ const PTY2 = "pty_fedcba9876543210";
 
 export async function oct15PureChecks(ok: Ok) {
   oct15ReviewAmountChecks(ok);
+  oct15RevChecks(ok);
   /* ---- #3 / #4 (pure + pins) ---- */
   {
     ok(JSON.stringify(addendaAdded([{ no: 1 }], [{ no: 1 }, { no: 3 }, { no: 2 }])) === "[2,3]" && addendaAdded(null, []).length === 0 && addendaAdded([{ no: 1 }, { no: 2 }], [{ no: 1 }]).length === 0,
@@ -104,6 +108,47 @@ async function dropCompanies() {
   await db.delete(companies).where(like(companies.id, `TEST${FIX}:%`));
 }
 
+/* ---- #13 — every send gets the next Rev; numbers never repeat ---- */
+export function oct15RevChecks(ok: Ok) {
+  const R = (rev: number, reason: string, revNo?: number) => ({ rev, reason, at: rev, ...(revNo ? { docFields: { revNo } } : {}) });
+  ok(documentRevStamp({ revisions: [], status: "draft" }).revNum === 1 && documentRevStamp({ status: "draft" }).revNum === 1, "oct15 #13: before any send the document prints Rev 1");
+  const once = [R(1, "sent", 1)];
+  ok(documentRevStamp({ revisions: once, status: "sent" }).revNum === 1 && documentRevStamp({ revisions: once, status: "draft" }).revNum === 2,
+    "oct15 #13: a sent quote prints its send's Rev; revising it prints the NEXT one (no second Rev 1)");
+  ok(documentRevStamp({ revisions: [...once, R(2, "manual"), R(3, "recall")], status: "draft" }).revNum === 2, "oct15 #13: manual / recall snapshots don't move the Rev — only sends do");
+  // Legacy: two sends that both printed "Rev 1" under the old rule keep it; the next send is 2.
+  const legacy = [R(1, "sent"), R(2, "sent")];
+  ok(sentRevNo(legacy, legacy[0]) === 1 && sentRevNo(legacy, legacy[1]) === 1 && sentDocumentStamp({ revisions: legacy } as never, legacy[1] as never).revNo === 1,
+    "oct15 #13: older sends keep the Rev their PDFs printed");
+  ok(maxSentRevNo(legacy) === 1 && nextSendRevNo(legacy) === 2 && documentRevStamp({ revisions: legacy, status: "draft" }).revNum === 2, "oct15 #13: the next send after them is max + 1");
+  ok(nextSendRevNo([R(1, "sent", 4), R(2, "manual"), R(3, "sent", 2)]) === 5, "oct15 #13: the next Rev is the max any send printed + 1, never a reuse");
+  ok(documentRevStamp({ revisions: once, status: "draft", docRevNo: 1 }).revNum === 1, "oct15 #13: a quote shown as one sent revision prints that revision's Rev");
+  const q = { revisions: [R(1, "sent", 1), R(2, "manual"), R(3, "sent", 2)], status: "draft", updatedAt: 5 } as never;
+  ok(documentRevStamp(quoteAsOfRevision(q, (q as { revisions: never[] }).revisions[0])).revNum === 1, "oct15 #13: the as-sent view of Rev 1 still prints Rev 1 while the quote is being revised");
+  const qs = rd("src/lib/stores/quotes.ts");
+  ok(qs.includes('if (reason === "sent" && r.docFields) r.docFields = { ...r.docFields, revNo: nextSendRevNo(revs) };'), "oct15 #13: every sent revision (setStatus, a portal refresh, a bidder send's cut) stamps max + 1");
+  ok(!rd("src/app/(app)/estimator/page.tsx").includes("revisions?.length || 1") && !rd("src/app/(app)/estimator/actions.ts").includes("revisions?.length || 1"),
+    "oct15 #13: the Estimator header reads the same rule");
+}
+
+async function oct15RevDbChecks(ok: Ok) {
+  const qid = fixtureId(FIX, "revq");
+  await createFixture("quotes", buildQuote(qid, { name: "O15 rev", customer: "O15 Owner", customerId: CO.own, value: 1000 } as never, "system", null, Date.now()) as never);
+  const sentRevs = async () => ((await getQuote(qid))?.revisions || []).filter((r) => r.reason === "sent");
+  await setStatus(qid, "sent", "Pat", { bypassApprovalGate: "engine-owned-flow" });
+  await setStatus(qid, "draft", "Pat");
+  await addQuoteRevision(qid, { by: "Pat", reason: "manual" });
+  const mid = await getQuote(qid);
+  ok(!!mid && documentRevStamp(mid).revNum === 2, "oct15 #13 db: a revise of a once-sent quote prints Rev 2");
+  await setStatus(qid, "sent", "Pat", { bypassApprovalGate: "engine-owned-flow" });
+  await setStatus(qid, "draft", "Pat");
+  await setStatus(qid, "sent", "Pat", { bypassApprovalGate: "engine-owned-flow" });
+  const sr = await sentRevs();
+  const q = await getQuote(qid);
+  ok(sr.map((r) => r.docFields?.revNo).join() === "1,2,3" && !!q && documentRevStamp(q).revNum === 3 && sentDocumentStamp(q, sr[2]).revNo === 3,
+    "oct15 #13 db: three sends stamp Rev 1, 2, 3 (a manual snapshot in between moves nothing): " + sr.map((r) => r.docFields?.revNo).join());
+}
+
 export async function oct15DbChecks(ok: Ok) {
   try {
     await dropCompanies();
@@ -112,6 +157,7 @@ export async function oct15DbChecks(ok: Ok) {
     await saveContact({ id: CO.ct, firstName: "Gee", lastName: "Cee", homeCompanyId: CO.gc });
     await setEmails(CO.ct, [{ value: "gee@o15.test", label: "work", isPrimary: true }] as never);
     await oct15BidDbChecks(ok);
+    await oct15RevDbChecks(ok);
   } finally {
     await dropFixtures(FIX);
     await dropCompanies();

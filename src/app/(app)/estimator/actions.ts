@@ -65,7 +65,7 @@ import {
 import { companyCredit } from "@/lib/stores/reward-ledger";
 import { normalizePdfOptions, type QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
-import type { QuotePdfView } from "@/lib/quote-pdf/state";
+import { documentRevStamp, type QuotePdfView } from "@/lib/quote-pdf/state";
 import { activeUsers } from "@/lib/users";
 import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
 import { PRICING_TIER_LABEL } from "@/lib/identity/config";
@@ -437,7 +437,7 @@ export async function saveQuoteAction(
       ok: false,
       id: null,
       number: null,
-      revNum: Math.max(1, prior?.revisions?.length || 1),
+      revNum: documentRevStamp(prior ?? {}).revNum,
       updatedAt: prior?.updatedAt ?? Date.now(),
       review: prior?.review ?? null,
       status: prior?.status ?? null,
@@ -484,7 +484,7 @@ export async function saveQuoteAction(
       ok: false,
       id: loadedId,
       number: prior ? displayQuoteNumber(prior) : null,
-      revNum: Math.max(1, prior?.revisions?.length || 1),
+      revNum: documentRevStamp(prior ?? {}).revNum,
       updatedAt: prior?.updatedAt ?? Date.now(),
       review: prior?.review ?? null,
       status: prior?.status ?? null,
@@ -704,7 +704,7 @@ export async function saveQuoteAction(
     ok: !!q && !statusError,
     id: q?.id ?? null,
     number: q ? displayQuoteNumber(q) : null,
-    revNum: Math.max(1, q?.revisions?.length || 1),
+    revNum: documentRevStamp(q ?? {}).revNum,
     updatedAt: q?.updatedAt ?? Date.now(),
     review: q?.review ?? null,
     status: q?.status ?? null,

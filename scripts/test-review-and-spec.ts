@@ -49408,8 +49408,8 @@ import { RERENDER_MIN_MS as n293tFRerenderMinMs, stampRerenderDeadlineMs as n293
   // ---- one counting rule: what quoteDocumentDataFor prints is documentRevStamp ----
   const cases = [qf([]), qf([r(1, "sent", 1), r(2, "manual", 2), r(3, "sent", 3)]), qf([r(1, "sent", 1)], { updatedAt: 0 })];
   ok(cases.every((q) => { const d = n293tDocData(q, null, SET); const s = n293tFStamp(q); return s.revNum === d.revNum && s.revDateMs === d.revDateMs; }) &&
-     n293tFStamp(cases[1]).revNum === 3 && n293tFStamp(cases[2]).revDateMs === 7,
-    "#293t final 1: documentRevStamp is exactly the Rev N + date quoteDocumentDataFor prints (revisions so far, at least 1; updatedAt, else createdAt)");
+     n293tFStamp(cases[1]).revNum === 2 && n293tFStamp(cases[2]).revDateMs === 7,
+    "#293t final 1 (Rev = send number since Jeff 2026-10-15 #13): documentRevStamp is exactly the Rev N + date quoteDocumentDataFor prints (a sent quote: its latest send's Rev; updatedAt, else createdAt)");
   const ready: N293tFPdf = { status: "ready", at: 10, savedAt: 5, blobPath: "p", printed: { revNum: 2, revDateMs: 5 } };
   const pend = n293tFPending(ready, 20, 21);
   const settled = n293tFSettle(pend, 20, { ok: true, blobPath: "p2", printed: { revNum: 3, revDateMs: 20 } }, 30);
@@ -49442,9 +49442,9 @@ import { RERENDER_MIN_MS as n293tFRerenderMinMs, stampRerenderDeadlineMs as n293
   const live = qf([rev1, rev2], { updatedAt: T3 + DAY });
   const webProps = n293tDocData(n293tAsOf(live, rev2), null, SET);
   const hdr = n293tHeader(live, rev2);
-  ok(pdfProps.revNum === 1 && webProps.revNum === pdfProps.revNum && webProps.revDateMs === pdfProps.revDateMs && webProps.revDateMs === T2,
-    "#293t final 1: recall + edit + resend on a later day — the online document prints the PDF's Rev 1 and save date, not rev 2 / the send day");
-  ok(hdr === `EST-1007 · Rev 1 · sent ${chicago(T2)}` && !hdr.includes(chicago(T3)),
+  ok(pdfProps.revNum === 2 && webProps.revNum === pdfProps.revNum && webProps.revDateMs === pdfProps.revDateMs && webProps.revDateMs === T2,
+    "#293t final 1: recall + edit + resend on a later day — the online document prints the PDF's Rev (2 since Jeff 2026-10-15 #13 — never Rev 1 twice) and save date, not the send day");
+  ok(hdr === `EST-1007 · Rev 2 · sent ${chicago(T2)}` && !hdr.includes(chicago(T3)),
     "#293t final 1: the online header line names the PDF's Rev and date too");
   const firstWeb = n293tDocData(n293tAsOf(qf([rev1]), rev1), null, SET);
   ok(firstWeb.revNum === 1 && firstWeb.revDateMs === T1 - 60_000 && n293tHeader(qf([rev1]), rev1) === `EST-1007 · Rev 1 · sent ${chicago(T1 - 60_000)}`,
@@ -49479,8 +49479,8 @@ import { RERENDER_MIN_MS as n293tFRerenderMinMs, stampRerenderDeadlineMs as n293
     "#293t fix round 2: the generator re-renders at most once, only for a still-pending save with budget left, under a deadline signal");
   const qdd = rd("src/lib/quote-pdf/quote-document-data.ts");
   ok(qdd.includes("const stamp = documentRevStamp(q);") && qdd.includes("revNum: stamp.revNum,") && qdd.includes("revDateMs: stamp.revDateMs,") &&
-     rd("src/lib/quote-pdf/state.ts").includes("return { revNum: Math.max(1, q.revisions?.length || 1), revDateMs: q.updatedAt || q.createdAt || 0 };"),
-    "#293t final 1: the PDF's Rev/date rule is unchanged, now named once (documentRevStamp)");
+     rd("src/lib/quote-pdf/state.ts").includes("return { revNum: shownAsSent && max > 0 ? max : max + 1, revDateMs };"),
+    "#293t final 1: the PDF's Rev/date rule is named once (documentRevStamp; the send number since Jeff 2026-10-15 #13)");
 
   // ---- item 7: the print token's leading zero ----
   const S = "test-secret-293tf";
@@ -69730,7 +69730,7 @@ import { qd293Sections as p3QdSections, renderQuoteDocument293 as p3RenderQd } f
       locationId: locId, contactName: contactName || "", quoteNote: (q.quoteNote as string) ?? "", assumptions: (q.assumptions as string) ?? "",
       owner: (q.owner as string) || "", preparedBy: (q.preparedBy as string) || "", paymentTerms: (q.paymentTerms as string) || "Unknown",
       sections: p3NormOrder(spec.sections as never, groups), groups, vendorQuotes: (q.vendorQuotes as never) || [], pdfOptions: p3NormPdf(q.pdfOptions),
-      revNum: Math.max(1, (q.revisions as unknown[])?.length || 1), revDateMs: (q.updatedAt as number) || 0,
+      revNum: n293tFStamp(q as never).revNum, revDateMs: (q.updatedAt as number) || 0,
       source: q.source === "portal-catalog" ? "portal-catalog" : null, portalFirm: q.source === "portal-catalog" ? ((q.portalFirm as never) ?? null) : null,
       customers: [...others, custLite], companyName: settings.companyName, logoDark: settings.logoDark, rewardsLine,
     };

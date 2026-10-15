@@ -1,5 +1,5 @@
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
-import { latestSentRevision, pdfKindForQuoteType } from "@/lib/quote-pdf/state";
+import { latestSentRevision, pdfKindForQuoteType, sentRevNo } from "@/lib/quote-pdf/state";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import type { SentRevRow } from "./package-view";
 
@@ -72,10 +72,8 @@ export function sentDocumentStamp(
   rev: Pick<QuoteRevision, "rev" | "at" | "docFields" | "pdfSavedAt">
 ): { revNo: number; issuedAt: number } {
   const df = rev.docFields;
-  const revs = Array.isArray(q.revisions) ? q.revisions : [];
-  const idx = revs.findIndex((r) => r.rev === rev.rev);
-  const before = idx >= 0 ? idx : Math.max(0, rev.rev - 1);
-  const revNo = typeof df?.revNo === "number" && Number.isSafeInteger(df.revNo) && df.revNo >= 1 ? df.revNo : Math.max(1, before);
+  // The frozen stamp, else the PDF's pre-#13 counting rule (one rule: state.ts sentRevNo).
+  const revNo = sentRevNo(q.revisions, rev);
   const issuedAt =
     typeof df?.issuedAt === "number" && Number.isFinite(df.issuedAt) && df.issuedAt > 0
       ? df.issuedAt
@@ -114,6 +112,8 @@ export function quoteAsOfRevision(q: Quote, rev: QuoteRevision): Quote {
     value: rev.value,
     updatedAt: issuedAt,
     revisions: revs.slice(0, revNo),
+    // Jeff 2026-10-15 #13: documentRevStamp prints exactly this revision's Rev.
+    docRevNo: revNo,
     shareLink: null,
   } as unknown as Quote;
 }

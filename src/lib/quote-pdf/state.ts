@@ -40,18 +40,61 @@ export type QuotePdfState = {
 
 /**
  * #293 slice 3 — the Rev N and date the customer QuoteDocument prints for a
- * quote as it stands at render time: Rev = the revisions cut so far (at
- * least 1), the date = the last update. quoteDocumentDataFor reads exactly
+ * quote as it stands at render time. quoteDocumentDataFor reads exactly
  * this, so the generator can record what a file printed. Pure.
+ *
+ * Jeff 2026-10-15 #13 — Rev is the SEND number and never repeats (it used to
+ * be the revisions cut so far, so a revise + resend printed Rev 1 twice):
+ * - a quote shown as one sent revision (`docRevNo`, quoteAsOfRevision) prints that revision's Rev;
+ * - a sent / won / lost quote prints its latest send's Rev (sentRevNo — the
+ *   frozen docFields.revNo, else the old counting rule, so history keeps what it printed);
+ * - anything else (a draft, a revise in progress) prints the NEXT send's Rev:
+ *   the highest Rev any send printed + 1 (1 before the first send).
+ * The date is the last update, as before.
  */
 export type DocumentRevStamp = { revNum: number; revDateMs: number };
+
+type RevLike = { rev?: unknown; reason?: unknown; docFields?: { revNo?: unknown } | null } | null | undefined;
+
+const validRevNo = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 1;
+
+/** The Rev one sent revision printed: its frozen docFields.revNo, else the
+ *  pre-#13 counting rule (the revisions before it, at least 1) — what an
+ *  older PDF printed. Pure. */
+export function sentRevNo(revisions: readonly unknown[] | null | undefined, r: RevLike): number {
+  if (r && validRevNo(r.docFields?.revNo)) return r.docFields.revNo;
+  const revs = Array.isArray(revisions) ? (revisions as RevLike[]) : [];
+  const idx = r ? revs.findIndex((x) => !!x && x.rev === r.rev) : -1;
+  const rev = r && typeof r.rev === "number" ? r.rev : 1;
+  return Math.max(1, idx >= 0 ? idx : rev - 1);
+}
+
+/** Jeff 2026-10-15 #13 — the highest Rev any send printed (0 = never sent). Pure. */
+export function maxSentRevNo(revisions: readonly unknown[] | null | undefined): number {
+  const revs = Array.isArray(revisions) ? (revisions as RevLike[]) : [];
+  let max = 0;
+  for (const r of revs) if (r && r.reason === "sent") max = Math.max(max, sentRevNo(revs, r));
+  return max;
+}
+
+/** Jeff 2026-10-15 #13 — the Rev the next send prints: previous max + 1. Pure. */
+export function nextSendRevNo(revisions: readonly unknown[] | null | undefined): number {
+  return maxSentRevNo(revisions) + 1;
+}
 
 export function documentRevStamp(q: {
   revisions?: readonly unknown[] | null;
   updatedAt?: number | null;
   createdAt?: number | null;
+  status?: string | null;
+  /** Set only by quoteAsOfRevision: the Rev the shown sent revision printed. */
+  docRevNo?: number | null;
 }): DocumentRevStamp {
-  return { revNum: Math.max(1, q.revisions?.length || 1), revDateMs: q.updatedAt || q.createdAt || 0 };
+  const revDateMs = q.updatedAt || q.createdAt || 0;
+  if (validRevNo(q.docRevNo)) return { revNum: q.docRevNo, revDateMs };
+  const max = maxSentRevNo(q.revisions);
+  const shownAsSent = q.status === "sent" || q.status === "won" || q.status === "lost";
+  return { revNum: shownAsSent && max > 0 ? max : max + 1, revDateMs };
 }
 
 /** What a browser sees: the state without the storage path. */

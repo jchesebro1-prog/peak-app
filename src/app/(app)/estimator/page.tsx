@@ -36,7 +36,7 @@ import { resolveTier } from "@/lib/pricing-tiers";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { pickContactName, pickVenueId, readHandoff, systemQuoteName } from "@/app/(app)/quotes/new/handoff";
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
-import { pdfView } from "@/lib/quote-pdf/state";
+import { documentRevStamp, pdfView } from "@/lib/quote-pdf/state";
 import EstimatorClient from "./estimator-client";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { sourceForSave } from "@/lib/portal-quote-mode";
@@ -222,10 +222,9 @@ async function initialFrom(
     // blank (a blank prints the owner, then the company, on the document).
     owner: q.owner || "",
     preparedBy: q.preparedBy || "",
-    // Real priced revisions (item 24). This used to count `history`, which is
-    // the status pipeline — so the printed "Rev N" climbed every time a quote
-    // moved draft → sent → won, with no revision having been taken.
-    revNum: Math.max(1, q.revisions?.length || 1),
+    // The printed Rev (Jeff 2026-10-15 #13): the send number — the latest
+    // send's on a sent quote, the next send's on a draft — the PDF's own rule.
+    revNum: documentRevStamp(q).revNum,
     revDateMs: q.updatedAt || Date.now(),
     // Item 11 (D87): stamped tier seeds labor/curtain margins client-side.
     pricingTier: q.pricingTier ?? null,
