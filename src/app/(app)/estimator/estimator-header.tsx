@@ -13,6 +13,7 @@ import { canSendBackFromReview, withoutSendBack } from "@/lib/estimate-review/re
 import PopoutButton from "@/components/popout/popout-button";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import PartiesChip from "./parties-chip";
+import BidChip from "./bid-chip";
 
 /**
  * #305 (spec 2026-10-07 §4) — the Estimator's one header, shown on every
@@ -206,6 +207,7 @@ export function EstimatorHeader({
               </button>
               {/* #348 — canApplyCredit is can("create") */}
               <PartiesChip quoteId={s.loadedId} canEdit={s.canApplyCredit} />
+              <BidChip quoteId={s.loadedId} canEdit={s.canApplyCredit} />
             </div>
           </div>
         </div>

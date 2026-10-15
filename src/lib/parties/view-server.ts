@@ -21,6 +21,8 @@ export async function partyVMs(parties: Party[]): Promise<PartyVM[]> {
       contactId: p.contactId,
       contactName: ct ? displayName(ct) : "",
       href: `/companies/${encodeURIComponent(p.companyId)}`,
+      hasBid: !!p.bid,
+      awarded: p.bid?.result === "awarded",
     };
   });
 }

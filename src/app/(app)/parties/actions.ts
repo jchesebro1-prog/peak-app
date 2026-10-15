@@ -68,6 +68,7 @@ export async function removePartyAction(id: string): Promise<PartyActionResult> 
   if (typeof id !== "string" || !id) return { ok: false, error: "That link no longer exists." };
   const cur = await getDoc<Party>("record_parties", id);
   if (!cur) return { ok: false, error: "That link no longer exists." };
+  if (cur.bid?.result === "awarded") return { ok: false, error: "Undo the award first." };
   await removeParty(id);
   touch(cur.recordType);
   return { ok: true, parties: await fresh(cur.recordType, cur.recordId) };

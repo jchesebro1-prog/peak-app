@@ -152,13 +152,15 @@ export default function PartiesEditor({
                 <button
                   type="button"
                   aria-label={`Remove ${p.companyName} (${p.roleText})`}
-                  onClick={() =>
+                  title={p.awarded ? "Undo the award first" : undefined}
+                  onClick={() => {
+                    if (p.hasBid && !window.confirm(`Remove ${p.companyName} as a bidder? Its bid history on this estimate is lost.`)) return;
                     start(async () => {
                       const r = await callAction(() => removePartyAction(p.id));
                       if (r) apply(r);
-                    })
-                  }
-                  disabled={pending}
+                    });
+                  }}
+                  disabled={pending || p.awarded}
                   style={{ ...btn, padding: "2px 7px", color: "#8a2f22" }}
                 >
                   ✕

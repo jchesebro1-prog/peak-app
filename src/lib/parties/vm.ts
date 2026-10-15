@@ -10,6 +10,9 @@ export type PartyVM = {
   contactId: string | null;
   contactName: string;
   href: string;
+  /** Quote bidder rows only: has a bid state (removing it loses bid history) / is the awarded bidder. */
+  hasBid: boolean;
+  awarded: boolean;
 };
 
 export type ContactOption = { id: string; name: string; title: string };
