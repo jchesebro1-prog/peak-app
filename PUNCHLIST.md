@@ -12340,6 +12340,32 @@ Jeff (Oct 14): "We need the ability to archive a message in the Organize tab and
 - **Tests:** `scripts/test-inbox-org.ts` → `inboxOrgArchiveLabelChecks` (also chained into test:specs). No migration, no env var.
 
 **Follow-ups / Jeff-gated:**
-- The only label you can apply is the Inbox's color category (one per thread). Real Gmail labels can't be applied from the app; Gmail's "Label ▾" in the Inbox is a filter. Say if you want Gmail labels applied from Peak.
+- ~~Only the colour category can be applied~~ — Jeff chose real Gmail labels: done in #347.
 - "Archive all shown" on Noise still leaves the archived rows on the Noise tab, while a row's own Archive takes the row off. Say if both should behave the same way.
 - **Review fixes (same day):** archived Noise rows, marked-noise ones included, come back on new outside mail. Skip and un-skip use compare-and-set. Undo never re-inboxes mail Gmail had already archived. The Home brief's Organize counts are now live (D1052).
+
+## 347. The Labels card uses my real Gmail labels — pick, create, remove — DONE 2026-10-14 on `worktree-assist-layer` (D1055–D1057)
+
+Jeff (Oct 14) chose "My real Gmail labels" for the #346 Labels card: pick from your actual Gmail labels, or create a new one, and the label applies in Gmail.
+
+**Built:**
+- **Labels card** (reader sidebar, your own threads in Organize and the Inbox):
+  - The thread's Gmail labels show as chips with ✕: your labels, Starred and Important.
+  - "+ Add label" opens a searchable picker of your labels, with "Create '<typed>'" at the bottom.
+  - The app's `Peak/*` labels show read-only and are never offered; placeholder labels are never shown.
+  - The colour category sits underneath as a small Colour row (D1055).
+- **Gmail:**
+  - Apply and remove go through `threads.modify`; create goes through `users.labels.create`.
+  - The stored labels update at once, and errors show inline (no Gmail, reconnect, label missing, quota).
+  - The label list re-reads from Gmail when the cache is more than 5 minutes old.
+  - No new OAuth scope: `gmail.modify` was already requested (D1055, D1056).
+- **Import side:** a label you change in Gmail now reaches the app through the incremental sync. The card's own change isn't echoed back (D1057).
+- **Guards:** three new owner-checked actions in `actions.ts` (`gmailLabelPickerAction`, `setGmailLabelAction`, `createGmailLabelAction`), covered by the #341 audit (53 actions found).
+- **Tests:** `scripts/test-inbox-org.ts` → `inboxGmailLabelChecks` (fake Gmail client; chained into test:specs). No migration, no env var.
+
+**Not exercised live:** real Gmail. Gmail can't be reached locally, so the browser check used a seeded label cache and `gmailLabelIds`, and applying showed the "no Gmail" inline error. The Gmail calls are covered by the fake client only.
+
+**Follow-ups / Jeff-gated:**
+- Try it on production with your own mailbox: add a label, create one, remove one, and check each in Gmail. Then change a label in Gmail and check that it shows in Peak after the next sync.
+- A mailbox connected before gmail.modify was added (pre-July 19) shows "reconnect" until it is reconnected.
+- A Gmail-side change to the same thread's labels within 2 minutes of a change made in Peak waits for that thread's next label event (D1057).
