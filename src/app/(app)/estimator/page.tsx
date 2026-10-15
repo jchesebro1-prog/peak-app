@@ -48,6 +48,8 @@ import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults
 import ActionError from "@/components/action-error";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import { assistDraftViewOf } from "@/lib/assist/features/estimate-draft";
+import { vendorPdfGateFor } from "@/lib/assist/gate-server";
+import { assistSettingsOf } from "@/lib/assist/config";
 import { getSuggestion, suggestionForQuote } from "@/lib/stores/estimate-suggestions";
 import { suggestionViewOf, unlinkedRetryAllowed, type EstimateSuggestionView, type SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 import type { EstimateSuggestion } from "@/lib/assist/features/suggestion";
@@ -391,17 +393,20 @@ export default async function EstimatorPage({
   // inspection, consulting, rental) opens its own builder, not the
   // Estimator — this is the server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
+  // #348 slice 5: Read the PDF — the server gate (kill switch + pilot + feature first, then a Claude key), off the
+  // same settings load and inside the Promise.all; a failure hides it.
+  const settingsLoad = getSettings();
   // Estimate suggestion: the hand-off's `?suggestion=` (new estimate), else the
   // saved quote's linked one (else, unlinked, the one its URL still names).
   // Read inside the Promise.all below so an Estimator open doesn't wait on it serially.
-
-  const [suggestion, fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults, systemCategories] =
+  const [suggestion, fabricRows, laborRows, customerDocs, settings, vendorPdfGate, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults, systemCategories] =
     await Promise.all([
       loadSuggestion(readHandoff(sp).suggestionId, q),
       fabricParts(),
       byCategory("Labor"),
       allCustomers(),
-      getSettings(),
+      settingsLoad,
+      settingsLoad.then((st) => vendorPdfGateFor(user.id, { settings: assistSettingsOf(st) })).catch(() => "error"),
       getFixtureRates(),
       activeUsers(),
       catalogList(),
@@ -415,6 +420,7 @@ export default async function EstimatorPage({
       getEstimateOutputDefaults(),
       loadSystemCategoryOptions(),
     ]);
+  const vendorPdfEnabled = vendorPdfGate === null;
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
   const quoteTasks = q ? await tasksForQuote(q.id) : [];
@@ -608,6 +614,8 @@ export default async function EstimatorPage({
       // Estimate suggestion (spec 2026-10-13 §2): the Suggested BOM panel + its live parts.
       suggestion={suggestion.view}
       suggestionParts={suggestion.parts}
+      // #348 slice 5: the vendor form's Read the PDF (pilot users with a Claude key only).
+      vendorPdfEnabled={vendorPdfEnabled}
     />
     </>
   );

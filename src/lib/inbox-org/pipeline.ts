@@ -111,7 +111,7 @@ export type OrgContextInput = {
   now?: number;
 };
 
-const NO_ASSIST: AssistSettings = { users: [], features: { tasks: false, reply: false, estimate: false, file: false, promise: false, brief: false, ask: false }, capUsd: 0 };
+const NO_ASSIST: AssistSettings = { users: [], features: { tasks: false, reply: false, estimate: false, file: false, promise: false, brief: false, ask: false, vendorpdf: false }, capUsd: 0 };
 
 /** Pure: the context from already-loaded rows. Own domains are Peak's own
  *  plus the admin override's, else plus the team's (see ownDomainsFrom). */

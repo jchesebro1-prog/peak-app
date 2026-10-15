@@ -13266,35 +13266,125 @@ S2 asks `rigging.depth` first in its Rigging system module (pick list `rig_depth
 
 A daily sweep creates one task per due date, 30 days before it and due on it: for every live (not voided) finding with a next-due date — the existing `Finding.nextDue`, which the brief sets when a verified finding closes ("set the next-due date on the related log"); any status counts — and for every venue with a next assessment date. Venues had no such field: `venue_profiles` gains `nextAssessmentAt` (epoch ms, optional; `setNextAssessmentAt`), set on the venue page's Assessments card ("Next assessment", a date, `create` permission, read-only otherwise; `setNextAssessmentAction`). The account rep is the company's owner (`companies.owner_user_id`, the Companies directory's Owner) when that user is active; else the creator of the assessment behind it (a venue: its most recent assessment); else the task is unassigned. Task ids are deterministic — `T-asr-f-<finding>-<due day>` / `T-asr-v-<site>-<due day>` — and created with `createTaskOnce` after a live-or-deleted check, so the sweep is idempotent, a reminder someone deleted never returns, and a moved date gets its own reminder. A date already past gets none. Pure planner `src/lib/assessments/reminders.ts`; sweep `reminders-server.ts`, run first in the daily drive cron (`/api/drive/sync`, 10 s deadline) and lazily from the Assessments page (`after()`, once per process per 6 hours). The brief's "owner contact" reminders and Immediate-attention alerts to the hazard contact (customer-facing email) are not built: the reminder is an internal task. **#353 review fixes:** I1 — the date field saves on blur or Enter, never per keystroke, ignores a year before 1900 (the server refuses one too), stays enabled while saving and says Saved / the error inline (`next-assessment-input.ts`). I2 — the lazy sweep never runs on a preview deploy. M3 — a finding's `nextDue` changed or cleared (`saveFinding`, `transitionFinding`, `voidFinding`) or a venue's date (the Next assessment action) closes — marks done — the open reminders for the old date at once (`reminder-close.ts`); the sweep closes any others whose record's date moved (offline pushes, merges). M4 — a closed finding with a next-due date still gets its reminder (kept: that is the brief's next-due log). M5 — the sweep reads three assessment fields, checks every planned id in one batched read, and its reads run under the deadline. M8 — no reminder for a finding or venue whose venue was deleted.
 
+## D1140. `vendorpdf` is an opt-in, Claude-only Assist feature (#348 slice 5, 2026-10-15)
 
-## D1140. A partial price file dates only the parts in it (#354, Jeff 2026-10-15 items 32–33; answers MASTER-QUESTIONS E6)
+"Read the PDF" on the Estimator's vendor quote form is the Assist feature `vendorpdf`: off until an admin ticks it under Settings → Beta → Assist pilot → features, and only for pilot users. It runs through `runAssist` like every other feature (gate, monthly cap, log to `assist_runs`).
+- **Models:** Haiku 5.5 by default; **Try harder** re-reads on Sonnet 5.5. Env overrides `ASSIST_MODEL_VENDORPDF` and `ASSIST_MODEL_VENDORPDF_HARD`.
+- **Rate:** 30 reads per user per hour. Try harder counts.
+- **Claude only:** a request that carries a document never goes to the local provider. With no Claude key the button is hidden, not disabled.
+
+## D1141. Provider documents (#348 slice 5, 2026-10-15)
+
+`ProviderRequest.document` sends the PDF as a base64 `document` block placed before the text. No prompt caching and no citations (citations are incompatible with structured outputs). The wire schema is required-but-nullable because structured outputs reject length and range constraints; the stored shape (`VendorQuote.extracted`, spec §3.7) is all-optional. The model gets no tools and no web access, and the prompt frames the document as untrusted data.
+
+## D1142. Where the bytes come from, and how big they can be (#348 slice 5, 2026-10-15)
+
+- **Source:** the server reads only a Blob path the vendor quote owns (`ownsVendorQuoteBlobPath` against the vendor quote id) or the form's in-memory data-URL. It never fetches a URL.
+- **Size** is checked before reading (`head`). The ceiling is the API's 32 MiB request, so a file of at most about 23.8 MiB once base64-encoded. A bigger one says it is too large and to enter it by hand.
+- **Pages:** at most 100, counted by pdf-lib, then a byte-scan fallback, then the API decides.
+
+## D1143. Checks flag, never fix (#348 slice 5, 2026-10-15)
+
+`src/lib/vendor-pdf/checks.ts` is deterministic and never changes a number the model read.
+- **Line math:** qty × unit must equal the amount within max($0.01, 0.5 % of the amount, half a cent per unit).
+- **Sum against total:** the lines must add to the printed total within max($0.01, 1¢ per line). A quote that says freight or tax is excluded is read with that in mind.
+- **Catalog match:** model #, then MFR P/N, then SKU / order #, then former SKU; exact before loose; a tie breaks by the vendor's manufacturer, otherwise the line is shown as ambiguous.
+- **Vendor company:** see D1145.
+- **Freight pre-tick:** see D1144 and D1153.
+
+## D1144. What counts as freight "excluded" (#348 slice 5, 2026-10-15)
+
+The wording is wider than the plan's first pattern: prepay / prepaid and add(ed), PPD & add, PP&A, "plus freight", "freight extra", and FOB origin including "FOB: Origin". Excluded wording wins over a freight charge that is inside the total. (`src/lib/vendor-pdf/checks.ts`)
+
+## D1145. Vendor name matching (#348 slice 5, 2026-10-15)
+
+Normalizing turns punctuation into a space, so "L.L.C." and "Rose-Brand" both normalize, and drops company suffixes (Inc, LLC and the like). The read links a vendor company only on an exact normalized name among live vendor-type companies (D1105); a near miss is not linked. Otherwise the typed name stays and the panel says to pick one.
+
+## D1146. The catalog lookup is a server SQL pre-filter (#348 slice 5, 2026-10-15)
+
+`partsByLooseKeys` runs after the model call, because it needs the printed part numbers. It pre-filters in SQL by loose key with a cap of 25 parts per key, and keeps the true count, so a match on a cut-short key shows as ambiguous rather than as a confident hit. One catalog index is built per read.
+
+## D1147. What the read fills (#348 slice 5, 2026-10-15; Jeff's answers to questions 1, 3 and 5)
+
+The read fills only blank fields, appends lines, and never unticks freight.
+- **Freight and tax stay inside the printed total** (Jeff): the total goes into Total cost and the freight / tax rows are listed in Terms. They are not added as material lines, so the itemized display can read "Lines add to X — the quote will use Y".
+- **Description is prefilled when blank** (Jeff), from `vendorPdfDescription`: one line gives its description or MFR P/N; several give "<first> + N more items". It stays editable.
+- **A catalog match is a chip only** (Jeff): it never replaces the line's description or MFR P/N and is not compared to catalog cost.
+- **Re-read:** Try harder (or any read over an earlier one) replaces the lines the last read filled, after a confirm when some were edited. Lines typed by hand stay.
+- **Replacing or removing the file drops the read.**
+
+## D1148. Save trusts the server, not the browser (#348 slice 5, 2026-10-15)
+
+`VendorQuote.extracted` is kept on save only when the server can vouch for it: a matching prior `runId`, or a run bound to that vendor quote with a matching data hash. `model` and `at` come from the run row, never from the browser. **Move system and Copy system** verify `extracted` the same way (the browser supplies those rows) but never score a read.
+
+## D1149. Accuracy is scored once, at the first save (#348 slice 5, 2026-10-15; Jeff's answer to question 8)
+
+`setVendorPdfOutcome` writes the outcome at the first save that keeps a run: first write wins, no user check, so a scored read stays scored. Later edits (vendor revisions) do not rescore. The diff matches lines by `extractedIndex` only. **Any** read over an earlier read — not only Try harder — marks the earlier run replaced (`discarded`, `replacedBy`), for the same user and the same vendor quote; a failed read replaces nothing.
+
+## D1150. The read has a deadline (#348 slice 5, 2026-10-15)
+
+The model call is given about 108 s from the start of the action, less whatever was spent before the call (gate, bytes, page count). With under 20 s left the action refuses before calling, and nothing is charged. This sits under the 120 s page budget.
+
+## D1151. The gate runs cheap checks first (#348 slice 5, 2026-10-15)
+
+`vendorPdfGateFor` checks the kill switch, the pilot list and the feature switch before it reads the stored key, so a user who is not in the pilot costs no key read. It runs inside the Estimator page's `Promise.all`; a gate error hides the button rather than breaking the page.
+
+## D1152. The Vendor PDFs report and its blind spots (#348 slice 5, 2026-10-15)
+
+Settings → Assist pilot → **Vendor PDFs** has two tables: by model (all reads) and by vendor (saved reads), with kept and edited counts. Known blind spots, accepted for now:
+- a failed scoring write is lost for good;
+- a read kept only through Move system / Copy system is never scored (D1148);
+- a read restored onto the record after it was replaced counts as Replaced, not Saved;
+- if the read-time run-detail write fails, the save drops `extracted` quietly.
+
+## D1153. The includes-freight pre-tick (#348 slice 5, 2026-10-15; default, Jeff to confirm question 2)
+
+The Includes freight box is ticked when a freight charge is inside the total, or when the terms say "prepaid and allowed" or "FOB destination". It is never ticked on "FOB origin", "plus freight" or "freight extra" (D1144). "Freight $0" or "TBD" does not tick it either.
+
+## D1154. File ceiling stays at the API request cap (#348 slice 5, 2026-10-15; default, Jeff to confirm question 4)
+
+An email PDF between about 23.8 MiB and the 25 MB attachment cap (D1111) says it is too large to read and to enter it by hand. The Files API is a later option.
+
+## D1155. No closest-match vendor suggestion (#348 slice 5, 2026-10-15; default, Jeff to confirm question 6)
+
+The read links a vendor company only on an exact normalized name (D1145). It does not suggest the closest match.
+
+## D1156. Read limits and cost (#348 slice 5, 2026-10-15; default, Jeff to confirm question 7)
+
+30 reads per person per hour (Try harder included), at most 100 pages, and Try harder once per read in the UI. Rough cost: a typical 3-page quote is about $0.002 on Haiku and $0.03 on Sonnet; a 100-page PDF is about $0.13 on Haiku and $0.50 on Sonnet.
+
+## D1157. A saved quote can be read again (#348 slice 5, 2026-10-15; default, Jeff to confirm question 9)
+
+Re-reading a saved vendor quote is allowed. The new read replaces the lines the old read filled (D1147) and the old read's score stands (D1149).
+
+## D1158. A partial price file dates only the parts in it (#354, Jeff 2026-10-15 items 32–33; answers MASTER-QUESTIONS E6)
 
 Each catalog part carries its own `priceDate` (epoch ms): the effective date of the last **priced** import file that listed it, changed price or not. Both importers stamp it per row through the store (`UpsertOpts.priceDate`, written by `writePart` / `insertIfAbsent`; any other write keeps the stored value, and a full replace that dropped it gets it back): the Catalog page's price-book import (`runCatalogImport`, when the file has a List or Cost column) and the Import hub (`commitCatalogImport` → `commitImport` with `ctx.priced`, never in Skip mode). Neither importer calls `setPriceListEffective` any more, so a supplement (one category, a "new products" sheet) no longer re-dates the manufacturer's whole book; the parts it leaves out keep their old date. `settings.priceListEffective` stays — set only by hand from the Catalog banner — as the fallback for parts no priced file has listed since #354. `effectivePriceDate` reads the **latest** of `pricedAt` (when the price last moved), `priceDate` and the book date, so a by-hand book date still confirms every line. Item 33 (keep): the assembly/fixture builders' "prices as of" stays newest-wins and the Home card / Catalog banner / manufacturer page stay oldest-wins; both now read the per-part dates (the builders' part projections carry `priceDate`). `commitCatalogImport`'s `stamped` now lists the manufacturers with at least one dated row. No migration (JSONB field). **#354 review:** a row dates its part only when the file is priced **and** that row carries a price (List or Cost > 0) — a blank-price row confirms nothing (`rowDatesPrice` in the Import hub, the same per-row check in the Catalog page importer). A full re-import (the yearly book) dates only the parts it lists, so a part the new book dropped stays as old as it was and keeps its book stale — the honest answer (nobody re-confirmed it); fix it by deleting the discontinued part, or by setting the manufacturer's date in the Catalog banner if the whole book really was re-confirmed. The portal's stale-cost rule (`portal-price-rules`) now reads the part's own latest date (`effectivePriceDate` without the book date — `pricedAt` or `priceDate`, the later), so a price a recent file re-confirmed is no longer price-on-request as stale; the part form's copy names the price-file path.
 
-## D1141. A Grid rack group is its Assembly Builder rack; Link to rack… / Unlink (#354, Jeff 2026-10-15 item 43; answers Grid notes #4 "does a group feed a rack assembly's RU elevation?")
+## D1159. A Grid rack group is its Assembly Builder rack; Link to rack… / Unlink (#354, Jeff 2026-10-15 item 43; answers Grid notes #4 "does a group feed a rack assembly's RU elevation?")
 
 A placed rack assembly (`asm:<rackId>` whose record is kind `rack`) already prices as the whole rack (rack-level parts + every RU device) and the risers list its devices (#296). The Grid now shows that rack's RU devices as the placement's group — read-only, in the Property Editor's **Rack** row, with **Open rack →** (`/design/assemblies/rack/<id>`, a new tab). The rows are derived from the rack record on each page load (`page.tsx` → `rackDevices`, `rackDeviceLines`: slot "rack", qty > 0; optional add-ons and rack-level parts left out) and are never member placements, so the BOM keeps pricing the rack once. **Link to rack…** (a plain device that can hold and holds nothing yet — a rack enclosure part, say) makes that device the rack: `partId` becomes `asm:<rackId>`, `GridPlacement.rackId` marks the link and `rackHolderPartId` remembers its own part (`linkPlacementRack`). Refused while it holds devices of its own (they would price on top of the rack), for a curtain, a member, an assembly or allowance already, or a device already linked (`rackLinkRefusal`). A linked holder takes no members: `holdRefusal` refuses Place inside / Move into / drag-onto, and `settleGroups` releases any it somehow has. **Unlink** puts the remembered part back and copies the rack's devices in as an ordinary, numbered group — one device per unit (≤ 200, else refused), each priced on its own from then on; a SKU the Grid can't place is left out and counted (`unlinkPlacementRack`, `unlinkRackAction`). A part swap ends a link; a pasted copy of a linked device is a plain rack placement; undo restore carries the link only while the part still is that rack. Link and Unlink are not undoable (the editor clears its stack, the existing not-undoable path). **#354 review:** the refusal reads "Remove the N devices inside first — the rack supplies them.", and a one-step **Link and remove its N devices** (an inline confirm; not undoable, like Link) deletes those member placements — the risers forget them as a delete does — and links, in one write (`linkPlacementRack(…, { removeMembers })`). Unlink copies the rack-level parts (enclosure, blanks, vents, power, fans — `rackLevelLines`) as well as the RU devices, one placement per unit (≤ 200 together), so the BOM drops nothing; the toast names both counts. A lot marker (qty > 1) can't link ("set its quantity to 1 first"). Place inside / Move into / drag-onto refuse **any** rack-assembly holder — placed from the library or linked (`rackHolderRefusal` in the actions: one fixture read per assembly named) — members put inside a library rack before this rule stay and can still be taken out (their undo back in is refused). Link and Unlink refuse on an estimate-owned option (#314: "A rack link changes what the design prices — This design draws estimate …"). Not built: rack devices on the Spreadsheet / Browser / plan label (the risers and schedule already list a rack's contents), and an Unlink for a rack placed straight from the library (it IS the rack; swap its part first). Pure rules `src/lib/design/grid-rack-link.ts`. No migration.
 
-## D1142. ADC walk-along end stops, walk-along bi-parts and center pipe supports (#354, Jeff 2026-10-15 item 45; answers #291 "Out of scope" 2)
+## D1160. ADC walk-along end stops, walk-along bi-parts and center pipe supports (#354, Jeff 2026-10-15 item 45; answers #291 "Out of scope" 2)
 
 Two optional series roles, priced only when mapped (never required for Active): **walkAlongEndStop** replaces the end stop on a walk-along track, two per curtain half; **centerPipeSupport** (batten mounting only) is priced `ceil(L / centerSupportEveryFt) − 1` per track — the interior supports so no batten span exceeds the per-series number; blank = off, so an unset series never prices one (conservative default: ADC's binders give no single rule we could find, and mapping parts is Jeff's job). A walk-along track can be **two halves** (`TrackConfig.walkAlongBipart`, the Estimator's "Two halves (walk-along bi-part)" box): built like a bi-part — the series overlap, two lapped legs (sticks, splices, hanging points per leg), 2 master carriers, lap clamps on a batten when mapped — with 4 end stops and no cord. Cord-operated tracks never use walk-along end stops and ignore the flag (`cleanTrackConfig` drops it). Curve idlers are not modelled (Jeff: not wanted). Saved lines without the flag price as before.
 
-## D1143. Separate ceiling and batten hanging-point spacing per track series (#354, Jeff 2026-10-15 item 45)
+## D1161. Separate ceiling and batten hanging-point spacing per track series (#354, Jeff 2026-10-15 item 45)
 
 `TrackSeries.ceilingSpacingFt` and `battenSpacingFt` (optional, ≤ 40'), each falling back to the shared `hangerSpacingFt` (`hangerSpacingFor`), so every existing series prices the same. The engine uses the line's own override, else the mounting's spacing, else the shared one; the Estimator's collapsed Spacing row shows the mounting's default. Estimating Rules → Track series gains Batten clamp spacing, Ceiling hanger spacing and Center supports every (blank = above / none).
 
-## D1144. Contemporary church @2: the nave's front part never grows past its drawn depth (#354, Jeff 2026-10-15 item 46)
+## D1162. Contemporary church @2: the nave's front part never grows past its drawn depth (#354, Jeff 2026-10-15 item 46)
 
 On `church-contemporary@1` the whole nave stretched with nave depth, so a deep nave moved the widest point down, steepened the upper splays and squeezed the Green Room / Electrical Room behind them (≈ 18' at the drawn 55' nave, ≈ 12' at 90'). `church-contemporary@2` reuses the same converted drawing with one change: the platform tip → widest point span is a new y-drive **`houseCapped`** (stretch.ts `makeYMap`) — it shrinks with the nave like `houseOpen` while the nave is no deeper than drawn and stops at its drawn 16'0.6" beyond that, the rest of the nave taking the extra. So those rooms keep their drawn width however deep the nave, and a nave shallower than drawn draws exactly as on @1 (a fixed span folded the lower storage rooms on a 20'-deep, 200'-wide nave — the legal-size sweep caught it; the capped span passes all 240 sizes). Versioned, as the registry requires: @1 stays registered unchanged and draws for Grid sheets stamped with it, designs that picked it and venue types whose Background it is (nothing moves); it is marked `retired` — never a default, listed by the Settings / intake / Quick Design pickers only while it is the current value (`pickerTemplates`). A venue type already set to Contemporary keeps @1 until someone re-picks "Church — Contemporary". House fields and limits are shared (`CONTEMPORARY_SPEC`). Render regenerated (`church-contemporary-4-deep-nave.png`).
 
-## D1145. The arena's default end stage is 16' deep (#354, Jeff 2026-10-15 item 46)
+## D1163. The arena's default end stage is 16' deep (#354, Jeff 2026-10-15 item 46)
 
 On the default 134' floor the court (its drawn share, 564/804 of the length) ends 20' from each end wall, so the 24' default stage covered 4' of the court. The Arena venue's default stage depth (`VENUES` `d`) is now 16', which clears the court at every size preset (Small 14' after the field minimum, Medium 16', Large 20' — flush with the court line). Placement is unchanged, and a design keeps the depth it saved; no template change, so no new id. Render regenerated (`arena-1-default.png`).
 
-## D1146. Church Auto fill hangs side lights inside the platform; the Gym Stage default stage is 30' (#354, Jeff 2026-10-15 item 46)
+## D1164. Church Auto fill hangs side lights inside the platform; the Gym Stage default stage is 30' (#354, Jeff 2026-10-15 item 46)
 
 Church family only, the Auto-fill frame sets `sideInside`: side lights hang 0.02 of the sheet (at most a quarter of the frame's width) inside the stage frame's side walls instead of outside them. A church's stage frame is the chancel / platform core walled off from the side rooms, so the proscenium rule put Traditional's upstage side lights in the Choir and Electrical Rooms (and Contemporary's in the Green and Electrical Rooms). A rule, not geometry: stamped sheets keep their frame, and only a new fill or re-fill places differently (devices already placed don't move). The Gym Stage venue's default stage depth is 30' (was the drawing's 20'); saved designs keep theirs. Render regenerated (`gym-stage-1-default.png`).
 
-## D1147. Spec Library numbers follow Fall Creek (Bray 3748); the renumber script finds nothing to change (#354, Jeff 2026-10-15 item 47; answers #265 "spec numbers vs Bray's TOC")
+## D1165. Spec Library numbers follow Fall Creek (Bray 3748); the renumber script finds nothing to change (#354, Jeff 2026-10-15 item 47; answers #265 "spec numbers vs Bray's TOC")
 
 `npm run specs:renumber-bray` (scripts/specs-renumber-bray.ts, the geo-recheck pattern: dry run by default, `--apply`, `--yes` for a hosted DB, an explicit DATABASE_URL / PGLITE_PATH target only, `--map` for another file) reads `docs/specs-seed/bray-toc-map.json` — `{ source, confirmed: true, sections: [{ from, to, title? }] }` — and renumbers each mapped `spec_sections.number` (and title, when given; `updateSection`) and every `spec_records.section` in it through `saveSpecRecord`, so each record keeps its old number as a revision. Record ids (`PS-116123-003`), section ids, article links and saved project specs (SP-####) never change. Pure plan `src/lib/specs/bray-renumber.ts`: refuses an unconfirmed map, malformed numbers, a number listed twice, two sections onto one number, a target that is another entry's source (a swap or chain — #354 review), or a target held by a section that stays; idempotent (a second run plans nothing). **Source (Jeff, same day): Fall Creek, Bray project 3748.** No Fall Creek table of contents (00 01 10) or project manual is on this Mac or in Jeff's Dropbox, and its drawings cite no spec sections, so the authority is the numbers Bray's own Fall Creek section files print — there is one, `Fall Creek HS Auditorium AV Written Spec Section 27-41-00.docx` (Dropbox: Computer Backups/Downloads; "DOCUMENT 27 41 00 – MULTI-PURPOSE AUDIO-VIDEO SYSTEM", Construction Documents, 2026-10-14). `docs/specs-seed/bray-toc-map.json` is confirmed with that source and maps 27 41 00 → 27 41 00 (title kept: "Multi-Purpose" names Fall Creek's room). **No changes needed:** a dry run on a scratch PGlite seeded with the library (the North HS seed, the 2026-09-26 library export and the 46 v1 records — 11 sections) plans 0 sections and 0 records. Every other library section has no Fall Creek counterpart and keeps its number: 11 61 13, 11 61 14, 11 61 23, 11 61 33, 11 61 43, 26 09 23, 26 09 61, 26 55 61, 27 41 16. When Bray issues more Fall Creek sections or its TOC, add them to the map and dry-run again. Background: the only complete Bray tables of contents found — Neenah HS (Bray 3314, 2021-11-22) and Westosha Central HS (Bray 3423, 2022-03-28), both in Jeff's Dropbox Cavanaugh Tocci examples — number our sections 11 06 10 / 11 60 01 / 11 61 25 / 26 50 00 / 27 40 00, while Bray's own 2026 jobs — Oshkosh North HS (3580: 11 61 13, 11 61 14, 11 61 23, 26 09 61, 27 41 00) and Fall Creek HS (3748: 27 41 00) — use the numbers the library has today. The Neenah TOC stays in the repo as an unconfirmed draft (`docs/specs-seed/bray-toc-map.draft-neenah-2021.json`, superseded by Jeff's Fall Creek choice; the script refuses it as-is). The script was tried on scratch PGlite only (dry run, apply, re-run = no-op); never on production or `.data/pglite`.

@@ -784,7 +784,7 @@ export async function suggestEntryDbChecks(ok: Ok): Promise<void> {
   const LEAD = "TEST-lead-entry-1";
   try {
     const env = { ANTHROPIC_API_KEY: "sk-test" };
-    const on = { users: ["u-pilot"], features: { tasks: true, reply: true, estimate: true, file: false, promise: false, brief: false, ask: false }, capUsd: 200 };
+    const on = { users: ["u-pilot"], features: { tasks: true, reply: true, estimate: true, file: false, promise: false, brief: false, ask: false, vendorpdf: false }, capUsd: 200 };
     ok((await E.estimateSuggestEnabled("u-pilot", { settings: on, env })) === true, "suggest entry: on for a pilot user with the estimate feature on");
     ok((await E.estimateSuggestEnabled("u-other", { settings: on, env })) === false && (await E.estimateSuggestEnabled("u-pilot", { settings: { ...on, features: { ...on.features, estimate: false } }, env })) === false && (await E.estimateSuggestEnabled("u-pilot", { settings: on, env: {} })) === false, "suggest entry: off outside the pilot, with the estimate feature off, or with Assist not set up");
     ok((await E.suggestionReadyHref("lead", LEAD)) === null, "suggest entry: no suggestion yet → no ready link");

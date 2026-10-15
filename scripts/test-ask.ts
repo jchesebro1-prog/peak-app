@@ -302,7 +302,7 @@ function gateChecks(ok: Ok): void {
   ok(featureKey({ feature: "ask", step: null }) === "Ask AI", "ask report: runs label as Ask AI");
   const pilot = readFileSync("src/app/(app)/settings/groups/assist-pilot.tsx", "utf8");
   const act = readFileSync("src/app/(app)/settings/actions.ts", "utf8");
-  ok(/\{ key: "ask", label: "Ask AI" \}/.test(pilot) && /"brief" \| "ask", boolean/.test(act) && /for \(const f of ASSIST_FEATURES\) \{[^}]*typeof v === "boolean"\) featurePartial\[f\] = v;/.test(act) && /mergeSettingsObject\("assistFeatures", featurePartial\)/.test(act) && ASSIST_FEATURES.includes("ask"), "ask settings: the pilot card has an Ask AI switch; setAssistSettingsAction accepts ask and keeps it when another switch changes");
+  ok(/\{ key: "ask", label: "Ask AI" \}/.test(pilot) && /Partial<Record<AssistFeature, boolean>>/.test(act) && /for \(const f of ASSIST_FEATURES\) \{[^}]*typeof v === "boolean"\) featurePartial\[f\] = v;/.test(act) && /mergeSettingsObject\("assistFeatures", featurePartial\)/.test(act) && ASSIST_FEATURES.includes("ask"), "ask settings: the pilot card has an Ask AI switch; setAssistSettingsAction accepts ask and keeps it when another switch changes");
 }
 
 export async function askPureChecks(ok: Ok): Promise<void> {

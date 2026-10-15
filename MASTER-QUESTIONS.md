@@ -225,7 +225,7 @@ Estimating Rules — these just need real values before go-live)
   the file — each part carries its own price date (`priceDate`), and an import
   no longer re-dates the whole manufacturer; (b) builders keep showing the
   newest date (price books stay oldest-wins, read per part). Built in #354
-  (D1140).**
+  (D1158).**
 - ~~**E7.** Consulting projects added by hand (D155, built 2026-09-21) seed
   EVERY phase on the Settings phase menu, all pending — the "+ New consulting
   project" modal has no phase picker. A project born from a won quote is

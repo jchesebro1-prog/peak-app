@@ -115,6 +115,54 @@ export async function getBlobHead(
   return { bytes, size: meta.size };
 }
 
+/**
+ * #348 slice 5 — a private blob's whole body, for a caller with a hard cap
+ * (Read the PDF). `head()` first: a blob whose LISTED size is over `max` is
+ * refused without its body ever being requested. The stream is then cut off
+ * past `max` regardless, so a size that changed between the two calls can't
+ * smuggle a bigger body through.
+ */
+export async function getBlobBytes(
+  pathname: string,
+  max: number
+): Promise<{ ok: true; bytes: Buffer } | { ok: false; reason: "missing" | "too-large"; size?: number }> {
+  let size: number;
+  try {
+    size = (await head(pathname)).size;
+  } catch (e) {
+    if (isBlobNotFound(e)) return { ok: false, reason: "missing" };
+    throw e;
+  }
+  if (size > max) return { ok: false, reason: "too-large", size };
+  let res: Awaited<ReturnType<typeof get>>;
+  try {
+    res = await get(pathname, { access: "private" });
+  } catch (e) {
+    if (isBlobNotFound(e)) return { ok: false, reason: "missing" };
+    throw e;
+  }
+  if (!res || res.statusCode !== 200 || !res.stream) return { ok: false, reason: "missing" };
+  const reader = res.stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > max) return { ok: false, reason: "too-large", size: total };
+      chunks.push(value);
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      /* already closed */
+    }
+  }
+  return { ok: true, bytes: Buffer.concat(chunks, total) };
+}
+
 /** True for the vendor's "no such blob" error — a missing file, not an outage. */
 export function isBlobNotFound(e: unknown): boolean {
   return e instanceof BlobNotFoundError || (e instanceof Error && e.name === "BlobNotFoundError");
