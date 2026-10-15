@@ -10,7 +10,7 @@ import type { Party } from "./rules";
  *
  * Precedence: an explicit bidder party id (must be a live GC/EC bidder row on THIS quote) → the awarded bidder
  * (`q.bid.awardedPartyId`) → null (today's output, byte-identical). An explicit id that isn't a valid bidder here
- * falls back to the awarded default, never to a wrong company. The owner stays the quote's customer.
+ * falls back to the awarded default, never to a wrong company — unless `{ strict: true }`, which returns null instead. The owner stays the quote's customer.
  */
 /** The party when it is a live GC/EC bidder row on THIS quote, else null. */
 export async function bidderPartyFor(quoteId: string, id: string | null | undefined): Promise<Party | null> {
@@ -21,9 +21,11 @@ export async function bidderPartyFor(quoteId: string, id: string | null | undefi
 
 export async function documentAddressee(
   q: Pick<Quote, "id" | "customer" | "customerId" | "bid">,
-  partyId?: string | null
+  partyId?: string | null,
+  opts?: { strict?: boolean }
 ): Promise<DocAddressee | null> {
-  const party = (await bidderPartyFor(q.id, partyId)) ?? (await bidderPartyFor(q.id, q.bid?.awardedPartyId ?? null));
+  // strict: the explicit id or nothing — a signed per-bidder render must never fall back to the awarded bidder.
+  const party = opts?.strict ? await bidderPartyFor(q.id, partyId) : (await bidderPartyFor(q.id, partyId)) ?? (await bidderPartyFor(q.id, q.bid?.awardedPartyId ?? null));
   if (!party) return null;
   const company = await getCompany(party.companyId);
   if (!company) return null;

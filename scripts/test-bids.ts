@@ -1,5 +1,7 @@
 /* #348 slice 2a — bids harness checks. `bidChecks` is pure; `bidDbChecks` needs the test DB (Task 2 fills it).
    Run the pure half alone with `npx tsx scripts/test-bids.ts`. */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import {
   BID_RESULTS, BID_RESULT_LABEL, EMPTY_BID, sanitizeBidDetails, sanitizeBidSiteUrl, sanitizeBidderPatch, newBidderState, applyBidderPatch,
@@ -33,6 +35,11 @@ const T1 = Date.UTC(2026, 9, 1);
 const B = (over: Partial<BidderState> = {}): BidderState => ({ ...newBidderState("email"), ...over });
 
 export async function bidChecks(ok: Ok) {
+  // 2b-i: the print route's token binding — a bidder variant verifies `${id}~${bidder}`, and the check runs before any quote read.
+  const printPage = readFileSync(join(process.cwd(), "src/app/print/quote/[id]/page.tsx"), "utf8");
+  const tokenAt = printPage.indexOf("if (!tokenOk(t, \"quote\", bidder ? `${id}~${bidder}` : id)) notFound();"), readAt = printPage.indexOf("getQuote(");
+  ok(tokenAt > 0 && readAt > 0 && tokenAt < readAt && printPage.includes("documentAddressee(q, bidder, { strict: true })"), "bids: the print route verifies the `${id}~${bidder}` token before getQuote( and loads a bidder strictly");
+  ok(/rawBidder !== undefined && \(typeof rawBidder !== "string"[^\n]*\) notFound\(\);/.test(printPage), "bids: a present-but-malformed bidder param 404s instead of falling through");
   ok(BID_RESULTS.join() === "pending,awarded,lost,withdrew,no_bid", "bids: result keys");
   ok(BID_RESULT_LABEL.lost === "Lost the award" && BID_RESULT_LABEL.no_bid === "No bid", "bids: result labels");
   ok(EMPTY_BID.dueAt === null && EMPTY_BID.addenda.length === 0 && EMPTY_BID.awardedPartyId === null, "bids: empty bid");
@@ -314,6 +321,7 @@ export async function bidDbChecks(ok: Ok) {
     const adOther = await documentAddressee(qa, wpId);
     const ownerRow = (await listFor("quote", q)).find((p) => p.role === "owner");
     ok(!!ownerRow && (await documentAddressee(qa, "pty_nope")) === null && (await documentAddressee(qa, ownerRow.id)) === null && adOther === null, "addressee db: a non-bidder, the owner row, another quote's party or an unknown id → null");
+    ok((await documentAddressee(qa, g1, { strict: true }))?.companyName === "Bid GC One" && (await documentAddressee(qa, null, { strict: true })) === null && (await documentAddressee(qa, "pty_nope", { strict: true })) === null && (await documentAddressee(qa, wpId, { strict: true })) === null && (await documentAddressee(qa, ownerRow?.id, { strict: true })) === null, "addressee db: strict returns the explicit bidder only — an unknown id, none, another quote's party or the owner row → null");
     const dN = quoteDocumentDataFor(qa as never, null, settings), dNull = quoteDocumentDataFor(qa as never, null, settings, null), dA = quoteDocumentDataFor(qa as never, null, settings, ad1);
     ok(JSON.stringify(dN) === JSON.stringify(dNull) && dN.ownerLine === "" && dN.bidLine === "", "addressee db: a null addressee is byte-identical to the 3-arg call");
     ok(dA.custName === "Bid GC One" && dA.ownerLine === "Owner: Bid Owner" && dA.venueLabel === dN.venueLabel && dA.hasAttn && dA.attnLine === "Gee Ceeone" && dA.bidLine === ad1?.bidLine, "addressee db: the document is addressed to the bidder; the venue still resolves from the owner");
@@ -337,6 +345,7 @@ export async function bidDbChecks(ok: Ok) {
     ok(typeof after?.contentChangedAt === "number" && after.contentChangedAt !== before?.contentChangedAt && after.updatedAt === before?.updatedAt, "bids db: award advances contentChangedAt and leaves updatedAt unchanged");
     const awAd = await documentAddressee(after as never);
     ok(awAd?.companyName === "Bid GC One" && (await documentAddressee(after as never, "pty_nope"))?.companyName === "Bid GC One" && (await documentAddressee(after as never, g2))?.companyName === "Bid GC Two", "addressee db: the awarded bidder is the default; an invalid id falls back to it; an explicit bidder wins");
+    ok((await documentAddressee(after as never, "pty_nope", { strict: true })) === null && (await documentAddressee(after as never, g2, { strict: true }))?.companyName === "Bid GC Two", "addressee db: with an awarded bidder, strict still never falls back to it");
     ok(bidders.find((b) => b.id === g1)?.bid.result === "awarded" && bidders.find((b) => b.id === g2)?.bid.result === "lost" && bidders.find((b) => b.id === g2)?.bid.lostByAward === true, "bids db: winner awarded, the rest lost by award");
     ok(after?.customerId === before?.customerId && after?.pricingTier === before?.pricingTier && after?.tierMargin === before?.tierMargin && after?.customer === before?.customer, "bids db: award never changes the customer or tier");
     const postAwardAt = after?.contentChangedAt ?? 0;

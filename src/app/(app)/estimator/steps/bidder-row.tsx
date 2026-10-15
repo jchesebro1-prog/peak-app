@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import type { BidderVM, BidPanelVM } from "@/lib/parties/bid-vm";
 
 /** #348 slice 2a — one bidder's row in the Bidders card (presentation only; the card owns the calls). */
@@ -12,6 +12,18 @@ function resultChip(b: BidderVM): CSSProperties {
   if (b.result === "awarded") return { ...CHIP, background: "#e6f4ea", color: "#1e6b34" };
   if (b.result === "lost") return { ...CHIP, background: "#f1f2f5", color: "#6b7280" };
   return { ...CHIP, background: "#f1f2f5", color: "#5b616e" };
+}
+
+/** The file name from a Content-Disposition `filename*=UTF-8''…` (decoded), else the fallback. */
+function downloadName(disposition: string | null, fallback: string): string {
+  const m = disposition?.match(/filename\*=(?:UTF-8'')?([^;]+)/i);
+  if (m) {
+    try {
+      const n = decodeURIComponent(m[1].trim().replace(/^"|"$/g, ""));
+      if (n) return n;
+    } catch {}
+  }
+  return fallback;
 }
 
 export function BidderRow({
@@ -36,6 +48,37 @@ export function BidderRow({
   const urlSaving = savingFields.includes(`${b.id}:bidSiteUrl`);
   const noSaving = savingFields.includes(`${b.id}:gcBidNo`);
   const locked = b.result === "awarded" || b.result === "lost";
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState("");
+  const pdfInFlight = useRef(false);
+  // #348 2b-i — the render takes seconds: fetch it so the row can say "Preparing PDF…" and show a failure inline (a bare link would navigate to the error text).
+  async function downloadPdf() {
+    if (pdfInFlight.current) return;
+    pdfInFlight.current = true;
+    setPdfBusy(true);
+    setPdfError("");
+    try {
+      const res = await fetch(b.pdfHref);
+      if (!res.ok) {
+        setPdfError((await res.text()).trim().slice(0, 300) || "The bidder PDF couldn’t be rendered — try again.");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = downloadName(res.headers.get("content-disposition"), `${b.companyName} estimate.pdf`);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch {
+      setPdfError("The bidder PDF couldn’t be downloaded — check your connection and try again.");
+    } finally {
+      pdfInFlight.current = false;
+      setPdfBusy(false);
+    }
+  }
   return (
     <li style={{ listStyle: "none", border: "1px solid #ececf0", borderRadius: 9, padding: "9px 11px", display: "grid", gap: 7 }}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
@@ -46,10 +89,21 @@ export function BidderRow({
         <span style={resultChip(b)}>{b.resultLabel}</span>
         <span style={{ fontSize: 11.5, color: b.needsRev ? "#9a6a00" : "#5b616e", fontWeight: b.needsRev ? 600 : 400 }}>{b.statusText}</span>
         {/* #348 2b-i — the estimate addressed to this bidder, rendered on demand; any bidder (pending, awarded, lost) can need a copy. */}
-        <a href={b.pdfHref} download aria-label={`Download PDF — ${b.companyName}`} style={{ fontSize: 11.5, fontWeight: 600, marginLeft: "auto" }}>
-          Download PDF
-        </a>
+        <button
+          type="button"
+          aria-label={`Download PDF — ${b.companyName}`}
+          disabled={pdfBusy}
+          onClick={() => void downloadPdf()}
+          style={{ fontFamily: "var(--font-ui)", fontSize: 11.5, fontWeight: 600, marginLeft: "auto", background: "none", border: "none", padding: 0, color: "var(--accent)", cursor: pdfBusy ? "default" : "pointer", opacity: pdfBusy ? 0.7 : 1 }}
+        >
+          {pdfBusy ? "Preparing PDF…" : "Download PDF"}
+        </button>
       </div>
+      {pdfError && (
+        <div role="alert" style={{ fontSize: 11.5, color: "#b42318" }}>
+          {pdfError}
+        </div>
+      )}
       {(b.contactName || b.contactEmail) && (
         <div style={{ fontSize: 11.5, color: "#5b616e" }}>
           {b.contactName}
