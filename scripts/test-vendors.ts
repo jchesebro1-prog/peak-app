@@ -144,6 +144,12 @@ export async function vendorChecks(ok: Ok) {
   ok(vqActions.includes("isPdfAttachment({ name: r.name, mime: r.mime })") && !vqActions.includes("data:${r.mime}") && vqActions.includes("data:application/pdf;base64"), "vendor hand-off: PDF-only, and the data-URL never interpolates the attachment's mime");
   ok(/const blank = !\(d\.vendor \|\| ""\)\.trim\(\) && !d\.vendorCompanyId;/.test(hook) && hook.includes("...(blank ? { vendor: p.vendor, vendorCompanyId: p.vendorCompanyId } : {})"), "vendor hand-off: the prefill never overwrites a vendor the user typed or picked while copying");
   ok(modal.includes('htmlFor="vendor-quote-vendor"') && modal.includes('inputId="vendor-quote-vendor"') && modal.includes("disabled={copying}"), "vendor modal: Vendor label tied to the field's input; field disabled while copying");
+  const wlc = readFileSync("src/app/(app)/inbox/work-link-card.tsx", "utf8");
+  ok(/!vm\.readOnly && \(\s*<button[^>]*onClick=\{\(\) => setFileOpen\(true\)\}/.test(wlc) && /!vm\.readOnly && fileOpen && <FileThreadDialog/.test(wlc), "inbox: the File button and dialog render only under !vm.readOnly (owner-only)");
+  const vqd = readFileSync("src/app/(app)/inbox/vendor-quote-dialog.tsx", "utf8");
+  const fileCall = vqd.indexOf("fileThreadAction(");
+  ok(fileCall > 0 && vqd.lastIndexOf("!vm.readOnly", fileCall) > vqd.lastIndexOf("try {", fileCall) && !vqd.includes("d.close()"), "inbox: the vendor-quote dialog files only inside a !vm.readOnly guard; neither dialog closes in the effect cleanup (StrictMode)");
+  ok(!readFileSync("src/app/(app)/inbox/file-thread-dialog.tsx", "utf8").includes("d.close()"), "inbox: the File dialog does not close in its effect cleanup (StrictMode)");
   const serverOnly = /from "[^"]*(?:stores\/|@\/db|node:|-server)[^"]*"/;
   ok(!serverOnly.test(field) && !serverOnly.test(modal), "vendor modal: no store / db / node / -server import in the client field or modal");
 }
@@ -250,7 +256,7 @@ export async function vendorDbChecks(ok: Ok) {
     const f1 = await fileThreadTo(t1, { type: "quote", id: q }, vven1, ME);
     const f1b = await fileThreadTo((await getThread(T1))!, { type: "quote", id: q }, vven1, ME);
     const t1Filing = (await getThread(T1))?.filing;
-    ok(f1.ok && f1b.ok && t1Filing?.state === "skipped" && t1Filing.customerId === vcust, "filing: a pending #335 suggestion is skipped once a person files by hand (no Approve-all / rule sweep / archive-on-reply can re-file it)");
+    ok(f1.ok && f1b.ok && t1Filing?.state === "skipped" && t1Filing.customerId === vcust, "filing: a pending #335 suggestion is skipped once a person files by hand (a manual File marks it skipped so Approve-all-strong won't override it; a sender-rule sweep or an explicit per-thread approve can still re-file it)");
     const t1After = await getThread(T1);
     const stQ = await getQuote(q);
     ok(f1.ok && f1.label === filingLinkLabel({ type: "quote", number: displayQuoteNumber(stQ!), name: stQ!.name }) && f1b.ok && !f1b.partyAdded

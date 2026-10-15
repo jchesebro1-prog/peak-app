@@ -43,8 +43,8 @@ export async function fileThreadTo(
     if (t.customerId !== vendorCompanyId) await linkThread(t.id, vendorCompanyId, t.resolvedContactId ?? null, "user");
   }
   await setLink(t.id, { type: target.type, id: target.id, label });
-  /* A person filed this by hand, so a pending #335 suggestion must not file it somewhere else later (Approve-all, a
-     sender-rule sweep, archive-on-reply). Skip is the inbox-org writer for exactly this decision: a `suggested` filing
+  /* A person filed this by hand, so a manual File marks the pending #335 suggestion skipped so Approve-all-strong won't
+     override it; a sender-rule sweep or an explicit per-thread approve can still re-file it. Skip is the inbox-org writer for exactly this decision: a `suggested` filing
      becomes `skipped` and the skip is logged; a thread with no suggestion, or one already filed / dismissed / skipped,
      answers not-suggested and is left alone. Best effort — the filing itself has already succeeded. */
   try {

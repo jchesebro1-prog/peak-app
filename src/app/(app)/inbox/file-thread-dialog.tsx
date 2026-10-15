@@ -27,10 +27,9 @@ export default function FileThreadDialog({ vm, onClose }: { vm: ReaderVM; onClos
 
   useEffect(() => {
     const d = dialog.current;
-    if (d && !d.open) d.showModal();
-    return () => {
-      if (d?.open) d.close();
-    };
+    if (!d) return;
+    if (!d.open) d.showModal();
+    d.querySelector("input")?.focus();
   }, []);
 
   const replaces = !!vm.link && !!target && !(vm.link.type === target.type && vm.link.id === target.id);

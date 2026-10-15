@@ -34,11 +34,13 @@ export default function VendorQuoteDialog({
 
   useEffect(() => {
     const d = dialog.current;
-    if (d && !d.open) d.showModal();
-    return () => {
-      if (d?.open) d.close();
-    };
+    if (!d) return;
+    if (!d.open) d.showModal();
+    d.querySelector("input")?.focus();
   }, []);
+
+  const replaces =
+    !vm.readOnly && alsoFile && !!vm.link && !!target && !(vm.link.type === "quote" && vm.link.id === target.id);
 
   const go = async () => {
     if (!target || busy) return;
@@ -49,6 +51,7 @@ export default function VendorQuoteDialog({
     }
     setBusy(true);
     setError(null);
+    let pushed = false;
     try {
       if (!vm.readOnly && alsoFile) {
         const r = await fileThreadAction(vm.id, { type: "quote", id: target.id }, vm.vendorCompany?.id ?? null);
@@ -58,10 +61,11 @@ export default function VendorQuoteDialog({
         }
       }
       router.push(vendorFromEmailHref(target.id, ref));
+      pushed = true; // stay busy until the page changes so Continue can't double-submit
     } catch {
       setError("Couldn't open the estimate — try again.");
     } finally {
-      setBusy(false);
+      if (!pushed) setBusy(false);
     }
   };
 
@@ -88,6 +92,11 @@ export default function VendorQuoteDialog({
             <input type="checkbox" checked={alsoFile} onChange={(e) => setAlsoFile(e.target.checked)} disabled={busy} />
             {VENDOR_COPY.alsoFile}
           </label>
+        )}
+        {replaces && vm.link && (
+          <div style={{ fontSize: 12, color: "#8a5a00", background: "#fff6e0", border: "1px solid #f0dcaa", borderRadius: 7, padding: "6px 9px" }}>
+            {VENDOR_COPY.replaceLink(vm.link.label)}
+          </div>
         )}
         {error && (
           <div role="alert" style={{ fontSize: 12, color: "#b4543a" }}>
