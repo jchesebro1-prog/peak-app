@@ -1,4 +1,4 @@
-import { getDoc, insertWithPrefixedId, listDocs, patchDoc, softDeleteDoc, type Doc } from "@/db/doc-store";
+import { getDoc, insertWithPrefixedId, listDocs, listDocsWhere, patchDoc, softDeleteDoc, type Doc } from "@/db/doc-store";
 import {
   normalizeSpecDocument,
   projectSiblings,
@@ -24,6 +24,16 @@ export async function createSpecDocument(
 export async function getSpecDocument(id: string): Promise<SpecDocument | null> {
   const raw = await getDoc<Doc>("spec_documents", id);
   return raw ? normalizeSpecDocument(raw) : null;
+}
+
+/** #352 review I2 — the live specs the builder opened from one quote (`source.quoteId`, or a quote source's `id`),
+ *  filtered in SQL — never the whole collection. Unsorted. */
+export async function specDocumentsWithQuoteSource(quoteId: string): Promise<SpecDocument[]> {
+  if (!quoteId) return [];
+  const list = await listDocsWhere<Doc>("spec_documents", {
+    any: [{ path: ["source", "quoteId"], is: quoteId }, { all: [{ path: ["source", "kind"], is: "quote" }, { path: ["source", "id"], is: quoteId }] }],
+  });
+  return list.map(normalizeSpecDocument);
 }
 
 export async function allSpecDocuments(): Promise<SpecDocument[]> {
