@@ -22,7 +22,9 @@ const NOTE_MAX = 200;
 const BIDNO_MAX = 60;
 const CONF_MAX = 120;
 const URL_MAX = 500;
-const isMs = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n > 0;
+export const BID_TIME_MIN = Date.UTC(2000, 0, 1);
+export const BID_TIME_MAX = Date.UTC(2100, 0, 1);
+const isMs = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= BID_TIME_MIN && n <= BID_TIME_MAX;
 
 export function sanitizeBidDetails(
   raw: unknown
@@ -30,6 +32,7 @@ export function sanitizeBidDetails(
   if (!raw || typeof raw !== "object") return { ok: false, error: "Nothing to save." };
   const r = raw as { dueAt?: unknown; addenda?: unknown };
   if (r.dueAt !== null && r.dueAt !== undefined && !isMs(r.dueAt)) return { ok: false, error: "Pick a valid due date." };
+  if (r.addenda !== undefined && !Array.isArray(r.addenda)) return { ok: false, error: "Addenda must be a list." };
   const list = Array.isArray(r.addenda) ? r.addenda : [];
   if (list.length > ADDENDA_MAX) return { ok: false, error: `Keep it to ${ADDENDA_MAX} addenda.` };
   const out: BidAddendum[] = [];
@@ -68,11 +71,13 @@ export function sanitizeBidderPatch(raw: unknown): { ok: true; value: BidderPatc
     out.submitVia = r.submitVia;
   }
   if ("bidSiteUrl" in r) {
+    if (r.bidSiteUrl !== null && r.bidSiteUrl !== undefined && typeof r.bidSiteUrl !== "string") return { ok: false, error: "That value isn't text." };
     const u = sanitizeBidSiteUrl(r.bidSiteUrl);
     if (!u.ok) return u;
     out.bidSiteUrl = u.value ?? undefined;
   }
   if ("gcBidNo" in r) {
+    if (r.gcBidNo !== null && r.gcBidNo !== undefined && typeof r.gcBidNo !== "string") return { ok: false, error: "That value isn't text." };
     const n = typeof r.gcBidNo === "string" ? r.gcBidNo.trim() : "";
     if (n.length > BIDNO_MAX) return { ok: false, error: "Keep the bid number under 60 characters." };
     out.gcBidNo = n || undefined;
@@ -99,7 +104,7 @@ export function applyBidderPatch(bid: BidderState, patch: BidderPatch): BidderSt
 }
 
 export function markSubmittedState(bid: BidderState, rev: number, by: string, confirmation: string, now: number): BidderState {
-  const conf = (confirmation || "").trim().slice(0, CONF_MAX);
+  const conf = (typeof confirmation === "string" ? confirmation : "").trim().slice(0, CONF_MAX);
   const next: BidderState = { ...bid, revSent: rev, sentAt: now, sentBy: by, failed: null };
   if (conf) next.confirmation = conf;
   else delete next.confirmation;
@@ -126,7 +131,7 @@ export function awardPlan(
   const updates: Array<{ id: string; bid: BidderState }> = [{ id: winner.id, bid: { ...winner.bid, result: "awarded" } }];
   for (const b of bidders) {
     if (b.id === partyId || b.bid.result !== "pending") continue;
-    updates.push({ id: b.id, bid: { ...b.bid, result: "lost" as const, lostByAward: true } });
+    updates.push({ id: b.id, bid: { ...b.bid, result: "lost", lostByAward: true } });
   }
   return { ok: true, updates };
 }
@@ -147,6 +152,7 @@ export const canAward = (status: string): boolean => status === "draft" || statu
 export const canUndoAward = (status: string): boolean => status !== "won";
 
 export function bidDueText(dueAt: number): string {
+  if (!isMs(dueAt)) return "";
   return `${chicagoShortDate(dueAt)}, ${chicagoTime(dueAt)}`;
 }
 
@@ -154,10 +160,11 @@ export function bidderStatusText(bid: BidderState, rev: number): string {
   if (bid.result !== "pending") return BID_RESULT_LABEL[bid.result];
   if (bid.revSent == null) return "Not submitted";
   if (bid.revSent < rev) return `Needs Rev ${rev}`;
-  return `Submitted Rev ${bid.revSent}${bid.sentAt ? ` · ${chicagoShortDate(bid.sentAt)}` : ""}`;
+  return `Submitted Rev ${bid.revSent}${isMs(bid.sentAt) ? ` · ${chicagoShortDate(bid.sentAt)}` : ""}`;
 }
 
 export function bidDueDays(dueAt: number, now: number): number {
+  if (!isMs(dueAt) || !isMs(now)) return Number.POSITIVE_INFINITY;
   return dayDiff(dayKey(now), dayKey(dueAt));
 }
 
