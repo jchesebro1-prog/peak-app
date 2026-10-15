@@ -935,8 +935,11 @@ async function placeSystemInEstimate(
     const maxItemId = appended.reduce((m, sec) => Math.max(m, ...(sec?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
     const mergedSections = withRewardCredit(appended, rewardCreditOf(appended), maxItemId + 1);
     const t = totals(mergedSections, 0);
-    const carried = placedVq.length
-      ? await storeVendorQuotes(target.quoteId, placedVq)
+    // The browser supplies these rows: stamp addedAt and drop any company that isn't a live vendor company BEFORE storing / adding parties.
+    const priorTargetVq = vendorQuoteRows(existing.vendorQuotes);
+    const preparedVq = await prepareVendorQuotesForSave(priorTargetVq, placedVq, Date.now());
+    const carried = preparedVq.length
+      ? await storeVendorQuotes(target.quoteId, preparedVq)
       : [];
     const updated = await update(target.quoteId, {
       spec: { sections: normalizeSystemOrder(mergedSections, existingGroups), mobs: existingSpec?.mobs || [], groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}) },
@@ -955,7 +958,7 @@ async function placeSystemInEstimate(
       return { ok: false, error: "That estimate could not be found." };
     }
     // #348 slice 4: a moved/copied vendor quote's company joins the target as a vendor party (once). Never fails the move.
-    await withSavepoint(() => addVendorPartiesForSave({ type: "quote", id: updated.id }, vendorQuoteRows(existing.vendorQuotes), placedVq, opts.by))
+    await withSavepoint(() => addVendorPartiesForSave({ type: "quote", id: updated.id }, priorTargetVq, preparedVq, opts.by))
       .catch((e) => console.error("placeSystemInEstimate: adding vendor parties failed", updated.id, e));
     // #222 fix wave 1: the target's document gained a section.
     await scheduleQuotePdf(updated.id);
@@ -1014,18 +1017,20 @@ async function placeSystemInEstimate(
       console.error("moveSystemToEstimateAction: copying parties failed", created.id, e);
     }
   }
+  // The browser supplies these rows: stamp addedAt and drop any non-vendor company before storing / adding parties.
+  const preparedNewVq = await prepareVendorQuotesForSave([], placedVq, Date.now());
   // create() promotes only the declared Quote columns — contactName rides
   // along on the doc like it does for saveQuoteAction's fresh-create path.
   const withContact = await update(created.id, {
     contactName: opts.sourceContext.contactName || "",
     // Same as saveQuoteAction's fresh-create path: the Blob path can only be
     // keyed by the real quote id, which exists for the first time here.
-    ...(placedVq.length
-      ? { vendorQuotes: await storeVendorQuotes(created.id, placedVq) }
+    ...(preparedNewVq.length
+      ? { vendorQuotes: await storeVendorQuotes(created.id, preparedNewVq) }
       : {}),
   } as QuotePatch);
   // #348 slice 4: a placed vendor quote's company is a vendor party on the new estimate (a split's copyParties already carried it — addParty is idempotent).
-  await withSavepoint(() => addVendorPartiesForSave({ type: "quote", id: created.id }, [], placedVq, opts.by))
+  await withSavepoint(() => addVendorPartiesForSave({ type: "quote", id: created.id }, [], preparedNewVq, opts.by))
     .catch((e) => console.error("placeSystemInEstimate: adding vendor parties failed", created.id, e));
   await scheduleQuotePdf(created.id);
   refresh();

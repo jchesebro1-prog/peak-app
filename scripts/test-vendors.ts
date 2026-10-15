@@ -1,12 +1,11 @@
 /* #348 slice 4 — vendors harness checks. `vendorChecks` is pure; `vendorDbChecks` needs the test DB (Tasks 2–4 fill it).
    Run the pure half alone with `npx tsx scripts/test-vendors.ts`. */
-import { like } from "drizzle-orm";
+import { like, sql } from "drizzle-orm";
 import type { Ok } from "./test-inbox-org";
 import { getDb } from "../src/db";
 import { companies } from "../src/db/schema";
 import { patchDoc } from "../src/db/doc-store";
 import { DOC_TABLES } from "../src/db/doc-tables";
-import { eq } from "drizzle-orm";
 import { saveCompany } from "../src/lib/identity/companies";
 import { createFixture, dropFixtures, fixtureId } from "./test-fixtures";
 import { buildQuote, get as getQuote } from "../src/lib/stores/quotes";
@@ -113,6 +112,12 @@ export async function vendorDbChecks(ok: Ok) {
     const legacy = await prepareVendorQuotesForSave<VendorQuoteLike>([], [{ id: "vqaaaa4", vendor: "Two", vendorCompanyId: vven2 }], 1);
     ok(legacy[0].vendorCompanyId === vven2, "vendors db: legacy 'Vendor' type is a vendor company");
 
+    // The move/copy path (placeSystemInEstimate) prepares the browser's placed rows then adds parties from the prepared array.
+    const movePrior: VendorQuoteLike[] = [];
+    const movePrepared = await prepareVendorQuotesForSave<VendorQuoteLike>(movePrior, [{ id: "vqaaaa5", vendor: "Customer", vendorCompanyId: vcust }, { id: "vqaaaa6", vendor: "Ghost", vendorCompanyId: "TEST348:vnope" }], 99);
+    const moveAdded = await addVendorPartiesForSave({ type: "quote", id: q }, movePrior, movePrepared, "u");
+    ok(movePrepared.every((v) => !v.vendorCompanyId && v.addedAt === 99) && moveAdded === 0 && (await listFor("quote", q)).filter((p) => p.role === "vendor").length === 0, "vendors db: a customer-type / missing vendorCompanyId through the move path is dropped and adds no party");
+
     const prep1 = prepared.slice(0, 1);
     const n1 = await addVendorPartiesForSave({ type: "quote", id: q }, [], prep1, "u");
     const rows1 = (await listFor("quote", q)).filter((p) => p.role === "vendor");
@@ -138,8 +143,9 @@ export async function vendorDbChecks(ok: Ok) {
     ok((await quotesReceivedFor(vcust)).length === 0, "vendors db: a non-vendor company has no quotes received");
   } finally {
     // Party ids are pty_<hash> — not TEST348-prefixed, so dropFixtures(348) skips them: delete this quote's rows directly.
+    // Direct SQL by recordId — includes soft-deleted rows, so a mid-test failure can't leak a pty_ row.
     const t = DOC_TABLES.record_parties;
-    for (const p of await listFor("quote", q)) await db.delete(t).where(eq(t.id, p.id));
+    await db.delete(t).where(sql`${t.doc}->>'recordId' = ${q}`);
     await dropFixtures(348);
     await dropIdentity();
   }
