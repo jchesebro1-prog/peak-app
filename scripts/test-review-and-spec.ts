@@ -56120,9 +56120,9 @@ async function p3SendAsyncChecks(): Promise<void> {
        b.indexOf("canSendOrApprove(user)") < b.indexOf("liveEstimateEmailDeps(") && b.includes("cleanInput(input)"),
       `#P3 send: ${name} requires a session, then send|approve, before wiring the live deps`);
   }
-  ok(src.startsWith('"use server";') && src.includes("asOf: typeof o.asOf === \"number\"") && src.includes("printOriginFor(process.env,") && src.includes("await headers()"),
-    "#P3 send: the wrappers are server actions, pass the client's asOf through, and build the origin from the request (printOriginFor)");
-  ok(fnBody("estimateEmailDefaultsAction").includes("await requireUser()") && src.includes("getConnectionInfo(personalKey(user.id))"), "#P3 send: the defaults action needs a session and reads the sender's own Gmail connection");
+  ok(src.startsWith('"use server";') && src.includes("asOf: typeof o.asOf === \"number\"") && src.includes("await requestWhere()") && readFileSync(join(process.cwd(), "src/lib/estimate-email/request-where.ts"), "utf8").includes("printOriginFor(process.env,") && readFileSync(join(process.cwd(), "src/lib/estimate-email/request-where.ts"), "utf8").includes("await headers()"),
+    "#P3 send: the wrappers are server actions, pass the client's asOf through, and build the origin from the request (requestWhere → printOriginFor)");
+  ok(fnBody("estimateEmailDefaultsAction").includes("await requireUser()") && src.includes("senderMailbox(user.id,") && readFileSync(join(process.cwd(), "src/lib/estimate-email/sender-mailbox.ts"), "utf8").includes("getConnectionInfo(personalKey(userId))"), "#P3 send: the defaults action needs a session and reads the sender's own Gmail connection (senderMailbox)");
   ok(fnBody("estimateEmailDefaultsAction").includes("signatureFor(user.name)") && fnBody("estimateEmailDefaultsAction").includes("signature,"), "#P3 send fix: the defaults action seeds the sender's #127 signature");
   const server = readFileSync(join(process.cwd(), "src/lib/estimate-email/send-server.ts"), "utf8");
   ok(server.includes("sendQuoteToCustomer(id, actor, asOf)") && server.includes("ensureShareLink(id, opts.actor.name)") && server.includes("sendDraft(draft.id, spec.mailboxUser, { stampAddresses: true })") &&

@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { estimateEmailDefaults, type EstimateEmailDefaults } from "@/lib/estimate-email/compose";
 import {
@@ -13,11 +12,10 @@ import {
   type TrackReadResult, type TrackReplyResult, type TrackResult,
 } from "@/lib/estimate-email/track-server";
 import { leadEstimator } from "@/lib/estimate-output/responses";
-import { gmailEnabled, personalKey } from "@/lib/gmail/config";
-import { getConnectionInfo } from "@/lib/gmail/connections";
+import { requestWhere } from "@/lib/estimate-email/request-where";
+import { senderMailbox } from "@/lib/estimate-email/sender-mailbox";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
-import { printOriginFor } from "@/lib/quote-pdf/origin";
 import { pdfKindForQuoteType } from "@/lib/quote-pdf/state";
 import { shareSecret } from "@/lib/quote-share/links";
 import { ONLINE_COPY } from "@/lib/quote-share/view";
@@ -58,15 +56,6 @@ function cleanInput(raw: unknown): EstimateEmailInput {
     followUpDays: typeof o.followUpDays === "number" ? o.followUpDays : Number.NaN,
     asOf: typeof o.asOf === "number" && Number.isFinite(o.asOf) ? o.asOf : undefined,
   };
-}
-
-/** The request's print origin (the cover's link line uses it too); refused before anything is touched. */
-async function requestWhere(): Promise<{ origin: string; host: string | null; proto: string | null } | { error: string }> {
-  const h = await headers();
-  const host = h.get("x-forwarded-host") || h.get("host");
-  const proto = h.get("x-forwarded-proto");
-  const where = printOriginFor(process.env, host, proto);
-  return "error" in where ? { error: where.error } : { origin: where.origin, host, proto };
 }
 
 /** The "changed since you opened it" refusal — the client needs the fresh view to retry against. */
@@ -132,17 +121,7 @@ export async function estimateEmailDefaultsAction(quoteId: string): Promise<Esti
   ]);
   const lead = leadEstimator(q.owner, q.preparedBy, roster);
   const senderEmail = (me?.email || user.email || "").trim();
-  let fromAddress = senderEmail;
-  let gmailConnected = false;
-  try {
-    const info = gmailEnabled() ? await getConnectionInfo(personalKey(user.id)) : null;
-    if (info) {
-      gmailConnected = true;
-      fromAddress = info.address || senderEmail;
-    }
-  } catch (e) {
-    console.error("[estimate-email] gmail connection lookup failed", e);
-  }
+  const { gmailConnected, fromAddress } = await senderMailbox(user.id, senderEmail);
   return {
     ok: true,
     ...estimateEmailDefaults({

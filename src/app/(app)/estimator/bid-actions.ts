@@ -4,79 +4,21 @@ import { revalidatePath } from "next/cache";
 import { getDoc } from "@/db/doc-store";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
-import { emailsFor } from "@/lib/identity/contacts";
-import { bidDueText, bidderStatusText, BID_RESULT_LABEL, canAward as canAwardStatus, canUndoAward, currentRev, needsRev } from "@/lib/parties/bids";
-import type { BidCandidateVM, BidderVM, BidPanelVM } from "@/lib/parties/bid-vm";
-import { partyVMs } from "@/lib/parties/view-server";
-import { addBidder, awardBid, listBidders, markSubmitted, setBidDetails, undoAward, updateBidder } from "@/lib/stores/bids";
-import { listFor } from "@/lib/stores/parties";
+import type { BidPanelResult } from "@/lib/parties/bid-vm";
+import { loadBidPanel, viewerOf } from "@/lib/parties/bid-panel-server";
+import { addBidder, awardBid, markSubmitted, setBidDetails, undoAward, updateBidder } from "@/lib/stores/bids";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 
 /** #348 slice 2a — the Bidders card's server actions. Reads need a signed-in user; every mutation needs `create`. */
-export type BidPanelResult = { ok: true; panel: BidPanelVM; note?: string } | { ok: false; error: string };
+export type { BidPanelResult };
 
 const DENIED = "You can't change this bid.";
 const isId = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 200;
 
-async function loadPanel(quoteId: string, canEdit: boolean): Promise<BidPanelResult> {
-  if (!isId(quoteId)) return { ok: false, error: "That estimate wasn't found." };
-  const q = await getQuote(quoteId);
-  if (!q) return { ok: false, error: "That estimate wasn't found." };
-  const rev = currentRev(q);
-  const parties = await listBidders(quoteId);
-  const vms = await partyVMs(parties);
-  const emails = await Promise.all(parties.map(async (p) => (p.contactId ? ((await emailsFor(p.contactId))[0]?.email ?? "") : "")));
-  const bidders: BidderVM[] = parties.map((p, i) => ({
-    id: p.id,
-    role: p.role as "gc" | "ec",
-    companyId: p.companyId,
-    companyName: vms[i].companyName,
-    contactName: vms[i].contactName,
-    contactEmail: emails[i],
-    result: p.bid.result,
-    resultLabel: BID_RESULT_LABEL[p.bid.result],
-    submitVia: p.bid.submitVia,
-    bidSiteUrl: /^https?:\/\//i.test(p.bid.bidSiteUrl ?? "") ? (p.bid.bidSiteUrl as string) : "",
-    gcBidNo: p.bid.gcBidNo ?? "",
-    confirmation: p.bid.confirmation ?? "",
-    statusText: bidderStatusText(p.bid, rev),
-    needsRev: needsRev(p.bid, rev),
-    pdfHref: `/api/quotes/${encodeURIComponent(quoteId)}/bidder-pdf/${encodeURIComponent(p.id)}?download=1`,
-  }));
-  // Candidates: the lead's GC / EC parties that aren't already bidders here.
-  let candidates: BidCandidateVM[] = [];
-  if (q.leadId) {
-    const have = new Set(parties.map((p) => `${p.role}:${p.companyId}`));
-    const lead = (await listFor("lead", q.leadId)).filter((p) => (p.role === "gc" || p.role === "ec") && !have.has(`${p.role}:${p.companyId}`));
-    const lvms = await partyVMs(lead);
-    candidates = lead.map((p, i) => ({ companyId: p.companyId, companyName: lvms[i].companyName, contactId: p.contactId, role: p.role as "gc" | "ec" }));
-  }
-  const awardedPartyId = q.bid?.awardedPartyId ?? null;
-  const dueAt = q.bid?.dueAt ?? null;
-  return {
-    ok: true,
-    panel: {
-      quoteId,
-      status: q.status,
-      ownerName: q.customer || "",
-      rev,
-      dueAt,
-      dueText: dueAt ? bidDueText(dueAt) : "",
-      addenda: q.bid?.addenda ?? [],
-      awardedPartyId,
-      bidders,
-      candidates,
-      canEdit,
-      canAward: canAwardStatus(q.status) && !awardedPartyId && bidders.some((b) => b.result === "pending"),
-      canUndo: !!awardedPartyId && canUndoAward(q.status),
-    },
-  };
-}
-
 export async function bidPanelAction(quoteId: string): Promise<BidPanelResult> {
   const user = await requireUser();
-  return loadPanel(quoteId, can("create", user.roles));
+  return loadBidPanel(quoteId, viewerOf(user));
 }
 
 /**
@@ -98,7 +40,7 @@ async function mutate(
   if (!r.ok) return { ok: false, error: r.error || "That didn't save." };
   revalidatePath("/", "layout");
   if (rerender === true || (rerender === "if-awarded" && !!(await getQuote(quoteId))?.bid?.awardedPartyId)) await scheduleQuotePdf(quoteId);
-  const panel = await loadPanel(quoteId, true);
+  const panel = await loadBidPanel(quoteId, viewerOf(user));
   return panel.ok && r.note ? { ...panel, note: r.note } : panel;
 }
 

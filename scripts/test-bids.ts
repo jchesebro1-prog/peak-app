@@ -39,6 +39,7 @@ import { addQuoteRevision, buildQuote, get as getQuote, revisionDocFields, setSt
 import { getProjectByQuote } from "../src/lib/stores/projects";
 import { autoTaskId } from "../src/lib/stores/tasks";
 import { addParty, listFor, setPartyBid, setPartyContact } from "../src/lib/stores/parties";
+import { loadBidPanel } from "../src/lib/parties/bid-panel-server";
 import { awardedRecipient, bidderRecipient, documentAddressee, touchAwardedAddressee } from "../src/lib/parties/addressee-server";
 import { renderBidderPdf } from "../src/lib/quote-pdf/bidder-pdf-server";
 import { signPrintToken, verifyPrintToken } from "../src/lib/quote-pdf/token";
@@ -787,9 +788,39 @@ export async function bidSendDbChecks(ok: Ok) {
     const subRoutes = ["datasheets.pdf/route.ts", "package.zip/route.ts", "doc/[docId]/route.ts", "file/[fileId]/route.ts", "photo/[docId]/route.ts"].map((f) => rdS(SD + f));
     ok(subRoutes.every((t) => t.includes("isPackageToken(") && !t.includes("isShareTokenV2(")), "link: every package sub-route gates on isPackageToken, never isShareTokenV2");
     ok(rdS(SD + "page.tsx").includes("isPackageToken(token)") && rdS(SD + "package-page.tsx").includes("bidderCanAct("), "link: the share page branches on isPackageToken; the package page gates actions on bidderCanAct");
+
+    // 2b-ii Task 7 — the shared panel loader: the send plan, row labels and per-viewer permissions.
+    const ep = fixtureId(348, "ep");
+    await createFixture("quotes", buildQuote(ep, { name: "Panel quote", customer: "Send Owner", customerId: own, value: 1000 } as never, "system", null, NOW) as never);
+    const regEp = async () => { for (const p of await listFor("quote", ep)) registerFixture("record_parties", p.id); };
+    const pb1 = await addBidder({ quoteId: ep, companyId: gc1, contactId: ct1, role: "gc" }, "u");
+    const pb2 = await addBidder({ quoteId: ep, companyId: gc2, role: "gc" }, "u");
+    const pb3 = await addBidder({ quoteId: ep, companyId: gc1, role: "ec", submitVia: "website" }, "u");
+    await regEp();
+    if (!pb1.ok || !pb2.ok || !pb3.ok) throw new Error("panel bidders missing");
+    const pg1 = pb1.party.id, pg2 = pb2.party.id, pg3 = pb3.party.id;
+    const full = await loadBidPanel(ep, { canEdit: true, canSend: true, canLink: true });
+    if (!full.ok) throw new Error("panel load failed: " + full.error);
+    const rowOf = (pn: typeof full.panel, id: string) => pn.bidders.find((b) => b.id === id);
+    ok(JSON.stringify(full.panel.plan.ids) === JSON.stringify([pg1]) && full.panel.plan.label === "Send to all bidders" && full.panel.plan.noEmail === 1 && full.panel.canCopyLink === false,
+      "panel db: the plan is the one emailable bidder, \"Send to all bidders\", one without an email, no link before a send");
+    ok(rowOf(full.panel, pg1)?.sendLabel === "Send" && rowOf(full.panel, pg1)?.contactEmail === "gee@e.test" && rowOf(full.panel, pg2)?.noEmail === true && rowOf(full.panel, pg2)?.sendLabel === "" && rowOf(full.panel, pg3)?.sendLabel === "" && rowOf(full.panel, pg3)?.noEmail === false,
+      "panel db: g1 Send (recipient email), g2 No email, the website bidder neither");
+    ok(full.panel.canSend && full.panel.addendaAfterSend.length === 0 && rowOf(full.panel, pg1)?.revisedSubject === "" && rowOf(full.panel, pg1)?.opensText === "", "panel db: canSend, no addenda after a send, no revised subject, no opens text");
+    const noSend = await loadBidPanel(ep, { canEdit: true, canSend: false, canLink: true });
+    ok(noSend.ok && noSend.panel.plan.ids.length === 0 && noSend.panel.plan.label === null && !noSend.panel.canSend && noSend.panel.bidders.every((b) => b.sendLabel === ""), "panel db: without send permission the plan is empty and no row has a button");
+    const badId = await loadBidPanel("", { canEdit: true, canSend: true, canLink: true });
+    ok(!badId.ok && badId.error === "That estimate wasn't found.", "panel db: an empty id is refused");
+    const rdP = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+    const sendAct = rdP("src/app/(app)/estimator/bid-send-actions.ts");
+    const sendBody = sendAct.slice(sendAct.indexOf("export async function sendToBidderAction("), sendAct.indexOf("export type BidderEmailDefaultsResult"));
+    ok(sendAct.startsWith('"use server";') && sendBody.indexOf("await requireUser()") > 0 && sendBody.indexOf('!can("send", user.roles) && !can("approve", user.roles)') > sendBody.indexOf("await requireUser()") && sendBody.indexOf('!can("send", user.roles) && !can("approve", user.roles)') < sendBody.indexOf("liveBidderEmailDeps(")
+      && sendBody.includes("revalidatePath(") && sendBody.includes("retryUnknown: o.retryUnknown === true") && rdP("src/app/(app)/estimator/send-actions.ts").includes("await requestWhere()") && rdP("src/lib/estimate-email/request-where.ts").includes("printOriginFor(process.env,"),
+      "panel: sendToBidderAction gates send|approve before the live deps, revalidates, and shares requestWhere with the estimate send");
   } finally {
     try { await regAll(); } catch {}
     try { for (const p of await listFor("quote", fixtureId(348, "es"))) registerFixture("record_parties", p.id); } catch {}
+    try { for (const p of await listFor("quote", fixtureId(348, "ep"))) registerFixture("record_parties", p.id); } catch {}
     await dropFixtures(348);
     await dropBidSendIdentityFixtures();
   }
