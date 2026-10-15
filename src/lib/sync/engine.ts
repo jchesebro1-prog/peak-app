@@ -42,6 +42,13 @@ export const FIELD_COLLECTIONS = [
 ] as const;
 
 const PAUSED_KEY = "rss_sync_paused_v1";
+/** Jeff 2026-10-15 #39 — a pull refused for the user's role (403): stop pulling
+ *  for this page's life (no 60 s poll of refusals). A 401 (signed out) or a
+ *  5xx is left to the ordinary next try. Pure. */
+export function pullStopsOn(status: number): boolean {
+  return status === 403;
+}
+
 /** How long a `retry` reply waits before the next flush. */
 const RETRY_DELAY_MS = 30_000;
 
@@ -113,6 +120,8 @@ class SyncEngine {
   private started = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** #39 — the server refused this user's pull (not a field role). */
+  private pullForbidden = false;
 
   /** One delayed re-flush after a push replied `retry` (no tight loop: one timer at a time). */
   private scheduleRetry() {
@@ -434,7 +443,7 @@ class SyncEngine {
 
   /** Pull office changes into the local mirror and advance cursors. */
   async pull(): Promise<void> {
-    if (!this.connected()) return;
+    if (!this.connected() || this.pullForbidden) return;
     try {
       const cursors =
         (await idb.getMeta<Record<string, number>>(CURSORS_META)) || {};
@@ -444,6 +453,13 @@ class SyncEngine {
         "&cursors=" +
         encodeURIComponent(JSON.stringify(cursors));
       const res = await fetch(url);
+      if (pullStopsOn(res.status)) {
+        // #39 — not a field role: stop the poll; no retries
+        this.pullForbidden = true;
+        if (this.pollTimer) clearInterval(this.pollTimer);
+        this.pollTimer = null;
+        return;
+      }
       if (!res.ok) return;
       const data = (await res.json()) as {
         changes: Record<

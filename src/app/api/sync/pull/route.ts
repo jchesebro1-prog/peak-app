@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { listSince } from "@/db/doc-store";
-import { pullCollections } from "@/lib/sync/pull-collections";
+import { mayPullFieldData, pullCollections } from "@/lib/sync/pull-collections";
 
 /**
  * Cursor-based pull — GET /api/sync/pull?cursors={"comms":123,...}
@@ -12,11 +12,19 @@ import { pullCollections } from "@/lib/sync/pull-collections";
  * #323 final review: only the offline field collections (pullCollections →
  * SYNCABLE_COLLECTIONS) are ever served — never meetings (other reps'
  * private notes and transcripts) or any other server-authoritative table.
+ *
+ * Jeff 2026-10-15 #39: and only to field roles (`create` holders —
+ * estimators, managers, admins); a Reviewer-only user gets 403, which stops
+ * the client engine's pulling. Push stays open to any active user: the field
+ * editors save through it, and it writes only the documents being edited.
  */
 export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user?.active) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  if (!mayPullFieldData(session.user.roles)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
   const url = new URL(req.url);
   let cursors: Record<string, number> = {};

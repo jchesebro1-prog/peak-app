@@ -924,6 +924,28 @@ export async function taskShareDbChecks(ok: Ok): Promise<void> {
   }
 }
 
+/** Jeff 2026-10-15 #39 — the offline field pull serves field roles only
+ *  (`create` holders: Estimator / Manager / Admin); a Reviewer-only user gets
+ *  403 and the client engine stops pulling (no 60 s poll of refusals). */
+export async function syncPullRoleChecks(ok: Ok): Promise<void> {
+  const { mayPullFieldData } = await import("@/lib/sync/pull-collections");
+  const { pullStopsOn } = await import("@/lib/sync/engine");
+  const { ROLE_PERMS } = await import("@/lib/team");
+  ok(mayPullFieldData(["Estimator"]) && mayPullFieldData(["Manager"]) && mayPullFieldData(["Admin"]) && mayPullFieldData(["Reviewer", "Estimator"]),
+    "sync pull (#39): estimators, managers and admins pull the field set");
+  ok(!mayPullFieldData(["Reviewer"]) && !mayPullFieldData([]) && !mayPullFieldData(null) && !mayPullFieldData(["Crew"]), "sync pull (#39): a Reviewer-only user (or no role) may not");
+  ok(ROLE_PERMS.Reviewer.includes("approve") && !ROLE_PERMS.Reviewer.includes("create") && (["Admin", "Manager", "Estimator"] as const).every((r) => ROLE_PERMS[r].includes("create")), "sync pull (#39): `create` is exactly the field roles in ROLE_PERMS");
+  ok(pullStopsOn(403) && !pullStopsOn(401) && !pullStopsOn(500) && !pullStopsOn(200), "sync pull (#39): only a 403 stops the client's pulling — a sign-out or a server error tries again later");
+  const route = readFileSync("src/app/api/sync/pull/route.ts", "utf8");
+  ok(/if \(!session\?\.user\?\.active\) \{[\s\S]{0,120}status: 401 \}\);\s*\}\s*if \(!mayPullFieldData\(session\.user\.roles\)\) \{\s*return NextResponse\.json\(\{ error: "forbidden" \}, \{ status: 403 \}\);/.test(route),
+    "sync pull (#39): the route answers 403 to a non-field role before reading anything");
+  const eng = readFileSync("src/lib/sync/engine.ts", "utf8");
+  ok(/if \(!this\.connected\(\) \|\| this\.pullForbidden\) return;/.test(eng) && /if \(pullStopsOn\(res\.status\)\) \{[\s\S]{0,120}this\.pullForbidden = true;\s*if \(this\.pollTimer\) clearInterval\(this\.pollTimer\);/.test(eng),
+    "sync pull (#39): on a 403 the engine stops the poll and never pulls again this page");
+  const push = readFileSync("src/app/api/sync/push/route.ts", "utf8");
+  ok(!push.includes("mayPullFieldData"), "sync pull (#39): push stays open to any active user (the field editors save through it)");
+}
+
 if (process.argv[1] && /test-thread-visibility\.ts$/.test(process.argv[1])) {
   let fail = 0;
   const ok: Ok = (c, m) => {
@@ -939,6 +961,7 @@ if (process.argv[1] && /test-thread-visibility\.ts$/.test(process.argv[1])) {
     await threadVisibilityDbChecks(ok);
     taskSharePureChecks(ok);
     await taskShareDbChecks(ok);
+    await syncPullRoleChecks(ok);
     threadVisibilityPins(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall thread visibility checks passed");
     process.exit(fail ? 1 : 0);
