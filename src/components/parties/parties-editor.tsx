@@ -51,8 +51,9 @@ export default function PartiesEditor({
     setError("");
     setNote(r.note ?? "");
     setParties(r.parties);
-    onChange?.(r.parties);
-    router.refresh();
+    // The Estimator chip tracks changes through onChange; refreshing there would re-run the heavy page loader.
+    if (onChange) onChange(r.parties);
+    else router.refresh();
     return true;
   };
 

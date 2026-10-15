@@ -46,7 +46,7 @@ export default function PartiesChip({ quoteId, canEdit }: { quoteId: string | nu
         ref={dialog}
         onClose={() => setOpen(false)}
         aria-label="Companies on this estimate"
-        style={{ width: "min(520px, calc(100vw - 32px))", border: "1px solid #e4e7ec", borderRadius: 12, padding: 0 }}
+        style={{ width: "min(520px, calc(100vw - 32px))", margin: "auto", maxHeight: "calc(100vh - 64px)", overflow: "auto", border: "1px solid #e4e7ec", borderRadius: 12, padding: 0 }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid #f0f1f4" }}>
           <span style={{ fontSize: 14.5, fontWeight: 600 }}>Companies on this estimate</span>
@@ -55,7 +55,7 @@ export default function PartiesChip({ quoteId, canEdit }: { quoteId: string | nu
           </button>
         </div>
         <div style={{ padding: "14px 18px 18px" }}>
-          {open && quoteId && parties && <PartiesEditor recordType="quote" recordId={quoteId} initial={parties} canEdit={canEdit} onChange={setParties} />}
+          {open && quoteId && parties && <PartiesEditor key={quoteId} recordType="quote" recordId={quoteId} initial={parties} canEdit={canEdit} onChange={setParties} />}
           {open && quoteId && !parties && <div style={{ fontSize: 12, color: "#8c919c" }}>Loading…</div>}
         </div>
       </dialog>

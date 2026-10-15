@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm, requireUser } from "@/lib/session";
+import { withSavepoint } from "@/db";
 import { canonicalBonusSections } from "@/lib/estimate-bonus/canonical";
 import { stripBonusLines } from "@/lib/estimate-bonus/rules";
 import { readTierSize } from "@/lib/task-plan/fields";
@@ -640,7 +641,9 @@ export async function saveQuoteAction(
     if (leadId) {
       try {
         const { copyParties } = await import("@/lib/stores/parties");
-        await copyParties({ type: "lead", id: leadId }, { type: "quote", id: created.id }, user.id);
+        await withSavepoint(async () => {
+          await copyParties({ type: "lead", id: leadId }, { type: "quote", id: created.id }, user.id);
+        });
       } catch (e) {
         console.error("saveQuoteAction: copying lead parties failed", created.id, e);
       }

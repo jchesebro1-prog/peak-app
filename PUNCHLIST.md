@@ -12390,7 +12390,7 @@ Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-
 - **Shared editor** on the lead drawer, an Estimator **Parties** chip and the project page. Writes need `create`.
 - **Company page** gains a Bids & roles card (live records only, one batched read per record type).
 - **Carry-over:** lead → estimate (everything except GC/EC) and estimate → project (everything), once, inside `withSavepoint` so a failure never undoes a save or a win (D1059).
-- **Opportunity board** skips a lead that has estimates; its estimates inherit the forecast; the lead drawer lists them with a total (D1060).
+- **Opportunity board** skips a lead that has a non-lost estimate (an all-lost lead stays on the board); its estimates inherit the forecast; the lead drawer lists them with a total (D1060).
 - **Company delete** is refused while the company is on any live party row (D1062).
 - **Tests:** `scripts/test-parties.ts` (in test:specs).
 
@@ -12400,5 +12400,7 @@ Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-
 - Slice 4: vendors (vendor company on vendor quotes, File to estimate / project, Procurement).
 - Slice 5: Read the PDF (Assist `vendorpdf`).
 - Slice 6: portal bidder view and Reports → Bids by GC/EC.
+
+**Not on a preview:** do not deploy a Vercel preview of this branch. Previews share the production Neon DB and skip migrations, so `record_parties` doesn't exist there and every company page (Bids & roles card), the lead drawer card, the project card and company delete would throw. **Post-merge production check** (after the merge deploy applies 0041), on a throwaway customer: link an owner and a GC on a lead; convert it / save an estimate from it (the owner carries, the GC doesn't); mark it Won so a project spawns; confirm the project lists the owner. This is the only real run of the postgres-js savepoint path. Then delete the test records.
 
 **Notes:** `addParty`'s one-owner check is not locked, so two simultaneous first-owner adds could both land. Renumber migration 0041 at merge if another branch lands one first.

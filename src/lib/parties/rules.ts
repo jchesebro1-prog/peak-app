@@ -135,10 +135,13 @@ export function leadEstimatesTotal(quotes: ReadonlyArray<{ status?: string; valu
   return Math.round(sum);
 }
 
-/** Leads that have at least one estimate — excluded from the opportunity board (their estimates carry the value). */
-export function leadIdsWithEstimates(quotes: ReadonlyArray<{ leadId?: string | null }>): Set<string> {
+/**
+ * Leads that have at least one non-lost estimate — excluded from the opportunity board (their estimates carry the value).
+ * A lead whose estimates are all lost stays on the board: it reads as open while it is re-quoted.
+ */
+export function leadIdsWithEstimates(quotes: ReadonlyArray<{ leadId?: string | null; status?: string }>): Set<string> {
   const out = new Set<string>();
-  for (const q of quotes) if (q.leadId) out.add(q.leadId);
+  for (const q of quotes) if (q.leadId && q.status !== "lost") out.add(q.leadId);
   return out;
 }
 

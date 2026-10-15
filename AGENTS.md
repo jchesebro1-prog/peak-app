@@ -1425,15 +1425,25 @@ See `.env.example`.
     the lead drawer, an Estimator Parties chip and the project page, and the
     company page gains a Bids & roles card (live records only). Parties carry
     lead → estimate (everything except GC/EC) on first save and on convert,
-    and estimate → project on creation, through `withSavepoint`
+    and estimate → project on creation — all three (estimate save, lead
+    convert, project spawn) run through `withSavepoint`
     (`src/db/index.ts`) so a failed copy never undoes a save or a win. The
-    opportunity board skips a lead that has estimates (they carry the value
-    and inherit its forecast) and the lead drawer lists them with a total.
+    opportunity board skips a lead that has a non-lost estimate (they carry
+    the value and inherit its forecast; a lead whose estimates are all lost
+    stays on the board) and the lead drawer lists them with a total.
     A company on any live party row can't be deleted. Writes need `create`.
     Tests: `scripts/test-parties.ts` (in test:specs). Remaining: slices 2–6
     (spec §10: bids, split systems, vendors, Read the PDF, portal + reports).
-    Renumber migration 0041 at merge if another branch lands one first. Punch
-    item #348.
+    Renumber migration 0041 at merge if another branch lands one first. Not on
+    a preview: do not deploy a Vercel preview of this branch — previews share
+    the production Neon DB and skip migrations, so `record_parties` doesn't
+    exist there and every company page (Bids & roles card), the lead drawer
+    card, the project card and company delete would throw. After the merge
+    deploy applies 0041, on a throwaway customer: link an owner and a GC on
+    a lead, convert it / save an estimate from it (the owner carries, the GC
+    doesn't), mark it Won so a project spawns, and confirm the project lists
+    the owner — the only real run of the postgres-js savepoint path — then
+    delete the test records. Punch item #348.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

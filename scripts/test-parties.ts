@@ -72,6 +72,12 @@ export async function partyChecks(ok: Ok) {
   ok(leadEstimatesTotal([{ status: "draft", value: 100.4 }, { status: "sent", value: 200 }, { status: "won", value: 50 }, { status: "lost", value: 999 }, {}]) === 350, "parties: estimates total sums draft/sent/won, rounds, skips lost");
   const w = leadIdsWithEstimates([{ leadId: "L-1" }, { leadId: null }, {}, { leadId: "L-2" }, { leadId: "L-1" }]);
   ok(w.size === 2 && w.has("L-1") && w.has("L-2"), "parties: lead ids with estimates");
+  const wl = leadIdsWithEstimates([
+    { leadId: "L-lost", status: "lost" },
+    { leadId: "L-mix", status: "lost" }, { leadId: "L-mix", status: "draft" },
+  ]);
+  ok(!wl.has("L-lost"), "parties: a lead with only a lost estimate is not in the set (stays on the board)");
+  ok(wl.has("L-mix") && wl.size === 1, "parties: a lead with a lost + a draft estimate is in the set");
   const leadIn = (id: string, extra: Partial<OppLeadInput> = {}): OppLeadInput => ({
     id, org: "Org", interest: "x", stage: "new", owner: "", value: 1000, createdAt: 1, updatedAt: 1, customerId: null, convertedCustomerId: null, convertedQuoteId: null, forecastAt: null, ...extra,
   });
