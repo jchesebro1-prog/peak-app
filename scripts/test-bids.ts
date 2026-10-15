@@ -8,6 +8,8 @@ import {
 import type { BidderState } from "../src/lib/parties/rules";
 import { quoteMatchesSearch } from "../src/lib/estimate-number";
 import { selectBidDue } from "../src/lib/triage/feeds/quotes";
+import { closedKeys } from "../src/lib/triage/liveness";
+import type { SnapshotRow } from "../src/lib/triage/types";
 import { factLabel, pointsFor } from "../src/lib/triage/rank";
 import type { Quote } from "../src/lib/stores/quotes";
 import { like } from "drizzle-orm";
@@ -31,7 +33,7 @@ export async function bidChecks(ok: Ok) {
   ok(EMPTY_BID.dueAt === null && EMPTY_BID.addenda.length === 0 && EMPTY_BID.awardedPartyId === null, "bids: empty bid");
 
   const d = sanitizeBidDetails({ dueAt: 1_800_000_000_000, addenda: [{ no: 2, receivedAt: Date.UTC(2026, 9, 5), note: " b " }, { no: 1, receivedAt: Date.UTC(2026, 9, 4), note: "a" }] });
-  ok(d.ok && d.value.dueAt === 1_800_000_000_000 && d.value.addenda.map((a) => a.no).join() === "1,2" && d.value.addenda[1].note === "b", "bids: details sanitized, addenda sorted + trimmed");
+  ok(d.ok && d.value.dueAt === 1_800_000_000_000 && d.value.addenda?.map((a) => a.no).join() === "1,2" && d.value.addenda?.[1]?.note === "b", "bids: details sanitized, addenda sorted + trimmed");
   ok(sanitizeBidDetails({ dueAt: null, addenda: [] }).ok, "bids: no due date is fine");
   const dupe = sanitizeBidDetails({ dueAt: null, addenda: [{ no: 1, receivedAt: T1, note: "" }, { no: 1, receivedAt: T1 + 1, note: "" }] });
   ok(!dupe.ok && dupe.error === "Addendum 1 is listed twice.", "bids: duplicate addendum refused");
@@ -127,7 +129,9 @@ export async function bidChecks(ok: Ok) {
   const badAdd = sanitizeBidDetails({ dueAt: null, addenda: "x" });
   ok(!badAdd.ok && badAdd.error === "Addenda must be a list.", "bids: non-array addenda refused");
   const noAdd = sanitizeBidDetails({ dueAt: null });
-  ok(noAdd.ok && noAdd.value.addenda.length === 0, "bids: omitted addenda means none");
+  ok(noAdd.ok && noAdd.value.addenda === undefined && noAdd.value.dueAt === null, "bids: omitted addenda means keep (explicit null due clears)");
+  const noDue = sanitizeBidDetails({ addenda: [] });
+  ok(noDue.ok && !("dueAt" in noDue.value) && noDue.value.addenda?.length === 0, "bids: omitted due date means keep");
   ok(markSubmittedState(B(), 1, "u", 5 as unknown as string, T1).confirmation === undefined, "bids: non-string confirmation ignored");
   const orig = [{ id: "a", bid: B() }, { id: "b", bid: B() }, { id: "c", bid: B({ result: "no_bid" }) }];
   const plan = awardPlan(orig, "a");
@@ -164,6 +168,22 @@ export async function bidChecks(ok: Ok) {
   ok(selectBidDue([tq({ owner: "Someone Else" })], two, tctx).length === 0, "bids: not mine → no fact");
   ok(selectBidDue([tq()], new Map([["Q-9", [{ bid: B({ revSent: 1 }) }]]]), tctx).length === 0, "bids: every bidder submitted → no fact");
   ok(selectBidDue([tq({ revisions: [{}, {}] })], new Map([["Q-9", [{ bid: B({ revSent: 1 }) }]]]), tctx).length === 1, "bids: a bidder on an older revision still counts as missing");
+
+  // Final review fix 1 — a frozen bid-due row stays visible while the rule still fires.
+  const srow = (key: string): SnapshotRow => ({ key, source: "quote", title: key, sub: "", href: "/", score: 1, reason: "", callLine: null, also: [] });
+  const awardedQ = tq({ id: "Q-10", bid: { dueAt: OCT21_2PM, addenda: [], awardedPartyId: "p" } });
+  const doneQ = tq({ id: "Q-11" });
+  const liveClosed = closedKeys(
+    [srow("quote:Q-9"), srow("quote:Q-10"), srow("quote:Q-11")],
+    {
+      tasks: new Map(), assignments: new Map(), threads: new Map(), recordings: new Map(),
+      quotes: new Map([["Q-9", tq()], ["Q-10", awardedQ], ["Q-11", doneQ]]),
+      bidders: new Map([["Q-9", [{ bid: B() }]], ["Q-10", [{ bid: B({ result: "awarded" }) }]], ["Q-11", [{ bid: B({ revSent: 1 }) }]]]),
+    },
+    tctx.me, NOW, { id: tctx.me.id, name: tctx.me.name, nameUnique: true }
+  );
+  ok(!liveClosed.has("quote:Q-9"), "bids: a bid_due-only row survives closedKeys while the bid is still due");
+  ok(liveClosed.has("quote:Q-10") && liveClosed.has("quote:Q-11"), "bids: an awarded (or fully submitted) bid's row is hidden");
 }
 
 const BID_FIX = { gc1: fixtureId(348, "bgc1"), gc2: fixtureId(348, "bgc2"), own: fixtureId(348, "bown"), ct1: fixtureId(348, "bct1") };
@@ -204,12 +224,24 @@ export async function bidDbChecks(ok: Ok) {
     const bad = await setBidDetails(q, { dueAt: -1, addenda: [] });
     ok(!bad.ok && (await getQuote(q))?.bid?.dueAt === T, "bids db: bad details refused and nothing written");
     ok(!(await setBidDetails(fixtureId(348, "bmissing"), { dueAt: null, addenda: [] })).ok, "bids db: details on a missing estimate refused");
+    const keepAdd = await setBidDetails(q, { dueAt: T + 3600_000 });
+    const q2 = await getQuote(q);
+    ok(keepAdd.ok && q2?.bid?.dueAt === T + 3600_000 && q2.bid.addenda.length === 1, "bids db: a missing addenda key keeps the stored addenda");
+    ok(q2?.updatedAt === q1?.updatedAt && q2?.contentChangedAt === q1?.contentChangedAt, "bids db: a bid edit doesn't bump updatedAt or stale the content (not content until 2b)");
+    await setBidDetails(q, { addenda: q2?.bid?.addenda ?? [] });
+    ok((await getQuote(q))?.bid?.dueAt === T + 3600_000, "bids db: a missing dueAt key keeps the stored due date");
+    await setBidDetails(q, { dueAt: T });
+    const wonDetails = await setBidDetails(qWon, { dueAt: T });
+    ok(!wonDetails.ok && wonDetails.error === "This estimate is closed." && !(await getQuote(qWon))?.bid, "bids db: a won estimate's bid details can't be edited");
 
     // bidders
     const a1 = await addBidder({ quoteId: q, companyId: gc1, contactId: ct1, role: "gc" }, "u");
     ok(a1.ok && a1.party.bid?.result === "pending" && a1.party.bid.submitVia === "email" && a1.party.contactId === ct1, "bids db: add a GC bidder (pending, email)");
     const a1b = await addBidder({ quoteId: q, companyId: gc1, role: "gc" }, "u");
     ok(a1.ok && a1b.ok && a1b.party.id === a1.party.id && (await listBidders(q)).length === 1, "bids db: adding the same bidder again keeps one row");
+    ok(a1.ok && !a1.existed && a1b.ok && a1b.existed, "bids db: a second add reports the bidder already existed");
+    const selfBid = await addBidder({ quoteId: q, companyId: own, role: "gc" }, "u");
+    ok(!selfBid.ok && selfBid.error === "The customer can't bid on its own estimate.", "bids db: the customer can't bid on its own estimate");
     const a2 = await addBidder({ quoteId: q, companyId: gc2, role: "gc", submitVia: "website" }, "u");
     ok(a2.ok && a2.party.bid?.submitVia === "website", "bids db: a bidder can submit via website");
     await regAll();
@@ -273,6 +305,8 @@ export async function bidDbChecks(ok: Ok) {
     await regAll();
     const proj = await getProjectByQuote(q);
     ok(!!proj && proj.billToCompanyId === gc1 && proj.customerId === own, "bids db: the project bills the awarded GC; the customer stays the owner");
+    const projParties = proj ? await listFor("project", proj.id) : [];
+    ok(projParties.some((p) => p.companyId === gc1) && !projParties.some((p) => p.companyId === gc2), "bids db: the awarded GC carries to the project; the losing bidder doesn't");
     const noUndo = await undoAward(q);
     ok(!noUndo.ok && noUndo.error === "The estimate is won — the award can't be undone.", "bids db: a won estimate's award can't be undone");
   } finally {

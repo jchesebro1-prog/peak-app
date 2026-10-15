@@ -26,9 +26,11 @@ export const BID_TIME_MIN = Date.UTC(2000, 0, 1);
 export const BID_TIME_MAX = Date.UTC(2100, 0, 1);
 const isMs = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= BID_TIME_MIN && n <= BID_TIME_MAX;
 
+/** A bid-details edit. A missing `dueAt` / `addenda` key means "keep the current value" (the store merges);
+ *  an explicit `dueAt: null` clears the due date. */
 export function sanitizeBidDetails(
   raw: unknown
-): { ok: true; value: { dueAt: number | null; addenda: BidAddendum[] } } | { ok: false; error: string } {
+): { ok: true; value: { dueAt?: number | null; addenda?: BidAddendum[] } } | { ok: false; error: string } {
   if (!raw || typeof raw !== "object") return { ok: false, error: "Nothing to save." };
   const r = raw as { dueAt?: unknown; addenda?: unknown };
   if (r.dueAt !== null && r.dueAt !== undefined && !isMs(r.dueAt)) return { ok: false, error: "Pick a valid due date." };
@@ -48,7 +50,10 @@ export function sanitizeBidDetails(
     out.push({ no: x.no, receivedAt: x.receivedAt, note });
   }
   out.sort((a, b) => a.no - b.no);
-  return { ok: true, value: { dueAt: isMs(r.dueAt) ? r.dueAt : null, addenda: out } };
+  const value: { dueAt?: number | null; addenda?: BidAddendum[] } = {};
+  if ("dueAt" in r && r.dueAt !== undefined) value.dueAt = isMs(r.dueAt) ? r.dueAt : null;
+  if ("addenda" in r && r.addenda !== undefined) value.addenda = out;
+  return { ok: true, value };
 }
 
 export function sanitizeBidSiteUrl(raw: unknown): { ok: true; value: string | null } | { ok: false; error: string } {

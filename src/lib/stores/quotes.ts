@@ -382,7 +382,8 @@ export type Quote = {
    *  never content, never snapshotted — read when a package is built. */
   packagePeakHeader?: boolean | null;
   /** #348 slice 2a — bid details (due date, addenda, the awarded bidder's party id). Written only by
-   *  patchQuoteBid under the row lock; update() drops it. Content (prints on the estimate in slice 2b). */
+   *  patchQuoteBid under the row lock; update() drops it. Not content until slice 2b prints it (not a
+   *  QUOTE_CONTENT_FIELDS member, never bumps updatedAt); 2b re-adds it together with scheduleQuotePdf. */
   bid?: QuoteBid | null;
   /** Estimator Phase 3 — the comms threads this estimate was emailed on
    *  (spec §10.1 step 6), oldest first, ≤ 50, one per threadId. Written only
@@ -484,8 +485,7 @@ export const QUOTE_CONTENT_FIELDS = [
   "pdfOptions",
   // #245: a firm portal quote prints "Valid until <date>".
   "portalFirm",
-  // #348: the bid's due date / addenda / awarded bidder print in slice 2b.
-  "bid",
+  // #348: `bid` is NOT content in slice 2a (nothing prints it yet); 2b re-adds it with scheduleQuotePdf.
 ] as const;
 
 /** A comparable key of what the customer document shows. Pure. */
@@ -2377,11 +2377,12 @@ export async function setPackagePeakHeader(id: string, on: boolean | null): Prom
 }
 
 /** #348 slice 2a — the ONLY writer of `Quote.bid`. `mutate` gets the current bid (EMPTY_BID when none) and
- *  returns the next one; runs under the row lock. Bumps updatedAt: the due date and addenda print. */
+ *  returns the next one; runs under the row lock. Not content until slice 2b prints it; 2b re-adds it together
+ *  with scheduleQuotePdf. Until then it touches nothing else — not updatedAt — so a bid edit never stales the
+ *  PDF, an approval or an in-flight Send's version check (the setPackagePeakHeader precedent). */
 export async function patchQuoteBid(id: string, mutate: (bid: QuoteBid) => QuoteBid): Promise<Quote | null> {
   return patchQuote(id, (doc) => {
     doc.bid = mutate(doc.bid ? { ...doc.bid, addenda: [...doc.bid.addenda] } : { ...EMPTY_BID, addenda: [] });
-    doc.updatedAt = Date.now();
   });
 }
 

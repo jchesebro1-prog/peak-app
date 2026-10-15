@@ -14,7 +14,7 @@ import { createProjectFromQuote } from "../src/lib/stores/projects";
 import { autoTaskId } from "../src/lib/stores/tasks";
 import { convert } from "../src/lib/stores/leads";
 import { buildOpportunities, type OppLeadInput, type OppQuoteInput } from "../src/lib/opportunities";
-import { addParty, copyParties, listFor, listForCompany, liveRecordsForCompany, listForRecords, partyId, removeParty, setPartyContact } from "../src/lib/stores/parties";
+import { addParty, copyParties, listFor, listForCompany, liveRecordsForCompany, listForRecords, partyId, removeParty, setPartyBid, setPartyContact } from "../src/lib/stores/parties";
 import {
   PARTY_ROLES, PARTY_RECORD_TYPES, ROLE_LABEL, ROLE_SHORT, partyInputProblem, normalizePartyInput, ownerConflict, carriesTo,
   partyRoleText, groupPartiesByRole, sortParties, leadEstimatesTotal, leadIdsWithEstimates, deleteRefusal, type Party,
@@ -55,6 +55,9 @@ export async function partyChecks(ok: Ok) {
   ok(!carriesTo("lead", "quote", { role: "gc" }) && !carriesTo("lead", "quote", { role: "ec" }), "parties: lead→quote skips GC/EC");
   ok(["owner", "architect", "consultant", "vendor", "other"].every((r) => carriesTo("lead", "quote", { role: r as never })), "parties: lead→quote carries the rest");
   ok(PARTY_ROLES.every((r) => carriesTo("quote", "project", { role: r })), "parties: quote→project carries every role");
+  const bs = (result: "pending" | "awarded" | "lost" | "withdrew" | "no_bid") => ({ result, submitVia: "email" as const });
+  ok(carriesTo("quote", "project", { role: "gc", bid: bs("awarded") }) && carriesTo("quote", "project", { role: "ec", bid: bs("pending") }) && carriesTo("quote", "project", { role: "gc", bid: null }), "parties: quote→project carries awarded, pending and non-bidder rows");
+  ok((["lost", "withdrew", "no_bid"] as const).every((r) => !carriesTo("quote", "project", { role: "gc", bid: bs(r) })), "parties: quote→project leaves losing bidders (lost / withdrew / no bid) on the estimate");
   ok(!carriesTo("project", "quote", { role: "owner" }), "parties: no other direction carries");
 
   ok(partyRoleText({ role: "other", roleLabel: "CM" }) === "CM" && partyRoleText({ role: "gc", roleLabel: null }) === "GC", "parties: role text");
@@ -144,7 +147,14 @@ export async function partyDbChecks(ok: Ok) {
     ok(sc.ok && sc.party.contactId === ct2, "parties db: set contact");
     const scBad = await setPartyContact(gcRow.id, ct1);
     ok(!scBad.ok && scBad.error === "That person isn't at this company.", "parties db: set contact checks company");
-    ok((await setPartyContact(gcRow.id, null)).ok, "parties db: clear contact");
+    const cleared = await setPartyContact(gcRow.id, null);
+    ok(cleared.ok && cleared.party.contactId === null, "parties db: clear contact");
+    // Key-level write: a bid state written between the dialog's read and its contact save is never reverted.
+    await setPartyBid(gcRow.id, { result: "awarded", submitVia: "email" });
+    const keep = await setPartyContact(gcRow.id, ct2);
+    ok(keep.ok && keep.party.contactId === ct2 && keep.party.bid?.result === "awarded" && keep.party.companyId === gcRow.companyId, "parties db: set contact touches only the contact (bid state kept)");
+    await setPartyBid(gcRow.id, null);
+    await setPartyContact(gcRow.id, null);
 
     const copied = await copyParties({ type: "lead", id: lead }, { type: "quote", id: quote }, "u-test");
     const onQuote = await listFor("quote", quote);

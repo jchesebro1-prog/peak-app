@@ -25,6 +25,7 @@ const FIELD: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12, paddi
 export function BiddersCard({ quoteId, refreshKey }: { quoteId: string; refreshKey: number }) {
   const [panel, setPanel] = useState<BidPanelVM | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   // Button-driven mutations count toward the card-wide `busy`; blur-saves only lock their own input.
   const [pending, setPending] = useState(0);
   const [savingFields, setSavingFields] = useState<string[]>([]);
@@ -70,12 +71,16 @@ export function BiddersCard({ quoteId, refreshKey }: { quoteId: string; refreshK
     if (field) setSavingFields((f) => [...f, field]);
     else setPending((n) => n + 1);
     setErr(null);
+    setNote(null);
     let ok = false;
     try {
       const r = await call();
+      // Tell the header's Bid chip (same window) to reload its label.
+      if (r.ok) window.dispatchEvent(new CustomEvent("peak:bid-changed", { detail: { quoteId } }));
       if (isLatest()) {
         if (r.ok) {
           setPanel(r.panel);
+          setNote(r.note ?? null);
           ok = true;
         } else setErr(r.error);
       } else ok = r.ok;
@@ -116,6 +121,31 @@ export function BiddersCard({ quoteId, refreshKey }: { quoteId: string; refreshK
 
   const edit = !!panel?.canEdit;
   const addendaText = panel?.addenda.length ? `Addenda: ${panel.addenda.map((a) => a.no).join(", ")}` : "";
+  const errLine = err && (
+    <div role="alert" style={{ marginTop: 8, fontSize: 12, color: "#8a2f22" }}>
+      {err}
+    </div>
+  );
+  // No bidders and not adding one: a compact one-line card instead of the full empty block.
+  if (panel && panel.bidders.length === 0 && !adding) {
+    return (
+      <div>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+          <div style={CARD_LABEL}>Bidders</div>
+          <span style={{ fontSize: 12, color: "#5b616e" }}>Not a bid</span>
+          {edit && !panel.awardedPartyId && (
+            <>
+              <span aria-hidden style={{ fontSize: 12, color: "#aab0bb" }}>·</span>
+              <button type="button" disabled={busy} onClick={() => setAdding(true)} style={BTN}>
+                + Add bidder
+              </button>
+            </>
+          )}
+        </div>
+        {errLine}
+      </div>
+    );
+  }
   return (
     <div>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -158,7 +188,7 @@ export function BiddersCard({ quoteId, refreshKey }: { quoteId: string; refreshK
           ))}
         </ul>
       )}
-      {edit && panel && (
+      {edit && panel && !panel.awardedPartyId && (
         <div style={{ marginTop: 10 }}>
           {!adding ? (
             <button type="button" disabled={busy} onClick={() => setAdding(true)} style={BTN}>
@@ -219,11 +249,12 @@ export function BiddersCard({ quoteId, refreshKey }: { quoteId: string; refreshK
           )}
         </div>
       )}
-      {err && (
-        <div role="alert" style={{ marginTop: 8, fontSize: 12, color: "#8a2f22" }}>
-          {err}
+      {note && !err && (
+        <div role="status" style={{ marginTop: 8, fontSize: 12, color: "#5b616e" }}>
+          {note}
         </div>
       )}
+      {errLine}
     </div>
   );
 }

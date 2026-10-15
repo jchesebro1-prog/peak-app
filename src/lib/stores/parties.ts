@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { getDoc, getDocRows, listDocsByField, patchDoc, softDeleteDoc, upsertDoc, type Doc } from "@/db/doc-store";
+import { getDoc, getDocRows, listDocsByField, patchDoc, patchDocKey, softDeleteDoc, upsertDoc, type Doc } from "@/db/doc-store";
 import { getCompany } from "@/lib/identity/companies";
 import { getContact } from "@/lib/identity/contacts";
 import { getMany as getQuotes } from "@/lib/stores/quotes";
@@ -135,6 +135,8 @@ export async function addParty(
   return { ok: true, party: await upsertDoc<Party>("record_parties", party), existed: false };
 }
 
+/** A key-level write (#348 2a review): touches only `contactId` and `updatedAt` in SQL, never a read-modify-write
+ *  of the whole row — so an award / bidder edit landing in between is never reverted. */
 export async function setPartyContact(
   id: string,
   contactId: string | null
@@ -144,10 +146,8 @@ export async function setPartyContact(
   const next = (typeof contactId === "string" ? contactId.trim() : "") || null;
   const cp = await contactProblem(cur.companyId, next);
   if (cp) return { ok: false, error: cp };
-  const saved = await patchDoc<Party>("record_parties", id, (d) => {
-    d.contactId = next;
-    d.updatedAt = Date.now();
-  });
+  const wrote = await patchDocKey("record_parties", [id], "contactId", next, { stamp: { updatedAt: Date.now() } });
+  const saved = wrote.ids.length ? await getDoc<Party>("record_parties", id) : null;
   return saved ? { ok: true, party: saved } : { ok: false, error: "That link no longer exists." };
 }
 

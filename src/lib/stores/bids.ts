@@ -22,17 +22,29 @@ export async function listBidders(quoteId: string): Promise<Bidder[]> {
   return (await listFor("quote", quoteId)).filter(isBidder);
 }
 
+/** A missing `dueAt` / `addenda` key keeps the stored value; an explicit `dueAt: null` clears it. Refuses a
+ *  closed (won / lost) estimate; reads and writes under the quote's row lock. */
 export async function setBidDetails(quoteId: string, raw: unknown): Promise<{ ok: true; bid: QuoteBid } | { ok: false; error: string }> {
   const clean = sanitizeBidDetails(raw);
   if (!clean.ok) return clean;
-  const saved = await patchQuoteBid(quoteId, (bid) => ({ ...bid, dueAt: clean.value.dueAt, addenda: clean.value.addenda }));
-  return saved?.bid ? { ok: true, bid: saved.bid } : { ok: false, error: "That estimate wasn't found." };
+  const { dueAt, addenda } = clean.value;
+  return withQuoteRowLock(quoteId, async () => {
+    const q = await getQuote(quoteId);
+    if (!q) return { ok: false as const, error: "That estimate wasn't found." };
+    if (CLOSED.has(q.status)) return { ok: false as const, error: "This estimate is closed." };
+    const saved = await patchQuoteBid(quoteId, (bid) => ({
+      ...bid,
+      ...(dueAt !== undefined ? { dueAt } : {}),
+      ...(addenda !== undefined ? { addenda } : {}),
+    }));
+    return saved?.bid ? { ok: true as const, bid: saved.bid } : { ok: false as const, error: "That estimate wasn't found." };
+  });
 }
 
 export async function addBidder(
   input: { quoteId: string; companyId: string; contactId?: string | null; role: "gc" | "ec"; submitVia?: "email" | "website" },
   by: string
-): Promise<{ ok: true; party: Party } | { ok: false; error: string }> {
+): Promise<{ ok: true; party: Party; existed: boolean } | { ok: false; error: string }> {
   if (input.role !== "gc" && input.role !== "ec") return { ok: false, error: "Bidders are GCs or ECs." };
   // Row lock first (setStatus's order): the closed / awarded checks and the insert see one committed state.
   const gate = await withQuoteRowLock(input.quoteId, async () => {
@@ -40,13 +52,15 @@ export async function addBidder(
     if (!q) return { ok: false as const, error: "That estimate wasn't found." };
     if (CLOSED.has(q.status)) return { ok: false as const, error: "This estimate is closed." };
     if (q.bid?.awardedPartyId) return { ok: false as const, error: "Undo the award before adding a bidder." };
+    if (q.customerId && input.companyId === q.customerId) return { ok: false as const, error: "The customer can't bid on its own estimate." };
+    const wasBidder = (await listBidders(q.id)).some((p) => p.companyId === input.companyId && p.role === input.role);
     const added = await addParty({ recordType: "quote", recordId: q.id, companyId: input.companyId, contactId: input.contactId ?? null, role: input.role }, by);
     if (!added.ok) return added;
     const party = added.party.bid ? added.party : (await setPartyBid(added.party.id, newBidderState(input.submitVia))) ?? added.party;
-    return { ok: true as const, party, q };
+    return { ok: true as const, party, q, existed: wasBidder };
   });
   if (!gate.ok) return gate;
-  const { party, q } = gate;
+  const { party, q, existed } = gate;
   // The owner is the customer (spec §3.4): make it explicit on a bid.
   if (q.customerId && !(await listFor("quote", q.id)).some((p) => p.role === "owner")) {
     await addParty({ recordType: "quote", recordId: q.id, companyId: q.customerId, role: "owner" }, by);
@@ -55,7 +69,7 @@ export async function addBidder(
   if (q.leadId && (await getDoc("leads", q.leadId))) {
     await addParty({ recordType: "lead", recordId: q.leadId, companyId: input.companyId, contactId: input.contactId ?? null, role: input.role }, by);
   }
-  return { ok: true, party };
+  return { ok: true, party, existed };
 }
 
 async function bidderRow(partyId: string): Promise<{ party: Bidder; quote: Quote } | { error: string }> {
@@ -86,6 +100,7 @@ export async function updateBidder(partyId: string, raw: unknown): Promise<{ ok:
   const clean = sanitizeBidderPatch(raw);
   if (!clean.ok) return clean;
   return withBidderLocked(partyId, async (row) => {
+    if (clean.value.result && row.quote.bid?.awardedPartyId) return { ok: false as const, error: "Undo the award first." };
     if (clean.value.result && row.party.bid.result !== "pending" && row.party.bid.result !== "withdrew" && row.party.bid.result !== "no_bid")
       return { ok: false as const, error: "Undo the award first." };
     const saved = await setPartyBid(partyId, applyBidderPatch(row.party.bid, clean.value));

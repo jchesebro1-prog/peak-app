@@ -158,6 +158,7 @@ export async function globalSearch(
   // that match the term (capped at 50) → their gc/ec party rows with bid state → those quotes, one batched read each.
   // Quotes are visible to every signed-in staff member today, so nothing here widens access.
   const bidderOf = new Map<string, string[]>();
+  const bidderSeen = new Map<string, number>(); // quote id → newest bidder-row updatedAt
   {
     const hit = companies.filter((c) => matches(q, c.name)).slice(0, 50);
     if (hit.length) {
@@ -168,11 +169,14 @@ export async function globalSearch(
         const list = bidderOf.get(p.recordId) ?? [];
         list.push(nameById.get(p.companyId) || p.companyId);
         bidderOf.set(p.recordId, list);
+        bidderSeen.set(p.recordId, Math.max(bidderSeen.get(p.recordId) ?? 0, Number(p.updatedAt) || 0));
       }
     }
   }
-  const bidderQuotes = bidderOf.size
-    ? [...(await getQuotesByIds([...bidderOf.keys()])).values()].map((d) => ({ ...d, bidders: bidderOf.get(d.id) ?? [] }) as unknown as Doc)
+  // At most CANDIDATES quotes through the bidder path, newest bidder rows first (a busy GC can be on hundreds).
+  const bidderIds = [...bidderSeen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, CANDIDATES).map(([id]) => id);
+  const bidderQuotes = bidderIds.length
+    ? [...(await getQuotesByIds(bidderIds)).values()].map((d) => ({ ...d, bidders: bidderOf.get(d.id) ?? [] }) as unknown as Doc)
     : [];
   const quoteDocs = [...partialQuotes, ...quotes, ...bidderQuotes].map((d) =>
     bidderOf.has(d.id) ? ({ ...d, bidders: bidderOf.get(d.id) } as unknown as Doc) : d

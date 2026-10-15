@@ -13,7 +13,7 @@ import { listFor } from "@/lib/stores/parties";
 import { get as getQuote } from "@/lib/stores/quotes";
 
 /** #348 slice 2a — the Bidders card's server actions. Reads need a signed-in user; every mutation needs `create`. */
-export type BidPanelResult = { ok: true; panel: BidPanelVM } | { ok: false; error: string };
+export type BidPanelResult = { ok: true; panel: BidPanelVM; note?: string } | { ok: false; error: string };
 
 const DENIED = "You can't change this bid.";
 const isId = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 200;
@@ -81,7 +81,10 @@ export async function bidPanelAction(quoteId: string): Promise<BidPanelResult> {
  * Gate, run the store call, then return the fresh panel (or the store's error). The gate runs first, so a
  * `quoteId` given as a resolver (a bidder id → its quote) is only looked up for a permitted user.
  */
-async function mutate(quoteRef: unknown | (() => Promise<unknown>), run: (userId: string) => Promise<{ ok: boolean; error?: string }>): Promise<BidPanelResult> {
+async function mutate(
+  quoteRef: unknown | (() => Promise<unknown>),
+  run: (userId: string) => Promise<{ ok: boolean; error?: string; note?: string }>
+): Promise<BidPanelResult> {
   const user = await requireUser();
   if (!can("create", user.roles)) return { ok: false, error: DENIED };
   const quoteId = typeof quoteRef === "function" ? await (quoteRef as () => Promise<unknown>)() : quoteRef;
@@ -89,7 +92,8 @@ async function mutate(quoteRef: unknown | (() => Promise<unknown>), run: (userId
   const r = await run(user.id);
   if (!r.ok) return { ok: false, error: r.error || "That didn't save." };
   revalidatePath("/", "layout");
-  return loadPanel(quoteId, true);
+  const panel = await loadPanel(quoteId, true);
+  return panel.ok && r.note ? { ...panel, note: r.note } : panel;
 }
 
 /** The quote a bidder belongs to (a bidder id is a party id; its record id is the quote). */
@@ -114,7 +118,7 @@ export async function addBidderAction(
     return addBidder(
       { quoteId, companyId: input.companyId, contactId: input.contactId ?? null, role: input.role, submitVia: input.submitVia === "website" ? "website" : "email" },
       uid
-    );
+    ).then((r) => (r.ok && r.existed ? { ...r, note: "Already a bidder." } : r));
   });
 }
 

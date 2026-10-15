@@ -1413,8 +1413,6 @@ See `.env.example`.
     list and the pick lists in `field-lists.ts`, tell the reps older surveys
     ask for Scope first, send the CW Elevation and line set schedule sheets,
     try a real assessment end to end. Punch item #344.
-63. ✅ **Mailbox identity** (#349, D1063–D1073) — mailbox ownership follows the user's id (`CommThread.mailboxOwnerId`; one rule `ownsMailbox`, stamp → Gmail key → a name only one user holds, else nobody; `ownMailboxCond` in SQL; viewers from `src/lib/mailbox-viewer.ts`), assignments carry `assignedToId`, creators refuse a blank owner, legacy threads stamp lazily in write guards and via `npm run comms:stamp-owners` (Jeff-gated prod run; shared names get the `"unresolved"` tombstone), a rename or new hire never moves mail (`src/lib/mailbox-names.ts`), and Settings → Team refuses duplicate names. Punch item #349.
-
 62. 🚧 **Estimate parties — slices 1 + 2a** (#348, D1058–D1062, D1074–D1078) — Jeff, Oct 14: an
     estimate can name more than one company. Slice 1 is the parties core: a
     `record_parties` doc collection (migration 0041; id `pty_` + sha1 of
@@ -1446,8 +1444,8 @@ See `.env.example`.
     the owner — the only real run of the postgres-js savepoint path — then
     delete the test records.
     ✅ Slice 2a (D1074–D1078, Oct 15) — bids: `Quote.bid` `{dueAt, addenda,
-    awardedPartyId}` (content; one writer `patchQuoteBid`, bumps `updatedAt`)
-    plus per-bidder state on the quote's GC/EC party rows (`setPartyBid`),
+    awardedPartyId}` (one writer `patchQuoteBid`; not content in 2a and never
+    bumps `updatedAt` — 2b re-adds both with a PDF re-render) plus per-bidder state on the quote's GC/EC party rows (`setPartyBid`),
     composed by `src/lib/stores/bids.ts`; pure rules in `src/lib/parties/`.
     Every bid write takes the quote row lock first (`withQuoteRowLock`, the
     order `setStatus` uses). A Bid chip (due date + addenda) in the Estimator
@@ -1457,11 +1455,14 @@ See `.env.example`.
     emailed bids until 2b), Award / Undo award. The owner stays the customer
     (venue ids are per company); the winner is `bid.awardedPartyId`, other
     pending bidders become "Lost the award", and the project stamps
-    `billToCompanyId` at Won (own savepoint). Surfaced on the Quotes hub
+    `billToCompanyId` at Won (own savepoint); losing bidders (lost / withdrew /
+    no bid) don't carry to the project. Surfaced on the Quotes hub
     ("Out to bid"), ⌘K by bidder name, Morning triage "bid due" and the
     project's Bill to. Remaining: 2b (per-bidder PDFs, client links, send to
     all), then slices 3–6; prod check adds due date → two bidders → Award →
     Won → Bill to. Punch item #348.
+
+63. ✅ **Mailbox identity** (#349, D1063–D1073) — mailbox ownership follows the user's id (`CommThread.mailboxOwnerId`; one rule `ownsMailbox`, stamp → Gmail key → a name only one user holds, else nobody; `ownMailboxCond` in SQL; viewers from `src/lib/mailbox-viewer.ts`), assignments carry `assignedToId`, creators refuse a blank owner, legacy threads stamp lazily in write guards and via `npm run comms:stamp-owners` (Jeff-gated prod run; shared names get the `"unresolved"` tombstone), a rename or new hire never moves mail (`src/lib/mailbox-names.ts`), and Settings → Team refuses duplicate names. Punch item #349.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

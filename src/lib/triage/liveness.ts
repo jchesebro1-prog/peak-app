@@ -7,6 +7,8 @@ import { normalizeRecording, type RecordingRecord } from "@/lib/stores/recording
 import type { Quote } from "@/lib/stores/quotes";
 import { quoteAwaitsApprovalBy, quoteBackFromReview } from "@/lib/quote-approval-rules";
 import { portalBellGroups } from "@/lib/portal-bell";
+import type { BidderState } from "@/lib/parties/rules";
+import { bidDueFact } from "./feeds/quotes";
 import { parseTriageKey } from "./keys";
 import type { SnapshotRow, TriageSource, TriageUser } from "./types";
 
@@ -17,7 +19,14 @@ export type LiveDocs = {
   threads: ReadonlyMap<string, Pick<CommThread, "status" | "archived" | "assignedTo" | "deleted" | "gmailInboxed">>;
   recordings: ReadonlyMap<string, { actionItems: readonly { key: string; disposition: string }[] }>;
   quotes: ReadonlyMap<string, Quote>;
+  /** #348 — bidder rows for the quotes that could still carry a bid-due fact (absent = none loaded). */
+  bidders?: ReadonlyMap<string, ReadonlyArray<{ bid: BidderState | null }>>;
 };
+
+/** #348 — the cheap pre-check before any bidder read: mine, open, with a due date and no award. Pure. */
+export function maybeBidDue(q: Quote, me: Pick<TriageUser, "name">): boolean {
+  return !!q.owner && q.owner === me.name && (q.status === "draft" || q.status === "sent") && !!q.bid?.dueAt && !q.bid.awardedPartyId;
+}
 
 /**
  * Spec "Snapshots and refresh": between runs the list is frozen, except rows
@@ -55,7 +64,13 @@ export function closedKeys(rows: readonly SnapshotRow[], docs: LiveDocs, me: Tri
       }
       case "quote": {
         const q = docs.quotes.get(k.id);
-        const stillMine = !!q && (quoteAwaitsApprovalBy(q, me.name, me.canApprove) || quoteBackFromReview(q, me.name) === "changes" || portalReview.has(q.id));
+        const stillMine =
+          !!q &&
+          (quoteAwaitsApprovalBy(q, me.name, me.canApprove) ||
+            quoteBackFromReview(q, me.name) === "changes" ||
+            portalReview.has(q.id) ||
+            // #348 — a bid I own, still due and still missing a bidder's current revision (the feed's own rule).
+            (maybeBidDue(q, me) && !!bidDueFact(q, docs.bidders?.get(q.id) ?? [], { me, now })));
         if (!stillMine) closed.add(r.key);
         break;
       }
@@ -83,5 +98,13 @@ export async function loadClosedKeys(rows: readonly SnapshotRow[], me: TriageUse
     mailboxViewer(me),
   ]);
   const recordings = new Map([...liveMap(recs)].map(([id, d]) => [id, normalizeRecording(d)]));
-  return closedKeys(rows, { tasks: liveMap(tasks), assignments: liveMap(assignments), threads: liveMap(threads), recordings, quotes: liveMap(quotes) }, me, now, viewer);
+  const liveQuotes = liveMap(quotes);
+  // #348 — bidder rows only for quotes that pass the cheap checks (one batched read; parties store loaded lazily).
+  const bidIds = [...liveQuotes.values()].filter((q) => maybeBidDue(q, me)).map((q) => q.id);
+  let bidders: Map<string, Array<{ bid: BidderState | null }>> | undefined;
+  if (bidIds.length) {
+    const { listForRecords } = await import("@/lib/stores/parties");
+    bidders = await listForRecords("quote", bidIds);
+  }
+  return closedKeys(rows, { tasks: liveMap(tasks), assignments: liveMap(assignments), threads: liveMap(threads), recordings, quotes: liveQuotes, bidders }, me, now, viewer);
 }

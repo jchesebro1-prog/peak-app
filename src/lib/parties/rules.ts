@@ -105,10 +105,14 @@ export function ownerConflict(existing: readonly Party[], input: Pick<PartyInput
 }
 
 /** Carry-over (spec §3.5): lead → estimate copies everyone but GC/EC (bidders are ticked per estimate);
- *  estimate → project copies everyone. Nothing else carries. */
-export function carriesTo(from: PartyRecordType, to: PartyRecordType, p: Pick<Party, "role">): boolean {
+ *  estimate → project copies everyone except losing bidders (#348 2a: a bid result of lost / withdrew / no_bid
+ *  stays on the estimate; the awarded, pending and non-bidder rows carry). Nothing else carries. */
+export function carriesTo(from: PartyRecordType, to: PartyRecordType, p: Pick<Party, "role"> & { bid?: BidderState | null }): boolean {
   if (from === "lead" && to === "quote") return p.role !== "gc" && p.role !== "ec";
-  if (from === "quote" && to === "project") return true;
+  if (from === "quote" && to === "project") {
+    const r = p.bid?.result;
+    return r !== "lost" && r !== "withdrew" && r !== "no_bid";
+  }
   return false;
 }
 

@@ -100,6 +100,18 @@ export default function BidChip({ quoteId, canEdit }: { quoteId: string | null; 
     return () => window.removeEventListener("focus", onFocus);
   }, [quoteId, reload]);
 
+  // The Bidders card announces each successful change in this window. Reload for this quote only; no time
+  // throttle (each event is one user action), and latest-response-wins (`seq`) keeps overlapping loads safe.
+  useEffect(() => {
+    if (!quoteId) return;
+    const onChanged = (e: Event) => {
+      if ((e as CustomEvent<{ quoteId?: string }>).detail?.quoteId !== quoteId) return;
+      void reload();
+    };
+    window.addEventListener("peak:bid-changed", onChanged);
+    return () => window.removeEventListener("peak:bid-changed", onChanged);
+  }, [quoteId, reload]);
+
   useEffect(() => {
     const d = dialog.current;
     if (!d) return;
@@ -148,6 +160,7 @@ export default function BidChip({ quoteId, canEdit }: { quoteId: string | null; 
     }
   };
 
+  const nextAddendumNo = addenda.length ? Math.max(...addenda.map((a) => a.no)) + 1 : 1;
   const addAddendum = () =>
     setAddenda((l) => [...l, { no: l.length ? Math.max(...l.map((a) => a.no)) + 1 : 1, receivedAt: fromDateInput(toDateInput(Date.now())) ?? Date.now(), note: "" }]);
   const editAddendum = (i: number, patch: Partial<BidAddendum>) => setAddenda((l) => l.map((a, j) => (j === i ? { ...a, ...patch } : a)));
@@ -236,7 +249,7 @@ export default function BidChip({ quoteId, canEdit }: { quoteId: string | null; 
                 </div>
               ))}
               {!readOnly && (
-                <button type="button" onClick={addAddendum} disabled={addenda.length >= 30} style={{ ...btn, marginTop: 6 }}>
+                <button type="button" onClick={addAddendum} disabled={addenda.length >= 30 || nextAddendumNo > 99} style={{ ...btn, marginTop: 6 }}>
                   + Addendum
                 </button>
               )}
