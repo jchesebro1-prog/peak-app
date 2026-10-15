@@ -1,3 +1,4 @@
+import peakLetterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
 import { notFound } from "next/navigation";
 import QuoteDocument, { QUOTE_PRINT_CSS } from "@/app/(app)/estimator/quote-document";
 import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
@@ -84,7 +85,7 @@ export default async function PrintQuotePage({
       {cutSheets?.ok && cutSheets.models.client.length > 0 && (
         <div style={{ breakBefore: "page" }}>
           <style>{CLIENT_PRINT_CSS}</style>
-          <CutSheetPages models={cutSheets.models.client} style="client" photos={cutSheets.photos} />
+          <CutSheetPages models={cutSheets.models.client} style="client" photos={cutSheets.photos} letterheadSrc={peakLetterhead.src} />
         </div>
       )}
     </main>

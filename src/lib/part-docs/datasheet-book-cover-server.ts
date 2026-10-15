@@ -110,11 +110,14 @@ export async function gridBookCover(project: GridProject, opts: { quoteId?: stri
  * changes the key (bookCachePath, and the estimate zip's packageZipCachePath).
  * A null cover (the book's plain cover) has its own key.
  */
-export function bookCoverFingerprint(cover: BookCover | null, letterhead: Letterhead | null): string {
+export function bookCoverFingerprint(cover: BookCover | null, letterhead: Letterhead | null, specLetterhead?: Letterhead | null): string {
   const digest = (b: Uint8Array | null | undefined) => (b ? createHash("sha256").update(b).digest("hex") : null);
+  const lh = (l: Letterhead | null) => (l ? { name: l.companyName, d: digest(l.image?.png ?? l.image?.jpeg), full: !!l.image?.full } : null);
   const facts = {
     cover: cover ? { ...cover, customerLogo: cover.customerLogo ? { f: cover.customerLogo.format, d: digest(cover.customerLogo.bytes) } : null } : null,
-    letterhead: letterhead ? { name: letterhead.companyName, d: digest(letterhead.image?.png ?? letterhead.image?.jpeg), full: !!letterhead.image?.full } : null,
+    letterhead: lh(letterhead),
+    // Jeff 2026-10-15 #12: the estimate zip's Specifications.docx letterhead, when the caller keys it too.
+    ...(specLetterhead !== undefined ? { spec: lh(specLetterhead) } : {}),
   };
   return createHash("sha256").update(JSON.stringify(facts)).digest("hex").slice(0, 8);
 }

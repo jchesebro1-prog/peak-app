@@ -22,6 +22,8 @@ import { documentRevStamp, maxSentRevNo, nextSendRevNo, sentRevNo } from "../src
 import { quoteAsOfRevision, sentDocumentStamp } from "../src/lib/quote-share/view";
 import { addQuoteRevision } from "../src/lib/stores/quotes";
 import { bomViewProps } from "../src/app/(app)/estimator/quote-document-view";
+import { documentLetterhead, fullDocumentLetterhead } from "../src/lib/letterhead-server";
+import { bookCoverFingerprint } from "../src/lib/part-docs/datasheet-book-cover-server";
 import { appendResponseTo, MAX_CLIENT_RESPONSES, responseQuoteLimitKey, type ClientResponse } from "../src/lib/estimate-output/responses";
 
 const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -31,6 +33,7 @@ const PTY2 = "pty_fedcba9876543210";
 export async function oct15PureChecks(ok: Ok) {
   oct15ReviewAmountChecks(ok);
   oct15RevChecks(ok);
+  await oct15LetterheadChecks(ok);
   /* ---- #14 — the online / package-page BOM follows the PDF's Qty switch ---- */
   {
     const props = (pdfQty: boolean) => ({ pdfQty, pdfNotes: false, pdfPrices: true, detail: "sectioned", sections: [], document: null, pdfItemizedAppendix: true }) as never;
@@ -116,6 +119,32 @@ async function dropCompanies() {
   const db = await getDb();
   await db.delete(contactsTable).where(like(contactsTable.id, `TEST${FIX}:%`));
   await db.delete(companies).where(like(companies.id, `TEST${FIX}:%`));
+}
+
+/* ---- #12 — the full Peak letterhead on the estimate's Datasheets.pdf cover and the client cut sheets ---- */
+async function oct15LetterheadChecks(ok: Ok) {
+  // A 1×1 PNG "logo" — documentLetterhead (the D59 ladder) prints it; the estimate book never does.
+  const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const settings = { companyName: "Peak Systems Group", logoDark: png } as never;
+  const full = await fullDocumentLetterhead(settings, true);
+  const ladder = await documentLetterhead(settings, true);
+  ok(!!full?.image && full.image.full === true && full.image.png === null && full.image.w > 1000, "oct15 #12: the estimate book letterhead is the full baked Peak sheet, even with a Branding logo");
+  ok(!!ladder?.image && ladder.image.full === false, "oct15 #12: the document ladder (Specifications.docx, letters) still prints the uploaded logo");
+  ok((await fullDocumentLetterhead(settings, false)) === null, "oct15 #12: the Peak-header choice still turns the book's letterhead off");
+  ok(bookCoverFingerprint(null, full) !== bookCoverFingerprint(null, full, ladder) && bookCoverFingerprint(null, full, undefined) === bookCoverFingerprint(null, full),
+    "oct15 #12: the zip cache key folds in the spec's own letterhead only when given (old book keys unchanged)");
+  const zs = rd("src/lib/estimate-output/package-zip-server.ts");
+  ok(zs.includes("bookLetterhead: loadEstimateBookLetterhead,") && zs.includes("buildSpecDocx(sp.spec, { letterhead: specLetterhead })") && zs.includes("loadEstimateBookLetterhead(peakHeader), loadDocumentLetterhead(peakHeader)"),
+    "oct15 #12: the package zip's book takes the full sheet; Specifications.docx keeps its own letterhead");
+  const dl = rd("src/lib/part-docs/datasheet-book-download.ts");
+  ok(dl.includes("quoteBookCover(q), loadEstimateBookLetterhead(q.packagePeakHeader)") && dl.includes("loadEstimateBookLetterhead(resolvePeakHeader(q.packagePeakHeader") && dl.includes("gridBookCover(project, { quoteId, by }), loadDocumentLetterhead(opts.peakHeader)"),
+    "oct15 #12: the staff and share-page estimate books take the full sheet; the Grid design's book is unchanged");
+  ok(rd("src/lib/client-package-server.ts").includes("`[package] quote ${quote.id}`, bookLetterhead, bookCover)"), "oct15 #12: the Quotes-hub client package's book takes the full sheet");
+  const cs = rd("src/components/cutsheets/cut-sheet-pages.tsx");
+  ok(cs.includes('className="pk-cs-letterhead" src={letterheadSrc}') && !cs.includes("m.header.logoDark") && cs.includes("<SubmittalSheet key={m.sheetNo} m={m} />"),
+    "oct15 #12: a client cut sheet heads with the full letterhead (never the Branding logo); the submittal keeps its title block");
+  ok(["src/app/print/cutsheets/[quoteId]/page.tsx", "src/app/print/quote/[id]/page.tsx", "src/app/estimator-preview/[id]/page.tsx", "src/app/(app)/estimator/cut-sheets/page.tsx"].every((f) => /<CutSheetPages [^>]*letterheadSrc=\{(peakLetterhead|letterhead)\.src\}/.test(rd(f))),
+    "oct15 #12: every cut-sheet page passes the baked letterhead");
 }
 
 /* ---- #13 — every send gets the next Rev; numbers never repeat ---- */

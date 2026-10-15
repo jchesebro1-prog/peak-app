@@ -16,7 +16,7 @@ import type { SharedPackage } from "@/lib/quote-share/links";
 import { sentDocumentStamp } from "@/lib/quote-share/view";
 import { allSections } from "@/lib/stores/spec-sections";
 import type { Letterhead } from "@/lib/letterhead";
-import { loadDocumentLetterhead, loadPeakHeaderDefault } from "@/lib/letterhead-server";
+import { loadDocumentLetterhead, loadEstimateBookLetterhead, loadPeakHeaderDefault } from "@/lib/letterhead-server";
 import { resolvePeakHeader } from "@/lib/letterhead";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import { createStoredZip, zipStream, type ZipFile } from "@/lib/zip";
@@ -41,15 +41,19 @@ import {
 /** `coverOk` (Grid notes #8): false when the book's job cover couldn't be loaded — a plain cover is never frozen in the cache. */
 export type BuiltPackageZip = { zip: Buffer; leftOut: LeftOut[]; datasheets: number; specsheets: number; specifications: boolean; book?: boolean; coverOk?: boolean } | null;
 
-/** Grid notes #8 — the book's front matter for one download: the job cover (null + coverOk false = it couldn't be loaded) and the letterhead. */
-export type ZipBookFront = { cover: BookCover | null; coverOk: boolean; letterhead: Letterhead | null };
+/** Grid notes #8 — the book's front matter for one download: the job cover (null + coverOk false = it couldn't be loaded) and the
+ *  letterhead (Jeff 2026-10-15 #12: the full baked Peak sheet). `specLetterhead` — Specifications.docx's own (the D59 ladder,
+ *  unchanged); absent = resolved by the build. */
+export type ZipBookFront = { cover: BookCover | null; coverOk: boolean; letterhead: Letterhead | null; specLetterhead?: Letterhead | null };
 
 type ZipDeps = {
   read: (blobKey: string, signal: AbortSignal) => Promise<ReadableStream | null>;
   sections: () => Promise<Awaited<ReturnType<typeof allSections>>>;
   now: () => number;
-  /** Grid notes #9 — the specification's first-page letterhead (null = none); #329: also the datasheet book's cover. */
+  /** Grid notes #9 — the specification's first-page letterhead (null = none). */
   letterhead: (perDoc: boolean | null | undefined) => Promise<Letterhead | null>;
+  /** Jeff 2026-10-15 #12 — the datasheet book's cover: the full baked Peak letterhead (null = none). */
+  bookLetterhead: (perDoc: boolean | null | undefined) => Promise<Letterhead | null>;
   /** #329b — the #298 manufacturer merges for the datasheet book (null = each part's own manufacturer). */
   canonicalMfr: () => Promise<CanonicalMfr | null>;
   /** Grid notes #8 — the datasheet book's job cover for this revision. */
@@ -61,6 +65,7 @@ const liveZipDeps: ZipDeps = {
   sections: allSections,
   now: Date.now,
   letterhead: loadDocumentLetterhead,
+  bookLetterhead: loadEstimateBookLetterhead,
   canonicalMfr: () => loadCanonicalMfr(undefined, "[package]"),
   bookCover: (q, rev) => quoteBookCover(q, { rev }),
 };
@@ -88,9 +93,12 @@ export async function buildRevisionPackageZip(q: Quote, rev: QuoteRevision, deps
   // Grid notes #9 — the estimate's own "Include Peak header" (staff package panel) ?? the company default.
   // #329: the same letterhead heads the datasheet book's cover.
   // Grid notes #8: servePackageZip passes the front it keyed the cache by — the build prints exactly that.
-  const letterhead = opts.front ? opts.front.letterhead : await d.letterhead(typeof opts.peakHeader === "boolean" ? opts.peakHeader : q.packagePeakHeader);
+  // Jeff 2026-10-15 #12: the book's cover takes the full baked Peak sheet; Specifications.docx keeps its own ladder.
+  const header = typeof opts.peakHeader === "boolean" ? opts.peakHeader : q.packagePeakHeader;
+  const letterhead = opts.front ? opts.front.letterhead : await d.bookLetterhead(header);
+  const specLetterhead = opts.front && opts.front.specLetterhead !== undefined ? opts.front.specLetterhead : await d.letterhead(header);
   let coverOk = opts.front ? opts.front.coverOk : true;
-  if (specifications) files.push({ name: SPEC_DOCX_NAME, data: await buildSpecDocx(sp.spec, { letterhead }) });
+  if (specifications) files.push({ name: SPEC_DOCX_NAME, data: await buildSpecDocx(sp.spec, { letterhead: specLetterhead }) });
 
   // #329 — the book's rows: one per BOM part, manufacturer A→Z; datasheets are read in that order.
   const partBySku = new Map(docs.parts.map((p) => [p.sku, p] as const));
@@ -220,15 +228,22 @@ type ServeDeps = {
   front: (q: Quote, rev: QuoteRevision, peakHeader: boolean) => Promise<ZipBookFront>;
 };
 
-/** The live front: the letterhead for the resolved header, and the revision's job cover (a load failure → null, coverOk false). */
+/** The live front: the letterheads for the resolved header (the book's full sheet, the spec's ladder), and the revision's
+ *  job cover (a load failure → null, coverOk false). */
 async function liveZipFront(q: Quote, rev: QuoteRevision, peakHeader: boolean): Promise<ZipBookFront> {
-  const letterhead = await loadDocumentLetterhead(peakHeader);
+  const [letterhead, specLetterhead] = await Promise.all([loadEstimateBookLetterhead(peakHeader), loadDocumentLetterhead(peakHeader)]);
   try {
-    return { cover: await quoteBookCover(q, { rev }), coverOk: true, letterhead };
+    return { cover: await quoteBookCover(q, { rev }), coverOk: true, letterhead, specLetterhead };
   } catch (e) {
     console.warn(`[package] ${q.id} rev ${rev.rev}: datasheet book job cover not loaded`, e instanceof Error ? e.message : e);
-    return { cover: null, coverOk: false, letterhead };
+    return { cover: null, coverOk: false, letterhead, specLetterhead };
   }
+}
+
+/** The zip cache's front key: the book cover + its letterhead, plus (#12) the spec's own letterhead when it differs —
+ *  a Branding logo change still re-keys a zip whose Specifications.docx prints it. */
+export function zipFrontKey(front: ZipBookFront): string {
+  return front.specLetterhead === undefined ? bookCoverFingerprint(front.cover, front.letterhead) : bookCoverFingerprint(front.cover, front.letterhead, front.specLetterhead);
 }
 
 /** Next's `after()` where there is a request scope, else a plain un-awaited call; a rejection is the task's own to catch. */
@@ -269,7 +284,7 @@ export async function servePackageZip(pkg: SharedPackage, deps: Partial<ServeDep
   const peakHeader = await d.peakHeader(pkg.q);
   // Grid notes #8: so is Datasheets.pdf's job cover — it reads live data (logo, contact, estimator), so it keys the cache too.
   const front = await d.front(pkg.q, pkg.rev, peakHeader);
-  const path = packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader, bookCoverFingerprint(front.cover, front.letterhead));
+  const path = packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader, zipFrontKey(front));
   if (d.cacheOn) {
     try {
       const cached = await d.get(path);

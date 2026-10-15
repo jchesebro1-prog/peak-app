@@ -9,7 +9,7 @@ import { bookRows, revisionPackageDocs, specPackageDocs } from "@/lib/estimate-o
 import { PACKAGE_ZIP_DOC_MAX_BYTES, PACKAGE_ZIP_TOTAL_MAX_BYTES, packageZipCacheDir, packageZipCacheOn } from "@/lib/estimate-output/package-zip";
 import type { Letterhead } from "@/lib/letterhead";
 import { resolvePeakHeader } from "@/lib/letterhead";
-import { loadDocumentLetterhead, loadPeakHeaderDefault } from "@/lib/letterhead-server";
+import { loadDocumentLetterhead, loadEstimateBookLetterhead, loadPeakHeaderDefault } from "@/lib/letterhead-server";
 import type { CoverageIndex } from "@/lib/part-docs/coverage";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { resolvePackageDocs } from "@/lib/part-docs/package";
@@ -183,7 +183,8 @@ export async function quoteBookPdf(quoteId: string, opts: { startedAt: number; d
   // #333: the estimate's own datasheet choices — a left-out product is not in the book (Q2).
   const docs = await specPackageDocs(q.spec, q.packageSelection ?? null);
   const partBySku = new Map(docs.parts.map((p) => [p.sku, p] as const));
-  const [cover, letterhead, canonicalMfr] = await Promise.all([quoteBookCover(q), loadDocumentLetterhead(q.packagePeakHeader), loadCanonicalMfr(undefined, "[datasheets]")]);
+  // Jeff 2026-10-15 #12: an estimate's book cover takes the full baked Peak letterhead.
+  const [cover, letterhead, canonicalMfr] = await Promise.all([quoteBookCover(q), loadEstimateBookLetterhead(q.packagePeakHeader), loadCanonicalMfr(undefined, "[datasheets]")]);
   return buildBookDownload({
     startedAt,
     inputs: loadBookInputs({ rows: bookRows(docs), partOf: (sku) => partBySku.get(sku), docsOf: (sku) => docs.bySku.get(sku), canonicalMfr }),
@@ -312,7 +313,8 @@ export async function serveSharedBook(pkg: SharedPackage, deps: Partial<ServeDep
     },
     defer: deferTask,
     cover: (q, rev) => quoteBookCover(q, { rev }),
-    letterhead: async (q) => loadDocumentLetterhead(resolvePeakHeader(q.packagePeakHeader, await loadPeakHeaderDefault())),
+    // Jeff 2026-10-15 #12: the full baked Peak letterhead on an estimate's book cover.
+    letterhead: async (q) => loadEstimateBookLetterhead(resolvePeakHeader(q.packagePeakHeader, await loadPeakHeaderDefault())),
     build: (q, rev, cover, letterhead, t0) => revisionBookPdf(q, rev, cover, letterhead, { startedAt: t0 }),
     ...deps,
   };

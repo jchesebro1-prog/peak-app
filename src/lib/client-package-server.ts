@@ -37,7 +37,7 @@ import { rackElevationPng } from "@/lib/rack/raster";
 import { racksInGrid, racksInQuote, scheduleCsv } from "@/lib/rack/submittal";
 import { RACK_MIN_RENDER_MS, rackSubmittalFiles } from "@/lib/rack/submittal-server";
 import type { Letterhead } from "@/lib/letterhead";
-import { loadDocumentLetterhead } from "@/lib/letterhead-server";
+import { loadDocumentLetterhead, loadEstimateBookLetterhead } from "@/lib/letterhead-server";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { normalizePackageSelection } from "@/lib/estimate-output/package-selection";
 import { liveRenameRefs } from "@/lib/stores/catalog-renames";
@@ -740,7 +740,9 @@ export async function createQuoteClientPackage(quote: Quote, by: string, opts: {
   }, files, gaps, bookPlan, d.readDoc);
   // Grid notes #8 — the book's job cover.
   const bookCover = await safeBookCover(d, { kind: "quote", quote });
-  const bookP = packageBook(bookParts, bookDocs, [quote.name, quote.customer, `Estimate ${displayQuoteNumber(quote)}`, bookDate(Date.now())], cutSheetsBy, `[package] quote ${quote.id}`, letterhead, bookCover);
+  // Jeff 2026-10-15 #12: the estimate's Datasheets.pdf cover takes the full baked Peak letterhead (the spec keeps its own).
+  const bookLetterhead = await loadEstimateBookLetterhead(typeof opts.peakHeader === "boolean" ? opts.peakHeader : quote.packagePeakHeader);
+  const bookP = packageBook(bookParts, bookDocs, [quote.name, quote.customer, `Estimate ${displayQuoteNumber(quote)}`, bookDate(Date.now())], cutSheetsBy, `[package] quote ${quote.id}`, bookLetterhead, bookCover);
   // Grid notes #7 — a quote minted by a Grid design ships that option's drawing set (the first render on the
   // package's deadline) in place of the equipment summary; a failed render keeps the summary plus one gap.
   // A quote with no Grid design keeps the summary, no gap.
