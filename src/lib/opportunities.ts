@@ -48,6 +48,8 @@ export type OppLeadInput = {
   convertedCustomerId: string | null;
   convertedQuoteId: string | null;
   forecastAt: number | null;
+  /** #346 — the lead has ≥ 1 estimate (Quote.leadId). Its estimates ride the board instead, like a converted lead. */
+  hasEstimates?: boolean;
 };
 
 export type OppQuoteInput = {
@@ -126,7 +128,7 @@ export function canSetPoReceived(status: string): boolean {
 /* ---- the union ---- */
 
 /**
- * Build the merged board rows. A converted lead (non-null convertedQuoteId)
+ * Build the merged board rows. A converted lead (non-null convertedQuoteId) or a lead with estimates (#346)
  * is EXCLUDED — its quote carries the opportunity from there — but its
  * forecastAt is inherited onto that quote's card. ALL quoteTypes ride the
  * board (flame_test / repair / inspection / consulting bids are pipeline
@@ -141,7 +143,7 @@ export function buildOpportunities(
 
   const rows: OppRow[] = [];
   for (const l of leads) {
-    if (l.convertedQuoteId) continue;
+    if (l.convertedQuoteId || l.hasEstimates) continue;
     const col = leadColumn(l.stage);
     if (!col) continue;
     rows.push({

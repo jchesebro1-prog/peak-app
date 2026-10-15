@@ -33,6 +33,8 @@ import WorklistRow from "./worklist-row";
 import LeadDrawer from "./lead-drawer";
 import { MeetingsCard } from "@/components/meetings/meetings-card";
 import { AssessmentsCard } from "@/components/assessments/assessment-cards";
+import { PartiesCard } from "@/components/parties/parties-card";
+import { LeadEstimates } from "@/components/parties/lead-estimates";
 import { OwnerDot } from "./avatar";
 import { setStageAction } from "./actions";
 import { getSettings } from "@/lib/settings";
@@ -871,6 +873,8 @@ export default async function LeadsPage({
               <>
                 <MeetingsCard kind="work" id={leadRec.id} viewerId={me.id} style={{ marginTop: 18 }} />
                 <AssessmentsCard leadId={leadRec.id} customerId={leadRec.customerId ?? leadRec.convertedCustomerId ?? undefined} compact />
+                <PartiesCard recordType="lead" recordId={leadRec.id} />
+                <LeadEstimates leadId={leadRec.id} />
               </>
             ) : null
           }

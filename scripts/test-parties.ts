@@ -9,6 +9,7 @@ import { DEMO_COLLECTIONS } from "../src/db/seed-data";
 import { saveCompany } from "../src/lib/identity/companies";
 import { saveContact } from "../src/lib/identity/contacts";
 import { dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
+import { buildOpportunities, type OppLeadInput } from "../src/lib/opportunities";
 import { addParty, copyParties, listFor, listForCompany, listForRecords, partyId, removeParty, setPartyContact } from "../src/lib/stores/parties";
 import {
   PARTY_ROLES, PARTY_RECORD_TYPES, ROLE_LABEL, ROLE_SHORT, partyInputProblem, normalizePartyInput, ownerConflict, carriesTo,
@@ -63,6 +64,11 @@ export async function partyChecks(ok: Ok) {
   ok(leadEstimatesTotal([{ status: "draft", value: 100.4 }, { status: "sent", value: 200 }, { status: "won", value: 50 }, { status: "lost", value: 999 }, {}]) === 350, "parties: estimates total sums draft/sent/won, rounds, skips lost");
   const w = leadIdsWithEstimates([{ leadId: "L-1" }, { leadId: null }, {}, { leadId: "L-2" }, { leadId: "L-1" }]);
   ok(w.size === 2 && w.has("L-1") && w.has("L-2"), "parties: lead ids with estimates");
+  const leadIn = (id: string, extra: Partial<OppLeadInput> = {}): OppLeadInput => ({
+    id, org: "Org", interest: "x", stage: "new", owner: "", value: 1000, createdAt: 1, updatedAt: 1, customerId: null, convertedCustomerId: null, convertedQuoteId: null, forecastAt: null, ...extra,
+  });
+  const board = buildOpportunities([leadIn("L-1"), leadIn("L-2", { hasEstimates: true })], []);
+  ok(board.some((r) => r.id === "L-1") && !board.some((r) => r.id === "L-2"), "parties: board skips a lead whose estimates carry it");
 }
 
 export async function partyDbChecks(ok: Ok) {
