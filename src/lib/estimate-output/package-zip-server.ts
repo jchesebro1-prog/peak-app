@@ -21,6 +21,8 @@ import { resolvePeakHeader } from "@/lib/letterhead";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import { createStoredZip, zipStream, type ZipFile } from "@/lib/zip";
 import { bookRows, revisionPackageDocs } from "./package-docs-server";
+import { quoteSpecDocuments, quoteSpecDocxFiles, specDocumentsKey } from "./package-spec-docs-server";
+import { createHash } from "node:crypto";
 import {
   LEFT_OUT_NAME, LEFT_OUT_REASON, leftOutText, NOTHING_TO_DOWNLOAD, PACKAGE_BOOK_MS, PACKAGE_ZIP_DEADLINE_MS, PACKAGE_ZIP_DOC_MAX_BYTES,
   PACKAGE_ZIP_TOTAL_MAX_BYTES, packageZipCacheDir, packageZipCacheOn, packageZipCachePath, packageZipFileName, SPEC_DOCX_NAME, zipCacheable,
@@ -58,6 +60,8 @@ type ZipDeps = {
   canonicalMfr: () => Promise<CanonicalMfr | null>;
   /** Grid notes #8 — the datasheet book's job cover for this revision. */
   bookCover: (q: Quote, rev: QuoteRevision) => Promise<BookCover>;
+  /** Jeff 2026-10-15 #17 — the estimate's Specs-builder Word files (SP-####), and any spec that couldn't be built. */
+  specDocFiles: (q: Quote) => Promise<{ files: ZipFile[]; skipped: string[] }>;
 };
 
 const liveZipDeps: ZipDeps = {
@@ -68,6 +72,7 @@ const liveZipDeps: ZipDeps = {
   bookLetterhead: loadEstimateBookLetterhead,
   canonicalMfr: () => loadCanonicalMfr(undefined, "[package]"),
   bookCover: (q, rev) => quoteBookCover(q, { rev }),
+  specDocFiles: (q) => quoteSpecDocxFiles(q.id),
 };
 
 /** `peakHeader` (Grid notes #9 review): the header value resolved by the caller (servePackageZip keys the
@@ -98,7 +103,13 @@ export async function buildRevisionPackageZip(q: Quote, rev: QuoteRevision, deps
   const letterhead = opts.front ? opts.front.letterhead : await d.bookLetterhead(header);
   const specLetterhead = opts.front && opts.front.specLetterhead !== undefined ? opts.front.specLetterhead : await d.letterhead(header);
   let coverOk = opts.front ? opts.front.coverOk : true;
-  if (specifications) files.push({ name: SPEC_DOCX_NAME, data: await buildSpecDocx(sp.spec, { letterhead: specLetterhead }) });
+  // Jeff 2026-10-15 #17: the estimate's own Specs-builder files (SP-####) replace the D94 Specifications.docx;
+  // without any (or when none could be built) the D94 file ships as before.
+  const sps = await d.specDocFiles(q);
+  for (const id of sps.skipped) leftOut.push({ name: `Specification ${id}`, reason: LEFT_OUT_REASON.unreadable });
+  const specFileCount = sps.files.length ? sps.files.length : specifications ? 1 : 0;
+  if (sps.files.length) files.push(...sps.files);
+  else if (specifications) files.push({ name: SPEC_DOCX_NAME, data: await buildSpecDocx(sp.spec, { letterhead: specLetterhead }) });
 
   // #329 — the book's rows: one per BOM part, manufacturer A→Z; datasheets are read in that order.
   const partBySku = new Map(docs.parts.map((p) => [p.sku, p] as const));
@@ -201,7 +212,7 @@ export async function buildRevisionPackageZip(q: Quote, rev: QuoteRevision, deps
       maxBytes: bookByteBudget([...bookDocs.values()].reduce((n, x) => n + (x.bytes?.byteLength ?? 0), 0)),
     });
     if (built.ok) {
-      files.splice(specifications ? 1 : 0, 0, { name: BOOK_FILE_NAME, data: built.bytes });
+      files.splice(specFileCount, 0, { name: BOOK_FILE_NAME, data: built.bytes });
       book = true;
       // A datasheet the book couldn't read ships loose but isn't in the book: say so (deterministic — still cacheable).
       for (const id of built.unmergeable) leftOut.push({ name: bookDocs.get(id)?.name ?? "A datasheet", reason: LEFT_OUT_REASON.notInBook });
@@ -212,7 +223,7 @@ export async function buildRevisionPackageZip(q: Quote, rev: QuoteRevision, deps
   }
   if (!files.length && !leftOut.length) return null;
   if (leftOut.length) files.push({ name: LEFT_OUT_NAME, data: Buffer.from(leftOutText(leftOut), "utf8") });
-  return { zip: createStoredZip(files), leftOut, datasheets, specsheets, specifications, book, coverOk };
+  return { zip: createStoredZip(files), leftOut, datasheets, specsheets, specifications: specFileCount > 0, book, coverOk };
 }
 
 type ServeDeps = {
@@ -226,6 +237,8 @@ type ServeDeps = {
   peakHeader: (q: Quote) => Promise<boolean>;
   /** Grid notes #8 — Datasheets.pdf's front matter for this download (its fingerprint keys the cache). */
   front: (q: Quote, rev: QuoteRevision, peakHeader: boolean) => Promise<ZipBookFront>;
+  /** Jeff 2026-10-15 #17 — names the estimate's SP-#### specs (ids + last edits) for the cache key; "" = none. */
+  specKey: (q: Quote) => Promise<string>;
 };
 
 /** The live front: the letterheads for the resolved header (the book's full sheet, the spec's ladder), and the revision's
@@ -270,6 +283,7 @@ export async function servePackageZip(pkg: SharedPackage, deps: Partial<ServeDep
     build: (q, rev, peakHeader, front) => buildRevisionPackageZip(q, rev, {}, { peakHeader, front }),
     peakHeader: async (q) => resolvePeakHeader(q.packagePeakHeader, await loadPeakHeaderDefault()),
     front: liveZipFront,
+    specKey: async (q) => specDocumentsKey(await quoteSpecDocuments(q.id)),
     ...deps,
   };
   const { revNo } = sentDocumentStamp(pkg.q, pkg.rev);
@@ -284,7 +298,10 @@ export async function servePackageZip(pkg: SharedPackage, deps: Partial<ServeDep
   const peakHeader = await d.peakHeader(pkg.q);
   // Grid notes #8: so is Datasheets.pdf's job cover — it reads live data (logo, contact, estimator), so it keys the cache too.
   const front = await d.front(pkg.q, pkg.rev, peakHeader);
-  const path = packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader, zipFrontKey(front));
+  // #17: a spec edit re-keys the zip too (the SP-#### files are read live).
+  const specKey = await d.specKey(pkg.q);
+  const frontKey = zipFrontKey(front);
+  const path = packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader, specKey ? createHash("sha256").update(`${frontKey}|${specKey}`).digest("hex").slice(0, 8) : frontKey);
   if (d.cacheOn) {
     try {
       const cached = await d.get(path);

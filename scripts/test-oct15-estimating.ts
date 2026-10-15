@@ -24,6 +24,9 @@ import { addQuoteRevision } from "../src/lib/stores/quotes";
 import { bomViewProps } from "../src/app/(app)/estimator/quote-document-view";
 import { documentLetterhead, fullDocumentLetterhead } from "../src/lib/letterhead-server";
 import { bookCoverFingerprint } from "../src/lib/part-docs/datasheet-book-cover-server";
+import { specDocumentsForQuote, specDocumentsKey, uniqueDocxName, quoteSpecDocuments } from "../src/lib/estimate-output/package-spec-docs-server";
+import { buildRevisionPackageZip } from "../src/lib/estimate-output/package-zip-server";
+import { createSpecDocument, patchSpecDocument } from "../src/lib/stores/spec-documents";
 import { appendResponseTo, MAX_CLIENT_RESPONSES, responseQuoteLimitKey, type ClientResponse } from "../src/lib/estimate-output/responses";
 
 const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -34,6 +37,19 @@ export async function oct15PureChecks(ok: Ok) {
   oct15ReviewAmountChecks(ok);
   oct15RevChecks(ok);
   await oct15LetterheadChecks(ok);
+  /* ---- #17 — the client zip carries the estimate's SP-#### Word files ---- */
+  {
+    const doc = (id: string, quoteId: string | undefined, createdAt: number, kind = "quote") => ({ id, createdAt, updatedAt: createdAt, source: { kind, ...(quoteId ? { quoteId } : {}) } }) as never;
+    const all = [doc("SP-1003", "Q-1", 30), doc("SP-1001", "Q-1", 10, "grid"), doc("SP-1002", "Q-2", 20), doc("SP-1004", undefined, 5, "scratch")];
+    ok(specDocumentsForQuote(all, "Q-1").map((d) => d.id).join() === "SP-1001,SP-1003" && specDocumentsForQuote(all, "").length === 0, "oct15 #17: an estimate's specs are those the builder opened from it (quote or Grid source), oldest first");
+    ok(specDocumentsKey([]) === "" && /^[0-9a-f]{8}$/.test(specDocumentsKey([{ id: "SP-1", updatedAt: 1 }])) && specDocumentsKey([{ id: "SP-1", updatedAt: 1 }]) !== specDocumentsKey([{ id: "SP-1", updatedAt: 2 }]),
+      "oct15 #17: the zip cache key follows each spec's last edit");
+    const used = new Set<string>();
+    ok(uniqueDocxName("A.docx", used) === "A.docx" && uniqueDocxName("A.docx", used) === "A (2).docx" && uniqueDocxName("a.docx", used) === "a (3).docx", "oct15 #17: two specs with one file name don't collide");
+    const zs = rd("src/lib/estimate-output/package-zip-server.ts");
+    ok(zs.includes("if (sps.files.length) files.push(...sps.files);") && zs.includes("else if (specifications) files.push({ name: SPEC_DOCX_NAME") && zs.includes("files.splice(specFileCount, 0, { name: BOOK_FILE_NAME"),
+      "oct15 #17: the SP files replace Specifications.docx (the D94 file only without them); Datasheets.pdf follows them");
+  }
   /* ---- #14 — the online / package-page BOM follows the PDF's Qty switch ---- */
   {
     const props = (pdfQty: boolean) => ({ pdfQty, pdfNotes: false, pdfPrices: true, detail: "sectioned", sections: [], document: null, pdfItemizedAppendix: true }) as never;
@@ -188,6 +204,30 @@ async function oct15RevDbChecks(ok: Ok) {
     "oct15 #13 db: three sends stamp Rev 1, 2, 3 (a manual snapshot in between moves nothing): " + sr.map((r) => r.docFields?.revNo).join());
 }
 
+async function oct15ZipSpecDbChecks(ok: Ok) {
+  const qid = fixtureId(FIX, "zipq");
+  await createFixture("quotes", buildQuote(qid, { name: "O15 zip", customer: "O15 Owner", customerId: CO.own, value: 1000 } as never, "system", null, Date.now()) as never);
+  await setStatus(qid, "sent", "Pat", { bypassApprovalGate: "engine-owned-flow" });
+  const q = (await getQuote(qid))!;
+  const rev = (q.revisions || []).find((r) => r.reason === "sent")!;
+  const stub = async () => ({ files: [{ name: "Peak_Spec 11 61 43_Stage Curtains.docx", data: Buffer.from("DOCX-SP") }], skipped: ["SP-1999"] });
+  const built = await buildRevisionPackageZip(q, rev, { read: async () => null, sections: async () => [], letterhead: async () => null, bookLetterhead: async () => null, specDocFiles: stub });
+  const has = (t: string) => !!built && built.zip.includes(Buffer.from(t, "utf8"));
+  ok(!!built && has("Peak_Spec 11 61 43_Stage Curtains.docx") && has("DOCX-SP") && !has("Specifications.docx") && built.specifications === true && has("Specification SP-1999"),
+    "oct15 #17 db: the zip carries the SP Word file (no D94 Specifications.docx) and names a spec it couldn't build");
+  const none = await buildRevisionPackageZip(q, rev, { read: async () => null, sections: async () => [], letterhead: async () => null, bookLetterhead: async () => null, specDocFiles: async () => ({ files: [], skipped: [] }) });
+  ok(none === null, "oct15 #17 db: without SP files and with no D94 sections there is nothing to download, as before");
+  const sp = await createSpecDocument({
+    sectionId: "sec-none", header: { projectName: "O15", projectNumber: "", phase: "", issueDate: "", preparedBy: "" }, source: { kind: "quote", id: qid, quoteId: qid },
+    products: [], printQuantities: false, fillIns: {}, createdBy: "t", updatedBy: "t",
+  } as never);
+  registerFixture("spec_documents", sp.id);
+  const linked = await quoteSpecDocuments(qid);
+  const k1 = specDocumentsKey(linked);
+  await patchSpecDocument(sp.id, (d) => ({ ...d, fillIns: { "a#1": "x" } }), "t");
+  ok(linked.length === 1 && linked[0].id === sp.id && specDocumentsKey(await quoteSpecDocuments(qid)) !== k1, "oct15 #17 db: a spec saved from the estimate is found, and editing it changes the zip's cache key");
+}
+
 export async function oct15DbChecks(ok: Ok) {
   try {
     await dropCompanies();
@@ -197,6 +237,7 @@ export async function oct15DbChecks(ok: Ok) {
     await setEmails(CO.ct, [{ value: "gee@o15.test", label: "work", isPrimary: true }] as never);
     await oct15BidDbChecks(ok);
     await oct15RevDbChecks(ok);
+    await oct15ZipSpecDbChecks(ok);
   } finally {
     await dropFixtures(FIX);
     await dropCompanies();
