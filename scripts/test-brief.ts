@@ -1010,7 +1010,7 @@ async function briefOrganizeEntryChecks(ok: Ok): Promise<void> {
   const counts = organizeCounts([th("a", "UNK"), th("b", "C1")], { id: "u-me", name: "Me", nameUnique: true }, (id) => id === "UNK");
   ok(counts.toFile === 2 && counts.strong === 1, `brief #345: a suggestion under a placeholder company is still To file but never counted strong (${JSON.stringify(counts)})`);
   const build = readFileSync("src/lib/brief/build.ts", "utf8");
-  ok(build.includes("const organize = organizeCounts(threads, me, (id) => placeholderIds.has(id));") && build.includes("isPlaceholderCompany(c.name)"), "brief #345: the build passes the placeholder companies to the Organize counts");
+  ok(build.includes("const organize = organizeCounts(threads, await mailboxViewer(me), (id) => placeholderIds.has(id));") && build.includes("isPlaceholderCompany(c.name)"), "brief #345: the build passes the placeholder companies to the Organize counts");
   const entry = readFileSync("src/app/(app)/inbox/organize/entry.ts", "utf8");
   ok(entry.includes('export const ORGANIZE_CLEANUP_HREF = `${ORGANIZE_TO_FILE_HREF}&cleanup=1`;'), "brief #345: the Inbox side builds the same cleanup link");
 }
@@ -1162,10 +1162,10 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
   ok(tasksClick.includes("runId: storedTasks.runId") && tasksClick.includes("return;") && !tasksClick.includes("suggestTasksAction"), "brief pins: Suggest tasks opens the dialog on fresh stored suggestions with their runId — no model call");
   const inbox = readFileSync("src/app/(app)/inbox/page.tsx", "utf8");
   // #341: never on a read-only (another mailbox's) thread
-  ok(/const storedDraft = readOnly \? null : readerPreDraft\(sel, \{ id: user\.id, name: me \}\);/.test(inbox) && /\n\s+preDraft,\n\s+\};/.test(inbox), "brief pins: the reader VM carries the stored pre-draft (readerPreDraft)");
+  ok(/const storedDraft = readOnly \? null : readerPreDraft\(sel, viewer\);/.test(inbox) && /\n\s+preDraft,\n\s+\};/.test(inbox), "brief pins: the reader VM carries the stored pre-draft (readerPreDraft)");
   ok(/const nudgeQuote = nudgeId \? await getQuote\(nudgeId\)\.catch\(\(\) => null\) : null;\s+const nudge = nudgePrefill\(nudgeQuote, \{ id: user\.id, name: me \}\);/.test(inbox) && /prefillRecipient\(c, nudge\.contact\)/.test(inbox) && /subject: nudge\.subject,/.test(inbox) && /body: withSignature\(nudge\.body, signature, "add"\),/.test(inbox) && !/params\.(subject|body)\b/.test(inbox), "brief pins: Inbox compose init takes ?nudge=<quoteId> (read server-side), never subject/body from the URL");
   const rp = readFileSync("src/lib/brief/reader-predraft.ts", "utf8");
-  ok(rp.includes("preDraftFreshFor(t, me.id)") && rp.includes("onMyCourt(t, env)") && rp.includes("sameName(t.assignedTo, me.name)") && rp.includes("body.trim()"), "brief pins: readerPreDraft requires fresh + court me + mine, and a body for the reply");
+  ok(rp.includes("preDraftFreshFor(t, me.id)") && rp.includes("onMyCourt(t, env)") && rp.includes("isAssignedTo(t, me)") && rp.includes("body.trim()"), "brief pins: readerPreDraft requires fresh + court me + mine, and a body for the reply");
   const view = readFileSync("src/components/brief/brief-card-view.tsx", "utf8");
   ok(view.includes("rebuildBriefAction()") && view.includes('postChanged("inbox")') && view.includes("router.refresh()"), "brief pins: Rebuild refreshes the page and tells other windows (postChanged)");
   ok(view.includes("@media (max-width:899px)") && view.includes(".pkb-big{display:block}") && view.includes("new SpeechSynthesisUtterance(vm.speech)") && /const listenBtn = canSpeak \?/.test(view) && view.includes('useSearchParams().get("brief")') && view.includes('briefParam === "1"') && view.includes("[vm.id, briefParam]") && view.includes("scrollIntoView"), "brief pins: big-text under 900 px, Listen only when speech is supported, ?brief=1 scrolls to the card");
@@ -1175,7 +1175,7 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
   ok(cueAt > 0 && /<SuggestEstimate\s+source=\{\{ kind: "lead", id: d\.leadSuggest\.leadId \}\}\s+readyHref=\{d\.leadSuggest\.readyHref\}/.test(leadCue) && leadCue.indexOf("d.leadHref && (") > leadCue.indexOf("<SuggestEstimate"), "brief pins: the lead cue is Suggest estimate (startSuggestion via SuggestEstimate) when on, else the old Open lead link");
   const card = readFileSync("src/components/brief/brief-card.tsx", "utf8");
   ok(/flags\.estimate && leadIds\.size \? suggestionReadyHrefs\("lead", \[\.\.\.leadIds\]\)/.test(card) && /quotes: quoteInfo,\s*leads,/.test(card), "brief pins: the server card looks up each Do-these-first lead's suggestion only with Suggest estimate on (pilot + estimate)");
-  ok(card.includes("loadBriefView(user, triageNow())") && card.includes("readerPreDraft(t, { id: user.id, name: user.name })") && card.includes("nudgePrefill(q, { id: user.id, name: user.name }) !== null") && /assistUiFlags\(user\.id, settings, await getAssistEnv\(\)\)/.test(card), "brief pins: the server card runs the Assist gate, reads the lazy view, ready pre-drafts and nudges the Inbox will prefill");
+  ok(card.includes("loadBriefView(user, triageNow())") && card.includes("readerPreDraft(t, viewer)") && card.includes("const viewer = await mailboxViewer(user);") && card.includes("nudgePrefill(q, { id: user.id, name: user.name }) !== null") && /assistUiFlags\(user\.id, settings, await getAssistEnv\(\)\)/.test(card), "brief pins: the server card runs the Assist gate, reads the lazy view, ready pre-drafts and nudges the Inbox will prefill");
   const cardFn = card.slice(card.indexOf("export default async function BriefCard"), card.indexOf("async function loadCardVM"));
   ok(/try \{\s*vm = await loadCardVM\(user, settings\);\s*\} catch/.test(cardFn) && cardFn.includes("Your brief couldn’t load"), "brief pins: everything after the gate (load, store reads, VM) is inside one try — the card never breaks Home");
   const useFn2 = reader.slice(reader.indexOf("const useStoredDraft"), reader.indexOf("const closeComposer"));

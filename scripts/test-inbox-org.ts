@@ -2009,7 +2009,7 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   ok(page.includes('const isOrganize = viewParam === "organize";') && page.includes("<OrganizeBox") && page.includes("loadOrganize(user, organizeTab"), "ui: /inbox?view=organize renders the Organize box from loadOrganize");
   ok(page.includes('key: "organize"') && page.includes("count: organizeCounts.toFile") && page.includes('href: viewHref("organize")'), "ui: the Inbox nav carries an Organize row with the To file count");
   ok(page.includes("view === \"unmatched\" || isMeetings || isOrganize") && page.includes("const isView = !!view || isMeetings || isOrganize;"), "ui: Organize is a view and skips the thread-list query");
-  ok(page.includes("explicitThread && visibleTo(explicitThread, me)"), "ui: Organize opens only my own thread in the reader");
+  ok(page.includes("explicitThread && visibleTo(explicitThread, viewer)"), "ui: Organize opens only my own thread in the reader (#349: by identity)");
   ok(page.includes("org,") && page.includes("buildReaderOrg(sel,"), "ui: the reader VM carries the organization strip");
   const shell = read("src/app/(app)/inbox/inbox-shell.tsx");
   ok(shell.includes("meetings || organize ?") && shell.includes("organize?.list") && shell.includes('{ value: "organize", label: "Organize" }'), "ui: the shell swaps the list column for the Organize box (and the narrow picker knows it)");
@@ -3041,9 +3041,9 @@ export async function inboxOrgArchiveLabelChecks(ok: Ok): Promise<void> {
   const cb = src("src/app/(app)/inbox/command-bar.tsx");
   ok(cb.includes("export function CategoryMenu(") && /<CategoryMenu\s+trigger=\{<ActBtnInner icon=\{<TagIcon size=\{14\} \/>\} label="Categorize" caret \/>\}/.test(cb), "labels #346: the Inbox's Categorize ▾ and the Labels card share one CategoryMenu");
   const act = src("src/app/(app)/inbox/actions.ts");
-  ok(/export async function categoryAction\(id: string, key: string \| null\) \{\s*const user = await requireUser\(\);\s*if \(!\(await ownThread\(id, user\.name\)\)\) return;/.test(act), "labels #346: categoryAction stays owner-checked (#341)");
+  ok(/export async function categoryAction\(id: string, key: string \| null\) \{\s*const user = await requireUser\(\);\s*if \(!\(await ownThread\(id, user\)\)\) return;/.test(act), "labels #346: categoryAction stays owner-checked (#341, #349: by identity)");
   const ld = src("src/app/(app)/inbox/organize/load.ts");
-  ok(ld.includes("const mine = (await allThreads()).filter((t) => visibleTo(t, me.name));"), "archive #346: Organize lists only my own threads — a read-only #341 thread never shows there");
+  ok(ld.includes('const mine = (await listDocsWhere<CommThread>("comms", ownMailboxCond(viewer))).filter((t) => visibleTo(t, viewer));'), "archive #346: Organize lists only my own threads — a read-only #341 thread never shows there (#349: by identity, cut in SQL)");
 }
 
 /* ---------- #347: the person's own Gmail labels on the Labels card ---------- */
@@ -3159,7 +3159,8 @@ export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
     const t1 = await mk("apply");
     const pk = await U.labelPicker(t1, me, f1.client, NOW);
     ok(pk.ok && pk.labels.some((l) => l.name === "Warranty") && !pk.labels.some((l) => l.name.startsWith("Peak")), "labels #347: the picker lists my mailbox's labels, never Peak/*");
-    const other = await mk("other", { mailboxUser: "TEST347 Ben Other" });
+    // #349 — someone else's thread: their name AND their own Gmail account (ownership follows the key, not the name)
+    const other = await mk("other", { mailboxUser: "TEST347 Ben Other", gmailAccountKey: "personal:TEST347-u-ben" });
     ok(!(await U.labelPicker(other, me, f1.client, NOW)).ok, "labels #347: the picker refuses someone else's thread");
     const local = await mk("local", { gmailThreadId: undefined });
     const lp = await U.labelPicker(local, me, f1.client, NOW);
@@ -3199,7 +3200,8 @@ export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
     ok(U.gmailError(new Error("Gmail API /labels/Label_9 → 404 Not Found")) === "label-missing" && U.gmailError(new Error("Gmail API /threads/t1/modify → 404 Not Found")) === "thread-missing" && U.gmailError(new Error("Gmail API /threads/t1/modify → 400 Invalid label: Label_9")) === "label-missing" && U.gmailError(new Error("Gmail API /messages → 404")) === "failed", "labels #347 review: a 404 is 'label missing' only on a labels endpoint; on a thread it is 'no longer in Gmail'");
 
     /* review: the thread must be bridged through MY Gmail connection */
-    const foreignKey = await mk("foreign-key", { gmailAccountKey: "personal:TEST347-u-ben" });
+    // #349 — stamped mine (the owner id wins) but bridged through Ben's account
+    const foreignKey = await mk("foreign-key", { mailboxOwnerId: "TEST347-u-ann", gmailAccountKey: "personal:TEST347-u-ben" });
     const unstamped = await mk("unstamped", { gmailAccountKey: undefined });
     const fk = await U.setThreadLabel(foreignKey, "Label_1", true, me, f1.client, NOW);
     const us = await U.labelPicker(unstamped, me, f1.client, NOW);
@@ -3257,7 +3259,7 @@ export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
   /* pins: actions, card */
   const act = src("src/app/(app)/inbox/actions.ts");
   for (const n of ["gmailLabelPickerAction", "setGmailLabelAction", "createGmailLabelAction"])
-    ok(new RegExp(`export async function ${n}\\(threadId: string[^)]*\\) \\{\\s*const user = await requireUser\\(\\);\\s*if \\(!\\(await ownThread\\(threadId, user\\.name\\)\\)\\)`).test(act), `labels #347: ${n} is owner-checked (#341) before Gmail is touched`);
+    ok(new RegExp(`export async function ${n}\\(threadId: string[^)]*\\) \\{\\s*const user = await requireUser\\(\\);\\s*if \\(!\\(await ownThread\\(threadId, user\\)\\)\\)`).test(act), `labels #347: ${n} is owner-checked (#341, #349: by identity) before Gmail is touched`);
   const lc = src("src/app/(app)/inbox/labels-card.tsx");
   ok(lc.includes("setGmailLabelAction(vm.id, g.id, false)") && lc.includes("setGmailLabelAction(vm.id, l.id, true)") && lc.includes("createGmailLabelAction(vm.id, name)") && lc.includes("gmailLabelPickerAction(threadId)"), "labels #347: the card removes (✕), applies and creates through the owner-checked actions; the picker loads when it opens");
   ok(lc.includes("Create “{q.trim()}”") && lc.includes("validateLabelName(q)") && lc.includes('placeholder="Search or create a label…"') && lc.includes("data-peak-label") && lc.includes('role="alert"'), "labels #347: a searchable picker with Create '<typed>' at the bottom; Peak/* chips read-only; errors inline");
@@ -3265,14 +3267,14 @@ export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
   ok(!valueImports(lc).some((p) => /^@\/(db\b|lib\/stores\/|lib\/inbox-org\/)|^@\/lib\/gmail\/(?!user-label-rules)/.test(p)), "labels #347: the card imports only the pure label rules from lib/gmail (no store, db or Gmail client)");
   const ul = src("src/lib/gmail/user-labels.ts");
   ok(/casDocKey\("comms", threadId, "messages", t\.messages, next\)/.test(ul) && /casDocKey\("comms", threadId, "userLabelOps", prev, ops\)/.test(ul) && !/patchDoc/.test(ul), "labels #347 review: the label write is a compare-and-set on the messages key (re-read on conflict) — never a whole-doc rewrite that could drop a message appended meanwhile");
-  ok(/const t = await ownThread\(threadId, me\.name\);[\s\S]*?const key = personalKey\(me\.id\);\s*if \(t\.mailbox !== "personal" \|\| !t\.gmailThreadId \|\| t\.gmailAccountKey !== key\) return failWith\("no-gmail"\);/.test(ul), "labels #347 review: the Gmail key is personalKey(me.id), and the thread must be bridged through it");
+  ok(/const t = await ownThread\(threadId, me\);[\s\S]*?const key = personalKey\(me\.id\);\s*if \(t\.mailbox !== "personal" \|\| !t\.gmailThreadId \|\| t\.gmailAccountKey !== key\) return failWith\("no-gmail"\);/.test(ul), "labels #347 review: the Gmail key is personalKey(me.id), and the thread must be bridged through it");
   ok(/async function writeCache[\s\S]*?try \{\s*await replaceLabels\(key, labels\);\s*\} catch/.test(ul) && /if \(created\) \{\s*try \{/.test(ul), "labels #347 review: a cache write failing after Gmail created the label is logged, and Create still applies the label and reports success");
   const conn = src("src/lib/gmail/connections.ts");
   ok(/export async function replaceLabels[\s\S]*?await withTransaction\(async \(\) => \{\s*const db = await getDb\(\);\s*await db\.delete\(gmailLabels\)/.test(conn), "labels #347 review: replaceLabels deletes and inserts in one transaction");
   const li = src("src/lib/gmail/label-interpret.ts");
   ok(/for \(const \[gThread, perMessage\] of userLabelChanges\(events, isCard\)\)/.test(li) && /casDocKey\("comms", t\.id, "messages", t\.messages, next\)/.test(li) && /const evAdded = ev\.added\.filter\(notCard\);/.test(li), "labels #347 review: my labels are recorded from every event (Peak/* or not) by an ordered CAS pass; the Peak/* branch leaves them to it");
   const ld = src("src/app/(app)/inbox/organize/load.ts");
-  ok(/export async function organizeEntryCounts[\s\S]*?listDocsByField<CommThread>\("comms", "mailboxUser", \[me\.name\]\)/.test(ld), "brief #347 review: the live Organize counts read only my mailbox (SQL doc->>'mailboxUser'), never the whole collection");
+  ok(/export async function organizeEntryCounts[\s\S]*?listDocsWhere<CommThread>\("comms", ownMailboxCond\(viewer\)\)/.test(ld), "brief #347 review: the live Organize counts read only my mailbox (#349: ownMailboxCond in SQL, by identity), never the whole collection");
   const rules = src("src/lib/gmail/user-label-rules.ts");
   ok(valueImports(rules).length === 0, "labels #347: user-label-rules.ts has no imports (client-safe)");
   const cfg = src("src/lib/gmail/config.ts");
