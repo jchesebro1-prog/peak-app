@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
-import { getDoc, listDocsByField, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
+import { getDoc, getDocRows, listDocsByField, patchDoc, softDeleteDoc, upsertDoc, type Doc } from "@/db/doc-store";
 import { getCompany } from "@/lib/identity/companies";
 import { getContact } from "@/lib/identity/contacts";
 import { getMany as getQuotes } from "@/lib/stores/quotes";
+import type { Quote } from "@/lib/stores/quotes";
+import type { LeadRecord } from "@/lib/stores/leads";
+import type { ProjectRecord } from "@/lib/stores/projects";
 import {
   carriesTo, normalizePartyInput, ownerConflict, partyInputProblem, sortParties,
   type Party, type PartyInput, type PartyRecordType, type PartyRole,
@@ -44,14 +47,19 @@ export async function listForCompany(companyId: string): Promise<Party[]> {
   return sortParties(await listDocsByField<Party>("record_parties", "companyId", [companyId]));
 }
 
+/** A party group plus the loaded record behind it — a discriminated union so a caller needs no casts. */
+export type LiveRecordGroup =
+  | { recordType: "quote"; recordId: string; parties: Party[]; record: Quote }
+  | { recordType: "lead"; recordId: string; parties: Party[]; record: LeadRecord }
+  | { recordType: "project"; recordId: string; parties: Party[]; record: ProjectRecord };
+
 /**
- * The records a company is on, one entry per record with all that record's party rows. A party row can outlive its
- * record (a quote, lead or project deleted later keeps its rows), so only groups whose record still exists are
- * returned — the company page card and the company delete guard both read this, never `listForCompany` directly.
+ * The records a company is on, one entry per record with all that record's party rows and the loaded record. A
+ * party row can outlive its record (a quote, lead or project deleted later keeps its rows), so only groups whose
+ * record still exists are returned — the company page card and the company delete guard both read this, never
+ * `listForCompany` directly. Each record type loads in ONE batched call (not one read per record).
  */
-export async function liveRecordsForCompany(
-  companyId: string
-): Promise<Array<{ recordType: PartyRecordType; recordId: string; parties: Party[] }>> {
+export async function liveRecordsForCompany(companyId: string): Promise<LiveRecordGroup[]> {
   const groups = new Map<string, { recordType: PartyRecordType; recordId: string; parties: Party[] }>();
   for (const p of await listForCompany(companyId)) {
     const key = `${p.recordType}:${p.recordId}`;
@@ -60,13 +68,26 @@ export async function liveRecordsForCompany(
     else groups.set(key, { recordType: p.recordType, recordId: p.recordId, parties: [p] });
   }
   const all = [...groups.values()];
-  const liveQuotes = await getQuotes([...new Set(all.filter((g) => g.recordType === "quote").map((g) => g.recordId))]);
-  const out: typeof all = [];
+  const idsOf = (t: PartyRecordType) => [...new Set(all.filter((g) => g.recordType === t).map((g) => g.recordId))];
+  const liveDocs = async <T extends Doc>(coll: "leads" | "projects", ids: string[]) =>
+    new Map((await getDocRows<T>(coll, ids)).filter((r) => !r.deleted).map((r) => [r.id, r.doc]));
+  const [quotes, leads, projects] = await Promise.all([
+    getQuotes(idsOf("quote")),
+    liveDocs<LeadRecord>("leads", idsOf("lead")),
+    liveDocs<ProjectRecord>("projects", idsOf("project")),
+  ]);
+  const out: LiveRecordGroup[] = [];
   for (const g of all) {
-    const live =
-      g.recordType === "quote" ? liveQuotes.has(g.recordId)
-      : !!(await getDoc(g.recordType === "lead" ? "leads" : "projects", g.recordId));
-    if (live) out.push(g);
+    if (g.recordType === "quote") {
+      const record = quotes.get(g.recordId);
+      if (record) out.push({ ...g, recordType: "quote", record });
+    } else if (g.recordType === "lead") {
+      const record = leads.get(g.recordId);
+      if (record) out.push({ ...g, recordType: "lead", record });
+    } else {
+      const record = projects.get(g.recordId);
+      if (record) out.push({ ...g, recordType: "project", record });
+    }
   }
   return out;
 }

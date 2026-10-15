@@ -1,13 +1,9 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { getDoc } from "@/db/doc-store";
 import { liveRecordsForCompany } from "@/lib/stores/parties";
-import { getMany as getQuotes } from "@/lib/stores/quotes";
 import { displayLeadNumber, displayQuoteNumber } from "@/lib/estimate-number";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { partyRoleText, type Party } from "@/lib/parties/rules";
-import type { LeadRecord } from "@/lib/stores/leads";
-import type { ProjectRecord } from "@/lib/stores/projects";
 import { ShortList } from "@/components/short-list";
 
 const CARD: CSSProperties = { background: "#fff", border: "1px solid #ececf0", borderRadius: 12, boxShadow: "0 1px 2px rgba(0,0,0,.04)", marginBottom: 24, overflow: "hidden" };
@@ -20,22 +16,18 @@ type Row = { key: string; kind: string; number: string; name: string; roles: str
 export async function CompanyRolesCard({ companyId, style, headStyle }: { companyId: string; style?: CSSProperties; headStyle?: CSSProperties }) {
   const records = await liveRecordsForCompany(companyId);
   if (!records.length) return null;
-  const quotes = await getQuotes([...new Set(records.filter((r) => r.recordType === "quote").map((r) => r.recordId))]);
   const rows: Row[] = [];
-  for (const { recordType, recordId, parties } of records) {
-    const key = `${recordType}:${recordId}`;
-    const roles = parties.map(partyRoleText).join(", ");
-    if (recordType === "quote") {
-      const q = quotes.get(recordId);
-      if (!q) continue;
+  for (const g of records) {
+    const key = `${g.recordType}:${g.recordId}`;
+    const roles = g.parties.map(partyRoleText).join(", ");
+    if (g.recordType === "quote") {
+      const q = g.record;
       rows.push({ key, kind: KIND.quote, number: displayQuoteNumber(q), name: q.name, roles, href: quoteBuilderHref(q), sort: q.updatedAt || 0 });
-    } else if (recordType === "lead") {
-      const l = await getDoc<LeadRecord>("leads", recordId);
-      if (!l) continue;
+    } else if (g.recordType === "lead") {
+      const l = g.record;
       rows.push({ key, kind: KIND.lead, number: displayLeadNumber(l), name: l.org + (l.interest ? ` — ${l.interest}` : ""), roles, href: `/leads?lead=${encodeURIComponent(l.id)}`, sort: l.updatedAt || 0 });
     } else {
-      const pr = await getDoc<ProjectRecord>("projects", recordId);
-      if (!pr) continue;
+      const pr = g.record;
       rows.push({ key, kind: KIND.project, number: pr.id, name: pr.name, roles, href: `/projects/${encodeURIComponent(pr.id)}`, sort: pr.updatedAt || 0 });
     }
   }

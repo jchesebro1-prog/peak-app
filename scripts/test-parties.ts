@@ -216,6 +216,16 @@ export async function partyDbChecks(ok: Ok) {
     ok(live1.some((g) => g.recordType === "quote" && g.recordId === wonQ) && live1.some((g) => g.recordType === "project" && g.recordId === proj?.id), "parties db: liveRecordsForCompany keeps a live quote and a live project");
     ok(!live1.some((g) => g.recordId === lead || g.recordId === quote), "parties db: party-only ids (no record behind them) are not live");
 
+    // two roles on ONE live record: one group (records are counted, not rows), carrying the loaded record
+    const second = await addParty({ recordType: "quote", recordId: wonQ, companyId: co1, role: "architect" }, "u-test");
+    ok(second.ok, "parties db: a second role for the same company on the same quote");
+    if (second.ok) registerFixture("record_parties", second.party.id);
+    const live2 = await liveRecordsForCompany(co1);
+    const wonGroups = live2.filter((g) => g.recordType === "quote" && g.recordId === wonQ);
+    ok(wonGroups.length === 1 && wonGroups[0].parties.length === 2, "parties db: liveRecordsForCompany counts records, not rows (two roles = one group)");
+    ok(wonGroups[0]?.record.id === wonQ, "parties db: the group carries its loaded record");
+    ok(live2.length === live1.length, "parties db: a second role on a live record doesn't change the live-record count");
+
     // withSavepoint contains a SQL error so the outer transaction survives
     ok((await withSavepoint(async () => 7)) === 7, "parties db: withSavepoint outside a transaction just runs fn");
     let survived = false, threw = false;
