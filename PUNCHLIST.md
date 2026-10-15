@@ -12381,7 +12381,7 @@ Jeff (Oct 14) chose "My real Gmail labels" for the #346 Labels card: pick from y
   - The brief's live counts read only your mailbox.
 - User display names are not unique (only email is). Two active users with the same name would share each other's mailbox ownership (#341's `visibleTo` matches names). Worth a uniqueness check in Settings → Team.
 
-## 348. Estimate parties, bids & vendor links — slices 1, 2a, 2b-i BUILT on `feat/348-estimate-parties` (D1058–D1062, D1074–D1082); 2b-ii next (per-bidder client links, send to all), then 3–6
+## 348. Estimate parties, bids & vendor links — slices 1, 2a, 2b-i, 2b-ii BUILT on `feat/348-estimate-parties` (D1058–D1062, D1074–D1096); next: slice 3 (split systems into a new estimate), then 4 vendors, 5 Read the PDF, 6 portal + reports
 
 Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-parties-and-bids-design.md`. An estimate links to exactly one company; real bid jobs involve an owner, several GCs and ECs, an architect, consultants and vendors.
 
@@ -12397,7 +12397,8 @@ Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-
 **Queued (spec §10):**
 - Slice 2a ✅ built (D1074–D1078): bid details (due date, addenda), a Bidders card on Send & track (add GC/EC, submit via email or their bid site, per-bidder link, GC bid #, Mark submitted, Award / Undo award), Bid chip, Quotes hub "Out to bid" filter, ⌘K by bidder name, Morning triage "bid due", the project's Bill to. The owner stays the customer.
 - Slice 2b-i ✅ built (D1079–D1082): customer documents addressed to the awarded bidder ("Prepared for <GC>", Owner line, bid line; venue from the owner), bid is content once awarded with an Award/Undo re-render, and a per-bidder PDF (signed `?bidder=` print variant, on-demand, Download PDF on the Bidders card).
-- Slice 2b-ii: per-bidder client links, send to all (attaches the 2b-i bidder PDF).
+- Slice 2b-ii ✅ built (D1086–D1096): Send / Retry per email bidder and **Send to all bidders** (one server call per bidder, progress, Stop), each email carrying its own bidder PDF and its own v3 link ("Prepared for <bidder>", Owner line, tagged responses, per-bidder "Opened N×", closed pages for lost / withdrew), Copy link, revised-bid subjects and Send revision to bidders. Open for Jeff: do bidders see the owner's Rewards perks / credit line; bidders share the 30/day response budget; acknowledging an addendum after a send means Draft → Send revision.
+- **Prod check additions (2b-ii):** from a Gmail-connected account, Send to all for two email bidders (two separate emails, each with its own PDF and link); open one link in a private window ("Prepared for <bidder>", Owner line); the row shows Opened 1×; Revoke kills the link.
 - **Prod check additions (2b-i):** Download a bidder PDF from the Bidders card (header shows the bidder, Owner line and bid line); after Award the estimate PDF reads "Prepared for <GC>" with the Owner line.
 
 - Slice 3: split systems into a new estimate.

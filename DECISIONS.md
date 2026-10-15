@@ -13008,3 +13008,59 @@ Pre-draft, nudge and suggestion lookups cover the picks plus the first 5 rows of
 - **Liveness fails.** If the liveness check (or the viewer read it needs) fails, every row it could have hidden is dropped (`failClosedKeys`: email, task, assignment, call and quote rows), never kept as "nothing closed". Lead, visit and renewal rows stay, because liveness never hides them. This applies to the brief card and to Start here's `loadTriageView` alike. A failed marks read still shows the rows, since marks only hide.
 - **Chips need my own mailbox.** The card's Draft reply ready / Tasks ready chips use `homeCardPreDraft` = `ownsMailbox` (#349) + `readerPreDraft`, exactly what the reader offers. A thread assigned to me in a teammate's mailbox opens read-only with no stored draft, so it gets no chip.
 - **One load per request.** `src/lib/triage/live-state.ts` `loadLiveState` reads marks, closed keys and the mailbox viewer in one React `cache()` call (Next's documented way to dedupe DB reads within a render), keyed by user, row keys and minute. The brief card and Start here hit the same entry on Home. Outside a render (crons, actions, the harness) `cache()` passes through. `loadClosedKeys` takes the viewer it already has.
+
+## D1086. Client link v3: one link per bidder (#348 slice 2b-ii, 2026-10-15)
+
+- **Shape.** `<exp>.<rev>.<16 hex>.<mac>`, the MAC over `share:bidder:<id>:<rev>:<partyId>:<nonce>:<exp>`. It uses the same nonce and expiry as v1/v2, so Revoke (and expiry) kills every bidder link with the owner's.
+- **Pinned to a sent revision** like v2. "View the current version" stays v3 for the same bidder.
+- **Every package sub-route accepts v3** with v2's pinned-revision rules. Datasheet and zip caches are shared because they name no bidder.
+
+## D1087. What a v3 page shows, and who may respond (#348 slice 2b-ii, 2026-10-15)
+
+- **Addressed strictly to its bidder** ("Prepared for <bidder>" plus the "Owner:" line). A removed bidder gets the one "isn't active" card.
+- **Lost / withdrew / no bid** still opens read-only with "This bid is closed." and no client actions, so it reveals nothing about who won. Pending and awarded bidders can respond.
+- **Responses carry `partyId`;** the quote note and the task name the bidder.
+- **Open for Jeff:** the owner's Rewards perks / credit line also prints on bidder copies and pages (decide whether bidders should see it). Bidders share the quote's client-response rate budget (30/day, 200 cap), not one budget each.
+
+## D1088. Bidder opens are counted on the bidder row (#348 slice 2b-ii, 2026-10-15)
+
+An open is `opens: {count, lastAt}` on the bidder's party row with a 30-minute per-IP dedupe. It never lands in `Quote.shareOpens`, so the owner's "Opened" chip is unchanged. The Bidders card shows "Opened N×" per row.
+
+## D1089. Bidder revisions are sent revisions (#348 slice 2b-ii, 2026-10-15)
+
+`currentRev` for a bidder is the latest SENT revision. An email stamps the revision it carried (`revSent`), and the walk compares it with the latest sent revision to decide who still needs a send. The printed Rev still follows D567 (open question D626).
+
+## D1090. The bidder email PDF is the sent revision rendered for the bidder (#348 slice 2b-ii, 2026-10-15)
+
+- Draft → live render, then cut; stored by reference at `quote-pdfs/<id>/bidder-<hex>-r<rev>-<ms>.pdf`, a flat folder so the Gmail bridge's `pdfPathFitsLink` admits it. This deviates from the spec's `rev-<n>/bidder-<partyId>.pdf`.
+- The website rows' Download PDF follows the same source rule.
+- **Inline cap:** with Blob storage down, an attachment is inlined only up to 4 MB. Edge: the cap refusal can come after the quote was marked Sent, leaving it Sent with no email (storage-down only; the walk message says so via `markedSent`).
+
+## D1091. One pipeline for bidder email (#348 slice 2b-ii, 2026-10-15)
+
+- `sendBidderEmail` reuses the ordered estimate-email steps through two optional hooks. No cover, no Cc, no follow-up task. The thread is filed under the bidder company and linked to the quote.
+- The first successful send (or failed-after-mark) moves the quote to Sent through the approval gate, exactly as today.
+- **Row refusals** (not walk stoppers): a malformed email (counted as "No email"), a removed bidder, a revision guard tripped inside `linkFor`.
+- **Failure states:** a maybe-sent result (`stillDraft` false) and a failed record write are both `failed.unknown`.
+
+## D1092. The walk: one server call per bidder (#348 slice 2b-ii, 2026-10-15)
+
+- Each call runs under the per-quote claim. Quote-level refusals stop the walk; row-level failures stamp `failed` and continue. A re-check under the claim returns `skipped` (double click, two tabs, re-run).
+- A Gmail timeout is `failed.unknown`: excluded from Send to all, and its Retry asks for a confirm.
+- The result message persists after the walk; Stop and unmount end it cleanly. Residual risk as the composer's: the email left but the record write failed, so `recordFailed` says to check Activity first.
+
+## D1093. Subjects (#348 slice 2b-ii, 2026-10-15)
+
+Same body for everyone. The subject is "Revised bid — … (Addendum N)" for a row whose last revision lacked a now-listed addendum, else the sender's own subject.
+
+## D1094. Mark submitted is for website rows only (#348 slice 2b-ii, 2026-10-15)
+
+Email rows get Send / Retry; a row whose submission is by the bidder's website keeps Mark submitted (D1077's manual stamp).
+
+## D1095. Acknowledging an addendum after a send is a new revision (#348 slice 2b-ii, 2026-10-15)
+
+An acknowledgement doesn't re-send anything. To get it to a bidder: move the estimate back to Draft, then **Send revision to bidders**; the card hints at this. **Open for Jeff:** whether that should be one button.
+
+## D1096. Local delivery stamps sent (#348 slice 2b-ii, 2026-10-15)
+
+With Gmail not connected, a bidder send stamps the row sent exactly as the composer does, and the walk summary says the delivery was local.
