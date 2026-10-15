@@ -245,7 +245,8 @@ export async function runAiPass(opts: AiPassOptions = {}, deps: AiPassDeps = {})
     // hour per process (an unindexed jsonb scan; D895)
     if (clock() - lastSweepAt >= AI_PASS_SWEEP_EVERY_MS) {
       lastSweepAt = clock();
-      const everyone = { names: ctx.users.map((u) => u.name), keys: ctx.users.map((u) => personalKey(u.id)) };
+      // #349 — the SQL cut is a superset (stamp, key or name); ownerOf decides by identity
+      const everyone = { names: ctx.users.map((u) => u.name), keys: ctx.users.map((u) => personalKey(u.id)), ids: ctx.users.map((u) => u.id) };
       for (const t of await pendingAiThreads({ notOwners: everyone, limit: AI_PASS_SWEEP_LIMIT })) {
         if (!ownerOf(t, ctx)) await clearPending(st, t);
       }
@@ -258,7 +259,7 @@ export async function runAiPass(opts: AiPassOptions = {}, deps: AiPassDeps = {})
       if (!owner) continue;
       const rows: CommThread[] = [];
       const seen = new Set<string>();
-      const who = { names: [owner.name], keys: [personalKey(owner.id)] };
+      const who = { names: [owner.name], keys: [personalKey(owner.id)], ids: [owner.id] };
       const courtRows = opts.filingOnly ? [] : await pendingAiThreads({ owner: who, only: "court", limit: AI_PASS_MAX_PER_OWNER });
       const filingRows = await pendingAiThreads({ owner: who, only: "filing", limit: AI_PASS_MAX_PER_OWNER });
       for (const t of [...courtRows, ...filingRows]) {

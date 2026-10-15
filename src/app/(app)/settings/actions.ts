@@ -44,6 +44,7 @@ import { sanitizeReviewLimits, type ReviewLimits } from "@/lib/review-limits";
 import { countSitesByVenueKind, storedSiteVenueKinds } from "@/lib/identity/sites";
 import { rederiveVenueNamesForTypes } from "@/lib/identity/venue-save";
 import { withTransaction } from "@/db";
+import { foldTeamName, teamNameError } from "@/lib/team-names";
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
@@ -87,7 +88,9 @@ export async function addUserAction(input: {
 }) {
   await requirePerm("manage_users");
   const name = (input.name || "").trim();
-  if (!name) return { ok: false as const, error: "Name is required." };
+  // #349 — never blank, never another teammate's name (mailboxes follow identity)
+  const nameError = teamNameError(name, await allUsers());
+  if (nameError) return { ok: false as const, error: nameError };
   await addUser({
     name,
     email: (input.email || "").trim(),
@@ -123,7 +126,16 @@ export async function updateMemberAction(
 ) {
   await requirePerm("manage_users");
   const clean: Parameters<typeof updateUser>[1] = {};
-  if (patch.name !== undefined && patch.name.trim()) clean.name = patch.name.trim();
+  if (patch.name !== undefined) {
+    // #349 — a rename is refused when blank or another teammate's name; an
+    // unchanged name (even one that is already a duplicate) never blocks the
+    // rest of the edit
+    const current = await getUser(id);
+    const changed = foldTeamName(patch.name) !== foldTeamName(current?.name);
+    const nameError = !foldTeamName(patch.name) || changed ? teamNameError(patch.name, await allUsers(), id) : null;
+    if (nameError) return { ok: false as const, error: nameError };
+    if (changed) clean.name = patch.name.trim().replace(/\s+/g, " ");
+  }
   if (patch.email !== undefined) clean.email = patch.email.trim();
   if (patch.googleEmail !== undefined) clean.googleEmail = patch.googleEmail.trim() || null;
   if (patch.title !== undefined) clean.title = patch.title.trim() || null;

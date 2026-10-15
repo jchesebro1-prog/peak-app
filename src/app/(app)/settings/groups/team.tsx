@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ROLES, ROLE_DESC, ROLE_PERMS, PERM_LABEL, firstName, type Role } from "@/lib/team";
 import { addUserAction, setRolesAction, setUserStatusAction, updateMemberAction } from "../actions";
 import { inputStyle, labelStyle, type Run } from "./shared";
+import { duplicateNameIds } from "@/lib/team-names";
 import type { OfficeVM, UserVM } from "./types";
 
 /**
@@ -11,6 +12,16 @@ import type { OfficeVM, UserVM } from "./types";
  * permissions, and the add/edit team-member modal. Moved verbatim from the
  * old settings-client.tsx Admin section; `?section=admin` now lands here.
  */
+
+const DUP_CHIP = {
+  fontSize: 10,
+  fontWeight: 600,
+  color: "#9a5b00",
+  background: "#fdf3e1",
+  padding: "1px 6px",
+  borderRadius: 5,
+  flexShrink: 0,
+} as const;
 
 const ROLE_COLORS: Record<string, string> = {
   Admin: "#5b4b8a",
@@ -21,13 +32,13 @@ const ROLE_COLORS: Record<string, string> = {
 
 export function TeamGroup({
   meId,
-  meName,
   users,
   offices,
   run,
 }: {
   meId: string;
-  meName: string;
+  /** unused since #349 (the row "You" and Remove go by id); kept for the caller */
+  meName?: string;
   users: UserVM[];
   offices: OfficeVM[];
   run: Run;
@@ -109,7 +120,8 @@ export function TeamGroup({
       // identity edits ride along with roles (PUNCHLIST #9 — email was
       // uneditable anywhere, and a wrong email means the member can't sign in)
       run(async () => {
-        await updateMemberAction(id, {
+        // #349 — a refused rename (blank / another teammate's name) stops here and shows why
+        const member = await updateMemberAction(id, {
           name: draft.name,
           email: draft.email,
           googleEmail: draft.googleEmail,
@@ -119,6 +131,7 @@ export function TeamGroup({
           officeId: draft.officeId,
           certifications: draft.certifications,
         });
+        if (!member.ok) return member;
         return setRolesAction(id, draft.roles);
       });
     }
@@ -127,11 +140,13 @@ export function TeamGroup({
 
   const isNew = modal === "new";
   const editingUser = modal && !isNew ? users.find((u) => u.id === modal) : null;
-  const canDelete = !!editingUser && editingUser.name !== meName;
+  const canDelete = !!editingUser && editingUser.id !== meId; // #349 — by id, never the name
 
   // Removed members are hidden by default (decision C) — showRemoved is the
   // escape hatch so an accidental Remove isn't a dead end.
   const removedCount = users.filter((u) => u.status === "removed").length;
+  // #349 — names must be unique (mailboxes follow identity); flag any that aren't yet
+  const dupIds = duplicateNameIds(users);
   const visibleUsers = showRemoved ? users : users.filter((u) => u.status !== "removed");
 
   return (
@@ -161,6 +176,14 @@ export function TeamGroup({
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "#9aa0ab" }}>
                 {visibleUsers.length}
               </span>
+              {dupIds.size > 0 && (
+                <span
+                  title="Two or more teammates share a name. Rename them so each mailbox stays tied to one person — an older email that carries only that name belongs to nobody until then."
+                  style={DUP_CHIP}
+                >
+                  ⚠ {dupIds.size} share a name
+                </span>
+              )}
               {removedCount > 0 && (
                 <button
                   onClick={() => setShowRemoved((s) => !s)}
@@ -246,6 +269,11 @@ export function TeamGroup({
                   }}
                 >
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{u.name}</span>
+                  {dupIds.has(u.id) && (
+                    <span title="Another teammate has this name — rename one of them." style={DUP_CHIP}>
+                      Duplicate name
+                    </span>
+                  )}
                   {u.id === meId && (
                     <span
                       style={{
