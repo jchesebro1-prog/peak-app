@@ -134,6 +134,8 @@ export const PORTAL_BID_COPY = {
   submitted: "Bid submitted",
   awarded: "Awarded",
   closed: "Closed",
+  /** Any non-404 bidder-PDF failure — the render's own text is staff-facing (env names) and is only logged. */
+  pdfUnavailable: "The PDF couldn’t be made right now — try again in a minute.",
 } as const;
 
 /** Chip: sent+pending → due text (or "Bid submitted" with no due date); awarded (sent or won) → "Awarded"; lost → "Closed".

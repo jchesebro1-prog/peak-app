@@ -5,7 +5,7 @@ import { attachmentDisposition } from "@/lib/document-files";
 import { getCompany } from "@/lib/identity/companies";
 import { bidderPdfFileName } from "@/lib/parties/addressee";
 import { bidderPartyFor } from "@/lib/parties/addressee-server";
-import type { PortalBidRow } from "@/lib/parties/portal-bid";
+import { PORTAL_BID_COPY, type PortalBidRow } from "@/lib/parties/portal-bid";
 import type { Party } from "@/lib/parties/rules";
 import { renderBidderPdf } from "@/lib/quote-pdf/bidder-pdf-server";
 import { rateLimit } from "@/lib/rate-limit";
@@ -47,7 +47,8 @@ async function bidderCompanyName(partyId: string, quoteId: string): Promise<stri
 
 /** The bidder's PDF response: rate limit (key by grant, or `preview:<cid>`) → render(q.id, partyId, host, proto, { rev })
  *  → inline application/pdf, nosniff, private no-store, file name bidderPdfFileName(src.name, companyName, src.rev)
- *  (the revision's name — never a later one). 404 → "Not found"; 503/500 → the render's text. */
+ *  (the revision's name — never a later one). 404 → "Not found"; 503/500 → PORTAL_BID_COPY.pdfUnavailable with the same
+ *  status (controller decision: the render's own text can name server env vars, so it is logged, never shown). */
 export async function portalBidPdfResponse(
   req: Request,
   src: { partyId: string; rev: number; name: string },
@@ -58,7 +59,11 @@ export async function portalBidPdfResponse(
   const h = req.headers;
   const render = deps.render ?? renderBidderPdf;
   const r = await render(ctx.quoteId, src.partyId, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"), { rev: src.rev });
-  if (!r.ok) return text(r.status === 404 ? "Not found" : r.error, r.status);
+  if (!r.ok) {
+    if (r.status === 404) return text("Not found", 404);
+    console.error(`[portal-bid-pdf] ${ctx.quoteId}: render failed (${r.status})`, r.error);
+    return text(PORTAL_BID_COPY.pdfUnavailable, r.status);
+  }
   const companyName = deps.companyName ? await deps.companyName(src.partyId) : await bidderCompanyName(src.partyId, ctx.quoteId);
   // The revision's own name and number — the render's file name follows the live quote, so it is never used here.
   const disposition = attachmentDisposition(bidderPdfFileName(src.name, companyName, src.rev));

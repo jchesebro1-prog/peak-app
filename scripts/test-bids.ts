@@ -1275,6 +1275,11 @@ export function portalBidPureChecks(ok: Ok) {
   ok(st(mk(), "CA", [row("A", "CA", "gc", { revSent: 999 })]).kind === "unavailable", "portal-bid: an unknown revSent is unavailable");
   ok(st(mk(), "CA", [row("A", "CA", "gc", null)]).kind === "unavailable", "portal-bid: a row without bid state is unavailable");
   ok(portalBidCandidates(mk(), row("A", "CA", "gc", { revSent: null })).length === 0, "portal-bid: no candidates without a delivered revision or a frozen one");
+  // #348 slice 6 task 2 — the PDF source carries the chosen revision's frozen name, never the live q.name.
+  {
+    const src = portalBidPdfSource(mk({ name: "Renamed live" }), "CA", [A]);
+    ok(src?.rev === 1 && src.name === "Rev1", "portal-bid: portalBidPdfSource names the chosen revision's frozen name when q.name differs");
+  }
   // #348 slice 6 task 2 — a row with no id never matches a revision frozen without an award (undefined === undefined).
   {
     const df = { docFields: { customer: "Owner" } };
@@ -1495,6 +1500,12 @@ export async function portalBidDbChecks(ok: Ok) {
     {
       const missing = fixtureId(348, "imissing");
       ok((await getQuote(missing)) === null && (await portalBidRowsFor({ id: missing, customerId: own }, gc1)).length === 0, "portal-bid db: an unknown quote id has no quote and no rows");
+      // The routes' null-q short-circuit, as written in page / pdf / photo.
+      const mq = await getQuote(missing);
+      const mBids = mq ? await portalBidRowsFor(mq, gc1) : [];
+      const mState = mq ? portalOnlineEstimateState(mq, gc1, mBids) : ({ kind: "unavailable" } as const);
+      const mPdf = mq ? portalBidPdfSource(mq, gc1, mBids) : null;
+      ok(mState.kind === "unavailable" && mPdf === null && mBids.length === 0, "portal-bid db: an unknown quote id is unavailable with no PDF source");
     }
     // 9. No other bidder named on gc1's addressed page.
     {
@@ -1564,9 +1575,12 @@ export async function portalBidDbChecks(ok: Ok) {
 
     // 10. The PDF response, with fake renders.
     {
+      // Rename the live quote FIRST: the PDF source must still carry the revision's frozen name.
+      await updateQuote(iq, { name: "Renamed later" });
       const a = await stateFor(gc1);
       const src = a.pdf!;
-      await updateQuote(iq, { name: "Renamed later" });
+      ok(a.q.name === "Renamed later" && !!src && src.name === "Portal bid quote" && src.name === (a.s.kind === "ok" ? a.s.rev.name : ""),
+        "portal-bid db: after a rename, the PDF source carries the revision's frozen name, not the live one");
       const calls: unknown[][] = [];
       const fakeOk = (async (...args: unknown[]) => { calls.push(args); return { ok: true as const, pdf: Buffer.from("%PDF-1"), fileName: "x" }; }) as unknown as typeof renderBidderPdf;
       const req = new Request("https://portal.test/portal/quotes/x/pdf", { headers: { host: "portal.test", "x-forwarded-proto": "https" } });
@@ -1582,9 +1596,23 @@ export async function portalBidDbChecks(ok: Ok) {
       const fake404 = (async () => ({ ok: false as const, status: 404 as const, error: "Not found" })) as unknown as typeof renderBidderPdf;
       const r404 = await portalBidPdfResponse(req, src, { quoteId: iq, rlKey: `portal-bidpdf:test-404-${Date.now()}` }, { render: fake404 });
       ok(r404.status === 404 && (await r404.text()) === "Not found", "portal-bid db: a refused render is a plain 404");
-      const fake503 = (async () => ({ ok: false as const, status: 503 as const, error: "PDFs aren't set up" })) as unknown as typeof renderBidderPdf;
-      const r503 = await portalBidPdfResponse(req, src, { quoteId: iq, rlKey: `portal-bidpdf:test-503-${Date.now()}` }, { render: fake503 });
-      ok(r503.status === 503 && (await r503.text()) === "PDFs aren't set up", "portal-bid db: a 503 carries the render's text");
+      const origErr = console.error;
+      console.error = () => {};
+      try {
+        for (const [status, error] of [
+          [503, "Bidder PDFs aren’t set up on this server (AUTH_SECRET is missing)."],
+          [503, "Set QUOTE_PDF_ORIGIN, or QUOTE_PDF_DISABLED is on."],
+          [500, "The bidder PDF couldn’t be rendered — try again."],
+        ] as const) {
+          const fakeFail = (async () => ({ ok: false as const, status, error })) as unknown as typeof renderBidderPdf;
+          const rf = await portalBidPdfResponse(req, src, { quoteId: iq, rlKey: `portal-bidpdf:test-${status}-${Date.now()}-${error.length}` }, { render: fakeFail });
+          const body = await rf.text();
+          ok(rf.status === status && body === PORTAL_BID_COPY.pdfUnavailable && !/AUTH_SECRET|QUOTE_PDF/.test(body),
+            `portal-bid db: a ${status} keeps its status and shows only the portal line (never the render's text)`);
+        }
+      } finally {
+        console.error = origErr;
+      }
       const key = `portal-bidpdf:test-rl-${Date.now()}`;
       const codes: number[] = [];
       for (let i = 0; i < PORTAL_BID_PDF_PER_MIN + 1; i++) codes.push((await portalBidPdfResponse(req, src, { quoteId: iq, rlKey: key }, { render: fakeOk, companyName: async () => "X" })).status);
@@ -1599,7 +1627,8 @@ export async function portalBidDbChecks(ok: Ok) {
       const row2 = (await listFor("quote", iq)).find((p) => p.id === p2);
       ok(un.ok && row2?.bid?.result === "pending" && b.s.kind === "ok" && b.s.rev.rev === r2 && listed(b.list) === 1, "portal-bid db: after Undo award gc2 is pending and visible again");
     }
-    await awardBid(iq, p1);
+    const reAw = await awardBid(iq, p1);
+    ok(reAw.ok && (await getQuote(iq))?.bid?.awardedPartyId === p1, "portal-bid db: gc1 is awarded again after Undo award");
 
     // 7. Won.
     await setStatus(iq, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
@@ -1635,6 +1664,28 @@ export async function portalBidDbChecks(ok: Ok) {
       const reads = files.filter((f) => /\bgetQuote\(/.test(readFileSync(join(root, f), "utf8")));
       ok(reads.length >= 3 && reads.every((f) => NO_BIDDER_ROWS_NEEDED.includes(f) || readFileSync(join(root, f), "utf8").includes("portalBidRowsFor(")),
         `portal-bid db: every portal file that reads a quote loads the bidder rows (${reads.join(", ")})`);
+      // Any VALUE import from @/lib/stores/quotes (any alias) must gate through portalBidRowsFor( or portalListsQuote(.
+      const QUOTE_READ_ALLOW: Record<string, string> = {
+        // Home: its quote lists go through homePortalQuotes / myQuotesCounts (portalListsQuote inside lib/portal-quotes)
+        // and `q.customerId === cid`; slice 6 Task 4 adds the Bids card through portalBidRowsForCompany.
+        "page.tsx": "Home",
+      };
+      const quoteValueImport = (src: string) =>
+        [...src.matchAll(/import\s+(type\s+)?([^;]*?)\s+from\s+["']@\/lib\/stores\/quotes["']/g)].some((m) => {
+          if (m[1]) return false;
+          const names = (m[2].match(/\{([^}]*)\}/)?.[1] ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+          return !/^\{/.test(m[2].trim()) || names.some((n) => !n.startsWith("type "));
+        });
+      const ungated = files.filter((f) => {
+        const src = readFileSync(join(root, f), "utf8");
+        return quoteValueImport(src) && !(f in QUOTE_READ_ALLOW) && !src.includes("portalBidRowsFor(") && !src.includes("portalListsQuote(");
+      });
+      const valueImporters = files.filter((f) => quoteValueImport(readFileSync(join(root, f), "utf8")));
+      ok(valueImporters.length >= 5 && !valueImporters.includes("quote-row.tsx") && ungated.length === 0,
+        `portal-bid db: every portal file with a value import from stores/quotes gates through portalBidRowsFor / portalListsQuote (${ungated.join(", ")})`);
+      ok(quoteValueImport('import {\n  getAll as allQuotes,\n  type Quote,\n} from "@/lib/stores/quotes";') && !quoteValueImport('import type { Quote } from "@/lib/stores/quotes";') &&
+         !quoteValueImport('import { type Quote } from "@/lib/stores/quotes";') && quoteValueImport('import * as Q from "@/lib/stores/quotes";'),
+        "portal-bid db: the import scan catches multi-line, aliased and namespace imports and skips type-only ones");
       const leaks = files.filter((f) => /@\/lib\/stores\/parties|@\/lib\/stores\/bids|@\/lib\/parties\/addressee-server/.test(readFileSync(join(root, f), "utf8")));
       ok(files.length > 10 && leaks.length === 0, `portal-bid db: no portal file imports the party stores or addressee-server (${leaks.join(", ")})`);
       const count = (f: string) => (readFileSync(join(__dirname, "..", f), "utf8").match(/portalListsQuote\(/g) || []).length;
