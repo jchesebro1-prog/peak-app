@@ -47,6 +47,8 @@ import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults
 import ActionError from "@/components/action-error";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import { assistDraftViewOf } from "@/lib/assist/features/estimate-draft";
+import { vendorPdfGateFor } from "@/lib/assist/gate-server";
+import { assistSettingsOf } from "@/lib/assist/config";
 import { getSuggestion, suggestionForQuote } from "@/lib/stores/estimate-suggestions";
 import { suggestionViewOf, unlinkedRetryAllowed, type EstimateSuggestionView, type SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 import type { EstimateSuggestion } from "@/lib/assist/features/suggestion";
@@ -415,6 +417,8 @@ export default async function EstimatorPage({
       getEstimateOutputDefaults(),
       loadSystemCategoryOptions(),
     ]);
+  // #348 slice 5: Read the PDF — the server gate (pilot + feature + kill switch + a Claude key); a failure hides it.
+  const vendorPdfEnabled = (await vendorPdfGateFor(user.id, { settings: assistSettingsOf(settings) }).catch(() => "error")) === null;
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
   const quoteTasks = q ? await tasksForQuote(q.id) : [];
@@ -604,6 +608,8 @@ export default async function EstimatorPage({
       // Estimate suggestion (spec 2026-10-13 §2): the Suggested BOM panel + its live parts.
       suggestion={suggestion.view}
       suggestionParts={suggestion.parts}
+      // #348 slice 5: the vendor form's Read the PDF (pilot users with a Claude key only).
+      vendorPdfEnabled={vendorPdfEnabled}
     />
     </>
   );

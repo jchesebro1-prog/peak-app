@@ -8,6 +8,7 @@ import { VENDOR_UPLOAD_MAX_LABEL } from "@/lib/vendor-quote-file";
 import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat } from "./est-ui";
 import VendorCompanyField from "@/components/vendors/vendor-company-field";
 import { VENDOR_COPY } from "@/lib/vendor-quotes/rules";
+import { VENDOR_PDF_COPY } from "@/lib/vendor-pdf/extraction";
 
 /**
  * Vendor quote form (#143, D162) — the sixth add-part input method, split off
@@ -108,6 +109,9 @@ export default function VendorQuoteModal({
   systemId,
   onPickSystem,
   fileActions,
+  reading = false,
+  readPanel,
+  lineHints,
 }: {
   secName: string;
   draft: VendorDraft;
@@ -153,6 +157,12 @@ export default function VendorQuoteModal({
   onPickSystem?: (id: string) => void;
   /** #348 slice 4 — extra controls after Remove in the file row (slice 5's Read the PDF). */
   fileActions?: ReactNode;
+  /** #348 slice 5 — Read the PDF is running: Add and the file input wait (like an upload). */
+  reading?: boolean;
+  /** #348 slice 5 — the read's results panel, right under the attachment + Link grid. */
+  readPanel?: ReactNode;
+  /** #348 slice 5 — line id → the read's hint under that material row (catalog match, math off, derived amount). */
+  lineHints?: Record<number, { text: string; warn: boolean }>;
 }) {
   const [fileNote, setFileNote] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -184,7 +194,7 @@ export default function VendorQuoteModal({
   const sell = total > 0 && margin < 1 ? round2(total / (1 - margin)) : total;
   /** #348 slice 4: the email hand-off is still copying the PDF in. */
   const copying = handoff?.status === "loading";
-  const busy = uploading || copying;
+  const busy = uploading || copying || reading;
   const valid =
     (draft.vendor || "").trim().length > 0 &&
     (draft.quoteNumber || "").trim().length > 0 &&
@@ -395,7 +405,7 @@ export default function VendorQuoteModal({
           disabled={!valid || busy}
           style={addBtnStyle(valid && !busy)}
         >
-          {uploading ? "Uploading\u2026" : copying ? VENDOR_COPY.copying : editing ? "Save changes" : "Add vendor quote"}
+          {uploading ? "Uploading\u2026" : copying ? VENDOR_COPY.copying : reading ? VENDOR_PDF_COPY.reading : editing ? "Save changes" : "Add vendor quote"}
         </button>
       }
     >
@@ -552,6 +562,7 @@ export default function VendorQuoteModal({
           />
         </div>
       </div>
+      {readPanel}
 
       {/* materials */}
       <div style={{ marginBottom: 16 }}>
@@ -721,6 +732,20 @@ export default function VendorQuoteModal({
                 >
                   ×
                 </button>
+                {/* #348 slice 5: the read's hint for this row, spanning the whole grid row. */}
+                {lineHints?.[line.id] && (
+                  <div
+                    style={{
+                      gridColumn: "1 / -1",
+                      marginTop: -3,
+                      fontSize: 11,
+                      lineHeight: 1.35,
+                      color: lineHints[line.id].warn ? "#8a6d1f" : "#5b616e",
+                    }}
+                  >
+                    {lineHints[line.id].text}
+                  </div>
+                )}
               </div>
             ))}
           </div>

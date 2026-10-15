@@ -21,6 +21,9 @@ import AddSystemModal from "../add-system-modal";
 import LaborModal from "../labor-modal";
 import TrackModal from "../track-modal";
 import VendorQuoteModal from "../vendor-quote-modal";
+import { ReadPdfButton, VendorPdfPanel } from "../vendor-pdf-panel";
+import { vendorPdfLineHints } from "@/lib/vendor-pdf/fill";
+import { isPdfAttachment } from "@/lib/vendor-quotes/rules";
 import { PortalPanel } from "../portal-panel";
 import { AssistDraftBanner } from "../assist-draft-banner";
 import { SuggestedBomPanel } from "../suggested-bom-panel";
@@ -194,6 +197,9 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     vendorFor,
     vendorFormMargin,
     vendorHandoff,
+    vendorPdf,
+    vendorPdfEnabled,
+    readVendorPdf,
     retargetVendor,
     setVendorCompany,
     vendorPreviews,
@@ -212,6 +218,8 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
   const mayResolveComments = canResolve(s.viewerRoles, {});
   const resolveComment = useResolveComment(s);
   useCommentsFocusRefresh(s);
+  /* #348 slice 5: Read the PDF — only for a user the server gate passed, and only on a PDF attachment. */
+  const readPdf = vendorPdfEnabled && !!vendorDraft.attachment && isPdfAttachment(vendorDraft.attachment);
 
   return (
     <div
@@ -752,6 +760,12 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           systems={sections.map((sec) => ({ id: sec.id, name: sec.name }))}
           systemId={vendorFor}
           onPickSystem={retargetVendor}
+          /* #348 slice 5: Read the PDF (pilot users with a Claude key; PDFs only) — the file-row button, the
+             results panel, the per-line hints, and Add waiting while it reads. */
+          fileActions={readPdf ? <ReadPdfButton busy={vendorPdf.busy} onRead={() => void readVendorPdf(false)} /> : undefined}
+          readPanel={readPdf ? <VendorPdfPanel draft={vendorDraft} state={vendorPdf} onTryHarder={() => void readVendorPdf(true)} /> : undefined}
+          lineHints={readPdf ? vendorPdfLineHints(vendorDraft) : undefined}
+          reading={readPdf && !!vendorPdf.busy}
         />
       )}
       {aiSource && aiOpen && (

@@ -591,6 +591,45 @@ export async function vendorPdfPureChecks(ok: Ok) {
     const src = readFileSync(new URL(`../src/lib/vendor-pdf/${f}`, import.meta.url), "utf8");
     ok(!/from\s+["'](node:|@\/db|@\/lib\/stores)|-server["']/.test(src), `vendor-pdf: ${f} imports nothing server-side`);
   }
+
+  /* ---- #348 slice 5 Task 6: the modal wiring (source pins) ---- */
+  const estDir = "../src/app/(app)/estimator/";
+  const srcOf = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
+  const buildStep = srcOf(`${estDir}steps/build-step.tsx`);
+  ok(/const readPdf = vendorPdfEnabled && [^;]*isPdfAttachment\(vendorDraft\.attachment\)/.test(buildStep), "modal: Read the PDF mounts only under vendorPdfEnabled + a PDF attachment");
+  ok((buildStep.match(/fileActions=\{/g) ?? []).length === 1 && /fileActions=\{readPdf \? <ReadPdfButton /.test(buildStep), "modal: fileActions is passed only under the gate");
+  ok(/readPanel=\{readPdf \? <VendorPdfPanel /.test(buildStep) && /lineHints=\{readPdf \? vendorPdfLineHints\(vendorDraft\)/.test(buildStep) && /reading=\{readPdf && !!vendorPdf\.busy\}/.test(buildStep), "modal: panel, hints and reading follow the same gate");
+  const estPage = srcOf(`${estDir}page.tsx`);
+  ok(/vendorPdfEnabled=\{vendorPdfEnabled\}/.test(estPage) && /\(await vendorPdfGateFor\(user\.id, \{ settings: assistSettingsOf\(settings\) \}\)/.test(estPage), "modal: page.tsx computes the gate with vendorPdfGateFor (a key required)");
+  ok(!/assistUiFlags/.test(estPage), "modal: page.tsx never gates Read the PDF on assistUiFlags");
+  const hookSrc = srcOf(`${estDir}use-estimator-state.ts`);
+  ok((hookSrc.match(/readVendorPdfAction\(/g) ?? []).length === 1, "modal: the hook calls readVendorPdfAction exactly once");
+  ok(hookSrc.includes("applyVendorPdfRead(undoVendorPdfRead(") && /cur\.id !== d\.id \|\| attKey\(cur\) !== attKey\(d\)/.test(hookSrc), "modal: a result undoes then applies, only onto the same form + file");
+  ok(/const setVendorField = [\s\S]{0,500}?field === "attachment"[\s\S]{0,200}?dropVendorPdfRead\(/.test(hookSrc), "modal: replacing / removing the file drops the read");
+  ok((hookSrc.match(/extractedIndex:/g) ?? []).length === 1 && /typeof l\.fromRead === "number" && d\.extracted \? \{ extractedIndex: l\.fromRead \}/.test(hookSrc), "modal: commit writes extractedIndex only under d.extracted");
+  ok(/\.\.\.\(d\.extracted \? \{ extracted: d\.extracted \} : \{\}\)/.test(hookSrc), "modal: commit carries extracted");
+  ok((hookSrc.match(/resetVendorPdf\(\)/g) ?? []).length >= 4, "modal: Read state resets on discard, close, seed and file change");
+  ok(/window\.confirm\(VENDOR_PDF_COPY\.replaceConfirm\(/.test(hookSrc) && /VENDOR_PDF_COPY\.couldNotRead/.test(hookSrc), "modal: replace confirm + a throw reads as couldNotRead");
+  const modalSrc = srcOf(`${estDir}vendor-quote-modal.tsx`);
+  ok(/const busy = uploading \|\| copying \|\| reading;/.test(modalSrc) && /reading \? VENDOR_PDF_COPY\.reading/.test(modalSrc), "modal: reading joins busy and relabels Add");
+  ok(/\{readPanel\}/.test(modalSrc) && /lineHints\?\.\[line\.id\]/.test(modalSrc), "modal: renders the read panel and the per-line hints");
+  const panelSrc = srcOf(`${estDir}vendor-pdf-panel.tsx`);
+  ok(panelSrc.startsWith('"use client";') && panelSrc.includes("Reads the PDF again with Sonnet — replaces the lines this read filled in") && /checkNotes\(/.test(panelSrc) && /VENDOR_PDF_COPY\.filled\(/.test(panelSrc), "modal: the panel — client, filled line, check notes, Try harder title");
+  const clientBanned = /from\s+["']([^"']*\/stores\/[^"']*|@\/lib\/stores[^"']*|@\/db[^"']*|node:[^"']*|pdf-lib|@\/lib\/blob|[^"']*-server)["']/;
+  for (const [name, src] of [["vendor-pdf-panel.tsx", panelSrc], ["vendor-quote-modal.tsx", modalSrc], ...["extraction.ts", "checks.ts", "fill.ts", "diff.ts"].map((f) => [f, srcOf(`../src/lib/vendor-pdf/${f}`)])]) {
+    ok(!clientBanned.test(src), `modal: ${name} imports nothing server-only`);
+  }
+  // Pure: the line hints — a catalog chip and an off line's math warning on one row.
+  const hintX: VendorPdfExtraction = { lines: [{ description: "J", mfrPartNumber: "Jupiter 4", qty: 2, unitPrice: 100, amount: 150 }, { description: "K", mfrPartNumber: "Jupiter 4", qty: 1, unitPrice: 5, amount: 5 }] };
+  const hintChecks = vendorPdfChecks(hintX, { parts: [{ sku: "Symetrix:80-0043", mfr: "Symetrix", manufacturerModelNumber: "Jupiter 4" }], companies: [] });
+  const hintDraft = applyVendorPdfRead(
+    { id: "vqh", vendor: "", quoteNumber: "", description: "", link: "", attachment: null, attachmentPreview: null, lines: [], terms: "", notes: "", total: "", includesFreight: false, display: "single", vendorCompanyId: null, fromThreadId: null, extracted: null, pdfRead: null },
+    { runId: "r", model: "claude-haiku-5-5", hard: false, at: 1, data: hintX, checks: hintChecks, pages: 1 },
+    (() => { let k = 0; return () => ++k; })()
+  );
+  const lh = vendorPdfLineHints(hintDraft);
+  ok(lh[1]?.warn === true && lh[1].text === "2 × $100.00 = $200.00 — the PDF says $150.00 — In catalog: Jupiter 4 · Symetrix:80-0043", "modal: line hint joins the math warning and the catalog chip");
+  ok(lh[2]?.warn === false && lh[2].text === "In catalog: Jupiter 4 · Symetrix:80-0043", "modal: a clean catalog line is an info hint");
 }
 
 /* ---- #348 slice 5 Task 3: fill / undo / diff / report (pure) ---- */

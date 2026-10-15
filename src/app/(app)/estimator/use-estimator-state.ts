@@ -24,9 +24,12 @@ import type { DraftedLine } from "./ai-scope-modal";
 import { DISC_LABEL, type SuggestPart } from "./estimator-data";
 import { backSolveExtSell, priceFromUnitSellEdit, repriceAtMargin, buildLaborItems, computeCurtain, computeLabor, lineMarginOf, makeLaborRate, repricedAtLineMargin, round2, clearSellOverride, parseSellOverride, SYSTEM_PRICE_STEP, systemSellTotal, totals, vendorTotalSeed, withPriceRound } from "./pricing";
 import type { PdfToggle } from "./preview-doc";
-import { vendorAttachmentLoad, type CurtainDraft, type CustomDraft, type EstimatorProps, type FixtureDraft, type LaborDraft, type MobDraft, type SpecItem, type SpecMob, type SpecSection, type TrackDraft, type TravelLite, type VendorDraft, type VendorLineDraft, type VendorQuote } from "./types";
+import { vendorAttachmentLoad, type CurtainDraft, type CustomDraft, type EstimatorProps, type FixtureDraft, type LaborDraft, type MobDraft, type SpecItem, type SpecMob, type SpecSection, type TrackDraft, type TravelLite, type VendorDraft, type VendorLineDraft, type VendorPdfFormState, type VendorQuote } from "./types";
 import { vendorQuoteFromThreadAction } from "./vendor-actions";
-import { VENDOR_COPY } from "@/lib/vendor-quotes/rules";
+import { VENDOR_COPY, isPdfAttachment } from "@/lib/vendor-quotes/rules";
+import { readVendorPdfAction } from "./vendor-pdf-actions";
+import { VENDOR_PDF_COPY } from "@/lib/vendor-pdf/extraction";
+import { applyVendorPdfRead, dropVendorPdfRead, readLinesEdited, undoVendorPdfRead } from "@/lib/vendor-pdf/fill";
 import { sectionFreightDefault, applyAutoFreight } from "./freight-default";
 import { fixtureBomLine } from "./fixture-bom";
 import { applyAutoTrips as applyAutoTripsToMobs, applyLocalTrip, applyMobType, applyTravelTripTo, defaultLaborMobs, disciplineForSystemTitle, laborMob, roundTripMiles, typeMobMiles, setRouteMiles } from "./labor-defaults";
@@ -182,6 +185,14 @@ const freshVendor = (): VendorDraft => ({
   extracted: null,
   pdfRead: null,
 });
+
+/** #348 slice 5 — Read the PDF, idle. */
+const VENDOR_PDF_IDLE: VendorPdfFormState = { busy: null, error: null };
+/** Which file a read was for: a result for a replaced (or removed) file is dropped. */
+const attKey = (d: VendorDraft) => {
+  const a = d.attachment;
+  return a ? a.blobPath ?? `${a.dataUrl?.length ?? 0}:${a.name}` : "";
+};
 
 const freshLabor = (
   t: TravelLite | null,
@@ -630,6 +641,17 @@ export function useEstimatorState(props: EstimatorProps) {
   const vendorSeedRef = useRef<VendorDraft | null>(null);
   const [vendorHandoff, setVendorHandoff] = useState<{ status: "loading" | "done" | "failed"; note: string } | null>(null);
   const vendorHandoffConsumedRef = useRef(false);
+  /* #348 slice 5: Read the PDF's live state. `vendorPdfSeqRef` numbers each read and each reset, so a result (or a
+     failure) that lands after its form closed, reseeded or changed file is dropped; `vendorPdfBusyRef` is the
+     synchronous double-click guard (one action call per click). */
+  const [vendorPdf, setVendorPdf] = useState<VendorPdfFormState>(VENDOR_PDF_IDLE);
+  const vendorPdfSeqRef = useRef(0);
+  const vendorPdfBusyRef = useRef(false);
+  const resetVendorPdf = () => {
+    vendorPdfSeqRef.current++;
+    vendorPdfBusyRef.current = false;
+    setVendorPdf(VENDOR_PDF_IDLE);
+  };
   /* #269: the labor group a "click the line to edit" open is seeding, set
      just before openInputMethod("labor") and consumed by seedDraft — the
      vendor-edit pattern above. `laborEdit` is that open's live state (the
@@ -2345,6 +2367,7 @@ export function useEstimatorState(props: EstimatorProps) {
       vendorSeedRef.current = null;
       setVendorHandoff(null);
       setVendorDraft(freshVendor());
+      resetVendorPdf();
     } else if (kind === "labor") {
       // #269: an abandoned labor edit must not seed the next "+ Labor".
       laborEditRef.current = null;
@@ -2387,6 +2410,7 @@ export function useEstimatorState(props: EstimatorProps) {
       vendorEditRef.current = null;
       const rec = !handoffSeed && editId ? vendorQuotes.find((v) => v.id === editId) : undefined;
       setVendorDraft(handoffSeed || (rec ? vendorDraftFromRecord(rec) : freshVendor()));
+      resetVendorPdf();
     } else if (kind === "fixture") {
       // #246: the list now holds every kind (fixtures first); preselect the
       // first FIXTURE — today's pick — and nothing when there is none.
@@ -2441,6 +2465,8 @@ export function useEstimatorState(props: EstimatorProps) {
     // #348 slice 4: the email hand-off never outlives the form it opened.
     vendorSeedRef.current = null;
     setVendorHandoff(null);
+    // #348 slice 5: nor a Read the PDF in flight.
+    resetVendorPdf();
     if (cur) discardDraft(cur.kind, cur.secId);
   };
 
@@ -2755,8 +2781,63 @@ export function useEstimatorState(props: EstimatorProps) {
      priced line, survives the row's × control, and makes Single/Itemized a
      pure render decision instead of a set of $0 rows that would leak onto
      the customer document. */
-  const setVendorField = <K extends keyof VendorDraft>(field: K, value: VendorDraft[K]) =>
+  const setVendorField = <K extends keyof VendorDraft>(field: K, value: VendorDraft[K]) => {
+    /* #348 slice 5: a replaced or removed file drops the read (its lines stay, now the user's own) and any read
+       still in flight for the old file, with its error. */
+    if (field === "attachment") {
+      resetVendorPdf();
+      setVendorDraft((d) => ({ ...dropVendorPdfRead(d), [field]: value }));
+      return;
+    }
     setVendorDraft((d) => ({ ...d, [field]: value }));
+  };
+
+  /** #348 slice 5 — Read the PDF (hard = Try harder, on Sonnet). One click = one action call; a new read over an
+   *  earlier one confirms first, then undoes that read before applying the new one (applyVendorPdfRead doesn't). */
+  const readVendorPdf = async (hard: boolean) => {
+    const d = vendorDraft;
+    const a = d.attachment;
+    const source = a?.blobPath
+      ? { kind: "blob" as const, blobPath: a.blobPath }
+      : a?.dataUrl
+        ? { kind: "dataUrl" as const, dataUrl: a.dataUrl }
+        : null;
+    if (!a || !source || !isPdfAttachment(a) || vendorPdfBusyRef.current) return;
+    if (d.extracted) {
+      const { read, edited } = readLinesEdited(d);
+      if (read > 0 && !window.confirm(VENDOR_PDF_COPY.replaceConfirm(read, edited))) return;
+    }
+    const seq = ++vendorPdfSeqRef.current;
+    vendorPdfBusyRef.current = true;
+    setVendorPdf({ busy: hard ? "hard" : "read", error: null });
+    let r: Awaited<ReturnType<typeof readVendorPdfAction>>;
+    try {
+      r = await readVendorPdfAction({
+        vendorQuoteId: d.id,
+        quoteId: loadedId,
+        source,
+        hard,
+        retryOf: hard ? d.extracted?.runId ?? null : null,
+      });
+    } catch (e) {
+      console.error("[estimator] Read the PDF failed:", e);
+      r = { ok: false, error: VENDOR_PDF_COPY.couldNotRead, runId: null };
+    }
+    // The form closed, reseeded or changed file meanwhile: this result belongs to nothing on screen.
+    if (vendorPdfSeqRef.current !== seq) return;
+    vendorPdfBusyRef.current = false;
+    if (r.ok) {
+      const result = r;
+      setVendorDraft((cur) =>
+        cur.id !== d.id || attKey(cur) !== attKey(d)
+          ? cur
+          : applyVendorPdfRead(undoVendorPdfRead(cur), result, () => ++vendorLineIdRef.current)
+      );
+      setVendorPdf(VENDOR_PDF_IDLE);
+    } else {
+      setVendorPdf({ busy: null, error: { text: r.error, tooLarge: !!r.tooLarge, hard } });
+    }
+  };
   const setVendorLine = (
     id: number,
     field: keyof Omit<VendorLineDraft, "id">,
@@ -3330,6 +3411,8 @@ export function useEstimatorState(props: EstimatorProps) {
     retargetVendor,
     setVendorCompany,
     vendorHandoff,
+    vendorPdf,
+    readVendorPdf,
     ownerValue,
     partsBusy,
     paymentTerms,

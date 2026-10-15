@@ -746,4 +746,15 @@ export type EstimatorProps = {
    *  suggestion's own sku (a rename resolves to the new part); a sku missing
    *  here lands as an unpriced custom line. */
   suggestionParts?: SuggestionParts;
+  /** #348 slice 5 — Read the PDF is offered: `vendorPdfGateFor` passed on the server (a pilot user, the feature on,
+   *  the kill switch off, and a Claude key). Never derived from assistUiFlags, which reports true under the local
+   *  provider with no key. */
+  vendorPdfEnabled: boolean;
+};
+
+/** #348 slice 5 — the vendor form's Read the PDF state (transient; reset whenever the form or its file changes).
+ *  `error.hard` = the failed attempt was a Try harder, so it isn't offered again. */
+export type VendorPdfFormState = {
+  busy: null | "read" | "hard";
+  error: { text: string; tooLarge: boolean; hard: boolean } | null;
 };
