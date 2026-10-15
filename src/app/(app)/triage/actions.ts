@@ -74,7 +74,7 @@ export async function triageDoneAction(key: string): Promise<Result> {
       if (!(await setThreadStatus(plan.id, "closed"))) return { ok: false, error: GONE };
     }
     // Lead/quote/visit/renewal "Done for today" intentionally records a mark even for a deleted record (it is hidden anyway).
-    await setMark({ userId: user.id, key: k, kind: "done", at: cur.now, snapshotId: cur.snapshotId, until: null });
+    await setMark({ userId: user.id, key: k, kind: "done", at: cur.now, snapshotId: cur.snapshotId, until: null }, { row });
   } catch (error) {
     console.error("triageDoneAction failed", error);
     return { ok: false, error: "Couldn’t mark that done — please try again." };
@@ -92,7 +92,7 @@ export async function triageSnoozeAction(key: string): Promise<Result> {
   if (row === undefined) return { ok: false, error: "Couldn’t check your list — please try again." };
   if (!row) return { ok: false, error: NOT_LISTED };
   try {
-    await setMark({ userId: user.id, key: k, kind: "snooze", at: cur.now, snapshotId: cur.snapshotId, until: snoozeUntil(cur.day) });
+    await setMark({ userId: user.id, key: k, kind: "snooze", at: cur.now, snapshotId: cur.snapshotId, until: snoozeUntil(cur.day) }, { row });
   } catch (error) {
     console.error("triageSnoozeAction failed", error);
     return { ok: false, error: "Couldn’t snooze that — please try again." };
@@ -117,7 +117,8 @@ export async function triageDismissAction(key: string): Promise<Result> {
         const rec = await getRecording(meetingId);
         if (rec) await dismissActionItem(rec, itemKey);
       },
-      mark: async (key) => void (await setMark({ userId: user.id, key, kind: "dismiss", at: cur.now, snapshotId: null, until: null })),
+      // #37 — the row's own key passes the row, so a Not mine on an escalated (returned) row re-dismisses it
+      mark: async (key) => void (await setMark({ userId: user.id, key, kind: "dismiss", at: cur.now, snapshotId: null, until: null }, { row: key === row.key ? row : null })),
     });
   } catch (error) {
     console.error("triageDismissAction failed", error);
@@ -145,7 +146,7 @@ export async function triageReassignAction(key: string, assignee: string): Promi
   if (!triageMayActOnThread(thread, await mailboxViewer(user))) return { ok: false, error: NOT_YOURS };
   try {
     await assignThread(parsed.id, target);
-    await setMark({ userId: user.id, key: k, kind: "done", at: cur.now, snapshotId: cur.snapshotId, until: null });
+    await setMark({ userId: user.id, key: k, kind: "done", at: cur.now, snapshotId: cur.snapshotId, until: null }, { row });
   } catch (error) {
     console.error("triageReassignAction failed", error);
     return { ok: false, error: "Couldn’t reassign that — please try again." };

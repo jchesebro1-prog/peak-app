@@ -84,6 +84,8 @@ export function selectEmail(
       href: `/inbox?thread=${encodeURIComponent(t.id)}`,
       since,
       facts,
+      // #37 — a new inbound customer message brings back a "Not mine"
+      ...(lastInbound(t)?.at ? { escalatedAt: lastInbound(t)!.at } : {}),
     });
   }
   return out;

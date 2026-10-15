@@ -36,7 +36,7 @@ export function toSnapshotRows(candidates: readonly TriageCandidate[], openWork:
   for (const c of rankCandidates(collapseDuplicates(candidates, openWork))) {
     if (seen.has(c.key)) continue;
     seen.add(c.key);
-    rows.push({ key: c.key, source: c.source, title: c.title, sub: c.sub, href: c.href, score: c.score, reason: c.reason, callLine: c.callLine ?? null, also: c.also ?? [], alsoKeys: c.alsoKeys ?? [] });
+    rows.push({ key: c.key, source: c.source, title: c.title, sub: c.sub, href: c.href, score: c.score, reason: c.reason, callLine: c.callLine ?? null, also: c.also ?? [], alsoKeys: c.alsoKeys ?? [], ...(c.escalatedAt ? { escalatedAt: c.escalatedAt } : {}) });
   }
   return rows.slice(0, MAX_SNAPSHOT_ROWS);
 }

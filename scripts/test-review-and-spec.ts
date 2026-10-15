@@ -11358,7 +11358,7 @@ import { suggestPureChecks, suggestStoreDbChecks, suggestRoutePins, suggestPipel
 import { askPureChecks, askSearchDbChecks, askToolsDbChecks, askRunnerChecks, askUiChecks } from "./test-ask";
 import { threadVisibilityPureChecks, threadVisibilityDbChecks, threadVisibilityPins, taskSharePureChecks, taskShareDbChecks } from "./test-thread-visibility";
 import { settingsRaceHelperChecks, settingsRaceCallerChecks, settingsRaceBlobChecks, settingsRaceFollowupChecks } from "./test-settings-race";
-import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
+import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks, triageEscalationChecks } from "./test-morning-triage";
 import { autoCalFieldsChecks, autoCalDueChecks, autoCalUrgencyChecks, autoCalPlacementChecks, autoCalPinRuleChecks, autoCalPinStoreChecks, autoCalLoaderChecks, autoCalWriteChecks, autoCalCalendarViewChecks, autoCalDragPanelChecks, autoCalHomeChecks, autoCalFormChecks, autoCalNobodyDoneChecks } from "./test-auto-calendar";
 import { defaultDueAt } from "@/lib/task-plan/due";
 seeded()
@@ -11642,6 +11642,7 @@ seeded()
   .then(() => triageCronChecks(ok))
   .then(() => triageActionChecks(ok))
   .then(() => triageHomeChecks(ok))
+  .then(() => triageEscalationChecks(ok))
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .then(() => meetings323StoreChecks(ok))

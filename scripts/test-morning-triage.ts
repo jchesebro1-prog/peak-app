@@ -53,7 +53,7 @@ import { getSnapshot, insertSnapshotIfAbsent, markId, marksFor, saveSnapshot, se
 import { buildSlotForAll, computeSnapshot, LIVE_NOTE, loadTriageView, type TriageView } from "@/lib/triage/service";
 import { closedKeys, failClosedKeys } from "@/lib/triage/liveness";
 import { loadLiveState } from "@/lib/triage/live-state";
-import { markHides, snoozeUntil, visibleRows } from "@/lib/triage/view";
+import { dismissLapsed, markHides, snoozeUntil, visibleRows } from "@/lib/triage/view";
 import { gatherCandidates, MAX_SNAPSHOT_ROWS, toSnapshotRows } from "@/lib/triage/build";
 import { createFeedData, type FeedDataSources } from "@/lib/triage/feeds/data";
 import { dismissListedRow, foldedCallKeys, listedRow } from "@/lib/triage/listed";
@@ -884,4 +884,110 @@ export async function triageHomeChecks(ok: Ok): Promise<void> {
   const rowsSrc = readFileSync("src/components/triage/triage-rows.tsx", "utf8");
   ok(/try \{/.test(rowsSrc) && /finally \{/.test(rowsSrc) && /setBusyKey\(null\)/.test(rowsSrc.slice(rowsSrc.indexOf("finally {"))), "rows: a rejected action still resets the busy state and shows an error");
   ok(/aria-label=\{`Done: \$\{r\.title\}`\}/.test(rowsSrc) && /aria-label=\{`Snooze till tomorrow: \$\{r\.title\}`\}/.test(rowsSrc) && /aria-label=\{`Not mine: \$\{r\.title\}`\}/.test(rowsSrc), "rows: Done / Snooze / Not mine carry row-specific accessible names");
+}
+
+/** Jeff 2026-10-15 #37 — a "Not mine" comes back when the item escalates after
+ *  the mark: a new customer message, a resubmit for approval, an SLA breach. */
+export async function triageEscalationChecks(ok: Ok): Promise<void> {
+  /* ---- pure: the rule ---- */
+  const cur = { snapshotId: "u:2026-10-12:midday", day: "2026-10-12", slot: "midday" as const };
+  const dis = { kind: "dismiss" as const, at: MON_10, snapshotId: null, until: null };
+  ok(dismissLapsed(dis, { escalatedAt: MON_10 + 1 }) && !dismissLapsed(dis, { escalatedAt: MON_10 }) && !dismissLapsed(dis, { escalatedAt: MON_10 - H }) && !dismissLapsed(dis, {}) && !dismissLapsed(dis, null),
+    "#37: a Not mine lapses only when the row's escalation is later than the mark (not equal, not earlier, not absent)");
+  ok(!dismissLapsed({ kind: "snooze", at: MON_10 }, { escalatedAt: MON_10 + H }) && !dismissLapsed({ kind: "done", at: MON_10 }, { escalatedAt: MON_10 + H }), "#37: only a dismiss lapses — Snooze and Done keep their rules");
+  ok(!markHides(dis, cur, { escalatedAt: MON_10 + H }) && markHides(dis, cur, { escalatedAt: MON_10 - H }) && markHides(dis, cur) && markHides({ kind: "dismiss", snapshotId: null, until: null }, cur, { escalatedAt: MON_10 + H }),
+    "#37: markHides — an escalated row shows through its Not mine; an older one (or a row without the field, or a mark without a time) stays hidden");
+  ok(
+    markHides({ kind: "snooze", at: MON_10, snapshotId: null, until: "2026-10-13:0" }, cur, { escalatedAt: MON_10 + H }) &&
+      markHides({ kind: "done", at: MON_10, snapshotId: cur.snapshotId, until: null }, cur, { escalatedAt: MON_10 + H }),
+    "#37: an escalation never cuts a Snooze or a Done short"
+  );
+  const row = (key: string, escalatedAt?: number): SnapshotRow => ({ key, source: parseTriageKey(key)!.source, title: key, sub: "", href: "/", score: 1, reason: "", callLine: null, also: [], ...(escalatedAt ? { escalatedAt } : {}) });
+  const marks = ["email:C-1", "email:C-2", "quote:Q-1", "lead:L-1"].map((key) => ({ id: key, userId: "u", key, ...dis }));
+  ok(
+    visibleRows([row("email:C-1", MON_10 + H), row("email:C-2", MON_10 - D), row("quote:Q-1", MON_10 + 2 * H), row("lead:L-1")], marks, new Set(), cur).map((r) => r.key).join() === "email:C-1,quote:Q-1",
+    "#37: visibleRows — the escalated email and quote come back; the quiet email and the lead without an escalation stay dismissed"
+  );
+
+  /* ---- pure: each feed's escalation time ---- */
+  const thread = (id: string, msgs: Array<{ at: number; direction: "in" | "out" }>) =>
+    ({
+      id, mailbox: "personal", mailboxUser: ME.name, unread: true, customerId: null, customer: "Acme", contactName: "Pat", contactEmail: "pat@acme.test",
+      subject: "Hi", channel: "email", status: "waiting_us", assignedTo: ME.name, link: null, createdAt: THU_9, updatedAt: THU_9,
+      messages: msgs.map((m, i) => ({ id: `m${i}`, at: m.at, direction: m.direction, channel: "email", author: "Pat", body: "Hi" })),
+    }) as unknown as CommThread;
+  const deals: DealIndex = { quotes: new Map(), leads: new Map() };
+  const em = selectEmail([thread("C-1", [{ at: THU_9, direction: "in" }, { at: FRI_9, direction: "out" }, { at: FRI_15, direction: "in" }])], deals, { viewer: { id: ME.id, name: ME.name, nameUnique: true }, now: MON_10 });
+  ok(em[0]?.escalatedAt === FRI_15, "#37 email feed: the escalation is the newest inbound customer message");
+  const lead = (id: string, extra: Record<string, unknown> = {}) =>
+    ({ id, org: `Org ${id}`, contact: "", stage: "new", owner: ME.name, value: 0, interest: "", slaHours: 24, firstContactAt: null, nextActionAt: null, createdAt: MON_10 - 30 * H, lastActivityAt: MON_10 - 30 * H, ...extra }) as unknown as LeadRecord;
+  const lr = selectLeads([lead("L1"), lead("L2", { createdAt: MON_10 - 21 * H })], { me: ME, now: MON_10 });
+  ok(lr[0].escalatedAt === MON_10 - 30 * H + 24 * H && lr[1].escalatedAt === undefined, "#37 leads feed: a breached SLA escalates at its deadline; due-soon is not an escalation");
+  const q = (id: string, extra: Record<string, unknown> = {}) =>
+    ({ id, name: `Quote ${id}`, customer: "Acme", owner: "Someone Else", status: "draft", value: 1000, sections: [], updatedAt: MON_10 - H, ...extra }) as unknown as Quote;
+  const qr = selectQuotes([q("Q1", { review: { state: "in_review", submittedAt: MON_10 - 3 * H, submittedBy: "Someone Else" } }), q("Q2", { owner: ME.name, review: { state: "changes", decidedBy: "Jeff Chesebro" } })], { me: { ...ME, canApprove: true }, now: MON_10 });
+  ok(qr.find((c) => c.key === "quote:Q1")?.escalatedAt === MON_10 - 3 * H && qr.find((c) => c.key === "quote:Q2")?.escalatedAt === undefined, "#37 quotes feed: awaiting approval escalates at its (re)submit; sent back is not an escalation");
+  const built = toSnapshotRows([cand("email:C-9", "email", [{ kind: "customer_waiting", businessDays: 1 }], 1, { escalatedAt: FRI_15 }), cand("lead:L-9", "lead", [{ kind: "lead_stale", days: 6 }])], []);
+  ok(built.find((r) => r.key === "email:C-9")?.escalatedAt === FRI_15 && !("escalatedAt" in built.find((r) => r.key === "lead:L-9")!), "#37: the snapshot row keeps the candidate's escalation (and none when it has none)");
+
+  /* ---- DB: the mark store and the frozen list ---- */
+  const U = { id: fixtureId("TRIAGE", "u-esc37"), name: "Triage Escalate", canApprove: false };
+  const KEY = `email:${fixtureId("TRIAGE", "c-esc37")}`;
+  const ids = { mon: snapshotId(U.id, "2026-10-12", "morning"), noon: snapshotId(U.id, "2026-10-12", "midday"), tue: snapshotId(U.id, "2026-10-13", "morning") };
+  for (const id of Object.values(ids)) registerFixture("triage_snapshots", id);
+  registerFixture("triage_marks", markId(U.id, KEY));
+  let esc = MON_10 - D;
+  const feeds: TriageFeed[] = [{ source: "email", load: async () => ({ candidates: [cand(KEY, "email", [{ kind: "customer_waiting", businessDays: 1 }], MON_10 - D, { escalatedAt: esc })] }) }];
+  const keysOf = (v: TriageView) => v.rows.map((r) => r.key);
+  // the fake thread isn't in the DB: liveness would close it, so it reports nothing closed
+  const live = { closedKeys: async () => new Set<string>() };
+  ok(keysOf(await loadTriageView(U, MON_10, { feeds, live })).includes(KEY), "#37 db: (setup) the email is on the morning list");
+  const monRow = (await getSnapshot(ids.mon))!.rows.find((r) => r.key === KEY)!;
+  await setMark({ userId: U.id, key: KEY, kind: "dismiss", at: MON_10 + 60_000, snapshotId: null, until: null }, { row: monRow });
+  ok(!keysOf(await loadTriageView(U, MON_10 + H, { feeds: [], live })).includes(KEY), "#37 db: Not mine hides it at once");
+  ok((await setMark({ userId: U.id, key: KEY, kind: "snooze", at: MON_10 + 2 * H, snapshotId: ids.mon, until: "2026-10-13:0" }, { row: monRow })).kind === "dismiss", "#37 db: with no escalation a later Snooze still can't replace the Not mine");
+  esc = MON_10 + 2 * H; // the customer writes again after the mark
+  const noonView = await loadTriageView(U, MON_1345, { feeds, live });
+  ok(keysOf(noonView).includes(KEY), "#37 db: a new customer message after the Not mine brings the email back in the next snapshot");
+  const noonRow = (await getSnapshot(ids.noon))!.rows.find((r) => r.key === KEY)!;
+  const re = await setMark({ userId: U.id, key: KEY, kind: "dismiss", at: MON_1345 + 60_000, snapshotId: null, until: null }, { row: noonRow });
+  ok(re.kind === "dismiss" && re.at === MON_1345 + 60_000 && !keysOf(await loadTriageView(U, MON_1345 + H, { feeds: [], live })).includes(KEY), "#37 db: Not mine again on the returned row re-arms it (a newer mark time) and hides it");
+  ok(!keysOf(await loadTriageView(U, TUE_8, { feeds, live })).includes(KEY), "#37 db: with no newer message it stays dismissed the next morning");
+  const sn = await setMark({ userId: U.id, key: KEY, kind: "snooze", at: TUE_8, snapshotId: ids.tue, until: "2026-10-14:0" }, { row: { escalatedAt: MON_1345 } });
+  ok(sn.kind === "dismiss", "#37 db: a Snooze through a row whose escalation predates the mark is still refused (the store re-checks)");
+
+  /* ---- pins: every action hands the listed row to setMark ---- */
+  const actions = readFileSync("src/app/(app)/triage/actions.ts", "utf8");
+  ok((actions.match(/until: null \}, \{ row \}\);/g) || []).length === 2 && /until: snoozeUntil\(cur\.day\) \}, \{ row \}\);/.test(actions) && /\{ row: key === row\.key \? row : null \}/.test(actions),
+    "#37 actions: Done, Reassign, Snooze and Not mine pass the listed row, so a returned row's new mark replaces the lapsed Not mine");
+  const store = readFileSync("src/lib/triage/store.ts", "utf8");
+  ok(/if \(existing\?\.kind === "dismiss" && !dismissLapsed\(existing, opts\.row\)\) return existing;/.test(store), "#37 store: a dismiss stays permanent unless it has lapsed for the row acted on");
+}
+
+if (process.argv[1] && /test-morning-triage\.ts$/.test(process.argv[1])) {
+  let fail = 0;
+  const ok: Ok = (c, m) => {
+    console.log((c ? "PASS " : "FAIL ") + m);
+    if (!c) fail++;
+  };
+  if (process.env.DATABASE_URL) {
+    console.error("Refusing to run: DATABASE_URL is set; unset it (this suite writes to the DB).");
+    process.exit(1);
+  }
+  (async () => {
+    const { seeded } = await import("@/db");
+    const { dropFixtures } = await import("./test-fixtures");
+    await seeded();
+    try {
+      for (const run of [triageFoundationChecks, triageRankChecks, triageMatchChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks, triageEscalationChecks])
+        await run(ok);
+    } finally {
+      await dropFixtures();
+    }
+    console.log(fail ? `\n${fail} FAILED` : "\nall morning triage checks passed");
+    process.exit(fail ? 1 : 0);
+  })().catch((err) => {
+    console.log("FAIL " + (err instanceof Error ? err.stack || err.message : String(err)));
+    process.exit(1);
+  });
 }
