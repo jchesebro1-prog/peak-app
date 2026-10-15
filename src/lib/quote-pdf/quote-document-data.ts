@@ -8,6 +8,7 @@ import { documentRevStamp } from "./state";
 import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
+import { addressedHeader, type DocAddressee } from "@/lib/parties/addressee";
 
 /**
  * A saved quote → the props of the customer QuoteDocument (#222). Mirrors what
@@ -69,7 +70,9 @@ type DocCustomer = {
 export function quoteDocumentDataFor(
   q: DocQuote,
   cust: DocCustomer | null,
-  settings: Pick<AppSettingsData, "companyName" | "logoDark">
+  settings: Pick<AppSettingsData, "companyName" | "logoDark">,
+  /** #348 2b-i — a bidder / the awarded bidder: replaces "Prepared for" / "Attn" only; null = today's output. */
+  addressee: DocAddressee | null = null
 ): QuoteDocumentProps {
   const spec = (q.spec || null) as { sections?: unknown; groups?: unknown; document?: unknown } | null;
   const groups = sanitizeGroups(spec?.groups);
@@ -101,14 +104,24 @@ export function quoteDocumentDataFor(
   // #293 slice 3: Rev = revisions so far, date = last update — the one rule
   // (state.ts) the generator also uses to record what a file printed.
   const stamp = documentRevStamp(q);
+  const header = addressedHeader(
+    {
+      custName: (q.customerId && cust?.name) || q.customer || "",
+      hasAttn: current ? true : !!contactName,
+      attnLine: current ? current.name + (current.role ? " · " + current.role : "") : contactName,
+    },
+    addressee
+  );
   return {
     // #223 — the document prints the estimate number (the id when unnumbered).
     quoteId: displayQuoteNumber(q),
     revNum: stamp.revNum,
     revDateMs: stamp.revDateMs,
-    custName: (q.customerId && cust?.name) || q.customer || "",
-    hasAttn: current ? true : !!contactName,
-    attnLine: current ? current.name + (current.role ? " · " + current.role : "") : contactName,
+    custName: header.custName,
+    hasAttn: header.hasAttn,
+    attnLine: header.attnLine,
+    ownerLine: header.ownerLine,
+    bidLine: header.bidLine,
     projectName: q.name || "",
     venueLabel: loc ? [loc.label || "", loc.city || ""].filter(Boolean).join(" — ") : "",
     // The lead estimator — "Questions? Reach out to …".

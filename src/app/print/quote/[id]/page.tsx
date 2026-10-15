@@ -6,6 +6,7 @@ import { verifyPrintToken } from "@/lib/quote-pdf/token";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { getSettings } from "@/lib/settings";
+import { documentAddressee } from "@/lib/parties/addressee-server";
 import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
 import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
 import { keyProductPhotoDataUris } from "@/lib/narrative/photos";
@@ -50,7 +51,7 @@ export default async function PrintQuotePage({
     // #292 — Client-style cut sheets after the estimate, only when the quote asks for them. A failure or a slow load (8 s) drops them, never the PDF — and says so in the server log.
     normalizePdfOptions(q.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
   ]);
-  const doc = quoteDocumentDataFor(q, cust, settings);
+  const doc = quoteDocumentDataFor(q, cust, settings, await documentAddressee(q));
   // #293: key-product photos inlined as data URIs (this route has no session).
   // Never throws — a photo that can't be read just isn't printed.
   // Phase 5: plus the package document's photo-on product blocks.

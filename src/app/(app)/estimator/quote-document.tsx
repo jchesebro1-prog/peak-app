@@ -36,6 +36,10 @@ export type QuoteDocumentProps = {
   projectName: string;
   /** "Label — City" for the selected customer venue ("" when none). */
   venueLabel: string;
+  /** #348 2b-i — "Owner: <company>" under the project name (bidder-addressed documents only). */
+  ownerLine?: string;
+  /** #348 2b-i — "Bid due … · Addenda acknowledged: …" under the meta grid (bidder-addressed documents only). */
+  bidLine?: string;
   /** The lead estimator (`owner`) — "Questions? Reach out to …". */
   ownerName: string;
   /** #287 task B — "Prepared by": `preparedBy`, else the owner, else the company. */
@@ -744,6 +748,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
               <div style={microLabel}>Project</div>
               <div style={{ fontWeight: 600 }}>{p.projectName || "Stage systems package"}</div>
               {p.venueLabel && <div style={{ color: "#5b616e" }}>{p.venueLabel}</div>}
+              {p.ownerLine && <div style={{ color: "#5b616e" }}>{p.ownerLine}</div>}
             </div>
             <div>
               <div style={microLabel}>Prepared by</div>
@@ -751,6 +756,8 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
               <div style={{ color: "#5b616e" }}>{p.companyName}</div>
             </div>
           </div>
+
+          {p.bidLine && <div style={{ color: "#5b616e", fontSize: 11.5, margin: "-10px 0 16px" }}>{p.bidLine}</div>}
 
           {/* at-a-glance investment band */}
           <div

@@ -54910,7 +54910,7 @@ import { qd293Props as p2adProps, qd293Sections as p2adSections, renderQuoteDocu
     "#P2a document: the helper lives in the client-safe quote-document-view.ts");
   ok(data.includes("const groups = sanitizeGroups(spec?.groups);") && data.includes("groups,\n") && data.includes("normalizeSystemOrder(spec && Array.isArray(spec.sections)") && data.includes("as { sections?: unknown; groups?: unknown; document?: unknown }"),
     "#P2a document: quoteDocumentDataFor reads groups from the same spec as sections");
-  ok(loader.includes("quoteDocumentDataFor(src, cust, settings)") && printPage.includes("quoteDocumentDataFor(q, cust, settings)"),
+  ok(loader.includes("quoteDocumentDataFor(src, cust, settings, await documentAddressee(src))") && printPage.includes("quoteDocumentDataFor(q, cust, settings, await documentAddressee(q))"),
     "#P2a document: the web loader (live or frozen revision) and the print route both build props through quoteDocumentDataFor");
   const online = rd("src/components/online-estimate/online-estimate.tsx");
   ok(online.includes('<QuoteDocument {...shown} layout="web" />') && online.includes("bomViewProps(docProps)"), "#P2a document: the online view renders the same QuoteDocument (groups ride in docProps; the BOM view spreads them)");
@@ -57293,7 +57293,7 @@ function p4PreviewChecks(): void {
      p4pCopy.noCurtains === "This estimate has no curtains.",
     "#P4 preview: package from the live loader, BOM = the online BOM view, cut sheets in the Client style (no print CSS injected)");
   const loader = rd("src/lib/estimate-output/package-live-loader.ts");
-  ok(loader.includes("quoteDocumentDataFor(q, cust, settings)") && loader.includes("purchasePerksDocLine(perks)") && loader.includes("packageViewModel(") &&
+  ok(loader.includes("quoteDocumentDataFor(q, cust, settings, await documentAddressee(q))") && loader.includes("purchasePerksDocLine(perks)") && loader.includes("packageViewModel(") &&
      loader.includes("keyProductPhotoLinks(packagePhotoSections(doc.sections), staffPartDocHref, doc.document)") && loader.includes("coverSummary: q.coverSummary") &&
      !/sharePath|resolveSharedPackage|loadQuoteDocumentProps|"\/share\//.test(loader),
     "#P4 preview: the live loader builds from the saved quote (the print route's calls) with staff photo links — never a share token or a sent revision");

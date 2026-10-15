@@ -11,6 +11,7 @@ import { partyVMs } from "@/lib/parties/view-server";
 import { addBidder, awardBid, listBidders, markSubmitted, setBidDetails, undoAward, updateBidder } from "@/lib/stores/bids";
 import { listFor } from "@/lib/stores/parties";
 import { get as getQuote } from "@/lib/stores/quotes";
+import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 
 /** #348 slice 2a — the Bidders card's server actions. Reads need a signed-in user; every mutation needs `create`. */
 export type BidPanelResult = { ok: true; panel: BidPanelVM; note?: string } | { ok: false; error: string };
@@ -83,7 +84,9 @@ export async function bidPanelAction(quoteId: string): Promise<BidPanelResult> {
  */
 async function mutate(
   quoteRef: unknown | (() => Promise<unknown>),
-  run: (userId: string) => Promise<{ ok: boolean; error?: string; note?: string }>
+  run: (userId: string) => Promise<{ ok: boolean; error?: string; note?: string }>,
+  /** #348 2b-i: the write changes what the customer document prints (bid is content) → re-render the PDF. */
+  rerender = false
 ): Promise<BidPanelResult> {
   const user = await requireUser();
   if (!can("create", user.roles)) return { ok: false, error: DENIED };
@@ -92,6 +95,7 @@ async function mutate(
   const r = await run(user.id);
   if (!r.ok) return { ok: false, error: r.error || "That didn't save." };
   revalidatePath("/", "layout");
+  if (rerender) await scheduleQuotePdf(quoteId);
   const panel = await loadPanel(quoteId, true);
   return panel.ok && r.note ? { ...panel, note: r.note } : panel;
 }
@@ -104,7 +108,7 @@ async function quoteOfBidder(partyId: unknown): Promise<string | null> {
 }
 
 export async function setBidDetailsAction(quoteId: string, raw: unknown): Promise<BidPanelResult> {
-  return mutate(quoteId, () => setBidDetails(quoteId, raw));
+  return mutate(quoteId, () => setBidDetails(quoteId, raw), true);
 }
 
 export async function addBidderAction(
@@ -131,9 +135,9 @@ export async function markSubmittedAction(partyId: string, confirmation: string)
 }
 
 export async function awardBidAction(quoteId: string, partyId: string): Promise<BidPanelResult> {
-  return mutate(quoteId, () => (isId(partyId) ? awardBid(quoteId, partyId) : Promise.resolve({ ok: false, error: "That bidder wasn't found." })));
+  return mutate(quoteId, () => (isId(partyId) ? awardBid(quoteId, partyId) : Promise.resolve({ ok: false, error: "That bidder wasn't found." })), true);
 }
 
 export async function undoAwardAction(quoteId: string): Promise<BidPanelResult> {
-  return mutate(quoteId, () => undoAward(quoteId));
+  return mutate(quoteId, () => undoAward(quoteId), true);
 }

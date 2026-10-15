@@ -23,6 +23,8 @@ import { buildQuote, get as getQuote, setStatus } from "../src/lib/stores/quotes
 import { getProjectByQuote } from "../src/lib/stores/projects";
 import { autoTaskId } from "../src/lib/stores/tasks";
 import { addParty, listFor, setPartyBid } from "../src/lib/stores/parties";
+import { documentAddressee } from "../src/lib/parties/addressee-server";
+import { quoteDocumentDataFor } from "../src/lib/quote-pdf/quote-document-data";
 import { addBidder, awardBid, listBidders, markSubmitted, setBidDetails, undoAward, updateBidder } from "../src/lib/stores/bids";
 
 const T1 = Date.UTC(2026, 9, 1);
@@ -240,6 +242,7 @@ export async function bidDbChecks(ok: Ok) {
 
     // details
     const T = Date.UTC(2026, 9, 28, 19, 0), T0 = Date.UTC(2026, 9, 20, 15, 0);
+    const q0 = await getQuote(q);
     const d = await setBidDetails(q, { dueAt: T, addenda: [{ no: 1, receivedAt: T0, note: "a" }] });
     const q1 = await getQuote(q);
     ok(d.ok && q1?.bid?.dueAt === T && q1.bid.addenda.length === 1 && q1.bid.awardedPartyId === null, "bids db: bid details saved on the quote");
@@ -249,7 +252,8 @@ export async function bidDbChecks(ok: Ok) {
     const keepAdd = await setBidDetails(q, { dueAt: T + 3600_000 });
     const q2 = await getQuote(q);
     ok(keepAdd.ok && q2?.bid?.dueAt === T + 3600_000 && q2.bid.addenda.length === 1, "bids db: a missing addenda key keeps the stored addenda");
-    ok(q2?.updatedAt === q1?.updatedAt && q2?.contentChangedAt === q1?.contentChangedAt, "bids db: a bid edit doesn't bump updatedAt or stale the content (not content until 2b)");
+    ok(q2?.updatedAt === q1?.updatedAt && q2?.updatedAt === q0?.updatedAt, "bids db: a bid edit doesn't bump updatedAt (no version bump)");
+    ok(typeof q1?.contentChangedAt === "number" && (q2?.contentChangedAt ?? 0) >= q1.contentChangedAt && q0?.contentChangedAt == null, "bids db: bid is content — a bid edit stamps contentChangedAt (the PDF re-renders)");
     await setBidDetails(q, { addenda: q2?.bid?.addenda ?? [] });
     ok((await getQuote(q))?.bid?.dueAt === T + 3600_000, "bids db: a missing dueAt key keeps the stored due date");
     await setBidDetails(q, { dueAt: T });
@@ -286,6 +290,7 @@ export async function bidDbChecks(ok: Ok) {
     // closed (won) estimate: a bidder there can't be awarded or edited
     const wp = await addParty({ recordType: "quote", recordId: qWon, companyId: gc1, role: "gc" }, "u");
     if (!wp.ok) throw new Error("won-quote bidder missing");
+    const wpId = wp.party.id;
     await setPartyBid(wp.party.id, newBidderState("email"));
     await regAll();
     const awWon = await awardBid(qWon, wp.party.id);
@@ -294,6 +299,22 @@ export async function bidDbChecks(ok: Ok) {
     ok(!upWon.ok && upWon.error === "This estimate is closed.", "bids db: a won estimate's bidder can't be edited");
     const msWon = await markSubmitted(wp.party.id, "u", "");
     ok(!msWon.ok && msWon.error === "This estimate is closed.", "bids db: a won estimate's bidder can't be marked submitted");
+
+    // addressee (2b-i)
+    const qa = await getQuote(q);
+    if (!qa) throw new Error("quote missing");
+    const settings = { companyName: "Peak", logoDark: null };
+    ok((await documentAddressee(qa)) === null, "addressee db: no bidder awarded and none named → null (today's document)");
+    const ad1 = await documentAddressee(qa, g1);
+    ok(!!ad1 && ad1.companyName === "Bid GC One" && ad1.contactName === "Gee Ceeone" && ad1.ownerName === "Bid Owner" && ad1.bidLine === bidDocLine(qa.bid) && ad1.bidLine.startsWith("Bid due "), "addressee db: an explicit bidder → company, contact, owner and bid line");
+    const ad2 = await documentAddressee(qa, g2);
+    ok(!!ad2 && ad2.companyName === "Bid GC Two" && ad2.contactName === "", "addressee db: a bidder with no contact and none at the company → no contact");
+    const adOther = await documentAddressee(qa, wpId);
+    ok((await documentAddressee(qa, "pty_nope")) === null && (await documentAddressee(qa, (await listFor("quote", q)).find((p) => p.role === "owner")?.id)) === null && adOther === null, "addressee db: a non-bidder, the owner row, another quote's party or an unknown id → null");
+    const dN = quoteDocumentDataFor(qa as never, null, settings), dNull = quoteDocumentDataFor(qa as never, null, settings, null), dA = quoteDocumentDataFor(qa as never, null, settings, ad1);
+    ok(JSON.stringify(dN) === JSON.stringify(dNull) && dN.ownerLine === "" && dN.bidLine === "", "addressee db: a null addressee is byte-identical to the 3-arg call");
+    ok(dA.custName === "Bid GC One" && dA.ownerLine === "Owner: Bid Owner" && dA.venueLabel === dN.venueLabel && dA.hasAttn && dA.attnLine === "Gee Ceeone" && dA.bidLine === ad1?.bidLine, "addressee db: the document is addressed to the bidder; the venue still resolves from the owner");
+
 
     const noAward = await undoAward(q);
     ok(!noAward.ok && noAward.error === "Nothing is awarded.", "bids db: undo with nothing awarded refused");
@@ -304,6 +325,8 @@ export async function bidDbChecks(ok: Ok) {
     const after = await getQuote(q);
     const bidders = await listBidders(q);
     ok(aw.ok && after?.bid?.awardedPartyId === g1, "bids db: award stamps the quote");
+    const awAd = await documentAddressee(after as never);
+    ok(awAd?.companyName === "Bid GC One" && (await documentAddressee(after as never, "pty_nope"))?.companyName === "Bid GC One" && (await documentAddressee(after as never, g2))?.companyName === "Bid GC Two", "addressee db: the awarded bidder is the default; an invalid id falls back to it; an explicit bidder wins");
     ok(bidders.find((b) => b.id === g1)?.bid.result === "awarded" && bidders.find((b) => b.id === g2)?.bid.result === "lost" && bidders.find((b) => b.id === g2)?.bid.lostByAward === true, "bids db: winner awarded, the rest lost by award");
     ok(after?.customerId === before?.customerId && after?.pricingTier === before?.pricingTier && after?.tierMargin === before?.tierMargin && after?.customer === before?.customer, "bids db: award never changes the customer or tier");
     const again = await awardBid(q, g1);
