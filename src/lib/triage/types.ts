@@ -47,6 +47,7 @@ export type TriageFact =
   | { kind: "call_todo" }
   | { kind: "portal_quote_review" }
   | { kind: "quote_sent_back" }
+  | { kind: "bid_due"; days: number; missing: number }
   | { kind: "renewal_past_due"; days: number }
   | { kind: "lead_next_action_overdue" }
   | { kind: "task_at_risk" }

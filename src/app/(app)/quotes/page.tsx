@@ -31,6 +31,10 @@ import { loadReviewLimitContext } from "@/lib/review-limits-server";
 import { ReviewLimitChip } from "@/components/review-limit-chip";
 import { displayQuoteNumber, quoteMatchesSearch, quoteSearchRank } from "@/lib/estimate-number";
 import { opensChip } from "@/lib/quote-share/package-view";
+import { listForRecords } from "@/lib/stores/parties";
+import { getCompanies } from "@/lib/identity/companies";
+import { bidDueText, isOpenBid } from "@/lib/parties/bids";
+import type { BidderState } from "@/lib/parties/rules";
 
 export const metadata = { title: "Quotes — Quartzite-6" };
 /** #222 fix wave 1: recalling a revision renders the quote's saved PDF in `after()`, inside this budget. */
@@ -128,6 +132,19 @@ export default async function QuotesPage({
   ]);
   const me = user.name;
 
+  /* ---- #348 bids: one batched party read + one batched company-name read for the whole hub (no per-row reads).
+     A bidder is a gc/ec party row carrying bid state; a quote is a bid iff it has at least one. ---- */
+  const partiesByQuote = await listForRecords("quote", quotes.map((q) => q.id));
+  const biddersByQuote = new Map<string, Array<{ companyId: string; bid: BidderState }>>();
+  for (const [qid, list] of partiesByQuote) {
+    const b = list.filter((p) => p.bid && (p.role === "gc" || p.role === "ec"));
+    if (b.length) biddersByQuote.set(qid, b.map((p) => ({ companyId: p.companyId, bid: p.bid! })));
+  }
+  const bidderCompanyIds = [...new Set([...biddersByQuote.values()].flatMap((l) => l.map((b) => b.companyId)))];
+  const bidderCompanies = await getCompanies(bidderCompanyIds);
+  const bidderNames = (qid: string): string[] =>
+    (biddersByQuote.get(qid) ?? []).map((b) => bidderCompanies.get(b.companyId)?.name || "").filter(Boolean);
+
   /* ---- identity + customer lookups (port of Team.person / CustomerStore) ---- */
   const identity = new Map(users.map((u) => [u.name, { color: u.color, initials: u.initials }]));
   const colorOf = (n: string) => identity.get(n)?.color || fallbackColor(n || "");
@@ -154,6 +171,7 @@ export default async function QuotesPage({
   const TYPE_KEYS = ["system", "flame_test", "repair", "inspection", "consulting", "rental"] as const;
   const typeParam = one(sp.type);
   const typeFilter = (TYPE_KEYS as readonly string[]).includes(typeParam) ? typeParam : "all";
+  const bidFilter = one(sp.bid) === "open";
   const selectedId = one(sp.id);
   // #223 — search by estimate number (FLM-1002, 1002), old id, name, customer.
   const searchTerm = one(sp.q).trim();
@@ -175,6 +193,7 @@ export default async function QuotesPage({
     type?: string;
     id?: string | null;
     q?: string;
+    bid?: string;
   }) => {
     const qs = new URLSearchParams();
     const w = over.who ?? (scope === "all" ? "all" : scope);
@@ -183,6 +202,7 @@ export default async function QuotesPage({
     if (w && w !== "all") qs.set("who", w);
     if (st && st !== "all") qs.set("status", st);
     if (ty && ty !== "all") qs.set("type", ty);
+    if ((over.bid ?? (bidFilter ? "open" : "")) === "open") qs.set("bid", "open");
     const term = over.q ?? searchTerm;
     if (term) qs.set("q", term);
     if (over.id) qs.set("id", over.id);
@@ -199,8 +219,9 @@ export default async function QuotesPage({
      Exact-number hits list first; within a tier getAll()'s order holds. ---- */
   if (searchTerm) {
     scoped = scoped
-      .filter((q) => quoteMatchesSearch(q, searchTerm))
-      .map((q, i) => ({ q, i, r: quoteSearchRank(q, searchTerm) ?? Number.MAX_SAFE_INTEGER }))
+      .map((q) => ({ q, hay: { ...q, bidders: bidderNames(q.id) } }))
+      .filter((x) => quoteMatchesSearch(x.hay, searchTerm))
+      .map((x, i) => ({ q: x.q, i, r: quoteSearchRank(x.hay, searchTerm) ?? Number.MAX_SAFE_INTEGER }))
       .sort((a, b) => a.r - b.r || a.i - b.i)
       .map((x) => x.q);
   }
@@ -213,6 +234,10 @@ export default async function QuotesPage({
     typeCounts[k] = scoped.filter((q) => typeOf(q) === k).length;
   });
   if (typeFilter !== "all") scoped = scoped.filter((q) => typeOf(q) === typeFilter);
+  // #348 — "Out to bid": counted over scope + search + type like the other counts, then applied.
+  const isOutToBid = (q: Quote) => isOpenBid(q, biddersByQuote.get(q.id) ?? []);
+  const outToBidCount = scoped.filter(isOutToBid).length;
+  if (bidFilter) scoped = scoped.filter(isOutToBid);
 
   const roster = users.filter((u) => u.status === "active");
   const ownerOptions = [
@@ -382,6 +407,7 @@ export default async function QuotesPage({
             {scope !== "all" && <input type="hidden" name="who" value={scope} />}
             {filter !== "all" && <input type="hidden" name="status" value={filter} />}
             {typeFilter !== "all" && <input type="hidden" name="type" value={typeFilter} />}
+            {bidFilter && <input type="hidden" name="bid" value="open" />}
             <input
               type="search"
               name="q"
@@ -505,6 +531,29 @@ export default async function QuotesPage({
             </Link>
           );
         })}
+        <Link
+          href={hrefFor({ bid: bidFilter ? "" : "open" })}
+          data-testid="quote-bid-filter"
+          title={bidFilter ? "Showing estimates still out to bid — click to show all" : "Estimates with a bidder still pending"}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontFamily: "var(--font-ui)",
+            fontSize: 12,
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+            padding: "6px 12px",
+            borderRadius: 20,
+            textDecoration: "none",
+            border: bidFilter ? "1px solid var(--accent)" : "1px solid #e4e7ec",
+            background: bidFilter ? "var(--accent)" : "#fff",
+            color: bidFilter ? "#fff" : "#5b616e",
+          }}
+        >
+          Out to bid{" "}
+          <span style={{ fontFamily: "var(--font-mono)", opacity: 0.65 }}>{outToBidCount}</span>
+        </Link>
       </div>
 
       {/* quotes table */}
@@ -679,6 +728,38 @@ export default async function QuotesPage({
                         Portal
                       </span>
                     )}
+                    {(() => {
+                      const bidders = biddersByQuote.get(q.id);
+                      if (!bidders) return null;
+                      const awarded = !!q.bid?.awardedPartyId;
+                      const label = awarded
+                        ? "Awarded"
+                        : q.bid?.dueAt
+                          ? `Bid · due ${bidDueText(q.bid.dueAt).split(",")[0]}`
+                          : "Bid";
+                      return (
+                        <span
+                          data-testid="quote-bid-chip"
+                          title={`${bidders.length} ${bidders.length === 1 ? "bidder" : "bidders"}${
+                            q.bid?.dueAt ? ` · due ${bidDueText(q.bid.dueAt)}` : ""
+                          }`}
+                          style={{
+                            flexShrink: 0,
+                            fontSize: 9,
+                            fontWeight: 700,
+                            letterSpacing: ".04em",
+                            textTransform: "uppercase",
+                            color: awarded ? "#1f7a52" : "#3a3f4a",
+                            background: awarded ? "#eaf6ef" : "#f1f2f5",
+                            border: awarded ? "1px solid #cce9da" : "1px solid #e4e7ec",
+                            padding: "2px 6px",
+                            borderRadius: 4,
+                          }}
+                        >
+                          {label}
+                        </span>
+                      );
+                    })()}
                     {q.portalAcceptance && q.status === "sent" && (
                       <span
                         title={

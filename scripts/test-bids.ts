@@ -6,6 +6,10 @@ import {
   markSubmittedState, currentRev, needsRev, awardPlan, undoAwardPlan, canAward, canUndoAward, bidderStatusText, bidDueText, bidDueDays, isOpenBid,
 } from "../src/lib/parties/bids";
 import type { BidderState } from "../src/lib/parties/rules";
+import { quoteMatchesSearch } from "../src/lib/estimate-number";
+import { selectBidDue } from "../src/lib/triage/feeds/quotes";
+import { factLabel, pointsFor } from "../src/lib/triage/rank";
+import type { Quote } from "../src/lib/stores/quotes";
 import { like } from "drizzle-orm";
 import { getDb } from "../src/db";
 import { companies, contacts as contactsTable } from "../src/db/schema";
@@ -137,6 +141,28 @@ export async function bidChecks(ok: Ok) {
   const frozen = Object.freeze(B({ gcBidNo: "1" }));
   const patched = applyBidderPatch(frozen, { gcBidNo: undefined, submitVia: "website" });
   ok(frozen.gcBidNo === "1" && frozen.submitVia === "email" && patched.gcBidNo === undefined && patched.submitVia === "website", "bids: applyBidderPatch doesn't mutate its input");
+  // Task 5 — search by bidder name, and the Morning triage bid-due fact
+  const bq = { id: "Q-1", name: "Gym", customer: "MPSD" };
+  ok(quoteMatchesSearch({ ...bq, bidders: ["Miron Construction"] }, "miron"), "bids: a quote answers to a bidder's company name");
+  ok(!quoteMatchesSearch(bq, "miron") && !quoteMatchesSearch({ ...bq, bidders: [] }, "miron"), "bids: without bidders the name doesn't match");
+  const tctx = { me: { id: "u-t", name: "Dana Tester", canApprove: false }, now: NOW };
+  const tq = (over: Record<string, unknown> = {}) =>
+    ({ id: "Q-9", name: "Gym", customer: "MPSD", owner: "Dana Tester", status: "sent", updatedAt: 1, bid: { dueAt: OCT21_2PM, addenda: [], awardedPartyId: null }, ...over }) as unknown as Quote;
+  const two = new Map([["Q-9", [{ bid: B() }, { bid: B() }]]]);
+  const due = selectBidDue([tq()], two, tctx);
+  const f = due[0]?.facts.find((x) => x.kind === "bid_due");
+  ok(due.length === 1 && !!f && f.kind === "bid_due" && f.days === 1 && f.missing === 2, "bids: due tomorrow with 2 unsubmitted → bid_due {days:1, missing:2}");
+  ok(f?.kind === "bid_due" && pointsFor(f) === 25 && factLabel(f) === "Bid due tomorrow · 2 bidders not submitted", "bids: bid_due tomorrow points + label");
+  ok(factLabel({ kind: "bid_due", days: 0, missing: 1 }) === "Bid due today · 1 bidder not submitted" && pointsFor({ kind: "bid_due", days: 0, missing: 1 }) === 35, "bids: bid_due today points + label");
+  ok(factLabel({ kind: "bid_due", days: -1, missing: 1 }) === "Bid past due" && pointsFor({ kind: "bid_due", days: -1, missing: 1 }) === 35, "bids: bid_due past due label");
+  const past = selectBidDue([tq({ bid: { dueAt: NOW - 86_400_000, addenda: [], awardedPartyId: null } })], two, tctx);
+  const pf = past[0]?.facts.find((x) => x.kind === "bid_due");
+  ok(pf?.kind === "bid_due" && pf.days === -1, "bids: past due → days -1");
+  ok(selectBidDue([tq({ bid: { dueAt: NOW + 3 * 86_400_000, addenda: [], awardedPartyId: null } })], two, tctx).length === 0, "bids: due in 3 days → no fact");
+  ok(selectBidDue([tq({ bid: { dueAt: OCT21_2PM, addenda: [], awardedPartyId: "p" } })], two, tctx).length === 0, "bids: awarded → no fact");
+  ok(selectBidDue([tq({ owner: "Someone Else" })], two, tctx).length === 0, "bids: not mine → no fact");
+  ok(selectBidDue([tq()], new Map([["Q-9", [{ bid: B({ revSent: 1 }) }]]]), tctx).length === 0, "bids: every bidder submitted → no fact");
+  ok(selectBidDue([tq({ revisions: [{}, {}] })], new Map([["Q-9", [{ bid: B({ revSent: 1 }) }]]]), tctx).length === 1, "bids: a bidder on an older revision still counts as missing");
 }
 
 const BID_FIX = { gc1: fixtureId(348, "bgc1"), gc2: fixtureId(348, "bgc2"), own: fixtureId(348, "bown"), ct1: fixtureId(348, "bct1") };

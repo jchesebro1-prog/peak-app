@@ -10,6 +10,8 @@ import {
   type QuoteNumberFields,
 } from "@/lib/estimate-number";
 import { quotesByPartialNumber } from "@/lib/stores/estimate-numbers";
+import { getMany as getQuotesByIds } from "@/lib/stores/quotes";
+import type { Party } from "@/lib/parties/rules";
 import { allCompanies, getCompanies } from "@/lib/identity/companies";
 import { allContacts, displayName, emailsForContacts } from "@/lib/identity/contacts";
 import { normalizeRecording, recordingStatusChip, type RecordingRecord } from "@/lib/stores/recordings";
@@ -62,7 +64,7 @@ function matches(q: string, ...fields: Array<unknown>): boolean {
 }
 
 /** #223 — a doc as the estimate-number helpers read it. */
-type NumberedDoc = QuoteNumberFields & { id: string; name?: string | null; customer?: string | null };
+type NumberedDoc = QuoteNumberFields & { id: string; name?: string | null; customer?: string | null; bidders?: readonly string[] | null };
 const asNumbered = (d: Doc): NumberedDoc => d as unknown as NumberedDoc;
 
 /** #304: "Jupiter 4 · 80-0043" — the model first, the order # beside it. */
@@ -150,8 +152,31 @@ export async function globalSearch(
         ),
       ])
     : [[], []];
+  // #348 — a quote also answers to a bidder's company name: the companies already loaded for the Companies group
+  // that match the term (capped at 50) → their gc/ec party rows with bid state → those quotes, one batched read each.
+  // Quotes are visible to every signed-in staff member today, so nothing here widens access.
+  const bidderOf = new Map<string, string[]>();
+  {
+    const hit = companies.filter((c) => matches(q, c.name)).slice(0, 50);
+    if (hit.length) {
+      const nameById = new Map(hit.map((c) => [c.id, c.name || c.id]));
+      const rows = await listDocsByField<Party & Doc>("record_parties", "companyId", [...nameById.keys()]);
+      for (const p of rows) {
+        if (p.recordType !== "quote" || !p.bid || (p.role !== "gc" && p.role !== "ec")) continue;
+        const list = bidderOf.get(p.recordId) ?? [];
+        list.push(nameById.get(p.companyId) || p.companyId);
+        bidderOf.set(p.recordId, list);
+      }
+    }
+  }
+  const bidderQuotes = bidderOf.size
+    ? [...(await getQuotesByIds([...bidderOf.keys()])).values()].map((d) => ({ ...d, bidders: bidderOf.get(d.id) ?? [] }) as unknown as Doc)
+    : [];
+  const quoteDocs = [...partialQuotes, ...quotes, ...bidderQuotes].map((d) =>
+    bidderOf.has(d.id) ? ({ ...d, bidders: bidderOf.get(d.id) } as unknown as Doc) : d
+  );
   const seenQuote = new Set<string>();
-  const quoteHits = [...numberedQuotes, ...[...partialQuotes, ...quotes].filter((d) => quoteMatchesSearch(asNumbered(d), q))]
+  const quoteHits = [...numberedQuotes, ...quoteDocs.filter((d) => quoteMatchesSearch(asNumbered(d), q))]
     .filter((d) => {
       if (seenQuote.has(d.id)) return false;
       seenQuote.add(d.id);
@@ -166,7 +191,9 @@ export async function globalSearch(
     quoteHits.map((d) => ({
       id: d.id,
       title: String(d.name || d.id),
-      sub: `${displayQuoteNumber(asNumbered(d))} · ${String(d.customer || "")}`,
+      sub: `${displayQuoteNumber(asNumbered(d))} · ${String(d.customer || "")}${
+        bidderOf.has(d.id) && !matches(q, d.id, d.name, d.customer) ? ` · bidder ${bidderOf.get(d.id)![0]}` : ""
+      }`,
       href: `/quotes?id=${encodeURIComponent(d.id)}`,
       letter: "Q",
       color: "var(--accent)",

@@ -837,6 +837,7 @@ export function ProjectsView({
               view={view}
               who={who}
               custName={custName(sel)}
+              billToName={sel.billToCompanyId ? custById.get(sel.billToCompanyId) || sel.billToCompanyId : null}
               identity={identity}
               roster={roster}
               taskRows={taskRows}
@@ -898,6 +899,7 @@ function ProjectDetail({
   view,
   who,
   custName,
+  billToName,
   identity,
   roster,
   taskRows,
@@ -913,6 +915,8 @@ function ProjectDetail({
   view: "list" | "board";
   who: string;
   custName: string;
+  /** #348 — the awarded bidder's company when the quote was won through an award (stamped at Won); null otherwise. */
+  billToName?: string | null;
   identity: Identity[];
   roster: string[];
   taskRows: TaskRecord[];
@@ -1015,7 +1019,7 @@ function ProjectDetail({
             </div>
             <div style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-.01em", marginTop: 8 }}>{p.name}</div>
             <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 3 }}>
-              {custName} · PM {firstName(p.owner)} · {formatJobValue(p, money)}
+              {custName}{billToName ? ` · Bill to ${billToName}` : ""} · PM {firstName(p.owner)} · {formatJobValue(p, money)}
               {typeof p.performanceBonusPool === "number" && p.performanceBonusPool > 0 ? ` · Performance bonus pool ${money(p.performanceBonusPool)}` : ""}
             </div>
           </div>
@@ -1234,7 +1238,7 @@ function ProjectDetail({
           <CrewTab p={p} colorOf={colorOf} initialsOf={initialsOf} roster={roster} />
         )}
         {curTab === "timeline" && <TimelineTab p={p} isOrder={isOrder} />}
-        {curTab === "packet" && <HandoffPacketTab p={p} taskRows={taskRows} />}
+        {curTab === "packet" && <HandoffPacketTab p={p} taskRows={taskRows} billToName={billToName} />}
         {curTab === "documents" && (
           <DocumentsCard customerId={p.customerId} siteId={p.locationId} projectId={p.id} />
         )}
@@ -1246,7 +1250,7 @@ function ProjectDetail({
 
 /* ---------------- Installer handoff packet (#44b) ---------------- */
 
-function HandoffPacketTab({ p, taskRows }: { p: ProjectRecord; taskRows: TaskRecord[] }) {
+function HandoffPacketTab({ p, taskRows, billToName }: { p: ProjectRecord; taskRows: TaskRecord[]; billToName?: string | null }) {
   const scopes = signoffScopes(p);
   const scopeLines = new Map<string, typeof p.procurement>();
   for (const line of p.procurement || []) {
@@ -1281,7 +1285,7 @@ function HandoffPacketTab({ p, taskRows }: { p: ProjectRecord; taskRows: TaskRec
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#6f7682", background: "#f1f2f5", padding: "4px 7px", borderRadius: 5 }}>{p.id}</span>
         </div>
       </div>
-      {section("Site & schedule", <>{row("Customer", p.customer || "—")}{row("Install window", p.installStart ? fmtDate(p.installStart) + " – " + fmtDate(p.installEnd) : "Not scheduled")}{row("Crew", p.crew.length ? p.crew.map((c) => c.person).join(", ") : "Unassigned")}{row("Target", fmtDate(p.targetDate))}</>)}
+      {section("Site & schedule", <>{row("Customer", p.customer || "—")}{billToName ? row("Bill to", billToName) : null}{row("Install window", p.installStart ? fmtDate(p.installStart) + " – " + fmtDate(p.installEnd) : "Not scheduled")}{row("Crew", p.crew.length ? p.crew.map((c) => c.person).join(", ") : "Unassigned")}{row("Target", fmtDate(p.targetDate))}</>)}
       {section("Scope & materials", <div style={{ display: "grid", gap: 9 }}>{scopes.map((scope) => {
         const lines = scopeLines.get(scope) || [];
         return <div key={scope}><div style={{ fontSize: 12.5, fontWeight: 650, color: "#30343c", marginBottom: 4 }}>{scope}</div>{lines.length ? lines.map((line) => <div key={line.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "4px 0 4px 10px", fontSize: 12, color: "#5b616e" }}><span>{line.desc}</span><span style={{ fontFamily: "var(--font-mono)", color: "#8c919c" }}>{line.qty} {line.unit} · {line.status}</span></div>) : <div style={{ color: "#9aa0ab", fontSize: 12 }}>No procurement lines recorded.</div>}</div>;

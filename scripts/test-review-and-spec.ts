@@ -28394,7 +28394,7 @@ function e223Src(rel: string): string {
 {
   const hub = e223Src("src/app/(app)/quotes/page.tsx");
   ok(!hub.includes("{q.id} · {owner}") && hub.includes("{displayQuoteNumber(q)} · {owner}"), "#223 quotes hub: rows show the estimate number, not the internal id");
-  ok(hub.includes("quoteMatchesSearch(q, searchTerm)") && hub.includes('name="q"'), "#223 quotes hub: a search box filters by number, old id, name and customer");
+  ok(hub.includes("quoteMatchesSearch(x.hay, searchTerm)") && hub.includes('name="q"'), "#223 quotes hub: a search box filters by number, old id, name and customer");
   ok(hub.includes("was {q.id}"), "#223 quotes hub: the selected panel shows 'was Q-…' in small type");
   ok(hub.includes("quoteSearchRank(") && hub.includes("number={displayQuoteNumber(q)}"), "#223 quotes hub: exact-number hits list first; revision history names the number");
   ok(e223Src("src/app/(app)/quotes/controls.tsx").includes("Priced snapshots of {number || id}"), "#223 quotes hub: the revision-history drawer names the quote by its number");
