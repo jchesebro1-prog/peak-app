@@ -96,6 +96,8 @@ export type PackageViewInput = {
   view: "narrative" | "bom";
   base: string;
   letterheadSrc: string;
+  /** #348 2b-ii — a bidder's v3 link whose bid is no longer live: the banner reads "This bid is closed." */
+  bidClosed?: boolean;
 };
 
 export function packageViewModel(i: PackageViewInput): PackageViewProps {
@@ -116,7 +118,7 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
     headerLine: i.headerLine,
     totalLabel: t.totalLabel,
     total: fmt(t.total),
-    banner: packageBanner(i.state, i.currentHref),
+    banner: packageBanner(i.state, i.currentHref, i.bidClosed === true),
     summary: coverSummaryText(i.frozen.coverSummary, scopes.map((s) => s.name)),
     view: i.view,
     narrativeHref: i.base,

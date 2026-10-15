@@ -1,7 +1,7 @@
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { resolveSharedPackage, resolveSharedQuote, SHARE_PHOTO_PER_MIN } from "@/lib/quote-share/links";
 import { servePackagePhotoForRevision, servePhotoForRevision } from "@/lib/quote-share/photo-response";
-import { isShareTokenV2 } from "@/lib/quote-share/token";
+import { isPackageToken } from "@/lib/quote-share/token";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,8 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request, ctx: { params: Promise<{ id: string; token: string; docId: string }> }) {
   const { id, token, docId } = await ctx.params;
   if (!rateLimit("share-photo:" + (clientIp(req) || "unknown"), SHARE_PHOTO_PER_MIN, 60_000).ok) return new Response("Too many requests", { status: 429 });
-  if (isShareTokenV2(token)) {
+  // #348 2b-ii: a bidder's v3 takes this branch too — it can never fall through to v1's latest-sent rule.
+  if (isPackageToken(token)) {
     try {
       const pkg = await resolveSharedPackage(id, token);
       if (!pkg) return new Response("Not found", { status: 404 });

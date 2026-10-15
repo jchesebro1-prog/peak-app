@@ -205,8 +205,15 @@ export function appendResponseTo(list: unknown, r: ClientResponse): ClientRespon
   return [...cur, r];
 }
 
+/** #348 2b-ii — a bidder company name as it goes into a note, task title or response row: trimmed, every run of
+ *  whitespace (newlines included) collapsed to one space, at most 120 characters. */
+export const BIDDER_NAME_MAX = 120;
+export function cleanBidderName(name: unknown): string {
+  return (typeof name === "string" ? name : "").replace(/\s+/g, " ").trim().slice(0, BIDDER_NAME_MAX).trim();
+}
+
 export function responseTaskTitle(r: Pick<CleanResponse, "kind" | "sectionNames" | "total">, number: string, revNo: number, bidderName = ""): string {
-  const bidder = bidderName.trim();
+  const bidder = cleanBidderName(bidderName);
   if (bidder)
     return r.kind === "accept" ? `${bidder} accepted ${number} Rev ${revNo} — ${r.sectionNames.join(", ")} (${fmt(r.total)})` : `Bidder question — ${number} · ${bidder}`;
   return r.kind === "accept" ? `Client accepted ${number} Rev ${revNo} — ${r.sectionNames.join(", ")} (${fmt(r.total)})` : `Client question — ${number}`;
@@ -214,7 +221,7 @@ export function responseTaskTitle(r: Pick<CleanResponse, "kind" | "sectionNames"
 
 export function responseNoteText(r: CleanResponse, number: string, revNo: number, bidderName = ""): string {
   const who = [r.name, r.title, r.email].filter(Boolean).join(" · ");
-  const bidder = bidderName.trim();
+  const bidder = cleanBidderName(bidderName);
   const head = bidder
     ? r.kind === "accept"
       ? `${bidder} (bidder) selected scopes on ${number} Rev ${revNo} (bid link): ${r.sectionNames.join(", ")} — ${fmt(r.total)} before any Rewards credit.`
@@ -282,7 +289,7 @@ const chicagoStamp = (ms: number) =>
     .replace(/[\u202f\u00a0]/g, " ");
 
 const bidderLabel = (r: ClientResponse, bidderNameOf?: (partyId: string) => string): string => {
-  const name = r.partyId && bidderNameOf ? (bidderNameOf(r.partyId) || "").trim() : "";
+  const name = r.partyId && bidderNameOf ? cleanBidderName(bidderNameOf(r.partyId)) : "";
   return name ? `${name} (bidder)` : "";
 };
 

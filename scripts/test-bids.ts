@@ -45,6 +45,10 @@ import { signPrintToken, verifyPrintToken } from "../src/lib/quote-pdf/token";
 import { quoteDocumentDataFor } from "../src/lib/quote-pdf/quote-document-data";
 import { addBidder, awardBid, listBidders, markBidderSendFailed, markSubmitted, recordBidderOpen, recordBidderSend, setBidDetails, undoAward, updateBidder } from "../src/lib/stores/bids";
 import { recordEstimateEmail } from "../src/lib/stores/quotes";
+import { bidderLinkPath, bidderSharePath, ensureShareLink, recordSharedOpen, resolveSharedPackage, revokeShareLink } from "../src/lib/quote-share/links";
+import { submitClientResponse } from "../src/lib/estimate-output/responses-server";
+import { CLIENT_ACTION_COPY, cleanBidderName, type ClientResponse } from "../src/lib/estimate-output/responses";
+import { loadPackageViewProps } from "../src/lib/estimate-output/package-loader";
 
 const T1 = Date.UTC(2026, 9, 1);
 const B = (over: Partial<BidderState> = {}): BidderState => ({ ...newBidderState("email"), ...over });
@@ -682,8 +686,105 @@ export async function bidSendDbChecks(ok: Ok) {
     await recordEstimateEmail(eq, { threadId: "C-e3", rev: 1, at: T, by: "x", to: "y", partyId: "nope" });
     const e3 = (await getQuote(eq))?.estimateEmails?.find((e) => e.threadId === "C-e3");
     ok(!!e3 && !("partyId" in e3), "send db: a malformed partyId isn't stored");
+
+    // 2b-ii Task 5 — bidder links (v3): the share page, opens, tagged responses.
+    const es = fixtureId(348, "es");
+    const SEC = "s3cret";
+    await createFixture("quotes", buildQuote(es, { name: "Link quote", customer: "Send Owner", customerId: own, value: 1000 } as never, "system", null, NOW) as never);
+    const regEs = async () => { for (const p of await listFor("quote", es)) registerFixture("record_parties", p.id); };
+    const lb1 = await addBidder({ quoteId: es, companyId: gc1, contactId: ct1, role: "gc" }, "u");
+    const lb2 = await addBidder({ quoteId: es, companyId: gc2, role: "gc" }, "u");
+    await regEs();
+    if (!lb1.ok || !lb2.ok) throw new Error("link bidders missing");
+    const sg1 = lb1.party.id, sg2 = lb2.party.id;
+    const preSend = await bidderLinkPath(es, sg1, "Test", { secret: SEC });
+    ok(!preSend.ok, "link db: an unsent estimate has no bidder link (ensureShareLink's refusal passes through)");
+    await setStatus(es, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    const ens = await ensureShareLink(es, "Test", { secret: SEC });
+    ok(ens.ok, "link db: the estimate's share link exists after the send");
+    const lp1 = await bidderLinkPath(es, sg1, "Test", { secret: SEC });
+    const tok1 = lp1.ok ? lp1.path.split("/").pop()! : "";
+    const p1 = parseShareToken(tok1);
+    ok(lp1.ok && lp1.rev === 1 && lp1.path.startsWith("/share/quote/") && p1?.v === 3 && p1.partyId === sg1 && p1.rev === 1, "link db: bidderLinkPath → a v3 path for this bidder at the latest sent revision");
+    const lpGone = await bidderLinkPath(es, "pty_0000000000000000", "Test", { secret: SEC });
+    ok(!lpGone.ok && lpGone.error === BID_SEND_COPY.gone, "link db: an unknown bidder gets BID_SEND_COPY.gone");
+    const lpOther = await bidderLinkPath(es, g1, "Test", { secret: SEC });
+    ok(!lpOther.ok && lpOther.error === BID_SEND_COPY.gone, "link db: another quote's bidder gets BID_SEND_COPY.gone");
+    const qes = (await getQuote(es))!;
+    const NOWL = Date.now();
+    ok(bidderSharePath(qes, sg1, 2, SEC, NOWL) === null && bidderSharePath(qes, "pty_xyz", 1, SEC, NOWL) === null && bidderSharePath(qes, sg1, 1, SEC, (qes.shareLink?.expiresAt ?? 0) + 1) === null
+      && bidderSharePath(qes, sg1, 1, "", NOWL) === null && bidderSharePath(qes, sg1, 1, SEC, NOWL) === (lp1.ok ? lp1.path : "x"),
+      "link db: bidderSharePath — only a sent rev, a bidder-shaped id, an active link and a secret");
+
+    const hit1 = await resolveSharedPackage(es, tok1, { secret: SEC });
+    ok(hit1?.bidder?.companyName === "Send GC One" && hit1.bidder.result === "pending" && hit1.bidder.partyId === sg1 && hit1.bidder.companyId === gc1 && hit1.rev.rev === 1 && hit1.currentPath === null,
+      "link db: a v3 token resolves its bidder (company, pending) at the pinned revision");
+    const v2tok = ens.ok && ens.link.pathV2 ? ens.link.pathV2.split("/").pop()! : "";
+    const hitV2 = await resolveSharedPackage(es, v2tok, { secret: SEC });
+    ok(!!hitV2 && hitV2.bidder === null, "link db: the owner's v2 for the same quote has bidder === null");
+    const tokForged = tok1.replace(sg1.slice(4), sg2.slice(4));
+    ok((await resolveSharedPackage(es, tokForged, { secret: SEC })) === null, "link db: a v3 moved to another bidder's id fails the MAC");
+
+    const docB = hit1 ? await loadQuoteDocumentProps(hit1.q, { revision: hit1.rev, photos: { href: (d) => d }, bidderPartyId: sg1 }) : null;
+    ok(docB?.custName === "Send GC One" && docB.ownerLine === "Owner: Send Owner", "link db: the bidder's document is addressed to the bidder, owner on its own line");
+    const docX = hit1 ? await loadQuoteDocumentProps(hit1.q, { revision: hit1.rev, photos: { href: (d) => d }, bidderPartyId: "pty_0000000000000000" }) : "x";
+    ok(docX === null, "link db: an unresolvable bidder id fails the loader closed");
+    const docO = hitV2 ? await loadQuoteDocumentProps(hitV2.q, { revision: hitV2.rev, photos: { href: (d) => d } }) : null;
+    ok(!!docO && docO.custName === "Send Owner", "link db: without bidderPartyId the document stays owner-addressed");
+
+    const lp2 = await bidderLinkPath(es, sg2, "Test", { secret: SEC });
+    const tok2 = lp2.ok ? lp2.path.split("/").pop()! : "";
+    ok(!!(await resolveSharedPackage(es, tok2, { secret: SEC }))?.bidder, "link db: the second bidder's v3 resolves");
+    await setPartyBid(sg2, null);
+    ok((await resolveSharedPackage(es, tok2, { secret: SEC })) === null, "link db: a removed bidder's v3 resolves null (the one inactive card)");
+    await setPartyBid(sg2, newBidderState());
+
+    const op1 = await recordSharedOpen(es, tok1, "203.0.113.7", { secret: SEC });
+    const op2 = await recordSharedOpen(es, tok1, "203.0.113.7", { secret: SEC });
+    const sg1Bid = (await listBidders(es)).find((b) => b.id === sg1)?.bid;
+    const qOpen = await getQuote(es);
+    ok(op1 === true && op2 === false && sg1Bid?.opens?.count === 1 && !("1" in ((qOpen?.shareOpens ?? {}) as Record<string, unknown>)),
+      "link db: a bidder open counts once per IP on the bidder, never on Quote.shareOpens");
+
+    let seen: { r: ClientResponse; b?: string } | null = null;
+    const sub1 = await submitClientResponse("question", es, tok1, { name: "Pat", message: "Hi" }, "203.0.113.8", {
+      secret: SEC, users: async () => [], notify: async (_q, r, _u, _n, b) => { seen = { r, b }; },
+    });
+    const seenV = seen as { r: ClientResponse; b?: string } | null;
+    const stored = (await getQuote(es))?.clientResponses?.at(-1);
+    ok(sub1.ok && seenV?.r.partyId === sg1 && seenV.b === "Send GC One" && stored?.partyId === sg1, "link db: a bidder's response is tagged with the bidder and names it to notify");
+
+    const aw = await awardBid(es, sg2);
+    const hitLost = await resolveSharedPackage(es, tok1, { secret: SEC });
+    ok(aw.ok && hitLost?.bidder?.partyId === sg1 && hitLost.bidder.result === "lost", "link db: a lost bidder's link still resolves, result lost");
+    const subLost = await submitClientResponse("question", es, tok1, { name: "Pat", message: "Again" }, "203.0.113.9", { secret: SEC, users: async () => [], notify: async () => {} });
+    ok(!subLost.ok && subLost.error === CLIENT_ACTION_COPY.closed, "link db: a lost bidder can't respond (closed)");
+    ok(!!hitLost && packageBanner(hitLost.state, null, true)?.text === "This bid is closed.", "link db: the closed-bid banner");
+    const modelLost = hitLost ? await loadPackageViewProps(hitLost, { base: "/b", view: "narrative", letterheadSrc: "/l.jpg" }) : null;
+    ok(modelLost?.banner?.text === "This bid is closed." && modelLost.customer === "Send GC One", "link db: the lost bidder's package page reads \"This bid is closed.\", addressed to the bidder");
+    const hitWin = await resolveSharedPackage(es, tok2, { secret: SEC });
+    const modelWin = hitWin ? await loadPackageViewProps(hitWin, { base: "/b", view: "narrative", letterheadSrc: "/l.jpg" }) : null;
+    ok(hitWin?.bidder?.result === "awarded" && modelWin?.banner == null && modelWin?.customer === "Send GC Two", "link db: the awarded bidder's page has no closed banner");
+    ok((await undoAward(es)).ok, "link db: the award undoes");
+
+    // Superseded: a newer send re-signs the SAME bidder's v3 — never the owner's v2.
+    await addQuoteRevision(es, { by: "Test", reason: "sent" });
+    const sup = await resolveSharedPackage(es, tok1, { secret: SEC });
+    const supTok = parseShareToken(sup?.currentPath?.split("/").pop());
+    ok(sup?.state.kind === "superseded" && supTok?.v === 3 && supTok.partyId === sg1 && supTok.rev === 2, "link db: a superseded v3's current link is the same bidder's v3 at the latest revision");
+
+    ok(cleanBidderName("  Acme\n\n  GC\tInc  ") === "Acme GC Inc" && cleanBidderName("x".repeat(200)).length === 120 && cleanBidderName(undefined) === "", "link: bidder names are one line, ≤ 120 chars");
+
+    ok((await revokeShareLink(es, "Test")).ok && (await resolveSharedPackage(es, tok1, { secret: SEC })) === null, "link db: Revoke kills every bidder link");
+
+    const rdS = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+    const SD = "src/app/share/quote/[id]/[token]/";
+    const subRoutes = ["datasheets.pdf/route.ts", "package.zip/route.ts", "doc/[docId]/route.ts", "file/[fileId]/route.ts", "photo/[docId]/route.ts"].map((f) => rdS(SD + f));
+    ok(subRoutes.every((t) => t.includes("isPackageToken(") && !t.includes("isShareTokenV2(")), "link: every package sub-route gates on isPackageToken, never isShareTokenV2");
+    ok(rdS(SD + "page.tsx").includes("isPackageToken(token)") && rdS(SD + "package-page.tsx").includes("bidderCanAct("), "link: the share page branches on isPackageToken; the package page gates actions on bidderCanAct");
   } finally {
     try { await regAll(); } catch {}
+    try { for (const p of await listFor("quote", fixtureId(348, "es"))) registerFixture("record_parties", p.id); } catch {}
     await dropFixtures(348);
     await dropBidSendIdentityFixtures();
   }

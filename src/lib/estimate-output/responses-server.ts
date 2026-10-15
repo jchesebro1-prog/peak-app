@@ -1,5 +1,5 @@
 import { displayQuoteNumber } from "@/lib/estimate-number";
-import { canAct } from "@/lib/quote-share/package-view";
+import { bidderCanAct, canAct } from "@/lib/quote-share/package-view";
 import { resolveSharedPackage } from "@/lib/quote-share/links";
 import { revisionGroupedSections } from "@/lib/quote-share/photo-response";
 import { sentDocumentStamp } from "@/lib/quote-share/view";
@@ -10,7 +10,7 @@ import { appendClientResponse, type Quote } from "@/lib/stores/quotes";
 import { createTask } from "@/lib/stores/tasks";
 import { allUsers } from "@/lib/users";
 import {
-  chicagoDayEnd, CLIENT_ACTION_COPY, CLIENT_LINK_ACTOR, confirmationText, leadEstimator, newResponseId, PEAK_NAME, RESPONSE_IP_LIMIT,
+  chicagoDayEnd, cleanBidderName, CLIENT_ACTION_COPY, CLIENT_LINK_ACTOR, confirmationText, leadEstimator, newResponseId, PEAK_NAME, RESPONSE_IP_LIMIT,
   RESPONSE_IP_WINDOW_MS, RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS, responseAssignees, responseNoteText, responseScopes, responseTaskTitle,
   sanitizeClientResponse, type ClientActionResult, type ClientResponse, type ClientResponseKind, type RosterUser,
 } from "./responses";
@@ -28,7 +28,8 @@ type SubmitDeps = {
   secret?: string;
   now?: () => number;
   users?: () => Promise<RosterUser[]>;
-  notify?: (q: Quote, r: ClientResponse, users: RosterUser[], now: number) => Promise<void>;
+  /** #348 2b-ii: `bidderName` — the v3 bidder's (clean) company name; absent for the owner's v2. */
+  notify?: (q: Quote, r: ClientResponse, users: RosterUser[], now: number, bidderName?: string) => Promise<void>;
 };
 
 export async function submitClientResponse(kind: ClientResponseKind, id: string, token: string, input: unknown, ip: string, deps: SubmitDeps = {}): Promise<ClientActionResult> {
@@ -40,13 +41,17 @@ export async function submitClientResponse(kind: ClientResponseKind, id: string,
   const hit = await resolveSharedPackage(id, token, { secret: deps.secret, now });
   if (!hit) return { ok: false, error: CLIENT_ACTION_COPY.inactive };
   if (!canAct(hit.state)) return { ok: false, error: hit.state.kind === "superseded" ? CLIENT_ACTION_COPY.superseded : CLIENT_ACTION_COPY.closed };
+  // #348 2b-ii: a bidder's v3 acts only while its bid is pending or awarded (a missing result is closed). An award
+  // landing between here and appendClientResponse writes a harmless note — accepted.
+  const bidder = hit.bidder ?? null;
+  if (bidder && !(bidder.result && bidderCanAct(bidder.result))) return { ok: false, error: CLIENT_ACTION_COPY.closed };
   // Phase 2b: the offered scopes include the alternate systems — the same list the picker shows.
   const { sections, groups } = revisionGroupedSections(hit.rev);
   const clean = sanitizeClientResponse(kind, o, responseScopes(sections, groups));
   if (!clean.ok) return clean;
   // The per-quote daily slot is spent only on a submission that will be written (an invalid one costs the quote nothing).
   if (!rateLimit(`share-respond-quote:${hit.q.id}`, RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS).ok) return { ok: false, error: CLIENT_ACTION_COPY.tooMany };
-  const res = await appendClientResponse(hit.q.id, hit.rev.rev, clean.value, now, newResponseId());
+  const res = await appendClientResponse(hit.q.id, hit.rev.rev, { ...clean.value, ...(bidder ? { partyId: bidder.partyId } : {}) }, now, newResponseId());
   if (!res.ok) return { ok: false, error: res.reason === "full" ? CLIENT_ACTION_COPY.full : res.reason === "state" ? CLIENT_ACTION_COPY.closed : CLIENT_ACTION_COPY.inactive };
   let users: RosterUser[] = [];
   try {
@@ -54,9 +59,9 @@ export async function submitClientResponse(kind: ClientResponseKind, id: string,
   } catch (e) {
     console.error("[client-response] roster unavailable", e instanceof Error ? e.message : e);
   }
-  const notify = deps.notify ?? notifyClientResponse;
+  const notify = deps.notify ?? ((q: Quote, r: ClientResponse, u: RosterUser[], n: number, b?: string) => notifyClientResponse(q, r, u, n, {}, b));
   try {
-    await notify(hit.q, res.response, users, now);
+    await notify(hit.q, res.response, users, now, bidder ? cleanBidderName(bidder.companyName) : undefined);
   } catch (e) {
     console.error("[client-response] notify failed", e instanceof Error ? e.message : e);
   }
@@ -77,19 +82,21 @@ const liveNotify: NotifyDeps = { addNote: addNoteRecord, logActivity, createTask
 /** R15 + R16: a system note on the quote (customer timeline), a system
  *  activity on the lead (never `note` — that stamps firstContactAt), one
  *  task per assignee. Each step on its own: one failing never stops the rest. */
-export async function notifyClientResponse(q: Quote, r: ClientResponse, users: RosterUser[], now: number, deps: Partial<NotifyDeps> = {}): Promise<void> {
+export async function notifyClientResponse(q: Quote, r: ClientResponse, users: RosterUser[], now: number, deps: Partial<NotifyDeps> = {}, bidderName = ""): Promise<void> {
   const d: NotifyDeps = { ...liveNotify, ...deps };
   const number = displayQuoteNumber(q);
   const rev = (q.revisions || []).find((x) => x.rev === r.rev);
   const revNo = rev ? sentDocumentStamp(q, rev).revNo : r.rev;
-  const text = responseNoteText(r, number, revNo);
+  // #348 2b-ii: a bidder's response names the bidder (cleaned: one line, ≤ 120 chars) in the note and task title.
+  const bidder = cleanBidderName(bidderName);
+  const text = responseNoteText(r, number, revNo, bidder);
   const steps: Array<() => Promise<unknown>> = [
     () => d.addNote({ parentKind: "quote", parentId: q.id, customerId: q.customerId ?? null, text, system: true }, CLIENT_LINK_ACTOR),
     ...(q.leadId ? [() => d.logActivity(q.leadId as string, { type: "system", by: CLIENT_LINK_ACTOR, at: now, note: text }, CLIENT_LINK_ACTOR)] : []),
     ...responseAssignees(q.owner, q.preparedBy, users).map((u) => () =>
       d.createTask(
         {
-          title: responseTaskTitle(r, number, revNo),
+          title: responseTaskTitle(r, number, revNo, bidder),
           section: "Review",
           quoteId: q.id,
           assigneeUserId: u.id,

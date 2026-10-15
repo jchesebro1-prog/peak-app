@@ -5,7 +5,7 @@ import { loadPackageExtras } from "@/lib/estimate-output/package-extras";
 import { creditNoteText } from "@/lib/estimate-output/responses";
 import { loadPackageViewProps } from "@/lib/estimate-output/package-loader";
 import { resolveSharedPackage } from "@/lib/quote-share/links";
-import { canAct } from "@/lib/quote-share/package-view";
+import { bidderCanAct, canAct } from "@/lib/quote-share/package-view";
 import { ONLINE_COPY, sharePath } from "@/lib/quote-share/view";
 import { OpenBeacon } from "./open-beacon";
 import { buildPackageSlots } from "./package-slots";
@@ -29,7 +29,8 @@ export async function SharedPackagePage({ id, token, view }: { id: string; token
   const slots = buildPackageSlots(await loadPackageExtras(hit, base), {
     id: hit.q.id,
     token,
-    canAct: canAct(hit.state),
+    // #348 2b-ii: a v3 link may act only while its bid is pending or awarded; a missing result counts as closed.
+    canAct: canAct(hit.state) && (hit.bidder ? !!hit.bidder.result && bidderCanAct(hit.bidder.result) : true),
     creditNote: creditNoteText(model.totals.creditAmount),
   });
   return (

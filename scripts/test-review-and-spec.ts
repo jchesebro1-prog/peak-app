@@ -52315,23 +52315,23 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
 {
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const page = rd("src/app/share/quote/[id]/[token]/page.tsx");
-  ok(page.indexOf("rateLimit(") < page.indexOf("isShareTokenV2(token)") && page.indexOf("isShareTokenV2(token)") < page.indexOf("resolveSharedQuote(") &&
+  ok(page.indexOf("rateLimit(") < page.indexOf("isPackageToken(token)") && page.indexOf("isPackageToken(token)") < page.indexOf("resolveSharedQuote(") &&
      page.includes("<SharedPackagePage id={id} token={token} view={onlineView(sp.view)} />"),
-    "#301 page: a v2 token branches to the package after the rate limit and before the v1 resolve");
+    "#301 page: a package token (v2, or #348's bidder v3) branches to the package after the rate limit and before the v1 resolve");
   const pp = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
   ok(pp.includes("resolveSharedPackage(id, token)") && pp.includes("loadPackageViewProps(") && (pp.match(/ONLINE_COPY\.shareInactive/g) || []).length === 1 &&
      pp.includes("<PackageView model={model} slots={slots} />") && pp.includes("Slice C") && !pp.includes('"use client"') && !/\b(update|patchShareLink|recordShareOpen)\(/.test(pp) &&
      !pp.includes("quoteAsOfRevision") && !pp.includes("auth(") && !pp.includes("cookies("),
     "#301 page: the package page resolves, loads, renders PackageView with the Slice C mounts empty, one inactive card; read-only, no session");
   const loader = rd("src/lib/estimate-output/package-loader.ts");
-  ok(loader.includes("loadQuoteDocumentProps(hit.q, { revision: hit.rev, photos: { href } })") && loader.includes("packageFrozenFields(hit.rev.docFields,") &&
+  ok(loader.includes("loadQuoteDocumentProps(hit.q, { revision: hit.rev, photos: { href }, bidderPartyId: hit.bidder?.partyId })") && loader.includes("packageFrozenFields(hit.rev.docFields,") &&
      loader.includes("keyProductPhotoLinks(packagePhotoSections(doc.sections), href, doc.document)") && !loader.includes("quoteAsOfRevision") && !/\bq\.(coverSummary|notIncluded|packageFiles)\b/.test(loader),
     "#301 loader: the sent revision through the web loader; cover fields from the pinned revision only (R12); every scope's photos");
   const photo = rd("src/app/share/quote/[id]/[token]/photo/[docId]/route.ts");
-  ok(photo.indexOf("rateLimit(") < photo.indexOf("isShareTokenV2(token)") && photo.indexOf("isShareTokenV2(token)") < photo.indexOf("resolveSharedQuote(") &&
+  ok(photo.indexOf("rateLimit(") < photo.indexOf("isPackageToken(token)") && photo.indexOf("isPackageToken(token)") < photo.indexOf("resolveSharedQuote(") &&
      photo.includes("servePackagePhotoForRevision(req, pkg.rev, docId)"),
-    "#301 photos: the share photo route takes a v2 token (the pinned revision's package photo set) or a v1 one (#293's)");
-  ok(photo.slice(photo.indexOf("isShareTokenV2(token)) {")).indexOf("try {") > 0 && photo.indexOf("try {") < photo.indexOf("resolveSharedPackage(") && photo.indexOf("resolveSharedPackage(") < photo.indexOf("} catch (e) {") &&
+    "#301 photos: the share photo route takes a package token — v2 or #348's v3 (the pinned revision's package photo set) — or a v1 one (#293's)");
+  ok(photo.slice(photo.indexOf("isPackageToken(token)) {")).indexOf("try {") > 0 && photo.indexOf("try {") < photo.indexOf("resolveSharedPackage(") && photo.indexOf("resolveSharedPackage(") < photo.indexOf("} catch (e) {") &&
      photo.slice(photo.indexOf("} catch (e) {")).includes("console.warn(") && photo.slice(photo.indexOf("} catch (e) {")).includes('return new Response("Not found", { status: 404 })') && photo.includes("return await servePackagePhotoForRevision("),
     "#301 photos fix: a DB error resolving a v2 photo link is the same uniform 404, logged (never a 500)");
   const pr = rd("src/lib/quote-share/photo-response.ts");
@@ -52777,11 +52777,11 @@ import { renderToStaticMarkup as e301cdRender } from "react-dom/server";
   const html = e301cdRender(e301cdEl(E301cdLink, { link: { href: "/share/quote/Q-1/t/doc/PD-1", name: "ColorSource.pdf" } }));
   ok(html.includes('href="/share/quote/Q-1/t/doc/PD-1"') && html.includes("Datasheet — ColorSource.pdf") && html.includes("download"), "#301 docs: the link reads \"Datasheet — <file>\" and downloads");
   const route = rd("src/app/share/quote/[id]/[token]/doc/[docId]/route.ts");
-  ok(route.indexOf("rateLimit(") < route.indexOf("isShareTokenV2(token)") && route.indexOf("isShareTokenV2(token)") < route.indexOf("resolveSharedPackage(") &&
+  ok(route.indexOf("rateLimit(") < route.indexOf("isPackageToken(token)") && route.indexOf("isPackageToken(token)") < route.indexOf("resolveSharedPackage(") &&
      route.indexOf("resolveSharedPackage(") < route.indexOf("packageDocForRevision(pkg.rev, docId)") &&
      route.includes('rateLimit("share-doc:" + (clientIp(req) || "unknown"), SHARE_DOC_PER_MIN, 60_000)') && route.includes("attachmentDisposition(doc.fileName)") &&
      route.includes('"x-content-type-options": "nosniff"') && route.includes(`"content-security-policy": "sandbox; default-src 'none'"`) && !route.includes("quoteAsOfRevision") && !/\b(update|patchQuote|setStatus)\(/.test(route),
-    "#301 docs: the route rate-limits first, takes only a v2 token, serves only the pinned revision's documents, as an attachment; read-only");
+    "#301 docs: the route rate-limits first, takes only a package (v2/v3) token, serves only the pinned revision's documents, as an attachment; read-only");
   const srv = rd("src/lib/estimate-output/package-docs-server.ts");
   ok(srv.includes("loadScopedCoverage(parts)") && !srv.includes("listCatalog") && !srv.includes("loadPartDocsState") && srv.includes("quoteBom(src, rackOf, isInternal)") && srv.includes("internalSkuCheck("),
     "#301 docs: the revision's documents use the scoped loader and the client package's BOM rule — never the whole catalog");
@@ -52927,10 +52927,10 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
       "#301 zip: putBlobAt refuses any path outside estimate-package/ or containing .. , before it calls Blob");
   }
   const route = rd("src/app/share/quote/[id]/[token]/package.zip/route.ts");
-  ok(route.indexOf("rateLimit(") < route.indexOf("isShareTokenV2(token)") && route.indexOf("isShareTokenV2(token)") < route.indexOf("resolveSharedPackage(") &&
+  ok(route.indexOf("rateLimit(") < route.indexOf("isPackageToken(token)") && route.indexOf("isPackageToken(token)") < route.indexOf("resolveSharedPackage(") &&
      route.indexOf("resolveSharedPackage(") < route.indexOf("servePackageZip(pkg)") && route.includes("SHARE_ZIP_PER_WINDOW, SHARE_ZIP_WINDOW_MS") &&
      route.includes("export const maxDuration = 120;") && !route.includes("maxDuration = 60"),
-    "#301 zip: the route rate-limits (6 / 10 min / IP), takes only a v2 token, then serves the pinned revision's zip (maxDuration 120, as the rack submittal)");
+    "#301 zip: the route rate-limits (6 / 10 min / IP), takes only a package (v2/v3) token, then serves the pinned revision's zip (maxDuration 120, as the rack submittal)");
   ok(/try \{\s*pkg = await resolveSharedPackage\(id, token\);\s*\} catch \(e\) \{\s*console\.error\([^;]*, e\);\s*return notFound\(\);\s*\}/.test(route),
     "#301 zip: a resolveSharedPackage failure is caught, logged and answered with the same uniform 404 as an invalid link");
   const srv = rd("src/lib/estimate-output/package-zip-server.ts");
@@ -52948,7 +52948,7 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
   const docRoute = rd("src/app/share/quote/[id]/[token]/doc/[docId]/route.ts");
   const dRes = docRoute.indexOf("resolveSharedPackage(");
   const dCatch = docRoute.indexOf("} catch (e) {", dRes);
-  ok(docRoute.lastIndexOf("try {", dRes) > docRoute.indexOf("isShareTokenV2(token)") && dRes < docRoute.indexOf("packageDocForRevision(", dRes) && docRoute.indexOf("packageDocForRevision(", dRes) < dCatch &&
+  ok(docRoute.lastIndexOf("try {", dRes) > docRoute.indexOf("isPackageToken(token)") && dRes < docRoute.indexOf("packageDocForRevision(", dRes) && docRoute.indexOf("packageDocForRevision(", dRes) < dCatch &&
      dCatch < docRoute.indexOf("getBlobStream(") && docRoute.slice(dCatch, docRoute.indexOf("getBlobStream(")).includes("console.warn(") &&
      docRoute.slice(dCatch, docRoute.indexOf("getBlobStream(")).includes("return notFound();"),
     "#301 docs route: a DB error while resolving the package or its document is the same uniform 404, logged server-side (never a 500)");
@@ -53069,9 +53069,9 @@ import { renderToStaticMarkup as e301cuRender } from "react-dom/server";
      fin.indexOf("d.head(") < fin.indexOf("sniffPackageFile(") && fin.indexOf("sniffPackageFile(") < fin.indexOf("addPackageFile("),
     "#301 uploads: finalize checks the path, never touches a recorded blob, sniffs the real bytes, then records");
   const fileRoute = rd("src/app/share/quote/[id]/[token]/file/[fileId]/route.ts");
-  ok(fileRoute.indexOf("rateLimit(") < fileRoute.indexOf("isShareTokenV2(token)") && fileRoute.indexOf("isShareTokenV2(token)") < fileRoute.indexOf("resolveSharedPackage(") &&
+  ok(fileRoute.indexOf("rateLimit(") < fileRoute.indexOf("isPackageToken(token)") && fileRoute.indexOf("isPackageToken(token)") < fileRoute.indexOf("resolveSharedPackage(") &&
      fileRoute.includes("packageFileForRevision(pkg.rev, fileId)") && fileRoute.includes("SHARE_FILE_PER_MIN") && !fileRoute.includes("q.packageFiles"),
-    "#301 uploads: the file route serves only the pinned revision's frozen list (R12), v2 only, 120/min/IP");
+    "#301 uploads: the file route serves only the pinned revision's frozen list (R12), package (v2/v3) tokens only, 120/min/IP");
   const acts = rd("src/app/(app)/estimator/package-actions.ts");
   ok(/^"use server";/.test(acts) && !/^export (?!async function)/m.test(acts) && (acts.match(/await requireUser\(\);/g) || []).length >= 2 &&
      (acts.match(/if \(!can\("send", user\.roles\)\) return \{ ok: false, error: ONLINE_COPY\.needsSend \};/g) || []).length >= 2,
@@ -68569,7 +68569,7 @@ async function gridNotes8Checks(): Promise<void> {
     const bad2 = await route8.GET(req8("10.8.0.2"), { params: Promise.resolve({ id: QID8, token: `${Date.now() + 86_400_000}.1.${"A".repeat(43)}` }) });
     const shareSrc = rd8("src/app/share/quote/[id]/[token]/datasheets.pdf/route.ts");
     ok(bad1.status === 404 && bad2.status === 404 && shareSrc.includes('rateLimit("share-zip:" + (clientIp(req) || "unknown"), SHARE_ZIP_PER_WINDOW, SHARE_ZIP_WINDOW_MS)') &&
-       shareSrc.indexOf("rateLimit(") < shareSrc.indexOf("isShareTokenV2(token)") && shareSrc.indexOf("isShareTokenV2(token)") < shareSrc.indexOf("resolveSharedPackage(") &&
+       shareSrc.indexOf("rateLimit(") < shareSrc.indexOf("isPackageToken(token)") && shareSrc.indexOf("isPackageToken(token)") < shareSrc.indexOf("resolveSharedPackage(") &&
        shareSrc.includes("serveSharedBook(pkg, {}, startedAt)") && shareSrc.includes("export const maxDuration = 120;"),
       "Grid notes #8: the share download uses package.zip's share-zip: bucket, refuses a malformed or forged token with the uniform 404, then serves the pinned revision's book");
     const pkg8 = { q: q8, rev: rev8, state: { kind: "ok" }, currentPath: null } as never;

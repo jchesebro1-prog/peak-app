@@ -37,7 +37,7 @@ export type DocPhotos = "inline" | { href: (docId: string) => string };
 
 export type LoadQuoteDocumentOpts =
   | { revision?: QuoteRevision | null; photos: "inline" }
-  | { revision: QuoteRevision; photos: { href: (docId: string) => string } };
+  | { revision: QuoteRevision; photos: { href: (docId: string) => string }; bidderPartyId?: string };
 
 /** A web page may render only a sent revision of this very quote. */
 function webRevisionOk(q: Quote, rev: QuoteRevision | null | undefined): boolean {
@@ -72,13 +72,16 @@ async function revisionAddressee(src: Quote, revision: QuoteRevision | null | un
 export async function loadQuoteDocumentProps(q: Quote, opts: LoadQuoteDocumentOpts): Promise<QuoteDocumentProps | null> {
   if (opts.photos !== "inline" && !webRevisionOk(q, opts.revision)) return null;
   const src = opts.revision ? quoteAsOfRevision(q, opts.revision) : q;
+  // #348 2b-ii — a bidder's v3 page is addressed to that bidder, strictly: no valid bidder row → null (fail closed).
+  const bidderPartyId = opts.photos !== "inline" ? opts.bidderPartyId : undefined;
   const [cust, settings, perks, addressee] = await Promise.all([
     getCustomer(src.customerId),
     getSettings(),
     // #282 perks+points — the customer's purchase perks line (program on only).
     purchasePerksForCompany(src.customerId),
-    revisionAddressee(src, opts.revision),
+    bidderPartyId !== undefined ? documentAddressee(src, bidderPartyId, { strict: true }) : revisionAddressee(src, opts.revision),
   ]);
+  if (bidderPartyId !== undefined && !addressee) return null;
   const doc = quoteDocumentDataFor(src, cust, settings, addressee);
   const keyProductPhotos =
     opts.photos === "inline" ? await keyProductPhotoDataUris(doc.sections, doc.document) : await keyProductPhotoLinks(doc.sections, opts.photos.href, doc.document);
