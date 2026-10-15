@@ -12408,5 +12408,8 @@ The app is safe before step 4: ownership already resolves the same way lazily (G
 - Other records still name people by display name — tasks (`assigneeName`), Queue assignments, site visits, lead / quote owners, notification prefs (incl. Keep threads in my inbox). Unique team names now keep those unambiguous; moving them to ids is separate work.
 - A stamp can be dropped by a concurrent whole-document write that read the thread just before it; harmless (the fallback resolves the same owner) and re-stamped on the next action.
 - `moveTo` keeps a thread's old `gmailAccountKey`; the owner id wins, but its Gmail thread stays in the old account.
-- Review items 7, 9 and 11 of the #349 review — deferred by the coordinator ("not now").
+- Deferred from the #349 review:
+  - **Gmail thread split (`src/lib/gmail/bridge.ts` ~298).** A legacy thread that has a Gmail thread id, no `gmailAccountKey`, and an owner name held by more than one user now matches no account. The next inbound reply starts a duplicate thread. Running the stamp script and fixing duplicate names removes the case.
+  - **Test coverage.** The generated action audit only covers `inbox/*`; `quotes/new`, `estimator/send-actions` and `triage/actions` are guarded by source pins alone. The bridge's per-account attach and its import stamp are regex-pinned, with no behaviour test.
+  - **AI-pass worklist (#335).** `pendingAiThreads` applies its SQL limit before the identity re-check, so a namesake's threads can fill a batch. Shared-name threads also never get their pending flag cleared. Both are harmless but untidy.
 - An unknown-name thread (its name held by no user) stays unowned until a newcomer's name retires it; the script only lists it.
