@@ -670,7 +670,8 @@ export function useEstimatorState(props: EstimatorProps) {
       qty: String(l.qty),
       unit: l.unit,
       amount: String(l.amount),
-      ...(typeof l.extractedIndex === "number" ? { fromRead: l.extractedIndex } : {}),
+      // #348 slice 5: a read line is tagged only while the record still has its read (the server strips both together).
+      ...(v.extracted && typeof l.extractedIndex === "number" ? { fromRead: l.extractedIndex } : {}),
     }));
     return {
       /* The record's OWN id, never a fresh mint: the attachment is stored under
@@ -2823,6 +2824,8 @@ export function useEstimatorState(props: EstimatorProps) {
         qty: parseMoney(l.qty) || 0,
         unit: (l.unit || "").trim() || "ea",
         amount: round2(parseMoney(l.amount) || 0),
+        // #348 slice 5: which read line this row came from — the server keeps it only with a verified read.
+        ...(typeof l.fromRead === "number" && d.extracted ? { extractedIndex: l.fromRead } : {}),
       })),
       terms: d.terms || "",
       notes: d.notes || "",
@@ -2833,6 +2836,8 @@ export function useEstimatorState(props: EstimatorProps) {
       ...(d.vendorCompanyId ? { vendorCompanyId: d.vendorCompanyId } : {}),
       ...(d.fromThreadId ? { fromThreadId: d.fromThreadId } : {}),
       ...(prevRec?.addedAt ? { addedAt: prevRec.addedAt } : {}),
+      // #348 slice 5: the read this form keeps — re-verified against its run on the server at save.
+      ...(d.extracted ? { extracted: d.extracted } : {}),
     };
     /* Replaced IN PLACE on an edit — same id, same position — so the spawned
        line keeps resolving against it and the row order does not shuffle. */

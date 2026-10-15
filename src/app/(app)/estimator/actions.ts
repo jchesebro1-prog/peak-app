@@ -74,6 +74,7 @@ import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import { rackFactsOrUndefined } from "@/lib/rack/part-facts";
 import { setQuotePeopleAs } from "@/lib/quote-people";
 import { addVendorPartiesForSave, prepareVendorQuotesForSave } from "@/lib/stores/vendor-quotes";
+import { recordVendorPdfOutcomes, verifyVendorPdfExtractions } from "@/lib/vendor-pdf/save-server";
 import { quoteSpecFollowingRenames, selectionFollowingRenames } from "@/lib/stores/catalog-renames";
 import { leadIdForCreate, linkSavedQuoteToSuggestion } from "@/lib/assist/suggestion-save";
 
@@ -567,9 +568,14 @@ export async function saveQuoteAction(
   // #348 slice 4: server-stamp addedAt and keep only a live vendor company; the vendor party is added after the write.
   const priorVq = vendorQuoteRows(prior?.vendorQuotes);
   storedVendorQuotes = await prepareVendorQuotesForSave(priorVq, storedVendorQuotes, Date.now());
+  // #348 slice 5: a Read-the-PDF result is kept only when its run row vouches for it (model + time from the row);
+  // a run first kept by this save is scored once, after the write.
+  const vpdf = await verifyVendorPdfExtractions(priorVq, storedVendorQuotes);
+  storedVendorQuotes = vpdf.vendorQuotes;
   if (loadedId) {
     storedVendorQuotes = await storeVendorQuotes(loadedId, storedVendorQuotes);
     q = await update(loadedId, { ...patch, vendorQuotes: storedVendorQuotes } as QuotePatch);
+    if (q && vpdf.fresh.length) await recordVendorPdfOutcomes(vpdf.fresh, storedVendorQuotes, loadedId);
     // #348 slice 4 — a vendor quote's company joins the estimate as a vendor party, once (D-next-2). Never fails the save.
     if (q) {
       try { await withSavepoint(() => addVendorPartiesForSave({ type: "quote", id: loadedId }, priorVq, storedVendorQuotes, user.id)); }
@@ -673,6 +679,7 @@ export async function saveQuoteAction(
       vendorQuotes: storedVendorQuotes,
       pdfOptions: normalizePdfOptions(payload.pdfOptions),
     } as QuotePatch);
+    if (q && vpdf.fresh.length) await recordVendorPdfOutcomes(vpdf.fresh, storedVendorQuotes, created.id);
     // #222: same ordering as the update branch.
     if (q) pdfState = await scheduleQuotePdf(created.id);
     if (payload.status !== "draft") {
@@ -937,7 +944,9 @@ async function placeSystemInEstimate(
     const t = totals(mergedSections, 0);
     // The browser supplies these rows: stamp addedAt and drop any company that isn't a live vendor company BEFORE storing / adding parties.
     const priorTargetVq = vendorQuoteRows(existing.vendorQuotes);
-    const preparedVq = await prepareVendorQuotesForSave(priorTargetVq, placedVq, Date.now());
+    // #348 slice 5: a moved / copied vendor quote's read is re-verified like a save (these rows come from the
+    // browser) but never scored here — a read is scored once, at the first save that keeps it.
+    const preparedVq = (await verifyVendorPdfExtractions(priorTargetVq, await prepareVendorQuotesForSave(priorTargetVq, placedVq, Date.now()))).vendorQuotes;
     const carried = preparedVq.length
       ? await storeVendorQuotes(target.quoteId, preparedVq)
       : [];
@@ -1018,7 +1027,8 @@ async function placeSystemInEstimate(
     }
   }
   // The browser supplies these rows: stamp addedAt and drop any non-vendor company before storing / adding parties.
-  const preparedNewVq = await prepareVendorQuotesForSave([], placedVq, Date.now());
+  // #348 slice 5: reads re-verified like a save, never scored here (see the existing-target branch).
+  const preparedNewVq = (await verifyVendorPdfExtractions([], await prepareVendorQuotesForSave([], placedVq, Date.now()))).vendorQuotes;
   // create() promotes only the declared Quote columns — contactName rides
   // along on the doc like it does for saveQuoteAction's fresh-create path.
   const withContact = await update(created.id, {

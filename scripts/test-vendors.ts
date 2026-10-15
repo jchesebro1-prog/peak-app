@@ -8,7 +8,7 @@ import { patchDoc } from "../src/db/doc-store";
 import { DOC_TABLES } from "../src/db/doc-tables";
 import { saveCompany } from "../src/lib/identity/companies";
 import { createFixture, dropFixtures, fixtureId } from "./test-fixtures";
-import { buildQuote, get as getQuote } from "../src/lib/stores/quotes";
+import { buildQuote, get as getQuote, update as updateQuote } from "../src/lib/stores/quotes";
 import type { Quote } from "../src/lib/stores/quotes";
 import { addParty, listFor, removeParty } from "../src/lib/stores/parties";
 import { displayQuoteNumber } from "../src/lib/estimate-number";
@@ -25,7 +25,8 @@ import { capTruncatedMatches, catalogLookupKeys } from "../src/lib/vendor-pdf/ch
 import { readVendorPdf, vendorPdfErrorFor, VENDOR_PDF_DATA_URL_PREFIX, type ReadVendorPdfInput, type VendorPdfSource } from "../src/lib/vendor-pdf/read-server";
 import { countPdfPages, pageCountFromText } from "../src/lib/vendor-pdf/pages-server";
 import { partsByLooseKeys } from "../src/lib/stores/catalog";
-import { createRun, getRun } from "../src/lib/stores/assist-runs";
+import { createRun, getRun, listRunsByMonth, setVendorPdfOutcome } from "../src/lib/stores/assist-runs";
+import { recordVendorPdfOutcomes, verifyVendorPdfExtractions } from "../src/lib/vendor-pdf/save-server";
 import { assistSettingsOf } from "../src/lib/assist/config";
 import type { AssistProvider, ProviderRequest } from "../src/lib/assist/types";
 import { fakeRun } from "./test-assist";
@@ -43,7 +44,7 @@ import {
 import { vendorPdfDiff, vendorPdfOutcome } from "../src/lib/vendor-pdf/diff";
 import { vendorPdfReport } from "../src/lib/assist/report";
 import { parseMoney } from "../src/app/(app)/estimator/material-csv";
-import type { VendorDraft, VendorQuoteLine } from "../src/app/(app)/estimator/types";
+import type { VendorDraft, VendorQuote, VendorQuoteLine } from "../src/app/(app)/estimator/types";
 import type { AssistRun } from "../src/lib/stores/assist-runs";
 import { readFileSync } from "node:fs";
 import { fileThreadTo, vendorThreadsFor, loadVendorsPanel } from "../src/lib/vendor-quotes/threads-server";
@@ -1010,5 +1011,144 @@ export async function vendorPdfDbChecks(ok: Ok) {
     await dropRuns();
     await dropFixtures(348);
     await dropIdentity();
+  }
+  await vendorPdfSaveChecks(ok);
+}
+
+/** #348 slice 5 Task 5 (vendorPdfDbChecks part B) — the save keeps a verified `extracted`, scores the run once, and the
+ *  Vendor PDFs report reads it. Its own user and day: part A already spends most of one user's hourly Assist limit. */
+async function vendorPdfSaveChecks(ok: Ok) {
+  const db = await getDb();
+  const runsT = DOC_TABLES.assist_runs;
+  const U = { id: fixtureId(348, "hs"), name: "Sal Saver" };
+  const dropRuns = async () => { await db.delete(runsT).where(sql`${runsT.doc}->>'userId' = ${U.id}`); };
+  const settings = assistSettingsOf({ assistUsers: [U.id], assistFeatures: { vendorpdf: true } });
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test-348" };
+  const now = Date.UTC(2034, 4, 12, 15, 0);
+  const VQ = "vqhaaaa1";
+  const mkPdf = async () => { const d = await PDFDocument.create(); d.addPage(); return Buffer.from(await d.save()); };
+  const L = (description: string, mfrPartNumber: string, qty: number, unitPrice: number, amount: number) => ({ description, mfrPartNumber, qty, unit: "ea", unitPrice, amount });
+  const wire = JSON.stringify({
+    vendor: "Rose Brand 348", quoteNumber: "RB-77", quoteDate: null, validUntil: null, leadTime: null, shipFrom: null,
+    lines: [L("Velour drape", "RB-100", 1, 50, 50), L("Track", "HX-7700", 2, 30, 70), L("Clamp", "CL-1", 1, 40, 40)], freight: 25, tax: null, total: 185, paymentTerms: null, notes: null,
+  });
+  const deps = (provider: AssistProvider) => ({ provider, settings, env, now });
+  const read = async (over: Partial<ReadVendorPdfInput> = {}, answer: { text: string } | { error: string } = { text: wire }) =>
+    readVendorPdf({ vendorQuoteId: VQ, quoteId: null, source: { kind: "dataUrl", dataUrl: VENDOR_PDF_DATA_URL_PREFIX + (await mkPdf()).toString("base64") }, hard: false, retryOf: null, ...over }, U, deps(pdfFake(answer, [])));
+  const askRun = fakeRun({ id: "AR-zzzz348-askb", feature: "ask", userId: U.id, monthKey: "2034-05" });
+  try {
+    await dropRuns();
+    // 1. A happy read.
+    const r = await read();
+    if (!r.ok) { ok(false, "save pdf: the happy read failed — part B can't run"); return; }
+    const runRow = await getRun(r.runId);
+    const fromLines = (r.data.lines ?? []).map((l, i): VendorQuoteLine => {
+      const f = filledLine(l, i);
+      return { id: i + 1, description: f.description, ...(f.manufacturerPartNumber ? { manufacturerPartNumber: f.manufacturerPartNumber } : {}), qty: Number(f.qty), unit: f.unit, amount: Number(f.amount), extractedIndex: i };
+    });
+    const typed: VendorQuoteLine = { id: 9, description: "Typed extra", qty: 1, unit: "ea", amount: 10 };
+    const vq = (over: Partial<VendorQuote> = {}): VendorQuote => ({
+      id: VQ, vendor: "Rose Brand 348", quoteNumber: "RB-77", description: "Velour drape + 2 more items", lines: [...fromLines, typed], terms: "", notes: "",
+      total: 185, totalSource: "manual", includesFreight: true, display: "single",
+      extracted: { runId: r.runId, model: "forged-model", at: 1, data: r.data }, ...over,
+    });
+    const idx = (v: VendorQuote) => v.lines.map((l) => (l.extractedIndex === undefined ? "-" : String(l.extractedIndex))).join("");
+
+    // 2. Kept, with model + at from the run row; one fresh stamp.
+    const v2 = await verifyVendorPdfExtractions([], [vq()]);
+    const k2 = v2.vendorQuotes[0];
+    ok(k2.extracted?.runId === r.runId && k2.extracted.model === "claude-haiku-5-5" && k2.extracted.model === runRow?.model && k2.extracted.at === now && k2.extracted.at === runRow?.createdAt && canonicalJson(k2.extracted.data) === canonicalJson(r.data), "save pdf: a verified read is kept — model and time from the run row, not the browser");
+    ok(idx(k2) === "012-" && v2.fresh.length === 1 && v2.fresh[0].runId === r.runId && v2.fresh[0].vendorQuoteId === VQ, "save pdf: its indexes stay; one fresh stamp");
+
+    // 3. Forged data (one amount changed) → dropped, indexes stripped.
+    const forged = { ...r.data, lines: (r.data.lines ?? []).map((l, i) => (i === 0 ? { ...l, amount: 5 } : l)) };
+    const v3 = await verifyVendorPdfExtractions([], [vq({ extracted: { runId: r.runId, model: "m", at: 1, data: forged } })]);
+    ok(!("extracted" in v3.vendorQuotes[0]) && idx(v3.vendorQuotes[0]) === "----" && v3.vendorQuotes[0].lines.length === 4 && v3.fresh.length === 0, "save pdf: forged data is dropped and every line's index stripped (the lines stay)");
+    // 4. The same run pasted onto another vendor quote.
+    const v4 = await verifyVendorPdfExtractions([], [vq({ id: "vqhaaaa2" })]);
+    ok(!("extracted" in v4.vendorQuotes[0]) && idx(v4.vendorQuotes[0]) === "----" && v4.fresh.length === 0, "save pdf: a run read for another vendor quote is dropped");
+    // 5. A run id that doesn't exist.
+    const v5 = await verifyVendorPdfExtractions([], [vq({ extracted: { runId: "AR-nope348-zzzz", model: "m", at: 1, data: r.data } })]);
+    ok(!("extracted" in v5.vendorQuotes[0]) && v5.fresh.length === 0, "save pdf: an unknown run id is dropped");
+    // 6. A failed run's id.
+    const failed = await read({}, { error: "declined" });
+    const failedId = !failed.ok ? failed.runId : null;
+    const v6 = failedId ? await verifyVendorPdfExtractions([], [vq({ extracted: { runId: failedId, model: "m", at: 1, data: r.data } })]) : null;
+    ok(!!failedId && !!v6 && !("extracted" in v6.vendorQuotes[0]) && v6.fresh.length === 0, "save pdf: a failed run's id is dropped");
+    // 6b. Not a vendorpdf run / null / malformed.
+    await createRun(askRun);
+    const v6b = await verifyVendorPdfExtractions([], [vq({ extracted: { runId: askRun.id, model: "m", at: 1, data: r.data } }), vq({ id: "vqhaaaa3", extracted: null }), vq({ id: "vqhaaaa4", extracted: { runId: r.runId } as never })]);
+    ok(v6b.vendorQuotes.every((v) => !("extracted" in v) && idx(v) === "----") && v6b.fresh.length === 0, "save pdf: another feature's run, a null read and a read with no data are all dropped (indexes stripped)");
+    // 7. The prior copy's run id with different browser data → the PRIOR copy; not fresh.
+    const prior = k2;
+    const v7 = await verifyVendorPdfExtractions([prior], [vq({ extracted: { runId: r.runId, model: "browser", at: 7, data: { vendor: "Changed" } } })]);
+    ok(canonicalJson(v7.vendorQuotes[0].extracted) === canonicalJson(prior.extracted) && v7.fresh.length === 0, "save pdf: the stored run id keeps the stored copy (data, model, at) and is not re-scored");
+    // 8. An index past the read's lines is stripped; others stay.
+    const v8 = await verifyVendorPdfExtractions([], [vq({ lines: [...fromLines.slice(0, 2), { ...typed, extractedIndex: 7 }, { ...typed, id: 10, extractedIndex: 1.5 }] })]);
+    ok(idx(v8.vendorQuotes[0]) === "01--" && !!v8.vendorQuotes[0].extracted, "save pdf: extractedIndex 7 / 1.5 on a 3-line read is stripped");
+
+    // 9. Scoring — first write wins.
+    const saved9 = v2.vendorQuotes;
+    await recordVendorPdfOutcomes(v2.fresh, saved9, fixtureId(348, "hq0"));
+    const row9 = await getRun(r.runId);
+    const d9 = (row9?.outcomeDetail ?? {}) as Record<string, unknown>;
+    const diff9 = d9.diff as { added?: number; kept?: number } | undefined;
+    ok(row9?.outcome === "edited" && diff9?.added === 1 && diff9?.kept === 3 && d9.vendor === "Rose Brand 348" && d9.quoteId === fixtureId(348, "hq0") && d9.vendorQuoteId === VQ && d9.dataHash !== undefined && d9.mathFlags === 1, "save pdf: the first save scores the run (edited: 3 kept, 1 added) and keeps the read-time detail");
+    const at9 = row9?.outcomeAt;
+    await recordVendorPdfOutcomes(v2.fresh, [{ ...saved9[0], lines: fromLines }], "other-quote");
+    const row9b = await getRun(r.runId);
+    ok(row9b?.outcome === "edited" && row9b.outcomeAt === at9 && (row9b.outcomeDetail as Record<string, unknown>).quoteId === fixtureId(348, "hq0"), "save pdf: a second score is a no-op (first write wins)");
+    // 10. setVendorPdfOutcome only on a vendorpdf run.
+    ok((await setVendorPdfOutcome(askRun.id, "accepted", { x: 1 })) === false && (await getRun(askRun.id))?.outcome === null, "save pdf: setVendorPdfOutcome refuses an ask run");
+
+    // 11. End to end through the quote store (a save-equivalent — the "use server" action can't run here).
+    const r11 = await read({ quoteId: fixtureId(348, "hq1") });
+    if (!r11.ok) { ok(false, "save pdf: the second read failed"); return; }
+    const vq11 = vq({ extracted: { runId: r11.runId, model: "x", at: 0, data: r11.data } });
+    const quote = { ...buildQuote(fixtureId(348, "hq1"), { name: "Read the PDF save", customer: "Save Test", value: 100 }, "system", null, now),
+      spec: { sections: [{ id: "s1", name: "Sys", items: [{ id: 1, vendorQuoteId: VQ }] }], mobs: [] }, vendorQuotes: [] } as unknown as Quote;
+    await createFixture("quotes", quote as never);
+    const v11 = await verifyVendorPdfExtractions([], [vq11]);
+    const q11 = await updateQuote(fixtureId(348, "hq1"), { vendorQuotes: v11.vendorQuotes } as never);
+    if (q11 && v11.fresh.length) await recordVendorPdfOutcomes(v11.fresh, v11.vendorQuotes, fixtureId(348, "hq1"));
+    const back = await getQuote(fixtureId(348, "hq1"));
+    const backVq = (back?.vendorQuotes as VendorQuote[] | undefined)?.[0];
+    ok(backVq?.extracted?.runId === r11.runId && backVq.extracted.model === "claude-haiku-5-5" && idx(backVq) === "012-", "save pdf: the stored estimate keeps the verified read and its line indexes");
+    ok((await getRun(r11.runId))?.outcome === "edited", "save pdf: the stored save scored its run");
+    const act = readFileSync("src/app/(app)/estimator/actions.ts", "utf8");
+    const save = act.slice(act.indexOf("export async function saveQuoteAction"), act.indexOf("export async function", act.indexOf("export async function saveQuoteAction") + 10));
+    const iPrep = save.indexOf("prepareVendorQuotesForSave("), iVer = save.indexOf("verifyVendorPdfExtractions("), iStore = save.indexOf("storeVendorQuotes(");
+    ok(iPrep > 0 && iVer > iPrep && iStore > iVer, "save pdf: saveQuoteAction verifies after prepareVendorQuotesForSave, before storing");
+    ok(save.split("recordVendorPdfOutcomes(").length - 1 === 2, "save pdf: saveQuoteAction scores in both the update and the create branch");
+    const place = act.slice(act.indexOf("async function placeSystemInEstimate("));
+    ok(place.split("verifyVendorPdfExtractions(").length - 1 === 2 && !place.includes("recordVendorPdfOutcomes("), "save pdf: moving / copying a system verifies the reads it carries, never scores them");
+    const st = readFileSync("src/app/(app)/estimator/use-estimator-state.ts", "utf8");
+    ok(/typeof l\.fromRead === "number" && d\.extracted \? \{ extractedIndex: l\.fromRead \}/.test(st) && /d\.extracted \? \{ extracted: d\.extracted \}/.test(st), "save pdf: the form's save carries extracted and each read line's index (only with a read)");
+    ok(/v\.extracted && typeof l\.extractedIndex === "number" \? \{ fromRead: l\.extractedIndex \}/.test(st), "save pdf: reopening a quote tags read lines only when it still has its read");
+
+    // 12. The report.
+    const hard = await read({ hard: true, retryOf: r11.runId });
+    void hard;
+    const mine = (await listRunsByMonth("2034-05")).filter((x) => x.userId === U.id);
+    const rep = vendorPdfReport(mine);
+    const hk = rep.byModel.find((m) => m.key === "claude-haiku-5-5");
+    const sn = rep.byModel.find((m) => m.key === "claude-sonnet-5-5");
+    ok(!!hk && hk.reads === 3 && hk.okReads === 2 && hk.saved === 2 && hk.replaced === 0 && hk.mathFlags === 2 && hk.linesRead === 6 && hk.kept === 6 && hk.added === 2, "save pdf report: Haiku — 3 reads (1 failed), 2 saved, math flags summed");
+    ok(!!sn && sn.reads === 1 && sn.tryHarder === 1 && sn.saved === 0, "save pdf report: Sonnet — the Try harder read");
+    ok(rep.byVendor.length === 1 && rep.byVendor[0].key === "Rose Brand 348" && rep.byVendor[0].saved === 2, "save pdf report: by vendor — saved reads only");
+    // A Try harder before any save replaces the earlier read.
+    const r12 = await read();
+    const h12 = r12.ok ? await read({ hard: true, retryOf: r12.runId }) : null;
+    const rep2 = vendorPdfReport((await listRunsByMonth("2034-05")).filter((x) => x.userId === U.id));
+    ok(!!h12?.ok && rep2.byModel.find((m) => m.key === "claude-haiku-5-5")?.replaced === 1 && rep2.total.tryHarder === 2, "save pdf report: a Try harder before any save counts as Replaced");
+
+    // 13. The settings card.
+    const card = readFileSync("src/app/(app)/settings/groups/assist-pilot.tsx", "utf8");
+    ok(card.includes("Vendor PDFs") && card.includes("vendorPdf") && card.includes("No reads this month.") && card.includes("By vendor counts saved reads only"), "settings: the Vendor PDFs table");
+    const data = readFileSync("src/app/(app)/settings/assist-data.ts", "utf8");
+    ok(data.includes("vendorPdf: vendorPdfReport(runs)") && data.includes('vendorPdfModels: { read: modelFor("vendorpdf", env), hard: modelFor("vendorpdfHard", env) }'), "settings: loadAssistVM fills vendorPdf + vendorPdfModels");
+  } finally {
+    await dropRuns();
+    await dropFixtures(348);
   }
 }
