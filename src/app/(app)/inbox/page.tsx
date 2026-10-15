@@ -101,7 +101,9 @@ import { organizeEntryVM } from "./organize/entry";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import { isPlaceholderCompany, withoutPlaceholderLink } from "@/lib/inbox-org/placeholder";
 import { cleanupVMOf, getCleanupState } from "@/lib/inbox-org/cleanup";
-import { ORGANIZE_BASE_HREF, organizeTabOf } from "./organize/format";
+import { ORGANIZE_BASE_HREF, organizeArchiveTarget, organizeTabOf } from "./organize/format";
+import { threadGmailLabels } from "./row-labels";
+import { cardGmailChips } from "@/lib/gmail/user-label-rules";
 import { getTask } from "@/lib/stores/tasks";
 import { can } from "@/lib/team";
 import HomeTabs from "../home-tabs";
@@ -567,13 +569,7 @@ export default async function InboxPage({
       pinned: !!t.pinned,
       categoryColor: cat?.color || "",
       categoryLabel: cat?.label || "",
-      labels: labelOptions
-        // System labels are useful context too (e.g. Starred, Important,
-        // Sent); Gmail's inbox/sent/draft routing labels are omitted because
-        // the folder already communicates them.
-        .filter((l) => l.type === "user" || !["INBOX", "SENT", "DRAFT", "TRASH", "SPAM", "ALL_MAIL"].includes(l.id))
-        .filter((l) => (t.messages || []).some((m) => (m.gmailLabelIds || []).includes(l.id)))
-        .slice(0, 4),
+      labels: threadGmailLabels(t.messages || [], labelOptions),
       name: nm,
       msgCount: (t.messages || []).length,
       messagePreviews: (t.messages || []).slice(-8).map((m) => ({
@@ -1088,6 +1084,22 @@ export default async function InboxPage({
       meId: user.id,
       threadTasks,
       org: readOnly ? null : org,
+      // #346 — the sidebar's Labels card (own threads only: a read-only
+      // thread has no sidebar and no label to change)
+      labels: readOnly
+        ? null
+        : {
+            current: categoryMeta(sel.category),
+            options: CATEGORIES,
+            // #347 — the person's own Gmail labels (editable), Peak/* read-only
+            gmail: cardGmailChips(
+              sel.messages || [],
+              labelOptions.map((l) => ({ labelId: l.id, name: l.name, type: l.type, textColor: l.textColor, backgroundColor: l.backgroundColor }))
+            ),
+            gmailEditable: sel.mailbox === "personal" && !!sel.gmailThreadId,
+          },
+      // #346 — set below when the thread is opened from the Organize view
+      organize: null,
       // Estimate suggestion (spec 2026-10-13 §3): looked up only when the button shows.
       suggestionHref: !readOnly && assistFlags.estimate && sel.channel === "email" ? await suggestionReadyHref("thread", sel.id) : null,
       readOnlyLinkedTo: "",
@@ -1280,6 +1292,9 @@ export default async function InboxPage({
     });
     // #335 §6 — "Organize my inbox" is for Assist pilot users (feature `file`)
     const cleanup = assistAll.file ? { state: cleanupVMOf(await getCleanupState(user.id).catch(() => null)) } : null;
+    // #346 — the reader's Archive, opened from this tab: what it does and
+    // where the selection goes next (own threads only)
+    if (reader && !reader.readOnly) reader = { ...reader, organize: organizeArchiveTarget(vm, reader.id) };
     organizeSlot = {
       // keyed by tab: a tab switch remounts the box, so its confirm / rule
       // offer / note state never carries over to another tab

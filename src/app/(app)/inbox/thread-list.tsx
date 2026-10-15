@@ -17,7 +17,7 @@ const LABEL_SWATCHES = [
   ["#7b5fb0", "#f1ebf8"],
 ] as const;
 
-function labelColors(label: { id: string; textColor?: string | null; backgroundColor?: string | null }) {
+export function labelColors(label:{ id: string; textColor?: string | null; backgroundColor?: string | null }) {
   if (label.textColor || label.backgroundColor)
     return { color: label.textColor || "#5b616e", background: label.backgroundColor || "#f1f2f5" };
   let hash = 0;

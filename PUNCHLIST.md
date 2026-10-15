@@ -12323,3 +12323,60 @@ Jeff (Oct 14): on a computer he couldn't find Organize or "Organize my inbox"; t
 - The existing `Peak/Customers/UNKNOWN` label in Gmail stays on the threads that carry it. Remove or delete it in Gmail if you want it gone.
 - Re-homing the Daylite contacts parked under UNKNOWN onto their real companies is still worth doing: until then their mail links to the contact only, with no customer.
 - The new tab row and banner show for the whole team, not only the pilot, because the view was never pilot-only. Say if you want them pilot-only.
+
+## 346. Archive and apply labels from Inbox → Organize — DONE 2026-10-14 on `worktree-assist-layer` (D1052–D1054)
+
+Jeff (Oct 14): "We need the ability to archive a message in the Organize tab and to apply labels." Refined: labels go in the reader's right sidebar, styled like the linking panel, and Archive is the reader's bottom-bar button.
+
+**Built:**
+- **Archive from Organize.** The reader's bottom-bar Archive (when the thread was opened from Organize) and an Archive button on each Organize row use `archiveFromOrganizeAction`, so the thread is archived in Gmail as well.
+  - On **To file** and **Noise** the row also leaves the list, like Skip: a waiting suggestion is `skipped`, a Noise row is `cleared`, and the change is logged as Skip.
+  - On **Filed** it only archives.
+  - From the reader, the selection moves to the next row, or clears when there is none.
+  - The Organize note says "Archived — it comes back on new mail · Undo". Undo restores both the archive and the filing state (D1052).
+- **Labels card** in the reader sidebar, for your own threads in Organize and the Inbox. It shows the Inbox's category as a chip with ✕, plus "+ Add label" / "Change" through the same `categoryAction` as Categorize ▾ (now one shared `CategoryMenu`). Gmail labels on the thread show as read-only chips, never a placeholder `Peak/Customers` label. A label never changes the filing (D1053).
+- No bulk selection and no `e` shortcut (D1054).
+- **Guards:** both new actions are owner-checked (`myThread`) and listed in the #341 audit (`scripts/test-thread-visibility.ts`). Read-only threads never show in Organize, and their reader has no sidebar.
+- **Tests:** `scripts/test-inbox-org.ts` → `inboxOrgArchiveLabelChecks` (also chained into test:specs). No migration, no env var.
+
+**Follow-ups / Jeff-gated:**
+- ~~Only the colour category can be applied~~ — Jeff chose real Gmail labels: done in #347.
+- "Archive all shown" on Noise still leaves the archived rows on the Noise tab, while a row's own Archive takes the row off. Say if both should behave the same way.
+- **Review fixes (same day):** archived Noise rows, marked-noise ones included, come back on new outside mail. Skip and un-skip use compare-and-set. Undo never re-inboxes mail Gmail had already archived. The Home brief's Organize counts are now live (D1052).
+
+## 347. The Labels card uses my real Gmail labels — pick, create, remove — DONE 2026-10-14 on `worktree-assist-layer` (D1055–D1057)
+
+Jeff (Oct 14) chose "My real Gmail labels" for the #346 Labels card: pick from your actual Gmail labels, or create a new one, and the label applies in Gmail.
+
+**Built:**
+- **Labels card** (reader sidebar, your own threads in Organize and the Inbox):
+  - The thread's Gmail labels show as chips with ✕: your labels, Starred and Important.
+  - "+ Add label" opens a searchable picker of your labels, with "Create '<typed>'" at the bottom.
+  - The app's `Peak/*` labels show read-only and are never offered; placeholder labels are never shown.
+  - The colour category sits underneath as a small Colour row (D1055).
+- **Gmail:**
+  - Apply and remove go through `threads.modify`; create goes through `users.labels.create`.
+  - The stored labels update at once, and errors show inline (no Gmail, reconnect, label missing, quota).
+  - The label list re-reads from Gmail when the cache is more than 5 minutes old.
+  - No new OAuth scope: `gmail.modify` was already requested (D1055, D1056).
+- **Import side:** a label you change in Gmail now reaches the app through the incremental sync. The card's own change isn't echoed back (D1057).
+- **Guards:** three new owner-checked actions in `actions.ts` (`gmailLabelPickerAction`, `setGmailLabelAction`, `createGmailLabelAction`), covered by the #341 audit (53 actions found).
+- **Tests:** `scripts/test-inbox-org.ts` → `inboxGmailLabelChecks` (fake Gmail client; chained into test:specs). No migration, no env var.
+
+**Not exercised live:** real Gmail. Gmail can't be reached locally, so the browser check used a seeded label cache and `gmailLabelIds`, and applying showed the "no Gmail" inline error. The Gmail calls are covered by the fake client only.
+
+**Follow-ups / Jeff-gated:**
+- Try it on production with your own mailbox: add a label, create one, remove one, and check each in Gmail. Then change a label in Gmail and check that it shows in Peak after the next sync.
+- A mailbox connected before gmail.modify was added (pre-July 19) shows "reconnect" until it is reconnected.
+- A Gmail-side change to the same label within 2 minutes of the card changing it waits for that label's next event (D1057).
+- **Review fixes (same day):**
+  - The thread must be bridged through your own Gmail connection.
+  - "Peak /X" counts as `Peak/`.
+  - Labels in a mixed event are kept.
+  - Echoes are suppressed per label.
+  - Label writes are compare-and-set.
+  - The cache write is one transaction and can't fail a create.
+  - Archive answers "Couldn't update — try again" when the skip keeps conflicting.
+  - A thread 404 reads "no longer in Gmail".
+  - The brief's live counts read only your mailbox.
+- User display names are not unique (only email is). Two active users with the same name would share each other's mailbox ownership (#341's `visibleTo` matches names). Worth a uniqueness check in Settings → Team.

@@ -16,6 +16,7 @@ import { getSnapshot } from "@/lib/triage/store";
 import { getCleanupState } from "@/lib/inbox-org/cleanup";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import { triageNow } from "@/lib/triage/service";
+import { organizeEntryCounts } from "@/app/(app)/inbox/organize/load";
 import BriefCardView from "./brief-card-view";
 
 /**
@@ -69,12 +70,16 @@ async function loadCardVM(user: SessionUser, settings: AssistSettings): Promise<
   // #345 — Organize's line + "Organize my inbox" (pilot with Inbox organization on, while the
   // 90-day cleanup was never run or is unfinished); a failed read just leaves the offer out
   const organizeAvailable = !inboxOrgDisabled();
-  const [snap, threads, quotes, leadReady, cleanupState] = await Promise.all([
+  // #346 — the live Organize counts (the Inbox banner's), so an Archive or a
+  // filing since the brief was built shows at once; a failed read keeps the
+  // brief's stored counts
+  const [snap, threads, quotes, leadReady, cleanupState, organizeLive] = await Promise.all([
     getSnapshot(snapshotId(b.userId, b.day, b.slot)).catch(() => null),
     Promise.all([...threadIds].map((id) => getThread(id).catch(() => null))),
     Promise.all([...quoteIds].map((id) => getQuote(id).catch(() => null))),
     flags.estimate && leadIds.size ? suggestionReadyHrefs("lead", [...leadIds]) : Promise.resolve(null),
     organizeAvailable && flags.file ? getCleanupState(user.id).catch(() => undefined) : Promise.resolve(undefined),
+    organizeAvailable ? organizeEntryCounts(user).catch(() => null) : Promise.resolve(null),
   ]);
   const cleanup: "never" | "unfinished" | "done" | null =
     !organizeAvailable || !flags.file || cleanupState === undefined ? null : cleanupState === null ? "never" : cleanupState.done ? "done" : "unfinished";
@@ -112,5 +117,6 @@ async function loadCardVM(user: SessionUser, settings: AssistSettings): Promise<
     quotes: quoteInfo,
     leads,
     organizeEntry: { available: organizeAvailable, cleanup },
+    organizeLive,
   });
 }

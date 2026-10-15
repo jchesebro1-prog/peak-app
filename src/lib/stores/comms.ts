@@ -365,6 +365,13 @@ export type CommThread = {
    *  (add/remove) for this thread. Echo-suppression stamp; unset until the
    *  first successful sync. */
   peakLabelsAppliedAt?: number;
+  /** #347 — the reader's Labels card's last operation on each of the
+   *  person's own Gmail labels on this thread (label id → added / removed,
+   *  when). The history import ignores Gmail's events for a label inside the
+   *  label echo window after the card changed it — the card's state wins, so
+   *  a stale echo (an add reported after a later remove) never re-adds it.
+   *  Entries older than the window are pruned on the next write. */
+  userLabelOps?: Record<string, { on: boolean; at: number }>;
   /** #124 — the linked venue: a CustomerLocation.id (directory id) of the
    *  linked customer. Cleared whenever customerId changes to a different
    *  customer (linkThread / applyResweepPatch / Peak label removal). */

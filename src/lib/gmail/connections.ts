@@ -1,5 +1,5 @@
 import { and, eq, isNull, lt, or } from "drizzle-orm";
-import { getDb } from "@/db";
+import { getDb, withTransaction } from "@/db";
 import { gmailConnections, gmailLabels, type GmailConnectionRow, type GmailLabelRow } from "@/db/schema";
 import { isPersonalKey } from "./config";
 import { decryptToken, encryptToken } from "./crypto";
@@ -131,21 +131,25 @@ export async function replaceLabels(
   mailboxKey: string,
   labels: GmailLabelMeta[]
 ): Promise<void> {
-  const db = await getDb();
   const now = Date.now();
-  await db.delete(gmailLabels).where(eq(gmailLabels.mailboxKey, mailboxKey));
-  if (!labels.length) return;
-  await db.insert(gmailLabels).values(
-    labels.map((l) => ({
-      mailboxKey,
-      labelId: l.id,
-      name: l.name,
-      type: l.type,
-      textColor: l.color?.textColor ?? null,
-      backgroundColor: l.color?.backgroundColor ?? null,
-      updatedAt: now,
-    }))
-  );
+  // #347 review — one transaction: a failed insert never leaves the mailbox
+  // with an emptied cache (and readers never see it half-written)
+  await withTransaction(async () => {
+    const db = await getDb();
+    await db.delete(gmailLabels).where(eq(gmailLabels.mailboxKey, mailboxKey));
+    if (!labels.length) return;
+    await db.insert(gmailLabels).values(
+      labels.map((l) => ({
+        mailboxKey,
+        labelId: l.id,
+        name: l.name,
+        type: l.type,
+        textColor: l.color?.textColor ?? null,
+        backgroundColor: l.color?.backgroundColor ?? null,
+        updatedAt: now,
+      }))
+    );
+  });
 }
 
 /**
