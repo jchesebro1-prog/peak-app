@@ -236,7 +236,9 @@ export async function vendorDbChecks(ok: Ok) {
       messages: [{ id: "m1", at: now, direction: "in", channel: "email", author: "Rep", body: "SECRET BODY", attachments: [] }], ...extra,
     } as unknown as CommThread);
     const [T1, T2, T3, T4, T5, T7] = ["vt1", "vt2", "vt3", "vt4", "vt5", "vt7"].map((s) => fixtureId(348, s));
-    await thr("vt1", { customerId: null });
+    const sugg = { customerId: vcust, work: null, noise: false, source: "identity", reason: "test", strength: "strong", needsReply: false, state: "suggested", at: now };
+    await thr("vt1", { customerId: null, filing: sugg });
+    await thr("vt8", { filing: { ...sugg, state: "dismissed", noise: true } });
     await thr("vt2", { status: "draft", link: { type: "quote", id: q }, customerId: vven1 });
     await thr("vt3", { customerId: vven1 });
     await thr("vt4", { link: { type: "quote", id: q }, customerId: vcust });
@@ -244,8 +246,11 @@ export async function vendorDbChecks(ok: Ok) {
     await thr("vt7", { link: { type: "project", id: vp1 }, customerId: vven1, linkedBy: "user" });
 
     const t1 = (await getThread(T1))!;
-    const f1 = await fileThreadTo(t1, { type: "quote", id: q }, vven1, "u");
-    const f1b = await fileThreadTo((await getThread(T1))!, { type: "quote", id: q }, vven1, "u");
+    const ME = { id: A.id, name: A.name };
+    const f1 = await fileThreadTo(t1, { type: "quote", id: q }, vven1, ME);
+    const f1b = await fileThreadTo((await getThread(T1))!, { type: "quote", id: q }, vven1, ME);
+    const t1Filing = (await getThread(T1))?.filing;
+    ok(f1.ok && f1b.ok && t1Filing?.state === "skipped" && t1Filing.customerId === vcust, "filing: a pending #335 suggestion is skipped once a person files by hand (no Approve-all / rule sweep / archive-on-reply can re-file it)");
     const t1After = await getThread(T1);
     const stQ = await getQuote(q);
     ok(f1.ok && f1.label === filingLinkLabel({ type: "quote", number: displayQuoteNumber(stQ!), name: stQ!.name }) && f1b.ok && !f1b.partyAdded
@@ -253,8 +258,8 @@ export async function vendorDbChecks(ok: Ok) {
       && asVendorQuotes((stQ as unknown as { vendorQuotes: unknown }).vendorQuotes).filter((v) => v.vendorCompanyId === vven1).length === 1
       && (await listFor("quote", q)).filter((p) => p.role === "vendor" && p.companyId === vven1).length === 1,
       "filing: link + vendor kept + party idempotent");
-    const missing = await fileThreadTo(t1After!, { type: "quote", id: "TEST348:vmissing" }, null, "u");
-    const notVendor = await fileThreadTo(t1After!, { type: "quote", id: q }, vcust, "u");
+    const missing = await fileThreadTo(t1After!, { type: "quote", id: "TEST348:vmissing" }, null, ME);
+    const notVendor = await fileThreadTo(t1After!, { type: "quote", id: q }, vcust, ME);
     ok(!missing.ok && missing.error === "That estimate or project wasn't found." && !notVendor.ok && notVendor.error === "Pick a vendor company.", "filing: a missing target and a non-vendor company are refused");
 
     const idsOf = (r: Array<{ id: string }>) => r.map((x) => x.id).sort().join("|");
@@ -273,6 +278,10 @@ export async function vendorDbChecks(ok: Ok) {
     for (const id of [T1, T7]) if (canSeeThread((await getThread(id))!, NOBODY)) allowed.push(id);
     ok(idsOf(forN) === allowed.sort().join("|") && !idsOf(forN).includes(T2), "vendors: a viewer with no id sees only what canSeeThread allows (never a draft)");
     ok((await vendorThreadsFor({ quoteId: q }, new Set(), B)).length === 0, "vendors: no vendor companies, no list");
+    // last: filing T8 links it to the estimate, so it would join the lists asserted above
+    const T8 = fixtureId(348, "vt8");
+    const f8 = await fileThreadTo((await getThread(T8))!, { type: "quote", id: q }, vven1, ME);
+    ok(f8.ok && (await getThread(T8))?.filing?.state === "dismissed", "filing: a dismissed (noise) filing is left exactly as it was");
 
     if (!blobEnabled()) {
       let threw = false;

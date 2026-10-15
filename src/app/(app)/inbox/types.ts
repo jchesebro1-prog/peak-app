@@ -163,6 +163,8 @@ export type MessageVM = {
 
 export type LinkVM = {
   type: string;
+  /** #348 slice 4 — the linked record's id (the Add-as-vendor-quote dialog pre-picks a linked estimate) */
+  id: string;
   kindLabel: string;
   label: string;
   color: string;

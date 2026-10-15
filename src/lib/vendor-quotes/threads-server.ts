@@ -5,6 +5,7 @@
 import { listDocsWhere, type Doc, type DocCond } from "@/db/doc-store";
 import { getCompanies } from "@/lib/identity/companies";
 import { linkThread } from "@/lib/gmail/linking";
+import { skipFiling, type OrgActor } from "@/lib/inbox-org/apply";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { canSeeThread, setLink, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
 import { canSeeThreadCond } from "@/lib/stores/comms-visibility";
@@ -23,7 +24,7 @@ export async function fileThreadTo(
   t: CommThread,
   target: FileTarget,
   vendorCompanyId: string | null,
-  by: string
+  by: OrgActor
 ): Promise<{ ok: true; label: string; partyAdded: boolean } | { ok: false; error: string }> {
   const notFound = { ok: false as const, error: "That estimate or project wasn't found." };
   let label: string;
@@ -42,10 +43,19 @@ export async function fileThreadTo(
     if (t.customerId !== vendorCompanyId) await linkThread(t.id, vendorCompanyId, t.resolvedContactId ?? null, "user");
   }
   await setLink(t.id, { type: target.type, id: target.id, label });
+  /* A person filed this by hand, so a pending #335 suggestion must not file it somewhere else later (Approve-all, a
+     sender-rule sweep, archive-on-reply). Skip is the inbox-org writer for exactly this decision: a `suggested` filing
+     becomes `skipped` and the skip is logged; a thread with no suggestion, or one already filed / dismissed / skipped,
+     answers not-suggested and is left alone. Best effort — the filing itself has already succeeded. */
+  try {
+    await skipFiling(t.id, by);
+  } catch (err) {
+    console.error("[vendor-quotes] pending filing suggestion not skipped", t.id, err);
+  }
   let partyAdded = false;
   if (vendorCompanyId) {
     try {
-      const r = await addParty({ recordType: target.type, recordId: target.id, companyId: vendorCompanyId, role: "vendor" }, by);
+      const r = await addParty({ recordType: target.type, recordId: target.id, companyId: vendorCompanyId, role: "vendor" }, by.id);
       if (r.ok) partyAdded = !r.existed;
       else console.error("[vendor-quotes] vendor party not added on filing", target, vendorCompanyId, r.error);
     } catch (err) {

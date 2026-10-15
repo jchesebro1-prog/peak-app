@@ -801,7 +801,7 @@ export function threadVisibilityPins(ok: Ok): void {
   const inbox = read("src/app/(app)/inbox/page.tsx");
   ok(
     /if \(readOnly\) \{\s*reader = \{/.test(inbox) &&
-      ["taskLinks: \\[\\]", "threadTasks: \\[\\]", "linkOptions: \\{ quote: \\[\\], lead: \\[\\], survey: \\[\\], inspection: \\[\\], project: \\[\\] \\}", "resolvedCustomerId: null", "customerCard: null", "linkedPeople: \\[\\]"].every((f) => new RegExp(f).test(inbox)) &&
+      ["taskLinks: \\[\\]", "threadTasks: \\[\\]", "linkOptions: \\{ quote: \\[\\], lead: \\[\\], survey: \\[\\], inspection: \\[\\], project: \\[\\] \\}", "resolvedCustomerId: null", "customerCard: null", "linkedPeople: \\[\\]", "vendorCompany: null"].every((f) => new RegExp(f).test(inbox)) &&
       /isThreadLinked\(sel\) && sel\.customerId \?/.test(inbox),
     "reader (#341): a read-only thread ships no task / link / customer-card data, and names its customer only when deliberately linked (sel.customerId, never resolveCustomerId)"
   );

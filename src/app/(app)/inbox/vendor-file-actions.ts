@@ -98,7 +98,7 @@ export async function fileThreadAction(
     return { ok: false, error: "That estimate or project wasn't found." };
   if (vendorCompanyId !== null && (typeof vendorCompanyId !== "string" || !vendorCompanyId || vendorCompanyId.length > TARGET_ID_MAX))
     return { ok: false, error: VENDOR_COPY.pickVendor };
-  const r = await fileThreadTo(t, { type: target.type, id: target.id }, vendorCompanyId, me.id);
+  const r = await fileThreadTo(t, { type: target.type, id: target.id }, vendorCompanyId, { id: me.id, name: me.name });
   if (!r.ok) return r;
   revalidatePath("/inbox");
   revalidatePath("/estimator");

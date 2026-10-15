@@ -14,7 +14,7 @@ import { recordNudgeOpened } from "@/lib/brief/nudge-outcome";
 import { after } from "next/server";
 import { readerPreDraft } from "@/lib/brief/reader-predraft";
 import { attachmentHref } from "@/lib/comms-attachments";
-import { isPdfAttachment, threadAttachmentHref, threadAttachmentRef } from "@/lib/vendor-quotes/rules";
+import { isPdfAttachment, isVendorPickerType, threadAttachmentHref, threadAttachmentRef } from "@/lib/vendor-quotes/rules";
 import { groupCompanyOptions } from "@/lib/vendor-status";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { get as getQuote, getAll as allQuotes } from "@/lib/stores/quotes";
@@ -1012,6 +1012,7 @@ export default async function InboxPage({
       link: m.link
         ? {
             type: m.link.type,
+            id: m.link.id,
             kindLabel: m.link.type.charAt(0).toUpperCase() + m.link.type.slice(1),
             label: linkLabel(m.link),
             color: LINK_KIND_COLOR[m.link.type] || "#5b616e",
@@ -1050,6 +1051,7 @@ export default async function InboxPage({
       link: sel.link
         ? {
             type: sel.link.type,
+            id: sel.link.id,
             kindLabel:
               sel.link.type.charAt(0).toUpperCase() + sel.link.type.slice(1),
             label: linkLabel(sel.link),
@@ -1115,7 +1117,11 @@ export default async function InboxPage({
       suggestionHref: !readOnly && assistFlags.estimate && sel.channel === "email" ? await suggestionReadyHref("thread", sel.id) : null,
       attachmentsPending:
         !readOnly && gmailEnabled() && (sel.messages || []).some((m) => m.gmailId && !m.attsListed && !(m.attachments || []).length),
-      vendorCompany: null,
+      // #348 slice 4 — the owner's reader only (a read-only reader below resets it): the vendor company the thread is filed under
+      vendorCompany: (() => {
+        const vc = sel.customerId ? customers.find((c) => c.id === sel.customerId) : null;
+        return vc && isVendorPickerType(vc.type) ? { id: vc.id, name: vc.name } : null;
+      })(),
       readOnlyLinkedTo: "",
       preDraft,
     };
