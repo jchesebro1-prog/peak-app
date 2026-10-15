@@ -12380,7 +12380,7 @@ Jeff (Oct 14) chose "My real Gmail labels" for the #346 Labels card: pick from y
   - The brief's live counts read only your mailbox.
 - User display names are not unique (only email is). Two active users with the same name would share each other's mailbox ownership (#341's `visibleTo` matches names). Worth a uniqueness check in Settings → Team.
 
-## 348. Estimate parties, bids & vendor links — Slices 1, 2, 3 and 4 built (1–3 merged 2ad8eec8); next: Jeff's 2026-10-15 bid follow-ups (per-bidder response limit; addendum after send → Draft + Send revision to every bidder), then 5 Read the PDF, 6 portal + reports
+## 348. Estimate parties, bids & vendor links — Slices 1, 2, 3 and 4 built (1–3 merged 2ad8eec8), plus Jeff's 2026-10-15 bid follow-ups (D1118–D1119); next: 5 Read the PDF, 6 portal + reports
 
 Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-parties-and-bids-design.md`. An estimate links to exactly one company; real bid jobs involve an owner, several GCs and ECs, an architect, consultants and vendors.
 
@@ -12403,6 +12403,8 @@ Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-
 - Slice 3 ✅ built (D1097): split systems into a new estimate.
 - Slice 4 ✅ built (D1105–D1117): vendor company on vendor quotes (picker, validated, a vendor party once), Gmail attachments by reference with a download route, **Add as vendor quote…** from an email PDF (`?vq=` hand-off), **File to estimate / project…**, a Vendors card on Build package → BOM quote and Send & track, "Quotes we've received" on the vendor and company pages, and vendor quotes + emails on project Procurement. Visibility: reads use `canSeeThread`, writes `ownThread`.
 - **Prod check additions (slice 4):** `SELECT DISTINCT type FROM companies` for vendor spellings (D1105); from a Gmail-connected account, a vendor email with a PDF over 5 MB — the reader chip downloads and Add as vendor quote copies it (verifies streamed-response size on Vercel). For Jeff: imported Gmail attachments now count in the Inbox "has attachment" filter and attachment-name search; a cancelled Add-as-vendor-quote form leaves an orphaned Blob copy (same as uploads).
+- Jeff's 2026-10-15 bid follow-ups ✅ built (D1118–D1119): each bidder gets its own client-link response limit (its own daily bucket and its own 200-response cap; the owner keeps the quote-wide ones), and adding an addendum to a sent estimate moves it back to Draft. The Bid chip says so, and the Bidders card then offers **Send revision to bidders** to every pending email bidder. Note, date and due-date edits and removals never change status. The old "move back to Draft" hint is now only a fallback.
+- **Prod check additions (follow-ups):** on a sent test estimate with two sent email bidders, add Addendum 2 in the Bid chip: the note shows, the header reads Draft, and Send & track offers Send revision to bidders for both.
 - Slice 5: Read the PDF (Assist `vendorpdf`).
 - Slice 6: portal bidder view and Reports → Bids by GC/EC.
 

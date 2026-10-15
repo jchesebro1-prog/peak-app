@@ -13060,7 +13060,7 @@ Email rows get Send / Retry; a row whose submission is by the bidder's website k
 
 ## D1095. Acknowledging an addendum after a send is a new revision (#348 slice 2b-ii, 2026-10-15)
 
-An acknowledgement doesn't re-send anything. To get it to a bidder: move the estimate back to Draft, then **Send revision to bidders**; the card hints at this. **Open for Jeff:** whether that should be one button.
+An acknowledgement doesn't re-send anything. To get it to a bidder: move the estimate back to Draft, then **Send revision to bidders**; the card hints at this. **Open for Jeff:** whether that should be one button. **Superseded by D1119** (Jeff 2026-10-15): adding an addendum to a sent estimate now moves it back to Draft itself; the card's hint stays only as a fallback.
 
 ## D1096. Local delivery stamps sent (#348 slice 2b-ii, 2026-10-15)
 
@@ -13163,3 +13163,11 @@ The Procurement tab shows the source estimate's vendor quotes plus vendor thread
 ## D1117. Who may add a vendor quote from an email (#348 slice 4, 2026-10-15)
 
 "Add as vendor quote…" is open to anyone who can see the thread (it only reads; the copy runs under the broker's `canSeeThread` check). "Also file" is the thread owner's only.
+
+## D1118. Each bidder has its own client-link response limit (#348, Jeff 2026-10-15 item 2)
+
+A bidder's v3 response spends its own daily bucket, `share-respond-quote:<quote>:<partyId>` (30 a day, as before); the owner's v2 keeps `share-respond-quote:<quote>`. The 200-response storage cap on `Quote.clientResponses` is per responder too: `appendResponseTo` counts only responses with the same `partyId` (the owner has none). A bidder can never use up the owner's budget or another bidder's. The per-IP limit (5 per 10 minutes) is unchanged and still shared by everyone on one address. Trade-off: the stored list can now grow to 200 × (bidders + 1).
+
+## D1119. An addendum after a send puts the estimate back to Draft (#348, Jeff 2026-10-15 item 3)
+
+When a Bid chip save adds an addendum number that wasn't on the stored list and the estimate is `sent`, `setBidDetails` moves it back to `draft` through `setStatus` under the same row lock and transaction. That is the same transition as the status select: history is stamped, the pipeline stage snaps, and Draft has no approval gate. The chip then shows "Addendum N added — the estimate is back in Draft. Send revision to bidders when it's ready." and the Estimator header picks up the new status. The Bidders card's plan already offers **Send revision to bidders** to every pending email bidder on a draft. A note or date edit, a removal or a due-date change never changes status. Re-adding a number removed after the send counts as added. Won and lost estimates still refuse bid details. The card's amber "move the estimate back to Draft" hint stays only as a fallback, for a sent estimate whose addenda changed some other way. Supersedes D1095's manual step.
