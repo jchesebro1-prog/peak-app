@@ -12473,14 +12473,16 @@ The app is safe before step 4: ownership already resolves the same way lazily (G
 
 **Done:**
 - **#25 Estimate reply text (D1098):** Send & track's Activity card shows every message to anyone who can open the quote. Reply and Mark read stay the mailbox owner's (#349). Answers #308's question (a).
-- **#26 Task-shared email (D1099):** a task created from an email (any status, not deleted) shares that one email with its assignee, read-only — by `assigneeUserId`, else a unique `assigneeName`. One task read per viewer (`MailboxViewer.taskThreadIds`), mirrored in SQL by a new `DocCond` `in` leaf; every write guard unchanged.
+- **#26 Task-shared email (D1099):** when the thread's owner assigns a task from an email to a teammate (Inbox task dialog, Suggest tasks, Ask AI's task card), the server stamps the task (`threadShare`) and the assignee can read that one email, read-only, while the task is live and still theirs. Re-assigning never moves it (only the owner's hand-off re-stamps); a pushed, promise or unstamped task shares nothing. One task read per viewer (`MailboxViewer.taskThreadIds`, a Set), filtered on the row id in SQL (`DocCond` `idIn`); every write guard unchanged.
 - **#27 Ask AI on a phone (D1100):** a ✦ in the narrow (≤ 860 px) top bar and an Ask AI row in the drawer open the panel full screen with the current page as context; same `askGateFor` gate.
 - **#29 Noise "Archive all shown" (D1101):** archives and clears every Noise row shown, a row's own Organize Archive each (Gmail too, marked-noise rows keep their filing), with one Undo for the batch.
 - **#37 "Not mine" comes back (D1102):** a dismissed Start here item returns at the next snapshot once it escalates after the mark — a new customer message, a resubmit for approval, or a lead SLA breach. Snooze and Done unchanged. Answers MASTER-QUESTIONS P1.
-- **#39 Sync pull for field roles (D1103):** `/api/sync/pull` answers 403 to anyone without `create` (Reviewer-only); the client stops pulling on a 403. Push stays open.
+- **#39 Sync pull for field roles (D1103):** `/api/sync/pull` answers 403 to anyone without `create` (Reviewer-only); the client stops pulling and clears its pulled field mirror on a 403. Push stays open but strips server-owned fields (`tasks.threadShare`, `tasks.threadId`).
 - **#41 Portal sign-in email (D1104):** creating portal access emails the link with a short welcome note from the granter's own connected Gmail mailbox; otherwise it copies the link with "Couldn’t email it — copy the link instead." Copy link stays; each active grant gains Resend link. The token is never logged. Answers MASTER-QUESTIONS F16.
 
 **Tests:** `npm run test:thread-visibility` (#26 parity / read-only / deleted task / wrong assignee, #39), `test:inbox-org` (#29), `test:ask` (#27 pins), new `npm run test:morning-triage` (#37, standalone runner for the triage suite), new `npm run test:portal-invite` (#41, fake mail sender), #25 pins in test:specs; all chained into test:specs. No migration, no env var.
+
+**Review fixes (same day, #351 review):** C1/I1/I2 — the task share became the owner's server-stamped act (see #26 above; D1099, D1103). M1 — the portal invite thread carries no customerId. M2 — one invite email per grant per minute. M3 — only an outside sender's message brings a Not mine back. M4 — a pull 403 clears the browser's pulled field data. M5 — Send & track skips threads in Deleted. M6 — the shared ids are a Set, filtered on the row id. M7 — a failing row never loses the batch Undo on Noise.
 
 **Remaining (Jeff-gated):**
 - Tell the team: an email you assign as a task becomes readable (read-only) by the assignee; estimate replies are readable by everyone who opens the quote.
