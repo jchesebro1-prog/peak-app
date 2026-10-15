@@ -6,7 +6,6 @@ import { liveBomDocumentProps } from "@/lib/estimate-output/live-bom";
 import { previewPath } from "@/lib/estimate-output/package-preview";
 import type { EstimatorState } from "../use-estimator-state";
 import { VendorsCard } from "./vendors-card";
-import { vendorCardGroups } from "@/lib/vendor-quotes/rules";
 
 /** Copy for the BOM quote tab (spec 2026-10-12 §4.3). */
 export const BOM_TAB_COPY = {
@@ -120,9 +119,9 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
           )}
           {!pdfOpts.pdfPrices && <span style={{ flexBasis: "100%", color: "#8a6d1f" }}>{BOM_TAB_COPY.pricesHidden}</span>}
         </div>
-        <details open={vendorQuotes.length > 0} style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: "10px 14px", marginBottom: 12 }}>
+        <details open style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: "10px 14px", marginBottom: 12 }}>
           <summary style={{ cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: "#16181d" }}>
-            Vendors ({vendorCardGroups({ vendorQuotes, companies: [], threads: [] }).length})
+            Vendors
           </summary>
           <div style={{ marginTop: 10 }}>
             {loadedId ? <VendorsCard quoteId={loadedId} vendorQuotes={vendorQuotes} refreshKey={0} /> : <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate first.</div>}

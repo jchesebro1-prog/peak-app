@@ -9,7 +9,11 @@ const LINK: CSSProperties = { color: "var(--accent)", fontWeight: 600, textDecor
 const CHIP: CSSProperties = { fontSize: 10.5, fontWeight: 600, borderRadius: 20, padding: "2px 8px", background: "#f1f2f5", color: "#5b616e", whiteSpace: "nowrap" };
 const DOT: CSSProperties = { width: 7, height: 7, borderRadius: "50%", background: "var(--accent)", display: "inline-block", flexShrink: 0, alignSelf: "center" };
 
-/** #348 slice 4 — vendors grouped by company: their quotes on the estimate and the emails filed to it. Presentational. */
+/**
+ * #348 slice 4 — vendors grouped by company: their quotes on the estimate and the emails filed to it. Presentational.
+ * Links open in a new tab so leaving the Estimator never drops unsaved edits. Dates render in the viewer's timezone when
+ * used client-side and in server UTC when server-rendered.
+ */
 export function VendorGroupsList({ groups, emptyText }: { groups: VendorCardGroup[]; emptyText: string }) {
   if (!groups.length) return <div style={{ fontSize: 11.5, color: "#aab0bb" }}>{emptyText}</div>;
   return (
@@ -18,7 +22,7 @@ export function VendorGroupsList({ groups, emptyText }: { groups: VendorCardGrou
         <div key={g.key}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, fontWeight: 600, color: "#16181d" }}>
             {g.href ? (
-              <a href={g.href} style={LINK}>
+              <a href={g.href} target="_blank" rel="noopener noreferrer" style={LINK}>
                 {g.name}
               </a>
             ) : (
@@ -38,7 +42,7 @@ export function VendorGroupsList({ groups, emptyText }: { groups: VendorCardGrou
                 </span>
               )}
               {q.fromThreadId && (
-                <a href={`/inbox?thread=${encodeURIComponent(q.fromThreadId)}`} style={LINK}>
+                <a href={`/inbox?thread=${encodeURIComponent(q.fromThreadId)}`} target="_blank" rel="noopener noreferrer" style={LINK}>
                   {VENDOR_COPY.fromEmail}
                 </a>
               )}
@@ -47,7 +51,7 @@ export function VendorGroupsList({ groups, emptyText }: { groups: VendorCardGrou
           {g.threads.map((t) => (
             <div key={t.id} style={ROW}>
               {t.unread && <span style={DOT} role="img" aria-label="Unread" title="Unread" />}
-              <a href={t.href} style={LINK}>
+              <a href={t.href} target="_blank" rel="noopener noreferrer" style={LINK}>
                 {t.subject || "(no subject)"}
               </a>
               <span style={MUTED}>{t.lastFrom}</span>

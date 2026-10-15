@@ -226,6 +226,7 @@ export function ProjectsView({
   pipelines,
   canDelete = false,
   meetingsSlot = null,
+  procurementSlot = null,
 }: {
   projects: ProjectRecord[];
   pending: QuoteLike[];
@@ -248,6 +249,7 @@ export function ProjectsView({
   canDelete?: boolean;
   /** #323 — the server-rendered Meetings card for the selected project (Overview tab). */
   meetingsSlot?: ReactNode;
+  procurementSlot?: ReactNode;
 }) {
   const custName = (p: { customerId: string | null; customer: string }) =>
     (p.customerId && custById.get(p.customerId)) || p.customer || "—";
@@ -846,6 +848,7 @@ export function ProjectsView({
               pipelines={pipelines}
               canDelete={canDelete}
               meetingsSlot={meetingsSlot}
+              procurementSlot={procurementSlot}
             />
           ) : (
             <div
@@ -908,6 +911,7 @@ function ProjectDetail({
   pipelines,
   canDelete,
   meetingsSlot,
+  procurementSlot,
 }: {
   p: ProjectRecord;
   tab: string;
@@ -925,6 +929,7 @@ function ProjectDetail({
   pipelines: Pipelines;
   canDelete: boolean;
   meetingsSlot: ReactNode;
+  procurementSlot: ReactNode;
 }) {
   const { colorOf, initialsOf } = makeIdentityLookup(identity);
   // The record's own pipeline — an order walks the order pipeline, a job on a
@@ -1232,7 +1237,12 @@ function ProjectDetail({
           />
         )}
         {curTab === "overview" && meetingsSlot}
-        {curTab === "procurement" && <ProcurementTab p={p} />}
+        {curTab === "procurement" && (
+          <>
+            <ProcurementTab p={p} />
+            {procurementSlot}
+          </>
+        )}
         {curTab === "deliveries" && <DeliveriesTab p={p} />}
         {curTab === "crew" && !isOrder && (
           <CrewTab p={p} colorOf={colorOf} initialsOf={initialsOf} roster={roster} />
