@@ -1,6 +1,8 @@
 import { attachmentDisposition } from "@/lib/document-files";
 import { renderBidderPdf } from "@/lib/quote-pdf/bidder-pdf-server";
+import { bidderPdfRev } from "@/lib/parties/bid-send";
 import { requireUser } from "@/lib/session";
+import { get as getQuote } from "@/lib/stores/quotes";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -18,7 +20,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   await requireUser();
   const { id, partyId } = await params;
   const h = request.headers;
-  const r = await renderBidderPdf(id, partyId, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
+  // Once the quote is sent this is the version that was sent (its latest sent revision); while a draft, the live document.
+  const q = id && id.length <= 64 ? await getQuote(id) : null;
+  if (!q) return text("Not found", 404);
+  const r = await renderBidderPdf(id, partyId, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"), { rev: bidderPdfRev(q) });
   if (!r.ok) return text(r.error, r.status);
   const disposition = attachmentDisposition(r.fileName);
   const download = new URL(request.url).searchParams.get("download") === "1";

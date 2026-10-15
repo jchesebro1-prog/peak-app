@@ -49111,8 +49111,8 @@ import { quoteDocumentDataFor as n293tDocData } from "@/lib/quote-pdf/quote-docu
     .flatMap((e) => (e.isDirectory() ? srcFiles(join(dir, e.name)) : /\.(ts|tsx)$/.test(e.name) ? [join(dir, e.name)] : []));
   const all = srcFiles("src").map((f) => [f, rd(f)] as const);
   const asOfCallers = all.filter(([, t]) => t.includes("quoteAsOfRevision(")).map(([f]) => f).sort();
-  ok(JSON.stringify(asOfCallers) === JSON.stringify(["src/lib/quote-pdf/document-loader.ts", "src/lib/quote-share/view.ts"]),
-    `#293t binding: quoteAsOfRevision is called only by the document loader (got ${asOfCallers.join(", ")})`);
+  ok(JSON.stringify(asOfCallers) === JSON.stringify(["src/app/print/quote/[id]/page.tsx", "src/lib/quote-pdf/document-loader.ts", "src/lib/quote-share/view.ts"]),
+    `#293t binding: quoteAsOfRevision is called only by the document loader and (#348 2b-ii) the signed bidder-revision print variant (got ${asOfCallers.join(", ")})`);
   ok(!/["']use (client|server)["']/.test(loader) && !/\.pdf\b|pdfBlobPath|shareLink|generateMetadata/.test(loader) && /return \{ \.\.\.doc, keyProductPhotos, rewardsLine: purchasePerksDocLine\(perks\) \};/.test(loader),
     "#293t binding: the loader is server-only, returns QuoteDocument props only, and never reads the live PDF or the share link");
   const clientImporters = all.filter(([, t]) => /^["']use client["'];?\s*$/m.test(t) && /from ["']@\/lib\/(quote-pdf\/document-loader|quote-share\/photo-response)["']/.test(t)).map(([f]) => f);
@@ -54910,7 +54910,7 @@ import { qd293Props as p2adProps, qd293Sections as p2adSections, renderQuoteDocu
     "#P2a document: the helper lives in the client-safe quote-document-view.ts");
   ok(data.includes("const groups = sanitizeGroups(spec?.groups);") && data.includes("groups,\n") && data.includes("normalizeSystemOrder(spec && Array.isArray(spec.sections)") && data.includes("as { sections?: unknown; groups?: unknown; document?: unknown }"),
     "#P2a document: quoteDocumentDataFor reads groups from the same spec as sections");
-  ok(loader.includes("quoteDocumentDataFor(src, cust, settings, addressee)") && printPage.includes("quoteDocumentDataFor(q, cust, settings, addressee)"),
+  ok(loader.includes("quoteDocumentDataFor(src, cust, settings, addressee)") && printPage.includes("quoteDocumentDataFor(src, cust, settings, addressee)"),
     "#P2a document: the web loader (live or frozen revision) and the print route both build props through quoteDocumentDataFor");
   const online = rd("src/components/online-estimate/online-estimate.tsx");
   ok(online.includes('<QuoteDocument {...shown} layout="web" />') && online.includes("bomViewProps(docProps)"), "#P2a document: the online view renders the same QuoteDocument (groups ride in docProps; the BOM view spreads them)");

@@ -52,8 +52,8 @@ const B = (over: Partial<BidderState> = {}): BidderState => ({ ...newBidderState
 export async function bidChecks(ok: Ok) {
   // 2b-i: the print route's token binding — a bidder variant verifies `${id}~${bidder}`, and the check runs before any quote read.
   const printPage = readFileSync(join(process.cwd(), "src/app/print/quote/[id]/page.tsx"), "utf8");
-  const tokenAt = printPage.indexOf("if (!tokenOk(t, \"quote\", bidder ? `${id}~${bidder}` : id)) notFound();"), readAt = printPage.indexOf("getQuote(");
-  ok(tokenAt > 0 && readAt > 0 && tokenAt < readAt && printPage.includes("documentAddressee(q, bidder, { strict: true })"), "bids: the print route verifies the `${id}~${bidder}` token before getQuote( and loads a bidder strictly");
+  const tokenAt = printPage.indexOf("if (!tokenOk(t, \"quote\", bidder ? (rev ? `${id}~${bidder}~r${rev}` : `${id}~${bidder}`) : id)) notFound();"), readAt = printPage.indexOf("getQuote(");
+  ok(tokenAt > 0 && readAt > 0 && tokenAt < readAt && printPage.includes("documentAddressee(src, bidder, { strict: true })"), "bids: the print route verifies the `${id}~${bidder}[~r${rev}]` token before getQuote( and loads a bidder strictly (on the revision's source)");
   ok(/rawBidder !== undefined && \(typeof rawBidder !== "string"[^\n]*\) notFound\(\);/.test(printPage), "bids: a present-but-malformed bidder param 404s instead of falling through");
   ok(BID_RESULTS.join() === "pending,awarded,lost,withdrew,no_bid", "bids: result keys");
   ok(BID_RESULT_LABEL.lost === "Lost the award" && BID_RESULT_LABEL.no_bid === "No bid", "bids: result labels");
@@ -667,6 +667,17 @@ export async function bidSendDbChecks(ok: Ok) {
     const qo = await getQuote(eq);
     ok((await bid(g1))?.opens?.count === 2 && (await bid(g1))?.opens?.lastAt === T + 5 && qo?.shareOpens === undefined && qo?.updatedAt === u0, "send db: bidder opens count on the party, never on the quote");
     ok((await recordBidderOpen(eq, g1, -1)) === false, "send db: a bad open time writes nothing");
+
+    // 2b-ii Task 4 — the bidder PDF from the sent revision
+    const rRev9 = await renderBidderPdf(eq, g1, "localhost:3000", "http", { rev: 9 });
+    ok(!rRev9.ok && rRev9.status === 404 && rRev9.error === "Not found", "bidder pdf rev db: a rev that isn't one of the quote's sent revisions 404s before any render");
+    const tA = signPrintToken("s3cret", "quote", `${eq}~${g1}`, 1_000_000), tR1 = signPrintToken("s3cret", "quote", `${eq}~${g1}~r1`, 1_000_000);
+    ok(!verifyPrintToken("s3cret", tA, "quote", `${eq}~${g1}~r1`, 1_000_000) && !verifyPrintToken("s3cret", tR1, "quote", `${eq}~${g1}`, 1_000_000)
+      && !verifyPrintToken("s3cret", tR1, "quote", `${eq}~${g1}~r2`, 1_000_000) && !verifyPrintToken("s3cret", tR1, "quote", `${eq}~${g2}~r1`, 1_000_000) && verifyPrintToken("s3cret", tR1, "quote", `${eq}~${g1}~r1`, 1_000_000),
+      "bidder pdf rev db: a rev token is bound to its bidder and revision; a no-rev token never unlocks it, nor the reverse");
+    const rd4 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+    ok(rd4("src/app/print/quote/[id]/page.tsx").includes("~r${") && rd4("src/app/print/quote/[id]/page.tsx").includes("quoteAsOfRevision(") && rd4("src/app/api/quotes/[id]/bidder-pdf/[partyId]/route.ts").includes("bidderPdfRev(") && rd4("src/app/api/quotes/[id]/pdf/route.ts").includes("bidderFileOf(file)"),
+      "bidder pdf rev: the print route reads the revision's source, the download route passes the sent rev, the pdf route serves bidder files");
 
     await recordEstimateEmail(eq, { threadId: "C-e3", rev: 1, at: T, by: "x", to: "y", partyId: "nope" });
     const e3 = (await getQuote(eq))?.estimateEmails?.find((e) => e.threadId === "C-e3");
