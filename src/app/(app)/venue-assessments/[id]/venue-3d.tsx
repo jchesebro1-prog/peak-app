@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { venueArchetype, type VenueClass } from "@/lib/stores/venue-classes";
+import { presetCamera, VIEW_PRESETS, type ViewPreset } from "@/lib/venue-3d-views";
 
 /**
  * 3D venue preview (IDEAS #49 Phase 1) — a parametric model of the space
@@ -183,6 +184,12 @@ const MEASURE_KEYS = [
 export default function Venue3D({ venueClass, venueSubtype, measurements }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [preset, setPreset] = useState<ViewPreset>("orbit");
+  const [wireframe, setWireframe] = useState<boolean>(true);
+  // The scene is built once per model; these let the async build read the latest choice and
+  // let the view effect below drive the live scene without rebuilding it.
+  const viewRef = useRef({ preset: "orbit" as ViewPreset, wireframe: true });
+  const applyRef = useRef<((preset: ViewPreset, wireframe: boolean) => void) | null>(null);
 
   // Only rebuild when a dimension the model actually uses changes.
   const modelKey = useMemo(
@@ -228,6 +235,14 @@ export default function Venue3D({ venueClass, venueSubtype, measurements }: Prop
           booth: new THREE.MeshLambertMaterial({ color: 0x4b5563 }),
           door: new THREE.MeshLambertMaterial({ color: 0x8b6fc9 }),
         };
+
+        // Wireframe lines in the pale shell colours vanish on the pale background, so wireframe mode
+        // darkens each material toward slate. The transparent grid deck stays a solid see-through plane.
+        const baseColor = new Map<InstanceType<typeof THREE.MeshLambertMaterial>, number>();
+        Object.entries(mat).forEach(([k, mm]) => {
+          if (k !== "gridDeck") baseColor.set(mm, mm.color.getHex());
+        });
+        const slate = new THREE.Color(0x3b4252);
 
         const box = (w: number, h: number, d: number, material: InstanceType<typeof THREE.MeshLambertMaterial>, x: number, y: number, z: number) => {
           const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
@@ -330,22 +345,80 @@ export default function Venue3D({ venueClass, venueSubtype, measurements }: Prop
           }
         }
 
+        const bounds3 = new THREE.Box3().setFromObject(group);
+        const bounds = {
+          minX: bounds3.min.x, maxX: bounds3.max.x, minY: bounds3.min.y, maxY: bounds3.max.y, minZ: bounds3.min.z, maxZ: bounds3.max.z,
+        };
+        const orbitHome = {
+          position: [M.houseW * 0.35, M.houseH * 0.95, M.houseD * 1.15] as [number, number, number],
+          target: [0, M.stageH + Math.max(M.proH / 2, 6), 0] as [number, number, number],
+        };
+        const viewOpts = (aspect: number) => ({ aspect, plasterZ: 0, eyeHeight: 5, lookY: orbitHome.target[1], orbitHome });
+
         const width = host.clientWidth || 600;
         const height = 420;
-        const camera = new THREE.PerspectiveCamera(50, width / height, 0.5, 3000);
-        camera.position.set(M.houseW * 0.35, M.houseH * 0.95, M.houseD * 1.15);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.localClippingEnabled = true; // Section clips every material at the centre line
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.setSize(width, height);
         host.innerHTML = "";
         host.appendChild(renderer.domElement);
 
-        const controls = new OrbitControls(camera, renderer.domElement);
-        controls.target.set(0, M.stageH + Math.max(M.proH / 2, 6), 0);
-        controls.enableDamping = true;
-        controls.maxPolarAngle = Math.PI * 0.52;
-        controls.minDistance = 10;
-        controls.maxDistance = Math.max(M.houseD, M.houseW) * 4;
+        type Cam = InstanceType<typeof THREE.PerspectiveCamera> | InstanceType<typeof THREE.OrthographicCamera>;
+        let camera: Cam = new THREE.PerspectiveCamera(50, width / height, 0.5, 3000);
+        let controls = new OrbitControls<Cam>(camera, renderer.domElement);
+        let current: ViewPreset | null = null; // null until the first setView configures the controls
+
+        const applyMaterials = (wire: boolean, clip: InstanceType<typeof THREE.Plane> | null) => {
+          Object.values(mat).forEach((mm) => {
+            const base = baseColor.get(mm);
+            if (base !== undefined) {
+              mm.wireframe = wire;
+              mm.color.setHex(base);
+              if (wire) mm.color.lerp(slate, 0.55);
+            }
+            mm.clippingPlanes = clip ? [clip] : null;
+            mm.needsUpdate = true;
+          });
+        };
+
+        // Replace the camera + controls for a preset. The abandoned controls are disposed (they hold
+        // DOM listeners); cameras own no GPU resources. The camera's up vector is set BEFORE the
+        // controls are built because OrbitControls reads it once, at construction.
+        const setView = (next: ViewPreset, wire: boolean) => {
+          const w = host.clientWidth || width;
+          const p = presetCamera(next, bounds, viewOpts(w / height));
+          if (next !== current || p.kind !== (camera instanceof THREE.OrthographicCamera ? "ortho" : "perspective")) {
+            controls.dispose();
+            if (p.kind === "ortho") {
+              camera = new THREE.OrthographicCamera(p.ortho!.left, p.ortho!.right, p.ortho!.top, p.ortho!.bottom, 0.1, 5000);
+            } else {
+              camera = new THREE.PerspectiveCamera(50, w / height, 0.5, 3000);
+            }
+            camera.up.set(p.up[0], p.up[1], p.up[2]);
+            camera.position.set(p.position[0], p.position[1], p.position[2]);
+            controls = new OrbitControls<Cam>(camera, renderer.domElement);
+            controls.target.set(p.target[0], p.target[1], p.target[2]);
+            controls.enableDamping = true;
+            controls.enableRotate = p.rotate; // ortho views only zoom + pan
+            if (p.kind === "ortho") {
+              controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+              controls.touches.ONE = THREE.TOUCH.PAN;
+              controls.maxPolarAngle = Math.PI;
+              controls.minZoom = 0.2;
+              controls.maxZoom = 20;
+            } else {
+              controls.maxPolarAngle = Math.PI * 0.52;
+              controls.minDistance = next === "orbit" ? 10 : 1;
+              controls.maxDistance = Math.max(M.houseD, M.houseW) * 4;
+            }
+            controls.update();
+            current = next;
+          }
+          applyMaterials(wire, p.clip ? new THREE.Plane(new THREE.Vector3(...p.clip.normal), p.clip.constant) : null);
+        };
+        setView(viewRef.current.preset, viewRef.current.wireframe);
+        applyRef.current = setView;
 
         let raf = 0;
         const tick = () => {
@@ -357,14 +430,25 @@ export default function Venue3D({ venueClass, venueSubtype, measurements }: Prop
 
         const onResize = () => {
           const w = host.clientWidth || width;
-          camera.aspect = w / height;
-          camera.updateProjectionMatrix();
           renderer.setSize(w, height);
+          if (camera instanceof THREE.OrthographicCamera) {
+            const o = presetCamera(current ?? "orbit", bounds, viewOpts(w / height)).ortho;
+            if (o) {
+              camera.left = o.left;
+              camera.right = o.right;
+              camera.top = o.top;
+              camera.bottom = o.bottom;
+            }
+          } else {
+            camera.aspect = w / height;
+          }
+          camera.updateProjectionMatrix();
         };
         const ro = new ResizeObserver(onResize);
         ro.observe(host);
 
         cleanup = () => {
+          applyRef.current = null;
           cancelAnimationFrame(raf);
           ro.disconnect();
           controls.dispose();
@@ -387,6 +471,12 @@ export default function Venue3D({ venueClass, venueSubtype, measurements }: Prop
     };
   }, [model]);
 
+  // Drive the live scene when the viewer picks a preset or flips Wireframe.
+  useEffect(() => {
+    viewRef.current = { preset, wireframe };
+    applyRef.current?.(preset, wireframe);
+  }, [preset, wireframe]);
+
   if (error) {
     return (
       <div style={{ border: "1.5px dashed #dfe2e8", borderRadius: 11, padding: 20, textAlign: "center", fontSize: 12.5, color: "#aab0bb" }}>
@@ -397,6 +487,30 @@ export default function Venue3D({ venueClass, venueSubtype, measurements }: Prop
 
   return (
     <div>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 8 }}>
+        <div role="group" aria-label="3D view" style={{ display: "inline-flex", border: "1px solid #dfe2e8", borderRadius: 8, overflow: "hidden" }}>
+          {VIEW_PRESETS.map((p, i) => (
+            <button
+              key={p.id}
+              type="button"
+              aria-pressed={preset === p.id}
+              onClick={() => setPreset(p.id)}
+              style={{
+                font: "inherit", fontSize: 12, fontWeight: 600, padding: "6px 12px", cursor: "pointer", border: "none",
+                borderLeft: i ? "1px solid #dfe2e8" : "none",
+                color: preset === p.id ? "#fff" : "#4b5563",
+                background: preset === p.id ? "#4c3a86" : "#fff",
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#4b5563", cursor: "pointer" }}>
+          <input type="checkbox" checked={wireframe} onChange={(e) => setWireframe(e.target.checked)} />
+          Wireframe
+        </label>
+      </div>
       <div ref={hostRef} style={{ width: "100%", height: 420, borderRadius: 11, overflow: "hidden", background: "#f5f5f7", border: "1px solid #e8eaee" }} />
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
         {model.legend.map((l) => (
@@ -415,7 +529,8 @@ export default function Venue3D({ venueClass, venueSubtype, measurements }: Prop
         ))}
       </div>
       <div style={{ fontSize: 11.5, color: "#aab0bb", marginTop: 8 }}>
-        Drag to orbit · scroll to zoom. Gray chips are assumptions — fill those measurements to sharpen the model.
+        {preset === "orbit" || preset === "elevation" ? "Drag to orbit · scroll to zoom." : "Drag to pan · scroll to zoom."}{" "}
+        {preset === "section" ? "Cut at the centre line, seen from stage right. " : ""}Gray chips are assumptions — fill those measurements to sharpen the model.
       </div>
     </div>
   );

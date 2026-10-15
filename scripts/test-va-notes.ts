@@ -2071,6 +2071,47 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     ok(print7.includes("/api/surveys/") && print7.includes("/sheet-pdf") && /const \{ photos: _earlier, \.\.\.patch \}/.test(print7) && print7.includes("URL.createObjectURL(await res.blob())") && print7.includes("60_000") && print7.includes("application/pdf"),
       "#344 C7 fix: Print sheet posts the draft patch (minus the inline Earlier photos) to the route and opens the blob");
   }
+  /* ---- C8: 3D view presets + wireframe ---- */
+  {
+    const V = await import("../src/lib/venue-3d-views");
+    const b = { minX: -31, maxX: 31, minY: -0.4, maxY: 53, minZ: -28, maxZ: 52 };
+    const near = (a: number, c: number, e = 1e-9) => Math.abs(a - c) < e;
+    const orb = V.presetCamera("orbit", b, { orbitHome: { position: [20, 25, 60], target: [0, 12, 0] } });
+    ok(orb.kind === "perspective" && orb.rotate && orb.position.join() === "20,25,60" && orb.target.join() === "0,12,0" && !orb.ortho && !orb.clip,
+      "#344 C8: Orbit keeps today's perspective framing (the supplied home) with full rotation and no clipping");
+    const orbD = V.presetCamera("orbit", b);
+    ok(orbD.kind === "perspective" && orbD.position[2] > b.maxZ && orbD.target[2] === 0, "#344 C8: Orbit without a home still frames from beyond the house, aimed at the plaster line");
+    const pl = V.presetCamera("plan", b, { aspect: 2 });
+    ok(pl.kind === "ortho" && !pl.rotate && near(pl.target[0], 0) && near(pl.target[2], 12) && pl.position[0] === pl.target[0] && pl.position[2] === pl.target[2] && pl.position[1] > b.maxY && pl.up.join() === "0,0,-1",
+      "#344 C8: Plan sits straight above the model centre looking down, stage at the top of the screen");
+    const o = pl.ortho!;
+    ok(near((o.right - o.left) / (o.top - o.bottom), 2) && o.right - o.left >= (b.maxX - b.minX) * V.ORTHO_MARGIN - 1e-9 && o.top - o.bottom >= (b.maxZ - b.minZ) * V.ORTHO_MARGIN - 1e-9 && near(o.left, -o.right) && near(o.bottom, -o.top),
+      "#344 C8: Plan's ortho extents cover the whole footprint with a margin, centred, at the viewport aspect");
+    const tall = V.presetCamera("plan", { ...b, minX: -4, maxX: 4 }, { aspect: 1 }).ortho!;
+    ok(near((tall.right - tall.left) / (tall.top - tall.bottom), 1) && tall.top - tall.bottom >= 80 * V.ORTHO_MARGIN - 1e-9,
+      "#344 C8: a narrow, deep footprint is fitted by its height (the width widens to keep the aspect)");
+    const se = V.presetCamera("section", b, { aspect: 1.5 });
+    ok(se.kind === "ortho" && !se.rotate && se.position[0] < b.minX && se.target[0] === 0 && se.position[1] === se.target[1] && se.position[2] === se.target[2] && se.up.join() === "0,1,0",
+      "#344 C8: Section looks along the cross-stage axis from stage right (-x) at the centre line");
+    ok(!!se.clip && se.clip.normal.join() === "1,0,0" && near(se.clip.constant, 0) && se.ortho!.right - se.ortho!.left >= (b.maxZ - b.minZ) * V.ORTHO_MARGIN - 1e-9 && se.ortho!.top - se.ortho!.bottom >= (b.maxY - b.minY) * V.ORTHO_MARGIN - 1e-9,
+      "#344 C8: Section clips away the stage-right half at the centre line; its extents cover depth × height");
+    const off = V.presetCamera("section", { ...b, minX: -20, maxX: 40 });
+    ok(near(off.clip!.constant, -10) && off.target[0] === 10, "#344 C8: Section clips at the bounds' centre when it is off the origin");
+    const el = V.presetCamera("elevation", b, { lookY: 12 });
+    ok(el.kind === "perspective" && el.rotate && el.position[1] === 5 && el.position[0] === 0 && near(el.position[2], 26) && el.target[2] === 0 && el.target[1] === 12 && !el.clip,
+      "#344 C8: Elevation stands centre house at 5 ft eye height looking at the plaster line");
+    const el2 = V.presetCamera("elevation", b, { eyeHeight: 6, plasterZ: 0 });
+    ok(el2.position[1] === 6 && el2.target[1] === 6, "#344 C8: Elevation looks level at eye height unless told where the opening is");
+    ok(V.VIEW_PRESETS.map((p) => p.id).join() === "orbit,plan,section,elevation" && V.fitOrtho(0, 0, NaN).right > 0, "#344 C8: four presets in order; a degenerate model still yields a usable frustum");
+    const v3 = rd("src/app/(app)/venue-assessments/[id]/venue-3d.tsx");
+    ok(v3.includes("localClippingEnabled = true") && v3.includes(".wireframe =") && v3.includes("OrthographicCamera") && v3.includes("enableRotate") && v3.includes("MOUSE.PAN") &&
+      v3.includes('import("three")') && v3.includes("presetCamera(") && v3.includes("clippingPlanes"),
+      "#344 C8: source pins — clipping, wireframe, OrthographicCamera, enableRotate, pan on ortho, lazy three import");
+    ok(v3.includes("aria-pressed") && v3.includes("VIEW_PRESETS") && /type="checkbox"/.test(v3) && v3.includes("Wireframe") && /useState<boolean>\(true\)|useState\(true\)/.test(v3),
+      "#344 C8: a segmented preset control (aria-pressed) and a Wireframe checkbox, on by default");
+    ok(v3.includes("controls.dispose()") && (v3.match(/controls\.dispose\(\)/g) || []).length >= 2 && !rd("src/lib/venue-3d-views.ts").includes("use client") && !/from ["']three|import\(["']three/.test(rd("src/lib/venue-3d-views.ts")),
+      "#344 C8: an abandoned camera's controls are disposed on every switch; the view math is a pure module with no three import");
+  }
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
