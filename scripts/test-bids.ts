@@ -8,7 +8,11 @@ import {
   markSubmittedState, currentRev, needsRev, awardPlan, undoAwardPlan, canAward, canUndoAward, bidderStatusText, bidDueText, bidDueDays, isOpenBid,
 } from "../src/lib/parties/bids";
 import type { BidderState } from "../src/lib/parties/rules";
-import { addressedHeader, bidDocLine, bidderPdfFileName, type DocAddressee } from "../src/lib/parties/addressee";
+import { addressedHeader, bidDocLine, bidderPdfFileName, ownerNameFromLine, sendDefaultsContact, type DocAddressee } from "../src/lib/parties/addressee";
+import { quoteAsOfRevision } from "../src/lib/quote-share/view";
+import { coverDocumentPropsFor } from "../src/lib/estimate-output/cover";
+import { packageViewModel } from "../src/lib/estimate-output/package-model";
+import { loadQuoteDocumentProps } from "../src/lib/quote-pdf/document-loader";
 import { quoteMatchesSearch } from "../src/lib/estimate-number";
 import { selectBidDue } from "../src/lib/triage/feeds/quotes";
 import { closedKeys } from "../src/lib/triage/liveness";
@@ -17,15 +21,15 @@ import { factLabel, pointsFor } from "../src/lib/triage/rank";
 import type { Quote } from "../src/lib/stores/quotes";
 import { like } from "drizzle-orm";
 import { getDb } from "../src/db";
-import { companies, contacts as contactsTable } from "../src/db/schema";
+import { companies, contactEmails, contacts as contactsTable } from "../src/db/schema";
 import { saveCompany } from "../src/lib/identity/companies";
-import { saveContact } from "../src/lib/identity/contacts";
+import { saveContact, setEmails } from "../src/lib/identity/contacts";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
-import { buildQuote, get as getQuote, setStatus } from "../src/lib/stores/quotes";
+import { addQuoteRevision, buildQuote, get as getQuote, revisionDocFields, setStatus, type QuoteRevision } from "../src/lib/stores/quotes";
 import { getProjectByQuote } from "../src/lib/stores/projects";
 import { autoTaskId } from "../src/lib/stores/tasks";
-import { addParty, listFor, setPartyBid } from "../src/lib/stores/parties";
-import { documentAddressee } from "../src/lib/parties/addressee-server";
+import { addParty, listFor, setPartyBid, setPartyContact } from "../src/lib/stores/parties";
+import { awardedRecipient, documentAddressee, touchAwardedAddressee } from "../src/lib/parties/addressee-server";
 import { renderBidderPdf } from "../src/lib/quote-pdf/bidder-pdf-server";
 import { signPrintToken, verifyPrintToken } from "../src/lib/quote-pdf/token";
 import { quoteDocumentDataFor } from "../src/lib/quote-pdf/quote-document-data";
@@ -217,12 +221,34 @@ export async function bidChecks(ok: Ok) {
   const h2 = addressedHeader(base, { ...a, contactName: "", contactRole: "", ownerName: "", bidLine: "" });
   ok(!h2.hasAttn && h2.attnLine === "" && h2.ownerLine === "" && h2.bidLine === "", "addressee: blank contact has no attn");
   ok(addressedHeader(base, { ...a, contactRole: "" }).attnLine === "Sam Lee", "addressee: attn without a role");
+
+  // 2b-i final review: owner name, Send defaults, frozen award + bid on revisions
+  ok(ownerNameFromLine("Owner: Acme ISD") === "Acme ISD" && ownerNameFromLine("") === "" && ownerNameFromLine(undefined) === "" && ownerNameFromLine("Acme") === "", "addressee: the owner name reads back from the owner line");
+  const ownerC = { name: "Pat Owner", email: "pat@owner.test" };
+  ok(JSON.stringify(sendDefaultsContact(null, ownerC)) === JSON.stringify({ contactName: "Pat Owner", contactEmail: "pat@owner.test" }), "send defaults: nothing awarded → the owner's contact");
+  ok(JSON.stringify(sendDefaultsContact({ name: "Gee Ceeone", firstName: "Gee", email: " gee@gc.test " }, ownerC)) === JSON.stringify({ contactName: "Gee", contactEmail: "gee@gc.test" }), "send defaults: awarded → To is the bidder's contact, the greeting its first name");
+  ok(sendDefaultsContact({ name: "Gee Ceeone", firstName: "Gee", email: "" }, ownerC).contactEmail === "pat@owner.test" && sendDefaultsContact({ name: "Gee Ceeone", firstName: "Gee", email: "" }, ownerC).contactName === "Pat Owner", "send defaults: an awarded contact with no email falls back to the owner's");
+  ok(sendDefaultsContact({ name: "Gee Ceeone", firstName: "", email: "g@gc.test" }, ownerC).contactName === "Gee Ceeone", "send defaults: no first name → the display name");
+  const rq = { id: "Q-1", customer: "", status: "sent", bid: { dueAt: dueMs, addenda: [ad(1)], awardedPartyId: "pty_x" } } as unknown as Quote;
+  const rdf = revisionDocFields(rq);
+  ok(rdf.awardedPartyId === "pty_x" && rdf.bid?.dueAt === dueMs && rdf.bid.addenda.length === 1 && rdf.bid.addenda !== rq.bid?.addenda, "revisions: docFields freeze the awarded party and a copy of the bid");
+  const rdf0 = revisionDocFields({ id: "Q-2", customer: "", status: "draft" } as unknown as Quote);
+  ok(rdf0.awardedPartyId === null && !("bid" in rdf0), "revisions: no bid → awardedPartyId null, no bid frozen");
+  const liveQ = { ...rq, bid: { dueAt: dueMs + 86_400_000, addenda: [], awardedPartyId: null }, revisions: [] } as unknown as Quote;
+  const asOf = quoteAsOfRevision(liveQ, { rev: 1, at: 1, by: "t", reason: "sent", note: "", name: "x", value: 0, docFields: rdf } as unknown as QuoteRevision);
+  ok(asOf.bid?.dueAt === dueMs && bidDocLine(asOf.bid) === "Bid due Oct 21, 2:00 PM · Addenda acknowledged: 1" && !("awardedPartyId" in asOf), "revisions: the as-sent quote prints the frozen bid line; the frozen award never spreads onto the quote");
+  const asOfLegacy = quoteAsOfRevision(liveQ, { rev: 1, at: 1, by: "t", reason: "sent", note: "", name: "x", value: 0, docFields: { customer: "" } } as unknown as QuoteRevision);
+  ok(asOfLegacy.bid?.dueAt === dueMs + 86_400_000, "revisions: an older revision without a frozen bid keeps the live one");
 }
 
 const BID_FIX = { gc1: fixtureId(348, "bgc1"), gc2: fixtureId(348, "bgc2"), own: fixtureId(348, "bown"), ct1: fixtureId(348, "bct1") };
+const F_FIX = { ct2: fixtureId(348, "fct2"), ct3: fixtureId(348, "fct3") };
 async function dropBidIdentityFixtures() {
   const db = await getDb();
-  await db.delete(contactsTable).where(like(contactsTable.id, "TEST348:b%"));
+  for (const pre of ["TEST348:b%", "TEST348:f%"]) {
+    await db.delete(contactEmails).where(like(contactEmails.contactId, pre));
+    await db.delete(contactsTable).where(like(contactsTable.id, pre));
+  }
   await db.delete(companies).where(like(companies.id, "TEST348:b%"));
 }
 
@@ -318,6 +344,10 @@ export async function bidDbChecks(ok: Ok) {
     ok(!!ad1 && ad1.companyName === "Bid GC One" && ad1.contactName === "Gee Ceeone" && ad1.ownerName === "Bid Owner" && ad1.bidLine === bidDocLine(qa.bid) && ad1.bidLine.startsWith("Bid due "), "addressee db: an explicit bidder → company, contact, owner and bid line");
     const ad2 = await documentAddressee(qa, g2);
     ok(!!ad2 && ad2.companyName === "Bid GC Two" && ad2.contactName === "", "addressee db: a bidder with no contact and none at the company → no contact");
+    await saveContact({ id: F_FIX.ct2, firstName: "Aaron", lastName: "Alpha", homeCompanyId: gc2 });
+    ok((await documentAddressee(qa, g2))?.contactName === "", "addressee db: a bidder company's non-primary contact is never the Attn fallback (not the alphabetically first)");
+    await saveContact({ id: F_FIX.ct3, firstName: "Zed", lastName: "Primary", homeCompanyId: gc2, isPrimary: true });
+    ok((await documentAddressee(qa, g2))?.contactName === "Zed Primary", "addressee db: with no party contact the bidder company's primary contact is the Attn");
     const adOther = await documentAddressee(qa, wpId);
     const ownerRow = (await listFor("quote", q)).find((p) => p.role === "owner");
     ok(!!ownerRow && (await documentAddressee(qa, "pty_nope")) === null && (await documentAddressee(qa, ownerRow.id)) === null && adOther === null, "addressee db: a non-bidder, the owner row, another quote's party or an unknown id → null");
@@ -335,6 +365,10 @@ export async function bidDbChecks(ok: Ok) {
 
     const noAward = await undoAward(q);
     ok(!noAward.ok && noAward.error === "Nothing is awarded.", "bids db: undo with nothing awarded refused");
+
+    // a revision cut before any award (2b-i final review)
+    const revPre = await addQuoteRevision(q, { by: "Test", reason: "sent", note: "pre-award" });
+    ok(!!revPre && revPre.docFields?.awardedPartyId === null, "revisions db: a revision cut before the award freezes no addressee");
 
     // award
     const before = await getQuote(q);
@@ -354,6 +388,39 @@ export async function bidDbChecks(ok: Ok) {
     await setBidDetails(q, { dueAt: T });
     const again = await awardBid(q, g1);
     ok(!again.ok && /already awarded/.test(again.error), "bids db: a second award is refused");
+
+    // 2b-i final review: the awarded bidder's contact change re-renders; another bidder's doesn't
+    const c0 = await getQuote(q);
+    await new Promise((r) => setTimeout(r, 5));
+    const s2 = await setPartyContact(g2, F_FIX.ct3);
+    ok(s2.ok && !(await touchAwardedAddressee(s2.party, null)) && (await getQuote(q))?.contentChangedAt === c0?.contentChangedAt, "contact db: a non-awarded bidder's contact change leaves contentChangedAt alone");
+    const s1 = await setPartyContact(g1, null);
+    const touched = s1.ok && (await touchAwardedAddressee(s1.party, ct1));
+    const c1 = await getQuote(q);
+    ok(touched && (c1?.contentChangedAt ?? 0) > (c0?.contentChangedAt ?? 0) && c1?.updatedAt === c0?.updatedAt, "contact db: the awarded bidder's contact change advances contentChangedAt (Send waits) without bumping updatedAt");
+    const s1b = await setPartyContact(g1, ct1);
+    ok(s1b.ok && !(await touchAwardedAddressee(s1b.party, ct1)), "contact db: an unchanged contact touches nothing");
+
+    // Send defaults follow the awarded bidder
+    ok((await awardedRecipient({ id: q, bid: null })) === null && (await awardedRecipient({ id: q, bid: { dueAt: null, addenda: [], awardedPartyId: g2 + "x" } })) === null, "send db: nothing (or a dead id) awarded → no recipient");
+    const rcp0 = await awardedRecipient((await getQuote(q))!);
+    ok(rcp0?.partyId === g1 && rcp0.contactId === ct1 && rcp0.name === "Gee Ceeone" && rcp0.firstName === "Gee" && rcp0.email === "", "send db: the awarded bidder's contact, no email on file");
+    await setEmails(ct1, [{ value: "gee@gc-one.test", label: "work", isPrimary: true }]);
+    const rcp1 = await awardedRecipient((await getQuote(q))!);
+    const sd = sendDefaultsContact(rcp1, { name: "Bid Owner Contact", email: "own@owner.test" });
+    ok(rcp1?.email === "gee@gc-one.test" && sd.contactEmail === "gee@gc-one.test" && sd.contactName === "Gee", "send db: To = the awarded contact's email, greeting = their first name");
+
+    // cover + package page show the owner when addressed (never otherwise)
+    const qAw = (await getQuote(q))!;
+    const dAw = quoteDocumentDataFor(qAw as never, null, settings, await documentAddressee(qAw)), dOwn = quoteDocumentDataFor(qAw as never, null, settings, null);
+    const cov = (d: typeof dAw) => coverDocumentPropsFor({ doc: d, coverSummary: "", notIncluded: "", signer: null, footerLine: "", shareUrl: null, letterhead: { src: "/l.png", full: true } });
+    ok(cov(dAw).project.owner === "Bid Owner" && cov(dAw).project.customer === "Bid GC One" && !("owner" in cov(dOwn).project), "cover: an addressed estimate shows the Owner row; an owner-addressed one is unchanged");
+    const pkg = (d: typeof dAw) => packageViewModel({ doc: d, photos: {}, catalog: new Map(), frozen: { coverSummary: "", notIncluded: "" }, state: { kind: "ok", rev: { rev: 1 } as never, closed: false, won: false }, headerLine: "", currentHref: null, view: "narrative", base: "/x", letterheadSrc: "/l.png" });
+    ok(pkg(dAw).owner === "Bid Owner" && !("owner" in pkg(dOwn)), "package page: an addressed estimate carries the owner; an owner-addressed one is unchanged");
+
+    // a revision cut while awarded
+    const revAw = await addQuoteRevision(q, { by: "Test", reason: "sent", note: "awarded" });
+    ok(!!revAw && revAw.docFields?.awardedPartyId === g1 && revAw.docFields.bid?.dueAt === T, "revisions db: a revision cut while awarded freezes the awarded bidder and the bid");
     const wd = await updateBidder(g1, { result: "withdrew" });
     ok(!wd.ok && wd.error === "Undo the award first.", "bids db: an awarded bidder can't be edited to withdrew");
     const wdLost = await updateBidder(g2, { result: "withdrew" });
@@ -366,6 +433,25 @@ export async function bidDbChecks(ok: Ok) {
     const un = await undoAward(q);
     const afterUndo = await listBidders(q);
     ok(un.ok && afterUndo.every((b) => b.bid.result === "pending" && !("lostByAward" in b.bid)) && (await getQuote(q))?.bid?.awardedPartyId === null, "bids db: undo returns every bidder to pending");
+
+    // after undo: each revision still prints who it was sent to; the live document is the owner's
+    await setBidDetails(q, { dueAt: T + 86_400_000 });
+    const qU = (await getQuote(q))!;
+    const revOf = (n: number | undefined) => (qU.revisions || []).find((r) => r.rev === n) ?? null;
+    const rPre = revOf(revPre?.rev), rAw = revOf(revAw?.rev);
+    if (!rPre || !rAw) throw new Error("revisions missing");
+    const docAw = await loadQuoteDocumentProps(qU, { revision: rAw, photos: "inline" });
+    const docPre = await loadQuoteDocumentProps(qU, { revision: rPre, photos: "inline" });
+    const docLive = await loadQuoteDocumentProps(qU, { photos: "inline" });
+    ok(docAw?.custName === "Bid GC One" && docAw.ownerLine === "Owner: Bid Owner" && docAw.bidLine === bidDocLine({ dueAt: T, addenda: rAw.docFields?.bid?.addenda ?? [], awardedPartyId: null }), "revisions db: after undo, a revision cut while awarded still shows the GC and the bid line as sent");
+    ok(docPre?.custName === "Bid Owner" && docPre.ownerLine === "" && docPre.bidLine === "", "revisions db: a revision cut before the award shows the owner");
+    ok(docLive?.custName === "Bid Owner" && docLive.ownerLine === "", "revisions db: the live document follows the live (undone) award");
+    const legacyDf = { ...rAw.docFields } as Record<string, unknown>;
+    delete legacyDf.awardedPartyId;
+    delete legacyDf.bid;
+    const docLegacy = await loadQuoteDocumentProps(qU, { revision: { ...rAw, docFields: legacyDf } as never, photos: "inline" });
+    ok(docLegacy?.custName === "Bid Owner" && docLegacy.ownerLine === "", "revisions db: an older revision without a frozen award loads owner-addressed");
+    await setBidDetails(q, { dueAt: T });
 
     // won → project Bill to, undo refused
     ok((await awardBid(q, g1)).ok, "bids db: award again");

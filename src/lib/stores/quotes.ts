@@ -535,6 +535,13 @@ export type QuoteRevisionDocFields = {
   /** #333 — the package selection as sent. Present only when the live quote
    *  had one; absent = defaults (everything on, nothing left out). */
   packageSelection?: PackageSelection;
+  /** #348 2b-i — the awarded bidder's party id when the revision was cut (null = owner-addressed). The online
+   *  page addresses a sent revision to THIS bidder, never the live award, so it matches the frozen PDF. Absent
+   *  on older revisions = owner-addressed. Never part of the header spread. */
+  awardedPartyId?: string | null;
+  /** #348 2b-i — the bid (due date, addenda) as sent; present only when the quote had one. Spread over the
+   *  live bid by quoteAsOfRevision so the bid line prints as sent. Absent = the live bid (older revisions). */
+  bid?: QuoteBid;
   /** #293 slice 3 — the Rev N and the date the revision's PDF printed
    *  (QuotePdfState.printed), stamped once with the PDF copy
    *  (setRevisionPdfPath). Absent until then, when the render couldn't be
@@ -1005,6 +1012,9 @@ export function revisionDocFields(doc: Quote): QuoteRevisionDocFields {
     packageFiles: cleanPackageFiles(d.packageFiles),
     // #333: only when the live quote has one — an untouched quote's revision is byte-identical.
     ...(d.packageSelection ? { packageSelection: normalizePackageSelection(d.packageSelection) } : {}),
+    // #348 2b-i: who the document was addressed to, and the bid line as sent.
+    awardedPartyId: d.bid?.awardedPartyId ?? null,
+    ...(d.bid ? { bid: { ...d.bid, addenda: [...(d.bid.addenda || [])] } } : {}),
   };
 }
 
@@ -1127,6 +1137,20 @@ async function patchQuote(id: string, mutate: (doc: Quote) => Quote | void): Pro
   return withTransaction(async () => {
     await lockQuoteRow(id);
     return patchDoc<Quote>("quotes", id, (doc) => stampContentChange(doc, mutate));
+  });
+}
+
+/**
+ * #348 2b-i — stamp `contentChangedAt` (now) without any other change and without bumping `updatedAt`: for a
+ * change OUTSIDE the quote doc that the customer document prints — the awarded bidder's contact (Attn). The PDF
+ * saved before it is then stale, so Send waits for the re-render the caller schedules (scheduleQuotePdf).
+ */
+export async function touchQuoteContent(id: string): Promise<Quote | null> {
+  return withTransaction(async () => {
+    await lockQuoteRow(id);
+    return patchDoc<Quote>("quotes", id, (doc) => {
+      doc.contentChangedAt = Math.max(Date.now(), (doc.contentChangedAt ?? 0) + 1);
+    });
   });
 }
 

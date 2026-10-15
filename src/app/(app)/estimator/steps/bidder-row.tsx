@@ -6,6 +6,7 @@ import type { BidderVM, BidPanelVM } from "@/lib/parties/bid-vm";
 /** #348 slice 2a — one bidder's row in the Bidders card (presentation only; the card owns the calls). */
 export const BTN: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12, fontWeight: 600, color: "#16181d", background: "#f1f2f5", border: "none", borderRadius: 7, padding: "6px 12px", cursor: "pointer" };
 const FIELD: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12, padding: "4px 6px", border: "1px solid #dcdfe5", borderRadius: 6, background: "#fff" };
+const SR_ONLY: CSSProperties = { position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap", border: 0 };
 const CHIP: CSSProperties = { fontSize: 10.5, fontWeight: 600, borderRadius: 20, padding: "2px 8px", whiteSpace: "nowrap" };
 
 function resultChip(b: BidderVM): CSSProperties {
@@ -59,8 +60,14 @@ export function BidderRow({
     setPdfError("");
     try {
       const res = await fetch(b.pdfHref);
-      if (!res.ok) {
-        setPdfError((await res.text()).trim().slice(0, 300) || "The bidder PDF couldn’t be rendered — try again.");
+      // A signed-out session redirects to the sign-in page (200, HTML) — never save that as a PDF.
+      if (res.redirected) {
+        setPdfError("Your session expired — reload the page.");
+        return;
+      }
+      if (!res.ok || !res.headers.get("content-type")?.startsWith("application/pdf")) {
+        const text = res.ok ? "" : (await res.text()).trim().slice(0, 300);
+        setPdfError(text || "The bidder PDF couldn’t be rendered — try again.");
         return;
       }
       const blob = await res.blob();
@@ -91,13 +98,18 @@ export function BidderRow({
         {/* #348 2b-i — the estimate addressed to this bidder, rendered on demand; any bidder (pending, awarded, lost) can need a copy. */}
         <button
           type="button"
-          aria-label={`Download PDF — ${b.companyName}`}
+          aria-label={pdfBusy ? undefined : `Download PDF — ${b.companyName}`}
+          aria-busy={pdfBusy}
           disabled={pdfBusy}
           onClick={() => void downloadPdf()}
           style={{ fontFamily: "var(--font-ui)", fontSize: 11.5, fontWeight: 600, marginLeft: "auto", background: "none", border: "none", padding: 0, color: "var(--accent)", cursor: pdfBusy ? "default" : "pointer", opacity: pdfBusy ? 0.7 : 1 }}
         >
           {pdfBusy ? "Preparing PDF…" : "Download PDF"}
         </button>
+        {/* Announced to screen readers while the render runs (the button's own label goes quiet when busy). */}
+        <span aria-live="polite" style={SR_ONLY}>
+          {pdfBusy ? `Preparing the PDF for ${b.companyName}…` : ""}
+        </span>
       </div>
       {pdfError && (
         <div role="alert" style={{ fontSize: 11.5, color: "#b42318" }}>

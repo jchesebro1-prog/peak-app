@@ -52242,7 +52242,7 @@ import type { SpecSection as E301bbSec } from "@/app/(app)/estimator/types";
     "#301 model: the scope price only — never a line or unit price, cost, internal note or room (§10)");
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   ok(!/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/(pricing|quote-document-view)"|@\/lib\/specs\/record-keys"|@\/lib\/catalog-rename\/sku")/m.test(rd("src/lib/estimate-output/bom.ts")) &&
-     !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/pricing"|\.\/scopes"|\.\/bom"|@\/lib\/quote-share\/package-view"|@\/lib\/part-image-fallback"|@\/lib\/package-doc\/(print|resolve)")/m.test(rd("src/lib/estimate-output/package-model.ts")),
+     !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/pricing"|\.\/scopes"|\.\/bom"|@\/lib\/quote-share\/package-view"|@\/lib\/part-image-fallback"|@\/lib\/package-doc\/(print|resolve)"|@\/lib\/parties\/addressee")/m.test(rd("src/lib/estimate-output/package-model.ts")),
     "#301 purity: bom.ts and package-model.ts are pure and client-safe");
 }
 
@@ -54910,7 +54910,7 @@ import { qd293Props as p2adProps, qd293Sections as p2adSections, renderQuoteDocu
     "#P2a document: the helper lives in the client-safe quote-document-view.ts");
   ok(data.includes("const groups = sanitizeGroups(spec?.groups);") && data.includes("groups,\n") && data.includes("normalizeSystemOrder(spec && Array.isArray(spec.sections)") && data.includes("as { sections?: unknown; groups?: unknown; document?: unknown }"),
     "#P2a document: quoteDocumentDataFor reads groups from the same spec as sections");
-  ok(loader.includes("quoteDocumentDataFor(src, cust, settings, await documentAddressee(src))") && printPage.includes("quoteDocumentDataFor(q, cust, settings, addressee)"),
+  ok(loader.includes("quoteDocumentDataFor(src, cust, settings, addressee)") && printPage.includes("quoteDocumentDataFor(q, cust, settings, addressee)"),
     "#P2a document: the web loader (live or frozen revision) and the print route both build props through quoteDocumentDataFor");
   const online = rd("src/components/online-estimate/online-estimate.tsx");
   ok(online.includes('<QuoteDocument {...shown} layout="web" />') && online.includes("bomViewProps(docProps)"), "#P2a document: the online view renders the same QuoteDocument (groups ride in docProps; the BOM view spreads them)");

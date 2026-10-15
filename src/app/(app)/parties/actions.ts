@@ -8,6 +8,8 @@ import { contactsForCompany, displayName } from "@/lib/identity/contacts";
 import { PARTY_RECORD_TYPES, type Party, type PartyInput, type PartyRecordType } from "@/lib/parties/rules";
 import type { ContactOption, PartyVM } from "@/lib/parties/vm";
 import { partyVMs } from "@/lib/parties/view-server";
+import { touchAwardedAddressee } from "@/lib/parties/addressee-server";
+import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { withQuoteRowLock } from "@/lib/stores/quotes";
 import { addParty, listFor, removeParty, setPartyContact } from "@/lib/stores/parties";
 
@@ -57,8 +59,11 @@ export async function setPartyContactAction(id: string, contactId: string | null
   if (!can("create", user.roles)) return { ok: false, error: DENIED };
   if (typeof id !== "string" || !id) return { ok: false, error: "That link no longer exists." };
   if (contactId !== null && typeof contactId !== "string") return { ok: false, error: "That person isn't at this company." };
+  const prev = await getDoc<Party>("record_parties", id);
   const r = await setPartyContact(id, contactId);
   if (!r.ok) return r;
+  // #348 2b-i: the awarded bidder's contact is the document's Attn — stamp the content and re-render the PDF.
+  if (await touchAwardedAddressee(r.party, prev?.contactId)) await scheduleQuotePdf(r.party.recordId);
   touch(r.party.recordType);
   return { ok: true, parties: await fresh(r.party.recordType, r.party.recordId) };
 }

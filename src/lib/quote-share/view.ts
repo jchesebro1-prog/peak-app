@@ -92,6 +92,8 @@ function headerFields(df: QuoteRevision["docFields"]): Partial<Quote> {
   const out: Record<string, unknown> = { ...df };
   delete out.revNo;
   delete out.issuedAt;
+  // #348 2b-i: the frozen award is read by the document loader directly (the frozen `bid` does spread).
+  delete out.awardedPartyId;
   return out as Partial<Quote>;
 }
 

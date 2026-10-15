@@ -2,6 +2,7 @@ import type { QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import { fmt } from "@/app/(app)/estimator/pricing";
 import type { OnlineEstimateState, ShareLinkView } from "@/lib/quote-share/view";
 import { addOptions, alternatesListView, coverSummaryText, coverTotals, notIncludedLine, outputScopes, scopePriceLabel, type AlternatesListView } from "./scopes";
+import { ownerNameFromLine } from "@/lib/parties/addressee";
 
 /**
  * #301 slice A — the cover PDF's props (spec §4), built from the customer
@@ -25,7 +26,8 @@ export type CoverDocumentProps = {
   letterhead: { src: string; full: boolean };
   companyName: string;
   footerLine: string;
-  project: { customer: string; attn: string; venue: string; project: string; number: string; date: string };
+  /** `owner` (#348 2b-i) — present only when the estimate is addressed to a bidder: the owner company's name. */
+  project: { customer: string; attn: string; owner?: string; venue: string; project: string; number: string; date: string };
   scopes: Array<{ id: string; text: string; missing: boolean; priceLabel: string }>;
   summary: string;
   totals: { creditLabel: string | null; creditAmount: string | null; totalLabel: string; total: string; rewardsLine: string; standingLines: string[] };
@@ -94,6 +96,7 @@ export function coverDocumentPropsFor(input: CoverInput): CoverDocumentProps {
   const scopes = outputScopes(d);
   const t = coverTotals(d);
   const alternates = alternatesListView(d);
+  const owner = ownerNameFromLine(d.ownerLine);
   return {
     title: (d.projectName || "").trim() || COVER_DEFAULT_TITLE,
     letterhead: input.letterhead,
@@ -102,6 +105,7 @@ export function coverDocumentPropsFor(input: CoverInput): CoverDocumentProps {
     project: {
       customer: d.custName,
       attn: d.hasAttn ? d.attnLine : "",
+      ...(owner ? { owner } : {}),
       venue: d.venueLabel,
       project: d.projectName,
       number: `${d.quoteId} Rev ${d.revNum}`,

@@ -48,10 +48,9 @@ export default async function PrintQuotePage({
   if (!tokenOk(t, "quote", bidder ? `${id}~${bidder}` : id)) notFound();
   const q = await getQuote(id);
   if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") notFound();
-  // Strict: an explicit bidder that is no longer a live bidder on this quote (deleted since signing) is a 404, never the awarded default.
-  const addressee = bidder ? await documentAddressee(q, bidder, { strict: true }) : await documentAddressee(q);
-  if (bidder && !addressee) notFound();
-  const [cust, settings, perks, cutSheets] = await Promise.all([
+  const [addressee, cust, settings, perks, cutSheets] = await Promise.all([
+    // Strict: an explicit bidder that is no longer a live bidder on this quote (deleted since signing) is a 404, never the awarded default.
+    bidder ? documentAddressee(q, bidder, { strict: true }) : documentAddressee(q),
     getCustomer(q.customerId),
     getSettings(),
     // #282 perks+points — the customer's purchase perks line (program on only).
@@ -59,6 +58,7 @@ export default async function PrintQuotePage({
     // #292 — Client-style cut sheets after the estimate, only when the quote asks for them. A failure or a slow load (8 s) drops them, never the PDF — and says so in the server log.
     normalizePdfOptions(q.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
   ]);
+  if (bidder && !addressee) notFound();
   const doc = quoteDocumentDataFor(q, cust, settings, addressee);
   // #293: key-product photos inlined as data URIs (this route has no session).
   // Never throws — a photo that can't be read just isn't printed.

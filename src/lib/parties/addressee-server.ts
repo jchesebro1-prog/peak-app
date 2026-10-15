@@ -1,7 +1,8 @@
 import { getDoc } from "@/db/doc-store";
 import { getCompany } from "@/lib/identity/companies";
-import { contactsForCompany, displayName, getContact } from "@/lib/identity/contacts";
-import type { Quote } from "@/lib/stores/quotes";
+import { contactsForCompany, displayName, emailsFor, getContact } from "@/lib/identity/contacts";
+import type { ContactRow } from "@/db/schema";
+import { get as getQuote, touchQuoteContent, type Quote } from "@/lib/stores/quotes";
 import { bidDocLine, type DocAddressee } from "./addressee";
 import type { Party } from "./rules";
 
@@ -19,6 +20,40 @@ export async function bidderPartyFor(quoteId: string, id: string | null | undefi
   return p && p.recordType === "quote" && p.recordId === quoteId && !!p.bid && (p.role === "gc" || p.role === "ec") ? p : null;
 }
 
+/** The person a bidder document is addressed to: the party's own contact, else the bidder company's PRIMARY
+ *  contact (never just the alphabetically first), else none. */
+export async function addresseeContact(party: Pick<Party, "contactId" | "companyId">): Promise<ContactRow | null> {
+  return (await getContact(party.contactId)) ?? (await contactsForCompany(party.companyId)).find((c) => c.isPrimary) ?? null;
+}
+
+/**
+ * #348 2b-i — Send & track's default recipient once a bidder is awarded: the awarded bidder's addressee contact
+ * (addresseeContact) and that contact's primary email. null when nothing is awarded (or the awarded row / company
+ * is gone) — the caller keeps the owner's defaults. `email` is "" when the contact has none (the caller then
+ * falls back too); `firstName` is for the greeting.
+ */
+export async function awardedRecipient(
+  q: Pick<Quote, "id" | "bid">
+): Promise<{ partyId: string; contactId: string | null; name: string; firstName: string; email: string } | null> {
+  const party = await bidderPartyFor(q.id, q.bid?.awardedPartyId ?? null);
+  if (!party || !(await getCompany(party.companyId))) return null;
+  const contact = await addresseeContact(party);
+  const email = contact ? ((await emailsFor(contact.id))[0]?.email ?? "").trim() : "";
+  return { partyId: party.id, contactId: contact?.id ?? null, name: contact ? displayName(contact) : "", firstName: (contact?.firstName || "").trim(), email };
+}
+
+/**
+ * #348 2b-i — after a party's contact changed: when it is the AWARDED bidder on a quote, its Attn line is on the
+ * customer document, so stamp the quote's content (touchQuoteContent — Send then waits for the re-render) and
+ * return true; the caller schedules the PDF. Anything else (another bidder, a lead / project row, no change) → false.
+ */
+export async function touchAwardedAddressee(party: Pick<Party, "id" | "recordType" | "recordId" | "contactId">, prevContactId: string | null | undefined): Promise<boolean> {
+  if (party.recordType !== "quote" || (prevContactId ?? null) === (party.contactId ?? null)) return false;
+  const q = await getQuote(party.recordId);
+  if (!q || q.bid?.awardedPartyId !== party.id) return false;
+  return !!(await touchQuoteContent(q.id));
+}
+
 export async function documentAddressee(
   q: Pick<Quote, "id" | "customer" | "customerId" | "bid">,
   partyId?: string | null,
@@ -29,7 +64,7 @@ export async function documentAddressee(
   if (!party) return null;
   const company = await getCompany(party.companyId);
   if (!company) return null;
-  const contact = (await getContact(party.contactId)) ?? (await contactsForCompany(party.companyId))[0] ?? null;
+  const contact = await addresseeContact(party);
   // Live company name first, the denormalized q.customer as fallback — quoteDocumentDataFor's `cust?.name || q.customer` order.
   const ownerName = ((await getCompany(q.customerId))?.name || q.customer || "").trim();
   return {

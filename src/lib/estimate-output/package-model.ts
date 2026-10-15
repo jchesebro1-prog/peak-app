@@ -7,6 +7,7 @@ import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 import { addOptions, alternatesListView, coverSummaryText, coverTotals, notIncludedItems, outputScopes } from "./scopes";
 import type { AlternatesListView } from "./scopes";
 import { packageBomRows, type BomCatalogPart, type PackageBomRow } from "./bom";
+import { ownerNameFromLine } from "@/lib/parties/addressee";
 import { PACKAGE_COPY, packageBanner, type PackageBanner, type VisiblePackageState } from "@/lib/quote-share/package-view";
 import { documentApplies } from "@/lib/package-doc/print";
 import { resolvePackageDoc, type ResolvedPackageDoc } from "@/lib/package-doc/resolve";
@@ -59,6 +60,8 @@ export type PackageViewProps = {
   companyName: string;
   title: string;
   customer: string;
+  /** #348 2b-i — the owner company, present only when the estimate is addressed to a bidder. */
+  owner?: string;
   venue: string;
   headerLine: string;
   totalLabel: string;
@@ -101,12 +104,14 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
   const byId = new Map((d.sections || []).map((s) => [s.id, s] as const));
   const t = coverTotals(d);
   const alternates = alternatesListView(d);
+  const owner = ownerNameFromLine(d.ownerLine);
   return {
     // #331: the package page always prints the full baked Peak letterhead, never the Branding logo.
     logo: { src: i.letterheadSrc, full: true },
     companyName: d.companyName,
     title: (d.projectName || "").trim() || PACKAGE_COPY.titleFallback,
     customer: d.custName,
+    ...(owner ? { owner } : {}),
     venue: d.venueLabel,
     headerLine: i.headerLine,
     totalLabel: t.totalLabel,

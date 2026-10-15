@@ -58,16 +58,28 @@ export async function keyProductPhotoLinks(sections: SpecSection[], href: (docId
   }
 }
 
+/**
+ * #348 2b-i — who the document is addressed to. A sent revision is addressed to the bidder awarded when it was
+ * cut (`docFields.awardedPartyId`, strict — never today's award, so the online page matches the frozen PDF); a
+ * revision without it (cut before 2b-i, or before any award) is owner-addressed. The live quote uses the live award.
+ */
+async function revisionAddressee(src: Quote, revision: QuoteRevision | null | undefined) {
+  if (!revision) return documentAddressee(src);
+  const frozen = revision.docFields?.awardedPartyId ?? null;
+  return frozen ? documentAddressee(src, frozen, { strict: true }) : null;
+}
+
 export async function loadQuoteDocumentProps(q: Quote, opts: LoadQuoteDocumentOpts): Promise<QuoteDocumentProps | null> {
   if (opts.photos !== "inline" && !webRevisionOk(q, opts.revision)) return null;
   const src = opts.revision ? quoteAsOfRevision(q, opts.revision) : q;
-  const [cust, settings, perks] = await Promise.all([
+  const [cust, settings, perks, addressee] = await Promise.all([
     getCustomer(src.customerId),
     getSettings(),
     // #282 perks+points — the customer's purchase perks line (program on only).
     purchasePerksForCompany(src.customerId),
+    revisionAddressee(src, opts.revision),
   ]);
-  const doc = quoteDocumentDataFor(src, cust, settings, await documentAddressee(src));
+  const doc = quoteDocumentDataFor(src, cust, settings, addressee);
   const keyProductPhotos =
     opts.photos === "inline" ? await keyProductPhotoDataUris(doc.sections, doc.document) : await keyProductPhotoLinks(doc.sections, opts.photos.href, doc.document);
   return { ...doc, keyProductPhotos, rewardsLine: purchasePerksDocLine(perks) };

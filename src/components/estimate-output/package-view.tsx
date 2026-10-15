@@ -183,7 +183,7 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
         <div className="pkg-head-row">
           <div style={{ minWidth: 0 }}>
             <h1 className="pkg-title">{m.title}</h1>
-            <div className="pkg-meta">{[m.customer, m.venue].filter(Boolean).join(" · ")}</div>
+            <div className="pkg-meta">{[m.customer, m.owner ? `Owner: ${m.owner}` : "", m.venue].filter(Boolean).join(" · ")}</div>
             <div className="pkg-stamp">{m.headerLine}</div>
           </div>
           <div className="pkg-grand">

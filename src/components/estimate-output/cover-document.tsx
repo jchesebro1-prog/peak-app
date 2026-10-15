@@ -35,6 +35,7 @@ export default function CoverDocument(p: CoverDocumentProps) {
   const left: Array<[string, string]> = [
     ["Customer", p.project.customer],
     ["Attn", p.project.attn],
+    ["Owner", p.project.owner || ""],
     ["Venue", p.project.venue],
   ].filter(([, v]) => !!(v || "").trim()) as Array<[string, string]>;
   const right: Array<[string, string]> = [

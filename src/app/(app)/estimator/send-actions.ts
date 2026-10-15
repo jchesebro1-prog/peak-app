@@ -23,6 +23,8 @@ import { shareSecret } from "@/lib/quote-share/links";
 import { ONLINE_COPY } from "@/lib/quote-share/view";
 import { requireUser, type SessionUser } from "@/lib/session";
 import { contactByName } from "@/lib/stores/customers";
+import { awardedRecipient } from "@/lib/parties/addressee-server";
+import { sendDefaultsContact } from "@/lib/parties/addressee";
 import { signatureFor } from "@/lib/stores/signatures";
 import { get as getQuote, type QuoteStatus } from "@/lib/stores/quotes";
 import { can } from "@/lib/team";
@@ -118,8 +120,10 @@ export async function estimateEmailDefaultsAction(quoteId: string): Promise<Esti
   const q = await getQuote(String(quoteId || ""));
   if (!q) return { ok: false, error: SEND_COPY.gone };
   if (pdfKindForQuoteType(q.quoteType) !== "quote") return { ok: false, error: SEND_COPY.notEstimate };
-  const [contact, roster, me, signature] = await Promise.all([
+  const [contact, recipient, roster, me, signature] = await Promise.all([
     q.customerId && q.contactName ? contactByName(q.customerId, q.contactName).catch(() => null) : Promise.resolve(null),
+    // #348 2b-i: once a bidder is awarded the estimate is addressed to it — To and the greeting follow.
+    awardedRecipient(q).catch(() => null),
     activeUsers(),
     getUser(user.id),
     // #127 — seeded into the body so it's visible and editable; the send
@@ -144,8 +148,7 @@ export async function estimateEmailDefaultsAction(quoteId: string): Promise<Esti
     ...estimateEmailDefaults({
       projectName: q.name || "",
       estimateNumber: displayQuoteNumber(q),
-      contactName: q.contactName || contact?.name || "",
-      contactEmail: contact?.email || "",
+      ...sendDefaultsContact(recipient, { name: q.contactName || contact?.name || "", email: contact?.email || "" }),
       senderName: user.name,
       senderEmail,
       leadName: lead?.name || "",

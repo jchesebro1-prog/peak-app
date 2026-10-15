@@ -40,3 +40,18 @@ export function addressedHeader(
     bidLine: a.bidLine,
   };
 }
+
+/** "Owner: Acme ISD" → "Acme ISD" (the cover's Owner row and the package page's meta read the document's ownerLine). */
+export function ownerNameFromLine(ownerLine: string | null | undefined): string {
+  const l = (ownerLine || "").trim();
+  return l.startsWith("Owner: ") ? l.slice("Owner: ".length).trim() : "";
+}
+
+/** Send & track's To + greeting name: the awarded bidder's contact when it has an email, else the owner's contact. */
+export function sendDefaultsContact(
+  recipient: { name: string; firstName: string; email: string } | null,
+  owner: { name: string; email: string }
+): { contactName: string; contactEmail: string } {
+  if (recipient && recipient.email.trim()) return { contactName: recipient.firstName || recipient.name, contactEmail: recipient.email.trim() };
+  return { contactName: owner.name, contactEmail: owner.email };
+}
