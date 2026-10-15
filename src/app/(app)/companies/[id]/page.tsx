@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import { requireUser } from "@/lib/session";
-import { activeUsers } from "@/lib/users";
+import { activeUsers, allUsers } from "@/lib/users";
+import { canChangeVisit } from "@/lib/visit-edit-rights";
 import { can, deriveInitials, fallbackColor } from "@/lib/team";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { visitsForCustomer } from "@/lib/stores/site-visits";
@@ -268,6 +269,8 @@ export default async function CustomerDetailPage({
   // Spec 2026-10-09 site-visit scheduling — Edit + conflict badges. A stored
   // "scheduled" visit past its end already reads "done" (deriveVisitStage).
   const teamNames = users.map((u) => u.name);
+  // Jeff 2026-10-15 #35 — a scheduled visit's Edit / Delete are live only for its lead or an approver.
+  const visitRoster = (await allUsers()).map((u) => ({ id: u.id, name: u.name }));
   const conflictVisits = visits
     .filter((v) => v.stage === "scheduled" && v.startAt != null)
     .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0))
@@ -928,6 +931,7 @@ export default async function CustomerDetailPage({
                                   attendees: v.attendees,
                                 }}
                                 team={teamNames}
+                                canEdit={canChangeVisit(v, me, visitRoster)}
                               />
                             ) : null}
                             {can("create", me.roles) && (
@@ -938,7 +942,7 @@ export default async function CustomerDetailPage({
                                 Start assessment
                               </Link>
                             )}
-                            <DeleteVisitButton id={v.id} />
+                            <DeleteVisitButton id={v.id} canDelete={canChangeVisit(v, me, visitRoster)} />
                           </span>
                         </div>
                         <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>

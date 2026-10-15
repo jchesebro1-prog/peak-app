@@ -25,6 +25,7 @@ import { pickManualPhases } from "../src/lib/consulting-stages";
 import { generateSchedule, withEngagementPhaseIds } from "../src/lib/consulting-schedule";
 import { phaseWeightsFor } from "../src/lib/settings";
 import { createManualEngagement, DEFAULT_CONSULTING_PHASES } from "../src/lib/stores/engagements";
+import { canChangeVisit, isVisitLead, VISIT_EDIT_REFUSAL } from "../src/lib/visit-edit-rights";
 
 const ROOT = join(__dirname, "..");
 const src = (p: string) => readFileSync(join(ROOT, p), "utf8");
@@ -273,12 +274,54 @@ async function phaseDbChecks(ok: Ok) {
   }
 }
 
+/* ------------------------------------------------------------------ #35 visit edit rights ------------------------------------------------------------------ */
+
+function visitRightsChecks(ok: Ok) {
+  const roster = [
+    { id: "u1", name: "Jeff Chesebro" },
+    { id: "u2", name: "Sam Okafor" },
+    { id: "u3", name: "Pat Lee" },
+    { id: "u4", name: "pat lee " }, // an (archived) namesake makes "Pat Lee" ambiguous
+  ];
+  const tech = { id: "u2", name: "Sam Okafor", roles: ["Estimator"] };
+  const other = { id: "u1", name: "Jeff Chesebro", roles: ["Estimator"] };
+  const approver = { id: "u9", name: "Rae Approver", roles: ["Reviewer"] };
+  const sched = { stage: "scheduled", assignedTo: "sam okafor" };
+  ok(isVisitLead(sched, tech, roster) && canChangeVisit(sched, tech, roster), "b3 #35: the lead (by unique name, case-insensitive) can change a scheduled visit");
+  ok(!canChangeVisit(sched, other, roster), "b3 #35: a teammate who is neither lead nor approver cannot");
+  ok(canChangeVisit(sched, approver, roster) && canChangeVisit(sched, { ...other, roles: ["Manager"] }, roster) && canChangeVisit(sched, { ...other, roles: ["Admin"] }, roster),
+    "b3 #35: anyone holding approve (Reviewer / Manager / Admin) can");
+  const amb = { stage: "scheduled", assignedTo: "Pat Lee" };
+  ok(!isVisitLead(amb, { id: "u3", name: "Pat Lee" }, roster) && !canChangeVisit(amb, { id: "u3", name: "Pat Lee", roles: ["Estimator"] }, roster) && canChangeVisit(amb, approver, roster),
+    "b3 #35: an ambiguous lead name (#349: a namesake on the roster, any status) is nobody's — approvers only");
+  ok(!canChangeVisit({ stage: "scheduled", assignedTo: "" }, tech, roster), "b3 #35: a scheduled visit with no lead is approvers-only");
+  ok(canChangeVisit({ stage: "claimed", assignedTo: "Jeff Chesebro" }, tech, roster) && canChangeVisit({ stage: "open" }, tech, roster),
+    "b3 #35: request-pool visits keep their own claim model (not restricted here)");
+  const ba = src("src/app/(app)/visit-booking-actions.ts");
+  const gate = "if (!canChangeVisit(v, me, await allUsers())) return { ok: false, error: VISIT_EDIT_REFUSAL };";
+  const before = (text: string, a: string, b: string) => text.indexOf(a) >= 0 && text.indexOf(b) > text.indexOf(a);
+  ok(before(ba, 'if (v.stage !== "scheduled")', gate) && before(ba, gate, "await updateVisitBooking("),
+    "b3 #35 pin: updateVisitAction refuses before it writes (edit / re-lead)");
+  const va = src("src/app/(app)/venue-assessments/visit-actions.ts");
+  const rm = va.slice(va.indexOf("export async function removeVisitAction"), va.indexOf("export async function scheduleVisitAction"));
+  const sc = va.slice(va.indexOf("export async function scheduleVisitAction"));
+  ok(before(rm, gate, "await cancelVisitInvites(v") && before(rm, gate, "await removeVisit(id)"), "b3 #35 pin: removeVisitAction refuses before cancelling invites or deleting");
+  ok(before(sc, gate, "await scheduleVisit(id"), "b3 #35 pin: scheduleVisitAction refuses to re-time a scheduled visit before it writes");
+  const cp = src("src/app/(app)/companies/[id]/page.tsx");
+  ok(cp.includes("canEdit={canChangeVisit(v, me, visitRoster)}") && cp.includes("<DeleteVisitButton id={v.id} canDelete={canChangeVisit(v, me, visitRoster)} />"),
+    "b3 #35 pin: the company record shows read-only Edit / Delete to everyone else");
+  ok(/if \(!canEdit\)[\s\S]{0,200}disabled/.test(src("src/components/visit-booking/visit-edit-button.tsx")) && VISIT_EDIT_REFUSAL.includes("lead or an approver"),
+    "b3 #35 pin: the read-only Edit is a disabled control");
+  ok(!/from "@\/lib\/stores|from "@\/db/.test(src("src/lib/visit-edit-rights.ts")), "b3 #35 pin: the rule module is store-free");
+}
+
 /* ------------------------------------------------------------------ entry points ------------------------------------------------------------------ */
 
 export async function batch3PureChecks(ok: Ok) {
   listPagingChecks(ok);
   pipelineChecks(ok);
   phasePickerChecks(ok);
+  visitRightsChecks(ok);
 }
 
 export async function batch3DbChecks(ok: Ok) {
