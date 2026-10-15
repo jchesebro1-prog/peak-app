@@ -19,7 +19,8 @@ import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { rateLimit, rateLimitRefund } from "@/lib/rate-limit";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getDocument } from "@/lib/stores/documents";
-import { acceptanceLine, chicagoDayEnd, cleanPoNumber, RESPONSE_NAME_MAX, RESPONSE_TITLE_MAX, responseAssignees, type RosterUser } from "@/lib/estimate-output/responses";
+import { acceptanceLine, chicagoDayEnd, cleanPoNumber, leadEstimator, RESPONSE_NAME_MAX, RESPONSE_TITLE_MAX, type RosterUser } from "@/lib/estimate-output/responses";
+import { can } from "@/lib/team";
 import { cleanText } from "@/lib/document-files";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { createTask } from "@/lib/stores/tasks";
@@ -309,11 +310,19 @@ export async function acceptPortal(
  * "Accepted by <name>, <title> — PO <po>". The app has no system / sender
  * mailbox to email from (every outbound email is a person's own Gmail), so
  * the notice is a to-do for the Lead estimator — their bell and Home queue —
- * falling back to every active approver when the lead isn't on the roster
- * (the client-link rule, responseAssignees). Emailing it needs a sender
+ * falling back to the active ADMINS (manage_users) when the lead isn't an
+ * active roster member (#352 review M6 — not every approver). Emailing it needs a sender
  * mailbox first (PUNCHLIST). Each assignee on its own: one failing never
  * stops the rest.
  */
+/** #352 review M6 — who hears about a portal acceptance: the active Lead estimator, else the active admins. Pure. */
+export function portalAcceptanceAssignees<T extends RosterUser>(owner: string | null | undefined, preparedBy: string | null | undefined, users: readonly T[]): T[] {
+  const active = (u: RosterUser) => (u.status ?? "active") === "active";
+  const lead = leadEstimator(owner, preparedBy, users);
+  if (lead && active(lead)) return [lead];
+  return users.filter((u) => active(u) && can("manage_users", u.roles || []));
+}
+
 export async function notifyPortalAcceptance(
   q: Quote,
   a: { signerName: string; signerTitle: string; poNumber: string },
@@ -324,7 +333,7 @@ export async function notifyPortalAcceptance(
   const make = deps.createTask ?? createTask;
   const line = acceptanceLine({ name: a.signerName, title: a.signerTitle, po: a.poNumber });
   const number = displayQuoteNumber(q);
-  for (const u of responseAssignees(q.owner, q.preparedBy, users)) {
+  for (const u of portalAcceptanceAssignees(q.owner, q.preparedBy, users)) {
     try {
       await make(
         {

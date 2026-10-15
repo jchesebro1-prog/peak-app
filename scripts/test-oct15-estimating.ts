@@ -525,7 +525,7 @@ export async function oct15DbChecks(ok: Ok) {
     {
       // #15: the Lead estimator's to-do for a portal acceptance (no system mailbox to email from).
       const made: Array<{ title: string; assigneeName?: string; notes?: string; quoteId?: string }> = [];
-      const users = [{ id: "u-lead", name: "Lead O15", status: "active", roles: ["Estimator"] }, { id: "u-appr", name: "Appr O15", status: "active", roles: ["Admin"] }];
+      const users = [{ id: "u-lead", name: "Lead O15", status: "active", roles: ["Estimator"] }, { id: "u-appr", name: "Appr O15", status: "active", roles: ["Admin"] }, { id: "u-mgr", name: "Mgr O15", status: "active", roles: ["Manager"] }];
       const q = { id: "Q-O15", estNo: 1015, name: "Stage", owner: "Lead O15", preparedBy: "", customerId: "C-1", quoteType: "system" } as never;
       await notifyPortalAcceptance(q, { signerName: "Pat Doe", signerTitle: "Director", poNumber: "4481" }, Date.UTC(2026, 9, 15, 15), {
         users: async () => users, createTask: (async (input: { title: string; assigneeName?: string; notes?: string; quoteId?: string }) => { made.push(input); return input; }) as never,
@@ -536,7 +536,7 @@ export async function oct15DbChecks(ok: Ok) {
       await notifyPortalAcceptance({ ...(q as object), owner: "Nobody Here" } as never, { signerName: "Pat", signerTitle: "Dir", poNumber: "" }, Date.now(), {
         users: async () => users, createTask: (async (input: { title: string }) => { none.push(input); return input; }) as never,
       });
-      ok(none.length === 1 && none[0].assigneeName === "Appr O15" && none[0].title.endsWith("Accepted by Pat, Dir"), "oct15 #15 db: no Lead estimator on the roster → the approvers");
+      ok(none.length === 1 && none[0].assigneeName === "Appr O15" && none[0].title.endsWith("Accepted by Pat, Dir"), "oct15 #15 db / M6: no Lead estimator on the roster → the admins only (a Manager approver gets nothing)");
       ok(ACCEPT_SIGNER_NAME_COPY.length > 0 && ACCEPT_SIGNER_TITLE_COPY.length > 0 && ACCEPT_PO_NUMBER_COPY.length > 0, "oct15 #15: refusal copy exists");
     }
     {
