@@ -328,7 +328,7 @@ export async function triageFeedChecksA(ok: Ok): Promise<void> {
       thread("C-8", THU_9, { link: { type: "lead", id: "L-1" } }),
     ],
     deals,
-    { me: ME, now: MON_10 }
+    { viewer: { id: ME.id, name: ME.name, nameUnique: true }, now: MON_10 } // #349 — the viewer's identity
   );
   ok(em.map((c) => c.key).join(",") === "email:C-1,email:C-2,email:C-3,email:C-8", "email feed: only my waiting, inboxed, unarchived threads");
   ok(
@@ -568,7 +568,8 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
       quotes: new Map([["Q1", { id: "Q1", owner: "Someone Else", status: "draft", review: { state: "approved" } } as unknown as Quote]]),
     },
     ME,
-    MON_10
+    MON_10,
+    { id: ME.id, name: ME.name, nameUnique: true } // #349 — the viewer's identity
   );
   ok([...closed].sort().join(",") === "call:R1:k1,email:C1,email:C3,quote:Q1,task:T1", "liveness: a done task, replied or Gmail-disposed thread, decided to-do and approved quote are hidden; open ones and leads stay");
 

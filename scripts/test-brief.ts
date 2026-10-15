@@ -475,7 +475,7 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
 
     /* courtMeThreads */
     const all = (await Promise.all(Object.values(TH).map((id) => getThread(id)))).filter(Boolean) as Thread[];
-    const court = courtMeThreads(all, ME).map((t) => t.id);
+    const court = courtMeThreads(all, { ...ME, nameUnique: true }).map((t) => t.id); // #349 — a viewer (identity)
     ok(court.join(",") === [TH.mine, TH.stale, TH.fresh].join(","), `brief drafts: court-me threads are mine, waiting on us, assigned to me, in my own box, not archived / noise — oldest wait first (${court.join(",")})`);
 
     /* the queue: first run */
@@ -1007,7 +1007,7 @@ async function briefOrganizeEntryChecks(ok: Ok): Promise<void> {
   const { organizeCounts } = await import("@/lib/brief/build");
   const fil = (customerId: string) => ({ customerId, work: null, noise: false, source: "identity", reason: "x", strength: "strong", needsReply: false, state: "suggested", at: 1 });
   const th = (id: string, customerId: string) => ({ id, mailbox: "personal", mailboxUser: "Me", archived: false, deleted: false, status: "waiting_us", filing: fil(customerId) }) as unknown as import("@/lib/stores/comms").CommThread;
-  const counts = organizeCounts([th("a", "UNK"), th("b", "C1")], { name: "Me" }, (id) => id === "UNK");
+  const counts = organizeCounts([th("a", "UNK"), th("b", "C1")], { id: "u-me", name: "Me", nameUnique: true }, (id) => id === "UNK");
   ok(counts.toFile === 2 && counts.strong === 1, `brief #345: a suggestion under a placeholder company is still To file but never counted strong (${JSON.stringify(counts)})`);
   const build = readFileSync("src/lib/brief/build.ts", "utf8");
   ok(build.includes("const organize = organizeCounts(threads, me, (id) => placeholderIds.has(id));") && build.includes("isPlaceholderCompany(c.name)"), "brief #345: the build passes the placeholder companies to the Organize counts");
@@ -1128,13 +1128,13 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
   const sugg = [{ title: "Send drawings", notes: "", dueDate: "", assigneeUserId: "", linkKeys: [], tier: "normal", size: "s" }];
   const pd = { body: "Hi Pat — attached.", runId: "AR-r", taskSuggestions: sugg, taskRunId: "AR-t", basis: "m2", at: MON(6, 47), ownerId: "u-dana" };
   const th = (over: Record<string, unknown> = {}) => ({ status: "waiting_us", assignedTo: "Dana Diaz", noise: null, court: null, messages: msgs, preDraft: pd, ...over }) as unknown as ThreadArg;
-  const DANA = { id: "u-dana", name: "Dana Diaz" };
+  const DANA = { id: "u-dana", name: "Dana Diaz", nameUnique: true }; // #349 — a viewer (identity)
   const env = {};
   const r1 = readerPreDraft(th(), DANA, env);
   ok(!!r1 && r1.reply?.body === pd.body && r1.reply.runId === "AR-r" && r1.tasks?.runId === "AR-t" && r1.tasks.suggestions.length === 1 && r1.preparedLabel === "6:47 AM", "reader pre-draft: fresh, court me, mine → Use it (body + runId) and the stored suggestions");
   ok(readerPreDraft(th({ preDraft: { ...pd, basis: "m1" } }), DANA, env) === null, "reader pre-draft: stale (a newer inbound message) → nothing; the reader drafts live");
   ok(readerPreDraft(th({ assignedTo: "Sam Roe" }), DANA, env) === null, "reader pre-draft: someone else's thread → nothing");
-  ok(readerPreDraft(th({ assignedTo: "Sam Roe" }), { id: "u-sam", name: "Sam Roe" }, env) === null && readerPreDraft(th({ preDraft: { ...pd, ownerId: undefined } }), DANA, env) === null, "reader pre-draft: a thread reassigned since the draft was made shows its new owner nothing (ownerId must match)");
+  ok(readerPreDraft(th({ assignedTo: "Sam Roe" }), { id: "u-sam", name: "Sam Roe", nameUnique: true }, env) === null && readerPreDraft(th({ preDraft: { ...pd, ownerId: undefined } }), DANA, env) === null, "reader pre-draft: a thread reassigned since the draft was made shows its new owner nothing (ownerId must match)");
   ok(readerPreDraft(th({ status: "waiting_them" }), DANA, env) === null && readerPreDraft(th({ noise: { flagged: true } }), DANA, env) === null, "reader pre-draft: not on my court (waiting on them, or noise) → nothing");
   const noBody = readerPreDraft(th({ preDraft: { ...pd, body: "  " } }), DANA, env);
   ok(!!noBody && noBody.reply === null && !!noBody.tasks, "reader pre-draft: an empty body never shows Use it (stored suggestions still do)");

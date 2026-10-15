@@ -56701,7 +56701,7 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
       ok((await C.holdLastOutbound(T2, "failed")) === null && !(await C.get(T2))!.messages[0].noAutoRetry, "#P3 final review (I1, DB): a Gmail-delivered message is never stamped");
       const live = S.liveEstimateEmailDeps({ origin: "https://app.test", host: null, proto: null, actor: { id: "u-p3f-none", name: "Spec P3F Sender", roles: ["Admin"] } });
       const sent = await live.createAndSendThread({
-        mailboxUser: "Spec P3F Sender", customerId: null, customer: "Spec fixture", contactName: "Pat", to: "pat@school.org", cc: "", subject: "Estimate EST-1",
+        mailboxUser: "Spec P3F Sender", mailboxOwnerId: "u-p3f-none", customerId: null, customer: "Spec fixture", contactName: "Pat", to: "pat@school.org", cc: "", subject: "Estimate EST-1",
         body: "Hi", link: { type: "quote", id: QF, label: "EST-1" }, attachments: [],
       });
       registerFixture("comms", sent.threadId);
@@ -56848,7 +56848,7 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
        route.indexOf("await requireUser()") < route.indexOf("isCoverFileName(file)"),
       "#P3 final review (M1): ?file= serves a cover from THIS quote's folder only, behind the team session");
     const send = rd("src/lib/estimate-email/send-server.ts");
-    ok(send.includes("store.put(pdfStoragePath(quoteId, `cover-${now}`), bytes)") && send.includes('findDraftByLink("quote", quoteId, { mailboxUser })'),
+    ok(send.includes("store.put(pdfStoragePath(quoteId, `cover-${now}`), bytes)") && send.includes('findDraftByLink("quote", quoteId, { owner: await mailboxViewer(owner) })'),
       "#P3 final review (M1, I3b): the live deps store the cover under quote-pdfs/<id>/cover-<now>.pdf and look up the sender's own draft");
 
     // findDraftByLink narrowed to one mailbox (DB).
@@ -56857,11 +56857,13 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
     await createFixture("comms", { ...base, id: fixtureId(308, "p3f-d-ann"), mailboxUser: "Ann P3F", createdAt: 100, updatedAt: 100, draft: { attachments: [{ name: "EST.pdf", pdfPath: "quote-pdfs/x/rev-1.pdf" }] } } as never);
     await createFixture("comms", { ...base, id: fixtureId(308, "p3f-d-ann-deleted"), mailboxUser: "Ann P3F", deleted: true, createdAt: 300, updatedAt: 300, draft: {} } as never);
     await createFixture("comms", { ...base, id: fixtureId(308, "p3f-d-bob"), mailboxUser: "Bob P3F", createdAt: 200, updatedAt: 200, draft: {} } as never);
-    ok((await C.findDraftByLink("quote", QL, { mailboxUser: "ann p3f" }))?.id === fixtureId(308, "p3f-d-ann") && (await C.findDraftByLink("quote", QL, { mailboxUser: "Bob P3F" }))?.id === fixtureId(308, "p3f-d-bob") &&
-       (await C.findDraftByLink("quote", QL, { mailboxUser: "Cy P3F" })) === null && !!(await C.findDraftByLink("quote", QL)),
-      "#P3 final review (I3b, DB): findDraftByLink with a mailbox returns only that person's own live (not deleted) draft; the unscoped renewal lookup still works");
+    // #349 — the owner is a viewer (identity); these legacy drafts carry only a name, which counts while unique
+    const ownerV = (id: string, name: string) => ({ owner: { id, name, nameUnique: true } });
+    ok((await C.findDraftByLink("quote", QL, ownerV("u-ann", "Ann P3F")))?.id === fixtureId(308, "p3f-d-ann") && (await C.findDraftByLink("quote", QL, ownerV("u-bob", "Bob P3F")))?.id === fixtureId(308, "p3f-d-bob") &&
+       (await C.findDraftByLink("quote", QL, ownerV("u-cy", "Cy P3F"))) === null && (await C.findDraftByLink("quote", QL, { owner: { id: "u-ann", name: "Ann P3F", nameUnique: false } })) === null && !!(await C.findDraftByLink("quote", QL)),
+      "#P3 final review (I3b, DB): findDraftByLink with a mailbox returns only that person's own live (not deleted) draft (#349: by identity — a shared name finds nothing); the unscoped renewal lookup still works");
     const live = S.liveEstimateEmailDeps({ origin: "https://app.test", host: null, proto: null, actor: { id: "u-x", name: "Ann P3F", roles: ["Admin"] } });
-    const found = await live.findInboxDraft(QL, "Ann P3F");
+    const found = await live.findInboxDraft(QL, { id: "u-x", name: "Ann P3F" });
     ok(found?.threadId === fixtureId(308, "p3f-d-ann") && found.createdAt === 100 && found.attachments[0]?.pdfPath === "quote-pdfs/x/rev-1.pdf", "#P3 final review (I3b, DB): the live findInboxDraft returns the draft's id, creation time and attachments");
   }
 

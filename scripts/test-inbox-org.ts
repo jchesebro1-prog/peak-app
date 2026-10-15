@@ -765,14 +765,14 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     const tP = await read(pNoise);
     ok(tP.noise?.flagged === true && tP.noise.moved === true && tP.archived === true && tP.filing?.noise === true && tP.filing.source === "noise-rule", "org pipeline: a pilot owner's noise is moved — flagged, moved, archived");
     ok(tP.updatedAt === T0 + 5 && !rP.skipped && rP.archived === true, "org pipeline: the noise move is quiet (the list order keeps the message time)");
-    const noiseList = await threadsIn("personal", "noise", MIKE);
+    const noiseList = await threadsIn("personal", "noise", { id: MIKE_ID, name: MIKE, nameUnique: true });
     ok(noiseList.some((t) => t.id === pNoise) && !noiseList.some((t) => t.id === knownId), "org pipeline: threadsIn(…, 'noise') lists moved noise only");
-    ok(!(await threadsIn("personal", "inbox", MIKE)).some((t) => t.id === pNoise), "org pipeline: moved noise has left the inbox folder");
+    ok(!(await threadsIn("personal", "inbox", { id: MIKE_ID, name: MIKE, nameUnique: true })).some((t) => t.id === pNoise), "org pipeline: moved noise has left the inbox folder");
     const nNoise = await mk("noise-plain", promo());
     await organizeThread(nNoise, { ctx });
     const tN = await read(nNoise);
     ok(tN.noise?.flagged === true && tN.noise.moved === false && tN.archived === false, "org pipeline: a non-pilot owner's noise is only tagged (stays in the inbox)");
-    ok(!(await threadsIn("personal", "noise", MIKE)).some((t) => t.id === nNoise), "org pipeline: tagged-only noise isn't in the Noise tab");
+    ok(!(await threadsIn("personal", "noise", { id: MIKE_ID, name: MIKE, nameUnique: true })).some((t) => t.id === nNoise), "org pipeline: tagged-only noise isn't in the Noise tab");
     const rescued = await mk("noise-rescued", { ...promo(), noise: { flagged: false, reason: "", moved: false, rescued: true } });
     await organizeThread(rescued, { ctx: pilot });
     ok(!(await read(rescued)).noise?.flagged && (await read(rescued)).noise?.rescued === true && !(await read(rescued)).archived, "org pipeline: a rescued thread is never flagged again");
@@ -794,7 +794,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     await organizeThread(weakNoise, { ctx: pilot });
     const tWeak = await read(weakNoise);
     ok(tWeak.noise?.flagged === true && tWeak.noise.moved === false && tWeak.archived === false && tWeak.filing?.noise === true, "org pipeline: rule noise on a weak-domain thread is tag-only, even for a pilot owner");
-    ok(!(await threadsIn("personal", "noise", MIKE)).some((t) => t.id === weakNoise), "org pipeline: tag-only weak-domain noise stays out of the Noise tab");
+    ok(!(await threadsIn("personal", "noise", { id: MIKE_ID, name: MIKE, nameUnique: true })).some((t) => t.id === weakNoise), "org pipeline: tag-only weak-domain noise stays out of the Noise tab");
     ok(tWeak.filing?.customerId === CUST && tWeak.filing.pendingAi === true, "org pipeline: tag-only weak-domain noise keeps the guessed customer and is pendingAi for a pilot owner (the AI decides)");
     const weakNoisePlain = await mk("noise-weak-domain-plain", { resolution: "suggested", suggestedCustomerId: CUST, contactEmail: "rfp-notify@district.test", messages: [msg({ fromEmail: "rfp-notify@district.test", bulk: true })] });
     await organizeThread(weakNoisePlain, { ctx });
@@ -960,7 +960,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
         tri("C-h", { noise: { flagged: false, reason: "", moved: false, rescued: true } }),
       ],
       { quotes: new Map(), leads: new Map() },
-      { me: { id: MIKE_ID, name: MIKE } as never, now: T0 + 3 * 86_400_000 }
+      { viewer: { id: MIKE_ID, name: MIKE, nameUnique: true }, now: T0 + 3 * 86_400_000 }
     );
     ok(picked.map((c) => c.key).join(",") === "email:C-a,email:C-c,email:C-h", "org triage: waiting_us AND court 'me' (or no court); a customer / nobody court doesn't count; a rescued thread does");
     ok(!picked.some((c) => c.key === "email:C-e"), "org triage: court 'me' but status waiting_them (an in-app reply / Mark replied moved on) → not picked");
@@ -981,7 +981,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
         tri("S-nobasis", { court: { owner: "customer", reason: "", source: "rule", at: T0 + 60_000 }, messages: newMsgs }),
       ],
       { quotes: new Map(), leads: new Map() },
-      { me: { id: MIKE_ID, name: MIKE } as never, now: T0 + 3 * 86_400_000 }
+      { viewer: { id: MIKE_ID, name: MIKE, nameUnique: true }, now: T0 + 3 * 86_400_000 }
     );
     ok(fresh.map((c) => c.key).join(",") === "email:S-stale,email:S-nobasis", "org triage: a stale customer court plus new inbound mail → picked (status decides); a current customer court still hides it");
     ok(courtIsCurrent({ court: { basis: "m3", at: 0 }, messages: newMsgs }) && !courtIsCurrent({ court: { basis: "m2", at: 0 }, messages: newMsgs }) && !courtIsCurrent({ court: null, messages: newMsgs }) && courtIsCurrent({ court: { basis: "x", at: 0 }, messages: [] }), "org triage: courtIsCurrent follows the newest email message's id");
@@ -1166,7 +1166,7 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   await run(routedProvider({ file: fileAns("noise") }));
   const tN = await read(nz);
   ok(tN.filing?.noise === true && tN.filing.source === "ai" && tN.noise?.flagged === true && tN.noise.moved === true && tN.archived === true, "ai pass: strong AI noise moves a pilot owner's thread with no customer guess (flagged, moved, archived)");
-  ok((await threadsIn("personal", "noise", ARI)).some((t) => t.id === nz), "ai pass: …and it lists in the Noise tab");
+  ok((await threadsIn("personal", "noise", { id: ARI_ID, name: ARI, nameUnique: true })).some((t) => t.id === nz), "ai pass: …and it lists in the Noise tab");
   const nzGuess = await mk("noise-guessed", { resolution: "suggested", suggestedCustomerId: CUST, contactEmail: "news@ai-school.test", messages: [msg({ fromEmail: "news@ai-school.test", body: "Our October newsletter" })] });
   await organizeThread(nzGuess, { ctx: pilot, backlog: true });
   await run(routedProvider({ file: fileAns("noise") }));
@@ -2720,7 +2720,7 @@ export async function inboxOrgPlaceholderChecks(ok: Ok): Promise<void> {
     await applyResolution(probe, live);
     ok(probe.customerId === null && probe.resolvedContactId === CT && probe.resolution === "unknown", "matcher #345: applyResolution stamps the contact, no customerId (new mail / stampResolutionOnCreate)");
     const sweepT = await mk("sweep", { contactName: "Parked Person", contactEmail: "parked.t345@ph345-school.test", messages: [msg({ fromEmail: "parked.t345@ph345-school.test" })] });
-    await resweepThreads({ email: "parked.t345@ph345-school.test" }, { mailboxUser: MO });
+    await resweepThreads({ email: "parked.t345@ph345-school.test" }, { owner: { id: MO_ID, name: MO, nameUnique: true } });
     const swept = await read(sweepT);
     ok(swept.customerId === null && swept.resolvedContactId === CT && swept.resolution === "unknown", `matcher #345: resweepThreads links the contact, never UNKNOWN (${swept.customerId} · ${swept.resolvedContactId})`);
     ok((await resolveCustomerId(swept)) === null, "matcher #345: resolveCustomerId — the contact's UNKNOWN home company is no customer");

@@ -661,9 +661,10 @@ export function isNoiseRow(t: CommThread): boolean {
 }
 
 /** The person's To file list (spec §2), newest first. Task 6's selector. */
-export async function toFileThreads(me: MailboxViewer): Promise<CommThread[]> {
+export async function toFileThreads(me: MailboxViewer | Pick<OrgActor, "id" | "name">): Promise<CommThread[]> {
+  const viewer = "nameUnique" in me ? me : await mailboxViewer(me); // #349 — by identity
   return (await listDocs<CommThread>("comms"))
-    .filter((t) => visibleTo(t, me) && isToFileRow(t)) // #349 — by identity
+    .filter((t) => visibleTo(t, viewer) && isToFileRow(t))
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
@@ -679,7 +680,7 @@ export async function approveAllStrong(
   const budget = opts.budgetMs ?? APPROVE_ALL_BUDGET_MS;
   const list =
     ids === "all-visible"
-      ? (await toFileThreads(await mailboxViewer(me))).filter(isStrongRow).map((t) => t.id)
+      ? (await toFileThreads(me)).filter(isStrongRow).map((t) => t.id)
       : [...new Set(ids.map((x) => String(x || "").trim()).filter(Boolean))];
   let approved = 0;
   let skipped = 0;
