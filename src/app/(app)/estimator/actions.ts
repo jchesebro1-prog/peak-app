@@ -950,8 +950,16 @@ async function placeSystemInEstimate(
   const t = totals(newSections, 0);
   // #348 slice 3: the lead comes from the STORED source quote (never from the client); an unsaved or missing source
   // simply has none. The id only says which stored quote to read.
-  const splitSource = opts.splitFrom ? await get(opts.splitFrom.quoteId) : null;
-  const splitLeadId = splitSource?.leadId || null;
+  // A read failure only skips the carry; a deleted lead isn't carried.
+  let splitSource: Quote | null = null;
+  if (opts.splitFrom) {
+    try {
+      splitSource = await get(opts.splitFrom.quoteId);
+    } catch (e) {
+      console.error("moveSystemToEstimateAction: reading the source quote failed", opts.splitFrom.quoteId, e);
+    }
+  }
+  const splitLeadId = splitSource ? await leadIdForCreate(splitSource.leadId) : null;
   let created: Quote;
   try {
     created = await create({

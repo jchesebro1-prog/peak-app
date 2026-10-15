@@ -268,7 +268,7 @@ export async function partyDbChecks(ok: Ok) {
     ok((await copyParties({ type: "quote", id: splitSrc }, { type: "quote", id: splitNew }, "u-test")) === 0, "parties db: quote→quote copy is idempotent");
     // the Move action's `new` path: lead from the stored source quote, copy inside a savepoint, existing target untouched
     const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
-    ok(/const splitSource = opts\.splitFrom \? await get\(opts\.splitFrom\.quoteId\) : null;\s*const splitLeadId = splitSource\?\.leadId \|\| null;/.test(actionsSrc) && /\.\.\.\(splitLeadId \? \{ leadId: splitLeadId \} : \{\}\),\s*name: opts\.newName/.test(actionsSrc), "parties: Move → New reads the lead from the stored source quote and passes it to create");
+    ok(/splitSource = await get\(opts\.splitFrom\.quoteId\)/.test(actionsSrc) && /const splitLeadId = splitSource \? await leadIdForCreate\(splitSource\.leadId\) : null;/.test(actionsSrc) && /\.\.\.\(splitLeadId \? \{ leadId: splitLeadId \} : \{\}\),\s*name: opts\.newName/.test(actionsSrc), "parties: Move → New reads the lead from the stored source quote and passes it to create");
     ok(/withSavepoint\(async \(\) => \{\s*await copyParties\(\{ type: "quote", id: splitSource\.id \}, \{ type: "quote", id: created\.id \}/.test(actionsSrc), "parties: Move → New copies the source's parties inside a savepoint");
     ok(/target\.kind === "new" && typeof sourceQuoteId === "string"/.test(actionsSrc) && actionsSrc.split("splitFrom:").length === 2, "parties: only the Move action's New path asks for the split (Copy and Move → existing carry nothing)");
 
