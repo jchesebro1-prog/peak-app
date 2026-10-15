@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/session";
 import { blobEnabled, putBlob, safeName } from "@/lib/blob";
 import {
   VENDOR_QUOTE_BLOB_PREFIX,
+  VENDOR_QUOTE_ID_RE,
   VENDOR_UPLOAD_MAX_BYTES,
   VENDOR_UPLOAD_MAX_LABEL,
 } from "@/lib/vendor-quote-file";
@@ -36,10 +37,6 @@ import {
 // A single file in, then a Blob write — nowhere near this, but a slow uplink
 // must not have the function expire while the body is still arriving.
 export const maxDuration = 60;
-
-/** The client's vendor-quote id shape: "vq" + base36 time + base36 random.
- *  It lands in a storage path, so it is validated, never sanitized-and-used. */
-const VQ_ID = /^vq[a-z0-9]{4,32}$/;
 
 const tooBig = () =>
   `That file is larger than ${VENDOR_UPLOAD_MAX_LABEL}. Attach a smaller PDF, or paste a Link instead.`;
@@ -85,7 +82,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   const vendorQuoteId = String(form.get("vendorQuoteId") || "");
-  if (!VQ_ID.test(vendorQuoteId)) {
+  if (!VENDOR_QUOTE_ID_RE.test(vendorQuoteId)) {
     return NextResponse.json({ ok: false, error: "Bad vendor quote id." }, { status: 400 });
   }
 

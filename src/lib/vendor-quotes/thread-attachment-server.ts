@@ -2,7 +2,8 @@
    SEE the thread (#341 canSeeThread — own, assigned or deliberately linked). Visibility is checked before anything
    else, and a missing thread answers exactly like an invisible one. Bytes come from the stored data-URL, Gmail (by the
    stored part id — never stored on import), or the quote / assessment PDF store. Server-only. */
-import { dataUrlToBytes } from "@/lib/blob";
+import { dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
+import { VENDOR_QUOTE_BLOB_PREFIX, VENDOR_QUOTE_ID_RE } from "@/lib/vendor-quote-file";
 import { gmailEnabled } from "@/lib/gmail/config";
 import { readPdfForThread } from "@/lib/thread-pdf-read";
 import { canSeeThread, get as getThread, type CommAttachment, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
@@ -69,4 +70,13 @@ export async function readThreadAttachment(
   // 6 — the fetched bytes, again
   if (bytes.length > max) return fail(VENDOR_COPY.tooBig);
   return { ok: true, thread: t, att, bytes, name: att.name || "attachment", mime: mime || "application/octet-stream" };
+}
+
+/** The copy half: write fetched bytes to private Blob at `vendor-quotes/<vqId>-<safeName>` (the shape
+ *  `ownsVendorQuoteBlobPath` admits). putBlob adds a random suffix, so the RETURNED pathname is the only one that
+ *  resolves — never the requested one. */
+export async function copyToVendorQuoteBlob(vqId: string, name: string, mime: string, bytes: Buffer): Promise<{ blobPath: string }> {
+  if (!VENDOR_QUOTE_ID_RE.test(vqId)) throw new Error("Bad vendor quote id.");
+  const stored = await putBlob(`${VENDOR_QUOTE_BLOB_PREFIX}${vqId}-${safeName(name || "quote.pdf")}`, bytes, mime || "application/pdf");
+  return { blobPath: stored.pathname };
 }

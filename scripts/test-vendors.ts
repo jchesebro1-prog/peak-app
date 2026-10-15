@@ -15,11 +15,15 @@ import { displayQuoteNumber } from "../src/lib/estimate-number";
 import { prepareVendorQuotesForSave, addVendorPartiesForSave, vendorPartyRemovalRefusalFor, quotesReceivedFor } from "../src/lib/stores/vendor-quotes";
 import type { VendorQuoteLike } from "../src/lib/vendor-quotes/rules";
 import { readFileSync } from "node:fs";
+import { fileThreadTo, vendorThreadsFor, loadVendorsPanel } from "../src/lib/vendor-quotes/threads-server";
+import { canSeeThread, get as getThread } from "../src/lib/stores/comms";
+import { blobEnabled } from "../src/lib/blob";
+import { ownsVendorQuoteBlobPath } from "../src/lib/vendor-quote-file";
 import { findPart, listAttachmentParts, parseInbound } from "../src/lib/gmail/mime";
 import type { GmailFullMessage, GmailPart } from "../src/lib/gmail/api";
 import type { CommThread } from "../src/lib/stores/comms";
 import type { MailboxViewer } from "../src/lib/stores/comms-visibility";
-import { readThreadAttachment } from "../src/lib/vendor-quotes/thread-attachment-server";
+import { readThreadAttachment, copyToVendorQuoteBlob } from "../src/lib/vendor-quotes/thread-attachment-server";
 import {
   VENDOR_COPY, VENDOR_FROM_EMAIL_MAX_BYTES, isVendorPickerType, asVendorQuotes, vendorCompanyIdsOf, newVendorCompanyIds, stampVendorQuotes,
   keepLiveVendorCompanies, liveVendorQuoteIds, vendorPartyRemovalRefusal, quoteNumberFromSubject, isPdfAttachment, threadAttachmentRef,
@@ -205,6 +209,64 @@ export async function vendorDbChecks(ok: Ok) {
     ok(errOf(await readThreadAttachment({ threadId: T6, messageId: "m1", index: 1 }, A, { vendorPdf: true })) === "That's one of our own estimate PDFs, not a vendor quote.", "broker: our own estimate PDF is not a vendor quote");
     ok(errOf(await readThreadAttachment({ threadId: T6, messageId: "m1", index: 2 }, A)) === VENDOR_COPY.tooBig, "broker: over 25 MB refused on the stored size");
     ok(errOf(await readThreadAttachment({ threadId: T6, messageId: "m1", index: 3 }, A)) === "Gmail isn't connected here — download the PDF and attach it by hand.", "broker: a Gmail attachment with Gmail off says so");
+
+    // part C — filing a thread + visibility-filtered vendor threads (Task 4)
+    const vp1 = fixtureId(348, "vp1");
+    await createFixture("projects", { id: vp1, kind: "project", name: "Vendor test project", customer: "Vendor Test Owner", customerId: vcust, quoteId: q, createdAt: now, updatedAt: now } as never);
+    const thr = (slug: string, extra: Record<string, unknown>) => createFixture("comms", {
+      id: fixtureId(348, slug), mailbox: "personal", mailboxUser: A.name, mailboxOwnerId: A.id, unread: true, customer: "", contactName: "", contactEmail: "rep@vendor.test",
+      subject: `Subj ${slug}`, channel: "email", status: "waiting_us", createdAt: now, updatedAt: now,
+      messages: [{ id: "m1", at: now, direction: "in", channel: "email", author: "Rep", body: "SECRET BODY", attachments: [] }], ...extra,
+    } as unknown as CommThread);
+    const [T1, T2, T3, T4, T5, T7] = ["vt1", "vt2", "vt3", "vt4", "vt5", "vt7"].map((s) => fixtureId(348, s));
+    await thr("vt1", { customerId: null });
+    await thr("vt2", { status: "draft", link: { type: "quote", id: q }, customerId: vven1 });
+    await thr("vt3", { customerId: vven1 });
+    await thr("vt4", { link: { type: "quote", id: q }, customerId: vcust });
+    await thr("vt5", { link: { type: "quote", id: q }, customerId: vven1, deleted: true });
+    await thr("vt7", { link: { type: "project", id: vp1 }, customerId: vven1, linkedBy: "user" });
+
+    const t1 = (await getThread(T1))!;
+    const f1 = await fileThreadTo(t1, { type: "quote", id: q }, vven1, "u");
+    const f1b = await fileThreadTo((await getThread(T1))!, { type: "quote", id: q }, vven1, "u");
+    const t1After = await getThread(T1);
+    const stQ = await getQuote(q);
+    ok(f1.ok && f1.label === filingLinkLabel({ type: "quote", number: displayQuoteNumber(stQ!), name: stQ!.name }) && f1b.ok && !f1b.partyAdded
+      && t1After?.link?.type === "quote" && t1After.link.id === q && t1After.customerId === vven1 && t1After.linkedBy === "user"
+      && asVendorQuotes((stQ as unknown as { vendorQuotes: unknown }).vendorQuotes).filter((v) => v.vendorCompanyId === vven1).length === 1
+      && (await listFor("quote", q)).filter((p) => p.role === "vendor" && p.companyId === vven1).length === 1,
+      "filing: link + vendor kept + party idempotent");
+    const missing = await fileThreadTo(t1After!, { type: "quote", id: "TEST348:vmissing" }, null, "u");
+    const notVendor = await fileThreadTo(t1After!, { type: "quote", id: q }, vcust, "u");
+    ok(!missing.ok && missing.error === "That estimate or project wasn't found." && !notVendor.ok && notVendor.error === "Pick a vendor company.", "filing: a missing target and a non-vendor company are refused");
+
+    const idsOf = (r: Array<{ id: string }>) => r.map((x) => x.id).sort().join("|");
+    const vSet = new Set([vven1]);
+    const forB = await vendorThreadsFor({ quoteId: q }, vSet, B);
+    ok(idsOf(forB) === T1, "vendors (#341): B sees only the filed vendor thread");
+    const forA = await vendorThreadsFor({ quoteId: q }, vSet, A);
+    ok(idsOf(forA) === T1 && ![T2, T3, T4, T5].some((x) => idsOf(forA).includes(x)), "vendors: drafts never listed, even to their owner");
+    ok(forB.every((r) => !("body" in r) && !("messages" in r) && !("snippet" in r)) && !JSON.stringify(forB).includes("SECRET BODY"), "vendors: only subject / last author / last time / unread ship");
+    const both = await vendorThreadsFor({ quoteId: q, projectId: vp1 }, vSet, B);
+    const panel = await loadVendorsPanel({ quoteId: q, projectId: vp1 }, B);
+    ok(idsOf(both) === [T1, T7].sort().join("|") && panel.threads.length === 2 && panel.companies.some((c) => c.id === vven1 && c.name === "Vendor Co One"), "vendors: quote + project threads, and the panel names the vendor company");
+    const NOBODY: MailboxViewer = { id: "", name: "", nameUnique: false };
+    const forN = await vendorThreadsFor({ quoteId: q, projectId: vp1 }, vSet, NOBODY);
+    const allowed: string[] = [];
+    for (const id of [T1, T7]) if (canSeeThread((await getThread(id))!, NOBODY)) allowed.push(id);
+    ok(idsOf(forN) === allowed.sort().join("|") && !idsOf(forN).includes(T2), "vendors: a viewer with no id sees only what canSeeThread allows (never a draft)");
+    ok((await vendorThreadsFor({ quoteId: q }, new Set(), B)).length === 0, "vendors: no vendor companies, no list");
+
+    if (!blobEnabled()) {
+      let threw = false;
+      try { await copyToVendorQuoteBlob("bad id", "x.pdf", "application/pdf", Buffer.from("x")); } catch { threw = true; }
+      ok(threw, "broker copy: a bad vendor quote id is refused");
+    } else {
+      let threw = false;
+      try { await copyToVendorQuoteBlob("bad id", "x.pdf", "application/pdf", Buffer.from("x")); } catch { threw = true; }
+      const cp = await copyToVendorQuoteBlob("vqaaaa9", "Q.pdf", "application/pdf", Buffer.from("%PDF-1.4\n"));
+      ok(threw && ownsVendorQuoteBlobPath(cp.blobPath, "vqaaaa9"), "broker copy: the returned pathname is the record's own");
+    }
   } finally {
     // Party ids are pty_<hash> — not TEST348-prefixed, so dropFixtures(348) skips them: delete this quote's rows directly.
     // Direct SQL by recordId — includes soft-deleted rows, so a mid-test failure can't leak a pty_ row.
