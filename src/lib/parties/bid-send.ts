@@ -57,8 +57,8 @@ export function bidderAlreadyHas(q: { status: string } & Revs, bid: BidderState)
 type BidQ = { bid?: { addenda?: Array<{ no: number; receivedAt: number }> } | null } & Revs;
 
 function missingFrom(live: Array<{ no: number }>, frozen: Array<{ no: number }>): number[] {
-  const have = new Set(frozen.map((a) => a.no));
-  return live.filter((a) => !have.has(a.no)).map((a) => a.no).sort((a, b) => a - b);
+  const have = new Set(frozen.filter((a) => a && typeof a.no === "number").map((a) => a.no));
+  return live.filter((a) => a && typeof a.no === "number" && !have.has(a.no)).map((a) => a.no).sort((a, b) => a - b);
 }
 
 export function addendaSinceRow(q: BidQ, bid: BidderState): number[] {

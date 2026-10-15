@@ -13,6 +13,10 @@ import {
   isPartyId, latestSentRev, bidderPdfRev, bidderEmailNeed, bidderSendPlan, bidderAlreadyHas, addendaSinceRow, addendaAfterLatestSend,
   bidderSubject, bidWalkSummary, BID_SEND_COPY, type SendRow,
 } from "../src/lib/parties/bid-send";
+import { signShareTokenV3, verifyShareTokenV3, signShareTokenV2, verifyShareTokenV2, signShareToken, verifyShareToken, parseShareToken, isPackageToken, isShareTokenV2, SHARE_TOKEN_V3_RE } from "../src/lib/quote-share/token";
+import { bidderCanAct, packageBanner, PACKAGE_COPY } from "../src/lib/quote-share/package-view";
+import { responseNoteText, responseTaskTitle, responseRows, cleanClientResponses } from "../src/lib/estimate-output/responses";
+import { fmt } from "../src/app/(app)/estimator/pricing";
 import { bidderEmailDefaults, isBidderFileName, bidderFileOf } from "../src/lib/estimate-email/compose";
 import { addressedHeader, bidDocLine, bidderPdfFileName, ownerNameFromLine, sendDefaultsContact, type DocAddressee } from "../src/lib/parties/addressee";
 import { quoteAsOfRevision } from "../src/lib/quote-share/view";
@@ -328,6 +332,56 @@ export async function bidSendChecks(ok: Ok) {
   ok(isPartyId("pty_0123456789abcdef") && !isPartyId("pty_xyz") && !isPartyId(5), "bid-send: isPartyId");
   ok(latestSentRev({ revisions: [R(1, "sent"), R(2, "manual")] }) === 1 && latestSentRev({ revisions: [] }) === null, "bid-send: latestSentRev");
   ok(BID_SEND_COPY.progress(2, 5) === "Sending 2 of 5…" && BID_SEND_COPY.sendN(1) === "Send to 1 bidder" && BID_SEND_COPY.recipients(["A", "B"]) === "To: A, B (2 bidders)", "bid-send: copy functions");
+
+  // 2b-ii Task 2 — v3 bidder token, bidder-aware package + responses
+  {
+    const S = "s3cret", P = "pty_0123456789abcdef", Qp = "pty_fedcba9876543210";
+    const L3 = { nonce: "N".repeat(43), expiresAt: 2_000_000_000_000 }, NOW = 1_999_000_000_000;
+    const t = signShareTokenV3(S, "Q-1", 2, P, L3.nonce, L3.expiresAt);
+    const v2t = signShareTokenV2(S, "Q-1", 2, L3.nonce, L3.expiresAt);
+    const v1t = signShareToken(S, "Q-1", L3.nonce, L3.expiresAt);
+    ok(SHARE_TOKEN_V3_RE.test(t), "v3 token: shape");
+    const got = verifyShareTokenV3(S, t, "Q-1", L3, NOW);
+    ok(got?.rev === 2 && got.partyId === P, "v3 token: verifies to rev + party");
+    ok(verifyShareTokenV3(S, t, "Q-2", L3, NOW) === null, "v3 token: another quote → null");
+    ok(verifyShareTokenV3(S, t, "Q-1", { ...L3, nonce: "M".repeat(43) }, NOW) === null, "v3 token: rotated nonce → null");
+    ok(verifyShareTokenV3(S, t, "Q-1", L3, L3.expiresAt + 1) === null, "v3 token: expired → null");
+    ok(verifyShareTokenV3(S, t, "Q-1", L3, NaN) === null, "v3 token: NaN clock → null");
+    ok(verifyShareTokenV3(S, t, "Q-1", { ...L3, expiresAt: L3.expiresAt + 1 }, NOW) === null, "v3 token: stored expiry mismatch → null");
+    ok(verifyShareTokenV3(S, t, "Q-1", null, NOW) === null, "v3 token: no stored link → null");
+    const parts = t.split(".");
+    ok(verifyShareTokenV3(S, [parts[0], parts[1], Qp.slice(4), parts[3]].join("."), "Q-1", L3, NOW) === null, "v3 token: swapped party hex → null");
+    ok(verifyShareTokenV3(S, [parts[0], "3", parts[2], parts[3]].join("."), "Q-1", L3, NOW) === null, "v3 token: changed rev → null");
+    ok(verifyShareTokenV2(S, t, "Q-1", L3, NOW) === null && verifyShareToken(S, t, "Q-1", L3, NOW) === false, "v3 token: not a valid v1 or v2");
+    ok(verifyShareTokenV3(S, v2t, "Q-1", L3, NOW) === null && verifyShareTokenV3(S, v1t, "Q-1", L3, NOW) === null, "v3 verify: v1/v2 tokens → null");
+    const pt = parseShareToken(t);
+    ok(pt?.v === 3 && pt.exp === L3.expiresAt && pt.rev === 2 && pt.partyId === P, "v3 token: parse");
+    ok(isPackageToken(t) && isPackageToken(v2t) && !isPackageToken(v1t) && !isShareTokenV2(t), "v3 token: isPackageToken / isShareTokenV2");
+    let threw = false;
+    try { signShareTokenV3(S, "Q-1", 2, "pty_XYZ", L3.nonce, L3.expiresAt); } catch { threw = true; }
+    ok(threw, "v3 token: a bad party id throws to sign");
+    ok(bidderCanAct(null) && bidderCanAct(undefined) && bidderCanAct("pending") && bidderCanAct("awarded"), "bidderCanAct: owner / pending / awarded");
+    ok(!bidderCanAct("lost") && !bidderCanAct("withdrew") && !bidderCanAct("no_bid"), "bidderCanAct: lost / withdrew / no_bid");
+    const sup = { kind: "superseded", rev: { rev: 1 }, latestRev: 2, sentAt: 1 } as never;
+    ok(packageBanner(sup, "/x", true)?.text === "This bid is closed." && PACKAGE_COPY.bidClosed === "This bid is closed.", "packageBanner: bidClosed wins");
+    ok(packageBanner({ kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never, null, false) === null, "packageBanner: open → null");
+    const r = { kind: "accept" as const, sectionNames: ["Rigging", "Curtains"], total: 12500, name: "Pat", email: "pat@x.test", message: "", sectionIds: [] as string[] };
+    ok(responseNoteText(r, "EST-1042", 2, "Miron Construction").startsWith(`Miron Construction (bidder) selected scopes on EST-1042 Rev 2 (bid link): Rigging, Curtains — ${fmt(12500)} before any Rewards credit.`), "responses: bidder accept note");
+    ok(responseNoteText({ ...r, kind: "question", message: "Hi" }, "EST-1042", 2, "Miron Construction").startsWith("Question from Miron Construction (bidder) on EST-1042 Rev 2 (bid link)."), "responses: bidder question note");
+    ok(responseTaskTitle(r, "EST-1042", 2, "Miron Construction") === `Miron Construction accepted EST-1042 Rev 2 — Rigging, Curtains (${fmt(12500)})`, "responses: bidder accept task title");
+    ok(responseTaskTitle({ ...r, kind: "question" }, "EST-1042", 2, "Miron Construction") === "Bidder question — EST-1042 · Miron Construction", "responses: bidder question task title");
+    ok(responseNoteText(r, "EST-1042", 2, "") === responseNoteText(r, "EST-1042", 2) && responseNoteText(r, "EST-1042", 2).startsWith("Client selected scopes"), "responses: blank bidder keeps the client wording");
+    ok(responseTaskTitle(r, "EST-1042", 2, "") === `Client accepted EST-1042 Rev 2 — Rigging, Curtains (${fmt(12500)})` && responseTaskTitle({ ...r, kind: "question" }, "EST-1042", 2, "") === "Client question — EST-1042", "responses: blank bidder keeps the client task titles");
+    const rv = { id: "CR-0123456789ab", kind: "accept", rev: 1, at: 5, name: "Pat", email: "pat@x.test", message: "", sectionIds: [], sectionNames: [], total: 1 };
+    ok(cleanClientResponses([{ ...rv, partyId: P }])[0].partyId === P, "responses: partyId kept");
+    ok(cleanClientResponses([{ ...rv, partyId: "x" }])[0].partyId === undefined && cleanClientResponses([rv])[0].partyId === undefined, "responses: bad partyId dropped");
+    ok(responseRows([{ ...rv, partyId: P }], (n) => n, (id) => (id === P ? "Miron" : ""))[0].who.startsWith("Miron (bidder) · Pat"), "responseRows: bidder prefix");
+    ok(responseRows([{ ...rv, partyId: P }], (n) => n, () => "")[0].who === "Pat · pat@x.test" && responseRows([{ ...rv, partyId: P }], (n) => n)[0].who === "Pat · pat@x.test", "responseRows: no name → no prefix");
+    const nullAdd = { bid: { dueAt: null, awardedPartyId: null, addenda: [{ no: 1, receivedAt: 1, note: "" }, { no: 2, receivedAt: 1, note: "" }] }, revisions: [{ rev: 1, reason: "sent", at: 1, by: "u", docFields: { bid: { dueAt: null, awardedPartyId: null, addenda: [null, { no: 1, receivedAt: 1, note: "" }] } } }] };
+    let nthrew = false, nres = "";
+    try { nres = addendaAfterLatestSend(nullAdd as never).join(); } catch { nthrew = true; }
+    ok(!nthrew && nres === "2", "bid-send: a frozen addenda list with null doesn't throw");
+  }
 }
 
 export async function bidDbChecks(ok: Ok) {

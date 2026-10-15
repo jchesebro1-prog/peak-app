@@ -27,6 +27,8 @@ export type ClientResponse = {
   sectionNames: string[];
   /** Σ the selected scopes' prices, pre-credit (R1). 0 for a question. */
   total: number;
+  /** #348 2b-ii — the bidder (pty_ + 16 hex) whose v3 link sent this; absent on the owner's link. */
+  partyId?: string;
 };
 export type CleanResponse = Omit<ClientResponse, "id" | "rev" | "at">;
 export type ClientActionResult = { ok: true; confirmation: string } | { ok: false; error: string };
@@ -78,6 +80,7 @@ export const CLIENT_ACTION_COPY = {
 
 const EMAIL_RE = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[^\s@<>()",;:]+$/;
 const ID_RE = /^CR-[0-9a-f]{12}$/;
+const PARTY_ID_RE = /^pty_[0-9a-f]{16}$/;
 
 /** "Alternate — <group name>: <system name>" — the picker label, also what
  *  the note and task record for a chosen alternate. */
@@ -164,6 +167,7 @@ function responseOf(v: unknown): ClientResponse | null {
   if (typeof rev !== "number" || typeof at !== "number" || typeof total !== "number") return null;
   if (!Number.isSafeInteger(rev) || rev < 1 || !Number.isFinite(at) || !Number.isFinite(total) || total < 0) return null;
   const title = cleanText(o.title, RESPONSE_TITLE_MAX);
+  const partyId = typeof o.partyId === "string" && PARTY_ID_RE.test(o.partyId) ? o.partyId : "";
   return {
     id: o.id,
     kind: o.kind,
@@ -176,6 +180,7 @@ function responseOf(v: unknown): ClientResponse | null {
     sectionIds: strList(o.sectionIds),
     sectionNames: strList(o.sectionNames),
     total,
+    ...(partyId ? { partyId } : {}),
   };
 }
 
@@ -200,14 +205,21 @@ export function appendResponseTo(list: unknown, r: ClientResponse): ClientRespon
   return [...cur, r];
 }
 
-export function responseTaskTitle(r: Pick<CleanResponse, "kind" | "sectionNames" | "total">, number: string, revNo: number): string {
+export function responseTaskTitle(r: Pick<CleanResponse, "kind" | "sectionNames" | "total">, number: string, revNo: number, bidderName = ""): string {
+  const bidder = bidderName.trim();
+  if (bidder)
+    return r.kind === "accept" ? `${bidder} accepted ${number} Rev ${revNo} — ${r.sectionNames.join(", ")} (${fmt(r.total)})` : `Bidder question — ${number} · ${bidder}`;
   return r.kind === "accept" ? `Client accepted ${number} Rev ${revNo} — ${r.sectionNames.join(", ")} (${fmt(r.total)})` : `Client question — ${number}`;
 }
 
-export function responseNoteText(r: CleanResponse, number: string, revNo: number): string {
+export function responseNoteText(r: CleanResponse, number: string, revNo: number, bidderName = ""): string {
   const who = [r.name, r.title, r.email].filter(Boolean).join(" · ");
-  const head =
-    r.kind === "accept"
+  const bidder = bidderName.trim();
+  const head = bidder
+    ? r.kind === "accept"
+      ? `${bidder} (bidder) selected scopes on ${number} Rev ${revNo} (bid link): ${r.sectionNames.join(", ")} — ${fmt(r.total)} before any Rewards credit.`
+      : `Question from ${bidder} (bidder) on ${number} Rev ${revNo} (bid link).`
+    : r.kind === "accept"
       ? `Client selected scopes on ${number} Rev ${revNo} (client link): ${r.sectionNames.join(", ")} — ${fmt(r.total)} before any Rewards credit.`
       : `Client question on ${number} Rev ${revNo} (client link).`;
   return [head, `From: ${who}`, r.message ? `Message: ${r.message}` : ""].filter(Boolean).join("\n");
@@ -269,15 +281,20 @@ const chicagoStamp = (ms: number) =>
     .toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Chicago" })
     .replace(/[\u202f\u00a0]/g, " ");
 
+const bidderLabel = (r: ClientResponse, bidderNameOf?: (partyId: string) => string): string => {
+  const name = r.partyId && bidderNameOf ? (bidderNameOf(r.partyId) || "").trim() : "";
+  return name ? `${name} (bidder)` : "";
+};
+
 /** The staff list, newest first. `revNoOf` maps QuoteRevision.rev → the printed Rev N. */
-export function responseRows(raw: unknown, revNoOf: (rev: number) => number): ResponseRow[] {
+export function responseRows(raw: unknown, revNoOf: (rev: number) => number, bidderNameOf?: (partyId: string) => string): ResponseRow[] {
   return cleanClientResponses(raw)
     .sort((a, b) => b.at - a.at)
     .map((r) => ({
       id: r.id,
       kindLabel: r.kind === "accept" ? "Selected scopes" : "Question",
       revLabel: `Rev ${revNoOf(r.rev)}`,
-      who: [r.name, r.title, r.email].filter(Boolean).join(" · "),
+      who: [bidderLabel(r, bidderNameOf), r.name, r.title, r.email].filter(Boolean).join(" · "),
       scopes: r.sectionNames.join(", "),
       total: r.kind === "accept" ? fmt(r.total) : "",
       message: r.message,
