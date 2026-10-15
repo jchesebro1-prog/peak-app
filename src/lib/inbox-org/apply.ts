@@ -115,10 +115,24 @@ export type RuleOffer = {
 /** The thread, when it exists and is `me`'s own (and not a draft or in
  *  Deleted). #349 — by identity; an action path, so a thread owned through
  *  its Gmail key or a unique legacy name is stamped with its owner. */
+/** #349 review — one users-table read per actor object: a bulk action (Archive
+ *  N rows, approve all, a CAS retry loop) passes the same `me` to every
+ *  myThread call, so the viewer is resolved once per call, not per row. */
+const viewerCache = new WeakMap<object, Promise<MailboxViewer>>();
+function viewerFor(me: OrgActor): Promise<MailboxViewer> {
+  let v = viewerCache.get(me);
+  if (!v) {
+    v = mailboxViewer(me);
+    viewerCache.set(me, v);
+    v.catch(() => viewerCache.delete(me));
+  }
+  return v;
+}
+
 async function myThread(threadId: string, me: OrgActor): Promise<CommThread | null> {
   const t = await getThread(threadId);
   if (!t || t.deleted || t.status === "draft") return null;
-  const viewer = await mailboxViewer(me);
+  const viewer = await viewerFor(me);
   if (!visibleTo(t, viewer)) return null;
   await stampMailboxOwner(t, viewer);
   return t;
@@ -680,7 +694,7 @@ export async function approveAllStrong(
   const budget = opts.budgetMs ?? APPROVE_ALL_BUDGET_MS;
   const list =
     ids === "all-visible"
-      ? (await toFileThreads(me)).filter(isStrongRow).map((t) => t.id)
+      ? (await toFileThreads(await viewerFor(me))).filter(isStrongRow).map((t) => t.id)
       : [...new Set(ids.map((x) => String(x || "").trim()).filter(Boolean))];
   let approved = 0;
   let skipped = 0;
@@ -784,7 +798,7 @@ async function sweepSender(
   const started = Date.now();
   const budget = opts.budgetMs ?? RULE_SWEEP_BUDGET_MS;
   const ctx = await loadOrgContext({ fresh: true });
-  const viewer = await mailboxViewer(me); // #349 — my mailbox by identity
+  const viewer = await viewerFor(me); // #349 — my mailbox by identity
   const all = await listDocs<CommThread>("comms");
   const candidates = all
     .filter(
@@ -861,8 +875,12 @@ export async function archiveAfterReply(
   if (inboxOrgDisabled()) return { ok: true, archived: false, filed: false, skipped: "disabled" };
   const t = await getThread(threadId);
   if (!t || t.deleted || t.status === "draft" || t.mailbox !== "personal") return { ok: true, archived: false, filed: false, skipped: "not-applicable" };
-  if (me && !visibleTo(t, await mailboxViewer(me))) return NOT_FOUND(); // #349 — by identity
-  if (await keepInInbox(t.mailboxUser || "")) {
+  if (me && !visibleTo(t, await viewerFor(me))) return NOT_FOUND(); // #349 — by identity
+  // #349 review — the OWNER's preference, found through the owner id (their
+  // current name on the roster; the preference store stays keyed by name)
+  const ownerId = resolveMailboxOwnerId(t, (await loadOrgContext()).nameRoster);
+  const ownerName = ownerId ? (await loadOrgContext()).nameRoster.find((u) => u.id === ownerId)?.name ?? "" : "";
+  if (await keepInInbox(ownerName)) {
     if (by === "teammate-reply" && opts.wasArchived && !t.archived) {
       await archive(t.id, { quiet: true });
       return { ok: true, archived: true, filed: false };

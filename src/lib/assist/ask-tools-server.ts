@@ -684,6 +684,8 @@ const SEARCH_GROUP_KIND: Readonly<Record<string, RefKind>> = {
 async function runSearch(query: string, me: AskUser): Promise<Loaded> {
   // #341 — globalSearch keeps only the email threads I may see (canSeeThreadCond), before its cut to 5.
   const groups: Group[] = await globalSearch(query, me, { emailOnly: true });
+  // #349 review — the viewer (a users-table read) once per search, not per hit
+  let viewer: MailboxViewer | null = null;
   const refs: AskToolRef[] = [];
   const blocks: string[] = [];
   for (const g of groups) {
@@ -692,7 +694,7 @@ async function runSearch(query: string, me: AskUser): Promise<Loaded> {
     for (const item of g.items) {
       if (kind === "thread") {
         // the read rule once more, row by row (loadThreadReadable)
-        const viewer = await mailboxViewer(me);
+        viewer ??= await mailboxViewer(me);
         const th = await loadThreadReadable(item.id, viewer);
         if (!th) continue;
         refs.push(threadRef(th, viewer, item.title));

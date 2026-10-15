@@ -14,14 +14,15 @@
  *
  * A thread is stamped only when exactly one user already owns it by the app's
  * own rule (its Gmail account key, else a name exactly one user — any status —
- * holds). Everything else is listed as unresolved and left alone; it stays
- * owned by nobody (fail closed) until a person fixes the name in Settings →
- * Team and the script is re-run. The app is safe before this runs: ownership
- * already resolves the same way lazily, and each owner's next write stamps
- * the thread.
+ * holds). A thread whose name two or more users hold is TOMBSTONED with
+ * --apply (#349 review: `mailboxOwnerId = "unresolved"` — owned by nobody for
+ * good, so renaming the duplicates afterwards never hands it to anyone). An
+ * unknown or blank name is only listed (a new hire's name is retired when they
+ * are added). Run this BEFORE renaming duplicate teammates. The app is safe
+ * before it runs: ownership already resolves the same way lazily.
  */
 import { requireHostedConfirmation, resolveExplicitDbTarget } from "./db-target";
-import { applyOwnerStamps, loadOwnerStampPlan } from "../src/lib/comms-owner-stamp";
+import { applyOwnerStamps, loadOwnerStampPlan, tombstoneStamps } from "../src/lib/comms-owner-stamp";
 import { allUsers } from "../src/lib/users";
 
 const args = process.argv.slice(2);
@@ -56,13 +57,19 @@ async function main(): Promise<void> {
     console.log(`  unresolved  ${u.id}  "${u.mailboxUser}"  — ${why}`);
   }
 
-  let line = `${plan.candidates} unstamped personal thread(s): ${plan.stamps.length} resolvable (${byKey} by Gmail key, ${byName} by unique name), ${plan.unresolved.length} unresolved`;
+  const tombs = tombstoneStamps(plan);
+  let line =
+    `${plan.candidates} unstamped personal thread(s): ${plan.stamps.length} resolvable (${byKey} by Gmail key, ${byName} by unique name), ` +
+    `${plan.unresolved.length} unresolved (${tombs.length} on a shared name ${apply ? "→ tombstoned" : "→ would be tombstoned (owned by nobody)"})` +
+    (plan.tombstoned ? `; ${plan.tombstoned} already tombstoned` : "");
   if (apply) {
     const r = await applyOwnerStamps(plan.stamps);
-    line += `; stamped ${r.stamped}` + (r.raced ? `, ${r.raced} changed meanwhile (left alone)` : "");
+    const t = await applyOwnerStamps(tombs);
+    line += `; stamped ${r.stamped}, tombstoned ${t.stamped}` + (r.raced + t.raced ? `, ${r.raced + t.raced} changed meanwhile (left alone)` : "");
   }
   console.log(`\n${apply ? "Applied" : "Dry run"}: ${line}.`);
-  if (!apply && plan.stamps.length) console.log("Nothing was written. Review the unresolved list above, then re-run with --apply (and --yes for a hosted database).");
+  if (!apply && (plan.stamps.length || tombs.length))
+    console.log("Nothing was written. Review the unresolved list above (shared names include archived users), then re-run with --apply (and --yes for a hosted database) BEFORE renaming any duplicate teammates.");
   process.exit(0);
 }
 

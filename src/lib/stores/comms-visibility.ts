@@ -70,6 +70,17 @@ export type MailboxViewer = { id: string; name: string; nameUnique: boolean };
 export type RosterEntry = { id: string; name: string };
 
 const filled = (v: unknown): v is string => typeof v === "string" && v !== "";
+
+/** #349 review — the tombstone owner: a legacy name-only thread whose name was
+ *  shared (or is being handed to a newcomer) is stamped with this instead of a
+ *  user id, so it reads as owned by NOBODY for good. `ownsMailbox`,
+ *  `ownMailboxCond`, `resolveMailboxOwnerId`, the lazy stamp, the stamp script
+ *  and later renames all treat it as "stamped, nobody's" — they never resolve
+ *  or overwrite it. Never a users.id (those are `u<n>`). */
+export const MAILBOX_OWNER_NOBODY = "unresolved";
+
+/** A real owner id: filled and not the tombstone. */
+const isRealId = (v: unknown): v is string => filled(v) && v !== MAILBOX_OWNER_NOBODY;
 const fold = (v: unknown): string => (typeof v === "string" ? v.trim().toLowerCase() : "");
 
 /** The viewer for `u`, given the roster (every user): `nameUnique` when no OTHER
@@ -88,10 +99,11 @@ export function viewerFrom(u: { id: string; name: string }, roster: readonly Ros
  *  same answer `ownsMailbox` gives each roster member. */
 export function resolveMailboxOwnerId(t: MailboxFields, roster: readonly RosterEntry[]): string | null {
   if (t.mailbox !== "personal") return null;
-  if (filled(t.mailboxOwnerId)) return t.mailboxOwnerId;
+  if (filled(t.mailboxOwnerId)) return isRealId(t.mailboxOwnerId) ? t.mailboxOwnerId : null; // the tombstone is nobody
   if (filled(t.gmailAccountKey)) return userIdOfKey(t.gmailAccountKey);
   if (!filled(t.mailboxUser)) return null;
   const f = fold(t.mailboxUser);
+  if (f === "") return null; // a whitespace-only name is never unique (as viewerFrom)
   const holders = roster.filter((r) => fold(r.name) === f);
   return holders.length === 1 && holders[0].name === t.mailboxUser ? holders[0].id : null;
 }
@@ -99,8 +111,8 @@ export function resolveMailboxOwnerId(t: MailboxFields, roster: readonly RosterE
 /** How `ownsMailbox` decided: by the stamp, the Gmail key, or the legacy
  *  unique name (null = not mine). The lazy stamp writes only for the last two. */
 export function mailboxOwnership(t: MailboxFields, me: MailboxViewer): "stamp" | "key" | "name" | null {
-  if (!me || !filled(me.id) || t.mailbox !== "personal") return null;
-  if (filled(t.mailboxOwnerId)) return t.mailboxOwnerId === me.id ? "stamp" : null;
+  if (!me || !isRealId(me.id) || t.mailbox !== "personal") return null;
+  if (filled(t.mailboxOwnerId)) return t.mailboxOwnerId === me.id ? "stamp" : null; // the tombstone never equals a real id
   if (filled(t.gmailAccountKey)) return t.gmailAccountKey === personalKey(me.id) ? "key" : null;
   return me.nameUnique && filled(me.name) && t.mailboxUser === me.name ? "name" : null;
 }
@@ -184,7 +196,7 @@ const NEVER: DocCond = { any: [] };
 /** `ownsMailbox` as a DocCond — the same three branches (the stamp; else the
  *  Gmail key; else the legacy name, only while `me`'s name is unique). */
 export function ownMailboxCond(me: MailboxViewer): DocCond {
-  if (!me || !filled(me.id)) return NEVER;
+  if (!me || !isRealId(me.id)) return NEVER; // the tombstone matches nobody
   const unstamped: DocCond = { path: ["mailboxOwnerId"], empty: "text" };
   const branches: DocCond[] = [
     { path: ["mailboxOwnerId"], is: me.id },

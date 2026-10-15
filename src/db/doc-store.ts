@@ -411,6 +411,25 @@ export async function casDocKey(coll: CollectionName, id: string, key: string, e
   return rows.length > 0;
 }
 
+/**
+ * #349 review — compare-and-set ONE top-level key on every live row matching
+ * `where`, in one UPDATE: writes `value` only where the key is still absent
+ * (or null) — the same key-level CAS as `casDocKey(…, undefined, value)`, for
+ * a set of rows (a rename handing over its name-only threads). Returns the ids
+ * written. Every path and value is a bound parameter (docCondSql).
+ */
+export async function casDocKeyWhere(coll: CollectionName, where: DocCond, key: string, value: unknown): Promise<string[]> {
+  const db = await getDb();
+  const t = table(coll);
+  const now = Date.now();
+  const rows = await db
+    .update(t)
+    .set({ doc: sql`(${t.doc} || jsonb_build_object(${key}::text, ${JSON.stringify(value)}::jsonb))`, rev: sql`${t.rev} + 1`, updatedAt: now, receivedAt: now })
+    .where(and(eq(t.deleted, false), docCondSql(t.doc, where), sql`((${t.doc}->${key}) IS NULL OR jsonb_typeof(${t.doc}->${key}) = 'null')`))
+    .returning({ id: t.id });
+  return rows.map((r) => r.id);
+}
+
 export async function getDoc<T extends Doc = Doc>(
   coll: CollectionName,
   id: string

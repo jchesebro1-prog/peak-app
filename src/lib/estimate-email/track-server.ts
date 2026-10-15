@@ -119,11 +119,6 @@ export function opensOf(q: Pick<Quote, "shareOpens">): TrackOpens {
   return { total, byRev };
 }
 
-const sameName = (a: string | null | undefined, b: string | null | undefined) => {
-  const x = String(a ?? "").trim().toLowerCase();
-  return !!x && x === String(b ?? "").trim().toLowerCase();
-};
-
 /** Final review (I2) — a thread can be replied to only once it has really
  *  gone out: not a draft, at least one outbound message, and a recipient. */
 function replyable(raw: unknown): boolean {
@@ -134,12 +129,14 @@ function replyable(raw: unknown): boolean {
   return msgs.some((m) => m?.direction === "out");
 }
 
-/** The quote's Lead estimator by name (owner, else preparedBy when the owner
- *  isn't an active team member) — estimate-output/responses leadEstimator. */
-async function leadNameOf(deps: TrackDeps, q: Pick<Quote, "owner" | "preparedBy">): Promise<string> {
+/** The quote's Lead estimator's user id (owner, else preparedBy when the
+ *  owner isn't an active team member) — estimate-output/responses
+ *  leadEstimator, which returns the roster entry. #349 review: compared by id,
+ *  never by display name; a failed roster read is nobody. */
+async function leadIdOf(deps: TrackDeps, q: Pick<Quote, "owner" | "preparedBy">): Promise<string> {
   try {
     const active = (await deps.roster()).filter((u) => (u.status ?? "active") === "active");
-    return leadEstimator(q.owner, q.preparedBy, active)?.name ?? "";
+    return leadEstimator(q.owner, q.preparedBy, active)?.id ?? "";
   } catch (e) {
     console.error("[estimate-email] track: roster read failed", e);
     return "";
@@ -153,17 +150,17 @@ function mailboxOwnerOf(raw: unknown): string {
   return typeof u === "string" ? u.trim() : "";
 }
 
-/** #349 — the viewer for `who` against the whole roster (a failed read is an
- *  empty roster: then only a stamped / Gmail-keyed thread can be theirs by
- *  id, plus a legacy name nobody else is known to hold). */
+/** #349 — the viewer for `who` against the whole roster. A failed read fails
+ *  closed (#349 review): `nameUnique: false`, so only a stamped / Gmail-keyed
+ *  thread can be theirs — never a legacy name-only one. */
 async function viewerOf(deps: TrackDeps, who: { id: string; name: string }): Promise<MailboxViewer> {
-  let roster: RosterUser[] = [];
   try {
-    roster = await deps.roster();
+    const roster: RosterUser[] = await deps.roster();
+    return viewerFrom(who, roster.map((u) => ({ id: u.id, name: u.name })));
   } catch (e) {
     console.error("[estimate-email] track: roster read failed", e);
+    return { id: typeof who?.id === "string" ? who.id : "", name: typeof who?.name === "string" ? who.name : "", nameUnique: false };
   }
-  return viewerFrom(who, roster.map((u) => ({ id: u.id, name: u.name })));
 }
 
 /** #349 — is `viewer` the raw thread's mailbox owner? By identity
@@ -191,7 +188,8 @@ export async function trackEstimate(deps: TrackDeps, viewer: TrackViewer, quoteI
     if (e && typeof e.threadId === "string" && Number.isFinite(e.rev)) revOf.set(e.threadId, e.rev);
   }
   const holdsPerm = can("send", viewer.roles) || can("approve", viewer.roles);
-  const isLead = sameName(await leadNameOf(deps, q), viewer.name);
+  const leadId = await leadIdOf(deps, q);
+  const isLead = !!leadId && leadId === viewer.id; // #349 review — by id
   const me = await viewerOf(deps, viewer);
   const loaded = await Promise.all(ids.map(async (tid) => {
     try {
