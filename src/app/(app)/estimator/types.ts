@@ -213,6 +213,12 @@ export type VendorQuote = {
   includesFreight: boolean;
   /** LIVE on the record, not frozen at add time — flippable from the row. */
   display: "single" | "itemized";
+  /** #348 slice 4 — the vendor company (Customers directory, a vendor type); `vendor` stays the display / typed fallback. Absent on legacy quotes. */
+  vendorCompanyId?: string | null;
+  /** #348 slice 4 — first saved (server-stamped; absent on quotes saved before slice 4). */
+  addedAt?: number;
+  /** #348 slice 4 — the email thread this quote came from (Add as vendor quote…). */
+  fromThreadId?: string | null;
 };
 
 /** Data-URL characters the estimate's vendor attachments already spend of
@@ -403,6 +409,9 @@ export type VendorDraft = {
   total: string;
   includesFreight: boolean;
   display: "single" | "itemized";
+  /** #348 slice 4 — the picked vendor company (null = typed name only) and the email the quote came from. */
+  vendorCompanyId: string | null;
+  fromThreadId: string | null;
 };
 
 export type FixtureDraft = {
@@ -637,6 +646,8 @@ export type AssistDraftView = {
 
 export type EstimatorProps = {
   initial: InitialQuote;
+  /** #348 slice 4 — ?vq= hand-off ref (validated shape), else null. */
+  vendorFromThread?: string | null;
   /** Settings → Pipelines (Task 6) — the Daylite stage bar reads the loaded
    *  quote's pipeline from here; loaded once server-side (loadPipelines()). */
   pipelines: Pipelines;

@@ -175,6 +175,8 @@ const freshVendor = (): VendorDraft => ({
   total: "",
   includesFreight: false,
   display: "single",
+  vendorCompanyId: null,
+  fromThreadId: null,
 });
 
 const freshLabor = (
@@ -693,6 +695,8 @@ export function useEstimatorState(props: EstimatorProps) {
       total: vendorTotalSeed(v.total, vendorLinesTotal(lines)),
       includesFreight: !!v.includesFreight,
       display: v.display,
+      vendorCompanyId: v.vendorCompanyId ?? null,
+      fromThreadId: v.fromThreadId ?? null,
     };
   };
   // Customer tier margin stamp (item 11, D87) — SEEDS the labor draft and
@@ -2704,6 +2708,8 @@ export function useEstimatorState(props: EstimatorProps) {
        edit rather than inherited — a stale vendor name on a re-quoted line is
        the failure this feature exists to prevent. */
     const lineDesc = vendor + " \u00b7 " + quoteNumber + " \u2014 " + description;
+    // #348 slice 4: addedAt is server-stamped; keep the client copy honest between saves.
+    const prevRec = vendorQuotes.find((v) => v.id === vqId);
     const record: VendorQuote = {
       id: vqId,
       vendor,
@@ -2728,6 +2734,9 @@ export function useEstimatorState(props: EstimatorProps) {
       totalSource: vendorDraftTotalSource(d),
       includesFreight: d.includesFreight,
       display: d.display,
+      ...(d.vendorCompanyId ? { vendorCompanyId: d.vendorCompanyId } : {}),
+      ...(d.fromThreadId ? { fromThreadId: d.fromThreadId } : {}),
+      ...(prevRec?.addedAt ? { addedAt: prevRec.addedAt } : {}),
     };
     /* Replaced IN PLACE on an edit — same id, same position — so the spawned
        line keeps resolving against it and the row order does not shuffle. */

@@ -1,6 +1,19 @@
 /* #348 slice 4 — vendors harness checks. `vendorChecks` is pure; `vendorDbChecks` needs the test DB (Tasks 2–4 fill it).
    Run the pure half alone with `npx tsx scripts/test-vendors.ts`. */
+import { like } from "drizzle-orm";
 import type { Ok } from "./test-inbox-org";
+import { getDb } from "../src/db";
+import { companies } from "../src/db/schema";
+import { patchDoc } from "../src/db/doc-store";
+import { DOC_TABLES } from "../src/db/doc-tables";
+import { eq } from "drizzle-orm";
+import { saveCompany } from "../src/lib/identity/companies";
+import { createFixture, dropFixtures, fixtureId } from "./test-fixtures";
+import { buildQuote, get as getQuote } from "../src/lib/stores/quotes";
+import type { Quote } from "../src/lib/stores/quotes";
+import { addParty, listFor, removeParty } from "../src/lib/stores/parties";
+import { displayQuoteNumber } from "../src/lib/estimate-number";
+import { prepareVendorQuotesForSave, addVendorPartiesForSave, vendorPartyRemovalRefusalFor, quotesReceivedFor } from "../src/lib/stores/vendor-quotes";
 import type { VendorQuoteLike } from "../src/lib/vendor-quotes/rules";
 import {
   VENDOR_COPY, VENDOR_FROM_EMAIL_MAX_BYTES, isVendorPickerType, asVendorQuotes, vendorCompanyIdsOf, newVendorCompanyIds, stampVendorQuotes,
@@ -80,7 +93,56 @@ export async function vendorChecks(ok: Ok) {
 }
 
 export async function vendorDbChecks(ok: Ok) {
-  void ok; // Tasks 2–4 fill this in.
+  const db = await getDb();
+  const dropIdentity = async () => { await db.delete(companies).where(like(companies.id, "TEST348:v%")); };
+  const q = fixtureId(348, "vq1");
+  try {
+    await dropIdentity();
+    const vven1 = fixtureId(348, "vven1"), vven2 = fixtureId(348, "vven2"), vcust = fixtureId(348, "vcust");
+    await saveCompany({ id: vven1, name: "Vendor Co One", type: "vendor/manufacturer", lifecycle: "active", deleted: false });
+    await saveCompany({ id: vven2, name: "Vendor Co Two", type: "Vendor", lifecycle: "active", deleted: false });
+    await saveCompany({ id: vcust, name: "Vendor Test Owner", type: "customer", lifecycle: "active", deleted: false });
+    const quote = { ...buildQuote(q, { name: "Vendor quote test", customer: "Vendor Test Owner", customerId: vcust, value: 1000 }, "system", null, Date.now()),
+      spec: { sections: [{ id: "s1", name: "Sys", items: [{ id: 1, vendorQuoteId: "vqaaaa1" }] }], mobs: [] }, vendorQuotes: [] } as unknown as Quote;
+    await createFixture("quotes", quote as never);
+
+    const prepared = await prepareVendorQuotesForSave<VendorQuoteLike>([], [
+      { id: "vqaaaa1", vendor: "Vendor Co One", vendorCompanyId: vven1 }, { id: "vqaaaa2", vendor: "X", vendorCompanyId: vcust }, { id: "vqaaaa3", vendor: "Y", vendorCompanyId: "TEST348:vnope" },
+    ], 1234);
+    ok(prepared[0].vendorCompanyId === vven1 && !prepared[1].vendorCompanyId && !prepared[2].vendorCompanyId && prepared.every((v) => v.addedAt === 1234), "vendors db: only live vendor-type companies kept on save");
+    const legacy = await prepareVendorQuotesForSave<VendorQuoteLike>([], [{ id: "vqaaaa4", vendor: "Two", vendorCompanyId: vven2 }], 1);
+    ok(legacy[0].vendorCompanyId === vven2, "vendors db: legacy 'Vendor' type is a vendor company");
+
+    const prep1 = prepared.slice(0, 1);
+    const n1 = await addVendorPartiesForSave({ type: "quote", id: q }, [], prep1, "u");
+    const rows1 = (await listFor("quote", q)).filter((p) => p.role === "vendor");
+    ok(n1 === 1 && rows1.length === 1 && rows1[0].companyId === vven1, "vendors db: a vendor quote's company joins as a vendor party");
+    const n2 = await addVendorPartiesForSave({ type: "quote", id: q }, prep1, prep1, "u");
+    ok(n2 === 0 && (await listFor("quote", q)).filter((p) => p.role === "vendor").length === 1, "vendors db: once — a repeat save adds nothing");
+
+    await removeParty(rows1[0].id);
+    const n3 = await addVendorPartiesForSave({ type: "quote", id: q }, prep1, prep1, "u");
+    ok(n3 === 0 && (await listFor("quote", q)).filter((p) => p.role === "vendor").length === 0, "vendors db: a deliberately removed vendor isn't re-added by a later save");
+    const re = await addParty({ recordType: "quote", recordId: q, companyId: vven1, role: "vendor" }, "u");
+    const row = re.ok ? re.party : null;
+
+    await patchDoc<Quote>("quotes", q, (d) => { (d as unknown as { vendorQuotes: unknown }).vendorQuotes = prep1; });
+    const refusal = row ? await vendorPartyRemovalRefusalFor(row) : "no row";
+    await patchDoc<Quote>("quotes", q, (d) => { (d as unknown as { spec: unknown }).spec = { sections: [{ id: "s1", name: "Sys", items: [{ id: 1 }] }], mobs: [] }; });
+    const after = row ? await vendorPartyRemovalRefusalFor(row) : "no row";
+    ok(refusal === "Vendor Co One has a vendor quote on this estimate — delete that vendor quote first." && after === null, "vendors db: removal refused only while a LIVE line names the company");
+
+    const stored = await getQuote(q);
+    const recv = await quotesReceivedFor(vven1);
+    ok(recv.length === 1 && recv[0].quoteId === q && recv[0].addedAt === 1234 && !!stored && recv[0].estimate === displayQuoteNumber(stored), "vendors db: quotes received lists the estimate with the vendor quote");
+    ok((await quotesReceivedFor(vcust)).length === 0, "vendors db: a non-vendor company has no quotes received");
+  } finally {
+    // Party ids are pty_<hash> — not TEST348-prefixed, so dropFixtures(348) skips them: delete this quote's rows directly.
+    const t = DOC_TABLES.record_parties;
+    for (const p of await listFor("quote", q)) await db.delete(t).where(eq(t.id, p.id));
+    await dropFixtures(348);
+    await dropIdentity();
+  }
 }
 
 if (process.argv[1]?.endsWith("test-vendors.ts")) {

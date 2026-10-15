@@ -11,6 +11,7 @@ import { partyVMs } from "@/lib/parties/view-server";
 import { touchAwardedAddressee } from "@/lib/parties/addressee-server";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { withQuoteRowLock } from "@/lib/stores/quotes";
+import { vendorPartyRemovalRefusalFor } from "@/lib/stores/vendor-quotes";
 import { addParty, listFor, removeParty, setPartyContact } from "@/lib/stores/parties";
 
 export type PartyActionResult = { ok: true; parties: PartyVM[]; note?: string } | { ok: false; error: string };
@@ -79,6 +80,9 @@ export async function removePartyAction(id: string): Promise<PartyActionResult> 
     const cur = await getDoc<Party>("record_parties", id);
     if (!cur) return { ok: false, error: "That link no longer exists." };
     if (cur.bid?.result === "awarded") return { ok: false, error: "Undo the award first." };
+    // #348 slice 4: a vendor party can't go while a live vendor quote on the estimate names its company.
+    const vendorRefusal = await vendorPartyRemovalRefusalFor(cur);
+    if (vendorRefusal) return { ok: false, error: vendorRefusal };
     await removeParty(id);
     touch(cur.recordType);
     return { ok: true, parties: await fresh(cur.recordType, cur.recordId) };
