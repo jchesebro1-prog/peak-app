@@ -82,6 +82,7 @@ import { addressStatesForVisits } from "@/lib/address-verify/targets";
 import type { AddressState } from "@/lib/address-verify/types";
 import { FLAG_TEXT } from "@/lib/drive-plan/plan";
 import AddressFlagBadge from "@/components/address-fix/address-flag";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 // Visit schedule/delete actions run their after() drive re-sync (geocode + OSRM + Google writes) inside this invocation — keep the 60s ceiling.
 export const maxDuration = 60;
@@ -144,10 +145,10 @@ export default async function CustomerDetailPage({
     // #341 — threads on this company are linked (customerId), so every
     // teammate sees them, read-only when not their own; one in Deleted (or
     // another person's draft) is not listed (canSeeThread).
-    visibleByCustomer(id, me.name),
+    mailboxViewer(me).then((v) => visibleByCustomer(id, v)), // #349 — by identity
     officesFromSettings(),
     activeUsers(),
-    loadCustomerFeed({ id: cust.id, name: cust.name }, me.id, me.name),
+    loadCustomerFeed({ id: cust.id, name: cust.name }, me.id, me),
     getSettings(),
     getRewardsProgram(),
     // Grid notes #8 — the customer logo on the datasheet book's cover.

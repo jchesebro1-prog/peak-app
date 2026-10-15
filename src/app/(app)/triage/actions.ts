@@ -8,8 +8,7 @@ import { assign as assignThread, get as getThread, setStatus as setThreadStatus 
 import { triageMayActOnThread } from "@/lib/triage/thread-access";
 import { getRecording } from "@/lib/stores/recordings";
 import { dismissActionItem } from "@/lib/krisp/write-back";
-import { activeUsers } from "@/lib/users";
-import { sameName } from "@/lib/quote-approval-rules";
+import { actorByName, mailboxViewer } from "@/lib/mailbox-viewer";
 import { parseTriageKey } from "@/lib/triage/keys";
 import { donePlan } from "@/lib/triage/actions-plan";
 import { slotAt, snapshotId } from "@/lib/triage/clock";
@@ -71,7 +70,7 @@ export async function triageDoneAction(key: string): Promise<Result> {
       // #341 — re-read at action time: still my own thread, or still assigned to me
       const t = await getThread(plan.id);
       if (!t) return { ok: false, error: GONE };
-      if (!triageMayActOnThread(t, user.name)) return { ok: false, error: NOT_YOURS };
+      if (!triageMayActOnThread(t, await mailboxViewer(user))) return { ok: false, error: NOT_YOURS }; // #349 — by identity
       if (!(await setThreadStatus(plan.id, "closed"))) return { ok: false, error: GONE };
     }
     // Lead/quote/visit/renewal "Done for today" intentionally records a mark even for a deleted record (it is hidden anyway).
@@ -133,7 +132,8 @@ export async function triageReassignAction(key: string, assignee: string): Promi
   const k = String(key || "");
   const parsed = parseTriageKey(k);
   if (!parsed || parsed.source !== "email") return { ok: false, error: "Only an email can be reassigned." };
-  const target = (await activeUsers()).find((u) => sameName(u.name, String(assignee || "")));
+  // #349 — the pick becomes an identity: exactly one active teammate by that name
+  const target = await actorByName(String(assignee || ""));
   if (!target) return { ok: false, error: "Pick a teammate." };
   const cur = currentSlot(user.id);
   const row = await listed(user.id, k, cur.now);
@@ -142,9 +142,9 @@ export async function triageReassignAction(key: string, assignee: string): Promi
   // #341 — re-read at action time: still my own thread, or still assigned to me
   const thread = await getThread(parsed.id).catch(() => null);
   if (!thread) return { ok: false, error: GONE };
-  if (!triageMayActOnThread(thread, user.name)) return { ok: false, error: NOT_YOURS };
+  if (!triageMayActOnThread(thread, await mailboxViewer(user))) return { ok: false, error: NOT_YOURS };
   try {
-    await assignThread(parsed.id, target.name);
+    await assignThread(parsed.id, target);
     await setMark({ userId: user.id, key: k, kind: "done", at: cur.now, snapshotId: cur.snapshotId, until: null });
   } catch (error) {
     console.error("triageReassignAction failed", error);

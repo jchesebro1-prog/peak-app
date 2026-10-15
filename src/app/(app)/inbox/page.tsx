@@ -112,6 +112,7 @@ import { leadNumbersFor, quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { assistSettingsOf, assistUiFlags } from "@/lib/assist/config";
 import { getAssistEnv } from "@/lib/assist/key-store";
 import { suggestionReadyHref } from "@/lib/assist/suggest-entry-server";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 export const metadata = { title: "Inbox — Quartzite-6" };
 
@@ -234,6 +235,8 @@ export default async function InboxPage({
   const params = await searchParams;
   const user = await requireUser();
   const me = user.name;
+  // #349 — every ownership check is by identity (id; a legacy name only while unique)
+  const viewer = await mailboxViewer(user);
   const settings = await getSettings();
   // #334 — Assist buttons render only for gated-in users (no provider = none).
   const assistAll = assistUiFlags(user.id, assistSettingsOf(settings), await getAssistEnv());
@@ -301,10 +304,10 @@ export default async function InboxPage({
   // (canOpenThread). Anything else reads as no thread at all. A thread that
   // isn't in their own mailbox opens read-only (reader.readOnly below).
   const threadHit = threadParam ? await getThread(threadParam) : null;
-  const explicitThread = threadHit && canOpenThread(threadHit, me) ? threadHit : null;
+  const explicitThread = threadHit && canOpenThread(threadHit, viewer) ? threadHit : null;
   // deep links carry only ?thread= (global search does) — land in its
   // mailbox, but only ever my own (never switch to someone else's box)
-  if (explicitThread && visibleTo(explicitThread, me) && !params.box && !view && !isMeetings && !isOrganize) {
+  if (explicitThread && visibleTo(explicitThread, viewer) && !params.box && !view && !isMeetings && !isOrganize) {
     box = explicitThread.mailbox === "personal" ? "personal" : explicitThread.mailbox;
     folder = "inbox";
   }
@@ -315,7 +318,7 @@ export default async function InboxPage({
   const draftThread = draftParam ? await getThread(draftParam) : null;
   // #341 — only my own draft opens in the composer
   const openDraftThread =
-    draftThread && draftThread.status === "draft" && visibleTo(draftThread, me) ? draftThread : null;
+    draftThread && draftThread.status === "draft" && visibleTo(draftThread, viewer) ? draftThread : null;
 
   const isView = !!view || isMeetings || isOrganize;
   const isDrafts = !isView && folder === "drafts";
@@ -342,10 +345,10 @@ export default async function InboxPage({
     organizeCounts,
   ] = await Promise.all([
     Promise.resolve(mailboxes(me, boxOpts)),
-    folderCounts("personal", me),
-    needsReplyCount(me),
-    callsCount(me),
-    flaggedCount(me),
+    folderCounts("personal", viewer),
+    needsReplyCount(viewer),
+    callsCount(viewer),
+    flaggedCount(viewer),
     view === "unmatched" ? allThreads() : Promise.resolve([] as CommThread[]),
     followUpCount({ unownedOrMine: true, me }),
     // Unmatched builds its own list from allComms — skip the query it would
@@ -353,7 +356,7 @@ export default async function InboxPage({
     // Organize view (#335) builds its own rows.
     view === "unmatched" || isMeetings || isOrganize
       ? Promise.resolve([] as CommThread[])
-      : threadsIn(view ?? box, view ? "inbox" : folder, me, {
+      : threadsIn(view ?? box, view ? "inbox" : folder, viewer, {
           filter,
           sort: sortParam,
           crmMode,
@@ -373,7 +376,7 @@ export default async function InboxPage({
   // channel, but only the mailbox the signed-in user can see (same rule as
   // every other view), never deleted, never a draft, not already resolved.
   const isUnmatched = (t: CommThread) =>
-    visibleTo(t, me) &&
+    visibleTo(t, viewer) &&
     !t.deleted &&
     t.status !== "draft" &&
     !t.customerId &&
@@ -553,8 +556,8 @@ export default async function InboxPage({
       : t.customer || t.contactName || "Customer";
     const bm = boxMeta(t.mailbox || "personal", t.mailboxUser || undefined, {
       domain,
-      userColor: t.mailboxUser === me ? user.color : undefined,
-      personalAddress: t.mailboxUser === me ? myAddress : undefined,
+      userColor: visibleTo(t, viewer) ? user.color : undefined,
+      personalAddress: visibleTo(t, viewer) ? myAddress : undefined,
     });
     const snip = snippet(t);
     const cat = categoryMeta(t.category);
@@ -690,7 +693,7 @@ export default async function InboxPage({
   const selRaw = isMeetings
     ? null
     : isOrganize
-      ? explicitThread && visibleTo(explicitThread, me) && !explicitThread.deleted ? explicitThread : null
+      ? explicitThread && visibleTo(explicitThread, viewer) && !explicitThread.deleted ? explicitThread : null
       : explicitThread ?? autoThread;
   // #345 — a link the contact matcher stamped to a placeholder company
   // ("UNKNOWN" …) before it learned to skip them reads as no customer here;
@@ -703,13 +706,13 @@ export default async function InboxPage({
     // #341 — a thread outside my own mailbox (linked or assigned to me) is
     // read-only: no reply, status, filing, links, tasks or Assist — every
     // write action refuses it server-side too (lib/inbox-thread-guard.ts).
-    const readOnly = !visibleTo(sel, me);
+    const readOnly = !visibleTo(sel, viewer);
     const sm = statusMeta(sel.status);
     const cm = channelMeta(sel.channel);
     const bm = boxMeta(sel.mailbox || "personal", sel.mailboxUser || undefined, {
       domain,
-      userColor: sel.mailboxUser === me ? user.color : undefined,
-      personalAddress: sel.mailboxUser === me ? myAddress : undefined,
+      userColor: visibleTo(sel, viewer) ? user.color : undefined,
+      personalAddress: visibleTo(sel, viewer) ? myAddress : undefined,
     });
     const resolvedCid = await resolveCustomerId(sel);
     const resolvedCustomer = resolvedCid
@@ -963,7 +966,7 @@ export default async function InboxPage({
 
     // AI daily brief §4 — a fresh, court-me pre-draft of mine (else null). The
     // stored suggestions keep only this dialog's link keys and team ids.
-    const storedDraft = readOnly ? null : readerPreDraft(sel, { id: user.id, name: me });
+    const storedDraft = readOnly ? null : readerPreDraft(sel, viewer);
     const linkKeySet = new Set(taskLinks.map((l) => l.key));
     const teamIds = new Set(roster.map((u) => u.id));
     const preDraft: ReaderVM["preDraft"] = storedDraft

@@ -40,6 +40,7 @@ import {
   resolveCustomerForRow,
   type CustomerRef,
 } from "./link";
+import { retireNameForNewcomer } from "@/lib/mailbox-names";
 
 const YEAR = 365 * 86400000;
 
@@ -1057,6 +1058,8 @@ const WRITERS: Record<string, Writer> = {
       cache.find((u) => (v.email && ci(u.email, v.email)) || ci(u.name, v.name)) || null,
     create: async (v, cache) => {
       const roles = rolesFrom(str(v.roles));
+      // #349 review — a new teammate inherits no older name-only mail carrying their name
+      await retireNameForNewcomer(str(v.name));
       await addUser({
         name: str(v.name),
         email: str(v.email),

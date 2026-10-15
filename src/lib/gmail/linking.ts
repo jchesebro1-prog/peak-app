@@ -17,6 +17,8 @@ import { mintId } from "@/lib/identity/ids";
 import { isPlaceholderCompanyId, placeholderCompanyIds } from "@/lib/identity/companies";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import type { CommLink, CommThread, LinkedBy } from "@/lib/stores/comms";
+import { ownsMailbox, type MailboxViewer } from "@/lib/stores/comms-visibility";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { domainOf, isPublicDomain } from "./config";
 import { claimDomain, customersForDomain, customersForDomains } from "./domains";
 import { resolveSender, type Resolution } from "./resolve";
@@ -111,10 +113,11 @@ function matchesFilter(t: CommThread, f?: { email?: string; domain?: string }): 
 
 /** #341 — which mailbox a resweep may touch. A resweep a PERSON triggered
  *  (adding a contact or customer, claiming a domain, a Gmail label) passes
- *  their own mailbox (`mailboxUser`, a name) or account (`accountKey`); only
- *  a system resweep with no acting user (the import backfill) runs over every
- *  mailbox — and what it links stays private anyway (no `linkedBy`). */
-export type ResweepScope = { mailboxUser?: string; accountKey?: string };
+ *  their own mailbox (`owner`, #349: a MailboxViewer — by identity, never a
+ *  name) or account (`accountKey`); only a system resweep with no acting
+ *  user (the import backfill) runs over every mailbox — and what it links
+ *  stays private anyway (no `linkedBy`). */
+export type ResweepScope = { owner?: MailboxViewer; accountKey?: string };
 
 /** Re-run the resolver over unlinked threads. Idempotent; patches only when
  *  something changes. Resolves in two batched queries (every candidate
@@ -127,14 +130,14 @@ export async function resweepThreads(
   const started = Date.now();
   const sc: ResweepScope = typeof scope === "string" ? { accountKey: scope } : scope ?? {};
   // A blank scope value would read as "everything" — refuse it instead.
-  if (("mailboxUser" in sc && !sc.mailboxUser) || ("accountKey" in sc && !sc.accountKey)) return 0;
+  if (("owner" in sc && !sc.owner?.id) || ("accountKey" in sc && !sc.accountKey)) return 0;
   const all = await listDocs<CommThread>("comms");
   const candidates = all.filter(
     (t) =>
       !t.deleted &&
       !(t.customerId && t.resolution === "linked") &&
       !(sc.accountKey && t.gmailAccountKey !== sc.accountKey) &&
-      !(sc.mailboxUser && !(t.mailbox === "personal" && t.mailboxUser === sc.mailboxUser)) &&
+      !(sc.owner && !ownsMailbox(t, sc.owner)) &&
       matchesFilter(t, filter) &&
       !!resolveAddressFor(t)
   );
@@ -221,8 +224,9 @@ export async function rememberAddress(
   displayName: string,
   contactId: string | null | undefined,
   addedBy: { id: string; name: string },
-  /** #341 — the acting person's mailbox; the backlog resweep touches only it */
-  scope: ResweepScope = { mailboxUser: addedBy.name }
+  /** #341 — the acting person's mailbox; the backlog resweep touches only it
+   *  (default: `addedBy`'s own, by identity — #349) */
+  scope?: ResweepScope
 ): Promise<string> {
   const e = (email || "").trim().toLowerCase();
   if (!e) return "";
@@ -265,7 +269,7 @@ export async function rememberAddress(
   if (d && !isPublicDomain(d) && (await customersForDomain(d)).length === 0) {
     await claimDomain(d, customerId, "learned", addedBy.name);
   }
-  await resweepThreads({ email: e }, scope);
+  await resweepThreads({ email: e }, scope ?? { owner: await mailboxViewer(addedBy) });
   return cid;
 }
 

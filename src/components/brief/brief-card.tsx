@@ -18,6 +18,7 @@ import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import { triageNow } from "@/lib/triage/service";
 import { organizeEntryCounts } from "@/app/(app)/inbox/organize/load";
 import BriefCardView from "./brief-card-view";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 /**
  * AI daily brief — the Home card (spec §4), above Start here. Home mounts it
@@ -94,9 +95,10 @@ async function loadCardVM(user: SessionUser, settings: AssistSettings): Promise<
   }
 
   const threadReady: Record<string, CardThreadReady> = {};
+  const viewer = await mailboxViewer(user); // #349 — assigned to me by identity
   for (const t of threads) {
     if (!t) continue;
-    const pd = readerPreDraft(t, { id: user.id, name: user.name });
+    const pd = readerPreDraft(t, viewer);
     threadReady[t.id] = { draft: flags.reply && !!pd?.reply, tasks: flags.tasks && !!pd?.tasks };
   }
 

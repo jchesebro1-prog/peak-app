@@ -1,10 +1,11 @@
 import { getDocRows } from "@/db/doc-store";
 import type { TaskRecord } from "@/lib/stores/tasks";
 import type { Assignment } from "@/lib/stores/assignments";
-import type { CommThread } from "@/lib/stores/comms";
+import { isAssignedTo, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { normalizeRecording, type RecordingRecord } from "@/lib/stores/recordings";
 import type { Quote } from "@/lib/stores/quotes";
-import { quoteAwaitsApprovalBy, quoteBackFromReview, sameName } from "@/lib/quote-approval-rules";
+import { quoteAwaitsApprovalBy, quoteBackFromReview } from "@/lib/quote-approval-rules";
 import { portalBellGroups } from "@/lib/portal-bell";
 import { parseTriageKey } from "./keys";
 import type { SnapshotRow, TriageSource, TriageUser } from "./types";
@@ -25,7 +26,7 @@ export type LiveDocs = {
  * waiting on me — are hidden on render. Lead / visit / renewal rows stay
  * until their marks or the next snapshot. Pure.
  */
-export function closedKeys(rows: readonly SnapshotRow[], docs: LiveDocs, me: TriageUser, now: number): Set<string> {
+export function closedKeys(rows: readonly SnapshotRow[], docs: LiveDocs, me: TriageUser, now: number, viewer: MailboxViewer): Set<string> {
   const closed = new Set<string>();
   const portalReview = new Set(portalBellGroups([...docs.quotes.values()], me.name, now).review.map((i) => i.id));
   for (const r of rows) {
@@ -44,7 +45,7 @@ export function closedKeys(rows: readonly SnapshotRow[], docs: LiveDocs, me: Tri
       }
       case "email": {
         const t = docs.threads.get(k.id);
-        if (!t || t.status !== "waiting_us" || t.archived || t.deleted || t.gmailInboxed === false || !sameName(t.assignedTo, me.name)) closed.add(r.key);
+        if (!t || t.status !== "waiting_us" || t.archived || t.deleted || t.gmailInboxed === false || !isAssignedTo(t, viewer)) closed.add(r.key); // #349 — by identity
         break;
       }
       case "call": {
@@ -73,13 +74,14 @@ export async function loadClosedKeys(rows: readonly SnapshotRow[], me: TriageUse
       return k && k.source === src ? [k.id] : [];
     });
   const liveMap = <T>(list: Array<{ id: string; deleted: boolean; doc: T }>) => new Map(list.filter((x) => !x.deleted).map((x) => [x.id, x.doc]));
-  const [tasks, assignments, threads, recs, quotes] = await Promise.all([
+  const [tasks, assignments, threads, recs, quotes, viewer] = await Promise.all([
     getDocRows<TaskRecord>("tasks", idsOf("task")),
     getDocRows<Assignment>("assignments", idsOf("assignment")),
     getDocRows<CommThread>("comms", idsOf("email")),
     getDocRows<RecordingRecord>("recordings", idsOf("call")),
     getDocRows<Quote>("quotes", idsOf("quote")),
+    mailboxViewer(me),
   ]);
   const recordings = new Map([...liveMap(recs)].map(([id, d]) => [id, normalizeRecording(d)]));
-  return closedKeys(rows, { tasks: liveMap(tasks), assignments: liveMap(assignments), threads: liveMap(threads), recordings, quotes: liveMap(quotes) }, me, now);
+  return closedKeys(rows, { tasks: liveMap(tasks), assignments: liveMap(assignments), threads: liveMap(threads), recordings, quotes: liveMap(quotes) }, me, now, viewer);
 }

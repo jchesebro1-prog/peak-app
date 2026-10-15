@@ -108,7 +108,7 @@ export async function startInspectionRenewalOutreach(
   if (!id) return;
   let res;
   try {
-    res = await inspectionRenewalOutreach(id, user.name);
+    res = await inspectionRenewalOutreach(id, { id: user.id, name: user.name });
   } catch (error) {
     console.error("startInspectionRenewalOutreach failed", error);
     redirect("/inspections?err=" + encodeURIComponent("Couldn’t prepare that renewal email — please try again."));

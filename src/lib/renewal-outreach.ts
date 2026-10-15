@@ -65,6 +65,7 @@ import { getLiftRate } from "@/lib/service-quote-inputs";
 import { quoteRewardCredit } from "@/lib/rewards/credit-line";
 import { serviceLetterPrice } from "@/lib/rewards/service-credit";
 import { rewardPointsPhrase } from "@/lib/rewards/points";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 /**
  * IDEAS #36 — one-click renewal outreach. The ✉ on a renewal row runs this:
@@ -1009,9 +1010,10 @@ export async function upsertRenewalDraft(opts: {
   to: string;
   copy: Copy;
   attachment: CommAttachment;
-  me: string;
+  /** #349 — the acting person by identity (the draft's owner) */
+  me: { id: string; name: string };
 }): Promise<string> {
-  const existing = opts.me ? await findDraftByLink(opts.linkType, opts.linkId, { mailboxUser: opts.me }) : null;
+  const existing = opts.me?.id ? await findDraftByLink(opts.linkType, opts.linkId, { owner: await mailboxViewer(opts.me) }) : null;
   if (existing) {
     // one renewal, one draft: refresh the quote PDF but never touch the
     // subject/body — template copy is written only on first creation, so
@@ -1030,7 +1032,7 @@ export async function upsertRenewalDraft(opts: {
     // Lands in the sender's own mailbox — the shared Sales box was retired,
     // and a draft filed there would now be invisible to everyone.
     mailbox: "personal",
-    mailboxUser: opts.me,
+    owner: opts.me, // #349 — owned by identity; saveDraft refuses a blank owner
     customerId: opts.customerId,
     customer: opts.customer,
     contactName: opts.contactName,
@@ -1044,7 +1046,6 @@ export async function upsertRenewalDraft(opts: {
       renewal: true,
     },
     attachments: [opts.attachment],
-    me: opts.me,
   });
   return thread.id;
 }
@@ -1055,8 +1056,9 @@ export async function upsertRenewalDraft(opts: {
  */
 export async function flameRenewalOutreach(
   jobId: string,
-  me: string
+  actor: { id: string; name: string }
 ): Promise<RenewalOutreachResult | null> {
+  const me = actor.name;
   const job = await getFlameJob(jobId);
   if (!job || job.stage !== "completed") return null;
 
@@ -1102,7 +1104,7 @@ export async function flameRenewalOutreach(
     to: contact?.email || "",
     copy: template,
     attachment,
-    me,
+    me: actor,
   });
   return { threadId, quoteId: quote.id };
 }
@@ -1113,8 +1115,9 @@ export async function flameRenewalOutreach(
  */
 export async function inspectionRenewalOutreach(
   recordId: string,
-  me: string
+  actor: { id: string; name: string }
 ): Promise<RenewalOutreachResult | null> {
+  const me = actor.name;
   const rec = await getInspection(recordId);
   if (!rec || rec.stage !== "completed") return null;
 
@@ -1159,7 +1162,7 @@ export async function inspectionRenewalOutreach(
     to: rec.contactEmail || "",
     copy: template,
     attachment,
-    me,
+    me: actor,
   });
   return { threadId, quoteId: quote.id };
 }

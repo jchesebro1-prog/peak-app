@@ -29,8 +29,8 @@ export default async function TriagePage({
   const viewingSelf = target.id === user.id;
   const view = await loadTriageView(target, triageNow());
   // #341 — a teammate's list: email rows I can't see myself are "Private email" (redacted here, on the server)
-  const rows = viewingSelf ? view.rows : await redactRowsForViewer(view.rows, user.name);
-  const teammates = roster.map((u) => u.name).filter((n) => n !== user.name);
+  const rows = viewingSelf ? view.rows : await redactRowsForViewer(view.rows, user);
+  const teammates = roster.filter((u) => u.id !== user.id).map((u) => u.name); // #349 — by id, not name
 
   return (
     <HomeTabs active="dashboard">

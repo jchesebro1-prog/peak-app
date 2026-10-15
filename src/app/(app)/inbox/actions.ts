@@ -69,6 +69,7 @@ import {
 } from "@/lib/stores/inspections";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import { ownThread, ownThreadIds } from "@/lib/inbox-thread-guard";
+import { actorByName, mailboxViewer } from "@/lib/mailbox-viewer";
 
 /**
  * Inbox server actions — thin wrappers over the comms store (the prototype's
@@ -98,28 +99,28 @@ function revalidate() {
 
 export async function markReadAction(id: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await markRead(id);
   revalidate();
 }
 
 export async function archiveAction(id: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await archive(id);
   revalidate();
 }
 
 export async function unarchiveAction(id: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await unarchive(id);
   revalidate();
 }
 
 export async function markUnreadAction(id: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await markUnread(id);
   revalidate();
 }
@@ -128,21 +129,21 @@ export async function markUnreadAction(id: string) {
 
 export async function flagAction(id: string, on: boolean) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await setFlag(id, on);
   revalidate();
 }
 
 export async function pinAction(id: string, on: boolean) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await setPin(id, on);
   revalidate();
 }
 
 export async function categoryAction(id: string, key: string | null) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await setCategory(id, key);
   revalidate();
 }
@@ -154,14 +155,14 @@ export async function categoryAction(id: string, key: string | null) {
 
 export async function gmailLabelPickerAction(threadId: string) {
   const user = await requireUser();
-  if (!(await ownThread(threadId, user.name))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
+  if (!(await ownThread(threadId, user))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
   const { labelPicker } = await import("@/lib/gmail/user-labels");
   return labelPicker(threadId, { id: user.id, name: user.name });
 }
 
 export async function setGmailLabelAction(threadId: string, labelId: string, on: boolean) {
   const user = await requireUser();
-  if (!(await ownThread(threadId, user.name))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
+  if (!(await ownThread(threadId, user))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
   const { setThreadLabel } = await import("@/lib/gmail/user-labels");
   const r = await setThreadLabel(threadId, typeof labelId === "string" ? labelId.slice(0, 200) : "", on === true, { id: user.id, name: user.name });
   revalidate();
@@ -170,7 +171,7 @@ export async function setGmailLabelAction(threadId: string, labelId: string, on:
 
 export async function createGmailLabelAction(threadId: string, name: string) {
   const user = await requireUser();
-  if (!(await ownThread(threadId, user.name))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
+  if (!(await ownThread(threadId, user))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
   const { createThreadLabel } = await import("@/lib/gmail/user-labels");
   const r = await createThreadLabel(threadId, typeof name === "string" ? name.slice(0, 400) : "", { id: user.id, name: user.name });
   revalidate();
@@ -181,14 +182,14 @@ export async function createGmailLabelAction(threadId: string, name: string) {
 
 export async function deleteAction(id: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await softDelete(id);
   revalidate();
 }
 
 export async function restoreAction(id: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await restore(id);
   revalidate();
 }
@@ -201,7 +202,7 @@ export async function restoreAction(id: string) {
 /** The selection, cut to the signed-in user's own threads (#341). */
 async function ids(list: string[]): Promise<string[]> {
   const user = await requireUser();
-  return ownThreadIds(list, user.name);
+  return ownThreadIds(list, user);
 }
 
 export async function bulkArchiveAction(list: string[]) {
@@ -292,7 +293,7 @@ export async function searchInboxAction(
   labelId?: string | null
 ): Promise<{ rows: SearchRow[] }> {
   const user = await requireUser();
-  const hits = await searchThreads(query, scope, user.name, labelId);
+  const hits = await searchThreads(query, scope, await mailboxViewer(user), labelId);
   const rows: SearchRow[] = hits.slice(0, 100).map((t) => {
     const icon = channelMeta(t.channel).icon;
     return {
@@ -312,7 +313,7 @@ export async function searchInboxAction(
 
 export async function setStatusAction(id: string, status: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await setStatus(id, status);
   // #335 §4 — Mark replied / Close also archive (same per-user setting as
   // archive-on-reply); best-effort, never fails the status change
@@ -329,15 +330,19 @@ export async function setStatusAction(id: string, status: string) {
 
 export async function reopenAction(id: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await reopen(id);
   revalidate();
 }
 
 export async function assignAction(id: string, name: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
-  await assign(id, name || "");
+  if (!(await ownThread(id, user))) return;
+  // #349 — by identity: the picked name must be exactly one active teammate
+  // (a blank name clears the assignment; an ambiguous one changes nothing)
+  const who = (name || "").trim() ? await actorByName(name) : null;
+  if ((name || "").trim() && !who) return;
+  await assign(id, who);
   revalidate();
 }
 
@@ -359,7 +364,7 @@ export async function setLinkAction(
   adopt?: { customerId: string; customer: string } | null
 ) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   // picking a record on an unlinked thread also adopts the resolved customer
   // (port of Comm Thread onLinkRec)
   if (adopt && adopt.customerId) {
@@ -377,7 +382,7 @@ export async function setMessageLinkAction(
   link: CommLink | null,
 ) {
   const user = await requireUser();
-  const thread = await ownThread(threadId, user.name);
+  const thread = await ownThread(threadId, user);
   if (!thread) return { ok: false as const, error: "Thread not found." };
   if (!(thread.messages || []).some((m) => m.id === messageId))
     return { ok: false as const, error: "Message not found." };
@@ -397,7 +402,7 @@ export async function replyAction(id: string, body: string, signatureHandled?: b
   const user = await requireUser();
   const b = (body || "").trim();
   if (!b) return { ok: false as const };
-  if (!(await ownThread(id, user.name))) return { ok: false as const };
+  if (!(await ownThread(id, user))) return { ok: false as const };
   const profile = await getUser(user.id);
   const out = applyOutboundSignature(b, signatureHandled, profile || { name: user.name, email: user.email });
   // #335 — archive-on-reply runs after the response, off the send's path
@@ -416,7 +421,7 @@ export async function logNoteAction(
   const user = await requireUser();
   const b = (body || "").trim();
   if (!b) return { ok: false as const };
-  if (!(await ownThread(id, user.name))) return { ok: false as const };
+  if (!(await ownThread(id, user))) return { ok: false as const };
   await addMessage(id, {
     direction,
     channel,
@@ -540,7 +545,7 @@ export async function composeSendAction(d: ComposePayload) {
     return { ok: false as const, id: null };
   }
   if (d.id) {
-    if (!(await ownThread(d.id, me))) return { ok: false as const, id: null, error: "Draft not found." };
+    if (!(await ownThread(d.id, user))) return { ok: false as const, id: null, error: "Draft not found." };
     const stale = await staleEstimateDraft(d.id);
     if (stale) return { ok: false as const, id: null, error: stale };
   }
@@ -559,7 +564,7 @@ export async function composeSendAction(d: ComposePayload) {
   } else {
     const rec = await compose({
       mailbox: asMailbox(d.mailbox),
-      mailboxUser: me,
+      owner: { id: user.id, name: me }, // #349 — owned by identity
       cc: d.cc,
       subject: (d.subject || "").trim() || "(no subject)",
       body,
@@ -567,8 +572,6 @@ export async function composeSendAction(d: ComposePayload) {
       customer,
       contactName: d.contactName,
       contactEmail: d.to,
-      assignedTo: me,
-      me,
     });
     id = rec.id;
   }
@@ -580,7 +583,7 @@ export async function saveDraftAction(d: ComposePayload) {
   const user = await requireUser();
   const me = user.name;
   if (d.id) {
-    if (!(await ownThread(d.id, me))) return { ok: false as const, id: null };
+    if (!(await ownThread(d.id, user))) return { ok: false as const, id: null };
     await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body: d.body });
     revalidate();
     return { ok: true as const, id: d.id };
@@ -588,7 +591,7 @@ export async function saveDraftAction(d: ComposePayload) {
   const customer = d.customerId ? await nameFor(d.customerId) : "";
   const rec = await saveDraft({
     mailbox: asMailbox(d.mailbox),
-    mailboxUser: me,
+    owner: { id: user.id, name: me }, // #349 — owned by identity
     to: d.to,
     cc: d.cc,
     subject: d.subject,
@@ -596,7 +599,6 @@ export async function saveDraftAction(d: ComposePayload) {
     customerId: d.customerId || null,
     customer,
     contactName: d.contactName,
-    me,
   });
   revalidate();
   return { ok: true as const, id: rec.id };
@@ -622,6 +624,11 @@ export async function logInteractionAction(d: LogPayload) {
     return { ok: false as const, id: null };
   }
   const customer = await nameFor(d.customerId);
+  // #349 — the assignee by identity: blank = me; a picked name must be
+  // exactly one active teammate
+  const owner = { id: user.id, name: me };
+  const assignee = (d.assignedTo || "").trim() && d.assignedTo !== me ? await actorByName(d.assignedTo) : owner;
+  if (!assignee) return { ok: false as const, id: null };
   // #80: insertWithPrefixedId THROWS once an id collision outlasts its retry
   // budget (doc-store.ts). Rare, but this is a Log button — report it through
   // the failure shape this action already has instead of letting a raw
@@ -630,7 +637,7 @@ export async function logInteractionAction(d: LogPayload) {
   try {
     rec = await create({
       mailbox: "personal",
-      mailboxUser: me,
+      owner,
       customerId: d.customerId,
       customer,
       contactName: d.contactName,
@@ -639,8 +646,7 @@ export async function logInteractionAction(d: LogPayload) {
       channel: d.channel,
       direction: d.direction,
       body: d.body,
-      assignedTo: d.assignedTo || me,
-      me,
+      assignee,
     });
   } catch (err) {
     console.error("logInteractionAction: comm mint failed", err);

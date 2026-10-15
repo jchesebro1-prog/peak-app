@@ -12,8 +12,9 @@
  * Not `import "server-only"`: the package isn't installed in this repo; the
  * `next build` gate catches a client import of this module instead.
  */
-import { getAll as allThreads, visibleTo, type CommThread } from "@/lib/stores/comms";
-import { listDocsByField } from "@/db/doc-store";
+import { ownMailboxCond, visibleTo, type CommThread } from "@/lib/stores/comms";
+import { listDocsWhere } from "@/db/doc-store";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { inInbox, isNoiseRow, isStrongRow, isToFileRow } from "@/lib/inbox-org/apply";
 import { isPlaceholderCompany, withoutPlaceholderCustomer } from "@/lib/inbox-org/placeholder";
 import { placeholderCompanyIds } from "@/lib/identity/companies";
@@ -216,13 +217,15 @@ export function buildReaderOrg(
   };
 }
 
-/** The Organize view for `me`: one comms scan, then the pure builder. */
+/** The Organize view for `me`: my own mailbox (#349 — by identity, cut in
+ *  SQL by ownMailboxCond and re-checked), then the pure builder. */
 export async function loadOrganize(
-  me: { name: string },
+  me: { id: string; name: string },
   tab: OrganizeTab,
   opts: { customers: Array<{ id: string; name: string }>; isAdmin: boolean; baseHref?: string }
 ): Promise<OrganizeVM> {
-  const mine = (await allThreads()).filter((t) => visibleTo(t, me.name));
+  const viewer = await mailboxViewer(me);
+  const mine = (await listDocsWhere<CommThread>("comms", ownMailboxCond(viewer))).filter((t) => visibleTo(t, viewer));
   const names = new Map(opts.customers.map((c) => [c.id, c.name]));
   return buildOrganizeVM(mine, {
     tab,
@@ -238,14 +241,16 @@ export async function loadOrganize(
  *  strong (Approve all strong's rows) and Noise counts — one comms scan, the
  *  same rules as the Organize tabs; a strong suggestion under a placeholder
  *  company ("UNKNOWN" …) isn't strong, as in the Organize view. */
-export async function organizeEntryCounts(me: { name: string }): Promise<{ toFile: number; strong: number; noise: number }> {
+export async function organizeEntryCounts(me: { id: string; name: string }): Promise<{ toFile: number; strong: number; noise: number }> {
   let toFile = 0;
   let noise = 0;
   const strongRows: CommThread[] = [];
-  // #347 review — my own mailbox only, cut in SQL (doc->>'mailboxUser'); the
-  // Home brief card reads this on every load, so never the whole collection
-  for (const t of await listDocsByField<CommThread>("comms", "mailboxUser", [me.name])) {
-    if (!visibleTo(t, me.name)) continue;
+  // #347 review — my own mailbox only, cut in SQL (#349: ownMailboxCond, by
+  // identity); the Home brief card reads this on every load, so never the
+  // whole collection
+  const viewer = await mailboxViewer(me);
+  for (const t of await listDocsWhere<CommThread>("comms", ownMailboxCond(viewer))) {
+    if (!visibleTo(t, viewer)) continue;
     if (isToFileRow(t)) {
       toFile++;
       if (isStrongRow(t)) strongRows.push(t);

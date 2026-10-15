@@ -41,9 +41,9 @@ import { draftReplyForThread, type AssistFailKind, type ThreadAssistFail } from 
 import { suggestTasksForThread } from "@/lib/assist/tasks-server";
 import { passHasFallback } from "@/lib/inbox-org/ai-pass";
 import { onMyCourt } from "@/lib/triage/feeds/email";
-import { sameName } from "@/lib/quote-approval-rules";
 import { signatureFor } from "@/lib/stores/signatures";
-import { casPreDraftKey, get as getThread, getAll as allThreads, lastInbound, visibleTo, waitingSince, type CommThread } from "@/lib/stores/comms";
+import { casPreDraftKey, get as getThread, getAll as allThreads, isAssignedTo, lastInbound, visibleTo, waitingSince, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { casAssistNudgeKey, get as getQuote, getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
 import { mergeRunDetail, monthSpend } from "@/lib/stores/assist-runs";
 import { PREDRAFT_RUN_KEY } from "./report-keys";
@@ -116,7 +116,7 @@ export function resetDraftQueue(): void {
 }
 
 /** My court-me threads (the triage email feed's rule, in my own mailbox), oldest wait first. */
-export function courtMeThreads(threads: readonly CommThread[], me: { name: string }): CommThread[] {
+export function courtMeThreads(threads: readonly CommThread[], me: MailboxViewer): CommThread[] {
   const out: Array<{ t: CommThread; since: number }> = [];
   for (const t of threads) {
     if (!isCourtMe(t, me)) continue;
@@ -125,9 +125,10 @@ export function courtMeThreads(threads: readonly CommThread[], me: { name: strin
   return out.sort((a, b) => a.since - b.since || a.t.id.localeCompare(b.t.id)).map((x) => x.t);
 }
 
-function isCourtMe(t: CommThread, me: { name: string }): boolean {
+function isCourtMe(t: CommThread, me: MailboxViewer): boolean {
   if (t.channel !== "email" || t.deleted || t.archived || t.gmailInboxed === false) return false;
-  if (!visibleTo(t, me.name) || !sameName(t.assignedTo, me.name) || !onMyCourt(t)) return false;
+  // #349 — my own mailbox and assigned to me, both by identity
+  if (!visibleTo(t, me) || !isAssignedTo(t, me) || !onMyCourt(t)) return false;
   return !!newestInboundId(t);
 }
 
@@ -246,7 +247,7 @@ export async function runDraftQueue(
     if (!user || user.status !== "active") return { ...res, skipped: "gated" };
     if (guarded) lastStart.set(ownerId, clock());
 
-    const me = { id: user.id, name: user.name };
+    const me = await mailboxViewer({ id: user.id, name: user.name }); // #349 — identity
     const runDeps: RunDeps = { ...(deps.run ?? {}), settings, env, ...(deps.now !== undefined ? { now: deps.now } : {}) };
     const deadline: CallDeadline = { at: opts.deadlineMs, hasFallback: passHasFallback(env, deps.run), minCallMs: DRAFT_MIN_CALL_MS, clock };
     const leaseUntil = opts.deadlineMs + DRAFT_LEASE_GRACE_MS;

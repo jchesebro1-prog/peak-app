@@ -328,7 +328,7 @@ export async function triageFeedChecksA(ok: Ok): Promise<void> {
       thread("C-8", THU_9, { link: { type: "lead", id: "L-1" } }),
     ],
     deals,
-    { me: ME, now: MON_10 }
+    { viewer: { id: ME.id, name: ME.name, nameUnique: true }, now: MON_10 } // #349 — the viewer's identity
   );
   ok(em.map((c) => c.key).join(",") === "email:C-1,email:C-2,email:C-3,email:C-8", "email feed: only my waiting, inboxed, unarchived threads");
   ok(
@@ -568,7 +568,8 @@ export async function triageSnapshotChecks(ok: Ok): Promise<void> {
       quotes: new Map([["Q1", { id: "Q1", owner: "Someone Else", status: "draft", review: { state: "approved" } } as unknown as Quote]]),
     },
     ME,
-    MON_10
+    MON_10,
+    { id: ME.id, name: ME.name, nameUnique: true } // #349 — the viewer's identity
   );
   ok([...closed].sort().join(",") === "call:R1:k1,email:C1,email:C3,quote:Q1,task:T1", "liveness: a done task, replied or Gmail-disposed thread, decided to-do and approved quote are hidden; open ones and leads stay");
 
@@ -814,7 +815,7 @@ export async function triageActionChecks(ok: Ok): Promise<void> {
   const exportsN = (actions.match(/export async function /g) || []).length;
   ok(actions.startsWith('"use server";') && exportsN === 4 && (actions.match(/await requireUser\(\)/g) || []).length === exportsN, "actions: a server-action file; every action calls requireUser() first");
   ok((actions.match(/await listed\(user\.id, k, cur\.now\)/g) || []).length === 4 && (actions.match(/error: NOT_LISTED/g) || []).length >= 4 && /isn't on your list/.test(actions), "actions: done, snooze, dismiss and reassign each confirm the key is on the signed-in user's snapshot first");
-  ok(/dismissActionItem\(/.test(actions) && /assignThread\(/.test(actions) && /sameName\(u\.name, /.test(actions), "actions: dismissing a call to-do dismisses it on its recording; reassign only to an active teammate");
+  ok(/dismissActionItem\(/.test(actions) && /assignThread\(/.test(actions) && /const target = await actorByName\(/.test(actions), "actions: dismissing a call to-do dismisses it on its recording; reassign only to an active teammate (#349: exactly one, by identity)");
   const rowsSrc = readFileSync("src/components/triage/triage-rows.tsx", "utf8");
   const importLines = rowsSrc.split("\n").filter((l) => l.startsWith("import "));
   ok(

@@ -44,6 +44,8 @@ import { sanitizeReviewLimits, type ReviewLimits } from "@/lib/review-limits";
 import { countSitesByVenueKind, storedSiteVenueKinds } from "@/lib/identity/sites";
 import { rederiveVenueNamesForTypes } from "@/lib/identity/venue-save";
 import { withTransaction } from "@/db";
+import { foldTeamName, teamNameError } from "@/lib/team-names";
+import { handOverNameOnly, retireNameForNewcomer } from "@/lib/mailbox-names";
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
@@ -87,7 +89,11 @@ export async function addUserAction(input: {
 }) {
   await requirePerm("manage_users");
   const name = (input.name || "").trim();
-  if (!name) return { ok: false as const, error: "Name is required." };
+  // #349 — never blank, never another teammate's name (mailboxes follow identity)
+  const nameError = teamNameError(name, await allUsers());
+  if (nameError) return { ok: false as const, error: nameError };
+  // #349 review — a newcomer inherits no older name-only mail that carries this name
+  await retireNameForNewcomer(name);
   await addUser({
     name,
     email: (input.email || "").trim(),
@@ -123,7 +129,27 @@ export async function updateMemberAction(
 ) {
   await requirePerm("manage_users");
   const clean: Parameters<typeof updateUser>[1] = {};
-  if (patch.name !== undefined && patch.name.trim()) clean.name = patch.name.trim();
+  if (patch.name !== undefined) {
+    // #349 — a rename is refused when blank or another teammate's name; an
+    // unchanged name (even one that is already a duplicate) never blocks the
+    // rest of the edit. "Changed" is the trimmed, whitespace-collapsed value
+    // (a case-only rename saves); the fold is only the duplicate check.
+    const next = patch.name.trim().replace(/\s+/g, " ");
+    if (!next) return { ok: false as const, error: "Name is required." };
+    const current = await getUser(id);
+    const users = await allUsers();
+    const nameError = foldTeamName(next) !== foldTeamName(current?.name) ? teamNameError(next, users, id) : null;
+    if (nameError) return { ok: false as const, error: nameError };
+    if (current && next !== current.name) {
+      clean.name = next;
+      const renameFrom = { id: current.id, name: current.name };
+      // #349 review — BEFORE the rename: the old name's name-only mail is pinned to
+      // this user (their name alone) or to nobody (a shared name), and anything
+      // already carrying the new name is retired — a rename never moves mail
+      await handOverNameOnly(renameFrom, users.map((u) => ({ id: u.id, name: u.name })));
+      await retireNameForNewcomer(next);
+    }
+  }
   if (patch.email !== undefined) clean.email = patch.email.trim();
   if (patch.googleEmail !== undefined) clean.googleEmail = patch.googleEmail.trim() || null;
   if (patch.title !== undefined) clean.title = patch.title.trim() || null;

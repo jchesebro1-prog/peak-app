@@ -27,6 +27,7 @@ import { normalizeAssessment } from "@/lib/stores/assessments";
 import { normalizeFinding } from "@/lib/stores/findings";
 import { sitesForCompanies } from "@/lib/identity/sites";
 import { assessmentSearchResult, findingSearchResult, matchesAssessment, matchesFinding } from "@/lib/assessments/integration";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 /**
  * Global nav search (⌘K) — port of Nav.dc.html's search sources:
@@ -77,7 +78,8 @@ function staffLabelText(p: SearchPartLike): string {
  * The ⌘K search's groups for `rawQ` as `me` may see them (meetings through
  * canSeeMeeting, email threads through canSeeThread). The query is trimmed
  * and lower-cased; under 2 characters there are no groups. `me.id` scopes
- * meetings, `me.name` email threads (mailboxUser / assignedTo hold names).
+ * meetings and (#349) email threads — by identity, the name only for a legacy
+ * thread no other user's name matches (mailboxViewer).
  *
  * #341 — email-thread candidates are cut to the threads `me` may see — my
  * own mailbox's, ones assigned to me, and ones linked to an entity; never one
@@ -94,12 +96,12 @@ export async function globalSearch(
   me: { id: string; name?: string | null },
   opts: GlobalSearchOpts = {}
 ): Promise<Group[]> {
-  const meName = me.name || "";
   const q = (rawQ || "")
     .trim()
     .toLowerCase();
   if (q.length < 2) return [];
   const meId = me.id;
+  const viewer = await mailboxViewer({ id: me.id, name: me.name || "" });
 
   // Pull only a small candidate set per table from SQL (matches anywhere in
   // the doc), then apply the precise per-field filter below. Avoids
@@ -113,7 +115,7 @@ export async function globalSearch(
       searchDocs("inspections", q, CANDIDATES),
       searchDocs<CommThread & Doc>("comms", q, CANDIDATES, {
         ...(opts.emailOnly ? { fieldEquals: { channel: "email" } } : {}),
-        where: canSeeThreadCond(meName),
+        where: canSeeThreadCond(viewer),
       }),
       allCompanies(),
       allContacts(),
@@ -253,7 +255,7 @@ export async function globalSearch(
     "Email threads",
     comms
       // #341 — the SQL cut above, re-checked row by row (one rule, comms-visibility.ts)
-      .filter((d) => canSeeThread(d, meName))
+      .filter((d) => canSeeThread(d, viewer))
       .filter((d) => matches(q, d.subject, d.customer, d.contactName, d.contactEmail))
       .map((d) => ({
         id: d.id,

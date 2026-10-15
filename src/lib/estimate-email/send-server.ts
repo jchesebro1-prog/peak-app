@@ -19,6 +19,7 @@ import { createTask } from "@/lib/stores/tasks";
 import { can } from "@/lib/team";
 import { activeUsers, getUser } from "@/lib/users";
 import { attachmentsFit, bodyWithLink, coverPdfHref, estimateDraftIsCurrent, FOLLOW_UP_CHOICES, parseRecipients, withoutAddresses } from "./compose";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 /**
  * Estimator Phase 3 (spec §10.1, §10.3) — email the estimate from the
@@ -144,6 +145,8 @@ export type EstimateEmailInput = {
 
 export type ThreadSpec = {
   mailboxUser: string;
+  /** #349 — the sender's users.id: the thread's owner (identity, never the name). */
+  mailboxOwnerId: string;
   customerId: string | null;
   customer: string;
   contactName: string;
@@ -188,7 +191,7 @@ export type EstimateEmailDeps = {
    *  the stored path, or null when storage is unavailable / the write failed. */
   storeCover: (quoteId: string, bytes: Buffer, now: number) => Promise<string | null>;
   /** The sender's newest unsent Inbox draft linked to this quote (Open in Inbox reuses it). */
-  findInboxDraft: (quoteId: string, mailboxUser: string) => Promise<InboxDraftRef | null>;
+  findInboxDraft: (quoteId: string, owner: { id: string; name: string }) => Promise<InboxDraftRef | null>;
   /** Take the quote's one in-flight send (Quote.emailSending). */
   claimSend: (id: string, by: string, now: number) => Promise<{ ok: true; claim: EstimateEmailClaim } | { ok: false; reason: "busy" | "gone" }>;
   releaseSend: (id: string, claim: EstimateEmailClaim) => Promise<void>;
@@ -476,6 +479,7 @@ async function threadSpecFor(deps: EstimateEmailDeps, actor: SendActor, p: Prepa
   const q = m.q;
   return {
     mailboxUser: actor.name,
+    mailboxOwnerId: actor.id,
     customerId: q.customerId ?? null,
     customer: q.customer || "",
     contactName: q.contactName || "",
@@ -643,7 +647,7 @@ export async function openEstimateInInbox(
  */
 async function reuseInboxDraft(deps: EstimateEmailDeps, actor: SendActor, quoteId: string): Promise<OpenInInboxResult | null> {
   try {
-    const d = await deps.findInboxDraft(quoteId, actor.name);
+    const d = await deps.findInboxDraft(quoteId, { id: actor.id, name: actor.name });
     if (!d) return null;
     const q = await deps.getQuote(quoteId);
     const rev = q ? latestSentRevision(q.revisions) : null;
@@ -711,8 +715,9 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
         return null;
       }
     },
-    findInboxDraft: async (quoteId, mailboxUser) => {
-      const t = await findDraftByLink("quote", quoteId, { mailboxUser });
+    findInboxDraft: async (quoteId, owner) => {
+      // #349 — the sender's own drafts, by identity
+      const t = await findDraftByLink("quote", quoteId, { owner: await mailboxViewer(owner) });
       return t ? { threadId: t.id, createdAt: t.createdAt, attachments: t.draft?.attachments || [] } : null;
     },
     claimSend: (id, by, now) => claimEstimateEmailSend(id, by, now),
@@ -729,7 +734,7 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
     },
     createAndSendThread: async (spec) => {
       const connected = await gmailConnectedFor(opts.actor.id);
-      const draft = await saveDraft({ ...draftInput(spec), me: spec.mailboxUser });
+      const draft = await saveDraft(draftInput(spec));
       try {
         const sent = await sendDraft(draft.id, spec.mailboxUser, { stampAddresses: true });
         if (!sent) throw new Error("the draft vanished before it was sent");
@@ -744,7 +749,7 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
       if (delivery !== "gmail") await holdOutbound(draft.id, delivery);
       return { threadId: draft.id, delivery };
     },
-    createDraftThread: async (spec) => ({ threadId: (await saveDraft({ ...draftInput(spec), me: spec.mailboxUser })).id }),
+    createDraftThread: async (spec) => ({ threadId: (await saveDraft(draftInput(spec))).id }),
     recordEmail: recordEstimateEmail,
     addFollowUpTask: (spec, actor) => createTask(spec, { id: actor.id, name: actor.name }),
     roster: async () => (await activeUsers()).map((u) => ({ id: u.id, name: u.name, status: u.status })),
@@ -808,7 +813,7 @@ export async function deliveryAfterSend(connected: boolean, readThread: () => Pr
 function draftInput(spec: ThreadSpec) {
   return {
     mailbox: "personal" as const,
-    mailboxUser: spec.mailboxUser,
+    owner: { id: spec.mailboxOwnerId, name: spec.mailboxUser }, // #349 — owned by identity
     customerId: spec.customerId,
     customer: spec.customer,
     contactName: spec.contactName,

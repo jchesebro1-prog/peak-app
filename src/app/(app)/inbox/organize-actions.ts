@@ -29,6 +29,7 @@ import { customerRecordCandidates, likelyFilingCustomer } from "@/lib/inbox-org/
 import { filingSenderOf } from "@/lib/inbox-org/pipeline";
 import { get as getThread, visibleTo } from "@/lib/stores/comms";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 /** #335 Inbox organization — run the time-boxed AI pass over my own
  *  pendingAi threads now (the Organize view's "Sync now"-style button).
@@ -202,7 +203,7 @@ export async function filingRecordsAction(
 > {
   const me = await requireUser();
   const t = await getThread(str(threadId));
-  if (!t || t.deleted || t.status === "draft" || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
+  if (!t || t.deleted || t.status === "draft" || !visibleTo(t, await mailboxViewer(me))) return { ok: false, error: "Thread not found." };
   let cid = str(customerId);
   if (!cid) cid = (await likelyFilingCustomer(t, filingSenderOf(t, await loadOrgContext()))) || "";
   if (!cid) return { ok: true, customer: null, records: [] };

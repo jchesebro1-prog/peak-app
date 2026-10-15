@@ -21458,9 +21458,9 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
   ok(names214.every((n) => fn214(n).includes("await requireUser()")), "#214 actions: every popup action requires a signed-in user");
   ok(
     ["linkPopupDataAction", "fetchMessageCcAction", "fillContactBlanksAction"].every((n) => fn214(n).includes("loadThread(")) &&
-      acts214.includes("if (!t || !visibleTo(t, me.name)) return { ok: false, error: \"Thread not found.\" };") &&
-      fn214("setThreadContactsAction").includes("visibleTo(t, me.name)"),
-    "#214 actions: thread actions only reach threads in the user's own mailbox"
+      acts214.includes("const t = await ownThread(threadId, me);") && acts214.includes("if (!t) return { ok: false, error: \"Thread not found.\" };") &&
+      fn214("setThreadContactsAction").includes("await ownThread(threadId, me)"),
+    "#214 actions: thread actions only reach threads in the user's own mailbox (#349: ownThread, by identity)"
   );
   // #341 — thread visibility: the reader opens only what canOpenThread allows,
   // read-only off-mailbox; ⌘K's thread candidates follow canSeeThread in SQL.
@@ -21468,13 +21468,14 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
   const reader340 = read("src/app/(app)/inbox/thread-reader.tsx");
   const search340 = read("src/lib/search/global-search.ts");
   ok(
-    /const explicitThread = threadHit && canOpenThread\(threadHit, me\) \? threadHit : null;/.test(inbox340) &&
-      /if \(explicitThread && visibleTo\(explicitThread, me\) && !params\.box/.test(inbox340) &&
-      /draftThread && draftThread\.status === "draft" && visibleTo\(draftThread, me\)/.test(inbox340),
+    /const explicitThread = threadHit && canOpenThread\(threadHit, viewer\) \? threadHit : null;/.test(inbox340) &&
+      /if \(explicitThread && visibleTo\(explicitThread, viewer\) && !params\.box/.test(inbox340) &&
+      /draftThread && draftThread\.status === "draft" && visibleTo\(draftThread, viewer\)/.test(inbox340) &&
+      /const viewer = await mailboxViewer\(user\);/.test(inbox340),
     "#341 reader: ?thread= opens only a thread the viewer may see (canOpenThread), never switches to another person's box, and ?draft= opens only my own draft"
   );
   ok(
-    /const readOnly = !visibleTo\(sel, me\);/.test(inbox340) &&
+    /const readOnly = !visibleTo\(sel, viewer\);/.test(inbox340) &&
       /unread: readOnly \? false : !!sel\.unread,/.test(inbox340) &&
       /org: readOnly \? null : org,/.test(inbox340) &&
       /visit: readOnly \? null : visit,/.test(inbox340) &&
@@ -21488,8 +21489,9 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
     "#341 reader: a read-only thread shows the banner and no write control — no actions/composer footer (reply, status, archive, Assist, pre-draft), no link sidebar, no per-message Link… / Task… / link picker, no court strip, and no mark-read"
   );
   ok(
-    /where: canSeeThreadCond\(meName\),/.test(search340) &&
-      /\.filter\(\(d\) => canSeeThread\(d, meName\)\)/.test(search340) &&
+    /where: canSeeThreadCond\(viewer\),/.test(search340) &&
+      /\.filter\(\(d\) => canSeeThread\(d, viewer\)\)/.test(search340) &&
+      /const viewer = await mailboxViewer\(\{ id: me\.id, name: me\.name \|\| "" \}\);/.test(search340) &&
       !/threadsOf/.test(search340),
     "#341 ⌘K: email-thread candidates are cut to canSeeThread in SQL before the per-group limit, and re-checked per row"
   );
@@ -55687,10 +55689,10 @@ async function p3SendAsyncChecks(): Promise<void> {
       "#P3 send (fix round 2): happy path — the send claim first (after the cheap preflight), then signature, attachments, mark sent, the link, the email, record, the follow-up, and the claim released last");
     ok(f.st.released.length === 1 && f.st.released[0] === f.st.claims[0] && f.st.claims[0]?.by === "Sam Mills", "#P3 send fix: the claim taken is the claim released (on success)");
     ok(f.st.asOf.join() === "77", "#P3 send: mark sent passes the shown version (asOf) to the approval gate");
-    const t = f.st.threads[0] ?? ({ body: "", to: "", cc: "", mailboxUser: "", customerId: null, contactName: "", customer: "", subject: "", link: { type: "", id: "" }, attachments: [] } as P3sThread);
+    const t = f.st.threads[0] ?? ({ body: "", to: "", cc: "", mailboxUser: "", mailboxOwnerId: "", customerId: null, contactName: "", customer: "", subject: "", link: { type: "", id: "" }, attachments: [] } as P3sThread);
     ok(t.body === "Hi Pat,\n\nView it here: " + URL + "\n\nThanks,\nSam\n\n-- \nSam Mills · Peak" && !t.body.includes("{link}"), "#P3 send: {link} becomes the absolute client-link URL; the sender's signature is applied (Inbox rule)");
-    ok(t.to === "pat@school.org, ops@school.org" && t.cc === "lee@peak.com" && t.mailboxUser === "Sam Mills" && t.customerId === "co-1" && t.contactName === "Pat Rivera",
-      "#P3 send: the thread holds the FULL To line, the Cc, the sender's personal box and the quote's customer + contact");
+    ok(t.to === "pat@school.org, ops@school.org" && t.cc === "lee@peak.com" && t.mailboxUser === "Sam Mills" && t.mailboxOwnerId === "u1" && t.customerId === "co-1" && t.contactName === "Pat Rivera",
+      "#P3 send: the thread holds the FULL To line, the Cc, the sender's personal box (#349 — owned by the sender's id) and the quote's customer + contact");
     ok(t.link.type === "quote" && t.link.id === "Q-P3S" && t.link.label === "EST-1042 · North HS Auditorium", "#P3 send: the thread links the quote as `<EST number> · <project name>`");
     const [estA, covA] = t.attachments;
     ok(t.attachments.map((a) => a.name).join("|") === "EST-1042.pdf|EST-1042 Cover.pdf" && t.attachments.every((a) => a.mime === "application/pdf") &&
@@ -56083,7 +56085,7 @@ async function p3SendAsyncChecks(): Promise<void> {
     // I3b — Open in Inbox reuses the sender's own still-current draft for the quote.
     const draftOf = (createdAt: number, paths: string[]) => ({ threadId: "C-OPEN", createdAt, attachments: paths.map((pdfPath) => ({ pdfPath })) });
     const cur = fakes(sentRev);
-    cur.deps.findInboxDraft = async (qid, who) => { cur.calls.push(`findInboxDraft:${qid}:${who}`); return draftOf(600, ["quote-pdfs/Q-P3S/rev-2.pdf", `quote-pdfs/Q-P3S/cover-${NOW}.pdf`]); };
+    cur.deps.findInboxDraft = async (qid, who) => { cur.calls.push(`findInboxDraft:${qid}:${who.name}`); return draftOf(600, ["quote-pdfs/Q-P3S/rev-2.pdf", `quote-pdfs/Q-P3S/cover-${NOW}.pdf`]); };
     const rc = await p3sOpenInbox(cur.deps, SAM, "Q-P3S", input());
     ok(rc.ok && rc.reused === true && rc.href === p3sHref("C-OPEN") && rc.threadId === "C-OPEN" && rc.status === "sent",
       "#P3 final review (I3b): Open in Inbox with the sender's still-current draft open → that draft's link");
@@ -56174,7 +56176,6 @@ async function p3TrackAsyncChecks(): Promise<void> {
       getQuote: async (id) => (quote && id === quote.id ? quote : null),
       getThread: async (id) => threads.get(id) ?? null,
       applySignature: async (body) => { calls.push("applySignature"); return body + "\n\n-- \nSam Mills"; },
-      userIdByName: async (n) => (n === "Sam Mills" ? "u1" : null),
       gmailConnected: async () => gmail,
       reply: async (id, body, me) => {
         calls.push("reply"); replies.push({ id, body, me });
@@ -56367,7 +56368,6 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
       getQuote: async (id) => (id === "Q-P3F" ? quote() : null),
       getThread: async (id) => threads.get(id) ?? null,
       applySignature: async (b) => { calls.push("applySignature"); return b; },
-      userIdByName: async (n) => ({ "Sam Mills": "u1", "Eve Estimator": "u2" } as Record<string, string>)[n] ?? null,
       gmailConnected: async (uid) => { connectedFor.push(uid); return uid === "u1"; },
       reply: async (id, body, me) => {
         calls.push("reply");
@@ -56405,7 +56405,7 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
     const r = await p3tMarkReadAs(f.deps, SENDER, "Q-P3F", "C-A");
     ok(!r.ok && r.error === "Only Sam Mills can mark this read." && r.error === P3T.notOwnerRead("Sam Mills"), "#P3 track fix: a non-owner can't mark an email read — named refusal");
     ok(f.calls.length === 0 && f.threads.get("C-A")!.unread === true, "#P3 track fix: a refused non-owner mark read writes nothing");
-    const adm = await p3tMarkReadAs(f.deps, { name: "Ann Admin" }, "Q-P3F", "C-A");
+    const adm = await p3tMarkReadAs(f.deps, { id: "u5", name: "Ann Admin" }, "Q-P3F", "C-A");
     ok(!adm.ok && f.calls.length === 0, "#P3 track fix: an Admin can't mark someone else's mailbox read either");
     const gone = await p3tMarkReadAs(f.deps, SENDER, "Q-P3F", "C-NOPE");
     ok(!gone.ok && gone.error === "Not found." && f.calls.length === 0, "#P3 track fix: a foreign thread still reads Not found. (no oracle)");
@@ -56419,10 +56419,16 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
     const r = await p3tReply(f.deps, OWNER, "Q-P3F", "C-A", "On it.");
     ok(r.ok && r.delivery === "gmail" && f.connectedFor.join() === "u1" && f.threads.get("C-A")!.messages.length === 3 && f.threads.get("C-A")!.messages[2].author === "Sam Mills" && f.calls.join() === "applySignature,reply,markRead",
       "#P3 track fix: the owner's reply goes out as the owner, delivery looked up for the owner's id, thread read afterwards");
-    const g = fakes();
-    g.deps.userIdByName = async () => null;
+    // #349 — ownership is by identity: a thread stamped with the owner's id is theirs whatever its display name says
+    const g = fakes([{ ...mk("C-A", true, "Old Name"), mailbox: "personal", mailboxOwnerId: "u1" } as FThread, mk("C-B", false, "Sam Mills")]);
     const ru = await p3tReply(g.deps, OWNER, "Q-P3F", "C-A", "On it.");
-    ok(ru.ok && g.connectedFor.join() === "u1", "#P3 track fix: an owner name off the roster falls back to the actor's own id (the actor IS the owner)");
+    ok(ru.ok && g.connectedFor.join() === "u1", "#P3 track fix (#349): the owner by id (the stamp), delivery looked up for the owner's own id");
+    const dup = fakes();
+    dup.deps.roster = async () => [{ id: "u1", name: "Sam Mills", status: "active" }, { id: "u7", name: "Sam Mills", status: "archived" }, { id: "u4", name: "Lee Lead", status: "active" }];
+    const rd2 = await p3tReply(dup.deps, OWNER, "Q-P3F", "C-A", "On it.");
+    ok(!rd2.ok && rd2.error === P3T.notOwnerReply("Sam Mills") && dup.calls.length === 0, "#349: a legacy name-only thread whose name two users hold has no owner — even its namesake can't reply");
+    const imp = await p3tReply(fakes([{ ...mk("C-A", true, "Sam Mills"), mailbox: "personal", mailboxOwnerId: "u8" } as FThread, mk("C-B", false)]).deps, OWNER, "Q-P3F", "C-A", "Hi");
+    ok(!imp.ok && imp.error === P3T.notOwnerReply("Sam Mills"), "#349: a thread stamped with another user's id is not mine though it carries my name");
   }
 
   // Message text visibility.
@@ -56464,9 +56470,9 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
     const src = readFileSync(join(process.cwd(), "src/lib/estimate-email/send-server.ts"), "utf8");
     ok(src.includes("const delivery = await deliveryAfterSend(connected, () => getThread(draft.id));"), "#P3 track fix: createAndSendThread goes through the guarded helper");
     const track = readFileSync(join(process.cwd(), "src/lib/estimate-email/track-server.ts"), "utf8");
-    ok(track.includes("userIdByName") && track.includes("gmailConnected((await deps.userIdByName(owner)) ?? actor.id)"), "#P3 track fix: delivery is computed for the thread owner");
+    ok(!track.includes("userIdByName") && track.includes("gmailConnected(actor.id)") && track.includes("ownedBy(raw, await viewerOf(deps, actor))"), "#P3 track fix (#349): delivery is computed for the thread owner — the actor, checked by id");
     const act = readFileSync(join(process.cwd(), "src/app/(app)/estimator/send-actions.ts"), "utf8");
-    ok(act.includes("trackEstimate(liveTrackDeps(), { id: user.id, name: user.name, roles: user.roles }") && act.includes("markEstimateEmailRead(liveTrackDeps(), { name: user.name }"), "#P3 track fix: the wrappers pass the viewer / actor");
+    ok(act.includes("trackEstimate(liveTrackDeps(), { id: user.id, name: user.name, roles: user.roles }") && act.includes("markEstimateEmailRead(liveTrackDeps(), { id: user.id, name: user.name }"), "#P3 track fix: the wrappers pass the viewer / actor");
   }
 }
 
@@ -56701,7 +56707,7 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
       ok((await C.holdLastOutbound(T2, "failed")) === null && !(await C.get(T2))!.messages[0].noAutoRetry, "#P3 final review (I1, DB): a Gmail-delivered message is never stamped");
       const live = S.liveEstimateEmailDeps({ origin: "https://app.test", host: null, proto: null, actor: { id: "u-p3f-none", name: "Spec P3F Sender", roles: ["Admin"] } });
       const sent = await live.createAndSendThread({
-        mailboxUser: "Spec P3F Sender", customerId: null, customer: "Spec fixture", contactName: "Pat", to: "pat@school.org", cc: "", subject: "Estimate EST-1",
+        mailboxUser: "Spec P3F Sender", mailboxOwnerId: "u-p3f-none", customerId: null, customer: "Spec fixture", contactName: "Pat", to: "pat@school.org", cc: "", subject: "Estimate EST-1",
         body: "Hi", link: { type: "quote", id: QF, label: "EST-1" }, attachments: [],
       });
       registerFixture("comms", sent.threadId);
@@ -56763,7 +56769,6 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
         getQuote: async (id) => (id === q.id ? q : null),
         getThread: async (id) => threads.get(id) ?? null,
         applySignature: async (b) => { calls.push("applySignature"); return b; },
-        userIdByName: async () => "u1",
         gmailConnected: async () => true,
         reply: async (id, body, me) => { calls.push("reply"); const t = threads.get(id); if (!t) return null; t.messages.push({ direction: "out", at: 900, author: me, body, to: "pat@school.org", ...replyMsg }); return t; },
         markRead: async (id) => { calls.push("markRead"); return threads.get(id) ?? null; },
@@ -56849,7 +56854,7 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
        route.indexOf("await requireUser()") < route.indexOf("isCoverFileName(file)"),
       "#P3 final review (M1): ?file= serves a cover from THIS quote's folder only, behind the team session");
     const send = rd("src/lib/estimate-email/send-server.ts");
-    ok(send.includes("store.put(pdfStoragePath(quoteId, `cover-${now}`), bytes)") && send.includes('findDraftByLink("quote", quoteId, { mailboxUser })'),
+    ok(send.includes("store.put(pdfStoragePath(quoteId, `cover-${now}`), bytes)") && send.includes('findDraftByLink("quote", quoteId, { owner: await mailboxViewer(owner) })'),
       "#P3 final review (M1, I3b): the live deps store the cover under quote-pdfs/<id>/cover-<now>.pdf and look up the sender's own draft");
 
     // findDraftByLink narrowed to one mailbox (DB).
@@ -56858,11 +56863,13 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
     await createFixture("comms", { ...base, id: fixtureId(308, "p3f-d-ann"), mailboxUser: "Ann P3F", createdAt: 100, updatedAt: 100, draft: { attachments: [{ name: "EST.pdf", pdfPath: "quote-pdfs/x/rev-1.pdf" }] } } as never);
     await createFixture("comms", { ...base, id: fixtureId(308, "p3f-d-ann-deleted"), mailboxUser: "Ann P3F", deleted: true, createdAt: 300, updatedAt: 300, draft: {} } as never);
     await createFixture("comms", { ...base, id: fixtureId(308, "p3f-d-bob"), mailboxUser: "Bob P3F", createdAt: 200, updatedAt: 200, draft: {} } as never);
-    ok((await C.findDraftByLink("quote", QL, { mailboxUser: "ann p3f" }))?.id === fixtureId(308, "p3f-d-ann") && (await C.findDraftByLink("quote", QL, { mailboxUser: "Bob P3F" }))?.id === fixtureId(308, "p3f-d-bob") &&
-       (await C.findDraftByLink("quote", QL, { mailboxUser: "Cy P3F" })) === null && !!(await C.findDraftByLink("quote", QL)),
-      "#P3 final review (I3b, DB): findDraftByLink with a mailbox returns only that person's own live (not deleted) draft; the unscoped renewal lookup still works");
+    // #349 — the owner is a viewer (identity); these legacy drafts carry only a name, which counts while unique
+    const ownerV = (id: string, name: string) => ({ owner: { id, name, nameUnique: true } });
+    ok((await C.findDraftByLink("quote", QL, ownerV("u-ann", "Ann P3F")))?.id === fixtureId(308, "p3f-d-ann") && (await C.findDraftByLink("quote", QL, ownerV("u-bob", "Bob P3F")))?.id === fixtureId(308, "p3f-d-bob") &&
+       (await C.findDraftByLink("quote", QL, ownerV("u-cy", "Cy P3F"))) === null && (await C.findDraftByLink("quote", QL, { owner: { id: "u-ann", name: "Ann P3F", nameUnique: false } })) === null && !!(await C.findDraftByLink("quote", QL)),
+      "#P3 final review (I3b, DB): findDraftByLink with a mailbox returns only that person's own live (not deleted) draft (#349: by identity — a shared name finds nothing); the unscoped renewal lookup still works");
     const live = S.liveEstimateEmailDeps({ origin: "https://app.test", host: null, proto: null, actor: { id: "u-x", name: "Ann P3F", roles: ["Admin"] } });
-    const found = await live.findInboxDraft(QL, "Ann P3F");
+    const found = await live.findInboxDraft(QL, { id: "u-x", name: "Ann P3F" });
     ok(found?.threadId === fixtureId(308, "p3f-d-ann") && found.createdAt === 100 && found.attachments[0]?.pdfPath === "quote-pdfs/x/rev-1.pdf", "#P3 final review (I3b, DB): the live findInboxDraft returns the draft's id, creation time and attachments");
   }
 
