@@ -19,6 +19,8 @@ import { isLaborSku } from "@/lib/design/wire-labor";
 import { firstName } from "@/lib/team";
 import { approvalSnapshotMatches } from "@/lib/approval-snapshot";
 import { money } from "@/lib/format";
+import { systemSellTotal } from "@/app/(app)/estimator/pricing";
+import type { SpecSection } from "@/app/(app)/estimator/types";
 
 /* ---------------- kinds ---------------- */
 
@@ -222,14 +224,50 @@ function limitOf(v: unknown): ReviewLimit | null {
   return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
 }
 
-/** The quote against its owner's CURRENT limit for its kind. */
+/**
+ * Jeff 2026-10-15 #6 — the largest Alternate group's price on an Estimator
+ * quote: the alternate systems (`sec.alternate`, stamped from their group)
+ * summed per group (`groupId`; an ungrouped alternate is its own group) by
+ * systemSellTotal — the price the PDF's Alternates block prints — and the
+ * biggest one taken. No alternates (or no `spec.sections`) → 0. Pure.
+ */
+export function largestAlternateTotal(spec: unknown): number {
+  const secs = spec && typeof spec === "object" ? (spec as { sections?: unknown }).sections : null;
+  if (!Array.isArray(secs)) return 0;
+  const byGroup = new Map<string, number>();
+  for (const raw of secs) {
+    const sec = raw as SpecSection | null;
+    if (!sec || typeof sec !== "object" || sec.alternate !== true || !Array.isArray(sec.items)) continue;
+    const key = typeof sec.groupId === "string" && sec.groupId ? "g:" + sec.groupId : "s:" + String(sec.id);
+    const price = systemSellTotal(sec);
+    byGroup.set(key, (byGroup.get(key) ?? 0) + (Number.isFinite(price) ? price : 0));
+  }
+  let max = 0;
+  for (const v of byGroup.values()) if (v > max) max = v;
+  return Math.round(max * 100) / 100;
+}
+
+/**
+ * Jeff 2026-10-15 #6 — what the review limit is compared against: the base
+ * bid (`value`, which never includes an alternate) plus the largest Alternate
+ * group, so a customer taking the biggest alternate can't land above the
+ * owner's limit. null when `value` isn't a real number. Pure.
+ */
+export function reviewAmount(q: Pick<ReviewableQuote, "value" | "spec">): number | null {
+  if (typeof q.value !== "number" || !Number.isFinite(q.value)) return null;
+  return Math.round((q.value + largestAlternateTotal(q.spec)) * 100) / 100;
+}
+
+/** The quote against its owner's CURRENT limit for its kind. The amount is
+ *  reviewAmount — base bid + the largest alternate (Jeff 2026-10-15 #6). */
 export function evaluateReviewLimit(q: ReviewableQuote, ctx: ReviewLimitContext): ReviewLimitEval {
   const kind = reviewKindOf(q);
   const ownerName = quoteOwnerName(q);
   const ownerId = resolveOwnerId(ownerName, ctx.roster);
   const limit = ownerId ? limitOf(ctx.limits[ownerId]?.[kind]) : null;
-  const finite = typeof q.value === "number" && Number.isFinite(q.value);
-  const value = finite ? q.value : 0;
+  const amount = reviewAmount(q);
+  const finite = amount !== null;
+  const value = amount ?? 0;
   const fits = ownerId != null && limit != null && finite && (limit === "none" || value <= limit);
   return { kind, ownerName, ownerId, limit, value, fits };
 }
@@ -280,7 +318,9 @@ export function autoSnapshotUnchanged(q: ReviewableQuote): boolean {
   const owner = quoteOwnerName(q).toLowerCase();
   const stamped = (r.decidedBy || "").trim().toLowerCase();
   if (!owner || owner !== stamped) return false;
-  if (typeof q.value !== "number" || !Number.isFinite(q.value) || q.value > a.value) return false;
+  // #6: the same amount the limit reads (base + the largest alternate).
+  const amount = reviewAmount(q);
+  if (amount === null || amount > a.value) return false;
   return reviewKindOf(q) === a.kind;
 }
 
