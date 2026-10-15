@@ -1,7 +1,7 @@
 /**
  * Jeff 2026-10-15 #41 — granting portal access emails the sign-in link from
  * the granter's own mailbox (fake mail sender here; nothing real is sent).
- * Standalone: `npx tsx scripts/test-portal-invite.ts`; also chained into
+ * Standalone: `npm run test:portal-invite` (a throwaway PGlite); also chained into
  * test:specs.
  */
 import { readFileSync } from "node:fs";
@@ -11,7 +11,7 @@ export type Ok = (cond: boolean, msg: string) => void;
 
 const LINK = "https://app.test/portal/access?t=" + "ab".repeat(32);
 const ACTOR = { id: "u-grant", name: "Gina Granter", roles: ["Estimator"], email: "ginag@peak.test" };
-const INPUT = { personName: "Pat Q Customer", email: "pat@school.test", customerId: "C-1", customerName: "Lincoln HS", companyName: "Peak Systems Group", link: LINK, days: 90 };
+const INPUT = { personName: "Pat Q Customer", email: "pat@school.test", customerName: "Lincoln HS", companyName: "Peak Systems Group", link: LINK, days: 90 };
 
 function fakes(o: { connected?: boolean | "throw"; gmailId?: string; sendFailure?: string; saveThrows?: boolean; sendReturnsNull?: boolean } = {}) {
   const calls: string[] = [];
@@ -51,8 +51,8 @@ export async function portalInviteChecks(ok: Ok): Promise<void> {
   const r1 = await sendPortalInvite(s1.deps, ACTOR, INPUT);
   const d = s1.drafts[0] || {};
   ok(r1 === "sent" && s1.calls.join() === "connected:u-grant,save,send:C-INV:Gina Granter", "#41: connected → a draft in my mailbox, sent through the bridge (the Inbox's sendDraft path)");
-  ok(JSON.stringify(d.owner) === JSON.stringify({ id: "u-grant", name: "Gina Granter" }) && d.mailbox === "personal" && d.to === "pat@school.test" && String(d.body).includes(LINK) && String(d.body).endsWith("-- Gina") && d.customerId === "C-1",
-    "#41: the draft is owned by the granter's identity (#349), addressed to the person, signed, with the link");
+  ok(JSON.stringify(d.owner) === JSON.stringify({ id: "u-grant", name: "Gina Granter" }) && d.mailbox === "personal" && d.to === "pat@school.test" && String(d.body).includes(LINK) && String(d.body).endsWith("-- Gina") && d.customerId === null,
+    "#41: the draft is owned by the granter's identity (#349), addressed to the person, signed, with the link — and no customerId (#351 M1: never team-shared)");
 
   /* fallbacks */
   const s2 = fakes({ connected: false });
@@ -83,9 +83,24 @@ export async function portalInviteChecks(ok: Ok): Promise<void> {
   ok(portalInviteNote("sent", "pat@school.test") === "Emailed the sign-in link to pat@school.test from your mailbox." && portalInviteNote("not-sent", "x") === "Couldn’t email it — copy the link instead." && portalInviteNote("unknown", "x") === PORTAL_INVITE_COPY.unknown,
     "#41: the card's notes — emailed, or Couldn't email it — copy the link instead");
 
+  /* #351 review M2 — one email per grant per minute, claimed server-side */
+  const { createGrant, revokeGrant, claimGrantInvite } = await import("@/lib/portal");
+  const { INVITE_COOLDOWN_MS } = await import("@/lib/portal-invite");
+  const hadSecret = process.env.AUTH_SECRET;
+  if (!hadSecret) process.env.AUTH_SECRET = "test351-secret"; // createGrant encrypts the token
+  const g = await createGrant({ customerId: "TEST-351-cust", name: "Pat", email: "pat@school.test", createdBy: "Test" }).finally(() => {
+    if (!hadSecret) delete process.env.AUTH_SECRET;
+  });
+  const T0 = Date.now();
+  ok(INVITE_COOLDOWN_MS === 60_000 && (await claimGrantInvite(g.id, T0, INVITE_COOLDOWN_MS)) && !(await claimGrantInvite(g.id, T0 + 30_000, INVITE_COOLDOWN_MS)) && (await claimGrantInvite(g.id, T0 + 61_000, INVITE_COOLDOWN_MS)),
+    "#351 M2: a second email for the same grant within a minute is refused; after a minute it goes");
+  await revokeGrant(g.id);
+  ok(!(await claimGrantInvite(g.id, T0 + 999_999, INVITE_COOLDOWN_MS)) && !(await claimGrantInvite("PG-nope", T0, INVITE_COOLDOWN_MS)), "#351 M2: a revoked or unknown grant is never emailed");
+
   /* pins */
   const act = readFileSync("src/app/(app)/companies/actions.ts", "utf8");
-  ok(/const grant = await createGrant\([\s\S]{0,500}const invite = await emailPortalLink\(user, \{ name, email, customerId: cust\.id, customerName: cust\.name \|\| "" \}, grantPath\(grant\)\);\s*return \{ ok: true as const, path: grantPath\(grant\), \.\.\.invite \};/.test(act),
+  ok(/if \(!\(await claimGrantInvite\(who\.grantId, Date\.now\(\), INVITE_COOLDOWN_MS\)\.catch\(\(\) => false\)\)\) return \{ emailed: "too-soon", note: PORTAL_INVITE_COPY\.tooSoon \};/.test(act), "#351 M2: the action claims the cooldown before sending");
+  ok(/const grant = await createGrant\([\s\S]{0,500}const invite = await emailPortalLink\(user, \{ grantId: grant\.id, name, email, customerName: cust\.name \|\| "" \}, grantPath\(grant\)\);\s*return \{ ok: true as const, path: grantPath\(grant\), \.\.\.invite \};/.test(act),
     "#41: creating a grant emails its link from the signed-in user's mailbox and still returns the path (Copy link)");
   ok(/export async function resendPortalLinkAction\([^)]*\) \{\s*const user = await requireUser\(\);[\s\S]{0,500}if \(!g \|\| g\.revokedAt \|\| \(g\.expiresAt && g\.expiresAt < Date\.now\(\)\)\) return/.test(act) && /\(await grantsFor\(cust\.id\)\)\.find\(\(x\) => x\.id === grantId\)/.test(act),
     "#41: Resend link is signed-in only and sends only an active grant of THIS customer");
@@ -105,7 +120,13 @@ if (process.argv[1] && /test-portal-invite\.ts$/.test(process.argv[1])) {
     console.log((c ? "PASS " : "FAIL ") + m);
     if (!c) fail++;
   };
-  portalInviteChecks(ok)
+  if (process.env.DATABASE_URL) {
+    console.error("Refusing to run: DATABASE_URL is set; unset it (this suite writes to the DB).");
+    process.exit(1);
+  }
+  import("@/db")
+    .then(({ seeded }) => seeded())
+    .then(() => portalInviteChecks(ok))
     .then(() => {
       console.log(fail ? `\n${fail} FAILED` : "\nall portal invite checks passed");
       process.exit(fail ? 1 : 0);

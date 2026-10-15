@@ -13,7 +13,11 @@
  *
  * The link carries the grant's token: it is only ever written into the email
  * itself (the person's sign-in link) — never into a log line, an error or a
- * returned message.
+ * returned message. #351 review M1: the draft carries NO customerId, so the
+ * thread holding the token stays in the granter's private mailbox (a
+ * customerId is one of the fields a deliberate link shares with the team).
+ * M2: one email per grant per minute (`INVITE_COOLDOWN_MS`, claimed under the
+ * grants blob's row lock in portal.ts).
  */
 import { applySenderSignature, deliveryAfterSend, gmailConnectedFor, holdOutbound, type EmailDelivery, type SendActor } from "@/lib/estimate-email/send-server";
 import { get as getThread, saveDraft, sendDraft, type CommThread, type SaveDraftInput } from "@/lib/stores/comms";
@@ -24,7 +28,11 @@ export const PORTAL_INVITE_COPY = {
   sent: (email: string) => `Emailed the sign-in link to ${email} from your mailbox.`,
   notEmailed: "Couldn’t email it — copy the link instead.",
   unknown: "Gmail didn’t answer — check your Sent folder before resending.",
+  tooSoon: "Just sent — wait a minute before resending.",
 } as const;
+
+/** #351 review M2 — at most one invite email per grant per minute. */
+export const INVITE_COOLDOWN_MS = 60_000;
 
 export type PortalInviteOutcome = "sent" | "unknown" | "not-sent";
 
@@ -65,7 +73,7 @@ export type PortalInviteDeps = {
 export async function sendPortalInvite(
   deps: PortalInviteDeps,
   actor: SendActor,
-  input: { personName: string; email: string; customerId: string; customerName: string; companyName: string; link: string; days: number }
+  input: { personName: string; email: string; customerName: string; companyName: string; link: string; days: number }
 ): Promise<PortalInviteOutcome> {
   const to = (input.email || "").trim();
   if (!actor?.id || !actor?.name || !to || !/^[^\s@]+@[^\s@]+$/.test(to)) return "not-sent";
@@ -82,7 +90,7 @@ export async function sendPortalInvite(
     const draft = await deps.saveDraft({
       mailbox: "personal",
       owner: { id: actor.id, name: actor.name }, // #349 — the granter's own mailbox, by identity
-      customerId: input.customerId || null,
+      customerId: null, // M1 — never team-shared through a customer link
       customer: input.customerName,
       contactName: input.personName,
       contactEmail: to,

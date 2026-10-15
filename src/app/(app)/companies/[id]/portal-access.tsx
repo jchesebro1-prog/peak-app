@@ -75,7 +75,7 @@ export function PortalAccessCard({
         return;
       }
       postChanged("customer", customerId);
-      setNote({ text: res.note, bad: res.emailed === "not-sent" });
+      setNote({ text: res.note, bad: res.emailed === "not-sent" || res.emailed === "too-soon" });
       // #41 — not emailed: today's behaviour, the link goes to the clipboard
       if (res.emailed !== "sent") await copy(res.path, "new");
       else {
@@ -97,7 +97,7 @@ export function PortalAccessCard({
         setError(res.error);
         return;
       }
-      setNote({ text: res.note, bad: res.emailed === "not-sent" });
+      setNote({ text: res.note, bad: res.emailed === "not-sent" || res.emailed === "too-soon" });
     });
   }
 

@@ -222,7 +222,7 @@ export async function createPortalGrantAction(input: {
   });
   revalidatePath("/companies/" + encodeURIComponent(cust.id));
   // Jeff 2026-10-15 #41 — email the sign-in link from my own mailbox; Copy link stays the fallback
-  const invite = await emailPortalLink(user, { name, email, customerId: cust.id, customerName: cust.name || "" }, grantPath(grant));
+  const invite = await emailPortalLink(user, { grantId: grant.id, name, email, customerName: cust.name || "" }, grantPath(grant));
   return { ok: true as const, path: grantPath(grant), ...invite };
 }
 
@@ -231,13 +231,15 @@ export async function createPortalGrantAction(input: {
  *  Never throws; the link is never logged. */
 async function emailPortalLink(
   user: { id: string; name: string; roles: string[]; email?: string | null },
-  who: { name: string; email: string; customerId: string; customerName: string },
+  who: { grantId: string; name: string; email: string; customerName: string },
   path: string
-): Promise<{ emailed: "sent" | "unknown" | "not-sent"; note: string }> {
-  const { livePortalInviteDeps, portalInviteNote, sendPortalInvite } = await import("@/lib/portal-invite");
+): Promise<{ emailed: "sent" | "unknown" | "not-sent" | "too-soon"; note: string }> {
+  const { INVITE_COOLDOWN_MS, PORTAL_INVITE_COPY, livePortalInviteDeps, portalInviteNote, sendPortalInvite } = await import("@/lib/portal-invite");
   const { requestWhere } = await import("@/lib/estimate-email/request-where");
-  const { PORTAL_TTL_DAYS } = await import("@/lib/portal");
+  const { PORTAL_TTL_DAYS, claimGrantInvite } = await import("@/lib/portal");
   let emailed: "sent" | "unknown" | "not-sent" = "not-sent";
+  // M2 — one email per grant per minute, claimed server-side
+  if (!(await claimGrantInvite(who.grantId, Date.now(), INVITE_COOLDOWN_MS).catch(() => false))) return { emailed: "too-soon", note: PORTAL_INVITE_COPY.tooSoon };
   try {
     const where = await requestWhere();
     if (!("error" in where)) {
@@ -245,7 +247,6 @@ async function emailPortalLink(
       emailed = await sendPortalInvite(livePortalInviteDeps(), { id: user.id, name: user.name, roles: user.roles, email: user.email ?? null }, {
         personName: who.name,
         email: who.email,
-        customerId: who.customerId,
         customerName: who.customerName,
         companyName: settings.companyName || "",
         link: where.origin + path,
@@ -269,7 +270,7 @@ export async function resendPortalLinkAction(input: { customerId: string; grantI
   if (!cust) return { ok: false as const, error: "Unknown customer." };
   const g = (await grantsFor(cust.id)).find((x) => x.id === grantId);
   if (!g || g.revokedAt || (g.expiresAt && g.expiresAt < Date.now())) return { ok: false as const, error: "That access link is no longer active." };
-  const invite = await emailPortalLink(user, { name: g.name, email: g.email, customerId: cust.id, customerName: cust.name || "" }, grantPath(g));
+  const invite = await emailPortalLink(user, { grantId: g.id, name: g.name, email: g.email, customerName: cust.name || "" }, grantPath(g));
   return { ok: true as const, path: grantPath(g), ...invite };
 }
 
