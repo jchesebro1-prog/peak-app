@@ -636,6 +636,15 @@ export async function saveQuoteAction(
             : "Could not create the quote — please try again.",
       };
     }
+    // #346 — a new estimate on a lead starts with the lead's companies (not its GCs/ECs — bidders are ticked per estimate).
+    if (leadId) {
+      try {
+        const { copyParties } = await import("@/lib/stores/parties");
+        await copyParties({ type: "lead", id: leadId }, { type: "quote", id: created.id }, user.id);
+      } catch (e) {
+        console.error("saveQuoteAction: copying lead parties failed", created.id, e);
+      }
+    }
     // create() promotes only the declared columns — stamp the extras + status.
     // The vendor-quote attachments can only be stored now: this is the first
     // moment the real quote id exists to key their Blob path by (#143).

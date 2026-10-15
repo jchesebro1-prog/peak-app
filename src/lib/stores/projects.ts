@@ -779,6 +779,15 @@ export async function createProjectFromQuote(
     if (!q || q.status !== "won" || isProjectExcludedQuoteType(q.quoteType)) return null;
     const p = await createProject(fromQuote(q, await loadPipelines()));
 
+    // #346 — the estimate's companies carry to the project once. Never allowed to undo the win:
+    // this runs inside setStatus's transaction (see quote-spawn.ts), so a failure is logged, not thrown.
+    try {
+      const { copyParties } = await import("@/lib/stores/parties");
+      await copyParties({ type: "quote", id: quoteId }, { type: "project", id: p.id }, q.owner || DEFAULT_ACTOR);
+    } catch (e) {
+      console.error("projects.createProjectFromQuote: copying parties failed", quoteId, e);
+    }
+
     // Item 16 (task-first): a sold install spawns the PM kickoff follow-up.
     // Unassigned until the project-roles model exists (D87: assign-by-role later).
     const { createAutoTask } = await import("@/lib/stores/tasks");

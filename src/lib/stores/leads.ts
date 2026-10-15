@@ -819,6 +819,14 @@ export async function convert(
   const numbered = await numberNewDoc("quotes", quote);
   const quoteId = quote.id;
 
+  // #346 — the converted quote starts with the lead's companies (not its GCs/ECs).
+  try {
+    const { copyParties } = await import("./parties");
+    await copyParties({ type: "lead", id }, { type: "quote", id: quoteId }, me);
+  } catch (e) {
+    console.error("leads.convert: copying parties failed", id, e);
+  }
+
   // 3) link + advance the lead
   const lead = await patchDoc<LeadRecord>("leads", id, (rec) => {
     rec.customerId = customerId;

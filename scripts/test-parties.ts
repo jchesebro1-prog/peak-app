@@ -8,7 +8,9 @@ import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "../src/db/doc-tables";
 import { DEMO_COLLECTIONS } from "../src/db/seed-data";
 import { saveCompany } from "../src/lib/identity/companies";
 import { saveContact } from "../src/lib/identity/contacts";
-import { dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
+import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
+import { buildQuote } from "../src/lib/stores/quotes";
+import { createProjectFromQuote } from "../src/lib/stores/projects";
 import { buildOpportunities, type OppLeadInput, type OppQuoteInput } from "../src/lib/opportunities";
 import { addParty, copyParties, listFor, listForCompany, listForRecords, partyId, removeParty, setPartyContact } from "../src/lib/stores/parties";
 import {
@@ -163,6 +165,20 @@ export async function partyDbChecks(ok: Ok) {
     const revived = await addParty({ recordType: "lead", recordId: lead, companyId: co2, role: "gc" }, "u-test");
     ok(revived.ok && !revived.existed && revived.party.id === gcRow.id && revived.party.contactId === null, "parties db: re-adding a removed row revives it fresh");
     ok(!(await removeParty(fixtureId(346, "missing"))), "parties db: removing an unknown id is false");
+
+    // carry estimate → project through createProjectFromQuote
+    const wonQ = fixtureId(346, "won");
+    await createFixture("quotes", { ...buildQuote(wonQ, { name: "Party won", customer: "Party Co One", customerId: co1, value: 1000 }, "system", null, Date.now()), status: "won" } as never);
+    const ownerOnWon = await addParty({ recordType: "quote", recordId: wonQ, companyId: co1, role: "owner" }, "u-test");
+    if (ownerOnWon.ok) registerFixture("record_parties", ownerOnWon.party.id);
+    const proj = await createProjectFromQuote(wonQ);
+    ok(!!proj, "parties db: fixture won quote spawns a project");
+    if (proj) {
+      registerFixture("projects", proj.id);
+      const onProj = await listFor("project", proj.id);
+      for (const p of onProj) registerFixture("record_parties", p.id);
+      ok(onProj.length === 1 && onProj[0].role === "owner" && onProj[0].companyId === co1, "parties db: project inherits the estimate's parties");
+    }
   } finally {
     await dropFixtures(346);
     await dropPartyIdentityFixtures();
