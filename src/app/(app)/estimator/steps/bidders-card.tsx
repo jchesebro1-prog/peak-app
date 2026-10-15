@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import CompanySearch from "@/components/parties/company-search";
 import type { BidderVM, BidPanelVM } from "@/lib/parties/bid-vm";
+import { BID_SEND_COPY } from "@/lib/parties/bid-send";
+import { SEND_UI_COPY } from "@/lib/estimate-email/send-ui";
 import {
   addBidderAction,
   awardBidAction,
@@ -12,7 +14,12 @@ import {
   updateBidderAction,
   type BidPanelResult,
 } from "../bid-actions";
+import { bidderEmailDefaultsAction } from "../bid-send-actions";
 import { BidderRow, BTN } from "./bidder-row";
+import { BidderSendPanel, type BidderEmailDefaults } from "./bidder-send-panel";
+import { useBidderWalk, type BidSendCtx } from "./use-bidder-walk";
+
+export type { BidSendCtx } from "./use-bidder-walk";
 
 const CARD_LABEL = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase" } as const;
 const FIELD: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12, padding: "4px 6px", border: "1px solid #dcdfe5", borderRadius: 6, background: "#fff" };
@@ -22,14 +29,21 @@ const FIELD: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12, paddi
  * submitted, whether the current revision went out, and Award / Undo. The owner stays the customer. Loads on
  * mount and when `refreshKey` changes; every mutation replaces the panel from the action's own result.
  */
-export function BiddersCard({ quoteId, refreshKey }: { quoteId: string; refreshKey: number }) {
+export function BiddersCard({ quoteId, refreshKey, sendCtx }: { quoteId: string; refreshKey: number; sendCtx: BidSendCtx }) {
   const [panel, setPanel] = useState<BidPanelVM | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   // Button-driven mutations count toward the card-wide `busy`; blur-saves only lock their own input.
   const [pending, setPending] = useState(0);
   const [savingFields, setSavingFields] = useState<string[]>([]);
-  const busy = pending > 0;
+  // #348 2b-ii — the email panel's targets (null = closed), its defaults (loaded once per mount) and the walk.
+  const [target, setTarget] = useState<{ ids: string[]; retryUnknown: boolean } | null>(null);
+  const [defaults, setDefaults] = useState<BidderEmailDefaults | null>(null);
+  const [defaultsErr, setDefaultsErr] = useState<string | null>(null);
+  const defaultsAsked = useRef(false);
+  // Each walk result replaces the panel; the walk's end bumps `refreshKey` (onSent), so a fresh load lands last.
+  const { progress, walking, walk, stop } = useBidderWalk(quoteId, sendCtx, { panel: setPanel, note: setNote, error: setErr });
+  const busy = pending > 0 || walking;
   const [adding, setAdding] = useState(false);
   const [role, setRole] = useState<"gc" | "ec">("gc");
   const [via, setVia] = useState<"email" | "website">("email");
@@ -119,6 +133,37 @@ export function BiddersCard({ quoteId, refreshKey }: { quoteId: string; refreshK
     void run(() => awardBidAction(quoteId, b.id));
   };
 
+  function openSend(ids: string[], retryUnknown = false) {
+    setTarget({ ids, retryUnknown });
+    setErr(null);
+    setNote(null);
+    if (defaultsAsked.current) return;
+    defaultsAsked.current = true;
+    bidderEmailDefaultsAction(quoteId).then(
+      (r) => {
+        if (!mountedRef.current) return;
+        if (r.ok) {
+          setDefaults({ subject: r.subject, body: r.body, gmailConnected: r.gmailConnected, fromAddress: r.fromAddress });
+          setDefaultsErr(null);
+        } else {
+          defaultsAsked.current = false; // the next open tries again
+          setDefaultsErr(r.error);
+        }
+      },
+      () => {
+        defaultsAsked.current = false;
+        if (mountedRef.current) setDefaultsErr(SEND_UI_COPY.failed);
+      }
+    );
+  }
+  const onSend = (b: BidderVM) => {
+    if (b.failedUnknown) {
+      if (!window.confirm(BID_SEND_COPY.unknownConfirm(b.companyName))) return;
+      openSend([b.id], true);
+    } else openSend([b.id]);
+  };
+  const targeted = target && panel ? panel.bidders.filter((b) => target.ids.includes(b.id)) : [];
+
   const edit = !!panel?.canEdit;
   const addendaText = panel?.addenda.length ? `Addenda: ${panel.addenda.map((a) => a.no).join(", ")}` : "";
   const errLine = err && (
@@ -152,12 +197,30 @@ export function BiddersCard({ quoteId, refreshKey }: { quoteId: string; refreshK
         <div style={CARD_LABEL}>Bidders{panel ? ` · ${panel.bidders.length}` : ""}</div>
         {panel?.dueText && <span style={{ fontSize: 11.5, color: "#5b616e" }}>Due {panel.dueText}</span>}
         {addendaText && <span style={{ fontSize: 10.5, fontWeight: 600, borderRadius: 20, padding: "2px 8px", background: "#f1f2f5", color: "#5b616e" }}>{addendaText}</span>}
+        {panel?.plan.label && panel.canSend && !walking && (
+          <button type="button" disabled={busy} onClick={() => openSend(panel.plan.ids)} style={{ ...BTN, background: "var(--accent)", color: "#fff" }}>
+            {panel.plan.label}
+          </button>
+        )}
+        {progress && (
+          <>
+            <span aria-live="polite" style={{ fontSize: 12, fontWeight: 600, color: "#16181d" }}>
+              {BID_SEND_COPY.progress(Math.max(1, progress.i), progress.n)}
+            </span>
+            <button type="button" onClick={stop} style={BTN}>
+              {BID_SEND_COPY.stop}
+            </button>
+          </>
+        )}
         {edit && panel?.canUndo && (
           <button type="button" disabled={busy} onClick={() => void run(() => undoAwardAction(quoteId))} style={{ ...BTN, marginLeft: "auto" }}>
             Undo award
           </button>
         )}
       </div>
+      {!!panel?.addendaAfterSend.length && (
+        <div style={{ marginBottom: 10, fontSize: 12, fontWeight: 600, color: "#9a6a00" }}>{BID_SEND_COPY.addendumHint(panel.addendaAfterSend)}</div>
+      )}
       {!panel && !err && <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Loading…</div>}
       {!panel && err && (
         <button
@@ -180,13 +243,32 @@ export function BiddersCard({ quoteId, refreshKey }: { quoteId: string; refreshK
               b={b}
               panel={panel}
               busy={busy}
+              walking={walking}
               savingFields={savingFields}
               onPatch={(id, patch, field) => void run(() => updateBidderAction(id, patch), field ? `${id}:${field}` : undefined)}
               onSubmitted={onSubmitted}
               onAward={onAward}
+              onSend={onSend}
             />
           ))}
         </ul>
+      )}
+      {target && panel && (
+        <div style={{ marginTop: 10 }}>
+          <BidderSendPanel
+            names={targeted.map((b) => b.companyName)}
+            revisedSubject={targeted.find((b) => b.revisedSubject)?.revisedSubject ?? ""}
+            defaults={defaults}
+            loadError={defaultsErr}
+            disabled={busy}
+            onCancel={() => setTarget(null)}
+            onSend={(c) => {
+              const t = target;
+              setTarget(null);
+              void walk(t.ids.filter((id) => targeted.some((b) => b.id === id)), c, { retryUnknown: t.retryUnknown });
+            }}
+          />
+        </div>
       )}
       {edit && panel && !panel.awardedPartyId && (
         <div style={{ marginTop: 10 }}>

@@ -13,7 +13,7 @@ import { PackageStaffPanel } from "../package-staff-panel";
 import { CHEVRON_CLIP, DARK_SELECT, STATUS_DOT } from "../estimator-styles";
 import type { EstimatorState } from "../use-estimator-state";
 import { SendActivity } from "./send-activity";
-import { BiddersCard } from "./bidders-card";
+import { BiddersCard, type BidSendCtx } from "./bidders-card";
 import { SendComposer } from "./send-composer";
 import { BonusCard } from "./bonus-card";
 import { alternateChoices, liveEstimatorBonus } from "@/lib/estimate-bonus/card";
@@ -55,6 +55,7 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
     pipelines,
     quoteTasks,
     saveNow,
+    selectionSettled,
     setActionError,
     setGateRefused,
     setTrackSummary,
@@ -70,6 +71,13 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
   } = s;
   /** Bumped after a send so the Activity card re-reads at once. */
   const [trackKey, setTrackKey] = useState(0);
+  /** #348 2b-ii — a bidder send saves and settles exactly as the composer's send does, then refreshes Activity. */
+  const sendCtx: BidSendCtx = {
+    versionToSend: async () => (pdfDirty ? await saveNow() : next?.asOf),
+    selectionSettled,
+    applySync,
+    onSent: () => setTrackKey((k) => k + 1),
+  };
 
   const cards: Record<SendCard, ReactNode> = {
     composer: (
@@ -88,7 +96,7 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
     ),
     bidders: (
       <section key="bidders" aria-label="Bidders" style={CARD}>
-        {loadedId ? <BiddersCard quoteId={loadedId} refreshKey={trackKey} /> : <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate first.</div>}
+        {loadedId ? <BiddersCard quoteId={loadedId} refreshKey={trackKey} sendCtx={sendCtx} /> : <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate first.</div>}
       </section>
     ),
     status: (
