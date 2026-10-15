@@ -24,6 +24,15 @@ import type { CatalogMatchPart } from "../src/lib/vendor-pdf/checks";
 import {
   lineMath, filledLine, sumCheck, catalogMatch, buildCatalogIndex, normalizeCompanyName, vendorCompanyMatch, includesFreightRule, vendorPdfChecks, mathFlagCount, checkNotes,
 } from "../src/lib/vendor-pdf/checks";
+import {
+  applyVendorPdfRead, undoVendorPdfRead, readLinesEdited, dropVendorPdfRead, vendorPdfLineHints, vendorPdfTerms, vendorPdfDescription,
+  type VendorPdfReadResult,
+} from "../src/lib/vendor-pdf/fill";
+import { vendorPdfDiff, vendorPdfOutcome } from "../src/lib/vendor-pdf/diff";
+import { vendorPdfReport } from "../src/lib/assist/report";
+import { parseMoney } from "../src/app/(app)/estimator/material-csv";
+import type { VendorDraft, VendorQuoteLine } from "../src/app/(app)/estimator/types";
+import type { AssistRun } from "../src/lib/stores/assist-runs";
 import { readFileSync } from "node:fs";
 import { fileThreadTo, vendorThreadsFor, loadVendorsPanel } from "../src/lib/vendor-quotes/threads-server";
 import { canSeeThread, get as getThread } from "../src/lib/stores/comms";
@@ -571,8 +580,206 @@ export async function vendorPdfPureChecks(ok: Ok) {
   }
 }
 
+/* ---- #348 slice 5 Task 3: fill / undo / diff / report (pure) ---- */
+export async function vendorPdfFillChecks(ok: Ok) {
+  const blank = (o: Partial<VendorDraft> = {}): VendorDraft => ({
+    id: "vqtest", vendor: "", quoteNumber: "", description: "", link: "", attachment: null, attachmentPreview: null, lines: [],
+    terms: "", notes: "", total: "", includesFreight: false, display: "single", vendorCompanyId: null, fromThreadId: null,
+    extracted: null, pdfRead: null, ...o,
+  });
+  const cos = [{ id: "c1", name: "Rose Brand", type: "vendor" }];
+  const x: VendorPdfExtraction = {
+    vendor: "Rose Brand Inc.", quoteNumber: "Q-77", quoteDate: "2026-10-01", validUntil: "2026-11-01", leadTime: "2 weeks", freight: 25, tax: 10, total: 1234.5,
+    paymentTerms: "Net 30", notes: "FOB destination",
+    lines: [
+      { description: "Jupiter 4 processor", mfrPartNumber: "Jupiter 4", qty: 2, unitPrice: 100, amount: 200 },
+      { description: "Cable", qty: 5, unitPrice: 10 },
+      { mfrPartNumber: "WID-77", qty: 1, amount: 40 },
+    ],
+  };
+  const res = (data: VendorPdfExtraction = x, o: Partial<VendorPdfReadResult> = {}): VendorPdfReadResult => ({
+    runId: "run1", model: "claude-haiku-5-5", hard: false, at: 1000, data,
+    checks: vendorPdfChecks(data, { parts: [], companies: cos }), pages: 2, ...o,
+  });
+  let n = 100;
+  const mint = () => ++n;
+
+  // Terms + description.
+  ok(vendorPdfTerms(x) === "Quote date: 2026-10-01\nValid until: 2026-11-01\nLead time: 2 weeks\nPayment: Net 30\nFreight: $25.00\nTax: $10.00", "fill: terms list only printed rows, in order");
+  ok(vendorPdfTerms({}) === "" && vendorPdfTerms({ shipFrom: "Reno" }) === "Ships from: Reno", "fill: terms empty / ships-from row");
+  ok(vendorPdfDescription({}) === "" && vendorPdfDescription({ lines: [] }) === "", "fill: description for 0 lines is blank");
+  ok(vendorPdfDescription({ lines: [{ description: "Rope" }] }) === "Rope", "fill: description for 1 line");
+  ok(vendorPdfDescription({ lines: [{ mfrPartNumber: "AB-1" }] }) === "AB-1", "fill: description falls back to the part number");
+  ok(vendorPdfDescription({ lines: [{ qty: 1 }] }) === "", "fill: a line with neither description nor part number → blank");
+  ok(vendorPdfDescription({ lines: [{ description: "Rope" }, { description: "B" }] }) === "Rope + 1 more item", "fill: 2 lines → '+ 1 more item'");
+  ok(vendorPdfDescription({ lines: [{ mfrPartNumber: "AB-1" }, {}, {}] }) === "AB-1 + 2 more items", "fill: 3 lines, first has only a part number");
+  const longDesc = vendorPdfDescription({ lines: [{ description: "x".repeat(200) }, { description: "y" }, { description: "z" }] });
+  ok(longDesc.length <= 200 && longDesc.endsWith(" + 2 more items"), "fill: description capped, suffix kept");
+
+  // Apply onto a blank draft.
+  const typed = { id: 1, description: "typed", manufacturerPartNumber: "", qty: "1", unit: "ea", amount: "9" };
+  const a1 = applyVendorPdfRead(blank({ lines: [typed] }), res(), mint);
+  ok(a1.lines.length === 4 && a1.lines[0].id === 1 && a1.lines[0].fromRead === undefined, "apply: typed line stays first");
+  ok(a1.lines.slice(1).map((l) => l.fromRead).join() === "0,1,2", "apply: appended lines carry fromRead 0-2");
+  ok(new Set(a1.lines.map((l) => l.id)).size === 4 && a1.lines[1].id === 101 && a1.lines[3].id === 103, "apply: fresh ids from mint");
+  ok(a1.lines[2].amount === "50" && a1.lines[3].description === "WID-77" && a1.lines[1].manufacturerPartNumber === "Jupiter 4" && a1.lines[1].qty === "2" && a1.lines[1].amount === "200", "apply: lines come from filledLine");
+  ok(a1.vendor === "Rose Brand" && a1.vendorCompanyId === "c1", "apply: vendor links on a 'one' match (company name)");
+  ok(a1.quoteNumber === "Q-77" && a1.total === "1234.5" && a1.terms.startsWith("Quote date: 2026-10-01") && a1.notes === "FOB destination", "apply: scalars fill when blank; total '1234.5'");
+  ok(a1.description === "Jupiter 4 processor + 2 more items", "apply: description prefilled when blank");
+  ok(a1.includesFreight === true && a1.pdfRead?.filled.includesFreight === true, "apply: freight ticked from the rule");
+  ok(a1.extracted?.runId === "run1" && a1.extracted.model === "claude-haiku-5-5" && a1.extracted.at === 1000 && a1.extracted.data === x, "apply: extracted stamped");
+  ok(a1.pdfRead?.hard === false && a1.pdfRead.pages === 2 && a1.pdfRead.filled.vendorCompanyId === "c1" && a1.pdfRead.filled.total === "1234.5" && a1.pdfRead.filled.description === a1.description, "apply: pdfRead.filled records what was written");
+
+  const a2 = applyVendorPdfRead(blank({ vendorCompanyId: "c9", vendor: "Other Co", quoteNumber: "MINE", description: "My desc", total: "5", terms: "t", notes: "n", includesFreight: true }), res(), mint);
+  ok(a2.vendor === "Other Co" && a2.vendorCompanyId === "c9", "apply: a picked vendor is not overwritten");
+  ok(a2.quoteNumber === "MINE" && a2.description === "My desc" && a2.total === "5" && a2.terms === "t" && a2.notes === "n", "apply: typed scalars stay");
+  ok(a2.includesFreight === true && a2.pdfRead?.filled.includesFreight === false && a2.pdfRead.filled.vendor === null && a2.pdfRead.filled.description === null, "apply: filled records only what was written");
+  const a3 = applyVendorPdfRead(blank({ vendor: "Typed Vendor" }), res(), mint);
+  ok(a3.vendor === "Typed Vendor" && a3.vendorCompanyId === null, "apply: a typed vendor (no company) is not overwritten either");
+  const noMatch = res({ ...x, vendor: "Unknown Supply" });
+  const a4 = applyVendorPdfRead(blank(), noMatch, mint);
+  ok(a4.vendor === "Unknown Supply" && a4.vendorCompanyId === null, "apply: no company match → the PDF's text as typed fallback");
+  const a5 = applyVendorPdfRead(blank(), res({ lines: [{ amount: 5 }] }), mint);
+  ok(a5.total === "" && a5.terms === "" && a5.quoteNumber === "" && a5.vendor === "" && a5.description === "" && a5.pdfRead?.filled.total === null && a5.lines.length === 1, "apply: nothing printed → fields stay blank");
+  const a6 = applyVendorPdfRead(blank(), res({ ...x, notes: "Freight extra", freight: 25, total: 100, lines: [{ amount: 100 }] }), mint);
+  ok(a6.includesFreight === false, "apply: freight excluded words → not ticked");
+  const a7 = applyVendorPdfRead(blank({ includesFreight: true }), res({ lines: [{ amount: 1 }], total: 1 }), mint);
+  ok(a7.includesFreight === true && a7.pdfRead?.filled.includesFreight === false, "apply: freight never unticked");
+
+  // Undo then apply (Try harder).
+  const fresh = applyVendorPdfRead(blank({ lines: [typed] }), res(), mint);
+  const edited = { ...fresh, quoteNumber: "Q-CHANGED", lines: fresh.lines.map((l) => (l.fromRead === 1 ? { ...l, amount: "99" } : l)) };
+  const un = undoVendorPdfRead(edited);
+  ok(un.lines.length === 1 && un.lines[0].id === 1, "undo: read lines go, typed lines stay");
+  ok(un.quoteNumber === "Q-CHANGED", "undo: a changed quote # stays");
+  ok(un.total === "" && un.terms === "" && un.notes === "" && un.description === "" && un.vendor === "" && un.vendorCompanyId === null, "undo: untouched filled scalars blank");
+  ok(un.includesFreight === false && un.extracted === null && un.pdfRead === null, "undo: freight unticked, extracted + pdfRead cleared");
+  const userTicked = undoVendorPdfRead({ ...fresh, includesFreight: true, pdfRead: { ...fresh.pdfRead!, filled: { ...fresh.pdfRead!.filled, includesFreight: false } } });
+  ok(userTicked.includesFreight === true, "undo: a freight tick the read did not make stays");
+  const userUnticked = undoVendorPdfRead({ ...fresh, includesFreight: false });
+  ok(userUnticked.includesFreight === false, "undo: a freight tick the user already removed stays removed");
+  const vendorEdited = undoVendorPdfRead({ ...fresh, vendor: "Changed" });
+  ok(vendorEdited.vendor === "Changed" && vendorEdited.vendorCompanyId === "c1", "undo: a vendor the user changed stays (name and link together)");
+  const again = applyVendorPdfRead(un, res({ ...x, quoteNumber: "Q-NEW" }, { runId: "run2", hard: true }), mint);
+  ok(again.quoteNumber === "Q-CHANGED" && again.lines.length === 4 && again.extracted?.runId === "run2", "try harder: a changed quote # survives the re-apply");
+  const again2 = applyVendorPdfRead(undoVendorPdfRead(fresh), res({ ...x, quoteNumber: "Q-NEW" }, { runId: "run2", hard: true }), mint);
+  ok(again2.quoteNumber === "Q-NEW" && again2.pdfRead?.hard === true, "try harder: an untouched quote # is replaced");
+  const savedEdit = blank({ lines: [typed, { ...typed, id: 2, fromRead: 0 }], quoteNumber: "keep", extracted: { runId: "r", model: "m", at: 1, data: x } });
+  const savedUn = undoVendorPdfRead(savedEdit);
+  ok(savedUn.lines.length === 1 && savedUn.quoteNumber === "keep" && savedUn.extracted === null, "undo: with pdfRead null only the lines go (and extracted)");
+
+  // readLinesEdited / drop.
+  ok(JSON.stringify(readLinesEdited(fresh)) === JSON.stringify({ read: 3, edited: 0 }), "readLinesEdited: untouched read");
+  ok(JSON.stringify(readLinesEdited(edited)) === JSON.stringify({ read: 3, edited: 1 }), "readLinesEdited: one edited amount");
+  const reformatted = { ...fresh, lines: fresh.lines.map((l) => (l.fromRead === 0 ? { ...l, amount: "200.00", qty: " 2 " } : l)) };
+  ok(readLinesEdited(reformatted).edited === 0, "readLinesEdited: numeric reformatting is not an edit");
+  ok(JSON.stringify(readLinesEdited(blank())) === JSON.stringify({ read: 0, edited: 0 }), "readLinesEdited: nothing read");
+  const dropped = dropVendorPdfRead(edited);
+  ok(dropped.lines.length === 4 && dropped.lines.every((l) => !("fromRead" in l)) && dropped.extracted === null && dropped.pdfRead === null && dropped.quoteNumber === "Q-CHANGED", "drop: lines stay as the user's own, read cleared");
+
+  // Hints.
+  const hx: VendorPdfExtraction = { lines: [{ description: "A", mfrPartNumber: "Jupiter 4", qty: 2, unitPrice: 100, amount: 200 }, { description: "B", qty: 12, unitPrice: 45, amount: 504 }, { description: "C", qty: 5, unitPrice: 10 }, { description: "D", amount: 1 }] };
+  const hres = res(hx, { checks: vendorPdfChecks(hx, { parts: [{ sku: "Symetrix:80-0043", mfr: "Symetrix", manufacturerModelNumber: "Jupiter 4" }], companies: [] }) });
+  const hd = applyVendorPdfRead(blank(), hres, mint);
+  const hints = vendorPdfLineHints(hd);
+  const ids = hd.lines.map((l) => l.id);
+  ok(hints[ids[0]]?.text === "In catalog: Jupiter 4 · Symetrix:80-0043" && hints[ids[0]].warn === false, "hints: catalog match chip");
+  ok(hints[ids[1]]?.warn === true && hints[ids[1]].text.includes("12 × $45.00 = $540.00") && hints[ids[1]].text.includes("$504.00"), "hints: math off is a warning");
+  ok(hints[ids[2]]?.warn === false && /computed/i.test(hints[ids[2]].text), "hints: derived amount is info");
+  ok(hints[ids[3]] === undefined, "hints: a clean line has none");
+  ok(Object.keys(vendorPdfLineHints({ ...hd, pdfRead: null })).length === 0, "hints: none without pdfRead");
+  const fixedMath = vendorPdfLineHints({ ...hd, lines: hd.lines.map((l) => (l.id === ids[1] ? { ...l, amount: "540" } : l)) });
+  ok(fixedMath[ids[1]] === undefined, "hints: a corrected amount drops the stale math warning");
+
+  // Diff.
+  const lines = (over: Array<Partial<VendorQuoteLine> | null> = []): VendorQuoteLine[] => {
+    const base: VendorQuoteLine[] = (x.lines ?? []).map((l, i) => {
+      const f = filledLine(l, i);
+      return { id: i + 1, description: f.description, manufacturerPartNumber: f.manufacturerPartNumber, qty: Number(f.qty), unit: f.unit, amount: Number(f.amount), extractedIndex: i };
+    });
+    return base.flatMap((l, i) => (over[i] === null ? [] : [{ ...l, ...(over[i] ?? {}) }]));
+  };
+  const sv = (ls: VendorQuoteLine[], o: { total?: number; totalSource?: "manual" | "lines" } = {}) => ({ lines: ls, total: o.total ?? 1234.5, totalSource: o.totalSource });
+  const dAll = vendorPdfDiff(x, sv(lines()));
+  ok(dAll.read === 3 && dAll.kept === 3 && dAll.edited === 0 && dAll.deleted === 0 && dAll.added === 0 && !dAll.totalChanged && vendorPdfOutcome(dAll) === "accepted", "diff: all kept → accepted");
+  ok(dAll.mathFlags === 1, "diff: mathFlags from the extraction (sum off)");
+  const dQty = vendorPdfDiff(x, sv(lines([{ qty: 3 }])));
+  ok(dQty.edited === 1 && dQty.kept === 2 && dQty.fieldEdits.qty === 1 && dQty.fieldEdits.amount === 0 && vendorPdfOutcome(dQty) === "edited", "diff: one edited qty");
+  const dMulti = vendorPdfDiff(x, sv(lines([{ description: "  Jupiter   4  processor ", unit: " EA ", amount: 200.004 }])));
+  ok(dMulti.kept === 3 && dMulti.edited === 0, "diff: whitespace, case and sub-cent differences are not edits");
+  const dFields = vendorPdfDiff(x, sv(lines([{ description: "other", manufacturerPartNumber: "ZZ", unit: "box", amount: 1 }])));
+  ok(dFields.edited === 1 && dFields.fieldEdits.description === 1 && dFields.fieldEdits.partNumber === 1 && dFields.fieldEdits.unit === 1 && dFields.fieldEdits.amount === 1, "diff: each differing field counted once");
+  const dDel = vendorPdfDiff(x, sv(lines([{}, null])));
+  ok(dDel.deleted === 1 && dDel.kept === 2, "diff: a removed line is deleted");
+  const typedLine: VendorQuoteLine = { id: 9, description: "typed", qty: 1, unit: "ea", amount: 5 };
+  const dAdd = vendorPdfDiff(x, sv([...lines(), typedLine]));
+  ok(dAdd.added === 1 && dAdd.kept === 3 && vendorPdfOutcome(dAdd) === "edited", "diff: a typed line is added");
+  const dDup = vendorPdfDiff(x, sv([...lines(), { ...lines()[0], id: 10 }]));
+  ok(dDup.added === 1 && dDup.kept === 3, "diff: a duplicated index counts one added");
+  const dBad = vendorPdfDiff(x, sv([...lines(), { ...typedLine, extractedIndex: 99 }, { ...typedLine, id: 11, extractedIndex: 1.5 }, { ...typedLine, id: 12, extractedIndex: -1 }]));
+  ok(dBad.added === 3 && dBad.kept === 3, "diff: out-of-range / non-integer indexes are added");
+  const dTot = vendorPdfDiff(x, sv(lines(), { total: 1300 }));
+  ok(dTot.totalChanged === true && vendorPdfOutcome(dTot) === "edited", "diff: a total typed over a printed one");
+  const dTotSame = vendorPdfDiff(x, sv(lines(), { total: 1234.504 }));
+  ok(dTotSame.totalChanged === false, "diff: half-cent total difference is not a change");
+  const noTotal: VendorPdfExtraction = { ...x, total: undefined };
+  ok(vendorPdfDiff(noTotal, sv(lines(), { total: 245, totalSource: "lines" })).totalChanged === false, "diff: no printed total + lines-driven → no change");
+  ok(vendorPdfDiff(noTotal, sv(lines(), { total: 245, totalSource: "manual" })).totalChanged === true, "diff: no printed total + typed → changed");
+  const dEmpty = vendorPdfDiff({}, sv([typedLine]));
+  ok(dEmpty.read === 0 && dEmpty.added === 1, "diff: an extraction with no lines");
+  const dBlankAmt = vendorPdfDiff({ lines: [{ description: "no money" }], total: 0 }, sv([{ id: 1, description: "no money", qty: 1, unit: "ea", amount: 0, extractedIndex: 0 }], { total: 0 }));
+  ok(dBlankAmt.kept === 1, "diff: a line with no printed amount saved at 0 is kept");
+  const dBlankAmt2 = vendorPdfDiff({ lines: [{ description: "no money" }] }, sv([{ id: 1, description: "no money", qty: 1, unit: "ea", amount: 50, extractedIndex: 0 }], { totalSource: "lines" }));
+  ok(dBlankAmt2.edited === 1 && dBlankAmt2.fieldEdits.amount === 1, "diff: a typed amount over a blank counts as edited");
+  ok(parseMoney("12,450.00") === 12450 && vendorPdfDiff({ lines: [{ description: "a", qty: 12450, amount: 1 }] }, sv([{ id: 1, description: "a", qty: parseMoney("12,450.00"), unit: "ea", amount: 1, extractedIndex: 0 }], { totalSource: "lines" })).kept === 1, "diff: parseMoney reads '12,450.00'");
+
+  // Report.
+  const run = (id: string, o: Partial<AssistRun> & { detail?: Record<string, unknown> }): AssistRun => {
+    const { detail, ...rest } = o;
+    return {
+      id, feature: "vendorpdf", step: null, userId: "u1", userName: "Jeff", provider: "anthropic", model: "claude-haiku-5-5", requestedModel: "claude-haiku-5-5", fellBack: false,
+      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.01, latencyMs: 1, inputHash: "h", output: "", ok: true, error: null, stopReason: null,
+      contextRef: "vendorquote:new:vq", monthKey: "2034-05", outcome: null, outcomeDetail: detail ?? null, outcomeAt: null, createdAt: 1, ...rest,
+    } as AssistRun;
+  };
+  const rd = (read: number, kept: number, edited: number, extra: Partial<ReturnType<typeof vendorPdfDiff>> = {}) => ({ read, kept, edited, deleted: 0, added: 0, fieldEdits: { description: 0, partNumber: 0, qty: 0, unit: 0, amount: 0 }, totalChanged: false, mathFlags: 0, ...extra });
+  const runs: AssistRun[] = [
+    run("r1", { outcome: "edited", costUsd: 0.02, detail: { hard: false, mathFlags: 1, vendor: "Rose Brand", diff: rd(3, 2, 1, { totalChanged: true }) } }),
+    run("r2", { outcome: "discarded", costUsd: 0.03, detail: { hard: false, mathFlags: 2 } }),
+    run("r3", { model: "claude-sonnet-5-5", outcome: "accepted", costUsd: 0.1, detail: { hard: true, mathFlags: 0, vendor: "", diff: rd(3, 3, 0) } }),
+    run("r4", { ok: false, costUsd: 0.005, detail: { mathFlags: 9 } }),
+    run("r5", { feature: "reply", costUsd: 5 }),
+  ];
+  const rep = vendorPdfReport(runs);
+  ok(rep.total.reads === 4 && rep.total.okReads === 3 && rep.total.tryHarder === 1 && rep.total.saved === 2 && rep.total.replaced === 1, "report: total counts (other features ignored)");
+  ok(rep.total.linesRead === 6 && rep.total.kept === 5 && rep.total.edited === 1 && rep.total.deleted === 0 && rep.total.added === 0 && rep.total.keptPct === 83.3 && rep.total.totalChanged === 1, "report: total line stats, keptPct 83.3");
+  ok(rep.total.mathFlags === 3, "report: mathFlags sum over ok reads only");
+  ok(Math.abs(rep.total.costUsd - 0.155) < 1e-9, "report: cost summed (failed read included)");
+  ok(rep.byModel.map((m) => m.key).join() === "claude-haiku-5-5,claude-sonnet-5-5", "report: byModel keys");
+  const hk = rep.byModel[0];
+  ok(hk.reads === 3 && hk.okReads === 2 && hk.saved === 1 && hk.replaced === 1 && hk.keptPct === 66.7 && hk.tryHarder === 0, "report: Haiku row");
+  ok(rep.byModel[1].saved === 1 && rep.byModel[1].tryHarder === 1 && rep.byModel[1].keptPct === 100, "report: Sonnet row");
+  ok(rep.byVendor.map((v) => v.key).join() === "Rose Brand,Unnamed vendor" && rep.byVendor.every((v) => v.saved === 1), "report: byVendor covers saved runs only");
+  ok(rep.byVendor[0].reads === 1 && rep.byVendor[0].keptPct === 66.7, "report: vendor row stats");
+  const none = vendorPdfReport([]);
+  ok(none.total.reads === 0 && none.total.keptPct === null && none.byModel.length === 0 && none.byVendor.length === 0, "report: empty");
+  ok(vendorPdfReport([run("x", { outcome: "accepted", detail: { diff: rd(0, 0, 0) } })]).total.keptPct === null, "report: keptPct null with no lines read");
+  ok(vendorPdfReport([run("y", { outcome: "accepted" })]).total.saved === 0, "report: accepted without a diff is not saved");
+
+  // Boundary.
+  for (const f of ["fill.ts", "diff.ts"]) {
+    const src = readFileSync(new URL(`../src/lib/vendor-pdf/${f}`, import.meta.url), "utf8");
+    ok(!/from\s+["'](node:|@\/db|@\/lib\/stores)|-server["']/.test(src), `vendor-pdf: ${f} imports nothing server-side`);
+    const imports = [...src.matchAll(/^import\s+(type\s+)?[^;]*?from\s+["']([^"']+)["']/gm)].map((m) => ({ type: !!m[1], from: m[2] }));
+    const allowed = (i: { type: boolean; from: string }) =>
+      i.from === "./checks" || i.from === "./extraction" || i.from === "./diff" || i.from === "@/lib/format" ||
+      i.from === "@/app/(app)/estimator/material-csv" || (i.type && i.from === "@/app/(app)/estimator/types");
+    ok(imports.length > 0 && imports.every(allowed), `vendor-pdf: ${f} imports only types from estimator/types + ./checks ./extraction (+ pure helpers)`);
+  }
+}
+
 if (process.argv[1]?.endsWith("test-vendors.ts")) {
   let pass = 0, fail = 0;
   const ok: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
-  vendorChecks(ok).then(() => vendorPdfPureChecks(ok)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
+  vendorChecks(ok).then(() => vendorPdfPureChecks(ok)).then(() => vendorPdfFillChecks(ok)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
 }

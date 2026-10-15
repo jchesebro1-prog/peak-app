@@ -19,6 +19,8 @@ import type { TrackConfig } from "@/lib/track-engine";
 import type { TrackMounting, TrackOperation, TrackSeries } from "@/lib/track-series";
 import type { SystemIntro } from "@/lib/narrative/intros";
 import type { EstimateSuggestionView, SuggestionParts } from "@/lib/assist/features/suggestion-panel";
+import type { VendorPdfExtraction } from "@/lib/vendor-pdf/extraction";
+import type { VendorPdfReadUi } from "@/lib/vendor-pdf/fill";
 
 export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
 export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
@@ -184,7 +186,12 @@ export type VendorQuoteLine = {
   qty: number;
   unit: string;
   amount: number;
+  /** #348 slice 5 — index into extracted.data.lines this line was filled from (absent = typed). */
+  extractedIndex?: number;
 };
+
+/** #348 slice 5 — the Read-the-PDF result a saved vendor quote keeps (server-verified at save). */
+export type VendorQuoteExtracted = { runId: string; model: string; at: number; data: VendorPdfExtraction };
 
 /**
  * A vendor's quote imported into an estimate. Persisted TOP-LEVEL on the
@@ -219,6 +226,8 @@ export type VendorQuote = {
   addedAt?: number;
   /** #348 slice 4 — the email thread this quote came from (Add as vendor quote…). */
   fromThreadId?: string | null;
+  /** #348 slice 5 — what Read the PDF read from this quote's file (absent = never read). */
+  extracted?: VendorQuoteExtracted | null;
 };
 
 /** Data-URL characters the estimate's vendor attachments already spend of
@@ -377,6 +386,8 @@ export type VendorLineDraft = {
   qty: string;
   unit: string;
   amount: string;
+  /** #348 slice 5 — the extracted line this row was filled from (absent = typed). */
+  fromRead?: number;
 };
 
 export type VendorDraft = {
@@ -412,6 +423,9 @@ export type VendorDraft = {
   /** #348 slice 4 — the picked vendor company (null = typed name only) and the email the quote came from. */
   vendorCompanyId: string | null;
   fromThreadId: string | null;
+  /** #348 slice 5 — the read this form keeps (saved with the quote) and the banner state (never persisted). */
+  extracted: VendorQuoteExtracted | null;
+  pdfRead: VendorPdfReadUi | null;
 };
 
 export type FixtureDraft = {

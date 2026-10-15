@@ -179,6 +179,8 @@ const freshVendor = (): VendorDraft => ({
   display: "single",
   vendorCompanyId: null,
   fromThreadId: null,
+  extracted: null,
+  pdfRead: null,
 });
 
 const freshLabor = (
@@ -668,6 +670,7 @@ export function useEstimatorState(props: EstimatorProps) {
       qty: String(l.qty),
       unit: l.unit,
       amount: String(l.amount),
+      ...(typeof l.extractedIndex === "number" ? { fromRead: l.extractedIndex } : {}),
     }));
     return {
       /* The record's OWN id, never a fresh mint: the attachment is stored under
@@ -705,6 +708,8 @@ export function useEstimatorState(props: EstimatorProps) {
       display: v.display,
       vendorCompanyId: v.vendorCompanyId ?? null,
       fromThreadId: v.fromThreadId ?? null,
+      extracted: v.extracted ?? null,
+      pdfRead: null,
     };
   };
   // Customer tier margin stamp (item 11, D87) — SEEDS the labor draft and
