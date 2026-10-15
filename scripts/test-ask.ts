@@ -1522,6 +1522,19 @@ export async function askUiChecks(ok: Ok): Promise<void> {
       /if \(!res\.ok \|\| latestQ\.current !== q\) return;/.test(nav) && /if \(latestQ\.current !== q\) return;\s*setSearchGroups/.test(nav),
     "ask ui: the ⌘K Ask AI row, ⌘↵, \"Searching…\" and the panel are all gated on askEnabled; a route change closes the panel; a stale search reply is dropped"
   );
+  // Jeff 2026-10-15 #27 — a phone entry: ✦ in the ≤ 860 px top bar and an Ask AI drawer row, full screen, same gate
+  ok(
+    /const openAskBlank = \(\) => \{\s*if \(!askEnabled\) return;[\s\S]{0,200}setAsk\(\{ question: "", page: \(window\.location\.pathname \+ window\.location\.search\)\.slice\(0, 500\), n: \+\+askSeq\.current, full: true \}\);/.test(nav) &&
+      /\{narrow && askEnabled && \(\s*<button className="pk-iconbtn" aria-label="Ask AI"[^>]*onClick=\{openAskBlank\}/.test(nav) &&
+      /<SyncChip variant="drawer" \/>\s*\{askEnabled && \(\s*<button\s+type="button"\s+onClick=\{openAskBlank\}/.test(nav) &&
+      /fullScreen=\{!!ask\.full\}/.test(nav),
+    "ask ui (#27): the phone entry — ✦ in the narrow top bar and a drawer row — opens a blank question on the current page, gated on askEnabled"
+  );
+  ok(
+    /fullScreen = false,/.test(panel) && /className=\{fullScreen \? "pk-ask pk-ask-full" : "pk-ask"\}/.test(panel) && /\.pk-ask\.pk-ask-full \{ top: 0; right: 0; left: 0; bottom: 0; width: 100vw;[^}]*height: 100dvh;/.test(panel) &&
+      /if \(initialQuestion\.trim\(\)\) void ask\(initialQuestion\);\s*else queueMicrotask\(\(\) => inputRef\.current\?\.focus\(\)\);/.test(panel),
+    "ask ui (#27): the phone entry's panel is full screen at any width and starts with the input focused (no question asked)"
+  );
   const layout = read("src/app/(app)/layout.tsx");
   ok(/const askEnabled = \(await askGateFor\(user\.id, \{ settings: assistSettingsOf\(settings\) \}\)\.catch\(\(\) => "error"\)\) === null;/.test(layout) && /askEnabled=\{askEnabled\}/.test(layout), "ask ui: the (app) layout computes askEnabled with askGateFor (=== null) and passes it to Nav");
   const cards = read(`${dir}/AskCards.tsx`);

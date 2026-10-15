@@ -3,7 +3,9 @@
 /**
  * Ask AI — the panel (spec 2026-10-13-ask-ai-design.md §1). Opened from the
  * ⌘K "Ask AI" row with the query as the first question; anchored under the
- * search box, full screen under 700 px. Esc / ✕ close it and closing forgets
+ * search box, full screen under 700 px — and always full screen when opened
+ * from the phone entry (`fullScreen`, Jeff 2026-10-15 #27: the ≤ 860 px top
+ * bar ✦ and the drawer row). Esc / ✕ close it and closing forgets
  * the conversation (Nav also closes it on a route change).
  *
  * Model text is untrusted: answers render through ask-render's block model
@@ -48,6 +50,7 @@ const CSS = `
 .pk-ask a.pk-ask-ref:hover { text-decoration: underline; }
 .pk-ask-answer p { margin: 0 0 8px; line-height: 1.5; }
 .pk-ask-answer ul { margin: 0 0 8px; padding-left: 18px; line-height: 1.5; }
+.pk-ask.pk-ask-full { top: 0; right: 0; left: 0; bottom: 0; width: 100vw; max-width: none; max-height: none; height: 100dvh; border-radius: 0; border: none; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
 @media (max-width: 700px) {
   .pk-ask { top: 0; right: 0; left: 0; bottom: 0; width: 100vw; max-width: none; max-height: none; height: 100dvh; border-radius: 0; border: none; padding-top: env(safe-area-inset-top); }
 }
@@ -117,8 +120,11 @@ export default function AskPanel({
   team,
   meId,
   onClose,
+  fullScreen = false,
 }: {
   initialQuestion: string;
+  /** Jeff 2026-10-15 #27 — the phone entry opens it full screen at any width. */
+  fullScreen?: boolean;
   /** location.pathname + location.search when the panel opened */
   page: string;
   team: AskTeamMember[];
@@ -278,7 +284,7 @@ export default function AskPanel({
   const latestKey = turns.length ? turns[turns.length - 1].key : -1;
 
   return (
-    <div className="pk-ask" role="dialog" aria-label="Ask AI">
+    <div className={fullScreen ? "pk-ask pk-ask-full" : "pk-ask"} role="dialog" aria-label="Ask AI">
       <style>{CSS}</style>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: "1px solid #f0f1f4" }}>
         <span style={{ fontSize: 14, fontWeight: 700 }}>✦ Ask AI</span>

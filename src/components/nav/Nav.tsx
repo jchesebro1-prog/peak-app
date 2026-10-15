@@ -95,7 +95,7 @@ export default function Nav({
   const latestQ = useRef("");
   // Ask AI: the open panel (its first question + the page it was opened on).
   // `n` remounts the panel for a fresh conversation each time it's opened.
-  const [ask, setAsk] = useState<{ question: string; page: string; n: number } | null>(null);
+  const [ask, setAsk] = useState<{ question: string; page: string; n: number; full?: boolean } | null>(null);
   const askSeq = useRef(0);
   // The ⌘K query whose results are showing — "Searching…" until it catches up.
   const [searchedQ, setSearchedQ] = useState("");
@@ -138,6 +138,17 @@ export default function Nav({
     setSearchGroups([]);
     searchRef.current?.blur();
     setAsk({ question, page: (window.location.pathname + window.location.search).slice(0, 500), n: ++askSeq.current });
+  };
+
+  /** Jeff 2026-10-15 #27 — the phone entry (≤ 860 px: top bar ✦ and the
+   *  drawer row): Ask AI full screen with no question yet, the current page
+   *  as its context. Same gate as the ⌘K row (askEnabled = askGateFor). */
+  const openAskBlank = () => {
+    if (!askEnabled) return;
+    setDrawerOpen(false);
+    setMenuOpen(false);
+    setNotifOpen(false);
+    setAsk({ question: "", page: (window.location.pathname + window.location.search).slice(0, 500), n: ++askSeq.current, full: true });
   };
 
   useEffect(() => {
@@ -509,6 +520,12 @@ export default function Nav({
             </div>
           )}
 
+          {narrow && askEnabled && (
+            <button className="pk-iconbtn" aria-label="Ask AI" title="Ask AI" onClick={openAskBlank} style={{ fontSize: 16, lineHeight: 1 }}>
+              ✦
+            </button>
+          )}
+
           <div style={{ position: "relative" }}>
             <button
               className="pk-iconbtn"
@@ -754,7 +771,7 @@ export default function Nav({
       {/* Ask AI (spec 2026-10-13 §1) — outside the wide-only search box so it
           survives a resize; closes on Esc / ✕ and on a route change. */}
       {askEnabled && ask && (
-        <AskPanel key={ask.n} initialQuestion={ask.question} page={ask.page} team={askTeam} meId={user.id} onClose={closeAsk} />
+        <AskPanel key={ask.n} initialQuestion={ask.question} page={ask.page} team={askTeam} meId={user.id} onClose={closeAsk} fullScreen={!!ask.full} />
       )}
 
       {/* Narrow drawer */}
@@ -832,6 +849,30 @@ export default function Nav({
             </div>
 
             <SyncChip variant="drawer" />
+
+            {askEnabled && (
+              <button
+                type="button"
+                onClick={openAskBlank}
+                style={{
+                  margin: "10px 10px 4px",
+                  padding: "11px 12px",
+                  borderRadius: 10,
+                  background: "#23262d",
+                  border: "1px solid #2f323a",
+                  color: "#e7e9ee",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  textAlign: "left",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span style={{ color: "var(--accent)" }}>✦</span> Ask AI
+              </button>
+            )}
 
             <nav
               style={{
