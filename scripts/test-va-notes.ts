@@ -1297,6 +1297,90 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     ok(BG.feetOf("38'-6\"") === 38.5 && BG.feetOf("38.5") === 38.5 && BG.feetOf("") === null && BG.feetOf("<b>") === null && BG.feetOf(true) === null && BG.feetOf("9999") === 300,
       "#344 C2: feetOf parses ft-in, decimals, rejects junk and clamps to 300 ft");
   }
+
+  // ─── C3: InkPad view math, replace op, source pins ───
+  {
+    const V = await import("../src/lib/ink/view");
+    const INK = await import("../src/lib/ink/model");
+    const near = (a: number, b: number, e = 1e-6) => Math.abs(a - b) <= e;
+    const f = V.fitScale(1000, 800, 900, 640, 0);
+    ok(near(f, 1000 / 900), "#344 C3: fitScale contains the doc (width-limited 900×640 in 1000×800)");
+    ok(near(V.fitScale(1000, 500, 900, 640, 10), 480 / 640), "#344 C3: fitScale honours padding and the limiting axis");
+    const fv = V.fitView(1000, 800, 900, 640, 0);
+    ok(fv.z === 1 && near(fv.x, 0) && near(fv.y, (800 - 640 * f) / 2), "#344 C3: fitView is zoom 1 with the doc centred");
+    const v = { z: 2, x: 30, y: -40 };
+    const d = V.screenToDoc(v, 0.5, 130, 60), s = V.docToScreen(v, 0.5, d.x, d.y);
+    ok(near(d.x, 100) && near(d.y, 100) && near(s.x, 130) && near(s.y, 60), "#344 C3: screenToDoc / docToScreen invert each other");
+    const za = V.zoomAt(v, 3, 200, 150);
+    const before = V.screenToDoc(v, 0.5, 200, 150), after = V.screenToDoc(za, 0.5, 200, 150);
+    ok(za.z === 3 && near(before.x, after.x) && near(before.y, after.y), "#344 C3: zoomAt keeps the doc point under the focus fixed");
+    ok(V.zoomAt(v, 99, 0, 0).z === 4 && V.zoomAt(v, 0.01, 0, 0).z === 0.5 && V.clampZoom(NaN) === 1, "#344 C3: zoom clamps to 0.5–4 (NaN → 1)");
+    const p0 = { z: 1, x: 0, y: 0 };
+    const pz = V.pinchView(p0, { x: 100, y: 100 }, { x: 200, y: 100 }, { x: 50, y: 100 }, { x: 250, y: 100 });
+    ok(pz.z === 2 && near(pz.x, -150) && near(pz.y, -100), "#344 C3: pinch spreading 2× doubles zoom about the midpoint");
+    const pp = V.pinchView(p0, { x: 100, y: 100 }, { x: 200, y: 100 }, { x: 130, y: 120 }, { x: 230, y: 120 });
+    ok(pp.z === 1 && near(pp.x, 30) && near(pp.y, 20), "#344 C3: two fingers moving together pan without zooming");
+    const pc = V.pinchView(p0, { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 0 }, { x: 1000, y: 0 });
+    const pd = V.pinchView(p0, { x: 5, y: 5 }, { x: 5, y: 5 }, { x: 0, y: 0 }, { x: 100, y: 0 });
+    ok(pc.z === 4 && pd.z === 1, "#344 C3: pinch clamps at 4× and ignores a zero start distance");
+    // 900×640 doc at fit 1 in a 1000×800 stage, zoom 1: smaller than the stage → ≥ 75 % stays visible
+    const cl = V.clampView({ z: 1, x: -5000, y: 5000 }, 1, 1000, 800, 900, 640);
+    ok(near(cl.x, -225) && near(cl.y, 800 - 640 + 160), "#344 C3: clampView keeps a small doc ≥ 75 % on screen");
+    const big = V.clampView({ z: 4, x: 900, y: -99999 }, 1, 1000, 800, 900, 640);
+    ok(near(big.x, 250) && near(big.y, 800 - 2560 - 200), "#344 C3: clampView keeps a zoomed doc covering ≥ 75 % of the stage");
+    const inside = { z: 1, x: 50, y: 80 };
+    ok(JSON.stringify(V.clampView(inside, 1, 1000, 800, 900, 640)) === JSON.stringify(inside), "#344 C3: clampView leaves an on-screen view alone");
+    ok(V.isTap({ t: 0, x: 0, y: 0 }, { t: 200, x: 3, y: 4 }) && !V.isTap({ t: 0, x: 0, y: 0 }, { t: 400, x: 0, y: 0 }) && !V.isTap({ t: 0, x: 0, y: 0 }, { t: 100, x: 30, y: 0 }),
+      "#344 C3: isTap needs short and still");
+    ok(V.isDoubleTap({ t: 1000, x: 10, y: 10 }, { t: 1250, x: 20, y: 15 }) && !V.isDoubleTap(null, { t: 0, x: 0, y: 0 }) &&
+      !V.isDoubleTap({ t: 1000, x: 10, y: 10 }, { t: 1400, x: 10, y: 10 }) && !V.isDoubleTap({ t: 1000, x: 10, y: 10 }, { t: 1100, x: 80, y: 10 }),
+      "#344 C3: isDoubleTap within 300 ms and 30 px");
+    ok(V.pointerRole("pen", true) === "draw" && V.pointerRole("touch", true) === "nav" && V.pointerRole("mouse", true) === "draw" &&
+      V.pointerRole("touch", false) === "draw" && V.pointerRole("mouse", false) === "draw",
+      "#344 C3: once a pen is seen fingers navigate; without one everything draws");
+    ok(V.pointPressure("mouse", 0) === 0.5 && V.pointPressure("pen", 0.8) === 0.8 && V.pointPressure("pen", 0) === 0.1 && V.pointPressure("pen", 3) === 1 &&
+      V.pointPressure("touch", 0) === 0.5 && V.pointPressure("touch", 1) === 0.5 && V.pointPressure("touch", 0.3) === 0.3 && V.pointPressure("pen", NaN) === 0.1,
+      "#344 C3: pressure — mouse 0.5, pen as reported (0 → 0.1), touch without pressure 0.5");
+    ok(V.penWidthFor(900, 640) === 2.5 && V.penWidthFor(1600, 1200) === 4 && V.penWidthFor(10, 10) === 1 && V.labelSizeFor(900, 640) === 23 && V.labelSizeFor(100, 100) === 12,
+      "#344 C3: pen width and label size scale with the doc");
+    ok(V.eraserRadius(2.5, 1) === 14 && V.eraserRadius(2.5, 10) === 5 && near(V.eraserRadius(2.5, 4), 5) && V.eraserRadius(2, 0) === 14,
+      "#344 C3: eraser radius ≥ 2 × pen width and ≥ 14 screen px at the current scale");
+    const e1 = V.exportSize(4032, 3024, false), e2 = V.exportSize(900, 640, true), e3 = V.exportSize(800, 600, false);
+    ok(e1.w === 1600 && e1.h === 1200 && e2.w === 1600 && e2.h === 1138 && e3.w === 800 && e3.k === 1, "#344 C3: export long edge 1600 (photo never upscaled; SVG upscales)");
+    const labs = [
+      { id: "a", x: 10, y: 10, text: "ABCD", color: "#16181d", size: 10 },
+      { id: "b", x: 12, y: 12, text: "XY", color: "#16181d", size: 10 },
+    ];
+    ok(V.hitLabel(labs, 14, 14, V.approxLabelWidth, 0) === "b" && V.hitLabel(labs, 30, 12, V.approxLabelWidth, 0) === "a" &&
+      V.hitLabel(labs, 100, 100, V.approxLabelWidth) === null, "#344 C3: hitLabel picks the topmost label box");
+    const url = V.svgDataUrl('<svg><text>A — B × C</text></svg>');
+    ok(url.startsWith("data:image/svg+xml;charset=utf-8,") && decodeURIComponent(url.split(",")[1]) === '<svg><text>A — B × C</text></svg>',
+      "#344 C3: svgDataUrl percent-encodes non-ASCII (no btoa)");
+    // replace op: one undo step for a whole drag-erase
+    const mk = (id: string, x: number): import("../src/lib/ink/model").Stroke => ({ id, tool: "pen", color: "#16181d", width: 2, pts: [x, 0, 0.5, x + 10, 0, 0.5] });
+    const h = INK.createHistory(INK.emptyInk(100, 100));
+    h.do({ t: "stroke", stroke: mk("a", 0) });
+    h.do({ t: "stroke", stroke: mk("b", 50) });
+    let tmp = h.current;
+    tmp = INK.eraseAt(tmp, 5, 0, 3);
+    tmp = INK.eraseAt(tmp, 55, 0, 3);
+    h.do({ t: "replace", doc: tmp });
+    const erasedAll = h.current.strokes.length === 0;
+    h.undo();
+    ok(erasedAll && h.current.strokes.length === 2, "#344 C3: a replace op makes a drag-erase one undo step");
+    const same = h.current;
+    ok(h.do({ t: "replace", doc: same }) === same && h.canRedo, "#344 C3: replacing with the current doc is a no-op (redo kept)");
+    // source pins
+    const pad = readFileSync(join(process.cwd(), "src/components/ink/ink-pad.tsx"), "utf8");
+    const flat = readFileSync(join(process.cwd(), "src/components/ink/flatten.ts"), "utf8");
+    ok(['pointerType === "pen"', "getCoalescedEvents", "touchAction: \"none\"", 'aria-modal="true"', "aria-labelledby", 'role="dialog"', "svgDataUrl(", "flattenInk("]
+      .every((k) => pad.includes(k)) && ["toBlob(", '"image/jpeg", 0.85', "exportSize(", "fillRect(", "svgDataUrl("].every((k) => flat.includes(k)),
+      "#344 C3: InkPad pins — pen detection, coalesced events, touch-action none, modal dialog; flatten → white base, JPEG 0.85 toBlob");
+    const noServer = (src: string) => !/from\s+["'][^"']*(stores|server|@\/db)[^"']*["']/.test(src);
+    ok(noServer(pad) && noServer(flat) && pad.startsWith('"use client"') && ![pad, flat].some((x) => x.includes("window.confirm") || x.includes("btoa(")),
+      "#344 C3: InkPad is a client component with no store/server imports, no window.confirm, no btoa");
+    ok(pad.split("\n").length <= 600, "#344 C3: InkPad stays under ~600 lines (" + pad.split("\n").length + ")");
+  }
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {

@@ -157,7 +157,9 @@ export type InkOp =
   | { t: "label"; label: InkLabel }
   | { t: "move"; id: string; x: number; y: number }
   | { t: "unlabel"; id: string }
-  | { t: "clear" };
+  | { t: "clear" }
+  /** Swap in a whole doc derived from the current one (e.g. a drag-erase) — one undo step. */
+  | { t: "replace"; doc: InkDoc };
 
 export function applyOp(doc: InkDoc, op: InkOp): InkDoc {
   switch (op.t) {
@@ -167,6 +169,7 @@ export function applyOp(doc: InkDoc, op: InkOp): InkDoc {
     case "move": return moveLabel(doc, op.id, op.x, op.y);
     case "unlabel": return removeLabel(doc, op.id);
     case "clear": return clearInk(doc);
+    case "replace": return op.doc;
   }
 }
 
