@@ -42,6 +42,13 @@ import { DEFAULT_IMAGE } from "../src/lib/package-doc/schema";
 import { onlineShowsCutSheets } from "../src/lib/curtain-cut-sheets/online";
 import { acceptanceLine, cleanPoNumber, sanitizeClientResponse, responseNoteText, responseRows, cleanClientResponses, CLIENT_ACTION_COPY } from "../src/lib/estimate-output/responses";
 import { notifyPortalAcceptance, ACCEPT_SIGNER_NAME_COPY, ACCEPT_SIGNER_TITLE_COPY, ACCEPT_PO_NUMBER_COPY } from "../src/lib/portal-quotes";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { generateQuotePdf } from "../src/lib/quote-pdf/generate";
+import { quoteDocumentDataFor } from "../src/lib/quote-pdf/quote-document-data";
+import { pdfStorage } from "../src/lib/quote-pdf/storage";
+import { revisionCopyPlan, pdfIsCurrent } from "../src/lib/quote-pdf/state";
+import { updateQuotePdf } from "../src/lib/stores/quotes";
 import { appendResponseTo, MAX_CLIENT_RESPONSES, responseQuoteLimitKey, type ClientResponse } from "../src/lib/estimate-output/responses";
 
 const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -306,6 +313,19 @@ function oct15BonusRateChecks(ok: Ok) {
 
 /* ---- #13 — every send gets the next Rev; numbers never repeat ---- */
 export function oct15RevChecks(ok: Ok) {
+  // #352 review I1 — the copy step's plan.
+  const rv = (revNo?: number, extra: Record<string, unknown> = {}) => ({ rev: 2, at: 100, reason: "sent", ...(revNo ? { docFields: { revNo } } : {}), ...extra });
+  const pdf = (savedAt: number, revNum?: number) => ({ savedAt, ...(revNum ? { printed: { revNum, revDateMs: savedAt } } : {}) });
+  ok(revisionCopyPlan(rv(2), pdf(90, 2), 80) === "copy" && revisionCopyPlan(rv(2), pdf(90), 80) === "copy" && revisionCopyPlan(rv(), pdf(90, 1), 80) === "copy",
+    "I1: a pre-send file copies when it printed the stamped Rev (or either is unknown — older revisions)");
+  ok(revisionCopyPlan(rv(2), pdf(90, 1), 80) === "rerender" && revisionCopyPlan(rv(2), pdf(90, 1), 150) === "wait",
+    "I1: a pre-send file with another Rev is refused — re-rendered while nothing printed changed since the send, else left");
+  ok(revisionCopyPlan(rv(2), pdf(120, 2), 80) === "copy" && revisionCopyPlan(rv(2), pdf(120, 1), 80) === "wait" && revisionCopyPlan(rv(2), pdf(120, 2), 110) === "wait" && revisionCopyPlan(rv(), pdf(120, 2), 80) === "wait",
+    "I1: a post-send file copies only when unchanged since the send and printing exactly the stamped Rev — never a loop");
+  ok(revisionCopyPlan(rv(2, { pdfBlobPath: "x" }), pdf(90, 2), 80) === "wait" && revisionCopyPlan({ rev: 2, at: 100, reason: "manual" }, pdf(90, 2), 80) === "wait", "I1: a copied or non-sent revision is left alone");
+  const qsrc = rd("src/lib/stores/quotes.ts");
+  ok(qsrc.includes("if (r && typeof stamped === \"number\" && typeof printedRev === \"number\" && printedRev !== stamped) return;") && qsrc.includes("if (out && revised.value) await scheduleRevisePdfSafely(id);"),
+    "I1: setRevisionPdfPath never overwrites a stamped Rev; every revise schedules a render");
   const R = (rev: number, reason: string, revNo?: number) => ({ rev, reason, at: rev, ...(revNo ? { docFields: { revNo } } : {}) });
   ok(documentRevStamp({ revisions: [], status: "draft" }).revNum === 1 && documentRevStamp({ status: "draft" }).revNum === 1, "oct15 #13: before any send the document prints Rev 1");
   const once = [R(1, "sent", 1)];
@@ -325,6 +345,65 @@ export function oct15RevChecks(ok: Ok) {
   ok(qs.includes('if (reason === "sent" && r.docFields) r.docFields = { ...r.docFields, revNo: nextSendRevNo(revs) };'), "oct15 #13: every sent revision (setStatus, a portal refresh, a bidder send's cut) stamps max + 1");
   ok(!rd("src/app/(app)/estimator/page.tsx").includes("revisions?.length || 1") && !rd("src/app/(app)/estimator/actions.ts").includes("revisions?.length || 1"),
     "oct15 #13: the Estimator header reads the same rule");
+}
+
+/* ---- #352 review I1 — a revise resent with no edits never reprints the old Rev ---- */
+async function oct15ResendDbChecks(ok: Ok) {
+  const keys = ["BLOB_READ_WRITE_TOKEN", "VERCEL", "QUOTE_PDF_DIR"] as const;
+  const prev = keys.map((k) => [k, process.env[k]] as const);
+  delete process.env.BLOB_READ_WRITE_TOKEN;
+  delete process.env.VERCEL;
+  const root = mkdtempSync(join(tmpdir(), "quote-pdfs-o15-"));
+  process.env.QUOTE_PDF_DIR = root;
+  try {
+    const qid = fixtureId(FIX, "resend");
+    const sec = { id: "sysR", name: "O15 resend", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "O15R", desc: "Fixture", qty: 1, unit: "ea", cost: 10, price: 20 }] };
+    await createFixture("quotes", buildQuote(qid, { name: "O15 resend", customer: "O15 Owner", customerId: CO.own, value: 20, spec: { sections: [sec], mobs: [] } } as never, "system", null, Date.now()) as never);
+    const SET = { companyName: "Peak Systems Group", logoDark: null };
+    const render = async () => Buffer.from(`%PDF-1.4 o15 Rev ${quoteDocumentDataFor((await getQuote(qid))!, null, SET).revNum}`);
+    const renderAt = async (savedAt: number) => generateQuotePdf({ quoteId: qid, savedAt, origin: "http://print.test", secret: "o15-secret", render });
+    const tick = () => new Promise<void>((r) => setTimeout(r, 5));
+    const fileOf = async () => {
+      const p = (await getQuote(qid))?.revisions?.filter((r) => r.reason === "sent").at(-1)?.pdfBlobPath;
+      const store = pdfStorage();
+      return p && !("unavailable" in store) ? (await store.read(p))?.toString() ?? null : null;
+    };
+    // Send 1: save → render (Rev 1) → send → the copy carries Rev 1.
+    const s1 = Date.now();
+    await updateQuotePdf(qid, (cur) => ({ status: "pending", at: s1, savedAt: s1, ...(cur?.blobPath ? { blobPath: cur.blobPath } : {}) }));
+    await renderAt(s1);
+    await tick();
+    await setStatus(qid, "sent", "Pat", { bypassApprovalGate: "engine-owned-flow" });
+    const q1 = (await getQuote(qid))!;
+    const ready1 = q1.pdf!;
+    ok(q1.revisions?.at(-1)?.docFields?.revNo === 1 && (await fileOf()) === "%PDF-1.4 o15 Rev 1", "I1 db: the first send carries Rev 1 (revision and file)");
+    // Revise with no edits: the PDF is re-scheduled (outside a request: marked stale), so Send waits for a fresh render.
+    await tick();
+    await setStatus(qid, "draft", "Pat");
+    const q2 = (await getQuote(qid))!;
+    ok(q2.pdf?.status === "pending" && !pdfIsCurrent(q2.pdf, q2.contentChangedAt), "I1 db: a revise re-schedules the PDF — Send waits for a fresh render");
+    // The reviewer's case: the old Rev 1 file is still the current one when the resend lands (no edits, no re-render).
+    await updateQuotePdf(qid, () => ready1);
+    await tick();
+    await setStatus(qid, "sent", "Pat", { bypassApprovalGate: "engine-owned-flow" });
+    const q3 = (await getQuote(qid))!;
+    const rev2 = q3.revisions!.filter((r) => r.reason === "sent").at(-1)!;
+    ok(rev2.docFields?.revNo === 2 && !rev2.pdfBlobPath && q3.pdf?.status === "pending",
+      "I1 db: the resend stamps Rev 2 and refuses the Rev 1 file — the copy step schedules a re-render instead");
+    // The re-render (status sent → prints Rev 2) is copied onto the revision.
+    await renderAt(q3.pdf!.savedAt);
+    const q4 = (await getQuote(qid))!;
+    const rev2b = q4.revisions!.filter((r) => r.reason === "sent").at(-1)!;
+    ok(!!rev2b.pdfBlobPath && rev2b.docFields?.revNo === 2 && q4.pdf?.printed?.revNum === 2 && (await fileOf()) === "%PDF-1.4 o15 Rev 2",
+      "I1 db: after the re-render both the revision and its PDF read Rev 2");
+    ok((q4.revisions || []).find((r) => r.rev === 1)?.docFields?.revNo === 1, "I1 db: the first send still reads Rev 1");
+  } finally {
+    for (const [k, v] of prev) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
 async function oct15RevDbChecks(ok: Ok) {
@@ -402,6 +481,7 @@ export async function oct15DbChecks(ok: Ok) {
     await setEmails(CO.ct, [{ value: "gee@o15.test", label: "work", isPrimary: true }] as never);
     await oct15BidDbChecks(ok);
     await oct15RevDbChecks(ok);
+    await oct15ResendDbChecks(ok);
     await oct15ZipSpecDbChecks(ok);
     await oct15PeopleDbChecks(ok);
     {

@@ -9,7 +9,7 @@ import {
   pdfKindForQuoteType,
   pdfStoragePath,
   printPathFor,
-  revisionAwaitingPdf,
+  revisionCopyPlan,
   settlePdf,
   type DocumentRevStamp,
   type PdfOutcome,
@@ -133,9 +133,11 @@ function isPendingFor(cur: QuotePdfState | null | undefined, savedAt: number): c
 /**
  * #293 slice 3 — the Rev N and date the file just rendered printed: the
  * print route's own rule (documentRevStamp, via quoteDocumentDataFor) over the
- * quote it read mid-render. Read before and after the render; both values only
- * ever grow (revisions are append-only, updatedAt moves forward), so equal
- * readings mean the print route saw exactly them. A write that landed during
+ * quote it read mid-render. Read before and after the render; both values
+ * never go down — Rev is the send number (D1123: a revise moves it to the next
+ * send's, a send keeps it, so a send landing mid-render prints the same Rev
+ * either side) and updatedAt only moves forward — so equal readings mean the
+ * print route printed exactly them. A write that landed during
  * the render → `stamp: null` (nothing is recorded rather than a guess), with
  * the quote as re-read (`after`) so the caller can render once more against it.
  */
@@ -257,7 +259,9 @@ export async function generateQuotePdf(input: GenerateInput): Promise<QuotePdfSt
 
 /**
  * Copy the current READY file onto the latest sent revision when that revision
- * is still owed one (revisionAwaitingPdf). Called from setStatus after a send
+ * is still owed one (revisionCopyPlan — #352 review I1: only a file that printed
+ * the revision's stamped Rev; a stale-Rev file schedules a re-render instead).
+ * Called from setStatus after a send
  * commits, and by the generator when a render finishes after the send. The
  * stamp is once-only (setRevisionPdfPath); a copy that loses that race is
  * deleted unless it is the very file the revision now records.
@@ -272,7 +276,14 @@ export async function copySentRevisionPdf(quoteId: string): Promise<string | nul
   const pdf = q?.pdf;
   if (!q || !pdf || !pdfIsCurrent(pdf, q.contentChangedAt) || !pdf.blobPath) return null;
   const rev = latestSentRevision(q.revisions);
-  if (!rev || !revisionAwaitingPdf(rev, pdf.savedAt)) return null;
+  // #352 review I1: never copy a file that printed another Rev than the send stamped — re-render it instead.
+  const plan = revisionCopyPlan(rev, pdf, q.contentChangedAt);
+  if (plan === "rerender") {
+    const { scheduleQuotePdf } = await import("./schedule");
+    await scheduleQuotePdf(quoteId);
+    return null;
+  }
+  if (!rev || plan !== "copy") return null;
   const store = pdfStorage();
   if ("unavailable" in store) return null;
   const bytes = await store.read(pdf.blobPath);

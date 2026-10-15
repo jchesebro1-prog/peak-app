@@ -193,6 +193,39 @@ export function revisionAwaitingPdf(rev: RevisionPdfFields | null | undefined, p
   return !!rev && rev.reason === "sent" && !rev.pdfBlobPath && rev.at >= pdfSavedAt;
 }
 
+/**
+ * #352 review I1 — what copySentRevisionPdf does with the current READY file
+ * for a sent revision still owed a copy:
+ * - "copy": a file made from a save at/before the send whose printed Rev is
+ *   the revision's stamped Rev (or either is unknown — older revisions and
+ *   unstamped renders keep the pre-#13 behaviour); or a file rendered AFTER
+ *   the send while nothing printed has changed since (it shows the revision's
+ *   content) and it printed exactly the stamped Rev;
+ * - "rerender": a pre-send file that printed a different Rev (a revise
+ *   resent with no edits still holds the old Rev's file) while nothing
+ *   printed has changed since the send — the re-render prints the stamped Rev
+ *   and is copied by the rule above (a post-send file never asks again, so
+ *   there is no loop);
+ * - "wait": anything else — nothing is copied, nothing scheduled. Pure.
+ */
+export type RevisionCopyPlan = "copy" | "rerender" | "wait";
+
+export function revisionCopyPlan(
+  rev: (RevisionPdfFields & { docFields?: { revNo?: unknown } | null }) | null | undefined,
+  pdf: { savedAt: number; printed?: DocumentRevStamp | null },
+  contentChangedAt: number | null | undefined
+): RevisionCopyPlan {
+  if (!rev || rev.reason !== "sent" || rev.pdfBlobPath) return "wait";
+  const stamped = validRevNo(rev.docFields?.revNo) ? rev.docFields.revNo : null;
+  const printed = pdf.printed && validRevNo(pdf.printed.revNum) ? pdf.printed.revNum : null;
+  const unchangedSince = (contentChangedAt ?? 0) <= rev.at;
+  if (rev.at >= pdf.savedAt) {
+    if (stamped !== null && printed !== null && printed !== stamped) return unchangedSince ? "rerender" : "wait";
+    return "copy";
+  }
+  return unchangedSince && stamped !== null && printed === stamped ? "copy" : "wait";
+}
+
 export function latestSentRevision<R extends RevisionPdfFields>(revisions: R[] | null | undefined): R | null {
   const revs = Array.isArray(revisions) ? revisions : [];
   for (let i = revs.length - 1; i >= 0; i--) if (revs[i]?.reason === "sent") return revs[i];

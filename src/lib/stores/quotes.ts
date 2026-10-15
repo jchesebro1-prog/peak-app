@@ -1255,6 +1255,10 @@ export async function setRevisionPdfPath(
     let hit = false;
     await patchDoc<Quote>("quotes", id, (doc) => {
       const r = (doc.revisions || []).find((x) => x.rev === rev);
+      // #352 review I1: a file that printed another Rev than the send stamped is never recorded on it.
+      const stamped = r?.docFields?.revNo;
+      const printedRev = file.printed?.revNum;
+      if (r && typeof stamped === "number" && typeof printedRev === "number" && printedRev !== stamped) return;
       if (r && !r.pdfBlobPath) {
         r.pdfBlobPath = path;
         if (typeof file.savedAt === "number" && Number.isFinite(file.savedAt)) r.pdfSavedAt = file.savedAt;
@@ -1584,6 +1588,16 @@ export async function appendClientResponse(id: string, pinnedRev: number, r: Cle
 /** After a send commits: copy the current PDF onto the new sent revision (#222).
  *  Never fails the send — a missing copy is logged, and the generator retries
  *  it when a still-rendering PDF lands. */
+/** #352 review I1 — schedule the revised draft's PDF (it now prints the next Rev). Never fails the status change. */
+async function scheduleRevisePdfSafely(id: string): Promise<void> {
+  try {
+    const { scheduleQuotePdf } = await import("../quote-pdf/schedule");
+    await scheduleQuotePdf(id);
+  } catch (e) {
+    console.error("[quotes] scheduling the revised PDF failed", id, e);
+  }
+}
+
 async function copySentPdfSafely(id: string): Promise<void> {
   try {
     const { copySentRevisionPdf } = await import("../quote-pdf/generate");
@@ -2052,6 +2066,8 @@ export async function setStatus(
   opts: SetStatusOpts = {}
 ): Promise<Quote | null> {
   const sentCut = { value: false };
+  // #352 review I1: set when this call really moved a sent / won / lost quote back to Draft (a revise).
+  const revised = { value: false };
   // Estimator bonuses: read before the transaction — the patch mutator is synchronous.
   // A failed users read must never block marking Won — credits then fall back to no userId.
   const bonusUsers = status === "won" ? await bonusUserList() : [];
@@ -2110,6 +2126,8 @@ export async function setStatus(
     if (autoStamp) doc.review = autoStamp;
     doc.history = doc.history || [];
     doc.history.push({ at: t, from: doc.status, to: status });
+    // #352 review I1: a revise — the document now prints the NEXT send's Rev (D1123).
+    if (status === "draft" && doc.status !== "draft") revised.value = true;
     doc.status = status;
     moved.value = true;
     // Estimator bonuses: Won records the payout; leaving Won withdraws it.
@@ -2200,6 +2218,10 @@ export async function setStatus(
   // the stamp, though swallowed here, leaves the outer Postgres transaction
   // aborted, so the caller's next statement fails instead of committing.
   if (out && sentCut.value) await copySentPdfSafely(id);
+  // #352 review I1: every revise (the Estimator's status menu, the Quotes hub, a stage move, a bid addendum, a
+  // portal refresh) re-renders the PDF, so Send waits for a file that prints the next Rev — a resend with no edits
+  // can never carry the previous send's file. Outside a request it is only marked stale (Send still waits).
+  if (out && revised.value) await scheduleRevisePdfSafely(id);
   // #282 phase 2: the Rewards ledger follows every real transition — earn +
   // redeem on won, reverse + unredeem on leaving won. Never for an imported
   // row (historical-import records history, it is not a sale made here), and
