@@ -35,6 +35,7 @@ import type { Answer, Answers } from "../src/lib/assessments/answers";
 import { addPicklistValue } from "../src/lib/stores/assessment-picklists";
 import { planReminders, reminderTaskId, inReminderWindow, REMINDER_LEAD_DAYS, type ReminderFinding } from "../src/lib/assessments/reminders";
 import { runAssessmentReminders } from "../src/lib/assessments/reminders-server";
+import { parseNextAssessmentInput, nextAssessmentInputValue, MIN_NEXT_ASSESSMENT_MS } from "../src/lib/assessments/next-assessment-input";
 import { setNextAssessmentAt, getVenueProfile } from "../src/lib/stores/venue-profiles";
 import { getDocRows, softDeleteDoc } from "../src/db/doc-store";
 import { DOC_TABLES } from "../src/db/doc-tables";
@@ -449,6 +450,16 @@ function reminderChecks(ok: Ok) {
   ok(/after\(maybeRunAssessmentReminders\)/.test(src("src/app/(app)/assessments/page.tsx")), "b3 #10 pin: the Assessments page runs them lazily (throttled)");
   const act = src("src/app/(app)/assessments/reminder-actions.ts");
   ok(/await requirePerm\("create"\);[\s\S]*getSite\(siteId\)[\s\S]*setNextAssessmentAt\(site\.id, site\.companyId, at\)/.test(act), "b3 #10 pin: setting a venue's next assessment needs `create` and a real venue");
+  // #353 review I1 — the date field
+  const pd = parseNextAssessmentInput("2027-03-04");
+  ok(pd !== "ignore" && pd.at === new Date(2027, 2, 4, 12).getTime() && nextAssessmentInputValue(pd.at) === "2027-03-04", "I1: a full date parses to noon local and round-trips");
+  ok(parseNextAssessmentInput("0002-03-04") === "ignore" && parseNextAssessmentInput("0202-03-04") === "ignore" && parseNextAssessmentInput("1899-12-31") === "ignore" && parseNextAssessmentInput("2027-13-01") === "ignore" && parseNextAssessmentInput("27-03-04") === "ignore",
+    "I1: a half-typed or pre-1900 year is ignored");
+  ok(JSON.stringify(parseNextAssessmentInput("")) === '{"at":null}' && parseNextAssessmentInput("1900-01-01") !== "ignore" && MIN_NEXT_ASSESSMENT_MS === Date.UTC(1900, 0, 1), "I1: empty clears; 1900 is the floor");
+  const nae = src("src/components/assessments/next-assessment-edit.tsx");
+  ok(/onBlur=\{\(\) => void commit\(\)\}/.test(nae) && /e\.key === "Enter"[\s\S]{0,80}void commit\(\)/.test(nae) && !/disabled=/.test(nae) && !/onChange=\{[^}]*setNextAssessmentAction/.test(nae) && /"Saved"/.test(nae) && /role="status"/.test(nae),
+    "I1 pin: saves on blur / Enter only, stays enabled while saving, shows Saved or the error inline");
+  ok(/at >= MIN_NEXT_ASSESSMENT_MS/.test(src("src/app/(app)/assessments/reminder-actions.ts")), "I1 pin: the server refuses a pre-1900 date too");
   ok(!/from "@\/lib\/stores|from "@\/db/.test(src("src/components/assessments/next-assessment-edit.tsx")) && !/from "@\/lib\/stores|from "@\/db/.test(src("src/lib/assessments/reminders.ts")), "b3 #10 pin: the client control and the planner import no store");
 }
 
