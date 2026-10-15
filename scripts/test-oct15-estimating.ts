@@ -39,6 +39,7 @@ import { resolvePackageDoc } from "../src/lib/package-doc/resolve";
 import { productImageFor } from "../src/lib/package-doc/seed";
 import { sanitizePackageDoc } from "../src/lib/package-doc/sanitize";
 import { DEFAULT_IMAGE } from "../src/lib/package-doc/schema";
+import { onlineShowsCutSheets } from "../src/lib/curtain-cut-sheets/online";
 import { appendResponseTo, MAX_CLIENT_RESPONSES, responseQuoteLimitKey, type ClientResponse } from "../src/lib/estimate-output/responses";
 
 const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -50,6 +51,19 @@ export async function oct15PureChecks(ok: Ok) {
   oct15RevChecks(ok);
   await oct15LetterheadChecks(ok);
   oct15BonusRateChecks(ok);
+  /* ---- #22 — the online estimate shows cut sheets when the PDF includes them ---- */
+  {
+    ok(onlineShowsCutSheets({ pdfCutSheets: true }, null, 100) && onlineShowsCutSheets({ pdfCutSheets: true }, 100, 100), "oct15 #22: the sent revision's Cut sheets toggle on → the online pages show them");
+    ok(!onlineShowsCutSheets({ pdfCutSheets: false }, null, 100) && !onlineShowsCutSheets(null, null, 100) && !onlineShowsCutSheets({}, null, 100), "oct15 #22: off (the default) → none");
+    ok(!onlineShowsCutSheets({ pdfCutSheets: true }, 101, 100), "oct15 #22: the print route's rule — edited since the revision, the live-built sheets would disagree, so none");
+    const on = rd("src/lib/curtain-cut-sheets/online.ts");
+    ok(on.includes('loadCutSheets(q.id, { images: "data" })') && on.includes("CUT_SHEET_APPEND_LOAD_MS") && on.includes("loaded.models.client.length > 0"), "oct15 #22: the online pages load the Client sheets with inlined photos, capped at 8 s");
+    const share = rd("src/app/share/quote/[id]/[token]/page.tsx"), portal = rd("src/app/portal/quotes/[id]/page.tsx"), pkg = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
+    ok(share.includes("await onlineCutSheets(ok.q, ok.rev)") && portal.includes("await onlineCutSheets(q, state.rev)") && pkg.includes("await onlineCutSheets(hit.q, hit.rev)") &&
+       [share, portal, pkg].every((t) => t.includes("<OnlineCutSheets loaded={")) && rd("src/components/estimate-output/package-view.tsx").includes('{slots.cutSheets && <section data-mount="cutsheets"'),
+      "oct15 #22: the v1 share page, the portal page and the package page each show them for their sent revision");
+    ok(!/["']use client["']/.test(rd("src/components/cutsheets/online-cut-sheets.tsx")), "oct15 #22: the cut-sheet block is a server component");
+  }
   /* ---- #20 — narrative photos alternate right, left, right ---- */
   {
     const sides = alternatingPhotoSides(["a|1", "a|2", "b|1", "a|1"]);

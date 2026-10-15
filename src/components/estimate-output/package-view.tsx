@@ -22,6 +22,8 @@ export type PackageSlots = {
   downloads?: ReactNode;
   actions?: ReactNode;
   keyProductExtra?: Record<string, ReactNode>;
+  /** Jeff 2026-10-15 #22 — the Client-style curtain cut sheets, when the sent PDF carries them. */
+  cutSheets?: ReactNode;
 };
 
 export const PACKAGE_WEB_CSS = `
@@ -270,6 +272,7 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
         </section>
       )}
       {slots.plans && <section data-mount="plans">{slots.plans}</section>}
+      {slots.cutSheets && <section data-mount="cutsheets" className="pkg-card">{slots.cutSheets}</section>}
       {m.options.length > 0 && (
         <section className="pkg-card">
           <h2>{PACKAGE_COPY.options}</h2>

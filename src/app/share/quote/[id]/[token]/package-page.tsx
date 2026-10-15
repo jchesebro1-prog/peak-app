@@ -9,6 +9,8 @@ import { bidderCanAct, canAct } from "@/lib/quote-share/package-view";
 import { ONLINE_COPY, sharePath } from "@/lib/quote-share/view";
 import { OpenBeacon } from "./open-beacon";
 import { buildPackageSlots } from "./package-slots";
+import { onlineCutSheets } from "@/lib/curtain-cut-sheets/online";
+import { OnlineCutSheets } from "@/components/cutsheets/online-cut-sheets";
 
 /**
  * #301 slice B — the v2/v3 (rev-pinned) share link's page: the estimate package
@@ -26,7 +28,9 @@ export async function SharedPackagePage({ id, token, view }: { id: string; token
   const base = hit ? sharePath(hit.q.id, token) : "";
   const model = hit ? await loadPackageViewProps(hit, { base, view, letterheadSrc: letterhead.src }) : null;
   if (!hit || !model) return <OnlineEstimateCard title={ONLINE_COPY.shareInactive} />;
-  const slots = buildPackageSlots(await loadPackageExtras(hit, base), {
+  // Jeff 2026-10-15 #22: the cut sheets the sent PDF carries (owner-addressed, like the PDF's own).
+  const cut = await onlineCutSheets(hit.q, hit.rev);
+  const built = buildPackageSlots(await loadPackageExtras(hit, base), {
     id: hit.q.id,
     token,
     // #348 2b-ii: a v3 link may act only while its bid is pending or awarded; a missing result counts as closed.
@@ -34,6 +38,7 @@ export async function SharedPackagePage({ id, token, view }: { id: string; token
     // D1087: the owner's Rewards credit note is not shown on a bidder's page or an awarded-addressed one (the owner's loyalty standing is private).
     creditNote: hit.bidder || hit.rev.docFields?.awardedPartyId ? null : creditNoteText(model.totals.creditAmount),
   });
+  const slots = cut ? { ...built, cutSheets: <OnlineCutSheets loaded={cut} letterheadSrc={letterhead.src} /> } : built;
   return (
     <>
       <PackageView model={model} slots={slots} />
