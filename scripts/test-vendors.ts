@@ -108,6 +108,11 @@ export async function vendorChecks(ok: Ok) {
   ok(JSON.stringify(listAttachmentParts(payload)) === JSON.stringify([{ partId: "1", name: "Quote RB-88214.pdf", mime: "application/pdf", size: 48213 }]), "gmail attachments: named parts only, nested walk");
   const many: GmailPart = { mimeType: "multipart/mixed", parts: Array.from({ length: 25 }, (_, i) => ({ partId: String(i), mimeType: "application/pdf", filename: `f${i}.pdf`, body: { size: 1 } })) };
   ok(listAttachmentParts(many, 20).length === 20, "gmail attachments: capped at max");
+  const inl = (mimeType: string, filename: string, hs: { name: string; value: string }[]): GmailPart => ({ partId: "9", mimeType, filename, headers: hs, body: { size: 5 } });
+  const wrap = (p: GmailPart): GmailPart => ({ mimeType: "multipart/related", parts: [p] });
+  ok(listAttachmentParts(wrap(inl("image/png", "image001.png", [{ name: "Content-ID", value: "<sig1>" }, { name: "Content-Disposition", value: "Inline; filename=image001.png" }]))).length === 0, "gmail attachments: an inline image with a Content-ID (signature logo) is skipped");
+  ok(listAttachmentParts(wrap(inl("image/png", "site.png", [{ name: "Content-ID", value: "<x>" }, { name: "Content-Disposition", value: "attachment; filename=site.png" }]))).length === 1, "gmail attachments: an attachment-disposition image is kept");
+  ok(listAttachmentParts(wrap(inl("application/pdf", "q.pdf", [{ name: "content-id", value: "<q>" }, { name: "content-disposition", value: "inline; filename=q.pdf" }]))).length === 1, "gmail attachments: an inline PDF with a Content-ID is kept");
   ok(findPart(payload, "0.0")?.mimeType === "text/plain" && findPart(payload, "9") === null, "gmail attachments: findPart by part id (nested; missing → null)");
   ok(parseInbound({ id: "g1", threadId: "t1", payload } as GmailFullMessage).attachments.length === 1, "gmail attachments: parseInbound lists them");
 

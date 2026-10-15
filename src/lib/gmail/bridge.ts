@@ -56,12 +56,10 @@ import {
   GmailTimeoutError,
   type GmailLabelEvent,
 } from "./api";
-import { attachmentMimePart, pdfPathFitsLink } from "@/lib/comms-attachments";
+import { attachmentMimePart } from "@/lib/comms-attachments";
+import { readPdfForThread as readThreadPdf } from "@/lib/thread-pdf-read";
 import { icsMimeType } from "@/lib/ics";
 import { sendWithMailboxFallback, visitInviteGmailIds, type InviteVisitShape } from "@/lib/visit-invite-plan";
-import { pdfStorage } from "@/lib/quote-pdf/storage";
-import { assessmentIdOfPdfPath, assessmentPdfFitsThread, isAssessmentPdfPath } from "@/lib/assessments/report-pdf-path";
-import { readAssessmentPdf } from "@/lib/assessments/report-pdf-storage";
 import { buildRaw, findPart, headerValue, listAttachmentParts, parseAddress, parseInbound, type ParsedInbound } from "./mime";
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
 import { queueLabelSync, reconcilePeakLabelsForMailbox } from "./label-sync";
@@ -115,12 +113,6 @@ function mailboxOfKey(key: MailboxKey): { mailbox: MailboxId; userName: string |
 
 /* ---- outbound ------------------------------------------------------------- */
 
-/** A by-reference attachment's bytes (storage guards the quote-PDF path). */
-async function readQuotePdf(path: string): Promise<Buffer | null> {
-  const store = pdfStorage();
-  return "unavailable" in store ? null : store.read(path);
-}
-
 /** I1 — how a send threw: no answer in time ("timeout": Gmail may have
  *  accepted it) vs anything else ("error"). */
 export function sendFailureKind(err: unknown): "timeout" | "error" {
@@ -154,16 +146,8 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
   const lastIn = lastInbound(t);
   const inReplyTo = lastIn?.gmailMessageId || undefined;
 
-  const readPdfForThread = async (path: string): Promise<Buffer | null> => {
-    // #340: an emailed assessment report rides by reference too — read only on a thread for that assessment's
-    // customer (or an unlinked one), streamed from Blob.
-    if (isAssessmentPdfPath(path)) {
-      const { getAssessment } = await import("@/lib/stores/assessments");
-      const a = await getAssessment(assessmentIdOfPdfPath(path) ?? "");
-      return assessmentPdfFitsThread(path, t, a?.customerId ?? null) ? readAssessmentPdf(path) : null;
-    }
-    return pdfPathFitsLink(path, t.link) ? readQuotePdf(path) : null;
-  };
+  // A quote-linked thread only reads that quote's own PDFs; an assessment report only its customer's (a refused path reads as missing → throws).
+  const readPdfForThread = (path: string): Promise<Buffer | null> => readThreadPdf(path, t);
   for (const m of pending) {
     try {
       // data-URL attachments → raw base64 MIME parts (IDEAS #36); a

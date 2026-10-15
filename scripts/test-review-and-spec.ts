@@ -56022,7 +56022,8 @@ async function p3SendAsyncChecks(): Promise<void> {
     const notB64 = await attachmentMimePart({ name: "b.txt", dataUrl: "data:text/plain,hi" }, fakeRead);
     ok(legacy?.dataBase64 === "QUJD" && notB64 === null && reads.length === 2, "#P3 send fix: data-URL attachments resolve exactly as before (non-base64 skipped, no storage read)");
     const bridge = readFileSync(join(process.cwd(), "src/lib/gmail/bridge.ts"), "utf8");
-    ok(bridge.includes("attachmentMimePart(a, readPdfForThread)") && bridge.includes("pdfPathFitsLink(path, t.link) ? readQuotePdf(path)") && bridge.includes("pdfStorage()"),
+    const threadPdf = readFileSync(join(process.cwd(), "src/lib/thread-pdf-read.ts"), "utf8");
+    ok(bridge.includes("attachmentMimePart(a, readPdfForThread)") && bridge.includes("readThreadPdf(path, t)") && threadPdf.includes("pdfPathFitsLink(path, t.link) ? readQuotePdf(path)") && threadPdf.includes("pdfStorage()"),
       "#P3 send fix: the Gmail bridge builds MIME parts through attachmentMimePart with the quote-PDF store, scoped to the thread's linked quote (fix round 2)");
     const { pdfPathFitsLink } = await import("@/lib/comms-attachments");
     ok(pdfPathFitsLink("quote-pdfs/Q-P3S/rev-4.pdf", { type: "quote", id: "Q-P3S" }) && !pdfPathFitsLink("quote-pdfs/Q-OTHER/rev-4.pdf", { type: "quote", id: "Q-P3S" }) &&

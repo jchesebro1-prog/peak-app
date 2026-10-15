@@ -652,7 +652,8 @@ async function finalReviewEmailChecks(ok: Ok) {
   const act = readFileSync(join(ROOT, "src/app/(app)/assessments/[id]/report/actions.ts"), "utf8");
   ok(/emailAttachmentMode\(r\.pdf\.length, blobEnabled\(\)\)/.test(act) && /storeAssessmentPdf\(a\.id, r\.pdf/.test(act) && /assessmentPdfAttachment\(/.test(act) && act.indexOf("dataUrl") > act.indexOf('plan.mode === "reference"'), "final I2: Email report stores + attaches by reference, inline only in the no-Blob branch");
   const br = readFileSync(join(ROOT, "src/lib/gmail/bridge.ts"), "utf8");
-  ok(/isAssessmentPdfPath\(path\)/.test(br) && /assessmentPdfFitsThread\(path, t, a\?\.customerId \?\? null\) \? readAssessmentPdf\(path\)/.test(br), "final I2: the Gmail bridge reads an assessment PDF only when it fits the thread, from Blob");
+  const tpr = readFileSync(join(ROOT, "src/lib/thread-pdf-read.ts"), "utf8");
+  ok(/readThreadPdf\(path, t\)/.test(br) && /isAssessmentPdfPath\(path\)/.test(tpr) && /assessmentPdfFitsThread\(path, t, a\?\.customerId \?\? null\) \? readAssessmentPdf\(path\)/.test(tpr), "final I2: the Gmail bridge reads an assessment PDF only when it fits the thread, from Blob");
   const rt = readFileSync(join(ROOT, "src/app/api/assessments/[id]/report-pdf/route.ts"), "utf8");
   ok(/isAssessmentPdfFile\(file\)/.test(rt) && /streamAssessmentPdf\(`assessment-pdfs\/\$\{id\}\/\$\{file\}`\)/.test(rt), "final I2: the report route serves a stored copy by ?file=, guarded");
 }

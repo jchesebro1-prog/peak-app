@@ -1,11 +1,12 @@
 /* #348 slice 4 — vendors: the pure rules. Browser-safe: the vendor quote modal, the Inbox reader and the Vendors card
    import this. The stores (src/lib/stores/vendor-quotes.ts) and the broker (thread-attachment-server.ts) call it. */
+import { ATTACHMENTS_PER_MESSAGE_MAX } from "@/lib/attachment-limits";
 import type { VendorCardGroup, VendorCompanyVM, VendorQuoteRowVM, VendorThreadVM, QuoteReceivedRow } from "./vm";
 
 export const VENDOR_PICKER_TYPES = ["vendor/manufacturer", "vendor", "manufacturer"] as const;
 export const VENDOR_FROM_EMAIL_MAX_BYTES = 25 * 1024 * 1024;
 export const VENDOR_FROM_EMAIL_MAX_LABEL = "25 MB";
-export const ATTACHMENTS_PER_MESSAGE_MAX = 20;
+export { ATTACHMENTS_PER_MESSAGE_MAX };
 export const VENDOR_FROM_EMAIL_PARAM = "vq";
 
 export const VENDOR_COPY = {

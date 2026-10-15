@@ -1,5 +1,5 @@
 import type { GmailFullMessage, GmailHeader, GmailPart } from "./api";
-import { ATTACHMENTS_PER_MESSAGE_MAX } from "@/lib/vendor-quotes/rules";
+import { ATTACHMENTS_PER_MESSAGE_MAX } from "@/lib/attachment-limits";
 
 /**
  * Minimal RFC-2822 build/parse for the Gmail bridge. We send plain-text
@@ -182,6 +182,15 @@ export type ParsedInbound = {
 /** #348 slice 4 — one named attachment part of an inbound message. */
 export type InboundAttachment = { partId: string; name: string; mime: string; size: number };
 
+/** An embedded signature/logo image: a Content-ID plus an inline disposition. A PDF is never one — an inline PDF is real content. */
+function isInlineSignatureImage(p: GmailPart, name: string): boolean {
+  const mime = (p.mimeType || "").toLowerCase().split(";")[0].trim();
+  if (mime === "application/pdf" || /\.pdf$/i.test(name)) return false;
+  const hs = p.headers || [];
+  const get = (n: string) => hs.find((h) => h.name.toLowerCase() === n)?.value || "";
+  return !!get("content-id").trim() && /^\s*inline/i.test(get("content-disposition"));
+}
+
 /** #348 slice 4 — every part with a non-blank filename and a partId,
  *  depth-first, at most `max`. Metadata only — the bytes stay in Gmail. */
 export function listAttachmentParts(part: GmailPart | undefined, max = ATTACHMENTS_PER_MESSAGE_MAX): InboundAttachment[] {
@@ -189,7 +198,7 @@ export function listAttachmentParts(part: GmailPart | undefined, max = ATTACHMEN
   const walk = (p: GmailPart | undefined) => {
     if (!p || out.length >= max) return;
     const name = (p.filename || "").trim();
-    if (name && p.partId) {
+    if (name && p.partId && !isInlineSignatureImage(p, name)) {
       out.push({ partId: p.partId, name: name.slice(0, 200), mime: p.mimeType || "application/octet-stream", size: p.body?.size || 0 });
     }
     for (const c of p.parts || []) walk(c);

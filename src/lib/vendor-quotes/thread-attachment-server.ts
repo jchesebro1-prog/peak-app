@@ -1,10 +1,10 @@
 /* #348 slice 4 — the attachment broker's read half: one attachment's bytes off an email thread, for anyone who can
    SEE the thread (#341 canSeeThread — own, assigned or deliberately linked). Visibility is checked before anything
    else, and a missing thread answers exactly like an invisible one. Bytes come from the stored data-URL, Gmail (by the
-   stored part id — never stored on import), or the quote-PDF store. Server-only. */
+   stored part id — never stored on import), or the quote / assessment PDF store. Server-only. */
 import { dataUrlToBytes } from "@/lib/blob";
 import { gmailEnabled } from "@/lib/gmail/config";
-import { pdfStorage } from "@/lib/quote-pdf/storage";
+import { readPdfForThread } from "@/lib/thread-pdf-read";
 import { canSeeThread, get as getThread, type CommAttachment, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
 import { VENDOR_COPY, VENDOR_FROM_EMAIL_MAX_BYTES, type ThreadAttachmentRef } from "./rules";
 
@@ -56,8 +56,9 @@ export async function readThreadAttachment(
     }
   } else if (att.pdfPath) {
     try {
-      const store = pdfStorage();
-      bytes = "unavailable" in store ? null : await store.read(att.pdfPath);
+      // The same guarded reader the send path uses: quote PDFs only on that quote's thread, assessment reports only on
+      // that customer's (or an unlinked) thread; a refused path reads as missing.
+      bytes = await readPdfForThread(att.pdfPath, t);
     } catch {
       bytes = null;
     }
