@@ -2805,7 +2805,7 @@ export function useEstimatorState(props: EstimatorProps) {
     if (!a || !source || !isPdfAttachment(a) || vendorPdfBusyRef.current) return;
     if (d.extracted) {
       const { read, edited } = readLinesEdited(d);
-      if (read > 0 && !window.confirm(VENDOR_PDF_COPY.replaceConfirm(read, edited))) return;
+      if (read > 0 && !window.confirm(VENDOR_PDF_COPY.replaceConfirm(read, edited, hard))) return;
     }
     const seq = ++vendorPdfSeqRef.current;
     vendorPdfBusyRef.current = true;
@@ -2817,7 +2817,8 @@ export function useEstimatorState(props: EstimatorProps) {
         quoteId: loadedId,
         source,
         hard,
-        retryOf: hard ? d.extracted?.runId ?? null : null,
+        // Any read over an earlier one replaces it — the server retires that run (Read again or Try harder).
+        retryOf: d.extracted?.runId ?? null,
       });
     } catch (e) {
       console.error("[estimator] Read the PDF failed:", e);

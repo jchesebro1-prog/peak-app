@@ -393,17 +393,20 @@ export default async function EstimatorPage({
   // inspection, consulting, rental) opens its own builder, not the
   // Estimator — this is the server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
+  // #348 slice 5: Read the PDF — the server gate (kill switch + pilot + feature first, then a Claude key), off the
+  // same settings load and inside the Promise.all; a failure hides it.
+  const settingsLoad = getSettings();
   // Estimate suggestion: the hand-off's `?suggestion=` (new estimate), else the
   // saved quote's linked one (else, unlinked, the one its URL still names).
   // Read inside the Promise.all below so an Estimator open doesn't wait on it serially.
-
-  const [suggestion, fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults, systemCategories] =
+  const [suggestion, fabricRows, laborRows, customerDocs, settings, vendorPdfGate, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults, systemCategories] =
     await Promise.all([
       loadSuggestion(readHandoff(sp).suggestionId, q),
       fabricParts(),
       byCategory("Labor"),
       allCustomers(),
-      getSettings(),
+      settingsLoad,
+      settingsLoad.then((st) => vendorPdfGateFor(user.id, { settings: assistSettingsOf(st) })).catch(() => "error"),
       getFixtureRates(),
       activeUsers(),
       catalogList(),
@@ -417,8 +420,7 @@ export default async function EstimatorPage({
       getEstimateOutputDefaults(),
       loadSystemCategoryOptions(),
     ]);
-  // #348 slice 5: Read the PDF — the server gate (pilot + feature + kill switch + a Claude key); a failure hides it.
-  const vendorPdfEnabled = (await vendorPdfGateFor(user.id, { settings: assistSettingsOf(settings) }).catch(() => "error")) === null;
+  const vendorPdfEnabled = vendorPdfGate === null;
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
   const quoteTasks = q ? await tasksForQuote(q.id) : [];

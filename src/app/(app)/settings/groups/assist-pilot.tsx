@@ -176,7 +176,7 @@ function VendorPdfRowsTable({ title, keyLabel, rows, total, empty }: { title: st
             <th style={th}>Reads</th>
             <th style={th}>Try harder</th>
             <th style={th} title="kept on a vendor quote when the estimate was saved — scored once, at that first save">Saved</th>
-            <th style={th} title="a Try harder replaced it before any save">Replaced</th>
+            <th style={th} title="a later read (Read again or Try harder) replaced it before any save">Replaced</th>
             <th style={th}>Lines read</th>
             <th style={th}>Kept</th>
             <th style={th}>Edited</th>

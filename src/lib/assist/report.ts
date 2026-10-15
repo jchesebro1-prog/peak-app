@@ -301,7 +301,7 @@ export type VendorPdfReportRow = {
   /** every vendorpdf run, failed included */ reads: number; okReads: number;
   /** outcomeDetail.hard === true */ tryHarder: number;
   /** outcome accepted | edited with a diff */ saved: number;
-  /** outcome discarded (a Try harder replaced it) */ replaced: number;
+  /** outcome discarded (a later read — Read again or Try harder — replaced it) */ replaced: number;
   linesRead: number; kept: number; edited: number; deleted: number; added: number;
   /** kept ÷ linesRead over saved runs, %, one decimal; null with none */ keptPct: number | null;
   totalChanged: number;

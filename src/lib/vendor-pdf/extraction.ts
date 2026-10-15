@@ -36,7 +36,10 @@ function cleanStr(v: string | null | undefined, max: number, keepNewlines = fals
   const s = keepNewlines
     ? v.replace(/\r\n?/g, "\n").split("\n").map((l) => l.replace(/[^\S\n]+/g, " ").trim()).join("\n").replace(/\n{3,}/g, "\n\n").trim()
     : v.replace(/\s+/g, " ").trim();
-  const capped = s.slice(0, max).trim(); // trim after the cap so cleaning is idempotent
+  // After the cap: drop trailing whitespace AND any trailing high surrogate (a cut through an emoji leaves half a
+  // pair, which no longer round-trips as UTF-8) — together, so a run like "x\uD83D \uD83D" ends clean in one pass and
+  // cleaning stays idempotent. A high surrogate at the very end is always unpaired.
+  const capped = s.slice(0, max).replace(/[\s\uD800-\uDBFF]+$/, "").trim();
   return capped || undefined;
 }
 function cleanNum(v: number | null | undefined): number | undefined {
@@ -142,9 +145,23 @@ export const VENDOR_PDF_COPY = {
   badRequest: "That read request isn't valid.",
   fileMissing: "Couldn't find the file — attach it again.",
   couldNotRead: "Couldn't read that PDF — Try harder, or enter it by hand.",
+  /** couldNotRead where no Try harder is offered (after a Try harder, or while busy). */
+  couldNotReadNoRetry: "Couldn't read that PDF — enter it by hand.",
   rejected: "Claude couldn't open that PDF (it may be password-protected) — enter it by hand.",
   noQuote: "That PDF doesn't look like a quote — enter it by hand.",
   tooManyLines: "The quote has more lines than one read can hold — Try harder, or enter the rest by hand.",
+  /** tooManyLines where no Try harder is offered. */
+  tooManyLinesNoRetry: "The quote has more lines than one read can hold — enter the rest by hand.",
   filled: (n: number, model: string) => `${model} filled ${n} line${n === 1 ? "" : "s"} — check them before adding. Nothing is saved until you add the quote and save the estimate.`,
-  replaceConfirm: (n: number, edited: number) => `Try harder replaces the ${n} line${n === 1 ? "" : "s"} the last read filled in${edited ? `, including ${edited} you edited` : ""}. Lines you typed stay. Continue?`,
+  replaceConfirm: (n: number, edited: number, hard: boolean) =>
+    `${hard ? "Try harder" : "Reading again"} replaces the ${n} line${n === 1 ? "" : "s"} the last read filled in${edited ? `, including ${edited} you edited` : ""}. Lines you typed stay. Continue?`,
 } as const;
+
+/** The error line the panel shows: the server's copy, minus its "Try harder" hint when no Try harder button is shown
+ *  (a Try harder already failed). Any other text passes through. */
+export function vendorPdfErrorText(text: string, tryHarderShown: boolean): string {
+  if (tryHarderShown) return text;
+  if (text === VENDOR_PDF_COPY.couldNotRead) return VENDOR_PDF_COPY.couldNotReadNoRetry;
+  if (text === VENDOR_PDF_COPY.tooManyLines) return VENDOR_PDF_COPY.tooManyLinesNoRetry;
+  return text;
+}

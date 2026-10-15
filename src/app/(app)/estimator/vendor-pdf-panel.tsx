@@ -5,7 +5,7 @@
    `VendorPdfFormState`) and runs the pure checks' notes; the read itself is the hook's `readVendorPdf`. Nothing here
    saves — a read fills the form, and only Add + Save keep it. */
 import type { CSSProperties } from "react";
-import { VENDOR_PDF_COPY, modelLabel } from "@/lib/vendor-pdf/extraction";
+import { VENDOR_PDF_COPY, modelLabel, vendorPdfErrorText } from "@/lib/vendor-pdf/extraction";
 import { checkNotes } from "@/lib/vendor-pdf/checks";
 import { yearAwareDate } from "@/lib/format";
 import type { VendorDraft, VendorPdfFormState } from "./types";
@@ -93,7 +93,7 @@ export function VendorPdfPanel({ draft, state, onTryHarder }: { draft: VendorDra
       )}
       {err && (
         <div role="alert" style={{ color: ERROR, fontSize: 11.5, marginTop: read ? 6 : 0 }}>
-          {err.text}
+          {vendorPdfErrorText(err.text, offerTryHarder)}
         </div>
       )}
       {offerTryHarder && (

@@ -3,7 +3,7 @@ import { billedPrice, claudeCostUsd, costUsd, modelFor, requestOptionsFor, SLOT_
 import { anthropicRequestOptions, buildAnthropicParams, FALLBACK_BETA } from "@/lib/assist/anthropic";
 import { buildLocalBody } from "@/lib/assist/local";
 import { pickProvider } from "@/lib/assist/provider";
-import { ASSIST_FEATURES, OPT_IN_FEATURES, assistGate, assistSettingsOf, assistUiFlags, monthKeyChicago, chicagoToday, assistConfigured, assistStatusLine, cleanApiKey, effectiveAnthropicKey } from "@/lib/assist/config";
+import { ASSIST_FEATURES, OPT_IN_FEATURES, assistAccess, assistGate, assistSettingsOf, assistUiFlags, monthKeyChicago, chicagoToday, assistConfigured, assistStatusLine, cleanApiKey, effectiveAnthropicKey } from "@/lib/assist/config";
 import { ASSIST_SECRETS_BLOB, assistKeyInfo, clearAssistKey, getAssistEnv, readAssistKey, resetAssistKeyCache, saveAssistKey } from "@/lib/assist/key-store";
 import { appSettings, blobs } from "@/db/schema";
 import { getSettingsPatchStrict, mergeSettingsObject, setSettings } from "@/lib/settings";
@@ -217,6 +217,30 @@ export async function assistProviderChecks(ok: Ok): Promise<void> {
   ok(typeof (await vendorPdfGateFor("u-pilot", { settings: vOff, env: vKey })) === "string", "vendorPdfGateFor: refused with the feature off");
   ok((await vendorPdfGateFor("u-pilot", { settings: vOn, env: { ASSIST_PROVIDER: "local", ASSIST_LOCAL_URL: "http://mini" } })) === VENDOR_PDF_NO_KEY_TEXT, "vendorPdfGateFor: local provider with no Claude key = the no-key text");
   ok((await vendorPdfGateFor("u-pilot", { settings: vOn, env: { ASSIST_PROVIDER: "local", ASSIST_LOCAL_URL: "http://mini", ANTHROPIC_API_KEY: "sk-test" } })) === null, "vendorPdfGateFor: local provider with a Claude key is allowed (the PDF still goes to Claude)");
+  // #348 slice 5 final fix — the pilot list / feature switch / kill switch are checked before the stored key is read.
+  let keyLoads = 0;
+  const loadEnv = async () => { keyLoads++; return vKey; };
+  const nonPilot = await vendorPdfGateFor("u-other", { settings: vOn, loadEnv });
+  const featOff = await vendorPdfGateFor("u-pilot", { settings: vOff, loadEnv });
+  const prevKill = process.env.ASSIST_DISABLED;
+  process.env.ASSIST_DISABLED = "true";
+  let killed: string | null;
+  try {
+    killed = await vendorPdfGateFor("u-pilot", { settings: vOn, loadEnv });
+  } finally {
+    if (prevKill === undefined) delete process.env.ASSIST_DISABLED;
+    else process.env.ASSIST_DISABLED = prevKill;
+  }
+  ok(nonPilot === "Assist isn't enabled for you." && featOff === "This Assist feature is turned off." && killed === "Assist is switched off." && keyLoads === 0, "vendorPdfGateFor: a non-pilot user, a feature that's off and the kill switch are refused without reading the stored key");
+  const pilotOk = await vendorPdfGateFor("u-pilot", { settings: vOn, loadEnv });
+  ok(pilotOk === null && keyLoads === 1, "vendorPdfGateFor: a pilot user reads the stored key once, then is allowed");
+  ok((await vendorPdfGateFor("u-pilot", { settings: vOn, loadEnv: async () => ({}) })) === "Assist is not set up.", "vendorPdfGateFor: a pilot user with no key anywhere → not set up (the full gate still runs)");
+  ok(assistAccess("vendorpdf", "u-pilot", vOn).ok && !assistAccess("vendorpdf", "u-other", vOn).ok && !assistAccess("vendorpdf", "u-pilot", vOff).ok, "assistAccess: the pilot list + feature switch, no env");
+  const estPageSrc = readFileSync("src/app/(app)/estimator/page.tsx", "utf8");
+  const pAll = estPageSrc.indexOf("await Promise.all([");
+  const pEnd = estPageSrc.indexOf("]);", pAll);
+  const pGate = estPageSrc.indexOf("vendorPdfGateFor(user.id");
+  ok(pAll > 0 && pGate > pAll && pGate < pEnd && (estPageSrc.match(/vendorPdfGateFor\(/g) ?? []).length === 1 && (estPageSrc.match(/getSettings\(\)/g) ?? []).length === 1, "estimator page: Read the PDF's gate runs inside the page's Promise.all, off the one settings load");
 }
 
 export function fakeProvider(text: string, opts: { fail?: "unreachable" | "declined"; calls?: ProviderRequest[]; name?: "fake" | "local" } = {}): AssistProvider {
@@ -773,7 +797,7 @@ export async function assistSettingsRaceChecks(ok: Ok): Promise<void> {
     const c = await read();
     ok(c.raceP === 1 && c.raceQ === 2 && c.raceR === 3 && c.raceA === 1, "settings race: concurrent setSettings of different keys all persist");
 
-    // Seven concurrent single-switch merges into assistFeatures.
+    // One concurrent single-switch merge per Assist feature (eight) into assistFeatures.
     await setSettings({ assistFeatures: { tasks: true }, assistUsers: ["u1"] });
     await Promise.all(ASSIST_FEATURES.map((f, i) => mergeSettingsObject("assistFeatures", { [f]: i % 2 === 0 })));
     const m = await read();

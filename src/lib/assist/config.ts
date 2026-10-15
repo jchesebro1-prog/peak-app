@@ -44,6 +44,12 @@ export function assistGate(
 ): { ok: true } | { ok: false; reason: string } {
   if ((env.ASSIST_DISABLED || "").trim() === "true") return { ok: false, reason: "Assist is switched off." };
   if (!assistConfigured(env).ok) return { ok: false, reason: "Assist is not set up." };
+  return assistAccess(feature, userId, settings);
+}
+
+/** The pilot-list + feature-switch half of assistGate — needs no env, so a caller can refuse a non-pilot user
+ *  before reading the stored key (#348 slice 5: the Estimator page runs Read the PDF's gate on every load). */
+export function assistAccess(feature: AssistFeature, userId: string, settings: AssistSettings): { ok: true } | { ok: false; reason: string } {
   if (!userId || !settings.users.includes(userId)) return { ok: false, reason: "Assist isn't enabled for you." };
   if (!settings.features[feature]) return { ok: false, reason: "This Assist feature is turned off." };
   return { ok: true };

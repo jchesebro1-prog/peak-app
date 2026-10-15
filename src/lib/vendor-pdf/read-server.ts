@@ -151,7 +151,9 @@ async function readAfterGate(
   const slot = hard ? "vendorpdfHard" : "vendorpdf";
   const now = deps.now ?? Date.now();
   const split = splitCallDeps({ ...deps, now }, slot);
-  if (!split) return { ok: false, error: VENDOR_PDF_COPY.couldNotRead, runId: null }; // only with a caller deadline
+  // Too little of the caller's deadline left for a real call (the action's 108 s, less the gate, bytes and pages):
+  // refused before calling — no run, no charge.
+  if (!split) return { ok: false, error: VENDOR_PDF_COPY.couldNotRead, runId: null };
   const companiesLoad: Promise<VendorCompanyLike[]> = deps.companies
     ? Promise.resolve(deps.companies)
     : (deps.loadCompanies ?? liveVendorCompanies)().catch((e: unknown) => {
@@ -211,9 +213,9 @@ async function readAfterGate(
       dataHash: createHash("sha256").update(canonicalJson(data)).digest("hex"),
     })
   );
-  // 11. Try harder replaces the earlier read of THIS vendor quote: discarded unless it already has a score
-  //     (first write wins). Another user's run, or a run for another vendor quote, is left alone.
-  if (hard && retryOf) {
+  // 11. A read over an earlier read of THIS vendor quote (Read again or Try harder) replaces it: discarded unless it
+  //     already has a score (first write wins). Another user's run, or a run for another vendor quote, is left alone.
+  if (retryOf) {
     await tryWrite("discard earlier read", async () => {
       const prev = await getRun(retryOf);
       const prevVq = (prev?.outcomeDetail as Record<string, unknown> | null | undefined)?.vendorQuoteId;

@@ -14,7 +14,7 @@ import { addParty, listFor, removeParty } from "../src/lib/stores/parties";
 import { displayQuoteNumber } from "../src/lib/estimate-number";
 import { prepareVendorQuotesForSave, addVendorPartiesForSave, vendorPartyRemovalRefusalFor, quotesReceivedFor } from "../src/lib/stores/vendor-quotes";
 import type { VendorQuoteLike } from "../src/lib/vendor-quotes/rules";
-import { toJsonSchema } from "../src/lib/assist/run";
+import { toJsonSchema, type AssistCallDeps } from "../src/lib/assist/run";
 import {
   VendorPdfWire, VendorPdfExtractionSchema, cleanExtraction, isEmptyExtraction, canonicalJson, modelLabel, VENDOR_PDF_SYSTEM, VENDOR_PDF_LINES_MAX,
   VENDOR_PDF_MAX_FILE_BYTES, VENDOR_PDF_MAX_REQUEST_BYTES,
@@ -30,7 +30,7 @@ import { recordVendorPdfOutcomes, verifyVendorPdfExtractions } from "../src/lib/
 import { assistSettingsOf } from "../src/lib/assist/config";
 import type { AssistProvider, ProviderRequest } from "../src/lib/assist/types";
 import { fakeRun } from "./test-assist";
-import { VENDOR_PDF_COPY } from "../src/lib/vendor-pdf/extraction";
+import { VENDOR_PDF_COPY, vendorPdfErrorText } from "../src/lib/vendor-pdf/extraction";
 import { VENDOR_ATTACHMENT_BUDGET } from "../src/app/(app)/estimator/types";
 import { PDFDocument } from "pdf-lib";
 import { createHash } from "node:crypto";
@@ -395,6 +395,20 @@ export async function vendorPdfPureChecks(ok: Ok) {
     ...e, vendor: e.vendor ?? null, lines: (e.lines ?? []).map((l) => wl(l)), notes: e.notes ?? null, freight: e.freight ?? null, tax: e.tax ?? null, total: e.total ?? null,
   });
   ok(JSON.stringify(cleanExtraction(reWire(spaceCap))) === JSON.stringify(spaceCap) && JSON.stringify(cleanExtraction(reWire(c1))) === JSON.stringify(c1), "vendor-pdf: cleanExtraction is idempotent (capped at a space)");
+  // Final fix #4 — a cap through an emoji drops the half surrogate pair, and cleaning stays idempotent.
+  const emoji = "\u{1F3AD}"; // 🎭, two UTF-16 code units
+  const loneHigh = /[\uD800-\uDBFF]$/;
+  const sur = cleanExtraction(wire({
+    vendor: `${"v".repeat(119)}${emoji}`, notes: `${"n".repeat(1999)}${emoji}x`, quoteNumber: `${"q".repeat(57)}\uD83D \uD83D\uD83D`,
+    lines: [wl({ description: `${"d".repeat(199)}${emoji}`, mfrPartNumber: `${"p".repeat(78)}${emoji}`, amount: 1 })],
+  }));
+  ok(sur.vendor === "v".repeat(119) && sur.notes === "n".repeat(1999) && sur.lines![0].description === "d".repeat(199) && sur.lines![0].mfrPartNumber === `${"p".repeat(78)}${emoji}`, "vendor-pdf: a cap through an emoji drops its half; a whole emoji inside the cap stays");
+  ok(sur.quoteNumber === "q".repeat(57) && ![sur.vendor, sur.notes, sur.quoteNumber, sur.lines![0].description].some((t) => loneHigh.test(t ?? "")), "vendor-pdf: trailing lone high surrogates and spaces go together in one pass");
+  ok(JSON.stringify(cleanExtraction(reWire(sur))) === JSON.stringify(sur) && VendorPdfExtractionSchema.safeParse(sur).success, "vendor-pdf: cleanExtraction is idempotent (capped through an emoji)");
+  // Final fix #5 — the copy follows what the panel offers.
+  ok(VENDOR_PDF_COPY.replaceConfirm(3, 1, false) === "Reading again replaces the 3 lines the last read filled in, including 1 you edited. Lines you typed stay. Continue?" && VENDOR_PDF_COPY.replaceConfirm(1, 0, true) === "Try harder replaces the 1 line the last read filled in. Lines you typed stay. Continue?", "vendor-pdf copy: replaceConfirm names Read again vs Try harder");
+  ok(vendorPdfErrorText(VENDOR_PDF_COPY.couldNotRead, true) === VENDOR_PDF_COPY.couldNotRead && vendorPdfErrorText(VENDOR_PDF_COPY.couldNotRead, false) === "Couldn't read that PDF — enter it by hand." && vendorPdfErrorText(VENDOR_PDF_COPY.tooManyLines, false) === "The quote has more lines than one read can hold — enter the rest by hand." && vendorPdfErrorText(VENDOR_PDF_COPY.tooManyLines, true) === VENDOR_PDF_COPY.tooManyLines, "vendor-pdf copy: no Try harder hint when no Try harder is shown");
+  ok(vendorPdfErrorText(VENDOR_PDF_COPY.notPdf, false) === VENDOR_PDF_COPY.notPdf && !/try harder/i.test(VENDOR_PDF_COPY.couldNotReadNoRetry + VENDOR_PDF_COPY.tooManyLinesNoRetry), "vendor-pdf copy: other errors pass through; the no-retry variants never say Try harder");
   const many = cleanExtraction(wire({ lines: Array.from({ length: 400 }, (_, i) => wl({ description: `L${i}`, amount: i })) }));
   ok(many.lines?.length === VENDOR_PDF_LINES_MAX && VendorPdfExtractionSchema.safeParse(many).success, "vendor-pdf: 400 lines become 300");
   const empty = cleanExtraction(wire());
@@ -600,7 +614,7 @@ export async function vendorPdfPureChecks(ok: Ok) {
   ok((buildStep.match(/fileActions=\{/g) ?? []).length === 1 && /fileActions=\{readPdf \? <ReadPdfButton /.test(buildStep), "modal: fileActions is passed only under the gate");
   ok(/readPanel=\{readPdf \? <VendorPdfPanel /.test(buildStep) && /lineHints=\{readPdf \? vendorPdfLineHints\(vendorDraft\)/.test(buildStep) && /reading=\{readPdf && !!vendorPdf\.busy\}/.test(buildStep), "modal: panel, hints and reading follow the same gate");
   const estPage = srcOf(`${estDir}page.tsx`);
-  ok(/vendorPdfEnabled=\{vendorPdfEnabled\}/.test(estPage) && /\(await vendorPdfGateFor\(user\.id, \{ settings: assistSettingsOf\(settings\) \}\)/.test(estPage), "modal: page.tsx computes the gate with vendorPdfGateFor (a key required)");
+  ok(/vendorPdfEnabled=\{vendorPdfEnabled\}/.test(estPage) && /settingsLoad\.then\(\(st\) => vendorPdfGateFor\(user\.id, \{ settings: assistSettingsOf\(st\) \}\)\)\.catch\(\(\) => "error"\)/.test(estPage) && /const vendorPdfEnabled = vendorPdfGate === null;/.test(estPage), "modal: page.tsx computes the gate with vendorPdfGateFor (a key required), off the shared settings load; a failure hides it");
   ok(!/assistUiFlags/.test(estPage), "modal: page.tsx never gates Read the PDF on assistUiFlags");
   const hookSrc = srcOf(`${estDir}use-estimator-state.ts`);
   ok((hookSrc.match(/readVendorPdfAction\(/g) ?? []).length === 1, "modal: the hook calls readVendorPdfAction exactly once");
@@ -609,12 +623,14 @@ export async function vendorPdfPureChecks(ok: Ok) {
   ok((hookSrc.match(/extractedIndex:/g) ?? []).length === 1 && /typeof l\.fromRead === "number" && d\.extracted \? \{ extractedIndex: l\.fromRead \}/.test(hookSrc), "modal: commit writes extractedIndex only under d.extracted");
   ok(/\.\.\.\(d\.extracted \? \{ extracted: d\.extracted \} : \{\}\)/.test(hookSrc), "modal: commit carries extracted");
   ok((hookSrc.match(/resetVendorPdf\(\)/g) ?? []).length >= 4, "modal: Read state resets on discard, close, seed and file change");
-  ok(/window\.confirm\(VENDOR_PDF_COPY\.replaceConfirm\(/.test(hookSrc) && /VENDOR_PDF_COPY\.couldNotRead/.test(hookSrc), "modal: replace confirm + a throw reads as couldNotRead");
+  ok(/window\.confirm\(VENDOR_PDF_COPY\.replaceConfirm\(read, edited, hard\)\)/.test(hookSrc) && /VENDOR_PDF_COPY\.couldNotRead/.test(hookSrc), "modal: replace confirm (Read again vs Try harder) + a throw reads as couldNotRead");
+  ok(/^\s*retryOf: d\.extracted\?\.runId \?\? null,$/m.test(hookSrc) && !/retryOf: hard \?/.test(hookSrc), "modal: every read over an earlier read sends retryOf (not only Try harder)");
   const modalSrc = srcOf(`${estDir}vendor-quote-modal.tsx`);
   ok(/const busy = uploading \|\| copying \|\| reading;/.test(modalSrc) && /reading \? VENDOR_PDF_COPY\.reading/.test(modalSrc), "modal: reading joins busy and relabels Add");
   ok(/\{readPanel\}/.test(modalSrc) && /lineHints\?\.\[line\.id\]/.test(modalSrc), "modal: renders the read panel and the per-line hints");
   const panelSrc = srcOf(`${estDir}vendor-pdf-panel.tsx`);
   ok(panelSrc.startsWith('"use client";') && panelSrc.includes("Reads the PDF again with Sonnet — replaces the lines this read filled in") && /checkNotes\(/.test(panelSrc) && /VENDOR_PDF_COPY\.filled\(/.test(panelSrc), "modal: the panel — client, filled line, check notes, Try harder title");
+  ok(/\{vendorPdfErrorText\(err\.text, offerTryHarder\)\}/.test(panelSrc) && !/\{err\.text\}/.test(panelSrc), "modal: the panel's error line drops the Try harder hint when no Try harder is shown");
   const clientBanned = /from\s+["']([^"']*\/stores\/[^"']*|@\/lib\/stores[^"']*|@\/db[^"']*|node:[^"']*|pdf-lib|@\/lib\/blob|[^"']*-server)["']/;
   for (const [name, src] of [["vendor-pdf-panel.tsx", panelSrc], ["vendor-quote-modal.tsx", modalSrc], ...["extraction.ts", "checks.ts", "fill.ts", "diff.ts"].map((f) => [f, srcOf(`../src/lib/vendor-pdf/${f}`)])]) {
     ok(!clientBanned.test(src), `modal: ${name} imports nothing server-only`);
@@ -1051,7 +1067,67 @@ export async function vendorPdfDbChecks(ok: Ok) {
     await dropFixtures(348);
     await dropIdentity();
   }
+  await vendorPdfFinalFixChecks(ok);
   await vendorPdfSaveChecks(ok);
+}
+
+/** #348 slice 5 final fixes — the action's deadline shortens (or refuses) the call; a plain Read again retires the
+ *  earlier run. Its own user: part A already spends most of one user's hourly Assist limit. */
+async function vendorPdfFinalFixChecks(ok: Ok) {
+  const db = await getDb();
+  const runsT = DOC_TABLES.assist_runs;
+  const U = { id: fixtureId(348, "hf"), name: "Fay Final" };
+  const myRuns = async () => (await db.select({ id: runsT.id }).from(runsT).where(sql`${runsT.doc}->>'userId' = ${U.id}`)).length;
+  const dropRuns = async () => { await db.delete(runsT).where(sql`${runsT.doc}->>'userId' = ${U.id}`); };
+  const settings = assistSettingsOf({ assistUsers: [U.id], assistFeatures: { vendorpdf: true } });
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test-348" };
+  const now = Date.UTC(2034, 4, 11, 15, 0);
+  const VQ = "vqhffff1";
+  const d = await PDFDocument.create();
+  d.addPage();
+  const dataUrl = VENDOR_PDF_DATA_URL_PREFIX + Buffer.from(await d.save()).toString("base64");
+  const wire = JSON.stringify({
+    vendor: "Final Fix Supply", quoteNumber: null, quoteDate: null, validUntil: null, leadTime: null, shipFrom: null,
+    lines: [{ description: "Clamp", mfrPartNumber: "CL-9", qty: 1, unit: "ea", unitPrice: 10, amount: 10 }], freight: null, tax: null, total: 10, paymentTerms: null, notes: null,
+  });
+  const input = (over: Partial<ReadVendorPdfInput> = {}): ReadVendorPdfInput => ({ vendorQuoteId: VQ, quoteId: null, source: { kind: "dataUrl", dataUrl }, hard: false, retryOf: null, ...over });
+  const deps = (calls: ProviderRequest[], extra: Partial<AssistCallDeps> = {}) => ({ provider: pdfFake({ text: wire }, calls), settings, env, now, parts: [], companies: [], ...extra });
+  // The action's deadline, fixed at its start (T0); `clock` is "now" when the call is about to start.
+  const T0 = 1_900_000_000_000;
+  const actionDeadline = (spentMs: number) => ({ at: T0 + 108_000, hasFallback: false, minCallMs: 20_000, clock: () => T0 + spentMs });
+  try {
+    await dropRuns();
+    // 1. Time already spent shortens the call: 60 s spent → 108 − 60 − 5 (margin) = 43 s, no retries.
+    const c1: ProviderRequest[] = [];
+    const r1 = await readVendorPdf(input(), U, deps(c1, { deadline: actionDeadline(60_000) }));
+    ok(r1.ok && c1.length === 1 && c1[0].timeoutMs === 43_000 && c1[0].maxRetries === 0, `read pdf deadline: 60 s already spent → the call gets 43 s (got ${c1[0]?.timeoutMs})`);
+    // A fresh deadline never lengthens a slot: Haiku keeps 80 s, Sonnet 95 s.
+    const c1b: ProviderRequest[] = [];
+    await readVendorPdf(input(), U, deps(c1b, { deadline: actionDeadline(0) }));
+    await readVendorPdf(input({ hard: true }), U, deps(c1b, { deadline: actionDeadline(0) }));
+    ok(c1b.length === 2 && c1b[0].timeoutMs === 80_000 && c1b[1].timeoutMs === 95_000, "read pdf deadline: with the time to spare, each slot keeps its own timeout");
+    // Too little left (86 s spent → 17 s < 20 s) → refused before calling: couldNotRead, no call, no run.
+    const c1c: ProviderRequest[] = [];
+    const before = await myRuns();
+    const r1c = await readVendorPdf(input(), U, deps(c1c, { deadline: actionDeadline(86_000) }));
+    ok(!r1c.ok && r1c.error === VENDOR_PDF_COPY.couldNotRead && r1c.runId === null && c1c.length === 0 && (await myRuns()) === before, "read pdf deadline: too little time left → couldNotRead before calling, no run row");
+    const act = readFileSync("src/app/(app)/estimator/vendor-pdf-actions.ts", "utf8");
+    const fn = act.slice(act.indexOf("export async function readVendorPdfAction"));
+    ok(fn.indexOf("const deadline = { at: Date.now() + VENDOR_PDF_ACTION_BUDGET_MS, hasFallback: false, minCallMs: VENDOR_PDF_MIN_CALL_MS }") > 0 && fn.indexOf("const deadline") < fn.indexOf("requireUser(") && /readVendorPdf\(coerce\(input\), \{ id: me\.id, name: me\.name \}, \{ deadline \}\)/.test(fn) && /const VENDOR_PDF_ACTION_BUDGET_MS = 108_000;/.test(act) && /const VENDOR_PDF_MIN_CALL_MS = 20_000;/.test(act), "action: a 108 s deadline fixed before requireUser, passed to readVendorPdf");
+
+    // 2. Read → Read again (not Try harder) retires the first run.
+    const a = await readVendorPdf(input(), U, deps([]));
+    const b = a.ok ? await readVendorPdf(input({ retryOf: a.runId }), U, deps([])) : null;
+    const runA = a.ok ? await getRun(a.runId) : null;
+    const detB = b?.ok ? ((await getRun(b.runId))?.outcomeDetail ?? {}) as Record<string, unknown> : {};
+    ok(a.ok && !!b?.ok && b.hard === false && runA?.outcome === "discarded" && (runA.outcomeDetail as Record<string, unknown>)?.replacedBy === (b?.ok ? b.runId : "x") && detB.hard === false && detB.retryOf === (a.ok ? a.runId : ""), "read pdf: a plain Read again discards the earlier read (replacedBy), recorded as retryOf on a non-hard run");
+    // A scored run stays scored (first write wins), whatever reads over it.
+    if (b?.ok) await setVendorPdfOutcome(b.runId, "accepted", { diff: { read: 1, kept: 1, edited: 0, deleted: 0, added: 0, totalChanged: false } });
+    const c2 = b?.ok ? await readVendorPdf(input({ retryOf: b.runId }), U, deps([])) : null;
+    ok(!!c2?.ok && b?.ok === true && (await getRun(b.runId))?.outcome === "accepted", "read pdf: Read again over an already-scored read leaves its outcome alone");
+  } finally {
+    await dropRuns();
+  }
 }
 
 /** #348 slice 5 Task 5 (vendorPdfDbChecks part B) — the save keeps a verified `extracted`, scores the run once, and the

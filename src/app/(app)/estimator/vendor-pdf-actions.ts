@@ -23,11 +23,20 @@ function coerce(input: unknown): ReadVendorPdfInput {
   };
 }
 
+/** The deadline the model call must end by, from the action's start: under the Estimator page's maxDuration
+ *  (120 s) with room for the run detail and checks after the call. Not exported: a "use server" file exports only
+ *  async functions. */
+const VENDOR_PDF_ACTION_BUDGET_MS = 108_000;
+/** Less than this left for the call → refused before calling (couldNotRead), never a call cut off mid-read. */
+const VENDOR_PDF_MIN_CALL_MS = 20_000;
+
 /**
- * #348 slice 5 — Read the PDF (one click = one model call). Runs under the Estimator page's maxDuration (120 s);
- * the Try-harder slot's worst case fits inside it. Writes nothing but the Assist run row.
+ * #348 slice 5 — Read the PDF (one click = one model call). Runs under the Estimator page's maxDuration (120 s):
+ * the deadline is fixed at the action's start, so the time the gate, the Blob read and the page count took
+ * shortens the call's timeout (the slot's 80 s / 95 s is the most it gets). Writes nothing but the Assist run row.
  */
 export async function readVendorPdfAction(input: ReadVendorPdfInput): Promise<ReadVendorPdfResult> {
+  const deadline = { at: Date.now() + VENDOR_PDF_ACTION_BUDGET_MS, hasFallback: false, minCallMs: VENDOR_PDF_MIN_CALL_MS };
   const me = await requireUser();
-  return readVendorPdf(coerce(input), { id: me.id, name: me.name });
+  return readVendorPdf(coerce(input), { id: me.id, name: me.name }, { deadline });
 }

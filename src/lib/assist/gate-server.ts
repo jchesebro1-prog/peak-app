@@ -1,9 +1,9 @@
 /** #334 Assist — the cheap early gate (D869), shared by the Inbox actions and the reusable server functions. */
 import { getSettings } from "@/lib/settings";
-import { assistGate, assistSettingsOf } from "./config";
+import { assistAccess, assistGate, assistSettingsOf } from "./config";
 import { getAssistEnv } from "./key-store";
 import type { RunDeps } from "./run";
-import type { AssistFeature } from "./types";
+import type { AssistFeature, Env } from "./types";
 import { ASK_NO_KEY_TEXT } from "./features/ask-limits";
 
 /** Gate first (D869): a refused user never triggers the full-table loads
@@ -35,10 +35,21 @@ export async function askGateFor(userId: string, deps: Pick<RunDeps, "settings" 
 
 export const VENDOR_PDF_NO_KEY_TEXT = "Read the PDF needs the Claude API key.";
 
-/** #348 slice 5 — gateFor("vendorpdf") AND a Claude key in the effective env (Claude-only, like Ask AI). Null = allowed. */
-export async function vendorPdfGateFor(userId: string, deps: Pick<RunDeps, "settings" | "env"> = {}): Promise<string | null> {
-  const env = deps.env ?? (await getAssistEnv());
-  const refused = await gateFor("vendorpdf", userId, { settings: deps.settings, env });
+/** Read the PDF's gate deps: the usual settings / env, plus a seam for the stored-key loader (tests spy on it). */
+export type VendorPdfGateDeps = Pick<RunDeps, "settings" | "env"> & { loadEnv?: () => Promise<Env> };
+
+/**
+ * #348 slice 5 — gateFor("vendorpdf") AND a Claude key in the effective env (Claude-only, like Ask AI). Null = allowed.
+ * The kill switch, the pilot list and the feature switch are checked first, from settings and the process env only:
+ * the Estimator page runs this on every load for every user, so a non-pilot user never reads the stored key.
+ */
+export async function vendorPdfGateFor(userId: string, deps: VendorPdfGateDeps = {}): Promise<string | null> {
+  const settings = deps.settings ?? assistSettingsOf(await getSettings());
+  if (((deps.env ?? process.env).ASSIST_DISABLED || "").trim() === "true") return "Assist is switched off.";
+  const access = assistAccess("vendorpdf", userId, settings);
+  if (!access.ok) return access.reason;
+  const env = deps.env ?? (await (deps.loadEnv ?? getAssistEnv)());
+  const refused = await gateFor("vendorpdf", userId, { settings, env });
   if (refused) return refused;
   return (env.ANTHROPIC_API_KEY || "").trim() ? null : VENDOR_PDF_NO_KEY_TEXT;
 }
