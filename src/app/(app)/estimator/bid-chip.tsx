@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { bidPanelAction, setBidDetailsAction } from "./bid-actions";
+import { bidPanelAction, setBidDetailsAction, type BidDetailsResult } from "./bid-actions";
 import type { BidAddendum } from "@/lib/parties/bids";
 import type { BidPanelVM } from "@/lib/parties/bid-vm";
 
@@ -49,7 +49,17 @@ function chipLabel(p: BidPanelVM | null): string {
   return parts.join(" · ");
 }
 
-export default function BidChip({ quoteId, canEdit }: { quoteId: string | null; canEdit: boolean }) {
+/** #348 (Jeff 2026-10-15): `onSync` — an addendum saved on a sent estimate moved it back to Draft; the header applies
+ *  the fresh status + next step. */
+export default function BidChip({
+  quoteId,
+  canEdit,
+  onSync,
+}: {
+  quoteId: string | null;
+  canEdit: boolean;
+  onSync?: (sync: NonNullable<BidDetailsResult["sync"]>) => void;
+}) {
   const [stored, setPanel] = useState<BidPanelVM | null>(null);
   // A panel for another estimate is never shown (the VM carries its quote id).
   const panel = stored && stored.quoteId === quoteId ? stored : null;
@@ -58,6 +68,8 @@ export default function BidChip({ quoteId, canEdit }: { quoteId: string | null; 
   const [addenda, setAddenda] = useState<BidAddendum[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  /** The save's note (an addendum moved the estimate back to Draft) — shown in the dialog, which then stays open. */
+  const [notice, setNotice] = useState("");
   const dialog = useRef<HTMLDialogElement>(null);
   // Latest-response-wins: a slow reload for an old quote or an earlier request never overwrites a newer one.
   const seq = useRef(0);
@@ -105,7 +117,8 @@ export default function BidChip({ quoteId, canEdit }: { quoteId: string | null; 
   useEffect(() => {
     if (!quoteId) return;
     const onChanged = (e: Event) => {
-      if ((e as CustomEvent<{ quoteId?: string }>).detail?.quoteId !== quoteId) return;
+      const detail = (e as CustomEvent<{ quoteId?: string; source?: string }>).detail;
+      if (detail?.quoteId !== quoteId || detail.source === "chip") return;
       void reload();
     };
     window.addEventListener("peak:bid-changed", onChanged);
@@ -121,6 +134,7 @@ export default function BidChip({ quoteId, canEdit }: { quoteId: string | null; 
 
   const openDialog = async () => {
     setError("");
+    setNotice("");
     const fresh = (await reload()) ?? panel;
     setDueInput(toLocalInput(fresh?.dueAt ?? null));
     setAddenda(fresh?.addenda ?? []);
@@ -145,13 +159,21 @@ export default function BidChip({ quoteId, canEdit }: { quoteId: string | null; 
     if (dueInput && due == null) return setError("Pick a valid due date.");
     setSaving(true);
     setError("");
+    setNotice("");
     try {
       const r = await setBidDetailsAction(quoteId, { dueAt: due, addenda });
       if (r.ok) {
         seq.current++; // an older in-flight load must not overwrite this fresher panel
         lastLoaded.current = Date.now();
         setPanel(r.panel);
-        setOpen(false);
+        if (r.sync) onSync?.(r.sync);
+        // The Bidders card (Send & track) reloads its plan: "Send revision to bidders" now applies.
+        window.dispatchEvent(new CustomEvent("peak:bid-changed", { detail: { quoteId, source: "chip" } }));
+        if (r.note) {
+          setDueInput(toLocalInput(r.panel.dueAt));
+          setAddenda(r.panel.addenda);
+          setNotice(r.note);
+        } else setOpen(false);
       } else setError(r.error);
     } catch {
       setError("Couldn't save — try again.");
@@ -260,13 +282,16 @@ export default function BidChip({ quoteId, canEdit }: { quoteId: string | null; 
                 {error}
               </div>
             )}
+            <div role="status" style={notice ? { fontSize: 12, fontWeight: 600, color: "#9a6a00" } : { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>
+              {notice}
+            </div>
             {!readOnly && (
               <div style={{ display: "flex", gap: 8 }}>
                 <button type="button" onClick={() => void save()} disabled={saving} style={{ ...btn, background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" }}>
                   {saving ? "Saving…" : "Save"}
                 </button>
                 <button type="button" onClick={() => setOpen(false)} disabled={saving} style={btn}>
-                  Cancel
+                  {notice ? "Close" : "Cancel"}
                 </button>
               </div>
             )}

@@ -198,11 +198,29 @@ export function cleanClientResponses(raw: unknown): ClientResponse[] {
   return out;
 }
 
-/** The list with `r` appended, or null at the 200 cap. */
+/** #348 (Jeff 2026-10-15) — who a response counts against: the bidder's party id, or "" for the owner's v2. */
+export const responderKey = (r: { partyId?: string }): string => r.partyId || "";
+
+/** How many stored responses belong to `partyId`'s responder (absent / "" = the owner). */
+export function responsesBy(list: unknown, partyId?: string): number {
+  const key = partyId || "";
+  return cleanClientResponses(list).filter((x) => responderKey(x) === key).length;
+}
+
+/** The list with `r` appended, or null at the 200 cap. #348: the cap is per responder — only responses from the
+ *  same responder (same `partyId`; the owner has none) count, so a bidder never spends the owner's or another
+ *  bidder's room. */
 export function appendResponseTo(list: unknown, r: ClientResponse): ClientResponse[] | null {
   const cur = cleanClientResponses(list);
-  if (cur.length >= MAX_CLIENT_RESPONSES) return null;
+  const key = responderKey(r);
+  if (cur.filter((x) => responderKey(x) === key).length >= MAX_CLIENT_RESPONSES) return null;
   return [...cur, r];
+}
+
+/** #348 (Jeff 2026-10-15) — the per-quote daily response bucket: each bidder's v3 gets its own, the owner's v2
+ *  keeps the quote-wide key, so a bidder can never use up the owner's budget or another bidder's. */
+export function responseQuoteBucket(quoteId: string, partyId?: string | null): string {
+  return partyId ? `share-respond-quote:${quoteId}:${partyId}` : `share-respond-quote:${quoteId}`;
 }
 
 /** #348 2b-ii — a bidder company name as it goes into a note, task title or response row: trimmed, every run of

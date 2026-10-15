@@ -7,8 +7,11 @@ import { can } from "@/lib/team";
 import type { BidPanelResult } from "@/lib/parties/bid-vm";
 import { loadBidPanel, viewerOf } from "@/lib/parties/bid-panel-server";
 import { addBidder, awardBid, markSubmitted, setBidDetails, undoAward, updateBidder } from "@/lib/stores/bids";
-import { get as getQuote } from "@/lib/stores/quotes";
+import { get as getQuote, type QuoteStatus } from "@/lib/stores/quotes";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
+import { addendumDraftNote } from "@/lib/parties/bids";
+import { quoteNextStepFor } from "@/lib/quote-next-step-server";
+import type { QuoteNextStepView } from "@/lib/quote-next-step";
 
 /** #348 slice 2a — the Bidders card's server actions. Reads need a signed-in user; every mutation needs `create`. */
 export type { BidPanelResult };
@@ -27,7 +30,7 @@ export async function bidPanelAction(quoteId: string): Promise<BidPanelResult> {
  */
 async function mutate(
   quoteRef: unknown | (() => Promise<unknown>),
-  run: (userId: string) => Promise<{ ok: boolean; error?: string; note?: string }>,
+  run: (userId: string, userName: string) => Promise<{ ok: boolean; error?: string; note?: string }>,
   /** #348 2b-i: the write can change what the customer document prints → re-render the PDF. `true` = always;
    *  `"if-awarded"` = only when the quote currently has an award (due date / addenda print only with an addressee). */
   rerender: boolean | "if-awarded" = false
@@ -36,7 +39,7 @@ async function mutate(
   if (!can("create", user.roles)) return { ok: false, error: DENIED };
   const quoteId = typeof quoteRef === "function" ? await (quoteRef as () => Promise<unknown>)() : quoteRef;
   if (!isId(quoteId)) return { ok: false, error: "That estimate wasn't found." };
-  const r = await run(user.id);
+  const r = await run(user.id, user.name);
   if (!r.ok) return { ok: false, error: r.error || "That didn't save." };
   revalidatePath("/", "layout");
   if (rerender === true || (rerender === "if-awarded" && !!(await getQuote(quoteId))?.bid?.awardedPartyId)) await scheduleQuotePdf(quoteId);
@@ -51,8 +54,33 @@ async function quoteOfBidder(partyId: unknown): Promise<string | null> {
   return p && p.recordType === "quote" ? p.recordId : null;
 }
 
-export async function setBidDetailsAction(quoteId: string, raw: unknown): Promise<BidPanelResult> {
-  return mutate(quoteId, () => setBidDetails(quoteId, raw), "if-awarded");
+/** #348 (Jeff 2026-10-15): when the save added an addendum to a sent estimate, the store moved it back to Draft —
+ *  the result then carries the note and `sync` (the fresh status + next step) so the Estimator's header follows. */
+export type BidDetailsResult = BidPanelResult & { sync?: { status: QuoteStatus; next: QuoteNextStepView | null } };
+
+export async function setBidDetailsAction(quoteId: string, raw: unknown): Promise<BidDetailsResult> {
+  let moved: number[] | undefined;
+  const res = await mutate(
+    quoteId,
+    async (_uid, name) => {
+      const r = await setBidDetails(quoteId, raw, name);
+      if (r.ok && r.backToDraft?.length) {
+        moved = r.backToDraft;
+        return { ok: true, note: addendumDraftNote(r.backToDraft) };
+      }
+      return r;
+    },
+    "if-awarded"
+  );
+  if (!res.ok || !moved) return res;
+  try {
+    const user = await requireUser();
+    const q = await getQuote(quoteId);
+    return q ? { ...res, sync: { status: q.status, next: await quoteNextStepFor(q, user) } } : res;
+  } catch (e) {
+    console.error("[bid-details] next-step refresh failed", e);
+    return res;
+  }
 }
 
 export async function addBidderAction(

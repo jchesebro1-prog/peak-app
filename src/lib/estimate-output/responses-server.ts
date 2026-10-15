@@ -11,7 +11,7 @@ import { createTask } from "@/lib/stores/tasks";
 import { allUsers } from "@/lib/users";
 import {
   chicagoDayEnd, cleanBidderName, CLIENT_ACTION_COPY, CLIENT_LINK_ACTOR, confirmationText, leadEstimator, newResponseId, PEAK_NAME, RESPONSE_IP_LIMIT,
-  RESPONSE_IP_WINDOW_MS, RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS, responseAssignees, responseNoteText, responseScopes, responseTaskTitle,
+  RESPONSE_IP_WINDOW_MS, RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS, responseAssignees, responseQuoteBucket, responseNoteText, responseScopes, responseTaskTitle,
   sanitizeClientResponse, type ClientActionResult, type ClientResponse, type ClientResponseKind, type RosterUser,
 } from "./responses";
 
@@ -50,7 +50,8 @@ export async function submitClientResponse(kind: ClientResponseKind, id: string,
   const clean = sanitizeClientResponse(kind, o, responseScopes(sections, groups));
   if (!clean.ok) return clean;
   // The per-quote daily slot is spent only on a submission that will be written (an invalid one costs the quote nothing).
-  if (!rateLimit(`share-respond-quote:${hit.q.id}`, RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS).ok) return { ok: false, error: CLIENT_ACTION_COPY.tooMany };
+  // #348: per responder — a bidder's v3 has its own bucket; the owner's v2 keeps the quote-wide one.
+  if (!rateLimit(responseQuoteBucket(hit.q.id, bidder?.partyId), RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS).ok) return { ok: false, error: CLIENT_ACTION_COPY.tooMany };
   const res = await appendClientResponse(hit.q.id, hit.rev.rev, { ...clean.value, ...(bidder ? { partyId: bidder.partyId } : {}) }, now, newResponseId());
   if (!res.ok) return { ok: false, error: res.reason === "full" ? CLIENT_ACTION_COPY.full : res.reason === "state" ? CLIENT_ACTION_COPY.closed : CLIENT_ACTION_COPY.inactive };
   let users: RosterUser[] = [];

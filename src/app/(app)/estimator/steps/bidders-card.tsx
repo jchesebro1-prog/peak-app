@@ -79,6 +79,17 @@ export function BiddersCard({ quoteId, refreshKey, sendCtx }: { quoteId: string;
     );
   }, [quoteId, refreshKey, retryKey]);
 
+  // #348 (Jeff 2026-10-15): a Bid chip save can move the estimate back to Draft (an addendum after a send) — reload
+  // so the plan offers "Send revision to bidders". Only the chip's own event; this card's events come from itself.
+  useEffect(() => {
+    const onChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ quoteId?: string; source?: string }>).detail;
+      if (detail?.quoteId === quoteId && detail.source === "chip") setRetryKey((k) => k + 1);
+    };
+    window.addEventListener("peak:bid-changed", onChanged);
+    return () => window.removeEventListener("peak:bid-changed", onChanged);
+  }, [quoteId]);
+
   /** `field` marks a blur-save (locks just that input); without it the whole card is busy. */
   async function run(call: () => Promise<BidPanelResult>, field?: string): Promise<boolean> {
     const id = ++reqRef.current;
@@ -219,6 +230,8 @@ export function BiddersCard({ quoteId, refreshKey, sendCtx }: { quoteId: string;
           </button>
         )}
       </div>
+      {/* #348 (Jeff 2026-10-15): the Bid chip now moves a sent estimate back to Draft when an addendum is added, so this
+          shows only as a fallback — a sent estimate whose addenda changed by another path (addendaAfterSend is [] off sent). */}
       {!!panel?.addendaAfterSend.length && (
         <div style={{ marginBottom: 10, fontSize: 12, fontWeight: 600, color: "#9a6a00" }}>{BID_SEND_COPY.addendumHint(panel.addendaAfterSend)}</div>
       )}

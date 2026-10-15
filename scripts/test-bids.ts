@@ -6,6 +6,7 @@ import type { Ok } from "./test-inbox-org";
 import {
   BID_RESULTS, BID_RESULT_LABEL, EMPTY_BID, sanitizeBidDetails, sanitizeBidSiteUrl, sanitizeBidderPatch, newBidderState, applyBidderPatch,
   markSubmittedState, currentRev, needsRev, awardPlan, undoAwardPlan, canAward, canUndoAward, bidderStatusText, bidDueText, bidDueDays, isOpenBid,
+  addedAddendumNos, addendumMovesToDraft, addendumDraftNote,
 } from "../src/lib/parties/bids";
 import type { BidderState } from "../src/lib/parties/rules";
 import { bidderSentState, bidderFailedState, nextBidderOpens, bidderOpensText } from "../src/lib/parties/bids";
@@ -49,6 +50,7 @@ import { recordEstimateEmail } from "../src/lib/stores/quotes";
 import { bidderLinkPath, bidderSharePath, ensureShareLink, recordSharedOpen, resolveSharedPackage, revokeShareLink } from "../src/lib/quote-share/links";
 import { submitClientResponse } from "../src/lib/estimate-output/responses-server";
 import { CLIENT_ACTION_COPY, cleanBidderName, type ClientResponse } from "../src/lib/estimate-output/responses";
+import { appendResponseTo, responsesBy, responseQuoteBucket, MAX_CLIENT_RESPONSES, RESPONSE_QUOTE_LIMIT } from "../src/lib/estimate-output/responses";
 import { loadPackageViewProps } from "../src/lib/estimate-output/package-loader";
 import {
   EstimateEmailError, SEND_COPY, sendBidderEmail, sendEstimateEmail,
@@ -1113,8 +1115,132 @@ export async function bidSendFakeChecks(ok: Ok) {
   }
 }
 
+/** #348 Jeff's 2026-10-15 bid follow-ups (decisions 2 and 3) — pure: per-responder response caps + buckets, and the
+ *  addendum → Draft rule. */
+export async function bidFollowupChecks(ok: Ok) {
+  const PA = "pty_aaaaaaaaaaaaaaaa", PB = "pty_bbbbbbbbbbbbbbbb";
+  const resp = (i: number, partyId?: string): ClientResponse => ({
+    id: `CR-${String(i).padStart(12, "0")}`, kind: "question", rev: 1, at: T1 + i, name: "N", email: "", message: "m", sectionIds: [], sectionNames: [], total: 0, ...(partyId ? { partyId } : {}),
+  });
+  const ownerFull = Array.from({ length: MAX_CLIENT_RESPONSES }, (_, i) => resp(i));
+  ok(appendResponseTo(ownerFull, resp(9001)) === null, "followup: the owner's 201st response is refused (the 200 cap holds for the owner)");
+  ok(appendResponseTo(ownerFull, resp(9002, PA))?.length === MAX_CLIENT_RESPONSES + 1, "followup: a bidder still has room when the owner's 200 are used");
+  const aFull = Array.from({ length: MAX_CLIENT_RESPONSES }, (_, i) => resp(i, PA));
+  ok(appendResponseTo(aFull, resp(9003, PA)) === null, "followup: a bidder's 201st response is refused");
+  ok(appendResponseTo(aFull, resp(9004, PB))?.length === MAX_CLIENT_RESPONSES + 1 && appendResponseTo(aFull, resp(9005))?.length === MAX_CLIENT_RESPONSES + 1,
+    "followup: one bidder's full cap never blocks another bidder or the owner");
+  const mixed = [...aFull.slice(0, 3), resp(500), resp(501, PB)];
+  ok(responsesBy(mixed, PA) === 3 && responsesBy(mixed) === 1 && responsesBy(mixed, "") === 1 && responsesBy(mixed, PB) === 1 && responsesBy("junk", PA) === 0, "followup: responsesBy counts one responder (owner = no partyId)");
+  ok(responseQuoteBucket("Q-1") === "share-respond-quote:Q-1" && responseQuoteBucket("Q-1", null) === "share-respond-quote:Q-1" && responseQuoteBucket("Q-1", PA) === `share-respond-quote:Q-1:${PA}`,
+    "followup: the owner keeps the quote-wide bucket; each bidder has its own");
+  const srv = readFileSync(join(process.cwd(), "src/lib/estimate-output/responses-server.ts"), "utf8");
+  ok(srv.includes("rateLimit(responseQuoteBucket(hit.q.id, bidder?.partyId), RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS)") && !srv.includes("`share-respond-quote:${hit.q.id}`"),
+    "followup: submitClientResponse spends the responder's own bucket (source pin)");
+
+  const A = (no: number, note = "") => ({ no, receivedAt: T1, note });
+  ok(addedAddendumNos([A(1)], [A(1), A(3), A(2)]).join() === "2,3", "followup: added addenda = new numbers, ascending");
+  ok(addedAddendumNos([A(1, "x"), A(2)], [A(1, "y")]).length === 0 && addedAddendumNos([A(1)], [A(1)]).length === 0 && addedAddendumNos(null, []).length === 0,
+    "followup: a note edit or a removal adds nothing");
+  ok(addedAddendumNos(undefined, [A(1)]).join() === "1", "followup: the first addendum on a bid with none counts");
+  ok(addendumMovesToDraft("sent", [2]) && !addendumMovesToDraft("sent", []) && !addendumMovesToDraft("draft", [2]) && !addendumMovesToDraft("won", [2]),
+    "followup: only a sent estimate with an added addendum moves to Draft");
+  ok(addendumDraftNote([2]) === "Addendum 2 added — the estimate is back in Draft. Send revision to bidders when it's ready." && addendumDraftNote([2, 3]).startsWith("Addenda 2, 3 added"),
+    "followup: the Bid chip note");
+  const chip = readFileSync(join(process.cwd(), "src/app/(app)/estimator/bid-chip.tsx"), "utf8");
+  ok(chip.includes("setNotice(r.note)") && chip.includes("onSync?.(r.sync)") && chip.includes('source: "chip"'), "followup: the Bid chip shows the note, syncs the header and tells the Bidders card");
+}
+
+const H_FIX = { own: fixtureId(348, "hown"), gc1: fixtureId(348, "hgc1"), gc2: fixtureId(348, "hgc2"), ct1: fixtureId(348, "hct1"), ct2: fixtureId(348, "hct2") };
+async function dropFollowupIdentityFixtures() {
+  const db = await getDb();
+  await db.delete(contactEmails).where(like(contactEmails.contactId, "TEST348:h%"));
+  await db.delete(contactsTable).where(like(contactsTable.id, "TEST348:h%"));
+  await db.delete(companies).where(like(companies.id, "TEST348:h%"));
+}
+
+/** #348 Jeff's 2026-10-15 bid follow-ups — DB: per-bidder response buckets, and an addendum after a send → Draft. */
+export async function bidFollowupDbChecks(ok: Ok) {
+  const { own, gc1, gc2, ct1, ct2 } = H_FIX;
+  const hq = fixtureId(348, "hq");
+  const SEC = "h-s3cret";
+  const regAll = async () => { for (const p of await listFor("quote", hq)) registerFixture("record_parties", p.id); };
+  try {
+    await dropFollowupIdentityFixtures();
+    await saveCompany({ id: own, name: "Follow Owner", type: "customer", lifecycle: "active", deleted: false });
+    await saveCompany({ id: gc1, name: "Follow GC One", type: "customer", lifecycle: "active", deleted: false });
+    await saveCompany({ id: gc2, name: "Follow GC Two", type: "customer", lifecycle: "active", deleted: false });
+    await saveContact({ id: ct1, firstName: "Hal", lastName: "One", homeCompanyId: gc1 });
+    await setEmails(ct1, [{ value: "hal@h.test", label: "work", isPrimary: true }] as never);
+    await saveContact({ id: ct2, firstName: "Hue", lastName: "Two", homeCompanyId: gc2 });
+    await setEmails(ct2, [{ value: "hue@h.test", label: "work", isPrimary: true }] as never);
+    const NOW = Date.now();
+    await createFixture("quotes", buildQuote(hq, { name: "Follow quote", customer: "Follow Owner", customerId: own, value: 1000 } as never, "system", null, NOW) as never);
+    const b1 = await addBidder({ quoteId: hq, companyId: gc1, contactId: ct1, role: "gc" }, "u");
+    const b2 = await addBidder({ quoteId: hq, companyId: gc2, contactId: ct2, role: "gc" }, "u");
+    await regAll();
+    if (!b1.ok || !b2.ok) throw new Error("follow-up bidders missing");
+    const p1 = b1.party.id, p2 = b2.party.id;
+    const T = Date.UTC(2026, 9, 20, 17, 0);
+    const d1 = await setBidDetails(hq, { addenda: [{ no: 1, receivedAt: T, note: "first" }] }, "Test");
+    ok(d1.ok && !d1.backToDraft && (await getQuote(hq))?.status === "draft", "followup db: an addendum on a draft stays draft, no note");
+    await setStatus(hq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    for (const [pid, to] of [[p1, "hal@h.test"], [p2, "hue@h.test"]] as const) await recordBidderSend(hq, pid, { threadId: `C-h-${pid}`, rev: 1, at: T, by: "Test", to }, { kind: "sent" }, "u1");
+
+    // 1. Each bidder has its own response bucket; the owner's v2 keeps the quote-wide one.
+    const ens = await ensureShareLink(hq, "Test", { secret: SEC });
+    const l1 = await bidderLinkPath(hq, p1, "Test", { secret: SEC }), l2 = await bidderLinkPath(hq, p2, "Test", { secret: SEC });
+    const tok1 = l1.ok ? l1.path.split("/").pop()! : "", tok2 = l2.ok ? l2.path.split("/").pop()! : "";
+    const tokOwner = ens.ok && ens.link.pathV2 ? ens.link.pathV2.split("/").pop()! : "";
+    const deps = { secret: SEC, users: async () => [], notify: async () => {} };
+    let spent = 0;
+    for (let i = 0; i < RESPONSE_QUOTE_LIMIT; i++) {
+      const r = await submitClientResponse("question", hq, tok1, { name: "Hal", message: `q${i}` }, `192.0.2.${i + 1}`, deps);
+      if (r.ok) spent++;
+    }
+    const over1 = await submitClientResponse("question", hq, tok1, { name: "Hal", message: "one more" }, "192.0.2.101", deps);
+    const from2 = await submitClientResponse("question", hq, tok2, { name: "Hue", message: "mine" }, "192.0.2.102", deps);
+    const fromOwner = await submitClientResponse("question", hq, tokOwner, { name: "Pat", message: "owner" }, "192.0.2.103", deps);
+    const stored = (await getQuote(hq))?.clientResponses ?? [];
+    ok(spent === RESPONSE_QUOTE_LIMIT && !over1.ok && over1.error === CLIENT_ACTION_COPY.tooMany, "followup db: a bidder's own daily limit stops it");
+    ok(from2.ok && fromOwner.ok && responsesBy(stored, p2) === 1 && responsesBy(stored) === 1 && responsesBy(stored, p1) === RESPONSE_QUOTE_LIMIT,
+      "followup db: one bidder's spent limit never blocks another bidder or the owner");
+
+    // 2. An addendum after a send puts the estimate back to Draft; Send revision then goes to every pending bidder.
+    const before = await getQuote(hq);
+    const d2 = await setBidDetails(hq, { addenda: [{ no: 1, receivedAt: T, note: "first" }, { no: 2, receivedAt: T + 86_400_000, note: "second" }] }, "Test");
+    const after = await getQuote(hq);
+    const last = after?.history?.at(-1);
+    ok(before?.status === "sent" && d2.ok && d2.backToDraft?.join() === "2" && after?.status === "draft" && last?.from === "sent" && last.to === "draft",
+      "followup db: Addendum 2 on a sent estimate → Draft through setStatus (history stamped)");
+    const pan = await loadBidPanel(hq, { canEdit: true, canSend: true, canLink: true });
+    ok(pan.ok && [...pan.panel.plan.ids].sort().join() === [p1, p2].sort().join() && pan.panel.plan.label === "Send revision to bidders" && pan.panel.addendaAfterSend.length === 0,
+      "followup db: the Bidders plan lists both sent bidders with \"Send revision to bidders\", and no fallback hint on the draft");
+
+    // Back to sent: a note edit, a removal and a due-date change never change status.
+    await setStatus(hq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    const n1 = await setBidDetails(hq, { addenda: [{ no: 1, receivedAt: T, note: "first" }, { no: 2, receivedAt: T + 86_400_000, note: "second, edited" }] }, "Test");
+    const s1 = (await getQuote(hq))?.status;
+    const n2 = await setBidDetails(hq, { addenda: [{ no: 2, receivedAt: T + 86_400_000, note: "second, edited" }] }, "Test");
+    const s2 = (await getQuote(hq))?.status;
+    const n3 = await setBidDetails(hq, { dueAt: T + 7 * 86_400_000 }, "Test");
+    const s3 = (await getQuote(hq))?.status;
+    ok(n1.ok && !n1.backToDraft && s1 === "sent" && n2.ok && !n2.backToDraft && s2 === "sent" && n3.ok && !n3.backToDraft && s3 === "sent",
+      "followup db: a note edit, a removal and a due-date change keep the estimate sent");
+    // Re-adding a number removed after the send counts as added (it isn't on the stored list).
+    const n4 = await setBidDetails(hq, { addenda: [{ no: 1, receivedAt: T, note: "back" }, { no: 2, receivedAt: T + 86_400_000, note: "second, edited" }] }, "Test");
+    ok(n4.ok && n4.backToDraft?.join() === "1" && (await getQuote(hq))?.status === "draft", "followup db: re-adding a removed addendum on a sent estimate moves it to Draft too");
+    await setStatus(hq, "lost", "Test");
+    const closed = await setBidDetails(hq, { addenda: [{ no: 3, receivedAt: T, note: "" }] }, "Test");
+    ok(!closed.ok && closed.error === "This estimate is closed." && (await getQuote(hq))?.status === "lost", "followup db: a lost estimate's bid details are still refused");
+  } finally {
+    try { await regAll(); } catch {}
+    await dropFixtures(348);
+    await dropFollowupIdentityFixtures();
+  }
+}
+
 if (process.argv[1]?.endsWith("test-bids.ts")) {
   let pass = 0, fail = 0;
   const okf: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
-  bidChecks(okf).then(() => bidSendChecks(okf)).then(() => bidSendFakeChecks(okf)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
+  bidChecks(okf).then(() => bidSendChecks(okf)).then(() => bidSendFakeChecks(okf)).then(() => bidFollowupChecks(okf)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
 }

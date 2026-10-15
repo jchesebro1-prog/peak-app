@@ -1,10 +1,10 @@
 import { getDoc } from "@/db/doc-store";
 import type { EstimateEmailEntry, Quote } from "@/lib/stores/quotes";
-import { get as getQuote, patchQuoteBid, recordEstimateEmail, withQuoteRowLock } from "@/lib/stores/quotes";
+import { get as getQuote, patchQuoteBid, recordEstimateEmail, setStatus, statusFailureMessage, withQuoteRowLock } from "@/lib/stores/quotes";
 import { addParty, listFor, setPartyBid } from "@/lib/stores/parties";
 import type { BidderState, Party } from "@/lib/parties/rules";
 import {
-  applyBidderPatch, awardPlan, bidderFailedState, bidderSentState, canAward, canUndoAward, currentRev, markSubmittedState, newBidderState, nextBidderOpens, sanitizeBidDetails,
+  addedAddendumNos, addendumMovesToDraft, applyBidderPatch, awardPlan, bidderFailedState, bidderSentState, canAward, canUndoAward, currentRev, markSubmittedState, newBidderState, nextBidderOpens, sanitizeBidDetails,
   sanitizeBidderPatch, undoAwardPlan, type QuoteBid,
 } from "@/lib/parties/bids";
 
@@ -23,22 +23,39 @@ export async function listBidders(quoteId: string): Promise<Bidder[]> {
 }
 
 /** A missing `dueAt` / `addenda` key keeps the stored value; an explicit `dueAt: null` clears it. Refuses a
- *  closed (won / lost) estimate; reads and writes under the quote's row lock. */
-export async function setBidDetails(quoteId: string, raw: unknown): Promise<{ ok: true; bid: QuoteBid } | { ok: false; error: string }> {
+ *  closed (won / lost) estimate; reads and writes under the quote's row lock.
+ *
+ *  #348 (Jeff 2026-10-15): a save that ADDS an addendum number to a `sent` estimate moves it back to Draft through
+ *  setStatus (the same transition the status select makes — history stamped, pipeline stage snapped, no approval
+ *  gate on draft) inside the same lock and transaction, and returns `backToDraft` (the added numbers). A note /
+ *  date edit, a removal or a due-date change never changes status. */
+export async function setBidDetails(
+  quoteId: string,
+  raw: unknown,
+  by?: string | null
+): Promise<{ ok: true; bid: QuoteBid; backToDraft?: number[] } | { ok: false; error: string }> {
   const clean = sanitizeBidDetails(raw);
   if (!clean.ok) return clean;
   const { dueAt, addenda } = clean.value;
-  return withQuoteRowLock(quoteId, async () => {
-    const q = await getQuote(quoteId);
-    if (!q) return { ok: false as const, error: "That estimate wasn't found." };
-    if (CLOSED.has(q.status)) return { ok: false as const, error: "This estimate is closed." };
-    const saved = await patchQuoteBid(quoteId, (bid) => ({
-      ...bid,
-      ...(dueAt !== undefined ? { dueAt } : {}),
-      ...(addenda !== undefined ? { addenda } : {}),
-    }));
-    return saved?.bid ? { ok: true as const, bid: saved.bid } : { ok: false as const, error: "That estimate wasn't found." };
-  });
+  try {
+    return await withQuoteRowLock(quoteId, async () => {
+      const q = await getQuote(quoteId);
+      if (!q) return { ok: false as const, error: "That estimate wasn't found." };
+      if (CLOSED.has(q.status)) return { ok: false as const, error: "This estimate is closed." };
+      const added = addenda !== undefined ? addedAddendumNos(q.bid?.addenda, addenda) : [];
+      const saved = await patchQuoteBid(quoteId, (bid) => ({
+        ...bid,
+        ...(dueAt !== undefined ? { dueAt } : {}),
+        ...(addenda !== undefined ? { addenda } : {}),
+      }));
+      if (!saved?.bid) return { ok: false as const, error: "That estimate wasn't found." };
+      if (!addendumMovesToDraft(q.status, added)) return { ok: true as const, bid: saved.bid };
+      await setStatus(quoteId, "draft", by ?? null);
+      return { ok: true as const, bid: saved.bid, backToDraft: added };
+    });
+  } catch (e) {
+    return { ok: false, error: statusFailureMessage(e, `bids setBidDetails(${quoteId}): moving back to draft failed`) };
+  }
 }
 
 export async function addBidder(

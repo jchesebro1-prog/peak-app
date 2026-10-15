@@ -56,6 +56,25 @@ export function sanitizeBidDetails(
   return { ok: true, value };
 }
 
+/** #348 (Jeff 2026-10-15) — the addendum numbers a bid-details save ADDS: in `after`, not in `before`, ascending.
+ *  A note edit, a date edit or a removal adds nothing. */
+export function addedAddendumNos(before: ReadonlyArray<{ no: number }> | null | undefined, after: ReadonlyArray<{ no: number }> | null | undefined): number[] {
+  const had = new Set((before || []).filter((a) => a && typeof a.no === "number").map((a) => a.no));
+  return [...new Set((after || []).filter((a) => a && typeof a.no === "number" && !had.has(a.no)).map((a) => a.no))].sort((a, b) => a - b);
+}
+
+/** #348 (Jeff 2026-10-15) — an addendum after a send puts the estimate back to Draft: only a `sent` estimate whose
+ *  save adds an addendum number moves. Draft stays draft; won / lost never reach a bid-details write. */
+export function addendumMovesToDraft(status: string, added: ReadonlyArray<number>): boolean {
+  return status === "sent" && added.length > 0;
+}
+
+/** The note the Bid chip shows after a save that moved the estimate back to Draft. */
+export function addendumDraftNote(nos: ReadonlyArray<number>): string {
+  const which = nos.length === 1 ? `Addendum ${nos[0]}` : `Addenda ${nos.join(", ")}`;
+  return `${which} added — the estimate is back in Draft. Send revision to bidders when it's ready.`;
+}
+
 export function sanitizeBidSiteUrl(raw: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
   const s = typeof raw === "string" ? raw.trim() : "";
   if (!s) return { ok: true, value: null };
