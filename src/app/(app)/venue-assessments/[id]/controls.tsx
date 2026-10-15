@@ -900,10 +900,10 @@ export default function SurveyEditor({
       const { queued } = await serialSave(async () => {
         const sent: Draft = { ...edits, photoRefs: refsNow.current, sketches: sketchesNow.current };
         const seq = stampNow.current?.seq ?? null;
-        // until a save carrying the stage lands online, or the server shows it (#344 C-final D/E). #344 C-final F: a move
-        // made while another is pending starts from that one's target (record.stage may predate it), and every sent
-        // target is remembered so its late landing isn't read as a stage set elsewhere
-        pendingFrom.current = pendingStage.current ?? (record.stage || "requested") as SurveyStage;
+        // until a save carrying the stage lands online, or the server shows it (#344 C-final D/E). #344 C-final F: every
+        // sent target is remembered so its late landing isn't read as a stage set elsewhere; a move made while another is
+        // pending keeps the first move's start (the server's stage before any of them), which the set doesn't cover
+        pendingFrom.current = pendingStage.current ? pendingFrom.current : (record.stage || "requested") as SurveyStage;
         pendingStage.current = target;
         unconfirmedTargets.current.add(target);
         const patch = buildPatch({ stage: target }, sent);

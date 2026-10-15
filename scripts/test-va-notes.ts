@@ -2505,7 +2505,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const adv = ctl.slice(ctl.indexOf("async function advanceStage("), ctl.indexOf("async function onCreateQuote("));
     const sav = ctl.slice(ctl.indexOf("async function onSave("), ctl.indexOf("async function advanceStage("));
     const psr = ctl.slice(ctl.indexOf("async function savePhotoRefs("), ctl.indexOf("// #344 C6 — sketch pads save through"));
-    ok(/pendingFrom\.current = pendingStage\.current \?\? \(record\.stage \|\| "requested"\)/.test(adv) && /doc: buildFullDoc\(\{ stage: target \}, sent\)/.test(adv) &&
+    ok(/pendingFrom\.current = pendingStage\.current \? pendingFrom\.current : \(record\.stage \|\| "requested"\)/.test(adv) && /doc: buildFullDoc\(\{ stage: target \}, sent\)/.test(adv) &&
       /if \(res\.queued\) unsentFieldSeq\.current = seq;/.test(adv) && /if \(res\.queued\) unsentFieldSeq\.current = seq;/.test(sav) &&
       /unsentFieldSeq\.current = null;/.test(adv) && /unsentFieldSeq\.current = null;/.test(sav),
       "#344 C-final E: a queued Save changes / stage move records its seq as holding unsent fields (the move's outbox copy carries the stage); an online one clears it");
@@ -2572,10 +2572,10 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const onSave = ctl.slice(ctl.indexOf("async function onSave("), ctl.indexOf("async function advanceStage("));
     const clears = (s: string) => [...s.matchAll(/pendingStage\.current = null;\s*pendingFrom\.current = null;\s*unconfirmedTargets\.current\.clear\(\);/g)].length;
     ok(/const unconfirmedTargets = useRef<Set<SurveyStage>>\(new Set\(\)\)/.test(ctl) &&
-      /pendingFrom\.current = pendingStage\.current \?\? \(record\.stage \|\| "requested"\) as SurveyStage;\s*pendingStage\.current = target;\s*unconfirmedTargets\.current\.add\(target\);/.test(adv) &&
+      /pendingFrom\.current = pendingStage\.current \? pendingFrom\.current : \(record\.stage \|\| "requested"\) as SurveyStage;\s*pendingStage\.current = target;\s*unconfirmedTargets\.current\.add\(target\);/.test(adv) &&
       /pendingStageSettled\(pendingStage\.current, pendingFrom\.current, initial\.stage, unconfirmedTargets\.current\)/.test(ctl) &&
       clears(adv) === 1 && clears(onSave) === 1 && [...ctl.matchAll(/pendingStage\.current = null;/g)].length === 3 && clears(ctl) === 3,
-      "#344 C-final F: a move starts from the pending target (else the record), adds its target to unconfirmedTargets, and every clear of the pending stage clears the set");
+      "#344 C-final F: a move made while another is pending keeps the first move's start (else the record), adds its target to unconfirmedTargets, and every clear of the pending stage clears the set");
   }
 }
 
