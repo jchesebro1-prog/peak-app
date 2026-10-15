@@ -12901,7 +12901,7 @@ A newly imported thread on a personal key is stamped `mailboxOwnerId = userIdOfK
 - **Before a name becomes held** (`addUserAction`, a rename TO it, and the Import hub's team rows): any unstamped, key-less thread or name-only assignment already carrying that name (any case) belongs to no current user — names are unique (D1070) — so it is tombstoned. A newcomer who takes a former teammate's name inherits nothing.
 After a stamp, a rename transfers nothing: the thread follows the id.
 
-## D1074. The daily brief card is three blocks: Emails, Estimates, Tasks (#350, 2026-10-15)
+## D1083. The daily brief card is three blocks: Emails, Estimates, Tasks (#350, 2026-10-15)
 
 Jeff, Oct 15: "How do we get the morning brief to lead with emails, then estimates, then tasks?" The Home brief card (#337) now shows the summary, then three blocks in a fixed order. An empty block is hidden, and the other blocks keep their order. The separate "Do these first" list is gone. Its picks get a ★ (accent color) inside their own block, float to the top of their group, and keep their why as small text and as the star's tooltip. Rows that aren't picks show their triage reason as a tooltip only.
 
@@ -12917,9 +12917,9 @@ Inside each block, in Jeff's order:
 - **Estimates:** "N quotes waiting on your approval", then the quote rows awaiting me (the triage quote feed, so the approvals are listed), quiet quotes with Send nudge, lead rows with the Suggest estimate cue, and renewal rows.
 - **Tasks:** task, assignment and call rows, then new promise-tasks (one already on the list as a task row isn't listed twice), then "Today: …" (visits, driving, the plan), then today's visit rows.
 
-## D1075. Block rows, cap, phone, Listen and wording (#350, 2026-10-15)
+## D1084. Block rows, cap, phone, Listen and wording (#350, 2026-10-15)
 
-**Rows.** The blocks list the slot's visible snapshot rows, the same set Start here shows: marks and liveness (`visibleRows` + `loadClosedKeys`) are applied in the server card. If the snapshot can't be read, only the picks show, titled by their stored why, with no link.
+**Rows.** The blocks list the slot's visible snapshot rows, the same set Start here shows: marks and liveness (`visibleRows` + `loadLiveState`, D1085) are applied in the server card. If the snapshot can't be read, the card fails closed: no triage rows and no picks (D1085).
 
 **Cap.** Each block shows at most `BLOCK_CAP` = 5 item rows (triage rows, quiet quotes, promise-tasks). The count, Organize, cleanup and Today lines don't count toward it, and ★ picks are always kept. What's hidden is linked:
 - triage rows → "N more · See all in Start here →" `/triage`;
@@ -12930,8 +12930,15 @@ Pre-draft, nudge and suggestion lookups cover the picks plus the first 5 rows of
 
 **Phone (< 900 px).** The phone view shows the same blocks in the same order in big text, with ★ picks and the same "more" links. It still shows no drafts: no Draft ready, nudge note, Send nudge or Suggest estimate.
 
-**Listen.** `briefSpeech(brief, rows)` reads the summary, then "Emails. …", "Estimates. …", "Tasks. …". Each block reads its picks first ("Start with <title>. <why>", "Then …"), then its counts in the card's order.
+**Listen.** `briefSpeech(brief, rows)` reads the summary, then "Emails. …", "Estimates. …", "Tasks. …". Inside each block it follows the card's order: each group's picks ("Start with <title>. <why>", then "Then …") and then that group's count. Estimates reads the approvals, the ★ quotes, the quiet quotes, the ★ leads and their count, then the ★ renewals and their count (D1085).
 
-**Wording.** The Haiku system prompt now asks for the summary in Emails → Estimates → Tasks order and says the picks are starred in their block. The user text groups the facts under Emails / Estimates / Tasks, with per-block row counts and a source → block key. The rule-built summary (`ruleBrief`) follows the same order. Per-block counts ("N customers waiting on a reply", "N leads ready to quote", "N renewals coming up", "N tasks on your list") replace "N items on your list".
+**Wording.** The Haiku system prompt now asks for the summary in Emails → Estimates → Tasks order and says the picks are starred in their block. The user text groups the facts under Emails / Estimates / Tasks, with per-block row counts of the list the model sees (capped at `BRIEF_ROWS_MAX`; a cut list says "the first N of M") and a source → block key. The rule-built summary (`ruleBrief`) follows the same order. Per-block counts ("N customers waiting on a reply", "N leads ready to quote", "N renewals coming up", "N tasks on your list") replace "N items on your list".
 
 **No data change.** Storage keys, the brief build, slots, crons, leases, the draft queue and the `doFirst` model output are unchanged. A brief stored before this renders in the new layout with no rebuild.
+
+## D1085. The brief card and Start here fail closed, and share one load (#350 review, 2026-10-15)
+
+- **Snapshot read fails.** The brief card gets `rows: null` and shows no triage rows and no picks, so a pick never appears, or gets a Draft or Tasks chip, without its live row. Listen reads no picks and no row counts. The brief's own facts (Organize, approvals, quiet quotes, promise-tasks, Today) still show.
+- **Liveness fails.** If the liveness check (or the viewer read it needs) fails, every row it could have hidden is dropped (`failClosedKeys`: email, task, assignment, call and quote rows), never kept as "nothing closed". Lead, visit and renewal rows stay, because liveness never hides them. This applies to the brief card and to Start here's `loadTriageView` alike. A failed marks read still shows the rows, since marks only hide.
+- **Chips need my own mailbox.** The card's Draft reply ready / Tasks ready chips use `homeCardPreDraft` = `ownsMailbox` (#349) + `readerPreDraft`, exactly what the reader offers. A thread assigned to me in a teammate's mailbox opens read-only with no stored draft, so it gets no chip.
+- **One load per request.** `src/lib/triage/live-state.ts` `loadLiveState` reads marks, closed keys and the mailbox viewer in one React `cache()` call (Next's documented way to dedupe DB reads within a render), keyed by user, row keys and minute. The brief card and Start here hit the same entry on Home. Outside a render (crons, actions, the harness) `cache()` passes through. `loadClosedKeys` takes the viewer it already has.
