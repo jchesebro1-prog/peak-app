@@ -12380,3 +12380,25 @@ Jeff (Oct 14) chose "My real Gmail labels" for the #346 Labels card: pick from y
   - A thread 404 reads "no longer in Gmail".
   - The brief's live counts read only your mailbox.
 - User display names are not unique (only email is). Two active users with the same name would share each other's mailbox ownership (#341's `visibleTo` matches names). Worth a uniqueness check in Settings → Team.
+
+## 348. Estimate parties, bids & vendor links — slice 1 (parties core) BUILT 2026-10-14 on `feat/348-estimate-parties` (D1058–D1062), slices 2–6 queued
+
+Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-parties-and-bids-design.md`. An estimate links to exactly one company; real bid jobs involve an owner, several GCs and ECs, an architect, consultants and vendors.
+
+**Built (slice 1):**
+- **`record_parties`** collection (migration 0041): one row per company in one role on a lead, estimate or project. Roles: Owner · General contractor · Electrical contractor · Architect · Theatre / AV consultant · Vendor · Other (typed label). One owner per record.
+- **Shared editor** on the lead drawer, an Estimator **Parties** chip and the project page. Writes need `create`.
+- **Company page** gains a Bids & roles card (live records only, one batched read per record type).
+- **Carry-over:** lead → estimate (everything except GC/EC) and estimate → project (everything), once, inside `withSavepoint` so a failure never undoes a save or a win (D1059).
+- **Opportunity board** skips a lead that has estimates; its estimates inherit the forecast; the lead drawer lists them with a total (D1060).
+- **Company delete** is refused while the company is on any live party row (D1062).
+- **Tests:** `scripts/test-parties.ts` (in test:specs).
+
+**Queued (spec §10):**
+- Slice 2: bids (per-bidder PDFs and links, send-to-all, award / undo, due dates).
+- Slice 3: split systems into a new estimate.
+- Slice 4: vendors (vendor company on vendor quotes, File to estimate / project, Procurement).
+- Slice 5: Read the PDF (Assist `vendorpdf`).
+- Slice 6: portal bidder view and Reports → Bids by GC/EC.
+
+**Notes:** `addParty`'s one-owner check is not locked, so two simultaneous first-owner adds could both land. Renumber migration 0041 at merge if another branch lands one first.

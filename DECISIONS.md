@@ -12848,3 +12848,28 @@ Before #347, the history import (`interpretLabelEvents`) dropped any label event
 - Both the card's write and the import's write are compare-and-set on the thread's `messages` key, re-read on conflict, so a message appended meanwhile is never lost. Labels live per message, so the CAS covers the whole array.
 
 Trade-off: a Gmail-side change to the same label within 2 minutes of the card changing it waits for that label's next event.
+
+## D1058. Estimate parties are one junction collection (#348 slice 1, 2026-10-14)
+
+`record_parties` (migration 0041) holds one doc per company in one role on a lead, estimate or project. Roles are owner · gc · ec · architect · consultant · vendor · other (a typed label). It was chosen over a JSONB list on the quote (no company-side lookups, no carry to the project) and over per-GC estimate copies (edits would have to sync). The id is `pty_` + sha1(recordType, recordId, companyId, role), so one row per (record, company, role) needs no unique index. Remove soft-deletes, and a re-add revives the row fresh. The collection is not syncable and the go-live reset wipes it with its records. Review notes:
+- `addParty`'s one-owner check is read-then-write with no lock, so two simultaneous first-owner adds for different companies could both land. Accepted for slice 1.
+- Re-adding an existing row returns it unchanged. A different person passed in is ignored; change the person on the row instead.
+
+## D1059. Carry-over is a one-time copy (#348, 2026-10-14)
+
+Lead → estimate runs on the estimate's first save (and on lead convert) and copies every role except GC/EC, because bidders are ticked per estimate in slice 2. Estimate → project copies every row when the project is created. After that each list is its own. A copy failure is logged and never undoes the save or the win. Review notes:
+- The project copy runs inside `withSavepoint` (new helper in `src/db/index.ts`) because it executes inside `setStatus`'s transaction. A SQL failure rolls back only the copy, never the win. `leads.convert` uses it too.
+- Repair and inspection "linked" projects (`spawnServiceLinkedProject`) don't carry parties.
+- `createdBy` holds a user id on estimator-created rows and a display name on convert and project copies, because the stores only have names there.
+
+## D1060. A lead with estimates leaves the opportunity board (#348, 2026-10-14)
+
+Spec §3.6 said "lead value = sum of its estimates". The board already lists every estimate as its own card, so summing into the lead card too would count the job twice. Instead a lead with at least one estimate is excluded from the board exactly like a converted lead, and the lead drawer shows an Estimates list with the total (draft + sent + won, lost excluded). Before this, a lead with non-converted estimates was already double-counted. Forecast inheritance now follows `Quote.leadId` for a lead skipped because of its estimates. A lead marked lost but still holding a draft estimate shows only the estimate card.
+
+## D1061. Parties edits need `create` (#348, 2026-10-14)
+
+Same bar as the other record edits (companies, leads, findings). Reading parties needs only a session.
+
+## D1062. A linked company can't be deleted (#348, 2026-10-14)
+
+Company delete is refused while the company is on any live party row, naming how many records. Before, a delete left quotes pointing at a soft-deleted company silently. Parties make the links visible, so the guard is cheap. It counts live records only: a party row can outlive its deleted record and never blocks a delete. The company page's Bids & roles card reads the same `liveRecordsForCompany` (one batched read per record type).

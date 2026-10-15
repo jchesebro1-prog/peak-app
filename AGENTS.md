@@ -1414,5 +1414,26 @@ See `.env.example`.
     ask for Scope first, send the CW Elevation and line set schedule sheets,
     try a real assessment end to end. Punch item #344.
 
+62. 🚧 **Estimate parties — slice 1** (#348, D1058–D1062) — Jeff, Oct 14: an
+    estimate can name more than one company. Slice 1 is the parties core: a
+    `record_parties` doc collection (migration 0041; id `pty_` + sha1 of
+    record type, record id, company and role) with roles owner · gc · ec ·
+    architect · consultant · vendor · other (typed label), at most one owner
+    per record, soft-delete and revive. Pure rules in `src/lib/parties/`
+    (`rules.ts`, `vm.ts`), store `src/lib/stores/parties.ts`, server view
+    `view-server.ts`. One shared editor (`src/components/parties/`) sits on
+    the lead drawer, an Estimator Parties chip and the project page, and the
+    company page gains a Bids & roles card (live records only). Parties carry
+    lead → estimate (everything except GC/EC) on first save and on convert,
+    and estimate → project on creation, through `withSavepoint`
+    (`src/db/index.ts`) so a failed copy never undoes a save or a win. The
+    opportunity board skips a lead that has estimates (they carry the value
+    and inherit its forecast) and the lead drawer lists them with a total.
+    A company on any live party row can't be deleted. Writes need `create`.
+    Tests: `scripts/test-parties.ts` (in test:specs). Remaining: slices 2–6
+    (spec §10: bids, split systems, vendors, Read the PDF, portal + reports).
+    Renumber migration 0041 at merge if another branch lands one first. Punch
+    item #348.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
