@@ -12,7 +12,7 @@ import type { QuoteStatus } from "@/lib/stores/quotes";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { NextStepSync } from "@/app/(app)/quotes/review-actions";
 import { carriesPipeline, firstStage, stageById } from "@/lib/pipelines";
-import { saveBonusAlternatesAction, saveBonusSplitAction, draftQuoteScopeAction, copySystemToEstimateAction, moveSystemToEstimateAction, resolveCatalogSkusAction, resolveTierAction, saveQuoteAction, searchQuotesAction, setQuotePipelineAction, setQuoteStageAction, setQuotePeopleAction, setStatusAction, travelForSelectionAction, updateQuoteMetaAction, type CopySystemTarget, type MoveSystemTarget, type ReviewSync, type StageSync } from "./actions";
+import { saveBonusAlternatesAction, saveBonusSplitAction, draftQuoteScopeAction, copySystemToEstimateAction, moveSystemToEstimateAction, resolveCatalogSkusAction, resolveTierAction, saveQuoteAction, searchQuotesAction, setQuotePipelineAction, setQuoteStageAction, setQuotePeopleAction, setStatusAction, quoteSyncAction, travelForSelectionAction, updateQuoteMetaAction, type CopySystemTarget, type MoveSystemTarget, type ReviewSync, type StageSync } from "./actions";
 import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewards/actions";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { defaultAlternatesTaken, normalizeSplit, type BonusRecord, type BonusSplit } from "@/lib/estimate-bonus/record";
@@ -1293,6 +1293,17 @@ export function useEstimatorState(props: EstimatorProps) {
       setStatus(r.status);
       setBaseStatus(r.status);
     }
+  };
+
+  /** Jeff 2026-10-15 #3 — the server moved the status (a new addendum on a sent bid → Draft): re-read and apply it. */
+  const resyncStatus = () => {
+    const id = loadedId;
+    if (!id) return;
+    void quoteSyncAction(id)
+      .then((r) => {
+        if (r.ok) applySync(r);
+      })
+      .catch(() => {});
   };
 
   /** Same idea as applySync, for the Daylite stage bar's StageSync (Task 6) —
@@ -3122,6 +3133,7 @@ export function useEstimatorState(props: EstimatorProps) {
     applyAutoMiles,
     applyCredit,
     applySync,
+    resyncStatus,
     applyTravelTrip,
     assumptionLibrary,
     assumptions,

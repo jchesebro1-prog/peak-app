@@ -299,7 +299,7 @@ export async function bidSendChecks(ok: Ok) {
   ok(bidderEmailNeed(sq, row("a", { revSent: 1 })) === "revision", "bid-send: sent, behind → revision");
   const rows = [row("a"), row("b", { revSent: 1 }), row("c", { submitVia: "website" }), row("d", {}, ""), row("e", { failed: { at: 1, error: "t", unknown: true } })];
   const plan = bidderSendPlan(sq, rows);
-  ok(plan.ids.join() === "a,b" && plan.label === "Send revision to bidders" && plan.noEmail === 1, "bid-send: plan ids/label/noEmail");
+  ok(plan.ids.join() === "a,b" && plan.label === "Send revision to all bidders" && plan.noEmail === 1, "bid-send: plan ids/label/noEmail");
   ok(bidderSendPlan(dq, [row("a")]).label === "Send to all bidders", "bid-send: plan label on a first send");
   const done = bidderSendPlan(sq, [row("a", { revSent: 2 })]);
   ok(done.ids.length === 0 && done.label === null, "bid-send: nothing to send → null label");

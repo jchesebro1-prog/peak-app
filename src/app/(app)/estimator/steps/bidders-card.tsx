@@ -79,6 +79,15 @@ export function BiddersCard({ quoteId, refreshKey, sendCtx }: { quoteId: string;
     );
   }, [quoteId, refreshKey, retryKey]);
 
+  // Jeff 2026-10-15 #3 — the Bid chip's addendum moved the estimate back to Draft: reload the plan ("Send revision to all bidders").
+  useEffect(() => {
+    const onRevised = (e: Event) => {
+      if ((e as CustomEvent<{ quoteId?: string }>).detail?.quoteId === quoteId) setRetryKey((k) => k + 1);
+    };
+    window.addEventListener("peak:bid-revised", onRevised);
+    return () => window.removeEventListener("peak:bid-revised", onRevised);
+  }, [quoteId]);
+
   /** `field` marks a blur-save (locks just that input); without it the whole card is busy. */
   async function run(call: () => Promise<BidPanelResult>, field?: string): Promise<boolean> {
     const id = ++reqRef.current;

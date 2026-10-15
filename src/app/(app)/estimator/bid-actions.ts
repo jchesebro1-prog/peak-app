@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import type { BidPanelResult } from "@/lib/parties/bid-vm";
 import { loadBidPanel, viewerOf } from "@/lib/parties/bid-panel-server";
+import { addendumRevisedNote } from "@/lib/parties/bids";
 import { addBidder, awardBid, markSubmitted, setBidDetails, undoAward, updateBidder } from "@/lib/stores/bids";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
@@ -27,7 +28,7 @@ export async function bidPanelAction(quoteId: string): Promise<BidPanelResult> {
  */
 async function mutate(
   quoteRef: unknown | (() => Promise<unknown>),
-  run: (userId: string) => Promise<{ ok: boolean; error?: string; note?: string }>,
+  run: (userId: string, userName: string) => Promise<{ ok: boolean; error?: string; note?: string }>,
   /** #348 2b-i: the write can change what the customer document prints → re-render the PDF. `true` = always;
    *  `"if-awarded"` = only when the quote currently has an award (due date / addenda print only with an addressee). */
   rerender: boolean | "if-awarded" = false
@@ -36,7 +37,7 @@ async function mutate(
   if (!can("create", user.roles)) return { ok: false, error: DENIED };
   const quoteId = typeof quoteRef === "function" ? await (quoteRef as () => Promise<unknown>)() : quoteRef;
   if (!isId(quoteId)) return { ok: false, error: "That estimate wasn't found." };
-  const r = await run(user.id);
+  const r = await run(user.id, user.name);
   if (!r.ok) return { ok: false, error: r.error || "That didn't save." };
   revalidatePath("/", "layout");
   if (rerender === true || (rerender === "if-awarded" && !!(await getQuote(quoteId))?.bid?.awardedPartyId)) await scheduleQuotePdf(quoteId);
@@ -52,7 +53,12 @@ async function quoteOfBidder(partyId: unknown): Promise<string | null> {
 }
 
 export async function setBidDetailsAction(quoteId: string, raw: unknown): Promise<BidPanelResult> {
-  return mutate(quoteId, () => setBidDetails(quoteId, raw), "if-awarded");
+  // Jeff 2026-10-15 #3: a new addendum on a sent estimate moves it back to Draft (setBidDetails) — say so.
+  return mutate(
+    quoteId,
+    (_uid, name) => setBidDetails(quoteId, raw, name).then((r) => (r.ok && r.revised?.length ? { ...r, note: addendumRevisedNote(r.revised) } : r)),
+    "if-awarded"
+  );
 }
 
 export async function addBidderAction(

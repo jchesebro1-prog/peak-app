@@ -269,6 +269,14 @@ async function syncOf(id: string, user: { name: string; roles: string[] }): Prom
   };
 }
 
+/** Jeff 2026-10-15 #3 — read-only: the quote's current status / review / next step for this viewer, after the
+ *  status moved outside the Estimator (a new addendum on a sent bid put it back to Draft). Writes nothing. */
+export async function quoteSyncAction(id: string): Promise<ReviewSync> {
+  const user = await requireUser();
+  if (typeof id !== "string" || !id || id.length > 64) return { ok: false, review: null, status: null };
+  return syncOf(id, user);
+}
+
 /** Client-callable twin of ReviewSync for the Daylite stage bar (Task 6) — the
  *  estimator's useTransition callers need the pipeline fields back too. */
 export type StageSync = {

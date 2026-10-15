@@ -1,11 +1,11 @@
 import { getDoc } from "@/db/doc-store";
 import type { EstimateEmailEntry, Quote } from "@/lib/stores/quotes";
-import { get as getQuote, patchQuoteBid, recordEstimateEmail, withQuoteRowLock } from "@/lib/stores/quotes";
+import { get as getQuote, patchQuoteBid, recordEstimateEmail, setStatus, withQuoteRowLock } from "@/lib/stores/quotes";
 import { addParty, listFor, setPartyBid } from "@/lib/stores/parties";
 import type { BidderState, Party } from "@/lib/parties/rules";
 import {
   applyBidderPatch, awardPlan, bidderFailedState, bidderSentState, canAward, canUndoAward, currentRev, markSubmittedState, newBidderState, nextBidderOpens, sanitizeBidDetails,
-  sanitizeBidderPatch, undoAwardPlan, type QuoteBid,
+  sanitizeBidderPatch, undoAwardPlan, addendaAdded, type QuoteBid,
 } from "@/lib/parties/bids";
 
 /**
@@ -23,8 +23,17 @@ export async function listBidders(quoteId: string): Promise<Bidder[]> {
 }
 
 /** A missing `dueAt` / `addenda` key keeps the stored value; an explicit `dueAt: null` clears it. Refuses a
- *  closed (won / lost) estimate; reads and writes under the quote's row lock. */
-export async function setBidDetails(quoteId: string, raw: unknown): Promise<{ ok: true; bid: QuoteBid } | { ok: false; error: string }> {
+ *  closed (won / lost) estimate; reads and writes under the quote's row lock.
+ *
+ *  Jeff 2026-10-15 #3: a NEW addendum on a SENT estimate puts it back to Draft — the normal revise
+ *  (setStatus "draft", same row lock, history entry, no revision cut), so the next send is a new sent
+ *  revision with the next Rev, re-checked by the approval gate like any revise, and the Bidders card
+ *  offers "Send revision to all bidders". `revised` lists the new addenda when it happened. */
+export async function setBidDetails(
+  quoteId: string,
+  raw: unknown,
+  by?: string
+): Promise<{ ok: true; bid: QuoteBid; revised?: number[] } | { ok: false; error: string }> {
   const clean = sanitizeBidDetails(raw);
   if (!clean.ok) return clean;
   const { dueAt, addenda } = clean.value;
@@ -32,12 +41,19 @@ export async function setBidDetails(quoteId: string, raw: unknown): Promise<{ ok
     const q = await getQuote(quoteId);
     if (!q) return { ok: false as const, error: "That estimate wasn't found." };
     if (CLOSED.has(q.status)) return { ok: false as const, error: "This estimate is closed." };
+    const added = addenda !== undefined ? addendaAdded(q.bid?.addenda, addenda) : [];
     const saved = await patchQuoteBid(quoteId, (bid) => ({
       ...bid,
       ...(dueAt !== undefined ? { dueAt } : {}),
       ...(addenda !== undefined ? { addenda } : {}),
     }));
-    return saved?.bid ? { ok: true as const, bid: saved.bid } : { ok: false as const, error: "That estimate wasn't found." };
+    if (!saved?.bid) return { ok: false as const, error: "That estimate wasn't found." };
+    if (q.status === "sent" && added.length > 0) {
+      // Joins this transaction (setStatus re-locks the same row harmlessly).
+      await setStatus(quoteId, "draft", by || "Addendum");
+      return { ok: true as const, bid: saved.bid, revised: added };
+    }
+    return { ok: true as const, bid: saved.bid };
   });
 }
 

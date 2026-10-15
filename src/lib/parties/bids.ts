@@ -213,3 +213,15 @@ export function isOpenBid(q: { status?: string; bid?: QuoteBid | null }, bidders
   if (q.bid?.awardedPartyId) return false;
   return bidders.some((b) => b.bid?.result === "pending");
 }
+
+/** Jeff 2026-10-15 #3 — the addendum numbers in `next` that `prev` didn't have (sorted). Pure. */
+export function addendaAdded(prev: ReadonlyArray<{ no: number }> | null | undefined, next: ReadonlyArray<{ no: number }> | null | undefined): number[] {
+  const had = new Set((prev || []).filter((a) => a && typeof a.no === "number").map((a) => a.no));
+  return [...new Set((next || []).filter((a) => a && typeof a.no === "number" && !had.has(a.no)).map((a) => a.no))].sort((a, b) => a - b);
+}
+
+/** Jeff 2026-10-15 #3 — the note the Bid chip shows when a new addendum moved a sent estimate back to Draft. */
+export function addendumRevisedNote(nos: readonly number[]): string {
+  const what = nos.length === 1 ? `Addendum ${nos[0]}` : `Addenda ${nos.join(", ")}`;
+  return `${what} added — the estimate is back in Draft. Send revision to all bidders on Send & track when it's ready.`;
+}
