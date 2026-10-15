@@ -17,7 +17,7 @@
  * Nothing here sends mail. Results are typed; a refusal is
  * `{ ok: false, error, message }`, never a throw (except a DB failure).
  */
-import { getDoc, listDocs, listDocsByField } from "@/db/doc-store";
+import { casDocKey, getDoc, listDocs, listDocsByField } from "@/db/doc-store";
 import {
   archive,
   casOrg,
@@ -517,23 +517,56 @@ export async function archiveFromOrganize(
 ): Promise<{ ok: true; undo: OrganizeArchiveUndo } | ApplyFail> {
   const t = await myThread(threadId, me);
   if (!t) return NOT_FOUND();
-  const f = t.filing;
   let unskip = false;
   let unclear = false;
   if (tab !== "filed") {
-    if (f && f.state === "suggested") {
-      await setOrg(t.id, { filing: { ...settled(f), state: "skipped" } });
-      await logAction(t, f, "skipped", { userId: me.id, outcome: "discarded", state: "skipped", now });
+    // compare-and-set: a filing the pipeline / AI pass rewrote meanwhile is
+    // re-read, never overwritten
+    const sk = await casFiling(t.id, me, (f) => (f && f.state === "suggested" ? { ...settled(f), state: "skipped" } : null));
+    if (sk) {
+      await logAction(sk.thread, sk.prev, "skipped", { userId: me.id, outcome: "discarded", state: "skipped", now });
       unskip = true;
     }
-    if (tab === "noise" && t.noise?.flagged && !t.noise.rescued && !t.noise.cleared) {
-      await setOrg(t.id, { noise: { ...t.noise, cleared: true } });
-      unclear = true;
-    }
+    if (tab === "noise") unclear = await casNoise(t.id, (n) => (n?.flagged && !n.rescued && !n.cleared ? { ...n, cleared: true } : null));
   }
-  const unarchiveIt = !t.archived;
-  if (unarchiveIt) await archive(t.id);
-  return { ok: true, undo: { threadId: t.id, unarchive: unarchiveIt, unskip, unclear } };
+  // already archived by the reader's rule (app or Gmail side): Undo never
+  // re-inboxes mail Gmail had already archived
+  const wasArchived = !!t.archived || t.gmailInboxed === false;
+  if (!t.archived) await archive(t.id);
+  return { ok: true, undo: { threadId: t.id, unarchive: !wasArchived, unskip, unclear } };
+}
+
+const CAS_TRIES = 3;
+
+/** Compare-and-set `filing` from the thread as read now: `next(current)`
+ *  (null = nothing to write). A conflicting write re-reads and retries. The
+ *  thread is re-checked as `me`'s own on every read. Returns the thread and
+ *  filing it replaced, or null when nothing was written. */
+async function casFiling(
+  threadId: string,
+  me: OrgActor,
+  next: (f: Filing | undefined) => Filing | null
+): Promise<{ thread: CommThread; prev: Filing } | null> {
+  for (let i = 0; i < CAS_TRIES; i++) {
+    const t = await myThread(threadId, me);
+    if (!t) return null;
+    const want = next(t.filing);
+    if (!want || !t.filing) return null;
+    if (await casOrg(t.id, "filing", t.filing, want)) return { thread: t, prev: t.filing };
+  }
+  return null;
+}
+
+/** Compare-and-set `noise` the same way (a key-level CAS; re-read on conflict). */
+async function casNoise(threadId: string, next: (n: NoiseFlag | undefined) => NoiseFlag | null): Promise<boolean> {
+  for (let i = 0; i < CAS_TRIES; i++) {
+    const t = await getThread(threadId);
+    if (!t) return false;
+    const want = next(t.noise ?? undefined);
+    if (!want) return false;
+    if (await casDocKey("comms", t.id, "noise", t.noise ?? undefined, want)) return true;
+  }
+  return false;
 }
 
 /** Undo an Organize Archive: put back each part it changed, only while that
@@ -547,17 +580,21 @@ export async function undoArchiveFromOrganize(
 ): Promise<{ ok: true } | ApplyFail> {
   const t = await myThread(u.threadId, me);
   if (!t) return NOT_FOUND();
-  const f = t.filing;
-  if (u.unskip && f && f.state === "skipped") {
-    await setOrg(t.id, { filing: { ...f, state: "suggested", at: now } });
-    await logAction(t, f, "undone", { userId: me.id, outcome: "undo", state: "suggested", now });
+  if (u.unskip) {
+    const us = await casFiling(t.id, me, (f) => (f && f.state === "skipped" ? { ...f, state: "suggested", at: now } : null));
+    if (us) await logAction(us.thread, us.prev, "undone", { userId: me.id, outcome: "undo", state: "suggested", now });
   }
-  if (u.unclear && t.noise?.cleared) {
-    const noise: NoiseFlag = { ...t.noise };
-    delete noise.cleared;
-    await setOrg(t.id, { noise });
+  if (u.unclear)
+    await casNoise(t.id, (n) => {
+      if (!n?.cleared) return null;
+      const out: NoiseFlag = { ...n };
+      delete out.cleared;
+      return out;
+    });
+  if (u.unarchive) {
+    const cur = await getThread(t.id);
+    if (cur && (cur.archived || cur.gmailInboxed === false)) await unarchive(t.id);
   }
-  if (u.unarchive && t.archived) await unarchive(t.id);
   return { ok: true };
 }
 

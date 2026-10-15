@@ -712,6 +712,15 @@ export async function organizeThread(threadId: string, opts: OrganizeOpts = {}):
     }
   }
 
+  // #346 — a Noise row archived from Organize (`cleared`) comes back on new
+  // outside mail, whatever its filing (a dismissed — marked-noise — filing
+  // is locked above, so its flag is kept and only loses `cleared` here)
+  if (filingNew && noise?.cleared) {
+    const back: NoiseFlag = { ...noise };
+    delete back.cleared;
+    noise = back;
+  }
+
   // a filing kept as it was (filed / dismissed / skipped, or an AI
   // suggestion no outside mail has reset) only tracks whether a reply is
   // still owed

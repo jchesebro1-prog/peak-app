@@ -2937,10 +2937,45 @@ export async function inboxOrgArchiveLabelChecks(ok: Ok): Promise<void> {
     const u3 = await read(nt);
     ok(u3.archived === false && u3.noise?.cleared === undefined && u3.noise?.flagged === true && u3.filing?.state === "suggested" && isNoiseRow(u3), "archive #346: Undo puts the Noise row back (in the inbox, flagged, suggested)");
     const nm = await mk("noise-moved", { archived: true });
-    const dismissed = sugg({ noise: true, customerId: null, state: "dismissed", source: "noise-rule" });
+    const dismissed = sugg({ noise: true, customerId: null, state: "dismissed", source: "noise-rule", basis: (await read(nm)).messages[0].id });
     await setOrg(nm, { filing: dismissed, noise: { flagged: true, reason: "Marked as noise", moved: true } });
     const r4 = await archiveFromOrganize(nm, "noise", me);
     ok(r4.ok && !r4.undo.unarchive && !r4.undo.unskip && r4.undo.unclear && (await read(nm)).filing?.state === "dismissed" && !isNoiseRow(await read(nm)), "archive #346: a moved (already archived) Noise row is only cleared — still dismissed, nothing to un-archive");
+    await organizeThread(nm);
+    ok(!isNoiseRow(await read(nm)) && (await read(nm)).noise?.cleared === true, "archive #346 review: with no new mail the cleared (dismissed) row stays off Noise");
+    await addMessage(nm, { direction: "in", body: "Actually — can you quote the stage drapes?" });
+    await organizeThread(nm);
+    const back = await read(nm);
+    ok(isNoiseRow(back) && back.noise?.cleared === undefined && back.filing?.state === "dismissed", "archive #346 review: new outside mail on an archived, dismissed (marked-noise) row brings it back to the Noise tab (cleared dropped, still marked)");
+    await setOrg(nm, { noise: { flagged: true, reason: "Marked as noise", moved: true, cleared: true } });
+    await patchDoc<CommThread>("comms", nm, (d) => {
+      d.archived = true;
+      d.gmailInboxed = false;
+    });
+    await reinboxFromGmail(nm);
+    const rein = await read(nm);
+    ok(rein.archived === false && rein.gmailInboxed === true && !rein.noise?.flagged && !rein.noise?.cleared, "archive #346 review: a Gmail re-inbox (D898 — Gmail puts a new reply back in INBOX) brings an archived, dismissed row back to the Inbox (rescued)");
+
+    /* Gmail had already archived it: Undo never re-inboxes */
+    const ga = await mk("gmail-archived", { gmailInboxed: false });
+    await setOrg(ga, { filing: sugg() });
+    const r5 = await archiveFromOrganize(ga, "to-file", me);
+    ok(r5.ok && !r5.undo.unarchive && r5.undo.unskip && (await read(ga)).archived === true, "archive #346 review: a thread Gmail had already archived (gmailInboxed false) counts as archived — nothing for Undo to un-archive");
+    if (r5.ok) await undoArchiveFromOrganize(r5.undo, me);
+    ok((await read(ga)).gmailInboxed === false && (await read(ga)).filing?.state === "suggested", "archive #346 review: …so Undo puts the suggestion back but never re-inboxes it in Gmail");
+
+    /* compare-and-set: a filing rewritten meanwhile is never clobbered */
+    const cs = await mk("cas");
+    await setOrg(cs, { filing: sugg() });
+    const fresh = sugg({ customerId: "TEST346-other", reason: "New mail", at: NOW + 5 });
+    const { casOrg: realCas } = await import("@/lib/stores/comms");
+    ok(!(await realCas(cs, "filing", sugg({ reason: "stale" }), { ...fresh, state: "skipped" })) && (await read(cs)).filing?.state === "suggested", "archive #346 review: (setup) casOrg refuses a stale expected filing");
+    await setOrg(cs, { filing: fresh });
+    const r6 = await archiveFromOrganize(cs, "to-file", me);
+    const a6 = await read(cs);
+    ok(r6.ok && a6.filing?.state === "skipped" && a6.filing.customerId === "TEST346-other" && a6.filing.reason === "New mail", "archive #346 review: skip writes over the filing as read now (compare-and-set), keeping what a concurrent write put there");
+    const apSrc = readFileSync("src/lib/inbox-org/apply.ts", "utf8");
+    ok(/if \(await casOrg\(t\.id, "filing", t\.filing, want\)\) return/.test(apSrc) && !/await setOrg\(t\.id, \{ filing: \{ \.\.\.settled\(f\), state: "skipped" \} \}\)/.test(apSrc.slice(apSrc.indexOf("export async function archiveFromOrganize("))), "archive #346 review: archive / undo write the filing only through casFiling (casOrg, re-read on conflict)");
 
     /* label: the Inbox's category action leaves the filing alone */
     const lb = await mk("label");
@@ -2980,7 +3015,7 @@ export async function inboxOrgArchiveLabelChecks(ok: Ok): Promise<void> {
   ok(/export async function archiveFromOrganizeAction\(threadIds: string\[\], tab: string\)[\s\S]*?const me = await actor\(\);[\s\S]*?await archiveFromOrganize\(id, t, me\)[\s\S]*?revalidate\(\);/.test(oa), "archive #346: archiveFromOrganizeAction loops my own threads through archiveFromOrganize, then revalidates");
   ok(/export async function undoArchiveFromOrganizeAction\(list: OrganizeArchiveUndo\[\]\)[\s\S]*?await undoArchiveFromOrganize\([\s\S]*?u\.unarchive === true/.test(oa), "archive #346: the Undo action re-reads each flag as a strict boolean");
   const ap = src("src/lib/inbox-org/apply.ts");
-  ok(/export async function archiveFromOrganize\([\s\S]*?const t = await myThread\(threadId, me\);\s*if \(!t\) return NOT_FOUND\(\);[\s\S]*?if \(unarchiveIt\) await archive\(t\.id\);/.test(ap), "archive #346: archiveFromOrganize is owner-checked (myThread) and archives through comms.archive (Gmail follows)");
+  ok(/export async function archiveFromOrganize\([\s\S]*?const t = await myThread\(threadId, me\);\s*if \(!t\) return NOT_FOUND\(\);[\s\S]*?const wasArchived = !!t\.archived \|\| t\.gmailInboxed === false;\s*if \(!t\.archived\) await archive\(t\.id\);/.test(ap), "archive #346: archiveFromOrganize is owner-checked (myThread) and archives through comms.archive (Gmail follows)");
   const tr = src("src/app/(app)/inbox/thread-reader.tsx");
   ok(tr.includes("await archiveFromOrganizeAction([vm.id], org.tab);") && tr.includes("router.push(org.nextHref ?? org.closeHref)") && tr.includes("new CustomEvent(ORGANIZE_ARCHIVED_EVENT") && tr.includes('postChanged("thread", vm.id);'), "archive #346: the reader's bottom Archive, opened from Organize, archives through the Organize action, posts changed, tells the box (Undo) and moves to the next row");
   ok(/if \(vm\.archived\) await unarchiveAction\(vm\.id\);\s*else await archiveAction\(vm\.id\);/.test(tr), "archive #346: outside Organize the reader's Archive / Unarchive is the Inbox's own");

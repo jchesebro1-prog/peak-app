@@ -12342,4 +12342,4 @@ Jeff (Oct 14): "We need the ability to archive a message in the Organize tab and
 **Follow-ups / Jeff-gated:**
 - The only label you can apply is the Inbox's color category (one per thread). Real Gmail labels can't be applied from the app; Gmail's "Label ▾" in the Inbox is a filter. Say if you want Gmail labels applied from Peak.
 - "Archive all shown" on Noise still leaves the archived rows on the Noise tab, while a row's own Archive takes the row off. Say if both should behave the same way.
-- A Noise row you marked as noise yourself stays off the Noise tab after Archive, even when new mail arrives.
+- **Review fixes (same day):** archived Noise rows, marked-noise ones included, come back on new outside mail. Skip and un-skip use compare-and-set. Undo never re-inboxes mail Gmail had already archived. The Home brief's Organize counts are now live (D1052).
