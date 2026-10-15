@@ -486,13 +486,43 @@ const CAP_MAX_LINES = 3;
 function captionLines(caption: string | undefined, w: number): string[] {
   const t = winAnsi(String(caption ?? "").trim());
   if (!t) return [];
-  const lines = wrap(t, CAP_SIZE, false, w);
+  /* newlines split first; a single token wider than the cell is hard-broken */
+  const lines: string[] = [];
+  for (const para of t.split(/\r\n|\r|\n/)) {
+    for (const ln of wrap(para.trim(), CAP_SIZE, false, w)) {
+      let rest = ln;
+      while (rest.length > 1 && measure(rest, CAP_SIZE, false) > w) {
+        let n = rest.length - 1;
+        while (n > 1 && measure(rest.slice(0, n), CAP_SIZE, false) > w) n--;
+        lines.push(rest.slice(0, n));
+        rest = rest.slice(n);
+      }
+      lines.push(rest);
+    }
+  }
+  while (lines.length > 1 && !lines[lines.length - 1]) lines.pop();
   if (lines.length <= CAP_MAX_LINES) return lines;
   const out = lines.slice(0, CAP_MAX_LINES);
   let last = out[CAP_MAX_LINES - 1].replace(/\s+$/, "");
   while (last && measure(last + "\x85", CAP_SIZE, false) > w) last = last.slice(0, -1).replace(/\s+$/, "");
   out[CAP_MAX_LINES - 1] = last + "\x85";
   return out;
+}
+
+/** The height of the first image row of a section (what a heading must keep company with): the same scaling and caption
+ *  rule `sheetImages` draws with, without registering anything. Unembeddable images print a one-line text row. */
+function firstImageRowHeight(images: FieldSheetImage[]): number {
+  const h = (img: FieldSheetImage): number => {
+    const info = img.jpeg && jpegInfo(img.jpeg);
+    if (!info || info.w <= 0 || info.h <= 0) return 14;
+    const boxW = img.full ? CONTENT_W : IMG_HALF_W;
+    const maxH = img.full ? IMG_FULL_MAX_H : IMG_HALF_MAX_H;
+    const caps = captionLines(img.caption, boxW).length;
+    return info.h * Math.min(boxW / info.w, maxH / info.h) + (caps ? 3 + caps * CAP_LEAD : 0);
+  };
+  const first = images[0];
+  const row = first.full ? [first] : images.slice(0, 2).filter((i) => !i.full);
+  return 6 + Math.max(...row.map(h)) + 4;
 }
 
 /** Image blocks inside a field-sheet section: photos two to a row, sketches content width, each scaled to fit its box
@@ -592,7 +622,7 @@ function renderFieldSheetPdf(doc: LetterDoc, sheet: FieldSheetDoc): Buffer {
 
     for (const section of page.sections) {
       /* an images-only section keeps its heading with (most of) its first picture row (#344 C7) */
-      if (section.images?.length && !section.rows.length) pdf.ensure(24 + 150);
+      if (section.images?.length && !section.rows.length) pdf.ensure(24 + firstImageRowHeight(section.images));
       pdf.line(section.heading.toUpperCase(), {
         size: 9.5,
         bold: true,

@@ -1,6 +1,6 @@
 import { attachmentDisposition } from "@/lib/document-files";
 import { renderSurveySheetPdf } from "@/lib/survey-sheet-pdf-server";
-import { requireUser } from "@/lib/session";
+import { getOptionalUser } from "@/lib/session";
 import { zipStream } from "@/lib/zip";
 
 /** Loads the sheet's photos and sketches from storage, then one in-process PDF render. */
@@ -19,8 +19,10 @@ const text = (body: string, status: number) =>
  * is capped around 4.5 MB on Vercel, which a sheet with ~10 photos exceeds. Opens inline; `?download=1` downloads.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  await requireUser();
+  const user = await getOptionalUser();
+  if (!user) return text("Unauthorized", 401);
   const { id } = await params;
+  if (!/^FS-\d+$/.test(id)) return text("Not found", 404);
   const declared = Number(request.headers.get("content-length") || 0);
   if (declared > MAX_BODY_BYTES) return text("Request too large", 413);
   const raw = await request.text();

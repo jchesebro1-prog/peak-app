@@ -1082,7 +1082,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       const out = MGX.printRecordFor(existing, { liftRequired: "", legacyNotes: [{ section: "x", label: "BOGUS", text: "BOGUS" }] } as never);
       const labels = (out.legacyNotes || []).map((n) => n.label);
       return labels.includes("Kind of lift needed (before #344)") && !labels.includes("BOGUS") && JSON.stringify(existing) === before &&
-        /const record = printRecordFor\(existing, patch\);[\s\S]{0,1200}buildAssessmentSheet\(record, images\)/.test(rd("src/lib/survey-sheet-pdf-server.ts")); // C7: the printed record also plans the images
+        /const record = printRecordFor\(existing, \{ \.\.\.clean, id: existing\.id \}\);[\s\S]{0,1200}buildAssessmentSheet\(record, images\)/.test(rd("src/lib/survey-sheet-pdf-server.ts")); // C7: the printed record also plans the images
     });
     t("the line set quantity seed counts only rows with a set number", () => {
       const a = MGX.migrateSurvey({ linesets: [{ id: "a", pos: "1" }, { id: "b", pos: "Ext" }, { id: "c", pos: "" }] } as unknown as MigratableSurvey);
@@ -2058,17 +2058,17 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     /* the render resolves bytes on the server; the route streams it (#344 C7 fix) */
     const lib7 = readFileSync(join(process.cwd(), "src/lib/survey-sheet-pdf-server.ts"), "utf8");
     ok(lib7.includes("planSheetImages(") && lib7.includes("resolveSheetImages(") && lib7.includes("surveyFileBytes(existing") && /buildAssessmentSheet\(record, images\)/.test(lib7) &&
-      lib7.includes("printRecordFor(existing, patch)") && lib7.includes("export async function renderSurveySheetPdf("),
+      lib7.includes("printRecordFor(existing, { ...clean, id: existing.id })") && lib7.includes("sanitizeIncomingFileSlots(") && lib7.includes("mergeSurveyFileRefs(") && lib7.includes("export async function renderSurveySheetPdf("),
       "#344 C7: renderSurveySheetPdf plans from the printed record, loads bytes with surveyFileBytes (the stored slot first) and passes them to the sheet");
     const act7 = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/actions.ts"), "utf8");
     const route7 = readFileSync(join(process.cwd(), "src/app/api/surveys/[id]/sheet-pdf/route.ts"), "utf8");
     const ctl7 = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/controls.tsx"), "utf8");
     const print7 = ctl7.slice(ctl7.indexOf("async function onPrintSheet"), ctl7.indexOf("per-section photos (#344 C5)"));
     ok(!act7.includes("printSurveySheet") && !ctl7.includes("printSurveySheet") && route7.includes("zipStream(r.pdf)") && /export const maxDuration = \d+/.test(route7) &&
-      route7.includes("await requireUser()") && route7.includes("MAX_BODY_BYTES") && route7.includes("413") && route7.includes("export async function POST(") &&
+      route7.includes("getOptionalUser()") && route7.includes("401") && route7.includes("FS-") && route7.includes("MAX_BODY_BYTES") && route7.includes("413") && route7.includes("export async function POST(") &&
       route7.includes("renderSurveySheetPdf(") && route7.includes("nosniff") && route7.includes("private, no-store") && route7.includes('"inline"'),
       "#344 C7 fix: the field sheet PDF streams from a signed-in route (zipStream, maxDuration, capped body, inline + nosniff + no-store) — no base64 server action");
-    ok(print7.includes("/api/surveys/") && print7.includes("/sheet-pdf") && /const \{ photos: _earlier, \.\.\.patch \}/.test(print7) && print7.includes("URL.createObjectURL(await res.blob())") && print7.includes("60_000"),
+    ok(print7.includes("/api/surveys/") && print7.includes("/sheet-pdf") && /const \{ photos: _earlier, \.\.\.patch \}/.test(print7) && print7.includes("URL.createObjectURL(await res.blob())") && print7.includes("60_000") && print7.includes("application/pdf"),
       "#344 C7 fix: Print sheet posts the draft patch (minus the inline Earlier photos) to the route and opens the blob");
   }
 }
@@ -2252,6 +2252,28 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
       const noSheet = await renderSurveySheetPdf("FS-no-such-survey", {});
       ok(sheet.ok && sheet.pdf.subarray(0, 4).toString("latin1") === "%PDF" && sheet.fileName === `${sv.id}-venue-assessment.pdf` && !noSheet.ok && noSheet.status === 404,
         "#344 C7 fix: renderSurveySheetPdf returns a %PDF buffer for a stored survey and a 404 result for an unknown one");
+      /* the print path sanitizes the patch like a save: a foreign id + a minted blobPath never reaches storage */
+      const { inflateSync } = await import("node:zlib");
+      const pdfText = (pdf: Buffer): string => {
+        const raw = pdf.toString("latin1");
+        let out = raw;
+        const re = /\/Filter \/FlateDecode \/Length (\d+) >>\nstream\n/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(raw))) {
+          const start = m.index + m[0].length;
+          try { out += inflateSync(pdf.subarray(start, start + +m[1])).toString("latin1"); } catch { /* not text */ }
+        }
+        return out;
+      };
+      const imgCount = (t: string) => (t.match(/\/Subtype \/Image/g) || []).length; // the letterhead counts the same in both
+      const mintedId = FF.newFileId("p");
+      const forged = await renderSurveySheetPdf(sv.id, {
+        id: "FS-999999",
+        photoRefs: [{ id: mintedId, caption: "Forged shot", section: "mHouse", takenAt: 1, by: "u1", file: { blobPath: `assessments/AS-1001/${mintedId}.jpg` } }],
+      });
+      const forgedText = forged.ok ? pdfText(forged.pdf) : "";
+      ok(forged.ok && forged.fileName === `${sv.id}-venue-assessment.pdf` && forgedText.includes("Forged shot") && forgedText.includes("not available") && imgCount(forgedText) === imgCount(sheet.ok ? pdfText(sheet.pdf) : "x"),
+        "#344 C7 fix: a patch with a foreign id and a minted blobPath prints under the survey's own id, the image listed as not available and never embedded");
     } finally {
       if (prevBlob !== undefined) process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
     }

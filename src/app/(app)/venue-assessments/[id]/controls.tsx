@@ -849,6 +849,8 @@ export default function SurveyEditor({
         body: JSON.stringify(patch),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // an expired session can follow a redirect to /login with a 200 — only a PDF becomes the preview
+      if (!(res.headers.get("content-type") || "").startsWith("application/pdf")) throw new Error("Not a PDF");
       const url = URL.createObjectURL(await res.blob());
       if (preview) preview.location.href = url;
       else window.location.assign(url);

@@ -4,6 +4,8 @@ import { getSettings } from "@/lib/settings";
 import { buildAssessmentSheet, planSheetImages, resolveSheetImages } from "@/lib/venue-assessment-sheet";
 import { surveyFileBytes } from "@/lib/field-files/file-bytes";
 import { printRecordFor } from "@/lib/survey-migrate";
+import { mergeSurveyFileRefs, sanitizeIncomingFileSlots } from "@/lib/field-files/files";
+import { blobEnabled } from "@/lib/blob";
 import { renderLetterPdf } from "@/lib/pdf";
 import { letterheadJpeg } from "@/lib/renewal-outreach";
 
@@ -22,7 +24,13 @@ export async function renderSurveySheetPdf(id: string, patch: object): Promise<S
   const settings = await getSettings();
   const header = await letterheadJpeg(settings);
   /* migrate the merged draft so a print of unsaved edits shows the Older notes those edits produce */
-  const record = printRecordFor(existing, patch);
+  /* the patch is untrusted: sanitized and merged exactly like a save (a foreign id or a minted blobPath never survives), and
+     the id is the stored survey's, whatever the body says */
+  const clean = mergeSurveyFileRefs(
+    existing as unknown as Record<string, unknown>,
+    sanitizeIncomingFileSlots({ ...(patch as Record<string, unknown>), id: existing.id }, existing.id, { blobEnabled: blobEnabled(), stored: existing as unknown as Record<string, unknown> }),
+  );
+  const record = printRecordFor(existing, { ...clean, id: existing.id });
   /* #344 C7: photos (markup first) and sketches, loaded here — the stored slot first (the server may have finished a
      file the editor still shows pending), else the draft's; a missing or failed file is listed, never thrown */
   const loadFile = async (fileId: string): Promise<Buffer | null> => {
