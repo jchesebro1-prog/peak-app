@@ -742,12 +742,16 @@ export type BidderSendResult =
 
 type BidderFail = Extract<BidderSendResult, { ok: false }>;
 
+/** The largest bidder PDF that may ride inline (base64 in the thread) when PDF storage is unavailable. */
+const BIDDER_INLINE_MAX = 4 * 1024 * 1024;
+
 /** The row's own refusals — no stamp, no claim. */
 function bidderRowRefusal(t: BidderTarget | null, input: BidderEmailInput): string | null {
   if (!t) return BID_SEND_COPY.gone;
   if (t.bid.result !== "pending") return BID_SEND_COPY.notPending;
   if (t.bid.submitVia === "website") return BID_SEND_COPY.website;
   if (!String(t.email || "").trim()) return BID_SEND_COPY.noEmail(t.contactName || t.companyName);
+  if (!parseRecipients(t.email).ok) return BID_SEND_COPY.badEmail(t.contactName || t.companyName);
   if (t.bid.failed?.unknown && input.retryUnknown !== true) return BID_SEND_COPY.unknownRetry;
   return null;
 }
@@ -791,7 +795,8 @@ export async function sendBidderEmail(
     const fq = (await deps.getQuote(c.q.id)) ?? c.q;
     if (bidderAlreadyHas(fq, t.bid)) return { ok: true, partyId, skipped: true, rev: latestSentRev(fq) ?? 0 };
 
-    const p = await prepareClaimed(deps, actor, c, est, "send", async (pp) => {
+    // The recipient is the claim-time re-read's, so the email and the stamp agree.
+    const p = await prepareClaimed(deps, actor, c, { ...est, to: t.email }, "send", async (pp) => {
       const rev = bidderPdfRev(pp.q);
       const rendered = await deps.renderBidderPdf(pp.q, partyId, rev);
       if (!rendered.ok) return { ok: false, error: rendered.error, ...(rendered.scope === "row" ? { scope: "row" as const } : {}) };
@@ -825,10 +830,22 @@ async function sendBidderClaimed(
   const whole = (error: string, markedSent?: boolean): BidderFail => ({ ok: false, partyId, error, scope: "quote", ...(markedSent ? { markedSent: true } : {}) });
   const pdf = p.bidderPdf;
   if (!pdf) return whole(SEND_COPY.prepareFailed);
-  const m = await markAndLink(deps, actor, p, input.asOf, (q, rev) => deps.bidderLink(q.id, partyId, rev.rev));
-  if (!m.ok) return whole(m.error, m.markedSent);
-  // A sent revision cut during the render (e.g. a portal price refresh): the PDF is of an older one — email nothing.
-  if (pdf.rev !== null && pdf.rev !== m.rev.rev) return whole(SEND_COPY.changedSince, m.markedSent);
+  let bidderGone = false;
+  const m = await markAndLink(deps, actor, p, input.asOf, async (q, rev) => {
+    // A sent revision cut during the render (e.g. a portal price refresh): the PDF is of an older one — mint no link, email nothing.
+    if (pdf.rev !== null && rev.rev !== pdf.rev) throw new EstimateEmailError(SEND_COPY.changedSince);
+    try {
+      return await deps.bidderLink(q.id, partyId, rev.rev);
+    } catch (e) {
+      // The bidder was removed between the claim and the link: this row's problem, not the quote's.
+      if (e instanceof EstimateEmailError && e.message === BID_SEND_COPY.gone) bidderGone = true;
+      throw e;
+    }
+  });
+  if (!m.ok) {
+    if (bidderGone) return { ok: false, partyId, error: BID_SEND_COPY.gone, scope: "row", ...(m.markedSent ? { markedSent: true } : {}) };
+    return whole(m.error, m.markedSent);
+  }
   const { q, markedSent } = m;
   const rev = m.rev.rev;
 
@@ -840,6 +857,7 @@ async function sendBidderClaimed(
   } catch (e) {
     console.error("[estimate-email] storing the bidder PDF failed — attaching it inline", e);
   }
+  if (!path && pdf.bytes.length > BIDDER_INLINE_MAX) return whole(BID_SEND_COPY.tooLarge, markedSent);
   const att: CommAttachment = path
     ? { name, mime: "application/pdf", size: pdf.bytes.length, pdfPath: path, href: coverPdfHref(q.id, path) }
     : { name, mime: "application/pdf", size: pdf.bytes.length, dataUrl: "data:application/pdf;base64," + pdf.bytes.toString("base64") };
@@ -858,12 +876,15 @@ async function sendBidderClaimed(
   } catch (e) {
     console.error("[estimate-email] bidder send failed", e);
     const threadId = e instanceof EstimateEmailError ? e.threadId : undefined;
+    // The thread is no longer a draft: the send may have left Gmail — never a blind retry.
+    const mayHaveSent = !!threadId && e instanceof EstimateEmailError && e.stillDraft === false;
+    const error = mayHaveSent ? SEND_COPY.gmailUnknownResend : SEND_COPY.notSent;
     try {
-      await deps.markBidderFailed(quoteId, partyId, { at: deps.now(), error: SEND_COPY.notSent, ...(threadId ? { threadId } : {}) });
+      await deps.markBidderFailed(quoteId, partyId, { at: deps.now(), error, ...(mayHaveSent ? { unknown: true } : {}), ...(threadId ? { threadId } : {}) });
     } catch (e2) {
       console.error("[estimate-email] stamping the bidder failure failed", e2);
     }
-    return { ok: false, partyId, error: SEND_COPY.notSent, scope: "row", ...(markedSent ? { markedSent: true } : {}) };
+    return { ok: false, partyId, error, scope: "row", ...(markedSent ? { markedSent: true } : {}) };
   }
   const entry: EstimateEmailEntry = { threadId: sent.threadId, rev, at: deps.now(), by: actor.name, to: t.email };
   if (sent.delivery !== "gmail" && sent.delivery !== "local") {
@@ -887,6 +908,14 @@ async function sendBidderClaimed(
   } catch (e) {
     console.error("[estimate-email] bidder record failed", e);
     warning = BID_SEND_COPY.recordFailed;
+  }
+  if (warning) {
+    // Nothing on the row says it went out: stamp it unknown so Send to all never emails it twice. Best effort.
+    try {
+      await deps.markBidderFailed(quoteId, partyId, { at: deps.now(), error: BID_SEND_COPY.recordFailed, unknown: true, threadId: sent.threadId });
+    } catch (e) {
+      console.error("[estimate-email] stamping the unrecorded bidder send failed", e);
+    }
   }
   return { ok: true, partyId, threadId: sent.threadId, delivery: sent.delivery, rev, status: q.status, ...(warning ? { warning } : {}) };
 }

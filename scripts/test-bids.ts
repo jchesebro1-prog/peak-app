@@ -982,8 +982,8 @@ export async function bidSendFakeChecks(ok: Ok) {
       return { ok: true, pdf: Buffer.from("%PDF-bidder") };
     };
     const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input({ asOf: undefined }));
-    ok(!r.ok && r.scope === "quote" && r.error === SEND_COPY.changedSince && !f.calls.includes("createAndSendThread") && !f.calls.includes("storeBidderPdf"),
-      "send fake: a sent revision cut during the render refuses — nothing emailed");
+    ok(!r.ok && r.scope === "quote" && r.error === SEND_COPY.changedSince && !f.calls.includes("createAndSendThread") && !f.calls.includes("storeBidderPdf") && !f.calls.some((c) => c.startsWith("bidderLink")),
+      "send fake: a sent revision cut during the render refuses — no link minted, nothing emailed");
   }
   // 13. Storage down.
   {
@@ -1009,6 +1009,58 @@ export async function bidSendFakeChecks(ok: Ok) {
     const g = fakes({}, { recordBidderSend: async () => { throw new Error("db"); } });
     const rg = await sendBidderEmail(g.deps, SAM, "Q-P3S", PID, input());
     ok(rg.ok && "warning" in rg && rg.warning === BID_SEND_COPY.recordFailed, "send fake: a thrown record is a warning too");
+  }
+  // 17. Malformed email is a row refusal: no claim, no stamp.
+  {
+    const f = fakes({}, {}, target({}, { email: "not an email" }));
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+    ok(!r.ok && r.scope === "row" && r.error === BID_SEND_COPY.badEmail("Gee Ceeone") && !f.calls.includes("claimSend") && !f.calls.includes("markBidderFailed") && !f.st.failed.length,
+      "send fake: a malformed bidder email is a row refusal — no claim, no stamp");
+    const q = { status: "draft", revisions: [] };
+    const rows = [{ id: "a", bid: newBidderState("email"), email: "nope" }, { id: "b", bid: newBidderState("email"), email: "ok@x.test" }];
+    const plan = bidderSendPlan(q, rows);
+    ok(bidderEmailNeed(q, rows[0]) === null && plan.ids.join() === "b" && plan.noEmail === 1, "send plan: a malformed email counts as no email, not planned");
+  }
+  // 18. A send that may have left Gmail is stamped unknown.
+  {
+    const f = fakes({}, { createAndSendThread: async () => { throw new EstimateEmailError(SEND_COPY.notSent, "C-SENT", false); } });
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+    ok(!r.ok && r.scope === "row" && r.markedSent === true && f.st.failed[0]?.unknown === true && f.st.failed[0]?.error === SEND_COPY.gmailUnknownResend && f.st.failed[0]?.threadId === "C-SENT",
+      "send fake: a thread no longer a draft after a throw is stamped unknown with its thread");
+  }
+  // 19. Record failure after Gmail accepted: the row ends unknown.
+  {
+    for (const label of ["false", "throw"]) {
+      const f = fakes({}, { recordBidderSend: async () => { if (label === "throw") throw new Error("db"); return false; } });
+      const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+      const s = f.st.failed[0];
+      ok(r.ok && "warning" in r && r.warning === BID_SEND_COPY.recordFailed && s?.unknown === true && s.threadId === "C-9001" && s.error === BID_SEND_COPY.recordFailed,
+        `send fake: a record that ${label === "throw" ? "threw" : "wrote nothing"} stamps the row unknown`);
+    }
+    const h = fakes({}, { recordBidderSend: async () => false, markBidderFailed: async () => { throw new Error("db"); } });
+    const rh = await sendBidderEmail(h.deps, SAM, "Q-P3S", PID, input());
+    ok(rh.ok && "warning" in rh, "send fake: a failing unknown-stamp is swallowed");
+  }
+  // 20. The recipient is the claim-time re-read's.
+  {
+    const f = fakes({}, {}, [target(), target({}, { email: "new@miron.test" })]);
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+    ok(r.ok && f.st.threads[0]?.to === "new@miron.test" && f.st.records[0]?.entry.to === "new@miron.test", "send fake: the email goes to the address re-read under the claim");
+  }
+  // 21. A bidder removed between the claim and the link is a row refusal.
+  {
+    const f = fakes({}, { bidderLink: async () => { throw new EstimateEmailError(BID_SEND_COPY.gone); } });
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+    ok(!r.ok && r.scope === "row" && r.error === BID_SEND_COPY.gone && r.markedSent === true && !f.st.threads.length, "send fake: a bidder gone at the link is a row refusal");
+  }
+  // 22. Inline fallback is capped.
+  {
+    const f = fakes({}, { storeBidderPdf: async () => null, renderBidderPdf: async () => ({ ok: true, pdf: Buffer.alloc(4 * 1024 * 1024 + 1) }) });
+    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
+    ok(!r.ok && r.scope === "quote" && r.error === BID_SEND_COPY.tooLarge && !f.st.threads.length, "send fake: storage down and over 4 MB — refused, not inlined");
+    const g = fakes({}, { storeBidderPdf: async () => null, renderBidderPdf: async () => ({ ok: true, pdf: Buffer.alloc(4 * 1024 * 1024) }) });
+    const rg = await sendBidderEmail(g.deps, SAM, "Q-P3S", PID, input());
+    ok(rg.ok && !!g.st.threads[0]?.attachments[0]?.dataUrl, "send fake: storage down and exactly 4 MB — still inline");
   }
   // 16. The customer path is untouched: same fakes, the #P3 order.
   {

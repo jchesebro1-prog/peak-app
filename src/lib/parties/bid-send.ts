@@ -28,10 +28,13 @@ export type SendRow = { id: string; bid: BidderState; email: string };
 
 const sendable = (status: string) => status === "draft" || status === "sent";
 
+/** A pure, browser-safe look at a bidder's email: a blank or obviously malformed address counts as no email. */
+export const bidderEmailUsable = (email: unknown): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email ?? "").trim());
+
 export function bidderEmailNeed(q: { status: string } & Revs, row: SendRow): "send" | "revision" | "retry" | null {
   if (!sendable(q.status)) return null;
   const b = row.bid;
-  if (b.result !== "pending" || b.submitVia !== "email" || !String(row.email || "").trim()) return null;
+  if (b.result !== "pending" || b.submitVia !== "email" || !bidderEmailUsable(row.email)) return null;
   if (q.status === "sent") {
     const L = latestSentRev(q);
     if (L != null && b.revSent != null && b.revSent >= L) return null;
@@ -43,7 +46,7 @@ export function bidderEmailNeed(q: { status: string } & Revs, row: SendRow): "se
 export function bidderSendPlan(q: { status: string } & Revs, rows: ReadonlyArray<SendRow>): { ids: string[]; label: string | null; noEmail: number } {
   const planned = rows.filter((r) => bidderEmailNeed(q, r) !== null && !r.bid.failed?.unknown);
   const noEmail = sendable(q.status)
-    ? rows.filter((r) => r.bid.result === "pending" && r.bid.submitVia === "email" && !String(r.email || "").trim()).length
+    ? rows.filter((r) => r.bid.result === "pending" && r.bid.submitVia === "email" && !bidderEmailUsable(r.email)).length
     : 0;
   const label = planned.length === 0 ? null : planned.some((r) => r.bid.revSent != null) ? "Send revision to bidders" : "Send to all bidders";
   return { ids: planned.map((r) => r.id), label, noEmail };
@@ -117,6 +120,7 @@ export const BID_SEND_COPY = {
   notPending: "Only a pending bidder can be emailed.",
   website: "This bidder submits through their bid website — use Download PDF and Mark submitted.",
   noEmail: (who: string) => `${who} has no email address — add one on the company page.`,
+  badEmail: (who: string) => `${who}'s email address doesn't look right — fix it on the company page.`,
   unknownRetry: "Gmail didn’t answer in time for this bidder — check your Gmail Sent folder, then Retry.",
   unknownConfirm: (co: string) => `Gmail didn’t answer in time when this went to ${co}. Check your Gmail Sent folder first — send it again anyway?`,
   tooLarge: "The bidder PDF is over 15 MB — too large to email.",
