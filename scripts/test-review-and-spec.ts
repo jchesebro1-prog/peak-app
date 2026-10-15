@@ -51638,7 +51638,7 @@ import type { SpecSection as E301gSec } from "@/app/(app)/estimator/types";
   const acts = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/actions.ts"), "utf8");
   const saveBody = acts.slice(acts.indexOf("export async function saveSurvey("), acts.indexOf("export async function advanceSurveyStage("));
   const advBody = acts.slice(acts.indexOf("export async function advanceSurveyStage("), acts.indexOf("export async function deleteSurvey("));
-  ok(saveBody.includes("await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);") && advBody.includes("await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);"),
+  ok(saveBody.includes("await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);") && /await update(?:Checked)?\(id, withSanitizedSurveyGoals\(patch\) as Partial<SurveyRecord>\);/.test(advBody), // #344 C-final C: updateChecked
     "#301 goals: saveSurvey and advanceSurveyStage clean the goals before writing (R4)");
   const box = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/sections/systems.tsx"), "utf8");
   // #344 B4: goals became a list editor, after Scope of interest and before Present.

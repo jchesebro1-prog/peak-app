@@ -54,8 +54,9 @@ export function strokesFitUploadCap(json: string): boolean {
 }
 
 /** The keys a photo / sketch save sends to the server (#344 C-final B): the file lists and their seen ids — never the
- *  rest of the draft, so a file save can't revert another device's field edits. */
-export const FILE_PATCH_KEYS = ["photoRefs", "photoRefIdsSeen", "sketches", "sketchIdsSeen"] as const;
+ *  rest of the draft, so a file save can't revert another device's field edits — plus the save's order stamp (#344
+ *  C-final C), so a late file save never overwrites a newer one from the same editor. */
+export const FILE_PATCH_KEYS = ["photoRefs", "photoRefIdsSeen", "sketches", "sketchIdsSeen", "saveStamp"] as const;
 export function fileOnlyPatch<T extends Record<string, unknown>>(patch: T): Partial<T> {
   const out: Partial<T> = {};
   for (const k of FILE_PATCH_KEYS) if (k in patch && patch[k] !== undefined) (out as Record<string, unknown>)[k] = patch[k];

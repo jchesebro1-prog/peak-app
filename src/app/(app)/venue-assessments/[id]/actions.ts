@@ -7,6 +7,7 @@ import { withSanitizedSurveyGoals } from "@/lib/estimate-output/goals";
 import {
   get,
   update,
+  updateChecked,
   setStage,
   assign,
   remove,
@@ -117,6 +118,9 @@ export type SurveyPatch = Partial<
    *  sketches listed here (a second device's photos survive this editor's save) and never stores the lists. */
   photoRefIdsSeen?: string[];
   sketchIdsSeen?: string[];
+  /** #344 C-final C — transport-only: this editor mount's id + its save run's seq (the outbox copy carries the same).
+   *  The store skips a stamped save no newer than the last one it applied from that editor and never stores it. */
+  saveStamp?: { editor: string; seq: number };
 };
 
 /** Persist the whole editor draft (Save survey / Save changes). */
@@ -146,7 +150,12 @@ export async function advanceSurveyStage(
   const existing = await get(id);
   if (!existing) return;
   // #301 (R4): Client goals are trimmed and capped (≤ 1,000) on the way in.
-  await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);
+  const res = await updateChecked(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);
+  // #344 C-final C: a stale stamped save (a newer save from this editor already landed) moves no stage either
+  if (!res.applied) {
+    revalidatePath("/", "layout");
+    return;
+  }
   if (target === "scheduled") {
     await assign(id, patch.assignedTo ?? existing.assignedTo, patch.scheduledDate ?? existing.scheduledDate);
   } else {

@@ -43,6 +43,9 @@ export type SectionPhotosOptions = {
   blobEnabled: boolean;
   /** draft.photoRefs */
   refs: SurveyPhotoRef[];
+  /** #344 C-final C — the editor's live refs (its refsNow): `refs` lags a render behind a refresh's union, so every
+   *  list this hook commits is built from these */
+  liveRefs?: () => SurveyPhotoRef[];
   /** mirror a new list into the draft — a photo change is saved on its own, so it never dirties the draft */
   onRefs: (next: SurveyPhotoRef[]) => void;
   /** the editor's photo save: the current refs (online: only the file keys; never the user's unsaved edits) */
@@ -120,6 +123,8 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
   useEffect(() => {
     optsRef.current = o;
   });
+  /** The editor's current refs (live), else this hook's copy — what every commit builds on (#344 C-final C). */
+  const liveRefs = (): SurveyPhotoRef[] => optsRef.current.liveRefs?.() ?? refsRef.current;
 
   const [msg, setMsgState] = useState<Msg | null>(null);
   const setMsg = (text: string | null, section: string | null = null) => setMsgState(text ? { text, section } : null);
@@ -167,7 +172,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
     let alive = true;
     void (async () => {
       const pending = new Set<string>();
-      for (const r of refsRef.current) {
+      for (const r of liveRefs()) {
         if (!slotFinished(r.file)) pending.add(r.id);
         if (r.markup && !slotFinished(r.markup.image)) pending.add(r.markup.id);
       }
@@ -217,7 +222,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
           if (rid !== recordId) return; // another record's file: the server has it already
           const slot: FinishedSlot | null = ref.blobPath ? { blobPath: ref.blobPath } : ref.inline ? { inline: ref.inline } : null;
           if (slot) {
-            const folded = foldFileSlot({ photoRefs: refsRef.current }, fileId, slot);
+            const folded = foldFileSlot({ photoRefs: liveRefs() }, fileId, slot);
             if (folded.status === "set" && folded.doc.photoRefs) commit(folded.doc.photoRefs);
             else if (folded.status === "missing") optsRef.current.foldOther?.(fileId, slot);
           }
@@ -256,7 +261,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
   async function addPhotos(sectionId: string, files: File[]) {
     setMsg(null);
     if (!files.length) return;
-    if (photoRoom(refsRef.current.length) <= 0) {
+    if (photoRoom(liveRefs().length) <= 0) {
       setMsg(SURVEY_PHOTO_CAP_MESSAGE, sectionId);
       return;
     }
@@ -265,7 +270,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
     try {
       const shots: Array<{ blob: Blob; takenAt: number }> = [];
       for (const f of files) {
-        if (shots.length >= photoRoom(refsRef.current.length)) {
+        if (shots.length >= photoRoom(liveRefs().length)) {
           problems.push(SURVEY_PHOTO_CAP_MESSAGE);
           break;
         }
@@ -275,7 +280,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
           problems.push(errText(e, "That photo couldn't be used."));
         }
       }
-      const taking = shots.slice(0, photoRoom(refsRef.current.length));
+      const taking = shots.slice(0, photoRoom(liveRefs().length));
       if (taking.length < shots.length && !problems.includes(SURVEY_PHOTO_CAP_MESSAGE)) problems.push(SURVEY_PHOTO_CAP_MESSAGE);
       if (!taking.length) return;
       const me = optsRef.current.me;
@@ -296,7 +301,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
       }
       if (!queued.length) return;
       for (const a of queued) addLocalUrl(a.ref.id, a.blob);
-      commit([...refsRef.current, ...queued.map((a) => a.ref)]);
+      commit([...liveRefs(), ...queued.map((a) => a.ref)]);
       await persist(sectionId);
     } finally {
       setBusySec(null);
@@ -305,9 +310,9 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
   }
 
   /* ---------- viewer actions ---------- */
-  const findRef = (id: string) => refsRef.current.find((r) => r.id === id);
+  const findRef = (id: string) => liveRefs().find((r) => r.id === id);
   function replaceRef(next: SurveyPhotoRef) {
-    commit(refsRef.current.map((r) => (r.id === next.id ? next : r)));
+    commit(liveRefs().map((r) => (r.id === next.id ? next : r)));
   }
 
   function saveCaption(photoId: string, text: string) {
@@ -332,7 +337,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
   async function deletePhoto(photoId: string) {
     const cur = findRef(photoId);
     if (!cur) return;
-    commit(refsRef.current.filter((r) => r.id !== photoId));
+    commit(liveRefs().filter((r) => r.id !== photoId));
     setViewer((v) => (v?.id === photoId ? null : v));
     await dropQueued(filesToDiscard(cur));
     await persist(cur.section);
@@ -450,7 +455,7 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
   /** Discard on a failed ORIGINAL deletes the photo and on a failed sketch file removes the drawing, so both ask first;
    *  anything else discards at once. */
   function askDiscard(fileId: string) {
-    if (refsRef.current.some((r) => r.id === fileId) || optsRef.current.describeOther?.(fileId)) setConfirmDiscard(fileId);
+    if (liveRefs().some((r) => r.id === fileId) || optsRef.current.describeOther?.(fileId)) setConfirmDiscard(fileId);
     else void onDiscard(fileId);
   }
   async function onDiscard(fileId: string) {
@@ -458,8 +463,8 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
     setFailBusy(fileId);
     try {
       const hex = fileId.slice(2);
-      const owner = refsRef.current.find((r) => r.id === fileId);
-      const marked = refsRef.current.find((r) => r.markup?.id === `m_${hex}`);
+      const owner = liveRefs().find((r) => r.id === fileId);
+      const marked = liveRefs().find((r) => r.markup?.id === `m_${hex}`);
       if (owner) await deletePhoto(owner.id);
       else if (marked && (fileId.startsWith("m_") || fileId.startsWith("k_"))) await removeMarkup(marked.id);
       else if (!(await optsRef.current.discardOther?.(fileId))) await dropQueued([fileId]);

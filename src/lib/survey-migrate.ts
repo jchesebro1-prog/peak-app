@@ -381,9 +381,16 @@ export function migrateSurvey<T extends MigratableSurvey>(s: T): T {
 }
 
 /** #344 B-final — the record a print of unsaved edits shows: the saved record with the editor's patch on top, migrated
- *  again (on a copy) so the notes those edits produce show. An incoming `legacyNotes` is never trusted (derived only). */
+ *  again (on a copy) so the notes those edits produce show. An incoming `legacyNotes` is never trusted (derived only).
+ *  `saveStamp` / `_saveSeqs` (#344 C-final C, save order) are dropped from both. */
 export function printRecordFor<T extends MigratableSurvey>(existing: T, patch: object): T {
-  const { legacyNotes: _ignored, ...rest } = patch as { legacyNotes?: unknown };
+  // #344 C-final C: the save stamp and the server's per-editor seq map never reach a print
+  const { legacyNotes: _ignored, saveStamp: _stamp, _saveSeqs: _seqs, ...rest } = patch as { legacyNotes?: unknown; saveStamp?: unknown; _saveSeqs?: unknown };
   void _ignored;
-  return migrateSurvey(structuredClone({ ...existing, ...rest }) as T);
+  void _stamp;
+  void _seqs;
+  const { saveStamp: _s2, _saveSeqs: _q2, ...base } = existing as T & { saveStamp?: unknown; _saveSeqs?: unknown };
+  void _s2;
+  void _q2;
+  return migrateSurvey(structuredClone({ ...base, ...rest }) as T);
 }

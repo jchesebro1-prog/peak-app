@@ -3,7 +3,7 @@
 /* InkPad (#344 C3) — full-screen, Apple-Pencil-first drawing dialog for sketch pads (over an SVG
    background) and photo markup (over a photo). Once a Pencil touches any pad this session, the pen
    draws and fingers only pan / pinch-zoom (palm never draws); without a pen, mouse and finger draw.
-   Doc coordinates are background units; view math lives in src/lib/ink/view.ts. */
+   "Draw with finger" (#344 C-final C) turns Pencil mode off again. Doc coordinates are background units; view math lives in src/lib/ink/view.ts. */
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent, type Ref } from "react";
 import { createPortal, flushSync } from "react-dom";
@@ -54,6 +54,18 @@ const notePen = () => {
   penSeen = true;
   try { localStorage.setItem(PEN_SEEN_KEY, "1"); } catch { /* remembered for this session only */ }
 };
+/* #344 C-final C — the way out: "Draw with finger" forgets the remembered Pencil (fingers draw again) and, for this page
+   session, a Pencil touch no longer flips back into Pencil mode; turning it off restores Pencil mode. */
+let fingerMode = false;
+const forgetPen = () => {
+  penSeen = false;
+  fingerMode = true;
+  try { localStorage.removeItem(PEN_SEEN_KEY); } catch { /* nothing stored */ }
+};
+const restorePen = () => {
+  fingerMode = false;
+  notePen();
+};
 
 export function InkPad(props: InkPadProps) {
   if (!props.open || typeof document === "undefined") return null;
@@ -72,6 +84,11 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
   const [tool, setTool] = useState<Tool>("pen");
   const [color, setColor] = useState<string>(INK_COLORS[0]);
   const [pen, setPen] = useState<boolean>(hasPen);
+  const [fingerShown, setFingerShown] = useState<boolean>(() => fingerMode); // the toggle shows once a Pencil is known
+  const toggleFinger = () => {
+    if (pen) { forgetPen(); setPen(false); setFingerShown(true); }
+    else { restorePen(); setPen(true); }
+  };
   const [view, setViewState] = useState<View | null>(null);
   const [stage, setStage] = useState<{ w: number; h: number } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -351,7 +368,7 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
     if (type === "mouse" && e.button !== 0) return; // right / middle click never draws
     ignoredRef.current.delete(id); // a fresh press from an id whose pointerup was lost
     if (type === "pen") {
-      if (!hasPen()) { notePen(); setPen(true); }
+      if (!hasPen() && !fingerMode) { notePen(); setPen(true); }
       penTakeover();
     }
     rectRef.current = stageRef.current!.getBoundingClientRect();
@@ -577,6 +594,10 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
               <button type="button" className="ink-btn" onClick={() => setConfirm("clear")} disabled={busy || (!doc.strokes.length && !doc.labels.length)}>Clear</button>
             )}
             <button type="button" className="ink-btn" onClick={() => stage && setView(fitView(stage.w, stage.h, dw, dh))} aria-label="Fit to screen">Fit</button>
+            {(pen || fingerShown) && (
+              <button type="button" className="ink-btn" aria-pressed={!pen} onClick={toggleFinger} disabled={busy}
+                title={pen ? "Let a finger draw (the Pencil still draws)" : "Back to Pencil mode: only the Pencil draws, fingers pan"}>Draw with finger</button>
+            )}
           </div>
           <div className="ink-group ink-end">
             <button type="button" className="ink-btn" onClick={requestCancel} disabled={busy}>Cancel</button>
@@ -585,7 +606,7 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
         </div>
       </div>
       <div className="ink-hint" aria-live="polite">
-        {note ?? (pen ? "Pencil draws · one finger pans · pinch to zoom · double-tap to fit" : "Draw with a finger or mouse · pinch or ⌘-scroll to zoom")}
+        {note ?? (pen ? "Pencil draws · one finger pans · pinch to zoom · double-tap to fit" : fingerShown ? "Finger and Pencil draw · pinch to zoom" : "Draw with a finger or mouse · pinch or ⌘-scroll to zoom")}
       </div>
       {confirm === "discard" && (
         <div className="ink-discard" role="alertdialog" aria-label="Discard changes?">

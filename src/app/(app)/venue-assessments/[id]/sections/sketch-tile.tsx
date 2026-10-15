@@ -44,6 +44,9 @@ export type SectionSketchesOptions = {
   me: string;
   /** draft.sketches */
   sketches: Record<string, SketchRef>;
+  /** #344 C-final C — the editor's live sketches (its sketchesNow): `sketches` lags a render behind a refresh's union,
+   *  so every set this hook commits is built from these */
+  liveSketches?: () => Record<string, SketchRef>;
   /** the draft: the gates read its scope / rigging / line set quantity, the backgrounds its measurements */
   survey: FlowSlice & { linesetQty?: number; measurements: Record<string, string | boolean>; sketches?: unknown };
   /** mirror new sketches into the draft — a sketch change is saved on its own, so it never dirties the draft */
@@ -122,6 +125,8 @@ export function useSectionSketches(o: SectionSketchesOptions): SectionSketches {
   useEffect(() => {
     optsRef.current = o;
   });
+  /** The editor's current sketches (live), else this hook's copy — what every commit builds on (#344 C-final C). */
+  const liveSketches = (): Record<string, SketchRef> => optsRef.current.liveSketches?.() ?? sketchesRef.current;
 
   const [msg, setMsgState] = useState<Msg | null>(null);
   const setMsg = (text: string | null, section = "") => setMsgState(text ? { text, section } : null);
@@ -166,7 +171,7 @@ export function useSectionSketches(o: SectionSketchesOptions): SectionSketches {
     let alive = true;
     void (async () => {
       const pending = new Set<string>();
-      for (const r of Object.values(sketchesRef.current)) {
+      for (const r of Object.values(liveSketches())) {
         if (r && typeof r.id === "string" && !slotFinished(r.image)) pending.add(r.id);
       }
       const kept: Record<string, string> = {};
@@ -207,7 +212,7 @@ export function useSectionSketches(o: SectionSketchesOptions): SectionSketches {
 
   /** The queue finished a file no photo owns: land it on its sketch (the store's own fold rule). */
   function fold(fileId: string, slot: FinishedSlot): boolean {
-    const f = foldFileSlot({ sketches: sketchesRef.current }, fileId, slot);
+    const f = foldFileSlot({ sketches: liveSketches() }, fileId, slot);
     if (f.status !== "set" || !f.doc.sketches) return false;
     commit(f.doc.sketches);
     return true;
@@ -256,7 +261,7 @@ export function useSectionSketches(o: SectionSketchesOptions): SectionSketches {
     const ac = new AbortController();
     abortRef.current = ac;
     try {
-      const cur = sketchesRef.current[view.key];
+      const cur = liveSketches()[view.key];
       const doc = cur ? await loadStrokes(cur, ac.signal) : null;
       if (!mounted.current || ac.signal.aborted) return;
       // The background follows the saved strokes: a line set sheet reopens at the rows it was drawn on (its
@@ -295,8 +300,8 @@ export function useSectionSketches(o: SectionSketchesOptions): SectionSketches {
       setMsg(`The sketch couldn't be kept on this device (${errText(e, "storage refused it")}) — the earlier drawing is kept. Try Done again.`, section);
       throw e;
     }
-    const cur = sketchesRef.current[key]; // read after the queue: the sketches may have moved on meanwhile
-    const next = withNewSketch(sketchesRef.current, key, s, optsRef.current.me, nowMs());
+    const cur = liveSketches()[key]; // read after the queue: the sketches may have moved on meanwhile
+    const next = withNewSketch(liveSketches(), key, s, optsRef.current.me, nowMs());
     const stale = sketchFilesToDiscard(cur, next[key]);
     addLocalUrl(s, result.jpeg);
     commit(next);
@@ -324,7 +329,7 @@ export function useSectionSketches(o: SectionSketchesOptions): SectionSketches {
   /** Discard on a failed upload of a sketch's file whose image never finished: remove that sketch (tile back to Draw),
    *  drop both its queued files and save. False when no such sketch owns it. */
   async function discard(fileId: string): Promise<boolean> {
-    const d = sketchAfterDiscard(sketchesRef.current, fileId);
+    const d = sketchAfterDiscard(liveSketches(), fileId);
     if (!d) return false;
     const section = sectionOf(d.key);
     commit(d.sketches);

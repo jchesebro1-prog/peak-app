@@ -36,6 +36,7 @@ import Venue3D from "./venue-3d";
 import SuggestEstimate from "@/components/assist/suggest-estimate";
 import { saveThroughOutbox } from "@/lib/sync/save";
 import { SAVE_ACTION_TIMEOUT_MS } from "@/lib/sync/save-timeout";
+import { newEditorId, type SaveStamp } from "@/lib/field-files/save-stamp";
 import { RecordingsStrip, type RecordingStripItem } from "@/components/recordings/recordings-strip";
 import { FromRecordingPanel, type FromRecordingPanelData } from "@/components/recordings/from-recording-panel";
 import type { Draft, EditorCustomer, EditorMeta, FieldDef, SectionDef } from "./sections/types";
@@ -307,15 +308,24 @@ export default function SurveyEditor({
   const lastSaved = useRef<Draft>(initial);
   const refsNow = useRef<SurveyPhotoRef[]>(initial.photoRefs);
   const sketchesNow = useRef<Record<string, SketchRef>>(initial.sketches); // #344 C6: the current sketches, same rule
-  useEffect(() => {
-    lastSaved.current = adoptedBase;
-    refsNow.current = adoptedBase.photoRefs;
-    sketchesNow.current = adoptedBase.sketches;
-  }, [adoptedBase]);
   // #344 C-final: every photo ref / sketch id this editor has seen — loaded, refreshed in, or created here. Every save
   // sends them; the store deletes only refs and sketches listed here, so this editor never deletes another device's.
   const seenPhotoIds = useRef<Set<string>>(new Set(initial.photoRefs.map((r) => r.id)));
   const seenSketchIds = useRef<Set<string>>(new Set(Object.values(initial.sketches).map((k) => k.id)));
+  /** #344 C-final C: this editor mount's id and save counter. Each serialSave run takes the next seq; buildPatch (and so
+   *  buildFullDoc, the outbox copy) stamps it, so a timed-out save that lands late never overwrites a newer one. */
+  const [editorId] = useState(() => newEditorId());
+  const saveSeq = useRef(0);
+  const stampNow = useRef<SaveStamp | null>(null);
+  useEffect(() => {
+    lastSaved.current = adoptedBase;
+    refsNow.current = adoptedBase.photoRefs;
+    sketchesNow.current = adoptedBase.sketches;
+    // #344 C-final C: the adopted record's refs replace refsNow before the union below can mark them — mark them here,
+    // or the next save wouldn't list them as seen (and a photo deleted here later would come back)
+    for (const r of adoptedBase.photoRefs) seenPhotoIds.current.add(r.id);
+    for (const k of Object.values(adoptedBase.sketches)) seenSketchIds.current.add(k.id);
+  }, [adoptedBase]);
   // A refreshed record (the router refresh after any save) may carry photos / sketches another device added: union
   // the unseen ones in by id, even while the draft is dirty (photo state is independent of the dirty fields).
   useEffect(() => {
@@ -752,6 +762,8 @@ export default function SurveyEditor({
       // #344 C5 — whole list every save (a ref absent from a save is deleted); finished slots are kept by the store
       // once photos were touched in this session they are always sent (deleting the only one must reach the server)
       // #344 C-final: with the ids this editor has seen — the store deletes only those, never another device's photos
+      // #344 C-final C: this save run's order stamp (the action's patch and its outbox copy carry the same one)
+      ...(stampNow.current ? { saveStamp: stampNow.current } : {}),
       ...(draft.photoRefs.length || Array.isArray(record.photoRefs) || photosTouched.current
         ? { photoRefs: draft.photoRefs, photoRefIdsSeen: [...seenPhotoIds.current] }
         : {}),
@@ -794,7 +806,10 @@ export default function SurveyEditor({
       ...rec,
       ...(buildPatch(over, d) as Record<string, unknown>),
       updatedAt: Date.now(),
-      rev: (record.rev || 1) + 1, // #344 C-final B: never a finalize's rev — another device's newer save stays a conflict
+      // #344 C-final B: never a finalize's rev. The push is a conflict only when the stored rev is above this one —
+      // one intervening write from another device (stored rev = record.rev + 1) is NOT a conflict: the push merges
+      // over it; only two or more are. This editor's own earlier saves are ordered by the save stamp (C-final C).
+      rev: (record.rev || 1) + 1,
       syncState: "synced",
     };
   }
@@ -892,8 +907,9 @@ export default function SurveyEditor({
     setSaving(true);
     try {
       // The saved record supplies Earlier photos; sending them inline would only bloat the request.
-      const { photos: _earlier, ...patch } = buildPatch(undefined, { ...draft, photoRefs: refsNow.current, sketches: sketchesNow.current });
+      const { photos: _earlier, saveStamp: _stamp, ...patch } = buildPatch(undefined, { ...draft, photoRefs: refsNow.current, sketches: sketchesNow.current });
       void _earlier;
+      void _stamp; // a print is not a save — no order stamp
       const res = await fetch(`/api/surveys/${encodeURIComponent(record.id)}/sheet-pdf`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -924,7 +940,11 @@ export default function SurveyEditor({
   /** Save changes, stage moves and photo saves run one at a time (each reads the newest refs when it runs). */
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
   function serialSave<T>(fn: () => Promise<T>): Promise<T> {
-    const run = saveChain.current.then(fn, fn);
+    const stamped = () => {
+      stampNow.current = { editor: editorId, seq: ++saveSeq.current };
+      return fn();
+    };
+    const run = saveChain.current.then(stamped, stamped);
     saveChain.current = run.catch(() => undefined);
     return run;
   }
@@ -959,6 +979,7 @@ export default function SurveyEditor({
     me,
     sketches: draft.sketches,
     survey: draft,
+    liveSketches: () => sketchesNow.current,
     onSketches: (next) => {
       for (const k of Object.values(next)) seenSketchIds.current.add(k.id);
       sketchesNow.current = next;
@@ -972,6 +993,7 @@ export default function SurveyEditor({
     me,
     blobEnabled,
     refs: draft.photoRefs,
+    liveRefs: () => refsNow.current,
     onRefs: (next) => {
       for (const r of next) seenPhotoIds.current.add(r.id);
       refsNow.current = next;

@@ -2072,7 +2072,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       route7.includes("getOptionalUser()") && route7.includes("401") && route7.includes("FS-") && route7.includes("MAX_BODY_BYTES") && route7.includes("413") && route7.includes("export async function POST(") &&
       route7.includes("renderSurveySheetPdf(") && route7.includes("nosniff") && route7.includes("private, no-store") && route7.includes('"inline"'),
       "#344 C7 fix: the field sheet PDF streams from a signed-in route (zipStream, maxDuration, capped body, inline + nosniff + no-store) — no base64 server action");
-    ok(print7.includes("/api/surveys/") && print7.includes("/sheet-pdf") && /const \{ photos: _earlier, \.\.\.patch \}/.test(print7) && print7.includes("URL.createObjectURL(await res.blob())") && print7.includes("60_000") && print7.includes("application/pdf"),
+    ok(print7.includes("/api/surveys/") && print7.includes("/sheet-pdf") && /const \{ photos: _earlier, (saveStamp: _stamp, )?\.\.\.patch \}/.test(print7) && print7.includes("URL.createObjectURL(await res.blob())") && print7.includes("60_000") && print7.includes("application/pdf"),
       "#344 C7 fix: Print sheet posts the draft patch (minus the inline Earlier photos) to the route and opens the blob");
   }
   /* ---- C8: 3D view presets + wireframe ---- */
@@ -2313,6 +2313,92 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       "#344 C-final B: Remove markup asks first");
     ok(ctl.includes("subscribePhotoQueue(") && ctl.includes("pendingPhotoCount(record.id)") && /\{uploading\} uploading/.test(ctl),
       "#344 C-final B: the editor header shows N uploading while this survey's files are on the device queue");
+  }
+
+  /* ---- C-final C: a late save never overwrites a newer one; adoption seeds seen ids; finger drawing; live refs ---- */
+  {
+    const read = (rel: string) => { try { return readFileSync(join(process.cwd(), rel), "utf8"); } catch { return ""; } };
+    const ctl = read("src/app/(app)/venue-assessments/[id]/controls.tsx");
+    const act = read("src/app/(app)/venue-assessments/[id]/actions.ts");
+    const sto = read("src/lib/stores/surveys.ts");
+    const sp = read("src/app/(app)/venue-assessments/[id]/sections/section-photos.tsx");
+    const st = read("src/app/(app)/venue-assessments/[id]/sections/sketch-tile.tsx");
+    const pad = read("src/components/ink/ink-pad.tsx");
+    const mig = read("src/lib/survey-migrate.ts");
+    let SS: typeof import("../src/lib/field-files/save-stamp") | null = null;
+    try { SS = await import("../src/lib/field-files/save-stamp"); } catch { SS = null; }
+    ok(!!SS, "#344 C-final C: the save-stamp module loads");
+    if (SS) {
+      const e1 = SS.newEditorId(), e2 = SS.newEditorId();
+      ok(/^[0-9a-f]{16}$/.test(e1) && e1 !== e2 && !!SS.parseSaveStamp({ editor: e1, seq: 1 }) &&
+        !SS.parseSaveStamp({ editor: e1, seq: 0 }) && !SS.parseSaveStamp({ editor: "x", seq: 1 }) && !SS.parseSaveStamp({ editor: e1, seq: 1.5 }) && !SS.parseSaveStamp(null),
+        "#344 C-final C: a random editor id per mount; a stamp needs a valid editor and a positive integer seq");
+      const a = SS.checkSaveStamp(undefined, { editor: e1, seq: 2 }, 100);
+      const older = SS.checkSaveStamp(a.seqs, { editor: e1, seq: 1 }, 200);
+      const same = SS.checkSaveStamp(a.seqs, { editor: e1, seq: 2 }, 200);
+      const newer = SS.checkSaveStamp(a.seqs, { editor: e1, seq: 3 }, 200);
+      const other = SS.checkSaveStamp(a.seqs, { editor: e2, seq: 1 }, 200);
+      const none = SS.checkSaveStamp(a.seqs, null, 300);
+      ok(!a.stale && a.seqs?.[e1]?.seq === 2 && older.stale && same.stale && !newer.stale && newer.seqs?.[e1]?.seq === 3 &&
+        !other.stale && other.seqs?.[e1]?.seq === 2 && other.seqs?.[e2]?.seq === 1 && !none.stale && none.seqs?.[e1]?.seq === 2 &&
+        SS.checkSaveStamp(undefined, null, 1).seqs === undefined,
+        "#344 C-final C: checkSaveStamp — an older or equal seq from the same editor is stale; newer / other editors apply; unstamped keeps the map");
+      let many: unknown = undefined;
+      for (let i = 0; i < 25; i++) many = SS.checkSaveStamp(many, { editor: `editor${String(i).padStart(4, "0")}`, seq: 1 }, 1000 + i).seqs;
+      const keys = Object.keys(many as object);
+      ok(keys.length === SS.SAVE_SEQS_KEEP && SS.SAVE_SEQS_KEEP === 20 && !keys.includes("editor0000") && keys.includes("editor0024"),
+        "#344 C-final C: the seq map keeps the 20 most recent editors");
+      ok(Object.keys(SS.readSaveSeqs({ __proto__x: 1, ["bad key"]: { seq: 1 }, goodeditor1: { seq: 2, at: 5 }, zz: { seq: 1 } })).join() === "goodeditor1",
+        "#344 C-final C: a malformed stored map entry is dropped");
+      const stripped = SS.withoutSaveFields({ a: 1, saveStamp: { editor: e1, seq: 1 }, _saveSeqs: {} });
+      ok(JSON.stringify(stripped) === '{"a":1}', "#344 C-final C: withoutSaveFields drops the stamp and the seq map");
+      // the plain-text readers never print the map
+      const rec = { ...(sheetBase as object), _saveSeqs: { zzeditorid99: { seq: 7, at: 1 } }, saveStamp: { editor: "zzeditorid99", seq: 7 } } as never;
+      const outs = [JSON.stringify(buildAssessmentSheet(rec)), surveyFindings(rec), surveyText(rec), JSON.stringify(recapFor(rec)),
+        JSON.stringify(MGX.printRecordFor(sheetBase as never, { _saveSeqs: { zzeditorid99: { seq: 1, at: 1 } }, saveStamp: { editor: "zzeditorid99", seq: 1 } }))];
+      ok(outs.every((t) => !t.includes("zzeditorid99")), "#344 C-final C: the field sheet, findings, Assist text, recap and print record never carry _saveSeqs / saveStamp");
+    }
+    const FF = await import("../src/lib/field-files/files");
+    const fp = FF.fileOnlyPatch({ notes: "x", photoRefs: [], saveStamp: { editor: "abcdefgh12", seq: 4 } } as Record<string, unknown>);
+    ok(JSON.stringify((fp as Record<string, unknown>).saveStamp) === '{"editor":"abcdefgh12","seq":4}' && !("notes" in fp),
+      "#344 C-final C: a photo / sketch save's file-only patch carries the save stamp");
+    const ser = ctl.slice(ctl.indexOf("function serialSave"), ctl.indexOf("function serialSave") + 700);
+    ok(/useState\(\(\) => newEditorId\(\)\)/.test(ctl) && /\+\+saveSeq\.current/.test(ser) && /stampNow\.current = /.test(ser) &&
+      /saveStamp: stampNow\.current/.test(ctl),
+      "#344 C-final C: each serialSave run stamps { editor, ++seq }; buildPatch (and so buildFullDoc, the outbox copy) carries the same stamp");
+    ok(/saveStamp: _stamp/.test(ctl.slice(ctl.indexOf("async function onPrintSheet"))), "#344 C-final C: the field-sheet print never sends the save stamp");
+    ok(act.includes("saveStamp?: { editor: string; seq: number }") && /updateChecked\(/.test(act.slice(act.indexOf("export async function advanceSurveyStage"))) &&
+      /if \(!res\.applied\)/.test(act),
+      "#344 C-final C: SurveyPatch carries saveStamp; a stage move whose stamped save was stale skips the stage write too");
+    const upd = sto.slice(sto.indexOf("async function updateUnlocked"), sto.indexOf("export async function update("));
+    const push = sto.slice(sto.indexOf("export async function pushSurvey"), sto.indexOf("export async function setStage"));
+    ok(/checkSaveStamp\(/.test(upd) && /stale/.test(upd) && /delete next\.saveStamp|withoutSaveFields/.test(upd),
+      "#344 C-final C: update() checks the stamp under the survey lock and never stores saveStamp");
+    ok(/checkSaveStamp\(/.test(push) && push.indexOf("chk.stale") > -1 && push.indexOf("chk.stale") < push.indexOf('status: "conflict"'),
+      "#344 C-final C: pushSurvey checks the stamp before the rev conflict check (a superseded push replies ok)");
+    ok(/delete \(s as Record<string, unknown>\)\[SAVE_SEQS_FIELD\]|withoutSaveFields/.test(sto.slice(sto.indexOf("function normalize("), sto.indexOf("export async function getAll"))) &&
+      !/_saveSeqs|SAVE_SEQS/.test(ctl.slice(ctl.indexOf("function toDraft("), ctl.indexOf("function toDraft(") + 6000).split("\n}\n")[0]) &&
+      /saveStamp|SAVE_STAMP/.test(mig.slice(mig.indexOf("export function printRecordFor"))),
+      "#344 C-final C: get()/getAll() strip _saveSeqs; toDraft never reads it; printRecordFor strips both");
+
+    /* fix 2 — adoption seeds the seen sets */
+    const adopt = ctl.slice(ctl.indexOf("lastSaved.current = adoptedBase;") - 40, ctl.indexOf("}, [adoptedBase]);"));
+    ok(/adoptedBase\.photoRefs\) seenPhotoIds\.current\.add\(r\.id\)/.test(adopt) && /seenSketchIds\.current\.add\(k\.id\)/.test(adopt),
+      "#344 C-final C: adopting a refreshed record adds its photo and sketch ids to the seen sets");
+
+    /* fix 3 — a way out of remembered Pencil mode */
+    ok(pad.includes("Draw with finger") && /aria-pressed=\{!pen\}/.test(pad) && /localStorage\.removeItem\(PEN_SEEN_KEY\)/.test(pad) &&
+      /fingerMode/.test(pad) && /if \(!hasPen\(\) && !fingerMode\)/.test(pad) && /pointerRole\(type, hasPen\(\)\)/.test(pad),
+      "#344 C-final C: a Draw with finger toggle (aria-pressed) lets touch draw and forgets the remembered Pencil; off restores Pencil mode (palm rejection unchanged)");
+
+    /* fix 4 — the hooks read the editor's live refs */
+    ok(/liveRefs: \(\) => refsNow\.current/.test(ctl) && /liveSketches: \(\) => sketchesNow\.current/.test(ctl) &&
+      /const liveRefs = \(\)/.test(sp) && /commit\(\[\.\.\.liveRefs\(\), \.\.\.queued/.test(sp) && /const liveSketches = \(\)/.test(st) &&
+      /withNewSketch\(liveSketches\(\)/.test(st),
+      "#344 C-final C: the photo / sketch hooks build commits from the editor's live refs (a capture right after a refresh keeps the unioned refs)");
+
+    /* minor — the conflict comment is accurate */
+    ok(/one intervening write/.test(ctl) && /two or more/.test(ctl), "#344 C-final C: the outbox rev comment says only two or more intervening writes conflict");
   }
 }
 
@@ -2565,6 +2651,63 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
     await S.pushSurvey({ id: newId, rev: 1, doc: { customer: "Seen", photoRefIdsSeen: [A], sketchIdsSeen: [] } });
     const rawN = (await (await import("../src/db/doc-store")).getDoc("surveys", newId)) as Record<string, unknown> | null;
     ok(rawN?.customer === "Seen" && !("photoRefIdsSeen" in rawN) && !("sketchIdsSeen" in rawN), "#344 C-final: pushSurvey's insert path strips the seen fields too");
+  }
+  /* C-final C: a late save from the same editor never overwrites a newer one */
+  {
+    const { getDoc } = await import("../src/db/doc-store");
+    const { getDb } = await import("../src/db");
+    const { DOC_TABLES } = await import("../src/db/doc-tables");
+    const { eq } = await import("drizzle-orm");
+    const db = await getDb();
+    const revOf = async (id: string) => (await db.select().from(DOC_TABLES.surveys).where(eq(DOC_TABLES.surveys.id, id)).limit(1))[0]?.rev ?? 0;
+    const ED = "laptopeditor01", ED2 = "ipadeditor0002";
+    const sv = await S.create({ owner: "Sam Surveyor" } as never);
+    registerFixture("surveys", sv.id);
+    const base = (await S.get(sv.id))!;
+    // save 1 times out → its outbox copy is pushed; save 2 (newer) is pushed / lands; then save 1's hung action lands
+    const p1 = await S.pushSurvey({ id: sv.id, rev: (base.rev || 1) + 1, doc: { ...(base as object), notes: "first", saveStamp: { editor: ED, seq: 1 } } as Record<string, unknown> });
+    const p2 = await S.pushSurvey({ id: sv.id, rev: (base.rev || 1) + 1, doc: { ...(base as object), notes: "second", saveStamp: { editor: ED, seq: 2 } } as Record<string, unknown> });
+    const r2 = await revOf(sv.id);
+    const late = await S.update(sv.id, { notes: "first", saveStamp: { editor: ED, seq: 1 } } as never);
+    const k1 = await S.get(sv.id);
+    ok(p1.status === "ok" && p2.status === "ok" && k1?.notes === "second" && (await revOf(sv.id)) === r2 && !!late && (late as { notes?: string }).notes === "second",
+      "#344 C-final C: update() with an older stamp from the same editor is a no-op (returns the current record; rev unchanged)");
+    const latePush = await S.pushSurvey({ id: sv.id, rev: 1, doc: { ...(base as object), notes: "first", saveStamp: { editor: ED, seq: 1 } } as Record<string, unknown> });
+    ok(latePush.status === "ok" && latePush.rev === r2 && (await S.get(sv.id))?.notes === "second",
+      "#344 C-final C: pushSurvey with an older stamp replies ok with the current rev and changes nothing (no conflict)");
+    // same stamp: the action lands, then its outbox copy is pushed → idempotent
+    await S.update(sv.id, { notes: "third", saveStamp: { editor: ED, seq: 3 } } as never);
+    const r3 = await revOf(sv.id);
+    const dup = await S.pushSurvey({ id: sv.id, rev: r3, doc: { ...(base as object), notes: "third-outbox", saveStamp: { editor: ED, seq: 3 } } as Record<string, unknown> });
+    ok(dup.status === "ok" && (await revOf(sv.id)) === r3 && (await S.get(sv.id))?.notes === "third",
+      "#344 C-final C: the same stamp twice (action + its outbox copy) applies once");
+    const chk = await S.updateChecked(sv.id, { notes: "x", saveStamp: { editor: ED, seq: 3 } } as never);
+    ok(chk.applied === false && chk.record?.notes === "third", "#344 C-final C: updateChecked reports a stale stamped save as not applied");
+    // another editor and unstamped writers still apply
+    await S.update(sv.id, { notes: "ipad", saveStamp: { editor: ED2, seq: 1 } } as never);
+    const a1 = (await S.get(sv.id))?.notes;
+    await S.update(sv.id, { notes: "krisp" } as never);
+    const a2 = (await S.get(sv.id))?.notes;
+    await S.setStage(sv.id, "onsite");
+    const nb = await revOf(sv.id);
+    const up = await S.pushSurvey({ id: sv.id, rev: nb, doc: { ...((await S.get(sv.id)) as object), notes: "unstamped push" } as Record<string, unknown> });
+    const raw = (await getDoc("surveys", sv.id)) as Record<string, unknown> | null;
+    const seqs = raw?._saveSeqs as Record<string, { seq: number }> | undefined;
+    const got = await S.get(sv.id);
+    ok(a1 === "ipad" && a2 === "krisp" && up.status === "ok" && got?.notes === "unstamped push" && got?.stage === "onsite" &&
+      seqs?.[ED]?.seq === 3 && seqs?.[ED2]?.seq === 1 && !("saveStamp" in (raw ?? {})) && !("_saveSeqs" in (got ?? {})) &&
+      !("_saveSeqs" in ((await S.getAll()).find((x) => x.id === sv.id) ?? {})),
+      "#344 C-final C: other editors and unstamped writes apply; unstamped writes keep the seq map; saveStamp is never stored; get()/getAll() hide _saveSeqs");
+    // a pushed doc can't forge the map, and an insert records the stamp
+    await S.pushSurvey({ id: sv.id, rev: await revOf(sv.id), doc: { ...((await S.get(sv.id)) as object), _saveSeqs: {} } as Record<string, unknown> });
+    const raw2 = (await getDoc("surveys", sv.id)) as Record<string, unknown> | null;
+    const newId = "FS-" + (900000 + Math.floor(Math.random() * 99999));
+    registerFixture("surveys", newId);
+    await S.pushSurvey({ id: newId, rev: 1, doc: { customer: "Stamped", saveStamp: { editor: ED, seq: 5 } } });
+    const rawN = (await getDoc("surveys", newId)) as Record<string, unknown> | null;
+    ok((raw2?._saveSeqs as Record<string, { seq: number }> | undefined)?.[ED]?.seq === 3 &&
+      (rawN?._saveSeqs as Record<string, { seq: number }> | undefined)?.[ED]?.seq === 5 && !("saveStamp" in (rawN ?? {})),
+      "#344 C-final C: a pushed _saveSeqs is ignored (the stored map wins); an inserted survey records its stamp");
   }
 }
 

@@ -26,6 +26,7 @@ import {
   type SketchRef,
   type SurveyPhotoRef,
 } from "../field-files/files";
+import { SAVE_SEQS_FIELD, SAVE_STAMP_FIELD, checkSaveStamp, parseSaveStamp, withoutSaveFields } from "../field-files/save-stamp";
 import {
   blankSystemsState,
   type DisciplineData,
@@ -459,6 +460,7 @@ const DEFAULT_ME = "Jeff Chesebro";
  * src/lib/survey-migrate.ts (migrateSurvey).
  */
 function normalize(s: SurveyRecord): SurveyRecord {
+  delete (s as Record<string, unknown>)[SAVE_SEQS_FIELD]; // #344 C-final C: server-only save order, never shown
   if (!s.stage) s.stage = s.syncState === "synced" ? "completed" : "onsite";
   // ---- Venue Assessments read-time migration (D132) ----
   if (!s.venueClass) s.venueClass = venueClassFor(s.venueType);
@@ -552,27 +554,56 @@ function withSurveyLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
 /** The stored doc (read inside the lock) + the patch, stamped, its file slots sanitized (a client never mints a
  *  finished slot) and `mergeSurveyFileRefs` applied (a stored finished slot is never replaced; a photo / sketch the
  *  client never saw is never deleted — #344 C-final). `legacyNotes` is derived on read and the seen lists are
- *  transport-only — neither is stored. */
-async function updateUnlocked(id: string, patch: Partial<SurveyRecord>): Promise<SurveyRecord | null> {
-  return patchDoc<SurveyRecord>("surveys", id, (s) => {
+ *  transport-only — neither is stored.
+ *  #344 C-final C: a patch carrying an editor's `saveStamp` whose seq is not newer than the seq stored for that editor
+ *  (`_saveSeqs`) is a no-op — a timed-out save landing after a newer one from the same editor, or a save and its outbox
+ *  copy both arriving. Otherwise the seq is recorded. `saveStamp` is never stored; a patch can't set `_saveSeqs`;
+ *  unstamped writes (leads, Krisp write-back, stage moves elsewhere) apply as before and keep the map. */
+async function updateUnlocked(id: string, patch: Partial<SurveyRecord>): Promise<{ record: SurveyRecord | null; applied: boolean }> {
+  const { [SAVE_STAMP_FIELD]: rawStamp, [SAVE_SEQS_FIELD]: _forged, ...rest } = patch as Record<string, unknown>;
+  void _forged;
+  const stamp = parseSaveStamp(rawStamp);
+  if (stamp) {
+    const cur = await getDoc<SurveyRecord>("surveys", id);
+    if (!cur) return { record: null, applied: false };
+    if (checkSaveStamp((cur as Record<string, unknown>)[SAVE_SEQS_FIELD], stamp, now()).stale) {
+      return { record: withoutSaveFields(cur), applied: false };
+    }
+  }
+  const rec = await patchDoc<SurveyRecord>("surveys", id, (s) => {
     const stored = { ...s } as Record<string, unknown>;
     const t = now();
-    const next = Object.assign(s, patch, {
+    const chk = checkSaveStamp(stored[SAVE_SEQS_FIELD], stamp, t);
+    const next = Object.assign(s, rest, {
       updatedAt: t,
       syncState: "synced" as SyncState,
       syncedAt: t,
       rev: (s.rev || 1) + 1,
     }) as Record<string, unknown>;
     delete next.legacyNotes;
+    delete next.saveStamp;
+    if (chk.seqs) next[SAVE_SEQS_FIELD] = chk.seqs;
+    else delete next[SAVE_SEQS_FIELD];
     return mergeSurveyFileRefs(stored, sanitizeIncomingFileSlots(next, id, { blobEnabled: blobEnabled(), stored })) as SurveyRecord;
   });
+  return { record: rec ? withoutSaveFields(rec) : null, applied: !!rec };
 }
 
-/** Content update — bumps updatedAt + rev (prototype re-dirty). Under the survey lock, merging file refs (#344 C4). */
+/** Content update — bumps updatedAt + rev (prototype re-dirty). Under the survey lock, merging file refs (#344 C4).
+ *  A stale stamped patch (#344 C-final C) changes nothing and returns the current record. */
 export async function update(
   id: string,
   patch: Partial<SurveyRecord>
 ): Promise<SurveyRecord | null> {
+  return (await withSurveyLock(id, () => updateUnlocked(id, patch))).record;
+}
+
+/** `update()` that also says whether the patch applied — false for a stale stamped save (#344 C-final C), so a caller
+ *  that follows it with another write (a stage move) can skip that too. */
+export async function updateChecked(
+  id: string,
+  patch: Partial<SurveyRecord>
+): Promise<{ record: SurveyRecord | null; applied: boolean }> {
   return withSurveyLock(id, () => updateUnlocked(id, patch));
 }
 
@@ -652,7 +683,8 @@ export type SurveyPushResult = {
  * that isn't its own file's path in this survey, or an inline one on a Blob deployment, becomes pending); an unknown
  * id is inserted; a stale rev is a `conflict` with the server copy; otherwise the pushed doc replaces the stored one
  * EXCEPT that a stored finished file slot is never replaced and a photo / sketch the device never saw is never deleted
- * (`mergeSurveyFileRefs`, #344 C-final). `legacyNotes` and the seen lists are never stored. Anything thrown (a lock timeout, a database
+ * (`mergeSurveyFileRefs`, #344 C-final). `legacyNotes` and the seen lists are never stored. A stamped push that is not
+ * newer than its editor's stored seq changes nothing and replies `ok` (#344 C-final C). Anything thrown (a lock timeout, a database
  * error) replies `retry` so the device keeps the capture.
  */
 export async function pushSurvey(rec: { id: string; rev?: number; doc: Record<string, unknown> }): Promise<SurveyPushResult> {
@@ -663,12 +695,20 @@ export async function pushSurvey(rec: { id: string; rev?: number; doc: Record<st
       const t = DOC_TABLES.surveys;
       const existing = await db.select().from(t).where(eq(t.id, id)).limit(1);
       const at = Date.now();
+      // #344 C-final C: an editor's older (or the same) save — its action already landed, or a newer save did — changes
+      // nothing and replies ok with the current rev, so the outbox entry clears instead of becoming a conflict
+      const storedDoc = (existing[0]?.doc as Record<string, unknown> | undefined) ?? null;
+      const chk = checkSaveStamp(storedDoc?.[SAVE_SEQS_FIELD], parseSaveStamp(rec.doc?.[SAVE_STAMP_FIELD]), at);
+      if (existing.length && chk.stale) return { id, status: "ok", rev: existing[0].rev };
       // A pushed copy never mints a finished slot (only the finalize does); then a stored finished slot always wins.
       const doc: Record<string, unknown> = sanitizeIncomingFileSlots({ ...rec.doc, id }, id, {
         blobEnabled: blobEnabled(),
         stored: (existing[0]?.doc as Record<string, unknown> | undefined) ?? null,
       });
       delete doc.legacyNotes;
+      delete doc[SAVE_STAMP_FIELD]; // transport-only
+      if (chk.seqs) doc[SAVE_SEQS_FIELD] = chk.seqs; // the stored map (+ this stamp) — a pushed copy never sets it
+      else delete doc[SAVE_SEQS_FIELD];
       if (!existing.length) {
         for (const f of SURVEY_SEEN_FIELDS) delete doc[f]; // transport-only (#344 C-final); the merge strips them otherwise
         await db.insert(t).values({ id, doc, rev: rec.rev ?? 1, updatedAt: at, receivedAt: at, review: { state: "new" }, deleted: false });
