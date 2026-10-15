@@ -80,7 +80,7 @@ export function BiddersCard({ quoteId, refreshKey, sendCtx }: { quoteId: string;
   }, [quoteId, refreshKey, retryKey]);
 
   // #348 (Jeff 2026-10-15): a Bid chip save can move the estimate back to Draft (an addendum after a send) — reload
-  // so the plan offers "Send revision to bidders". Only the chip's own event; this card's events come from itself.
+  // so the plan offers "Send revision to all bidders". Only the chip's own event; this card's events come from itself.
   useEffect(() => {
     const onChanged = (e: Event) => {
       const detail = (e as CustomEvent<{ quoteId?: string; source?: string }>).detail;

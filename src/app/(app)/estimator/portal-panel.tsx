@@ -6,6 +6,7 @@ import { declinePortalAcceptanceAction } from "./actions";
 import { PURCHASE_METHOD_LABEL, reviewBannerHeading } from "@/lib/portal-quote-mode";
 import type { PortalPanelData } from "./types";
 import { postChanged } from "@/lib/popout/channel";
+import { acceptanceLine } from "@/lib/estimate-output/responses";
 
 /**
  * Staff Portal panel (#245 Task 13, spec §5; generalized #248 Task 4, spec
@@ -138,6 +139,12 @@ export function PortalPanel({
           <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1f7a52" }}>
             Accepted by {data.portalAcceptance.by} — {fmtDateTime(data.portalAcceptance.at)}
           </div>
+          {/* Jeff 2026-10-15 #15: who signed it, and the PO number they typed. */}
+          {data.portalAcceptance.signerName && (
+            <div style={{ fontSize: 12.5, color: "#1f7a52" }}>
+              {acceptanceLine({ name: data.portalAcceptance.signerName, title: data.portalAcceptance.signerTitle, po: data.portalAcceptance.poNumber })}
+            </div>
+          )}
           <div style={{ fontSize: 12.5, color: "#5b616e" }}>
             {data.portalAcceptance.purchaseMethod ? "Purchasing by " + PURCHASE_METHOD_LABEL[data.portalAcceptance.purchaseMethod] : "Purchase method not recorded"}
           </div>

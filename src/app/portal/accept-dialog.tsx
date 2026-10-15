@@ -70,6 +70,10 @@ export function AcceptDialog({
   const [open, setOpen] = useState(false);
   const [method, setMethod] = useState<(typeof PURCHASE_METHODS)[number] | "">("");
   const [notes, setNotes] = useState("");
+  // Jeff 2026-10-15 #15: accepting is signed — typed name and title (required), an optional PO number.
+  const [signerName, setSignerName] = useState("");
+  const [signerTitle, setSignerTitle] = useState("");
+  const [poNumber, setPoNumber] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [fileMsg, setFileMsg] = useState("");
   const [busy, setBusy] = useState(false);
@@ -104,6 +108,14 @@ export function AcceptDialog({
       setError("Pick how you'll purchase.");
       return;
     }
+    if (!signerName.trim()) {
+      setError("Type your name to accept.");
+      return;
+    }
+    if (!signerTitle.trim()) {
+      setError("Type your title to accept.");
+      return;
+    }
     setBusy(true);
     setError("");
     let poDocumentId: string | null = null;
@@ -127,7 +139,7 @@ export function AcceptDialog({
       }
     }
     try {
-      const r = await acceptPortalQuote({ quoteId, purchaseMethod: method, notes, poDocumentId });
+      const r = await acceptPortalQuote({ quoteId, purchaseMethod: method, notes, poDocumentId, signerName, signerTitle, poNumber });
       if (!r.ok) {
         setError(r.error);
         setBusy(false);
@@ -157,6 +169,26 @@ export function AcceptDialog({
               {PURCHASE_METHOD_LABEL[m]}
             </label>
           ))}
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label htmlFor="pk-accept-name" style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "#8c919c" }}>
+            Your name
+          </label>
+          <input id="pk-accept-name" style={FIELD} required maxLength={120} autoComplete="name" value={signerName} onChange={(e) => setSignerName(e.target.value)} />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label htmlFor="pk-accept-title" style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "#8c919c" }}>
+            Your title
+          </label>
+          <input id="pk-accept-title" style={FIELD} required maxLength={120} autoComplete="organization-title" value={signerTitle} onChange={(e) => setSignerTitle(e.target.value)} />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label htmlFor="pk-accept-po" style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "#8c919c" }}>
+            PO # (optional)
+          </label>
+          <input id="pk-accept-po" style={FIELD} maxLength={60} value={poNumber} onChange={(e) => setPoNumber(e.target.value)} />
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>

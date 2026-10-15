@@ -48,7 +48,7 @@ export function bidderSendPlan(q: { status: string } & Revs, rows: ReadonlyArray
   const noEmail = sendable(q.status)
     ? rows.filter((r) => r.bid.result === "pending" && r.bid.submitVia === "email" && !bidderEmailUsable(r.email)).length
     : 0;
-  const label = planned.length === 0 ? null : planned.some((r) => r.bid.revSent != null) ? "Send revision to bidders" : "Send to all bidders";
+  const label = planned.length === 0 ? null : planned.some((r) => r.bid.revSent != null) ? BID_SEND_COPY.sendRevision : BID_SEND_COPY.sendAll;
   return { ids: planned.map((r) => r.id), label, noEmail };
 }
 
@@ -102,7 +102,8 @@ export function bidWalkSummary(s: { total: number; sent: number; failed: number;
 
 export const BID_SEND_COPY = {
   sendAll: "Send to all bidders",
-  sendRevision: "Send revision to bidders",
+  // Jeff 2026-10-15 #3: after an addendum moves the estimate back to Draft, the revision goes to every bidder.
+  sendRevision: "Send revision to all bidders",
   preparing: "Preparing…",
   progress: (i: number, n: number) => `Sending ${i} of ${n}…`,
   stop: "Stop",
@@ -130,6 +131,6 @@ export const BID_SEND_COPY = {
   recordFailed: "Sent — but the bidder row couldn’t be updated. Check Activity before sending again.",
   /** #348 (Jeff 2026-10-15): a fallback only — the Bid chip moves a sent estimate back to Draft itself when an addendum
    *  is added; this shows when a sent estimate's addenda changed by another path. */
-  addendumHint: (nos: number[]) => `Addendum ${nos.join(", ")} came in after the last send — move the estimate back to Draft, then Send revision to bidders.`,
+  addendumHint: (nos: number[]) => `Addendum ${nos.join(", ")} came in after the last send — move the estimate back to Draft, then Send revision to all bidders.`,
   linkCopied: "Link copied.",
 } as const;

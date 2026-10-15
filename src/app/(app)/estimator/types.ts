@@ -104,6 +104,9 @@ export type SpecItem = {
    * folded into other rows on every customer surface by `customerLines`.
    */
   bonus?: "package" | "estimator";
+  /** Jeff 2026-10-15 #19 — the rate (fraction) a bonus line was figured at, present only when it isn't the default
+   *  5 % / 2 % (Estimating Rules → Estimator bonuses). Written only by `withBonusLines`. */
+  bonusPct?: number;
   /** #270: a mobilization's travel cost as its own internal line (mileage,
    *  hotel, per diem, lift rental). Like `laborOverhead` the CUSTOMER
    *  document never shows it — `customerLines` folds its sell into the
@@ -554,6 +557,10 @@ export type PortalPanelData = {
     purchaseMethod?: "po" | "card" | "check" | "other";
     notes?: string;
     poDocumentId?: string | null;
+    /** Jeff 2026-10-15 #15 — the signer and PO # typed at Accept. */
+    signerName?: string;
+    signerTitle?: string;
+    poNumber?: string;
   } | null;
   portalDecline: { at: number; by: string; note: string } | null;
   porItems: Array<{ desc: string; qty: number }>;
@@ -729,6 +736,11 @@ export type EstimatorProps = {
   viewerName: string;
   /** #287 task B — may this user make someone else the lead estimator (`approve`)? */
   viewerCanApprove: boolean;
+  /** Jeff 2026-10-15 #18 — the loaded quote has been sent at least once (quoteSentOnce): Lead estimator and
+   *  Prepared by are then read-only for non-approvers. Absent = false. */
+  peopleSentOnce?: boolean;
+  /** Jeff 2026-10-15 #19 — Estimating Rules' bonus rates (fractions) for a draft's live bonus lines. Absent = 5 % / 2 %. */
+  bonusRates?: import("@/lib/estimate-bonus/flags").BonusRates;
   /** Estimator Phase 4 — the signed-in user's roles, for the review-comment
    *  rules (src/lib/estimate-review/comments.ts: add / resolve / delete). */
   viewerRoles: string[];

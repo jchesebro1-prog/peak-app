@@ -4,6 +4,7 @@ import {
   insertWithPrefixedId,
   listDocs,
   listDocsByField,
+  listDocsFiltered,
   patchDoc,
   softDeleteDoc,
   updateBlob,
@@ -377,6 +378,16 @@ export async function getAllProjects(): Promise<ProjectRecord[]> {
   const list = await listDocs<ProjectRecord>("projects");
   const pipes = await loadPipelines();
   return list.map((p) => normalizeProject(p, pipes)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+/** Jeff 2026-10-15 #11 — who/when/where of every live project, as a SQL projection: the Companies directory's
+ *  owner + activity rollup and the Venues directory's last-activity bucket read this, never whole projects. */
+export async function listProjectActivityRows(): Promise<Array<{ id: string; customerId: string | null; locationId: string | null; owner: string; updatedAt: number }>> {
+  const rows = await listDocsFiltered<{ id: string; customerId?: string | null; locationId?: string | null; owner?: string; updatedAt?: number }>(
+    "projects",
+    { fields: ["customerId", "locationId", "owner", "updatedAt"] }
+  );
+  return rows.map((r) => ({ id: r.id, customerId: r.customerId ?? null, locationId: r.locationId ?? null, owner: r.owner || "", updatedAt: Number(r.updatedAt) || 0 }));
 }
 
 export async function getProject(id: string): Promise<ProjectRecord | null> {

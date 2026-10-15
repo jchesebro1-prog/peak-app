@@ -26,7 +26,9 @@ const LIGHT_SELECT: CSSProperties = {
 const LIGHT_HINT: CSSProperties = { fontSize: 11, color: "#8c919c", lineHeight: 1.45 };
 
 export function QuotePeopleFields({ s, tone }: { s: EstimatorState; tone: "dark" | "light" }) {
-  const { changePeople, loadedId, ownerValue, peopleBusy, peopleOptions, preparedValue, samePerson, viewerCanApprove, viewerName } = s;
+  const { changePeople, loadedId, ownerValue, peopleBusy, peopleLocked, peopleOptions, preparedValue, samePerson, viewerCanApprove, viewerName } = s;
+  // Jeff 2026-10-15 #18: locked at the first send for anyone without `approve` (the server refuses too).
+  const lockedTitle = "Locked once the quote has been sent — an approver can change it";
   const dark = tone === "dark";
   const label = dark ? CTX_LABEL : LIGHT_LABEL;
   const select = dark ? DARK_SELECT : LIGHT_SELECT;
@@ -37,12 +39,14 @@ export function QuotePeopleFields({ s, tone }: { s: EstimatorState; tone: "dark"
       <select
         value={ownerValue}
         onChange={(e) => changePeople({ owner: e.target.value })}
-        disabled={!loadedId || peopleBusy}
+        disabled={!loadedId || peopleBusy || peopleLocked}
         aria-label="Lead estimator"
         title={
-          viewerCanApprove
-            ? "Owns the quote — their review limit applies and it lists under them on the Quotes hub"
-            : "Only an approver can hand a quote to someone else"
+          peopleLocked
+            ? lockedTitle
+            : viewerCanApprove
+              ? "Owns the quote — their review limit applies and it lists under them on the Quotes hub"
+              : "Only an approver can hand a quote to someone else"
         }
         style={{ ...select, width: "100%", minWidth: 0, opacity: loadedId ? 1 : 0.6 }}
       >
@@ -64,9 +68,9 @@ export function QuotePeopleFields({ s, tone }: { s: EstimatorState; tone: "dark"
       <select
         value={preparedValue}
         onChange={(e) => changePeople({ preparedBy: e.target.value })}
-        disabled={!loadedId || peopleBusy}
+        disabled={!loadedId || peopleBusy || peopleLocked}
         aria-label="Prepared by"
-        title="Prints under Prepared by on the customer document"
+        title={peopleLocked ? lockedTitle : "Prints under Prepared by on the customer document"}
         style={{ ...select, width: "100%", minWidth: 0, opacity: loadedId ? 1 : 0.6 }}
       >
         {peopleOptions(preparedValue).map((o) => (
@@ -75,7 +79,7 @@ export function QuotePeopleFields({ s, tone }: { s: EstimatorState; tone: "dark"
           </option>
         ))}
       </select>
-      <span style={hint}>{loadedId ? "Saved as you pick" : "Save the quote to change these"}</span>
+      <span style={hint}>{!loadedId ? "Save the quote to change these" : peopleLocked ? "Locked since the first send — an approver can change these" : "Saved as you pick"}</span>
     </>
   );
 }

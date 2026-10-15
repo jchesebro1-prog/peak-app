@@ -3,7 +3,7 @@ import type { Node as PMNode, NodeType } from "@tiptap/pm/model";
 import { sinkListItem } from "@tiptap/pm/schema-list";
 import { TextSelection, type Command, type Transaction } from "@tiptap/pm/state";
 import StarterKit, { type StarterKitOptions } from "@tiptap/starter-kit";
-import { CHIP_KINDS, clampPhotoWidth, DEFAULT_IMAGE, DEFAULT_PHOTO, HEADING_LEVELS, isChipKind, isPhotoAlign } from "@/lib/package-doc/schema";
+import { CHIP_KINDS, clampPhotoWidth, DEFAULT_IMAGE, DEFAULT_PHOTO, HEADING_LEVELS, isChipKind, isImageAlign, isPhotoAlign } from "@/lib/package-doc/schema";
 import type { PhotoAttrs } from "@/lib/package-doc/types";
 
 /**
@@ -233,7 +233,7 @@ export const ProductImageNode = atomBlock("productImage", "data-pd-product-image
     default: DEFAULT_IMAGE.align,
     parseHTML: (el: HTMLElement) => {
       const v = el.getAttribute("data-align");
-      return isPhotoAlign(v) ? v : DEFAULT_IMAGE.align;
+      return isImageAlign(v) ? v : DEFAULT_IMAGE.align;
     },
     renderHTML: (a: Record<string, unknown>) => ({ "data-align": String(a.align ?? DEFAULT_IMAGE.align) }),
   },

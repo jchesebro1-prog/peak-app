@@ -82,7 +82,8 @@ export function ReviewCostSummary({ sections, totals }: { sections: SpecSection[
       </div>
       {(pkgBonus > 0 || estBonus > 0) && (
         <div style={{ fontSize: 11.5, color: "#5b616e", marginTop: 2 }}>
-          5% package bonus (payout) {fmt(pkgBonus)} · 2% estimator bonus {fmt(estBonus)}
+          {/* Jeff 2026-10-15 #19: the rates live in Estimating Rules, so the label names no percentage. */}
+          Package bonus (payout) {fmt(pkgBonus)} · estimator bonus {fmt(estBonus)}
         </div>
       )}
     </div>

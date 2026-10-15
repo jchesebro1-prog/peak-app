@@ -18,6 +18,7 @@ import { findingsPdfHref } from "@/lib/assessments/register";
 import { assessmentCardRows, chicagoDay, confirmedLine, isOpenFinding, openRatingCounts, profileFactRows, registerHref, startHref } from "@/lib/assessments/integration";
 import { ShortList } from "@/components/short-list";
 import ShortCodeEdit from "./short-code-edit";
+import NextAssessmentEdit from "./next-assessment-edit";
 
 const CARD: CSSProperties = { background: "#fff", border: "1px solid #ececf0", borderRadius: 12, boxShadow: "0 1px 2px rgba(0,0,0,.04)", marginBottom: 24, overflow: "hidden" };
 const HEAD: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, padding: "14px 18px 12px", borderBottom: "1px solid #f0f1f4" };
@@ -108,7 +109,7 @@ export async function AssessmentsCard({ siteId, customerId, leadId, projectId, t
   const user = await requireUser();
   const canStart = can("create", user.roles);
   const workScope = !!leadId || !!projectId;
-  const [list, findings, siteList] = await Promise.all([
+  const [list, findings, siteList, profile] = await Promise.all([
     listAssessments({
       ...(siteId ? { siteId } : {}),
       ...(!siteId && !workScope && customerId ? { customerId } : {}),
@@ -117,6 +118,8 @@ export async function AssessmentsCard({ siteId, customerId, leadId, projectId, t
     }),
     siteId ? findingsFor("site", siteId) : !workScope && customerId ? findingsFor("customer", customerId) : Promise.resolve([]),
     !siteId && !workScope && customerId ? sitesForCompany(customerId) : Promise.resolve([]),
+    // Jeff 2026-10-15 #10 — a venue's next assessment date (its reminder goes to the account rep 30 days ahead)
+    siteId && !workScope ? getVenueProfile(siteId) : Promise.resolve(null),
   ]);
   const openCounts = new Map<string, number>();
   for (const f of findings) if (isOpenFinding(f)) openCounts.set(f.assessmentId, (openCounts.get(f.assessmentId) ?? 0) + 1);
@@ -144,6 +147,11 @@ export async function AssessmentsCard({ siteId, customerId, leadId, projectId, t
           {canStart && <StartLink href={start} />}
         </span>
       </div>
+      {siteId && !workScope && (
+        <div style={{ padding: "9px 18px", borderBottom: "1px solid #f5f6f8" }}>
+          <NextAssessmentEdit siteId={siteId} at={profile?.nextAssessmentAt ?? null} canEdit={canStart} />
+        </div>
+      )}
       {rows.length > 0 ? (
         <ShortList
           initial={5}

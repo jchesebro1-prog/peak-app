@@ -1,5 +1,12 @@
 /* S2 Rigging — overhead rigging systems and access structures; two depths, screen or full intake
-   (rules R1–R12). Screening only: an ETCP-certified rigger does the actual inspection. */
+   (rules R1–R12). Screening only: an ETCP-certified rigger does the actual inspection.
+   Jeff 2026-10-15 #8 (the brief's open question "one scope with a toggle, or two scopes?"): ONE scope, with the
+   depth asked in the form — `rigging.depth`, Quick check ("screen") or Full inspection ("full"); unanswered reads
+   as the scope's own depth (the visit type's default). Quick check = everything the brief's R6 keeps: the rigging
+   system, the screen (presence, counts, red flags, documents, who operates) and the system-type, access/fall,
+   wire rope, training and pit lift modules R2–R5 and R8–R12 open. Full inspection adds only what R7 names — stage
+   dimensions and plaster line to rear wall, install history, the line set schedule and the hardware inventory
+   (FULL_INTAKE in rules.ts). Switching never deletes an answer: hidden questions keep theirs. */
 import type { ScopeDef } from "../types";
 import { answered, date, ftin, is, long, many, num, one, RULE_ONLY, text, yn } from "../q";
 
@@ -15,6 +22,10 @@ export const RIGGING_SCOPE: ScopeDef = {
       id: "rigging.system",
       title: "Rigging system",
       questions: [
+        one("rigging.depth", "Depth: quick check or full inspection", "rig_depth", {
+          help: "Quick check screens presence, counts, red flags, documents and who operates. Full inspection adds stage dimensions, install history, the line set schedule and the hardware inventory. Switching keeps every answer.",
+          when: { not: is("rigging.overhead", "none") },
+        }),
         one("rigging.overhead", "Overhead rigging system type", "overhead", { profile: true, required: true }),
         yn("rigging.hanging_positions", "Any hanging positions for fixtures?", { when: is("rigging.overhead", "none") }),
         many("rigging.access", "Grid, loading bridge or catwalk present", "rig_access"),

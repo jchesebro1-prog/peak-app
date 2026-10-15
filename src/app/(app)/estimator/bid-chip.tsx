@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { bidPanelAction, setBidDetailsAction, type BidDetailsResult } from "./bid-actions";
 import { postChanged } from "@/lib/popout/channel";
-import type { BidAddendum } from "@/lib/parties/bids";
+import { addedAddendumNos, addendumReviseConfirm, type BidAddendum } from "@/lib/parties/bids";
 import type { BidPanelVM } from "@/lib/parties/bid-vm";
 
 /*
@@ -162,6 +162,10 @@ export default function BidChip({
     setError("");
     setNotice("");
     try {
+      const wasSent = panel.status === "sent";
+      // #352 review M2: a new addendum on a sent, not-awarded bid reverts it to Draft — ask first.
+      const added = addedAddendumNos(panel.addenda, addenda);
+      if (wasSent && !panel.awardedPartyId && added.length > 0 && !window.confirm(addendumReviseConfirm(added))) return;
       const r = await setBidDetailsAction(quoteId, { dueAt: due, addenda });
       if (r.ok) {
         seq.current++; // an older in-flight load must not overwrite this fresher panel
@@ -171,7 +175,7 @@ export default function BidChip({
           onSync?.(r.sync);
           postChanged("quote", quoteId); // the status moved — other windows refresh (as changeStatus does)
         }
-        // The Bidders card (Send & track) reloads its plan: "Send revision to bidders" now applies.
+        // The Bidders card (Send & track) reloads its plan: "Send revision to all bidders" now applies.
         window.dispatchEvent(new CustomEvent("peak:bid-changed", { detail: { quoteId, source: "chip" } }));
         if (r.note) {
           setDueInput(toLocalInput(r.panel.dueAt));

@@ -28,7 +28,8 @@ export async function listBidders(quoteId: string): Promise<Bidder[]> {
  *  #348 (Jeff 2026-10-15): a save that ADDS an addendum number to a `sent` estimate moves it back to Draft through
  *  setStatus (the same transition the status select makes — history stamped, pipeline stage snapped, no approval
  *  gate on draft) inside the same lock and transaction, and returns `backToDraft` (the added numbers). A note /
- *  date edit, a removal or a due-date change never changes status. */
+ *  date edit, a removal or a due-date change never changes status, and an AWARDED bid never reverts (#352 review
+ *  M2). setStatus re-renders the PDF on the revise, so the next send prints the next Rev (#352 review I1). */
 export async function setBidDetails(
   quoteId: string,
   raw: unknown,
@@ -50,7 +51,8 @@ export async function setBidDetails(
         ...(addenda !== undefined ? { addenda } : {}),
       }));
       if (!saved?.bid) return { ok: false as const, error: "That estimate wasn't found." };
-      if (!addendumMovesToDraft(q.status, added)) return { ok: true as const, bid: saved.bid };
+      // #352 review M2: an awarded bid is decided — the addendum is recorded and the estimate stays Sent.
+      if (!addendumMovesToDraft(q.status, added, !!q.bid?.awardedPartyId)) return { ok: true as const, bid: saved.bid };
       try {
         await setStatus(quoteId, "draft", by ?? null);
       } catch (e) {

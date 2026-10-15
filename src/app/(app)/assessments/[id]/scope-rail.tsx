@@ -47,7 +47,8 @@ export default function ScopeRail({
             return (
               <label key={s.code} className="as-scope-opt">
                 <input type="checkbox" checked={on} disabled={s.code === "S0"} onChange={(e) => onToggle(s.code, e.target.checked)} />
-                <span>{s.title}{s.depths?.length ? <span className="as-mono-sm"> ({sel?.depth ?? s.depths[0]})</span> : null}</span>
+                {/* Jeff 2026-10-15 #8 — rigging's depth is a question in the form now, not a scope setting. */}
+                <span>{s.title}</span>
                 {!on && offWithAnswers.includes(s.code) && <span className="as-mono-sm" title="Answers are kept while the scope is off"> · answers kept</span>}
               </label>
             );

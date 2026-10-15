@@ -221,13 +221,16 @@ Estimating Rules — these just need real values before go-live)
   makes the book outdated — decision A from #14). ✦ keep both as built
   ☐ builders should show the oldest date too (a build with one stale part
   reads as stale) ☐ show both ("as of … / oldest line …") ☐ other: ______
-- **E7.** Consulting projects added by hand (D155, built 2026-09-21) seed
+- ~~**E7.** Consulting projects added by hand (D155, built 2026-09-21) seed
   EVERY phase on the Settings phase menu, all pending — the "+ New consulting
   project" modal has no phase picker. A project born from a won quote is
   different: it seeds only the phases ticked on that proposal.
   ✦ keep full-menu — an unwanted phase is removed on the project page in one
   click ☐ give the modal a phase checklist (same list the fee proposal uses)
-  ☐ seed a shorter default set instead: ______ ☐ other: ______
+  ☐ seed a shorter default set instead: ______ ☐ other: ______~~
+  **ANSWERED 2026-10-15 (Jeff): give the modal a phase checklist, every phase
+  ticked by default; only ticked phases get tasks and milestones. Built in
+  #353 (D1137).**
 
 ## F. Service-line product decisions (from IDEAS.md)
 
@@ -441,11 +444,13 @@ Install projects and system quotes now run on Daylite-named pipelines you can
 edit in Settings → Pipelines (D236–D239), and `/import/daylite` brings in the
 project and opportunity history (D241–D242).
 
-- **O1.** Does the **BID SPEC** pipeline have a stage before **Collect
+- ~~**O1.** Does the **BID SPEC** pipeline have a stage before **Collect
   Information**? The Daylite export numbers Create BID as "3", which suggests
   one. ✦ no — Collect Information is first ☐ yes, it is called: ______ (it
   would be added as a Draft stage; you can also add it yourself in Settings →
-  Pipelines)
+  Pipelines)~~ **ANSWERED 2026-10-15 (Jeff): yes — "Lead / Qualify", a Draft
+  stage before Collect Information, added to stored pipelines once. Built in
+  #353 (D1135).**
 
 ## P. Morning triage (built 2026-10-10, #324)
 
@@ -494,8 +499,10 @@ Jeff confirmed all four calls as built (logged as D762 in DECISIONS.md):
 Attendees, per-person invites, conflict checks and Edit on scheduled visits
 (D775–D783).
 
-- **T1.** **Who can edit a scheduled visit.** Anyone signed in can edit/re-lead a scheduled visit or remove attendees, which emails/cancels teammates' calendar copies — keep open, or restrict to the lead/approvers?
-  ✦ keep open to everyone signed in ☐ only the lead and approvers ☐ other: ______
+- ~~**T1.** **Who can edit a scheduled visit.** Anyone signed in can edit/re-lead a scheduled visit or remove attendees, which emails/cancels teammates' calendar copies — keep open, or restrict to the lead/approvers?
+  ✦ keep open to everyone signed in ☐ only the lead and approvers ☐ other: ______~~
+  **ANSWERED 2026-10-15 (Jeff): only the lead and approvers (everyone holds
+  `approve` today, so nothing changes until that does). Built in #353 (D1136).**
 
 ## U. Auto task calendar (built 2026-10-10, #327)
 

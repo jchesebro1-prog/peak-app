@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   contactEmails,
@@ -23,6 +23,32 @@ export function displayName(c: Pick<ContactRow, "firstName" | "lastName">): stri
 
 function nameSorted(rows: ContactRow[]): ContactRow[] {
   return rows.sort((a, b) => displayName(a).localeCompare(displayName(b)));
+}
+
+/**
+ * Jeff 2026-10-15 #11 — the Companies directory's "search everything": the
+ * home companies of live contacts whose name, title or any email contains
+ * `query` (case-insensitive), matched in SQL so the directory never loads every
+ * contact. LIKE metacharacters in the query are literal.
+ */
+export async function companyIdsWithContactMatching(query: string): Promise<Set<string>> {
+  const q = query.trim().toLowerCase();
+  const out = new Set<string>();
+  if (!q) return out;
+  const pattern = "%" + q.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
+  const db = await getDb();
+  const rows = await db
+    .selectDistinct({ companyId: contacts.homeCompanyId })
+    .from(contacts)
+    .where(
+      and(
+        eq(contacts.deleted, false),
+        sql`(lower(${contacts.firstName} || ' ' || ${contacts.lastName} || ' ' || ${contacts.title}) LIKE ${pattern}
+          OR EXISTS (SELECT 1 FROM ${contactEmails} WHERE ${contactEmails.contactId} = ${contacts.id} AND lower(${contactEmails.email}) LIKE ${pattern}))`
+      )
+    );
+  for (const r of rows) if (r.companyId) out.add(r.companyId);
+  return out;
 }
 
 export async function allContacts(opts?: {

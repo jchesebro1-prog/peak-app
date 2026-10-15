@@ -8410,7 +8410,7 @@ import {
   const ed = DEFAULT_QUOTE_PIPELINES.find((p) => p.id === "estimate-design")!;
   const bs = DEFAULT_QUOTE_PIPELINES.find((p) => p.id === "bid-spec")!;
   ok(ed.stages.map((s) => s.id + ":" + s.tag).join(",") === "first-contact:draft,design:draft,presentation:sent,acceptance:won", "pipelines: estimate-design seed");
-  ok(bs.stages.map((s) => s.id + ":" + s.tag).join(",") === "collect-info:draft,create-bid:draft,bid-sent:sent,awarded:won", "pipelines: bid-spec seed");
+  ok(bs.stages.map((s) => s.id + ":" + s.tag).join(",") === "lead-qualify:draft,collect-info:draft,create-bid:draft,bid-sent:sent,awarded:won", "pipelines: bid-spec seed (Jeff 2026-10-15 #42: Lead / Qualify first)");
   ok(DEFAULT_PIPELINES.defaultQuotePipelineId === "estimate-design", "pipelines: default quote pipeline");
   for (const p of DEFAULT_PROJECT_PIPELINES) ok(validateProjectPipeline(p).length === 0, `pipelines: seed ${p.id} validates`);
   for (const p of DEFAULT_QUOTE_PIPELINES) ok(validateQuotePipeline(p).length === 0, `pipelines: seed ${p.id} validates`);
@@ -8625,7 +8625,7 @@ async function quotesPipelineAsyncChecks(): Promise<void> {
     const b = await Q.create({ name: "pl-bid", customer: "Test" });
     await Q.setQuoteStage(b.id, "design", "Test");
     const sw = await Q.setQuotePipeline(b.id, "bid-spec");
-    ok(sw?.pipelineId === "bid-spec" && sw.stage === "collect-info", "quotes: switching estimate-design → bid-spec lands on Collect Information");
+    ok(sw?.pipelineId === "bid-spec" && sw.stage === "lead-qualify", "quotes: switching estimate-design → bid-spec lands on its first stage, Lead / Qualify (Jeff 2026-10-15 #42)");
     ok(!(await Q.setQuotePipeline(b.id, "nope")), "quotes: switching to an unknown pipeline is refused");
     const bs = await Q.setStatus(b.id, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
     ok(bs?.stage === "bid-sent", "quotes: status snaps within the quote's own pipeline");
@@ -11353,7 +11353,9 @@ import { assessmentChecks, assessmentDbChecks } from "./test-assessments";
 import { partyChecks, partyDbChecks } from "./test-parties";
 import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
 import { vendorChecks, vendorDbChecks, vendorPdfDbChecks, vendorPdfPureChecks, vendorPdfFillChecks } from "./test-vendors";
+import { oct15PureChecks, oct15DbChecks } from "./test-oct15-estimating";
 import { vaNotesChecks, vaNotesDbChecks } from "./test-va-notes";
+import { batch3PureChecks, batch3DbChecks } from "./test-oct15-batch3";
 import { briefPureChecks, briefDraftDbChecks, briefBuildDbChecks, briefCardChecks, briefReminderChecks } from "./test-brief";
 import { suggestPureChecks, suggestStoreDbChecks, suggestRoutePins, suggestPipelineDbChecks, suggestPanelChecks, suggestPanelPins, suggestSaveDbChecks, suggestEntryChecks, suggestEntryDbChecks, suggestEntryPins } from "./test-suggest";
 import { askPureChecks, askSearchDbChecks, askToolsDbChecks, askRunnerChecks, askUiChecks } from "./test-ask";
@@ -11728,7 +11730,9 @@ seeded()
   .then(() => assessmentChecks(ok)).then(() => assessmentDbChecks(ok))
   .then(() => partyChecks(ok)).then(() => partyDbChecks(ok))
   .then(() => bidChecks(ok)).then(() => bidDbChecks(ok)).then(() => bidSendChecks(ok)).then(() => bidSendFakeChecks(ok)).then(() => bidSendDbChecks(ok)).then(() => bidFollowupChecks(ok)).then(() => bidFollowupDbChecks(ok)).then(() => vendorChecks(ok)).then(() => vendorDbChecks(ok)).then(() => vendorPdfDbChecks(ok)).then(() => vendorPdfPureChecks(ok)).then(() => vendorPdfFillChecks(ok))
+  .then(() => oct15PureChecks(ok)).then(() => oct15DbChecks(ok))
   .then(() => vaNotesChecks(ok)).then(() => vaNotesDbChecks(ok))
+  .then(() => batch3PureChecks(ok)).then(() => batch3DbChecks(ok))
   .then(() => briefPureChecks(ok))
   .then(() => briefDraftDbChecks(ok))
   .then(() => briefBuildDbChecks(ok))
@@ -13817,7 +13821,7 @@ ok(
   // Estimate/Design's Acceptance/won.
   const mismatched = plan.quotes.find((q) => q.name.startsWith("MISMATCHED"))!;
   ok(
-    mismatched.pipelineId === "bid-spec" && mismatched.stage === "collect-info" && mismatched.status === "draft",
+    mismatched.pipelineId === "bid-spec" && mismatched.stage === "lead-qualify" && mismatched.status === "draft",
     "daylite: an Estimate/Design stage label on a BID SPEC row resolves to bid-spec's own first stage, not the other pipeline's mapping"
   );
   ok(plan.stats.unmappedOppStages["acceptance"] === 1, "daylite: the cross-pipeline label is counted in stats.unmappedOppStages");
@@ -22708,13 +22712,12 @@ import { visibleRows as slVisibleRows, filterRows as slFilterRows, visibleGroupF
   ok(companyPage224.includes("ShortList"), "#224: the company record renders cards through ShortList");
 
   const directory224 = read224("src/app/(app)/companies/page.tsx");
-  ok(/sp\.n\b/.test(directory224) && directory224.includes('params.set("n"'), "#224: the Companies directory reads and writes the `?n=` page-size param");
-  ok(/showMoreHref|Show more/.test(directory224), "#224: the Companies directory has a Show-more control");
+  // Jeff 2026-10-15 #11 replaced #224's `?n=` "Show more" with 50-a-page Prev / Next (`?page=`, src/lib/list-paging.ts).
+  ok(/parsePageParam\(one\(sp\.page\)\)/.test(directory224) && directory224.includes("<ListPager"), "#224 → #11: the Companies directory pages with ?page= and the shared pager");
 
   const venues224 = read224("src/app/(app)/venues/page.tsx");
-  ok(/sp\.n\b/.test(venues224) && venues224.includes('p.set("n"'), "#224: the Venues directory reads and writes the `?n=` page-size param");
+  ok(/parsePageParam\(one\(sp\.page\)\)/.test(venues224) && venues224.includes("<ListPager"), "#224 → #11: the Venues directory pages with ?page= and the shared pager");
   ok(!/const PAGE = 200/.test(venues224), "#224: the old hard 200-row cap is gone from Venues");
-  ok(/Show more/.test(venues224), "#224: the Venues directory has a Show-more control");
 
   const shortListComp224 = read224("src/components/short-list.tsx");
   ok(shortListComp224.startsWith('"use client"'), "#224: ShortList is a client component");
@@ -23515,7 +23518,7 @@ import { parsePageSize as fr224ParsePageSize } from "@/lib/short-list";
     ["companies/page.tsx", companiesSrc224],
     ["venues/page.tsx", venuesSrc224],
   ] as const) {
-    ok(src.includes('from "@/lib/short-list"'), `#224: ${name} imports the shared short-list module`);
+    ok(src.includes('from "@/lib/list-paging"'), `#224 → #11: ${name} imports the shared list-paging module`);
     ok(!/function parsePageSize\(/.test(src), `#224: ${name} no longer defines its own local parsePageSize`);
   }
   const shortListLibSrc224 = read("src/lib/short-list.ts");
@@ -26225,7 +26228,7 @@ import { fixtureId as fixtureId222, registerFixture as registerFixture222 } from
   };
   const d = quoteDocumentDataFor(q as never, cust as never, { companyName: "Peak", logoDark: null });
   ok(d.custName === "Civic Center" && d.venueLabel === "Theater — Denver" && d.hasAttn && d.attnLine === "Pat Lee · TD", "#222 quoteDocumentDataFor: customer, venue and attn exactly as the Estimator preview shows them");
-  ok(d.revNum === 2 && d.revDateMs === 1234 && d.detail === "sectioned" && d.pdfPrices === false && d.pdfQty === true && d.paymentTerms === "Net 30", "#222 quoteDocumentDataFor: revision, date, saved pdfOptions, terms");
+  ok(d.revNum === 1 && d.revDateMs === 1234 && d.detail === "sectioned" && d.pdfPrices === false && d.pdfQty === true && d.paymentTerms === "Net 30", "#222 quoteDocumentDataFor: revision (never sent → Rev 1, Jeff 2026-10-15 #13), date, saved pdfOptions, terms");
   ok(d.t.grand === 0 && d.sections.length === 0 && d.ownerName === "Jeff Chesebro" && d.preparedByName === "Jeff Chesebro" && d.companyName === "Peak", "#222 quoteDocumentDataFor: totals from saved sections, owner, company");
   const bare = quoteDocumentDataFor({ id: "Q-10", name: "", customer: "Walk-in", customerId: null, owner: "", updatedAt: 5, createdAt: 5 } as never, null, { companyName: "", logoDark: null });
   ok(
@@ -28403,9 +28406,10 @@ function e223Src(rel: string): string {
 {
   const hub = e223Src("src/app/(app)/quotes/page.tsx");
   ok(!hub.includes("{q.id} · {owner}") && hub.includes("{displayQuoteNumber(q)} · {owner}"), "#223 quotes hub: rows show the estimate number, not the internal id");
-  ok(hub.includes("quoteMatchesSearch(x.hay, searchTerm)") && hub.includes('name="q"'), "#223 quotes hub: a search box filters by number, old id, name and customer");
+  // Jeff 2026-10-15 #11: the search moved into the pure quotesHubView (over every quote, before the page is cut).
+  ok(hub.includes("quotesHubView(") && /q: searchTerm/.test(hub) && hub.includes('name="q"') && e223Src("src/lib/quotes-hub-view.ts").includes("bidders: bidderNames(q.id)"), "#223 quotes hub: a search box filters by number, old id, name and customer");
   ok(hub.includes("was {q.id}"), "#223 quotes hub: the selected panel shows 'was Q-…' in small type");
-  ok(hub.includes("quoteSearchRank(") && hub.includes("number={displayQuoteNumber(q)}"), "#223 quotes hub: exact-number hits list first; revision history names the number");
+  ok(e223Src("src/lib/quotes-hub-view.ts").includes("quoteSearchRank(") && hub.includes("number={displayQuoteNumber(q)}"), "#223 quotes hub: exact-number hits list first; revision history names the number");
   ok(e223Src("src/app/(app)/quotes/controls.tsx").includes("Priced snapshots of {number || id}"), "#223 quotes hub: the revision-history drawer names the quote by its number");
   const search = e223Src("src/lib/search/global-search.ts");
   ok(search.includes('listDocsByField("quotes", "estNo"') && search.includes('listDocsByField("leads", "estNo"') && search.includes("quoteMatchesSearch("), "#223 ⌘K: typed numbers are looked up by value; quotes also match by old id");
@@ -30622,7 +30626,7 @@ async function portal245AcceptAsyncChecks(): Promise<void> {
       source: "customer", customerId: CO, siteId: null, projectId: null, notes: "", uploadedBy: "Pat Buyer",
     });
     registerFixture("documents", ownDoc.id);
-    const okR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "PO 44812", poDocumentId: ownDoc.id }, NOW);
+    const okR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "PO 44812", poDocumentId: ownDoc.id, signerName: "Pat Buyer", signerTitle: "Director" }, NOW, { notify: async () => {} }); // #15: signed
     ok(okR.ok, "#245 accept: a firm in-date quote accepts with purchaseMethod po + notes + the customer's own PO file");
     const q1 = await d245GetQuote(genA.quoteId);
     ok(
@@ -30649,7 +30653,7 @@ async function portal245AcceptAsyncChecks(): Promise<void> {
     );
     const badNoteR = await d245DeclinePortalAcceptance(genA.quoteId, "Staff", "   ");
     ok(!badNoteR.ok, "#245 decline: an empty/whitespace-only note is refused");
-    const reAcceptR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "check", notes: "", poDocumentId: null }, NOW);
+    const reAcceptR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "check", notes: "", poDocumentId: null, signerName: "Pat Buyer", signerTitle: "Director" }, NOW, { notify: async () => {} });
     ok(reAcceptR.ok, "#245 accept: the customer can accept again after a staff decline (still 'sent', portalAcceptance was cleared)");
     ok((await d245GetQuote(genA.quoteId))?.portalDecline === null, "#245 accept: a fresh acceptance clears the prior portalDecline");
 
@@ -32636,7 +32640,7 @@ async function portal248RefreshAsyncChecks(): Promise<void> {
     // Accept (unchanged — canAcceptPortal doesn't filter by source) then
     // staff decline, widened here to cover portal-service (#248 controller
     // decision: decline accepts either portal source).
-    const acc = await d245AcceptPortal(sess, { quoteId: gen.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, EXPIRED_NOW);
+    const acc = await d245AcceptPortal(sess, { quoteId: gen.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "Pat Buyer", signerTitle: "Director" }, EXPIRED_NOW, { notify: async () => {} });
     ok(acc.ok, "#248 accept: an accepted portal-service quote accepts exactly like portal-catalog (canAcceptPortal untouched)");
     const declineR = await d245DeclinePortalAcceptance(gen.quoteId, "Staff", "Need a PO");
     ok(declineR.ok, "#248 decline: staff decline, widened to portal-service, declines a real acceptance");
@@ -48337,10 +48341,10 @@ import type { SpecItem as N293sItem, SpecSection as N293sSec } from "@/app/(app)
 
   // ---- the Load pick ----
   const pick = n293sForLoad(QS, "sysA")!;
-  ok(!!pick && eq(pick.section.items.map((x) => x.id), [1, 2]) && pick.vendorLinesDropped === 1 && pick.source.tierMargin === 0.3,
-    "#293s load: vendor-quote lines and the Rewards credit are left out (counted); the snapshot's tier is the source tier");
-  ok(eq(pick.section.keyProducts, [{ lineKey: "1", sku: "ETC-S4", text: "S4 para", photo: true }]) && !("room" in pick.section) && pick.section.narrative === "  Our lighting.  ",
-    "#293s load: blocks on dropped or missing lines go, room (job-specific) goes, the narrative carries");
+  ok(!!pick && eq(pick.section.items.map((x) => x.id), [1, 2, 5]) && pick.vendorLines === 1 && pick.source.tierMargin === 0.3,
+    "#293s load: the Rewards credit is left out; vendor-quote lines come along (counted — Jeff 2026-10-15 #21); the snapshot's tier is the source tier");
+  ok(eq(pick.section.keyProducts, [{ lineKey: "1", sku: "ETC-S4", text: "S4 para", photo: true }, { lineKey: "5", sku: "VQ-1", text: "Vendor para", photo: true }]) && !("room" in pick.section) && pick.section.narrative === "  Our lighting.  ",
+    "#293s load: blocks on missing lines go, room (job-specific) goes, the narrative carries");
   ok(n293sForLoad(QS, "sysL") === null && n293sForLoad(QS, "nope") === null && n293sForLoad(QD, "d") === null && n293sForLoad(QS, "sysLive") === null,
     "#293s load: labor, unknown, draft and live-only-after-send systems are refused");
   ok(n293sGone === "That estimate is no longer available", "#293s load: the gone message is the spec's copy");
@@ -48348,16 +48352,16 @@ import type { SpecItem as N293sItem, SpecSection as N293sSec } from "@/app/(app)
   // ---- placement on the client ----
   let n = 500;
   const placed = n293sPlace({ ...pick.section, freightAuto: true, freightPct: 9 }, { id: "sys777", nextId: () => ++n, autoFreightPct: 4 });
-  ok(placed.id === "sys777" && eq(placed.items.map((x) => x.id), [501, 502]) && eq(placed.keyProducts, [{ lineKey: "501", sku: "ETC-S4", text: "S4 para", photo: true }]),
+  ok(placed.id === "sys777" && eq(placed.items.map((x) => x.id), [501, 502, 503]) && eq(placed.keyProducts, [{ lineKey: "501", sku: "ETC-S4", text: "S4 para", photo: true }, { lineKey: "503", sku: "VQ-1", text: "Vendor para", photo: true }]),
     "#293s place: fresh section id, items re-id'd through nextId, blocks follow their lines");
   ok(placed.freightPct === 4 && n293sPlace({ ...pick.section, freightPct: 9 }, { id: "s", nextId: () => ++n, autoFreightPct: 4 }).freightPct === 9,
     "#293s place: an auto-freight system takes this estimate's default; a hand-set freight is kept");
   ok(!("keyProducts" in n293sPlace(sec("z", "Z", [it(1, "Z")]), { id: "s", nextId: () => ++n, autoFreightPct: 0 })), "#293s place: no blocks → no key (back-compat shape)");
 
   // ---- notices and row text ----
-  ok(n293sLoadNotice({ systemName: "Main Lighting", estNumber: "EST-1005", costsUpdated: 3, tierRepriced: 0, vendorLinesDropped: 1 }) ===
-    "Loaded Main Lighting from EST-1005 · 3 parts updated to today's cost · 1 vendor-quote line left out", "#293s notice: Load reports cost moves and left-out vendor lines");
-  ok(n293sLoadNotice({ systemName: "A", estNumber: "Q-1", costsUpdated: 1, tierRepriced: 2, vendorLinesDropped: 0 }) ===
+  ok(n293sLoadNotice({ systemName: "Main Lighting", estNumber: "EST-1005", costsUpdated: 3, tierRepriced: 0, vendorLinesFlagged: 1 }) ===
+    "Loaded Main Lighting from EST-1005 · 3 parts updated to today's cost · 1 vendor-quote line at the old vendor price — re-quote", "#293s notice: Load reports cost moves and flagged vendor lines (Jeff 2026-10-15 #21)");
+  ok(n293sLoadNotice({ systemName: "A", estNumber: "Q-1", costsUpdated: 1, tierRepriced: 2, vendorLinesFlagged: 0 }) ===
     "Loaded A from Q-1 · 1 part updated to today's cost · 2 lines re-priced to this estimate's tier", "#293s notice: singular/plural and the tier move");
   const rowHit = { ...sHit, status: "won" as const, at: Date.UTC(2026, 8, 15, 18) };
   ok(n293sRowMeta(rowHit) === "Lakefront HS · EST-1005 · Won · Sep 15, 2026" && n293sRowCounts(sHit) === "3 lines · 2 key products",
@@ -48493,11 +48497,14 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
 
   // Load: re-read, re-priced at today's catalog and the target tier, vendor line left out.
   const r = await n293sLoad(`${QID}:1:sysLib`, 0.2);
-  ok(r.ok && r.section.items.length === 1 && r.section.items[0].cost === 120 && r.section.items[0].price === n293sSeed({ cost: 120 }, 0.2) && r.costsUpdated === 1 && r.tierRepriced === 1 && r.vendorLinesDropped === 1,
-    "#293s load (DB): today's cost (100 → 120), the target tier's seed, one vendor-quote line left out");
+  const vq = r.ok ? r.section.items.find((x) => x.sku === "VQ-293") : undefined;
+  ok(r.ok && r.section.items.length === 2 && r.section.items[0].cost === 120 && r.section.items[0].price === n293sSeed({ cost: 120 }, 0.2) && r.costsUpdated === 1 && r.tierRepriced === 1 && r.vendorLinesFlagged === 1,
+    "#293s load (DB): today's cost (100 → 120), the target tier's seed, one vendor-quote line flagged (Jeff 2026-10-15 #21)");
+  ok(!!vq && vq.cost === 50 && vq.price === 80 && !("vendorQuoteId" in vq) && vq.internalNote === "Old vendor price — re-quote",
+    "#293s load (DB): the vendor line comes in at its last price, unlinked from the source's vendor quote, flagged \"Old vendor price — re-quote\" (Jeff 2026-10-15 #21)");
   ok(r.ok && r.section.name === "Test293 Library Lighting" && r.section.narrative === "Library intro 293." && r.section.presentation === "narrative" &&
-     JSON.stringify(r.section.keyProducts) === JSON.stringify([{ lineKey: "1", sku: P, text: "Lib para", photo: true }]) && !("room" in r.section) && r.section.id !== "sysLib",
-    "#293s load (DB): the SENT system's name, narrative, presentation and key products carry; the vendor line's block and the room don't");
+     JSON.stringify(r.section.keyProducts) === JSON.stringify([{ lineKey: "1", sku: P, text: "Lib para", photo: true }, { lineKey: "2", sku: "VQ-293", text: "Vendor para", photo: true }]) && !("room" in r.section) && r.section.id !== "sysLib",
+    "#293s load (DB): the SENT system's name, narrative, presentation and key products carry (the vendor line's too, #21); the room doesn't");
   ok(r.ok && (/^EST-\d+/.test(r.estNumber) || r.estNumber === QID), "#293s load (DB): the notice names the source estimate");
   const draftLoad = await n293sLoad(`${QDRAFT}:live:sysLib`, 0.2);
   ok(!draftLoad.ok && draftLoad.error === "That estimate is no longer available", "#293s load (DB): a draft's system can't be loaded");
@@ -48821,9 +48828,9 @@ import { revisionDocFields as n293tDocFields, type Quote as N293tQuote, type Quo
   // ---- BOM view ----
   const narr = p293Props({ pdfOptions: { detail: "sectioned", pdfQty: false, pdfNotes: false, pdfPrices: false, pdfItemizedAppendix: true } });
   const bom = n293tBom(narr);
-  ok(bom.detail === "itemized" && bom.pdfQty && bom.pdfNotes && bom.pdfPrices === false && bom.pdfItemizedAppendix === false &&
+  ok(bom.detail === "itemized" && bom.pdfQty === false && bom.pdfNotes && bom.pdfPrices === false && bom.pdfItemizedAppendix === false &&
      bom.sections.every((s) => s.presentation === "itemized"),
-    "#293t BOM view: every system itemized, quantities and descriptions on, prices kept as chosen, appendix off");
+    "#293t BOM view: every system itemized, descriptions on, prices and quantities kept as chosen (Jeff 2026-10-15 #14), appendix off");
   ok(narr.sections.some((s) => s.presentation === "narrative") && narr.detail === "sectioned", "#293t BOM view: the input props are not mutated");
   const narrHtml = p293Render(p293Props());
   const bomHtml = p293Render(n293tBom(p293Props()));
@@ -49225,8 +49232,8 @@ async function onlineDoc293tAsyncChecks(): Promise<void> {
   const st2 = n293tState(q2);
   const p2 = st2.kind === "ok" ? await n293tLoad(q2, { revision: st2.rev, photos: webHref }) : null;
   const h2 = p2 ? [p293Render({ ...p2, layout: "web" }), p293Render({ ...n293tBom(p2), layout: "web" })].join("\n") : "";
-  // Final fix 1: no PDF was copied, so Rev N follows the PDF's counting rule (1 revision before it).
-  ok(st2.kind === "ok" && st2.rev.rev === 2 && (q2.revisions || []).length === 2 && !!p2 && p2.revNum === 1 &&
+  // Final fix 1: no PDF was copied; Jeff 2026-10-15 #13: each send stamped its Rev at the cut (1, then 2).
+  ok(st2.kind === "ok" && st2.rev.rev === 2 && (q2.revisions || []).length === 2 && !!p2 && p2.revNum === 2 &&
      h2.includes("Second intro 293t.") && h2.includes("Second note 293t.") && h2.includes("Second line 293t") && !/SECRET-293/.test(h2),
     "#293t loader (DB): with two sent revisions the page renders the latest only — nothing of the earlier one, no internal note (Narrative + BOM, web)");
 }
@@ -49407,8 +49414,8 @@ import { RERENDER_MIN_MS as n293tFRerenderMinMs, stampRerenderDeadlineMs as n293
   // ---- one counting rule: what quoteDocumentDataFor prints is documentRevStamp ----
   const cases = [qf([]), qf([r(1, "sent", 1), r(2, "manual", 2), r(3, "sent", 3)]), qf([r(1, "sent", 1)], { updatedAt: 0 })];
   ok(cases.every((q) => { const d = n293tDocData(q, null, SET); const s = n293tFStamp(q); return s.revNum === d.revNum && s.revDateMs === d.revDateMs; }) &&
-     n293tFStamp(cases[1]).revNum === 3 && n293tFStamp(cases[2]).revDateMs === 7,
-    "#293t final 1: documentRevStamp is exactly the Rev N + date quoteDocumentDataFor prints (revisions so far, at least 1; updatedAt, else createdAt)");
+     n293tFStamp(cases[1]).revNum === 2 && n293tFStamp(cases[2]).revDateMs === 7,
+    "#293t final 1 (Rev = send number since Jeff 2026-10-15 #13): documentRevStamp is exactly the Rev N + date quoteDocumentDataFor prints (a sent quote: its latest send's Rev; updatedAt, else createdAt)");
   const ready: N293tFPdf = { status: "ready", at: 10, savedAt: 5, blobPath: "p", printed: { revNum: 2, revDateMs: 5 } };
   const pend = n293tFPending(ready, 20, 21);
   const settled = n293tFSettle(pend, 20, { ok: true, blobPath: "p2", printed: { revNum: 3, revDateMs: 20 } }, 30);
@@ -49441,9 +49448,9 @@ import { RERENDER_MIN_MS as n293tFRerenderMinMs, stampRerenderDeadlineMs as n293
   const live = qf([rev1, rev2], { updatedAt: T3 + DAY });
   const webProps = n293tDocData(n293tAsOf(live, rev2), null, SET);
   const hdr = n293tHeader(live, rev2);
-  ok(pdfProps.revNum === 1 && webProps.revNum === pdfProps.revNum && webProps.revDateMs === pdfProps.revDateMs && webProps.revDateMs === T2,
-    "#293t final 1: recall + edit + resend on a later day — the online document prints the PDF's Rev 1 and save date, not rev 2 / the send day");
-  ok(hdr === `EST-1007 · Rev 1 · sent ${chicago(T2)}` && !hdr.includes(chicago(T3)),
+  ok(pdfProps.revNum === 2 && webProps.revNum === pdfProps.revNum && webProps.revDateMs === pdfProps.revDateMs && webProps.revDateMs === T2,
+    "#293t final 1: recall + edit + resend on a later day — the online document prints the PDF's Rev (2 since Jeff 2026-10-15 #13 — never Rev 1 twice) and save date, not the send day");
+  ok(hdr === `EST-1007 · Rev 2 · sent ${chicago(T2)}` && !hdr.includes(chicago(T3)),
     "#293t final 1: the online header line names the PDF's Rev and date too");
   const firstWeb = n293tDocData(n293tAsOf(qf([rev1]), rev1), null, SET);
   ok(firstWeb.revNum === 1 && firstWeb.revDateMs === T1 - 60_000 && n293tHeader(qf([rev1]), rev1) === `EST-1007 · Rev 1 · sent ${chicago(T1 - 60_000)}`,
@@ -49478,8 +49485,8 @@ import { RERENDER_MIN_MS as n293tFRerenderMinMs, stampRerenderDeadlineMs as n293
     "#293t fix round 2: the generator re-renders at most once, only for a still-pending save with budget left, under a deadline signal");
   const qdd = rd("src/lib/quote-pdf/quote-document-data.ts");
   ok(qdd.includes("const stamp = documentRevStamp(q);") && qdd.includes("revNum: stamp.revNum,") && qdd.includes("revDateMs: stamp.revDateMs,") &&
-     rd("src/lib/quote-pdf/state.ts").includes("return { revNum: Math.max(1, q.revisions?.length || 1), revDateMs: q.updatedAt || q.createdAt || 0 };"),
-    "#293t final 1: the PDF's Rev/date rule is unchanged, now named once (documentRevStamp)");
+     rd("src/lib/quote-pdf/state.ts").includes("return { revNum: shownAsSent && max > 0 ? max : max + 1, revDateMs };"),
+    "#293t final 1: the PDF's Rev/date rule is named once (documentRevStamp; the send number since Jeff 2026-10-15 #13)");
 
   // ---- item 7: the print token's leading zero ----
   const S = "test-secret-293tf";
@@ -49585,9 +49592,9 @@ async function finalFix293tAsyncChecks(): Promise<void> {
       await tick();
       await send(QA);
       const w2 = await web(QA);
-      ok(!!w2 && !!seen2.v && w2.rev.rev === 2 && seen2.v.revNum === 1 && w2.props.revNum === seen2.v.revNum && w2.props.revDateMs === seen2.v.revDateMs &&
-         w2.props.revDateMs !== w2.rev.at && w2.rev.pdfSavedAt === saved2 && w2.header.includes(" · Rev 1 · ") && w2.props.quoteNote === "Second note 293tF",
-        "#293t final 1 (DB): recall + edit + resend — the online pages print the PDF's Rev 1 and save date, not the revision's own Rev 2 / send time");
+      ok(!!w2 && !!seen2.v && w2.rev.rev === 2 && seen2.v.revNum === 2 && w2.props.revNum === seen2.v.revNum && w2.props.revDateMs === seen2.v.revDateMs &&
+         w2.props.revDateMs !== w2.rev.at && w2.rev.pdfSavedAt === saved2 && w2.header.includes(" · Rev 2 · ") && w2.props.quoteNote === "Second note 293tF",
+        "#293t final 1 (DB): recall + edit + resend — the revised draft's PDF prints the next Rev (2, Jeff 2026-10-15 #13 — never Rev 1 twice) and the online pages print it and its save date, not the send time");
 
       // 3. Save + send in one action (the render runs AFTER the cut): the PDF says Rev 2 — and so do the pages.
       const QB = fixtureId(293, "t-final-onesave");
@@ -49635,8 +49642,8 @@ async function finalFix293tAsyncChecks(): Promise<void> {
       await tick();
       await send(QC);
       const w4 = await web(QC);
-      ok(!!w4 && !!w4.rev.pdfBlobPath && w4.rev.docFields?.revNo === undefined && w4.rev.pdfSavedAt === savedC && w4.props.revNum === 1 && w4.props.revDateMs === savedC,
-        "#293t final 1 (DB): an unstamped copy derives the PDF counting rule — Rev 1, the copied file's savedAt");
+      ok(!!w4 && !!w4.rev.pdfBlobPath && w4.rev.docFields?.revNo === 1 && w4.rev.docFields?.issuedAt === undefined && w4.rev.pdfSavedAt === savedC && w4.props.revNum === 1 && w4.props.revDateMs === savedC,
+        "#293t final 1 (DB): an unstamped copy keeps the Rev the send stamped at the cut (1, Jeff 2026-10-15 #13) and the copied file's savedAt");
 
       // 5. Fix round 2 — the quote moves during render 1 only (the Send click mid-render): one re-render, its stamp recorded.
       const mkRace = async (tag: string) => {
@@ -49978,7 +49985,8 @@ import { qd293Props as mfdQdProps, qd293Sections as mfdQdSections, renderQuoteDo
   const html = mfdQdRender({ ...mfdQdProps({ sections: secs }), keyProductPhotos: { "SKU-5": { src: "data:image/png;base64,QUFB", alt: "Five" } } });
   ok(html.includes('src="/placeholders/allowance.webp"') && html.includes('src="/placeholders/custom-device.webp"') && html.includes('src="data:image/png;base64,QUFB"'),
     "mfr images: an allowance/custom key product prints its placeholder; a catalog photo still prints");
-  ok((html.match(/<img[^>]+float:right;width:34%/g) || []).length === 3 && html.includes("Budget allowance — Fixture allowance"), "mfr images: placeholders float like a photo; a catalog block with no photo prints full width");
+  ok((html.match(/<img[^>]+float:right;width:34%/g) || []).length === 2 && (html.match(/<img[^>]+float:left;width:34%/g) || []).length === 1 && html.includes("Budget allowance — Fixture allowance"),
+    "mfr images: placeholders float like a photo (alternating right, left, right — Jeff 2026-10-15 #20); a catalog block with no photo prints full width");
   secs[1].keyProducts = secs[1].keyProducts.map((k) => ({ ...k, photo: false }));
   const off = mfdQdRender({ ...mfdQdProps({ sections: secs }), keyProductPhotos: {} });
   ok(!off.includes("/placeholders/") && (off.match(/class="est-kp"/g) || []).length === 4, "mfr images: Photo off drops the placeholder too");
@@ -52600,7 +52608,7 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
   ok(long.ok && long.value.name.length === 120 && long.value.message.length === 4000 && long.value.sectionIds.length === 0 && long.value.total === 0 && !("title" in long.value),
     "#301 responses: caps (name 120, message 4,000); a question carries no scopes, total or title");
   const e2 = e301crSan("accept", { name: "P", email: "e".repeat(300) + "@x.io", sectionIds: ["s1"] }, scopes);
-  const nl = e301crSan("accept", { name: "A\nB", sectionIds: ["s1"] }, scopes);
+  const nl = e301crSan("accept", { name: "A\nB", title: "Director", sectionIds: ["s1"] }, scopes); // #15: an accept is signed (title)
   ok(!e2.ok && e2.error === e301crCopy.badEmail && nl.ok && !/[\n\r]/.test(nl.value.name),
     "#301 responses: an email over 200 characters is refused (never truncated into another address); a name never carries a line break");
   const secs = [
@@ -52622,7 +52630,7 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
   ok(e301crTitle(a, "EST-1042", 2) === "Client accepted EST-1042 Rev 2 — Lighting, Rigging ($48,250.00)" &&
      e301crTitle({ ...a, kind: "question" }, "EST-1042", 2) === "Client question — EST-1042",
     "#301 responses: the task titles (D-m)");
-  ok(e301crNote(a, "EST-1042", 2) === "Client selected scopes on EST-1042 Rev 2 (client link): Lighting, Rigging — $48,250.00 before any Rewards credit.\nFrom: Pat Doe · Facilities · pat@school.org\nMessage: Please start in June." &&
+  ok(e301crNote(a, "EST-1042", 2) === "Client selected scopes on EST-1042 Rev 2 (client link): Lighting, Rigging — $48,250.00 before any Rewards credit.\nAccepted by Pat Doe, Facilities\nFrom: Pat Doe · Facilities · pat@school.org\nMessage: Please start in June." && // #15: the signer line
      e301crNote({ ...a, kind: "question", title: undefined, email: "", message: "Is rigging inspected?" }, "EST-1042", 2) === "Client question on EST-1042 Rev 2 (client link).\nFrom: Pat Doe\nMessage: Is rigging inspected?",
     "#301 responses: the note / activity text names the scopes, the pre-credit total, who, and the message");
   // ---- R16 assignees ----
@@ -52654,7 +52662,8 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
      e301crChips({ noDatasheet: 0, drawings: 1, keyProductsNeedText: 0, scopesNoGoals: 0 }).length === 0,
     "#301 gaps: the staff chips (only the gaps that exist)");
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/document-files"|@\/app\/\(app\)\/estimator\/pricing"|@\/lib\/team"|\.\/scopes")/m.test(rd("src/lib/estimate-output/responses.ts")) &&
+  // #352 review I3: + the portal's pure card scan (portal-quote-mode.ts has type-only imports).
+  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/document-files"|@\/app\/\(app\)\/estimator\/pricing"|@\/lib\/team"|@\/lib\/portal-quote-mode"|\.\/scopes")/m.test(rd("src/lib/estimate-output/responses.ts")) &&
      !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/narrative"|@\/app\/\(app\)\/estimator\/quote-document-view"|\.\/scopes")/m.test(rd("src/lib/estimate-output/package-gaps.ts")),
     "#301 responses/gaps purity: client-safe value imports only");
 }
@@ -52758,7 +52767,7 @@ async function e301cStoreAsyncChecks(): Promise<void> {
   ok(e301crClean([rr(1, { at: null }), rr(2, { rev: null }), rr(3, { rev: "" }), rr(4, { at: "" }), rr(5, { total: "5" }), rr(6, { total: null }), rr(7)]).map((x) => x.at).join() === "7",
     "#301 responses: a record whose at / rev / total isn't a real number is dropped, never coerced to 0");
   ok(!e301crSan("hack" as never, { name: "P", sectionIds: ["s1"] }, sc).ok && !e301crSan(undefined as never, { name: "P", message: "x", sectionIds: ["s1"] }, sc).ok &&
-     e301crSan("accept", { name: "P", sectionIds: ["s1"] }, sc).ok && e301crSan("question", { name: "P", message: "x" }, sc).ok,
+     e301crSan("accept", { name: "P", title: "Director", sectionIds: ["s1"] }, sc).ok && e301crSan("question", { name: "P", message: "x" }, sc).ok,
     "#301 responses: any kind other than exactly accept | question is refused at runtime");
   const stamp = e301crRows([rr(9, { at: Date.UTC(2026, 9, 5, 19, 14) })], (v) => v)[0].when;
   ok(stamp === "Oct 5, 2:14 PM" && !/[\u202f\u00a0]/.test(stamp), "#301 responses: the staff time stamp uses a plain space whatever the ICU build");
@@ -52941,7 +52950,7 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
   ok(/try \{\s*pkg = await resolveSharedPackage\(id, token\);\s*\} catch \(e\) \{\s*console\.error\([^;]*, e\);\s*return notFound\(\);\s*\}/.test(route),
     "#301 zip: a resolveSharedPackage failure is caught, logged and answered with the same uniform 404 as an invalid link");
   const srv = rd("src/lib/estimate-output/package-zip-server.ts");
-  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes('const letterhead = opts.front ? opts.front.letterhead : await d.letterhead(typeof opts.peakHeader === "boolean" ? opts.peakHeader : q.packagePeakHeader);') && srv.includes("buildSpecDocx(sp.spec, { letterhead })") && srv.includes("zipCacheable(built.leftOut) && front.coverOk && built.coverOk !== false") &&
+  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes("const letterhead = opts.front ? opts.front.letterhead : await d.bookLetterhead(header);") && srv.includes("buildSpecDocx(sp.spec, { letterhead: specLetterhead })") /* Jeff 2026-10-15 #12 */ && srv.includes("zipCacheable(built.leftOut) && front.coverOk && built.coverOk !== false") &&
      !srv.includes("listCatalog") && !/\b(update|patchQuote|setStatus)\(/.test(srv),
     "#301 zip: capped reads, unique entry names, the D94 docx, cache only a clean build; never the whole catalog, never a quote write");
   const dl301cz = [{ documentId: "PD-1", name: "A.pdf", kind: "datasheet", skus: ["A"] }, { documentId: "PD-2", name: "B.docx", kind: "specsheet", skus: ["B"] }, { documentId: "PD-3", name: "M.pdf", kind: "manual", skus: ["C"] }] as const;
@@ -53222,7 +53231,7 @@ async function e301cActionsAsyncChecks(): Promise<void> {
   const notify = async (_q: unknown, r: { kind: string; total: number }) => { calls.push(`${r.kind}:${r.total}`); };
   const salt = String(Date.now() % 100_000);
   const deps = { secret: S, users: async () => users, notify };
-  const acc = await R.submitClientResponse("accept", QID, tok, { name: "Pat Doe", email: "pat@school.org", sectionIds: ["s2", "s1", "bogus"] }, "203.0.113.1-" + salt, deps);
+  const acc = await R.submitClientResponse("accept", QID, tok, { name: "Pat Doe", title: "Facilities", email: "pat@school.org", sectionIds: ["s2", "s1", "bogus"] }, "203.0.113.1-" + salt, deps);
   const q1 = (await Q.get(QID))!;
   ok(acc.ok && acc.confirmation === "Thanks — Lead 301C has been notified." && q1.status === "sent" && q1.clientResponses?.length === 1 &&
      q1.clientResponses[0].total === 48250 && q1.clientResponses[0].sectionNames.join() === "Lighting,Rigging" && calls.join() === "accept:48250",
@@ -54694,7 +54703,7 @@ import * as p2a from "@/lib/estimate-groups/groups";
   ok(/const groups = sanitizeGroups\(payload\.groups \?\? \(prior\?\.spec as \{ groups\?: unknown \} \| null \| undefined\)\?\.groups\)/.test(actionsSrc), "#P2a persistence: saveQuoteAction sanitises payload.groups, falling back to the stored spec.groups");
   ok(/spec: \{ sections: normalizeSystemOrder\(savedSections, groups\), mobs: payload\.mobs, groups, \.\.\.\(docSave\.document \? \{ document: docSave\.document \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: saveQuoteAction writes spec { sections (normalised), mobs, groups }");
   ok(/\.\.\.withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
-  ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\)\)/.test(actionsSrc) && /spec: \{ sections: newSections, mobs: \[\] \}/.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
+  ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\), await loadBonusRates\(\)\)/.test(actionsSrc) && /spec: \{ sections: newSections, mobs: \[\] \}/.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
   ok(/groups = sanitizeGroups\(spec\?\.groups\)/.test(pageSrc) && /normalizeSystemOrder\(spec\.sections as SpecSection\[\], groups\)/.test(pageSrc) && /^\s+groups,$/m.test(pageSrc) && /groups: \[\],/.test(pageSrc), "#P2a persistence: page.tsx reads spec.groups through sanitizeGroups into initial.groups (new quotes: [])");
   ok(/withoutGroupMeta\(copied\)/.test(copySrc), "#P2a persistence: copy-system strips group meta from the copy");
   ok(/withKeyProducts\(withoutGroupMeta\(base\), kps\)/.test(libSrc), "#P2a persistence: system-library load strips group meta");
@@ -55486,7 +55495,7 @@ import { renderToStaticMarkup as p2boRender } from "react-dom/server";
   const inSum = p2boSelTotal(rs.filter((s) => !s.alternate));
   ok(p2boSelTotal(rs.filter((s) => p2boDefault(rs).includes(s.id))) === inSum && p2boSelTotal(rs.filter((s) => [...p2boDefault(rs), "a3"].includes(s.id))) === inSum + 400,
     "#P2b outputs: the running total starts at the In-total scopes and adds a ticked alternate");
-  const acc = p2boSan("accept", { name: "Pat", sectionIds: ["a3", "s1", "zz-unknown"] }, rs);
+  const acc = p2boSan("accept", { name: "Pat", title: "Director", sectionIds: ["a3", "s1", "zz-unknown"] }, rs);
   ok(acc.ok && acc.value.sectionIds.join() === "s1,a3" && acc.value.sectionNames.join("|") === "Rigging|Alternate — Rigging alternates: Motorized battens" &&
      acc.value.total === p2boSell(props.sections[0]) + 400,
     "#P2b outputs: the server accepts a submitted alternate id (named by its label, priced into the total) and drops an unknown id");
@@ -55547,7 +55556,7 @@ async function p2bOutputsAsyncChecks(): Promise<void> {
   const calls: string[] = [];
   const deps = { secret: S, users: async () => users, notify: async (_q: unknown, r: { total: number; sectionNames: string[] }) => { calls.push(`${r.total}:${r.sectionNames.join("|")}`); } };
   const salt = String(Date.now() % 100_000);
-  const acc = await R.submitClientResponse("accept", QID, tok, { name: "Pat", sectionIds: ["s2", "s1"] }, "198.51.100.1-" + salt, deps);
+  const acc = await R.submitClientResponse("accept", QID, tok, { name: "Pat", title: "Director", sectionIds: ["s2", "s1"] }, "198.51.100.1-" + salt, deps);
   const got = (await Q.get(QID))!;
   ok(acc.ok && got.clientResponses?.length === 1 && got.clientResponses[0].sectionIds.join() === "s1,s2" && got.clientResponses[0].total === 1500 &&
      calls.join() === "1500:Lighting|Alternate — Upgrades: LED Upgrade" && got.status === "sent",
@@ -57239,7 +57248,7 @@ function p4PreviewChecks(): void {
      p4pPath("Q 1", "bom", "bom") === "/estimator-preview/Q%201?tab=bom",
     "#P4 preview: the preview path keeps the package page's Narrative / BOM toggle on the package tab");
   const stamp = Date.UTC(2026, 9, 7, 17);
-  ok(p4pHeader({ id: "Q-9", estNo: 1005, quoteType: "system", revisions: [{}, {}], updatedAt: stamp }) === "EST-1005 · Rev 2 · saved Oct 7, 2026" &&
+  ok(p4pHeader({ id: "Q-9", estNo: 1005, quoteType: "system", status: "sent", revisions: [{ rev: 1, reason: "sent", docFields: { revNo: 1 } }, { rev: 2, reason: "sent", docFields: { revNo: 2 } }], updatedAt: stamp } as never) === "EST-1005 · Rev 2 · saved Oct 7, 2026" && // #13: Rev = send number
      p4pHeader({ id: "Q-9", revisions: [], updatedAt: stamp }).startsWith("Q-9 · Rev 1 · saved"),
     "#P4 preview: the header line is the saved estimate's own number, Rev and date (no sent revision needed)");
 
@@ -57741,7 +57750,7 @@ import type { SpecSection as P5Section } from "@/app/(app)/estimator/types";
     J(seeded.content[9]) === J({ type: "priceTable" }) && J(seeded.content[12]) === J(P("Alt words")),
     "#P5 model: seed — the intro follows narrativeBlocks (line breaks kept, '- ' bullets); a system with no narrative gets just its heading and price line");
   const kp1 = seeded.content[4] as P5PB, kp2 = seeded.content[5] as P5PB;
-  ok(J(seeded.content[3]) === J({ type: "productImage", attrs: { sectionId: "s1", lineKey: "1", sku: "SKU1", align: "right", width: 34 } }) &&
+  ok(J(seeded.content[3]) === J({ type: "productImage", attrs: { sectionId: "s1", lineKey: "1", sku: "SKU1", align: "auto", width: 34 } }) && // #20: auto
     J(kp1.attrs) === J({ sectionId: "s1", lineKey: "1", sku: "SKU1", photo: { show: false, align: "right", width: 34 } }) && kp2.attrs.photo.show === false && kp2.attrs.lineKey === "2" &&
     p5t.productBlockText(kp1) === "Fixture one paragraph.\n\nSecond para." && p5t.productBlockText(kp2) === "- f1\n- f2",
     "#P5 model: seed — product blocks for printable key products only (missing line skipped), words read back verbatim; #312: the photo is its own productImage (right, 34) before the words when kp.photo, the block's own photo hidden");
@@ -58501,7 +58510,7 @@ import type { PDBlock as P5lBlock } from "@/lib/package-doc/types";
   ok(valid(sys) && J(sys) === J([H("Lighting"), P(), { type: "systemTotal", attrs: { sectionId: "s2" } }]),
     "#P5 left pane: a system drops as a level-2 heading with its name + an empty paragraph (the cursor lands there) + its live price line (#312)");
   const line5 = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "5" }, secs, paraOf);
-  ok(valid(line5) && J(line5) === J([{ type: "productImage", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "right", width: 34 } }, { type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: false, align: "right", width: 34 } }, content: [P(T("First para.")), P(T("Second para."))] }]),
+  ok(valid(line5) && J(line5) === J([{ type: "productImage", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "auto", width: 34 } }, { type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: false, align: "right", width: 34 } }, content: [P(T("First para.")), P(T("Second para."))] }]),
     "#P5 left pane: a line drops as its productImage (right 34 %, #312) + a product block (sectionId / lineKey / sku, own photo hidden) holding its library paragraph split into paragraphs");
   const line6 = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "6" }, secs, paraOf);
   ok(valid(line6) && J((line6![1] as { content: unknown }).content) === J([P()]),
@@ -59265,8 +59274,8 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
      J(p5San(doc([{ type: "productImage", attrs: { width: 40, align: "full", sku: " SKU-5 ", lineKey: 5, sectionId: " s2 ", extra: 1, photo: { show: true } }, content: [P("x")] }]))) === J(doc([IMG("s2", "5", "SKU-5", "full", 40)])),
     "#312 images: the sanitizer keeps a productImage { sectionId, lineKey, sku, align, width } in that order, trims anchors, drops other attrs and any content");
   const coerced = p5San(doc([IMG("s2", "5", "A", "middle", 5), IMG("s2", "5", "A", "left", 300), IMG("s2", "5", "A", "right", 62.4), { type: "productImage", attrs: { sectionId: "s2", lineKey: "5", sku: "A", width: "x" } }]))!;
-  ok(J(coerced.content.map((b) => [(b as { attrs: { align: string } }).attrs.align, (b as { attrs: { width: number } }).attrs.width])) === J([["right", 25], ["left", 100], ["right", 62], ["right", 34]]),
-    "#312 images: align coerces to left/right/full (default right), width clamps to 25–100 and rounds (non-number → 34)");
+  ok(J(coerced.content.map((b) => [(b as { attrs: { align: string } }).attrs.align, (b as { attrs: { width: number } }).attrs.width])) === J([["auto", 25], ["left", 100], ["right", 62], ["auto", 34]]),
+    "#312 images: align coerces to auto/left/right/full (default auto since Jeff 2026-10-15 #20), width clamps to 25–100 and rounds (non-number → 34)");
   const dropped = p5San(doc([P("keep"), { type: "productImage" }, IMG("", "5", "A"), IMG("s2", "", "A"), IMG("x".repeat(65), "5", "A"), IMG("s2", "x".repeat(33), "A"), IMG("s2", "5", "x".repeat(129)),
     { type: "bulletList", content: [{ type: "listItem", content: [P("li"), IMG("s2", "5", "A")] }] }, { type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "A" }, content: [P("w"), IMG("s2", "5", "A")] },
     { type: "paragraph", content: [IMG("s2", "5", "A")] }]))!;
@@ -59275,7 +59284,7 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
   const blankSku = p5San(doc([IMG("s2", "5", "")]))!;
   const once = p5San(doc([IMG("s2", "5", "SKU-5"), PB("s2", "5", "SKU-5", "w", { show: false }), IMG("s2", "5", "SKU-5", "full", 80)]))!;
   ok(J(blankSku.content[0]) === J(IMG("s2", "5", "")) && J(p5San(once)) === J(once) && once.content.length === 3 &&
-     p5s.BLOCK_NODES.includes("productImage") && (p5s.NODE_NAMES as readonly string[]).includes("productImage") && J(p5s.DEFAULT_IMAGE) === J({ align: "right", width: 34 }),
+     p5s.BLOCK_NODES.includes("productImage") && (p5s.NODE_NAMES as readonly string[]).includes("productImage") && J(p5s.DEFAULT_IMAGE) === J({ align: "auto", width: 34 }), // Jeff 2026-10-15 #20: a new image alternates
     "#312 images: a blank sku is kept (like a product block); sanitize is idempotent; productImage is in the schema lists; the default image is right at 34 %");
 
   // (2) Resolver: own photo, kind placeholder, nothing.
@@ -59332,19 +59341,19 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
   // (5) Seed + insert shapes.
   const s2 = { ...secs.find((s) => s.id === "s2")!, keyProducts: [{ lineKey: "5", sku: "SKU-5", text: "Five.", photo: true }, { lineKey: "6", sku: "SKU-6", text: "Six.", photo: false }] } as Secs[number];
   const kp = i312Kp(s2);
-  ok(J(kp.map((b) => b.type)) === J(["productImage", "productBlock", "productBlock"]) && J(kp[0]) === J(IMG("s2", "5", "SKU-5")) &&
+  ok(J(kp.map((b) => b.type)) === J(["productImage", "productBlock", "productBlock"]) && J(kp[0]) === J(IMG("s2", "5", "SKU-5", "auto")) && // #20: a seeded image is Auto
      J((kp[1] as { attrs: unknown }).attrs) === J({ sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: false, align: "right", width: 34 } }) && (kp[2] as { attrs: { photo: { show: boolean } } }).attrs.photo.show === false,
     "#312 images: seed — a key product with its photo flag on becomes productImage (right 34 %) then its words (photo hidden); with the flag off, words only");
   const seeded = p5Seed({ sections: [s2] });
   ok(J(seeded.content.map((b) => b.type)) === J(["heading", "paragraph", "bulletList", "productImage", "productBlock", "productBlock", "systemTotal", "priceTable"]) && J(p5San(seeded)) === J(seeded),
     "#312 images: seed — heading → intro → key products (image + words) → price line; the seed is valid");
   ok(J(i312Nodes("s1", 4, "X", "", false)) === J([{ type: "productBlock", attrs: { sectionId: "s1", lineKey: "4", sku: "X", photo: { show: false, align: "right", width: 34 } }, content: [{ type: "paragraph" }] }]) &&
-     J(i312ImgFor("s1", 4, "X", { align: "full", width: 500 })) === J(IMG("s1", "4", "X", "full", 100)) && J(i312ImgFor("s1", "4", "X")) === J(IMG("s1", "4", "X")),
+     J(i312ImgFor("s1", 4, "X", { align: "full", width: 500 })) === J(IMG("s1", "4", "X", "full", 100)) && J(i312ImgFor("s1", "4", "X")) === J(IMG("s1", "4", "X", "auto")),
     "#312 images: productNodesFor / productImageFor — words-only without a photo; image attrs default right 34, clamp like the validator");
   const allowNodes = p5l.docNodesFor({ kind: "line", sectionId: "s1", lineKey: "2" }, secs, () => "never read")!;
   const noPara = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "6" }, secs, () => null)!;
-  ok(J(allowNodes.map((b) => b.type)) === J(["productImage", "productBlock"]) && J(allowNodes[0]) === J(IMG("s1", "2", "line:2")) && J((allowNodes[1] as { content: unknown }).content) === J([P()]) &&
-     J(noPara[0]) === J(IMG("s2", "6", "SKU-6")),
+  ok(J(allowNodes.map((b) => b.type)) === J(["productImage", "productBlock"]) && J(allowNodes[0]) === J(IMG("s1", "2", "line:2", "auto")) && J((allowNodes[1] as { content: unknown }).content) === J([P()]) &&
+     J(noPara[0]) === J(IMG("s2", "6", "SKU-6", "auto")),
     "#312 images: a BOM line (drag / +) always inserts its image then its words — even a line with no photo (the image shows 'No photo for this part' in the editor and prints nothing)");
   const pres = p5l.docPresence(p5San(doc([IMG("s2", "6", "SKU-6")]))!);
   ok(p5l.lineInDoc("s2", "6", pres) && !p5l.lineInDoc("s2", "5", pres), "#312 images: an image alone marks its line as in the document (the BOM tick)");
@@ -59378,8 +59387,8 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
   const it = schema.nodes.productImage;
   ok(it && it.isAtom && !it.isInline && it.spec.group === "block" && it.spec.draggable === true && J(p5eNames().nodes) === J([...p5eNodeNames].sort()) &&
      J(p5eSan(schema.nodeFromJSON(doc([IMG("s2", "5", "SKU-5", "left", 40), P("t")])).toJSON())) === J(doc([IMG("s2", "5", "SKU-5", "left", 40), P("t")])) &&
-     J(schema.nodes.productImage.create({ sectionId: "s", lineKey: "1", sku: "A" }).attrs) === J({ sectionId: "s", lineKey: "1", sku: "A", align: "right", width: 34 }),
-    "#312 images: the editor schema registers productImage (block atom, draggable, attrs default right 34) matching schema.ts, round-tripping through the sanitizer");
+     J(schema.nodes.productImage.create({ sectionId: "s", lineKey: "1", sku: "A" }).attrs) === J({ sectionId: "s", lineKey: "1", sku: "A", align: "auto", width: 34 }),
+    "#312 images: the editor schema registers productImage (block atom, draggable, attrs default auto 34 — #20) matching schema.ts, round-tripping through the sanitizer");
   const pmDoc = schema.nodeFromJSON(doc([P("a"), PB("s2", "5", "SKU-5", "w", { align: "left", width: 40 }), P("b")]) as never);
   const st0 = P312State.create({ schema, doc: pmDoc });
   const tr = st0.tr;
@@ -59428,7 +59437,7 @@ import { NodeSelection as F312NodeSel, EditorState as F312State } from "@tiptap/
   const iv = rd(`${ED}/product-image-view.tsx`), pbv = rd(`${ED}/product-block-view.tsx`), ed = rd(`${ED}/package-doc-editor.tsx`);
   const view = rd("src/components/package-doc/package-doc-view.tsx");
   // (1) the image sits above the following block's positioned wrapper; (2) clears earlier floats.
-  ok(/position: "relative",\s*zIndex: selected \? 5 : 2,\s*\.\.\.wrapperStyle\(img\)/.test(iv) && iv.includes("zIndex: 4"),
+  ok(/position: "relative",\s*zIndex: selected \? 5 : 2,\s*\.\.\.wrapperStyle\((img|shown)\)/.test(iv) && iv.includes("zIndex: 4"), // #352 M4: `shown` = the previewed side
     "#312 fix round 1: the image's float wrapper is position: relative with z-index 2 (5 selected), above the next product block's own relative wrapper, and the strip sits inside it");
   ok((iv.match(/clear: "both"/g) || []).length === 3 && view.includes(".pd-doc .pd-image { clear: both; }") && ed.includes(".pd-ed-prose .node-productImage { clear: both; }"),
     "#312 fix round 1: an image starts below any earlier float — editor wrapper (all three aligns), .node-productImage and print .pd-image clear both");
@@ -59447,7 +59456,7 @@ import { NodeSelection as F312NodeSel, EditorState as F312State } from "@tiptap/
   const did0 = f312Add(t0, at0);
   const out0 = t0.doc.toJSON() as { content: Array<{ type: string; attrs?: Record<string, unknown> }> };
   ok(did0 && t0.steps.length === 1 && J(out0.content.map((n) => n.type)) === J(["paragraph", "productImage", "productBlock"]) &&
-     J(out0.content[1].attrs) === J({ sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "right", width: 34 }) &&
+     J(out0.content[1].attrs) === J({ sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "auto", width: 34 }) && // #20: Auto
      t0.selection instanceof F312NodeSel && t0.selection.node.type.name === "productImage",
     "#312 fix round 1: Add photo inserts a default productImage with the block's anchors right before it, selected, in one step");
   const t1 = F312State.create({ schema, doc: t0.doc }).tr;
@@ -67288,7 +67297,7 @@ async function gridNotes9Checks(): Promise<void> {
   await serve9(true);
   ok(/-h0-c[0-9a-f]{8}-v3\.zip$/.test(got9[0]) && /-h1-c[0-9a-f]{8}-v3\.zip$/.test(got9[1]) && built9.join() === "false,true", "Grid notes #9 review: a download reads the cache under its resolved header and builds with exactly that header");
   const zsrc9 = src9("src/lib/estimate-output/package-zip-server.ts");
-  ok(zsrc9.includes("resolvePeakHeader(q.packagePeakHeader, await loadPeakHeaderDefault())") && zsrc9.includes("packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader, bookCoverFingerprint(front.cover, front.letterhead))") && zsrc9.includes("d.build(pkg.q, pkg.rev, peakHeader, front)"),
+  ok(zsrc9.includes("resolvePeakHeader(q.packagePeakHeader, await loadPeakHeaderDefault())") && zsrc9.includes("const frontKey = zipFrontKey(front);") && zsrc9.includes("packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader, zipKeyWithSpecs(frontKey, specKey))") && zsrc9.includes("d.build(pkg.q, pkg.rev, peakHeader, front)"),
     "Grid notes #9 review: servePackageZip resolves the header once (estimate's choice ?? company default) for both the cache key and the build");
 
   // Toggle actions: a boolean or null only, the D94 toggle gated on create; the Grid menu never guesses ON.
@@ -68063,7 +68072,7 @@ import { canonicalBonusSections as bnCanon } from "@/lib/estimate-bonus/canonica
 
 {
   const bnHook = readFileSync(join(process.cwd(), "src/app/(app)/estimator/use-estimator-state.ts"), "utf8");
-  const bnFx = bnHook.indexOf("withBonusLines(cur, nextId)");
+  const bnFx = bnHook.indexOf("withBonusLines(cur, nextId, bonusRatesFor(status, cur, bonusRates))"); // Jeff 2026-10-15 #19: the draft's rates
   const bnFxStart = bnHook.lastIndexOf("useEffect(", bnFx);
   const bnFxBody = bnHook.slice(bnFxStart, bnHook.indexOf("}, [sections, status]);", bnFx) + 30);
   ok(bnFx > 0 && /bonusRulesApply\(\{ source: initial\.bonusSource, quoteType: initial\.bonusQuoteType, status \}, cur\)/.test(bnFxBody), "#bonus client pin: the effect gates on bonusRulesApply with the hook's own status, judged on the current sections");
@@ -68199,7 +68208,7 @@ import { repriceForTier as bnfReprice } from "@/app/(app)/estimator/tier-reprice
   const save = hook.slice(hook.indexOf("const saveNow = async"), hook.indexOf("const doSave ="));
   ok(/const statusBeforeSave = baseStatus;/.test(save) && /syncBonusAfterStatus\(statusBeforeSave, res\.status\);\s*setStatus\(res\.status\);/.test(save), "#bonus M5 source pin: a save that moves to/from Won refreshes the bonus card");
   const sum = bnfRead("src/app/(app)/estimator/review-cost-summary.tsx");
-  ok(sum.includes("5% package bonus (payout)") && sum.includes("bonusSum(isPackageBonusItem, (it) => it.qty * it.cost)"), "#bonus M8: the cost summary shows the 5% as its payout (package line cost)");
+  ok(sum.includes("Package bonus (payout)") && sum.includes("bonusSum(isPackageBonusItem, (it) => it.qty * it.cost)"), "#bonus M8: the cost summary shows the 5% as its payout (package line cost)");
   const pr = bnfRead("src/app/(app)/estimator/pricing.ts");
   const prDoc = pr.slice(pr.lastIndexOf("/**", pr.indexOf("function customerLinesRaw(")), pr.indexOf("function customerLinesRaw("));
   ok(/bonus: "package"/.test(prDoc) && /bonus: "estimator"/.test(prDoc) && /absorbSellAdjustment/.test(prDoc), "#bonus M11: customerLinesRaw's doc comment covers the 5% fold and the 2% spread");
@@ -69730,7 +69739,7 @@ import { qd293Sections as p3QdSections, renderQuoteDocument293 as p3RenderQd } f
       locationId: locId, contactName: contactName || "", quoteNote: (q.quoteNote as string) ?? "", assumptions: (q.assumptions as string) ?? "",
       owner: (q.owner as string) || "", preparedBy: (q.preparedBy as string) || "", paymentTerms: (q.paymentTerms as string) || "Unknown",
       sections: p3NormOrder(spec.sections as never, groups), groups, vendorQuotes: (q.vendorQuotes as never) || [], pdfOptions: p3NormPdf(q.pdfOptions),
-      revNum: Math.max(1, (q.revisions as unknown[])?.length || 1), revDateMs: (q.updatedAt as number) || 0,
+      revNum: n293tFStamp(q as never).revNum, revDateMs: (q.updatedAt as number) || 0,
       source: q.source === "portal-catalog" ? "portal-catalog" : null, portalFirm: q.source === "portal-catalog" ? ((q.portalFirm as never) ?? null) : null,
       customers: [...others, custLite], companyName: settings.companyName, logoDark: settings.logoDark, rewardsLine,
     };

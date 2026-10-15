@@ -1,3 +1,4 @@
+import peakLetterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
@@ -68,7 +69,7 @@ export default async function CutSheetsPage({ searchParams }: { searchParams: Pr
       {result.types.length === 0 ? (
         <div className="pk-card" style={{ padding: "48px 24px", textAlign: "center", fontSize: 15, fontWeight: 600 }}>{CUT_SHEETS_NONE}</div>
       ) : (
-        <CutSheetPages models={models[style]} style={style} photos={photos} />
+        <CutSheetPages models={models[style]} style={style} photos={photos} letterheadSrc={peakLetterhead.src} />
       )}
     </div>
   );

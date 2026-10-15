@@ -4,6 +4,7 @@ import { fmt } from "@/app/(app)/estimator/pricing";
 import { cleanText } from "@/lib/document-files";
 import { permsFor } from "@/lib/team";
 import { alternateScopes, outputScopes } from "./scopes";
+import { looksLikeCardNumber } from "@/lib/portal-quote-mode";
 
 /**
  * #301 slice C (D-m, D-n, R1, R15, R16) — what a client sends from the
@@ -29,6 +30,8 @@ export type ClientResponse = {
   total: number;
   /** #348 2b-ii — the bidder (pty_ + 16 hex) whose v3 link sent this; absent on the owner's link. */
   partyId?: string;
+  /** Jeff 2026-10-15 #15 — an accept's optional purchase order number (one line, ≤ 60). */
+  po?: string;
 };
 export type CleanResponse = Omit<ClientResponse, "id" | "rev" | "at">;
 export type ClientActionResult = { ok: true; confirmation: string } | { ok: false; error: string };
@@ -38,10 +41,15 @@ export type ClientActionResult = { ok: true; confirmation: string } | { ok: fals
 export type ResponseScope = { id: string; name: string; price: number; priceLabel: string; alternate?: true };
 
 export const MAX_CLIENT_RESPONSES = 200;
+/** #352 review M1 — the quote's whole list (owner + every bidder) never passes this; a submit past it is refused
+ *  ("full"), never an old response dropped — the list is the record of what customers sent. */
+export const MAX_CLIENT_RESPONSES_TOTAL = 1_000;
 export const RESPONSE_NAME_MAX = 120;
 export const RESPONSE_TITLE_MAX = 120;
 export const RESPONSE_EMAIL_MAX = 200;
 export const RESPONSE_MESSAGE_MAX = 4_000;
+/** Jeff 2026-10-15 #15 — a typed PO number. */
+export const RESPONSE_PO_MAX = 60;
 export const RESPONSE_IP_LIMIT = 5;
 export const RESPONSE_IP_WINDOW_MS = 10 * 60_000;
 export const RESPONSE_QUOTE_LIMIT = 30;
@@ -65,6 +73,10 @@ export const CLIENT_ACTION_COPY = {
   note: "Note",
   message: "Message",
   needName: "Enter your name.",
+  // Jeff 2026-10-15 #15: accepting online takes the signer's name and title, and an optional PO number.
+  needTitle: "Enter your title.",
+  poNumber: "PO # (optional)",
+  badPo: "Check the PO number — a card number can't go here.",
   needScope: "Check at least one scope.",
   needMessage: "Enter a message.",
   badEmail: "Check the email address.",
@@ -129,23 +141,50 @@ export function sanitizeClientResponse(
     if (!message) return { ok: false, error: CLIENT_ACTION_COPY.needMessage };
     return { ok: true, value: { kind, name, email, message, sectionIds: [], sectionNames: [], total: 0 } };
   }
-  const title = cleanText(o.title, RESPONSE_TITLE_MAX);
   const want = new Set(Array.isArray(o.sectionIds) ? o.sectionIds.slice(0, 200).filter((x): x is string => typeof x === "string") : []);
   const picked = scopes.filter((s) => want.has(s.id));
   if (!picked.length) return { ok: false, error: CLIENT_ACTION_COPY.needScope };
+  // Jeff 2026-10-15 #15: an accept is signed — name AND title required; a PO number is optional.
+  const title = cleanText(o.title, RESPONSE_TITLE_MAX);
+  if (!title) return { ok: false, error: CLIENT_ACTION_COPY.needTitle };
+  const po = cleanPoNumber(o.po);
+  if (po === null) return { ok: false, error: CLIENT_ACTION_COPY.badPo };
   return {
     ok: true,
     value: {
       kind,
       name,
       email,
-      ...(title ? { title } : {}),
+      title,
       message,
       sectionIds: picked.map((s) => s.id),
       sectionNames: picked.map((s) => s.name),
       total: selectedTotal(picked),
+      ...(po ? { po } : {}),
     },
   };
+}
+
+/**
+ * Jeff 2026-10-15 #15 — a typed PO number: one line, trimmed, ≤ 60 characters
+ * ("" = none). null when it is too long or carries a payment card number
+ * anywhere in it — the portal's own check (#245 `looksLikeCardNumber`: any run
+ * of 13–19 digits, spaces / dashes allowed, that passes Luhn; #352 review I3) —
+ * refused, never stored. A long PO that fails Luhn is a PO. Pure.
+ */
+export function cleanPoNumber(raw: unknown): string | null {
+  const v = (typeof raw === "string" ? raw : "").replace(/\s+/g, " ").trim();
+  if (!v) return "";
+  if (v.length > RESPONSE_PO_MAX) return null;
+  if (looksLikeCardNumber(v)) return null;
+  return v;
+}
+
+/** Jeff 2026-10-15 #15 — "Accepted by <name>, <title> — PO <po>" (the PO part only when given). Pure. */
+export function acceptanceLine(a: { name?: string | null; title?: string | null; po?: string | null }): string {
+  const who = [(a.name || "").trim(), (a.title || "").trim()].filter(Boolean).join(", ");
+  const po = (a.po || "").trim();
+  return `Accepted by ${who || "the customer"}${po ? ` — PO ${po}` : ""}`;
 }
 
 export function newResponseId(): string {
@@ -168,6 +207,7 @@ function responseOf(v: unknown): ClientResponse | null {
   if (!Number.isSafeInteger(rev) || rev < 1 || !Number.isFinite(at) || !Number.isFinite(total) || total < 0) return null;
   const title = cleanText(o.title, RESPONSE_TITLE_MAX);
   const partyId = typeof o.partyId === "string" && PARTY_ID_RE.test(o.partyId) ? o.partyId : "";
+  const po = cleanText(o.po, RESPONSE_PO_MAX);
   return {
     id: o.id,
     kind: o.kind,
@@ -181,6 +221,7 @@ function responseOf(v: unknown): ClientResponse | null {
     sectionNames: strList(o.sectionNames),
     total,
     ...(partyId ? { partyId } : {}),
+    ...(po ? { po } : {}),
   };
 }
 
@@ -212,6 +253,8 @@ export function responsesBy(list: unknown, partyId?: string): number {
  *  bidder's room. */
 export function appendResponseTo(list: unknown, r: ClientResponse): ClientResponse[] | null {
   const cur = cleanClientResponses(list);
+  // #352 review M1: the whole list (owner + every bidder) never passes 1,000 — refused, nothing old dropped.
+  if (cur.length >= MAX_CLIENT_RESPONSES_TOTAL) return null;
   const key = responderKey(r);
   if (cur.filter((x) => responderKey(x) === key).length >= MAX_CLIENT_RESPONSES) return null;
   return [...cur, r];
@@ -221,6 +264,12 @@ export function appendResponseTo(list: unknown, r: ClientResponse): ClientRespon
  *  keeps the quote-wide key, so a bidder can never use up the owner's budget or another bidder's. */
 export function responseQuoteBucket(quoteId: string, partyId?: string | null): string {
   return partyId ? `share-respond-quote:${quoteId}:${partyId}` : `share-respond-quote:${quoteId}`;
+}
+
+/** Jeff 2026-10-15 #2 (#352) — responseQuoteBucket for a validated party id: a malformed one falls back to the
+ *  quote-wide key. */
+export function responseQuoteLimitKey(quoteId: string, partyId?: string | null): string {
+  return responseQuoteBucket(quoteId, typeof partyId === "string" && PARTY_ID_RE.test(partyId) ? partyId : null);
 }
 
 /** #348 2b-ii — a bidder company name as it goes into a note, task title or response row: trimmed, every run of
@@ -247,7 +296,9 @@ export function responseNoteText(r: CleanResponse, number: string, revNo: number
     : r.kind === "accept"
       ? `Client selected scopes on ${number} Rev ${revNo} (client link): ${r.sectionNames.join(", ")} — ${fmt(r.total)} before any Rewards credit.`
       : `Client question on ${number} Rev ${revNo} (client link).`;
-  return [head, `From: ${who}`, r.message ? `Message: ${r.message}` : ""].filter(Boolean).join("\n");
+  // Jeff 2026-10-15 #15: an accept names its signer and any PO number.
+  const signed = r.kind === "accept" && r.title ? acceptanceLine(r) : "";
+  return [head, signed, `From: ${who}`, r.message ? `Message: ${r.message}` : ""].filter(Boolean).join("\n");
 }
 
 export type RosterUser = { id: string; name: string; status?: string | null; roles?: string[] | null };
@@ -321,7 +372,7 @@ export function responseRows(raw: unknown, revNoOf: (rev: number) => number, bid
       id: r.id,
       kindLabel: r.kind === "accept" ? "Selected scopes" : "Question",
       revLabel: `Rev ${revNoOf(r.rev)}`,
-      who: [bidderLabel(r, bidderNameOf), r.name, r.title, r.email].filter(Boolean).join(" · "),
+      who: [bidderLabel(r, bidderNameOf), r.name, r.title, r.email, r.po ? `PO ${r.po}` : ""].filter(Boolean).join(" · "),
       scopes: r.sectionNames.join(", "),
       total: r.kind === "accept" ? fmt(r.total) : "",
       message: r.message,

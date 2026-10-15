@@ -22,7 +22,18 @@ export type PackageSlots = {
   downloads?: ReactNode;
   actions?: ReactNode;
   keyProductExtra?: Record<string, ReactNode>;
+  /** Jeff 2026-10-15 #22 — the Client-style curtain cut sheets, when the sent PDF carries them. */
+  cutSheets?: ReactNode;
 };
+
+/** Jeff 2026-10-15 #20 — every other key-product photo floats left (stacked on a phone). Printed only on a page that
+ *  has one, so a page whose photos don't alternate renders exactly as before. */
+export const PACKAGE_LEFT_PHOTO_CSS = `
+.pkg-kp.pkg-kp-left img { float: left; margin: 0 14px 8px 0; }
+@media (max-width: 600px) {
+  .pkg-kp.pkg-kp-left img { float: none; margin: 0 0 10px; }
+}
+`;
 
 export const PACKAGE_WEB_CSS = `
 .pkg { display: flex; flex-direction: column; gap: 14px; font-size: 14px; line-height: 1.55; color: #16181d; overflow-wrap: break-word; }
@@ -106,7 +117,7 @@ function Blocks({ blocks }: { blocks: NarrativeBlock[] }) {
   );
 }
 
-function Scope({ s, bom, extra }: { s: PackageScopeView; bom: boolean; extra: Record<string, ReactNode> }) {
+function Scope({ s, bom, extra, showQty = true }: { s: PackageScopeView; bom: boolean; extra: Record<string, ReactNode>; showQty?: boolean }) {
   return (
     <section className="pkg-card pkg-scope" data-scope={s.id}>
       <div className="pkg-scope-head">
@@ -129,7 +140,7 @@ function Scope({ s, bom, extra }: { s: PackageScopeView; bom: boolean; extra: Re
           <Blocks blocks={s.intro} />
           {s.fallback && <p className="pkg-p">{s.fallback}</p>}
           {s.keyProducts.map((kp) => (
-            <div key={kp.sku} className="pkg-kp">
+            <div key={kp.sku} className={kp.side === "left" ? "pkg-kp pkg-kp-left" : "pkg-kp"}>
               {kp.photo && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={kp.photo.src} alt={kp.photo.alt} />
@@ -147,7 +158,8 @@ function Scope({ s, bom, extra }: { s: PackageScopeView; bom: boolean; extra: Re
             <table className="pkg-bom">
               <thead>
                 <tr>
-                  {PACKAGE_COPY.bomHead.map((h) => (
+                  {/* Jeff 2026-10-15 #14: no Qty column when the estimate PDF hides quantities. */}
+                  {PACKAGE_COPY.bomHead.filter((h, i) => showQty || i > 0).map((h) => (
                     <th key={h} scope="col">{h}</th>
                   ))}
                 </tr>
@@ -155,7 +167,7 @@ function Scope({ s, bom, extra }: { s: PackageScopeView; bom: boolean; extra: Re
               <tbody>
                 {s.bom.map((r) => (
                   <tr key={r.key}>
-                    <td className="pkg-qty">{r.qty == null ? "" : `${r.qty}${r.unit ? " " + r.unit : ""}`}</td>
+                    {showQty && <td className="pkg-qty">{r.qty == null ? "" : `${r.qty}${r.unit ? " " + r.unit : ""}`}</td>}
                     <td>{r.manufacturer}</td>
                     <td>{r.part}</td>
                     <td>{r.description}</td>
@@ -177,6 +189,7 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
   return (
     <div className="pkg" data-view={m.view}>
       <style>{PACKAGE_WEB_CSS}</style>
+      {m.scopes.some((s) => s.keyProducts.some((kp) => kp.side === "left")) && <style>{PACKAGE_LEFT_PHOTO_CSS}</style>}
       <header className="pkg-card">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={m.logo.src} alt={m.companyName} className={m.logo.full ? "pkg-logo-full" : "pkg-logo"} />
@@ -223,7 +236,7 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
           <ResolvedPackageDocView resolved={m.document} productExtra={extra} />
         </section>
       ) : (
-        m.scopes.map((s) => <Scope key={s.id} s={s} bom={bom} extra={extra} />)
+        m.scopes.map((s) => <Scope key={s.id} s={s} bom={bom} extra={extra} showQty={m.showQty !== false} />)
       )}
       <section className="pkg-card">
         {m.totals.creditLabel && m.totals.creditAmount && (
@@ -268,6 +281,7 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
         </section>
       )}
       {slots.plans && <section data-mount="plans">{slots.plans}</section>}
+      {slots.cutSheets && <section data-mount="cutsheets" className="pkg-card">{slots.cutSheets}</section>}
       {m.options.length > 0 && (
         <section className="pkg-card">
           <h2>{PACKAGE_COPY.options}</h2>

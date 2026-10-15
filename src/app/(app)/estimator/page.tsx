@@ -20,7 +20,7 @@ import { getSettings, type Office } from "@/lib/settings";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
-import { getFixtureRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
+import { getFixtureRates, loadBonusRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
 import { loadFreightRule } from "@/lib/freight-rule-load";
 import { allSpecRecords } from "@/lib/stores/spec-records";
 import { listTrackSeries } from "@/lib/stores/track-series";
@@ -37,7 +37,8 @@ import { resolveTier } from "@/lib/pricing-tiers";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { pickContactName, pickVenueId, readHandoff, systemQuoteName } from "@/app/(app)/quotes/new/handoff";
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
-import { pdfView } from "@/lib/quote-pdf/state";
+import { documentRevStamp, pdfView } from "@/lib/quote-pdf/state";
+import { quoteSentOnce } from "@/lib/quote-people-lock";
 import EstimatorClient from "./estimator-client";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { sourceForSave } from "@/lib/portal-quote-mode";
@@ -225,10 +226,9 @@ async function initialFrom(
     // blank (a blank prints the owner, then the company, on the document).
     owner: q.owner || "",
     preparedBy: q.preparedBy || "",
-    // Real priced revisions (item 24). This used to count `history`, which is
-    // the status pipeline — so the printed "Rev N" climbed every time a quote
-    // moved draft → sent → won, with no revision having been taken.
-    revNum: Math.max(1, q.revisions?.length || 1),
+    // The printed Rev (Jeff 2026-10-15 #13): the send number — the latest
+    // send's on a sent quote, the next send's on a draft — the PDF's own rule.
+    revNum: documentRevStamp(q).revNum,
     revDateMs: q.updatedAt || Date.now(),
     // Item 11 (D87): stamped tier seeds labor/curtain margins client-side.
     pricingTier: q.pricingTier ?? null,
@@ -599,6 +599,10 @@ export default async function EstimatorPage({
       // the quote; only an approver may hand it to someone else.
       viewerName={user.name}
       viewerCanApprove={can("approve", user.roles)}
+      // Jeff 2026-10-15 #18: the people lock at the first send (approvers can still change them).
+      peopleSentOnce={quoteSentOnce(q)}
+      // Jeff 2026-10-15 #19: a draft's bonus lines follow Estimating Rules (the server re-derives them on save).
+      bonusRates={await loadBonusRates()}
       // Phase 4: the review-comment permissions (add / resolve / delete).
       viewerRoles={user.roles}
       // #293: Save to library / intros — the Spec panel's audience (#205).

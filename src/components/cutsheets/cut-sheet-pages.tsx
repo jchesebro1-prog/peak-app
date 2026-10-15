@@ -11,10 +11,24 @@ export const CLIENT_PRINT_CSS = `@media print { @page { size: letter; margin: 0.
 
 const detailBox = `0 0 ${MOUNT_DETAIL_VIEWBOX.w} ${MOUNT_DETAIL_VIEWBOX.h}`;
 
-export function CutSheetPages({ models, style, photos }: { models: CutSheetModel[]; style: CutSheetStyle; photos: ReadonlyMap<string, string[]> }) {
+/** `letterheadSrc` (Jeff 2026-10-15 #12) — the full baked Peak letterhead sheet's URL (`peak-letterhead.jpg`'s src,
+ *  passed by the page so this module stays importable without an image loader); the Client style heads with it. */
+export function CutSheetPages({
+  models,
+  style,
+  photos,
+  letterheadSrc,
+}: {
+  models: CutSheetModel[];
+  style: CutSheetStyle;
+  photos: ReadonlyMap<string, string[]>;
+  letterheadSrc?: string;
+}) {
   return (
     <div className="pk-cs-set" data-style={style}>
-      {models.map((m) => (style === "submittal" ? <SubmittalSheet key={m.sheetNo} m={m} /> : <ClientSheet key={m.sheetNo} m={m} photos={photos.get(m.sheetNo) ?? []} />))}
+      {models.map((m) =>
+        style === "submittal" ? <SubmittalSheet key={m.sheetNo} m={m} /> : <ClientSheet key={m.sheetNo} m={m} photos={photos.get(m.sheetNo) ?? []} letterheadSrc={letterheadSrc} />
+      )}
     </div>
   );
 }
@@ -100,19 +114,26 @@ function SubmittalSheet({ m }: { m: CutSheetModel }) {
   );
 }
 
-function ClientSheet({ m, photos }: { m: CutSheetModel; photos: string[] }) {
+function ClientSheet({ m, photos, letterheadSrc }: { m: CutSheetModel; photos: string[]; letterheadSrc?: string }) {
   return (
     <section className="pk-cs-client" data-sheet={m.sheetNo}>
-      <header className="pk-cs-head">
-        {m.header.logoDark ? (
-          // Data-URL brand mark from Settings → Branding (title-block idiom).
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={m.header.logoDark} alt={m.header.companyName || "Company logo"} style={{ maxHeight: "0.5in", maxWidth: "2.2in" }} />
-        ) : (
+      {/* Jeff 2026-10-15 #12 — a client cut sheet heads with the full baked Peak letterhead, like the estimate it
+          follows (#331, D853), never the Branding logo. The submittal style keeps its title block. */}
+      {letterheadSrc ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="pk-cs-letterhead" src={letterheadSrc} alt={m.header.companyName || "Peak Systems Group"} style={{ display: "block", width: "100%", height: "auto", marginBottom: "6pt" }} />
+          <header className="pk-cs-head">
+            <span />
+            <span>{`Curtain cut sheet · ${m.header.estimateNo}`}</span>
+          </header>
+        </>
+      ) : (
+        <header className="pk-cs-head">
           <strong>{m.header.companyName}</strong>
-        )}
-        <span>{`Curtain cut sheet · ${m.header.estimateNo}`}</span>
-      </header>
+          <span>{`Curtain cut sheet · ${m.header.estimateNo}`}</span>
+        </header>
+      )}
       <h1 className="pk-cs-title">{m.title}</h1>
       <Elevation m={m} maxHeight="3.6in" />
       <p className="pk-cs-desc">{m.description}</p>

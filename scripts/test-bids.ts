@@ -301,7 +301,7 @@ export async function bidSendChecks(ok: Ok) {
   ok(bidderEmailNeed(sq, row("a", { revSent: 1 })) === "revision", "bid-send: sent, behind → revision");
   const rows = [row("a"), row("b", { revSent: 1 }), row("c", { submitVia: "website" }), row("d", {}, ""), row("e", { failed: { at: 1, error: "t", unknown: true } })];
   const plan = bidderSendPlan(sq, rows);
-  ok(plan.ids.join() === "a,b" && plan.label === "Send revision to bidders" && plan.noEmail === 1, "bid-send: plan ids/label/noEmail");
+  ok(plan.ids.join() === "a,b" && plan.label === "Send revision to all bidders" && plan.noEmail === 1, "bid-send: plan ids/label/noEmail");
   ok(bidderSendPlan(dq, [row("a")]).label === "Send to all bidders", "bid-send: plan label on a first send");
   const done = bidderSendPlan(sq, [row("a", { revSent: 2 })]);
   ok(done.ids.length === 0 && done.label === null, "bid-send: nothing to send → null label");
@@ -1144,7 +1144,7 @@ export async function bidFollowupChecks(ok: Ok) {
   ok(addedAddendumNos(undefined, [A(1)]).join() === "1", "followup: the first addendum on a bid with none counts");
   ok(addendumMovesToDraft("sent", [2]) && !addendumMovesToDraft("sent", []) && !addendumMovesToDraft("draft", [2]) && !addendumMovesToDraft("won", [2]),
     "followup: only a sent estimate with an added addendum moves to Draft");
-  ok(addendumDraftNote([2]) === "Addendum 2 added — the estimate is back in Draft. Send revision to bidders when it's ready. The customer's and bidders' links show it as being revised until then." && addendumDraftNote([2, 3]).startsWith("Addenda 2, 3 added"),
+  ok(addendumDraftNote([2]) === "Addendum 2 added — the estimate is back in Draft. Send revision to all bidders when it's ready. The customer's and bidders' links show it as being revised until then." && addendumDraftNote([2, 3]).startsWith("Addenda 2, 3 added"),
     "followup: the Bid chip note");
   const chip = readFileSync(join(process.cwd(), "src/app/(app)/estimator/bid-chip.tsx"), "utf8");
   ok(chip.includes('postChanged("quote", quoteId)') && chip.indexOf('postChanged("quote", quoteId)') > chip.indexOf("onSync?.(r.sync)"), "followup: a status sync posts the LiveSync change so other windows refresh");
@@ -1216,8 +1216,8 @@ export async function bidFollowupDbChecks(ok: Ok) {
     ok(before?.status === "sent" && d2.ok && d2.backToDraft?.join() === "2" && after?.status === "draft" && last?.from === "sent" && last.to === "draft",
       "followup db: Addendum 2 on a sent estimate → Draft through setStatus (history stamped)");
     const pan = await loadBidPanel(hq, { canEdit: true, canSend: true, canLink: true });
-    ok(pan.ok && [...pan.panel.plan.ids].sort().join() === [p1, p2].sort().join() && pan.panel.plan.label === "Send revision to bidders" && pan.panel.addendaAfterSend.length === 0,
-      "followup db: the Bidders plan lists both sent bidders with \"Send revision to bidders\", and no fallback hint on the draft");
+    ok(pan.ok && [...pan.panel.plan.ids].sort().join() === [p1, p2].sort().join() && pan.panel.plan.label === "Send revision to all bidders" && pan.panel.addendaAfterSend.length === 0,
+      "followup db: the Bidders plan lists both sent bidders with \"Send revision to all bidders\" (#352), and no fallback hint on the draft");
 
     // Back to sent: a note edit, a removal and a due-date change never change status.
     await setStatus(hq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });

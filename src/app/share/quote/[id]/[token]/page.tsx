@@ -7,6 +7,9 @@ import { ONLINE_COPY, onlineHeaderLine, onlineView, sharePath } from "@/lib/quot
 import { OnlineEstimateCard, OnlineEstimateView } from "@/components/online-estimate/online-estimate";
 import { isPackageToken } from "@/lib/quote-share/token";
 import { SharedPackagePage } from "./package-page";
+import letterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
+import { onlineCutSheets } from "@/lib/curtain-cut-sheets/online";
+import { OnlineCutSheets } from "@/components/cutsheets/online-cut-sheets";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Estimate", robots: { index: false, follow: false }, referrer: "no-referrer" };
@@ -48,16 +51,21 @@ export default async function SharedQuotePage({
       })
     : null;
   if (!ok || !docProps) return <OnlineEstimateCard title={ONLINE_COPY.shareInactive} />;
+  // Jeff 2026-10-15 #22: the cut sheets the sent PDF carries.
+  const cutSheets = await onlineCutSheets(ok.q, ok.rev);
   return (
-    <OnlineEstimateView
-      docProps={docProps}
-      view={onlineView(sp.view)}
-      headerLine={onlineHeaderLine(ok.q, ok.rev)}
-      closed={ok.closed}
-      narrativeHref={base}
-      bomHref={base + "?view=bom"}
-      pdfHref={null}
-      backHref={null}
-    />
+    <>
+      <OnlineEstimateView
+        docProps={docProps}
+        view={onlineView(sp.view)}
+        headerLine={onlineHeaderLine(ok.q, ok.rev)}
+        closed={ok.closed}
+        narrativeHref={base}
+        bomHref={base + "?view=bom"}
+        pdfHref={null}
+        backHref={null}
+      />
+      {cutSheets && <OnlineCutSheets loaded={cutSheets} letterheadSrc={letterhead.src} />}
+    </>
   );
 }

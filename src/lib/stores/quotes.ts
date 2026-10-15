@@ -5,6 +5,7 @@ import {
   getDocRows,
   insertWithPrefixedId,
   listDocs,
+  listDocsFiltered,
   casDocKey,
   patchDoc,
   patchDocKey,
@@ -26,7 +27,7 @@ import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
-import { canHavePdf, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
+import { canHavePdf, nextSendRevNo, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
 import { SHARE_DEFAULT_TTL_MS, newShareNonce } from "@/lib/quote-share/token";
 import { nextOpens, type ShareOpens } from "@/lib/estimate-output/opens";
 import { appendPackageFile, cleanPackageFiles, type PackageFile } from "@/lib/estimate-output/package-files";
@@ -267,6 +268,10 @@ export type Quote = {
     purchaseMethod?: "po" | "card" | "check" | "other";
     notes?: string;
     poDocumentId?: string | null;
+    /** Jeff 2026-10-15 #15 — who signed it online (typed; required on every new acceptance) and an optional PO #. */
+    signerName?: string;
+    signerTitle?: string;
+    poNumber?: string;
   } | null;
   /** #245 (spec §4.2) — a FIRM portal-catalog generation: every line priced by
    *  rule (portal-pricing.ts), sent at once, good until `validUntil`. Absent /
@@ -795,6 +800,35 @@ export async function getAll(): Promise<Quote[]> {
   return list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
+/** Jeff 2026-10-15 #11 — the top-level quote fields the Quotes hub filters, counts and searches over, and the
+ *  Companies directory rolls up. A SQL projection (`listDocsFiltered` `fields`), so a list read never ships a
+ *  quote's spec, revisions or history. */
+export const QUOTE_LIST_FIELDS = [
+  "name", "customer", "customerId", "locationId", "owner", "status", "quoteType", "value", "estNo", "estSuffix", "updatedAt", "bid",
+] as const;
+export type QuoteListRow = Pick<Quote, "id" | "name" | "customer" | "customerId" | "owner" | "status" | "value" | "updatedAt"> & {
+  locationId?: string | null;
+  quoteType?: string;
+  estNo?: number;
+  estSuffix?: number;
+  bid?: QuoteBid | null;
+};
+
+/** Every live quote as a `QuoteListRow`, newest first — getAll()'s order, without the documents. */
+export async function listQuoteRows(): Promise<QuoteListRow[]> {
+  const rows = await listDocsFiltered<QuoteListRow & { id: string }>("quotes", { fields: QUOTE_LIST_FIELDS });
+  for (const r of rows) {
+    r.name = r.name || "";
+    r.customer = r.customer || "";
+    r.customerId = r.customerId || null;
+    r.owner = r.owner || "";
+    r.status = (r.status || "draft") as QuoteStatus;
+    r.value = Number(r.value) || 0;
+    r.updatedAt = Number(r.updatedAt) || 0;
+  }
+  return rows.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
 export async function get(id: string): Promise<Quote | null> {
   const q = await getDoc<Quote>("quotes", id);
   return q ? normalizeQuotePipeline(q, await loadPipelines()) : null;
@@ -1083,6 +1117,9 @@ function pushRevision(
 ): QuoteRevision {
   const revs = Array.isArray(doc.revisions) ? doc.revisions : [];
   const r = snapshotOf(doc, revs.length + 1, by, reason, note);
+  // Jeff 2026-10-15 #13: every send stamps its Rev — the previous max + 1 — so two sends never print the
+  // same number. The PDF copy (setRevisionPdfPath) overwrites it with what the file really printed.
+  if (reason === "sent" && r.docFields) r.docFields = { ...r.docFields, revNo: nextSendRevNo(revs) };
   doc.revisions = [...revs, r];
   return r;
 }
@@ -1248,6 +1285,10 @@ export async function setRevisionPdfPath(
     let hit = false;
     await patchDoc<Quote>("quotes", id, (doc) => {
       const r = (doc.revisions || []).find((x) => x.rev === rev);
+      // #352 review I1: a file that printed another Rev than the send stamped is never recorded on it.
+      const stamped = r?.docFields?.revNo;
+      const printedRev = file.printed?.revNum;
+      if (r && typeof stamped === "number" && typeof printedRev === "number" && printedRev !== stamped) return;
       if (r && !r.pdfBlobPath) {
         r.pdfBlobPath = path;
         if (typeof file.savedAt === "number" && Number.isFinite(file.savedAt)) r.pdfSavedAt = file.savedAt;
@@ -1577,6 +1618,16 @@ export async function appendClientResponse(id: string, pinnedRev: number, r: Cle
 /** After a send commits: copy the current PDF onto the new sent revision (#222).
  *  Never fails the send — a missing copy is logged, and the generator retries
  *  it when a still-rendering PDF lands. */
+/** #352 review I1 — schedule the revised draft's PDF (it now prints the next Rev). Never fails the status change. */
+async function scheduleRevisePdfSafely(id: string): Promise<void> {
+  try {
+    const { scheduleQuotePdf } = await import("../quote-pdf/schedule");
+    await scheduleQuotePdf(id);
+  } catch (e) {
+    console.error("[quotes] scheduling the revised PDF failed", id, e);
+  }
+}
+
 async function copySentPdfSafely(id: string): Promise<void> {
   try {
     const { copySentRevisionPdf } = await import("../quote-pdf/generate");
@@ -2045,6 +2096,8 @@ export async function setStatus(
   opts: SetStatusOpts = {}
 ): Promise<Quote | null> {
   const sentCut = { value: false };
+  // #352 review I1: set when this call really moved a sent / won / lost quote back to Draft (a revise).
+  const revised = { value: false };
   // Estimator bonuses: read before the transaction — the patch mutator is synchronous.
   // A failed users read must never block marking Won — credits then fall back to no userId.
   const bonusUsers = status === "won" ? await bonusUserList() : [];
@@ -2103,6 +2156,8 @@ export async function setStatus(
     if (autoStamp) doc.review = autoStamp;
     doc.history = doc.history || [];
     doc.history.push({ at: t, from: doc.status, to: status });
+    // #352 review I1: a revise — the document now prints the NEXT send's Rev (D1125).
+    if (status === "draft" && doc.status !== "draft") revised.value = true;
     doc.status = status;
     moved.value = true;
     // Estimator bonuses: Won records the payout; leaving Won withdraws it.
@@ -2193,6 +2248,10 @@ export async function setStatus(
   // the stamp, though swallowed here, leaves the outer Postgres transaction
   // aborted, so the caller's next statement fails instead of committing.
   if (out && sentCut.value) await copySentPdfSafely(id);
+  // #352 review I1: every revise (the Estimator's status menu, the Quotes hub, a stage move, a bid addendum, a
+  // portal refresh) re-renders the PDF, so Send waits for a file that prints the next Rev — a resend with no edits
+  // can never carry the previous send's file. Outside a request it is only marked stale (Send still waits).
+  if (out && revised.value) await scheduleRevisePdfSafely(id);
   // #282 phase 2: the Rewards ledger follows every real transition — earn +
   // redeem on won, reverse + unredeem on leaving won. Never for an imported
   // row (historical-import records history, it is not a sale made here), and

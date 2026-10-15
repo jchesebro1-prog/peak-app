@@ -1,3 +1,4 @@
+import peakLetterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
 import { notFound } from "next/navigation";
 import { CutSheetPages, CLIENT_PRINT_CSS, SUBMITTAL_PRINT_CSS } from "@/components/cutsheets/cut-sheet-pages";
 import { loadCutSheets } from "@/lib/curtain-cut-sheets/load";
@@ -36,7 +37,7 @@ export default async function PrintCutSheetsPage({
   return (
     <main>
       <style>{style === "submittal" ? SUBMITTAL_PRINT_CSS : CLIENT_PRINT_CSS}</style>
-      <CutSheetPages models={models} style={style} photos={loaded.photos} />
+      <CutSheetPages models={models} style={style} photos={loaded.photos} letterheadSrc={peakLetterhead.src} />
     </main>
   );
 }

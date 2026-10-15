@@ -6,6 +6,9 @@ import { LIFT_TYPES, LOADING_DOOR_TYPES, LIGHTING_POSITIONS, listSlug } from "..
 
 const o = (value: string, label: string): PickOption => ({ value, label });
 
+/** Lists rules read value-by-value, so an admin can't add to them (Jeff 2026-10-15 #8: the rigging depth). */
+export const FIXED_PICK_LISTS: ReadonlySet<string> = new Set(["rig_depth"]);
+
 export const PICK_LISTS: Record<string, PickOption[]> = {
   // S0 core
   use: [o("school", "School"), o("community", "Community"), o("rentals", "Rentals"), o("assemblies", "Assemblies"), o("other", "Other")],
@@ -22,6 +25,9 @@ export const PICK_LISTS: Record<string, PickOption[]> = {
   lift_type: LIFT_TYPES.map((l) => o(listSlug(l), l)),
   door_type: LOADING_DOOR_TYPES.map((l) => o(listSlug(l), l)),
   lighting_position: LIGHTING_POSITIONS.map((l) => o(listSlug(l), l)),
+
+  // S2 rigging (Jeff 2026-10-15 #8): the depth toggle. Values match the scope Depth ("screen" | "full").
+  rig_depth: [o("screen", "Quick check"), o("full", "Full inspection")],
 
   // shared
   yes_no_unknown: [o("yes", "Yes"), o("no", "No"), o("unknown", "Unknown")],

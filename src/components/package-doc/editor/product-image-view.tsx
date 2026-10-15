@@ -6,11 +6,13 @@ import { keyProductHeading } from "@/app/(app)/estimator/narrative";
 import { findLine, findSection } from "@/lib/package-doc/chips";
 import { lineAnchorInBom } from "@/lib/package-doc/gaps";
 import { clampPhotoWidth, PHOTO_WIDTH_MAX, PHOTO_WIDTH_MIN } from "@/lib/package-doc/schema";
-import type { LineAnchor, PhotoAlign } from "@/lib/package-doc/types";
+import type { ImageAlign, LineAnchor } from "@/lib/package-doc/types";
 import { AtomRemove } from "./atom-remove";
 import { usePackageDocEnv } from "./editor-context";
 import { setImageAttrs } from "./editor-commands";
 import { isLineTokenSku, linePhotoPreview, withImage, type ImageAttrs } from "./editor-model";
+import { walkPhotoSides } from "@/lib/package-doc/photo-sides";
+import type { Node as PMNode } from "@tiptap/pm/model";
 
 /**
  * Estimator #312 — a product's photo as its own piece (productImage): just
@@ -26,7 +28,8 @@ import { isLineTokenSku, linePhotoPreview, withImage, type ImageAttrs } from "./
  */
 
 const BTN: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 11, fontWeight: 600, color: "#3a3f4a", background: "#f1f2f5", border: "none", borderRadius: 5, padding: "3px 7px", cursor: "pointer" };
-const ALIGNS: Array<[PhotoAlign, string]> = [["left", "Left"], ["right", "Right"], ["full", "Full"]];
+// Jeff 2026-10-15 #20: Auto (the default) alternates right, left, right when printed; the others are explicit.
+const ALIGNS: Array<[ImageAlign, string]> = [["auto", "Auto"], ["left", "Left"], ["right", "Right"], ["full", "Full"]];
 const AMBER = "#d9a63a";
 
 /** Where the image sits: the print's float (package-doc-view photoStyle), on the
@@ -36,6 +39,22 @@ function wrapperStyle(img: ImageAttrs): CSSProperties {
   if (img.align === "full") return { display: "block", width: `${img.width}%`, margin: "4px auto 10px", clear: "both" };
   if (img.align === "left") return { float: "left", width: `${img.width}%`, margin: "4px 14px 8px 0", clear: "both" };
   return { float: "right", width: `${img.width}%`, margin: "4px 0 8px 14px", clear: "both" };
+}
+
+/** The side an image at `pos` previews on: its own align, or — for Auto — the print's alternation up to it. */
+function autoSide(doc: PMNode, pos: number | undefined, align: ImageAlign, hasPhoto: (a: LineAnchor) => boolean): ImageAlign {
+  if (align !== "auto" || typeof pos !== "number") return align === "auto" ? "right" : align;
+  const items: Array<ImageAlign | null> = [];
+  let at = -1;
+  doc.forEach((child, offset) => {
+    if (offset === pos) at = items.length;
+    const a = child.attrs as { sectionId?: unknown; lineKey?: unknown; sku?: unknown; align?: unknown; photo?: { show?: unknown; align?: unknown } };
+    const anchor: LineAnchor = { sectionId: String(a.sectionId || ""), lineKey: String(a.lineKey || ""), sku: String(a.sku || "") };
+    if (child.type.name === "productImage") items.push(hasPhoto(anchor) ? withImage({ align: a.align as ImageAlign }, {}).align : null);
+    else if (child.type.name === "productBlock" && a.photo?.show === true) items.push(hasPhoto(anchor) ? withImage({ align: a.photo.align as ImageAlign }, {}).align : null);
+    else items.push(null);
+  });
+  return at >= 0 ? walkPhotoSides(items)[at] ?? "right" : "right";
 }
 
 export default function ProductImageView({ node, editor, getPos, selected }: ReactNodeViewProps) {
@@ -51,6 +70,13 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
   const line = inBom ? findLine(findSection(sections, a.sectionId), a.lineKey) : null;
   const name = (line && keyProductHeading(line)) || (row && row.desc) || a.sku || "Product";
 
+  // #352 review M4: an Auto image previews on the side the print gives it — the same rule (walkPhotoSides) over the
+  // document's top-level blocks, counting only the photos that print (an image or photo-on product block with a source).
+  const shown = withImage({ ...img, align: autoSide(editor.state.doc, getPos(), img.align, (anchor) => {
+    const r = !isLineTokenSku(anchor.sku) && anchor.sku && rows && Object.hasOwn(rows, anchor.sku) ? rows[anchor.sku] : undefined;
+    return !!linePhotoPreview(anchor, sections, r);
+  }) }, {});
+
   const patch = (p: Partial<ImageAttrs>) => {
     const at = getPos();
     if (typeof at === "number") setImageAttrs(editor, at, p);
@@ -59,7 +85,7 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
   const strip: CSSProperties = {
     position: "absolute",
     top: "calc(100% + 4px)",
-    ...(img.align === "right" ? { right: 0 } : img.align === "left" ? { left: 0 } : { left: "50%", transform: "translateX(-50%)" }),
+    ...(shown.align === "right" ? { right: 0 } : shown.align === "left" ? { left: 0 } : { left: "50%", transform: "translateX(-50%)" }),
     zIndex: 4,
     display: "flex",
     alignItems: "center",
@@ -90,7 +116,7 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
         // swallows its clicks; the selected image (and its strip) sits higher.
         position: "relative",
         zIndex: selected ? 5 : 2,
-        ...wrapperStyle(img),
+        ...wrapperStyle(shown),
         borderRadius: 4,
         outline: selected ? "2px solid #6b8fd1" : !inBom ? `2px solid ${AMBER}` : hover ? "1.5px dashed #b9bec8" : "1.5px dashed transparent",
         outlineOffset: 3,
@@ -103,7 +129,7 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
             src={preview.src}
             alt={name}
             draggable={false}
-            style={{ display: "block", width: "100%", maxHeight: img.align === "full" ? "4in" : "2.4in", objectFit: "contain", objectPosition: img.align === "left" ? "left top" : img.align === "right" ? "right top" : "center top" }}
+            style={{ display: "block", width: "100%", maxHeight: shown.align === "full" ? "4in" : "2.4in", objectFit: "contain", objectPosition: shown.align === "left" ? "left top" : shown.align === "right" ? "right top" : "center top" }}
           />
         ) : (
           <div

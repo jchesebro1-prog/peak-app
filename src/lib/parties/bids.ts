@@ -65,14 +65,15 @@ export function addedAddendumNos(before: ReadonlyArray<{ no: number }> | null | 
 
 /** #348 (Jeff 2026-10-15) — an addendum after a send puts the estimate back to Draft: only a `sent` estimate whose
  *  save adds an addendum number moves. Draft stays draft; won / lost never reach a bid-details write. */
-export function addendumMovesToDraft(status: string, added: ReadonlyArray<number>): boolean {
-  return status === "sent" && added.length > 0;
+export function addendumMovesToDraft(status: string, added: ReadonlyArray<number>, awarded = false): boolean {
+  // #352 review M2: an awarded bid is decided — an addendum is only recorded.
+  return status === "sent" && added.length > 0 && !awarded;
 }
 
 /** The note the Bid chip shows after a save that moved the estimate back to Draft. */
 export function addendumDraftNote(nos: ReadonlyArray<number>): string {
   const which = nos.length === 1 ? `Addendum ${nos[0]}` : `Addenda ${nos.join(", ")}`;
-  return `${which} added — the estimate is back in Draft. Send revision to bidders when it's ready. The customer's and bidders' links show it as being revised until then.`;
+  return `${which} added — the estimate is back in Draft. Send revision to all bidders when it's ready. The customer's and bidders' links show it as being revised until then.`;
 }
 
 export function sanitizeBidSiteUrl(raw: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
@@ -231,4 +232,10 @@ export function isOpenBid(q: { status?: string; bid?: QuoteBid | null }, bidders
   if (q.status !== "draft" && q.status !== "sent") return false;
   if (q.bid?.awardedPartyId) return false;
   return bidders.some((b) => b.bid?.result === "pending");
+}
+
+/** #352 review M2 — the Bid chip's confirmation before a new addendum moves a sent (not awarded) bid back to Draft. */
+export function addendumReviseConfirm(nos: readonly number[]): string {
+  const what = nos.length === 1 ? `Addendum ${nos[0]}` : `Addenda ${nos.join(", ")}`;
+  return `${what} came in after this estimate was sent. Saving puts it back to Draft so you can send the revision to every bidder. Continue?`;
 }

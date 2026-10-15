@@ -3,9 +3,13 @@ import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
 import { can, deriveInitials, fallbackColor } from "@/lib/team";
 import { DeleteCompanyButton } from "./delete-company-button";
-import { all as allCustomers, primaryLoc } from "@/lib/stores/customers";
-import { getAll as getAllQuotes } from "@/lib/stores/quotes";
-import { getAllProjects } from "@/lib/stores/projects";
+import { allForDirectory, primaryLoc } from "@/lib/stores/customers";
+import { listQuoteRows } from "@/lib/stores/quotes";
+import { listProjectActivityRows } from "@/lib/stores/projects";
+import { companyIdsWithContactMatching } from "@/lib/identity/contacts";
+import { companyRollups, filterCompanyDirectory } from "@/lib/company-directory";
+import { paginate, parsePageParam, withPage } from "@/lib/list-paging";
+import { ListPager } from "@/components/list-pager";
 import { coordsOf } from "@/lib/geo";
 import { Avatar } from "@/components/ui";
 import { FilterBar } from "./controls";
@@ -20,7 +24,6 @@ import { venueTypesFrom } from "@/lib/venue-types";
 import { resolveFieldDefs } from "@/lib/customer-fields";
 import { travelForPoints } from "@/lib/travel-bulk";
 import { compareDrive, driveTitle, fmtDrive, parseDriveSort } from "@/lib/drive-format";
-import { parsePageSize } from "@/lib/short-list";
 
 export const metadata = { title: "Companies — Quartzite-6" };
 
@@ -28,25 +31,18 @@ function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
 }
 
-/** Directory paging (#224) — first PAGE rows, then "Show more" raises `?n=`
- *  by PAGE (clamped to a max of 500 by the shared parsePageSize — see
- *  src/lib/short-list.ts). Filters/search apply before this (they narrow
- *  `sorted` itself); this only limits how much of the already-filtered
- *  list renders. */
-const PAGE = 50;
-
-/** Every current query param carries over except `n` (bumped) and `edit`
- *  (a transient modal-open flag, not a filter worth preserving across a
- *  page navigation). */
-function showMoreHref(sp: Record<string, string | string[] | undefined>, nextN: number): string {
+/** Directory paging (Jeff 2026-10-15 #11, replacing #224's "Show more"): 50 a page, Prev / Next and
+ *  "Page X of Y", the page in `?page=`. Filters, search and sort run over every company first. Every
+ *  current query param carries over except `page` (set by the pager) and `edit` (a transient
+ *  modal-open flag) and #224's retired `n`. */
+function pageParamsOf(sp: Record<string, string | string[] | undefined>): URLSearchParams {
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(sp)) {
-    if (k === "n" || k === "edit" || v === undefined) continue;
+    if (k === "page" || k === "n" || k === "edit" || v === undefined) continue;
     const val = Array.isArray(v) ? v[0] : v;
     if (val) params.set(k, val);
   }
-  params.set("n", String(nextN));
-  return "/companies?" + params.toString();
+  return params;
 }
 
 const CSS = `
@@ -67,12 +63,14 @@ export default async function CustomersPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Jeff 2026-10-15 #11 — slim reads: companies + venues (no contacts), and only the quote / project fields
+  // the rollups need (SQL projections), so the whole directory filters without loading whole documents.
   const [me, sp, customers, quotes, projects, users, settings] = await Promise.all([
     requireUser(),
     searchParams,
-    allCustomers(),
-    getAllQuotes(),
-    getAllProjects(),
+    allForDirectory(),
+    listQuoteRows(),
+    listProjectActivityRows(),
     activeUsers(),
     getSettings(),
   ]);
@@ -97,79 +95,14 @@ export default async function CustomersPage({
     };
   };
 
-  /* ---- per-customer activity rollups (quotes / projects live by id|name) ---- */
-  const quotesById = new Map<string, typeof quotes>();
-  const quotesByName = new Map<string, typeof quotes>();
-  for (const qt of quotes) {
-    const key = qt.customerId || qt.customer;
-    if (!key) continue;
-    const idx = qt.customerId ? quotesById : quotesByName;
-    const list = idx.get(key);
-    if (list) list.push(qt);
-    else idx.set(key, [qt]);
-  }
-  // Concatenation loses the original interleaving; callers only sum, count, and sort by `at`.
-  const quotesFor = (id: string, name: string) => [
-    ...(quotesById.get(id) ?? []),
-    ...(name ? quotesByName.get(name) ?? [] : []),
-  ];
-  const projectsByCustomer = new Map<string, typeof projects>();
-  for (const p of projects) {
-    if (p.customerId == null) continue;
-    const list = projectsByCustomer.get(p.customerId);
-    if (list) list.push(p);
-    else projectsByCustomer.set(p.customerId, [p]);
-  }
-  const projectsFor = (id: string) => projectsByCustomer.get(id) ?? [];
+  /* ---- per-customer activity rollups (quotes / projects live by id|name; a stored owner wins — D83) ---- */
+  const rows = companyRollups(customers, quotes, projects);
 
-  const rollup = (id: string, name: string) => {
-    const qs = quotesFor(id, name);
-    const openValue = qs
-      .filter((qt) => qt.status === "draft" || qt.status === "sent")
-      .reduce((a, qt) => a + (qt.value || 0), 0);
-    const acts = [
-      ...qs.map((qt) => ({ at: qt.updatedAt || 0, owner: qt.owner || "" })),
-      ...projectsFor(id).map((p) => ({ at: p.updatedAt || 0, owner: p.owner || "" })),
-    ].filter((r) => r.owner);
-    acts.sort((a, b) => b.at - a.at);
-    return { openValue, quoteCount: qs.length, owner: acts[0]?.owner || "" };
-  };
-
-  const rows = customers.map((c) => {
-    const r = rollup(c.id, c.name);
-    // A stored owner wins; the rollup is the fallback for records that predate
-    // the field or have never been assigned (D83, punch item 23 D).
-    if (c.owner) r.owner = c.owner;
-    return { c, ...r };
-  });
-
-  /* ---- filters ---- */
+  /* ---- filters, over EVERY company: scope, type, search (name, type, venues, and — in SQL — contacts' names,
+     titles and emails), added in 7 days ---- */
+  const contactHits = q.trim() ? await companyIdsWithContactMatching(q) : undefined;
+  const { filtered, addedCount } = filterCompanyDirectory(rows, { scope, me: me.name, type: typeParam, q, added, contactHits });
   const ql = q.trim().toLowerCase();
-  const preAdded = rows.filter(({ c, owner }) => {
-    if (scope === "mine" && owner !== me.name) return false;
-    if (scope !== "all" && scope !== "mine" && owner !== scope) return false;
-    if (typeParam !== "all" && c.type !== typeParam) return false;
-    if (ql) {
-      const hay = (
-        c.name +
-        " " +
-        (c.locations || []).map((l) => [l.label, l.city, l.state].filter(Boolean).join(" ")).join(" ")
-      ).toLowerCase();
-      if (!hay.includes(ql)) return false;
-    }
-    return true;
-  });
-  // createdAt is typed optional on CustomerDoc, but post-D85 every row has
-  // one: composeDoc (customers.ts:288) always copies the notNull
-  // companies.created_at, and the D85 converter stamped legacy pre-D83 rows
-  // with the CONVERSION run time (`doc.createdAt ?? t`) — reseeds rerun it
-  // (seed-data.ts). So legacy/seeded rows read as "new" for 7 days after any
-  // reseed or the prod first-boot; the `?? 0` is a type guard, not a
-  // never-match path.
-  const since7 = Date.now() - 7 * 86_400_000;
-  const isRecent = ({ c }: (typeof preAdded)[number]) => (c.createdAt ?? 0) >= since7;
-  const addedCount = preAdded.filter(isRecent).length;
-  const filtered = added ? preAdded.filter(isRecent) : preAdded;
 
   /* ---- drive-from-origin (#176, D229): one bulk lookup covering every
    *  customer's primary venue, then sort a COPY of `filtered` so nothing
@@ -189,7 +122,6 @@ export default async function CustomersPage({
       };
     })
   );
-  const n = parsePageSize(one(sp.n));
   const sort = parseDriveSort(one(sp.sort));
   const sorted = sort
     ? [...filtered].sort(
@@ -199,9 +131,9 @@ export default async function CustomersPage({
       )
     : filtered;
 
-  const matchCount = sorted.length;
-  const pageRows = sorted.slice(0, n);
-  const hasMore = matchCount > pageRows.length;
+  const paged = paginate(sorted, parsePageParam(one(sp.page)));
+  const pageRows = paged.rows;
+  const pageParams = pageParamsOf(sp);
 
   const types = ["all", ...Array.from(new Set(customers.map((c) => c.type).filter(Boolean)))];
   const ownerOptions = [
@@ -356,7 +288,7 @@ export default async function CustomersPage({
             <>
             {sorted.length > 0 && (
               <div style={{ fontSize: 11.5, color: "#8c919c", marginBottom: 8 }}>
-                Showing {pageRows.length} of {matchCount}
+                Showing {paged.from}–{paged.to} of {paged.total}
               </div>
             )}
             <div className="pk-card" style={{ padding: 0, overflow: "hidden" }}>
@@ -430,17 +362,16 @@ export default async function CustomersPage({
                 </div>
               )}
             </div>
-            {hasMore && (
-              <div style={{ textAlign: "center", marginTop: 14 }}>
-                <Link
-                  href={showMoreHref(sp, n + PAGE)}
-                  className="pk-btn-outline"
-                  style={{ display: "inline-block", fontSize: 12.5, fontWeight: 600, textDecoration: "none", padding: "9px 16px", borderRadius: 8 }}
-                >
-                  Show more ({matchCount - pageRows.length} left)
-                </Link>
-              </div>
-            )}
+            <ListPager
+              page={paged.page}
+              pageCount={paged.pageCount}
+              total={paged.total}
+              from={paged.from}
+              to={paged.to}
+              prevHref={paged.page > 1 ? withPage("/companies", pageParams, paged.page - 1) : null}
+              nextHref={paged.page < paged.pageCount ? withPage("/companies", pageParams, paged.page + 1) : null}
+              noun="companies"
+            />
             </>
           )}
         </div>

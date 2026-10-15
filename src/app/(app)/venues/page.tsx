@@ -6,7 +6,8 @@ import { timeAgo } from "@/lib/format";
 import { cityState, mono } from "../companies/lib";
 import { travelForPoints } from "@/lib/travel-bulk";
 import { compareDrive, driveTitle, fmtDrive, parseDriveSort } from "@/lib/drive-format";
-import { parsePageSize } from "@/lib/short-list";
+import { paginate, parsePageParam, withPage } from "@/lib/list-paging";
+import { ListPager } from "@/components/list-pager";
 
 /**
  * Venues directory (D101) — mirrors the Companies list's server-component +
@@ -14,9 +15,8 @@ import { parsePageSize } from "@/lib/short-list";
  * stays single-file since this task only touches this new page: the search
  * box and company filter are a plain GET <form> (text input + native
  * <datalist>) instead of the companies page's separate client controls.tsx
- * (no debounced client state). Result paging (#224) mirrors the companies
- * directory's `?n=` "Show more" idiom — the old hard 200-row cap (punch
- * #92, D142) is gone.
+ * (no debounced client state). Result paging is the shared 50-a-page pager
+ * (Jeff 2026-10-15 #11, `?page=`), which replaced #224's `?n=` "Show more".
  */
 
 export const metadata = { title: "Venues — Quartzite-6" };
@@ -24,12 +24,6 @@ export const metadata = { title: "Venues — Quartzite-6" };
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
 }
-
-/** Directory paging (#224) — replaces the old hard PAGE=200 cap with the
- *  companies directory's "Show more" idiom: first PAGE rows, then a link
- *  that raises `?n=` by PAGE, preserving the other filters. `?n=` itself is
- *  clamped to a max of 500 by the shared parsePageSize (src/lib/short-list.ts). */
-const PAGE = 50;
 
 const CSS = `
   .ve-row:hover { background: #fafbff; }
@@ -124,16 +118,14 @@ export default async function VenuesPage({
     });
   }
 
-  // The directory can hold thousands of venues; render only a page of them
-  // so the DOM stays light (punch #92's cap became #224's paging: a
-  // "Show more" link raises `?n=` by PAGE instead of a hard 200 cutoff).
-  // Filters + search narrow the set before paging is applied.
-  const n = parsePageSize(one(sp.n));
-  const matchCount = filtered.length;
-  const hasMore = matchCount > n;
-  const visible = filtered.slice(0, n);
+  // The directory can hold thousands of venues; render one 50-row page of
+  // them (Jeff 2026-10-15 #11). Filters + search + sort run over every venue
+  // before the page is cut.
+  const paged = paginate(filtered, parsePageParam(one(sp.page)));
+  const matchCount = paged.total;
+  const visible = paged.rows;
   const resultLabel =
-    `Showing ${visible.length} of ${matchCount}` +
+    (matchCount ? `Showing ${paged.from}–${paged.to} of ${matchCount}` : "Showing 0 of 0") +
     ` venue${matchCount === 1 ? "" : "s"}` +
     (activeCompanyName ? " · " + activeCompanyName : "") +
     (ql ? ` · “${q.trim()}”` : "") +
@@ -141,16 +133,14 @@ export default async function VenuesPage({
       ? ` · Drive from ${travel.originName}`
       : " · Set a quote origin with coordinates in Settings → Locations to see drive times");
 
-  const linkWith = (patch: { company?: string; sort?: string; n?: number }) => {
+  const linkWith = (patch: { company?: string; sort?: string; page?: number }) => {
     const p = new URLSearchParams();
     if (q.trim()) p.set("q", q.trim());
     const nextCompany = patch.company !== undefined ? patch.company : company;
     if (nextCompany) p.set("company", nextCompany);
     const nextSort = patch.sort !== undefined ? patch.sort : sort;
     if (nextSort) p.set("sort", nextSort);
-    if (patch.n !== undefined) p.set("n", String(patch.n));
-    const s = p.toString();
-    return "/venues" + (s ? "?" + s : "");
+    return withPage("/venues", p, patch.page ?? 1);
   };
 
   const hasVenues = rows.length > 0;
@@ -307,17 +297,16 @@ export default async function VenuesPage({
           )}
         </div>
       )}
-      {hasMore && (
-        <div style={{ textAlign: "center", marginTop: 14 }}>
-          <Link
-            href={linkWith({ n: n + PAGE })}
-            className="pk-btn-outline"
-            style={{ display: "inline-block", fontSize: 12.5, fontWeight: 600, textDecoration: "none", padding: "9px 16px", borderRadius: 8 }}
-          >
-            Show more ({matchCount - visible.length} left)
-          </Link>
-        </div>
-      )}
+      <ListPager
+        page={paged.page}
+        pageCount={paged.pageCount}
+        total={paged.total}
+        from={paged.from}
+        to={paged.to}
+        prevHref={paged.page > 1 ? linkWith({ page: paged.page - 1 }) : null}
+        nextHref={paged.page < paged.pageCount ? linkWith({ page: paged.page + 1 }) : null}
+        noun="venues"
+      />
     </div>
   );
 }

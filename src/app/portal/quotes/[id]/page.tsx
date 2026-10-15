@@ -10,6 +10,9 @@ import { loadQuoteDocumentProps } from "@/lib/quote-pdf/document-loader";
 import { ONLINE_COPY, onlineHeaderLine, onlineView } from "@/lib/quote-share/view";
 import { OnlineEstimateCard, OnlineEstimateView } from "@/components/online-estimate/online-estimate";
 import { PortalShell } from "../../shell";
+import letterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
+import { onlineCutSheets } from "@/lib/curtain-cut-sheets/online";
+import { OnlineCutSheets } from "@/components/cutsheets/online-cut-sheets";
 import { PortalSignedOut } from "../../signed-out";
 import { portalNav } from "../../nav";
 
@@ -88,16 +91,21 @@ export default async function PortalQuotePage({
   });
   // The loader fails closed (null) unless given this quote's own sent revision.
   if (!docProps) return shell(<OnlineEstimateCard title={ONLINE_COPY.portalUnavailable} backHref={backHref} />);
+  // Jeff 2026-10-15 #22: the cut sheets the sent PDF carries.
+  const cutSheets = await onlineCutSheets(q, state.rev);
   return shell(
-    <OnlineEstimateView
-      docProps={docProps}
-      view={onlineView(sp.view)}
-      headerLine={onlineHeaderLine(q, state.rev)}
-      closed={state.closed}
-      narrativeHref={withQs(base)}
-      bomHref={withQs(base, "view=bom")}
-      pdfHref={portalQuotePdfSource(q, cid) ? withQs(base + "/pdf") : null}
-      backHref={backHref}
-    />
+    <>
+      <OnlineEstimateView
+        docProps={docProps}
+        view={onlineView(sp.view)}
+        headerLine={onlineHeaderLine(q, state.rev)}
+        closed={state.closed}
+        narrativeHref={withQs(base)}
+        bomHref={withQs(base, "view=bom")}
+        pdfHref={portalQuotePdfSource(q, cid) ? withQs(base + "/pdf") : null}
+        backHref={backHref}
+      />
+      {cutSheets && <OnlineCutSheets loaded={cutSheets} letterheadSrc={letterhead.src} />}
+    </>
   );
 }
