@@ -283,6 +283,9 @@ async function rackLinkChecks(ok: Ok) {
   const member = { ...base, id: "m", partId: "AMP", groupId: "h" };
   ok(L.rackLinkRefusal(holder, [holder]) === null, "#43: a plain device holding nothing can link to a rack");
   ok(L.rackLinkRefusal(holder, [holder, member]) === L.rackLinkHasMembers(1), "#43: …not while it holds devices of its own (they'd price on top of the rack)");
+  ok(L.rackLinkHasMembers(2) === "Remove the 2 devices inside first — the rack supplies them.", "#354 review: the refusal says to remove the devices (the rack supplies them)");
+  ok(L.rackLinkRefusal(holder, [holder, member], { removeMembers: true }) === null && L.rackLinkMemberCount(holder, [holder, member]) === 1, "#354 review: …while the one-step Link and remove its N devices is allowed");
+  ok(L.rackLinkRefusal({ ...holder, qty: 3 }, [holder]) === L.RACK_LINK_QTY && L.rackLinkRefusal({ ...holder, qty: 1 }, [holder]) === null, "#354 review: a lot marker (qty > 1) can't link — set its quantity to 1 first");
   ok(L.rackLinkRefusal({ ...holder, partId: ASSEMBLY_PART_PREFIX + "r1" }, []) === L.RACK_LINK_ASSEMBLY && L.rackLinkRefusal({ ...holder, partId: "allow:lighting:par:good" }, []) === L.RACK_LINK_ASSEMBLY, "#43: …nor an assembly or allowance already");
   ok(L.rackLinkRefusal({ ...holder, curtain: {} }, []) === L.RACK_LINK_CURTAIN && L.rackLinkRefusal(member, [member]) === Gg.GROUP_HOLDER_IS_MEMBER && L.rackLinkRefusal({ ...holder, rackId: "r1" }, []) === L.RACK_LINK_ALREADY, "#43: …nor a curtain, a member or a device already linked");
   const linked = { ...holder, partId: "asm:r1", rackId: "r1", rackHolderPartId: "MA-RACK" };
@@ -301,13 +304,21 @@ async function rackLinkChecks(ok: Ok) {
     { slot: "rack", line: { sku: "DSP", qty: 1 } },
   ];
   const dev = L.rackDeviceLines(lines);
+  ok(L.rackLevelLines(lines).map((l) => `${l.sku}×${l.qty}`).join() === "ENCL×1" && L.snapshotUnits([...dev, ...L.rackLevelLines(lines)])!.join() === "AMP,AMP,DSP,ENCL",
+    "#354 review: Unlink copies the rack-level parts too (devices first), so the BOM drops nothing");
   ok(dev.map((l) => `${l.sku}×${l.qty}`).join() === "AMP×2,DSP×1", "#43: the group is the rack's RU devices (rack-level parts and optional add-ons left out)");
   ok(JSON.stringify(L.rackDeviceRows(dev, (s) => (s === "DSP" ? "Signal processor" : undefined))) === JSON.stringify([{ sku: "AMP", desc: "Amp", qty: 2 }, { sku: "DSP", desc: "Signal processor", qty: 1 }]), "#43: rows read the catalog description, else the rack's label");
   ok(L.snapshotUnits(dev)!.join() === "AMP,AMP,DSP" && L.snapshotUnits([{ sku: "X", qty: Gg.MAX_GROUP_MEMBERS + 1 }]) === null, "#43: Unlink copies one device per unit, refused past the 200-device group cap");
   ok(L.rackHref("rk 1") === "/design/assemblies/rack/rk%201", "#43: Open rack → the Assembly Builder rack page");
   // Wiring pins.
+  const act0 = src("src/app/(app)/design/grid/[id]/actions.ts");
+  ok(/async function rackEstimateRefusal[\s\S]{0,400}estimateLinkOf\(project\)/.test(act0) && (act0.match(/await rackEstimateRefusal\(project,/g) || []).length === 2,
+    "#354 review: link and unlink both refuse on an estimate-owned option (#314)");
+  ok((act0.match(/await rackHolderRefusal\(projectId,/g) || []).length === 2 && /\(await getFixture\(id\)\)\?\.kind === "rack"\) return RACK_HOLDS_NOTHING/.test(act0),
+    "#354 review: Place inside and Move into refuse any rack-assembly holder, linked or placed from the library");
+  ok(/rackLevelLines\(all\)/.test(act0), "#354 review: unlinkRackAction copies rack-level parts");
   const act = src("src/app/(app)/design/grid/[id]/actions.ts");
-  ok(/export async function linkRackAction[\s\S]{0,400}await requireUser\(\)[\s\S]{0,500}rack\.kind !== "rack"/.test(act) && /export async function unlinkRackAction[\s\S]{0,300}await requireUser\(\)/.test(act), "#43: both actions are signed-in only and the link checks the rack is a rack");
+  ok(/export async function linkRackAction[\s\S]{0,400}await requireUser\(\)[\s\S]{0,1200}rack\.kind !== "rack"/.test(act) && /export async function unlinkRackAction[\s\S]{0,300}await requireUser\(\)/.test(act), "#43: both actions are signed-in only and the link checks the rack is a rack");
   const page = src("src/app/(app)/design/grid/[id]/page.tsx");
   ok(/rackDevices=\{rackDevices\}/.test(page) && /racks=\{racks\}/.test(page), "#43: the editor gets the rack list and each placed rack's devices from the server");
   const pe = src("src/app/(app)/design/grid/[id]/workspace/property-editor.tsx");
@@ -333,7 +344,7 @@ async function rackLinkDbChecks(ok: Ok) {
     // Refused while it holds a device of its own.
     await G.setPlacementsGroup(project.id, [{ id: amp.id, groupId: encl.id }]);
     const refused = await G.linkPlacementRack(project.id, { placementId: encl.id, rackId: "b4-rack" });
-    ok(!refused.ok && /Take out the 1 device inside first/.test(refused.error), "#43 store: Link is refused while the device holds one of its own");
+    ok(!refused.ok && /Remove the 1 device inside first — the rack supplies them/.test(refused.error), "#43 store: Link is refused while the device holds one of its own");
     await G.setPlacementsGroup(project.id, [{ id: amp.id, groupId: null }]);
     const lk = await G.linkPlacementRack(project.id, { placementId: encl.id, rackId: "b4-rack" });
     const e1 = await get(encl.id);
@@ -348,6 +359,20 @@ async function rackLinkDbChecks(ok: Ok) {
     ok(un.ok && un.added === 3 && e2.partId === "B4-ENCL" && e2.rackId === undefined && e2.rackHolderPartId === undefined, "#43 store: Unlink puts the device's own part back and ends the link");
     ok(members.map((m) => m.partId).join() === "B4-AMP,B4-AMP,B4-DSP" && members.every((m) => m.x === e2.x && m.optionId === opt && !!m.designator), "#43 store: …and copies the rack's devices in as an ordinary, numbered group at the device");
     ok(!(await G.unlinkPlacementRack(project.id, { placementId: encl.id, skus: [], by })).ok, "#43 store: Unlink on a device that isn't linked is refused");
+    // #354 review: Link and remove its N devices — one write.
+    const box = await put(0.6, "B4-ENCL");
+    const in1 = await put(0.61, "B4-AMP");
+    const in2 = await put(0.62, "B4-DSP");
+    await G.setPlacementsGroup(project.id, [{ id: in1.id, groupId: box.id }, { id: in2.id, groupId: box.id }]);
+    const v0 = (await G.getProject(project.id))!.updatedAt;
+    const lr = await G.linkPlacementRack(project.id, { placementId: box.id, rackId: "b4-rack", removeMembers: true });
+    const after2 = (await G.getProject(project.id))!;
+    ok(lr.ok && lr.value.removed === 2 && !after2.placements!.some((x) => x.id === in1.id || x.id === in2.id) && after2.placements!.find((x) => x.id === box.id)?.rackId === "b4-rack" && lr.landed?.before === v0,
+      "#354 review: Link and remove deletes the devices inside and links, in one write");
+    const lot = (await G.addPlacement(project.id, { sheetId: sh.id, page: 1, x: 0.7, y: 0.5, partId: "B4-ENCL", optionId: opt, by }))!.placements!.at(-1)!;
+    await G.setPlacementsPart(project.id, [{ id: lot.id, partId: "B4-ENCL2", qty: 4 }]);
+    const lotLink = await G.linkPlacementRack(project.id, { placementId: lot.id, rackId: "b4-rack" });
+    ok(!lotLink.ok && /set its quantity to 1 first/.test(lotLink.error), "#354 review: the store refuses to link a lot marker");
     // A part swap ends a link.
     const solo = await put(0.8, "B4-ENCL");
     await G.linkPlacementRack(project.id, { placementId: solo.id, rackId: "b4-rack" });

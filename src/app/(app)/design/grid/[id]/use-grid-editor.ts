@@ -2303,18 +2303,20 @@ function useGridEditorImpl(props: GridEditorProps) {
     [rackDevices]
   );
 
-  /** Oct 15 #43: "Link to rack…" — not undoable (Unlink is the way back), so the stack is cleared. */
+  /** Oct 15 #43: "Link to rack…" — not undoable (Unlink is the way back), so the stack is cleared. `removeMembers`
+   *  (#354 review): "Link and remove its N devices" deletes the devices inside in the same write. */
   const linkRack = useCallback(
-    async (placementId: string, rackId: string): Promise<boolean> => {
+    async (placementId: string, rackId: string, removeMembers = false): Promise<boolean> => {
       setErr(null);
       setBusy(true);
       try {
-        const r = await linkRackAction(project.id, { placementId, rackId });
+        const r = await linkRackAction(project.id, { placementId, rackId, ...(removeMembers ? { removeMembers: true } : {}) });
         if (!r.ok) {
           setErr(r.error);
           return false;
         }
-        noteAction(`Linked to ${racks.find((x) => x.id === rackId)?.label ?? "the rack"} — its devices come from the rack.`);
+        const gone = r.removed ? ` Removed the ${r.removed} device${r.removed === 1 ? "" : "s"} that were inside.` : "";
+        noteAction(`Linked to ${racks.find((x) => x.id === rackId)?.label ?? "the rack"} — its devices come from the rack.${gone}`);
         onStructuralChange();
         return true;
       } catch {
@@ -2338,9 +2340,11 @@ function useGridEditorImpl(props: GridEditorProps) {
           setErr(r.error);
           return false;
         }
-        const n = r.added;
+        const n = r.devices;
         noteAction(
-          `Unlinked — ${n} device${n === 1 ? "" : "s"} copied in as an ordinary group.` +
+          `Unlinked — ${n} device${n === 1 ? "" : "s"}` +
+            (r.parts ? ` and ${r.parts} rack part${r.parts === 1 ? "" : "s"} (blanks, vents, power…)` : "") +
+            " copied in as an ordinary group." +
             (r.skipped ? ` ${r.skipped} left out (not placeable on the Grid).` : "")
         );
         onStructuralChange();

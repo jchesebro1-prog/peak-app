@@ -1696,8 +1696,8 @@ export async function addPlacementInside(
  */
 export async function linkPlacementRack(
   projectId: string,
-  input: { placementId: string; rackId: string }
-): Promise<BatchResult<{ partId: string }>> {
+  input: { placementId: string; rackId: string; removeMembers?: boolean }
+): Promise<BatchResult<{ partId: string; removed: number }>> {
   const rackPart = assemblyPartId(input.rackId);
   const before = await getProject(projectId);
   const old = (before?.placements || []).find((pl) => pl.id === input.placementId);
@@ -1709,6 +1709,16 @@ export async function linkPlacementRack(
       ensureOptions(p);
       let was = "";
       const reissue = new Set<string>();
+      // #354 review: "Link and remove its N devices" — the devices inside go in the same write (the rack supplies
+      // them); the risers forget them exactly as a delete does.
+      const gone = new Set(
+        input.removeMembers ? (p.placements || []).filter((pl) => pl.groupId === input.placementId && pl.id !== input.placementId).map((pl) => pl.id) : []
+      );
+      if (gone.size) {
+        p.placements = (p.placements || []).filter((pl) => !gone.has(pl.id));
+        if (p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
+        pruneConduitRisersIn(p);
+      }
       p.placements = (p.placements || []).map((pl) => {
         if (pl.id !== input.placementId) return pl;
         was = pl.partId;
@@ -1721,11 +1731,11 @@ export async function linkPlacementRack(
         return linked;
       });
       stampNewDesignators(p, reissue, codeOf, digits);
-      return { partId: was };
+      return { partId: was, removed: gone.size };
     },
     (placements, ids) => {
       const pl = placements.find((x) => ids.has(x.id))!;
-      return rackLinkRefusal(pl, placements);
+      return rackLinkRefusal(pl, placements, { removeMembers: input.removeMembers });
     }
   );
 }

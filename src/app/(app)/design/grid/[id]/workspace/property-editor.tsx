@@ -21,7 +21,7 @@ import { RouteEditor } from "../wires-panel";
 import { SpacePinControl, TypeEditControl } from "./type-space-controls";
 import { TYPE_NOT_UNDOABLE } from "@/lib/design/grid-type-edit";
 import { groupRefusal, holdRefusal } from "@/lib/design/grid-groups";
-import { rackHref, rackLinkRefusal } from "@/lib/design/grid-rack-link";
+import { rackHref, rackLinkMemberCount, rackLinkRefusal } from "@/lib/design/grid-rack-link";
 import Menu from "./menu";
 import type { GridEditor } from "../use-grid-editor";
 
@@ -480,12 +480,17 @@ function GroupRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
   }
   if (holdRefusal(pl)) return null;
   const n = holderCounts.get(pl.id) || 0;
+  // #354 review: a rack placed from the library supplies its own devices (the Rack row) — only devices put inside it
+  // before that rule can still be taken out.
+  const isRack = !!ed.rackOf(pl);
+  if (isRack && !n) return null;
   const placing = placeInsideId === pl.id;
   return (
     <PropRow label="Holds" title="Any device can hold others — a rack, a booth, a panel. They list under it on the Spreadsheet.">
       <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         <span style={{ flex: 1, minWidth: 0, color: n ? undefined : "#8c919c" }}>{n ? `${n} device${n === 1 ? "" : "s"}` : "Nothing yet"}</span>
-        <button
+        {!isRack && (
+          <button
           type="button"
           style={placing ? { ...small, background: "#16181d", color: "#fff", borderColor: "#16181d" } : small}
           disabled={busy && !placing}
@@ -494,7 +499,8 @@ function GroupRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
           title="Then click parts in the Product Library — each click adds one inside this device"
         >
           {placing ? "Done" : "Place inside"}
-        </button>
+          </button>
+        )}
         {n > 0 && (
           <button type="button" style={small} disabled={busy} onClick={() => void takeOutOfGroup([pl.id])} title="Put every device inside back on the plan beside it">
             Take all out
@@ -513,6 +519,8 @@ function GroupRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
 function RackRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
   const { rackOf, racks, linkRack, unlinkRack, placements, busy } = ed;
   const rack = rackOf(pl);
+  // #354 review: "Link and remove its N devices" — picked rack waiting for the confirm (not undoable).
+  const [confirmRack, setConfirmRack] = useState<string | null>(null);
   const small: React.CSSProperties = { ...BTN, padding: "2px 8px", fontSize: 11, flex: "0 0 auto", whiteSpace: "nowrap" };
   if (rack) {
     const units = rack.rows.reduce((n, r) => n + r.qty, 0);
@@ -557,16 +565,51 @@ function RackRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
       </>
     );
   }
-  if (!racks.length || rackLinkRefusal(pl, placements)) return null;
+  if (!racks.length) return null;
+  const inside = rackLinkMemberCount(pl, placements);
+  // Linkable outright, or only once its devices go (the one-step link-and-remove); anything else hides the row.
+  if (rackLinkRefusal(pl, placements, { removeMembers: true })) return null;
+  const label = (r: { label: string; scope?: string }) => (r.scope ? `${r.label} (${r.scope})` : r.label);
+  const pending = confirmRack ? racks.find((r) => r.id === confirmRack) : undefined;
   return (
-    <PropRow label="Rack" title="Make this device an Assembly Builder rack: it prices as the rack and shows the rack's devices. Not undoable — Unlink is the way back.">
-      <Menu
-        label="Link to rack…"
-        disabled={busy}
-        title="Pick the rack this device is"
-        items={racks.map((r) => ({ label: r.scope ? `${r.label} (${r.scope})` : r.label, onSelect: () => void linkRack(pl.id, r.id) }))}
-      />
-    </PropRow>
+    <>
+      <PropRow
+        label="Rack"
+        title={
+          inside
+            ? `Remove the ${inside} device${inside === 1 ? "" : "s"} inside first — the rack supplies them. Or link and remove them in one step.`
+            : "Make this device an Assembly Builder rack: it prices as the rack and shows the rack's devices. Not undoable — Unlink is the way back."
+        }
+      >
+        <Menu
+          label={inside ? `Link and remove its ${inside} device${inside === 1 ? "" : "s"}…` : "Link to rack…"}
+          disabled={busy}
+          title="Pick the rack this device is"
+          items={racks.map((r) => ({ label: label(r), onSelect: () => (inside ? setConfirmRack(r.id) : void linkRack(pl.id, r.id)) }))}
+        />
+      </PropRow>
+      {pending && inside > 0 && (
+        <div style={{ padding: "6px 10px", fontSize: 11, color: "#5b616e", borderBottom: "1px solid #f0f1f4" }}>
+          {`Deletes the ${inside} device${inside === 1 ? "" : "s"} inside and links to ${label(pending)} — the rack supplies its devices. This can't be undone.`}
+          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <button
+              type="button"
+              style={{ ...BTN, padding: "2px 8px", fontSize: 11, color: "#a0442b" }}
+              disabled={busy}
+              onClick={() => {
+                setConfirmRack(null);
+                void linkRack(pl.id, pending.id, true);
+              }}
+            >
+              {`Link and remove ${inside}`}
+            </button>
+            <button type="button" style={{ ...BTN, padding: "2px 8px", fontSize: 11 }} onClick={() => setConfirmRack(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

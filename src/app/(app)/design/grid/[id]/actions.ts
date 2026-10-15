@@ -124,8 +124,8 @@ import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
 import { getFixture, listFixtures } from "@/lib/stores/fixtures";
 import { getCatalogRates, loadWireLaborRules } from "@/lib/stores/pricing";
 import { fixtureLineParts, fixtureSkus, resolveFixture } from "@/lib/fixture-assemblies";
-import { RACK_LINK_GONE, rackDeviceLines, rackUnlinkTooMany, snapshotUnits } from "@/lib/design/grid-rack-link";
-import { assemblyPartId } from "@/lib/design/grid-virtual-parts";
+import { RACK_HOLDS_NOTHING, RACK_LINK_ESTIMATE, RACK_LINK_GONE, rackDeviceLines, rackLevelLines, rackUnlinkTooMany, snapshotUnits } from "@/lib/design/grid-rack-link";
+import { assemblyPartId, parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
 import { searchCatalog } from "@/app/(app)/estimator/actions";
 import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
 import { partForGrid, placeablePartIds } from "@/lib/design/grid-part-lookup";
@@ -891,6 +891,27 @@ export async function setPlacementsSpaceAction(
  *  take them out (`null` — to `x,y` when given, else beside the holder) in
  *  one all-or-nothing write; the store checks every group rule. `previous`
  *  is what undo sends back. */
+/**
+ * #354 review: a rack placed from the library (`asm:<id>` whose assembly is a rack) or linked to one supplies its own
+ * devices (Oct 15 #43) — nothing goes inside it by hand. Members it already has stay; only new ones are refused.
+ * One fixture read per distinct assembly named.
+ */
+async function rackHolderRefusal(projectId: string, holderIds: readonly string[]): Promise<string | null> {
+  if (!holderIds.length) return null;
+  const project = await getProject(projectId);
+  if (!project) return null;
+  const want = new Set(holderIds);
+  const asmIds = new Set<string>();
+  for (const pl of project.placements || []) {
+    if (!want.has(pl.id)) continue;
+    if (pl.rackId) return RACK_HOLDS_NOTHING;
+    const ref = parseVirtualPartId(pl.partId);
+    if (ref?.kind === "assembly") asmIds.add(ref.id);
+  }
+  for (const id of asmIds) if ((await getFixture(id))?.kind === "rack") return RACK_HOLDS_NOTHING;
+  return null;
+}
+
 export async function setPlacementsGroupAction(
   projectId: string,
   items: GroupItem[]
@@ -906,6 +927,9 @@ export async function setPlacementsGroupAction(
     )
   )
     return { ok: false, error: BATCH_INVALID };
+  // #354 review: never into a rack (only items that go INTO a holder; Take out is always allowed).
+  const holds = await rackHolderRefusal(projectId, [...new Set(items.flatMap((it) => (it.groupId ? [it.groupId] : [])))]);
+  if (holds) return { ok: false, error: holds };
   const r = await setPlacementsGroup(
     projectId,
     items.map((it) => ({ id: it.id, groupId: it.groupId, ...(it.x !== undefined && it.y !== undefined ? { x: it.x, y: it.y } : {}) }))
@@ -926,6 +950,8 @@ export async function placeInsideAction(projectId: string, input: { holderId: st
     return { ok: false, error: BATCH_INVALID };
   const refusal = await placeDevicePartRefusal(input.partId);
   if (refusal) return { ok: false, error: refusal };
+  const holds = await rackHolderRefusal(projectId, [input.holderId]);
+  if (holds) return { ok: false, error: holds };
   await adoptForPlacement([input.partId], user.name);
   const r = await addPlacementInside(projectId, { holderId: input.holderId, partId: input.partId, by: user.name });
   if (!r.ok) return r;
@@ -940,45 +966,74 @@ export async function placeInsideAction(projectId: string, input: { holderId: st
 }
 
 /**
+ * #354 review: a rack link changes what the design prices, so an estimate-owned option (#314) refuses it like every
+ * other grid→quote write. `pl` = the device, `project` read by the caller; null = allowed.
+ */
+async function rackEstimateRefusal(project: NonNullable<Awaited<ReturnType<typeof getProject>>>, pl: GridPlacement | undefined): Promise<string | null> {
+  const link = estimateLinkOf(project);
+  if (!link || !pl) return null;
+  if ((pl.optionId || defaultOptionId(project)) !== link.optionId) return null;
+  return `${RACK_LINK_ESTIMATE} — ${await estimateRefusal(link.quoteId)}`;
+}
+
+/**
  * Oct 15 #43: "Link to rack…" — the device becomes the rack assembly `rackId`
  * (the Assembly Builder rack is the source of its devices). The rack must exist
  * and be a rack; the store refuses a curtain, a member, an assembly already, a
- * device already linked or one holding devices of its own. Not undoable (Unlink
- * is the way back), so the editor clears its undo stack.
+ * device already linked, a lot marker (qty > 1) or one holding devices of its
+ * own — unless `removeMembers` (#354 review: "Link and remove its N devices"),
+ * which deletes them in the same write. Refused on an estimate-owned option.
+ * Not undoable (Unlink is the way back), so the editor clears its undo stack.
  */
-export async function linkRackAction(projectId: string, input: { placementId: string; rackId: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function linkRackAction(
+  projectId: string,
+  input: { placementId: string; rackId: string; removeMembers?: boolean }
+): Promise<{ ok: true; removed: number } | { ok: false; error: string }> {
   await requireUser();
-  if (!isStr(projectId) || !isObj(input) || !isStr(input.placementId) || !PLACEMENT_ID.test(input.placementId) || !isStr(input.rackId) || input.rackId === "" || input.rackId.length > PART_ID_MAX)
+  if (
+    !isStr(projectId) || !isObj(input) || !isStr(input.placementId) || !PLACEMENT_ID.test(input.placementId) || !isStr(input.rackId) || input.rackId === "" ||
+    input.rackId.length > PART_ID_MAX || (input.removeMembers !== undefined && typeof input.removeMembers !== "boolean")
+  )
     return { ok: false, error: BATCH_INVALID };
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  const owned = await rackEstimateRefusal(project, (project.placements || []).find((pl) => pl.id === input.placementId));
+  if (owned) return { ok: false, error: owned };
   const rack = await getFixture(input.rackId);
   if (!rack || rack.kind !== "rack") return { ok: false, error: RACK_LINK_GONE };
-  const r = await linkPlacementRack(projectId, { placementId: input.placementId, rackId: input.rackId });
+  const r = await linkPlacementRack(projectId, { placementId: input.placementId, rackId: input.rackId, removeMembers: input.removeMembers === true });
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   revalidatePath(`${editorPath(projectId)}/schedule`);
-  return { ok: true };
+  return { ok: true, removed: r.value.removed };
 }
 
 /**
  * Oct 15 #43: "Unlink" — the device gets its own part back and the rack's
- * devices, as the rack has them now, go in as an ordinary group (one device
- * per unit, each priced on its own from then on). A SKU the Grid can't place
- * (gone from the catalog, a fabric…) is left out and counted; a rack since
- * deleted copies nothing. Refused past the 200-device group cap.
+ * contents, as the rack has them now, go in as an ordinary group: its devices
+ * and (#354 review) its rack-level parts — blanks, vents, power, fans — one
+ * placement per unit, each priced on its own from then on, so the BOM drops
+ * nothing. A SKU the Grid can't place (gone from the catalog, a fabric…) is left
+ * out and counted; a rack since deleted copies nothing. Refused past the
+ * 200-member group cap, and on an estimate-owned option.
  */
 export async function unlinkRackAction(
   projectId: string,
   input: { placementId: string }
-): Promise<{ ok: true; added: number; skipped: number } | { ok: false; error: string }> {
+): Promise<{ ok: true; devices: number; parts: number; skipped: number } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!isStr(projectId) || !isObj(input) || !isStr(input.placementId) || !PLACEMENT_ID.test(input.placementId)) return { ok: false, error: BATCH_INVALID };
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
   const holder = (project.placements || []).find((pl) => pl.id === input.placementId);
+  const owned = await rackEstimateRefusal(project, holder);
+  if (owned) return { ok: false, error: owned };
   const rack = holder?.rackId ? await getFixture(holder.rackId) : null;
-  const lines = rack && rack.kind === "rack" ? rackDeviceLines(fixtureLineParts(rack)) : [];
-  const units = snapshotUnits(lines);
-  if (!units) return { ok: false, error: rackUnlinkTooMany(lines.reduce((n, l) => n + l.qty, 0)) };
+  const all = rack && rack.kind === "rack" ? fixtureLineParts(rack) : [];
+  const devices = rackDeviceLines(all);
+  const rackParts = rackLevelLines(all);
+  const units = snapshotUnits([...devices, ...rackParts]);
+  if (!units) return { ok: false, error: rackUnlinkTooMany([...devices, ...rackParts].reduce((n, l) => n + l.qty, 0)) };
   const distinct = [...new Set(units)];
   const placeable = distinct.length ? await placeablePartIds(new Set(distinct)) : new Set<string>();
   const usable: string[] = [];
@@ -990,7 +1045,8 @@ export async function unlinkRackAction(
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   revalidatePath(`${editorPath(projectId)}/schedule`);
-  return { ok: true, added: r.added, skipped: units.length - skus.length };
+  const deviceUnits = devices.filter((l) => ok.has(l.sku)).reduce((n, l) => n + l.qty, 0);
+  return { ok: true, devices: deviceUnits, parts: skus.length - deviceUnits, skipped: units.length - skus.length };
 }
 
 /** #299: one batch edit resolves at most this many DISTINCT part ids — the
