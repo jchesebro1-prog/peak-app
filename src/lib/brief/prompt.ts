@@ -56,6 +56,8 @@ const dueLabel = (ms: number | null) => (ms ? `due ${new Date(ms).toISOString().
 export function buildBriefUserText(f: BriefPromptFacts): string {
   const t = f.today;
   const o = f.organize;
+  // #350 review: every count is of the list the model actually sees (capped at BRIEF_ROWS_MAX)
+  const rows = f.rows.slice(0, BRIEF_ROWS_MAX);
   const lines: string[] = [
     `You are writing the ${f.slot === "morning" ? "morning" : "afternoon"} brief for ${briefField(f.name) || "a staff member"}, for ${briefField(f.dayLabel)}.`,
     "",
@@ -65,7 +67,7 @@ export function buildBriefUserText(f: BriefPromptFacts): string {
   if (f.since) lines.push(`- Since this morning: ${f.since.done} done, ${f.since.open} still open, ${f.since.new} new.`);
   lines.push(
     "Emails:",
-    `- Customers waiting on a reply: ${countRows(f.rows, "email")} (the email rows of the list).`,
+    `- Customers waiting on a reply: ${countRows(rows, "email")} (the email rows of the list).`,
     `- Inbox organization: ${o.toFile} to file (${o.strong} strong), ${o.noise} noise.`,
     "Estimates:",
     `- Quotes waiting on their approval: ${f.approvals}.`
@@ -75,9 +77,9 @@ export function buildBriefUserText(f: BriefPromptFacts): string {
     for (const q of f.quiet) lines.push(`  - ${briefField(q.number)} ${briefField(q.name)} for ${briefField(q.customer) || "unknown customer"}: ${q.days} business days quiet`);
   }
   lines.push(
-    `- Leads ready to quote: ${countRows(f.rows, "lead")}; renewals coming up: ${countRows(f.rows, "renewal")} (the lead and renewal rows).`,
+    `- Leads ready to quote: ${countRows(rows, "lead")}; renewals coming up: ${countRows(rows, "renewal")} (the lead and renewal rows).`,
     "Tasks:",
-    `- Tasks on the list: ${countRows(f.rows, "task", "assignment", "call")} (the task, assignment and call rows).`
+    `- Tasks on the list: ${countRows(rows, "task", "assignment", "call")} (the task, assignment and call rows).`
   );
   if (f.newPromiseTasks.length) {
     lines.push(`- New tasks from promises in email (${f.newPromiseTasks.length}):`);
@@ -87,8 +89,7 @@ export function buildBriefUserText(f: BriefPromptFacts): string {
     `- Today: ${t.visits} site visit${t.visits === 1 ? "" : "s"}${t.visits && t.firstVisitAt ? ` (first at ${chicagoTime(t.firstVisitAt)})` : ""}; ${t.driveMin != null && t.driveMin > 0 ? `about ${driveLabel(t.driveMin)} of driving` : "no driving planned"}; ${t.tasksDue} task${t.tasksDue === 1 ? "" : "s"} on today's plan.`
   );
   lines.push(`Row sources by block: email → Emails; quote, lead, renewal → Estimates; task, assignment, call, visit → Tasks.`);
-  lines.push("", "List (rank order):", "key | source | title | reason");
-  const rows = f.rows.slice(0, BRIEF_ROWS_MAX);
+  lines.push("", f.rows.length > rows.length ? `List (rank order; the first ${rows.length} of ${f.rows.length}):` : "List (rank order):", "key | source | title | reason");
   if (!rows.length) lines.push("(empty — nothing on the list)");
   for (const r of rows) lines.push(`${briefField(r.key, 200)} | ${briefField(r.source)} | ${briefField(r.title) || "(no title)"} | ${briefField(r.reason)}`);
   lines.push("</brief_data>", "", "Write the summary and doFirst now.");

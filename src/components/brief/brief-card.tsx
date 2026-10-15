@@ -5,15 +5,16 @@ import { getAssistEnv } from "@/lib/assist/key-store";
 import { loadBriefView } from "@/lib/brief/build";
 import { briefCardVM, type BriefCardVM, type CardLeadSuggest, type CardQuoteInfo, type CardRow, type CardThreadReady } from "@/lib/brief/card-vm";
 import { suggestionReadyHrefs } from "@/lib/assist/suggest-entry-server";
-import { readerPreDraft } from "@/lib/brief/reader-predraft";
+import { homeCardPreDraft } from "@/lib/brief/reader-predraft";
 import { nudgePrefill } from "@/lib/inbox-compose-prefill";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { get as getThread } from "@/lib/stores/comms";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { snapshotId } from "@/lib/triage/clock";
 import { parseTriageKey } from "@/lib/triage/keys";
-import { getSnapshot, marksFor } from "@/lib/triage/store";
-import { loadClosedKeys } from "@/lib/triage/liveness";
+import { getSnapshot } from "@/lib/triage/store";
+import { loadLiveState } from "@/lib/triage/live-state";
+import type { MailboxViewer } from "@/lib/stores/comms";
 import { visibleRows } from "@/lib/triage/view";
 import type { SnapshotRow } from "@/lib/triage/types";
 import { BLOCK_CAP } from "@/lib/brief/blocks";
@@ -69,9 +70,8 @@ async function loadCardVM(user: SessionUser, settings: AssistSettings): Promise<
   // filing since the brief was built shows at once; a failed read keeps the
   // brief's stored counts
   const sid = snapshotId(b.userId, b.day, b.slot);
-  const [snap, marks, cleanupState, organizeLive] = await Promise.all([
+  const [snap, cleanupState, organizeLive] = await Promise.all([
     getSnapshot(sid).catch(() => null),
-    marksFor(user.id).catch(() => []),
     organizeAvailable && flags.file ? getCleanupState(user.id).catch(() => undefined) : Promise.resolve(undefined),
     organizeAvailable ? organizeEntryCounts(user).catch(() => null) : Promise.resolve(null),
   ]);
@@ -79,13 +79,18 @@ async function loadCardVM(user: SessionUser, settings: AssistSettings): Promise<
     !organizeAvailable || !flags.file || cleanupState === undefined ? null : cleanupState === null ? "never" : cleanupState.done ? "done" : "unfinished";
 
   // The blocks list the slot's rows as Start here shows them: marks (done /
-  // snooze / not mine) and liveness applied. No snapshot → null: the picks
-  // then show from their stored why.
+  // snooze / not mine) and liveness applied, through the same per-request
+  // load (React cache — Start here's loadTriageView shares it). Fail closed
+  // (#350 review): no snapshot (or a failed read) → null, and the card shows
+  // no rows and no picks; a failed liveness check drops the rows it could
+  // have hidden (loadLiveState).
   const snapRows = Array.isArray(snap?.rows) ? snap.rows.filter((r) => r && typeof r.key === "string") : null;
   let visible: SnapshotRow[] | null = null;
+  let viewer: MailboxViewer | null = null;
   if (snapRows) {
-    const closed = await loadClosedKeys(snapRows, triageUserFromSession(user), now).catch(() => new Set<string>());
-    visible = visibleRows(snapRows, marks, closed, { snapshotId: sid, day: b.day, slot: b.slot });
+    const live = await loadLiveState(snapRows, triageUserFromSession(user), now);
+    viewer = live.viewer;
+    visible = visibleRows(snapRows, live.marks, live.closed, { snapshotId: sid, day: b.day, slot: b.slot });
   }
   const rows: CardRow[] | null = visible
     ? visible.map((r) => ({ key: r.key, source: r.source, title: String(r.title || ""), href: String(r.href || ""), reason: String(r.reason || "") }))
@@ -104,7 +109,7 @@ async function loadCardVM(user: SessionUser, settings: AssistSettings): Promise<
     if (k?.source === "quote") quoteIds.add(k.id);
     if (k?.source === "lead") leadIds.add(k.id);
   };
-  for (const d of b.doFirst) want(d.key);
+  if (rows) for (const d of b.doFirst) want(d.key);
   for (const r of rows ?? []) {
     const src = parseTriageKey(r.key)?.source;
     if (!src) continue;
@@ -127,10 +132,11 @@ async function loadCardVM(user: SessionUser, settings: AssistSettings): Promise<
     : undefined;
 
   const threadReady: Record<string, CardThreadReady> = {};
-  const viewer = await mailboxViewer(user); // #349 — assigned to me by identity
+  if (!viewer && threadIds.size) viewer = await mailboxViewer(user).catch(() => null); // #349 — by identity
   for (const t of threads) {
-    if (!t) continue;
-    const pd = readerPreDraft(t, viewer);
+    if (!t || !viewer) continue;
+    // a chip only when the reader would offer the draft: my own mailbox (#349), fresh, my court
+    const pd = homeCardPreDraft(t, viewer);
     threadReady[t.id] = { draft: flags.reply && !!pd?.reply, tasks: flags.tasks && !!pd?.tasks };
   }
 

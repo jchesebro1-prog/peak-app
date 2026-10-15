@@ -73,13 +73,3 @@ export function capBlock<T>(items: readonly T[], starred: (t: T) => boolean, cap
   }
   return { shown, hidden };
 }
-
-/** Group rows by block (rank order kept inside each). */
-export function rowsByBlock<T extends { key: string; source?: unknown }>(rows: readonly T[]): Record<BriefBlockId, T[]> {
-  const out: Record<BriefBlockId, T[]> = { emails: [], estimates: [], tasks: [] };
-  for (const r of rows) {
-    const s = rowSource(r);
-    if (s) out[BLOCK_OF_SOURCE[s]].push(r);
-  }
-  return out;
-}

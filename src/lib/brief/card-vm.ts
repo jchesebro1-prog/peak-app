@@ -33,7 +33,7 @@ export type BriefCardInput = {
   brief: Brief;
   stale: "yesterday-afternoon" | null;
   transient: boolean;
-  /** The slot's visible triage rows in rank order; null = the snapshot couldn't be read (the picks then show from their stored why). */
+  /** The slot's visible triage rows in rank order; null = the snapshot couldn't be read — fail closed: no rows and no picks (#350 review). */
   rows: readonly CardRow[] | null;
   threads: Readonly<Record<string, CardThreadReady>>;
   quotes: Readonly<Record<string, CardQuoteInfo>>;
@@ -156,12 +156,12 @@ export function briefCardVM(input: BriefCardInput): BriefCardVM {
   const whyOf = new Map(b.doFirst.map((d) => [d.key, d.why]));
   const pickKeys = b.doFirst.map((d) => d.key);
 
-  // The rows the blocks list: the visible snapshot rows — or, with no
-  // snapshot, just the picks (title from their stored why, no link). A pick
-  // whose row is gone (done, snoozed, closed) is dropped with it.
-  const rowsIn: CardRow[] = input.rows
-    ? input.rows.filter((r) => r && typeof r.key === "string" && rowSource(r))
-    : b.doFirst.filter((d) => parseTriageKey(d.key)).map((d) => ({ key: d.key, title: "", href: "" }));
+  // The rows the blocks list: the visible snapshot rows only. Fail closed
+  // (#350 review): with no snapshot (null) the blocks hold no triage rows and
+  // no picks — a pick is never shown, or given a Draft / Tasks chip, without
+  // its live row. A pick whose row is gone (done, snoozed, closed) is dropped
+  // with it.
+  const rowsIn: CardRow[] = (input.rows ?? []).filter((r) => r && typeof r.key === "string" && rowSource(r));
 
   const toRow = (r: CardRow): BriefBlockRow => {
     const parsed = parseTriageKey(r.key);
@@ -171,7 +171,6 @@ export function briefCardVM(input: BriefCardInput): BriefCardVM {
     const lead = parsed?.source === "lead" ? input.leads?.[parsed.id] : undefined;
     const star = whyOf.has(r.key);
     const why = whyOf.get(r.key) ?? "";
-    const hasRow = !!input.rows && !!r.title;
     return {
       kind: "row",
       key: r.key,
@@ -179,12 +178,12 @@ export function briefCardVM(input: BriefCardInput): BriefCardVM {
       title: r.title || why || "An item on your list",
       href: r.href || null,
       star,
-      why: hasRow ? why : "",
+      why: r.title ? why : "", // an untitled row shows its why as the title, once
       hint: typeof r.reason === "string" ? r.reason : "",
       draftReady: !!thread?.draft || !!quote?.nudge,
       tasksReady: !!thread?.tasks,
       leadHref: parsed?.source === "lead" && r.href ? r.href : null,
-      leadSuggest: parsed?.source === "lead" && lead && input.rows ? { leadId: parsed.id, readyHref: lead.readyHref } : null,
+      leadSuggest: parsed?.source === "lead" && lead ? { leadId: parsed.id, readyHref: lead.readyHref } : null,
     };
   };
   const bySource = (...sources: TriageSource[]) => starFirst(rowsIn.filter((r) => sources.includes(rowSource(r)!)), pickKeys).map(toRow);
@@ -289,6 +288,6 @@ export function briefCardVM(input: BriefCardInput): BriefCardVM {
     today,
     approvals,
     quiet,
-    speech: briefSpeech(b, input.rows ? rowsIn : null),
+    speech: briefSpeech(b, rowsIn),
   };
 }
