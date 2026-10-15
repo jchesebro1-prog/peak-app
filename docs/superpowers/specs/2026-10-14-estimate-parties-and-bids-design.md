@@ -133,9 +133,12 @@ Copied **once** at each hand-off; afterwards each list is its own:
 
 ### 3.6 Lead value
 
-When a lead has ≥ 2 estimates, its board value = sum of its draft/sent/won
-estimates' values (lost excluded). With 0–1 estimates, unchanged. Pure
-`leadRollupValue(lead, quotes)`.
+The opportunity board already lists every estimate as its own card, so a lead
+with ≥ 1 estimate (`Quote.leadId`) is **excluded from the board** — like a
+converted lead — and its estimates carry the value (no double count). The lead
+drawer shows an *Estimates* list with the total of its draft/sent/won
+estimates (lost excluded). Pure `leadEstimatesTotal(quotes)` and
+`leadIdsWithEstimates(quotes)` (D1054).
 
 ### 3.7 Vendors
 
