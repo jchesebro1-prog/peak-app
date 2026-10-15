@@ -6,6 +6,7 @@ import {
   markSubmittedState, currentRev, needsRev, awardPlan, undoAwardPlan, canAward, canUndoAward, bidderStatusText, bidDueText, bidDueDays, isOpenBid,
 } from "../src/lib/parties/bids";
 import type { BidderState } from "../src/lib/parties/rules";
+import { addressedHeader, bidDocLine, bidderPdfFileName, type DocAddressee } from "../src/lib/parties/addressee";
 import { quoteMatchesSearch } from "../src/lib/estimate-number";
 import { selectBidDue } from "../src/lib/triage/feeds/quotes";
 import { closedKeys } from "../src/lib/triage/liveness";
@@ -184,6 +185,27 @@ export async function bidChecks(ok: Ok) {
   );
   ok(!liveClosed.has("quote:Q-9"), "bids: a bid_due-only row survives closedKeys while the bid is still due");
   ok(liveClosed.has("quote:Q-10") && liveClosed.has("quote:Q-11"), "bids: an awarded (or fully submitted) bid's row is hidden");
+
+  // addressee helpers (slice 2b-i task 1)
+  const dueMs = Date.UTC(2026, 9, 21, 19, 0); // Oct 21 2:00 PM CDT
+  const ad = (no: number) => ({ no, receivedAt: T1, note: "" });
+  ok(bidDocLine({ dueAt: dueMs, addenda: [ad(2), ad(1)], awardedPartyId: null }) === "Bid due Oct 21, 2:00 PM · Addenda acknowledged: 1, 2", "addressee: bid line with due + addenda ascending");
+  ok(bidDocLine({ dueAt: null, addenda: [ad(1)], awardedPartyId: null }) === "Addenda acknowledged: 1", "addressee: addenda only");
+  ok(bidDocLine({ dueAt: dueMs, addenda: [], awardedPartyId: null }) === "Bid due Oct 21, 2:00 PM", "addressee: due only");
+  ok(bidDocLine({ dueAt: null, addenda: [], awardedPartyId: null }) === "" && bidDocLine(null) === "" && bidDocLine(undefined) === "", "addressee: empty bid line");
+  ok(bidderPdfFileName("Lincoln HS: Rigging/Curtains", "ABC  Construction", 2) === "Peak \u2013 Lincoln HS RiggingCurtains \u2013 ABC Construction \u2013 Rev 2.pdf", "addressee: file name sanitized");
+  const longName = bidderPdfFileName("P", "x".repeat(100), 1);
+  ok(longName === `Peak \u2013 P \u2013 ${"x".repeat(60)} \u2013 Rev 1.pdf`, "addressee: bidder name cut to 60");
+  ok(bidderPdfFileName("", "ABC", 3) === "Peak \u2013 ABC \u2013 Rev 3.pdf" && bidderPdfFileName("P", " ", 3) === "Peak \u2013 P \u2013 Rev 3.pdf", "addressee: empty parts omitted");
+  const base = { custName: "Owner Co", hasAttn: true, attnLine: "Pat" };
+  const h0 = addressedHeader(base, null);
+  ok(h0.custName === "Owner Co" && h0.hasAttn && h0.attnLine === "Pat" && h0.ownerLine === "" && h0.bidLine === "", "addressee: null addressee keeps the base header");
+  const a: DocAddressee = { companyName: "ABC GC", contactName: "Sam Lee", contactRole: "Estimator", ownerName: "Owner Co", bidLine: "Bid due Oct 21, 2:00 PM" };
+  const h1 = addressedHeader(base, a);
+  ok(h1.custName === "ABC GC" && h1.hasAttn && h1.attnLine === "Sam Lee \u00b7 Estimator" && h1.ownerLine === "Owner: Owner Co" && h1.bidLine === "Bid due Oct 21, 2:00 PM", "addressee: header switches to the bidder");
+  const h2 = addressedHeader(base, { ...a, contactName: "", contactRole: "", ownerName: "", bidLine: "" });
+  ok(!h2.hasAttn && h2.attnLine === "" && h2.ownerLine === "" && h2.bidLine === "", "addressee: blank contact has no attn");
+  ok(addressedHeader(base, { ...a, contactRole: "" }).attnLine === "Sam Lee", "addressee: attn without a role");
 }
 
 const BID_FIX = { gc1: fixtureId(348, "bgc1"), gc2: fixtureId(348, "bgc2"), own: fixtureId(348, "bown"), ct1: fixtureId(348, "bct1") };
