@@ -710,7 +710,7 @@ export default function SurveyEditor({
       // once photos were touched in this session they are always sent (deleting the only one must reach the server)
       ...(draft.photoRefs.length || Array.isArray(record.photoRefs) || photosTouched.current ? { photoRefs: draft.photoRefs } : {}),
       // #344 C6 — sketch pads, sent whole once there are any (a stored finished slot is kept by the store)
-      ...(Object.keys(draft.sketches).length || (record.sketches && typeof record.sketches === "object") ? { sketches: draft.sketches } : {}),
+      ...(Object.keys(draft.sketches).length || (record.sketches && typeof record.sketches === "object") || sketchesTouched.current ? { sketches: draft.sketches } : {}),
       auditoriumSize: draft.auditoriumSize,
       yearBuilt: draft.yearBuilt,
       systemsState: draft.systemsState,
@@ -860,6 +860,8 @@ export default function SurveyEditor({
   const revSeen = useRef(0);
   /** Once photos change in this session, every save carries photoRefs (even an empty list). */
   const photosTouched = useRef(false);
+  /** Same for sketches: once they change in this session every save carries them (even an empty set). */
+  const sketchesTouched = useRef(false);
   /** A photo (true) or sketch ("drawing") save failed and nothing has saved since — the pill says so instead of "Saved". */
   const [photoUnsaved, setPhotoUnsaved] = useState<boolean | "drawing">(false);
   /** Save changes, stage moves and photo saves run one at a time (each reads the newest refs when it runs). */
@@ -899,6 +901,7 @@ export default function SurveyEditor({
     survey: draft,
     onSketches: (next) => {
       sketchesNow.current = next;
+      sketchesTouched.current = true;
       setDraft((d) => ({ ...d, sketches: next }));
     },
     save: () => savePhotoRefs("drawing"),

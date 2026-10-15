@@ -37,6 +37,8 @@ import * as MGX from "../src/lib/survey-migrate";
 import { scopeText } from "../src/lib/survey-format";
 import { linesetCondLabel, blankLinesetRow, rowIsEmpty, linesetQuantityPlan, fillDown, fillDownImpact, addMissingSets, markSpare, clampLinesetQty, formatSetRanges, type LinesetRow } from "../src/lib/stores/linesets";
 
+const isObjPlain = (v: unknown): boolean => typeof v === "object" && v !== null && !Array.isArray(v);
+
 export async function vaNotesChecks(ok: Ok): Promise<void> {
   /* ---- Task 1: survey-flow ---- */
   ok(SECTION_ORDER.indexOf("tier1") === 2 && SECTION_ORDER[0] === "cust" && SECTION_ORDER[1] === "visit",
@@ -1904,6 +1906,17 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       ok(sp.includes("discardOther?:") && sp.includes("describeOther?:") && /optsRef\.current\.discardOther\?\.\(fileId\)/.test(sp) && sp.includes("o.describeOther?.(fileId)") &&
         ctl.includes("discardOther:") && ctl.includes("describeOther:") && ctl.includes('"Drawing not saved yet"'),
         "#344 C6 fix: failed sketch uploads are named by pad and discarded through the sketch hook; a failed sketch save says Drawing not saved yet");
+
+      /* ---- C6 fix 2 ---- */
+      ok(/photosTouched\.current \? \{ photoRefs/.test(ctl) && /sketchesTouched\.current \? \{\s*sketches: draft\.sketches/.test(ctl) &&
+        /sketchesNow\.current = next;\s*sketchesTouched\.current = true;/.test(ctl),
+        "#344 C6 fix2: sketchesTouched is set on every sketch change and is in the save condition, so an emptied set is still sent");
+      const delAll = FF.sanitizeIncomingFileSlots({ photoRefs: [], sketches: {} } as Record<string, unknown>, "FS-1",
+        { blobEnabled: true, stored: { sketches: storedSk, photoRefs: storedRefs } });
+      ok(Array.isArray(delAll.photoRefs) && (delAll.photoRefs as unknown[]).length === 0 && isObjPlain(delAll.sketches) && Object.keys(delAll.sketches as object).length === 0,
+        "#344 C6 fix2: an empty photoRefs [] and empty sketches {} are honoured as a deliberate deletion of all (not replaced by the stored ones)");
+      ok(sp.includes("describeOther?.(fileId)) setConfirmDiscard(fileId)") && sp.includes("This removes the drawing"),
+        "#344 C6 fix2: discarding a failed sketch upload asks first (This removes the drawing), like a failed original photo");
     }
   }
 }

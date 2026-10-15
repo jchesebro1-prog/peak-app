@@ -429,9 +429,10 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
       setFailBusy(null);
     }
   }
-  /** Discard on a failed ORIGINAL deletes the photo, so it asks first; anything else discards at once. */
+  /** Discard on a failed ORIGINAL deletes the photo and on a failed sketch file removes the drawing, so both ask first;
+   *  anything else discards at once. */
   function askDiscard(fileId: string) {
-    if (refsRef.current.some((r) => r.id === fileId)) setConfirmDiscard(fileId);
+    if (refsRef.current.some((r) => r.id === fileId) || optsRef.current.describeOther?.(fileId)) setConfirmDiscard(fileId);
     else void onDiscard(fileId);
   }
   async function onDiscard(fileId: string) {
@@ -561,8 +562,14 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
       <FailedPhotos rows={failedRows} busy={failBusy} note={null} onRetry={(id) => void onRetry(id)} onDiscard={askDiscard} />
       {confirmDiscard && failed.some((f) => f.photoId === confirmDiscard) && (
         <div className="sp-msg" role="alertdialog" aria-label="Discard photo">
-          <span style={{ flex: 1 }}>This deletes the photo ({describe(confirmDiscard)}) from the survey. It never finished uploading.</span>
-          <button type="button" className="sp-btn sp-danger" disabled={failBusy === confirmDiscard} onClick={() => void onDiscard(confirmDiscard)}>Delete photo</button>
+          {refsRef.current.some((r) => r.id === confirmDiscard) ? (
+            <span style={{ flex: 1 }}>This deletes the photo ({describe(confirmDiscard)}) from the survey. It never finished uploading.</span>
+          ) : (
+            <span style={{ flex: 1 }}>This removes the drawing ({describe(confirmDiscard)}). It never finished uploading.</span>
+          )}
+          <button type="button" className="sp-btn sp-danger" disabled={failBusy === confirmDiscard} onClick={() => void onDiscard(confirmDiscard)}>
+            {refsRef.current.some((r) => r.id === confirmDiscard) ? "Delete photo" : "Remove drawing"}
+          </button>
           <button type="button" className="sp-btn quiet" onClick={() => setConfirmDiscard(null)}>Cancel</button>
         </div>
       )}
