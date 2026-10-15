@@ -13111,3 +13111,55 @@ A dismiss mark stops hiding a row whose `escalatedAt` is later than the mark (pu
 ## D1104. Granting portal access emails the sign-in link from the granter's mailbox (#351, Jeff 2026-10-15 item 41; answers MASTER-QUESTIONS F16)
 
 `createPortalGrantAction` creates the grant, then `sendPortalInvite` (`src/lib/portal-invite.ts`) emails a short welcome note with the link from the signed-in user's own connected Gmail mailbox: a draft owned by their identity (#349) sent through the Inbox's `sendDraft` → Gmail bridge, signed with their signature. The link's origin is the request's (`requestWhere`, the same as the estimate email's). With Gmail off, no connected mailbox or no usable origin nothing is created and the card falls back to today's copy-to-clipboard with "Couldn’t email it — copy the link instead." A Gmail refusal is held back from later bridge sends and falls back the same way; a Gmail timeout says to check Sent before resending. Copy link stays on every row, and each active grant gains **Resend link** (`resendPortalLinkAction`: signed-in, an active grant of that customer only). The link and its token are never logged or returned in a message. The sent email in the granter's mailbox holds it, and its draft carries no `customerId`, so the thread is never shared with the team through a customer link (#351 review M1; any staff member can still copy the link from the company page). One email per grant per minute, claimed server-side under the grants blob's row lock (`claimGrantInvite`, `inviteSentAt`; "Just sent — wait a minute before resending.", #351 review M2).
+
+## D1105. What a vendor company is (#348 slice 4, 2026-10-15)
+
+A live company typed `vendor` / `manufacturer`, or the legacy `Vendor` / `Manufacturer` spellings (case-insensitive), is a vendor company for the picker and for save validation. `/vendors` stays exact. A `vendorCompanyId` that isn't a live vendor company is dropped on save and the typed name stays; a kept typed name is never hidden by the field. A moved or copied system validates its vendor companies the same way before they are stored. Prod check: `SELECT DISTINCT type FROM companies` for the spellings in use.
+
+## D1106. The vendor party is added once (#348 slice 4, 2026-10-15)
+
+A save, or a moved or copied system, adds the vendor party only when it introduces a company the estimate's saved vendor quotes didn't already name. It is idempotent by party id (`addParty` returns `existed`). A vendor removed on purpose isn't re-added unless a new vendor quote brings the company back. Removing a vendor party while a **live** vendor quote names it is refused ("… has a vendor quote on this estimate — delete that vendor quote first."). It runs under the save's `requireUser`, like slice 1's lead-party copy.
+
+## D1107. `addedAt` is server-stamped; legacy quotes stay undated (#348 slice 4, 2026-10-15)
+
+A vendor quote's `addedAt` is written by the server on save, never taken from the browser. Legacy records have none and show "—".
+
+## D1108. Legacy vendor quotes are left alone (#348 slice 4, 2026-10-15)
+
+No name-matching backfill: vendor names are ambiguous ("Rose" vs "Rose Brand"). A quote with no `vendorCompanyId` lists under "Not linked to a vendor company" on the Vendors card, and Edit links it. Open note: older links are dropped on an unrelated save if the company is retyped.
+
+## D1109. Gmail attachments are listed by reference (#348 slice 4, 2026-10-15)
+
+The import lists each attachment (part id, name, mime, size); the bytes stay in Gmail. Older mail is listed lazily when its owner opens it (at most 10 messages per open, stamped `attsListed`). Downloads go through `/api/inbox/attachments/…` for anyone who can see the thread (`canSeeThread`), keyed by `partId` because Gmail attachment ids aren't stable. Inline signature images aren't attachments and are skipped. The route streams, labels anything off its type allowlist `application/octet-stream`, and sends `Cache-Control: private, no-store` with a safe filename. Missing and invisible threads get the same refusal (no oracle). **For Jeff:** imported Gmail attachments now count in the Inbox "has attachment" filter and in attachment-name search.
+
+## D1110. The Inbox → Estimator hand-off is a URL reference (#348 slice 4, 2026-10-15)
+
+"Add as vendor quote…" opens the Estimator at `?vq=<thread>~<message>~<index>`, resolved by a server broker when the Estimator opens. Chosen over Ask AI's sessionStorage hand-off (it dies with the tab, and would hold a Blob path before the user has seen the modal) and over a stored draft id (a new store, TTL and cleanup, and the visibility check would run at click time, not at copy time). The URL carries ids only; the broker re-checks `canSeeThread` at use, and `vq` is stripped before the copy runs so a reload never copies twice. The hand-off is PDF-only. Links in the dialogs open in a new tab.
+
+## D1111. Broker limits (#348 slice 4, 2026-10-15)
+
+The cap is 25 MB (Gmail's ceiling), checked on the stored size before the fetch and on the bytes after. Bytes are copied server-side from Gmail or the stored data-URL to `vendor-quotes/<vqId>-<name>` (ownership asserted on the path), so the 4.5 MB request ceiling never applies; the browser upload stays 4 MB. With no Blob, a data-URL is used only within the estimate's attachment budget. **For Jeff:** a cancelled Add-as-vendor-quote form leaves an orphaned Blob copy, the same as an abandoned upload. Prod check: a vendor email with a PDF over 5 MB, from a Gmail-connected account — the reader chip downloads and Add as vendor quote copies it (verifies streamed response size on Vercel).
+
+## D1112. Filing a thread to an estimate or project (#348 slice 4, 2026-10-15)
+
+**File to estimate / project…** needs the thread's owner (`ownThread`) and `can("create")`. It sets the work link, which **shares the thread with staff** (#341's deliberate link; the dialog says so), makes the vendor the thread's company (`linkThread(…, "user")`) and adds the vendor party. It replaces an existing link, with a warning showing the current one. A manual File also marks a pending #335 filing suggestion skipped, so an Approve can't overwrite the vendor; a sender-rule sweep or an explicit approve can still re-file it, and the Assist report counts the skip as "discarded" in its AI metrics. Inbox dialogs are StrictMode-safe, one submit at a time, and pins are owner-only.
+
+## D1113. Vendor threads on the card and on Procurement (#348 slice 4, 2026-10-15)
+
+A thread is listed when it is filed to the record, its company is one of the record's vendor companies (parties ∪ vendor-quote companies), `canSeeThread` holds (cut in SQL by `canSeeThreadCond`, then re-checked in JS), and it is not a draft or deleted. Rows show subject, last author and time, and unread only — never a body, messages or snippet. A thread the viewer can't see adds nothing, not even a count. An unfiled automatic sender match never appears.
+
+## D1114. Where the Vendors card lives (#348 slice 4, 2026-10-15)
+
+Build package → **BOM quote** (vendor quotes price the BOM; Client package is what goes to the client) and Send & track after Bidders.
+
+## D1115. "Quotes we've received" (#348 slice 4, 2026-10-15)
+
+Indexed by vendor party rows (one batched quote read), on the vendor page Overview and the company page: estimate number, job, quote #, total and date added.
+
+## D1116. Project Procurement reads vendor quotes and emails (#348 slice 4, 2026-10-15)
+
+The Procurement tab shows the source estimate's vendor quotes plus vendor threads filed to the estimate **or** the project. Vendor companies are the union of the project's and the estimate's vendor parties and the vendor-quote companies. Non-vendor threads filed to the project don't show here.
+
+## D1117. Who may add a vendor quote from an email (#348 slice 4, 2026-10-15)
+
+"Add as vendor quote…" is open to anyone who can see the thread (it only reads; the copy runs under the broker's `canSeeThread` check). "Also file" is the thread owner's only.

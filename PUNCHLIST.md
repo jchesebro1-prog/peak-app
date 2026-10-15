@@ -12380,7 +12380,7 @@ Jeff (Oct 14) chose "My real Gmail labels" for the #346 Labels card: pick from y
   - The brief's live counts read only your mailbox.
 - User display names are not unique (only email is). Two active users with the same name would share each other's mailbox ownership (#341's `visibleTo` matches names). Worth a uniqueness check in Settings → Team.
 
-## 348. Estimate parties, bids & vendor links — slices 1, 2 (2a/2b-i/2b-ii) and 3 built on `feat/348-estimate-parties` (D1058–D1062, D1074–D1097); next: 4 vendors, 5 Read the PDF, 6 portal + reports
+## 348. Estimate parties, bids & vendor links — Slices 1, 2, 3 and 4 built (1–3 merged 2ad8eec8); next: Jeff's 2026-10-15 bid follow-ups (per-bidder response limit; addendum after send → Draft + Send revision to every bidder), then 5 Read the PDF, 6 portal + reports
 
 Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-parties-and-bids-design.md`. An estimate links to exactly one company; real bid jobs involve an owner, several GCs and ECs, an architect, consultants and vendors.
 
@@ -12400,8 +12400,9 @@ Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-
 - **Prod check additions (2b-ii):** from a Gmail-connected account, Send to all for two email bidders (two separate emails, each with its own PDF and link); open one link in a private window ("Prepared for <bidder>", Owner line); the row shows Opened 1×; Revoke kills the link.
 - **Prod check additions (2b-i):** Download a bidder PDF from the Bidders card (header shows the bidder, Owner line and bid line); after Award the estimate PDF reads "Prepared for <GC>" with the Owner line.
 
-- Slice 3: split systems into a new estimate.
-- Slice 4: vendors (vendor company on vendor quotes, File to estimate / project, Procurement).
+- Slice 3 ✅ built (D1097): split systems into a new estimate.
+- Slice 4 ✅ built (D1105–D1117): vendor company on vendor quotes (picker, validated, a vendor party once), Gmail attachments by reference with a download route, **Add as vendor quote…** from an email PDF (`?vq=` hand-off), **File to estimate / project…**, a Vendors card on Build package → BOM quote and Send & track, "Quotes we've received" on the vendor and company pages, and vendor quotes + emails on project Procurement. Visibility: reads use `canSeeThread`, writes `ownThread`.
+- **Prod check additions (slice 4):** `SELECT DISTINCT type FROM companies` for vendor spellings (D1105); from a Gmail-connected account, a vendor email with a PDF over 5 MB — the reader chip downloads and Add as vendor quote copies it (verifies streamed-response size on Vercel). For Jeff: imported Gmail attachments now count in the Inbox "has attachment" filter and attachment-name search; a cancelled Add-as-vendor-quote form leaves an orphaned Blob copy (same as uploads).
 - Slice 5: Read the PDF (Assist `vendorpdf`).
 - Slice 6: portal bidder view and Reports → Bids by GC/EC.
 
