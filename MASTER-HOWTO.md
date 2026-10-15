@@ -222,6 +222,13 @@ app calls a model:
    you add lines and save (§6e).
 5. After about 30 days read the report (estimated cost, outcome per feature)
    and decide whether to keep it.
+6. **Read the PDF (vendor quotes, #348 slice 5, D1140–D1157).** Tick it under
+   Assist pilot → features. It needs the Claude key; with no key the button
+   stays hidden. It reads the PDF attached to a vendor quote on the Estimator
+   into the vendor quote form only: check the flagged lines, then Add and Save.
+   **Try harder** re-reads with Sonnet (about 20× the cost of a Haiku read). The
+   **Vendor PDFs** table shows how much people corrected. Optional env overrides:
+   `ASSIST_MODEL_VENDORPDF` and `ASSIST_MODEL_VENDORPDF_HARD`.
 
 ## 6b. Inbox organization (#335, D882–D900)
 

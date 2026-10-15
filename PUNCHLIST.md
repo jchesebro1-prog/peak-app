@@ -12389,7 +12389,7 @@ Jeff (Oct 14) chose "My real Gmail labels" for the #346 Labels card: pick from y
   - The brief's live counts read only your mailbox.
 - User display names are not unique (only email is). Two active users with the same name would share each other's mailbox ownership (#341's `visibleTo` matches names). Worth a uniqueness check in Settings → Team.
 
-## 348. Estimate parties, bids & vendor links — Slices 1, 2, 3 and 4 built (1–3 merged 2ad8eec8), plus Jeff's 2026-10-15 bid follow-ups (D1118–D1119); next: 5 Read the PDF, 6 portal + reports
+## 348. Estimate parties, bids & vendor links — Slices 1–5 built (1–3 merged 2ad8eec8), plus Jeff's 2026-10-15 bid follow-ups (D1118–D1119); slice 5 is D1140–D1157; next: 6 portal + reports
 
 Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-parties-and-bids-design.md`. An estimate links to exactly one company; real bid jobs involve an owner, several GCs and ECs, an architect, consultants and vendors.
 
@@ -12414,7 +12414,27 @@ Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-
 - **Prod check additions (slice 4):** `SELECT DISTINCT type FROM companies` for vendor spellings (D1105); from a Gmail-connected account, a vendor email with a PDF over 5 MB — the reader chip downloads and Add as vendor quote copies it (verifies streamed-response size on Vercel). For Jeff: imported Gmail attachments now count in the Inbox "has attachment" filter and attachment-name search; a cancelled Add-as-vendor-quote form leaves an orphaned Blob copy (same as uploads).
 - Jeff's 2026-10-15 bid follow-ups ✅ built (D1118–D1119): each bidder gets its own client-link response limit (its own daily bucket and its own 200-response cap; the owner keeps the quote-wide ones), and adding an addendum to a sent estimate moves it back to Draft. The Bid chip says so, and the Bidders card then offers **Send revision to bidders** to every pending email bidder. Note, date and due-date edits and removals never change status. The old "move back to Draft" hint is now only a fallback.
 - **Prod check additions (follow-ups):** on a sent test estimate with two sent email bidders, add Addendum 2 in the Bid chip: the note shows, the header reads Draft, and Send & track offers Send revision to bidders for both.
-- Slice 5: Read the PDF (Assist `vendorpdf`).
+- Slice 5 ✅ built (D1140–D1157): **Read the PDF** (Assist `vendorpdf`) in the Estimator's vendor quote form. Opt-in for pilot users with the feature ticked **and** a Claude key; with no key the button is hidden. Haiku 5.5 reads the attached PDF (Try harder re-reads on Sonnet 5.5); the form fills blank fields only (Description from the lines, quote #, date, terms, Total cost) and appends lines. Deterministic checks flag line math, sum against total, catalog matches (a chip only), the vendor company and the freight pre-tick; they never fix a number. Freight and tax stay inside the printed total. `VendorQuote.extracted` is server-verified on save, accuracy is scored once at the first save, and Settings → Assist pilot → **Vendor PDFs** reports by model and by vendor. Pure modules in `src/lib/vendor-pdf/`; tests in `scripts/test-vendors.ts`.
+- **Jeff-gated (slice 5):** tick **Read the PDF** for the pilot users (Settings → Beta → Assist pilot → features); a Claude key must be set.
+- **Jeff to confirm (slice 5 defaults, each logged):**
+  - Includes-freight pre-tick: tick on a freight charge inside the total, "prepaid and allowed" or "FOB destination"; never on "FOB origin", "plus freight" or "freight extra"; "freight $0" or "TBD" does not tick (D1153, question 2).
+  - File ceiling: about 23.8 MiB after base64, so an email PDF between that and 25 MB says "too large" (D1154, question 4). Use the Files API later?
+  - Vendor auto-link: exact normalized name among vendor companies only, no closest-match suggestion (D1155, question 6).
+  - Limits: 30 reads per person per hour (Try harder counts), 100 pages, Try harder once per read in the UI (D1156, question 7).
+  - Re-reading a saved vendor quote is allowed; the old read's score stands (D1157, question 9).
+- **Prod checks (slice 5):**
+  - Read a real 2–5 page vendor PDF and a 40+ page one; note the latency against the 120 s page budget (the read refuses under 20 s left, D1150).
+  - A scanned (image-only) PDF.
+  - A password-protected PDF (expect the `rejected` copy).
+  - A PDF over 5 MB through the Inbox "Add as vendor quote" hand-off, then Read the PDF.
+  - After a few reads, check Settings → Assist pilot → Vendor PDFs (D1152 lists the report's blind spots).
+- **Follow-ups (slice 5, deferred, not built):**
+  - pdf-lib fully inflates compressed object streams on load, so a crafted PDF could run the function out of memory. Count pages by a byte scan first, add a size threshold, or move the count to a worker.
+  - Time the catalog SQL pre-filter (`partsByLooseKeys`) on production.
+  - Every save re-sends the full `extracted.data`. Send `{ runId }` alone when the server already has it.
+  - An accessibility pass on the Read panel: mount the live region empty, use `aria-disabled` instead of `disabled`, add `aria-describedby` on the line hints.
+  - Share the "Assist is switched off." text as one constant.
+  - `run.ts` could refuse a document request with no Claude key up front.
 - Slice 6: portal bidder view and Reports → Bids by GC/EC.
 
 **Not on a preview:** do not deploy a Vercel preview of this branch. Previews share the production Neon DB and skip migrations, so `record_parties` doesn't exist there and every company page (Bids & roles card), the lead drawer card, the project card and company delete would throw. **Post-merge production check** (after the merge deploy applies 0041), on a throwaway customer: link an owner and a GC on a lead; convert it / save an estimate from it (the owner carries, the GC doesn't); mark it Won so a project spawns; confirm the project lists the owner. This is the only real run of the postgres-js savepoint path. For 2a on the same estimate: set a Bid due date, add two bidders (GC + EC), Award one, then Send to the customer works without a re-save (a bid edit never stales the PDF in 2a); mark Won → the project shows Bill to the awarded bidder and lists only the awarded bidder, not the one that lost. Then delete the test records.

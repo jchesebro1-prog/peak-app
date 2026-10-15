@@ -1071,7 +1071,8 @@ See `.env.example`.
     nothing creates a quote any more; drafts made before keep their banner.
     The gate (`src/lib/assist/config.ts`): no `ANTHROPIC_API_KEY` (or local URL) =
     no UI and no call; `ASSIST_DISABLED=true` kills it; `settings.assistUsers`
-    must include the user (**an empty list means nobody**); per-feature toggles.
+    must include the user (**an empty list means nobody**); per-feature toggles
+    (a later one, `vendorpdf` — Read the PDF on a vendor quote — is #348 slice 5, phase 62).
     Every call goes through `runAssist` (`src/lib/assist/run.ts`: gate, $200
     monthly cap, per-hour rate limit — the estimate counted once on the extract
     step — provider with a local → Haiku fallback, zod, log) over one provider
@@ -1416,7 +1417,7 @@ See `.env.example`.
     list and the pick lists in `field-lists.ts`, tell the reps older surveys
     ask for Scope first, send the CW Elevation and line set schedule sheets,
     try a real assessment end to end. Punch item #344.
-62. 🚧 **Estimate parties — slices 1, 2a, 2b-i, 2b-ii, 3 + 4** (#348, D1058–D1062, D1074–D1097, D1105–D1119) — Jeff, Oct 14: an
+62. 🚧 **Estimate parties — slices 1, 2a, 2b-i, 2b-ii, 3, 4 + 5** (#348, D1058–D1062, D1074–D1097, D1105–D1119, D1140–D1157) — Jeff, Oct 14: an
     estimate can name more than one company. Slice 1 is the parties core: a
     `record_parties` doc collection (migration 0041; id `pty_` + sha1 of
     record type, record id, company and role) with roles owner · gc · ec ·
@@ -1510,7 +1511,23 @@ See `.env.example`.
     ✅ Jeff's bid follow-ups (D1118–D1119, Oct 15): each bidder gets its own
     response limit and cap, and an addendum added to a sent estimate moves it
     back to Draft, so Send revision goes to every pending bidder.
-    Remaining: slices 5–6 (Read the PDF, portal + reports).
+    ✅ Slice 5 (D1140–D1157, Oct 15) — **Read the PDF**: the Assist feature
+    `vendorpdf` (opt-in, pilot users; Haiku 5.5, Try harder on Sonnet 5.5; env
+    `ASSIST_MODEL_VENDORPDF` / `…_HARD`; 30 reads per user per hour) reads a vendor
+    quote's PDF into the Estimator's vendor quote form. Documents are Claude-only
+    (`ProviderRequest.document`; never the local provider; the button is hidden
+    without a key). Bytes come only from a Blob path the vendor quote owns or the
+    form's data-URL, size-checked first (about 23.8 MiB after base64, 100 pages),
+    under a deadline of about 108 s from the action's start. Pure checks flag and
+    never fix (line math, sum against total, catalog chip, exact-name vendor
+    company, freight pre-tick); freight and tax stay inside the total; Description
+    is prefilled when blank. `VendorQuote.extracted` is server-verified on save by
+    run hash (Move / Copy verify but never score), accuracy is scored once at the
+    first save, any later read replaces the earlier run, and Settings → Assist
+    pilot → Vendor PDFs reports by model and vendor. Pure modules in
+    `src/lib/vendor-pdf/`; tests in `scripts/test-vendors.ts`.
+    Remaining: slice 6 (portal + reports), plus Jeff's confirms and prod checks
+    for slice 5 (PUNCHLIST #348).
 
 63. ✅ **Mailbox identity** (#349, D1063–D1073) — mailbox ownership follows the user's id (`CommThread.mailboxOwnerId`; one rule `ownsMailbox`, stamp → Gmail key → a name only one user holds, else nobody; `ownMailboxCond` in SQL; viewers from `src/lib/mailbox-viewer.ts`), assignments carry `assignedToId`, creators refuse a blank owner, legacy threads stamp lazily in write guards and via `npm run comms:stamp-owners` (Jeff-gated prod run; shared names get the `"unresolved"` tombstone), a rename or new hire never moves mail (`src/lib/mailbox-names.ts`), and Settings → Team refuses duplicate names. Punch item #349.
 

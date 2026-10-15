@@ -13265,3 +13265,94 @@ S2 asks `rigging.depth` first in its Rigging system module (pick list `rig_depth
 ## D1139. Assessment reminders go out 30 days ahead, to the venue's account rep (#353, Jeff 2026-10-15 item 10; answers the brief's "what lead time … and who receives them")
 
 A daily sweep creates one task per due date, 30 days before it and due on it: for every live (not voided) finding with a next-due date — the existing `Finding.nextDue`, which the brief sets when a verified finding closes ("set the next-due date on the related log"); any status counts — and for every venue with a next assessment date. Venues had no such field: `venue_profiles` gains `nextAssessmentAt` (epoch ms, optional; `setNextAssessmentAt`), set on the venue page's Assessments card ("Next assessment", a date, `create` permission, read-only otherwise; `setNextAssessmentAction`). The account rep is the company's owner (`companies.owner_user_id`, the Companies directory's Owner) when that user is active; else the creator of the assessment behind it (a venue: its most recent assessment); else the task is unassigned. Task ids are deterministic — `T-asr-f-<finding>-<due day>` / `T-asr-v-<site>-<due day>` — and created with `createTaskOnce` after a live-or-deleted check, so the sweep is idempotent, a reminder someone deleted never returns, and a moved date gets its own reminder. A date already past gets none. Pure planner `src/lib/assessments/reminders.ts`; sweep `reminders-server.ts`, run first in the daily drive cron (`/api/drive/sync`, 10 s deadline) and lazily from the Assessments page (`after()`, once per process per 6 hours). The brief's "owner contact" reminders and Immediate-attention alerts to the hazard contact (customer-facing email) are not built: the reminder is an internal task. **#353 review fixes:** I1 — the date field saves on blur or Enter, never per keystroke, ignores a year before 1900 (the server refuses one too), stays enabled while saving and says Saved / the error inline (`next-assessment-input.ts`). I2 — the lazy sweep never runs on a preview deploy. M3 — a finding's `nextDue` changed or cleared (`saveFinding`, `transitionFinding`, `voidFinding`) or a venue's date (the Next assessment action) closes — marks done — the open reminders for the old date at once (`reminder-close.ts`); the sweep closes any others whose record's date moved (offline pushes, merges). M4 — a closed finding with a next-due date still gets its reminder (kept: that is the brief's next-due log). M5 — the sweep reads three assessment fields, checks every planned id in one batched read, and its reads run under the deadline. M8 — no reminder for a finding or venue whose venue was deleted.
+
+## D1140. `vendorpdf` is an opt-in, Claude-only Assist feature (#348 slice 5, 2026-10-15)
+
+"Read the PDF" on the Estimator's vendor quote form is the Assist feature `vendorpdf`: off until an admin ticks it under Settings → Beta → Assist pilot → features, and only for pilot users. It runs through `runAssist` like every other feature (gate, monthly cap, log to `assist_runs`).
+- **Models:** Haiku 5.5 by default; **Try harder** re-reads on Sonnet 5.5. Env overrides `ASSIST_MODEL_VENDORPDF` and `ASSIST_MODEL_VENDORPDF_HARD`.
+- **Rate:** 30 reads per user per hour. Try harder counts.
+- **Claude only:** a request that carries a document never goes to the local provider. With no Claude key the button is hidden, not disabled.
+
+## D1141. Provider documents (#348 slice 5, 2026-10-15)
+
+`ProviderRequest.document` sends the PDF as a base64 `document` block placed before the text. No prompt caching and no citations (citations are incompatible with structured outputs). The wire schema is required-but-nullable because structured outputs reject length and range constraints; the stored shape (`VendorQuote.extracted`, spec §3.7) is all-optional. The model gets no tools and no web access, and the prompt frames the document as untrusted data.
+
+## D1142. Where the bytes come from, and how big they can be (#348 slice 5, 2026-10-15)
+
+- **Source:** the server reads only a Blob path the vendor quote owns (`ownsVendorQuoteBlobPath` against the vendor quote id) or the form's in-memory data-URL. It never fetches a URL.
+- **Size** is checked before reading (`head`). The ceiling is the API's 32 MiB request, so a file of at most about 23.8 MiB once base64-encoded. A bigger one says it is too large and to enter it by hand.
+- **Pages:** at most 100, counted by pdf-lib, then a byte-scan fallback, then the API decides.
+
+## D1143. Checks flag, never fix (#348 slice 5, 2026-10-15)
+
+`src/lib/vendor-pdf/checks.ts` is deterministic and never changes a number the model read.
+- **Line math:** qty × unit must equal the amount within max($0.01, 0.5 % of the amount, half a cent per unit).
+- **Sum against total:** the lines must add to the printed total within max($0.01, 1¢ per line). A quote that says freight or tax is excluded is read with that in mind.
+- **Catalog match:** model #, then MFR P/N, then SKU / order #, then former SKU; exact before loose; a tie breaks by the vendor's manufacturer, otherwise the line is shown as ambiguous.
+- **Vendor company:** see D1145.
+- **Freight pre-tick:** see D1144 and D1153.
+
+## D1144. What counts as freight "excluded" (#348 slice 5, 2026-10-15)
+
+The wording is wider than the plan's first pattern: prepay / prepaid and add(ed), PPD & add, PP&A, "plus freight", "freight extra", and FOB origin including "FOB: Origin". Excluded wording wins over a freight charge that is inside the total. (`src/lib/vendor-pdf/checks.ts`)
+
+## D1145. Vendor name matching (#348 slice 5, 2026-10-15)
+
+Normalizing turns punctuation into a space, so "L.L.C." and "Rose-Brand" both normalize, and drops company suffixes (Inc, LLC and the like). The read links a vendor company only on an exact normalized name among live vendor-type companies (D1105); a near miss is not linked. Otherwise the typed name stays and the panel says to pick one.
+
+## D1146. The catalog lookup is a server SQL pre-filter (#348 slice 5, 2026-10-15)
+
+`partsByLooseKeys` runs after the model call, because it needs the printed part numbers. It pre-filters in SQL by loose key with a cap of 25 parts per key, and keeps the true count, so a match on a cut-short key shows as ambiguous rather than as a confident hit. One catalog index is built per read.
+
+## D1147. What the read fills (#348 slice 5, 2026-10-15; Jeff's answers to questions 1, 3 and 5)
+
+The read fills only blank fields, appends lines, and never unticks freight.
+- **Freight and tax stay inside the printed total** (Jeff): the total goes into Total cost and the freight / tax rows are listed in Terms. They are not added as material lines, so the itemized display can read "Lines add to X — the quote will use Y".
+- **Description is prefilled when blank** (Jeff), from `vendorPdfDescription`: one line gives its description or MFR P/N; several give "<first> + N more items". It stays editable.
+- **A catalog match is a chip only** (Jeff): it never replaces the line's description or MFR P/N and is not compared to catalog cost.
+- **Re-read:** Try harder (or any read over an earlier one) replaces the lines the last read filled, after a confirm when some were edited. Lines typed by hand stay.
+- **Replacing or removing the file drops the read.**
+
+## D1148. Save trusts the server, not the browser (#348 slice 5, 2026-10-15)
+
+`VendorQuote.extracted` is kept on save only when the server can vouch for it: a matching prior `runId`, or a run bound to that vendor quote with a matching data hash. `model` and `at` come from the run row, never from the browser. **Move system and Copy system** verify `extracted` the same way (the browser supplies those rows) but never score a read.
+
+## D1149. Accuracy is scored once, at the first save (#348 slice 5, 2026-10-15; Jeff's answer to question 8)
+
+`setVendorPdfOutcome` writes the outcome at the first save that keeps a run: first write wins, no user check, so a scored read stays scored. Later edits (vendor revisions) do not rescore. The diff matches lines by `extractedIndex` only. **Any** read over an earlier read — not only Try harder — marks the earlier run replaced (`discarded`, `replacedBy`), for the same user and the same vendor quote; a failed read replaces nothing.
+
+## D1150. The read has a deadline (#348 slice 5, 2026-10-15)
+
+The model call is given about 108 s from the start of the action, less whatever was spent before the call (gate, bytes, page count). With under 20 s left the action refuses before calling, and nothing is charged. This sits under the 120 s page budget.
+
+## D1151. The gate runs cheap checks first (#348 slice 5, 2026-10-15)
+
+`vendorPdfGateFor` checks the kill switch, the pilot list and the feature switch before it reads the stored key, so a user who is not in the pilot costs no key read. It runs inside the Estimator page's `Promise.all`; a gate error hides the button rather than breaking the page.
+
+## D1152. The Vendor PDFs report and its blind spots (#348 slice 5, 2026-10-15)
+
+Settings → Assist pilot → **Vendor PDFs** has two tables: by model (all reads) and by vendor (saved reads), with kept and edited counts. Known blind spots, accepted for now:
+- a failed scoring write is lost for good;
+- a read kept only through Move system / Copy system is never scored (D1148);
+- a read restored onto the record after it was replaced counts as Replaced, not Saved;
+- if the read-time run-detail write fails, the save drops `extracted` quietly.
+
+## D1153. The includes-freight pre-tick (#348 slice 5, 2026-10-15; default, Jeff to confirm question 2)
+
+The Includes freight box is ticked when a freight charge is inside the total, or when the terms say "prepaid and allowed" or "FOB destination". It is never ticked on "FOB origin", "plus freight" or "freight extra" (D1144). "Freight $0" or "TBD" does not tick it either.
+
+## D1154. File ceiling stays at the API request cap (#348 slice 5, 2026-10-15; default, Jeff to confirm question 4)
+
+An email PDF between about 23.8 MiB and the 25 MB attachment cap (D1111) says it is too large to read and to enter it by hand. The Files API is a later option.
+
+## D1155. No closest-match vendor suggestion (#348 slice 5, 2026-10-15; default, Jeff to confirm question 6)
+
+The read links a vendor company only on an exact normalized name (D1145). It does not suggest the closest match.
+
+## D1156. Read limits and cost (#348 slice 5, 2026-10-15; default, Jeff to confirm question 7)
+
+30 reads per person per hour (Try harder included), at most 100 pages, and Try harder once per read in the UI. Rough cost: a typical 3-page quote is about $0.002 on Haiku and $0.03 on Sonnet; a 100-page PDF is about $0.13 on Haiku and $0.50 on Sonnet.
+
+## D1157. A saved quote can be read again (#348 slice 5, 2026-10-15; default, Jeff to confirm question 9)
+
+Re-reading a saved vendor quote is allowed. The new read replaces the lines the old read filled (D1147) and the old read's score stands (D1149).
