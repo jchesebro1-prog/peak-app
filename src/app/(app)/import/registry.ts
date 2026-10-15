@@ -88,6 +88,12 @@ export type ImportResult = {
   warnings: string[];
 };
 
+/** Oct 15 #32 review: a catalog row dates its part only when the file is priced AND the row itself carries a price
+ *  (a blank List and Cost cell in a priced file confirmed nothing for that part). */
+function rowDatesPrice(ctx: CommitContext, v: Record<string, unknown>): boolean {
+  return !!ctx.priced && (num(v.list) > 0 || num(v.cost) > 0);
+}
+
 /** #133 — per-commit context handed to every writer; the catalog writer
  *  reads `effectiveAt` (the price list's effective date for `pricedAt`);
  *  the task_templates writer reads `me` for `createdBy` on a set it mints
@@ -1216,7 +1222,7 @@ const WRITERS: Record<string, Writer> = {
       // it preserves fields a price sheet doesn't carry (ports, trade, spec
       // text, datasheet attachments) when a SKU is re-imported. pricedAt
       // (#133) lands only when the price actually changes.
-      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt, ...(ctx.priced ? { priceDate: ctx.effectiveAt } : {}) });
+      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt, ...(rowDatesPrice(ctx, v) ? { priceDate: ctx.effectiveAt } : {}) });
       if (ex) Object.assign(ex, patch);
       else cache.push({ id: sku, sku, ...patch });
     },
@@ -1225,7 +1231,7 @@ const WRITERS: Record<string, Writer> = {
     update: async (ex, v, _cache, ctx) => {
       const sku = str(ex.sku);
       const patch = ownedCatalogPatch(catalogPatch(v, ex, sku, { now: Date.now(), by: ctx.me?.name, specLib: needsSpecLib(v) ? await specLibFor(ctx) : undefined }), ex, v);
-      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt, ...(ctx.priced ? { priceDate: ctx.effectiveAt } : {}) });
+      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt, ...(rowDatesPrice(ctx, v) ? { priceDate: ctx.effectiveAt } : {}) });
     },
     exportObjects: async () => {
       const [list, sections, articles] = await Promise.all([Catalog.list(), allSections(), allArticles()]);

@@ -1,4 +1,5 @@
 import { get as getPart, list as listCatalog, type CatalogPart } from "@/lib/stores/catalog";
+import { effectivePriceDate } from "./catalog-books";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { loadPartDocsState } from "@/lib/part-docs/load";
@@ -329,7 +330,10 @@ async function buildIndex(): Promise<Built> {
       cost: Number(p.cost) || 0,
       list: Number(p.list) || 0,
       note: p.note || "",
-      pricedAt: typeof p.pricedAt === "number" ? p.pricedAt : null,
+      // #354 review: the part's own latest price date — when its price moved, or (Oct 15 #32) a priced file last
+      // confirmed it — so a re-confirmed price is no longer "stale" (portal-price-rules). The manufacturer's
+      // by-hand book date is left out, as before.
+      pricedAt: effectivePriceDate(p),
       visibility,
       imageIds,
       datasheetIds: datasheetIdsFor(state.index, p.sku),
@@ -375,7 +379,7 @@ async function buildIndex(): Promise<Built> {
       sku: p.sku, desc: p.desc || "", mfr: p.mfr || "", category: p.category || "", unit: p.unit || "ea",
       mpn: p.manufacturerPartNumber || "", model: p.manufacturerModelNumber || "",
       cost: Number(p.cost) || 0, list: Number(p.list) || 0, note: p.note || "",
-      pricedAt: typeof p.pricedAt === "number" ? p.pricedAt : null, visibility: "auto",
+      pricedAt: effectivePriceDate(p), visibility: "auto",
       imageIds: [], datasheetIds: [], specText: null, accessories: [], quoteCount: 0,
     });
   }

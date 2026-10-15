@@ -135,7 +135,8 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
       },
       // Oct 15 #32: a priced file dates every line it carries (priceDate),
       // changed price or not — and ONLY those lines.
-      { pricedAt: input.effectiveAt, ...(priced ? { priceDate: input.effectiveAt } : {}) }
+      // Oct 15 #32 review: …and only a row that itself carries a price (a blank List and Cost cell confirms nothing).
+      { pricedAt: input.effectiveAt, ...(priced && ((parsed.hasList && r.list > 0) || (parsed.hasCost && r.cost > 0)) ? { priceDate: input.effectiveAt } : {}) }
     );
     existing.add(sku);
   }

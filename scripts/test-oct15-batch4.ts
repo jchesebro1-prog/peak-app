@@ -8,6 +8,7 @@ import type { Ok } from "./test-inbox-org";
 import { effectivePriceDate, priceBooks } from "../src/lib/catalog-books";
 import { pricesAsOf } from "../src/lib/fixture-assemblies";
 import { catalogEffectiveAtFor } from "../src/lib/vendor-status";
+import { unitPriceFor } from "../src/lib/portal-price-rules";
 
 const ROOT = join(__dirname, "..");
 const src = (p: string) => readFileSync(join(ROOT, p), "utf8");
@@ -37,11 +38,18 @@ function priceDateChecks(ok: Ok) {
   ok(catalogEffectiveAtFor(parts, ["Acme"], book) === fresh, "#32: the vendor 'Catalog priced' date reads the newest per-part date");
   const imp = src("src/app/(app)/catalog/import.ts");
   ok(!imp.includes("setPriceListEffective"), "#32: the Catalog page importer no longer re-dates the manufacturer's book");
-  ok(/priced \? \{ priceDate: input\.effectiveAt \}/.test(imp), "#32: …it stamps priceDate on each row of a priced file");
+  ok(/priced && \(\(parsed\.hasList && r\.list > 0\) \|\| \(parsed\.hasCost && r\.cost > 0\)\) \? \{ priceDate: input\.effectiveAt \}/.test(imp), "#32: …it stamps priceDate on each row of a priced file that carries a price");
+  // #354 review M6: the portal's stale-cost rule reads the part's own latest date, so a re-confirmed price un-stales.
+  const stale = { margin: 0.3, staleCostMonths: 12, now };
+  const oldPart = { mfr: "Acme", cost: 10, list: 20, pricedAt: now - 400 * DAY };
+  ok(unitPriceFor({ ...oldPart, pricedAt: effectivePriceDate(oldPart) }, stale).porReason === "stale-cost" &&
+     !unitPriceFor({ ...oldPart, pricedAt: effectivePriceDate({ ...oldPart, priceDate: fresh }) }, stale).por,
+    "#354 review: a price a recent file re-confirmed (priceDate) is not stale on the portal; an unconfirmed old one still is");
+  ok((src("src/lib/portal-catalog-index.ts").match(/pricedAt: effectivePriceDate\(p\)/g) || []).length === 2, "#354 review: the portal index reads effectivePriceDate for both its part rows");
   const hub = src("src/app/(app)/import/catalog-commit.ts");
   ok(!hub.includes("setPriceListEffective"), "#32: the Import hub no longer re-dates the manufacturer's book");
   const reg = src("src/app/(app)/import/registry.ts");
-  ok((reg.match(/ctx\.priced \? \{ priceDate: ctx\.effectiveAt \}/g) || []).length === 2, "#32: both hub catalog write paths (create, update) stamp priceDate");
+  ok((reg.match(/rowDatesPrice\(ctx, v\) \? \{ priceDate: ctx\.effectiveAt \}/g) || []).length === 2 && /!!ctx\.priced && \(num\(v\.list\) > 0 \|\| num\(v\.cost\) > 0\)/.test(reg), "#32: both hub catalog write paths (create, update) stamp priceDate on a priced row of a priced file");
 }
 
 async function priceDateDbChecks(ok: Ok) {
@@ -61,6 +69,21 @@ async function priceDateDbChecks(ok: Ok) {
   await Catalog.mergeUpsert("B4-PD-1", { list: 10 }, { pricedAt: D2, priceDate: D2 });
   const after = await Catalog.get("B4-PD-1");
   ok(after?.priceDate === D2 && after.pricedAt === D1, "#32 store: an unchanged price in a newer file moves priceDate, not pricedAt");
+
+  // #354 review I1: a blank-price row in a priced file dates nothing — both importers.
+  const { runCatalogImport } = await import("../src/app/(app)/catalog/import");
+  const csv = "SKU,Description,Category,Unit,List,Cost\nB4-BL-1,Priced row,Test,ea,100,60\nB4-BL-2,Blank price row,Test,ea,,\n";
+  const imp = await runCatalogImport({ mfr: "B4 Blank Co", text: csv, bytes: Buffer.byteLength(csv), effectiveAt: D1, defaultCategory: "" });
+  ok(imp.ok && (await Catalog.get("B4-BL-1"))?.priceDate === D1 && (await Catalog.get("B4-BL-2"))?.priceDate === undefined,
+    "#354 review: the Catalog importer dates a priced row but not a blank-price row in the same file");
+  const { commitImport } = await import("../src/app/(app)/import/registry");
+  const { parseCsv, autoMap, prepareRows } = await import("../src/app/(app)/import/parse");
+  const { getTypeMeta } = await import("../src/app/(app)/import/types");
+  const t = getTypeMeta("catalog")!;
+  const p = parseCsv("SKU,Description,List Price,Cost,Manufacturer\nB4-HB-1,Hub priced,50,30,B4 Hub Blank\nB4-HB-2,Hub blank,,,B4 Hub Blank\n");
+  await commitImport("catalog", prepareRows(p.rows, autoMap(p.headers, t.fields), t.fields).rows, "update", { effectiveAt: D2, priced: true });
+  ok((await Catalog.get("B4-HB-1"))?.priceDate === D2 && (await Catalog.get("B4-HB-2"))?.priceDate === undefined,
+    "#354 review: the Import hub dates a priced row but not a blank-price row in a priced file");
 }
 
 /* --- #46 venue drawing fixes --- */
