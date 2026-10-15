@@ -14,10 +14,10 @@ import { createProjectFromQuote } from "../src/lib/stores/projects";
 import { autoTaskId } from "../src/lib/stores/tasks";
 import { convert } from "../src/lib/stores/leads";
 import { buildOpportunities, type OppLeadInput, type OppQuoteInput } from "../src/lib/opportunities";
-import { addParty, copyParties, listFor, listForCompany, listForRecords, partyId, removeParty, setPartyContact } from "../src/lib/stores/parties";
+import { addParty, copyParties, listFor, listForCompany, liveRecordsForCompany, listForRecords, partyId, removeParty, setPartyContact } from "../src/lib/stores/parties";
 import {
   PARTY_ROLES, PARTY_RECORD_TYPES, ROLE_LABEL, ROLE_SHORT, partyInputProblem, normalizePartyInput, ownerConflict, carriesTo,
-  partyRoleText, groupPartiesByRole, sortParties, leadEstimatesTotal, leadIdsWithEstimates, type Party,
+  partyRoleText, groupPartiesByRole, sortParties, leadEstimatesTotal, leadIdsWithEstimates, deleteRefusal, type Party,
 } from "../src/lib/parties/rules";
 
 const P = (over: Partial<Party>): Party => ({
@@ -64,6 +64,10 @@ export async function partyChecks(ok: Ok) {
 
   const s = sortParties([P({ id: "b", role: "gc", createdAt: 2 }), P({ id: "a", role: "gc", createdAt: 2 }), P({ id: "c", role: "owner", createdAt: 9 })]);
   ok(s.map((x) => x.id).join() === "c,a,b", "parties: sort = role order, then createdAt, then id");
+
+  ok(deleteRefusal("Acme", 0) === null, "parties: no refusal when unlinked");
+  ok(deleteRefusal("Acme", 1) === "Acme is linked to 1 record (leads, estimates or projects) — remove it from them first.", "parties: refusal copy, singular");
+  ok(deleteRefusal("Acme", 3) === "Acme is linked to 3 records (leads, estimates or projects) — remove it from them first.", "parties: refusal copy, plural");
 
   ok(leadEstimatesTotal([{ status: "draft", value: 100.4 }, { status: "sent", value: 200 }, { status: "won", value: 50 }, { status: "lost", value: 999 }, {}]) === 350, "parties: estimates total sums draft/sent/won, rounds, skips lost");
   const w = leadIdsWithEstimates([{ leadId: "L-1" }, { leadId: null }, {}, { leadId: "L-2" }, { leadId: "L-1" }]);
@@ -200,6 +204,17 @@ export async function partyDbChecks(ok: Ok) {
       for (const p of onConv) registerFixture("record_parties", p.id);
       ok(onConv.length === 1 && onConv[0].role === "owner" && onConv[0].companyId === co1, "parties db: converted quote has the lead's owner and no GC");
     }
+
+    // a party row outlives its record: liveRecordsForCompany counts only records that still exist
+    const ghost = fixtureId(346, "ghost");
+    const gh = await addParty({ recordType: "quote", recordId: ghost, companyId: co1, role: "vendor" }, "u-test");
+    ok(gh.ok, "parties db: a party row on a record id that doesn't exist can be written (the action layer checks the record)");
+    if (gh.ok) registerFixture("record_parties", gh.party.id);
+    const live1 = await liveRecordsForCompany(co1);
+    ok(!live1.some((g) => g.recordId === ghost), "parties db: liveRecordsForCompany skips a party on a missing record");
+    ok(live1.some((g) => g.recordType === "lead" && g.recordId === convLead && g.parties.length === 1), "parties db: liveRecordsForCompany keeps a live lead");
+    ok(live1.some((g) => g.recordType === "quote" && g.recordId === wonQ) && live1.some((g) => g.recordType === "project" && g.recordId === proj?.id), "parties db: liveRecordsForCompany keeps a live quote and a live project");
+    ok(!live1.some((g) => g.recordId === lead || g.recordId === quote), "parties db: party-only ids (no record behind them) are not live");
 
     // withSavepoint contains a SQL error so the outer transaction survives
     ok((await withSavepoint(async () => 7)) === 7, "parties db: withSavepoint outside a transaction just runs fn");

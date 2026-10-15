@@ -141,3 +141,9 @@ export function leadIdsWithEstimates(quotes: ReadonlyArray<{ leadId?: string | n
   for (const q of quotes) if (q.leadId) out.add(q.leadId);
   return out;
 }
+
+/** Company delete guard copy (spec §8): null when the company is on no live party row. */
+export function deleteRefusal(companyName: string, n: number): string | null {
+  if (n <= 0) return null;
+  return `${companyName} is linked to ${n} record${n === 1 ? "" : "s"} (leads, estimates or projects) — remove it from them first.`;
+}

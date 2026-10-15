@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { getDoc, listDocsByField, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import { getCompany } from "@/lib/identity/companies";
 import { getContact } from "@/lib/identity/contacts";
+import { getMany as getQuotes } from "@/lib/stores/quotes";
 import {
   carriesTo, normalizePartyInput, ownerConflict, partyInputProblem, sortParties,
   type Party, type PartyInput, type PartyRecordType, type PartyRole,
@@ -41,6 +42,33 @@ export async function listForRecords(recordType: PartyRecordType, recordIds: rea
 export async function listForCompany(companyId: string): Promise<Party[]> {
   if (!companyId) return [];
   return sortParties(await listDocsByField<Party>("record_parties", "companyId", [companyId]));
+}
+
+/**
+ * The records a company is on, one entry per record with all that record's party rows. A party row can outlive its
+ * record (a quote, lead or project deleted later keeps its rows), so only groups whose record still exists are
+ * returned — the company page card and the company delete guard both read this, never `listForCompany` directly.
+ */
+export async function liveRecordsForCompany(
+  companyId: string
+): Promise<Array<{ recordType: PartyRecordType; recordId: string; parties: Party[] }>> {
+  const groups = new Map<string, { recordType: PartyRecordType; recordId: string; parties: Party[] }>();
+  for (const p of await listForCompany(companyId)) {
+    const key = `${p.recordType}:${p.recordId}`;
+    const g = groups.get(key);
+    if (g) g.parties.push(p);
+    else groups.set(key, { recordType: p.recordType, recordId: p.recordId, parties: [p] });
+  }
+  const all = [...groups.values()];
+  const liveQuotes = await getQuotes([...new Set(all.filter((g) => g.recordType === "quote").map((g) => g.recordId))]);
+  const out: typeof all = [];
+  for (const g of all) {
+    const live =
+      g.recordType === "quote" ? liveQuotes.has(g.recordId)
+      : !!(await getDoc(g.recordType === "lead" ? "leads" : "projects", g.recordId));
+    if (live) out.push(g);
+  }
+  return out;
 }
 
 async function contactProblem(companyId: string, contactId: string | null): Promise<string | null> {

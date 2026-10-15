@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { remove, upsert } from "@/lib/stores/customers";
+import { liveRecordsForCompany } from "@/lib/stores/parties";
+import { deleteRefusal } from "@/lib/parties/rules";
+import { getCompany } from "@/lib/identity/companies";
 import { addNoteRecord, canDeleteNote, getNote, removeNote } from "@/lib/stores/notes";
 import {
   coordsOf,
@@ -144,6 +147,9 @@ export async function deleteCustomerAction(
   const user = await requireUser();
   if (!can("create", user.roles)) return { ok: false as const, error: "You can't delete companies." };
   if (!id) return { ok: false as const, error: "Missing company id." };
+  // #346 — a company that is an owner / GC / EC / architect / vendor somewhere can't silently vanish from those records.
+  const refusal = deleteRefusal((await getCompany(id))?.name || id, (await liveRecordsForCompany(id)).length);
+  if (refusal) return { ok: false as const, error: refusal };
   await remove(id);
   revalidatePath("/", "layout");
   return { ok: true as const };
