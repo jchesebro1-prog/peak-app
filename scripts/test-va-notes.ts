@@ -1082,7 +1082,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       const out = MGX.printRecordFor(existing, { liftRequired: "", legacyNotes: [{ section: "x", label: "BOGUS", text: "BOGUS" }] } as never);
       const labels = (out.legacyNotes || []).map((n) => n.label);
       return labels.includes("Kind of lift needed (before #344)") && !labels.includes("BOGUS") && JSON.stringify(existing) === before &&
-        /const record = printRecordFor\(existing, patch\);[\s\S]{0,1200}buildAssessmentSheet\(record, images\)/.test(rd("src/app/(app)/venue-assessments/[id]/actions.ts")); // C7: the printed record also plans the images
+        /const record = printRecordFor\(existing, patch\);[\s\S]{0,1200}buildAssessmentSheet\(record, images\)/.test(rd("src/lib/survey-sheet-pdf-server.ts")); // C7: the printed record also plans the images
     });
     t("the line set quantity seed counts only rows with a set number", () => {
       const a = MGX.migrateSurvey({ linesets: [{ id: "a", pos: "1" }, { id: "b", pos: "Ext" }, { id: "c", pos: "" }] } as unknown as MigratableSurvey);
@@ -2055,12 +2055,21 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       imageCount(cappedPdf) === 2 && listed.map((r) => r.value.split(" — ")[0]).join() === "Shot 2,Shot 3,Shot 4",
       "#344 C7: the images share a 20 MB budget — past it the rest are listed by caption, not embedded");
 
-    /* the action resolves bytes on the server */
+    /* the render resolves bytes on the server; the route streams it (#344 C7 fix) */
+    const lib7 = readFileSync(join(process.cwd(), "src/lib/survey-sheet-pdf-server.ts"), "utf8");
+    ok(lib7.includes("planSheetImages(") && lib7.includes("resolveSheetImages(") && lib7.includes("surveyFileBytes(existing") && /buildAssessmentSheet\(record, images\)/.test(lib7) &&
+      lib7.includes("printRecordFor(existing, patch)") && lib7.includes("export async function renderSurveySheetPdf("),
+      "#344 C7: renderSurveySheetPdf plans from the printed record, loads bytes with surveyFileBytes (the stored slot first) and passes them to the sheet");
     const act7 = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/actions.ts"), "utf8");
-    const ps7 = act7.slice(act7.indexOf("export async function printSurveySheet"), act7.indexOf("export async function advanceSurveyStage"));
-    ok(ps7.includes("planSheetImages(") && ps7.includes("resolveSheetImages(") && ps7.includes("surveyFileBytes(existing") && /buildAssessmentSheet\(record, images\)/.test(ps7) &&
-      /from "@\/lib\/field-files\/file-bytes"/.test(act7),
-      "#344 C7: printSurveySheet plans from the printed record, loads bytes with surveyFileBytes (the stored slot first) and passes them to the sheet");
+    const route7 = readFileSync(join(process.cwd(), "src/app/api/surveys/[id]/sheet-pdf/route.ts"), "utf8");
+    const ctl7 = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/controls.tsx"), "utf8");
+    const print7 = ctl7.slice(ctl7.indexOf("async function onPrintSheet"), ctl7.indexOf("per-section photos (#344 C5)"));
+    ok(!act7.includes("printSurveySheet") && !ctl7.includes("printSurveySheet") && route7.includes("zipStream(r.pdf)") && /export const maxDuration = \d+/.test(route7) &&
+      route7.includes("await requireUser()") && route7.includes("MAX_BODY_BYTES") && route7.includes("413") && route7.includes("export async function POST(") &&
+      route7.includes("renderSurveySheetPdf(") && route7.includes("nosniff") && route7.includes("private, no-store") && route7.includes('"inline"'),
+      "#344 C7 fix: the field sheet PDF streams from a signed-in route (zipStream, maxDuration, capped body, inline + nosniff + no-store) — no base64 server action");
+    ok(print7.includes("/api/surveys/") && print7.includes("/sheet-pdf") && /const \{ photos: _earlier, \.\.\.patch \}/.test(print7) && print7.includes("URL.createObjectURL(await res.blob())") && print7.includes("60_000"),
+      "#344 C7 fix: Print sheet posts the draft patch (minus the inline Earlier photos) to the route and opens the blob");
   }
 }
 
@@ -2237,6 +2246,12 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
       ok(!!jb && jb.contentType === "application/json" && jb.bytes.toString("utf8").startsWith("{") && !!pb && pb.contentType === "image/jpeg" && pb.bytes[0] === 0xff &&
         (fin ? await surveyFileBytes(fin, FF.newFileId("p")) : 1) === null,
         "#344 C4: surveyFileBytes decodes inline files with their content type; an unreferenced id is null");
+      /* #344 C7 fix: the server-only render the sheet route streams */
+      const { renderSurveySheetPdf } = await import("../src/lib/survey-sheet-pdf-server");
+      const sheet = await renderSurveySheetPdf(sv.id, {});
+      const noSheet = await renderSurveySheetPdf("FS-no-such-survey", {});
+      ok(sheet.ok && sheet.pdf.subarray(0, 4).toString("latin1") === "%PDF" && sheet.fileName === `${sv.id}-venue-assessment.pdf` && !noSheet.ok && noSheet.status === 404,
+        "#344 C7 fix: renderSurveySheetPdf returns a %PDF buffer for a stored survey and a 404 result for an unknown one");
     } finally {
       if (prevBlob !== undefined) process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
     }

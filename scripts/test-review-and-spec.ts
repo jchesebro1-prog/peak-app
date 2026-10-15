@@ -51636,7 +51636,7 @@ import type { SpecSection as E301gSec } from "@/app/(app)/estimator/types";
   ok(e301gOptions(list, {}).length === 0, "#301 site visit: no lead and no customer → nothing");
 
   const acts = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/actions.ts"), "utf8");
-  const saveBody = acts.slice(acts.indexOf("export async function saveSurvey("), acts.indexOf("export async function printSurveySheet("));
+  const saveBody = acts.slice(acts.indexOf("export async function saveSurvey("), acts.indexOf("export async function advanceSurveyStage("));
   const advBody = acts.slice(acts.indexOf("export async function advanceSurveyStage("), acts.indexOf("export async function deleteSurvey("));
   ok(saveBody.includes("await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);") && advBody.includes("await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);"),
     "#301 goals: saveSurvey and advanceSurveyStage clean the goals before writing (R4)");

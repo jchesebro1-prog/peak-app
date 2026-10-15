@@ -30,7 +30,7 @@ import {
   REPLACE_VS_REUSE_OPTIONS,
 } from "@/lib/stores/survey-intake";
 import { LIFT_TYPES, LOADING_DOOR_TYPES, distanceText, shouldAutoFillTravel, showLiftDetails, travelTimeText } from "@/lib/field-lists";
-import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, printSurveySheet, type SurveyPatch } from "./actions";
+import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, type SurveyPatch } from "./actions";
 import Venue3D from "./venue-3d";
 import SuggestEstimate from "@/components/assist/suggest-estimate";
 import { saveThroughOutbox } from "@/lib/sync/save";
@@ -840,10 +840,16 @@ export default function SurveyEditor({
     const preview = window.open("", "_blank");
     setSaving(true);
     try {
-      const result = await printSurveySheet(record.id, buildPatch(undefined, { ...draft, photoRefs: refsNow.current, sketches: sketchesNow.current }));
-      if (!result.ok) throw new Error(result.error);
-      const bytes = Uint8Array.from(atob(result.base64), (char) => char.charCodeAt(0));
-      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      // The saved record supplies Earlier photos; sending them inline would only bloat the request.
+      const { photos: _earlier, ...patch } = buildPatch(undefined, { ...draft, photoRefs: refsNow.current, sketches: sketchesNow.current });
+      void _earlier;
+      const res = await fetch(`/api/surveys/${encodeURIComponent(record.id)}/sheet-pdf`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const url = URL.createObjectURL(await res.blob());
       if (preview) preview.location.href = url;
       else window.location.assign(url);
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
