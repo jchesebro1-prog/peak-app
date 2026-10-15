@@ -343,6 +343,11 @@ function visitRightsChecks(ok: Ok) {
   const cp = src("src/app/(app)/companies/[id]/page.tsx");
   ok(cp.includes("canEdit={canChangeVisit(v, me, visitRoster)}") && cp.includes("<DeleteVisitButton id={v.id} canDelete={canChangeVisit(v, me, visitRoster)} />"),
     "b3 #35 pin: the company record shows read-only Edit / Delete to everyone else");
+  ok(!cp.includes("await allUsers()") && /getCompanyLogo\(cust\.id\),[\s\S]{0,200}allUsers\(\),\s*\]\);/.test(cp) && cp.includes("const visitRoster = everyone.map("),
+    "M8 pin: the company record fetches the roster in its parallel read, not after it");
+  const vh = src("src/lib/venue-history-server.ts"), cs = src("src/lib/consulting-stages.ts");
+  ok(/so the directory is a single pass over the data\.\n \*\/\nexport async function loadVenueDirectory/.test(vh) && /amount\. Nothing here reads settings or the store\.\n \*\/\nexport function manualMilestoneSeeds/.test(cs),
+    "M6 pin: the moved doc comments sit on their own functions again");
   ok(/if \(!canEdit\)[\s\S]{0,200}disabled/.test(src("src/components/visit-booking/visit-edit-button.tsx")) && VISIT_EDIT_REFUSAL.includes("lead or an approver"),
     "b3 #35 pin: the read-only Edit is a disabled control");
   ok(!/from "@\/lib\/stores|from "@\/db/.test(src("src/lib/visit-edit-rights.ts")), "b3 #35 pin: the rule module is store-free");

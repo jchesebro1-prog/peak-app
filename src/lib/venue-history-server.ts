@@ -39,11 +39,6 @@ export type VenueDirRow = {
   lastActivity: number | null;
 };
 
-/**
- * Every venue with its owning company, city, and last-activity timestamp.
- * Loads each store once and buckets activity by `${customerId}|${locationId}`,
- * so the directory is a single pass over the data.
- */
 /** Jeff 2026-10-15 #11 — the directory reads only these fields of each record (a SQL projection), never whole
  *  quotes / projects / jobs; the same eight stores the history below reads in full. */
 type ActivityRow = { id: string; customerId?: string | null; locationId?: string | null; companyId?: string | null; siteIds?: string[]; updatedAt?: number; startAt?: number | null };
@@ -52,6 +47,11 @@ function activityRows(coll: CollectionName, fields: readonly string[]): Promise<
 }
 const AT = ["customerId", "locationId", "updatedAt"] as const;
 
+/**
+ * Every venue with its owning company, city, and last-activity timestamp.
+ * Loads each store once and buckets activity by `${customerId}|${locationId}`,
+ * so the directory is a single pass over the data.
+ */
 export async function loadVenueDirectory(): Promise<VenueDirRow[]> {
   const [sites, quotes, projects, engagements, flame, inspections, repairs, surveys, visits] =
     await Promise.all([

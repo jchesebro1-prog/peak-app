@@ -201,14 +201,6 @@ export type ManualFee =
     };
 
 /**
- * What a manual engagement's milestones seed from — the pure half of
- * createManualEngagement, mirroring milestoneSeeds above. A fixed fee becomes
- * ONE unscheduled "Fee" milestone carrying the amount; a schedule keeps its
- * rows (trimmed names, "Milestone" when blank, missing/negative dates → 0,
- * negative amounts → 0) and drops rows that have neither a name nor an
- * amount. Nothing here reads settings or the store.
- */
-/**
  * Jeff 2026-10-15 #34 (MASTER-QUESTIONS E7) — the phases a hand-added consulting project starts with, from the
  * "+ New consulting project" checklist (every phase ticked by default). Posted names are kept only when they are on
  * the Settings phase menu, in the MENU's order. `undefined` (a client that predates the checklist) = the whole menu,
@@ -222,6 +214,14 @@ export function pickManualPhases(menu: readonly string[], posted: unknown): stri
   return picked.length ? picked : null;
 }
 
+/**
+ * What a manual engagement's milestones seed from — the pure half of
+ * createManualEngagement, mirroring milestoneSeeds above. A fixed fee becomes
+ * ONE unscheduled "Fee" milestone carrying the amount; a schedule keeps its
+ * rows (trimmed names, "Milestone" when blank, missing/negative dates → 0,
+ * negative amounts → 0) and drops rows that have neither a name nor an
+ * amount. Nothing here reads settings or the store.
+ */
 export function manualMilestoneSeeds(
   fee: ManualFee | null | undefined
 ): Array<{ name: string; targetDate: number; amount: number }> {
