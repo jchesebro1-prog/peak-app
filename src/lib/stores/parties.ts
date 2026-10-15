@@ -120,10 +120,13 @@ export async function copyParties(
   const src = (await listFor(from.type, from.id)).filter((p) => carriesTo(from.type, to.type, p));
   let n = 0;
   const t = Date.now();
+  const targetRows = await listFor(to.type, to.id);
   for (const p of src) {
     const id = partyId(to.type, to.id, p.companyId, p.role);
     if (await getDoc<Party>("record_parties", id)) continue;
-    await upsertDoc<Party>("record_parties", {
+    // One owner per record: never copy a second owner company onto a target that already has one.
+    if (ownerConflict(targetRows, p)) continue;
+    const row: Party = {
       id,
       recordType: to.type,
       recordId: to.id,
@@ -135,7 +138,9 @@ export async function copyParties(
       createdAt: t,
       createdBy: by,
       updatedAt: t,
-    });
+    };
+    await upsertDoc<Party>("record_parties", row);
+    targetRows.push(row);
     n++;
   }
   return n;

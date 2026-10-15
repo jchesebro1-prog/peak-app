@@ -127,6 +127,17 @@ export async function partyDbChecks(ok: Ok) {
     for (const p of await listFor("project", project)) registerFixture("record_parties", p.id);
     ok(toProj === 3, "parties db: quote→project copies every row");
 
+    const quote2 = fixtureId(346, "quote2");
+    const o2 = await addParty({ recordType: "quote", recordId: quote2, companyId: co2, role: "owner" }, "u-test");
+    ok(o2.ok, "parties db: owner on the one-owner copy target");
+    if (o2.ok) registerFixture("record_parties", o2.party.id);
+    const into2 = await copyParties({ type: "lead", id: lead }, { type: "quote", id: quote2 }, "u-test");
+    const onQuote2 = await listFor("quote", quote2);
+    for (const p of onQuote2) registerFixture("record_parties", p.id);
+    const owners2 = onQuote2.filter((p) => p.role === "owner");
+    ok(owners2.length === 1 && owners2[0].companyId === co2, "parties db: copy never gives the target a second owner");
+    ok(into2 === 2 && onQuote2.map((p) => p.role).join() === "owner,architect,other", "parties db: non-owner rows still copied past the owner conflict");
+
     const forCo1 = await listForCompany(co1);
     ok(forCo1.filter((p) => p.recordId === lead).length === 2 && forCo1.some((p) => p.recordType === "project"), "parties db: listForCompany spans records");
     const many = await listForRecords("lead", [lead, fixtureId(346, "empty")]);
