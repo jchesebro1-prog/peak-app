@@ -1258,6 +1258,45 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       "#344 C1: renderInk draws labels at scaled position/size and strokes in colour with round caps");
     ok(typeof INK.inkId() === "string" && /^[0-9a-z]{8,10}$/.test(INK.inkId()) && INK.inkId() !== INK.inkId(), "#344 C1: inkId is short base-36 and unique");
   }
+
+  // ─── C2: pad backgrounds ───
+  {
+    const BG = await import("../src/lib/ink/backgrounds");
+    const keys = BG.SKETCH_PADS.map((p) => p.key);
+    ok(keys.join() === "beams,cwElevation,brick,stagePlan,stageSection,houseSection,housePlan,linesetSheet" &&
+      BG.SKETCH_PADS.find((p) => p.key === "linesetSheet")?.gate === "linesets" && BG.SKETCH_PADS.find((p) => p.key === "brick")?.gate === "counterweight",
+      "#344 C2: SKETCH_PADS registry has the eight pads with sections and gates");
+    const full = { proW: "40'", proH: "20'", stageDepth: "30'-6\"", wingSL: "15", wingSR: "12", apron: "6'", gridH: "50'", houseH: "30'", houseWidth: "60'", houseDepth: "70'", catwalkH: "22'" };
+    const bad: string[] = [];
+    for (const k of keys) {
+      for (const m of [full, {}]) {
+        const r = BG.backgroundFor(k, m);
+        if (!(r.svg.startsWith("<svg xmlns=") && r.svg.includes(`viewBox="0 0 ${r.w} ${r.h}"`) && r.svg.includes("<rect") && r.w > 0 && r.h > 0 && r.svg.endsWith("</svg>") && !r.svg.includes("NaN"))) bad.push(k);
+      }
+    }
+    ok(bad.length === 0, "#344 C2: every SKETCH_PADS key renders a self-contained SVG (measured and empty)" + (bad.length ? " bad: " + bad.join() : ""));
+    const sp = BG.backgroundFor("stagePlan", full).svg;
+    ok(sp.includes("PLASTER LINE") && sp.includes("PROSCENIUM 40&apos;") === false && sp.includes("PROSCENIUM 40'") && sp.includes("STAGE DEPTH 30'-6\"") && sp.includes(">SL<") && sp.includes(">SR<") && sp.includes(">CL<"),
+      "#344 C2: a measured stage plan has PLASTER LINE, SL/SR/CL and the proW / stageDepth dimension labels");
+    const gen = BG.backgroundFor("stagePlan", {}).svg;
+    ok(gen.includes("PLASTER LINE") && gen.includes(">PROSCENIUM<") && !/PROSCENIUM \d/.test(gen), "#344 C2: empty measurements fall back to generic proportions with unvalued labels");
+    ok(BG.backgroundFor("beams", full).svg.includes("PLASTER LINE") && BG.backgroundFor("stageSection", full).svg.includes("GRID HEIGHT 50'") &&
+      BG.backgroundFor("stageSection", full).svg.includes("PRO HEIGHT 20'") && BG.backgroundFor("houseSection", full).svg.includes("CEILING HEIGHT 30'") &&
+      BG.backgroundFor("housePlan", full).svg.includes("HOUSE WIDTH 60'") && BG.backgroundFor("housePlan", full).svg.includes("HOUSE DEPTH 70'"),
+      "#344 C2: section and house pads label proH, gridH, houseH, houseWidth, houseDepth");
+    const p1 = BG.backgroundFor("linesetSheet", {}).svg, p2 = BG.backgroundFor("linesetSheet", {}, { page: 2 }).svg, p2k = BG.backgroundFor("linesetSheet2", {}).svg;
+    ok(p1.includes(">1<") && p1.includes(">30<") && !p1.includes(">31<") && p2.includes(">31<") && p2.includes(">60<") && !p2.includes(">30<") && p2k.includes(">31<"),
+      "#344 C2: linesetSheet page 1 numbers rows 1…30, page 2 (opts or key) starts at 31");
+    ok(["Set", "Dist. from PL", "Set name", "Finished W×H", "Arbor load", "Trim low", "Trim high", "Condition", "Notes"].every((c) => p1.includes(`>${c}<`)) &&
+      BG.backgroundFor("linesetSheet", {}, { linesetRows: 5 }).svg.includes(">5<") && !BG.backgroundFor("linesetSheet", {}, { linesetRows: 5 }).svg.includes(">6<"),
+      "#344 C2: linesetSheet has the lineset column labels and honours linesetRows");
+    ok(BG.backgroundFor("cwElevation", {}).svg.includes("CW ELEVATION SHEET (placeholder") && BG.backgroundFor("brick", {}).svg.includes("BRICK DRAWING"),
+      "#344 C2: cwElevation placeholder and brick grid carry their titles");
+    const evil = BG.backgroundFor("stagePlan", { proW: "<script>alert(1)</script>", stageDepth: "x</text><script>" }).svg;
+    ok(!evil.includes("<script"), "#344 C2: SVG never contains <script, even from hostile measurement text");
+    ok(BG.feetOf("38'-6\"") === 38.5 && BG.feetOf("38.5") === 38.5 && BG.feetOf("") === null && BG.feetOf("<b>") === null && BG.feetOf(true) === null && BG.feetOf("9999") === 300,
+      "#344 C2: feetOf parses ft-in, decimals, rejects junk and clamps to 300 ft");
+  }
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
