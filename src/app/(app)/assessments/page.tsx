@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { after } from "next/server";
 import { requireUser } from "@/lib/session";
+import { maybeRunAssessmentReminders } from "@/lib/assessments/reminders-server";
 import { can } from "@/lib/team";
 import { VISIT_TYPES } from "@/lib/assessments/defs";
 import { listAssessments } from "@/lib/stores/assessments";
@@ -36,6 +38,8 @@ const fmtDate = (ms: number) => (ms ? new Date(ms).toLocaleDateString("en-US", {
 /** The assessment list (#340, spec §2): newest visit first, filtered by ?status= and ?customer=. */
 export default async function AssessmentsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const [user, sp] = await Promise.all([requireUser(), searchParams]);
+  // Jeff 2026-10-15 #10 — the lazy reminder sweep (the daily drive cron is the main trigger); throttled per process.
+  after(maybeRunAssessmentReminders);
   const statusParam = one(sp.status);
   const status = (STATUSES as readonly string[]).includes(statusParam) ? statusParam : "";
   const customer = one(sp.customer);

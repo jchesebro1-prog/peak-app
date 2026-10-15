@@ -31,6 +31,12 @@ import { FIXED_PICK_LISTS } from "../src/lib/assessments/defs/picklists";
 import { evaluate, riggingDepth, type EvalInput } from "../src/lib/assessments/evaluate";
 import type { Answer, Answers } from "../src/lib/assessments/answers";
 import { addPicklistValue } from "../src/lib/stores/assessment-picklists";
+import { planReminders, reminderTaskId, inReminderWindow, REMINDER_LEAD_DAYS, type ReminderFinding } from "../src/lib/assessments/reminders";
+import { runAssessmentReminders } from "../src/lib/assessments/reminders-server";
+import { setNextAssessmentAt, getVenueProfile } from "../src/lib/stores/venue-profiles";
+import { getDocRows, softDeleteDoc } from "../src/db/doc-store";
+import { DOC_TABLES } from "../src/db/doc-tables";
+import { inArray } from "drizzle-orm";
 
 const ROOT = join(__dirname, "..");
 const src = (p: string) => readFileSync(join(ROOT, p), "utf8");
@@ -375,6 +381,100 @@ async function rigDepthChecks(ok: Ok) {
     "b3 #8: the quick/full split is documented in the S2 definition");
 }
 
+/* ------------------------------------------------------------------ #10 assessment reminders ------------------------------------------------------------------ */
+
+const DAY = 86_400_000;
+
+function reminderChecks(ok: Ok) {
+  const now = Date.UTC(2026, 9, 15, 15);
+  ok(REMINDER_LEAD_DAYS === 30 && inReminderWindow(now + 30 * DAY, now) && inReminderWindow(now + 1, now) && !inReminderWindow(now + 31 * DAY, now) && !inReminderWindow(now - DAY, now) && !inReminderWindow(null, now),
+    "b3 #10: a reminder is due from 30 days before the date until the date itself");
+  const f = (key: string, extra: Partial<ReminderFinding>): ReminderFinding => ({ key, printedId: "MPSD-LIN-RIG-00" + key.slice(-1), customerId: "co1", siteId: "st1", assessmentId: "AS-1001", category: "RIG", description: "Fire curtain test", ...extra });
+  const findings = [
+    f("fd1", { nextDue: now + 20 * DAY }),
+    f("fd2", { nextDue: now + 45 * DAY }),
+    f("fd3", { nextDue: now - 2 * DAY }),
+    f("fd4", { nextDue: now + 5 * DAY, voided: { by: "x", at: 1, reason: "dup" } }),
+    f("fd5", {}),
+    f("fd6", { nextDue: now + 10 * DAY, customerId: "co2", assessmentId: "AS-1002" }),
+  ];
+  const base = {
+    findings,
+    venues: [{ siteId: "st1", customerId: "co1", nextAssessmentAt: now + 25 * DAY }, { siteId: "st2", customerId: "co2", nextAssessmentAt: now + 60 * DAY }, { siteId: "st3", customerId: "co3", nextAssessmentAt: now + 3 * DAY }],
+    assessments: [
+      { id: "AS-1001", siteId: "st1", createdBy: "u7", visitDate: 1 },
+      { id: "AS-1002", siteId: "st2", createdBy: "u8", visitDate: 1 },
+      { id: "AS-1003", siteId: "st3", createdBy: "u7", visitDate: 1 },
+      { id: "AS-1004", siteId: "st3", createdBy: "u8", visitDate: 9 },
+    ],
+    owners: new Map<string, string | null>([["co1", "u1"], ["co2", "u-gone"], ["co3", null]]),
+    activeUserIds: new Set(["u1", "u7", "u8"]),
+    siteNames: new Map([["st1", "Lincoln HS — Auditorium"]]),
+    dayLabel: (ms: number) => new Date(ms).toISOString().slice(0, 10),
+    now,
+  };
+  const plans = planReminders(base);
+  ok(plans.filter((x) => x.kind === "finding").map((x) => x.ref).join() === "fd1,fd6", "b3 #10: one reminder per live finding with a next-due date inside the window (not later, not past, not voided, not undated)");
+  ok(plans.filter((x) => x.kind === "venue").map((x) => x.ref).join() === "st1,st3", "b3 #10: one per venue whose next assessment falls inside the window");
+  const p1 = plans.find((x) => x.ref === "fd1")!, p6 = plans.find((x) => x.ref === "fd6")!, v1 = plans.find((x) => x.ref === "st1")!, v3 = plans.find((x) => x.ref === "st3")!;
+  ok(p1.assigneeUserId === "u1" && v1.assigneeUserId === "u1", "b3 #10: assigned to the venue's account rep (the company owner)");
+  ok(p6.assigneeUserId === "u8", "b3 #10: an owner who is no longer active falls back to the assessment's creator");
+  ok(v3.assigneeUserId === "u8", "b3 #10: with no owner a venue reminder goes to the creator of its most recent assessment");
+  ok(planReminders({ ...base, activeUserIds: new Set() }).every((x) => x.assigneeUserId === null), "b3 #10: nobody active → an unassigned task, never a guess");
+  ok(p1.dueAt === now + 20 * DAY && p1.title.includes("MPSD-LIN-RIG-001") && p1.title.includes("Lincoln HS — Auditorium") && v3.title.includes("the venue"), "b3 #10: the task is due on the date and names the finding / venue");
+  ok(p1.id === reminderTaskId("finding", "fd1", now + 20 * DAY) && p1.id === planReminders(base).find((x) => x.ref === "fd1")!.id && /^T-asr-f-fd1-\d{8}$/.test(p1.id) && /^T-asr-v-st1-\d{8}$/.test(v1.id),
+    "b3 #10: deterministic task ids (record + due day) — the sweep is idempotent");
+  ok(reminderTaskId("finding", "fd1", now + 21 * DAY) !== p1.id, "b3 #10: a moved due date gets its own reminder");
+  const route = src("src/app/api/drive/sync/route.ts");
+  ok(/runAssessmentReminders\(\{ deadlineMs: started \+ 10_000 \}\)/.test(route) && route.indexOf("runAssessmentReminders(") < route.indexOf("syncAllDrivers("), "b3 #10 pin: the daily drive cron runs the reminders first, inside a 10 s deadline");
+  ok(/after\(maybeRunAssessmentReminders\)/.test(src("src/app/(app)/assessments/page.tsx")), "b3 #10 pin: the Assessments page runs them lazily (throttled)");
+  const act = src("src/app/(app)/assessments/reminder-actions.ts");
+  ok(/await requirePerm\("create"\);[\s\S]*getSite\(siteId\)[\s\S]*setNextAssessmentAt\(site\.id, site\.companyId, at\)/.test(act), "b3 #10 pin: setting a venue's next assessment needs `create` and a real venue");
+  ok(!/from "@\/lib\/stores|from "@\/db/.test(src("src/components/assessments/next-assessment-edit.tsx")) && !/from "@\/lib\/stores|from "@\/db/.test(src("src/lib/assessments/reminders.ts")), "b3 #10 pin: the client control and the planner import no store");
+}
+
+async function reminderDbChecks(ok: Ok) {
+  const db = await getDb();
+  const PFX = "TESTb3r:";
+  const now = Date.now();
+  const F1 = PFX + "fd1", F2 = PFX + "fd2", SITE = PFX + "st1", CO = PFX + "co1", AS = PFX + "AS1";
+  const ids = [reminderTaskId("finding", F1, now + 12 * DAY), reminderTaskId("venue", SITE, now + 20 * DAY)];
+  const cleanup = async () => {
+    await db.delete(DOC_TABLES.tasks).where(inArray(DOC_TABLES.tasks.id, ids));
+    for (const [coll, id] of [["findings", F1], ["findings", F2], ["assessments", AS], ["venue_profiles", SITE]] as const)
+      await db.delete(DOC_TABLES[coll]).where(inArray(DOC_TABLES[coll].id, [id]));
+    await db.delete(sites).where(like(sites.id, PFX + "%"));
+    await db.delete(companies).where(like(companies.id, PFX + "%"));
+  };
+  try {
+    await cleanup();
+    await saveCompany({ id: CO, name: "B3 Reminder Co", type: "customer", lifecycle: "active", deleted: false, ownerUserId: "u1" });
+    await saveSite({ id: SITE, companyId: CO, name: "B3 Reminder Hall", locationName: "B3 Reminder Hall", venueKind: "proscenium" });
+    const ins = async (coll: "findings" | "assessments", id: string, doc: Record<string, unknown>) =>
+      db.insert(DOC_TABLES[coll]).values({ id, doc: { ...doc, id }, rev: 1, updatedAt: now, receivedAt: now, review: { state: "new" }, deleted: false });
+    await ins("assessments", AS, { customerId: CO, siteId: SITE, status: "completed", visitDate: now - 300 * DAY, assessorId: "u1", createdBy: "u1", answers: {}, scopes: [], photos: [], dismissedPrompts: [], visitType: "condition", createdAt: now, updatedAt: now });
+    await ins("findings", F1, { key: F1, customerId: CO, siteId: SITE, assessmentId: AS, category: "RIG", rating: "needs", description: "Fire curtain drop test", status: "closed", nextDue: now + 12 * DAY, createdAt: now, updatedAt: now, createdBy: "u1" });
+    await ins("findings", F2, { key: F2, customerId: CO, siteId: SITE, assessmentId: AS, category: "RIG", rating: "needs", description: "Later", status: "closed", nextDue: now + 90 * DAY, createdAt: now, updatedAt: now, createdBy: "u1" });
+    await setNextAssessmentAt(SITE, CO, now + 20 * DAY);
+    ok((await getVenueProfile(SITE))?.nextAssessmentAt === Math.round(now + 20 * DAY), "b3 #10 db: a venue's next assessment date is stored on its profile (the new minimal field)");
+    const r1 = await runAssessmentReminders({ now });
+    const rows = await getDocRows<{ id: string; assigneeUserId: string | null; dueAt: number; customerId: string; siteId: string; title: string }>("tasks", ids);
+    ok(rows.length === 2 && rows.every((r) => !r.deleted && r.doc.assigneeUserId === "u1" && r.doc.customerId === CO) && r1.created >= 2,
+      "b3 #10 db: the sweep creates the finding and venue reminders, assigned to the account rep: " + JSON.stringify(r1));
+    ok(rows.find((r) => r.id === ids[0])!.doc.dueAt === now + 12 * DAY && rows.find((r) => r.id === ids[0])!.doc.siteId === SITE, "b3 #10 db: due on the finding's date, linked to the venue");
+    const r2 = await runAssessmentReminders({ now });
+    ok(r2.created === 0 && (await getDocRows("tasks", ids)).length === 2, "b3 #10 db: a second run creates nothing (idempotent)");
+    await softDeleteDoc("tasks", ids[0]);
+    const r3 = await runAssessmentReminders({ now });
+    const after3 = await getDocRows("tasks", [ids[0]]);
+    ok(r3.created === 0 && after3.length === 1 && after3[0].deleted, "b3 #10 db: a reminder someone deleted is never re-created");
+    await setNextAssessmentAt(SITE, CO, null);
+    ok((await getVenueProfile(SITE))?.nextAssessmentAt === undefined, "b3 #10 db: clearing the date removes it");
+  } finally {
+    await cleanup();
+  }
+}
+
 /* ------------------------------------------------------------------ entry points ------------------------------------------------------------------ */
 
 export async function batch3PureChecks(ok: Ok) {
@@ -383,12 +483,14 @@ export async function batch3PureChecks(ok: Ok) {
   phasePickerChecks(ok);
   visitRightsChecks(ok);
   await rigDepthChecks(ok);
+  reminderChecks(ok);
 }
 
 export async function batch3DbChecks(ok: Ok) {
   await listDbChecks(ok);
   await pipelineDbChecks(ok);
   await phaseDbChecks(ok);
+  await reminderDbChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-oct15-batch3.ts")) {
