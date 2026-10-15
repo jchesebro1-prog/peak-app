@@ -36,7 +36,8 @@ function cleanStr(v: string | null | undefined, max: number, keepNewlines = fals
   const s = keepNewlines
     ? v.replace(/\r\n?/g, "\n").split("\n").map((l) => l.replace(/[^\S\n]+/g, " ").trim()).join("\n").replace(/\n{3,}/g, "\n\n").trim()
     : v.replace(/\s+/g, " ").trim();
-  return s ? s.slice(0, max) : undefined;
+  const capped = s.slice(0, max).trim(); // trim after the cap so cleaning is idempotent
+  return capped || undefined;
 }
 function cleanNum(v: number | null | undefined): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;

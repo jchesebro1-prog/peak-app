@@ -86,6 +86,31 @@ function tierKeys(p: CatalogMatchPart): Record<CatalogMatchBy, string[]> {
 }
 const TIERS: CatalogMatchBy[] = ["model", "partNumber", "sku", "formerSku"];
 
+/** Key → parts, per tier, for the exact and the loose key. Built once per read (the catalog is tens of thousands
+ *  of parts and a read can have 300 lines); a part appears at most once per key, in catalog order. */
+export type CatalogIndex = Record<"exact" | "loose", Record<CatalogMatchBy, Map<string, CatalogMatchPart[]>>>;
+export function buildCatalogIndex(parts: readonly CatalogMatchPart[]): CatalogIndex {
+  const mk = () => ({ model: new Map(), partNumber: new Map(), sku: new Map(), formerSku: new Map() }) as Record<CatalogMatchBy, Map<string, CatalogMatchPart[]>>;
+  const idx: CatalogIndex = { exact: mk(), loose: mk() };
+  const add = (m: Map<string, CatalogMatchPart[]>, key: string, p: CatalogMatchPart) => {
+    if (!key) return;
+    const list = m.get(key);
+    if (!list) m.set(key, [p]);
+    else if (list[list.length - 1] !== p) list.push(p);
+  };
+  for (const p of parts) {
+    const keys = tierKeys(p);
+    for (const tier of TIERS) {
+      for (const v of keys[tier]) {
+        const e = exactKey(v);
+        add(idx.exact[tier], e, p);
+        add(idx.loose[tier], looseKey(e), p);
+      }
+    }
+  }
+  return idx;
+}
+
 /** Match a printed part number to the catalog. Keys: exact = NFKC, trim, uppercase, collapse whitespace;
  *  loose = exact with every non-[A-Z0-9] removed (used only when the loose key is ≥ 4 chars).
  *  Part numbers under 3 characters never match.
@@ -95,19 +120,20 @@ const TIERS: CatalogMatchBy[] = ["model", "partNumber", "sku", "formerSku"];
  *    3 sku:        part.sku, or orderNumberOf(part.sku) (the text after the first colon)
  *    4 formerSku:  any of part.formerSkus, or orderNumberOf(former)
  *  Several parts in the winning tier: keep those whose normalized mfr equals normalizeCompanyName(vendorHint);
- *  exactly one → match; otherwise ambiguous (count). `model` is partModel(part). */
-export function catalogMatch(partNumber: string | undefined, parts: readonly CatalogMatchPart[], vendorHint?: string): CatalogMatch {
+ *  exactly one → match; otherwise ambiguous (count). `model` is partModel(part).
+ *  Pass a prebuilt `buildCatalogIndex(parts)` when matching many lines against one catalog. */
+export function catalogMatch(partNumber: string | undefined, parts: readonly CatalogMatchPart[] | CatalogIndex, vendorHint?: string): CatalogMatch {
   const exact = exactKey(partNumber);
   if (exact.length < 3) return null;
   const loose = looseKey(exact);
-  const keyed = parts.map((p) => ({ p, keys: tierKeys(p) }));
-  const attempts: Array<{ key: string; norm: (k: string) => string }> = [{ key: exact, norm: exactKey }];
-  if (loose.length >= 4) attempts.push({ key: loose, norm: (k) => looseKey(exactKey(k)) });
+  const idx = Array.isArray(parts) ? buildCatalogIndex(parts as readonly CatalogMatchPart[]) : (parts as CatalogIndex);
+  const attempts: Array<{ kind: "exact" | "loose"; key: string }> = [{ kind: "exact", key: exact }];
+  if (loose.length >= 4) attempts.push({ kind: "loose", key: loose });
   const hint = vendorHint ? normalizeCompanyName(vendorHint) : "";
   for (const a of attempts) {
     for (const tier of TIERS) {
-      const hits = keyed.filter((k) => k.keys[tier].some((v) => v.trim() && a.norm(v) === a.key)).map((k) => k.p);
-      if (hits.length === 0) continue;
+      const hits = idx[a.kind][tier].get(a.key);
+      if (!hits || hits.length === 0) continue;
       let pick = hits;
       if (hits.length > 1 && hint) {
         const narrowed = hits.filter((p) => normalizeCompanyName(p.mfr) === hint);
@@ -146,8 +172,8 @@ export function vendorCompanyMatch(vendor: string | undefined, companies: readon
 }
 
 export type FreightRule = { tick: boolean; why: "excluded-words" | "freight-in-total" | "included-words" | "none" };
-const FREIGHT_NEG = /freight\s+(not\s+included|extra|additional|to be (added|billed)|tbd|billed separately|collect)|plus freight|\+\s*freight|f\.?o\.?b\.?\s+(origin|shipping point|factory|our dock)|prepay(\s+and|\s*&)\s*add|ppd\s*(&|and)\s*add/i;
-const FREIGHT_POS = /freight\s+(included|incl\.?|allowed)|prepaid\s+(and|&)\s+allowed|ppd\s*(&|and)\s*allowed|f\.?o\.?b\.?\s+(destination|jobsite|job site)|free (freight|shipping)|delivered price/i;
+const FREIGHT_NEG = /freight\s+(not\s+included|extra|additional|to be (added|billed)|tbd|billed separately|collect)|plus freight|\+\s*freight|f\.?o\.?b\.?[:\s]+(origin|shipping point|factory|our dock)|prepa(?:y|id)(?:\s+and|\s*&)\s*add(?:ed)?|ppd\s*(?:&|and)\s*add(?:ed)?|\bpp\s*&\s*a\b/i;
+const FREIGHT_POS = /freight\s+(included|incl\.?|allowed)|prepaid\s+(and|&)\s+allowed|ppd\s*(&|and)\s*allowed|f\.?o\.?b\.?[:\s]+(destination|jobsite|job site)|free (freight|shipping)|delivered price/i;
 /** Text = paymentTerms + notes + leadTime + shipFrom. In order:
  *  1. NEG words → no tick (excluded-words; wins).
  *  2. freight > 0 and the total carries it (sumCheck ok, or no total) → tick (freight-in-total).
@@ -164,11 +190,12 @@ export function includesFreightRule(x: VendorPdfExtraction): FreightRule {
 export type VendorPdfLineCheck = { math: LineMath; derivedAmount: boolean; catalog: CatalogMatch };
 export type VendorPdfChecks = { lines: VendorPdfLineCheck[]; sum: SumCheck; vendor: VendorMatch; freight: FreightRule; mathFlags: number };
 export function vendorPdfChecks(x: VendorPdfExtraction, ctx: { parts: readonly CatalogMatchPart[]; companies: readonly VendorCompanyLike[] }): VendorPdfChecks {
+  const index = buildCatalogIndex(ctx.parts);
   return {
     lines: (x.lines ?? []).map((l, i) => ({
       math: lineMath(l),
       derivedAmount: filledLine(l, i).derivedAmount,
-      catalog: catalogMatch(l.mfrPartNumber, ctx.parts, x.vendor),
+      catalog: catalogMatch(l.mfrPartNumber, index, x.vendor),
     })),
     sum: sumCheck(x),
     vendor: vendorCompanyMatch(x.vendor, ctx.companies),
@@ -207,8 +234,10 @@ export function checkNotes(c: VendorPdfChecks, x: VendorPdfExtraction, form: { v
   }
   if (c.sum.status === "excludes-extras") warn.push("The PDF total leaves out freight / tax.");
   if (x.vendor) {
-    const formDiffers = form.vendor.trim() !== "" && normalizeCompanyName(form.vendor) !== normalizeCompanyName(x.vendor);
-    if (formDiffers) warn.push(`The PDF reads “${x.vendor}” — the form has “${form.vendor.trim()}”.`);
+    const nameDiffers = form.vendor.trim() !== "" && normalizeCompanyName(form.vendor) !== normalizeCompanyName(x.vendor);
+    // The form already links a different company than the one the PDF's name matches.
+    const idDiffers = form.vendorCompanyId !== null && c.vendor.status === "one" && form.vendorCompanyId !== c.vendor.companyId;
+    if (nameDiffers || idDiffers) warn.push(`The PDF reads “${x.vendor}” — the form has “${form.vendor.trim() || "another vendor"}”.`);
     else if (c.vendor.status === "many") warn.push(`The PDF reads “${x.vendor}” — matches ${c.vendor.count} vendor companies — pick one.`);
     else if (c.vendor.status === "one") info.push(`The PDF reads “${x.vendor}” — linked to ${c.vendor.name}.`);
   }

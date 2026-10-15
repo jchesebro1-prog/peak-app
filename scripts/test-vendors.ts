@@ -20,8 +20,9 @@ import {
   VENDOR_PDF_MAX_FILE_BYTES, VENDOR_PDF_MAX_REQUEST_BYTES,
 } from "../src/lib/vendor-pdf/extraction";
 import type { VendorPdfExtraction, VendorPdfWireOut } from "../src/lib/vendor-pdf/extraction";
+import type { CatalogMatchPart } from "../src/lib/vendor-pdf/checks";
 import {
-  lineMath, filledLine, sumCheck, catalogMatch, normalizeCompanyName, vendorCompanyMatch, includesFreightRule, vendorPdfChecks, mathFlagCount, checkNotes,
+  lineMath, filledLine, sumCheck, catalogMatch, buildCatalogIndex, normalizeCompanyName, vendorCompanyMatch, includesFreightRule, vendorPdfChecks, mathFlagCount, checkNotes,
 } from "../src/lib/vendor-pdf/checks";
 import { readFileSync } from "node:fs";
 import { fileThreadTo, vendorThreadsFor, loadVendorsPanel } from "../src/lib/vendor-quotes/threads-server";
@@ -331,19 +332,25 @@ export async function vendorDbChecks(ok: Ok) {
   }
 }
 
+// Loose view of a JSON Schema document, enough to assert on its shape.
+type JsonObj = {
+  additionalProperties?: boolean; items?: unknown; required: string[];
+  properties: { lines: { items: { additionalProperties?: boolean; required?: string[] } }; vendor: { anyOf?: Array<{ type?: string }> }; total: { anyOf?: Array<{ type?: string }> } };
+};
+
 /** #348 slice 5 — Read the PDF: schema, cleaning, prompt and every deterministic check (pure). */
 export async function vendorPdfPureChecks(ok: Ok) {
   // Schema → JSON Schema (structured outputs reject length / range keywords).
-  const js = toJsonSchema(VendorPdfWire) as any;
+  const js = toJsonSchema(VendorPdfWire) as JsonObj;
   const wireKeys = ["vendor", "quoteNumber", "quoteDate", "validUntil", "leadTime", "shipFrom", "lines", "freight", "tax", "total", "paymentTerms", "notes"];
   const lineKeys = ["description", "mfrPartNumber", "qty", "unit", "unitPrice", "amount"];
   ok(js.additionalProperties === false && js.items === undefined, "vendor-pdf: wire root is closed");
   ok(js.properties?.lines?.items?.additionalProperties === false, "vendor-pdf: wire line items are closed");
   ok(wireKeys.every((k) => js.required?.includes(k)) && js.required.length === 12, "vendor-pdf: wire requires all 12 keys");
-  ok(lineKeys.every((k) => js.properties.lines.items.required?.includes(k)) && js.properties.lines.items.required.length === 6, "vendor-pdf: wire line requires all 6 keys");
+  ok(lineKeys.every((k) => js.properties.lines.items.required?.includes(k)) && js.properties.lines.items.required?.length === 6, "vendor-pdf: wire line requires all 6 keys");
   const jsText = JSON.stringify(js);
   ok(!/maxLength|minLength|"minimum"|"maximum"|maxItems/.test(jsText), "vendor-pdf: wire schema has no length / range keywords");
-  ok(js.properties.vendor.anyOf?.some((a: any) => a.type === "null") && js.properties.total.anyOf?.some((a: any) => a.type === "null"), "vendor-pdf: nullable fields emit anyOf with null");
+  ok(!!js.properties.vendor.anyOf?.some((a) => a.type === "null") && !!js.properties.total.anyOf?.some((a) => a.type === "null"), "vendor-pdf: nullable fields emit anyOf with null");
 
   // cleanExtraction.
   const wire = (o: Partial<VendorPdfWireOut> = {}): VendorPdfWireOut => ({
@@ -360,6 +367,12 @@ export async function vendorPdfPureChecks(ok: Ok) {
   ok(c1.notes === "FOB origin\n\nNo returns ok", "vendor-pdf: notes keep newlines (collapsed to one blank line)");
   ok(c1.lines?.length === 2 && c1.lines[0].description?.length === 200 && !("unitPrice" in c1.lines[0]) && c1.lines[1].mfrPartNumber === "AB-1", "vendor-pdf: clean caps description at 200, drops NaN and all-null lines");
   ok(VendorPdfExtractionSchema.safeParse(c1).success, "vendor-pdf: cleaned extraction passes the stored schema");
+  const spaceCap = cleanExtraction(wire({ vendor: "V", notes: `${"n".repeat(1999)} tail`, lines: [wl({ description: `${"d".repeat(199)} tail`, mfrPartNumber: `${"p".repeat(79)} tail` })] }));
+  ok(!/\s$/.test(spaceCap.lines![0].description!) && !/\s$/.test(spaceCap.lines![0].mfrPartNumber!) && !/\s$/.test(spaceCap.notes!), "vendor-pdf: clean trims after the cap");
+  const reWire = (e: VendorPdfExtraction): VendorPdfWireOut => wire({
+    ...e, vendor: e.vendor ?? null, lines: (e.lines ?? []).map((l) => wl(l)), notes: e.notes ?? null, freight: e.freight ?? null, tax: e.tax ?? null, total: e.total ?? null,
+  });
+  ok(JSON.stringify(cleanExtraction(reWire(spaceCap))) === JSON.stringify(spaceCap) && JSON.stringify(cleanExtraction(reWire(c1))) === JSON.stringify(c1), "vendor-pdf: cleanExtraction is idempotent (capped at a space)");
   const many = cleanExtraction(wire({ lines: Array.from({ length: 400 }, (_, i) => wl({ description: `L${i}`, amount: i })) }));
   ok(many.lines?.length === VENDOR_PDF_LINES_MAX && VendorPdfExtractionSchema.safeParse(many).success, "vendor-pdf: 400 lines become 300");
   const empty = cleanExtraction(wire());
@@ -424,7 +437,8 @@ export async function vendorPdfPureChecks(ok: Ok) {
   ok(m4?.kind === "match" && m4.by === "formerSku" && m4.sku === "Lex:OLD", "vendor-pdf: former SKU order number matches by formerSku");
   const m4b = catalogMatch("lex:77-1234", parts);
   ok(m4b?.kind === "match" && m4b.by === "formerSku", "vendor-pdf: former SKU matches whole");
-  ok(catalogMatch("jupiter  4", parts)?.kind === "match", "vendor-pdf: exact key collapses whitespace and case");
+  const mj = catalogMatch("jupiter  4", parts);
+  ok(mj?.kind === "match" && mj.by === "model" && mj.sku === "Symetrix:80-0043", "vendor-pdf: exact key collapses whitespace and case");
   const m5 = catalogMatch("JUPITER-4", parts);
   ok(m5?.kind === "match" && m5.by === "model" && m5.sku === "Symetrix:80-0043", "vendor-pdf: loose key matches in pass 2");
   ok(catalogMatch("EA", parts) === null && catalogMatch("12", [P("12", { mfr: "X" })]) === null && catalogMatch(undefined, parts) === null && catalogMatch("  ", parts) === null, "vendor-pdf: short / blank part numbers never match");
@@ -436,6 +450,43 @@ export async function vendorPdfPureChecks(ok: Ok) {
   const hint = catalogMatch("FX-100", dup, "The Beta, Inc.");
   ok(hint?.kind === "match" && hint.sku === "B:X1", "vendor-pdf: vendor hint narrows to one mfr");
   ok(catalogMatch("FX-100", dup, "Gamma")?.kind === "ambiguous", "vendor-pdf: a hint that narrows to none stays ambiguous");
+
+  // One prebuilt index gives the same answers as matching each line against the raw parts.
+  const idx = buildCatalogIndex([...parts, ...dup, P("x:1", { mfr: "Q", manufacturerPartNumber: "A-1" })]);
+  const allParts: CatalogMatchPart[] = [...parts, ...dup, P("x:1", { mfr: "Q", manufacturerPartNumber: "A-1" })];
+  // The straightforward per-line scan the index replaced (keys rebuilt for every part on every call).
+  const naive = (pn: string, ps: CatalogMatchPart[], hint = "") => {
+    const ex = (v: unknown) => String(v ?? "").normalize("NFKC").trim().toUpperCase().replace(/\s+/g, " ");
+    const lo = (v: string) => v.replace(/[^A-Z0-9]/g, "");
+    const key = ex(pn);
+    if (key.length < 3) return null;
+    const order = (sku: string) => { const i = sku.indexOf(":"); return (i >= 0 ? sku.slice(i + 1).trim() : "") || sku; };
+    const tiers: Array<[string, (p: CatalogMatchPart) => string[]]> = [
+      ["model", (p) => [p.manufacturerModelNumber ?? ""]], ["partNumber", (p) => [p.manufacturerPartNumber ?? ""]],
+      ["sku", (p) => [p.sku, order(p.sku)]], ["formerSku", (p) => (p.formerSkus ?? []).flatMap((f) => [f, order(f)])],
+    ];
+    const passes: Array<(v: string) => string> = [ex, (v) => lo(ex(v))];
+    for (const [pi, norm] of passes.entries()) {
+      const want = pi === 0 ? key : lo(key);
+      if (pi === 1 && want.length < 4) break;
+      for (const [by, keys] of tiers) {
+        const hits = ps.filter((p) => keys(p).some((v) => v.trim() && norm(v) === want));
+        if (!hits.length) continue;
+        const narrowed = hint ? hits.filter((p) => normalizeCompanyName(p.mfr) === normalizeCompanyName(hint)) : [];
+        const one = hits.length === 1 ? hits : narrowed.length === 1 ? narrowed : null;
+        return one ? { kind: "match", sku: one[0].sku, by } : { kind: "ambiguous", count: hits.length, by };
+      }
+    }
+    return null;
+  };
+  const slim = (m: ReturnType<typeof catalogMatch>) => (m === null ? null : m.kind === "match" ? { kind: m.kind, sku: m.sku, by: m.by } : m);
+  const probes = ["Jupiter 4", "jupiter  4", "JUPITER-4", "80-0043", "WID-77", "wid77", "msc-100", "77-1234", "lex:77-1234", "FX-100", "fx 100", "A-1", "EA", "12", "", "nope-999", "Dimmer 12", "DIMMER12"];
+  ok(probes.every((q) => JSON.stringify(catalogMatch(q, idx, "Beta")) === JSON.stringify(catalogMatch(q, allParts, "Beta"))), "vendor-pdf: a prebuilt index matches like the raw parts");
+  ok(probes.every((q) => JSON.stringify(slim(catalogMatch(q, idx, "Beta"))) === JSON.stringify(naive(q, allParts, "Beta")) && JSON.stringify(slim(catalogMatch(q, idx))) === JSON.stringify(naive(q, allParts))), "vendor-pdf: the index gives the old per-line scan's answers");
+  const manyLines = Array.from({ length: 300 }, (_, i) => ({ mfrPartNumber: i % 3 === 0 ? "WID-77" : i % 3 === 1 ? "Jupiter 4" : `ZZZ-${i}` }));
+  const viaChecks = vendorPdfChecks({ lines: manyLines }, { parts: allParts, companies: [] });
+  ok(viaChecks.lines.every((l, i) => JSON.stringify(l.catalog) === JSON.stringify(catalogMatch(manyLines[i].mfrPartNumber, allParts))), "vendor-pdf: 300 lines through vendorPdfChecks match line by line");
+  ok(buildCatalogIndex([P("Q:ABCD", { manufacturerPartNumber: "ABCD", manufacturerModelNumber: "ABCD" })]).exact.sku.get("ABCD")?.length === 1, "vendor-pdf: a part is listed once per key");
 
   // Vendor companies.
   ok(normalizeCompanyName("The Rose Brand, Inc.") === "rose brand", "vendor-pdf: normalize strips the, punctuation, Inc.");
@@ -462,7 +513,14 @@ export async function vendorPdfPureChecks(ok: Ok) {
   ok(fr({ paymentTerms: "Net 30", shipFrom: "Free shipping on orders" }).tick, "vendor-pdf: free shipping ticks (text spans fields)");
   ok(!fr({ notes: "Freight not included" }).tick && !fr({ leadTime: "Plus freight" }).tick && !fr({ notes: "PPD & add" }).tick, "vendor-pdf: more excluded wordings");
   ok(!fr({}).tick && fr({}).why === "none", "vendor-pdf: nothing printed is none");
-  ok(fr({ notes: "FOB Destination" }).why === "included-words", "vendor-pdf: FOB destination ticks");
+  ok(fr({ notes: "FOB Destination" }).why === "included-words" && fr({ notes: "FOB: Destination" }).why === "included-words", "vendor-pdf: FOB destination ticks");
+  ok(fr({ notes: "Freight prepaid and allowed" }).tick && fr({ notes: "Freight prepaid & allowed" }).tick, "vendor-pdf: prepaid and allowed still ticks");
+  // Each excluded wording ALONE (no "FOB origin" alongside), with freight in an ok total — the words win.
+  for (const phrase of ["Freight prepaid and added", "Freight prepaid & added", "prepaid & add", "Prepay and add", "prepay & add", "PP&A", "PP & A", "PPD & add", "ppd and added", "FOB: Origin", "F.O.B. origin", "FOB shipping point", "Freight extra"]) {
+    const r = fr({ freight: 250, total: 350, notes: phrase });
+    ok(!r.tick && r.why === "excluded-words", `vendor-pdf: "${phrase}" excludes freight`);
+  }
+  ok(fr({ notes: "Shipping app & accessories" }).why === "none", "vendor-pdf: PP&A needs the whole token");
 
   // Aggregate + notes.
   const x: VendorPdfExtraction = {
@@ -489,6 +547,12 @@ export async function vendorPdfPureChecks(ok: Ok) {
   ok(texts.includes("Amounts computed from qty × unit price on lines 2, 5."), "vendor-pdf: checkNotes derived lines");
   const firstInfo = notes.findIndex((n) => n.tone === "info");
   ok(firstInfo > 0 && notes.slice(0, firstInfo).every((n) => n.tone === "warn") && notes.slice(firstInfo).every((n) => n.tone === "info") || notes.every((n) => n.tone === "warn"), "vendor-pdf: warnings come first");
+  const linkedSame = checkNotes(checks, x, { vendor: "Rose Brand", vendorCompanyId: "c1" }).map((n) => n.text);
+  ok(linkedSame.includes("The PDF reads “Rose Brand Inc.” — linked to Rose Brand."), "vendor-pdf: checkNotes linked when the form's company id equals the match");
+  const linkedOther = checkNotes(checks, x, { vendor: "", vendorCompanyId: "c3" }).map((n) => n.text);
+  ok(linkedOther.includes("The PDF reads “Rose Brand Inc.” — the form has “another vendor”.") && !linkedOther.some((t) => t.includes("linked to")), "vendor-pdf: checkNotes warns when the form's company id differs from the match");
+  const idWarn = checkNotes(checks, x, { vendor: "Rose Brand", vendorCompanyId: "c3" });
+  ok(idWarn.some((n) => n.tone === "warn" && n.text === "The PDF reads “Rose Brand Inc.” — the form has “Rose Brand”."), "vendor-pdf: checkNotes id-differs warning is a warn");
   const nDiff = checkNotes(checks, x, { vendor: "Other Co", vendorCompanyId: "c3" }).map((n) => n.text);
   ok(nDiff.includes("The PDF reads “Rose Brand Inc.” — the form has “Other Co”."), "vendor-pdf: checkNotes form vendor differs");
   const manyChecks = vendorPdfChecks({ vendor: "Rose Brand" }, { parts: [], companies: [...cos, { id: "c4", name: "Rose Brand Inc", type: "vendor" }] });
@@ -501,9 +565,8 @@ export async function vendorPdfPureChecks(ok: Ok) {
   ok(checkNotes(vendorPdfChecks({}, { parts: [], companies: [] }), {}, { vendor: "", vendorCompanyId: null }).length === 0, "vendor-pdf: an empty extraction has no notes");
 
   // Boundary: pure, browser-safe.
-  const { readFileSync: rf } = await import("node:fs");
   for (const f of ["extraction.ts", "checks.ts"]) {
-    const src = rf(new URL(`../src/lib/vendor-pdf/${f}`, import.meta.url), "utf8");
+    const src = readFileSync(new URL(`../src/lib/vendor-pdf/${f}`, import.meta.url), "utf8");
     ok(!/from\s+["'](node:|@\/db|@\/lib\/stores)|-server["']/.test(src), `vendor-pdf: ${f} imports nothing server-side`);
   }
 }
