@@ -56493,10 +56493,10 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   ok(p3ui.canCompose("draft") && p3ui.canCompose("sent") && !p3ui.canCompose("won") && !p3ui.canCompose("lost"), "#P3 send UI: won/lost can't compose");
 
   const L = (st: "draft" | "sent" | "won" | "lost", pipe = true) => p3ui.sendStepLayout(st, pipe).join(",");
-  ok(L("draft") === "composer,status,pipeline,clientLink,tasks", "#P3 send UI: draft — composer first, then Status, Pipeline, Client link (+ responses), Tasks");
-  ok(L("sent") === "activity,composer,clientLink,tasks,pipeline,status", "#P3 send UI: sent — Activity first, then the re-send composer, Client link, Tasks, Pipeline, Status");
-  ok(L("won") === "activity,clientLink,tasks,pipeline,status" && L("lost") === L("won"), "#P3 send UI: won/lost — Activity first, no composer");
-  ok(L("draft", false) === "composer,status,clientLink,tasks" && !L("sent", false).includes("pipeline"), "#P3 send UI: no Pipeline card when the stage bar doesn't apply");
+  ok(L("draft") === "composer,bidders,status,pipeline,clientLink,tasks", "#P3 send UI: draft — composer first, then Status, Pipeline, Client link (+ responses), Tasks");
+  ok(L("sent") === "activity,bidders,composer,clientLink,tasks,pipeline,status", "#P3 send UI: sent — Activity first, then the re-send composer, Client link, Tasks, Pipeline, Status");
+  ok(L("won") === "activity,bidders,clientLink,tasks,pipeline,status" && L("lost") === L("won"), "#P3 send UI: won/lost — Activity first, no composer");
+  ok(L("draft", false) === "composer,bidders,status,clientLink,tasks" && !L("sent", false).includes("pipeline"), "#P3 send UI: no Pipeline card when the stage bar doesn't apply");
 
   const mGmail = p3ui.sendResultMessage({ ok: true, delivery: "gmail", status: "sent", next: null });
   const mLocal = p3ui.sendResultMessage({ ok: true, delivery: "local", status: "sent", warning: "Sent — but the follow-up task couldn’t be created. Add it by hand." });
@@ -56540,7 +56540,7 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   ok(comp.includes("{primaryLabel(status)}") && comp.includes("{SEND_UI_COPY.linkHint}") && comp.includes("SEND_UI_COPY.from(gmail.from) : SEND_UI_COPY.gmailOff") && comp.includes("FOLLOW_UP_OPTIONS.map("),
     "#P3 send UI: composer shows the primary label, the {link} hint, the Gmail line and the follow-up select");
   ok(comp.includes("{SEND_UI_COPY.sendAnother}") && comp.includes("useState(!collapsible)") && comp.includes("setOpen(false);"), "#P3 send UI: the re-send composer collapses to Send another email");
-  ok(step.includes("sendStepLayout(status, showStageBar).map((k) => cards[k])") && step.includes("collapsible={status !== \"draft\"}") && ['key="composer"', 'key="activity"', 'key="status"', 'key="pipeline"', 'key="clientLink"', 'key="tasks"'].every((k) => step.includes(k)),
+  ok(step.includes("sendStepLayout(status, showStageBar).map((k) => cards[k])") && step.includes("collapsible={status !== \"draft\"}") && ['key="composer"', 'key="activity"', 'key="bidders"', 'key="status"', 'key="pipeline"', 'key="clientLink"', 'key="tasks"'].every((k) => step.includes(k)),
     "#P3 send UI: the step renders its cards as one keyed list ordered by status");
   ok(step.includes("id={SEND_STEP_IDS.status}") && step.includes("id={SEND_STEP_IDS.statusSelect}") && step.includes("id={SEND_STEP_IDS.clientLink}"), "#P3 send UI: the hatches' targets carry their ids");
   ok(step.includes("<SendActivity quoteId={loadedId} refreshKey={trackKey} onTrack={setTrackSummary} />") && step.includes("onSent={() => setTrackKey((k) => k + 1)}"), "#P3 send UI: a send refreshes Activity; Activity reports to the hook");

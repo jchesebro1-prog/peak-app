@@ -13,6 +13,7 @@ import { PackageStaffPanel } from "../package-staff-panel";
 import { CHEVRON_CLIP, DARK_SELECT, STATUS_DOT } from "../estimator-styles";
 import type { EstimatorState } from "../use-estimator-state";
 import { SendActivity } from "./send-activity";
+import { BiddersCard } from "./bidders-card";
 import { SendComposer } from "./send-composer";
 import { BonusCard } from "./bonus-card";
 import { alternateChoices, liveEstimatorBonus } from "@/lib/estimate-bonus/card";
@@ -83,6 +84,11 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
         ) : (
           <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate first.</div>
         )}
+      </section>
+    ),
+    bidders: (
+      <section key="bidders" aria-label="Bidders" style={CARD}>
+        {loadedId ? <BiddersCard quoteId={loadedId} refreshKey={trackKey} /> : <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate first.</div>}
       </section>
     ),
     status: (

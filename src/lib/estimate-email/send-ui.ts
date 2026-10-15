@@ -98,7 +98,7 @@ export function canCompose(status: QuoteStatus): boolean {
   return status === "draft" || status === "sent";
 }
 
-export type SendCard = "composer" | "activity" | "status" | "pipeline" | "clientLink" | "tasks";
+export type SendCard = "composer" | "activity" | "bidders" | "status" | "pipeline" | "clientLink" | "tasks";
 
 /**
  * Card order per status (spec §10.3–10.4): before the first send the composer
@@ -108,10 +108,10 @@ export type SendCard = "composer" | "activity" | "status" | "pipeline" | "client
 export function sendStepLayout(status: QuoteStatus, showPipeline: boolean): SendCard[] {
   const order: SendCard[] =
     status === "draft"
-      ? ["composer", "status", "pipeline", "clientLink", "tasks"]
+      ? ["composer", "bidders", "status", "pipeline", "clientLink", "tasks"]
       : status === "sent"
-        ? ["activity", "composer", "clientLink", "tasks", "pipeline", "status"]
-        : ["activity", "clientLink", "tasks", "pipeline", "status"];
+        ? ["activity", "bidders", "composer", "clientLink", "tasks", "pipeline", "status"]
+        : ["activity", "bidders", "clientLink", "tasks", "pipeline", "status"];
   return showPipeline ? order : order.filter((c) => c !== "pipeline");
 }
 
