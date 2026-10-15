@@ -29,17 +29,19 @@ export function portalBidDueAt(q: Pick<Quote, "bid">, rev: Pick<QuoteRevision, "
   return typeof dueAt === "number" && Number.isFinite(dueAt) ? dueAt : null;
 }
 
-/** The sent revisions this party may see, oldest first: rev === revSent (reason "sent"), plus sent revisions frozen
- *  with docFields.awardedPartyId === party.id. Empty when revSent is null / not a safe integer / not a SENT revision. */
+/** The sent revisions this party may see, oldest first (Jeff: the latest revision "sent OR addressed to them"):
+ *  - via "sent": rev === revSent, which must be a safe integer pointing at a SENT revision (otherwise no "sent" candidate);
+ *  - via "award": any sent revision frozen with docFields.awardedPartyId === party.id. These count on their own,
+ *    even when revSent is null, and they survive Undo award (the revision stays addressed to that party).
+ *  Whether the ROW may see anything at all (result, award match) is portalBidState's call, not this function's. */
 export function portalBidCandidates(q: Pick<Quote, "revisions">, row: PortalBidRow): Candidate[] {
   const revSent = row.bid?.revSent;
-  if (typeof revSent !== "number" || !Number.isSafeInteger(revSent)) return [];
   const revs = Array.isArray(q.revisions) ? q.revisions : [];
-  if (!revs.some((r) => r && r.reason === "sent" && r.rev === revSent)) return [];
+  const sentOk = typeof revSent === "number" && Number.isSafeInteger(revSent) && revs.some((r) => r && r.reason === "sent" && r.rev === revSent);
   const out: Candidate[] = [];
   for (const r of revs) {
     if (!r || r.reason !== "sent") continue;
-    if (r.rev === revSent) out.push({ rev: r, via: "sent" });
+    if (sentOk && r.rev === revSent) out.push({ rev: r, via: "sent" });
     else if (r.docFields?.awardedPartyId === row.id) out.push({ rev: r, via: "award" });
   }
   return out;

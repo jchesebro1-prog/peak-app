@@ -1271,7 +1271,7 @@ export function portalBidPureChecks(ok: Ok) {
   ok(st(mk(), "CA", [row("A", "CA", "gc", { revSent: 1.5 })]).kind === "unavailable", "portal-bid: a non-integer revSent is unavailable");
   ok(st(mk(), "CA", [row("A", "CA", "gc", { revSent: 999 })]).kind === "unavailable", "portal-bid: an unknown revSent is unavailable");
   ok(st(mk(), "CA", [row("A", "CA", "gc", null)]).kind === "unavailable", "portal-bid: a row without bid state is unavailable");
-  ok(portalBidCandidates(mk(), row("A", "CA", "gc", { revSent: null })).length === 0, "portal-bid: no candidates without a delivered revision");
+  ok(portalBidCandidates(mk(), row("A", "CA", "gc", { revSent: null })).length === 0, "portal-bid: no candidates without a delivered revision or a frozen one");
   // Never a later unsent revision.
   ok(s.kind === "ok" && s.bid.rev.rev !== 3, "portal-bid: never a later revision sent to others");
   // Excluded results.
@@ -1282,6 +1282,17 @@ export function portalBidPureChecks(ok: Ok) {
   ok(st(awarded, "CB", [B]).kind === "unavailable", "portal-bid: a stale pending row on an awarded bid is unavailable");
   s = st(awarded, "CA", [row("A", "CA", "gc", { result: "awarded" })]);
   ok(s.kind === "ok" && s.bid.rev.rev === 4 && s.bid.via === "award" && s.bid.result === "awarded" && s.bid.dueAt === T + 1, "portal-bid: the awarded bidder sees the revision frozen to it, with that revision's due date");
+  // An award candidate counts on its own: no delivered copy needed.
+  s = st(awarded, "CA", [row("A", "CA", "gc", { result: "awarded", revSent: null })]);
+  ok(s.kind === "ok" && s.bid.rev.rev === 4 && s.bid.via === "award", "portal-bid: an awarded row with revSent null sees the revision frozen to it");
+  ok(st(mk(), "CA", [row("A", "CA", "gc", { revSent: null })]).kind === "unavailable", "portal-bid: a pending row with revSent null and nothing frozen to it is unavailable");
+  ok(st(awarded, "CB", [row("B", "CB", "gc", { revSent: null })]).kind === "unavailable", "portal-bid: a pending row with revSent null on a quote awarded to someone else is unavailable");
+  s = st(awarded, "CA", [row("A", "CA", "gc", { revSent: 999, result: "awarded" })]);
+  ok(s.kind === "ok" && s.bid.rev.rev === 4 && s.bid.via === "award", "portal-bid: a bad revSent still leaves the award candidate");
+  // After Undo award the revision frozen to A stays A's candidate (it is addressed to A).
+  const undone = mk({}, [rev(1, "sent"), rev(2, "manual"), rev(3, "sent"), r4]);
+  s = st(undone, "CA", [row("A", "CA", "gc", { result: "pending", revSent: 1 })]);
+  ok(s.kind === "ok" && s.bid.rev.rev === 4 && s.bid.via === "award" && s.bid.result === "pending", "portal-bid: after Undo award, a revision frozen to the bidder stays its candidate");
   const toB = mk({ bid: { dueAt: T, addenda: [], awardedPartyId: "A" } }, [rev(1, "sent"), rev(4, "sent", { docFields: { awardedPartyId: "B" } })]);
   ok(portalBidCandidates(toB, A).length === 1 && portalBidCandidates(toB, A)[0].rev.rev === 1, "portal-bid: a revision frozen to another bidder is never A's candidate");
   // Status.
@@ -1328,10 +1339,11 @@ export function portalBidPureChecks(ok: Ok) {
   ok(s.kind === "ok" && s.bid.partyId === "A", "portal-bid: equal revisions prefer the GC row");
   s = st(mk(), "CA", [row("E", "CA", "ec", { revSent: 1 }), A]);
   ok(s.kind === "ok" && s.bid.partyId === "A", "portal-bid: the GC preference does not depend on row order");
-  s = st(mk(), "CA", [A, row("E", "CA", "ec", { revSent: 3, result: "awarded" })]);
+  const awardedE = mk({ bid: { dueAt: T, addenda: [], awardedPartyId: "E" } });
+  s = st(awardedE, "CA", [A, row("E", "CA", "ec", { revSent: 3, result: "awarded" })]);
   ok(s.kind === "ok" && s.bid.partyId === "E" && s.bid.result === "awarded", "portal-bid: an awarded row beats a pending one");
-  s = st(mk(), "CA", [row("A", "CA", "gc", { result: "awarded", revSent: 1 }), E]);
-  ok(s.kind === "ok" && s.bid.partyId === "A", "portal-bid: awarded beats a later pending revision");
+  s = st(mk({ bid: { dueAt: T, addenda: [], awardedPartyId: "A" } }), "CA", [row("A", "CA", "gc", { result: "awarded", revSent: 1 }), E]);
+  ok(s.kind === "ok" && s.bid.partyId === "A" && s.bid.rev.rev === 1, "portal-bid: the awarded row beats a later pending revision on an awarded bid");
   // PDF source.
   {
     const p = portalBidPdfSource(mk(), "CA", [A]);
@@ -1361,7 +1373,7 @@ export function portalBidPureChecks(ok: Ok) {
     ok(portalBidChip("sent", { ...base, result: "pending", dueAt: null }) === "Bid submitted", "portal-bid: no due date reads Bid submitted");
     ok(portalBidChip("sent", { ...base, result: "awarded", dueAt: T }) === "Awarded" && portalBidChip("won", { ...base, result: "awarded", dueAt: T }) === "Awarded", "portal-bid: awarded chip");
     ok(portalBidChip("lost", { ...base, result: "pending", dueAt: T }) === "Closed", "portal-bid: lost reads Closed");
-    ok(!/lost|other bidder/i.test(JSON.stringify(PORTAL_BID_COPY)), "portal-bid: the copy never says lost or other bidder");
+    ok(!/lost|other bidder/i.test(JSON.stringify(PORTAL_BID_COPY)) && !/lost|other bidder/i.test(PORTAL_BID_COPY.cardSub("X")) && !/lost|other bidder/i.test(PORTAL_BID_COPY.due("X")), "portal-bid: the copy never says lost or other bidder (function strings included)");
   }
   // Due date.
   {
@@ -1373,8 +1385,8 @@ export function portalBidPureChecks(ok: Ok) {
   // Boundary.
   {
     const src = readFileSync(join(__dirname, "../src/lib/parties/portal-bid.ts"), "utf8");
-    const imports = src.split("\n").filter((l) => /^import /.test(l)).join("\n");
-    ok(!/import (?!type)[^;]*@\/lib\/stores/.test(imports) && !/@\/db|node:|-server/.test(imports), "portal-bid: no store value import, no db, node: or -server");
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    ok(!/import (?!type)[^;]*@\/lib\/stores/.test(code) && !/@\/db|node:|-server/.test(code), "portal-bid: no store value import, no db, node: or -server");
   }
 }
 
