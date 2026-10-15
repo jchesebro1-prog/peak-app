@@ -537,8 +537,8 @@ export function threadActor(a: { id?: unknown; name?: unknown } | null | undefin
  *  by its Gmail key or a unique legacy name, so its ownership no longer
  *  depends on the name. One compare-and-set key write (lands only while the
  *  key is still absent; never a whole-doc rewrite). Called from the write
- *  guards (ownThread, Organize's myThread, Assist's loadThreadFor) — never
- *  on a page render. Best-effort: a failure leaves the lazy fallback. */
+ *  guards (ownThread, Organize's myThread) — never on a page render or a
+ *  read-only loader. Best-effort: a failure leaves the lazy fallback. */
 export async function stampMailboxOwner(t: CommThread, me: MailboxViewer): Promise<void> {
   const how = mailboxOwnership(t, me);
   if (how !== "key" && how !== "name") return;

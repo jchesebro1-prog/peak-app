@@ -1,5 +1,5 @@
 /** #334 Assist — the one "may this user run Assist on this thread" read, shared by the Inbox actions and the estimate draft. */
-import { canSeeThread, get as getThread, stampMailboxOwner, visibleTo, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
+import { canSeeThread, get as getThread, visibleTo, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
 import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 type Me = { id: string; name: string } | MailboxViewer;
@@ -12,14 +12,14 @@ async function viewerOf(me: Me): Promise<MailboxViewer> {
 /** A live (not in Deleted) email thread in the user's own mailbox, else null.
  *  Every ACTION keeps this rule — drafting a reply (it sends from this
  *  mailbox), suggesting tasks, suggesting an estimate, the brief's drafts.
- *  #349 — by identity; a thread owned through its Gmail key or a unique
- *  legacy name is stamped with its owner on the way through. */
+ *  #349 — by identity. Read-only: it is also reached from the brief's
+ *  background draft queue, so the lazy owner stamp is left to the Inbox and
+ *  Organize write guards (ownThread, apply.ts myThread). */
 export async function loadThreadFor(threadId: string, me: Me): Promise<CommThread | null> {
   if (!me?.id) return null;
   const viewer = await viewerOf(me);
   const t = await getThread(String(threadId || ""));
   if (!t || t.deleted || !visibleTo(t, viewer) || t.channel !== "email") return null;
-  await stampMailboxOwner(t, viewer);
   return t;
 }
 
