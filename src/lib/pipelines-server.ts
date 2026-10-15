@@ -1,13 +1,27 @@
 import { getSettings, setSettings, updateSettings } from "@/lib/settings";
+import { inTransaction } from "@/db";
+import { isPreviewDeploy } from "@/lib/deploy-env";
 import { listDocs, type Doc } from "@/db/doc-store";
 import {
   resolvePipelines, resolveProjectStage, validateProjectPipeline, validateQuotePipeline, projectPipelineFor, quotePipelineFor, carriesPipeline,
   stageById, DEFAULT_PIPELINES, LEAD_QUALIFY_FIX, withLeadQualifyStage, type Pipelines, type ProjectPipeline, type QuotePipeline,
 } from "@/lib/pipelines";
 
+/**
+ * Whether this read may run the one-time Lead / Qualify ensure: not yet marked done, never from a preview deploy
+ * (previews share the production database — #353 review I2) and never inside the caller's transaction (#353 review
+ * M1: the ensure takes the settings row lock and commits on its own; inside a unit it would ride — or deadlock —
+ * the caller's transaction, and `outsideTransaction` can't be awaited there on one-connection PGlite). A skipped
+ * read uses the stored list as is; the next eligible read runs it.
+ */
+export function shouldEnsureLeadQualify(s: { pipelineFixes?: unknown }, ctx: { preview: boolean; inTransaction: boolean }): boolean {
+  if (ctx.preview || ctx.inTransaction) return false;
+  return !(Array.isArray(s.pipelineFixes) && s.pipelineFixes.includes(LEAD_QUALIFY_FIX));
+}
+
 export async function loadPipelines(): Promise<Pipelines> {
   let s = await getSettings();
-  if (!(Array.isArray(s.pipelineFixes) && s.pipelineFixes.includes(LEAD_QUALIFY_FIX))) {
+  if (shouldEnsureLeadQualify(s, { preview: isPreviewDeploy(), inTransaction: inTransaction() })) {
     try {
       await ensureLeadQualifyStage();
       s = await getSettings();

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { maybeRunAssessmentReminders } from "@/lib/assessments/reminders-server";
+import { isPreviewDeploy } from "@/lib/deploy-env";
 import { can } from "@/lib/team";
 import { VISIT_TYPES } from "@/lib/assessments/defs";
 import { listAssessments } from "@/lib/stores/assessments";
@@ -39,7 +40,8 @@ const fmtDate = (ms: number) => (ms ? new Date(ms).toLocaleDateString("en-US", {
 export default async function AssessmentsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const [user, sp] = await Promise.all([requireUser(), searchParams]);
   // Jeff 2026-10-15 #10 — the lazy reminder sweep (the daily drive cron is the main trigger); throttled per process.
-  after(maybeRunAssessmentReminders);
+  // #353 review I2: never from a preview deploy (previews share the production database).
+  if (!isPreviewDeploy()) after(maybeRunAssessmentReminders);
   const statusParam = one(sp.status);
   const status = (STATUSES as readonly string[]).includes(statusParam) ? statusParam : "";
   const customer = one(sp.customer);

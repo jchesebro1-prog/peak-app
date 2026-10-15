@@ -18,7 +18,9 @@ import { allForDirectory } from "../src/lib/stores/customers";
 import { listQuoteRows } from "../src/lib/stores/quotes";
 import { createFixture, dropFixtures, fixtureId } from "./test-fixtures";
 import { DEFAULT_QUOTE_PIPELINES, LEAD_QUALIFY_FIX, LEAD_QUALIFY_STAGE, withLeadQualifyStage, validateQuotePipeline, type QuotePipeline } from "../src/lib/pipelines";
-import { ensureLeadQualifyStage, loadPipelines } from "../src/lib/pipelines-server";
+import { ensureLeadQualifyStage, loadPipelines, shouldEnsureLeadQualify } from "../src/lib/pipelines-server";
+import { isPreviewDeploy } from "../src/lib/deploy-env";
+import { withTransaction } from "../src/db";
 import { getSettingsPatch, setSettings } from "../src/lib/settings";
 import { get as getQuote } from "../src/lib/stores/quotes";
 import { pickManualPhases } from "../src/lib/consulting-stages";
@@ -209,6 +211,16 @@ function pipelineChecks(ok: Ok) {
   const noCollect = withLeadQualifyStage([{ ...OLD_BID_SPEC, stages: OLD_BID_SPEC.stages.filter((s) => s.id !== "collect-info") }]);
   ok(noCollect?.[0].stages[0].id === LEAD_QUALIFY_STAGE.id, "b3 #42: with Collect Information gone it goes first");
   ok(/"lead \/ qualify": \{ stage: "lead-qualify" \}/.test(src("src/lib/daylite/history.ts")), "b3 #42: the Daylite import maps a \"Lead / Qualify\" stage label");
+  // #353 review I2 / M1
+  ok(!isPreviewDeploy({}) && !isPreviewDeploy({ VERCEL_ENV: "" }) && !isPreviewDeploy({ VERCEL_ENV: "production" }) && isPreviewDeploy({ VERCEL_ENV: "preview" }) && isPreviewDeploy({ VERCEL_ENV: "development" }),
+    "I2: isPreviewDeploy — any VERCEL_ENV other than production; unset (dev, tests) is not a preview");
+  const unmarked = { pipelineFixes: [] as string[] }, marked = { pipelineFixes: [LEAD_QUALIFY_FIX] };
+  ok(shouldEnsureLeadQualify(unmarked, { preview: false, inTransaction: false }) && !shouldEnsureLeadQualify(marked, { preview: false, inTransaction: false }) &&
+     !shouldEnsureLeadQualify(unmarked, { preview: true, inTransaction: false }) && !shouldEnsureLeadQualify(unmarked, { preview: false, inTransaction: true }),
+    "I2 / M1: the ensure runs only unmarked, never on a preview deploy, never inside the caller's transaction");
+  ok(/shouldEnsureLeadQualify\(s, \{ preview: isPreviewDeploy\(\), inTransaction: inTransaction\(\) \}\)/.test(src("src/lib/pipelines-server.ts")) &&
+     /if \(!isPreviewDeploy\(\)\) after\(maybeRunAssessmentReminders\)/.test(src("src/app/(app)/assessments/page.tsx")),
+    "I2 pin: loadPipelines and the Assessments page's lazy reminder sweep both ask isPreviewDeploy()");
 }
 
 async function pipelineDbChecks(ok: Ok) {
@@ -231,6 +243,13 @@ async function pipelineDbChecks(ok: Ok) {
     await setSettings({ quotePipelines: OLD_LIST });
     const loaded = await loadPipelines();
     ok(loaded.quote.find((p) => p.id === "bid-spec")!.stages.length === 4, "b3 #42 db: once marked, a later list without the stage is left alone (a deliberate delete sticks)");
+    // #353 review M1: inside a transaction the read never writes; the next read outside does.
+    await setSettings({ quotePipelines: OLD_LIST, pipelineFixes: undefined });
+    const inTx = await withTransaction(async () => loadPipelines());
+    const afterTx = await getSettingsPatch();
+    ok(inTx.quote.find((p) => p.id === "bid-spec")!.stages.length === 4 && !afterTx.pipelineFixes, "M1 db: loadPipelines inside a transaction skips the ensure (no write)");
+    const outTx = await loadPipelines();
+    ok(outTx.quote.find((p) => p.id === "bid-spec")!.stages[0].id === "lead-qualify" && ((await getSettingsPatch()).pipelineFixes as string[]).includes(LEAD_QUALIFY_FIX), "M1 db: the next read outside a transaction runs it");
     // A fresh environment (no stored list): loadPipelines marks it and reads the seeds.
     await setSettings({ quotePipelines: undefined, pipelineFixes: undefined });
     const fresh = await loadPipelines();
