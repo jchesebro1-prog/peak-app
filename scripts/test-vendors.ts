@@ -129,6 +129,18 @@ export async function vendorChecks(ok: Ok) {
   const bridge = readFileSync("src/lib/gmail/bridge.ts", "utf8");
   const recBody = bridge.slice(bridge.indexOf("export async function recordMessage("), bridge.indexOf("// attach to an existing thread"));
   ok(recBody.includes("attsListed: true") && recBody.includes("gmailPartId: a.partId"), "gmail attachments: recordMessage stores attachments by reference and stamps attsListed");
+
+  // Task 5 — the vendor quote modal + the ?vq= hand-off
+  const modal = readFileSync("src/app/(app)/estimator/vendor-quote-modal.tsx", "utf8");
+  ok(modal.includes("VendorCompanyField") && modal.includes("fileActions") && !modal.includes('list="pk-vendor-names"'), "vendor modal: the Vendor cell is VendorCompanyField (datalist moved into it) + a fileActions slot");
+  const vqActions = readFileSync("src/app/(app)/estimator/vendor-actions.ts", "utf8");
+  ok(/readThreadAttachment\([^;]*vendorPdf: true/.test(vqActions) && vqActions.includes("copyToVendorQuoteBlob("), "vendor hand-off: the action reads through the broker (vendorPdf) and copies into Blob");
+  const hook = readFileSync("src/app/(app)/estimator/use-estimator-state.ts", "utf8");
+  const stripAt = hook.indexOf('.delete("vq")');
+  ok(stripAt > 0 && stripAt < hook.indexOf("vendorQuoteFromThreadAction("), "vendor hand-off: vq is stripped from the URL before the action runs");
+  const field = readFileSync("src/components/vendors/vendor-company-field.tsx", "utf8");
+  const serverOnly = /from "[^"]*(?:stores\/|@\/db|node:|-server)[^"]*"/;
+  ok(!serverOnly.test(field) && !serverOnly.test(modal), "vendor modal: no store / db / node / -server import in the client field or modal");
 }
 
 export async function vendorDbChecks(ok: Ok) {

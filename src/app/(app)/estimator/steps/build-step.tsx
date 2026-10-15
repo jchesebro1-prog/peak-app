@@ -193,6 +193,9 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     vendorEditingRec,
     vendorFor,
     vendorFormMargin,
+    vendorHandoff,
+    retargetVendor,
+    setVendorCompany,
     vendorPreviews,
     vendorQuotes,
     vendorSec,
@@ -741,6 +744,14 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           editing={!!vendorEditingRec}
           onAdd={() => commitVendorQuote(vendorFor)}
           onClose={closeInput}
+          /* #348 slice 4: the vendor company picker (typed name as the fallback) and the email hand-off. */
+          onPickVendor={(c) => setVendorCompany(c)}
+          onTypedVendor={(name) => setVendorField("vendor", name)}
+          onUnlinkVendor={() => setVendorCompany(null)}
+          handoff={vendorHandoff}
+          systems={sections.map((sec) => ({ id: sec.id, name: sec.name }))}
+          systemId={vendorFor}
+          onPickSystem={retargetVendor}
         />
       )}
       {aiSource && aiOpen && (

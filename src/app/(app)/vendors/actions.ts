@@ -8,10 +8,12 @@
  * action (settings/actions.ts saveSettingsAction).
  */
 import { revalidatePath } from "next/cache";
-import { requirePerm } from "@/lib/session";
+import { requirePerm, requireUser } from "@/lib/session";
 import { getUser } from "@/lib/users";
 import { setSettings } from "@/lib/settings";
-import { getCompany } from "@/lib/identity/companies";
+import { allCompanies, getCompany } from "@/lib/identity/companies";
+import { rankLinkTargets, type LinkTargetHit } from "@/lib/inbox-link-targets";
+import { isVendorPickerType } from "@/lib/vendor-quotes/rules";
 import { isVendorType } from "@/lib/identity/config";
 import { getContact } from "@/lib/identity/contacts";
 import {
@@ -31,6 +33,16 @@ import { parseLedgerDates } from "./dates";
 
 type R = { ok: true } | { ok: false; error: string };
 const revalidate = () => revalidatePath("/", "layout");
+
+/** #348 slice 4 — the vendor quote modal's company picker: live companies of a vendor type only (isVendorPickerType),
+ *  ranked by the Inbox link search's own rules. A read — `requireUser`. */
+export async function searchVendorCompaniesAction(q: string): Promise<LinkTargetHit[]> {
+  await requireUser();
+  const companies = (await allCompanies())
+    .filter((c) => isVendorPickerType(c.type))
+    .map((c) => ({ id: c.id, name: c.name, city: c.city, state: c.state }));
+  return rankLinkTargets(q, { companies, sites: [], people: [] }, "company").companies;
+}
 
 /** Settings → Catalog: who receives the vendor price-list tasks. "" clears
  *  the pick (back to the default rule — resolveCatalogOwner). */
