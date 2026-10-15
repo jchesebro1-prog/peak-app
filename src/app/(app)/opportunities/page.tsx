@@ -160,6 +160,7 @@ export default async function OpportunitiesPage({
       updatedAt: q.updatedAt || 0,
       customerId: q.customerId ?? null,
       poReceivedAt: q.poReceivedAt ?? null,
+      leadId: q.leadId ?? null,
     }))
   );
 

@@ -9,7 +9,7 @@ import { DEMO_COLLECTIONS } from "../src/db/seed-data";
 import { saveCompany } from "../src/lib/identity/companies";
 import { saveContact } from "../src/lib/identity/contacts";
 import { dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
-import { buildOpportunities, type OppLeadInput } from "../src/lib/opportunities";
+import { buildOpportunities, type OppLeadInput, type OppQuoteInput } from "../src/lib/opportunities";
 import { addParty, copyParties, listFor, listForCompany, listForRecords, partyId, removeParty, setPartyContact } from "../src/lib/stores/parties";
 import {
   PARTY_ROLES, PARTY_RECORD_TYPES, ROLE_LABEL, ROLE_SHORT, partyInputProblem, normalizePartyInput, ownerConflict, carriesTo,
@@ -69,6 +69,15 @@ export async function partyChecks(ok: Ok) {
   });
   const board = buildOpportunities([leadIn("L-1"), leadIn("L-2", { hasEstimates: true })], []);
   ok(board.some((r) => r.id === "L-1") && !board.some((r) => r.id === "L-2"), "parties: board skips a lead whose estimates carry it");
+  const quoteIn = (id: string, extra: Partial<OppQuoteInput> = {}): OppQuoteInput => ({
+    id, name: "Q", customer: "C", status: "draft", owner: "", value: 500, createdAt: 1, updatedAt: 1, customerId: null, poReceivedAt: null, ...extra,
+  });
+  const fb = buildOpportunities(
+    [leadIn("L-3", { hasEstimates: true, forecastAt: 1234 }), leadIn("L-4", { forecastAt: 5678 })],
+    [quoteIn("Q-1", { leadId: "L-3" }), quoteIn("Q-2", { leadId: "L-4" })]
+  );
+  ok(fb.find((r) => r.id === "Q-1")?.forecastAt === 1234, "parties: an estimate inherits its skipped lead's forecast date");
+  ok(fb.find((r) => r.id === "Q-2")?.forecastAt === null && fb.some((r) => r.id === "L-4"), "parties: a lead still on the board does not feed its forecast into its estimate");
 }
 
 export async function partyDbChecks(ok: Ok) {
