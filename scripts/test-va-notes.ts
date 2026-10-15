@@ -30,6 +30,11 @@ import { sanitizeSurveyDisciplineGoals, withSanitizedSurveyGoals, goalsFromSurve
 import { surveyText } from "../src/lib/assist/features/suggest-sources";
 import { curtainItemText, positionRowLine, monthText } from "../src/lib/survey-format";
 import { cleanPlainText } from "../src/lib/estimate-output/fields";
+import * as FLX from "../src/lib/field-lists";
+import * as GLX from "../src/lib/estimate-output/goals";
+import * as LSX from "../src/lib/stores/linesets";
+import * as MGX from "../src/lib/survey-migrate";
+import { scopeText } from "../src/lib/survey-format";
 import { linesetCondLabel, blankLinesetRow, rowIsEmpty, linesetQuantityPlan, fillDown, fillDownImpact, addMissingSets, markSpare, clampLinesetQty, formatSetRanges, type LinesetRow } from "../src/lib/stores/linesets";
 
 export async function vaNotesChecks(ok: Ok): Promise<void> {
@@ -77,7 +82,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     scope: ["rigging", "lighting"],
     disciplines: {
       rigging: { scope: ["New grid"], goals: "Safer fly rail" },
-      lighting: { scope: [], scopeOther: "LED retrofit study" },
+      lighting: { scope: ["Other"], scopeOther: "LED retrofit study" },
       curtain: { scope: ["Flame test"] },
     },
   });
@@ -393,7 +398,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   const ml3 = mm({ disciplines: { rigging: { present: ["Hemp"], linesetCount: "24", battenCount: "30" } } } as MigratableSurvey);
   ok(ml3.linesetQty === 24 && ml3.disciplines?.rigging?.linesetCount === "24" && hasNote(ml3, "dRigging", "Lineset count / Batten count (before #344)", "Batten count: 30"),
     "#344 B2 stepMeasureLinks: line set quantity from Lineset count; a different Batten count is a note");
-  const ml4 = mm({ linesets: [{ id: "a" }, { id: "b" }], disciplines: { rigging: { present: ["Hemp"], battenCount: "about 12" } } } as unknown as MigratableSurvey);
+  const ml4 = mm({ linesets: [{ id: "a", pos: "1" }, { id: "b", pos: "2" }], disciplines: { rigging: { present: ["Hemp"], battenCount: "about 12" } } } as unknown as MigratableSurvey);
   ok(ml4.linesetQty === 2 && hasNote(ml4, "dRigging", "Lineset count / Batten count (before #344)", "Batten count: about 12"),
     "#344 B2 stepMeasureLinks: existing rows set the line set quantity");
   const ml5 = mm({ linesetQty: 9, disciplines: { rigging: { present: ["Hemp"], battenCount: "9", linesetCount: "300" } } } as MigratableSurvey);
@@ -542,8 +547,8 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     "#344 B3: condition slider is a 0–4 native range, coloured from --cond-N, with aria-valuetext");
   ok(slider.includes("CONDITION_STEPS") && slider.includes("onChange(null)") && slider.includes("Not rated"),
     "#344 B3: condition slider shows step labels, 'Not rated' until touched, and Clear stores null (a kept key, so it stays cleared)");
-  ok(goals.includes("maxLength={300}") && /MAX_GOALS\s*=\s*20/.test(goals) && goals.includes("+ Add goal") && goals.includes("disabled={value.length >= MAX_GOALS}"),
-    "#344 B3: goals editor caps typing at 300 chars a line and 20 goals");
+  ok(goals.includes("maxLength={goalMaxLength(value, i)}") && /MAX_GOALS\s*=\s*20/.test(goals) && goals.includes("+ Add goal") && goals.includes("value.length < MAX_GOALS") && goals.includes("disabled={!canAdd}"),
+    "#344 B3: goals editor caps typing at 300 chars a line and 20 goals (B-final: and the 1,000 total)");
   ok(goals.includes("Enter") && goals.includes("focus()") && goals.includes("↑") && goals.includes("↓") && goals.includes("×"),
     "#344 B3: goals editor adds-after on Enter, reorders and removes");
   ok(goals.includes("nativeEvent.isComposing") && goals.includes("role=\"group\"") && goals.includes("aria-label={`${label} ${i + 1}`}"),
@@ -661,8 +666,8 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     "#344 B5: the old liftNeeded / loadingDoorSize / liftHeight fields are gone from Site access");
   ok(siteSec.includes('{ kind: "textarea", key: "pathToFloor", label: "Path: truck → floor"') && siteSec.includes("LOADING_DOOR_TYPES") && siteSec.includes("LIFT_TYPES"),
     "#344 B5: Path: truck → floor is a textarea; door type and lift type use the fixed lists");
-  ok(/draft\.liftRequired === "yes"/.test(siteSec) && ["Loading door type", "Loading door location", "Loading door W × H", "Lift needed?", "Lift type", "Working height", "Who supplies lift"].every((l) => siteSec.includes(`label: "${l}"`)),
-    "#344 B5: Lift type, Working height and Who supplies lift show only when a lift is needed");
+  ok(/showLiftDetails\(draft\)/.test(siteSec) && ["Loading door type", "Loading door location", "Loading door W × H", "Lift needed?", "Lift type", "Working height", "Who supplies lift"].every((l) => siteSec.includes(`label: "${l}"`)),
+    "#344 B5: Lift type, Working height and Who supplies lift show only when a lift is needed (B-final: or one of them holds a value)");
   ok(["loadingDoorType", "loadingDoorLocation", "loadingDoorWH", "liftRequired", "liftType", "liftWorkingHeight"].every((k) =>
       actsB5.includes(`| "${k}"`) && ctlB5.includes(`${k}: draft.${k}`) && ctlB5.includes(`${k}: r.${k}`)),
     "#344 B5: the new access keys are in SurveyPatch, toDraft and buildPatch");
@@ -862,7 +867,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       "#344 B7: an unmigrated old survey still prints its access answers from the old keys");
     const noneNeeded = buildAssessmentSheet({ ...(sheetBase as object), legacyNotes: undefined, liftNeeded: "None needed" } as never);
     const nn = noneNeeded.fieldSheet!.pages.flatMap((p) => p.sections).find((x) => x.heading === "Site access")!.rows;
-    ok(nn.find((r) => r.label === "Lift needed")?.value === "No" && nn.find((r) => r.label === "Lift type")?.value === "", "#344 B7: old None needed prints Lift needed No");
+    ok(nn.find((r) => r.label === "Lift needed")?.value === "No" && !nn.some((r) => r.label === "Lift type"), "#344 B7: old None needed prints Lift needed No (and, B-final, no lift details)");
 
     const fx7 = surveyFindings(b7);
     ok(fx7.includes("Access/logistics: loading door: Roll-up / overhead, Dock B, 10' × 12'; lift: Yes — Scissor >20ft, working height 32' (Peak)"),
@@ -876,11 +881,11 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const st7 = surveyText(b7);
     ok(st7.includes("  - Main / act curtain: qty 4 · Velour 25 oz · Standard track · 40' × 22' · Good") && !st7.includes("Unticked"),
       "#344 B7: Assist's site-visit text carries each ticked curtain row");
-    ok(st7.includes("  - Electric 1 · 24 circuits · 40' · trim 22' · needs new cable") && st7.includes("  - conditionLevel: Fair") && st7.includes("  - lastFlameTest: Mar 2024"),
+    ok(st7.includes("  - Electric 1 · 24 circuits · 40' · trim 22' · needs new cable") && st7.includes("  - Condition: Fair") && st7.includes("  - Last flame test: Mar 2024"),
       "#344 B7: Assist's text carries lighting position rows, the AV condition label and month fields");
     ok(!st7.includes("[object Object]") && !st7.includes("tg_price_sensitive"), "#344 B7: no raw objects or internal tags in Assist's text");
-    const many: Record<string, unknown> = { present: Array.from({ length: 30 }, (_, i) => `Type ${i}`), items: {} };
-    for (let i = 0; i < 30; i++) { many[`f${i}`] = `v${i}`; (many.items as Record<string, unknown>)[`Type ${i}`] = { qty: String(i + 1) }; }
+    const many: Record<string, unknown> = { present: Array.from({ length: 60 }, (_, i) => `Type ${i}`), items: {} };
+    for (let i = 0; i < 60; i++) { many[`f${i}`] = `v${i}`; (many.items as Record<string, unknown>)[`Type ${i}`] = { qty: String(i + 1) }; }
     const stMany = surveyText({ id: "FS-B7", disciplines: { curtain: many } } as never);
     ok(stMany.split("\n").filter((l) => l.startsWith("  - ")).length === 40, "#344 B7: Assist's discipline lines stay within their 40-line budget");
 
@@ -912,6 +917,144 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const clrLs = clrSheet.fieldSheet!.pages.flatMap((p) => p.sections).find((x) => x.heading === "Linesets")!.rows;
     ok(!clrLs[0].value.includes(linesetCondLabel("G")) && clrLs[1].value.includes(linesetCondLabel("G")),
       "#344 B7 fix: a cleared line set condition prints no condition (the old code only shows when the key is absent)");
+  }
+
+  /* ---- B-final: whole-branch review fixes ---- */
+  {
+    const t = (label: string, fn: () => boolean) => {
+      let pass = false;
+      try { pass = fn(); } catch (err) { console.log("  threw: " + (err instanceof Error ? err.message : String(err))); }
+      ok(pass, "#344 B-final: " + label);
+    };
+    const secsOf = (rec: unknown) => buildAssessmentSheet(rec as never).fieldSheet!.pages.flatMap((p) => p.sections);
+
+    /* 1. findings never resurrect old access answers on a migrated record */
+    t("findings read a migrated record's access only from the new keys (no old door, lift kind or lift height)", () => {
+      const a = surveyFindings({ legacyNotes: [], liftNeeded: "Scissor OLDKIND", liftHeight: "OLD-H30", loadingDoorSize: "OLD-DOOR", liftRequired: "", liftSupplier: "" });
+      const b = surveyFindings({ legacyNotes: [], liftRequired: "yes", liftType: "Scissor >20ft", liftHeight: "OLD-H30", liftWorkingHeight: "" });
+      return !a.includes("OLD") && !a.includes("lift:") && b.includes("lift: Yes — Scissor >20ft") && !b.includes("OLD-H30");
+    });
+    t("findings of a migrated old survey print Lift needed Yes but never the old height as the working height", () => {
+      const m = MGX.migrateSurvey({ liftNeeded: "Scissor lift", liftHeight: "30'" } as MigratableSurvey);
+      const f = surveyFindings(m as never);
+      return f.includes("lift: Yes") && !f.includes("30'") && !f.includes("Scissor lift");
+    });
+
+    /* 2. Assist reads only what the editor shows, plus Older notes */
+    const oldRec = MGX.migrateSurvey({
+      id: "FS-BF", venueClass: "auditorium", scope: ["curtain", "lighting", "av"],
+      disciplines: {
+        curtain: { present: ["Legs"], legsQtyPairs: "4", trackOperation: "Manual OLDOP", lastFlameTest: "spring OLDFLAME", scope: ["Flame test"],
+          scopeOther: "UNTICKED-OTHER", fixedPipeQty: "PIPEQTY9", notes: "Curtain note", replaceVsReuse: "Reuse", junkKey: "JUNKVAL" },
+        lighting: { consoleLocation: "Booth by the window", consoleLocationOther: "HIDDEN-OTHER", positionList: ["Electric 1"],
+          positionRows: { "Electric 1": { circuits: "24" }, "FOH 2": { circuits: "UNTICKEDPOS" } } },
+        av: { condition: "Good", conditionLevel: 1 },
+      },
+    } as unknown as MigratableSurvey);
+    const stBF = surveyText(oldRec as never);
+    t("Assist never prints removed or old keys as fields (legsQtyPairs, trackOperationOld, consoleLocationOld, lastFlameTestOld, AV condition text)", () =>
+      !/legsQtyPairs|trackOperationOld|consoleLocationOld|lastFlameTestOld|junkKey|JUNKVAL/.test(stBF) && !/condition: Good/i.test(stBF));
+    t("Assist skips an unticked Other's text, an Other text when the console isn't Other, an unticked pipes qty and unticked positions", () =>
+      !stBF.includes("UNTICKED-OTHER") && !stBF.includes("HIDDEN-OTHER") && !stBF.includes("PIPEQTY9") && !stBF.includes("UNTICKEDPOS"));
+    t("Assist prints the editor's fields by label: Present, curtain rows, scope, notes, console location, positions, AV condition", () =>
+      stBF.includes("  - Present: Legs") && stBF.includes("  - Legs: qty 4") && stBF.includes("  - Curtain scope of interest: Flame test") &&
+      stBF.includes("  - Notes: Curtain note") && stBF.includes("  - Replace vs. reuse (curtains): Reuse") && stBF.includes("  - Console location: Booth") &&
+      stBF.includes("  - Electric 1 · 24 circuits") && stBF.includes("  - Condition: Poor"));
+    t("Assist appends the record's Older notes (the old answers' text survives)", () =>
+      stBF.includes("Older notes:") && stBF.includes("  - Track operation (before #344): Manual OLDOP") &&
+      stBF.includes("  - Console location (before #344): Booth by the window") && stBF.includes("  - Last flame test (before #344): spring OLDFLAME"));
+
+    /* 3. Fill down on Condition never resurrects an old rating */
+    t("Fill down from an unrated row writes null Condition below, which stays null through migrate", () => {
+      const r0 = { ...blankLinesetRow(1) };
+      const r1 = { ...blankLinesetRow(2), cond: "G" as const, condition: 3 as const };
+      const r2 = { ...blankLinesetRow(3), cond: "F" as const };
+      const filled = LSX.fillDown([r0, r1, r2], r0.id, "condition");
+      const mig = MGX.migrateSurvey({ linesets: filled } as unknown as MigratableSurvey).linesets as unknown as LinesetRow[];
+      return filled[1].condition === null && "condition" in filled[2] && filled[2].condition === null && mig[1].condition === null && mig[2].condition === null &&
+        LSX.fillDownImpact([r0, r1, r2], r0.id, "condition") === 2;
+    });
+
+    /* 4. Goals: the editor enforces the save's 1,000-character total */
+    t("goalsBudgetLeft counts trimmed lines plus their newline joins, like the save sanitizer", () =>
+      GLX.goalsBudgetLeft([]) === 1000 && GLX.goalsBudgetLeft(["a".repeat(10), "", "  ", " " + "b".repeat(5) + " "]) === 1000 - 16 &&
+      GLX.goalsBudgetLeft(["a".repeat(700), "b".repeat(400)]) === 0);
+    t("a goal input's maxLength is min(300, its length + the budget left) and never below its length", () => {
+      const full = ["a".repeat(500), "b".repeat(499)];
+      return GLX.goalMaxLength(full, 0) === 300 + 200 && GLX.goalMaxLength(["abc"], 0) === 300 && GLX.goalMaxLength(full.concat([""]), 2) === 0 &&
+        GLX.goalMaxLength(["a".repeat(900), ""], 1) === 99 && GLX.goalMaxLength(["a".repeat(900), "xx"], 1) === 99;
+    });
+    const glTsx = rd("src/app/(app)/venue-assessments/[id]/sections/goals-list.tsx");
+    t("the goals editor shows characters left and gates + Add goal / Enter on the budget", () =>
+      glTsx.includes("characters left") && glTsx.includes("goalsBudgetLeft(") && glTsx.includes("goalMaxLength(") && !glTsx.includes("maxLength={300}"));
+
+    /* 5. An unticked Other never prints */
+    t("scopeText and the recap use Other's text only while Other is ticked", () => {
+      const d = { scope: ["Flame test"], scopeOther: "Rehang" };
+      const rc = recapFor({ scope: ["curtain"], disciplines: { curtain: d } });
+      const rcNone = recapFor({ disciplines: { curtain: { scope: [], scopeOther: "Rehang" } } });
+      return scopeText(d) === "Flame test" && scopeText({ scope: ["Other"], scopeOther: "Rehang" }) === "Other: Rehang" &&
+        rc[0].other === "" && recapScopeText(rc[0]) === "Flame test" && rcNone.length === 0;
+    });
+
+    /* 6. Line sets in use turn the schedule on */
+    const ctlBF = rd("src/app/(app)/venue-assessments/[id]/controls.tsx");
+    t("linesetsInUse: a quantity above 0 or any row", () =>
+      LSX.linesetsInUse([], 3) && LSX.linesetsInUse([blankLinesetRow(1)], 0) && !LSX.linesetsInUse([], 0) && !LSX.linesetsInUse([], undefined));
+    t("the editor's line set apply path also sets linesetsEnabled", () => /const applyLinesets[\s\S]{0,400}linesetsInUse\([\s\S]{0,200}linesetsEnabled/.test(ctlBF));
+
+    /* 7. Travel fills once */
+    t("shouldAutoFillTravel fills a blank travel only while the record was never auto-filled", () => {
+      const sug = { min: 30, miles: 20 };
+      return FLX.shouldAutoFillTravel({ travelTime: "", distance: "" }, sug) && FLX.shouldAutoFillTravel({ travelTime: "35 min", distance: "" }, sug) &&
+        !FLX.shouldAutoFillTravel({ travelTime: "", distance: "", travelAutoFilled: true }, sug) && !FLX.shouldAutoFillTravel({ travelTime: "", distance: "" }, null) &&
+        !FLX.shouldAutoFillTravel({ travelTime: "35 min", distance: "20 mi" }, sug);
+    });
+    t("the editor stores travelAutoFilled (toDraft sets it when it fills; buildPatch and SurveyPatch carry it)", () =>
+      /shouldAutoFillTravel\(/.test(ctlBF) && /travelAutoFilled: draft\.travelAutoFilled/.test(ctlBF) &&
+      rd("src/app/(app)/venue-assessments/[id]/actions.ts").includes('| "travelAutoFilled"') && rd("src/lib/stores/surveys.ts").includes("travelAutoFilled?: true"));
+
+    /* 8. Lift details */
+    t("showLiftDetails: Lift needed yes, or any lift detail holds a value", () =>
+      FLX.showLiftDetails({ liftRequired: "yes" }) && FLX.showLiftDetails({ liftRequired: "", liftSupplier: "Sunbelt" }) &&
+      FLX.showLiftDetails({ liftRequired: "no", liftWorkingHeight: "30'" }) && !FLX.showLiftDetails({ liftRequired: "no" }) && !FLX.showLiftDetails({}));
+    t("the editor's lift details follow showLiftDetails", () => /showLiftDetails\(draft\)/.test(ctlBF));
+    t("migration: an old supplier with Lift needed never answered sets Lift needed yes (idempotent; a cleared one stays cleared)", () => {
+      const a = MGX.migrateSurvey(MGX.migrateSurvey({ liftSupplier: "Sunbelt" } as MigratableSurvey));
+      const b = MGX.migrateSurvey({ liftRequired: "", liftSupplier: "Sunbelt" } as MigratableSurvey);
+      return a.liftRequired === "yes" && b.liftRequired === "" && MGX.migrateSurvey({} as MigratableSurvey).liftRequired === undefined;
+    });
+    t("the sheet skips Lift type / Working height / Who supplies lift when Lift needed is No", () => {
+      const rows = secsOf({ ...(sheetBase as object), legacyNotes: [], liftRequired: "no", liftType: "Scissor >20ft", liftWorkingHeight: "30'", liftSupplier: "Peak" })
+        .find((x) => x.heading === "Site access")!.rows.map((r) => r.label);
+      const yes = secsOf({ ...(sheetBase as object), legacyNotes: [], liftRequired: "yes" }).find((x) => x.heading === "Site access")!.rows.map((r) => r.label);
+      return rows.includes("Lift needed") && !rows.includes("Lift type") && !rows.includes("Working height") && !rows.includes("Who supplies lift") &&
+        yes.includes("Lift type") && yes.includes("Who supplies lift");
+    });
+
+    /* 9. Engine codes are pinned */
+    t("engine pick-list codes derived from the survey lists never change", () => {
+      const pl = ASSESSMENT_DEF.pickLists;
+      return pl.lift_type.map((o) => o.value).join("|") === "ladder_12ft|scaffolding|single_man_lift|scissor_20ft|scissor_40ft|scissor_50ft" &&
+        pl.door_type.map((o) => o.value).join("|") === "roll_up_overhead|double_doors|single_door|dock_door|other" &&
+        pl.lighting_position.map((o) => o.value).join("|") === "electric_1|electric_2|electric_3|electric_4|electric_5|foh_1|foh_2|foh_3|torms|balcony|other" &&
+        (rd("src/lib/field-lists.ts").match(/Engine codes are derived from these labels — add new labels, never edit or remove one\./g) || []).length === 3;
+    });
+
+    /* 10. Print of unsaved edits; line set quantity seed */
+    t("printRecordFor migrates the merged draft (the edits' notes show) and ignores an incoming legacyNotes", () => {
+      const existing = MGX.migrateSurvey({ liftNeeded: "Scissor lift", legacyNotes: [] } as MigratableSurvey);
+      const before = JSON.stringify(existing);
+      const out = MGX.printRecordFor(existing, { liftRequired: "", legacyNotes: [{ section: "x", label: "BOGUS", text: "BOGUS" }] } as never);
+      const labels = (out.legacyNotes || []).map((n) => n.label);
+      return labels.includes("Kind of lift needed (before #344)") && !labels.includes("BOGUS") && JSON.stringify(existing) === before &&
+        rd("src/app/(app)/venue-assessments/[id]/actions.ts").includes("buildAssessmentSheet(printRecordFor(existing, patch))");
+    });
+    t("the line set quantity seed counts only rows with a set number", () => {
+      const a = MGX.migrateSurvey({ linesets: [{ id: "a", pos: "1" }, { id: "b", pos: "Ext" }, { id: "c", pos: "" }] } as unknown as MigratableSurvey);
+      const b = MGX.migrateSurvey({ linesets: [{ id: "a", pos: "Ext" }], disciplines: { rigging: { linesetCount: "12" } } } as unknown as MigratableSurvey);
+      return a.linesetQty === 1 && b.linesetQty === 12;
+    });
   }
 }
 

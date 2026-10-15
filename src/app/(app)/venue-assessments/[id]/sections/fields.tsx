@@ -132,6 +132,8 @@ export function renderField(f: FieldDef, p: FieldRenderProps) {
           {f.options.map((o) => (
             <option key={o} value={o}>{o}</option>
           ))}
+          {/* a stored value outside the list (an older answer, e.g. a lift supplier) still shows and can be changed */}
+          {val && !f.options.includes(val) && <option value={val}>{val}</option>}
         </select>
       </div>
     );

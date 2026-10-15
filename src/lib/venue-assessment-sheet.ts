@@ -3,8 +3,6 @@ import type { SurveyRecord } from "@/lib/stores/surveys";
 import { VENUE_CLASSES, classMeasureFields } from "@/lib/stores/venue-classes";
 import {
   DISCIPLINE_GROUPS,
-  PIPES_LABEL,
-  visibleFields,
   type DisciplineData,
   type SystemField,
 } from "@/lib/stores/survey-intake";
@@ -23,7 +21,7 @@ import type { LegacyNote } from "@/lib/survey-migrate";
 import { linesetCondLabel, linesetTypeLabel } from "@/lib/stores/linesets";
 import { conditionLabel, isConditionLevel } from "@/lib/field-lists";
 import {
-  accessFacts, consoleLocationText, curtainItemText, curtainItemsOf, monthText, positionRowText, positionRowsOf, scopeText,
+  accessFacts, consoleLocationText, curtainItemText, curtainItemsOf, monthText, positionRowText, positionRowsOf, scopeText, shownFields,
 } from "@/lib/survey-format";
 
 type SheetRecord = Pick<
@@ -86,10 +84,8 @@ function disciplineSection(record: SheetRecord, index: number): FieldSheetSectio
   const rows = [
     row("Client goals", goals.join("; ")),
     row("Present", data.present),
-    ...visibleFields(group, record.venueClass)
-      /* the pipes qty belongs to its Present chip (as in the editor) */
-      .filter((field) => field.key !== "fixedPipeQty" || (Array.isArray(data.present) && data.present.includes(PIPES_LABEL)))
-      .map((field) => row(field.label, fieldText(field, data, record.measurements))),
+    /* the fields the editor shows (the pipes qty belongs to its Present chip) */
+    ...shownFields(group, data, record.venueClass).map((field) => row(field.label, fieldText(field, data, record.measurements))),
     ...extra,
     row(group.scopeLabel, scopeText(data)),
     row("Notes", data.notes),
@@ -137,8 +133,10 @@ export function buildAssessmentSheet(record: SheetRecord): LetterDoc {
         rows: [
           row("Loading door type", access.doorType), row("Loading door location", access.doorLocation),
           row("Loading door W × H", access.doorWH), row("Lift needed", access.liftNeeded),
-          row("Lift type", access.liftType), row("Working height", access.liftWorkingHeight),
-          row("Who supplies lift", access.liftSupplier),
+          /* Lift needed No: the details don't apply (a value kept from before stays stored, not printed) */
+          ...(access.liftNeeded === "No"
+            ? []
+            : [row("Lift type", access.liftType), row("Working height", access.liftWorkingHeight), row("Who supplies lift", access.liftSupplier)]),
           row("Path to floor", record.pathToFloor), row("Working hours", record.workingHours),
           row("Blackout dates", record.blackoutDates), row("Floor protection", record.floorProtection),
           row("Badging required", record.badgingRequired), row("First impressions", record.firstImpressions),

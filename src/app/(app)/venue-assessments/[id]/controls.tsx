@@ -29,7 +29,7 @@ import {
   type InventoryRow,
   REPLACE_VS_REUSE_OPTIONS,
 } from "@/lib/stores/survey-intake";
-import { LIFT_TYPES, LOADING_DOOR_TYPES, distanceText, travelTimeText } from "@/lib/field-lists";
+import { LIFT_TYPES, LOADING_DOOR_TYPES, distanceText, shouldAutoFillTravel, showLiftDetails, travelTimeText } from "@/lib/field-lists";
 import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, printSurveySheet, type SurveyPatch } from "./actions";
 import Venue3D from "./venue-3d";
 import SuggestEstimate from "@/components/assist/suggest-estimate";
@@ -51,6 +51,7 @@ import { OlderNotes } from "./sections/older-notes";
 import { PhotosSection } from "./sections/photos";
 import { SystemsSection } from "./sections/systems";
 import { LinesetsSection } from "./sections/linesets";
+import { linesetsInUse } from "@/lib/stores/linesets";
 import { AssessmentUsageSection } from "./sections/assessment-usage";
 import { AssessmentConditionSection } from "./sections/assessment-condition";
 import { AssessmentFindingsSection } from "./sections/assessment-findings";
@@ -97,9 +98,11 @@ function timeAgo(ts: number | null | undefined): string {
 type TravelSuggestion = { min: number; miles: number } | null;
 const TRAVEL_HINT = "From the venue's verified address";
 
-/** `travel` fills a blank Travel time / Distance on open (#344 B5); not a change, so the draft stays clean — any save
-    stores it. */
+/** `travel` fills a blank Travel time / Distance on open (#344 B5) — once: the fill also sets `travelAutoFilled`, which
+    the next save stores, and a record carrying it is never refilled (a cleared field stays cleared). Not a change, so
+    the draft stays clean — any save stores it. */
 function toDraft(r: SurveyRecord, travel: TravelSuggestion = null): Draft {
+  const fillTravel = shouldAutoFillTravel(r, travel) ? travel : null;
   return {
     customer: r.customer || "",
     customerId: r.customerId ?? null,
@@ -115,8 +118,9 @@ function toDraft(r: SurveyRecord, travel: TravelSuggestion = null): Draft {
     visitType: r.visitType || "",
     visitPurpose: r.visitPurpose || "",
     reason: r.reason || "",
-    travelTime: r.travelTime || (travel ? travelTimeText(travel.min) : ""),
-    distance: r.distance || (travel ? distanceText(travel.miles) : ""),
+    travelTime: r.travelTime || (fillTravel ? travelTimeText(fillTravel.min) : ""),
+    distance: r.distance || (fillTravel ? distanceText(fillTravel.miles) : ""),
+    ...(r.travelAutoFilled === true || fillTravel ? { travelAutoFilled: true as const } : {}),
     hasBOM: !!r.hasBOM,
     hasDrawings: !!r.hasDrawings,
     hasPhotos: !!r.hasPhotos,
@@ -364,10 +368,14 @@ export default function SurveyEditor({
   const removeInvRow = (id: string) =>
     patchDraft({ inventory: draft.inventory.filter((r) => r.id !== id) });
   const patchLineset = (id: string, patch: Partial<(typeof draft.linesets)[number]>) =>
-    patchDraft({ linesets: draft.linesets.map((row) => (row.id === id ? { ...row, ...patch } : row)) });
+    patchDraft({ linesets: draft.linesets.map((row) => (row.id === id ? { ...row, ...patch } : row)), linesetsEnabled: true });
   // always a number once touched (0 = none) — an unset quantity would be reseeded on the next read
-  const applyLinesets = (rows: typeof draft.linesets, qty?: number) =>
-    patchDraft(qty == null ? { linesets: rows } : { linesets: rows, linesetQty: qty });
+  // #344 B-final: a schedule in use (a quantity above 0 or any row) also turns linesetsEnabled on, so every reader that
+  // gates on it shows the sets
+  const applyLinesets = (rows: typeof draft.linesets, qty?: number) => {
+    const enable = draft.linesetsEnabled || linesetsInUse(rows, qty ?? draft.linesetQty);
+    patchDraft(qty == null ? { linesets: rows, linesetsEnabled: enable } : { linesets: rows, linesetQty: qty, linesetsEnabled: enable });
+  };
   const removeLineset = (id: string) =>
     patchDraft({ linesets: draft.linesets.filter((row) => row.id !== id) });
 
@@ -575,7 +583,7 @@ export default function SurveyEditor({
         { kind: "text", key: "loadingDoorLocation", label: "Loading door location" },
         { kind: "text", key: "loadingDoorWH", label: "Loading door W × H", placeholder: "e.g. 10' × 12'" },
         { kind: "choice", key: "liftRequired", label: "Lift needed?", options: [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }] },
-        ...(draft.liftRequired === "yes"
+        ...(showLiftDetails(draft)
           ? ([
               { kind: "select", key: "liftType", label: "Lift type", options: LIFT_TYPES },
               { kind: "text", key: "liftWorkingHeight", label: "Working height", placeholder: "e.g. 32'" },
@@ -691,6 +699,7 @@ export default function SurveyEditor({
       reason: draft.reason,
       travelTime: draft.travelTime,
       distance: draft.distance,
+      ...(draft.travelAutoFilled ? { travelAutoFilled: draft.travelAutoFilled } : {}),
       hasBOM: draft.hasBOM,
       hasDrawings: draft.hasDrawings,
       hasPhotos: draft.hasPhotos,

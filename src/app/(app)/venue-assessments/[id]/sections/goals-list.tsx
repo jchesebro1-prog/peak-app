@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, type CSSProperties } from "react";
+import { goalMaxLength, goalsBudgetLeft } from "@/lib/estimate-output/goals";
 import { inpStyle } from "./styles";
 
-/* The save sanitizer is the real limit (1,000 chars total); this only limits new typing. */
+/* The save keeps at most 1,000 characters in all (lines joined with "\n"); the editor enforces the same total so
+   nothing is cut silently on save (#344 B-final). */
 const MAX_GOALS = 20;
 
 
@@ -55,6 +57,9 @@ export function GoalsListEditor({
     }
   }, [value]);
 
+  const left = goalsBudgetLeft(value);
+  /* a new goal needs at least its "\n" join and one character */
+  const canAdd = value.length < MAX_GOALS && left >= 2;
   const setAt = (i: number, text: string) => onChange(value.map((g, j) => (j === i ? text : g)));
   const removeAt = (i: number) => {
     const next = value.filter((_, j) => j !== i);
@@ -63,7 +68,7 @@ export function GoalsListEditor({
     onChange(next);
   };
   const insertAfter = (i: number) => {
-    if (value.length >= MAX_GOALS) return;
+    if (!canAdd) return;
     const next = [...value];
     next.splice(i + 1, 0, "");
     pending.current = { kind: "input", index: i + 1 };
@@ -88,7 +93,7 @@ export function GoalsListEditor({
             }}
             type="text"
             value={goal}
-            maxLength={300}
+            maxLength={goalMaxLength(value, i)}
             aria-label={`${label} ${i + 1}`}
             onChange={(e) => setAt(i, e.target.value)}
             onKeyDown={(e) => {
@@ -127,8 +132,9 @@ export function GoalsListEditor({
         <button
           type="button"
           ref={addBtn}
-          disabled={value.length >= MAX_GOALS}
+          disabled={!canAdd}
           onClick={() => {
+            if (!canAdd) return;
             pending.current = { kind: "input", index: value.length };
             onChange([...value, ""]);
           }}
@@ -142,8 +148,8 @@ export function GoalsListEditor({
             border: "1px dashed #c5cad3",
             background: "#fff",
             color: "#5b616e",
-            cursor: value.length >= MAX_GOALS ? "not-allowed" : "pointer",
-            opacity: value.length >= MAX_GOALS ? 0.5 : 1,
+            cursor: canAdd ? "pointer" : "not-allowed",
+            opacity: canAdd ? 1 : 0.5,
           }}
         >
           + Add goal
@@ -151,6 +157,9 @@ export function GoalsListEditor({
         {value.length >= MAX_GOALS && (
           <span style={{ marginLeft: 10, fontSize: 12, color: "#9aa0ab" }}>Up to {MAX_GOALS} goals.</span>
         )}
+        <span aria-live="polite" style={{ marginLeft: 10, fontSize: 12, color: left < 50 ? "#b4543a" : "#9aa0ab" }}>
+          {left === 1 ? "1 character left" : `${left.toLocaleString("en-US")} characters left`}
+        </span>
       </div>
     </div>
   );

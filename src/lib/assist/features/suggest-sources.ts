@@ -12,8 +12,10 @@ import { DISCIPLINE_LABEL, DISCIPLINES } from "@/lib/estimate-output/fields";
 import { goalsFromSurvey } from "@/lib/estimate-output/goals";
 import { conditionLabel } from "@/lib/field-lists";
 import {
-  curtainItemLine, curtainItemText, curtainItemsOf, disciplineFieldBound, disciplineFieldType, monthText, positionRowLine, positionRowText, positionRowsOf,
+  consoleLocationText, curtainItemLine, curtainItemText, curtainItemsOf, disciplineGroup, monthText, oneLine, positionRowLine, positionRowsOf, scopeText,
+  shownFields,
 } from "@/lib/survey-format";
+import type { DisciplineGroup, SystemField } from "@/lib/stores/survey-intake";
 import { cleanPromptAttr, cleanPromptField, defangWrappers, promptMessages, threadBlock, type PromptMessage } from "./thread-text";
 
 export { promptMessages, threadBlock };
@@ -107,44 +109,64 @@ export type SurveySourceInput = Partial<
     | "id" | "customer" | "venue" | "visitPurpose" | "venueType" | "reason" | "scopeOfWork" | "notes" | "conditions" | "installTimeframe"
     | "loadingDock" | "elevatorSize" | "floorType" | "accessDoorSize" | "liftNeeded" | "liftSupplier" | "measurements"
     | "loadingDoorSize" | "liftHeight" | "loadingDoorType" | "loadingDoorLocation" | "loadingDoorWH" | "liftRequired" | "liftType" | "liftWorkingHeight"
-    | "disciplines" | "inventory"
+    | "disciplines" | "inventory" | "venueClass" | "legacyNotes"
   >
 >;
 
-function disciplineFieldLines(d: unknown): string[] {
+/** One discipline field's value as the editor shows it: a condition its label, a month "Mar 2024", the console
+ *  location Other's text (only while Other is picked), a check "yes"; a stored object prints nothing. */
+function fieldValue(field: SystemField, data: Record<string, unknown>): string {
+  const v = data[field.key];
+  if (field.type === "condition") return conditionLabel(v);
+  if (field.type === "month") return monthText(v);
+  if (field.key === "consoleLocation") return consoleLocationText(data);
+  if (field.type === "check") return v === true ? "yes" : "";
+  if (Array.isArray(v)) return v.filter((x) => typeof x === "string" && x.trim()).join(", ");
+  return oneLine(v);
+}
+
+/**
+ * #344 B-final: a discipline's lines are exactly what the editor shows — Present, the class's visible fields (a
+ * bound field is the measurement, already in the findings; the pipes qty only with its chip), the ticked curtain
+ * rows and Replace vs. reuse, the chosen lighting positions, the scope (Other's text only while Other is ticked) and
+ * Notes. Never the raw stored keys: removed or old keys show only as the record's Older notes.
+ */
+function disciplineFieldLines(group: DisciplineGroup, d: unknown, venueClass: SurveySourceInput["venueClass"]): string[] {
   if (!d || typeof d !== "object" || Array.isArray(d)) return [];
+  const data = d as Record<string, unknown>;
   const out: string[] = [];
-  const push = (t: string) => {
-    if (t && out.length < SURVEY_DISCIPLINE_FIELDS_MAX) out.push(`  - ${t}`);
+  const pushText = (t: string) => {
+    const c = cleanPromptField(t, 300);
+    if (c && out.length < SURVEY_DISCIPLINE_FIELDS_MAX) out.push(`  - ${c}`);
   };
-  for (const [k, v] of Object.entries(d as Record<string, unknown>)) {
-    if (k === "goals" || out.length >= SURVEY_DISCIPLINE_FIELDS_MAX) continue;
-    // #344 B7: curtain rows and lighting position rows read as the field sheet prints them (one line each).
-    if (k === "items") {
-      for (const { label, item } of curtainItemsOf(d as Record<string, unknown>)) {
-        if (curtainItemText(item)) push(cleanPromptField(curtainItemLine(label, item), 300));
-      }
-      continue;
-    }
-    if (k === "positionRows") {
-      for (const { pos, row } of positionRowsOf(d as Record<string, unknown>)) {
-        if (positionRowText(row)) push(cleanPromptField(positionRowLine(pos, row), 300));
-      }
-      continue;
-    }
-    // A bound field's answer is the measurement (already in the findings text); a stale discipline value never prints.
-    if (disciplineFieldBound(k)) continue;
-    const type = disciplineFieldType(k);
-    const val =
-      type === "condition" || k === "conditionLevel" ? conditionLabel(v)
-      : type === "month" ? monthText(v)
-      : Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()).join(", ")
-      : typeof v === "boolean" ? (v ? "yes" : "")
-      : typeof v === "string" ? v
-      : typeof v === "number" && Number.isFinite(v) ? String(v)
-      : "";
-    const t = cleanPromptField(val, 300);
-    if (t) push(`${cleanPromptField(k, 60)}: ${t}`);
+  const push = (label: string, value: string) => {
+    if (oneLine(value)) pushText(`${label}: ${value}`);
+  };
+  const present = Array.isArray(data.present) ? data.present.filter((x): x is string => typeof x === "string" && !!x.trim()) : [];
+  push("Present", present.join(", "));
+  for (const field of shownFields(group, data, venueClass)) {
+    if (field.bind) continue;
+    push(field.label, fieldValue(field, data));
+  }
+  if (group.key === "curtain") {
+    for (const { label, item } of curtainItemsOf(data)) if (curtainItemText(item)) pushText(curtainItemLine(label, item));
+    push("Replace vs. reuse (curtains)", oneLine(data.replaceVsReuse));
+  }
+  if (group.key === "lighting") for (const { pos, row } of positionRowsOf(data)) pushText(positionRowLine(pos, row));
+  push(group.scopeLabel, scopeText(data));
+  push("Notes", oneLine(data.notes));
+  return out;
+}
+
+/** The record's Older notes (old answers the form has no field for), one line each, same caps as a discipline. */
+function olderNoteLines(notes: SurveySourceInput["legacyNotes"]): string[] {
+  const out: string[] = [];
+  for (const n of Array.isArray(notes) ? notes : []) {
+    if (out.length >= SURVEY_DISCIPLINE_FIELDS_MAX) break;
+    if (!n || typeof n !== "object") continue;
+    const label = cleanPromptField(n.label, 120);
+    const text = cleanPromptField(n.text, 300);
+    if (text) out.push(`  - ${label ? `${label}: ` : ""}${text}`);
   }
   return out;
 }
@@ -162,10 +184,12 @@ export function surveyText(s: SurveySourceInput): string {
   const discBlocks: string[] = [];
   for (const k of DISCIPLINES) {
     const g = goals[k] ? block(goals[k], 1000) : "";
-    const fields = disciplineFieldLines(disc[k]);
+    const group = disciplineGroup(k);
+    const fields = group ? disciplineFieldLines(group, disc[k], s.venueClass) : [];
     if (!g && !fields.length) continue;
     discBlocks.push([`${DISCIPLINE_LABEL[k]}:`, g ? `  Client goals: ${g.replace(/\n+/g, " ")}` : "", ...fields].filter(Boolean).join("\n"));
   }
+  const older = olderNoteLines(s.legacyNotes);
   // A synced doc can carry anything: null / non-object rows are skipped.
   const rows = (Array.isArray(s.inventory) ? s.inventory : []).filter(
     (r): r is NonNullable<SurveySourceInput["inventory"]>[number] => !!r && typeof r === "object" && !Array.isArray(r)
@@ -182,6 +206,7 @@ export function surveyText(s: SurveySourceInput): string {
     ...head,
     findings,
     ...(discBlocks.length ? ["Disciplines:", ...discBlocks] : []),
+    ...(older.length ? ["Older notes:", ...older] : []),
     ...(inv.length ? ["Existing inventory:", ...inv, more] : []),
     "</site_visit>",
   ].filter(Boolean).join("\n");

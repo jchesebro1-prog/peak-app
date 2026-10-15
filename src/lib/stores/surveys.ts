@@ -322,6 +322,8 @@ export interface SurveyDraft {
   reason: string;
   travelTime: string;
   distance: string;
+  /** #344 B-final — set once the editor filled Travel time / Distance from the drive suggestion; never refilled after */
+  travelAutoFilled?: true;
   hasBOM: boolean;
   hasDrawings: boolean;
   hasPhotos: boolean;

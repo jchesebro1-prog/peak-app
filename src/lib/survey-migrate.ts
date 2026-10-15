@@ -38,6 +38,7 @@ export type MigratableSurvey = {
   liftRequired?: "" | "yes" | "no";
   liftType?: string;
   liftHeight?: string;
+  liftSupplier?: string;
   // #344 B2 — line sets
   linesets?: Array<Partial<LinesetRow>>;
   linesetQty?: number;
@@ -164,6 +165,8 @@ export function stepAccess(s: MigratableSurvey): void {
     }
   }
   if (!blankStr(s.liftHeight)) addLegacyNote(s, { section: "site", label: "Lift needed — type / height" + BEFORE, text: strOf(s.liftHeight) });
+  /* #344 B-final: a supplier was named, so a lift was needed — only when Lift needed was never answered */
+  if (s.liftRequired === undefined && !blankStr(s.liftSupplier)) s.liftRequired = "yes";
 }
 
 const MEASURE_LINKS: Array<[string, string, string]> = [
@@ -191,7 +194,9 @@ export function stepMeasureLinks(s: MigratableSurvey): void {
   }
   const counts: Array<[string, string]> = [["linesetCount", "Lineset count"], ["battenCount", "Batten count"]];
   if (typeof s.linesetQty !== "number") {
-    if (Array.isArray(s.linesets) && s.linesets.length > 0) s.linesetQty = s.linesets.length;
+    /* only rows with a set number count (an "Ext" or blank position is kept but is not a numbered set) */
+    const numbered = Array.isArray(s.linesets) ? s.linesets.filter((r) => !!r && /^\d+$/.test(strOf(r.pos)) && Number(strOf(r.pos)) >= 1).length : 0;
+    if (numbered > 0) s.linesetQty = numbered;
     else {
       const first = counts.map(([k]) => wholeCount(rig?.[k])).find((n) => n !== null);
       if (first != null) s.linesetQty = first;
@@ -373,4 +378,12 @@ export function migrateSurvey<T extends MigratableSurvey>(s: T): T {
   stepAvCondition(s);
   stepLinesets(s);
   return s;
+}
+
+/** #344 B-final — the record a print of unsaved edits shows: the saved record with the editor's patch on top, migrated
+ *  again (on a copy) so the notes those edits produce show. An incoming `legacyNotes` is never trusted (derived only). */
+export function printRecordFor<T extends MigratableSurvey>(existing: T, patch: object): T {
+  const { legacyNotes: _ignored, ...rest } = patch as { legacyNotes?: unknown };
+  void _ignored;
+  return migrateSurvey(structuredClone({ ...existing, ...rest }) as T);
 }

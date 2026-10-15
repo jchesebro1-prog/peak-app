@@ -168,25 +168,34 @@ export type LinesetFillKey = Exclude<keyof LinesetRow, "id" | "pos">;
 
 const cellBlank = (v: unknown) => v == null || String(v).trim() === "";
 
+const COND_SEED: Record<string, ConditionLevel> = { G: 3, F: 2, P: 1, X: 0 };
+/** A row's Condition as the editor shows it: the stored level, else (never answered) the old code's seed. */
+function conditionOf(row: LinesetRow): ConditionLevel | null | undefined {
+  return row.condition !== undefined ? row.condition : COND_SEED[String(row.cond ?? "")];
+}
+
 /** How many non-empty cells below the source row Fill down would change (differing values; a blank source counts every filled cell). */
 export function fillDownImpact(rows: LinesetRow[], fromId: string, key: LinesetFillKey): number {
   const at = rows.findIndex((row) => row.id === fromId);
   if (at < 0) return 0;
-  const source = rows[at][key];
+  const read = (row: LinesetRow) => (key === "condition" ? conditionOf(row) : row[key]);
+  const source = read(rows[at]);
   let n = 0;
   for (let i = at + 1; i < rows.length; i++) {
-    const cell = rows[i][key];
+    const cell = read(rows[i]);
     if (cellBlank(cell)) continue;
     if (cellBlank(source) || String(cell) !== String(source)) n++;
   }
   return n;
 }
 
-/** Copy one cell's value into the same column of every row after it (in the order given). */
+/** Copy one cell's value into the same column of every row after it (in the order given). Condition is written as
+ *  `null` from an unrated row — never deleted — so the read-time migration can't re-seed an old G/F/P/X rating
+ *  ("a cleared field stays cleared"). */
 export function fillDown(rows: LinesetRow[], fromId: string, key: LinesetFillKey): LinesetRow[] {
   const at = rows.findIndex((row) => row.id === fromId);
   if (at < 0) return rows;
-  const source = rows[at][key];
+  const source = key === "condition" ? (conditionOf(rows[at]) ?? null) : rows[at][key];
   return rows.map((row, i) => {
     if (i <= at) return row;
     const next: Record<string, unknown> = { ...row };
@@ -194,6 +203,12 @@ export function fillDown(rows: LinesetRow[], fromId: string, key: LinesetFillKey
     else next[key] = source;
     return next as unknown as LinesetRow;
   });
+}
+
+/** #344 B-final: the schedule is in use once it has a quantity above 0 or any row — the editor then turns
+ *  `linesetsEnabled` on too, so every reader that gates on it (older code included) shows the sets. */
+export function linesetsInUse(rows: readonly LinesetRow[] | undefined, qty: number | undefined): boolean {
+  return (typeof qty === "number" && qty > 0) || (rows?.length ?? 0) > 0;
 }
 
 /** Mark sets fromPos…toPos as Open / spare where no type is set yet; typed sets are left and listed. */

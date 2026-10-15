@@ -68,6 +68,8 @@ export type Draft = {
   visitPurpose: string;
   reason: string;
   travelTime: string;
+  /** #344 B-final — Travel was auto-filled once (stored on the next save; never refilled) */
+  travelAutoFilled?: true;
   distance: string;
   hasBOM: boolean;
   hasDrawings: boolean;

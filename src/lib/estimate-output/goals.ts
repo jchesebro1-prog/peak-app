@@ -25,6 +25,33 @@ function cleanGoalList(v: unknown[]): string[] {
   return out;
 }
 
+/** #344 B-final: what's left of the save's 1,000-character total for a goal list being edited — the cleaned
+ *  non-blank lines plus one "\n" between each, exactly as `cleanGoalList` counts them. Never below 0. */
+export function goalsBudgetLeft(lines: readonly unknown[]): number {
+  let used = 0;
+  let n = 0;
+  for (const x of lines) {
+    const line = cleanPlainText(x, CLIENT_GOALS_MAX);
+    if (!line) continue;
+    used += line.length + (n ? 1 : 0);
+    n++;
+  }
+  return Math.max(0, CLIENT_GOALS_MAX - used);
+}
+
+/** Per-goal input limit. */
+export const GOAL_LINE_MAX = 300;
+
+/** #344 B-final: one goal input's maxLength — min(300, its length + what the list has left), where a blank line also
+ *  pays for the "\n" it adds once it has text; never below its current length (an older long goal is never cut). */
+export function goalMaxLength(lines: readonly string[], i: number): number {
+  const cur = String(lines[i] ?? "");
+  const t = cleanPlainText(cur, CLIENT_GOALS_MAX).length;
+  const others = lines.some((x, j) => j !== i && cleanPlainText(x, CLIENT_GOALS_MAX));
+  const left = goalsBudgetLeft(lines) - (t === 0 && others ? 1 : 0);
+  return Math.max(cur.length, Math.min(GOAL_LINE_MAX, t + Math.max(0, left)));
+}
+
 /** R4: each discipline's `goals` cleaned (trimmed, ≤ 1,000); a blank or
  *  non-string one removed; every other field and key untouched. #344: a goals
  *  list (the read-time migration turns goal text into one) is kept as a cleaned

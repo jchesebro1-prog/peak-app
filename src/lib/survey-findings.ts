@@ -50,25 +50,30 @@ export type SurveyFindingsInput = Partial<
     | "measurements"
     | "disciplines"
     | "scope"
+    | "legacyNotes"
   >
 >;
 
-/** #344 B7: "lift: Yes — Scissor >20ft, working height 32' (Peak)" from the B5 answers; "lift: No"; before B5 the old
- *  answer exactly as it always printed ("lift: Scissor (Sunbelt)"). */
-function liftLine(s: SurveyFindingsInput, f: ReturnType<typeof accessFacts>): string {
+/** #344 B7: "lift: Yes — Scissor >20ft, working height 32' (Peak)" from the B5 answers; "lift: No" (never its details).
+ *  A migrated record (`legacyNotes` is an array — get() always derives it) reads only the new keys: its old answers
+ *  already moved or show as Older notes. Only an unmigrated record falls back to the old answer, exactly as it always
+ *  printed ("lift: Scissor (Sunbelt)"). */
+function liftLine(s: SurveyFindingsInput, f: ReturnType<typeof accessFacts>, migrated: boolean): string {
   if (s.liftRequired === "no") return "lift: No";
-  if (s.liftRequired === "yes") {
-    const bits = [f.liftType, f.liftWorkingHeight ? `working height ${f.liftWorkingHeight}` : ""].filter(Boolean);
-    return `lift: Yes${bits.length ? ` — ${bits.join(", ")}` : ""}${f.liftSupplier ? ` (${f.liftSupplier})` : ""}`;
-  }
+  const bits = [f.liftType, f.liftWorkingHeight ? `working height ${f.liftWorkingHeight}` : ""].filter(Boolean);
+  const supplier = f.liftSupplier ? ` (${f.liftSupplier})` : "";
+  if (s.liftRequired === "yes") return `lift: Yes${bits.length ? ` — ${bits.join(", ")}` : ""}${supplier}`;
+  if (migrated) return bits.length || supplier ? `lift: ${bits.join(", ") || "—"}${supplier}` : "";
   const old = (s.liftNeeded || "").trim();
   if (!old) return "";
-  return `lift: ${old}${f.liftWorkingHeight ? `, working height ${f.liftWorkingHeight}` : ""}${f.liftSupplier ? ` (${f.liftSupplier})` : ""}`;
+  return `lift: ${old}${f.liftWorkingHeight ? `, working height ${f.liftWorkingHeight}` : ""}${supplier}`;
 }
 
 /** Flatten a field survey's brief + field capture into plain-text findings. */
 export function surveyFindings(s: SurveyFindingsInput): string {
-  const door = accessFacts(s);
+  /* the same gate as the field sheet: only an unmigrated record reads the old access keys */
+  const migrated = Array.isArray(s.legacyNotes);
+  const door = accessFacts(s, !migrated);
   const parts: string[] = [
     kv("Venue type", s.venueType),
     kv("Reason for visit", s.reason),
@@ -83,7 +88,7 @@ export function surveyFindings(s: SurveyFindingsInput): string {
     kv("floor", s.floorType),
     kv("access door", s.accessDoorSize),
     kv("loading door", [door.doorType, door.doorLocation, door.doorWH].filter(Boolean).join(", ")),
-    liftLine(s, door),
+    liftLine(s, door, migrated),
   ].filter(Boolean);
   if (access.length) parts.push("Access/logistics: " + access.join("; "));
   const meas = recordLines(s.measurements);

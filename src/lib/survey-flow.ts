@@ -114,7 +114,8 @@ export function recapFor(s: FlowSlice): RecapEntry[] {
   for (const g of DISCIPLINE_GROUPS) {
     const d: DisciplineData = s.disciplines?.[g.key] || {};
     const scopes = Array.isArray(d.scope) ? d.scope.map((x) => String(x)).filter(Boolean) : [];
-    const other = typeof d.scopeOther === "string" ? d.scopeOther.trim() : "";
+    /* Other's text is read back only while Other is ticked (#344 B-final) */
+    const other = scopes.includes("Other") && typeof d.scopeOther === "string" ? d.scopeOther.trim() : "";
     const goals = goalLists[g.key] ?? [];
     const listed = set ? set.includes(g.key) : scopes.length > 0 || goals.length > 0 || other !== "";
     if (listed) out.push({ disc: g.key, label: SCOPE_LABEL[g.key], scopes, other, goals });

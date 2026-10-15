@@ -2,11 +2,14 @@
    sheet, the read-time migration and the Assessments engine (R4: both forms use the same lists). Pure. Jeff chose
    fixed-in-code lists (Oct 14); changing one is a code change. */
 
+/* Engine codes are derived from these labels — add new labels, never edit or remove one. */
 export const LIFT_TYPES: readonly string[] = ["Ladder >12ft", "Scaffolding", "Single Man Lift", "Scissor >20ft", "Scissor >40ft", "Scissor >50ft"];
+/* Engine codes are derived from these labels — add new labels, never edit or remove one. */
 export const LOADING_DOOR_TYPES: readonly string[] = ["Roll-up / overhead", "Double doors", "Single door", "Dock door", "Other"];
 export const TRACK_SERIES: readonly string[] = ["N/A", "None", "Lightweight", "Standard", "Curved"];
 export const TRACK_OPERATIONS: readonly string[] = ["SL", "SR"];
 export const PLUG_TYPES: readonly string[] = ["Stage-pin", "Edison", "Twist-lock", "Other", "Mixed"];
+/* Engine codes are derived from these labels — add new labels, never edit or remove one. */
 export const LIGHTING_POSITIONS: readonly string[] = [
   "Electric 1", "Electric 2", "Electric 3", "Electric 4", "Electric 5", "FOH 1", "FOH 2", "FOH 3", "Torms", "Balcony", "Other",
 ];
@@ -86,4 +89,23 @@ export function acceptTravel(est: { source: string; minutes: number | null; mile
 /** Engine pick-list code for a label: "Ladder >12ft" → "ladder_12ft". */
 export function listSlug(label: string): string {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+/** #344 B-final — the Visit card fills a blank Travel time / Distance from the drive suggestion only while the record
+ *  was never auto-filled (`travelAutoFilled` unset). Once a fill is saved the flag stays, so a cleared field stays
+ *  cleared on every later open. */
+export function shouldAutoFillTravel(
+  rec: { travelTime?: unknown; distance?: unknown; travelAutoFilled?: unknown },
+  suggestion: { min: number; miles: number } | null | undefined
+): boolean {
+  if (!suggestion || rec.travelAutoFilled === true) return false;
+  const blank = (v: unknown) => typeof v !== "string" || v.trim() === "";
+  return blank(rec.travelTime) || blank(rec.distance);
+}
+
+/** #344 B-final — Lift type / Working height / Who supplies lift show while Lift needed is Yes, or while any of them
+ *  holds a value (an old supplier, or details entered before No was picked stay visible and editable). */
+export function showLiftDetails(s: { liftRequired?: unknown; liftType?: unknown; liftWorkingHeight?: unknown; liftSupplier?: unknown }): boolean {
+  const has = (v: unknown) => typeof v === "string" && v.trim() !== "";
+  return s.liftRequired === "yes" || has(s.liftType) || has(s.liftWorkingHeight) || has(s.liftSupplier);
 }

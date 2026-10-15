@@ -2,20 +2,23 @@
    printed field sheet (venue-assessment-sheet.ts), the plain-text findings (survey-findings.ts) and Assist's
    site-visit source text (assist/features/suggest-sources.ts). Pure and client-safe. */
 import { LIGHTING_POSITIONS, conditionLabel, parseMonthYear } from "./field-lists";
-import { DISCIPLINE_GROUPS, PIPES_LABEL, SCOPE_OTHER, type CurtainItem, type DisciplineData, type PositionRow } from "./stores/survey-intake";
+import {
+  DISCIPLINE_GROUPS, PIPES_LABEL, SCOPE_OTHER, visibleFields,
+  type CurtainItem, type DisciplineData, type DisciplineGroup, type DisciplineKey, type PositionRow, type SystemField,
+} from "./stores/survey-intake";
+import type { VenueClass } from "./stores/venue-classes";
 
-const FIELD_TYPE = new Map<string, string | undefined>(DISCIPLINE_GROUPS.flatMap((g) => g.fields.map((f) => [f.key, f.type] as const)));
-
-/** A discipline field's def type by key ("condition", "month", …), so plain-text readers can format the value. */
-export function disciplineFieldType(key: string): string | undefined {
-  return FIELD_TYPE.get(key);
+/** A discipline's group definition by key. */
+export function disciplineGroup(key: DisciplineKey | string): DisciplineGroup | undefined {
+  return DISCIPLINE_GROUPS.find((g) => g.key === key);
 }
 
-const FIELD_BOUND = new Set<string>(DISCIPLINE_GROUPS.flatMap((g) => g.fields.filter((f) => f.bind).map((f) => f.key)));
-
-/** True when a discipline field shares its value with a measurement (`bind`): the measurement is the answer. */
-export function disciplineFieldBound(key: string): boolean {
-  return FIELD_BOUND.has(key);
+/** The discipline fields the editor shows for this class: the class's visible fields, the pipes qty only while its
+ *  Present chip is ticked. Shared by the field sheet and Assist (#344 B-final). */
+export function shownFields(group: DisciplineGroup, data: DisciplineData | Record<string, unknown> | null | undefined, cls: VenueClass | undefined): SystemField[] {
+  const present = (data as Record<string, unknown> | null | undefined)?.present;
+  const pipes = Array.isArray(present) && present.includes(PIPES_LABEL);
+  return visibleFields(group, cls as VenueClass).filter((f) => f.key !== "fixedPipeQty" || pipes);
 }
 
 /** A stored scalar as one trimmed line (numbers allowed); anything else is "". */
@@ -113,11 +116,13 @@ export function consoleLocationText(d: DisciplineData | Record<string, unknown> 
   return loc === "Other" && other ? `Other: ${other}` : loc;
 }
 
-/** "New grid, Add hoists, Other: …" — the scopes, with Other's text when it has one. */
+/** "New grid, Add hoists, Other: …" — the scopes, with Other's text when it has one. Other's text counts only while
+ *  Other is ticked (unticking keeps the text stored but the editor hides it). */
 export function scopeText(d: DisciplineData | Record<string, unknown> | null | undefined): string {
   const data = (d || {}) as Record<string, unknown>;
-  const other = oneLine(data.scopeOther);
-  const scopes = strList(data.scope).filter((x) => x !== SCOPE_OTHER || !other);
+  const ticked = strList(data.scope);
+  const other = ticked.includes(SCOPE_OTHER) ? oneLine(data.scopeOther) : "";
+  const scopes = ticked.filter((x) => x !== SCOPE_OTHER || !other);
   return [...scopes, other ? `Other: ${other}` : ""].filter(Boolean).join(", ");
 }
 

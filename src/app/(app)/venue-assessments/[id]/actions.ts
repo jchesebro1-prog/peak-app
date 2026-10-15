@@ -16,6 +16,7 @@ import {
 import { create as createQuote } from "@/lib/stores/quotes";
 import { getSettings } from "@/lib/settings";
 import { buildAssessmentSheet } from "@/lib/venue-assessment-sheet";
+import { printRecordFor } from "@/lib/survey-migrate";
 import { renderLetterPdf } from "@/lib/pdf";
 import { letterheadJpeg } from "@/lib/renewal-outreach";
 
@@ -44,6 +45,7 @@ export type SurveyPatch = Partial<
     | "visitType"
     | "reason"
     | "travelTime"
+    | "travelAutoFilled"
     | "distance"
     | "hasBOM"
     | "hasDrawings"
@@ -131,7 +133,8 @@ export async function printSurveySheet(id: string, patch: SurveyPatch) {
   if (!existing) return { ok: false as const, error: "Assessment not found." };
   const settings = await getSettings();
   const header = await letterheadJpeg(settings);
-  const doc = buildAssessmentSheet({ ...existing, ...patch });
+  /* migrate the merged draft so a print of unsaved edits shows the Older notes those edits produce */
+  const doc = buildAssessmentSheet(printRecordFor(existing, patch));
   doc.companyName = settings.companyName;
   doc.accent = settings.accent;
   doc.headerJpeg = header.jpeg;
