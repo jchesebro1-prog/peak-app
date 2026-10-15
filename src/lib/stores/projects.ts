@@ -9,7 +9,7 @@ import {
   updateBlob,
   upsertDoc,
 } from "@/db/doc-store";
-import { withQuoteLock } from "@/db";
+import { withQuoteLock, withSavepoint } from "@/db";
 import { createAssignment } from "@/lib/stores/assignments";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { yearAwareDate } from "@/lib/format";
@@ -780,10 +780,14 @@ export async function createProjectFromQuote(
     const p = await createProject(fromQuote(q, await loadPipelines()));
 
     // #346 — the estimate's companies carry to the project once. Never allowed to undo the win:
-    // this runs inside setStatus's transaction (see quote-spawn.ts), so a failure is logged, not thrown.
+    // this runs inside setStatus's transaction (see quote-spawn.ts), where a SQL error would abort the
+    // whole Postgres transaction past any JS catch — so the copy runs in a savepoint (rolled back alone)
+    // and a failure is logged, not thrown.
     try {
-      const { copyParties } = await import("@/lib/stores/parties");
-      await copyParties({ type: "quote", id: quoteId }, { type: "project", id: p.id }, q.owner || DEFAULT_ACTOR);
+      await withSavepoint(async () => {
+        const { copyParties } = await import("@/lib/stores/parties");
+        await copyParties({ type: "quote", id: quoteId }, { type: "project", id: p.id }, q.owner || DEFAULT_ACTOR);
+      });
     } catch (e) {
       console.error("projects.createProjectFromQuote: copying parties failed", quoteId, e);
     }

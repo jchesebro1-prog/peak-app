@@ -2,7 +2,7 @@
    Run the pure half alone with `npx tsx scripts/test-parties.ts`. */
 import { like, sql } from "drizzle-orm";
 import type { Ok } from "./test-inbox-org";
-import { getDb } from "../src/db";
+import { getDb, withSavepoint, withTransaction } from "../src/db";
 import { companies, contacts as contactsTable } from "../src/db/schema";
 import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "../src/db/doc-tables";
 import { DEMO_COLLECTIONS } from "../src/db/seed-data";
@@ -11,6 +11,8 @@ import { saveContact } from "../src/lib/identity/contacts";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
 import { buildQuote } from "../src/lib/stores/quotes";
 import { createProjectFromQuote } from "../src/lib/stores/projects";
+import { autoTaskId } from "../src/lib/stores/tasks";
+import { convert } from "../src/lib/stores/leads";
 import { buildOpportunities, type OppLeadInput, type OppQuoteInput } from "../src/lib/opportunities";
 import { addParty, copyParties, listFor, listForCompany, listForRecords, partyId, removeParty, setPartyContact } from "../src/lib/stores/parties";
 import {
@@ -175,10 +177,43 @@ export async function partyDbChecks(ok: Ok) {
     ok(!!proj, "parties db: fixture won quote spawns a project");
     if (proj) {
       registerFixture("projects", proj.id);
+      registerFixture("tasks", autoTaskId(`item16:sold:${proj.id}`)); // the kickoff auto-task the spawn creates
       const onProj = await listFor("project", proj.id);
       for (const p of onProj) registerFixture("record_parties", p.id);
       ok(onProj.length === 1 && onProj[0].role === "owner" && onProj[0].companyId === co1, "parties db: project inherits the estimate's parties");
     }
+
+    // lead → quote through leads.convert: owner carries, GC does not
+    const convLead = fixtureId(346, "convlead");
+    const NOW = Date.now();
+    await createFixture("leads", { id: convLead, org: "Party Co One", contact: "Pat One", stage: "new", source: "web", customerId: co1, value: 0, activities: [], createdAt: NOW, updatedAt: NOW, lastActivityAt: NOW } as never);
+    for (const [co, role] of [[co1, "owner"], [co2, "gc"]] as const) {
+      const r = await addParty({ recordType: "lead", recordId: convLead, companyId: co, role }, "u-test");
+      ok(r.ok, `parties db: ${role} on the lead to convert`);
+      if (r.ok) registerFixture("record_parties", r.party.id);
+    }
+    const conv = await convert(convLead);
+    ok(!!conv?.quoteId, "parties db: fixture lead converts to a quote");
+    if (conv?.quoteId) {
+      registerFixture("quotes", conv.quoteId);
+      const onConv = await listFor("quote", conv.quoteId);
+      for (const p of onConv) registerFixture("record_parties", p.id);
+      ok(onConv.length === 1 && onConv[0].role === "owner" && onConv[0].companyId === co1, "parties db: converted quote has the lead's owner and no GC");
+    }
+
+    // withSavepoint contains a SQL error so the outer transaction survives
+    ok((await withSavepoint(async () => 7)) === 7, "parties db: withSavepoint outside a transaction just runs fn");
+    let survived = false, threw = false;
+    await withTransaction(async () => {
+      try {
+        await withSavepoint(async () => { await (await getDb()).execute(sql`select * from no_such_table_346`); });
+      } catch {
+        threw = true;
+      }
+      await (await getDb()).execute(sql`select 1`); // would throw "current transaction is aborted" without the savepoint
+      survived = true;
+    });
+    ok(threw && survived, "parties db: a SQL error inside withSavepoint rolls back to the savepoint, the outer transaction survives");
   } finally {
     await dropFixtures(346);
     await dropPartyIdentityFixtures();

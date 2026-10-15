@@ -8,6 +8,7 @@ import {
 } from "@/db/doc-store";
 import { displayQuoteNumber, isEstimateNo, withoutEstimateFields } from "@/lib/estimate-number";
 import { numberNewDoc } from "@/lib/stores/estimate-numbers";
+import { withSavepoint } from "@/db";
 
 /**
  * LeadStore — direct port of app/lead.js (rss_leads_v1).
@@ -821,8 +822,10 @@ export async function convert(
 
   // #346 — the converted quote starts with the lead's companies (not its GCs/ECs).
   try {
-    const { copyParties } = await import("./parties");
-    await copyParties({ type: "lead", id }, { type: "quote", id: quoteId }, me);
+    await withSavepoint(async () => {
+      const { copyParties } = await import("./parties");
+      await copyParties({ type: "lead", id }, { type: "quote", id: quoteId }, me);
+    });
   } catch (e) {
     console.error("leads.convert: copying parties failed", id, e);
   }
