@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PARTY_ROLES, ROLE_LABEL, groupPartiesByRole, type PartyRecordType, type PartyRole } from "@/lib/parties/rules";
@@ -11,6 +11,7 @@ import CompanySearch from "./company-search";
 /**
  * #346 — the one parties editor: grouped by role, add (role → company → optional person → label for Other),
  * change person, remove. Used by the lead drawer, the project page and the Estimator's Parties dialog.
+ * Remount with key={recordType + ":" + recordId} when the record changes — state is seeded from `initial` once.
  */
 export default function PartiesEditor({
   recordType,
@@ -39,6 +40,8 @@ export default function PartiesEditor({
   const [contactId, setContactId] = useState("");
   const [label, setLabel] = useState("");
   const [contactsFor, setContactsFor] = useState<Record<string, ContactOption[]>>({});
+  // The company the user last picked; a contacts response for any other company is stale and dropped.
+  const pickedRef = useRef<string | null>(null);
 
   const apply = (r: PartyActionResult) => {
     if (!r.ok) {
@@ -53,26 +56,46 @@ export default function PartiesEditor({
     return true;
   };
 
+  // Runs one awaited server action; a thrown action shows inline instead of reaching the error boundary.
+  const callAction = async (run: () => Promise<PartyActionResult>): Promise<PartyActionResult | null> => {
+    try {
+      return await run();
+    } catch {
+      setError("Couldn't save — try again.");
+      return null;
+    }
+  };
+
   const pickCompany = (c: { id: string; name: string }) => {
+    pickedRef.current = c.id;
     setCompany(c);
     setContactId("");
     setContacts([]);
-    companyContactsAction(c.id).then(setContacts).catch(() => setContacts([]));
+    companyContactsAction(c.id)
+      .then((list) => {
+        if (pickedRef.current === c.id) setContacts(list);
+      })
+      .catch(() => {
+        if (pickedRef.current === c.id) setContacts([]);
+      });
   };
 
   const resetAdd = () => {
+    pickedRef.current = null;
     setAdding(false);
     setCompany(null);
     setContacts([]);
     setContactId("");
     setLabel("");
+    setError("");
+    setNote("");
   };
 
   const submit = () => {
     if (!company) return setError("Pick a company.");
     start(async () => {
-      const ok = apply(await addPartyAction({ recordType, recordId, companyId: company.id, role, contactId: contactId || null, roleLabel: role === "other" ? label : null }));
-      if (ok) resetAdd();
+      const r = await callAction(() => addPartyAction({ recordType, recordId, companyId: company.id, role, contactId: contactId || null, roleLabel: role === "other" ? label : null }));
+      if (r && apply(r)) resetAdd();
     });
   };
 
@@ -103,7 +126,12 @@ export default function PartiesEditor({
                   aria-label={`Person at ${p.companyName}`}
                   value={p.contactId ?? ""}
                   onFocus={() => loadContacts(p.companyId)}
-                  onChange={(e) => start(async () => void apply(await setPartyContactAction(p.id, e.target.value || null)))}
+                  onChange={(e) =>
+                    start(async () => {
+                      const r = await callAction(() => setPartyContactAction(p.id, e.target.value || null));
+                      if (r) apply(r);
+                    })
+                  }
                   disabled={pending}
                   style={{ fontSize: 12, maxWidth: 180 }}
                 >
@@ -123,7 +151,12 @@ export default function PartiesEditor({
                 <button
                   type="button"
                   aria-label={`Remove ${p.companyName} (${p.roleText})`}
-                  onClick={() => start(async () => void apply(await removePartyAction(p.id)))}
+                  onClick={() =>
+                    start(async () => {
+                      const r = await callAction(() => removePartyAction(p.id));
+                      if (r) apply(r);
+                    })
+                  }
                   disabled={pending}
                   style={{ ...btn, padding: "2px 7px", color: "#8a2f22" }}
                 >
@@ -163,7 +196,14 @@ export default function PartiesEditor({
             {company ? (
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <span style={{ fontSize: 13 }}>{company.name}</span>
-                <button type="button" onClick={() => setCompany(null)} style={{ ...btn, padding: "2px 8px" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    pickedRef.current = null;
+                    setCompany(null);
+                  }}
+                  style={{ ...btn, padding: "2px 8px" }}
+                >
                   Change
                 </button>
               </div>
