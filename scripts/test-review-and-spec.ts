@@ -21454,9 +21454,9 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
   ok(names214.every((n) => fn214(n).includes("await requireUser()")), "#214 actions: every popup action requires a signed-in user");
   ok(
     ["linkPopupDataAction", "fetchMessageCcAction", "fillContactBlanksAction"].every((n) => fn214(n).includes("loadThread(")) &&
-      acts214.includes("if (!t || !visibleTo(t, me.name)) return { ok: false, error: \"Thread not found.\" };") &&
-      fn214("setThreadContactsAction").includes("visibleTo(t, me.name)"),
-    "#214 actions: thread actions only reach threads in the user's own mailbox"
+      acts214.includes("const t = await ownThread(threadId, me);") && acts214.includes("if (!t) return { ok: false, error: \"Thread not found.\" };") &&
+      fn214("setThreadContactsAction").includes("await ownThread(threadId, me)"),
+    "#214 actions: thread actions only reach threads in the user's own mailbox (#349: ownThread, by identity)"
   );
   // #341 — thread visibility: the reader opens only what canOpenThread allows,
   // read-only off-mailbox; ⌘K's thread candidates follow canSeeThread in SQL.
@@ -21464,13 +21464,14 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
   const reader340 = read("src/app/(app)/inbox/thread-reader.tsx");
   const search340 = read("src/lib/search/global-search.ts");
   ok(
-    /const explicitThread = threadHit && canOpenThread\(threadHit, me\) \? threadHit : null;/.test(inbox340) &&
-      /if \(explicitThread && visibleTo\(explicitThread, me\) && !params\.box/.test(inbox340) &&
-      /draftThread && draftThread\.status === "draft" && visibleTo\(draftThread, me\)/.test(inbox340),
+    /const explicitThread = threadHit && canOpenThread\(threadHit, viewer\) \? threadHit : null;/.test(inbox340) &&
+      /if \(explicitThread && visibleTo\(explicitThread, viewer\) && !params\.box/.test(inbox340) &&
+      /draftThread && draftThread\.status === "draft" && visibleTo\(draftThread, viewer\)/.test(inbox340) &&
+      /const viewer = await mailboxViewer\(user\);/.test(inbox340),
     "#341 reader: ?thread= opens only a thread the viewer may see (canOpenThread), never switches to another person's box, and ?draft= opens only my own draft"
   );
   ok(
-    /const readOnly = !visibleTo\(sel, me\);/.test(inbox340) &&
+    /const readOnly = !visibleTo\(sel, viewer\);/.test(inbox340) &&
       /unread: readOnly \? false : !!sel\.unread,/.test(inbox340) &&
       /org: readOnly \? null : org,/.test(inbox340) &&
       /visit: readOnly \? null : visit,/.test(inbox340) &&
@@ -21484,8 +21485,9 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
     "#341 reader: a read-only thread shows the banner and no write control — no actions/composer footer (reply, status, archive, Assist, pre-draft), no link sidebar, no per-message Link… / Task… / link picker, no court strip, and no mark-read"
   );
   ok(
-    /where: canSeeThreadCond\(meName\),/.test(search340) &&
-      /\.filter\(\(d\) => canSeeThread\(d, meName\)\)/.test(search340) &&
+    /where: canSeeThreadCond\(viewer\),/.test(search340) &&
+      /\.filter\(\(d\) => canSeeThread\(d, viewer\)\)/.test(search340) &&
+      /const viewer = await mailboxViewer\(\{ id: me\.id, name: me\.name \|\| "" \}\);/.test(search340) &&
       !/threadsOf/.test(search340),
     "#341 ⌘K: email-thread candidates are cut to canSeeThread in SQL before the per-group limit, and re-checked per row"
   );
@@ -56079,7 +56081,7 @@ async function p3SendAsyncChecks(): Promise<void> {
     // I3b — Open in Inbox reuses the sender's own still-current draft for the quote.
     const draftOf = (createdAt: number, paths: string[]) => ({ threadId: "C-OPEN", createdAt, attachments: paths.map((pdfPath) => ({ pdfPath })) });
     const cur = fakes(sentRev);
-    cur.deps.findInboxDraft = async (qid, who) => { cur.calls.push(`findInboxDraft:${qid}:${who}`); return draftOf(600, ["quote-pdfs/Q-P3S/rev-2.pdf", `quote-pdfs/Q-P3S/cover-${NOW}.pdf`]); };
+    cur.deps.findInboxDraft = async (qid, who) => { cur.calls.push(`findInboxDraft:${qid}:${who.name}`); return draftOf(600, ["quote-pdfs/Q-P3S/rev-2.pdf", `quote-pdfs/Q-P3S/cover-${NOW}.pdf`]); };
     const rc = await p3sOpenInbox(cur.deps, SAM, "Q-P3S", input());
     ok(rc.ok && rc.reused === true && rc.href === p3sHref("C-OPEN") && rc.threadId === "C-OPEN" && rc.status === "sent",
       "#P3 final review (I3b): Open in Inbox with the sender's still-current draft open → that draft's link");

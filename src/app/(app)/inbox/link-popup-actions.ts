@@ -12,10 +12,8 @@ import { revalidatePath } from "next/cache";
 import { requireUser, type SessionUser } from "@/lib/session";
 import { patchDoc } from "@/db/doc-store";
 import {
-  get as getThread,
   resolveCustomerId,
   timeFull,
-  visibleTo,
   type CommMessage,
   type CommThread,
 } from "@/lib/stores/comms";
@@ -52,7 +50,7 @@ import {
   type LinkTargetKind,
 } from "@/lib/inbox-link-targets";
 import type { LinkPopupData, PopupParticipant } from "./types";
-import { mailboxViewer } from "@/lib/mailbox-viewer";
+import { ownThread } from "@/lib/inbox-thread-guard";
 
 type R = { ok: true; note?: string } | { ok: false; error: string };
 type DataR = { ok: true; data: LinkPopupData } | { ok: false; error: string };
@@ -90,8 +88,8 @@ function senderOf(m: CommMessage, t: CommThread, own: readonly string[] = []): P
 type Loaded = { ok: true; t: CommThread; m: CommMessage } | { ok: false; error: string };
 
 async function loadThread(threadId: string, messageId: string, me: SessionUser): Promise<Loaded> {
-  const t = await getThread(threadId);
-  if (!t || !visibleTo(t, await mailboxViewer(me))) return { ok: false, error: "Thread not found." };
+  const t = await ownThread(threadId, me); // #349 — my own, by identity (stamps a legacy owner)
+  if (!t) return { ok: false, error: "Thread not found." };
   const m = (t.messages || []).find((x) => x.id === messageId);
   if (!m) return { ok: false, error: "That message isn't on this thread." };
   return { ok: true, t, m };
@@ -242,8 +240,8 @@ export async function setThreadContactsAction(
   on: boolean
 ): Promise<R> {
   const me = await requireUser();
-  const t = await getThread(threadId);
-  if (!t || !visibleTo(t, await mailboxViewer(me))) return { ok: false, error: "Thread not found." };
+  const t = await ownThread(threadId, me); // #349 — my own, by identity (stamps a legacy owner)
+  if (!t) return { ok: false, error: "Thread not found." };
   const c = on ? await getContact(contactId) : null;
   if (on && !c) return { ok: false, error: "Person not found." };
   const pre = applyContactLink(t, contactId, on);

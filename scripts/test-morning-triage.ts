@@ -815,7 +815,7 @@ export async function triageActionChecks(ok: Ok): Promise<void> {
   const exportsN = (actions.match(/export async function /g) || []).length;
   ok(actions.startsWith('"use server";') && exportsN === 4 && (actions.match(/await requireUser\(\)/g) || []).length === exportsN, "actions: a server-action file; every action calls requireUser() first");
   ok((actions.match(/await listed\(user\.id, k, cur\.now\)/g) || []).length === 4 && (actions.match(/error: NOT_LISTED/g) || []).length >= 4 && /isn't on your list/.test(actions), "actions: done, snooze, dismiss and reassign each confirm the key is on the signed-in user's snapshot first");
-  ok(/dismissActionItem\(/.test(actions) && /assignThread\(/.test(actions) && /sameName\(u\.name, /.test(actions), "actions: dismissing a call to-do dismisses it on its recording; reassign only to an active teammate");
+  ok(/dismissActionItem\(/.test(actions) && /assignThread\(/.test(actions) && /const target = await actorByName\(/.test(actions), "actions: dismissing a call to-do dismisses it on its recording; reassign only to an active teammate (#349: exactly one, by identity)");
   const rowsSrc = readFileSync("src/components/triage/triage-rows.tsx", "utf8");
   const importLines = rowsSrc.split("\n").filter((l) => l.startsWith("import "));
   ok(
