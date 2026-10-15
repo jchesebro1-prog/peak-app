@@ -14,7 +14,7 @@ import { postChanged } from "@/lib/popout/channel";
  * status on mount, again whenever the window regains focus (a send made
  * elsewhere while the preview is open enables Copy without reopening it) and
  * after its own actions — no quote data comes from the Estimator.
- * #301 slice B: Copy copies the v2 link (pinned to the latest sent revision);
+ * #301 slice B: Copy copies the v2/v3 (rev-pinned) link (pinned to the latest sent revision);
  * every sent revision is listed with its opens (a superseded one keeps working
  * with a banner).
  * #301 slice C: the package's staff side (gaps, drawings, responses, Rebuild)

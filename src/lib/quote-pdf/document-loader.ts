@@ -5,6 +5,7 @@ import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
 import { keyProductPhotoDataUris, keyProductPhotoDocs, PHOTO_TYPES } from "@/lib/narrative/photos";
 import { quoteAsOfRevision } from "@/lib/quote-share/view";
 import { quoteDocumentDataFor } from "./quote-document-data";
+import { rewardsVisibleFor } from "@/lib/parties/addressee";
 import { documentAddressee } from "@/lib/parties/addressee-server";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import type { QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
@@ -85,5 +86,5 @@ export async function loadQuoteDocumentProps(q: Quote, opts: LoadQuoteDocumentOp
   const doc = quoteDocumentDataFor(src, cust, settings, addressee);
   const keyProductPhotos =
     opts.photos === "inline" ? await keyProductPhotoDataUris(doc.sections, doc.document) : await keyProductPhotoLinks(doc.sections, opts.photos.href, doc.document);
-  return { ...doc, keyProductPhotos, rewardsLine: purchasePerksDocLine(perks) };
+  return { ...doc, keyProductPhotos, rewardsLine: rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : "" };
 }

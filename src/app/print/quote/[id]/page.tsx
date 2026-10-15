@@ -6,6 +6,7 @@ import { verifyPrintToken } from "@/lib/quote-pdf/token";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { getSettings } from "@/lib/settings";
+import { rewardsVisibleFor } from "@/lib/parties/addressee";
 import { documentAddressee } from "@/lib/parties/addressee-server";
 import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
 import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
@@ -57,6 +58,8 @@ export default async function PrintQuotePage({
   const revision = rev ? (Array.isArray(q.revisions) ? q.revisions : []).find((r) => r.rev === rev && r.reason === "sent") : null;
   if (rev && !revision) notFound();
   const src = revision ? quoteAsOfRevision(q, revision) : q;
+  // A revision render shows what was sent: live edits since that revision (content changed after it was cut) would make the live-built cut sheets disagree, so they are skipped.
+  const cutSheetsOk = !revision || !(typeof q.contentChangedAt === "number" && q.contentChangedAt > revision.at);
   const [addressee, cust, settings, perks, cutSheets] = await Promise.all([
     // Strict: an explicit bidder that is no longer a live bidder on this quote (deleted since signing) is a 404, never the awarded default.
     bidder ? documentAddressee(src, bidder, { strict: true }) : documentAddressee(q),
@@ -65,7 +68,7 @@ export default async function PrintQuotePage({
     // #282 perks+points — the customer's purchase perks line (program on only).
     purchasePerksForCompany(src.customerId),
     // #292 — Client-style cut sheets after the estimate, only when the quote asks for them. A failure or a slow load (8 s) drops them, never the PDF — and says so in the server log.
-    normalizePdfOptions(src.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
+    cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
   ]);
   if (bidder && !addressee) notFound();
   const doc = quoteDocumentDataFor(src, cust, settings, addressee);
@@ -76,7 +79,7 @@ export default async function PrintQuotePage({
   return (
     <main>
       <style>{QUOTE_PRINT_CSS}</style>
-      <QuoteDocument {...doc} keyProductPhotos={keyProductPhotos} rewardsLine={purchasePerksDocLine(perks)} />
+      <QuoteDocument {...doc} keyProductPhotos={keyProductPhotos} rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
       {/* #292 — its own page after the estimate; the Client resets (width/padding) ride along. */}
       {cutSheets?.ok && cutSheets.models.client.length > 0 && (
         <div style={{ breakBefore: "page" }}>

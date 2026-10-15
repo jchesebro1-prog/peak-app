@@ -289,8 +289,10 @@ const chicagoStamp = (ms: number) =>
     .replace(/[\u202f\u00a0]/g, " ");
 
 const bidderLabel = (r: ClientResponse, bidderNameOf?: (partyId: string) => string): string => {
-  const name = r.partyId && bidderNameOf ? cleanBidderName(bidderNameOf(r.partyId)) : "";
-  return name ? `${name} (bidder)` : "";
+  if (!r.partyId) return "";
+  const name = bidderNameOf ? cleanBidderName(bidderNameOf(r.partyId)) : "";
+  // A response through a bidder's link whose row is gone (or whose company has no name) is still a bidder's — never a blank "who".
+  return name ? `${name} (bidder)` : "Former bidder";
 };
 
 /** The staff list, newest first. `revNoOf` maps QuoteRevision.rev → the printed Rev N. */

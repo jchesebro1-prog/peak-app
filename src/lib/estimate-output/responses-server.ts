@@ -17,7 +17,7 @@ import {
 
 /**
  * #301 slice C (D-m, D-n, R15, R16) — a client's scope selection or question
- * from the package page. Every submit re-verifies: the v2 token, the pinned
+ * from the package page. Every submit re-verifies: the v2/v3 token, the pinned
  * revision is the latest sent one and the quote is `sent` (canAct; the store
  * re-checks under the row lock), then the per-IP and per-quote limits, the
  * honeypot and the field caps. Side effects are best-effort after the

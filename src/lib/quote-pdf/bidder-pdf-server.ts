@@ -5,9 +5,16 @@ import { bidderPartyFor } from "@/lib/parties/addressee-server";
 import { currentRev } from "@/lib/parties/bids";
 import { printOriginFor } from "@/lib/quote-pdf/origin";
 import { PdfRenderUnavailable, renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
-import { pdfKindForQuoteType } from "@/lib/quote-pdf/state";
+import { latestSentRevision, pdfKindForQuoteType } from "@/lib/quote-pdf/state";
 import { signPrintToken } from "@/lib/quote-pdf/token";
-import { get as getQuote } from "@/lib/stores/quotes";
+import { get as getQuote, type Quote } from "@/lib/stores/quotes";
+
+/** A sent revision keeps its own number; a live render of a quote that already has a sent revision is the NEXT one, named "(draft)". */
+function liveBidderPdfName(q: Quote, bidderName: string, rev: number | null): string {
+  if (rev != null) return bidderPdfFileName(q.name, bidderName, rev);
+  const sent = latestSentRevision(q.revisions);
+  return sent ? bidderPdfFileName(q.name, bidderName, sent.rev + 1, true) : bidderPdfFileName(q.name, bidderName, currentRev(q));
+}
 
 /**
  * #348 slice 2b-i — one headless-Chrome render of a system estimate addressed to ONE bidder, on demand, through
@@ -48,7 +55,7 @@ export async function renderBidderPdf(
       `${where.origin}/print/quote/${encodeURIComponent(q.id)}?bidder=${encodeURIComponent(party.id)}${rev != null ? `&rev=${rev}` : ""}&t=${encodeURIComponent(t)}`,
       { timeoutMs: COVER_RENDER_TIMEOUT_MS, signal: AbortSignal.timeout(COVER_RENDER_DEADLINE_MS) }
     );
-    return { ok: true, pdf, fileName: bidderPdfFileName(q.name, company.name, rev ?? currentRev(q)) };
+    return { ok: true, pdf, fileName: liveBidderPdfName(q, company.name, rev) };
   } catch (e) {
     if (e instanceof PdfRenderUnavailable) return { ok: false, status: 503, error: e.message };
     console.error("[bidder-pdf] render failed", e);

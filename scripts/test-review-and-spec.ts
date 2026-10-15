@@ -41615,7 +41615,7 @@ import type { PurchasePerk as R282ePP } from "@/lib/rewards/program";
   for (const f of ["src/components/rewards/purchase-perks-banner.tsx", "src/app/(app)/settings/rewards/purchase-perks-editor.tsx", "src/app/portal/redeem-perk-button.tsx", "src/components/rewards/perk-actions.tsx"]) {
     ok(!/from "@\/lib\/stores\//.test(r282Read(f, "utf8")), `#282 perks+points wiring: client component ${f.split("/").pop()} imports no server store`);
   }
-  ok(/rewardsLine=\{purchasePerksDocLine\(perks\)\}/.test(r282Read("src/app/print/quote/[id]/page.tsx", "utf8")), "#282 perks+points wiring: the quote PDF route prints the purchase-perks line");
+  ok(/rewardsLine=\{rewardsVisibleFor\(addressee\) \? purchasePerksDocLine\(perks\) : ""\}/.test(r282Read("src/app/print/quote/[id]/page.tsx", "utf8")), "#282 perks+points wiring: the quote PDF route prints the purchase-perks line");
   for (const f of ["src/app/(app)/flame-tests/letter/letter-view.tsx", "src/app/(app)/inspections/letter/letter-view.tsx"]) {
     ok(/purchasePerksDocLine\(await purchasePerksForCompany\(quote\.customerId\)\)/.test(r282Read(f, "utf8")), `#282 perks+points wiring: ${f.split("/")[2]} letter prints the line`);
   }
@@ -49113,7 +49113,7 @@ import { quoteDocumentDataFor as n293tDocData } from "@/lib/quote-pdf/quote-docu
   const asOfCallers = all.filter(([, t]) => t.includes("quoteAsOfRevision(")).map(([f]) => f).sort();
   ok(JSON.stringify(asOfCallers) === JSON.stringify(["src/app/print/quote/[id]/page.tsx", "src/lib/quote-pdf/document-loader.ts", "src/lib/quote-share/view.ts"]),
     `#293t binding: quoteAsOfRevision is called only by the document loader and (#348 2b-ii) the signed bidder-revision print variant (got ${asOfCallers.join(", ")})`);
-  ok(!/["']use (client|server)["']/.test(loader) && !/\.pdf\b|pdfBlobPath|shareLink|generateMetadata/.test(loader) && /return \{ \.\.\.doc, keyProductPhotos, rewardsLine: purchasePerksDocLine\(perks\) \};/.test(loader),
+  ok(!/["']use (client|server)["']/.test(loader) && !/\.pdf\b|pdfBlobPath|shareLink|generateMetadata/.test(loader) && /return \{ \.\.\.doc, keyProductPhotos, rewardsLine: rewardsVisibleFor\(addressee\) \? purchasePerksDocLine\(perks\) : "" \};/.test(loader),
     "#293t binding: the loader is server-only, returns QuoteDocument props only, and never reads the live PDF or the share link");
   const clientImporters = all.filter(([, t]) => /^["']use client["'];?\s*$/m.test(t) && /from ["']@\/lib\/(quote-pdf\/document-loader|quote-share\/photo-response)["']/.test(t)).map(([f]) => f);
   ok(clientImporters.length === 0, `#293t binding: no client component imports the loader or the photo responder (got ${clientImporters.join(", ")})`);
@@ -57293,7 +57293,7 @@ function p4PreviewChecks(): void {
      p4pCopy.noCurtains === "This estimate has no curtains.",
     "#P4 preview: package from the live loader, BOM = the online BOM view, cut sheets in the Client style (no print CSS injected)");
   const loader = rd("src/lib/estimate-output/package-live-loader.ts");
-  ok(loader.includes("quoteDocumentDataFor(q, cust, settings, await documentAddressee(q))") && loader.includes("purchasePerksDocLine(perks)") && loader.includes("packageViewModel(") &&
+  ok(loader.includes("quoteDocumentDataFor(q, cust, settings, addressee)") && loader.includes("await documentAddressee(q)") && loader.includes("purchasePerksDocLine(perks)") && loader.includes("packageViewModel(") &&
      loader.includes("keyProductPhotoLinks(packagePhotoSections(doc.sections), staffPartDocHref, doc.document)") && loader.includes("coverSummary: q.coverSummary") &&
      !/sharePath|resolveSharedPackage|loadQuoteDocumentProps|"\/share\//.test(loader),
     "#P4 preview: the live loader builds from the saved quote (the print route's calls) with staff photo links — never a share token or a sent revision");

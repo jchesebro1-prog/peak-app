@@ -8,7 +8,7 @@ import { packageBomSkus, type BomCatalogPart } from "./bom";
 import { packageFrozenFields, packagePhotoSections, packageViewModel, type PackageViewProps } from "./package-model";
 
 /**
- * #301 slice B — the package page's props for a resolved v2 link. The
+ * #301 slice B — the package page's props for a resolved v2/v3 (rev-pinned) link. The
  * document is the pinned SENT revision through the #293 web loader (which
  * fails closed for anything else and is the only place an as-sent quote is
  * built). The cover fields come from that revision's docFields only (R12 —

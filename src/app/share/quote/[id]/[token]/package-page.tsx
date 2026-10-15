@@ -11,7 +11,7 @@ import { OpenBeacon } from "./open-beacon";
 import { buildPackageSlots } from "./package-slots";
 
 /**
- * #301 slice B — the v2 (rev-pinned) share link's page: the estimate package
+ * #301 slice B — the v2/v3 (rev-pinned) share link's page: the estimate package
  * (spec §5). The share page has already rate-limited the request. Order:
  * resolveSharedPackage (shape → get → v2 verify → state) → the package
  * loader (the pinned SENT revision; fails closed). Every miss is the ONE
@@ -31,7 +31,8 @@ export async function SharedPackagePage({ id, token, view }: { id: string; token
     token,
     // #348 2b-ii: a v3 link may act only while its bid is pending or awarded; a missing result counts as closed.
     canAct: canAct(hit.state) && (hit.bidder ? !!hit.bidder.result && bidderCanAct(hit.bidder.result) : true),
-    creditNote: creditNoteText(model.totals.creditAmount),
+    // D1087: the owner's Rewards credit note is not shown on a bidder's page or an awarded-addressed one (the owner's loyalty standing is private).
+    creditNote: hit.bidder || hit.rev.docFields?.awardedPartyId ? null : creditNoteText(model.totals.creditAmount),
   });
   return (
     <>

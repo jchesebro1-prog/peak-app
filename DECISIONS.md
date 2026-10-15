@@ -13020,7 +13020,8 @@ Pre-draft, nudge and suggestion lookups cover the picks plus the first 5 rows of
 - **Addressed strictly to its bidder** ("Prepared for <bidder>" plus the "Owner:" line). A removed bidder gets the one "isn't active" card.
 - **Lost / withdrew / no bid** still opens read-only with "This bid is closed." and no client actions, so it reveals nothing about who won. Pending and awarded bidders can respond.
 - **Responses carry `partyId`;** the quote note and the task name the bidder.
-- **Open for Jeff:** the owner's Rewards perks / credit line also prints on bidder copies and pages (decide whether bidders should see it). Bidders share the quote's client-response rate budget (30/day, 200 cap), not one budget each.
+- **The owner's Rewards are hidden on bidder- and awarded-addressed copies by default** (the purchase-perks line on the PDF / page / cover, and the credit note under the client picker): the owner's loyalty standing is private. Reversible if Jeff wants bidders to see it (`rewardsVisibleFor`).
+- **Open for Jeff:** bidders share the quote's client-response rate budget (30/day, 200 cap), not one budget each.
 
 ## D1088. Bidder opens are counted on the bidder row (#348 slice 2b-ii, 2026-10-15)
 
@@ -13040,7 +13041,7 @@ An open is `opens: {count, lastAt}` on the bidder's party row with a 30-minute p
 
 - `sendBidderEmail` reuses the ordered estimate-email steps through two optional hooks. No cover, no Cc, no follow-up task. The thread is filed under the bidder company and linked to the quote.
 - The first successful send (or failed-after-mark) moves the quote to Sent through the approval gate, exactly as today.
-- **Row refusals** (not walk stoppers): a malformed email (counted as "No email"), a removed bidder, a revision guard tripped inside `linkFor`.
+- **Row refusals** (not walk stoppers): a malformed email (counted as "No email"), a bidder removed between the claim and the link. The revision guard inside `linkFor` is a quote-level stop, not a row refusal.
 - **Failure states:** a maybe-sent result (`stillDraft` false) and a failed record write are both `failed.unknown`.
 
 ## D1092. The walk: one server call per bidder (#348 slice 2b-ii, 2026-10-15)

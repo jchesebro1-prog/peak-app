@@ -8,7 +8,7 @@ import { revisionGroupedSections } from "@/lib/quote-share/photo-response";
 import { datasheetLinks, downloadsView, EMPTY_EXTRAS, plansView, withDatasheetAliases, type PackageExtras } from "./package-extras-model";
 
 /**
- * #301 slice C — the package page's extras for a resolved v2 link: the
+ * #301 slice C — the package page's extras for a resolved v2/v3 (rev-pinned) link: the
  * pinned SENT revision's documents (datasheets per key product and the
  * Downloads card; Task 6 Plans & risers, Task 7 the client actions' scopes).
  * Server-only. Never throws — a failed read leaves that card out.

@@ -831,7 +831,7 @@ async function sendBidderClaimed(
   const pdf = p.bidderPdf;
   if (!pdf) return whole(SEND_COPY.prepareFailed);
   let bidderGone = false;
-  const m = await markAndLink(deps, actor, p, input.asOf, async (q, rev) => {
+  const m = await markAndLink(deps, actor, p, input.asOf ?? p.q.updatedAt, async (q, rev) => {
     // A sent revision cut during the render (e.g. a portal price refresh): the PDF is of an older one — mint no link, email nothing.
     if (pdf.rev !== null && rev.rev !== pdf.rev) throw new EstimateEmailError(SEND_COPY.changedSince);
     try {

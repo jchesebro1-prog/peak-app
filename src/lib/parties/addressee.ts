@@ -14,14 +14,22 @@ export function bidDocLine(bid: QuoteBid | null | undefined): string {
   return parts.join(" · ");
 }
 
+/**
+ * #348 2b-ii (D1087) — the owner's Rewards (purchase-perks line, credit note) print only on the OWNER's copy: a
+ * document addressed to a bidder (explicit, or the awarded default) hides them — the owner's loyalty standing is private.
+ */
+export function rewardsVisibleFor(addressee: DocAddressee | null | undefined): boolean {
+  return !addressee;
+}
+
 const UNSAFE = /[\/\\:*?"<>|\u0000-\u001f\u007f]/g;
 function namePart(s: string): string {
   return (s || "").replace(UNSAFE, "").replace(/\s+/g, " ").trim().slice(0, 60).trim();
 }
 
 /** `Peak – <project> – <bidder> – Rev <n>.pdf`; an empty project/bidder part is omitted. */
-export function bidderPdfFileName(projectName: string, bidderName: string, rev: number): string {
-  const parts = ["Peak", namePart(projectName), namePart(bidderName), `Rev ${rev}`].filter(Boolean);
+export function bidderPdfFileName(projectName: string, bidderName: string, rev: number, draft = false): string {
+  const parts = ["Peak", namePart(projectName), namePart(bidderName), `Rev ${rev}${draft ? " (draft)" : ""}`].filter(Boolean);
   return `${parts.join(" – ")}.pdf`;
 }
 

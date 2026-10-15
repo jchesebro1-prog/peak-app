@@ -18,7 +18,7 @@ import { bidderCanAct, packageBanner, PACKAGE_COPY } from "../src/lib/quote-shar
 import { responseNoteText, responseTaskTitle, responseRows, cleanClientResponses } from "../src/lib/estimate-output/responses";
 import { fmt } from "../src/app/(app)/estimator/pricing";
 import { bidderEmailDefaults, isBidderFileName, bidderFileOf } from "../src/lib/estimate-email/compose";
-import { addressedHeader, bidDocLine, bidderPdfFileName, ownerNameFromLine, sendDefaultsContact, type DocAddressee } from "../src/lib/parties/addressee";
+import { addressedHeader, bidDocLine, bidderPdfFileName, ownerNameFromLine, rewardsVisibleFor, sendDefaultsContact, type DocAddressee } from "../src/lib/parties/addressee";
 import { quoteAsOfRevision } from "../src/lib/quote-share/view";
 import { coverDocumentPropsFor } from "../src/lib/estimate-output/cover";
 import { packageViewModel } from "../src/lib/estimate-output/package-model";
@@ -230,6 +230,7 @@ export async function bidChecks(ok: Ok) {
   ok(bidDocLine({ dueAt: dueMs, addenda: [], awardedPartyId: null }) === "Bid due Oct 21, 2:00 PM", "addressee: due only");
   ok(bidDocLine({ dueAt: null, addenda: [], awardedPartyId: null }) === "" && bidDocLine(null) === "" && bidDocLine(undefined) === "", "addressee: empty bid line");
   ok(bidderPdfFileName("Lincoln HS: Rigging/Curtains", "ABC  Construction", 2) === "Peak \u2013 Lincoln HS RiggingCurtains \u2013 ABC Construction \u2013 Rev 2.pdf", "addressee: file name sanitized");
+  ok(bidderPdfFileName("P", "ABC", 3, true) === "Peak \u2013 P \u2013 ABC \u2013 Rev 3 (draft).pdf" && bidderPdfFileName("P", "ABC", 3) === "Peak \u2013 P \u2013 ABC \u2013 Rev 3.pdf", "addressee: a live render of a quote with a sent revision is named \"Rev N+1 (draft)\"");
   const longName = bidderPdfFileName("P", "x".repeat(100), 1);
   ok(longName === `Peak \u2013 P \u2013 ${"x".repeat(60)} \u2013 Rev 1.pdf`, "addressee: bidder name cut to 60");
   ok(bidderPdfFileName("", "ABC", 3) === "Peak \u2013 ABC \u2013 Rev 3.pdf" && bidderPdfFileName("P", " ", 3) === "Peak \u2013 P \u2013 Rev 3.pdf", "addressee: empty parts omitted");
@@ -394,7 +395,7 @@ export async function bidSendChecks(ok: Ok) {
     ok(cleanClientResponses([{ ...rv, partyId: P }])[0].partyId === P, "responses: partyId kept");
     ok(cleanClientResponses([{ ...rv, partyId: "x" }])[0].partyId === undefined && cleanClientResponses([rv])[0].partyId === undefined, "responses: bad partyId dropped");
     ok(responseRows([{ ...rv, partyId: P }], (n) => n, (id) => (id === P ? "Miron" : ""))[0].who.startsWith("Miron (bidder) · Pat"), "responseRows: bidder prefix");
-    ok(responseRows([{ ...rv, partyId: P }], (n) => n, () => "")[0].who === "Pat · pat@x.test" && responseRows([{ ...rv, partyId: P }], (n) => n)[0].who === "Pat · pat@x.test", "responseRows: no name → no prefix");
+    ok(responseRows([{ ...rv, partyId: P }], (n) => n, () => "")[0].who === "Former bidder · Pat · pat@x.test" && responseRows([{ ...rv, partyId: P }], (n) => n)[0].who === "Former bidder · Pat · pat@x.test" && responseRows([rv], (n) => n)[0].who === "Pat · pat@x.test", "responseRows: a bidder response whose name no longer resolves reads \"Former bidder\"; an owner response has no prefix");
     const nullAdd = { bid: { dueAt: null, awardedPartyId: null, addenda: [{ no: 1, receivedAt: 1, note: "" }, { no: 2, receivedAt: 1, note: "" }] }, revisions: [{ rev: 1, reason: "sent", at: 1, by: "u", docFields: { bid: { dueAt: null, awardedPartyId: null, addenda: [null, { no: 1, receivedAt: 1, note: "" }] } } }] };
     let nthrew = false, nres = "";
     try { nres = addendaAfterLatestSend(nullAdd as never).join(); } catch { nthrew = true; }
@@ -567,6 +568,13 @@ export async function bidDbChecks(ok: Ok) {
     ok(cov(dAw).project.owner === "Bid Owner" && cov(dAw).project.customer === "Bid GC One" && !("owner" in cov(dOwn).project), "cover: an addressed estimate shows the Owner row; an owner-addressed one is unchanged");
     const pkg = (d: typeof dAw) => packageViewModel({ doc: d, photos: {}, catalog: new Map(), frozen: { coverSummary: "", notIncluded: "" }, state: { kind: "ok", rev: { rev: 1 } as never, closed: false, won: false }, headerLine: "", currentHref: null, view: "narrative", base: "/x", letterheadSrc: "/l.png" });
     ok(pkg(dAw).owner === "Bid Owner" && !("owner" in pkg(dOwn)), "package page: an addressed estimate carries the owner; an owner-addressed one is unchanged");
+
+    // D1087: the owner's Rewards print only on the owner's copy — an addressed document (explicit bidder or the awarded default) hides them.
+    ok(!rewardsVisibleFor(await documentAddressee(qAw)) && !rewardsVisibleFor(await documentAddressee(qAw, g2)) && rewardsVisibleFor(null), "rewards: an awarded-addressed or explicit-bidder document hides the owner's Rewards; the owner's copy keeps them");
+    for (const f of ["src/lib/quote-pdf/document-loader.ts", "src/lib/estimate-output/cover-loader.ts", "src/lib/estimate-output/package-live-loader.ts", "src/app/print/quote/[id]/page.tsx"]) {
+      ok(/rewardsVisibleFor\(addressee\) \? purchasePerksDocLine\(perks\) : ""/.test(readFileSync(join(process.cwd(), f), "utf8")), `rewards: ${f} gates the perks line on the addressee`);
+    }
+    ok(readFileSync(join(process.cwd(), "src/app/share/quote/[id]/[token]/package-page.tsx"), "utf8").includes("hit.bidder || hit.rev.docFields?.awardedPartyId ? null : creditNoteText("), "rewards: the package page drops the credit note on a bidder / awarded-addressed copy");
 
     // a revision cut while awarded
     const revAw = await addQuoteRevision(q, { by: "Test", reason: "sent", note: "awarded" });

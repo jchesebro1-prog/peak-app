@@ -166,8 +166,9 @@ export async function recordBidderSend(
 ): Promise<boolean> {
   return withQuoteRowLock(quoteId, async () => {
     const p = await bidderOnQuote(quoteId, partyId);
-    if (!p) return false;
+    // The email already went out (or its draft exists): record it even when the bidder vanished mid-send — only the party write is skipped.
     await recordEstimateEmail(quoteId, { ...entry, partyId });
+    if (!p) return false;
     const next = outcome.kind === "sent"
       ? bidderSentState(p.bid, entry.rev, by, entry.threadId, entry.at)
       : bidderFailedState(p.bid, { at: entry.at, error: outcome.error, unknown: outcome.unknown }, entry.threadId);

@@ -2,6 +2,7 @@ import type { QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getSettings } from "@/lib/settings";
 import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
+import { rewardsVisibleFor } from "@/lib/parties/addressee";
 import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
 import { keyProductPhotoLinks } from "@/lib/quote-pdf/document-loader";
 import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
@@ -31,7 +32,8 @@ import { previewHeaderLine, previewPath, staffPackageExtras, staffPartDocHref, t
 /** The customer document's props for the live saved quote (the print route's calls, no photos). */
 export async function liveQuoteDocumentProps(q: Quote): Promise<QuoteDocumentProps> {
   const [cust, settings, perks] = await Promise.all([getCustomer(q.customerId), getSettings(), purchasePerksForCompany(q.customerId)]);
-  return { ...quoteDocumentDataFor(q, cust, settings, await documentAddressee(q)), rewardsLine: purchasePerksDocLine(perks) };
+  const addressee = await documentAddressee(q);
+  return { ...quoteDocumentDataFor(q, cust, settings, addressee), rewardsLine: rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : "" };
 }
 
 /** An open estimate's state, so packageBanner shows nothing (the preview is "as it will read once sent"). */
