@@ -1011,7 +1011,7 @@ export async function taskShareDbChecks(ok: Ok): Promise<void> {
  *  403 and the client engine stops pulling (no 60 s poll of refusals). */
 export async function syncPullRoleChecks(ok: Ok): Promise<void> {
   const { mayPullFieldData } = await import("@/lib/sync/pull-collections");
-  const { pullStopsOn } = await import("@/lib/sync/engine");
+  const { pullStopsOn, mirrorKeysToClear, FIELD_COLLECTIONS } = await import("@/lib/sync/engine");
   const { ROLE_PERMS } = await import("@/lib/team");
   ok(mayPullFieldData(["Estimator"]) && mayPullFieldData(["Manager"]) && mayPullFieldData(["Admin"]) && mayPullFieldData(["Reviewer", "Estimator"]),
     "sync pull (#39): estimators, managers and admins pull the field set");
@@ -1024,6 +1024,16 @@ export async function syncPullRoleChecks(ok: Ok): Promise<void> {
   const eng = readFileSync("src/lib/sync/engine.ts", "utf8");
   ok(/if \(!this\.connected\(\) \|\| this\.pullForbidden\) return;/.test(eng) && /if \(pullStopsOn\(res\.status\)\) \{[\s\S]{0,120}this\.pullForbidden = true;\s*if \(this\.pollTimer\) clearInterval\(this\.pollTimer\);/.test(eng),
     "sync pull (#39): on a 403 the engine stops the poll and never pulls again this page");
+  const mirror = [
+    { key: "tasks::T-1", collection: "tasks" },
+    { key: "surveys::S-1", collection: "surveys" },
+    { key: "tasks::T-2", collection: "tasks" },
+    { key: "other::X", collection: "other" },
+  ];
+  const outbox = [{ collection: "tasks", id: "T-2", state: "pending" as const }, { collection: "surveys", id: "S-1", state: "error" as const }];
+  ok(mirrorKeysToClear(mirror, outbox, FIELD_COLLECTIONS).join() === "tasks::T-1,surveys::S-1", "sync pull (#351 M4): a 403 clears the pulled field mirror — keeping only a capture still waiting to push");
+  ok(/\/\/ M4 — and drop what an earlier pull left in this browser[^\n]*\n\s*await this\.clearFieldMirror\(\);/.test(eng) && /for \(const key of mirrorKeysToClear\(mirror, outbox, FIELD_COLLECTIONS\)\) await idb\.delete\("mirror", key\);\s*await idb\.setMeta\(CURSORS_META, \{\}\);/.test(eng),
+    "sync pull (#351 M4): the engine deletes those mirror rows and resets the pull cursors on the 403");
   const push = readFileSync("src/app/api/sync/push/route.ts", "utf8");
   ok(!push.includes("mayPullFieldData"), "sync pull (#39): push stays open to any active user (the field editors save through it)");
 }

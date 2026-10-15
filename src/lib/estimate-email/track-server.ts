@@ -175,6 +175,8 @@ export async function trackEstimate(deps: TrackDeps, viewer: TrackViewer, quoteI
   const loaded = await Promise.all(ids.map(async (tid) => {
     try {
       const raw = await deps.getThread(tid);
+      // #351 review M5 — a thread in Deleted is not listed
+      if ((raw as { deleted?: unknown } | null)?.deleted) return null;
       const s = summarizeThread(raw);
       return s ? { s, owner: mailboxOwnerOf(raw), mine: ownedBy(raw, me), replyable: replyable(raw) } : null;
     } catch (e) {

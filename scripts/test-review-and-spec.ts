@@ -56817,6 +56817,12 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
     ok(await seesText(quote({ owner: "Lee Lead" })), "Jeff 10-15 #25: the Lead estimator reads the text (no Reply)");
     ok(await seesText(quote({ owner: "Sam Mills", preparedBy: "Sam Mills" }), [{ id: "u1", name: "Sam Mills", status: "active" }, { id: "u4", name: "Lee Lead", status: "inactive" }]),
       "Jeff 10-15 #25: a viewer with no role on the quote still reads the text, never Reply");
+    {
+      const del = mkDeps();
+      (del.threads.get("C-SENT") as unknown as { deleted?: boolean }).deleted = true;
+      const rdl = await T.trackEstimate(del.deps, LEE, "Q-P3FR");
+      ok(rdl.ok && !rdl.emails.some((e) => e.threadId === "C-SENT") && rdl.emails.length > 0, "#351 M5: a tracked email in Deleted is not listed (its text with it)");
+    }
     ok(!rd("src/lib/estimate-email/track-server.ts").includes("textHidden") && !rd("src/lib/estimate-email/track-server.ts").includes("leadEstimator("), "Jeff 10-15 #25: track-server no longer gates the text by role");
   }
 

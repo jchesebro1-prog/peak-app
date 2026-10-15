@@ -120,9 +120,15 @@ export async function archiveFromOrganizeAction(threadIds: string[], tab: string
   const undo: OrganizeArchiveUndo[] = [];
   let refused = 0;
   for (const id of list) {
-    const r = await archiveFromOrganize(id, t, me);
-    if (r.ok) undo.push(r.undo);
-    else refused++;
+    // #351 review M7 — one row failing never loses the Undo of the rows that did archive
+    try {
+      const r = await archiveFromOrganize(id, t, me);
+      if (r.ok) undo.push(r.undo);
+      else refused++;
+    } catch (e) {
+      console.error("[organize] archive failed for one row", id, e instanceof Error ? e.message : e);
+      refused++;
+    }
   }
   revalidate();
   // Jeff 2026-10-15 #29 — Archive all shown sends every Noise row; past the cap the rest wait for another press

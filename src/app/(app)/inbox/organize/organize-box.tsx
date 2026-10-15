@@ -102,7 +102,8 @@ export default function OrganizeBox({
         const r = await archiveFromOrganizeAction(ids, tab);
         for (const id of ids) postChanged("thread", id);
         if (!r.archived) setNote({ text: "Couldn't archive — try again.", bad: true });
-        else setNote({ text: organizeArchiveNote(tab, r.archived) + (r.more ? " · press again for the rest" : ""), bad: false, undo: r.undo });
+        // M7 — the rows that archived keep their Undo; the rest are named
+        else setNote({ text: organizeArchiveNote(tab, r.archived) + (r.refused ? ` · ${r.refused} couldn't be archived` : "") + (r.more ? " · press again for the rest" : ""), bad: false, undo: r.undo });
         if (tab !== "filed" && selectedId && ids.includes(selectedId)) {
           const i = vm.rows.findIndex((x) => x.id === selectedId);
           const next = vm.rows.slice(i + 1).find((x) => !ids.includes(x.id));
