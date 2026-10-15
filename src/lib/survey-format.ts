@@ -13,6 +13,13 @@ export function disciplineGroup(key: DisciplineKey | string): DisciplineGroup | 
   return DISCIPLINE_GROUPS.find((g) => g.key === key);
 }
 
+/** Present is exactly "None" — the editor then shows only scope, goals and Present for the discipline (no fields,
+ *  curtain rows, lighting positions, inventories or Notes). One predicate for the editor and every plain-text reader. */
+export function presentIsNoneOnly(d: DisciplineData | Record<string, unknown> | null | undefined): boolean {
+  const present = (d as Record<string, unknown> | null | undefined)?.present;
+  return Array.isArray(present) && present.length === 1 && String(present[0]).toLowerCase() === "none";
+}
+
 /** The discipline fields the editor shows for this class: the class's visible fields, the pipes qty only while its
  *  Present chip is ticked. Shared by the field sheet and Assist (#344 B-final). */
 export function shownFields(group: DisciplineGroup, data: DisciplineData | Record<string, unknown> | null | undefined, cls: VenueClass | undefined): SystemField[] {

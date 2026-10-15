@@ -1,5 +1,7 @@
 import type { SurveyRecord } from "@/lib/stores/surveys";
-import { recapFor, recapScopeText } from "./survey-flow";
+import { hasCounterweight, recapFor, recapScopeText } from "./survey-flow";
+import { MEASURE_GROUPS, type MeasureField } from "./survey-measure-fields";
+import { classMeasureFields } from "./stores/venue-classes";
 import { accessFacts } from "./survey-format";
 
 /**
@@ -22,6 +24,41 @@ export function recordLines(rec: Record<string, string> | undefined): string {
     .filter(([, v]) => (v == null ? "" : String(v)).trim())
     .map(([k, v]) => `  - ${k}: ${String(v).trim()}`)
     .join("\n");
+}
+
+/** #344 B-final2: a migrated record's measurements by label — the fields the editor shows (the class's quick set, then
+ *  the measurement groups, each key once), never the raw stored keys. Checks print as Yes and are skipped when off.
+ *  Beams & rigging mirrors the editor: the structural drawing check always, brick / CW elevation only with a
+ *  Counterweight system, and no beam measurements once a structural drawing is on file. */
+function measurementLabelLines(s: SurveyFindingsInput): string {
+  const m = (s.measurements || {}) as Record<string, unknown>;
+  const cw = hasCounterweight(s as Parameters<typeof hasCounterweight>[0]);
+  const structural = m.structuralDrawingOnFile === true || m.structuralDrawingOnFile === "true";
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (f: MeasureField) => {
+    if (seen.has(f.key)) return;
+    seen.add(f.key);
+    const v = m[f.key];
+    if (f.type === "check") {
+      if (v === true || v === "true") out.push(`  - ${f.label}: Yes`);
+      return;
+    }
+    const t = (v == null ? "" : String(v)).trim();
+    if (t) out.push(`  - ${f.label}: ${t}`);
+  };
+  classMeasureFields(s.venueClass as Parameters<typeof classMeasureFields>[0]).forEach(add);
+  for (const g of MEASURE_GROUPS) {
+    for (const f of g.fields) {
+      if (g.id === "mBeams") {
+        const drawing = f.key === "structuralDrawingOnFile" || ((f.key === "brickDrawingOnFile" || f.key === "cwElevationOnFile") && cw);
+        const isDrawingKey = f.key === "structuralDrawingOnFile" || f.key === "brickDrawingOnFile" || f.key === "cwElevationOnFile";
+        if (isDrawingKey ? !drawing : structural) continue;
+      }
+      add(f);
+    }
+  }
+  return out.join("\n");
 }
 
 export type SurveyFindingsInput = Partial<
@@ -48,6 +85,7 @@ export type SurveyFindingsInput = Partial<
     | "liftType"
     | "liftWorkingHeight"
     | "measurements"
+    | "venueClass"
     | "disciplines"
     | "scope"
     | "legacyNotes"
@@ -91,7 +129,8 @@ export function surveyFindings(s: SurveyFindingsInput): string {
     liftLine(s, door, migrated),
   ].filter(Boolean);
   if (access.length) parts.push("Access/logistics: " + access.join("; "));
-  const meas = recordLines(s.measurements);
+  /* a migrated record prints its measurements by label (the editor's fields); an unmigrated one keeps the old keys */
+  const meas = migrated ? measurementLabelLines(s) : recordLines(s.measurements);
   if (meas) parts.push("Measurements:\n" + meas);
   const heard = recapFor(s).filter((e) => e.scopes.length || e.other || e.goals.length);
   if (heard.length) {

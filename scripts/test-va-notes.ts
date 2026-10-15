@@ -919,6 +919,38 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       "#344 B7 fix: a cleared line set condition prints no condition (the old code only shows when the key is absent)");
   }
 
+  /* ---- B-final2: findings by label; a None-only discipline prints nothing else ---- */
+  {
+    const mig = {
+      venueClass: "auditorium", legacyNotes: [], disciplines: { rigging: { present: ["Counterweight"] } },
+      measurements: { brickDrawing: true, hhSheet: true, structuralDrawingOnFile: false, brickDrawingOnFile: true, gridH: "58'", proW: "40'", loadingBridge: true, midrail: "4'", stray: "x" },
+    };
+    const f1 = surveyFindings(mig as never);
+    ok(!f1.includes("brickDrawing:") && !f1.includes("hhSheet") && !f1.includes("gridH") && !f1.includes("stray") && /  - Grid height[^:]*: 58'/.test(f1) && f1.includes("  - Proscenium width: 40'"),
+      "#344 B-final2: findings for a migrated record print measurements by label, never the raw stored keys");
+    ok(f1.includes("  - Brick drawing on file: Yes") && f1.includes("  - Loading bridge present: Yes") && f1.includes("  - Midrail height: 4'") && !f1.includes("Structural drawing on file") && !f1.includes("CW Elevation"),
+      "#344 B-final2: checks print as Yes (off ones skipped); brick drawing shows with Counterweight, beams show with no structural drawing");
+    const f2 = surveyFindings({ ...mig, measurements: { ...mig.measurements, structuralDrawingOnFile: true } } as never);
+    ok(f2.includes("  - Structural drawing on file: Yes") && !f2.includes("Midrail") && !f2.includes("Loading bridge"), "#344 B-final2: a structural drawing on file hides the beam measurements from findings");
+    const f3 = surveyFindings({ ...mig, disciplines: { rigging: { present: ["Dead-hung"] } } } as never);
+    ok(!f3.includes("Brick drawing on file") && f3.includes("  - Midrail height: 4'"), "#344 B-final2: brick / CW drawings print only with a Counterweight rigging system");
+    ok(surveyFindings({ measurements: { proW: "40'" } } as never) === "Measurements:\n  - proW: 40'", "#344 B-final2: an unmigrated record keeps the old key lines");
+
+    const noneRec = {
+      ...(sheetBase as object), venueClass: "auditorium", scope: ["lighting"], id: "FS-NONE",
+      disciplines: { lighting: { present: ["None"], goals: ["Brighter"], scope: ["New fixtures"], consoleLocation: "Booth", positionList: ["FOH 1"], positionRows: { "FOH 1": { circuits: "12" } }, notes: "SECRET-NOTE" } },
+    };
+    const noneSheet = JSON.stringify(buildAssessmentSheet(noneRec as never).fieldSheet);
+    ok(!noneSheet.includes("SECRET-NOTE") && !noneSheet.includes("Console location") && !noneSheet.includes("FOH 1") && noneSheet.includes("Brighter") && noneSheet.includes("New fixtures"),
+      "#344 B-final2: a None-only discipline prints only goals, Present and scope on the sheet");
+    const noneText = surveyText(noneRec as never);
+    ok(!noneText.includes("SECRET-NOTE") && !noneText.includes("Console location") && !noneText.includes("FOH 1") && noneText.includes("Present: None"),
+      "#344 B-final2: a None-only discipline prints no console, positions or notes in Assist");
+    const someRec = { ...noneRec, disciplines: { lighting: { ...(noneRec.disciplines.lighting as object), present: ["None", "Dimmers"] } } };
+    ok(JSON.stringify(buildAssessmentSheet(someRec as never).fieldSheet).includes("SECRET-NOTE") && surveyText(someRec as never).includes("SECRET-NOTE"),
+      "#344 B-final2: with anything besides None ticked, the discipline prints in full");
+  }
+
   /* ---- B-final: whole-branch review fixes ---- */
   {
     const t = (label: string, fn: () => boolean) => {

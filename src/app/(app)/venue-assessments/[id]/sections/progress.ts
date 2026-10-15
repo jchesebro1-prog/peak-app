@@ -2,6 +2,7 @@
    section: text / select / textarea / measure / sub. Yes/no toggles (and #344 B5's Yes/No choice), notes and checks are left out (unticked is a valid
    answer). Read-only sections (recap, 3D, photos, final thoughts…) have total 0 and no ring. */
 import { DISCIPLINE_GROUPS, PIPES_LABEL, tier1Items, visibleFields } from "@/lib/stores/survey-intake";
+import { presentIsNoneOnly } from "@/lib/survey-format";
 import { rowIsEmpty } from "@/lib/stores/linesets";
 import type { Draft, FieldDef, SectionDef } from "./types";
 
@@ -57,7 +58,7 @@ export function sectionProgress(sec: SectionDef, d: Draft, ctx: { tier1Done: boo
       const data = d.disciplines[sec.disc] || {};
       const present = Array.isArray(data.present) ? data.present : [];
       const vals: unknown[] = [data.goals, data.present, data.scope];
-      const noneOnly = present.length === 1 && String(present[0]).toLowerCase() === "none";
+      const noneOnly = presentIsNoneOnly(data);
       if (g && !noneOnly) {
         const fields = visibleFields(g, d.venueClass).filter(
           (f) => f.type !== "check" && (f.key !== "fixedPipeQty" || present.includes(PIPES_LABEL))

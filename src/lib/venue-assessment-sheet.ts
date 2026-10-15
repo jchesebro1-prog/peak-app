@@ -21,7 +21,7 @@ import type { LegacyNote } from "@/lib/survey-migrate";
 import { linesetCondLabel, linesetTypeLabel } from "@/lib/stores/linesets";
 import { conditionLabel, isConditionLevel } from "@/lib/field-lists";
 import {
-  accessFacts, consoleLocationText, curtainItemText, curtainItemsOf, monthText, positionRowText, positionRowsOf, scopeText, shownFields,
+  accessFacts, consoleLocationText, curtainItemText, curtainItemsOf, monthText, positionRowText, positionRowsOf, presentIsNoneOnly, scopeText, shownFields,
 } from "@/lib/survey-format";
 
 type SheetRecord = Pick<
@@ -73,6 +73,10 @@ function disciplineSection(record: SheetRecord, index: number): FieldSheetSectio
   const data: DisciplineData = record.disciplines?.[group.key] || {};
   const goals = goalListsFromSurvey(record)[group.key] ?? [];
   const extra: ReturnType<typeof row>[] = [];
+  /* Present = None only: the editor shows just goals, Present and scope (#344 B-final2) */
+  if (presentIsNoneOnly(data)) {
+    return { heading: group.title, rows: [row("Client goals", goals.join("; ")), row("Present", data.present), row(group.scopeLabel, scopeText(data))] };
+  }
   if (group.key === "curtain") {
     extra.push(...curtainItemsOf(data).map(({ label, item }) => row(label, curtainItemText(item))));
     extra.push(row("Replace vs. reuse (curtains)", data.replaceVsReuse));

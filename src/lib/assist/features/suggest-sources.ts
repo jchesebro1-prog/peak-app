@@ -12,7 +12,7 @@ import { DISCIPLINE_LABEL, DISCIPLINES } from "@/lib/estimate-output/fields";
 import { goalsFromSurvey } from "@/lib/estimate-output/goals";
 import { conditionLabel } from "@/lib/field-lists";
 import {
-  consoleLocationText, curtainItemLine, curtainItemText, curtainItemsOf, disciplineGroup, monthText, oneLine, positionRowLine, positionRowsOf, scopeText,
+  consoleLocationText, curtainItemLine, curtainItemText, curtainItemsOf, disciplineGroup, monthText, oneLine, positionRowLine, positionRowsOf, presentIsNoneOnly, scopeText,
   shownFields,
 } from "@/lib/survey-format";
 import type { DisciplineGroup, SystemField } from "@/lib/stores/survey-intake";
@@ -144,6 +144,10 @@ function disciplineFieldLines(group: DisciplineGroup, d: unknown, venueClass: Su
   };
   const present = Array.isArray(data.present) ? data.present.filter((x): x is string => typeof x === "string" && !!x.trim()) : [];
   push("Present", present.join(", "));
+  if (presentIsNoneOnly(data)) {
+    push(group.scopeLabel, scopeText(data));
+    return out;
+  }
   for (const field of shownFields(group, data, venueClass)) {
     if (field.bind) continue;
     push(field.label, fieldValue(field, data));

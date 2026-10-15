@@ -16,6 +16,7 @@ import {
 import type { VenueClass } from "@/lib/stores/venue-classes";
 import { FIXTURE_POSITIONS, isConditionLevel } from "@/lib/field-lists";
 import { splitGoalLines } from "@/lib/survey-flow";
+import { presentIsNoneOnly } from "@/lib/survey-format";
 import { ConditionSlider } from "./condition-slider";
 import { GoalsListEditor } from "./goals-list";
 import { ScopeChips } from "./scope-chips";
@@ -256,7 +257,7 @@ export function SystemsSection(props: Props) {
   const disc = group.key;
   const present = listOf(props.value(disc, "present"));
   const options = presentOptionsFor(disc, venueClass);
-  const noneOnly = present.length === 1 && present[0].toLowerCase() === "none";
+  const noneOnly = presentIsNoneOnly({ present });
   const scope = listOf(props.value(disc, "scope"));
   const raw = props.value(disc, "goals");
   /* A list is shown as-is (a just-added blank goal must survive); an old string splits one goal per line. */
