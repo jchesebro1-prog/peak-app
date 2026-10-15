@@ -1416,7 +1416,7 @@ See `.env.example`.
     list and the pick lists in `field-lists.ts`, tell the reps older surveys
     ask for Scope first, send the CW Elevation and line set schedule sheets,
     try a real assessment end to end. Punch item #344.
-62. 🚧 **Estimate parties — slices 1 + 2a** (#348, D1058–D1062, D1074–D1078) — Jeff, Oct 14: an
+62. 🚧 **Estimate parties — slices 1, 2a + 2b-i** (#348, D1058–D1062, D1074–D1082) — Jeff, Oct 14: an
     estimate can name more than one company. Slice 1 is the parties core: a
     `record_parties` doc collection (migration 0041; id `pty_` + sha1 of
     record type, record id, company and role) with roles owner · gc · ec ·
@@ -1464,6 +1464,20 @@ See `.env.example`.
     project's Bill to. Remaining: 2b (per-bidder PDFs, client links, send to
     all), then slices 3–6; prod check adds due date → two bidders → Award →
     Won → Bill to. Punch item #348.
+    ✅ Slice 2b-i (D1079–D1082, Oct 15) — addressed documents + per-bidder
+    PDF: a customer document is addressed explicit bidder → awarded bidder →
+    none (venue always from the owner; "Prepared for <GC>", an "Owner: …"
+    line and a "Bid due … · Addenda acknowledged: …" line only when
+    addressed) through the print route, document loader (web / portal /
+    share), cover and package-live loaders; the in-app live BOM preview, the
+    datasheet-book cover and cut sheets stay owner-addressed, and a frozen
+    sent revision shows the live awarded bidder. `bid` is content only once
+    awarded (`quoteContentKey`; still no `updatedAt` bump), and Award / Undo
+    schedule a PDF re-render. The Bidders card's Download PDF hits
+    `GET /api/quotes/[id]/bidder-pdf/[partyId]`, a signed `?bidder=` print
+    variant (strict — a bad bidder is a 404) rendered on demand, named
+    `Peak – <project> – <bidder> – Rev N.pdf`. Remaining: 2b-ii (per-bidder
+    client links, send to all), then slices 3–6.
 
 63. ✅ **Mailbox identity** (#349, D1063–D1073) — mailbox ownership follows the user's id (`CommThread.mailboxOwnerId`; one rule `ownsMailbox`, stamp → Gmail key → a name only one user holds, else nobody; `ownMailboxCond` in SQL; viewers from `src/lib/mailbox-viewer.ts`), assignments carry `assignedToId`, creators refuse a blank owner, legacy threads stamp lazily in write guards and via `npm run comms:stamp-owners` (Jeff-gated prod run; shared names get the `"unresolved"` tombstone), a rename or new hire never moves mail (`src/lib/mailbox-names.ts`), and Settings → Team refuses duplicate names. Punch item #349.
 

@@ -12947,6 +12947,22 @@ A bidder submitted through its own bid website can't be tracked by the app, so *
 
 A company-level default bid-site link is deferred: the company editor doesn't edit `website` either, and adding it is about ten touch points plus a migration. Each bidder carries its own link instead. Surfacing: a Bid chip with a due-date and addenda dialog in the Estimator header; a Bidders card on Send & track; an "Out to bid" Quotes hub filter and badge; ⌘K matches a quote by bidder name; and Morning triage gains a "bid due" fact (source quote, owner by name, today / tomorrow / past due, dropped 14 days after the due date, and no due date on closed bids).
 
+## D1079. Addressed customer documents (#348 slice 2b-i, 2026-10-15)
+
+A customer document is addressed by one precedence: an explicit bidder (the per-bidder PDF), else the awarded bidder, else nobody. The venue always comes from the owner. Only when a document is addressed does the header read "Prepared for <GC>" with an "Owner: …" line, plus a bid line ("Bid due … · Addenda acknowledged: …"); an unaddressed estimate prints exactly as before. It is wired into the print route, the document loader (web, portal, share), and the cover and package-live loaders. It is **not** applied to the in-app live BOM preview (built in the browser), the datasheet-book cover or cut sheets (shared across bidders) — those stay owner-addressed. A frozen sent revision viewed later shows the live awarded bidder, not the bidder at send time.
+
+## D1080. A bid is content only once awarded (#348 slice 2b-i, 2026-10-15)
+
+This supersedes D1075's "not content in 2a" for the awarded case. `quoteContentKey` counts `bid` only when `awardedPartyId` is set, so pre-award bid edits (due date, addenda, bidder submissions) never stale the PDF, an approval or an in-flight Send. Award and Undo award — and a due-date or addenda edit after an award — schedule a PDF re-render. None of them bump `updatedAt` (the `patchQuoteBid` writer still doesn't).
+
+## D1081. Per-bidder PDF (#348 slice 2b-i, 2026-10-15)
+
+A signed print variant, `?bidder=pty_…`, with a token bound to `<id>~<partyId>`. It is strict: an invalid or deleted bidder is a 404, never a fallback to the owner or awarded address. It renders on demand like the cover PDF (not cached) through `GET /api/quotes/[id]/bidder-pdf/[partyId]`, and the file is named `Peak – <project> – <bidder> – Rev N.pdf`. The Bidders card's Download PDF shows progress and errors. Slice 2b-ii attaches the same render to per-bidder emails.
+
+## D1082. The addressed header's owner name is the live company name (#348 slice 2b-i, 2026-10-15)
+
+The "Owner:" line prefers the owner company's current name over the name stamped on the party row.
+
 ## D1083. The daily brief card is three blocks: Emails, Estimates, Tasks (#350, 2026-10-15)
 
 Jeff, Oct 15: "How do we get the morning brief to lead with emails, then estimates, then tasks?" The Home brief card (#337) now shows the summary, then three blocks in a fixed order. An empty block is hidden, and the other blocks keep their order. The separate "Do these first" list is gone. Its picks get a ★ (accent color) inside their own block, float to the top of their group, and keep their why as small text and as the star's tooltip. Rows that aren't picks show their triage reason as a tooltip only.
