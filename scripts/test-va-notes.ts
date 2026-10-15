@@ -1184,6 +1184,51 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     while (ch.canUndo) { ch.undo(); undone++; }
     ok(undone === 3 && ch.current.strokes.length === 3, "#344 C1: history cap keeps only the last 3 undo steps");
 
+    // hardening: clamps, strict parse, code points, cap floor, prototype safety
+    {
+      const big = INK.emptyInk(1e300, 1e300);
+      ok(big.w === 16384 && big.h === 16384 && INK.emptyInk(-5, 0.2).w === 1 && INK.emptyInk(NaN, 10).w > 0 && INK.emptyInk(NaN, 10).w <= 16384,
+        "#344 C1: emptyInk clamps w/h to 1…16384 and defaults non-finite");
+      const cs = INK.addStroke(INK.emptyInk(100, 100), mk("cw", [1, 1, 0.5, 5, 5, 0.5], 1e300));
+      const cs2 = INK.addStroke(INK.emptyInk(100, 100), mk("cw2", [1, 1, 0.5, 5, 5, 0.5], 0.1));
+      ok(cs.strokes[0]?.width === 64 && cs2.strokes[0]?.width === 0.5, "#344 C1: addStroke clamps width to 0.5…64");
+      const cl = INK.addLabel(INK.emptyInk(100, 100), { id: "cl", x: 1, y: 1, text: "t", color: "#000", size: 1e300 });
+      const cl2 = INK.addLabel(INK.emptyInk(100, 100), { id: "cl2", x: 1, y: 1, text: "t", color: "#000", size: 1 });
+      ok(cl.labels[0]?.size === 200 && cl2.labels[0]?.size === 4, "#344 C1: addLabel clamps size to 4…200");
+      const pc = INK.parseInk({ v: 1, w: 1e300, h: 0.001, labels: [{ id: "a", x: 1, y: 1, text: "t", color: "#000", size: 1e300 }],
+        strokes: [{ id: "b", tool: "pen", color: "#000", width: 1e300, pts: [1, 1, 0.5, 2, 2, 0.5] }] });
+      ok(!!pc && pc.w === 16384 && pc.h === 1 && pc.strokes[0].width === 64 && pc.labels[0].size === 200,
+        "#344 C1: parseInk clamps w/h (1e300 → 16384), width (→ 64) and size (→ 200)");
+      ok(INK.parseInk({ v: 99, w: 10, h: 10, strokes: [], labels: [] }) === null && !!INK.parseInk({ w: 10, h: 10 }) && !!INK.parseInk({ v: 1, w: 10, h: 10 }),
+        "#344 C1: parseInk rejects v: 99, accepts v absent or 1");
+      const dup = INK.parseInk({ v: 1, w: 10, h: 10,
+        strokes: [{ id: "d", tool: "pen", color: "#000", width: 2, pts: [1, 1, 0.5] }, { id: "d", tool: "pen", color: "#000", width: 9, pts: [2, 2, 0.5] }],
+        labels: [{ id: "L", x: 1, y: 1, text: "first", color: "#000", size: 10 }, { id: "L", x: 2, y: 2, text: "second", color: "#000", size: 10 }] });
+      ok(!!dup && dup.strokes.length === 1 && dup.strokes[0].width === 2 && dup.labels.length === 1 && dup.labels[0].text === "first",
+        "#344 C1: parseInk drops duplicate stroke/label ids (keeps the first)");
+      const hx = (c: string) => INK.addStroke(INK.emptyInk(10, 10), mk("hx", [1, 1, 0.5, 2, 2, 0.5], 2, c)).strokes[0].color;
+      ok(hx("#12345") === INK.INK_COLORS[0] && hx("#1234567") === INK.INK_COLORS[0] && hx("#123") === "#123" && hx("#1234") === "#1234" &&
+        hx("#123456") === "#123456" && hx("#12345678") === "#12345678", "#344 C1: colours accept only 3, 4, 6 or 8 hex digits (#12345 rejected)");
+      const em = "a".repeat(119) + "😀" + "tail";
+      const el = INK.addLabel(INK.emptyInk(10, 10), { id: "em", x: 1, y: 1, text: em, color: "#000", size: 10 }).labels[0].text;
+      const ep = INK.parseInk({ v: 1, w: 10, h: 10, labels: [{ id: "em", x: 1, y: 1, text: em, color: "#000", size: 10 }] })!.labels[0].text;
+      const okText = (t: string) => Array.from(t).length === 120 && t.endsWith("😀") && !/[\ud800-\udbff]$/.test(t);
+      ok(okText(el) && okText(ep), "#344 C1: label text truncates by code points (emoji at the 120 boundary not split)");
+      const h0 = INK.createHistory(INK.emptyInk(50, 50), 0);
+      h0.do({ t: "stroke", stroke: mk("z1", [1, 1, 0.5, 5, 5, 0.5]) });
+      h0.do({ t: "stroke", stroke: mk("z2", [10, 1, 0.5, 15, 5, 0.5]) });
+      ok(h0.canUndo && (h0.undo(), h0.current.strokes.length === 1) && !h0.canUndo, "#344 C1: createHistory cap 0 still allows exactly one undo");
+      const before = (Object.prototype as Record<string, unknown>).polluted;
+      const pj = INK.parseInk('{"v":1,"w":10,"h":10,"__proto__":{"polluted":"yes"},"strokes":[{"id":"p","tool":"pen","color":"#000","width":2,"pts":[1,1,0.5],"__proto__":{"polluted":"yes"}}],"labels":[]}');
+      ok(!!pj && before === undefined && (Object.prototype as Record<string, unknown>).polluted === undefined && ({} as Record<string, unknown>).polluted === undefined,
+        "#344 C1: a __proto__ key in JSON does not pollute Object.prototype");
+      const budget = INK.parseInk({ v: 1, w: 10, h: 10, labels: [], strokes: [
+        { id: "b1", tool: "pen", color: "#000", width: 2, pts: Array.from({ length: 3 * 100_000 }, (_, i) => (i % 3 === 2 ? 0.5 : i)) },
+        { id: "b2", tool: "pen", color: "#000", width: 2, pts: Array.from({ length: 3 * 100_000 }, (_, i) => (i % 3 === 2 ? 0.5 : i)) },
+        { id: "b3", tool: "pen", color: "#000", width: 2, pts: [1, 1, 0.5] }] });
+      ok(!!budget && budget.strokes.map((x) => x.id).join() === "b1,b3", "#344 C1: parseInk skips an over-budget stroke but keeps later ones that fit");
+    }
+
     // render against a fake ctx
     const calls: Array<[string, ...unknown[]]> = [];
     const widths: number[] = [];

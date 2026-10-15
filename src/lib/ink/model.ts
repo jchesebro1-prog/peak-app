@@ -9,7 +9,9 @@ export type InkDoc = { v: 1; w: number; h: number; strokes: Stroke[]; labels: In
 export const INK_COLORS = ["#16181d", "#c0392b", "#1f5f9a"] as const;
 export const INK_CAPS = { strokes: 5000, numbers: 400_000, labels: 200, labelChars: 120 } as const;
 
-const HEX_COLOR = /^#[0-9a-f]{3,8}$/i;
+export const INK_LIMITS = { size: [1, 16384], width: [0.5, 64], labelSize: [4, 200] } as const;
+
+const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
 /** Short base-36 id; works in the browser and Node. */
 export function inkId(): string {
@@ -21,9 +23,19 @@ export function inkId(): string {
 const r05 = (v: number) => Math.round(v * 2) / 2;
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+/** Clamp into [lo, hi] and round to 2 decimals; a non-number or non-finite value gives `def`. */
+function clampNum(v: unknown, lo: number, hi: number, def: number): number {
+  if (typeof v !== "number" || !Number.isFinite(v)) return def;
+  return r2(v < lo ? lo : v > hi ? hi : v);
+}
+/** First 120 code points (never splits a surrogate pair). The pre-slice only bounds the work. */
+function clipLabel(text: string): string {
+  return Array.from(text.slice(0, INK_CAPS.labelChars * 2)).slice(0, INK_CAPS.labelChars).join("");
+}
 
 export function emptyInk(w: number, h: number): InkDoc {
-  return { v: 1, w, h, strokes: [], labels: [] };
+  const [lo, hi] = INK_LIMITS.size;
+  return { v: 1, w: clampNum(w, lo, hi, 1024), h: clampNum(h, lo, hi, 1024), strokes: [], labels: [] };
 }
 
 /** Quantise a flat [x, y, p…] array: x/y to 0.5, p to 2 decimals in [0,1]. Null when malformed. */
@@ -81,11 +93,11 @@ export function simplify(pts: number[], tolerance = 0.4): number[] {
 
 export function addStroke(doc: InkDoc, stroke: Stroke): InkDoc {
   const pts = normPts(stroke.pts);
-  if (!pts || !(stroke.width > 0) || !Number.isFinite(stroke.width)) return doc;
+  if (!pts) return doc;
   if (doc.strokes.length >= INK_CAPS.strokes) return doc;
   if (numbersIn(doc) + pts.length > INK_CAPS.numbers) return doc;
   const color = HEX_COLOR.test(stroke.color) ? stroke.color : INK_COLORS[0];
-  return { ...doc, strokes: [...doc.strokes, { id: stroke.id, tool: "pen", color, width: stroke.width, pts }] };
+  return { ...doc, strokes: [...doc.strokes, { id: stroke.id, tool: "pen", color, width: clampNum(stroke.width, INK_LIMITS.width[0], INK_LIMITS.width[1], 2), pts }] };
 }
 
 function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
@@ -112,11 +124,11 @@ export function eraseAt(doc: InkDoc, x: number, y: number, radius: number): InkD
 }
 
 export function addLabel(doc: InkDoc, label: InkLabel): InkDoc {
-  const text = String(label.text ?? "").slice(0, INK_CAPS.labelChars);
+  const text = clipLabel(String(label.text ?? ""));
   if (!text.trim() || doc.labels.length >= INK_CAPS.labels) return doc;
-  if (![label.x, label.y, label.size].every((n) => Number.isFinite(n)) || !(label.size > 0)) return doc;
+  if (![label.x, label.y].every((n) => Number.isFinite(n))) return doc;
   const color = HEX_COLOR.test(label.color) ? label.color : INK_COLORS[0];
-  return { ...doc, labels: [...doc.labels, { id: label.id, x: r05(label.x), y: r05(label.y), text, color, size: label.size }] };
+  return { ...doc, labels: [...doc.labels, { id: label.id, x: r05(label.x), y: r05(label.y), text, color, size: clampNum(label.size, INK_LIMITS.labelSize[0], INK_LIMITS.labelSize[1], 16) }] };
 }
 
 export function moveLabel(doc: InkDoc, id: string, x: number, y: number): InkDoc {
@@ -170,6 +182,7 @@ export type InkHistory = {
 
 /** Snapshot-based undo/redo (docs are immutable, so snapshots share structure). */
 export function createHistory(doc: InkDoc, cap = 200): InkHistory {
+  cap = Number.isFinite(cap) ? Math.max(1, Math.floor(cap)) : 200;
   let cur = doc;
   let past: InkDoc[] = [];
   let future: InkDoc[] = [];
@@ -211,8 +224,13 @@ export function parseInk(json: unknown): InkDoc | null {
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
-  const w = o.w, h = o.h;
-  if (typeof w !== "number" || typeof h !== "number" || !(w > 0) || !(h > 0) || !Number.isFinite(w) || !Number.isFinite(h)) return null;
+  if (o.v !== undefined && o.v !== 1) return null;
+  const rw = o.w, rh = o.h;
+  if (typeof rw !== "number" || typeof rh !== "number" || !(rw > 0) || !(rh > 0) || !Number.isFinite(rw) || !Number.isFinite(rh)) return null;
+  const w = clampNum(rw, INK_LIMITS.size[0], INK_LIMITS.size[1], 1024);
+  const h = clampNum(rh, INK_LIMITS.size[0], INK_LIMITS.size[1], 1024);
+  const strokeIds = new Set<string>();
+  const labelIds = new Set<string>();
   const strokes: Stroke[] = [];
   let numbers = 0;
   if (Array.isArray(o.strokes)) {
@@ -220,13 +238,14 @@ export function parseInk(json: unknown): InkDoc | null {
       if (strokes.length >= INK_CAPS.strokes) break;
       if (!s || typeof s !== "object") continue;
       const r = s as Record<string, unknown>;
+      if (Array.isArray(r.pts) && r.pts.length > INK_CAPS.numbers - numbers) continue;
       const pts = normPts(r.pts);
-      if (!pts || typeof r.id !== "string" || !r.id) continue;
-      if (typeof r.width !== "number" || !(r.width > 0) || !Number.isFinite(r.width)) continue;
-      if (numbers + pts.length > INK_CAPS.numbers) continue;
+      if (!pts || typeof r.id !== "string" || !r.id || strokeIds.has(r.id)) continue;
+      if (typeof r.width !== "number") continue;
+      strokeIds.add(r.id);
       numbers += pts.length;
       const color = typeof r.color === "string" && HEX_COLOR.test(r.color) ? r.color : INK_COLORS[0];
-      strokes.push({ id: r.id, tool: "pen", color, width: r.width, pts });
+      strokes.push({ id: r.id, tool: "pen", color, width: clampNum(r.width, INK_LIMITS.width[0], INK_LIMITS.width[1], 2), pts });
     }
   }
   const labels: InkLabel[] = [];
@@ -235,13 +254,14 @@ export function parseInk(json: unknown): InkDoc | null {
       if (labels.length >= INK_CAPS.labels) break;
       if (!l || typeof l !== "object") continue;
       const r = l as Record<string, unknown>;
-      if (typeof r.id !== "string" || !r.id || typeof r.text !== "string") continue;
+      if (typeof r.id !== "string" || !r.id || labelIds.has(r.id) || typeof r.text !== "string") continue;
       if (typeof r.x !== "number" || typeof r.y !== "number" || typeof r.size !== "number") continue;
-      if (!Number.isFinite(r.x) || !Number.isFinite(r.y) || !Number.isFinite(r.size) || !(r.size > 0)) continue;
-      const text = r.text.slice(0, INK_CAPS.labelChars);
+      if (!Number.isFinite(r.x) || !Number.isFinite(r.y)) continue;
+      const text = clipLabel(r.text);
       if (!text.trim()) continue;
+      labelIds.add(r.id);
       const color = typeof r.color === "string" && HEX_COLOR.test(r.color) ? r.color : INK_COLORS[0];
-      labels.push({ id: r.id, x: r05(r.x), y: r05(r.y), text, color, size: r.size });
+      labels.push({ id: r.id, x: r05(r.x), y: r05(r.y), text, color, size: clampNum(r.size, INK_LIMITS.labelSize[0], INK_LIMITS.labelSize[1], 16) });
     }
   }
   return { v: 1, w, h, strokes, labels };
