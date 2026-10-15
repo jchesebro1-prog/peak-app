@@ -12323,3 +12323,23 @@ Jeff (Oct 14): on a computer he couldn't find Organize or "Organize my inbox"; t
 - The existing `Peak/Customers/UNKNOWN` label in Gmail stays on the threads that carry it. Remove or delete it in Gmail if you want it gone.
 - Re-homing the Daylite contacts parked under UNKNOWN onto their real companies is still worth doing: until then their mail links to the contact only, with no customer.
 - The new tab row and banner show for the whole team, not only the pilot, because the view was never pilot-only. Say if you want them pilot-only.
+
+## 346. Archive and apply labels from Inbox → Organize — DONE 2026-10-14 on `worktree-assist-layer` (D1052–D1054)
+
+Jeff (Oct 14): "We need the ability to archive a message in the Organize tab and to apply labels." Refined: labels go in the reader's right sidebar, styled like the linking panel, and Archive is the reader's bottom-bar button.
+
+**Built:**
+- **Archive from Organize.** The reader's bottom-bar Archive (when the thread was opened from Organize) and an Archive button on each Organize row use `archiveFromOrganizeAction`, so the thread is archived in Gmail as well.
+  - On **To file** and **Noise** the row also leaves the list, like Skip: a waiting suggestion is `skipped`, a Noise row is `cleared`, and the change is logged as Skip.
+  - On **Filed** it only archives.
+  - From the reader, the selection moves to the next row, or clears when there is none.
+  - The Organize note says "Archived — it comes back on new mail · Undo". Undo restores both the archive and the filing state (D1052).
+- **Labels card** in the reader sidebar, for your own threads in Organize and the Inbox. It shows the Inbox's category as a chip with ✕, plus "+ Add label" / "Change" through the same `categoryAction` as Categorize ▾ (now one shared `CategoryMenu`). Gmail labels on the thread show as read-only chips, never a placeholder `Peak/Customers` label. A label never changes the filing (D1053).
+- No bulk selection and no `e` shortcut (D1054).
+- **Guards:** both new actions are owner-checked (`myThread`) and listed in the #341 audit (`scripts/test-thread-visibility.ts`). Read-only threads never show in Organize, and their reader has no sidebar.
+- **Tests:** `scripts/test-inbox-org.ts` → `inboxOrgArchiveLabelChecks` (also chained into test:specs). No migration, no env var.
+
+**Follow-ups / Jeff-gated:**
+- The only label you can apply is the Inbox's color category (one per thread). Real Gmail labels can't be applied from the app; Gmail's "Label ▾" in the Inbox is a filter. Say if you want Gmail labels applied from Peak.
+- "Archive all shown" on Noise still leaves the archived rows on the Noise tab, while a row's own Archive takes the row off. Say if both should behave the same way.
+- A Noise row you marked as noise yourself stays off the Noise tab after Archive, even when new mail arrives.
