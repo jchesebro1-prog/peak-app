@@ -36467,7 +36467,7 @@ import { planTemplate as c255T10fPlanTpl, LABEL_CHAR_PX as c255T10fChar } from "
   // (a) field mapping: width = opening, wing = return wall → stage side wall, depth = stage depth; house fields = the gym floor.
   const gv = c255T10fVenues.find((v) => v.key === "gym")!;
   const sd = c255T10fSized(gv, "medium");
-  ok(gv.w === 40 && gv.d === 20 && gv.wing === 10 && sd.width === 40 && sd.depth === 20 && sd.wing === 10, "#255 T10 fix: Quick Design's Gym Stage defaults to the drawing — 40' opening, 10' wings, 20' stage");
+  ok(gv.w === 40 && gv.d === 30 && gv.wing === 10 && sd.width === 40 && sd.depth === 30 && sd.wing === 10, "#255 T10 fix: Quick Design's Gym Stage defaults to the drawing — 40' opening, 10' wings (Oct 15 #46: a 30' stage)");
   ok(c255T10fDims.gym.map((d) => d.label).join("|") === "Opening|Stage height|Stage depth|Ceiling height|Wings", "#255 T10 fix: the gym's dimension rows read Opening / Wings / Stage depth (plus heights)");
   const gDef = { ...base, venue: "gym", ...sd };
   const fDef = c255T10Fields(gDef, c255T10fEff("gym", gDef, c255T10Types(undefined)))!;
@@ -36497,7 +36497,7 @@ import { planTemplate as c255T10fPlanTpl, LABEL_CHAR_PX as c255T10fChar } from "
   ok(c255T10fPlanTpl(gDef, "proscenium@1") === "gym-stage@1" && c255T10Geom(gDef, "proscenium@1").template === "gym-stage@1" && c255T10fPlanTpl({ venue: "school" }, "gym-stage@1") === "gym-stage@1" && c255T10fPlanTpl({ venue: "school" }, "proscenium@1") === "proscenium@1", "#255 T10 fix: the plan of a gym forced onto proscenium@1 still draws the gym; a proscenium design may still pick the gym drawing");
   {
     const intake = readFileSync("src/app/(app)/design/grid/[id]/grid-intake.tsx", "utf8"), panel = readFileSync("src/components/design/scope-inputs-panel.tsx", "utf8");
-    ok([intake, panel].every((f) => f.includes("const choices = planKindTemplates(venue.kind);") && !f.includes("templatesFor(PLAN_KIND_WORKS_LIKE")), "#255 T10 fix: the Grid intake and Quick Design Background pickers list the plan kind's own templates");
+    ok([intake, panel].every((f) => /const choices = pickerTemplates\(planKindTemplates\(venue\.kind\), /.test(f) && !f.includes("templatesFor(PLAN_KIND_WORKS_LIKE")), "#255 T10 fix: the Grid intake and Quick Design Background pickers list the plan kind's own templates (Oct 15 #46: live ones, plus a retired one while picked)");
   }
 
   // (d) the gym floor is never shallower than the Booth is long on a side wall, so it fits on every wall.
