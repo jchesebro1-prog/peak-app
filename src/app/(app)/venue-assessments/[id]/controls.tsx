@@ -7,7 +7,7 @@ import type {
   SurveyStage,
   MeasureGroup,
 } from "@/lib/stores/surveys";
-import { photoCountsBySection, type SketchRef, type SurveyPhotoRef } from "@/lib/field-files/files";
+import { photoCountsBySection, unionUnseenFileRefs, type SketchRef, type SurveyPhotoRef } from "@/lib/field-files/files";
 import {
   VENUE_CLASSES,
   VISIT_PURPOSES,
@@ -289,6 +289,26 @@ export default function SurveyEditor({
     refsNow.current = adoptedBase.photoRefs;
     sketchesNow.current = adoptedBase.sketches;
   }, [adoptedBase]);
+  // #344 C-final: every photo ref / sketch id this editor has seen — loaded, refreshed in, or created here. Every save
+  // sends them; the store deletes only refs and sketches listed here, so this editor never deletes another device's.
+  const seenPhotoIds = useRef<Set<string>>(new Set(initial.photoRefs.map((r) => r.id)));
+  const seenSketchIds = useRef<Set<string>>(new Set(Object.values(initial.sketches).map((k) => k.id)));
+  // A refreshed record (the router refresh after any save) may carry photos / sketches another device added: union
+  // the unseen ones in by id, even while the draft is dirty (photo state is independent of the dirty fields).
+  useEffect(() => {
+    const u = unionUnseenFileRefs(
+      { photoRefs: refsNow.current, sketches: sketchesNow.current },
+      initial,
+      { photos: seenPhotoIds.current, sketches: seenSketchIds.current },
+    );
+    if (!u) return;
+    for (const id of u.added.photos) seenPhotoIds.current.add(id);
+    for (const id of u.added.sketches) seenSketchIds.current.add(id);
+    refsNow.current = u.photoRefs;
+    sketchesNow.current = u.sketches;
+    lastSaved.current = { ...lastSaved.current, photoRefs: u.photoRefs, sketches: u.sketches };
+    setDraft((d) => ({ ...d, photoRefs: u.photoRefs, sketches: u.sketches }));
+  }, [initial]);
   if (initial !== seenInitial) {
     setSeenInitial(initial);
     if (adoptNextRecord) {
@@ -708,9 +728,14 @@ export default function SurveyEditor({
       photos: draft.photos,
       // #344 C5 — whole list every save (a ref absent from a save is deleted); finished slots are kept by the store
       // once photos were touched in this session they are always sent (deleting the only one must reach the server)
-      ...(draft.photoRefs.length || Array.isArray(record.photoRefs) || photosTouched.current ? { photoRefs: draft.photoRefs } : {}),
+      // #344 C-final: with the ids this editor has seen — the store deletes only those, never another device's photos
+      ...(draft.photoRefs.length || Array.isArray(record.photoRefs) || photosTouched.current
+        ? { photoRefs: draft.photoRefs, photoRefIdsSeen: [...seenPhotoIds.current] }
+        : {}),
       // #344 C6 — sketch pads, sent whole once there are any (a stored finished slot is kept by the store)
-      ...(Object.keys(draft.sketches).length || (record.sketches && typeof record.sketches === "object") || sketchesTouched.current ? { sketches: draft.sketches } : {}),
+      ...(Object.keys(draft.sketches).length || (record.sketches && typeof record.sketches === "object") || sketchesTouched.current
+        ? { sketches: draft.sketches, sketchIdsSeen: [...seenSketchIds.current] }
+        : {}),
       auditoriumSize: draft.auditoriumSize,
       yearBuilt: draft.yearBuilt,
       systemsState: draft.systemsState,
@@ -908,6 +933,7 @@ export default function SurveyEditor({
     sketches: draft.sketches,
     survey: draft,
     onSketches: (next) => {
+      for (const k of Object.values(next)) seenSketchIds.current.add(k.id);
       sketchesNow.current = next;
       sketchesTouched.current = true;
       setDraft((d) => ({ ...d, sketches: next }));
@@ -920,6 +946,7 @@ export default function SurveyEditor({
     blobEnabled,
     refs: draft.photoRefs,
     onRefs: (next) => {
+      for (const r of next) seenPhotoIds.current.add(r.id);
       refsNow.current = next;
       photosTouched.current = true;
       setDraft((d) => ({ ...d, photoRefs: next }));

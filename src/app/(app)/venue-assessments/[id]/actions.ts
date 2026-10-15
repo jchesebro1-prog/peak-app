@@ -112,7 +112,12 @@ export type SurveyPatch = Partial<
     | "scope"
     | "internalTags"
   >
->;
+> & {
+  /** #344 C-final — transport-only: the photo ref / sketch ids this editor has seen. The store deletes only refs and
+   *  sketches listed here (a second device's photos survive this editor's save) and never stores the lists. */
+  photoRefIdsSeen?: string[];
+  sketchIdsSeen?: string[];
+};
 
 /** Persist the whole editor draft (Save survey / Save changes). */
 export async function saveSurvey(id: string, patch: SurveyPatch): Promise<void> {

@@ -184,20 +184,42 @@ function mergeMarkup(stored: unknown, incoming: unknown): unknown {
   return { ...incoming, image: keepFinished(stored.image, incoming.image), strokes: keepFinished(stored.strokes, incoming.strokes) };
 }
 
+/** #344 C-final: the transport-only fields a client save / push carries — the photo ref ids (`p_…`) and sketch ids
+ *  (`s_…`) the client has seen (loaded from the record or created in its session). Never stored. */
+export const SURVEY_SEEN_FIELDS = ["photoRefIdsSeen", "sketchIdsSeen"] as const;
+
+/** A seen list as a set; anything but an array is "absent" (null) — an old client or another writer. */
+function seenSet(v: unknown): Set<string> | null {
+  return Array.isArray(v) ? new Set(v.filter((x): x is string => typeof x === "string")) : null;
+}
+
 /**
  * The survey write paths' merge rule: returns `incoming` with, for every photo ref / sketch / markup present in both
  * (same id), each slot that is finished in `stored` kept as stored — so a save made from a copy older than an upload
- * never loses the finished file, and nothing the client sends replaces a finished file. A sketch or markup whose
- * incoming id differs (a re-draw / re-markup) is taken as sent; refs absent from `incoming` stay absent (deleted).
- * Callers pass `incoming` through `sanitizeIncomingFileSlots` first, so the client never mints a finished slot.
- * Pure: neither input is mutated.
+ * never loses the finished file, and nothing the client sends replaces a finished file. A markup whose incoming id
+ * differs (a re-markup) is taken as sent. Callers pass `incoming` through `sanitizeIncomingFileSlots` first, so the
+ * client never mints a finished slot. Pure: neither input is mutated.
+ *
+ * #344 C-final — a client only deletes what it has seen. `incoming.photoRefIdsSeen` / `sketchIdsSeen` list the ids
+ * the client saw; both are stripped from the result (transport-only).
+ * - A stored photo ref absent from the incoming list is kept unless its id is in `photoRefIdsSeen`; kept refs follow
+ *   the incoming order, oldest first. Kept refs are never dropped by SURVEY_PHOTO_CAP — the incoming refs that are
+ *   new to the server give way, newest first.
+ * - A stored sketch whose pad the incoming copy leaves out, or fills with a different id, wins unless its id is in
+ *   `sketchIdsSeen` (the client saw it and re-drew or removed it on purpose).
+ * - No seen list (an old client, another writer) means nothing is deleted; a copy with no `photoRefs` / `sketches`
+ *   at all keeps the stored ones. `photoRefs: []` with every stored id seen still deletes them all.
  */
 export function mergeSurveyFileRefs(stored: Record<string, unknown>, incoming: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...incoming };
-  if (Array.isArray(incoming.photoRefs) && Array.isArray(stored?.photoRefs)) {
+  const seenP = seenSet(incoming.photoRefIdsSeen);
+  const seenS = seenSet(incoming.sketchIdsSeen);
+  for (const f of SURVEY_SEEN_FIELDS) delete out[f];
+  if (Array.isArray(stored?.photoRefs)) {
     const byId = new Map<string, Record<string, unknown>>();
     for (const r of stored.photoRefs) if (isObj(r) && typeof r.id === "string") byId.set(r.id, r);
-    out.photoRefs = incoming.photoRefs.map((r: unknown) => {
+    const inRefs: unknown[] = Array.isArray(incoming.photoRefs) ? incoming.photoRefs : [];
+    const mapped = inRefs.map((r: unknown) => {
       if (!isObj(r) || typeof r.id !== "string") return r;
       const s = byId.get(r.id);
       if (!s) return r;
@@ -209,18 +231,70 @@ export function mergeSurveyFileRefs(stored: Record<string, unknown>, incoming: R
       }
       return next;
     });
-  }
-  if (isObj(incoming.sketches) && isObj(stored?.sketches)) {
-    const sk: Record<string, unknown> = {};
-    for (const [key, r] of Object.entries(incoming.sketches)) {
-      const s = (stored.sketches as Record<string, unknown>)[key];
-      sk[key] = isObj(r) && isObj(s) && typeof r.id === "string" && r.id === s.id
-        ? { ...r, image: keepFinished(s.image, r.image), strokes: keepFinished(s.strokes, r.strokes) }
-        : r;
+    const inIds = new Set(mapped.map((r) => (isObj(r) && typeof r.id === "string" ? r.id : "")));
+    const kept = [...byId.values()].filter((r) => !inIds.has(r.id as string) && !seenP?.has(r.id as string));
+    let list = mapped;
+    let over = mapped.length + kept.length - SURVEY_PHOTO_CAP;
+    if (kept.length && over > 0) {
+      // the incoming refs the server doesn't hold yet give way, newest (last) first; a stored ref is never dropped
+      list = [...mapped];
+      for (let i = list.length - 1; i >= 0 && over > 0; i--) {
+        const r = list[i];
+        if (!(isObj(r) && typeof r.id === "string" && byId.has(r.id))) {
+          list.splice(i, 1);
+          over--;
+        }
+      }
     }
+    out.photoRefs = kept.length ? [...list, ...kept] : list;
+  }
+  if (isObj(stored?.sketches)) {
+    const storedSk = stored.sketches as Record<string, unknown>;
+    const inSk: Record<string, unknown> = isObj(incoming.sketches) ? incoming.sketches : {};
+    const unseen = (s: unknown): boolean => isObj(s) && typeof s.id === "string" && !seenS?.has(s.id);
+    const sk: Record<string, unknown> = {};
+    for (const [key, r] of Object.entries(inSk)) {
+      const s = storedSk[key];
+      if (isObj(r) && isObj(s) && typeof r.id === "string" && r.id === s.id) {
+        sk[key] = { ...r, image: keepFinished(s.image, r.image), strokes: keepFinished(s.strokes, r.strokes) };
+      } else sk[key] = unseen(s) ? s : r; // a stored sketch the client never saw wins over its different one
+    }
+    for (const [key, s] of Object.entries(storedSk)) if (!(key in sk) && unseen(s)) sk[key] = s; // a pad it never saw stays
     out.sketches = sk;
   }
   return out;
+}
+
+/**
+ * #344 C-final — the editor's side of the rule: a refreshed record's photo refs and sketches the editor has never seen
+ * (another device added them) are unioned into its current state by id — refs appended in the record's order, a sketch
+ * set on its pad. Ids in `seen` (including ones this editor deleted) are never brought back. Returns null when there is
+ * nothing new; `added` lists the ids to mark as seen. Pure: no input is mutated.
+ */
+export function unionUnseenFileRefs(
+  cur: { photoRefs: SurveyPhotoRef[]; sketches: Record<string, SketchRef> },
+  fresh: { photoRefs?: unknown; sketches?: unknown },
+  seen: { photos: ReadonlySet<string>; sketches: ReadonlySet<string> },
+): { photoRefs: SurveyPhotoRef[]; sketches: Record<string, SketchRef>; added: { photos: string[]; sketches: string[] } } | null {
+  const have = new Set(cur.photoRefs.map((r) => r.id));
+  const newRefs: SurveyPhotoRef[] = [];
+  for (const r of Array.isArray(fresh.photoRefs) ? fresh.photoRefs : []) {
+    if (isObj(r) && typeof r.id === "string" && !seen.photos.has(r.id) && !have.has(r.id)) {
+      have.add(r.id);
+      newRefs.push(r as unknown as SurveyPhotoRef);
+    }
+  }
+  const sketches = { ...cur.sketches };
+  const addedSk: string[] = [];
+  if (isObj(fresh.sketches)) {
+    for (const [key, s] of Object.entries(fresh.sketches)) {
+      if (!isObj(s) || typeof s.id !== "string" || seen.sketches.has(s.id) || sketches[key]?.id === s.id) continue;
+      sketches[key] = s as unknown as SketchRef;
+      addedSk.push(s.id);
+    }
+  }
+  if (!newRefs.length && !addedSk.length) return null;
+  return { photoRefs: [...cur.photoRefs, ...newRefs], sketches, added: { photos: newRefs.map((r) => r.id), sketches: addedSk } };
 }
 
 /** An incoming finished slot, kept only when it is this file's own: a Blob path in this survey under `fileId`

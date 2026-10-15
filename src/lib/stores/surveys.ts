@@ -18,6 +18,7 @@ import {
   foldFileSlot,
   inlineFileProblem,
   mergeSurveyFileRefs,
+  SURVEY_SEEN_FIELDS,
   sanitizeIncomingFileSlots,
   slotFinished,
   surveyInlineTotal,
@@ -549,8 +550,9 @@ function withSurveyLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
 }
 
 /** The stored doc (read inside the lock) + the patch, stamped, its file slots sanitized (a client never mints a
- *  finished slot) and `mergeSurveyFileRefs` applied (a stored finished slot is never replaced). `legacyNotes` is
- *  derived on read — never stored. */
+ *  finished slot) and `mergeSurveyFileRefs` applied (a stored finished slot is never replaced; a photo / sketch the
+ *  client never saw is never deleted — #344 C-final). `legacyNotes` is derived on read and the seen lists are
+ *  transport-only — neither is stored. */
 async function updateUnlocked(id: string, patch: Partial<SurveyRecord>): Promise<SurveyRecord | null> {
   return patchDoc<SurveyRecord>("surveys", id, (s) => {
     const stored = { ...s } as Record<string, unknown>;
@@ -649,7 +651,8 @@ export type SurveyPushResult = {
  * the file-ref merge: the pushed copy's file slots are sanitized first (`sanitizeIncomingFileSlots` — a finished slot
  * that isn't its own file's path in this survey, or an inline one on a Blob deployment, becomes pending); an unknown
  * id is inserted; a stale rev is a `conflict` with the server copy; otherwise the pushed doc replaces the stored one
- * EXCEPT that a stored finished file slot is never replaced (`mergeSurveyFileRefs`). `legacyNotes` is never stored. Anything thrown (a lock timeout, a database
+ * EXCEPT that a stored finished file slot is never replaced and a photo / sketch the device never saw is never deleted
+ * (`mergeSurveyFileRefs`, #344 C-final). `legacyNotes` and the seen lists are never stored. Anything thrown (a lock timeout, a database
  * error) replies `retry` so the device keeps the capture.
  */
 export async function pushSurvey(rec: { id: string; rev?: number; doc: Record<string, unknown> }): Promise<SurveyPushResult> {
@@ -667,6 +670,7 @@ export async function pushSurvey(rec: { id: string; rev?: number; doc: Record<st
       });
       delete doc.legacyNotes;
       if (!existing.length) {
+        for (const f of SURVEY_SEEN_FIELDS) delete doc[f]; // transport-only (#344 C-final); the merge strips them otherwise
         await db.insert(t).values({ id, doc, rev: rec.rev ?? 1, updatedAt: at, receivedAt: at, review: { state: "new" }, deleted: false });
         return { id, status: "ok", rev: rec.rev ?? 1 };
       }

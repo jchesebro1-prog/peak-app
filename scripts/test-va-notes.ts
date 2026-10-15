@@ -1497,7 +1497,8 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     };
     const snapS = JSON.stringify(stored);
     const snapI = JSON.stringify(incoming);
-    const merged = FF.mergeSurveyFileRefs(stored, incoming) as typeof incoming;
+    // #344 C-final: this client saw every stored ref / sketch, so leaving one out (p_cccccccc) or re-drawing one (housePlan) is deliberate
+    const merged = FF.mergeSurveyFileRefs(stored, { ...incoming, photoRefIdsSeen: ["p_aaaaaaaa", "p_bbbbbbbb", "p_cccccccc", "p_ffffffff"], sketchIdsSeen: ["s_dddddddd", "s_eeeeeeee"] }) as typeof incoming;
     const refA = merged.photoRefs.find((r) => r.id === "p_aaaaaaaa")!;
     ok(refA.file.blobPath === "surveys/FS-1/p_aaaaaaaa.jpg" && !("pending" in refA.file) && refA.caption === "new caption" &&
       refA.markup?.image.blobPath === "surveys/FS-1/m_a1a1a1a1.jpg" && refA.markup?.strokes.blobPath === "surveys/FS-1/k_a1a1a1a1.json",
@@ -1531,7 +1532,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       "#344 C4 fix: merge — a stored finished slot is never replaced, even by a finished incoming one");
     const noMk = FF.mergeSurveyFileRefs(stored, { photoRefs: [{ ...incoming.photoRefs[0], markup: undefined }] }) as typeof incoming;
     ok(!noMk.photoRefs[0].markup, "#344 C4: merge — a removed markup stays removed");
-    ok(JSON.stringify(FF.mergeSurveyFileRefs(stored, { notes: "x" })) === JSON.stringify({ notes: "x" }) && JSON.stringify(FF.mergeSurveyFileRefs({}, incoming)) === snapI,
+    ok(JSON.stringify(FF.mergeSurveyFileRefs({ notes: "y" }, { notes: "x" })) === JSON.stringify({ notes: "x" }) && JSON.stringify(FF.mergeSurveyFileRefs({}, incoming)) === snapI,
       "#344 C4: merge — nothing to merge leaves the incoming copy as it is");
 
     /* the fold (one finished slot into the refs) */
@@ -1729,7 +1730,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const osv = ctl.slice(ctl.indexOf("async function onSave"), ctl.indexOf("async function advanceStage"));
     ok(psv.includes("serialSave(") && psv.includes("{ ...lastSaved.current, photoRefs: refsNow.current") && !psv.includes("validate(") && !psv.includes("...draft") && psv.includes("buildPatch(undefined, sent)") &&
       psv.includes("setPhotoUnsaved(true)") && osv.includes("serialSave(") && osv.includes("photoRefs: refsNow.current") && osv.includes("lastSaved.current = sent") &&
-      ctl.includes('"Photo not saved yet"') && ctl.includes("photosTouched.current ? { photoRefs: draft.photoRefs }") && ctl.includes("setAdoptedBase(initial)") &&
+      ctl.includes('"Photo not saved yet"') && /photosTouched\.current\s*\?\s*\{ photoRefs: draft\.photoRefs[,}]/.test(ctl) && ctl.includes("setAdoptedBase(initial)") &&
       /function buildPatch\(over\?: Partial<SurveyPatch>, d: Draft = draft\)/.test(ctl) && /function buildFullDoc\(over\?: Partial<SurveyPatch>, d: Draft = draft\)/.test(ctl),
       "#344 C5 fix: a photo save sends the last-saved draft + the current refs (never unsaved edits), serialised with Save changes, which always sends the current refs; a failed photo save shows Photo not saved yet");
     ok(!sp.includes('display: "none"') && (sp.match(/className="sp-file"/g) || []).length === 2 && sp.includes(":focus-within") &&
@@ -1908,7 +1909,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
         "#344 C6 fix: failed sketch uploads are named by pad and discarded through the sketch hook; a failed sketch save says Drawing not saved yet");
 
       /* ---- C6 fix 2 ---- */
-      ok(/photosTouched\.current \? \{ photoRefs/.test(ctl) && /sketchesTouched\.current \? \{\s*sketches: draft\.sketches/.test(ctl) &&
+      ok(/photosTouched\.current\s*\?\s*\{ photoRefs/.test(ctl) && /sketchesTouched\.current\s*\?\s*\{\s*sketches: draft\.sketches/.test(ctl) &&
         /sketchesNow\.current = next;\s*sketchesTouched\.current = true;/.test(ctl),
         "#344 C6 fix2: sketchesTouched is set on every sketch change and is in the save condition, so an emptied set is still sent");
       const delAll = FF.sanitizeIncomingFileSlots({ photoRefs: [], sketches: {} } as Record<string, unknown>, "FS-1",
@@ -2116,6 +2117,63 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     ok(/p\.id === preset \? setResetTick/.test(v3) && v3.includes("force ||") && /applyRef\.current\?\.\(preset, wireframe, force\)/.test(v3),
       "#344 C8 fix: clicking the already-active preset re-applies it (forced rebuild = reset view)");
   }
+  /* ---- C-final: a second editor never deletes photos or sketches it hasn't seen ---- */
+  {
+    const FF = await import("../src/lib/field-files/files");
+    type Ref = { id: string; section: string; takenAt: number; by: string; file: { pending?: true; blobPath?: string } };
+    type Sk = { id: string; image: { pending?: true; blobPath?: string }; strokes: { pending?: true }; updatedAt: number; by: string };
+    type Doc = { photoRefs?: Ref[]; sketches?: Record<string, Sk>; photoRefIdsSeen?: string[]; sketchIdsSeen?: string[]; notes?: string };
+    const pend = { pending: true as const };
+    const ref = (id: string, done?: boolean): Ref => ({ id, section: "mBeams", takenAt: 1, by: "u", file: done ? { blobPath: `surveys/FS-1/${id}.jpg` } : pend });
+    const sk = (id: string): Sk => ({ id, image: pend, strokes: pend, updatedAt: 1, by: "u" });
+    const A = "p_aaaaaaaa1111", B = "p_bbbbbbbb2222", C = "p_cccccccc3333";
+    const stored: Doc = { photoRefs: [ref(A, true), ref(B)], sketches: { stagePlan: sk("s_aaaaaaaa1111"), housePlan: sk("s_bbbbbbbb2222") } };
+    const ids = (d: Doc) => (d.photoRefs || []).map((r) => r.id).join(",");
+    const m = (inc: Doc) => FF.mergeSurveyFileRefs(stored as Record<string, unknown>, inc as Record<string, unknown>) as Doc;
+    const unknownKept = m({ photoRefs: [ref(C)], photoRefIdsSeen: [C] });
+    ok(ids(unknownKept) === [C, A, B].join(",") && unknownKept.photoRefs![1].file.blobPath === `surveys/FS-1/${A}.jpg`,
+      "#344 C-final: a stored photo ref the client never saw is kept (appended after the incoming order, oldest first)");
+    const seenGone = m({ photoRefs: [ref(B)], photoRefIdsSeen: [A, B] });
+    ok(ids(seenGone) === B, "#344 C-final: a stored ref the client saw and left out is deleted");
+    const noSeen = m({ photoRefs: [] });
+    ok(ids(noSeen) === [A, B].join(","), "#344 C-final: without a seen set (old client / other writer) nothing is deleted");
+    const absent = m({ notes: "x" });
+    ok(ids(absent) === [A, B].join(",") && absent.sketches?.stagePlan.id === "s_aaaaaaaa1111" && absent.notes === "x",
+      "#344 C-final: a copy with no photoRefs / sketches at all keeps every stored ref and sketch");
+    const allGone = m({ photoRefs: [], photoRefIdsSeen: [A, B], sketches: {}, sketchIdsSeen: ["s_aaaaaaaa1111", "s_bbbbbbbb2222"] });
+    ok(Array.isArray(allGone.photoRefs) && allGone.photoRefs.length === 0 && Object.keys(allGone.sketches || { x: 1 }).length === 0,
+      "#344 C-final: photoRefs [] / sketches {} with every id seen still deletes them all (a deliberate delete-all)");
+    const skStored = m({ sketches: { stagePlan: sk("s_cccccccc3333") } });
+    ok(skStored.sketches?.stagePlan.id === "s_aaaaaaaa1111" && skStored.sketches?.housePlan.id === "s_bbbbbbbb2222",
+      "#344 C-final: a sketch the client never saw wins over a different incoming one, and an unseen stored pad stays");
+    const skSeen = m({ sketches: { stagePlan: sk("s_cccccccc3333") }, sketchIdsSeen: ["s_aaaaaaaa1111", "s_bbbbbbbb2222"] });
+    ok(skSeen.sketches?.stagePlan.id === "s_cccccccc3333" && !skSeen.sketches?.housePlan,
+      "#344 C-final: a seen sketch replaced (re-drawn) or removed by the client takes the client's copy");
+    ok(!("photoRefIdsSeen" in unknownKept) && !("sketchIdsSeen" in skSeen) && !("photoRefIdsSeen" in allGone) &&
+      !("photoRefIdsSeen" in (FF.mergeSurveyFileRefs({}, { photoRefIdsSeen: [A], sketchIdsSeen: [] }) as object)),
+      "#344 C-final: the seen fields are transport-only — stripped from every merge result");
+    const many = Array.from({ length: FF.SURVEY_PHOTO_CAP }, (_, i) => ref("p_" + (i + 1).toString(16).padStart(12, "0")));
+    const capped = FF.mergeSurveyFileRefs({ photoRefs: [ref(A), ref(B)] }, { photoRefs: many, photoRefIdsSeen: many.map((r) => r.id) }) as Doc;
+    ok(capped.photoRefs!.length === FF.SURVEY_PHOTO_CAP && ids(capped).endsWith([A, B].join(",")),
+      "#344 C-final: kept unseen stored refs are never dropped by the cap; the client's newest new refs give way");
+    // the client side: a refreshed record's unseen refs / sketches are unioned in by id
+    const cur = { photoRefs: [ref(B) as never], sketches: { stagePlan: sk("s_dddddddd4444") as never } };
+    const fresh = { photoRefs: [ref(A, true), ref(B, true), ref(C)], sketches: { stagePlan: sk("s_aaaaaaaa1111"), housePlan: sk("s_bbbbbbbb2222") } };
+    const u = FF.unionUnseenFileRefs(cur, fresh, { photos: new Set([B, C]), sketches: new Set(["s_bbbbbbbb2222", "s_dddddddd4444"]) });
+    ok(!!u && u.photoRefs.map((r) => r.id).join(",") === [B, A].join(",") && u.sketches.stagePlan.id === "s_aaaaaaaa1111" && !u.sketches.housePlan &&
+      u.added.photos.join() === A && u.added.sketches.join() === "s_aaaaaaaa1111" && cur.photoRefs.length === 1,
+      "#344 C-final: unionUnseenFileRefs adds only refs / sketches the editor hasn't seen (a seen-deleted one stays deleted); pure");
+    ok(FF.unionUnseenFileRefs(cur, { photoRefs: [ref(B)], sketches: {} }, { photos: new Set([B]), sketches: new Set() }) === null,
+      "#344 C-final: unionUnseenFileRefs returns null when there is nothing new");
+    const ctlF = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/controls.tsx"), "utf8");
+    const actF = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/actions.ts"), "utf8");
+    ok(/photoRefIdsSeen: \[\.\.\.seenPhotoIds\.current\]/.test(ctlF) && /sketchIdsSeen: \[\.\.\.seenSketchIds\.current\]/.test(ctlF) &&
+      actF.includes("photoRefIdsSeen?: string[]") && actF.includes("sketchIdsSeen?: string[]"),
+      "#344 C-final: buildPatch (every save path + the outbox whole doc) sends the seen photo and sketch ids");
+    ok(/onRefs: \(next\) => \{[\s\S]{0,200}seenPhotoIds\.current\.add/.test(ctlF) && /onSketches: \(next\) => \{[\s\S]{0,200}seenSketchIds\.current\.add/.test(ctlF) &&
+      ctlF.includes("unionUnseenFileRefs(") && /useEffect\(\(\) => \{[\s\S]{0,120}unionUnseenFileRefs\([\s\S]{0,900}\}, \[initial\]\)/.test(ctlF),
+      "#344 C-final: the editor marks every ref it creates as seen and unions a refreshed record's unseen refs even while dirty");
+  }
 }
 
 export async function vaNotesDbChecks(ok: Ok): Promise<void> {
@@ -2266,7 +2324,7 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
       const { surveyInlineTotal } = FF;
       const room = FF.INLINE_CAPS.totalPerSurvey - surveyInlineTotal((await S.get(sv.id)) ?? {});
       ok(room > 0 && room < FF.INLINE_CAPS.totalPerSurvey, "#344 C4: the survey's inline total counts every finished inline file");
-      await S.update(sv.id, { photoRefs: (await S.get(sv.id))?.photoRefs?.filter((r) => r.id !== P2) } as never);
+      await S.update(sv.id, { photoRefs: (await S.get(sv.id))?.photoRefs?.filter((r) => r.id !== P2), photoRefIdsSeen: [P2] } as never);
       // the sync push keeps finished slots and never stores legacyNotes
       const cur = await S.get(sv.id);
       const tableRev = (await db.select().from(DOC_TABLES.surveys).where(eq(DOC_TABLES.surveys.id, sv.id)).limit(1))[0]?.rev ?? 0;
@@ -2322,6 +2380,51 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
     } finally {
       if (prevBlob !== undefined) process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
     }
+  }
+  /* C-final: the laptop / iPad scenario through update() and pushSurvey — a save never deletes refs it hasn't seen */
+  {
+    const FF = await import("../src/lib/field-files/files");
+    const pend = { pending: true as const };
+    const pref = (id: string) => ({ id, section: "mBeams", takenAt: 1, by: "ipad", file: pend });
+    const A = FF.newFileId("p"), B = FF.newFileId("p"), SA = FF.newFileId("s");
+    const sv = await S.create({ owner: "Sam Surveyor" } as never);
+    registerFixture("surveys", sv.id);
+    // the iPad adds two photos and a sketch
+    await S.update(sv.id, { photoRefs: [pref(A), pref(B)], sketches: { stagePlan: { id: SA, image: pend, strokes: pend, updatedAt: 1, by: "ipad" } }, photoRefIdsSeen: [A, B], sketchIdsSeen: [SA] } as never);
+    // the laptop (opened before them) saves its stale empty lists, having seen nothing
+    await S.update(sv.id, { notes: "laptop", photoRefs: [], sketches: {}, photoRefIdsSeen: [], sketchIdsSeen: [] } as never);
+    const k1 = await S.get(sv.id);
+    const ids = (d: typeof k1) => (d?.photoRefs ?? []).map((r) => r.id).join(",");
+    ok(k1?.notes === "laptop" && ids(k1) === [A, B].join(",") && k1?.sketches?.stagePlan?.id === SA,
+      "#344 C-final: update() — a second editor's stale empty save keeps the photos and sketch it never saw (and its other edits land)");
+    await S.update(sv.id, { photoRefs: [], photoRefIdsSeen: [A] } as never);
+    const k2 = await S.get(sv.id);
+    const raw2 = (await (await import("../src/db/doc-store")).getDoc("surveys", sv.id)) as Record<string, unknown> | null;
+    ok(ids(k2) === B && !!raw2 && !("photoRefIdsSeen" in raw2) && !("sketchIdsSeen" in raw2),
+      "#344 C-final: update() — photoRefs [] with seen [A] deletes A only; the seen fields are never stored");
+    // the same through the sync push (a whole doc from an offline laptop)
+    const { getDb } = await import("../src/db");
+    const { DOC_TABLES } = await import("../src/db/doc-tables");
+    const { eq } = await import("drizzle-orm");
+    const db = await getDb();
+    const revOf = async () => (await db.select().from(DOC_TABLES.surveys).where(eq(DOC_TABLES.surveys.id, sv.id)).limit(1))[0]?.rev ?? 0;
+    await S.update(sv.id, { photoRefs: [pref(A), pref(B)], photoRefIdsSeen: [A, B] } as never);
+    const base = (await S.get(sv.id))!;
+    const n = await revOf();
+    const p1 = await S.pushSurvey({ id: sv.id, rev: n + 1, doc: { ...(base as object), photoRefs: [], sketches: {}, photoRefIdsSeen: [], sketchIdsSeen: [], notes: "pushed" } as Record<string, unknown> });
+    const k3 = await S.get(sv.id);
+    ok(p1.status === "ok" && k3?.notes === "pushed" && ids(k3) === [A, B].join(",") && k3?.sketches?.stagePlan?.id === SA,
+      "#344 C-final: pushSurvey — a pushed copy with empty lists and nothing seen keeps every stored photo and sketch");
+    const n2 = await revOf();
+    const p2 = await S.pushSurvey({ id: sv.id, rev: n2 + 1, doc: { ...(base as object), photoRefs: [], photoRefIdsSeen: [A] } as Record<string, unknown> });
+    const raw4 = (await (await import("../src/db/doc-store")).getDoc("surveys", sv.id)) as Record<string, unknown> | null;
+    ok(p2.status === "ok" && ids(await S.get(sv.id)) === B && !!raw4 && !("photoRefIdsSeen" in raw4),
+      "#344 C-final: pushSurvey — photoRefs [] with seen [A] deletes A only; the seen fields are never stored");
+    const newId = "FS-" + (900000 + Math.floor(Math.random() * 99999));
+    registerFixture("surveys", newId);
+    await S.pushSurvey({ id: newId, rev: 1, doc: { customer: "Seen", photoRefIdsSeen: [A], sketchIdsSeen: [] } });
+    const rawN = (await (await import("../src/db/doc-store")).getDoc("surveys", newId)) as Record<string, unknown> | null;
+    ok(rawN?.customer === "Seen" && !("photoRefIdsSeen" in rawN) && !("sketchIdsSeen" in rawN), "#344 C-final: pushSurvey's insert path strips the seen fields too");
   }
 }
 
