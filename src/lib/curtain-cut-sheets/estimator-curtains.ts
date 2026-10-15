@@ -31,7 +31,16 @@ export type CutSheetFabric = { sku: string; name: string; oz?: number; ozBasis?:
 export type CutSheetMount = {
   key: CurtainMountKey;
   source: "track" | "picked" | "assumed";
-  track?: { line: SpecItem; seriesId: string; seriesName: string; seriesGone: boolean; operation: TrackOperation; carrierSpacingIn: number };
+  track?: {
+    line: SpecItem;
+    seriesId: string;
+    seriesName: string;
+    seriesGone: boolean;
+    operation: TrackOperation;
+    carrierSpacingIn: number;
+    /** #354 review (Oct 15 #45): a walk-along track in two halves — the sheets say "two-half walk-along". */
+    twoHalfWalkAlong?: boolean;
+  };
 };
 /** Where a line sits — staff warnings and "Edit the curtain →" only. */
 export type CurtainLineRef = { ref: string; where: string; desc: string; sectionId?: string; lineId?: number };
@@ -158,6 +167,7 @@ export function estimatorCurtains(sections: readonly SpecSection[], fabrics: rea
             seriesName: series?.name || "",
             seriesGone: !series,
             operation: cfg.operation,
+            ...(cfg.operation === "walkalong" && cfg.walkAlongBipart === true ? { twoHalfWalkAlong: true } : {}),
             carrierSpacingIn: positiveOr(cfg.carrierSpacingIn, positiveOr(series?.carrierSpacingIn, DEFAULT_MARK_SPACING_IN)),
           },
         };
@@ -361,7 +371,8 @@ export function curtainTypeKey(c: CutSheetCurtain): string {
     c.topFinish,
     c.bottomFinish,
     c.mount.key,
-    c.mount.track ? `track:${c.mount.track.seriesId}:${c.mount.track.carrierSpacingIn}` : "",
+    // #354 review: a two-half walk-along never merges with another hang (the sheet states it).
+    c.mount.track ? `track:${c.mount.track.seriesId}:${c.mount.track.carrierSpacingIn}${c.mount.track.twoHalfWalkAlong ? ":2w" : ""}` : "",
   ].join("|");
 }
 

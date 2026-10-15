@@ -110,10 +110,12 @@ export function plainDescription(type: CurtainType): string {
   const place = MOUNT_PLACE[c.mount.key];
   const mountedTo = place ? ` mounted to ${place}` : "";
   const t = c.mount.track;
+  // #354 review (Oct 15 #45): a walk-along track in two halves says so.
+  const kind = t?.twoHalfWalkAlong ? "two-half walk-along " : "";
   const hang = t
     ? t.seriesName
-      ? `, hung from carriers on ${aOrAn(t.seriesName)} ${t.seriesName} track${mountedTo}`
-      : `, hung from carriers on a track${mountedTo}`
+      ? `, hung from carriers on ${aOrAn(kind || t.seriesName)} ${kind}${t.seriesName} track${mountedTo}`
+      : `, hung from carriers on a ${kind}track${mountedTo}`
     : c.mount.key === "tie-batten"
       ? `, tied to ${place}`
       : c.mount.key === "wall-hookloop"
@@ -184,7 +186,9 @@ export function cutSheetModel(type: CurtainType, ctx: CutSheetContext): CutSheet
     box,
   });
   const t = c.mount.track;
-  const mountLabel = t && t.seriesName ? `${MOUNT_KEY_LABELS[c.mount.key]} (${t.seriesName})` : MOUNT_KEY_LABELS[c.mount.key];
+  const twoHalf = t?.twoHalfWalkAlong ? "two-half walk-along" : "";
+  const mountNote = [t?.seriesName || "", twoHalf].filter(Boolean).join(", ");
+  const mountLabel = mountNote ? `${MOUNT_KEY_LABELS[c.mount.key]} (${mountNote})` : MOUNT_KEY_LABELS[c.mount.key];
   return {
     style: ctx.style,
     sheetNo: type.sheetNo,

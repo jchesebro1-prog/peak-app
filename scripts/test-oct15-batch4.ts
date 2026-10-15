@@ -271,6 +271,18 @@ async function trackChecks(ok: Ok) {
   ok(TB.trackLineDesc(c, { name: "ADC 280" }) === "Main — ADC 280 walk-along bi-parting track, 40' run", "#45 line: the description says walk-along bi-parting");
   ok(TB.spacingDefaults(sp, "ceiling").hanger === "8" && TB.spacingDefaults(sp, "batten").hanger === "4" && TB.spacingDefaults(series(), "ceiling").hanger === "5", "#45 form: the collapsed spacing shows the mounting's own default");
   ok(TB.freshTrackDraft([]).walkAlongBipart === false, "#45 form: a new track starts as one half");
+  // #354 review M8: cut sheets say "two-half walk-along".
+  const { plainDescription } = await import("../src/lib/curtain-cut-sheets/model");
+  const { curtainTypeKey } = await import("../src/lib/curtain-cut-sheets/estimator-curtains");
+  const curtain = (two: boolean) => ({
+    name: "Main", fabric: null, fabricText: "IFR velour", fabricRef: null, widthFt: 40, heightFt: 20, fullnessPct: 50, qty: 1, topFinish: "grommets", bottomFinish: "chain", warnings: [],
+    mount: { key: "track-batten", source: "track", track: { line: {}, seriesId: "adc-280", seriesName: "ADC 280", seriesGone: false, operation: "walkalong", carrierSpacingIn: 12, ...(two ? { twoHalfWalkAlong: true } : {}) } },
+  });
+  const typeOf = (two: boolean) => ({ title: "Main", totalQty: 1, sizes: [{ widthFt: 40, heightFt: 20 }], markSpacingIn: 12, curtains: [curtain(two)] }) as never;
+  ok(/hung from carriers on a two-half walk-along ADC 280 track/.test(plainDescription(typeOf(true))) && !/two-half/.test(plainDescription(typeOf(false))),
+    "#354 review: the client cut sheet says a two-half walk-along track (and only then)");
+  ok(curtainTypeKey(curtain(true) as never) !== curtainTypeKey(curtain(false) as never), "#354 review: a two-half walk-along curtain never merges into a one-half type's sheet");
+  ok(/cfg\.operation === "walkalong" && cfg\.walkAlongBipart === true \? \{ twoHalfWalkAlong: true \}/.test(src("src/lib/curtain-cut-sheets/estimator-curtains.ts")), "#354 review: the Estimator curtain read passes the two-half flag from the track line");
 }
 
 /* --- #43 Grid rack group ↔ rack RU elevation --- */
