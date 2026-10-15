@@ -42,7 +42,8 @@ import {
   viewerFrom,
   visibleTo,
 } from "@/lib/stores/comms-visibility";
-import { planOwnerStamps } from "@/lib/comms-owner-stamp";
+import { planOwnerStamps, tombstoneStamps } from "@/lib/comms-owner-stamp";
+import { MAILBOX_OWNER_NOBODY } from "@/lib/stores/comms-visibility";
 import { duplicateNameIds, foldTeamName, teamNameError } from "@/lib/team-names";
 import { PRIVATE_EMAIL_TITLE, redactEmailRows, triageMayActOnThread } from "@/lib/triage/thread-access";
 import type { CommThread } from "@/lib/stores/comms";
@@ -186,6 +187,13 @@ function mailboxIdentityPureChecks(ok: Ok): void {
   const oc = JSON.stringify(ownMailboxCond(A));
   ok(oc.includes('"path":["mailboxOwnerId"],"is":"u-a"') && oc.includes('"path":["gmailAccountKey"],"is":"personal:u-a"') && !oc.includes("mailboxUser") && JSON.stringify(ownMailboxCond(Cv)).includes('"path":["mailboxUser"],"is":"Cam Solo"'), "identity (#349): ownMailboxCond — id and key branches always, the legacy-name branch only for a unique name");
 
+  /* #349 review — the tombstone owns nothing, ever */
+  const tomb = base({ mailboxUser: "Cam Solo", mailboxOwnerId: MAILBOX_OWNER_NOBODY });
+  ok(!ownsMailbox(tomb, Cv) && !canSeeThread(tomb, Cv) && resolveMailboxOwnerId(tomb, roster) === null && mailboxOwnership(tomb, Cv) === null, "tombstone (#349 review): a thread stamped \"unresolved\" is nobody's — not even the sole holder of its name");
+  const fakeTomb: MailboxViewer = { id: MAILBOX_OWNER_NOBODY, name: "x", nameUnique: true };
+  ok(!ownsMailbox(tomb, fakeTomb) && JSON.stringify(ownMailboxCond(fakeTomb)) === JSON.stringify({ any: [] }), "tombstone (#349 review): no viewer can match it (a viewer id equal to the tombstone owns nothing, in JS and SQL)");
+  ok(resolveMailboxOwnerId(base({ mailboxUser: "   " }), [{ id: "u-w", name: "   " }]) === null, "identity (#349 review): a whitespace-only name is never unique in resolveMailboxOwnerId (as viewerFrom)");
+
   /* the comms:stamp-owners plan */
   const plan = planOwnerStamps(
     [
@@ -196,15 +204,18 @@ function mailboxIdentityPureChecks(ok: Ok): void {
       { id: "s5", mailbox: "personal", mailboxUser: "Ghost Person" },
       { id: "s6", mailbox: "personal", mailboxUser: "" },
       { id: "s7", mailbox: "sales", mailboxUser: null },
+      { id: "s8", mailbox: "personal", mailboxUser: "Pat Twin", mailboxOwnerId: MAILBOX_OWNER_NOBODY },
     ],
     roster
   );
   ok(
     plan.candidates === 5 &&
       JSON.stringify(plan.stamps) === JSON.stringify([{ id: "s1", ownerId: "u-c", how: "name" }, { id: "s3", ownerId: "u-b", how: "key" }]) &&
-      JSON.stringify(plan.unresolved.map((u) => [u.id, u.reason])) === JSON.stringify([["s2", "shared-name"], ["s5", "unknown-name"], ["s6", "no-name"]]),
-    "comms:stamp-owners (#349): stamps by Gmail key or a unique name, skips stamped and shared-box threads, lists shared / unknown / blank names as unresolved"
+      JSON.stringify(plan.unresolved.map((u) => [u.id, u.reason])) === JSON.stringify([["s2", "shared-name"], ["s5", "unknown-name"], ["s6", "no-name"]]) &&
+      plan.tombstoned === 1,
+    "comms:stamp-owners (#349): stamps by Gmail key or a unique name, skips stamped (and already tombstoned) and shared-box threads, lists shared / unknown / blank names as unresolved"
   );
+  ok(JSON.stringify(tombstoneStamps(plan)) === JSON.stringify([{ id: "s2", ownerId: MAILBOX_OWNER_NOBODY }]), "comms:stamp-owners (#349 review): --apply tombstones the shared-name rows only (unknown / blank names are listed, not written)");
 
   /* Settings → Team names */
   const team = [
@@ -502,6 +513,8 @@ async function mailboxIdentityDbChecks(
   const { mailboxViewer, mailboxRoster, actorByName } = await import("@/lib/mailbox-viewer");
   const { loadOwnerStampPlan, applyOwnerStamps } = await import("@/lib/comms-owner-stamp");
   const { upsertRenewalDraft } = await import("@/lib/renewal-outreach");
+  const { handOverNameOnly, retireNameForNewcomer } = await import("@/lib/mailbox-names");
+  const { eq } = await import("drizzle-orm");
   const apply = await import("@/lib/inbox-org/apply");
 
   const TWIN = "TV349 Twin";
@@ -510,7 +523,7 @@ async function mailboxIdentityDbChecks(
   const db = await getDb();
   // real user rows: the twins, plus ME and OTHER (the stamp script resolves a
   // legacy name only to a user who exists)
-  const rows = [A, B, ME, OTHER];
+  const rows: Array<{ id: string; name: string; roles: string[] }> = [A, B, ME, OTHER];
   await db.insert(users).values(
     rows.map((u, i) => ({ id: u.id, name: u.name, email: `tv349-user-${i}@peak.test`, roles: ["Estimator"], color: "#5b616e", initials: "TT", status: "active" as const, createdAt: NOW }))
   );
@@ -602,6 +615,57 @@ async function mailboxIdentityDbChecks(
     const again = await applyOwnerStamps(mine);
     const replan = (await loadOwnerStampPlan(await mailboxRoster())).stamps.filter((s) => ours.has(s.id));
     ok(first.stamped === mine.length && again.stamped === 0 && again.raced === mine.length && replan.length === 0 && (await C.get(T.scriptLegacy.id))?.mailboxOwnerId === ME.id && (await C.get(T.bKey.id))?.mailboxOwnerId === B.id && !(await C.get(T.legacyTwin.id))?.mailboxOwnerId, "comms:stamp-owners db (#349): apply stamps each once (compare-and-set), a re-run writes nothing, unresolved threads stay unstamped");
+    // #349 review — --apply also tombstones the shared-name rows
+    const tombs = tombstoneStamps({ unresolved }).filter((s) => ours.has(s.id));
+    const tw = await applyOwnerStamps(tombs);
+    ok(tombs.some((s) => s.id === T.legacyTwin.id) && !tombs.some((s) => s.id === T.ghost.id) && tw.stamped === tombs.length && (await C.get(T.legacyTwin.id))?.mailboxOwnerId === MAILBOX_OWNER_NOBODY && !(await C.get(T.ghost.id))?.mailboxOwnerId, "comms:stamp-owners db (#349 review): --apply tombstones the shared-name thread (\"unresolved\"); an unknown name is only listed");
+    const replan2 = await loadOwnerStampPlan(await mailboxRoster());
+    ok(!replan2.unresolved.some((u) => u.id === T.legacyTwin.id) && replan2.tombstoned >= 1 && !(await ownThread(T.legacyTwin.id, A)) && (await C.get(T.legacyTwin.id))?.mailboxOwnerId === MAILBOX_OWNER_NOBODY, "comms:stamp-owners db (#349 review): a tombstone is never re-planned, resolved or overwritten (the lazy stamp leaves it)");
+
+    /* #349 review — renames never move mail; newcomers inherit nothing */
+    const rename = async (u: { id: string }, name: string) => db.update(users).set({ name }).where(eq(users.id, u.id));
+    // the twins: after the script, rename A away — B is now the name's only holder, yet the tombstoned thread stays nobody's
+    await handOverNameOnly(A, await mailboxRoster());
+    await rename(A, "TV349 Twin Renamed");
+    const BV2 = await mailboxViewer(B);
+    ok(BV2.nameUnique && !canSeeThread((await C.get(T.legacyTwin.id))! as never, BV2) && !(await ownThread(T.legacyTwin.id, B)), "rename (#349 review): renaming one of two namesakes after the script never hands the shared-name thread to the other — it stays tombstoned");
+    // a fresh name-only thread on a SHARED old name is tombstoned by the rename itself
+    await rename(A, TWIN);
+    const twin2 = th(w("twin2"), TWIN, "twintwoword");
+    await createFixture("comms", twin2 as never);
+    const h = await handOverNameOnly(A, await mailboxRoster());
+    await rename(A, "TV349 Twin Renamed");
+    ok(h.owner === MAILBOX_OWNER_NOBODY && (await C.get(twin2.id))?.mailboxOwnerId === MAILBOX_OWNER_NOBODY && !canSeeThread((await C.get(twin2.id))! as never, await mailboxViewer(B)), "rename (#349 review): renaming away from a shared name tombstones that name's name-only threads — the remaining namesake gets nothing");
+    // a UNIQUE old name: the renamed user keeps their name-only mail (and assignments); a new hire with the old name inherits nothing
+    const R = { id: "u-tv349-r", name: "TV349 Renamer", roles: ["admin"] };
+    await db.insert(users).values({ id: R.id, name: R.name, email: "tv349-renamer@peak.test", roles: ["Estimator"], color: "#5b616e", initials: "TR", status: "active" as const, createdAt: NOW });
+    rows.push(R);
+    const rLegacy = th(w("r-legacy"), R.name, "renamerword");
+    const rAssign = th(w("r-assign"), OTHER.name, "renamerassignword", { assignedTo: R.name });
+    await createFixture("comms", rLegacy as never);
+    await createFixture("comms", rAssign as never);
+    const hr = await handOverNameOnly(R, await mailboxRoster());
+    await rename(R, "TV349 Renamed");
+    const RV = await mailboxViewer({ id: R.id, name: "TV349 Renamed" });
+    const rl = (await C.get(rLegacy.id))!;
+    const ra = (await C.get(rAssign.id))!;
+    ok(hr.owner === R.id && rl.mailboxOwnerId === R.id && ra.assignedToId === R.id && canSeeThread(rl, RV) && isAssignedTo(ra, RV), "rename (#349 review): before a rename the old (unique) name's name-only thread and assignment are stamped with the user's id — they stay theirs under the new name");
+    await retireNameForNewcomer(R.name);
+    const N = { id: "u-tv349-n", name: R.name };
+    await db.insert(users).values({ id: N.id, name: N.name, email: "tv349-newhire@peak.test", roles: ["Estimator"], color: "#5b616e", initials: "TN", status: "active" as const, createdAt: NOW });
+    rows.push({ ...N, roles: [] });
+    const NV = await mailboxViewer(N);
+    ok(NV.nameUnique && !canSeeThread(rl, NV) && !isAssignedTo(ra, NV) && !(await ownThread(rLegacy.id, N)) && (await k("renamerword", N)).length === 0, "new hire (#349 review): a new user taking a renamed teammate's old name inherits none of their mail or assignments");
+    // a later rename of R moves nothing either (everything is stamped)
+    const hr2 = await handOverNameOnly({ id: R.id, name: "TV349 Renamed" }, await mailboxRoster());
+    await rename(R, "TV349 Third Name");
+    ok(hr2.threads === 0 && (await C.get(rLegacy.id))?.mailboxOwnerId === R.id && canSeeThread((await C.get(rLegacy.id))!, await mailboxViewer({ id: R.id, name: "TV349 Third Name" })), "rename (#349 review): renaming again after the stamp transfers nothing — the thread follows the id");
+    // an orphaned name (no current holder) is retired before a newcomer takes it
+    const ghostHire = { id: "u-tv349-ghost", name: "TV349 Nobody" };
+    const retired = await retireNameForNewcomer(ghostHire.name);
+    await db.insert(users).values({ id: ghostHire.id, name: ghostHire.name, email: "tv349-ghost@peak.test", roles: ["Estimator"], color: "#5b616e", initials: "TG", status: "active" as const, createdAt: NOW });
+    rows.push({ ...ghostHire, roles: [] });
+    ok(retired.threads >= 1 && (await C.get(T.ghost.id))?.mailboxOwnerId === MAILBOX_OWNER_NOBODY && !canSeeThread((await C.get(T.ghost.id))!, await mailboxViewer(ghostHire)), "new hire (#349 review): older name-only mail already carrying a newcomer's name is tombstoned first — they inherit nothing");
 
     /* creators: a personal thread needs a real owner — never DEFAULT_USER */
     const throws = async (fn: () => Promise<unknown>) => {
@@ -698,7 +762,7 @@ export function threadVisibilityPins(ok: Ok): void {
   const guard = read("src/lib/inbox-thread-guard.ts");
   ok(/if \(!t \|\| !visibleTo\(t, viewer\)\) return null;\n  await stampMailboxOwner\(t, viewer\);/.test(guard), "inbox guard (#341, #349): ownThread is the mailbox owner check — by identity — and stamps the owner lazily");
   const apply = read("src/lib/inbox-org/apply.ts");
-  ok(/if \(!t \|\| t\.deleted \|\| t\.status === "draft"\) return null;\n  const viewer = await mailboxViewer\(me\);\n  if \(!visibleTo\(t, viewer\)\) return null;/.test(apply), "inbox organize (#341, #349): apply.ts myThread stays the owner check behind every Organize action — by identity");
+  ok(/if \(!t \|\| t\.deleted \|\| t\.status === "draft"\) return null;\n  const viewer = await viewerFor\(me\);\n  if \(!visibleTo\(t, viewer\)\) return null;/.test(apply), "inbox organize (#341, #349): apply.ts myThread stays the owner check behind every Organize action — by identity");
   ok(/linkedBy: t\.linkedBy \?\? null,/.test(apply) && /await linkThread\(t\.id, target\.customerId, t\.resolvedContactId \?\? null, "filing"\);/.test(apply), "filing (#341): fileThread links with linkedBy \"filing\" and snapshots the old flag for Undo");
 
   // resweeps a person triggers stay in their mailbox
@@ -755,13 +819,20 @@ export function threadVisibilityPins(ok: Ok): void {
   const userLabels = read("src/lib/gmail/user-labels.ts");
   ok(/const t = await ownThread\(threadId, me\);/.test(userLabels) && /t\.gmailAccountKey !== key\) return failWith\("no-gmail"\)/.test(userLabels), "Gmail labels (#347, #349): labels act only on my own thread (identity) bridged through my own key");
   const track = read("src/lib/estimate-email/track-server.ts");
-  ok(!/sameName\(x\.owner, viewer\.name\)/.test(track) && !/sameName\(owner, actor\.name\)/.test(track) && (track.match(/ownedBy\(raw, await viewerOf\(deps, actor\)\)/g) || []).length === 2, "Send & track (#349): reply and Mark read on an estimate email need the mailbox owner by identity, never the display name");
+  ok(!/sameName\(/.test(track) && (track.match(/ownedBy\(raw, await viewerOf\(deps, actor\)\)/g) || []).length === 2 && /const isLead = !!leadId && leadId === viewer\.id;/.test(track) && /return \{ id: [^}]*nameUnique: false \};/.test(track), "Send & track (#349 + review): reply and Mark read need the mailbox owner by identity; the Lead estimator is matched by id; a failed roster read fails closed (nameUnique false)");
   const settings = read("src/app/(app)/settings/actions.ts");
-  ok(/const nameError = teamNameError\(name, await allUsers\(\)\);/.test(settings) && /teamNameError\(patch\.name, await allUsers\(\), id\)/.test(settings), "Settings → Team (#349): add and rename refuse a blank or duplicate name");
+  ok(/const nameError = teamNameError\(name, await allUsers\(\)\);/.test(settings) && /teamNameError\(next, users, id\)/.test(settings), "Settings → Team (#349): add and rename refuse a blank or duplicate name");
+  const renameSrc = settings.slice(settings.indexOf("export async function updateMemberAction"), settings.indexOf("export async function setRolesAction"));
+  ok(
+    /foldTeamName\(next\) !== foldTeamName\(current\?\.name\) \? teamNameError/.test(renameSrc) && /if \(current && next !== current\.name\) \{/.test(renameSrc) &&
+      renameSrc.indexOf("await handOverNameOnly(") < renameSrc.indexOf("await updateUser(") && renameSrc.indexOf("await retireNameForNewcomer(next)") < renameSrc.indexOf("await updateUser(") &&
+      /await retireNameForNewcomer\(name\);\n  await addUser\(/.test(settings),
+    "Settings → Team (#349 review): a case-only rename saves (the fold is only the duplicate check); a rename pins the old name's mail and retires the new name BEFORE it is applied; a new user's name is retired before they are added"
+  );
   const teamUi = read("src/app/(app)/settings/groups/team.tsx");
   ok(/const dupIds = duplicateNameIds\(users\);/.test(teamUi) && /Duplicate name/.test(teamUi) && /if \(!member\.ok\) return member;/.test(teamUi), "Settings → Team (#349): duplicates already on the team get a warning chip; a refused rename shows its error");
   const script = read("scripts/comms-stamp-owners.ts");
-  ok(/const apply = args\.includes\("--apply"\);/.test(script) && /resolveExplicitDbTarget\(/.test(script) && /if \(apply\) requireHostedConfirmation\(target\.hosted, args\);/.test(script) && /"comms:stamp-owners": "tsx scripts\/comms-stamp-owners\.ts"/.test(read("package.json")), "comms:stamp-owners (#349): a dry run by default; --apply writes; a hosted DB also needs --yes; an explicit target only");
+  ok(/const t = await applyOwnerStamps\(tombs\);/.test(script) && /const apply = args\.includes\("--apply"\);/.test(script) && /resolveExplicitDbTarget\(/.test(script) && /if \(apply\) requireHostedConfirmation\(target\.hosted, args\);/.test(script) && /"comms:stamp-owners": "tsx scripts\/comms-stamp-owners\.ts"/.test(read("package.json")), "comms:stamp-owners (#349): a dry run by default; --apply writes; a hosted DB also needs --yes; an explicit target only");
 }
 
 if (process.argv[1] && /test-thread-visibility\.ts$/.test(process.argv[1])) {

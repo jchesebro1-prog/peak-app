@@ -1413,7 +1413,7 @@ See `.env.example`.
     list and the pick lists in `field-lists.ts`, tell the reps older surveys
     ask for Scope first, send the CW Elevation and line set schedule sheets,
     try a real assessment end to end. Punch item #344.
-63. ✅ **Mailbox identity** (#349, D1063–D1071) — mailbox ownership follows the user's id (`CommThread.mailboxOwnerId`; one rule `ownsMailbox`, stamp → Gmail key → a name only one user holds, else nobody; `ownMailboxCond` in SQL; viewers from `src/lib/mailbox-viewer.ts`), assignments carry `assignedToId`, creators refuse a blank owner, legacy threads stamp lazily in write guards and via `npm run comms:stamp-owners` (Jeff-gated prod run), and Settings → Team refuses duplicate names. Punch item #349.
+63. ✅ **Mailbox identity** (#349, D1063–D1073) — mailbox ownership follows the user's id (`CommThread.mailboxOwnerId`; one rule `ownsMailbox`, stamp → Gmail key → a name only one user holds, else nobody; `ownMailboxCond` in SQL; viewers from `src/lib/mailbox-viewer.ts`), assignments carry `assignedToId`, creators refuse a blank owner, legacy threads stamp lazily in write guards and via `npm run comms:stamp-owners` (Jeff-gated prod run; shared names get the `"unresolved"` tombstone), a rename or new hire never moves mail (`src/lib/mailbox-names.ts`), and Settings → Team refuses duplicate names. Punch item #349.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

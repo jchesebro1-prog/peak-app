@@ -178,7 +178,7 @@ export function TeamGroup({
               </span>
               {dupIds.size > 0 && (
                 <span
-                  title="Two or more teammates share a name. Rename them so each mailbox stays tied to one person — an older email that carries only that name belongs to nobody until then."
+                  title="Two or more teammates share a name. Older emails that carry only that shared name belong to nobody, and renaming never hands them to anyone. Run the owner stamp (npm run comms:stamp-owners) before renaming, then rename so names stay unique."
                   style={DUP_CHIP}
                 >
                   ⚠ {dupIds.size} share a name
@@ -270,7 +270,7 @@ export function TeamGroup({
                 >
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{u.name}</span>
                   {dupIds.has(u.id) && (
-                    <span title="Another teammate has this name — rename one of them." style={DUP_CHIP}>
+                    <span title="Another teammate has this name. Rename one of them (after the owner stamp has run) — older name-only emails on this name stay with nobody." style={DUP_CHIP}>
                       Duplicate name
                     </span>
                   )}
