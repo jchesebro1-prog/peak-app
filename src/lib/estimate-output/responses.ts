@@ -4,6 +4,7 @@ import { fmt } from "@/app/(app)/estimator/pricing";
 import { cleanText } from "@/lib/document-files";
 import { permsFor } from "@/lib/team";
 import { alternateScopes, outputScopes } from "./scopes";
+import { looksLikeCardNumber } from "@/lib/portal-quote-mode";
 
 /**
  * #301 slice C (D-m, D-n, R1, R15, R16) — what a client sends from the
@@ -163,15 +164,16 @@ export function sanitizeClientResponse(
 
 /**
  * Jeff 2026-10-15 #15 — a typed PO number: one line, trimmed, ≤ 60 characters
- * ("" = none). null when it is too long or looks like a payment card number
- * (13–19 digits, ignoring spaces / dashes) — refused, never stored. Pure.
+ * ("" = none). null when it is too long or carries a payment card number
+ * anywhere in it — the portal's own check (#245 `looksLikeCardNumber`: any run
+ * of 13–19 digits, spaces / dashes allowed, that passes Luhn; #352 review I3) —
+ * refused, never stored. A long PO that fails Luhn is a PO. Pure.
  */
 export function cleanPoNumber(raw: unknown): string | null {
   const v = (typeof raw === "string" ? raw : "").replace(/\s+/g, " ").trim();
   if (!v) return "";
   if (v.length > RESPONSE_PO_MAX) return null;
-  const digits = v.replace(/[\s-]/g, "");
-  if (/^\d{13,19}$/.test(digits)) return null;
+  if (looksLikeCardNumber(v)) return null;
   return v;
 }
 

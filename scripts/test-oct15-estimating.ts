@@ -64,6 +64,9 @@ export async function oct15PureChecks(ok: Ok) {
   {
     ok(cleanPoNumber("  PO-4481 ") === "PO-4481" && cleanPoNumber("") === "" && cleanPoNumber(undefined) === "" && cleanPoNumber("x".repeat(61)) === null && cleanPoNumber("4111 1111 1111 1111") === null && cleanPoNumber("4111-1111-1111-1111") === null,
       "oct15 #15: a PO number is one line, ≤ 60 characters, and never a card number");
+    ok(cleanPoNumber("PO 4111 1111 1111 1111") === null && cleanPoNumber("Card 4111111111111111 please") === null, "I3: a card number inside the PO text is refused (Luhn scan of every digit run)");
+    ok(cleanPoNumber("123456789012345") === "123456789012345" && cleanPoNumber("PO 1234-5678-9012-345") === "PO 1234-5678-9012-345", "I3: a real 15-digit PO that fails Luhn is accepted");
+    ok(rd("src/lib/estimate-output/responses.ts").includes("if (looksLikeCardNumber(v)) return null;"), "I3: cleanPoNumber reuses the portal's looksLikeCardNumber");
     ok(acceptanceLine({ name: "Pat Doe", title: "Director", po: "4481" }) === "Accepted by Pat Doe, Director — PO 4481" && acceptanceLine({ name: "Pat Doe", title: "Director" }) === "Accepted by Pat Doe, Director",
       "oct15 #15: the notice reads \"Accepted by <name>, <title> — PO <po>\"");
     const scopes = [{ id: "s1", name: "Lighting", price: 100, priceLabel: "$100.00" }];
