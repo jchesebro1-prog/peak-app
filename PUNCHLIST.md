@@ -12241,7 +12241,7 @@ Follow-up to #342. A writer that computed a key's new value from its current one
 
 **Remaining:** none. Watch: a long outer transaction that calls one of these holds the row lock until it commits.
 
-## 344. Venue Assessment notes (Jeff, Oct 14) — 23 notes in three slices — slices A and B DONE 2026-10-14 on `feat/344-va-notes` (D1019–D1032, D1038–D1051), slice C pending
+## 344. Venue Assessment notes (Jeff, Oct 14) — 23 notes in three slices — slices A and B DONE 2026-10-14 on `feat/344-va-notes` (D1019–D1032, D1038–D1051); slice C BUILT 2026-10-15, awaiting Jeff's iPad + Pencil test (D1072–D1082)
 
 Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`) editor, designed in `docs/superpowers/specs/2026-10-14-venue-assessment-notes-design.md` and built as three slices on one branch. Slice A plan: `docs/superpowers/plans/2026-10-14-va-notes-slice-a.md`.
 
@@ -12260,12 +12260,43 @@ Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`
 - Per-discipline scope-first chips with Other, goals as lists, curtain rows (fabric, oz, track series, size, condition), lighting positions with a Position column on the fixtures inventory, the Bad→New condition slider, and a quantity-first line set schedule (Fill down, Mark spare).
 - Field sheet, findings text, Assist, Ask AI and the recap print only what the editor shows (`survey-format.ts`, `survey-measure-fields.ts`). Tests in `scripts/test-va-notes.ts`. No migration, no env var. **No instant rollback past this merge** (D1043).
 
-**Slice C — pending (drawing & photo capture, spec C1–C8; Jeff to send the CW Elevation sheet and the line set schedule sheet):** ink model and pad, generated pad backgrounds, a shared photo / sketch pipeline, sketch pads, per-section photos with caption and markup, field-sheet output, 3D presets. Needs a real iPad + Apple Pencil test (pressure, palm rejection, offline capture and later sync) before merge.
+**Slice C — BUILT 2026-10-15, awaiting Jeff's iPad + Apple Pencil test; not merged** (drawing & photo capture; plan `docs/superpowers/plans/2026-10-14-va-notes-slice-c.md`; D1072–D1082):
+- A Pencil-first ink pad (`src/components/ink/ink-pad.tsx`, pure model `src/lib/ink/`): pen in three colours, eraser, text labels, undo / redo, clear, pinch and pan, palm rejection once a Pencil is seen, **Draw with finger** override; Done saves the strokes (re-editable) and a flattened JPEG.
+- Sketch pads in their sections: Beams & rigging, CW elevation and Brick (counterweight only), Stage plan, Stage section, House section, House plan, and the line set schedule's **Fill in by hand** sheet (30 rows a page). Backgrounds are drawn from the survey's measurements (`src/lib/ink/backgrounds.ts`); CW Elevation and the line set sheet are placeholders until Jeff's real sheets arrive.
+- **Add photo** on every section (camera or library, several at once), thumbnails in the section and a count on the rail; a viewer with caption, Mark up / Edit markup / View original / Remove markup, Delete. The original is never changed.
+- Files go through the Assessments engine's device queue (now record-kind aware: `AS-` / `FS-`) to private Blob at `surveys/<FS-id>/…`; offline captures wait on the device and upload on reconnect. One merge rule on every write path, an advisory lock, seen-id deletes and per-editor save stamps keep two devices, the outbox and late saves from losing a photo or a field (D1076–D1077).
+- The field sheet prints each section's photos (marked-up version) with captions and its sketches, streamed from `/api/surveys/[id]/sheet-pdf` (20 MB image budget).
+- 3D view: Orbit / Plan / Section / Elevation presets and a Wireframe toggle (on by default).
+- **Tests:** `scripts/test-va-notes.ts` (`#344 C1…C8`, `C-final A…G`). No migration, no env var.
+- **Verified on desktop** (scratch DB, Blob off, 2026-10-15): photo + caption + markup (pen, colour, text label), View original, Edit markup reloads the strokes, Remove markup keeps the caption, Beams / Stage plan / line set sheet drawn, reload keeps everything, the printed PDF embeds the marked-up photo and three sketches, 3D presets + Wireframe. Not verifiable on desktop: Pencil pressure, palm rejection, a real Blob upload.
+
+**Slice C — Jeff's iPad test (on a Vercel deployment with Blob, NOT local dev — a branch preview shares the production database, so use a throwaway survey and delete it after):** use a throwaway survey; keep ONE editor open on it at a time unless the step says otherwise.
+1. **Pencil + palm.** Open Beams & rigging → Draw. Rest your palm on the screen *before* the first Pencil stroke, then draw. Palm should leave no marks. Pinch / pan with fingers while the Pencil rests. Write a few words with Scribble in a text label.
+2. **Finger toggle.** In a pad, tap **Draw with finger**, draw with a finger, turn it off — the Pencil should own drawing again.
+3. **Dense handwriting.** Line set schedule → Fill in by hand. Fill several rows in small handwriting; zoom in and out; Done. Reopen — strokes come back editable; the tile is legible.
+4. **Photos in bursts on weak Wi-Fi.** Add 5–6 photos quickly in two sections. Watch "N uploading". Force-quit Safari mid-upload, reopen the survey — nothing lost; anything stuck shows Retry / Discard.
+5. **Airplane mode.** Turn on airplane mode, take photos and draw a sketch, edit a few fields, Save. Turn airplane mode off, wait for the sync chip to settle, reload — everything is there. Then **Print sheet** — photos and sketches print.
+6. **Markup twice.** Mark up a photo, Done; mark it up again, Done. View original shows the clean photo; Remove markup keeps the photo and caption.
+7. **Leave while uploading.** Add photos and immediately go back to the list; come back — they finish or show Retry.
+8. **Rotate** the iPad with a pad open and with the viewer open.
+9. **3D.** Orbit, Plan, Section, Elevation; Wireframe on / off. (Wireframe shows each face's diagonal — say if you want outlines only.)
+Report anything odd with the survey id and the step number.
+
+**Slice C follow-ups (from the review ledger, none block the iPad test):**
+- A stage move made offline can push an older stage over a later office move on the same survey — the server has no forward-only stage rule (a stamped push could refuse to move a stage back past a stage write made after the stamp's time).
+- A pending stage clears only when the editor sees a refreshed record; an editor that never refreshes can re-send its own last move once over an office move.
+- A queued save from before a reload (another mount's entry, kept because it holds field edits) is pushed with its file lists: if it never reached the server, it can drop a markup made after the reload or bring back a photo deleted after it. Needs markup-version ids in the merge to fix.
+- The editor never learns when its queued field save pushed, so a later queued photo save can carry already-saved fields and revert one field write from another device.
+- Wireframe shows each face's triangle diagonal (material wireframe); edges-only outlines if Jeff wants them.
+- Replaced and deleted survey files stay in Blob (D1079); a sweep is a later job.
+- The desktop pass photographed one section (the plan said two); multi-section capture is covered by the iPad script.
+- Smoke (`test:smoke`) deferred: 29 GB free, under the 45 GB the run needs.
 
 **Jeff-gated:**
 - Review the internal tag list in Settings → Field & Venues (nine starter tags).
 - Older in-progress surveys ask for **Scope** (and **Rigging system**) before their intakes unlock (D1023) — tell the reps.
 - Send the real CW Elevation Sheet and the line set schedule sheet (slice C; placeholders are generated until then).
+- Run the slice C iPad test (script above) on a deployment with Blob; say whether you want wireframe outlines without diagonals.
 - Review the pick lists in `src/lib/field-lists.ts` (lift, loading door, track series, positions, console).
 - Try a real assessment end to end (travel fill, curtain rows, lighting positions, line sets, the printed sheet).
 
@@ -12292,7 +12323,7 @@ Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`
 - A null measurement counts as answered; Safari IME Enter guard on goal entry; a button-name polish on goal move / remove.
 - No dark-mode tokens for `--cond-0…4` (the app has no dark theme).
 
-**Remaining:** slice C (needs a real iPad + Apple Pencil test before merge), plus the Jeff-gated items above.
+**Remaining:** Jeff's iPad + Apple Pencil test of slice C (script above) — slice C merges to main only after it — plus the Jeff-gated items above.
 
 ## 345. Inbox Organize is hard to find, and it suggests junk companies ("UNKNOWN") — DONE 2026-10-14 on `worktree-assist-layer` (D1033–D1037)
 

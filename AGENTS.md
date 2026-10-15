@@ -1364,7 +1364,7 @@ See `.env.example`.
     re-link old hand-made customer links that should be shared, try two
     accounts on production. Punch item #341.
 
-61. 🚧 **Venue Assessment notes** (#344, D1019–D1032, D1038–D1051) — Jeff's Oct 14 notes on
+61. 🚧 **Venue Assessment notes** (#344, D1019–D1032, D1038–D1051, D1072–D1082) — Jeff's Oct 14 notes on
     the Venue Assessments (`FS-####`) editor, three slices on one branch
     (spec `docs/superpowers/specs/2026-10-14-venue-assessment-notes-design.md`).
     ✅ **Slice A (form structure & flow):** a new section order with **Kill
@@ -1408,8 +1408,27 @@ See `.env.example`.
     the editor shows. No migration, no env var. **No instant rollback past the
     slice B merge** — a slice A build reads list goals as empty and deletes them
     on the next save; roll forward.
-    Remaining: slice C (ink pad, photos and sketches; needs a real iPad +
-    Apple Pencil test before merge), plus Jeff-gated: review the internal tag
+    🚧 **Slice C (drawing & photo capture, D1072–D1082) — built on
+    `feat/344-va-notes`, NOT on main until Jeff's iPad + Apple Pencil test:**
+    a Pencil-first ink pad (`src/components/ink/`, pure model `src/lib/ink/`;
+    palm rejection, Draw with finger) saving strokes JSON + a flattened JPEG;
+    sketch pads in their sections (Beams, CW elevation / Brick with
+    counterweight, Stage plan / section, House section / plan, the line set
+    schedule's Fill in by hand sheet) on backgrounds drawn from the
+    measurements (`src/lib/ink/backgrounds.ts`; CW Elevation and the line set
+    sheet are placeholders); Add photo on every section with caption and
+    markup that never touches the original; files through the engine's device
+    queue (kind from the `AS-` / `FS-` prefix) to private Blob at
+    `surveys/<FS-id>/<p_|m_|k_|s_…>` (`src/lib/field-files/`, broker
+    `/api/surveys/[id]/files/upload`, bytes `/api/surveys/[id]/files/[fileId]`);
+    one merge rule (`mergeSurveyFileRefs`: a finished slot wins, delete only
+    seen ids), the survey advisory lock, per-editor save stamps
+    (`save-stamp.ts`, hidden `_saveSeqs` with `fullSeq`) and file-only writes
+    that never bump rev; a streamed field-sheet PDF with photos and sketches
+    (`/api/surveys/[id]/sheet-pdf`); 3D Orbit / Plan / Section / Elevation +
+    Wireframe. Replaced files stay in Blob (D1079). No migration, no env var.
+    Remaining: Jeff's iPad test (script in PUNCHLIST #344), then merge; plus
+    Jeff-gated: review the internal tag
     list and the pick lists in `field-lists.ts`, tell the reps older surveys
     ask for Scope first, send the CW Elevation and line set schedule sheets,
     try a real assessment end to end. Punch item #344.

@@ -12848,3 +12848,47 @@ Before #347, the history import (`interpretLabelEvents`) dropped any label event
 - Both the card's write and the import's write are compare-and-set on the thread's `messages` key, re-read on conflict, so a message appended meanwhile is never lost. Labels live per message, so the CAS covers the whole array.
 
 Trade-off: a Gmail-side change to the same label within 2 minutes of the card changing it waits for that label's next event.
+
+## D1072. Drawings are vector strokes plus a flattened JPEG; nothing reads the handwriting (#344 slice C, 2026-10-15 — notes 9, 10, 11, 22)
+
+Every pad (sketches, photo markup, the line set sheet) saves two files: the strokes as JSON (`InkDoc`: pen strokes with pressure, text labels; caps 5,000 strokes / 400,000 numbers / 200 labels of ≤ 120 characters) and one JPEG of background + ink (long edge ≤ 1600, quality 0.85). The strokes reload for editing; the JPEG is what prints and what the tile shows. No handwriting recognition (D89): a handwritten line set sheet is the record unless the table is typed. Pure model `src/lib/ink/model.ts`; pad `src/components/ink/ink-pad.tsx`; flatten `src/components/ink/flatten.ts`.
+
+## D1073. Pencil first: once a Pencil touches the pad, fingers pan and zoom (#344 slice C, 2026-10-15)
+
+The first `pen` pointer turns on Pencil mode and the device remembers it (`localStorage` `ink:penSeen`). In Pencil mode a finger never draws — it pans, two fingers pinch — and a palm resting while the Pencil draws is ignored. Without a Pencil, a finger or mouse draws and two fingers zoom. **Draw with finger** in the pad header switches a Pencil device back to finger drawing until the page reloads; the Pencil still draws while it's on. Coalesced pointer events for smooth lines; device-pixel ratio capped at 2.
+
+## D1074. Survey files: ids, paths, and the record kind comes from the id (#344 slice C, 2026-10-15)
+
+`p_<hex>` photo original, `m_<hex>` markup (a NEW id on every re-markup, stored on `ref.markup.id`), `s_<hex>` sketch, `k_<same hex>` the strokes of a markup or sketch. Paths `surveys/<FS-id>/<fileId>.jpg|.json`; the Assessments engine keeps `assessments/<AS-id>/…` unchanged. The engine's device queue (IndexedDB `peak-assessment-photos`) now holds both — the record kind is read from the id prefix (`AS-` / `FS-`), never stored. Upload broker `/api/surveys/[id]/files/upload` grants one exact path per file (JPEG ≤ 5 MB, strokes JSON ≤ 4 MB); finalize re-reads the real bytes before recording the file. Bytes route `/api/surveys/[id]/files/[fileId]` (signed-in team only). `src/lib/field-files/`.
+
+## D1075. Markup never touches the original (#344 slice C, 2026-10-15 — note 20)
+
+Every section has Add photo (camera or library, several at once) and its photos show in that section; the rail counts them. A photo carries a caption (≤ 500 characters) and at most one markup. The viewer shows the marked-up version, with View original, Edit markup (reloads the strokes over the original), Remove markup (keeps the original and caption) and Delete photo. Old inline `photos` stay readable as Earlier photos; new photos never go inline in production.
+
+## D1076. Merging survey files: a finished file always wins; delete only what the device saw (#344 slice C, 2026-10-15)
+
+`photoRefs` (cap 200) and `sketches` (cap 40) merge on every write path — online save, offline push, finalize, print — with one rule (`mergeSurveyFileRefs`): a stored finished file slot is never replaced by a pending one, only the finalize action mints a finished slot, and a ref is removed only if the saving device listed it in `photoRefIdsSeen` / `sketchIdsSeen` (transport-only lists). A photo another device added while this one was offline survives this one's save. All survey writers run under one advisory lock (`withAdvisoryLock(344, "survey:<id>")`). Finalizing a file, and a save that carries only photos / sketches, never bump the record's rev (other devices still pull the change — pull follows the row's `seq`), so photos never turn a queued field save into a conflict; only field writes count toward the rev check.
+
+## D1077. A late save from the same editor never overwrites a newer one (#344 slice C, 2026-10-15)
+
+Each editor mount draws a random id and stamps every save `{editor, seq}`; the server keeps a hidden per-editor map `_saveSeqs` (20 editors, never sent to a device, never trusted from one). A stamped save older than that editor's newest full save is skipped; one that is only older than file-only saves (photos, sketches) still applies its fields, without its file lists. Stage moves follow the same rule, and until a stage move has saved online every later save re-carries that stage — but only then: an open editor never re-sends a stage it didn't just set, since the list page, an import or another device may have moved it since. A file-only save keeps the queued outbox entry that holds field edits not yet sent, and only that one. Saves that time out (15 s) go to the outbox; a capture is queued on the device before its save starts. Unstamped writes (older clients, scripts) apply as before. `src/lib/field-files/save-stamp.ts`.
+
+## D1078. Inline files are local dev only, and small (#344 slice C, 2026-10-15)
+
+With Blob configured (every deployment) a file only ever uploads; the finalize action refuses inline bytes. Without Blob (local dev) files store inline as data URLs, capped at 400 KB per JPEG, 200 KB per strokes file and 1.5 MB per survey — enough to test, not to use. Inline bytes are checked (JPEG magic / parseable JSON); the label is never trusted.
+
+## D1079. Replaced and deleted files stay in Blob (#344 slice C, 2026-10-15)
+
+Deleting a photo, removing or redoing a markup, and redrawing a sketch drop the ref but leave the old files in Blob. With several devices merging, a file one device stops pointing at may still be what another device's offline copy points at, so nothing deletes it. Only an upload that failed its byte check, or a duplicate upload of a file already finished, is removed. A Blob sweep of unreferenced `surveys/` files is a later job if storage ever matters.
+
+## D1080. Pad backgrounds are drawn from the survey's measurements; CW Elevation and the line set sheet are placeholders (#344 slice C, 2026-10-15)
+
+Stage plan, Beams (stage-only plan), Stage section, House section and House plan backgrounds are pure SVG drawn from the measurements present (proscenium, depth, wings, apron, grid, house), labelled with the known dimensions, generic proportions otherwise. CW Elevation and Brick are titled grids, shown only with a counterweight system. The line set sheet is a ruled sheet with the schedule's columns, 30 rows a page (up to 7 pages from the line set quantity; a drawn page stays listed if the quantity drops), shown only with a line-set system. Jeff's real CW Elevation and line set sheets drop in later — one file each in `src/lib/ink/backgrounds.ts`.
+
+## D1081. The field sheet prints photos and drawings, streamed (#344 slice C, 2026-10-15)
+
+Print sheet POSTs the editor's draft to `/api/surveys/[id]/sheet-pdf`, which sanitizes and merges it exactly like a save (but never stamps or stores it) and streams the PDF — a buffered response would hit Vercel's ~4.5 MB cap with ten photos. Each section prints its photos (markup version if any) with captions and its sketches full width; Earlier photos print under Wrap-up. Embedded images stop at 20 MB; the rest are listed by caption. The old client-side `printSurveySheet` is gone.
+
+## D1082. 3D view: wireframe by default, four view presets (#344 slice C, 2026-10-15 — note 12)
+
+Orbit (free), Plan (top-down orthographic), Section (orthographic from stage right, cut at the centre line) and Elevation (eye height from centre house toward the plaster line); a Wireframe checkbox, on by default. Wireframe uses the materials' wireframe mode, so each face shows its triangle diagonal — an edges-only outline is a polish follow-up if Jeff wants it. `src/lib/venue-3d-views.ts`.
