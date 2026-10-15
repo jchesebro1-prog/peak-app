@@ -149,6 +149,22 @@ export function catalogMatch(partNumber: string | undefined, parts: readonly Cat
   return null;
 }
 
+/** The loose keys a server pre-filter reads candidate parts by (the read's printed part numbers that can match:
+ *  exact key ≥ 3 chars, non-empty loose key), deduped and sorted. Equal exact keys mean equal loose keys, so the
+ *  parts whose any tier key has one of these loose forms are a superset of every part catalogMatch can hit for
+ *  this read — catalogMatch over them answers exactly as over the whole book. A number with no letter or digit
+ *  (e.g. "---") yields no key and so never matches through the pre-filter. */
+export function catalogLookupKeys(x: VendorPdfExtraction): string[] {
+  const out = new Set<string>();
+  for (const l of x.lines ?? []) {
+    const exact = exactKey(l.mfrPartNumber);
+    if (exact.length < 3) continue;
+    const loose = looseKey(exact);
+    if (loose) out.add(loose);
+  }
+  return [...out].sort();
+}
+
 export type VendorCompanyLike = { id: string; name: string; type?: string | null };
 /** lowercase, "&" → "and", strip punctuation, collapse spaces, drop a leading "the" and trailing
  *  inc|incorporated|llc|l l c|co|corp|corporation|company|ltd|limited (repeatedly). */

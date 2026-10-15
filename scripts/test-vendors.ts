@@ -21,6 +21,18 @@ import {
 } from "../src/lib/vendor-pdf/extraction";
 import type { VendorPdfExtraction, VendorPdfWireOut } from "../src/lib/vendor-pdf/extraction";
 import type { CatalogMatchPart } from "../src/lib/vendor-pdf/checks";
+import { catalogLookupKeys } from "../src/lib/vendor-pdf/checks";
+import { readVendorPdf, vendorPdfErrorFor, VENDOR_PDF_DATA_URL_PREFIX, type ReadVendorPdfInput, type VendorPdfSource } from "../src/lib/vendor-pdf/read-server";
+import { countPdfPages, pageCountFromText } from "../src/lib/vendor-pdf/pages-server";
+import { partsByLooseKeys } from "../src/lib/stores/catalog";
+import { createRun, getRun } from "../src/lib/stores/assist-runs";
+import { assistSettingsOf } from "../src/lib/assist/config";
+import type { AssistProvider, ProviderRequest } from "../src/lib/assist/types";
+import { fakeRun } from "./test-assist";
+import { VENDOR_PDF_COPY } from "../src/lib/vendor-pdf/extraction";
+import { VENDOR_ATTACHMENT_BUDGET } from "../src/app/(app)/estimator/types";
+import { PDFDocument } from "pdf-lib";
+import { createHash } from "node:crypto";
 import {
   lineMath, filledLine, sumCheck, catalogMatch, buildCatalogIndex, normalizeCompanyName, vendorCompanyMatch, includesFreightRule, vendorPdfChecks, mathFlagCount, checkNotes,
 } from "../src/lib/vendor-pdf/checks";
@@ -36,7 +48,7 @@ import type { AssistRun } from "../src/lib/stores/assist-runs";
 import { readFileSync } from "node:fs";
 import { fileThreadTo, vendorThreadsFor, loadVendorsPanel } from "../src/lib/vendor-quotes/threads-server";
 import { canSeeThread, get as getThread } from "../src/lib/stores/comms";
-import { blobEnabled } from "../src/lib/blob";
+import { blobEnabled, deleteBlob, getBlobBytes, putBlob } from "../src/lib/blob";
 import { ownsVendorQuoteBlobPath } from "../src/lib/vendor-quote-file";
 import { findPart, listAttachmentParts, parseInbound } from "../src/lib/gmail/mime";
 import type { GmailFullMessage, GmailPart } from "../src/lib/gmail/api";
@@ -782,4 +794,183 @@ if (process.argv[1]?.endsWith("test-vendors.ts")) {
   let pass = 0, fail = 0;
   const ok: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
   vendorChecks(ok).then(() => vendorPdfPureChecks(ok)).then(() => vendorPdfFillChecks(ok)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
+}
+
+/** A fake Claude for Read the PDF: answers `text`, or fails with `error`; records every request. */
+function pdfFake(answer: { text: string } | { error: string }, calls: ProviderRequest[]): AssistProvider {
+  return {
+    name: "fake",
+    async complete(req) {
+      calls.push(req);
+      const usage = { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 };
+      if ("error" in answer) return { ok: false, error: answer.error, model: req.model, usage, stopReason: answer.error === "declined" ? "refusal" : null };
+      return { ok: true, text: answer.text, model: req.model, usage, stopReason: "end_turn" };
+    },
+  };
+}
+
+/** #348 slice 5 Task 4 — the server read: gate, verified bytes, size + page guards, one runAssist per click, Try harder. */
+export async function vendorPdfDbChecks(ok: Ok) {
+  const db = await getDb();
+  const runsT = DOC_TABLES.assist_runs;
+  const U = { id: fixtureId(348, "hu"), name: "Hal Reader" };
+  const myRuns = async () => (await db.select({ id: runsT.id }).from(runsT).where(sql`${runsT.doc}->>'userId' = ${U.id}`)).length;
+  const dropRuns = async () => { await db.delete(runsT).where(sql`${runsT.doc}->>'userId' = ${U.id}`); };
+  const dropIdentity = async () => { await db.delete(companies).where(like(companies.id, "TEST348:h%")); };
+  const settings = assistSettingsOf({ assistUsers: [U.id], assistFeatures: { vendorpdf: true } });
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test-348" };
+  const now = Date.UTC(2034, 4, 10, 15, 0);
+  const VQ = "vqhaaaa1";
+  const mkPdf = async (n: number) => { const d = await PDFDocument.create(); for (let i = 0; i < n; i++) d.addPage(); return Buffer.from(await d.save()); };
+  const dataUrlOf = (b: Buffer) => VENDOR_PDF_DATA_URL_PREFIX + b.toString("base64");
+  const L = (description: string, mfrPartNumber: string, qty: number, unitPrice: number, amount: number) => ({ description, mfrPartNumber, qty, unit: "ea", unitPrice, amount });
+  const wire = (over: Partial<VendorPdfWireOut> = {}) => JSON.stringify({
+    vendor: null, quoteNumber: null, quoteDate: null, validUntil: null, leadTime: null, shipFrom: null,
+    lines: [], freight: null, tax: null, total: null, paymentTerms: null, notes: null, ...over,
+  });
+  const happyWire = wire({ vendor: "Rose Brand 348", quoteNumber: "RB-77", lines: [L("Velour drape", "RB-100", 1, 50, 50), L("Track", "HX-7700", 2, 30, 70), L("Clamp", "CL-1", 1, 40, 40)], freight: 25, total: 185 });
+  const input = (over: Partial<ReadVendorPdfInput> = {}): ReadVendorPdfInput => ({ vendorQuoteId: VQ, quoteId: null, source: { kind: "dataUrl", dataUrl: "" }, hard: false, retryOf: null, ...over });
+  const parts: CatalogMatchPart[] = [{ sku: "Hexa:HX 7700", mfr: "Hexa", manufacturerModelNumber: "HX 7700", manufacturerPartNumber: "100-200" }];
+  // "Rose Brand 348", not "Rose Brand": the dev seed already has a live Rose Brand vendor (rose-brand), which would make it "many".
+  try {
+    await dropRuns();
+    await dropIdentity();
+    await saveCompany({ id: fixtureId(348, "hrose"), name: "Rose Brand 348", type: "vendor/manufacturer", lifecycle: "active", deleted: false });
+    await saveCompany({ id: fixtureId(348, "hcust"), name: "Rose Brand 348", type: "customer", lifecycle: "active", deleted: false });
+    const pdf2 = await mkPdf(2);
+    const deps = (provider: AssistProvider) => ({ provider, settings, env, now });
+
+    // 1. Gate off — refused before any byte, no run, no call.
+    const c1: ProviderRequest[] = [];
+    const g = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, { provider: pdfFake({ text: happyWire }, c1), settings: assistSettingsOf({ assistUsers: [U.id], assistFeatures: { vendorpdf: false } }), env, now });
+    ok(!g.ok && g.runId === null && c1.length === 0 && (await myRuns()) === 0, "read pdf: gate off → refused, no call, no run row");
+
+    // 2. Foreign path.
+    const c2: ProviderRequest[] = [];
+    const fp = await readVendorPdf(input({ source: { kind: "blob", blobPath: "vendor-quotes/vqother-x.pdf" } }), U, deps(pdfFake({ text: happyWire }, c2)));
+    ok(!fp.ok && fp.error === VENDOR_PDF_COPY.notThisFile && c2.length === 0, "read pdf: another vendor quote's blob path → notThisFile, never called");
+
+    // 3. Bad data URL.
+    const png = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: "data:image/png;base64,iVBORw0KGgo=" } }), U, deps(pdfFake({ text: happyWire }, c2)));
+    const notPdf = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: VENDOR_PDF_DATA_URL_PREFIX + Buffer.from("hello, not a pdf").toString("base64") } }), U, deps(pdfFake({ text: happyWire }, c2)));
+    ok(!png.ok && png.error === VENDOR_PDF_COPY.notPdf && !notPdf.ok && notPdf.error === VENDOR_PDF_COPY.notPdf && c2.length === 0, "read pdf: an image data URL and a non-%PDF payload → notPdf");
+    const huge = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: VENDOR_PDF_DATA_URL_PREFIX + "A".repeat(VENDOR_ATTACHMENT_BUDGET + 200) } }), U, deps(pdfFake({ text: happyWire }, c2)));
+    ok(!huge.ok && huge.tooLarge === true && huge.error === VENDOR_PDF_COPY.tooLargeBytes && c2.length === 0, "read pdf: a data URL past the attachment budget → tooLarge, never decoded");
+    const bad = await readVendorPdf(input({ vendorQuoteId: "../x", source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, deps(pdfFake({ text: happyWire }, c2)));
+    const badRetry = await readVendorPdf(input({ retryOf: "AR-x;drop", source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, deps(pdfFake({ text: happyWire }, c2)));
+    const badKind = await readVendorPdf(input({ source: { kind: "url", url: "https://evil.test/a.pdf" } as unknown as VendorPdfSource }), U, deps(pdfFake({ text: happyWire }, c2)));
+    ok(!bad.ok && !badRetry.ok && !badKind.ok && c2.length === 0 && (await myRuns()) === 0, "read pdf: a bad vendor quote id / retryOf / source kind is refused with no call");
+
+    // 4. Happy path.
+    const c4: ProviderRequest[] = [];
+    const r4 = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, { ...deps(pdfFake({ text: happyWire }, c4)), parts });
+    ok(r4.ok && r4.checks.lines[1].math.status === "off" && r4.pages === 2 && r4.checks.mathFlags === 1 && r4.data.lines?.length === 3, "read pdf: happy path — 3 lines, line 2's math off, 2 pages");
+    ok(c4.length === 1 && c4[0].document?.base64 === pdf2.toString("base64") && c4[0].document?.mediaType === "application/pdf" && c4[0].model === "claude-haiku-5-5", "read pdf: the request carries the PDF as a document block, on Haiku");
+    ok(r4.ok && r4.model === "claude-haiku-5-5" && r4.hard === false && r4.at === now, "read pdf: the result names the answering model and the run's time");
+    const row4 = r4.ok ? await getRun(r4.runId) : null;
+    const d4 = (row4?.outcomeDetail ?? {}) as Record<string, unknown>;
+    const hash4 = r4.ok ? createHash("sha256").update(canonicalJson(r4.data)).digest("hex") : "";
+    ok(!!row4 && row4.feature === "vendorpdf" && row4.contextRef === "vendorquote:new:vqhaaaa1" && row4.createdAt === now && row4.outcome === null, "read pdf: the run row — feature, context ref, time, no outcome yet");
+    ok(d4.vendorQuoteId === VQ && d4.quoteId === null && d4.hard === false && d4.retryOf === null && d4.dataHash === hash4 && d4.mathFlags === 1 && d4.pages === 2 && d4.bytes === pdf2.length && d4.lines === 3, "read pdf: the run detail — ids, hash, mathFlags, pages, bytes, lines");
+    ok(r4.ok && r4.checks.lines[1].catalog?.kind === "match" && r4.checks.lines[1].catalog.sku === "Hexa:HX 7700" && r4.checks.lines[1].catalog.by === "model", "read pdf: deps.parts matches a printed number by model #");
+    ok(r4.ok && r4.checks.vendor.status === "one" && r4.checks.vendor.companyId === fixtureId(348, "hrose"), "read pdf: the vendor matches the live vendor company, not the customer namesake");
+    ok(r4.ok && r4.checks.freight.tick === true && r4.checks.sum.status === "ok", "read pdf: freight inside the printed total");
+
+    // 5. 101 pages — refused before the call.
+    const c5: ProviderRequest[] = [];
+    const before5 = await myRuns();
+    const r5 = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: dataUrlOf(await mkPdf(101)) } }), U, deps(pdfFake({ text: happyWire }, c5)));
+    ok(!r5.ok && r5.error === VENDOR_PDF_COPY.tooLargePages(101) && r5.tooLarge === true && c5.length === 0 && (await myRuns()) === before5, "read pdf: 101 pages → tooLargePages(101), no call, no run");
+
+    // 6. Page count without pdf-lib.
+    const mini = "%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R >> endobj\n4 0 obj << /Type /Page /Parent 2 0 R >> endobj\n5 0 obj << /Type /Page /Parent 2 0 R >> endobj\n%%EOF";
+    ok(pageCountFromText(mini) === 3 && pageCountFromText(mini.replace("/Count 3", "")) === 3 && pageCountFromText("garbage bytes") === null, "pages: /Pages /Count, else /Type /Page objects, else null");
+    ok(pageCountFromText("1 0 obj << /Type /Pages /Count 2 >> endobj 7 0 obj << /Type /Pages /Count 9 >> endobj") === 9, "pages: the largest /Pages /Count wins (the root)");
+    ok((await countPdfPages(Buffer.from("%PDF-1.4\nnot really a pdf"))) === null && (await countPdfPages(Buffer.from(mini, "latin1"))) === 3 && (await countPdfPages(pdf2)) === 2, "pages: countPdfPages — pdf-lib, the text fallback, null");
+
+    // 7. Try harder.
+    const c7: ProviderRequest[] = [];
+    const r7 = r4.ok ? await readVendorPdf(input({ hard: true, retryOf: r4.runId, source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, { ...deps(pdfFake({ text: happyWire }, c7)), parts }) : null;
+    const prev7 = r4.ok ? await getRun(r4.runId) : null;
+    const d7 = r7?.ok ? ((await getRun(r7.runId))?.outcomeDetail ?? {}) as Record<string, unknown> : {};
+    ok(!!r7?.ok && c7[0]?.model === "claude-sonnet-5-5" && r7.model === "claude-sonnet-5-5" && r7.hard === true && d7.hard === true && d7.retryOf === (r4.ok ? r4.runId : ""), "read pdf: Try harder runs on Sonnet and records retryOf");
+    ok(prev7?.outcome === "discarded" && (prev7.outcomeDetail as Record<string, unknown>)?.replacedBy === (r7?.ok ? r7.runId : "x"), "read pdf: Try harder discards the earlier read (replacedBy)");
+    // A failing Try harder leaves the earlier read alone — and still logs its detail.
+    const r7b = r7?.ok ? await readVendorPdf(input({ hard: true, retryOf: r7.runId, source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, deps(pdfFake({ error: "declined" }, []))) : null;
+    const prev7b = r7?.ok ? await getRun(r7.runId) : null;
+    const fail7 = r7b && !r7b.ok && r7b.runId ? await getRun(r7b.runId) : null;
+    const fd7 = (fail7?.outcomeDetail ?? {}) as Record<string, unknown>;
+    ok(!!r7b && !r7b.ok && r7b.error === VENDOR_PDF_COPY.couldNotRead && prev7b?.outcome === null, "read pdf: a declined Try harder → couldNotRead, the earlier read's outcome stays null");
+    ok(!!fail7 && fail7.ok === false && fd7.hard === true && fd7.retryOf === (r7?.ok ? r7.runId : "") && fd7.vendorQuoteId === VQ && fd7.quoteId === null && fd7.pages === 2 && fd7.bytes === pdf2.length, "read pdf: a failed read's run still gets its detail (hard, retryOf, ids, pages, bytes)");
+    // Someone else's run id is never discarded.
+    const other = fakeRun({ id: "AR-zzzz348-abcd", feature: "vendorpdf", userId: "someone-else", monthKey: "2034-05" });
+    await createRun(other);
+    try {
+      await readVendorPdf(input({ hard: true, retryOf: other.id, source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, { ...deps(pdfFake({ text: happyWire }, [])), parts });
+      ok((await getRun(other.id))?.outcome === null, "read pdf: Try harder never discards another user's run");
+    } finally {
+      await db.delete(runsT).where(sql`${runsT.id} = ${other.id}`);
+    }
+
+    // 8. Error mapping.
+    const r8a = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, deps(pdfFake({ error: "too long" }, [])));
+    const r8b = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, deps(pdfFake({ error: "request rejected: PDF pages exceed limit" }, [])));
+    const r8c = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, deps(pdfFake({ error: "request rejected: PDF is password protected" }, [])));
+    const r8d = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, deps(pdfFake({ text: "{not json" }, [])));
+    ok(!r8a.ok && r8a.error === VENDOR_PDF_COPY.tooManyLines && !!r8a.runId, "read pdf: 'too long' → tooManyLines (run logged)");
+    ok(!r8b.ok && r8b.error === VENDOR_PDF_COPY.tooLargeBytes && r8b.tooLarge === true, "read pdf: a page/size rejection → tooLarge");
+    ok(!r8c.ok && r8c.error === VENDOR_PDF_COPY.rejected && !r8c.tooLarge, "read pdf: another rejection → rejected");
+    ok(!r8d.ok && r8d.error === VENDOR_PDF_COPY.couldNotRead, "read pdf: an unreadable answer → couldNotRead");
+    ok(vendorPdfErrorFor("Too many Assist requests — try again in a bit.").error === "Too many Assist requests — try again in a bit." && vendorPdfErrorFor("empty answer").error === VENDOR_PDF_COPY.couldNotRead, "read pdf: rate-limit text passes through; empty answer → couldNotRead");
+
+    // 9. Empty read.
+    const r9 = await readVendorPdf(input({ source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, deps(pdfFake({ text: wire() }, [])));
+    const row9 = !r9.ok && r9.runId ? await getRun(r9.runId) : null;
+    ok(!r9.ok && r9.error === VENDOR_PDF_COPY.noQuote && !!row9 && row9.ok === true && row9.outcome === null && (row9.outcomeDetail as Record<string, unknown>)?.vendorQuoteId === VQ, "read pdf: an all-null read → noQuote, run logged with detail, outcome null");
+
+    // 10. Catalog (SQL pre-filter) and vendor — no deps.parts / deps.companies.
+    await createFixture("catalog_parts", { id: fixtureId(348, "hpart1"), sku: fixtureId(348, "hpart1"), desc: "Hexa tracker", category: "Rigging", unit: "ea", list: 10, cost: 5, mfr: "Hexa348", manufacturerModelNumber: "HXQ 9348", formerSkus: ["Old348:HXQ-OLD-9348"] } as never);
+    await createFixture("catalog_parts", { id: fixtureId(348, "hpart2"), sku: fixtureId(348, "hpart2"), desc: "Wide", category: "Rigging", unit: "ea", list: 10, cost: 5, mfr: "Hexa348", manufacturerPartNumber: "ＷＸ－９３４８" } as never);
+    const byModel = await partsByLooseKeys(["HXQ9348"]);
+    const byFormer = await partsByLooseKeys(["HXQOLD9348"]);
+    const bySkuOrder = await partsByLooseKeys(["HPART1"]);
+    const byNfkc = await partsByLooseKeys(["WX9348"]);
+    ok(byModel.some((p) => p.sku === fixtureId(348, "hpart1") && p.manufacturerModelNumber === "HXQ 9348" && p.formerSkus?.[0] === "Old348:HXQ-OLD-9348" && p.mfr === "Hexa348"), "catalog pre-filter: by model # (loose), projected to the match fields");
+    ok(byFormer.some((p) => p.sku === fixtureId(348, "hpart1")) && bySkuOrder.some((p) => p.sku === fixtureId(348, "hpart1")) && byNfkc.some((p) => p.sku === fixtureId(348, "hpart2")), "catalog pre-filter: by a former SKU's order #, the SKU's order #, and NFKC (full-width) text");
+    ok((await partsByLooseKeys([])).length === 0 && (await partsByLooseKeys(["ZZZNOPE348"])).length === 0, "catalog pre-filter: no keys / no hit → nothing read");
+    ok(catalogLookupKeys({ lines: [{ mfrPartNumber: "hx-7700" }, { mfrPartNumber: "HX 7700" }, { mfrPartNumber: "ab" }, { mfrPartNumber: "---" }, { description: "x" }] }).join() === "HX7700", "catalog pre-filter: lookup keys are the loose keys of matchable printed numbers");
+    const r10 = await readVendorPdf(input({ quoteId: "Q-348", source: { kind: "dataUrl", dataUrl: dataUrlOf(pdf2) } }), U, deps(pdfFake({ text: wire({ vendor: "Rose Brand 348, Inc.", lines: [L("Tracker", "HXQ-9348", 1, 10, 10), L("Wide", "WX 9348", 1, 5, 5)], total: 15 }) }, [])));
+    ok(r10.ok && r10.checks.vendor.status === "one" && r10.checks.vendor.companyId === fixtureId(348, "hrose"), "read pdf: vendor match over live vendor-type companies only");
+    ok(r10.ok && r10.checks.lines[0].catalog?.kind === "match" && r10.checks.lines[0].catalog.sku === fixtureId(348, "hpart1") && r10.checks.lines[1].catalog?.kind === "match" && r10.checks.lines[1].catalog.sku === fixtureId(348, "hpart2"), "read pdf: the server's catalog pre-filter finds the printed numbers' parts");
+    ok(r10.ok && (await getRun(r10.runId))?.contextRef === "vendorquote:Q-348:vqhaaaa1", "read pdf: a saved estimate's id in the context ref");
+
+    // 11. getBlobBytes.
+    const blobSrc = readFileSync("src/lib/blob.ts", "utf8");
+    const gb = blobSrc.slice(blobSrc.indexOf("export async function getBlobBytes"));
+    ok(gb.indexOf("head(") > 0 && gb.indexOf("head(") < gb.indexOf("get(pathname"), "getBlobBytes: head() is asked before the body is requested");
+    if (blobEnabled()) {
+      const put = await putBlob(`vendor-quotes/${VQ}-t4.pdf`, Buffer.from("%PDF-1.4 tiny"), "application/pdf");
+      try {
+        const whole = await getBlobBytes(put.pathname, 1000);
+        const tooBig = await getBlobBytes(put.pathname, 3);
+        ok(whole.ok && whole.bytes.toString() === "%PDF-1.4 tiny" && !tooBig.ok && tooBig.reason === "too-large", "getBlobBytes: reads a small blob; over max → too-large");
+        ok(!(await getBlobBytes(`vendor-quotes/${VQ}-missing-${Date.now()}.pdf`, 1000)).ok, "getBlobBytes: a missing blob → missing");
+      } finally {
+        await deleteBlob(put.pathname);
+      }
+    }
+
+    // 12. Source pins.
+    const act = readFileSync("src/app/(app)/estimator/vendor-pdf-actions.ts", "utf8");
+    ok(act.startsWith('"use server"') && act.includes("requireUser(") && act.includes("readVendorPdf("), "action: use server, requireUser, readVendorPdf");
+    const rs = readFileSync("src/lib/vendor-pdf/read-server.ts", "utf8");
+    const body = rs.slice(rs.indexOf("export async function readVendorPdf"));
+    ok(body.indexOf("vendorPdfGateFor(") > 0 && body.indexOf("vendorPdfGateFor(") < body.indexOf("loadVendorPdfBytes("), "read-server: the gate runs before any byte is loaded");
+    ok(rs.includes("ownsVendorQuoteBlobPath(") && !/\bfetch\(/.test(rs), "read-server: blob paths are ownership-checked; nothing is fetched");
+    ok(!/from "[^"]*(?:stores\/|@\/db|node:|-server|pdf-lib|@\/lib\/blob)[^"]*"/.test(act.replace('from "@/lib/vendor-pdf/read-server"', "")), "action: imports only session + read-server");
+  } finally {
+    await dropRuns();
+    await dropFixtures(348);
+    await dropIdentity();
+  }
 }

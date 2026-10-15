@@ -47,7 +47,8 @@ export type RunDeps = { provider?: AssistProvider; fallback?: AssistProvider | n
 export type CallDeadline = { at: number; hasFallback: boolean; minCallMs: number; clock?: () => number };
 /** A reusable server function's options: runAssist's deps plus the call's own rate/limit choices. */
 export type AssistCallDeps = RunDeps & { countRate?: boolean; limits?: CallLimits; deadline?: CallDeadline };
-export type RunResult<T> = { ok: true; runId: string; value: T } | { ok: false; runId: string | null; error: string };
+/** `model` (ok only) is the model that answered, as logged on the run (#348 slice 5 shows it). */
+export type RunResult<T> = { ok: true; runId: string; value: T; model: string } | { ok: false; runId: string | null; error: string };
 
 /** A cap only ever shortens: min(slot, cap), clamped to `floor` — a 0 / negative
  *  timeout must never read as "unset" (the provider's longer default). */
@@ -159,5 +160,5 @@ export async function runAssist<T = string>(args: RunArgs<T>, deps: RunDeps = {}
     createdAt: now,
   };
   await createRun(run);
-  return ok ? { ok: true, runId: run.id, value: value as T } : { ok: false, runId: run.id, error: error || "Assist failed." };
+  return ok ? { ok: true, runId: run.id, value: value as T, model: run.model } : { ok: false, runId: run.id, error: error || "Assist failed." };
 }

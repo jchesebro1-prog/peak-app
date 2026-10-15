@@ -7,6 +7,9 @@ import type { PortalVisibility } from "@/lib/portal-visibility";
 import type { RackPartFacts } from "@/lib/rack/types";
 import type { TagFields } from "@/lib/design/conduit-riser/tags";
 import { orderNumberOf } from "@/lib/catalog-rename/sku";
+import { and, asc, eq, sql, type SQL } from "drizzle-orm";
+import { getDb } from "@/db";
+import { DOC_TABLES } from "@/db/doc-tables";
 import { MAX_PARAGRAPH } from "@/app/(app)/estimator/narrative";
 
 export type CatalogProductMetadata = {
@@ -311,6 +314,67 @@ export async function getManyAnyCase(skus: readonly string[]): Promise<CatalogPa
   const missed = skus.filter((s) => s && !bySku.has(s));
   if (!missed.length) return found;
   return dedupeBySku([...found, ...(await getDocsByIdAnyCase<CatalogPart>("catalog_parts", missed))]);
+}
+
+/** The match fields of a part — what Read the PDF's catalog chip needs, never the whole document. */
+export type CatalogMatchFields = Pick<CatalogPart, "sku" | "mfr" | "manufacturerModelNumber" | "manufacturerPartNumber" | "formerSkus">;
+/** Most loose keys one candidate read takes (a read holds at most 300 lines). */
+export const LOOSE_KEYS_MAX = 600;
+
+/**
+ * #348 slice 5 — the live parts whose model #, MFR P/N, SKU (or the order number after its first colon) or a
+ * former SKU (or its order number) has one of `looseKeys` as its loose key — NFKC, uppercase, letters and digits
+ * only, the same key `vendor-pdf/checks.ts` matches by. Filtered in SQL and projected to the match fields, so a
+ * read never loads the ~37k-part book; in id order, capped at `limit` rows.
+ */
+export async function partsByLooseKeys(looseKeys: readonly string[], limit = 5000): Promise<CatalogMatchFields[]> {
+  const keys = [...new Set(looseKeys.filter((k) => typeof k === "string" && k.length > 0))].slice(0, LOOSE_KEYS_MAX);
+  if (!keys.length) return [];
+  const db = await getDb();
+  const t = DOC_TABLES.catalog_parts;
+  const inKeys = sql`(${sql.join(keys.map((k) => sql`${k}`), sql`, `)})`;
+  const loose = (e: SQL) => sql`regexp_replace(upper(normalize(${e}, NFKC)), '[^A-Z0-9]', '', 'g')`;
+  const afterColon = (e: SQL) => sql`substring(${e} from position(':' in ${e}) + 1)`;
+  const field = (name: string) => sql`coalesce(${t.doc}->>${name}, '')`;
+  const sku = field("sku");
+  const former = sql`(CASE WHEN jsonb_typeof(${t.doc}->'formerSkus') = 'array' THEN ${t.doc}->'formerSkus' ELSE '[]'::jsonb END)`;
+  const fv = sql`fs.v`;
+  const hit = sql`(
+    ${loose(field("manufacturerModelNumber"))} IN ${inKeys}
+    OR ${loose(field("manufacturerPartNumber"))} IN ${inKeys}
+    OR ${loose(sku)} IN ${inKeys}
+    OR ${loose(afterColon(sku))} IN ${inKeys}
+    OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(${former}) AS fs(v) WHERE ${loose(fv)} IN ${inKeys} OR ${loose(afterColon(fv))} IN ${inKeys})
+  )`;
+  const rows = await db
+    .select({
+      id: t.id,
+      sku: sql<string | null>`${t.doc}->>'sku'`,
+      mfr: sql<string | null>`${t.doc}->>'mfr'`,
+      model: sql<string | null>`${t.doc}->>'manufacturerModelNumber'`,
+      pn: sql<string | null>`${t.doc}->>'manufacturerPartNumber'`,
+      former: sql<unknown>`${t.doc}->'formerSkus'`,
+    })
+    .from(t)
+    .where(and(eq(t.deleted, false), hit))
+    .orderBy(asc(t.id))
+    .limit(limit);
+  return rows.map((r) => {
+    const out: CatalogMatchFields = { sku: r.sku || r.id };
+    if (typeof r.mfr === "string") out.mfr = r.mfr;
+    if (typeof r.model === "string") out.manufacturerModelNumber = r.model;
+    if (typeof r.pn === "string") out.manufacturerPartNumber = r.pn;
+    let former = r.former;
+    if (typeof former === "string") {
+      try {
+        former = JSON.parse(former); // a driver that hands jsonb back as text
+      } catch {
+        former = null;
+      }
+    }
+    if (Array.isArray(former)) out.formerSkus = former.filter((x): x is string => typeof x === "string");
+    return out;
+  });
 }
 
 /** Rows of a given category (port of window.catalogByCategory). */
