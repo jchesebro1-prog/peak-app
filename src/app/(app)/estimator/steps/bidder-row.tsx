@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { BidderVM, BidPanelVM } from "@/lib/parties/bid-vm";
 import { BID_SEND_COPY } from "@/lib/parties/bid-send";
 import { ONLINE_COPY } from "@/lib/quote-share/view";
@@ -67,10 +67,17 @@ export function BidderRow({
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkNote, setLinkNote] = useState("");
   const [linkError, setLinkError] = useState("");
+  const linkTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearLinkTimer = () => {
+    if (linkTimer.current) clearTimeout(linkTimer.current);
+    linkTimer.current = null;
+  };
+  useEffect(() => clearLinkTimer, []);
   // #348 2b-ii — this bidder's own link (v3), copied; a browser that refuses the clipboard gets a prompt to copy by hand.
   async function copyLink() {
     if (linkBusy) return;
     setLinkBusy(true);
+    clearLinkTimer();
     setLinkNote("");
     setLinkError("");
     try {
@@ -86,6 +93,7 @@ export function BidderRow({
         window.prompt(ONLINE_COPY.copyManual, url);
       }
       setLinkNote(BID_SEND_COPY.linkCopied);
+      linkTimer.current = setTimeout(() => setLinkNote(""), 4000);
     } catch {
       setLinkError("The link couldn’t be made — check your connection and try again.");
     } finally {

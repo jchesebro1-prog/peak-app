@@ -90,11 +90,12 @@ export function bidderSubject(base: string, estimateName: string, newAddenda: nu
   return text.slice(0, 300);
 }
 
-export function bidWalkSummary(s: { total: number; sent: number; failed: number; local: number; stoppedError?: string | null }): string {
+export function bidWalkSummary(s: { total: number; sent: number; failed: number; local: number; stoppedError?: string | null; stopped?: boolean }): string {
   let out: string;
   if (s.stoppedError) out = `Stopped after ${s.sent} of ${s.total}: ${s.stoppedError}`;
   else if (s.failed === 0) out = `Sent to ${s.sent} bidder${s.sent === 1 ? "" : "s"}.`;
   else out = `Sent to ${s.sent} of ${s.total} bidders — ${s.failed} failed. Retry ${s.failed === 1 ? "it" : "them"} below.`;
+  if (s.stopped && !s.stoppedError) out += " Stopped — the rest weren’t sent.";
   if (s.local > 0) out += " Saved locally — Gmail isn’t connected.";
   return out;
 }
@@ -102,8 +103,10 @@ export function bidWalkSummary(s: { total: number; sent: number; failed: number;
 export const BID_SEND_COPY = {
   sendAll: "Send to all bidders",
   sendRevision: "Send revision to bidders",
+  preparing: "Preparing…",
   progress: (i: number, n: number) => `Sending ${i} of ${n}…`,
   stop: "Stop",
+  stopLabel: "Stop sending",
   rowSend: "Send",
   rowRevision: "Send revision",
   rowRetry: "Retry",

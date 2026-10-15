@@ -339,6 +339,9 @@ export async function bidSendChecks(ok: Ok) {
   ok(bidWalkSummary({ total: 4, sent: 3, failed: 1, local: 0 }) === "Sent to 3 of 4 bidders — 1 failed. Retry it below.", "bid-send: walk summary one failed");
   ok(bidWalkSummary({ total: 4, sent: 2, failed: 2, local: 2 }) === "Sent to 2 of 4 bidders — 2 failed. Retry them below. Saved locally — Gmail isn’t connected.", "bid-send: walk summary local");
   ok(bidWalkSummary({ total: 4, sent: 1, failed: 0, local: 0, stoppedError: "Needs approval." }) === "Stopped after 1 of 4: Needs approval.", "bid-send: walk summary stopped");
+  ok(bidWalkSummary({ total: 4, sent: 2, failed: 0, local: 0, stopped: true }) === "Sent to 2 bidders. Stopped — the rest weren’t sent.", "bid-send: walk summary stopped by user");
+  ok(bidWalkSummary({ total: 4, sent: 1, failed: 0, local: 0, stoppedError: "x", stopped: true }) === "Stopped after 1 of 4: x", "bid-send: error stop wins over stopped flag");
+  ok(BID_SEND_COPY.preparing === "Preparing…", "bid-send: preparing copy");
   const f1 = "bidder-0123456789abcdef-r2-1760000000000.pdf";
   ok(isBidderFileName(f1) && isBidderFileName("bidder-0123456789abcdef-r2-1760000000000-AbC123.pdf"), "bid-send: bidder file names");
   ok(!isBidderFileName("bidder-0123-r2-1760000000000.pdf") && !isBidderFileName("../" + f1) && !isBidderFileName("cover-1760000000000.pdf"), "bid-send: bad bidder file names");

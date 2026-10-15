@@ -16,6 +16,9 @@ export type BidSendCtx = {
   onSent: () => void;
 };
 
+/** The walk's end-of-run message: an error (alert) or a plain note. */
+export type WalkMsg = { tone: "error" | "note"; text: string };
+
 /** Prefix for an inline message when a failed send still moved the estimate Draft → Sent. */
 const MARKED_SENT = "Marked sent — ";
 
@@ -27,9 +30,12 @@ const MARKED_SENT = "Marked sent — ";
 export function useBidderWalk(
   quoteId: string,
   sendCtx: BidSendCtx,
-  on: { panel: (p: BidPanelVM) => void; note: (m: string) => void; error: (m: string) => void }
+  on: { panel: (p: BidPanelVM) => void }
 ) {
+  // `i` 0 = preparing (before the first call starts).
   const [progress, setProgress] = useState<{ i: number; n: number } | null>(null);
+  // The walk's result lives apart from the card's load error: a refresh must not wipe it. Cleared by the next walk / mutation or a dismiss.
+  const [walkMsg, setWalkMsg] = useState<WalkMsg | null>(null);
   const walkingRef = useRef(false);
   const stopRef = useRef(false);
   const mountedRef = useRef(true);
@@ -42,6 +48,7 @@ export function useBidderWalk(
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      stopRef.current = true; // an unmounted walk finishes its in-flight row, then stops
     };
   }, []);
 
@@ -49,19 +56,26 @@ export function useBidderWalk(
     if (walkingRef.current || ids.length === 0) return;
     walkingRef.current = true;
     stopRef.current = false;
+    setWalkMsg(null);
     setProgress({ i: 0, n: ids.length });
-    const tally = { total: ids.length, sent: 0, failed: 0, local: 0, stoppedError: null as string | null };
+    const tally = { total: ids.length, sent: 0, failed: 0, local: 0, stoppedError: null as string | null, stopped: false };
+    const say = (tone: WalkMsg["tone"], text: string) => {
+      if (mountedRef.current) setWalkMsg({ tone, text });
+    };
     let calls = 0;
     let markedSent = false;
     try {
       if (!(await latest.current.sendCtx.selectionSettled())) {
-        latest.current.on.error(SEND_UI_COPY.selectionNotSaved);
+        say("error", SEND_UI_COPY.selectionNotSaved);
         return;
       }
       let asOf = await latest.current.sendCtx.versionToSend();
       if (asOf === false) return;
       for (let k = 0; k < ids.length; k++) {
-        if (stopRef.current) break;
+        if (stopRef.current) {
+          tally.stopped = true;
+          break;
+        }
         if (mountedRef.current) setProgress({ i: k + 1, n: ids.length });
         let r: BidderSendActionResult;
         try {
@@ -74,7 +88,7 @@ export function useBidderWalk(
         if (r.panel && mountedRef.current) latest.current.on.panel(r.panel);
         const s = sendSync(r);
         if (s) latest.current.sendCtx.applySync(s);
-        if (r.next) asOf = r.next.asOf || undefined;
+        asOf = r.next ? r.next.asOf || undefined : undefined;
         if (r.ok) {
           if (!("skipped" in r)) {
             tally.sent++;
@@ -91,10 +105,10 @@ export function useBidderWalk(
       }
       if (calls === 0) return;
       const text = (markedSent ? MARKED_SENT : "") + bidWalkSummary(tally);
-      if (mountedRef.current) (tally.stoppedError ? latest.current.on.error : latest.current.on.note)(text);
+      say(tally.stoppedError ? "error" : "note", text);
     } catch (e) {
       console.error("[BiddersCard] walk", e);
-      if (mountedRef.current) latest.current.on.error(SEND_UI_COPY.failed);
+      say("error", SEND_UI_COPY.failed);
     } finally {
       walkingRef.current = false;
       if (mountedRef.current) setProgress(null);
@@ -106,5 +120,5 @@ export function useBidderWalk(
     }
   }
 
-  return { progress, walking: progress !== null, walk, stop: () => (stopRef.current = true) };
+  return { progress, walkMsg, clearWalkMsg: () => setWalkMsg(null), walking: progress !== null, walk, stop: () => (stopRef.current = true) };
 }

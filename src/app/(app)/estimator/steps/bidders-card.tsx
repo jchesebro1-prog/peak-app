@@ -22,6 +22,7 @@ import { useBidderWalk, type BidSendCtx } from "./use-bidder-walk";
 export type { BidSendCtx } from "./use-bidder-walk";
 
 const CARD_LABEL = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase" } as const;
+const SR_ONLY: CSSProperties = { position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap", border: 0 };
 const FIELD: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12, padding: "4px 6px", border: "1px solid #dcdfe5", borderRadius: 6, background: "#fff" };
 
 /**
@@ -42,7 +43,7 @@ export function BiddersCard({ quoteId, refreshKey, sendCtx }: { quoteId: string;
   const [defaultsErr, setDefaultsErr] = useState<string | null>(null);
   const defaultsAsked = useRef(false);
   // Each walk result replaces the panel; the walk's end bumps `refreshKey` (onSent), so a fresh load lands last.
-  const { progress, walking, walk, stop } = useBidderWalk(quoteId, sendCtx, { panel: setPanel, note: setNote, error: setErr });
+  const { progress, walkMsg, clearWalkMsg, walking, walk, stop } = useBidderWalk(quoteId, sendCtx, { panel: setPanel });
   const busy = pending > 0 || walking;
   const [adding, setAdding] = useState(false);
   const [role, setRole] = useState<"gc" | "ec">("gc");
@@ -86,6 +87,7 @@ export function BiddersCard({ quoteId, refreshKey, sendCtx }: { quoteId: string;
     else setPending((n) => n + 1);
     setErr(null);
     setNote(null);
+    clearWalkMsg();
     let ok = false;
     try {
       const r = await call();
@@ -137,6 +139,7 @@ export function BiddersCard({ quoteId, refreshKey, sendCtx }: { quoteId: string;
     setTarget({ ids, retryUnknown });
     setErr(null);
     setNote(null);
+    clearWalkMsg();
     if (defaultsAsked.current) return;
     defaultsAsked.current = true;
     bidderEmailDefaultsAction(quoteId).then(
@@ -202,15 +205,13 @@ export function BiddersCard({ quoteId, refreshKey, sendCtx }: { quoteId: string;
             {panel.plan.label}
           </button>
         )}
+        <span aria-live="polite" style={progress ? { fontSize: 12, fontWeight: 600, color: "#16181d" } : SR_ONLY}>
+          {progress ? (progress.i === 0 ? BID_SEND_COPY.preparing : BID_SEND_COPY.progress(progress.i, progress.n)) : ""}
+        </span>
         {progress && (
-          <>
-            <span aria-live="polite" style={{ fontSize: 12, fontWeight: 600, color: "#16181d" }}>
-              {BID_SEND_COPY.progress(Math.max(1, progress.i), progress.n)}
-            </span>
-            <button type="button" onClick={stop} style={BTN}>
-              {BID_SEND_COPY.stop}
-            </button>
-          </>
+          <button type="button" aria-label={BID_SEND_COPY.stopLabel} onClick={stop} style={BTN}>
+            {BID_SEND_COPY.stop}
+          </button>
         )}
         {edit && panel?.canUndo && (
           <button type="button" disabled={busy} onClick={() => void run(() => undoAwardAction(quoteId))} style={{ ...BTN, marginLeft: "auto" }}>
@@ -334,6 +335,17 @@ export function BiddersCard({ quoteId, refreshKey, sendCtx }: { quoteId: string;
       {note && !err && (
         <div role="status" style={{ marginTop: 8, fontSize: 12, color: "#5b616e" }}>
           {note}
+        </div>
+      )}
+      {walkMsg && (
+        <div
+          role={walkMsg.tone === "error" ? "alert" : "status"}
+          style={{ marginTop: 8, fontSize: 12, color: walkMsg.tone === "error" ? "#8a2f22" : "#5b616e", display: "flex", gap: 8, alignItems: "baseline" }}
+        >
+          <span>{walkMsg.text}</span>
+          <button type="button" aria-label="Dismiss message" onClick={clearWalkMsg} style={{ fontFamily: "var(--font-ui)", fontSize: 11.5, fontWeight: 600, background: "none", border: "none", padding: 0, color: "inherit", cursor: "pointer", textDecoration: "underline" }}>
+            Dismiss
+          </button>
         </div>
       )}
       {errLine}
