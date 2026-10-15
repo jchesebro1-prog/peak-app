@@ -33,7 +33,7 @@ import { factLabel, pointsFor, rankCandidates, reasonOf, scoreOf } from "@/lib/t
 import { feedErrorMessage, type SnapshotRow, type TriageCandidate, type TriageFact } from "@/lib/triage/types";
 import { clipLine, formatTimestamp, matchTranscriptLine } from "@/lib/triage/transcript-match";
 import { collapseDuplicates } from "@/lib/triage/dedupe";
-import { selectEmail, type DealIndex } from "@/lib/triage/feeds/email";
+import { lastExternalInboundAt, selectEmail, type DealIndex } from "@/lib/triage/feeds/email";
 import { selectTasks, tierOf } from "@/lib/triage/feeds/tasks";
 import { selectLeads } from "@/lib/triage/feeds/leads";
 import { selectVisits, todaysVisitsFor, visitAttendees } from "@/lib/triage/feeds/visits";
@@ -919,6 +919,10 @@ export async function triageEscalationChecks(ok: Ok): Promise<void> {
   const deals: DealIndex = { quotes: new Map(), leads: new Map() };
   const em = selectEmail([thread("C-1", [{ at: THU_9, direction: "in" }, { at: FRI_9, direction: "out" }, { at: FRI_15, direction: "in" }])], deals, { viewer: { id: ME.id, name: ME.name, nameUnique: true }, now: MON_10 });
   ok(em[0]?.escalatedAt === FRI_15, "#37 email feed: the escalation is the newest inbound customer message");
+  const tm = thread("C-2", [{ at: THU_9, direction: "in" }, { at: FRI_15, direction: "in" }]);
+  (tm.messages[1] as { fromEmail?: string }).fromEmail = "jeffc@peaksystemsgroup.com"; // a teammate's mail, imported inbound
+  const em2 = selectEmail([tm], deals, { viewer: { id: ME.id, name: ME.name, nameUnique: true }, now: MON_10, isInternal: (e) => e.endsWith("@peaksystemsgroup.com") });
+  ok(em2[0]?.escalatedAt === THU_9 && lastExternalInboundAt(tm, () => true) === null, "#351 M3: only an outside sender's message escalates — a teammate's newer inbound mail doesn't");
   const lead = (id: string, extra: Record<string, unknown> = {}) =>
     ({ id, org: `Org ${id}`, contact: "", stage: "new", owner: ME.name, value: 0, interest: "", slaHours: 24, firstContactAt: null, nextActionAt: null, createdAt: MON_10 - 30 * H, lastActivityAt: MON_10 - 30 * H, ...extra }) as unknown as LeadRecord;
   const lr = selectLeads([lead("L1"), lead("L2", { createdAt: MON_10 - 21 * H })], { me: ME, now: MON_10 });

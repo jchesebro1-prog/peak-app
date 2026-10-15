@@ -1,6 +1,7 @@
 import { isAssignedTo, lastInbound, waitingSince, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
 import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { courtIsCurrent } from "@/lib/inbox-org/court-current";
+import { isPeakAddress } from "@/lib/inbox-org/internal";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import { isOpen as leadIsOpen } from "@/lib/stores/leads";
 import { money } from "@/lib/format";
@@ -51,6 +52,20 @@ export function onMyCourt(
   return t.court.owner === "me";
 }
 
+/** #351 review M3 — the newest message from an OUTSIDE sender (#335's
+ *  internal check: the team's addresses and own domains), the escalation a
+ *  "Not mine" yields to. A teammate's or my own mail never escalates. Pure. */
+export function lastExternalInboundAt(t: Pick<CommThread, "messages" | "contactEmail">, isInternal: (email: string) => boolean): number | null {
+  const m = t.messages || [];
+  for (let i = m.length - 1; i >= 0; i--) {
+    if (m[i].direction !== "in") continue;
+    const from = (m[i].fromEmail || t.contactEmail || "").trim().toLowerCase();
+    if (from && isInternal(from)) continue;
+    return typeof m[i].at === "number" ? m[i].at : null;
+  }
+  return null;
+}
+
 /**
  * Threads assigned to me that are waiting on us — the bell's own rule
  * (nav-counts.ts "Customers waiting on a reply"): status waiting_us and in my
@@ -61,8 +76,9 @@ export function onMyCourt(
 export function selectEmail(
   threads: readonly CommThread[],
   deals: DealIndex,
-  ctx: Pick<FeedCtx, "now"> & { viewer: MailboxViewer }
+  ctx: Pick<FeedCtx, "now"> & { viewer: MailboxViewer; isInternal?: (email: string) => boolean }
 ): TriageCandidate[] {
+  const isInternal = ctx.isInternal ?? isPeakAddress;
   const out: TriageCandidate[] = [];
   for (const t of threads) {
     // #349 — assigned to me by identity (assignedToId, else a unique name)
@@ -84,8 +100,11 @@ export function selectEmail(
       href: `/inbox?thread=${encodeURIComponent(t.id)}`,
       since,
       facts,
-      // #37 — a new inbound customer message brings back a "Not mine"
-      ...(lastInbound(t)?.at ? { escalatedAt: lastInbound(t)!.at } : {}),
+      // #37 — a new message from an outside sender brings back a "Not mine" (M3: never a teammate's)
+      ...(() => {
+        const at = lastExternalInboundAt(t, isInternal);
+        return at ? { escalatedAt: at } : {};
+      })(),
     });
   }
   return out;
@@ -99,6 +118,8 @@ export const emailFeed: TriageFeed = {
       quotes: new Map(quotes.map((q) => [q.id, { status: q.status, value: Number(q.value) || 0 }])),
       leads: new Map(leads.map((l) => [l.id, { open: leadIsOpen(l), value: Number(l.value) || 0 }])),
     };
-    return { candidates: selectEmail(threads, deals, { now: ctx.now, viewer: await mailboxViewer(ctx.me) }) };
+    // #335's internal-sender check (the team's addresses + own domains); Peak's own domain if it can't be read
+    const org = await import("@/lib/inbox-org/pipeline").then((m) => m.loadOrgContext()).catch(() => null);
+    return { candidates: selectEmail(threads, deals, { now: ctx.now, viewer: await mailboxViewer(ctx.me), isInternal: org?.isInternal ?? isPeakAddress }) };
   },
 };
