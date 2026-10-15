@@ -11172,8 +11172,7 @@ an inline Reply went out with the signature. Gmail is off locally, so a real Gma
 production.
 
 **Questions for Jeff.**
-(a) Reply-text visibility: message text shows to the thread owner, send/approve holders and the Lead estimator; everyone else
-sees metadata only. Keep that, or show text to anyone who can open the quote? (D662)
+~~(a) Reply-text visibility: message text shows to the thread owner, send/approve holders and the Lead estimator; everyone else sees metadata only. Keep that, or show text to anyone who can open the quote? (D662)~~ **ANSWERED 2026-10-15 (Jeff): anyone who can open the quote reads the text — built in #351 (D1098).**
 (b) New customer-facing email copy: the default subject ("<project> — estimate EST-####") and default body wording, with the
 signature and `{link}` line. Approve or reword.
 (c) Approve the composer strings added beyond the plan: "Email the estimate", "Client link opened N time(s)", "N new".
@@ -12467,3 +12466,23 @@ The app is safe before step 4: ownership already resolves the same way lazily (G
 **Review fixes (same day, D1085):** fail closed on a missing snapshot and on a liveness error (Start here too), owner-gated chips, one cached load shared with Start here, Listen's Estimates order matches the card, and prompt counts of the capped list. Tests: test:brief and the triage checks in test:specs.
 
 **Remaining (Jeff-gated):** look at a real morning's brief on production and confirm the block contents and order read right. Also confirm the call-to-do placement (Tasks, not Emails).
+
+## 351. Jeff's 2026-10-15 decisions — Batch 1 (Inbox & privacy) — DONE 2026-10-15 on `worktree-assist-layer` (D1098–D1104)
+
+**Asked (Jeff, 2026-10-15 decision session — `docs/decisions/2026-10-15-jeff-decisions.md`, items 25, 26, 27, 29, 37, 39, 41).**
+
+**Done:**
+- **#25 Estimate reply text (D1098):** Send & track's Activity card shows every message to anyone who can open the quote. Reply and Mark read stay the mailbox owner's (#349). Answers #308's question (a).
+- **#26 Task-shared email (D1099):** a task created from an email (any status, not deleted) shares that one email with its assignee, read-only — by `assigneeUserId`, else a unique `assigneeName`. One task read per viewer (`MailboxViewer.taskThreadIds`), mirrored in SQL by a new `DocCond` `in` leaf; every write guard unchanged.
+- **#27 Ask AI on a phone (D1100):** a ✦ in the narrow (≤ 860 px) top bar and an Ask AI row in the drawer open the panel full screen with the current page as context; same `askGateFor` gate.
+- **#29 Noise "Archive all shown" (D1101):** archives and clears every Noise row shown, a row's own Organize Archive each (Gmail too, marked-noise rows keep their filing), with one Undo for the batch.
+- **#37 "Not mine" comes back (D1102):** a dismissed Start here item returns at the next snapshot once it escalates after the mark — a new customer message, a resubmit for approval, or a lead SLA breach. Snooze and Done unchanged. Answers MASTER-QUESTIONS P1.
+- **#39 Sync pull for field roles (D1103):** `/api/sync/pull` answers 403 to anyone without `create` (Reviewer-only); the client stops pulling on a 403. Push stays open.
+- **#41 Portal sign-in email (D1104):** creating portal access emails the link with a short welcome note from the granter's own connected Gmail mailbox; otherwise it copies the link with "Couldn’t email it — copy the link instead." Copy link stays; each active grant gains Resend link. The token is never logged. Answers MASTER-QUESTIONS F16.
+
+**Tests:** `npm run test:thread-visibility` (#26 parity / read-only / deleted task / wrong assignee, #39), `test:inbox-org` (#29), `test:ask` (#27 pins), new `npm run test:morning-triage` (#37, standalone runner for the triage suite), new `npm run test:portal-invite` (#41, fake mail sender), #25 pins in test:specs; all chained into test:specs. No migration, no env var.
+
+**Remaining (Jeff-gated):**
+- Tell the team: an email you assign as a task becomes readable (read-only) by the assignee; estimate replies are readable by everyone who opens the quote.
+- On production: grant portal access to yourself with Gmail connected and check the email lands from your mailbox (and Resend link); try Ask AI's ✦ on a phone and in the native app; a Reviewer-only account no longer pulls field data (a Reviewer editing a field record offline still saves).
+- Pick a real dismissed Start here email and confirm it returns after the customer writes again.

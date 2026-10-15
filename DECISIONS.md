@@ -13069,3 +13069,39 @@ With Gmail not connected, a bidder send stamps the row sent exactly as the compo
 ## D1097. Split systems into a new estimate reuses Move system (#348 slice 3, 2026-10-15)
 
 Move system → New estimate is the split: one system per move (move more into the new estimate afterwards with Move → existing). The new estimate joins the source's lead (live leads only, via `leadIdForCreate`; the DB numbers it `-N`) and inherits the source's non-bidder companies (a quote → quote carry skips bid rows). Moving into an existing estimate copies nothing. An unsaved estimate seeded from a lead doesn't pass its lead on a split: only the stored source quote is read, and a failed read just skips the carry.
+
+## D1098. Estimate reply text is readable by anyone who can open the quote (#351, Jeff 2026-10-15 item 25)
+
+Supersedes D662's text rule. Send & track's Activity card (`trackEstimate`, `src/lib/estimate-email/track-server.ts`) now returns every message of the quote's tracked emails to any signed-in viewer — anyone who can open the estimate, the same people who could already see the subject, recipient and unread count. The `textHidden` flag, its explanation line and the Lead-estimator lookup that only served it are gone. **Reply** and **Mark read** stay the mailbox owner's, by identity (#349); a viewer who isn't the owner never gets `canReply`.
+
+## D1099. A task assigned from an email shares that one email with its assignee, read-only (#351, Jeff 2026-10-15 item 26)
+
+`canSeeThread` and its SQL twin `canSeeThreadCond` (`src/lib/stores/comms-visibility.ts`) gain one branch: a live task links the thread (`TaskRecord.threadId`) and is assigned to the viewer — `assigneeUserId` when stamped, else `assigneeName` only while the viewer's name is unique (#349's rule, `taskAssignedTo`). Any status counts (open, in progress, blocked, done); a deleted task doesn't. Drafts and Deleted threads stay hidden as before.
+
+- **No per-thread reads:** `mailboxViewer()` loads the viewer's task-linked thread ids once (one SQL read of `tasks` through `taskShareCond`, capped at 2,000; a failed read is no shares) into `MailboxViewer.taskThreadIds`. The SQL twin is a new additive `DocCond` leaf, `{ path, in }` (`IN (…)`, none = FALSE), on the thread id. A viewer built without the read (`viewerFrom`) shares nothing.
+- **Read-only:** writes still need the owner (`isOwnThread` / `ownThread` / `visibleTo` are unchanged), so the reader opens such a thread read-only with no reply, filing, links or tasks; Ask AI may read it (`loadThreadReadable`), reply and task drafting stay own-only (`loadThreadFor`). ⌘K, the company feed and the admin Start here redaction follow `canSeeThread`.
+
+## D1100. Ask AI's phone entry: a top-bar ✦ and a drawer row, full screen (#351, Jeff 2026-10-15 item 27)
+
+At ≤ 860 px the ⌘K search box (and its Ask AI row) is hidden, so the narrow top bar gets a ✦ button and the drawer an **Ask AI** row. Both open `AskPanel` with no question yet (the input focused) and the current page as its context, full screen at any width (new `fullScreen` prop, `pk-ask-full`). Same gate as the ⌘K row: `askEnabled` from `askGateFor`. The native shell uses the same Nav, so it gets the entry too.
+
+## D1101. Noise "Archive all shown" is a row's Archive for every row shown, with one Undo (#351, Jeff 2026-10-15 item 29)
+
+Replaces #346's behaviour (D1052's last sentence). The button now runs `archiveFromOrganizeAction(ids, "noise")` over every Noise row shown (the VM's `noiseShownIds`), not just the ones still in the inbox through the Inbox's plain bulk archive. Each row is archived (Gmail follows), `cleared` off the tab, and its suggestion skipped — a marked-noise (`dismissed`) row keeps its filing — exactly as a row's own Archive. The note offers one **Undo** for the batch (`undoArchiveFromOrganizeAction` with every row's record). Past the 500-row cap the action reports `more` and the note says to press again.
+
+## D1102. A "Not mine" comes back when the item escalates (#351, Jeff 2026-10-15 item 37; answers MASTER-QUESTIONS P1)
+
+Each Morning triage feed stamps its candidate with the latest escalation it can see, carried onto the snapshot row as `escalatedAt`:
+- **Email:** the newest inbound customer message (`lastInbound`).
+- **Quote awaiting my approval:** `review.submittedAt` — every (re)submit sets it.
+- **Lead:** the SLA deadline, once breached.
+
+A dismiss mark stops hiding a row whose `escalatedAt` is later than the mark (pure `dismissLapsed`, `src/lib/triage/view.ts`). Rows built before the field, and sources with no escalation (tasks, visits, renewals, calls, sent-back and portal quotes), never lapse. Snapshots are frozen between runs, so an item returns at the next snapshot after the escalation (6:45 or 13:45 Chicago, or the first view's lazy build). `setMark` keeps a dismiss permanent unless it has lapsed for the row acted on — then Done, Snooze or another Not mine replaces it (the actions pass the listed row). Snooze and Done themselves are unchanged.
+
+## D1103. Offline sync pull serves field roles only (#351, Jeff 2026-10-15 item 39)
+
+`GET /api/sync/pull` answers 403 unless the user holds `create` (`mayPullFieldData`) — in `ROLE_PERMS` exactly Admin, Manager and Estimator; a Reviewer-only user is refused before anything is read. The client engine stops pulling for the page's life on a 403 (`pullStopsOn`; the 60 s poll is cleared), so there is no retry storm; a 401 or 5xx still tries again later. **Push stays open** to any active user: the field editors are reachable with `requireUser` and save through it, and it writes only the documents being edited — gating it would strand a Reviewer's edits in the outbox.
+
+## D1104. Granting portal access emails the sign-in link from the granter's mailbox (#351, Jeff 2026-10-15 item 41; answers MASTER-QUESTIONS F16)
+
+`createPortalGrantAction` creates the grant, then `sendPortalInvite` (`src/lib/portal-invite.ts`) emails a short welcome note with the link from the signed-in user's own connected Gmail mailbox: a draft owned by their identity (#349) sent through the Inbox's `sendDraft` → Gmail bridge, signed with their signature. The link's origin is the request's (`requestWhere`, the same as the estimate email's). With Gmail off, no connected mailbox or no usable origin nothing is created and the card falls back to today's copy-to-clipboard with "Couldn’t email it — copy the link instead." A Gmail refusal is held back from later bridge sends and falls back the same way; a Gmail timeout says to check Sent before resending. Copy link stays on every row, and each active grant gains **Resend link** (`resendPortalLinkAction`: signed-in, an active grant of that customer only). The link and its token are never logged or returned in a message; the sent email in the granter's mailbox holds it, as any staff member can already copy it from the company page.
