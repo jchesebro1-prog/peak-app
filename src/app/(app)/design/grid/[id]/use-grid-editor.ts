@@ -76,6 +76,8 @@ import {
   setPlacementsSpaceAction,
   setPlacementsGroupAction,
   placeInsideAction,
+  linkRackAction,
+  unlinkRackAction,
   setSymbolDisplayAction,
   setSymbolLookAction,
   setVenueAction,
@@ -101,6 +103,7 @@ import { idsInRect, marqueeSelection, normRect, toggleId, type Rect } from "@/li
 import { alignPositions, changedMoves, distributePositions, type AlignMode } from "@/lib/design/grid-align";
 import { copySelection, PASTE_OFFSET, pasteLayout, type Clipboard } from "@/lib/design/grid-clipboard";
 import { dropHolderAt, holderOf, memberCounts, membersLeftBehind, membersOf, type DeleteMembers } from "@/lib/design/grid-groups";
+import { isRackLinked, rackIdOf, type RackDeviceRow } from "@/lib/design/grid-rack-link";
 // Type-only: the module itself imports the server-side catalog lookup.
 import type { CurtainInput } from "@/lib/design/grid-curtain-input";
 import { cleanSymbolDisplay, hitRadius, type SymbolDisplay, type SymbolMode } from "@/lib/design/grid-symbol-display";
@@ -379,6 +382,10 @@ export type GridEditorProps = {
   typeCategoryCounts?: Record<string, number>;
   /** Grid notes #2: …of which carry their own type (cleared by "whole category"). */
   typeCategoryOverrides?: Record<string, number>;
+  /** Oct 15 #43: every Assembly Builder rack — the "Link to rack…" choices. */
+  racks?: RackChoice[];
+  /** Oct 15 #43: rack id → its devices, for each rack this design places (read-only group). */
+  rackDevices?: Record<string, { label: string; rows: RackDeviceRow[] }>;
   /** #321: digits a designator number prints with (Grid Settings → Designator numbers). */
   designatorDigits: 1 | 2;
   /** #321: the active option's conduit riser, normalized and pruned (liveConduitRiser); null = none. */
@@ -421,6 +428,10 @@ export type GridEditorProps = {
 const NO_CONDUIT_SIZES: ConduitSize[] = [];
 const NO_PARTS: PartLite[] = [];
 const NO_COUNTS: Record<string, number> = {};
+/** Oct 15 #43: one Assembly Builder rack in the "Link to rack…" menu. */
+export type RackChoice = { id: string; label: string; scope?: string };
+const NO_RACKS: RackChoice[] = [];
+const NO_RACK_DEVICES: Record<string, { label: string; rows: RackDeviceRow[] }> = {};
 
 function useGridEditorImpl(props: GridEditorProps) {
   const {
@@ -450,6 +461,8 @@ function useGridEditorImpl(props: GridEditorProps) {
   const canEditTypes = props.canEditTypes ?? false;
   const typeCategoryCounts = props.typeCategoryCounts ?? NO_COUNTS;
   const typeCategoryOverrides = props.typeCategoryOverrides ?? NO_COUNTS;
+  const racks = props.racks ?? NO_RACKS;
+  const rackDevices = props.rackDevices ?? NO_RACK_DEVICES;
   const estimateLink = props.estimateLink ?? null;
   const estimateTray = props.estimateTray ?? null;
   const intakeNotices = props.intakeNotices ?? [];
@@ -2279,6 +2292,69 @@ function useGridEditorImpl(props: GridEditorProps) {
   );
   const stopPlaceInside = useCallback(() => setPlaceInsideId(null), []);
 
+  /** Oct 15 #43: the rack a device draws as (a rack assembly, linked or placed from the library) and its
+   *  devices — the read-only group — or null. `linked` = made by "Link to rack…" (Unlink offered). */
+  const rackOf = useCallback(
+    (pl: GridPlacement): { rackId: string; label: string; rows: RackDeviceRow[]; linked: boolean } | null => {
+      const id = rackIdOf(pl.partId, (fid) => !!rackDevices[fid]);
+      if (!id) return null;
+      return { rackId: id, label: rackDevices[id].label, rows: rackDevices[id].rows, linked: isRackLinked(pl) };
+    },
+    [rackDevices]
+  );
+
+  /** Oct 15 #43: "Link to rack…" — not undoable (Unlink is the way back), so the stack is cleared. */
+  const linkRack = useCallback(
+    async (placementId: string, rackId: string): Promise<boolean> => {
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await linkRackAction(project.id, { placementId, rackId });
+        if (!r.ok) {
+          setErr(r.error);
+          return false;
+        }
+        noteAction(`Linked to ${racks.find((x) => x.id === rackId)?.label ?? "the rack"} — its devices come from the rack.`);
+        onStructuralChange();
+        return true;
+      } catch {
+        setErr(SAVE_FAILED);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [project.id, racks, noteAction, onStructuralChange]
+  );
+
+  /** Oct 15 #43: "Unlink" — the device gets its own part back and the rack's devices go in as an ordinary group. */
+  const unlinkRack = useCallback(
+    async (placementId: string): Promise<boolean> => {
+      setErr(null);
+      setBusy(true);
+      try {
+        const r = await unlinkRackAction(project.id, { placementId });
+        if (!r.ok) {
+          setErr(r.error);
+          return false;
+        }
+        const n = r.added;
+        noteAction(
+          `Unlinked — ${n} device${n === 1 ? "" : "s"} copied in as an ordinary group.` +
+            (r.skipped ? ` ${r.skipped} left out (not placeable on the Grid).` : "")
+        );
+        onStructuralChange();
+        return true;
+      } catch {
+        setErr(SAVE_FAILED);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [project.id, noteAction, onStructuralChange]
+  );
+
   const enterTool = useCallback(
     (t: GridTool, opts?: { partId?: string; curtainType?: string }) => {
       // Grid notes #4: while placing inside a holder, every library pick
@@ -3268,6 +3344,10 @@ function useGridEditorImpl(props: GridEditorProps) {
     // Grid notes #4: equipment groups.
     placementsById,
     holderCounts,
+    racks,
+    rackOf,
+    linkRack,
+    unlinkRack,
     isInside,
     holderLabel,
     movablePlacements,

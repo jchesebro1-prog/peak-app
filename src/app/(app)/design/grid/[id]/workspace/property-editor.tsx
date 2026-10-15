@@ -21,6 +21,7 @@ import { RouteEditor } from "../wires-panel";
 import { SpacePinControl, TypeEditControl } from "./type-space-controls";
 import { TYPE_NOT_UNDOABLE } from "@/lib/design/grid-type-edit";
 import { groupRefusal, holdRefusal } from "@/lib/design/grid-groups";
+import { rackHref, rackLinkRefusal } from "@/lib/design/grid-rack-link";
 import Menu from "./menu";
 import type { GridEditor } from "../use-grid-editor";
 
@@ -320,6 +321,7 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
         )}
       </PropRow>
       {!selectedPlacement.curtain && <GroupRow key={`group:${selectedPlacement.id}`} ed={ed} pl={selectedPlacement} />}
+      {!selectedPlacement.curtain && <RackRow key={`rack:${selectedPlacement.id}`} ed={ed} pl={selectedPlacement} />}
       <PropRow label="Qty">{qty}</PropRow>
       <PropRow label="Sell">
         <span style={{ fontWeight: 600 }}>
@@ -499,6 +501,71 @@ function GroupRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
           </button>
         )}
       </span>
+    </PropRow>
+  );
+}
+
+/**
+ * Oct 15 #43: the rack this device draws as — its Assembly Builder rack's devices, read-only, with
+ * Open rack → (and Unlink when "Link to rack…" made it) — or, for a plain device that can hold and
+ * holds nothing yet, "Link to rack…".
+ */
+function RackRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
+  const { rackOf, racks, linkRack, unlinkRack, placements, busy } = ed;
+  const rack = rackOf(pl);
+  const small: React.CSSProperties = { ...BTN, padding: "2px 8px", fontSize: 11, flex: "0 0 auto", whiteSpace: "nowrap" };
+  if (rack) {
+    const units = rack.rows.reduce((n, r) => n + r.qty, 0);
+    return (
+      <>
+        <PropRow label="Rack" title="Its devices come from the Assembly Builder rack — change them there">
+          <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <strong style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{rack.label}</strong>
+            <a href={rackHref(rack.rackId)} target="_blank" rel="noopener noreferrer" style={{ ...small, textDecoration: "none", color: "#16181d" }}>
+              Open rack →
+            </a>
+          </span>
+        </PropRow>
+        <div style={{ padding: "4px 10px 6px", fontSize: 11, color: "#5b616e", borderBottom: "1px solid #f0f1f4" }}>
+          <div style={{ color: "#8c919c", marginBottom: 3 }}>
+            {units ? `${units} device${units === 1 ? "" : "s"} inside, from the rack (read-only)` : "No devices in the rack yet"}
+          </div>
+          {rack.rows.length > 0 && (
+            <div style={{ maxHeight: 140, overflowY: "auto" }}>
+              {rack.rows.map((r) => (
+                <div key={r.sku} style={{ display: "flex", gap: 6 }}>
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`${r.sku} — ${r.desc}`}>
+                    {r.desc}
+                  </span>
+                  <span style={{ fontFamily: "var(--font-mono)", color: "#8c919c" }}>×{r.qty}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {rack.linked && (
+            <button
+              type="button"
+              style={{ ...small, marginTop: 6 }}
+              disabled={busy}
+              onClick={() => void unlinkRack(pl.id)}
+              title="Puts this device's own part back and copies the rack's devices in as an ordinary group — each then priced on its own. Not undoable."
+            >
+              Unlink
+            </button>
+          )}
+        </div>
+      </>
+    );
+  }
+  if (!racks.length || rackLinkRefusal(pl, placements)) return null;
+  return (
+    <PropRow label="Rack" title="Make this device an Assembly Builder rack: it prices as the rack and shows the rack's devices. Not undoable — Unlink is the way back.">
+      <Menu
+        label="Link to rack…"
+        disabled={busy}
+        title="Pick the rack this device is"
+        items={racks.map((r) => ({ label: r.scope ? `${r.label} (${r.scope})` : r.label, onSelect: () => void linkRack(pl.id, r.id) }))}
+      />
     </PropRow>
   );
 }

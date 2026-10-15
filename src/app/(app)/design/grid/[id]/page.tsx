@@ -40,6 +40,8 @@ import { scopeTargetsByTier } from "@/lib/design/scope-targets";
 import { autoEstimateCards, autoTargets, priceOverrides, sellOnlyCards } from "@/lib/design/auto-estimate";
 import { autoEstimateFor } from "@/lib/design/grid-auto-model";
 import { virtualPartsFor } from "@/lib/design/grid-virtual-parts";
+import { rackDeviceLines, rackDeviceRows, rackIdOf, type RackDeviceRow } from "@/lib/design/grid-rack-link";
+import { fixtureLineParts } from "@/lib/fixture-assemblies";
 import { customItemBomLines, customItemsOf } from "@/lib/design/grid-custom-items";
 import { getGridFavorites, getGridRecent, loadDeviceTypeContext } from "@/lib/stores/device-types";
 import { normalizeRawCategory } from "@/lib/design/device-types";
@@ -230,6 +232,18 @@ export default async function GridEditorPage({
     ...gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile, deviceTypes }),
     ...virtualPartsFor((project.placements || []).map((pl) => pl.partId), equipMap, equipCtx),
   ];
+  // Oct 15 #43: every rack assembly (the "Link to rack…" choices) and, for each rack the design places
+  // (`asm:<rackId>`, linked or placed from the library), its devices — the read-only group the editor shows.
+  const rackFixtures = [...equipCtx.fixtures.values()].filter((f) => f.kind === "rack");
+  const racks = rackFixtures.map((f) => ({ id: f.id, label: f.label, ...(f.scope ? { scope: f.scope } : {}) })).sort((a, b) => a.label.localeCompare(b.label));
+  const descBySku = new Map(catalog.map((p) => [p.sku, p.desc] as const));
+  const rackDevices: Record<string, { label: string; rows: RackDeviceRow[] }> = {};
+  for (const pl of project.placements || []) {
+    const id = rackIdOf(pl.partId, (fid) => equipCtx.fixtures.get(fid)?.kind === "rack");
+    if (!id || rackDevices[id]) continue;
+    const f = equipCtx.fixtures.get(id)!;
+    rackDevices[id] = { label: f.label, rows: rackDeviceRows(rackDeviceLines(fixtureLineParts(f)), (sku) => descBySku.get(sku)) };
+  }
   // Grid notes #2: catalog parts per raw category, for the Type control's
   // "Apply to the whole category (N parts)" — only the library's categories.
   const typeCategoryCounts: Record<string, number> = {};
@@ -412,6 +426,8 @@ export default async function GridEditorPage({
       canEditTypes={can("manage_users", user.roles)}
       typeCategoryCounts={typeCategoryCounts}
       typeCategoryOverrides={typeCategoryOverrides}
+      racks={racks}
+      rackDevices={rackDevices}
       designatorDigits={designatorDigitsOf(settings)}
       conduitRiser={liveConduitRiser(designed, activeOptionId, "lighting")}
       avRiser={liveConduitRiser(designed, activeOptionId, "av")}

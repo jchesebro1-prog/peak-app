@@ -66,6 +66,8 @@ import {
   setAutoEstimate,
   addIntakeNotices,
   removeIntakeNotice,
+  linkPlacementRack,
+  unlinkPlacementRack,
 } from "@/lib/stores/grid-projects";
 import { defaultOptionId, estimateLinkOf, estimateOwnedRefusal, hasOption, resolveOptionId } from "@/lib/design/grid-options";
 import { attachPlanCandidate, planCandidatesFor } from "@/lib/design/grid-plan-intake-server";
@@ -119,9 +121,11 @@ import {
 } from "@/lib/design/grid-auto-model";
 import { buildEquipmentPriceTable, isTierKey, sellFromCost } from "@/lib/design/equipment-map";
 import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
-import { listFixtures } from "@/lib/stores/fixtures";
+import { getFixture, listFixtures } from "@/lib/stores/fixtures";
 import { getCatalogRates, loadWireLaborRules } from "@/lib/stores/pricing";
-import { fixtureSkus, resolveFixture } from "@/lib/fixture-assemblies";
+import { fixtureLineParts, fixtureSkus, resolveFixture } from "@/lib/fixture-assemblies";
+import { RACK_LINK_GONE, rackDeviceLines, rackUnlinkTooMany, snapshotUnits } from "@/lib/design/grid-rack-link";
+import { assemblyPartId } from "@/lib/design/grid-virtual-parts";
 import { searchCatalog } from "@/app/(app)/estimator/actions";
 import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
 import { partForGrid, placeablePartIds } from "@/lib/design/grid-part-lookup";
@@ -935,6 +939,60 @@ export async function placeInsideAction(projectId: string, input: { holderId: st
   return { ok: true, placement: r.placement };
 }
 
+/**
+ * Oct 15 #43: "Link to rack…" — the device becomes the rack assembly `rackId`
+ * (the Assembly Builder rack is the source of its devices). The rack must exist
+ * and be a rack; the store refuses a curtain, a member, an assembly already, a
+ * device already linked or one holding devices of its own. Not undoable (Unlink
+ * is the way back), so the editor clears its undo stack.
+ */
+export async function linkRackAction(projectId: string, input: { placementId: string; rackId: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireUser();
+  if (!isStr(projectId) || !isObj(input) || !isStr(input.placementId) || !PLACEMENT_ID.test(input.placementId) || !isStr(input.rackId) || input.rackId === "" || input.rackId.length > PART_ID_MAX)
+    return { ok: false, error: BATCH_INVALID };
+  const rack = await getFixture(input.rackId);
+  if (!rack || rack.kind !== "rack") return { ok: false, error: RACK_LINK_GONE };
+  const r = await linkPlacementRack(projectId, { placementId: input.placementId, rackId: input.rackId });
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  revalidatePath(`${editorPath(projectId)}/schedule`);
+  return { ok: true };
+}
+
+/**
+ * Oct 15 #43: "Unlink" — the device gets its own part back and the rack's
+ * devices, as the rack has them now, go in as an ordinary group (one device
+ * per unit, each priced on its own from then on). A SKU the Grid can't place
+ * (gone from the catalog, a fabric…) is left out and counted; a rack since
+ * deleted copies nothing. Refused past the 200-device group cap.
+ */
+export async function unlinkRackAction(
+  projectId: string,
+  input: { placementId: string }
+): Promise<{ ok: true; added: number; skipped: number } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!isStr(projectId) || !isObj(input) || !isStr(input.placementId) || !PLACEMENT_ID.test(input.placementId)) return { ok: false, error: BATCH_INVALID };
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  const holder = (project.placements || []).find((pl) => pl.id === input.placementId);
+  const rack = holder?.rackId ? await getFixture(holder.rackId) : null;
+  const lines = rack && rack.kind === "rack" ? rackDeviceLines(fixtureLineParts(rack)) : [];
+  const units = snapshotUnits(lines);
+  if (!units) return { ok: false, error: rackUnlinkTooMany(lines.reduce((n, l) => n + l.qty, 0)) };
+  const distinct = [...new Set(units)];
+  const placeable = distinct.length ? await placeablePartIds(new Set(distinct)) : new Set<string>();
+  const usable: string[] = [];
+  for (const sku of distinct) if (placeable.has(sku) && !(await placeDevicePartRefusal(sku))) usable.push(sku);
+  const ok = new Set(usable);
+  const skus = units.filter((sku) => ok.has(sku));
+  if (usable.length) await adoptForPlacement(usable, user.name);
+  const r = await unlinkPlacementRack(projectId, { placementId: input.placementId, skus, by: user.name });
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  revalidatePath(`${editorPath(projectId)}/schedule`);
+  return { ok: true, added: r.added, skipped: units.length - skus.length };
+}
+
 /** #299: one batch edit resolves at most this many DISTINCT part ids — the
  *  per-id lookups run in parallel, so the payload can't fan them out. */
 const MAX_DISTINCT_PARTS = 200;
@@ -1093,6 +1151,11 @@ async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | nul
   const spaceId = isSpaceId(raw.spaceId) ? raw.spaceId : null;
   // Grid notes #4: a member comes back into its holder (the store re-checks the link).
   const groupId = !curtain && isStr(raw.groupId) && PLACEMENT_ID.test(raw.groupId) ? raw.groupId : null;
+  // Oct 15 #43: a rack-linked holder comes back linked — only when it still draws as that rack.
+  const rackLink =
+    !curtain && isStr(raw.rackId) && raw.rackId !== "" && raw.rackId.length <= PART_ID_MAX && isPartId(raw.rackHolderPartId) && raw.partId === assemblyPartId(raw.rackId)
+      ? { rackId: raw.rackId, rackHolderPartId: raw.rackHolderPartId }
+      : null;
   return {
     id: raw.id,
     sheetId: raw.sheetId,
@@ -1105,6 +1168,7 @@ async function cleanRestoredPlacement(raw: unknown): Promise<GridPlacement | nul
     ...(tag ? { tag } : {}),
     ...(spaceId ? { spaceId } : {}),
     ...(groupId ? { groupId } : {}),
+    ...(rackLink ?? {}),
     ...(curtain ? { curtain } : {}),
     ...(isStr(raw.optionId) ? { optionId: raw.optionId } : {}),
     ...(seededFrom ? { seededFrom } : {}),

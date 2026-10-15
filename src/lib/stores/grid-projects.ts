@@ -74,6 +74,8 @@ import {
   type ConduitRemovedBySystem,
 } from "@/lib/design/conduit-riser/live";
 import { designatorContext, type DesignatorPreload } from "@/lib/design/designators-server";
+import { RACK_UNLINK_NOT_LINKED, isRackLinked, rackLinkRefusal } from "@/lib/design/grid-rack-link";
+import { assemblyPartId } from "@/lib/design/grid-virtual-parts";
 import type { BaseSheetOutcome, SheetSplit } from "@/lib/design/grid-sheet-split";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
 export type { DrawingSetSettings } from "@/lib/design/grid-drawing-set";
@@ -190,6 +192,17 @@ export type GridPlacement = {
    * through setPlacementsGroup / addPlacementInside / paste / restore.
    */
   groupId?: string;
+  /**
+   * Oct 15 #43: the rack assembly this holder is linked to ("Link to rack…").
+   * Set only together with `partId === "asm:<rackId>"` and
+   * `rackHolderPartId`; the group's devices are the rack's own (derived,
+   * read-only, never member placements — grid-rack-link). A linked holder
+   * takes no members (holdRefusal). Written only by linkPlacementRack /
+   * unlinkPlacementRack; a part swap drops it.
+   */
+  rackId?: string;
+  /** Oct 15 #43: the part the holder had before "Link to rack…" — Unlink puts it back. */
+  rackHolderPartId?: string;
   /**
    * Curtain spec (punch #49) - present only on a curtain drop-in. A curtain
    * is a priced line, not a catalog unit: it is sized and specced here and
@@ -1673,6 +1686,114 @@ export async function addPlacementInside(
   return { ok: true, project: updated, placement: made };
 }
 
+/**
+ * Oct 15 #43: "Link to rack…" — the device becomes the rack assembly
+ * (`asm:<rackId>`, priced as the whole rack exactly like a rack placed from the
+ * library), remembering its own part for Unlink. Refused (nothing written) per
+ * rackLinkRefusal: a curtain, a member, an assembly already, already linked, or
+ * holding devices of its own. Its designator follows the part swap rule. The
+ * caller checks the rack exists and is a rack.
+ */
+export async function linkPlacementRack(
+  projectId: string,
+  input: { placementId: string; rackId: string }
+): Promise<BatchResult<{ partId: string }>> {
+  const rackPart = assemblyPartId(input.rackId);
+  const before = await getProject(projectId);
+  const old = (before?.placements || []).find((pl) => pl.id === input.placementId);
+  const { codeOf, digits } = await designatorContext([...(old ? [old.partId] : []), rackPart]);
+  return batchEdit(
+    projectId,
+    [input.placementId],
+    (p) => {
+      ensureOptions(p);
+      let was = "";
+      const reissue = new Set<string>();
+      p.placements = (p.placements || []).map((pl) => {
+        if (pl.id !== input.placementId) return pl;
+        was = pl.partId;
+        const linked: GridPlacement = withoutAuto({ ...pl, partId: rackPart, rackId: input.rackId, rackHolderPartId: pl.partId });
+        delete linked.qty;
+        if (!keepsDesignatorOnSwap(pl.designator, codeOf(pl), codeOf(linked))) {
+          delete linked.designator;
+          reissue.add(pl.id);
+        }
+        return linked;
+      });
+      stampNewDesignators(p, reissue, codeOf, digits);
+      return { partId: was };
+    },
+    (placements, ids) => {
+      const pl = placements.find((x) => ids.has(x.id))!;
+      return rackLinkRefusal(pl, placements);
+    }
+  );
+}
+
+/**
+ * Oct 15 #43: "Unlink" — the holder gets its own part back and `skus` (one per
+ * unit, the rack's devices as they are now — the caller reads the rack) go in
+ * as an ordinary group: new placements at the holder's spot, numbered like any
+ * new device, each priced on its own from now on. Refused when the device is
+ * not linked. The caller checks every SKU is placeable and the cap.
+ */
+export async function unlinkPlacementRack(
+  projectId: string,
+  input: { placementId: string; skus: string[]; by: string }
+): Promise<{ ok: true; project: GridProject; added: number } | { ok: false; error: string }> {
+  const before = await getProject(projectId);
+  if (!before) return { ok: false, error: "Design not found." };
+  const holder0 = (before.placements || []).find((pl) => pl.id === input.placementId);
+  if (!holder0) return { ok: false, error: GROUP_HOLDER_GONE };
+  if (!isRackLinked(holder0) || !holder0.rackHolderPartId) return { ok: false, error: RACK_UNLINK_NOT_LINKED };
+  const { codeOf, digits } = await designatorContext([holder0.partId, holder0.rackHolderPartId, ...input.skus]);
+  let refusal = null as string | null;
+  let added = 0;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    ensureOptions(p);
+    const holder = (p.placements || []).find((pl) => pl.id === input.placementId);
+    if (!holder) {
+      refusal = GROUP_HOLDER_GONE;
+      return;
+    }
+    if (!isRackLinked(holder) || !holder.rackHolderPartId) {
+      refusal = RACK_UNLINK_NOT_LINKED;
+      return;
+    }
+    const at = Date.now();
+    const own: GridPlacement = withoutAuto({ ...holder, partId: holder.rackHolderPartId });
+    delete own.rackId;
+    delete own.rackHolderPartId;
+    const reissue = new Set<string>();
+    if (!keepsDesignatorOnSwap(holder.designator, codeOf(holder), codeOf(own))) {
+      delete own.designator;
+      reissue.add(own.id);
+    }
+    const members: GridPlacement[] = input.skus.map((sku) => ({
+      id: rid("gp-"),
+      sheetId: own.sheetId,
+      page: own.page,
+      x: own.x,
+      y: own.y,
+      partId: sku,
+      optionId: own.optionId,
+      ...(own.spaceId ? { spaceId: own.spaceId } : {}),
+      groupId: own.id,
+      by: input.by,
+      at,
+    }));
+    for (const m of members) reissue.add(m.id);
+    p.placements = [...(p.placements || []).map((pl) => (pl.id === own.id ? own : pl)), ...members];
+    stampNewDesignators(p, reissue, codeOf, digits);
+    settleGroupsIn(p);
+    added = members.length;
+    p.updatedAt = at;
+  });
+  if (!updated) return { ok: false, error: "Design not found." };
+  if (refusal) return { ok: false, error: refusal };
+  return { ok: true, project: updated, added };
+}
+
 const CURTAIN_PART_REFUSAL = "Curtains can't change part — edit the curtain instead.";
 
 /**
@@ -1713,6 +1834,9 @@ export async function setPlacementsPart(
         });
         if (it.partId === pl.partId) return pl;
         const swapped: GridPlacement = withoutAuto({ ...pl, partId: it.partId });
+        // Oct 15 #43: a rack link is the device's own state — a new part ends it.
+        delete swapped.rackId;
+        delete swapped.rackHolderPartId;
         // An item carrying qty (undo of a swap) restores its lot through the
         // same clean as every other written qty; otherwise the lot is dropped.
         const { qty } = lotAndTag(it.qty, undefined);
