@@ -392,6 +392,10 @@ async function brayChecks(ok: Ok) {
   ok(!draft.ok && draft.errors.some((e) => /confirmed/.test(e)), "#47: an unconfirmed (draft) map is refused");
   const bad = B.parseBrayMap({ source: "x", confirmed: true, sections: [{ from: "116123", to: "11 06 10" }, { from: "11 61 23", to: "11 06 10" }, { from: "26 09 61", to: "11 06 10" }, { from: "26 09 61", to: "26 50 00" }] });
   ok(!bad.ok && bad.errors.length === 3, "#47: malformed numbers, two sections onto one number and a number listed twice are all named");
+  const swap = B.parseBrayMap({ source: "x", confirmed: true, sections: [{ from: "11 61 23", to: "26 09 61" }, { from: "26 09 61", to: "11 61 23" }] });
+  const chain = B.parseBrayMap({ source: "x", confirmed: true, sections: [{ from: "11 61 13", to: "11 61 14" }, { from: "11 61 14", to: "11 61 25" }] });
+  ok(!swap.ok && swap.errors.length === 2 && !chain.ok && chain.errors.length === 1 && /swaps and chains/.test(chain.errors[0]), "#354 review: a map whose target is another entry's source (a swap or a chain) is refused");
+  ok(B.parseBrayMap({ source: "x", confirmed: true, sections: [{ from: "27 41 00", to: "27 41 00" }, { from: "11 61 23", to: "11 06 10" }] }).ok, "#354 review: …an entry mapping a number to itself is not a chain");
   const sections = [
     { id: "ss-r", number: "11 61 23", title: "Theatrical Rigging and Curtains" },
     { id: "ss-l", number: "26 09 61", title: "Theatrical Lighting" },

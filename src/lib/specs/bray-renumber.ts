@@ -66,6 +66,17 @@ export function parseBrayMap(raw: unknown): { ok: true; map: BrayMap } | { ok: f
     if (csiKey(from) === csiKey(to) && !title) continue; // nothing to do
     entries.push({ from, to, ...(title ? { title } : {}) });
   }
+  // #354 review: a target that is also another entry's source (a swap, or a chain A → B → C) would depend on the
+  // order sections are written in — refused; renumber in two passes instead.
+  const pairs = (list ?? []).map((e) => {
+    const r = e && typeof e === "object" ? (e as Record<string, unknown>) : {};
+    return { from: typeof r.from === "string" ? csiKey(r.from) : "", to: typeof r.to === "string" ? csiKey(r.to) : "", label: typeof r.to === "string" ? r.to.trim() : "" };
+  });
+  for (const [i, e] of pairs.entries()) {
+    if (!e.to || e.from === e.to) continue;
+    if (pairs.some((o, j) => j !== i && o.from === e.to))
+      errors.push(`sections[${i}]: ${e.label} is also another entry's "from" — swaps and chains aren't allowed; renumber in two runs.`);
+  }
   return errors.length ? { ok: false, errors } : { ok: true, map: { source, entries } };
 }
 
