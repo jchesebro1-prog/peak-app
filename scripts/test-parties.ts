@@ -1,6 +1,15 @@
 /* #346 estimate parties — harness checks. `partyChecks` is pure; `partyDbChecks` needs the test DB.
    Run the pure half alone with `npx tsx scripts/test-parties.ts`. */
+import { like, sql } from "drizzle-orm";
 import type { Ok } from "./test-inbox-org";
+import { getDb } from "../src/db";
+import { companies, contacts as contactsTable } from "../src/db/schema";
+import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "../src/db/doc-tables";
+import { DEMO_COLLECTIONS } from "../src/db/seed-data";
+import { saveCompany } from "../src/lib/identity/companies";
+import { saveContact } from "../src/lib/identity/contacts";
+import { dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
+import { addParty, copyParties, listFor, listForCompany, listForRecords, partyId, removeParty, setPartyContact } from "../src/lib/stores/parties";
 import {
   PARTY_ROLES, PARTY_RECORD_TYPES, ROLE_LABEL, ROLE_SHORT, partyInputProblem, normalizePartyInput, ownerConflict, carriesTo,
   partyRoleText, groupPartiesByRole, sortParties, leadEstimatesTotal, leadIdsWithEstimates, type Party,
@@ -57,7 +66,95 @@ export async function partyChecks(ok: Ok) {
 }
 
 export async function partyDbChecks(ok: Ok) {
-  void ok; // Task 2 fills this in.
+  ok("record_parties" in DOC_TABLES, "parties db: record_parties is a registered doc collection");
+  ok(!(SYNCABLE_COLLECTIONS as string[]).includes("record_parties"), "parties db: not syncable (server actions only)");
+  ok(DEMO_COLLECTIONS.includes("record_parties" as never), "parties db: wiped by the go-live reset with its records");
+  const db = await getDb();
+  const idx = await db.execute(sql`select indexname from pg_indexes where tablename = 'record_parties' and indexname in ('record_parties_record_id_idx','record_parties_company_id_idx')`);
+  ok(idx.rows.length === 2, "parties db: recordId + companyId expression indexes exist");
+  const trg = await db.execute(sql`select tgname from pg_trigger where tgname = 'record_parties_seq_bump'`);
+  ok(trg.rows.length === 1, "parties db: seq-bump trigger installed");
+  try {
+    await partyIdentityFixtures();
+    const { co1, co2, ct1, ct2 } = PARTY_FIX;
+    const lead = fixtureId(346, "lead"), quote = fixtureId(346, "quote"), project = fixtureId(346, "project");
+
+    const id = partyId("lead", lead, co1, "owner");
+    ok(/^pty_[0-9a-f]{16}$/.test(id) && id === partyId("lead", lead, co1, "owner") && id !== partyId("lead", lead, co1, "gc"), "parties db: deterministic id per (record, company, role)");
+
+    const a = await addParty({ recordType: "lead", recordId: lead, companyId: co1, role: "owner", contactId: ct1 }, "u-test");
+    ok(a.ok && !a.existed && a.party.contactId === ct1 && a.party.bid === null, "parties db: add owner with contact");
+    if (a.ok) registerFixture("record_parties", a.party.id);
+    const again = await addParty({ recordType: "lead", recordId: lead, companyId: co1, role: "owner" }, "u-test");
+    ok(again.ok && again.existed, "parties db: re-adding the same (record, company, role) reports existed");
+    const own2 = await addParty({ recordType: "lead", recordId: lead, companyId: co2, role: "owner" }, "u-test");
+    ok(!own2.ok && own2.error === "This record already has an owner.", "parties db: second owner refused");
+    const badCt = await addParty({ recordType: "lead", recordId: lead, companyId: co2, role: "gc", contactId: ct1 }, "u-test");
+    ok(!badCt.ok && badCt.error === "That person isn't at this company.", "parties db: contact must belong to the company");
+    const noCo = await addParty({ recordType: "lead", recordId: lead, companyId: fixtureId(346, "nope"), role: "gc" }, "u-test");
+    ok(!noCo.ok && noCo.error === "That company doesn't exist.", "parties db: unknown company refused");
+    let nonString: Awaited<ReturnType<typeof addParty>> | null = null;
+    try {
+      nonString = await addParty({ recordType: "lead", recordId: 5 as never, companyId: co2, role: "gc" }, "u-test");
+    } catch {
+      nonString = null;
+    }
+    ok(!!nonString && !nonString.ok && nonString.error === "Missing record.", "parties db: a non-string id from a server action is refused, not thrown");
+
+    for (const [role, co, label] of [["gc", co2, null], ["architect", co2, null], ["other", co1, "CM"]] as const) {
+      const r = await addParty({ recordType: "lead", recordId: lead, companyId: co, role, roleLabel: label }, "u-test");
+      ok(r.ok, `parties db: add ${role}`);
+      if (r.ok) registerFixture("record_parties", r.party.id);
+    }
+    const onLead = await listFor("lead", lead);
+    ok(onLead.map((p) => p.role).join() === "owner,gc,architect,other", "parties db: listFor sorted by role");
+    ok((await listFor("quote", lead)).length === 0, "parties db: listFor filters by record type");
+
+    const gcRow = onLead.find((p) => p.role === "gc")!;
+    const sc = await setPartyContact(gcRow.id, ct2);
+    ok(sc.ok && sc.party.contactId === ct2, "parties db: set contact");
+    const scBad = await setPartyContact(gcRow.id, ct1);
+    ok(!scBad.ok && scBad.error === "That person isn't at this company.", "parties db: set contact checks company");
+    ok((await setPartyContact(gcRow.id, null)).ok, "parties db: clear contact");
+
+    const copied = await copyParties({ type: "lead", id: lead }, { type: "quote", id: quote }, "u-test");
+    const onQuote = await listFor("quote", quote);
+    for (const p of onQuote) registerFixture("record_parties", p.id);
+    ok(copied === 3 && onQuote.map((p) => p.role).join() === "owner,architect,other", "parties db: lead→quote copies all but GC/EC");
+    ok(onQuote.every((p) => p.bid === null && p.recordId === quote), "parties db: copies are fresh rows on the target");
+    ok((await copyParties({ type: "lead", id: lead }, { type: "quote", id: quote }, "u-test")) === 0, "parties db: copy is idempotent");
+    const toProj = await copyParties({ type: "quote", id: quote }, { type: "project", id: project }, "u-test");
+    for (const p of await listFor("project", project)) registerFixture("record_parties", p.id);
+    ok(toProj === 3, "parties db: quote→project copies every row");
+
+    const forCo1 = await listForCompany(co1);
+    ok(forCo1.filter((p) => p.recordId === lead).length === 2 && forCo1.some((p) => p.recordType === "project"), "parties db: listForCompany spans records");
+    const many = await listForRecords("lead", [lead, fixtureId(346, "empty")]);
+    ok(many.get(lead)?.length === 4 && (many.get(fixtureId(346, "empty")) ?? []).length === 0, "parties db: listForRecords groups by record");
+
+    ok(await removeParty(gcRow.id), "parties db: remove");
+    ok(!(await listFor("lead", lead)).some((p) => p.id === gcRow.id), "parties db: removed row gone from lists");
+    const revived = await addParty({ recordType: "lead", recordId: lead, companyId: co2, role: "gc" }, "u-test");
+    ok(revived.ok && !revived.existed && revived.party.id === gcRow.id && revived.party.contactId === null, "parties db: re-adding a removed row revives it fresh");
+    ok(!(await removeParty(fixtureId(346, "missing"))), "parties db: removing an unknown id is false");
+  } finally {
+    await dropFixtures(346);
+    await dropPartyIdentityFixtures();
+  }
+}
+
+const PARTY_FIX = { co1: fixtureId(346, "co1"), co2: fixtureId(346, "co2"), ct1: fixtureId(346, "ct1"), ct2: fixtureId(346, "ct2") };
+async function partyIdentityFixtures() {
+  await dropPartyIdentityFixtures();
+  await saveCompany({ id: PARTY_FIX.co1, name: "Party Co One", type: "customer", lifecycle: "active", deleted: false });
+  await saveCompany({ id: PARTY_FIX.co2, name: "Party Co Two", type: "customer", lifecycle: "active", deleted: false });
+  await saveContact({ id: PARTY_FIX.ct1, firstName: "Pat", lastName: "One", homeCompanyId: PARTY_FIX.co1 });
+  await saveContact({ id: PARTY_FIX.ct2, firstName: "Sam", lastName: "Two", homeCompanyId: PARTY_FIX.co2 });
+}
+async function dropPartyIdentityFixtures() {
+  const db = await getDb();
+  await db.delete(contactsTable).where(like(contactsTable.id, "TEST346:%"));
+  await db.delete(companies).where(like(companies.id, "TEST346:%"));
 }
 
 if (process.argv[1]?.endsWith("test-parties.ts")) {
