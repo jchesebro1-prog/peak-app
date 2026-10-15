@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { bidPanelAction, setBidDetailsAction } from "./bid-actions";
-import type { BidAddendum } from "@/lib/parties/bids";
+import { addendaAdded, addendumReviseConfirm, type BidAddendum } from "@/lib/parties/bids";
 import type { BidPanelVM } from "@/lib/parties/bid-vm";
 
 /*
@@ -158,6 +158,9 @@ export default function BidChip({
     setError("");
     try {
       const wasSent = panel.status === "sent";
+      // #352 review M2: a new addendum on a sent, not-awarded bid reverts it to Draft — ask first.
+      const added = addendaAdded(panel.addenda, addenda);
+      if (wasSent && !panel.awardedPartyId && added.length > 0 && !window.confirm(addendumReviseConfirm(added))) return;
       const r = await setBidDetailsAction(quoteId, { dueAt: due, addenda });
       if (r.ok) {
         seq.current++; // an older in-flight load must not overwrite this fresher panel

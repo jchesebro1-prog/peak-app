@@ -28,7 +28,8 @@ export async function listBidders(quoteId: string): Promise<Bidder[]> {
  *  Jeff 2026-10-15 #3: a NEW addendum on a SENT estimate puts it back to Draft — the normal revise
  *  (setStatus "draft", same row lock, history entry, no revision cut), so the next send is a new sent
  *  revision with the next Rev, re-checked by the approval gate like any revise, and the Bidders card
- *  offers "Send revision to all bidders". `revised` lists the new addenda when it happened. */
+ *  offers "Send revision to all bidders". `revised` lists the new addenda when it happened. An AWARDED bid never
+ *  reverts (#352 review M2): the award is decided, so the addendum is only recorded. */
 export async function setBidDetails(
   quoteId: string,
   raw: unknown,
@@ -48,7 +49,8 @@ export async function setBidDetails(
       ...(addenda !== undefined ? { addenda } : {}),
     }));
     if (!saved?.bid) return { ok: false as const, error: "That estimate wasn't found." };
-    if (q.status === "sent" && added.length > 0) {
+    // #352 review M2: an awarded bid is decided — an addendum is recorded, the estimate stays Sent (no revert).
+    if (q.status === "sent" && added.length > 0 && !q.bid?.awardedPartyId) {
       // Joins this transaction (setStatus re-locks the same row harmlessly).
       await setStatus(quoteId, "draft", by || "Addendum");
       return { ok: true as const, bid: saved.bid, revised: added };

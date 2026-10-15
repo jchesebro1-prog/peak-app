@@ -41,6 +41,9 @@ export type ClientActionResult = { ok: true; confirmation: string } | { ok: fals
 export type ResponseScope = { id: string; name: string; price: number; priceLabel: string; alternate?: true };
 
 export const MAX_CLIENT_RESPONSES = 200;
+/** #352 review M1 — the quote's whole list (owner + every bidder) never passes this; a submit past it is refused
+ *  ("full"), never an old response dropped — the list is the record of what customers sent. */
+export const MAX_CLIENT_RESPONSES_TOTAL = 1_000;
 export const RESPONSE_NAME_MAX = 120;
 export const RESPONSE_TITLE_MAX = 120;
 export const RESPONSE_EMAIL_MAX = 200;
@@ -241,6 +244,7 @@ export function cleanClientResponses(raw: unknown): ClientResponse[] {
  *  (its partyId) have their own MAX_CLIENT_RESPONSES, so one bidder filling its budget never closes the others'. */
 export function appendResponseTo(list: unknown, r: ClientResponse): ClientResponse[] | null {
   const cur = cleanClientResponses(list);
+  if (cur.length >= MAX_CLIENT_RESPONSES_TOTAL) return null;
   const who = r.partyId ?? "";
   if (cur.filter((x) => (x.partyId ?? "") === who).length >= MAX_CLIENT_RESPONSES) return null;
   return [...cur, r];

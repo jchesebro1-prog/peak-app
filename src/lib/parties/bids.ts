@@ -220,6 +220,12 @@ export function addendaAdded(prev: ReadonlyArray<{ no: number }> | null | undefi
   return [...new Set((next || []).filter((a) => a && typeof a.no === "number" && !had.has(a.no)).map((a) => a.no))].sort((a, b) => a - b);
 }
 
+/** #352 review M2 — the Bid chip's confirmation before a new addendum moves a sent (not awarded) bid back to Draft. */
+export function addendumReviseConfirm(nos: readonly number[]): string {
+  const what = nos.length === 1 ? `Addendum ${nos[0]}` : `Addenda ${nos.join(", ")}`;
+  return `${what} came in after this estimate was sent. Saving puts it back to Draft so you can send the revision to every bidder. Continue?`;
+}
+
 /** Jeff 2026-10-15 #3 — the note the Bid chip shows when a new addendum moved a sent estimate back to Draft. */
 export function addendumRevisedNote(nos: readonly number[]): string {
   const what = nos.length === 1 ? `Addendum ${nos[0]}` : `Addenda ${nos.join(", ")}`;
