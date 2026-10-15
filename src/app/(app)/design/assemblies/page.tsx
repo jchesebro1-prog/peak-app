@@ -54,6 +54,7 @@ export default async function AssemblyBuilderPage({
       list: Number(p.list) || 0,
       cost: Number(p.cost) || 0,
       ...(p.pricedAt ? { pricedAt: p.pricedAt } : {}),
+      ...(p.priceDate ? { priceDate: p.priceDate } : {}),
       // #296: rack facts for every referenced SKU (rack placements included) — the sidebar and row totals read them.
       ...(rack ? { rack } : {}),
     };

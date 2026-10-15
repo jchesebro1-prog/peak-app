@@ -163,6 +163,12 @@ export type CatalogPart = {
    *  `settings.priceListEffective` date covers those (lib/catalog-books
    *  effectivePriceDate). */
   pricedAt?: number;
+  /** Epoch ms — the effective date of the last PRICED import file that
+   *  listed this part, changed price or not (Oct 15 #32). Written only by
+   *  the importers through `UpsertOpts.priceDate`; a part a partial file
+   *  never mentions keeps its old date. Absent on parts no priced file has
+   *  listed since #32 — `settings.priceListEffective` dates those. */
+  priceDate?: number;
 
   /* --- Specs module (#205). All additive JSONB, no migration. ---
    * These are the ONE canonical set (D258). productMetadata.specSection /
@@ -337,7 +343,18 @@ export async function fabricPartsByCategory(): Promise<CatalogPart[]> {
 /** Options for a part write. `pricedAt` is the effective date to stamp WHEN
  *  the write changes `list` or `cost` (the importers pass the price list's
  *  effective date); it is ignored when the price is unchanged. Default: now. */
-export type UpsertOpts = { pricedAt?: number };
+export type UpsertOpts = {
+  pricedAt?: number;
+  /** Oct 15 #32 — a priced import file's effective date, stamped as
+   *  `priceDate` on this part whether or not its price moved. Omitted by
+   *  every non-import write, which keeps the stored value. */
+  priceDate?: number;
+};
+
+/** A finite positive epoch ms, else null. */
+function priceDateOf(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+}
 
 async function writePart(
   existing: CatalogPart | null,
@@ -354,6 +371,11 @@ async function writePart(
   else delete doc.deviceTypeKey;
   if (pricedAt != null) doc.pricedAt = pricedAt;
   else delete doc.pricedAt;
+  // Oct 15 #32: an import stamps its file date; any other write keeps the
+  // stored one (a full-replace doc that dropped it gets it back).
+  const priceDate = priceDateOf(opts.priceDate) ?? priceDateOf(part.priceDate) ?? priceDateOf(existing?.priceDate);
+  if (priceDate != null) doc.priceDate = priceDate;
+  else delete doc.priceDate;
   return upsertDoc<CatalogPart>("catalog_parts", doc);
 }
 
@@ -368,6 +390,9 @@ export async function insertIfAbsent(part: Omit<CatalogPart, "id"> & { id?: stri
   const pricedAt = nextPricedAt(null, part, opts.pricedAt ?? now);
   if (pricedAt != null) doc.pricedAt = pricedAt;
   else delete doc.pricedAt;
+  const priceDate = priceDateOf(opts.priceDate) ?? priceDateOf(part.priceDate);
+  if (priceDate != null) doc.priceDate = priceDate;
+  else delete doc.priceDate;
   return insertDocIfAbsent<CatalogPart>("catalog_parts", doc);
 }
 

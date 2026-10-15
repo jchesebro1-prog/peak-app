@@ -823,7 +823,7 @@ function PartFormModal({
   error,
 }: {
   part: CatalogPart | null;
-  /** #133 — the part's effective price date (own pricedAt or the manufacturer's book date), null when undated. */
+  /** #133 — the part's effective price date (lib/catalog-books effectivePriceDate), null when undated. */
   priceDate: number | null;
   categories: string[];
   manufacturers: string[];

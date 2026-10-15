@@ -93,7 +93,15 @@ export type ImportResult = {
  *  the task_templates writer reads `me` for `createdBy` on a set it mints
  *  (#145 D169) — optional because scripts/regression callers (and the
  *  catalog path, which never creates a set) have no session to hand it. */
-export type CommitContext = { effectiveAt: number; me?: { name: string }; pipes?: Pipelines };
+export type CommitContext = {
+  effectiveAt: number;
+  me?: { name: string };
+  pipes?: Pipelines;
+  /** Oct 15 #32 — the file mapped a List or Cost column, so every catalog
+   *  row it writes is dated `priceDate = effectiveAt`. Absent/false = a
+   *  price-less file, which dates nothing. */
+  priced?: boolean;
+};
 
 /** The link-back tally a contacts/venues writer keeps for one commit.
  *  `createdIds` remembers the customers THIS file created, so a later row
@@ -1208,7 +1216,7 @@ const WRITERS: Record<string, Writer> = {
       // it preserves fields a price sheet doesn't carry (ports, trade, spec
       // text, datasheet attachments) when a SKU is re-imported. pricedAt
       // (#133) lands only when the price actually changes.
-      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt });
+      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt, ...(ctx.priced ? { priceDate: ctx.effectiveAt } : {}) });
       if (ex) Object.assign(ex, patch);
       else cache.push({ id: sku, sku, ...patch });
     },
@@ -1217,7 +1225,7 @@ const WRITERS: Record<string, Writer> = {
     update: async (ex, v, _cache, ctx) => {
       const sku = str(ex.sku);
       const patch = ownedCatalogPatch(catalogPatch(v, ex, sku, { now: Date.now(), by: ctx.me?.name, specLib: needsSpecLib(v) ? await specLibFor(ctx) : undefined }), ex, v);
-      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt });
+      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt, ...(ctx.priced ? { priceDate: ctx.effectiveAt } : {}) });
     },
     exportObjects: async () => {
       const [list, sections, articles] = await Promise.all([Catalog.list(), allSections(), allArticles()]);
