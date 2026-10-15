@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import CompanySearch from "@/components/parties/company-search";
 import type { BidderVM, BidPanelVM } from "@/lib/parties/bid-vm";
 import {
@@ -25,45 +25,72 @@ const FIELD: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12, paddi
 export function BiddersCard({ quoteId, refreshKey }: { quoteId: string; refreshKey: number }) {
   const [panel, setPanel] = useState<BidPanelVM | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  // Button-driven mutations count toward the card-wide `busy`; blur-saves only lock their own input.
+  const [pending, setPending] = useState(0);
+  const [savingFields, setSavingFields] = useState<string[]>([]);
+  const busy = pending > 0;
   const [adding, setAdding] = useState(false);
   const [role, setRole] = useState<"gc" | "ec">("gc");
   const [via, setVia] = useState<"email" | "website">("email");
   const [company, setCompany] = useState<{ id: string; name: string } | null>(null);
 
+  // One counter for the load and every mutation: only the newest request may write the panel / error.
+  const reqRef = useRef(0);
+  const mountedRef = useRef(true);
   useEffect(() => {
-    let live = true;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // "Try again" after a failed first load bumps this to re-run the load effect.
+  const [retryKey, setRetryKey] = useState(0);
+  useEffect(() => {
+    const id = ++reqRef.current;
+    const isLatest = () => mountedRef.current && id === reqRef.current;
     bidPanelAction(quoteId).then(
       (r) => {
-        if (!live) return;
+        if (!isLatest()) return;
         if (r.ok) {
           setPanel(r.panel);
           setErr(null);
         } else setErr(r.error);
       },
-      () => live && setErr("Couldn't load the bidders. Try again.")
+      () => {
+        if (isLatest()) setErr("Couldn't load the bidders. Try again.");
+      }
     );
-    return () => {
-      live = false;
-    };
-  }, [quoteId, refreshKey]);
+  }, [quoteId, refreshKey, retryKey]);
 
-  async function run(call: () => Promise<BidPanelResult>): Promise<boolean> {
-    setBusy(true);
+  /** `field` marks a blur-save (locks just that input); without it the whole card is busy. */
+  async function run(call: () => Promise<BidPanelResult>, field?: string): Promise<boolean> {
+    const id = ++reqRef.current;
+    const isLatest = () => mountedRef.current && id === reqRef.current;
+    if (field) setSavingFields((f) => [...f, field]);
+    else setPending((n) => n + 1);
     setErr(null);
+    let ok = false;
     try {
       const r = await call();
-      if (r.ok) {
-        setPanel(r.panel);
-        return true;
-      }
-      setErr(r.error);
+      if (isLatest()) {
+        if (r.ok) {
+          setPanel(r.panel);
+          ok = true;
+        } else setErr(r.error);
+      } else ok = r.ok;
     } catch {
-      setErr("That didn't save. Try again.");
+      if (isLatest()) setErr("That didn't save. Try again.");
     } finally {
-      setBusy(false);
+      if (mountedRef.current) {
+        if (field) setSavingFields((f) => {
+            const i = f.indexOf(field);
+            return i < 0 ? f : [...f.slice(0, i), ...f.slice(i + 1)];
+          });
+        else setPending((n) => n - 1);
+      }
     }
-    return false;
+    return ok;
   }
 
   const resetAdd = () => {
@@ -102,16 +129,29 @@ export function BiddersCard({ quoteId, refreshKey }: { quoteId: string; refreshK
         )}
       </div>
       {!panel && !err && <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Loading…</div>}
+      {!panel && err && (
+        <button
+          type="button"
+          onClick={() => {
+            setErr(null);
+            setRetryKey((k) => k + 1);
+          }}
+          style={BTN}
+        >
+          Try again
+        </button>
+      )}
       {panel && panel.bidders.length === 0 && <div style={{ fontSize: 12, color: "#5b616e" }}>Not a bid. Add the GCs or ECs this estimate goes to.</div>}
       {panel && panel.bidders.length > 0 && (
-        <ul style={{ margin: 0, padding: 0, display: "grid", gap: 8 }}>
+        <ul role="list" style={{ margin: 0, padding: 0, display: "grid", gap: 8 }}>
           {panel.bidders.map((b) => (
             <BidderRow
               key={b.id}
               b={b}
               panel={panel}
               busy={busy}
-              onPatch={(id, patch) => void run(() => updateBidderAction(id, patch))}
+              savingFields={savingFields}
+              onPatch={(id, patch, field) => void run(() => updateBidderAction(id, patch), field ? `${id}:${field}` : undefined)}
               onSubmitted={onSubmitted}
               onAward={onAward}
             />
@@ -155,7 +195,7 @@ export function BiddersCard({ quoteId, refreshKey }: { quoteId: string; refreshK
                 </div>
               )}
               <div style={{ display: "grid", gap: 4, fontSize: 11.5, color: "#5b616e" }}>
-                Or search companies
+                <span>Or search companies</span>
                 {company ? (
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <span style={{ fontSize: 13, color: "#16181d" }}>{company.name}</span>
@@ -164,7 +204,7 @@ export function BiddersCard({ quoteId, refreshKey }: { quoteId: string; refreshK
                     </button>
                   </div>
                 ) : (
-                  <CompanySearch placeholder="Search companies…" disabled={busy} onPick={setCompany} />
+                  <CompanySearch placeholder="Search companies to add as a bidder" disabled={busy} onPick={setCompany} />
                 )}
               </div>
               <div style={{ display: "flex", gap: 8 }}>

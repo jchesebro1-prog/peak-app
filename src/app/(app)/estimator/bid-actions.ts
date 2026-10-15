@@ -36,7 +36,7 @@ async function loadPanel(quoteId: string, canEdit: boolean): Promise<BidPanelRes
     result: p.bid.result,
     resultLabel: BID_RESULT_LABEL[p.bid.result],
     submitVia: p.bid.submitVia,
-    bidSiteUrl: p.bid.bidSiteUrl ?? "",
+    bidSiteUrl: /^https?:\/\//i.test(p.bid.bidSiteUrl ?? "") ? (p.bid.bidSiteUrl as string) : "",
     gcBidNo: p.bid.gcBidNo ?? "",
     confirmation: p.bid.confirmation ?? "",
     statusText: bidderStatusText(p.bid, rev),
@@ -77,10 +77,14 @@ export async function bidPanelAction(quoteId: string): Promise<BidPanelResult> {
   return loadPanel(quoteId, can("create", user.roles));
 }
 
-/** Gate, run the store call, then return the fresh panel (or the store's error). */
-async function mutate(quoteId: unknown, run: (userId: string) => Promise<{ ok: boolean; error?: string }>): Promise<BidPanelResult> {
+/**
+ * Gate, run the store call, then return the fresh panel (or the store's error). The gate runs first, so a
+ * `quoteId` given as a resolver (a bidder id → its quote) is only looked up for a permitted user.
+ */
+async function mutate(quoteRef: unknown | (() => Promise<unknown>), run: (userId: string) => Promise<{ ok: boolean; error?: string }>): Promise<BidPanelResult> {
   const user = await requireUser();
   if (!can("create", user.roles)) return { ok: false, error: DENIED };
+  const quoteId = typeof quoteRef === "function" ? await (quoteRef as () => Promise<unknown>)() : quoteRef;
   if (!isId(quoteId)) return { ok: false, error: "That estimate wasn't found." };
   const r = await run(user.id);
   if (!r.ok) return { ok: false, error: r.error || "That didn't save." };
@@ -115,13 +119,11 @@ export async function addBidderAction(
 }
 
 export async function updateBidderAction(partyId: string, raw: unknown): Promise<BidPanelResult> {
-  const qid = await quoteOfBidder(partyId);
-  return mutate(qid, () => updateBidder(partyId, raw));
+  return mutate(() => quoteOfBidder(partyId), () => updateBidder(partyId, raw));
 }
 
 export async function markSubmittedAction(partyId: string, confirmation: string): Promise<BidPanelResult> {
-  const qid = await quoteOfBidder(partyId);
-  return mutate(qid, (uid) => markSubmitted(partyId, uid, typeof confirmation === "string" ? confirmation : ""));
+  return mutate(() => quoteOfBidder(partyId), (uid) => markSubmitted(partyId, uid, typeof confirmation === "string" ? confirmation : ""));
 }
 
 export async function awardBidAction(quoteId: string, partyId: string): Promise<BidPanelResult> {

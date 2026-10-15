@@ -18,6 +18,7 @@ export function BidderRow({
   b,
   panel,
   busy,
+  savingFields,
   onPatch,
   onSubmitted,
   onAward,
@@ -25,11 +26,15 @@ export function BidderRow({
   b: BidderVM;
   panel: BidPanelVM;
   busy: boolean;
-  onPatch: (partyId: string, patch: Record<string, unknown>) => void;
+  /** `${partyId}:${field}` keys with a blur-save in flight (each disables only its own input). */
+  savingFields: readonly string[];
+  onPatch: (partyId: string, patch: Record<string, unknown>, field?: string) => void;
   onSubmitted: (b: BidderVM) => void;
   onAward: (b: BidderVM) => void;
 }) {
   const edit = panel.canEdit;
+  const urlSaving = savingFields.includes(`${b.id}:bidSiteUrl`);
+  const noSaving = savingFields.includes(`${b.id}:gcBidNo`);
   const locked = b.result === "awarded" || b.result === "lost";
   return (
     <li style={{ listStyle: "none", border: "1px solid #ececf0", borderRadius: 9, padding: "9px 11px", display: "grid", gap: 7 }}>
@@ -64,8 +69,8 @@ export function BidderRow({
                 aria-label={`Bid site link — ${b.companyName}`}
                 placeholder="https://…"
                 defaultValue={b.bidSiteUrl}
-                disabled={busy}
-                onBlur={(e) => e.target.value.trim() !== b.bidSiteUrl && onPatch(b.id, { bidSiteUrl: e.target.value })}
+                disabled={urlSaving}
+                onBlur={(e) => e.target.value.trim() !== b.bidSiteUrl && onPatch(b.id, { bidSiteUrl: e.target.value }, "bidSiteUrl")}
                 style={{ ...FIELD, width: 200 }}
               />
               {b.bidSiteUrl && (
@@ -77,11 +82,11 @@ export function BidderRow({
           )}
           <input
             key={`no-${b.gcBidNo}`}
-            aria-label={`GC bid # — ${b.companyName}`}
+            aria-label={`GC bid number — ${b.companyName}`}
             placeholder="GC bid #"
             defaultValue={b.gcBidNo}
-            disabled={busy}
-            onBlur={(e) => e.target.value.trim() !== b.gcBidNo && onPatch(b.id, { gcBidNo: e.target.value })}
+            disabled={noSaving}
+            onBlur={(e) => e.target.value.trim() !== b.gcBidNo && onPatch(b.id, { gcBidNo: e.target.value }, "gcBidNo")}
             style={{ ...FIELD, width: 100 }}
           />
         </div>
@@ -94,7 +99,7 @@ export function BidderRow({
       {edit && (
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
           {b.result === "pending" && (
-            <button type="button" disabled={busy} onClick={() => onSubmitted(b)} style={BTN}>
+            <button type="button" aria-label={`Mark submitted — ${b.companyName}`} disabled={busy} onClick={() => onSubmitted(b)} style={BTN}>
               {b.needsRev ? `Mark Rev ${panel.rev} submitted` : "Mark submitted"}
             </button>
           )}
@@ -116,7 +121,7 @@ export function BidderRow({
             )}
           </select>
           {panel.canAward && b.result === "pending" && (
-            <button type="button" disabled={busy} onClick={() => onAward(b)} style={{ ...BTN, background: "var(--accent)", color: "#fff" }}>
+            <button type="button" aria-label={`Award — ${b.companyName}`} disabled={busy} onClick={() => onAward(b)} style={{ ...BTN, background: "var(--accent)", color: "#fff" }}>
               Award
             </button>
           )}
