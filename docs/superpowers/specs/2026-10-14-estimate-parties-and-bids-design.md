@@ -29,7 +29,7 @@ estimates for different scopes, or a single estimate with many scopes.*
 |---|---|
 | 1 | Bid shape: both — the same scope to several GCs/ECs **and** owner/architect/consultant roles on the job. |
 | 2 | Every bidder's copy is **identical** (scope and price); only the addressee changes. |
-| 3 | **Award** picks the winning bidder, who becomes the estimate's customer. Losing bidders are "lost the award", never "Peak lost". |
+| 3 | **Award** picks the winning bidder. **Revised 2026-10-15 (Jeff):** the owner stays the estimate's customer (venues are stored per customer company, so swapping the customer would move the venue); the winner is the *awarded bidder* — documents are addressed to them, the portal shows it to them, the project records them as Bill to. Losing bidders are "lost the award", never "Peak lost". |
 | 4 | Before award, the estimate's customer is the **owner / venue**. |
 | 5 | Roles: Owner · GC · EC · Architect · Theatre/AV consultant · Vendor · Other (typed label). |
 | 6 | Vendors: a vendor quote links a vendor **company**; vendor emails file to an estimate/project; a vendor PDF on an email becomes a vendor quote; all of it carries to the project. |
@@ -107,16 +107,22 @@ type BidderState = {
 
 ### 3.4 Customer of record and award
 
-- Before award, `Quote.customerId` = the owner (the record's `owner` party).
-  The estimator keeps the two in step: setting the customer sets/updates the
-  owner party when the estimate is a bid.
-- **`awardBid(quoteId, partyId, by)`** — store-owned, one transaction:
-  winner `result: awarded`; other `pending` bidders → `lost`; `customerId` /
-  contact → the winner's company/contact **without re-stamping the pricing
-  tier**; a `history` note; `Quote.bid.awardedPartyId` set. Allowed only while
-  status is draft or sent. **`undoAward`** reverses it until the quote is Won
-  (restores the owner as customer, bidders with `lostByAward` →
-  `pending`).
+Revised 2026-10-15 (Jeff, D-number in slice 2a): **the owner stays the
+customer of record for good.** A venue (`Quote.locationId`) is an id within the
+customer company, and the tier, history and reports all key off `customerId`,
+so swapping the customer at award would silently move the venue to the GC's
+record.
+
+- `Quote.customerId` = the owner (also its `owner` party).
+- **`awardBid(quoteId, partyId, by)`** — store-owned, one transaction: winner
+  `result: awarded`; other `pending` bidders → `lost` with `lostByAward`;
+  `Quote.bid.awardedPartyId` set; the customer, contact, venue and tier never
+  change. Allowed only while status is draft or sent. **`undoAward`** reverses
+  it until the quote is Won (bidders with `lostByAward` → `pending`).
+- After award, customer documents are addressed *Prepared for* the awarded
+  bidder (slice 2b's addressee mechanism), the portal lists the quote for the
+  awarded bidder's company (slice 6), and the project records the awarded
+  bidder's company as **Bill to** (`ProjectRecord.billToCompanyId`).
 - **Won** is unchanged: `setStatus("won")` → `spawnFromQuote` → one project.
 
 ### 3.5 Carry-over
@@ -125,9 +131,8 @@ Copied **once** at each hand-off; afterwards each list is its own:
 - lead → estimate (estimate created with `leadId`): owner, architect,
   consultant, vendor, other rows. GC/EC rows are **not** copied as bidders —
   the estimator ticks bidders from the lead's GC/EC list.
-- estimate → project (`spawnProject`): every row; the awarded bidder becomes
-  the project's customer as it already is via `customerId`. Bid state stays on
-  the quote rows.
+- estimate → project (`spawnProject`): every row; the awarded bidder's company
+  is stamped as the project's Bill to. Bid state stays on the quote rows.
 - Adding a GC/EC bidder on an estimate also adds a plain `gc`/`ec` row on its
   lead if missing.
 
@@ -202,8 +207,8 @@ estimates (lost excluded). Pure `leadEstimatesTotal(quotes)` and
   the bidder. v1/v2 links keep working.
 - **Portal** — a bidder company with a grant lists the bid read-only (Bid
   badge, due date, their PDF, no Accept). After award it leaves losing
-  bidders' portals; the winner sees it as a normal quote (it is now their
-  `customerId`).
+  bidders' portals; the awarded bidder's portal lists it addressed to them
+  (the owner's portal keeps it too — it is still the `customerId`).
 
 ## 6. Vendors
 
