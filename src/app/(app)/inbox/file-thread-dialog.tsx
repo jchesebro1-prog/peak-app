@@ -18,7 +18,12 @@ import { ACCENT_BTN, BTN, MUTED } from "./sidebar-styles";
 export default function FileThreadDialog({ vm, onClose }: { vm: ReaderVM; onClose: () => void }) {
   const router = useRouter();
   const dialog = useRef<HTMLDialogElement>(null);
-  const [target, setTarget] = useState<FilingTargetVM | null>(null);
+  // An estimate/project the thread is already linked to starts picked — filing it just adds the vendor.
+  const current: FilingTargetVM | null =
+    vm.link && (vm.link.type === "quote" || vm.link.type === "project")
+      ? { type: vm.link.type, id: vm.link.id, label: vm.link.label, sub: "" }
+      : null;
+  const [target, setTarget] = useState<FilingTargetVM | null>(current);
   const [vendor, setVendor] = useState(vm.vendorCompany?.name ?? "");
   const [vendorId, setVendorId] = useState<string | null>(vm.vendorCompany?.id ?? null);
   const [busy, setBusy] = useState(false);
@@ -72,7 +77,7 @@ export default function FileThreadDialog({ vm, onClose }: { vm: ReaderVM; onClos
             Currently linked: <span style={{ fontWeight: 600 }}>{vm.link.kindLabel} · {vm.link.label}</span>
           </div>
         )}
-        <FilingTargetSearch onPick={setTarget} disabled={busy || !!filed} />
+        <FilingTargetSearch initial={current} onPick={setTarget} disabled={busy || !!filed} />
         {replaces && vm.link && (
           <div style={{ fontSize: 12, color: "#8a5a00", background: "#fff6e0", border: "1px solid #f0dcaa", borderRadius: 7, padding: "6px 9px" }}>
             {VENDOR_COPY.replaceLink(vm.link.label)}
