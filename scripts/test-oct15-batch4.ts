@@ -363,6 +363,13 @@ async function brayChecks(ok: Ok) {
   const dp = B.parseBrayMap(draftFile);
   ok(!dp.ok && draftFile.confirmed === false, "#47: the committed Neenah 2021 draft map is unconfirmed, so the script refuses it as-is");
   ok(B.parseBrayMap({ ...draftFile, confirmed: true }).ok, "#47: …and is otherwise well-formed (Jeff confirms, then it runs)");
+  // Jeff (Oct 15): Fall Creek (Bray 3748) is the source. Its only Bray-issued section, 27 41 00, is already the library's.
+  const fc = JSON.parse(src("docs/specs-seed/bray-toc-map.json"));
+  const fcp = B.parseBrayMap(fc);
+  ok(fcp.ok && fc.confirmed === true && /Fall Creek/.test(fc.source) && /3748/.test(fc.source), "#47: the confirmed map cites Fall Creek (Bray 3748) as its source");
+  const libSections = ["11 61 13", "11 61 14", "11 61 23", "11 61 33", "11 61 43", "26 09 23", "26 09 61", "26 55 61", "27 41 16", "27 41 00"].map((n, i) => ({ id: `s${i}`, number: n, title: n }));
+  const fcPlan = fcp.ok ? B.planRenumber(fcp.map, libSections, [{ specId: "PS-274100-001", section: "27 41 00" }, { specId: "PS-116123-001", section: "11 61 23" }]) : null;
+  ok(!!fcPlan && fcPlan.ok && fcPlan.plan.sections.length === 0 && fcPlan.plan.records.length === 0, "#47: against the library's numbers the Fall Creek map changes nothing (27 41 00 already matches)");
   const script = src("scripts/specs-renumber-bray.ts");
   ok(/resolveExplicitDbTarget/.test(script) && /requireHostedConfirmation/.test(script) && /saveSpecRecord\(/.test(script) && /docs\/specs-seed\/bray-toc-map\.json/.test(script) && /--apply/.test(script),
     "#47: the script is dry-run by default, needs an explicit target (--yes for hosted) and writes records through saveSpecRecord");

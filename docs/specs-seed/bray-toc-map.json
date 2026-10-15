@@ -1,0 +1,15 @@
+{
+  "source": "Fall Creek HS – Addition & Remodeling, Bray Associates project 3748, Construction Documents 2026-10-14 — section numbers as Bray's own Fall Creek section files print them (no project-manual TOC found)",
+  "confirmed": true,
+  "notes": [
+    "Jeff 2026-10-15 (#47): use Fall Creek's TOC (Bray 3748).",
+    "No Fall Creek table of contents (00 01 10) or project manual is on this Mac or in Jeff's Dropbox (searched 2026-10-15: Spotlight by name and content for Fall Creek / 3748 / Table of Contents / 00 01 10 / Project Manual, and every file beside the 27 41 00 docx). Fall Creek's drawings carry Bray title blocks but cite no spec sections.",
+    "Authority used instead: the one Bray-issued Fall Creek section file — Dropbox: Computer Backups/Downloads/Fall Creek HS Auditorium AV Written Spec Section 27-41-00.docx — titled 'DOCUMENT 27 41 00 – MULTI-PURPOSE AUDIO-VIDEO SYSTEM', footer 'MULTI-PURPOSE AUDIO-VIDEO SYSTEM 27 41 00', header 'Fall Creek High School – Addition & Remodeling, Project No. 3748, Construction Documents, October 14, 2026'.",
+    "Result: 27 41 00 already matches the library's 27 41 00, so the map changes nothing. The title is left as the library's ('Audio-Video Systems'): 'Multi-Purpose' names Fall Creek's room, not the section.",
+    "Library sections with no Fall Creek counterpart keep their numbers: 11 61 13 Acoustic Shell Enclosure, 11 61 14 Orchestra Pit Filler, 11 61 23 Theatrical Rigging and Curtains, 11 61 33 Rigging Systems and Controls, 11 61 43 Stage Curtains, 26 09 23 Lighting Controls, 26 09 61 Theatrical Lighting Controls (and Controls and Fixtures), 26 55 61 Theatrical Lighting Fixtures, 27 41 16 Performance Audio-Video Systems.",
+    "When Bray issues Fall Creek's other sections or its project-manual TOC, add their numbers here and re-run the dry run."
+  ],
+  "sections": [
+    { "from": "27 41 00", "to": "27 41 00" }
+  ]
+}
