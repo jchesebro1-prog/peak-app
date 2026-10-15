@@ -19,6 +19,7 @@ import { get, setQuotePeople, type Quote } from "@/lib/stores/quotes";
 import { quoteOwnerName } from "@/lib/review-limits";
 import { sameName } from "@/lib/quote-approval-rules";
 import { activeUsers } from "@/lib/users";
+import { canChangeQuotePeople, PEOPLE_LOCKED_AFTER_SEND } from "@/lib/quote-people-lock";
 
 export const PICK_SOMEONE = "Pick someone on the team.";
 export const ONLY_APPROVER_HANDS_OFF = "Only an approver can make someone else the lead estimator.";
@@ -60,6 +61,8 @@ export async function setQuotePeopleAs(
   // Escalation guard — the owner field itself, and the effective owner the
   // review limit reads (a blank owner falls back to preparedBy).
   const approver = can("approve", actor.roles);
+  // Jeff 2026-10-15 #18: both lock at the first send — after it, only an approver changes either.
+  if (!canChangeQuotePeople(q, approver) && (!sameName(owner, cur.owner) || !sameName(preparedBy, cur.preparedBy))) return refuse(PEOPLE_LOCKED_AFTER_SEND);
   const handsOff = (next: string, before: string) =>
     !sameName(next, before) && !sameName(next, actor.name) && !!next.trim();
   if (!approver) {

@@ -704,6 +704,9 @@ export type EstimatorProps = {
   viewerName: string;
   /** #287 task B — may this user make someone else the lead estimator (`approve`)? */
   viewerCanApprove: boolean;
+  /** Jeff 2026-10-15 #18 — the loaded quote has been sent at least once (quoteSentOnce): Lead estimator and
+   *  Prepared by are then read-only for non-approvers. Absent = false. */
+  peopleSentOnce?: boolean;
   /** Estimator Phase 4 — the signed-in user's roles, for the review-comment
    *  rules (src/lib/estimate-review/comments.ts: add / resolve / delete). */
   viewerRoles: string[];

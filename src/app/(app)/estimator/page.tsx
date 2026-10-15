@@ -37,6 +37,7 @@ import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { pickContactName, pickVenueId, readHandoff, systemQuoteName } from "@/app/(app)/quotes/new/handoff";
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { documentRevStamp, pdfView } from "@/lib/quote-pdf/state";
+import { quoteSentOnce } from "@/lib/quote-people-lock";
 import EstimatorClient from "./estimator-client";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { sourceForSave } from "@/lib/portal-quote-mode";
@@ -588,6 +589,8 @@ export default async function EstimatorPage({
       // the quote; only an approver may hand it to someone else.
       viewerName={user.name}
       viewerCanApprove={can("approve", user.roles)}
+      // Jeff 2026-10-15 #18: the people lock at the first send (approvers can still change them).
+      peopleSentOnce={quoteSentOnce(q)}
       // Phase 4: the review-comment permissions (add / resolve / delete).
       viewerRoles={user.roles}
       // #293: Save to library / intros — the Spec panel's audience (#205).

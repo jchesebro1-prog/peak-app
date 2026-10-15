@@ -27,6 +27,8 @@ import { bookCoverFingerprint } from "../src/lib/part-docs/datasheet-book-cover-
 import { specDocumentsForQuote, specDocumentsKey, uniqueDocxName, quoteSpecDocuments } from "../src/lib/estimate-output/package-spec-docs-server";
 import { buildRevisionPackageZip } from "../src/lib/estimate-output/package-zip-server";
 import { createSpecDocument, patchSpecDocument } from "../src/lib/stores/spec-documents";
+import { canChangeQuotePeople, quoteSentOnce, PEOPLE_LOCKED_AFTER_SEND } from "../src/lib/quote-people-lock";
+import { setQuotePeopleAs } from "../src/lib/quote-people";
 import { appendResponseTo, MAX_CLIENT_RESPONSES, responseQuoteLimitKey, type ClientResponse } from "../src/lib/estimate-output/responses";
 
 const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -37,6 +39,17 @@ export async function oct15PureChecks(ok: Ok) {
   oct15ReviewAmountChecks(ok);
   oct15RevChecks(ok);
   await oct15LetterheadChecks(ok);
+  /* ---- #18 — Lead estimator / Prepared by lock at send; approvers can still change them ---- */
+  {
+    ok(!quoteSentOnce({ status: "draft", revisions: [{ reason: "manual" }], history: [] }) && quoteSentOnce({ status: "draft", revisions: [{ reason: "sent" }] })
+      && quoteSentOnce({ status: "draft", history: [{ to: "sent" }] }) && quoteSentOnce({ status: "won" }) && !quoteSentOnce(null),
+      "oct15 #18: a quote counts as sent once it has a sent revision, a move to sent, or a status at/after sent");
+    ok(canChangeQuotePeople({ status: "draft" }, false) && !canChangeQuotePeople({ status: "sent" }, false) && canChangeQuotePeople({ status: "sent" }, true),
+      "oct15 #18: before the first send anyone may change them; after it, approvers only");
+    const f = rd("src/app/(app)/estimator/quote-people-fields.tsx");
+    ok((f.match(/disabled=\{!loadedId \|\| peopleBusy \|\| peopleLocked\}/g) || []).length === 2 && rd("src/app/(app)/estimator/page.tsx").includes("peopleSentOnce={quoteSentOnce(q)}"),
+      "oct15 #18: both selects are read-only for a non-approver once sent");
+  }
   /* ---- #17 — the client zip carries the estimate's SP-#### Word files ---- */
   {
     const doc = (id: string, quoteId: string | undefined, createdAt: number, kind = "quote") => ({ id, createdAt, updatedAt: createdAt, source: { kind, ...(quoteId ? { quoteId } : {}) } }) as never;
@@ -228,6 +241,30 @@ async function oct15ZipSpecDbChecks(ok: Ok) {
   ok(linked.length === 1 && linked[0].id === sp.id && specDocumentsKey(await quoteSpecDocuments(qid)) !== k1, "oct15 #17 db: a spec saved from the estimate is found, and editing it changes the zip's cache key");
 }
 
+async function oct15PeopleDbChecks(ok: Ok) {
+  const mk = async (slug: string, extra: Record<string, unknown> = {}) => {
+    const id = fixtureId(FIX, "people-" + slug);
+    await createFixture("quotes", { id, name: "O15 people", customer: "", customerId: null, status: "draft", source: "estimator", quoteType: "system",
+      owner: "Jena Tolksdorf", preparedBy: "Jena Tolksdorf", value: 200, margin: 0.5, history: [], createdAt: 1, updatedAt: 1, spec: { sections: [], mobs: [] }, ...extra } as never);
+    return id;
+  };
+  const NIC = { name: "Nic Trapani", roles: ["Estimator"] };
+  const JEFF = { name: "Jeff Chesebro", roles: ["Admin", "Estimator"] };
+  const draft = await mk("draft");
+  const d = await setQuotePeopleAs(draft, NIC, { preparedBy: "Nic Trapani" });
+  ok(d.ok && (await getQuote(draft))?.preparedBy === "Nic Trapani", "oct15 #18 db: before the first send a non-approver may change Prepared by");
+  const sent = await mk("sent", { history: [{ at: 2, from: "draft", to: "sent" }], revisions: [{ rev: 1, reason: "sent", at: 2 }] });
+  const n1 = await setQuotePeopleAs(sent, NIC, { owner: "Nic Trapani" });
+  const n2 = await setQuotePeopleAs(sent, NIC, { preparedBy: "Nic Trapani" });
+  ok(!n1.ok && !n2.ok && n1.error === PEOPLE_LOCKED_AFTER_SEND && (await getQuote(sent))?.owner === "Jena Tolksdorf" && (await getQuote(sent))?.updatedAt === 1,
+    "oct15 #18 db: after a send (now revising in Draft) a non-approver's change is refused, nothing written");
+  const same = await setQuotePeopleAs(sent, NIC, { owner: "Jena Tolksdorf" });
+  ok(same.ok && !same.changed, "oct15 #18 db: re-picking the same people is not a change");
+  const j = await setQuotePeopleAs(sent, JEFF, { owner: "Nic Trapani", preparedBy: "Jason Keagy" });
+  const after = await getQuote(sent);
+  ok(j.ok && after?.owner === "Nic Trapani" && after.preparedBy === "Jason Keagy", "oct15 #18 db: an approver can still change both after the send");
+}
+
 export async function oct15DbChecks(ok: Ok) {
   try {
     await dropCompanies();
@@ -238,6 +275,7 @@ export async function oct15DbChecks(ok: Ok) {
     await oct15BidDbChecks(ok);
     await oct15RevDbChecks(ok);
     await oct15ZipSpecDbChecks(ok);
+    await oct15PeopleDbChecks(ok);
   } finally {
     await dropFixtures(FIX);
     await dropCompanies();

@@ -217,7 +217,7 @@ export function useEstimatorState(props: EstimatorProps) {
     initial, pipelines, fabrics, curtainSewingPct, trackSeries, trackParts, laborRates, fixtureRates,
     fixtureAssemblies, vendors, blobUploads, customers, travel, next: initialNext, aiSource, people,
     quoteTasks, templateSets, assumptionLibrary, freightRule, portalStatusError, assistDraft, specKeys, canApplyCredit,
-    viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault,
+    viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault, peopleSentOnce = false,
     suggestion = null, suggestionParts,
   } = props;
   /* ---------------- state (port of the prototype's this.state) ---------------- */
@@ -1294,6 +1294,9 @@ export function useEstimatorState(props: EstimatorProps) {
       setBaseStatus(r.status);
     }
   };
+
+  /** Jeff 2026-10-15 #18 — Lead estimator / Prepared by are read-only for a non-approver once the quote has been sent. */
+  const peopleLocked = !viewerCanApprove && (peopleSentOnce || status === "sent" || status === "won" || status === "lost");
 
   /** Jeff 2026-10-15 #3 — the server moved the status (a new addendum on a sent bid → Draft): re-read and apply it. */
   const resyncStatus = () => {
@@ -3379,6 +3382,7 @@ export function useEstimatorState(props: EstimatorProps) {
     venueOptions,
     venueRoomName,
     viewerCanApprove,
+    peopleLocked,
     viewerName,
     bonusSplit,
     bonusRecord,
