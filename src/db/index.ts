@@ -261,6 +261,9 @@ export const GRID_PLAN_LOCK_NAMESPACE = 3141;
 /** Advisory-lock namespace for the Assessments engine (#340): printed finding-id allocation per
  *  (company, venue, category), and the read-merge-write of one assessment / finding / venue profile / pick list. */
 export const ASSESSMENT_LOCK_NAMESPACE = 337;
+/** Advisory-lock namespace for Venue Assessment surveys (#344 C4): the read-merge-write of one survey (`survey:<id>`)
+ *  by every write path — update(), a finished file, the sync push — so a finished file path is never lost. */
+export const SURVEY_LOCK_NAMESPACE = 344;
 
 /**
  * Run `fn` inside a transaction holding the Postgres advisory lock

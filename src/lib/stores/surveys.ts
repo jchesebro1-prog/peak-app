@@ -6,6 +6,24 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import { eq, sql } from "drizzle-orm";
+import { getDb, SURVEY_LOCK_NAMESPACE, withAdvisoryLock } from "@/db";
+import { DOC_TABLES } from "@/db/doc-tables";
+import { blobEnabled } from "@/lib/blob";
+import {
+  FILE_ID_RE,
+  INLINE_CAPS,
+  fileSlotOf,
+  filePathMatches,
+  foldFileSlot,
+  inlineFileProblem,
+  mergeSurveyFileRefs,
+  slotFinished,
+  surveyInlineTotal,
+  type FinishedSlot,
+  type SketchRef,
+  type SurveyPhotoRef,
+} from "../field-files/files";
 import {
   blankSystemsState,
   type DisciplineData,
@@ -311,6 +329,10 @@ export interface SurveyDraft {
   internalTags?: string[];
   /** derived on every read by migrateSurvey — never stored */
   legacyNotes?: LegacyNote[];
+  /** #344 C4 — per-section photos; each file slot is filled by the device photo queue (cap 200) */
+  photoRefs?: SurveyPhotoRef[];
+  /** #344 C4 — sketch pads by key; a re-draw gets a new `s_` id */
+  sketches?: Record<string, SketchRef>;
 }
 
 export interface SurveyRecord extends SurveyDraft {
@@ -515,19 +537,144 @@ export async function create(
   return insertWithPrefixedId<SurveyRecord>("surveys", "FS", 1053, build);
 }
 
-/** Content update — bumps updatedAt + rev (prototype re-dirty). */
+/* ---- #344 C4: one lock per survey; every write path merges file refs inside it ---- */
+
+const surveyLockKey = (id: string) => `survey:${id}`;
+
+/** Run `fn` holding this survey's advisory lock. Locked public functions never call each other (each has an unlocked
+ *  inner helper), so no path waits on a lock its own transaction already holds. */
+function withSurveyLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  return withAdvisoryLock(SURVEY_LOCK_NAMESPACE, surveyLockKey(id), fn);
+}
+
+/** The stored doc (read inside the lock) + the patch, stamped, with `mergeSurveyFileRefs` applied: a finished file
+ *  slot is never replaced by an unfinished one from an older copy. `legacyNotes` is derived on read — never stored. */
+async function updateUnlocked(id: string, patch: Partial<SurveyRecord>): Promise<SurveyRecord | null> {
+  return patchDoc<SurveyRecord>("surveys", id, (s) => {
+    const stored = { ...s } as Record<string, unknown>;
+    const t = now();
+    const next = Object.assign(s, patch, {
+      updatedAt: t,
+      syncState: "synced" as SyncState,
+      syncedAt: t,
+      rev: (s.rev || 1) + 1,
+    }) as Record<string, unknown>;
+    delete next.legacyNotes;
+    return mergeSurveyFileRefs(stored, next) as SurveyRecord;
+  });
+}
+
+/** Content update — bumps updatedAt + rev (prototype re-dirty). Under the survey lock, merging file refs (#344 C4). */
 export async function update(
   id: string,
   patch: Partial<SurveyRecord>
 ): Promise<SurveyRecord | null> {
-  return patchDoc<SurveyRecord>("surveys", id, (s) => {
-    Object.assign(s, patch, {
-      updatedAt: now(),
-      syncState: "synced" as SyncState,
-      syncedAt: now(),
-      rev: (s.rev || 1) + 1,
-    });
+  return withSurveyLock(id, () => updateUnlocked(id, patch));
+}
+
+export type SurveyFileErr = { ok: false; error: string; terminal?: true };
+const fileErr = (error: string, terminal?: boolean): SurveyFileErr => (terminal ? { ok: false, error, terminal: true } : { ok: false, error });
+
+/**
+ * A survey file is uploaded (#344 C4): set its slot to `{ blobPath }` or (local dev without Blob) `{ inline }`,
+ * dropping `pending`, and bump rev — under the survey lock, reading the stored doc inside it. The owning ref:
+ * `p_` → that photo's `file`; `m_` → its `markup.image`; `k_` → `markup.strokes` of the photo with the same hex,
+ * else the strokes of the sketch with that hex; `s_` → that sketch's `image`.
+ *
+ * - An already-finished slot is never replaced: `{ ok, already: true }` with the stored slot and current rev.
+ * - No ref owns the file yet → retryable (the capture save may not have synced).
+ * - Survey missing / deleted, a bad id, a path outside the file's own name, an inline file on a Blob deployment, a bad
+ *   inline file or one past INLINE_CAPS (each, or the survey's 1.5 MB total) → `terminal`.
+ */
+export async function applyFinalizedSurveyFile(
+  id: string,
+  fileId: string,
+  slot: { blobPath?: string | null; inline?: string | null },
+  user: { id: string },
+): Promise<{ ok: true; ref: FinishedSlot; rev: number; already?: true } | SurveyFileErr> {
+  if (typeof user?.id !== "string" || !user.id) return fileErr("Unknown user");
+  if (typeof id !== "string" || !/^FS-\d+$/.test(id)) return fileErr("Survey not found", true);
+  if (typeof fileId !== "string" || !FILE_ID_RE.test(fileId)) return fileErr("That file isn't valid", true);
+  const blobPath = typeof slot?.blobPath === "string" && slot.blobPath ? slot.blobPath : undefined;
+  const inline = typeof slot?.inline === "string" && slot.inline ? slot.inline : undefined;
+  return withSurveyLock(id, async () => {
+    const s = await getDoc<SurveyRecord>("surveys", id);
+    if (!s) return fileErr("Survey not found", true);
+    const cur = fileSlotOf(s, fileId);
+    if (cur && slotFinished(cur)) {
+      return { ok: true as const, ref: cur.blobPath ? { blobPath: cur.blobPath } : { inline: cur.inline! }, rev: s.rev || 1, already: true as const };
+    }
+    if (!!blobPath === !!inline) return fileErr("A file needs a stored path or an inline copy, not both", true);
+    if (blobPath && !filePathMatches(blobPath, id, fileId)) return fileErr("The file path isn't this file's own path in this survey", true);
+    if (inline) {
+      if (blobEnabled()) return fileErr("Files upload to file storage on this deployment.", true);
+      const bad = inlineFileProblem(fileId, inline);
+      if (bad) return fileErr(bad, true);
+      if (surveyInlineTotal(s) + inline.length > INLINE_CAPS.totalPerSurvey) {
+        return fileErr(`This survey already holds ${INLINE_CAPS.totalPerSurvey.toLocaleString("en-US")} characters of inline files (local dev without file storage)`, true);
+      }
+    }
+    const folded = foldFileSlot(s, fileId, blobPath ? { blobPath } : { inline: inline! });
+    if (folded.status === "missing") return fileErr("That file isn't on this survey yet");
+    if (folded.status === "already") return { ok: true as const, ref: folded.slot, rev: s.rev || 1, already: true as const };
+    const t = now();
+    const next = { ...folded.doc, updatedAt: t, syncState: "synced" as SyncState, syncedAt: t, rev: (s.rev || 1) + 1 } as SurveyRecord;
+    delete next.legacyNotes;
+    await patchDoc<SurveyRecord>("surveys", id, () => next);
+    return { ok: true as const, ref: blobPath ? { blobPath } : { inline: inline! }, rev: next.rev };
   });
+}
+
+export type SurveyPushResult = {
+  id: string;
+  status: "ok" | "conflict" | "error" | "retry";
+  rev?: number;
+  server?: Record<string, unknown>;
+  error?: string;
+};
+
+/**
+ * /api/sync/push branch for `surveys` (#344 C4) — the generic whole-document upsert, now under the survey lock with
+ * the file-ref merge: an unknown id is inserted as sent; a stale rev is a `conflict` with the server copy; otherwise
+ * the pushed doc replaces the stored one EXCEPT that a finished file slot is never replaced by the pushed copy's
+ * unfinished one (`mergeSurveyFileRefs`). `legacyNotes` is never stored. Anything thrown (a lock timeout, a database
+ * error) replies `retry` so the device keeps the capture.
+ */
+export async function pushSurvey(rec: { id: string; rev?: number; doc: Record<string, unknown> }): Promise<SurveyPushResult> {
+  const id = rec.id;
+  try {
+    return await withSurveyLock(id, async (): Promise<SurveyPushResult> => {
+      const db = await getDb();
+      const t = DOC_TABLES.surveys;
+      const existing = await db.select().from(t).where(eq(t.id, id)).limit(1);
+      const at = Date.now();
+      const doc: Record<string, unknown> = { ...rec.doc, id };
+      delete doc.legacyNotes;
+      if (!existing.length) {
+        await db.insert(t).values({ id, doc, rev: rec.rev ?? 1, updatedAt: at, receivedAt: at, review: { state: "new" }, deleted: false });
+        return { id, status: "ok", rev: rec.rev ?? 1 };
+      }
+      if (typeof rec.rev === "number" && rec.rev < existing[0].rev) {
+        return { id, status: "conflict", rev: existing[0].rev, server: { ...(existing[0].doc as object), id } };
+      }
+      const merged = mergeSurveyFileRefs(existing[0].doc as Record<string, unknown>, doc);
+      await db
+        .update(t)
+        .set({
+          doc: merged,
+          rev: typeof rec.rev === "number" ? sql`GREATEST(${t.rev}, ${rec.rev})` : sql`${t.rev} + 1`,
+          updatedAt: at,
+          receivedAt: at,
+          deleted: false,
+          // review deliberately untouched — server-owned
+        })
+        .where(eq(t.id, id));
+      return { id, status: "ok", rev: rec.rev };
+    });
+  } catch (e) {
+    console.error("[surveys] push failed; the device will retry", id, e);
+    return { id, status: "retry", error: "The server couldn't save it just now; it will try again" };
+  }
 }
 
 export async function setStage(

@@ -12,6 +12,7 @@ import { normalizeProject, type ProjectRecord } from "@/lib/stores/projects";
 import type { Pipelines } from "@/lib/pipelines";
 import { pushAssessment } from "@/lib/stores/assessments";
 import { pushFinding } from "@/lib/stores/findings";
+import { pushSurvey } from "@/lib/stores/surveys";
 
 /** Abuse guards for the open sync endpoint. */
 const MAX_RECORDS_PER_COLLECTION = 1000;
@@ -91,6 +92,15 @@ export async function POST(req: Request) {
         const user = { id: String(session.user.id ?? ""), roles: session.user.roles };
         const one = { id: rec.id, rev: rec.rev, doc: rec.doc };
         results[coll].push(coll === "assessments" ? await pushAssessment(one, user) : await pushFinding(one, user));
+        continue;
+      }
+      // Venue Assessment surveys (#344 C4): the same whole-document upsert as
+      // below, but under the survey's advisory lock and merged with the stored
+      // doc so a finished photo / sketch file is never replaced by the pushed
+      // copy's still-pending slot (the device photo queue may have finished it
+      // after this copy was made). A throw replies retry.
+      if (coll === "surveys") {
+        results[coll].push(await pushSurvey({ id: rec.id, rev: rec.rev, doc: rec.doc }));
         continue;
       }
       try {
