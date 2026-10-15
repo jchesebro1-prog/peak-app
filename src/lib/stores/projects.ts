@@ -783,18 +783,24 @@ export async function createProjectFromQuote(
 
     // #348 — the estimate's companies carry to the project once. Never allowed to undo the win:
     // this runs inside setStatus's transaction (see quote-spawn.ts), where a SQL error would abort the
-    // whole Postgres transaction past any JS catch — so the copy runs in a savepoint (rolled back alone)
-    // and a failure is logged, not thrown.
+    // whole Postgres transaction past any JS catch — so each step runs in its OWN savepoint (rolled back
+    // alone; a copy failure doesn't drop Bill to, nor the reverse) and a failure is logged, not thrown.
     try {
       await withSavepoint(async () => {
         const { copyParties } = await import("@/lib/stores/parties");
         await copyParties({ type: "quote", id: quoteId }, { type: "project", id: p.id }, q.owner || DEFAULT_ACTOR);
+      });
+    } catch (e) {
+      console.error("projects.createProjectFromQuote: copying parties failed", quoteId, e);
+    }
+    try {
+      await withSavepoint(async () => {
         const awardedId = (q.bid as { awardedPartyId?: string | null } | null | undefined)?.awardedPartyId;
         const awarded = awardedId ? await getDoc<{ id: string; companyId?: string }>("record_parties", awardedId) : null;
         if (awarded?.companyId) await patchDoc<ProjectRecord>("projects", p.id, (d) => { d.billToCompanyId = awarded.companyId!; });
       });
     } catch (e) {
-      console.error("projects.createProjectFromQuote: copying parties failed", quoteId, e);
+      console.error("projects.createProjectFromQuote: stamping Bill to failed", quoteId, e);
     }
 
     // Item 16 (task-first): a sold install spawns the PM kickoff follow-up.

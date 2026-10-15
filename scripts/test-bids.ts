@@ -15,7 +15,7 @@ import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-
 import { buildQuote, get as getQuote, setStatus } from "../src/lib/stores/quotes";
 import { getProjectByQuote } from "../src/lib/stores/projects";
 import { autoTaskId } from "../src/lib/stores/tasks";
-import { listFor } from "../src/lib/stores/parties";
+import { addParty, listFor, setPartyBid } from "../src/lib/stores/parties";
 import { addBidder, awardBid, listBidders, markSubmitted, setBidDetails, undoAward, updateBidder } from "../src/lib/stores/bids";
 
 const T1 = Date.UTC(2026, 9, 1);
@@ -202,6 +202,21 @@ export async function bidDbChecks(ok: Ok) {
     const ms = await markSubmitted(g2, "u", "CONF-1");
     ok(ms.ok && ms.party.bid?.revSent === 1 && ms.party.bid.confirmation === "CONF-1" && ms.party.bid.sentBy === "u", "bids db: mark submitted stamps rev, confirmation, sender");
 
+    // closed (won) estimate: a bidder there can't be awarded or edited
+    const wp = await addParty({ recordType: "quote", recordId: qWon, companyId: gc1, role: "gc" }, "u");
+    if (!wp.ok) throw new Error("won-quote bidder missing");
+    await setPartyBid(wp.party.id, newBidderState("email"));
+    await regAll();
+    const awWon = await awardBid(qWon, wp.party.id);
+    ok(!awWon.ok && awWon.error === "Only an open estimate can be awarded.", "bids db: a won estimate can't be awarded");
+    const upWon = await updateBidder(wp.party.id, { gcBidNo: "1" });
+    ok(!upWon.ok && upWon.error === "This estimate is closed.", "bids db: a won estimate's bidder can't be edited");
+    const msWon = await markSubmitted(wp.party.id, "u", "");
+    ok(!msWon.ok && msWon.error === "This estimate is closed.", "bids db: a won estimate's bidder can't be marked submitted");
+
+    const noAward = await undoAward(q);
+    ok(!noAward.ok && noAward.error === "Nothing is awarded.", "bids db: undo with nothing awarded refused");
+
     // award
     const before = await getQuote(q);
     const aw = await awardBid(q, g1);
@@ -214,6 +229,11 @@ export async function bidDbChecks(ok: Ok) {
     ok(!again.ok && /already awarded/.test(again.error), "bids db: a second award is refused");
     const wd = await updateBidder(g1, { result: "withdrew" });
     ok(!wd.ok && wd.error === "Undo the award first.", "bids db: an awarded bidder can't be edited to withdrew");
+    const wdLost = await updateBidder(g2, { result: "withdrew" });
+    ok(!wdLost.ok && wdLost.error === "Undo the award first.", "bids db: a lost-by-award bidder's result can't be edited either");
+    const lateAdd = await addBidder({ quoteId: q, companyId: own, role: "ec" }, "u");
+    ok(!lateAdd.ok && lateAdd.error === "Undo the award before adding a bidder.", "bids db: no new bidder once awarded");
+    ok(after?.locationId === before?.locationId && (after as { contactName?: string } | null)?.contactName === (before as { contactName?: string } | null)?.contactName, "bids db: award keeps the location and contact name");
 
     // undo
     const un = await undoAward(q);

@@ -1120,6 +1120,18 @@ async function patchQuote(id: string, mutate: (doc: Quote) => Quote | void): Pro
 }
 
 /**
+ * #348 — run `fn` in a transaction holding the quote ROW lock (FOR UPDATE). Same lock order as setStatus:
+ * row lock first, advisory (withQuoteLock) only afterwards, so a bid write can never invert against a
+ * "won" spawn. Nested patchQuote calls join this transaction and re-lock the same row harmlessly.
+ */
+export async function withQuoteRowLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  return withTransaction(async () => {
+    await lockQuoteRow(id);
+    return fn();
+  });
+}
+
+/**
  * Run a quote mutation and stamp `contentChangedAt` when it changed anything
  * the customer document prints (#222 fix wave 1). The stamp is the write's own
  * `updatedAt` when the mutation bumped it — a save's render (savedAt taken

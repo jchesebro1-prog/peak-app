@@ -1,7 +1,6 @@
-import { withQuoteLock } from "@/db";
 import { getDoc } from "@/db/doc-store";
 import type { Quote } from "@/lib/stores/quotes";
-import { get as getQuote, patchQuoteBid } from "@/lib/stores/quotes";
+import { get as getQuote, patchQuoteBid, withQuoteRowLock } from "@/lib/stores/quotes";
 import { addParty, listFor, setPartyBid } from "@/lib/stores/parties";
 import type { BidderState, Party } from "@/lib/parties/rules";
 import {
@@ -35,12 +34,19 @@ export async function addBidder(
   by: string
 ): Promise<{ ok: true; party: Party } | { ok: false; error: string }> {
   if (input.role !== "gc" && input.role !== "ec") return { ok: false, error: "Bidders are GCs or ECs." };
-  const q = await getQuote(input.quoteId);
-  if (!q) return { ok: false, error: "That estimate wasn't found." };
-  if (CLOSED.has(q.status)) return { ok: false, error: "This estimate is closed." };
-  const added = await addParty({ recordType: "quote", recordId: q.id, companyId: input.companyId, contactId: input.contactId ?? null, role: input.role }, by);
-  if (!added.ok) return added;
-  const party = added.party.bid ? added.party : (await setPartyBid(added.party.id, newBidderState(input.submitVia))) ?? added.party;
+  // Row lock first (setStatus's order): the closed / awarded checks and the insert see one committed state.
+  const gate = await withQuoteRowLock(input.quoteId, async () => {
+    const q = await getQuote(input.quoteId);
+    if (!q) return { ok: false as const, error: "That estimate wasn't found." };
+    if (CLOSED.has(q.status)) return { ok: false as const, error: "This estimate is closed." };
+    if (q.bid?.awardedPartyId) return { ok: false as const, error: "Undo the award before adding a bidder." };
+    const added = await addParty({ recordType: "quote", recordId: q.id, companyId: input.companyId, contactId: input.contactId ?? null, role: input.role }, by);
+    if (!added.ok) return added;
+    const party = added.party.bid ? added.party : (await setPartyBid(added.party.id, newBidderState(input.submitVia))) ?? added.party;
+    return { ok: true as const, party, q };
+  });
+  if (!gate.ok) return gate;
+  const { party, q } = gate;
   // The owner is the customer (spec §3.4): make it explicit on a bid.
   if (q.customerId && !(await listFor("quote", q.id)).some((p) => p.role === "owner")) {
     await addParty({ recordType: "quote", recordId: q.id, companyId: q.customerId, role: "owner" }, by);
@@ -60,27 +66,46 @@ async function bidderRow(partyId: string): Promise<{ party: Bidder; quote: Quote
   return { party: p, quote: q };
 }
 
+/** Look the bidder up to learn its quote, then re-read it (and the quote) under the quote's row lock and
+ *  refuse a closed estimate — every bidder edit is read-modify-write, so it must not race an award. */
+async function withBidderLocked<T extends { ok: boolean }>(
+  partyId: string,
+  fn: (row: { party: Bidder; quote: Quote }) => Promise<T>
+): Promise<T | { ok: false; error: string }> {
+  const first = await getDoc<Party>("record_parties", partyId);
+  if (!first || first.recordType !== "quote") return { ok: false, error: "That bidder wasn't found." };
+  return withQuoteRowLock(first.recordId, async () => {
+    const row = await bidderRow(partyId);
+    if ("error" in row) return { ok: false as const, error: row.error };
+    if (CLOSED.has(row.quote.status)) return { ok: false as const, error: "This estimate is closed." };
+    return fn(row);
+  });
+}
+
 export async function updateBidder(partyId: string, raw: unknown): Promise<{ ok: true; party: Party } | { ok: false; error: string }> {
   const clean = sanitizeBidderPatch(raw);
   if (!clean.ok) return clean;
-  const row = await bidderRow(partyId);
-  if ("error" in row) return { ok: false, error: row.error };
-  if (clean.value.result && row.party.bid.result !== "pending" && row.party.bid.result !== "withdrew" && row.party.bid.result !== "no_bid")
-    return { ok: false, error: "Undo the award first." };
-  const saved = await setPartyBid(partyId, applyBidderPatch(row.party.bid, clean.value));
-  return saved ? { ok: true, party: saved } : { ok: false, error: "That bidder wasn't found." };
+  return withBidderLocked(partyId, async (row) => {
+    if (clean.value.result && row.party.bid.result !== "pending" && row.party.bid.result !== "withdrew" && row.party.bid.result !== "no_bid")
+      return { ok: false as const, error: "Undo the award first." };
+    const saved = await setPartyBid(partyId, applyBidderPatch(row.party.bid, clean.value));
+    return saved ? { ok: true as const, party: saved } : { ok: false as const, error: "That bidder wasn't found." };
+  });
 }
 
 export async function markSubmitted(partyId: string, by: string, confirmation: string): Promise<{ ok: true; party: Party } | { ok: false; error: string }> {
-  const row = await bidderRow(partyId);
-  if ("error" in row) return { ok: false, error: row.error };
-  if (row.party.bid.result !== "pending") return { ok: false, error: "Only a pending bidder can be marked submitted." };
-  const saved = await setPartyBid(partyId, markSubmittedState(row.party.bid, currentRev(row.quote), by, confirmation, Date.now()));
-  return saved ? { ok: true, party: saved } : { ok: false, error: "That bidder wasn't found." };
+  return withBidderLocked(partyId, async (row) => {
+    if (row.party.bid.result !== "pending") return { ok: false as const, error: "Only a pending bidder can be marked submitted." };
+    const saved = await setPartyBid(partyId, markSubmittedState(row.party.bid, currentRev(row.quote), by, confirmation, Date.now()));
+    return saved ? { ok: true as const, party: saved } : { ok: false as const, error: "That bidder wasn't found." };
+  });
 }
 
+// LOCK ORDER: every bid write takes the quote ROW lock first (withQuoteRowLock) — the same order as
+// setStatus("won"), which row-locks and only then takes the advisory lock in spawnFromQuote. Taking the
+// advisory lock first here would invert that and let an award land on a won quote.
 export async function awardBid(quoteId: string, partyId: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  return withQuoteLock(quoteId, async () => {
+  return withQuoteRowLock(quoteId, async () => {
     const q = await getQuote(quoteId);
     if (!q) return { ok: false as const, error: "That estimate wasn't found." };
     if (!canAward(q.status)) return { ok: false as const, error: "Only an open estimate can be awarded." };
@@ -94,7 +119,7 @@ export async function awardBid(quoteId: string, partyId: string): Promise<{ ok: 
 }
 
 export async function undoAward(quoteId: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  return withQuoteLock(quoteId, async () => {
+  return withQuoteRowLock(quoteId, async () => {
     const q = await getQuote(quoteId);
     if (!q) return { ok: false as const, error: "That estimate wasn't found." };
     if (!canUndoAward(q.status)) return { ok: false as const, error: "The estimate is won — the award can't be undone." };
