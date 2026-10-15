@@ -69,7 +69,7 @@ export function addendaSinceRow(q: BidQ, bid: BidderState): number[] {
   const frozen = rev?.docFields?.bid?.addenda;
   if (Array.isArray(frozen)) return missingFrom(live, frozen);
   const sentAt = bid.sentAt ?? 0;
-  return live.filter((a) => a.receivedAt > sentAt).map((a) => a.no).sort((a, b) => a - b);
+  return live.filter((a) => a && typeof a.no === "number" && typeof a.receivedAt === "number" && a.receivedAt > sentAt).map((a) => a.no).sort((a, b) => a - b);
 }
 
 export function addendaAfterLatestSend(q: BidQ): number[] {

@@ -437,7 +437,7 @@ export const ESTIMATE_EMAIL_CLAIM_MS = 120_000;
 
 /** One emailed copy of the estimate: the comms thread, the sent revision it
  *  carried, when, by whom (user name) and the To line. */
-export type EstimateEmailEntry = { threadId: string; rev: number; at: number; by: string; to: string };
+export type EstimateEmailEntry = { threadId: string; rev: number; at: number; by: string; to: string; partyId?: string };
 
 /** Most entries kept on a quote; the oldest are dropped past it. */
 export const ESTIMATE_EMAILS_MAX = 50;
@@ -1345,6 +1345,8 @@ export async function recordEstimateEmail(id: string, entry: EstimateEmailEntry)
     at: entry.at,
     by: String(entry.by ?? "").slice(0, 200),
     to: String(entry.to ?? "").slice(0, 1000),
+    // #348 2b-ii — which bidder this email went to (a bidder send only).
+    ...(typeof entry.partyId === "string" && /^pty_[0-9a-f]{16}$/.test(entry.partyId) ? { partyId: entry.partyId } : {}),
   };
   let wrote = false;
   await patchQuote(id, (doc) => {

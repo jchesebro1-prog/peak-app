@@ -1,10 +1,10 @@
 import { getDoc } from "@/db/doc-store";
-import type { Quote } from "@/lib/stores/quotes";
-import { get as getQuote, patchQuoteBid, withQuoteRowLock } from "@/lib/stores/quotes";
+import type { EstimateEmailEntry, Quote } from "@/lib/stores/quotes";
+import { get as getQuote, patchQuoteBid, recordEstimateEmail, withQuoteRowLock } from "@/lib/stores/quotes";
 import { addParty, listFor, setPartyBid } from "@/lib/stores/parties";
 import type { BidderState, Party } from "@/lib/parties/rules";
 import {
-  applyBidderPatch, awardPlan, canAward, canUndoAward, currentRev, markSubmittedState, newBidderState, sanitizeBidDetails,
+  applyBidderPatch, awardPlan, bidderFailedState, bidderSentState, canAward, canUndoAward, currentRev, markSubmittedState, newBidderState, nextBidderOpens, sanitizeBidDetails,
   sanitizeBidderPatch, undoAwardPlan, type QuoteBid,
 } from "@/lib/parties/bids";
 
@@ -142,5 +142,53 @@ export async function undoAward(quoteId: string): Promise<{ ok: true } | { ok: f
     for (const u of undoAwardPlan(await listBidders(quoteId))) await setPartyBid(u.id, u.bid);
     await patchQuoteBid(quoteId, (bid) => ({ ...bid, awardedPartyId: null }));
     return { ok: true as const };
+  });
+}
+
+/** The party when it is a live GC/EC bidder row on THIS quote. Call under the quote's row lock. */
+async function bidderOnQuote(quoteId: string, partyId: string): Promise<Bidder | null> {
+  const p = await getDoc<Party>("record_parties", partyId);
+  return p && p.recordType === "quote" && p.recordId === quoteId && isBidder(p) ? p : null;
+}
+
+/**
+ * #348 2b-ii — record one bidder email (sent, or failed after the thread existed): the estimate-email entry
+ * (remembers the bidder; idempotent by thread, no updatedAt bump) and the bidder's own state. Does not require
+ * `pending` — a bidder awarded while its email was in flight still gets the true `revSent`. Row lock first.
+ * Returns whether the party write happened.
+ */
+export async function recordBidderSend(
+  quoteId: string,
+  partyId: string,
+  entry: EstimateEmailEntry,
+  outcome: { kind: "sent" } | { kind: "failed"; error: string; unknown?: boolean },
+  by: string
+): Promise<boolean> {
+  return withQuoteRowLock(quoteId, async () => {
+    const p = await bidderOnQuote(quoteId, partyId);
+    if (!p) return false;
+    await recordEstimateEmail(quoteId, { ...entry, partyId });
+    const next = outcome.kind === "sent"
+      ? bidderSentState(p.bid, entry.rev, by, entry.threadId, entry.at)
+      : bidderFailedState(p.bid, { at: entry.at, error: outcome.error, unknown: outcome.unknown }, entry.threadId);
+    return !!(await setPartyBid(partyId, next));
+  });
+}
+
+/** A send that failed before any thread existed: stamp the failure on the bidder, nothing else. */
+export async function markBidderSendFailed(quoteId: string, partyId: string, f: { at: number; error: string; unknown?: boolean }): Promise<boolean> {
+  return withQuoteRowLock(quoteId, async () => {
+    const p = await bidderOnQuote(quoteId, partyId);
+    return p ? !!(await setPartyBid(partyId, bidderFailedState(p.bid, f))) : false;
+  });
+}
+
+/** One more open of this bidder's link. Counts on the party only — never Quote.shareOpens, never patchQuote. */
+export async function recordBidderOpen(quoteId: string, partyId: string, now: number): Promise<boolean> {
+  return withQuoteRowLock(quoteId, async () => {
+    const p = await bidderOnQuote(quoteId, partyId);
+    if (!p) return false;
+    const opens = nextBidderOpens(p.bid.opens, now);
+    return opens ? !!(await setPartyBid(partyId, { ...p.bid, opens })) : false;
   });
 }

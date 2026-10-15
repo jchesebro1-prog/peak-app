@@ -39,11 +39,12 @@ import { addQuoteRevision, buildQuote, get as getQuote, revisionDocFields, setSt
 import { getProjectByQuote } from "../src/lib/stores/projects";
 import { autoTaskId } from "../src/lib/stores/tasks";
 import { addParty, listFor, setPartyBid, setPartyContact } from "../src/lib/stores/parties";
-import { awardedRecipient, documentAddressee, touchAwardedAddressee } from "../src/lib/parties/addressee-server";
+import { awardedRecipient, bidderRecipient, documentAddressee, touchAwardedAddressee } from "../src/lib/parties/addressee-server";
 import { renderBidderPdf } from "../src/lib/quote-pdf/bidder-pdf-server";
 import { signPrintToken, verifyPrintToken } from "../src/lib/quote-pdf/token";
 import { quoteDocumentDataFor } from "../src/lib/quote-pdf/quote-document-data";
-import { addBidder, awardBid, listBidders, markSubmitted, setBidDetails, undoAward, updateBidder } from "../src/lib/stores/bids";
+import { addBidder, awardBid, listBidders, markBidderSendFailed, markSubmitted, recordBidderOpen, recordBidderSend, setBidDetails, undoAward, updateBidder } from "../src/lib/stores/bids";
+import { recordEstimateEmail } from "../src/lib/stores/quotes";
 
 const T1 = Date.UTC(2026, 9, 1);
 const B = (over: Partial<BidderState> = {}): BidderState => ({ ...newBidderState("email"), ...over });
@@ -298,6 +299,10 @@ export async function bidSendChecks(ok: Ok) {
   ok(addendaSinceRow({ bid: live([1, 2]), revisions: [fr(1, [1])] }, B({ revSent: null })).length === 0, "bid-send: never sent → no addenda since");
   const nb = { bid: { dueAt: null, awardedPartyId: null, addenda: [{ no: 3, receivedAt: 50, note: "" }] }, revisions: [fr(1, null)] };
   ok(addendaSinceRow(nb, B({ revSent: 1, sentAt: 40 })).join() === "3" && addendaSinceRow(nb, B({ revSent: 1, sentAt: 60 })).length === 0, "bid-send: fallback by receivedAt vs sentAt");
+  const dirty = { bid: { dueAt: null, awardedPartyId: null, addenda: [null, { no: 4, receivedAt: "x" }, { no: 3, receivedAt: 50, note: "" }] }, revisions: [fr(1, null)] };
+  let dthrew = false, dres = "";
+  try { dres = addendaSinceRow(dirty as never, B({ revSent: 1, sentAt: 40 })).join(); } catch { dthrew = true; }
+  ok(!dthrew && dres === "3", "bid-send: fallback skips malformed addenda entries");
   ok(addendaAfterLatestSend({ bid: live([1, 2]), revisions: [fr(1, [1])] }).join() === "2", "bid-send: addenda after latest send");
   ok(addendaAfterLatestSend({ bid: live([1, 2]), revisions: [] }).length === 0 && addendaAfterLatestSend({ bid: live([1, 2]), revisions: [fr(1, null)] }).length === 0, "bid-send: no sent revision / no frozen bid → none");
   const base = "Bid — Gym (EST-1042)";
@@ -599,6 +604,77 @@ export async function bidDbChecks(ok: Ok) {
     try { await regAll(); } catch {}
     await dropFixtures(348);
     await dropBidIdentityFixtures();
+  }
+}
+
+const E_FIX = { own: fixtureId(348, "eown"), gc1: fixtureId(348, "egc1"), gc2: fixtureId(348, "egc2"), ct1: fixtureId(348, "ect1"), ct2: fixtureId(348, "ect2") };
+async function dropBidSendIdentityFixtures() {
+  const db = await getDb();
+  await db.delete(contactEmails).where(like(contactEmails.contactId, "TEST348:e%"));
+  await db.delete(contactsTable).where(like(contactsTable.id, "TEST348:e%"));
+  await db.delete(companies).where(like(companies.id, "TEST348:e%"));
+}
+
+/** #348 2b-ii task 3 — the bidder send / failure / open writers and the bidder recipient (DB). */
+export async function bidSendDbChecks(ok: Ok) {
+  const { own, gc1, gc2, ct1, ct2 } = E_FIX;
+  const eq = fixtureId(348, "eq");
+  const regAll = async () => { for (const p of await listFor("quote", eq)) registerFixture("record_parties", p.id); };
+  try {
+    await dropBidSendIdentityFixtures();
+    await saveCompany({ id: own, name: "Send Owner", type: "customer", lifecycle: "active", deleted: false });
+    await saveCompany({ id: gc1, name: "Send GC One", type: "customer", lifecycle: "active", deleted: false });
+    await saveCompany({ id: gc2, name: "Send GC Two", type: "customer", lifecycle: "active", deleted: false });
+    await saveContact({ id: ct1, firstName: "Gee", lastName: "Ceeone", homeCompanyId: gc1 });
+    await setEmails(ct1, [{ value: "gee@e.test", label: "work", isPrimary: true }] as never);
+    await saveContact({ id: ct2, firstName: "Pri", lastName: "Mary", homeCompanyId: gc2, isPrimary: true });
+    const NOW = Date.now();
+    await createFixture("quotes", buildQuote(eq, { name: "Send quote", customer: "Send Owner", customerId: own, value: 1000 } as never, "system", null, NOW) as never);
+    const a1 = await addBidder({ quoteId: eq, companyId: gc1, contactId: ct1, role: "gc" }, "u");
+    const a2 = await addBidder({ quoteId: eq, companyId: gc2, role: "gc" }, "u");
+    const a3 = await addBidder({ quoteId: eq, companyId: gc1, role: "ec", submitVia: "website" }, "u");
+    await regAll();
+    if (!a1.ok || !a2.ok || !a3.ok) throw new Error("send bidders missing");
+    const g1 = a1.party.id, g2 = a2.party.id, g3 = a3.party.id;
+    const bid = async (id: string) => (await listBidders(eq)).find((b) => b.id === id)?.bid;
+
+    const r1 = await bidderRecipient(a1.party), r2 = await bidderRecipient(a2.party);
+    ok(r1.contactId === ct1 && r1.email === "gee@e.test" && r1.firstName === "Gee", "send db: bidderRecipient → the party's contact, its first email, first name");
+    ok(r2.contactId === ct2 && r2.email === "", "send db: bidderRecipient → the company's primary contact; no email → \"\"");
+
+    const T = Date.UTC(2026, 9, 20, 15, 0);
+    const u0 = (await getQuote(eq))?.updatedAt;
+    const s1 = await recordBidderSend(eq, g1, { threadId: "C-e1", rev: 1, at: T, by: "Test", to: "gee@e.test" }, { kind: "sent" }, "u1");
+    const b1 = await bid(g1), qa = await getQuote(eq);
+    ok(s1 === true && b1?.revSent === 1 && b1.sentAt === T && b1.sentBy === "u1" && b1.threadId === "C-e1" && b1.failed === null, "send db: a sent bidder stamps revSent / sentAt / sentBy / thread, no failure");
+    const em = qa?.estimateEmails?.at(-1) as Record<string, unknown> | undefined; // jsonb reorders keys: compare by value
+    ok(!!em && Object.keys(em).length === 6 && em.threadId === "C-e1" && em.rev === 1 && em.at === T && em.by === "Test" && em.to === "gee@e.test" && em.partyId === g1, "send db: the estimate email remembers the bidder");
+    ok(qa?.updatedAt === u0, "send db: recording a bidder send doesn't bump updatedAt");
+
+    const s2 = await recordBidderSend(eq, g2, { threadId: "C-e2", rev: 1, at: T, by: "Test", to: "x@e.test" }, { kind: "failed", error: "Gmail didn\u2019t answer\u2026", unknown: true }, "u1");
+    const b2 = await bid(g2);
+    ok(s2 === true && b2?.failed?.unknown === true && b2.revSent == null && b2.threadId === "C-e2", "send db: an unknown failure keeps the thread, no revSent, unknown flag");
+
+    const f3 = await markBidderSendFailed(eq, g3, { at: T, error: "x" });
+    ok(f3 === true && (await bid(g3))?.failed?.error === "x", "send db: markBidderSendFailed stamps the failure");
+    const before1 = JSON.stringify(await bid(g1));
+    const fOther = await markBidderSendFailed(fixtureId(348, "eq2"), g1, { at: T, error: "nope" });
+    ok(fOther === false && JSON.stringify(await bid(g1)) === before1, "send db: another quote's id can't write a bidder's failure");
+    ok((await recordBidderSend(fixtureId(348, "eq2"), g1, { threadId: "C-ex", rev: 1, at: T, by: "x", to: "y" }, { kind: "sent" }, "u")) === false && !(await getQuote(eq))?.estimateEmails?.some((e) => e.threadId === "C-ex"), "send db: a party of another quote writes nothing");
+
+    await recordBidderOpen(eq, g1, T);
+    await recordBidderOpen(eq, g1, T + 5);
+    const qo = await getQuote(eq);
+    ok((await bid(g1))?.opens?.count === 2 && (await bid(g1))?.opens?.lastAt === T + 5 && qo?.shareOpens === undefined && qo?.updatedAt === u0, "send db: bidder opens count on the party, never on the quote");
+    ok((await recordBidderOpen(eq, g1, -1)) === false, "send db: a bad open time writes nothing");
+
+    await recordEstimateEmail(eq, { threadId: "C-e3", rev: 1, at: T, by: "x", to: "y", partyId: "nope" });
+    const e3 = (await getQuote(eq))?.estimateEmails?.find((e) => e.threadId === "C-e3");
+    ok(!!e3 && !("partyId" in e3), "send db: a malformed partyId isn't stored");
+  } finally {
+    try { await regAll(); } catch {}
+    await dropFixtures(348);
+    await dropBidSendIdentityFixtures();
   }
 }
 

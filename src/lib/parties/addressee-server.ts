@@ -26,6 +26,15 @@ export async function addresseeContact(party: Pick<Party, "contactId" | "company
   return (await getContact(party.contactId)) ?? (await contactsForCompany(party.companyId)).find((c) => c.isPrimary) ?? null;
 }
 
+/** #348 2b-ii — who an email to this bidder goes to: the addressee contact and that contact's first email ("" when none). */
+export async function bidderRecipient(
+  party: Pick<Party, "contactId" | "companyId">
+): Promise<{ contactId: string | null; name: string; firstName: string; email: string }> {
+  const contact = await addresseeContact(party);
+  const email = contact ? ((await emailsFor(contact.id))[0]?.email ?? "").trim() : "";
+  return { contactId: contact?.id ?? null, name: contact ? displayName(contact) : "", firstName: (contact?.firstName || "").trim(), email };
+}
+
 /**
  * #348 2b-i — Send & track's default recipient once a bidder is awarded: the awarded bidder's addressee contact
  * (addresseeContact) and that contact's primary email. null when nothing is awarded (or the awarded row / company
@@ -37,9 +46,8 @@ export async function awardedRecipient(
 ): Promise<{ partyId: string; contactId: string | null; name: string; firstName: string; email: string } | null> {
   const party = await bidderPartyFor(q.id, q.bid?.awardedPartyId ?? null);
   if (!party || !(await getCompany(party.companyId))) return null;
-  const contact = await addresseeContact(party);
-  const email = contact ? ((await emailsFor(contact.id))[0]?.email ?? "").trim() : "";
-  return { partyId: party.id, contactId: contact?.id ?? null, name: contact ? displayName(contact) : "", firstName: (contact?.firstName || "").trim(), email };
+  const r = await bidderRecipient(party);
+  return { partyId: party.id, ...r };
 }
 
 /**
