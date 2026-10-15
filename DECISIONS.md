@@ -13065,3 +13065,7 @@ An acknowledgement doesn't re-send anything. To get it to a bidder: move the est
 ## D1096. Local delivery stamps sent (#348 slice 2b-ii, 2026-10-15)
 
 With Gmail not connected, a bidder send stamps the row sent exactly as the composer does, and the walk summary says the delivery was local.
+
+## D1097. Split systems into a new estimate reuses Move system (#348 slice 3, 2026-10-15)
+
+Move system → New estimate is the split: one system per move (move more into the new estimate afterwards with Move → existing). The new estimate joins the source's lead (live leads only, via `leadIdForCreate`; the DB numbers it `-N`) and inherits the source's non-bidder companies (a quote → quote carry skips bid rows). Moving into an existing estimate copies nothing. An unsaved estimate seeded from a lead doesn't pass its lead on a split: only the stored source quote is read, and a failed read just skips the carry.

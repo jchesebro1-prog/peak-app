@@ -1416,7 +1416,7 @@ See `.env.example`.
     list and the pick lists in `field-lists.ts`, tell the reps older surveys
     ask for Scope first, send the CW Elevation and line set schedule sheets,
     try a real assessment end to end. Punch item #344.
-62. 🚧 **Estimate parties — slices 1, 2a, 2b-i + 2b-ii** (#348, D1058–D1062, D1074–D1096) — Jeff, Oct 14: an
+62. 🚧 **Estimate parties — slices 1, 2a, 2b-i, 2b-ii + 3** (#348, D1058–D1062, D1074–D1097) — Jeff, Oct 14: an
     estimate can name more than one company. Slice 1 is the parties core: a
     `record_parties` doc collection (migration 0041; id `pty_` + sha1 of
     record type, record id, company and role) with roles owner · gc · ec ·
@@ -1490,8 +1490,11 @@ See `.env.example`.
     (`opens`, never `Quote.shareOpens`). Bidder revisions are sent revisions,
     a revised bid gets an "(Addendum N)" subject, and Mark submitted stays for
     website rows. Open for Jeff: owner Rewards line on bidder copies, the shared
-    response budget, addendum acknowledgement after a send. Remaining: slices
-    3–6.
+    response budget, addendum acknowledgement after a send.
+    ✅ Slice 3 (D1097, Oct 15) — split systems: Move system → New estimate
+    (one system per move) puts the new estimate on the source's live lead
+    and copies the source's non-bidder companies; Move → existing copies
+    nothing. Remaining: slices 4–6 (vendors, Read the PDF, portal + reports).
 
 63. ✅ **Mailbox identity** (#349, D1063–D1073) — mailbox ownership follows the user's id (`CommThread.mailboxOwnerId`; one rule `ownsMailbox`, stamp → Gmail key → a name only one user holds, else nobody; `ownMailboxCond` in SQL; viewers from `src/lib/mailbox-viewer.ts`), assignments carry `assignedToId`, creators refuse a blank owner, legacy threads stamp lazily in write guards and via `npm run comms:stamp-owners` (Jeff-gated prod run; shared names get the `"unresolved"` tombstone), a rename or new hire never moves mail (`src/lib/mailbox-names.ts`), and Settings → Team refuses duplicate names. Punch item #349.
 
