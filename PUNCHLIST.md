@@ -12379,4 +12379,29 @@ Jeff (Oct 14) chose "My real Gmail labels" for the #346 Labels card: pick from y
   - Archive answers "Couldn't update — try again" when the skip keeps conflicting.
   - A thread 404 reads "no longer in Gmail".
   - The brief's live counts read only your mailbox.
-- User display names are not unique (only email is). Two active users with the same name would share each other's mailbox ownership (#341's `visibleTo` matches names). Worth a uniqueness check in Settings → Team.
+- User display names are not unique (only email is). Two active users with the same name would share each other's mailbox ownership (#341's `visibleTo` matches names). Worth a uniqueness check in Settings → Team. → Done in #349 (ownership by id, unique names).
+
+## 349. Mailbox ownership follows the signed-in user's identity, not their display name — DONE 2026-10-15 on `worktree-assist-layer` (D1063–D1071)
+
+**Asked (Jeff, 2026-10-14):** "ultimately that should all be linked to the email address so you can't view a different mailbox that isn't tied to your email." Also: Settings → Team should block duplicate display names. Before this, #341's `visibleTo` and every mailbox check compared `mailboxUser` — a display name — so two teammates with the same name (or several "New user" invites) owned each other's personal mail. No migration, no env var.
+
+**Done:**
+- **Owner id on threads:** `CommThread.mailboxOwnerId` (the owner's `users.id`, 1:1 with their unique email) beside the `mailboxUser` display name, written by every creator — Inbox compose / draft / Log call or meeting, renewal and estimate emails, the assessment report email, the Gmail import (the account's user) and `moveTo`. A personal thread with a blank or missing owner is refused (`NO_OWNER_ERROR`); `DEFAULT_USER` is display-only (D1063, D1067, D1068).
+- **One rule:** `ownsMailbox(t, me)` — the owner id, else the Gmail key (`personal:<id>`), else a legacy name only one user (any status) holds; a shared name owns nothing. Its SQL twin `ownMailboxCond` feeds ⌘K, Inbox search, Organize and Suggest estimate. Every mailbox check switched: the reader, folders and counts, the action guards, Organize, the brief, triage, ⌘K, the company page and feed, Ask, resweeps, Draft reply's style examples, the #347 labels, the Gmail bridge's sending account and Send & track (D1063, D1064, D1068, D1069).
+- **Assignments by id:** `assignedToId` beside `assignedTo`; pickers still send a name, turned into exactly one teammate or refused (D1066).
+- **Lazy stamp:** a legacy thread is stamped with its owner the first time its owner acts on it (the Inbox / Organize write guards, a key-level compare-and-set) — never on a page view (D1065).
+- **`npm run comms:stamp-owners`:** a one-time backfill — dry run by default, `--apply`, `--yes` for a hosted DB, explicit target only; it lists the threads it can't resolve and leaves them owned by nobody (D1071).
+- **Settings → Team:** add and rename refuse a blank name or one another teammate (any status) holds, case- and whitespace-insensitive, with a clear error; duplicates already on the team get a "Duplicate name" chip and a header count (D1070).
+- **Tests:** `npm run test:thread-visibility` — two real users sharing a name see nothing of each other's in the reader list, ⌘K, the company page, Organize, Ask, the action guards and assignments; the owner id wins over the name; Gmail-key and unique-name legacy threads resolve, a shared-name one is nobody's; listings never stamp, actions do; the stamp plan and its idempotent apply; creators refuse a blank owner; the Team-name rules; source pins. test:inbox-org, test:brief, test:assist and test:specs fixtures/pins follow the identity rule.
+
+**Remaining (Jeff-gated):**
+1. Back up production: `DATABASE_URL=… npm run db:export`.
+2. `DATABASE_URL=… npm run comms:stamp-owners` (dry run) — review the "unresolved" lines: each is an older in-app thread whose owner name is shared or unknown. Rename any duplicate teammates in Settings → Team first (the Team list flags them), then re-run the dry run.
+3. `DATABASE_URL=… npm run comms:stamp-owners -- --apply --yes`.
+The app is safe before step 3: ownership already resolves the same way lazily (Gmail key, else a unique name), and each owner's next action stamps the thread.
+4. Check Settings → Team for the "⚠ N share a name" chip (several "New user" invites would show) and rename them.
+
+**Known follow-ups:**
+- Other records still name people by display name — tasks (`assigneeName`), Queue assignments, site visits, lead / quote owners, notification prefs (incl. Keep threads in my inbox). Unique team names now keep those unambiguous; moving them to ids is separate work.
+- A stamp can be dropped by a concurrent whole-document write that read the thread just before it; harmless (the fallback resolves the same owner) and re-stamped on the next action.
+- `moveTo` keeps a thread's old `gmailAccountKey`; the owner id wins, but its Gmail thread stays in the old account.

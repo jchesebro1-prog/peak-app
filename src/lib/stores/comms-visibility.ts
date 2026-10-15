@@ -14,7 +14,7 @@
  *   - unstamped, its `gmailAccountKey` (the Gmail bridge's stamp) is my
  *     personal key (`personal:<my id>`), or
  *   - unstamped and key-less (a legacy local-only thread: an in-app draft, a
- *     logged call), its `mailboxUser` name is mine AND no other active user
+ *     logged call), its `mailboxUser` name is mine AND no other user (any status)
  *     holds that name (`nameUnique`). A shared name owns nothing — fail
  *     closed. Such threads are stamped lazily on the owner's next write
  *     (`stampMailboxOwner` in comms.ts) and by `npm run comms:stamp-owners`.
@@ -62,18 +62,18 @@ type VisibilityFields = MailboxFields & LinkFields & AssignFields & Partial<Pick
 
 /** #349 — who is looking: the signed-in user's id (the identity every
  *  ownership check keys on), their display name, and whether that name is
- *  held by them alone among active users (the only case a legacy
+ *  held by them alone among all users, archived included (the only case a legacy
  *  name-stamped thread or assignment can be theirs). */
 export type MailboxViewer = { id: string; name: string; nameUnique: boolean };
 
-/** A roster entry for `viewerFrom` / `resolveMailboxOwnerId` — the ACTIVE users. */
+/** A roster entry for `viewerFrom` / `resolveMailboxOwnerId` — every user, any status (mailbox-viewer.ts mailboxRoster). */
 export type RosterEntry = { id: string; name: string };
 
 const filled = (v: unknown): v is string => typeof v === "string" && v !== "";
 const fold = (v: unknown): string => (typeof v === "string" ? v.trim().toLowerCase() : "");
 
-/** The viewer for `u`, given the ACTIVE roster: `nameUnique` when no OTHER
- *  active user's name folds (trimmed, case-insensitive) to `u`'s. */
+/** The viewer for `u`, given the roster (every user): `nameUnique` when no OTHER
+ *  user's name (any status) folds (trimmed, case-insensitive) to `u`'s. */
 export function viewerFrom(u: { id: string; name: string }, roster: readonly RosterEntry[]): MailboxViewer {
   const id = typeof u?.id === "string" ? u.id : "";
   const name = typeof u?.name === "string" ? u.name : "";
@@ -82,8 +82,8 @@ export function viewerFrom(u: { id: string; name: string }, roster: readonly Ros
 }
 
 /** #349 — the users.id that owns a personal-mailbox thread, from an
- *  already-loaded ACTIVE roster: the stamp, else the Gmail account key, else
- *  the legacy name when exactly one active user holds it (exact spelling).
+ *  already-loaded roster (every user): the stamp, else the Gmail account key, else
+ *  the legacy name when exactly one user (any status) holds it (exact spelling).
  *  null = a shared-box thread or nobody (an ambiguous or unknown name). The
  *  same answer `ownsMailbox` gives each roster member. */
 export function resolveMailboxOwnerId(t: MailboxFields, roster: readonly RosterEntry[]): string | null {
@@ -140,7 +140,7 @@ export function isThreadLinked(t: LinkFields): boolean {
 
 /** Assigned to `me` (#349): `assignedToId` when stamped; else the legacy
  *  `assignedTo` name (trimmed, case-insensitive) only while `me`'s name is
- *  unique among active users. "" never matches. */
+ *  unique among all users. "" never matches. */
 export function isAssignedTo(t: AssignFields, me: MailboxViewer): boolean {
   if (!me || !filled(me.id)) return false;
   if (filled(t.assignedToId)) return t.assignedToId === me.id;

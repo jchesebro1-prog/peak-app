@@ -12848,3 +12848,44 @@ Before #347, the history import (`interpretLabelEvents`) dropped any label event
 - Both the card's write and the import's write are compare-and-set on the thread's `messages` key, re-read on conflict, so a message appended meanwhile is never lost. Labels live per message, so the CAS covers the whole array.
 
 Trade-off: a Gmail-side change to the same label within 2 minutes of the card changing it waits for that label's next event.
+
+## D1063. Mailbox ownership follows the user's id, not their display name (#349, 2026-10-15)
+
+Jeff (Oct 14): "ultimately that should all be linked to the email address so you can't view a different mailbox that isn't tied to your email." A user's `users.id` is 1:1 with their unique email, so it is the identity every mailbox check keys on. `CommThread` gains an optional `mailboxOwnerId` (JSONB, no migration); `mailboxUser` stays for display. One pure rule, `ownsMailbox(t, me)` (`comms-visibility.ts`, also exported as #341's `visibleTo`), where `me` is a `MailboxViewer` `{ id, name, nameUnique }` built on the server by `mailboxViewer()` (`src/lib/mailbox-viewer.ts`):
+- the thread's `mailboxOwnerId` is set → it must be my id;
+- else its `gmailAccountKey` is set → it must be `personalKey(my id)` (the bridge's `personal:<userId>` mapping);
+- else (a legacy local thread: an in-app draft, a logged call) its `mailboxUser` must equal my name exactly AND my name must be held by no other user (`nameUnique`). Otherwise nobody owns it — fail closed.
+
+`resolveMailboxOwnerId(t, roster)` gives the same answer as an id (the bridge, Organize's `ownerOf`, the stamp script). `ownMailboxCond(me)` is the rule as a doc-store `DocCond` (a new `empty: "text"` condition; every value a bound parameter), used by ⌘K's `canSeeThreadCond`, Inbox search, the Organize view and counts and the lead-thread read for Suggest estimate. Every check switched: `isOwnThread`, `canSeeThread`, `canOpenThread`, `inBox` / folder counts / unread / needs-reply / calls / flagged, `threadsIn`, `searchThreads`, `findDraftByLink` (renewal and estimate drafts), the inbox action guards, Organize (`myThread`, To file, approve-all, archive-after-reply, the cleanup run), the brief's counts and draft queue, triage (email feed, liveness, Done / Reassign, admin redaction), ⌘K, the company page and feed, Ask (`loadThreadReadable` / `loadThreadFor` / `threadRef`), resweep scopes (`ResweepScope.owner`), Draft reply's style examples (my own sent mail by id), the #347 labels (through `ownThread`) and the Send & track reply / Mark read (D1069).
+
+## D1064. A name is "unique" only if no other user of any status holds it (#349, 2026-10-15)
+
+The brief said "exactly one active user". `mailboxRoster()` and the Organize context's `nameRoster` count every user — archived and removed included — trimmed and case-insensitive. Reason: an archived former teammate's legacy threads must not pass to a new teammate who happens to take the same name; with every status counted that case fails closed. Archived users can't sign in, so nobody loses access they could use. `actorByName` (turning a picked name into an assignee) still picks among active users only, and only when exactly one holds the name.
+
+## D1065. Legacy threads are stamped lazily — in write guards only (#349, 2026-10-15)
+
+When a thread resolves by Gmail key or by unique name inside an Inbox or Organize write guard (`ownThread` / `ownThreadIds` in `inbox-thread-guard.ts`, apply.ts `myThread`), `stampMailboxOwner` writes `mailboxOwnerId` with a key-level compare-and-set (`casDocKey`, lands only while the key is absent; never a whole-doc rewrite). Nothing stamps on a page render, a listing, ⌘K, the company page, Ask, or Assist's `loadThreadFor` (it is also reached from the brief's background draft queue, so it stays read-only). A concurrent whole-document `patchDoc` that read the thread before the stamp can drop it again; that is harmless — the lazy fallback still resolves the same owner and the next action re-stamps.
+
+## D1066. Assignment by id; pickers still send names (#349, 2026-10-15)
+
+New assignments store `assignedToId` beside the `assignedTo` display name (`assign(threadId, { id, name } | null)`, `create`'s `assignee`). `isAssignedTo` (and `canSeeThread`'s assigned branch, triage Done / Reassign, the brief's court-me rule, the bell) uses the id when present, else the legacy name only while the viewer's name is unique. The Inbox Owner select, Log call's Assign to, triage Reassign and Gmail `Peak/Assigned/<first name>` labels still pick by name; the server turns the pick into an identity (`actorByName`, or the label's existing exactly-one rule) and refuses an ambiguous pick rather than guessing.
+
+## D1067. No fallback owner for a personal thread (#349, 2026-10-15)
+
+`create`, `compose`, `saveDraft` and `moveTo(…, "personal")` take an explicit `owner: { id, name }` and throw `NO_OWNER_ERROR` for a blank or missing one; `DEFAULT_USER` is now display-only (an author, a box label). Callers updated: Inbox compose / save draft / Log call or meeting, renewal outreach (`flameRenewalOutreach` / `inspectionRenewalOutreach` / `upsertRenewalDraft` take the acting user), the estimate email (`ThreadSpec.mailboxOwnerId`), the assessment report email. The simulated "Get mail" item goes to a shared box with `assignee: null`. No cron creates a personal thread except the Gmail import, whose owner is the account's user (D1068). The brief nudge and Ask's `?compose=ask` only prefill the composer, whose save carries the signed-in owner.
+
+## D1068. The Gmail bridge works by identity (#349, 2026-10-15)
+
+A newly imported thread on a personal key is stamped `mailboxOwnerId = userIdOfKey(key)`; an existing thread a message attaches to gets the same stamp when it has none. The account a thread sends from, reconciles against and re-derives under (`keyForThreadWith`) now comes from `resolveMailboxOwnerId` — the stamp, else the thread's own key, else a name exactly one user holds — instead of the first user whose name matched, so mail can never leave from a namesake's Gmail. An inbound message attaches to an existing thread only within its own account (Gmail thread ids are per-account); before, any thread anywhere with the same Gmail thread id absorbed it.
+
+## D1069. Send & track's reply and Mark read need the owner by identity (#349, 2026-10-15)
+
+`replyToEstimateEmail` and `markEstimateEmailRead` (and `trackEstimate`'s `canReply` / visible text for the owner) check `ownsMailbox` with a viewer built from the roster (`deps.roster`, now every user; the Lead estimator rule still filters active members). The actor is then the owner, so delivery is looked up for the actor's own id and the `userIdByName` dependency is gone. A raw thread with no `mailbox` field reads as personal (create's default).
+
+## D1070. Settings → Team names are unique (#349, 2026-10-15)
+
+`addUserAction` and `updateMemberAction` refuse a blank name ("Name is required.") or one another user — any status — already holds, compared trimmed, inner whitespace collapsed and case-insensitive (`src/lib/team-names.ts`), with an error naming the holder ("“Sam Mills” (archived) already has that name — …"). A rename that leaves the name unchanged never blocks the rest of the edit, even if that name is already a duplicate; a rename is stored with inner whitespace collapsed. The Team list shows a "Duplicate name" chip on each holder and a "⚠ N share a name" count in the header; the modal now surfaces a refused rename instead of hiding it behind the roles save, and "Remove" is gated on the id, not the name. The CSV team import (Import hub) already matches an existing member by name or email, so it can't add a duplicate except by a blank name ("New user") — left as is.
+
+## D1071. `npm run comms:stamp-owners` — a one-time, idempotent backfill (#349, 2026-10-15)
+
+`scripts/comms-stamp-owners.ts` over `src/lib/comms-owner-stamp.ts`: dry run by default, `--apply` writes, a hosted database also needs `--yes`, and the target must be explicit (`DATABASE_URL` or `PGLITE_PATH` in the command's own environment — the `geo:recheck-venues` pattern). It stamps an unstamped personal thread only when exactly one user already owns it by D1063's rule (by Gmail key, or a name exactly one user holds) and lists every other one as unresolved — "name held by more than one user", "no user has exactly this name" or "no owner name" — leaving it owned by nobody until the name is fixed in Settings → Team and the script re-run. Each write is a compare-and-set on the absent key, so a re-run (or a thread stamped meanwhile) writes nothing. The app is safe before it runs: the lazy fallback resolves the same owners.
