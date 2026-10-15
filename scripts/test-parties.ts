@@ -1,4 +1,4 @@
-/* #346 estimate parties — harness checks. `partyChecks` is pure; `partyDbChecks` needs the test DB.
+/* #348 estimate parties — harness checks. `partyChecks` is pure; `partyDbChecks` needs the test DB.
    Run the pure half alone with `npx tsx scripts/test-parties.ts`. */
 import { like, sql } from "drizzle-orm";
 import type { Ok } from "./test-inbox-org";
@@ -100,7 +100,7 @@ export async function partyDbChecks(ok: Ok) {
   try {
     await partyIdentityFixtures();
     const { co1, co2, ct1, ct2 } = PARTY_FIX;
-    const lead = fixtureId(346, "lead"), quote = fixtureId(346, "quote"), project = fixtureId(346, "project");
+    const lead = fixtureId(348, "lead"), quote = fixtureId(348, "quote"), project = fixtureId(348, "project");
 
     const id = partyId("lead", lead, co1, "owner");
     ok(/^pty_[0-9a-f]{16}$/.test(id) && id === partyId("lead", lead, co1, "owner") && id !== partyId("lead", lead, co1, "gc"), "parties db: deterministic id per (record, company, role)");
@@ -114,7 +114,7 @@ export async function partyDbChecks(ok: Ok) {
     ok(!own2.ok && own2.error === "This record already has an owner.", "parties db: second owner refused");
     const badCt = await addParty({ recordType: "lead", recordId: lead, companyId: co2, role: "gc", contactId: ct1 }, "u-test");
     ok(!badCt.ok && badCt.error === "That person isn't at this company.", "parties db: contact must belong to the company");
-    const noCo = await addParty({ recordType: "lead", recordId: lead, companyId: fixtureId(346, "nope"), role: "gc" }, "u-test");
+    const noCo = await addParty({ recordType: "lead", recordId: lead, companyId: fixtureId(348, "nope"), role: "gc" }, "u-test");
     ok(!noCo.ok && noCo.error === "That company doesn't exist.", "parties db: unknown company refused");
     let nonString: Awaited<ReturnType<typeof addParty>> | null = null;
     try {
@@ -150,7 +150,7 @@ export async function partyDbChecks(ok: Ok) {
     for (const p of await listFor("project", project)) registerFixture("record_parties", p.id);
     ok(toProj === 3, "parties db: quote→project copies every row");
 
-    const quote2 = fixtureId(346, "quote2");
+    const quote2 = fixtureId(348, "quote2");
     const o2 = await addParty({ recordType: "quote", recordId: quote2, companyId: co2, role: "owner" }, "u-test");
     ok(o2.ok, "parties db: owner on the one-owner copy target");
     if (o2.ok) registerFixture("record_parties", o2.party.id);
@@ -163,17 +163,17 @@ export async function partyDbChecks(ok: Ok) {
 
     const forCo1 = await listForCompany(co1);
     ok(forCo1.filter((p) => p.recordId === lead).length === 2 && forCo1.some((p) => p.recordType === "project"), "parties db: listForCompany spans records");
-    const many = await listForRecords("lead", [lead, fixtureId(346, "empty")]);
-    ok(many.get(lead)?.length === 4 && (many.get(fixtureId(346, "empty")) ?? []).length === 0, "parties db: listForRecords groups by record");
+    const many = await listForRecords("lead", [lead, fixtureId(348, "empty")]);
+    ok(many.get(lead)?.length === 4 && (many.get(fixtureId(348, "empty")) ?? []).length === 0, "parties db: listForRecords groups by record");
 
     ok(await removeParty(gcRow.id), "parties db: remove");
     ok(!(await listFor("lead", lead)).some((p) => p.id === gcRow.id), "parties db: removed row gone from lists");
     const revived = await addParty({ recordType: "lead", recordId: lead, companyId: co2, role: "gc" }, "u-test");
     ok(revived.ok && !revived.existed && revived.party.id === gcRow.id && revived.party.contactId === null, "parties db: re-adding a removed row revives it fresh");
-    ok(!(await removeParty(fixtureId(346, "missing"))), "parties db: removing an unknown id is false");
+    ok(!(await removeParty(fixtureId(348, "missing"))), "parties db: removing an unknown id is false");
 
     // carry estimate → project through createProjectFromQuote
-    const wonQ = fixtureId(346, "won");
+    const wonQ = fixtureId(348, "won");
     await createFixture("quotes", { ...buildQuote(wonQ, { name: "Party won", customer: "Party Co One", customerId: co1, value: 1000 }, "system", null, Date.now()), status: "won" } as never);
     const ownerOnWon = await addParty({ recordType: "quote", recordId: wonQ, companyId: co1, role: "owner" }, "u-test");
     if (ownerOnWon.ok) registerFixture("record_parties", ownerOnWon.party.id);
@@ -188,7 +188,7 @@ export async function partyDbChecks(ok: Ok) {
     }
 
     // lead → quote through leads.convert: owner carries, GC does not
-    const convLead = fixtureId(346, "convlead");
+    const convLead = fixtureId(348, "convlead");
     const NOW = Date.now();
     await createFixture("leads", { id: convLead, org: "Party Co One", contact: "Pat One", stage: "new", source: "web", customerId: co1, value: 0, activities: [], createdAt: NOW, updatedAt: NOW, lastActivityAt: NOW } as never);
     for (const [co, role] of [[co1, "owner"], [co2, "gc"]] as const) {
@@ -206,7 +206,7 @@ export async function partyDbChecks(ok: Ok) {
     }
 
     // a party row outlives its record: liveRecordsForCompany counts only records that still exist
-    const ghost = fixtureId(346, "ghost");
+    const ghost = fixtureId(348, "ghost");
     const gh = await addParty({ recordType: "quote", recordId: ghost, companyId: co1, role: "vendor" }, "u-test");
     ok(gh.ok, "parties db: a party row on a record id that doesn't exist can be written (the action layer checks the record)");
     if (gh.ok) registerFixture("record_parties", gh.party.id);
@@ -231,7 +231,7 @@ export async function partyDbChecks(ok: Ok) {
     let survived = false, threw = false;
     await withTransaction(async () => {
       try {
-        await withSavepoint(async () => { await (await getDb()).execute(sql`select * from no_such_table_346`); });
+        await withSavepoint(async () => { await (await getDb()).execute(sql`select * from no_such_table_348`); });
       } catch {
         threw = true;
       }
@@ -240,12 +240,12 @@ export async function partyDbChecks(ok: Ok) {
     });
     ok(threw && survived, "parties db: a SQL error inside withSavepoint rolls back to the savepoint, the outer transaction survives");
   } finally {
-    await dropFixtures(346);
+    await dropFixtures(348);
     await dropPartyIdentityFixtures();
   }
 }
 
-const PARTY_FIX = { co1: fixtureId(346, "co1"), co2: fixtureId(346, "co2"), ct1: fixtureId(346, "ct1"), ct2: fixtureId(346, "ct2") };
+const PARTY_FIX = { co1: fixtureId(348, "co1"), co2: fixtureId(348, "co2"), ct1: fixtureId(348, "ct1"), ct2: fixtureId(348, "ct2") };
 async function partyIdentityFixtures() {
   await dropPartyIdentityFixtures();
   await saveCompany({ id: PARTY_FIX.co1, name: "Party Co One", type: "customer", lifecycle: "active", deleted: false });
@@ -255,8 +255,8 @@ async function partyIdentityFixtures() {
 }
 async function dropPartyIdentityFixtures() {
   const db = await getDb();
-  await db.delete(contactsTable).where(like(contactsTable.id, "TEST346:%"));
-  await db.delete(companies).where(like(companies.id, "TEST346:%"));
+  await db.delete(contactsTable).where(like(contactsTable.id, "TEST348:%"));
+  await db.delete(companies).where(like(companies.id, "TEST348:%"));
 }
 
 if (process.argv[1]?.endsWith("test-parties.ts")) {

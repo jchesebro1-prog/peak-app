@@ -140,7 +140,7 @@ export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Run `fn` so a failure inside it can never poison the surrounding transaction (#346).
+ * Run `fn` so a failure inside it can never poison the surrounding transaction (#348).
  *
  * A SQL error inside a Postgres transaction aborts the WHOLE transaction — every later
  * statement fails with "current transaction is aborted" — so a JS `try/catch` around a

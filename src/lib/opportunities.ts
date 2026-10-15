@@ -48,7 +48,7 @@ export type OppLeadInput = {
   convertedCustomerId: string | null;
   convertedQuoteId: string | null;
   forecastAt: number | null;
-  /** #346 — the lead has ≥ 1 estimate (Quote.leadId). Its estimates ride the board instead, like a converted lead. */
+  /** #348 — the lead has ≥ 1 estimate (Quote.leadId). Its estimates ride the board instead, like a converted lead. */
   hasEstimates?: boolean;
 };
 
@@ -63,7 +63,7 @@ export type OppQuoteInput = {
   updatedAt: number;
   customerId: string | null;
   poReceivedAt: number | null;
-  /** #346 — Quote.leadId; lets a card inherit the forecast of a lead the board skips for hasEstimates. */
+  /** #348 — Quote.leadId; lets a card inherit the forecast of a lead the board skips for hasEstimates. */
   leadId?: string | null;
 };
 
@@ -130,7 +130,7 @@ export function canSetPoReceived(status: string): boolean {
 /* ---- the union ---- */
 
 /**
- * Build the merged board rows. A converted lead (non-null convertedQuoteId) or a lead with estimates (#346)
+ * Build the merged board rows. A converted lead (non-null convertedQuoteId) or a lead with estimates (#348)
  * is EXCLUDED — its quote carries the opportunity from there — but its
  * forecastAt is inherited onto that quote's card: by convertedQuoteId for a
  * converted lead, else by the quote's leadId for a lead skipped for its estimates. ALL quoteTypes ride the

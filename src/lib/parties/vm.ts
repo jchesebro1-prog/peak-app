@@ -1,4 +1,4 @@
-/* #346 — the browser-facing party view model (pure types; client components import these). */
+/* #348 — the browser-facing party view model (pure types; client components import these). */
 import type { PartyRole } from "./rules";
 
 export type PartyVM = {

@@ -12,7 +12,7 @@ import {
 } from "@/lib/parties/rules";
 
 /**
- * #346 — estimate parties (`record_parties`): the ONLY writer. One row per company in one role on a lead,
+ * #348 — estimate parties (`record_parties`): the ONLY writer. One row per company in one role on a lead,
  * quote or project. The id is derived from (recordType, recordId, companyId, role), so a second add of the same
  * row lands on the same id — uniqueness without a unique index. Removing soft-deletes; adding again revives the
  * row fresh (upsertDoc replaces the doc and clears `deleted`).

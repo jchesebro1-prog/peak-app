@@ -8,7 +8,7 @@ import { leadEstimatesTotal } from "@/lib/parties/rules";
 const money = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
 const STATUS: Record<string, string> = { draft: "Draft", sent: "Sent", won: "Won", lost: "Lost" };
 
-/** #346 — every estimate on this lead/opportunity with the estimates total (draft + sent + won). Nothing when none. */
+/** #348 — every estimate on this lead/opportunity with the estimates total (draft + sent + won). Nothing when none. */
 export async function LeadEstimates({ leadId }: { leadId: string }) {
   const quotes = (await listDocsByField<Quote>("quotes", "leadId", [leadId])).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   if (!quotes.length) return null;

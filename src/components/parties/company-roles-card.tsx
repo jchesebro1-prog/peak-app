@@ -12,7 +12,7 @@ const KIND: Record<Party["recordType"], string> = { lead: "Opportunity", quote: 
 
 type Row = { key: string; kind: string; number: string; name: string; roles: string; href: string; sort: number };
 
-/** #346 — every live lead / estimate / project this company is on, and in what role. Nothing when none. */
+/** #348 — every live lead / estimate / project this company is on, and in what role. Nothing when none. */
 export async function CompanyRolesCard({ companyId, style, headStyle }: { companyId: string; style?: CSSProperties; headStyle?: CSSProperties }) {
   const records = await liveRecordsForCompany(companyId);
   if (!records.length) return null;

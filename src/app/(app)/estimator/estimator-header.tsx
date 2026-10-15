@@ -204,7 +204,7 @@ export function EstimatorHeader({
                   {qdOpen ? "▴" : "▾"}
                 </span>
               </button>
-              {/* #346 — canApplyCredit is can("create") */}
+              {/* #348 — canApplyCredit is can("create") */}
               <PartiesChip quoteId={s.loadedId} canEdit={s.canApplyCredit} />
             </div>
           </div>

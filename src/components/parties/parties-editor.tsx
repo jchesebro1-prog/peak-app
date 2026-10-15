@@ -9,7 +9,7 @@ import { addPartyAction, companyContactsAction, removePartyAction, setPartyConta
 import CompanySearch from "./company-search";
 
 /**
- * #346 — the one parties editor: grouped by role, add (role → company → optional person → label for Other),
+ * #348 — the one parties editor: grouped by role, add (role → company → optional person → label for Other),
  * change person, remove. Used by the lead drawer, the project page and the Estimator's Parties dialog.
  * Remount with key={recordType + ":" + recordId} when the record changes — state is seeded from `initial` once.
  */

@@ -820,7 +820,7 @@ export async function convert(
   const numbered = await numberNewDoc("quotes", quote);
   const quoteId = quote.id;
 
-  // #346 — the converted quote starts with the lead's companies (not its GCs/ECs).
+  // #348 — the converted quote starts with the lead's companies (not its GCs/ECs).
   try {
     await withSavepoint(async () => {
       const { copyParties } = await import("./parties");

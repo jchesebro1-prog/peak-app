@@ -1,4 +1,4 @@
-/* #346 — estimate parties: the pure rules. Browser-safe (no node or store imports): client components read the
+/* #348 — estimate parties: the pure rules. Browser-safe (no node or store imports): client components read the
    roles and labels from here. The store (src/lib/stores/parties.ts) is the only writer and calls these. */
 
 export const PARTY_ROLES = ["owner", "gc", "ec", "architect", "consultant", "vendor", "other"] as const;

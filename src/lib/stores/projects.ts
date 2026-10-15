@@ -779,7 +779,7 @@ export async function createProjectFromQuote(
     if (!q || q.status !== "won" || isProjectExcludedQuoteType(q.quoteType)) return null;
     const p = await createProject(fromQuote(q, await loadPipelines()));
 
-    // #346 — the estimate's companies carry to the project once. Never allowed to undo the win:
+    // #348 — the estimate's companies carry to the project once. Never allowed to undo the win:
     // this runs inside setStatus's transaction (see quote-spawn.ts), where a SQL error would abort the
     // whole Postgres transaction past any JS catch — so the copy runs in a savepoint (rolled back alone)
     // and a failure is logged, not thrown.

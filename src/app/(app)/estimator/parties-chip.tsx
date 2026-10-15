@@ -5,7 +5,7 @@ import PartiesEditor from "@/components/parties/parties-editor";
 import { listPartiesAction } from "@/app/(app)/parties/actions";
 import type { PartyVM } from "@/lib/parties/vm";
 
-/** #346 — the Estimator header's Parties chip: "Parties · 3" opens a dialog with the shared editor. Disabled until saved. */
+/** #348 — the Estimator header's Parties chip: "Parties · 3" opens a dialog with the shared editor. Disabled until saved. */
 export default function PartiesChip({ quoteId, canEdit }: { quoteId: string | null; canEdit: boolean }) {
   const [parties, setParties] = useState<PartyVM[] | null>(null);
   const [open, setOpen] = useState(false);

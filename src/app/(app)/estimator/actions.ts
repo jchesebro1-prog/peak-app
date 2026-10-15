@@ -636,7 +636,7 @@ export async function saveQuoteAction(
             : "Could not create the quote — please try again.",
       };
     }
-    // #346 — a new estimate on a lead starts with the lead's companies (not its GCs/ECs — bidders are ticked per estimate).
+    // #348 — a new estimate on a lead starts with the lead's companies (not its GCs/ECs — bidders are ticked per estimate).
     if (leadId) {
       try {
         const { copyParties } = await import("@/lib/stores/parties");

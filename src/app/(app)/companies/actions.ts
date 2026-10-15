@@ -147,7 +147,7 @@ export async function deleteCustomerAction(
   const user = await requireUser();
   if (!can("create", user.roles)) return { ok: false as const, error: "You can't delete companies." };
   if (!id) return { ok: false as const, error: "Missing company id." };
-  // #346 — a company that is an owner / GC / EC / architect / vendor somewhere can't silently vanish from those records.
+  // #348 — a company that is an owner / GC / EC / architect / vendor somewhere can't silently vanish from those records.
   const refusal = deleteRefusal((await getCompany(id))?.name || id, (await liveRecordsForCompany(id)).length);
   if (refusal) return { ok: false as const, error: refusal };
   await remove(id);

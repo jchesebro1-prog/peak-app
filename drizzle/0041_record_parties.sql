@@ -1,4 +1,4 @@
--- Estimate parties (#346, slice 1) — one doc collection: record_parties.
+-- Estimate parties (#348, slice 1) — one doc collection: record_parties.
 --
 --  - One row per company in one role on a lead / quote / project; id pty_<16 hex> =
 --    sha1(recordType, recordId, companyId, role), so (record, company, role) is unique by id.

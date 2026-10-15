@@ -1,6 +1,6 @@
-# Estimate parties, bids & vendor links — design (#346)
+# Estimate parties, bids & vendor links — design (#348)
 
-**Date:** 2026-10-14 · **Punch item:** #346 · **Decisions:** D1052+ · **Migration:** 0041
+**Date:** 2026-10-14 · **Punch item:** #348 · **Decisions:** D1058+ · **Migration:** 0041
 **Status:** approved in brainstorm (Jeff, 2026-10-14) — every section confirmed.
 
 ## 1. Problem
@@ -138,7 +138,7 @@ with ≥ 1 estimate (`Quote.leadId`) is **excluded from the board** — like a
 converted lead — and its estimates carry the value (no double count). The lead
 drawer shows an *Estimates* list with the total of its draft/sent/won
 estimates (lost excluded). Pure `leadEstimatesTotal(quotes)` and
-`leadIdsWithEstimates(quotes)` (D1054).
+`leadIdsWithEstimates(quotes)` (D1060).
 
 ### 3.7 Vendors
 

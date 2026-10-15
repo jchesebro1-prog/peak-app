@@ -131,7 +131,7 @@ export default async function OpportunitiesPage({
   };
 
   /* ---- union + filters + totals ---- */
-  // #346 — a lead whose estimates are on the board is not counted twice.
+  // #348 — a lead whose estimates are on the board is not counted twice.
   const withEstimates = leadIdsWithEstimates(quotes);
   const rows = buildOpportunities(
     leads.map((l) => ({

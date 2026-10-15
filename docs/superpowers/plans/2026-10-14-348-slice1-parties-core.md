@@ -1,4 +1,4 @@
-# #346 Slice 1 — Parties core Implementation Plan
+# #348 Slice 1 — Parties core Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Worktree: `/Users/sm/Downloads/peak-app/.claude/worktrees/parties`, branch `feat/346-estimate-parties`. Run every command from there. **Never `git stash`** (shared across worktrees) — commit instead.
+- Worktree: `/Users/sm/Downloads/peak-app/.claude/worktrees/parties`, branch `feat/348-estimate-parties`. Run every command from there. **Never `git stash`** (shared across worktrees) — commit instead.
 - Node: `export PATH="$HOME/.local/node/bin:$PATH"` if `node` is missing.
 - Never open `.data/pglite` from a script while a dev server may be running; `test:specs` uses its own temp datadir (fine).
 - Roles (exact keys, in this display order): `owner`, `gc`, `ec`, `architect`, `consultant`, `vendor`, `other`.
@@ -27,7 +27,7 @@
 - Opportunity board: a lead with ≥ 1 live estimate (`Quote.leadId === lead.id`) is excluded from the board (its estimates carry the value), the same way a converted lead already is.
 - Company delete is refused while the company is on any live party row: error text `"<Company> is linked to N record(s) (leads, estimates or projects) — remove it from them first."`
 - Client components must never import `src/lib/stores/*` or anything that imports `node:crypto`/`postgres` (it breaks `next build` only).
-- Decisions: D1052–D1056 (recompute from `origin/main` right before writing docs; if taken, use the next free numbers). Punch item **#346**. Migration **0041**.
+- Decisions: D1058–D1062 (recompute from `origin/main` right before writing docs; if taken, use the next free numbers). Punch item **#348**. Migration **0041**.
 - Gates for every task that touches code: `npx tsc --noEmit` clean; `npm run test:specs` all PASS; final task adds `npm run test:smoke`, `npx eslint` on touched files, and `npm run build`.
 
 ---
@@ -91,7 +91,7 @@
 Create `scripts/test-parties.ts`:
 
 ```ts
-/* #346 estimate parties — harness checks. `partyChecks` is pure; `partyDbChecks` needs the test DB.
+/* #348 estimate parties — harness checks. `partyChecks` is pure; `partyDbChecks` needs the test DB.
    Run the pure half alone with `npx tsx scripts/test-parties.ts`. */
 import type { Ok } from "./test-inbox-org";
 import {
@@ -183,7 +183,7 @@ Expected: FAIL — `Cannot find module '../src/lib/parties/rules'`.
 Create `src/lib/parties/rules.ts`:
 
 ```ts
-/* #346 — estimate parties: the pure rules. Browser-safe (no node or store imports): client components read the
+/* #348 — estimate parties: the pure rules. Browser-safe (no node or store imports): client components read the
    roles and labels from here. The store (src/lib/stores/parties.ts) is the only writer and calls these. */
 
 export const PARTY_ROLES = ["owner", "gc", "ec", "architect", "consultant", "vendor", "other"] as const;
@@ -339,7 +339,7 @@ Then: `npx tsc --noEmit` — expected: no output.
 
 ```bash
 git add src/lib/parties/rules.ts scripts/test-parties.ts scripts/test-review-and-spec.ts
-git commit -m "feat(346): parties rules — roles, validation, carry filter, lead estimate rollup
+git commit -m "feat(348): parties rules — roles, validation, carry filter, lead estimate rollup
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -371,7 +371,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 In `src/db/doc-tables.ts`, after the `export const venueProfiles = …` line add:
 
 ```ts
-export const recordParties = docTable("record_parties"); // Estimate parties (#346) — one company in one role on a lead / quote / project, id pty_<16 hex> = sha1(recordType, recordId, companyId, role); migration 0041_record_parties
+export const recordParties = docTable("record_parties"); // Estimate parties (#348) — one company in one role on a lead / quote / project, id pty_<16 hex> = sha1(recordType, recordId, companyId, role); migration 0041_record_parties
 ```
 
 and inside `DOC_TABLES`, after `venue_profiles: venueProfiles,`:
@@ -390,7 +390,7 @@ Expected: a new `drizzle/0041_<random_name>.sql`, `drizzle/meta/0041_snapshot.js
 Rename the SQL file to `drizzle/0041_record_parties.sql` and change the journal entry's `"tag"` to `"0041_record_parties"`. Replace the SQL file's contents with:
 
 ```sql
--- Estimate parties (#346, slice 1) — one doc collection: record_parties.
+-- Estimate parties (#348, slice 1) — one doc collection: record_parties.
 --
 --  - One row per company in one role on a lead / quote / project; id pty_<16 hex> =
 --    sha1(recordType, recordId, companyId, role), so (record, company, role) is unique by id.
@@ -435,7 +435,7 @@ export async function partyDbChecks(ok: Ok) {
   try {
     await partyIdentityFixtures();
     const { co1, co2, ct1, ct2 } = PARTY_FIX;
-    const lead = fixtureId(346, "lead"), quote = fixtureId(346, "quote"), project = fixtureId(346, "project");
+    const lead = fixtureId(348, "lead"), quote = fixtureId(348, "quote"), project = fixtureId(348, "project");
 
     const id = partyId("lead", lead, co1, "owner");
     ok(/^pty_[0-9a-f]{16}$/.test(id) && id === partyId("lead", lead, co1, "owner") && id !== partyId("lead", lead, co1, "gc"), "parties db: deterministic id per (record, company, role)");
@@ -449,7 +449,7 @@ export async function partyDbChecks(ok: Ok) {
     ok(!own2.ok && own2.error === "This record already has an owner.", "parties db: second owner refused");
     const badCt = await addParty({ recordType: "lead", recordId: lead, companyId: co2, role: "gc", contactId: ct1 }, "u-test");
     ok(!badCt.ok && badCt.error === "That person isn't at this company.", "parties db: contact must belong to the company");
-    const noCo = await addParty({ recordType: "lead", recordId: lead, companyId: fixtureId(346, "nope"), role: "gc" }, "u-test");
+    const noCo = await addParty({ recordType: "lead", recordId: lead, companyId: fixtureId(348, "nope"), role: "gc" }, "u-test");
     ok(!noCo.ok && noCo.error === "That company doesn't exist.", "parties db: unknown company refused");
 
     for (const [role, co, label] of [["gc", co2, null], ["architect", co2, null], ["other", co1, "CM"]] as const) {
@@ -480,21 +480,21 @@ export async function partyDbChecks(ok: Ok) {
 
     const forCo1 = await listForCompany(co1);
     ok(forCo1.filter((p) => p.recordId === lead).length === 2 && forCo1.some((p) => p.recordType === "project"), "parties db: listForCompany spans records");
-    const many = await listForRecords("lead", [lead, fixtureId(346, "empty")]);
-    ok(many.get(lead)?.length === 4 && (many.get(fixtureId(346, "empty")) ?? []).length === 0, "parties db: listForRecords groups by record");
+    const many = await listForRecords("lead", [lead, fixtureId(348, "empty")]);
+    ok(many.get(lead)?.length === 4 && (many.get(fixtureId(348, "empty")) ?? []).length === 0, "parties db: listForRecords groups by record");
 
     ok(await removeParty(gcRow.id), "parties db: remove");
     ok(!(await listFor("lead", lead)).some((p) => p.id === gcRow.id), "parties db: removed row gone from lists");
     const revived = await addParty({ recordType: "lead", recordId: lead, companyId: co2, role: "gc" }, "u-test");
     ok(revived.ok && !revived.existed && revived.party.id === gcRow.id && revived.party.contactId === null, "parties db: re-adding a removed row revives it fresh");
-    ok(!(await removeParty(fixtureId(346, "missing"))), "parties db: removing an unknown id is false");
+    ok(!(await removeParty(fixtureId(348, "missing"))), "parties db: removing an unknown id is false");
   } finally {
-    await dropFixtures(346);
+    await dropFixtures(348);
     await dropPartyIdentityFixtures();
   }
 }
 
-const PARTY_FIX = { co1: fixtureId(346, "co1"), co2: fixtureId(346, "co2"), ct1: fixtureId(346, "ct1"), ct2: fixtureId(346, "ct2") };
+const PARTY_FIX = { co1: fixtureId(348, "co1"), co2: fixtureId(348, "co2"), ct1: fixtureId(348, "ct1"), ct2: fixtureId(348, "ct2") };
 async function partyIdentityFixtures() {
   await dropPartyIdentityFixtures();
   await saveCompany({ id: PARTY_FIX.co1, name: "Party Co One", type: "customer", lifecycle: "active", deleted: false });
@@ -504,8 +504,8 @@ async function partyIdentityFixtures() {
 }
 async function dropPartyIdentityFixtures() {
   const db = await getDb();
-  await db.delete(contactsTable).where(like(contactsTable.id, "TEST346:%"));
-  await db.delete(companies).where(like(companies.id, "TEST346:%"));
+  await db.delete(contactsTable).where(like(contactsTable.id, "TEST348:%"));
+  await db.delete(companies).where(like(companies.id, "TEST348:%"));
 }
 ```
 
@@ -545,7 +545,7 @@ import {
 } from "@/lib/parties/rules";
 
 /**
- * #346 — estimate parties (`record_parties`): the ONLY writer. One row per company in one role on a lead,
+ * #348 — estimate parties (`record_parties`): the ONLY writer. One row per company in one role on a lead,
  * quote or project. The id is derived from (recordType, recordId, companyId, role), so a second add of the same
  * row lands on the same id — uniqueness without a unique index. Removing soft-deletes; adding again revives the
  * row fresh (upsertDoc replaces the doc and clears `deleted`).
@@ -684,7 +684,7 @@ Expected: final summary with `0 FAIL`; `grep -c "parties db"` in the output of a
 
 ```bash
 git add src/db/doc-tables.ts drizzle/0041_record_parties.sql drizzle/meta/_journal.json drizzle/meta/0041_snapshot.json src/lib/stores/parties.ts scripts/test-parties.ts
-git commit -m "feat(346): record_parties collection (migration 0041) + store
+git commit -m "feat(348): record_parties collection (migration 0041) + store
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -713,7 +713,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 Create `src/lib/parties/vm.ts`:
 
 ```ts
-/* #346 — the browser-facing party view model (pure types; client components import these). */
+/* #348 — the browser-facing party view model (pure types; client components import these). */
 import type { PartyRole } from "./rules";
 
 export type PartyVM = {
@@ -856,7 +856,7 @@ import { Typeahead } from "@/components/search/typeahead";
 import { searchLinkTargetsAction } from "@/app/(app)/inbox/link-popup-actions";
 import type { LinkTargetHit } from "@/lib/inbox-link-targets";
 
-/** #346 — debounced company search (the Inbox link sidebar's #121 pattern, companies only). */
+/** #348 — debounced company search (the Inbox link sidebar's #121 pattern, companies only). */
 const keyOf = (h: LinkTargetHit) => h.id;
 const passAll = () => true;
 const stable = () => 0;
@@ -937,7 +937,7 @@ import { addPartyAction, companyContactsAction, removePartyAction, setPartyConta
 import CompanySearch from "./company-search";
 
 /**
- * #346 — the one parties editor: grouped by role, add (role → company → optional person → label for Other),
+ * #348 — the one parties editor: grouped by role, add (role → company → optional person → label for Other),
  * change person, remove. Used by the lead drawer, the project page and the Estimator's Parties dialog.
  */
 export default function PartiesEditor({
@@ -1139,7 +1139,7 @@ Run: `grep -n "stores/\|node:crypto\|view-server" src/components/parties/*.tsx s
 
 ```bash
 git add src/lib/parties/vm.ts src/lib/parties/view-server.ts "src/app/(app)/parties/actions.ts" src/components/parties/company-search.tsx src/components/parties/parties-editor.tsx
-git commit -m "feat(346): parties actions + shared editor (company search, person, roles)
+git commit -m "feat(348): parties actions + shared editor (company search, person, roles)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1181,7 +1181,7 @@ Run: `npx tsx scripts/test-parties.ts` — expected: a type error / FAIL on `has
 In `src/lib/opportunities.ts`, add to `OppLeadInput`:
 
 ```ts
-  /** #346 — the lead has ≥ 1 estimate (Quote.leadId). Its estimates ride the board instead, like a converted lead. */
+  /** #348 — the lead has ≥ 1 estimate (Quote.leadId). Its estimates ride the board instead, like a converted lead. */
   hasEstimates?: boolean;
 ```
 
@@ -1191,12 +1191,12 @@ and in `buildOpportunities`, change `if (l.convertedQuoteId) continue;` (the one
     if (l.convertedQuoteId || l.hasEstimates) continue;
 ```
 
-Update the function's doc comment's first sentence to: `A converted lead (non-null convertedQuoteId) or a lead with estimates (#346) is EXCLUDED — its quotes carry the opportunity from there — …`.
+Update the function's doc comment's first sentence to: `A converted lead (non-null convertedQuoteId) or a lead with estimates (#348) is EXCLUDED — its quotes carry the opportunity from there — …`.
 
 In `src/app/(app)/opportunities/page.tsx`, just before `const rows = buildOpportunities(`, add:
 
 ```ts
-  // #346 — a lead whose estimates are on the board is not counted twice.
+  // #348 — a lead whose estimates are on the board is not counted twice.
   const withEstimates = leadIdsWithEstimates(quotes);
 ```
 
@@ -1217,7 +1217,7 @@ import { partyVMs } from "@/lib/parties/view-server";
 import { PARTY_ROLES, type PartyRecordType, type PartyRole } from "@/lib/parties/rules";
 import PartiesEditor from "./parties-editor";
 
-/** #346 — the "Job" / "Companies" card on the lead drawer and the project page. */
+/** #348 — the "Job" / "Companies" card on the lead drawer and the project page. */
 export async function PartiesCard({
   recordType,
   recordId,
@@ -1257,7 +1257,7 @@ import { leadEstimatesTotal } from "@/lib/parties/rules";
 const money = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
 const STATUS: Record<string, string> = { draft: "Draft", sent: "Sent", won: "Won", lost: "Lost" };
 
-/** #346 — every estimate on this lead/opportunity with the estimates total (draft + sent + won). Nothing when none. */
+/** #348 — every estimate on this lead/opportunity with the estimates total (draft + sent + won). Nothing when none. */
 export async function LeadEstimates({ leadId }: { leadId: string }) {
   const quotes = (await listDocsByField<Quote>("quotes", "leadId", [leadId])).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   if (!quotes.length) return null;
@@ -1299,7 +1299,7 @@ Run: `npx tsc --noEmit` — no output. Run: `npx tsx scripts/test-parties.ts` �
 
 ```bash
 git add src/components/parties/parties-card.tsx src/components/parties/lead-estimates.tsx "src/app/(app)/leads/page.tsx" src/lib/opportunities.ts "src/app/(app)/opportunities/page.tsx" scripts/test-parties.ts
-git commit -m "feat(346): lead Job card + estimates total; board skips leads whose estimates carry them
+git commit -m "feat(348): lead Job card + estimates total; board skips leads whose estimates carry them
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1328,7 +1328,7 @@ import PartiesEditor from "@/components/parties/parties-editor";
 import { listPartiesAction } from "@/app/(app)/parties/actions";
 import type { PartyVM } from "@/lib/parties/vm";
 
-/** #346 — the Estimator header's Parties chip: "Parties · 3" opens a dialog with the shared editor. Disabled until saved. */
+/** #348 — the Estimator header's Parties chip: "Parties · 3" opens a dialog with the shared editor. Disabled until saved. */
 export default function PartiesChip({ quoteId, canEdit }: { quoteId: string | null; canEdit: boolean }) {
   const [parties, setParties] = useState<PartyVM[] | null>(null);
   const [open, setOpen] = useState(false);
@@ -1405,7 +1405,7 @@ Run: `npx tsc --noEmit` — no output.
 
 ```bash
 git add "src/app/(app)/estimator/parties-chip.tsx" "src/app/(app)/estimator/estimator-header.tsx"
-git commit -m "feat(346): Estimator header Parties chip + dialog
+git commit -m "feat(348): Estimator header Parties chip + dialog
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1431,7 +1431,7 @@ Append inside the `try` block of `partyDbChecks` (before `} finally {`):
 
 ```ts
     // carry estimate → project through createProjectFromQuote
-    const wonQ = fixtureId(346, "won");
+    const wonQ = fixtureId(348, "won");
     await createFixture("quotes", buildQuote({ id: wonQ, name: "Party won", customer: "Party Co One", customerId: co1, status: "won", value: 1000, quoteType: "system" } as never) as never);
     const ownerOnWon = await addParty({ recordType: "quote", recordId: wonQ, companyId: co1, role: "owner" }, "u-test");
     if (ownerOnWon.ok) registerFixture("record_parties", ownerOnWon.party.id);
@@ -1454,7 +1454,7 @@ Run: `npm run test:specs 2>&1 | grep -E "parties db: project inherits|0 FAIL|FAI
 In `src/lib/stores/projects.ts`, inside `createProjectFromQuote`, directly after `const p = await createProject(fromQuote(q, await loadPipelines()));` add:
 
 ```ts
-    // #346 — the estimate's companies carry to the project once. Never allowed to undo the win:
+    // #348 — the estimate's companies carry to the project once. Never allowed to undo the win:
     // this runs inside setStatus's transaction (see quote-spawn.ts), so a failure is logged, not thrown.
     try {
       const { copyParties } = await import("@/lib/stores/parties");
@@ -1469,7 +1469,7 @@ In `src/lib/stores/projects.ts`, inside `createProjectFromQuote`, directly after
 In `src/app/(app)/estimator/actions.ts` create branch, after the `try { created = await create(...) } catch { … }` block and before `storedVendorQuotes = await storeVendorQuotes(...)`, add:
 
 ```ts
-    // #346 — a new estimate on a lead starts with the lead's companies (not its GCs/ECs — bidders are ticked per estimate).
+    // #348 — a new estimate on a lead starts with the lead's companies (not its GCs/ECs — bidders are ticked per estimate).
     if (leadId) {
       try {
         const { copyParties } = await import("@/lib/stores/parties");
@@ -1483,7 +1483,7 @@ In `src/app/(app)/estimator/actions.ts` create branch, after the `try { created 
 In `src/lib/stores/leads.ts` `convert`, directly after the `const quote = await insertWithPrefixedId("quotes", …)` statement completes, add:
 
 ```ts
-  // #346 — the converted quote starts with the lead's companies (not its GCs/ECs).
+  // #348 — the converted quote starts with the lead's companies (not its GCs/ECs).
   try {
     const { copyParties } = await import("./parties");
     await copyParties({ type: "lead", id }, { type: "quote", id: quote.id }, me);
@@ -1512,7 +1512,7 @@ Run: `npm run test:specs 2>&1 | tail -3` — `0 FAIL`. Run: `npx tsc --noEmit` �
 
 ```bash
 git add "src/app/(app)/estimator/actions.ts" src/lib/stores/leads.ts src/lib/stores/projects.ts "src/app/(app)/projects/[id]/page.tsx" scripts/test-parties.ts
-git commit -m "feat(346): carry parties lead → estimate → project; project Companies card
+git commit -m "feat(348): carry parties lead → estimate → project; project Companies card
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1557,7 +1557,7 @@ export function deleteRefusal(companyName: string, n: number): string | null {
 In `src/app/(app)/companies/actions.ts` `deleteCustomerAction`, after the `if (!id) …` line add:
 
 ```ts
-  // #346 — a company that is an owner / GC / EC / architect / vendor somewhere can't silently vanish from those records.
+  // #348 — a company that is an owner / GC / EC / architect / vendor somewhere can't silently vanish from those records.
   const linked = await listForCompany(id);
   const refusal = deleteRefusal((await getCompany(id))?.name || id, new Set(linked.map((p) => `${p.recordType}:${p.recordId}`)).size);
   if (refusal) return { ok: false as const, error: refusal };
@@ -1588,7 +1588,7 @@ const KIND: Record<Party["recordType"], string> = { lead: "Opportunity", quote: 
 
 type Row = { key: string; kind: string; number: string; name: string; roles: string; href: string; sort: number };
 
-/** #346 — every lead / estimate / project this company is on, and in what role. Nothing when none. */
+/** #348 — every lead / estimate / project this company is on, and in what role. Nothing when none. */
 export async function CompanyRolesCard({ companyId, style, headStyle }: { companyId: string; style?: CSSProperties; headStyle?: CSSProperties }) {
   const parties = await listForCompany(companyId);
   if (!parties.length) return null;
@@ -1650,7 +1650,7 @@ Check `getMany` in `src/lib/stores/quotes.ts` returns `Promise<Quote[]>` (if it 
 In `src/app/(app)/companies/[id]/page.tsx`, after `<FindingsCard customerId={cust.id} … />` add:
 
 ```tsx
-            {/* #346 — leads / estimates / projects this company is on (owner, GC, EC, architect, vendor…) */}
+            {/* #348 — leads / estimates / projects this company is on (owner, GC, EC, architect, vendor…) */}
             <CompanyRolesCard companyId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
 ```
 
@@ -1664,7 +1664,7 @@ Run: `npx tsx scripts/test-parties.ts` — `0 FAIL`. `npx tsc --noEmit` — no o
 
 ```bash
 git add src/components/parties/company-roles-card.tsx "src/app/(app)/companies/[id]/page.tsx" "src/app/(app)/companies/actions.ts" src/lib/parties/rules.ts scripts/test-parties.ts
-git commit -m "feat(346): company Bids & roles card; refuse deleting a linked company
+git commit -m "feat(348): company Bids & roles card; refuse deleting a linked company
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1674,18 +1674,18 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 8: Docs, full gates, browser check
 
 **Files:**
-- Modify: `DECISIONS.md` (append D1052–D1056), `PUNCHLIST.md` (add #346), `AGENTS.md` (phase 60 entry after phase 59)
+- Modify: `DECISIONS.md` (append D1058–D1062), `PUNCHLIST.md` (add #348), `AGENTS.md` (phase 62 entry after phase 61)
 
 - [ ] **Step 1: Recompute numbers**
 
-Run: `git fetch -q origin && git show origin/main:DECISIONS.md | grep -oE "^## D[0-9]+" | sort -t D -k2 -n | tail -1` and `git show origin/main:PUNCHLIST.md | grep -oE "#3[0-9]{2}" | sort -u | tail -3`. If D1052 or #346 is taken, use the next free numbers everywhere below (and in the spec header).
+Run: `git fetch -q origin && git show origin/main:DECISIONS.md | grep -oE "^## D[0-9]+" | sort -t D -k2 -n | tail -1` and `git show origin/main:PUNCHLIST.md | grep -oE "#3[0-9]{2}" | sort -u | tail -3`. If D1058 or #348 is taken, use the next free numbers everywhere below (and in the spec header).
 
 - [ ] **Step 2: Decisions**
 
 Append to `DECISIONS.md` (match the file's existing heading/bullet style — read the last entry first):
 
 ```markdown
-## D1052: Estimate parties are one junction collection (#346 slice 1) (2026-10-14)
+## D1058: Estimate parties are one junction collection (#348 slice 1) (2026-10-14)
 
 `record_parties` (migration 0041) — one doc per company in one role on a lead, estimate or project; roles
 owner · gc · ec · architect · consultant · vendor · other (typed label). Chosen over a JSONB list on the quote
@@ -1693,24 +1693,24 @@ owner · gc · ec · architect · consultant · vendor · other (typed label). C
 sha1(recordType, recordId, companyId, role), so one row per (record, company, role) needs no unique index; remove
 soft-deletes and a re-add revives the row fresh. Not syncable; wiped by the go-live reset with its records.
 
-## D1053: Carry-over is a one-time copy (#346) (2026-10-14)
+## D1059: Carry-over is a one-time copy (#348) (2026-10-14)
 
 Lead → estimate on the estimate's first save (and on lead convert) copies every role but GC/EC — bidders are
 ticked per estimate in slice 2. Estimate → project copies every row when the project is created. After that each
 list is its own. A copy failure is logged and never undoes the save or the win.
 
-## D1054: A lead with estimates leaves the opportunity board (#346) (2026-10-14)
+## D1060: A lead with estimates leaves the opportunity board (#348) (2026-10-14)
 
 Spec §3.6 said "lead value = sum of its estimates". The board already lists every estimate as its own card, so
 summing into the lead card too would count the job twice; instead a lead with ≥ 1 estimate is excluded from the
 board exactly like a converted lead, and the lead drawer shows an Estimates list with the total (draft + sent +
 won, lost excluded). Before this, a lead with non-converted estimates was already double-counted.
 
-## D1055: Parties edits need `create` (#346) (2026-10-14)
+## D1061: Parties edits need `create` (#348) (2026-10-14)
 
 Same bar as the other record edits (companies, leads, findings). Reading parties needs only a session.
 
-## D1056: A linked company can't be deleted (#346) (2026-10-14)
+## D1062: A linked company can't be deleted (#348) (2026-10-14)
 
 Company delete is refused while the company is on any live party row, naming how many records. Before, a delete
 left quotes pointing at a soft-deleted company silently; parties make the links visible, so the guard is cheap.
@@ -1718,9 +1718,9 @@ left quotes pointing at a soft-deleted company silently; parties make the links 
 
 - [ ] **Step 3: Punch item + phase entry**
 
-Add `#346` to `PUNCHLIST.md` following the newest entry's format: title "Estimate parties, bids & vendor links", reported 2026-10-14 by Jeff, link the spec, status "Slice 1 (parties core) built; slices 2–6 queued (bids, split systems, vendors, Read the PDF, portal + reports)".
+Add `#348` to `PUNCHLIST.md` following the newest entry's format: title "Estimate parties, bids & vendor links", reported 2026-10-14 by Jeff, link the spec, status "Slice 1 (parties core) built; slices 2–6 queued (bids, split systems, vendors, Read the PDF, portal + reports)".
 
-Add phase **60** to `AGENTS.md` after phase 59, one paragraph in the same voice: what slice 1 shipped (collection, roles, the editor on lead / estimate / project, company Bids & roles, carry-over, board fix, delete guard), decisions D1052–D1056, migration 0041, "Remaining: slices 2–6 (spec §10)".
+Add phase **60** to `AGENTS.md` after phase 61, one paragraph in the same voice: what slice 1 shipped (collection, roles, the editor on lead / estimate / project, company Bids & roles, carry-over, board fix, delete guard), decisions D1058–D1062, migration 0041, "Remaining: slices 2–6 (spec §10)".
 
 - [ ] **Step 4: Full gates**
 
@@ -1744,7 +1744,7 @@ Follow the memory recipe "Exercising POST routes safely" / "Worktree dev-server 
 
 ```bash
 git add DECISIONS.md PUNCHLIST.md AGENTS.md
-git commit -m "docs(346): slice 1 — D1052–D1056, punch #346, phase 60
+git commit -m "docs(348): slice 1 — D1058–D1062, punch #348, phase 62
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```

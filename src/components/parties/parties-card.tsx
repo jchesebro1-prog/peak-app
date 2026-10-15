@@ -6,7 +6,7 @@ import { partyVMs } from "@/lib/parties/view-server";
 import { PARTY_ROLES, type PartyRecordType, type PartyRole } from "@/lib/parties/rules";
 import PartiesEditor from "./parties-editor";
 
-/** #346 — the "Job" / "Companies" card on the lead drawer and the project page. */
+/** #348 — the "Job" / "Companies" card on the lead drawer and the project page. */
 export async function PartiesCard({
   recordType,
   recordId,

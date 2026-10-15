@@ -789,7 +789,7 @@ export default async function CustomerDetailPage({
             {/* #340 assessments engine — this company's assessments and findings (with the customer code) */}
             <AssessmentsCard customerId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
             <FindingsCard customerId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
-            {/* #346 — leads / estimates / projects this company is on (owner, GC, EC, architect, vendor…) */}
+            {/* #348 — leads / estimates / projects this company is on (owner, GC, EC, architect, vendor…) */}
             <CompanyRolesCard companyId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
 
             {/* ---- details (#23) — populated custom fields ---- */}
