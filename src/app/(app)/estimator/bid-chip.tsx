@@ -9,9 +9,9 @@ import type { BidPanelVM } from "@/lib/parties/bid-vm";
  * #348 slice 2a — the Estimator header's Bid chip: "Bid · due Oct 21, 2:00 PM · 4 bidders · Add. 2" opens a dialog with the
  * due date and addenda. Bidders are managed on Send & track. Disabled until the estimate is saved.
  *
- * Dates: staff work in America/Chicago, and the browser's local zone is Chicago for them, so the datetime-local input is
- * read and written in the browser's local time. Received dates (date inputs) store noon local time so a DST shift or a
- * midnight edge never moves the day.
+ * Dates: the datetime-local input is read and written in the BROWSER's local time (staff browsers are on Chicago time, but
+ * that isn't enforced); the chip text is always America/Chicago (`bidDueText`, computed on the server). Received dates
+ * (date inputs) store noon local time so a DST shift or a midnight edge never moves the day.
  */
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -32,7 +32,11 @@ const toDateInput = (ms: number): string => {
 const fromDateInput = (v: string): number | null => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
   if (!m) return null;
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0).getTime();
+  // setFullYear keeps a year below 1000 as typed ("0050"); the Date constructor would map it to 1950.
+  const d = new Date(2000, 0, 1, 12, 0, 0);
+  d.setFullYear(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const t = d.getTime();
+  return Number.isFinite(t) ? t : null;
 };
 
 function chipLabel(p: BidPanelVM | null): string {
@@ -57,20 +61,27 @@ export default function BidChip({ quoteId, canEdit }: { quoteId: string | null; 
   const dialog = useRef<HTMLDialogElement>(null);
   // Latest-response-wins: a slow reload for an old quote or an earlier request never overwrites a newer one.
   const seq = useRef(0);
+  const inFlight = useRef(0);
+  const lastLoaded = useRef(0);
 
   const reload = useCallback(() => {
     if (!quoteId) return Promise.resolve(null);
     const mine = ++seq.current;
+    inFlight.current++;
     return bidPanelAction(quoteId)
       .then((r) => {
         if (mine !== seq.current) return null;
         if (r.ok) {
+          lastLoaded.current = Date.now();
           setPanel(r.panel);
           return r.panel;
         }
         return null;
       })
-      .catch(() => null);
+      .catch(() => null)
+      .finally(() => {
+        inFlight.current--;
+      });
   }, [quoteId]);
 
   useEffect(() => {
@@ -80,7 +91,11 @@ export default function BidChip({ quoteId, canEdit }: { quoteId: string | null; 
   // The Bidders card (Send & track) changes the bid; refresh the label when the window regains focus.
   useEffect(() => {
     if (!quoteId) return;
-    const onFocus = () => void reload();
+    const onFocus = () => {
+      // Skip while a load is running or one finished in the last 5 s.
+      if (inFlight.current > 0 || Date.now() - lastLoaded.current < 5000) return;
+      void reload();
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [quoteId, reload]);
@@ -100,10 +115,20 @@ export default function BidChip({ quoteId, canEdit }: { quoteId: string | null; 
     setOpen(true);
   };
 
-  const readOnly = !canEdit || (panel ? !panel.canEdit : false);
+  // No loaded bid = nothing to edit: Save must never write empties over a stored due date / addenda.
+  const readOnly = !canEdit || !panel || !panel.canEdit;
+
+  const retry = async () => {
+    setError("");
+    const fresh = await reload();
+    if (fresh) {
+      setDueInput(toLocalInput(fresh.dueAt));
+      setAddenda(fresh.addenda);
+    }
+  };
 
   const save = async () => {
-    if (!quoteId || saving) return;
+    if (!quoteId || saving || !panel) return;
     const due = fromLocalInput(dueInput);
     if (dueInput && due == null) return setError("Pick a valid due date.");
     setSaving(true);
@@ -111,6 +136,8 @@ export default function BidChip({ quoteId, canEdit }: { quoteId: string | null; 
     try {
       const r = await setBidDetailsAction(quoteId, { dueAt: due, addenda });
       if (r.ok) {
+        seq.current++; // an older in-flight load must not overwrite this fresher panel
+        lastLoaded.current = Date.now();
         setPanel(r.panel);
         setOpen(false);
       } else setError(r.error);
@@ -154,7 +181,22 @@ export default function BidChip({ quoteId, canEdit }: { quoteId: string | null; 
             ✕
           </button>
         </div>
-        {open && (
+        {open && !panel && (
+          <div style={{ padding: "14px 18px 18px", display: "grid", gap: 12 }}>
+            <div role="alert" style={{ fontSize: 12.5, color: "#8a2f22" }}>
+              Couldn&apos;t load this bid — try again.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={() => void retry()} style={btn}>
+                Try again
+              </button>
+              <button type="button" onClick={() => setOpen(false)} style={btn}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+        {open && panel && (
           <div style={{ padding: "14px 18px 18px", display: "grid", gap: 12 }}>
             <label style={{ display: "grid", gap: 4, fontSize: 11.5, fontWeight: 600 }}>
               Bid due
