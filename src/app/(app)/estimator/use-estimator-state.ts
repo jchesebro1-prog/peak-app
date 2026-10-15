@@ -1803,7 +1803,9 @@ export function useEstimatorState(props: EstimatorProps) {
           customer: cname,
           contactName: contactName || "",
         },
-        movedVq
+        movedVq,
+        // #348 slice 3: the server reads the stored source quote's lead + companies; an unsaved estimate has none.
+        loadedId || null
       );
       if (res.ok) {
         postChanged("quote", res.targetId);

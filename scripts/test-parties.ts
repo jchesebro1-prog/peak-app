@@ -1,6 +1,8 @@
 /* #348 estimate parties — harness checks. `partyChecks` is pure; `partyDbChecks` needs the test DB.
    Run the pure half alone with `npx tsx scripts/test-parties.ts`. */
 import { like, sql } from "drizzle-orm";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import { getDb, withSavepoint, withTransaction } from "../src/db";
 import { companies, contacts as contactsTable } from "../src/db/schema";
@@ -59,6 +61,9 @@ export async function partyChecks(ok: Ok) {
   ok(carriesTo("quote", "project", { role: "gc", bid: bs("awarded") }) && carriesTo("quote", "project", { role: "ec", bid: bs("pending") }) && carriesTo("quote", "project", { role: "gc", bid: null }), "parties: quote→project carries awarded, pending and non-bidder rows");
   ok((["lost", "withdrew", "no_bid"] as const).every((r) => !carriesTo("quote", "project", { role: "gc", bid: bs(r) })), "parties: quote→project leaves losing bidders (lost / withdrew / no bid) on the estimate");
   ok(!carriesTo("project", "quote", { role: "owner" }), "parties: no other direction carries");
+  ok(["owner", "architect", "consultant", "vendor", "other", "gc", "ec"].every((r) => carriesTo("quote", "quote", { role: r as never, bid: null })), "parties: quote→quote carries every role without a bid state");
+  ok(carriesTo("quote", "quote", { role: "owner" }) && carriesTo("quote", "quote", { role: "gc" }), "parties: quote→quote carries rows with no bid field at all");
+  ok((["pending", "awarded", "lost", "withdrew", "no_bid"] as const).every((r) => !carriesTo("quote", "quote", { role: "gc", bid: bs(r) }) && !carriesTo("quote", "quote", { role: "ec", bid: bs(r) })), "parties: quote→quote leaves every bidder row (any bid state) on its estimate");
 
   ok(partyRoleText({ role: "other", roleLabel: "CM" }) === "CM" && partyRoleText({ role: "gc", roleLabel: null }) === "GC", "parties: role text");
 
@@ -241,6 +246,31 @@ export async function partyDbChecks(ok: Ok) {
     ok(wonGroups.length === 1 && wonGroups[0].parties.length === 2, "parties db: liveRecordsForCompany counts records, not rows (two roles = one group)");
     ok(wonGroups[0]?.record.id === wonQ, "parties db: the group carries its loaded record");
     ok(live2.length === live1.length, "parties db: a second role on a live record doesn't change the live-record count");
+
+    // #348 slice 3 — Move system → New estimate: the new estimate carries the source's non-bidder companies
+    const splitSrc = fixtureId(348, "splitsrc"), splitNew = fixtureId(348, "splitnew");
+    await createFixture("quotes", buildQuote(splitSrc, { name: "Split source", customer: "Party Co One", customerId: co1, leadId: lead, value: 1000 }, "system", null, Date.now()) as never);
+    for (const [co, role] of [[co1, "owner"], [co2, "architect"], [co2, "gc"], [co1, "vendor"]] as const) {
+      const r = await addParty({ recordType: "quote", recordId: splitSrc, companyId: co, role }, "u-test");
+      ok(r.ok, `parties db: ${role} on the split source`);
+      if (r.ok) {
+        registerFixture("record_parties", r.party.id);
+        if (role === "gc") await setPartyBid(r.party.id, { result: "pending", submitVia: "email" });
+      }
+    }
+    const splitN = await copyParties({ type: "quote", id: splitSrc }, { type: "quote", id: splitNew }, "u-test");
+    const onSplit = await listFor("quote", splitNew);
+    for (const p of onSplit) registerFixture("record_parties", p.id);
+    ok(splitN === 3 && onSplit.map((p) => p.role).join() === "owner,architect,vendor", "parties db: quote→quote copies owner, architect and vendor");
+    ok(!onSplit.some((p) => p.role === "gc" || p.role === "ec"), "parties db: quote→quote never copies a bidder row");
+    ok(onSplit.every((p) => p.bid === null && p.recordId === splitNew), "parties db: split copies are fresh rows with no bid state");
+    ok((await listFor("quote", splitSrc)).length === 4, "parties db: the source estimate's rows are untouched by the split");
+    ok((await copyParties({ type: "quote", id: splitSrc }, { type: "quote", id: splitNew }, "u-test")) === 0, "parties db: quote→quote copy is idempotent");
+    // the Move action's `new` path: lead from the stored source quote, copy inside a savepoint, existing target untouched
+    const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+    ok(/const splitSource = opts\.splitFrom \? await get\(opts\.splitFrom\.quoteId\) : null;\s*const splitLeadId = splitSource\?\.leadId \|\| null;/.test(actionsSrc) && /\.\.\.\(splitLeadId \? \{ leadId: splitLeadId \} : \{\}\),\s*name: opts\.newName/.test(actionsSrc), "parties: Move → New reads the lead from the stored source quote and passes it to create");
+    ok(/withSavepoint\(async \(\) => \{\s*await copyParties\(\{ type: "quote", id: splitSource\.id \}, \{ type: "quote", id: created\.id \}/.test(actionsSrc), "parties: Move → New copies the source's parties inside a savepoint");
+    ok(/target\.kind === "new" && typeof sourceQuoteId === "string"/.test(actionsSrc) && actionsSrc.split("splitFrom:").length === 2, "parties: only the Move action's New path asks for the split (Copy and Move → existing carry nothing)");
 
     // withSavepoint contains a SQL error so the outer transaction survives
     ok((await withSavepoint(async () => 7)) === 7, "parties db: withSavepoint outside a transaction just runs fn");

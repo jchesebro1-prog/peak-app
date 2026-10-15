@@ -838,7 +838,8 @@ export async function moveSystemToEstimateAction(
     customer: string;
     contactName: string;
   },
-  vendorQuotes: VendorQuote[] = []
+  vendorQuotes: VendorQuote[] = [],
+  sourceQuoteId: string | null = null
 ): Promise<MoveSystemResult> {
   const user = await requireUser();
   // #267: a moved system keeps its own price — sanitized like a save.
@@ -855,6 +856,8 @@ export async function moveSystemToEstimateAction(
     sourceContext,
     vendorQuotes,
     owner: user.name,
+    // #348 slice 3: only a Move into a NEW estimate splits off the source's lead and companies.
+    ...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId ? { splitFrom: { quoteId: sourceQuoteId, userId: user.id } } : {}),
   });
   if (!placed.ok) return placed;
   return { ok: true, targetId: placed.targetId, targetName: placed.targetName, targetNumber: placed.targetNumber };
@@ -887,6 +890,8 @@ async function placeSystemInEstimate(
     vendorQuotes: VendorQuote[];
     owner: string;
     tier?: { pricingTier: string; tierMargin: number };
+    /** #348 slice 3 — Move into a NEW estimate: the stored source quote lends its lead and non-bidder companies. */
+    splitFrom?: { quoteId: string; userId: string };
   }
 ): Promise<{ ok: true; targetId: string; targetName: string; targetNumber: string } | { ok: false; error: string }> {
   const placedIds = vendorIdsInSections([placed]);
@@ -943,9 +948,14 @@ async function placeSystemInEstimate(
   // Estimator bonuses: the new draft estimate gets its bonus lines at birth.
   const newSections = canonicalBonusSections({ source: "estimator", status: "draft" }, withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))]));
   const t = totals(newSections, 0);
+  // #348 slice 3: the lead comes from the STORED source quote (never from the client); an unsaved or missing source
+  // simply has none. The id only says which stored quote to read.
+  const splitSource = opts.splitFrom ? await get(opts.splitFrom.quoteId) : null;
+  const splitLeadId = splitSource?.leadId || null;
   let created: Quote;
   try {
     created = await create({
+      ...(splitLeadId ? { leadId: splitLeadId } : {}),
       name: opts.newName,
       customer: opts.sourceContext.customer,
       customerId: opts.sourceContext.customerId,
@@ -966,6 +976,17 @@ async function placeSystemInEstimate(
           ? e.message
           : "Could not create the new estimate — please try again.",
     };
+  }
+  // #348 slice 3: the split estimate starts with the source's companies (never its bidders).
+  if (splitSource && opts.splitFrom) {
+    try {
+      const { copyParties } = await import("@/lib/stores/parties");
+      await withSavepoint(async () => {
+        await copyParties({ type: "quote", id: splitSource.id }, { type: "quote", id: created.id }, opts.splitFrom!.userId);
+      });
+    } catch (e) {
+      console.error("moveSystemToEstimateAction: copying parties failed", created.id, e);
+    }
   }
   // create() promotes only the declared Quote columns — contactName rides
   // along on the doc like it does for saveQuoteAction's fresh-create path.
