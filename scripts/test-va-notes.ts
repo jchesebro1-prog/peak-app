@@ -2111,6 +2111,10 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       "#344 C8: a segmented preset control (aria-pressed) and a Wireframe checkbox, on by default");
     ok(v3.includes("controls.dispose()") && (v3.match(/controls\.dispose\(\)/g) || []).length >= 2 && !rd("src/lib/venue-3d-views.ts").includes("use client") && !/from ["']three|import\(["']three/.test(rd("src/lib/venue-3d-views.ts")),
       "#344 C8: an abandoned camera's controls are disposed on every switch; the view math is a pure module with no three import");
+    const elevPolar = /next === "elevation" \? Math\.PI \* ([0-9.]+)/.exec(v3);
+    ok(!!elevPolar && Number(elevPolar[1]) > 0.5, "#344 C8 fix: the Elevation branch sets a maxPolarAngle above π/2, so its 5 ft eye height is not clamped up");
+    ok(/p\.id === preset \? setResetTick/.test(v3) && v3.includes("force ||") && /applyRef\.current\?\.\(preset, wireframe, force\)/.test(v3),
+      "#344 C8 fix: clicking the already-active preset re-applies it (forced rebuild = reset view)");
   }
 }
 

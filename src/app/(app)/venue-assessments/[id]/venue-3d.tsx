@@ -189,7 +189,9 @@ export default function Venue3D({ venueClass, venueSubtype, measurements }: Prop
   // The scene is built once per model; these let the async build read the latest choice and
   // let the view effect below drive the live scene without rebuilding it.
   const viewRef = useRef({ preset: "orbit" as ViewPreset, wireframe: true });
-  const applyRef = useRef<((preset: ViewPreset, wireframe: boolean) => void) | null>(null);
+  const applyRef = useRef<((preset: ViewPreset, wireframe: boolean, force?: boolean) => void) | null>(null);
+  const handledResetRef = useRef(0);
+  const [resetTick, setResetTick] = useState(0); // bumped when the active preset is clicked again
 
   // Only rebuild when a dimension the model actually uses changes.
   const modelKey = useMemo(
@@ -385,10 +387,10 @@ export default function Venue3D({ venueClass, venueSubtype, measurements }: Prop
         // Replace the camera + controls for a preset. The abandoned controls are disposed (they hold
         // DOM listeners); cameras own no GPU resources. The camera's up vector is set BEFORE the
         // controls are built because OrbitControls reads it once, at construction.
-        const setView = (next: ViewPreset, wire: boolean) => {
+        const setView = (next: ViewPreset, wire: boolean, force = false) => {
           const w = host.clientWidth || width;
           const p = presetCamera(next, bounds, viewOpts(w / height));
-          if (next !== current || p.kind !== (camera instanceof THREE.OrthographicCamera ? "ortho" : "perspective")) {
+          if (force || next !== current || p.kind !== (camera instanceof THREE.OrthographicCamera ? "ortho" : "perspective")) {
             controls.dispose();
             if (p.kind === "ortho") {
               camera = new THREE.OrthographicCamera(p.ortho!.left, p.ortho!.right, p.ortho!.top, p.ortho!.bottom, 0.1, 5000);
@@ -408,7 +410,8 @@ export default function Venue3D({ venueClass, venueSubtype, measurements }: Prop
               controls.minZoom = 0.2;
               controls.maxZoom = 20;
             } else {
-              controls.maxPolarAngle = Math.PI * 0.52;
+              // Elevation's eye (5 ft) sits below its target, so a 0.52π clamp would lift the camera to ~10 ft.
+              controls.maxPolarAngle = next === "elevation" ? Math.PI * 0.9 : Math.PI * 0.52;
               controls.minDistance = next === "orbit" ? 10 : 1;
               controls.maxDistance = Math.max(M.houseD, M.houseW) * 4;
             }
@@ -474,8 +477,10 @@ export default function Venue3D({ venueClass, venueSubtype, measurements }: Prop
   // Drive the live scene when the viewer picks a preset or flips Wireframe.
   useEffect(() => {
     viewRef.current = { preset, wireframe };
-    applyRef.current?.(preset, wireframe);
-  }, [preset, wireframe]);
+    const force = resetTick !== handledResetRef.current; // a re-click on the active preset rebuilds its camera
+    handledResetRef.current = resetTick;
+    applyRef.current?.(preset, wireframe, force);
+  }, [preset, wireframe, resetTick]);
 
   if (error) {
     return (
@@ -494,7 +499,7 @@ export default function Venue3D({ venueClass, venueSubtype, measurements }: Prop
               key={p.id}
               type="button"
               aria-pressed={preset === p.id}
-              onClick={() => setPreset(p.id)}
+              onClick={() => (p.id === preset ? setResetTick((n) => n + 1) : setPreset(p.id))}
               style={{
                 font: "inherit", fontSize: 12, fontWeight: 600, padding: "6px 12px", cursor: "pointer", border: "none",
                 borderLeft: i ? "1px solid #dfe2e8" : "none",
