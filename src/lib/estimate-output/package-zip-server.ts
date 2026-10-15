@@ -21,8 +21,7 @@ import { resolvePeakHeader } from "@/lib/letterhead";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import { createStoredZip, zipStream, type ZipFile } from "@/lib/zip";
 import { bookRows, revisionPackageDocs } from "./package-docs-server";
-import { quoteSpecDocuments, quoteSpecDocxFiles, specDocumentsKey } from "./package-spec-docs-server";
-import { createHash } from "node:crypto";
+import { quoteSpecDocuments, quoteSpecDocxFiles, specDocumentsKey, zipKeyWithSpecs } from "./package-spec-docs-server";
 import {
   LEFT_OUT_NAME, LEFT_OUT_REASON, leftOutText, NOTHING_TO_DOWNLOAD, PACKAGE_BOOK_MS, PACKAGE_ZIP_DEADLINE_MS, PACKAGE_ZIP_DOC_MAX_BYTES,
   PACKAGE_ZIP_TOTAL_MAX_BYTES, packageZipCacheDir, packageZipCacheOn, packageZipCachePath, packageZipFileName, SPEC_DOCX_NAME, zipCacheable,
@@ -301,7 +300,7 @@ export async function servePackageZip(pkg: SharedPackage, deps: Partial<ServeDep
   // #17: a spec edit re-keys the zip too (the SP-#### files are read live).
   const specKey = await d.specKey(pkg.q);
   const frontKey = zipFrontKey(front);
-  const path = packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader, specKey ? createHash("sha256").update(`${frontKey}|${specKey}`).digest("hex").slice(0, 8) : frontKey);
+  const path = packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader, zipKeyWithSpecs(frontKey, specKey));
   if (d.cacheOn) {
     try {
       const cached = await d.get(path);

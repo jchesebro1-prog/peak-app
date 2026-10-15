@@ -33,6 +33,11 @@ export function specDocumentsKey(docs: readonly Pick<SpecDocument, "id" | "updat
     .slice(0, 8);
 }
 
+/** The zip cache's cover key with the specs folded in (8 hex); unchanged when there are none, so other zips keep their key. Pure. */
+export function zipKeyWithSpecs(frontKey: string, specKey: string): string {
+  return specKey ? createHash("sha256").update(`${frontKey}|${specKey}`).digest("hex").slice(0, 8) : frontKey;
+}
+
 /** A name not already in `used` ("x.docx" → "x (2).docx"). Pure; records the name it returns. */
 export function uniqueDocxName(name: string, used: Set<string>): string {
   let out = name;

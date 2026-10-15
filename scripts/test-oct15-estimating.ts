@@ -24,7 +24,7 @@ import { addQuoteRevision } from "../src/lib/stores/quotes";
 import { bomViewProps } from "../src/app/(app)/estimator/quote-document-view";
 import { documentLetterhead, fullDocumentLetterhead } from "../src/lib/letterhead-server";
 import { bookCoverFingerprint } from "../src/lib/part-docs/datasheet-book-cover-server";
-import { specDocumentsForQuote, specDocumentsKey, uniqueDocxName, quoteSpecDocuments } from "../src/lib/estimate-output/package-spec-docs-server";
+import { specDocumentsForQuote, specDocumentsKey, uniqueDocxName, quoteSpecDocuments, zipKeyWithSpecs } from "../src/lib/estimate-output/package-spec-docs-server";
 import { buildRevisionPackageZip } from "../src/lib/estimate-output/package-zip-server";
 import { createSpecDocument, patchSpecDocument } from "../src/lib/stores/spec-documents";
 import { canChangeQuotePeople, quoteSentOnce, PEOPLE_LOCKED_AFTER_SEND } from "../src/lib/quote-people-lock";
@@ -153,6 +153,8 @@ export async function oct15PureChecks(ok: Ok) {
       "oct15 #17: the zip cache key follows each spec's last edit");
     const used = new Set<string>();
     ok(uniqueDocxName("A.docx", used) === "A.docx" && uniqueDocxName("A.docx", used) === "A (2).docx" && uniqueDocxName("a.docx", used) === "a (3).docx", "oct15 #17: two specs with one file name don't collide");
+    ok(zipKeyWithSpecs("ab12cd34", "") === "ab12cd34" && /^[0-9a-f]{8}$/.test(zipKeyWithSpecs("ab12cd34", "0011aabb")) && zipKeyWithSpecs("ab12cd34", "0011aabb") !== "ab12cd34",
+      "oct15 #17: a zip with no SP specs keeps its cache key; with them the key folds them in");
     const zs = rd("src/lib/estimate-output/package-zip-server.ts");
     ok(zs.includes("if (sps.files.length) files.push(...sps.files);") && zs.includes("else if (specifications) files.push({ name: SPEC_DOCX_NAME") && zs.includes("files.splice(specFileCount, 0, { name: BOOK_FILE_NAME"),
       "oct15 #17: the SP files replace Specifications.docx (the D94 file only without them); Datasheets.pdf follows them");
