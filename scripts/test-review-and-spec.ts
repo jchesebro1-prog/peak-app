@@ -52659,7 +52659,8 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
      e301crChips({ noDatasheet: 0, drawings: 1, keyProductsNeedText: 0, scopesNoGoals: 0 }).length === 0,
     "#301 gaps: the staff chips (only the gaps that exist)");
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/document-files"|@\/app\/\(app\)\/estimator\/pricing"|@\/lib\/team"|\.\/scopes")/m.test(rd("src/lib/estimate-output/responses.ts")) &&
+  // #352 review I3: + the portal's pure card scan (portal-quote-mode.ts has type-only imports).
+  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/document-files"|@\/app\/\(app\)\/estimator\/pricing"|@\/lib\/team"|@\/lib\/portal-quote-mode"|\.\/scopes")/m.test(rd("src/lib/estimate-output/responses.ts")) &&
      !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/narrative"|@\/app\/\(app\)\/estimator\/quote-document-view"|\.\/scopes")/m.test(rd("src/lib/estimate-output/package-gaps.ts")),
     "#301 responses/gaps purity: client-safe value imports only");
 }
@@ -59432,7 +59433,7 @@ import { NodeSelection as F312NodeSel, EditorState as F312State } from "@tiptap/
   const iv = rd(`${ED}/product-image-view.tsx`), pbv = rd(`${ED}/product-block-view.tsx`), ed = rd(`${ED}/package-doc-editor.tsx`);
   const view = rd("src/components/package-doc/package-doc-view.tsx");
   // (1) the image sits above the following block's positioned wrapper; (2) clears earlier floats.
-  ok(/position: "relative",\s*zIndex: selected \? 5 : 2,\s*\.\.\.wrapperStyle\(img\)/.test(iv) && iv.includes("zIndex: 4"),
+  ok(/position: "relative",\s*zIndex: selected \? 5 : 2,\s*\.\.\.wrapperStyle\((img|shown)\)/.test(iv) && iv.includes("zIndex: 4"), // #352 M4: `shown` = the previewed side
     "#312 fix round 1: the image's float wrapper is position: relative with z-index 2 (5 selected), above the next product block's own relative wrapper, and the strip sits inside it");
   ok((iv.match(/clear: "both"/g) || []).length === 3 && view.includes(".pd-doc .pd-image { clear: both; }") && ed.includes(".pd-ed-prose .node-productImage { clear: both; }"),
     "#312 fix round 1: an image starts below any earlier float — editor wrapper (all three aligns), .node-productImage and print .pd-image clear both");
