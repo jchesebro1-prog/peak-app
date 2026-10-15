@@ -1082,7 +1082,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       const out = MGX.printRecordFor(existing, { liftRequired: "", legacyNotes: [{ section: "x", label: "BOGUS", text: "BOGUS" }] } as never);
       const labels = (out.legacyNotes || []).map((n) => n.label);
       return labels.includes("Kind of lift needed (before #344)") && !labels.includes("BOGUS") && JSON.stringify(existing) === before &&
-        rd("src/app/(app)/venue-assessments/[id]/actions.ts").includes("buildAssessmentSheet(printRecordFor(existing, patch))");
+        /const record = printRecordFor\(existing, patch\);[\s\S]{0,1200}buildAssessmentSheet\(record, images\)/.test(rd("src/app/(app)/venue-assessments/[id]/actions.ts")); // C7: the printed record also plans the images
     });
     t("the line set quantity seed counts only rows with a set number", () => {
       const a = MGX.migrateSurvey({ linesets: [{ id: "a", pos: "1" }, { id: "b", pos: "Ext" }, { id: "c", pos: "" }] } as unknown as MigratableSurvey);
@@ -1918,6 +1918,149 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       ok(sp.includes("describeOther?.(fileId)) setConfirmDiscard(fileId)") && sp.includes("This removes the drawing"),
         "#344 C6 fix2: discarding a failed sketch upload asks first (This removes the drawing), like a failed original photo");
     }
+  }
+  /* ---- C7: the field sheet prints photos (markup version) and sketches ---- */
+  {
+    const PDF = await import("../src/lib/pdf");
+    const VS = await import("../src/lib/venue-assessment-sheet");
+    const { createHash } = await import("node:crypto");
+    const { inflateSync } = await import("node:zlib");
+    /* the PDF with every content stream inflated and the xref (byte offsets) dropped — stable across zlib builds */
+    const inflated = (pdf: Buffer): string => {
+      const s = pdf.toString("latin1");
+      let out = "";
+      let i = 0;
+      const re = /\/Filter \/FlateDecode \/Length (\d+) >>\nstream\n/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(s))) {
+        const start = m.index + m[0].length;
+        const len = +m[1];
+        out += s.slice(i, m.index) + "<<inflated>>\n" + inflateSync(pdf.subarray(start, start + len)).toString("latin1");
+        i = start + len;
+        re.lastIndex = i;
+      }
+      return out + s.slice(i);
+    };
+    const normHash = (pdf: Buffer) => { const t = inflated(pdf); return createHash("sha256").update(t.slice(0, t.lastIndexOf("xref\n")), "latin1").digest("hex"); };
+    const imageCount = (pdf: Buffer) => (pdf.toString("latin1").match(/\/Subtype \/Image/g) || []).length;
+    /* a real 4×3 baseline JPEG (sharp) and a 2×2 PNG */
+    const JPEG = Buffer.from("/9j/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCAADAAQDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAABAb/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCWAEpn/9k=", "base64");
+    const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEklEQVQImWMQ0fggovGBAUIBAB1uBLHoQPpzAAAAAElFTkSuQmCC", "base64");
+    ok(!!PDF.jpegInfo(JPEG) && PDF.jpegInfo(JPEG)!.w === 4 && PDF.jpegInfo(PNG) === null, "#344 C7: the fixtures — a real 4×3 JPEG and a PNG");
+
+    /* text-only sheets are unchanged: hashes computed from the renderer BEFORE C7 (scripts/tmp baseline, 834043de) */
+    const c7Base = {
+      id: "FS-77", venueClass: "theatre", venue: "Hall", customer: "Acme", measurements: { stageWidth: "40" }, linesets: [{ ...blankLinesetRow(1), setName: "Main" }], linesetsEnabled: true,
+      lifeSafety: { deluge: "Yes", smokeVent: "", adaNotes: "", egressNotes: "" }, assessmentEnabled: true, assessment: blankAssessment(), templateRev: "5.1",
+      signoff: { repName: "Rep", repSignedAt: "2026-09-20", contactName: "", contactSignedAt: "", reviewerName: "", reviewerRole: "", reviewerSignedAt: "" },
+      scope: ["rigging", "curtain"], disciplines: { rigging: { present: ["Counterweight"], scope: ["New grid"], goals: "Safer rail\nQuieter", notes: "Long notes ".repeat(40) } },
+      legacyNotes: [], scheduledDate: "2026-10-01", notes: "General",
+    } as never;
+    const plain = buildAssessmentSheet(c7Base);
+    const plainPdf = PDF.renderLetterPdf(plain);
+    const emptyPlan = await VS.resolveSheetImages(VS.planSheetImages(c7Base), async () => JPEG);
+    ok(normHash(plainPdf) === "fe1ff980bb9d7dfd5dd68533406d4341ac6e912c9225ab8d3701565a40aa1a05" &&
+      normHash(PDF.renderLetterPdf({ ...plain, headerJpeg: JPEG, headerFull: true })) === "ddd54a6cf35e1abb1c998c03cd777b0e11c3958ccfbf306237fba282e48afa18" &&
+      !plainPdf.toString("latin1").includes("/XObject") && emptyPlan.length === 0 &&
+      PDF.renderLetterPdf(buildAssessmentSheet(c7Base, emptyPlan)).equals(plainPdf),
+      "#344 C7: a sheet without images renders exactly as before C7 (same content, no XObject) — with or without the letterhead");
+
+    /* two image blocks: two image XObjects + the captions */
+    const twoDoc = { ...plain, fieldSheet: { ...plain.fieldSheet!, pages: [{ title: "Photos", sections: [{ heading: "Beams — photos", rows: [], images: [
+      { jpeg: JPEG, caption: "Upstage beam (marked up)" }, { jpeg: JPEG, caption: "Rail" },
+    ] }] }] } };
+    const twoPdf = PDF.renderLetterPdf(twoDoc);
+    const twoText = inflated(twoPdf);
+    ok(imageCount(twoPdf) === 2 && twoText.includes("(Upstage beam \\(marked up\\))") && twoText.includes("(Rail)") && (twoText.match(/ Do Q/g) || []).length === 2,
+      "#344 C7: a section with two photos renders two /Subtype /Image XObjects, each drawn once, with its caption");
+    const longCap = "A very long caption ".repeat(30);
+    const capText = inflated(PDF.renderLetterPdf({ ...twoDoc, fieldSheet: { ...twoDoc.fieldSheet, pages: [{ title: "P", sections: [{ heading: "H", rows: [], images: [{ jpeg: JPEG, caption: longCap }] }] }] } }));
+    ok((capText.match(/\(A very long caption/g) || []).length === 3 && capText.includes("\x85)"),
+      "#344 C7: a photo caption wraps to at most 3 lines, the last one ending in an ellipsis");
+    const pngPdf = PDF.renderLetterPdf({ ...twoDoc, fieldSheet: { ...twoDoc.fieldSheet, pages: [{ title: "P", sections: [{ heading: "H", rows: [], images: [{ jpeg: PNG, caption: "A PNG" }] }] }] } });
+    ok(imageCount(pngPdf) === 0 && inflated(pngPdf).includes("A PNG"), "#344 C7: the renderer never embeds bytes that aren't a JPEG — it prints the caption as text");
+    const manyPdf = PDF.renderLetterPdf({ ...twoDoc, fieldSheet: { ...twoDoc.fieldSheet, pages: [{ title: "P", sections: [{ heading: "H", rows: [],
+      images: Array.from({ length: 9 }, (_, i) => ({ jpeg: JPEG, caption: `S${i}`, full: true })) }] }] } });
+    ok(imageCount(manyPdf) === 9 && (manyPdf.toString("latin1").match(/\/Type \/Page /g) || []).length >= 5 && inflated(manyPdf).includes("(P \\(continued\\))"),
+      "#344 C7: full-width sketches page-break when a block doesn't fit (the page title redraws as continued)");
+
+    /* the plan: only what the editor shows */
+    const pend = { pending: true as const };
+    const done = (id: string) => ({ blobPath: `surveys/FS-78/${id}.jpg` });
+    const planRec = {
+      id: "FS-78", scope: ["curtain"], disciplines: { rigging: { present: ["Dead-hung"] } }, assessmentEnabled: false, linesets: [],
+      photoRefs: [
+        { id: "p_aaaaaaaaaaaa", section: "mBeams", takenAt: 1, by: "u", file: done("p_aaaaaaaaaaaa"), caption: "hidden beams" },
+        { id: "p_bbbbbbbbbbbb", section: "mLayout", takenAt: 2, by: "u", file: done("p_bbbbbbbbbbbb"), caption: "Stage left",
+          markup: { id: "m_cccccccccccc", image: done("m_cccccccccccc"), strokes: pend, updatedAt: 3 } },
+        { id: "p_dddddddddddd", section: "assessmentFindings", takenAt: 3, by: "u", file: done("p_dddddddddddd") },
+        { id: "p_eeeeeeeeeeee", section: "dCurtain", takenAt: 4, by: "u", file: done("p_eeeeeeeeeeee") },
+      ],
+      sketches: {
+        stagePlan: { id: "s_111111111111", image: done("s_111111111111"), strokes: pend, updatedAt: 1, by: "u" },
+        beams: { id: "s_222222222222", image: done("s_222222222222"), strokes: pend, updatedAt: 1, by: "u" },
+        cwElevation: { id: "s_333333333333", image: done("s_333333333333"), strokes: pend, updatedAt: 1, by: "u" },
+      },
+      photos: [{ id: "old1", name: "IMG_1.jpg", dataUrl: "data:image/jpeg;base64," + JPEG.toString("base64") }],
+    };
+    const plan = VS.planSheetImages(planRec as never);
+    ok(plan.map((p) => p.id).join(",") === "photo:p_bbbbbbbbbbbb,sketch:stagePlan,photo:p_eeeeeeeeeeee,earlier:old1" &&
+      plan[0].fileIds.join() === "m_cccccccccccc,p_bbbbbbbbbbbb" && plan[1].fileIds.join() === "s_111111111111" && plan[1].full && !plan[0].full &&
+      plan[1].caption === "Stage plan sketch" && plan[0].caption === "Stage left",
+      "#344 C7: the plan prints only what the editor shows — no photos in hidden sections (out of scope, assessment off), no gated-out sketches; the markup first, then the original; sketches full width with the pad title");
+    const cwPlan = VS.planSheetImages({ ...planRec, scope: ["rigging"], disciplines: { rigging: { present: ["Counterweight"] } } } as never);
+    ok(["sketch:beams", "sketch:cwElevation", "photo:p_aaaaaaaaaaaa"].every((id) => cwPlan.some((p) => p.id === id)), "#344 C7: in scope, Beams photos and the counterweight sketches print");
+
+    /* resolving: markup → original fallback, non-JPEG listed, missing listed, a throwing loader never throws, concurrency ≤ 4 */
+    let inFlight = 0;
+    let peak = 0;
+    const calls: string[] = [];
+    const resolved = await VS.resolveSheetImages(plan, async (fileId) => {
+      calls.push(fileId);
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+      if (fileId === "m_cccccccccccc") return null; // markup not uploaded yet → the original prints
+      if (fileId === "s_111111111111") return PNG;
+      if (fileId === "p_eeeeeeeeeeee") throw new Error("blob down");
+      return JPEG;
+    });
+    const by = (id: string) => resolved.find((r) => r.id === id)!;
+    ok(by("photo:p_bbbbbbbbbbbb").jpeg?.equals(JPEG) === true && calls.includes("p_bbbbbbbbbbbb") &&
+      by("sketch:stagePlan").skipped === "not-jpeg" && !by("sketch:stagePlan").jpeg &&
+      by("photo:p_eeeeeeeeeeee").skipped === "unavailable" && by("earlier:old1").jpeg?.equals(JPEG) === true && peak <= 4,
+      "#344 C7: resolve — a missing markup falls back to the original; a non-JPEG is listed, a failed load is listed (never thrown); at most 4 loads at once");
+    const sheet = buildAssessmentSheet(planRec as never, resolved);
+    const secs = sheet.fieldSheet!.pages.flatMap((p) => p.sections.map((s) => ({ page: p.title, s })));
+    const layout = secs.find((x) => (x.s.images?.length ?? 0) > 0 && x.s.heading.startsWith("Stage layout"));
+    const earlier = secs.find((x) => x.s.heading === "Earlier photos");
+    const curtain = secs.find((x) => x.s.heading.startsWith("Curtain"))!;
+    ok(!!layout && layout.page.endsWith("Site & access") && layout.s.images!.length === 1 && layout.s.images![0].caption === "Stage left" &&
+      layout.s.rows.some((r) => r.label === "Sketch" && r.value.startsWith("Stage plan sketch")) &&
+      !!earlier && earlier.page.endsWith("Project notes") && earlier.s.images!.length === 1 &&
+      secs.some((x) => x.page === curtain.page && x.s.rows.some((r) => r.label === "Photo" && /not available/.test(r.value))),
+      "#344 C7: images sit on their section's page (layout photos on Site & access, Earlier photos on Project notes); a skipped image is a text row");
+    const sheetPdf = PDF.renderLetterPdf(sheet);
+    ok(imageCount(sheetPdf) === 2 && inflated(sheetPdf).includes("(Stage left)"), "#344 C7: the printed sheet embeds exactly the JPEGs that resolved");
+
+    /* budget: past it, the rest are listed */
+    const many = Array.from({ length: 5 }, (_, i) => ({ id: `p_${String(i).repeat(12)}`, section: "mLayout", takenAt: i, by: "u", file: done(`p_${String(i).repeat(12)}`), caption: `Shot ${i}` }));
+    const bigPlan = VS.planSheetImages({ id: "FS-78", photoRefs: many } as never);
+    const capped = await VS.resolveSheetImages(bigPlan, async () => JPEG, { budget: JPEG.length * 2 + 1 });
+    const cappedSheet = buildAssessmentSheet({ id: "FS-78", photoRefs: many } as never, capped);
+    const cappedPdf = PDF.renderLetterPdf(cappedSheet);
+    const listed = cappedSheet.fieldSheet!.pages.flatMap((p) => p.sections).flatMap((s) => s.rows).filter((r) => r.label === "Photo" && /image limit/.test(r.value));
+    ok(VS.SHEET_IMAGE_BUDGET === 20 * 1024 * 1024 && capped.filter((r) => r.jpeg).length === 2 && capped.slice(2).every((r) => r.skipped === "over-budget") &&
+      imageCount(cappedPdf) === 2 && listed.map((r) => r.value.split(" — ")[0]).join() === "Shot 2,Shot 3,Shot 4",
+      "#344 C7: the images share a 20 MB budget — past it the rest are listed by caption, not embedded");
+
+    /* the action resolves bytes on the server */
+    const act7 = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/actions.ts"), "utf8");
+    const ps7 = act7.slice(act7.indexOf("export async function printSurveySheet"), act7.indexOf("export async function advanceSurveyStage"));
+    ok(ps7.includes("planSheetImages(") && ps7.includes("resolveSheetImages(") && ps7.includes("surveyFileBytes(existing") && /buildAssessmentSheet\(record, images\)/.test(ps7) &&
+      /from "@\/lib\/field-files\/file-bytes"/.test(act7),
+      "#344 C7: printSurveySheet plans from the printed record, loads bytes with surveyFileBytes (the stored slot first) and passes them to the sheet");
   }
 }
 

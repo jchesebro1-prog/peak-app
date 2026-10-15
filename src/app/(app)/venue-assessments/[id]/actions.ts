@@ -15,7 +15,8 @@ import {
 } from "@/lib/stores/surveys";
 import { create as createQuote } from "@/lib/stores/quotes";
 import { getSettings } from "@/lib/settings";
-import { buildAssessmentSheet } from "@/lib/venue-assessment-sheet";
+import { buildAssessmentSheet, planSheetImages, resolveSheetImages } from "@/lib/venue-assessment-sheet";
+import { surveyFileBytes } from "@/lib/field-files/file-bytes";
 import { printRecordFor } from "@/lib/survey-migrate";
 import { renderLetterPdf } from "@/lib/pdf";
 import { letterheadJpeg } from "@/lib/renewal-outreach";
@@ -138,7 +139,19 @@ export async function printSurveySheet(id: string, patch: SurveyPatch) {
   const settings = await getSettings();
   const header = await letterheadJpeg(settings);
   /* migrate the merged draft so a print of unsaved edits shows the Older notes those edits produce */
-  const doc = buildAssessmentSheet(printRecordFor(existing, patch));
+  const record = printRecordFor(existing, patch);
+  /* #344 C7: photos (markup first) and sketches, loaded here — the stored slot first (the server may have finished a
+     file the editor still shows pending), else the draft's; a missing or failed file is listed, never thrown */
+  const loadFile = async (fileId: string): Promise<Buffer | null> => {
+    try {
+      return (await surveyFileBytes(existing, fileId))?.bytes ?? (await surveyFileBytes(record, fileId))?.bytes ?? null;
+    } catch (e) {
+      console.error("printSurveySheet: image load failed", fileId, e);
+      return null;
+    }
+  };
+  const images = await resolveSheetImages(planSheetImages(record), loadFile);
+  const doc = buildAssessmentSheet(record, images);
   doc.companyName = settings.companyName;
   doc.accent = settings.accent;
   doc.headerJpeg = header.jpeg;
