@@ -76,7 +76,14 @@ export async function vendorThreadsFor(
   if (!vendorCompanyIds.size || (!records.quoteId && !records.projectId)) return [];
   const rows = await listDocsWhere<CommThread & Doc>(
     "comms",
-    { all: [{ any: [linkCond("quote", records.quoteId), linkCond("project", records.projectId)] }, canSeeThreadCond(viewer), { path: ["status"], isNot: "draft" }] },
+    {
+      all: [
+        { any: [linkCond("quote", records.quoteId), linkCond("project", records.projectId)] },
+        { any: [...vendorCompanyIds].map((id) => ({ path: ["customerId"], is: id })) },
+        canSeeThreadCond(viewer),
+        { path: ["status"], isNot: "draft" },
+      ],
+    },
     { limit: 200 }
   );
   return rows.filter((t) => canSeeThread(t, viewer) && isListedVendorThread(t, vendorCompanyIds)).map((t) => vendorThreadRow({ ...t, customerId: t.customerId as string }));

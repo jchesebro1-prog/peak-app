@@ -25,7 +25,8 @@ import {
   quoteNumberFromSubject,
   threadAttachmentHref,
 } from "@/lib/vendor-quotes/rules";
-import type { VendorPrefill } from "@/lib/vendor-quotes/vm";
+import { loadVendorsPanel } from "@/lib/vendor-quotes/threads-server";
+import type { VendorPrefill, VendorsPanelResult } from "@/lib/vendor-quotes/vm";
 import { VENDOR_ATTACHMENT_BUDGET } from "./types";
 
 export async function vendorQuoteFromThreadAction(input: {
@@ -88,4 +89,18 @@ export async function vendorQuoteFromThreadAction(input: {
       note,
     },
   };
+}
+
+/** The Vendors card's server half: vendor companies (names) and the vendor threads the viewer may see. Never the raw
+    vendor quotes (their data-URLs) — the card reads the live editor state for those. */
+export async function vendorsPanelAction(quoteId: string): Promise<VendorsPanelResult> {
+  const user = await requireUser();
+  if (typeof quoteId !== "string" || !quoteId) return { ok: false, error: "That estimate wasn't found." };
+  try {
+    const { companies, threads } = await loadVendorsPanel({ quoteId }, await mailboxViewer(user));
+    return { ok: true, companies, threads };
+  } catch (err) {
+    console.error("[vendor-quotes] vendors panel failed", quoteId, err);
+    return { ok: false, error: "Couldn't load the vendors. Try again." };
+  }
 }
