@@ -6,6 +6,7 @@ import { get as getQuote } from "@/lib/stores/quotes";
 import { getCart } from "@/lib/stores/portal-carts";
 import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { portalOnlineEstimateState, portalQuotePdfSource } from "@/lib/quote-pdf/portal-access";
+import { portalBidRowsFor } from "@/lib/parties/portal-bid-server";
 import { loadQuoteDocumentProps } from "@/lib/quote-pdf/document-loader";
 import { ONLINE_COPY, onlineHeaderLine, onlineView } from "@/lib/quote-share/view";
 import { OnlineEstimateCard, OnlineEstimateView } from "@/components/online-estimate/online-estimate";
@@ -35,6 +36,11 @@ function one(v: string | string[] | undefined): string {
  * document (lost = closed banner), the being-revised card, or one 200 card
  * for everything else (unknown, another customer's, never sent, service) —
  * nothing hints whether the quote exists. Read-only.
+ *
+ * #348 slice 6 — a GC/EC bidder company sees its OWN addressed revision (the
+ * bidder rule in portal-access over its rows from portalBidRowsFor): the
+ * document addressed to it, its own PDF, no other bidder named. Refusals are
+ * the same unavailable card.
  */
 export default async function PortalQuotePage({
   params,
@@ -60,7 +66,9 @@ export default async function PortalQuotePage({
     // The nav's Cart (N) — never read in a team preview.
     preview ? Promise.resolve(null) : getCart(session.grantId, cid),
   ]);
-  const state = q ? portalOnlineEstimateState(q, cid) : ({ kind: "unavailable" } as const);
+  // #348 slice 6: this company's bidder rows on the quote ([] without a read for the quote's own customer).
+  const bids = q ? await portalBidRowsFor(q, cid) : [];
+  const state = q ? portalOnlineEstimateState(q, cid, bids) : ({ kind: "unavailable" } as const);
   const pv = preview ? `preview=${encodeURIComponent(cid)}` : "";
   const withQs = (path: string, extra = "") => {
     const qs = [extra, pv].filter(Boolean).join("&");
@@ -88,6 +96,8 @@ export default async function PortalQuotePage({
   const docProps = await loadQuoteDocumentProps(q, {
     revision: state.rev,
     photos: { href: (docId) => withQs(`${base}/photo/${encodeURIComponent(docId)}`) },
+    // A bidder's page is addressed to that bidder (strict: no valid bidder row → null → the unavailable card).
+    ...(state.bidder ? { bidderPartyId: state.bidder.partyId } : {}),
   });
   // The loader fails closed (null) unless given this quote's own sent revision.
   if (!docProps) return shell(<OnlineEstimateCard title={ONLINE_COPY.portalUnavailable} backHref={backHref} />);
@@ -102,7 +112,7 @@ export default async function PortalQuotePage({
         closed={state.closed}
         narrativeHref={withQs(base)}
         bomHref={withQs(base, "view=bom")}
-        pdfHref={portalQuotePdfSource(q, cid) ? withQs(base + "/pdf") : null}
+        pdfHref={state.bidder || portalQuotePdfSource(q, cid) ? withQs(base + "/pdf") : null}
         backHref={backHref}
       />
       {cutSheets && <OnlineCutSheets loaded={cutSheets} letterheadSrc={letterhead.src} />}

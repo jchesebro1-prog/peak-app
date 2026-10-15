@@ -1,0 +1,73 @@
+/* #348 slice 6 — the ONLY portal code that reads `record_parties`. Portal routes and pages import this module, never
+   stores/parties, stores/bids or addressee-server (pinned). The rule itself is pure (portal-bid.ts, composed by
+   quote-pdf/portal-access.ts); this module loads the rows it decides over and serves the bidder's own PDF. */
+import { attachmentDisposition } from "@/lib/document-files";
+import { getCompany } from "@/lib/identity/companies";
+import { bidderPdfFileName } from "@/lib/parties/addressee";
+import { bidderPartyFor } from "@/lib/parties/addressee-server";
+import type { PortalBidRow } from "@/lib/parties/portal-bid";
+import type { Party } from "@/lib/parties/rules";
+import { renderBidderPdf } from "@/lib/quote-pdf/bidder-pdf-server";
+import { rateLimit } from "@/lib/rate-limit";
+import { listFor, listForCompany } from "@/lib/stores/parties";
+import type { Quote } from "@/lib/stores/quotes";
+
+/** Only the fields the rule reads — the portal never holds a party's contact, author or timestamps. */
+function toRow(p: Party): PortalBidRow {
+  return { id: p.id, recordType: p.recordType, recordId: p.recordId, companyId: p.companyId, role: p.role, bid: p.bid };
+}
+
+/** A live GC/EC quote bidder row of this company (the pure rule re-checks every one of these). */
+function isCompanyBidRow(p: Party, cid: string): boolean {
+  return !!p && !!p.id && p.recordType === "quote" && p.companyId === cid && (p.role === "gc" || p.role === "ec") && !!p.bid;
+}
+
+/** This company's bidder rows on one quote — [] without a read when cid is the quote's customer (or empty). */
+export async function portalBidRowsFor(q: Pick<Quote, "id" | "customerId">, cid: string): Promise<PortalBidRow[]> {
+  if (!cid || !q?.id || q.customerId === cid) return [];
+  const rows = await listFor("quote", q.id);
+  return rows.filter((p) => p.recordId === q.id && isCompanyBidRow(p, cid)).map(toRow);
+}
+
+/** Every quote bidder row of this company (listForCompany — indexed), for Home. */
+export async function portalBidRowsForCompany(cid: string): Promise<PortalBidRow[]> {
+  if (!cid) return [];
+  return (await listForCompany(cid)).filter((p) => isCompanyBidRow(p, cid)).map(toRow);
+}
+
+export const PORTAL_BID_PDF_PER_MIN = 6;
+
+const text = (body: string, status: number) =>
+  new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "private, no-store" } });
+
+async function bidderCompanyName(partyId: string, quoteId: string): Promise<string> {
+  const party = await bidderPartyFor(quoteId, partyId);
+  return party ? ((await getCompany(party.companyId))?.name ?? "") : "";
+}
+
+/** The bidder's PDF response: rate limit (key by grant, or `preview:<cid>`) → render(q.id, partyId, host, proto, { rev })
+ *  → inline application/pdf, nosniff, private no-store, file name bidderPdfFileName(src.name, companyName, src.rev)
+ *  (the revision's name — never a later one). 404 → "Not found"; 503/500 → the render's text. */
+export async function portalBidPdfResponse(
+  req: Request,
+  src: { partyId: string; rev: number; name: string },
+  ctx: { quoteId: string; rlKey: string },
+  deps: { render?: typeof renderBidderPdf; companyName?: (partyId: string) => Promise<string> } = {}
+): Promise<Response> {
+  if (!rateLimit(ctx.rlKey, PORTAL_BID_PDF_PER_MIN, 60_000).ok) return text("Too many requests", 429);
+  const h = req.headers;
+  const render = deps.render ?? renderBidderPdf;
+  const r = await render(ctx.quoteId, src.partyId, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"), { rev: src.rev });
+  if (!r.ok) return text(r.status === 404 ? "Not found" : r.error, r.status);
+  const companyName = deps.companyName ? await deps.companyName(src.partyId) : await bidderCompanyName(src.partyId, ctx.quoteId);
+  // The revision's own name and number — the render's file name follows the live quote, so it is never used here.
+  const disposition = attachmentDisposition(bidderPdfFileName(src.name, companyName, src.rev));
+  return new Response(new Uint8Array(r.pdf), {
+    headers: {
+      "content-type": "application/pdf",
+      "content-disposition": "inline" + disposition.slice("attachment".length),
+      "x-content-type-options": "nosniff",
+      "cache-control": "private, no-store",
+    },
+  });
+}

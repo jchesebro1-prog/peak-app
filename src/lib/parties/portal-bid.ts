@@ -42,13 +42,15 @@ export function portalBidCandidates(q: Pick<Quote, "revisions">, row: PortalBidR
   for (const r of revs) {
     if (!r || r.reason !== "sent") continue;
     if (sentOk && r.rev === revSent) out.push({ rev: r, via: "sent" });
-    else if (r.docFields?.awardedPartyId === row.id) out.push({ rev: r, via: "award" });
+    // A row without an id never matches (undefined === undefined on a revision frozen without an award).
+    else if (row.id && r.docFields?.awardedPartyId === row.id) out.push({ rev: r, via: "award" });
   }
   return out;
 }
 
 /**
  * The bidder rule. Unavailable unless ALL hold:
+ *  - the row has an id;
  *  - cid non-empty and q.customerId !== cid (the customer rules decide the customer — never this one);
  *  - not Daylite history; pdf kind "quote" (system estimates);
  *  - a row with recordType "quote", recordId === q.id, companyId === cid, role gc|ec, bid set, result pending|awarded;
@@ -66,7 +68,7 @@ export function portalBidState(q: BidQuote, cid: string, rows: readonly PortalBi
   const awardedId = q.bid?.awardedPartyId || null;
   let best: { row: PortalBidRow; cand: Candidate; at: number } | null = null;
   for (const row of rows) {
-    if (!row || row.recordType !== "quote" || row.recordId !== q.id || row.companyId !== cid) continue;
+    if (!row || !row.id || row.recordType !== "quote" || row.recordId !== q.id || row.companyId !== cid) continue;
     if (row.role !== "gc" && row.role !== "ec") continue;
     const result = row.bid?.result;
     if (result !== "pending" && result !== "awarded") continue;

@@ -11351,7 +11351,7 @@ import { inboxOrgPureChecks, inboxOrgDbChecks, inboxOrgPipelineChecks, inboxOrgA
 import { popoutPureChecks } from "./test-popout";
 import { assessmentChecks, assessmentDbChecks } from "./test-assessments";
 import { partyChecks, partyDbChecks } from "./test-parties";
-import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, portalBidPureChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
+import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, portalBidPureChecks, portalBidDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
 import { vendorChecks, vendorDbChecks, vendorPdfDbChecks, vendorPdfPureChecks, vendorPdfFillChecks } from "./test-vendors";
 import { oct15PureChecks, oct15DbChecks } from "./test-oct15-estimating";
 import { vaNotesChecks, vaNotesDbChecks } from "./test-va-notes";
@@ -11729,7 +11729,7 @@ seeded()
   .then(() => popoutPureChecks(ok))
   .then(() => assessmentChecks(ok)).then(() => assessmentDbChecks(ok))
   .then(() => partyChecks(ok)).then(() => partyDbChecks(ok))
-  .then(() => bidChecks(ok)).then(() => bidDbChecks(ok)).then(() => bidSendChecks(ok)).then(() => bidSendFakeChecks(ok)).then(() => bidSendDbChecks(ok)).then(() => bidFollowupChecks(ok)).then(() => bidFollowupDbChecks(ok)).then(() => vendorChecks(ok)).then(() => vendorDbChecks(ok)).then(() => vendorPdfDbChecks(ok)).then(() => vendorPdfPureChecks(ok)).then(() => vendorPdfFillChecks(ok)).then(() => portalBidPureChecks(ok))
+  .then(() => bidChecks(ok)).then(() => bidDbChecks(ok)).then(() => bidSendChecks(ok)).then(() => bidSendFakeChecks(ok)).then(() => bidSendDbChecks(ok)).then(() => bidFollowupChecks(ok)).then(() => bidFollowupDbChecks(ok)).then(() => vendorChecks(ok)).then(() => vendorDbChecks(ok)).then(() => vendorPdfDbChecks(ok)).then(() => vendorPdfPureChecks(ok)).then(() => vendorPdfFillChecks(ok)).then(() => portalBidPureChecks(ok)).then(() => portalBidDbChecks(ok))
   .then(() => oct15PureChecks(ok)).then(() => oct15DbChecks(ok))
   .then(() => vaNotesChecks(ok)).then(() => vaNotesDbChecks(ok))
   .then(() => batch3PureChecks(ok)).then(() => batch3DbChecks(ok))
@@ -49274,7 +49274,7 @@ import { portalOnlineEstimateState as n293tPortalState } from "@/lib/quote-pdf/p
   const comp = rd("src/components/online-estimate/online-estimate.tsx");
   ok(!/["']use client["']/.test(page) && !/["']use client["']/.test(comp) && noClientImports("src/app/portal/quotes/[id]/page.tsx") && noClientImports("src/components/online-estimate/online-estimate.tsx"),
     "#293t portal page: server-rendered; no client component it imports can receive the quote's data");
-  ok(page.indexOf("resolvePortalViewer(") > -1 && page.indexOf("resolvePortalViewer(") < page.indexOf("getQuote(") && page.includes("portalOnlineEstimateState(q, cid)") &&
+  ok(page.indexOf("resolvePortalViewer(") > -1 && page.indexOf("resolvePortalViewer(") < page.indexOf("getQuote(") && page.includes("portalOnlineEstimateState(q, cid, bids)") &&
      page.includes("loadQuoteDocumentProps(q, {") && page.includes("revision: state.rev,") && page.includes("ONLINE_COPY.portalUnavailable") && page.includes("ONLINE_COPY.revising") && page.includes("<PortalSignedOut"),
     "#293t portal page: the viewer first, then the one state rule; the sent revision; the signed-out, unavailable and revising cards");
   ok(!page.includes("notFound(") && !/\b(update|patchShareLink|ensureShareLink|revokeShareLink|addQuoteRevision|setStatus|mergeUpsert)\(/.test(page),
@@ -49283,7 +49283,7 @@ import { portalOnlineEstimateState as n293tPortalState } from "@/lib/quote-pdf/p
      (comp.match(/prefetch=\{false\}/g) || []).length >= 3 && comp.includes("ONLINE_COPY.closed") && comp.includes("<style>{QUOTE_WEB_CSS}</style>"),
     "#293t online view: the web document, a server-side BOM transform behind two plain links, the closed banner");
   const photo = rd("src/app/portal/quotes/[id]/photo/[docId]/route.ts");
-  ok(photo.includes("resolvePortalViewer(") && /rateLimit\(rlKey, 300, 60_000\)/.test(photo) && photo.includes("portalOnlineEstimateState(q, session.customerId)") &&
+  ok(photo.includes("resolvePortalViewer(") && /rateLimit\(rlKey, 300, 60_000\)/.test(photo) && photo.includes("portalOnlineEstimateState(q, session.customerId, bids)") &&
      photo.includes("servePhotoForRevision(req, state.rev, docId)") && photo.includes("`portal-photo:${session.grantId}`"),
     "#293t portal photos: a portal viewer, 300/min per grant, the quote's own sent revision, only its printed photos");
   const row = rd("src/app/portal/quote-row.tsx");

@@ -1,6 +1,6 @@
 /* #348 slice 2a — bids harness checks. `bidChecks` is pure; `bidDbChecks` needs the test DB (Task 2 fills it).
    Run the pure half alone with `npx tsx scripts/test-bids.ts`. */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import {
@@ -32,13 +32,16 @@ import { factLabel, pointsFor } from "../src/lib/triage/rank";
 import type { Quote } from "../src/lib/stores/quotes";
 import { portalBidCandidates, portalBidChip, portalBidDueAt, portalBidList, portalBidState, PORTAL_BID_COPY, type PortalBidRow } from "../src/lib/parties/portal-bid";
 import { portalBidPdfSource, portalOnlineEstimateState } from "../src/lib/quote-pdf/portal-access";
+import { portalBidPdfResponse, portalBidRowsFor, portalBidRowsForCompany, PORTAL_BID_PDF_PER_MIN } from "../src/lib/parties/portal-bid-server";
+import { acceptPortal, copyToCart, PORTAL_NOT_FOUND_COPY, refreshPortalQuote, renamePortalQuote } from "../src/lib/portal-quotes";
+import { serviceRequestFromQuoteId } from "../src/lib/portal-service-quotes";
 import { like } from "drizzle-orm";
 import { getDb } from "../src/db";
 import { companies, contactEmails, contacts as contactsTable } from "../src/db/schema";
 import { saveCompany } from "../src/lib/identity/companies";
 import { saveContact, setEmails } from "../src/lib/identity/contacts";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
-import { addQuoteRevision, buildQuote, get as getQuote, revisionDocFields, setStatus, type QuoteRevision } from "../src/lib/stores/quotes";
+import { addQuoteRevision, buildQuote, get as getQuote, portalListsQuote, revisionDocFields, setStatus, update as updateQuote, type QuoteRevision } from "../src/lib/stores/quotes";
 import { getProjectByQuote } from "../src/lib/stores/projects";
 import { autoTaskId } from "../src/lib/stores/tasks";
 import { addParty, listFor, setPartyBid, setPartyContact } from "../src/lib/stores/parties";
@@ -1272,6 +1275,18 @@ export function portalBidPureChecks(ok: Ok) {
   ok(st(mk(), "CA", [row("A", "CA", "gc", { revSent: 999 })]).kind === "unavailable", "portal-bid: an unknown revSent is unavailable");
   ok(st(mk(), "CA", [row("A", "CA", "gc", null)]).kind === "unavailable", "portal-bid: a row without bid state is unavailable");
   ok(portalBidCandidates(mk(), row("A", "CA", "gc", { revSent: null })).length === 0, "portal-bid: no candidates without a delivered revision or a frozen one");
+  // #348 slice 6 task 2 — a row with no id never matches a revision frozen without an award (undefined === undefined).
+  {
+    const df = { docFields: { customer: "Owner" } };
+    const qNoAward = mk({}, [rev(1, "sent", df), rev(2, "sent", df)]);
+    for (const id of [undefined, ""]) {
+      const r = row("x", "CA", "gc", { revSent: null }, { id });
+      ok(portalBidCandidates(qNoAward, r).length === 0 && st(qNoAward, "CA", [r]).kind === "unavailable",
+        `portal-bid: a row with id ${JSON.stringify(id)} has no award candidates and is unavailable`);
+    }
+    const rSent = row("x", "CA", "gc", { revSent: 1 }, { id: undefined });
+    ok(st(qNoAward, "CA", [rSent]).kind === "unavailable", "portal-bid: a row without an id is skipped even with a delivered revision");
+  }
   // Never a later unsent revision.
   ok(s.kind === "ok" && s.bid.rev.rev !== 3, "portal-bid: never a later revision sent to others");
   // Excluded results.
@@ -1387,6 +1402,248 @@ export function portalBidPureChecks(ok: Ok) {
     const src = readFileSync(join(__dirname, "../src/lib/parties/portal-bid.ts"), "utf8");
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
     ok(!/import (?!type)[^;]*@\/lib\/stores/.test(code) && !/@\/db|node:|-server/.test(code), "portal-bid: no store value import, no db, node: or -server");
+  }
+}
+
+const I_FIX = {
+  own: fixtureId(348, "iown"), gc1: fixtureId(348, "igc1"), gc2: fixtureId(348, "igc2"), gc3: fixtureId(348, "igc3"), gc4: fixtureId(348, "igc4"),
+  oth: fixtureId(348, "ioth"), ct1: fixtureId(348, "ict1"), ct2: fixtureId(348, "ict2"),
+};
+async function dropPortalBidIdentityFixtures() {
+  const db = await getDb();
+  await db.delete(contactEmails).where(like(contactEmails.contactId, "TEST348:i%"));
+  await db.delete(contactsTable).where(like(contactsTable.id, "TEST348:i%"));
+  await db.delete(companies).where(like(companies.id, "TEST348:i%"));
+}
+
+/** #348 slice 6 task 2 — the portal loader, the three portal quote routes' rule and the bidder PDF response, against the DB. */
+export async function portalBidDbChecks(ok: Ok) {
+  const { own, gc1, gc2, gc3, gc4, oth, ct1, ct2 } = I_FIX;
+  const iq = fixtureId(348, "iq");
+  const NAMES = { own: "Portal Owner I", gc1: "Portal GC One I", gc2: "Portal GC Two I", gc3: "Portal GC Three I", gc4: "Portal GC Four I", oth: "Portal Other I" };
+  const regAll = async () => {
+    for (const p of await listFor("quote", iq)) registerFixture("record_parties", p.id);
+    const proj = await getProjectByQuote(iq).catch(() => null);
+    if (proj) {
+      registerFixture("projects", proj.id);
+      registerFixture("tasks", autoTaskId(`item16:sold:${proj.id}`));
+      for (const p of await listFor("project", proj.id)) registerFixture("record_parties", p.id);
+    }
+  };
+  const ses = (cid: string) => ({ grantId: "PG-i", customerId: cid, name: "T", email: "t@i.test" });
+  const T = Date.UTC(2034, 2, 10);
+  const sentRevs = (q: Quote | null) => (q?.revisions ?? []).filter((r) => r.reason === "sent");
+  const stateFor = async (cid: string) => {
+    const q = (await getQuote(iq))!;
+    const rows = await portalBidRowsFor(q, cid);
+    return { q, rows, s: portalOnlineEstimateState(q, cid, rows), pdf: portalBidPdfSource(q, cid, rows), list: portalBidList([q], cid, rows) };
+  };
+  const listed = (l: ReturnType<typeof portalBidList>) => l.open.length + l.history.length;
+  try {
+    await dropPortalBidIdentityFixtures();
+    for (const k of ["own", "gc1", "gc2", "gc3", "gc4", "oth"] as const) {
+      await saveCompany({ id: I_FIX[k], name: NAMES[k], type: "customer", lifecycle: "active", deleted: false });
+    }
+    await saveContact({ id: ct1, firstName: "Ivy", lastName: "One", homeCompanyId: gc1 });
+    await setEmails(ct1, [{ value: "ivy@i.test", label: "work", isPrimary: true }] as never);
+    await saveContact({ id: ct2, firstName: "Ike", lastName: "Two", homeCompanyId: gc2 });
+    await setEmails(ct2, [{ value: "ike@i.test", label: "work", isPrimary: true }] as never);
+    const NOW = Date.now();
+    await createFixture("quotes", buildQuote(iq, { name: "Portal bid quote", customer: NAMES.own, customerId: own, value: 1000 } as never, "system", null, NOW) as never);
+    const added = [
+      await addBidder({ quoteId: iq, companyId: gc1, contactId: ct1, role: "gc" }, "u"),
+      await addBidder({ quoteId: iq, companyId: gc2, contactId: ct2, role: "gc" }, "u"),
+      await addBidder({ quoteId: iq, companyId: gc3, role: "gc" }, "u"),
+      await addBidder({ quoteId: iq, companyId: gc4, role: "gc" }, "u"),
+    ];
+    await regAll();
+    if (!added.every((a) => a.ok)) throw new Error("portal bidders missing");
+    const [p1, p2, p3, p4] = added.map((a) => (a.ok ? a.party.id : ""));
+    await setStatus(iq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    const r1 = sentRevs(await getQuote(iq)).at(-1)!.rev;
+    const send = (pid: string, rev: number) => recordBidderSend(iq, pid, { threadId: `C-i-${pid}-${rev}`, rev, at: T, by: "Test", to: "x@i.test" }, { kind: "sent" }, "u1");
+    for (const pid of [p1, p2, p3]) await send(pid, r1);
+    await updateBidder(p3, { result: "withdrew" });
+
+    // Loader.
+    {
+      const q = (await getQuote(iq))!;
+      const rows1 = await portalBidRowsFor(q, gc1);
+      ok(rows1.length === 1 && rows1[0].id === p1 && rows1.every((r) => r.companyId === gc1 && r.recordType === "quote" && r.recordId === iq && !!r.bid),
+        "portal-bid db: portalBidRowsFor returns only this company's bidder rows on the quote");
+      ok(!("contactId" in rows1[0]) && !("createdBy" in rows1[0]), "portal-bid db: the loader hands the portal only the rule's fields");
+      ok((await portalBidRowsFor(q, own)).length === 0 && (await portalBidRowsFor(q, "")).length === 0 && (await portalBidRowsFor(q, oth)).length === 0,
+        "portal-bid db: the owner, an empty company and a stranger get no rows");
+      const byCo = await portalBidRowsForCompany(gc1);
+      ok(byCo.some((r) => r.id === p1) && byCo.every((r) => r.companyId === gc1 && r.recordType === "quote" && !!r.bid && (r.role === "gc" || r.role === "ec")),
+        "portal-bid db: portalBidRowsForCompany lists this company's quote bidder rows only");
+      ok((await portalBidRowsForCompany("")).length === 0, "portal-bid db: no company, no rows");
+      const rows4 = await portalBidRowsFor(q, gc4);
+      ok(rows4.length === 1 && rows4[0].id === p4 && rows4[0].bid?.revSent == null, "portal-bid db: a never-sent bidder's row loads — the rule, not the loader, refuses it");
+    }
+
+    // 1. A sent bidder sees its delivered revision.
+    {
+      const { s, pdf } = await stateFor(gc1);
+      ok(s.kind === "ok" && s.bidder?.partyId === p1 && s.rev.rev === r1 && pdf?.partyId === p1 && pdf.rev === r1, "portal-bid db: gc1 sees r1 (state and PDF source)");
+    }
+    // 2. Refused, the same as missing.
+    for (const [cid, label] of [[gc4, "never sent"], [gc3, "withdrew"], [oth, "a stranger"]] as const) {
+      const { s, pdf, list } = await stateFor(cid);
+      ok(s.kind === "unavailable" && pdf === null && listed(list) === 0, `portal-bid db: ${label} is unavailable, with no PDF`);
+    }
+    {
+      const missing = fixtureId(348, "imissing");
+      ok((await getQuote(missing)) === null && (await portalBidRowsFor({ id: missing, customerId: own }, gc1)).length === 0, "portal-bid db: an unknown quote id has no quote and no rows");
+    }
+    // 9. No other bidder named on gc1's addressed page.
+    {
+      const q = (await getQuote(iq))!;
+      const rev1 = q.revisions!.find((r) => r.rev === r1 && r.reason === "sent")!;
+      const props = await loadQuoteDocumentProps(q, { revision: rev1, photos: { href: (d) => d }, bidderPartyId: p1 });
+      const json = JSON.stringify(props);
+      ok(!!props && props.custName === NAMES.gc1 && !json.includes(NAMES.gc2) && !json.includes(NAMES.gc3) && props.rewardsLine === "",
+        "portal-bid db: gc1's page is addressed to gc1, names no other bidder and has no rewards line");
+    }
+
+    // 3. An unsent revision: draft → sent cuts r2, delivered to gc2 only.
+    await setStatus(iq, "draft", "Test");
+    await setStatus(iq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    const r2 = sentRevs(await getQuote(iq)).at(-1)!.rev;
+    await send(p2, r2);
+    {
+      const a = await stateFor(gc1), b = await stateFor(gc2);
+      ok(r2 > r1 && a.s.kind === "ok" && a.s.rev.rev === r1 && a.pdf?.rev === r1, "portal-bid db: gc1 still sees r1 after an unsent r2");
+      ok(b.s.kind === "ok" && b.s.rev.rev === r2 && b.pdf?.rev === r2 && b.s.bidder?.partyId === p2, "portal-bid db: gc2 sees r2");
+    }
+
+    // 4. Revising: an addendum on the sent estimate moves it to draft.
+    const ad = await setBidDetails(iq, { addenda: [{ no: 1, receivedAt: T, note: "a" }] }, "Test");
+    {
+      const a = await stateFor(gc1);
+      ok(ad.ok && a.q.status === "draft" && a.s.kind === "revising" && listed(a.list) === 0 && a.pdf === null,
+        "portal-bid db: while revising, gc1 gets the being-revised card, no list row and no PDF");
+    }
+
+    // 5. Award.
+    await setStatus(iq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    const aw = await awardBid(iq, p1);
+    {
+      const a = await stateFor(gc1), b = await stateFor(gc2);
+      ok(aw.ok && b.s.kind === "unavailable" && listed(b.list) === 0 && b.pdf === null, "portal-bid db: a bidder lost by award is unavailable and unlisted");
+      ok(a.s.kind === "ok" && a.s.bidder?.result === "awarded", "portal-bid db: the awarded bidder still sees its estimate");
+      ok(portalOnlineEstimateState(a.q, own).kind === "ok" && portalListsQuote(a.q, own) && (await portalBidRowsFor(a.q, own)).length === 0,
+        "portal-bid db: the owner's view is unchanged by the award (and reads no rows)");
+    }
+
+    // 6. A revision addressed after the award (never emailed to gc1).
+    await setStatus(iq, "draft", "Test");
+    await setStatus(iq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    const rAw = sentRevs(await getQuote(iq)).at(-1)!;
+    {
+      const a = await stateFor(gc1);
+      ok(rAw.docFields?.awardedPartyId === p1 && a.s.kind === "ok" && a.s.rev.rev === rAw.rev && a.s.bidder?.via === "award" && a.pdf?.rev === rAw.rev,
+        "portal-bid db: gc1 sees the revision frozen to it after the award (via award)");
+    }
+
+    // 8. Read-only: every portal write refuses a bidder company, the same as a missing quote.
+    {
+      const s1 = ses(gc1);
+      const acc = await acceptPortal(s1, { quoteId: iq, purchaseMethod: "po", notes: "", poDocumentId: null });
+      const ref = await refreshPortalQuote(s1, iq);
+      const cp = await copyToCart(s1, iq);
+      const rn = await renamePortalQuote(s1, iq, "Mine now");
+      ok(!acc.ok && acc.error === PORTAL_NOT_FOUND_COPY, "portal-bid db: acceptPortal refuses a bidder");
+      ok(!ref.ok && ref.error === PORTAL_NOT_FOUND_COPY, "portal-bid db: refreshPortalQuote refuses a bidder");
+      ok(!cp.ok && cp.error === PORTAL_NOT_FOUND_COPY, "portal-bid db: copyToCart refuses a bidder");
+      ok(!rn.ok && rn.error === PORTAL_NOT_FOUND_COPY, "portal-bid db: renamePortalQuote refuses a bidder");
+      ok((await serviceRequestFromQuoteId(gc1, iq)) === null, "portal-bid db: serviceRequestFromQuoteId refuses a bidder");
+      const after = await getQuote(iq);
+      ok(after?.status === "sent" && after.name === "Portal bid quote" && !after.portalAcceptance, "portal-bid db: nothing was written");
+    }
+
+    // 10. The PDF response, with fake renders.
+    {
+      const a = await stateFor(gc1);
+      const src = a.pdf!;
+      await updateQuote(iq, { name: "Renamed later" });
+      const calls: unknown[][] = [];
+      const fakeOk = (async (...args: unknown[]) => { calls.push(args); return { ok: true as const, pdf: Buffer.from("%PDF-1"), fileName: "x" }; }) as unknown as typeof renderBidderPdf;
+      const req = new Request("https://portal.test/portal/quotes/x/pdf", { headers: { host: "portal.test", "x-forwarded-proto": "https" } });
+      const res = await portalBidPdfResponse(req, src, { quoteId: iq, rlKey: `portal-bidpdf:test-ok-${Date.now()}` }, { render: fakeOk });
+      const disp = res.headers.get("content-disposition") || "";
+      ok(res.status === 200 && res.headers.get("content-type") === "application/pdf" && disp.startsWith("inline;") && disp.includes(`Rev ${src.rev}`) &&
+         disp.includes("Portal bid quote") && !disp.includes("Renamed later") && disp.includes(NAMES.gc1) &&
+         res.headers.get("x-content-type-options") === "nosniff" && res.headers.get("cache-control") === "private, no-store",
+        "portal-bid db: the PDF opens inline, named for the revision's own name, this bidder and its Rev");
+      ok((await res.text()) === "%PDF-1", "portal-bid db: the rendered bytes are served");
+      ok(calls.length === 1 && calls[0][0] === iq && calls[0][1] === p1 && calls[0][2] === "portal.test" && calls[0][3] === "https" && (calls[0][4] as { rev?: number })?.rev === src.rev,
+        "portal-bid db: the render gets the quote, this party, the host and the bidder's own revision");
+      const fake404 = (async () => ({ ok: false as const, status: 404 as const, error: "Not found" })) as unknown as typeof renderBidderPdf;
+      const r404 = await portalBidPdfResponse(req, src, { quoteId: iq, rlKey: `portal-bidpdf:test-404-${Date.now()}` }, { render: fake404 });
+      ok(r404.status === 404 && (await r404.text()) === "Not found", "portal-bid db: a refused render is a plain 404");
+      const fake503 = (async () => ({ ok: false as const, status: 503 as const, error: "PDFs aren't set up" })) as unknown as typeof renderBidderPdf;
+      const r503 = await portalBidPdfResponse(req, src, { quoteId: iq, rlKey: `portal-bidpdf:test-503-${Date.now()}` }, { render: fake503 });
+      ok(r503.status === 503 && (await r503.text()) === "PDFs aren't set up", "portal-bid db: a 503 carries the render's text");
+      const key = `portal-bidpdf:test-rl-${Date.now()}`;
+      const codes: number[] = [];
+      for (let i = 0; i < PORTAL_BID_PDF_PER_MIN + 1; i++) codes.push((await portalBidPdfResponse(req, src, { quoteId: iq, rlKey: key }, { render: fakeOk, companyName: async () => "X" })).status);
+      ok(PORTAL_BID_PDF_PER_MIN === 6 && codes.slice(0, 6).every((c) => c === 200) && codes[6] === 429, "portal-bid db: the seventh PDF in a minute on one key is 429");
+      await updateQuote(iq, { name: "Portal bid quote" });
+    }
+
+    // 11. Undo award: the bidder lost by award is pending and visible again.
+    const un = await undoAward(iq);
+    {
+      const b = await stateFor(gc2);
+      const row2 = (await listFor("quote", iq)).find((p) => p.id === p2);
+      ok(un.ok && row2?.bid?.result === "pending" && b.s.kind === "ok" && b.s.rev.rev === r2 && listed(b.list) === 1, "portal-bid db: after Undo award gc2 is pending and visible again");
+    }
+    await awardBid(iq, p1);
+
+    // 7. Won.
+    await setStatus(iq, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    await regAll();
+    {
+      const a = await stateFor(gc1), b = await stateFor(gc2);
+      ok(a.q.status === "won" && a.s.kind === "ok" && !a.s.closed && a.list.history.length === 1 && a.list.open.length === 0, "portal-bid db: the awarded bidder sees a won estimate in its history");
+      ok(b.s.kind === "unavailable" && listed(b.list) === 0, "portal-bid db: a losing bidder can't see the won estimate");
+    }
+
+    // 12. Route pins.
+    {
+      const rd = (f: string) => readFileSync(join(__dirname, "..", f), "utf8");
+      const page = rd("src/app/portal/quotes/[id]/page.tsx"), pdf = rd("src/app/portal/quotes/[id]/pdf/route.ts"), photo = rd("src/app/portal/quotes/[id]/photo/[docId]/route.ts");
+      ok([page, pdf, photo].every((x) => x.includes("portalBidRowsFor(")), "portal-bid db: page, PDF and photo routes load the bidder rows");
+      ok(page.includes("portalOnlineEstimateState(q, cid, bids)") && page.includes("bidderPartyId: state.bidder.partyId") && page.includes("onlineCutSheets(q, state.rev)"),
+        "portal-bid db: the page composes the bidder rows and addresses the document to the bidder");
+      ok(pdf.includes("portalBidPdfSource(q, session.customerId, bids)") && pdf.includes("export const maxDuration = 60") && pdf.includes("portalBidPdfResponse(req, bid,") &&
+         pdf.includes("`portal-bidpdf:preview:${session.customerId}`") && pdf.includes("`portal-bidpdf:${session.grantId}`") &&
+         pdf.includes("portalQuotePdfPreparing(q, session.customerId)") && pdf.includes("portalQuotePdfUnavailable(q, session.customerId)") &&
+         pdf.includes("pdfFileName(displayQuoteNumber(q), src.rev)") && pdf.indexOf("portalBidPdfSource(") < pdf.indexOf("portalQuotePdfSource(q, session.customerId)"),
+        "portal-bid db: the PDF route answers a bidder first, then runs the customer code unchanged");
+      ok(photo.includes("portalOnlineEstimateState(q, session.customerId, bids)") && photo.includes("servePhotoForRevision(req, state.rev, docId)"), "portal-bid db: photos come from the bidder's own revision");
+      const srv = rd("src/lib/parties/portal-bid-server.ts");
+      ok(srv.includes("bidderPdfFileName(src.name,") && srv.includes("rateLimit(ctx.rlKey, PORTAL_BID_PDF_PER_MIN, 60_000)") && !srv.includes("r.fileName"),
+        "portal-bid db: the bidder PDF is named by bidderPdfFileName over the revision's name, never the render's live name");
+    }
+    // 13. Choke-point inventory.
+    {
+      const root = join(__dirname, "../src/app/portal");
+      const files = (readdirSync(root, { recursive: true }) as string[]).filter((f) => /\.(ts|tsx)$/.test(f));
+      const NO_BIDDER_ROWS_NEEDED: string[] = [];
+      const reads = files.filter((f) => /\bgetQuote\(/.test(readFileSync(join(root, f), "utf8")));
+      ok(reads.length >= 3 && reads.every((f) => NO_BIDDER_ROWS_NEEDED.includes(f) || readFileSync(join(root, f), "utf8").includes("portalBidRowsFor(")),
+        `portal-bid db: every portal file that reads a quote loads the bidder rows (${reads.join(", ")})`);
+      const leaks = files.filter((f) => /@\/lib\/stores\/parties|@\/lib\/stores\/bids|@\/lib\/parties\/addressee-server/.test(readFileSync(join(root, f), "utf8")));
+      ok(files.length > 10 && leaks.length === 0, `portal-bid db: no portal file imports the party stores or addressee-server (${leaks.join(", ")})`);
+      const count = (f: string) => (readFileSync(join(__dirname, "..", f), "utf8").match(/portalListsQuote\(/g) || []).length;
+      ok(count("src/lib/portal-quotes.ts") === 4 && count("src/lib/portal-service-quotes.ts") === 1, "portal-bid db: the portal write actions still gate on portalListsQuote (4 + 1)");
+    }
+  } finally {
+    try { await regAll(); } catch {}
+    await dropFixtures(348);
+    await dropPortalBidIdentityFixtures();
   }
 }
 
