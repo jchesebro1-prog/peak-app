@@ -12900,3 +12900,38 @@ A newly imported thread on a personal key is stamped `mailboxOwnerId = userIdOfK
 - **Before a rename** (`updateMemberAction`, only when the trimmed, whitespace-collapsed name actually changes — a case-only rename saves; the fold is only the duplicate check): the OLD name's unstamped, key-less personal threads (`mailboxUser` exactly the old name) get `mailboxOwnerId = this user` when the name was theirs alone, else the tombstone; name-only assignments to the old name get `assignedToId` the same way. Then the new name is retired (below), then the name changes.
 - **Before a name becomes held** (`addUserAction`, a rename TO it, and the Import hub's team rows): any unstamped, key-less thread or name-only assignment already carrying that name (any case) belongs to no current user — names are unique (D1070) — so it is tombstoned. A newcomer who takes a former teammate's name inherits nothing.
 After a stamp, a rename transfers nothing: the thread follows the id.
+
+## D1074. The daily brief card is three blocks: Emails, Estimates, Tasks (#350, 2026-10-15)
+
+Jeff, Oct 15: "How do we get the morning brief to lead with emails, then estimates, then tasks?" The Home brief card (#337) now shows the summary, then three blocks in a fixed order. An empty block is hidden, and the other blocks keep their order. The separate "Do these first" list is gone. Its picks get a ★ (accent color) inside their own block, float to the top of their group, and keep their why as small text and as the star's tooltip. Rows that aren't picks show their triage reason as a tooltip only.
+
+Every triage source maps to a block (`BLOCK_OF_SOURCE`, `src/lib/brief/blocks.ts`):
+- `email` → **Emails**: the feed's own rule, customers waiting on a reply in my court.
+- `quote`, `lead`, `renewal` → **Estimates**: quotes awaiting me (approval, portal review, sent back), leads ready to quote, renewals.
+- `task`, `assignment`, `call`, `visit` → **Tasks**.
+
+A **call to-do goes to Tasks**, not Emails: it is a meeting action item with no thread and no pre-draft, like the promise-tasks Jeff put in Tasks. Because every source maps to a block, a pick is dropped only when its key doesn't parse as a triage key, or when its row is no longer visible (done, snoozed, Not mine or closed). The card drops the row too, so a done item never comes back as a star.
+
+Inside each block, in Jeff's order:
+- **Emails:** the email rows, each with "Draft reply ready · Use it" when the thread's pre-draft is fresh. "Use it" links to the thread, where the reader's own Use it fills the composer. Then the Organize line ("N emails to file · M noise — Review") and "Organize my inbox" when it applies.
+- **Estimates:** "N quotes waiting on your approval", then the quote rows awaiting me (the triage quote feed, so the approvals are listed), quiet quotes with Send nudge, lead rows with the Suggest estimate cue, and renewal rows.
+- **Tasks:** task, assignment and call rows, then new promise-tasks (one already on the list as a task row isn't listed twice), then "Today: …" (visits, driving, the plan), then today's visit rows.
+
+## D1075. Block rows, cap, phone, Listen and wording (#350, 2026-10-15)
+
+**Rows.** The blocks list the slot's visible snapshot rows, the same set Start here shows: marks and liveness (`visibleRows` + `loadClosedKeys`) are applied in the server card. If the snapshot can't be read, only the picks show, titled by their stored why, with no link.
+
+**Cap.** Each block shows at most `BLOCK_CAP` = 5 item rows (triage rows, quiet quotes, promise-tasks). The count, Organize, cleanup and Today lines don't count toward it, and ★ picks are always kept. What's hidden is linked:
+- triage rows → "N more · See all in Start here →" `/triage`;
+- quiet quotes → `/quotes`;
+- promise-tasks → `/queue`.
+
+Pre-draft, nudge and suggestion lookups cover the picks plus the first 5 rows of each source, a superset of what the cap shows.
+
+**Phone (< 900 px).** The phone view shows the same blocks in the same order in big text, with ★ picks and the same "more" links. It still shows no drafts: no Draft ready, nudge note, Send nudge or Suggest estimate.
+
+**Listen.** `briefSpeech(brief, rows)` reads the summary, then "Emails. …", "Estimates. …", "Tasks. …". Each block reads its picks first ("Start with <title>. <why>", "Then …"), then its counts in the card's order.
+
+**Wording.** The Haiku system prompt now asks for the summary in Emails → Estimates → Tasks order and says the picks are starred in their block. The user text groups the facts under Emails / Estimates / Tasks, with per-block row counts and a source → block key. The rule-built summary (`ruleBrief`) follows the same order. Per-block counts ("N customers waiting on a reply", "N leads ready to quote", "N renewals coming up", "N tasks on your list") replace "N items on your list".
+
+**No data change.** Storage keys, the brief build, slots, crons, leases, the draft queue and the `doFirst` model output are unchanged. A brief stored before this renders in the new layout with no rebuild.

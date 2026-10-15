@@ -1202,6 +1202,9 @@ See `.env.example`.
     try Listen in the car. Follow-ups: whole-doc writers that can clobber
     leases, per-process Rebuild limit, every user's build scanning all threads
     and quotes. Next: AI sidebar. Punch item #337.
+    ✅ Follow-up (#350, D1074–D1075): the card is three blocks — Emails, Estimates,
+    Tasks (`src/lib/brief/blocks.ts`) — with the Do-these-first picks as ★ in their
+    own block, on the phone and in Listen too; presentation and prompt wording only.
 
 57. ✅ **Estimate suggestion** (#338, D930–D942) — roadmap piece 3, replacing
     #334's Draft estimate, for Assist pilot users with the **Suggest estimate**
