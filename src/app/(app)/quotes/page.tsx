@@ -732,9 +732,10 @@ export default async function QuotesPage({
                       const bidders = biddersByQuote.get(q.id);
                       if (!bidders) return null;
                       const awarded = !!q.bid?.awardedPartyId;
+                      const closed = q.status === "won" || q.status === "lost";
                       const label = awarded
                         ? "Awarded"
-                        : q.bid?.dueAt
+                        : q.bid?.dueAt && !closed
                           ? `Bid · due ${bidDueText(q.bid.dueAt).split(",")[0]}`
                           : "Bid";
                       return (

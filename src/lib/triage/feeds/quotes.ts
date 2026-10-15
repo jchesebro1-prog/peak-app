@@ -59,8 +59,9 @@ export function selectQuotes(
   return [...byKey.values()];
 }
 
-/** The bid-due fact for one quote, or null: mine, still out to bid, due tomorrow or sooner (past due included),
- *  and at least one pending bidder hasn't been sent the current revision. Pure. */
+/** The bid-due fact for one quote, or null: mine, still out to bid, due tomorrow or sooner (past due included,
+ *  up to 14 Chicago days back — older dead bids drop off), and at least one pending bidder hasn't been sent the
+ *  current revision. Pure. */
 export function bidDueFact(
   q: Quote,
   bidders: ReadonlyArray<{ bid: BidderState | null }>,
@@ -70,7 +71,7 @@ export function bidDueFact(
   const dueAt = q.bid?.dueAt;
   if (!dueAt || !isOpenBid(q, bidders)) return null;
   const days = bidDueDays(dueAt, ctx.now);
-  if (days > 1) return null;
+  if (days > 1 || days < -14) return null;
   const rev = currentRev(q);
   const missing = bidders.filter((b) => needsRev(b.bid, rev)).length;
   return missing ? { kind: "bid_due", days, missing } : null;
