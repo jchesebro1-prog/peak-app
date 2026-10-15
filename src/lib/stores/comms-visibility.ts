@@ -40,6 +40,15 @@
  * logged call / meeting (channel other than email) with a customer.
  * Another person's DRAFT is never visible — unsent mail is not yet a record.
  *
+ * Jeff 2026-10-15 #26 — a thread a live task links (`TaskRecord.threadId`)
+ * is visible, read-only, to that task's assignee (`assigneeUserId` when
+ * stamped, else the `assigneeName` only while it is unique — #349's rule),
+ * whatever the task's status, until the task is deleted. Assigning a task
+ * from an unlinked email shares exactly that one email. The ids are
+ * precomputed once per viewer (`MailboxViewer.taskThreadIds`, loaded by
+ * `mailboxViewer()` through `taskShareCond`), so no rule reads tasks per
+ * thread.
+ *
  * Writes and actions stay with the owner (`isOwnThread`): a reply sends from
  * the owner's Gmail account, and filing / status / read state are theirs.
  * `canOpenThread` is the Inbox reader's rule — the owner also opens their own
@@ -58,13 +67,15 @@ import type { CommThread } from "./comms";
 type MailboxFields = Pick<CommThread, "mailbox" | "mailboxUser"> & Partial<Pick<CommThread, "mailboxOwnerId" | "gmailAccountKey">>;
 type LinkFields = Partial<Pick<CommThread, "customerId" | "siteId" | "link" | "linkedContactIds" | "linkedBy" | "filing" | "channel">>;
 type AssignFields = Partial<Pick<CommThread, "assignedTo" | "assignedToId">>;
-type VisibilityFields = MailboxFields & LinkFields & AssignFields & Partial<Pick<CommThread, "deleted" | "status">>;
+type VisibilityFields = MailboxFields & LinkFields & AssignFields & Partial<Pick<CommThread, "id" | "deleted" | "status">>;
 
 /** #349 — who is looking: the signed-in user's id (the identity every
  *  ownership check keys on), their display name, and whether that name is
  *  held by them alone among all users, archived included (the only case a legacy
- *  name-stamped thread or assignment can be theirs). */
-export type MailboxViewer = { id: string; name: string; nameUnique: boolean };
+ *  name-stamped thread or assignment can be theirs). `taskThreadIds` (Jeff
+ *  2026-10-15 #26): the threads live tasks assigned to them link — absent =
+ *  none (a viewer built without the task read, e.g. `viewerFrom`). */
+export type MailboxViewer = { id: string; name: string; nameUnique: boolean; taskThreadIds?: readonly string[] };
 
 /** A roster entry for `viewerFrom` / `resolveMailboxOwnerId` — every user, any status (mailbox-viewer.ts mailboxRoster). */
 export type RosterEntry = { id: string; name: string };
@@ -160,6 +171,31 @@ export function isAssignedTo(t: AssignFields, me: MailboxViewer): boolean {
   return me.nameUnique && m !== "" && fold(t.assignedTo) === m;
 }
 
+/** Jeff 2026-10-15 #26 — a live task assigned to `me` links this thread. */
+export function isTaskSharedTo(t: Partial<Pick<CommThread, "id">>, me: MailboxViewer): boolean {
+  return filled(t.id) && Array.isArray(me?.taskThreadIds) && me.taskThreadIds.includes(t.id);
+}
+
+/** A task (its assignee fields) is assigned to `me` — #349's rule on the task
+ *  store's fields: `assigneeUserId` when stamped, else the `assigneeName`
+ *  (trimmed, case-insensitive) only while `me`'s name is unique. */
+export function taskAssignedTo(task: { assigneeUserId?: string | null; assigneeName?: string | null }, me: MailboxViewer): boolean {
+  if (!me || !isRealId(me.id)) return false;
+  if (filled(task.assigneeUserId)) return task.assigneeUserId === me.id;
+  const m = fold(me.name);
+  return me.nameUnique && m !== "" && fold(task.assigneeName) === m;
+}
+
+/** `taskAssignedTo` plus a thread link, as a DocCond over the tasks
+ *  collection — the one read that fills `MailboxViewer.taskThreadIds`. */
+export function taskShareCond(me: MailboxViewer): DocCond {
+  if (!me || !isRealId(me.id)) return NEVER;
+  const branches: DocCond[] = [{ path: ["assigneeUserId"], is: me.id }];
+  const m = fold(me.name);
+  if (me.nameUnique && m) branches.push({ all: [{ path: ["assigneeUserId"], empty: "text" }, { path: ["assigneeName"], isFolded: m }] });
+  return { all: [{ path: ["threadId"], filled: "text" }, { any: branches }] };
+}
+
 /** My own live thread — what every write / action / Assist draft requires. */
 export function isOwnThread(t: VisibilityFields, me: MailboxViewer): boolean {
   return ownsMailbox(t, me) && !t.deleted;
@@ -175,7 +211,7 @@ export function canSeeThread(t: VisibilityFields, me: MailboxViewer): boolean {
   if (t.deleted) return false;
   if (ownsMailbox(t, me)) return true;
   if (t.status === "draft") return false;
-  return isAssignedTo(t, me) || isThreadLinked(t);
+  return isAssignedTo(t, me) || isThreadLinked(t) || isTaskSharedTo(t, me);
 }
 
 /** The Inbox reader: canSeeThread, plus my own thread in Deleted. */
@@ -237,8 +273,9 @@ export function canSeeThreadCond(me: MailboxViewer): DocCond {
       { any: [{ path: ["customerId"], filled: "text" }, { path: ["siteId"], filled: "text" }, workLink, { path: ["linkedContactIds"], filled: "array" }] },
     ],
   };
+  const taskShared: DocCond = { path: ["id"], in: Array.isArray(me?.taskThreadIds) ? me.taskThreadIds : [] };
   const shared: DocCond = {
-    all: [{ path: ["status"], isNot: "draft" }, { any: [assignedToCond(me), linked] }],
+    all: [{ path: ["status"], isNot: "draft" }, { any: [assignedToCond(me), linked, taskShared] }],
   };
   return { all: [notDeleted, { any: [ownMailboxCond(me), shared] }] };
 }

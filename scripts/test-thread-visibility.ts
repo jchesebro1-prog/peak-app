@@ -33,12 +33,15 @@ import {
   isAssignedTo,
   isOwnThread,
   isSharedThread,
+  isTaskSharedTo,
   isThreadLinked,
   mailboxOwnership,
   ownMailboxCond,
   ownsMailbox,
   readOnlyBanner,
   resolveMailboxOwnerId,
+  taskAssignedTo,
+  taskShareCond,
   viewerFrom,
   visibleTo,
 } from "@/lib/stores/comms-visibility";
@@ -819,7 +822,7 @@ export function threadVisibilityPins(ok: Ok): void {
   const userLabels = read("src/lib/gmail/user-labels.ts");
   ok(/const t = await ownThread\(threadId, me\);/.test(userLabels) && /t\.gmailAccountKey !== key\) return failWith\("no-gmail"\)/.test(userLabels), "Gmail labels (#347, #349): labels act only on my own thread (identity) bridged through my own key");
   const track = read("src/lib/estimate-email/track-server.ts");
-  ok(!/sameName\(/.test(track) && (track.match(/ownedBy\(raw, await viewerOf\(deps, actor\)\)/g) || []).length === 2 && /const isLead = !!leadId && leadId === viewer\.id;/.test(track) && /return \{ id: [^}]*nameUnique: false \};/.test(track), "Send & track (#349 + review): reply and Mark read need the mailbox owner by identity; the Lead estimator is matched by id; a failed roster read fails closed (nameUnique false)");
+  ok(!/sameName\(/.test(track) && (track.match(/ownedBy\(raw, await viewerOf\(deps, actor\)\)/g) || []).length === 2 && !/isLead/.test(track) && /return \{ id: [^}]*nameUnique: false \};/.test(track), "Send & track (#349 + review, Jeff 10-15 #25): reply and Mark read need the mailbox owner by identity; the text no longer follows a Lead-estimator check; a failed roster read fails closed (nameUnique false)");
   const settings = read("src/app/(app)/settings/actions.ts");
   ok(/const nameError = teamNameError\(name, await allUsers\(\)\);/.test(settings) && /teamNameError\(next, users, id\)/.test(settings), "Settings → Team (#349): add and rename refuse a blank or duplicate name");
   const renameSrc = settings.slice(settings.indexOf("export async function updateMemberAction"), settings.indexOf("export async function setRolesAction"));
@@ -835,6 +838,92 @@ export function threadVisibilityPins(ok: Ok): void {
   ok(/const t = await applyOwnerStamps\(tombs\);/.test(script) && /const apply = args\.includes\("--apply"\);/.test(script) && /resolveExplicitDbTarget\(/.test(script) && /if \(apply\) requireHostedConfirmation\(target\.hosted, args\);/.test(script) && /"comms:stamp-owners": "tsx scripts\/comms-stamp-owners\.ts"/.test(read("package.json")), "comms:stamp-owners (#349): a dry run by default; --apply writes; a hosted DB also needs --yes; an explicit target only");
 }
 
+/** Jeff 2026-10-15 #26 — a task assigned from an email shares that one email
+ *  with the assignee, read-only. Pure rule + SQL parity + the real loaders. */
+export function taskSharePureChecks(ok: Ok): void {
+  const ME: MailboxViewer = { id: "u-me", name: "Me Person", nameUnique: true, taskThreadIds: ["C-T1"] };
+  const t = base({ id: "C-T1" } as Partial<CommThread>);
+  ok(canSeeThread(t, ME) && canOpenThread(t, ME) && !isOwnThread(t, ME) && !visibleTo(t, ME), "task share (#26): a task-linked thread is visible and opens, but is not mine (read-only)");
+  ok(!canSeeThread(base({ id: "C-T2" } as Partial<CommThread>), ME), "task share (#26): a thread no task of mine links stays hidden");
+  ok(!canSeeThread({ ...t, deleted: true }, ME) && !canSeeThread({ ...t, status: "draft" }, ME), "task share (#26): never a deleted thread or another person's draft");
+  ok(!canSeeThread(t, { ...ME, taskThreadIds: undefined }), "task share (#26): a viewer built without the task read (viewerFrom) shares nothing");
+  ok(isTaskSharedTo(t, ME) && !isTaskSharedTo(base(), ME) && !isTaskSharedTo(t, { id: "u-me", name: "Me Person", nameUnique: true }), "task share (#26): isTaskSharedTo — the thread id is in the viewer's task set");
+  ok(
+    taskAssignedTo({ assigneeUserId: "u-me", assigneeName: "Someone Else" }, ME) &&
+      !taskAssignedTo({ assigneeUserId: "u-other", assigneeName: "Me Person" }, ME) &&
+      taskAssignedTo({ assigneeUserId: null, assigneeName: " me person " }, ME) &&
+      !taskAssignedTo({ assigneeUserId: null, assigneeName: "Me Person" }, { ...ME, nameUnique: false }) &&
+      !taskAssignedTo({ assigneeUserId: "", assigneeName: "" }, { id: "", name: "", nameUnique: false }),
+    "task share (#26): taskAssignedTo — the id when stamped (wins over the name), else a unique name only (#349)"
+  );
+  const row = (key: string, title: string): SnapshotRow => ({ key, source: "email", title, sub: "Re: pricing", href: "/x", score: 1, reason: "r", callLine: null, also: [] });
+  const red = redactEmailRows([row("email:C-T1", "Task Co"), row("email:C-T2", "Other Co")], new Map<string, T>([["C-T1", t], ["C-T2", base({ id: "C-T2" } as Partial<CommThread>)]]) as never, ME);
+  ok(red[0].title === "Task Co" && red[1].title === PRIVATE_EMAIL_TITLE, "task share (#26): an admin's Start here view shows a task-shared email, redacts the rest");
+  const cond = JSON.stringify(canSeeThreadCond(ME));
+  ok(cond.includes('{"path":["id"],"in":["C-T1"]}') && JSON.stringify(canSeeThreadCond({ ...ME, taskThreadIds: undefined })).includes('{"path":["id"],"in":[]}'), "task share (#26): canSeeThreadCond carries the viewer's task thread ids (none → matches nothing)");
+  const sc = JSON.stringify(taskShareCond(ME));
+  ok(sc.includes('"threadId"') && sc.includes('"assigneeUserId"],"is":"u-me"') && sc.includes('"isFolded":"me person"') && !JSON.stringify(taskShareCond({ ...ME, nameUnique: false })).includes("isFolded") && JSON.stringify(taskShareCond({ id: "", name: "", nameUnique: false })) === '{"any":[]}',
+    "task share (#26): taskShareCond — linked tasks by assignee id, or the unique name with no id; a blank viewer matches nothing");
+}
+
+export async function taskShareDbChecks(ok: Ok): Promise<void> {
+  const { searchDocs, softDeleteDoc } = await import("@/db/doc-store");
+  const { createFixture, dropFixtures, fixtureId } = await import("./test-fixtures");
+  const { mailboxViewer, taskThreadIdsFor } = await import("@/lib/mailbox-viewer");
+  const { globalSearch } = await import("@/lib/search/global-search");
+  const { loadThreadFor, loadThreadReadable } = await import("@/lib/assist/thread-access");
+  const { ownThread } = await import("@/lib/inbox-thread-guard");
+  const { seeded } = await import("@/db");
+  await seeded();
+  const ME = { id: "u-tv26-me", name: "TV26 Me" };
+  const OWNER = { id: "u-tv26-owner", name: "TV26 Owner" };
+  const NOW = Date.UTC(2034, 6, 1, 15, 0);
+  const id = (s: string) => fixtureId("tv26", s);
+  const ids = { byId: id("t-byid"), byName: id("t-byname"), done: id("t-done"), wrong: id("t-wrong"), gone: id("t-gone"), draft: id("t-draft"), none: id("t-none") };
+  const th = (tid: string, word: string, over: Record<string, unknown> = {}) => ({
+    id: tid, mailbox: "personal", mailboxUser: OWNER.name, mailboxOwnerId: OWNER.id, unread: true, customerId: null, customer: "Quuxlefrond Hall",
+    contactName: "Pat Q", contactEmail: "pat@quuxlefrond.test", subject: `Quuxlefrond ${word}`, channel: "email", status: "waiting_us", assignedTo: "", link: null,
+    createdAt: NOW, updatedAt: NOW, messages: [{ id: "m1", at: NOW, direction: "in", channel: "email", author: "Pat Q", fromEmail: "pat@quuxlefrond.test", body: `Body ${word}` }], ...over,
+  });
+  const task = (tid: string, threadId: string, over: Record<string, unknown> = {}) => ({
+    id: tid, title: "Follow up", section: "Email", projectId: null, quoteId: null, designId: null, engagementId: null, coverageKey: null,
+    assigneeUserId: ME.id, assigneeName: ME.name, dueAt: null, startAt: null, schedule: null, handScheduled: false, status: "open", notes: "",
+    createdBy: OWNER.name, createdAt: NOW, updatedAt: NOW, doneAt: null, threadId, ...over,
+  });
+  const threads = [th(ids.byId, "byid"), th(ids.byName, "byname"), th(ids.done, "done"), th(ids.wrong, "wrong"), th(ids.gone, "gone"), th(ids.draft, "draft", { status: "draft" }), th(ids.none, "none")];
+  try {
+    for (const t of threads) await createFixture("comms", t as never);
+    await createFixture("tasks", task(id("k-byid"), ids.byId) as never);
+    await createFixture("tasks", task(id("k-byname"), ids.byName, { assigneeUserId: null }) as never);
+    await createFixture("tasks", task(id("k-done"), ids.done, { status: "done", doneAt: NOW }) as never);
+    await createFixture("tasks", task(id("k-wrong"), ids.wrong, { assigneeUserId: OWNER.id, assigneeName: OWNER.name }) as never);
+    await createFixture("tasks", task(id("k-gone"), ids.gone) as never);
+    await softDeleteDoc("tasks", id("k-gone"));
+    await createFixture("tasks", task(id("k-draft"), ids.draft) as never);
+    await createFixture("tasks", task(id("k-nothread"), "", { threadId: null }) as never);
+
+    const v = await mailboxViewer(ME);
+    const shared = new Set(v.taskThreadIds ?? []);
+    ok(shared.has(ids.byId) && shared.has(ids.byName) && shared.has(ids.done) && !shared.has(ids.wrong) && !shared.has(ids.gone),
+      "task share db (#26): mailboxViewer loads the threads of my live tasks — by id, by unique name, done included; never another assignee's or a deleted task's");
+    ok((await taskThreadIdsFor({ id: "", name: "", nameUnique: false })).length === 0, "task share db (#26): a blank viewer reads no tasks");
+    const seen = threads.filter((t) => canSeeThread(t as never, v)).map((t) => t.id).sort();
+    ok(JSON.stringify(seen) === JSON.stringify([ids.byId, ids.byName, ids.done].sort()), "task share db (#26): canSeeThread — the three task-shared threads; never the wrong assignee's, the deleted task's, a draft or an untasked thread");
+    for (const who of [ME, OWNER]) {
+      const w = await mailboxViewer(who);
+      const sqlIds = new Set((await searchDocs("comms", "quuxlefrond", 200, { where: canSeeThreadCond(w) })).map((d) => d.id));
+      const mismatch = threads.filter((t) => sqlIds.has(t.id) !== canSeeThread(t as never, w)).map((t) => t.id);
+      ok(mismatch.length === 0, `task share db (#26): canSeeThreadCond (SQL) === canSeeThread (JS), as ${who.name}` + (mismatch.length ? ` — differs on ${mismatch.join(", ")}` : ""));
+    }
+    const k = ((await globalSearch("quuxlefrond", ME)).find((g) => g.label === "Email threads")?.items ?? []).map((i) => i.id);
+    ok(k.includes(ids.byId) && !k.includes(ids.wrong) && !k.includes(ids.none), "task share db (#26): ⌘K finds the task-shared email for its assignee only");
+    ok(!!(await loadThreadReadable(ids.byId, v)) && !(await loadThreadFor(ids.byId, v)) && !(await loadThreadReadable(ids.wrong, v)), "task share db (#26): Ask reads it (loadThreadReadable); reply / task drafting stays own-only (loadThreadFor)");
+    ok(!(await ownThread(ids.byId, v)) && !(await ownThread(ids.byId, ME)) && !!(await ownThread(ids.byId, OWNER)), "task share db (#26): every Inbox write guard (ownThread) still refuses the assignee — read-only");
+  } finally {
+    await dropFixtures("tv26");
+  }
+}
+
 if (process.argv[1] && /test-thread-visibility\.ts$/.test(process.argv[1])) {
   let fail = 0;
   const ok: Ok = (c, m) => {
@@ -848,6 +937,8 @@ if (process.argv[1] && /test-thread-visibility\.ts$/.test(process.argv[1])) {
   (async () => {
     threadVisibilityPureChecks(ok);
     await threadVisibilityDbChecks(ok);
+    taskSharePureChecks(ok);
+    await taskShareDbChecks(ok);
     threadVisibilityPins(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall thread visibility checks passed");
     process.exit(fail ? 1 : 0);

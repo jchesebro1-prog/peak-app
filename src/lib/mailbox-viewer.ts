@@ -7,9 +7,32 @@
  * assignment can still be theirs. Reads the users table fresh every call (a
  * few dozen rows), so a rename or a new teammate takes effect on the next
  * request.
+ *
+ * Jeff 2026-10-15 #26 — the viewer also carries the thread ids their live
+ * tasks link (`taskThreadIds`): ONE SQL read of the tasks collection per
+ * viewer build (`taskShareCond`), so every canSeeThread / canSeeThreadCond
+ * after it is a set lookup — never a task read per thread. A failed read is
+ * no task shares (fail closed).
  */
+import { listDocsWhere } from "@/db/doc-store";
 import { activeUsers, allUsers } from "@/lib/users";
-import { viewerFrom, type MailboxViewer, type RosterEntry } from "@/lib/stores/comms-visibility";
+import { taskShareCond, viewerFrom, type MailboxViewer, type RosterEntry } from "@/lib/stores/comms-visibility";
+
+/** The most task-linked threads one viewer carries (newest-id order is not
+ *  promised; a person with more open email tasks than this is not real). */
+export const TASK_SHARE_CAP = 2000;
+
+/** Jeff 2026-10-15 #26 — the thread ids live tasks assigned to `v` link. */
+export async function taskThreadIdsFor(v: MailboxViewer): Promise<string[]> {
+  if (!v?.id) return [];
+  try {
+    const rows = await listDocsWhere<{ id: string; threadId?: string | null }>("tasks", taskShareCond(v), { limit: TASK_SHARE_CAP });
+    return [...new Set(rows.map((r) => (typeof r.threadId === "string" ? r.threadId : "")).filter(Boolean))];
+  } catch (e) {
+    console.error("[mailbox-viewer] task share read failed", e);
+    return [];
+  }
+}
 
 /** Every user (any status) as id + name — the roster name uniqueness is
  *  judged against (an archived namesake still makes a name ambiguous). */
@@ -21,7 +44,8 @@ export async function mailboxRoster(): Promise<RosterEntry[]> {
  *  id) is a viewer who owns nothing. */
 export async function mailboxViewer(u: { id: string; name: string } | null | undefined): Promise<MailboxViewer> {
   if (!u?.id) return { id: "", name: "", nameUnique: false };
-  return viewerFrom(u, await mailboxRoster());
+  const v = viewerFrom(u, await mailboxRoster());
+  return { ...v, taskThreadIds: await taskThreadIdsFor(v) };
 }
 
 /** The one ACTIVE teammate whose name is `name` (trimmed, case-insensitive)

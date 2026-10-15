@@ -85,7 +85,9 @@ export async function listDeletedDocs<T extends Doc = Doc>(coll: CollectionName)
  *  - `filled: "text"`: a non-empty string; `filled: "array"`: a non-empty
  *    JSON array;
  *  - `empty: "text"` (#349): the text at path, absent / null read as "", is
- *    "" (the exact complement of `filled: "text"`).
+ *    "" (the exact complement of `filled: "text"`);
+ *  - `in` (Jeff 2026-10-15 #26): the text at path is one of the values
+ *    (null/absent never matches; no values never matches).
  * `all` of nothing is true; `any` of nothing is false.
  */
 export type DocCond =
@@ -95,7 +97,8 @@ export type DocCond =
   | { path: readonly string[]; isNot: string }
   | { path: readonly string[]; isFolded: string }
   | { path: readonly string[]; filled: "text" | "array" }
-  | { path: readonly string[]; empty: "text" };
+  | { path: readonly string[]; empty: "text" }
+  | { path: readonly string[]; in: readonly string[] };
 
 /** JS whitespace `trim()` strips, for the SQL btrim in `isFolded`. */
 const TRIM_CHARS = " \t\n\r\f\v\u00a0\ufeff";
@@ -115,6 +118,10 @@ export function docCondSql(doc: SQLWrapper, c: DocCond): SQL {
   if ("all" in c) return c.all.length ? sql`(${sql.join(c.all.map((x) => docCondSql(doc, x)), sql` AND `)})` : sql`TRUE`;
   if ("any" in c) return c.any.length ? sql`(${sql.join(c.any.map((x) => docCondSql(doc, x)), sql` OR `)})` : sql`FALSE`;
   if ("is" in c) return sql`(${textAtPath(doc, c.path)} = ${c.is})`;
+  if ("in" in c) {
+    if (!c.in.length) return sql`FALSE`;
+    return sql`(${textAtPath(doc, c.path)} IN (${sql.join(c.in.map((v) => sql`${v}`), sql`, `)}))`;
+  }
   if ("isNot" in c) return sql`(coalesce(${textAtPath(doc, c.path)}, '') <> ${c.isNot})`;
   if ("isFolded" in c) {
     if (!c.isFolded) return sql`FALSE`;
