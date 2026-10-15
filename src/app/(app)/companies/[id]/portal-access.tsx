@@ -2,14 +2,17 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createPortalGrantAction, revokePortalGrantAction } from "../actions";
+import { createPortalGrantAction, resendPortalLinkAction, revokePortalGrantAction } from "../actions";
 import { postChanged } from "@/lib/popout/channel";
 
 /**
  * Portal access card (IDEAS #47) — the team side of the customer portal.
- * Each contact gets their OWN link (Jeff's per-person login call); the
- * office copies it into an email until magic-link sending rides the Gmail
- * integration. Revoking kills the link + any signed-in session immediately.
+ * Each contact gets their OWN link (Jeff's per-person login call). Jeff
+ * 2026-10-15 #41: creating a link emails it, with a short welcome note, from
+ * the granter's own connected Gmail mailbox (Resend link does it again); with
+ * no connected mailbox or Gmail off it falls back to copying the link, and
+ * says so. Copy link stays on every row. Revoking kills the link + any
+ * signed-in session immediately.
  */
 
 export type GrantVM = {
@@ -35,6 +38,8 @@ export function PortalAccessCard({
   const [pending, startTransition] = useTransition();
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** #41 — what happened to the email (sent / fall back to Copy link) */
+  const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null);
   const [sel, setSel] = useState(0);
   const [manualName, setManualName] = useState("");
   const [manualEmail, setManualEmail] = useState("");
@@ -58,6 +63,7 @@ export function PortalAccessCard({
       ? { name: manualName, email: manualEmail }
       : options[sel] || { name: "", email: "" };
     setError(null);
+    setNote(null);
     startTransition(async () => {
       const res = await createPortalGrantAction({
         customerId,
@@ -69,10 +75,29 @@ export function PortalAccessCard({
         return;
       }
       postChanged("customer", customerId);
-      await copy(res.path, "new");
+      setNote({ text: res.note, bad: res.emailed === "not-sent" });
+      // #41 — not emailed: today's behaviour, the link goes to the clipboard
+      if (res.emailed !== "sent") await copy(res.path, "new");
+      else {
+        setCopied("emailed");
+        setTimeout(() => setCopied(null), 1800);
+      }
       setManualName("");
       setManualEmail("");
       router.refresh();
+    });
+  }
+
+  function resend(grantId: string) {
+    setError(null);
+    setNote(null);
+    startTransition(async () => {
+      const res = await resendPortalLinkAction({ customerId, grantId });
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setNote({ text: res.note, bad: res.emailed === "not-sent" });
     });
   }
 
@@ -142,8 +167,9 @@ export function PortalAccessCard({
         </a>
       </div>
       <div style={{ fontSize: 11.5, color: "#9aa0ab", lineHeight: 1.5, marginBottom: 12 }}>
-        Personal access links — each person gets their own; copy it into an email. They&#39;ll see
-        published quotes, venue compliance, and can request quotes.
+        Personal access links — each person gets their own, emailed to them from your mailbox
+        (or copy it into an email). They&#39;ll see published quotes, venue compliance, and can
+        request quotes.
       </div>
 
       {activeGrants.map((g) => (
@@ -181,6 +207,26 @@ export function PortalAccessCard({
             }}
           >
             {copied === g.id ? "Copied ✓" : "Copy link"}
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => resend(g.id)}
+            title="Email this person their sign-in link again, from your mailbox"
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: "#5b616e",
+              background: "#fff",
+              border: "1px solid #e4e7ec",
+              borderRadius: 8,
+              padding: "7px 10px",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Resend link
           </button>
           <button
             type="button"
@@ -267,8 +313,13 @@ export function PortalAccessCard({
             cursor: pending ? "wait" : "pointer",
           }}
         >
-          {copied === "new" ? "Link created & copied ✓" : "Create access link"}
+          {copied === "new" ? "Link created & copied ✓" : copied === "emailed" ? "Link created & emailed ✓" : "Create access link"}
         </button>
+        {note && (
+          <div role="status" style={{ fontSize: 11.5, color: note.bad ? "#b4543a" : "#5b616e", marginTop: 8, lineHeight: 1.5 }}>
+            {note.text}
+          </div>
+        )}
         {error && (
           <div style={{ fontSize: 11.5, color: "#b4543a", marginTop: 8, lineHeight: 1.5, wordBreak: "break-all" }}>
             {error}
