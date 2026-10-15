@@ -43,8 +43,35 @@ export const FILE_ID_RE = /^[pmks]_[a-z0-9]{8,32}$/;
 
 /** Inline (dev / no-Blob) caps, in data-URL characters. */
 export const INLINE_CAPS = { jpeg: 400_000, json: 200_000, totalPerSurvey: 1_500_000 } as const;
-/** Upload caps the survey broker grants, in bytes. */
-export const UPLOAD_CAPS = { jpeg: 5 * 1024 * 1024, json: 2 * 1024 * 1024 } as const;
+/** Upload caps the survey broker grants, in bytes. #344 C-final B: JSON is 4 MB — a strokes doc at the ink model's own
+ *  caps (5,000 strokes, 400,000 numbers, 200 labels) serialises to ~3.3 MB at worst. The finalize read and the bytes
+ *  route derive their caps from these. */
+export const UPLOAD_CAPS = { jpeg: 5 * 1024 * 1024, json: 4 * 1024 * 1024 } as const;
+
+/** #344 C-final B: true when a strokes JSON's UTF-8 bytes fit the upload cap (the InkPad refuses Done otherwise). */
+export function strokesFitUploadCap(json: string): boolean {
+  return new TextEncoder().encode(json).length <= UPLOAD_CAPS.json;
+}
+
+/** The keys a photo / sketch save sends to the server (#344 C-final B): the file lists and their seen ids — never the
+ *  rest of the draft, so a file save can't revert another device's field edits. */
+export const FILE_PATCH_KEYS = ["photoRefs", "photoRefIdsSeen", "sketches", "sketchIdsSeen"] as const;
+export function fileOnlyPatch<T extends Record<string, unknown>>(patch: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const k of FILE_PATCH_KEYS) if (k in patch && patch[k] !== undefined) (out as Record<string, unknown>)[k] = patch[k];
+  return out;
+}
+
+/** #344 C-final B: the user's edits in `latest` are still those `sent` carried — photo refs, sketches and updatedAt
+ *  aside (they save on their own). Fields compare by identity: any edit after the save began keeps the draft dirty. */
+export function editsUnchangedSince(latest: Record<string, unknown>, sent: Record<string, unknown>): boolean {
+  if (latest === sent) return true;
+  const skip = new Set(["photoRefs", "sketches", "updatedAt"]);
+  for (const k of new Set([...Object.keys(latest), ...Object.keys(sent)])) {
+    if (!skip.has(k) && !Object.is(latest[k], sent[k])) return false;
+  }
+  return true;
+}
 
 const RECORD_RE: Record<RecordKind, RegExp> = { assessment: /^AS-\d+$/, survey: /^FS-\d+$/ };
 
@@ -362,7 +389,11 @@ export function sanitizeIncomingFileSlots<T extends Record<string, unknown>>(
   if (isObj(doc.sketches)) {
     // #344 C6: only a registered pad's key (isSketchKey) holding a ref with a valid s_ id is kept, at most
     // SURVEY_SKETCH_CAP of them; by is a string and updatedAt a finite number
+    // #344 C-final B: an unknown key is refused from the incoming copy only — a STORED sketch under a key the registry
+    // no longer knows is kept exactly as stored (no editor can show it, so none can mean to delete or replace it)
     const sk: Record<string, unknown> = {};
+    const storedSk = stored && isObj(stored.sketches) ? (stored.sketches as Record<string, unknown>) : {};
+    for (const [key, r] of Object.entries(storedSk)) if (!isSketchKey(key) && key !== "__proto__" && isObj(r)) sk[key] = r;
     let n = 0;
     for (const [key, r] of Object.entries(doc.sketches)) {
       if (!isSketchKey(key) || !isObj(r)) continue;

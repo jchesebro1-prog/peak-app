@@ -7,7 +7,8 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent, type Ref } from "react";
 import { createPortal, flushSync } from "react-dom";
-import { INK_CAPS, INK_COLORS, createHistory, emptyInk, eraseAt, fitInkTo, inkCapHit, inkId, moveLabel, renderInk, simplify, type InkDoc, type InkLabel } from "@/lib/ink/model";
+import { INK_CAPS, INK_COLORS, createHistory, emptyInk, eraseAt, fitInkTo, inkCapHit, inkId, moveLabel, renderInk, serializeInk, simplify, type InkDoc, type InkLabel } from "@/lib/ink/model";
+import { strokesFitUploadCap } from "@/lib/field-files/files";
 import { flattenInk, type InkBackground } from "./flatten";
 import {
   approxLabelWidth, clampView, docToScreen, eraserRadius, fitScale, fitView, hitLabel, isDoubleTap, isTap,
@@ -39,10 +40,20 @@ type Editing = { x: number; y: number; value: string };
 
 const COLOR_NAMES = ["Black", "Red", "Blue"];
 
-/* Session-wide: the first `pointerType === "pen"` flips every pad into Pencil mode. */
-let penSeen = false;
-const hasPen = () => penSeen;
-const notePen = () => { penSeen = true; };
+/* The first `pointerType === "pen"` flips every pad into Pencil mode — remembered on the device (#344 C-final B), so a
+   palm before the first Pencil stroke of a visit never draws. Storage that throws (private mode) = session-only. */
+const PEN_SEEN_KEY = "ink:penSeen";
+let penSeen: boolean | null = null;
+const hasPen = (): boolean => {
+  if (penSeen === null) {
+    try { penSeen = typeof localStorage !== "undefined" && localStorage.getItem(PEN_SEEN_KEY) === "1"; } catch { penSeen = false; }
+  }
+  return penSeen;
+};
+const notePen = () => {
+  penSeen = true;
+  try { localStorage.setItem(PEN_SEEN_KEY, "1"); } catch { /* remembered for this session only */ }
+};
 
 export function InkPad(props: InkPadProps) {
   if (!props.open || typeof document === "undefined") return null;
@@ -294,6 +305,11 @@ function InkPadDialog({ title, background, initial, onCancel, onDone }: InkPadPr
     capRef.current = null;
     try {
       const d = hist.current;
+      // #344 C-final B: strokes past the upload cap would never upload — refuse here, with the pad still open
+      if (!strokesFitUploadCap(serializeInk(d))) {
+        setNote("This drawing is too big to save — erase some strokes or labels, then try Done again.");
+        return;
+      }
       const jpeg = await flattenInk(background, d);
       await onDone({ doc: d, jpeg });
     } catch {

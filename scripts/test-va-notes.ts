@@ -1703,13 +1703,14 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     ok(/<input[^>]*type="file"[^>]*accept="image\/\*"[^>]*capture="environment"/.test(sp) && /<input[^>]*type="file"[^>]*accept="image\/\*"[^>]*multiple/.test(sp) && sp.includes("resizePhoto("),
       "#344 C5: every section's Add photo has a camera input (capture=environment) and a library input (multiple), shrunk with the engine's resizePhoto");
     const cap = sp.slice(sp.indexOf("async function addPhotos"));
-    ok(cap.length > 0 && sp.includes("async function addPhotos") && cap.indexOf("await persist(") > 0 && cap.indexOf("await persist(") < cap.indexOf("enqueuePhoto(") &&
+    // #344 C-final B reversed the order: the bytes are queued on the device first, then the pending ref is saved
+    ok(cap.length > 0 && sp.includes("async function addPhotos") && cap.indexOf("enqueuePhoto(") > 0 && cap.indexOf("enqueuePhoto(") < cap.indexOf("await persist(") &&
       sp.includes('newFileId("p")') && sp.includes("photoRoom(") && sp.includes("SURVEY_PHOTO_CAP_MESSAGE"),
-      "#344 C5: a capture adds the pending p_ ref, saves, THEN enqueues the bytes (cap 200)");
+      "#344 C5: a capture mints a pending p_ ref, queues the bytes, THEN saves the ref (cap 200)");
     const mk = sp.slice(sp.indexOf("async function saveMarkup"));
-    ok(sp.includes("async function saveMarkup") && sp.includes('newFileId("m")') && sp.includes('siblingId(') && mk.indexOf("await persist(") > 0 &&
-      mk.indexOf("await persist(") < mk.indexOf("enqueuePhoto(") && sp.includes("serializeInk(") && sp.includes('"application/json"'),
-      "#344 C5: a markup gets a NEW m_ id + its k_, saves, THEN enqueues the flattened JPEG and the strokes JSON");
+    ok(sp.includes("async function saveMarkup") && sp.includes('newFileId("m")') && sp.includes('siblingId(') && mk.indexOf("enqueuePhoto(") > 0 &&
+      mk.indexOf("enqueuePhoto(") < mk.indexOf("await persist(") && sp.includes("serializeInk(") && sp.includes('"application/json"'),
+      "#344 C5: a markup gets a NEW m_ id + its k_, enqueues the flattened JPEG and the strokes JSON, THEN saves");
     ok(/<InkPad[\s\S]{0,400}background=\{\{ kind: "image", url: originalUrl/.test(sp) && sp.includes("parseInk(") && sp.includes("queuedPhotoBlob("),
       "#344 C5: the InkPad draws over the ORIGINAL photo, starting from the saved strokes (device copy while pending)");
     ok(sp.includes("filesToDiscard(") && sp.includes("discardPhoto(") && sp.includes("View original") && sp.includes("Edit markup") && sp.includes("Remove markup") &&
@@ -1828,9 +1829,9 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       "#344 C6: sketch-tile is a client hook with no store / server imports");
     const sv = st.slice(st.indexOf("async function saveSketch"));
     ok(st.includes("async function saveSketch") && sv.includes('newFileId("s")') && sv.includes("siblingId(") && sv.includes("withNewSketch(") &&
-      sv.indexOf("await persist(") > 0 && sv.indexOf("await persist(") < sv.indexOf("enqueuePhoto(") && sv.indexOf("sketchFilesToDiscard(") >= 0 && st.includes("discardPhoto(") &&
+      sv.indexOf("enqueuePhoto(") > 0 && sv.indexOf("enqueuePhoto(") < sv.indexOf("await persist(") && sv.indexOf("sketchFilesToDiscard(") >= 0 && st.includes("discardPhoto(") &&
       st.includes("serializeInk(") && st.includes('"application/json"'),
-      "#344 C6: Done mints a NEW s_ + k_, saves the pending ref, THEN enqueues the JPEG + strokes, and discards the superseded sketch's queued files");
+      "#344 C6: Done mints a NEW s_ + k_, enqueues the JPEG + strokes, THEN saves the pending ref, and discards the superseded sketch's queued files");
     ok(st.includes("visibleSketchPads(") && st.includes("padBackground(") && /kind: "svg"/.test(st) && st.includes("parseInk(") && st.includes("fitInkTo(") &&
       st.includes("queuedPhotoBlob(") && st.includes("URL.revokeObjectURL(") && st.includes("<InkPad") && st.includes("couldn't load"),
       "#344 C6: a tile opens the InkPad over the generated background, starting from the saved strokes (device copy while pending, fitted), else empty with a note");
@@ -1901,9 +1902,11 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
         /function addLocalUrl[\s\S]{0,120}mounted\.current/.test(st),
         "#344 C6 fix: the pad's background is built from the saved strokes' size (line set sheets never fitted); the strokes fetch aborts on unmount; inline strokes read with fetch");
       const sv2 = st.slice(st.indexOf("async function saveSketch"), st.indexOf("/* ---------- rendering"));
-      ok(sv2.includes("withSketchRestored(") && sv2.indexOf("withSketchRestored(") < sv2.indexOf("await dropQueued(stale)") && /catch \(e\) \{[\s\S]{0,900}throw e;/.test(sv2) &&
+      // #344 C-final B: the files queue before anything changes, so a failed enqueue has nothing to restore — it drops
+      // what queued and rejects (the previous sketch was never touched)
+      ok(!sv2.includes("withSketchRestored(") && sv2.indexOf("dropQueued([s, k])") >= 0 && sv2.indexOf("dropQueued([s, k])") < sv2.indexOf("commit(next)") && /catch \(e\) \{[\s\S]{0,900}throw e;/.test(sv2) &&
         st.includes("That sketch never finished uploading — draw it again.") && st.includes("sketchAfterDiscard(") && st.includes("Replace the drawing you can't see?"),
-        "#344 C6 fix: a failed enqueue restores the previous sketch and keeps the pad open; a discarded unfinished sketch goes back to Draw; Done over unloaded strokes asks first");
+        "#344 C6 fix: a failed enqueue keeps the previous sketch and the pad open; a discarded unfinished sketch goes back to Draw; Done over unloaded strokes asks first");
       ok(sp.includes("discardOther?:") && sp.includes("describeOther?:") && /optsRef\.current\.discardOther\?\.\(fileId\)/.test(sp) && sp.includes("o.describeOther?.(fileId)") &&
         ctl.includes("discardOther:") && ctl.includes("describeOther:") && ctl.includes('"Drawing not saved yet"'),
         "#344 C6 fix: failed sketch uploads are named by pad and discarded through the sketch hook; a failed sketch save says Drawing not saved yet");
@@ -2173,6 +2176,143 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     ok(/onRefs: \(next\) => \{[\s\S]{0,200}seenPhotoIds\.current\.add/.test(ctlF) && /onSketches: \(next\) => \{[\s\S]{0,200}seenSketchIds\.current\.add/.test(ctlF) &&
       ctlF.includes("unionUnseenFileRefs(") && /useEffect\(\(\) => \{[\s\S]{0,120}unionUnseenFileRefs\([\s\S]{0,900}\}, \[initial\]\)/.test(ctlF),
       "#344 C-final: the editor marks every ref it creates as seen and unions a refreshed record's unseen refs even while dirty");
+  }
+  /* ---- C-final B: captures queue before saving; saves time out to the outbox; strokes cap; dirty; rev; pen ---- */
+  {
+    const FF = await import("../src/lib/field-files/files");
+    const INK = await import("../src/lib/ink/model");
+    const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+    const has = (k: string) => Object.prototype.hasOwnProperty.call(FF, k);
+    const sp = read("src/app/(app)/venue-assessments/[id]/sections/section-photos.tsx");
+    const st = read("src/app/(app)/venue-assessments/[id]/sections/sketch-tile.tsx");
+    const ctl = read("src/app/(app)/venue-assessments/[id]/controls.tsx");
+    const pad = read("src/components/ink/ink-pad.tsx");
+    const sav = read("src/lib/sync/save.ts");
+    const fls = read("src/lib/field-files/files.ts");
+    const fb = read("src/lib/field-files/file-bytes.ts");
+    const fa = read("src/app/(app)/venue-assessments/file-actions.ts");
+    const upr = read("src/app/api/surveys/[id]/files/upload/route.ts");
+
+    /* fix 3 — the strokes JSON cap */
+    ok(FF.UPLOAD_CAPS.json === 4 * 1024 * 1024 && !/json:\s*2 \* 1024 \* 1024/.test(fls),
+      "#344 C-final B: the strokes JSON upload cap is 4 MB");
+    ok(/maximumSizeInBytes: json \? UPLOAD_CAPS\.json/.test(upr) && /json: UPLOAD_CAPS\.json \+/.test(fb) && fa.includes("readCapped(stream, UPLOAD_CAPS.json)"),
+      "#344 C-final B: the broker, the finalize read and the bytes route all derive their JSON cap from UPLOAD_CAPS.json");
+    {
+      const strokes: Array<{ id: string; tool: "pen"; color: string; width: number; pts: number[] }> = [];
+      let extra = Math.floor(INK.INK_CAPS.numbers / 3) - 26 * INK.INK_CAPS.strokes; // points left after 26 per stroke
+      for (let i = 0; i < INK.INK_CAPS.strokes; i++) {
+        const n = 26 + (extra > 0 ? 1 : 0);
+        if (extra > 0) extra--;
+        const pts: number[] = [];
+        for (let j = 0; j < n; j++) pts.push(16383.5, 16383.5, 0.55);
+        strokes.push({ id: `s${String(i).padStart(9, "0")}`, tool: "pen", color: "#1f5f9a", width: 63.75, pts });
+      }
+      const labels = Array.from({ length: INK.INK_CAPS.labels }, (_, i) => ({
+        id: `l${String(i).padStart(9, "0")}`, x: 16383.5, y: 16383.5, text: "\u{1D11E}".repeat(INK.INK_CAPS.labelChars), color: "#1f5f9a", size: 199.75,
+      }));
+      const json = INK.serializeInk({ v: 1, w: 16384, h: 16384, strokes, labels });
+      const parsed = INK.parseInk(json);
+      const bytes = Buffer.byteLength(json, "utf8");
+      const numbers = parsed ? parsed.strokes.reduce((n, s) => n + s.pts.length, 0) : 0;
+      ok(!!parsed && parsed.strokes.length === INK.INK_CAPS.strokes && numbers > INK.INK_CAPS.numbers - 3 && parsed.labels.length === INK.INK_CAPS.labels &&
+        bytes > 2 * 1024 * 1024 && bytes <= FF.UPLOAD_CAPS.json && has("strokesFitUploadCap") && FF.strokesFitUploadCap(json),
+        `#344 C-final B: a max-size strokes doc (5,000 strokes, ${numbers} numbers at the largest coordinates, 200 full labels) is ${bytes} bytes — over the old 2 MB, under the 4 MB cap`);
+    }
+    ok(has("strokesFitUploadCap") && FF.strokesFitUploadCap("x".repeat(FF.UPLOAD_CAPS.json)) && !FF.strokesFitUploadCap("x".repeat(FF.UPLOAD_CAPS.json + 1)) &&
+      !FF.strokesFitUploadCap("é".repeat(FF.UPLOAD_CAPS.json / 2 + 1)),
+      "#344 C-final B: strokesFitUploadCap counts UTF-8 bytes against the cap");
+    const doneFn = pad.slice(pad.indexOf("const done = async"), pad.indexOf("/* ── pointers"));
+    ok(doneFn.includes("strokesFitUploadCap(serializeInk(") && doneFn.indexOf("strokesFitUploadCap(") < doneFn.indexOf("await onDone(") && /too big/i.test(doneFn),
+      "#344 C-final B: InkPad's Done refuses, with a clear message, strokes too big to upload (the pad stays open)");
+
+    /* minor — unknown stored sketch keys are kept, unknown incoming ones refused */
+    {
+      const fin = (id: string) => ({ blobPath: `surveys/FS-1/${id}.jpg` });
+      const old = { id: "s_aaaaaaaa0001", image: fin("s_aaaaaaaa0001"), strokes: { blobPath: "surveys/FS-1/k_aaaaaaaa0001.json" }, updatedAt: 1, by: "u" };
+      const cur = { id: "s_aaaaaaaa0002", image: { pending: true as const }, strokes: { pending: true as const }, updatedAt: 2, by: "u" };
+      const stored = { sketches: { retiredPad: old, stagePlan: cur } } as Record<string, unknown>;
+      const s1 = FF.sanitizeIncomingFileSlots({ sketches: { stagePlan: cur, bogusPad: cur } } as Record<string, unknown>, "FS-1", { blobEnabled: true, stored });
+      const sk1 = s1.sketches as Record<string, { id: string }>;
+      ok(!!sk1 && JSON.stringify(sk1.retiredPad) === JSON.stringify(old) && !sk1.bogusPad && sk1.stagePlan?.id === cur.id,
+        "#344 C-final B: sanitize keeps a stored sketch whose pad key is unknown, and still refuses an unknown key from incoming");
+      const s2 = FF.sanitizeIncomingFileSlots({ sketches: { stagePlan: cur, retiredPad: { ...cur, id: "s_aaaaaaaa0009" } }, sketchIdsSeen: [old.id, cur.id] } as Record<string, unknown>,
+        "FS-1", { blobEnabled: true, stored });
+      const m2 = FF.mergeSurveyFileRefs(stored, s2) as { sketches?: Record<string, { id: string }> };
+      ok(m2.sketches?.retiredPad?.id === old.id && m2.sketches?.stagePlan?.id === cur.id,
+        "#344 C-final B: a save that has seen the unknown-key sketch can neither delete nor overwrite it");
+    }
+
+    /* fix 4 — the dirty-clear rule */
+    {
+      const m = { a: "1" };
+      const sent = { notes: "a", measurements: m, photoRefs: [] as unknown[], sketches: {}, updatedAt: 1 };
+      const okRule = has("editsUnchangedSince");
+      const same = okRule && FF.editsUnchangedSince(sent, sent) &&
+        FF.editsUnchangedSince({ ...sent, photoRefs: [{ id: "p_1" }], sketches: { stagePlan: {} }, updatedAt: 9 }, sent);
+      const typed = okRule && !FF.editsUnchangedSince({ ...sent, notes: "ab" }, sent) && !FF.editsUnchangedSince({ ...sent, measurements: { ...m, b: "2" } }, sent) &&
+        !FF.editsUnchangedSince({ ...sent, venue: "x" }, sent);
+      ok(same && typed, "#344 C-final B: editsUnchangedSince — photo / sketch / updatedAt changes aside, any edit after the click keeps the draft dirty");
+      const os = ctl.slice(ctl.indexOf("async function onSave"), ctl.indexOf("async function advanceStage"));
+      const as = ctl.slice(ctl.indexOf("async function advanceStage"), ctl.indexOf("async function onCreateQuote"));
+      const guarded = (src: string) => /if \(editsUnchangedSince\(draftRef\.current, edits\)\) setDirty\(false\)/.test(src) && !/^\s*setDirty\(false\);/m.test(src);
+      ok(guarded(os) && guarded(as) && /draftRef\.current = draft/.test(ctl),
+        "#344 C-final B: Save changes and stage moves clear dirty only when the latest draft still matches what was sent");
+    }
+
+    /* fix 7 — photo / sketch saves send only the file keys online */
+    {
+      const okP = has("fileOnlyPatch");
+      const p = okP ? FF.fileOnlyPatch({ notes: "x", customer: "c", photoRefs: [], photoRefIdsSeen: ["p_1"], sketches: {}, sketchIdsSeen: [] }) : {};
+      ok(okP && Object.keys(p).sort().join() === "photoRefIdsSeen,photoRefs,sketchIdsSeen,sketches" && Object.keys(FF.fileOnlyPatch({ notes: "x" })).length === 0,
+        "#344 C-final B: fileOnlyPatch keeps only photoRefs, sketches and their seen lists");
+      const psv = ctl.slice(ctl.indexOf("async function savePhotoRefs"), ctl.indexOf("const sectionPhotos = useSectionPhotos"));
+      ok(psv.includes("fileOnlyPatch(buildPatch(undefined, sent))") && /action: \(\) => saveSurvey\(record\.id, filePatch\)/.test(psv) && psv.includes("doc: buildFullDoc(undefined, sent)"),
+        "#344 C-final B: a photo / sketch save sends only the file keys online (other fields can't revert another device's edits); the outbox keeps the whole doc");
+    }
+
+    /* fix 2 — the bytes reach the device queue before the save; the save times out to the outbox */
+    {
+      const cap = sp.slice(sp.indexOf("async function addPhotos"), sp.indexOf("/* ---------- viewer actions"));
+      const mk = sp.slice(sp.indexOf("async function saveMarkup"), sp.indexOf("/* ---------- failed uploads"));
+      const sv = st.slice(st.indexOf("async function saveSketch"), st.indexOf("/** Done in the pad: straight to saveSketch"));
+      const before = (src: string, a: string, b: string) => src.indexOf(a) >= 0 && src.indexOf(b) >= 0 && src.indexOf(a) < src.indexOf(b);
+      ok(before(cap, "enqueuePhoto(", "await persist(") && before(cap, "enqueuePhoto(", "commit(") && /if \(!queued\.length\) return;/.test(cap),
+        "#344 C-final B: a capture queues its bytes on the device BEFORE adding + saving the pending ref; a photo that couldn't be kept is never saved");
+      ok(before(mk, "enqueuePhoto(", "await persist(") && before(mk, "enqueuePhoto(", "replaceRef(") && /catch \(e\) \{[\s\S]{0,500}dropQueued\(\[m, k\]\)[\s\S]{0,400}throw e;/.test(mk),
+        "#344 C-final B: a markup queues both files BEFORE the ref changes or saves; an enqueue failure drops what queued, keeps the old markup and rejects (pad stays open)");
+      ok(before(sv, "enqueuePhoto(", "await persist(") && before(sv, "enqueuePhoto(", "commit(") && /catch \(e\) \{[\s\S]{0,500}dropQueued\(\[s, k\]\)[\s\S]{0,400}throw e;/.test(sv),
+        "#344 C-final B: a sketch queues both files BEFORE the sketch changes or saves; an enqueue failure drops what queued, keeps the old sketch and rejects");
+      const TO = await import("../src/lib/sync/save-timeout").catch(() => null);
+      let timedOut = false, passed = false, rejected = false;
+      if (TO) {
+        try { await TO.withSaveTimeout(new Promise<never>(() => undefined), 20); } catch (e) { timedOut = e instanceof TO.SaveTimeoutError; }
+        passed = (await TO.withSaveTimeout(Promise.resolve(7), 1000)) === 7;
+        try { await TO.withSaveTimeout(Promise.reject(new Error("boom")), 1000); } catch (e) { rejected = (e as Error).message === "boom" && !(e instanceof TO.SaveTimeoutError); }
+      }
+      ok(!!TO && timedOut && passed && rejected && TO.SAVE_ACTION_TIMEOUT_MS === 15_000,
+        "#344 C-final B: withSaveTimeout — a hung action rejects with SaveTimeoutError after the limit; results and real errors pass through");
+      ok(/withSaveTimeout\(opts\.action\(\), opts\.timeoutMs\)/.test(sav) && /e instanceof SaveTimeoutError/.test(sav) && /timeoutMs\?: number/.test(sav),
+        "#344 C-final B: saveThroughOutbox treats a timed-out action like a lost connection — the whole doc goes to the outbox");
+      const psv = ctl.slice(ctl.indexOf("async function savePhotoRefs"), ctl.indexOf("const sectionPhotos = useSectionPhotos"));
+      const os = ctl.slice(ctl.indexOf("async function onSave"), ctl.indexOf("async function onCreateQuote"));
+      ok(psv.includes("timeoutMs: SAVE_ACTION_TIMEOUT_MS") && (os.match(/timeoutMs: SAVE_ACTION_TIMEOUT_MS/g) || []).length === 2,
+        "#344 C-final B: photo / sketch saves, Save changes and stage moves all time out to the outbox");
+    }
+
+    /* fix 5 — no rev adoption from a finalize */
+    ok(!/onRev|revSeen/.test(ctl) && !/onRev/.test(sp) && /rev: \(record\.rev \|\| 1\) \+ 1/.test(ctl),
+      "#344 C-final B: the editor never adopts a finalize's rev — the outbox doc builds on the record's own rev (conflicts stay detectable)");
+
+    /* fix 8 — Pencil mode remembered on the device */
+    ok(pad.includes('"ink:penSeen"') && /try \{[^}]*localStorage\.getItem\(PEN_SEEN_KEY\)/.test(pad) && /try \{[^}]*localStorage\.setItem\(PEN_SEEN_KEY, "1"\)/.test(pad),
+      "#344 C-final B: a device that has used a Pencil starts every pad in Pencil mode (localStorage ink:penSeen, guarded)");
+
+    /* minor — Remove markup asks first; the header counts uploads */
+    ok(sp.includes("Remove this markup?") && /confirmRemove/.test(sp) && !/onClick=\{\(\) => void removeMarkup\(vRef\.id\)\}>Remove markup/.test(sp),
+      "#344 C-final B: Remove markup asks first");
+    ok(ctl.includes("subscribePhotoQueue(") && ctl.includes("pendingPhotoCount(record.id)") && /\{uploading\} uploading/.test(ctl),
+      "#344 C-final B: the editor header shows N uploading while this survey's files are on the device queue");
   }
 }
 

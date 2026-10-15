@@ -7,7 +7,8 @@ import type {
   SurveyStage,
   MeasureGroup,
 } from "@/lib/stores/surveys";
-import { photoCountsBySection, unionUnseenFileRefs, type SketchRef, type SurveyPhotoRef } from "@/lib/field-files/files";
+import { editsUnchangedSince, fileOnlyPatch, photoCountsBySection, unionUnseenFileRefs, type SketchRef, type SurveyPhotoRef } from "@/lib/field-files/files";
+import { pendingPhotoCount, subscribePhotoQueue } from "@/lib/assessments/photo-queue";
 import {
   VENUE_CLASSES,
   VISIT_PURPOSES,
@@ -34,6 +35,7 @@ import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, ty
 import Venue3D from "./venue-3d";
 import SuggestEstimate from "@/components/assist/suggest-estimate";
 import { saveThroughOutbox } from "@/lib/sync/save";
+import { SAVE_ACTION_TIMEOUT_MS } from "@/lib/sync/save-timeout";
 import { RecordingsStrip, type RecordingStripItem } from "@/components/recordings/recordings-strip";
 import { FromRecordingPanel, type FromRecordingPanelData } from "@/components/recordings/from-recording-panel";
 import type { Draft, EditorCustomer, EditorMeta, FieldDef, SectionDef } from "./sections/types";
@@ -271,6 +273,27 @@ export default function SurveyEditor({
   const initial = useMemo<Draft>(() => toDraft(record, travelSuggestion), [record, travelSuggestion]);
   const [draft, setDraft] = useState<Draft>(initial);
   const [dirty, setDirty] = useState(false);
+  // #344 C-final B: the newest draft, for a save that finishes after the user typed more (it stays dirty then)
+  const draftRef = useRef<Draft>(initial);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+  // #344 C-final B: this survey's files still on the device queue (the header says "N uploading")
+  const [uploading, setUploading] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const off = subscribePhotoQueue(() => {
+      void pendingPhotoCount(record.id)
+        .then((n) => {
+          if (alive) setUploading(n);
+        })
+        .catch(() => undefined);
+    });
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [record.id]);
   // A "From recording" Insert (spec §4.4) writes into the SAVED survey and
   // refreshes the route. Adopt the refreshed record so the appended text
   // shows and the next Save doesn't overwrite it with this stale draft —
@@ -771,7 +794,7 @@ export default function SurveyEditor({
       ...rec,
       ...(buildPatch(over, d) as Record<string, unknown>),
       updatedAt: Date.now(),
-      rev: Math.max(record.rev || 1, revSeen.current) + 1,
+      rev: (record.rev || 1) + 1, // #344 C-final B: never a finalize's rev — another device's newer save stays a conflict
       syncState: "synced",
     };
   }
@@ -788,12 +811,14 @@ export default function SurveyEditor({
           id: record.id,
           doc: buildFullDoc(undefined, sent),
           action: () => saveSurvey(record.id, patch),
+          timeoutMs: SAVE_ACTION_TIMEOUT_MS,
         });
         lastSaved.current = sent;
         setPhotoUnsaved(false);
         return res;
       });
-      setDirty(false);
+      // #344 C-final B: typing while the save ran (or waited in the queue) keeps the draft dirty — that text wasn't sent
+      if (editsUnchangedSince(draftRef.current, edits)) setDirty(false);
       setDraft((d) => ({ ...d, updatedAt: Date.now() }));
       flash(
         queued
@@ -819,13 +844,14 @@ export default function SurveyEditor({
           id: record.id,
           doc: buildFullDoc({ stage: target }, sent),
           action: () => advanceSurveyStage(record.id, patch, target),
+          timeoutMs: SAVE_ACTION_TIMEOUT_MS,
         });
         lastSaved.current = { ...sent, stage: target };
         setPhotoUnsaved(false);
         return res;
       });
+      if (editsUnchangedSince(draftRef.current, edits)) setDirty(false); // #344 C-final B: same rule as Save changes
       setDraft((d) => ({ ...d, stage: target, updatedAt: Date.now() }));
-      setDirty(false);
       flash(
         queued
           ? `Moved to ${meta.stageMeta[target].label} — will sync when you're back online`
@@ -889,8 +915,6 @@ export default function SurveyEditor({
   }
 
   /* ---------- per-section photos (#344 C5) ---------- */
-  // The survey's stored rev a finalize reported (a finalize never bumps it) — the next outbox save builds on it.
-  const revSeen = useRef(0);
   /** Once photos change in this session, every save carries photoRefs (even an empty list). */
   const photosTouched = useRef(false);
   /** Same for sketches: once they change in this session every save carries them (even an empty set). */
@@ -904,18 +928,21 @@ export default function SurveyEditor({
     saveChain.current = run.catch(() => undefined);
     return run;
   }
-  /** A photo change saves the LAST-SAVED draft + the current refs: the user's unsaved edits stay unsaved (and dirty),
-   *  and are never saved half-typed or past validate(). */
+  /** A photo change saves the current refs + sketches: the user's unsaved edits stay unsaved (and dirty), and are
+   *  never saved half-typed or past validate(). Online (#344 C-final B) the patch carries ONLY the file keys + their
+   *  seen ids — the store merges it over the stored doc, so another device's field edits are never reverted; the
+   *  offline outbox still needs a whole doc (the last-saved draft + the refs), which the push rev check protects. */
   async function savePhotoRefs(kind: "photo" | "drawing" = "photo") {
     try {
       await serialSave(async () => {
         const sent: Draft = { ...lastSaved.current, photoRefs: refsNow.current, sketches: sketchesNow.current };
-        const patch = buildPatch(undefined, sent);
+        const filePatch = fileOnlyPatch(buildPatch(undefined, sent));
         await saveThroughOutbox({
           collection: "surveys",
           id: record.id,
           doc: buildFullDoc(undefined, sent),
-          action: () => saveSurvey(record.id, patch),
+          action: () => saveSurvey(record.id, filePatch),
+          timeoutMs: SAVE_ACTION_TIMEOUT_MS,
         });
         lastSaved.current = { ...lastSaved.current, photoRefs: sent.photoRefs, sketches: sent.sketches };
         setPhotoUnsaved(false);
@@ -952,9 +979,6 @@ export default function SurveyEditor({
       setDraft((d) => ({ ...d, photoRefs: next }));
     },
     save: () => savePhotoRefs("photo"),
-    onRev: (rev) => {
-      if (rev > revSeen.current) revSeen.current = rev;
-    },
     sectionTitle: (id) => sections.find((s) => s.id === id)?.title ?? "another section",
     foldOther: (fileId, slot) => sectionSketches.fold(fileId, slot),
     discardOther: (fileId) => sectionSketches.discard(fileId),
@@ -1162,6 +1186,11 @@ export default function SurveyEditor({
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#aab0bb" }}>{sub}</span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: savePillInk, background: savePillBg }}>{savePillLabel}</span>
+              {uploading > 0 && (
+                <span role="status" title="Photos and drawings still on this device — they upload when there is a connection" style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: "#1f5f9a", background: "#e8f0f8" }}>
+                  {uploading} uploading
+                </span>
+              )}
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: intakeMeta.ink, background: intakeMeta.soft, border: `1px solid ${intakeMeta.bd}` }}>{intakeMeta.label}</span>
             </div>
           </div>

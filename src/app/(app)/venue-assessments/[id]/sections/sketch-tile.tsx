@@ -11,8 +11,9 @@
  * background, starting from the saved strokes.
  *
  * Done always makes a NEW sketch: a fresh `s_` id + its `k_` strokes. The
- * order is the photos' order — the pending ref is saved first (so the server
- * owns the ids), THEN both files go to the shared device queue. The superseded
+ * order is the photos' order (#344 C-final B) — both files go to the shared
+ * device queue FIRST, THEN the pending ref is saved (a finalize that beats the
+ * save is a retryable `missing`). The superseded
  * sketch's still-queued files are discarded; its uploaded files stay in Blob as
  * orphans (nothing refers to them). The queue's `onDone` is the photos hook's
  * (one configuration per editor); it hands files no photo owns to `fold` here.
@@ -28,7 +29,7 @@ import { SKETCH_PADS, linesetSheetPage, padBackground, type SketchKey } from "@/
 import { visibleSketchPads, type FlowSlice, type SketchPadView } from "@/lib/survey-flow";
 import { discardPhoto, enqueuePhoto, queuedPhotoBlob } from "@/lib/assessments/photo-queue";
 import {
-  foldFileSlot, newFileId, siblingId, sketchAfterDiscard, sketchFilesToDiscard, slotFinished, withNewSketch, withSketchRestored,
+  foldFileSlot, newFileId, siblingId, sketchAfterDiscard, sketchFilesToDiscard, slotFinished, withNewSketch,
   type FinishedSlot, type SketchRef,
 } from "@/lib/field-files/files";
 import type { HandSheet } from "./linesets";
@@ -277,30 +278,29 @@ export function useSectionSketches(o: SectionSketchesOptions): SectionSketches {
     }
   }
 
-  /** Done in the pad: a NEW s_ id + its k_, the sketch saved with both slots pending, THEN both files queued; the
-   *  superseded sketch's queued files are dropped. Returned to the pad, so Done stays "Saving…" until it settles. */
+  /** Done in the pad: a NEW s_ id + its k_, both files queued on the device FIRST, THEN the sketch saved with both
+   *  slots pending; the superseded sketch's queued files are dropped. Returned to the pad, so Done stays "Saving…"
+   *  until it settles. */
   async function saveSketch(key: SketchKey, result: Done) {
     const section = sectionOf(key);
-    const cur = sketchesRef.current[key];
     const s = newFileId("s");
     const k = siblingId(s, "k");
-    const next = withNewSketch(sketchesRef.current, key, s, optsRef.current.me, nowMs());
-    const stale = sketchFilesToDiscard(cur, next[key]);
-    addLocalUrl(s, result.jpeg);
-    commit(next);
-    await persist(section); // the server must own the ids before a finalize can land (a failed save still queues: retryable)
     try {
       await enqueuePhoto(recordId, s, result.jpeg);
       await enqueuePhoto(recordId, k, new Blob([serializeInk(result.doc)], { type: "application/json" }));
     } catch (e) {
-      // The new drawing isn't safely on this device: put the previous sketch back (its queued files untouched), save
-      // that, drop whatever of the new one did queue, and reject — the pad stays open with the strokes intact.
-      commit(withSketchRestored(sketchesRef.current, key, s, cur));
+      // The new drawing isn't safely on this device. Nothing was changed or saved yet, so the previous sketch (and its
+      // queued files) is still in place: drop whatever of the new one did queue, and reject — the pad stays open.
       await dropQueued([s, k]);
-      await persist(section);
       setMsg(`The sketch couldn't be kept on this device (${errText(e, "storage refused it")}) — the earlier drawing is kept. Try Done again.`, section);
       throw e;
     }
+    const cur = sketchesRef.current[key]; // read after the queue: the sketches may have moved on meanwhile
+    const next = withNewSketch(sketchesRef.current, key, s, optsRef.current.me, nowMs());
+    const stale = sketchFilesToDiscard(cur, next[key]);
+    addLocalUrl(s, result.jpeg);
+    commit(next);
+    await persist(section);
     await dropQueued(stale);
     // Uploaded files of a re-drawn sketch stay in Blob as orphans (harmless; nothing refers to them).
     if (stale.length) console.info("[venue-assessments] sketch re-drawn; any uploaded files of the old one stay as orphans", recordId, stale.join(", "));

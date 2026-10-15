@@ -7,9 +7,12 @@
  * touched (View original / Edit markup / Remove markup). A markup gets a NEW
  * `m_` id (+ its `k_` strokes) every time it is (re)done.
  *
- * The order is always: add the pending ref → save the survey (so the server
- * owns the file id) → THEN hand the bytes to the shared device queue, which
- * uploads them to private Blob (inline data URLs in local dev) and finalizes.
+ * The order is always (#344 C-final B): hand the bytes to the shared device
+ * queue FIRST (so they are safe on the device before anything waits on the
+ * network) → add the pending ref → save the survey. The queue uploads them to
+ * private Blob (inline data URLs in local dev) and finalizes; a finalize that
+ * lands before the save is a retryable `missing` (the upload isn't repeated).
+ * A file that couldn't be queued is never saved as a ref.
  * The queue's `onDone` folds each finished slot into the draft with the
  * store's own `foldFileSlot`. Files a re-markup / removal / delete leaves
  * behind are discarded from the device queue so they don't retry for 7 days.
@@ -42,10 +45,8 @@ export type SectionPhotosOptions = {
   refs: SurveyPhotoRef[];
   /** mirror a new list into the draft — a photo change is saved on its own, so it never dirties the draft */
   onRefs: (next: SurveyPhotoRef[]) => void;
-  /** the editor's photo save: the last-saved survey + the current refs (never the user's unsaved edits) */
+  /** the editor's photo save: the current refs (online: only the file keys; never the user's unsaved edits) */
   save: () => Promise<void>;
-  /** the survey's stored rev after a finalize (adopted for the next outbox save) */
-  onRev: (rev: number) => void;
   sectionTitle: (sectionId: string) => string;
   /** #344 C6 — a finished file no photo owns (a sketch's) is handed on: one queue configuration per editor */
   foldOther?: (fileId: string, slot: FinishedSlot) => boolean;
@@ -64,7 +65,7 @@ export type SectionPhotos = {
   overlay: ReactNode;
 };
 
-type Viewer = { id: string; original: boolean; confirmDelete: boolean; caption: string };
+type Viewer = { id: string; original: boolean; confirmDelete: boolean; confirmRemove?: boolean; caption: string };
 /** A message shown beside the section it is about (null section = the photo list as a whole). */
 type Msg = { text: string; section: string | null };
 type Ink = { photoId: string; originalUrl: string; w: number; h: number; initial?: InkDoc };
@@ -210,7 +211,9 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
     () =>
       configurePhotoQueue({
         blobEnabled,
-        onDone: async (rid, fileId, ref, rev) => {
+        // #344 C-final B: a finalize's rev is never adopted — it would hide another device's newer save from the
+        // outbox's conflict check (a finalize never bumps rev; the record's own rev stays the base)
+        onDone: async (rid, fileId, ref) => {
           if (rid !== recordId) return; // another record's file: the server has it already
           const slot: FinishedSlot | null = ref.blobPath ? { blobPath: ref.blobPath } : ref.inline ? { inline: ref.inline } : null;
           if (slot) {
@@ -218,7 +221,6 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
             if (folded.status === "set" && folded.doc.photoRefs) commit(folded.doc.photoRefs);
             else if (folded.status === "missing") optsRef.current.foldOther?.(fileId, slot);
           }
-          if (typeof rev === "number") optsRef.current.onRev(rev);
         },
       }),
     [recordId, blobEnabled],
@@ -281,16 +283,21 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
         ref: { id: newFileId("p"), section: sectionId, takenAt: s.takenAt, by: me, file: { pending: true as const } } satisfies SurveyPhotoRef,
         blob: s.blob,
       }));
-      for (const a of added) addLocalUrl(a.ref.id, a.blob);
-      commit([...refsRef.current, ...added.map((a) => a.ref)]);
-      await persist(sectionId); // the server must own the ids before a finalize can land (a failed save still queues: retryable)
+      // #344 C-final B: the bytes go to the device queue FIRST — a save that hangs on a dead connection can't leave them
+      // only in memory. A finalize that beats the save is a retryable `missing`; one that couldn't be queued isn't saved.
+      const queued: typeof added = [];
       for (const a of added) {
         try {
           await enqueuePhoto(recordId, a.ref.id, a.blob);
+          queued.push(a);
         } catch (e) {
-          problems.push(`A photo couldn't be kept on this device: ${errText(e, "storage refused it")}`);
+          problems.push(`A photo couldn't be kept on this device, so it wasn't added: ${errText(e, "storage refused it")}`);
         }
       }
+      if (!queued.length) return;
+      for (const a of queued) addLocalUrl(a.ref.id, a.blob);
+      commit([...refsRef.current, ...queued.map((a) => a.ref)]);
+      await persist(sectionId);
     } finally {
       setBusySec(null);
       if (problems.length) setMsg([...new Set(problems)].join(" "), sectionId);
@@ -377,27 +384,38 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
     setInk(null);
   }
 
-  /** Done in the pad: a NEW m_ id + its k_, the ref saved with both slots pending, THEN both files queued; the
-   *  superseded markup's queued files are dropped. Returned to the pad, so Done stays "Saving…" until it settles. */
+  /** Done in the pad: a NEW m_ id + its k_, both files queued on the device FIRST, THEN the ref saved with both slots
+   *  pending; the superseded markup's queued files are dropped. Returned to the pad, so Done stays "Saving…" until it
+   *  settles. An enqueue failure drops what did queue, leaves the previous markup (and its queued files) untouched,
+   *  and rejects — the pad stays open with the strokes intact (#344 C-final B). */
   async function saveMarkup(photoId: string, result: { doc: InkDoc; jpeg: Blob }) {
-    const cur = findRef(photoId);
-    if (!cur) {
+    const first = findRef(photoId);
+    if (!first) {
       closeInk();
       return;
     }
     const m = newFileId("m");
     const k = siblingId(m, "k");
+    try {
+      await enqueuePhoto(recordId, m, result.jpeg);
+      await enqueuePhoto(recordId, k, new Blob([serializeInk(result.doc)], { type: "application/json" }));
+    } catch (e) {
+      // nothing was changed or saved yet: the previous markup stays as it is
+      await dropQueued([m, k]);
+      setMsg(`The markup couldn't be kept on this device (${errText(e, "storage refused it")}) — the earlier markup is kept. Try Done again.`, first.section);
+      throw e;
+    }
+    const cur = findRef(photoId); // re-read: the refs may have moved on while the files queued
+    if (!cur) {
+      await dropQueued([m, k]); // the photo was deleted meanwhile
+      closeInk();
+      return;
+    }
     const next = withNewMarkup(cur, m, nowMs());
     const stale = filesToDiscard(cur, next);
     addLocalUrl(m, result.jpeg);
     replaceRef(next);
     await persist(cur.section);
-    try {
-      await enqueuePhoto(recordId, m, result.jpeg);
-      await enqueuePhoto(recordId, k, new Blob([serializeInk(result.doc)], { type: "application/json" }));
-    } catch (e) {
-      setMsg(`The markup couldn't be kept on this device: ${errText(e, "storage refused it")}`, cur.section);
-    }
     await dropQueued(stale);
     setViewer((v) => (v && v.id === photoId ? { ...v, original: false } : v));
     closeInk();
@@ -614,8 +632,24 @@ export function useSectionPhotos(o: SectionPhotosOptions): SectionPhotos {
                 <button type="button" className="sp-btn" aria-disabled={opening} disabled={opening} onClick={() => void openMarkup(vRef.id)}>
                   {opening ? "Opening…" : vRef.markup ? "Edit markup" : "Mark up"}
                 </button>
-                {vRef.markup && (
-                  <button type="button" className="sp-btn quiet" onClick={() => void removeMarkup(vRef.id)}>Remove markup</button>
+                {vRef.markup && !viewer.confirmRemove && (
+                  <button type="button" className="sp-btn quiet" onClick={() => setViewer({ ...viewer, confirmRemove: true })}>Remove markup</button>
+                )}
+                {vRef.markup && viewer.confirmRemove && (
+                  <>
+                    <span style={{ fontSize: 12.5, color: "#b4543a" }}>Remove this markup?</span>
+                    <button
+                      type="button"
+                      className="sp-btn sp-danger"
+                      onClick={() => {
+                        setViewer({ ...viewer, confirmRemove: false, original: false });
+                        void removeMarkup(vRef.id);
+                      }}
+                    >
+                      Yes, remove
+                    </button>
+                    <button type="button" className="sp-btn quiet" onClick={() => setViewer({ ...viewer, confirmRemove: false })}>Cancel</button>
+                  </>
                 )}
                 <span style={{ flex: 1 }} />
                 {viewer.confirmDelete ? (
