@@ -334,16 +334,66 @@ async function rackLinkDbChecks(ok: Ok) {
   }
 }
 
+/* --- #47 Spec Library numbers follow Bray's TOC (script + plan; the map is Jeff's) --- */
+async function brayChecks(ok: Ok) {
+  const B = await import("../src/lib/specs/bray-renumber");
+  const good = { source: "Test TOC", confirmed: true, sections: [{ from: "11 61 23", to: "11 06 10", title: "Stage Rigging and Curtains" }, { from: "26 09 61", to: "26 50 00" }] };
+  const p = B.parseBrayMap(good);
+  ok(p.ok && p.map.entries.length === 2, "#47: a confirmed map with CSI numbers parses");
+  const draft = B.parseBrayMap({ ...good, confirmed: false });
+  ok(!draft.ok && draft.errors.some((e) => /confirmed/.test(e)), "#47: an unconfirmed (draft) map is refused");
+  const bad = B.parseBrayMap({ source: "x", confirmed: true, sections: [{ from: "116123", to: "11 06 10" }, { from: "11 61 23", to: "11 06 10" }, { from: "26 09 61", to: "11 06 10" }, { from: "26 09 61", to: "26 50 00" }] });
+  ok(!bad.ok && bad.errors.length === 3, "#47: malformed numbers, two sections onto one number and a number listed twice are all named");
+  const sections = [
+    { id: "ss-r", number: "11 61 23", title: "Theatrical Rigging and Curtains" },
+    { id: "ss-l", number: "26 09 61", title: "Theatrical Lighting" },
+    { id: "ss-a", number: "27 41 00", title: "Audio-Video" },
+  ];
+  const records = [{ specId: "PS-116123-001", section: "11 61 23" }, { specId: "PS-116123-002", section: "11 61 23" }, { specId: "PS-260961-001", section: "26 09 61" }, { specId: "PS-274100-001", section: "27 41 00" }];
+  const plan = B.planRenumber(p.ok ? p.map : { source: "", entries: [] }, sections, records);
+  ok(plan.ok && plan.plan.sections.map((s) => `${s.id}:${s.to}:${s.titleTo}`).join("|") === "ss-r:11 06 10:Stage Rigging and Curtains|ss-l:26 50 00:Theatrical Lighting" &&
+     plan.plan.records.map((r) => `${r.specId}→${r.to}`).join() === "PS-116123-001→11 06 10,PS-116123-002→11 06 10,PS-260961-001→26 50 00",
+    "#47: the plan renumbers each mapped section (title when given) and every record in it; unmapped sections stay");
+  const after = B.planRenumber(p.ok ? p.map : { source: "", entries: [] }, [{ ...sections[0], number: "11 06 10", title: "Stage Rigging and Curtains" }, { ...sections[1], number: "26 50 00" }, sections[2]], records.map((r) => ({ ...r, section: r.section === "11 61 23" ? "11 06 10" : r.section === "26 09 61" ? "26 50 00" : r.section })));
+  ok(after.ok && after.plan.sections.length === 0 && after.plan.records.length === 0 && after.plan.already.length === 2, "#47: a second run plans nothing (idempotent)");
+  const clash = B.planRenumber({ source: "x", entries: [{ from: "11 61 23", to: "27 41 00" }] }, sections, records);
+  ok(!clash.ok && /27 41 00 is already section "Audio-Video"/.test(clash.errors[0]), "#47: a target number held by a section that stays put refuses the whole map");
+  ok(B.renumberWhy("11 61 23", "Fall Creek TOC") === "Renumbered from 11 61 23 to follow Bray's TOC (Fall Creek TOC).", "#47: each record's new revision says why");
+  const draftFile = JSON.parse(src("docs/specs-seed/bray-toc-map.draft-neenah-2021.json"));
+  const dp = B.parseBrayMap(draftFile);
+  ok(!dp.ok && draftFile.confirmed === false, "#47: the committed Neenah 2021 draft map is unconfirmed, so the script refuses it as-is");
+  ok(B.parseBrayMap({ ...draftFile, confirmed: true }).ok, "#47: …and is otherwise well-formed (Jeff confirms, then it runs)");
+  const script = src("scripts/specs-renumber-bray.ts");
+  ok(/resolveExplicitDbTarget/.test(script) && /requireHostedConfirmation/.test(script) && /saveSpecRecord\(/.test(script) && /docs\/specs-seed\/bray-toc-map\.json/.test(script) && /--apply/.test(script),
+    "#47: the script is dry-run by default, needs an explicit target (--yes for hosted) and writes records through saveSpecRecord");
+  ok(/"specs:renumber-bray": "tsx scripts\/specs-renumber-bray\.ts"/.test(src("package.json")), "#47: npm run specs:renumber-bray");
+}
+
+async function brayDbChecks(ok: Ok) {
+  const S = await import("../src/lib/stores/spec-records");
+  const { normalizeSpecRecord } = await import("../src/lib/specs/records");
+  const base = normalizeSpecRecord({ specId: "PS-B4TEST-001", kind: "companion", status: "ready", section: "11 61 23", article: "2.1", title: "Batch 4", specText: "Text.", mfrNumbers: [], includeWith: [] })!;
+  await S.saveSpecRecord(base, "Test", "seed");
+  const r = await S.saveSpecRecord({ ...base, section: "11 06 10" }, "specs:renumber-bray", "Renumbered from 11 61 23 to follow Bray's TOC (Test).");
+  const revs = await S.specRecordRevisions("PS-B4TEST-001");
+  ok(r.outcome === "updated" && r.record.section === "11 06 10" && revs.length === 1 && revs[0].record.section === "11 61 23" && /Bray's TOC/.test(revs[0].why),
+    "#47 store: a renumbered record keeps its old number as a revision (history never rewritten)");
+  const again = await S.saveSpecRecord({ ...r.record }, "specs:renumber-bray", "again");
+  ok(again.outcome === "unchanged", "#47 store: re-saving the same number is a no-op (no extra revision)");
+}
+
 export async function batch4PureChecks(ok: Ok) {
   priceDateChecks(ok);
   await venueChecks(ok);
   await trackChecks(ok);
   await rackLinkChecks(ok);
+  await brayChecks(ok);
 }
 
 export async function batch4DbChecks(ok: Ok) {
   await priceDateDbChecks(ok);
   await rackLinkDbChecks(ok);
+  await brayDbChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-oct15-batch4.ts")) {
