@@ -17,6 +17,10 @@ import { companyIdsWithContactMatching } from "../src/lib/identity/contacts";
 import { allForDirectory } from "../src/lib/stores/customers";
 import { listQuoteRows } from "../src/lib/stores/quotes";
 import { createFixture, dropFixtures, fixtureId } from "./test-fixtures";
+import { DEFAULT_QUOTE_PIPELINES, LEAD_QUALIFY_FIX, LEAD_QUALIFY_STAGE, withLeadQualifyStage, validateQuotePipeline, type QuotePipeline } from "../src/lib/pipelines";
+import { ensureLeadQualifyStage, loadPipelines } from "../src/lib/pipelines-server";
+import { getSettingsPatch, setSettings } from "../src/lib/settings";
+import { get as getQuote } from "../src/lib/stores/quotes";
 
 const ROOT = join(__dirname, "..");
 const src = (p: string) => readFileSync(join(ROOT, p), "utf8");
@@ -161,14 +165,78 @@ async function listDbChecks(ok: Ok) {
   }
 }
 
+/* ------------------------------------------------------------------ #42 BID SPEC Lead / Qualify ------------------------------------------------------------------ */
+
+const OLD_BID_SPEC: QuotePipeline = {
+  id: "bid-spec",
+  label: "BID SPEC",
+  stages: [
+    { id: "collect-info", label: "Collect Information", tag: "draft" },
+    { id: "create-bid", label: "Create BID", tag: "draft" },
+    { id: "bid-sent", label: "BID Sent", tag: "sent" },
+    { id: "awarded", label: "Awarded", tag: "won" },
+  ],
+};
+const OLD_LIST: QuotePipeline[] = [DEFAULT_QUOTE_PIPELINES[0], OLD_BID_SPEC];
+
+function pipelineChecks(ok: Ok) {
+  const seed = DEFAULT_QUOTE_PIPELINES.find((p) => p.id === "bid-spec")!;
+  ok(seed.stages[0].id === "lead-qualify" && seed.stages[0].label === "Lead / Qualify" && seed.stages[0].tag === "draft" && seed.stages[1].id === "collect-info" && !validateQuotePipeline(seed).length,
+    "b3 #42: the BID SPEC seed starts Lead / Qualify (a plain Draft stage) → Collect Information, and validates");
+  const once = withLeadQualifyStage(OLD_LIST);
+  ok(!!once && once[1].stages.map((s) => s.id).join() === "lead-qualify,collect-info,create-bid,bid-sent,awarded" && once[0] === OLD_LIST[0] && OLD_BID_SPEC.stages.length === 4,
+    "b3 #42: a stored list gains the stage before Collect Information; other pipelines and the input are untouched");
+  ok(withLeadQualifyStage(once!) === null, "b3 #42: idempotent — a list that has it changes nothing (never a duplicate)");
+  const renamed = [{ ...OLD_BID_SPEC, stages: [{ id: "lq", label: "Lead/qualify", tag: "draft" as const }, ...OLD_BID_SPEC.stages] }];
+  ok(withLeadQualifyStage(renamed) === null, "b3 #42: a stage already named Lead / Qualify (any spelling) counts as present");
+  ok(withLeadQualifyStage([DEFAULT_QUOTE_PIPELINES[0]]) === null, "b3 #42: no BID SPEC pipeline → nothing to do");
+  const noCollect = withLeadQualifyStage([{ ...OLD_BID_SPEC, stages: OLD_BID_SPEC.stages.filter((s) => s.id !== "collect-info") }]);
+  ok(noCollect?.[0].stages[0].id === LEAD_QUALIFY_STAGE.id, "b3 #42: with Collect Information gone it goes first");
+  ok(/"lead \/ qualify": \{ stage: "lead-qualify" \}/.test(src("src/lib/daylite/history.ts")), "b3 #42: the Daylite import maps a \"Lead / Qualify\" stage label");
+}
+
+async function pipelineDbChecks(ok: Ok) {
+  const before = await getSettingsPatch();
+  const Q = fixtureId("b3", "bid-quote");
+  try {
+    await setSettings({ quotePipelines: OLD_LIST, pipelineFixes: undefined });
+    await createFixture("quotes", { id: Q, name: "B3 bid", customer: "x", status: "draft", quoteType: "system", pipelineId: "bid-spec", stage: "collect-info", updatedAt: Date.now() } as never);
+    ok((await ensureLeadQualifyStage()) === true, "b3 #42 db: the ensure adds the stage to a stored list");
+    const p1 = await getSettingsPatch();
+    const bs1 = (p1.quotePipelines as QuotePipeline[]).find((p) => p.id === "bid-spec")!;
+    ok(bs1.stages.map((s) => s.id).join() === "lead-qualify,collect-info,create-bid,bid-sent,awarded" && (p1.pipelineFixes as string[]).includes(LEAD_QUALIFY_FIX),
+      "b3 #42 db: stored BID SPEC now reads Lead / Qualify → Collect Information…, and the marker is set");
+    ok((await ensureLeadQualifyStage()) === false, "b3 #42 db: a second run changes nothing");
+    await setSettings({ pipelineFixes: undefined });
+    ok((await ensureLeadQualifyStage()) === false && ((await getSettingsPatch()).quotePipelines as QuotePipeline[])[1].stages.filter((s) => s.id === "lead-qualify").length === 1,
+      "b3 #42 db: even with the marker cleared it never duplicates the stage");
+    ok((await getQuote(Q))?.stage === "collect-info", "b3 #42 db: an existing quote keeps its stage");
+    // One-time: a stage Jeff deletes afterwards stays deleted.
+    await setSettings({ quotePipelines: OLD_LIST });
+    const loaded = await loadPipelines();
+    ok(loaded.quote.find((p) => p.id === "bid-spec")!.stages.length === 4, "b3 #42 db: once marked, a later list without the stage is left alone (a deliberate delete sticks)");
+    // A fresh environment (no stored list): loadPipelines marks it and reads the seeds.
+    await setSettings({ quotePipelines: undefined, pipelineFixes: undefined });
+    const fresh = await loadPipelines();
+    const pf = await getSettingsPatch();
+    ok(fresh.quote.find((p) => p.id === "bid-spec")!.stages[0].id === "lead-qualify" && !pf.quotePipelines && (pf.pipelineFixes as string[]).includes(LEAD_QUALIFY_FIX),
+      "b3 #42 db: with no stored list the seeds carry the stage and only the marker is written");
+  } finally {
+    await setSettings({ quotePipelines: before.quotePipelines, pipelineFixes: before.pipelineFixes });
+    await dropFixtures("b3");
+  }
+}
+
 /* ------------------------------------------------------------------ entry points ------------------------------------------------------------------ */
 
 export async function batch3PureChecks(ok: Ok) {
   listPagingChecks(ok);
+  pipelineChecks(ok);
 }
 
 export async function batch3DbChecks(ok: Ok) {
   await listDbChecks(ok);
+  await pipelineDbChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-oct15-batch3.ts")) {

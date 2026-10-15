@@ -161,6 +161,8 @@ export type AppSettingsData = {
   projectPipelines?: import("@/lib/pipelines").ProjectPipeline[];
   quotePipelines?: import("@/lib/pipelines").QuotePipeline[];
   defaultQuotePipelineId?: string;
+  /** One-time pipeline fixes already applied to the stored lists (Jeff 2026-10-15 #42: "bid-spec-lead-qualify"). */
+  pipelineFixes?: string[];
   /** Recordings → Drive archive (Krisp recordings spec §1.3). Connection key
    *  of the mailbox whose Google account owns the archive; null = not
    *  configured, the nightly archive job waits. */

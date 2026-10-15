@@ -8410,7 +8410,7 @@ import {
   const ed = DEFAULT_QUOTE_PIPELINES.find((p) => p.id === "estimate-design")!;
   const bs = DEFAULT_QUOTE_PIPELINES.find((p) => p.id === "bid-spec")!;
   ok(ed.stages.map((s) => s.id + ":" + s.tag).join(",") === "first-contact:draft,design:draft,presentation:sent,acceptance:won", "pipelines: estimate-design seed");
-  ok(bs.stages.map((s) => s.id + ":" + s.tag).join(",") === "collect-info:draft,create-bid:draft,bid-sent:sent,awarded:won", "pipelines: bid-spec seed");
+  ok(bs.stages.map((s) => s.id + ":" + s.tag).join(",") === "lead-qualify:draft,collect-info:draft,create-bid:draft,bid-sent:sent,awarded:won", "pipelines: bid-spec seed (Jeff 2026-10-15 #42: Lead / Qualify first)");
   ok(DEFAULT_PIPELINES.defaultQuotePipelineId === "estimate-design", "pipelines: default quote pipeline");
   for (const p of DEFAULT_PROJECT_PIPELINES) ok(validateProjectPipeline(p).length === 0, `pipelines: seed ${p.id} validates`);
   for (const p of DEFAULT_QUOTE_PIPELINES) ok(validateQuotePipeline(p).length === 0, `pipelines: seed ${p.id} validates`);
@@ -8625,7 +8625,7 @@ async function quotesPipelineAsyncChecks(): Promise<void> {
     const b = await Q.create({ name: "pl-bid", customer: "Test" });
     await Q.setQuoteStage(b.id, "design", "Test");
     const sw = await Q.setQuotePipeline(b.id, "bid-spec");
-    ok(sw?.pipelineId === "bid-spec" && sw.stage === "collect-info", "quotes: switching estimate-design → bid-spec lands on Collect Information");
+    ok(sw?.pipelineId === "bid-spec" && sw.stage === "lead-qualify", "quotes: switching estimate-design → bid-spec lands on its first stage, Lead / Qualify (Jeff 2026-10-15 #42)");
     ok(!(await Q.setQuotePipeline(b.id, "nope")), "quotes: switching to an unknown pipeline is refused");
     const bs = await Q.setStatus(b.id, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
     ok(bs?.stage === "bid-sent", "quotes: status snaps within the quote's own pipeline");
@@ -13821,7 +13821,7 @@ ok(
   // Estimate/Design's Acceptance/won.
   const mismatched = plan.quotes.find((q) => q.name.startsWith("MISMATCHED"))!;
   ok(
-    mismatched.pipelineId === "bid-spec" && mismatched.stage === "collect-info" && mismatched.status === "draft",
+    mismatched.pipelineId === "bid-spec" && mismatched.stage === "lead-qualify" && mismatched.status === "draft",
     "daylite: an Estimate/Design stage label on a BID SPEC row resolves to bid-spec's own first stage, not the other pipeline's mapping"
   );
   ok(plan.stats.unmappedOppStages["acceptance"] === 1, "daylite: the cross-pipeline label is counted in stats.unmappedOppStages");

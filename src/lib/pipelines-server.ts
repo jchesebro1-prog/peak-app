@@ -1,13 +1,44 @@
-import { getSettings, setSettings } from "@/lib/settings";
+import { getSettings, setSettings, updateSettings } from "@/lib/settings";
 import { listDocs, type Doc } from "@/db/doc-store";
 import {
   resolvePipelines, resolveProjectStage, validateProjectPipeline, validateQuotePipeline, projectPipelineFor, quotePipelineFor, carriesPipeline,
-  stageById, DEFAULT_PIPELINES, type Pipelines, type ProjectPipeline, type QuotePipeline,
+  stageById, DEFAULT_PIPELINES, LEAD_QUALIFY_FIX, withLeadQualifyStage, type Pipelines, type ProjectPipeline, type QuotePipeline,
 } from "@/lib/pipelines";
 
 export async function loadPipelines(): Promise<Pipelines> {
-  const s = await getSettings();
+  let s = await getSettings();
+  if (!(Array.isArray(s.pipelineFixes) && s.pipelineFixes.includes(LEAD_QUALIFY_FIX))) {
+    try {
+      await ensureLeadQualifyStage();
+      s = await getSettings();
+    } catch {
+      // A failed ensure never breaks a pipelines read — the next read retries.
+    }
+  }
   return resolvePipelines(s);
+}
+
+/**
+ * Jeff 2026-10-15 #42 — one-time, idempotent: a stored quote-pipeline list gets BID SPEC's new Lead / Qualify stage
+ * before Collect Information (`withLeadQualifyStage`), under the settings row lock, and the `pipelineFixes` marker
+ * is set in the same write — so it runs once per environment and a stage Jeff later deletes in Settings → Pipelines
+ * never comes back. With no stored list the seeds already carry the stage; only the marker is written. Records keep
+ * their stage. Returns whether the stored list changed.
+ */
+export async function ensureLeadQualifyStage(): Promise<boolean> {
+  let changed = false;
+  await updateSettings((cur) => {
+    const fixes = Array.isArray(cur.pipelineFixes) ? (cur.pipelineFixes as unknown[]).filter((x): x is string => typeof x === "string") : [];
+    changed = false;
+    if (fixes.includes(LEAD_QUALIFY_FIX)) return null;
+    const stored = Array.isArray(cur.quotePipelines) ? (cur.quotePipelines as QuotePipeline[]) : null;
+    // Only a list resolvePipelines would actually use (an invalid one reads as the seeds).
+    const valid = !!stored && resolvePipelines({ quotePipelines: stored }).quote === stored;
+    const next = valid && stored ? withLeadQualifyStage(stored) : null;
+    changed = !!next;
+    return { pipelineFixes: [...fixes, LEAD_QUALIFY_FIX], ...(next ? { quotePipelines: next } : {}) };
+  });
+  return changed;
 }
 
 /** Stage ids in use, per pipeline id — the editor's "N records here" and the delete guard. */
