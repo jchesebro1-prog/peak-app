@@ -105,7 +105,7 @@ export async function oct15PureChecks(ok: Ok) {
     ok(qd.includes("style={keyProductPhotoStyle(photoSides?.get(ps.id + \"|\" + kp.sku) ?? \"right\")}") && qd.includes("[...previewSections, ...alternateGroups.flatMap((ag) => ag.systems.map((x) => x.ps))]"),
       "oct15 #20: the PDF / online document numbers photos across the body's narrative systems, then the alternates");
     const pv = rd("src/components/estimate-output/package-view.tsx");
-    ok(pv.includes(".pkg-kp.pkg-kp-left img { float: left;") && pv.includes('className={kp.side === "left" ? "pkg-kp pkg-kp-left" : "pkg-kp"}') && rd("src/lib/estimate-output/package-model.ts").includes("n++ % 2 === 1"),
+    ok(pv.includes(".pkg-kp.pkg-kp-left img { float: left;") && pv.includes("<style>{PACKAGE_LEFT_PHOTO_CSS}</style>}") && pv.includes('className={kp.side === "left" ? "pkg-kp pkg-kp-left" : "pkg-kp"}') && rd("src/lib/estimate-output/package-model.ts").includes("n++ % 2 === 1"),
       "oct15 #20: the package page alternates too (stacked on a phone)");
     // The TipTap document: a new image is "auto" and alternates; an explicit choice wins.
     ok(DEFAULT_IMAGE.align === "auto" && productImageFor("s1", 1, "A").attrs.align === "auto" && productImageFor("s1", 1, "A", { align: "left" }).attrs.align === "left", "oct15 #20: a new document image defaults to Auto");
@@ -163,7 +163,7 @@ export async function oct15PureChecks(ok: Ok) {
     ok(bomViewProps(props(false)).pdfQty === false && bomViewProps(props(true)).pdfQty === true, "oct15 #14: the online BOM view keeps the PDF's Qty choice");
     const pm = rd("src/lib/estimate-output/package-model.ts");
     const pv = rd("src/components/estimate-output/package-view.tsx");
-    ok(pm.includes("showQty: d.pdfQty !== false,") && pm.includes('d.pdfQty === false ? { ...r, qty: null, unit: "" } : r') && pv.includes("showQty || i > 0") && pv.includes("{showQty && <td className=\"pkg-qty\">"),
+    ok(pm.includes("...(d.pdfQty === false ? { showQty: false } : {}),") && pm.includes('d.pdfQty === false ? { ...r, qty: null, unit: "" } : r') && pv.includes("showQty || i > 0") && pv.includes("{showQty && <td className=\"pkg-qty\">"),
       "oct15 #14: the package page's BOM drops its Qty column (and quantities) when the PDF hides them");
   }
   /* ---- #3 / #4 (pure + pins) ---- */

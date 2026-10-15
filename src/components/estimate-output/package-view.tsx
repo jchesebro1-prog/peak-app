@@ -26,6 +26,15 @@ export type PackageSlots = {
   cutSheets?: ReactNode;
 };
 
+/** Jeff 2026-10-15 #20 — every other key-product photo floats left (stacked on a phone). Printed only on a page that
+ *  has one, so a page whose photos don't alternate renders exactly as before. */
+export const PACKAGE_LEFT_PHOTO_CSS = `
+.pkg-kp.pkg-kp-left img { float: left; margin: 0 14px 8px 0; }
+@media (max-width: 600px) {
+  .pkg-kp.pkg-kp-left img { float: none; margin: 0 0 10px; }
+}
+`;
+
 export const PACKAGE_WEB_CSS = `
 .pkg { display: flex; flex-direction: column; gap: 14px; font-size: 14px; line-height: 1.55; color: #16181d; overflow-wrap: break-word; }
 .pkg-card { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; padding: 22px 26px; }
@@ -58,7 +67,6 @@ export const PACKAGE_WEB_CSS = `
 .pkg-label { font-size: 11px; font-weight: 700; color: #5b616e; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
 .pkg-kp { overflow: hidden; margin-top: 14px; }
 .pkg-kp img { float: right; width: 34%; max-height: 2.4in; object-fit: contain; margin: 0 0 8px 14px; }
-.pkg-kp.pkg-kp-left img { float: left; margin: 0 14px 8px 0; }
 .pkg-bom-wrap { overflow-x: auto; }
 .pkg-bom { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pkg-bom th { white-space: nowrap; text-align: left; font-size: 11px; font-weight: 700; color: #5b616e; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #e4e7ec; padding: 6px 8px; }
@@ -72,7 +80,7 @@ export const PACKAGE_WEB_CSS = `
 @media (max-width: 600px) {
   .pkg-card { padding: 18px 16px; }
   .pkg-grand { text-align: left; }
-  .pkg-kp img, .pkg-kp.pkg-kp-left img { float: none; display: block; width: 100%; max-height: 3in; margin: 0 0 10px; }
+  .pkg-kp img { float: none; display: block; width: 100%; max-height: 3in; margin: 0 0 10px; }
 }
 @page { size: letter; margin: 0.6in; }
 @media print {
@@ -181,6 +189,7 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
   return (
     <div className="pkg" data-view={m.view}>
       <style>{PACKAGE_WEB_CSS}</style>
+      {m.scopes.some((s) => s.keyProducts.some((kp) => kp.side === "left")) && <style>{PACKAGE_LEFT_PHOTO_CSS}</style>}
       <header className="pkg-card">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={m.logo.src} alt={m.companyName} className={m.logo.full ? "pkg-logo-full" : "pkg-logo"} />

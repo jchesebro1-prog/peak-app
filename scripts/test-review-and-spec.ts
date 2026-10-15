@@ -49229,8 +49229,8 @@ async function onlineDoc293tAsyncChecks(): Promise<void> {
   const st2 = n293tState(q2);
   const p2 = st2.kind === "ok" ? await n293tLoad(q2, { revision: st2.rev, photos: webHref }) : null;
   const h2 = p2 ? [p293Render({ ...p2, layout: "web" }), p293Render({ ...n293tBom(p2), layout: "web" })].join("\n") : "";
-  // Final fix 1: no PDF was copied, so Rev N follows the PDF's counting rule (1 revision before it).
-  ok(st2.kind === "ok" && st2.rev.rev === 2 && (q2.revisions || []).length === 2 && !!p2 && p2.revNum === 1 &&
+  // Final fix 1: no PDF was copied; Jeff 2026-10-15 #13: each send stamped its Rev at the cut (1, then 2).
+  ok(st2.kind === "ok" && st2.rev.rev === 2 && (q2.revisions || []).length === 2 && !!p2 && p2.revNum === 2 &&
      h2.includes("Second intro 293t.") && h2.includes("Second note 293t.") && h2.includes("Second line 293t") && !/SECRET-293/.test(h2),
     "#293t loader (DB): with two sent revisions the page renders the latest only — nothing of the earlier one, no internal note (Narrative + BOM, web)");
 }
@@ -49589,9 +49589,9 @@ async function finalFix293tAsyncChecks(): Promise<void> {
       await tick();
       await send(QA);
       const w2 = await web(QA);
-      ok(!!w2 && !!seen2.v && w2.rev.rev === 2 && seen2.v.revNum === 1 && w2.props.revNum === seen2.v.revNum && w2.props.revDateMs === seen2.v.revDateMs &&
-         w2.props.revDateMs !== w2.rev.at && w2.rev.pdfSavedAt === saved2 && w2.header.includes(" · Rev 1 · ") && w2.props.quoteNote === "Second note 293tF",
-        "#293t final 1 (DB): recall + edit + resend — the online pages print the PDF's Rev 1 and save date, not the revision's own Rev 2 / send time");
+      ok(!!w2 && !!seen2.v && w2.rev.rev === 2 && seen2.v.revNum === 2 && w2.props.revNum === seen2.v.revNum && w2.props.revDateMs === seen2.v.revDateMs &&
+         w2.props.revDateMs !== w2.rev.at && w2.rev.pdfSavedAt === saved2 && w2.header.includes(" · Rev 2 · ") && w2.props.quoteNote === "Second note 293tF",
+        "#293t final 1 (DB): recall + edit + resend — the revised draft's PDF prints the next Rev (2, Jeff 2026-10-15 #13 — never Rev 1 twice) and the online pages print it and its save date, not the send time");
 
       // 3. Save + send in one action (the render runs AFTER the cut): the PDF says Rev 2 — and so do the pages.
       const QB = fixtureId(293, "t-final-onesave");
@@ -49639,8 +49639,8 @@ async function finalFix293tAsyncChecks(): Promise<void> {
       await tick();
       await send(QC);
       const w4 = await web(QC);
-      ok(!!w4 && !!w4.rev.pdfBlobPath && w4.rev.docFields?.revNo === undefined && w4.rev.pdfSavedAt === savedC && w4.props.revNum === 1 && w4.props.revDateMs === savedC,
-        "#293t final 1 (DB): an unstamped copy derives the PDF counting rule — Rev 1, the copied file's savedAt");
+      ok(!!w4 && !!w4.rev.pdfBlobPath && w4.rev.docFields?.revNo === 1 && w4.rev.docFields?.issuedAt === undefined && w4.rev.pdfSavedAt === savedC && w4.props.revNum === 1 && w4.props.revDateMs === savedC,
+        "#293t final 1 (DB): an unstamped copy keeps the Rev the send stamped at the cut (1, Jeff 2026-10-15 #13) and the copied file's savedAt");
 
       // 5. Fix round 2 — the quote moves during render 1 only (the Send click mid-render): one re-render, its stamp recorded.
       const mkRace = async (tag: string) => {
@@ -49982,7 +49982,8 @@ import { qd293Props as mfdQdProps, qd293Sections as mfdQdSections, renderQuoteDo
   const html = mfdQdRender({ ...mfdQdProps({ sections: secs }), keyProductPhotos: { "SKU-5": { src: "data:image/png;base64,QUFB", alt: "Five" } } });
   ok(html.includes('src="/placeholders/allowance.webp"') && html.includes('src="/placeholders/custom-device.webp"') && html.includes('src="data:image/png;base64,QUFB"'),
     "mfr images: an allowance/custom key product prints its placeholder; a catalog photo still prints");
-  ok((html.match(/<img[^>]+float:right;width:34%/g) || []).length === 3 && html.includes("Budget allowance — Fixture allowance"), "mfr images: placeholders float like a photo; a catalog block with no photo prints full width");
+  ok((html.match(/<img[^>]+float:right;width:34%/g) || []).length === 2 && (html.match(/<img[^>]+float:left;width:34%/g) || []).length === 1 && html.includes("Budget allowance — Fixture allowance"),
+    "mfr images: placeholders float like a photo (alternating right, left, right — Jeff 2026-10-15 #20); a catalog block with no photo prints full width");
   secs[1].keyProducts = secs[1].keyProducts.map((k) => ({ ...k, photo: false }));
   const off = mfdQdRender({ ...mfdQdProps({ sections: secs }), keyProductPhotos: {} });
   ok(!off.includes("/placeholders/") && (off.match(/class="est-kp"/g) || []).length === 4, "mfr images: Photo off drops the placeholder too");
@@ -52945,7 +52946,7 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
   ok(/try \{\s*pkg = await resolveSharedPackage\(id, token\);\s*\} catch \(e\) \{\s*console\.error\([^;]*, e\);\s*return notFound\(\);\s*\}/.test(route),
     "#301 zip: a resolveSharedPackage failure is caught, logged and answered with the same uniform 404 as an invalid link");
   const srv = rd("src/lib/estimate-output/package-zip-server.ts");
-  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes('const letterhead = opts.front ? opts.front.letterhead : await d.letterhead(typeof opts.peakHeader === "boolean" ? opts.peakHeader : q.packagePeakHeader);') && srv.includes("buildSpecDocx(sp.spec, { letterhead })") && srv.includes("zipCacheable(built.leftOut) && front.coverOk && built.coverOk !== false") &&
+  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes("const letterhead = opts.front ? opts.front.letterhead : await d.bookLetterhead(header);") && srv.includes("buildSpecDocx(sp.spec, { letterhead: specLetterhead })") /* Jeff 2026-10-15 #12 */ && srv.includes("zipCacheable(built.leftOut) && front.coverOk && built.coverOk !== false") &&
      !srv.includes("listCatalog") && !/\b(update|patchQuote|setStatus)\(/.test(srv),
     "#301 zip: capped reads, unique entry names, the D94 docx, cache only a clean build; never the whole catalog, never a quote write");
   const dl301cz = [{ documentId: "PD-1", name: "A.pdf", kind: "datasheet", skus: ["A"] }, { documentId: "PD-2", name: "B.docx", kind: "specsheet", skus: ["B"] }, { documentId: "PD-3", name: "M.pdf", kind: "manual", skus: ["C"] }] as const;
@@ -57242,7 +57243,7 @@ function p4PreviewChecks(): void {
      p4pPath("Q 1", "bom", "bom") === "/estimator-preview/Q%201?tab=bom",
     "#P4 preview: the preview path keeps the package page's Narrative / BOM toggle on the package tab");
   const stamp = Date.UTC(2026, 9, 7, 17);
-  ok(p4pHeader({ id: "Q-9", estNo: 1005, quoteType: "system", revisions: [{}, {}], updatedAt: stamp }) === "EST-1005 · Rev 2 · saved Oct 7, 2026" &&
+  ok(p4pHeader({ id: "Q-9", estNo: 1005, quoteType: "system", status: "sent", revisions: [{ rev: 1, reason: "sent", docFields: { revNo: 1 } }, { rev: 2, reason: "sent", docFields: { revNo: 2 } }], updatedAt: stamp } as never) === "EST-1005 · Rev 2 · saved Oct 7, 2026" && // #13: Rev = send number
      p4pHeader({ id: "Q-9", revisions: [], updatedAt: stamp }).startsWith("Q-9 · Rev 1 · saved"),
     "#P4 preview: the header line is the saved estimate's own number, Rev and date (no sent revision needed)");
 
@@ -59268,8 +59269,8 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
      J(p5San(doc([{ type: "productImage", attrs: { width: 40, align: "full", sku: " SKU-5 ", lineKey: 5, sectionId: " s2 ", extra: 1, photo: { show: true } }, content: [P("x")] }]))) === J(doc([IMG("s2", "5", "SKU-5", "full", 40)])),
     "#312 images: the sanitizer keeps a productImage { sectionId, lineKey, sku, align, width } in that order, trims anchors, drops other attrs and any content");
   const coerced = p5San(doc([IMG("s2", "5", "A", "middle", 5), IMG("s2", "5", "A", "left", 300), IMG("s2", "5", "A", "right", 62.4), { type: "productImage", attrs: { sectionId: "s2", lineKey: "5", sku: "A", width: "x" } }]))!;
-  ok(J(coerced.content.map((b) => [(b as { attrs: { align: string } }).attrs.align, (b as { attrs: { width: number } }).attrs.width])) === J([["right", 25], ["left", 100], ["right", 62], ["right", 34]]),
-    "#312 images: align coerces to left/right/full (default right), width clamps to 25–100 and rounds (non-number → 34)");
+  ok(J(coerced.content.map((b) => [(b as { attrs: { align: string } }).attrs.align, (b as { attrs: { width: number } }).attrs.width])) === J([["auto", 25], ["left", 100], ["right", 62], ["auto", 34]]),
+    "#312 images: align coerces to auto/left/right/full (default auto since Jeff 2026-10-15 #20), width clamps to 25–100 and rounds (non-number → 34)");
   const dropped = p5San(doc([P("keep"), { type: "productImage" }, IMG("", "5", "A"), IMG("s2", "", "A"), IMG("x".repeat(65), "5", "A"), IMG("s2", "x".repeat(33), "A"), IMG("s2", "5", "x".repeat(129)),
     { type: "bulletList", content: [{ type: "listItem", content: [P("li"), IMG("s2", "5", "A")] }] }, { type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "A" }, content: [P("w"), IMG("s2", "5", "A")] },
     { type: "paragraph", content: [IMG("s2", "5", "A")] }]))!;
@@ -59335,19 +59336,19 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
   // (5) Seed + insert shapes.
   const s2 = { ...secs.find((s) => s.id === "s2")!, keyProducts: [{ lineKey: "5", sku: "SKU-5", text: "Five.", photo: true }, { lineKey: "6", sku: "SKU-6", text: "Six.", photo: false }] } as Secs[number];
   const kp = i312Kp(s2);
-  ok(J(kp.map((b) => b.type)) === J(["productImage", "productBlock", "productBlock"]) && J(kp[0]) === J(IMG("s2", "5", "SKU-5")) &&
+  ok(J(kp.map((b) => b.type)) === J(["productImage", "productBlock", "productBlock"]) && J(kp[0]) === J(IMG("s2", "5", "SKU-5", "auto")) && // #20: a seeded image is Auto
      J((kp[1] as { attrs: unknown }).attrs) === J({ sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: false, align: "right", width: 34 } }) && (kp[2] as { attrs: { photo: { show: boolean } } }).attrs.photo.show === false,
     "#312 images: seed — a key product with its photo flag on becomes productImage (right 34 %) then its words (photo hidden); with the flag off, words only");
   const seeded = p5Seed({ sections: [s2] });
   ok(J(seeded.content.map((b) => b.type)) === J(["heading", "paragraph", "bulletList", "productImage", "productBlock", "productBlock", "systemTotal", "priceTable"]) && J(p5San(seeded)) === J(seeded),
     "#312 images: seed — heading → intro → key products (image + words) → price line; the seed is valid");
   ok(J(i312Nodes("s1", 4, "X", "", false)) === J([{ type: "productBlock", attrs: { sectionId: "s1", lineKey: "4", sku: "X", photo: { show: false, align: "right", width: 34 } }, content: [{ type: "paragraph" }] }]) &&
-     J(i312ImgFor("s1", 4, "X", { align: "full", width: 500 })) === J(IMG("s1", "4", "X", "full", 100)) && J(i312ImgFor("s1", "4", "X")) === J(IMG("s1", "4", "X")),
+     J(i312ImgFor("s1", 4, "X", { align: "full", width: 500 })) === J(IMG("s1", "4", "X", "full", 100)) && J(i312ImgFor("s1", "4", "X")) === J(IMG("s1", "4", "X", "auto")),
     "#312 images: productNodesFor / productImageFor — words-only without a photo; image attrs default right 34, clamp like the validator");
   const allowNodes = p5l.docNodesFor({ kind: "line", sectionId: "s1", lineKey: "2" }, secs, () => "never read")!;
   const noPara = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "6" }, secs, () => null)!;
-  ok(J(allowNodes.map((b) => b.type)) === J(["productImage", "productBlock"]) && J(allowNodes[0]) === J(IMG("s1", "2", "line:2")) && J((allowNodes[1] as { content: unknown }).content) === J([P()]) &&
-     J(noPara[0]) === J(IMG("s2", "6", "SKU-6")),
+  ok(J(allowNodes.map((b) => b.type)) === J(["productImage", "productBlock"]) && J(allowNodes[0]) === J(IMG("s1", "2", "line:2", "auto")) && J((allowNodes[1] as { content: unknown }).content) === J([P()]) &&
+     J(noPara[0]) === J(IMG("s2", "6", "SKU-6", "auto")),
     "#312 images: a BOM line (drag / +) always inserts its image then its words — even a line with no photo (the image shows 'No photo for this part' in the editor and prints nothing)");
   const pres = p5l.docPresence(p5San(doc([IMG("s2", "6", "SKU-6")]))!);
   ok(p5l.lineInDoc("s2", "6", pres) && !p5l.lineInDoc("s2", "5", pres), "#312 images: an image alone marks its line as in the document (the BOM tick)");
@@ -59381,8 +59382,8 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
   const it = schema.nodes.productImage;
   ok(it && it.isAtom && !it.isInline && it.spec.group === "block" && it.spec.draggable === true && J(p5eNames().nodes) === J([...p5eNodeNames].sort()) &&
      J(p5eSan(schema.nodeFromJSON(doc([IMG("s2", "5", "SKU-5", "left", 40), P("t")])).toJSON())) === J(doc([IMG("s2", "5", "SKU-5", "left", 40), P("t")])) &&
-     J(schema.nodes.productImage.create({ sectionId: "s", lineKey: "1", sku: "A" }).attrs) === J({ sectionId: "s", lineKey: "1", sku: "A", align: "right", width: 34 }),
-    "#312 images: the editor schema registers productImage (block atom, draggable, attrs default right 34) matching schema.ts, round-tripping through the sanitizer");
+     J(schema.nodes.productImage.create({ sectionId: "s", lineKey: "1", sku: "A" }).attrs) === J({ sectionId: "s", lineKey: "1", sku: "A", align: "auto", width: 34 }),
+    "#312 images: the editor schema registers productImage (block atom, draggable, attrs default auto 34 — #20) matching schema.ts, round-tripping through the sanitizer");
   const pmDoc = schema.nodeFromJSON(doc([P("a"), PB("s2", "5", "SKU-5", "w", { align: "left", width: 40 }), P("b")]) as never);
   const st0 = P312State.create({ schema, doc: pmDoc });
   const tr = st0.tr;
@@ -59450,7 +59451,7 @@ import { NodeSelection as F312NodeSel, EditorState as F312State } from "@tiptap/
   const did0 = f312Add(t0, at0);
   const out0 = t0.doc.toJSON() as { content: Array<{ type: string; attrs?: Record<string, unknown> }> };
   ok(did0 && t0.steps.length === 1 && J(out0.content.map((n) => n.type)) === J(["paragraph", "productImage", "productBlock"]) &&
-     J(out0.content[1].attrs) === J({ sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "right", width: 34 }) &&
+     J(out0.content[1].attrs) === J({ sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "auto", width: 34 }) && // #20: Auto
      t0.selection instanceof F312NodeSel && t0.selection.node.type.name === "productImage",
     "#312 fix round 1: Add photo inserts a default productImage with the block's anchors right before it, selected, in one step");
   const t1 = F312State.create({ schema, doc: t0.doc }).tr;

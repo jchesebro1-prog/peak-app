@@ -70,8 +70,9 @@ export type PackageViewProps = {
   banner: PackageBanner | null;
   summary: string;
   view: "narrative" | "bom";
-  /** Jeff 2026-10-15 #14 — the BOM's Qty column follows the estimate PDF's Qty switch (the revision's pdfOptions). */
-  showQty: boolean;
+  /** Jeff 2026-10-15 #14 — false when the estimate PDF hides quantities (the revision's pdfOptions): the BOM drops its
+   *  Qty column. Absent = shown. */
+  showQty?: boolean;
   narrativeHref: string;
   bomHref: string;
   scopes: PackageScopeView[];
@@ -133,7 +134,8 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
     banner: packageBanner(i.state, i.currentHref, i.bidClosed === true),
     summary: coverSummaryText(i.frozen.coverSummary, scopes.map((s) => s.name)),
     view: i.view,
-    showQty: d.pdfQty !== false,
+    // Only when hidden: a quote showing quantities keeps its props byte-identical.
+    ...(d.pdfQty === false ? { showQty: false } : {}),
     narrativeHref: i.base,
     bomHref: i.base + "?view=bom",
     scopes: withAlternatingSides(scopes.map((s) => {
