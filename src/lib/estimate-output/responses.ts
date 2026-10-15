@@ -199,10 +199,19 @@ export function cleanClientResponses(raw: unknown): ClientResponse[] {
 }
 
 /** The list with `r` appended, or null at the 200 cap. */
+/** Jeff 2026-10-15 #2 — the stored cap counts per sender: the owner's link (no partyId) and each bidder's v3 link
+ *  (its partyId) have their own MAX_CLIENT_RESPONSES, so one bidder filling its budget never closes the others'. */
 export function appendResponseTo(list: unknown, r: ClientResponse): ClientResponse[] | null {
   const cur = cleanClientResponses(list);
-  if (cur.length >= MAX_CLIENT_RESPONSES) return null;
+  const who = r.partyId ?? "";
+  if (cur.filter((x) => (x.partyId ?? "") === who).length >= MAX_CLIENT_RESPONSES) return null;
   return [...cur, r];
+}
+
+/** Jeff 2026-10-15 #2 — the per-quote daily rate-limit key: the owner's link keeps the quote's own budget; a
+ *  bidder's v3 link (a pty_ id) counts on its own key, so each bidder gets RESPONSE_QUOTE_LIMIT a day. */
+export function responseQuoteLimitKey(quoteId: string, partyId?: string | null): string {
+  return typeof partyId === "string" && PARTY_ID_RE.test(partyId) ? `share-respond-quote:${quoteId}:${partyId}` : `share-respond-quote:${quoteId}`;
 }
 
 /** #348 2b-ii — a bidder company name as it goes into a note, task title or response row: trimmed, every run of
