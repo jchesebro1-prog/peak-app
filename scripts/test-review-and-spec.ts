@@ -56812,7 +56812,7 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
     const LEE = { id: "u4", name: "Lee Lead", roles: ["Crew"] };
     const seesText = async (q: import("@/lib/stores/quotes").Quote, roster?: Array<{ id: string; name: string; status: string }>) => {
       const r = await T.trackEstimate(mkDeps(q, roster).deps, LEE, "Q-P3FR");
-      return r.ok && r.emails.length > 0 && r.emails.every((e) => e.messages.length > 0 && !e.canReply);
+      return r.ok && r.emails.length > 0 && r.emails.every((e) => !e.canReply) && (r.emails.find((e) => e.threadId === "C-SENT")?.messages.length ?? 0) > 0 && (r.emails.find((e) => e.threadId === "C-NOOUT")?.messages.length ?? 0) > 0;
     };
     ok(await seesText(quote({ owner: "Lee Lead" })), "Jeff 10-15 #25: the Lead estimator reads the text (no Reply)");
     ok(await seesText(quote({ owner: "Sam Mills", preparedBy: "Sam Mills" }), [{ id: "u1", name: "Sam Mills", status: "active" }, { id: "u4", name: "Lee Lead", status: "inactive" }]),
