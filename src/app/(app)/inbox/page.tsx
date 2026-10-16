@@ -15,6 +15,7 @@ import { after } from "next/server";
 import { readerPreDraft } from "@/lib/brief/reader-predraft";
 import { attachmentHref } from "@/lib/comms-attachments";
 import { attachKey } from "@/lib/mail-attachments";
+import { replyAllCc } from "@/lib/reply-all";
 import { isPdfAttachment, isVendorPickerType, threadAttachmentHref, threadAttachmentRef } from "@/lib/vendor-quotes/rules";
 import { groupCompanyOptions } from "@/lib/vendor-status";
 import { all as allCustomers } from "@/lib/stores/customers";
@@ -1045,6 +1046,11 @@ export default async function InboxPage({
       chanIcon: chanIconOf(sel.channel),
       boxLabel: bm?.label || "Info",
       boxAddress: bm?.address || "",
+      // #356 re-review — Reply all Cc: the replied-to message's other recipients, never our own address or the contact
+      replyAllCc: replyAllCc(
+        [...(sel.messages || [])].reverse().find((m) => m.direction === "in") || (sel.messages || [])[(sel.messages || []).length - 1],
+        [bm?.address, user.email, sel.contactEmail],
+      ),
       boxColor: bm?.color || "#8a6d1f",
       contactName: sel.contactName || "Customer",
       contactEmail: sel.contactEmail || "",

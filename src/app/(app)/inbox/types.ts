@@ -210,6 +210,8 @@ export type ReaderVM = {
   chanIcon: ChanIcon;
   boxLabel: string;
   boxAddress: string;
+  /** #356 re-review — Reply all's Cc pre-fill (lib/reply-all): the other To / Cc recipients of the replied-to message. */
+  replyAllCc: string;
   boxColor: string;
   contactName: string;
   contactEmail: string;

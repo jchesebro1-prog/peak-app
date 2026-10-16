@@ -27,6 +27,7 @@ import { ORGANIZE_ARCHIVED_EVENT, organizeArchiveNote, organizeArchiveRemoves, s
 import { archiveFromOrganizeAction } from "./organize-actions";
 import { listThreadAttachmentsAction } from "./vendor-file-actions";
 import AttachPicker, { attachPayload, initialAttachState, type AttachState } from "./attach-picker";
+import { FORWARD_ATTS_LOADING } from "@/lib/inbox-forward-copy";
 import VendorQuoteDialog from "./vendor-quote-dialog";
 import { VENDOR_COPY } from "@/lib/vendor-quotes/rules";
 import { postChanged } from "@/lib/popout/channel";
@@ -664,6 +665,9 @@ export default function ThreadReader({
   // from Gmail once per thread (the server lists up to 10 messages per call and
   // stamps each), then refresh when any turned up. Owner only (never read-only).
   const pendingAttsId = vm?.attachmentsPending ? vm.id : null;
+  // #356 re-review — the thread whose listing finished (a Forward waits for it)
+  const [attsListedFor, setAttsListedFor] = useState<string | null>(null);
+  const fwdAttsLoading = !!pendingAttsId && attsListedFor !== pendingAttsId;
   useEffect(() => {
     if (!pendingAttsId) return;
     let live = true;
@@ -671,7 +675,10 @@ export default function ThreadReader({
       .then((r) => {
         if (live && r.ok && r.changed) router.refresh();
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (live) setAttsListedFor(pendingAttsId);
+      });
     return () => {
       live = false;
     };
@@ -744,7 +751,8 @@ export default function ThreadReader({
     } else {
       setMode(m);
       setCTo(vm.contactEmail || "");
-      setCCc(m === "replyAll" ? vm.boxAddress : "");
+      // #356 re-review — Reply all Cc's the replied-to message's other recipients (never our own mailbox address)
+      setCCc(m === "replyAll" ? vm.replyAllCc : "");
       setShowCc(m === "replyAll");
       setCSubject(/^re:/i.test(vm.subject) ? vm.subject : "Re: " + vm.subject);
       setCBody(withSignature("", signature, "add"));
@@ -847,6 +855,11 @@ export default function ThreadReader({
       // configured; the server skips its own legacy footer in that case.
       // #356 review (Critical 1) — Forward is a NEW message to the typed To / Cc, never a reply to this thread's contact
       if (mode === "forward") {
+        // #356 re-review — the original's Gmail attachments are still being listed: don't leave them off silently
+        if (fwdOriginals && fwdAttsLoading) {
+          setAtt((s) => ({ ...s, error: FORWARD_ATTS_LOADING }));
+          return;
+        }
         const fwd = await forwardAction({
           threadId: vm.id,
           to: cTo,
@@ -867,7 +880,8 @@ export default function ThreadReader({
         return;
       }
       // #356 review — Reply all sends its Cc
-      const res = await replyAction(vm.id, b, !!signature, attachPayload(att), mode === "replyAll" ? cCc : undefined);
+      // #356 re-review — the Cc row's value goes out whenever the row is shown (Reply too, not only Reply all)
+      const res = await replyAction(vm.id, b, !!signature, attachPayload(att), showCc ? cCc : undefined);
       // Batch 6 #64 — an attachment the server refused keeps the composer open with the reason
       if (!res.ok && "error" in res && res.error) {
         setAtt((s) => ({ ...s, error: res.error ?? null }));
@@ -1543,11 +1557,15 @@ export default function ThreadReader({
                 </button>
               </div>
               <FieldRow label="To">
+                {/* #356 re-review — a reply always goes to the thread's contact (the server ignores a typed To), so
+                    To is read-only in Reply / Reply all; only Forward sends to a typed address. */}
                 <input
                   value={cTo}
                   onChange={(e) => setCTo(e.target.value)}
+                  readOnly={mode !== "forward"}
+                  title={mode !== "forward" ? "A reply goes to this conversation’s contact — use Forward to send it elsewhere" : undefined}
                   placeholder="name@email.com"
-                  style={fieldInputStyle("mono")}
+                  style={mode !== "forward" ? { ...fieldInputStyle("mono"), color: "#6b7079" } : fieldInputStyle("mono")}
                 />
               </FieldRow>
               {showCc && (
@@ -1698,10 +1716,11 @@ export default function ThreadReader({
                 </button>
               </div>
               <div style={{ background: "#fafbfc", paddingBottom: 10 }}>
-                {mode === "forward" && fwdOriginalCount > 0 && (
+                {mode === "forward" && (fwdOriginalCount > 0 || !!vm.attachmentsPending) && (
                   <label style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 20px 0", fontSize: 12, color: "#3a3f4a" }}>
                     <input type="checkbox" checked={fwdOriginals} onChange={(e) => setFwdOriginals(e.target.checked)} />
-                    Include the original’s {fwdOriginalCount} attachment{fwdOriginalCount === 1 ? "" : "s"}
+                    {fwdOriginalCount > 0 ? `Include the original’s ${fwdOriginalCount} attachment${fwdOriginalCount === 1 ? "" : "s"}` : "Include the original’s attachments"}
+                    {fwdAttsLoading && <span style={{ color: "#9aa0ab" }}> — still loading…</span>}
                   </label>
                 )}
                 <AttachPicker state={att} setState={setAtt} threadId={vm.id} customerId="" />
