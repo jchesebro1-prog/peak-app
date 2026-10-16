@@ -66,7 +66,7 @@ import { defaultSuggestionTarget, sendSuggestionId, suggestPanelFirstRead, sugge
 import { catalogAddPrice, customPartSell, repriceForTier } from "./tier-reprice";
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 import { postChanged } from "@/lib/popout/channel";
-import { applyLineMove, extractLinesAsSection, planLineMove, removeLinesFromSources } from "@/lib/estimate-line-move/move";
+import { applyLineMove, extractLinesAsSection, lineRefKey, planLineMove, removeLinesFromSources, type LineRef } from "@/lib/estimate-line-move/move";
 import { setUnsavedHold } from "@/lib/popout/hold";
 import { discardConfirmText, inputIsDirty, isModalInputKind, MODAL_INPUT_KINDS, rebaseDraft, stableDraftJson, type ModalInputKind } from "@/lib/estimate-steps/discard-confirm";
 
@@ -1970,15 +1970,16 @@ export function useEstimatorState(props: EstimatorProps) {
   };
   /** #356: move ticked lines (and their partners) to another system here or a
    *  new one. Client-only — kept by the next Save, like ↑/↓. */
-  const moveLinesHere = (selected: number[], target: { kind: "system"; sectionId: string } | { kind: "new"; name: string }) => {
+  const moveLinesHere = (selected: LineRef[], target: { kind: "system"; sectionId: string } | { kind: "new"; name: string }) => {
     const resolved = target.kind === "new" ? { kind: "new" as const, id: "sys" + nextId(), name: target.name.trim() || "New System" } : target;
-    const { sections: next, plan } = applyLineMove(sections, selected, resolved);
+    // Ids are unique per system only: a line whose id the target already holds lands with a fresh one.
+    const { sections: next, plan } = applyLineMove(sections, selected, resolved, { mintItemId: nextId });
     if (plan.noop) return;
     const targetId = resolved.kind === "new" ? resolved.id : resolved.sectionId;
     const targetName = resolved.kind === "new" ? resolved.name : sections.find((s) => s.id === targetId)?.name || "that system";
     // Same order as reorderSections: a system inserted last must not leave the Rewards credit off the last row.
     setSections(withRewardCredit(normalizeSystemOrder(next, groups), rewardCreditOf(sections), nextId()));
-    const n = plan.ids.length;
+    const n = plan.lines.length;
     setMoveNotice({ ok: true, targetId: "", targetName: "", targetNumber: "", verb: "Lines", detail: `Moved ${n} line${n === 1 ? "" : "s"} to ${targetName}` });
     requestAnimationFrame(() => requestAnimationFrame(() => selectSystem(targetId)));
   };
@@ -1986,10 +1987,11 @@ export function useEstimatorState(props: EstimatorProps) {
   /** #356: move ticked lines to another estimate — bundled as one section and
    *  sent through Move system's own server path; they leave this estimate only
    *  once the server confirms. */
-  const moveLinesToEstimate = (selected: number[], dest: MoveSystemTarget) => {
+  const moveLinesToEstimate = (selected: LineRef[], dest: MoveSystemTarget) => {
     const plan = planLineMove(sections, selected, { kind: "estimate" });
     if (plan.noop || movingLines) return;
-    const outgoing = extractLinesAsSection(sections, plan);
+    // Lines from two systems may share an id: the outgoing section gets them unique (the server re-ids against the target).
+    const outgoing = extractLinesAsSection(sections, plan, { mintItemId: nextId });
     const usedVqIds = new Set(outgoing.items.map((it) => it.vendorQuoteId).filter((id): id is string => !!id));
     const usedVq = vendorQuotes.filter((v) => usedVqIds.has(v.id));
     const cname = customerId ? customers.find((c) => c.id === customerId)?.name || custName : custName;
@@ -2009,11 +2011,14 @@ export function useEstimatorState(props: EstimatorProps) {
           return;
         }
         postChanged("quote", res.targetId);
-        const gone = new Set(plan.ids);
+        const gone = new Set(plan.lines.map(lineRefKey));
         const stillUsed = new Set(
-          sectionsRef.current.flatMap((s) => s.items).filter((it) => !gone.has(it.id)).map((it) => it.vendorQuoteId).filter((id): id is string => !!id)
+          sectionsRef.current
+            .flatMap((s) => s.items.filter((it) => !gone.has(lineRefKey({ sectionId: s.id, id: it.id }))))
+            .map((it) => it.vendorQuoteId)
+            .filter((id): id is string => !!id)
         );
-        setSections((ss) => removeLinesFromSources(ss, plan.ids));
+        setSections((ss) => removeLinesFromSources(ss, plan.lines));
         if (usedVq.length) setVendorQuotes((vs) => vs.filter((v) => !usedVqIds.has(v.id) || stillUsed.has(v.id)));
         setMoveNotice({ ok: true, targetId: res.targetId, targetName: res.targetName, targetNumber: res.targetNumber });
       } catch {

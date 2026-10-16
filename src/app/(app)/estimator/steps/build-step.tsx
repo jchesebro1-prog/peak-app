@@ -13,7 +13,7 @@ import { vendorAttachmentLoad } from "../types";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
 import SectionCard from "../section-card";
 import MoveLinesBar from "../move-lines-bar";
-import { isMovableLine } from "@/lib/estimate-line-move/move";
+import { isMovableLine, lineRefKey, parseLineRefKey, type LineRef } from "@/lib/estimate-line-move/move";
 import { CommentPin, useCommentsFocusRefresh, useResolveComment } from "../comment-pins";
 import SystemLibraryModal from "../system-library-modal";
 import AiScopeModal from "../ai-scope-modal";
@@ -229,10 +229,12 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
   const readPdf = vendorPdfEnabled && !!vendorDraft.attachment && isPdfAttachment(vendorDraft.attachment);
 
   /* #356: ticked lines and a row's ⇄ feed the Move bar. Build unmounts on a step
-     change (estimator-client renders one step at a time), which clears both; an id
-     that no longer exists (deleted, moved away) simply drops out of liveSelected. */
-  const [selectedLines, setSelectedLines] = useState<Set<number>>(() => new Set());
-  const [rowMove, setRowMove] = useState<number | null>(null);
+     change (estimator-client renders one step at a time), which clears both; a line
+     that no longer exists (deleted, moved away) simply drops out of liveSelected.
+     Item ids are unique per SYSTEM only (Copy/Move system keeps them), so a tick is
+     keyed "<sectionId>:<id>" (lineRefKey) — never the bare id. */
+  const [selectedLines, setSelectedLines] = useState<Set<string>>(() => new Set());
+  const [rowMove, setRowMove] = useState<LineRef | null>(null);
   // Another quote loaded into this same screen: its line ids are not ours. (null → id is a first save — keep the ticks.)
   const [selQuote, setSelQuote] = useState(loadedId);
   if (selQuote !== loadedId) {
@@ -242,22 +244,42 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
       setRowMove(null);
     }
   }
-  const movableIds = useMemo(() => new Set(sections.flatMap((x) => x.items.filter(isMovableLine).map((it) => it.id))), [sections]);
-  const liveSelected = useMemo(() => [...selectedLines].filter((id) => movableIds.has(id)), [selectedLines, movableIds]);
-  const toggleLine = (id: number) =>
+  // A built (collapsed) system shows no rows, so its lines can't be ticked — and a tick made before it was marked built no longer counts.
+  const movableKeys = useMemo(
+    () => new Set(sections.filter((x) => x.built !== true).flatMap((x) => x.items.filter(isMovableLine).map((it) => lineRefKey({ sectionId: x.id, id: it.id })))),
+    [sections]
+  );
+  const liveSelected = useMemo(() => [...selectedLines].filter((k) => movableKeys.has(k)), [selectedLines, movableKeys]);
+  /** Each system's own ticked line ids — so ticking A:105 never ticks C:105. */
+  const selectedBySection = useMemo(() => {
+    const m = new Map<string, Set<number>>();
+    for (const k of liveSelected) {
+      const r = parseLineRefKey(k);
+      if (!r) continue;
+      const set = m.get(r.sectionId) || new Set<number>();
+      set.add(r.id);
+      m.set(r.sectionId, set);
+    }
+    return m;
+  }, [liveSelected]);
+  const toggleLine = (ref: LineRef) =>
     setSelectedLines((cur) => {
+      const k = lineRefKey(ref);
       const n = new Set(cur);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
+      if (n.has(k)) n.delete(k);
+      else n.add(k);
       return n;
     });
   // A successful move takes its lines away (out of the estimate, or a ⇄ line already
   // moved): drop the ids that left and end row mode, so the bar closes cleanly.
   // (Adjusted during render, like selQuote above.)
-  if (rowMove != null && !movableIds.has(rowMove)) setRowMove(null);
+  if (rowMove != null && !movableKeys.has(lineRefKey(rowMove))) setRowMove(null);
   if (liveSelected.length !== selectedLines.size) setSelectedLines(new Set(liveSelected));
-  const rowLive = rowMove != null && movableIds.has(rowMove);
-  const barIds = rowLive ? [rowMove] : liveSelected;
+  const rowLive = rowMove != null && movableKeys.has(lineRefKey(rowMove));
+  const barLines: LineRef[] = useMemo(
+    () => (rowLive && rowMove ? [rowMove] : liveSelected.map(parseLineRefKey).filter((r): r is LineRef => !!r)),
+    [rowLive, rowMove, liveSelected]
+  );
 
   return (
     <div
@@ -564,9 +586,9 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     onSetPrice={setItemPrice}
                     onSetExtSell={setItemExtSell}
                     onMoveItem={(itemId, direction) => moveItem(sec.id, itemId, direction)}
-                    selectedLines={isInternal ? selectedLines : undefined}
-                    onToggleLineSelected={isInternal ? toggleLine : undefined}
-                    onMoveLine={isInternal ? setRowMove : undefined}
+                    selectedLines={isInternal ? selectedBySection.get(sec.id) : undefined}
+                    onToggleLineSelected={isInternal ? (itemId) => toggleLine({ sectionId: sec.id, id: itemId }) : undefined}
+                    onMoveLine={isInternal ? (itemId) => setRowMove({ sectionId: sec.id, id: itemId }) : undefined}
                     // While an estimate move runs, no tick or ⇄ may remount the waiting bar — kept in place, disabled.
                     lineSelectDisabled={movingLines}
                     onRemoveItem={removeItem}
@@ -659,12 +681,12 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           >
             + From library…
           </button>
-          {isInternal && barIds.length > 0 && (
+          {isInternal && barLines.length > 0 && (
             <MoveLinesBar
-              key={rowLive ? "row-" + rowMove : "ticks"}
+              key={rowLive && rowMove ? "row-" + lineRefKey(rowMove) : "ticks"}
               sections={sections}
               groups={groups}
-              lineIds={barIds}
+              lines={barLines}
               single={rowLive}
               openMenu={rowLive}
               moving={movingLines}
@@ -675,8 +697,8 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                   setRowMove(null);
                 }
               }}
-              onMoveHere={(t) => moveLinesHere(barIds, t)}
-              onMoveToEstimate={(d) => moveLinesToEstimate(barIds, d)}
+              onMoveHere={(t) => moveLinesHere(barLines, t)}
+              onMoveToEstimate={(d) => moveLinesToEstimate(barLines, d)}
               searchQuotes={searchQuotes}
               moveError={moveNotice && !moveNotice.ok ? moveNotice.error : undefined}
             />

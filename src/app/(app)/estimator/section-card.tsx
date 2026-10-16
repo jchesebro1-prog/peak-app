@@ -1027,7 +1027,8 @@ export default function SectionCard(p: SectionCardProps) {
                       background: "#f7f8fa",
                     }}
                   >
-                    <div style={{ minWidth: 0 }}>
+                    {/* #356: no checkbox here, but line up under "Item" with the rows that have one. */}
+                    <div style={{ minWidth: 0, ...(p.onToggleLineSelected ? { paddingLeft: LINE_CHECK_PAD } : null) }}>
                       <div style={{ lineHeight: 1.3 }}>
                         <span aria-hidden="true" style={{ marginRight: 6 }}>{"\u{1F512}"}</span>
                         {it.desc}
@@ -1129,6 +1130,8 @@ export default function SectionCard(p: SectionCardProps) {
                         style={{ width: LINE_CHECK_SIZE, height: LINE_CHECK_SIZE, margin: "2px 0 0", flexShrink: 0, accentColor: "var(--accent)" }}
                       />
                     )}
+                    {/* #356: a line that can't move (the Rewards credit) keeps the checkbox's room, so its description lines up. */}
+                    {p.onToggleLineSelected && !isMovableLine(it) && <span aria-hidden="true" data-line-check-pad="" style={{ width: LINE_CHECK_SIZE, flexShrink: 0 }} />}
                     <div style={{ minWidth: 0, flex: 1 }}>
                     <div
                       title={laborEditable ? lineDesc + " — click to edit this labor" : trackEditable ? lineDesc + " — click to edit this track" : curtainEditable ? lineDesc + " — click to edit this curtain" : customEditable ? lineDesc + " — click to edit this custom part" : lineDesc}

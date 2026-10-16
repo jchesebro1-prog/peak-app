@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState, useTransition, type CSSProperties, type KeyboardEvent } from "react";
-import { describeLineMove, planLineMove, type LineMoveTarget } from "@/lib/estimate-line-move/move";
+import { describeLineMove, planLineMove, type LineMoveTarget, type LineRef } from "@/lib/estimate-line-move/move";
 import { groupBlocks, type SystemGroup } from "@/lib/estimate-groups/groups";
 import type { MoveSystemTarget } from "./actions";
 import type { QuoteLite, SpecSection } from "./types";
@@ -19,8 +19,8 @@ type MoveHere = { kind: "system"; sectionId: string } | { kind: "new"; name: str
 type MoveLinesBarProps = {
   sections: SpecSection[];
   groups: SystemGroup[];
-  /** What the bar acts on (the ticks, or one row's line). */
-  lineIds: number[];
+  /** What the bar acts on (the ticks, or one row's line) — by system + id: ids repeat across systems. */
+  lines: LineRef[];
   /** Opened from one row's ⇄ (the label shows that line; there is no idle state). */
   single: boolean;
   /** Start with the menu open (row ⇄). */
@@ -99,7 +99,7 @@ const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const statusLabel = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export default function MoveLinesBar(p: MoveLinesBarProps) {
-  const { sections, groups, lineIds, single } = p;
+  const { sections, groups, lines, single } = p;
   const [mode, setMode] = useState<Mode>(p.openMenu || single ? "menu" : "idle");
   const [pending, setPending] = useState<Pending | null>(null);
   const [newName, setNewName] = useState(DEFAULT_NEW_NAME);
@@ -161,22 +161,13 @@ export default function MoveLinesBar(p: MoveLinesBarProps) {
     else if (mode === "confirm") confirmRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
   }, [mode]);
 
-  /** Which system holds each line — a system that already holds every line is no target. */
-  const sectionOf = useMemo(() => {
-    const m = new Map<number, string>();
-    for (const s of sections) for (const it of s.items) m.set(it.id, s.id);
-    return m;
-  }, [sections]);
-  const holdsAll = (secId: string) => lineIds.length > 0 && lineIds.every((id) => sectionOf.get(id) === secId);
+  /** A system that already holds every selected line is no target (a line is its system + id). */
+  const holdsAll = (secId: string) => lines.length > 0 && lines.every((r) => r.sectionId === secId);
 
   const singleLine = useMemo(() => {
-    if (!single || lineIds.length !== 1) return null;
-    for (const s of sections) {
-      const it = s.items.find((x) => x.id === lineIds[0]);
-      if (it) return it;
-    }
-    return null;
-  }, [single, lineIds, sections]);
+    if (!single || lines.length !== 1) return null;
+    return sections.find((s) => s.id === lines[0].sectionId)?.items.find((x) => x.id === lines[0].id) || null;
+  }, [single, lines, sections]);
 
   const planTarget: LineMoveTarget | null = !pending
     ? null
@@ -192,7 +183,7 @@ export default function MoveLinesBar(p: MoveLinesBarProps) {
     : pending.kind === "new"
     ? pending.name
     : pending.label;
-  const plan = planTarget ? planLineMove(sections, lineIds, planTarget) : null;
+  const plan = planTarget ? planLineMove(sections, lines, planTarget) : null;
   const effects = plan && !plan.noop ? describeLineMove(plan, sections, targetLabel) : [];
   const titleTarget = !pending
     ? ""
@@ -239,7 +230,7 @@ export default function MoveLinesBar(p: MoveLinesBarProps) {
   };
 
   const busy = !!waiting || p.moving;
-  const countLabel = singleLine ? singleLine.desc : `${lineIds.length} selected`;
+  const countLabel = singleLine ? singleLine.desc : `${lines.length} selected`;
 
   /* ---------- the menu: systems in rail order under their group headings ---------- */
   const menu = () => {
@@ -326,7 +317,7 @@ export default function MoveLinesBar(p: MoveLinesBarProps) {
             </>
           ) : (
             <>
-              <span style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{lineIds.length}</span> selected
+              <span style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{lines.length}</span> selected
             </>
           )}
         </span>
@@ -427,7 +418,7 @@ export default function MoveLinesBar(p: MoveLinesBarProps) {
           ) : (
             <>
               <div style={{ fontWeight: 600, overflowWrap: "anywhere" }}>
-                Move {plural(plan.ids.length, "line")} to {titleTarget}?
+                Move {plural(plan.lines.length, "line")} to {titleTarget}?
               </div>
               {failure && (
                 <div role="alert" style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: "#9a2f22", overflowWrap: "anywhere" }}>
