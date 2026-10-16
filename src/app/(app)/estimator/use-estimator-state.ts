@@ -1975,7 +1975,8 @@ export function useEstimatorState(props: EstimatorProps) {
     if (plan.noop) return;
     const targetId = resolved.kind === "new" ? resolved.id : resolved.sectionId;
     const targetName = resolved.kind === "new" ? resolved.name : sections.find((s) => s.id === targetId)?.name || "that system";
-    setSections(normalizeSystemOrder(next, groups));
+    // Same order as reorderSections: a system inserted last must not leave the Rewards credit off the last row.
+    setSections(withRewardCredit(normalizeSystemOrder(next, groups), rewardCreditOf(sections), nextId()));
     const n = plan.ids.length;
     setMoveNotice({ ok: true, targetId: "", targetName: "", targetNumber: "", verb: "Lines", detail: `Moved ${n} line${n === 1 ? "" : "s"} to ${targetName}` });
     requestAnimationFrame(() => requestAnimationFrame(() => selectSystem(targetId)));
@@ -2009,11 +2010,13 @@ export function useEstimatorState(props: EstimatorProps) {
         postChanged("quote", res.targetId);
         const gone = new Set(plan.ids);
         const stillUsed = new Set(
-          sections.flatMap((s) => s.items).filter((it) => !gone.has(it.id)).map((it) => it.vendorQuoteId).filter((id): id is string => !!id)
+          sectionsRef.current.flatMap((s) => s.items).filter((it) => !gone.has(it.id)).map((it) => it.vendorQuoteId).filter((id): id is string => !!id)
         );
         setSections((ss) => removeLinesFromSources(ss, plan.ids));
         if (usedVq.length) setVendorQuotes((vs) => vs.filter((v) => !usedVqIds.has(v.id) || stillUsed.has(v.id)));
         setMoveNotice({ ok: true, targetId: res.targetId, targetName: res.targetName, targetNumber: res.targetNumber });
+      } catch {
+        setMoveNotice({ ok: false, error: "Could not move those lines." });
       } finally {
         setMovingLines(false);
       }
