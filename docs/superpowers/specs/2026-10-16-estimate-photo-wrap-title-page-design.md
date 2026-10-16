@@ -125,7 +125,7 @@ apart from §1/§2. The bidder PDF (`?bidder=`) gets the title page and order
   - PNG / JPEG: one page per image, page = the image's orientation on letter
     (portrait or landscape), image fitted inside 0.5in margins. WebP: converted
     to PNG with sharp first.
-  - Caps: per file 25 MB (already the upload cap), total 80 MB of drawings, and a
+  - Caps: per file 25 MB (already the upload cap), the finished PDF kept ≤ 14 MB so Send can still attach it (15 MB email limit; Jeff, Oct 16 — drawings that don't fit are left out with a warning and stay on the package page), and a
     deadline inside the existing 120 s render budget; anything over is skipped.
   - **Never fails the estimate PDF**: a skipped drawing is logged on the PDF state
     (`pdfNotes`-style warning shown in Customer review → Document) and the rest

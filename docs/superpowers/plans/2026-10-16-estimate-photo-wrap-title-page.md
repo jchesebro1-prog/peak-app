@@ -24,6 +24,11 @@ Each one is a spec point the code contradicts or leaves open, with the resolutio
 8. **`pdfNotes` name clash.** The spec says "`pdfNotes`-style warning", but `pdfNotes` is already a Show-on-PDF option (line descriptions, `quote-document.tsx:65`). **Resolution:** the new field is `QuotePdfState.notes`.
 9. **Model tag fallback.** `lineModel` ends in `partModel`, which can print a SKU tail (e.g. a custom part's SKU) when a part has no Model # or MFR P/N. That is the spec's rule (#304); flagged only so nobody is surprised.
 
+
+## Controller amendments (Jeff, Oct 16) — these OVERRIDE anything below
+
+- **A1 — the estimate PDF stays under the email limit.** Jeff chose "Keep it under 15 MB": the finished estimate PDF (main + drawings + links page) must stay ≤ `ESTIMATE_PDF_TARGET_MAX_BYTES` = 14 MB (headroom under `ESTIMATE_EMAIL_ATTACH_MAX` = 15 MB, `src/lib/estimate-email/compose.ts:12`). Replace the 80 MB total cap: the drawings budget is `14 MB − (main bytes + tail bytes)`, drawings are taken in list order while they fit (`over-total` skip otherwise — copy: "left out to keep the PDF under 15 MB for email; it's on the client package page"), and after `save()` a final guard drops drawings from the END and re-merges (at most 3 tries; then main + links only) if the merged output is still over 14 MB. The per-file 25 MB cap stays. The "PDF over 15 MB" note in open issue 4 is then unreachable for drawings — keep it only as a defensive note. Open issue 6 (memory) is moot at this size. Update `DRAWINGS_TOTAL_MAX_BYTES` uses, the tests, the copy and the docs task accordingly.
+
 ## Global Constraints
 
 - Work only in `/Users/sm/Downloads/peak-app/.claude/worktrees/photo-wrap` on branch `feat/narrative-photo-wrap`. Never edit the main checkout. Never `git stash` (shared stash) — make a WIP commit instead.
