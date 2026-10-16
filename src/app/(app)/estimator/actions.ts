@@ -49,6 +49,8 @@ import { normalizeSystemOrder, sanitizeGroups, sanitizeSectionGroupMeta, without
 import { packageDocForSave } from "@/lib/package-doc/save";
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import type { PackageDoc } from "@/lib/package-doc/types";
+import { docIdFloor } from "@/lib/package-doc/ids";
+import { reIdIncomingSection } from "@/lib/estimate-line-move/reid";
 import { copyPricingFor } from "./copy-pricing";
 import { seedMarginOf, usableTierMargin } from "./tier-reprice";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
@@ -941,7 +943,10 @@ async function placeSystemInEstimate(
     const existingGroups = sanitizeGroups(existingSpec?.groups);
     // #282 phase 2: the target's own Rewards credit stays on ITS last system —
     // re-pinned after the order is normalised, so it really is the last one.
-    const appendedRaw = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))])], existingGroups);
+    // #356: item ids are unique per system only — an incoming line whose id the target already uses anywhere is
+    // re-minted above the target's ids and its package document's floor (computeNid's), its star following.
+    const incoming = reIdIncomingSection(stripBonusLines(withoutGroupMeta(placed)), existingSpec?.sections || [], docIdFloor(existingDoc));
+    const appendedRaw = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([incoming])], existingGroups);
     // Estimator bonuses: re-derive on the merged list with the TARGET's own
     // source / quoteType / status (a won or portal target is left untouched).
     // Before the credit re-pin below, so value/margin include the bonus.
