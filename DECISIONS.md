@@ -13489,3 +13489,11 @@ A bid marked submitted (website) while the estimate is in Draft has no delivered
 ## D1184. The due date shown is the one printed on their revision (#348 slice 6, 2026-10-15; default, Jeff to confirm question 14)
 
 The bidder's "Due …" is the due date frozen on its revision (`docFields.bid`); a revision from before slice 2b falls back to the estimate's current due date. A later change to the due date does not change an already-sent revision's copy.
+
+## D1185. Staff see when the owner's portal is Scope only (#348 follow-up, 2026-10-15)
+
+The Send & track Bidders card shows a muted line when the owner sees the estimate as Scope only in the portal, and the Bid chip's dialog shows "Owner portal: Scope only". The chip's own label is unchanged. It reads the same server rule as the portal (`portalQuoteHasBidders`), so it stays after every bidder is removed. It is read-only, and there is no way to clear it (Jeff: sticky for good). If the check fails, the label is left off and the error is logged. The portal's own check still protects the prices.
+
+## D1186. Ask before a stray click discards an Estimator pop-up (#348 follow-up, 2026-10-15)
+
+The Curtain, Track, Add assembly, Labor and Vendor quote pop-ups ask before the backdrop click or × discards unsaved work. Each open's draft is snapshotted once it settles and compared at close; key order and undefined-vs-missing don't count. A vendor quote with a PDF read, or a read still running, says the read will be lost. Switching to another input asks the same way. Add / Save never asks. A clean form closes silently. AI scope and Add a system close as before. Not covered: a vendor file still uploading (it isn't in the draft yet) and Custom part (inline, not a pop-up).
