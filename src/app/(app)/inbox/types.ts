@@ -83,6 +83,8 @@ export type AttachmentVM = {
 export type AttachmentMetaVM = {
   name: string;
   size: number;
+  /** Batch 6 #64 — lib/mail-attachments attachKey: the composer keeps or drops a draft's file by it. */
+  key?: string;
 };
 
 export type DraftPayload = {

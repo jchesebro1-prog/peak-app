@@ -56,7 +56,8 @@ import {
   GmailTimeoutError,
   type GmailLabelEvent,
 } from "./api";
-import { attachmentMimePart } from "@/lib/comms-attachments";
+import { attachmentMimePart, outboundAttachError } from "@/lib/comms-attachments";
+import { readMailRefForThread } from "@/lib/mail-attachments-server";
 import { readPdfForThread as readThreadPdf } from "@/lib/thread-pdf-read";
 import { icsMimeType } from "@/lib/ics";
 import { sendWithMailboxFallback, visitInviteGmailIds, type InviteVisitShape } from "@/lib/visit-invite-plan";
@@ -155,8 +156,11 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
       // unreadable one throws, so the message is never sent without it.
       const attachments = (
         // A quote-linked thread only reads that quote's own PDFs (a refused path reads as missing → throws).
-        await Promise.all((m.attachments || []).map((a) => attachmentMimePart(a, readPdfForThread)))
+        // Batch 6 #64: a composer upload / a document is read by reference too (re-checked against this thread).
+        await Promise.all((m.attachments || []).map((a) => attachmentMimePart(a, readPdfForThread, (r) => readMailRefForThread(r, t))))
       ).filter((a): a is NonNullable<typeof a> => !!a);
+      const tooBig = outboundAttachError(attachments);
+      if (tooBig) throw new Error(tooBig);
       const raw = buildRaw({
         from: fromAddr,
         to: toAddr,

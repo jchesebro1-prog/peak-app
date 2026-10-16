@@ -207,15 +207,121 @@ function todayJobsChecks(ok: Ok) {
     "#65: a forced pull still honours a 403 (pullForbidden) and reports success");
 }
 
+/* --- #64 Attach in the Inbox composer --- */
+async function attachPureChecks(ok: Ok) {
+  const M = await import("../src/lib/mail-attachments");
+  const { attachmentMimePart, outboundAttachError } = await import("../src/lib/comms-attachments");
+  const { multipartSendBody, SIMPLE_SEND_MAX_CHARS } = await import("../src/lib/gmail/api");
+  const key = "UP-0123456789abcdef";
+  const p = M.mailBlobPath("u1", key, "Rigging plan (v2).pdf");
+  ok(p.startsWith("mail-attachments/u1/UP-0123456789abcdef/") && M.mailBlobPathInScope(p, "u1", key) && M.mailBlobPathInScope(p, "u1"), "#64: an upload path sits under the uploader's own folder and key");
+  ok(!M.mailBlobPathInScope(p, "u2") && !M.mailBlobPathInScope(p, "u1", "UP-ffffffffffffffff") && !M.mailBlobPathInScope("documents/c1/UP-0123456789abcdef/x.pdf", "u1") &&
+     !M.mailBlobPathInScope("mail-attachments/u1/UP-0123456789abcdef/../x.pdf", "u1") && !M.mailBlobPathInScope("mail-attachments/u1/UP-0123456789abcdef/a/b.pdf", "u1"),
+    "#64: another user's path, another key, a document path, '..' and a nested path are all refused");
+  ok(M.isMailBlobPath(p) && !M.isMailBlobPath("quote-pdfs/Q-1/rev-1.pdf") && M.mailBlobOwnerSegment(p) === "u1", "#64: the bridge recognises only composer upload paths, and whose");
+  ok(M.parseMailUploadPayload(JSON.stringify({ uploadKey: key }))?.uploadKey === key && M.parseMailUploadPayload('{"uploadKey":"x"}') === null && M.parseMailUploadPayload("nope") === null, "#64: the token route's payload is just a valid upload key");
+  ok(M.attachKey({ blobPath: p }, 3) === `blob:${p}` && M.attachKey({ documentId: "DOC-1001" }, 0) === "doc:DOC-1001" && M.attachKey({ pdfPath: "quote-pdfs/Q/rev-1.pdf" }, 0) === "pdf:quote-pdfs/Q/rev-1.pdf" && M.attachKey({ name: "a.txt" }, 2) === "old:2:a.txt",
+    "#64: draft files are kept or dropped by a stable key");
+  const parsed = M.parseComposeAttachments({ keep: ["pdf:x", 7], add: [{ kind: "upload", blobPath: p, name: "a.pdf" }, { kind: "document", documentId: "DOC-1001" }, { kind: "document", documentId: "../x" }, { kind: "evil" }] });
+  ok(!!parsed && parsed.keep.join() === "pdf:x" && parsed.add.length === 2 && M.parseComposeAttachments(undefined) === null, "#64: the browser's { keep, add } is shape-checked (junk dropped; absent = untouched)");
+  ok(M.attachLimitError([{ size: 20 * 1024 * 1024 }, { size: 6 * 1024 * 1024 }])?.includes("25 MB") === true && M.attachLimitError([{ size: 1 }]) === null && M.attachLimitError(Array.from({ length: 21 }, () => ({ size: 1 })))?.includes("20") === true,
+    "#64: 25 MB and 20 files together");
+  ok(M.mailAttachNameError("big.zip", 26 * 1024 * 1024)?.includes("25 MB") === true && M.mailAttachNameError("run.exe", 10)?.includes("program") === true && M.mailAttachNameError("a.pdf", 0)?.includes("empty") === true && M.mailAttachNameError("a.pdf", 10) === null,
+    "#64: one file is checked before it uploads (size, program, empty)");
+  ok(M.documentFitsEmail({ customerId: "c1", projectId: null }, { customerId: "c1" }) && M.documentFitsEmail({ customerId: "c2", projectId: "P-1" }, { customerId: "c1", projectId: "P-1" }) &&
+     !M.documentFitsEmail({ customerId: "c2", projectId: null }, { customerId: "c1" }) && !M.documentFitsEmail({ customerId: "c1", projectId: null }, {}),
+    "#64: a document fits the email's own company or project only");
+
+  const read = async () => Buffer.from("hello");
+  const part = await attachmentMimePart({ name: "a.pdf", mime: "application/pdf", blobPath: p }, async () => null, read);
+  ok(part?.dataBase64 === Buffer.from("hello").toString("base64") && part.mime === "application/pdf", "#64: a by-reference upload becomes a MIME part through the reader");
+  let threw = false;
+  try {
+    await attachmentMimePart({ name: "gone.pdf", documentId: "DOC-1" }, async () => null, async () => null);
+  } catch {
+    threw = true;
+  }
+  ok(threw, "#64: a missing / refused upload or document THROWS — the email never goes without it");
+  ok(outboundAttachError([{ dataBase64: Buffer.alloc(26 * 1024 * 1024).toString("base64") }]) !== null && outboundAttachError([{ dataBase64: "aGVsbG8=" }]) === null, "#64: the bridge refuses a message whose attachments are over 25 MB");
+  const raw = Buffer.from("From: a\r\n\r\nhi").toString("base64url");
+  const body = multipartSendBody(raw, "T1", "BND").toString("utf8");
+  ok(body.startsWith('--BND\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{"threadId":"T1"}') && body.includes("Content-Type: message/rfc822\r\n\r\nFrom: a\r\n\r\nhi") && body.endsWith("--BND--\r\n") && SIMPLE_SEND_MAX_CHARS === 4 * 1024 * 1024,
+    "#64: a big send goes to Gmail's upload endpoint as multipart/related (thread metadata + the raw message)");
+
+  const route = src("src/app/api/inbox/attach-upload/route.ts");
+  ok(route.includes("mailBlobPathInScope(pathname, u.id, payload.uploadKey)") && route.includes("maximumSizeInBytes: MAIL_ATTACH_MAX_BYTES") && !route.includes("onUploadCompleted:"),
+    "#64: the token route grants only the signed-in user's own path, 25 MB, no callback");
+  const actions = src("src/app/(app)/inbox/attach-actions.ts");
+  ok(/attachableDocumentsAction[\s\S]*const t = await ownThread\(input\.threadId, user\)/.test(actions) && !actions.includes("Buffer") && !actions.includes("arrayBuffer"),
+    "#64: the Documents list for a draft is its owner's only (#341/#349); no file bytes pass through a server action");
+  const inbox = src("src/app/(app)/inbox/actions.ts");
+  ok(/export async function replyAction\(id: string, body: string, signatureHandled\?: boolean, attachments\?: unknown\) \{[\s\S]{0,300}const own = await ownThread\(id, user\);\s*if \(!own\) return/.test(inbox) &&
+     inbox.includes("resolveComposeAttachments(") && (inbox.match(/resolveComposeAttachments\(/g) || []).length === 4,
+    "#64: reply / send / save check the owner, then re-check every attachment on the server");
+  const picker = src("src/app/(app)/inbox/attach-picker.tsx");
+  ok(picker.startsWith('"use client"') && picker.includes('handleUploadUrl: "/api/inbox/attach-upload"') && !/from "@\/lib\/stores\//.test(picker) && picker.includes("aria-label={`Remove ${a.name}`}"),
+    "#64: the picker uploads straight to Blob, imports no store and shows ✕ on every chip");
+  const reader = src("src/app/(app)/inbox/thread-reader.tsx");
+  ok(!reader.includes("illustrative in this preview") && reader.includes("<AttachPicker state={att} setState={setAtt} threadId={vm.id}") && src("src/app/(app)/inbox/compose-modal.tsx").includes("<AttachPicker state={att} setState={setAtt} threadId={cd.id} customerId={cd.customerId} />"),
+    "#64: the reply composer's demo Attach is replaced by the real one, and New message / Edit draft get it too");
+  const bridge = src("src/lib/gmail/bridge.ts");
+  ok(bridge.includes("attachmentMimePart(a, readPdfForThread, (r) => readMailRefForThread(r, t))") && bridge.includes("const tooBig = outboundAttachError(attachments);"), "#64: the Gmail bridge reads the new references and enforces 25 MB");
+}
+
+async function attachDbChecks(ok: Ok) {
+  const S = await import("../src/lib/mail-attachments-server");
+  const key = "UP-00000000000000aa";
+  const mine = `mail-attachments/u1/${key}/plan-x1.pdf`;
+  const heads = new Map<string, { bytes: Uint8Array; size: number }>([
+    [mine, { bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]), size: 1000 }],
+    [`mail-attachments/u1/${key}/tool-x1.pdf`, { bytes: new Uint8Array([0x4d, 0x5a, 0, 0]), size: 50 }],
+    [`mail-attachments/u1/${key}/huge-x1.pdf`, { bytes: new Uint8Array([1, 2, 3]), size: 26 * 1024 * 1024 }],
+  ]);
+  const removed: string[] = [];
+  const deps = {
+    head: async (p: string) => heads.get(p) ?? null,
+    remove: async (p: string) => { removed.push(p); },
+    document: async (id: string) => (id === "DOC-2001" ? { id, fileName: "Spec.pdf", mime: "application/pdf", size: 5000, customerId: "c1", projectId: null, blobPath: "documents/c1/x" } : id === "DOC-2002" ? { id, fileName: "Other.pdf", mime: "application/pdf", size: 10, customerId: "c9", projectId: null, blobPath: "documents/c9/y" } : null),
+  };
+  const fin = await S.finalizeMailUpload({ uploadKey: key, blobPath: mine, fileName: "plan.pdf", mime: "application/pdf" }, "u1", deps);
+  ok(fin.ok && fin.attachment.size === 1000 && fin.attachment.blobPath === mine, "#64 server: a finished upload becomes an attachment at its real (Blob-listed) size");
+  const exe = await S.finalizeMailUpload({ uploadKey: key, blobPath: `mail-attachments/u1/${key}/tool-x1.pdf`, fileName: "tool.pdf" }, "u1", deps);
+  const huge = await S.finalizeMailUpload({ uploadKey: key, blobPath: `mail-attachments/u1/${key}/huge-x1.pdf`, fileName: "huge.pdf" }, "u1", deps);
+  ok(!exe.ok && !huge.ok && removed.length === 2, "#64 server: program bytes and an over-25 MB file are refused and deleted");
+  const theirs = await S.finalizeMailUpload({ uploadKey: key, blobPath: mine, fileName: "plan.pdf" }, "u2", deps);
+  ok(!theirs.ok && removed.length === 2, "#64 server: someone else's upload is refused and never deleted");
+
+  const stored = [{ name: "EST-1001.pdf", mime: "application/pdf", size: 2000, pdfPath: "quote-pdfs/Q-1/rev-1.pdf", href: "/x" }];
+  const untouched = await S.resolveComposeAttachments(stored, null, { userId: "u1", customerId: "c1" }, deps);
+  ok(untouched.ok && untouched.attachments.length === 1, "#64 server: an untouched list keeps the draft's own files");
+  const r = await S.resolveComposeAttachments(stored, { keep: ["pdf:quote-pdfs/Q-1/rev-1.pdf"], add: [{ kind: "upload", blobPath: mine, name: "plan.pdf" }, { kind: "document", documentId: "DOC-2001" }] }, { userId: "u1", customerId: "c1" }, deps);
+  ok(r.ok && r.attachments.map((a) => a.name).join("|") === "EST-1001.pdf|plan.pdf|Spec.pdf" && r.attachments[2].size === 5000 && r.attachments[2].documentId === "DOC-2001",
+    "#64 server: kept files + a checked upload + a document (name and size from the record)");
+  const dropped = await S.resolveComposeAttachments(stored, { keep: [], add: [] }, { userId: "u1", customerId: "c1" }, deps);
+  ok(dropped.ok && dropped.attachments.length === 0, "#64 server: ✕ removes a draft's file");
+  const forged = await S.resolveComposeAttachments([], { keep: ["pdf:quote-pdfs/Q-9/rev-1.pdf"], add: [] }, { userId: "u1", customerId: "c1" }, deps);
+  ok(forged.ok && forged.attachments.length === 0, "#64 server: a browser can't invent a by-reference file by naming its key");
+  const other = await S.resolveComposeAttachments([], { keep: [], add: [{ kind: "document", documentId: "DOC-2002" }] }, { userId: "u1", customerId: "c1" }, deps);
+  const notMine = await S.resolveComposeAttachments([], { keep: [], add: [{ kind: "upload", blobPath: mine, name: "plan.pdf" }] }, { userId: "u2", customerId: "c1" }, deps);
+  ok(!other.ok && !notMine.ok, "#64 server: another company's document and another user's upload are refused");
+
+  const T = { id: "C-x", customerId: "c1", link: null, mailboxOwnerId: "u2" } as never;
+  ok((await S.readMailRefForThread({ blobPath: mine }, T)) === null, "#64 server: at send time an upload must be the thread owner's own");
+  ok((await S.readMailRefForThread({ blobPath: "documents/c1/UP-00000000000000aa/x.pdf" }, T)) === null, "#64 server: a non-composer path is never read as an upload");
+  ok((await S.readMailRefForThread({ documentId: "DOC-999999" }, T)) === null, "#64 server: a missing document reads as missing (the send throws)");
+}
+
 export async function batch6PureChecks(ok: Ok) {
   fieldTaskPureChecks(ok);
   sourcingChecks(ok);
   await appIconChecks(ok);
   todayJobsChecks(ok);
+  await attachPureChecks(ok);
 }
 
 export async function batch6DbChecks(ok: Ok) {
   await fieldTaskDbChecks(ok);
+  await attachDbChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-batch6.ts")) {

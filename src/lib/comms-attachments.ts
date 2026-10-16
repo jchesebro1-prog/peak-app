@@ -12,6 +12,9 @@ export type ResolvableAttachment = {
   dataUrl?: string;
   pdfPath?: string;
   href?: string;
+  /** Batch 6 #64 — a composer upload / a Documents record, by reference (lib/mail-attachments.ts). */
+  blobPath?: string;
+  documentId?: string;
 };
 
 /** A same-origin path (`/…`, never `//host` or `/\\host`). */
@@ -36,7 +39,10 @@ export type MimeAttachment = { name: string; mime: string; dataBase64: string };
  */
 export async function attachmentMimePart(
   a: ResolvableAttachment,
-  readPdf: (path: string) => Promise<Buffer | null>
+  readPdf: (path: string) => Promise<Buffer | null>,
+  /** Batch 6 #64 — reads a composer upload / a document (mail-attachments-server readMailRefForThread). A missing or
+   *  refused one THROWS, like a missing PDF: the email never goes out without a file it lists. */
+  readRef?: (a: ResolvableAttachment) => Promise<Buffer | null>
 ): Promise<MimeAttachment | null> {
   const name = a.name || "attachment";
   if (a.dataUrl) {
@@ -49,7 +55,21 @@ export async function attachmentMimePart(
     if (!bytes || !bytes.length) throw new Error(`attachment ${name} could not be read from storage`);
     return { name, mime: a.mime || "application/pdf", dataBase64: bytes.toString("base64") };
   }
+  if (a.blobPath || a.documentId) {
+    const bytes = readRef ? await readRef(a) : null;
+    if (!bytes || !bytes.length) throw new Error(`attachment ${name} could not be read from storage`);
+    return { name, mime: a.mime || "application/octet-stream", dataBase64: bytes.toString("base64") };
+  }
   return null;
+}
+
+/** Batch 6 #64 — Gmail's 25 MB cap, before base64: the attachment bytes one outbound message may carry. */
+export const OUTBOUND_ATTACH_MAX_BYTES = 25 * 1024 * 1024;
+
+/** Refusal when the decoded attachments of one message are over the cap (never sent), else null. */
+export function outboundAttachError(parts: ReadonlyArray<{ dataBase64: string }>): string | null {
+  const bytes = parts.reduce((s, p) => s + Math.floor((p.dataBase64.replace(/=+$/, "").length * 3) / 4), 0);
+  return bytes > OUTBOUND_ATTACH_MAX_BYTES ? "attachments are over 25 MB together" : null;
 }
 
 /**

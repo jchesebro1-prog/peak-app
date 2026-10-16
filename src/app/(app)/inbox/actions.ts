@@ -69,6 +69,8 @@ import {
 } from "@/lib/stores/inspections";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import { ownThread, ownThreadIds } from "@/lib/inbox-thread-guard";
+import { emailDocContext, resolveComposeAttachments } from "@/lib/mail-attachments-server";
+import { parseComposeAttachments } from "@/lib/mail-attachments";
 import { actorByName, mailboxViewer } from "@/lib/mailbox-viewer";
 
 /**
@@ -398,15 +400,20 @@ export async function setMessageLinkAction(
 
 /** `signatureHandled` — see email-signature.ts applyOutboundSignature's doc
  *  comment for the full #127-vs-legacy-footer rule (I2, round-3 review). */
-export async function replyAction(id: string, body: string, signatureHandled?: boolean) {
+export async function replyAction(id: string, body: string, signatureHandled?: boolean, attachments?: unknown) {
   const user = await requireUser();
   const b = (body || "").trim();
   if (!b) return { ok: false as const };
-  if (!(await ownThread(id, user))) return { ok: false as const };
+  const own = await ownThread(id, user);
+  if (!own) return { ok: false as const };
+  // Batch 6 #64 — files from the reply composer's Attach button (re-checked here: the caller's own uploads, this
+  // thread's company / project documents, 25 MB together)
+  const atts = await resolveComposeAttachments([], parseComposeAttachments(attachments), { userId: user.id, ...emailDocContext(own) });
+  if (!atts.ok) return { ok: false as const, error: atts.error };
   const profile = await getUser(user.id);
   const out = applyOutboundSignature(b, signatureHandled, profile || { name: user.name, email: user.email });
   // #335 — archive-on-reply runs after the response, off the send's path
-  const sent = await reply(id, { body: out, me: user.name, postReply: "caller" });
+  const sent = await reply(id, { body: out, me: user.name, postReply: "caller", ...(atts.attachments.length ? { attachments: atts.attachments } : {}) });
   if (replyLeft(sent)) after(() => runPostReply(id));
   revalidate();
   return { ok: true as const };
@@ -446,6 +453,9 @@ export type ComposePayload = {
   /** I2 (Inbox round 3 review) — true whenever the #127 composer flow ran
    *  for this send; see replyAction's doc comment for the full rule. */
   signatureHandled?: boolean;
+  /** Batch 6 #64 — the Attach button: which of the draft's files stay (by key) and what's added (uploads by
+   *  reference, Documents by id). Absent = untouched. Re-checked on the server (lib/mail-attachments-server). */
+  attachments?: unknown;
 };
 
 /**
@@ -544,8 +554,17 @@ export async function composeSendAction(d: ComposePayload) {
   if (!(d.to || "").trim() || !((d.subject || "").trim() || (d.body || "").trim())) {
     return { ok: false as const, id: null };
   }
+  // Batch 6 #64 — the composer's attachments, resolved against the draft (or nothing, for a new message)
+  const own = d.id ? await ownThread(d.id, user) : null;
+  if (d.id && !own) return { ok: false as const, id: null, error: "Draft not found." };
+  const attachIn = parseComposeAttachments(d.attachments);
+  const atts = await resolveComposeAttachments(
+    own?.draft?.attachments || [],
+    attachIn,
+    own ? { userId: user.id, ...emailDocContext(own) } : { userId: user.id, customerId: d.customerId || null, projectId: null },
+  );
+  if (!atts.ok) return { ok: false as const, id: null, error: atts.error };
   if (d.id) {
-    if (!(await ownThread(d.id, user))) return { ok: false as const, id: null, error: "Draft not found." };
     const stale = await staleEstimateDraft(d.id);
     if (stale) return { ok: false as const, id: null, error: stale };
   }
@@ -556,11 +575,27 @@ export async function composeSendAction(d: ComposePayload) {
   const customer = d.customerId ? await nameFor(d.customerId) : "";
   let id: string | null = null;
   if (d.id) {
-    await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body });
+    await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body, ...(attachIn ? { attachments: atts.attachments } : {}) });
     const rec = await sendDraft(d.id, me);
     id = rec ? rec.id : d.id;
     if (isEstimateDraft) await holdEstimateIfNotGmail(id, connected);
     await completeRenewalOutreach(id, me);
+  } else if (atts.attachments.length) {
+    // Batch 6 #64 — a new message with files goes out the draft way (the draft carries them into the sent message)
+    const draft = await saveDraft({
+      mailbox: asMailbox(d.mailbox),
+      owner: { id: user.id, name: me }, // #349 — owned by identity
+      to: d.to,
+      cc: d.cc,
+      subject: (d.subject || "").trim() || "(no subject)",
+      body,
+      customerId: d.customerId || null,
+      customer,
+      contactName: d.contactName,
+      attachments: atts.attachments,
+    });
+    const rec = await sendDraft(draft.id, me);
+    id = rec ? rec.id : draft.id;
   } else {
     const rec = await compose({
       mailbox: asMailbox(d.mailbox),
@@ -582,12 +617,18 @@ export async function composeSendAction(d: ComposePayload) {
 export async function saveDraftAction(d: ComposePayload) {
   const user = await requireUser();
   const me = user.name;
+  const attachIn = parseComposeAttachments(d.attachments);
   if (d.id) {
-    if (!(await ownThread(d.id, user))) return { ok: false as const, id: null };
-    await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body: d.body });
+    const own = await ownThread(d.id, user);
+    if (!own) return { ok: false as const, id: null };
+    const atts = await resolveComposeAttachments(own.draft?.attachments || [], attachIn, { userId: user.id, ...emailDocContext(own) });
+    if (!atts.ok) return { ok: false as const, id: null, error: atts.error };
+    await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body: d.body, ...(attachIn ? { attachments: atts.attachments } : {}) });
     revalidate();
     return { ok: true as const, id: d.id };
   }
+  const atts = await resolveComposeAttachments([], attachIn, { userId: user.id, customerId: d.customerId || null, projectId: null });
+  if (!atts.ok) return { ok: false as const, id: null, error: atts.error };
   const customer = d.customerId ? await nameFor(d.customerId) : "";
   const rec = await saveDraft({
     mailbox: asMailbox(d.mailbox),
@@ -599,6 +640,7 @@ export async function saveDraftAction(d: ComposePayload) {
     customerId: d.customerId || null,
     customer,
     contactName: d.contactName,
+    ...(atts.attachments.length ? { attachments: atts.attachments } : {}),
   });
   revalidate();
   return { ok: true as const, id: rec.id };
