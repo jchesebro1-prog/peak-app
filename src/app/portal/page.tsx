@@ -222,7 +222,13 @@ export default async function PortalPage({
   const mine = myQuotesCounts(quotes, cid);
   const mineTotal = mine.open + mine.accepted + mine.closed;
   // #348 slice 6 Task 4: the bids other customers sent THIS company (it is a GC / EC bidder, never the quote's customer).
-  const bidGroups = portalBidList(quotes, cid, bidRows);
+  // Bounded to the quotes one of this company's bid rows points at (the same output as listing every quote).
+  const bidQuoteIds = new Set(bidRows.map((r) => r.recordId));
+  const bidGroups = portalBidList(
+    quotes.filter((q) => bidQuoteIds.has(q.id)),
+    cid,
+    bidRows
+  );
 
   // #220: project history, app-era only (never Daylite imports), through the
   // portalProjectView whitelist — value only when known and the quote is won.

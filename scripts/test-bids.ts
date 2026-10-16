@@ -1483,8 +1483,17 @@ export function portalBidPureChecks(ok: Ok) {
       "bids-card: the bid row shows the revision's frozen name and value, the Bid badge and the status chip — never the live q.name / q.value");
     ok(bidCode.includes("Open PDF ↗") && bidCode.includes("/pdf") && bidCode.includes("prefetch={false}"), "bids-card: the bid row links the online page and Open PDF");
     ok(!/@\/lib\/stores\/(parties|bids)|-server|addressee/.test(bidCode), "bids-card: the bid row imports no party store, bid store or -server module");
+    // Home bounds the list to the quotes one of this company's rows points at — the output is identical.
+    {
+      const qs = [mk({ id: "Q-1" }), mk({ id: "Q-3", status: "lost" }), mk({ id: "Q-5", customerId: "CA" }), mk({ id: "Q-9" }), mk({ id: "Q-6", status: "won", bid: { dueAt: null, addenda: [], awardedPartyId: "A6" } })];
+      const rs = [A, row("A3", "CA", "gc", {}, { recordId: "Q-3" }), row("A6", "CA", "gc", { result: "awarded" }, { recordId: "Q-6" })];
+      const ids = new Set(rs.map((r) => r.recordId));
+      ok(JSON.stringify(portalBidList(qs, "CA", rs)) === JSON.stringify(portalBidList(qs.filter((q) => ids.has(q.id)), "CA", rs)) &&
+         portalBidList(qs, "CA", rs).open.length + portalBidList(qs, "CA", rs).history.length === 3,
+        "bids-card: pre-filtering quotes by the company's row recordIds leaves portalBidList's output unchanged");
+    }
     const homeSrc = codeOf(rd("src/app/portal/page.tsx"));
-    ok(homeSrc.includes("portalBidRowsForCompany(cid)") && homeSrc.includes("portalBidList(quotes, cid, bidRows)") && homeSrc.includes("homePortalQuotes(quotes, cid)") &&
+    ok(homeSrc.includes("portalBidRowsForCompany(cid)") && homeSrc.includes("portalBidList(\n    quotes.filter((q) => bidQuoteIds.has(q.id)),") && homeSrc.includes("new Set(bidRows.map((r) => r.recordId))") && homeSrc.includes("homePortalQuotes(quotes, cid)") &&
        homeSrc.includes("PORTAL_BID_COPY.card") && homeSrc.includes("PORTAL_BID_COPY.cardSub(companyName)") && homeSrc.includes("<PortalBidRow"),
       "bids-card: Home loads the company's bidder rows, lists them through portalBidList and keeps homePortalQuotes");
     ok(homeSrc.indexOf("PORTAL_BID_COPY.card") > -1 && homeSrc.indexOf("PORTAL_BID_COPY.card") < homeSrc.indexOf("Your quotes &amp; estimates"), "bids-card: the card sits above Your quotes & estimates");
@@ -1853,16 +1862,21 @@ export async function portalBidDbChecks(ok: Ok) {
           const names = (m[2].match(/\{([^}]*)\}/)?.[1] ?? "").split(",").map((x) => x.trim()).filter(Boolean);
           return !/^\{/.test(m[2].trim()) || names.some((n) => !n.startsWith("type "));
         });
+      // Loading rows (portalBidRowsForCompany) is not a gate; the list rule (portalBidList) is.
+      const quoteGated = (src: string) => src.includes("portalBidRowsFor(") || src.includes("portalBidList(") || src.includes("portalListsQuote(");
       const ungated = files.filter((f) => {
         const src = readFileSync(join(root, f), "utf8");
-        return quoteValueImport(src) && !(f in QUOTE_READ_ALLOW) && !src.includes("portalBidRowsFor(") && !src.includes("portalBidRowsForCompany(") && !src.includes("portalListsQuote(");
+        return quoteValueImport(src) && !(f in QUOTE_READ_ALLOW) && !quoteGated(src);
       });
       const valueImporters = files.filter((f) => quoteValueImport(readFileSync(join(root, f), "utf8")));
       ok(valueImporters.length >= 5 && !valueImporters.includes("quote-row.tsx") && ungated.length === 0,
-        `portal-bid db: every portal file with a value import from stores/quotes gates through portalBidRowsFor / portalBidRowsForCompany / portalListsQuote (${ungated.join(", ")})`);
+        `portal-bid db: every portal file with a value import from stores/quotes gates through portalBidRowsFor / portalBidList / portalListsQuote (${ungated.join(", ")})`);
       ok(quoteValueImport('import {\n  getAll as allQuotes,\n  type Quote,\n} from "@/lib/stores/quotes";') && !quoteValueImport('import type { Quote } from "@/lib/stores/quotes";') &&
          !quoteValueImport('import { type Quote } from "@/lib/stores/quotes";') && quoteValueImport('import * as Q from "@/lib/stores/quotes";'),
         "portal-bid db: the import scan catches multi-line, aliased and namespace imports and skips type-only ones");
+      ok(!quoteGated('import { getQuote } from "@/lib/stores/quotes";\nconst r = await portalBidRowsForCompany(cid);') && quoteGated("const g = portalBidList(qs, cid, rows);") &&
+         quoteGated("await portalBidRowsFor(q, cid);") && quoteGated("portalListsQuote(q, cid)"),
+        "portal-bid db: loading company rows alone is not a gate (a quote reader calling only portalBidRowsForCompany is flagged); portalBidList / portalBidRowsFor / portalListsQuote are");
       const leaks = files.filter((f) => /@\/lib\/stores\/parties|@\/lib\/stores\/bids|@\/lib\/parties\/addressee-server/.test(readFileSync(join(root, f), "utf8")));
       ok(files.length > 10 && leaks.length === 0, `portal-bid db: no portal file imports the party stores or addressee-server (${leaks.join(", ")})`);
       // Task 3 fix round 1 — the owner's fail-open default (hasBidders omitted = today's priced answer) is enforced:
