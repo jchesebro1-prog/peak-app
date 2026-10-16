@@ -7,6 +7,7 @@ import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import { FIELD_TASK_ID_RE, fieldTaskIdDecision } from "../src/lib/stores/tasks";
 import { sourcingReport, sourcingCsv, sortForNoCost, type SourcingPart } from "../src/lib/sourcing-report";
+import { todaysJobs, pagesToCache, readyCount, readyLine, isoDay } from "../src/lib/sync/today-jobs";
 import { iconSource, iconVersion, parseIconFile, iconHref, manifestIcons, iconCacheControl, ICON_LIGHT_BG, ICON_DARK_BG } from "../src/lib/app-icon";
 
 const ROOT = join(__dirname, "..");
@@ -146,10 +147,71 @@ async function appIconChecks(ok: Ok) {
   ok(/\|icons\|/.test(src("src/middleware.ts")), "#67: /icons/* stays outside the session gate (login page, home-screen install)");
 }
 
+/* --- #65 Download today's jobs --- */
+function todayJobsChecks(ok: Ok) {
+  const day = "2026-10-16";
+  const start = Date.UTC(2026, 9, 16, 5); // 00:00 Chicago (CDT)
+  const end = Date.UTC(2026, 9, 17, 5) - 1;
+  const dayKeyOf = (ms: number) => (ms >= start && ms <= end ? day : ms < start ? "2026-10-15" : "2026-10-17");
+  const me = { id: "u7", name: "Nic Trapani" };
+  const svc = (id: string, extra: Record<string, unknown> = {}) => ({ id, stage: "scheduled", assignedTo: "Nic Trapani", scheduledDate: day, customer: "Lincoln HS", venue: "Aud", ...extra });
+  const jobs = todaysJobs({
+    visits: [
+      { id: "SV-1", startAt: start + 3600e3, assignedTo: "Nic Trapani", attendees: [], stage: "scheduled", surveyId: "FS-9", customerId: "c1", customer: "Lincoln HS", venue: "Aud" },
+      { id: "SV-2", startAt: start + 7200e3, assignedTo: "Jeff Chesebro", attendees: ["nic trapani"], stage: "scheduled", surveyId: null, customerId: "c2", customer: "X", venue: "" },
+      { id: "SV-3", startAt: end + 3600e3, assignedTo: "Nic Trapani", attendees: [], stage: "scheduled", surveyId: null, customerId: "c3", customer: "Tomorrow", venue: "" },
+      { id: "SV-4", startAt: start, assignedTo: "Jeff Chesebro", attendees: [], stage: "scheduled", surveyId: null, customerId: "c4", customer: "Not mine", venue: "" },
+    ] as never,
+    surveys: [svc("FS-9"), svc("FS-10", { stage: "completed" })] as never,
+    inspections: [svc("IN-1"), svc("IN-2", { scheduledDate: "2026-10-17" })] as never,
+    flame: [svc("FT-1", { assignedTo: "Jeff Chesebro" })] as never,
+    repairs: [svc("RP-1", { assignedTo: "Jeff Chesebro", crew: ["Nic Trapani"] })] as never,
+    assessments: [
+      { id: "AS-1001", status: "onsite", assessorId: "u7", visitDate: start + 1 },
+      { id: "AS-1002", status: "completed", assessorId: "u7", visitDate: start + 1 },
+      { id: "AS-1003", status: "draft", assessorId: "u9", visitDate: start + 1 },
+    ] as never,
+    projects: [
+      { id: "P-1", kind: "project", name: "Install", customer: "Lincoln", crew: [{ person: "Nic Trapani", start: start - 86400e3, end: start }] },
+      { id: "P-2", kind: "project", name: "Done one", customer: "Y", crew: [{ person: "Nic Trapani", start, end: start }] },
+      { id: "P-3", kind: "project", name: "Next week", customer: "Z", crew: [{ person: "Nic Trapani", start: end + 7 * 86400e3, end: end + 8 * 86400e3 }] },
+    ] as never,
+  }, me, { key: day, start, end }, dayKeyOf, (id) => id === "P-2");
+  const ids = jobs.map((j) => `${j.kind}:${j.id}`).join(",");
+  ok(ids === "site_visit:SV-1,site_visit:SV-2,survey:FS-9,inspection:IN-1,repair_job:RP-1,assessment:AS-1001,project:P-1",
+    `#65: today's jobs are mine (lead / attendee / assignee / crew / assessor), today only, not completed or done (got ${ids})`);
+  const sv1 = jobs.find((j) => j.id === "SV-1")!;
+  const sv2 = jobs.find((j) => j.id === "SV-2")!;
+  ok(sv1.href === "/venue-assessments/FS-9" && sv2.href === "/companies/c2" && sv1.collection === null, "#65: a visit opens its survey, else its company; it is not mirrored");
+  ok(jobs.find((j) => j.id === "RP-1")?.href === "/repairs/results?job=RP-1" && jobs.find((j) => j.id === "AS-1001")?.collection === "assessments", "#65: job links and mirrored collections");
+  const pages = pagesToCache(jobs);
+  ok(pages[0] === "/field-work" && pages.filter((p) => p === "/venue-assessments/FS-9").length === 1, "#65: the Field Work list plus each page once");
+  const cached = new Set(pages.filter((p) => p !== "/inspections/IN-1"));
+  const mirrored = new Set(["surveys:FS-9", "inspections:IN-1", "repair_jobs:RP-1", "assessments:AS-1001"]);
+  ok(readyCount(jobs, cached, mirrored) === 5, "#65: ready = page kept and (if mirrored) record on the device — IN-1's page and P-1's record are missing");
+  ok(readyLine(5, 5) === "Ready offline: 5 jobs" && readyLine(1, 1) === "Ready offline: 1 job" && readyLine(5, 7).startsWith("Ready offline: 5 jobs (2 couldn") && readyLine(0, 0) === "No jobs for you today.",
+    "#65: the result line reads 'Ready offline: N jobs'");
+  ok(isoDay("2026-10-16") === day && isoDay("") === "" && isoDay("10/16/2026") === "", "#65: isoDay takes only YYYY-MM-DD");
+
+  const route = src("src/app/api/sync/today/route.ts");
+  ok(/if \(!mayPullFieldData\(me\.roles\)\) return NextResponse\.json\(\{ error: "forbidden" \}, \{ status: 403 \}\)/.test(route) && route.includes("getOptionalUser()"),
+    "#65: /api/sync/today has the pull's gate — signed in and `create` (#351)");
+  const sw = src("public/sw.js");
+  ok(sw.includes("const port = event.ports && event.ports[0]") && sw.includes(".then(() => reply(true))") && sw.includes(".catch(() => reply(false))"), "#65: the service worker answers a CACHE_ROUTE that carries a port");
+  const btn = src("src/components/sync/download-today.tsx");
+  ok(btn.includes('fetch("/api/sync/today"') && btn.includes("engine.pull({ force: true })") && btn.includes("readyLine(ready, jobs.length)") && !/from "@\/lib\/stores\//.test(btn.replace(/import type[^\n]*\n/g, "")),
+    "#65: the button lists, pulls into the mirror, caches pages and reports — and imports no store");
+  ok(/canFieldDownload: can\("create", user\.roles\)/.test(src("src/app/(app)/layout.tsx")) && src("src/components/nav/Nav.tsx").includes('<SyncChip variant="drawer" canDownload={!!user.canFieldDownload} />') &&
+     /\{can\("create", me\.roles\) && <DownloadToday \/>\}/.test(src("src/app/(app)/field-work/page.tsx")), "#65: the button shows (nav sync panel, phone drawer, Field Work) only to `create` holders");
+  ok(/async pull\(opts: \{ force\?: boolean \} = \{\}\): Promise<boolean>/.test(src("src/lib/sync/engine.ts")) && src("src/lib/sync/engine.ts").includes("this.pullForbidden) return false"),
+    "#65: a forced pull still honours a 403 (pullForbidden) and reports success");
+}
+
 export async function batch6PureChecks(ok: Ok) {
   fieldTaskPureChecks(ok);
   sourcingChecks(ok);
   await appIconChecks(ok);
+  todayJobsChecks(ok);
 }
 
 export async function batch6DbChecks(ok: Ok) {
