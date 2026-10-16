@@ -128,6 +128,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     moveLinesHere,
     moveLinesToEstimate,
     movingLines,
+    moveNotice,
     moveSystem,
     openCurtainEdit,
     openCustomEdit,
@@ -250,8 +251,15 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
       else n.add(id);
       return n;
     });
+  // A successful move takes its lines away (out of the estimate, or a ⇄ line already
+  // moved): drop the ids that left and end row mode, so the bar closes cleanly.
+  // (Adjusted during render, like selQuote above.)
+  if (rowMove != null && !movableIds.has(rowMove)) setRowMove(null);
+  if (liveSelected.length !== selectedLines.size) setSelectedLines(new Set(liveSelected));
   const rowLive = rowMove != null && movableIds.has(rowMove);
   const barIds = rowLive ? [rowMove] : liveSelected;
+  // While an estimate move runs, no tick or ⇄ may remount the waiting bar.
+  const canPickLines = isInternal && !movingLines;
 
   return (
     <div
@@ -559,8 +567,8 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     onSetExtSell={setItemExtSell}
                     onMoveItem={(itemId, direction) => moveItem(sec.id, itemId, direction)}
                     selectedLines={isInternal ? selectedLines : undefined}
-                    onToggleLineSelected={isInternal ? toggleLine : undefined}
-                    onMoveLine={isInternal ? setRowMove : undefined}
+                    onToggleLineSelected={canPickLines ? toggleLine : undefined}
+                    onMoveLine={canPickLines ? setRowMove : undefined}
                     onRemoveItem={removeItem}
                     onToggleKeyProduct={(itemId) => toggleKeyProductLine(sec.id, itemId)}
                     onToggleCatalog={() => openInputMethod("catalog", sec.id)}
@@ -670,6 +678,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
               onMoveHere={(t) => moveLinesHere(barIds, t)}
               onMoveToEstimate={(d) => moveLinesToEstimate(barIds, d)}
               searchQuotes={searchQuotes}
+              moveError={moveNotice && !moveNotice.ok ? moveNotice.error : undefined}
             />
           )}
           {addSystemOpen && (

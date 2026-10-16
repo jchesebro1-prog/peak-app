@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState, useTransition, type CSSProperties, type KeyboardEvent } from "react";
 import { describeLineMove, planLineMove, type LineMoveTarget } from "@/lib/estimate-line-move/move";
-import type { SystemGroup } from "@/lib/estimate-groups/groups";
+import { groupBlocks, type SystemGroup } from "@/lib/estimate-groups/groups";
 import type { MoveSystemTarget } from "./actions";
 import type { QuoteLite, SpecSection } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
@@ -31,6 +31,8 @@ type MoveLinesBarProps = {
   onMoveHere: (target: MoveHere) => void;
   onMoveToEstimate: (dest: MoveSystemTarget) => void;
   searchQuotes: (q: string) => Promise<QuoteLite[]>;
+  /** The hook's current move error (its moveNotice when not ok). Shown only for a move this bar started. */
+  moveError?: string;
 };
 
 type Mode = "idle" | "menu" | "name" | "estimate" | "confirm";
@@ -101,29 +103,34 @@ export default function MoveLinesBar(p: MoveLinesBarProps) {
   const [mode, setMode] = useState<Mode>(p.openMenu || single ? "menu" : "idle");
   const [pending, setPending] = useState<Pending | null>(null);
   const [newName, setNewName] = useState(DEFAULT_NEW_NAME);
-  /** An estimate move is in flight: the bar stays up ("Moving…") until `moving` drops. */
-  const [waiting, setWaiting] = useState(false);
+  /** An estimate move this bar started: "start" on the click, "running" once the hook's
+   *  `moving` is seen true. The bar stays up ("Moving…") until `moving` drops. */
+  const [waiting, setWaiting] = useState<false | "start" | "running">(false);
+  /** The error of the last estimate move this bar started — never an older notice. */
+  const [failure, setFailure] = useState("");
 
   const menuRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // Kept in refs (not effect deps): the parent recreates these closures every render.
-  const onClearRef = useRef(p.onClear);
+  // Kept in a ref (not an effect dep): the parent recreates this closure every render.
   const searchQuotesRef = useRef(p.searchQuotes);
   useEffect(() => {
-    onClearRef.current = p.onClear;
     searchQuotesRef.current = p.searchQuotes;
   });
 
-  // Both updates (ours and the hook's movingLines) land in the same render as the
-  // click, so a render with waiting && !moving means the move finished — or never
-  // started (the hook refused it). Either way the selection clears; an error shows
-  // in the banner above the systems.
-  useEffect(() => {
-    if (waiting && !p.moving) onClearRef.current();
-  }, [waiting, p.moving]);
+  /* An estimate move ending. A success never gets here: its lines leave the
+     estimate, so the parent unmounts this bar (and Build resets the row ⇄). So
+     moving → false with the bar still up is a failure (or a move the hook
+     refused): nothing changes, the ticks stay, the bar stays on the preview with
+     the error and Move enabled for a retry. Adjusted during render (React's
+     "storing information from previous renders"), not in an effect. */
+  if (waiting === "start" && p.moving) setWaiting("running");
+  else if (waiting && !p.moving) {
+    setWaiting(false);
+    setFailure(waiting === "running" ? p.moveError || "Could not move those lines." : "");
+  }
 
   /* ---------- estimate search (the same debounce + sequence guard as section-card's Move picker) ---------- */
   const [query, setQuery] = useState("");
@@ -200,19 +207,22 @@ export default function MoveLinesBar(p: MoveLinesBarProps) {
   /** Back out one level: single mode has no idle bar, so leaving the menu ends it. */
   const close = () => {
     setPending(null);
+    setFailure("");
     if (single) p.onClear();
     else setMode("idle");
   };
 
   const confirm = (next: Pending) => {
     setPending(next);
+    setFailure("");
     setMode("confirm");
   };
 
   const runMove = () => {
     if (!pending || !plan || plan.noop || p.moving || waiting) return;
+    setFailure("");
     if (pending.kind === "estimate") {
-      setWaiting(true);
+      setWaiting("start");
       p.onMoveToEstimate(pending.dest);
       return;
     }
@@ -228,20 +238,18 @@ export default function MoveLinesBar(p: MoveLinesBarProps) {
     close();
   };
 
-  const busy = waiting || p.moving;
+  const busy = !!waiting || p.moving;
   const countLabel = singleLine ? singleLine.desc : `${lineIds.length} selected`;
 
   /* ---------- the menu: systems in rail order under their group headings ---------- */
   const menu = () => {
-    // A heading wherever the group changes (rail order keeps a group's systems together).
-    const heads = sections.map((sec, i) => {
-      const gid = sec.groupId ?? null;
-      const group = gid ? groups.find((g) => g.id === gid) : undefined;
-      return group && (i === 0 || (sections[i - 1].groupId ?? null) !== gid) ? group : null;
-    });
+    // Rail order: the same blocks the Build rail and cards render (ungrouped first, then each group).
+    const blocks = groupBlocks(sections, groups);
+    const ordered = blocks.flatMap((b) => b.sections);
+    const heads = blocks.flatMap((b) => b.sections.map((_, j) => (j === 0 ? b.group : null)));
     return (
       <div ref={menuRef} style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10, maxHeight: "min(50vh, 360px)", overflowY: "auto" }}>
-        {sections.map((sec, i) => {
+        {ordered.map((sec, i) => {
           const group = heads[i];
           const already = holdsAll(sec.id);
           return (
@@ -421,10 +429,15 @@ export default function MoveLinesBar(p: MoveLinesBarProps) {
               <div style={{ fontWeight: 600, overflowWrap: "anywhere" }}>
                 Move {plural(plan.ids.length, "line")} to {titleTarget}?
               </div>
+              {failure && (
+                <div role="alert" style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: "#9a2f22", overflowWrap: "anywhere" }}>
+                  {failure}
+                </div>
+              )}
               {effects.length > 0 && (
                 <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12, color: "#5b616e", lineHeight: 1.45 }}>
-                  {effects.map((line) => (
-                    <li key={line} style={{ overflowWrap: "anywhere" }}>
+                  {effects.map((line, i) => (
+                    <li key={i + ":" + line} style={{ overflowWrap: "anywhere" }}>
                       {line}
                     </li>
                   ))}
@@ -438,7 +451,7 @@ export default function MoveLinesBar(p: MoveLinesBarProps) {
                 {busy ? "Moving…" : "Move"}
               </button>
             )}
-            <button type="button" onClick={close} disabled={waiting} style={{ ...BTN, ...(waiting ? { opacity: 0.6, cursor: "default" } : null) }}>
+            <button type="button" onClick={close} disabled={!!waiting} style={{ ...BTN, ...(waiting ? { opacity: 0.6, cursor: "default" } : null) }}>
               Cancel
             </button>
           </div>

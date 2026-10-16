@@ -1,5 +1,7 @@
 /* #356 — move estimator lines between systems. Pure checks; run alone with
    `npx tsx scripts/test-estimate-line-move.ts`. */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
 import {
@@ -211,6 +213,38 @@ export async function lineMoveChecks(ok: Ok) {
     ok(lines.includes("Typed price cleared on Sys A"), "line-move: describe names the cleared typed price");
     ok(lines.includes("Sys A will be empty"), "line-move: describe names an emptied system");
   }
+
+  lineMoveUiChecks(ok);
+}
+
+/** #356 — source checks on the Build UI (staff gate, movable gate, the bar's failure path). */
+export function lineMoveUiChecks(ok: Ok) {
+  const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const build = src("src/app/(app)/estimator/steps/build-step.tsx");
+  const card = src("src/app/(app)/estimator/section-card.tsx");
+  const bar = src("src/app/(app)/estimator/move-lines-bar.tsx");
+
+  ok(/const canPickLines = isInternal && !movingLines;/.test(build), "line-move UI: ticking / ⇄ need staff (isInternal) and no estimate move in flight");
+  ok(build.includes("selectedLines={isInternal ? selectedLines : undefined}") &&
+     build.includes("onToggleLineSelected={canPickLines ? toggleLine : undefined}") &&
+     build.includes("onMoveLine={canPickLines ? setRowMove : undefined}"),
+    "line-move UI: build-step passes the three SectionCard props only behind isInternal");
+  ok(/\{isInternal && barIds\.length > 0 && \(\s*<MoveLinesBar/.test(build), "line-move UI: the Move bar renders for staff only");
+
+  ok(/\{p\.onToggleLineSelected && isMovableLine\(it\) && \(\s*<input\s+type="checkbox"/.test(card), "line-move UI: the select checkbox is gated on isMovableLine");
+  ok(/\{p\.onMoveLine && isMovableLine\(it\) && \(\s*<button[^>]*onClick=\{\(\) => p\.onMoveLine\?\.\(it\.id\)\}[^>]*>⇄<\/button>/.test(card), "line-move UI: ⇄ is gated on isMovableLine");
+
+  // Each effect body runs to its close: "});" (no deps) or "]);" (deps), whichever comes first.
+  const effects = bar.split("useEffect(").slice(1).map((b) => {
+    const ends = [b.indexOf("});"), b.indexOf("]);")].filter((i) => i >= 0);
+    return b.slice(0, Math.min(...ends) + 3);
+  });
+  ok(effects.length > 0 && !effects.some((b) => /moving/.test(b) && /onClear/.test(b)), "line-move UI: no MoveLinesBar effect clears on moving → false");
+  const at = bar.indexOf("else if (waiting && !p.moving) {");
+  const ending = at >= 0 ? bar.slice(at, bar.indexOf("}", at) + 1) : "";
+  ok(ending.includes("setWaiting(false)") && ending.includes("setFailure(") && !ending.includes("onClear"),
+    "line-move UI: a failed estimate move keeps the ticks (no onClear) and keeps its error");
+  ok(bar.includes("{failure && (") && bar.includes('color: "#9a2f22"'), "line-move UI: the bar shows the failed move's error");
 }
 
 if (process.argv[1]?.endsWith("test-estimate-line-move.ts")) {

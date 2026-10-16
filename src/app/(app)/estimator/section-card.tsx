@@ -79,6 +79,12 @@ const PORTAL_FIELD: CSSProperties = {
   background: "#fff",
 };
 
+/** #356: the line-select checkbox (fixed size, no UA margin) and its gap — the
+ *  column header's "Item" pads by both so it stays over the descriptions. */
+const LINE_CHECK_SIZE = 13;
+const LINE_CHECK_GAP = 8;
+const LINE_CHECK_PAD = LINE_CHECK_SIZE + LINE_CHECK_GAP;
+
 /** One icon button inside a line item's actions cell (↑ / ↓ / ×). */
 const ACTION_BTN: CSSProperties = {
   width: 20,
@@ -985,7 +991,8 @@ export default function SectionCard(p: SectionCardProps) {
                 alignItems: "center",
               }}
             >
-              <span>Item</span>
+              {/* #356: line up with the descriptions, which sit right of the select checkbox. */}
+              <span style={p.onToggleLineSelected ? { paddingLeft: LINE_CHECK_PAD } : undefined}>Item</span>
               <span style={{ textAlign: "center" }}>Qty</span>
               {isInternal && <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>Unit cost</span>}
               <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>Unit sell</span>
@@ -1108,7 +1115,7 @@ export default function SectionCard(p: SectionCardProps) {
                     borderTop: "1px solid #f5f6f8",
                   }}
                 >
-                  <div style={{ minWidth: 0, display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <div style={{ minWidth: 0, display: "flex", gap: LINE_CHECK_GAP, alignItems: "flex-start" }}>
                     {p.onToggleLineSelected && isMovableLine(it) && (
                       <input
                         type="checkbox"
@@ -1116,7 +1123,7 @@ export default function SectionCard(p: SectionCardProps) {
                         onChange={() => p.onToggleLineSelected?.(it.id)}
                         aria-label={`Select ${it.desc}`}
                         title="Select to move"
-                        style={{ marginTop: 2, flexShrink: 0, accentColor: "var(--accent)" }}
+                        style={{ width: LINE_CHECK_SIZE, height: LINE_CHECK_SIZE, margin: "2px 0 0", flexShrink: 0, accentColor: "var(--accent)" }}
                       />
                     )}
                     <div style={{ minWidth: 0, flex: 1 }}>
