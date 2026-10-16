@@ -110,3 +110,29 @@ These were answered through pop-out questions. Each is logged to DECISIONS.md an
   - who manages intros.
 - **Older MASTER-QUESTIONS items:** about 30, each with a default built in.
 - **Technical:** the middleware → proxy rename and the zip cache bump. These are mine to decide and will be taken as defaults.
+
+## Round 2 (2026-10-15/16)
+
+### Customer Rewards
+52. **Keep:** thresholds stay at Copper $25k, Silver $75k, Gold $150k, Platinum $300k.
+53. **Keep:** earn rates stay at Base 0%, Copper 1%, Silver 1.5%, Gold 2%, Platinum 3%.
+54. **Keep:** starting credit is 1% of past purchases, capped at $1,000 per customer.
+55. **Keep:** the program stays off until Jeff turns it on in Settings → Rewards. D493's placeholders are now Jeff's confirmed numbers.
+
+### Estimate output (#301 / #293 leftovers) → Batch 5
+56. **Build:** each scope on the cover PDF gets its own heading.
+57. **Keep:** the cover PDF prints the letterhead on page 1 only.
+58. **Build:** staff see a "Viewed <date time>" stamp on the client package page. It shows on Send & track and the Quotes hub; the customer never sees it.
+59. **Build:** reopening a won estimate loads the version that won.
+60. **Build:** a key product with no photo uses its datasheet's first-page thumbnail. A real photo always wins.
+61. **Build:** new estimates default to the Narrative presentation.
+62. **Build or keep (check):** anyone with `create` can edit the shared system intros.
+63. **Build:** the online toggle labels read "Overview / Itemized".
+
+### Other → Batch 6
+64. **Build:** an Attach button in the Inbox composer (computer files plus customer/project Documents, 25 MB, sent through Gmail).
+65. **Build:** a "Download today's jobs" button so a tech can work offline on the day's assigned visits, surveys and inspections.
+66. **Build:** a Reports table of most-quoted products and projected sourcing, weighted by win chance.
+67. **Build:** the app icon is generated from the Settings → Branding logo.
+68. **Keep:** all remaining older July MASTER-QUESTIONS defaults are accepted as final answers.
+69. **Build:** one review page listing every customer-facing sentence, for Jeff to approve or mark changes.
