@@ -485,6 +485,54 @@ export async function createTaskOnce(
   return (await getTask(input.id)) ?? t;
 }
 
+/** Batch 6 (bug fix) — the id format Field Work mints on the device for a new
+ *  punch-list task (`uid("tk-")` in field-work/controls.tsx: "tk-" + base36). */
+export const FIELD_TASK_ID_RE = /^tk-[a-z0-9]{1,16}$/;
+
+/** Batch 6 — what `createFieldTask` does with a client-chosen id. Pure.
+ *  - "server": no id was sent → the server allocates one (T-####).
+ *  - "refuse": the id is not a Field Work id (e.g. an office "T-6001"), or it
+ *    already names someone else's task or another project's task — never an
+ *    overwrite.
+ *  - "insert": a free Field Work id → insert-if-absent.
+ *  - "same": the id already holds this caller's own Install task on this
+ *    project (the same capture arriving twice: an outbox push then the action,
+ *    or a retried action) → idempotent success, the stored row untouched. */
+export function fieldTaskIdDecision(
+  clientId: string,
+  existing: Pick<TaskRecord, "projectId" | "section" | "assigneeUserId"> | null | undefined,
+  me: { id: string },
+  projectId: string,
+): "server" | "refuse" | "insert" | "same" {
+  if (!clientId) return "server";
+  if (!FIELD_TASK_ID_RE.test(clientId)) return "refuse";
+  if (!existing) return "insert";
+  return existing.projectId === projectId && existing.section === "Install" && !!me.id && existing.assigneeUserId === me.id
+    ? "same"
+    : "refuse";
+}
+
+/** Batch 6 (bug fix) — Field Work's "add a punch-list task". `createTask`
+ *  replaces a row outright when handed an id, so a client-chosen id could
+ *  overwrite any task (office ids run T-6000 upward). This never overwrites:
+ *  no id → server-allocated; a Field Work id → inserted at most once, and a
+ *  repeat of the caller's own capture is a no-op success. */
+export async function createFieldTask(
+  input: { clientId: string; title: string; projectId: string },
+  me: { id: string; name: string },
+): Promise<{ ok: true; task: TaskRecord } | { ok: false; error: string }> {
+  const base = { title: input.title, section: "Install", projectId: input.projectId, assigneeUserId: me.id, assigneeName: me.name };
+  const first = fieldTaskIdDecision(input.clientId, null, me, input.projectId);
+  if (first === "server") return { ok: true, task: await createTask(base, me) };
+  if (first === "refuse") return { ok: false, error: "That task id isn’t valid — please add the task again." };
+  const at = now();
+  const t = normalizeTask({ ...withAutoDue(base, at), id: input.clientId, createdBy: me.name, createdAt: at, updatedAt: at });
+  if (await insertDocIfAbsent<TaskRecord>("tasks", t)) return { ok: true, task: t };
+  const existing = await getTask(input.clientId);
+  if (existing && fieldTaskIdDecision(input.clientId, existing, me, input.projectId) === "same") return { ok: true, task: existing };
+  return { ok: false, error: "That task id is already in use — please add the task again." };
+}
+
 /** Idempotent system-created task (templates, item 16): coverageKey is the
     dedup guard — both trigger paths are re-runnable by design (PUNCHLIST §16).
     The id is deterministic (autoTaskId), so concurrent callers for the same

@@ -10,7 +10,7 @@ import {
   removeNote,
   removeTime,
 } from "@/lib/stores/projects";
-import { createTask, setTaskStatus } from "@/lib/stores/tasks";
+import { createFieldTask, setTaskStatus } from "@/lib/stores/tasks";
 
 /**
  * Field Work mutations — the ProjectStore calls the prototype's Field Work
@@ -44,11 +44,10 @@ export async function addFieldTask(formData: FormData): Promise<{ ok: true } | {
   const clientId = String(formData.get("taskId") || "");
   if (!projectId || !title) return { ok: false, error: "A task title is required." };
   try {
-    await createTask(
-      { id: clientId || undefined, title, section: "Install", projectId,
-        assigneeUserId: me.id, assigneeName: me.name },
-      me,
-    );
+    // Batch 6 — never createTask({ id }) here: that replaces any task by id.
+    if (!(await getProject(projectId))) return { ok: false, error: "That project no longer exists." };
+    const res = await createFieldTask({ clientId, title, projectId }, me);
+    if (!res.ok) return res;
   } catch (error) {
     console.error("addFieldTask: task mint failed", error);
     return { ok: false, error: "Couldn’t add that task — please try again." };
