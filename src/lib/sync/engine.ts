@@ -61,6 +61,13 @@ export function mirrorKeysToClear(
   return mirror.filter((m) => fieldCollections.includes(m.collection) && !pending.has(m.key)).map((m) => m.key);
 }
 
+/** #356 review — a push refused for the user's role (403, the pull's `create` gate): every entry it carried is parked
+ *  as read-only (state "error" — never pushed again until re-saved), not retried. Pure. */
+export function pushParksOn(status: number): boolean {
+  return status === 403;
+}
+export const PUSH_READ_ONLY_MESSAGE = "Read-only — your role can't save field work. Ask an admin for access.";
+
 /** How long a `retry` reply waits before the next flush. */
 const RETRY_DELAY_MS = 30_000;
 
@@ -396,6 +403,11 @@ class SyncEngine {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ collections }),
       });
+      if (pushParksOn(res.status)) {
+        for (const e of outbox) await idb.put("outbox", { ...e, state: "error", error: PUSH_READ_ONLY_MESSAGE });
+        await this.refreshCounts();
+        return;
+      }
       if (!res.ok) throw new Error(`push ${res.status}`);
       const data = (await res.json()) as {
         results: Record<

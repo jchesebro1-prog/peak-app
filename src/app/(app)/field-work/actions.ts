@@ -10,7 +10,8 @@ import {
   removeNote,
   removeTime,
 } from "@/lib/stores/projects";
-import { createFieldTask, setTaskStatus } from "@/lib/stores/tasks";
+import { createFieldTask, getTask, setTaskStatus } from "@/lib/stores/tasks";
+import { can } from "@/lib/team";
 
 /**
  * Field Work mutations — the ProjectStore calls the prototype's Field Work
@@ -23,10 +24,14 @@ import { createFieldTask, setTaskStatus } from "@/lib/stores/tasks";
 
 /** Check / uncheck an install task. */
 export async function toggleFieldTask(formData: FormData): Promise<void> {
-  await requireUser();
+  const me = await requireUser();
   const taskId = String(formData.get("taskId") || "");
   const done = String(formData.get("done") || "") === "1";
   if (!taskId) return;
+  // #356 review — field roles only (`create`), and only a task on a live project (the Field Work list's own rows)
+  if (!can("create", me.roles)) redirectFieldError("Your role can’t change field tasks.", formData);
+  const task = await getTask(taskId);
+  if (!task || !task.projectId || !(await getProject(task.projectId))) redirectFieldError("That task isn’t on a live project.", formData);
   try {
     await setTaskStatus(taskId, done ? "done" : "open");
   } catch (error) {
@@ -39,6 +44,8 @@ export async function toggleFieldTask(formData: FormData): Promise<void> {
 /** Add a punch-list task (Install section, assigned to the signed-in user). */
 export async function addFieldTask(formData: FormData): Promise<{ ok: true } | { ok: false; error: string }> {
   const me = await requireUser();
+  // #356 review — field roles only, like the offline push (`create`)
+  if (!can("create", me.roles)) return { ok: false, error: "Your role can’t add field tasks." };
   const projectId = String(formData.get("id") || "");
   const title = String(formData.get("title") || "").trim();
   const clientId = String(formData.get("taskId") || "");

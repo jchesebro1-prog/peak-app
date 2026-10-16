@@ -7,6 +7,7 @@ import { tierSizeOf } from "@/lib/task-plan/fields";
 import { autoDueAt } from "@/lib/task-plan/due";
 import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
 import { clearPlanPinsFor } from "@/lib/stores/task-pins";
+import { FIELD_TASK_ID_RE } from "@/lib/task-ids";
 
 /* ============================================================
    Tasks (#17) — the app's first cross-record task collection,
@@ -485,9 +486,8 @@ export async function createTaskOnce(
   return (await getTask(input.id)) ?? t;
 }
 
-/** Batch 6 (bug fix) — the id format Field Work mints on the device for a new
- *  punch-list task (`uid("tk-")` in field-work/controls.tsx: "tk-" + base36). */
-export const FIELD_TASK_ID_RE = /^tk-[a-z0-9]{1,16}$/;
+/** Batch 6 (bug fix) — Field Work's on-device task id (lib/task-ids). */
+export { FIELD_TASK_ID_RE };
 
 /** Batch 6 — what `createFieldTask` does with a client-chosen id. Pure.
  *  - "server": no id was sent → the server allocates one (T-####).
@@ -497,19 +497,23 @@ export const FIELD_TASK_ID_RE = /^tk-[a-z0-9]{1,16}$/;
  *  - "insert": a free Field Work id → insert-if-absent.
  *  - "same": the id already holds this caller's own Install task on this
  *    project (the same capture arriving twice: an outbox push then the action,
- *    or a retried action) → idempotent success, the stored row untouched. */
+ *    or a retried action) → idempotent success, the stored row untouched.
+ *    "Own" = assigned to the caller, or (#356 review) unassigned — an offline
+ *    capture whose roster id wasn't known — and created or named by them. */
 export function fieldTaskIdDecision(
   clientId: string,
-  existing: Pick<TaskRecord, "projectId" | "section" | "assigneeUserId"> | null | undefined,
-  me: { id: string },
+  existing: Pick<TaskRecord, "projectId" | "section" | "assigneeUserId"> & Partial<Pick<TaskRecord, "createdBy" | "assigneeName">> | null | undefined,
+  me: { id: string; name?: string },
   projectId: string,
 ): "server" | "refuse" | "insert" | "same" {
   if (!clientId) return "server";
   if (!FIELD_TASK_ID_RE.test(clientId)) return "refuse";
   if (!existing) return "insert";
-  return existing.projectId === projectId && existing.section === "Install" && !!me.id && existing.assigneeUserId === me.id
-    ? "same"
-    : "refuse";
+  if (existing.projectId !== projectId || existing.section !== "Install") return "refuse";
+  if (me.id && existing.assigneeUserId === me.id) return "same";
+  const name = (me.name || "").trim().toLowerCase();
+  const named = (v: unknown) => !!name && typeof v === "string" && v.trim().toLowerCase() === name;
+  return !existing.assigneeUserId && (named(existing.createdBy) || named(existing.assigneeName)) ? "same" : "refuse";
 }
 
 /** Batch 6 (bug fix) — Field Work's "add a punch-list task". `createTask`
