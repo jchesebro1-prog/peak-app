@@ -12394,7 +12394,7 @@ Jeff (Oct 14) chose "My real Gmail labels" for the #346 Labels card: pick from y
   - The brief's live counts read only your mailbox.
 - User display names are not unique (only email is). Two active users with the same name would share each other's mailbox ownership (#341's `visibleTo` matches names). Worth a uniqueness check in Settings → Team.
 
-## 348. Estimate parties, bids & vendor links — Slices 1–5 built (1–3 merged 2ad8eec8), plus Jeff's 2026-10-15 bid follow-ups (D1118–D1119); slice 5 is D1140–D1157; next: 6 portal + reports
+## 348. Estimate parties, bids & vendor links — Slices 1–6 built (1–3 merged 2ad8eec8), plus Jeff's 2026-10-15 bid follow-ups (D1118–D1119); slice 5 is D1140–D1157; slice 6 is D1166–D1184
 
 Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-parties-and-bids-design.md`. An estimate links to exactly one company; real bid jobs involve an owner, several GCs and ECs, an architect, consultants and vendors.
 
@@ -12441,7 +12441,34 @@ Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-
   - Share the "Assist is switched off." text as one constant.
   - `run.ts` could refuse a document request with no Claude key up front.
   - A click outside the vendor quote form closes and discards it (`ConfigModal` in `est-ui.tsx` closes on a backdrop click; older behavior shared by every Estimator config modal). With Read the PDF, a stray click now throws away a paid read. Ask before discarding a form that holds a read or unsaved edits. Found in the slice-5 browser pass.
-- Slice 6: portal bidder view and Reports → Bids by GC/EC.
+- Slice 6 ✅ built (D1166–D1184, Oct 15): **the portal bidder view, the owner's Scope only view, and Reports → Bids by GC/EC.**
+  - **Bidder view:** a GC or EC with a customer-portal grant sees, on Home, a **Bids** card of the estimates it bid on, and opens each as an online page addressed to it ("Prepared for <GC>", the Owner line, no other bidder named) with an **Open PDF** button. Read-only: no Accept, Refresh, Rename, Copy or Quote again. It sees only its own latest revision (delivered to it, or frozen to it after the award). Pending and awarded bids show; withdrew, no bid and lost are hidden. Draft is "being revised"; Won shows to the awarded bidder only; Lost shows as **Closed**. One gate (`portal-access.ts`, rule in `src/lib/parties/portal-bid.ts`, rows in `portal-bid-server.ts`); every portal write stays customer-only. The PDF renders on demand at the bidder's revision, 6 per minute per grant, `maxDuration = 60`; a failure shows one line and logs the real reason.
+  - **Owner's Scope only:** once an estimate has bidders, the owner's portal shows it as a BOM with no prices (before and after the award), no PDF, no photos, no Accept, Refresh, Copy or Rename, with a **Scope only** chip on Home. It is sticky: `Quote.bidScopeOnly`, written only by `markBidScopeOnly` (`addBidder`, or re-adding a removed bidder company); soft-deleted bidder rows also count; Move/Copy system → New estimate carries it for the same customer (fail-closed); a Move/Copy into an existing estimate does not. Vendor-quoted lines show the description only. Staff Send & track and the owner's client links are unchanged.
+  - **Report:** Reports → **Bids by GC/EC** (`bids-by-bidder`, after Pipeline by estimator in the preset, no extra permission; saved layouts unchanged). One row per company and role: Sent, Open, GC awarded (decided), Awarded to us, Withdrew / no bid, Awarded-to-us rate (awarded ÷ decided, "—" when none decided), Last sent. Period = the bid's due date (a future due date counts as now), else the last send. Bounded load (5,000 rows, says so when cut). Pure code in `bid-report.ts`, loader `bid-report-server.ts`, widget `_dashboard/widgets/bids.tsx`.
+  - **Tests:** `scripts/test-bids.ts` (in test:specs), including the portal file inventory.
+- **Jeff to confirm (slice 6 defaults, each logged):**
+  - A withdrew or no-bid bid still counts in Sent (D1176, question 2).
+  - The report's period is the due date, a future one anchored at now, else the last send. A bid's period can shift once its due date passes (D1173, question 3).
+  - A revision frozen to the awarded bidder is theirs even if Send & track's To changed (D1177, question 6).
+  - The portal PDF is re-rendered on demand, not the exact emailed file (D1178, question 7).
+  - Portal views are not counted as opens (D1179, question 9).
+  - The awarded bidder's portal doesn't list the project (D1180, question 10).
+  - The widget is in the default Reports layout (D1181, question 11).
+  - Old v3 links' "View the current version" is left as it is (D1182, question 12).
+  - A website bid made in Draft stays hidden until a revision is sent (D1183, question 13).
+  - The due date shown is the one printed on their revision (D1184, question 14).
+  - Also: the owner can still price a BOM model through the portal catalog and its "quoted before" shelf (D1170).
+- **Prod checks (slice 6):**
+  - A GC grant on a real bid: the Bids card, the online page addressed to the GC, and **Open PDF** latency on Vercel (≤ 60 s).
+  - An awarded GC's portal after a post-award send.
+  - The owner's portal on a bid estimate: Scope only, and a BOM with no prices.
+  - Reports → Bids by GC/EC counts after an award.
+- **Follow-ups (slice 6, deferred, not built):**
+  - Staff can't see or clear the Scope-only stamp. A chip on Send & track or Parties?
+  - The stamp can land on service quotes (`addBidder` has no quote-type check).
+  - The bidder PDF is an uncached Chrome render on every open. Cache it in Blob later.
+  - The report loads full quote documents. Reuse `ctx.data.quotes()`.
+  - The portal inventory scanners in `scripts/test-bids.ts` are per-file text checks, not per-call.
 
 **Not on a preview:** do not deploy a Vercel preview of this branch. Previews share the production Neon DB and skip migrations, so `record_parties` doesn't exist there and every company page (Bids & roles card), the lead drawer card, the project card and company delete would throw. **Post-merge production check** (after the merge deploy applies 0041), on a throwaway customer: link an owner and a GC on a lead; convert it / save an estimate from it (the owner carries, the GC doesn't); mark it Won so a project spawns; confirm the project lists the owner. This is the only real run of the postgres-js savepoint path. For 2a on the same estimate: set a Bid due date, add two bidders (GC + EC), Award one, then Send to the customer works without a re-save (a bid edit never stales the PDF in 2a); mark Won → the project shows Bill to the awarded bidder and lists only the awarded bidder, not the one that lost. Then delete the test records.
 
