@@ -1559,5 +1559,21 @@ See `.env.example`.
 
 63. ✅ **Mailbox identity** (#349, D1063–D1073) — mailbox ownership follows the user's id (`CommThread.mailboxOwnerId`; one rule `ownsMailbox`, stamp → Gmail key → a name only one user holds, else nobody; `ownMailboxCond` in SQL; viewers from `src/lib/mailbox-viewer.ts`), assignments carry `assignedToId`, creators refuse a blank owner, legacy threads stamp lazily in write guards and via `npm run comms:stamp-owners` (Jeff-gated prod run; shared names get the `"unresolved"` tombstone), a rename or new hire never moves mail (`src/lib/mailbox-names.ts`), and Settings → Team refuses duplicate names. Punch item #349.
 
+64. ✅ **Move lines between systems** (#357, D1201–D1207) — on the Estimator's
+    Build step, tick lines (or ⇄ one) and move them to another system, a New
+    system… (inserted after the source) or Another estimate… (lands as one
+    "<name> (moved)" system through `moveSystemToEstimateAction`). A preview
+    lists every side effect first. Lines keep their prices byte-for-byte;
+    partners travel (curtain ↔ track per `linkCurtainTracks`, whole labor
+    groups); a typed system price clears on both sides; stars and labor drafts
+    follow, re-minted on collision. Lines are addressed by `{ sectionId, id }`
+    because ids are unique per system only. The server now re-ids colliding
+    ids on any move or copy into an existing estimate (`reid.ts`), and the
+    package document's anchors follow a move (`package-doc/reanchor.ts`). Pure
+    rules in `src/lib/estimate-line-move/`; UI `move-lines-bar.tsx`; checks in
+    `scripts/test-estimate-line-move.ts`. No migration. Remaining: Jeff tries
+    it in production; follow-up for `removeItem` / `patchItem` bare-id
+    matching on estimates that already hold duplicate ids. Punch item #357.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

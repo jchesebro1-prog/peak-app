@@ -13559,3 +13559,31 @@ Jeff's item 68. MASTER-QUESTIONS B1–B3, F6, F7, F9–F11, F14, G2, G3, H1, H3,
 A reply (Reply or Reply all) always goes to the thread's contact — the server never read the composer's To — so To is now read-only in both, showing that contact; only Forward (D1194) sends to a typed address. The Cc row's value is sent whenever the row is shown, plain Reply included. Reply all pre-fills Cc with the replied-to message's other To and Cc recipients (the newest inbound message, else the newest one; `lib/reply-all.ts`), minus the mailbox's own address, the signed-in person's email and the primary contact; it used to pre-fill the mailbox's own address. A message imported before #214 may have no Cc header recorded, so its Reply all can come up short.
 
 Also in the re-review: a push is parked as read-only only on the push route's own `403 { error: "read-only" }`; any other 403 retries like any other failure (D1199). An offline tick — a push that changes only `status` / `doneAt` / `updatedAt` on a live task of a live project, project unchanged — is accepted with every other field kept from the stored copy, so ticking an office task offline now syncs the same as online (D1199's noted gap is closed). A Forward while the original's Gmail attachments are still being listed says "Attachments still loading — try again in a moment" instead of sending without them (D1194).
+
+## D1201. Lines move between systems; partners travel, prices never change (#357, 2026-10-16)
+
+Jeff, Oct 16: move one line, or several ticked lines, to another system. Build gains a checkbox on every movable line, a ⇄ per line and a sticky **N selected · Move to ▾ · Clear** bar. The targets are this estimate's systems (in rail order; a system holding every selected line is disabled), **New system…** (inserted after the first source, with its group, freight % and rounding) and **Another estimate…**. A preview lists every side effect before **Move**. A moved line keeps every field byte-for-byte: no re-pricing at the target's margin (Jeff's pick). Partners always come along, so a move never splits them: a curtain and its track as `linkCurtainTracks` pairs them (a legacy key-less pair moving together gets one fresh `curtainTrackKey`), and every line of a labor group in the same system. Bonus lines and the Rewards credit never move. Lines land at the end of the target in their original order. Pure rules: `src/lib/estimate-line-move/move.ts`.
+
+## D1202. A typed system price clears on both sides of a move (#357, 2026-10-16)
+
+`sellOverride` is cleared on every system that lost or gained a line (Jeff's pick), the same as the margin sliders do, and the preview names those systems. An emptied source system is kept, never deleted.
+
+## D1203. Stars and labor drafts follow their lines (#357, 2026-10-16)
+
+A moved line's key-product block moves with it. It is dropped (and the preview says so) when the target already features that part or already has `MAX_KEY_PRODUCTS`. A labor group's draft (`laborGroups[id]`) travels with its lines. If the target already uses the id, as a record key or as an orphan `laborGroup` on its lines (copies share ids), the moving group is re-minted on its lines and record, so a later Edit labor can never replace lines it doesn't own.
+
+## D1204. Lines are addressed by system + id; colliding ids are re-minted (#357, 2026-10-16)
+
+Item ids are unique per system, not per quote: Copy/Move system into an existing estimate (#266) keeps ids. The move feature therefore addresses lines as `{ sectionId, id }` throughout (selection, plan, removal), and a line landing where its id is taken gets a fresh one (`nextId`), with its star re-pointed (`remapKeyProducts`). The server's `placeSystemInEstimate` (existing-target branch, so #266 Move/Copy system too) now re-ids any incoming line whose id the target estimate already uses, from max(target ids, the package document's id floor) + 1 (`reIdIncomingSection`, `src/lib/estimate-line-move/reid.ts`). It stops new duplicates; estimates that already hold one are left as they are (follow-up: `removeItem` / `patchItem` still match a bare id across systems).
+
+## D1205. Moving lines to another estimate goes through Move system (#357, 2026-10-16)
+
+There is no new server action. The ticked lines and their partners are bundled into one section shaped like their first source (no typed sell, group, built, alternate, goals or cover), with their stars, labor drafts and vendor-quote records, and posted through `moveSystemToEstimateAction`. They land as one system, "<name> (moved)" (Jeff's pick), with #348's split-from-source and Scope-only rules on a new estimate. The lines leave this estimate only after the server confirms. A failure keeps the ticks and shows the error in the bar. A vendor record leaves local state only when no remaining line names it. An edit made to the moving lines during the round trip is lost, the same as Move system today.
+
+## D1206. A move re-points the package document (#357, 2026-10-16)
+
+Product blocks, product images and `lineQty` chips in the Build-package document anchor to `sectionId` + `lineKey`. An in-estimate move re-points every anchor naming a moved line to its new system and id (`reanchorPackageDoc`, `src/lib/package-doc/reanchor.ts`), saved with the next Save. Lines moved out of the estimate show as removed, the same as a deleted line. Review comments pin to a system, so a move doesn't affect them.
+
+## D1207. Moving is staff-only, Build-only, and needs no drag (#357, 2026-10-16)
+
+The checkboxes, ⇄ and bar render only for internal (staff) views on the Build step. Ticks clear on loading another quote, after a move, and for lines that vanish or sit in a built (collapsed) system. While a move to another estimate runs, the checkboxes and ⇄ stay in place but disabled, so the rows don't shift. The staff line-actions column widens from 104px to 126px to fit a sixth button; the client view stays 104px. Drag and drop, copying lines, and moving into a chosen system of another estimate are out of scope.

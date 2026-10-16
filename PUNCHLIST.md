@@ -12704,3 +12704,17 @@ Tests: `scripts/test-batch6.ts` (chained into test:specs; 72 pure / 89 with the 
 - Forward a real email with a Gmail attachment on production and check the vendor gets the file; try Reply all with a Cc.
 - **Re-review fixes (2026-10-16, D1200):** To is read-only on Reply / Reply all (only Forward sends to a typed address); the shown Cc row always goes out; Reply all Cc's the replied-to message's other recipients (not our own mailbox); a push parks as read-only only on the route's own `403 { error: "read-only" }`; an offline tick (status / doneAt / updatedAt only, live task on a live project) syncs like the online tick, other fields from the stored copy; Forward waits for the original's attachments to finish loading. Gates: tsc 0; `test-batch6.ts` 105 PASS pure / 131 PASS with the DB half, 0 FAIL; test:specs 24,271 PASS / 0 FAIL (includes test-thread-visibility); `next build` OK; eslint 0 problems on the 11 changed files; smoke not rerun (no page route touched). Not browser-verified.
 - **Left as is (re-review item 6):** forwarding a legacy attachment stored inline as a data URL copies its bytes into the new forward's comms document (which every page's nav data reads). Rare (pre-Gmail-reference attachments only); forward by reference later.
+
+## 357. Move estimator lines between systems — DONE 2026-10-16 on `feat/356-move-lines` (D1201–D1207)
+
+Jeff, Oct 16: "the ability to move each individual line in the estimator to different packages — or select multiple and move them to different systems." Spec `docs/superpowers/specs/2026-10-16-estimator-move-lines-design.md`; plan `docs/superpowers/plans/2026-10-16-estimator-move-lines.md`.
+
+**Built:** on Build, a checkbox on every movable line, a ⇄ per line, and a sticky **N selected · Move to ▾ · Clear** bar (`move-lines-bar.tsx`). Targets: this estimate's systems, **New system…**, and **Another estimate…** (new or existing; lands as one "<name> (moved)" system through `moveSystemToEstimateAction`). A preview lists linked lines that come along, typed prices that clear, stars that drop, and systems left empty. Pure rules in `src/lib/estimate-line-move/` (`move.ts`, `reid.ts`). Package-document anchors follow (`src/lib/package-doc/reanchor.ts`), and the server re-ids colliding ids on any move or copy into an existing estimate.
+
+**Gates:** tsc 0; `scripts/test-estimate-line-move.ts` 100 PASS / 0 FAIL (in test:specs); test:specs 24,493 PASS / 0 FAIL (after merging main); test:smoke 262 PASS / 0 FAIL (before the merge); `next build` OK; eslint 0 on the touched files (`scripts/test-review-and-spec.ts` overflows eslint's react-hooks rule, as before). A browser pass on a scratch copy of the dev DB covered: tick 2 lines → existing system; ⇄ → New system "Sound" (inserted after its source); Save + reload kept both; ⇄ → Another estimate → New estimate (the line left and arrived at the same price; the preview said the source would be empty); the bar at 900px with no page overflow.
+
+**Rollback:** safe. No migration, no new stored fields. Older code reads moved lines like any others. The server re-id only changes ids that would have collided.
+
+**Remaining:**
+- Jeff: try it on a real estimate in production. A curtain with its track, a labor group, and a starred product make the best test.
+- Follow-up: `removeItem` / `patchItem` in `use-estimator-state.ts` still match a bare id across systems, so an estimate that already holds the same id in two systems (from a pre-#357 Move/Copy system into an existing estimate) can delete or edit both twins.
