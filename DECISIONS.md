@@ -9423,7 +9423,8 @@ The package's Narrative view is page-wide, so key products and their photos show
 Narrative-presentation systems. The v2 photo route serves the pinned revision's `packagePhotoSections` set; the v1 set is
 unchanged. A scope with no intro and no key products shows its cover override or the labor wording; failing that, "The full
 parts list for this scope is under BOM." `[needs a paragraph]` never reaches a client. The cover has no per-scope heading
-(its price line names the scope), and the page's scope card has one; open question for Jeff.
+(its price line names the scope), and the page's scope card has one; open question for Jeff. **ANSWERED 2026-10-15
+(Jeff): the cover gets one per scope — D1187.**
 
 ## D625. Opens are counted by a JS beacon, per sent revision, best effort (#301 slice B, 2026-10-05)
 
@@ -13501,3 +13502,31 @@ The Send & track Bidders card shows a muted line when the owner sees the estimat
 ## D1186. Ask before a stray click discards an Estimator pop-up (#348 follow-up, 2026-10-15)
 
 The Curtain, Track, Add assembly, Labor and Vendor quote pop-ups ask before the backdrop click or × discards unsaved work. Each open's draft is snapshotted once it settles and compared at close; key order and undefined-vs-missing don't count. A vendor quote with a PDF read, or a read still running, says the read will be lost. Switching to another input asks the same way. Add / Save never asks. A vendor quote also asks while the Inbox hand-off is still copying its PDF in, and while its own file is still uploading ("Discard this vendor quote? The file is still uploading."). A clean form closes silently. AI scope and Add a system close as before. Custom part is inline, not a pop-up, and doesn't ask.
+
+## D1187. Each scope on the cover PDF gets its own heading (#355, Jeff 2026-10-15 item 56; answers #301 "per-scope heading")
+
+Every scope on the cover PDF (`/print/cover/[id]`) now opens with a small bold heading above its paragraph and price line: the system's own name, else its discipline (set or inferred — Lighting, Rigging, Curtains, AV), else "Scope N" (`coverScopeHeading`, `src/lib/estimate-output/cover.ts`). The heading sits inside the scope's `break-inside: avoid` block, so it never ends a page on its own. It adds one 11 pt line per scope; the paragraphs stay capped at 1,500 characters, so the 1–2 page budget holds for the usual estimate. The price line still names the scope too ("Lighting scope: $…"). The letterhead stays on page 1 only (item 57, a Keep). The #P2b "no alternates → unchanged" fixture was regenerated for the heading.
+
+## D1188. Staff see "Viewed <date time>" from the client link's opens (#355, Jeff 2026-10-15 item 58; answers #293 "viewed stamps")
+
+`lastViewedAt` / `viewedStamp` (`src/lib/quote-share/package-view.ts`) read the #301 beacon's `Quote.shareOpens` and take the latest `last` across every SENT revision — "Viewed Oct 6, 9:05 PM", Chicago time. It shows on the Client link panel (Send & track and Customer review), above the per-revision rows, and leads the Quotes hub's Opened chip tooltip. Staff only: it is built in the staff-only `shareLinkStatusAction` and the hub, and no customer page (share, package, portal) reads `shareOpens`. A bidder's v3 opens are counted on the bidder (#348), not here. The counts stay best effort (one per device per half hour).
+
+## D1189. Reopening a won estimate loads the version that won (#355, Jeff 2026-10-15 item 59; answers #293 "won quote recalled after its last send")
+
+At the Won transition a system estimate records `Quote.wonRev` — the revision holding the version that won: the latest SENT revision when the live quote still matches it (no extra snapshot), else a new manual snapshot noted "Won — the version that won" (won from a draft that was recalled and edited after its last send, or never sent). Moving out of Won to Draft (a revise) or Sent puts that version back on the live quote when edits saved after the win changed it — those edits are snapshotted first ("Auto-saved before reopening at the version that won"), like a revision recall, so nothing is lost. A catalog rename since the win is not a change (the won spec is rewritten to live SKUs first, #304). The Rewards credit goes through `restoredCreditFor` → `settleCredit` while the quote is still won, so it is the locked amount re-homed on the won version, and the ledger reconcile sees a plain revise (earn reversed, redeem returned once). The Estimator reloads after a status or stage move that did this. Rules are pure in `src/lib/quote-won-version.ts`; `wonRev` is setStatus's alone (`update()` drops it). Scope: Estimator system estimates only — never Daylite history or a historical-import win; service quotes keep their engine-owned flows. Not changed: the online / portal pages keep showing the latest SENT revision (the one the customer's PDF is), so a quote won from an edited draft still shows its last send online. Rollback: safe — older code ignores `wonRev`; the extra snapshots stay as ordinary manual revisions.
+
+## D1190. A key product with no real photo uses its datasheet's page-1 thumbnail — already so (#355, Jeff 2026-10-15 item 60; answers #293 spec §12 q2)
+
+No code change. `keyProductPhotoDocs` takes the part's first visible image, and `compareImages` sorts a `datasheet-render` thumbnail (#245) after every real photo, so the document chain is already own photo → datasheet thumbnail → the existing fallbacks (allowance / custom placeholder, manufacturer image, nothing). The PDF, the online estimate and the package page all read it; the portal tile has always used it. A thumbnail exists only where the admin datasheet-thumbnail render has run (Jeff-gated on production); a thumbnail hidden on the part never prints. Already-sent PDFs are frozen files and never change; the online and package pages of an old sent quote read photos live, so a thumbnail rendered later (or a real photo added later) shows there. Pinned in `scripts/test-batch5.ts` (pure + DB).
+
+## D1191. New systems start in the Narrative presentation (#355, Jeff 2026-10-15 item 61; answers #293 spec §12 q3)
+
+`NEW_SYSTEM_PRESENTATION = "narrative"` (`src/lib/estimate-output/fields.ts`) is stamped on every system made from now on: the fresh estimate's first system, + Add system (blank or a category) and a system added from a Suggested BOM. A system saved without the key — every older one — still reads and prints as Itemized, so existing estimates keep their setting. Copied, moved and loaded systems keep their own. Portal-built quotes and assessment-findings drafts stay itemized (their lines are the point). An empty narrative system prints "System scope and pricing are included in the total above." until it gets an intro or key products; the Itemized appendix toggle still prints its lines.
+
+## D1192. Anyone with `create` edits the shared system intros — already so (#355, Jeff 2026-10-15 item 62; answers #293 spec §12 q6)
+
+No code change. `upsertSystemIntroAction` / `deleteSystemIntroAction` require `create` (not admin-only) and are the only writers of the `narrative_intros` blob. Pinned.
+
+## D1193. The online toggle reads Overview / Itemized (#355, Jeff 2026-10-15 item 63)
+
+One `ONLINE_VIEW_LABELS` (`src/lib/quote-share/view.ts`) labels the customer-facing view toggle on the portal / share online estimate and the client package page "Overview" and "Itemized"; the package page's pointer reads "The full parts list for this scope is under Itemized." The query value stays `?view=bom`, so old links work. Staff-side labels are unchanged (Build package's Narrative / BOM quote tabs, a system's Narrative / Itemized presentation, the Itemized appendix hint). The #P2b fixture was regenerated for the new labels.

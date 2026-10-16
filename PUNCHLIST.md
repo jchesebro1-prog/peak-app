@@ -10357,18 +10357,23 @@ are additive JSONB that older code ignores. Rotating `AUTH_SECRET` also kills ev
 
 **For Jeff.**
 - Open questions in spec §12: ~~photo side~~ (**ANSWERED 2026-10-15: photos alternate right, left, right — #352,
-  D1131**), datasheet thumbnails as photos, default presentation, who manages intros.
+  D1131**), ~~datasheet thumbnails as photos, default presentation, who manages intros~~ (**ANSWERED 2026-10-15
+  (Jeff): a part with no real photo uses its datasheet thumbnail — already so, D1190; new systems default to Narrative —
+  built in #355, D1191; anyone with `create` manages intros — already so, D1192**).
 - Toggle title says "every narrative system's" though By-section prints every system — reword?
 - Paragraphs live on catalog parts, so take `npm run db:export` before Clear catalog price list or the go-live wipe.
 - Preview deploys share the production DB, so a paragraph or intro saved on a preview is a production write.
 - ~~Spec §12 q7 — vendor-quote lines are left out of Load system; say if you'd rather carry them with their files.~~
   **ANSWERED 2026-10-15 (Jeff): bring them, flagged "Old vendor price — re-quote". Built in #352 (D1132).**
 - Portal-built quotes are excluded from the library — keep that?
-- Should a won quote recalled after its last send load the last SENT version (current) or the version that won?
+- ~~Should a won quote recalled after its last send load the last SENT version (current) or the version that won?~~
+  **ANSWERED 2026-10-15 (Jeff): the version that won. Built in #355 (D1189) — reopening a won estimate puts the won
+  version back; the online page still shows the last send (its PDF).**
 - Client links: copy them from production only. Preview deploys share the production DB, so a link copied there
   carries the preview origin.
 - Spec §12 q4: is 60 days right for a client link?
-- View tracking is deliberately left out (a public GET never writes). Want "viewed" stamps?
+- ~~View tracking is deliberately left out (a public GET never writes). Want "viewed" stamps?~~ **ANSWERED 2026-10-15
+  (Jeff): yes, staff only. Opens are counted since #301 (D625); the "Viewed <date time>" stamp is #355 (D1188).**
 - The online header says "sent <date>" using the PDF's issue date.
 - Cut sheets stay PDF-only online; the online pages don't show them. Want them online too?
 - The BOM toggle shows quantities and descriptions even when the estimate was sent narrative-only.
@@ -10891,9 +10896,10 @@ disappear. Rotating `AUTH_SECRET` kills every link, as before.
    #352 (D1125).**
 3. ~~**BOM quantities** show on the package page even when the estimate PDF hides them. Keep?~~ **ANSWERED 2026-10-15
    (Jeff): the package-page BOM follows the PDF's quantities setting. Built in #352 (D1126).**
-4. **Per-scope heading on the cover.** The price line names the scope ("Lighting scope: $28,500.00"); there is no separate
-   heading. Want one?
-5. **Letterhead on page 1 only**; the footer repeats on every page. OK?
+4. ~~**Per-scope heading on the cover.** The price line names the scope ("Lighting scope: $28,500.00"); there is no separate
+   heading. Want one?~~ **ANSWERED 2026-10-15 (Jeff): yes — each scope gets its own heading. Built in #355 (D1187).**
+5. ~~**Letterhead on page 1 only**; the footer repeats on every page. OK?~~ **ANSWERED 2026-10-15 (Jeff): keep — page 1
+   only (decision item 57).**
 6. **Open counts are best effort.** One per device per half hour, per server instance; a mail scanner that runs JS can still
    count once. A signal, not proof. Fine?
 7. **A honeypot hit shows the normal "Thanks" and writes nothing** (a bot gets no signal). A real person who autofills the
@@ -12638,3 +12644,32 @@ The app is safe before step 4: ownership already resolves the same way lazily (G
 - A venue type already set to "Church — Contemporary" keeps the earlier drawing until it is re-picked in Settings → Venue types.
 - Try Link to rack… / Unlink on a real Grid design with a rack built in the Assembly Builder.
 - The first supplement price file on production: check its parts read the new date and the rest of the book keeps its old one.
+
+---
+
+## 355. Jeff's 2026-10-15 decisions — Batch 5 (Estimate output leftovers) — DONE 2026-10-16 on `worktree-assist-layer` (D1187–D1193)
+
+**Asked (Jeff, 2026-10-15/16 decision session — `docs/decisions/2026-10-15-jeff-decisions.md`, Round 2 items 55–63).** The #301 / #293 leftovers.
+
+**Done:**
+- **#55 Rewards numbers (D493 amended):** no code change — the thresholds, earn rates and 1 % / $1,000 starting credit are Jeff's confirmed numbers; the program stays off until he turns it on in Settings → Rewards.
+- **#56 Cover heading (D1187):** each scope on the cover PDF opens with its own heading — the system's name, else its discipline, else "Scope N" — inside the scope's no-break block. Answers #301 question 4. (#57, letterhead on page 1 only, is a Keep — #301 question 5.)
+- **#58 Viewed stamp (D1188):** "Viewed Oct 6, 9:05 PM" — the latest open of any sent revision's client link, Chicago time — on the Client link panel (Send & track, Customer review) and leading the Quotes hub's Opened chip tooltip. Staff only; no customer page reads `shareOpens`.
+- **#59 Won version (D1189):** the Won transition records `Quote.wonRev` (the latest send when it still matches, else a "Won — the version that won" snapshot); reopening (won → draft / sent) puts that version back when edits were saved after the win — the edits become a revision first, the credit is the locked amount through `restoredCreditFor` → `settleCredit`, the ledger sees a plain revise, and the Estimator reloads. System estimates only; never Daylite history or a historical import. The online page still shows the last send.
+- **#60 Datasheet thumbnail (D1190):** already so — a key product with no real photo prints its datasheet's page-1 thumbnail (a real photo always wins), on the PDF, online and the package page. Pinned. Sent PDFs stay frozen; online views of old sent quotes read photos live.
+- **#61 Narrative default (D1191):** new systems (fresh estimate, + Add system blank / category, Suggested BOM) start Narrative; systems saved without the key stay Itemized, so existing estimates keep their setting.
+- **#62 Intros (D1192):** already so — `create` edits the shared system intros. Pinned.
+- **#63 Toggle labels (D1193):** the online estimate and package page toggle reads Overview / Itemized ("…is under Itemized."); `?view=bom` unchanged; staff labels unchanged.
+
+**Tests:** new `scripts/test-batch5.ts` (pure + DB, chained into test:specs; `npx tsx scripts/test-batch5.ts` runs the pure half, with `PGLITE_PATH` the DB half): the cover heading rule and render, the Viewed stamp and the customer pages' absence of it, the won-version rules plus a DB run of send → win → edit → reopen (spec, value, credit, auto-save revision, ledger redeem / unredeem once), won from an edited draft, won → sent, a historical import, the thumbnail order and a DB run (no photo → thumbnail → real photo wins), the Narrative default and old systems still Itemized, the intro permission, the toggle labels. Harness expectations updated where behaviour changed: the #301 chip tooltip (#58), the #301 package-page order / fallback text (#63); the #P2b no-alternates fixture regenerated for the cover heading (#56) and the toggle labels (#63). No migration, no env var.
+
+**Gates:** tsc 0; `scripts/test-batch5.ts` 89 PASS pure / 103 PASS with the DB half, 0 FAIL; test:specs 24,243 PASS / 0 FAIL; test:smoke 262 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors, 0 warnings on the 15 changed src/scripts files (the harness file excluded, targeted edits only). Not browser-verified.
+
+**Rollback:** safe. New optional JSON only (`Quote.wonRev`, and the "Won — the version that won" / "Auto-saved before reopening…" revisions, which older code reads as ordinary manual revisions); older code ignores them. Rolling back restores the old cover, labels, default presentation and reopen behaviour.
+
+**Remaining (Jeff-gated):**
+- Look at a cover PDF with three or more scopes on production (headings, still 1–2 pages).
+- Open a sent estimate's client link from another device, then check the Viewed stamp on Send & track and the Quotes hub tooltip.
+- Win an estimate, edit it, revise it (status → Draft): the Estimator reloads at the won version and Revisions lists the edits as "Auto-saved before reopening at the version that won".
+- The datasheet thumbnail only exists where the admin datasheet-thumbnail render has run — run it on production (#245 remaining).
+- Still open from #301: open counts best effort (question 6), the honeypot (7), starter paragraphs (9). From #293: the Itemized appendix hint "Every narrative system's full line list…" wording (not the online toggle).
