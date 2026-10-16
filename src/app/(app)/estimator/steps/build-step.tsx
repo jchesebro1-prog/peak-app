@@ -258,8 +258,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
   if (liveSelected.length !== selectedLines.size) setSelectedLines(new Set(liveSelected));
   const rowLive = rowMove != null && movableIds.has(rowMove);
   const barIds = rowLive ? [rowMove] : liveSelected;
-  // While an estimate move runs, no tick or ⇄ may remount the waiting bar.
-  const canPickLines = isInternal && !movingLines;
 
   return (
     <div
@@ -567,8 +565,10 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     onSetExtSell={setItemExtSell}
                     onMoveItem={(itemId, direction) => moveItem(sec.id, itemId, direction)}
                     selectedLines={isInternal ? selectedLines : undefined}
-                    onToggleLineSelected={canPickLines ? toggleLine : undefined}
-                    onMoveLine={canPickLines ? setRowMove : undefined}
+                    onToggleLineSelected={isInternal ? toggleLine : undefined}
+                    onMoveLine={isInternal ? setRowMove : undefined}
+                    // While an estimate move runs, no tick or ⇄ may remount the waiting bar — kept in place, disabled.
+                    lineSelectDisabled={movingLines}
                     onRemoveItem={removeItem}
                     onToggleKeyProduct={(itemId) => toggleKeyProductLine(sec.id, itemId)}
                     onToggleCatalog={() => openInputMethod("catalog", sec.id)}

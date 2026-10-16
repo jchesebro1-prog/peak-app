@@ -224,11 +224,14 @@ export function lineMoveUiChecks(ok: Ok) {
   const card = src("src/app/(app)/estimator/section-card.tsx");
   const bar = src("src/app/(app)/estimator/move-lines-bar.tsx");
 
-  ok(/const canPickLines = isInternal && !movingLines;/.test(build), "line-move UI: ticking / ⇄ need staff (isInternal) and no estimate move in flight");
   ok(build.includes("selectedLines={isInternal ? selectedLines : undefined}") &&
-     build.includes("onToggleLineSelected={canPickLines ? toggleLine : undefined}") &&
-     build.includes("onMoveLine={canPickLines ? setRowMove : undefined}"),
+     build.includes("onToggleLineSelected={isInternal ? toggleLine : undefined}") &&
+     build.includes("onMoveLine={isInternal ? setRowMove : undefined}"),
     "line-move UI: build-step passes the three SectionCard props only behind isInternal");
+  ok(build.includes("lineSelectDisabled={movingLines}"), "line-move UI: an estimate move in flight disables ticking / ⇄ (kept in place, no row shift)");
+  ok(/checked=\{!!p\.selectedLines\?\.has\(it\.id\)\}\s*disabled=\{p\.lineSelectDisabled\}/.test(card) &&
+     /onClick=\{\(\) => p\.onMoveLine\?\.\(it\.id\)\} disabled=\{p\.lineSelectDisabled\}/.test(card),
+    "line-move UI: section-card disables (never hides) the checkbox and ⇄ while a move runs");
   ok(/\{isInternal && barIds\.length > 0 && \(\s*<MoveLinesBar/.test(build), "line-move UI: the Move bar renders for staff only");
 
   ok(/\{p\.onToggleLineSelected && isMovableLine\(it\) && \(\s*<input\s+type="checkbox"/.test(card), "line-move UI: the select checkbox is gated on isMovableLine");

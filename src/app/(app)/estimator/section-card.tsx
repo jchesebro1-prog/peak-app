@@ -179,6 +179,8 @@ export type SectionCardProps = {
   onToggleLineSelected?: (itemId: number) => void;
   /** #356: ⇄ — open the Move bar's menu for just this line. */
   onMoveLine?: (itemId: number) => void;
+  /** #356: an estimate move is running — the checkbox and ⇄ stay in place, disabled. */
+  lineSelectDisabled?: boolean;
   onRemoveItem: (id: number) => void;
   /** #293: ★ — mark / unmark this line as a key product (narrative block). */
   onToggleKeyProduct: (itemId: number) => void;
@@ -1120,6 +1122,7 @@ export default function SectionCard(p: SectionCardProps) {
                       <input
                         type="checkbox"
                         checked={!!p.selectedLines?.has(it.id)}
+                        disabled={p.lineSelectDisabled}
                         onChange={() => p.onToggleLineSelected?.(it.id)}
                         aria-label={`Select ${it.desc}`}
                         title="Select to move"
@@ -1510,7 +1513,7 @@ export default function SectionCard(p: SectionCardProps) {
                       </button>
                     )}
                     {p.onMoveLine && isMovableLine(it) && (
-                      <button type="button" className="est-action-btn" onClick={() => p.onMoveLine?.(it.id)} title="Move to another system…" aria-label={`Move ${it.desc} to another system`} style={ACTION_BTN}>⇄</button>
+                      <button type="button" className="est-action-btn" onClick={() => p.onMoveLine?.(it.id)} disabled={p.lineSelectDisabled} title="Move to another system…" aria-label={`Move ${it.desc} to another system`} style={p.lineSelectDisabled ? { ...ACTION_BTN, cursor: "default", opacity: 0.4 } : ACTION_BTN}>⇄</button>
                     )}
                     <button type="button" className="est-action-btn" onClick={() => p.onMoveItem(it.id, -1)} title="Move line up" style={ACTION_BTN}>↑</button>
                     <button type="button" className="est-action-btn" onClick={() => p.onMoveItem(it.id, 1)} title="Move line down" style={ACTION_BTN}>↓</button>
