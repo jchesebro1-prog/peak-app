@@ -1977,13 +1977,15 @@ export function bidReportPureChecks(ok: Ok) {
 
   // Total row.
   const tot = bidsByBidder([
-    inp("CA", "gc", { result: "awarded", sentAt: D }), inp("CA", "gc", { result: "lost" }),
-    inp("CB", "gc", { result: "lost" }), inp("CB", "gc", { result: "lost" }), inp("CB", "ec", { result: "pending" }),
+    inp("CA", "gc", { result: "awarded", sentAt: D }),
+    inp("CB", "gc", { result: "awarded" }), inp("CB", "gc", { result: "lost" }), inp("CB", "gc", { result: "lost" }),
+    inp("CB", "ec", { result: "pending" }),
     inp("CC", "ec", { result: "no_bid", sentAt: D - 9 * DAY }),
   ], names, P);
   const T = tot.total;
-  ok(T.name === "All GCs and ECs" && T.sent === 6 && T.open === 1 && T.decided === 4 && T.awarded === 1 && T.out === 1 && T.companies === 3, "bid-report: the total row sums the counts (distinct companies)");
-  ok(T.rate === 25 && tot.rows.map((x) => x.rate).join() !== "", "bid-report: the total rate is recomputed from the sums (1 ÷ 4), not averaged (50 and 0)");
+  ok(T.name === "All GCs and ECs" && T.sent === 6 && T.open === 1 && T.decided === 4 && T.awarded === 2 && T.out === 1 && T.companies === 3, "bid-report: the total row sums the counts (distinct companies)");
+  ok(tot.rows.find((x) => x.companyId === "CA")?.rate === 100 && tot.rows.find((x) => x.companyId === "CB" && x.role === "gc")?.rate === 33, "bid-report: the per-company rates in the total fixture are 100 and 33");
+  ok(T.rate === 50, "bid-report: the total rate is recomputed from the sums (2 ÷ 4 = 50), not averaged (100 and 33 average 67)");
   ok(T.lastSentAt === D, "bid-report: the total lastSentAt is the max over rows");
   const empty = bidsByBidder([], names, P);
   ok(empty.rows.length === 0 && empty.total.sent === 0 && empty.total.rate === null && empty.total.lastSentAt === null && empty.total.companies === 0, "bid-report: empty input → no rows, a zero total with a null rate");
@@ -1996,6 +1998,18 @@ export function bidReportPureChecks(ok: Ok) {
     inp("CC", "gc", {}), inp("CB", "gc", {}), inp("CA", "gc", {}), inp("CA", "ec", {}), inp("CA", "ec", {}),
   ], names, P).rows.map((x) => `${x.name}/${x.role}/${x.sent}`);
   ok(sorted.join() === "Alpha GC/ec/2,Alpha GC/gc/1,Beta Electric/gc/1,Gamma/gc/1", `bid-report: sorted by sent desc then name (${sorted.join()})`);
+
+  // Rounding: half-cases round up (57 ÷ 200 = 28.5).
+  const many: BidReportInput[] = [
+    ...Array.from({ length: 57 }, () => inp("CA", "gc", { result: "awarded" })),
+    ...Array.from({ length: 143 }, () => inp("CA", "gc", { result: "lost" })),
+  ];
+  ok(bidsByBidder(many, names, P).rows[0].rate === 29, "bid-report: 57 of 200 rounds to 29 (no float error)");
+
+  // Sort tiebreak: equal sent and name → role, then company id.
+  const tieNames = new Map([["C1", "Same"], ["C2", "Same"]]);
+  const tie = bidsByBidder([inp("C2", "gc", {}), inp("C1", "gc", {}), inp("C2", "ec", {})], tieNames, P).rows.map((x) => `${x.companyId}/${x.role}`);
+  ok(tie.join() === "C2/ec,C1/gc,C2/gc", `bid-report: equal sent and name sort by role, then company id (${tie.join()})`);
 
   // Copy + boundary.
   ok(BID_REPORT_COPY.cols.length === 9 && BID_REPORT_COPY.title === "Bids by GC/EC" && BID_REPORT_COPY.empty === "No bids sent in this period.", "bid-report: the copy constants");

@@ -1,8 +1,7 @@
 /* #348 slice 6 — Reports → "Bids by GC/EC": the pure per-bidder aggregation. Types only from the stores (no reads);
    the loader and the widget (Task 6) feed it rows. Jeff 2026-10-15: the awarded-to-us rate is awarded ÷ decided,
    decided = awarded + lost, and "—" (null) when nothing is decided. */
-import type { Party } from "./rules";
-import type { BidderState } from "./rules";
+import type { BidderState, Party } from "./rules";
 import type { Quote } from "@/lib/stores/quotes";
 
 export type BidReportInput = {
@@ -47,7 +46,7 @@ export function bidReportAnchor(q: Pick<Quote, "bid">, bid: BidderState): number
   return isNum(bid.sentAt) ? bid.sentAt : null;
 }
 
-const rateOf = (awarded: number, decided: number): number | null => (decided > 0 ? Math.round((awarded / decided) * 100) : null);
+const rateOf = (awarded: number, decided: number): number | null => (decided > 0 ? Math.round((awarded * 100) / decided) : null);
 
 type Acc = { companyId: string; role: "gc" | "ec"; sent: number; open: number; decided: number; awarded: number; out: number; lastSentAt: number | null };
 
@@ -60,7 +59,8 @@ export function bidsByBidder(
 ): { rows: BidReportRow[]; total: BidReportTotal } {
   const acc = new Map<string, Acc>();
   for (const { party, quote } of inputs) {
-    if (!quote) continue;
+    if (!quote) continue; // quote.status is intentionally ignored — the loader decides which quotes reach this
+
     if (party.role !== "gc" && party.role !== "ec") continue;
     const bid = party.bid;
     if (!bid || !isNum(bid.revSent)) continue; // not delivered → counts nowhere
