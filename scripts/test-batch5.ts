@@ -102,10 +102,16 @@ function wonVersionChecks(ok: Ok) {
      !reopenedAtWonVersion({ ...before, status: "sent" } as Quote, { revisions: [rev(1, "sent", 2000), rev(2, "manual", 3000, { note: REOPEN_AUTOSAVE_NOTE })] } as unknown as Quote),
     "#59: the action tells the Estimator to reload only when this move put the won version back");
   const st = src("src/lib/stores/quotes.ts");
-  ok(/doc\.wonRev = sent && sameWonContent\(sent, doc\) \? sent\.rev : pushRevision\(doc, by \|\| DEFAULT_ACTOR, "manual", WON_SNAPSHOT_NOTE\)\.rev;/.test(st) &&
-     st.includes('opts.bypassApprovalGate !== "historical-import"'), "#59: setStatus records the won version at the Won transition (never for a historical import)");
-  ok(/const c = await restoredCreditFor\(q, target, true\);/.test(st) && st.includes("withRestoredCredit(doc, reopen.credit);") && st.includes("delete clean.wonRev;"),
+  ok(/doc\.wonRev = sent && sentLive && sameWonContent\(sentLive, doc\) \? sent\.rev : pushRevision\(doc, by \|\| DEFAULT_ACTOR, "manual", WON_SNAPSHOT_NOTE\)\.rev;/.test(st) &&
+     st.includes('const recordsWon = status === "won" && tracksWonVersion(q) && opts.bypassApprovalGate !== "historical-import";') &&
+     st.includes("const sentLive = sent ? { ...sent, spec: wonRewrite(sent.spec ?? null) } : null;"),
+    "#59 / #355 M3: setStatus records the won version at the Won transition, comparing at today's SKUs (never for a historical import)");
+  ok(/const c = await restoredCreditFor\(q, target, true\);/.test(st) && st.includes("withRestoredCredit(doc, plan.credit);") && st.includes("delete clean.wonRev;"),
     "#59: the reopen's credit goes through restoredCreditFor → settleCredit (locked while still won); update() can't set wonRev");
+  ok(st.indexOf("const reopen = await reopenPlanFor(q, status, opts);") < st.indexOf("const gate = decideApprovalGate(status, gateQ, limits, opts, Date.now(), by ?? null);") &&
+     st.includes("const gateQ = asReopened(q, reopen);") && st.includes("const d = decideApprovalGate(status, asReopened(q, plan), await loadReviewLimitContext(), {}, Date.now(), actor);"),
+    "#355 review I1: setStatus and the actions' pre-check (checkApprovalGate) both judge the reopened version through one helper");
+  ok(st.includes("if (out && (revised.value || reopened.value)) await scheduleRevisePdfSafely(id);"), "#355 review I2: a restoring reopen re-renders its PDF (won → sent too)");
   const us = src("src/app/(app)/estimator/use-estimator-state.ts");
   ok((us.match(/if \(r\.reopenedAtWon\) \{\s*window\.location\.reload\(\);/g) || []).length === 2, "#59: the Estimator reloads after a status or stage move that put the won version back");
 }
@@ -246,10 +252,72 @@ async function wonVersionDbChecks(ok: Ok) {
     ok(priceOf(b3) === 2500 && priceOf(lastSent) === 2500 && b3.revisions!.some((r) => r.note === REOPEN_AUTOSAVE_NOTE && priceOf(r) === 4000),
       "#59 db: won → sent with edits since the win sends the version that won (the edits kept as a revision)");
 
-    // C: a historical import never records a won version.
+    // C: a historical import never records a won version, and never reopens one.
     const C = await mk("c");
     await Q.setStatus(C, "won", "Pat", { bypassApprovalGate: "historical-import" });
-    ok((await Q.get(C))!.wonRev == null, "#59 db: a historical-import win records no won version");
+    ok((await Q.get(C))!.wonRev === null, "#59 db: a historical-import win records no won version (wonRev null)");
+    await Q.setStatus(C, "draft", "Pat");
+    await Q.setStatus(C, "sent", "Pat", bypass);
+    await Q.setStatus(C, "won", "Pat", bypass);
+    const c1 = (await Q.get(C))!;
+    ok(typeof c1.wonRev === "number", "#59 db: a later real win records it");
+    await Q.update(C, { spec: spec(3100), value: 3000 } as never);
+    await Q.setStatus(C, "draft", "Pat", { bypassApprovalGate: "historical-import" });
+    const c2 = (await Q.get(C))!;
+    ok(priceOf(c2) === 3100 && !c2.revisions!.some((r) => r.note === REOPEN_AUTOSAVE_NOTE), "#355 review M1: a historical-import move out of Won never restores");
+    await Q.setStatus(C, "won", "Pat", { bypassApprovalGate: "historical-import" });
+    ok((await Q.get(C))!.wonRev === null, "#355 review M1: a Won move that records no version clears the older pointer");
+
+    // #355 review I1 — the approval gate judges the version the reopen will send.
+    const { approvalFingerprint } = await import("../src/lib/approval-snapshot");
+    const NOBODY = "B5 Not A User";
+    const E = await mk("e");
+    const e0 = (await Q.get(E))!;
+    await Q.update(E, { owner: "B5 Owner", review: { state: "approved", method: "in_app", reviewer: "Jeff Chesebro", decidedBy: "Jeff Chesebro", decidedAt: Date.now(), note: "",
+      submittedBy: null, submittedAt: null, auto: null, approvedAgainst: approvalFingerprint(e0) } } as never);
+    await Q.setStatus(E, "sent", NOBODY);
+    await Q.setStatus(E, "won", NOBODY);
+    await Q.update(E, { spec: spec(3200), value: 3100 } as never);
+    const T0 = Date.now() - 60_000;
+    await Q.updateQuotePdf(E, () => ({ status: "pending", at: T0, savedAt: T0 }) as never);
+    const eEdited = (await Q.get(E))!;
+    const pre = await Q.checkApprovalGate(eEdited, "sent", NOBODY);
+    ok(pre.ok, "#355 review I1: the action's pre-check (checkApprovalGate) passes a non-approver's won → sent reopen — the target is the approved version");
+    let threw = false;
+    try { await Q.setStatus(E, "sent", NOBODY); } catch { threw = true; }
+    const e2 = (await Q.get(E))!;
+    ok(!threw && e2.status === "sent" && priceOf(e2) === 2000, `#355 review I1: a non-approver reopens an approved-then-edited won quote to Sent at the approved version (threw ${threw}, ${e2.status}, ${priceOf(e2)})`);
+    ok(e2.pdf?.status === "pending" && (e2.pdf?.savedAt ?? 0) > T0 && e2.revisions!.filter((r) => r.reason === "sent").at(-1) !== undefined && priceOf(e2.revisions!.filter((r) => r.reason === "sent").at(-1)) === 2000,
+      `#355 review I2: won → sent with a restore sends the won version and schedules its PDF (pdf ${e2.pdf?.status})`);
+    // Control: the same edited content with no won version to restore is still refused for a non-approver.
+    const F = await mk("f");
+    const f0 = (await Q.get(F))!;
+    await Q.update(F, { owner: "B5 Owner", review: { state: "approved", method: "in_app", reviewer: "Jeff Chesebro", decidedBy: "Jeff Chesebro", decidedAt: Date.now(), note: "",
+      submittedBy: null, submittedAt: null, auto: null, approvedAgainst: approvalFingerprint(f0) } } as never);
+    await Q.update(F, { spec: spec(3200), value: 3100 } as never);
+    let fThrew = false;
+    try { await Q.setStatus(F, "sent", NOBODY); } catch { fThrew = true; }
+    ok(fThrew && (await Q.get(F))!.status === "draft", "#355 review I1 control: a changed, unrestored quote still needs a fresh approval");
+    // An approver's reopen: the new stamp fingerprints the restored content, not the post-win edits.
+    const G = await mk("g");
+    await Q.update(G, { owner: "B5 Owner" } as never);
+    await Q.setStatus(G, "sent", "Pat", bypass);
+    await Q.setStatus(G, "won", "Pat", bypass);
+    await Q.update(G, { spec: spec(3300), value: 3200 } as never);
+    const gEdited = (await Q.get(G))!;
+    await Q.setStatus(G, "sent", "Jeff Chesebro");
+    const g2 = (await Q.get(G))!;
+    const fp = g2.review?.approvedAgainst;
+    ok(g2.status === "sent" && priceOf(g2) === 2000 && !!fp && JSON.stringify(fp) === JSON.stringify(approvalFingerprint(g2)) && JSON.stringify(fp) !== JSON.stringify(approvalFingerprint(gEdited)),
+      `#355 review I1: an approver's stamp on the reopen fingerprints the restored version (${JSON.stringify(fp)})`);
+    // Control for I2: a won → sent with nothing to restore schedules nothing new.
+    const H = await mk("h");
+    await Q.setStatus(H, "sent", "Pat", bypass);
+    await Q.setStatus(H, "won", "Pat", bypass);
+    await Q.updateQuotePdf(H, () => ({ status: "pending", at: T0, savedAt: T0 }) as never);
+    const hPdf = JSON.stringify((await Q.get(H))!.pdf ?? null);
+    await Q.setStatus(H, "sent", "Pat", bypass);
+    ok(JSON.stringify((await Q.get(H))!.pdf ?? null) === hPdf, "#355 review I2 control: won → sent with no restore leaves the PDF state alone");
   } finally {
     await dropFixtures("b5");
   }
