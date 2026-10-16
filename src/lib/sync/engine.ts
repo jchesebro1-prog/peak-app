@@ -61,6 +61,13 @@ export function mirrorKeysToClear(
   return mirror.filter((m) => fieldCollections.includes(m.collection) && !pending.has(m.key)).map((m) => m.key);
 }
 
+/** #356 review — a push refused for the user's role (403, the pull's `create` gate): every entry it carried is parked
+ *  as read-only (state "error" — never pushed again until re-saved), not retried. Pure. */
+export function pushParksOn(status: number): boolean {
+  return status === 403;
+}
+export const PUSH_READ_ONLY_MESSAGE = "Read-only — your role can't save field work. Ask an admin for access.";
+
 /** How long a `retry` reply waits before the next flush. */
 const RETRY_DELAY_MS = 30_000;
 
@@ -396,6 +403,11 @@ class SyncEngine {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ collections }),
       });
+      if (pushParksOn(res.status)) {
+        for (const e of outbox) await idb.put("outbox", { ...e, state: "error", error: PUSH_READ_ONLY_MESSAGE });
+        await this.refreshCounts();
+        return;
+      }
       if (!res.ok) throw new Error(`push ${res.status}`);
       const data = (await res.json()) as {
         results: Record<
@@ -464,9 +476,12 @@ class SyncEngine {
     }
   }
 
-  /** Pull office changes into the local mirror and advance cursors. */
-  async pull(): Promise<void> {
-    if (!this.connected() || this.pullForbidden) return;
+  /** Pull office changes into the local mirror and advance cursors.
+   *  Batch 6 #65 — `force` pulls while "Work offline" is on (a deliberate
+   *  "Download today's jobs" while there is still a connection); it reports
+   *  whether the pull reached the server. */
+  async pull(opts: { force?: boolean } = {}): Promise<boolean> {
+    if (!(opts.force ? this.isOnline() : this.connected()) || this.pullForbidden) return false;
     try {
       const cursors =
         (await idb.getMeta<Record<string, number>>(CURSORS_META)) || {};
@@ -483,9 +498,9 @@ class SyncEngine {
         this.pollTimer = null;
         // M4 — and drop what an earlier pull left in this browser (cursors too, so a later grant starts clean)
         await this.clearFieldMirror();
-        return;
+        return false;
       }
-      if (!res.ok) return;
+      if (!res.ok) return false;
       const data = (await res.json()) as {
         changes: Record<
           string,
@@ -515,8 +530,10 @@ class SyncEngine {
       if (applied > 0 && typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent(DATA_PULLED_EVENT));
       }
+      return true;
     } catch {
       /* offline — ignore */
+      return false;
     }
   }
 

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import ActionError from "@/components/action-error";
 import { activeUsers } from "@/lib/users";
-import { deriveInitials, fallbackColor } from "@/lib/team";
+import { can, deriveInitials, fallbackColor } from "@/lib/team";
+import DownloadToday from "@/components/sync/download-today";
 import {
   getAllProjects,
   syncProjectsFromQuotes,
@@ -360,6 +361,8 @@ export default async function FieldWorkPage({
             {scopeTab("Whole team", "/field-work?scope=team", teamScope)}
           </div>
           <div style={{ fontSize: 13, color: "#8c919c", marginTop: 4 }}>{standfirst}</div>
+          {/* Batch 6 #65 — field roles (`create`, the #351 pull gate) keep today's jobs on the device. */}
+          {can("create", me.roles) && <DownloadToday />}
         </div>
 
         {rows.map((r) => r.node)}

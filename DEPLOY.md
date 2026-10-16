@@ -290,6 +290,26 @@ Every quote save renders the customer document to a PDF after the response
   `after()` inside that budget, after a 4 s wait that lets a burst of saves
   settle so only the latest one launches Chrome).
 
+## 8) App icon and email attachments (Batch 6, #356)
+
+- **App icon (#67).** The web app's icons — the favicon, the iPhone
+  home-screen icon and the installed-app (PWA) icons — are drawn from the
+  logo in **Settings → Branding** (`/icons/app/*.png`, `src/app/manifest.ts`).
+  Upload a new logo and the web icons change on the next page load; a phone
+  that already installed the web app may keep the old icon until it is
+  removed and added to the home screen again. **The native iOS and Android
+  apps have their own icons, built into the app**: they do not follow the
+  Branding logo. To change them, replace the icon sets in
+  `ios/App/App/Assets.xcassets/AppIcon.appiconset` and
+  `android/app/src/main/res/mipmap-*`, run `npx cap sync`, then rebuild and
+  reinstall both apps.
+- **Email attachments (#64).** The Inbox composer's Attach button uploads to
+  Vercel Blob under `mail-attachments/`, so it needs `BLOB_READ_WRITE_TOKEN`
+  (without it the upload answers "file storage isn't configured" and the
+  rest of the composer works). Attachments go out through the sender's
+  connected Gmail; a message over 4 MB uses Gmail's upload endpoint (no setup
+  needed).
+
 ## Afterwards
 
 - **Updates:** every `git push` to `main` redeploys automatically

@@ -1526,7 +1526,7 @@ export async function askUiChecks(ok: Ok): Promise<void> {
   ok(
     /const openAskBlank = \(\) => \{\s*if \(!askEnabled\) return;[\s\S]{0,200}setAsk\(\{ question: "", page: \(window\.location\.pathname \+ window\.location\.search\)\.slice\(0, 500\), n: \+\+askSeq\.current, full: true \}\);/.test(nav) &&
       /\{narrow && askEnabled && \(\s*<button className="pk-iconbtn" aria-label="Ask AI"[^>]*onClick=\{openAskBlank\}/.test(nav) &&
-      /<SyncChip variant="drawer" \/>\s*\{askEnabled && \(\s*<button\s+type="button"\s+onClick=\{openAskBlank\}/.test(nav) &&
+      /<SyncChip variant="drawer"(?: canDownload=\{!!user\.canFieldDownload\})? \/>\s*\{askEnabled && \(\s*<button\s+type="button"\s+onClick=\{openAskBlank\}/.test(nav) &&
       /fullScreen=\{!!ask\.full\}/.test(nav),
     "ask ui (#27): the phone entry — ✦ in the narrow top bar and a drawer row — opens a blank question on the current page, gated on askEnabled"
   );

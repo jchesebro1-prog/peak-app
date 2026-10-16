@@ -6,6 +6,7 @@ import { dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, VENDOR_QUOTE_ID_RE, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
 import { gmailEnabled } from "@/lib/gmail/config";
 import { readPdfForThread } from "@/lib/thread-pdf-read";
+import { readMailRefForThread } from "@/lib/mail-attachments-server";
 import { canSeeThread, get as getThread, type CommAttachment, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
 import { VENDOR_COPY, VENDOR_FROM_EMAIL_MAX_BYTES, type ThreadAttachmentRef } from "./rules";
 
@@ -43,6 +44,14 @@ export async function readThreadAttachment(
     } catch {
       return fail(VENDOR_COPY.copyFailed);
     }
+  } else if (att.fwdFrom && att.gmailPartId) {
+    // #356 review — a forwarded Gmail attachment: read from its source message (same-mailbox checked)
+    try {
+      bytes = await readMailRefForThread(att, t);
+    } catch {
+      bytes = null;
+    }
+    if (!bytes) return fail(VENDOR_COPY.copyFailed);
   } else if (att.gmailPartId) {
     if (!gmailEnabled()) return fail(VENDOR_COPY.noGmail);
     try {
@@ -65,6 +74,14 @@ export async function readThreadAttachment(
     }
     if (!bytes) return fail(VENDOR_COPY.copyFailed);
     mime = mime || "application/pdf";
+  } else if (att.blobPath || att.documentId) {
+    // Batch 6 #64 — a composer upload / a document, read by reference with the send path's own checks.
+    try {
+      bytes = await readMailRefForThread(att, t);
+    } catch {
+      bytes = null;
+    }
+    if (!bytes) return fail(VENDOR_COPY.copyFailed);
   }
   if (!bytes) return fail(VENDOR_COPY.copyFailed);
   // 6 — the fetched bytes, again

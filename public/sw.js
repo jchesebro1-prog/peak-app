@@ -66,8 +66,14 @@ function cacheableDocument(req, res) {
 
 self.addEventListener("message", (event) => {
   if (!event.data || event.data.type !== "CACHE_ROUTE") return;
+  // Batch 6 #65 — "Download today's jobs" passes a MessagePort and waits for
+  // { ok } so it can count what is really kept; the route-change ping doesn't.
+  const reply = (ok) => {
+    const port = event.ports && event.ports[0];
+    if (port) port.postMessage({ ok });
+  };
   const target = new URL(String(event.data.url || ""), self.location.origin);
-  if (target.origin !== self.location.origin || target.pathname.startsWith("/api/") || target.pathname === "/login" || target.pathname.startsWith("/share/")) return;
+  if (target.origin !== self.location.origin || target.pathname.startsWith("/api/") || target.pathname === "/login" || target.pathname.startsWith("/share/")) return reply(false);
   target.searchParams.delete("_rsc");
   const request = new Request(target.toString(), {
     method: "GET",
@@ -77,10 +83,13 @@ self.addEventListener("message", (event) => {
   event.waitUntil(
     fetch(request)
       .then((res) => {
-        if (!cacheableDocument(request, res)) return;
-        return caches.open(CACHE_NAME).then((cache) => cache.put(navigationKey(target.toString()), res));
+        if (!cacheableDocument(request, res)) return reply(false);
+        return caches
+          .open(CACHE_NAME)
+          .then((cache) => cache.put(navigationKey(target.toString()), res))
+          .then(() => reply(true));
       })
-      .catch(() => {})
+      .catch(() => reply(false))
   );
 });
 
