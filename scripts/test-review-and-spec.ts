@@ -11357,6 +11357,7 @@ import { oct15PureChecks, oct15DbChecks, discardConfirmChecks } from "./test-oct
 import { vaNotesChecks, vaNotesDbChecks } from "./test-va-notes";
 import { batch3PureChecks, batch3DbChecks } from "./test-oct15-batch3";
 import { batch4PureChecks, batch4DbChecks } from "./test-oct15-batch4";
+import { batch5PureChecks, batch5DbChecks } from "./test-batch5";
 import { briefPureChecks, briefDraftDbChecks, briefBuildDbChecks, briefCardChecks, briefReminderChecks } from "./test-brief";
 import { suggestPureChecks, suggestStoreDbChecks, suggestRoutePins, suggestPipelineDbChecks, suggestPanelChecks, suggestPanelPins, suggestSaveDbChecks, suggestEntryChecks, suggestEntryDbChecks, suggestEntryPins } from "./test-suggest";
 import { askPureChecks, askSearchDbChecks, askToolsDbChecks, askRunnerChecks, askUiChecks } from "./test-ask";
@@ -11735,6 +11736,7 @@ seeded()
   .then(() => vaNotesChecks(ok)).then(() => vaNotesDbChecks(ok))
   .then(() => batch3PureChecks(ok)).then(() => batch3DbChecks(ok))
   .then(() => batch4PureChecks(ok)).then(() => batch4DbChecks(ok))
+  .then(() => batch5PureChecks(ok)).then(() => batch5DbChecks(ok))
   .then(() => briefPureChecks(ok))
   .then(() => briefDraftDbChecks(ok))
   .then(() => briefBuildDbChecks(ok))
