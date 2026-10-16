@@ -19,6 +19,7 @@ import { NEW_SYSTEM_PRESENTATION } from "../src/lib/estimate-output/fields";
 import { systemFromCategory } from "../src/lib/system-categories";
 import { systemFromSuggestion } from "../src/lib/assist/features/suggestion";
 import { photoSkusOf } from "../src/app/(app)/estimator/narrative";
+import { can } from "../src/lib/team";
 
 const ROOT = join(__dirname, "..");
 const src = (p: string) => readFileSync(join(ROOT, p), "utf8");
@@ -138,12 +139,27 @@ function presentationChecks(ok: Ok) {
     "#61: portal-built and assessment-findings systems stay itemized");
 }
 
+/* --- #62 anyone with `create` edits the shared system intros (already so — pinned) --- */
+function introPermissionChecks(ok: Ok) {
+  const na = src("src/app/(app)/estimator/narrative-actions.ts");
+  for (const f of ["upsertSystemIntroAction", "deleteSystemIntroAction"]) {
+    const body = na.slice(na.indexOf(`export async function ${f}(`), na.indexOf(`export async function ${f}(`) + 400);
+    ok(body.includes("const user = await requireUser();") && body.includes('if (!can("create", user.roles)) return { ok: false, error: NEEDS_CREATE };') && !body.includes("manage_users"),
+      `#62: ${f} needs \`create\` — not admin-only`);
+  }
+  ok(can("create", ["Estimator"]) && can("create", ["Manager"]) && can("create", ["Admin"]), "#62: every role that holds create (Estimator included) can edit the intros");
+  const writers = ["src/app/(app)/estimator/narrative-actions.ts"];
+  ok(writers.every((f) => src(f).includes("upsertIntro(")) && !src("src/app/(app)/estimator/narrative-intros-modal.tsx").includes("@/lib/stores/"),
+    "#62: the narrative_intros blob is written only through the create-gated actions (the modal imports no store)");
+}
+
 export async function batch5PureChecks(ok: Ok) {
   coverHeadingChecks(ok);
   viewedChecks(ok);
   wonVersionChecks(ok);
   thumbnailPhotoChecks(ok);
   presentationChecks(ok);
+  introPermissionChecks(ok);
 }
 
 async function wonVersionDbChecks(ok: Ok) {
