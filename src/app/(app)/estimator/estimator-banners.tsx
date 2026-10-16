@@ -168,7 +168,7 @@ export function EstimatorBanners({ s, onActed }: { s: EstimatorState; onActed: (
           }}
         >
           <span>
-            {moveNotice.ok && moveNotice.verb === "Loaded" ? (
+            {moveNotice.ok && (moveNotice.verb === "Loaded" || moveNotice.verb === "Lines") ? (
               <>{moveNotice.detail}</>
             ) : moveNotice.ok && moveNotice.verb === "Copied" ? (
               moveNotice.targetId ? (

@@ -66,6 +66,7 @@ import { defaultSuggestionTarget, sendSuggestionId, suggestPanelFirstRead, sugge
 import { catalogAddPrice, customPartSell, repriceForTier } from "./tier-reprice";
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 import { postChanged } from "@/lib/popout/channel";
+import { applyLineMove, extractLinesAsSection, planLineMove, removeLinesFromSources } from "@/lib/estimate-line-move/move";
 import { setUnsavedHold } from "@/lib/popout/hold";
 import { discardConfirmText, inputIsDirty, isModalInputKind, MODAL_INPUT_KINDS, rebaseDraft, stableDraftJson, type ModalInputKind } from "@/lib/estimate-steps/discard-confirm";
 
@@ -475,13 +476,15 @@ export function useEstimatorState(props: EstimatorProps) {
         targetName: string;
         targetNumber: string;
         /** #266: "Copied" reuses this banner; absent = the original Moved wording. */
-        verb?: "Moved" | "Copied" | "Loaded";
+        verb?: "Moved" | "Copied" | "Loaded" | "Lines";
         /** #266: the re-price summary; a copy within this estimate has no targetId. */
         detail?: string;
       }
     | { ok: false; error: string }
     | null
   >(null);
+  /** #356: a "move lines to another estimate" round trip is in flight. */
+  const [movingLines, setMovingLines] = useState(false);
   const [custName, setCustName] = useState(initial.custName);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [locationId, setLocationId] = useState(initial.locationId);
@@ -1961,6 +1964,58 @@ export function useEstimatorState(props: EstimatorProps) {
           verb: "Copied",
           detail,
         });
+      }
+    });
+  };
+  /** #356: move ticked lines (and their partners) to another system here or a
+   *  new one. Client-only — kept by the next Save, like ↑/↓. */
+  const moveLinesHere = (selected: number[], target: { kind: "system"; sectionId: string } | { kind: "new"; name: string }) => {
+    const resolved = target.kind === "new" ? { kind: "new" as const, id: "sys" + nextId(), name: target.name.trim() || "New System" } : target;
+    const { sections: next, plan } = applyLineMove(sections, selected, resolved);
+    if (plan.noop) return;
+    const targetId = resolved.kind === "new" ? resolved.id : resolved.sectionId;
+    const targetName = resolved.kind === "new" ? resolved.name : sections.find((s) => s.id === targetId)?.name || "that system";
+    setSections(normalizeSystemOrder(next, groups));
+    const n = plan.ids.length;
+    setMoveNotice({ ok: true, targetId: "", targetName: "", targetNumber: "", verb: "Lines", detail: `Moved ${n} line${n === 1 ? "" : "s"} to ${targetName}` });
+    requestAnimationFrame(() => requestAnimationFrame(() => selectSystem(targetId)));
+  };
+
+  /** #356: move ticked lines to another estimate — bundled as one section and
+   *  sent through Move system's own server path; they leave this estimate only
+   *  once the server confirms. */
+  const moveLinesToEstimate = (selected: number[], dest: MoveSystemTarget) => {
+    const plan = planLineMove(sections, selected, { kind: "estimate" });
+    if (plan.noop || movingLines) return;
+    const outgoing = extractLinesAsSection(sections, plan);
+    const usedVqIds = new Set(outgoing.items.map((it) => it.vendorQuoteId).filter((id): id is string => !!id));
+    const usedVq = vendorQuotes.filter((v) => usedVqIds.has(v.id));
+    const cname = customerId ? customers.find((c) => c.id === customerId)?.name || custName : custName;
+    setMoveNotice(null);
+    setMovingLines(true);
+    startTransition(async () => {
+      try {
+        const res = await moveSystemToEstimateAction(
+          outgoing,
+          dest,
+          { customerId: customerId || null, locationId: locationId || null, customer: cname, contactName: contactName || "" },
+          usedVq,
+          loadedId || null
+        );
+        if (!res.ok) {
+          setMoveNotice({ ok: false, error: res.error || "Could not move those lines." });
+          return;
+        }
+        postChanged("quote", res.targetId);
+        const gone = new Set(plan.ids);
+        const stillUsed = new Set(
+          sections.flatMap((s) => s.items).filter((it) => !gone.has(it.id)).map((it) => it.vendorQuoteId).filter((id): id is string => !!id)
+        );
+        setSections((ss) => removeLinesFromSources(ss, plan.ids));
+        if (usedVq.length) setVendorQuotes((vs) => vs.filter((v) => !usedVqIds.has(v.id) || stillUsed.has(v.id)));
+        setMoveNotice({ ok: true, targetId: res.targetId, targetName: res.targetName, targetNumber: res.targetNumber });
+      } finally {
+        setMovingLines(false);
       }
     });
   };
@@ -3450,6 +3505,9 @@ export function useEstimatorState(props: EstimatorProps) {
     loadedId,
     locationId,
     moveItem,
+    moveLinesHere,
+    moveLinesToEstimate,
+    movingLines,
     moveNotice,
     moveSystem,
     narrRef,
