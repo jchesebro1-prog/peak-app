@@ -52076,8 +52076,8 @@ import type { Quote as E301bsQuote, QuoteRevision as E301bsRev } from "@/lib/sto
     "#301 rows: two sent revisions with the same printed Rev N read differently (each row carries its send date and time)");
   ok(e301bsRows({ revisions: [rev(1, "manual", 1)] }).length === 0 && e301bsRows(null).length === 0, "#301 rows: none before the first send");
   const chip = e301bsChip(withOpens);
-  ok(chip?.label === "Opened" && chip.title === "Client link — Rev 1 — superseded · sent Oct 5, 10:00 AM · opened 2× · first Oct 5 · last Oct 6" && e301bsChip({ revisions: revs }) === null,
-    "#301 chip: \"Opened\" once any sent revision was opened, the rows in its title");
+  ok(chip?.label === "Opened" && chip.title === "Viewed Oct 6, 10:00 AM — Client link — Rev 1 — superseded · sent Oct 5, 10:00 AM · opened 2× · first Oct 5 · last Oct 6" && e301bsChip({ revisions: revs }) === null,
+    "#301 chip: \"Opened\" once any sent revision was opened, the rows in its title (Batch 5 #58: led by the latest open's Viewed stamp)");
   ok(e301bsLatest(withOpens) === "Client link — Rev 2 · sent Oct 6, 10:00 AM · not opened yet" && e301bsLatest({ revisions: revs }) === "" && e301bsCopy.clientLink === "Client link",
     "#301 lead line: the latest revision's row once anything was opened, else nothing");
 

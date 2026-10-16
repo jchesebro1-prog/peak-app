@@ -157,4 +157,6 @@ export type ShareLinkView = {
 
 /** `sentRevs` (#301 slice B) — every sent revision with its opens, for any
  *  signed-in user; it carries no path. */
-export type ShareLinkStatus = { state: ShareEligibility; canSend: boolean; link: ShareLinkView | null; sentRevs: SentRevRow[] };
+export type ShareLinkStatus = { state: ShareEligibility; canSend: boolean; link: ShareLinkView | null; sentRevs: SentRevRow[];
+  /** Batch 5 #58 — "Viewed Oct 6, 10:42 AM" (latest open, Chicago), "" when never opened. Staff only. */
+  viewed?: string };

@@ -31,6 +31,8 @@ export const PACKAGE_COPY = {
   notIncluded: "Not included",
   clientLink: "Client link",
   openedChip: "Opened",
+  /** Batch 5 #58 — staff only (Client link panel, Quotes hub tooltip); never on a customer page. */
+  viewed: "Viewed",
   /** #348 2b-ii — a bidder's v3 link once the bid is no longer live; says nothing about the award. */
   bidClosed: "This bid is closed.",
 } as const;
@@ -108,11 +110,27 @@ export function sentRevisionRows(q: OpensSource | null | undefined): SentRevRow[
   return rows.reverse();
 }
 
-/** The Quotes hub chip: "Opened" once any sent revision's link was opened. */
+/** Batch 5 #58 (Jeff, 2026-10-15) — staff only: the latest time the client
+ *  opened ANY sent revision's package link (the #301 beacon's `last`), or
+ *  null when it was never opened. Never shown to the customer. */
+export function lastViewedAt(q: OpensSource | null | undefined): number | null {
+  let last = 0;
+  for (const r of sentRevisionRows(q)) if (r.opens && r.opens.last > last) last = r.opens.last;
+  return last > 0 ? last : null;
+}
+
+/** "Viewed Oct 6, 10:42 AM" (Chicago) — the staff stamp; "" when never opened. */
+export function viewedStamp(q: OpensSource | null | undefined): string {
+  const at = lastViewedAt(q);
+  return at ? `${PACKAGE_COPY.viewed} ${sentStamp(at)}` : "";
+}
+
+/** The Quotes hub chip: "Opened" once any sent revision's link was opened;
+ *  its tooltip leads with the latest open's date and time (Batch 5 #58). */
 export function opensChip(q: OpensSource | null | undefined): { label: string; title: string } | null {
   const opened = sentRevisionRows(q).filter((r) => r.opens);
   if (!opened.length) return null;
-  return { label: PACKAGE_COPY.openedChip, title: `${PACKAGE_COPY.clientLink} — ${opened.map((r) => r.line).join("; ")}` };
+  return { label: PACKAGE_COPY.openedChip, title: `${viewedStamp(q)} — ${PACKAGE_COPY.clientLink} — ${opened.map((r) => r.line).join("; ")}` };
 }
 
 /** The lead drawer's line: the latest revision's row, once anything was opened. */
