@@ -1037,7 +1037,8 @@ export async function syncPullRoleChecks(ok: Ok): Promise<void> {
   ok(/\/\/ M4 — and drop what an earlier pull left in this browser[^\n]*\n\s*await this\.clearFieldMirror\(\);/.test(eng) && /for \(const key of mirrorKeysToClear\(mirror, outbox, FIELD_COLLECTIONS\)\) await idb\.delete\("mirror", key\);\s*await idb\.setMeta\(CURSORS_META, \{\}\);/.test(eng),
     "sync pull (#351 M4): the engine deletes those mirror rows and resets the pull cursors on the 403");
   const push = readFileSync("src/app/api/sync/push/route.ts", "utf8");
-  ok(!push.includes("mayPullFieldData"), "sync pull (#39): push stays open to any active user (the field editors save through it)");
+  // #356 review — push now takes the same `create` gate as pull (was open to any active user)
+  ok(/if \(!mayPullFieldData\(session\.user\.roles\)\) \{\s*return NextResponse\.json\(\{ error: "read-only" \}, \{ status: 403 \}\);/.test(push), "sync push (#356 review): only field roles (`create`) push; others get 403 read-only");
 }
 
 if (process.argv[1] && /test-thread-visibility\.ts$/.test(process.argv[1])) {

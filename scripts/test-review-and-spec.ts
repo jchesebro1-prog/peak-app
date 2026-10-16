@@ -56699,7 +56699,7 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
        gapiSrc.includes('(await res.text().catch(() => ""))'),
       "#P3 final review (I1): gapi maps only the Gmail call's own timeout (after the token) to GmailTimeoutError; a refusal stays a plain error");
     const bridge = rd("src/lib/gmail/bridge.ts");
-    ok(bridge.includes("const pending = (t.messages || []).filter(isAutoDeliverable);") && bridge.includes("const failure = sendFailureKind(err);") && bridge.includes("if (target && !target.gmailId) target.sendFailure = failure;"),
+    ok(bridge.includes("const pending = (t.messages || []).filter(isAutoDeliverable);") && bridge.includes("const failure = sendFailureKind(err);") && /if \(target && !target\.gmailId\) \{\s*target\.sendFailure = failure;/.test(bridge),
       "#P3 final review (I1): deliverThreadOutbound sends only isAutoDeliverable messages and stamps how a send failed");
     const send = rd("src/lib/estimate-email/send-server.ts");
     ok(send.includes('if (delivery !== "gmail") await holdOutbound(draft.id, delivery);') && send.includes("await holdLastOutbound(threadId, delivery)"),

@@ -318,7 +318,7 @@ Estimating Rules — these just need real values before go-live)
   file-upload button** yet (the old "Attach (demo)" stub was removed as
   misleading, D66). Want manual attachments on ordinary emails?
   ✦ later, when a real need shows up ☐ add now~~
-  **ANSWERED 2026-10-15 (Jeff): build it — the Inbox composer's Attach button (computer files + the company's / project's Documents, 25 MB, sent through Gmail). Built in Batch 6 #356 (D1194).**
+  **ANSWERED 2026-10-15 (Jeff): build it — the Inbox composer's Attach button (computer files + the company's / project's Documents, 18 MB of files, sent through Gmail). Built in Batch 6 #356 (D1194).**
 - **F18.** *(Jul 12 — IDEAS #36, ties G1)* The renewal-quote **PDF embeds
   JPEG letterheads only** (D67): the baked-in Peak sheet works today, and a
   JPEG logoDark upload will too — but if your real logo (G1) is a **PNG**,
