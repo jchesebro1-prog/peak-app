@@ -7,6 +7,7 @@ import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import { FIELD_TASK_ID_RE, fieldTaskIdDecision } from "../src/lib/stores/tasks";
 import { sourcingReport, sourcingCsv, sortForNoCost, type SourcingPart } from "../src/lib/sourcing-report";
+import { iconSource, iconVersion, parseIconFile, iconHref, manifestIcons, iconCacheControl, ICON_LIGHT_BG, ICON_DARK_BG } from "../src/lib/app-icon";
 
 const ROOT = join(__dirname, "..");
 const src = (p: string) => readFileSync(join(ROOT, p), "utf8");
@@ -112,9 +113,43 @@ function sourcingChecks(ok: Ok) {
   ok(src("src/app/(app)/reports/page.tsx").includes('href="/reports/sourcing"'), "#66: Reports links to the table");
 }
 
+/* --- #67 app icon from the Branding logo --- */
+async function appIconChecks(ok: Ok) {
+  const sharp = (await import("sharp")).default;
+  const { renderAppIcon, BUILTIN_ICON_SVG } = await import("../src/lib/app-icon-render");
+  const red = await sharp({ create: { width: 40, height: 20, channels: 4, background: "#ff0000" } }).png().toBuffer();
+  const logo = `data:image/png;base64,${red.toString("base64")}`;
+  ok(iconSource({}) === null && iconVersion({}) === "default", "#67: no logo → the built-in mark, version 'default'");
+  ok(iconSource({ logoDark: logo, logoLight: logo })?.background === ICON_LIGHT_BG, "#67: the document (dark-on-white) logo is padded on white");
+  ok(iconSource({ logoLight: logo })?.background === ICON_DARK_BG, "#67: only the nav logo → padded on the nav's near-black");
+  ok(iconSource({ logoDark: "javascript:alert(1)" }) === null && iconSource({ logoDark: "data:text/html;base64,PGI+" }) === null, "#67: only a PNG/JPEG/SVG/WebP data URL is drawn");
+  const v1 = iconVersion({ logoDark: logo });
+  ok(/^[0-9a-f]{12}$/.test(v1) && v1 !== iconVersion({ logoLight: logo }) && v1 === iconVersion({ logoDark: logo }), "#67: the version changes with the logo and its background, and is stable");
+  ok(JSON.stringify(parseIconFile("512-maskable.png")) === '{"size":512,"maskable":true}' && parseIconFile("180.png")?.size === 180 &&
+     parseIconFile("64.png") === null && parseIconFile("../x.png") === null && parseIconFile("512.svg") === null, "#67: only the served sizes parse (32/180/192/512, -maskable)");
+  ok(iconHref(192, "abc") === "/icons/app/192.png?v=abc", "#67: icon hrefs carry the version");
+  const icons = manifestIcons("abc");
+  ok(icons.length === 3 && icons.some((i) => i.sizes === "192x192") && icons.some((i) => i.purpose === "maskable" && i.src.includes("512-maskable")), "#67: the manifest lists 192, 512 and a maskable 512");
+  ok(iconCacheControl("abc", "abc").includes("immutable") && !iconCacheControl("old", "abc").includes("immutable") && !iconCacheControl(null, "abc").includes("immutable"),
+    "#67: only the current version is cached immutably (a new logo busts the cache)");
+  const m = await sharp(await renderAppIcon(iconSource({ logoDark: logo }), v1, 192, false)).raw().toBuffer({ resolveWithObject: true });
+  const px = (x: number, y: number) => Array.from(m.data.subarray((y * m.info.width + x) * m.info.channels, (y * m.info.width + x) * m.info.channels + 3)).join(",");
+  ok(m.info.width === 192 && m.info.height === 192 && px(2, 2) === "255,255,255" && px(96, 96) === "255,0,0", "#67: the logo is fitted centred on a padded white square");
+  const builtin = await sharp(await renderAppIcon(null, "default", 32, false)).metadata();
+  ok(builtin.width === 32 && builtin.height === 32 && builtin.format === "png", "#67: with no logo the built-in mark renders as a PNG");
+  const junk = await sharp(await renderAppIcon({ dataUrl: "data:image/png;base64,AAAA", background: "#fff" }, "junk", 180, true)).metadata();
+  ok(junk.width === 180 && junk.format === "png", "#67: an unreadable logo falls back to the built-in mark");
+  ok(BUILTIN_ICON_SVG === src("public/icon.svg"), "#67: the inline built-in mark equals public/icon.svg");
+  const layout = src("src/app/layout.tsx");
+  ok(/export async function generateMetadata/.test(layout) && layout.includes("apple: [{ url: iconHref(180, v)") && !layout.includes('icon: "/icon.svg"'), "#67: the root layout links the versioned favicon and apple-touch-icon");
+  ok(src("src/app/manifest.ts").includes("icons: manifestIcons(version)") && src("src/app/manifest.ts").includes('dynamic = "force-dynamic"'), "#67: the manifest is generated per request from the logo");
+  ok(/\|icons\|/.test(src("src/middleware.ts")), "#67: /icons/* stays outside the session gate (login page, home-screen install)");
+}
+
 export async function batch6PureChecks(ok: Ok) {
   fieldTaskPureChecks(ok);
   sourcingChecks(ok);
+  await appIconChecks(ok);
 }
 
 export async function batch6DbChecks(ok: Ok) {
