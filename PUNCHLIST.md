@@ -12457,7 +12457,6 @@ Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-
   - Old v3 links' "View the current version" is left as it is (D1182, question 12).
   - A website bid made in Draft stays hidden until a revision is sent (D1183, question 13).
   - The due date shown is the one printed on their revision (D1184, question 14).
-  - Also: the owner can still price a BOM model through the portal catalog and its "quoted before" shelf (D1170).
 - **Prod checks (slice 6):**
   - A GC grant on a real bid: the Bids card, the online page addressed to the GC, and **Open PDF** latency on Vercel (≤ 60 s).
   - An awarded GC's portal after a post-award send.
