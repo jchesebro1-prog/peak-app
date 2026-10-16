@@ -52243,8 +52243,8 @@ import type { SpecSection as E301bbSec } from "@/app/(app)/estimator/types";
      m.logo.src === "/_test/lh.jpg" && m.logo.full && m.banner === null && m.narrativeHref === "/share/quote/Q-293/t" && m.bomHref === "/share/quote/Q-293/t?view=bom",
     "#301 model: header (title, customer, Rev stamp, grand total), letterhead, no banner on an open estimate, the two view links");
   ok(m.scopes.map((s) => `${s.num}:${s.name}`).join("|") === "1:Rigging|2:Lighting|3:Install|4:Empty narrative" && m.scopes[1].keyProducts[0].photo?.src === "/p/5" &&
-     m.scopes[1].fallback === null && m.scopes[0].fallback === "The full parts list for this scope is under BOM." && m.scopes[2].fallback === "Installation, commissioning & project management." &&
-     m.scopes[3].fallback === "The full parts list for this scope is under BOM.",
+     m.scopes[1].fallback === null && m.scopes[0].fallback === "The full parts list for this scope is under Itemized." && m.scopes[2].fallback === "Installation, commissioning & project management." &&
+     m.scopes[3].fallback === "The full parts list for this scope is under Itemized.", // Batch 5 #63: the toggle reads Overview / Itemized
     "#301 model: every printed scope; key-product photos; a scope with no text says where its parts are; labor reads the labor wording");
   ok(!JSON.stringify(m).includes("[needs a paragraph]"), "#301 model: the staff placeholder never reaches a client");
   ok(m.summary === "This estimate includes 4 scopes: Rigging, Lighting, Install and Empty narrative." && m.notIncluded.join("|") === "Permits|Painting" &&
@@ -52282,7 +52282,7 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
     frozen: { coverSummary: "Our summary.", notIncluded: "Permits\nPainting" }, state: { kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never,
     headerLine: "EST-1 · Rev 1 · sent Oct 5, 2026", currentHref: null, base: "/share/quote/Q-293/t", letterheadSrc: "/_test/lh.jpg" };
   const narr = e301bvRender(e301bvEl(PackageView301, { model: e301bmModel({ ...base, view: "narrative" }) }));
-  const order = ["Narrative test", "EST-1 · Rev 1", "Our summary.", ">Narrative<", ">Rigging<", "Your goals", "Even front light.", "A bright fresnel.", ">Install<", "ADD OPTION 1", "Not included", "Permits"]
+  const order = ["Narrative test", "EST-1 · Rev 1", "Our summary.", ">Overview<", ">Rigging<", "Your goals", "Even front light.", "A bright fresnel.", ">Install<", "ADD OPTION 1", "Not included", "Permits"]
     .map((s) => narr.indexOf(s));
   ok(order.every((v, i) => v >= 0 && (i === 0 || v > order[i - 1])), `#301 view: §5 order — header, summary, toggle, scopes (goals, intro, key products), options, Not included (${order.join(",")})`);
   ok(narr.includes('src="/share/quote/Q-293/t/photo/PD-5"') && narr.includes('aria-current="page"') && narr.includes('href="/share/quote/Q-293/t?view=bom"') &&

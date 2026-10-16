@@ -10,7 +10,12 @@ import type { Ok } from "./test-inbox-org";
 import { coverDocumentPropsFor, coverScopeHeading } from "../src/lib/estimate-output/cover";
 import CoverDocument from "../src/components/estimate-output/cover-document";
 import { qdP2bNoAltCases } from "./qd293-cases";
-import { lastViewedAt, opensChip, viewedStamp } from "../src/lib/quote-share/package-view";
+import { lastViewedAt, opensChip, PACKAGE_COPY, viewedStamp } from "../src/lib/quote-share/package-view";
+import { ONLINE_VIEW_LABELS } from "../src/lib/quote-share/view";
+import { packageViewModel } from "../src/lib/estimate-output/package-model";
+import PackageView from "../src/components/estimate-output/package-view";
+import { CLIENT_PACKAGE_COPY } from "../src/lib/estimate-output/client-package-ui";
+import { PACKAGE_TAB_LABEL } from "../src/lib/estimate-steps/package-tabs";
 import type { Quote, QuoteRevision } from "../src/lib/stores/quotes";
 import { isReopen, reopenedAtWonVersion, reopenTarget, REOPEN_AUTOSAVE_NOTE, sameWonContent, tracksWonVersion, WON_SNAPSHOT_NOTE, wonRevision } from "../src/lib/quote-won-version";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
@@ -153,6 +158,23 @@ function introPermissionChecks(ok: Ok) {
     "#62: the narrative_intros blob is written only through the create-gated actions (the modal imports no store)");
 }
 
+/* --- #63 the customer-facing toggle reads Overview / Itemized --- */
+function toggleLabelChecks(ok: Ok) {
+  ok(ONLINE_VIEW_LABELS.narrative === "Overview" && ONLINE_VIEW_LABELS.bom === "Itemized" && PACKAGE_COPY.narrative === "Overview" && PACKAGE_COPY.bom === "Itemized",
+    "#63: the online / package toggle labels are Overview / Itemized");
+  ok(PACKAGE_COPY.seeBom === "The full parts list for this scope is under Itemized.", "#63: the package page's pointer to the parts list names the new label");
+  const doc = Object.values(qdP2bNoAltCases())[0];
+  const model = packageViewModel({ doc, photos: {}, catalog: new Map(), frozen: { coverSummary: "", notIncluded: "" }, state: { kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never,
+    headerLine: "EST-1 · Rev 1", currentHref: null, view: "narrative", base: "/b", letterheadSrc: "/lh.jpg" });
+  const html = renderToStaticMarkup(createElement(PackageView, { model }));
+  ok(/<nav aria-label="Estimate view"[^>]*><a [^>]*>Overview<\/a><a [^>]*href="\/b\?view=bom"[^>]*>Itemized<\/a><\/nav>/.test(html) && !/>Narrative<\/a>|>BOM<\/a>/.test(html),
+    "#63: the package page renders Overview / Itemized (the link still carries ?view=bom)");
+  const online = src("src/components/online-estimate/online-estimate.tsx");
+  ok(online.includes("{ONLINE_VIEW_LABELS.narrative}") && online.includes("{ONLINE_VIEW_LABELS.bom}") && !/>\s*Narrative\s*</.test(online) && !/>\s*BOM\s*</.test(online),
+    "#63: the portal / share online estimate toggle reads the same labels");
+  ok(CLIENT_PACKAGE_COPY.narrative === "Narrative" && PACKAGE_TAB_LABEL.narrative === "Narrative", "#63: staff-side labels (Client package presentation, Build package tabs) are unchanged");
+}
+
 export async function batch5PureChecks(ok: Ok) {
   coverHeadingChecks(ok);
   viewedChecks(ok);
@@ -160,6 +182,7 @@ export async function batch5PureChecks(ok: Ok) {
   thumbnailPhotoChecks(ok);
   presentationChecks(ok);
   introPermissionChecks(ok);
+  toggleLabelChecks(ok);
 }
 
 async function wonVersionDbChecks(ok: Ok) {

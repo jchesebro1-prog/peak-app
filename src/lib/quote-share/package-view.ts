@@ -1,6 +1,6 @@
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import { latestSentRevision, pdfKindForQuoteType } from "@/lib/quote-pdf/state";
-import { ONLINE_COPY, sentDocumentStamp } from "./view";
+import { ONLINE_COPY, ONLINE_VIEW_LABELS, sentDocumentStamp } from "./view";
 import { ALTERNATES_NOTE, ALTERNATES_TITLE } from "@/lib/estimate-output/alternates-copy";
 import { opensFor, opensSummary, type ShareOpenStat } from "@/lib/estimate-output/opens";
 
@@ -19,10 +19,11 @@ export const PACKAGE_COPY = {
   viewCurrent: "View the current version",
   summary: "Summary",
   goals: "Your goals",
-  narrative: "Narrative",
-  bom: "BOM",
+  /** Batch 5 #63 — the toggle reads Overview / Itemized. */
+  narrative: ONLINE_VIEW_LABELS.narrative,
+  bom: ONLINE_VIEW_LABELS.bom,
   bomHead: ["Qty", "Manufacturer", "Model", "Description"],
-  seeBom: "The full parts list for this scope is under BOM.",
+  seeBom: `The full parts list for this scope is under ${ONLINE_VIEW_LABELS.bom}.`,
   noParts: "No parts listed for this scope.",
   options: "Add options",
   /** Estimator Phase 2b — the Alternates card; the cover's own shared copy (alternates-copy.ts). */
