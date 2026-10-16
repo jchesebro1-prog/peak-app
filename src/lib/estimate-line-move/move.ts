@@ -82,6 +82,16 @@ function mergeStars(target: KeyProduct[], moving: MovingStar[]): { kept: KeyProd
   return { kept, dropped };
 }
 
+/** A re-mint loop gives up after this many tries — a minter that keeps returning taken ids must never hang the page. */
+const MAX_REMINT = 1000;
+function remint<T>(taken: ReadonlySet<T>, mint: () => T, what: string): T {
+  for (let i = 0; i < MAX_REMINT; i++) {
+    const id = mint();
+    if (!taken.has(id)) return id;
+  }
+  throw new Error(`estimate-line-move: could not mint a free ${what} in ${MAX_REMINT} tries`);
+}
+
 const renumber = (items: SpecItem[]) => items.map((it, i) => ({ ...it, lineOrder: i }));
 
 /** Above every numeric line id in `sections` (the pure fallback for mintItemId). */
@@ -136,7 +146,7 @@ function carryLines(
     const rename = new Map<string, string>();
     for (const g of new Set(mine.map((x) => x.laborGroup).filter((g): g is string => !!g))) {
       let id = g;
-      if (takenGroups.has(id)) do id = mintGroup(); while (takenGroups.has(id));
+      if (takenGroups.has(id)) id = remint(takenGroups, mintGroup, "labor group id");
       takenGroups.add(id);
       if (id !== g) rename.set(g, id);
       const rec = s.laborGroups?.[g];
@@ -145,7 +155,7 @@ function carryLines(
     const idMap = new Map<number, number>();
     for (const x of mine) {
       let id = x.id;
-      if (takenIds.has(id)) do id = mintItem(); while (takenIds.has(id));
+      if (takenIds.has(id)) id = remint(takenIds, mintItem, "line id");
       takenIds.add(id);
       idMap.set(x.id, id);
       let next: SpecItem = x;
@@ -246,8 +256,14 @@ export function planLineMove(sections: readonly SpecSection[], selected: Iterabl
   let droppedStars: DroppedStar[] = [];
   if (target.kind !== "estimate" && !noop) {
     const tgt = targetId ? sections.find((s) => s.id === targetId) : undefined;
-    // The same landing applyLineMove does (fallback minters: the ids only need to be fresh, not final).
-    const { stars } = carryLines(sections, picked, { items: tgt?.items || [], laborGroups: tgt?.laborGroups || {} }, { mintLaborGroupId: () => "", mintCurtainTrackKey: () => "" });
+    // The same landing applyLineMove does. Preview minters only need to be fresh, not final — but each must be
+    // UNIQUE per call (a constant would spin the re-mint loop: two colliding groups both want a new id).
+    let g = 0;
+    const { stars } = carryLines(sections, picked, { items: tgt?.items || [], laborGroups: tgt?.laborGroups || {} }, {
+      mintLaborGroupId: () => "\u0000preview" + ++g,
+      // default item minter: above every id in `sections`, counting up
+      mintCurtainTrackKey: () => "", // not re-minted in a loop; the preview never reads the key
+    });
     droppedStars = mergeStars(tgt?.keyProducts || [], stars).dropped;
   }
 

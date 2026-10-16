@@ -277,6 +277,28 @@ export async function lineMoveChecks(ok: Ok) {
       "line-move: a target line's record-less labor group id is taken — the moving group is re-minted, never merged");
   }
 
+  // two colliding labor groups: the preview and the move both return (no constant preview minter spinning the re-mint loop)
+  {
+    const draft = { mobs: [], margin: "30" } as never;
+    const grp = () => ({ draft, lines: 1 });
+    const a = sec("A", [line(1, { labor: true, laborGroup: "lg1" }), line(2, { labor: true, laborGroup: "lg2" })], { laborGroups: { lg1: grp(), lg2: grp() } });
+    const b = sec("B", [line(3, { labor: true, laborGroup: "lg1" }), line(4, { labor: true, laborGroup: "lg2" })], { laborGroups: { lg1: grp(), lg2: grp() } });
+    const p = planLineMove([a, b], R("A", 1, 2), { kind: "system", sectionId: "B" });
+    ok(!p.noop && refs(p.lines) === "A:1,A:2", "line-move: two colliding labor groups — planLineMove (no opts) returns");
+    const r = applyLineMove([a, b], R("A", 1, 2), { kind: "system", sectionId: "B" });
+    const tb = find(r.sections, "B")!;
+    const moved = tb.items.filter((x) => x.id === 1 || x.id === 2).map((x) => x.laborGroup!);
+    ok(moved.length === 2 && new Set([...moved, "lg1", "lg2"]).size === 4 && moved.every((g) => !!tb.laborGroups?.[g]),
+      "line-move: two colliding labor groups — applyLineMove (no opts) returns with two fresh group ids and their records");
+    let threw = "";
+    try {
+      applyLineMove([a, b], R("A", 1, 2), { kind: "system", sectionId: "B" }, { mintLaborGroupId: () => "lg1" });
+    } catch (e) {
+      threw = (e as Error).message;
+    }
+    ok(/could not mint a free labor group id/.test(threw), "line-move: a minter that only returns taken ids throws a clear error instead of hanging");
+  }
+
   // legacy (key-less) curtain/track pairs that move together get one fresh key
   {
     const a = sec("A", [line(1, { curtain: true }), line(2, { track: { series: "x" } as never }), line(3)]);
