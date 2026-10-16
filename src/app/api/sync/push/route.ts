@@ -14,7 +14,7 @@ import { pushAssessment } from "@/lib/stores/assessments";
 import { pushFinding } from "@/lib/stores/findings";
 import { sanitizePushedDoc } from "@/lib/sync/server-owned";
 import { mayPullFieldData } from "@/lib/sync/pull-collections";
-import { taskPushAllowed, TASK_PUSH_REFUSED } from "@/lib/sync/task-push";
+import { taskPushDecision, TASK_PUSH_REFUSED } from "@/lib/sync/task-push";
 import { getProject } from "@/lib/stores/projects";
 
 /** Abuse guards for the open sync endpoint. */
@@ -117,19 +117,23 @@ export async function POST(req: Request) {
         const now = Date.now();
         // #356 review — a task push may insert only a new Field Work task and update only a field task on its own
         // project, or a task the pusher is assigned to / created (lib/sync/task-push)
+        let pushDoc: Record<string, unknown> = rec.doc;
         if (coll === "tasks") {
           // A stored row counts even when deleted: reviving one is an update, not a fresh insert.
           const stored = existing.length ? ((existing[0].doc as Record<string, unknown>) ?? {}) : null;
           const inc = rec.doc as Record<string, unknown>;
           const known = new Map<string, boolean>();
           for (const pid of [stored?.projectId, inc.projectId]) if (typeof pid === "string" && pid && !known.has(pid)) known.set(pid, await projectExists(pid));
-          if (!taskPushAllowed(rec.id, stored, inc, pusher, (x) => known.get(x) === true)) {
+          const decision = taskPushDecision(rec.id, stored, inc, pusher, (x) => known.get(x) === true, { storedDeleted: !!existing[0]?.deleted });
+          if (!decision.ok) {
             results[coll].push({ id: rec.id, status: "error", error: TASK_PUSH_REFUSED });
             continue;
           }
+          // a tick (re-review): the stored copy with only status / doneAt / updatedAt from the device
+          if (decision.doc) pushDoc = decision.doc;
         }
         // #351 review — server-owned fields (a task's share stamp and thread link) never come from a push
-        let doc: Record<string, unknown> = sanitizePushedDoc(coll, { ...rec.doc, id: rec.id }, existing.length ? { doc: existing[0].doc, deleted: !!existing[0].deleted } : null);
+        let doc: Record<string, unknown> = sanitizePushedDoc(coll, { ...pushDoc, id: rec.id }, existing.length ? { doc: existing[0].doc, deleted: !!existing[0].deleted } : null);
         if (coll === "projects") {
           pipes ||= await loadPipelines();
           doc = normalizeProject(doc as unknown as ProjectRecord, pipes) as unknown as Record<string, unknown>;
