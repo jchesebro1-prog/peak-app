@@ -52,6 +52,9 @@ export type LineMovePlan = {
   noop: boolean;
 };
 
+/** A line that landed: where it was, and its final system + id (the id changes only on a re-mint). */
+export type MovedLine = { from: LineRef; to: LineRef };
+
 export type LineMoveOpts = {
   mintLaborGroupId?: () => string;
   /** A fresh line id (the Estimator's nextId). Default: above every id in `sections`. */
@@ -127,7 +130,7 @@ function carryLines(
   picked: ReadonlySet<string>,
   target: { items: readonly SpecItem[]; laborGroups: Record<string, LaborGroupRecord> },
   opts: LineMoveOpts
-): { items: SpecItem[]; groups: Record<string, LaborGroupRecord>; stars: MovingStar[] } {
+): { items: SpecItem[]; groups: Record<string, LaborGroupRecord>; stars: MovingStar[]; landed: { from: LineRef; id: number }[] } {
   const mintGroup = opts.mintLaborGroupId || (() => newLaborGroupId());
   const mintItem = opts.mintItemId || defaultItemMinter(sections);
   const mintKey = opts.mintCurtainTrackKey || ((id: number) => newCurtainTrackKey(id));
@@ -140,6 +143,7 @@ function carryLines(
   const items: SpecItem[] = [];
   const out = new Map<SpecItem, SpecItem>(); // source object → carried object
   const stars: MovingStar[] = [];
+  const landed: { from: LineRef; id: number }[] = [];
   for (const s of sections) {
     const mine = s.items.filter((x) => picked.has(keyOf(s.id, x.id)));
     if (!mine.length) continue;
@@ -163,6 +167,7 @@ function carryLines(
       if (x.laborGroup && rename.has(x.laborGroup)) next = { ...next, laborGroup: rename.get(x.laborGroup) };
       out.set(x, next);
       items.push(next);
+      landed.push({ from: { sectionId: s.id, id: x.id }, id });
       const track = pairs.get(x);
       if (track && picked.has(keyOf(s.id, track.id))) pairedTrack.set(track, x);
     }
@@ -184,7 +189,7 @@ function carryLines(
       if (key) items[i] = { ...items[i], curtainTrackKey: key };
     }
   }
-  return { items, groups, stars };
+  return { items, groups, stars, landed };
 }
 
 export function planLineMove(sections: readonly SpecSection[], selected: Iterable<LineRef>, target: LineMoveTarget): LineMovePlan {
@@ -296,16 +301,17 @@ export function removeLinesFromSources(sections: readonly SpecSection[], lines: 
 }
 
 /** Moves the lines to the end of the target (an existing system or a new one
- *  inserted right after the first source). Returns the new list + the plan it
- *  applied. A no-op plan returns `sections` unchanged. */
+ *  inserted right after the first source). Returns the new list, the plan it
+ *  applied and every landed line's from → to (for reanchorPackageDoc). A
+ *  no-op plan returns `sections` unchanged. */
 export function applyLineMove(
   sections: readonly SpecSection[],
   selected: Iterable<LineRef>,
   target: Exclude<LineMoveTarget, { kind: "estimate" }>,
   opts: LineMoveOpts = {}
-): { sections: SpecSection[]; plan: LineMovePlan } {
+): { sections: SpecSection[]; plan: LineMovePlan; moved: MovedLine[] } {
   const plan = planLineMove(sections, selected, target);
-  if (plan.noop) return { sections: sections.slice(), plan };
+  if (plan.noop) return { sections: sections.slice(), plan, moved: [] };
   const picked = new Set(plan.lines.map(lineRefKey));
   const mintItemId = opts.mintItemId || defaultItemMinter(sections);
 
@@ -329,15 +335,17 @@ export function applyLineMove(
   }
   const targetId = target.kind === "system" ? target.sectionId : target.id;
 
+  const moved: MovedLine[] = [];
   list = list.map((s) => {
     if (s.id !== targetId) return s;
-    const { items, groups, stars } = carryLines(sections, picked, { items: s.items, laborGroups: s.laborGroups || {} }, { ...opts, mintItemId });
+    const { items, groups, stars, landed } = carryLines(sections, picked, { items: s.items, laborGroups: s.laborGroups || {} }, { ...opts, mintItemId });
+    for (const l of landed) moved.push({ from: l.from, to: { sectionId: targetId, id: l.id } });
     let next: SpecSection = clearSellOverride({ ...s, items: renumber([...s.items, ...items]) });
     if (Object.keys(groups).length) next = { ...next, laborGroups: groups };
     next = withKeyProducts(next, mergeStars(s.keyProducts || [], stars).kept);
     return next;
   });
-  return { sections: list, plan };
+  return { sections: list, plan, moved };
 }
 
 /** The lines of an estimate-bound plan as ONE section shaped like the first

@@ -10,6 +10,8 @@ import {
 } from "../src/lib/estimate-line-move/move";
 import { MAX_KEY_PRODUCTS } from "../src/app/(app)/estimator/narrative";
 import { reIdIncomingSection } from "../src/lib/estimate-line-move/reid";
+import { reanchorPackageDoc } from "../src/lib/package-doc/reanchor";
+import type { PackageDoc } from "../src/lib/package-doc/types";
 
 const line = (id: number, extra: Partial<SpecItem> = {}): SpecItem =>
   ({ id, sku: "SKU-" + id, desc: "Line " + id, qty: 1, unit: "ea", cost: 10 * id, price: 20 * id, ...extra }) as SpecItem;
@@ -339,6 +341,50 @@ export async function lineMoveChecks(ok: Ok) {
     ok(/reIdIncomingSection\(stripBonusLines\(withoutGroupMeta\(placed\)\), existingSpec\?\.sections \|\| \[\], docIdFloor\(existingDoc\)\)/.test(existingBranch) &&
        existingBranch.indexOf("reIdIncomingSection(") < existingBranch.indexOf("const appendedRaw"),
       "line-move server re-id: placeSystemInEstimate's existing-target branch re-ids the incoming system before appending it");
+  }
+
+  // the package document follows moved lines (#357): product blocks, product images and lineQty chips
+  {
+    const a = sec("A", [line(105, { sku: "A-105" }), line(1)]);
+    const b = sec("B", [line(107)]);
+    const c = sec("C", [line(105, { sku: "C-105" })]);
+    const photo = { show: true, align: "right" as const, width: 34 };
+    const doc = {
+      type: "doc",
+      version: 1,
+      content: [
+        { type: "productBlock", attrs: { sectionId: "A", lineKey: "105", sku: "A-105", photo }, content: [{ type: "paragraph", content: [{ type: "text", text: "Moved product" }] }] },
+        { type: "productImage", attrs: { sectionId: "A", lineKey: "105", sku: "A-105", align: "auto", width: 34 } },
+        { type: "paragraph", content: [{ type: "text", text: "Qty " }, { type: "chip", attrs: { kind: "lineQty", ref: "A:105" } }, { type: "chip", attrs: { kind: "lineQty", ref: "A:1" } }] },
+        { type: "productBlock", attrs: { sectionId: "C", lineKey: "105", sku: "C-105", photo }, content: [{ type: "paragraph", content: [{ type: "text", text: "Stays" }] }] },
+        { type: "systemTotal", attrs: { sectionId: "A" } },
+        { type: "paragraph", content: [{ type: "chip", attrs: { kind: "systemPrice", ref: "A" } }] },
+      ],
+    } as unknown as PackageDoc;
+    let n = 900;
+    // A:105 → C collides with C's own 105: re-minted to 901, and the document follows to C:901.
+    const r = applyLineMove([a, b, c], R("A", 105), { kind: "system", sectionId: "C" }, { mintItemId: () => ++n });
+    ok(r.moved.length === 1 && lineRefKey(r.moved[0].from) === "A:105" && lineRefKey(r.moved[0].to) === "C:901", "line-move doc: applyLineMove reports each landed line's from → to (final system + id)");
+    const nd = reanchorPackageDoc(doc, r.moved)!;
+    const blocks = nd.content as unknown as { type: string; attrs?: Record<string, unknown>; content?: { type: string; attrs?: Record<string, unknown> }[] }[];
+    ok(blocks[0].attrs!.sectionId === "C" && blocks[0].attrs!.lineKey === "901" && blocks[0].attrs!.sku === "A-105" && blocks[0].content === (doc.content[0] as { content: unknown }).content,
+      "line-move doc: a product block anchored to a moved line follows it (new system and re-minted id; sku untouched)");
+    ok(blocks[1].attrs!.sectionId === "C" && blocks[1].attrs!.lineKey === "901" && blocks[1].attrs!.sku === "A-105", "line-move doc: a product image follows its moved line");
+    ok(blocks[2].content![1].attrs!.ref === "C:901" && blocks[2].content![2].attrs!.ref === "A:1", "line-move doc: a lineQty chip follows its moved line; another line's chip is untouched");
+    ok(nd.content[3] === doc.content[3] && nd.content[4] === doc.content[4] && nd.content[5] === doc.content[5],
+      "line-move doc: an unrelated anchor (C's own 105), the system total and system chips keep their identity");
+    ok(reanchorPackageDoc(doc, []) === doc && reanchorPackageDoc(doc, [{ from: { sectionId: "Z", id: 1 }, to: { sectionId: "Y", id: 1 } }]) === doc && reanchorPackageDoc(null, r.moved) === null,
+      "line-move doc: nothing to re-point returns the same object (and no document stays null)");
+    // A plain move (no re-mint) keeps the line key and changes only the system.
+    const r2 = applyLineMove([a, b, c], R("A", 105), { kind: "system", sectionId: "B" }, { mintItemId: () => ++n });
+    const nd2 = reanchorPackageDoc(doc, r2.moved)!;
+    ok((nd2.content[0] as unknown as { attrs: { sectionId: string; lineKey: string } }).attrs.sectionId === "B" && (nd2.content[0] as unknown as { attrs: { lineKey: string } }).attrs.lineKey === "105",
+      "line-move doc: a move without a re-mint re-points only the system");
+    ok(applyLineMove([a], R("A", 105), { kind: "system", sectionId: "A" }).moved.length === 0, "line-move doc: a no-op move reports nothing moved");
+    const hook = readFileSync(join(process.cwd(), "src/app/(app)/estimator/use-estimator-state.ts"), "utf8");
+    const here = hook.slice(hook.indexOf("const moveLinesHere = "), hook.indexOf("const moveLinesToEstimate = "));
+    ok(here.includes("reanchorPackageDoc(packageDocRef.current, moved)") && here.includes("setPackageDoc(nd)") && here.includes("reanchorPackageDoc(packageDocOverDraft as PackageDoc | null, moved)"),
+      "line-move doc: moveLinesHere re-anchors the package document (and its over-cap draft) through the editor's setter");
   }
 
   // describe

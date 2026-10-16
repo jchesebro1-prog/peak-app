@@ -40,7 +40,7 @@ import { excludeRefusal, normalizePackageSelection, selectionKey, type PackageSe
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { PackageDoc } from "@/lib/package-doc/types";
 import { docIdFloor } from "@/lib/package-doc/ids";
-import { reanchorDocLine } from "@/lib/package-doc/reanchor";
+import { reanchorDocLine, reanchorPackageDoc } from "@/lib/package-doc/reanchor";
 import { PACKAGE_DOC_TOO_LARGE } from "@/lib/package-doc/save";
 import { docProductSkus } from "@/lib/package-doc/text";
 import { pdfDocKey, withSavedMeta, type PdfDocKeyInput } from "./pdf-doc-key";
@@ -2002,8 +2002,15 @@ export function useEstimatorState(props: EstimatorProps) {
   const moveLinesHere = (selected: LineRef[], target: { kind: "system"; sectionId: string } | { kind: "new"; name: string }) => {
     const resolved = target.kind === "new" ? { kind: "new" as const, id: "sys" + nextId(), name: target.name.trim() || "New System" } : target;
     // Ids are unique per system only: a line whose id the target already holds lands with a fresh one.
-    const { sections: next, plan } = applyLineMove(sections, selected, resolved, { mintItemId: nextId });
+    const { sections: next, plan, moved } = applyLineMove(sections, selected, resolved, { mintItemId: nextId });
     if (plan.noop) return;
+    // The package document's product blocks / images / line-quantity chips follow their lines (system, and a
+    // re-minted id) — through the same setter as #312's re-anchor, saved with the next Save. No document: nothing.
+    const nd = reanchorPackageDoc(packageDocRef.current, moved);
+    if (nd !== packageDocRef.current) setPackageDoc(nd);
+    // The over-cap draft (restored on return to Build package) follows too.
+    const od = reanchorPackageDoc(packageDocOverDraft as PackageDoc | null, moved);
+    if (od !== packageDocOverDraft) setPackageDocOverDraft(od);
     const targetId = resolved.kind === "new" ? resolved.id : resolved.sectionId;
     const targetName = resolved.kind === "new" ? resolved.name : sections.find((s) => s.id === targetId)?.name || "that system";
     // Same order as reorderSections: a system inserted last must not leave the Rewards credit off the last row.

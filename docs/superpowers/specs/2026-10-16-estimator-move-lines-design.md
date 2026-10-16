@@ -115,8 +115,15 @@ outgoing section instead (see below).
    the target estimate already uses anywhere, from max(target ids,
    `docIdFloor(target document)`) + 1 upward, remapping that system's stars
    and keeping everything else byte-for-byte (`reIdIncomingSection`,
-   `src/lib/estimate-line-move/reid.ts`). A re-minted line's review comments
-   or package-document references, which name the old id, no longer point at it.
+   `src/lib/estimate-line-move/reid.ts`). Review comments pin to a system, not a
+   line, so a move doesn't affect them. On an in-estimate move,
+   `applyLineMove` reports each landed line's `from → to` (`moved`) and
+   `reanchorPackageDoc` (`src/lib/package-doc/reanchor.ts`) re-points the Build
+   package document's product blocks, product images and `lineQty` chips to
+   the line's new system and (re-minted) id, through the editor's own setter,
+   so the next Save stores it. Lines moved to another estimate leave this one
+   like a deleted line: their anchors resolve to nothing (the editor's
+   "removed"), exactly as today.
 10. **Vendor lines** (`vendorQuoteId`): the VendorQuote record is quote-level;
     a move inside the estimate leaves it alone.
 
