@@ -20,7 +20,8 @@ import type { Quote, QuoteRevision } from "../src/lib/stores/quotes";
 import { isReopen, reopenedAtWonVersion, reopenTarget, REOPEN_AUTOSAVE_NOTE, sameWonContent, tracksWonVersion, WON_SNAPSHOT_NOTE, wonRevision } from "../src/lib/quote-won-version";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
 import { compareImages } from "../src/lib/part-docs/types";
-import { NEW_SYSTEM_PRESENTATION } from "../src/lib/estimate-output/fields";
+import { NEW_SYSTEM_PRESENTATION, presentationForNewSystem } from "../src/lib/estimate-output/fields";
+import { estimateReadiness } from "../src/lib/estimate-steps/readiness";
 import { systemFromCategory } from "../src/lib/system-categories";
 import { systemFromSuggestion } from "../src/lib/assist/features/suggestion";
 import { photoSkusOf } from "../src/app/(app)/estimator/narrative";
@@ -135,16 +136,29 @@ function thumbnailPhotoChecks(ok: Ok) {
 
 /* --- #61 new estimates default to the Narrative presentation --- */
 function presentationChecks(ok: Ok) {
-  ok(NEW_SYSTEM_PRESENTATION === "narrative", "#61: a new system's presentation is Narrative");
+  ok(NEW_SYSTEM_PRESENTATION === "narrative", "#61: a new estimate's first system is Narrative");
+  const sys = (presentation?: "itemized" | "narrative") => ({ ...(presentation ? { presentation } : {}) });
+  ok(presentationForNewSystem([]) === "narrative" && presentationForNewSystem([sys("narrative"), sys()]) === "narrative" &&
+     presentationForNewSystem([sys(), sys("narrative")]) === "itemized" && presentationForNewSystem([sys("itemized")]) === "itemized",
+    "#355 review M6: + Add system follows the estimate's first system (absent = Itemized); no system yet → Narrative");
   let n = 10;
   const ctx = { nextId: () => ++n, tierMargin: 0.3, price: (c: number) => c * 2, freightPct: 5, priceRound: 25 };
-  const cat = systemFromCategory({ id: "c", name: "Fixtures", items: [{ sku: "A", qty: 1, part: { sku: "A", desc: "A", unit: "ea", cost: 10, list: 20 } }] }, [{ sku: "A", qty: 2 }], ctx);
-  ok(cat.presentation === "narrative", "#61: + Add system → a category system starts Narrative");
-  const sug = systemFromSuggestion({ key: "k", name: "Rigging", categoryId: "c", lines: [] }, new Map(), ctx);
-  ok(sug.presentation === "narrative", "#61: a suggested system (+ Add system on the Suggested BOM) starts Narrative");
+  const catOpt = { id: "c", name: "Fixtures", items: [{ sku: "A", qty: 1, part: { sku: "A", desc: "A", unit: "ea", cost: 10, list: 20 } }] };
+  ok(systemFromCategory(catOpt, [{ sku: "A", qty: 2 }], { ...ctx, presentation: "narrative" }).presentation === "narrative" &&
+     systemFromCategory(catOpt, [{ sku: "A", qty: 2 }], { ...ctx, presentation: "itemized" }).presentation === "itemized" &&
+     !("presentation" in systemFromCategory(catOpt, [], ctx)), "#355 review M6: a category system takes the presentation it is given (none → no key)");
+  ok(systemFromSuggestion({ key: "k", name: "Rigging", categoryId: "c", lines: [] }, new Map(), { ...ctx, presentation: "itemized" }).presentation === "itemized",
+    "#355 review M6: a suggested system takes the presentation it is given");
   const us = src("src/app/(app)/estimator/use-estimator-state.ts");
-  ok((us.match(/presentation: NEW_SYSTEM_PRESENTATION/g) || []).length === 2 && /const freshSections = [\s\S]{0,400}presentation: NEW_SYSTEM_PRESENTATION/.test(us),
-    "#61: the fresh estimate's first system and + Add system (blank) start Narrative");
+  ok(/const freshSections = [\s\S]{0,400}presentation: NEW_SYSTEM_PRESENTATION/.test(us) && (us.match(/presentation: NEW_SYSTEM_PRESENTATION/g) || []).length === 1 &&
+     us.includes("presentation: presentationForNewSystem(ss)") && (us.match(/presentation: presentationForNewSystem\(sections\),/g) || []).length === 2,
+    "#355 review M6: only a NEW estimate starts Narrative; + Add system (blank, category, suggestion) follows the estimate");
+  const narr = { id: "n", name: "N", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", items: [{ id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 2 }] };
+  const base = { saved: true, review: null, status: "draft" as const, revNum: 1 };
+  const send1 = estimateReadiness({ ...base, sections: [narr, { ...narr, id: "n2", narrative: "Intro." }, narr] as never[] }).send;
+  ok(send1.state === "gaps" && send1.count === 2 && send1.label === "⚠ 2 narrative systems have no intro text", `#355 review M6: Send & track warns "N narrative systems have no intro text" (${send1.label})`);
+  ok(estimateReadiness({ ...base, sections: [{ ...narr, presentation: "itemized" }] as never[] }).send.state === "idle" &&
+     estimateReadiness({ ...base, status: "sent", sections: [narr] as never[] }).send.state === "ok", "#355 review M6: only a draft with an intro-less narrative system warns; never blocks (a badge only)");
   // Existing estimates keep their setting: a system saved without the key still reads (and prints) as Itemized.
   const old = { id: "s", name: "Old", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 2 }],
     keyProducts: [{ lineKey: "1", sku: "A", text: "x", photo: true }] };

@@ -1,4 +1,4 @@
-import { NEW_SYSTEM_PRESENTATION, sanitizeDiscipline, withDiscipline, type ScopeDiscipline } from "@/lib/estimate-output/fields";
+import { sanitizeDiscipline, withDiscipline, type ScopeDiscipline } from "@/lib/estimate-output/fields";
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 
 /**
@@ -221,6 +221,8 @@ export type SystemFromCategoryCtx = {
   groupId?: string;
   freightPct: number;
   priceRound: number;
+  /** #355 review M6 — the new system's presentation (presentationForNewSystem); absent = none stored (Itemized). */
+  presentation?: NonNullable<SpecSection["presentation"]>;
 };
 
 /**
@@ -269,7 +271,7 @@ export function systemFromCategory(
     freightPct: ctx.freightPct,
     freightAuto: true,
     priceRound: ctx.priceRound,
-    presentation: NEW_SYSTEM_PRESENTATION,
+    ...(ctx.presentation ? { presentation: ctx.presentation } : {}),
     items,
     ...(ctx.groupId ? { groupId: ctx.groupId } : {}),
   };

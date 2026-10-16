@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { NEW_SYSTEM_PRESENTATION } from "@/lib/estimate-output/fields";
+import { NEW_SYSTEM_PRESENTATION, presentationForNewSystem } from "@/lib/estimate-output/fields";
 import { SIDE_OPEN_KEY } from "./estimator-styles";
 import { surveyGoalsAction } from "./output-actions";
 import { listReviewCommentsAction } from "./review-actions";
@@ -2010,7 +2010,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const groupId = sections.find((s) => s.id === activeId)?.groupId;
     setSections((ss) => normalizeSystemOrder([
       ...ss,
-      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: NEW_SYSTEM_PRESENTATION, items: [], ...(groupId ? { groupId } : {}) },
+      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: presentationForNewSystem(ss), items: [], ...(groupId ? { groupId } : {}) },
     ], groups));
     setActiveId(id);
     openInputMethod("catalog", id);
@@ -2030,6 +2030,7 @@ export function useEstimatorState(props: EstimatorProps) {
       groupId,
       freightPct: freightDefault.pct,
       priceRound: SYSTEM_PRICE_STEP,
+      presentation: presentationForNewSystem(sections),
     });
     setSections((ss) => normalizeSystemOrder([...ss, sec], groups));
     setActiveId(sec.id);
@@ -2056,6 +2057,7 @@ export function useEstimatorState(props: EstimatorProps) {
       groupId,
       freightPct: freightDefault.pct,
       priceRound: SYSTEM_PRICE_STEP,
+      presentation: presentationForNewSystem(sections),
     });
     setSections((ss) => normalizeSystemOrder([...ss, sec], groups));
     setSuggestionTargets((m) => ({ ...m, [systemKey]: sec.id }));

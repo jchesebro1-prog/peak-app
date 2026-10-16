@@ -12,13 +12,21 @@ export type ScopeDiscipline = NonNullable<SpecSection["discipline"]>;
 export const DISCIPLINES: readonly ScopeDiscipline[] = ["lighting", "rigging", "curtain", "av"];
 export const DISCIPLINE_LABEL: Record<ScopeDiscipline, string> = { lighting: "Lighting", rigging: "Rigging", curtain: "Curtains", av: "AV" };
 
-/** Batch 5 #61 (Jeff, 2026-10-15): a system made from now on starts in the
- *  Narrative presentation — the fresh estimate's first system, + Add system
- *  (blank or a category) and a suggested system. A system saved without the
- *  key (every older one) still reads as Itemized, so existing estimates keep
- *  their setting; copied / loaded systems keep their own; portal-built and
+/** Batch 5 #61 (Jeff, 2026-10-15): a NEW estimate starts in the Narrative
+ *  presentation (its first system). A system saved without the key (every
+ *  older one) still reads as Itemized, so existing estimates keep their
+ *  setting; copied / loaded systems keep their own; portal-built and
  *  assessment-findings systems stay itemized (their lines are the point). */
 export const NEW_SYSTEM_PRESENTATION = "narrative" as const satisfies NonNullable<SpecSection["presentation"]>;
+
+/** #355 review M6 — + Add system (blank, a category, a suggestion) follows the
+ *  estimate's current presentation: its first system's (absent = Itemized),
+ *  or Narrative when it has no system yet. */
+export function presentationForNewSystem(sections: ReadonlyArray<Pick<SpecSection, "presentation">>): NonNullable<SpecSection["presentation"]> {
+  const first = sections[0];
+  if (!first) return NEW_SYSTEM_PRESENTATION;
+  return first.presentation === "narrative" ? "narrative" : "itemized";
+}
 
 export const CLIENT_GOALS_MAX = 1_000;
 export const COVER_TEXT_MAX = 1_500;
