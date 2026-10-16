@@ -30,9 +30,10 @@ import { closedKeys } from "../src/lib/triage/liveness";
 import type { SnapshotRow } from "../src/lib/triage/types";
 import { factLabel, pointsFor } from "../src/lib/triage/rank";
 import type { Quote } from "../src/lib/stores/quotes";
-import { portalBidCandidates, portalBidChip, portalBidDueAt, portalBidList, portalBidState, PORTAL_BID_COPY, type PortalBidRow } from "../src/lib/parties/portal-bid";
-import { portalBidPdfSource, portalOnlineEstimateState } from "../src/lib/quote-pdf/portal-access";
-import { portalBidPdfResponse, portalBidRowsFor, portalBidRowsForCompany, PORTAL_BID_PDF_PER_MIN } from "../src/lib/parties/portal-bid-server";
+import { portalBidCandidates, portalBidChip, portalBidDueAt, portalBidList, portalBidState, PORTAL_BID_COPY, quoteHasBidders, type PortalBidRow } from "../src/lib/parties/portal-bid";
+import { portalBidPdfSource, portalOnlineEstimateState, portalQuotePdfSource } from "../src/lib/quote-pdf/portal-access";
+import { portalBidPdfResponse, portalBidRowsFor, portalBidRowsForCompany, portalBidderQuoteIds, portalOwnerBom, portalQuoteHasBidders, PORTAL_BID_PDF_PER_MIN } from "../src/lib/parties/portal-bid-server";
+import { ownerBom, ownerBomSections } from "../src/lib/parties/portal-owner-bom";
 import { acceptPortal, copyToCart, PORTAL_NOT_FOUND_COPY, refreshPortalQuote, renamePortalQuote } from "../src/lib/portal-quotes";
 import { serviceRequestFromQuoteId } from "../src/lib/portal-service-quotes";
 import { like } from "drizzle-orm";
@@ -1402,6 +1403,74 @@ export function portalBidPureChecks(ok: Ok) {
     ok(portalBidDueAt(q, rev(1, "sent")) === T, "portal-bid: a revision without a bid reads the live due date");
     ok(portalBidDueAt(q, rev(4, "sent", { docFields: { bid: { dueAt: null, addenda: [], awardedPartyId: null } } })) === null, "portal-bid: a frozen null due date stays null");
   }
+  // #348 slice 6 Task 3 (Jeff 2026-10-15) — the owner's portal on a bid estimate: BOM only, no prices.
+  {
+    // "Has bidders": any GC/EC row on this quote with bid state, whatever its result.
+    for (const r of ["pending", "awarded", "withdrew", "no_bid", "lost"]) {
+      ok(quoteHasBidders("Q-1", [row("A", "CA", "gc", { result: r })]) && quoteHasBidders("Q-1", [row("E", "CA", "ec", { result: r })]), `owner-bom: a gc / ec row with bid state counts (${r})`);
+    }
+    for (const role of ["owner", "architect", "vendor", "engineer"]) {
+      ok(!quoteHasBidders("Q-1", [row("O", "CA", role as never, {})]), `owner-bom: a ${role} row never counts`);
+    }
+    ok(!quoteHasBidders("Q-1", [row("A", "CA", "gc", null)]), "owner-bom: a gc row with bid: null does not count");
+    ok(!quoteHasBidders("Q-1", [row("A", "CA", "gc", {}, { recordId: "Q-2" })]), "owner-bom: another quote's row does not count");
+    ok(!quoteHasBidders("Q-1", [row("A", "CA", "gc", {}, { recordType: "lead" })]), "owner-bom: a lead's row does not count");
+    ok(!quoteHasBidders("Q-1", []) && !quoteHasBidders("", [A]), "owner-bom: no rows / no quote id → false");
+    ok(quoteHasBidders("Q-1", [row("O", "OWNER", "owner" as never, {}), row("A", "CA", "gc", { result: "withdrew" })]), "owner-bom: one bidder among other parties is enough");
+
+    // The owner's state: bomOnly on ok, the revision unchanged; nothing else moves.
+    const o = portalOnlineEstimateState(mk(), "OWNER", [], { hasBidders: true });
+    ok(o.kind === "ok" && o.bomOnly === true && o.rev.rev === 3 && !o.closed && !("bidder" in o), "owner-bom: the owner with bidders gets ok + bomOnly on the latest sent revision");
+    for (const status of ["sent", "draft", "won", "lost"]) {
+      const q = mk({ status });
+      const today = JSON.stringify(portalOnlineEstimateState(q, "OWNER"));
+      ok(JSON.stringify(portalOnlineEstimateState(q, "OWNER", [], { hasBidders: false })) === today && JSON.stringify(portalOnlineEstimateState(q, "OWNER", [], {})) === today,
+        `owner-bom: without bidders the owner's answer deep-equals today's (${status})`);
+      const b = portalOnlineEstimateState(q, "OWNER", [], { hasBidders: true });
+      const t = JSON.parse(today);
+      ok(t.kind === "ok" ? b.kind === "ok" && b.bomOnly === true && JSON.stringify({ ...b, bomOnly: undefined }) === JSON.stringify({ ...t, bomOnly: undefined }) : JSON.stringify(b) === today,
+        `owner-bom: with bidders only bomOnly is added, revising / unavailable unchanged (${status})`);
+    }
+    ok(portalOnlineEstimateState(mk({ status: "lost" }), "OWNER", [], { hasBidders: true }).kind === "ok" &&
+       (portalOnlineEstimateState(mk({ status: "lost" }), "OWNER", [], { hasBidders: true }) as { closed: boolean }).closed === true, "owner-bom: a lost bid estimate is bomOnly and closed");
+    ok(portalOnlineEstimateState(mk({ status: "draft" }), "OWNER", [], { hasBidders: true }).kind === "revising", "owner-bom: a recalled bid estimate is still the being-revised card");
+    ok(JSON.stringify(portalOnlineEstimateState(mk(), "CA", [A], { hasBidders: true })) === JSON.stringify(portalOnlineEstimateState(mk(), "CA", [A])), "owner-bom: a bidder company's answer ignores hasBidders");
+    ok(portalOnlineEstimateState(mk({ source: "daylite" }), "OWNER", [], { hasBidders: true }).kind === "unavailable", "owner-bom: Daylite history stays unavailable");
+
+    // The PDF source refuses the owner of a bid estimate.
+    const withPdf = mk({}, [rev(1, "sent", { pdfBlobPath: "quote-pdfs/q1-r1.pdf" }), rev(2, "manual"), rev(3, "sent", { pdfBlobPath: "quote-pdfs/q1-r3.pdf" })]);
+    ok(portalQuotePdfSource(withPdf, "OWNER")?.path === "quote-pdfs/q1-r3.pdf" && portalQuotePdfSource(withPdf, "OWNER", { hasBidders: false })?.path === "quote-pdfs/q1-r3.pdf",
+      "owner-bom: without bidders the owner's PDF source is today's");
+    ok(portalQuotePdfSource(withPdf, "OWNER", { hasBidders: true }) === null, "owner-bom: with bidders the owner has no PDF source");
+
+    // The pure BOM: printed systems only, PackageBomRow keys only, no money anywhere.
+    const KEYS = "description,key,manufacturer,part,qty,unit";
+    const item = (id: number, over: Record<string, unknown> = {}) => ({ id, sku: "", desc: `Item ${id}`, qty: 2, unit: "ea", cost: 1234.5, price: 5678.25, ...over });
+    const spec = {
+      groups: [{ id: "g-alt", name: "Alt", alternate: true }],
+      sections: [
+        { id: "s1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [item(1, { manufacturer: "Acme", manufacturerModelNumber: "AX-1" }), item(2, { option: true, price: 99991 })] },
+        { id: "s2", name: "Empty", kind: "materials", mfr: "", freightPct: 0, items: [] },
+        { id: "s3", name: "Labor", kind: "labor", mfr: "", freightPct: 0, items: [item(3, { labor: true, price: 4321 })] },
+        { id: "s4", name: "Alternate one", kind: "materials", mfr: "", freightPct: 0, groupId: "g-alt", items: [item(4, { price: 8765 })] },
+      ],
+    };
+    const r1 = rev(1, "sent", { spec, docFields: { customer: "Owner" } });
+    const qb = mk({ name: "Live rename" }, [r1]);
+    const bom = ownerBom(qb, r1, new Map([["X", { mfr: "Cat" }]]), " Owner Co ");
+    const rows = bom.systems.flatMap((x) => x.rows);
+    ok(bom.title === "Rev1" && bom.preparedFor === "Owner Co" && /Rev 1/.test(bom.headerLine) && bom.showQty === true, "owner-bom: the header is the revision's name, number · Rev · sent date and Prepared for");
+    ok(bom.systems.map((x) => x.name).join() === "Rigging,Labor" && ownerBomSections(r1).length === 2, "owner-bom: one block per printed system (an empty system prints nothing, an Alternate is left out)");
+    ok(rows.length >= 2 && rows.every((r) => Object.keys(r).sort().join() === KEYS), "owner-bom: every row has only the PackageBomRow fields");
+    ok(rows[0].qty === 2 && rows[0].manufacturer === "Acme" && rows[0].part === "AX-1", "owner-bom: Qty · Manufacturer · Model come through");
+    const json = JSON.stringify(bom);
+    ok(!/1234|5678|99991|4321|8765|\$/.test(json) && !/price|cost|total|value/i.test(Object.keys(bom).join() + Object.keys(bom.systems[0]).join()), "owner-bom: no price, cost, option price or total anywhere in the model");
+    const noQty = ownerBom(mk({ pdfOptions: { pdfQty: false } }, [r1]), r1, new Map(), "Owner");
+    ok(noQty.showQty === false && noQty.systems.flatMap((x) => x.rows).every((r) => r.qty === null && r.unit === "" && Object.keys(r).sort().join() === KEYS), "owner-bom: Qty off → no quantities, same keys");
+    const frozenQty = rev(1, "sent", { spec, docFields: { pdfOptions: { pdfQty: false } } });
+    ok(ownerBom(mk({}, [frozenQty]), frozenQty, new Map(), "Owner").showQty === false, "owner-bom: the revision's frozen Qty choice wins over the live one");
+    ok(ownerBom(mk(), rev(3, "sent"), new Map(), "Owner").systems.length === 0, "owner-bom: a revision with no spec has no systems");
+  }
   // Boundary.
   {
     const src = readFileSync(join(__dirname, "../src/lib/parties/portal-bid.ts"), "utf8");
@@ -1424,7 +1493,7 @@ async function dropPortalBidIdentityFixtures() {
 /** #348 slice 6 task 2 — the portal loader, the three portal quote routes' rule and the bidder PDF response, against the DB. */
 export async function portalBidDbChecks(ok: Ok) {
   const { own, gc1, gc2, gc3, gc4, oth, ct1, ct2 } = I_FIX;
-  const iq = fixtureId(348, "iq");
+  const iq = fixtureId(348, "iq"), iq2 = fixtureId(348, "iq2");
   const NAMES = { own: "Portal Owner I", gc1: "Portal GC One I", gc2: "Portal GC Two I", gc3: "Portal GC Three I", gc4: "Portal GC Four I", oth: "Portal Other I" };
   const regAll = async () => {
     for (const p of await listFor("quote", iq)) registerFixture("record_parties", p.id);
@@ -1454,7 +1523,18 @@ export async function portalBidDbChecks(ok: Ok) {
     await saveContact({ id: ct2, firstName: "Ike", lastName: "Two", homeCompanyId: gc2 });
     await setEmails(ct2, [{ value: "ike@i.test", label: "work", isPrimary: true }] as never);
     const NOW = Date.now();
-    await createFixture("quotes", buildQuote(iq, { name: "Portal bid quote", customer: NAMES.own, customerId: own, value: 1000 } as never, "system", null, NOW) as never);
+    // Task 3: a printed system with priced lines, so the owner's BOM has rows (and prices that must never reach it).
+    const iSpec = {
+      sections: [
+        { id: "is1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [
+          { id: 1, sku: "", desc: "Batten", qty: 4, unit: "ea", cost: 1234.5, price: 5678.25, manufacturer: "Acme", manufacturerModelNumber: "AX-1" },
+          { id: 2, sku: "", desc: "Spare", qty: 1, unit: "ea", cost: 10, price: 99991, option: true },
+        ] },
+      ],
+    };
+    await createFixture("quotes", buildQuote(iq, { name: "Portal bid quote", customer: NAMES.own, customerId: own, value: 1000, spec: iSpec } as never, "system", null, NOW) as never);
+    // Task 3: the owner's second estimate — no bidders, behaves exactly as today.
+    await createFixture("quotes", buildQuote(iq2, { name: "Owner plain quote", customer: NAMES.own, customerId: own, value: 500, spec: iSpec } as never, "system", null, NOW) as never);
     const added = [
       await addBidder({ quoteId: iq, companyId: gc1, contactId: ct1, role: "gc" }, "u"),
       await addBidder({ quoteId: iq, companyId: gc2, contactId: ct2, role: "gc" }, "u"),
@@ -1492,6 +1572,50 @@ export async function portalBidDbChecks(ok: Ok) {
       const { s, pdf } = await stateFor(gc1);
       ok(s.kind === "ok" && s.bidder?.partyId === p1 && s.rev.rev === r1 && pdf?.partyId === p1 && pdf.rev === r1, "portal-bid db: gc1 sees r1 (state and PDF source)");
     }
+    // T3. The owner of a bid estimate (Jeff 2026-10-15): a BOM with no prices — no PDF, no Accept, no writes.
+    {
+      const q = (await getQuote(iq))!;
+      const hb = await portalQuoteHasBidders(q);
+      ok(hb && (await portalBidRowsFor(q, own)).length === 0, "owner-bom db: the owner's quote has bidders (and the bidder loader still reads nothing for the owner)");
+      const s = portalOnlineEstimateState(q, own, [], { hasBidders: hb });
+      ok(s.kind === "ok" && s.bomOnly === true && !s.bidder && s.rev.rev === r1, "owner-bom db: the owner's page state is bomOnly on its latest sent revision");
+      const withPdf = { ...q, revisions: (q.revisions ?? []).map((r) => (r.reason === "sent" ? { ...r, pdfBlobPath: "quote-pdfs/x.pdf" } : r)) } as Quote;
+      ok(portalQuotePdfSource(withPdf, own) !== null && portalQuotePdfSource(withPdf, own, { hasBidders: hb }) === null, "owner-bom db: the owner's PDF source is null once the quote has bidders");
+      const so = ses(own);
+      const acc = await acceptPortal(so, { quoteId: iq, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "Owen", signerTitle: "Director" }, Date.now(), { notify: async () => {} });
+      const ref = await refreshPortalQuote(so, iq);
+      const cp = await copyToCart(so, iq);
+      const rn = await renamePortalQuote(so, iq, "Owner rename");
+      ok(!acc.ok && acc.error === PORTAL_NOT_FOUND_COPY, "owner-bom db: acceptPortal refuses the owner of a bid estimate");
+      ok(!ref.ok && ref.error === PORTAL_NOT_FOUND_COPY, "owner-bom db: refreshPortalQuote refuses the owner of a bid estimate");
+      ok(!cp.ok && cp.error === PORTAL_NOT_FOUND_COPY, "owner-bom db: copyToCart refuses the owner of a bid estimate");
+      ok(!rn.ok && rn.error === PORTAL_NOT_FOUND_COPY, "owner-bom db: renamePortalQuote refuses the owner of a bid estimate");
+      const after = await getQuote(iq);
+      ok(after?.status === "sent" && !after.portalAcceptance && after.name === "Portal bid quote", "owner-bom db: nothing was written for the owner");
+      const bom = s.kind === "ok" ? await portalOwnerBom(q, s.rev, NAMES.own) : null;
+      const rows = bom ? bom.systems.flatMap((x) => x.rows) : [];
+      ok(!!bom && bom.preparedFor === NAMES.own && bom.title === "Portal bid quote" && bom.systems.length === 1 && rows.length === 1 && rows[0].qty === 4 && rows[0].manufacturer === "Acme" && rows[0].part === "AX-1",
+        "owner-bom db: the BOM is the sent revision's printed system — Qty · Manufacturer · Model, the option line left out");
+      ok(rows.every((r) => Object.keys(r).sort().join() === "description,key,manufacturer,part,qty,unit"), "owner-bom db: every BOM row has only the PackageBomRow fields");
+      ok(!/1234|5678|99991|22713|\$/.test(JSON.stringify(bom)), "owner-bom db: no price, cost, option price or total in the owner's BOM");
+      const ids = await portalBidderQuoteIds([iq, iq2, "", fixtureId(348, "imissing")]);
+      ok(ids.has(iq) && !ids.has(iq2) && ids.size === 1, "owner-bom db: portalBidderQuoteIds picks the bid estimate only");
+      ok((await portalBidderQuoteIds([])).size === 0, "owner-bom db: no ids, no read, empty set");
+    }
+    // T3. The owner's estimate without bidders behaves exactly as today — Accept still works.
+    {
+      await setStatus(iq2, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+      const q2 = (await getQuote(iq2))!;
+      const hb2 = await portalQuoteHasBidders(q2);
+      ok(!hb2 && JSON.stringify(portalOnlineEstimateState(q2, own, [], { hasBidders: hb2 })) === JSON.stringify(portalOnlineEstimateState(q2, own)) &&
+         portalOnlineEstimateState(q2, own).kind === "ok" && !("bomOnly" in portalOnlineEstimateState(q2, own, [], { hasBidders: hb2 })),
+        "owner-bom db: an estimate with no bidders has today's state, no bomOnly");
+      const w2 = { ...q2, revisions: (q2.revisions ?? []).map((r) => (r.reason === "sent" ? { ...r, pdfBlobPath: "quote-pdfs/y.pdf" } : r)) } as Quote;
+      ok(JSON.stringify(portalQuotePdfSource(w2, own, { hasBidders: hb2 })) === JSON.stringify(portalQuotePdfSource(w2, own)) && portalQuotePdfSource(w2, own) !== null, "owner-bom db: its PDF source is today's");
+      const acc2 = await acceptPortal(ses(own), { quoteId: iq2, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "Owen", signerTitle: "Director" }, Date.now(), { notify: async () => {} });
+      ok(acc2.ok && !!(await getQuote(iq2))?.portalAcceptance, "owner-bom db: Accept still works on the owner's estimate with no bidders");
+    }
+
     // 2. Refused, the same as missing.
     for (const [cid, label] of [[gc4, "never sent"], [gc3, "withdrew"], [oth, "a stranger"]] as const) {
       const { s, pdf, list } = await stateFor(cid);
@@ -1545,6 +1669,8 @@ export async function portalBidDbChecks(ok: Ok) {
       ok(a.s.kind === "ok" && a.s.bidder?.result === "awarded", "portal-bid db: the awarded bidder still sees its estimate");
       ok(portalOnlineEstimateState(a.q, own).kind === "ok" && portalListsQuote(a.q, own) && (await portalBidRowsFor(a.q, own)).length === 0,
         "portal-bid db: the owner's view is unchanged by the award (and reads no rows)");
+      const ao = portalOnlineEstimateState(a.q, own, [], { hasBidders: await portalQuoteHasBidders(a.q) });
+      ok(ao.kind === "ok" && ao.bomOnly === true, "owner-bom db: after the award the owner still sees the BOM only");
     }
 
     // 6. A revision addressed after the award (never emailed to gc1).
@@ -1637,6 +1763,9 @@ export async function portalBidDbChecks(ok: Ok) {
       const a = await stateFor(gc1), b = await stateFor(gc2);
       ok(a.q.status === "won" && a.s.kind === "ok" && !a.s.closed && a.list.history.length === 1 && a.list.open.length === 0, "portal-bid db: the awarded bidder sees a won estimate in its history");
       ok(b.s.kind === "unavailable" && listed(b.list) === 0, "portal-bid db: a losing bidder can't see the won estimate");
+      const wo = portalOnlineEstimateState(a.q, own, [], { hasBidders: await portalQuoteHasBidders(a.q) });
+      ok(wo.kind === "ok" && wo.bomOnly === true && (await acceptPortal(ses(own), { quoteId: iq, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "O", signerTitle: "D" })).ok === false,
+        "owner-bom db: the won bid estimate stays BOM only for the owner, for good");
     }
 
     // 12. Route pins.
@@ -1644,14 +1773,38 @@ export async function portalBidDbChecks(ok: Ok) {
       const rd = (f: string) => readFileSync(join(__dirname, "..", f), "utf8");
       const page = rd("src/app/portal/quotes/[id]/page.tsx"), pdf = rd("src/app/portal/quotes/[id]/pdf/route.ts"), photo = rd("src/app/portal/quotes/[id]/photo/[docId]/route.ts");
       ok([page, pdf, photo].every((x) => x.includes("portalBidRowsFor(")), "portal-bid db: page, PDF and photo routes load the bidder rows");
-      ok(page.includes("portalOnlineEstimateState(q, cid, bids)") && page.includes("bidderPartyId: state.bidder.partyId") && page.includes("onlineCutSheets(q, state.rev)"),
+      ok(page.includes("portalOnlineEstimateState(q, cid, bids, { hasBidders })") && page.includes("bidderPartyId: state.bidder.partyId") && page.includes("onlineCutSheets(q, state.rev)"),
         "portal-bid db: the page composes the bidder rows and addresses the document to the bidder");
       ok(pdf.includes("portalBidPdfSource(q, session.customerId, bids)") && pdf.includes("export const maxDuration = 60") && pdf.includes("portalBidPdfResponse(req, bid,") &&
          pdf.includes("`portal-bidpdf:preview:${session.customerId}`") && pdf.includes("`portal-bidpdf:${session.grantId}`") &&
          pdf.includes("portalQuotePdfPreparing(q, session.customerId)") && pdf.includes("portalQuotePdfUnavailable(q, session.customerId)") &&
-         pdf.includes("pdfFileName(displayQuoteNumber(q), src.rev)") && pdf.indexOf("portalBidPdfSource(") < pdf.indexOf("portalQuotePdfSource(q, session.customerId)"),
+         pdf.includes("pdfFileName(displayQuoteNumber(q), src.rev)") && pdf.indexOf("portalBidPdfSource(") > -1 && pdf.indexOf("portalBidPdfSource(") < pdf.indexOf("portalQuotePdfSource(q, session.customerId, { hasBidders })"),
         "portal-bid db: the PDF route answers a bidder first, then runs the customer code unchanged");
-      ok(photo.includes("portalOnlineEstimateState(q, session.customerId, bids)") && photo.includes("servePhotoForRevision(req, state.rev, docId)"), "portal-bid db: photos come from the bidder's own revision");
+      ok(photo.includes("portalOnlineEstimateState(q, session.customerId, bids, { hasBidders })") && photo.includes("servePhotoForRevision(req, state.rev, docId)"), "portal-bid db: photos come from the bidder's own revision");
+      // Task 3 pins (Jeff 2026-10-15): the owner of a bid estimate — BOM only, no prices, no PDF, no Accept.
+      const bomView = rd("src/app/portal/quotes/[id]/bom-view.tsx"), ownerBomSrc = rd("src/lib/parties/portal-owner-bom.ts");
+      ok(bomView.includes('import type { OwnerBom } from "@/lib/parties/portal-owner-bom";') && ownerBomSrc.includes("packageBomRows(sec, catalog, vendorQuotes)") &&
+         !/money\(|fmt\(|QuoteDocument|AcceptDialog|pdf/i.test(bomView) && !/["']use client["']/.test(bomView) && !/money\(|fmt\(|totals\(|systemSellTotal/.test(ownerBomSrc),
+        "owner-bom pins: the BOM view renders packageBomRows rows (via ownerBom) and carries no money, document, Accept or download");
+      const bomBranch = page.slice(page.indexOf("if (state.bomOnly) {"), page.indexOf("const docProps = await loadQuoteDocumentProps("));
+      ok(page.includes("portalQuoteHasBidders(q)") && bomBranch.includes("<BomView") && bomBranch.includes("portalOwnerBom(q, state.rev,") && !/QuoteDocument|OnlineEstimateView|pdfHref|onlineCutSheets/.test(bomBranch) &&
+         page.indexOf("if (state.bomOnly) {") > -1 && page.indexOf("if (state.bomOnly) {") < page.indexOf("loadQuoteDocumentProps(q, {") && page.includes("portalQuotePdfSource(q, cid, { hasBidders })") && !page.includes("portalQuotePdfSource(q, cid)"),
+        "owner-bom pins: the page's bomOnly branch renders <BomView before the priced document is ever loaded");
+      ok(pdf.includes("portalQuoteHasBidders(q)") && pdf.indexOf('if (q && hasBidders) return new Response("Not found", { status: 404 });') > -1 &&
+         pdf.indexOf('if (q && hasBidders) return new Response("Not found", { status: 404 });') < pdf.indexOf("portalQuotePdfPreparing(q, session.customerId)"),
+        "owner-bom pins: the PDF route answers the owner of a bid estimate with a plain 404 first");
+      ok(photo.includes("portalQuoteHasBidders(q)") && photo.includes("state.bomOnly"), "owner-bom pins: the photo route refuses the BOM-only owner");
+      const pq = rd("src/lib/portal-quotes.ts");
+      const gates = pq.match(/if \(!q \|\| !portalListsQuote\(q, session\.customerId\)\) return \{ ok: false, error: PORTAL_NOT_FOUND_COPY \};\n  if \(await ownerBidRefused\(q, session\.customerId\)\) return \{ ok: false, error: PORTAL_NOT_FOUND_COPY \};/g) || [];
+      ok(pq.includes("portalQuoteHasBidders(q)") && gates.length === 4 && (pq.match(/ownerBidRefused\(q, session\.customerId\)/g) || []).length === 4,
+        "owner-bom pins: accept, refresh, copy and rename each refuse the owner of a bid estimate right after the list rule");
+      const home = rd("src/app/portal/page.tsx"), mine = rd("src/app/portal/my-quotes/page.tsx"), rowSrc = rd("src/app/portal/quote-row.tsx");
+      ok(home.includes("portalBidderQuoteIds([") && home.includes("<PortalBidOwnerRow") && home.includes("!bidOwnerIds.has(p.quoteId)") && mine.includes("portalBidderQuoteIds(") && mine.includes("<PortalBidOwnerRow"),
+        "owner-bom pins: Home and My quotes render the scope-only row for a bid estimate (and Home hides its project's value)");
+      const ownerRow = rowSrc.slice(rowSrc.indexOf("export function PortalBidOwnerRow"));
+      ok(ownerRow.length > 100 && ownerRow.includes("<Chip c={SCOPE_ONLY_CHIP} />") && rowSrc.includes("label: PORTAL_BID_COPY.ownerChip") &&
+         !/money\(|AcceptDialog|RefreshPricingButton|copyQuoteToCart|pdf|Quote again|portalDecline|q\.value/i.test(ownerRow),
+        "owner-bom pins: the scope-only row has no value, Accept, Refresh pricing, decline note, PDF, Copy or Quote again");
       const srv = rd("src/lib/parties/portal-bid-server.ts");
       ok(srv.includes("bidderPdfFileName(src.name,") && srv.includes("rateLimit(ctx.rlKey, PORTAL_BID_PDF_PER_MIN, 60_000)") && !srv.includes("r.fileName"),
         "portal-bid db: the bidder PDF is named by bidderPdfFileName over the revision's name, never the render's live name");

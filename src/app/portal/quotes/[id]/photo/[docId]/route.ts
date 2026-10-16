@@ -2,7 +2,7 @@ import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { rateLimit } from "@/lib/rate-limit";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { portalOnlineEstimateState } from "@/lib/quote-pdf/portal-access";
-import { portalBidRowsFor } from "@/lib/parties/portal-bid-server";
+import { portalBidRowsFor, portalQuoteHasBidders } from "@/lib/parties/portal-bid-server";
 import { servePhotoForRevision } from "@/lib/quote-share/photo-response";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +22,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string; doc
   const q = await getQuote(id);
   // #348 slice 6: a bidder company's photos come from its own addressed revision.
   const bids = q ? await portalBidRowsFor(q, session.customerId) : [];
-  const state = q ? portalOnlineEstimateState(q, session.customerId, bids) : null;
-  if (!state || state.kind !== "ok") return new Response("Not found", { status: 404 });
+  // Task 3 (Jeff 2026-10-15): the owner of a bid estimate sees a BOM with no photos — nothing here for it.
+  const hasBidders = q && q.customerId === session.customerId ? await portalQuoteHasBidders(q) : false;
+  const state = q ? portalOnlineEstimateState(q, session.customerId, bids, { hasBidders }) : null;
+  if (!state || state.kind !== "ok" || state.bomOnly) return new Response("Not found", { status: 404 });
   return servePhotoForRevision(req, state.rev, docId);
 }

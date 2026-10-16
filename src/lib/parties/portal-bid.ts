@@ -136,7 +136,18 @@ export const PORTAL_BID_COPY = {
   closed: "Closed",
   /** Any non-404 bidder-PDF failure — the render's own text is staff-facing (env names) and is only logged. */
   pdfUnavailable: "The PDF couldn’t be made right now — try again in a minute.",
+  /** Task 3 (Jeff 2026-10-15) — the owner's BOM-only view of a bid estimate: the one muted line, and its Home chip. */
+  ownerBomNote: "Pricing for this project comes from your contractor.",
+  ownerChip: "Scope only",
 } as const;
+
+/** #348 slice 6 Task 3 (Jeff 2026-10-15) — "has bidders": any GC/EC row on THIS quote with bid state, whatever its
+ *  result (withdrew, lost, no bid all count). Owner, architect and vendor rows, a GC row with no bid state, and
+ *  another record's rows never count. Once true, the owner's portal shows the estimate as a BOM with no prices. */
+export function quoteHasBidders(quoteId: string, rows: readonly PortalBidRow[]): boolean {
+  if (!quoteId) return false;
+  return rows.some((r) => !!r && r.recordType === "quote" && r.recordId === quoteId && (r.role === "gc" || r.role === "ec") && !!r.bid);
+}
 
 /** Chip: sent+pending → due text (or "Bid submitted" with no due date); awarded (sent or won) → "Awarded"; lost → "Closed".
  *  Never "Lost", never a count or another company. */

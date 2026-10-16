@@ -15,6 +15,7 @@ import { priceServiceRequest, type ServiceRequest } from "@/lib/portal-service-p
 import { carryLift } from "@/lib/service-pricing";
 import { getLiftRate } from "@/lib/service-quote-inputs";
 import { copySentRevisionPdf } from "@/lib/quote-pdf/generate";
+import { portalQuoteHasBidders } from "@/lib/parties/portal-bid-server";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { rateLimit, rateLimitRefund } from "@/lib/rate-limit";
 import { get as getCustomer } from "@/lib/stores/customers";
@@ -206,6 +207,14 @@ export async function generatePortalQuote(
    ====================================================================== */
 
 export const PORTAL_NOT_FOUND_COPY = "We couldn't find that quote.";
+
+/** #348 slice 6 Task 3 (Jeff 2026-10-15) — the owner's portal on a bid estimate is a BOM with no prices: every
+ *  owner-portal write (accept, refresh pricing, copy to cart, rename) refuses it with the uniform not-found answer
+ *  once the quote has bidders (portalQuoteHasBidders — any GC/EC row with bid state, whatever its result). Staff
+ *  Approve / Decline (the Estimator's Portal panel) never comes through here. */
+async function ownerBidRefused(q: Pick<Quote, "id" | "customerId">, cid: string): Promise<boolean> {
+  return q.customerId === cid && (await portalQuoteHasBidders(q));
+}
 export const ACCEPT_ALREADY_COPY = "This quote was already accepted.";
 export const ACCEPT_NOT_READY_COPY = "This quote isn't ready to accept yet.";
 export const ACCEPT_EXPIRED_COPY = "This quote's pricing has expired — refresh it to get current pricing.";
@@ -236,6 +245,7 @@ export async function acceptPortal(
   if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
   const q = await getQuote(input.quoteId);
   if (!q || !portalListsQuote(q, session.customerId)) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
+  if (await ownerBidRefused(q, session.customerId)) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
 
   const mode = canAcceptPortal(q, now);
   if (!mode.ok) {
@@ -393,6 +403,7 @@ export async function refreshPortalQuote(
   if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
   const q = await getQuote(quoteId);
   if (!q || !portalListsQuote(q, session.customerId)) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
+  if (await ownerBidRefused(q, session.customerId)) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
   if (q.source !== "portal-catalog" && q.source !== "portal-service") return { ok: false, error: REFRESH_NOT_ELIGIBLE_COPY };
 
   const gate = canAcceptPortal(q, now);
@@ -530,6 +541,7 @@ export async function copyToCart(
   if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
   const q = await getQuote(quoteId);
   if (!q || !portalListsQuote(q, session.customerId)) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
+  if (await ownerBidRefused(q, session.customerId)) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
 
   if (!rateLimit("portal-copy:" + session.grantId, COPY_LIMIT, COPY_WINDOW_MS).ok) {
     return { ok: false, error: COPY_RATE_COPY };
@@ -649,6 +661,7 @@ export async function renamePortalQuote(
   if (!clean) return { ok: false, error: RENAME_BLANK_COPY };
   const q = typeof quoteId === "string" && quoteId ? await getQuote(quoteId) : null;
   if (!q || !portalListsQuote(q, session.customerId)) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
+  if (await ownerBidRefused(q, session.customerId)) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
   if (!isCustomerBuiltQuote(q)) return { ok: false, error: RENAME_NOT_BUILT_COPY };
   if (!isPortalRenamable(q)) return { ok: false, error: q.portalAcceptance ? RENAME_ACCEPTED_COPY : RENAME_CLOSED_COPY };
   if (q.name === clean) return { ok: true, name: clean };

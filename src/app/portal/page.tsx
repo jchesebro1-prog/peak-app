@@ -22,7 +22,8 @@ import { PortalShell } from "./shell";
 import { PortalSignedOut } from "./signed-out";
 import { portalNav } from "./nav";
 import { getCart } from "@/lib/stores/portal-carts";
-import { Chip, fmtDate, money, PortalQuoteRow } from "./quote-row";
+import { Chip, fmtDate, money, PortalBidOwnerRow, PortalQuoteRow } from "./quote-row";
+import { portalBidderQuoteIds } from "@/lib/parties/portal-bid-server";
 import { documentsForCustomer } from "@/lib/stores/documents";
 import { activeDocumentCategories, resolveDocumentCategories } from "@/lib/document-categories";
 import { groupForPortal } from "@/lib/document-rules";
@@ -222,6 +223,12 @@ export default async function PortalPage({
   // Only this customer's quotes (#222 final wave B): a project's quoteId is
   // never trusted to point inside the tenant.
   const quoteStatusById = new Map(quotes.filter((q) => q.customerId === cid).map((q) => [q.id, q.status]));
+  // #348 slice 6 Task 3 (Jeff 2026-10-15): the owner's estimates that have bidders show as scope only — no value,
+  // no Accept, no PDF — and a project built from one never shows its value. One read bounded to these ids.
+  const bidOwnerIds = await portalBidderQuoteIds([
+    ...published.map((q) => q.id),
+    ...projects.flatMap((p) => (p.customerId === cid && p.quoteId && quoteStatusById.has(p.quoteId) ? [p.quoteId] : [])),
+  ]);
   const venueNameOf = (locationId: string | null) => {
     const l = locationId ? venues.find((v) => v.id === locationId) : undefined;
     return l ? l.label || l.locationName || "" : "";
@@ -232,7 +239,7 @@ export default async function PortalPage({
       .map((p) =>
         portalProjectView(p, {
           venueName: venueNameOf(p.locationId),
-          quoteStatus: p.quoteId ? quoteStatusById.get(p.quoteId) ?? null : null,
+          quoteStatus: p.quoteId && !bidOwnerIds.has(p.quoteId) ? quoteStatusById.get(p.quoteId) ?? null : null,
         })
       )
   );
@@ -256,9 +263,12 @@ export default async function PortalPage({
 
   const acceptCategories = activeDocumentCategories(docCategories).map((c) => ({ key: c.key, label: c.label }));
 
-  const quoteRow = (q: (typeof published)[number]) => (
-    <PortalQuoteRow key={q.id} q={q} cid={cid} preview={preview} acceptCategories={acceptCategories} />
-  );
+  const quoteRow = (q: (typeof published)[number]) =>
+    bidOwnerIds.has(q.id) ? (
+      <PortalBidOwnerRow key={q.id} q={q} cid={cid} preview={preview} />
+    ) : (
+      <PortalQuoteRow key={q.id} q={q} cid={cid} preview={preview} acceptCategories={acceptCategories} />
+    );
 
   const projectRow = (v: (typeof projectGroups.active)[number]) => {
     const when =

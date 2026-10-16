@@ -49274,7 +49274,7 @@ import { portalOnlineEstimateState as n293tPortalState } from "@/lib/quote-pdf/p
   const comp = rd("src/components/online-estimate/online-estimate.tsx");
   ok(!/["']use client["']/.test(page) && !/["']use client["']/.test(comp) && noClientImports("src/app/portal/quotes/[id]/page.tsx") && noClientImports("src/components/online-estimate/online-estimate.tsx"),
     "#293t portal page: server-rendered; no client component it imports can receive the quote's data");
-  ok(page.indexOf("resolvePortalViewer(") > -1 && page.indexOf("resolvePortalViewer(") < page.indexOf("getQuote(") && page.includes("portalOnlineEstimateState(q, cid, bids)") &&
+  ok(page.indexOf("resolvePortalViewer(") > -1 && page.indexOf("resolvePortalViewer(") < page.indexOf("getQuote(") && page.includes("portalOnlineEstimateState(q, cid, bids, { hasBidders })") &&
      page.includes("loadQuoteDocumentProps(q, {") && page.includes("revision: state.rev,") && page.includes("ONLINE_COPY.portalUnavailable") && page.includes("ONLINE_COPY.revising") && page.includes("<PortalSignedOut"),
     "#293t portal page: the viewer first, then the one state rule; the sent revision; the signed-out, unavailable and revising cards");
   ok(!page.includes("notFound(") && !/\b(update|patchShareLink|ensureShareLink|revokeShareLink|addQuoteRevision|setStatus|mergeUpsert)\(/.test(page),
@@ -49283,7 +49283,7 @@ import { portalOnlineEstimateState as n293tPortalState } from "@/lib/quote-pdf/p
      (comp.match(/prefetch=\{false\}/g) || []).length >= 3 && comp.includes("ONLINE_COPY.closed") && comp.includes("<style>{QUOTE_WEB_CSS}</style>"),
     "#293t online view: the web document, a server-side BOM transform behind two plain links, the closed banner");
   const photo = rd("src/app/portal/quotes/[id]/photo/[docId]/route.ts");
-  ok(photo.includes("resolvePortalViewer(") && /rateLimit\(rlKey, 300, 60_000\)/.test(photo) && photo.includes("portalOnlineEstimateState(q, session.customerId, bids)") &&
+  ok(photo.includes("resolvePortalViewer(") && /rateLimit\(rlKey, 300, 60_000\)/.test(photo) && photo.includes("portalOnlineEstimateState(q, session.customerId, bids, { hasBidders })") &&
      photo.includes("servePhotoForRevision(req, state.rev, docId)") && photo.includes("`portal-photo:${session.grantId}`"),
     "#293t portal photos: a portal viewer, 300/min per grant, the quote's own sent revision, only its printed photos");
   const row = rd("src/app/portal/quote-row.tsx");

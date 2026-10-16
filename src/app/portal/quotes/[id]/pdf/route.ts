@@ -2,7 +2,7 @@ import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { pdfResponse } from "@/lib/quote-pdf/http";
 import { portalBidPdfSource, portalQuotePdfPreparing, portalQuotePdfSource, portalQuotePdfUnavailable } from "@/lib/quote-pdf/portal-access";
-import { portalBidPdfResponse, portalBidRowsFor } from "@/lib/parties/portal-bid-server";
+import { portalBidPdfResponse, portalBidRowsFor, portalQuoteHasBidders } from "@/lib/parties/portal-bid-server";
 import { pdfFileName } from "@/lib/quote-pdf/state";
 import { get as getQuote } from "@/lib/stores/quotes";
 
@@ -25,6 +25,10 @@ export const maxDuration = 60;
  * #348 slice 6 — a GC/EC bidder company gets its OWN addressed revision,
  * rendered on demand (portalBidPdfResponse: 6 a minute per grant), never the
  * customer's file. The customer code below it is unchanged.
+ *
+ * Task 3 (Jeff 2026-10-15) — the owner of a quote that has bidders gets no PDF
+ * at all (its portal is a BOM with no prices): a plain 404, before the
+ * being-prepared / unavailable answers.
  */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -39,7 +43,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       rlKey: preview ? `portal-bidpdf:preview:${session.customerId}` : `portal-bidpdf:${session.grantId}`,
     });
   }
-  const src = q ? portalQuotePdfSource(q, session.customerId) : null;
+  // Task 3: the owner of a bid estimate — one indexed read, only for the quote's own customer.
+  const hasBidders = q && q.customerId === session.customerId ? await portalQuoteHasBidders(q) : false;
+  if (q && hasBidders) return new Response("Not found", { status: 404 });
+  const src = q ? portalQuotePdfSource(q, session.customerId, { hasBidders }) : null;
   if (q && !src && portalQuotePdfPreparing(q, session.customerId)) {
     return new Response("This quote’s PDF is being prepared — try again in a minute.", {
       status: 404,

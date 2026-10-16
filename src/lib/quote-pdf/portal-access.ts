@@ -11,8 +11,10 @@ import { portalPdfPreparing, portalPdfSource, portalPdfUnavailable } from "./sta
  * file a customer may see: once sent, only the latest sent revision's copy;
  * never sent, the current ready PDF (portalPdfSource).
  */
-export function portalQuotePdfSource(q: Quote, customerId: string): { path: string; rev: number | null } | null {
+export function portalQuotePdfSource(q: Quote, customerId: string, opts: PortalOwnerOpts = {}): { path: string; rev: number | null } | null {
   if (!portalListsQuote(q, customerId)) return null;
+  // #348 slice 6 Task 3 (Jeff 2026-10-15): a bid estimate's owner gets no PDF — nothing priced can leak.
+  if (opts.hasBidders === true) return null;
   return portalPdfSource(q);
 }
 
@@ -27,7 +29,13 @@ export function portalQuotePdfUnavailable(q: Quote, customerId: string): boolean
   return portalListsQuote(q, customerId) && portalPdfUnavailable(q);
 }
 
-export type PortalOnlineState = Exclude<OnlineEstimateState, { kind: "ok" }> | { kind: "ok"; rev: QuoteRevision; closed: boolean; bidder?: PortalBid };
+export type PortalOnlineState =
+  | Exclude<OnlineEstimateState, { kind: "ok" }>
+  | { kind: "ok"; rev: QuoteRevision; closed: boolean; bidder?: PortalBid; bomOnly?: true };
+
+/** #348 slice 6 Task 3 — whether the quote has bidders (portalQuoteHasBidders). Every portal route passes it explicitly;
+ *  callers that pass nothing keep today's answer. */
+export type PortalOwnerOpts = { hasBidders?: boolean };
 
 /**
  * #293 slice 3 — the portal estimate page's rule (spec §5.2, decision 16):
@@ -38,13 +46,18 @@ export type PortalOnlineState = Exclude<OnlineEstimateState, { kind: "ok" }> | {
  * still requires the portal's list rule.
  *
  * #348 slice 6 — any OTHER company is decided by the bidder rule over ITS bidder rows on this quote (`bids`, from
- * portalBidRowsFor). No rows → unavailable (fails closed). The customer's answer is unchanged.
+ * portalBidRowsFor). No rows → unavailable (fails closed).
+ *
+ * Task 3 (Jeff 2026-10-15) — the customer (owner) of a quote that has bidders (`opts.hasBidders`, from
+ * portalQuoteHasBidders) sees it as a BOM with no prices: an ok state carries `bomOnly: true`, before and after the
+ * award. The revision is unchanged (the owner's latest sent); revising and unavailable are unchanged.
  */
-export function portalOnlineEstimateState(q: Quote, customerId: string, bids: readonly PortalBidRow[] = []): PortalOnlineState {
+export function portalOnlineEstimateState(q: Quote, customerId: string, bids: readonly PortalBidRow[] = [], opts: PortalOwnerOpts = {}): PortalOnlineState {
   if (!customerId || isImportedHistoryQuote(q)) return { kind: "unavailable" };
   if (q.customerId === customerId) {
     const s = onlineEstimateState(q);
     if (s.kind === "ok" && !portalListsQuote(q, customerId)) return { kind: "unavailable" };
+    if (s.kind === "ok" && opts.hasBidders === true) return { ...s, bomOnly: true };
     return s;
   }
   const b = portalBidState(q, customerId, bids);

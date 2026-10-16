@@ -5,12 +5,14 @@ import { attachmentDisposition } from "@/lib/document-files";
 import { getCompany } from "@/lib/identity/companies";
 import { bidderPdfFileName } from "@/lib/parties/addressee";
 import { bidderPartyFor } from "@/lib/parties/addressee-server";
-import { PORTAL_BID_COPY, type PortalBidRow } from "@/lib/parties/portal-bid";
+import { catalogFor } from "@/lib/estimate-output/package-loader";
+import { PORTAL_BID_COPY, quoteHasBidders, type PortalBidRow } from "@/lib/parties/portal-bid";
+import { ownerBom, ownerBomSkus, type OwnerBom } from "@/lib/parties/portal-owner-bom";
 import type { Party } from "@/lib/parties/rules";
 import { renderBidderPdf } from "@/lib/quote-pdf/bidder-pdf-server";
 import { rateLimit } from "@/lib/rate-limit";
-import { listFor, listForCompany } from "@/lib/stores/parties";
-import type { Quote } from "@/lib/stores/quotes";
+import { listFor, listForCompany, listForRecords } from "@/lib/stores/parties";
+import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 
 /** Only the fields the rule reads — the portal never holds a party's contact, author or timestamps. */
 function toRow(p: Party): PortalBidRow {
@@ -33,6 +35,30 @@ export async function portalBidRowsFor(q: Pick<Quote, "id" | "customerId">, cid:
 export async function portalBidRowsForCompany(cid: string): Promise<PortalBidRow[]> {
   if (!cid) return [];
   return (await listForCompany(cid)).filter((p) => isCompanyBidRow(p, cid)).map(toRow);
+}
+
+/** Task 3 (Jeff 2026-10-15) — whether this quote has bidders (quoteHasBidders over one indexed listFor read). Takes no
+ *  company: the caller decides it is the owner (q.customerId === cid); a bidder company is the bidder rule's call. */
+export async function portalQuoteHasBidders(q: Pick<Quote, "id">): Promise<boolean> {
+  if (!q?.id) return false;
+  return quoteHasBidders(q.id, (await listFor("quote", q.id)).map(toRow));
+}
+
+/** Task 3 — Home: which of these quotes have bidders, in one read bounded to those ids (listForRecords, chunked). */
+export async function portalBidderQuoteIds(quoteIds: readonly string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  const ids = [...new Set(quoteIds.filter((id) => typeof id === "string" && !!id))];
+  if (!ids.length) return out;
+  for (const [id, rows] of await listForRecords("quote", ids)) {
+    if (quoteHasBidders(id, rows.map(toRow))) out.add(id);
+  }
+  return out;
+}
+
+/** Task 3 — the owner's BOM-only view of a bid estimate's sent revision: the pure ownerBom over the package page's
+ *  catalog read (catalogFor never fails the page — a read error leaves Manufacturer / Model blank). */
+export async function portalOwnerBom(q: Quote, rev: QuoteRevision, preparedFor: string): Promise<OwnerBom> {
+  return ownerBom(q, rev, await catalogFor(ownerBomSkus(rev)), preparedFor);
 }
 
 export const PORTAL_BID_PDF_PER_MIN = 6;

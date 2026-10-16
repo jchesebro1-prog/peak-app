@@ -6,7 +6,7 @@ import { get as getQuote } from "@/lib/stores/quotes";
 import { getCart } from "@/lib/stores/portal-carts";
 import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { portalOnlineEstimateState, portalQuotePdfSource } from "@/lib/quote-pdf/portal-access";
-import { portalBidRowsFor } from "@/lib/parties/portal-bid-server";
+import { portalBidRowsFor, portalOwnerBom, portalQuoteHasBidders } from "@/lib/parties/portal-bid-server";
 import { loadQuoteDocumentProps } from "@/lib/quote-pdf/document-loader";
 import { ONLINE_COPY, onlineHeaderLine, onlineView } from "@/lib/quote-share/view";
 import { OnlineEstimateCard, OnlineEstimateView } from "@/components/online-estimate/online-estimate";
@@ -16,6 +16,7 @@ import { onlineCutSheets } from "@/lib/curtain-cut-sheets/online";
 import { OnlineCutSheets } from "@/components/cutsheets/online-cut-sheets";
 import { PortalSignedOut } from "../../signed-out";
 import { portalNav } from "../../nav";
+import { BomView } from "./bom-view";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,10 @@ function one(v: string | string[] | undefined): string {
  * bidder rule in portal-access over its rows from portalBidRowsFor): the
  * document addressed to it, its own PDF, no other bidder named. Refusals are
  * the same unavailable card.
+ *
+ * Task 3 (Jeff 2026-10-15) — the OWNER of a quote that has bidders sees it as
+ * a bill of materials with no price on anything (BomView): no priced
+ * document, no PDF, no Accept, before and after the award.
  */
 export default async function PortalQuotePage({
   params,
@@ -68,7 +73,9 @@ export default async function PortalQuotePage({
   ]);
   // #348 slice 6: this company's bidder rows on the quote ([] without a read for the quote's own customer).
   const bids = q ? await portalBidRowsFor(q, cid) : [];
-  const state = q ? portalOnlineEstimateState(q, cid, bids) : ({ kind: "unavailable" } as const);
+  // Task 3: whether the owner's quote has bidders — one indexed read, only for the quote's own customer.
+  const hasBidders = q && q.customerId === cid ? await portalQuoteHasBidders(q) : false;
+  const state = q ? portalOnlineEstimateState(q, cid, bids, { hasBidders }) : ({ kind: "unavailable" } as const);
   const pv = preview ? `preview=${encodeURIComponent(cid)}` : "";
   const withQs = (path: string, extra = "") => {
     const qs = [extra, pv].filter(Boolean).join("&");
@@ -88,10 +95,15 @@ export default async function PortalQuotePage({
   );
 
   if (!q || state.kind === "unavailable") {
-    const pdfHref = q && portalQuotePdfSource(q, cid) ? withQs(base + "/pdf") : null;
+    const pdfHref = q && portalQuotePdfSource(q, cid, { hasBidders }) ? withQs(base + "/pdf") : null;
     return shell(<OnlineEstimateCard title={ONLINE_COPY.portalUnavailable} pdfHref={pdfHref} backHref={backHref} />);
   }
   if (state.kind === "revising") return shell(<OnlineEstimateCard title={ONLINE_COPY.revising} backHref={backHref} />);
+  // Task 3 (Jeff 2026-10-15): the owner of a bid estimate — the BOM, never the priced document.
+  if (state.bomOnly) {
+    const bom = await portalOwnerBom(q, state.rev, cust?.name || "");
+    return shell(<BomView bom={bom} closed={state.closed} backHref={backHref} />);
+  }
 
   const docProps = await loadQuoteDocumentProps(q, {
     revision: state.rev,
@@ -112,7 +124,7 @@ export default async function PortalQuotePage({
         closed={state.closed}
         narrativeHref={withQs(base)}
         bomHref={withQs(base, "view=bom")}
-        pdfHref={state.bidder || portalQuotePdfSource(q, cid) ? withQs(base + "/pdf") : null}
+        pdfHref={state.bidder || portalQuotePdfSource(q, cid, { hasBidders }) ? withQs(base + "/pdf") : null}
         backHref={backHref}
       />
       {cutSheets && <OnlineCutSheets loaded={cutSheets} letterheadSrc={letterhead.src} />}
