@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { NEW_SYSTEM_PRESENTATION } from "@/lib/estimate-output/fields";
 import { SIDE_OPEN_KEY } from "./estimator-styles";
 import { surveyGoalsAction } from "./output-actions";
 import { listReviewCommentsAction } from "./review-actions";
@@ -81,7 +82,7 @@ export const TAX_RATE_PCT = 0;
  *  the freight rule itself. */
 const freshSections = (freightPct: number): SpecSection[] => [
   // #267: a new system's auto price rounds up to the next $25.
-  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, items: [] },
+  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: NEW_SYSTEM_PRESENTATION, items: [] },
 ];
 
 /** Phase 2a — unmarkEdited, blind to the Rewards credit line. The credit
@@ -1991,7 +1992,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const groupId = sections.find((s) => s.id === activeId)?.groupId;
     setSections((ss) => normalizeSystemOrder([
       ...ss,
-      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, items: [], ...(groupId ? { groupId } : {}) },
+      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: NEW_SYSTEM_PRESENTATION, items: [], ...(groupId ? { groupId } : {}) },
     ], groups));
     setActiveId(id);
     openInputMethod("catalog", id);

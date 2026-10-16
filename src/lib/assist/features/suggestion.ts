@@ -6,7 +6,7 @@
  * derived "✓ added" state and the Estimator link.
  */
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
-import { withDiscipline, sanitizeDiscipline, type ScopeDiscipline } from "@/lib/estimate-output/fields";
+import { NEW_SYSTEM_PRESENTATION, withDiscipline, sanitizeDiscipline, type ScopeDiscipline } from "@/lib/estimate-output/fields";
 import type { SystemCategory, SystemFromCategoryCtx } from "@/lib/system-categories";
 import type { DraftSchema, PricePart } from "./estimate-draft";
 import type { SuggestSourceKind } from "./suggest-sources";
@@ -187,6 +187,7 @@ export function systemFromSuggestion(system: SuggestionSystem, parts: PartsLooku
     freightPct: ctx.freightPct,
     freightAuto: true,
     priceRound: ctx.priceRound,
+    presentation: NEW_SYSTEM_PRESENTATION,
     items,
     ...(ctx.groupId ? { groupId: ctx.groupId } : {}),
   };
