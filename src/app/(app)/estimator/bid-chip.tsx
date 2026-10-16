@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { bidPanelAction, setBidDetailsAction, type BidDetailsResult } from "./bid-actions";
 import { postChanged } from "@/lib/popout/channel";
 import { addedAddendumNos, addendumReviseConfirm, type BidAddendum } from "@/lib/parties/bids";
+import { BID_SEND_COPY } from "@/lib/parties/bid-send";
 import type { BidPanelVM } from "@/lib/parties/bid-vm";
 
 /*
@@ -285,6 +286,7 @@ export default function BidChip({
               )}
             </div>
             <div style={small}>Bidders are managed on Send &amp; track.</div>
+            {panel.scopeOnly && <div style={small}>{BID_SEND_COPY.scopeOnlyChip}</div>}
             {error && (
               <div role="alert" style={{ fontSize: 12, color: "#8a2f22" }}>
                 {error}

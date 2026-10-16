@@ -1165,6 +1165,24 @@ export async function bidFollowupChecks(ok: Ok) {
   const bidsStore = readFileSync(join(process.cwd(), "src/lib/stores/bids.ts"), "utf8");
   ok(bidsStore.includes("statusMoveFailed = true") && bidsStore.includes("if (statusMoveFailed) return") && bidsStore.includes("Couldn't save the bid details — try again."), "followup: only a failed status move reports the status message; other failures are neutral");
   ok(chip.includes("setNotice(r.note)") && chip.includes("onSync?.(r.sync)") && chip.includes('source: "chip"'), "followup: the Bid chip shows the note, syncs the header and tells the Bidders card");
+
+  // #348 follow-up (Jeff 2026-10-15): staff see when the owner's portal is Scope only — read-only, sticky.
+  ok(BID_SEND_COPY.scopeOnlyNote === "The owner sees this estimate as Scope only in the portal — a parts list with no prices, no PDF and no Accept. This stays on even if bidders are removed." &&
+     BID_SEND_COPY.scopeOnlyChip === "Owner portal: Scope only", "scope-only label: the copy");
+  const stripC = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/.*$/gm, "");
+  const cardC = stripC(readFileSync(join(process.cwd(), "src/app/(app)/estimator/steps/bidders-card.tsx"), "utf8"));
+  const chipC = stripC(chip);
+  const noteUses = cardC.match(/[^\n]*BID_SEND_COPY\.scopeOnlyNote[^\n]*/g) || [];
+  ok(noteUses.length === 2 && noteUses.every((l) => /panel\?\.scopeOnly \?|panel\?\.scopeOnly &&/.test(l)) && cardC.includes("{scopeOnlyLine}") &&
+     cardC.indexOf("{scopeOnlyLine}") < cardC.indexOf("return (\n    <div>\n      <div style={{ display: \"flex\", flexWrap: \"wrap\", alignItems: \"center\", gap: 10, marginBottom: 10 }}>"),
+    "scope-only label pins: the Bidders card shows the note only when panel.scopeOnly — in the compact (no bidders) card too");
+  const chipUses = chipC.match(/[^\n]*BID_SEND_COPY\.scopeOnlyChip[^\n]*/g) || [];
+  ok(chipUses.length === 1 && /\{panel\.scopeOnly && <div style=\{small\}>\{BID_SEND_COPY\.scopeOnlyChip\}<\/div>\}/.test(chipUses[0]) && !/scopeOnly/.test(chipC.slice(chipC.indexOf("function chipLabel("), chipC.indexOf("export default function BidChip("))),
+    "scope-only label pins: the Bid chip's dialog shows the line only when panel.scopeOnly; the chip's own label is unchanged");
+  ok(!/scopeOnly\s*[:=]|setScopeOnly|bidScopeOnly/.test(cardC.replace(/const scopeOnlyLine = /, "")) && !/bidScopeOnly|setScopeOnly/.test(chipC), "scope-only label pins: nothing in the card or chip edits or clears it");
+  const panelSrv = stripC(readFileSync(join(process.cwd(), "src/lib/parties/bid-panel-server.ts"), "utf8"));
+  ok(/let scopeOnly = false;\s*try \{\s*scopeOnly = await portalQuoteHasBidders\(q\);\s*\} catch \(e\) \{\s*console\.error\(/.test(panelSrv) && /\n\s*scopeOnly,\n/.test(panelSrv),
+    "scope-only label pins: loadBidPanel reads the one server rule (portalQuoteHasBidders); a throw logs and shows no label");
 }
 
 const H_FIX = { own: fixtureId(348, "hown"), gc1: fixtureId(348, "hgc1"), gc2: fixtureId(348, "hgc2"), ct1: fixtureId(348, "hct1"), ct2: fixtureId(348, "hct2") };
@@ -1681,6 +1699,8 @@ export async function portalBidDbChecks(ok: Ok) {
       ok((await portalBidderQuoteIds([])).size === 0, "owner-bom db: no ids, no read, empty set");
       ok((await portalBidderQuoteIds([{ id: fixtureId(348, "inorows"), bidScopeOnly: true }])).has(fixtureId(348, "inorows")), "scope-only db: a stamped quote is Scope only with no party rows at all");
       ok(q.bidScopeOnly === true, "scope-only db: addBidder stamped the estimate (bidScopeOnly)");
+      const vmBid = await loadBidPanel(iq, { canEdit: true, canSend: true, canLink: true });
+      ok(vmBid.ok && vmBid.panel.scopeOnly === true, "scope-only label db: the Bidders panel VM carries scopeOnly for an estimate with bidders");
     }
     // T3. The owner's estimate without bidders behaves exactly as today — Accept still works.
     {
@@ -1696,6 +1716,8 @@ export async function portalBidDbChecks(ok: Ok) {
       ok(acc2.ok && !!(await getQuote(iq2))?.portalAcceptance, "owner-bom db: Accept still works on the owner's estimate with no bidders");
       const q2b = (await getQuote(iq2))!;
       ok(!("bidScopeOnly" in q2b) && (await portalBidderQuoteIds([q2b])).size === 0, "scope-only db: an estimate that never had bidders carries no stamp and is not Scope only");
+      const vmPlain = await loadBidPanel(iq2, { canEdit: true, canSend: true, canLink: true });
+      ok(vmPlain.ok && vmPlain.panel.scopeOnly === false && vmPlain.panel.bidders.length === 0, "scope-only label db: an estimate that never had a bidder → scopeOnly false");
     }
 
     // Final fix #2 (Jeff 2026-10-15): "Scope only" is sticky — removing every bidder, legacy rows, and a split.
@@ -1724,6 +1746,8 @@ export async function portalBidDbChecks(ok: Ok) {
       const acc3 = await acceptPortal(ses(own), { quoteId: iq3, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "Owen", signerTitle: "Director" }, Date.now(), { notify: async () => {} });
       ok(!acc3.ok && acc3.error === PORTAL_NOT_FOUND_COPY && !(await getQuote(iq3))!.portalAcceptance, "scope-only db: Accept is still refused after the bidders are removed");
       ok((await portalBidderQuoteIds([q3])).has(iq3), "scope-only db: Home / My quotes agree (portalBidderQuoteIds)");
+      const vmGone = await loadBidPanel(iq3, { canEdit: true, canSend: true, canLink: true });
+      ok(vmGone.ok && vmGone.panel.bidders.length === 0 && vmGone.panel.scopeOnly === true, "scope-only label db: every bidder removed — the VM still carries scopeOnly (sticky)");
 
       // Legacy: bidder rows from before the stamp existed (no stamp), then removed — the deleted rows still count.
       await createFixture("quotes", buildQuote(iq4, { name: "Owner legacy quote", customer: NAMES.own, customerId: own, value: 300, spec: iSpec } as never, "system", null, NOW) as never);
@@ -1736,6 +1760,8 @@ export async function portalBidDbChecks(ok: Ok) {
       const q4b = (await getQuote(iq4))!;
       ok((await listFor("quote", iq4)).every((p) => p.role !== "gc") && !("bidScopeOnly" in q4b) && (await portalQuoteHasBidders(q4b)) && (await portalBidderQuoteIds([q4b])).has(iq4),
         "scope-only db: its bidder row removed (soft-deleted), it stays Scope only — listFor still hides the row");
+      const vmLegacy = await loadBidPanel(iq4, { canEdit: true, canSend: true, canLink: true });
+      ok(vmLegacy.ok && vmLegacy.panel.scopeOnly === true, "scope-only label db: an unstamped estimate whose bidder row was removed → scopeOnly true");
 
       // Split (Move system → New estimate): the action's decision + create(…, { bidScopeOnly }).
       const inh = async (src: Quote | null, failed = false, cust: string | null = own) => newEstimateScopeOnly(src, failed, cust);
