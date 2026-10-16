@@ -27,7 +27,7 @@ export type LineMovePlan = {
   added: LineMovePartner[];
   sources: string[];
   clearedSell: string[];
-  droppedStars: DroppedStar[];
+  droppedStars: DroppedStar[]; // kinds "system" and "new"
   emptied: string[];
   noop: boolean;
 };
@@ -54,8 +54,43 @@ function mergeStars(target: KeyProduct[], moving: KeyProduct[]): { kept: KeyProd
 
 const renumber = (items: SpecItem[]) => items.map((it, i) => ({ ...it, lineOrder: i }));
 
+/** Carries the picked lines out of their sources, with their labor-group
+ *  records. Group ids are tracked per source section (copy-system keeps ids
+ *  verbatim, so two sources can both hold "lg1" with different drafts): an id
+ *  that is already taken in `base` or by an earlier source is re-minted, on
+ *  that source's moved lines only. */
+function carryLines(
+  sections: readonly SpecSection[],
+  picked: ReadonlySet<number>,
+  base: Record<string, LaborGroupRecord>,
+  mint: () => string
+): { items: SpecItem[]; groups: Record<string, LaborGroupRecord> } {
+  const groups: Record<string, LaborGroupRecord> = { ...base };
+  const taken = new Set(Object.keys(groups));
+  const items: SpecItem[] = [];
+  for (const s of sections) {
+    const mine = s.items.filter((x) => picked.has(x.id));
+    if (!mine.length) continue;
+    const rename = new Map<string, string>();
+    for (const g of new Set(mine.map((x) => x.laborGroup).filter((g): g is string => !!g))) {
+      let id = g;
+      if (taken.has(id)) do id = mint(); while (taken.has(id));
+      taken.add(id);
+      if (id !== g) rename.set(g, id);
+      const rec = s.laborGroups?.[g];
+      if (rec) groups[id] = rec;
+    }
+    for (const x of mine) items.push(x.laborGroup && rename.has(x.laborGroup) ? { ...x, laborGroup: rename.get(x.laborGroup) } : x);
+  }
+  return { items, groups };
+}
+
 export function planLineMove(sections: readonly SpecSection[], selected: Iterable<number>, target: LineMoveTarget): LineMovePlan {
   const targetId = target.kind === "system" ? target.sectionId : null;
+  const emptyPlan: LineMovePlan = { ids: [], added: [], sources: [], clearedSell: [], droppedStars: [], emptied: [], noop: true };
+  // A target that does not exist (or a "new" id already taken) would drop the lines on the floor.
+  if (target.kind === "system" && !sections.some((x) => x.id === target.sectionId)) return emptyPlan;
+  if (target.kind === "new" && sections.some((x) => x.id === target.id)) return emptyPlan;
   const where = new Map<number, { si: number; item: SpecItem }>();
   sections.forEach((s, si) => s.items.forEach((item) => where.set(item.id, { si, item })));
 
@@ -68,13 +103,12 @@ export function planLineMove(sections: readonly SpecSection[], selected: Iterabl
   });
 
   const picked = new Set<number>();
-  const ticked = new Set<number>();
   const added: LineMovePartner[] = [];
   const queue: number[] = [];
   for (const id of selected) {
     const w = where.get(id);
     if (!w || !isMovableLine(w.item) || (targetId && sections[w.si].id === targetId)) continue;
-    if (!picked.has(id)) { picked.add(id); ticked.add(id); queue.push(id); }
+    if (!picked.has(id)) { picked.add(id); queue.push(id); }
   }
   const pull = (p: LineMovePartner) => {
     const w = where.get(p.id);
@@ -104,8 +138,8 @@ export function planLineMove(sections: readonly SpecSection[], selected: Iterabl
   const clearedSell = sections.filter((s) => touched.has(s.id) && "sellOverride" in s).map((s) => s.id);
 
   let droppedStars: DroppedStar[] = [];
-  if (target.kind === "system" && !noop) {
-    const tgt = sections.find((s) => s.id === targetId);
+  if (target.kind !== "estimate" && !noop) {
+    const tgt = targetId ? sections.find((s) => s.id === targetId) : undefined;
     const moving = sections.flatMap((s) => (s.keyProducts || []).filter((k) => picked.has(Number(k.lineKey))));
     droppedStars = mergeStars(tgt?.keyProducts || [], moving).dropped;
   }
@@ -115,7 +149,7 @@ export function planLineMove(sections: readonly SpecSection[], selected: Iterabl
     return !s.items.some((x) => !picked.has(x.id) && isMovableLine(x));
   });
 
-  return { ids, added: added.filter((a) => !ticked.has(a.id)), sources, clearedSell, droppedStars, emptied, noop };
+  return { ids, added, sources, clearedSell, droppedStars, emptied, noop };
 }
 
 /** The source side of a move: the lines leave, their drafts and stars go with
@@ -146,10 +180,7 @@ export function applyLineMove(
   const mint = opts.mintLaborGroupId || (() => newLaborGroupId());
   const picked = new Set(plan.ids);
 
-  const movingItems = sections.flatMap((s) => s.items.filter((x) => picked.has(x.id)));
   const movingStars = sections.flatMap((s) => (s.keyProducts || []).filter((k) => picked.has(Number(k.lineKey))));
-  const movingGroups: Record<string, LaborGroupRecord> = {};
-  for (const s of sections) for (const [g, rec] of Object.entries(s.laborGroups || {})) if (movingItems.some((x) => x.laborGroup === g)) movingGroups[g] = rec;
 
   let list = removeLinesFromSources(sections, plan.ids);
 
@@ -173,15 +204,7 @@ export function applyLineMove(
 
   list = list.map((s) => {
     if (s.id !== targetId) return s;
-    // Labor group ids: re-mint any that already exist on the target.
-    const rename = new Map<string, string>();
-    const groups: Record<string, LaborGroupRecord> = { ...(s.laborGroups || {}) };
-    for (const [g, rec] of Object.entries(movingGroups)) {
-      const id = g in groups ? mint() : g;
-      if (id !== g) rename.set(g, id);
-      groups[id] = rec;
-    }
-    const items = movingItems.map((x) => (x.laborGroup && rename.has(x.laborGroup) ? { ...x, laborGroup: rename.get(x.laborGroup) } : x));
+    const { items, groups } = carryLines(sections, picked, s.laborGroups || {}, mint);
     let next: SpecSection = clearSellOverride({ ...s, items: renumber([...s.items, ...items]) });
     if (Object.keys(groups).length) next = { ...next, laborGroups: groups };
     next = withKeyProducts(next, mergeStars(s.keyProducts || [], movingStars).kept);
@@ -193,13 +216,17 @@ export function applyLineMove(
 /** The lines of an estimate-bound plan as ONE section shaped like the first
  *  source (for moveSystemToEstimateAction, which re-ids and names it
  *  "<name> (moved)"). No typed sell, group, built, alternate, goals or cover. */
-export function extractLinesAsSection(sections: readonly SpecSection[], plan: LineMovePlan): SpecSection {
+export function extractLinesAsSection(
+  sections: readonly SpecSection[],
+  plan: LineMovePlan,
+  opts: { mintLaborGroupId?: () => string } = {}
+): SpecSection {
   const picked = new Set(plan.ids);
   const first = sections.find((s) => s.id === plan.sources[0]) || sections[0];
-  const items = renumber(sections.flatMap((s) => s.items.filter((x) => picked.has(x.id))));
-  const groups: Record<string, LaborGroupRecord> = {};
-  for (const s of sections) for (const [g, rec] of Object.entries(s.laborGroups || {})) if (items.some((x) => x.laborGroup === g)) groups[g] = rec;
-  const stars = sections.flatMap((s) => (s.keyProducts || []).filter((k) => picked.has(Number(k.lineKey)))).slice(0, MAX_KEY_PRODUCTS);
+  const carried = carryLines(sections, picked, {}, opts.mintLaborGroupId || (() => newLaborGroupId()));
+  const items = renumber(carried.items);
+  const groups = carried.groups;
+  const stars = mergeStars([], sections.flatMap((s) => (s.keyProducts || []).filter((k) => picked.has(Number(k.lineKey))))).kept;
   const out: SpecSection = {
     id: first.id,
     name: first.name,

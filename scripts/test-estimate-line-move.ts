@@ -147,6 +147,60 @@ export async function lineMoveChecks(ok: Ok) {
     ok(plan.clearedSell.join() === "A", "line-move: an estimate move clears only the sources' typed sells");
   }
 
+  // unknown target / taken new id → no-op, nothing lost
+  {
+    const a = sec("A", [line(1), line(2)]);
+    const r = applyLineMove([a], [1], { kind: "system", sectionId: "ZZ" });
+    ok(r.plan.noop && ids(find(r.sections, "A")).join() === "1,2", "line-move: an unknown target system is a no-op and loses no lines");
+    const r2 = applyLineMove([a, sec("B", [])], [1], { kind: "new", id: "B", name: "X" });
+    ok(r2.plan.noop && ids(find(r2.sections, "A")).join() === "1,2" && r2.sections.length === 2, "line-move: a new-system id that already exists is a no-op");
+  }
+
+  // a partner already in the target is neither moved nor listed
+  {
+    const a = sec("A", [line(1, { curtain: true, curtainTrackKey: "ct-1-x" })]);
+    const b = sec("B", [line(3, { track: { series: "x" } as never, curtainTrackKey: "ct-1-x" })]);
+    const p = planLineMove([a, b], [1], { kind: "system", sectionId: "B" });
+    ok(p.ids.join() === "1" && p.added.length === 0, "line-move: a partner already in the target is not moved or listed");
+  }
+
+  // two sources sharing a labor group id → no draft is overwritten
+  {
+    const d1 = { mobs: [], margin: "30" } as never;
+    const d2 = { mobs: [], margin: "40" } as never;
+    const a = sec("A", [line(1, { labor: true, laborGroup: "lg1" })], { laborGroups: { lg1: { draft: d1, lines: 1 } } });
+    const b = sec("B", [line(2, { labor: true, laborGroup: "lg1" })], { laborGroups: { lg1: { draft: d2, lines: 1 } } });
+    const c = sec("C", []);
+    let n = 0;
+    const { sections } = applyLineMove([a, b, c], [1, 2], { kind: "system", sectionId: "C" }, { mintLaborGroupId: () => "lgM" + ++n });
+    const tc = find(sections, "C")!;
+    const g1 = tc.items.find((x) => x.id === 1)!.laborGroup, g2 = tc.items.find((x) => x.id === 2)!.laborGroup;
+    ok(g1 === "lg1" && g2 === "lgM1", "line-move: the second source's colliding labor group id is re-minted on its lines only");
+    ok(tc.laborGroups?.lg1?.draft === d1 && tc.laborGroups?.lgM1?.draft === d2, "line-move: each source keeps its own labor draft in the target");
+    // minted id that is itself taken is skipped
+    const e = sec("E", [line(5, { labor: true, laborGroup: "lg1" })], { laborGroups: { lg1: { draft: d2, lines: 1 } } });
+    const f = sec("F", [], { laborGroups: { lg1: { draft: d1, lines: 0 }, lgM1: { draft: d1, lines: 0 } } });
+    let m = 0;
+    const r = applyLineMove([e, f], [5], { kind: "system", sectionId: "F" }, { mintLaborGroupId: () => "lgM" + ++m });
+    ok(find(r.sections, "F")!.items[0].laborGroup === "lgM2", "line-move: a minted labor group id that is already taken is re-minted again");
+    // extract: same per-source rule
+    const plan = planLineMove([a, b], [1, 2], { kind: "estimate" });
+    let k = 0;
+    const out = extractLinesAsSection([a, b], plan, { mintLaborGroupId: () => "lgX" + ++k });
+    ok(out.items.map((x) => x.laborGroup).join() === "lg1,lgX1" && out.laborGroups?.lg1?.draft === d1 && out.laborGroups?.lgX1?.draft === d2, "line-move: the outgoing section re-mints a colliding labor group id per source");
+  }
+
+  // stars dropped for a new system too; extract dedupes stars
+  {
+    const kp = (id: number, sku: string) => ({ lineKey: String(id), sku, text: "p" + id, photo: true });
+    const a = sec("A", [line(1, { sku: "SAME" })], { keyProducts: [kp(1, "SAME")] });
+    const b = sec("B", [line(2, { sku: "SAME" })], { keyProducts: [kp(2, "SAME")] });
+    const { sections, plan } = applyLineMove([a, b], [1, 2], { kind: "new", id: "N", name: "N" });
+    ok(plan.droppedStars.length === 1 && plan.droppedStars[0].id === 2 && find(sections, "N")!.keyProducts!.length === 1, "line-move: a new system drops a duplicate-part star across sources");
+    const out = extractLinesAsSection([a, b], planLineMove([a, b], [1, 2], { kind: "estimate" }));
+    ok(out.keyProducts?.length === 1, "line-move: the outgoing section dedupes stars");
+  }
+
   // describe
   {
     const a = sec("A", [line(1, { curtain: true }), line(2, { track: { series: "x" } as never })], { sellOverride: 10 });
