@@ -29,6 +29,7 @@ import { customerRecordCandidates, likelyFilingCustomer } from "@/lib/inbox-org/
 import { filingSenderOf } from "@/lib/inbox-org/pipeline";
 import { get as getThread, visibleTo } from "@/lib/stores/comms";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 /** #335 Inbox organization — run the time-boxed AI pass over my own
  *  pendingAi threads now (the Organize view's "Sync now"-style button).
@@ -119,12 +120,20 @@ export async function archiveFromOrganizeAction(threadIds: string[], tab: string
   const undo: OrganizeArchiveUndo[] = [];
   let refused = 0;
   for (const id of list) {
-    const r = await archiveFromOrganize(id, t, me);
-    if (r.ok) undo.push(r.undo);
-    else refused++;
+    // #351 review M7 — one row failing never loses the Undo of the rows that did archive
+    try {
+      const r = await archiveFromOrganize(id, t, me);
+      if (r.ok) undo.push(r.undo);
+      else refused++;
+    } catch (e) {
+      console.error("[organize] archive failed for one row", id, e instanceof Error ? e.message : e);
+      refused++;
+    }
   }
   revalidate();
-  return { ok: true as const, archived: undo.length, refused, undo };
+  // Jeff 2026-10-15 #29 — Archive all shown sends every Noise row; past the cap the rest wait for another press
+  const more = Array.isArray(threadIds) && new Set(threadIds.map((x) => str(x)).filter(Boolean)).size > list.length;
+  return { ok: true as const, archived: undo.length, refused, undo, more };
 }
 
 /** #346 — Undo an Organize Archive. Each entry is re-checked (my own thread,
@@ -202,7 +211,7 @@ export async function filingRecordsAction(
 > {
   const me = await requireUser();
   const t = await getThread(str(threadId));
-  if (!t || t.deleted || t.status === "draft" || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
+  if (!t || t.deleted || t.status === "draft" || !visibleTo(t, await mailboxViewer(me))) return { ok: false, error: "Thread not found." };
   let cid = str(customerId);
   if (!cid) cid = (await likelyFilingCustomer(t, filingSenderOf(t, await loadOrgContext()))) || "";
   if (!cid) return { ok: true, customer: null, records: [] };

@@ -115,14 +115,26 @@ function fallbackChecks(ok: Ok): void {
   const r = ruleBrief(facts());
   ok(r.doFirst.map((d) => d.key).join(",") === "email:a,task:b,lead:c" && r.doFirst[0].why === "Customer waiting 2 days", "brief fallback: doFirst is the top 3 snapshot rows with their reasons");
   ok(
-    r.summary.includes("6 items on your list") && r.summary.includes("2 site visits today, the first at 9:30 AM") && r.summary.includes("1 h 10 min of driving") && r.summary.includes("3 tasks on today's plan") && r.summary.includes("2 quotes waiting on your approval") && r.summary.includes("5 threads to file (2 strong)") && r.summary.includes("3 noise") && r.summary.includes("1 new task from a promise"),
+    r.summary.includes("1 customer waiting on a reply") && r.summary.includes("1 lead ready to quote") && r.summary.includes("1 task on your list") && r.summary.includes("2 site visits today, the first at 9:30 AM") && r.summary.includes("1 h 10 min of driving") && r.summary.includes("3 tasks on today's plan") && r.summary.includes("2 quotes waiting on your approval") && r.summary.includes("5 threads to file (2 strong)") && r.summary.includes("3 noise") && r.summary.includes("1 new task from a promise"),
     `brief fallback: summary is composed from the counts (${r.summary})`
   );
   const quiet = [{ quoteId: "Q-1", number: "EST-1001", name: "Stage", customer: "North HS", sentAt: MON(9), days: 6 }];
   const clear = ruleBrief(facts({ rows: [], organize: { toFile: 0, strong: 0, noise: 0 }, newPromiseTasks: [], today: { visits: 0, firstVisitAt: null, driveMin: null, tasksDue: 0 }, approvals: 0, quiet }));
   ok(clear.doFirst.length === 0 && clear.summary.includes("Your list is clear") && clear.summary.includes("1 sent quote has gone quiet") && !/visit|approval|to file|promise/.test(clear.summary), `brief fallback: zero counts are left out; singular wording (${clear.summary})`);
   const one = ruleBrief(facts({ rows: ROW_OBJS.slice(0, 1), today: { visits: 1, firstVisitAt: MON(14), driveMin: 25, tasksDue: 1 } }));
-  ok(one.summary.includes("1 item on your list") && one.summary.includes("1 site visit today, at 2:00 PM") && one.summary.includes("25 min of driving") && one.summary.includes("1 task on today's plan"), `brief fallback: singular counts (${one.summary})`);
+  // #350 — Emails → Estimates → Tasks: every email fact before every estimate fact before every task fact
+  // ("1 task on your list": ROWS' `call:f` has no item part, so it parses as no source and counts in no block)
+  const at = (s: string) => r.summary.indexOf(s);
+  const emailsEnd = Math.max(at("1 customer waiting on a reply"), at("Inbox: 5 threads to file"));
+  const estStart = Math.min(at("2 quotes waiting on your approval"), at("1 lead ready to quote"));
+  const estEnd = Math.max(at("2 quotes waiting on your approval"), at("1 lead ready to quote"));
+  const tasksStart = Math.min(at("1 task on your list"), at("1 new task from a promise"), at("2 site visits today"), at("About 1 h 10 min of driving"), at("3 tasks on today's plan"));
+  ok(at("1 customer waiting on a reply") === 0 && emailsEnd < estStart && estEnd < tasksStart && at("1 lead ready to quote") > at("2 quotes waiting on your approval"), `brief fallback #350: the summary runs Emails → Estimates → Tasks (${r.summary})`);
+  const withQuiet = ruleBrief(facts({ quiet: [{ quoteId: "Q-1", number: "EST-1001", name: "Stage", customer: "North HS", sentAt: MON(9), days: 6 }] })).summary;
+  ok(withQuiet.indexOf("2 quotes waiting on your approval") < withQuiet.indexOf("1 sent quote has gone quiet") && withQuiet.indexOf("1 sent quote has gone quiet") < withQuiet.indexOf("1 lead ready to quote") && withQuiet.indexOf("1 lead ready to quote") < withQuiet.indexOf("1 task on your list"), `brief fallback #350: inside Estimates — approvals, quiet quotes, then leads (${withQuiet})`);
+  const renew = ruleBrief(facts({ rows: [{ key: "renewal:flame:R1", title: "t", reason: "r" }, { key: "renewal:inspection:R2", title: "t", reason: "r" }] })).summary;
+  ok(renew.includes("2 renewals coming up.") && !renew.includes("on your list") && !renew.includes("waiting on a reply"), `brief fallback #350: renewals count under Estimates; zero row counts are left out (${renew})`);
+  ok(one.summary.includes("1 customer waiting on a reply") && one.summary.includes("1 site visit today, at 2:00 PM") && one.summary.includes("25 min of driving") && one.summary.includes("1 task on today's plan"), `brief fallback: singular counts (${one.summary})`);
   const pm = ruleBrief(facts({ slot: "midday", since: { done: 4, open: 2, new: 1 } }));
   ok(pm.summary.startsWith("Since this morning: 4 done, 2 still open, 1 new."), `brief fallback: the afternoon summary leads with the since-morning line (${pm.summary.slice(0, 60)})`);
   ok(ruleBrief(facts({ rows: Array.from({ length: 400 }, (_, i) => ({ key: `k${i}`, title: "t", reason: "r" })) })).summary.length <= BRIEF_SUMMARY_MAX, "brief fallback: summary within the cap");
@@ -205,19 +217,41 @@ function speechChecks(ok: Ok): void {
   ok(spokenTime(MON(9)) === "nine a.m." && spokenTime(MON(9, 30)) === "nine thirty a.m." && spokenTime(MON(14, 5)) === "two oh five p.m." && spokenTime(MON(12, 15)) === "twelve fifteen p.m.", "brief speech: Chicago times read naturally");
   ok(spokenDuration(70) === "one hour and ten minutes" && spokenDuration(60) === "one hour" && spokenDuration(25) === "twenty-five minutes" && spokenDuration(1) === "one minute" && spokenDuration(125) === "two hours and five minutes", "brief speech: durations read naturally");
 
-  const titles = { "email:a": "Reply to Pat at North HS" };
-  const s = briefSpeech(BRIEF, titles);
+  const speechRows = [
+    { key: "email:a", source: "email", title: "Reply to Pat at North HS" },
+    { key: "task:b", source: "task", title: "" },
+    { key: "lead:c", source: "lead", title: "Lincoln HS" },
+    { key: "call:m1:i1", source: "call", title: "Send the riser drawings" },
+  ];
+  const s = briefSpeech(BRIEF, speechRows);
   ok(s.startsWith("Good morning. Here is your morning brief."), `brief speech: opens with the greeting (${s.slice(0, 50)})`);
   ok(s.includes("Busy Monday, two visits.") && !s.includes("·"), "brief speech: the summary is read with symbols turned into pauses");
-  ok(s.includes("Do these first. First, Reply to Pat at North HS. Pat has waited 2 days."), "brief speech: Do these first reads the row title, then why");
-  ok(!s.includes("task:b"), "brief speech: an item with no title and no why is never read as a raw key");
+  ok(s.includes("Emails. Start with Reply to Pat at North HS. Pat has waited 2 days. One customer is waiting on a reply."), `brief speech #350: the Emails block reads its ★ pick (row title, then why) before its counts (${s})`);
+  ok(!s.includes("task:b") && !s.includes("Do these first"), "brief speech: an item with no title and no why is never read as a raw key; no separate Do these first list");
+  const iSum = s.indexOf("Busy Monday"), iE = s.indexOf("Emails."), iQ = s.indexOf("Estimates."), iT = s.indexOf("Tasks.");
+  ok(iSum < iE && iE < iQ && iQ < iT, `brief speech #350: summary, then Emails, Estimates, Tasks (${iSum}/${iE}/${iQ}/${iT})`);
+  ok(s.includes("Estimates. One quote is waiting on your approval. One sent quote has gone quiet. One lead is ready to quote.") && s.includes("Tasks. Two tasks are on your list. One new task from a promise. You have two site visits today."), `brief speech #350: Estimates reads approvals, quiet, leads; Tasks reads the list (a call to-do counts), promises, then today (${s})`);
+  ok(s.indexOf("to file") > iE && s.indexOf("to file") < iQ, "brief speech #350: the Organize counts are read in Emails");
+  const noRows = briefSpeech({ ...BRIEF, doFirst: [{ key: "task:z", why: "Overdue a day" }, { key: "nope", why: "never read" }] });
+  ok(!noRows.includes("Overdue a day") && !noRows.includes("Start with") && !noRows.includes("never read") && !noRows.includes("waiting on a reply") && !noRows.includes("on your list") && noRows.includes("Tasks. One new task from a promise."), `brief speech #350 review: fail closed — with no rows (snapshot unreadable) no pick and no row count is read; the brief's own facts still are (${noRows})`);
+  const estOrder = briefSpeech(
+    { ...BRIEF, doFirst: [{ key: "lead:c", why: "SLA breached" }, { key: "quote:q", why: "Awaiting you" }, { key: "renewal:flame:r", why: "Due soon" }] },
+    [...speechRows, { key: "quote:q", source: "quote", title: "Stage curtain" }, { key: "renewal:flame:r", source: "renewal", title: "Flame renewal" }]
+  );
+  const est = estOrder.slice(estOrder.indexOf("Estimates."), estOrder.indexOf("Tasks."));
+  ok(
+    est === "Estimates. One quote is waiting on your approval. Start with Stage curtain. Awaiting you. One sent quote has gone quiet. Then Lincoln HS. SLA breached. One lead is ready to quote. Then Flame renewal. Due soon. One renewal is coming up. ",
+    `brief speech #350 review: Listen's Estimates follows the card — approvals, the ★ quote rows, quiet quotes, ★ leads and their count, ★ renewals and their count (${est})`
+  );
+  const gonePick = briefSpeech({ ...BRIEF, doFirst: [{ key: "email:gone", why: "Was waiting" }] }, speechRows);
+  ok(!gonePick.includes("Was waiting"), "brief speech #350: a pick whose row is no longer visible (done since) is not read — the card drops it too");
   ok(s.includes("You have two site visits today. The first is at nine thirty a.m.") && s.includes("About one hour and ten minutes of driving.") && s.includes("Three tasks are on today's plan."), "brief speech: today read with spelled numbers");
   ok(s.includes("One quote is waiting on your approval.") && s.includes("One sent quote has gone quiet.") && s.includes("Five threads to file, two of them strong, and three noise.") && s.includes("One new task from a promise."), "brief speech: counts read with singular/plural wording");
   const pm = briefSpeech({ ...BRIEF, slot: "midday", since: { done: 4, open: 1, new: 0 }, organize: { toFile: 0, strong: 0, noise: 0 }, quiet: [], approvals: 0, newPromiseTasks: [], today: { visits: 0, firstVisitAt: null, driveMin: null, tasksDue: 0 } });
   ok(pm.startsWith("Good afternoon. Here is your afternoon brief.") && pm.includes("Since this morning, four done, one still open, and none new.") && !/site visit|approval|quiet|to file|promise|today's plan/.test(pm), `brief speech: afternoon reads the since line; zero counts are skipped (${pm})`);
   ok(!/[*#_`]/.test(briefSpeech({ ...BRIEF, summary: "**Bold** _x_ `y` # z" })), "brief speech: no markdown symbols are read aloud");
-  const linked = briefSpeech({ ...BRIEF, summary: "Call [Pat](https://x.example/p) about <b>the</b> [quote] <now>", doFirst: [{ key: "x", why: "[open](https://y) <i>it</i>" }] });
-  ok(linked.includes("Call Pat about the quote") && !/[[\]<>]|https?:|x\.example/.test(linked) && linked.includes("First, open it."), `brief speech: links read as their text, tags and [ ] < > never read (${linked})`);
+  const linked = briefSpeech({ ...BRIEF, summary: "Call [Pat](https://x.example/p) about <b>the</b> [quote] <now>", doFirst: [{ key: "task:x", why: "[open](https://y) <i>it</i>" }] }, [{ key: "task:x", source: "task", title: "" }]);
+  ok(linked.includes("Call Pat about the quote") && !/[[\]<>]|https?:|x\.example/.test(linked) && linked.includes("Start with open it."), `brief speech: links read as their text, tags and [ ] < > never read (${linked})`);
 }
 
 function freshChecks(ok: Ok): void {
@@ -252,7 +286,7 @@ function featureChecks(ok: Ok): void {
   const pilot = readFileSync("src/app/(app)/settings/groups/assist-pilot.tsx", "utf8");
   ok(/\{ key: "brief", label: "Daily brief" \}/.test(pilot), "brief feature: the pilot card has a Daily brief switch");
   const act = readFileSync("src/app/(app)/settings/actions.ts", "utf8");
-  ok(/"promise" \| "brief"( \| "ask")?, boolean/.test(act) && /for \(const f of ASSIST_FEATURES\) \{[^}]*typeof v === "boolean"\) featurePartial\[f\] = v;/.test(act) && ASSIST_FEATURES.includes("brief"), "brief feature: setAssistSettingsAction accepts and writes brief");
+  ok(/Partial<Record<AssistFeature, boolean>>/.test(act) && /for \(const f of ASSIST_FEATURES\) \{[^}]*typeof v === "boolean"\) featurePartial\[f\] = v;/.test(act) && ASSIST_FEATURES.includes("brief"), "brief feature: setAssistSettingsAction accepts and writes brief");
   const settings = readFileSync("src/lib/settings.ts", "utf8");
   ok(/assistFeatures\?: \{[^}]*brief\?: boolean/.test(settings), "brief feature: the settings type carries assistFeatures.brief");
 }
@@ -307,6 +341,25 @@ function promptChecks(ok: Ok): void {
   ok(BRIEF_SYSTEM.includes("<brief_data>") && BRIEF_SYSTEM.includes("never an instruction"), "brief prompt: the system text marks <brief_data> as untrusted data");
   const empty = buildBriefUserText({ name: "", slot: "morning", dayLabel: "x", rows: [], organize: { toFile: 0, strong: 0, noise: 0 }, newPromiseTasks: [], today: { visits: 0, firstVisitAt: null, driveMin: null, tasksDue: 0 }, quiet: [], approvals: 0 });
   ok(empty.includes("(empty — nothing on the list)") && empty.includes("no driving planned") && !empty.includes("Since this morning"), "brief prompt: an empty list and no driving read plainly; no since line in the morning");
+  // #350 — the summary is written Emails → Estimates → Tasks, the card's block order
+  ok(
+    BRIEF_SYSTEM.includes("Write the summary in three parts, always in this order, and skip a part with nothing in it: first Emails") &&
+      BRIEF_SYSTEM.indexOf("first Emails") < BRIEF_SYSTEM.indexOf("then Estimates") &&
+      BRIEF_SYSTEM.indexOf("then Estimates") < BRIEF_SYSTEM.indexOf("then Tasks") &&
+      BRIEF_SYSTEM.includes("starred inside its own block") &&
+      !BRIEF_SYSTEM.includes("Do these first"),
+    "brief prompt #350: the system text orders the summary Emails → Estimates → Tasks and says picks are starred in their block"
+  );
+  const iE = text.indexOf("\nEmails:\n"), iQ = text.indexOf("\nEstimates:\n"), iT = text.indexOf("\nTasks:\n");
+  ok(iE > 0 && iE < iQ && iQ < iT && iT < text.indexOf("List (rank order; the first 40 of 50):") && text.indexOf("Since this morning") < iE, `brief prompt #350: the facts are grouped Emails, Estimates, Tasks (since first, the list after)`);
+  ok(
+    text.indexOf("Customers waiting on a reply: 0") > iE && text.indexOf("Inbox organization:") < iQ &&
+      text.indexOf("Quotes waiting on their approval: 3.") > iQ && text.indexOf("Sent quotes with no reply") > iQ && text.indexOf("Leads ready to quote: 40; renewals coming up: 0") > iQ &&
+      text.indexOf("Tasks on the list: 0") > iT && text.indexOf("New tasks from promises") > iT && text.indexOf("- Today: 1 site visit") > iT &&
+      text.includes("Row sources by block: email → Emails; quote, lead, renewal → Estimates; task, assignment, call, visit → Tasks."),
+    "brief prompt #350: each fact sits in its block, with the row counts per block and the source → block key"
+  );
+  ok(!text.includes("Leads ready to quote: 50") && text.includes("List (rank order; the first 40 of 50):") && !empty.includes("the first"), "brief prompt #350 review: the counts are of the list the model sees (capped at BRIEF_ROWS_MAX), and a cut list says 'the first N of M'");
 }
 
 export async function briefPureChecks(ok: Ok): Promise<void> {
@@ -475,7 +528,7 @@ export async function briefDraftDbChecks(ok: Ok): Promise<void> {
 
     /* courtMeThreads */
     const all = (await Promise.all(Object.values(TH).map((id) => getThread(id)))).filter(Boolean) as Thread[];
-    const court = courtMeThreads(all, ME).map((t) => t.id);
+    const court = courtMeThreads(all, { ...ME, nameUnique: true }).map((t) => t.id); // #349 — a viewer (identity)
     ok(court.join(",") === [TH.mine, TH.stale, TH.fresh].join(","), `brief drafts: court-me threads are mine, waiting on us, assigned to me, in my own box, not archived / noise — oldest wait first (${court.join(",")})`);
 
     /* the queue: first run */
@@ -800,7 +853,7 @@ export async function briefBuildDbChecks(ok: Ok): Promise<void> {
     /* 2. fallback: refusal, unusable answer, Assist off, no time */
     const refused = await B.buildBrief(meT, "morning", AM, { builtBy: "lazy", deadlineMs: soon(), deps: deps({ run: { provider: fakeProvider("", { fail: "declined" }) } }) });
     for (const r of await listDocsByField<{ id: string }>("assist_runs", "contextRef", [`brief:${ME.id}:${DAY}:morning`])) created.push({ coll: "assist_runs" as Coll, id: r.id });
-    ok(!!refused.error && refused.doFirst.map((d) => d.key).join(",") === "lead:TEST3373-1,visit:TEST3373-2,renewal:TEST3373-3" && refused.summary.includes("4 items on your list.") && refused.summary.includes("1 site visit today"), `brief fallback: a refusal → the rule-built brief (top 3 rows, counts), error kept (${refused.error})`);
+    ok(!!refused.error && refused.doFirst.map((d) => d.key).join(",") === "lead:TEST3373-1,visit:TEST3373-2,renewal:TEST3373-3" && refused.summary.includes("2 leads ready to quote.") && refused.summary.includes("1 renewal coming up.") && refused.summary.includes("1 site visit today"), `brief fallback: a refusal → the rule-built brief (top 3 rows, counts), error kept (${refused.error})`);
     answer = { summary: "", doFirst: [] };
     const unusable = await B.buildBrief(meT, "morning", AM, { builtBy: "lazy", deadlineMs: soon(), deps: deps() });
     for (const r of await listDocsByField<{ id: string }>("assist_runs", "contextRef", [`brief:${ME.id}:${DAY}:morning`])) created.push({ coll: "assist_runs" as Coll, id: r.id });
@@ -827,7 +880,7 @@ export async function briefBuildDbChecks(ok: Ok): Promise<void> {
     /* 3b. runAssist throwing (spend read, run log) → the rule-built brief, with its rows */
     const throwing = { ...pilot, get capUsd(): number { throw new Error("db down"); } } as typeof pilot;
     const thrown = await B.buildBrief(meT, "morning", AM, { builtBy: "lazy", deadlineMs: soon(), deps: deps({ settings: throwing }) });
-    ok(thrown.error === "Assist failed — the brief was built from the counts." && thrown.runId === null && thrown.doFirst.map((d) => d.key).join(",") === "lead:TEST3373-1,visit:TEST3373-2,renewal:TEST3373-3" && thrown.summary.includes("4 items on your list."), `brief fallback: a throw inside the Assist call keeps the facts — rule-built from the rows, error set (${thrown.summary})`);
+    ok(thrown.error === "Assist failed — the brief was built from the counts." && thrown.runId === null && thrown.doFirst.map((d) => d.key).join(",") === "lead:TEST3373-1,visit:TEST3373-2,renewal:TEST3373-3" && thrown.summary.includes("2 leads ready to quote."), `brief fallback: a throw inside the Assist call keeps the facts — rule-built from the rows, error set (${thrown.summary})`);
 
     /* 4. the view: stored, lazy, not eligible, before 6:45 */
     const v1 = await B.loadBriefView(ME, AM, { deps: deps() });
@@ -977,7 +1030,7 @@ export async function briefBuildDbChecks(ok: Ok): Promise<void> {
  *  while the 90-day cleanup was never run or isn't finished (pilot + Inbox organization). */
 async function briefOrganizeEntryChecks(ok: Ok): Promise<void> {
   const { briefCardVM, ORGANIZE_CLEANUP_HREF } = await import("@/lib/brief/card-vm");
-  const base = { brief: BRIEF, stale: null, transient: false, rows: {}, threads: {}, quotes: {} } as const;
+  const base = { brief: BRIEF, stale: null, transient: false, rows: [], threads: {}, quotes: {} } as const;
   const one = briefCardVM({ ...base, brief: { ...BRIEF, organize: { toFile: 1, strong: 0, noise: 0 } } });
   ok(one.organize?.label === "1 email to file" && one.organize.href === "/inbox?view=organize", `brief #345: one email reads "1 email to file", no noise part (${one.organize?.label})`);
   const noiseOnly = briefCardVM({ ...base, brief: { ...BRIEF, organize: { toFile: 0, strong: 0, noise: 4 } } });
@@ -1001,29 +1054,30 @@ async function briefOrganizeEntryChecks(ok: Ok): Promise<void> {
   const cardSrc = readFileSync("src/components/brief/brief-card.tsx", "utf8");
   ok(cardSrc.includes("organizeAvailable ? organizeEntryCounts(user).catch(() => null) : Promise.resolve(null)") && cardSrc.includes("organizeLive,"), "brief #346: the Home card reads the live counts the Inbox banner uses");
   const view = readFileSync("src/components/brief/brief-card-view.tsx", "utf8");
-  ok(view.includes("data-brief-organize ") && view.includes("{vm.organize.label} —") && view.includes("Review") && view.includes("data-brief-organize-cleanup") && view.includes("vm.organizeCleanup.href"), "brief #345: the card prints 'N emails to file · M noise — Review' and the Organize my inbox link");
+  ok(view.includes("data-brief-organize ") && view.includes("{it.label} —") && view.includes("Review") && view.includes("data-brief-organize-cleanup") && view.includes('case "cleanup":'), "brief #345: the card prints 'N emails to file · M noise — Review' and the Organize my inbox link");
   const card = readFileSync("src/components/brief/brief-card.tsx", "utf8");
   ok(card.includes("organizeAvailable && flags.file ? getCleanupState(user.id)") && card.includes("organizeEntry: { available: organizeAvailable, cleanup }") && card.includes("!inboxOrgDisabled()"), "brief #345: the card reads the cleanup state only for pilot + Inbox organization, and Organize's availability from the kill switch");
   const { organizeCounts } = await import("@/lib/brief/build");
   const fil = (customerId: string) => ({ customerId, work: null, noise: false, source: "identity", reason: "x", strength: "strong", needsReply: false, state: "suggested", at: 1 });
   const th = (id: string, customerId: string) => ({ id, mailbox: "personal", mailboxUser: "Me", archived: false, deleted: false, status: "waiting_us", filing: fil(customerId) }) as unknown as import("@/lib/stores/comms").CommThread;
-  const counts = organizeCounts([th("a", "UNK"), th("b", "C1")], { name: "Me" }, (id) => id === "UNK");
+  const counts = organizeCounts([th("a", "UNK"), th("b", "C1")], { id: "u-me", name: "Me", nameUnique: true }, (id) => id === "UNK");
   ok(counts.toFile === 2 && counts.strong === 1, `brief #345: a suggestion under a placeholder company is still To file but never counted strong (${JSON.stringify(counts)})`);
   const build = readFileSync("src/lib/brief/build.ts", "utf8");
-  ok(build.includes("const organize = organizeCounts(threads, me, (id) => placeholderIds.has(id));") && build.includes("isPlaceholderCompany(c.name)"), "brief #345: the build passes the placeholder companies to the Organize counts");
+  ok(build.includes("const organize = organizeCounts(threads, await mailboxViewer(me), (id) => placeholderIds.has(id));") && build.includes("isPlaceholderCompany(c.name)"), "brief #345: the build passes the placeholder companies to the Organize counts");
   const entry = readFileSync("src/app/(app)/inbox/organize/entry.ts", "utf8");
   ok(entry.includes('export const ORGANIZE_CLEANUP_HREF = `${ORGANIZE_TO_FILE_HREF}&cleanup=1`;'), "brief #345: the Inbox side builds the same cleanup link");
 }
 
 export async function briefCardChecks(ok: Ok): Promise<void> {
   const { briefCardVM, nudgeComposeHref, ORGANIZE_HREF } = await import("@/lib/brief/card-vm");
+  const { BLOCK_CAP } = await import("@/lib/brief/blocks");
   const { nudgePrefill, prefillRecipient, COMPOSE_BODY_MAX, COMPOSE_CONTACT_MAX, COMPOSE_SUBJECT_MAX } = await import("@/lib/inbox-compose-prefill");
   const { briefFromBlob, briefToBlob } = await import("@/lib/brief/build");
-  const { readerPreDraft } = await import("@/lib/brief/reader-predraft");
+  const { readerPreDraft, homeCardPreDraft } = await import("@/lib/brief/reader-predraft");
   const { outOfTime } = await import("@/lib/assist/reply-server");
   type ThreadArg = Parameters<typeof readerPreDraft>[0];
 
-  /* 1. the card VM */
+  /* 1. the card VM — three blocks, Emails → Estimates → Tasks (#350) */
   const doFirstBrief: Brief = {
     ...BRIEF,
     doFirst: [
@@ -1033,11 +1087,17 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
       { key: "task:gone", why: "" },
     ],
   };
-  const rows = {
-    "email:T1": { title: "Reply to Pat at North HS", href: "/inbox?thread=T1" },
-    "quote:Q-1": { title: "Stage curtain", href: "/estimator?id=Q-1" },
-    "lead:L1": { title: "New lead — Lincoln HS", href: "/leads?lead=L1" },
-  };
+  // rank order, as the snapshot holds them (task:gone was marked done — not visible)
+  const rows = [
+    { key: "task:T9", source: "task", title: "Call the rigger", href: "/queue?task=T9", reason: "Overdue 2 days" },
+    { key: "email:T2", source: "email", title: "Re: curtain colors", href: "/inbox?thread=T2", reason: "Customer message 3 h" },
+    { key: "lead:L1", source: "lead", title: "New lead — Lincoln HS", href: "/leads?lead=L1", reason: "SLA breached" },
+    { key: "email:T1", source: "email", title: "Reply to Pat at North HS", href: "/inbox?thread=T1", reason: "Customer waiting 2 days" },
+    { key: "visit:V1", source: "visit", title: "Site visit — North HS", href: "/calendar?visit=V1", reason: "Visit today" },
+    { key: "call:M1:i1", source: "call", title: "Send the riser drawings", href: "/recordings/M1", reason: "Call to-do" },
+    { key: "quote:Q-1", source: "quote", title: "Stage curtain", href: "/estimator?id=Q-1", reason: "Awaiting your approval" },
+    { key: "renewal:flame:R1", source: "renewal", title: "Flame test renewal — South HS", href: "/flame-tests", reason: "Renewal in 20 days" },
+  ];
   const nudge = { note: "Six days quiet — a short check-in.", emailSubject: "Following up on EST-1001", emailBody: "Hi Pat,\n\nJust checking in on the estimate.\n\nThanks" };
   const vm = briefCardVM({
     brief: doFirstBrief,
@@ -1048,35 +1108,92 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
     quotes: { "Q-1": { href: "/estimator?id=Q-1", nudge: { note: nudge.note } } },
   });
   ok(vm.id === "brief:u1:2026-10-12:morning" && vm.title === "Morning brief · 6:45" && vm.builtLabel === "built 6:45 AM" && vm.canRebuild && vm.notes.length === 0, `brief card: header — title, built time, Rebuild shown (${vm.builtLabel})`);
-  const [e, q, l, gone] = vm.doFirst;
-  ok(e.title === "Reply to Pat at North HS" && e.href === "/inbox?thread=T1" && e.why === "Pat has waited 2 days" && e.source === "Email" && e.draftReady && e.tasksReady && e.leadHref === null, "brief card: a Do-these-first item links to its snapshot row, with Draft ready / Tasks ready chips from the thread");
-  ok(q.draftReady && !q.tasksReady && q.href === "/estimator?id=Q-1", "brief card: a quote item with a ready nudge shows Draft ready");
-  ok(l.leadHref === "/leads?lead=L1" && !l.draftReady && l.source === "Lead" && !("pricingRequest" in l), "brief card: a lead item offers 'Ready to quote? → Open lead' on its own page — never labelled a pricing request");
-  ok(briefCardVM({ brief: { ...BRIEF, doFirst: [{ key: "lead:L9", why: "x" }] }, stale: null, transient: false, rows: {}, threads: {}, quotes: {} }).doFirst[0].leadHref === null, "brief card: a lead with no snapshot row gets no lead link");
+  ok(vm.blocks.map((bl) => `${bl.id}:${bl.title}`).join(",") === "emails:Emails,estimates:Estimates,tasks:Tasks" && !("doFirst" in vm) && !("counts" in vm), `brief card #350: three blocks in Jeff's order — Emails, Estimates, Tasks; no separate Do these first list (${vm.blocks.map((bl) => bl.id).join(",")})`);
+  const blk = (v: typeof vm, id: string) => v.blocks.find((bl) => bl.id === id);
+  const kinds = (v: typeof vm, id: string) => (blk(v, id)?.items ?? []).map((it) => (it.kind === "row" ? `${it.star ? "★" : ""}${it.key}` : it.kind === "quiet" ? `quiet:${it.quoteId}` : it.kind === "promise" ? `promise:${it.taskId}` : it.kind === "line" ? `line:${it.id}` : it.kind));
+  ok(kinds(vm, "emails").join(",") === "★email:T1,email:T2,organize", `brief card #350: Emails — the ★ pick first, then the other waiting emails in rank order, then the Organize line (${kinds(vm, "emails").join(",")})`);
+  ok(kinds(vm, "estimates").join(",") === "line:approvals,★quote:Q-1,quiet:Q-1,★lead:L1,renewal:R1".replace("renewal:R1", "renewal:flame:R1"), `brief card #350: Estimates — approvals (count, then the quotes awaiting you), quiet quotes, leads ready to quote, renewals (${kinds(vm, "estimates").join(",")})`);
+  ok(kinds(vm, "tasks").join(",") === "task:T9,call:M1:i1,promise:T-prm-1,line:today,visit:V1", `brief card #350: Tasks — the list's tasks (a call to-do is a task), new promise-tasks, Today's plan, today's visits (${kinds(vm, "tasks").join(",")})`);
+  const rowOf = (v: typeof vm, key: string) => v.blocks.flatMap((bl) => bl.items).find((it) => it.kind === "row" && it.key === key) as Extract<(typeof vm)["blocks"][number]["items"][number], { kind: "row" }> | undefined;
+  const e = rowOf(vm, "email:T1")!;
+  const e2 = rowOf(vm, "email:T2")!;
+  const q = rowOf(vm, "quote:Q-1")!;
+  const l = rowOf(vm, "lead:L1")!;
+  ok(e.star && e.title === "Reply to Pat at North HS" && e.href === "/inbox?thread=T1" && e.why === "Pat has waited 2 days" && e.source === "Email" && e.draftReady && e.tasksReady && e.leadHref === null, "brief card #350: a pick is ★ in its own block, links to its snapshot row and keeps its why; Draft reply ready / Tasks ready from the thread");
+  ok(!e2.star && e2.why === "" && e2.hint === "Customer message 3 h" && !e2.draftReady, "brief card #350: a row that isn't a pick has no ★ and no why — its triage reason is the tooltip");
+  ok(q.star && q.draftReady && !q.tasksReady && q.href === "/estimator?id=Q-1", "brief card: a quote row with a ready nudge shows Draft ready");
+  ok(l.leadHref === "/leads?lead=L1" && !l.draftReady && l.source === "Lead" && !("pricingRequest" in l), "brief card: a lead row offers 'Ready to quote? → Open lead' on its own page — never labelled a pricing request");
+  ok(!vm.blocks.flatMap((bl) => bl.items).some((it) => it.kind === "row" && it.key === "task:gone"), "brief card #350: a pick whose row is no longer visible (done / snoozed / closed) is dropped with it");
+  ok(briefCardVM({ brief: { ...BRIEF, doFirst: [{ key: "lead:L9", why: "x" }] }, stale: null, transient: false, rows: null, threads: {}, quotes: {} }).blocks.flatMap((bl) => bl.items).every((it) => it.kind !== "row" || it.leadHref === null), "brief card: a lead with no snapshot row gets no lead link");
   // Estimate suggestion (spec 2026-10-13 §3): with Suggest estimate on (a `leads` map), the lead cue becomes Suggest estimate / Suggestion ready.
   ok(l.leadSuggest === null && e.leadSuggest === null, "brief card: without Suggest estimate (no leads map) the lead keeps 'Open lead' and no suggest action");
-  const sugVM = (leads: Record<string, { readyHref: string | null }>) => briefCardVM({ brief: doFirstBrief, stale: null, transient: false, rows, threads: {}, quotes: {}, leads }).doFirst;
-  const [se, , sl] = sugVM({ L1: { readyHref: null } });
-  ok(sl.leadSuggest?.leadId === "L1" && sl.leadSuggest.readyHref === null && sl.leadHref === "/leads?lead=L1" && se.leadSuggest === null, "brief card: with Suggest estimate on, a lead row offers Suggest estimate for that lead (non-lead rows never do)");
-  ok(sugVM({ L1: { readyHref: "/estimator?suggestion=ES-abc&lead=L1" } })[2].leadSuggest?.readyHref === "/estimator?suggestion=ES-abc&lead=L1", "brief card: a lead with a suggestion offers 'Suggestion ready → Open'");
-  ok(briefCardVM({ brief: { ...BRIEF, doFirst: [{ key: "lead:L9", why: "x" }] }, stale: null, transient: false, rows: {}, threads: {}, quotes: {}, leads: { L9: { readyHref: null } } }).doFirst[0].leadSuggest === null, "brief card: a lead with no snapshot row gets no suggest action either");
-  ok(gone.href === null && gone.title === "An item on your list" && gone.why === "", "brief card: a key missing from the snapshot shows no link and never the raw key");
+  const sugVM = (leads: Record<string, { readyHref: string | null }>) => briefCardVM({ brief: doFirstBrief, stale: null, transient: false, rows, threads: {}, quotes: {}, leads });
+  const sv = sugVM({ L1: { readyHref: null } });
+  const sl = rowOf(sv, "lead:L1")!;
+  ok(sl.leadSuggest?.leadId === "L1" && sl.leadSuggest.readyHref === null && sl.leadHref === "/leads?lead=L1" && rowOf(sv, "email:T1")!.leadSuggest === null, "brief card: with Suggest estimate on, a lead row offers Suggest estimate for that lead (non-lead rows never do)");
+  ok(rowOf(sugVM({ L1: { readyHref: "/estimator?suggestion=ES-abc&lead=L1" } }), "lead:L1")!.leadSuggest?.readyHref === "/estimator?suggestion=ES-abc&lead=L1", "brief card: a lead with a suggestion offers 'Suggestion ready → Open'");
+  ok(briefCardVM({ brief: { ...BRIEF, doFirst: [{ key: "lead:L9", why: "x" }] }, stale: null, transient: false, rows: null, threads: {}, quotes: {}, leads: { L9: { readyHref: null } } }).blocks.flatMap((bl) => bl.items).every((it) => it.kind !== "row" || it.leadSuggest === null), "brief card: a lead with no snapshot row gets no suggest action either");
+
+  // an old stored brief (built before #350) renders in the new layout from the snapshot rows — no rebuild
+  const oldBrief: Brief = { ...BRIEF, doFirst: [{ key: "email:a", why: "Pat has waited 2 days" }, { key: "task:b", why: "" }, { key: "made:up", why: "x" }] };
+  const oldVm = briefCardVM({ brief: oldBrief, stale: null, transient: false, rows: [{ key: "email:a", source: "email", title: "Reply to Pat", href: "/inbox?thread=a" }, { key: "task:b", source: "task", title: "Call the rigger", href: "/queue" }], threads: {}, quotes: {} });
+  ok(oldVm.blocks.map((bl) => bl.id).join(",") === "emails,estimates,tasks" && kinds(oldVm, "emails")[0] === "★email:a" && kinds(oldVm, "tasks")[0] === "★task:b" && !oldVm.blocks.flatMap((bl) => bl.items).some((it) => it.kind === "row" && it.key === "made:up"), "brief card #350: an old stored brief renders the same three blocks with its picks starred in place — an unparseable key is dropped");
+
+  // #350 review — fail closed: no snapshot rows (the read failed) → no pick rows, no chips
+  const noSnap = briefCardVM({ brief: oldBrief, stale: null, transient: false, rows: null, threads: { a: { draft: true, tasks: true } }, quotes: {}, leads: { L1: { readyHref: null } } });
+  const noSnapRows = noSnap.blocks.flatMap((bl) => bl.items).filter((it) => it.kind === "row");
+  ok(noSnapRows.length === 0 && noSnap.blocks.map((bl) => bl.id).join(",") === "emails,estimates,tasks" && !noSnap.speech.includes("Pat has waited") && !noSnap.speech.includes("Start with"), `brief card #350 review: when the snapshot can't be read the card fails closed — no pick rows (so no Draft / Tasks chip on one), the brief's own facts still show, Listen reads no picks (${noSnapRows.length} rows)`);
+  const cardSrc350 = readFileSync("src/components/brief/brief-card.tsx", "utf8");
+  ok(/if \(rows\) for \(const d of b\.doFirst\) want\(d\.key\);/.test(cardSrc350) && cardSrc350.includes("getSnapshot(sid).catch(() => null)") && cardSrc350.includes("await loadLiveState(snapRows, triageUserFromSession(user), now)") && !/\.catch\(\(\) => new Set<string>\(\)\)/.test(cardSrc350), "brief card #350 review: the server card looks up chips for picks only with rows, and never treats a failed liveness check as 'nothing closed'");
+
+  // empty blocks hidden, order kept
+  const quietOnly = briefCardVM({ brief: { ...BRIEF, doFirst: [], organize: { toFile: 0, strong: 0, noise: 0 }, newPromiseTasks: [], today: { visits: 0, firstVisitAt: null, driveMin: null, tasksDue: 0 }, approvals: 0 }, stale: null, transient: false, rows: [], threads: {}, quotes: {} });
+  ok(quietOnly.blocks.map((bl) => bl.id).join(",") === "estimates", `brief card #350: an empty block is hidden (only Estimates has a quiet quote) (${quietOnly.blocks.map((bl) => bl.id).join(",")})`);
+  const tasksOnly = briefCardVM({ brief: { ...BRIEF, doFirst: [], organize: { toFile: 0, strong: 0, noise: 0 }, quiet: [], approvals: 0 }, stale: null, transient: false, rows: [{ key: "email:Z", source: "email", title: "Z", href: "/inbox?thread=Z" }], threads: {}, quotes: {} });
+  ok(tasksOnly.blocks.map((bl) => bl.id).join(",") === "emails,tasks", "brief card #350: blocks keep their order when one in the middle is empty");
+
+  // the cap
+  const many = Array.from({ length: 9 }, (_, i) => ({ key: `email:E${i}`, source: "email", title: `Email ${i}`, href: `/inbox?thread=E${i}` }));
+  const capped = briefCardVM({ brief: { ...BRIEF, doFirst: [{ key: "email:E8", why: "Oldest" }], organize: { toFile: 0, strong: 0, noise: 0 } }, stale: null, transient: false, rows: many, threads: {}, quotes: {} });
+  const ce = blk(capped, "emails")!;
+  ok(BLOCK_CAP === 5 && kinds(capped, "emails").join(",") === "★email:E8,email:E0,email:E1,email:E2,email:E3" && ce.more.length === 1 && ce.more[0].label === "4 more · See all in Start here →" && ce.more[0].href === "/triage", `brief card #350: a block shows ${BLOCK_CAP} rows (the ★ pick floated to the top, kept), then "N more · See all in Start here →" /triage (${kinds(capped, "emails").join(",")} / ${ce.more.map((m) => m.label).join(";")})`);
+  const sixStars = briefCardVM({ brief: { ...BRIEF, doFirst: many.slice(0, 5).map((r) => ({ key: r.key, why: "go" })), organize: { toFile: 0, strong: 0, noise: 0 } }, stale: null, transient: false, rows: many, threads: {}, quotes: {} });
+  ok(blk(sixStars, "emails")!.items.filter((it) => it.kind === "row").length === 5 && blk(sixStars, "emails")!.items.every((it) => it.kind !== "row" || it.star), "brief card #350: picks are never cut by the cap");
+  const quietMany = Array.from({ length: 8 }, (_, i) => ({ quoteId: `QQ${i}`, number: `EST-10${i}`, name: "Stage", customer: "X", sentAt: MON(9), days: 6 }));
+  const qm = briefCardVM({ brief: { ...BRIEF, doFirst: [], quiet: quietMany, approvals: 0 }, stale: null, transient: false, rows: [], threads: {}, quotes: {} });
+  ok(blk(qm, "estimates")!.items.length === 5 && blk(qm, "estimates")!.more.map((m) => `${m.label}@${m.href}`).join(";") === "3 more quiet quotes →@/quotes", `brief card #350: hidden quiet quotes link to the Quotes hub (${blk(qm, "estimates")!.more.map((m) => m.label).join(";")})`);
+
+  // a promise-task already on the list shows once, as the task row
+  const dupe = briefCardVM({ brief: { ...BRIEF, doFirst: [] }, stale: null, transient: false, rows: [{ key: "task:T-prm-1", source: "task", title: "Send drawings", href: "/queue" }], threads: {}, quotes: {} });
+  ok(kinds(dupe, "tasks").join(",") === "task:T-prm-1,line:today", `brief card #350: a new promise-task that is already a task row isn't listed twice (${kinds(dupe, "tasks").join(",")})`);
+
   ok(vm.organize?.label === "5 emails to file · 3 noise" && vm.organize.href === ORGANIZE_HREF && ORGANIZE_HREF === "/inbox?view=organize", `brief card: Inbox organization line reads "N emails to file · M noise" → Review /inbox?view=organize (#345) (${vm.organize?.label})`);
   await briefOrganizeEntryChecks(ok);
-  ok(briefCardVM({ brief: { ...BRIEF, organize: { toFile: 0, strong: 0, noise: 0 } }, stale: null, transient: false, rows: {}, threads: {}, quotes: {} }).organize === null, "brief card: Inbox organization hidden when every count is zero");
+  ok(briefCardVM({ brief: { ...BRIEF, organize: { toFile: 0, strong: 0, noise: 0 } }, stale: null, transient: false, rows: [], threads: {}, quotes: {} }).organize === null, "brief card: Inbox organization hidden when every count is zero");
   ok(vm.today === "2 visits (first at 9:30 AM) · 1 h 10 min driving · 3 tasks on today’s plan" && vm.approvals === "1 quote waiting on your approval", `brief card: Today line (${vm.today})`);
+  const lineText = (id: string) => vm.blocks.flatMap((bl) => bl.items).find((it) => it.kind === "line" && it.id === id) as { text: string } | undefined;
+  ok(lineText("today")?.text === `Today: ${vm.today}` && lineText("approvals")?.text === vm.approvals, "brief card #350: the Today line sits in Tasks and the approvals count in Estimates");
   ok(vm.promises.length === 1 && vm.promises[0].title === "Send drawings" && vm.promises[0].dueLabel === null, "brief card: new tasks from promises (title · due)");
   const qq = vm.quiet[0];
   ok(qq.label === "EST-1001 · Stage · North HS" && qq.daysLabel === "6 business days, no reply" && qq.note === nudge.note && qq.openHref === "/estimator?id=Q-1", "brief card: a quiet quote shows its note and Open estimate");
   ok(qq.nudgeHref === "/inbox?nudge=Q-1" && nudgeComposeHref("Q 1/x") === "/inbox?nudge=Q%201%2Fx", `brief card: Send nudge links to /inbox?nudge=<quoteId> — only the id travels (${qq.nudgeHref})`);
-  const bare = briefCardVM({ brief: BRIEF, stale: null, transient: false, rows: {}, threads: {}, quotes: {} });
+  const bare = briefCardVM({ brief: BRIEF, stale: null, transient: false, rows: [], threads: {}, quotes: {} });
   ok(bare.quiet[0].nudgeHref === null && bare.quiet[0].note === null && bare.quiet[0].openHref === "/estimator?id=Q-1", "brief card: no ready nudge → no Send nudge; Open estimate still links");
-  ok(vm.since === null && vm.counts.includes("Inbox: 5 emails to file · 3 noise") && vm.counts.some((c) => c.startsWith("Today: 2 visits")) && vm.counts.includes("1 sent quote has gone quiet") && vm.counts.includes("1 new task from a promise"), `brief card: big-text counts (${vm.counts.join(" | ")})`);
-  ok(vm.speech.includes("First, Reply to Pat at North HS. Pat has waited 2 days.") && !vm.speech.includes("task:gone") && !vm.speech.includes("email:T1"), "brief card: Listen reads the row titles, never a raw key");
-  const pm = briefCardVM({ brief: { ...BRIEF, slot: "midday", since: { done: 3, open: 2, new: 1 }, builtBy: "rebuild", error: "Assist failed — the brief was built from the counts." }, stale: null, transient: false, rows: {}, threads: {}, quotes: {} });
+  const sp = vm.speech;
+  ok(sp.includes("Emails. Start with Reply to Pat at North HS. Pat has waited 2 days.") && sp.includes("Estimates. One quote is waiting on your approval. Start with Stage curtain. Awaiting your approval. One sent quote has gone quiet. Then New lead — Lincoln HS. SLA breached. One lead is ready to quote.") && !sp.includes("task:gone") && !sp.includes("email:T1") && sp.indexOf("Emails.") < sp.indexOf("Estimates.") && sp.indexOf("Estimates.") < sp.indexOf("Tasks."), `brief card #350: Listen reads the summary, then the blocks in order with their ★ picks by row title — never a raw key (${sp})`);
+  const pm = briefCardVM({ brief: { ...BRIEF, slot: "midday", since: { done: 3, open: 2, new: 1 }, builtBy: "rebuild", error: "Assist failed — the brief was built from the counts." }, stale: null, transient: false, rows: [], threads: {}, quotes: {} });
   ok(pm.title === "Afternoon brief · 1:45" && pm.since === "Since this morning: 3 done · 2 still open · 1 new" && pm.builtLabel.startsWith("rebuilt ") && pm.notes.includes("Assist failed — the brief was built from the counts."), "brief card: afternoon adds the since line; a rebuilt brief and its error show");
-  const stale = briefCardVM({ brief: { ...BRIEF, slot: "midday", day: "2026-10-11" }, stale: "yesterday-afternoon", transient: false, rows: {}, threads: {}, quotes: {} });
+  const stale = briefCardVM({ brief: { ...BRIEF, slot: "midday", day: "2026-10-11" }, stale: "yesterday-afternoon", transient: false, rows: [], threads: {}, quotes: {} });
   ok(!stale.canRebuild && stale.notes[0].startsWith("Yesterday’s afternoon brief") && stale.builtLabel.includes("Oct"), `brief card: before 6:45 yesterday's afternoon brief shows, with no Rebuild (${stale.builtLabel})`);
+
+  // the view: both variants walk the same blocks; the phone one shows no drafts
+  const viewSrc = readFileSync("src/components/brief/brief-card-view.tsx", "utf8");
+  const full = viewSrc.slice(viewSrc.indexOf("function FullVariant"), viewSrc.indexOf("function BigVariant"));
+  const big = viewSrc.slice(viewSrc.indexOf("function BigVariant"));
+  ok(full.includes("vm.blocks.map((block)") && big.includes("vm.blocks.map((block)") && !viewSrc.includes("Do these first") && !viewSrc.includes("vm.doFirst") && !viewSrc.includes("vm.counts"), "brief view #350: the desktop and phone variants both render vm.blocks in order; no Do these first list");
+  const bigItem = big.slice(big.indexOf("function BigItem"));
+  ok(!/draftReady|tasksReady|nudgeHref|it\.note|SuggestEstimate|Draft/.test(bigItem) && bigItem.includes("<Star why={it.why} size={17} />"), "brief view #350: the phone blocks carry ★ picks but no drafts (no Draft ready, Send nudge, nudge note or Suggest estimate)");
+  ok(full.includes('<span className="pkb-chip">Draft reply ready</span>') && full.includes("Use it") && viewSrc.includes(".pkb-star{color:var(--accent)") && viewSrc.includes("Do this first — ${why}"), "brief view #350: an email row with a fresh pre-draft reads 'Draft reply ready · Use it'; the ★ is accent-colored (never hardcoded) with the why as its tooltip");
 
   /* 2. ?nudge= compose prefill (server-side: fresh, mine, capped) */
   type HE = QuoteHistoryEntry;
@@ -1128,19 +1245,26 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
   const sugg = [{ title: "Send drawings", notes: "", dueDate: "", assigneeUserId: "", linkKeys: [], tier: "normal", size: "s" }];
   const pd = { body: "Hi Pat — attached.", runId: "AR-r", taskSuggestions: sugg, taskRunId: "AR-t", basis: "m2", at: MON(6, 47), ownerId: "u-dana" };
   const th = (over: Record<string, unknown> = {}) => ({ status: "waiting_us", assignedTo: "Dana Diaz", noise: null, court: null, messages: msgs, preDraft: pd, ...over }) as unknown as ThreadArg;
-  const DANA = { id: "u-dana", name: "Dana Diaz" };
+  const DANA = { id: "u-dana", name: "Dana Diaz", nameUnique: true }; // #349 — a viewer (identity)
   const env = {};
   const r1 = readerPreDraft(th(), DANA, env);
   ok(!!r1 && r1.reply?.body === pd.body && r1.reply.runId === "AR-r" && r1.tasks?.runId === "AR-t" && r1.tasks.suggestions.length === 1 && r1.preparedLabel === "6:47 AM", "reader pre-draft: fresh, court me, mine → Use it (body + runId) and the stored suggestions");
   ok(readerPreDraft(th({ preDraft: { ...pd, basis: "m1" } }), DANA, env) === null, "reader pre-draft: stale (a newer inbound message) → nothing; the reader drafts live");
   ok(readerPreDraft(th({ assignedTo: "Sam Roe" }), DANA, env) === null, "reader pre-draft: someone else's thread → nothing");
-  ok(readerPreDraft(th({ assignedTo: "Sam Roe" }), { id: "u-sam", name: "Sam Roe" }, env) === null && readerPreDraft(th({ preDraft: { ...pd, ownerId: undefined } }), DANA, env) === null, "reader pre-draft: a thread reassigned since the draft was made shows its new owner nothing (ownerId must match)");
+  ok(readerPreDraft(th({ assignedTo: "Sam Roe" }), { id: "u-sam", name: "Sam Roe", nameUnique: true }, env) === null && readerPreDraft(th({ preDraft: { ...pd, ownerId: undefined } }), DANA, env) === null, "reader pre-draft: a thread reassigned since the draft was made shows its new owner nothing (ownerId must match)");
   ok(readerPreDraft(th({ status: "waiting_them" }), DANA, env) === null && readerPreDraft(th({ noise: { flagged: true } }), DANA, env) === null, "reader pre-draft: not on my court (waiting on them, or noise) → nothing");
   const noBody = readerPreDraft(th({ preDraft: { ...pd, body: "  " } }), DANA, env);
   ok(!!noBody && noBody.reply === null && !!noBody.tasks, "reader pre-draft: an empty body never shows Use it (stored suggestions still do)");
   const emptyTasks = readerPreDraft(th({ preDraft: { ...pd, taskSuggestions: [] } }), DANA, env);
   ok(!!emptyTasks && emptyTasks.tasks === null && !!emptyTasks.reply && readerPreDraft(th({ preDraft: { ...pd, body: "", taskSuggestions: [] } }), DANA, env) === null, "reader pre-draft: an empty stored suggestion list never skips the live Suggest tasks call");
   ok(readerPreDraft(th({ preDraft: { ...pd, body: "", taskSuggestions: null, taskRunId: null } }), DANA, env) === null && readerPreDraft(th({ preDraft: undefined }), DANA, env) === null, "reader pre-draft: nothing usable → null");
+  // #350 review — the Home card's chip only where the reader would offer the draft: my own mailbox (#349)
+  type CardThreadArg = Parameters<typeof homeCardPreDraft>[0];
+  const inBox = (owner: { id: string; name: string }) => ({ ...(th({ assignedToId: "u-dana" }) as object), mailbox: "personal", mailboxOwnerId: owner.id, mailboxUser: owner.name }) as unknown as CardThreadArg;
+  const teammates = inBox({ id: "u-sam", name: "Sam Roe" });
+  ok(readerPreDraft(teammates, DANA, env) !== null && homeCardPreDraft(teammates, DANA, env) === null, "brief card #350 review: a thread assigned to me in a teammate's mailbox gets no Draft / Tasks chip (the reader shows it read-only and offers no stored draft)");
+  const mine = homeCardPreDraft(inBox({ id: "u-dana", name: "Dana Diaz" }), DANA, env);
+  ok(!!mine?.reply && !!mine.tasks, "brief card #350 review: the same thread in my own mailbox gets its chips");
 
   /* 4. carry-over: the out-of-time result is a fresh object each time */
   const a = outOfTime();
@@ -1162,20 +1286,20 @@ export async function briefCardChecks(ok: Ok): Promise<void> {
   ok(tasksClick.includes("runId: storedTasks.runId") && tasksClick.includes("return;") && !tasksClick.includes("suggestTasksAction"), "brief pins: Suggest tasks opens the dialog on fresh stored suggestions with their runId — no model call");
   const inbox = readFileSync("src/app/(app)/inbox/page.tsx", "utf8");
   // #341: never on a read-only (another mailbox's) thread
-  ok(/const storedDraft = readOnly \? null : readerPreDraft\(sel, \{ id: user\.id, name: me \}\);/.test(inbox) && /\n\s+preDraft,\n\s+\};/.test(inbox), "brief pins: the reader VM carries the stored pre-draft (readerPreDraft)");
+  ok(/const storedDraft = readOnly \? null : readerPreDraft\(sel, viewer\);/.test(inbox) && /\n\s+preDraft,\n\s+\};/.test(inbox), "brief pins: the reader VM carries the stored pre-draft (readerPreDraft)");
   ok(/const nudgeQuote = nudgeId \? await getQuote\(nudgeId\)\.catch\(\(\) => null\) : null;\s+const nudge = nudgePrefill\(nudgeQuote, \{ id: user\.id, name: me \}\);/.test(inbox) && /prefillRecipient\(c, nudge\.contact\)/.test(inbox) && /subject: nudge\.subject,/.test(inbox) && /body: withSignature\(nudge\.body, signature, "add"\),/.test(inbox) && !/params\.(subject|body)\b/.test(inbox), "brief pins: Inbox compose init takes ?nudge=<quoteId> (read server-side), never subject/body from the URL");
   const rp = readFileSync("src/lib/brief/reader-predraft.ts", "utf8");
-  ok(rp.includes("preDraftFreshFor(t, me.id)") && rp.includes("onMyCourt(t, env)") && rp.includes("sameName(t.assignedTo, me.name)") && rp.includes("body.trim()"), "brief pins: readerPreDraft requires fresh + court me + mine, and a body for the reply");
+  ok(rp.includes("preDraftFreshFor(t, me.id)") && rp.includes("onMyCourt(t, env)") && rp.includes("isAssignedTo(t, me)") && rp.includes("body.trim()"), "brief pins: readerPreDraft requires fresh + court me + mine, and a body for the reply");
   const view = readFileSync("src/components/brief/brief-card-view.tsx", "utf8");
   ok(view.includes("rebuildBriefAction()") && view.includes('postChanged("inbox")') && view.includes("router.refresh()"), "brief pins: Rebuild refreshes the page and tells other windows (postChanged)");
   ok(view.includes("@media (max-width:899px)") && view.includes(".pkb-big{display:block}") && view.includes("new SpeechSynthesisUtterance(vm.speech)") && /const listenBtn = canSpeak \?/.test(view) && view.includes('useSearchParams().get("brief")') && view.includes('briefParam === "1"') && view.includes("[vm.id, briefParam]") && view.includes("scrollIntoView"), "brief pins: big-text under 900 px, Listen only when speech is supported, ?brief=1 scrolls to the card");
   ok(/localStorage\.getItem\(COLLAPSE_KEY\(vm\.id\)\)/.test(view) && view.includes("try {"), "brief pins: collapse remembered per brief id, storage in try/catch");
-  const cueAt = view.indexOf("{d.leadSuggest ? (");
+  const cueAt = view.indexOf("{it.leadSuggest ? (");
   const leadCue = view.slice(cueAt, cueAt + 1200);
-  ok(cueAt > 0 && /<SuggestEstimate\s+source=\{\{ kind: "lead", id: d\.leadSuggest\.leadId \}\}\s+readyHref=\{d\.leadSuggest\.readyHref\}/.test(leadCue) && leadCue.indexOf("d.leadHref && (") > leadCue.indexOf("<SuggestEstimate"), "brief pins: the lead cue is Suggest estimate (startSuggestion via SuggestEstimate) when on, else the old Open lead link");
+  ok(cueAt > 0 && /<SuggestEstimate\s+source=\{\{ kind: "lead", id: it\.leadSuggest\.leadId \}\}\s+readyHref=\{it\.leadSuggest\.readyHref\}/.test(leadCue) && leadCue.indexOf("it.leadHref && (") > leadCue.indexOf("<SuggestEstimate"), "brief pins: the lead cue is Suggest estimate (startSuggestion via SuggestEstimate) when on, else the old Open lead link");
   const card = readFileSync("src/components/brief/brief-card.tsx", "utf8");
-  ok(/flags\.estimate && leadIds\.size \? suggestionReadyHrefs\("lead", \[\.\.\.leadIds\]\)/.test(card) && /quotes: quoteInfo,\s*leads,/.test(card), "brief pins: the server card looks up each Do-these-first lead's suggestion only with Suggest estimate on (pilot + estimate)");
-  ok(card.includes("loadBriefView(user, triageNow())") && card.includes("readerPreDraft(t, { id: user.id, name: user.name })") && card.includes("nudgePrefill(q, { id: user.id, name: user.name }) !== null") && /assistUiFlags\(user\.id, settings, await getAssistEnv\(\)\)/.test(card), "brief pins: the server card runs the Assist gate, reads the lazy view, ready pre-drafts and nudges the Inbox will prefill");
+  ok(/flags\.estimate && leadIds\.size \? suggestionReadyHrefs\("lead", \[\.\.\.leadIds\]\)/.test(card) && /quotes: quoteInfo,\s*leads,/.test(card), "brief pins: the server card looks up each shown lead's suggestion only with Suggest estimate on (pilot + estimate)");
+  ok(card.includes("const now = triageNow();") && card.includes("loadBriefView(user, now)") && card.includes("homeCardPreDraft(t, viewer)") && card.includes("if (!viewer && threadIds.size) viewer = await mailboxViewer(user)") && card.includes("nudgePrefill(q, { id: user.id, name: user.name }) !== null") && /assistUiFlags\(user\.id, settings, await getAssistEnv\(\)\)/.test(card), "brief pins: the server card runs the Assist gate, reads the lazy view, ready pre-drafts and nudges the Inbox will prefill");
   const cardFn = card.slice(card.indexOf("export default async function BriefCard"), card.indexOf("async function loadCardVM"));
   ok(/try \{\s*vm = await loadCardVM\(user, settings\);\s*\} catch/.test(cardFn) && cardFn.includes("Your brief couldn’t load"), "brief pins: everything after the gate (load, store reads, VM) is inside one try — the card never breaks Home");
   const useFn2 = reader.slice(reader.indexOf("const useStoredDraft"), reader.indexOf("const closeComposer"));

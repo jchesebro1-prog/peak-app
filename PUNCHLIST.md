@@ -9485,8 +9485,9 @@ Spec: `docs/superpowers/specs/2026-09-28-church-template-design.md` (as-built no
 - Review the renders in `docs/venue-templates/renders/` (and a real plan per venue type on the preview deploy).
 - Confirm the Arena's corner radius (13', the floor's; the bowl's 13' + bowl depth) and the Contemporary back-wall
   rule (the back wall keeps the platform's width).
-- Confirm Traditional's upstage side lights landing in the Choir / Electrical rooms, and Contemporary's Green Room /
-  Electrical Room narrowing as the nave deepens (D462, D463).
+- ~~Confirm Traditional's upstage side lights landing in the Choir / Electrical rooms, and Contemporary's Green Room /
+  Electrical Room narrowing as the nave deepens (D462, D463).~~ **ANSWERED 2026-10-15 (Jeff): fix both, plus the
+  arena's 24' end stage covering 4' of the court and a 30' default gym stage — built in #354 (D1162–D1164).**
 - Pick a Background for any custom venue types in Settings → Venue types.
 - A real-DWG check of the Gym Stage Booth positions (back / left / right walls).
 - More drawings arrive as data + keys (the README recipe) — no new engine work expected.
@@ -9657,7 +9658,9 @@ New spec: known project numbers pre-fill the header. Harness checks added.
 Shell file was a hand-edited North HS original (see the follow-up below). **Was open:** where the reviewer's Acoustic
 Shell file came from (no Fall Creek 11 61 13 spec was ever saved — the library's 1.2/G numbers 1., 2., 3.); spec
 numbers vs Bray's TOC (MasterFormat has 11 61 23 as Folding and Portable Stages; SP-1002 and SP-1004 are both
-26 55 61; 26 09 61 "Controls and Fixtures" overlaps 26 55 61).
+26 55 61; 26 09 61 "Controls and Fixtures" overlaps 26 55 61). **ANSWERED 2026-10-15 (Jeff): renumber to Bray's TOC.
+Jeff chose Fall Creek (Bray 3748); its only Bray-issued section, 27 41 00, already matches the library, so #354
+(D1165) found no changes needed (`docs/specs-seed/bray-toc-map.json`, `npm run specs:renumber-bray`).**
 
 **Follow-up (same day) — Acoustic Shell + Pit Filler (D478).** Jeff's Acoustic Shell file turned out to be the North HS
 Word original edited by hand (its own list definitions: `lvlRestart=0` → 1.2/G numbered 4.–6., Times labels on Arial
@@ -10030,7 +10033,8 @@ Gates: tsc 0; test:specs 9495 PASS / 0 FAIL (+88); test:smoke 172/0; eslint 0 er
 Browser-verified (inspection $2,450 − $300 → letter $2,150; won → $300 redeemed + $32.25 earned at Silver 1.5 %;
 delete → both reversed; repair capped at its $825 total). Reviewed, no findings.
 
-**Jeff-gated:** review the defaults in Settings → Rewards (thresholds, earn %, starting-credit rate and cap), add
+**Jeff-gated:** ~~review the defaults in Settings → Rewards (thresholds, earn %, starting-credit rate and cap)~~ **confirmed
+2026-10-15 (Jeff) — the defaults are his numbers (D493)**; add
 perks, post starting credit, then turn the program on. The next production deploy applies migration 0034.
 **Lost quotes out of the program (2026-09-30, D505):** Jeff: "lost quotes shouldn't place into the rewards program."
 Marking a quote Lost (`setStatus`, every path) strips its credit — the Estimator line(s) and the service section's
@@ -10177,8 +10181,9 @@ Plan: `docs/superpowers/plans/2026-10-01-approver-send-and-lead-estimator.md`.
   lead, and the Quotes hub row adds "· prepared by <first name>" when they differ.
 
 **Follow-ups.**
-1. Should the lead estimator / Prepared by freeze after send? Today both can change on a sent quote (a PDF re-render
-   moves the printed revision date).
+1. ~~Should the lead estimator / Prepared by freeze after send? Today both can change on a sent quote (a PDF re-render
+   moves the printed revision date).~~ **ANSWERED 2026-10-15 (Jeff): they lock at the first send; an approver can still
+   change them. Built in #352 (D1129).**
 2. Settings → Team still decides who can approve, and so who can send others' quotes; check who holds `approve`.
 
 ---
@@ -10227,7 +10232,9 @@ hints) were fixed and re-reviewed.
    through the screen's own save action (ids `adc-280-black` … `adc-132-black`, 90 live SKUs), each priced with the real
    engine against production catalog costs (40' bi-parting 280 on a batten: 2 × 22' sticks, 8 hanging + 8 pipe clamps,
    2 lap clamps, 134' of #12 — $2,024.78 cost, matched by hand).
-2. Out of scope, for Jeff: walk-along bi-parts needing 4 end stops; center pipe supports (CPS) at the overlap; curve
+2. **ANSWERED 2026-10-15 (Jeff): walk-along end stops (4 on a walk-along bi-part), center pipe supports and separate
+   ceiling vs batten spacing are built in #354 (D1160, D1161); curve idlers are not wanted.** Was: out of scope, for
+   Jeff: walk-along bi-parts needing 4 end stops; center pipe supports (CPS) at the overlap; curve
    spindles/idlers on curved 140 cord runs; 220's floor pulley (ADC 1145 is not in the catalog — Jeff 2026-10-01: use the 2865BL, mapped;
    a cord-operated 220 now prices); pipe-clamp part numbers for 500 and 220 (ADC doesn't publish them); a
    separate ceiling vs batten hanger spacing; 170 has no black ceiling bracket in the catalog (ceiling-mounted 170 is
@@ -10349,17 +10356,24 @@ are additive JSONB that older code ignores. Rotating `AUTH_SECRET` also kills ev
 - The online header date is Chicago time while the document body uses server time (UTC on Vercel); align them.
 
 **For Jeff.**
-- Open questions in spec §12: photo side, datasheet thumbnails as photos, default presentation, who manages intros.
+- Open questions in spec §12: ~~photo side~~ (**ANSWERED 2026-10-15: photos alternate right, left, right — #352,
+  D1131**), ~~datasheet thumbnails as photos, default presentation, who manages intros~~ (**ANSWERED 2026-10-15
+  (Jeff): a part with no real photo uses its datasheet thumbnail — already so, D1190; new systems default to Narrative —
+  built in #355, D1191; anyone with `create` manages intros — already so, D1192**).
 - Toggle title says "every narrative system's" though By-section prints every system — reword?
 - Paragraphs live on catalog parts, so take `npm run db:export` before Clear catalog price list or the go-live wipe.
 - Preview deploys share the production DB, so a paragraph or intro saved on a preview is a production write.
-- Spec §12 q7 — vendor-quote lines are left out of Load system; say if you'd rather carry them with their files.
+- ~~Spec §12 q7 — vendor-quote lines are left out of Load system; say if you'd rather carry them with their files.~~
+  **ANSWERED 2026-10-15 (Jeff): bring them, flagged "Old vendor price — re-quote". Built in #352 (D1132).**
 - Portal-built quotes are excluded from the library — keep that?
-- Should a won quote recalled after its last send load the last SENT version (current) or the version that won?
+- ~~Should a won quote recalled after its last send load the last SENT version (current) or the version that won?~~
+  **ANSWERED 2026-10-15 (Jeff): the version that won. Built in #355 (D1189) — reopening a won estimate puts the won
+  version back; the online page still shows the last send (its PDF).**
 - Client links: copy them from production only. Preview deploys share the production DB, so a link copied there
   carries the preview origin.
 - Spec §12 q4: is 60 days right for a client link?
-- View tracking is deliberately left out (a public GET never writes). Want "viewed" stamps?
+- ~~View tracking is deliberately left out (a public GET never writes). Want "viewed" stamps?~~ **ANSWERED 2026-10-15
+  (Jeff): yes, staff only. Opens are counted since #301 (D625); the "Viewed <date time>" stamp is #355 (D1188).**
 - The online header says "sent <date>" using the PDF's issue date.
 - Cut sheets stay PDF-only online; the online pages don't show them. Want them online too?
 - The BOM toggle shows quantities and descriptions even when the estimate was sent narrative-only.
@@ -10877,12 +10891,15 @@ disappear. Rotating `AUTH_SECRET` kills every link, as before.
 **For Jeff.**
 1. **Fill Settings → Sales & Rewards → Estimate output** (the Not included list and the website). Until then a new quote's
    Not included starts empty and the cover footer has no web address.
-2. **Rev numbering.** Two sends both print "Rev 1" on the PDF and online (the #293 D567 rule); the panel now shows send
-   times to tell them apart. Fix the numbering?
-3. **BOM quantities** show on the package page even when the estimate PDF hides them. Keep?
-4. **Per-scope heading on the cover.** The price line names the scope ("Lighting scope: $28,500.00"); there is no separate
-   heading. Want one?
-5. **Letterhead on page 1 only**; the footer repeats on every page. OK?
+2. ~~**Rev numbering.** Two sends both print "Rev 1" on the PDF and online (the #293 D567 rule); the panel now shows send
+   times to tell them apart. Fix the numbering?~~ **ANSWERED 2026-10-15 (Jeff): every send gets the next Rev. Built in
+   #352 (D1125).**
+3. ~~**BOM quantities** show on the package page even when the estimate PDF hides them. Keep?~~ **ANSWERED 2026-10-15
+   (Jeff): the package-page BOM follows the PDF's quantities setting. Built in #352 (D1126).**
+4. ~~**Per-scope heading on the cover.** The price line names the scope ("Lighting scope: $28,500.00"); there is no separate
+   heading. Want one?~~ **ANSWERED 2026-10-15 (Jeff): yes — each scope gets its own heading. Built in #355 (D1187).**
+5. ~~**Letterhead on page 1 only**; the footer repeats on every page. OK?~~ **ANSWERED 2026-10-15 (Jeff): keep — page 1
+   only (decision item 57).**
 6. **Open counts are best effort.** One per device per half hour, per server instance; a mail scanner that runs JS can still
    count once. A signal, not proof. Fine?
 7. **A honeypot hit shows the normal "Thanks" and writes nothing** (a bot gets no signal). A real person who autofills the
@@ -10905,8 +10922,9 @@ disappear. Rotating `AUTH_SECRET` kills every link, as before.
   doesn't clear it. Invalidate on those writes.
 - **`gridProjectForQuote` performance.** It scans every Grid project per call (once per panel open and per Generate); index
   by quote id if it shows up.
-- **Spec builder vs the zip.** The zip's `Specifications.docx` is the D94 generator's output; the Specs builder's saved
-  `SP-####` documents (D329–D332) are a different docx. Decide which the client should get, or include both.
+- ~~**Spec builder vs the zip.** The zip's `Specifications.docx` is the D94 generator's output; the Specs builder's saved
+  `SP-####` documents (D329–D332) are a different docx. Decide which the client should get, or include both.~~
+  **ANSWERED 2026-10-15 (Jeff): the SP-#### file when the estimate has one. Built in #352 (D1128).**
 - Minor review notes not fixed: a cover selection longer than 1,500 chars is silently capped; the cover has Attn and Venue
   rows beyond the brief; whitespace-only goals count as present; a `Q 1` / `Q_1` quote id could collide in the zip cache key
   (irrelevant for `Q-####`).
@@ -11172,8 +11190,7 @@ an inline Reply went out with the signature. Gmail is off locally, so a real Gma
 production.
 
 **Questions for Jeff.**
-(a) Reply-text visibility: message text shows to the thread owner, send/approve holders and the Lead estimator; everyone else
-sees metadata only. Keep that, or show text to anyone who can open the quote? (D662)
+~~(a) Reply-text visibility: message text shows to the thread owner, send/approve holders and the Lead estimator; everyone else sees metadata only. Keep that, or show text to anyone who can open the quote? (D662)~~ **ANSWERED 2026-10-15 (Jeff): anyone who can open the quote reads the text — built in #351 (D1098).**
 (b) New customer-facing email copy: the default subject ("<project> — estimate EST-####") and default body wording, with the
 signature and `{link}` line. Approve or reword.
 (c) Approve the composer strings added beyond the plan: "Email the estimate", "Client link opened N time(s)", "N new".
@@ -11831,7 +11848,8 @@ Won … Jeff Chesebro (lead) 100% — $52.88", Reports listed it, and the projec
 - (a) Settings → Team: check who holds `approve` — they edit the split and the alternates after Won.
 - (b) Open one real draft on production and confirm its new price: drafts rise (5% now on the whole system cost, plus the
   new 2%).
-- (c) Decide whether the 5% and 2% rates should become Settings (they are constants today).
+- ~~(c) Decide whether the 5% and 2% rates should become Settings (they are constants today).~~ **ANSWERED 2026-10-15
+  (Jeff): Estimating Rules, new drafts only. Built in #352 (D1130).**
 - (d) The 5% pool payout itself happens outside the app.
 - (e) Codebase-wide CSV formula-injection guard (none of the app's exports have one).
 
@@ -11847,8 +11865,10 @@ a Branding logo set. 3e8316f1.
 
 **Remaining (Jeff-gated):**
 - (a) Check the letterhead on a real estimate PDF and Cover PDF on production with the Branding logo uploaded.
-- (b) **Open question:** should the estimate package zip's `Specifications.docx` and `Datasheets.pdf` cover, and the
-  client-style curtain cut sheets, switch to the full sheet too? They still follow the uploaded-logo ladder.
+- ~~(b) **Open question:** should the estimate package zip's `Specifications.docx` and `Datasheets.pdf` cover, and the
+  client-style curtain cut sheets, switch to the full sheet too? They still follow the uploaded-logo ladder.~~
+  **ANSWERED 2026-10-15 (Jeff): the Datasheets.pdf cover and client cut sheets yes, Specifications.docx no. Built in #352
+  (D1124).**
 
 ## 332. Assembly lines carry their members' datasheets and photos — BUILT 2026-10-12 on `feat/331-333-package` (D854–D856)
 
@@ -12183,7 +12203,7 @@ link/archive paths a person would.
 - **Slice 3 — Rigging inspection:** S2 full intake depth replaces the `RI` rubric capture; `ISSUE_LIBRARY` becomes Settings data; the RI reports read the register; L1/L2 renewals stay. The legacy rating map (D963) applies here.
 - **Slice 4 — Flame test, service checks, re-inspection:** per-curtain inventory → flame-test results, fire-curtain and emergency-lighting checks, re-inspection of open findings, status driven by repair jobs (D965).
 - **Slice 5 — Portal and reminders:** customer register, acknowledgment, immediate-hazard alerts, next-due reminders (fire curtain 90 days, emergency lighting, flame cert, E1.47 rigging) (D966).
-- **Open questions:** (a) S2 as one scope with a screen/full depth toggle (assumed) or two scopes — revisit in slice 3; (b) reminder lead times and recipients; (c) whether outside specialists use the app directly or only receive the findings PDF (slice 1 assumes the latter; Peak staff enter the specialist rating).
+- **Open questions:** ~~(a) S2 as one scope with a screen/full depth toggle (assumed) or two scopes — revisit in slice 3; (b) reminder lead times and recipients; (c) whether outside specialists use the app directly or only receive the findings PDF (slice 1 assumes the latter; Peak staff enter the specialist rating).~~ **ANSWERED 2026-10-15 (Jeff):** (a) one scope with a Quick check / Full inspection toggle — built in #353 (D1138); (b) 30 days ahead, to the venue's account rep — built in #353 (D1139); (c) specialists don't use the app, they receive the PDF (kept).
 
 ## 341. Email thread visibility — own, assigned or deliberately linked only — DONE 2026-10-14 on `worktree-assist-layer` (D1004–D1016)
 
@@ -12241,7 +12261,7 @@ Follow-up to #342. A writer that computed a key's new value from its current one
 
 **Remaining:** none. Watch: a long outer transaction that calls one of these holds the row lock until it commits.
 
-## 344. Venue Assessment notes (Jeff, Oct 14) — 23 notes in three slices — slices A and B DONE 2026-10-14 on `feat/344-va-notes` (D1019–D1032, D1038–D1051); slice C BUILT 2026-10-15, awaiting Jeff's iPad + Pencil test (D1072–D1082)
+## 344. Venue Assessment notes (Jeff, Oct 14) — 23 notes in three slices — slices A and B DONE 2026-10-14 on `feat/344-va-notes` (D1019–D1032, D1038–D1051); slice C BUILT 2026-10-15, awaiting Jeff's iPad + Pencil test (D1208–D1218)
 
 Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`) editor, designed in `docs/superpowers/specs/2026-10-14-venue-assessment-notes-design.md` and built as three slices on one branch. Slice A plan: `docs/superpowers/plans/2026-10-14-va-notes-slice-a.md`.
 
@@ -12260,11 +12280,11 @@ Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`
 - Per-discipline scope-first chips with Other, goals as lists, curtain rows (fabric, oz, track series, size, condition), lighting positions with a Position column on the fixtures inventory, the Bad→New condition slider, and a quantity-first line set schedule (Fill down, Mark spare).
 - Field sheet, findings text, Assist, Ask AI and the recap print only what the editor shows (`survey-format.ts`, `survey-measure-fields.ts`). Tests in `scripts/test-va-notes.ts`. No migration, no env var. **No instant rollback past this merge** (D1043).
 
-**Slice C — BUILT 2026-10-15, awaiting Jeff's iPad + Apple Pencil test; not merged** (drawing & photo capture; plan `docs/superpowers/plans/2026-10-14-va-notes-slice-c.md`; D1072–D1082):
+**Slice C — BUILT 2026-10-15, awaiting Jeff's iPad + Apple Pencil test; not merged** (drawing & photo capture; plan `docs/superpowers/plans/2026-10-14-va-notes-slice-c.md`; D1208–D1218):
 - A Pencil-first ink pad (`src/components/ink/ink-pad.tsx`, pure model `src/lib/ink/`): pen in three colours, eraser, text labels, undo / redo, clear, pinch and pan, palm rejection once a Pencil is seen, **Draw with finger** override; Done saves the strokes (re-editable) and a flattened JPEG.
 - Sketch pads in their sections: Beams & rigging, CW elevation and Brick (counterweight only), Stage plan, Stage section, House section, House plan, and the line set schedule's **Fill in by hand** sheet (30 rows a page). Backgrounds are drawn from the survey's measurements (`src/lib/ink/backgrounds.ts`); CW Elevation and the line set sheet are placeholders until Jeff's real sheets arrive.
 - **Add photo** on every section (camera or library, several at once), thumbnails in the section and a count on the rail; a viewer with caption, Mark up / Edit markup / View original / Remove markup, Delete. The original is never changed.
-- Files go through the Assessments engine's device queue (now record-kind aware: `AS-` / `FS-`) to private Blob at `surveys/<FS-id>/…`; offline captures wait on the device and upload on reconnect. One merge rule on every write path, an advisory lock, seen-id deletes and per-editor save stamps keep two devices, the outbox and late saves from losing a photo or a field (D1076–D1077).
+- Files go through the Assessments engine's device queue (now record-kind aware: `AS-` / `FS-`) to private Blob at `surveys/<FS-id>/…`; offline captures wait on the device and upload on reconnect. One merge rule on every write path, an advisory lock, seen-id deletes and per-editor save stamps keep two devices, the outbox and late saves from losing a photo or a field (D1212–D1213).
 - The field sheet prints each section's photos (marked-up version) with captions and its sketches, streamed from `/api/surveys/[id]/sheet-pdf` (20 MB image budget).
 - 3D view: Orbit / Plan / Section / Elevation presets and a Wireframe toggle (on by default).
 - **Tests:** `scripts/test-va-notes.ts` (`#344 C1…C8`, `C-final A…G`). No migration, no env var.
@@ -12288,7 +12308,7 @@ Report anything odd with the survey id and the step number.
 - A queued save from before a reload (another mount's entry, kept because it holds field edits) is pushed with its file lists: if it never reached the server, it can drop a markup made after the reload or bring back a photo deleted after it. Needs markup-version ids in the merge to fix.
 - The editor never learns when its queued field save pushed, so a later queued photo save can carry already-saved fields and revert one field write from another device.
 - Wireframe shows each face's triangle diagonal (material wireframe); edges-only outlines if Jeff wants them.
-- Replaced and deleted survey files stay in Blob (D1079); a sweep is a later job.
+- Replaced and deleted survey files stay in Blob (D1215); a sweep is a later job.
 - The desktop pass photographed one section (the plan said two); multi-section capture is covered by the iPad script.
 - Smoke (`test:smoke`) deferred: 29 GB free, under the 45 GB the run needs.
 
@@ -12411,3 +12431,321 @@ Jeff (Oct 14) chose "My real Gmail labels" for the #346 Labels card: pick from y
   - A thread 404 reads "no longer in Gmail".
   - The brief's live counts read only your mailbox.
 - User display names are not unique (only email is). Two active users with the same name would share each other's mailbox ownership (#341's `visibleTo` matches names). Worth a uniqueness check in Settings → Team.
+
+## 348. Estimate parties, bids & vendor links — Slices 1–6 built (1–3 merged 2ad8eec8), plus Jeff's 2026-10-15 bid follow-ups (D1118–D1119); slice 5 is D1140–D1157; slice 6 is D1166–D1184; follow-ups D1185–D1186
+
+Reported by Jeff, 2026-10-14. Spec: `docs/superpowers/specs/2026-10-14-estimate-parties-and-bids-design.md`. An estimate links to exactly one company; real bid jobs involve an owner, several GCs and ECs, an architect, consultants and vendors.
+
+**Built (slice 1):**
+- **`record_parties`** collection (migration 0041): one row per company in one role on a lead, estimate or project. Roles: Owner · General contractor · Electrical contractor · Architect · Theatre / AV consultant · Vendor · Other (typed label). One owner per record.
+- **Shared editor** on the lead drawer, an Estimator **Parties** chip and the project page. Writes need `create`.
+- **Company page** gains a Bids & roles card (live records only, one batched read per record type).
+- **Carry-over:** lead → estimate (everything except GC/EC) and estimate → project (everything), once, inside `withSavepoint` so a failure never undoes a save or a win (D1059).
+- **Opportunity board** skips a lead that has a non-lost estimate (an all-lost lead stays on the board); its estimates inherit the forecast; the lead drawer lists them with a total (D1060).
+- **Company delete** is refused while the company is on any live party row (D1062).
+- **Tests:** `scripts/test-parties.ts` (in test:specs).
+
+**Queued (spec §10):**
+- Slice 2a ✅ built (D1074–D1078): bid details (due date, addenda), a Bidders card on Send & track (add GC/EC, submit via email or their bid site, per-bidder link, GC bid #, Mark submitted, Award / Undo award), Bid chip, Quotes hub "Out to bid" filter, ⌘K by bidder name, Morning triage "bid due", the project's Bill to. The owner stays the customer.
+- Slice 2b-i ✅ built (D1079–D1082): customer documents addressed to the awarded bidder ("Prepared for <GC>", Owner line, bid line; venue from the owner), bid is content once awarded with an Award/Undo re-render, and a per-bidder PDF (signed `?bidder=` print variant, on-demand, Download PDF on the Bidders card).
+- Slice 2b-ii ✅ built (D1086–D1096): Send / Retry per email bidder and **Send to all bidders** (one server call per bidder, progress, Stop), each email carrying its own bidder PDF and its own v3 link ("Prepared for <bidder>", Owner line, tagged responses, per-bidder "Opened N×", closed pages for lost / withdrew), Copy link, revised-bid subjects and Send revision to bidders. Open for Jeff: do bidders see the owner's Rewards perks / credit line; bidders share the 30/day response budget; acknowledging an addendum after a send means Draft → Send revision. **ANSWERED 2026-10-15 (Jeff): each bidder gets its own response budget; a new addendum after a send puts the estimate back to Draft and Send revision goes to every bidder; the first bidder send marks it Sent. Built in #348 (D1118–D1119) and #352 (D1120–D1122).**
+- **Prod check additions (2b-ii):** from a Gmail-connected account, Send to all for two email bidders (two separate emails, each with its own PDF and link); open one link in a private window ("Prepared for <bidder>", Owner line); the row shows Opened 1×; Revoke kills the link.
+- **Prod check additions (2b-i):** Download a bidder PDF from the Bidders card (header shows the bidder, Owner line and bid line); after Award the estimate PDF reads "Prepared for <GC>" with the Owner line.
+
+- Slice 3 ✅ built (D1097): split systems into a new estimate.
+- Slice 4 ✅ built (D1105–D1117): vendor company on vendor quotes (picker, validated, a vendor party once), Gmail attachments by reference with a download route, **Add as vendor quote…** from an email PDF (`?vq=` hand-off), **File to estimate / project…**, a Vendors card on Build package → BOM quote and Send & track, "Quotes we've received" on the vendor and company pages, and vendor quotes + emails on project Procurement. Visibility: reads use `canSeeThread`, writes `ownThread`.
+- **Prod check additions (slice 4):** `SELECT DISTINCT type FROM companies` for vendor spellings (D1105); from a Gmail-connected account, a vendor email with a PDF over 5 MB — the reader chip downloads and Add as vendor quote copies it (verifies streamed-response size on Vercel). For Jeff: imported Gmail attachments now count in the Inbox "has attachment" filter and attachment-name search; a cancelled Add-as-vendor-quote form leaves an orphaned Blob copy (same as uploads).
+- Jeff's 2026-10-15 bid follow-ups ✅ built (D1118–D1119): each bidder gets its own client-link response limit (its own daily bucket and its own 200-response cap; the owner keeps the quote-wide ones), and adding an addendum to a sent estimate moves it back to Draft. The Bid chip says so, and the Bidders card then offers **Send revision to bidders** to every pending email bidder. Note, date and due-date edits and removals never change status. The old "move back to Draft" hint is now only a fallback.
+- **Prod check additions (follow-ups):** on a sent test estimate with two sent email bidders, add Addendum 2 in the Bid chip: the note shows, the header reads Draft, and Send & track offers Send revision to bidders for both.
+- Slice 5 ✅ built (D1140–D1157): **Read the PDF** (Assist `vendorpdf`) in the Estimator's vendor quote form. Opt-in for pilot users with the feature ticked **and** a Claude key; with no key the button is hidden. Haiku 5.5 reads the attached PDF (Try harder re-reads on Sonnet 5.5); the form fills blank fields only (Description from the lines, quote #, date, terms, Total cost) and appends lines. Deterministic checks flag line math, sum against total, catalog matches (a chip only), the vendor company and the freight pre-tick; they never fix a number. Freight and tax stay inside the printed total. `VendorQuote.extracted` is server-verified on save, accuracy is scored once at the first save, and Settings → Assist pilot → **Vendor PDFs** reports by model and by vendor. Pure modules in `src/lib/vendor-pdf/`; tests in `scripts/test-vendors.ts`.
+- **Jeff-gated (slice 5):** tick **Read the PDF** for the pilot users (Settings → Beta → Assist pilot → features); a Claude key must be set.
+- **Jeff to confirm (slice 5 defaults, each logged):**
+  - Includes-freight pre-tick: tick on a freight charge inside the total, "prepaid and allowed" or "FOB destination"; never on "FOB origin", "plus freight" or "freight extra"; "freight $0" or "TBD" does not tick (D1153, question 2).
+  - File ceiling: about 23.8 MiB after base64, so an email PDF between that and 25 MB says "too large" (D1154, question 4). Use the Files API later?
+  - Vendor auto-link: exact normalized name among vendor companies only, no closest-match suggestion (D1155, question 6).
+  - Limits: 30 reads per person per hour (Try harder counts), 100 pages, Try harder once per read in the UI (D1156, question 7).
+  - Re-reading a saved vendor quote is allowed; the old read's score stands (D1157, question 9).
+- **Prod checks (slice 5):**
+  - Read a real 2–5 page vendor PDF and a 40+ page one; note the latency against the 120 s page budget (the read refuses under 20 s left, D1150).
+  - A scanned (image-only) PDF.
+  - A password-protected PDF (expect the `rejected` copy).
+  - A PDF over 5 MB through the Inbox "Add as vendor quote" hand-off, then Read the PDF.
+  - After a few reads, check Settings → Assist pilot → Vendor PDFs (D1152 lists the report's blind spots).
+- **Follow-ups (slice 5, deferred, not built):**
+  - pdf-lib fully inflates compressed object streams on load, so a crafted PDF could run the function out of memory. Count pages by a byte scan first, add a size threshold, or move the count to a worker.
+  - Time the catalog SQL pre-filter (`partsByLooseKeys`) on production.
+  - Every save re-sends the full `extracted.data`. Send `{ runId }` alone when the server already has it.
+  - An accessibility pass on the Read panel: mount the live region empty, use `aria-disabled` instead of `disabled`, add `aria-describedby` on the line hints.
+  - Share the "Assist is switched off." text as one constant.
+  - `run.ts` could refuse a document request with no Claude key up front.
+- Slice 6 ✅ built (D1166–D1184, Oct 15): **the portal bidder view, the owner's Scope only view, and Reports → Bids by GC/EC.**
+  - **Bidder view:** a GC or EC with a customer-portal grant sees, on Home, a **Bids** card of the estimates it bid on, and opens each as an online page addressed to it ("Prepared for <GC>", the Owner line, no other bidder named) with an **Open PDF** button. Read-only: no Accept, Refresh, Rename, Copy or Quote again. It sees only its own latest revision (delivered to it, or frozen to it after the award). Pending and awarded bids show; withdrew, no bid and lost are hidden. Draft is "being revised"; Won shows to the awarded bidder only; Lost shows as **Closed**. One gate (`portal-access.ts`, rule in `src/lib/parties/portal-bid.ts`, rows in `portal-bid-server.ts`); every portal write stays customer-only. The PDF renders on demand at the bidder's revision, 6 per minute per grant, `maxDuration = 60`; a failure shows one line and logs the real reason.
+  - **Owner's Scope only:** once an estimate has bidders, the owner's portal shows it as a BOM with no prices (before and after the award), no PDF, no photos, no Accept, Refresh, Copy or Rename, with a **Scope only** chip on Home. It is sticky: `Quote.bidScopeOnly`, written only by `markBidScopeOnly` (`addBidder`, or re-adding a removed bidder company); soft-deleted bidder rows also count; Move/Copy system → New estimate carries it for the same customer (fail-closed); a Move/Copy into an existing estimate does not. Vendor-quoted lines show the description only. Staff Send & track and the owner's client links are unchanged.
+  - **Report:** Reports → **Bids by GC/EC** (`bids-by-bidder`, after Pipeline by estimator in the preset, no extra permission; saved layouts unchanged). One row per company and role: Sent, Open, GC awarded (decided), Awarded to us, Withdrew / no bid, Awarded-to-us rate (awarded ÷ decided, "—" when none decided), Last sent. Period = the bid's due date (a future due date counts as now), else the last send. Bounded load (5,000 rows, says so when cut). Pure code in `bid-report.ts`, loader `bid-report-server.ts`, widget `_dashboard/widgets/bids.tsx`.
+  - **Tests:** `scripts/test-bids.ts` (in test:specs), including the portal file inventory.
+- **Jeff to confirm (slice 6 defaults, each logged):**
+  - A withdrew or no-bid bid still counts in Sent (D1176, question 2).
+  - The report's period is the due date, a future one anchored at now, else the last send. A bid's period can shift once its due date passes (D1173, question 3).
+  - A revision frozen to the awarded bidder is theirs even if Send & track's To changed (D1177, question 6).
+  - The portal PDF is re-rendered on demand, not the exact emailed file (D1178, question 7).
+  - Portal views are not counted as opens (D1179, question 9).
+  - The awarded bidder's portal doesn't list the project (D1180, question 10).
+  - The widget is in the default Reports layout (D1181, question 11).
+  - Old v3 links' "View the current version" is left as it is (D1182, question 12).
+  - A website bid made in Draft stays hidden until a revision is sent (D1183, question 13).
+  - The due date shown is the one printed on their revision (D1184, question 14).
+- **Prod checks (slice 6):**
+  - A GC grant on a real bid: the Bids card, the online page addressed to the GC, and **Open PDF** latency on Vercel (≤ 60 s).
+  - An awarded GC's portal after a post-award send.
+  - The owner's portal on a bid estimate: Scope only, and a BOM with no prices.
+  - Reports → Bids by GC/EC counts after an award.
+- **Follow-ups (slice 6, deferred, not built):**
+  - The stamp can land on service quotes (`addBidder` has no quote-type check).
+  - The bidder PDF is an uncached Chrome render on every open. Cache it in Blob later.
+  - The report loads full quote documents. Reuse `ctx.data.quotes()`.
+  - The portal inventory scanners in `scripts/test-bids.ts` are per-file text checks, not per-call.
+- Follow-ups ✅ built (D1185–D1186, Oct 15), moved from the slice 5 and slice 6 lists:
+  - **Staff see Scope only (D1185):** the Send & track Bidders card shows a muted read-only line when the owner's portal shows the estimate as Scope only (also after every bidder is removed), and the Bid chip's dialog says "Owner portal: Scope only". `BidPanelVM.scopeOnly` comes from `portalQuoteHasBidders`. Nothing clears it (Jeff: sticky for good).
+  - **Ask before discarding a pop-up (D1186):** the Curtain, Track, Add assembly, Labor and Vendor quote pop-ups ask before a backdrop click or × throws away unsaved work, and name the PDF read on a vendor quote that has one. A vendor quote also asks while the Inbox hand-off is still copying its PDF or its file is still uploading. Switching to another input asks too. Add / Save never asks. Rules in `src/lib/estimate-steps/discard-confirm.ts`; tests in `scripts/test-oct15-estimating.ts` and `scripts/test-bids.ts`.
+
+**Not on a preview:** do not deploy a Vercel preview of this branch. Previews share the production Neon DB and skip migrations, so `record_parties` doesn't exist there and every company page (Bids & roles card), the lead drawer card, the project card and company delete would throw. **Post-merge production check** (after the merge deploy applies 0041), on a throwaway customer: link an owner and a GC on a lead; convert it / save an estimate from it (the owner carries, the GC doesn't); mark it Won so a project spawns; confirm the project lists the owner. This is the only real run of the postgres-js savepoint path. For 2a on the same estimate: set a Bid due date, add two bidders (GC + EC), Award one, then Send to the customer works without a re-save (a bid edit never stales the PDF in 2a); mark Won → the project shows Bill to the awarded bidder and lists only the awarded bidder, not the one that lost. Then delete the test records.
+
+**Notes:** `addParty`'s one-owner check is not locked, so two simultaneous first-owner adds could both land. Renumber migration 0041 at merge if another branch lands one first.
+
+- User display names are not unique (only email is). Two active users with the same name would share each other's mailbox ownership (#341's `visibleTo` matches names). Worth a uniqueness check in Settings → Team. → Done in #349 (ownership by id, unique names).
+
+## 349. Mailbox ownership follows the signed-in user's identity, not their display name — DONE 2026-10-15 on `worktree-assist-layer` (D1063–D1073)
+
+**Asked (Jeff, 2026-10-14):** "ultimately that should all be linked to the email address so you can't view a different mailbox that isn't tied to your email." Also: Settings → Team should block duplicate display names. Before this, #341's `visibleTo` and every mailbox check compared `mailboxUser` — a display name — so two teammates with the same name (or several "New user" invites) owned each other's personal mail. No migration, no env var.
+
+**Done:**
+- **Owner id on threads:** `CommThread.mailboxOwnerId` (the owner's `users.id`, 1:1 with their unique email) beside the `mailboxUser` display name, written by every creator — Inbox compose / draft / Log call or meeting, renewal and estimate emails, the assessment report email, the Gmail import (the account's user) and `moveTo`. A personal thread with a blank or missing owner is refused (`NO_OWNER_ERROR`); `DEFAULT_USER` is display-only (D1063, D1067, D1068).
+- **One rule:** `ownsMailbox(t, me)` — the owner id, else the Gmail key (`personal:<id>`), else a legacy name only one user (any status) holds; a shared name owns nothing. Its SQL twin `ownMailboxCond` feeds ⌘K, Inbox search, Organize and Suggest estimate. Every mailbox check switched: the reader, folders and counts, the action guards, Organize, the brief, triage, ⌘K, the company page and feed, Ask, resweeps, Draft reply's style examples, the #347 labels, the Gmail bridge's sending account and Send & track (D1063, D1064, D1068, D1069).
+- **Assignments by id:** `assignedToId` beside `assignedTo`; pickers still send a name, turned into exactly one teammate or refused (D1066).
+- **Lazy stamp:** a legacy thread is stamped with its owner the first time its owner acts on it (the Inbox / Organize write guards, a key-level compare-and-set) — never on a page view (D1065).
+- **`npm run comms:stamp-owners`:** a one-time backfill — dry run by default, `--apply`, `--yes` for a hosted DB, explicit target only; it lists the threads it can't resolve and leaves them owned by nobody (D1071).
+- **Settings → Team:** add and rename refuse a blank name or one another teammate (any status) holds, case- and whitespace-insensitive, with a clear error; duplicates already on the team get a "Duplicate name" chip and a header count (D1070).
+- **Tests:** `npm run test:thread-visibility` — two real users sharing a name see nothing of each other's in the reader list, ⌘K, the company page, Organize, Ask, the action guards and assignments; the owner id wins over the name; Gmail-key and unique-name legacy threads resolve, a shared-name one is nobody's; listings never stamp, actions do; the stamp plan and its idempotent apply; creators refuse a blank owner; the Team-name rules; source pins. test:inbox-org, test:brief, test:assist and test:specs fixtures/pins follow the identity rule.
+
+**Review fixes (same day, D1072–D1073):** a rename pins the old name's name-only mail to that user (unique name) or to nobody (shared name — a tombstone, `"unresolved"`) before it is applied; a new user or a rename TO a name retires older name-only mail carrying it, so a newcomer inherits nothing; `--apply` tombstones the script's shared-name rows; a case-only rename saves; Send & track's Lead estimator by id and a failed roster read fails closed; Keep threads in my inbox read for the owner by id; the viewer read once per Ask search / Organize bulk action; whitespace-only names never unique. Tests: rename after the stamp transfers nothing; a new hire with an old name inherits nothing; the tombstone is never resolved or overwritten.
+
+**Remaining (Jeff-gated) — in this order:**
+1. **Hold Settings → Team renames** until step 4 has run.
+2. Back up production: `DATABASE_URL=… npm run db:export`.
+3. Dry run against production: `DATABASE_URL=… npm run comms:stamp-owners`. Read the "unresolved" lines — especially "name held by more than one user": those are older in-app threads whose owner name is shared (archived and removed users count), and `--apply` will tombstone them (owned by nobody for good).
+4. `DATABASE_URL=… npm run comms:stamp-owners -- --apply --yes` — stamps the resolvable threads and tombstones the shared-name ones.
+5. Only now rename the duplicates the Team list flags ("⚠ N share a name" — several "New user" invites would show).
+The app is safe before step 4: ownership already resolves the same way lazily (Gmail key, else a unique name), and each owner's next action stamps the thread.
+
+**Known follow-ups:**
+- Other records still name people by display name — tasks (`assigneeName`), Queue assignments, site visits, lead / quote owners, notification prefs (incl. Keep threads in my inbox). Unique team names now keep those unambiguous; moving them to ids is separate work.
+- A stamp can be dropped by a concurrent whole-document write that read the thread just before it; harmless (the fallback resolves the same owner) and re-stamped on the next action.
+- `moveTo` keeps a thread's old `gmailAccountKey`; the owner id wins, but its Gmail thread stays in the old account.
+- Deferred from the #349 review:
+  - **Gmail thread split (`src/lib/gmail/bridge.ts` ~298).** A legacy thread that has a Gmail thread id, no `gmailAccountKey`, and an owner name held by more than one user now matches no account. The next inbound reply starts a duplicate thread. Running the stamp script and fixing duplicate names removes the case.
+  - **Test coverage.** The generated action audit only covers `inbox/*`; `quotes/new`, `estimator/send-actions` and `triage/actions` are guarded by source pins alone. The bridge's per-account attach and its import stamp are regex-pinned, with no behaviour test.
+  - **AI-pass worklist (#335).** `pendingAiThreads` applies its SQL limit before the identity re-check, so a namesake's threads can fill a batch. Shared-name threads also never get their pending flag cleared. Both are harmless but untidy.
+- An unknown-name thread (its name held by no user) stays unowned until a newcomer's name retires it; the script only lists it.
+
+## 350. Daily brief leads with Emails, then Estimates, then Tasks — DONE 2026-10-15 on `worktree-assist-layer` (D1083–D1085)
+
+**Asked (Jeff, 2026-10-15):** "How do we get the morning brief to lead with emails, then estimates, then tasks?"
+
+**Done:**
+- **Three blocks:** the #337 Home brief card shows the summary, then **Emails**, **Estimates** and **Tasks** in that fixed order. An empty block is hidden. The block rules are pure, in `src/lib/brief/blocks.ts`.
+- **Emails:** customers waiting on a reply, each with "Draft reply ready · Use it" when its pre-draft is fresh. Then the Organize "N to file — Review" line and Organize my inbox.
+- **Estimates:** the approvals count and the quotes awaiting me, quiet quotes with Send nudge, leads ready to quote with Suggest estimate, and renewals.
+- **Tasks:** overdue, due-today and at-risk tasks and assignments, meeting call to-dos, new promise-tasks, then Today's plan (visits, driving) and today's visits.
+- **Picks:** the "Do these first" list is gone. Its picks show as ★ inside their own block, with their why. A pick whose row is done or gone, or whose key doesn't parse, is dropped.
+- **Cap:** 5 rows per block (★ always kept), then "N more · See all in Start here →".
+- **Same rows as Start here:** marks and liveness are applied, so done items don't show. The load is shared with Start here through one React `cache()` per request (D1085).
+- **Fails closed (D1085):** an unreadable snapshot shows no rows and no picks. A failed liveness check drops the rows it could hide, in Start here too. Draft / Tasks chips appear only on threads in my own mailbox.
+- **Phone and Listen:** the phone view (< 900 px) shows the same blocks in big text, still without drafts. Listen reads the summary, then the blocks in the card's own order.
+- **Summary order:** the Haiku prompt and the rule-built summary are written in the same Emails → Estimates → Tasks order. The prompt's counts are of the list the model sees.
+- **No data change:** nothing changes in storage, the build or the model output, and briefs stored earlier render in the new layout.
+- **Tests:** `npm run test:brief` (in test:specs) covers block grouping and order, ★ picks, hidden empty blocks, the cap and its links, an old stored brief with no snapshot, the fallback order, the prompt pins, the phone-view pins and the Listen order.
+- **Browser check:** done on a scratch DB, desktop and 375 px.
+
+**Review fixes (same day, D1085):** fail closed on a missing snapshot and on a liveness error (Start here too), owner-gated chips, one cached load shared with Start here, Listen's Estimates order matches the card, and prompt counts of the capped list. Tests: test:brief and the triage checks in test:specs.
+
+**Remaining (Jeff-gated):** look at a real morning's brief on production and confirm the block contents and order read right. Also confirm the call-to-do placement (Tasks, not Emails).
+
+## 351. Jeff's 2026-10-15 decisions — Batch 1 (Inbox & privacy) — DONE 2026-10-15 on `worktree-assist-layer` (D1098–D1104)
+
+**Asked (Jeff, 2026-10-15 decision session — `docs/decisions/2026-10-15-jeff-decisions.md`, items 25, 26, 27, 29, 37, 39, 41).**
+
+**Done:**
+- **#25 Estimate reply text (D1098):** Send & track's Activity card shows every message to anyone who can open the quote. Reply and Mark read stay the mailbox owner's (#349). Answers #308's question (a).
+- **#26 Task-shared email (D1099):** when the thread's owner assigns a task from an email to a teammate (Inbox task dialog, Suggest tasks, Ask AI's task card), the server stamps the task (`threadShare`) and the assignee can read that one email, read-only, while the task is live and still theirs. Re-assigning never moves it (only the owner's hand-off re-stamps); a pushed, promise or unstamped task shares nothing. One task read per viewer (`MailboxViewer.taskThreadIds`, a Set), filtered on the row id in SQL (`DocCond` `idIn`); every write guard unchanged.
+- **#27 Ask AI on a phone (D1100):** a ✦ in the narrow (≤ 860 px) top bar and an Ask AI row in the drawer open the panel full screen with the current page as context; same `askGateFor` gate.
+- **#29 Noise "Archive all shown" (D1101):** archives and clears every Noise row shown, a row's own Organize Archive each (Gmail too, marked-noise rows keep their filing), with one Undo for the batch.
+- **#37 "Not mine" comes back (D1102):** a dismissed Start here item returns at the next snapshot once it escalates after the mark — a new customer message, a resubmit for approval, or a lead SLA breach. Snooze and Done unchanged. Answers MASTER-QUESTIONS P1.
+- **#39 Sync pull for field roles (D1103):** `/api/sync/pull` answers 403 to anyone without `create` (Reviewer-only); the client stops pulling and clears its pulled field mirror on a 403. Push stays open but strips server-owned fields (`tasks.threadShare`, `tasks.threadId`).
+- **#41 Portal sign-in email (D1104):** creating portal access emails the link with a short welcome note from the granter's own connected Gmail mailbox; otherwise it copies the link with "Couldn’t email it — copy the link instead." Copy link stays; each active grant gains Resend link. The token is never logged. Answers MASTER-QUESTIONS F16.
+
+**Tests:** `npm run test:thread-visibility` (#26 parity / read-only / deleted task / wrong assignee, #39), `test:inbox-org` (#29), `test:ask` (#27 pins), new `npm run test:morning-triage` (#37, standalone runner for the triage suite), new `npm run test:portal-invite` (#41, fake mail sender), #25 pins in test:specs; all chained into test:specs. No migration, no env var.
+
+**Review fixes (same day, #351 review):** C1/I1/I2 — the task share became the owner's server-stamped act (see #26 above; D1099, D1103). M1 — the portal invite thread carries no customerId. M2 — one invite email per grant per minute. M3 — only an outside sender's message brings a Not mine back. M4 — a pull 403 clears the browser's pulled field data. M5 — Send & track skips threads in Deleted. M6 — the shared ids are a Set, filtered on the row id. M7 — a failing row never loses the batch Undo on Noise.
+
+**Remaining (Jeff-gated):**
+- Tell the team: an email you assign as a task becomes readable (read-only) by the assignee; estimate replies are readable by everyone who opens the quote.
+- On production: grant portal access to yourself with Gmail connected and check the email lands from your mailbox (and Resend link); try Ask AI's ✦ on a phone and in the native app; a Reviewer-only account no longer pulls field data (a Reviewer editing a field record offline still saves).
+- Pick a real dismissed Start here email and confirm it returns after the customer writes again.
+
+## 352. Jeff's 2026-10-15 decisions — Batch 2 (Estimating & client output) — DONE 2026-10-15 on `worktree-assist-layer` (D1120–D1133)
+
+**Asked (Jeff, 2026-10-15 decision session — `docs/decisions/2026-10-15-jeff-decisions.md`, items 2, 3, 4, 6, 12–15, 17–22).**
+
+**Done:**
+- **#2 Per-bidder response budget (D1118 via #348, D1120):** built on main by #348 (each bidder's own daily bucket and 200-response cap); this batch adds the 1,000-per-quote total cap and a validated key.
+- **#3 Addendum after a send (D1119 via #348, D1121):** built on main by #348; a new addendum on a sent bid estimate moves it back to Draft (the normal revise; the next send is a new Rev, approval gate as any revise); the Bid chip says so, the Bidders card offers **Send revision to all bidders** (every pending email bidder, through the per-bidder send).
+- **#4 First bidder send marks Sent (D1122):** already so — pinned.
+- **#6 Review limit (D1123):** the amount compared with the owner's limit is the base bid + the largest Alternate group.
+- **#12 Letterhead (D1124):** the full baked Peak letterhead on every estimate Datasheets.pdf cover (zip, share page, staff download, Quotes-hub package) and on Client-style cut sheets; Specifications.docx and the submittal cut sheets unchanged.
+- **#13 Rev numbering (D1125):** Rev is the send number — a revised draft prints the next one, every send stamps max + 1; old sends keep the Rev they printed. Fixes "two sends both print Rev 1".
+- **#14 BOM quantities (D1126):** the online / package-page BOM follows the PDF's Qty switch.
+- **#15 Online Accept (D1127):** the share page's accept and the portal Accept require the signer's name and title, take an optional PO # (never a card number), store them, and the Lead estimator gets a to-do "Accepted by <name>, <title> — PO <po>" — not an email: there is no system mailbox to send from.
+- **#17 SP files in the zip (D1128):** the client zip carries the Specs-builder SP-#### Word files written for the estimate, else the D94 Specifications.docx as before.
+- **#18 People lock at send (D1129):** after the first send only an approver can change Lead estimator / Prepared by (server-refused, read-only in the Estimator).
+- **#19 Bonus rates (D1130):** Estimating Rules → Estimator bonuses (5 % / 2 %, 0–20 %); drafts take the current rates, sent / won / lost keep theirs.
+- **#20 Photo sides (D1131):** narrative photos alternate right, left, right (PDF, online, package page); the Build package document's product image gains Auto (the default), an explicit Left / Right / Full wins.
+- **#21 Load system vendor lines (D1132):** brought in at their last price, flagged "Old vendor price — re-quote" (internal note).
+- **#22 Online cut sheets (D1133):** when the sent PDF carries cut sheets, the portal, share and package pages show them too.
+
+**Tests:** new `scripts/test-oct15-estimating.ts` (pure + DB, in test:specs; `npx tsx scripts/test-oct15-estimating.ts` runs the pure half, with `PGLITE_PATH` the DB half). Harness expectations updated where the decisions changed behaviour: #293t Rev scenarios and the #222 / #P4 Rev pins (#13), the #293t BOM view (#14), the #301 zip pins (#12/#17), #301 / #P2b accept fixtures (signed accepts, #15), #245 / #248 portal accepts (#15), #293s Load system (#21), #312 image defaults and the mfr-images render (#20), #bonus pins (#19), bid-send's label (#3). The #P2b no-alternates outputs stay byte-identical. No migration, no env var.
+
+**Review fixes (same day, #352 review):** I1 — every revise re-renders the PDF, and the copy step refuses (and re-renders) a file whose printed Rev differs from the send's stamp, so a revise resent with no edits reads Rev 2 everywhere (D1125). I2 — a sent revision's zip carries only specs downloaded by its send, read with one filtered query; the cache key follows downloads and letterheads; residual risk logged in D1128. I3 — the PO check reuses the portal's Luhn card scan. M1 — client responses cap at 1,000 per quote (refused, never dropped). M2 — the Bid chip confirms before an addendum reverts a sent bid; an awarded bid never reverts. M3 — a re-quote vendor line is custom and Send & track warns "N lines need a re-quote". M4 — the editor previews Auto images with the print's alternation. M5 — no whole-collection spec reads. M6 — a portal acceptance with no Lead estimator goes to the admins only. M7 — printedStamp's comment.
+
+**Rollback:** safe — additive JSON (`ClientResponse.po`, `portalAcceptance.signerName/signerTitle/poNumber`, `SpecItem.bonusPct`, revision `docFields.revNo` at the cut, product-image align `auto`) that older code ignores (an Auto image reads as Right). Rolling back restores the old Rev rule for drafts.
+
+**Remaining (Jeff-gated):**
+- Check on production: revise a sent estimate and send again — the PDF and online page say Rev 2; add an addendum to a sent bid and send the revision to all bidders; accept a portal quote and a client link with a PO # and see the Lead estimator's to-do; download a package zip for an estimate with an SP-#### spec; look at the letterhead on a Datasheets.pdf cover and a client cut sheet; a narrative estimate with three photos.
+- Emailing the acceptance notice needs a sender (system) mailbox — say if you want one.
+- Bonus rates: change them only in Estimating Rules; a draft re-figures on its next save.
+- Zip cache: every cached package zip re-builds once (the book letterhead changed its key).
+
+## 353. Jeff's 2026-10-15 decisions — Batch 3 (Lists, pipelines, field) — DONE 2026-10-15 on `worktree-assist-layer` (D1134–D1139)
+
+**Asked (Jeff, 2026-10-15 decision session — `docs/decisions/2026-10-15-jeff-decisions.md`, items 8, 10, 11, 34, 35, 42).**
+
+**Done:**
+- **#11 Lists, 50 a page (D1134):** Companies, Quotes and Venues page 50 rows at a time — Prev / Next and "Page X of Y", the page in `?page=` (one `ListPager`, `src/lib/list-paging.ts`), replacing #224's Show more. Every filter, chip count, sort, stat tile and the search run over every record before the page is cut (pure `quotesHubView`, `filterCompanyDirectory`). The Quotes hub reads a slim SQL projection of every quote and only the page's 50 in full; a `?id=` link opens on its row's page. Companies reads companies + venues without contacts, and its search also matches contacts' names, titles and emails in SQL. Venues reads its activity as projections. Measured on a scratch DB (1,700 companies, 2,000 quotes, warm dev server): `/quotes` 10,082 KiB / 5.5 s → 306 KiB / 0.44 s; `/companies` (already capped by #224) 268 KiB / 544 ms → 270 KiB / 523 ms; `/venues` (already capped) 512 KiB / 808 ms → 514 KiB / 823 ms.
+- **#42 BID SPEC Lead / Qualify (D1135):** a plain Draft stage before Collect Information in the seed, and a one-time, idempotent ensure (`pipelineFixes` marker, under the settings lock) that adds it to a stored pipeline list without ever duplicating it; a later delete in Settings sticks. Quotes keep their stage. Answers MASTER-QUESTIONS O1.
+- **#35 Visit edit rights (D1136):** only the visit lead (#349's unique-name rule) or an approver can edit, re-lead, re-time or delete a scheduled visit — refused on the server before any write; read-only Edit / Delete on the company record for everyone else. Latent while everyone holds `approve`. Answers MASTER-QUESTIONS T1.
+- **#34 Consulting phases (D1137):** "+ New consulting project" has a Phases checklist, all ticked; only ticked phases are seeded (so only they get tasks and milestones). Answers MASTER-QUESTIONS E7.
+- **#8 Rigging depth (D1138):** S2 asks Quick check / Full inspection in the form (`rigging.depth`, a fixed list); R6 / R7 read it through `evaluate()`, unanswered = the visit type's default, so existing assessments evaluate as before; defVersion stays 1 (additive). Full inspection adds only R7's dimensions, install history, line set schedule and hardware inventory; answers carry over both ways. Answers #340 open question (a).
+- **#10 Assessment reminders (D1139):** a task 30 days before each live finding's next-due date and each venue's next assessment date, to the company owner (account rep), else the assessment's creator; deterministic `T-asr-…` ids, so idempotent and a deleted reminder stays deleted. Runs first in the daily drive cron (10 s) and lazily from the Assessments page. New minimal field `venue_profiles.nextAssessmentAt`, set on the venue page's Assessments card. Answers #340 open question (b).
+
+**Tests:** new `scripts/test-oct15-batch3.ts` (pure + DB, chained into test:specs; `npx tsx scripts/test-oct15-batch3.ts` runs the pure half, with `PGLITE_PATH` the DB half): paging and full-set filter / search correctness, the projection, the SQL contact search, the pipeline ensure's idempotency, visit edit rights, the phase picker, evaluate with depth and answer carry-over, reminder planning and idempotency. Harness expectations updated where behaviour changed: #224 paging pins, #223 search pins, the popout row-link pin, the bid-spec seed / switch / Daylite unmapped-stage checks, the assessment report's depth label. No migration, no env var.
+
+**Review fixes (same day, #353 review):** I1 — the Next assessment date saves on blur / Enter only, ignores a pre-1900 year, shows Saved inline. I2 — a shared `isPreviewDeploy()`; the pipeline ensure and the lazy reminder sweep never write from a preview deploy. M1 — the pipeline ensure never runs inside the caller's transaction. M2 — the slim projection reads each document once (`jsonb_to_record`): `listQuoteRows` 182 → 40 ms on revision-heavy quotes, same result. M3 — a moved / cleared / voided date closes the old reminder. M5 — a leaner sweep under its deadline. M6 — two doc comments back on their functions. M8 — the company page reads the roster in parallel; no reminders at deleted venues. M4, M7 kept as built (D1139, D1136).
+
+**Rollback:** safe. New JSON only (`settings.pipelineFixes`, the stored BID SPEC stage, `venue_profiles.nextAssessmentAt`, `rigging.depth` answers, `T-asr-…` tasks), which older code ignores; the Lead / Qualify stage stays in a stored list after a rollback (harmless — a Draft stage).
+
+**Remaining (Jeff-gated):**
+- Owners: reminders go to the company's Owner — set owners on the companies whose venues get assessed, or the reminder falls back to whoever started the assessment.
+- Set a "Next assessment" date on a real venue and close a finding with a next-due date; the next morning's drive cron (or opening Assessments) creates the tasks.
+- Try `/quotes` and `/companies` on production (Prev / Next, a search for a contact's email, a bell link to an old quote).
+- Look at BID SPEC in Settings → Pipelines once after deploy (Lead / Qualify should sit before Collect Information exactly once).
+
+---
+
+## 354. Jeff's 2026-10-15 decisions — Batch 4 (Grid, specs, catalog) — DONE 2026-10-15 on `worktree-assist-layer` (D1158–D1165)
+
+**Asked (Jeff, 2026-10-15 decision session — `docs/decisions/2026-10-15-jeff-decisions.md`, items 32, 43, 45, 46, 47).** The last batch.
+
+**Done:**
+- **#32 Partial price files (D1158):** each catalog part carries its own `priceDate`; both importers stamp it on every row a priced file writes and no longer re-date the manufacturer's whole book, so a supplement dates only its own lines. The by-hand Catalog banner date stays as the fallback. Builders keep the newest date (item 33), price books the oldest, both read per part. Answers MASTER-QUESTIONS E6.
+- **#43 Grid rack group ↔ rack (D1159):** a placed rack assembly shows its Assembly Builder rack's RU devices read-only in the Property Editor with **Open rack →**; **Link to rack…** makes a plain holder that rack (priced as the rack, no double counting); **Unlink** gives it its own part back and copies the rack's devices in as an ordinary group. Answers Grid notes #4's open question.
+- **#45 ADC track extras (D1160, D1161):** walk-along end stops (2 per curtain half; a walk-along can now be two halves — 4 stops, lapped legs, 2 masters), center pipe supports per a per-series "every X ft" (blank = off), and separate batten / ceiling hanging-point spacing (both fall back to the shared one). Optional roles, priced only when mapped. No curve idlers. Answers #291 Remaining 2.
+- **#46 Venue drawings (D1162–D1164):** `church-contemporary@2` keeps the Green / Electrical Rooms at their drawn width however deep the nave (new `houseCapped` y-span; @1 retired but still drawing for stamped sheets and designs that picked it); the arena's default end stage is 16' (24' covered 4' of the court); church Auto fill hangs side lights inside the platform, never in the side rooms; the Gym Stage default stage is 30'. Renders regenerated: `church-contemporary-4-deep-nave.png`, `arena-1-default.png`, `gym-stage-1-default.png`. Answers #255's open questions.
+- **#47 Bray TOC (D1165) — Fall Creek is the source; no changes needed:** `npm run specs:renumber-bray` renumbers sections and records from `docs/specs-seed/bray-toc-map.json` (dry run by default, `--apply`, `--yes` on a hosted DB; records keep their old number as a revision; ids never change). Jeff chose Fall Creek (Bray 3748). No Fall Creek TOC exists on file, so the map (confirmed) uses the numbers Bray's own Fall Creek section prints — `Fall Creek HS Auditorium AV Written Spec Section 27-41-00.docx`, 27 41 00 — which the library already has. Dry run on a scratch DB seeded with the library: 0 sections, 0 records would change. Sections with no Fall Creek counterpart keep their numbers (11 61 13, 11 61 14, 11 61 23, 11 61 33, 11 61 43, 26 09 23, 26 09 61, 26 55 61, 27 41 16). Answers #265's open question.
+
+**Tests:** new `scripts/test-oct15-batch4.ts` (pure + DB, chained into test:specs; `npx tsx scripts/test-oct15-batch4.ts` runs the pure half, with `PGLITE_PATH` the DB half): per-part dating and the price-book / builder / vendor dates, the store's stamping; the Contemporary @2 identity, shallow-nave parity, room widths at 55–200' naves and the 240-size fold / overlap / self-crossing sweep, side lights on the Platform for both church drawings, the arena stage at every size preset, the gym default; walk-along / two-halves / center-support / spacing quantities, sanitize and the form round-trip; the rack-link refusals, derived rows, snapshot, settle repair and the store's link / unlink / part-swap; the Bray map parse, plan, collision and idempotency, and a renumbered record's revision. `scripts/test-review-regressions.ts` updated for the per-part dating; harness expectations updated where behaviour changed (#255 template lists and gym default, #255 picker pin, #274 fixture roles). No migration, no env var.
+
+**Gates:** tsc 0; `scripts/test-oct15-batch4.ts` 87 PASS pure / 100 PASS with the DB half, 0 FAIL; `test:review:regressions` passed; test:specs 23,439 PASS / 0 FAIL; test:smoke 259 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors on the 43 changed src/scripts files (31 warnings, all on untouched lines). Not browser-verified.
+
+**Review fixes (same day, #354 review "With fixes"):** I1 — a blank-price row in a priced file dates nothing (both importers; tests). I2 — "Remove the N devices inside first — the rack supplies them." plus a one-step Link and remove its N devices (one write, confirmed inline, not undoable). M1 — Unlink copies the rack-level parts too; the toast counts them. M2 — a lot marker can't link. M3 — nothing goes inside a rack placed from the library either (existing members stay). M4 — link / unlink refused on an estimate-owned option. M5 — D1158 says a full re-import leaves parts missing from the file as stale as they were. M6 — the part form copy and the portal's stale-cost clock read the per-part date. M7 — a Bray map with a swap or chain is refused. M8 — cut sheets say "two-half walk-along". Expected production cases for M3's "existing members inside a library rack": none known (groups shipped Oct 12; not checked on production). Review-fix gates: tsc 0; `test-oct15-batch4.ts` 118 PASS / 0 FAIL (with the DB half); `test:review:regressions` passed; test:specs 23,459 PASS / 0 FAIL; test:smoke 259 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors on the 14 changed src/scripts files (1 pre-existing warning, `catalog/page.tsx` Date.now).
+
+**Rollback:** safe. New optional JSON only (`catalog_parts.priceDate`, `GridPlacement.rackId` / `rackHolderPartId`, track-series spacing / center-support fields and roles, `walkAlongBipart` on track lines); older code ignores them. After a rollback a design using `church-contemporary@2` falls back to its venue type's drawing, and a linked rack still prices as the rack.
+
+**Remaining (Jeff-gated):**
+- **Bray TOC:** nothing to run today. If Bray issues Fall Creek's project-manual TOC or more of its sections, add their numbers to `docs/specs-seed/bray-toc-map.json`; if the dry run then shows changes: `npm run db:export`, `DATABASE_URL=… npm run specs:renumber-bray` (dry run), then `-- --apply --yes`.
+- Map the new track roles on the ADC series (walk-along end stop, center pipe support) and set "Center supports every" and the batten / ceiling spacings where ADC's binders give them.
+- A venue type already set to "Church — Contemporary" keeps the earlier drawing until it is re-picked in Settings → Venue types.
+- Try Link to rack… / Unlink on a real Grid design with a rack built in the Assembly Builder.
+- The first supplement price file on production: check its parts read the new date and the rest of the book keeps its old one.
+
+---
+
+## 355. Jeff's 2026-10-15 decisions — Batch 5 (Estimate output leftovers) — DONE 2026-10-16 on `worktree-assist-layer` (D1187–D1193)
+
+**Asked (Jeff, 2026-10-15/16 decision session — `docs/decisions/2026-10-15-jeff-decisions.md`, Round 2 items 55–63).** The #301 / #293 leftovers.
+
+**Done:**
+- **#55 Rewards numbers (D493 amended):** no code change — the thresholds, earn rates and 1 % / $1,000 starting credit are Jeff's confirmed numbers; the program stays off until he turns it on in Settings → Rewards.
+- **#56 Cover heading (D1187):** each scope on the cover PDF opens with its own heading — the system's name, else its discipline, else "Scope N" — inside the scope's no-break block. Answers #301 question 4. (#57, letterhead on page 1 only, is a Keep — #301 question 5.)
+- **#58 Viewed stamp (D1188):** "Viewed Oct 6, 9:05 PM" — the latest open of any sent revision's client link, Chicago time — on the Client link panel (Send & track, Customer review) and leading the Quotes hub's Opened chip tooltip. Staff only; no customer page reads `shareOpens`.
+- **#59 Won version (D1189):** the Won transition records `Quote.wonRev` (the latest send when it still matches, else a "Won — the version that won" snapshot); reopening (won → draft / sent) puts that version back when edits were saved after the win — the edits become a revision first, the credit is the locked amount through `restoredCreditFor` → `settleCredit`, the ledger sees a plain revise, and the Estimator reloads. Every non-Daylite system quote; never a historical import. Only the priced fields come back — the header stays. The online page still shows the last send.
+- **#60 Datasheet thumbnail (D1190):** already so — a key product with no real photo prints its datasheet's page-1 thumbnail (a real photo always wins), on the PDF, online and the package page. Pinned. Sent PDFs stay frozen; online views of old sent quotes read photos live.
+- **#61 Narrative default (D1191):** a new estimate starts Narrative; + Add system follows the estimate's first system (review M6); systems saved without the key stay Itemized, so existing estimates keep their setting.
+- **#62 Intros (D1192):** already so — `create` edits the shared system intros. Pinned.
+- **#63 Toggle labels (D1193):** the online estimate and package page toggle reads Overview / Itemized ("…is under Itemized."); `?view=bom` unchanged; staff labels unchanged.
+
+**Tests:** new `scripts/test-batch5.ts` (pure + DB, chained into test:specs; `npx tsx scripts/test-batch5.ts` runs the pure half, with `PGLITE_PATH` the DB half): the cover heading rule and render, the Viewed stamp and the customer pages' absence of it, the won-version rules plus a DB run of send → win → edit → reopen (spec, value, credit, auto-save revision, ledger redeem / unredeem once), won from an edited draft, won → sent, a historical import, the thumbnail order and a DB run (no photo → thumbnail → real photo wins), the Narrative default and old systems still Itemized, the intro permission, the toggle labels. Harness expectations updated where behaviour changed: the #301 chip tooltip (#58), the #301 package-page order / fallback text (#63); the #P2b no-alternates fixture regenerated for the cover heading (#56) and the toggle labels (#63). No migration, no env var.
+
+**Gates:** tsc 0; `scripts/test-batch5.ts` 89 PASS pure / 103 PASS with the DB half, 0 FAIL; test:specs 24,243 PASS / 0 FAIL; test:smoke 262 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors, 0 warnings on the 15 changed src/scripts files (the harness file excluded, targeted edits only). Not browser-verified.
+
+**Review fixes (2026-10-16, #355 review "With fixes"):** I1 — the reopen is planned before the approval gate; setStatus and `checkApprovalGate` judge the restored version, so a non-approver can reopen an approved-then-edited won quote to Sent and an approver's stamp fingerprints the restored content (DB-tested, no bypass). I2 — a restoring reopen schedules its PDF, won → sent too. I3 — the Estimator saves unsaved edits before leaving Won (status menu and stage bar). M1 — a historical-import move never restores; a Won move that records nothing sets `wonRev` null. M2 — a Save whose status move reopens also reloads. M3 — the Won move compares at today's SKUs. M4/M5 — D1189 scope (every non-Daylite system quote) and "the header isn't restored". M6 — Narrative only for a NEW estimate; + Add system follows the estimate's first system; Send & track warns "N narrative systems have no intro text" (never blocks). M7 — the Viewed stamp shows on the Quotes hub row. M8 — Home's stage sheet and the Quotes hub say "Reopened at the version that won…". Review-fix gates: tsc 0; `scripts/test-batch5.ts` 99 PASS pure / 122 PASS with the DB half, 0 FAIL; test:specs 24,262 PASS / 0 FAIL; test:smoke 262 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors, 0 warnings on the 14 changed src/scripts files. Not browser-verified.
+
+**Rollback:** safe. New optional JSON only (`Quote.wonRev`, and the "Won — the version that won" / "Auto-saved before reopening…" revisions, which older code reads as ordinary manual revisions); older code ignores them. Rolling back restores the old cover, labels, default presentation and reopen behaviour.
+
+**Remaining (Jeff-gated):**
+- Look at a cover PDF with three or more scopes on production (headings, still 1–2 pages).
+- Open a sent estimate's client link from another device, then check the Viewed stamp on Send & track and the Quotes hub tooltip.
+- Win an estimate, edit it, revise it (status → Draft): the Estimator reloads at the won version and Revisions lists the edits as "Auto-saved before reopening at the version that won".
+- The datasheet thumbnail only exists where the admin datasheet-thumbnail render has run — run it on production (#245 remaining).
+- Still open from #301: open counts best effort (question 6), the honeypot (7), starter paragraphs (9). From #293: the Itemized appendix hint "Every narrative system's full line list…" wording (not the online toggle).
+## 356. Jeff's 2026-10-15 decisions — Batch 6 (Round 2 items 64–68 + Field Work task-id fix) — DONE 2026-10-16 on `batch6-jeff-decisions` (D1194–D1199)
+
+Decision record: `docs/decisions/2026-10-15-jeff-decisions.md` (on `worktree-assist-layer`), Round 2 items 64–68.
+
+- **#64 Attach in the Inbox composer (D1194).** New message, Edit draft and the reply composer (its Attach was a demo) attach computer files and the linked company's / project's Documents; chips with ✕; 18 MB of files / 20 files together (Gmail's 25 MB counts the encoded message). Uploads go straight to private Blob (`mail-attachments/<user>/<key>/`, `/api/inbox/attach-upload`, the server mints the path), re-checked by `finalizeMailUploadAction`; attachments ride by reference (`blobPath` / `documentId`) and are re-checked on save / send / reply after the owner check and again in the Gmail bridge; over 4 MB sends through Gmail's upload endpoint. `src/lib/mail-attachments.ts`, `mail-attachments-server.ts`, `inbox/attach-actions.ts`, `inbox/attach-picker.tsx`.
+- **#65 Download today's jobs (D1195).** Nav sync panel, phone drawer and Field Work, `create` holders only. `GET /api/sync/today` (`src/lib/sync/today-jobs.ts`) → forced pull into the mirror → the service worker keeps each page (MessagePort reply) → "Ready offline: N jobs".
+- **#66 Most-quoted products (D1196).** `/reports/sourcing` + CSV: parts and manufacturers across open estimates (sent, or drafts touched in 12 months), weighted by the #298 win rate; assemblies expanded, bonus lines skipped; cost for `approve` holders only. `src/lib/sourcing-report.ts`.
+- **#67 App icon from the Branding logo (D1197).** `/icons/app/*.png` (sharp, cached by logo version), generated `src/app/manifest.ts`, versioned favicon / apple-touch-icon; built-in mark when no logo. Native shells need their own icon sets + a rebuild (DEPLOY.md §8).
+- **#68 July defaults accepted (D1198).** MASTER-QUESTIONS B1–B3, F6, F7, F9–F11, F14, G2, G3, H1, H3, I4–I7, J1–J4, J6, K2, K4–K6 answered; F17, J5, K1, K3 answered by the builds above.
+- **Bug fix (D1199).** `addFieldTask` could overwrite any task by id; `createFieldTask` takes only `tk-` ids, inserts once, treats the caller's own repeat as idempotent and refuses the rest.
+
+Tests: `scripts/test-batch6.ts` (chained into test:specs; 72 pure / 89 with the DB half), plus targeted pin updates in `test-review-and-spec.ts`, `test-thread-visibility.ts` (attach-actions joins the #341 action audit) and `test-ask.ts`. Smoke adds `/reports/sourcing` and a manifest content check. No migration, no new env var.
+
+**Gates:** tsc 0; `scripts/test-batch6.ts` 72 PASS pure / 89 PASS with the DB half, 0 FAIL; test:specs 24,229 PASS / 0 FAIL; test:smoke 264 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors on the 39 changed src/scripts .ts/.tsx files (1 pre-existing warning, `field-work/page.tsx` Date.now; `test-review-and-spec.ts` skipped — eslint crashes on the harness). Not browser-verified.
+
+**Review fixes (#356 review "With fixes", 2026-10-16):** Critical 1 — Forward is a real new message (`forwardAction`, `src/lib/inbox-forward.ts`): its own thread addressed only to the typed To / Cc, "Fwd: …" + the quoted original, optionally the forwarded message's attachments (a Gmail one read from its source, same mailbox only) plus the rep's picks; a private source stays private (#341). Reply all sends its Cc (stamped on the message; bridge `outboundAddressing`). Important 2 — 18 MB of files ("Attachments too large for Gmail — 18 MB max."); the bridge refuses a built message over 25 MB encoded and shows "Not sent — …" on it (never retried). Important 3 — `/api/sync/push` takes the pull's `create` gate (403 parks the outbox entries as read-only); a `tasks` push inserts only new `tk-` tasks on a live project and updates only `tk-` tasks on their own live project or tasks the pusher is assigned to / created (`src/lib/sync/task-push.ts`); `toggleFieldTask` / `addFieldTask` need `create` and a task on a live project. Minor — sourcing reads quotes once and counts drafts touched in 12 months only; one cached settings read in the root layout; the Documents picker tags Internal files and names the company / project; `/favicon.ico` rewrites to `/icons/app/32.png`; the caller's own unassigned `tk-` capture answers ok. D1194, D1196, D1199 updated. Review-fix gates: tsc 0; `scripts/test-batch6.ts` 95 PASS pure / 119 PASS with the DB half, 0 FAIL; test:specs 24,259 PASS / 0 FAIL (includes test-thread-visibility; its "push stays open" pin now pins the new gate); test:smoke 264 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 problems on the 27 changed src/scripts files + next.config.ts. Not browser-verified.
+
+**Rollback:** safe. New optional fields only (`CommAttachment.blobPath` / `documentId` / `fwdFrom`, `CommMessage.sendError`); older code ignores them (an email drafted with one would send without it on old code, since the old bridge skips unknown attachments). Rolling back restores the static manifest only if `public/manifest.webmanifest` comes back with it.
+
+**Remaining (Jeff-gated):**
+- Attach a computer file and a company Document to a real email on production (needs `BLOB_READ_WRITE_TOKEN` and a connected Gmail); try one over 4 MB.
+- Press Download today's jobs on a phone with a real day's assignments, then go offline and open each job.
+- Upload the real logos in Settings → Branding and check the home-screen icon; replace the native app icon sets and rebuild if the apps should match.
+- Look at Reports → Most-quoted products with real open estimates.
+- **Question for Jeff (review item 9):** on a shared device, the offline mirror and the cached job pages stay after sign-out — another person signing in on that tablet could read them offline. Should sign-out clear the device (the mirror and the page cache, keeping unsent captures), or are field devices personal?
+- **Follow-up (review item 7):** sweep orphaned composer uploads — files under `mail-attachments/` that no draft or sent message references (a discarded composer), e.g. older than 7 days.
+- Forward a real email with a Gmail attachment on production and check the vendor gets the file; try Reply all with a Cc.
+- **Re-review fixes (2026-10-16, D1200):** To is read-only on Reply / Reply all (only Forward sends to a typed address); the shown Cc row always goes out; Reply all Cc's the replied-to message's other recipients (not our own mailbox); a push parks as read-only only on the route's own `403 { error: "read-only" }`; an offline tick (status / doneAt / updatedAt only, live task on a live project) syncs like the online tick, other fields from the stored copy; Forward waits for the original's attachments to finish loading. Gates: tsc 0; `test-batch6.ts` 105 PASS pure / 131 PASS with the DB half, 0 FAIL; test:specs 24,271 PASS / 0 FAIL (includes test-thread-visibility); `next build` OK; eslint 0 problems on the 11 changed files; smoke not rerun (no page route touched). Not browser-verified.
+- **Left as is (re-review item 6):** forwarding a legacy attachment stored inline as a data URL copies its bytes into the new forward's comms document (which every page's nav data reads). Rare (pre-Gmail-reference attachments only); forward by reference later.
+
+## 357. Move estimator lines between systems — DONE 2026-10-16 on `feat/356-move-lines` (D1201–D1207)
+
+Jeff, Oct 16: "the ability to move each individual line in the estimator to different packages — or select multiple and move them to different systems." Spec `docs/superpowers/specs/2026-10-16-estimator-move-lines-design.md`; plan `docs/superpowers/plans/2026-10-16-estimator-move-lines.md`.
+
+**Built:** on Build, a checkbox on every movable line, a ⇄ per line, and a sticky **N selected · Move to ▾ · Clear** bar (`move-lines-bar.tsx`). Targets: this estimate's systems, **New system…**, and **Another estimate…** (new or existing; lands as one "<name> (moved)" system through `moveSystemToEstimateAction`). A preview lists linked lines that come along, typed prices that clear, stars that drop, and systems left empty. Pure rules in `src/lib/estimate-line-move/` (`move.ts`, `reid.ts`). Package-document anchors follow (`src/lib/package-doc/reanchor.ts`), and the server re-ids colliding ids on any move or copy into an existing estimate.
+
+**Gates:** tsc 0; `scripts/test-estimate-line-move.ts` 100 PASS / 0 FAIL (in test:specs); test:specs 24,493 PASS / 0 FAIL (after merging main); test:smoke 262 PASS / 0 FAIL (before the merge); `next build` OK; eslint 0 on the touched files (`scripts/test-review-and-spec.ts` overflows eslint's react-hooks rule, as before). A browser pass on a scratch copy of the dev DB covered: tick 2 lines → existing system; ⇄ → New system "Sound" (inserted after its source); Save + reload kept both; ⇄ → Another estimate → New estimate (the line left and arrived at the same price; the preview said the source would be empty); the bar at 900px with no page overflow.
+
+**Rollback:** safe. No migration, no new stored fields. Older code reads moved lines like any others. The server re-id only changes ids that would have collided.
+
+**Remaining:**
+- Jeff: try it on a real estimate in production. A curtain with its track, a labor group, and a starred product make the best test.
+- Follow-up: `removeItem` / `patchItem` in `use-estimator-state.ts` still match a bare id across systems, so an estimate that already holds the same id in two systems (from a pre-#357 Move/Copy system into an existing estimate) can delete or edit both twins.

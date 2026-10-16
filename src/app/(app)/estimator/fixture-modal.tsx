@@ -19,7 +19,7 @@ function totals(assembly: ResolvedFixtureAssembly | undefined, quantities: Recor
  *  circuit. (Component, draft and handler names keep their #210 "fixture"
  *  spelling — internal only.) */
 export default function FixtureModal({
-  secName, draft, assemblies, onAssembly, onSet, onComponentQty, onAdd, onClose,
+  secName, draft, assemblies, onAssembly, onSet, onComponentQty, onAdd, onClose, confirmClose,
 }: {
   secName: string;
   draft: FixtureDraft;
@@ -29,6 +29,8 @@ export default function FixtureModal({
   onComponentQty: (sku: string, value: string) => void;
   onAdd: () => void;
   onClose: () => void;
+  /** #348 follow-up: ConfigModal asks this before the × / backdrop discards the form. */
+  confirmClose?: () => boolean;
 }) {
   const assembly = assemblies.find((item) => item.id === draft.assemblyId);
   const unit = totals(assembly, draft.componentQty);
@@ -39,7 +41,7 @@ export default function FixtureModal({
   const groups = groupAssemblies(assemblies);
 
   return (
-    <ConfigModal width={700} icon="◉" iconSize={15} title="Add assembly" sub={<>Adds to {secName}</>} onClose={onClose}
+    <ConfigModal width={700} icon="◉" iconSize={15} title="Add assembly" sub={<>Adds to {secName}</>} onClose={onClose} confirmClose={confirmClose}
       footerLeft={<><Stat label="Cost / ea" value={`$${unit.cost.toFixed(2)}`} color="#8c919c" /><Stat label="Sell / ea" value={`$${unit.sell.toFixed(2)}`} /><Stat label="Ext sell" value={`$${Math.round(unit.sell * count).toLocaleString()}`} size={14} weight={700} /></>}
       footerRight={<button type="button" onClick={onAdd} disabled={!valid} style={addBtnStyle(valid)}>Add assembly</button>}>
       {!assemblies.length ? (

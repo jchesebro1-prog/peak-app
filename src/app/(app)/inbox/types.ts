@@ -73,12 +73,18 @@ export type AttachmentVM = {
   mime: string;
   size: number;
   href: string;
+  /** #348 slice 4 — `threadId~messageId~index` (lib/vendor-quotes/rules threadAttachmentRef) */
+  ref: string;
+  /** #348 slice 4 — a PDF that could be a vendor quote (never our own by-reference estimate PDF) */
+  pdf: boolean;
 };
 
 /** Composer-side attachment chip (no bytes shipped to the client). */
 export type AttachmentMetaVM = {
   name: string;
   size: number;
+  /** Batch 6 #64 — lib/mail-attachments attachKey: the composer keeps or drops a draft's file by it. */
+  key?: string;
 };
 
 export type DraftPayload = {
@@ -151,6 +157,8 @@ export type MessageVM = {
   out: boolean;
   tag: string;
   queued: boolean;
+  /** #356 review — the bridge will never send this message (e.g. too large for Gmail): the reason, shown on it. */
+  sendError?: string;
   time: string;
   body: string;
   attachments?: AttachmentVM[];
@@ -159,6 +167,8 @@ export type MessageVM = {
 
 export type LinkVM = {
   type: string;
+  /** #348 slice 4 — the linked record's id (the Add-as-vendor-quote dialog pre-picks a linked estimate) */
+  id: string;
   kindLabel: string;
   label: string;
   color: string;
@@ -177,6 +187,11 @@ export type ReaderVM = {
   /** #341 — the customer a read-only thread is deliberately linked to ("" =
    *  none, or only an automatic sender match, which is never shown). */
   readOnlyLinkedTo: string;
+  /** #348 slice 4 — some Gmail message here was imported before attachments
+   *  were recorded: the reader runs the one-time lazy listing (owner only). */
+  attachmentsPending: boolean;
+  /** #348 slice 4 — the vendor company this thread is filed under (Task 6). */
+  vendorCompany: { id: string; name: string } | null;
   /** Thread is out of the inbox (locally archived OR archived on the Gmail
    *  side) — drives the Archive/Unarchive toggle. Unarchive clears the local
    *  flag and, with two-way archive (D74), pushes INBOX back onto the Gmail
@@ -195,6 +210,8 @@ export type ReaderVM = {
   chanIcon: ChanIcon;
   boxLabel: string;
   boxAddress: string;
+  /** #356 re-review — Reply all's Cc pre-fill (lib/reply-all): the other To / Cc recipients of the replied-to message. */
+  replyAllCc: string;
   boxColor: string;
   contactName: string;
   contactEmail: string;

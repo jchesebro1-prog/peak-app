@@ -74,6 +74,8 @@ export const DEFAULT_QUOTE_PIPELINES: QuotePipeline[] = [
     id: "bid-spec",
     label: "BID SPEC",
     stages: [
+      // Jeff 2026-10-15 #42 — a plain Draft stage ahead of Collect Information (no new tag: nothing keys off it).
+      { id: "lead-qualify", label: "Lead / Qualify", tag: "draft" },
       { id: "collect-info", label: "Collect Information", tag: "draft" },
       { id: "create-bid", label: "Create BID", tag: "draft" },
       { id: "bid-sent", label: "BID Sent", tag: "sent" },
@@ -163,6 +165,33 @@ export function validateQuotePipeline(p: QuotePipeline): string[] {
       break;
     }
   return errs;
+}
+
+/** Jeff 2026-10-15 #42 — the stage BID SPEC gained, and the one-time settings marker (`pipelineFixes`) that says
+ *  stored pipelines were brought up to it. */
+export const LEAD_QUALIFY_STAGE: PipelineStage<QuoteTag> = { id: "lead-qualify", label: "Lead / Qualify", tag: "draft" };
+export const LEAD_QUALIFY_FIX = "bid-spec-lead-qualify";
+
+const foldLabel = (s: string) => (s || "").toLowerCase().replace(/[^a-z]+/g, "");
+
+/**
+ * Jeff 2026-10-15 #42 — a STORED quote-pipeline list (Settings → Pipelines saves full replacements, so a list saved
+ * before this change has no Lead / Qualify) with the stage added to BID SPEC, right before Collect Information (the
+ * front when that stage is gone). `null` = nothing to change: no BID SPEC pipeline, the stage is already there (by id,
+ * or a stage already named "Lead / Qualify" / "Lead Qualify"), or the result would not validate. Never touches a
+ * record: a quote keeps whatever stage it is on.
+ */
+export function withLeadQualifyStage(list: readonly QuotePipeline[]): QuotePipeline[] | null {
+  const i = list.findIndex((p) => p.id === "bid-spec");
+  if (i < 0) return null;
+  const pl = list[i];
+  if (!Array.isArray(pl.stages)) return null;
+  if (pl.stages.some((s) => s.id === LEAD_QUALIFY_STAGE.id || foldLabel(s.label) === "leadqualify")) return null;
+  const at = Math.max(0, pl.stages.findIndex((s) => s.id === "collect-info"));
+  const stages = [...pl.stages.slice(0, at), { ...LEAD_QUALIFY_STAGE }, ...pl.stages.slice(at)];
+  const next: QuotePipeline = { ...pl, stages };
+  if (validateQuotePipeline(next).length) return null;
+  return list.map((p, k) => (k === i ? next : p));
 }
 
 function validList<T>(v: unknown, check: (p: T) => string[]): T[] | null {

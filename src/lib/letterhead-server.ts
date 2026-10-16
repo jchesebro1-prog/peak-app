@@ -112,6 +112,27 @@ export async function documentLetterhead(settings: AppSettingsData, perDoc?: boo
   return { companyName, image: { jpeg, png: logo?.png ?? null, full: !logo, w: info.w, h: info.h } };
 }
 
+/**
+ * Jeff 2026-10-15 #12 — an ESTIMATE's Datasheets.pdf cover heads with the full
+ * baked Peak letterhead sheet, like the estimate itself (#331, D853), never the
+ * Branding logo. The Peak-header choice (the document's ?? the company
+ * default) still decides whether the cover carries a letterhead at all. A
+ * missing sheet falls back to the company name in type.
+ */
+export async function fullDocumentLetterhead(settings: AppSettingsData, perDoc?: boolean | null): Promise<Letterhead | null> {
+  if (!resolvePeakHeader(perDoc, peakHeaderDefault(settings))) return null;
+  const companyName = (settings.companyName || "").trim() || "Peak Systems Group";
+  const jpeg = await bakedLetterhead();
+  const info = jpeg ? jpegInfo(jpeg) : null;
+  if (!jpeg || !info || info.w <= 0 || info.h <= 0) return { companyName, image: null };
+  return { companyName, image: { jpeg, png: null, full: true, w: info.w, h: info.h } };
+}
+
+/** fullDocumentLetterhead over the live settings — the estimate datasheet book's cover. */
+export async function loadEstimateBookLetterhead(perDoc?: boolean | null): Promise<Letterhead | null> {
+  return fullDocumentLetterhead(await getSettings(), perDoc);
+}
+
 /** documentLetterhead over the live settings. */
 export async function loadDocumentLetterhead(perDoc?: boolean | null): Promise<Letterhead | null> {
   return documentLetterhead(await getSettings(), perDoc);

@@ -126,13 +126,21 @@ export async function pushDueDate(input: unknown, nowMs: number = Date.now()): P
 }
 
 /** Reassign through the existing update paths, which clear the old assignee's pins. */
-export async function handOff(input: unknown): Promise<WriteResult> {
+export async function handOff(input: unknown, actor?: { id: string; name: string }): Promise<WriteResult> {
   const o = obj(input);
   const ref = parsePlanRef(o.kind, o.id);
   if (!ref) return { ok: false, error: "Unknown task." };
   const who = typeof o.userId === "string" ? (await activeUsers()).find((u) => u.id === o.userId) : undefined;
   if (!who) return { ok: false, error: "Pick someone on the team." };
-  if (ref.kind === "task") return (await updateTask(ref.id, { assigneeUserId: who.id, assigneeName: who.name })) ? { ok: true } : GONE;
+  if (ref.kind === "task") {
+    if (!(await updateTask(ref.id, { assigneeUserId: who.id, assigneeName: who.name }))) return GONE;
+    // #351 review — the share never moves with a hand-off; only the thread's owner re-stamps it
+    if (actor) {
+      const { reshareTaskThread } = await import("@/lib/task-thread-share");
+      await reshareTaskThread(ref.id, actor);
+    }
+    return { ok: true };
+  }
   if (!(await getAssignment(ref.id))) return GONE;
   await updateAssignment(ref.id, { assignee: who.name });
   return { ok: true };

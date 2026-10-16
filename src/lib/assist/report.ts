@@ -3,6 +3,7 @@ import type { AssistRun } from "@/lib/stores/assist-runs";
 import type { EstimateRunOutcome } from "./outcome";
 import type { FilingLogEntry } from "@/lib/stores/inbox-org";
 import type { FilingSource } from "@/lib/inbox-org/types";
+import type { VendorPdfDiff } from "@/lib/vendor-pdf/diff";
 import { NUDGE_OPENED_KEY, PREDRAFT_RUN_KEY } from "@/lib/brief/report-keys";
 
 /** `noSuggestion` — estimate draft runs that saved no suggestion (spec 2026-10-13 §4): counted apart, never as discarded. */
@@ -11,7 +12,7 @@ export type ReportRow = { key: string; runs: number; okRuns: number; accepted: n
 const blank = (key: string): ReportRow => ({ key, runs: 0, okRuns: 0, accepted: 0, edited: 0, discarded: 0, pending: 0, noSuggestion: 0, costUsd: 0 });
 
 /** #335 — the Inbox-organization passes read as what they do. */
-const FEATURE_LABEL: Partial<Record<AssistRun["feature"], string>> = { file: "file (filing)", promise: "promise (court + promises)", brief: "Daily brief", ask: "Ask AI" };
+const FEATURE_LABEL: Partial<Record<AssistRun["feature"], string>> = { file: "file (filing)", promise: "promise (court + promises)", brief: "Daily brief", ask: "Ask AI", vendorpdf: "Read the PDF" };
 
 export function featureKey(r: Pick<AssistRun, "feature" | "step">): string {
   return r.feature === "estimate" ? `Suggest estimate (${r.step ?? "draft"})` : FEATURE_LABEL[r.feature] ?? r.feature;
@@ -291,4 +292,72 @@ export function askReport(runs: AssistRun[]): AskReport {
     costUsd: Math.round(x.costUsd * 10000) / 10000,
   });
   return { total: done(total), byPerson: [...people.values()].map(done).sort((a, b) => a.key.localeCompare(b.key)) };
+}
+
+/* ---- Read the PDF rows (#348 slice 5, spec §8) -------------------------------- */
+
+export type VendorPdfReportRow = {
+  key: string;
+  /** every vendorpdf run, failed included */ reads: number; okReads: number;
+  /** outcomeDetail.hard === true */ tryHarder: number;
+  /** outcome accepted | edited with a diff */ saved: number;
+  /** outcome discarded (a later read — Read again or Try harder — replaced it) */ replaced: number;
+  linesRead: number; kept: number; edited: number; deleted: number; added: number;
+  /** kept ÷ linesRead over saved runs, %, one decimal; null with none */ keptPct: number | null;
+  totalChanged: number;
+  /** Σ outcomeDetail.mathFlags over ok reads (read-time, saved or not) */ mathFlags: number;
+  costUsd: number;
+};
+export type VendorPdfReport = { total: VendorPdfReportRow; byModel: VendorPdfReportRow[]; byVendor: VendorPdfReportRow[] };
+
+const blankVendorPdf = (key: string): VendorPdfReportRow => ({
+  key, reads: 0, okReads: 0, tryHarder: 0, saved: 0, replaced: 0, linesRead: 0, kept: 0, edited: 0, deleted: 0, added: 0, keptPct: null, totalChanged: 0, mathFlags: 0, costUsd: 0,
+});
+
+/** The scored diff a first save wrote to a run's detail (`outcomeDetail.diff`, a VendorPdfDiff), or null. */
+function savedDiff(r: AssistRun): Pick<VendorPdfDiff, "read" | "kept" | "edited" | "deleted" | "added" | "totalChanged"> | null {
+  if (r.outcome !== "accepted" && r.outcome !== "edited") return null;
+  const d = (r.outcomeDetail ?? {}) as { diff?: Partial<VendorPdfDiff> | null };
+  if (!d.diff || typeof d.diff !== "object") return null;
+  return { read: count(d.diff.read), kept: count(d.diff.kept), edited: count(d.diff.edited), deleted: count(d.diff.deleted), added: count(d.diff.added), totalChanged: d.diff.totalChanged === true };
+}
+
+/**
+ * Pure: the month's Read-the-PDF table. `vendorpdf` runs only. `byModel` keys on the answering model and covers every
+ * read; `byVendor` covers SAVED runs only (the vendor is known only at the first save): key = `outcomeDetail.vendor`
+ * or "Unnamed vendor". Accuracy is scored at the first save. Cost is rounded like the main report.
+ */
+export function vendorPdfReport(runs: AssistRun[]): VendorPdfReport {
+  const total = blankVendorPdf("Total");
+  const models = new Map<string, VendorPdfReportRow>();
+  const vendors = new Map<string, VendorPdfReportRow>();
+  for (const r of runs) {
+    if (r.feature !== "vendorpdf") continue;
+    const d = (r.outcomeDetail ?? {}) as Record<string, unknown>;
+    const diff = savedDiff(r);
+    const targets = [total, models.get(r.model) ?? blankVendorPdf(r.model)];
+    const vendorKey = diff ? (typeof d.vendor === "string" && d.vendor.trim() ? d.vendor.trim() : "Unnamed vendor") : null;
+    const vendorRow = vendorKey ? (vendors.get(vendorKey) ?? blankVendorPdf(vendorKey)) : null;
+    for (const row of vendorRow ? [...targets, vendorRow] : targets) {
+      row.reads++;
+      if (r.ok) { row.okReads++; row.mathFlags += count(d.mathFlags); }
+      if (d.hard === true) row.tryHarder++;
+      if (r.outcome === "discarded") row.replaced++;
+      if (diff) {
+        row.saved++;
+        row.linesRead += diff.read; row.kept += diff.kept; row.edited += diff.edited; row.deleted += diff.deleted; row.added += diff.added;
+        if (diff.totalChanged) row.totalChanged++;
+      }
+      row.costUsd += r.costUsd || 0;
+    }
+    models.set(r.model, targets[1]);
+    if (vendorRow && vendorKey) vendors.set(vendorKey, vendorRow);
+  }
+  const done = (x: VendorPdfReportRow): VendorPdfReportRow => ({
+    ...x,
+    keptPct: x.linesRead ? Math.round((x.kept / x.linesRead) * 1000) / 10 : null,
+    costUsd: Math.round(x.costUsd * 10000) / 10000,
+  });
+  const sorted = (m: Map<string, VendorPdfReportRow>) => [...m.values()].map(done).sort((a, b) => a.key.localeCompare(b.key));
+  return { total: done(total), byModel: sorted(models), byVendor: sorted(vendors) };
 }

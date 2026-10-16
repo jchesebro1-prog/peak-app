@@ -106,12 +106,19 @@ export function makeYMap(k: TemplateKeys, d: StretchDims): (y: number) => number
   const openOf = (drive: string) => spans.filter((s) => s.drive === drive).reduce((n, s) => n + len(s), 0);
   const openStage = openOf("stageDepth");
   const open = openOf("houseOpen");
+  const capped = openOf("houseCapped");
   // #255: the stage/platform depth range may hold fixed spans too (a church's front step); only its open spans stretch.
   const fixedStage = Math.abs(k.stageDepthTo - k.origin) - openStage;
-  const fixedHouse = k.origin - k.houseDepthTo - open;
+  const fixedHouse = k.origin - k.houseDepthTo - open - capped;
   const stageK = openStage > 0 ? Math.max(0, d.stageDepthFt * 12 - fixedStage) / openStage : 1;
-  const houseK = open > 0 ? Math.max(0, d.houseDepthFt * 12 - fixedHouse) / open : 1;
-  const newLen = (s: (typeof spans)[number]) => len(s) * (s.drive === "stageDepth" ? stageK : s.drive === "houseOpen" ? houseK : 1);
+  // Oct 15 #46: open and capped spans stretch together while the house is no deeper than drawn; past that the capped
+  // ones keep their drawn length and the open ones take the rest. A template with no capped span is unchanged.
+  const want = Math.max(0, d.houseDepthFt * 12 - fixedHouse);
+  const allK = open + capped > 0 ? want / (open + capped) : 1;
+  const cappedK = capped > 0 && open > 0 ? Math.min(1, allK) : allK;
+  const houseK = capped > 0 && open > 0 ? (allK <= 1 ? allK : (want - capped) / open) : open > 0 ? want / open : 1;
+  const newLen = (s: (typeof spans)[number]) =>
+    len(s) * (s.drive === "stageDepth" ? stageK : s.drive === "houseOpen" ? houseK : s.drive === "houseCapped" ? cappedK : 1);
   const ys = [spans[0].from, ...spans.map((s) => s.to)];
   const iO = ys.findIndex((y) => Math.abs(y - k.origin) < 1e-6);
   if (iO < 0) throw new Error(`venue template ${k.kind}: origin ${k.origin} is not a y key line`);

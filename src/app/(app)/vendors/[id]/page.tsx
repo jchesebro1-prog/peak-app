@@ -16,6 +16,7 @@ import { ACCENT_INK, ACCENT_SOFT, mono, typeColor } from "@/app/(app)/companies/
 import { VENDOR_TABS, VENDOR_TAB_LABEL, resolveVendorTab, type VendorTab } from "../tabs";
 import { toDateInput } from "../dates";
 import OverviewTab from "./overview-tab";
+import { QuotesReceivedCard } from "@/components/vendors/quotes-received-card";
 import ContactsTab, { type VendorContactVM } from "./contacts-tab";
 import PriceListsTab from "./price-lists-tab";
 
@@ -170,6 +171,7 @@ export default async function VendorDetailPage({
             quoted={quoted}
           />
         )}
+        {tab === "overview" && <QuotesReceivedCard companyId={row.id} />}
         {tab === "contacts" && <ContactsTab vendorId={row.id} contacts={contacts} />}
         {tab === "prices" && (
           <PriceListsTab

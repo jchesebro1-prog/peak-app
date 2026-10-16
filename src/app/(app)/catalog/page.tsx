@@ -823,7 +823,7 @@ function PartFormModal({
   error,
 }: {
   part: CatalogPart | null;
-  /** #133 — the part's effective price date (own pricedAt or the manufacturer's book date), null when undated. */
+  /** #133 — the part's effective price date (lib/catalog-books effectivePriceDate), null when undated. */
   priceDate: number | null;
   categories: string[];
   manufacturers: string[];
@@ -998,8 +998,8 @@ function PartFormModal({
             {editing && (
               <div style={{ fontSize: 11, color: "#aab0bb", marginTop: -7, marginBottom: 13 }}>
                 {priceDate
-                  ? `Price effective ${dateYear(priceDate)} — moves when the list price or cost changes.`
-                  : "No price date yet — a price change here, an import, or the manufacturer's price-list date on the Catalog banner sets one."}
+                  ? `Price effective ${dateYear(priceDate)} — moves when the list price or cost changes here, or when a price file that lists this part is imported.`
+                  : "No price date yet — a price change here, a price file that lists this part, or the manufacturer's price-list date on the Catalog banner sets one."}
               </div>
             )}
             <div style={{ marginBottom: 4 }}>

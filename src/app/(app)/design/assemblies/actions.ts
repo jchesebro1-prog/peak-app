@@ -49,6 +49,7 @@ export async function searchAssemblyPartsAction(query: string, limit = 40): Prom
       list: h.list,
       cost: h.cost,
       ...(h.pricedAt ? { pricedAt: h.pricedAt } : {}),
+      ...(h.priceDate ? { priceDate: h.priceDate } : {}),
       rack: h.rack,
     })),
     total,

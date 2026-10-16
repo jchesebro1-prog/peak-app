@@ -48,6 +48,8 @@ export type OppLeadInput = {
   convertedCustomerId: string | null;
   convertedQuoteId: string | null;
   forecastAt: number | null;
+  /** #348 — the lead has ≥ 1 estimate (Quote.leadId). Its estimates ride the board instead, like a converted lead. */
+  hasEstimates?: boolean;
 };
 
 export type OppQuoteInput = {
@@ -61,6 +63,8 @@ export type OppQuoteInput = {
   updatedAt: number;
   customerId: string | null;
   poReceivedAt: number | null;
+  /** #348 — Quote.leadId; lets a card inherit the forecast of a lead the board skips for hasEstimates. */
+  leadId?: string | null;
 };
 
 export type OppRow = {
@@ -126,9 +130,10 @@ export function canSetPoReceived(status: string): boolean {
 /* ---- the union ---- */
 
 /**
- * Build the merged board rows. A converted lead (non-null convertedQuoteId)
+ * Build the merged board rows. A converted lead (non-null convertedQuoteId) or a lead with estimates (#348)
  * is EXCLUDED — its quote carries the opportunity from there — but its
- * forecastAt is inherited onto that quote's card. ALL quoteTypes ride the
+ * forecastAt is inherited onto that quote's card: by convertedQuoteId for a
+ * converted lead, else by the quote's leadId for a lead skipped for its estimates. ALL quoteTypes ride the
  * board (flame_test / repair / inspection / consulting bids are pipeline
  * too — product flag for Jeff, D119).
  */
@@ -137,11 +142,15 @@ export function buildOpportunities(
   quotes: OppQuoteInput[]
 ): OppRow[] {
   const leadByQuote = new Map<string, OppLeadInput>();
-  for (const l of leads) if (l.convertedQuoteId) leadByQuote.set(l.convertedQuoteId, l);
+  const skippedLeadById = new Map<string, OppLeadInput>();
+  for (const l of leads) {
+    if (l.convertedQuoteId) leadByQuote.set(l.convertedQuoteId, l);
+    if (l.convertedQuoteId || l.hasEstimates) skippedLeadById.set(l.id, l);
+  }
 
   const rows: OppRow[] = [];
   for (const l of leads) {
-    if (l.convertedQuoteId) continue;
+    if (l.convertedQuoteId || l.hasEstimates) continue;
     const col = leadColumn(l.stage);
     if (!col) continue;
     rows.push({
@@ -173,7 +182,7 @@ export function buildOpportunities(
       createdAt: q.createdAt || 0,
       updatedAt: q.updatedAt || 0,
       companyId: q.customerId ?? null,
-      forecastAt: leadByQuote.get(q.id)?.forecastAt ?? null,
+      forecastAt: (leadByQuote.get(q.id) ?? (q.leadId ? skippedLeadById.get(q.leadId) : undefined))?.forecastAt ?? null,
       srcStage: q.status,
     });
   }

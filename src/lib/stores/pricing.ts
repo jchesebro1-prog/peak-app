@@ -21,6 +21,7 @@ import {
   type WireLaborRules,
 } from "@/lib/design/wire-labor";
 import { DEFAULT_SEWING_PCT, SEWING_PCT_ID, SEWING_PCT_MAX, sewingPctFrom } from "@/lib/design/curtain-pricing";
+import { BONUS_ESTIMATOR_PCT, BONUS_ESTIMATOR_RATE_ID, BONUS_PACKAGE_PCT, BONUS_PACKAGE_RATE_ID, BONUS_RATE_MAX_PCT, bonusRatesFrom, type BonusRates } from "@/lib/estimate-bonus/flags";
 import { DEFAULT_FREIGHT_RULE, FREIGHT_RATE_IDS, PORTAL_RATE_IDS } from "@/lib/freight-rule";
 
 /**
@@ -584,6 +585,15 @@ export const GROUPS: PricingGroup[] = [
     ],
   },
   {
+    key: "bonuses", label: "Estimator bonuses", live: true,
+    sub: "The automatic package and estimator bonus lines on every Estimator system (#330)",
+    note: "Live for DRAFT estimates only — a draft re-figures its bonus lines at these rates on its next save. A sent, won or lost estimate keeps the rates its lines were figured at, so its price never moves. 0–20 %.",
+    items: [
+      rate(BONUS_PACKAGE_RATE_ID, "Package bonus", BONUS_PACKAGE_PCT * 100, "% of system cost", { min: 0, max: BONUS_RATE_MAX_PCT, step: 0.5, help: "on a system with labor: cost × this, marked up at the system's blended margin" }),
+      rate(BONUS_ESTIMATOR_RATE_ID, "Estimator bonus", BONUS_ESTIMATOR_PCT * 100, "% of system price", { min: 0, max: BONUS_RATE_MAX_PCT, step: 0.5, help: "the system's price × this, at cost; split between Lead estimator and Prepared by at Won" }),
+    ],
+  },
+  {
     key: "portal", label: "Portal & freight", live: true,
     sub: "Freight by distance and customer self-quote rules",
     note: "Freight: base % under the first step, + step % for every full step of drive miles from the quoting office, never above the cap. Unknown distance charges the cap. The Estimator pre-fills new sections with it; the portal always applies it.",
@@ -753,6 +763,12 @@ export async function loadWireLaborRules(): Promise<WireLaborRules> {
 export async function loadCurtainSewingPct(): Promise<number> {
   const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
   return sewingPctFrom(g[SEWING_PCT_ID]);
+}
+
+/** Jeff 2026-10-15 #19: the Estimator bonus rates (fractions) — one read of the general blob. */
+export async function loadBonusRates(): Promise<BonusRates> {
+  const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
+  return bonusRatesFrom(g[BONUS_PACKAGE_RATE_ID], g[BONUS_ESTIMATOR_RATE_ID]);
 }
 
 /* ---------- export ---------- */

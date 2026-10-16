@@ -18,6 +18,8 @@ export function pointsFor(f: TriageFact): number {
     case "quote_awaiting_approval":
     case "lead_sla_due_soon":
       return 35;
+    case "bid_due":
+      return f.days <= 0 ? 35 : 25;
     case "task_due_today":
     case "call_todo":
     case "portal_quote_review":
@@ -73,6 +75,10 @@ export function factLabel(f: TriageFact): string {
       return "Portal quote to review";
     case "quote_sent_back":
       return "Sent back to you";
+    case "bid_due":
+      return f.days < 0
+        ? "Bid past due"
+        : `Bid due ${f.days === 0 ? "today" : "tomorrow"} · ${plural(f.missing, "bidder")} not submitted`;
     case "renewal_past_due":
       return `Renewal ${plural(f.days, "day")} past due`;
     case "lead_next_action_overdue":

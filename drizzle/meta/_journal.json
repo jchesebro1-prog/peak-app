@@ -288,6 +288,13 @@
       "when": 1791940678130,
       "tag": "0040_assessments",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792032143666,
+      "tag": "0041_record_parties",
+      "breakpoints": true
     }
   ]
 }

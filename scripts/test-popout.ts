@@ -470,7 +470,7 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
     ok(list.includes('if (!r.isDraft && handlePopoutClick(e, "thread", r.id, threadPopUrl(r.id))) return;'), "popout: Shift-click on an Inbox thread row pops the thread (drafts excluded)");
     ok(/if \(handlePopoutClick\(e, "thread", r\.id, threadPopUrl\(r\.id\)\)\) return;\s*onOpen\(r\.id\);/.test(list), "popout: Shift-click on an Inbox search result pops the thread");
     const hub = readSrc("src/app/(app)/quotes/page.tsx");
-    ok(/<PopLink\s+href=\{hrefFor\(\{ id: selected \? null : q\.id \}\)\}\s+popKind="estimate"\s+popId=\{q\.id\}\s+popUrl=\{quoteBuilderHref\(q\)\}/.test(hub), "popout: Shift-click on a Quotes hub row pops the estimate");
+    ok(/<PopLink\s+href=\{hrefFor\(\{ id: selected \? null : q\.id, page: paged\.page \}\)\}\s+popKind="estimate"\s+popId=\{q\.id\}\s+popUrl=\{quoteBuilderHref\(q\)\}/.test(hub), "popout: Shift-click on a Quotes hub row pops the estimate");
     ok(/<PopLink\s+href=\{editHrefFor\(q\)\.href\}\s+popKind="estimate"\s+popId=\{q\.id\}/.test(hub), "popout: Shift-click on the hub's Open link pops the estimate");
     ok(/<PopLink\s+key=\{qt\.id\}\s+href=\{quoteBuilderHref\(qt\)\}\s+popKind="estimate"\s+popId=\{qt\.id\}/.test(custPage), "popout: Shift-click on a customer record quote row pops the estimate");
     const pipeline = readSrc("src/app/(app)/home-pipeline.tsx");

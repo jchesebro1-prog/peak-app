@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { requireUser } from "@/lib/session";
-import { activeUsers } from "@/lib/users";
+import { activeUsers, allUsers } from "@/lib/users";
+import { canChangeVisit, VISIT_EDIT_REFUSAL } from "@/lib/visit-edit-rights";
 import { validVisitSpan } from "@/lib/visit-plan/input";
 import { cleanAttendees } from "@/lib/visit-plan/people";
 import { claimVisit, getVisit, releaseVisit, removeVisit, scheduleVisit } from "@/lib/stores/site-visits";
@@ -55,6 +56,8 @@ export async function removeVisitAction(
   if (!id) return { ok: false, error: "Missing visit id." };
   const v = await getVisit(id);
   if (!v) return { ok: false, error: "That visit could not be found." };
+  // Jeff 2026-10-15 #35 — deleting a scheduled visit cancels everyone's calendar copy: lead or approver only.
+  if (!canChangeVisit(v, me, await allUsers())) return { ok: false, error: VISIT_EDIT_REFUSAL };
   // Spec 2026-10-09 site-visit scheduling — everyone invited gets a
   // cancellation (calendar delete / METHOD:CANCEL). Never blocks the delete.
   await cancelVisitInvites(v, { id: me.id, name: me.name });
@@ -80,6 +83,8 @@ export async function scheduleVisitAction(
   if (!v) return { ok: false, error: "Visit not found" };
   if (v.stage === "done") return { ok: false, error: "Visit already completed" };
   if (!v.assignedTo) return { ok: false, error: "Claim the visit first" };
+  // Jeff 2026-10-15 #35 — re-timing an already-scheduled visit: lead or approver only.
+  if (!canChangeVisit(v, me, await allUsers())) return { ok: false, error: VISIT_EDIT_REFUSAL };
   // Spec 2026-10-09 site-visit scheduling — attendees picked while booking.
   // Omitted (undefined or null) = leave any existing attendees alone; only an
   // explicit array changes them.

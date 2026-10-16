@@ -10,11 +10,12 @@
  * Request-scope free (the POST route owns requireUser and the gate) so the DB
  * checks can drive it with fake providers.
  */
-import { listDocsByField } from "@/db/doc-store";
+import { listDocsWhere } from "@/db/doc-store";
 import { get as getLead } from "@/lib/stores/leads";
 import { get as getSurvey } from "@/lib/stores/surveys";
 import { getMeeting } from "@/lib/stores/meetings";
-import { resolveCustomerId, visibleTo, type CommThread } from "@/lib/stores/comms";
+import { ownMailboxCond, resolveCustomerId, visibleTo, type CommThread } from "@/lib/stores/comms";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { canSeeMeeting } from "@/lib/meetings/visibility";
 import { renderMeeting } from "@/lib/meetings/render";
 import { allContacts, displayName } from "@/lib/identity/contacts";
@@ -106,7 +107,7 @@ async function liveLeadId(id: unknown): Promise<string | null> {
  */
 async function loadSource(kind: SuggestSourceKind, id: string, me: { id: string; name: string }): Promise<LoadedSource | { error: string }> {
   if (kind === "thread") {
-    const t = await loadThreadFor(id, me.name);
+    const t = await loadThreadFor(id, me);
     if (!t) return { error: UNAVAILABLE.thread };
     const subject = oneLine(t.subject, LABEL_MAX);
     return {
@@ -123,10 +124,12 @@ async function loadSource(kind: SuggestSourceKind, id: string, me: { id: string;
   if (kind === "lead") {
     const lead = await getLead(id);
     if (!lead) return { error: UNAVAILABLE.lead };
-    // Threads linked to the lead — only ones this user may read (their own mailbox).
-    const mine = await listDocsByField<CommThread>("comms", "mailboxUser", [me.name]);
+    // Threads linked to the lead — only ones this user may read (their own
+    // mailbox — #349: by identity, cut in SQL by ownMailboxCond).
+    const viewer = await mailboxViewer(me);
+    const mine = await listDocsWhere<CommThread>("comms", ownMailboxCond(viewer));
     const threads: LeadThread[] = mine
-      .filter((t) => !t.deleted && t.channel === "email" && visibleTo(t, me.name) && t.link?.type === "lead" && t.link.id === lead.id)
+      .filter((t) => !t.deleted && t.channel === "email" && visibleTo(t, viewer) && t.link?.type === "lead" && t.link.id === lead.id)
       .map((t) => ({ subject: t.subject || "", messages: promptMessages(t) }));
     const org = oneLine(lead.org, LABEL_MAX);
     return {

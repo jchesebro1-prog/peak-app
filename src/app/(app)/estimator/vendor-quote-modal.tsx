@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fmt, round2 } from "./pricing";
 import { VENDOR_ATTACHMENT_BUDGET, type VendorDraft, type VendorLineDraft } from "./types";
 import { parseMaterialCsv, parseMoney, readCsvFile, summarizeCsvErrors, VENDOR_CSV_TEMPLATE } from "./material-csv";
 import { VENDOR_UPLOAD_MAX_LABEL } from "@/lib/vendor-quote-file";
 import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat } from "./est-ui";
+import VendorCompanyField from "@/components/vendors/vendor-company-field";
+import { VENDOR_COPY } from "@/lib/vendor-quotes/rules";
+import { VENDOR_PDF_COPY } from "@/lib/vendor-pdf/extraction";
+import { DISCARD_COPY } from "@/lib/estimate-steps/discard-confirm";
 
 /**
  * Vendor quote form (#143, D162) — the sixth add-part input method, split off
@@ -94,10 +98,22 @@ export default function VendorQuoteModal({
   onLoadLines,
   onAdd,
   onClose,
+  confirmClose,
   blobUploads,
   attachedChars,
   editing,
   savedQuoteId,
+  onPickVendor,
+  onTypedVendor,
+  onUnlinkVendor,
+  handoff = null,
+  systems,
+  systemId,
+  onPickSystem,
+  fileActions,
+  reading = false,
+  readPanel,
+  lineHints,
 }: {
   secName: string;
   draft: VendorDraft;
@@ -116,6 +132,8 @@ export default function VendorQuoteModal({
   onLoadLines: (lines: Omit<VendorLineDraft, "id">[]) => void;
   onAdd: () => void;
   onClose: () => void;
+  /** #348 follow-up: ConfigModal asks this before the × / backdrop discards the form. */
+  confirmClose?: () => boolean;
   /** Blob storage is configured, so the file is uploaded on selection and
    *  never rides in the save payload (#143). False keeps the data-URL path. */
   blobUploads: boolean;
@@ -130,6 +148,25 @@ export default function VendorQuoteModal({
   /** The saved estimate's id, when it has one — the only way to reach the
    *  download proxy for an attachment already in Blob storage (#144). */
   savedQuoteId: string | null;
+  /** #348 slice 4 — the Vendor cell: pick a vendor company, type a name (the fallback), or unlink the company. */
+  onPickVendor: (c: { id: string; name: string }) => void;
+  onTypedVendor: (name: string) => void;
+  onUnlinkVendor: () => void;
+  /** #348 slice 4 — the Inbox hand-off's copy of the email's PDF (null when the form wasn't opened from an email). */
+  handoff?: { status: "loading" | "done" | "failed"; note: string } | null;
+  /** #348 slice 4 — "Add to system", shown only on a hand-off (the form opened on a system the user didn't pick). */
+  systems?: Array<{ id: string; name: string }>;
+  /** The system the form adds to now (the open form's own system id). */
+  systemId?: string;
+  onPickSystem?: (id: string) => void;
+  /** #348 slice 4 — extra controls after Remove in the file row (slice 5's Read the PDF). */
+  fileActions?: ReactNode;
+  /** #348 slice 5 — Read the PDF is running: Add and the file input wait (like an upload). */
+  reading?: boolean;
+  /** #348 slice 5 — the read's results panel, right under the attachment + Link grid. */
+  readPanel?: ReactNode;
+  /** #348 slice 5 — line id → the read's hint under that material row (catalog match, math off, derived amount). */
+  lineHints?: Record<number, { text: string; warn: boolean }>;
 }) {
   const [fileNote, setFileNote] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -159,6 +196,12 @@ export default function VendorQuoteModal({
      negative one that the save rescales just the same — the stat has to show
      what will land, not fall back to the bare cost. */
   const sell = total > 0 && margin < 1 ? round2(total / (1 - margin)) : total;
+  /** #348 slice 4: the email hand-off is still copying the PDF in. */
+  const copying = handoff?.status === "loading";
+  const busy = uploading || copying || reading;
+  /* #348 follow-up, fix round 1: a file still uploading lives only in this form's state, so the × / backdrop asks here
+     first; otherwise it defers to the hook's check. No confirmClose handed in = none here either. */
+  const closeGuard = confirmClose ? () => (uploading ? window.confirm(DISCARD_COPY.vendorUploading) : confirmClose()) : undefined;
   const valid =
     (draft.vendor || "").trim().length > 0 &&
     (draft.quoteNumber || "").trim().length > 0 &&
@@ -335,6 +378,7 @@ export default function VendorQuoteModal({
       title={editing ? "Edit vendor quote" : "Vendor quote"}
       sub={editing ? <>In {secName}</> : <>Adds to {secName}</>}
       onClose={onClose}
+      confirmClose={closeGuard}
       footerLeft={
         <>
           <Stat
@@ -363,33 +407,51 @@ export default function VendorQuoteModal({
         <button
           type="button"
           onClick={() => {
-            if (!valid || uploading) return;
+            if (!valid || busy) return;
             onAdd();
           }}
-          disabled={!valid || uploading}
-          style={addBtnStyle(valid && !uploading)}
+          disabled={!valid || busy}
+          style={addBtnStyle(valid && !busy)}
         >
-          {uploading ? "Uploading\u2026" : editing ? "Save changes" : "Add vendor quote"}
+          {uploading ? "Uploading\u2026" : copying ? VENDOR_COPY.copying : reading ? VENDOR_PDF_COPY.reading : editing ? "Save changes" : "Add vendor quote"}
         </button>
       }
     >
+      {/* #348 slice 4: the email hand-off opened the form on a system the user didn't pick — let them move it. */}
+      {handoff && systems && systems.length > 0 && onPickSystem && (
+        <div style={{ marginBottom: 16 }}>
+          <label style={LBL}>Add to system</label>
+          <select
+            className="est-field"
+            value={systemId ?? ""}
+            onChange={(e) => onPickSystem(e.target.value)}
+            style={FIELD}
+          >
+            {systems.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name || "Untitled system"}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* vendor / quote number */}
       <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 12, marginBottom: 16 }}>
         <div>
-          <label style={LBL}>Vendor</label>
-          <input
-            className="est-field"
-            list="pk-vendor-names"
-            value={draft.vendor}
-            onChange={(e) => onSet("vendor", e.target.value)}
-            placeholder="e.g. Rose Brand"
-            style={FIELD}
+          <label htmlFor="vendor-quote-vendor" style={LBL}>
+            Vendor
+          </label>
+          <VendorCompanyField
+            vendor={draft.vendor}
+            vendorCompanyId={draft.vendorCompanyId}
+            vendors={vendors}
+            onPick={onPickVendor}
+            onTyped={onTypedVendor}
+            onUnlink={onUnlinkVendor}
+            disabled={copying}
+            inputId="vendor-quote-vendor"
           />
-          <datalist id="pk-vendor-names">
-            {vendors.map((v) => (
-              <option key={v} value={v} />
-            ))}
-          </datalist>
         </div>
         <div>
           <label style={LBL}>Quote number</label>
@@ -439,15 +501,15 @@ export default function VendorQuoteModal({
                 color: "#fff",
                 fontSize: 12.5,
                 fontWeight: 600,
-                cursor: uploading ? "default" : "pointer",
-                opacity: uploading ? 0.65 : 1,
+                cursor: busy ? "default" : "pointer",
+                opacity: busy ? 0.65 : 1,
               }}
             >
               {uploading ? "Uploading\u2026" : draft.attachment ? "Replace file" : "Select file"}
               <input
                 type="file"
                 accept=".pdf,.csv,.xls,.xlsx,application/pdf,image/*,text/csv"
-                disabled={uploading}
+                disabled={busy}
                 style={{ display: "none" }}
                 onChange={(e) => {
                   const input = e.currentTarget;
@@ -479,12 +541,20 @@ export default function VendorQuoteModal({
                 >
                   Remove
                 </button>
+                {fileActions}
               </>
             )}
           </div>
           {fileNote && (
             <div style={{ marginTop: 6, fontSize: 11.5, color: "#b4543a" }}>{fileNote}</div>
           )}
+          {/* Always rendered so assistive tech registers the live region before its text changes. */}
+          <div
+            role="status"
+            style={{ marginTop: handoff?.note ? 6 : 0, fontSize: 11.5, color: copying ? "#5b616e" : "#b4543a" }}
+          >
+            {handoff?.note || ""}
+          </div>
         </div>
         <div>
           <label style={LBL}>
@@ -500,6 +570,7 @@ export default function VendorQuoteModal({
           />
         </div>
       </div>
+      {readPanel}
 
       {/* materials */}
       <div style={{ marginBottom: 16 }}>
@@ -669,6 +740,20 @@ export default function VendorQuoteModal({
                 >
                   ×
                 </button>
+                {/* #348 slice 5: the read's hint for this row, spanning the whole grid row. */}
+                {lineHints?.[line.id] && (
+                  <div
+                    style={{
+                      gridColumn: "1 / -1",
+                      marginTop: -3,
+                      fontSize: 11,
+                      lineHeight: 1.35,
+                      color: lineHints[line.id].warn ? "#8a6d1f" : "#5b616e",
+                    }}
+                  >
+                    {lineHints[line.id].text}
+                  </div>
+                )}
               </div>
             ))}
           </div>

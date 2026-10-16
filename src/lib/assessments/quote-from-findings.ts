@@ -11,6 +11,7 @@ import { docLocId, getSite } from "@/lib/identity/sites";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { loadFreightRule } from "@/lib/freight-rule-load";
 import { canonicalBonusSections } from "@/lib/estimate-bonus/canonical";
+import { loadBonusRates } from "@/lib/stores/pricing";
 import { totals } from "@/app/(app)/estimator/pricing";
 import { findingsEstimatorSection, parseFindingKeys, quoteSelectionProblem } from "./findings-quote";
 
@@ -65,7 +66,7 @@ export async function quoteFromFindings(rawKeys: unknown, kind: QuoteKind, user:
   const venueName = venueNameOf(site) || siteId;
   const section = findingsEstimatorSection(list, { sectionId: "sys" + now, venueName, freightPct: rule.basePct });
   // Bonus lines at birth, exactly like every other new draft estimate (they price to nothing until lines are priced).
-  const sections = canonicalBonusSections({ source: "estimator", quoteType: "system", status: "draft" }, [section]);
+  const sections = canonicalBonusSections({ source: "estimator", quoteType: "system", status: "draft" }, [section], await loadBonusRates());
   const t = totals(sections, 0);
   const quote = await createQuote({
     name: `Assessment findings — ${venueName}`,

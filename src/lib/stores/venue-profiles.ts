@@ -2,6 +2,7 @@
    sites.id. Only a completed assessment writes here (completeAssessment), and only its `profile: true` answers.
    Kept through the go-live wipe, like venues. */
 import { ASSESSMENT_LOCK_NAMESPACE, withAdvisoryLock } from "@/db";
+import { listDocs } from "@/db/doc-store";
 import { nextRev, readRow, writeRow } from "./assessment-rows";
 
 export interface VenueProfile {
@@ -9,6 +10,9 @@ export interface VenueProfile {
   customerId: string;
   /** profile:true question key → the last confirmed value, when, and the assessment (AS-id) it came from */
   facts: Record<string, { v: unknown; at: number; from: string }>;
+  /** Jeff 2026-10-15 #10 — the venue's next assessment date (epoch ms), set by hand on the venue page; null / absent =
+   *  none. The assessment reminder (src/lib/assessments/reminders.ts) goes to the account rep 30 days before it. */
+  nextAssessmentAt?: number | null;
   updatedAt: number;
 }
 
@@ -22,12 +26,36 @@ function normalizeProfile(d: Record<string, unknown>, siteId: string): VenueProf
     const x = f as { v?: unknown; at?: unknown; from?: unknown };
     facts[k] = { v: x.v, at: typeof x.at === "number" ? x.at : 0, from: typeof x.from === "string" ? x.from : "" };
   }
+  const next = typeof d.nextAssessmentAt === "number" && Number.isFinite(d.nextAssessmentAt) && d.nextAssessmentAt > 0 ? d.nextAssessmentAt : null;
   return {
     siteId,
     customerId: typeof d.customerId === "string" ? d.customerId : "",
     facts,
+    ...(next ? { nextAssessmentAt: next } : {}),
     updatedAt: typeof d.updatedAt === "number" ? d.updatedAt : 0,
   };
+}
+
+/** Every live venue profile (the reminder sweep reads them all — one row per assessed venue, a small table). */
+export async function listVenueProfiles(): Promise<VenueProfile[]> {
+  return (await listDocs("venue_profiles")).map((d) => normalizeProfile(d, d.id));
+}
+
+/**
+ * Jeff 2026-10-15 #10 — set (or clear, with null) a venue's next assessment date. Keeps every fact; creates the
+ * profile when the venue has none yet. Under the venue's lock, like writeProfileFacts.
+ */
+export async function setNextAssessmentAt(siteId: string, customerId: string, at: number | null): Promise<void> {
+  if (!siteId) return;
+  const when = typeof at === "number" && Number.isFinite(at) && at > 0 ? Math.round(at) : null;
+  await withAdvisoryLock(ASSESSMENT_LOCK_NAMESPACE, `profile:${siteId}`, async () => {
+    const row = await readRow("venue_profiles", siteId);
+    const cur = row && !row.deleted ? normalizeProfile(row.doc, siteId) : { siteId, customerId, facts: {}, updatedAt: 0 };
+    const next: VenueProfile = { ...cur, customerId: cur.customerId || customerId, updatedAt: Date.now() };
+    if (when) next.nextAssessmentAt = when;
+    else delete next.nextAssessmentAt;
+    await writeRow("venue_profiles", siteId, { ...next, rev: nextRev(row) }, !row);
+  });
 }
 
 export async function getVenueProfile(siteId: string): Promise<VenueProfile | null> {

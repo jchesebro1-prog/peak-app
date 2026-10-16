@@ -1,8 +1,9 @@
-import { lastInbound, waitingSince, type CommThread } from "@/lib/stores/comms";
+import { isAssignedTo, lastInbound, waitingSince, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { courtIsCurrent } from "@/lib/inbox-org/court-current";
+import { isPeakAddress } from "@/lib/inbox-org/internal";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import { isOpen as leadIsOpen } from "@/lib/stores/leads";
-import { sameName } from "@/lib/quote-approval-rules";
 import { money } from "@/lib/format";
 import { businessMsBetween } from "../clock";
 import { triageKey } from "../keys";
@@ -51,6 +52,20 @@ export function onMyCourt(
   return t.court.owner === "me";
 }
 
+/** #351 review M3 — the newest message from an OUTSIDE sender (#335's
+ *  internal check: the team's addresses and own domains), the escalation a
+ *  "Not mine" yields to. A teammate's or my own mail never escalates. Pure. */
+export function lastExternalInboundAt(t: Pick<CommThread, "messages" | "contactEmail">, isInternal: (email: string) => boolean): number | null {
+  const m = t.messages || [];
+  for (let i = m.length - 1; i >= 0; i--) {
+    if (m[i].direction !== "in") continue;
+    const from = (m[i].fromEmail || t.contactEmail || "").trim().toLowerCase();
+    if (from && isInternal(from)) continue;
+    return typeof m[i].at === "number" ? m[i].at : null;
+  }
+  return null;
+}
+
 /**
  * Threads assigned to me that are waiting on us — the bell's own rule
  * (nav-counts.ts "Customers waiting on a reply"): status waiting_us and in my
@@ -58,10 +73,16 @@ export function onMyCourt(
  * side), not in Deleted.
  * ≥ 1 business day → "customer waiting"; younger → "customer message".
  */
-export function selectEmail(threads: readonly CommThread[], deals: DealIndex, ctx: Pick<FeedCtx, "me" | "now">): TriageCandidate[] {
+export function selectEmail(
+  threads: readonly CommThread[],
+  deals: DealIndex,
+  ctx: Pick<FeedCtx, "now"> & { viewer: MailboxViewer; isInternal?: (email: string) => boolean }
+): TriageCandidate[] {
+  const isInternal = ctx.isInternal ?? isPeakAddress;
   const out: TriageCandidate[] = [];
   for (const t of threads) {
-    if (!onMyCourt(t) || !sameName(t.assignedTo, ctx.me.name)) continue;
+    // #349 — assigned to me by identity (assignedToId, else a unique name)
+    if (!onMyCourt(t) || !isAssignedTo(t, ctx.viewer)) continue;
     if (t.archived || t.deleted || t.gmailInboxed === false) continue;
     const since = waitingSince(t) ?? lastInbound(t)?.at ?? t.updatedAt ?? 0;
     const biz = since ? businessMsBetween(since, ctx.now) : 0;
@@ -79,6 +100,11 @@ export function selectEmail(threads: readonly CommThread[], deals: DealIndex, ct
       href: `/inbox?thread=${encodeURIComponent(t.id)}`,
       since,
       facts,
+      // #37 — a new message from an outside sender brings back a "Not mine" (M3: never a teammate's)
+      ...(() => {
+        const at = lastExternalInboundAt(t, isInternal);
+        return at ? { escalatedAt: at } : {};
+      })(),
     });
   }
   return out;
@@ -92,6 +118,8 @@ export const emailFeed: TriageFeed = {
       quotes: new Map(quotes.map((q) => [q.id, { status: q.status, value: Number(q.value) || 0 }])),
       leads: new Map(leads.map((l) => [l.id, { open: leadIsOpen(l), value: Number(l.value) || 0 }])),
     };
-    return { candidates: selectEmail(threads, deals, ctx) };
+    // #335's internal-sender check (the team's addresses + own domains); Peak's own domain if it can't be read
+    const org = await import("@/lib/inbox-org/pipeline").then((m) => m.loadOrgContext()).catch(() => null);
+    return { candidates: selectEmail(threads, deals, { now: ctx.now, viewer: await mailboxViewer(ctx.me), isInternal: org?.isInternal ?? isPeakAddress }) };
   },
 };

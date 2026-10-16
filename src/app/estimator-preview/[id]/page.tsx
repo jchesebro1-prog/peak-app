@@ -61,7 +61,7 @@ export default async function EstimatorPreviewPage({
     return (
       <div style={{ overflowX: "auto", padding: "24px 16px 40px" }}>
         <div style={{ width: "max-content", margin: "0 auto" }}>
-          <CutSheetPages models={models} style="client" photos={loaded.photos} />
+          <CutSheetPages models={models} style="client" photos={loaded.photos} letterheadSrc={letterhead.src} />
         </div>
       </div>
     );

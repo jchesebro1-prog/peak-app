@@ -123,10 +123,11 @@ export type AppSettingsData = {
   fixtureAssemblies?: import("@/lib/fixture-assemblies").FixtureAssembly[];
   /** Per-manufacturer "price list effective" date (PUNCHLIST #133, D156),
    *  keyed by mfrKey() from lib/catalog-books (lowercase alphanumerics) →
-   *  epoch ms. Written by the Catalog banner's date input (the one-time
-   *  backfill for parts that predate `pricedAt`) and by both importers when
-   *  an import writes rows. A part's effective date is the LATER of its own
-   *  `pricedAt` and this — see effectivePriceDate. Absent = no book dates. */
+   *  epoch ms. Written only by the Catalog banner's date input (a by-hand
+   *  "the whole book is confirmed as of D"); since Oct 15 #32 the importers
+   *  date each part they carry (`priceDate`) instead of the whole book. A
+   *  part's effective date is the LATEST of its own `pricedAt`, its
+   *  `priceDate` and this — see effectivePriceDate. Absent = no book dates. */
   priceListEffective?: Record<string, number>;
   /** Grid symbol per catalog category (#131, D154) — FULL REPLACEMENT on
    *  save (the wireTypes idiom): resolveCategoryShapes in
@@ -161,6 +162,8 @@ export type AppSettingsData = {
   projectPipelines?: import("@/lib/pipelines").ProjectPipeline[];
   quotePipelines?: import("@/lib/pipelines").QuotePipeline[];
   defaultQuotePipelineId?: string;
+  /** One-time pipeline fixes already applied to the stored lists (Jeff 2026-10-15 #42: "bid-spec-lead-qualify"). */
+  pipelineFixes?: string[];
   /** Recordings → Drive archive (Krisp recordings spec §1.3). Connection key
    *  of the mailbox whose Google account owns the archive; null = not
    *  configured, the nightly archive job waits. */
@@ -178,8 +181,8 @@ export type AppSettingsData = {
   /** #334 Assist pilot (Settings → Beta): allow-listed user ids. Empty = NOBODY (unlike recordingsBetaUsers). Read via assistSettingsOf(). */
   assistUsers?: string[];
   /** #334: per-feature switches; a missing key counts as on, except the
-   *  opt-in ones (file, promise, brief, ask — OPT_IN_FEATURES), which count as off. */
-  assistFeatures?: { tasks?: boolean; reply?: boolean; estimate?: boolean; file?: boolean; promise?: boolean; brief?: boolean; ask?: boolean };
+   *  opt-in ones (file, promise, brief, ask, vendorpdf — OPT_IN_FEATURES), which count as off. */
+  assistFeatures?: { tasks?: boolean; reply?: boolean; estimate?: boolean; file?: boolean; promise?: boolean; brief?: boolean; ask?: boolean; vendorpdf?: boolean };
   /** #334: monthly API spend cap in dollars (default 200). */
   assistMonthlyCapUsd?: number;
   /** Outcome of the last nightly archive pass (lib/krisp/archive.ts) — shown

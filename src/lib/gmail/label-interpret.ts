@@ -227,7 +227,7 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
           (x) => x.name.split(" ")[0].toLowerCase() === cmd.firstName.toLowerCase()
         );
         if (matches.length === 1) {
-          await assign(t.id, matches[0].name);
+          await assign(t.id, { id: matches[0].id, name: matches[0].name }); // #349 — by identity
           applied++;
         } else {
           console.warn("[gmail] ambiguous/unknown assignee, skipping:", cmd.firstName, t.id);

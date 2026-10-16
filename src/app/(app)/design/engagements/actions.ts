@@ -34,7 +34,7 @@ import {
   submitPhaseReview,
   updateMeeting,
 } from "@/lib/stores/engagements";
-import { ENGAGEMENT_STAGE_KEYS, manualMilestoneSeeds, type ManualFee } from "@/lib/consulting-stages";
+import { ENGAGEMENT_STAGE_KEYS, manualMilestoneSeeds, type ManualFee, pickManualPhases } from "@/lib/consulting-stages";
 import { validateSpan } from "@/lib/consulting-schedule";
 import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
 import type { Annotation, MeasureUnit } from "@/lib/annotations";
@@ -223,6 +223,8 @@ export async function createManualEngagementAction(input: {
   /** #145 D165 — disciplines bought; posted keys are allowlisted below
    *  against the settings vocabulary (actions are public endpoints). */
   disciplines?: string[];
+  /** Jeff 2026-10-15 #34 — the ticked phases (allowlisted against the Settings phase menu); absent = every phase. */
+  phases?: string[];
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const me = await requirePerm("create");
   const name = String(input?.name || "").trim().slice(0, 160);
@@ -250,6 +252,10 @@ export async function createManualEngagementAction(input: {
   if (fee?.mode === "milestones" && manualMilestoneSeeds(fee).length === 0) {
     return { ok: false, error: "Add at least one milestone with an amount." };
   }
+  // Jeff 2026-10-15 #34 — only the ticked phases are seeded (and so only they get scheduled tasks and phase
+  // milestones). Checked before the quick-add customer is written, like the fee guards above.
+  const phases = pickManualPhases(mergedConsultingPhases((await getSettings()).consultingPhases), input?.phases);
+  if (!phases) return { ok: false, error: "Tick at least one phase." };
 
   let customerId = String(input?.customerId || "").trim();
   let customerName = "";
@@ -291,7 +297,7 @@ export async function createManualEngagementAction(input: {
       siteId,
       contactName: String(input?.contactName || "").trim().slice(0, 120),
       fee,
-      phases: mergedConsultingPhases(settings.consultingPhases),
+      phases,
       startAt: input.startAt,
       endAt: input.endAt,
       disciplines,

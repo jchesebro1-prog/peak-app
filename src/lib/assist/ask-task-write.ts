@@ -63,7 +63,7 @@ export async function createAskTask(
     const raw = links[field];
     const id = typeof raw === "string" ? raw.trim() : "";
     if (!id || id.length > REF_ID_MAX) continue;
-    const linkable = kind === "thread" ? !!(await loadThreadFor(id, me.name)) : !!(await resolveAskRef(kind, id, me));
+    const linkable = kind === "thread" ? !!(await loadThreadFor(id, me)) : !!(await resolveAskRef(kind, id, me));
     if (linkable) (input as Record<string, unknown>)[field] = id;
   }
   // A venue rides only with its own company (the Inbox's rule: the thread's venue must be its company's).
@@ -73,5 +73,8 @@ export async function createAskTask(
   }
   // The Inbox files an email task under "Email" (buildThreadTaskInput).
   if (input.threadId) input.section = "Email";
-  return { ok: true, task: await createTask(input, me) };
+  // #351 review — the thread link is the user's own (loadThreadFor), so assigning it to a teammate is the owner's share
+  const { ownerShareFor } = await import("@/lib/task-thread-share");
+  const threadShare = ownerShareFor(input.threadId, me, input.assigneeUserId, Date.now());
+  return { ok: true, task: await createTask(input, me, { threadShare }) };
 }

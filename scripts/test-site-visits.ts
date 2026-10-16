@@ -1270,5 +1270,6 @@ export async function siteVisitsFinalFixChecks(ok: Ok): Promise<void> {
     "site-visits fix: D780 says how often each calendar is read");
   ok(/## D782\. /.test(dec), "site-visits fix: the past-visit delete rule is logged (D782)");
   ok(dec.includes("keep that past-dated copy") && dec.includes("retries once"), "site-visits round 2: D782 / D783 carry the per-person and fallback clauses");
-  ok(read("MASTER-QUESTIONS.md").includes("- **T1.** **Who can edit a scheduled visit.**") && !read("MASTER-QUESTIONS.md").includes("- **S1.** **Who can edit"), "site-visits fix: the edit-permission question is on Jeff's list (T1, no clash with the short list's S1)");
+  // Jeff 2026-10-15 #35 answered T1 (struck through, D1136).
+  ok(read("MASTER-QUESTIONS.md").includes("- ~~**T1.** **Who can edit a scheduled visit.**") && read("MASTER-QUESTIONS.md").includes("Built in #353 (D1136)") && !read("MASTER-QUESTIONS.md").includes("- **S1.** **Who can edit"), "site-visits fix: the edit-permission question is on Jeff's list (T1, no clash with the short list's S1) — answered 2026-10-15");
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { NEW_SYSTEM_PRESENTATION, presentationForNewSystem } from "@/lib/estimate-output/fields";
 import { SIDE_OPEN_KEY } from "./estimator-styles";
 import { surveyGoalsAction } from "./output-actions";
 import { listReviewCommentsAction } from "./review-actions";
@@ -17,14 +18,19 @@ import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewar
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { defaultAlternatesTaken, normalizeSplit, type BonusRecord, type BonusSplit } from "@/lib/estimate-bonus/record";
 import { useRouter } from "next/navigation";
-import { bonusRulesApply, isBonusEligibleQuote, withBonusLines } from "@/lib/estimate-bonus/rules";
+import { bonusRatesFor, bonusRulesApply, isBonusEligibleQuote, withBonusLines } from "@/lib/estimate-bonus/rules";
 import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/rewards/credit-line";
 import type { WonEditField } from "@/app/(app)/quotes/new/handoff";
 import type { DraftedLine } from "./ai-scope-modal";
 import { DISC_LABEL, type SuggestPart } from "./estimator-data";
 import { backSolveExtSell, priceFromUnitSellEdit, repriceAtMargin, buildLaborItems, computeCurtain, computeLabor, lineMarginOf, makeLaborRate, repricedAtLineMargin, round2, clearSellOverride, parseSellOverride, SYSTEM_PRICE_STEP, systemSellTotal, totals, vendorTotalSeed, withPriceRound } from "./pricing";
 import type { PdfToggle } from "./preview-doc";
-import type { CurtainDraft, CustomDraft, EstimatorProps, FixtureDraft, LaborDraft, MobDraft, SpecItem, SpecMob, SpecSection, TrackDraft, TravelLite, VendorDraft, VendorLineDraft, VendorQuote } from "./types";
+import { vendorAttachmentLoad, type CurtainDraft, type CustomDraft, type EstimatorProps, type FixtureDraft, type LaborDraft, type MobDraft, type SpecItem, type SpecMob, type SpecSection, type TrackDraft, type TravelLite, type VendorDraft, type VendorLineDraft, type VendorPdfFormState, type VendorQuote } from "./types";
+import { vendorQuoteFromThreadAction } from "./vendor-actions";
+import { VENDOR_COPY, isPdfAttachment } from "@/lib/vendor-quotes/rules";
+import { readVendorPdfAction } from "./vendor-pdf-actions";
+import { VENDOR_PDF_COPY } from "@/lib/vendor-pdf/extraction";
+import { applyVendorPdfRead, dropVendorPdfRead, readLinesEdited, undoVendorPdfRead } from "@/lib/vendor-pdf/fill";
 import { sectionFreightDefault, applyAutoFreight } from "./freight-default";
 import { fixtureBomLine } from "./fixture-bom";
 import { applyAutoTrips as applyAutoTripsToMobs, applyLocalTrip, applyMobType, applyTravelTripTo, defaultLaborMobs, disciplineForSystemTitle, laborMob, roundTripMiles, typeMobMiles, setRouteMiles } from "./labor-defaults";
@@ -34,7 +40,7 @@ import { excludeRefusal, normalizePackageSelection, selectionKey, type PackageSe
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { PackageDoc } from "@/lib/package-doc/types";
 import { docIdFloor } from "@/lib/package-doc/ids";
-import { reanchorDocLine } from "@/lib/package-doc/reanchor";
+import { reanchorDocLine, reanchorPackageDoc } from "@/lib/package-doc/reanchor";
 import { PACKAGE_DOC_TOO_LARGE } from "@/lib/package-doc/save";
 import { docProductSkus } from "@/lib/package-doc/text";
 import { pdfDocKey, withSavedMeta, type PdfDocKeyInput } from "./pdf-doc-key";
@@ -61,7 +67,9 @@ import { defaultSuggestionTarget, sendSuggestionId, suggestPanelFirstRead, sugge
 import { catalogAddPrice, customPartSell, repriceForTier } from "./tier-reprice";
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 import { postChanged } from "@/lib/popout/channel";
+import { applyLineMove, extractLinesAsSection, lineRefKey, planLineMove, removeLinesFromSources, type LineRef } from "@/lib/estimate-line-move/move";
 import { setUnsavedHold } from "@/lib/popout/hold";
+import { discardConfirmText, inputIsDirty, isModalInputKind, MODAL_INPUT_KINDS, rebaseDraft, stableDraftJson, type ModalInputKind } from "@/lib/estimate-steps/discard-confirm";
 
 /** #333 review (F): how long Send waits for an in-flight Client package write. */
 const SELECTION_SETTLE_TIMEOUT_MS = 10_000;
@@ -75,7 +83,7 @@ export const TAX_RATE_PCT = 0;
  *  the freight rule itself. */
 const freshSections = (freightPct: number): SpecSection[] => [
   // #267: a new system's auto price rounds up to the next $25.
-  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, items: [] },
+  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: NEW_SYSTEM_PRESENTATION, items: [] },
 ];
 
 /** Phase 2a — unmarkEdited, blind to the Rewards credit line. The credit
@@ -175,7 +183,19 @@ const freshVendor = (): VendorDraft => ({
   total: "",
   includesFreight: false,
   display: "single",
+  vendorCompanyId: null,
+  fromThreadId: null,
+  extracted: null,
+  pdfRead: null,
 });
+
+/** #348 slice 5 — Read the PDF, idle. */
+const VENDOR_PDF_IDLE: VendorPdfFormState = { busy: null, error: null };
+/** Which file a read was for: a result for a replaced (or removed) file is dropped. */
+const attKey = (d: VendorDraft) => {
+  const a = d.attachment;
+  return a ? a.blobPath ?? `${a.dataUrl?.length ?? 0}:${a.name}` : "";
+};
 
 const freshLabor = (
   t: TravelLite | null,
@@ -217,7 +237,7 @@ export function useEstimatorState(props: EstimatorProps) {
     initial, pipelines, fabrics, curtainSewingPct, trackSeries, trackParts, laborRates, fixtureRates,
     fixtureAssemblies, vendors, blobUploads, customers, travel, next: initialNext, aiSource, people,
     quoteTasks, templateSets, assumptionLibrary, freightRule, portalStatusError, assistDraft, specKeys, canApplyCredit,
-    viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault,
+    viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault, peopleSentOnce = false, bonusRates,
     suggestion = null, suggestionParts,
   } = props;
   /* ---------------- state (port of the prototype's this.state) ---------------- */
@@ -339,7 +359,7 @@ export function useEstimatorState(props: EstimatorProps) {
     // Functional update: judged against the CURRENT sections, so an edit that
     // lands between this render and the update is never overwritten.
     setSectionsState((cur) =>
-      bonusRulesApply({ source: initial.bonusSource, quoteType: initial.bonusQuoteType, status }, cur) ? withBonusLines(cur, nextId) : cur
+      bonusRulesApply({ source: initial.bonusSource, quoteType: initial.bonusQuoteType, status }, cur) ? withBonusLines(cur, nextId, bonusRatesFor(status, cur, bonusRates)) : cur
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, status]);
@@ -457,13 +477,15 @@ export function useEstimatorState(props: EstimatorProps) {
         targetName: string;
         targetNumber: string;
         /** #266: "Copied" reuses this banner; absent = the original Moved wording. */
-        verb?: "Moved" | "Copied" | "Loaded";
+        verb?: "Moved" | "Copied" | "Loaded" | "Lines";
         /** #266: the re-price summary; a copy within this estimate has no targetId. */
         detail?: string;
       }
     | { ok: false; error: string }
     | null
   >(null);
+  /** #357: a "move lines to another estimate" round trip is in flight. */
+  const [movingLines, setMovingLines] = useState(false);
   const [custName, setCustName] = useState(initial.custName);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [locationId, setLocationId] = useState(initial.locationId);
@@ -618,6 +640,23 @@ export function useEstimatorState(props: EstimatorProps) {
      cleared by discardDraft, so an abandoned edit can never leak into the next
      plain "+ Vendor quote". */
   const vendorEditRef = useRef<string | null>(null);
+  /* #348 slice 4: the Inbox → Estimator hand-off (`?vq=`). `vendorSeedRef` is the blank draft the hand-off opens the
+     form on (its id is the one the PDF is copied under), consumed by seedDraft ahead of the edit seed; `vendorHandoff`
+     is the copy's live state (Add waits while it loads; its note shows under the file row). discardDraft clears both. */
+  const vendorSeedRef = useRef<VendorDraft | null>(null);
+  const [vendorHandoff, setVendorHandoff] = useState<{ status: "loading" | "done" | "failed"; note: string } | null>(null);
+  const vendorHandoffConsumedRef = useRef(false);
+  /* #348 slice 5: Read the PDF's live state. `vendorPdfSeqRef` numbers each read and each reset, so a result (or a
+     failure) that lands after its form closed, reseeded or changed file is dropped; `vendorPdfBusyRef` is the
+     synchronous double-click guard (one action call per click). */
+  const [vendorPdf, setVendorPdf] = useState<VendorPdfFormState>(VENDOR_PDF_IDLE);
+  const vendorPdfSeqRef = useRef(0);
+  const vendorPdfBusyRef = useRef(false);
+  const resetVendorPdf = () => {
+    vendorPdfSeqRef.current++;
+    vendorPdfBusyRef.current = false;
+    setVendorPdf(VENDOR_PDF_IDLE);
+  };
   /* #269: the labor group a "click the line to edit" open is seeding, set
      just before openInputMethod("labor") and consumed by seedDraft — the
      vendor-edit pattern above. `laborEdit` is that open's live state (the
@@ -658,6 +697,8 @@ export function useEstimatorState(props: EstimatorProps) {
       qty: String(l.qty),
       unit: l.unit,
       amount: String(l.amount),
+      // #348 slice 5: a read line is tagged only while the record still has its read (the server strips both together).
+      ...(v.extracted && typeof l.extractedIndex === "number" ? { fromRead: l.extractedIndex } : {}),
     }));
     return {
       /* The record's OWN id, never a fresh mint: the attachment is stored under
@@ -693,6 +734,10 @@ export function useEstimatorState(props: EstimatorProps) {
       total: vendorTotalSeed(v.total, vendorLinesTotal(lines)),
       includesFreight: !!v.includesFreight,
       display: v.display,
+      vendorCompanyId: v.vendorCompanyId ?? null,
+      fromThreadId: v.fromThreadId ?? null,
+      extracted: v.extracted ?? null,
+      pdfRead: null,
     };
   };
   // Customer tier margin stamp (item 11, D87) — SEEDS the labor draft and
@@ -704,6 +749,28 @@ export function useEstimatorState(props: EstimatorProps) {
   const [laborDraft, setLaborDraft] = useState<LaborDraft>(() =>
     freshLabor(null, initial.tierMargin, (initial.sections ?? freshSections(initialFreightDefault.pct))[0]?.name || "")
   );
+  /* #348 follow-up (Jeff 2026-10-15): the five configurator pop-ups ask before a stray click discards unsaved work.
+     ONE helper, markDraftBaseline, marks an open's baseline pending wherever its draft is (re)initialized — every open
+     through openInputMethod (fresh, an edit's seed, the hand-off's blank seed), and the labor travel reseed; the effect
+     below snapshots the COMMITTED draft (so a seed set in the same click is in it). The hand-off's fill re-bases the
+     stored baseline instead (rebaseDraft). confirmDiscardInput compares at close; Add / Save never asks. */
+  const modalDrafts = useMemo<Record<ModalInputKind, unknown>>(
+    () => ({ curtain: { draft: curtainDraft, track: curtainTrack }, track: trackDraft, fixture: fixtureDraft, labor: laborDraft, vendor: vendorDraft }),
+    [curtainDraft, curtainTrack, trackDraft, fixtureDraft, laborDraft, vendorDraft]
+  );
+  /** Per pop-up: the clean draft's stableDraftJson, or null while pending (snapshotted after the next commit). */
+  const draftBaselineRef = useRef<Partial<Record<ModalInputKind, string | null>>>({});
+  const [draftBaselineTick, setDraftBaselineTick] = useState(0);
+  const markDraftBaseline = (kind: InputKind) => {
+    if (!isModalInputKind(kind)) return;
+    draftBaselineRef.current[kind] = null;
+    setDraftBaselineTick((t) => t + 1); // guarantees the snapshot runs even when the seed equals the old draft
+  };
+  useEffect(() => {
+    for (const k of MODAL_INPUT_KINDS) {
+      if (draftBaselineRef.current[k] === null) draftBaselineRef.current[k] = stableDraftJson(modalDrafts[k]);
+    }
+  }, [draftBaselineTick, modalDrafts]);
   const [, startTransition] = useTransition();
 
   /* ---- AI scope draft (Phase 8, D4) — drafts only, estimator sets prices ---- */
@@ -876,9 +943,10 @@ export function useEstimatorState(props: EstimatorProps) {
      and wrap onto a second grid row. #269: 84px internally, room for the
      labor lines' ✎ Edit labor button beside them. #293: +20px for the ★
      key-product toggle — five 20px buttons + 1px gaps (✎ ★ ↑ ↓ × on a
-     labor, track or curtain line) need 104px in BOTH views. */
+     labor, track or curtain line) need 104px in BOTH views. #357: +22px
+     internally for ⇄ Move to another system — six buttons (✎ ★ ⇄ ↑ ↓ ×). */
   const cols = isInternal
-    ? "minmax(150px,1.3fr) 104px 92px 136px 116px 104px"
+    ? "minmax(150px,1.3fr) 104px 92px 136px 116px 126px"
     : "minmax(150px,1.3fr) 104px 136px 116px 104px";
 
   /* ---------------- travel (seeded + fetched on demand, punch #89) ----------------
@@ -1295,6 +1363,9 @@ export function useEstimatorState(props: EstimatorProps) {
     }
   };
 
+  /** Jeff 2026-10-15 #18 — Lead estimator / Prepared by are read-only for a non-approver once the quote has been sent. */
+  const peopleLocked = !viewerCanApprove && (peopleSentOnce || status === "sent" || status === "won" || status === "lost");
+
   /** Same idea as applySync, for the Daylite stage bar's StageSync (Task 6) —
    *  a stage move can also change status/review (setQuoteStage runs setStatus
    *  underneath when the tag changes), so all four fields sync together. */
@@ -1428,6 +1499,12 @@ export function useEstimatorState(props: EstimatorProps) {
           // bar shows the right stage highlighted without another round trip.
           if (res.pipelineId) setPipelineId(res.pipelineId);
           if (res.stage) setStage(res.stage);
+          // #355 review M2: the save's status move reopened a won estimate at the
+          // version that won — this document holds the edits; load it afresh.
+          if (res.reopenedAtWon) {
+            window.location.reload();
+            return false;
+          }
         }
         if (res.ok) {
           setActionError(null);
@@ -1476,6 +1553,12 @@ export function useEstimatorState(props: EstimatorProps) {
       setStatusChanging(true);
       startTransition(async () => {
         try {
+          // #355 review I3: leaving Won with unsaved edits — save them first, so
+          // the reopen's snapshot keeps them before the won version comes back.
+          if (prevStatus === "won" && v !== "won" && pdfDirty && (await saveNow()) === false) {
+            setStatus(prevStatus);
+            return;
+          }
           const r = await setStatusAction(id, v, v === "won" && alternatesTouched ? { alternatesTaken } : undefined);
           if (!r.ok) {
             // Punch #60: server rejected the transition (e.g. "won" without an
@@ -1490,6 +1573,12 @@ export function useEstimatorState(props: EstimatorProps) {
           setGateRefused(false);
           applySync(r);
           postChanged("quote", id);
+          // Batch 5 #59: the server put the won version back (the post-win edits are a
+          // revision now) — this document holds the edits, so load the quote afresh.
+          if (r.reopenedAtWon) {
+            window.location.reload();
+            return;
+          }
           // #282 follow-up: the server cleared the credit when the quote went
           // Lost — take the line off the open document too.
           if (v === "lost") setSections((ss) => (rewardCreditOf(ss) > 0 ? withoutRewardCredit(ss) : ss));
@@ -1519,6 +1608,12 @@ export function useEstimatorState(props: EstimatorProps) {
     setStatusChanging(true);
     startTransition(async () => {
       try {
+        // #355 review I3: same as changeStatus — a stage move can leave Won.
+        if (prevStatus === "won" && pdfDirty && (await saveNow()) === false) {
+          setStage(prevStage);
+          setStatus(prevStatus);
+          return;
+        }
         const r = await setQuoteStageAction(id, stageId, alternatesTouched ? alternatesTaken : undefined);
         if (!r.ok) {
           setStage(prevStage);
@@ -1531,6 +1626,10 @@ export function useEstimatorState(props: EstimatorProps) {
         setGateRefused(false);
         applyStageSync(r);
         postChanged("quote", id);
+        if (r.reopenedAtWon) {
+          window.location.reload();
+          return;
+        }
       } finally {
         setStatusChanging(false);
       }
@@ -1803,7 +1902,9 @@ export function useEstimatorState(props: EstimatorProps) {
           customer: cname,
           contactName: contactName || "",
         },
-        movedVq
+        movedVq,
+        // #348 slice 3: the server reads the stored source quote's lead + companies; an unsaved estimate has none.
+        loadedId || null
       );
       if (res.ok) {
         postChanged("quote", res.targetId);
@@ -1847,7 +1948,9 @@ export function useEstimatorState(props: EstimatorProps) {
           contactName: contactName || "",
           tierMargin: tierMarginRef.current,
         },
-        usedVq
+        usedVq,
+        // #348 slice 6: the server reads the stored source's Scope-only state; an unsaved estimate has none.
+        loadedId || null
       );
       if (!res.ok) {
         setMoveNotice({ ok: false, error: res.error || "Could not copy that system." });
@@ -1894,6 +1997,73 @@ export function useEstimatorState(props: EstimatorProps) {
       }
     });
   };
+  /** #357: move ticked lines (and their partners) to another system here or a
+   *  new one. Client-only — kept by the next Save, like ↑/↓. */
+  const moveLinesHere = (selected: LineRef[], target: { kind: "system"; sectionId: string } | { kind: "new"; name: string }) => {
+    const resolved = target.kind === "new" ? { kind: "new" as const, id: "sys" + nextId(), name: target.name.trim() || "New System" } : target;
+    // Ids are unique per system only: a line whose id the target already holds lands with a fresh one.
+    const { sections: next, plan, moved } = applyLineMove(sections, selected, resolved, { mintItemId: nextId });
+    if (plan.noop) return;
+    // The package document's product blocks / images / line-quantity chips follow their lines (system, and a
+    // re-minted id) — through the same setter as #312's re-anchor, saved with the next Save. No document: nothing.
+    const nd = reanchorPackageDoc(packageDocRef.current, moved);
+    if (nd !== packageDocRef.current) setPackageDoc(nd);
+    // The over-cap draft (restored on return to Build package) follows too.
+    const od = reanchorPackageDoc(packageDocOverDraft as PackageDoc | null, moved);
+    if (od !== packageDocOverDraft) setPackageDocOverDraft(od);
+    const targetId = resolved.kind === "new" ? resolved.id : resolved.sectionId;
+    const targetName = resolved.kind === "new" ? resolved.name : sections.find((s) => s.id === targetId)?.name || "that system";
+    // Same order as reorderSections: a system inserted last must not leave the Rewards credit off the last row.
+    setSections(withRewardCredit(normalizeSystemOrder(next, groups), rewardCreditOf(sections), nextId()));
+    const n = plan.lines.length;
+    setMoveNotice({ ok: true, targetId: "", targetName: "", targetNumber: "", verb: "Lines", detail: `Moved ${n} line${n === 1 ? "" : "s"} to ${targetName}` });
+    requestAnimationFrame(() => requestAnimationFrame(() => selectSystem(targetId)));
+  };
+
+  /** #357: move ticked lines to another estimate — bundled as one section and
+   *  sent through Move system's own server path; they leave this estimate only
+   *  once the server confirms. */
+  const moveLinesToEstimate = (selected: LineRef[], dest: MoveSystemTarget) => {
+    const plan = planLineMove(sections, selected, { kind: "estimate" });
+    if (plan.noop || movingLines) return;
+    // Lines from two systems may share an id: the outgoing section gets them unique (the server re-ids against the target).
+    const outgoing = extractLinesAsSection(sections, plan, { mintItemId: nextId });
+    const usedVqIds = new Set(outgoing.items.map((it) => it.vendorQuoteId).filter((id): id is string => !!id));
+    const usedVq = vendorQuotes.filter((v) => usedVqIds.has(v.id));
+    const cname = customerId ? customers.find((c) => c.id === customerId)?.name || custName : custName;
+    setMoveNotice(null);
+    setMovingLines(true);
+    startTransition(async () => {
+      try {
+        const res = await moveSystemToEstimateAction(
+          outgoing,
+          dest,
+          { customerId: customerId || null, locationId: locationId || null, customer: cname, contactName: contactName || "" },
+          usedVq,
+          loadedId || null
+        );
+        if (!res.ok) {
+          setMoveNotice({ ok: false, error: res.error || "Could not move those lines." });
+          return;
+        }
+        postChanged("quote", res.targetId);
+        const gone = new Set(plan.lines.map(lineRefKey));
+        const stillUsed = new Set(
+          sectionsRef.current
+            .flatMap((s) => s.items.filter((it) => !gone.has(lineRefKey({ sectionId: s.id, id: it.id }))))
+            .map((it) => it.vendorQuoteId)
+            .filter((id): id is string => !!id)
+        );
+        setSections((ss) => removeLinesFromSources(ss, plan.lines));
+        if (usedVq.length) setVendorQuotes((vs) => vs.filter((v) => !usedVqIds.has(v.id) || stillUsed.has(v.id)));
+        setMoveNotice({ ok: true, targetId: res.targetId, targetName: res.targetName, targetNumber: res.targetNumber });
+      } catch {
+        setMoveNotice({ ok: false, error: "Could not move those lines." });
+      } finally {
+        setMovingLines(false);
+      }
+    });
+  };
   const searchQuotes = (q: string) => searchQuotesAction(q, loadedId);
 
   const scrollToCard = (id: string) => {
@@ -1911,7 +2081,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const groupId = sections.find((s) => s.id === activeId)?.groupId;
     setSections((ss) => normalizeSystemOrder([
       ...ss,
-      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, items: [], ...(groupId ? { groupId } : {}) },
+      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: presentationForNewSystem(ss), items: [], ...(groupId ? { groupId } : {}) },
     ], groups));
     setActiveId(id);
     openInputMethod("catalog", id);
@@ -1931,6 +2101,7 @@ export function useEstimatorState(props: EstimatorProps) {
       groupId,
       freightPct: freightDefault.pct,
       priceRound: SYSTEM_PRICE_STEP,
+      presentation: presentationForNewSystem(sections),
     });
     setSections((ss) => normalizeSystemOrder([...ss, sec], groups));
     setActiveId(sec.id);
@@ -1957,6 +2128,7 @@ export function useEstimatorState(props: EstimatorProps) {
       groupId,
       freightPct: freightDefault.pct,
       priceRound: SYSTEM_PRICE_STEP,
+      presentation: presentationForNewSystem(sections),
     });
     setSections((ss) => normalizeSystemOrder([...ss, sec], groups));
     setSuggestionTargets((m) => ({ ...m, [systemKey]: sec.id }));
@@ -2321,7 +2493,11 @@ export function useEstimatorState(props: EstimatorProps) {
     else if (kind === "vendor") {
       // #144: an abandoned edit must not seed the next "+ Vendor quote".
       vendorEditRef.current = null;
+      // #348 slice 4: nor an abandoned email hand-off.
+      vendorSeedRef.current = null;
+      setVendorHandoff(null);
       setVendorDraft(freshVendor());
+      resetVendorPdf();
     } else if (kind === "labor") {
       // #269: an abandoned labor edit must not seed the next "+ Labor".
       laborEditRef.current = null;
@@ -2357,10 +2533,14 @@ export function useEstimatorState(props: EstimatorProps) {
       /* #144: the pending edit seed, consumed and CLEARED here so it applies to
          exactly one open. With none set — or a record since deleted — this is
          the unchanged blank form. */
+      /* #348 slice 4: the email hand-off's blank draft comes first — consumed and cleared the same way. */
+      const handoffSeed = vendorSeedRef.current;
+      vendorSeedRef.current = null;
       const editId = vendorEditRef.current;
       vendorEditRef.current = null;
-      const rec = editId ? vendorQuotes.find((v) => v.id === editId) : undefined;
-      setVendorDraft(rec ? vendorDraftFromRecord(rec) : freshVendor());
+      const rec = !handoffSeed && editId ? vendorQuotes.find((v) => v.id === editId) : undefined;
+      setVendorDraft(handoffSeed || (rec ? vendorDraftFromRecord(rec) : freshVendor()));
+      resetVendorPdf();
     } else if (kind === "fixture") {
       // #246: the list now holds every kind (fixtures first); preselect the
       // first FIXTURE — today's pick — and nothing when there is none.
@@ -2402,8 +2582,27 @@ export function useEstimatorState(props: EstimatorProps) {
         setLaborDraft(
           freshLabor(est, tierMargin, sections.find((section) => section.id === secId)?.name || "")
         );
+        markDraftBaseline("labor"); // #348 follow-up: the travel reseed is the new clean point
       });
     }
+  };
+
+  /** #348 follow-up: whether the open pop-up holds unsaved work (null when clean, or not one of the five). */
+  const openInputDirty = (): { kind: ModalInputKind; read: boolean } | null => {
+    const cur = openInputRef.current;
+    if (!cur || !isModalInputKind(cur.kind)) return null;
+    const reading = cur.kind === "vendor" && (vendorPdfBusyRef.current || !!vendorPdf.busy);
+    // Fix round 1: the Inbox hand-off still copying the PDF in counts too (closing drops the copy).
+    const copying = cur.kind === "vendor" && vendorHandoff?.status === "loading";
+    if (!inputIsDirty({ baseline: draftBaselineRef.current[cur.kind], current: modalDrafts[cur.kind], reading, copying })) return null;
+    return { kind: cur.kind, read: cur.kind === "vendor" && (reading || !!vendorDraft.pdfRead) };
+  };
+
+  /** #348 follow-up: true = OK to discard the open pop-up — it's clean, or the user confirmed. The pop-ups' × and
+   *  backdrop (ConfigModal's confirmClose) and a switch away (openInputMethod) ask; Add / Save call closeInput directly. */
+  const confirmDiscardInput = (): boolean => {
+    const d = openInputDirty();
+    return !d || window.confirm(discardConfirmText(d.kind, { read: d.read }));
   };
 
   /** Close whatever input method is open, discarding its draft. */
@@ -2412,6 +2611,11 @@ export function useEstimatorState(props: EstimatorProps) {
     openInputRef.current = null;
     openSeqRef.current++; // retires any callback still in flight for that open
     setOpenInput(null);
+    // #348 slice 4: the email hand-off never outlives the form it opened.
+    vendorSeedRef.current = null;
+    setVendorHandoff(null);
+    // #348 slice 5: nor a Read the PDF in flight.
+    resetVendorPdf();
     if (cur) discardDraft(cur.kind, cur.secId);
   };
 
@@ -2419,6 +2623,8 @@ export function useEstimatorState(props: EstimatorProps) {
    *  is already open on that system closes it — which discards it too. */
   const openInputMethod = (kind: InputKind, secId: string) => {
     const cur = openInputRef.current;
+    // #348 follow-up: closing or switching away from a pop-up with unsaved work asks first.
+    if (cur && !confirmDiscardInput()) return;
     if (cur && cur.kind === kind && cur.secId === secId) {
       closeInput();
       return;
@@ -2430,6 +2636,7 @@ export function useEstimatorState(props: EstimatorProps) {
     openInputRef.current = { kind, secId };
     setOpenInput({ kind, secId });
     seedDraft(kind, secId);
+    markDraftBaseline(kind);
   };
 
   /** Open the vendor form on a STORED quote (#144), so editing participates in
@@ -2439,10 +2646,89 @@ export function useEstimatorState(props: EstimatorProps) {
        open on this system" as a toggle and would close the form we are about to
        seed, and its discard of the outgoing draft would clear the pending seed
        set below. After closeInput there is nothing open left to discard. */
+    if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
     vendorEditRef.current = vqId;
     openInputMethod("vendor", secId);
   };
+
+  /** #348 slice 4: the hand-off's "Add to system" — move the OPEN vendor form to another system without discarding
+   *  its draft (the PDF is already copied under the draft's id). A no-op unless a vendor form is open. */
+  const retargetVendor = (secId: string) => {
+    const cur = openInputRef.current;
+    if (!cur || cur.kind !== "vendor" || cur.secId === secId) return;
+    if (!sections.some((sec) => sec.id === secId)) return;
+    openInputRef.current = { kind: "vendor", secId };
+    setOpenInput({ kind: "vendor", secId });
+  };
+
+  /** #348 slice 4: pick (or, with null, unlink) the vendor company. A pick names the vendor; unlinking keeps the name. */
+  const setVendorCompany = (c: { id: string; name: string } | null) =>
+    setVendorDraft((d) => (c ? { ...d, vendorCompanyId: c.id, vendor: c.name } : { ...d, vendorCompanyId: null }));
+
+  /* #348 slice 4: the Inbox → Estimator hand-off, once per page. The `vq` param is stripped from the URL FIRST, so a
+     reload never copies the PDF twice; only ids ever rode it, and the action re-checks the thread's visibility. */
+  useEffect(() => {
+    const ref = props.vendorFromThread;
+    if (!ref || !loadedId || vendorHandoffConsumedRef.current) return;
+    vendorHandoffConsumedRef.current = true;
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.delete("vq"); // VENDOR_FROM_EMAIL_PARAM
+      window.history.replaceState(window.history.state, "", u.pathname + u.search + u.hash);
+    } catch {
+      /* ignore — the copy below still runs once (the consumed ref) */
+    }
+    const secId = sections.some((sec) => sec.id === activeId) ? (activeId as string) : sections[0]?.id;
+    if (!secId) {
+      setActionError(VENDOR_COPY.noSystem);
+      return;
+    }
+    const seed = freshVendor();
+    closeInput();
+    vendorSeedRef.current = seed;
+    openInputMethod("vendor", secId);
+    setVendorHandoff({ status: "loading", note: VENDOR_COPY.copying });
+    const quoteId = loadedId;
+    void (async () => {
+      try {
+        const r = await vendorQuoteFromThreadAction({
+          quoteId,
+          ref,
+          vendorQuoteId: seed.id,
+          attachedChars: vendorAttachmentLoad(vendorQuotes),
+        });
+        if (!r.ok) {
+          setVendorHandoff((h) => (h ? { status: "failed", note: r.error || VENDOR_COPY.copyFailed } : h));
+          return;
+        }
+        const p = r.prefill;
+        const fill = (d: VendorDraft): VendorDraft => {
+          // The user closed (or switched) the form meanwhile — this result belongs to no open draft.
+          if (d.id !== seed.id) return d;
+          /* Apply the vendor only while the draft's vendor is still the seeded blank — never over what the user
+             typed or picked while the PDF was copying. */
+          const blank = !(d.vendor || "").trim() && !d.vendorCompanyId;
+          return {
+            ...d,
+            ...(blank ? { vendor: p.vendor, vendorCompanyId: p.vendorCompanyId } : {}),
+            quoteNumber: d.quoteNumber || p.quoteNumber,
+            attachment: p.attachment ?? d.attachment,
+            attachmentPreview: p.attachment ? p.preview : d.attachmentPreview,
+            fromThreadId: p.fromThreadId,
+          };
+        };
+        setVendorDraft(fill);
+        /* #348 follow-up: the filled form is the new clean point — the same fill applied to the baseline, so what the
+           user typed while the PDF copied still counts as theirs (a pending baseline snapshots the filled draft). */
+        draftBaselineRef.current.vendor = rebaseDraft<VendorDraft>(draftBaselineRef.current.vendor, fill);
+        setVendorHandoff((h) => (h ? { status: "done", note: p.note } : h));
+      } catch {
+        setVendorHandoff((h) => (h ? { status: "failed", note: VENDOR_COPY.copyFailed } : h));
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedId, sections.length]);
 
   /** #269: reopen the Labor configurator on the draft that built a labor
    *  group, from any of its lines. Same close-then-seed dance as
@@ -2452,6 +2738,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const sec = sections.find((s) => s.id === secId);
     const rec = sec ? laborGroupRecord(sec, group) : null;
     if (!sec || !rec) return;
+    if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
     laborEditRef.current = { group, draft: rec.draft, ...laborGroupEdits(sec, group) };
     openInputMethod("labor", secId);
@@ -2464,6 +2751,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
     if (!it?.track) return;
     const gone = !trackSeries.some((s) => s.id === it.track!.seriesId);
+    if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
     trackEditRef.current = {
       lineId,
@@ -2478,6 +2766,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const openCustomEdit = (secId: string, lineId: number) => {
     const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
     if (!it || !isCustomLineEditable(it)) return;
+    if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
     customEditRef.current = { lineId, draft: customDraftFromLine(it) };
     openInputMethod("custom", secId);
@@ -2488,6 +2777,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
     if (!it?.curtain) return;
     const linked = linkCurtainTracks(sections).links.get(it);
+    if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
     curtainEditRef.current = { lineId, draft: curtainDraftFromLine(it, defaultFabric, fabrics, (d) => computeCurtain(d, fabrics, { sewingPct: curtainSewingPct }, tierMargin ?? undefined).costEach), linkedTrack: linked?.track ? String(linked.track.mounting) : null };
     openInputMethod("curtain", secId);
@@ -2652,8 +2942,64 @@ export function useEstimatorState(props: EstimatorProps) {
      priced line, survives the row's × control, and makes Single/Itemized a
      pure render decision instead of a set of $0 rows that would leak onto
      the customer document. */
-  const setVendorField = <K extends keyof VendorDraft>(field: K, value: VendorDraft[K]) =>
+  const setVendorField = <K extends keyof VendorDraft>(field: K, value: VendorDraft[K]) => {
+    /* #348 slice 5: a replaced or removed file drops the read (its lines stay, now the user's own) and any read
+       still in flight for the old file, with its error. */
+    if (field === "attachment") {
+      resetVendorPdf();
+      setVendorDraft((d) => ({ ...dropVendorPdfRead(d), [field]: value }));
+      return;
+    }
     setVendorDraft((d) => ({ ...d, [field]: value }));
+  };
+
+  /** #348 slice 5 — Read the PDF (hard = Try harder, on Sonnet). One click = one action call; a new read over an
+   *  earlier one confirms first, then undoes that read before applying the new one (applyVendorPdfRead doesn't). */
+  const readVendorPdf = async (hard: boolean) => {
+    const d = vendorDraft;
+    const a = d.attachment;
+    const source = a?.blobPath
+      ? { kind: "blob" as const, blobPath: a.blobPath }
+      : a?.dataUrl
+        ? { kind: "dataUrl" as const, dataUrl: a.dataUrl }
+        : null;
+    if (!a || !source || !isPdfAttachment(a) || vendorPdfBusyRef.current) return;
+    if (d.extracted) {
+      const { read, edited } = readLinesEdited(d);
+      if (read > 0 && !window.confirm(VENDOR_PDF_COPY.replaceConfirm(read, edited, hard))) return;
+    }
+    const seq = ++vendorPdfSeqRef.current;
+    vendorPdfBusyRef.current = true;
+    setVendorPdf({ busy: hard ? "hard" : "read", error: null });
+    let r: Awaited<ReturnType<typeof readVendorPdfAction>>;
+    try {
+      r = await readVendorPdfAction({
+        vendorQuoteId: d.id,
+        quoteId: loadedId,
+        source,
+        hard,
+        // Any read over an earlier one replaces it — the server retires that run (Read again or Try harder).
+        retryOf: d.extracted?.runId ?? null,
+      });
+    } catch (e) {
+      console.error("[estimator] Read the PDF failed:", e);
+      r = { ok: false, error: VENDOR_PDF_COPY.couldNotRead, runId: null };
+    }
+    // The form closed, reseeded or changed file meanwhile: this result belongs to nothing on screen.
+    if (vendorPdfSeqRef.current !== seq) return;
+    vendorPdfBusyRef.current = false;
+    if (r.ok) {
+      const result = r;
+      setVendorDraft((cur) =>
+        cur.id !== d.id || attKey(cur) !== attKey(d)
+          ? cur
+          : applyVendorPdfRead(undoVendorPdfRead(cur), result, () => ++vendorLineIdRef.current)
+      );
+      setVendorPdf(VENDOR_PDF_IDLE);
+    } else {
+      setVendorPdf({ busy: null, error: { text: r.error, tooLarge: !!r.tooLarge, hard } });
+    }
+  };
   const setVendorLine = (
     id: number,
     field: keyof Omit<VendorLineDraft, "id">,
@@ -2702,6 +3048,8 @@ export function useEstimatorState(props: EstimatorProps) {
        edit rather than inherited — a stale vendor name on a re-quoted line is
        the failure this feature exists to prevent. */
     const lineDesc = vendor + " \u00b7 " + quoteNumber + " \u2014 " + description;
+    // #348 slice 4: addedAt is server-stamped; keep the client copy honest between saves.
+    const prevRec = vendorQuotes.find((v) => v.id === vqId);
     const record: VendorQuote = {
       id: vqId,
       vendor,
@@ -2719,6 +3067,8 @@ export function useEstimatorState(props: EstimatorProps) {
         qty: parseMoney(l.qty) || 0,
         unit: (l.unit || "").trim() || "ea",
         amount: round2(parseMoney(l.amount) || 0),
+        // #348 slice 5: which read line this row came from — the server keeps it only with a verified read.
+        ...(typeof l.fromRead === "number" && d.extracted ? { extractedIndex: l.fromRead } : {}),
       })),
       terms: d.terms || "",
       notes: d.notes || "",
@@ -2726,6 +3076,11 @@ export function useEstimatorState(props: EstimatorProps) {
       totalSource: vendorDraftTotalSource(d),
       includesFreight: d.includesFreight,
       display: d.display,
+      ...(d.vendorCompanyId ? { vendorCompanyId: d.vendorCompanyId } : {}),
+      ...(d.fromThreadId ? { fromThreadId: d.fromThreadId } : {}),
+      ...(prevRec?.addedAt ? { addedAt: prevRec.addedAt } : {}),
+      // #348 slice 5: the read this form keeps — re-verified against its run on the server at save.
+      ...(d.extracted ? { extracted: d.extracted } : {}),
     };
     /* Replaced IN PLACE on an edit — same id, same position — so the spawned
        line keeps resolving against it and the row order does not shuffle. */
@@ -3136,6 +3491,7 @@ export function useEstimatorState(props: EstimatorProps) {
     changeStatus,
     checkedAssumptions,
     closeInput,
+    confirmDiscardInput,
     closeQd,
     closeTitle,
     cols,
@@ -3196,6 +3552,9 @@ export function useEstimatorState(props: EstimatorProps) {
     loadedId,
     locationId,
     moveItem,
+    moveLinesHere,
+    moveLinesToEstimate,
+    movingLines,
     moveNotice,
     moveSystem,
     narrRef,
@@ -3215,6 +3574,11 @@ export function useEstimatorState(props: EstimatorProps) {
     openTitle,
     openTrackEdit,
     openVendorEdit,
+    retargetVendor,
+    setVendorCompany,
+    vendorHandoff,
+    vendorPdf,
+    readVendorPdf,
     ownerValue,
     partsBusy,
     paymentTerms,
@@ -3365,6 +3729,7 @@ export function useEstimatorState(props: EstimatorProps) {
     venueOptions,
     venueRoomName,
     viewerCanApprove,
+    peopleLocked,
     viewerName,
     bonusSplit,
     bonusRecord,

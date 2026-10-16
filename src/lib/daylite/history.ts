@@ -297,6 +297,10 @@ export const OPP_STAGE_MAP: Record<"estimate-design" | "bid-spec", Record<string
     "equipment ordered": { stage: "acceptance", projectStage: "equipment-ordered" },
   },
   "bid-spec": {
+    // Jeff 2026-10-15 #42 — BID SPEC's new first stage.
+    "lead / qualify": { stage: "lead-qualify" },
+    "lead/qualify": { stage: "lead-qualify" },
+    "lead qualify": { stage: "lead-qualify" },
     "collect information": { stage: "collect-info" },
     "create bid": { stage: "create-bid" },
     "bid sent": { stage: "bid-sent" },

@@ -5,8 +5,11 @@ import { resolveSharedQuote, SHARE_VIEW_PER_MIN } from "@/lib/quote-share/links"
 import { loadQuoteDocumentProps } from "@/lib/quote-pdf/document-loader";
 import { ONLINE_COPY, onlineHeaderLine, onlineView, sharePath } from "@/lib/quote-share/view";
 import { OnlineEstimateCard, OnlineEstimateView } from "@/components/online-estimate/online-estimate";
-import { isShareTokenV2 } from "@/lib/quote-share/token";
+import { isPackageToken } from "@/lib/quote-share/token";
 import { SharedPackagePage } from "./package-page";
+import letterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
+import { onlineCutSheets } from "@/lib/curtain-cut-sheets/online";
+import { OnlineCutSheets } from "@/components/cutsheets/online-cut-sheets";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Estimate", robots: { index: false, follow: false }, referrer: "no-referrer" };
@@ -34,8 +37,8 @@ export default async function SharedQuotePage({
   const ip = clientIpFromHeaders(await headers()) || "unknown";
   if (!rateLimit("share-view:" + ip, SHARE_VIEW_PER_MIN, 60_000).ok) return <OnlineEstimateCard title={ONLINE_COPY.tooMany} />;
   // #301 slice B — a v2 (rev-pinned) token opens the estimate package; a v1
-  // token keeps #293's page below, unchanged.
-  if (isShareTokenV2(token)) return <SharedPackagePage id={id} token={token} view={onlineView(sp.view)} />;
+  // token keeps #293's page below, unchanged. #348 2b-ii: so does a bidder's v3.
+  if (isPackageToken(token)) return <SharedPackagePage id={id} token={token} view={onlineView(sp.view)} />;
   const hit = await resolveSharedQuote(id, token);
   if (hit?.state.kind === "revising") return <OnlineEstimateCard title={ONLINE_COPY.revising} />;
   const ok = hit && hit.state.kind === "ok" ? { q: hit.q, rev: hit.state.rev, closed: hit.state.closed } : null;
@@ -48,16 +51,21 @@ export default async function SharedQuotePage({
       })
     : null;
   if (!ok || !docProps) return <OnlineEstimateCard title={ONLINE_COPY.shareInactive} />;
+  // Jeff 2026-10-15 #22: the cut sheets the sent PDF carries.
+  const cutSheets = await onlineCutSheets(ok.q, ok.rev);
   return (
-    <OnlineEstimateView
-      docProps={docProps}
-      view={onlineView(sp.view)}
-      headerLine={onlineHeaderLine(ok.q, ok.rev)}
-      closed={ok.closed}
-      narrativeHref={base}
-      bomHref={base + "?view=bom"}
-      pdfHref={null}
-      backHref={null}
-    />
+    <>
+      <OnlineEstimateView
+        docProps={docProps}
+        view={onlineView(sp.view)}
+        headerLine={onlineHeaderLine(ok.q, ok.rev)}
+        closed={ok.closed}
+        narrativeHref={base}
+        bomHref={base + "?view=bom"}
+        pdfHref={null}
+        backHref={null}
+      />
+      {cutSheets && <OnlineCutSheets loaded={cutSheets} letterheadSrc={letterhead.src} />}
+    </>
   );
 }

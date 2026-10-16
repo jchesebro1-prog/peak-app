@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm, requireUser } from "@/lib/session";
+import { withSavepoint } from "@/db";
 import { canonicalBonusSections } from "@/lib/estimate-bonus/canonical";
+import { loadBonusRates } from "@/lib/stores/pricing";
 import { stripBonusLines } from "@/lib/estimate-bonus/rules";
 import { readTierSize } from "@/lib/task-plan/fields";
 import { can } from "@/lib/team";
@@ -27,6 +29,7 @@ import {
   type QuoteReview,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
+import { reopenedAtWonVersion } from "@/lib/quote-won-version";
 import { travelForId } from "@/lib/stores/customers";
 import { clearPricedPor, sourceForSave } from "@/lib/portal-quote-mode";
 import { declinePortalAcceptance } from "@/lib/portal-quotes";
@@ -47,6 +50,8 @@ import { normalizeSystemOrder, sanitizeGroups, sanitizeSectionGroupMeta, without
 import { packageDocForSave } from "@/lib/package-doc/save";
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import type { PackageDoc } from "@/lib/package-doc/types";
+import { docIdFloor } from "@/lib/package-doc/ids";
+import { reIdIncomingSection } from "@/lib/estimate-line-move/reid";
 import { copyPricingFor } from "./copy-pricing";
 import { seedMarginOf, usableTierMargin } from "./tier-reprice";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
@@ -64,7 +69,7 @@ import {
 import { companyCredit } from "@/lib/stores/reward-ledger";
 import { normalizePdfOptions, type QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
-import type { QuotePdfView } from "@/lib/quote-pdf/state";
+import { documentRevStamp, type QuotePdfView } from "@/lib/quote-pdf/state";
 import { activeUsers } from "@/lib/users";
 import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
 import { PRICING_TIER_LABEL } from "@/lib/identity/config";
@@ -72,6 +77,8 @@ import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import { rackFactsOrUndefined } from "@/lib/rack/part-facts";
 import { setQuotePeopleAs } from "@/lib/quote-people";
+import { addVendorPartiesForSave, prepareVendorQuotesForSave } from "@/lib/stores/vendor-quotes";
+import { recordVendorPdfOutcomes, verifyVendorPdfExtractions } from "@/lib/vendor-pdf/save-server";
 import { quoteSpecFollowingRenames, selectionFollowingRenames } from "@/lib/stores/catalog-renames";
 import { leadIdForCreate, linkSavedQuoteToSuggestion } from "@/lib/assist/suggestion-save";
 
@@ -238,6 +245,9 @@ export type SaveResult = {
   /** Estimate suggestion — true when this save linked the quote to the
    *  posted `suggestionId` (the builder stops sending it). */
   suggestionLinked?: boolean;
+  /** #355 review M2 — this save's status move reopened a won estimate at the
+   *  version that won; the open document holds the edits, so reload. */
+  reopenedAtWon?: boolean;
 };
 
 export type ReviewSync = {
@@ -252,6 +262,9 @@ export type ReviewSync = {
   /** #284 — set on `ok: false` when the approval gate itself refused, so the
    *  banner can offer the next step (Submit for approval) right there. */
   gateRefused?: boolean;
+  /** Batch 5 #59 — the move reopened a won estimate at the version that won
+   *  (edits saved after the win became a revision); the open document is stale, reload it. */
+  reopenedAtWon?: boolean;
 };
 
 function refresh() {
@@ -280,6 +293,8 @@ export type StageSync = {
   /** #284 — see ReviewSync.next / gateRefused. */
   next?: QuoteNextStepView | null;
   gateRefused?: boolean;
+  /** Batch 5 #59 — see ReviewSync.reopenedAtWon. */
+  reopenedAtWon?: boolean;
 };
 
 async function stageSyncOf(id: string, user: { name: string; roles: string[] }): Promise<StageSync> {
@@ -428,7 +443,7 @@ export async function saveQuoteAction(
       ok: false,
       id: null,
       number: null,
-      revNum: Math.max(1, prior?.revisions?.length || 1),
+      revNum: documentRevStamp(prior ?? {}).revNum,
       updatedAt: prior?.updatedAt ?? Date.now(),
       review: prior?.review ?? null,
       status: prior?.status ?? null,
@@ -464,7 +479,7 @@ export async function saveQuoteAction(
   // persists; status = the prior status (status changes only travel through
   // setStatus, never this write), "draft" for a brand-new quote.
   const sellSanitized = Array.isArray(sellNormalized)
-    ? canonicalBonusSections({ source: savedSource, quoteType: prior?.quoteType, status: prior ? prior.status : "draft" }, sellNormalized)
+    ? canonicalBonusSections({ source: savedSource, quoteType: prior?.quoteType, status: prior ? prior.status : "draft" }, sellNormalized, await loadBonusRates())
     : sellNormalized;
   // #282 phase 2: a negative price only on the Rewards credit line, and that
   // line clamped to what the customer can spend here — refused, not stored,
@@ -475,7 +490,7 @@ export async function saveQuoteAction(
       ok: false,
       id: loadedId,
       number: prior ? displayQuoteNumber(prior) : null,
-      revNum: Math.max(1, prior?.revisions?.length || 1),
+      revNum: documentRevStamp(prior ?? {}).revNum,
       updatedAt: prior?.updatedAt ?? Date.now(),
       review: prior?.review ?? null,
       status: prior?.status ?? null,
@@ -537,6 +552,8 @@ export async function saveQuoteAction(
   patch.spec = await quoteSpecFollowingRenames(patch.spec);
   let q: Quote | null = null;
   let statusError: string | undefined;
+  // #355 review M2: set when this save's status move put the won version back.
+  let reopenedAtWon = false;
   let statusNotice: string | undefined = credit.notice;
   let pdfState: QuotePdfView | null = null;
   /* #143: keep only the vendor quotes something still references. Deleting a
@@ -562,9 +579,22 @@ export async function saveQuoteAction(
     if (liveVq.has(vq.id) || revVq.has(vq.id)) keptVq.set(vq.id, vq);
   });
   let storedVendorQuotes: VendorQuote[] = [...keptVq.values()];
+  // #348 slice 4: server-stamp addedAt and keep only a live vendor company; the vendor party is added after the write.
+  const priorVq = vendorQuoteRows(prior?.vendorQuotes);
+  storedVendorQuotes = await prepareVendorQuotesForSave(priorVq, storedVendorQuotes, Date.now());
+  // #348 slice 5: a Read-the-PDF result is kept only when its run row vouches for it (model + time from the row);
+  // a run first kept by this save is scored once, after the write.
+  const vpdf = await verifyVendorPdfExtractions(priorVq, storedVendorQuotes);
+  storedVendorQuotes = vpdf.vendorQuotes;
   if (loadedId) {
     storedVendorQuotes = await storeVendorQuotes(loadedId, storedVendorQuotes);
     q = await update(loadedId, { ...patch, vendorQuotes: storedVendorQuotes } as QuotePatch);
+    if (q && vpdf.fresh.length) await recordVendorPdfOutcomes(vpdf.fresh, storedVendorQuotes, loadedId);
+    // #348 slice 4 — a vendor quote's company joins the estimate as a vendor party, once (D-next-2). Never fails the save.
+    if (q) {
+      try { await withSavepoint(() => addVendorPartiesForSave({ type: "quote", id: loadedId }, priorVq, storedVendorQuotes, user.id)); }
+      catch (e) { console.error("saveQuoteAction: adding vendor parties failed", loadedId, e); }
+    }
     // #222: pending BEFORE any status change below, so a send in this same
     // save waits for this save's render instead of copying the previous file.
     if (q) pdfState = await scheduleQuotePdf(loadedId);
@@ -591,7 +621,9 @@ export async function saveQuoteAction(
       const decision = resolveSaveStatusChange(payload.status, payload.baseStatus, q.status);
       if (decision.kind === "apply") {
         try {
+          const beforeMove = q;
           q = (await setStatus(loadedId, payload.status, user.name)) ?? q;
+          reopenedAtWon = reopenedAtWonVersion(beforeMove, q);
         } catch (e) {
           // Same split as the create branch below: the gate's refusal is
           // the user's to read (#174); the field edits above are still saved.
@@ -636,6 +668,20 @@ export async function saveQuoteAction(
             : "Could not create the quote — please try again.",
       };
     }
+    // #348 — a new estimate on a lead starts with the lead's companies (not its GCs/ECs — bidders are ticked per estimate).
+    if (leadId) {
+      try {
+        const { copyParties } = await import("@/lib/stores/parties");
+        await withSavepoint(async () => {
+          await copyParties({ type: "lead", id: leadId }, { type: "quote", id: created.id }, user.id);
+        });
+      } catch (e) {
+        console.error("saveQuoteAction: copying lead parties failed", created.id, e);
+      }
+    }
+    // #348 slice 4 — a vendor quote's company joins the new estimate as a vendor party. Never fails the save.
+    try { await withSavepoint(() => addVendorPartiesForSave({ type: "quote", id: created.id }, [], storedVendorQuotes, user.id)); }
+    catch (e) { console.error("saveQuoteAction: adding vendor parties failed", created.id, e); }
     // create() promotes only the declared columns — stamp the extras + status.
     // The vendor-quote attachments can only be stored now: this is the first
     // moment the real quote id exists to key their Blob path by (#143).
@@ -649,6 +695,7 @@ export async function saveQuoteAction(
       vendorQuotes: storedVendorQuotes,
       pdfOptions: normalizePdfOptions(payload.pdfOptions),
     } as QuotePatch);
+    if (q && vpdf.fresh.length) await recordVendorPdfOutcomes(vpdf.fresh, storedVendorQuotes, created.id);
     // #222: same ordering as the update branch.
     if (q) pdfState = await scheduleQuotePdf(created.id);
     if (payload.status !== "draft") {
@@ -684,7 +731,7 @@ export async function saveQuoteAction(
     ok: !!q && !statusError,
     id: q?.id ?? null,
     number: q ? displayQuoteNumber(q) : null,
-    revNum: Math.max(1, q?.revisions?.length || 1),
+    revNum: documentRevStamp(q ?? {}).revNum,
     updatedAt: q?.updatedAt ?? Date.now(),
     review: q?.review ?? null,
     status: q?.status ?? null,
@@ -700,6 +747,7 @@ export async function saveQuoteAction(
     ...(statusError ? { error: statusError } : {}),
     ...(statusNotice ? { notice: statusNotice } : {}),
     ...(suggestionLinked ? { suggestionLinked: true } : {}),
+    ...(reopenedAtWon ? { reopenedAtWon: true } : {}),
   };
 }
 
@@ -826,7 +874,8 @@ export async function moveSystemToEstimateAction(
     customer: string;
     contactName: string;
   },
-  vendorQuotes: VendorQuote[] = []
+  vendorQuotes: VendorQuote[] = [],
+  sourceQuoteId: string | null = null
 ): Promise<MoveSystemResult> {
   const user = await requireUser();
   // #267: a moved system keeps its own price — sanitized like a save.
@@ -843,6 +892,12 @@ export async function moveSystemToEstimateAction(
     sourceContext,
     vendorQuotes,
     owner: user.name,
+    by: user.id,
+    // #348 slice 3: only a Move into a NEW estimate splits off the source's lead and companies.
+    // #348 slice 6: and a new estimate inherits Scope only from its source (scopeOnlyFrom).
+    ...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId
+      ? { splitFrom: { quoteId: sourceQuoteId, userId: user.id }, scopeOnlyFrom: sourceQuoteId }
+      : {}),
   });
   if (!placed.ok) return placed;
   return { ok: true, targetId: placed.targetId, targetName: placed.targetName, targetNumber: placed.targetNumber };
@@ -874,7 +929,14 @@ async function placeSystemInEstimate(
     sourceContext: { customerId: string | null; locationId: string | null; customer: string; contactName: string };
     vendorQuotes: VendorQuote[];
     owner: string;
+    /** #348 slice 4 — the acting user's id (a vendor party's createdBy). */
+    by: string;
     tier?: { pricingTier: string; tierMargin: number };
+    /** #348 slice 3 — Move into a NEW estimate: the stored source quote lends its lead and non-bidder companies. */
+    splitFrom?: { quoteId: string; userId: string };
+    /** #348 slice 6 — Move or Copy into a NEW estimate: the stored source quote whose "Scope only" the new estimate
+     *  inherits (same customer only; newEstimateScopeOnly). Ignored for an existing target. */
+    scopeOnlyFrom?: string;
   }
 ): Promise<{ ok: true; targetId: string; targetName: string; targetNumber: string } | { ok: false; error: string }> {
   const placedIds = vendorIdsInSections([placed]);
@@ -895,16 +957,24 @@ async function placeSystemInEstimate(
     const existingGroups = sanitizeGroups(existingSpec?.groups);
     // #282 phase 2: the target's own Rewards credit stays on ITS last system —
     // re-pinned after the order is normalised, so it really is the last one.
-    const appendedRaw = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))])], existingGroups);
+    // #357: item ids are unique per system only — an incoming line whose id the target already uses anywhere is
+    // re-minted above the target's ids and its package document's floor (computeNid's), its star following.
+    const incoming = reIdIncomingSection(stripBonusLines(withoutGroupMeta(placed)), existingSpec?.sections || [], docIdFloor(existingDoc));
+    const appendedRaw = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([incoming])], existingGroups);
     // Estimator bonuses: re-derive on the merged list with the TARGET's own
     // source / quoteType / status (a won or portal target is left untouched).
     // Before the credit re-pin below, so value/margin include the bonus.
-    const appended = canonicalBonusSections({ source: existing.source, quoteType: existing.quoteType, status: existing.status }, appendedRaw);
+    const appended = canonicalBonusSections({ source: existing.source, quoteType: existing.quoteType, status: existing.status }, appendedRaw, await loadBonusRates());
     const maxItemId = appended.reduce((m, sec) => Math.max(m, ...(sec?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
     const mergedSections = withRewardCredit(appended, rewardCreditOf(appended), maxItemId + 1);
     const t = totals(mergedSections, 0);
-    const carried = placedVq.length
-      ? await storeVendorQuotes(target.quoteId, placedVq)
+    // The browser supplies these rows: stamp addedAt and drop any company that isn't a live vendor company BEFORE storing / adding parties.
+    const priorTargetVq = vendorQuoteRows(existing.vendorQuotes);
+    // #348 slice 5: a moved / copied vendor quote's read is re-verified like a save (these rows come from the
+    // browser) but never scored here — a read is scored once, at the first save that keeps it.
+    const preparedVq = (await verifyVendorPdfExtractions(priorTargetVq, await prepareVendorQuotesForSave(priorTargetVq, placedVq, Date.now()))).vendorQuotes;
+    const carried = preparedVq.length
+      ? await storeVendorQuotes(target.quoteId, preparedVq)
       : [];
     const updated = await update(target.quoteId, {
       spec: { sections: normalizeSystemOrder(mergedSections, existingGroups), mobs: existingSpec?.mobs || [], groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}) },
@@ -922,6 +992,9 @@ async function placeSystemInEstimate(
     if (!updated) {
       return { ok: false, error: "That estimate could not be found." };
     }
+    // #348 slice 4: a moved/copied vendor quote's company joins the target as a vendor party (once). Never fails the move.
+    await withSavepoint(() => addVendorPartiesForSave({ type: "quote", id: updated.id }, priorTargetVq, preparedVq, opts.by))
+      .catch((e) => console.error("placeSystemInEstimate: adding vendor parties failed", updated.id, e));
     // #222 fix wave 1: the target's document gained a section.
     await scheduleQuotePdf(updated.id);
     refresh();
@@ -929,11 +1002,34 @@ async function placeSystemInEstimate(
   }
 
   // Estimator bonuses: the new draft estimate gets its bonus lines at birth.
-  const newSections = canonicalBonusSections({ source: "estimator", status: "draft" }, withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))]));
+  const newSections = canonicalBonusSections({ source: "estimator", status: "draft" }, withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))]), await loadBonusRates());
   const t = totals(newSections, 0);
+  // #348 slice 3: the lead comes from the STORED source quote (never from the client); an unsaved or missing source
+  // simply has none. The id only says which stored quote to read.
+  // A read failure only skips the carry; a deleted lead isn't carried.
+  // The stored source quote (Move → New: lead + companies + Scope only; Copy → New: Scope only). Never the client's copy.
+  const sourceId = opts.splitFrom?.quoteId || opts.scopeOnlyFrom || null;
+  let sourceQuote: Quote | null = null;
+  let sourceReadFailed = false;
+  if (sourceId) {
+    try {
+      sourceQuote = await get(sourceId);
+    } catch (e) {
+      sourceReadFailed = true;
+      console.error("placeSystemInEstimate: reading the source quote failed", sourceId, e);
+    }
+  }
+  const splitSource: Quote | null = opts.splitFrom ? sourceQuote : null;
+  const splitLeadId = splitSource ? await leadIdForCreate(splitSource.leadId) : null;
+  // #348 slice 6 (Jeff 2026-10-15): a new estimate made off a Scope-only estimate (its stamp, or bidders now or ever)
+  // for the same customer is Scope only too — stamped at create, in the same insert. An existing target changes nothing.
+  const scopeOnly = sourceId
+    ? await (await import("@/lib/parties/portal-bid-server")).newEstimateScopeOnly(sourceQuote, sourceReadFailed, opts.sourceContext.customerId)
+    : { stamp: false, failedClosed: false };
   let created: Quote;
   try {
     created = await create({
+      ...(splitLeadId ? { leadId: splitLeadId } : {}),
       name: opts.newName,
       customer: opts.sourceContext.customer,
       customerId: opts.sourceContext.customerId,
@@ -945,7 +1041,7 @@ async function placeSystemInEstimate(
       margin: t.margin,
       owner: opts.owner,
       ...(opts.tier ? { pricingTier: opts.tier.pricingTier, tierMargin: opts.tier.tierMargin } : {}),
-    });
+    }, { bidScopeOnly: scopeOnly.stamp });
   } catch (e) {
     return {
       ok: false,
@@ -955,16 +1051,36 @@ async function placeSystemInEstimate(
           : "Could not create the new estimate — please try again.",
     };
   }
+  if (scopeOnly.failedClosed) {
+    console.error("placeSystemInEstimate: the source couldn't be checked — the new estimate was stamped Scope only (fail closed)", { source: sourceId, created: created.id });
+  }
+  // #348 slice 3: the split estimate starts with the source's companies (never its bidders).
+  if (splitSource && opts.splitFrom) {
+    try {
+      const { copyParties } = await import("@/lib/stores/parties");
+      await withSavepoint(async () => {
+        await copyParties({ type: "quote", id: splitSource.id }, { type: "quote", id: created.id }, opts.splitFrom!.userId);
+      });
+    } catch (e) {
+      console.error("moveSystemToEstimateAction: copying parties failed", created.id, e);
+    }
+  }
+  // The browser supplies these rows: stamp addedAt and drop any non-vendor company before storing / adding parties.
+  // #348 slice 5: reads re-verified like a save, never scored here (see the existing-target branch).
+  const preparedNewVq = (await verifyVendorPdfExtractions([], await prepareVendorQuotesForSave([], placedVq, Date.now()))).vendorQuotes;
   // create() promotes only the declared Quote columns — contactName rides
   // along on the doc like it does for saveQuoteAction's fresh-create path.
   const withContact = await update(created.id, {
     contactName: opts.sourceContext.contactName || "",
     // Same as saveQuoteAction's fresh-create path: the Blob path can only be
     // keyed by the real quote id, which exists for the first time here.
-    ...(placedVq.length
-      ? { vendorQuotes: await storeVendorQuotes(created.id, placedVq) }
+    ...(preparedNewVq.length
+      ? { vendorQuotes: await storeVendorQuotes(created.id, preparedNewVq) }
       : {}),
   } as QuotePatch);
+  // #348 slice 4: a placed vendor quote's company is a vendor party on the new estimate (a split's copyParties already carried it — addParty is idempotent).
+  await withSavepoint(() => addVendorPartiesForSave({ type: "quote", id: created.id }, [], preparedNewVq, opts.by))
+    .catch((e) => console.error("placeSystemInEstimate: adding vendor parties failed", created.id, e));
   await scheduleQuotePdf(created.id);
   refresh();
   return { ok: true, targetId: created.id, targetName: (withContact || created).name, targetNumber: displayQuoteNumber(withContact || created) };
@@ -1016,7 +1132,8 @@ export async function copySystemToEstimateAction(
     contactName: string;
     tierMargin: number | null;
   },
-  vendorQuotes: VendorQuote[] = []
+  vendorQuotes: VendorQuote[] = [],
+  sourceQuoteId: string | null = null
 ): Promise<CopySystemResult> {
   const user = await requireUser();
   // #293: blocks ride copySectionForTarget's section spread — sanitized first.
@@ -1082,7 +1199,10 @@ export async function copySystemToEstimateAction(
     sourceContext,
     vendorQuotes,
     owner: user.name,
+    by: user.id,
     tier: stamp,
+    // #348 slice 6: a Copy into a NEW estimate inherits Scope only from the stored source (same customer only).
+    ...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId ? { scopeOnlyFrom: sourceQuoteId } : {}),
   });
   if (!placed.ok) return placed;
   return {
@@ -1235,6 +1355,8 @@ export async function setStatusAction(
 ): Promise<ReviewSync> {
   const user = await requireUser();
   if (!id || !STAGES.includes(status)) return { ok: false, review: null, status: null };
+  // Batch 5 #59: read before the move, to tell the client when a reopen put the won version back.
+  const before = await get(id);
   // Punch #60 (D84 hole): marking a quote WON or SENT requires an approval
   // record — in-app or attested. Every other stage transition stays open to
   // any signed-in user, as before. Pre-checked here so the UI gets the same
@@ -1275,7 +1397,8 @@ export async function setStatusAction(
     };
   }
   refresh();
-  return syncOf(id, user);
+  const sync = await syncOf(id, user);
+  return reopenedAtWonVersion(before, await get(id)) ? { ...sync, reopenedAtWon: true } : sync;
 }
 
 /** Estimator bonuses — save the Lead / Prepared-by split of the 2% (approvers only). */
@@ -1340,6 +1463,8 @@ export async function declinePortalAcceptanceAction(
 export async function setQuoteStageAction(id: string, stageId: string, alternatesTaken?: string[]): Promise<StageSync> {
   const user = await requireUser();
   if (!id || !stageId) return { ok: false, status: null, review: null, pipelineId: null, stage: null };
+  // Batch 5 #59: a stage move can reopen a won estimate too.
+  const before = await get(id);
   let q: Awaited<ReturnType<typeof setQuoteStage>>;
   try {
     q = await setQuoteStage(id, stageId, user.name, Array.isArray(alternatesTaken) ? alternatesTaken.filter((x): x is string => typeof x === "string") : undefined);
@@ -1374,7 +1499,8 @@ export async function setQuoteStageAction(id: string, stageId: string, alternate
     };
   }
   refresh();
-  return stageSyncOf(id, user);
+  const sync = await stageSyncOf(id, user);
+  return reopenedAtWonVersion(before, await get(id)) ? { ...sync, reopenedAtWon: true } : sync;
 }
 
 /**
@@ -1527,6 +1653,7 @@ export async function searchCatalog(
     list: p.list || 0,
     mfr: p.mfr || "",
     ...(p.pricedAt ? { pricedAt: p.pricedAt } : {}),
+    ...(p.priceDate ? { priceDate: p.priceDate } : {}),
     ...(p.manufacturerModelNumber?.trim() ? { model: p.manufacturerModelNumber.trim() } : {}),
     ...(p.manufacturerPartNumber?.trim() ? { mpn: p.manufacturerPartNumber.trim() } : {}),
     rack: rackFactsOrUndefined(p),

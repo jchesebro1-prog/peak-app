@@ -34,7 +34,7 @@ import { usePartSearch } from "./use-part-search";
 
 /** The catalog slice the builder searches and prices from (#210). Cost is
  *  included: the footer shows the live included cost, as Subassemblies did. */
-export type PartHit = { sku: string; desc: string; category: string; mfr: string; unit: string; list: number; cost: number; pricedAt?: number; rack?: RackPartFacts };
+export type PartHit = { sku: string; desc: string; category: string; mfr: string; unit: string; list: number; cost: number; pricedAt?: number; priceDate?: number; rack?: RackPartFacts };
 
 export type Draft = {
   id: string | null;

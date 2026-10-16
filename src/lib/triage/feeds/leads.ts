@@ -14,12 +14,13 @@ export const SLA_SOON_MS = 4 * 3_600_000;
  * `now` (the store reads Date.now()): SLA breached wins outright; else SLA
  * due within 4 h and/or next action overdue; stale only when nothing else.
  */
-export function leadFacts(l: LeadRecord, now: number): { facts: TriageFact[]; since: number } {
+export function leadFacts(l: LeadRecord, now: number): { facts: TriageFact[]; since: number; escalatedAt?: number } {
   const facts: TriageFact[] = [];
   let since = l.createdAt || 0;
   if (!l.firstContactAt && l.stage === "new") {
     const ms = slaDeadline(l) - now;
-    if (ms < 0) return { facts: [{ kind: "lead_sla_breached" }], since };
+    // #37 — the breach happened at the deadline: a "Not mine" from before it comes back
+    if (ms < 0) return { facts: [{ kind: "lead_sla_breached" }], since, escalatedAt: slaDeadline(l) };
     if (ms <= SLA_SOON_MS) facts.push({ kind: "lead_sla_due_soon", minutes: Math.max(1, Math.ceil(ms / 60_000)) });
   }
   if (l.nextActionAt && l.nextActionAt < now) {
@@ -43,7 +44,7 @@ export function selectLeads(leads: readonly LeadRecord[], ctx: Pick<FeedCtx, "me
   for (const l of leads) {
     if (!isOpen(l)) continue;
     if (l.owner && !sameName(l.owner, ctx.me.name)) continue;
-    const { facts, since } = leadFacts(l, ctx.now);
+    const { facts, since, escalatedAt } = leadFacts(l, ctx.now);
     if (!facts.length) continue;
     out.push({
       key: triageKey.lead(l.id),
@@ -53,6 +54,7 @@ export function selectLeads(leads: readonly LeadRecord[], ctx: Pick<FeedCtx, "me
       href: `/leads?lead=${encodeURIComponent(l.id)}`,
       since,
       facts,
+      ...(escalatedAt ? { escalatedAt } : {}),
     });
   }
   return out;

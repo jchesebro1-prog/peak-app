@@ -69,6 +69,10 @@ import {
 } from "@/lib/stores/inspections";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import { ownThread, ownThreadIds } from "@/lib/inbox-thread-guard";
+import { emailDocContext, resolveComposeAttachments } from "@/lib/mail-attachments-server";
+import { parseComposeAttachments } from "@/lib/mail-attachments";
+import { cleanAddressList, forwardThread } from "@/lib/inbox-forward";
+import { actorByName, mailboxViewer } from "@/lib/mailbox-viewer";
 
 /**
  * Inbox server actions — thin wrappers over the comms store (the prototype's
@@ -98,28 +102,28 @@ function revalidate() {
 
 export async function markReadAction(id: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await markRead(id);
   revalidate();
 }
 
 export async function archiveAction(id: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await archive(id);
   revalidate();
 }
 
 export async function unarchiveAction(id: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await unarchive(id);
   revalidate();
 }
 
 export async function markUnreadAction(id: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await markUnread(id);
   revalidate();
 }
@@ -128,21 +132,21 @@ export async function markUnreadAction(id: string) {
 
 export async function flagAction(id: string, on: boolean) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await setFlag(id, on);
   revalidate();
 }
 
 export async function pinAction(id: string, on: boolean) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await setPin(id, on);
   revalidate();
 }
 
 export async function categoryAction(id: string, key: string | null) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await setCategory(id, key);
   revalidate();
 }
@@ -154,14 +158,14 @@ export async function categoryAction(id: string, key: string | null) {
 
 export async function gmailLabelPickerAction(threadId: string) {
   const user = await requireUser();
-  if (!(await ownThread(threadId, user.name))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
+  if (!(await ownThread(threadId, user))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
   const { labelPicker } = await import("@/lib/gmail/user-labels");
   return labelPicker(threadId, { id: user.id, name: user.name });
 }
 
 export async function setGmailLabelAction(threadId: string, labelId: string, on: boolean) {
   const user = await requireUser();
-  if (!(await ownThread(threadId, user.name))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
+  if (!(await ownThread(threadId, user))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
   const { setThreadLabel } = await import("@/lib/gmail/user-labels");
   const r = await setThreadLabel(threadId, typeof labelId === "string" ? labelId.slice(0, 200) : "", on === true, { id: user.id, name: user.name });
   revalidate();
@@ -170,7 +174,7 @@ export async function setGmailLabelAction(threadId: string, labelId: string, on:
 
 export async function createGmailLabelAction(threadId: string, name: string) {
   const user = await requireUser();
-  if (!(await ownThread(threadId, user.name))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
+  if (!(await ownThread(threadId, user))) return { ok: false as const, error: "not-found" as const, message: "Thread not found." };
   const { createThreadLabel } = await import("@/lib/gmail/user-labels");
   const r = await createThreadLabel(threadId, typeof name === "string" ? name.slice(0, 400) : "", { id: user.id, name: user.name });
   revalidate();
@@ -181,14 +185,14 @@ export async function createGmailLabelAction(threadId: string, name: string) {
 
 export async function deleteAction(id: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await softDelete(id);
   revalidate();
 }
 
 export async function restoreAction(id: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await restore(id);
   revalidate();
 }
@@ -201,7 +205,7 @@ export async function restoreAction(id: string) {
 /** The selection, cut to the signed-in user's own threads (#341). */
 async function ids(list: string[]): Promise<string[]> {
   const user = await requireUser();
-  return ownThreadIds(list, user.name);
+  return ownThreadIds(list, user);
 }
 
 export async function bulkArchiveAction(list: string[]) {
@@ -292,7 +296,7 @@ export async function searchInboxAction(
   labelId?: string | null
 ): Promise<{ rows: SearchRow[] }> {
   const user = await requireUser();
-  const hits = await searchThreads(query, scope, user.name, labelId);
+  const hits = await searchThreads(query, scope, await mailboxViewer(user), labelId);
   const rows: SearchRow[] = hits.slice(0, 100).map((t) => {
     const icon = channelMeta(t.channel).icon;
     return {
@@ -312,7 +316,7 @@ export async function searchInboxAction(
 
 export async function setStatusAction(id: string, status: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await setStatus(id, status);
   // #335 §4 — Mark replied / Close also archive (same per-user setting as
   // archive-on-reply); best-effort, never fails the status change
@@ -329,15 +333,19 @@ export async function setStatusAction(id: string, status: string) {
 
 export async function reopenAction(id: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   await reopen(id);
   revalidate();
 }
 
 export async function assignAction(id: string, name: string) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
-  await assign(id, name || "");
+  if (!(await ownThread(id, user))) return;
+  // #349 — by identity: the picked name must be exactly one active teammate
+  // (a blank name clears the assignment; an ambiguous one changes nothing)
+  const who = (name || "").trim() ? await actorByName(name) : null;
+  if ((name || "").trim() && !who) return;
+  await assign(id, who);
   revalidate();
 }
 
@@ -359,7 +367,7 @@ export async function setLinkAction(
   adopt?: { customerId: string; customer: string } | null
 ) {
   const user = await requireUser();
-  if (!(await ownThread(id, user.name))) return;
+  if (!(await ownThread(id, user))) return;
   // picking a record on an unlinked thread also adopts the resolved customer
   // (port of Comm Thread onLinkRec)
   if (adopt && adopt.customerId) {
@@ -377,7 +385,7 @@ export async function setMessageLinkAction(
   link: CommLink | null,
 ) {
   const user = await requireUser();
-  const thread = await ownThread(threadId, user.name);
+  const thread = await ownThread(threadId, user);
   if (!thread) return { ok: false as const, error: "Thread not found." };
   if (!(thread.messages || []).some((m) => m.id === messageId))
     return { ok: false as const, error: "Message not found." };
@@ -393,18 +401,54 @@ export async function setMessageLinkAction(
 
 /** `signatureHandled` — see email-signature.ts applyOutboundSignature's doc
  *  comment for the full #127-vs-legacy-footer rule (I2, round-3 review). */
-export async function replyAction(id: string, body: string, signatureHandled?: boolean) {
+export async function replyAction(id: string, body: string, signatureHandled?: boolean, attachments?: unknown, cc?: unknown) {
   const user = await requireUser();
   const b = (body || "").trim();
   if (!b) return { ok: false as const };
-  if (!(await ownThread(id, user.name))) return { ok: false as const };
+  const own = await ownThread(id, user);
+  if (!own) return { ok: false as const };
+  // Batch 6 #64 — files from the reply composer's Attach button (re-checked here: the caller's own uploads, this
+  // thread's company / project documents, 25 MB together)
+  const atts = await resolveComposeAttachments([], parseComposeAttachments(attachments), { userId: user.id, ...emailDocContext(own) });
+  if (!atts.ok) return { ok: false as const, error: atts.error };
   const profile = await getUser(user.id);
   const out = applyOutboundSignature(b, signatureHandled, profile || { name: user.name, email: user.email });
   // #335 — archive-on-reply runs after the response, off the send's path
-  const sent = await reply(id, { body: out, me: user.name, postReply: "caller" });
+  // #356 review — Reply all's Cc reaches the Gmail send (stamped on the message; bridge outboundAddressing)
+  const ccLine = cleanAddressList(cc);
+  const sent = await reply(id, { body: out, me: user.name, postReply: "caller", ...(atts.attachments.length ? { attachments: atts.attachments } : {}), ...(ccLine ? { cc: ccLine } : {}) });
   if (replyLeft(sent)) after(() => runPostReply(id));
   revalidate();
   return { ok: true as const };
+}
+
+/** #356 review (Critical 1) — Forward: a NEW message to the typed To / Cc (never the source thread's customer
+ *  contact), "Fwd: …" + the quoted original, optionally the original's attachments plus the rep's own (lib/inbox-forward).
+ *  The source thread must be the caller's own (#341/#349). */
+export async function forwardAction(d: {
+  threadId: string;
+  to: string;
+  cc?: string;
+  subject?: string;
+  body: string;
+  signatureHandled?: boolean;
+  includeOriginal?: boolean;
+  attachments?: unknown;
+}): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const source = await ownThread(d?.threadId, user);
+  if (!source) return { ok: false, error: "Email not found." };
+  const b = String(d.body ?? "").trim();
+  if (!b) return { ok: false, error: "Write a message first." };
+  const profile = await getUser(user.id);
+  const body = applyOutboundSignature(b, d.signatureHandled, profile || { name: user.name, email: user.email });
+  const res = await forwardThread(
+    source,
+    { to: String(d.to ?? ""), cc: String(d.cc ?? ""), subject: String(d.subject ?? ""), body, includeOriginal: d.includeOriginal !== false, attachments: parseComposeAttachments(d.attachments) },
+    { id: user.id, name: user.name },
+  );
+  revalidate();
+  return res;
 }
 
 export async function logNoteAction(
@@ -416,7 +460,7 @@ export async function logNoteAction(
   const user = await requireUser();
   const b = (body || "").trim();
   if (!b) return { ok: false as const };
-  if (!(await ownThread(id, user.name))) return { ok: false as const };
+  if (!(await ownThread(id, user))) return { ok: false as const };
   await addMessage(id, {
     direction,
     channel,
@@ -441,6 +485,9 @@ export type ComposePayload = {
   /** I2 (Inbox round 3 review) — true whenever the #127 composer flow ran
    *  for this send; see replyAction's doc comment for the full rule. */
   signatureHandled?: boolean;
+  /** Batch 6 #64 — the Attach button: which of the draft's files stay (by key) and what's added (uploads by
+   *  reference, Documents by id). Absent = untouched. Re-checked on the server (lib/mail-attachments-server). */
+  attachments?: unknown;
 };
 
 /**
@@ -539,8 +586,17 @@ export async function composeSendAction(d: ComposePayload) {
   if (!(d.to || "").trim() || !((d.subject || "").trim() || (d.body || "").trim())) {
     return { ok: false as const, id: null };
   }
+  // Batch 6 #64 — the composer's attachments, resolved against the draft (or nothing, for a new message)
+  const own = d.id ? await ownThread(d.id, user) : null;
+  if (d.id && !own) return { ok: false as const, id: null, error: "Draft not found." };
+  const attachIn = parseComposeAttachments(d.attachments);
+  const atts = await resolveComposeAttachments(
+    own?.draft?.attachments || [],
+    attachIn,
+    own ? { userId: user.id, ...emailDocContext(own) } : { userId: user.id, customerId: d.customerId || null, projectId: null },
+  );
+  if (!atts.ok) return { ok: false as const, id: null, error: atts.error };
   if (d.id) {
-    if (!(await ownThread(d.id, me))) return { ok: false as const, id: null, error: "Draft not found." };
     const stale = await staleEstimateDraft(d.id);
     if (stale) return { ok: false as const, id: null, error: stale };
   }
@@ -551,15 +607,31 @@ export async function composeSendAction(d: ComposePayload) {
   const customer = d.customerId ? await nameFor(d.customerId) : "";
   let id: string | null = null;
   if (d.id) {
-    await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body });
+    await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body, ...(attachIn ? { attachments: atts.attachments } : {}) });
     const rec = await sendDraft(d.id, me);
     id = rec ? rec.id : d.id;
     if (isEstimateDraft) await holdEstimateIfNotGmail(id, connected);
     await completeRenewalOutreach(id, me);
+  } else if (atts.attachments.length) {
+    // Batch 6 #64 — a new message with files goes out the draft way (the draft carries them into the sent message)
+    const draft = await saveDraft({
+      mailbox: asMailbox(d.mailbox),
+      owner: { id: user.id, name: me }, // #349 — owned by identity
+      to: d.to,
+      cc: d.cc,
+      subject: (d.subject || "").trim() || "(no subject)",
+      body,
+      customerId: d.customerId || null,
+      customer,
+      contactName: d.contactName,
+      attachments: atts.attachments,
+    });
+    const rec = await sendDraft(draft.id, me);
+    id = rec ? rec.id : draft.id;
   } else {
     const rec = await compose({
       mailbox: asMailbox(d.mailbox),
-      mailboxUser: me,
+      owner: { id: user.id, name: me }, // #349 — owned by identity
       cc: d.cc,
       subject: (d.subject || "").trim() || "(no subject)",
       body,
@@ -567,8 +639,6 @@ export async function composeSendAction(d: ComposePayload) {
       customer,
       contactName: d.contactName,
       contactEmail: d.to,
-      assignedTo: me,
-      me,
     });
     id = rec.id;
   }
@@ -579,16 +649,22 @@ export async function composeSendAction(d: ComposePayload) {
 export async function saveDraftAction(d: ComposePayload) {
   const user = await requireUser();
   const me = user.name;
+  const attachIn = parseComposeAttachments(d.attachments);
   if (d.id) {
-    if (!(await ownThread(d.id, me))) return { ok: false as const, id: null };
-    await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body: d.body });
+    const own = await ownThread(d.id, user);
+    if (!own) return { ok: false as const, id: null };
+    const atts = await resolveComposeAttachments(own.draft?.attachments || [], attachIn, { userId: user.id, ...emailDocContext(own) });
+    if (!atts.ok) return { ok: false as const, id: null, error: atts.error };
+    await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body: d.body, ...(attachIn ? { attachments: atts.attachments } : {}) });
     revalidate();
     return { ok: true as const, id: d.id };
   }
+  const atts = await resolveComposeAttachments([], attachIn, { userId: user.id, customerId: d.customerId || null, projectId: null });
+  if (!atts.ok) return { ok: false as const, id: null, error: atts.error };
   const customer = d.customerId ? await nameFor(d.customerId) : "";
   const rec = await saveDraft({
     mailbox: asMailbox(d.mailbox),
-    mailboxUser: me,
+    owner: { id: user.id, name: me }, // #349 — owned by identity
     to: d.to,
     cc: d.cc,
     subject: d.subject,
@@ -596,7 +672,7 @@ export async function saveDraftAction(d: ComposePayload) {
     customerId: d.customerId || null,
     customer,
     contactName: d.contactName,
-    me,
+    ...(atts.attachments.length ? { attachments: atts.attachments } : {}),
   });
   revalidate();
   return { ok: true as const, id: rec.id };
@@ -622,6 +698,11 @@ export async function logInteractionAction(d: LogPayload) {
     return { ok: false as const, id: null };
   }
   const customer = await nameFor(d.customerId);
+  // #349 — the assignee by identity: blank = me; a picked name must be
+  // exactly one active teammate
+  const owner = { id: user.id, name: me };
+  const assignee = (d.assignedTo || "").trim() && d.assignedTo !== me ? await actorByName(d.assignedTo) : owner;
+  if (!assignee) return { ok: false as const, id: null };
   // #80: insertWithPrefixedId THROWS once an id collision outlasts its retry
   // budget (doc-store.ts). Rare, but this is a Log button — report it through
   // the failure shape this action already has instead of letting a raw
@@ -630,7 +711,7 @@ export async function logInteractionAction(d: LogPayload) {
   try {
     rec = await create({
       mailbox: "personal",
-      mailboxUser: me,
+      owner,
       customerId: d.customerId,
       customer,
       contactName: d.contactName,
@@ -639,8 +720,7 @@ export async function logInteractionAction(d: LogPayload) {
       channel: d.channel,
       direction: d.direction,
       body: d.body,
-      assignedTo: d.assignedTo || me,
-      me,
+      assignee,
     });
   } catch (err) {
     console.error("logInteractionAction: comm mint failed", err);

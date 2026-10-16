@@ -13,7 +13,7 @@ import type { EstimateOutputDefaults } from "@/lib/estimate-output/fields";
 import type { SchedulingSettings } from "@/lib/visit-plan/settings";
 import type { AssistSettings } from "@/lib/assist/types";
 import type { AssistKeyInfo } from "@/lib/assist/config";
-import type { AskReport, AssistReport, BriefReport, FilingReport } from "@/lib/assist/report";
+import type { AskReport, AssistReport, BriefReport, FilingReport, VendorPdfReport } from "@/lib/assist/report";
 import type { SenderRuleRowVM } from "@/lib/inbox-org/rule-list";
 
 export type UserVM = {
@@ -117,6 +117,10 @@ export type AssistVM = {
   ask: AskReport;
   /** Ask AI's two models in effect (env overrides applied) — the card's model hint. */
   askModels: { ask: string; askHard: string };
+  /** #348 slice 5 — Read the PDF: reads, Try harder, saved / replaced, line accuracy at first save, math flags, cost. */
+  vendorPdf: VendorPdfReport;
+  /** Read the PDF's two models in effect (env overrides applied) — the card's model hint. */
+  vendorPdfModels: { read: string; hard: string };
   /** #335 Inbox organization — the month's filing / court / promise rows,
    *  the company-wide sender rules and the own-domain override. */
   org: {

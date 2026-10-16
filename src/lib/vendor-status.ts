@@ -43,7 +43,7 @@ export const DEFAULT_CATALOG_OWNER_NAME = "Jena Tolksdorf";
 /** The two fields this module reads off a part. Callers pass CatalogPart[]
  *  (assignable); fixtures pass literals. The cast at the effectivePriceDate
  *  call keeps this independent of how the catalog plan typed its parameter. */
-export type DatedPart = { mfr?: string; pricedAt?: number };
+export type DatedPart = { mfr?: string; pricedAt?: number; priceDate?: number };
 type CatalogPartArg = Parameters<typeof effectivePriceDate>[0];
 type SettingsLike = Parameters<typeof effectivePriceDate>[1];
 

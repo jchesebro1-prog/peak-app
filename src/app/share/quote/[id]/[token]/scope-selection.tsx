@@ -26,6 +26,7 @@ export function ScopeSelection({ id, token, scopes, creditNote }: { id: string; 
   const [picked, setPicked] = useState<string[]>(() => defaultSelectedScopeIds(scopes));
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
+  const [po, setPo] = useState("");
   const [email, setEmail] = useState("");
   const [note, setNote] = useState("");
   const [trap, setTrap] = useState("");
@@ -59,7 +60,7 @@ export function ScopeSelection({ id, token, scopes, creditNote }: { id: string; 
     start(async () => {
       let r: ClientActionResult;
       try {
-        r = await submitScopeSelection(id, token, { name, title, email, message: note, sectionIds: picked, hp_confirm_x: trap });
+        r = await submitScopeSelection(id, token, { name, title, po, email, message: note, sectionIds: picked, hp_confirm_x: trap });
       } catch {
         setErr(CLIENT_ACTION_COPY.failed);
         return;
@@ -87,7 +88,9 @@ export function ScopeSelection({ id, token, scopes, creditNote }: { id: string; 
       </div>
       {creditNote && <div className="pkg-muted">{creditNote}</div>}
       <input aria-label={CLIENT_ACTION_COPY.name} placeholder={CLIENT_ACTION_COPY.name} required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} style={input} />
-      <input aria-label={CLIENT_ACTION_COPY.title} placeholder={CLIENT_ACTION_COPY.title} maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} style={input} />
+      {/* Jeff 2026-10-15 #15: accepting is signed — name and title required (the server re-checks); PO # optional. */}
+      <input aria-label={CLIENT_ACTION_COPY.title} placeholder={CLIENT_ACTION_COPY.title} required maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} style={input} />
+      <input aria-label={CLIENT_ACTION_COPY.poNumber} placeholder={CLIENT_ACTION_COPY.poNumber} maxLength={60} value={po} onChange={(e) => setPo(e.target.value)} style={input} />
       <input aria-label={CLIENT_ACTION_COPY.email} placeholder={CLIENT_ACTION_COPY.email} type="email" maxLength={200} value={email} onChange={(e) => setEmail(e.target.value)} style={input} />
       <textarea aria-label={CLIENT_ACTION_COPY.note} placeholder={CLIENT_ACTION_COPY.note} maxLength={4000} rows={3} value={note} onChange={(e) => setNote(e.target.value)} style={input} />
       <div aria-hidden="true" style={hidden}>

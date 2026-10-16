@@ -40,6 +40,7 @@ import {
   resolveCustomerForRow,
   type CustomerRef,
 } from "./link";
+import { retireNameForNewcomer } from "@/lib/mailbox-names";
 
 const YEAR = 365 * 86400000;
 
@@ -87,12 +88,26 @@ export type ImportResult = {
   warnings: string[];
 };
 
+/** Oct 15 #32 review: a catalog row dates its part only when the file is priced AND the row itself carries a price
+ *  (a blank List and Cost cell in a priced file confirmed nothing for that part). */
+function rowDatesPrice(ctx: CommitContext, v: Record<string, unknown>): boolean {
+  return !!ctx.priced && (num(v.list) > 0 || num(v.cost) > 0);
+}
+
 /** #133 — per-commit context handed to every writer; the catalog writer
  *  reads `effectiveAt` (the price list's effective date for `pricedAt`);
  *  the task_templates writer reads `me` for `createdBy` on a set it mints
  *  (#145 D169) — optional because scripts/regression callers (and the
  *  catalog path, which never creates a set) have no session to hand it. */
-export type CommitContext = { effectiveAt: number; me?: { name: string }; pipes?: Pipelines };
+export type CommitContext = {
+  effectiveAt: number;
+  me?: { name: string };
+  pipes?: Pipelines;
+  /** Oct 15 #32 — the file mapped a List or Cost column, so every catalog
+   *  row it writes is dated `priceDate = effectiveAt`. Absent/false = a
+   *  price-less file, which dates nothing. */
+  priced?: boolean;
+};
 
 /** The link-back tally a contacts/venues writer keeps for one commit.
  *  `createdIds` remembers the customers THIS file created, so a later row
@@ -1057,6 +1072,8 @@ const WRITERS: Record<string, Writer> = {
       cache.find((u) => (v.email && ci(u.email, v.email)) || ci(u.name, v.name)) || null,
     create: async (v, cache) => {
       const roles = rolesFrom(str(v.roles));
+      // #349 review — a new teammate inherits no older name-only mail carrying their name
+      await retireNameForNewcomer(str(v.name));
       await addUser({
         name: str(v.name),
         email: str(v.email),
@@ -1205,7 +1222,7 @@ const WRITERS: Record<string, Writer> = {
       // it preserves fields a price sheet doesn't carry (ports, trade, spec
       // text, datasheet attachments) when a SKU is re-imported. pricedAt
       // (#133) lands only when the price actually changes.
-      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt });
+      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt, ...(rowDatesPrice(ctx, v) ? { priceDate: ctx.effectiveAt } : {}) });
       if (ex) Object.assign(ex, patch);
       else cache.push({ id: sku, sku, ...patch });
     },
@@ -1214,7 +1231,7 @@ const WRITERS: Record<string, Writer> = {
     update: async (ex, v, _cache, ctx) => {
       const sku = str(ex.sku);
       const patch = ownedCatalogPatch(catalogPatch(v, ex, sku, { now: Date.now(), by: ctx.me?.name, specLib: needsSpecLib(v) ? await specLibFor(ctx) : undefined }), ex, v);
-      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt });
+      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt, ...(rowDatesPrice(ctx, v) ? { priceDate: ctx.effectiveAt } : {}) });
     },
     exportObjects: async () => {
       const [list, sections, articles] = await Promise.all([Catalog.list(), allSections(), allArticles()]);

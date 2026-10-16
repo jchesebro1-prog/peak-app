@@ -652,7 +652,8 @@ async function finalReviewEmailChecks(ok: Ok) {
   const act = readFileSync(join(ROOT, "src/app/(app)/assessments/[id]/report/actions.ts"), "utf8");
   ok(/emailAttachmentMode\(r\.pdf\.length, blobEnabled\(\)\)/.test(act) && /storeAssessmentPdf\(a\.id, r\.pdf/.test(act) && /assessmentPdfAttachment\(/.test(act) && act.indexOf("dataUrl") > act.indexOf('plan.mode === "reference"'), "final I2: Email report stores + attaches by reference, inline only in the no-Blob branch");
   const br = readFileSync(join(ROOT, "src/lib/gmail/bridge.ts"), "utf8");
-  ok(/isAssessmentPdfPath\(path\)/.test(br) && /assessmentPdfFitsThread\(path, t, a\?\.customerId \?\? null\) \? readAssessmentPdf\(path\)/.test(br), "final I2: the Gmail bridge reads an assessment PDF only when it fits the thread, from Blob");
+  const tpr = readFileSync(join(ROOT, "src/lib/thread-pdf-read.ts"), "utf8");
+  ok(/readThreadPdf\(path, t\)/.test(br) && /isAssessmentPdfPath\(path\)/.test(tpr) && /assessmentPdfFitsThread\(path, t, a\?\.customerId \?\? null\) \? readAssessmentPdf\(path\)/.test(tpr), "final I2: the Gmail bridge reads an assessment PDF only when it fits the thread, from Blob");
   const rt = readFileSync(join(ROOT, "src/app/api/assessments/[id]/report-pdf/route.ts"), "utf8");
   ok(/isAssessmentPdfFile\(file\)/.test(rt) && /streamAssessmentPdf\(`assessment-pdfs\/\$\{id\}\/\$\{file\}`\)/.test(rt), "final I2: the report route serves a stored copy by ?file=, guarded");
 }
@@ -2089,7 +2090,7 @@ async function task10Checks(ok: Ok) {
   const intake = Object.fromEntries(m.intake.map((r) => [r.label, r.value]));
   ok(intake["Facility"] === "Test District" && intake["Building and space"] === "Hall HS · Main stage" && intake["Visit date"] === "Oct 1, 2026" && intake["Accompanied by"] === "Chris", "report intake: facility, building and space, date, accompanying");
   ok(intake["Primary contact"] === "Pat Lee, Director · 555-0100 · pat@x.org" && intake["Hazard contact"] === "Sam Ortiz · 555-0199" && intake["Owner concerns"] === "Unable to inspect — Owner not present" && intake["Seats"] === "N/A" && intake["Use"] === "School, Weddings", "report intake: contacts, concerns, use and seats as printed text");
-  ok(m.standingLine === STANDING_LINE && m.notAccessible === "Grid — no key on site" && m.scopesRun[0].title === "Core" && m.scopesRun.some((s) => s.title === "Rigging" && s.depth === "Screening") && !m.scopesRun.some((s) => s.title === "Project and quote"), "report scope: the scopes run (with depth), the standing line, areas not accessible");
+  ok(m.standingLine === STANDING_LINE && m.notAccessible === "Grid — no key on site" && m.scopesRun[0].title === "Core" && m.scopesRun.some((s) => s.title === "Rigging" && s.depth === "Quick check") && !m.scopesRun.some((s) => s.title === "Project and quote"), "report scope: the scopes run (with depth), the standing line, areas not accessible");
   const ratingRow = (r: string) => m.summary.rows.find((x) => x.rating === r)!;
   ok(ratingRow("immediate").total === 1 && ratingRow("needs").counts.join() === "1,1,0,0,0" && ratingRow("good").counts.join() === "0,0,0,0,2" && m.summary.total === 5, "report summary: counts by rating × category over live findings only");
   ok(m.summary.immediate.length === 1 && m.summary.immediate[0].label === "TSTA-HAL-RIG-002" && m.summary.immediate[0].immediate?.lockout === "Tagged" && m.summary.immediate[0].immediate.notified.startsWith("Yes"), "report summary: Immediate items in full (hazard contact, lockout)");

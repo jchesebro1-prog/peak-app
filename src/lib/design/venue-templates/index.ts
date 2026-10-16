@@ -21,13 +21,21 @@ export type VenueTemplateEntry = {
   defaultForKinds: readonly BuiltInVenueKind[];
   /** …and of these venue-type keys (e.g. "gymstage"), which win over the kind default. */
   defaultForTypes: readonly string[];
+  /**
+   * Oct 15 #46: an earlier version of a redrawn template. It still draws — for Grid sheets stamped with it, designs
+   * that picked it and venue types whose Background it is — but pickers offer it only while it is the current value
+   * (pickerTemplates), and it is never a default.
+   */
+  retired?: boolean;
 };
 
 export const VENUE_TEMPLATES: readonly VenueTemplateEntry[] = [
   { id: "proscenium@1", label: "Auditorium / PAC", family: "proscenium", worksLike: ["proscenium"], defaultForKinds: ["proscenium"], defaultForTypes: [] },
   { id: "gym-stage@1", label: "Gym Stage", family: "proscenium", worksLike: ["proscenium"], defaultForKinds: [], defaultForTypes: ["gymstage"] },
   { id: "church-traditional@1", label: "Church — Traditional", family: "church", worksLike: ["church"], defaultForKinds: ["church"], defaultForTypes: [] },
-  { id: "church-contemporary@1", label: "Church — Contemporary", family: "church", worksLike: ["church"], defaultForKinds: [], defaultForTypes: [] },
+  { id: "church-contemporary@1", label: "Church — Contemporary (earlier drawing)", family: "church", worksLike: ["church"], defaultForKinds: [], defaultForTypes: [], retired: true },
+  // Oct 15 #46: the side rooms keep their width under a deep nave (church-contemporary.keys.ts).
+  { id: "church-contemporary@2", label: "Church — Contemporary", family: "church", worksLike: ["church"], defaultForKinds: [], defaultForTypes: [] },
   { id: "blackbox@1", label: "Blackbox", family: "blackbox", worksLike: ["blackbox", "flat"], defaultForKinds: ["blackbox", "flat"], defaultForTypes: [] },
   { id: "arena@1", label: "Arena", family: "arena", worksLike: ["arena"], defaultForKinds: ["arena"], defaultForTypes: [] },
 ];
@@ -85,9 +93,14 @@ export function planKindAllows(planKind: VenueKind, id: string): boolean {
   return !only || e.defaultForTypes.includes(only);
 }
 
-/** A type's default Background: a template made the default for its key, else for its kind, else the kind's first; null = none. */
+/** Oct 15 #46: the choices a Background picker lists — every live template, plus a retired one only while it is `current`. */
+export function pickerTemplates(list: readonly VenueTemplateEntry[], current: string | null | undefined): VenueTemplateEntry[] {
+  return list.filter((t) => !t.retired || t.id === current);
+}
+
+/** A type's default Background: a template made the default for its key, else for its kind, else the kind's first live one; null = none. */
 export function defaultBackground(kind: BuiltInVenueKind, typeKey?: string | null): string | null {
-  const list = templatesFor(kind);
+  const list = templatesFor(kind).filter((t) => !t.retired);
   return (
     (typeKey ? list.find((t) => t.defaultForTypes.includes(typeKey))?.id : undefined) ??
     list.find((t) => t.defaultForKinds.includes(kind))?.id ??
@@ -114,10 +127,10 @@ export function resolveBackground(types: readonly VenueType[], typeKey: string |
   const list = planKindTemplates(planKind);
   if (!list.length) return null;
   const valid = (id: unknown): id is string => typeof id === "string" && list.some((t) => t.id === id);
-  // A default outside a limited kind's list (the gym kind under a proscenium-type venue) falls to the list's first.
+  // A default outside a limited kind's list (the gym kind under a proscenium-type venue) falls to the list's first live one.
   const fallback = (key: string) => {
     const d = defaultBackground(wl, key);
-    return valid(d) ? d : list[0].id;
+    return valid(d) ? d : (list.find((t) => !t.retired) ?? list[0]).id;
   };
   const own = typeKey ? types.find((t) => t.key === typeKey) : undefined;
   // The design's own type decides when it works like this plan: its Background, else its own default.

@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { getVisit, updateVisitBooking } from "@/lib/stores/site-visits";
-import { activeUsers } from "@/lib/users";
+import { activeUsers, allUsers } from "@/lib/users";
+import { canChangeVisit, VISIT_EDIT_REFUSAL } from "@/lib/visit-edit-rights";
 import { dispatchVisitInvite, type RecipientResult } from "@/lib/visit-invite";
 import { validVisitSpan } from "@/lib/visit-plan/input";
 import { cleanAttendees } from "@/lib/visit-plan/people";
@@ -35,6 +36,8 @@ export async function updateVisitAction(
   // Only a scheduled visit is edited here; open/requested/claimed visits go
   // through the claim → schedule path, so this can't bypass the claim model.
   if (v.stage !== "scheduled") return { ok: false, error: "Only a scheduled visit can be edited" };
+  // Jeff 2026-10-15 #35 — only the lead (or an approver) edits or re-leads a scheduled visit.
+  if (!canChangeVisit(v, me, await allUsers())) return { ok: false, error: VISIT_EDIT_REFUSAL };
   const fresh = await updateVisitBooking(id, { startAt, endAt, assignedTo: lead, attendees: cleanAttendees(r.attendees, lead, roster) });
   if (!fresh) return { ok: false, error: "Visit not found" };
   // Spec 2026-10-09 triggers: re-sync the old and new day for everyone on

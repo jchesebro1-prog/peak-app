@@ -133,6 +133,7 @@ export default function LaborModal({
   onAdd,
   editing,
   onClose,
+  confirmClose,
 }: {
   secName: string;
   draft: LaborDraft;
@@ -154,6 +155,8 @@ export default function LaborModal({
   /** #269: set when reopened from a labor group's line — Update mode. */
   editing?: { group: string; handEdited: number; removed: number } | null;
   onClose: () => void;
+  /** #348 follow-up: ConfigModal asks this before the × / backdrop discards the form. */
+  confirmClose?: () => boolean;
 }) {
   const lr = computeLabor(draft, rate);
 
@@ -213,6 +216,7 @@ export default function LaborModal({
         )
       }
       onClose={onClose}
+      confirmClose={confirmClose}
       footerLeft={
         <div style={{ display: "flex", alignItems: "center", gap: 22 }}>
           <Stat label="Cost" value={fmt(lr.totalCost)} color="#8c919c" />
@@ -825,7 +829,7 @@ export default function LaborModal({
         </div>
       </div>
       <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: "#f7f8fa", color: "#5b616e", fontSize: 11.5 }}>
-        Package bonus (5% of system cost) is added to the system automatically.
+        A package bonus (a % of system cost, set in Estimating Rules) is added to the system automatically.
       </div>
       </div>
     </ConfigModal>

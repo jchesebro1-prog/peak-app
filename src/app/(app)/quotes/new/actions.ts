@@ -10,6 +10,7 @@ import { get as getThread, visibleTo } from "@/lib/stores/comms";
 import { linkThreadToNewQuote, threadQuoteLinkStatus } from "@/lib/gmail/linking";
 import { quoteEditPath, quoteServiceType, sameBuilder } from "./handoff";
 import { builderPath, isServiceType, type IntakeSubmit } from "./types";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 /** I1/I4 review — where the "This thread is linked to X" banner's "open it"
  *  points. Small and self-contained on purpose: the fuller LINK_KIND_COLOR/
@@ -68,7 +69,7 @@ export async function createQuoteIntakeAction(input: IntakeSubmit): Promise<Inta
   // request had no use for).
   const threadId = (input.threadId || "").trim();
   const thread = threadId ? await getThread(threadId) : null;
-  if (threadId && (!thread || !visibleTo(thread, me.name))) {
+  if (threadId && (!thread || !visibleTo(thread, await mailboxViewer(me)))) {
     return {
       ok: false,
       error: "That email thread couldn't be found — start the quote from the Quotes hub instead.",

@@ -104,6 +104,10 @@ export async function acceptPortalQuote(input: {
   purchaseMethod: string;
   notes: string;
   poDocumentId: string | null;
+  /** Jeff 2026-10-15 #15 — required (re-checked in acceptPortal). */
+  signerName?: string;
+  signerTitle?: string;
+  poNumber?: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const session = await portalSession().catch(() => null);
   const r = await acceptPortal(session, input);

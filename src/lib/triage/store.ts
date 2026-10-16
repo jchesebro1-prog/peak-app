@@ -1,5 +1,6 @@
 import { getDoc, insertDocIfAbsent, listDocsByField, upsertDoc } from "@/db/doc-store";
-import type { TriageMark, TriageSnapshot } from "./types";
+import type { SnapshotRow, TriageMark, TriageSnapshot } from "./types";
+import { dismissLapsed } from "./view";
 
 /** Persistence for the two triage collections. Server-only. */
 
@@ -25,11 +26,14 @@ export async function marksFor(userId: string): Promise<TriageMark[]> {
   return listDocsByField<TriageMark>("triage_marks", "userId", [userId]);
 }
 
-/** One mark per user per item; the latest wins — except a dismiss, which is permanent. */
-export async function setMark(m: Omit<TriageMark, "id">): Promise<TriageMark> {
+/** One mark per user per item; the latest wins — except a dismiss, which is
+ *  permanent until the item escalates past it (Jeff 2026-10-15 #37): then the
+ *  row is back on the list and any new mark (Done, Snooze, another Not mine)
+ *  on it replaces the lapsed dismiss. `row` is the listed row acted on. */
+export async function setMark(m: Omit<TriageMark, "id">, opts: { row?: Pick<SnapshotRow, "escalatedAt"> | null } = {}): Promise<TriageMark> {
   const id = markId(m.userId, m.key);
   const existing = await getDoc<TriageMark>("triage_marks", id);
-  if (existing?.kind === "dismiss") return existing;
+  if (existing?.kind === "dismiss" && !dismissLapsed(existing, opts.row)) return existing;
   const doc: TriageMark = { ...m, id };
   await upsertDoc<TriageMark>("triage_marks", doc);
   return doc;

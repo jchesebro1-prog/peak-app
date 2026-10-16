@@ -1,4 +1,4 @@
-import type { ChipKind, PhotoAlign, PhotoAttrs, PDMarkType } from "./types";
+import type { ChipKind, ImageAlign, PhotoAlign, PhotoAttrs, PDMarkType } from "./types";
 
 /**
  * Estimator Phase 5 — the package document schema, as data. The sanitizer
@@ -51,10 +51,13 @@ export const PHOTO_WIDTH_MIN = 25;
 export const PHOTO_WIDTH_MAX = 100;
 /** Today's narrative float: the photo sits 34 % wide on the right. */
 export const DEFAULT_PHOTO: PhotoAttrs = { show: true, align: "right", width: 34 };
-/** #312 — a new product image (productImage): the same float, right at 34 %. */
-export const DEFAULT_IMAGE: { align: PhotoAlign; width: number } = { align: "right", width: 34 };
+/** #312 — a new product image (productImage) at 34 %. Jeff 2026-10-15 #20: its align is "auto" — printed photos
+ *  alternate right, left, right in document order; an explicit Left / Right / Full wins. */
+export const DEFAULT_IMAGE: { align: ImageAlign; width: number } = { align: "auto", width: 34 };
+export const IMAGE_ALIGNS: readonly ImageAlign[] = ["auto", "left", "right", "full"];
 
 export const isChipKind = (v: unknown): v is ChipKind => typeof v === "string" && (CHIP_KINDS as readonly string[]).includes(v);
 export const isPhotoAlign = (v: unknown): v is PhotoAlign => typeof v === "string" && (PHOTO_ALIGNS as readonly string[]).includes(v);
+export const isImageAlign = (v: unknown): v is ImageAlign => typeof v === "string" && (IMAGE_ALIGNS as readonly string[]).includes(v);
 export const clampPhotoWidth = (v: unknown): number =>
   typeof v === "number" && Number.isFinite(v) ? Math.min(PHOTO_WIDTH_MAX, Math.max(PHOTO_WIDTH_MIN, Math.round(v))) : DEFAULT_PHOTO.width;

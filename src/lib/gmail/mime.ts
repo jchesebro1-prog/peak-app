@@ -1,4 +1,5 @@
 import type { GmailFullMessage, GmailHeader, GmailPart } from "./api";
+import { ATTACHMENTS_PER_MESSAGE_MAX } from "@/lib/attachment-limits";
 
 /**
  * Minimal RFC-2822 build/parse for the Gmail bridge. We send plain-text
@@ -173,7 +174,49 @@ export type ParsedInbound = {
   /** Inbox organization (#335) — an automatic message: Auto-Submitted set
    *  to anything but "no" (RFC 3834). */
   autoSubmitted: boolean;
+  /** #348 slice 4 — the message's named attachment parts, by reference
+   *  (no bytes): the bridge stores them as `gmailPartId` attachments. */
+  attachments: InboundAttachment[];
 };
+
+/** #348 slice 4 — one named attachment part of an inbound message. */
+export type InboundAttachment = { partId: string; name: string; mime: string; size: number };
+
+/** An embedded signature/logo image: a Content-ID plus an inline disposition. A PDF is never one — an inline PDF is real content. */
+function isInlineSignatureImage(p: GmailPart, name: string): boolean {
+  const mime = (p.mimeType || "").toLowerCase().split(";")[0].trim();
+  if (mime === "application/pdf" || /\.pdf$/i.test(name)) return false;
+  const hs = p.headers || [];
+  const get = (n: string) => hs.find((h) => h.name.toLowerCase() === n)?.value || "";
+  return !!get("content-id").trim() && /^\s*inline/i.test(get("content-disposition"));
+}
+
+/** #348 slice 4 — every part with a non-blank filename and a partId,
+ *  depth-first, at most `max`. Metadata only — the bytes stay in Gmail. */
+export function listAttachmentParts(part: GmailPart | undefined, max = ATTACHMENTS_PER_MESSAGE_MAX): InboundAttachment[] {
+  const out: InboundAttachment[] = [];
+  const walk = (p: GmailPart | undefined) => {
+    if (!p || out.length >= max) return;
+    const name = (p.filename || "").trim();
+    if (name && p.partId && !isInlineSignatureImage(p, name)) {
+      out.push({ partId: p.partId, name: name.slice(0, 200), mime: p.mimeType || "application/octet-stream", size: p.body?.size || 0 });
+    }
+    for (const c of p.parts || []) walk(c);
+  };
+  walk(part);
+  return out.slice(0, max);
+}
+
+/** #348 slice 4 — the part with this partId (depth-first), else null. */
+export function findPart(part: GmailPart | undefined, partId: string): GmailPart | null {
+  if (!part) return null;
+  if (part.partId === partId) return part;
+  for (const c of part.parts || []) {
+    const hit = findPart(c, partId);
+    if (hit) return hit;
+  }
+  return null;
+}
 
 /** Inbox organization (#335) — the two bulk/automatic signals off the headers. */
 export function bulkAutoFlags(hs: GmailHeader[] | undefined): { bulk: boolean; autoSubmitted: boolean } {
@@ -202,5 +245,6 @@ export function parseInbound(msg: GmailFullMessage): ParsedInbound {
     labelIds: msg.labelIds || [],
     siteVisitId: header(hs, "X-Peak-Site-Visit") || undefined,
     ...bulkAutoFlags(hs),
+    attachments: listAttachmentParts(msg.payload),
   };
 }

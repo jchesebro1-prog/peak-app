@@ -2,8 +2,10 @@
 /** `file` / `promise` (#335 Inbox organization): background Haiku passes —
  *  filing suggestions and the court / promise reading. `brief` (AI daily
  *  brief): the brief summary and quiet-quote nudges, Haiku. `ask` (Ask AI):
- *  the ⌘K research assistant, Haiku (Sonnet behind Try harder). */
-export type AssistFeature = "tasks" | "reply" | "estimate" | "file" | "promise" | "brief" | "ask";
+ *  the ⌘K research assistant, Haiku (Sonnet behind Try harder).
+ *  `vendorpdf` (#348 slice 5 Read the PDF): reads a vendor quote PDF into the
+ *  vendor quote form, Haiku (Sonnet behind Try harder), Claude only. */
+export type AssistFeature = "tasks" | "reply" | "estimate" | "file" | "promise" | "brief" | "ask" | "vendorpdf";
 export type AssistStep = "extract" | "draft";
 export type AssistEffort = "low" | "medium" | "high";
 export type AssistOutcome = "accepted" | "edited" | "discarded";
@@ -31,6 +33,8 @@ export type ProviderRequest = {
   maxRetries?: number;
   /** Claude: stream the answer (the estimate draft). */
   stream?: boolean;
+  /** #348 slice 5 — one PDF sent as a document block before the text (Claude only). */
+  document?: { mediaType: "application/pdf"; base64: string };
 };
 
 export type ProviderResult =

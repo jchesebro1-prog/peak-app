@@ -7,6 +7,8 @@ import { portalQuoteTypeLabel } from "@/lib/portal-my-quotes";
 import { portalQuoteDate } from "@/lib/portal-quote-names";
 import { portalOnlineEstimateState, portalQuotePdfPreparing, portalQuotePdfSource } from "@/lib/quote-pdf/portal-access";
 import { latestSentRevision, pdfView } from "@/lib/quote-pdf/state";
+import { PORTAL_BID_COPY } from "@/lib/parties/portal-bid";
+import { onlineHeaderLine } from "@/lib/quote-share/view";
 import { copyQuoteToCart } from "./actions";
 import { AcceptDialog } from "./accept-dialog";
 import { RefreshPricingButton } from "./refresh-pricing-button";
@@ -238,6 +240,47 @@ export function PortalQuoteRow({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+const SCOPE_ONLY_CHIP: ChipStyle = { label: PORTAL_BID_COPY.ownerChip, ink: "#5b616e", soft: "#f1f2f5", bd: "#e4e7ec" };
+
+/**
+ * #348 slice 6 Task 3 (Jeff 2026-10-15) — the owner's row for an estimate that has bidders: its portal is a bill of
+ * materials with no price on anything. Name, number, Rev and sent date, and a "Scope only" chip; the title opens the
+ * BOM view. No value, Accept, Refresh pricing, decline note, PDF link, Copy or Quote again — a sibling of
+ * PortalQuoteRow, so that row's money logic is never forked. The writes refuse server-side too (portal-quotes.ts).
+ */
+export function PortalBidOwnerRow({ q, cid, preview }: { q: Quote; cid: string; preview: boolean }) {
+  const online = portalOnlineEstimateState(q, cid, [], { hasBidders: true }).kind;
+  const href =
+    online === "ok" || online === "revising"
+      ? `/portal/quotes/${encodeURIComponent(q.id)}` + (preview ? `?preview=${encodeURIComponent(cid)}` : "")
+      : null;
+  const rev = latestSentRevision(q.revisions);
+  const name = (rev?.name || q.name || "").trim() || q.name;
+  return (
+    <div style={{ borderBottom: "1px solid #f5f6f8" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 12, alignItems: "center", padding: "13px 20px 12px" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {href ? (
+              <Link href={href} prefetch={false} style={{ color: "inherit", textDecoration: "none" }}>
+                {name}
+              </Link>
+            ) : (
+              name
+            )}
+          </div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>
+            {rev ? onlineHeaderLine(q, rev) : displayQuoteNumber(q)}
+          </div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <Chip c={SCOPE_ONLY_CHIP} />
+        </div>
+      </div>
     </div>
   );
 }

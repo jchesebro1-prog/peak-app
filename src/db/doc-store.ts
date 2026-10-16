@@ -83,7 +83,14 @@ export async function listDeletedDocs<T extends Doc = Doc>(coll: CollectionName)
  *  - `isFolded`: the text at path, trimmed and lower-cased, equals the value
  *    (pass the value already folded; "" never matches);
  *  - `filled: "text"`: a non-empty string; `filled: "array"`: a non-empty
- *    JSON array.
+ *    JSON array;
+ *  - `empty: "text"` (#349): the text at path, absent / null read as "", is
+ *    "" (the exact complement of `filled: "text"`);
+ *  - `in` (Jeff 2026-10-15 #26): the text at path is one of the values
+ *    (null/absent never matches; no values never matches);
+ *  - `idIn` (#351 review): the ROW id is one of the values (the id column
+ *    when the caller passes it — every doc-store reader does — else the
+ *    document's own `id`); no values never matches.
  * `all` of nothing is true; `any` of nothing is false.
  */
 export type DocCond =
@@ -92,7 +99,10 @@ export type DocCond =
   | { path: readonly string[]; is: string }
   | { path: readonly string[]; isNot: string }
   | { path: readonly string[]; isFolded: string }
-  | { path: readonly string[]; filled: "text" | "array" };
+  | { path: readonly string[]; filled: "text" | "array" }
+  | { path: readonly string[]; empty: "text" }
+  | { path: readonly string[]; in: readonly string[] }
+  | { idIn: readonly string[] };
 
 /** JS whitespace `trim()` strips, for the SQL btrim in `isFolded`. */
 const TRIM_CHARS = " \t\n\r\f\v\u00a0\ufeff";
@@ -108,16 +118,26 @@ function textAtPath(doc: SQLWrapper, path: readonly string[]): SQL {
   return sql`(${jsonAtPath(doc, path.slice(0, -1))} ->> ${path[path.length - 1]})`;
 }
 
-export function docCondSql(doc: SQLWrapper, c: DocCond): SQL {
-  if ("all" in c) return c.all.length ? sql`(${sql.join(c.all.map((x) => docCondSql(doc, x)), sql` AND `)})` : sql`TRUE`;
-  if ("any" in c) return c.any.length ? sql`(${sql.join(c.any.map((x) => docCondSql(doc, x)), sql` OR `)})` : sql`FALSE`;
+export function docCondSql(doc: SQLWrapper, c: DocCond, rowId?: SQLWrapper): SQL {
+  if ("all" in c) return c.all.length ? sql`(${sql.join(c.all.map((x) => docCondSql(doc, x, rowId)), sql` AND `)})` : sql`TRUE`;
+  if ("any" in c) return c.any.length ? sql`(${sql.join(c.any.map((x) => docCondSql(doc, x, rowId)), sql` OR `)})` : sql`FALSE`;
+  if ("idIn" in c) {
+    if (!c.idIn.length) return sql`FALSE`;
+    const target = rowId ? sql`${rowId}` : sql`(${doc} ->> 'id')`;
+    return sql`(${target} IN (${sql.join(c.idIn.map((v) => sql`${v}`), sql`, `)}))`;
+  }
   if ("is" in c) return sql`(${textAtPath(doc, c.path)} = ${c.is})`;
+  if ("in" in c) {
+    if (!c.in.length) return sql`FALSE`;
+    return sql`(${textAtPath(doc, c.path)} IN (${sql.join(c.in.map((v) => sql`${v}`), sql`, `)}))`;
+  }
   if ("isNot" in c) return sql`(coalesce(${textAtPath(doc, c.path)}, '') <> ${c.isNot})`;
   if ("isFolded" in c) {
     if (!c.isFolded) return sql`FALSE`;
     return sql`(lower(btrim(coalesce(${textAtPath(doc, c.path)}, ''), ${TRIM_CHARS})) = ${c.isFolded})`;
   }
   if (!c.path.length) throw new Error("DocCond: empty path");
+  if ("empty" in c) return sql`(coalesce(${textAtPath(doc, c.path)}, '') = '')`;
   if (c.filled === "array") {
     const j = jsonAtPath(doc, c.path);
     // CASE, not AND: Postgres doesn't promise AND short-circuits, and
@@ -159,7 +179,7 @@ export async function searchDocs<T extends Doc = Doc>(
   // Escape LIKE metacharacters so a user typing % or _ isn't a wildcard.
   const pattern = "%" + q.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
   const eqs = Object.entries(opts.fieldEquals ?? {}).map(([f, v]) => sql`${t.doc}->>${f} = ${v}`);
-  const extra = opts.where ? [docCondSql(t.doc, opts.where)] : [];
+  const extra = opts.where ? [docCondSql(t.doc, opts.where, t.id)] : [];
   const rows = await db
     .select()
     .from(t)
@@ -225,9 +245,16 @@ export async function listDocsFiltered<T extends Doc = Doc>(
   const order = opts.orderByNumericDesc
     ? desc(sql`(${t.doc}->>${opts.orderByNumericDesc})::numeric`)
     : asc(t.id);
+  // #353 review M2: the projection reads the document ONCE per row. `doc->'f'` per field detoasts (decompresses) a
+  // large document again for every field; `jsonb_to_record` over one `doc` reference pulls every wanted field in
+  // one call, each kept as jsonb (so a value's JSON type is untouched and JSON null still strips), giving the same
+  // object the per-field build did.
   const doc = opts.fields?.length
-    ? sql`jsonb_strip_nulls(jsonb_build_object(${sql.join(
-        opts.fields.map((f) => sql`${f}::text, ${t.doc}->${f}`),
+    ? sql`(SELECT jsonb_strip_nulls(jsonb_build_object(${sql.join(
+        opts.fields.map((f) => sql`${f}::text, x.${sql.identifier(f)}`),
+        sql`, `
+      )})) FROM jsonb_to_record(${t.doc}) AS x(${sql.join(
+        opts.fields.map((f) => sql`${sql.identifier(f)} jsonb`),
         sql`, `
       )}))`
     : t.doc;
@@ -292,12 +319,14 @@ export async function getDocsByIdAnyCase<T extends Doc = Doc>(
  * final fix wave). `field` is a code constant, passed as a bound parameter.
  * `nullFields` (#218) further keeps only rows where each of those top-level
  * fields is absent or JSON null (`doc->>f IS NULL`) — also code constants.
+ * `includeDeleted` (#348 slice 6) also returns soft-deleted rows — for a rule
+ * that must remember a removed row; every other caller keeps live rows only.
  */
 export async function listDocsByField<T extends Doc = Doc>(
   coll: CollectionName,
   field: string,
   values: readonly string[],
-  opts: { nullFields?: readonly string[] } = {}
+  opts: { nullFields?: readonly string[]; includeDeleted?: boolean } = {}
 ): Promise<T[]> {
   const unique = [...new Set(values)].filter(Boolean);
   if (!unique.length) return [];
@@ -310,7 +339,7 @@ export async function listDocsByField<T extends Doc = Doc>(
       .from(t)
       .where(
         and(
-          eq(t.deleted, false),
+          opts.includeDeleted ? undefined : eq(t.deleted, false),
           inArray(sql<string>`${t.doc}->>${field}`, unique.slice(i, i + DOC_BATCH_CHUNK)),
           ...(opts.nullFields ?? []).map((f) => sql`${t.doc}->>${f} IS NULL`)
         )
@@ -319,6 +348,19 @@ export async function listDocsByField<T extends Doc = Doc>(
     for (const r of rows) out.push({ ...(r.doc as T), id: r.id });
   }
   return out;
+}
+
+/**
+ * #349 — live rows matching one `DocCond` (the thread-ownership predicate),
+ * filtered in SQL, in id order; `limit` caps the rows. Every path segment and
+ * value is a bound parameter (docCondSql).
+ */
+export async function listDocsWhere<T extends Doc = Doc>(coll: CollectionName, where: DocCond, opts: { limit?: number } = {}): Promise<T[]> {
+  const db = await getDb();
+  const t = table(coll);
+  const q = db.select().from(t).where(and(eq(t.deleted, false), docCondSql(t.doc, where, t.id))).orderBy(asc(t.id));
+  const rows = opts.limit != null ? await q.limit(opts.limit) : await q;
+  return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
 }
 
 /**
@@ -392,6 +434,25 @@ export async function casDocKey(coll: CollectionName, id: string, key: string, e
     .where(and(eq(t.id, id), eq(t.deleted, false), sql`(${same})`))
     .returning({ id: t.id });
   return rows.length > 0;
+}
+
+/**
+ * #349 review — compare-and-set ONE top-level key on every live row matching
+ * `where`, in one UPDATE: writes `value` only where the key is still absent
+ * (or null) — the same key-level CAS as `casDocKey(…, undefined, value)`, for
+ * a set of rows (a rename handing over its name-only threads). Returns the ids
+ * written. Every path and value is a bound parameter (docCondSql).
+ */
+export async function casDocKeyWhere(coll: CollectionName, where: DocCond, key: string, value: unknown): Promise<string[]> {
+  const db = await getDb();
+  const t = table(coll);
+  const now = Date.now();
+  const rows = await db
+    .update(t)
+    .set({ doc: sql`(${t.doc} || jsonb_build_object(${key}::text, ${JSON.stringify(value)}::jsonb))`, rev: sql`${t.rev} + 1`, updatedAt: now, receivedAt: now })
+    .where(and(eq(t.deleted, false), docCondSql(t.doc, where, t.id), sql`((${t.doc}->${key}) IS NULL OR jsonb_typeof(${t.doc}->${key}) = 'null')`))
+    .returning({ id: t.id });
+  return rows.map((r) => r.id);
 }
 
 export async function getDoc<T extends Doc = Doc>(

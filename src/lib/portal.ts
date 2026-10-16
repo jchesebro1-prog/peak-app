@@ -42,6 +42,8 @@ export type PortalGrant = {
   expiresAt: number;
   revokedAt?: number | null;
   lastSeenAt?: number | null;
+  /** #351 review M2 — when the sign-in link was last emailed (cooldown). */
+  inviteSentAt?: number | null;
 };
 
 export type PortalSession = {
@@ -128,6 +130,21 @@ export async function touchGrantSeen(id: string, at = Date.now()): Promise<void>
     if (g.lastSeenAt && at - g.lastSeenAt < SEEN_REFRESH_MS) return null;
     return { [id]: { ...g, lastSeenAt: at } };
   });
+}
+
+/** #351 review M2 — claim one invite email for a grant (under the row lock):
+ *  false when one went out less than `cooldownMs` ago, or the grant is
+ *  gone / revoked. */
+export async function claimGrantInvite(id: string, at: number, cooldownMs: number): Promise<boolean> {
+  let claimed = false;
+  await updateBlob(BLOB_ID, (map) => {
+    const g = map[id] as (PortalGrant & { inviteSentAt?: number }) | undefined;
+    if (!g || typeof g !== "object" || g.revokedAt) return null;
+    if (typeof g.inviteSentAt === "number" && at - g.inviteSentAt < cooldownMs && at >= g.inviteSentAt) return null;
+    claimed = true;
+    return { [id]: { ...g, inviteSentAt: at } };
+  });
+  return claimed;
 }
 
 /** The raw magic-link token for a grant — decrypted from tokenEnc (or the

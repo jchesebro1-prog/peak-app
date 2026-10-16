@@ -2,8 +2,10 @@ import { DEFAULT_TRIM_FT, trackLengthFt, trackQuantities, type TrackConfig } fro
 import {
   TRACK_OPERATION_LABELS,
   TRACK_ROLE_NAMES,
+  hangerSpacingFor,
   isCordOperated,
   roleSku,
+  type TrackMounting,
   type TrackRole,
   type TrackSeries,
 } from "@/lib/track-series";
@@ -59,7 +61,7 @@ export const TRACK_SERIES_GONE = "This series no longer exists.";
 /** Where every role's part is mapped — named in every "no part" error. */
 export const TRACK_SERIES_HOME = "Estimating Rules → Track series";
 
-const MOUNT_ROLES: ReadonlySet<TrackRole> = new Set(["battenClamp", "ceilingHanger", "pipeClamp"]);
+const MOUNT_ROLES: ReadonlySet<TrackRole> = new Set(["battenClamp", "ceilingHanger", "pipeClamp", "centerPipeSupport"]);
 
 function partOf(parts: ReadonlyMap<string, TrackPart> | Record<string, TrackPart>, sku: string): TrackPart | undefined {
   if (!sku) return undefined;
@@ -118,7 +120,8 @@ export function trackBom(
 /** "Main drape track — ADC 280 bi-parting track, 40' run, curved R12'" (+ " (2 tracks)"). */
 export function trackLineDesc(config: TrackConfig, series: Pick<TrackSeries, "name">): string {
   const label = (config.label || "").trim() || "Track";
-  let desc = `${label} — ${series.name} ${TRACK_OPERATION_LABELS[config.operation].toLowerCase()} track, ${fmtFt(config.runFt)} run`;
+  const op = config.operation === "walkalong" && config.walkAlongBipart ? "walk-along bi-parting" : TRACK_OPERATION_LABELS[config.operation].toLowerCase();
+  let desc = `${label} — ${series.name} ${op} track, ${fmtFt(config.runFt)} run`;
   if (config.curved && config.radiusFt) desc += `, curved R${fmtFt(config.radiusFt)}`;
   if (config.qty > 1) desc += ` (${config.qty} tracks)`;
   return desc;
@@ -131,6 +134,7 @@ export function cleanTrackConfig(c: TrackConfig): TrackConfig {
   if (isCordOperated(c.operation) && c.trimFt != null) out.trimFt = c.trimFt;
   if (c.carrierSpacingIn != null) out.carrierSpacingIn = c.carrierSpacingIn;
   if (c.hangerSpacingFt != null) out.hangerSpacingFt = c.hangerSpacingFt;
+  if (c.operation === "walkalong" && c.walkAlongBipart === true) out.walkAlongBipart = true;
   const label = (c.label || "").trim();
   if (label) out.label = label;
   return out;
@@ -263,6 +267,7 @@ export function trackConfigFromDraft(d: TrackDraft): TrackConfig {
   if (carrier !== undefined && carrier > 0) c.carrierSpacingIn = carrier;
   const hanger = optionalNum(d.hangerSpacing);
   if (hanger !== undefined && hanger > 0) c.hangerSpacingFt = hanger;
+  if (d.operation === "walkalong" && d.walkAlongBipart === true) c.walkAlongBipart = true;
   const label = (d.label || "").trim();
   if (label) c.label = label;
   return c;
@@ -284,6 +289,7 @@ export function trackDraftFromConfig(c: TrackConfig): TrackDraft {
     label: c.label || "",
     carrierSpacing: str(c.carrierSpacingIn),
     hangerSpacing: str(c.hangerSpacingFt),
+    walkAlongBipart: c.operation === "walkalong" && c.walkAlongBipart === true,
   };
 }
 
@@ -308,12 +314,17 @@ export function freshTrackDraft(all: readonly TrackSeries[]): TrackDraft {
     label: "",
     carrierSpacing: "",
     hangerSpacing: "",
+    walkAlongBipart: false,
   };
 }
 
-/** The spacing a blank field falls back to — shown pre-filled in the collapsed Spacing row. */
-export function spacingDefaults(series: Pick<TrackSeries, "carrierSpacingIn" | "hangerSpacingFt"> | null | undefined): { carrier: string; hanger: string } {
-  return { carrier: series ? String(series.carrierSpacingIn) : "", hanger: series ? String(series.hangerSpacingFt) : "" };
+/** The spacing a blank field falls back to — shown pre-filled in the collapsed Spacing row (Oct 15 #45: the
+ *  series' ceiling or batten spacing for the chosen mounting, else its shared one). */
+export function spacingDefaults(
+  series: Pick<TrackSeries, "carrierSpacingIn" | "hangerSpacingFt" | "ceilingSpacingFt" | "battenSpacingFt"> | null | undefined,
+  mounting: TrackMounting = "batten"
+): { carrier: string; hanger: string } {
+  return { carrier: series ? String(series.carrierSpacingIn) : "", hanger: series ? String(hangerSpacingFor(series, mounting)) : "" };
 }
 
 /* ---------------- Add track from a curtain (spec §4) ---------------- */

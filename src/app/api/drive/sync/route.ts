@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cronAuthFailure } from "@/lib/triage/cron";
 import { ensureVenueGeoStatus } from "@/lib/address-verify/venue-geo";
 import { syncAllDrivers } from "@/lib/drive-sync/sync";
+import { runAssessmentReminders } from "@/lib/assessments/reminders-server";
 
 export const maxDuration = 60;
 
@@ -12,7 +13,10 @@ export const maxDuration = 60;
  * It has its own route because the Gmail route's 60 s budget is already
  * shared by triage and the photo sync.
  *
- * Two steps: stamp any venue still missing a verification status
+ * Jeff 2026-10-15 #10 rides first: the assessment reminders (30 days ahead, to
+ * the venue's account rep), idempotent by task id, inside a 10 s deadline.
+ *
+ * Then two steps: stamp any venue still missing a verification status
  * (`ensureVenueGeoStatus`, idempotent — a no-op once every row is stamped),
  * then re-sync every rep's drive events, least recently synced first, never
  * starting a rep past 50 s in (per-rep try/catch inside `syncAllDrivers`).
@@ -23,6 +27,13 @@ export async function GET(req: Request): Promise<NextResponse> {
   const fail = cronAuthFailure(req.headers.get("authorization"), process.env.CRON_SECRET);
   if (fail) return NextResponse.json({ error: fail.error }, { status: fail.status });
   const started = Date.now();
+  let assessmentReminders: Awaited<ReturnType<typeof runAssessmentReminders>> | { error: string };
+  try {
+    assessmentReminders = await runAssessmentReminders({ deadlineMs: started + 10_000 });
+  } catch (err) {
+    console.error("[assessment-reminders] cron rider failed", err);
+    assessmentReminders = { error: (err as Error).message };
+  }
   try {
     let venueGeo: Awaited<ReturnType<typeof ensureVenueGeoStatus>> | { error: string };
     try {
@@ -32,7 +43,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     }
     const budgetMs = Math.max(0, 50_000 - (Date.now() - started));
     const driveTime = await syncAllDrivers({ budgetMs, deadlineMs: started + 50_000 });
-    return NextResponse.json({ venueGeo, ...driveTime });
+    return NextResponse.json({ assessmentReminders, venueGeo, ...driveTime });
   } catch (err) {
     console.error("[drive-time] sync route failed", err);
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });

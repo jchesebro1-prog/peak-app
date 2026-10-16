@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { CODE_RE } from "@/lib/assessments/codes";
 import { isPlaceholderCompany } from "@/lib/inbox-org/placeholder";
 import { getDb } from "@/db";
@@ -111,6 +111,22 @@ export async function getCompanies(
     .from(companies)
     .where(and(inArray(companies.id, ids), eq(companies.deleted, false)));
   for (const r of rows) out.set(r.id, r);
+  return out;
+}
+
+/** Jeff 2026-10-15 #11 — live companies whose name matches one of `names` ignoring case, keyed by the lower-cased
+ *  name (on a tie the last by name order wins, as the Quotes hub's old in-memory map did). For a page of unlinked quotes. */
+export async function companiesByNames(names: readonly string[]): Promise<Map<string, CompanyRow>> {
+  const out = new Map<string, CompanyRow>();
+  const want = [...new Set(names.map((n) => (n || "").toLowerCase()).filter(Boolean))];
+  if (!want.length) return out;
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(companies)
+    .where(and(inArray(sql<string>`lower(${companies.name})`, want), eq(companies.deleted, false)));
+  rows.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  for (const r of rows) out.set((r.name || "").toLowerCase(), r);
   return out;
 }
 

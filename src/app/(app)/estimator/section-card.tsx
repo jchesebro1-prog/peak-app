@@ -18,6 +18,7 @@ import {
   systemSellWarning,
 } from "./pricing";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { isMovableLine } from "@/lib/estimate-line-move/move";
 import { CUSTOM_PART_MARGIN } from "./tier-reprice";
 import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
@@ -77,6 +78,12 @@ const PORTAL_FIELD: CSSProperties = {
   padding: "8px 9px",
   background: "#fff",
 };
+
+/** #357: the line-select checkbox (fixed size, no UA margin) and its gap — the
+ *  column header's "Item" pads by both so it stays over the descriptions. */
+const LINE_CHECK_SIZE = 13;
+const LINE_CHECK_GAP = 8;
+const LINE_CHECK_PAD = LINE_CHECK_SIZE + LINE_CHECK_GAP;
 
 /** One icon button inside a line item's actions cell (↑ / ↓ / ×). */
 const ACTION_BTN: CSSProperties = {
@@ -166,6 +173,14 @@ export type SectionCardProps = {
   onSetPrice: (id: number, v: string) => void;
   onSetExtSell: (id: number, v: string) => void;
   onMoveItem: (id: number, direction: -1 | 1) => void;
+  /** #357: the Build step's ticked lines (staff only; absent = no checkboxes). */
+  selectedLines?: ReadonlySet<number>;
+  /** #357: tick / untick a line for the Move bar. */
+  onToggleLineSelected?: (itemId: number) => void;
+  /** #357: ⇄ — open the Move bar's menu for just this line. */
+  onMoveLine?: (itemId: number) => void;
+  /** #357: an estimate move is running — the checkbox and ⇄ stay in place, disabled. */
+  lineSelectDisabled?: boolean;
   onRemoveItem: (id: number) => void;
   /** #293: ★ — mark / unmark this line as a key product (narrative block). */
   onToggleKeyProduct: (itemId: number) => void;
@@ -978,7 +993,8 @@ export default function SectionCard(p: SectionCardProps) {
                 alignItems: "center",
               }}
             >
-              <span>Item</span>
+              {/* #357: line up with the descriptions, which sit right of the select checkbox. */}
+              <span style={p.onToggleLineSelected ? { paddingLeft: LINE_CHECK_PAD } : undefined}>Item</span>
               <span style={{ textAlign: "center" }}>Qty</span>
               {isInternal && <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>Unit cost</span>}
               <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>Unit sell</span>
@@ -1011,7 +1027,8 @@ export default function SectionCard(p: SectionCardProps) {
                       background: "#f7f8fa",
                     }}
                   >
-                    <div style={{ minWidth: 0 }}>
+                    {/* #357: no checkbox here, but line up under "Item" with the rows that have one. */}
+                    <div style={{ minWidth: 0, ...(p.onToggleLineSelected ? { paddingLeft: LINE_CHECK_PAD } : null) }}>
                       <div style={{ lineHeight: 1.3 }}>
                         <span aria-hidden="true" style={{ marginRight: 6 }}>{"\u{1F512}"}</span>
                         {it.desc}
@@ -1101,7 +1118,21 @@ export default function SectionCard(p: SectionCardProps) {
                     borderTop: "1px solid #f5f6f8",
                   }}
                 >
-                  <div style={{ minWidth: 0 }}>
+                  <div style={{ minWidth: 0, display: "flex", gap: LINE_CHECK_GAP, alignItems: "flex-start" }}>
+                    {p.onToggleLineSelected && isMovableLine(it) && (
+                      <input
+                        type="checkbox"
+                        checked={!!p.selectedLines?.has(it.id)}
+                        disabled={p.lineSelectDisabled}
+                        onChange={() => p.onToggleLineSelected?.(it.id)}
+                        aria-label={`Select ${it.desc}`}
+                        title="Select to move"
+                        style={{ width: LINE_CHECK_SIZE, height: LINE_CHECK_SIZE, margin: "2px 0 0", flexShrink: 0, accentColor: "var(--accent)" }}
+                      />
+                    )}
+                    {/* #357: a line that can't move (the Rewards credit) keeps the checkbox's room, so its description lines up. */}
+                    {p.onToggleLineSelected && !isMovableLine(it) && <span aria-hidden="true" data-line-check-pad="" style={{ width: LINE_CHECK_SIZE, flexShrink: 0 }} />}
+                    <div style={{ minWidth: 0, flex: 1 }}>
                     <div
                       title={laborEditable ? lineDesc + " — click to edit this labor" : trackEditable ? lineDesc + " — click to edit this track" : curtainEditable ? lineDesc + " — click to edit this curtain" : customEditable ? lineDesc + " — click to edit this custom part" : lineDesc}
                       onClick={lineEditable ? openLine : undefined}
@@ -1344,6 +1375,7 @@ export default function SectionCard(p: SectionCardProps) {
                         {vqNotes && <span> · Notes: {vqNotes}</span>}
                       </div>
                     )}
+                    </div>
                   </div>
                   <div
                     style={{
@@ -1482,6 +1514,9 @@ export default function SectionCard(p: SectionCardProps) {
                       >
                         {kpStar === "on" ? "★" : "☆"}
                       </button>
+                    )}
+                    {p.onMoveLine && isMovableLine(it) && (
+                      <button type="button" className="est-action-btn" onClick={() => p.onMoveLine?.(it.id)} disabled={p.lineSelectDisabled} title="Move to another system…" aria-label={`Move ${it.desc} to another system`} style={p.lineSelectDisabled ? { ...ACTION_BTN, cursor: "default", opacity: 0.4 } : ACTION_BTN}>⇄</button>
                     )}
                     <button type="button" className="est-action-btn" onClick={() => p.onMoveItem(it.id, -1)} title="Move line up" style={ACTION_BTN}>↑</button>
                     <button type="button" className="est-action-btn" onClick={() => p.onMoveItem(it.id, 1)} title="Move line down" style={ACTION_BTN}>↓</button>

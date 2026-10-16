@@ -5,9 +5,7 @@
  * result into the #111 redirect. Server-only (reads/writes the catalog
  * store); never import it into a client component.
  */
-import { mfrKey } from "@/lib/catalog-books";
 import { checkManufacturer, checkSize } from "@/lib/catalog-import-guard";
-import { setPriceListEffective } from "@/lib/settings";
 import { list as listCatalog, mergeUpsert, type CatalogProductMetadata, type CatalogPart } from "@/lib/stores/catalog";
 import { importResolverFor } from "@/lib/stores/catalog-renames";
 import { looksLikeSpecId, resolveArticleRef, resolveSectionRef } from "@/lib/specs/articles";
@@ -22,7 +20,8 @@ export type CatalogImportInput = {
   text: string;
   /** Upload size in bytes (`file.size`, or `Buffer.byteLength` of the paste). */
   bytes: number;
-  /** Epoch ms — the price list's effective date; stamped as `pricedAt` on rows whose price changes. */
+  /** Epoch ms — the price list's effective date; stamped as `pricedAt` on rows whose price changes,
+   *  and (Oct 15 #32) as `priceDate` on every row of a priced file. */
   effectiveAt: number;
   /** Category for rows that leave theirs blank (the upload path passes "Prebuilt system"). */
   defaultCategory: string;
@@ -134,14 +133,17 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
         ...(artSection ? { specSectionId: artSection } : secId ? { specSectionId: secId } : {}),
         ...(artId ? { specArticleId: artId } : {}),
       },
-      { pricedAt: input.effectiveAt }
+      // Oct 15 #32: a priced file dates every line it carries (priceDate),
+      // changed price or not — and ONLY those lines.
+      // Oct 15 #32 review: …and only a row that itself carries a price (a blank List and Cost cell confirms nothing).
+      { pricedAt: input.effectiveAt, ...(priced && ((parsed.hasList && r.list > 0) || (parsed.hasCost && r.cost > 0)) ? { priceDate: input.effectiveAt } : {}) }
     );
     existing.add(sku);
   }
-  // D156: the file's effective date is the manufacturer's price-list date —
-  // it confirms the unchanged rows too, not just the ones whose price moved.
-  // But a file that carried no price column confirmed no price at all, so it
-  // must not re-date the book (final review item 3).
-  if (priced) await setPriceListEffective(mfrKey(mfr), input.effectiveAt);
+  // Oct 15 #32 (supersedes D156's book stamp): the file's effective date is
+  // stamped per part above, so a partial file never re-dates the lines it
+  // left out; the manufacturer-level date (settings.priceListEffective) is
+  // now set only by hand in the Catalog banner. A file with no price column
+  // confirmed no price and dates nothing (final review item 3).
   return { ok: true, imported: valid.length, mfr };
 }

@@ -10,6 +10,8 @@ import {
   type QuoteNumberFields,
 } from "@/lib/estimate-number";
 import { quotesByPartialNumber } from "@/lib/stores/estimate-numbers";
+import { getMany as getQuotesByIds } from "@/lib/stores/quotes";
+import type { Party } from "@/lib/parties/rules";
 import { allCompanies, getCompanies } from "@/lib/identity/companies";
 import { allContacts, displayName, emailsForContacts } from "@/lib/identity/contacts";
 import { normalizeRecording, recordingStatusChip, type RecordingRecord } from "@/lib/stores/recordings";
@@ -25,6 +27,7 @@ import { normalizeAssessment } from "@/lib/stores/assessments";
 import { normalizeFinding } from "@/lib/stores/findings";
 import { sitesForCompanies } from "@/lib/identity/sites";
 import { assessmentSearchResult, findingSearchResult, matchesAssessment, matchesFinding } from "@/lib/assessments/integration";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 /**
  * Global nav search (⌘K) — port of Nav.dc.html's search sources:
@@ -62,7 +65,7 @@ function matches(q: string, ...fields: Array<unknown>): boolean {
 }
 
 /** #223 — a doc as the estimate-number helpers read it. */
-type NumberedDoc = QuoteNumberFields & { id: string; name?: string | null; customer?: string | null };
+type NumberedDoc = QuoteNumberFields & { id: string; name?: string | null; customer?: string | null; bidders?: readonly string[] | null };
 const asNumbered = (d: Doc): NumberedDoc => d as unknown as NumberedDoc;
 
 /** #304: "Jupiter 4 · 80-0043" — the model first, the order # beside it. */
@@ -75,7 +78,8 @@ function staffLabelText(p: SearchPartLike): string {
  * The ⌘K search's groups for `rawQ` as `me` may see them (meetings through
  * canSeeMeeting, email threads through canSeeThread). The query is trimmed
  * and lower-cased; under 2 characters there are no groups. `me.id` scopes
- * meetings, `me.name` email threads (mailboxUser / assignedTo hold names).
+ * meetings and (#349) email threads — by identity, the name only for a legacy
+ * thread no other user's name matches (mailboxViewer).
  *
  * #341 — email-thread candidates are cut to the threads `me` may see — my
  * own mailbox's, ones assigned to me, and ones linked to an entity; never one
@@ -92,12 +96,12 @@ export async function globalSearch(
   me: { id: string; name?: string | null },
   opts: GlobalSearchOpts = {}
 ): Promise<Group[]> {
-  const meName = me.name || "";
   const q = (rawQ || "")
     .trim()
     .toLowerCase();
   if (q.length < 2) return [];
   const meId = me.id;
+  const viewer = await mailboxViewer({ id: me.id, name: me.name || "" });
 
   // Pull only a small candidate set per table from SQL (matches anywhere in
   // the doc), then apply the precise per-field filter below. Avoids
@@ -111,7 +115,7 @@ export async function globalSearch(
       searchDocs("inspections", q, CANDIDATES),
       searchDocs<CommThread & Doc>("comms", q, CANDIDATES, {
         ...(opts.emailOnly ? { fieldEquals: { channel: "email" } } : {}),
-        where: canSeeThreadCond(meName),
+        where: canSeeThreadCond(viewer),
       }),
       allCompanies(),
       allContacts(),
@@ -150,8 +154,35 @@ export async function globalSearch(
         ),
       ])
     : [[], []];
+  // #348 — a quote also answers to a bidder's company name: the companies already loaded for the Companies group
+  // that match the term (capped at 50) → their gc/ec party rows with bid state → those quotes, one batched read each.
+  // Quotes are visible to every signed-in staff member today, so nothing here widens access.
+  const bidderOf = new Map<string, string[]>();
+  const bidderSeen = new Map<string, number>(); // quote id → newest bidder-row updatedAt
+  {
+    const hit = companies.filter((c) => matches(q, c.name)).slice(0, 50);
+    if (hit.length) {
+      const nameById = new Map(hit.map((c) => [c.id, c.name || c.id]));
+      const rows = await listDocsByField<Party & Doc>("record_parties", "companyId", [...nameById.keys()]);
+      for (const p of rows) {
+        if (p.recordType !== "quote" || !p.bid || (p.role !== "gc" && p.role !== "ec")) continue;
+        const list = bidderOf.get(p.recordId) ?? [];
+        list.push(nameById.get(p.companyId) || p.companyId);
+        bidderOf.set(p.recordId, list);
+        bidderSeen.set(p.recordId, Math.max(bidderSeen.get(p.recordId) ?? 0, Number(p.updatedAt) || 0));
+      }
+    }
+  }
+  // At most CANDIDATES quotes through the bidder path, newest bidder rows first (a busy GC can be on hundreds).
+  const bidderIds = [...bidderSeen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, CANDIDATES).map(([id]) => id);
+  const bidderQuotes = bidderIds.length
+    ? [...(await getQuotesByIds(bidderIds)).values()].map((d) => ({ ...d, bidders: bidderOf.get(d.id) ?? [] }) as unknown as Doc)
+    : [];
+  const quoteDocs = [...partialQuotes, ...quotes, ...bidderQuotes].map((d) =>
+    bidderOf.has(d.id) ? ({ ...d, bidders: bidderOf.get(d.id) } as unknown as Doc) : d
+  );
   const seenQuote = new Set<string>();
-  const quoteHits = [...numberedQuotes, ...[...partialQuotes, ...quotes].filter((d) => quoteMatchesSearch(asNumbered(d), q))]
+  const quoteHits = [...numberedQuotes, ...quoteDocs.filter((d) => quoteMatchesSearch(asNumbered(d), q))]
     .filter((d) => {
       if (seenQuote.has(d.id)) return false;
       seenQuote.add(d.id);
@@ -166,7 +197,9 @@ export async function globalSearch(
     quoteHits.map((d) => ({
       id: d.id,
       title: String(d.name || d.id),
-      sub: `${displayQuoteNumber(asNumbered(d))} · ${String(d.customer || "")}`,
+      sub: `${displayQuoteNumber(asNumbered(d))} · ${String(d.customer || "")}${
+        bidderOf.has(d.id) && !matches(q, d.id, d.name, d.customer) ? ` · bidder ${bidderOf.get(d.id)![0]}` : ""
+      }`,
       href: `/quotes?id=${encodeURIComponent(d.id)}`,
       letter: "Q",
       color: "var(--accent)",
@@ -226,7 +259,7 @@ export async function globalSearch(
     "Email threads",
     comms
       // #341 — the SQL cut above, re-checked row by row (one rule, comms-visibility.ts)
-      .filter((d) => canSeeThread(d, meName))
+      .filter((d) => canSeeThread(d, viewer))
       .filter((d) => matches(q, d.subject, d.customer, d.contactName, d.contactEmail))
       .map((d) => ({
         id: d.id,

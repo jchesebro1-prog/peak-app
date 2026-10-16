@@ -27,7 +27,6 @@ import {
   undoArchiveFromOrganizeAction,
   undoFilingAction,
 } from "../organize-actions";
-import { bulkArchiveAction } from "../actions";
 import ChangeFiling from "./change-filing";
 import RuleOfferBanner from "./rule-offer";
 import CleanupButton from "./cleanup-button";
@@ -103,7 +102,8 @@ export default function OrganizeBox({
         const r = await archiveFromOrganizeAction(ids, tab);
         for (const id of ids) postChanged("thread", id);
         if (!r.archived) setNote({ text: "Couldn't archive — try again.", bad: true });
-        else setNote({ text: organizeArchiveNote(tab, r.archived), bad: false, undo: r.undo });
+        // M7 — the rows that archived keep their Undo; the rest are named
+        else setNote({ text: organizeArchiveNote(tab, r.archived) + (r.refused ? ` · ${r.refused} couldn't be archived` : "") + (r.more ? " · press again for the rest" : ""), bad: false, undo: r.undo });
         if (tab !== "filed" && selectedId && ids.includes(selectedId)) {
           const i = vm.rows.findIndex((x) => x.id === selectedId);
           const next = vm.rows.slice(i + 1).find((x) => !ids.includes(x.id));
@@ -171,17 +171,10 @@ export default function OrganizeBox({
       }
     });
 
-  const archiveShown = () =>
-    start(async () => {
-      setNote(null);
-      try {
-        await bulkArchiveAction(vm.noiseInInboxIds);
-        for (const id of vm.noiseInInboxIds) postChanged("thread", id);
-        setNote({ text: `Archived ${vm.noiseInInboxIds.length}`, bad: false });
-      } catch {
-        setNote({ text: "Something went wrong — try again.", bad: true });
-      }
-    });
+  /** Jeff 2026-10-15 #29 — Noise's Archive all shown is a row's own Archive
+   *  for every row shown (archived in Gmail too, the row `cleared` off the
+   *  tab), batched, with one Undo for the batch. */
+  const archiveShown = () => archiveRows(vm.noiseShownIds);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1, fontFamily: "var(--font-ui)" }}>
@@ -233,11 +226,11 @@ export default function OrganizeBox({
             <button
               type="button"
               style={BTN}
-              disabled={pending || vm.noiseInInboxIds.length === 0}
+              disabled={pending || vm.noiseShownIds.length === 0}
               onClick={archiveShown}
-              title={vm.noiseInInboxIds.length ? "Archive the noise still in your inbox" : "Everything shown is already out of your inbox"}
+              title={vm.noiseShownIds.length ? "Archive every row shown and clear it from Noise — Undo puts them back" : "Nothing to archive"}
             >
-              Archive all shown{vm.noiseInInboxIds.length ? ` (${vm.noiseInInboxIds.length})` : ""}
+              Archive all shown{vm.noiseShownIds.length ? ` (${vm.noiseShownIds.length})` : ""}
             </button>
           </div>
         )}

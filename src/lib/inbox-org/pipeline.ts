@@ -34,6 +34,7 @@ import { getDoc, listDocsByField } from "@/db/doc-store";
 import {
   archive,
   get as getThread,
+  resolveMailboxOwnerId,
   setOrg,
   setStatus,
   unarchive,
@@ -41,9 +42,8 @@ import {
   type CommThread,
   type ThreadStatus,
 } from "@/lib/stores/comms";
-import { activeUsers } from "@/lib/users";
+import { allUsers } from "@/lib/users";
 import { listConnections } from "@/lib/gmail/connections";
-import { userIdOfKey } from "@/lib/gmail/config";
 import { parseAddress } from "@/lib/gmail/mime";
 import { resolveForThread } from "@/lib/gmail/linking";
 import type { Resolution } from "@/lib/gmail/resolve";
@@ -57,7 +57,6 @@ import { assistGate, assistSettingsOf } from "@/lib/assist/config";
 import { getAssistEnv } from "@/lib/assist/key-store";
 import type { AssistSettings, Env } from "@/lib/assist/types";
 import { displayLeadNumber, displayQuoteNumber, leadNumberMatches } from "@/lib/estimate-number";
-import { sameName } from "@/lib/quote-approval-rules";
 import {
   appendFilingLogs,
   getOwnDomainOverride,
@@ -85,6 +84,10 @@ export type OrgUser = { id: string; name: string; emails: string[] };
 export type OrgContext = {
   loadedAt: number;
   users: OrgUser[];
+  /** #349 — every user (any status) as id + name: the roster a legacy
+   *  name-only thread's owner is resolved against (resolveMailboxOwnerId —
+   *  a name an archived namesake shares owns nothing). */
+  nameRoster: Array<{ id: string; name: string }>;
   /** Every Peak address: users' emails + googleEmails + connected mailboxes. */
   teamEmails: string[];
   ownDomains: string[];
@@ -98,6 +101,8 @@ export type OrgContext = {
 
 export type OrgContextInput = {
   users: Array<{ id: string; name: string; email?: string | null; googleEmail?: string | null }>;
+  /** #349 — every user, archived included (default: `users`) */
+  allUsers?: Array<{ id: string; name: string }>;
   connections?: Array<{ address?: string | null; userId?: string | null }>;
   ownDomainOverride?: string | null;
   senderRules?: SenderRule[];
@@ -106,7 +111,7 @@ export type OrgContextInput = {
   now?: number;
 };
 
-const NO_ASSIST: AssistSettings = { users: [], features: { tasks: false, reply: false, estimate: false, file: false, promise: false, brief: false, ask: false }, capUsd: 0 };
+const NO_ASSIST: AssistSettings = { users: [], features: { tasks: false, reply: false, estimate: false, file: false, promise: false, brief: false, ask: false, vendorpdf: false }, capUsd: 0 };
 
 /** Pure: the context from already-loaded rows. Own domains are Peak's own
  *  plus the admin override's, else plus the team's (see ownDomainsFrom). */
@@ -123,6 +128,7 @@ export function buildOrgContext(input: OrgContextInput): OrgContext {
   return {
     loadedAt: input.now ?? Date.now(),
     users,
+    nameRoster: (input.allUsers ?? input.users).map((u) => ({ id: u.id, name: u.name })),
     teamEmails,
     ownDomains,
     isInternal: makeInternalChecker(teamEmails, ownDomains),
@@ -134,15 +140,16 @@ export function buildOrgContext(input: OrgContextInput): OrgContext {
 }
 
 async function readOrgContext(): Promise<OrgContext> {
-  const [users, connections, ownDomainOverride, senderRules, settings, env] = await Promise.all([
-    activeUsers(),
+  const [everyone, connections, ownDomainOverride, senderRules, settings, env] = await Promise.all([
+    allUsers(),
     listConnections(),
     getOwnDomainOverride(),
     getSenderRules(),
     getSettings(),
     getAssistEnv(),
   ]);
-  return buildOrgContext({ users, connections, ownDomainOverride, senderRules, assist: assistSettingsOf(settings), env });
+  const users = everyone.filter((u) => u.status === "active");
+  return buildOrgContext({ users, allUsers: everyone, connections, ownDomainOverride, senderRules, assist: assistSettingsOf(settings), env });
 }
 
 export const ORG_CONTEXT_TTL_MS = 60_000;
@@ -223,10 +230,11 @@ export function roleOf(t: CommThread, m: CommMessage, owner: OrgUser | null, ctx
   return from && ctx.isInternal(from) ? "teammate" : "customer";
 }
 
+/** The thread's owner among the active team — #349: by identity (the
+ *  `mailboxOwnerId` stamp, else the Gmail account key, else a legacy name
+ *  only one user holds; resolveMailboxOwnerId), never a shared name. */
 export function ownerOf(t: CommThread, ctx: OrgContext): OrgUser | null {
-  const byName = t.mailboxUser ? ctx.users.find((u) => sameName(u.name, t.mailboxUser)) : undefined;
-  if (byName) return byName;
-  const uid = t.gmailAccountKey ? userIdOfKey(t.gmailAccountKey) : null;
+  const uid = resolveMailboxOwnerId(t, ctx.nameRoster);
   return (uid && ctx.users.find((u) => u.id === uid)) || null;
 }
 

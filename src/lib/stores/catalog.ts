@@ -7,6 +7,9 @@ import type { PortalVisibility } from "@/lib/portal-visibility";
 import type { RackPartFacts } from "@/lib/rack/types";
 import type { TagFields } from "@/lib/design/conduit-riser/tags";
 import { orderNumberOf } from "@/lib/catalog-rename/sku";
+import { sql, type SQL } from "drizzle-orm";
+import { getDb } from "@/db";
+import { DOC_TABLES } from "@/db/doc-tables";
 import { MAX_PARAGRAPH } from "@/app/(app)/estimator/narrative";
 
 export type CatalogProductMetadata = {
@@ -163,6 +166,12 @@ export type CatalogPart = {
    *  `settings.priceListEffective` date covers those (lib/catalog-books
    *  effectivePriceDate). */
   pricedAt?: number;
+  /** Epoch ms — the effective date of the last PRICED import file that
+   *  listed this part, changed price or not (Oct 15 #32). Written only by
+   *  the importers through `UpsertOpts.priceDate`; a part a partial file
+   *  never mentions keeps its old date. Absent on parts no priced file has
+   *  listed since #32 — `settings.priceListEffective` dates those. */
+  priceDate?: number;
 
   /* --- Specs module (#205). All additive JSONB, no migration. ---
    * These are the ONE canonical set (D258). productMetadata.specSection /
@@ -313,6 +322,92 @@ export async function getManyAnyCase(skus: readonly string[]): Promise<CatalogPa
   return dedupeBySku([...found, ...(await getDocsByIdAnyCase<CatalogPart>("catalog_parts", missed))]);
 }
 
+/** The match fields of a part — what Read the PDF's catalog chip needs, never the whole document. */
+export type CatalogMatchFields = Pick<CatalogPart, "sku" | "mfr" | "manufacturerModelNumber" | "manufacturerPartNumber" | "formerSkus">;
+/** Most loose keys one candidate read takes (a read holds at most 300 lines). */
+export const LOOSE_KEYS_MAX = 600;
+/** Parts read per lookup key — the cap is per key, so one common printed key can't crowd out another line's parts. */
+export const PARTS_PER_KEY = 25;
+export type LooseKeyLookup = { parts: CatalogMatchFields[]; truncated: Record<string, { total: number }> };
+
+function rowsOf<T>(result: unknown): T[] {
+  if (result && typeof result === "object" && "rows" in result) return (result as { rows: T[] }).rows;
+  return Array.isArray(result) ? (result as T[]) : [];
+}
+
+/**
+ * #348 slice 5 — the live parts whose model #, MFR P/N, SKU (or the order number after its first colon) or a
+ * former SKU (or its order number) has one of `looseKeys` as its loose key — NFKC, uppercase, letters and digits
+ * only, the same key `vendor-pdf/checks.ts` matches by. Filtered in SQL and projected to the match fields, so a
+ * read never loads the ~37k-part book.
+ *
+ * At most `perKey` parts per key, best tier first (model · MFR P/N · SKU · former SKU, then id): a key with more
+ * reports its full count in `truncated` (the caller reads a match on it as ambiguous — capTruncatedMatches). Under
+ * the cap every answering part is read, so matching over the result equals matching over the whole catalog.
+ * Parts come back once each, in id order.
+ */
+export async function partsByLooseKeys(looseKeys: readonly string[], opts: { perKey?: number } = {}): Promise<LooseKeyLookup> {
+  const keys = [...new Set(looseKeys.filter((k) => typeof k === "string" && k.length > 0))].slice(0, LOOSE_KEYS_MAX);
+  if (!keys.length) return { parts: [], truncated: {} };
+  const perKey = Math.max(1, Math.floor(opts.perKey ?? PARTS_PER_KEY));
+  const db = await getDb();
+  const t = DOC_TABLES.catalog_parts;
+  const inKeys = sql`(${sql.join(keys.map((k) => sql`${k}`), sql`, `)})`;
+  const keyArray = sql`ARRAY[${sql.join(keys.map((k) => sql`${k}`), sql`, `)}]::text[]`;
+  const keyRows = sql.join(keys.map((k) => sql`(${k}::text)`), sql`, `);
+  const loose = (e: SQL) => sql`regexp_replace(upper(normalize(${e}, NFKC)), '[^A-Z0-9]', '', 'g')`;
+  const afterColon = (e: SQL) => sql`substring(${e} from position(':' in ${e}) + 1)`;
+  const field = (name: string) => sql`coalesce(${t.doc}->>${name}, '')`;
+  const sku = field("sku");
+  const former = sql`(CASE WHEN jsonb_typeof(${t.doc}->'formerSkus') = 'array' THEN ${t.doc}->'formerSkus' ELSE '[]'::jsonb END)`;
+  const fv = sql`fs.v`;
+  const result = await db.execute(sql`
+    WITH c AS (
+      SELECT ${t.id} AS id, ${t.doc}->>'sku' AS sku, ${t.doc}->>'mfr' AS mfr,
+        ${t.doc}->>'manufacturerModelNumber' AS model, ${t.doc}->>'manufacturerPartNumber' AS pn, ${t.doc}->'formerSkus' AS former,
+        ${loose(field("manufacturerModelNumber"))} AS lm, ${loose(field("manufacturerPartNumber"))} AS lp,
+        ${loose(sku)} AS ls, ${loose(afterColon(sku))} AS lsa,
+        ARRAY(SELECT ${loose(fv)} FROM jsonb_array_elements_text(${former}) AS fs(v)
+              UNION SELECT ${loose(afterColon(fv))} FROM jsonb_array_elements_text(${former}) AS fs(v)) AS lf
+      FROM ${t} WHERE ${t.deleted} = false
+    ), h AS MATERIALIZED (
+      SELECT * FROM c WHERE lm IN ${inKeys} OR lp IN ${inKeys} OR ls IN ${inKeys} OR lsa IN ${inKeys} OR lf && ${keyArray}
+    ), m AS (
+      SELECT k.k, h.id, h.sku, h.mfr, h.model, h.pn, h.former,
+        CASE WHEN h.lm = k.k THEN 0 WHEN h.lp = k.k THEN 1 WHEN h.ls = k.k OR h.lsa = k.k THEN 2 ELSE 3 END AS rank
+      FROM h JOIN (VALUES ${keyRows}) AS k(k) ON (h.lm = k.k OR h.lp = k.k OR h.ls = k.k OR h.lsa = k.k OR k.k = ANY(h.lf))
+    ), r AS (
+      SELECT m.*, row_number() OVER (PARTITION BY m.k ORDER BY m.rank, m.id) AS rn, count(*) OVER (PARTITION BY m.k) AS total FROM m
+    )
+    SELECT k, id, sku, mfr, model, pn, former, total FROM r WHERE rn <= ${perKey} ORDER BY id, k
+  `);
+  type Row = { k: string; id: string; sku: string | null; mfr: string | null; model: string | null; pn: string | null; former: unknown; total: number | string | bigint };
+  const parts: CatalogMatchFields[] = [];
+  const seen = new Set<string>();
+  const truncated: Record<string, { total: number }> = {};
+  for (const r of rowsOf<Row>(result)) {
+    const total = Number(r.total);
+    if (total > perKey) truncated[r.k] = { total };
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    const out: CatalogMatchFields = { sku: r.sku || r.id };
+    if (typeof r.mfr === "string") out.mfr = r.mfr;
+    if (typeof r.model === "string") out.manufacturerModelNumber = r.model;
+    if (typeof r.pn === "string") out.manufacturerPartNumber = r.pn;
+    let former = r.former;
+    if (typeof former === "string") {
+      try {
+        former = JSON.parse(former); // a driver that hands jsonb back as text
+      } catch {
+        former = null;
+      }
+    }
+    if (Array.isArray(former)) out.formerSkus = former.filter((x): x is string => typeof x === "string");
+    parts.push(out);
+  }
+  return { parts, truncated };
+}
+
 /** Rows of a given category (port of window.catalogByCategory). */
 export async function byCategory(category: string): Promise<CatalogPart[]> {
   const all = await list();
@@ -337,7 +432,18 @@ export async function fabricPartsByCategory(): Promise<CatalogPart[]> {
 /** Options for a part write. `pricedAt` is the effective date to stamp WHEN
  *  the write changes `list` or `cost` (the importers pass the price list's
  *  effective date); it is ignored when the price is unchanged. Default: now. */
-export type UpsertOpts = { pricedAt?: number };
+export type UpsertOpts = {
+  pricedAt?: number;
+  /** Oct 15 #32 — a priced import file's effective date, stamped as
+   *  `priceDate` on this part whether or not its price moved. Omitted by
+   *  every non-import write, which keeps the stored value. */
+  priceDate?: number;
+};
+
+/** A finite positive epoch ms, else null. */
+function priceDateOf(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+}
 
 async function writePart(
   existing: CatalogPart | null,
@@ -354,6 +460,11 @@ async function writePart(
   else delete doc.deviceTypeKey;
   if (pricedAt != null) doc.pricedAt = pricedAt;
   else delete doc.pricedAt;
+  // Oct 15 #32: an import stamps its file date; any other write keeps the
+  // stored one (a full-replace doc that dropped it gets it back).
+  const priceDate = priceDateOf(opts.priceDate) ?? priceDateOf(part.priceDate) ?? priceDateOf(existing?.priceDate);
+  if (priceDate != null) doc.priceDate = priceDate;
+  else delete doc.priceDate;
   return upsertDoc<CatalogPart>("catalog_parts", doc);
 }
 
@@ -368,6 +479,9 @@ export async function insertIfAbsent(part: Omit<CatalogPart, "id"> & { id?: stri
   const pricedAt = nextPricedAt(null, part, opts.pricedAt ?? now);
   if (pricedAt != null) doc.pricedAt = pricedAt;
   else delete doc.pricedAt;
+  const priceDate = priceDateOf(opts.priceDate) ?? priceDateOf(part.priceDate);
+  if (priceDate != null) doc.priceDate = priceDate;
+  else delete doc.priceDate;
   return insertDocIfAbsent<CatalogPart>("catalog_parts", doc);
 }
 

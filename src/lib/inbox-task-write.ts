@@ -11,6 +11,7 @@ import {
   type ThreadTaskLinkCandidate,
   type ThreadTaskRequest,
 } from "@/lib/inbox-task";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 /**
  * #215 — the write half of "Create task" from an email. Kept out of the
@@ -93,7 +94,7 @@ export async function createTaskFromThread(
   // that touches a thread (setThreadSiteAction, setIdentityMessageAction,
   // quickAddVenueAction): missing, tombstoned, or another person's personal
   // mailbox are all "not there" from this user's side.
-  if (!thread || thread.deleted || !visibleTo(thread, me.name))
+  if (!thread || thread.deleted || !visibleTo(thread, await mailboxViewer(me)))
     return { ok: false, error: "That email thread no longer exists." };
   const [{ candidates }, roster] = await Promise.all([threadCandidates(thread), activeUsers()]);
   const built = buildThreadTaskInput({
@@ -104,5 +105,8 @@ export async function createTaskFromThread(
     me,
   });
   if (!built.ok) return built;
-  return { ok: true, task: await createTask(built.input, me) };
+  // #351 review — the owner (visibleTo above) shares this one email with a teammate assignee
+  const { ownerShareFor } = await import("@/lib/task-thread-share");
+  const threadShare = ownerShareFor(thread.id, me, built.input.assigneeUserId, Date.now());
+  return { ok: true, task: await createTask(built.input, me, { threadShare }) };
 }

@@ -3,7 +3,7 @@ import { ARENA_KEYS } from "./arena.keys";
 import blackboxRaw from "./blackbox.json";
 import { BLACKBOX_KEYS } from "./blackbox.keys";
 import churchContemporaryRaw from "./church-contemporary.json";
-import { CHURCH_CONTEMPORARY_KEYS } from "./church-contemporary.keys";
+import { CHURCH_CONTEMPORARY_KEYS, CHURCH_CONTEMPORARY_V2_KEYS } from "./church-contemporary.keys";
 import churchTraditionalRaw from "./church-traditional.json";
 import { CHURCH_TRADITIONAL_KEYS } from "./church-traditional.keys";
 import gymStageRaw from "./gym-stage.json";
@@ -43,6 +43,8 @@ const DATA: Record<string, TemplateData> = {
   "proscenium@1": { template: PROSCENIUM_TEMPLATE, keys: PROSCENIUM_KEYS, stretch: stretchProscenium },
   "church-traditional@1": memo(churchTraditionalRaw as unknown as VenueTemplate, CHURCH_TRADITIONAL_KEYS),
   "church-contemporary@1": memo(churchContemporaryRaw as unknown as VenueTemplate, CHURCH_CONTEMPORARY_KEYS),
+  // Oct 15 #46: the same drawing with the nave's front part rigid (see CHURCH_CONTEMPORARY_V2_KEYS).
+  "church-contemporary@2": memo(churchContemporaryRaw as unknown as VenueTemplate, CHURCH_CONTEMPORARY_V2_KEYS),
   "gym-stage@1": memo(gymStageRaw as unknown as VenueTemplate, GYM_STAGE_KEYS),
   "blackbox@1": memo(blackboxRaw as unknown as VenueTemplate, BLACKBOX_KEYS),
   "arena@1": memo(arenaRaw as unknown as VenueTemplate, ARENA_KEYS),

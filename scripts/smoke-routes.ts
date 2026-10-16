@@ -107,6 +107,7 @@ const ROUTES = [
   "/schedule?view=people", // #145 D172 — the By person portfolio view
   "/calendar",
   "/reports",
+  "/reports/sourcing", // Batch 6 #66 — most-quoted products / projected sourcing
   "/reviews",
   "/settings",
   "/settings?section=admin", // retired D99 Admin section → Team & Access (settings cleanup)
@@ -238,6 +239,10 @@ const ROUTES = [
   "/portal/quotes/Q-2041?preview=lakefront",
   "/portal/quotes/Q-2041?preview=lakefront&view=bom",
   "/portal/quotes/Q-0?preview=lakefront",
+  // #348 slice 6 Task 4 — a bidder company's previews (no seeded bids): Home compiles the Bids-card branch (no card
+  // without a bid) and the online page runs its bidder branch on another company's quote → the unavailable card.
+  "/portal?preview=northridge",
+  "/portal/quotes/Q-2041?preview=northridge",
   // #293 slice 3 — the signed share page: a well-formed token that passes the
   // shape check and reaches the DB read + HMAC verify (and fails it), and a
   // malformed one refused before any read — both the one 200 "isn't active" card.
@@ -252,6 +257,19 @@ const ROUTES = [
   // input redirects to /login rather than 4xx, so both must stay 3xx here.
   "/api/native/auth/start",
   "/api/native/auth/handoff",
+];
+
+/**
+ * Content checks: a 200 isn't enough where the page swallows a failure. The
+ * dashboard host turns a widget that throws into a "Couldn't load this
+ * widget." note and still answers 200, so /reports is checked for that note
+ * (any Reports preset widget throwing fails it) and for #348's Bids by GC/EC
+ * widget, which the preset renders.
+ */
+const CONTENT_CHECKS: Array<{ route: string; reject: string; expect: string; label: string }> = [
+  { route: "/reports?range=12m", reject: "Couldn't load this widget.", expect: "Bids by GC/EC", label: "Reports preset: every widget renders, incl. Bids by GC/EC" },
+  // Batch 6 #67 — the generated manifest lists the Branding-logo icons.
+  { route: "/manifest.webmanifest", reject: "Internal Server Error", expect: "/icons/app/192.png?v=", label: "Manifest: icons drawn from the Branding logo" },
 ];
 
 /**
@@ -578,7 +596,8 @@ async function checkRoute(
   route: string,
   jar: CookieJar | null,
   reject?: string,
-  expectNotFound?: boolean
+  expectNotFound?: boolean,
+  expect?: string
 ): Promise<{ route: string; ok: boolean; detail: string }> {
   try {
     const res = await fetch(base + route, {
@@ -600,6 +619,9 @@ async function checkRoute(
     );
     if (!problem && reject && body.includes(reject)) {
       problem = `body contains "${reject}" — the route answered 200 without rendering the record`;
+    }
+    if (!problem && expect && !body.includes(expect)) {
+      problem = `body lacks "${expect}"`;
     }
     if (problem) {
       return { route, ok: false, detail: `status ${res.status}, final ${finalUrl.pathname}${finalUrl.search} — ${problem}` };
@@ -710,6 +732,12 @@ async function main() {
     for (const d of DYNAMIC_ROUTES) {
       const r = await checkRoute(base, d.route, jar, d.reject, d.expectNotFound);
       report(r.ok, `${d.route} (${r.detail})`);
+    }
+
+    console.log("[smoke] --- content checks ---");
+    for (const c of CONTENT_CHECKS) {
+      const r = await checkRoute(base, c.route, jar, c.reject, false, c.expect);
+      report(r.ok, `${c.route} — ${c.label} (${r.ok ? r.detail : `${r.detail}; a Reports preset widget threw or Bids by GC/EC is missing`})`);
     }
 
     if (!auth.ok) {

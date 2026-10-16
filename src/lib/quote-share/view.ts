@@ -1,5 +1,5 @@
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
-import { latestSentRevision, pdfKindForQuoteType } from "@/lib/quote-pdf/state";
+import { latestSentRevision, pdfKindForQuoteType, sentRevNo } from "@/lib/quote-pdf/state";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import type { SentRevRow } from "./package-view";
 
@@ -27,6 +27,12 @@ export const ONLINE_COPY = {
   copyManual: "Copy this link:",
   revoked: "Link revoked — the old link no longer opens.",
 } as const;
+
+/** Batch 5 #63 (Jeff, 2026-10-15) — the customer-facing view toggle on the
+ *  online estimate (portal / share) and the client package page. The query
+ *  value stays `view=bom`; staff-side labels (Build package's Narrative /
+ *  BOM quote tabs, a system's Narrative / Itemized presentation) are unchanged. */
+export const ONLINE_VIEW_LABELS = { narrative: "Overview", bom: "Itemized" } as const;
 
 export type OnlineEstimateState =
   | { kind: "ok"; rev: QuoteRevision; closed: boolean }
@@ -72,10 +78,8 @@ export function sentDocumentStamp(
   rev: Pick<QuoteRevision, "rev" | "at" | "docFields" | "pdfSavedAt">
 ): { revNo: number; issuedAt: number } {
   const df = rev.docFields;
-  const revs = Array.isArray(q.revisions) ? q.revisions : [];
-  const idx = revs.findIndex((r) => r.rev === rev.rev);
-  const before = idx >= 0 ? idx : Math.max(0, rev.rev - 1);
-  const revNo = typeof df?.revNo === "number" && Number.isSafeInteger(df.revNo) && df.revNo >= 1 ? df.revNo : Math.max(1, before);
+  // The frozen stamp, else the PDF's pre-#13 counting rule (one rule: state.ts sentRevNo).
+  const revNo = sentRevNo(q.revisions, rev);
   const issuedAt =
     typeof df?.issuedAt === "number" && Number.isFinite(df.issuedAt) && df.issuedAt > 0
       ? df.issuedAt
@@ -92,6 +96,8 @@ function headerFields(df: QuoteRevision["docFields"]): Partial<Quote> {
   const out: Record<string, unknown> = { ...df };
   delete out.revNo;
   delete out.issuedAt;
+  // #348 2b-i: the frozen award is read by the document loader directly (the frozen `bid` does spread).
+  delete out.awardedPartyId;
   return out as Partial<Quote>;
 }
 
@@ -112,6 +118,8 @@ export function quoteAsOfRevision(q: Quote, rev: QuoteRevision): Quote {
     value: rev.value,
     updatedAt: issuedAt,
     revisions: revs.slice(0, revNo),
+    // Jeff 2026-10-15 #13: documentRevStamp prints exactly this revision's Rev.
+    docRevNo: revNo,
     shareLink: null,
   } as unknown as Quote;
 }
@@ -155,4 +163,6 @@ export type ShareLinkView = {
 
 /** `sentRevs` (#301 slice B) — every sent revision with its opens, for any
  *  signed-in user; it carries no path. */
-export type ShareLinkStatus = { state: ShareEligibility; canSend: boolean; link: ShareLinkView | null; sentRevs: SentRevRow[] };
+export type ShareLinkStatus = { state: ShareEligibility; canSend: boolean; link: ShareLinkView | null; sentRevs: SentRevRow[];
+  /** Batch 5 #58 — "Viewed Oct 6, 10:42 AM" (latest open, Chicago), "" when never opened. Staff only. */
+  viewed?: string };

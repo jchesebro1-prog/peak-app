@@ -13,6 +13,10 @@ import type { Pipelines } from "@/lib/pipelines";
 import { pushAssessment } from "@/lib/stores/assessments";
 import { pushFinding } from "@/lib/stores/findings";
 import { pushSurvey } from "@/lib/stores/surveys";
+import { sanitizePushedDoc } from "@/lib/sync/server-owned";
+import { mayPullFieldData } from "@/lib/sync/pull-collections";
+import { taskPushDecision, TASK_PUSH_REFUSED } from "@/lib/sync/task-push";
+import { getProject } from "@/lib/stores/projects";
 
 /** Abuse guards for the open sync endpoint. */
 const MAX_RECORDS_PER_COLLECTION = 1000;
@@ -36,6 +40,17 @@ export async function POST(req: Request) {
   if (!session?.user?.active) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  // #356 review — the pull's gate (Jeff 2026-10-15 #39): only field roles (`create`) write field data. The client
+  // parks every entry of a refused push as read-only (engine pushParksOn), so a 403 is never retried.
+  if (!mayPullFieldData(session.user.roles)) {
+    return NextResponse.json({ error: "read-only" }, { status: 403 });
+  }
+  const pusher = { id: String(session.user.id ?? ""), name: String(session.user.name ?? "") };
+  const projectSeen = new Map<string, boolean>();
+  const projectExists = async (id: string): Promise<boolean> => {
+    if (!projectSeen.has(id)) projectSeen.set(id, !!(await getProject(id)));
+    return projectSeen.get(id)!;
+  };
   const body = (await req.json()) as {
     collections?: Record<
       string,
@@ -110,7 +125,25 @@ export async function POST(req: Request) {
           .where(eq(t.id, rec.id))
           .limit(1);
         const now = Date.now();
-        let doc: Record<string, unknown> = { ...rec.doc, id: rec.id };
+        // #356 review — a task push may insert only a new Field Work task and update only a field task on its own
+        // project, or a task the pusher is assigned to / created (lib/sync/task-push)
+        let pushDoc: Record<string, unknown> = rec.doc;
+        if (coll === "tasks") {
+          // A stored row counts even when deleted: reviving one is an update, not a fresh insert.
+          const stored = existing.length ? ((existing[0].doc as Record<string, unknown>) ?? {}) : null;
+          const inc = rec.doc as Record<string, unknown>;
+          const known = new Map<string, boolean>();
+          for (const pid of [stored?.projectId, inc.projectId]) if (typeof pid === "string" && pid && !known.has(pid)) known.set(pid, await projectExists(pid));
+          const decision = taskPushDecision(rec.id, stored, inc, pusher, (x) => known.get(x) === true, { storedDeleted: !!existing[0]?.deleted });
+          if (!decision.ok) {
+            results[coll].push({ id: rec.id, status: "error", error: TASK_PUSH_REFUSED });
+            continue;
+          }
+          // a tick (re-review): the stored copy with only status / doneAt / updatedAt from the device
+          if (decision.doc) pushDoc = decision.doc;
+        }
+        // #351 review — server-owned fields (a task's share stamp and thread link) never come from a push
+        let doc: Record<string, unknown> = sanitizePushedDoc(coll, { ...pushDoc, id: rec.id }, existing.length ? { doc: existing[0].doc, deleted: !!existing[0].deleted } : null);
         if (coll === "projects") {
           pipes ||= await loadPipelines();
           doc = normalizeProject(doc as unknown as ProjectRecord, pipes) as unknown as Record<string, unknown>;

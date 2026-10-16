@@ -9,6 +9,7 @@ import {
   logNoteAction,
   reopenAction,
   replyAction,
+  forwardAction,
   setMessageLinkAction,
   setStatusAction,
   unarchiveAction,
@@ -24,6 +25,11 @@ import { completeThreadTaskAction } from "./task-actions";
 import ReaderOrgStrip from "./organize/reader-org";
 import { ORGANIZE_ARCHIVED_EVENT, organizeArchiveNote, organizeArchiveRemoves, shortTaskTitle } from "./organize/format";
 import { archiveFromOrganizeAction } from "./organize-actions";
+import { listThreadAttachmentsAction } from "./vendor-file-actions";
+import AttachPicker, { attachPayload, initialAttachState, type AttachState } from "./attach-picker";
+import { FORWARD_ATTS_LOADING } from "@/lib/inbox-forward-copy";
+import VendorQuoteDialog from "./vendor-quote-dialog";
+import { VENDOR_COPY } from "@/lib/vendor-quotes/rules";
 import { postChanged } from "@/lib/popout/channel";
 import { threadPopUrl } from "@/lib/popout/click";
 import PopoutButton from "@/components/popout/popout-button";
@@ -171,6 +177,7 @@ function ExpandedMessage({
   onLink,
   onOpenLinks,
   onTask,
+  onAddVendor,
   isEmail,
   readOnly = false,
 }: {
@@ -184,6 +191,8 @@ function ExpandedMessage({
   onOpenLinks: (opener: HTMLElement) => void;
   /** #215 — open the create-task dialog on this message */
   onTask: () => void;
+  /** #348 slice 4 — "Add as vendor quote…" on a PDF chip (a read, so it shows read-only too) */
+  onAddVendor: (a: { ref: string; name: string }) => void;
   /** #214 fix wave 1 — the old picker was gated to email threads only;
    *  "Link…" is hidden on a call/meeting thread for the same reason. */
   isEmail: boolean;
@@ -240,6 +249,11 @@ function ExpandedMessage({
               }}
             >
               Outbox · sending
+            </span>
+          )}
+          {m.sendError && (
+            <span role="alert" title="Gmail did not send this message" style={{ fontSize: 11, fontWeight: 600, color: "#9b3a2a" }}>
+              Not sent — {m.sendError}
             </span>
           )}
           <span style={{ fontSize: 11, color: "#aab0bb" }}>{m.time}</span>
@@ -341,8 +355,8 @@ function ExpandedMessage({
               }}
             >
               {(m.attachments || []).map((a, i) => (
+                <span key={`${a.name}-${i}`} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                 <a
-                  key={`${a.name}-${i}`}
                   href={a.href || undefined}
                   download={a.name}
                   title="Download attachment"
@@ -366,6 +380,26 @@ function ExpandedMessage({
                     {sizeLabel(a.size)}
                   </span>
                 </a>
+                {a.pdf && a.ref && (
+                  <button
+                    type="button"
+                    onClick={() => onAddVendor({ ref: a.ref, name: a.name })}
+                    aria-label={`Add ${a.name} as a vendor quote`}
+                    style={{
+                      border: 0,
+                      background: "none",
+                      padding: "2px 3px",
+                      cursor: "pointer",
+                      fontFamily: "var(--font-ui)",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: ACCENT_INK,
+                    }}
+                  >
+                    {VENDOR_COPY.addButton}
+                  </button>
+                )}
+                </span>
               ))}
             </div>
           )}
@@ -384,6 +418,7 @@ function Conversation({
   onLink,
   onOpenLinks,
   onTask,
+  onAddVendor,
   isEmail,
   readOnly = false,
 }: {
@@ -394,6 +429,8 @@ function Conversation({
   onOpenLinks: (messageId: string, opener: HTMLElement) => void;
   /** #215 — a message header's "Task…" */
   onTask: (messageId: string) => void;
+  /** #348 slice 4 — "Add as vendor quote…" on a PDF chip */
+  onAddVendor: (a: { ref: string; name: string }) => void;
   /** #214 fix wave 1 — hide "Link…" on a non-email thread */
   isEmail: boolean;
   /** #341 — a read-only thread: no Link… / Task… / Link message… */
@@ -430,6 +467,7 @@ function Conversation({
         onLink={(link) => onLink(m.id, link)}
         onOpenLinks={(el) => onOpenLinks(m.id, el)}
         onTask={() => onTask(m.id)}
+        onAddVendor={onAddVendor}
         isEmail={isEmail}
         readOnly={readOnly}
       />
@@ -485,6 +523,7 @@ function Conversation({
             onLink={(link) => onLink(newest.id, link)}
             onOpenLinks={(el) => onOpenLinks(newest.id, el)}
             onTask={() => onTask(newest.id)}
+            onAddVendor={onAddVendor}
             isEmail={isEmail}
             readOnly={readOnly}
           />
@@ -527,12 +566,15 @@ export default function ThreadReader({
 
   // email composer state (component is keyed by thread id — resets per thread)
   const [mode, setMode] = useState<Mode | null>(null);
+  // #356 review — Forward carries the forwarded message's own attachments unless unticked
+  const [fwdOriginals, setFwdOriginals] = useState(true);
   const [cTo, setCTo] = useState("");
   const [cCc, setCCc] = useState("");
   const [cSubject, setCSubject] = useState("");
   const [cBody, setCBody] = useState("");
   const [showCc, setShowCc] = useState(false);
-  const [attachNote, setAttachNote] = useState("");
+  // Batch 6 #64 — the reply composer's real Attach button (was a demo note)
+  const [att, setAtt] = useState<AttachState>(() => initialAttachState([]));
   // #127 — the composer body; on open the caret sits ABOVE the seeded
   // signature. I review — only when "To" is already filled (Reply/Reply
   // all, once vm.contactEmail resolved one): Forward opens with "To" blank
@@ -557,6 +599,7 @@ export default function ThreadReader({
   const linkGuardRef = useRef<(() => boolean) | null>(null);
   // #215 — the create-task dialog; messageId = the message it was opened from
   const [taskFor, setTaskFor] = useState<{ messageId: string | null } | null>(null);
+  const [vendorFor, setVendorFor] = useState<{ ref: string; name: string } | null>(null);
   // #334 Assist — Suggest tasks: busy while the model runs, then the dialog.
   const [assistBusy, setAssistBusy] = useState(false);
   /** #346 — an Organize Archive in flight (one press, one archive) */
@@ -617,6 +660,29 @@ export default function ThreadReader({
   const [logDir, setLogDir] = useState<"in" | "out" | null>(null);
   const [logBody, setLogBody] = useState("");
   const [loggingNote, setLoggingNote] = useState(false);
+
+  // #348 slice 4 — mail imported before attachments were recorded: list them
+  // from Gmail once per thread (the server lists up to 10 messages per call and
+  // stamps each), then refresh when any turned up. Owner only (never read-only).
+  const pendingAttsId = vm?.attachmentsPending ? vm.id : null;
+  // #356 re-review — the thread whose listing finished (a Forward waits for it)
+  const [attsListedFor, setAttsListedFor] = useState<string | null>(null);
+  const fwdAttsLoading = !!pendingAttsId && attsListedFor !== pendingAttsId;
+  useEffect(() => {
+    if (!pendingAttsId) return;
+    let live = true;
+    listThreadAttachmentsAction(pendingAttsId)
+      .then((r) => {
+        if (live && r.ok && r.changed) router.refresh();
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (live) setAttsListedFor(pendingAttsId);
+      });
+    return () => {
+      live = false;
+    };
+  }, [pendingAttsId, router]);
 
   if (!vm) {
     return (
@@ -680,15 +746,17 @@ export default function ThreadReader({
           "add"
         )
       );
-      setAttachNote("");
+      setAtt(initialAttachState([]));
+      setFwdOriginals(true);
     } else {
       setMode(m);
       setCTo(vm.contactEmail || "");
-      setCCc(m === "replyAll" ? vm.boxAddress : "");
+      // #356 re-review — Reply all Cc's the replied-to message's other recipients (never our own mailbox address)
+      setCCc(m === "replyAll" ? vm.replyAllCc : "");
       setShowCc(m === "replyAll");
       setCSubject(/^re:/i.test(vm.subject) ? vm.subject : "Re: " + vm.subject);
       setCBody(withSignature("", signature, "add"));
-      setAttachNote("");
+      setAtt(initialAttachState([]));
     }
   };
 
@@ -771,21 +839,54 @@ export default function ThreadReader({
     setCTo("");
     setCCc("");
     setShowCc(false);
-    setAttachNote("");
+    setAtt(initialAttachState([]));
   };
 
   const openTask = (messageId: string | null) => setTaskFor({ messageId });
 
   const doSend = async () => {
     const b = cBody.trim();
-    if (!b || sending) return;
+    if (!b || sending || att.uploading > 0) return;
     setSending(true);
     sendingRef.current = true;
     try {
       // I2 — the #127 flow ran (and gets the final say on the body,
       // signature kept or stripped) whenever this account has a signature
       // configured; the server skips its own legacy footer in that case.
-      const res = await replyAction(vm.id, b, !!signature);
+      // #356 review (Critical 1) — Forward is a NEW message to the typed To / Cc, never a reply to this thread's contact
+      if (mode === "forward") {
+        // #356 re-review — the original's Gmail attachments are still being listed: don't leave them off silently
+        if (fwdOriginals && fwdAttsLoading) {
+          setAtt((s) => ({ ...s, error: FORWARD_ATTS_LOADING }));
+          return;
+        }
+        const fwd = await forwardAction({
+          threadId: vm.id,
+          to: cTo,
+          cc: cCc,
+          subject: cSubject,
+          body: b,
+          signatureHandled: !!signature,
+          includeOriginal: fwdOriginals,
+          attachments: attachPayload(att),
+        });
+        if (!fwd.ok) {
+          setAtt((s) => ({ ...s, error: fwd.error }));
+          return;
+        }
+        postChanged("thread", fwd.id);
+        closeComposer();
+        router.refresh();
+        return;
+      }
+      // #356 review — Reply all sends its Cc
+      // #356 re-review — the Cc row's value goes out whenever the row is shown (Reply too, not only Reply all)
+      const res = await replyAction(vm.id, b, !!signature, attachPayload(att), showCc ? cCc : undefined);
+      // Batch 6 #64 — an attachment the server refused keeps the composer open with the reason
+      if (!res.ok && "error" in res && res.error) {
+        setAtt((s) => ({ ...s, error: res.error ?? null }));
+        return;
+      }
       if (res.ok && assistDraftRef.current) {
         // #334 — judged against what was actually sent, signature left out.
         const o = replyOutcome(assistDraftRef.current.draft, stripSignature(b, signature || ""));
@@ -838,6 +939,7 @@ export default function ThreadReader({
 
   // #127 — a signature alone (nothing typed above it) is not a real message
   const sendReady = stripSignature(cBody, signature).trim().length > 0 && cTo.trim().length > 0;
+  const fwdOriginalCount = (vm.messages[vm.messages.length - 1]?.attachments || []).length;
   const sigOn = hasSignature(cBody);
   const composerOpen = vm.isEmail && !!mode;
   const modeLabel = mode === "forward" ? "Forward" : mode === "replyAll" ? "Reply all" : "Reply";
@@ -1107,10 +1209,12 @@ export default function ThreadReader({
               setLinkFor({ messageId, fromHeader: true });
             }}
             onTask={(messageId) => openTask(messageId)}
+            onAddVendor={setVendorFor}
             isEmail={vm.isEmail}
             readOnly={vm.readOnly}
           />
         </div>
+        {vendorFor && <VendorQuoteDialog vm={vm} attachment={vendorFor} onClose={() => setVendorFor(null)} />}
 
         {/* actions + composer — #341: none on a read-only thread */}
         {!vm.readOnly && (
@@ -1453,11 +1557,15 @@ export default function ThreadReader({
                 </button>
               </div>
               <FieldRow label="To">
+                {/* #356 re-review — a reply always goes to the thread's contact (the server ignores a typed To), so
+                    To is read-only in Reply / Reply all; only Forward sends to a typed address. */}
                 <input
                   value={cTo}
                   onChange={(e) => setCTo(e.target.value)}
+                  readOnly={mode !== "forward"}
+                  title={mode !== "forward" ? "A reply goes to this conversation’s contact — use Forward to send it elsewhere" : undefined}
                   placeholder="name@email.com"
-                  style={fieldInputStyle("mono")}
+                  style={mode !== "forward" ? { ...fieldInputStyle("mono"), color: "#6b7079" } : fieldInputStyle("mono")}
                 />
               </FieldRow>
               {showCc && (
@@ -1550,26 +1658,6 @@ export default function ThreadReader({
                 >
                   {showCc ? "Hide Cc" : "+ Cc"}
                 </button>
-                <button
-                  onClick={() => setAttachNote(attachNote ? "" : "quote-Q-2041.pdf")}
-                  title="Attach (demo)"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 5,
-                    fontSize: 11.5,
-                    fontWeight: 600,
-                    color: "#5b616e",
-                    background: "transparent",
-                    border: "none",
-                    cursor: "pointer",
-                    padding: 4,
-                    fontFamily: "var(--font-ui)",
-                  }}
-                >
-                  <PaperclipIcon size={14} />
-                  Attach
-                </button>
                 {signature && (
                   <button
                     onClick={() => setCBody(withSignature(cBody, signature, sigOn ? "strip" : "add"))}
@@ -1607,7 +1695,7 @@ export default function ThreadReader({
                 </button>
                 <button
                   onClick={doSend}
-                  disabled={!sendReady || sending}
+                  disabled={!sendReady || sending || att.uploading > 0}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -1627,16 +1715,16 @@ export default function ThreadReader({
                   {sending ? "Sending…" : "Send"}
                 </button>
               </div>
-              {attachNote && (
-                <div
-                  style={{ padding: "0 12px 10px", fontSize: 11, color: "#9aa0ab", background: "#fafbfc" }}
-                >
-                  {attachNote}{" "}
-                  <span style={{ color: "#c0c5cd" }}>
-                    (attachments are illustrative in this preview)
-                  </span>
-                </div>
-              )}
+              <div style={{ background: "#fafbfc", paddingBottom: 10 }}>
+                {mode === "forward" && (fwdOriginalCount > 0 || !!vm.attachmentsPending) && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 20px 0", fontSize: 12, color: "#3a3f4a" }}>
+                    <input type="checkbox" checked={fwdOriginals} onChange={(e) => setFwdOriginals(e.target.checked)} />
+                    {fwdOriginalCount > 0 ? `Include the original’s ${fwdOriginalCount} attachment${fwdOriginalCount === 1 ? "" : "s"}` : "Include the original’s attachments"}
+                    {fwdAttsLoading && <span style={{ color: "#9aa0ab" }}> — still loading…</span>}
+                  </label>
+                )}
+                <AttachPicker state={att} setState={setAtt} threadId={vm.id} customerId="" />
+              </div>
             </div>
           )}
 

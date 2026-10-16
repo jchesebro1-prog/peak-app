@@ -1,3 +1,4 @@
+import peakLetterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
 import { notFound } from "next/navigation";
 import QuoteDocument, { QUOTE_PRINT_CSS } from "@/app/(app)/estimator/quote-document";
 import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
@@ -6,10 +7,13 @@ import { verifyPrintToken } from "@/lib/quote-pdf/token";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { getSettings } from "@/lib/settings";
+import { rewardsVisibleFor } from "@/lib/parties/addressee";
+import { documentAddressee } from "@/lib/parties/addressee-server";
 import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
 import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
 import { keyProductPhotoDataUris } from "@/lib/narrative/photos";
 import { normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
+import { quoteAsOfRevision } from "@/lib/quote-share/view";
 import { loadCutSheets } from "@/lib/curtain-cut-sheets/load";
 import { CUT_SHEET_APPEND_LOAD_MS, settleWithin } from "@/lib/curtain-cut-sheets/deadline";
 import { CutSheetPages, CLIENT_PRINT_CSS } from "@/components/cutsheets/cut-sheet-pages";
@@ -39,18 +43,36 @@ export default async function PrintQuotePage({
 }) {
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const t = Array.isArray(sp.t) ? sp.t[0] : sp.t;
-  if (!tokenOk(t, "quote", id)) notFound();
+  // #348 2b-i: a per-bidder variant (`?bidder=pty_…`) needs a token signed for `${id}~${bidder}`; a plain-id token never unlocks it.
+  // A bidder param that is present but malformed (or repeated) is a 404, never a fall-through to the plain document.
+  const rawBidder = sp.bidder;
+  if (rawBidder !== undefined && (typeof rawBidder !== "string" || rawBidder.length > 64 || !/^pty_[0-9a-f]{16}$/.test(rawBidder))) notFound();
+  const bidder = typeof rawBidder === "string" ? rawBidder : null;
+  // #348 2b-ii: `rev` renders the SENT revision a bidder received — only together with a valid bidder; a malformed, repeated or bidder-less rev is a 404.
+  const rawRev = sp.rev;
+  if (rawRev !== undefined && (!bidder || typeof rawRev !== "string" || !/^[1-9]\d{0,5}$/.test(rawRev))) notFound();
+  const rev = typeof rawRev === "string" ? Number(rawRev) : null;
+  if (!tokenOk(t, "quote", bidder ? (rev ? `${id}~${bidder}~r${rev}` : `${id}~${bidder}`) : id)) notFound();
   const q = await getQuote(id);
   if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") notFound();
-  const [cust, settings, perks, cutSheets] = await Promise.all([
-    getCustomer(q.customerId),
+  // A sent revision renders as it was sent; any other rev (missing, a draft/recall cut) is a 404.
+  const revision = rev ? (Array.isArray(q.revisions) ? q.revisions : []).find((r) => r.rev === rev && r.reason === "sent") : null;
+  if (rev && !revision) notFound();
+  const src = revision ? quoteAsOfRevision(q, revision) : q;
+  // A revision render shows what was sent: live edits since that revision (content changed after it was cut) would make the live-built cut sheets disagree, so they are skipped.
+  const cutSheetsOk = !revision || !(typeof q.contentChangedAt === "number" && q.contentChangedAt > revision.at);
+  const [addressee, cust, settings, perks, cutSheets] = await Promise.all([
+    // Strict: an explicit bidder that is no longer a live bidder on this quote (deleted since signing) is a 404, never the awarded default.
+    bidder ? documentAddressee(src, bidder, { strict: true }) : documentAddressee(q),
+    getCustomer(src.customerId),
     getSettings(),
     // #282 perks+points — the customer's purchase perks line (program on only).
-    purchasePerksForCompany(q.customerId),
+    purchasePerksForCompany(src.customerId),
     // #292 — Client-style cut sheets after the estimate, only when the quote asks for them. A failure or a slow load (8 s) drops them, never the PDF — and says so in the server log.
-    normalizePdfOptions(q.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
+    cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
   ]);
-  const doc = quoteDocumentDataFor(q, cust, settings);
+  if (bidder && !addressee) notFound();
+  const doc = quoteDocumentDataFor(src, cust, settings, addressee);
   // #293: key-product photos inlined as data URIs (this route has no session).
   // Never throws — a photo that can't be read just isn't printed.
   // Phase 5: plus the package document's photo-on product blocks.
@@ -58,12 +80,12 @@ export default async function PrintQuotePage({
   return (
     <main>
       <style>{QUOTE_PRINT_CSS}</style>
-      <QuoteDocument {...doc} keyProductPhotos={keyProductPhotos} rewardsLine={purchasePerksDocLine(perks)} />
+      <QuoteDocument {...doc} keyProductPhotos={keyProductPhotos} rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
       {/* #292 — its own page after the estimate; the Client resets (width/padding) ride along. */}
       {cutSheets?.ok && cutSheets.models.client.length > 0 && (
         <div style={{ breakBefore: "page" }}>
           <style>{CLIENT_PRINT_CSS}</style>
-          <CutSheetPages models={cutSheets.models.client} style="client" photos={cutSheets.photos} />
+          <CutSheetPages models={cutSheets.models.client} style="client" photos={cutSheets.photos} letterheadSrc={peakLetterhead.src} />
         </div>
       )}
     </main>

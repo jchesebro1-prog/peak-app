@@ -42,6 +42,34 @@ export const FIELD_COLLECTIONS = [
 ] as const;
 
 const PAUSED_KEY = "rss_sync_paused_v1";
+/** Jeff 2026-10-15 #39 — a pull refused for the user's role (403): stop pulling
+ *  for this page's life (no 60 s poll of refusals). A 401 (signed out) or a
+ *  5xx is left to the ordinary next try. Pure. */
+export function pullStopsOn(status: number): boolean {
+  return status === 403;
+}
+
+/** #351 review M4 — the mirror keys to drop when the server refuses this
+ *  user's pull: every pulled field-collection copy, except one whose local
+ *  capture is still waiting to push (the user's own unsent work). Pure. */
+export function mirrorKeysToClear(
+  mirror: ReadonlyArray<Pick<MirrorEntry, "key" | "collection">>,
+  outbox: ReadonlyArray<Pick<OutboxEntry, "collection" | "id" | "state">>,
+  fieldCollections: readonly string[]
+): string[] {
+  const pending = new Set(outbox.filter((e) => e.state === "pending").map((e) => outboxKey(e.collection, e.id)));
+  return mirror.filter((m) => fieldCollections.includes(m.collection) && !pending.has(m.key)).map((m) => m.key);
+}
+
+/** #356 review — a push refused for the user's role: every entry it carried is parked as read-only (state "error" —
+ *  never pushed again until re-saved). Re-review: only the push route's OWN refusal, a 403 whose body is
+ *  `{ error: "read-only" }`; any other 403 (a proxy, a WAF, an expired session page) is transient like any other
+ *  failure — the entries stay pending and retry. Pure. */
+export function pushParksOn(status: number, body?: unknown): boolean {
+  return status === 403 && !!body && typeof body === "object" && (body as { error?: unknown }).error === "read-only";
+}
+export const PUSH_READ_ONLY_MESSAGE = "Read-only — your role can't save field work. Ask an admin for access.";
+
 /** How long a `retry` reply waits before the next flush. */
 const RETRY_DELAY_MS = 30_000;
 
@@ -113,6 +141,8 @@ class SyncEngine {
   private started = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** #39 — the server refused this user's pull (not a field role). */
+  private pullForbidden = false;
 
   /** One delayed re-flush after a push replied `retry` (no tight loop: one timer at a time). */
   private scheduleRetry() {
@@ -308,6 +338,17 @@ class SyncEngine {
     await idb.put("mirror", entry);
   }
 
+  /** #351 review M4 — forget the pulled field data (keeps unsent local captures). */
+  private async clearFieldMirror(): Promise<void> {
+    try {
+      const [mirror, outbox] = await Promise.all([idb.getAll<MirrorEntry>("mirror"), idb.getAll<OutboxEntry>("outbox")]);
+      for (const key of mirrorKeysToClear(mirror, outbox, FIELD_COLLECTIONS)) await idb.delete("mirror", key);
+      await idb.setMeta(CURSORS_META, {});
+    } catch {
+      /* best effort — the next page load tries again */
+    }
+  }
+
   /* ---------- read fallback (offline) ---------- */
 
   async mirrorList<T extends { id: string }>(collection: string): Promise<T[]> {
@@ -365,6 +406,11 @@ class SyncEngine {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ collections }),
       });
+      if (res.status === 403 && pushParksOn(res.status, await res.clone().json().catch(() => null))) {
+        for (const e of outbox) await idb.put("outbox", { ...e, state: "error", error: PUSH_READ_ONLY_MESSAGE });
+        await this.refreshCounts();
+        return;
+      }
       if (!res.ok) throw new Error(`push ${res.status}`);
       const data = (await res.json()) as {
         results: Record<
@@ -433,9 +479,12 @@ class SyncEngine {
     }
   }
 
-  /** Pull office changes into the local mirror and advance cursors. */
-  async pull(): Promise<void> {
-    if (!this.connected()) return;
+  /** Pull office changes into the local mirror and advance cursors.
+   *  Batch 6 #65 — `force` pulls while "Work offline" is on (a deliberate
+   *  "Download today's jobs" while there is still a connection); it reports
+   *  whether the pull reached the server. */
+  async pull(opts: { force?: boolean } = {}): Promise<boolean> {
+    if (!(opts.force ? this.isOnline() : this.connected()) || this.pullForbidden) return false;
     try {
       const cursors =
         (await idb.getMeta<Record<string, number>>(CURSORS_META)) || {};
@@ -445,7 +494,16 @@ class SyncEngine {
         "&cursors=" +
         encodeURIComponent(JSON.stringify(cursors));
       const res = await fetch(url);
-      if (!res.ok) return;
+      if (pullStopsOn(res.status)) {
+        // #39 — not a field role: stop the poll; no retries
+        this.pullForbidden = true;
+        if (this.pollTimer) clearInterval(this.pollTimer);
+        this.pollTimer = null;
+        // M4 — and drop what an earlier pull left in this browser (cursors too, so a later grant starts clean)
+        await this.clearFieldMirror();
+        return false;
+      }
+      if (!res.ok) return false;
       const data = (await res.json()) as {
         changes: Record<
           string,
@@ -475,8 +533,10 @@ class SyncEngine {
       if (applied > 0 && typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent(DATA_PULLED_EVENT));
       }
+      return true;
     } catch {
       /* offline — ignore */
+      return false;
     }
   }
 

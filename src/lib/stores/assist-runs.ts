@@ -78,6 +78,33 @@ export async function setRunOutcome(
   return rows.length > 0;
 }
 
+/**
+ * #348 slice 5 — score a Read-the-PDF run at the estimate save that first keeps it. First write wins; no user check
+ * (a teammate may save) but feature-checked: only a `vendorpdf` run. Atomic, like setRunOutcome: one UPDATE whose
+ * WHERE clause (outcome still null, feature vendorpdf) is re-checked under the row lock. `detail` merges into the
+ * read-time detail (hard, mathFlags, dataHash… stay).
+ */
+export async function setVendorPdfOutcome(
+  id: string,
+  outcome: AssistOutcome,
+  detail: Record<string, unknown>,
+  now: number = Date.now()
+): Promise<boolean> {
+  const db = await getDb();
+  const t = DOC_TABLES[COLL];
+  const rows = await db
+    .update(t)
+    .set({
+      doc: sql`jsonb_set(jsonb_set(jsonb_set(${t.doc}, '{outcome}', to_jsonb(${outcome}::text)), '{outcomeAt}', to_jsonb(${now}::bigint)), '{outcomeDetail}', COALESCE(NULLIF(${t.doc}->'outcomeDetail', 'null'::jsonb), '{}'::jsonb) || ${JSON.stringify(detail ?? {})}::jsonb)`,
+      rev: sql`${t.rev} + 1`,
+      updatedAt: now,
+      receivedAt: now,
+    })
+    .where(and(eq(t.id, id), eq(t.deleted, false), sql`${t.doc}->>'feature' = 'vendorpdf'`, sql`${t.doc}->>'outcome' IS NULL`))
+    .returning({ id: t.id });
+  return rows.length > 0;
+}
+
 /** Confirmed card kinds kept on one Ask AI run. */
 export const ASK_CONFIRMED_MAX = 20;
 

@@ -4,12 +4,13 @@ import {
   insertWithPrefixedId,
   listDocs,
   listDocsByField,
+  listDocsFiltered,
   patchDoc,
   softDeleteDoc,
   updateBlob,
   upsertDoc,
 } from "@/db/doc-store";
-import { withQuoteLock } from "@/db";
+import { withQuoteLock, withSavepoint } from "@/db";
 import { createAssignment } from "@/lib/stores/assignments";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { yearAwareDate } from "@/lib/format";
@@ -211,6 +212,8 @@ export type ProjectRecord = {
   name: string;
   customer: string;
   customerId: string | null;
+  /** #348 — the awarded bidder's company (the GC/EC Peak contracts with); the customer stays the owner. */
+  billToCompanyId?: string | null;
   locationId: string | null;
   owner: string;
   /** Estimator bonuses — the 5% package-bonus cost carried from the won quote's
@@ -375,6 +378,16 @@ export async function getAllProjects(): Promise<ProjectRecord[]> {
   const list = await listDocs<ProjectRecord>("projects");
   const pipes = await loadPipelines();
   return list.map((p) => normalizeProject(p, pipes)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+/** Jeff 2026-10-15 #11 — who/when/where of every live project, as a SQL projection: the Companies directory's
+ *  owner + activity rollup and the Venues directory's last-activity bucket read this, never whole projects. */
+export async function listProjectActivityRows(): Promise<Array<{ id: string; customerId: string | null; locationId: string | null; owner: string; updatedAt: number }>> {
+  const rows = await listDocsFiltered<{ id: string; customerId?: string | null; locationId?: string | null; owner?: string; updatedAt?: number }>(
+    "projects",
+    { fields: ["customerId", "locationId", "owner", "updatedAt"] }
+  );
+  return rows.map((r) => ({ id: r.id, customerId: r.customerId ?? null, locationId: r.locationId ?? null, owner: r.owner || "", updatedAt: Number(r.updatedAt) || 0 }));
 }
 
 export async function getProject(id: string): Promise<ProjectRecord | null> {
@@ -778,6 +791,28 @@ export async function createProjectFromQuote(
     const q = await getDoc<QuoteLike>("quotes", quoteId);
     if (!q || q.status !== "won" || isProjectExcludedQuoteType(q.quoteType)) return null;
     const p = await createProject(fromQuote(q, await loadPipelines()));
+
+    // #348 — the estimate's companies carry to the project once. Never allowed to undo the win:
+    // this runs inside setStatus's transaction (see quote-spawn.ts), where a SQL error would abort the
+    // whole Postgres transaction past any JS catch — so each step runs in its OWN savepoint (rolled back
+    // alone; a copy failure doesn't drop Bill to, nor the reverse) and a failure is logged, not thrown.
+    try {
+      await withSavepoint(async () => {
+        const { copyParties } = await import("@/lib/stores/parties");
+        await copyParties({ type: "quote", id: quoteId }, { type: "project", id: p.id }, q.owner || DEFAULT_ACTOR);
+      });
+    } catch (e) {
+      console.error("projects.createProjectFromQuote: copying parties failed", quoteId, e);
+    }
+    try {
+      await withSavepoint(async () => {
+        const awardedId = (q.bid as { awardedPartyId?: string | null } | null | undefined)?.awardedPartyId;
+        const awarded = awardedId ? await getDoc<{ id: string; companyId?: string }>("record_parties", awardedId) : null;
+        if (awarded?.companyId) await patchDoc<ProjectRecord>("projects", p.id, (d) => { d.billToCompanyId = awarded.companyId!; });
+      });
+    } catch (e) {
+      console.error("projects.createProjectFromQuote: stamping Bill to failed", quoteId, e);
+    }
 
     // Item 16 (task-first): a sold install spawns the PM kickoff follow-up.
     // Unassigned until the project-roles model exists (D87: assign-by-role later).

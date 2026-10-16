@@ -8410,7 +8410,7 @@ import {
   const ed = DEFAULT_QUOTE_PIPELINES.find((p) => p.id === "estimate-design")!;
   const bs = DEFAULT_QUOTE_PIPELINES.find((p) => p.id === "bid-spec")!;
   ok(ed.stages.map((s) => s.id + ":" + s.tag).join(",") === "first-contact:draft,design:draft,presentation:sent,acceptance:won", "pipelines: estimate-design seed");
-  ok(bs.stages.map((s) => s.id + ":" + s.tag).join(",") === "collect-info:draft,create-bid:draft,bid-sent:sent,awarded:won", "pipelines: bid-spec seed");
+  ok(bs.stages.map((s) => s.id + ":" + s.tag).join(",") === "lead-qualify:draft,collect-info:draft,create-bid:draft,bid-sent:sent,awarded:won", "pipelines: bid-spec seed (Jeff 2026-10-15 #42: Lead / Qualify first)");
   ok(DEFAULT_PIPELINES.defaultQuotePipelineId === "estimate-design", "pipelines: default quote pipeline");
   for (const p of DEFAULT_PROJECT_PIPELINES) ok(validateProjectPipeline(p).length === 0, `pipelines: seed ${p.id} validates`);
   for (const p of DEFAULT_QUOTE_PIPELINES) ok(validateQuotePipeline(p).length === 0, `pipelines: seed ${p.id} validates`);
@@ -8625,7 +8625,7 @@ async function quotesPipelineAsyncChecks(): Promise<void> {
     const b = await Q.create({ name: "pl-bid", customer: "Test" });
     await Q.setQuoteStage(b.id, "design", "Test");
     const sw = await Q.setQuotePipeline(b.id, "bid-spec");
-    ok(sw?.pipelineId === "bid-spec" && sw.stage === "collect-info", "quotes: switching estimate-design → bid-spec lands on Collect Information");
+    ok(sw?.pipelineId === "bid-spec" && sw.stage === "lead-qualify", "quotes: switching estimate-design → bid-spec lands on its first stage, Lead / Qualify (Jeff 2026-10-15 #42)");
     ok(!(await Q.setQuotePipeline(b.id, "nope")), "quotes: switching to an unknown pipeline is refused");
     const bs = await Q.setStatus(b.id, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
     ok(bs?.stage === "bid-sent", "quotes: status snaps within the quote's own pipeline");
@@ -11350,13 +11350,23 @@ import { assistPureChecks, assistStoreChecks, assistProviderChecks, assistRunChe
 import { inboxOrgPureChecks, inboxOrgDbChecks, inboxOrgPipelineChecks, inboxOrgAiChecks, inboxOrgApplyChecks, inboxOrgUiChecks, inboxOrgCleanupChecks, inboxOrgEntryChecks, inboxOrgPlaceholderChecks, inboxOrgArchiveLabelChecks, inboxGmailLabelChecks } from "./test-inbox-org";
 import { popoutPureChecks } from "./test-popout";
 import { assessmentChecks, assessmentDbChecks } from "./test-assessments";
+import { partyChecks, partyDbChecks } from "./test-parties";
+import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, portalBidPureChecks, portalBidDbChecks, bidReportPureChecks, bidReportWidgetChecks, bidReportDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
+import { lineMoveChecks } from "./test-estimate-line-move";
+import { vendorChecks, vendorDbChecks, vendorPdfDbChecks, vendorPdfPureChecks, vendorPdfFillChecks } from "./test-vendors";
+import { oct15PureChecks, oct15DbChecks, discardConfirmChecks } from "./test-oct15-estimating";
 import { vaNotesChecks, vaNotesDbChecks } from "./test-va-notes";
+import { batch3PureChecks, batch3DbChecks } from "./test-oct15-batch3";
+import { batch4PureChecks, batch4DbChecks } from "./test-oct15-batch4";
+import { batch5PureChecks, batch5DbChecks } from "./test-batch5";
+import { batch6PureChecks, batch6DbChecks } from "./test-batch6";
 import { briefPureChecks, briefDraftDbChecks, briefBuildDbChecks, briefCardChecks, briefReminderChecks } from "./test-brief";
 import { suggestPureChecks, suggestStoreDbChecks, suggestRoutePins, suggestPipelineDbChecks, suggestPanelChecks, suggestPanelPins, suggestSaveDbChecks, suggestEntryChecks, suggestEntryDbChecks, suggestEntryPins } from "./test-suggest";
 import { askPureChecks, askSearchDbChecks, askToolsDbChecks, askRunnerChecks, askUiChecks } from "./test-ask";
-import { threadVisibilityPureChecks, threadVisibilityDbChecks, threadVisibilityPins } from "./test-thread-visibility";
+import { threadVisibilityPureChecks, threadVisibilityDbChecks, threadVisibilityPins, taskSharePureChecks, taskShareDbChecks, syncPullRoleChecks } from "./test-thread-visibility";
+import { portalInviteChecks } from "./test-portal-invite";
 import { settingsRaceHelperChecks, settingsRaceCallerChecks, settingsRaceBlobChecks, settingsRaceFollowupChecks } from "./test-settings-race";
-import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks } from "./test-morning-triage";
+import { triageFoundationChecks, triageFeedChecksA, triageFeedChecksB, triageCallChecks, triageMatchChecks, triageRankChecks, triageSnapshotChecks, triageCronChecks, triageActionChecks, triageHomeChecks, triageEscalationChecks } from "./test-morning-triage";
 import { autoCalFieldsChecks, autoCalDueChecks, autoCalUrgencyChecks, autoCalPlacementChecks, autoCalPinRuleChecks, autoCalPinStoreChecks, autoCalLoaderChecks, autoCalWriteChecks, autoCalCalendarViewChecks, autoCalDragPanelChecks, autoCalHomeChecks, autoCalFormChecks, autoCalNobodyDoneChecks } from "./test-auto-calendar";
 import { defaultDueAt } from "@/lib/task-plan/due";
 seeded()
@@ -11640,6 +11650,7 @@ seeded()
   .then(() => triageCronChecks(ok))
   .then(() => triageActionChecks(ok))
   .then(() => triageHomeChecks(ok))
+  .then(() => triageEscalationChecks(ok))
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .then(() => meetings323StoreChecks(ok))
@@ -11721,7 +11732,14 @@ seeded()
   .then(() => inboxGmailLabelChecks(ok))
   .then(() => popoutPureChecks(ok))
   .then(() => assessmentChecks(ok)).then(() => assessmentDbChecks(ok))
+  .then(() => partyChecks(ok)).then(() => partyDbChecks(ok))
+  .then(() => bidChecks(ok)).then(() => bidDbChecks(ok)).then(() => bidSendChecks(ok)).then(() => bidSendFakeChecks(ok)).then(() => bidSendDbChecks(ok)).then(() => bidFollowupChecks(ok)).then(() => bidFollowupDbChecks(ok)).then(() => vendorChecks(ok)).then(() => vendorDbChecks(ok)).then(() => vendorPdfDbChecks(ok)).then(() => vendorPdfPureChecks(ok)).then(() => vendorPdfFillChecks(ok)).then(() => portalBidPureChecks(ok)).then(() => portalBidDbChecks(ok)).then(() => bidReportPureChecks(ok)).then(() => bidReportWidgetChecks(ok)).then(() => bidReportDbChecks(ok))
+  .then(() => oct15PureChecks(ok)).then(() => discardConfirmChecks(ok)).then(() => oct15DbChecks(ok))
   .then(() => vaNotesChecks(ok)).then(() => vaNotesDbChecks(ok))
+  .then(() => batch3PureChecks(ok)).then(() => batch3DbChecks(ok))
+  .then(() => batch4PureChecks(ok)).then(() => batch4DbChecks(ok))
+  .then(() => batch5PureChecks(ok)).then(() => batch5DbChecks(ok))
+  .then(() => batch6PureChecks(ok)).then(() => batch6DbChecks(ok))
   .then(() => briefPureChecks(ok))
   .then(() => briefDraftDbChecks(ok))
   .then(() => briefBuildDbChecks(ok))
@@ -11744,11 +11762,16 @@ seeded()
   .then(() => askUiChecks(ok))
   .then(() => threadVisibilityPureChecks(ok))
   .then(() => threadVisibilityDbChecks(ok))
+  .then(() => taskSharePureChecks(ok))
+  .then(() => taskShareDbChecks(ok))
+  .then(() => syncPullRoleChecks(ok))
+  .then(() => portalInviteChecks(ok))
   .then(() => threadVisibilityPins(ok))
   .then(() => settingsRaceHelperChecks(ok))
   .then(() => settingsRaceCallerChecks(ok))
   .then(() => settingsRaceBlobChecks(ok))
   .then(() => settingsRaceFollowupChecks(ok))
+  .then(() => lineMoveChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -13806,7 +13829,7 @@ ok(
   // Estimate/Design's Acceptance/won.
   const mismatched = plan.quotes.find((q) => q.name.startsWith("MISMATCHED"))!;
   ok(
-    mismatched.pipelineId === "bid-spec" && mismatched.stage === "collect-info" && mismatched.status === "draft",
+    mismatched.pipelineId === "bid-spec" && mismatched.stage === "lead-qualify" && mismatched.status === "draft",
     "daylite: an Estimate/Design stage label on a BID SPEC row resolves to bid-spec's own first stage, not the other pipeline's mapping"
   );
   ok(plan.stats.unmappedOppStages["acceptance"] === 1, "daylite: the cross-pipeline label is counted in stats.unmappedOppStages");
@@ -21454,9 +21477,9 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
   ok(names214.every((n) => fn214(n).includes("await requireUser()")), "#214 actions: every popup action requires a signed-in user");
   ok(
     ["linkPopupDataAction", "fetchMessageCcAction", "fillContactBlanksAction"].every((n) => fn214(n).includes("loadThread(")) &&
-      acts214.includes("if (!t || !visibleTo(t, me.name)) return { ok: false, error: \"Thread not found.\" };") &&
-      fn214("setThreadContactsAction").includes("visibleTo(t, me.name)"),
-    "#214 actions: thread actions only reach threads in the user's own mailbox"
+      acts214.includes("const t = await ownThread(threadId, me);") && acts214.includes("if (!t) return { ok: false, error: \"Thread not found.\" };") &&
+      fn214("setThreadContactsAction").includes("await ownThread(threadId, me)"),
+    "#214 actions: thread actions only reach threads in the user's own mailbox (#349: ownThread, by identity)"
   );
   // #341 — thread visibility: the reader opens only what canOpenThread allows,
   // read-only off-mailbox; ⌘K's thread candidates follow canSeeThread in SQL.
@@ -21464,13 +21487,14 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
   const reader340 = read("src/app/(app)/inbox/thread-reader.tsx");
   const search340 = read("src/lib/search/global-search.ts");
   ok(
-    /const explicitThread = threadHit && canOpenThread\(threadHit, me\) \? threadHit : null;/.test(inbox340) &&
-      /if \(explicitThread && visibleTo\(explicitThread, me\) && !params\.box/.test(inbox340) &&
-      /draftThread && draftThread\.status === "draft" && visibleTo\(draftThread, me\)/.test(inbox340),
+    /const explicitThread = threadHit && canOpenThread\(threadHit, viewer\) \? threadHit : null;/.test(inbox340) &&
+      /if \(explicitThread && visibleTo\(explicitThread, viewer\) && !params\.box/.test(inbox340) &&
+      /draftThread && draftThread\.status === "draft" && visibleTo\(draftThread, viewer\)/.test(inbox340) &&
+      /const viewer = await mailboxViewer\(user\);/.test(inbox340),
     "#341 reader: ?thread= opens only a thread the viewer may see (canOpenThread), never switches to another person's box, and ?draft= opens only my own draft"
   );
   ok(
-    /const readOnly = !visibleTo\(sel, me\);/.test(inbox340) &&
+    /const readOnly = !visibleTo\(sel, viewer\);/.test(inbox340) &&
       /unread: readOnly \? false : !!sel\.unread,/.test(inbox340) &&
       /org: readOnly \? null : org,/.test(inbox340) &&
       /visit: readOnly \? null : visit,/.test(inbox340) &&
@@ -21484,8 +21508,9 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
     "#341 reader: a read-only thread shows the banner and no write control — no actions/composer footer (reply, status, archive, Assist, pre-draft), no link sidebar, no per-message Link… / Task… / link picker, no court strip, and no mark-read"
   );
   ok(
-    /where: canSeeThreadCond\(meName\),/.test(search340) &&
-      /\.filter\(\(d\) => canSeeThread\(d, meName\)\)/.test(search340) &&
+    /where: canSeeThreadCond\(viewer\),/.test(search340) &&
+      /\.filter\(\(d\) => canSeeThread\(d, viewer\)\)/.test(search340) &&
+      /const viewer = await mailboxViewer\(\{ id: me\.id, name: me\.name \|\| "" \}\);/.test(search340) &&
       !/threadsOf/.test(search340),
     "#341 ⌘K: email-thread candidates are cut to canSeeThread in SQL before the per-group limit, and re-checked per row"
   );
@@ -22695,13 +22720,12 @@ import { visibleRows as slVisibleRows, filterRows as slFilterRows, visibleGroupF
   ok(companyPage224.includes("ShortList"), "#224: the company record renders cards through ShortList");
 
   const directory224 = read224("src/app/(app)/companies/page.tsx");
-  ok(/sp\.n\b/.test(directory224) && directory224.includes('params.set("n"'), "#224: the Companies directory reads and writes the `?n=` page-size param");
-  ok(/showMoreHref|Show more/.test(directory224), "#224: the Companies directory has a Show-more control");
+  // Jeff 2026-10-15 #11 replaced #224's `?n=` "Show more" with 50-a-page Prev / Next (`?page=`, src/lib/list-paging.ts).
+  ok(/parsePageParam\(one\(sp\.page\)\)/.test(directory224) && directory224.includes("<ListPager"), "#224 → #11: the Companies directory pages with ?page= and the shared pager");
 
   const venues224 = read224("src/app/(app)/venues/page.tsx");
-  ok(/sp\.n\b/.test(venues224) && venues224.includes('p.set("n"'), "#224: the Venues directory reads and writes the `?n=` page-size param");
+  ok(/parsePageParam\(one\(sp\.page\)\)/.test(venues224) && venues224.includes("<ListPager"), "#224 → #11: the Venues directory pages with ?page= and the shared pager");
   ok(!/const PAGE = 200/.test(venues224), "#224: the old hard 200-row cap is gone from Venues");
-  ok(/Show more/.test(venues224), "#224: the Venues directory has a Show-more control");
 
   const shortListComp224 = read224("src/components/short-list.tsx");
   ok(shortListComp224.startsWith('"use client"'), "#224: ShortList is a client component");
@@ -23502,7 +23526,7 @@ import { parsePageSize as fr224ParsePageSize } from "@/lib/short-list";
     ["companies/page.tsx", companiesSrc224],
     ["venues/page.tsx", venuesSrc224],
   ] as const) {
-    ok(src.includes('from "@/lib/short-list"'), `#224: ${name} imports the shared short-list module`);
+    ok(src.includes('from "@/lib/list-paging"'), `#224 → #11: ${name} imports the shared list-paging module`);
     ok(!/function parsePageSize\(/.test(src), `#224: ${name} no longer defines its own local parsePageSize`);
   }
   const shortListLibSrc224 = read("src/lib/short-list.ts");
@@ -26212,7 +26236,7 @@ import { fixtureId as fixtureId222, registerFixture as registerFixture222 } from
   };
   const d = quoteDocumentDataFor(q as never, cust as never, { companyName: "Peak", logoDark: null });
   ok(d.custName === "Civic Center" && d.venueLabel === "Theater — Denver" && d.hasAttn && d.attnLine === "Pat Lee · TD", "#222 quoteDocumentDataFor: customer, venue and attn exactly as the Estimator preview shows them");
-  ok(d.revNum === 2 && d.revDateMs === 1234 && d.detail === "sectioned" && d.pdfPrices === false && d.pdfQty === true && d.paymentTerms === "Net 30", "#222 quoteDocumentDataFor: revision, date, saved pdfOptions, terms");
+  ok(d.revNum === 1 && d.revDateMs === 1234 && d.detail === "sectioned" && d.pdfPrices === false && d.pdfQty === true && d.paymentTerms === "Net 30", "#222 quoteDocumentDataFor: revision (never sent → Rev 1, Jeff 2026-10-15 #13), date, saved pdfOptions, terms");
   ok(d.t.grand === 0 && d.sections.length === 0 && d.ownerName === "Jeff Chesebro" && d.preparedByName === "Jeff Chesebro" && d.companyName === "Peak", "#222 quoteDocumentDataFor: totals from saved sections, owner, company");
   const bare = quoteDocumentDataFor({ id: "Q-10", name: "", customer: "Walk-in", customerId: null, owner: "", updatedAt: 5, createdAt: 5 } as never, null, { companyName: "", logoDark: null });
   ok(
@@ -28390,9 +28414,10 @@ function e223Src(rel: string): string {
 {
   const hub = e223Src("src/app/(app)/quotes/page.tsx");
   ok(!hub.includes("{q.id} · {owner}") && hub.includes("{displayQuoteNumber(q)} · {owner}"), "#223 quotes hub: rows show the estimate number, not the internal id");
-  ok(hub.includes("quoteMatchesSearch(q, searchTerm)") && hub.includes('name="q"'), "#223 quotes hub: a search box filters by number, old id, name and customer");
+  // Jeff 2026-10-15 #11: the search moved into the pure quotesHubView (over every quote, before the page is cut).
+  ok(hub.includes("quotesHubView(") && /q: searchTerm/.test(hub) && hub.includes('name="q"') && e223Src("src/lib/quotes-hub-view.ts").includes("bidders: bidderNames(q.id)"), "#223 quotes hub: a search box filters by number, old id, name and customer");
   ok(hub.includes("was {q.id}"), "#223 quotes hub: the selected panel shows 'was Q-…' in small type");
-  ok(hub.includes("quoteSearchRank(") && hub.includes("number={displayQuoteNumber(q)}"), "#223 quotes hub: exact-number hits list first; revision history names the number");
+  ok(e223Src("src/lib/quotes-hub-view.ts").includes("quoteSearchRank(") && hub.includes("number={displayQuoteNumber(q)}"), "#223 quotes hub: exact-number hits list first; revision history names the number");
   ok(e223Src("src/app/(app)/quotes/controls.tsx").includes("Priced snapshots of {number || id}"), "#223 quotes hub: the revision-history drawer names the quote by its number");
   const search = e223Src("src/lib/search/global-search.ts");
   ok(search.includes('listDocsByField("quotes", "estNo"') && search.includes('listDocsByField("leads", "estNo"') && search.includes("quoteMatchesSearch("), "#223 ⌘K: typed numbers are looked up by value; quotes also match by old id");
@@ -30609,7 +30634,7 @@ async function portal245AcceptAsyncChecks(): Promise<void> {
       source: "customer", customerId: CO, siteId: null, projectId: null, notes: "", uploadedBy: "Pat Buyer",
     });
     registerFixture("documents", ownDoc.id);
-    const okR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "PO 44812", poDocumentId: ownDoc.id }, NOW);
+    const okR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "PO 44812", poDocumentId: ownDoc.id, signerName: "Pat Buyer", signerTitle: "Director" }, NOW, { notify: async () => {} }); // #15: signed
     ok(okR.ok, "#245 accept: a firm in-date quote accepts with purchaseMethod po + notes + the customer's own PO file");
     const q1 = await d245GetQuote(genA.quoteId);
     ok(
@@ -30636,7 +30661,7 @@ async function portal245AcceptAsyncChecks(): Promise<void> {
     );
     const badNoteR = await d245DeclinePortalAcceptance(genA.quoteId, "Staff", "   ");
     ok(!badNoteR.ok, "#245 decline: an empty/whitespace-only note is refused");
-    const reAcceptR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "check", notes: "", poDocumentId: null }, NOW);
+    const reAcceptR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "check", notes: "", poDocumentId: null, signerName: "Pat Buyer", signerTitle: "Director" }, NOW, { notify: async () => {} });
     ok(reAcceptR.ok, "#245 accept: the customer can accept again after a staff decline (still 'sent', portalAcceptance was cleared)");
     ok((await d245GetQuote(genA.quoteId))?.portalDecline === null, "#245 accept: a fresh acceptance clears the prior portalDecline");
 
@@ -31235,7 +31260,7 @@ import { fixtureId as r242Fx, registerFixture as r242Reg } from "./test-fixtures
   const qs = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
   const setStatusBody = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("export async function setQuoteStage("));
   ok(
-    setStatusBody.includes("decideApprovalGate(status, q, ") && setStatusBody.includes("doc.review = autoStamp") && !setStatusBody.includes("resolveStatusGate(status, q.review"),
+    setStatusBody.includes("decideApprovalGate(status, gateQ, ") && setStatusBody.includes("doc.review = autoStamp") && !setStatusBody.includes("resolveStatusGate(status, q.review"),
     "#242: setStatus consults decideApprovalGate and writes the stamp inside the status patch"
   );
   const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
@@ -31699,9 +31724,9 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
   const qs = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
   const ss = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("export async function setQuoteStage("));
   ok(
-    /const needsLimits =\s*gated && !\(hasApproval\(q\.review\) && q\.review\?\.method !== "auto_limit" && approvalSnapshotMatches\(q\)\);/.test(ss) &&
+    /const needsLimits =\s*gated && !\(hasApproval\(gateQ\.review\) && gateQ\.review\?\.method !== "auto_limit" && approvalSnapshotMatches\(gateQ\)\);/.test(ss) &&
       ss.includes("const limits = needsLimits ? await loadReviewLimitContext() : NO_REVIEW_LIMITS;") &&
-      ss.includes("decideApprovalGate(status, q, limits, opts, Date.now(), by ?? null)"),
+      ss.includes("decideApprovalGate(status, gateQ, limits, opts, Date.now(), by ?? null)"), // #355 review I1: gateQ = the quote as the move will leave it
     "#242 final: setStatus loads review limits only for an unapproved or auto-approved quote, and passes the actor (#284: snapshot-aware)"
   );
 
@@ -32623,7 +32648,7 @@ async function portal248RefreshAsyncChecks(): Promise<void> {
     // Accept (unchanged — canAcceptPortal doesn't filter by source) then
     // staff decline, widened here to cover portal-service (#248 controller
     // decision: decline accepts either portal source).
-    const acc = await d245AcceptPortal(sess, { quoteId: gen.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, EXPIRED_NOW);
+    const acc = await d245AcceptPortal(sess, { quoteId: gen.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "Pat Buyer", signerTitle: "Director" }, EXPIRED_NOW, { notify: async () => {} });
     ok(acc.ok, "#248 accept: an accepted portal-service quote accepts exactly like portal-catalog (canAcceptPortal untouched)");
     const declineR = await d245DeclinePortalAcceptance(gen.quoteId, "Staff", "Need a PO");
     ok(declineR.ok, "#248 decline: staff decline, widened to portal-service, declines a real acceptance");
@@ -35676,7 +35701,7 @@ import { SEED_VENUE_TYPES as c255T3Seed } from "@/lib/venue-types";
   }
 
   ok(c255T3Ids.slice().sort().join("|") === c255T3Reg.map((t) => t.id).sort().join("|") && c255T3KeysById("church-traditional@1") === K, "#255 T3: every registered template has its drawing and key lines");
-  ok(c255T3For("church").map((t) => t.id).join("|") === "church-traditional@1|church-contemporary@1" && c255T3For("arena").length === 1 && c255T3Default("proscenium") === "proscenium@1" && c255T3Default("arena") === "arena@1", "#255 T3: templates are listed per works-like kind, each kind with its default (two since Contemporary, T8; Arena has one since T14)");
+  ok(c255T3For("church").map((t) => t.id).join("|") === "church-traditional@1|church-contemporary@1|church-contemporary@2" && c255T3For("arena").length === 1 && c255T3Default("proscenium") === "proscenium@1" && c255T3Default("arena") === "arena@1", "#255 T3: templates are listed per works-like kind, each kind with its default (two since Contemporary, T8, plus its retired @1 since Oct 15 #46; Arena has one since T14)");
   ok(c255T3Sanitize("church", "church", "proscenium@1") === "church-traditional@1" && c255T3Sanitize("church", "church", "church-traditional@1") === "church-traditional@1" && c255T3Sanitize("arena", "arena", "x") === "arena@1", "#255 T3: a stored background not made for the type's kind falls back to its default");
   const seed = c255T3Seed.map((t) => ({ ...t, background: c255T3Default(t.worksLike, t.key) }));
   ok(c255T3Resolve(seed, null, "church") === "church-traditional@1" && c255T3Resolve(seed, null, "proscenium") === "proscenium@1" && c255T3Resolve(seed, null, "arena") === "arena@1", "#255 T3: a design with no venue follows its kind's built-in type");
@@ -36080,7 +36105,7 @@ import { venueTypesFrom as c255T8Types } from "@/lib/venue-types";
         });
     ok(cornersAtEnds, `#255 T8 ${tag}: a region corner at a wall end sits on that wall's redrawn end`);
   }
-  ok(c255T8For("church").map((t) => t.id).join("|") === "church-traditional@1|church-contemporary@1", "#255 T8: church has two drawings to choose from");
+  ok(c255T8For("church").map((t) => t.id).join("|") === "church-traditional@1|church-contemporary@1|church-contemporary@2", "#255 T8: church has two drawings to choose from (Oct 15 #46: plus Contemporary @1, retired but still drawing)");
   const types = c255T8Types([{ key: "church", label: "Worship / Church", worksLike: "church", background: "church-contemporary@1" }]);
   ok(c255T8Effective("church", { venueType: "church" }, types) === "church-contemporary@1" && c255T8Effective("church", { venueType: "church", templateId: "church-traditional@1" }, types) === "church-traditional@1", "#255 T8: a type set to Contemporary draws Contemporary; a design can still pick Traditional");
   const hd = (o: Record<string, number | null>) => c255T8House({ width: 43, wing: 0, ...o }, "church-contemporary@1");
@@ -36448,7 +36473,7 @@ import { planTemplate as c255T10fPlanTpl, LABEL_CHAR_PX as c255T10fChar } from "
   // (a) field mapping: width = opening, wing = return wall → stage side wall, depth = stage depth; house fields = the gym floor.
   const gv = c255T10fVenues.find((v) => v.key === "gym")!;
   const sd = c255T10fSized(gv, "medium");
-  ok(gv.w === 40 && gv.d === 20 && gv.wing === 10 && sd.width === 40 && sd.depth === 20 && sd.wing === 10, "#255 T10 fix: Quick Design's Gym Stage defaults to the drawing — 40' opening, 10' wings, 20' stage");
+  ok(gv.w === 40 && gv.d === 30 && gv.wing === 10 && sd.width === 40 && sd.depth === 30 && sd.wing === 10, "#255 T10 fix: Quick Design's Gym Stage defaults to the drawing — 40' opening, 10' wings (Oct 15 #46: a 30' stage)");
   ok(c255T10fDims.gym.map((d) => d.label).join("|") === "Opening|Stage height|Stage depth|Ceiling height|Wings", "#255 T10 fix: the gym's dimension rows read Opening / Wings / Stage depth (plus heights)");
   const gDef = { ...base, venue: "gym", ...sd };
   const fDef = c255T10Fields(gDef, c255T10fEff("gym", gDef, c255T10Types(undefined)))!;
@@ -36478,7 +36503,7 @@ import { planTemplate as c255T10fPlanTpl, LABEL_CHAR_PX as c255T10fChar } from "
   ok(c255T10fPlanTpl(gDef, "proscenium@1") === "gym-stage@1" && c255T10Geom(gDef, "proscenium@1").template === "gym-stage@1" && c255T10fPlanTpl({ venue: "school" }, "gym-stage@1") === "gym-stage@1" && c255T10fPlanTpl({ venue: "school" }, "proscenium@1") === "proscenium@1", "#255 T10 fix: the plan of a gym forced onto proscenium@1 still draws the gym; a proscenium design may still pick the gym drawing");
   {
     const intake = readFileSync("src/app/(app)/design/grid/[id]/grid-intake.tsx", "utf8"), panel = readFileSync("src/components/design/scope-inputs-panel.tsx", "utf8");
-    ok([intake, panel].every((f) => f.includes("const choices = planKindTemplates(venue.kind);") && !f.includes("templatesFor(PLAN_KIND_WORKS_LIKE")), "#255 T10 fix: the Grid intake and Quick Design Background pickers list the plan kind's own templates");
+    ok([intake, panel].every((f) => /const choices = pickerTemplates\(planKindTemplates\(venue\.kind\), /.test(f) && !f.includes("templatesFor(PLAN_KIND_WORKS_LIKE")), "#255 T10 fix: the Grid intake and Quick Design Background pickers list the plan kind's own templates (Oct 15 #46: live ones, plus a retired one while picked)");
   }
 
   // (d) the gym floor is never shallower than the Booth is long on a side wall, so it fits on every wall.
@@ -38719,8 +38744,8 @@ import {
 } from "@/lib/stores/track-series";
 import { getBlob as t274GetBlob } from "@/db/doc-store";
 
-// #291 added optional roles (ceiling splice, pipe clamp, lap clamp, one-way dead end); #274's fixture keeps its original twelve.
-const T274_V1_ROLES = t274Roles.filter((r) => !["ceilingSplice", "pipeClamp", "lapClamp", "deadPulleyOneWay"].includes(r));
+// #291 added optional roles (ceiling splice, pipe clamp, lap clamp, one-way dead end) and Oct 15 #45 two more (walk-along end stop, center pipe support); #274's fixture keeps its original twelve.
+const T274_V1_ROLES = t274Roles.filter((r) => !["ceilingSplice", "pipeClamp", "lapClamp", "deadPulleyOneWay", "walkAlongEndStop", "centerPipeSupport"].includes(r));
 const T274_ALL_PARTS: Partial<Record<T274Role, { sku: string }>> = Object.fromEntries(T274_V1_ROLES.map((r) => [r, { sku: `P-${r}` }]));
 function t274Series(over: Partial<T274Series> = {}): T274Series {
   return {
@@ -39076,7 +39101,7 @@ import type { SpecItem as T274bItem, SpecSection as T274bSection, TrackPart as T
 const T274B_COST: Record<T274Role, number> = {
   track: 50, curved: 70, splice: 5, carrier: 2, masterCarrier: 12, endStop: 4, battenClamp: 6, ceilingHanger: 8,
   livePulley: 30, deadPulley: 30, floorBlock: 40, operatingLine: 0.5,
-  ceilingSplice: 9, pipeClamp: 3, lapClamp: 7, deadPulleyOneWay: 25,
+  ceilingSplice: 9, pipeClamp: 3, lapClamp: 7, deadPulleyOneWay: 25, walkAlongEndStop: 4, centerPipeSupport: 11,
 };
 function t274bParts(over: Partial<Record<T274Role, Partial<T274bPart> | null>> = {}): Record<string, T274bPart> {
   const out: Record<string, T274bPart> = {};
@@ -40274,7 +40299,7 @@ import { settleCredit as r282rSettle } from "@/lib/rewards/service-credit";
   const qa = r282cRead("src/app/(app)/quotes/actions.ts", "utf8");
   const qp = r282cRead("src/app/(app)/quotes/page.tsx", "utf8");
   ok(/restoreQuoteRevision\(id, rev, user\.name, \{ mayApplyCredit: can\("create", user\.roles\) \}\)/.test(qa) && /"creditNotice=" \+ encodeURIComponent\(res\.creditNotice\)/.test(qa) &&
-     /const creditNotice = one\(sp\.creditNotice\) \|\| null;/.test(qp) && /back=\{backHref\}/.test(qp),
+     /const creditNotice = one\(sp\.creditNotice\) \|\| one\(sp\.statusNotice\) \|\| null;/.test(qp) && /back=\{backHref\}/.test(qp),
     "#282 P3 restore wiring: Recall passes the create perm and returns to the quote row with the credit notice");
 }
 
@@ -41609,7 +41634,7 @@ import type { PurchasePerk as R282ePP } from "@/lib/rewards/program";
   for (const f of ["src/components/rewards/purchase-perks-banner.tsx", "src/app/(app)/settings/rewards/purchase-perks-editor.tsx", "src/app/portal/redeem-perk-button.tsx", "src/components/rewards/perk-actions.tsx"]) {
     ok(!/from "@\/lib\/stores\//.test(r282Read(f, "utf8")), `#282 perks+points wiring: client component ${f.split("/").pop()} imports no server store`);
   }
-  ok(/rewardsLine=\{purchasePerksDocLine\(perks\)\}/.test(r282Read("src/app/print/quote/[id]/page.tsx", "utf8")), "#282 perks+points wiring: the quote PDF route prints the purchase-perks line");
+  ok(/rewardsLine=\{rewardsVisibleFor\(addressee\) \? purchasePerksDocLine\(perks\) : ""\}/.test(r282Read("src/app/print/quote/[id]/page.tsx", "utf8")), "#282 perks+points wiring: the quote PDF route prints the purchase-perks line");
   for (const f of ["src/app/(app)/flame-tests/letter/letter-view.tsx", "src/app/(app)/inspections/letter/letter-view.tsx"]) {
     ok(/purchasePerksDocLine\(await purchasePerksForCompany\(quote\.customerId\)\)/.test(r282Read(f, "utf8")), `#282 perks+points wiring: ${f.split("/")[2]} letter prints the line`);
   }
@@ -47948,8 +47973,8 @@ async function narrativeFinal293AsyncChecks(): Promise<void> {
   ok(star.includes("updateSection(secId, (s) => toggleKeyProduct(s, itemId, text));") && star.includes(".ensure([sku])") && star.includes("fillEmptyKeyProductText(s, itemId, sku, para)") &&
      star.indexOf("toggleKeyProduct(s, itemId, text)") < star.indexOf(".ensure([sku])"),
     "#293 fix ★: marks first, awaits the library row, then fills an empty block on the live section");
-  ok(cli.includes('"minmax(150px,1.3fr) 104px 92px 136px 116px 104px"') && cli.includes('"minmax(150px,1.3fr) 104px 136px 116px 104px"'),
-    "#293 fix actions cell: 104px in both views — five 20px buttons (✎ ★ ↑ ↓ ×) fit");
+  ok(cli.includes('"minmax(150px,1.3fr) 104px 92px 136px 116px 126px"') && cli.includes('"minmax(150px,1.3fr) 104px 136px 116px 104px"'),
+    "#293 fix actions cell: five 20px buttons (✎ ★ ↑ ↓ ×) fit in 104px; #357: 126px internally for ⇄ (six)");
   ok(card.includes('aria-label="Key product — featured in the narrative"'), "#293 fix ★: the star has an aria-label");
   ok(/<NarrativeColumn\s+key=\{narrSec\.id\}/.test(cli), "#293 fix: the narrative column remounts per system (key={narrSec.id})");
   ok(photos.includes("Promise.race([read(d.blobKey as string, caps.perImage, abort.signal), expired])") && photos.includes("getBlobStream(blobKey, { signal })"),
@@ -48324,10 +48349,10 @@ import type { SpecItem as N293sItem, SpecSection as N293sSec } from "@/app/(app)
 
   // ---- the Load pick ----
   const pick = n293sForLoad(QS, "sysA")!;
-  ok(!!pick && eq(pick.section.items.map((x) => x.id), [1, 2]) && pick.vendorLinesDropped === 1 && pick.source.tierMargin === 0.3,
-    "#293s load: vendor-quote lines and the Rewards credit are left out (counted); the snapshot's tier is the source tier");
-  ok(eq(pick.section.keyProducts, [{ lineKey: "1", sku: "ETC-S4", text: "S4 para", photo: true }]) && !("room" in pick.section) && pick.section.narrative === "  Our lighting.  ",
-    "#293s load: blocks on dropped or missing lines go, room (job-specific) goes, the narrative carries");
+  ok(!!pick && eq(pick.section.items.map((x) => x.id), [1, 2, 5]) && pick.vendorLines === 1 && pick.source.tierMargin === 0.3,
+    "#293s load: the Rewards credit is left out; vendor-quote lines come along (counted — Jeff 2026-10-15 #21); the snapshot's tier is the source tier");
+  ok(eq(pick.section.keyProducts, [{ lineKey: "1", sku: "ETC-S4", text: "S4 para", photo: true }, { lineKey: "5", sku: "VQ-1", text: "Vendor para", photo: true }]) && !("room" in pick.section) && pick.section.narrative === "  Our lighting.  ",
+    "#293s load: blocks on missing lines go, room (job-specific) goes, the narrative carries");
   ok(n293sForLoad(QS, "sysL") === null && n293sForLoad(QS, "nope") === null && n293sForLoad(QD, "d") === null && n293sForLoad(QS, "sysLive") === null,
     "#293s load: labor, unknown, draft and live-only-after-send systems are refused");
   ok(n293sGone === "That estimate is no longer available", "#293s load: the gone message is the spec's copy");
@@ -48335,16 +48360,16 @@ import type { SpecItem as N293sItem, SpecSection as N293sSec } from "@/app/(app)
   // ---- placement on the client ----
   let n = 500;
   const placed = n293sPlace({ ...pick.section, freightAuto: true, freightPct: 9 }, { id: "sys777", nextId: () => ++n, autoFreightPct: 4 });
-  ok(placed.id === "sys777" && eq(placed.items.map((x) => x.id), [501, 502]) && eq(placed.keyProducts, [{ lineKey: "501", sku: "ETC-S4", text: "S4 para", photo: true }]),
+  ok(placed.id === "sys777" && eq(placed.items.map((x) => x.id), [501, 502, 503]) && eq(placed.keyProducts, [{ lineKey: "501", sku: "ETC-S4", text: "S4 para", photo: true }, { lineKey: "503", sku: "VQ-1", text: "Vendor para", photo: true }]),
     "#293s place: fresh section id, items re-id'd through nextId, blocks follow their lines");
   ok(placed.freightPct === 4 && n293sPlace({ ...pick.section, freightPct: 9 }, { id: "s", nextId: () => ++n, autoFreightPct: 4 }).freightPct === 9,
     "#293s place: an auto-freight system takes this estimate's default; a hand-set freight is kept");
   ok(!("keyProducts" in n293sPlace(sec("z", "Z", [it(1, "Z")]), { id: "s", nextId: () => ++n, autoFreightPct: 0 })), "#293s place: no blocks → no key (back-compat shape)");
 
   // ---- notices and row text ----
-  ok(n293sLoadNotice({ systemName: "Main Lighting", estNumber: "EST-1005", costsUpdated: 3, tierRepriced: 0, vendorLinesDropped: 1 }) ===
-    "Loaded Main Lighting from EST-1005 · 3 parts updated to today's cost · 1 vendor-quote line left out", "#293s notice: Load reports cost moves and left-out vendor lines");
-  ok(n293sLoadNotice({ systemName: "A", estNumber: "Q-1", costsUpdated: 1, tierRepriced: 2, vendorLinesDropped: 0 }) ===
+  ok(n293sLoadNotice({ systemName: "Main Lighting", estNumber: "EST-1005", costsUpdated: 3, tierRepriced: 0, vendorLinesFlagged: 1 }) ===
+    "Loaded Main Lighting from EST-1005 · 3 parts updated to today's cost · 1 vendor-quote line at the old vendor price — re-quote", "#293s notice: Load reports cost moves and flagged vendor lines (Jeff 2026-10-15 #21)");
+  ok(n293sLoadNotice({ systemName: "A", estNumber: "Q-1", costsUpdated: 1, tierRepriced: 2, vendorLinesFlagged: 0 }) ===
     "Loaded A from Q-1 · 1 part updated to today's cost · 2 lines re-priced to this estimate's tier", "#293s notice: singular/plural and the tier move");
   const rowHit = { ...sHit, status: "won" as const, at: Date.UTC(2026, 8, 15, 18) };
   ok(n293sRowMeta(rowHit) === "Lakefront HS · EST-1005 · Won · Sep 15, 2026" && n293sRowCounts(sHit) === "3 lines · 2 key products",
@@ -48480,11 +48505,14 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
 
   // Load: re-read, re-priced at today's catalog and the target tier, vendor line left out.
   const r = await n293sLoad(`${QID}:1:sysLib`, 0.2);
-  ok(r.ok && r.section.items.length === 1 && r.section.items[0].cost === 120 && r.section.items[0].price === n293sSeed({ cost: 120 }, 0.2) && r.costsUpdated === 1 && r.tierRepriced === 1 && r.vendorLinesDropped === 1,
-    "#293s load (DB): today's cost (100 → 120), the target tier's seed, one vendor-quote line left out");
+  const vq = r.ok ? r.section.items.find((x) => x.sku === "VQ-293") : undefined;
+  ok(r.ok && r.section.items.length === 2 && r.section.items[0].cost === 120 && r.section.items[0].price === n293sSeed({ cost: 120 }, 0.2) && r.costsUpdated === 1 && r.tierRepriced === 1 && r.vendorLinesFlagged === 1,
+    "#293s load (DB): today's cost (100 → 120), the target tier's seed, one vendor-quote line flagged (Jeff 2026-10-15 #21)");
+  ok(!!vq && vq.cost === 50 && vq.price === 80 && !("vendorQuoteId" in vq) && vq.internalNote === "Old vendor price — re-quote",
+    "#293s load (DB): the vendor line comes in at its last price, unlinked from the source's vendor quote, flagged \"Old vendor price — re-quote\" (Jeff 2026-10-15 #21)");
   ok(r.ok && r.section.name === "Test293 Library Lighting" && r.section.narrative === "Library intro 293." && r.section.presentation === "narrative" &&
-     JSON.stringify(r.section.keyProducts) === JSON.stringify([{ lineKey: "1", sku: P, text: "Lib para", photo: true }]) && !("room" in r.section) && r.section.id !== "sysLib",
-    "#293s load (DB): the SENT system's name, narrative, presentation and key products carry; the vendor line's block and the room don't");
+     JSON.stringify(r.section.keyProducts) === JSON.stringify([{ lineKey: "1", sku: P, text: "Lib para", photo: true }, { lineKey: "2", sku: "VQ-293", text: "Vendor para", photo: true }]) && !("room" in r.section) && r.section.id !== "sysLib",
+    "#293s load (DB): the SENT system's name, narrative, presentation and key products carry (the vendor line's too, #21); the room doesn't");
   ok(r.ok && (/^EST-\d+/.test(r.estNumber) || r.estNumber === QID), "#293s load (DB): the notice names the source estimate");
   const draftLoad = await n293sLoad(`${QDRAFT}:live:sysLib`, 0.2);
   ok(!draftLoad.ok && draftLoad.error === "That estimate is no longer available", "#293s load (DB): a draft's system can't be loaded");
@@ -48523,7 +48551,7 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
   const place = cli.slice(cli.indexOf("const placeLibrarySystem = "), cli.indexOf("const pushItems = "));
   ok(place.includes("placeLoadedSection(res.section, { id: newId, nextId, autoFreightPct: freightDefault.pct })") && place.includes("selectSystem(newId)") && place.includes('verb: "Loaded"') && place.includes("loadNotice(res)"),
     "#293s UI: a loaded system gets fresh ids (blocks remapped), lands after the active system, is selected, and the notice reports the re-price");
-  ok(cli.includes('verb?: "Moved" | "Copied" | "Loaded";') && cli.includes('moveNotice.ok && moveNotice.verb === "Loaded" ?'), "#293s UI: the result banner shows the Load notice");
+  ok(cli.includes('verb?: "Moved" | "Copied" | "Loaded" | "Lines";') && cli.includes('moveNotice.ok && (moveNotice.verb === "Loaded" || moveNotice.verb === "Lines") ?'), "#293s UI: the result banner shows the Load notice");
 }
 
 /* ======================================================================
@@ -48808,9 +48836,9 @@ import { revisionDocFields as n293tDocFields, type Quote as N293tQuote, type Quo
   // ---- BOM view ----
   const narr = p293Props({ pdfOptions: { detail: "sectioned", pdfQty: false, pdfNotes: false, pdfPrices: false, pdfItemizedAppendix: true } });
   const bom = n293tBom(narr);
-  ok(bom.detail === "itemized" && bom.pdfQty && bom.pdfNotes && bom.pdfPrices === false && bom.pdfItemizedAppendix === false &&
+  ok(bom.detail === "itemized" && bom.pdfQty === false && bom.pdfNotes && bom.pdfPrices === false && bom.pdfItemizedAppendix === false &&
      bom.sections.every((s) => s.presentation === "itemized"),
-    "#293t BOM view: every system itemized, quantities and descriptions on, prices kept as chosen, appendix off");
+    "#293t BOM view: every system itemized, descriptions on, prices and quantities kept as chosen (Jeff 2026-10-15 #14), appendix off");
   ok(narr.sections.some((s) => s.presentation === "narrative") && narr.detail === "sectioned", "#293t BOM view: the input props are not mutated");
   const narrHtml = p293Render(p293Props());
   const bomHtml = p293Render(n293tBom(p293Props()));
@@ -49105,9 +49133,9 @@ import { quoteDocumentDataFor as n293tDocData } from "@/lib/quote-pdf/quote-docu
     .flatMap((e) => (e.isDirectory() ? srcFiles(join(dir, e.name)) : /\.(ts|tsx)$/.test(e.name) ? [join(dir, e.name)] : []));
   const all = srcFiles("src").map((f) => [f, rd(f)] as const);
   const asOfCallers = all.filter(([, t]) => t.includes("quoteAsOfRevision(")).map(([f]) => f).sort();
-  ok(JSON.stringify(asOfCallers) === JSON.stringify(["src/lib/quote-pdf/document-loader.ts", "src/lib/quote-share/view.ts"]),
-    `#293t binding: quoteAsOfRevision is called only by the document loader (got ${asOfCallers.join(", ")})`);
-  ok(!/["']use (client|server)["']/.test(loader) && !/\.pdf\b|pdfBlobPath|shareLink|generateMetadata/.test(loader) && /return \{ \.\.\.doc, keyProductPhotos, rewardsLine: purchasePerksDocLine\(perks\) \};/.test(loader),
+  ok(JSON.stringify(asOfCallers) === JSON.stringify(["src/app/print/quote/[id]/page.tsx", "src/lib/quote-pdf/document-loader.ts", "src/lib/quote-share/view.ts"]),
+    `#293t binding: quoteAsOfRevision is called only by the document loader and (#348 2b-ii) the signed bidder-revision print variant (got ${asOfCallers.join(", ")})`);
+  ok(!/["']use (client|server)["']/.test(loader) && !/\.pdf\b|pdfBlobPath|shareLink|generateMetadata/.test(loader) && /return \{ \.\.\.doc, keyProductPhotos, rewardsLine: rewardsVisibleFor\(addressee\) \? purchasePerksDocLine\(perks\) : "" \};/.test(loader),
     "#293t binding: the loader is server-only, returns QuoteDocument props only, and never reads the live PDF or the share link");
   const clientImporters = all.filter(([, t]) => /^["']use client["'];?\s*$/m.test(t) && /from ["']@\/lib\/(quote-pdf\/document-loader|quote-share\/photo-response)["']/.test(t)).map(([f]) => f);
   ok(clientImporters.length === 0, `#293t binding: no client component imports the loader or the photo responder (got ${clientImporters.join(", ")})`);
@@ -49212,8 +49240,8 @@ async function onlineDoc293tAsyncChecks(): Promise<void> {
   const st2 = n293tState(q2);
   const p2 = st2.kind === "ok" ? await n293tLoad(q2, { revision: st2.rev, photos: webHref }) : null;
   const h2 = p2 ? [p293Render({ ...p2, layout: "web" }), p293Render({ ...n293tBom(p2), layout: "web" })].join("\n") : "";
-  // Final fix 1: no PDF was copied, so Rev N follows the PDF's counting rule (1 revision before it).
-  ok(st2.kind === "ok" && st2.rev.rev === 2 && (q2.revisions || []).length === 2 && !!p2 && p2.revNum === 1 &&
+  // Final fix 1: no PDF was copied; Jeff 2026-10-15 #13: each send stamped its Rev at the cut (1, then 2).
+  ok(st2.kind === "ok" && st2.rev.rev === 2 && (q2.revisions || []).length === 2 && !!p2 && p2.revNum === 2 &&
      h2.includes("Second intro 293t.") && h2.includes("Second note 293t.") && h2.includes("Second line 293t") && !/SECRET-293/.test(h2),
     "#293t loader (DB): with two sent revisions the page renders the latest only — nothing of the earlier one, no internal note (Narrative + BOM, web)");
 }
@@ -49254,7 +49282,7 @@ import { portalOnlineEstimateState as n293tPortalState } from "@/lib/quote-pdf/p
   const comp = rd("src/components/online-estimate/online-estimate.tsx");
   ok(!/["']use client["']/.test(page) && !/["']use client["']/.test(comp) && noClientImports("src/app/portal/quotes/[id]/page.tsx") && noClientImports("src/components/online-estimate/online-estimate.tsx"),
     "#293t portal page: server-rendered; no client component it imports can receive the quote's data");
-  ok(page.indexOf("resolvePortalViewer(") > -1 && page.indexOf("resolvePortalViewer(") < page.indexOf("getQuote(") && page.includes("portalOnlineEstimateState(q, cid)") &&
+  ok(page.indexOf("resolvePortalViewer(") > -1 && page.indexOf("resolvePortalViewer(") < page.indexOf("getQuote(") && page.includes("portalOnlineEstimateState(q, cid, bids, { hasBidders })") &&
      page.includes("loadQuoteDocumentProps(q, {") && page.includes("revision: state.rev,") && page.includes("ONLINE_COPY.portalUnavailable") && page.includes("ONLINE_COPY.revising") && page.includes("<PortalSignedOut"),
     "#293t portal page: the viewer first, then the one state rule; the sent revision; the signed-out, unavailable and revising cards");
   ok(!page.includes("notFound(") && !/\b(update|patchShareLink|ensureShareLink|revokeShareLink|addQuoteRevision|setStatus|mergeUpsert)\(/.test(page),
@@ -49263,7 +49291,7 @@ import { portalOnlineEstimateState as n293tPortalState } from "@/lib/quote-pdf/p
      (comp.match(/prefetch=\{false\}/g) || []).length >= 3 && comp.includes("ONLINE_COPY.closed") && comp.includes("<style>{QUOTE_WEB_CSS}</style>"),
     "#293t online view: the web document, a server-side BOM transform behind two plain links, the closed banner");
   const photo = rd("src/app/portal/quotes/[id]/photo/[docId]/route.ts");
-  ok(photo.includes("resolvePortalViewer(") && /rateLimit\(rlKey, 300, 60_000\)/.test(photo) && photo.includes("portalOnlineEstimateState(q, session.customerId)") &&
+  ok(photo.includes("resolvePortalViewer(") && /rateLimit\(rlKey, 300, 60_000\)/.test(photo) && photo.includes("portalOnlineEstimateState(q, session.customerId, bids, { hasBidders })") &&
      photo.includes("servePhotoForRevision(req, state.rev, docId)") && photo.includes("`portal-photo:${session.grantId}`"),
     "#293t portal photos: a portal viewer, 300/min per grant, the quote's own sent revision, only its printed photos");
   const row = rd("src/app/portal/quote-row.tsx");
@@ -49394,8 +49422,8 @@ import { RERENDER_MIN_MS as n293tFRerenderMinMs, stampRerenderDeadlineMs as n293
   // ---- one counting rule: what quoteDocumentDataFor prints is documentRevStamp ----
   const cases = [qf([]), qf([r(1, "sent", 1), r(2, "manual", 2), r(3, "sent", 3)]), qf([r(1, "sent", 1)], { updatedAt: 0 })];
   ok(cases.every((q) => { const d = n293tDocData(q, null, SET); const s = n293tFStamp(q); return s.revNum === d.revNum && s.revDateMs === d.revDateMs; }) &&
-     n293tFStamp(cases[1]).revNum === 3 && n293tFStamp(cases[2]).revDateMs === 7,
-    "#293t final 1: documentRevStamp is exactly the Rev N + date quoteDocumentDataFor prints (revisions so far, at least 1; updatedAt, else createdAt)");
+     n293tFStamp(cases[1]).revNum === 2 && n293tFStamp(cases[2]).revDateMs === 7,
+    "#293t final 1 (Rev = send number since Jeff 2026-10-15 #13): documentRevStamp is exactly the Rev N + date quoteDocumentDataFor prints (a sent quote: its latest send's Rev; updatedAt, else createdAt)");
   const ready: N293tFPdf = { status: "ready", at: 10, savedAt: 5, blobPath: "p", printed: { revNum: 2, revDateMs: 5 } };
   const pend = n293tFPending(ready, 20, 21);
   const settled = n293tFSettle(pend, 20, { ok: true, blobPath: "p2", printed: { revNum: 3, revDateMs: 20 } }, 30);
@@ -49428,9 +49456,9 @@ import { RERENDER_MIN_MS as n293tFRerenderMinMs, stampRerenderDeadlineMs as n293
   const live = qf([rev1, rev2], { updatedAt: T3 + DAY });
   const webProps = n293tDocData(n293tAsOf(live, rev2), null, SET);
   const hdr = n293tHeader(live, rev2);
-  ok(pdfProps.revNum === 1 && webProps.revNum === pdfProps.revNum && webProps.revDateMs === pdfProps.revDateMs && webProps.revDateMs === T2,
-    "#293t final 1: recall + edit + resend on a later day — the online document prints the PDF's Rev 1 and save date, not rev 2 / the send day");
-  ok(hdr === `EST-1007 · Rev 1 · sent ${chicago(T2)}` && !hdr.includes(chicago(T3)),
+  ok(pdfProps.revNum === 2 && webProps.revNum === pdfProps.revNum && webProps.revDateMs === pdfProps.revDateMs && webProps.revDateMs === T2,
+    "#293t final 1: recall + edit + resend on a later day — the online document prints the PDF's Rev (2 since Jeff 2026-10-15 #13 — never Rev 1 twice) and save date, not the send day");
+  ok(hdr === `EST-1007 · Rev 2 · sent ${chicago(T2)}` && !hdr.includes(chicago(T3)),
     "#293t final 1: the online header line names the PDF's Rev and date too");
   const firstWeb = n293tDocData(n293tAsOf(qf([rev1]), rev1), null, SET);
   ok(firstWeb.revNum === 1 && firstWeb.revDateMs === T1 - 60_000 && n293tHeader(qf([rev1]), rev1) === `EST-1007 · Rev 1 · sent ${chicago(T1 - 60_000)}`,
@@ -49465,8 +49493,8 @@ import { RERENDER_MIN_MS as n293tFRerenderMinMs, stampRerenderDeadlineMs as n293
     "#293t fix round 2: the generator re-renders at most once, only for a still-pending save with budget left, under a deadline signal");
   const qdd = rd("src/lib/quote-pdf/quote-document-data.ts");
   ok(qdd.includes("const stamp = documentRevStamp(q);") && qdd.includes("revNum: stamp.revNum,") && qdd.includes("revDateMs: stamp.revDateMs,") &&
-     rd("src/lib/quote-pdf/state.ts").includes("return { revNum: Math.max(1, q.revisions?.length || 1), revDateMs: q.updatedAt || q.createdAt || 0 };"),
-    "#293t final 1: the PDF's Rev/date rule is unchanged, now named once (documentRevStamp)");
+     rd("src/lib/quote-pdf/state.ts").includes("return { revNum: shownAsSent && max > 0 ? max : max + 1, revDateMs };"),
+    "#293t final 1: the PDF's Rev/date rule is named once (documentRevStamp; the send number since Jeff 2026-10-15 #13)");
 
   // ---- item 7: the print token's leading zero ----
   const S = "test-secret-293tf";
@@ -49572,9 +49600,9 @@ async function finalFix293tAsyncChecks(): Promise<void> {
       await tick();
       await send(QA);
       const w2 = await web(QA);
-      ok(!!w2 && !!seen2.v && w2.rev.rev === 2 && seen2.v.revNum === 1 && w2.props.revNum === seen2.v.revNum && w2.props.revDateMs === seen2.v.revDateMs &&
-         w2.props.revDateMs !== w2.rev.at && w2.rev.pdfSavedAt === saved2 && w2.header.includes(" · Rev 1 · ") && w2.props.quoteNote === "Second note 293tF",
-        "#293t final 1 (DB): recall + edit + resend — the online pages print the PDF's Rev 1 and save date, not the revision's own Rev 2 / send time");
+      ok(!!w2 && !!seen2.v && w2.rev.rev === 2 && seen2.v.revNum === 2 && w2.props.revNum === seen2.v.revNum && w2.props.revDateMs === seen2.v.revDateMs &&
+         w2.props.revDateMs !== w2.rev.at && w2.rev.pdfSavedAt === saved2 && w2.header.includes(" · Rev 2 · ") && w2.props.quoteNote === "Second note 293tF",
+        "#293t final 1 (DB): recall + edit + resend — the revised draft's PDF prints the next Rev (2, Jeff 2026-10-15 #13 — never Rev 1 twice) and the online pages print it and its save date, not the send time");
 
       // 3. Save + send in one action (the render runs AFTER the cut): the PDF says Rev 2 — and so do the pages.
       const QB = fixtureId(293, "t-final-onesave");
@@ -49622,8 +49650,8 @@ async function finalFix293tAsyncChecks(): Promise<void> {
       await tick();
       await send(QC);
       const w4 = await web(QC);
-      ok(!!w4 && !!w4.rev.pdfBlobPath && w4.rev.docFields?.revNo === undefined && w4.rev.pdfSavedAt === savedC && w4.props.revNum === 1 && w4.props.revDateMs === savedC,
-        "#293t final 1 (DB): an unstamped copy derives the PDF counting rule — Rev 1, the copied file's savedAt");
+      ok(!!w4 && !!w4.rev.pdfBlobPath && w4.rev.docFields?.revNo === 1 && w4.rev.docFields?.issuedAt === undefined && w4.rev.pdfSavedAt === savedC && w4.props.revNum === 1 && w4.props.revDateMs === savedC,
+        "#293t final 1 (DB): an unstamped copy keeps the Rev the send stamped at the cut (1, Jeff 2026-10-15 #13) and the copied file's savedAt");
 
       // 5. Fix round 2 — the quote moves during render 1 only (the Send click mid-render): one re-render, its stamp recorded.
       const mkRace = async (tag: string) => {
@@ -49965,7 +49993,8 @@ import { qd293Props as mfdQdProps, qd293Sections as mfdQdSections, renderQuoteDo
   const html = mfdQdRender({ ...mfdQdProps({ sections: secs }), keyProductPhotos: { "SKU-5": { src: "data:image/png;base64,QUFB", alt: "Five" } } });
   ok(html.includes('src="/placeholders/allowance.webp"') && html.includes('src="/placeholders/custom-device.webp"') && html.includes('src="data:image/png;base64,QUFB"'),
     "mfr images: an allowance/custom key product prints its placeholder; a catalog photo still prints");
-  ok((html.match(/<img[^>]+float:right;width:34%/g) || []).length === 3 && html.includes("Budget allowance — Fixture allowance"), "mfr images: placeholders float like a photo; a catalog block with no photo prints full width");
+  ok((html.match(/<img[^>]+float:right;width:34%/g) || []).length === 2 && (html.match(/<img[^>]+float:left;width:34%/g) || []).length === 1 && html.includes("Budget allowance — Fixture allowance"),
+    "mfr images: placeholders float like a photo (alternating right, left, right — Jeff 2026-10-15 #20); a catalog block with no photo prints full width");
   secs[1].keyProducts = secs[1].keyProducts.map((k) => ({ ...k, photo: false }));
   const off = mfdQdRender({ ...mfdQdProps({ sections: secs }), keyProductPhotos: {} });
   ok(!off.includes("/placeholders/") && (off.match(/class="est-kp"/g) || []).length === 4, "mfr images: Photo off drops the placeholder too");
@@ -52051,8 +52080,8 @@ import type { Quote as E301bsQuote, QuoteRevision as E301bsRev } from "@/lib/sto
     "#301 rows: two sent revisions with the same printed Rev N read differently (each row carries its send date and time)");
   ok(e301bsRows({ revisions: [rev(1, "manual", 1)] }).length === 0 && e301bsRows(null).length === 0, "#301 rows: none before the first send");
   const chip = e301bsChip(withOpens);
-  ok(chip?.label === "Opened" && chip.title === "Client link — Rev 1 — superseded · sent Oct 5, 10:00 AM · opened 2× · first Oct 5 · last Oct 6" && e301bsChip({ revisions: revs }) === null,
-    "#301 chip: \"Opened\" once any sent revision was opened, the rows in its title");
+  ok(chip?.label === "Opened" && chip.title === "Viewed Oct 6, 10:00 AM — Client link — Rev 1 — superseded · sent Oct 5, 10:00 AM · opened 2× · first Oct 5 · last Oct 6" && e301bsChip({ revisions: revs }) === null,
+    "#301 chip: \"Opened\" once any sent revision was opened, the rows in its title (Batch 5 #58: led by the latest open's Viewed stamp)");
   ok(e301bsLatest(withOpens) === "Client link — Rev 2 · sent Oct 6, 10:00 AM · not opened yet" && e301bsLatest({ revisions: revs }) === "" && e301bsCopy.clientLink === "Client link",
     "#301 lead line: the latest revision's row once anything was opened, else nothing");
 
@@ -52218,8 +52247,8 @@ import type { SpecSection as E301bbSec } from "@/app/(app)/estimator/types";
      m.logo.src === "/_test/lh.jpg" && m.logo.full && m.banner === null && m.narrativeHref === "/share/quote/Q-293/t" && m.bomHref === "/share/quote/Q-293/t?view=bom",
     "#301 model: header (title, customer, Rev stamp, grand total), letterhead, no banner on an open estimate, the two view links");
   ok(m.scopes.map((s) => `${s.num}:${s.name}`).join("|") === "1:Rigging|2:Lighting|3:Install|4:Empty narrative" && m.scopes[1].keyProducts[0].photo?.src === "/p/5" &&
-     m.scopes[1].fallback === null && m.scopes[0].fallback === "The full parts list for this scope is under BOM." && m.scopes[2].fallback === "Installation, commissioning & project management." &&
-     m.scopes[3].fallback === "The full parts list for this scope is under BOM.",
+     m.scopes[1].fallback === null && m.scopes[0].fallback === "The full parts list for this scope is under Itemized." && m.scopes[2].fallback === "Installation, commissioning & project management." &&
+     m.scopes[3].fallback === "The full parts list for this scope is under Itemized.", // Batch 5 #63: the toggle reads Overview / Itemized
     "#301 model: every printed scope; key-product photos; a scope with no text says where its parts are; labor reads the labor wording");
   ok(!JSON.stringify(m).includes("[needs a paragraph]"), "#301 model: the staff placeholder never reaches a client");
   ok(m.summary === "This estimate includes 4 scopes: Rigging, Lighting, Install and Empty narrative." && m.notIncluded.join("|") === "Permits|Painting" &&
@@ -52236,7 +52265,7 @@ import type { SpecSection as E301bbSec } from "@/app/(app)/estimator/types";
     "#301 model: the scope price only — never a line or unit price, cost, internal note or room (§10)");
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   ok(!/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/(pricing|quote-document-view)"|@\/lib\/specs\/record-keys"|@\/lib\/catalog-rename\/sku")/m.test(rd("src/lib/estimate-output/bom.ts")) &&
-     !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/pricing"|\.\/scopes"|\.\/bom"|@\/lib\/quote-share\/package-view"|@\/lib\/part-image-fallback"|@\/lib\/package-doc\/(print|resolve)")/m.test(rd("src/lib/estimate-output/package-model.ts")),
+     !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/pricing"|\.\/scopes"|\.\/bom"|@\/lib\/quote-share\/package-view"|@\/lib\/part-image-fallback"|@\/lib\/package-doc\/(print|resolve)"|@\/lib\/parties\/addressee")/m.test(rd("src/lib/estimate-output/package-model.ts")),
     "#301 purity: bom.ts and package-model.ts are pure and client-safe");
 }
 
@@ -52257,7 +52286,7 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
     frozen: { coverSummary: "Our summary.", notIncluded: "Permits\nPainting" }, state: { kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never,
     headerLine: "EST-1 · Rev 1 · sent Oct 5, 2026", currentHref: null, base: "/share/quote/Q-293/t", letterheadSrc: "/_test/lh.jpg" };
   const narr = e301bvRender(e301bvEl(PackageView301, { model: e301bmModel({ ...base, view: "narrative" }) }));
-  const order = ["Narrative test", "EST-1 · Rev 1", "Our summary.", ">Narrative<", ">Rigging<", "Your goals", "Even front light.", "A bright fresnel.", ">Install<", "ADD OPTION 1", "Not included", "Permits"]
+  const order = ["Narrative test", "EST-1 · Rev 1", "Our summary.", ">Overview<", ">Rigging<", "Your goals", "Even front light.", "A bright fresnel.", ">Install<", "ADD OPTION 1", "Not included", "Permits"]
     .map((s) => narr.indexOf(s));
   ok(order.every((v, i) => v >= 0 && (i === 0 || v > order[i - 1])), `#301 view: §5 order — header, summary, toggle, scopes (goals, intro, key products), options, Not included (${order.join(",")})`);
   ok(narr.includes('src="/share/quote/Q-293/t/photo/PD-5"') && narr.includes('aria-current="page"') && narr.includes('href="/share/quote/Q-293/t?view=bom"') &&
@@ -52309,23 +52338,23 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
 {
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const page = rd("src/app/share/quote/[id]/[token]/page.tsx");
-  ok(page.indexOf("rateLimit(") < page.indexOf("isShareTokenV2(token)") && page.indexOf("isShareTokenV2(token)") < page.indexOf("resolveSharedQuote(") &&
+  ok(page.indexOf("rateLimit(") < page.indexOf("isPackageToken(token)") && page.indexOf("isPackageToken(token)") < page.indexOf("resolveSharedQuote(") &&
      page.includes("<SharedPackagePage id={id} token={token} view={onlineView(sp.view)} />"),
-    "#301 page: a v2 token branches to the package after the rate limit and before the v1 resolve");
+    "#301 page: a package token (v2, or #348's bidder v3) branches to the package after the rate limit and before the v1 resolve");
   const pp = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
   ok(pp.includes("resolveSharedPackage(id, token)") && pp.includes("loadPackageViewProps(") && (pp.match(/ONLINE_COPY\.shareInactive/g) || []).length === 1 &&
      pp.includes("<PackageView model={model} slots={slots} />") && pp.includes("Slice C") && !pp.includes('"use client"') && !/\b(update|patchShareLink|recordShareOpen)\(/.test(pp) &&
      !pp.includes("quoteAsOfRevision") && !pp.includes("auth(") && !pp.includes("cookies("),
     "#301 page: the package page resolves, loads, renders PackageView with the Slice C mounts empty, one inactive card; read-only, no session");
   const loader = rd("src/lib/estimate-output/package-loader.ts");
-  ok(loader.includes("loadQuoteDocumentProps(hit.q, { revision: hit.rev, photos: { href } })") && loader.includes("packageFrozenFields(hit.rev.docFields,") &&
+  ok(loader.includes("loadQuoteDocumentProps(hit.q, { revision: hit.rev, photos: { href }, bidderPartyId: hit.bidder?.partyId })") && loader.includes("packageFrozenFields(hit.rev.docFields,") &&
      loader.includes("keyProductPhotoLinks(packagePhotoSections(doc.sections), href, doc.document)") && !loader.includes("quoteAsOfRevision") && !/\bq\.(coverSummary|notIncluded|packageFiles)\b/.test(loader),
     "#301 loader: the sent revision through the web loader; cover fields from the pinned revision only (R12); every scope's photos");
   const photo = rd("src/app/share/quote/[id]/[token]/photo/[docId]/route.ts");
-  ok(photo.indexOf("rateLimit(") < photo.indexOf("isShareTokenV2(token)") && photo.indexOf("isShareTokenV2(token)") < photo.indexOf("resolveSharedQuote(") &&
+  ok(photo.indexOf("rateLimit(") < photo.indexOf("isPackageToken(token)") && photo.indexOf("isPackageToken(token)") < photo.indexOf("resolveSharedQuote(") &&
      photo.includes("servePackagePhotoForRevision(req, pkg.rev, docId)"),
-    "#301 photos: the share photo route takes a v2 token (the pinned revision's package photo set) or a v1 one (#293's)");
-  ok(photo.slice(photo.indexOf("isShareTokenV2(token)) {")).indexOf("try {") > 0 && photo.indexOf("try {") < photo.indexOf("resolveSharedPackage(") && photo.indexOf("resolveSharedPackage(") < photo.indexOf("} catch (e) {") &&
+    "#301 photos: the share photo route takes a package token — v2 or #348's v3 (the pinned revision's package photo set) — or a v1 one (#293's)");
+  ok(photo.slice(photo.indexOf("isPackageToken(token)) {")).indexOf("try {") > 0 && photo.indexOf("try {") < photo.indexOf("resolveSharedPackage(") && photo.indexOf("resolveSharedPackage(") < photo.indexOf("} catch (e) {") &&
      photo.slice(photo.indexOf("} catch (e) {")).includes("console.warn(") && photo.slice(photo.indexOf("} catch (e) {")).includes('return new Response("Not found", { status: 404 })') && photo.includes("return await servePackagePhotoForRevision("),
     "#301 photos fix: a DB error resolving a v2 photo link is the same uniform 404, logged (never a 500)");
   const pr = rd("src/lib/quote-share/photo-response.ts");
@@ -52587,7 +52616,7 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
   ok(long.ok && long.value.name.length === 120 && long.value.message.length === 4000 && long.value.sectionIds.length === 0 && long.value.total === 0 && !("title" in long.value),
     "#301 responses: caps (name 120, message 4,000); a question carries no scopes, total or title");
   const e2 = e301crSan("accept", { name: "P", email: "e".repeat(300) + "@x.io", sectionIds: ["s1"] }, scopes);
-  const nl = e301crSan("accept", { name: "A\nB", sectionIds: ["s1"] }, scopes);
+  const nl = e301crSan("accept", { name: "A\nB", title: "Director", sectionIds: ["s1"] }, scopes); // #15: an accept is signed (title)
   ok(!e2.ok && e2.error === e301crCopy.badEmail && nl.ok && !/[\n\r]/.test(nl.value.name),
     "#301 responses: an email over 200 characters is refused (never truncated into another address); a name never carries a line break");
   const secs = [
@@ -52609,7 +52638,7 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
   ok(e301crTitle(a, "EST-1042", 2) === "Client accepted EST-1042 Rev 2 — Lighting, Rigging ($48,250.00)" &&
      e301crTitle({ ...a, kind: "question" }, "EST-1042", 2) === "Client question — EST-1042",
     "#301 responses: the task titles (D-m)");
-  ok(e301crNote(a, "EST-1042", 2) === "Client selected scopes on EST-1042 Rev 2 (client link): Lighting, Rigging — $48,250.00 before any Rewards credit.\nFrom: Pat Doe · Facilities · pat@school.org\nMessage: Please start in June." &&
+  ok(e301crNote(a, "EST-1042", 2) === "Client selected scopes on EST-1042 Rev 2 (client link): Lighting, Rigging — $48,250.00 before any Rewards credit.\nAccepted by Pat Doe, Facilities\nFrom: Pat Doe · Facilities · pat@school.org\nMessage: Please start in June." && // #15: the signer line
      e301crNote({ ...a, kind: "question", title: undefined, email: "", message: "Is rigging inspected?" }, "EST-1042", 2) === "Client question on EST-1042 Rev 2 (client link).\nFrom: Pat Doe\nMessage: Is rigging inspected?",
     "#301 responses: the note / activity text names the scopes, the pre-credit total, who, and the message");
   // ---- R16 assignees ----
@@ -52641,7 +52670,8 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
      e301crChips({ noDatasheet: 0, drawings: 1, keyProductsNeedText: 0, scopesNoGoals: 0 }).length === 0,
     "#301 gaps: the staff chips (only the gaps that exist)");
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/document-files"|@\/app\/\(app\)\/estimator\/pricing"|@\/lib\/team"|\.\/scopes")/m.test(rd("src/lib/estimate-output/responses.ts")) &&
+  // #352 review I3: + the portal's pure card scan (portal-quote-mode.ts has type-only imports).
+  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/document-files"|@\/app\/\(app\)\/estimator\/pricing"|@\/lib\/team"|@\/lib\/portal-quote-mode"|\.\/scopes")/m.test(rd("src/lib/estimate-output/responses.ts")) &&
      !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/narrative"|@\/app\/\(app\)\/estimator\/quote-document-view"|\.\/scopes")/m.test(rd("src/lib/estimate-output/package-gaps.ts")),
     "#301 responses/gaps purity: client-safe value imports only");
 }
@@ -52745,7 +52775,7 @@ async function e301cStoreAsyncChecks(): Promise<void> {
   ok(e301crClean([rr(1, { at: null }), rr(2, { rev: null }), rr(3, { rev: "" }), rr(4, { at: "" }), rr(5, { total: "5" }), rr(6, { total: null }), rr(7)]).map((x) => x.at).join() === "7",
     "#301 responses: a record whose at / rev / total isn't a real number is dropped, never coerced to 0");
   ok(!e301crSan("hack" as never, { name: "P", sectionIds: ["s1"] }, sc).ok && !e301crSan(undefined as never, { name: "P", message: "x", sectionIds: ["s1"] }, sc).ok &&
-     e301crSan("accept", { name: "P", sectionIds: ["s1"] }, sc).ok && e301crSan("question", { name: "P", message: "x" }, sc).ok,
+     e301crSan("accept", { name: "P", title: "Director", sectionIds: ["s1"] }, sc).ok && e301crSan("question", { name: "P", message: "x" }, sc).ok,
     "#301 responses: any kind other than exactly accept | question is refused at runtime");
   const stamp = e301crRows([rr(9, { at: Date.UTC(2026, 9, 5, 19, 14) })], (v) => v)[0].when;
   ok(stamp === "Oct 5, 2:14 PM" && !/[\u202f\u00a0]/.test(stamp), "#301 responses: the staff time stamp uses a plain space whatever the ICU build");
@@ -52771,11 +52801,11 @@ import { renderToStaticMarkup as e301cdRender } from "react-dom/server";
   const html = e301cdRender(e301cdEl(E301cdLink, { link: { href: "/share/quote/Q-1/t/doc/PD-1", name: "ColorSource.pdf" } }));
   ok(html.includes('href="/share/quote/Q-1/t/doc/PD-1"') && html.includes("Datasheet — ColorSource.pdf") && html.includes("download"), "#301 docs: the link reads \"Datasheet — <file>\" and downloads");
   const route = rd("src/app/share/quote/[id]/[token]/doc/[docId]/route.ts");
-  ok(route.indexOf("rateLimit(") < route.indexOf("isShareTokenV2(token)") && route.indexOf("isShareTokenV2(token)") < route.indexOf("resolveSharedPackage(") &&
+  ok(route.indexOf("rateLimit(") < route.indexOf("isPackageToken(token)") && route.indexOf("isPackageToken(token)") < route.indexOf("resolveSharedPackage(") &&
      route.indexOf("resolveSharedPackage(") < route.indexOf("packageDocForRevision(pkg.rev, docId)") &&
      route.includes('rateLimit("share-doc:" + (clientIp(req) || "unknown"), SHARE_DOC_PER_MIN, 60_000)') && route.includes("attachmentDisposition(doc.fileName)") &&
      route.includes('"x-content-type-options": "nosniff"') && route.includes(`"content-security-policy": "sandbox; default-src 'none'"`) && !route.includes("quoteAsOfRevision") && !/\b(update|patchQuote|setStatus)\(/.test(route),
-    "#301 docs: the route rate-limits first, takes only a v2 token, serves only the pinned revision's documents, as an attachment; read-only");
+    "#301 docs: the route rate-limits first, takes only a package (v2/v3) token, serves only the pinned revision's documents, as an attachment; read-only");
   const srv = rd("src/lib/estimate-output/package-docs-server.ts");
   ok(srv.includes("loadScopedCoverage(parts)") && !srv.includes("listCatalog") && !srv.includes("loadPartDocsState") && srv.includes("quoteBom(src, rackOf, isInternal)") && srv.includes("internalSkuCheck("),
     "#301 docs: the revision's documents use the scoped loader and the client package's BOM rule — never the whole catalog");
@@ -52921,14 +52951,14 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
       "#301 zip: putBlobAt refuses any path outside estimate-package/ or containing .. , before it calls Blob");
   }
   const route = rd("src/app/share/quote/[id]/[token]/package.zip/route.ts");
-  ok(route.indexOf("rateLimit(") < route.indexOf("isShareTokenV2(token)") && route.indexOf("isShareTokenV2(token)") < route.indexOf("resolveSharedPackage(") &&
+  ok(route.indexOf("rateLimit(") < route.indexOf("isPackageToken(token)") && route.indexOf("isPackageToken(token)") < route.indexOf("resolveSharedPackage(") &&
      route.indexOf("resolveSharedPackage(") < route.indexOf("servePackageZip(pkg)") && route.includes("SHARE_ZIP_PER_WINDOW, SHARE_ZIP_WINDOW_MS") &&
      route.includes("export const maxDuration = 120;") && !route.includes("maxDuration = 60"),
-    "#301 zip: the route rate-limits (6 / 10 min / IP), takes only a v2 token, then serves the pinned revision's zip (maxDuration 120, as the rack submittal)");
+    "#301 zip: the route rate-limits (6 / 10 min / IP), takes only a package (v2/v3) token, then serves the pinned revision's zip (maxDuration 120, as the rack submittal)");
   ok(/try \{\s*pkg = await resolveSharedPackage\(id, token\);\s*\} catch \(e\) \{\s*console\.error\([^;]*, e\);\s*return notFound\(\);\s*\}/.test(route),
     "#301 zip: a resolveSharedPackage failure is caught, logged and answered with the same uniform 404 as an invalid link");
   const srv = rd("src/lib/estimate-output/package-zip-server.ts");
-  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes('const letterhead = opts.front ? opts.front.letterhead : await d.letterhead(typeof opts.peakHeader === "boolean" ? opts.peakHeader : q.packagePeakHeader);') && srv.includes("buildSpecDocx(sp.spec, { letterhead })") && srv.includes("zipCacheable(built.leftOut) && front.coverOk && built.coverOk !== false") &&
+  ok(srv.includes("readCapped(") && srv.includes("packageEntryName(") && srv.includes("const letterhead = opts.front ? opts.front.letterhead : await d.bookLetterhead(header);") && srv.includes("buildSpecDocx(sp.spec, { letterhead: specLetterhead })") /* Jeff 2026-10-15 #12 */ && srv.includes("zipCacheable(built.leftOut) && front.coverOk && built.coverOk !== false") &&
      !srv.includes("listCatalog") && !/\b(update|patchQuote|setStatus)\(/.test(srv),
     "#301 zip: capped reads, unique entry names, the D94 docx, cache only a clean build; never the whole catalog, never a quote write");
   const dl301cz = [{ documentId: "PD-1", name: "A.pdf", kind: "datasheet", skus: ["A"] }, { documentId: "PD-2", name: "B.docx", kind: "specsheet", skus: ["B"] }, { documentId: "PD-3", name: "M.pdf", kind: "manual", skus: ["C"] }] as const;
@@ -52942,7 +52972,7 @@ import { renderToStaticMarkup as renderToStaticMarkup301cz } from "react-dom/ser
   const docRoute = rd("src/app/share/quote/[id]/[token]/doc/[docId]/route.ts");
   const dRes = docRoute.indexOf("resolveSharedPackage(");
   const dCatch = docRoute.indexOf("} catch (e) {", dRes);
-  ok(docRoute.lastIndexOf("try {", dRes) > docRoute.indexOf("isShareTokenV2(token)") && dRes < docRoute.indexOf("packageDocForRevision(", dRes) && docRoute.indexOf("packageDocForRevision(", dRes) < dCatch &&
+  ok(docRoute.lastIndexOf("try {", dRes) > docRoute.indexOf("isPackageToken(token)") && dRes < docRoute.indexOf("packageDocForRevision(", dRes) && docRoute.indexOf("packageDocForRevision(", dRes) < dCatch &&
      dCatch < docRoute.indexOf("getBlobStream(") && docRoute.slice(dCatch, docRoute.indexOf("getBlobStream(")).includes("console.warn(") &&
      docRoute.slice(dCatch, docRoute.indexOf("getBlobStream(")).includes("return notFound();"),
     "#301 docs route: a DB error while resolving the package or its document is the same uniform 404, logged server-side (never a 500)");
@@ -53063,9 +53093,9 @@ import { renderToStaticMarkup as e301cuRender } from "react-dom/server";
      fin.indexOf("d.head(") < fin.indexOf("sniffPackageFile(") && fin.indexOf("sniffPackageFile(") < fin.indexOf("addPackageFile("),
     "#301 uploads: finalize checks the path, never touches a recorded blob, sniffs the real bytes, then records");
   const fileRoute = rd("src/app/share/quote/[id]/[token]/file/[fileId]/route.ts");
-  ok(fileRoute.indexOf("rateLimit(") < fileRoute.indexOf("isShareTokenV2(token)") && fileRoute.indexOf("isShareTokenV2(token)") < fileRoute.indexOf("resolveSharedPackage(") &&
+  ok(fileRoute.indexOf("rateLimit(") < fileRoute.indexOf("isPackageToken(token)") && fileRoute.indexOf("isPackageToken(token)") < fileRoute.indexOf("resolveSharedPackage(") &&
      fileRoute.includes("packageFileForRevision(pkg.rev, fileId)") && fileRoute.includes("SHARE_FILE_PER_MIN") && !fileRoute.includes("q.packageFiles"),
-    "#301 uploads: the file route serves only the pinned revision's frozen list (R12), v2 only, 120/min/IP");
+    "#301 uploads: the file route serves only the pinned revision's frozen list (R12), package (v2/v3) tokens only, 120/min/IP");
   const acts = rd("src/app/(app)/estimator/package-actions.ts");
   ok(/^"use server";/.test(acts) && !/^export (?!async function)/m.test(acts) && (acts.match(/await requireUser\(\);/g) || []).length >= 2 &&
      (acts.match(/if \(!can\("send", user\.roles\)\) return \{ ok: false, error: ONLINE_COPY\.needsSend \};/g) || []).length >= 2,
@@ -53209,7 +53239,7 @@ async function e301cActionsAsyncChecks(): Promise<void> {
   const notify = async (_q: unknown, r: { kind: string; total: number }) => { calls.push(`${r.kind}:${r.total}`); };
   const salt = String(Date.now() % 100_000);
   const deps = { secret: S, users: async () => users, notify };
-  const acc = await R.submitClientResponse("accept", QID, tok, { name: "Pat Doe", email: "pat@school.org", sectionIds: ["s2", "s1", "bogus"] }, "203.0.113.1-" + salt, deps);
+  const acc = await R.submitClientResponse("accept", QID, tok, { name: "Pat Doe", title: "Facilities", email: "pat@school.org", sectionIds: ["s2", "s1", "bogus"] }, "203.0.113.1-" + salt, deps);
   const q1 = (await Q.get(QID))!;
   ok(acc.ok && acc.confirmation === "Thanks — Lead 301C has been notified." && q1.status === "sent" && q1.clientResponses?.length === 1 &&
      q1.clientResponses[0].total === 48250 && q1.clientResponses[0].sectionNames.join() === "Lighting,Rigging" && calls.join() === "accept:48250",
@@ -54680,8 +54710,9 @@ import * as p2a from "@/lib/estimate-groups/groups";
   ok(/groups\?: SystemGroup\[\]/.test(actionsSrc) && /export type SavePayload[\s\S]*?groups\?: SystemGroup\[\]/.test(actionsSrc), "#P2a persistence: SavePayload.groups is optional (older callers keep stored groups)");
   ok(/const groups = sanitizeGroups\(payload\.groups \?\? \(prior\?\.spec as \{ groups\?: unknown \} \| null \| undefined\)\?\.groups\)/.test(actionsSrc), "#P2a persistence: saveQuoteAction sanitises payload.groups, falling back to the stored spec.groups");
   ok(/spec: \{ sections: normalizeSystemOrder\(savedSections, groups\), mobs: payload\.mobs, groups, \.\.\.\(docSave\.document \? \{ document: docSave\.document \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: saveQuoteAction writes spec { sections (normalised), mobs, groups }");
-  ok(/\.\.\.withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
-  ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\)\)/.test(actionsSrc) && /spec: \{ sections: newSections, mobs: \[\] \}/.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
+  // #357: the stripped system is re-id'd against the target first (reIdIncomingSection), then appended.
+  ok(/const incoming = reIdIncomingSection\(stripBonusLines\(withoutGroupMeta\(placed\)\), /.test(actionsSrc) && /\.\.\.withoutRewardCredit\(\[incoming\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
+  ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\), await loadBonusRates\(\)\)/.test(actionsSrc) && /spec: \{ sections: newSections, mobs: \[\] \}/.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
   ok(/groups = sanitizeGroups\(spec\?\.groups\)/.test(pageSrc) && /normalizeSystemOrder\(spec\.sections as SpecSection\[\], groups\)/.test(pageSrc) && /^\s+groups,$/m.test(pageSrc) && /groups: \[\],/.test(pageSrc), "#P2a persistence: page.tsx reads spec.groups through sanitizeGroups into initial.groups (new quotes: [])");
   ok(/withoutGroupMeta\(copied\)/.test(copySrc), "#P2a persistence: copy-system strips group meta from the copy");
   ok(/withKeyProducts\(withoutGroupMeta\(base\), kps\)/.test(libSrc), "#P2a persistence: system-library load strips group meta");
@@ -54904,7 +54935,7 @@ import { qd293Props as p2adProps, qd293Sections as p2adSections, renderQuoteDocu
     "#P2a document: the helper lives in the client-safe quote-document-view.ts");
   ok(data.includes("const groups = sanitizeGroups(spec?.groups);") && data.includes("groups,\n") && data.includes("normalizeSystemOrder(spec && Array.isArray(spec.sections)") && data.includes("as { sections?: unknown; groups?: unknown; document?: unknown }"),
     "#P2a document: quoteDocumentDataFor reads groups from the same spec as sections");
-  ok(loader.includes("quoteDocumentDataFor(src, cust, settings)") && printPage.includes("quoteDocumentDataFor(q, cust, settings)"),
+  ok(loader.includes("quoteDocumentDataFor(src, cust, settings, addressee)") && printPage.includes("quoteDocumentDataFor(src, cust, settings, addressee)"),
     "#P2a document: the web loader (live or frozen revision) and the print route both build props through quoteDocumentDataFor");
   const online = rd("src/components/online-estimate/online-estimate.tsx");
   ok(online.includes('<QuoteDocument {...shown} layout="web" />') && online.includes("bomViewProps(docProps)"), "#P2a document: the online view renders the same QuoteDocument (groups ride in docProps; the BOM view spreads them)");
@@ -55473,7 +55504,7 @@ import { renderToStaticMarkup as p2boRender } from "react-dom/server";
   const inSum = p2boSelTotal(rs.filter((s) => !s.alternate));
   ok(p2boSelTotal(rs.filter((s) => p2boDefault(rs).includes(s.id))) === inSum && p2boSelTotal(rs.filter((s) => [...p2boDefault(rs), "a3"].includes(s.id))) === inSum + 400,
     "#P2b outputs: the running total starts at the In-total scopes and adds a ticked alternate");
-  const acc = p2boSan("accept", { name: "Pat", sectionIds: ["a3", "s1", "zz-unknown"] }, rs);
+  const acc = p2boSan("accept", { name: "Pat", title: "Director", sectionIds: ["a3", "s1", "zz-unknown"] }, rs);
   ok(acc.ok && acc.value.sectionIds.join() === "s1,a3" && acc.value.sectionNames.join("|") === "Rigging|Alternate — Rigging alternates: Motorized battens" &&
      acc.value.total === p2boSell(props.sections[0]) + 400,
     "#P2b outputs: the server accepts a submitted alternate id (named by its label, priced into the total) and drops an unknown id");
@@ -55534,7 +55565,7 @@ async function p2bOutputsAsyncChecks(): Promise<void> {
   const calls: string[] = [];
   const deps = { secret: S, users: async () => users, notify: async (_q: unknown, r: { total: number; sectionNames: string[] }) => { calls.push(`${r.total}:${r.sectionNames.join("|")}`); } };
   const salt = String(Date.now() % 100_000);
-  const acc = await R.submitClientResponse("accept", QID, tok, { name: "Pat", sectionIds: ["s2", "s1"] }, "198.51.100.1-" + salt, deps);
+  const acc = await R.submitClientResponse("accept", QID, tok, { name: "Pat", title: "Director", sectionIds: ["s2", "s1"] }, "198.51.100.1-" + salt, deps);
   const got = (await Q.get(QID))!;
   ok(acc.ok && got.clientResponses?.length === 1 && got.clientResponses[0].sectionIds.join() === "s1,s2" && got.clientResponses[0].total === 1500 &&
      calls.join() === "1500:Lighting|Alternate — Upgrades: LED Upgrade" && got.status === "sent",
@@ -55683,10 +55714,10 @@ async function p3SendAsyncChecks(): Promise<void> {
       "#P3 send (fix round 2): happy path — the send claim first (after the cheap preflight), then signature, attachments, mark sent, the link, the email, record, the follow-up, and the claim released last");
     ok(f.st.released.length === 1 && f.st.released[0] === f.st.claims[0] && f.st.claims[0]?.by === "Sam Mills", "#P3 send fix: the claim taken is the claim released (on success)");
     ok(f.st.asOf.join() === "77", "#P3 send: mark sent passes the shown version (asOf) to the approval gate");
-    const t = f.st.threads[0] ?? ({ body: "", to: "", cc: "", mailboxUser: "", customerId: null, contactName: "", customer: "", subject: "", link: { type: "", id: "" }, attachments: [] } as P3sThread);
+    const t = f.st.threads[0] ?? ({ body: "", to: "", cc: "", mailboxUser: "", mailboxOwnerId: "", customerId: null, contactName: "", customer: "", subject: "", link: { type: "", id: "" }, attachments: [] } as P3sThread);
     ok(t.body === "Hi Pat,\n\nView it here: " + URL + "\n\nThanks,\nSam\n\n-- \nSam Mills · Peak" && !t.body.includes("{link}"), "#P3 send: {link} becomes the absolute client-link URL; the sender's signature is applied (Inbox rule)");
-    ok(t.to === "pat@school.org, ops@school.org" && t.cc === "lee@peak.com" && t.mailboxUser === "Sam Mills" && t.customerId === "co-1" && t.contactName === "Pat Rivera",
-      "#P3 send: the thread holds the FULL To line, the Cc, the sender's personal box and the quote's customer + contact");
+    ok(t.to === "pat@school.org, ops@school.org" && t.cc === "lee@peak.com" && t.mailboxUser === "Sam Mills" && t.mailboxOwnerId === "u1" && t.customerId === "co-1" && t.contactName === "Pat Rivera",
+      "#P3 send: the thread holds the FULL To line, the Cc, the sender's personal box (#349 — owned by the sender's id) and the quote's customer + contact");
     ok(t.link.type === "quote" && t.link.id === "Q-P3S" && t.link.label === "EST-1042 · North HS Auditorium", "#P3 send: the thread links the quote as `<EST number> · <project name>`");
     const [estA, covA] = t.attachments;
     ok(t.attachments.map((a) => a.name).join("|") === "EST-1042.pdf|EST-1042 Cover.pdf" && t.attachments.every((a) => a.mime === "application/pdf") &&
@@ -56015,7 +56046,8 @@ async function p3SendAsyncChecks(): Promise<void> {
     const notB64 = await attachmentMimePart({ name: "b.txt", dataUrl: "data:text/plain,hi" }, fakeRead);
     ok(legacy?.dataBase64 === "QUJD" && notB64 === null && reads.length === 2, "#P3 send fix: data-URL attachments resolve exactly as before (non-base64 skipped, no storage read)");
     const bridge = readFileSync(join(process.cwd(), "src/lib/gmail/bridge.ts"), "utf8");
-    ok(bridge.includes("attachmentMimePart(a, readPdfForThread)") && bridge.includes("pdfPathFitsLink(path, t.link) ? readQuotePdf(path)") && bridge.includes("pdfStorage()"),
+    const threadPdf = readFileSync(join(process.cwd(), "src/lib/thread-pdf-read.ts"), "utf8");
+    ok(bridge.includes("attachmentMimePart(a, readPdfForThread") && bridge.includes("readThreadPdf(path, t)") && threadPdf.includes("pdfPathFitsLink(path, t.link) ? readQuotePdf(path)") && threadPdf.includes("pdfStorage()"),
       "#P3 send fix: the Gmail bridge builds MIME parts through attachmentMimePart with the quote-PDF store, scoped to the thread's linked quote (fix round 2)");
     const { pdfPathFitsLink } = await import("@/lib/comms-attachments");
     ok(pdfPathFitsLink("quote-pdfs/Q-P3S/rev-4.pdf", { type: "quote", id: "Q-P3S" }) && !pdfPathFitsLink("quote-pdfs/Q-OTHER/rev-4.pdf", { type: "quote", id: "Q-P3S" }) &&
@@ -56079,7 +56111,7 @@ async function p3SendAsyncChecks(): Promise<void> {
     // I3b — Open in Inbox reuses the sender's own still-current draft for the quote.
     const draftOf = (createdAt: number, paths: string[]) => ({ threadId: "C-OPEN", createdAt, attachments: paths.map((pdfPath) => ({ pdfPath })) });
     const cur = fakes(sentRev);
-    cur.deps.findInboxDraft = async (qid, who) => { cur.calls.push(`findInboxDraft:${qid}:${who}`); return draftOf(600, ["quote-pdfs/Q-P3S/rev-2.pdf", `quote-pdfs/Q-P3S/cover-${NOW}.pdf`]); };
+    cur.deps.findInboxDraft = async (qid, who) => { cur.calls.push(`findInboxDraft:${qid}:${who.name}`); return draftOf(600, ["quote-pdfs/Q-P3S/rev-2.pdf", `quote-pdfs/Q-P3S/cover-${NOW}.pdf`]); };
     const rc = await p3sOpenInbox(cur.deps, SAM, "Q-P3S", input());
     ok(rc.ok && rc.reused === true && rc.href === p3sHref("C-OPEN") && rc.threadId === "C-OPEN" && rc.status === "sent",
       "#P3 final review (I3b): Open in Inbox with the sender's still-current draft open → that draft's link");
@@ -56114,9 +56146,9 @@ async function p3SendAsyncChecks(): Promise<void> {
        b.indexOf("canSendOrApprove(user)") < b.indexOf("liveEstimateEmailDeps(") && b.includes("cleanInput(input)"),
       `#P3 send: ${name} requires a session, then send|approve, before wiring the live deps`);
   }
-  ok(src.startsWith('"use server";') && src.includes("asOf: typeof o.asOf === \"number\"") && src.includes("printOriginFor(process.env,") && src.includes("await headers()"),
-    "#P3 send: the wrappers are server actions, pass the client's asOf through, and build the origin from the request (printOriginFor)");
-  ok(fnBody("estimateEmailDefaultsAction").includes("await requireUser()") && src.includes("getConnectionInfo(personalKey(user.id))"), "#P3 send: the defaults action needs a session and reads the sender's own Gmail connection");
+  ok(src.startsWith('"use server";') && src.includes("asOf: typeof o.asOf === \"number\"") && src.includes("await requestWhere()") && readFileSync(join(process.cwd(), "src/lib/estimate-email/request-where.ts"), "utf8").includes("printOriginFor(process.env,") && readFileSync(join(process.cwd(), "src/lib/estimate-email/request-where.ts"), "utf8").includes("await headers()"),
+    "#P3 send: the wrappers are server actions, pass the client's asOf through, and build the origin from the request (requestWhere → printOriginFor)");
+  ok(fnBody("estimateEmailDefaultsAction").includes("await requireUser()") && src.includes("senderMailbox(user.id,") && readFileSync(join(process.cwd(), "src/lib/estimate-email/sender-mailbox.ts"), "utf8").includes("getConnectionInfo(personalKey(userId))"), "#P3 send: the defaults action needs a session and reads the sender's own Gmail connection (senderMailbox)");
   ok(fnBody("estimateEmailDefaultsAction").includes("signatureFor(user.name)") && fnBody("estimateEmailDefaultsAction").includes("signature,"), "#P3 send fix: the defaults action seeds the sender's #127 signature");
   const server = readFileSync(join(process.cwd(), "src/lib/estimate-email/send-server.ts"), "utf8");
   ok(server.includes("sendQuoteToCustomer(id, actor, asOf)") && server.includes("ensureShareLink(id, opts.actor.name)") && server.includes("sendDraft(draft.id, spec.mailboxUser, { stampAddresses: true })") &&
@@ -56170,7 +56202,6 @@ async function p3TrackAsyncChecks(): Promise<void> {
       getQuote: async (id) => (quote && id === quote.id ? quote : null),
       getThread: async (id) => threads.get(id) ?? null,
       applySignature: async (body) => { calls.push("applySignature"); return body + "\n\n-- \nSam Mills"; },
-      userIdByName: async (n) => (n === "Sam Mills" ? "u1" : null),
       gmailConnected: async () => gmail,
       reply: async (id, body, me) => {
         calls.push("reply"); replies.push({ id, body, me });
@@ -56363,7 +56394,6 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
       getQuote: async (id) => (id === "Q-P3F" ? quote() : null),
       getThread: async (id) => threads.get(id) ?? null,
       applySignature: async (b) => { calls.push("applySignature"); return b; },
-      userIdByName: async (n) => ({ "Sam Mills": "u1", "Eve Estimator": "u2" } as Record<string, string>)[n] ?? null,
       gmailConnected: async (uid) => { connectedFor.push(uid); return uid === "u1"; },
       reply: async (id, body, me) => {
         calls.push("reply");
@@ -56401,7 +56431,7 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
     const r = await p3tMarkReadAs(f.deps, SENDER, "Q-P3F", "C-A");
     ok(!r.ok && r.error === "Only Sam Mills can mark this read." && r.error === P3T.notOwnerRead("Sam Mills"), "#P3 track fix: a non-owner can't mark an email read — named refusal");
     ok(f.calls.length === 0 && f.threads.get("C-A")!.unread === true, "#P3 track fix: a refused non-owner mark read writes nothing");
-    const adm = await p3tMarkReadAs(f.deps, { name: "Ann Admin" }, "Q-P3F", "C-A");
+    const adm = await p3tMarkReadAs(f.deps, { id: "u5", name: "Ann Admin" }, "Q-P3F", "C-A");
     ok(!adm.ok && f.calls.length === 0, "#P3 track fix: an Admin can't mark someone else's mailbox read either");
     const gone = await p3tMarkReadAs(f.deps, SENDER, "Q-P3F", "C-NOPE");
     ok(!gone.ok && gone.error === "Not found." && f.calls.length === 0, "#P3 track fix: a foreign thread still reads Not found. (no oracle)");
@@ -56415,10 +56445,16 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
     const r = await p3tReply(f.deps, OWNER, "Q-P3F", "C-A", "On it.");
     ok(r.ok && r.delivery === "gmail" && f.connectedFor.join() === "u1" && f.threads.get("C-A")!.messages.length === 3 && f.threads.get("C-A")!.messages[2].author === "Sam Mills" && f.calls.join() === "applySignature,reply,markRead",
       "#P3 track fix: the owner's reply goes out as the owner, delivery looked up for the owner's id, thread read afterwards");
-    const g = fakes();
-    g.deps.userIdByName = async () => null;
+    // #349 — ownership is by identity: a thread stamped with the owner's id is theirs whatever its display name says
+    const g = fakes([{ ...mk("C-A", true, "Old Name"), mailbox: "personal", mailboxOwnerId: "u1" } as FThread, mk("C-B", false, "Sam Mills")]);
     const ru = await p3tReply(g.deps, OWNER, "Q-P3F", "C-A", "On it.");
-    ok(ru.ok && g.connectedFor.join() === "u1", "#P3 track fix: an owner name off the roster falls back to the actor's own id (the actor IS the owner)");
+    ok(ru.ok && g.connectedFor.join() === "u1", "#P3 track fix (#349): the owner by id (the stamp), delivery looked up for the owner's own id");
+    const dup = fakes();
+    dup.deps.roster = async () => [{ id: "u1", name: "Sam Mills", status: "active" }, { id: "u7", name: "Sam Mills", status: "archived" }, { id: "u4", name: "Lee Lead", status: "active" }];
+    const rd2 = await p3tReply(dup.deps, OWNER, "Q-P3F", "C-A", "On it.");
+    ok(!rd2.ok && rd2.error === P3T.notOwnerReply("Sam Mills") && dup.calls.length === 0, "#349: a legacy name-only thread whose name two users hold has no owner — even its namesake can't reply");
+    const imp = await p3tReply(fakes([{ ...mk("C-A", true, "Sam Mills"), mailbox: "personal", mailboxOwnerId: "u8" } as FThread, mk("C-B", false)]).deps, OWNER, "Q-P3F", "C-A", "Hi");
+    ok(!imp.ok && imp.error === P3T.notOwnerReply("Sam Mills"), "#349: a thread stamped with another user's id is not mine though it carries my name");
   }
 
   // Message text visibility.
@@ -56430,19 +56466,19 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
       return r;
     };
     const rOwner = await seen(OWNER_PLAIN);
-    ok(rOwner.emails.length === 2 && rOwner.emails.every((e) => !e.textHidden && e.canReply && e.ownerName === "Sam Mills" && e.messages.length === 2 && e.messages[1].snippet === "Please add an option"),
+    ok(rOwner.emails.length === 2 && rOwner.emails.every((e) => e.canReply && e.ownerName === "Sam Mills" && e.messages.length === 2 && e.messages[1].snippet === "Please add an option"),
       "#P3 track fix: the thread owner sees every message and can reply (no permission needed)");
     const rAppr = await seen(APPROVER);
-    ok(rAppr.emails.every((e) => !e.textHidden && !e.canReply && e.messages.length === 2 && e.ownerName === "Sam Mills"), "#P3 track fix: an approver sees the text but can't reply");
+    ok(rAppr.emails.every((e) => !e.canReply && e.messages.length === 2 && e.ownerName === "Sam Mills"), "#P3 track fix: an approver sees the text but can't reply");
     const rSend = await seen(SENDER);
-    ok(rSend.emails.every((e) => !e.textHidden && !e.canReply && e.messages.length === 2), "#P3 track fix: a send-holder sees the text but can't reply");
+    ok(rSend.emails.every((e) => !e.canReply && e.messages.length === 2), "#P3 track fix: a send-holder sees the text but can't reply");
     const rLead = await seen(LEAD);
-    ok(rLead.emails.every((e) => !e.textHidden && !e.canReply && e.messages.length === 2), "#P3 track fix: the quote's Lead estimator (owner field) sees the text but can't reply");
+    ok(rLead.emails.every((e) => !e.canReply && e.messages.length === 2), "#P3 track fix: the quote's Lead estimator (owner field) sees the text but can't reply");
     const rPlain = await seen(PLAIN);
-    ok(rPlain.emails.length === 2 && rPlain.emails.every((e) => e.textHidden && !e.canReply && e.messages.length === 0), "#P3 track fix: a plain viewer gets textHidden with no messages and no Reply");
+    ok(rPlain.emails.length === 2 && rPlain.emails.every((e) => !e.canReply && e.messages.length === 2 && !("textHidden" in e)), "Jeff 10-15 #25: a plain viewer who can open the quote reads every message, still no Reply");
     const a = rPlain.emails.find((e) => e.threadId === "C-A")!;
-    ok(a.subject === "Estimate C-A" && a.to === "pat@school.org" && a.sentAt === 1000 && a.rev === 2 && a.delivered && a.unread === 1 && a.ownerName === "Sam Mills" && rPlain.newReplies === 1 && JSON.stringify(rPlain).indexOf("Please add an option") < 0,
-      "#P3 track fix: hidden-text emails still carry subject, recipient, sent time, rev, delivery and unread count — and the text appears nowhere in the payload");
+    ok(a.subject === "Estimate C-A" && a.to === "pat@school.org" && a.sentAt === 1000 && a.rev === 2 && a.delivered && a.unread === 1 && a.ownerName === "Sam Mills" && rPlain.newReplies === 1 && JSON.stringify(rPlain).indexOf("Please add an option") >= 0,
+      "Jeff 10-15 #25: a plain viewer's emails carry subject, recipient, sent time, rev, delivery, unread count and the reply text");
     ok(rPlain.emails.find((e) => e.threadId === "C-B")!.rev === 1, "#P3 track fix: each email carries its own rev");
     const none = fakes([mk("C-A", true), mk("C-B", false)]);
     const rn = await p3tTrackAs(none.deps, PLAIN, "Q-P3F");
@@ -56460,9 +56496,9 @@ async function p3TrackFixAsyncChecks(): Promise<void> {
     const src = readFileSync(join(process.cwd(), "src/lib/estimate-email/send-server.ts"), "utf8");
     ok(src.includes("const delivery = await deliveryAfterSend(connected, () => getThread(draft.id));"), "#P3 track fix: createAndSendThread goes through the guarded helper");
     const track = readFileSync(join(process.cwd(), "src/lib/estimate-email/track-server.ts"), "utf8");
-    ok(track.includes("userIdByName") && track.includes("gmailConnected((await deps.userIdByName(owner)) ?? actor.id)"), "#P3 track fix: delivery is computed for the thread owner");
+    ok(!track.includes("userIdByName") && track.includes("gmailConnected(actor.id)") && track.includes("ownedBy(raw, await viewerOf(deps, actor))"), "#P3 track fix (#349): delivery is computed for the thread owner — the actor, checked by id");
     const act = readFileSync(join(process.cwd(), "src/app/(app)/estimator/send-actions.ts"), "utf8");
-    ok(act.includes("trackEstimate(liveTrackDeps(), { id: user.id, name: user.name, roles: user.roles }") && act.includes("markEstimateEmailRead(liveTrackDeps(), { name: user.name }"), "#P3 track fix: the wrappers pass the viewer / actor");
+    ok(act.includes("trackEstimate(liveTrackDeps(), { id: user.id, name: user.name, roles: user.roles }") && act.includes("markEstimateEmailRead(liveTrackDeps(), { id: user.id, name: user.name }"), "#P3 track fix: the wrappers pass the viewer / actor");
   }
 }
 
@@ -56477,7 +56513,7 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   ok(C.linkHint === "Keep {link} where the client link should go." && C.attachEstimate === "Estimate PDF" && C.attachCover === "Cover PDF", "#P3 send UI: link hint and attachment labels");
   ok(C.gmailOff === "Gmail not connected — it will be saved as sent here; connect Gmail in Settings → Mailboxes" && C.from("sam@peak.com") === "From sam@peak.com", "#P3 send UI: Gmail state line");
   ok(C.sentGmail === "Sent through Gmail." && C.sentLocal === "Sent locally (Gmail not connected).", "#P3 send UI: delivery copy");
-  ok(C.textHidden("Sam Mills") === "Message text is visible to Sam Mills, approvers and the lead estimator." && C.textHidden("").includes("the mailbox owner"), "#P3 send UI: hidden-text explanation names the owner");
+  ok(!("textHidden" in C), "Jeff 10-15 #25: no hidden-text explanation — every viewer reads the replies");
   ok(p3ui.FOLLOW_UP_OPTIONS.map((o) => `${o.value}:${o.label}`).join("|") === "0:Off|2:2 days|3:3 days|5:5 days|7:7 days|14:14 days" && p3ui.FOLLOW_UP_DEFAULT === 5, "#P3 send UI: follow-up options Off, 2/3/5/7/14 days; default 5");
 
   const init = p3ui.composerInitial({ to: "pat@school.org", cc: "lee@peak.com", subject: "S", body: "B {link}" });
@@ -56489,10 +56525,10 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   ok(p3ui.canCompose("draft") && p3ui.canCompose("sent") && !p3ui.canCompose("won") && !p3ui.canCompose("lost"), "#P3 send UI: won/lost can't compose");
 
   const L = (st: "draft" | "sent" | "won" | "lost", pipe = true) => p3ui.sendStepLayout(st, pipe).join(",");
-  ok(L("draft") === "composer,status,pipeline,clientLink,tasks", "#P3 send UI: draft — composer first, then Status, Pipeline, Client link (+ responses), Tasks");
-  ok(L("sent") === "activity,composer,clientLink,tasks,pipeline,status", "#P3 send UI: sent — Activity first, then the re-send composer, Client link, Tasks, Pipeline, Status");
-  ok(L("won") === "activity,clientLink,tasks,pipeline,status" && L("lost") === L("won"), "#P3 send UI: won/lost — Activity first, no composer");
-  ok(L("draft", false) === "composer,status,clientLink,tasks" && !L("sent", false).includes("pipeline"), "#P3 send UI: no Pipeline card when the stage bar doesn't apply");
+  ok(L("draft") === "composer,bidders,vendors,status,pipeline,clientLink,tasks", "#P3 send UI: draft — composer first, then Status, Pipeline, Client link (+ responses), Tasks");
+  ok(L("sent") === "activity,bidders,vendors,composer,clientLink,tasks,pipeline,status", "#P3 send UI: sent — Activity first, then the re-send composer, Client link, Tasks, Pipeline, Status");
+  ok(L("won") === "activity,bidders,vendors,clientLink,tasks,pipeline,status" && L("lost") === L("won"), "#P3 send UI: won/lost — Activity first, no composer");
+  ok(L("draft", false) === "composer,bidders,vendors,status,clientLink,tasks" && !L("sent", false).includes("pipeline"), "#P3 send UI: no Pipeline card when the stage bar doesn't apply");
 
   const mGmail = p3ui.sendResultMessage({ ok: true, delivery: "gmail", status: "sent", next: null });
   const mLocal = p3ui.sendResultMessage({ ok: true, delivery: "local", status: "sent", warning: "Sent — but the follow-up task couldn’t be created. Add it by hand." });
@@ -56536,7 +56572,7 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   ok(comp.includes("{primaryLabel(status)}") && comp.includes("{SEND_UI_COPY.linkHint}") && comp.includes("SEND_UI_COPY.from(gmail.from) : SEND_UI_COPY.gmailOff") && comp.includes("FOLLOW_UP_OPTIONS.map("),
     "#P3 send UI: composer shows the primary label, the {link} hint, the Gmail line and the follow-up select");
   ok(comp.includes("{SEND_UI_COPY.sendAnother}") && comp.includes("useState(!collapsible)") && comp.includes("setOpen(false);"), "#P3 send UI: the re-send composer collapses to Send another email");
-  ok(step.includes("sendStepLayout(status, showStageBar).map((k) => cards[k])") && step.includes("collapsible={status !== \"draft\"}") && ['key="composer"', 'key="activity"', 'key="status"', 'key="pipeline"', 'key="clientLink"', 'key="tasks"'].every((k) => step.includes(k)),
+  ok(step.includes("sendStepLayout(status, showStageBar).map((k) => cards[k])") && step.includes("collapsible={status !== \"draft\"}") && ['key="composer"', 'key="activity"', 'key="bidders"', 'key="vendors"', 'key="status"', 'key="pipeline"', 'key="clientLink"', 'key="tasks"'].every((k) => step.includes(k)),
     "#P3 send UI: the step renders its cards as one keyed list ordered by status");
   ok(step.includes("id={SEND_STEP_IDS.status}") && step.includes("id={SEND_STEP_IDS.statusSelect}") && step.includes("id={SEND_STEP_IDS.clientLink}"), "#P3 send UI: the hatches' targets carry their ids");
   ok(step.includes("<SendActivity quoteId={loadedId} refreshKey={trackKey} onTrack={setTrackSummary} />") && step.includes("onSent={() => setTrackKey((k) => k + 1)}"), "#P3 send UI: a send refreshes Activity; Activity reports to the hook");
@@ -56544,7 +56580,7 @@ import * as p3ui from "@/lib/estimate-email/send-ui";
   ok(/trackSummary,\s+setTrackSummary,\s+(?:[A-Za-z]+,\s+){0,6}next,\s+\};\s+\}/.test(hook) && hook.includes("useState<{ opens: number; newReplies: number } | null>(null)"), "#P3 send UI: the hook holds trackSummary (next stays last in its return)");
   ok(act.includes("sendTrackAction(quoteId)") && act.includes('window.addEventListener("focus", refresh)') && act.includes("}, [quoteId, refreshKey]);"), "#P3 send UI: Activity reads on mount, on window focus and after a send");
   ok(act.includes("onTrackRef.current({ opens, newReplies: newRepliesOf(emails) })"), "#P3 send UI: Activity lifts opens + new replies to the shell");
-  ok(/e\.textHidden \? \(\s*<div[^>]*>\{SEND_UI_COPY\.textHidden\(e\.ownerName\)\}/.test(act), "#P3 send UI: hidden text shows the explanation instead of messages");
+  ok(!act.includes("textHidden") && act.includes("{e.messages.length > 0 && ("), "Jeff 10-15 #25: the Activity card always lists the messages");
   ok(act.includes("{e.canReply && (") && act.includes("{e.canReply && replyOpen && (") && /\{e\.canReply && \([\s\S]{0,400}\{SEND_UI_COPY\.reply\}[\s\S]{0,200}e\.unread > 0 &&[\s\S]{0,200}\{SEND_UI_COPY\.markRead\}/.test(act),
     "#P3 send UI: Reply and Mark read (unread > 0) only when canReply");
   ok(act.includes("replyToEstimateEmailAction(quoteId, e.threadId, text)") && act.includes("markEstimateEmailReadAction(quoteId, e.threadId)") && act.includes("onPatch(r.summary)") && act.includes("disabled={pending || !text.trim()}"),
@@ -56664,11 +56700,11 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
       "#P3 final review (I1): delivery — a timed-out send is unknown, a refused one failed, a gmailId wins, not connected stays local");
     const api = rd("src/lib/gmail/api.ts");
     const gapiSrc = api.slice(api.indexOf("async function gapi<T>("), api.indexOf("/** Send a raw RFC-2822 message"));
-    ok(gapiSrc.indexOf("await accessTokenFor(mailboxKey)") < gapiSrc.indexOf("try {") && gapiSrc.includes("signal: AbortSignal.timeout(20_000)") && gapiSrc.includes("if (isAbortError(err)) throw new GmailTimeoutError(path);") &&
+    ok(gapiSrc.indexOf("await accessTokenFor(mailboxKey)") < gapiSrc.indexOf("try {") && gapiSrc.includes("signal: AbortSignal.timeout(opts.timeoutMs ?? 20_000)") && gapiSrc.includes("if (isAbortError(err)) throw new GmailTimeoutError(path);") &&
        gapiSrc.includes('(await res.text().catch(() => ""))'),
       "#P3 final review (I1): gapi maps only the Gmail call's own timeout (after the token) to GmailTimeoutError; a refusal stays a plain error");
     const bridge = rd("src/lib/gmail/bridge.ts");
-    ok(bridge.includes("const pending = (t.messages || []).filter(isAutoDeliverable);") && bridge.includes("const failure = sendFailureKind(err);") && bridge.includes("if (target && !target.gmailId) target.sendFailure = failure;"),
+    ok(bridge.includes("const pending = (t.messages || []).filter(isAutoDeliverable);") && bridge.includes("const failure = sendFailureKind(err);") && /if \(target && !target\.gmailId\) \{\s*target\.sendFailure = failure;/.test(bridge),
       "#P3 final review (I1): deliverThreadOutbound sends only isAutoDeliverable messages and stamps how a send failed");
     const send = rd("src/lib/estimate-email/send-server.ts");
     ok(send.includes('if (delivery !== "gmail") await holdOutbound(draft.id, delivery);') && send.includes("await holdLastOutbound(threadId, delivery)"),
@@ -56697,7 +56733,7 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
       ok((await C.holdLastOutbound(T2, "failed")) === null && !(await C.get(T2))!.messages[0].noAutoRetry, "#P3 final review (I1, DB): a Gmail-delivered message is never stamped");
       const live = S.liveEstimateEmailDeps({ origin: "https://app.test", host: null, proto: null, actor: { id: "u-p3f-none", name: "Spec P3F Sender", roles: ["Admin"] } });
       const sent = await live.createAndSendThread({
-        mailboxUser: "Spec P3F Sender", customerId: null, customer: "Spec fixture", contactName: "Pat", to: "pat@school.org", cc: "", subject: "Estimate EST-1",
+        mailboxUser: "Spec P3F Sender", mailboxOwnerId: "u-p3f-none", customerId: null, customer: "Spec fixture", contactName: "Pat", to: "pat@school.org", cc: "", subject: "Estimate EST-1",
         body: "Hi", link: { type: "quote", id: QF, label: "EST-1" }, attachments: [],
       });
       registerFixture("comms", sent.threadId);
@@ -56759,7 +56795,6 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
         getQuote: async (id) => (id === q.id ? q : null),
         getThread: async (id) => threads.get(id) ?? null,
         applySignature: async (b) => { calls.push("applySignature"); return b; },
-        userIdByName: async () => "u1",
         gmailConnected: async () => true,
         reply: async (id, body, me) => { calls.push("reply"); const t = threads.get(id); if (!t) return null; t.messages.push({ direction: "out", at: 900, author: me, body, to: "pat@school.org", ...replyMsg }); return t; },
         markRead: async (id) => { calls.push("markRead"); return threads.get(id) ?? null; },
@@ -56793,17 +56828,22 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
     const rg = await T.replyToEstimateEmail(gm.deps, SAM, "Q-P3FR", "C-SENT", "Hello");
     ok(rg.ok && rg.delivery === "gmail" && !rg.warning && !gm.calls.some((c) => c.startsWith("holdBack")), "#P3 final review (I1): a Gmail-delivered reply is never held back");
 
-    // M2 — the Lead estimator is the shared leadEstimator rule (owner, else preparedBy when the owner isn't active).
+    // Jeff 2026-10-15 #25 replaced M2's Lead-estimator text rule: anyone who can open the quote reads the text.
     const LEE = { id: "u4", name: "Lee Lead", roles: ["Crew"] };
     const seesText = async (q: import("@/lib/stores/quotes").Quote, roster?: Array<{ id: string; name: string; status: string }>) => {
       const r = await T.trackEstimate(mkDeps(q, roster).deps, LEE, "Q-P3FR");
-      return r.ok && r.emails.length > 0 && r.emails.every((e) => !e.textHidden);
+      return r.ok && r.emails.length > 0 && r.emails.every((e) => !e.canReply) && (r.emails.find((e) => e.threadId === "C-SENT")?.messages.length ?? 0) > 0 && (r.emails.find((e) => e.threadId === "C-NOOUT")?.messages.length ?? 0) > 0;
     };
-    ok(await seesText(quote({ owner: "Lee Lead" })), "#P3 final review (M2): the active owner is the Lead estimator");
-    ok(await seesText(quote({ owner: "Gone Person", preparedBy: "Lee Lead" })), "#P3 final review (M2): an owner off the active roster falls back to preparedBy");
-    ok(!(await seesText(quote({ owner: "Lee Lead", preparedBy: "Sam Mills" }), [{ id: "u1", name: "Sam Mills", status: "active" }, { id: "u4", name: "Lee Lead", status: "inactive" }])),
-      "#P3 final review (M2): an inactive owner is not the Lead estimator (preparedBy is) — no text by that name alone");
-    ok(rd("src/lib/estimate-email/track-server.ts").includes("leadEstimator(q.owner, q.preparedBy, active)"), "#P3 final review (M2): track-server uses the shared leadEstimator helper");
+    ok(await seesText(quote({ owner: "Lee Lead" })), "Jeff 10-15 #25: the Lead estimator reads the text (no Reply)");
+    ok(await seesText(quote({ owner: "Sam Mills", preparedBy: "Sam Mills" }), [{ id: "u1", name: "Sam Mills", status: "active" }, { id: "u4", name: "Lee Lead", status: "inactive" }]),
+      "Jeff 10-15 #25: a viewer with no role on the quote still reads the text, never Reply");
+    {
+      const del = mkDeps();
+      (del.threads.get("C-SENT") as unknown as { deleted?: boolean }).deleted = true;
+      const rdl = await T.trackEstimate(del.deps, LEE, "Q-P3FR");
+      ok(rdl.ok && !rdl.emails.some((e) => e.threadId === "C-SENT") && rdl.emails.length > 0, "#351 M5: a tracked email in Deleted is not listed (its text with it)");
+    }
+    ok(!rd("src/lib/estimate-email/track-server.ts").includes("textHidden") && !rd("src/lib/estimate-email/track-server.ts").includes("leadEstimator("), "Jeff 10-15 #25: track-server no longer gates the text by role");
   }
 
   // ---- I3: Inbox drafts must match the quote's latest sent revision ----
@@ -56845,7 +56885,7 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
        route.indexOf("await requireUser()") < route.indexOf("isCoverFileName(file)"),
       "#P3 final review (M1): ?file= serves a cover from THIS quote's folder only, behind the team session");
     const send = rd("src/lib/estimate-email/send-server.ts");
-    ok(send.includes("store.put(pdfStoragePath(quoteId, `cover-${now}`), bytes)") && send.includes('findDraftByLink("quote", quoteId, { mailboxUser })'),
+    ok(send.includes("store.put(pdfStoragePath(quoteId, `cover-${now}`), bytes)") && send.includes('findDraftByLink("quote", quoteId, { owner: await mailboxViewer(owner) })'),
       "#P3 final review (M1, I3b): the live deps store the cover under quote-pdfs/<id>/cover-<now>.pdf and look up the sender's own draft");
 
     // findDraftByLink narrowed to one mailbox (DB).
@@ -56854,11 +56894,13 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
     await createFixture("comms", { ...base, id: fixtureId(308, "p3f-d-ann"), mailboxUser: "Ann P3F", createdAt: 100, updatedAt: 100, draft: { attachments: [{ name: "EST.pdf", pdfPath: "quote-pdfs/x/rev-1.pdf" }] } } as never);
     await createFixture("comms", { ...base, id: fixtureId(308, "p3f-d-ann-deleted"), mailboxUser: "Ann P3F", deleted: true, createdAt: 300, updatedAt: 300, draft: {} } as never);
     await createFixture("comms", { ...base, id: fixtureId(308, "p3f-d-bob"), mailboxUser: "Bob P3F", createdAt: 200, updatedAt: 200, draft: {} } as never);
-    ok((await C.findDraftByLink("quote", QL, { mailboxUser: "ann p3f" }))?.id === fixtureId(308, "p3f-d-ann") && (await C.findDraftByLink("quote", QL, { mailboxUser: "Bob P3F" }))?.id === fixtureId(308, "p3f-d-bob") &&
-       (await C.findDraftByLink("quote", QL, { mailboxUser: "Cy P3F" })) === null && !!(await C.findDraftByLink("quote", QL)),
-      "#P3 final review (I3b, DB): findDraftByLink with a mailbox returns only that person's own live (not deleted) draft; the unscoped renewal lookup still works");
+    // #349 — the owner is a viewer (identity); these legacy drafts carry only a name, which counts while unique
+    const ownerV = (id: string, name: string) => ({ owner: { id, name, nameUnique: true } });
+    ok((await C.findDraftByLink("quote", QL, ownerV("u-ann", "Ann P3F")))?.id === fixtureId(308, "p3f-d-ann") && (await C.findDraftByLink("quote", QL, ownerV("u-bob", "Bob P3F")))?.id === fixtureId(308, "p3f-d-bob") &&
+       (await C.findDraftByLink("quote", QL, ownerV("u-cy", "Cy P3F"))) === null && (await C.findDraftByLink("quote", QL, { owner: { id: "u-ann", name: "Ann P3F", nameUnique: false } })) === null && !!(await C.findDraftByLink("quote", QL)),
+      "#P3 final review (I3b, DB): findDraftByLink with a mailbox returns only that person's own live (not deleted) draft (#349: by identity — a shared name finds nothing); the unscoped renewal lookup still works");
     const live = S.liveEstimateEmailDeps({ origin: "https://app.test", host: null, proto: null, actor: { id: "u-x", name: "Ann P3F", roles: ["Admin"] } });
-    const found = await live.findInboxDraft(QL, "Ann P3F");
+    const found = await live.findInboxDraft(QL, { id: "u-x", name: "Ann P3F" });
     ok(found?.threadId === fixtureId(308, "p3f-d-ann") && found.createdAt === 100 && found.attachments[0]?.pdfPath === "quote-pdfs/x/rev-1.pdf", "#P3 final review (I3b, DB): the live findInboxDraft returns the draft's id, creation time and attachments");
   }
 
@@ -57215,7 +57257,7 @@ function p4PreviewChecks(): void {
      p4pPath("Q 1", "bom", "bom") === "/estimator-preview/Q%201?tab=bom",
     "#P4 preview: the preview path keeps the package page's Narrative / BOM toggle on the package tab");
   const stamp = Date.UTC(2026, 9, 7, 17);
-  ok(p4pHeader({ id: "Q-9", estNo: 1005, quoteType: "system", revisions: [{}, {}], updatedAt: stamp }) === "EST-1005 · Rev 2 · saved Oct 7, 2026" &&
+  ok(p4pHeader({ id: "Q-9", estNo: 1005, quoteType: "system", status: "sent", revisions: [{ rev: 1, reason: "sent", docFields: { revNo: 1 } }, { rev: 2, reason: "sent", docFields: { revNo: 2 } }], updatedAt: stamp } as never) === "EST-1005 · Rev 2 · saved Oct 7, 2026" && // #13: Rev = send number
      p4pHeader({ id: "Q-9", revisions: [], updatedAt: stamp }).startsWith("Q-9 · Rev 1 · saved"),
     "#P4 preview: the header line is the saved estimate's own number, Rev and date (no sent revision needed)");
 
@@ -57282,7 +57324,7 @@ function p4PreviewChecks(): void {
      p4pCopy.noCurtains === "This estimate has no curtains.",
     "#P4 preview: package from the live loader, BOM = the online BOM view, cut sheets in the Client style (no print CSS injected)");
   const loader = rd("src/lib/estimate-output/package-live-loader.ts");
-  ok(loader.includes("quoteDocumentDataFor(q, cust, settings)") && loader.includes("purchasePerksDocLine(perks)") && loader.includes("packageViewModel(") &&
+  ok(loader.includes("quoteDocumentDataFor(q, cust, settings, addressee)") && loader.includes("await documentAddressee(q)") && loader.includes("purchasePerksDocLine(perks)") && loader.includes("packageViewModel(") &&
      loader.includes("keyProductPhotoLinks(packagePhotoSections(doc.sections), staffPartDocHref, doc.document)") && loader.includes("coverSummary: q.coverSummary") &&
      !/sharePath|resolveSharedPackage|loadQuoteDocumentProps|"\/share\//.test(loader),
     "#P4 preview: the live loader builds from the saved quote (the print route's calls) with staff photo links — never a share token or a sent revision");
@@ -57717,7 +57759,7 @@ import type { SpecSection as P5Section } from "@/app/(app)/estimator/types";
     J(seeded.content[9]) === J({ type: "priceTable" }) && J(seeded.content[12]) === J(P("Alt words")),
     "#P5 model: seed — the intro follows narrativeBlocks (line breaks kept, '- ' bullets); a system with no narrative gets just its heading and price line");
   const kp1 = seeded.content[4] as P5PB, kp2 = seeded.content[5] as P5PB;
-  ok(J(seeded.content[3]) === J({ type: "productImage", attrs: { sectionId: "s1", lineKey: "1", sku: "SKU1", align: "right", width: 34 } }) &&
+  ok(J(seeded.content[3]) === J({ type: "productImage", attrs: { sectionId: "s1", lineKey: "1", sku: "SKU1", align: "auto", width: 34 } }) && // #20: auto
     J(kp1.attrs) === J({ sectionId: "s1", lineKey: "1", sku: "SKU1", photo: { show: false, align: "right", width: 34 } }) && kp2.attrs.photo.show === false && kp2.attrs.lineKey === "2" &&
     p5t.productBlockText(kp1) === "Fixture one paragraph.\n\nSecond para." && p5t.productBlockText(kp2) === "- f1\n- f2",
     "#P5 model: seed — product blocks for printable key products only (missing line skipped), words read back verbatim; #312: the photo is its own productImage (right, 34) before the words when kp.photo, the block's own photo hidden");
@@ -58477,7 +58519,7 @@ import type { PDBlock as P5lBlock } from "@/lib/package-doc/types";
   ok(valid(sys) && J(sys) === J([H("Lighting"), P(), { type: "systemTotal", attrs: { sectionId: "s2" } }]),
     "#P5 left pane: a system drops as a level-2 heading with its name + an empty paragraph (the cursor lands there) + its live price line (#312)");
   const line5 = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "5" }, secs, paraOf);
-  ok(valid(line5) && J(line5) === J([{ type: "productImage", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "right", width: 34 } }, { type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: false, align: "right", width: 34 } }, content: [P(T("First para.")), P(T("Second para."))] }]),
+  ok(valid(line5) && J(line5) === J([{ type: "productImage", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "auto", width: 34 } }, { type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: false, align: "right", width: 34 } }, content: [P(T("First para.")), P(T("Second para."))] }]),
     "#P5 left pane: a line drops as its productImage (right 34 %, #312) + a product block (sectionId / lineKey / sku, own photo hidden) holding its library paragraph split into paragraphs");
   const line6 = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "6" }, secs, paraOf);
   ok(valid(line6) && J((line6![1] as { content: unknown }).content) === J([P()]),
@@ -59203,7 +59245,8 @@ import * as rean312 from "@/lib/package-doc/reanchor";
   ok(JSON.stringify(rean312.reanchorDocLine(nested, "s1", "7", "Q")).includes('"sku":"Q"'), "#312 fix1: reanchorDocLine also reaches nested blocks");
 
   // 3-5. Source pins on the hook.
-  ok(hook.includes('import { reanchorDocLine } from "@/lib/package-doc/reanchor";') && hook.includes("reanchorDocLine(packageDocRef.current, secId, res.anchor.lineKey, res.anchor.sku)") && hook.includes("setPackageDoc(nd);"),
+  // #357: the same import also brings reanchorPackageDoc (moving lines re-anchors the document too).
+  ok(/import \{ reanchorDocLine(, reanchorPackageDoc)? \} from "@\/lib\/package-doc\/reanchor";/.test(hook) && hook.includes("reanchorDocLine(packageDocRef.current, secId, res.anchor.lineKey, res.anchor.sku)") && hook.includes("setPackageDoc(nd);"),
     "#312 fix1: a changed anchor rewrites the Build package document through the existing setPackageDoc");
   ok(hook.includes('if (isNaN(qty) || qty < 0 || (qty === 0 && editId == null)) qty = 1;'), "#312 fix1: an edited line keeps qty 0; only an add defaults to 1");
   ok((hook.match(/if \(lineGone\(\)\) \{\n\s+setCustomError\(GONE\);\n\s+return;/g) || []).length === 2 && hook.includes('const GONE = "That line was removed \\u2014 nothing was changed.";') &&
@@ -59241,8 +59284,8 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
      J(p5San(doc([{ type: "productImage", attrs: { width: 40, align: "full", sku: " SKU-5 ", lineKey: 5, sectionId: " s2 ", extra: 1, photo: { show: true } }, content: [P("x")] }]))) === J(doc([IMG("s2", "5", "SKU-5", "full", 40)])),
     "#312 images: the sanitizer keeps a productImage { sectionId, lineKey, sku, align, width } in that order, trims anchors, drops other attrs and any content");
   const coerced = p5San(doc([IMG("s2", "5", "A", "middle", 5), IMG("s2", "5", "A", "left", 300), IMG("s2", "5", "A", "right", 62.4), { type: "productImage", attrs: { sectionId: "s2", lineKey: "5", sku: "A", width: "x" } }]))!;
-  ok(J(coerced.content.map((b) => [(b as { attrs: { align: string } }).attrs.align, (b as { attrs: { width: number } }).attrs.width])) === J([["right", 25], ["left", 100], ["right", 62], ["right", 34]]),
-    "#312 images: align coerces to left/right/full (default right), width clamps to 25–100 and rounds (non-number → 34)");
+  ok(J(coerced.content.map((b) => [(b as { attrs: { align: string } }).attrs.align, (b as { attrs: { width: number } }).attrs.width])) === J([["auto", 25], ["left", 100], ["right", 62], ["auto", 34]]),
+    "#312 images: align coerces to auto/left/right/full (default auto since Jeff 2026-10-15 #20), width clamps to 25–100 and rounds (non-number → 34)");
   const dropped = p5San(doc([P("keep"), { type: "productImage" }, IMG("", "5", "A"), IMG("s2", "", "A"), IMG("x".repeat(65), "5", "A"), IMG("s2", "x".repeat(33), "A"), IMG("s2", "5", "x".repeat(129)),
     { type: "bulletList", content: [{ type: "listItem", content: [P("li"), IMG("s2", "5", "A")] }] }, { type: "productBlock", attrs: { sectionId: "s2", lineKey: "5", sku: "A" }, content: [P("w"), IMG("s2", "5", "A")] },
     { type: "paragraph", content: [IMG("s2", "5", "A")] }]))!;
@@ -59251,7 +59294,7 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
   const blankSku = p5San(doc([IMG("s2", "5", "")]))!;
   const once = p5San(doc([IMG("s2", "5", "SKU-5"), PB("s2", "5", "SKU-5", "w", { show: false }), IMG("s2", "5", "SKU-5", "full", 80)]))!;
   ok(J(blankSku.content[0]) === J(IMG("s2", "5", "")) && J(p5San(once)) === J(once) && once.content.length === 3 &&
-     p5s.BLOCK_NODES.includes("productImage") && (p5s.NODE_NAMES as readonly string[]).includes("productImage") && J(p5s.DEFAULT_IMAGE) === J({ align: "right", width: 34 }),
+     p5s.BLOCK_NODES.includes("productImage") && (p5s.NODE_NAMES as readonly string[]).includes("productImage") && J(p5s.DEFAULT_IMAGE) === J({ align: "auto", width: 34 }), // Jeff 2026-10-15 #20: a new image alternates
     "#312 images: a blank sku is kept (like a product block); sanitize is idempotent; productImage is in the schema lists; the default image is right at 34 %");
 
   // (2) Resolver: own photo, kind placeholder, nothing.
@@ -59308,19 +59351,19 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
   // (5) Seed + insert shapes.
   const s2 = { ...secs.find((s) => s.id === "s2")!, keyProducts: [{ lineKey: "5", sku: "SKU-5", text: "Five.", photo: true }, { lineKey: "6", sku: "SKU-6", text: "Six.", photo: false }] } as Secs[number];
   const kp = i312Kp(s2);
-  ok(J(kp.map((b) => b.type)) === J(["productImage", "productBlock", "productBlock"]) && J(kp[0]) === J(IMG("s2", "5", "SKU-5")) &&
+  ok(J(kp.map((b) => b.type)) === J(["productImage", "productBlock", "productBlock"]) && J(kp[0]) === J(IMG("s2", "5", "SKU-5", "auto")) && // #20: a seeded image is Auto
      J((kp[1] as { attrs: unknown }).attrs) === J({ sectionId: "s2", lineKey: "5", sku: "SKU-5", photo: { show: false, align: "right", width: 34 } }) && (kp[2] as { attrs: { photo: { show: boolean } } }).attrs.photo.show === false,
     "#312 images: seed — a key product with its photo flag on becomes productImage (right 34 %) then its words (photo hidden); with the flag off, words only");
   const seeded = p5Seed({ sections: [s2] });
   ok(J(seeded.content.map((b) => b.type)) === J(["heading", "paragraph", "bulletList", "productImage", "productBlock", "productBlock", "systemTotal", "priceTable"]) && J(p5San(seeded)) === J(seeded),
     "#312 images: seed — heading → intro → key products (image + words) → price line; the seed is valid");
   ok(J(i312Nodes("s1", 4, "X", "", false)) === J([{ type: "productBlock", attrs: { sectionId: "s1", lineKey: "4", sku: "X", photo: { show: false, align: "right", width: 34 } }, content: [{ type: "paragraph" }] }]) &&
-     J(i312ImgFor("s1", 4, "X", { align: "full", width: 500 })) === J(IMG("s1", "4", "X", "full", 100)) && J(i312ImgFor("s1", "4", "X")) === J(IMG("s1", "4", "X")),
+     J(i312ImgFor("s1", 4, "X", { align: "full", width: 500 })) === J(IMG("s1", "4", "X", "full", 100)) && J(i312ImgFor("s1", "4", "X")) === J(IMG("s1", "4", "X", "auto")),
     "#312 images: productNodesFor / productImageFor — words-only without a photo; image attrs default right 34, clamp like the validator");
   const allowNodes = p5l.docNodesFor({ kind: "line", sectionId: "s1", lineKey: "2" }, secs, () => "never read")!;
   const noPara = p5l.docNodesFor({ kind: "line", sectionId: "s2", lineKey: "6" }, secs, () => null)!;
-  ok(J(allowNodes.map((b) => b.type)) === J(["productImage", "productBlock"]) && J(allowNodes[0]) === J(IMG("s1", "2", "line:2")) && J((allowNodes[1] as { content: unknown }).content) === J([P()]) &&
-     J(noPara[0]) === J(IMG("s2", "6", "SKU-6")),
+  ok(J(allowNodes.map((b) => b.type)) === J(["productImage", "productBlock"]) && J(allowNodes[0]) === J(IMG("s1", "2", "line:2", "auto")) && J((allowNodes[1] as { content: unknown }).content) === J([P()]) &&
+     J(noPara[0]) === J(IMG("s2", "6", "SKU-6", "auto")),
     "#312 images: a BOM line (drag / +) always inserts its image then its words — even a line with no photo (the image shows 'No photo for this part' in the editor and prints nothing)");
   const pres = p5l.docPresence(p5San(doc([IMG("s2", "6", "SKU-6")]))!);
   ok(p5l.lineInDoc("s2", "6", pres) && !p5l.lineInDoc("s2", "5", pres), "#312 images: an image alone marks its line as in the document (the BOM tick)");
@@ -59354,8 +59397,8 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
   const it = schema.nodes.productImage;
   ok(it && it.isAtom && !it.isInline && it.spec.group === "block" && it.spec.draggable === true && J(p5eNames().nodes) === J([...p5eNodeNames].sort()) &&
      J(p5eSan(schema.nodeFromJSON(doc([IMG("s2", "5", "SKU-5", "left", 40), P("t")])).toJSON())) === J(doc([IMG("s2", "5", "SKU-5", "left", 40), P("t")])) &&
-     J(schema.nodes.productImage.create({ sectionId: "s", lineKey: "1", sku: "A" }).attrs) === J({ sectionId: "s", lineKey: "1", sku: "A", align: "right", width: 34 }),
-    "#312 images: the editor schema registers productImage (block atom, draggable, attrs default right 34) matching schema.ts, round-tripping through the sanitizer");
+     J(schema.nodes.productImage.create({ sectionId: "s", lineKey: "1", sku: "A" }).attrs) === J({ sectionId: "s", lineKey: "1", sku: "A", align: "auto", width: 34 }),
+    "#312 images: the editor schema registers productImage (block atom, draggable, attrs default auto 34 — #20) matching schema.ts, round-tripping through the sanitizer");
   const pmDoc = schema.nodeFromJSON(doc([P("a"), PB("s2", "5", "SKU-5", "w", { align: "left", width: 40 }), P("b")]) as never);
   const st0 = P312State.create({ schema, doc: pmDoc });
   const tr = st0.tr;
@@ -59404,7 +59447,7 @@ import { NodeSelection as F312NodeSel, EditorState as F312State } from "@tiptap/
   const iv = rd(`${ED}/product-image-view.tsx`), pbv = rd(`${ED}/product-block-view.tsx`), ed = rd(`${ED}/package-doc-editor.tsx`);
   const view = rd("src/components/package-doc/package-doc-view.tsx");
   // (1) the image sits above the following block's positioned wrapper; (2) clears earlier floats.
-  ok(/position: "relative",\s*zIndex: selected \? 5 : 2,\s*\.\.\.wrapperStyle\(img\)/.test(iv) && iv.includes("zIndex: 4"),
+  ok(/position: "relative",\s*zIndex: selected \? 5 : 2,\s*\.\.\.wrapperStyle\((img|shown)\)/.test(iv) && iv.includes("zIndex: 4"), // #352 M4: `shown` = the previewed side
     "#312 fix round 1: the image's float wrapper is position: relative with z-index 2 (5 selected), above the next product block's own relative wrapper, and the strip sits inside it");
   ok((iv.match(/clear: "both"/g) || []).length === 3 && view.includes(".pd-doc .pd-image { clear: both; }") && ed.includes(".pd-ed-prose .node-productImage { clear: both; }"),
     "#312 fix round 1: an image starts below any earlier float — editor wrapper (all three aligns), .node-productImage and print .pd-image clear both");
@@ -59423,7 +59466,7 @@ import { NodeSelection as F312NodeSel, EditorState as F312State } from "@tiptap/
   const did0 = f312Add(t0, at0);
   const out0 = t0.doc.toJSON() as { content: Array<{ type: string; attrs?: Record<string, unknown> }> };
   ok(did0 && t0.steps.length === 1 && J(out0.content.map((n) => n.type)) === J(["paragraph", "productImage", "productBlock"]) &&
-     J(out0.content[1].attrs) === J({ sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "right", width: 34 }) &&
+     J(out0.content[1].attrs) === J({ sectionId: "s2", lineKey: "5", sku: "SKU-5", align: "auto", width: 34 }) && // #20: Auto
      t0.selection instanceof F312NodeSel && t0.selection.node.type.name === "productImage",
     "#312 fix round 1: Add photo inserts a default productImage with the block's anchors right before it, selected, in one step");
   const t1 = F312State.create({ schema, doc: t0.doc }).tr;
@@ -67264,7 +67307,7 @@ async function gridNotes9Checks(): Promise<void> {
   await serve9(true);
   ok(/-h0-c[0-9a-f]{8}-v3\.zip$/.test(got9[0]) && /-h1-c[0-9a-f]{8}-v3\.zip$/.test(got9[1]) && built9.join() === "false,true", "Grid notes #9 review: a download reads the cache under its resolved header and builds with exactly that header");
   const zsrc9 = src9("src/lib/estimate-output/package-zip-server.ts");
-  ok(zsrc9.includes("resolvePeakHeader(q.packagePeakHeader, await loadPeakHeaderDefault())") && zsrc9.includes("packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader, bookCoverFingerprint(front.cover, front.letterhead))") && zsrc9.includes("d.build(pkg.q, pkg.rev, peakHeader, front)"),
+  ok(zsrc9.includes("resolvePeakHeader(q.packagePeakHeader, await loadPeakHeaderDefault())") && zsrc9.includes("const frontKey = zipFrontKey(front);") && zsrc9.includes("packageZipCachePath(pkg.q.id, pkg.rev.rev, peakHeader, zipKeyWithSpecs(frontKey, specKey))") && zsrc9.includes("d.build(pkg.q, pkg.rev, peakHeader, front)"),
     "Grid notes #9 review: servePackageZip resolves the header once (estimate's choice ?? company default) for both the cache key and the build");
 
   // Toggle actions: a boolean or null only, the D94 toggle gated on create; the Grid menu never guesses ON.
@@ -68039,7 +68082,7 @@ import { canonicalBonusSections as bnCanon } from "@/lib/estimate-bonus/canonica
 
 {
   const bnHook = readFileSync(join(process.cwd(), "src/app/(app)/estimator/use-estimator-state.ts"), "utf8");
-  const bnFx = bnHook.indexOf("withBonusLines(cur, nextId)");
+  const bnFx = bnHook.indexOf("withBonusLines(cur, nextId, bonusRatesFor(status, cur, bonusRates))"); // Jeff 2026-10-15 #19: the draft's rates
   const bnFxStart = bnHook.lastIndexOf("useEffect(", bnFx);
   const bnFxBody = bnHook.slice(bnFxStart, bnHook.indexOf("}, [sections, status]);", bnFx) + 30);
   ok(bnFx > 0 && /bonusRulesApply\(\{ source: initial\.bonusSource, quoteType: initial\.bonusQuoteType, status \}, cur\)/.test(bnFxBody), "#bonus client pin: the effect gates on bonusRulesApply with the hook's own status, judged on the current sections");
@@ -68175,7 +68218,7 @@ import { repriceForTier as bnfReprice } from "@/app/(app)/estimator/tier-reprice
   const save = hook.slice(hook.indexOf("const saveNow = async"), hook.indexOf("const doSave ="));
   ok(/const statusBeforeSave = baseStatus;/.test(save) && /syncBonusAfterStatus\(statusBeforeSave, res\.status\);\s*setStatus\(res\.status\);/.test(save), "#bonus M5 source pin: a save that moves to/from Won refreshes the bonus card");
   const sum = bnfRead("src/app/(app)/estimator/review-cost-summary.tsx");
-  ok(sum.includes("5% package bonus (payout)") && sum.includes("bonusSum(isPackageBonusItem, (it) => it.qty * it.cost)"), "#bonus M8: the cost summary shows the 5% as its payout (package line cost)");
+  ok(sum.includes("Package bonus (payout)") && sum.includes("bonusSum(isPackageBonusItem, (it) => it.qty * it.cost)"), "#bonus M8: the cost summary shows the 5% as its payout (package line cost)");
   const pr = bnfRead("src/app/(app)/estimator/pricing.ts");
   const prDoc = pr.slice(pr.lastIndexOf("/**", pr.indexOf("function customerLinesRaw(")), pr.indexOf("function customerLinesRaw("));
   ok(/bonus: "package"/.test(prDoc) && /bonus: "estimator"/.test(prDoc) && /absorbSellAdjustment/.test(prDoc), "#bonus M11: customerLinesRaw's doc comment covers the 5% fold and the 2% spread");
@@ -68558,7 +68601,7 @@ async function gridNotes8Checks(): Promise<void> {
     const bad2 = await route8.GET(req8("10.8.0.2"), { params: Promise.resolve({ id: QID8, token: `${Date.now() + 86_400_000}.1.${"A".repeat(43)}` }) });
     const shareSrc = rd8("src/app/share/quote/[id]/[token]/datasheets.pdf/route.ts");
     ok(bad1.status === 404 && bad2.status === 404 && shareSrc.includes('rateLimit("share-zip:" + (clientIp(req) || "unknown"), SHARE_ZIP_PER_WINDOW, SHARE_ZIP_WINDOW_MS)') &&
-       shareSrc.indexOf("rateLimit(") < shareSrc.indexOf("isShareTokenV2(token)") && shareSrc.indexOf("isShareTokenV2(token)") < shareSrc.indexOf("resolveSharedPackage(") &&
+       shareSrc.indexOf("rateLimit(") < shareSrc.indexOf("isPackageToken(token)") && shareSrc.indexOf("isPackageToken(token)") < shareSrc.indexOf("resolveSharedPackage(") &&
        shareSrc.includes("serveSharedBook(pkg, {}, startedAt)") && shareSrc.includes("export const maxDuration = 120;"),
       "Grid notes #8: the share download uses package.zip's share-zip: bucket, refuses a malformed or forged token with the uniform 404, then serves the pinned revision's book");
     const pkg8 = { q: q8, rev: rev8, state: { kind: "ok" }, currentPath: null } as never;
@@ -69706,7 +69749,7 @@ import { qd293Sections as p3QdSections, renderQuoteDocument293 as p3RenderQd } f
       locationId: locId, contactName: contactName || "", quoteNote: (q.quoteNote as string) ?? "", assumptions: (q.assumptions as string) ?? "",
       owner: (q.owner as string) || "", preparedBy: (q.preparedBy as string) || "", paymentTerms: (q.paymentTerms as string) || "Unknown",
       sections: p3NormOrder(spec.sections as never, groups), groups, vendorQuotes: (q.vendorQuotes as never) || [], pdfOptions: p3NormPdf(q.pdfOptions),
-      revNum: Math.max(1, (q.revisions as unknown[])?.length || 1), revDateMs: (q.updatedAt as number) || 0,
+      revNum: n293tFStamp(q as never).revNum, revDateMs: (q.updatedAt as number) || 0,
       source: q.source === "portal-catalog" ? "portal-catalog" : null, portalFirm: q.source === "portal-catalog" ? ((q.portalFirm as never) ?? null) : null,
       customers: [...others, custLite], companyName: settings.companyName, logoDark: settings.logoDark, rewardsLine,
     };

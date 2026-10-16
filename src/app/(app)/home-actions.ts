@@ -8,8 +8,10 @@ import {
   remove as removeQuote,
   setStatus as setQuoteStatus,
   statusFailureMessage,
+  get as getQuote,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
+import { REOPENED_AT_WON_NOTICE, reopenedAtWonVersion } from "@/lib/quote-won-version";
 import { promoteDesignAction as promoteFromDesigns } from "./design/designs/actions";
 
 /**
@@ -18,7 +20,8 @@ import { promoteDesignAction as promoteFromDesigns } from "./design/designs/acti
  */
 
 /** What the stage sheet gets back (#174) — see `setQuoteStatusAction`. */
-export type StageMoveResult = { ok: true } | { ok: false; error: string };
+/** `notice` (#355 review M8) — set when the move reopened a won estimate at the version that won. */
+export type StageMoveResult = { ok: true; notice?: string } | { ok: false; error: string };
 
 /**
  * Stage sheet "Move to stage" (prototype setStatus).
@@ -39,8 +42,10 @@ export async function setQuoteStatusAction(
   const user = await requireUser();
   if (!(STAGES as readonly string[]).includes(status))
     return { ok: false, error: "That isn’t a stage a quote can move to." };
+  const before = await getQuote(id);
+  let after: Awaited<ReturnType<typeof setQuoteStatus>> = null;
   try {
-    await setQuoteStatus(id, status as QuoteStatus, user.name);
+    after = await setQuoteStatus(id, status as QuoteStatus, user.name);
   } catch (e) {
     // Next signals redirect/notFound by throwing; nothing in the try does
     // either today, but a catch in the app directory must never eat one.
@@ -54,7 +59,7 @@ export async function setQuoteStatusAction(
     };
   }
   revalidatePath("/", "layout");
-  return { ok: true };
+  return reopenedAtWonVersion(before, after) ? { ok: true, notice: REOPENED_AT_WON_NOTICE } : { ok: true };
 }
 
 /** Stage sheet "Delete" (prototype removeQuote). */

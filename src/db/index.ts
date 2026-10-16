@@ -139,6 +139,26 @@ export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
   );
 }
 
+/**
+ * Run `fn` so a failure inside it can never poison the surrounding transaction (#348).
+ *
+ * A SQL error inside a Postgres transaction aborts the WHOLE transaction — every later
+ * statement fails with "current transaction is aborted" — so a JS `try/catch` around a
+ * best-effort write (e.g. a carry-over that must never undo a win) cannot contain it.
+ * Inside an ambient transaction this runs `fn` in a nested drizzle transaction, which is
+ * a SAVEPOINT on both drivers (pglite: `savepoint spN` / `rollback to savepoint`;
+ * postgres-js: `client.savepoint`), with the nested handle installed as the ambient one
+ * for the duration so `getDb()` inside `fn` uses it. A throw rolls back only to the
+ * savepoint and is rethrown to the caller. Outside any transaction it just runs `fn()`.
+ */
+export async function withSavepoint<T>(fn: () => Promise<T>): Promise<T> {
+  const active = transactionStore.getStore();
+  if (!active) return fn();
+  return (active as unknown as { transaction: (work: (tx: Db) => Promise<T>) => Promise<T> }).transaction(
+    (tx) => transactionStore.run(tx, fn)
+  );
+}
+
 /** Drizzle's `.execute()` comes back shaped differently per driver: PGlite
  *  wraps its rows in `{ rows: [...] }` — confirmed directly against it in
  *  the regression harness. postgres-js's raw result is array-like instead

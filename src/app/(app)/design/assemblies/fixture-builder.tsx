@@ -68,7 +68,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
   }
   const mergePart = (hit: PartHit) => setParts((prev) => {
     const existing = prev.find((p) => p.sku === hit.sku);
-    if (existing && existing.pricedAt === hit.pricedAt && existing.cost === hit.cost && existing.list === hit.list) return prev;
+    if (existing && existing.pricedAt === hit.pricedAt && existing.priceDate === hit.priceDate && existing.cost === hit.cost && existing.list === hit.list) return prev;
     return [...prev.filter((p) => p.sku !== hit.sku), hit];
   });
 

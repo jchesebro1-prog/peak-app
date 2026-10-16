@@ -2,10 +2,10 @@ import { printableKeyProducts, resolveKeyProducts } from "@/app/(app)/estimator/
 import { systemPrintsInBody } from "@/app/(app)/estimator/quote-document-view";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import { groupBlocks, type SystemGroup } from "@/lib/estimate-groups/groups";
-import { clampPhotoWidth, DEFAULT_IMAGE, DEFAULT_PHOTO, DOC_VERSION, isPhotoAlign } from "./schema";
+import { clampPhotoWidth, DEFAULT_IMAGE, DEFAULT_PHOTO, DOC_VERSION, isImageAlign } from "./schema";
 import { sanitizePackageDoc } from "./sanitize";
 import { textToBlocks, textToParagraphs } from "./text";
-import type { PackageDoc, PDBlock, PDHeading, PDProductBlock, PDProductImage, PDSystemTotal, PhotoAlign, PhotoAttrs } from "./types";
+import type { PackageDoc, PDBlock, PDHeading, PDProductBlock, PDProductImage, PDSystemTotal, ImageAlign, PhotoAttrs } from "./types";
 
 /**
  * Estimator Phase 5 — "Start the document": a first draft built from the
@@ -59,13 +59,13 @@ export function productBlockFor(
   };
 }
 
-/** #312 — one product's photo as its own piece (right at 34 % unless given). */
-export function productImageFor(sectionId: string, lineKey: string | number, sku: string, img?: { align?: PhotoAlign; width?: number }): PDProductImage {
+/** #312 — one product's photo as its own piece (34 %, align "auto" — alternating — unless given; Jeff 2026-10-15 #20). */
+export function productImageFor(sectionId: string, lineKey: string | number, sku: string, img?: { align?: ImageAlign; width?: number }): PDProductImage {
   const align = img?.align;
   const width = img?.width;
   return {
     type: "productImage",
-    attrs: { sectionId, lineKey: String(lineKey), sku, align: isPhotoAlign(align) ? align : DEFAULT_IMAGE.align, width: width === undefined ? DEFAULT_IMAGE.width : clampPhotoWidth(width) },
+    attrs: { sectionId, lineKey: String(lineKey), sku, align: isImageAlign(align) ? align : DEFAULT_IMAGE.align, width: width === undefined ? DEFAULT_IMAGE.width : clampPhotoWidth(width) },
   };
 }
 

@@ -54,7 +54,7 @@ export function BonusCard(props: {
       <div style={CARD_LABEL}>Estimator bonus</div>
       <div style={{ fontSize: 11, color: "#9aa0ab" }}>Internal — never shown to the customer</div>
       <div style={ROW}>
-        2% on this estimate: <strong>{fmt(estimatorBonus)}</strong>
+        Estimator bonus on this estimate: <strong>{fmt(estimatorBonus)}</strong>
       </div>
       {showSplitRow(owner, preparedBy) && (
         <div style={{ ...ROW, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>

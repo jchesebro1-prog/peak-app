@@ -12,6 +12,8 @@ import { useRouter } from "next/navigation";
 import type { ReaderVM } from "./types";
 import { setLinkAction } from "./actions";
 import { LINK_TYPE_OPTIONS, newQuoteHref, type LinkWorkType } from "@/lib/inbox-links";
+import { VENDOR_COPY } from "@/lib/vendor-quotes/rules";
+import FileThreadDialog from "./file-thread-dialog";
 import { ACCENT_BTN, BTN, CARD, H, MUTED, SELECT } from "./sidebar-styles";
 
 export default function WorkLinkCard({
@@ -27,6 +29,7 @@ export default function WorkLinkCard({
   const [open, setOpen] = useState(mode === "edit");
   const [linkType, setLinkType] = useState<LinkWorkType>("quote");
   const [busy, setBusy] = useState(false);
+  const [fileOpen, setFileOpen] = useState(false);
   const options = open ? vm.linkOptions[linkType] || [] : [];
   // picking a record on an unlinked thread also adopts the resolved customer
   // (port of Comm Thread onLinkRec — unchanged from the inline picker)
@@ -144,7 +147,18 @@ export default function WorkLinkCard({
         >
           + New quote
         </button>
+        {!vm.readOnly && (
+          <button
+            type="button"
+            onClick={() => setFileOpen(true)}
+            title="Link this email to an estimate or project, with the vendor it came from"
+            style={BTN}
+          >
+            {VENDOR_COPY.fileButton}
+          </button>
+        )}
       </div>
+      {!vm.readOnly && fileOpen && <FileThreadDialog vm={vm} onClose={() => setFileOpen(false)} />}
       {mode === "edit" && open && (
         <>
           {vm.resolvedCustomerId ? (

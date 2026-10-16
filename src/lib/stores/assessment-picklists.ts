@@ -5,6 +5,8 @@ import { ASSESSMENT_LOCK_NAMESPACE, withAdvisoryLock } from "@/db";
 import { getBlob, setBlob } from "@/db/doc-store";
 import { ASSESSMENT_DEF } from "@/lib/assessments/defs";
 
+import { FIXED_PICK_LISTS } from "@/lib/assessments/defs/picklists";
+
 export const ASSESSMENT_PICKLISTS_BLOB = "assessment_picklists";
 
 export type PicklistExtra = { value: string; label: string; retired?: boolean };
@@ -50,6 +52,7 @@ export async function getPicklistExtras(): Promise<PicklistExtras> {
  *  built-in or earlier-added label (retired ones included). */
 export async function addPicklistValue(listId: string, label: string): Promise<{ ok: true } | { ok: false; error: string }> {
   if (UNSAFE_KEYS.has(listId) || !Object.hasOwn(ASSESSMENT_DEF.pickLists, listId)) return { ok: false, error: "Unknown pick list" };
+  if (FIXED_PICK_LISTS.has(listId)) return { ok: false, error: "This list is fixed" };
   const clean = String(label ?? "").trim().replace(/\s+/g, " ");
   if (!clean) return { ok: false, error: "Enter a label" };
   if (clean.length > LABEL_MAX) return { ok: false, error: `A label can be at most ${LABEL_MAX} characters` };

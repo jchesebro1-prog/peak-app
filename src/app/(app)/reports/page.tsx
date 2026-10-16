@@ -26,9 +26,14 @@ export default async function ReportsPage({
           <div className="pk-h1">Reports</div>
           <div className="pk-page-sub">Pipeline health, quoting performance, backlog and billing forecast — pick the widgets you want.</div>
         </div>
-        <Link href="/reports/estimator-bonuses" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
-          Estimator bonuses →
-        </Link>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <Link href="/reports/sourcing" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
+            Most-quoted products →
+          </Link>
+          <Link href="/reports/estimator-bonuses" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
+            Estimator bonuses →
+          </Link>
+        </div>
       </div>
       <WidgetHost user={user} surface="reports" sp={sp} />
     </HomeTabs>

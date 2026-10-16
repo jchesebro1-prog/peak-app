@@ -1071,7 +1071,8 @@ See `.env.example`.
     nothing creates a quote any more; drafts made before keep their banner.
     The gate (`src/lib/assist/config.ts`): no `ANTHROPIC_API_KEY` (or local URL) =
     no UI and no call; `ASSIST_DISABLED=true` kills it; `settings.assistUsers`
-    must include the user (**an empty list means nobody**); per-feature toggles.
+    must include the user (**an empty list means nobody**); per-feature toggles
+    (a later one, `vendorpdf` — Read the PDF on a vendor quote — is #348 slice 5, phase 62).
     Every call goes through `runAssist` (`src/lib/assist/run.ts`: gate, $200
     monthly cap, per-hour rate limit — the estimate counted once on the extract
     step — provider with a local → Haiku fallback, zod, log) over one provider
@@ -1202,6 +1203,9 @@ See `.env.example`.
     try Listen in the car. Follow-ups: whole-doc writers that can clobber
     leases, per-process Rebuild limit, every user's build scanning all threads
     and quotes. Next: AI sidebar. Punch item #337.
+    ✅ Follow-up (#350, D1083–D1085): the card is three blocks — Emails, Estimates,
+    Tasks (`src/lib/brief/blocks.ts`) — with the Do-these-first picks as ★ in their
+    own block, on the phone and in Listen too; presentation and prompt wording only.
 
 57. ✅ **Estimate suggestion** (#338, D930–D942) — roadmap piece 3, replacing
     #334's Draft estimate, for Assist pilot users with the **Suggest estimate**
@@ -1364,7 +1368,7 @@ See `.env.example`.
     re-link old hand-made customer links that should be shared, try two
     accounts on production. Punch item #341.
 
-61. 🚧 **Venue Assessment notes** (#344, D1019–D1032, D1038–D1051, D1072–D1082) — Jeff's Oct 14 notes on
+61. 🚧 **Venue Assessment notes** (#344, D1019–D1032, D1038–D1051, D1208–D1218) — Jeff's Oct 14 notes on
     the Venue Assessments (`FS-####`) editor, three slices on one branch
     (spec `docs/superpowers/specs/2026-10-14-venue-assessment-notes-design.md`).
     ✅ **Slice A (form structure & flow):** a new section order with **Kill
@@ -1408,7 +1412,7 @@ See `.env.example`.
     the editor shows. No migration, no env var. **No instant rollback past the
     slice B merge** — a slice A build reads list goals as empty and deletes them
     on the next save; roll forward.
-    🚧 **Slice C (drawing & photo capture, D1072–D1082) — built on
+    🚧 **Slice C (drawing & photo capture, D1208–D1218) — built on
     `feat/344-va-notes`, NOT on main until Jeff's iPad + Apple Pencil test:**
     a Pencil-first ink pad (`src/components/ink/`, pure model `src/lib/ink/`;
     palm rejection, Draw with finger) saving strokes JSON + a flattened JPEG;
@@ -1426,12 +1430,169 @@ See `.env.example`.
     (`save-stamp.ts`, hidden `_saveSeqs` with `fullSeq`) and file-only writes
     that never bump rev; a streamed field-sheet PDF with photos and sketches
     (`/api/surveys/[id]/sheet-pdf`); 3D Orbit / Plan / Section / Elevation +
-    Wireframe. Replaced files stay in Blob (D1079). No migration, no env var.
+    Wireframe. Replaced files stay in Blob (D1215). No migration, no env var.
     Remaining: Jeff's iPad test (script in PUNCHLIST #344), then merge; plus
     Jeff-gated: review the internal tag
     list and the pick lists in `field-lists.ts`, tell the reps older surveys
     ask for Scope first, send the CW Elevation and line set schedule sheets,
     try a real assessment end to end. Punch item #344.
+62. 🚧 **Estimate parties — slices 1, 2a, 2b-i, 2b-ii, 3, 4, 5 + 6** (#348, D1058–D1062, D1074–D1097, D1105–D1119, D1140–D1157, D1166–D1184) — Jeff, Oct 14: an
+    estimate can name more than one company. Slice 1 is the parties core: a
+    `record_parties` doc collection (migration 0041; id `pty_` + sha1 of
+    record type, record id, company and role) with roles owner · gc · ec ·
+    architect · consultant · vendor · other (typed label), at most one owner
+    per record, soft-delete and revive. Pure rules in `src/lib/parties/`
+    (`rules.ts`, `vm.ts`), store `src/lib/stores/parties.ts`, server view
+    `view-server.ts`. One shared editor (`src/components/parties/`) sits on
+    the lead drawer, an Estimator Parties chip and the project page, and the
+    company page gains a Bids & roles card (live records only). Parties carry
+    lead → estimate (everything except GC/EC) on first save and on convert,
+    and estimate → project on creation — all three (estimate save, lead
+    convert, project spawn) run through `withSavepoint`
+    (`src/db/index.ts`) so a failed copy never undoes a save or a win. The
+    opportunity board skips a lead that has a non-lost estimate (they carry
+    the value and inherit its forecast; a lead whose estimates are all lost
+    stays on the board) and the lead drawer lists them with a total.
+    A company on any live party row can't be deleted. Writes need `create`.
+    Tests: `scripts/test-parties.ts` (in test:specs). Remaining: slices 2–6
+    (spec §10: bids, split systems, vendors, Read the PDF, portal + reports).
+    Renumber migration 0041 at merge if another branch lands one first. Not on
+    a preview: do not deploy a Vercel preview of this branch — previews share
+    the production Neon DB and skip migrations, so `record_parties` doesn't
+    exist there and every company page (Bids & roles card), the lead drawer
+    card, the project card and company delete would throw. After the merge
+    deploy applies 0041, on a throwaway customer: link an owner and a GC on
+    a lead, convert it / save an estimate from it (the owner carries, the GC
+    doesn't), mark it Won so a project spawns, and confirm the project lists
+    the owner — the only real run of the postgres-js savepoint path — then
+    delete the test records.
+    ✅ Slice 2a (D1074–D1078, Oct 15) — bids: `Quote.bid` `{dueAt, addenda,
+    awardedPartyId}` (one writer `patchQuoteBid`; not content in 2a and never
+    bumps `updatedAt` — 2b re-adds both with a PDF re-render) plus per-bidder state on the quote's GC/EC party rows (`setPartyBid`),
+    composed by `src/lib/stores/bids.ts`; pure rules in `src/lib/parties/`.
+    Every bid write takes the quote row lock first (`withQuoteRowLock`, the
+    order `setStatus` uses). A Bid chip (due date + addenda) in the Estimator
+    header and a Bidders card on Send & track: add GC/EC, submit via email or
+    the bidder's own bid site (per-bidder link; a company default is deferred),
+    GC bid #, **Mark submitted** (a manual Rev N stamp, the stand-in for
+    emailed bids until 2b), Award / Undo award. The owner stays the customer
+    (venue ids are per company); the winner is `bid.awardedPartyId`, other
+    pending bidders become "Lost the award", and the project stamps
+    `billToCompanyId` at Won (own savepoint); losing bidders (lost / withdrew /
+    no bid) don't carry to the project. Surfaced on the Quotes hub
+    ("Out to bid"), ⌘K by bidder name, Morning triage "bid due" and the
+    project's Bill to. Remaining: 2b (per-bidder PDFs, client links, send to
+    all), then slices 3–6; prod check adds due date → two bidders → Award →
+    Won → Bill to. Punch item #348.
+    ✅ Slice 2b-i (D1079–D1082, Oct 15) — addressed documents + per-bidder
+    PDF: a customer document is addressed explicit bidder → awarded bidder →
+    none (venue always from the owner; "Prepared for <GC>", an "Owner: …"
+    line and a "Bid due … · Addenda acknowledged: …" line only when
+    addressed) through the print route, document loader (web / portal /
+    share), cover and package-live loaders; the in-app live BOM preview, the
+    datasheet-book cover and cut sheets stay owner-addressed, and a frozen
+    sent revision shows the live awarded bidder. `bid` is content only once
+    awarded (`quoteContentKey`; still no `updatedAt` bump), and Award / Undo
+    schedule a PDF re-render. The Bidders card's Download PDF hits
+    `GET /api/quotes/[id]/bidder-pdf/[partyId]`, a signed `?bidder=` print
+    variant (strict — a bad bidder is a 404) rendered on demand, named
+    `Peak – <project> – <bidder> – Rev N.pdf`.
+    ✅ Slice 2b-ii (D1086–D1096, Oct 15) — send to bidders: the Bidders card
+    gains Send / Retry per email bidder and **Send to all bidders** (one server
+    call per bidder under the per-quote claim; row failures stamp `failed` and
+    the walk continues, quote-level refusals stop it, a maybe-sent Gmail result
+    is `failed.unknown` with a confirmed Retry). Each email carries its own
+    bidder PDF (the sent revision rendered for that bidder, stored under
+    `quote-pdfs/<id>/bidder-…`) and a **v3 client link** (`<exp>.<rev>.<hex>.<mac>`,
+    same nonce as v1/v2 so Revoke kills it) to a package page addressed to the
+    bidder; lost / withdrew / no-bid pages open read-only as "This bid is
+    closed.", responses carry `partyId`, and opens count per bidder row
+    (`opens`, never `Quote.shareOpens`). Bidder revisions are sent revisions,
+    a revised bid gets an "(Addendum N)" subject, and Mark submitted stays for
+    website rows. Open for Jeff: owner Rewards line on bidder copies, the shared
+    response budget, addendum acknowledgement after a send.
+    ✅ Slice 3 (D1097, Oct 15) — split systems: Move system → New estimate
+    (one system per move) puts the new estimate on the source's live lead
+    and copies the source's non-bidder companies; Move → existing copies
+    nothing.
+    ✅ Slice 4 (D1105–D1117, Oct 15) — vendors: a vendor quote links a vendor
+    company (live `vendor`/`manufacturer` or legacy spellings, validated on
+    save and on move/copy; the vendor party is added once, removal refused
+    while a live quote names it); Gmail attachments are listed by reference
+    and served through `/api/inbox/attachments/…`; the Inbox gains **Add as
+    vendor quote…** (the `?vq=<thread>~<message>~<index>` URL hand-off,
+    PDF-only, copied server-side under 25 MB and stripped from the URL before
+    the copy) and **File to estimate / project…**. A Vendors card (Build
+    package → BOM quote, Send & track), "Quotes we've received" and project
+    Procurement read vendor quotes and filed vendor threads. The broker rule:
+    reads use `canSeeThread` (SQL `canSeeThreadCond`, then JS; never a body,
+    snippet or count of an invisible thread), writes use `ownThread`.
+    ✅ Jeff's bid follow-ups (D1118–D1119, Oct 15): each bidder gets its own
+    response limit and cap, and an addendum added to a sent estimate moves it
+    back to Draft, so Send revision goes to every pending bidder.
+    ✅ Slice 5 (D1140–D1157, Oct 15) — **Read the PDF**: the Assist feature
+    `vendorpdf` (opt-in, pilot users; Haiku 5.5, Try harder on Sonnet 5.5; env
+    `ASSIST_MODEL_VENDORPDF` / `…_HARD`; 30 reads per user per hour) reads a vendor
+    quote's PDF into the Estimator's vendor quote form. Documents are Claude-only
+    (`ProviderRequest.document`; never the local provider; the button is hidden
+    without a key). Bytes come only from a Blob path the vendor quote owns or the
+    form's data-URL, size-checked first (about 23.8 MiB after base64, 100 pages),
+    under a deadline of about 108 s from the action's start. Pure checks flag and
+    never fix (line math, sum against total, catalog chip, exact-name vendor
+    company, freight pre-tick); freight and tax stay inside the total; Description
+    is prefilled when blank. `VendorQuote.extracted` is server-verified on save by
+    run hash (Move / Copy verify but never score), accuracy is scored once at the
+    first save, any later read replaces the earlier run, and Settings → Assist
+    pilot → Vendor PDFs reports by model and vendor. Pure modules in
+    `src/lib/vendor-pdf/`; tests in `scripts/test-vendors.ts`.
+    ✅ Slice 6 (D1166–D1184, Oct 15) — portal + reports. **Portal bidder rule:**
+    a GC/EC with a grant sees, read-only, the estimates it bid on — its own
+    latest revision (delivered to it, or frozen to it after the award; a
+    frozen one counts without `revSent`), result pending or awarded, Lost shown
+    as "Closed", Won to the awarded bidder only, Draft "being revised". One
+    gate: `portalOnlineEstimateState` in `src/lib/quote-pdf/portal-access.ts`
+    composes `portalBidState` (`src/lib/parties/portal-bid.ts`) with rows passed
+    explicitly (none = unavailable); `portal-bid-server.ts` is the only portal
+    reader of `record_parties`; every portal write stays customer-only. The
+    online page is addressed to the bidder, and its PDF renders on demand at that
+    revision (`renderBidderPdf` with `rev`, 6/min per grant, `maxDuration = 60`;
+    a non-404 failure shows one line and logs the reason). **Owner Scope only:**
+    once an estimate has bidders, the owner's portal shows a BOM with no prices
+    (`portal-owner-bom.ts`; no PDF, photos, Accept, Refresh, Copy or Rename;
+    vendor lines show the description only), sticky via the store-owned
+    `Quote.bidScopeOnly` stamp (`markBidScopeOnly`; set by `addBidder` and by
+    re-adding a removed bidder company; soft-deleted rows count; carried by
+    Move/Copy system → New estimate for the same customer, fail-closed; not by
+    a Move/Copy into an existing estimate). Portal only — staff Send & track and
+    the owner's client links are unchanged. **Report:** Reports → Bids by GC/EC
+    (`bids-by-bidder`; `bid-report.ts`, `bid-report-server.ts`,
+    `_dashboard/widgets/bids.tsx`; no perm, after Pipeline by estimator in the
+    preset): Sent = delivered, Open = pending on a draft/sent estimate, GC
+    awarded = awarded + lost, Awarded to us, Withdrew/no bid apart, rate =
+    awarded ÷ decided ("—" if none), period = due date (a future one counts as
+    now) else last send, one row per company and role, bounded to 5,000 rows.
+    Tests: `scripts/test-bids.ts` (in test:specs), including the portal file
+    inventory.
+    Remaining: Jeff's confirms and prod checks for slices 5 and 6 (PUNCHLIST
+    #348). All #348 slices are built.
+
+63. ✅ **Mailbox identity** (#349, D1063–D1073) — mailbox ownership follows the user's id (`CommThread.mailboxOwnerId`; one rule `ownsMailbox`, stamp → Gmail key → a name only one user holds, else nobody; `ownMailboxCond` in SQL; viewers from `src/lib/mailbox-viewer.ts`), assignments carry `assignedToId`, creators refuse a blank owner, legacy threads stamp lazily in write guards and via `npm run comms:stamp-owners` (Jeff-gated prod run; shared names get the `"unresolved"` tombstone), a rename or new hire never moves mail (`src/lib/mailbox-names.ts`), and Settings → Team refuses duplicate names. Punch item #349.
+
+64. ✅ **Move lines between systems** (#357, D1201–D1207) — on the Estimator's
+    Build step, tick lines (or ⇄ one) and move them to another system, a New
+    system… (inserted after the source) or Another estimate… (lands as one
+    "<name> (moved)" system through `moveSystemToEstimateAction`). A preview
+    lists every side effect first. Lines keep their prices byte-for-byte;
+    partners travel (curtain ↔ track per `linkCurtainTracks`, whole labor
+    groups); a typed system price clears on both sides; stars and labor drafts
+    follow, re-minted on collision. Lines are addressed by `{ sectionId, id }`
+    because ids are unique per system only. The server now re-ids colliding
+    ids on any move or copy into an existing estimate (`reid.ts`), and the
+    package document's anchors follow a move (`package-doc/reanchor.ts`). Pure
+    rules in `src/lib/estimate-line-move/`; UI `move-lines-bar.tsx`; checks in
+    `scripts/test-estimate-line-move.ts`. No migration. Remaining: Jeff tries
+    it in production; follow-up for `removeItem` / `patchItem` bare-id
+    matching on estimates that already hold duplicate ids. Punch item #357.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

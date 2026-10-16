@@ -126,6 +126,15 @@ function condKeys(c: Cond | undefined, out: string[] = []): string[] {
   return out;
 }
 
+/** Jeff 2026-10-15 #8 — the rigging depth in force: the form's `rigging.depth` answer ("screen" = Quick check,
+    "full" = Full inspection), else the S2 scope's own depth (the visit type's default). The same reading rules R6 / R7
+    use (RIG_FULL in defs/rules.ts). */
+export function riggingDepth(answers: Answers, scopes: ScopeSel[]): Depth {
+  const v = valueOf(answers["rigging.depth"]);
+  if (v === "full" || v === "screen") return v;
+  return scopes.find((s) => s.code === "S2")?.depth === "full" ? "full" : "screen";
+}
+
 interface Pass { modules: Set<string>; visible: Set<string>; fired: Rule[] }
 
 export function evaluate(input: EvalInput): EvalResult {

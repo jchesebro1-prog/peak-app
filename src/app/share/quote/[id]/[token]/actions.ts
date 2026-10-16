@@ -9,7 +9,7 @@ import { openIpKey, recordSharedOpen, SHARE_OPEN_PER_MIN } from "@/lib/quote-sha
 
 /**
  * #301 slice B — the package page's server actions. Public (the share route
- * is outside the team login). Every action re-verifies the v2 token itself.
+ * is outside the team login). Every action re-verifies the v2 (or bidder v3) token itself.
  * Slice C: submitScopeSelection / askQuestion (responses-server.ts re-verifies
  * everything per submit).
  */

@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ComposeInit, CustomerVM, Opt } from "./types";
 import { composeSendAction, saveDraftAction } from "./actions";
-import { PaperclipIcon, SendIcon } from "./icons";
+import { SendIcon } from "./icons";
+import AttachPicker, { attachPayload, initialAttachState, type AttachState } from "./attach-picker";
 import { hasSignature, stripSignature, withSignature } from "@/lib/inbox-signature";
 
 export default function ComposeModal({
@@ -51,13 +52,10 @@ export default function ComposeModal({
   }, []);
   const sigOn = hasSignature(cd.body);
 
-  // real files already on the draft (IDEAS #36) — bytes stay server-side and
-  // ride through sendDraft(); the composer just shows what will go out
-  const attachments = cd.attachments || [];
-  const sizeLabel = (bytes: number) =>
-    bytes >= 1024 * 1024
-      ? (bytes / 1024 / 1024).toFixed(1) + " MB"
-      : Math.max(1, Math.round(bytes / 1024)) + " KB";
+  // Files on the draft (IDEAS #36) plus Batch 6 #64's Attach button — the bytes stay
+  // server-side (by reference) and ride through sendDraft(); the composer shows and edits the list
+  const [att, setAtt] = useState<AttachState>(() => initialAttachState(cd.attachments));
+  const uploading = att.uploading > 0;
 
   // #127 — a signature alone doesn't count as a body
   const composeReady =
@@ -75,21 +73,24 @@ export default function ComposeModal({
     // I2 — the #127 flow ran (and its result is final) whenever this
     // account has a signature configured; saveDraftAction ignores the flag.
     signatureHandled: !!signature,
+    attachments: attachPayload(att),
   });
 
   const doSaveDraft = async () => {
-    if (busy) return;
+    if (busy || uploading) return;
     setBusy("save");
+    setSendError(null);
     try {
-      await saveDraftAction(payload());
-      onSaved(cd.mailbox);
+      const res = await saveDraftAction(payload());
+      if (res.ok) onSaved(cd.mailbox);
+      else if ("error" in res && res.error) setSendError(res.error);
     } finally {
       setBusy(false);
     }
   };
 
   const doSend = async () => {
-    if (!composeReady || busy) return;
+    if (!composeReady || busy || uploading) return;
     setBusy("send");
     setSendError(null);
     try {
@@ -324,32 +325,7 @@ export default function ComposeModal({
           }}
         />
 
-        {attachments.length > 0 && (
-          <div style={{ padding: "6px 20px 0", display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {attachments.map((a, i) => (
-              <span
-                key={`${a.name}-${i}`}
-                title="Attached — sends with this email"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 11.5,
-                  fontWeight: 600,
-                  color: "#3a3f4a",
-                  background: "#f4f5f7",
-                  border: "1px solid #e8eaee",
-                  borderRadius: 7,
-                  padding: "5px 9px",
-                }}
-              >
-                <PaperclipIcon size={12} />
-                {a.name}
-                <span style={{ color: "#aab0bb", fontWeight: 500 }}>{sizeLabel(a.size)}</span>
-              </span>
-            ))}
-          </div>
-        )}
+        <AttachPicker state={att} setState={setAtt} threadId={cd.id} customerId={cd.customerId} />
 
         <div
           style={{
@@ -404,7 +380,7 @@ export default function ComposeModal({
           <span style={{ flex: 1 }} />
           <button
             onClick={doSaveDraft}
-            disabled={!!busy}
+            disabled={!!busy || uploading}
             style={{
               fontSize: 12.5,
               fontWeight: 600,
@@ -422,7 +398,7 @@ export default function ComposeModal({
           </button>
           <button
             onClick={doSend}
-            disabled={!composeReady || !!busy}
+            disabled={!composeReady || !!busy || uploading}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -435,11 +411,11 @@ export default function ComposeModal({
               padding: "9px 17px",
               cursor: composeReady ? "pointer" : "default",
               background: "var(--accent)",
-              opacity: composeReady && !busy ? 1 : 0.45,
+              opacity: composeReady && !busy && !uploading ? 1 : 0.45,
             }}
           >
             <SendIcon size={14} />
-            {busy === "send" ? "Sending…" : "Send"}
+            {busy === "send" ? "Sending…" : uploading ? "Uploading…" : "Send"}
           </button>
         </div>
       </div>

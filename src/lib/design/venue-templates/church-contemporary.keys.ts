@@ -125,3 +125,32 @@ export const CHURCH_CONTEMPORARY_KEYS: TemplateKeys = {
     { ref: [{ x: 504.696, y: -433.256 }, { x: 735.331, y: -663.891 }], faces: [[{ x: 500.453, y: -437.498 }, { x: 741.331, y: -678.376 }]] },
   ],
 };
+
+/**
+ * Oct 15 #46 (Jeff): `church-contemporary@2` is the same drawing with one
+ * change. The front part of the nave (from the platform tip to the widest
+ * point, 16'0.6" drawn) never grows past its drawn depth: a nave deeper than
+ * drawn puts all the extra into the rest of the nave (from the widest point to
+ * the back wall). A nave shallower than drawn still shrinks both parts
+ * together, as on @1 ("houseCapped").
+ *
+ * On @1 the whole nave stretched. A deep nave moved the widest point down,
+ * which steepened the upper splays and squeezed the Green Room and Electrical
+ * Room behind them. On @2 those two rooms never get narrower than at the
+ * drawing's own nave depth (55'5"), however deep the nave.
+ *
+ * @1 stays registered, unchanged, for Grid sheets stamped with it and for
+ * designs that picked it.
+ */
+export const CHURCH_CONTEMPORARY_V2_KEYS: TemplateKeys = {
+  ...CHURCH_CONTEMPORARY_KEYS,
+  ySpans: [
+    { from: 408.134, to: 402.134, drive: "fixed" }, // outer wall
+    { from: 402.134, to: 282.134, drive: "fixed" }, // Backstage (10')
+    { from: 282.134, to: 276.134, drive: "fixed" }, // the band's wall
+    { from: 276.134, to: -3.999, drive: "stageDepth" }, // platform: back wall → tip
+    { from: -3.999, to: -196.621, drive: "houseCapped" }, // nave front: tip → widest point, never past its drawn 16'0.6"
+    { from: -196.621, to: -669.376, drive: "houseOpen" }, // nave back: widest point → back wall
+    { from: -669.376, to: -675.376, drive: "fixed" }, // back wall
+  ],
+};

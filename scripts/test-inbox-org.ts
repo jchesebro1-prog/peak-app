@@ -666,7 +666,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     { id: DANA_ID, name: "TEST335 Dana", email: "dana@peaksystemsgroup.com", googleEmail: null },
   ];
   const ctx = buildOrgContext({ users });
-  const pilotAssist = { users: [MIKE_ID], features: { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true }, capUsd: 200 };
+  const pilotAssist = { users: [MIKE_ID], features: { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true, vendorpdf: true }, capUsd: 200 };
   const pilot = buildOrgContext({ users, assist: pilotAssist, env: { ANTHROPIC_API_KEY: "sk-test-not-real" } });
 
   /* context + pilot gate (pure) */
@@ -765,14 +765,14 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     const tP = await read(pNoise);
     ok(tP.noise?.flagged === true && tP.noise.moved === true && tP.archived === true && tP.filing?.noise === true && tP.filing.source === "noise-rule", "org pipeline: a pilot owner's noise is moved — flagged, moved, archived");
     ok(tP.updatedAt === T0 + 5 && !rP.skipped && rP.archived === true, "org pipeline: the noise move is quiet (the list order keeps the message time)");
-    const noiseList = await threadsIn("personal", "noise", MIKE);
+    const noiseList = await threadsIn("personal", "noise", { id: MIKE_ID, name: MIKE, nameUnique: true });
     ok(noiseList.some((t) => t.id === pNoise) && !noiseList.some((t) => t.id === knownId), "org pipeline: threadsIn(…, 'noise') lists moved noise only");
-    ok(!(await threadsIn("personal", "inbox", MIKE)).some((t) => t.id === pNoise), "org pipeline: moved noise has left the inbox folder");
+    ok(!(await threadsIn("personal", "inbox", { id: MIKE_ID, name: MIKE, nameUnique: true })).some((t) => t.id === pNoise), "org pipeline: moved noise has left the inbox folder");
     const nNoise = await mk("noise-plain", promo());
     await organizeThread(nNoise, { ctx });
     const tN = await read(nNoise);
     ok(tN.noise?.flagged === true && tN.noise.moved === false && tN.archived === false, "org pipeline: a non-pilot owner's noise is only tagged (stays in the inbox)");
-    ok(!(await threadsIn("personal", "noise", MIKE)).some((t) => t.id === nNoise), "org pipeline: tagged-only noise isn't in the Noise tab");
+    ok(!(await threadsIn("personal", "noise", { id: MIKE_ID, name: MIKE, nameUnique: true })).some((t) => t.id === nNoise), "org pipeline: tagged-only noise isn't in the Noise tab");
     const rescued = await mk("noise-rescued", { ...promo(), noise: { flagged: false, reason: "", moved: false, rescued: true } });
     await organizeThread(rescued, { ctx: pilot });
     ok(!(await read(rescued)).noise?.flagged && (await read(rescued)).noise?.rescued === true && !(await read(rescued)).archived, "org pipeline: a rescued thread is never flagged again");
@@ -794,7 +794,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     await organizeThread(weakNoise, { ctx: pilot });
     const tWeak = await read(weakNoise);
     ok(tWeak.noise?.flagged === true && tWeak.noise.moved === false && tWeak.archived === false && tWeak.filing?.noise === true, "org pipeline: rule noise on a weak-domain thread is tag-only, even for a pilot owner");
-    ok(!(await threadsIn("personal", "noise", MIKE)).some((t) => t.id === weakNoise), "org pipeline: tag-only weak-domain noise stays out of the Noise tab");
+    ok(!(await threadsIn("personal", "noise", { id: MIKE_ID, name: MIKE, nameUnique: true })).some((t) => t.id === weakNoise), "org pipeline: tag-only weak-domain noise stays out of the Noise tab");
     ok(tWeak.filing?.customerId === CUST && tWeak.filing.pendingAi === true, "org pipeline: tag-only weak-domain noise keeps the guessed customer and is pendingAi for a pilot owner (the AI decides)");
     const weakNoisePlain = await mk("noise-weak-domain-plain", { resolution: "suggested", suggestedCustomerId: CUST, contactEmail: "rfp-notify@district.test", messages: [msg({ fromEmail: "rfp-notify@district.test", bulk: true })] });
     await organizeThread(weakNoisePlain, { ctx });
@@ -960,7 +960,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
         tri("C-h", { noise: { flagged: false, reason: "", moved: false, rescued: true } }),
       ],
       { quotes: new Map(), leads: new Map() },
-      { me: { id: MIKE_ID, name: MIKE } as never, now: T0 + 3 * 86_400_000 }
+      { viewer: { id: MIKE_ID, name: MIKE, nameUnique: true }, now: T0 + 3 * 86_400_000 }
     );
     ok(picked.map((c) => c.key).join(",") === "email:C-a,email:C-c,email:C-h", "org triage: waiting_us AND court 'me' (or no court); a customer / nobody court doesn't count; a rescued thread does");
     ok(!picked.some((c) => c.key === "email:C-e"), "org triage: court 'me' but status waiting_them (an in-app reply / Mark replied moved on) → not picked");
@@ -981,7 +981,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
         tri("S-nobasis", { court: { owner: "customer", reason: "", source: "rule", at: T0 + 60_000 }, messages: newMsgs }),
       ],
       { quotes: new Map(), leads: new Map() },
-      { me: { id: MIKE_ID, name: MIKE } as never, now: T0 + 3 * 86_400_000 }
+      { viewer: { id: MIKE_ID, name: MIKE, nameUnique: true }, now: T0 + 3 * 86_400_000 }
     );
     ok(fresh.map((c) => c.key).join(",") === "email:S-stale,email:S-nobasis", "org triage: a stale customer court plus new inbound mail → picked (status decides); a current customer court still hides it");
     ok(courtIsCurrent({ court: { basis: "m3", at: 0 }, messages: newMsgs }) && !courtIsCurrent({ court: { basis: "m2", at: 0 }, messages: newMsgs }) && !courtIsCurrent({ court: null, messages: newMsgs }) && courtIsCurrent({ court: { basis: "x", at: 0 }, messages: [] }), "org triage: courtIsCurrent follows the newest email message's id");
@@ -1102,7 +1102,7 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
     { id: DANA_ID, name: "TEST335 Dana", email: "dana@peaksystemsgroup.com", googleEmail: null },
   ];
   const env = { ANTHROPIC_API_KEY: "sk-test-not-real" };
-  const allOn = { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true };
+  const allOn = { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true, vendorpdf: true };
   const pilot = buildOrgContext({ users, assist: { users: [ARI_ID], features: allOn, capUsd: 200 }, env });
   const offCtx = buildOrgContext({ users, assist: { users: [], features: allOn, capUsd: 200 }, env });
   const T0 = Date.UTC(2026, 9, 12, 15, 0); // Mon 12 Oct 2026, 10:00 Chicago
@@ -1166,7 +1166,7 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   await run(routedProvider({ file: fileAns("noise") }));
   const tN = await read(nz);
   ok(tN.filing?.noise === true && tN.filing.source === "ai" && tN.noise?.flagged === true && tN.noise.moved === true && tN.archived === true, "ai pass: strong AI noise moves a pilot owner's thread with no customer guess (flagged, moved, archived)");
-  ok((await threadsIn("personal", "noise", ARI)).some((t) => t.id === nz), "ai pass: …and it lists in the Noise tab");
+  ok((await threadsIn("personal", "noise", { id: ARI_ID, name: ARI, nameUnique: true })).some((t) => t.id === nz), "ai pass: …and it lists in the Noise tab");
   const nzGuess = await mk("noise-guessed", { resolution: "suggested", suggestedCustomerId: CUST, contactEmail: "news@ai-school.test", messages: [msg({ fromEmail: "news@ai-school.test", body: "Our October newsletter" })] });
   await organizeThread(nzGuess, { ctx: pilot, backlog: true });
   await run(routedProvider({ file: fileAns("noise") }));
@@ -1747,7 +1747,7 @@ export async function inboxOrgApplyChecks(ok: Ok): Promise<void> {
       ok(kr.ok && kr.archived === false && kr.skipped === "disabled" && (await read(killT)).archived === false, "kill switch: archiveAfterReply (Mark replied / Close / reply) archives nothing");
       await runPostReply(killT);
       ok((await read(killT)).archived === false, "kill switch: the post-reply step archives nothing");
-      const killCtx = buildOrgContext({ users: [{ id: ANN_ID, name: ANN, email: "ann.t335@peaksystemsgroup.com" }], assist: { users: [ANN_ID], features: { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true }, capUsd: 200 }, env: { ANTHROPIC_API_KEY: "sk-test-not-real" } });
+      const killCtx = buildOrgContext({ users: [{ id: ANN_ID, name: ANN, email: "ann.t335@peaksystemsgroup.com" }], assist: { users: [ANN_ID], features: { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true, vendorpdf: true }, capUsd: 200 }, env: { ANTHROPIC_API_KEY: "sk-test-not-real" } });
       const kp = await runAiPass({ ownerIds: [ANN_ID] }, { ctx: killCtx });
       ok(kp.looked === 0 && kp.calls === 0 && kp.cleared === 0, "kill switch: the AI pass does nothing");
     } finally {
@@ -2009,7 +2009,7 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   ok(page.includes('const isOrganize = viewParam === "organize";') && page.includes("<OrganizeBox") && page.includes("loadOrganize(user, organizeTab"), "ui: /inbox?view=organize renders the Organize box from loadOrganize");
   ok(page.includes('key: "organize"') && page.includes("count: organizeCounts.toFile") && page.includes('href: viewHref("organize")'), "ui: the Inbox nav carries an Organize row with the To file count");
   ok(page.includes("view === \"unmatched\" || isMeetings || isOrganize") && page.includes("const isView = !!view || isMeetings || isOrganize;"), "ui: Organize is a view and skips the thread-list query");
-  ok(page.includes("explicitThread && visibleTo(explicitThread, me)"), "ui: Organize opens only my own thread in the reader");
+  ok(page.includes("explicitThread && visibleTo(explicitThread, viewer)"), "ui: Organize opens only my own thread in the reader (#349: by identity)");
   ok(page.includes("org,") && page.includes("buildReaderOrg(sel,"), "ui: the reader VM carries the organization strip");
   const shell = read("src/app/(app)/inbox/inbox-shell.tsx");
   ok(shell.includes("meetings || organize ?") && shell.includes("organize?.list") && shell.includes('{ value: "organize", label: "Organize" }'), "ui: the shell swaps the list column for the Organize box (and the narrow picker knows it)");
@@ -2110,10 +2110,10 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   ok(ra.suggestion === "Lincoln HS → EST-1042 Main curtain" && ra.strength === "strong" && ra.canApprove && ra.href === "/inbox?view=organize&tab=to-file&thread=a", "ui vm: a row carries its suggestion, strength and reader link");
   ok(vmT.rows.find((r) => r.id === "b")!.needsReply && vmT.rows.find((r) => r.id === "c")!.archived && !vmT.rows.find((r) => r.id === "b")!.archived, "ui vm: the needs-reply dot and the Archived chip (archived-on-reply only)");
   ok(!vmT.rows.find((r) => r.id === "d")!.canApprove && vmT.rows.find((r) => r.id === "d")!.suggestion === null, "ui vm: a suggestion with nothing to file under can't be approved");
-  ok(vmT.isAdmin && vmT.noiseInInboxIds.length === 0, "ui vm: admin flag passes through; no Noise ids on To file");
+  ok(vmT.isAdmin && vmT.noiseShownIds.length === 0, "ui vm: admin flag passes through; no Noise ids on To file");
   const vmN = buildOrganizeVM(threads, { tab: "noise", now: NOW, customerName: names });
   ok(vmN.rows.map((r) => r.id).join(",") === "n,f,e" && vmN.rows[0].reason === "Newsletter" && vmN.rows[1].reason === "No-reply sender" && vmN.rows[2].reason === "Promotions", "polish: Noise lists everything flagged as noise (moved and tagged-only), newest first, each with its reason; rescued left out");
-  ok(vmN.noiseInInboxIds.join(",") === "n,f" && vmN.strongIds.length === 0 && !vmN.isAdmin, "polish: Archive all shown takes the noise still in the inbox (a tagged-only thread included)");
+  ok(vmN.noiseShownIds.join(",") === "n,f,e" && vmN.strongIds.length === 0 && !vmN.isAdmin, "Jeff 10-15 #29: Archive all shown takes every Noise row shown — still in the inbox or already archived");
   const vmF = buildOrganizeVM(threads, { tab: "filed", now: NOW, customerName: names });
   ok(vmF.rows.map((r) => r.id).join(",") === "i,g" && vmF.rows[0].filedBy === "approved" && vmF.rows[1].filedBy === "on reply" && !!vmF.rows[0].filedWhen, "ui vm: Filed lists the last 14 days, newest filing first, with how it was filed");
   const many = Array.from({ length: 205 }, (_, i) => th(`m${i}`, { filing: fil({ state: "filed", filedAt: NOW - i * 1000 }) }));
@@ -2246,7 +2246,7 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     { id: NOP_ID, name: NOP, email: "nopa.t335@peaksystemsgroup.com", googleEmail: null },
   ];
   const env = { ANTHROPIC_API_KEY: "sk-test-not-real" };
-  const allOn = { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true };
+  const allOn = { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true, vendorpdf: true };
   const pilot = buildOrgContext({ users, assist: { users: [CLEO_ID], features: allOn, capUsd: 200 }, env });
   const NOW = Date.UTC(2026, 9, 13, 15, 0); // Tue 13 Oct 2026, 10:00 Chicago
   const DAY = 86_400_000;
@@ -2720,7 +2720,7 @@ export async function inboxOrgPlaceholderChecks(ok: Ok): Promise<void> {
     await applyResolution(probe, live);
     ok(probe.customerId === null && probe.resolvedContactId === CT && probe.resolution === "unknown", "matcher #345: applyResolution stamps the contact, no customerId (new mail / stampResolutionOnCreate)");
     const sweepT = await mk("sweep", { contactName: "Parked Person", contactEmail: "parked.t345@ph345-school.test", messages: [msg({ fromEmail: "parked.t345@ph345-school.test" })] });
-    await resweepThreads({ email: "parked.t345@ph345-school.test" }, { mailboxUser: MO });
+    await resweepThreads({ email: "parked.t345@ph345-school.test" }, { owner: { id: MO_ID, name: MO, nameUnique: true } });
     const swept = await read(sweepT);
     ok(swept.customerId === null && swept.resolvedContactId === CT && swept.resolution === "unknown", `matcher #345: resweepThreads links the contact, never UNKNOWN (${swept.customerId} · ${swept.resolvedContactId})`);
     ok((await resolveCustomerId(swept)) === null, "matcher #345: resolveCustomerId — the contact's UNKNOWN home company is no customer");
@@ -3010,6 +3010,28 @@ export async function inboxOrgArchiveLabelChecks(ok: Ok): Promise<void> {
     const forged = await undoArchiveFromOrganize({ threadId: lb, unarchive: true, unskip: true, unclear: true }, me);
     ok(forged.ok && (await read(lb)).archived === false && (await read(lb)).filing?.state === "suggested", "archive #346: Undo reverses only what is still there (a never-archived thread is left as it is)");
     ok(ORGANIZE_ARCHIVE_MAX === 500, "archive #346: one Archive takes at most 500 threads");
+
+    /* Jeff 2026-10-15 #29 — Noise "Archive all shown": every row shown, a row's own Archive each, one Undo */
+    const ns1 = await mk("ns-tagged");
+    await setOrg(ns1, { filing: sugg({ noise: true, customerId: null, source: "noise-rule", strength: "strong" }), noise: { flagged: true, reason: "Promotions", moved: false } });
+    const ns2 = await mk("ns-moved", { archived: true });
+    await setOrg(ns2, { filing: sugg({ noise: true, customerId: null, source: "noise-rule", strength: "strong" }), noise: { flagged: true, reason: "Newsletter", moved: true } });
+    const ns3 = await mk("ns-dismissed", { archived: true });
+    await setOrg(ns3, { filing: sugg({ noise: true, customerId: null, state: "dismissed", source: "noise-rule" }), noise: { flagged: true, reason: "Marked as noise", moved: true } });
+    const nsIds = [ns1, ns2, ns3];
+    const vmBefore = buildOrganizeVM(await Promise.all(nsIds.map(read)), { tab: "noise", now: Date.now(), customerName: () => null });
+    ok(nsIds.every((x) => vmBefore.noiseShownIds.includes(x)), "Jeff 10-15 #29: (setup) Archive all shown carries every Noise row shown — in the inbox, moved and marked-noise");
+    const batch = [];
+    for (const x of vmBefore.noiseShownIds) batch.push(await archiveFromOrganize(x, "noise", me));
+    const after = await Promise.all(nsIds.map(read));
+    ok(batch.every((r) => r.ok) && after.every((t) => t.archived === true && t.noise?.cleared === true && !isNoiseRow(t)), "Jeff 10-15 #29: every row shown is archived AND cleared off the Noise tab");
+    ok(buildOrganizeVM(after, { tab: "noise", now: Date.now(), customerName: () => null }).rows.length === 0, "Jeff 10-15 #29: after Archive all shown the Noise tab shows none of them");
+    ok(after[2].filing?.state === "dismissed" && after[0].filing?.state === "skipped", "Jeff 10-15 #29: a marked-noise (dismissed) row keeps its filing; a suggested one is skipped — a row's own Archive, unchanged");
+    const undos = batch.flatMap((r) => (r.ok ? [r.undo] : []));
+    for (const u of undos) await undoArchiveFromOrganize(u, me);
+    const undone = await Promise.all(nsIds.map(read));
+    ok(undone.every((t) => isNoiseRow(t)) && undone[0].archived === false && undone[1].archived === true && undone[2].archived === true && undone[0].filing?.state === "suggested",
+      "Jeff 10-15 #29: the batch's one Undo puts every row back on Noise — only the one that was in the inbox is re-inboxed");
   } finally {
     await dropFixtures(346);
     if (logBefore) await db.update(blobs).set({ data: logBefore.data, updatedAt: logBefore.updatedAt }).where(eq(blobs.id, FILING_LOG_BLOB));
@@ -3029,6 +3051,10 @@ export async function inboxOrgArchiveLabelChecks(ok: Ok): Promise<void> {
   ok(ob.includes(`window.addEventListener(ORGANIZE_ARCHIVED_EVENT, on)`) && ob.includes("undoArchiveFromOrganizeAction(undo)") && ob.includes("data-organize-undo") && ob.includes("data-organize-archive") && ob.includes("archiveFromOrganizeAction(ids, tab)"), "archive #346: the Organize box shows Archived … Undo (its own row Archive and the reader's) and each row has Archive");
   ok(/for \(const id of ids\) postChanged\("thread", id\);/.test(ob) && /for \(const u of undo\) postChanged\("thread", u\.threadId\);/.test(ob), "archive #346: Archive and Undo post changed for each thread");
   ok(ob.includes("approveAllStrongAction(vm.strongIds)"), "archive #346: Approve all strong is still there");
+  ok(/try \{\s*const r = await archiveFromOrganize\(id, t, me\);\s*if \(r\.ok\) undo\.push\(r\.undo\);\s*else refused\+\+;\s*\} catch \(e\) \{[\s\S]{0,160}refused\+\+;\s*\}/.test(oa) && ob.includes("(r.refused ? ` · ${r.refused} couldn't be archived` : \"\")"),
+    "#351 M7: a row that throws counts as refused — the rows that archived keep their Undo, and the note names the rest");
+  ok(/const archiveShown = \(\) => archiveRows\(vm\.noiseShownIds\);/.test(ob) && !ob.includes("bulkArchiveAction") && ob.includes('(r.more ? " · press again for the rest" : "")'), "Jeff 10-15 #29: Noise's Archive all shown runs the rows' own Archive (archiveFromOrganizeAction) over every row shown, with the one Undo note");
+  ok(/const more = Array\.isArray\(threadIds\) && new Set\(threadIds\.map\(\(x\) => str\(x\)\)\.filter\(Boolean\)\)\.size > list\.length;\s*return \{ ok: true as const, archived: undo\.length, refused, undo, more \};/.test(oa), "Jeff 10-15 #29: past the 500 cap the action says there is more");
   ok(ORGANIZE_ARCHIVED_EVENT === "peak:organize-archived", "archive #346: the reader → box event name");
   const page = src("src/app/(app)/inbox/page.tsx");
   ok(page.includes("if (reader && !reader.readOnly) reader = { ...reader, organize: organizeArchiveTarget(vm, reader.id) };"), "archive #346: only my own thread's reader gets the Organize Archive");
@@ -3041,9 +3067,9 @@ export async function inboxOrgArchiveLabelChecks(ok: Ok): Promise<void> {
   const cb = src("src/app/(app)/inbox/command-bar.tsx");
   ok(cb.includes("export function CategoryMenu(") && /<CategoryMenu\s+trigger=\{<ActBtnInner icon=\{<TagIcon size=\{14\} \/>\} label="Categorize" caret \/>\}/.test(cb), "labels #346: the Inbox's Categorize ▾ and the Labels card share one CategoryMenu");
   const act = src("src/app/(app)/inbox/actions.ts");
-  ok(/export async function categoryAction\(id: string, key: string \| null\) \{\s*const user = await requireUser\(\);\s*if \(!\(await ownThread\(id, user\.name\)\)\) return;/.test(act), "labels #346: categoryAction stays owner-checked (#341)");
+  ok(/export async function categoryAction\(id: string, key: string \| null\) \{\s*const user = await requireUser\(\);\s*if \(!\(await ownThread\(id, user\)\)\) return;/.test(act), "labels #346: categoryAction stays owner-checked (#341, #349: by identity)");
   const ld = src("src/app/(app)/inbox/organize/load.ts");
-  ok(ld.includes("const mine = (await allThreads()).filter((t) => visibleTo(t, me.name));"), "archive #346: Organize lists only my own threads — a read-only #341 thread never shows there");
+  ok(ld.includes('const mine = (await listDocsWhere<CommThread>("comms", ownMailboxCond(viewer))).filter((t) => visibleTo(t, viewer));'), "archive #346: Organize lists only my own threads — a read-only #341 thread never shows there (#349: by identity, cut in SQL)");
 }
 
 /* ---------- #347: the person's own Gmail labels on the Labels card ---------- */
@@ -3159,7 +3185,8 @@ export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
     const t1 = await mk("apply");
     const pk = await U.labelPicker(t1, me, f1.client, NOW);
     ok(pk.ok && pk.labels.some((l) => l.name === "Warranty") && !pk.labels.some((l) => l.name.startsWith("Peak")), "labels #347: the picker lists my mailbox's labels, never Peak/*");
-    const other = await mk("other", { mailboxUser: "TEST347 Ben Other" });
+    // #349 — someone else's thread: their name AND their own Gmail account (ownership follows the key, not the name)
+    const other = await mk("other", { mailboxUser: "TEST347 Ben Other", gmailAccountKey: "personal:TEST347-u-ben" });
     ok(!(await U.labelPicker(other, me, f1.client, NOW)).ok, "labels #347: the picker refuses someone else's thread");
     const local = await mk("local", { gmailThreadId: undefined });
     const lp = await U.labelPicker(local, me, f1.client, NOW);
@@ -3199,7 +3226,8 @@ export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
     ok(U.gmailError(new Error("Gmail API /labels/Label_9 → 404 Not Found")) === "label-missing" && U.gmailError(new Error("Gmail API /threads/t1/modify → 404 Not Found")) === "thread-missing" && U.gmailError(new Error("Gmail API /threads/t1/modify → 400 Invalid label: Label_9")) === "label-missing" && U.gmailError(new Error("Gmail API /messages → 404")) === "failed", "labels #347 review: a 404 is 'label missing' only on a labels endpoint; on a thread it is 'no longer in Gmail'");
 
     /* review: the thread must be bridged through MY Gmail connection */
-    const foreignKey = await mk("foreign-key", { gmailAccountKey: "personal:TEST347-u-ben" });
+    // #349 — stamped mine (the owner id wins) but bridged through Ben's account
+    const foreignKey = await mk("foreign-key", { mailboxOwnerId: "TEST347-u-ann", gmailAccountKey: "personal:TEST347-u-ben" });
     const unstamped = await mk("unstamped", { gmailAccountKey: undefined });
     const fk = await U.setThreadLabel(foreignKey, "Label_1", true, me, f1.client, NOW);
     const us = await U.labelPicker(unstamped, me, f1.client, NOW);
@@ -3257,7 +3285,7 @@ export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
   /* pins: actions, card */
   const act = src("src/app/(app)/inbox/actions.ts");
   for (const n of ["gmailLabelPickerAction", "setGmailLabelAction", "createGmailLabelAction"])
-    ok(new RegExp(`export async function ${n}\\(threadId: string[^)]*\\) \\{\\s*const user = await requireUser\\(\\);\\s*if \\(!\\(await ownThread\\(threadId, user\\.name\\)\\)\\)`).test(act), `labels #347: ${n} is owner-checked (#341) before Gmail is touched`);
+    ok(new RegExp(`export async function ${n}\\(threadId: string[^)]*\\) \\{\\s*const user = await requireUser\\(\\);\\s*if \\(!\\(await ownThread\\(threadId, user\\)\\)\\)`).test(act), `labels #347: ${n} is owner-checked (#341, #349: by identity) before Gmail is touched`);
   const lc = src("src/app/(app)/inbox/labels-card.tsx");
   ok(lc.includes("setGmailLabelAction(vm.id, g.id, false)") && lc.includes("setGmailLabelAction(vm.id, l.id, true)") && lc.includes("createGmailLabelAction(vm.id, name)") && lc.includes("gmailLabelPickerAction(threadId)"), "labels #347: the card removes (✕), applies and creates through the owner-checked actions; the picker loads when it opens");
   ok(lc.includes("Create “{q.trim()}”") && lc.includes("validateLabelName(q)") && lc.includes('placeholder="Search or create a label…"') && lc.includes("data-peak-label") && lc.includes('role="alert"'), "labels #347: a searchable picker with Create '<typed>' at the bottom; Peak/* chips read-only; errors inline");
@@ -3265,14 +3293,14 @@ export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
   ok(!valueImports(lc).some((p) => /^@\/(db\b|lib\/stores\/|lib\/inbox-org\/)|^@\/lib\/gmail\/(?!user-label-rules)/.test(p)), "labels #347: the card imports only the pure label rules from lib/gmail (no store, db or Gmail client)");
   const ul = src("src/lib/gmail/user-labels.ts");
   ok(/casDocKey\("comms", threadId, "messages", t\.messages, next\)/.test(ul) && /casDocKey\("comms", threadId, "userLabelOps", prev, ops\)/.test(ul) && !/patchDoc/.test(ul), "labels #347 review: the label write is a compare-and-set on the messages key (re-read on conflict) — never a whole-doc rewrite that could drop a message appended meanwhile");
-  ok(/const t = await ownThread\(threadId, me\.name\);[\s\S]*?const key = personalKey\(me\.id\);\s*if \(t\.mailbox !== "personal" \|\| !t\.gmailThreadId \|\| t\.gmailAccountKey !== key\) return failWith\("no-gmail"\);/.test(ul), "labels #347 review: the Gmail key is personalKey(me.id), and the thread must be bridged through it");
+  ok(/const t = await ownThread\(threadId, me\);[\s\S]*?const key = personalKey\(me\.id\);\s*if \(t\.mailbox !== "personal" \|\| !t\.gmailThreadId \|\| t\.gmailAccountKey !== key\) return failWith\("no-gmail"\);/.test(ul), "labels #347 review: the Gmail key is personalKey(me.id), and the thread must be bridged through it");
   ok(/async function writeCache[\s\S]*?try \{\s*await replaceLabels\(key, labels\);\s*\} catch/.test(ul) && /if \(created\) \{\s*try \{/.test(ul), "labels #347 review: a cache write failing after Gmail created the label is logged, and Create still applies the label and reports success");
   const conn = src("src/lib/gmail/connections.ts");
   ok(/export async function replaceLabels[\s\S]*?await withTransaction\(async \(\) => \{\s*const db = await getDb\(\);\s*await db\.delete\(gmailLabels\)/.test(conn), "labels #347 review: replaceLabels deletes and inserts in one transaction");
   const li = src("src/lib/gmail/label-interpret.ts");
   ok(/for \(const \[gThread, perMessage\] of userLabelChanges\(events, isCard\)\)/.test(li) && /casDocKey\("comms", t\.id, "messages", t\.messages, next\)/.test(li) && /const evAdded = ev\.added\.filter\(notCard\);/.test(li), "labels #347 review: my labels are recorded from every event (Peak/* or not) by an ordered CAS pass; the Peak/* branch leaves them to it");
   const ld = src("src/app/(app)/inbox/organize/load.ts");
-  ok(/export async function organizeEntryCounts[\s\S]*?listDocsByField<CommThread>\("comms", "mailboxUser", \[me\.name\]\)/.test(ld), "brief #347 review: the live Organize counts read only my mailbox (SQL doc->>'mailboxUser'), never the whole collection");
+  ok(/export async function organizeEntryCounts[\s\S]*?listDocsWhere<CommThread>\("comms", ownMailboxCond\(viewer\)\)/.test(ld), "brief #347 review: the live Organize counts read only my mailbox (#349: ownMailboxCond in SQL, by identity), never the whole collection");
   const rules = src("src/lib/gmail/user-label-rules.ts");
   ok(valueImports(rules).length === 0, "labels #347: user-label-rules.ts has no imports (client-safe)");
   const cfg = src("src/lib/gmail/config.ts");
