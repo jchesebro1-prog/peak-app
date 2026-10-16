@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { getDoc, getDocRows, listDocsByField, patchDoc, patchDocKey, softDeleteDoc, upsertDoc, type Doc } from "@/db/doc-store";
 import { getCompany } from "@/lib/identity/companies";
 import { getContact } from "@/lib/identity/contacts";
-import { getMany as getQuotes } from "@/lib/stores/quotes";
+import { getMany as getQuotes, markBidScopeOnly, withQuoteRowLock } from "@/lib/stores/quotes";
 import type { Quote } from "@/lib/stores/quotes";
 import type { LeadRecord } from "@/lib/stores/leads";
 import type { ProjectRecord } from "@/lib/stores/projects";
@@ -115,6 +115,22 @@ async function contactProblem(companyId: string, contactId: string | null): Prom
   return c && c.homeCompanyId === companyId ? null : "That person isn't at this company.";
 }
 
+/** #348 slice 6 (Jeff 2026-10-15, final review Minor 1) — before a row is (re)written by its deterministic id: when the
+ *  PRIOR row under that id (live or soft-deleted) was a quote GC/EC row with bid state, stamp the quote Scope only
+ *  first. A revive writes `bid: null` over the deleted row — on a quote bid before the stamp existed that row was the
+ *  only evidence of the bid, and the owner's prices would come back. Call under the quote's row lock (onQuoteLocked). */
+async function keepBidEvidence(id: string): Promise<void> {
+  const [prior] = await getDocRows<Party>("record_parties", [id]);
+  const p = prior?.doc;
+  if (p && p.recordType === "quote" && !!p.recordId && (p.role === "gc" || p.role === "ec") && !!p.bid) await markBidScopeOnly(p.recordId);
+}
+
+/** A quote's party writes run under its row lock — the store's lock order (quote row first, then party rows, as
+ *  addBidder / setStatus do); nested calls join the outer transaction. Other record types run as before. */
+function onQuoteLocked<T>(recordType: PartyRecordType, recordId: string, fn: () => Promise<T>): Promise<T> {
+  return recordType === "quote" ? withQuoteRowLock(recordId, fn) : fn();
+}
+
 /** Server-action input arrives untyped: a truthy non-string would throw inside the pure rules (`.trim()`). */
 function hasNonStringField(raw: PartyInput): boolean {
   return [raw.recordId, raw.companyId, raw.contactId, raw.roleLabel].some((v) => v !== undefined && v !== null && typeof v !== "string");
@@ -132,24 +148,27 @@ export async function addParty(
   const cp = await contactProblem(input.companyId, input.contactId);
   if (cp) return { ok: false, error: cp };
   const id = partyId(input.recordType, input.recordId, input.companyId, input.role);
-  const existing = await getDoc<Party>("record_parties", id);
-  if (existing) return { ok: true, party: existing, existed: true };
-  if (ownerConflict(await listFor(input.recordType, input.recordId), input)) return { ok: false, error: "This record already has an owner." };
-  const t = Date.now();
-  const party: Party = {
-    id,
-    recordType: input.recordType,
-    recordId: input.recordId,
-    companyId: input.companyId,
-    contactId: input.contactId,
-    role: input.role,
-    roleLabel: input.roleLabel,
-    bid: null,
-    createdAt: t,
-    createdBy: by,
-    updatedAt: t,
-  };
-  return { ok: true, party: await upsertDoc<Party>("record_parties", party), existed: false };
+  return onQuoteLocked(input.recordType, input.recordId, async () => {
+    const existing = await getDoc<Party>("record_parties", id);
+    if (existing) return { ok: true as const, party: existing, existed: true };
+    if (ownerConflict(await listFor(input.recordType, input.recordId), input)) return { ok: false as const, error: "This record already has an owner." };
+    await keepBidEvidence(id);
+    const t = Date.now();
+    const party: Party = {
+      id,
+      recordType: input.recordType,
+      recordId: input.recordId,
+      companyId: input.companyId,
+      contactId: input.contactId,
+      role: input.role,
+      roleLabel: input.roleLabel,
+      bid: null,
+      createdAt: t,
+      createdBy: by,
+      updatedAt: t,
+    };
+    return { ok: true as const, party: await upsertDoc<Party>("record_parties", party), existed: false };
+  });
 }
 
 /** A key-level write (#348 2a review): touches only `contactId` and `updatedAt` in SQL, never a read-modify-write
@@ -184,32 +203,35 @@ export async function copyParties(
   by: string
 ): Promise<number> {
   const src = (await listFor(from.type, from.id)).filter((p) => carriesTo(from.type, to.type, p));
-  let n = 0;
-  const t = Date.now();
-  const targetRows = await listFor(to.type, to.id);
-  for (const p of src) {
-    const id = partyId(to.type, to.id, p.companyId, p.role);
-    if (await getDoc<Party>("record_parties", id)) continue;
-    // One owner per record: never copy a second owner company onto a target that already has one.
-    if (ownerConflict(targetRows, p)) continue;
-    const row: Party = {
-      id,
-      recordType: to.type,
-      recordId: to.id,
-      companyId: p.companyId,
-      contactId: p.contactId,
-      role: p.role,
-      roleLabel: p.roleLabel,
-      bid: null,
-      createdAt: t,
-      createdBy: by,
-      updatedAt: t,
-    };
-    await upsertDoc<Party>("record_parties", row);
-    targetRows.push(row);
-    n++;
-  }
-  return n;
+  return onQuoteLocked(to.type, to.id, async () => {
+    let n = 0;
+    const t = Date.now();
+    const targetRows = await listFor(to.type, to.id);
+    for (const p of src) {
+      const id = partyId(to.type, to.id, p.companyId, p.role);
+      if (await getDoc<Party>("record_parties", id)) continue;
+      // One owner per record: never copy a second owner company onto a target that already has one.
+      if (ownerConflict(targetRows, p)) continue;
+      await keepBidEvidence(id);
+      const row: Party = {
+        id,
+        recordType: to.type,
+        recordId: to.id,
+        companyId: p.companyId,
+        contactId: p.contactId,
+        role: p.role,
+        roleLabel: p.roleLabel,
+        bid: null,
+        createdAt: t,
+        createdBy: by,
+        updatedAt: t,
+      };
+      await upsertDoc<Party>("record_parties", row);
+      targetRows.push(row);
+      n++;
+    }
+    return n;
+  });
 }
 
 /** #348 slice 2a — the ONLY writer of `Party.bid` (bid state on a quote GC/EC row). */

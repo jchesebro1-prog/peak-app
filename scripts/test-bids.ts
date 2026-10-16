@@ -53,7 +53,7 @@ import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-
 import { addQuoteRevision, buildQuote, create as createQuote, get as getQuote, markBidScopeOnly, portalListsQuote, revisionDocFields, setStatus, update as updateQuote, type QuoteRevision } from "../src/lib/stores/quotes";
 import { getProjectByQuote } from "../src/lib/stores/projects";
 import { autoTaskId } from "../src/lib/stores/tasks";
-import { addParty, listFor, listForRecordsIncludingDeleted, removeParty, setPartyBid, setPartyContact } from "../src/lib/stores/parties";
+import { addParty, copyParties, listFor, listForRecordsIncludingDeleted, partyId, removeParty, setPartyBid, setPartyContact } from "../src/lib/stores/parties";
 import { loadBidPanel } from "../src/lib/parties/bid-panel-server";
 import { awardedRecipient, bidderRecipient, documentAddressee, touchAwardedAddressee } from "../src/lib/parties/addressee-server";
 import { renderBidderPdf } from "../src/lib/quote-pdf/bidder-pdf-server";
@@ -1788,9 +1788,52 @@ export async function portalBidDbChecks(ok: Ok) {
       ok(cp1.bidScopeOnly === true && hc1 && sc1.kind === "ok" && sc1.bomOnly === true, "scope-only db: Copy → New from a Scope-only estimate is stamped (owner sees the BOM only)");
       ok(!("bidScopeOnly" in cp2) && !(await portalOwnerHasBidders(cp2, own)), "scope-only db: Copy → New from a normal estimate is not stamped");
       const bidsSrc = codeOfSrc("src/lib/stores/bids.ts"), partiesSrc = codeOfSrc("src/lib/stores/parties.ts"), quotesSrc = codeOfSrc("src/lib/stores/quotes.ts");
-      ok(bidsSrc.includes("await markBidScopeOnly(q.id);") && !partiesSrc.includes("bidScopeOnly") && quotesSrc.includes("delete clean.bidScopeOnly;") &&
-         (quotesSrc.match(/"bidScopeOnly"/g) || []).length === 1,
+      const removeFn = partiesSrc.slice(partiesSrc.indexOf("export async function removeParty("), partiesSrc.indexOf("export async function copyParties("));
+      ok(bidsSrc.includes("await markBidScopeOnly(q.id);") && !partiesSrc.includes("bidScopeOnly") && removeFn.length > 0 && !/BidScopeOnly|bidScopeOnly/.test(removeFn) &&
+         quotesSrc.includes("delete clean.bidScopeOnly;") && (quotesSrc.match(/"bidScopeOnly"/g) || []).length === 1,
         "scope-only pins: addBidder stamps, removeParty never clears, update() drops it, and markBidScopeOnly is the one key-level writer");
+
+      // Fix round 3 (final review Minor 1): reviving a removed bidder row as a plain party keeps the bid evidence.
+      const iq5 = fixtureId(348, "iq5"), iq6 = fixtureId(348, "iq6"), iq7 = fixtureId(348, "iq7"), lead7 = fixtureId(348, "isrc7");
+      for (const [id, nm] of [[iq5, "Owner revive quote"], [iq6, "Owner never-bid quote"], [iq7, "Owner copy-revive quote"]] as const) {
+        await createFixture("quotes", buildQuote(id, { name: nm, customer: NAMES.own, customerId: own, value: 200, spec: iSpec } as never, "system", null, NOW) as never);
+      }
+      // A legacy bidder row (no stamp), removed, then the same company + role re-added as a plain party.
+      const l5 = await addParty({ recordType: "quote", recordId: iq5, companyId: gc3, role: "gc" }, "u");
+      if (l5.ok) await setPartyBid(l5.party.id, newBidderState("email"));
+      if (l5.ok) await removeParty(l5.party.id);
+      await setStatus(iq5, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+      ok(l5.ok && !("bidScopeOnly" in (await getQuote(iq5))!), "scope-only db: fixture — an unstamped quote with a soft-deleted bidder row");
+      const upd5 = (await getQuote(iq5))!.updatedAt;
+      const re5 = await addParty({ recordType: "quote", recordId: iq5, companyId: gc3, role: "gc" }, "u");
+      await regRows(iq5);
+      const q5 = (await getQuote(iq5))!;
+      ok(re5.ok && !re5.existed && re5.party.bid === null && re5.party.id === (l5.ok ? l5.party.id : "") && q5.bidScopeOnly === true && q5.updatedAt === upd5,
+        "scope-only db: re-adding a removed bidder as a plain party revives the row with no bid AND stamps the quote (updatedAt untouched)");
+      const hb5 = await portalOwnerHasBidders(q5, own), s5 = portalOnlineEstimateState(q5, own, [], { hasBidders: hb5 });
+      ok(hb5 && s5.kind === "ok" && s5.bomOnly === true, "scope-only db: after the revive the owner still sees the BOM only");
+      // A row that never had a bid: removed and re-added → no stamp.
+      const l6 = await addParty({ recordType: "quote", recordId: iq6, companyId: gc4, role: "gc" }, "u");
+      if (l6.ok) await removeParty(l6.party.id);
+      const re6 = await addParty({ recordType: "quote", recordId: iq6, companyId: gc4, role: "gc" }, "u");
+      await regRows(iq6);
+      ok(l6.ok && re6.ok && !("bidScopeOnly" in (await getQuote(iq6))!) && !(await portalQuoteHasBidders((await getQuote(iq6))!)),
+        "scope-only db: re-adding a row that never had a bid does not stamp the quote");
+      // copyParties (quote → quote: a split copies a plain GC row) reviving a removed bidder row stamps too.
+      const l7 = await addParty({ recordType: "quote", recordId: iq7, companyId: gc2, role: "gc" }, "u");
+      if (l7.ok) await setPartyBid(l7.party.id, newBidderState("email"));
+      if (l7.ok) await removeParty(l7.party.id);
+      const ld7 = await addParty({ recordType: "quote", recordId: lead7, companyId: gc2, role: "gc" }, "u");
+      if (ld7.ok) registerFixture("record_parties", ld7.party.id);
+      const n7 = await copyParties({ type: "quote", id: lead7 }, { type: "quote", id: iq7 }, "u");
+      await regRows(iq7);
+      const row7 = (await listFor("quote", iq7)).find((p) => p.id === partyId("quote", iq7, gc2, "gc"));
+      ok(l7.ok && ld7.ok && n7 === 1 && !!row7 && row7.bid === null && (await getQuote(iq7))!.bidScopeOnly === true,
+        "scope-only db: copyParties reviving a removed bidder row (quote → quote, a plain GC row) stamps the quote");
+      const ps = codeOfSrc("src/lib/stores/parties.ts");
+      ok(/return onQuoteLocked\(input\.recordType, input\.recordId, async \(\) => \{[\s\S]*?await keepBidEvidence\(id\);[\s\S]*?upsertDoc<Party>\("record_parties", party\)/.test(ps) &&
+         /return onQuoteLocked\(to\.type, to\.id, async \(\) => \{[\s\S]*?await keepBidEvidence\(id\);\s*const row: Party/.test(ps) && (ps.match(/upsertDoc<Party>\(/g) || []).length === 2,
+        "scope-only pins: both id-keyed party writers (addParty, copyParties) check the prior row under the quote row lock before writing");
     }
 
     // 2. Refused, the same as missing.

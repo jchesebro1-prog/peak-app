@@ -392,8 +392,9 @@ export type Quote = {
   bid?: QuoteBid | null;
   /** #348 slice 6 (Jeff 2026-10-15) — "Scope only" for good: once this estimate has had a GC/EC bidder (or was
    *  split off one that had), the owner's portal shows it as a BOM with no prices, even after every bidder row is
-   *  removed. Store-owned: written only by markBidScopeOnly (addBidder, a key-level write that never bumps
-   *  updatedAt) and by create() when a SERVER caller passes `opts.bidScopeOnly` (Move system → New estimate) —
+   *  removed. Store-owned: written only by markBidScopeOnly (addBidder, and a party write that revives a removed
+   *  bidder row — a key-level write that never bumps updatedAt) and by create() when a SERVER caller passes
+   *  `opts.bidScopeOnly` (Move system → New estimate and Copy system → New estimate, same customer only) —
    *  buildQuote never copies it from `partial`, and update() drops it, so no client save can set or clear it.
    *  Never content, never snapshotted. Read through portalQuoteHasBidders (stamp OR bidder rows incl. deleted). */
   bidScopeOnly?: true;
