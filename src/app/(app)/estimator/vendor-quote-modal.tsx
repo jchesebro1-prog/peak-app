@@ -97,6 +97,7 @@ export default function VendorQuoteModal({
   onLoadLines,
   onAdd,
   onClose,
+  confirmClose,
   blobUploads,
   attachedChars,
   editing,
@@ -130,6 +131,8 @@ export default function VendorQuoteModal({
   onLoadLines: (lines: Omit<VendorLineDraft, "id">[]) => void;
   onAdd: () => void;
   onClose: () => void;
+  /** #348 follow-up: ConfigModal asks this before the × / backdrop discards the form. */
+  confirmClose?: () => boolean;
   /** Blob storage is configured, so the file is uploaded on selection and
    *  never rides in the save payload (#143). False keeps the data-URL path. */
   blobUploads: boolean;
@@ -371,6 +374,7 @@ export default function VendorQuoteModal({
       title={editing ? "Edit vendor quote" : "Vendor quote"}
       sub={editing ? <>In {secName}</> : <>Adds to {secName}</>}
       onClose={onClose}
+      confirmClose={confirmClose}
       footerLeft={
         <>
           <Stat

@@ -54,6 +54,7 @@ import { pdfStorage } from "../src/lib/quote-pdf/storage";
 import { revisionCopyPlan, pdfIsCurrent } from "../src/lib/quote-pdf/state";
 import { updateQuotePdf } from "../src/lib/stores/quotes";
 import { appendResponseTo, MAX_CLIENT_RESPONSES, responseQuoteLimitKey, type ClientResponse } from "../src/lib/estimate-output/responses";
+import { DISCARD_COPY, discardConfirmText, draftChanged, inputIsDirty, isModalInputKind, MODAL_INPUT_KINDS, rebaseDraft, stableDraftJson } from "../src/lib/estimate-steps/discard-confirm";
 
 const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const PTY = "pty_0123456789abcdef";
@@ -588,11 +589,77 @@ async function oct15BidDbChecks(ok: Ok) {
     "M2 db: an addendum on an awarded bid is recorded and the estimate stays Sent (no revert)");
 }
 
+/** #348 follow-up (Jeff 2026-10-15) — the Estimator pop-ups ask before a stray click discards unsaved work. Pure + pins. */
+export function discardConfirmChecks(ok: Ok) {
+  // Pure: the dirty comparison.
+  const fresh = { id: "VQ-1", vendor: "", lines: [{ id: 1, qty: "1", amount: "" }], pdfRead: null, extracted: null, total: "" };
+  const base = stableDraftJson(fresh);
+  ok(!draftChanged(base, { ...fresh }) && !inputIsDirty({ baseline: base, current: structuredClone(fresh) }), "discard: a fresh, untouched draft is clean");
+  ok(draftChanged(base, { ...fresh, vendor: "Acme" }) && draftChanged(base, { ...fresh, lines: [{ id: 1, qty: "2", amount: "" }] }), "discard: an edited field (top-level or in a line) is dirty");
+  ok(draftChanged(base, { ...fresh, pdfRead: { runId: "r1", filled: 3 } }) && draftChanged(base, { ...fresh, extracted: { runId: "r1" } }), "discard: a PDF read present (pdfRead / extracted) is dirty");
+  const reordered = { total: "", extracted: null, pdfRead: null, lines: [{ amount: "", qty: "1", id: 1 }], vendor: "", id: "VQ-1" };
+  ok(!draftChanged(base, reordered), "discard: key order (top-level and nested) doesn't count");
+  ok(!draftChanged(base, { ...fresh, note: undefined }) && !draftChanged(stableDraftJson({ ...fresh, note: undefined }), fresh), "discard: undefined vs missing doesn't count (either way)");
+  ok(draftChanged(base, { ...fresh, total: null }), "discard: null is not missing (a cleared value counts)");
+  ok(!draftChanged(null, { ...fresh, vendor: "x" }) && !draftChanged(undefined, { vendor: "x" }), "discard: no baseline yet (still settling) is clean");
+  ok(inputIsDirty({ baseline: base, current: fresh, reading: true }) && !inputIsDirty({ baseline: base, current: fresh, reading: false }), "discard: a Read the PDF in progress is dirty on its own");
+  const fill = (d: typeof fresh) => (d.id !== "VQ-1" ? d : { ...d, vendor: d.vendor || "Filled Co" });
+  const rebased = rebaseDraft<typeof fresh>(base, fill);
+  ok(!draftChanged(rebased, fill(fresh)) && draftChanged(rebased, { ...fill(fresh), total: "9" }), "discard: the hand-off fill re-bases the baseline — the filled form is clean, a later edit dirty");
+  ok(rebaseDraft(null, fill) === null && rebaseDraft(undefined, fill) === undefined && rebaseDraft("{bad", fill) === "{bad", "discard: a pending or unreadable baseline is left as-is by rebaseDraft");
+  ok(MODAL_INPUT_KINDS.join() === "curtain,track,fixture,labor,vendor" && isModalInputKind("vendor") && !isModalInputKind("custom") && !isModalInputKind("catalog"), "discard: the five pop-ups (custom / catalog are not)");
+  ok(discardConfirmText("vendor", { read: true }) === "Discard this vendor quote? The PDF read and your changes will be lost." && DISCARD_COPY.vendorRead === discardConfirmText("vendor", { read: true }), "discard: vendor with a read — copy");
+  ok(discardConfirmText("vendor") === "Discard this vendor quote? Your changes will be lost." && discardConfirmText("curtain") === "Discard this curtain? Your changes will be lost." &&
+     discardConfirmText("track") === "Discard this track? Your changes will be lost." && discardConfirmText("fixture", { read: true }) === "Discard this assembly? Your changes will be lost." &&
+     discardConfirmText("labor") === "Discard this labor? Your changes will be lost.", "discard: the generic copy per pop-up (read only matters for vendor)");
+
+  // Pins.
+  const code = (f: string) => readFileSync(join(process.cwd(), f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const ui = code("src/app/(app)/estimator/est-ui.tsx");
+  const cm = ui.slice(ui.indexOf("export function ConfigModal("));
+  ok(/const close = confirmClose\s*\?\s*\(\) => \{\s*if \(confirmClose\(\)\) onClose\(\);\s*\}\s*:\s*onClose;/.test(cm) && /className="est-modalwrap"\s*onClick=\{close\}/.test(cm) && /className="est-close"\s*onClick=\{close\}/.test(cm) &&
+     !/onClick=\{onClose\}/.test(cm), "discard pins: ConfigModal's backdrop and × go through confirmClose (and, without it, onClose itself — unchanged)");
+  const bs = code("src/app/(app)/estimator/steps/build-step.tsx");
+  const closers = bs.match(/onClose=\{closeInput\}\s*confirmClose=\{confirmDiscardInput\}/g) || [];
+  ok(closers.length === 5 && (bs.match(/onClose=\{closeInput\}/g) || []).length === 5 && (bs.match(/confirmClose=/g) || []).length === 5, "discard pins: the five closeInput pop-ups pass confirmClose, nothing else does");
+  for (const [tag, f] of [["CurtainModal", "curtain-modal"], ["TrackModal", "track-modal"], ["FixtureModal", "fixture-modal"], ["LaborModal", "labor-modal"], ["VendorQuoteModal", "vendor-quote-modal"]] as const) {
+    const at = bs.indexOf(`<${tag}`), end = bs.indexOf("/>", bs.indexOf("onClose={closeInput}", at));
+    ok(at > 0 && bs.slice(at, end).includes("confirmClose={confirmDiscardInput}"), `discard pins: build-step passes confirmClose to ${tag}`);
+    ok(/confirmClose=\{confirmClose\}/.test(code(`src/app/(app)/estimator/${f}.tsx`)), `discard pins: ${tag} hands confirmClose to ConfigModal`);
+  }
+  ok(!/confirmClose/.test(code("src/app/(app)/estimator/ai-scope-modal.tsx")) && !/confirmClose/.test(code("src/app/(app)/estimator/add-system-modal.tsx")) &&
+     /<AiScopeModal[\s\S]*?onClose=\{\(\) => setAiOpen\(false\)\}/.test(bs), "discard pins: AI scope and Add a system don't pass confirmClose (they close as before)");
+  const hook = code("src/app/(app)/estimator/use-estimator-state.ts");
+  const fn = (start: string, next: string) => hook.slice(hook.indexOf(start), hook.indexOf(next, hook.indexOf(start) + start.length));
+  const closeFn = fn("const closeInput = () => {", "const openInputMethod = ");
+  ok(closeFn.length > 0 && !/confirm/.test(closeFn), "discard pins: closeInput itself never asks (the Add / Save path calls it directly)");
+  for (const [name, next] of [["const addTrack = (", "const setCurtainField"], ["const commitVendorQuote = ", "\n  const "], ["const addLabor = (", "\n  const "]] as const) {
+    const body = fn(name, next);
+    ok(body.length > 0 && body.includes("closeInput()") && !/confirmDiscardInput|window\.confirm\(discard/.test(body), `discard pins: ${name.replace(/const | = .*|\(/g, "")} closes without asking`);
+  }
+  const om = fn("const openInputMethod = (", "const openVendorEdit = ");
+  ok(/const cur = openInputRef\.current;\s*if \(cur && !confirmDiscardInput\(\)\) return;\s*if \(cur && cur\.kind === kind && cur\.secId === secId\)/.test(om) && /seedDraft\(kind, secId\);\s*markDraftBaseline\(kind\);/.test(om),
+    "discard pins: openInputMethod asks before closing / switching away, and marks the new open's baseline after seeding");
+  for (const n of ["openVendorEdit", "openLaborEdit", "openTrackEdit", "openCustomEdit", "openCurtainEdit"]) {
+    const body = fn(`const ${n} = (`, "closeInput();");
+    ok(body.length > 0 && body.length < 900 && body.includes("if (!confirmDiscardInput()) return;"), `discard pins: ${n} asks before its close-then-seed`);
+  }
+  ok(/const confirmDiscardInput = \(\): boolean => \{\s*const d = openInputDirty\(\);\s*return !d \|\| window\.confirm\(discardConfirmText\(d\.kind, \{ read: d\.read \}\)\);/.test(hook) &&
+     /reading = cur\.kind === "vendor" && \(vendorPdfBusyRef\.current \|\| !!vendorPdf\.busy\)/.test(hook) && /read: cur\.kind === "vendor" && \(reading \|\| !!vendorDraft\.pdfRead\)/.test(hook),
+    "discard pins: the confirm compares the open pop-up's draft (a running read counts; a read names it)");
+  ok((hook.match(/markDraftBaseline\(/g) || []).length === 2 && hook.includes('markDraftBaseline("labor");') &&
+     /draftBaselineRef\.current\.vendor = rebaseDraft<VendorDraft>\(draftBaselineRef\.current\.vendor, fill\);/.test(hook) && hook.includes("setVendorDraft(fill);"),
+    "discard pins: baselines are set in one helper — each open, the labor travel reseed — and the hand-off fill re-bases it");
+  ok(/if \(draftBaselineRef\.current\[k\] === null\) draftBaselineRef\.current\[k\] = stableDraftJson\(modalDrafts\[k\]\);/.test(hook) && /\}, \[draftBaselineTick, modalDrafts\]\);/.test(hook),
+    "discard pins: a pending baseline snapshots the committed draft");
+}
+
 if (process.argv[1]?.endsWith("test-oct15-estimating.ts")) {
   let pass = 0, fail = 0;
   const okf: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
   const db = !!process.env.PGLITE_PATH;
   oct15PureChecks(okf)
+    .then(() => discardConfirmChecks(okf))
     .then(() => (db ? oct15DbChecks(okf) : undefined))
     .then(() => { console.log(`${pass} PASS, ${fail} FAIL${db ? "" : " (pure only — set PGLITE_PATH for the DB half)"}`); process.exit(fail ? 1 : 0); })
     .catch((e) => { console.error(e); process.exit(1); });

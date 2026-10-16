@@ -11353,7 +11353,7 @@ import { assessmentChecks, assessmentDbChecks } from "./test-assessments";
 import { partyChecks, partyDbChecks } from "./test-parties";
 import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, portalBidPureChecks, portalBidDbChecks, bidReportPureChecks, bidReportWidgetChecks, bidReportDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
 import { vendorChecks, vendorDbChecks, vendorPdfDbChecks, vendorPdfPureChecks, vendorPdfFillChecks } from "./test-vendors";
-import { oct15PureChecks, oct15DbChecks } from "./test-oct15-estimating";
+import { oct15PureChecks, oct15DbChecks, discardConfirmChecks } from "./test-oct15-estimating";
 import { vaNotesChecks, vaNotesDbChecks } from "./test-va-notes";
 import { batch3PureChecks, batch3DbChecks } from "./test-oct15-batch3";
 import { batch4PureChecks, batch4DbChecks } from "./test-oct15-batch4";
@@ -11731,7 +11731,7 @@ seeded()
   .then(() => assessmentChecks(ok)).then(() => assessmentDbChecks(ok))
   .then(() => partyChecks(ok)).then(() => partyDbChecks(ok))
   .then(() => bidChecks(ok)).then(() => bidDbChecks(ok)).then(() => bidSendChecks(ok)).then(() => bidSendFakeChecks(ok)).then(() => bidSendDbChecks(ok)).then(() => bidFollowupChecks(ok)).then(() => bidFollowupDbChecks(ok)).then(() => vendorChecks(ok)).then(() => vendorDbChecks(ok)).then(() => vendorPdfDbChecks(ok)).then(() => vendorPdfPureChecks(ok)).then(() => vendorPdfFillChecks(ok)).then(() => portalBidPureChecks(ok)).then(() => portalBidDbChecks(ok)).then(() => bidReportPureChecks(ok)).then(() => bidReportWidgetChecks(ok)).then(() => bidReportDbChecks(ok))
-  .then(() => oct15PureChecks(ok)).then(() => oct15DbChecks(ok))
+  .then(() => oct15PureChecks(ok)).then(() => discardConfirmChecks(ok)).then(() => oct15DbChecks(ok))
   .then(() => vaNotesChecks(ok)).then(() => vaNotesDbChecks(ok))
   .then(() => batch3PureChecks(ok)).then(() => batch3DbChecks(ok))
   .then(() => batch4PureChecks(ok)).then(() => batch4DbChecks(ok))

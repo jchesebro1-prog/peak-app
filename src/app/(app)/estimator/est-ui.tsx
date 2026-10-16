@@ -121,6 +121,7 @@ export function ConfigModal({
   title,
   sub,
   onClose,
+  confirmClose,
   children,
   footerLeft,
   footerRight,
@@ -131,15 +132,23 @@ export function ConfigModal({
   title: ReactNode;
   sub: ReactNode;
   onClose: () => void;
+  /** #348 follow-up: asked before the backdrop click or × closes (true = OK to close). Without it, they close as
+   *  before. Never asked by the footer's own Add / Save. */
+  confirmClose?: () => boolean;
   children: ReactNode;
   footerLeft: ReactNode;
   footerRight: ReactNode;
 }) {
   const stop = (e: MouseEvent) => e.stopPropagation();
+  const close = confirmClose
+    ? () => {
+        if (confirmClose()) onClose();
+      }
+    : onClose;
   return (
     <div
       className="est-modalwrap"
-      onClick={onClose}
+      onClick={close}
       style={{
         position: "fixed",
         inset: 0,
@@ -203,7 +212,7 @@ export function ConfigModal({
           <button
             type="button"
             className="est-close"
-            onClick={onClose}
+            onClick={close}
             style={{
               width: 30,
               height: 30,

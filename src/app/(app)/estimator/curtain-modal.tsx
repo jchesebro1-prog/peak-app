@@ -57,6 +57,7 @@ export default function CurtainModal({
   onSet,
   onAdd,
   onClose,
+  confirmClose,
   track = null,
   trackSeries = [],
   trackParts = {},
@@ -75,6 +76,8 @@ export default function CurtainModal({
   onSet: (field: keyof CurtainDraft, val: string) => void;
   onAdd: () => void;
   onClose: () => void;
+  /** #348 follow-up: ConfigModal asks this before the × / backdrop discards the form. */
+  confirmClose?: () => boolean;
   /** #274: the curtain's track form — null while Add track is off. */
   track?: TrackDraft | null;
   trackSeries?: readonly TrackSeries[];
@@ -105,6 +108,7 @@ export default function CurtainModal({
         )
       }
       onClose={onClose}
+      confirmClose={confirmClose}
       footerLeft={
         <>
           <Stat label="Fabric" value={cc.fabricArea > 0 ? Math.round(cc.fabricArea) + " sq ft" : "—"} />

@@ -86,6 +86,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     canApplyCredit,
     cardRefs,
     closeInput,
+    confirmDiscardInput,
     cols,
     commitVendorQuote,
     copySystem,
@@ -661,6 +662,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           onSet={setCurtainField}
           onAdd={() => addCurtain(curtainFor)}
           onClose={closeInput}
+          confirmClose={confirmDiscardInput}
           track={curtainTrack}
           trackSeries={trackSeries}
           trackParts={trackParts}
@@ -680,6 +682,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           onSet={(field, val) => setTrackDraft((d) => ({ ...d, [field]: val }))}
           onAdd={() => addTrack(trackFor)}
           onClose={closeInput}
+          confirmClose={confirmDiscardInput}
         />
       )}
       {fixtureFor && (
@@ -692,6 +695,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           onComponentQty={setFixtureComponentQty}
           onAdd={() => addFixture(fixtureFor)}
           onClose={closeInput}
+          confirmClose={confirmDiscardInput}
         />
       )}
       {laborFor && (
@@ -715,6 +719,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           onAdd={() => addLabor(laborFor)}
           editing={laborEdit}
           onClose={closeInput}
+          confirmClose={confirmDiscardInput}
         />
       )}
       {vendorFor && (
@@ -752,6 +757,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           editing={!!vendorEditingRec}
           onAdd={() => commitVendorQuote(vendorFor)}
           onClose={closeInput}
+          confirmClose={confirmDiscardInput}
           /* #348 slice 4: the vendor company picker (typed name as the fallback) and the email hand-off. */
           onPickVendor={(c) => setVendorCompany(c)}
           onTypedVendor={(name) => setVendorField("vendor", name)}
