@@ -347,7 +347,7 @@ async function reviewPureChecks(ok: Ok) {
      sameMailbox({ mailbox: "info", mailboxOwnerId: null }, { mailbox: "info", mailboxOwnerId: null }) && !sameMailbox({ mailbox: "info", mailboxOwnerId: null }, { mailbox: "sales", mailboxOwnerId: null }),
     "#356 forward: a forwarded Gmail file is read only within the same mailbox");
   const reader = src("src/app/(app)/inbox/thread-reader.tsx");
-  ok(/if \(mode === "forward"\) \{\s*const fwd = await forwardAction\(\{\s*threadId: vm\.id,\s*to: cTo,\s*cc: cCc,/.test(reader) && reader.includes('replyAction(vm.id, b, !!signature, attachPayload(att), mode === "replyAll" ? cCc : undefined)'),
+  ok(/if \(mode === "forward"\) \{[\s\S]{0,400}const fwd = await forwardAction\(\{\s*threadId: vm\.id,\s*to: cTo,\s*cc: cCc,/.test(reader) && reader.includes("replyAction(vm.id, b, !!signature, attachPayload(att), showCc ? cCc : undefined)"),
     "#356: Forward sends to the typed To / Cc as a new message; Reply all passes its Cc");
   const acts = src("src/app/(app)/inbox/actions.ts");
   ok(/export async function forwardAction\([\s\S]{0,400}const source = await ownThread\(d\?\.threadId, user\);\s*if \(!source\) return/.test(acts) && acts.includes("...(ccLine ? { cc: ccLine } : {})"),
@@ -363,13 +363,14 @@ async function reviewPureChecks(ok: Ok) {
   ok(!taskPushAllowed("T-6001", { projectId: "P-1", assigneeUserId: "u2", createdBy: "Jeff Chesebro" }, { projectId: "P-1" }, user, live) &&
      taskPushAllowed("T-6001", { projectId: null, assigneeUserId: "u1" }, {}, user, live) && taskPushAllowed("T-6002", { createdBy: "nic trapani" }, {}, user, live),
     "#356 push: an office task updates only for its assignee or creator");
-  ok(pushParksOn(403) && !pushParksOn(500) && !pushParksOn(401) && PUSH_READ_ONLY_MESSAGE.startsWith("Read-only"), "#356 push: a 403 parks the entries as read-only (no retry storm)");
+  ok(pushParksOn(403, { error: "read-only" }) && !pushParksOn(403, { error: "forbidden" }) && !pushParksOn(403, null) && !pushParksOn(403) && !pushParksOn(500, { error: "read-only" }) && PUSH_READ_ONLY_MESSAGE.startsWith("Read-only"),
+    "#356 re-review push: only the route's own 403 { error: \"read-only\" } parks; any other 403 is transient (retried)");
   const route = src("src/app/api/sync/push/route.ts");
   ok(route.indexOf("if (!mayPullFieldData(session.user.roles))") > 0 && route.indexOf("if (!mayPullFieldData(session.user.roles))") < route.indexOf("await req.json()") &&
-     route.includes("if (!taskPushAllowed(rec.id, stored, inc, pusher, (x) => known.get(x) === true))") && route.includes("sanitizePushedDoc(coll,"),
+     route.includes("const decision = taskPushDecision(rec.id, stored, inc, pusher, (x) => known.get(x) === true, { storedDeleted: !!existing[0]?.deleted });") && route.includes("if (!decision.ok) {") && route.includes("sanitizePushedDoc(coll,"),
     "#356 push: the route has the pull's `create` gate before reading anything, the task rule, and still strips #351 fields");
   const eng = src("src/lib/sync/engine.ts");
-  ok(/if \(pushParksOn\(res\.status\)\) \{\s*for \(const e of outbox\) await idb\.put\("outbox", \{ \.\.\.e, state: "error", error: PUSH_READ_ONLY_MESSAGE \}\);/.test(eng), "#356 push: the engine parks a refused push's entries");
+  ok(/if \(res\.status === 403 && pushParksOn\(res\.status, await res\.clone\(\)\.json\(\)\.catch\(\(\) => null\)\)\) \{\s*for \(const e of outbox\) await idb\.put\("outbox", \{ \.\.\.e, state: "error", error: PUSH_READ_ONLY_MESSAGE \}\);/.test(eng), "#356 push: the engine parks a refused push's entries");
   const fw = src("src/app/(app)/field-work/actions.ts");
   ok(/export async function toggleFieldTask[\s\S]{0,500}if \(!can\("create", me\.roles\)\)[\s\S]{0,200}const task = await getTask\(taskId\);\s*if \(!task \|\| !task\.projectId \|\| !\(await getProject\(task\.projectId\)\)\)/.test(fw) &&
      /export async function addFieldTask[\s\S]{0,200}if \(!can\("create", me\.roles\)\)/.test(fw),
@@ -436,6 +437,63 @@ async function reviewDbChecks(ok: Ok) {
     "#356 reply all (DB): the Cc rides on the message and the bridge sends it");
 }
 
+/* --- #356 re-review fixes --- */
+async function rereviewPureChecks(ok: Ok) {
+  const { taskPushDecision, isTickOnly } = await import("../src/lib/sync/task-push");
+  const { replyAllCc, parseAddressList } = await import("../src/lib/reply-all");
+  const F = await import("../src/lib/inbox-forward");
+  const { FORWARD_ATTS_LOADING } = await import("../src/lib/inbox-forward-copy");
+  const reader = src("src/app/(app)/inbox/thread-reader.tsx");
+  ok(/<FieldRow label="To">[\s\S]{0,400}readOnly=\{mode !== "forward"\}/.test(reader) && /setCTo\(vm\.contactEmail \|\| ""\)/.test(reader),
+    "#356 re-review: To is read-only in Reply / Reply all and shows the thread contact — a typed To can only be sent by Forward (which sends it)");
+  ok(reader.includes("showCc ? cCc : undefined") && reader.includes('setCCc(m === "replyAll" ? vm.replyAllCc : "")') && !reader.includes("vm.boxAddress : \"\""),
+    "#356 re-review: the shown Cc row goes out on Reply too; Reply all no longer Cc's our own mailbox");
+  ok(reader.includes("if (fwdOriginals && fwdAttsLoading) {") && F.attachmentsPending({ gmailId: "g", attachments: [] }) && !F.attachmentsPending({ gmailId: "g", attsListed: true }) && !F.attachmentsPending({}) &&
+     FORWARD_ATTS_LOADING === "Attachments still loading — try again in a moment",
+    "#356 re-review: a Forward while the original's attachments are still loading says so instead of leaving them off");
+
+  // 3 — an offline tick
+  const live = (id: string) => id === "P-1";
+  const stored = { id: "T-6100", title: "Hang borders", projectId: "P-1", section: "Install", assigneeUserId: "u9", createdBy: "Jeff Chesebro", status: "open", doneAt: null, updatedAt: 1, notes: "keep" };
+  const user = { id: "u1", name: "Nic Trapani" };
+  const tick = { ...stored, status: "done", doneAt: 5, updatedAt: 5, rev: 3, syncState: "pending" };
+  const d = taskPushDecision("T-6100", stored, tick, user, live);
+  ok(d.ok && !!d.doc && d.doc.status === "done" && d.doc.doneAt === 5 && d.doc.notes === "keep" && d.doc.assigneeUserId === "u9" && !("rev" in d.doc && d.doc.rev === 3),
+    "#356 re-review push: an offline tick on an office Install task is allowed — status / doneAt / updatedAt from the device, the rest from the stored copy");
+  ok(!taskPushDecision("T-6100", stored, { ...tick, title: "Renamed" }, user, live).ok && !taskPushDecision("T-6100", stored, { ...tick, projectId: "P-2" }, user, (x) => x === "P-1" || x === "P-2").ok &&
+     !taskPushDecision("T-6100", stored, { ...tick, status: "bogus" }, user, live).ok && !taskPushDecision("T-6100", { ...stored, projectId: "P-dead" }, { ...tick, projectId: "P-dead" }, user, live).ok &&
+     !taskPushDecision("T-6100", stored, tick, user, live, { storedDeleted: true }).ok,
+    "#356 re-review push: anything beyond a tick, a moved project, an unknown status, a dead project or a deleted task is still refused");
+  ok(isTickOnly(stored, { status: "done", doneAt: 5, updatedAt: 5 }) && !isTickOnly(stored, { status: "done", assigneeUserId: "u1" }), "#356 re-review push: isTickOnly looks only at what the push carries");
+  const route = src("src/app/api/sync/push/route.ts");
+  ok(route.includes("if (decision.doc) pushDoc = decision.doc;") && route.includes("sanitizePushedDoc(coll, { ...pushDoc, id: rec.id },"), "#356 re-review push: the route writes the merged tick document");
+
+  // 4 — Reply all Cc
+  ok(parseAddressList('"Doe, Jane" <jane@x.org>, bob@x.org; Info <info@peak.com>').map((a) => a.email).join() === "jane@x.org,bob@x.org,info@peak.com", "#356 re-review: address lists split on top-level commas (a quoted comma stays)");
+  ok(replyAllCc({ to: "Info <info@peak.com>, Jane <jane@x.org>", cc: "pat@customer.org, Bob <bob@x.org>, jane@x.org" }, ["info@peak.com", "me@peak.com", "Pat@Customer.org"]) === "Jane <jane@x.org>, Bob <bob@x.org>" &&
+     replyAllCc({ to: "info@peak.com" }, ["info@peak.com"]) === "" && replyAllCc(null, []) === "",
+    "#356 re-review: Reply all Cc = the message's other To / Cc recipients, minus our own addresses and the primary contact");
+  ok(/replyAllCc: replyAllCc\([\s\S]{0,250}\[bm\?\.address, user\.email, sel\.contactEmail\]/.test(src("src/app/(app)/inbox/page.tsx")), "#356 re-review: the reader gets the Cc from the replied-to message, excluding the mailbox, the user and the contact");
+}
+
+async function rereviewDbChecks(ok: Ok) {
+  const C = await import("../src/lib/stores/comms");
+  const F = await import("../src/lib/inbox-forward");
+  const { createFixture, registerFixture, fixtureId } = await import("./test-fixtures");
+  const me = { id: "u-b6rr", name: "Batch Six RR" };
+  const id = fixtureId("b6", "fwd-pending");
+  await createFixture("comms", {
+    id, mailbox: "personal", mailboxUser: me.name, mailboxOwnerId: me.id, archived: false, customerId: null, customer: "", contactName: "Pat",
+    contactEmail: "pat@customer.org", cc: "", channel: "email", status: "waiting_us", assignedTo: me.name, unread: false, subject: "Plans", createdAt: 1, updatedAt: 1, link: null,
+    messages: [{ id: "m1", at: 1, direction: "in", channel: "email", author: "Pat", body: "Plans attached", gmailId: "g-1" }],
+  } as never);
+  const r = await F.forwardThread((await C.get(id))!, { to: "vendor@x.com", body: "FYI", includeOriginal: true }, me);
+  ok(!r.ok && r.error === "Attachments still loading — try again in a moment", "#356 re-review (DB): a forward whose original attachments aren't listed yet is refused with the reason");
+  const r2 = await F.forwardThread((await C.get(id))!, { to: "vendor@x.com", body: "FYI", includeOriginal: false }, me);
+  if (r2.ok) registerFixture("comms", r2.id);
+  ok(r2.ok, "#356 re-review (DB): unticking the originals sends the forward anyway");
+}
+
 export async function batch6PureChecks(ok: Ok) {
   fieldTaskPureChecks(ok);
   sourcingChecks(ok);
@@ -443,12 +501,14 @@ export async function batch6PureChecks(ok: Ok) {
   todayJobsChecks(ok);
   await attachPureChecks(ok);
   await reviewPureChecks(ok);
+  await rereviewPureChecks(ok);
 }
 
 export async function batch6DbChecks(ok: Ok) {
   await fieldTaskDbChecks(ok);
   await attachDbChecks(ok);
   await reviewDbChecks(ok);
+  await rereviewDbChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-batch6.ts")) {
