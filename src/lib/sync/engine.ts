@@ -61,10 +61,12 @@ export function mirrorKeysToClear(
   return mirror.filter((m) => fieldCollections.includes(m.collection) && !pending.has(m.key)).map((m) => m.key);
 }
 
-/** #356 review — a push refused for the user's role (403, the pull's `create` gate): every entry it carried is parked
- *  as read-only (state "error" — never pushed again until re-saved), not retried. Pure. */
-export function pushParksOn(status: number): boolean {
-  return status === 403;
+/** #356 review — a push refused for the user's role: every entry it carried is parked as read-only (state "error" —
+ *  never pushed again until re-saved). Re-review: only the push route's OWN refusal, a 403 whose body is
+ *  `{ error: "read-only" }`; any other 403 (a proxy, a WAF, an expired session page) is transient like any other
+ *  failure — the entries stay pending and retry. Pure. */
+export function pushParksOn(status: number, body?: unknown): boolean {
+  return status === 403 && !!body && typeof body === "object" && (body as { error?: unknown }).error === "read-only";
 }
 export const PUSH_READ_ONLY_MESSAGE = "Read-only — your role can't save field work. Ask an admin for access.";
 
@@ -403,7 +405,7 @@ class SyncEngine {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ collections }),
       });
-      if (pushParksOn(res.status)) {
+      if (res.status === 403 && pushParksOn(res.status, await res.clone().json().catch(() => null))) {
         for (const e of outbox) await idb.put("outbox", { ...e, state: "error", error: PUSH_READ_ONLY_MESSAGE });
         await this.refreshCounts();
         return;
