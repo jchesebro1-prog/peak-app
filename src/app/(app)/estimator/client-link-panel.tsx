@@ -175,6 +175,11 @@ export function ClientLinkPanel({ quoteId, withPackage = true }: { quoteId: stri
           Expires {shortDate(link.expiresAt)} · created by {link.createdBy}
         </span>
       )}
+      {status.viewed && (
+        <span data-testid="client-link-viewed" style={{ ...small, fontWeight: 600, color: "#3a3f4a" }}>
+          {status.viewed}
+        </span>
+      )}
       {status.sentRevs.length > 0 && (
         <div data-testid="client-link-revs" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {status.sentRevs.map((r) => (

@@ -10033,7 +10033,8 @@ Gates: tsc 0; test:specs 9495 PASS / 0 FAIL (+88); test:smoke 172/0; eslint 0 er
 Browser-verified (inspection $2,450 − $300 → letter $2,150; won → $300 redeemed + $32.25 earned at Silver 1.5 %;
 delete → both reversed; repair capped at its $825 total). Reviewed, no findings.
 
-**Jeff-gated:** review the defaults in Settings → Rewards (thresholds, earn %, starting-credit rate and cap), add
+**Jeff-gated:** ~~review the defaults in Settings → Rewards (thresholds, earn %, starting-credit rate and cap)~~ **confirmed
+2026-10-15 (Jeff) — the defaults are his numbers (D493)**; add
 perks, post starting credit, then turn the program on. The next production deploy applies migration 0034.
 **Lost quotes out of the program (2026-09-30, D505):** Jeff: "lost quotes shouldn't place into the rewards program."
 Marking a quote Lost (`setStatus`, every path) strips its credit — the Estimator line(s) and the service section's
@@ -10356,18 +10357,23 @@ are additive JSONB that older code ignores. Rotating `AUTH_SECRET` also kills ev
 
 **For Jeff.**
 - Open questions in spec §12: ~~photo side~~ (**ANSWERED 2026-10-15: photos alternate right, left, right — #352,
-  D1131**), datasheet thumbnails as photos, default presentation, who manages intros.
+  D1131**), ~~datasheet thumbnails as photos, default presentation, who manages intros~~ (**ANSWERED 2026-10-15
+  (Jeff): a part with no real photo uses its datasheet thumbnail — already so, D1190; new systems default to Narrative —
+  built in #355, D1191; anyone with `create` manages intros — already so, D1192**).
 - Toggle title says "every narrative system's" though By-section prints every system — reword?
 - Paragraphs live on catalog parts, so take `npm run db:export` before Clear catalog price list or the go-live wipe.
 - Preview deploys share the production DB, so a paragraph or intro saved on a preview is a production write.
 - ~~Spec §12 q7 — vendor-quote lines are left out of Load system; say if you'd rather carry them with their files.~~
   **ANSWERED 2026-10-15 (Jeff): bring them, flagged "Old vendor price — re-quote". Built in #352 (D1132).**
 - Portal-built quotes are excluded from the library — keep that?
-- Should a won quote recalled after its last send load the last SENT version (current) or the version that won?
+- ~~Should a won quote recalled after its last send load the last SENT version (current) or the version that won?~~
+  **ANSWERED 2026-10-15 (Jeff): the version that won. Built in #355 (D1189) — reopening a won estimate puts the won
+  version back; the online page still shows the last send (its PDF).**
 - Client links: copy them from production only. Preview deploys share the production DB, so a link copied there
   carries the preview origin.
 - Spec §12 q4: is 60 days right for a client link?
-- View tracking is deliberately left out (a public GET never writes). Want "viewed" stamps?
+- ~~View tracking is deliberately left out (a public GET never writes). Want "viewed" stamps?~~ **ANSWERED 2026-10-15
+  (Jeff): yes, staff only. Opens are counted since #301 (D625); the "Viewed <date time>" stamp is #355 (D1188).**
 - The online header says "sent <date>" using the PDF's issue date.
 - Cut sheets stay PDF-only online; the online pages don't show them. Want them online too?
 - The BOM toggle shows quantities and descriptions even when the estimate was sent narrative-only.
@@ -10890,9 +10896,10 @@ disappear. Rotating `AUTH_SECRET` kills every link, as before.
    #352 (D1125).**
 3. ~~**BOM quantities** show on the package page even when the estimate PDF hides them. Keep?~~ **ANSWERED 2026-10-15
    (Jeff): the package-page BOM follows the PDF's quantities setting. Built in #352 (D1126).**
-4. **Per-scope heading on the cover.** The price line names the scope ("Lighting scope: $28,500.00"); there is no separate
-   heading. Want one?
-5. **Letterhead on page 1 only**; the footer repeats on every page. OK?
+4. ~~**Per-scope heading on the cover.** The price line names the scope ("Lighting scope: $28,500.00"); there is no separate
+   heading. Want one?~~ **ANSWERED 2026-10-15 (Jeff): yes — each scope gets its own heading. Built in #355 (D1187).**
+5. ~~**Letterhead on page 1 only**; the footer repeats on every page. OK?~~ **ANSWERED 2026-10-15 (Jeff): keep — page 1
+   only (decision item 57).**
 6. **Open counts are best effort.** One per device per half hour, per server instance; a mail scanner that runs JS can still
    count once. A signal, not proof. Fine?
 7. **A honeypot hit shows the normal "Thanks" and writes nothing** (a bot gets no signal). A real person who autofills the
@@ -12637,3 +12644,63 @@ The app is safe before step 4: ownership already resolves the same way lazily (G
 - A venue type already set to "Church — Contemporary" keeps the earlier drawing until it is re-picked in Settings → Venue types.
 - Try Link to rack… / Unlink on a real Grid design with a rack built in the Assembly Builder.
 - The first supplement price file on production: check its parts read the new date and the rest of the book keeps its old one.
+
+---
+
+## 355. Jeff's 2026-10-15 decisions — Batch 5 (Estimate output leftovers) — DONE 2026-10-16 on `worktree-assist-layer` (D1187–D1193)
+
+**Asked (Jeff, 2026-10-15/16 decision session — `docs/decisions/2026-10-15-jeff-decisions.md`, Round 2 items 55–63).** The #301 / #293 leftovers.
+
+**Done:**
+- **#55 Rewards numbers (D493 amended):** no code change — the thresholds, earn rates and 1 % / $1,000 starting credit are Jeff's confirmed numbers; the program stays off until he turns it on in Settings → Rewards.
+- **#56 Cover heading (D1187):** each scope on the cover PDF opens with its own heading — the system's name, else its discipline, else "Scope N" — inside the scope's no-break block. Answers #301 question 4. (#57, letterhead on page 1 only, is a Keep — #301 question 5.)
+- **#58 Viewed stamp (D1188):** "Viewed Oct 6, 9:05 PM" — the latest open of any sent revision's client link, Chicago time — on the Client link panel (Send & track, Customer review) and leading the Quotes hub's Opened chip tooltip. Staff only; no customer page reads `shareOpens`.
+- **#59 Won version (D1189):** the Won transition records `Quote.wonRev` (the latest send when it still matches, else a "Won — the version that won" snapshot); reopening (won → draft / sent) puts that version back when edits were saved after the win — the edits become a revision first, the credit is the locked amount through `restoredCreditFor` → `settleCredit`, the ledger sees a plain revise, and the Estimator reloads. Every non-Daylite system quote; never a historical import. Only the priced fields come back — the header stays. The online page still shows the last send.
+- **#60 Datasheet thumbnail (D1190):** already so — a key product with no real photo prints its datasheet's page-1 thumbnail (a real photo always wins), on the PDF, online and the package page. Pinned. Sent PDFs stay frozen; online views of old sent quotes read photos live.
+- **#61 Narrative default (D1191):** a new estimate starts Narrative; + Add system follows the estimate's first system (review M6); systems saved without the key stay Itemized, so existing estimates keep their setting.
+- **#62 Intros (D1192):** already so — `create` edits the shared system intros. Pinned.
+- **#63 Toggle labels (D1193):** the online estimate and package page toggle reads Overview / Itemized ("…is under Itemized."); `?view=bom` unchanged; staff labels unchanged.
+
+**Tests:** new `scripts/test-batch5.ts` (pure + DB, chained into test:specs; `npx tsx scripts/test-batch5.ts` runs the pure half, with `PGLITE_PATH` the DB half): the cover heading rule and render, the Viewed stamp and the customer pages' absence of it, the won-version rules plus a DB run of send → win → edit → reopen (spec, value, credit, auto-save revision, ledger redeem / unredeem once), won from an edited draft, won → sent, a historical import, the thumbnail order and a DB run (no photo → thumbnail → real photo wins), the Narrative default and old systems still Itemized, the intro permission, the toggle labels. Harness expectations updated where behaviour changed: the #301 chip tooltip (#58), the #301 package-page order / fallback text (#63); the #P2b no-alternates fixture regenerated for the cover heading (#56) and the toggle labels (#63). No migration, no env var.
+
+**Gates:** tsc 0; `scripts/test-batch5.ts` 89 PASS pure / 103 PASS with the DB half, 0 FAIL; test:specs 24,243 PASS / 0 FAIL; test:smoke 262 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors, 0 warnings on the 15 changed src/scripts files (the harness file excluded, targeted edits only). Not browser-verified.
+
+**Review fixes (2026-10-16, #355 review "With fixes"):** I1 — the reopen is planned before the approval gate; setStatus and `checkApprovalGate` judge the restored version, so a non-approver can reopen an approved-then-edited won quote to Sent and an approver's stamp fingerprints the restored content (DB-tested, no bypass). I2 — a restoring reopen schedules its PDF, won → sent too. I3 — the Estimator saves unsaved edits before leaving Won (status menu and stage bar). M1 — a historical-import move never restores; a Won move that records nothing sets `wonRev` null. M2 — a Save whose status move reopens also reloads. M3 — the Won move compares at today's SKUs. M4/M5 — D1189 scope (every non-Daylite system quote) and "the header isn't restored". M6 — Narrative only for a NEW estimate; + Add system follows the estimate's first system; Send & track warns "N narrative systems have no intro text" (never blocks). M7 — the Viewed stamp shows on the Quotes hub row. M8 — Home's stage sheet and the Quotes hub say "Reopened at the version that won…". Review-fix gates: tsc 0; `scripts/test-batch5.ts` 99 PASS pure / 122 PASS with the DB half, 0 FAIL; test:specs 24,262 PASS / 0 FAIL; test:smoke 262 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors, 0 warnings on the 14 changed src/scripts files. Not browser-verified.
+
+**Rollback:** safe. New optional JSON only (`Quote.wonRev`, and the "Won — the version that won" / "Auto-saved before reopening…" revisions, which older code reads as ordinary manual revisions); older code ignores them. Rolling back restores the old cover, labels, default presentation and reopen behaviour.
+
+**Remaining (Jeff-gated):**
+- Look at a cover PDF with three or more scopes on production (headings, still 1–2 pages).
+- Open a sent estimate's client link from another device, then check the Viewed stamp on Send & track and the Quotes hub tooltip.
+- Win an estimate, edit it, revise it (status → Draft): the Estimator reloads at the won version and Revisions lists the edits as "Auto-saved before reopening at the version that won".
+- The datasheet thumbnail only exists where the admin datasheet-thumbnail render has run — run it on production (#245 remaining).
+- Still open from #301: open counts best effort (question 6), the honeypot (7), starter paragraphs (9). From #293: the Itemized appendix hint "Every narrative system's full line list…" wording (not the online toggle).
+## 356. Jeff's 2026-10-15 decisions — Batch 6 (Round 2 items 64–68 + Field Work task-id fix) — DONE 2026-10-16 on `batch6-jeff-decisions` (D1194–D1199)
+
+Decision record: `docs/decisions/2026-10-15-jeff-decisions.md` (on `worktree-assist-layer`), Round 2 items 64–68.
+
+- **#64 Attach in the Inbox composer (D1194).** New message, Edit draft and the reply composer (its Attach was a demo) attach computer files and the linked company's / project's Documents; chips with ✕; 18 MB of files / 20 files together (Gmail's 25 MB counts the encoded message). Uploads go straight to private Blob (`mail-attachments/<user>/<key>/`, `/api/inbox/attach-upload`, the server mints the path), re-checked by `finalizeMailUploadAction`; attachments ride by reference (`blobPath` / `documentId`) and are re-checked on save / send / reply after the owner check and again in the Gmail bridge; over 4 MB sends through Gmail's upload endpoint. `src/lib/mail-attachments.ts`, `mail-attachments-server.ts`, `inbox/attach-actions.ts`, `inbox/attach-picker.tsx`.
+- **#65 Download today's jobs (D1195).** Nav sync panel, phone drawer and Field Work, `create` holders only. `GET /api/sync/today` (`src/lib/sync/today-jobs.ts`) → forced pull into the mirror → the service worker keeps each page (MessagePort reply) → "Ready offline: N jobs".
+- **#66 Most-quoted products (D1196).** `/reports/sourcing` + CSV: parts and manufacturers across open estimates (sent, or drafts touched in 12 months), weighted by the #298 win rate; assemblies expanded, bonus lines skipped; cost for `approve` holders only. `src/lib/sourcing-report.ts`.
+- **#67 App icon from the Branding logo (D1197).** `/icons/app/*.png` (sharp, cached by logo version), generated `src/app/manifest.ts`, versioned favicon / apple-touch-icon; built-in mark when no logo. Native shells need their own icon sets + a rebuild (DEPLOY.md §8).
+- **#68 July defaults accepted (D1198).** MASTER-QUESTIONS B1–B3, F6, F7, F9–F11, F14, G2, G3, H1, H3, I4–I7, J1–J4, J6, K2, K4–K6 answered; F17, J5, K1, K3 answered by the builds above.
+- **Bug fix (D1199).** `addFieldTask` could overwrite any task by id; `createFieldTask` takes only `tk-` ids, inserts once, treats the caller's own repeat as idempotent and refuses the rest.
+
+Tests: `scripts/test-batch6.ts` (chained into test:specs; 72 pure / 89 with the DB half), plus targeted pin updates in `test-review-and-spec.ts`, `test-thread-visibility.ts` (attach-actions joins the #341 action audit) and `test-ask.ts`. Smoke adds `/reports/sourcing` and a manifest content check. No migration, no new env var.
+
+**Gates:** tsc 0; `scripts/test-batch6.ts` 72 PASS pure / 89 PASS with the DB half, 0 FAIL; test:specs 24,229 PASS / 0 FAIL; test:smoke 264 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors on the 39 changed src/scripts .ts/.tsx files (1 pre-existing warning, `field-work/page.tsx` Date.now; `test-review-and-spec.ts` skipped — eslint crashes on the harness). Not browser-verified.
+
+**Review fixes (#356 review "With fixes", 2026-10-16):** Critical 1 — Forward is a real new message (`forwardAction`, `src/lib/inbox-forward.ts`): its own thread addressed only to the typed To / Cc, "Fwd: …" + the quoted original, optionally the forwarded message's attachments (a Gmail one read from its source, same mailbox only) plus the rep's picks; a private source stays private (#341). Reply all sends its Cc (stamped on the message; bridge `outboundAddressing`). Important 2 — 18 MB of files ("Attachments too large for Gmail — 18 MB max."); the bridge refuses a built message over 25 MB encoded and shows "Not sent — …" on it (never retried). Important 3 — `/api/sync/push` takes the pull's `create` gate (403 parks the outbox entries as read-only); a `tasks` push inserts only new `tk-` tasks on a live project and updates only `tk-` tasks on their own live project or tasks the pusher is assigned to / created (`src/lib/sync/task-push.ts`); `toggleFieldTask` / `addFieldTask` need `create` and a task on a live project. Minor — sourcing reads quotes once and counts drafts touched in 12 months only; one cached settings read in the root layout; the Documents picker tags Internal files and names the company / project; `/favicon.ico` rewrites to `/icons/app/32.png`; the caller's own unassigned `tk-` capture answers ok. D1194, D1196, D1199 updated. Review-fix gates: tsc 0; `scripts/test-batch6.ts` 95 PASS pure / 119 PASS with the DB half, 0 FAIL; test:specs 24,259 PASS / 0 FAIL (includes test-thread-visibility; its "push stays open" pin now pins the new gate); test:smoke 264 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 problems on the 27 changed src/scripts files + next.config.ts. Not browser-verified.
+
+**Rollback:** safe. New optional fields only (`CommAttachment.blobPath` / `documentId` / `fwdFrom`, `CommMessage.sendError`); older code ignores them (an email drafted with one would send without it on old code, since the old bridge skips unknown attachments). Rolling back restores the static manifest only if `public/manifest.webmanifest` comes back with it.
+
+**Remaining (Jeff-gated):**
+- Attach a computer file and a company Document to a real email on production (needs `BLOB_READ_WRITE_TOKEN` and a connected Gmail); try one over 4 MB.
+- Press Download today's jobs on a phone with a real day's assignments, then go offline and open each job.
+- Upload the real logos in Settings → Branding and check the home-screen icon; replace the native app icon sets and rebuild if the apps should match.
+- Look at Reports → Most-quoted products with real open estimates.
+- **Question for Jeff (review item 9):** on a shared device, the offline mirror and the cached job pages stay after sign-out — another person signing in on that tablet could read them offline. Should sign-out clear the device (the mirror and the page cache, keeping unsent captures), or are field devices personal?
+- **Follow-up (review item 7):** sweep orphaned composer uploads — files under `mail-attachments/` that no draft or sent message references (a discarded composer), e.g. older than 7 days.
+- Forward a real email with a Gmail attachment on production and check the vendor gets the file; try Reply all with a Cc.
+- **Re-review fixes (2026-10-16, D1200):** To is read-only on Reply / Reply all (only Forward sends to a typed address); the shown Cc row always goes out; Reply all Cc's the replied-to message's other recipients (not our own mailbox); a push parks as read-only only on the route's own `403 { error: "read-only" }`; an offline tick (status / doneAt / updatedAt only, live task on a live project) syncs like the online tick, other fields from the stored copy; Forward waits for the original's attachments to finish loading. Gates: tsc 0; `test-batch6.ts` 105 PASS pure / 131 PASS with the DB half, 0 FAIL; test:specs 24,271 PASS / 0 FAIL (includes test-thread-visibility); `next build` OK; eslint 0 problems on the 11 changed files; smoke not rerun (no page route touched). Not browser-verified.
+- **Left as is (re-review item 6):** forwarding a legacy attachment stored inline as a data URL copies its bytes into the new forward's comms document (which every page's nav data reads). Rare (pre-Gmail-reference attachments only); forward by reference later.

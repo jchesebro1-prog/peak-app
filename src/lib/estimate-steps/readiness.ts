@@ -59,6 +59,13 @@ function buildBadge(sections: SpecSection[]): StepBadge {
   return { state: "gaps", count, label: parts.join(" · ") };
 }
 
+/** Narrative systems printed in the body with no intro text (a package
+ *  document that applies replaces the intros, so then none count). */
+export function narrativeWithoutIntro(sections: SpecSection[], document?: PackageDoc | null): number {
+  if (documentApplies(document)) return 0;
+  return sections.filter((s) => systemPrintsInBody(s) && s.presentation === "narrative" && !(s.narrative || "").trim()).length;
+}
+
 function packageBadge(saved: boolean, sections: SpecSection[], document?: PackageDoc | null): StepBadge {
   if (!saved) return { state: "idle", label: "Save first" };
   if (documentApplies(document)) {
@@ -66,7 +73,7 @@ function packageBadge(saved: boolean, sections: SpecSection[], document?: Packag
     const count = scopesWithoutGoals(sections) + g.removedChips.length + g.productsNotInBom.length;
     return count === 0 ? { state: "ok", label: "✓ Ready" } : { state: "gaps", count, label: plural(count, "gap", "gaps") };
   }
-  const noIntro = sections.filter((s) => systemPrintsInBody(s) && s.presentation === "narrative" && !(s.narrative || "").trim()).length;
+  const noIntro = narrativeWithoutIntro(sections);
   const count = noIntro + keyProductsNeedingText(sections) + scopesWithoutGoals(sections);
   return count === 0 ? { state: "ok", label: "✓ Ready" } : { state: "gaps", count, label: plural(count, "gap", "gaps") };
 }
@@ -86,9 +93,15 @@ export function requoteCount(sections: SpecSection[]): number {
 function sendBadge(i: ReadinessInput): StepBadge {
   // #352 review M3: a draft about to go out warns about lines still at an old vendor price — never blocks Send.
   const requote = i.status === "draft" ? requoteCount(i.sections) : 0;
-  if (requote > 0) {
+  // #355 review M6: so is a narrative system with no intro text (new estimates start Narrative).
+  const noIntro = i.status === "draft" ? narrativeWithoutIntro(i.sections, i.document) : 0;
+  if (requote > 0 || noIntro > 0) {
     const base = i.review?.tone === "approved" ? "Ready to send" : "";
-    return { state: "gaps", count: requote, label: [base, `⚠ ${plural(requote, "line needs", "lines need")} a re-quote`].filter(Boolean).join(" · ") };
+    const warn = [
+      requote ? `⚠ ${plural(requote, "line needs", "lines need")} a re-quote` : "",
+      noIntro ? `⚠ ${plural(noIntro, "narrative system has", "narrative systems have")} no intro text` : "",
+    ];
+    return { state: "gaps", count: requote + noIntro, label: [base, ...warn].filter(Boolean).join(" · ") };
   }
   if (i.status === "sent") {
     const opens = i.track?.opens ?? 0;

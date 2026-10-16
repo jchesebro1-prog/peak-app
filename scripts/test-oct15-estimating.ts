@@ -358,7 +358,7 @@ export function oct15RevChecks(ok: Ok) {
     "I1: a post-send file copies only when unchanged since the send and printing exactly the stamped Rev — never a loop");
   ok(revisionCopyPlan(rv(2, { pdfBlobPath: "x" }), pdf(90, 2), 80) === "wait" && revisionCopyPlan({ rev: 2, at: 100, reason: "manual" }, pdf(90, 2), 80) === "wait", "I1: a copied or non-sent revision is left alone");
   const qsrc = rd("src/lib/stores/quotes.ts");
-  ok(qsrc.includes("if (r && typeof stamped === \"number\" && typeof printedRev === \"number\" && printedRev !== stamped) return;") && qsrc.includes("if (out && revised.value) await scheduleRevisePdfSafely(id);"),
+  ok(qsrc.includes("if (r && typeof stamped === \"number\" && typeof printedRev === \"number\" && printedRev !== stamped) return;") && qsrc.includes("if (out && (revised.value || reopened.value)) await scheduleRevisePdfSafely(id);"),
     "I1: setRevisionPdfPath never overwrites a stamped Rev; every revise schedules a render");
   const R = (rev: number, reason: string, revNo?: number) => ({ rev, reason, at: rev, ...(revNo ? { docFields: { revNo } } : {}) });
   ok(documentRevStamp({ revisions: [], status: "draft" }).revNum === 1 && documentRevStamp({ status: "draft" }).revNum === 1, "oct15 #13: before any send the document prints Rev 1");

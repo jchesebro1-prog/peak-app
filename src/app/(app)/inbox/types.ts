@@ -83,6 +83,8 @@ export type AttachmentVM = {
 export type AttachmentMetaVM = {
   name: string;
   size: number;
+  /** Batch 6 #64 — lib/mail-attachments attachKey: the composer keeps or drops a draft's file by it. */
+  key?: string;
 };
 
 export type DraftPayload = {
@@ -155,6 +157,8 @@ export type MessageVM = {
   out: boolean;
   tag: string;
   queued: boolean;
+  /** #356 review — the bridge will never send this message (e.g. too large for Gmail): the reason, shown on it. */
+  sendError?: string;
   time: string;
   body: string;
   attachments?: AttachmentVM[];
@@ -206,6 +210,8 @@ export type ReaderVM = {
   chanIcon: ChanIcon;
   boxLabel: string;
   boxAddress: string;
+  /** #356 re-review — Reply all's Cc pre-fill (lib/reply-all): the other To / Cc recipients of the replied-to message. */
+  replyAllCc: string;
   boxColor: string;
   contactName: string;
   contactEmail: string;

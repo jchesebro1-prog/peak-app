@@ -28,6 +28,12 @@ export const ONLINE_COPY = {
   revoked: "Link revoked — the old link no longer opens.",
 } as const;
 
+/** Batch 5 #63 (Jeff, 2026-10-15) — the customer-facing view toggle on the
+ *  online estimate (portal / share) and the client package page. The query
+ *  value stays `view=bom`; staff-side labels (Build package's Narrative /
+ *  BOM quote tabs, a system's Narrative / Itemized presentation) are unchanged. */
+export const ONLINE_VIEW_LABELS = { narrative: "Overview", bom: "Itemized" } as const;
+
 export type OnlineEstimateState =
   | { kind: "ok"; rev: QuoteRevision; closed: boolean }
   | { kind: "revising" }
@@ -157,4 +163,6 @@ export type ShareLinkView = {
 
 /** `sentRevs` (#301 slice B) — every sent revision with its opens, for any
  *  signed-in user; it carries no path. */
-export type ShareLinkStatus = { state: ShareEligibility; canSend: boolean; link: ShareLinkView | null; sentRevs: SentRevRow[] };
+export type ShareLinkStatus = { state: ShareEligibility; canSend: boolean; link: ShareLinkView | null; sentRevs: SentRevRow[];
+  /** Batch 5 #58 — "Viewed Oct 6, 10:42 AM" (latest open, Chicago), "" when never opened. Staff only. */
+  viewed?: string };

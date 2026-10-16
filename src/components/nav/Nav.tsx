@@ -39,6 +39,8 @@ export type NavUser = {
   color: string;
   roleLabel: string;
   isAdmin: boolean;
+  /** Batch 6 #65 — may download today's jobs for offline (`create`, the #351 pull gate). */
+  canFieldDownload?: boolean;
 };
 
 export type RosterEntry = {
@@ -336,7 +338,7 @@ export default function Nav({
         </div>
 
         <div className="pk-nav-right">
-          <SyncChip />
+          <SyncChip canDownload={!!user.canFieldDownload} />
 
           {!narrow && (
             <div style={{ position: "relative" }}>
@@ -848,7 +850,7 @@ export default function Nav({
               </button>
             </div>
 
-            <SyncChip variant="drawer" />
+            <SyncChip variant="drawer" canDownload={!!user.canFieldDownload} />
 
             {askEnabled && (
               <button

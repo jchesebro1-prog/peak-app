@@ -11358,6 +11358,8 @@ import { oct15PureChecks, oct15DbChecks, discardConfirmChecks } from "./test-oct
 import { vaNotesChecks, vaNotesDbChecks } from "./test-va-notes";
 import { batch3PureChecks, batch3DbChecks } from "./test-oct15-batch3";
 import { batch4PureChecks, batch4DbChecks } from "./test-oct15-batch4";
+import { batch5PureChecks, batch5DbChecks } from "./test-batch5";
+import { batch6PureChecks, batch6DbChecks } from "./test-batch6";
 import { briefPureChecks, briefDraftDbChecks, briefBuildDbChecks, briefCardChecks, briefReminderChecks } from "./test-brief";
 import { suggestPureChecks, suggestStoreDbChecks, suggestRoutePins, suggestPipelineDbChecks, suggestPanelChecks, suggestPanelPins, suggestSaveDbChecks, suggestEntryChecks, suggestEntryDbChecks, suggestEntryPins } from "./test-suggest";
 import { askPureChecks, askSearchDbChecks, askToolsDbChecks, askRunnerChecks, askUiChecks } from "./test-ask";
@@ -11736,6 +11738,8 @@ seeded()
   .then(() => vaNotesChecks(ok)).then(() => vaNotesDbChecks(ok))
   .then(() => batch3PureChecks(ok)).then(() => batch3DbChecks(ok))
   .then(() => batch4PureChecks(ok)).then(() => batch4DbChecks(ok))
+  .then(() => batch5PureChecks(ok)).then(() => batch5DbChecks(ok))
+  .then(() => batch6PureChecks(ok)).then(() => batch6DbChecks(ok))
   .then(() => briefPureChecks(ok))
   .then(() => briefDraftDbChecks(ok))
   .then(() => briefBuildDbChecks(ok))
@@ -31256,7 +31260,7 @@ import { fixtureId as r242Fx, registerFixture as r242Reg } from "./test-fixtures
   const qs = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
   const setStatusBody = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("export async function setQuoteStage("));
   ok(
-    setStatusBody.includes("decideApprovalGate(status, q, ") && setStatusBody.includes("doc.review = autoStamp") && !setStatusBody.includes("resolveStatusGate(status, q.review"),
+    setStatusBody.includes("decideApprovalGate(status, gateQ, ") && setStatusBody.includes("doc.review = autoStamp") && !setStatusBody.includes("resolveStatusGate(status, q.review"),
     "#242: setStatus consults decideApprovalGate and writes the stamp inside the status patch"
   );
   const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
@@ -31720,9 +31724,9 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
   const qs = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
   const ss = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("export async function setQuoteStage("));
   ok(
-    /const needsLimits =\s*gated && !\(hasApproval\(q\.review\) && q\.review\?\.method !== "auto_limit" && approvalSnapshotMatches\(q\)\);/.test(ss) &&
+    /const needsLimits =\s*gated && !\(hasApproval\(gateQ\.review\) && gateQ\.review\?\.method !== "auto_limit" && approvalSnapshotMatches\(gateQ\)\);/.test(ss) &&
       ss.includes("const limits = needsLimits ? await loadReviewLimitContext() : NO_REVIEW_LIMITS;") &&
-      ss.includes("decideApprovalGate(status, q, limits, opts, Date.now(), by ?? null)"),
+      ss.includes("decideApprovalGate(status, gateQ, limits, opts, Date.now(), by ?? null)"), // #355 review I1: gateQ = the quote as the move will leave it
     "#242 final: setStatus loads review limits only for an unapproved or auto-approved quote, and passes the actor (#284: snapshot-aware)"
   );
 
@@ -40295,7 +40299,7 @@ import { settleCredit as r282rSettle } from "@/lib/rewards/service-credit";
   const qa = r282cRead("src/app/(app)/quotes/actions.ts", "utf8");
   const qp = r282cRead("src/app/(app)/quotes/page.tsx", "utf8");
   ok(/restoreQuoteRevision\(id, rev, user\.name, \{ mayApplyCredit: can\("create", user\.roles\) \}\)/.test(qa) && /"creditNotice=" \+ encodeURIComponent\(res\.creditNotice\)/.test(qa) &&
-     /const creditNotice = one\(sp\.creditNotice\) \|\| null;/.test(qp) && /back=\{backHref\}/.test(qp),
+     /const creditNotice = one\(sp\.creditNotice\) \|\| one\(sp\.statusNotice\) \|\| null;/.test(qp) && /back=\{backHref\}/.test(qp),
     "#282 P3 restore wiring: Recall passes the create perm and returns to the quote row with the credit notice");
 }
 
@@ -52076,8 +52080,8 @@ import type { Quote as E301bsQuote, QuoteRevision as E301bsRev } from "@/lib/sto
     "#301 rows: two sent revisions with the same printed Rev N read differently (each row carries its send date and time)");
   ok(e301bsRows({ revisions: [rev(1, "manual", 1)] }).length === 0 && e301bsRows(null).length === 0, "#301 rows: none before the first send");
   const chip = e301bsChip(withOpens);
-  ok(chip?.label === "Opened" && chip.title === "Client link — Rev 1 — superseded · sent Oct 5, 10:00 AM · opened 2× · first Oct 5 · last Oct 6" && e301bsChip({ revisions: revs }) === null,
-    "#301 chip: \"Opened\" once any sent revision was opened, the rows in its title");
+  ok(chip?.label === "Opened" && chip.title === "Viewed Oct 6, 10:00 AM — Client link — Rev 1 — superseded · sent Oct 5, 10:00 AM · opened 2× · first Oct 5 · last Oct 6" && e301bsChip({ revisions: revs }) === null,
+    "#301 chip: \"Opened\" once any sent revision was opened, the rows in its title (Batch 5 #58: led by the latest open's Viewed stamp)");
   ok(e301bsLatest(withOpens) === "Client link — Rev 2 · sent Oct 6, 10:00 AM · not opened yet" && e301bsLatest({ revisions: revs }) === "" && e301bsCopy.clientLink === "Client link",
     "#301 lead line: the latest revision's row once anything was opened, else nothing");
 
@@ -52243,8 +52247,8 @@ import type { SpecSection as E301bbSec } from "@/app/(app)/estimator/types";
      m.logo.src === "/_test/lh.jpg" && m.logo.full && m.banner === null && m.narrativeHref === "/share/quote/Q-293/t" && m.bomHref === "/share/quote/Q-293/t?view=bom",
     "#301 model: header (title, customer, Rev stamp, grand total), letterhead, no banner on an open estimate, the two view links");
   ok(m.scopes.map((s) => `${s.num}:${s.name}`).join("|") === "1:Rigging|2:Lighting|3:Install|4:Empty narrative" && m.scopes[1].keyProducts[0].photo?.src === "/p/5" &&
-     m.scopes[1].fallback === null && m.scopes[0].fallback === "The full parts list for this scope is under BOM." && m.scopes[2].fallback === "Installation, commissioning & project management." &&
-     m.scopes[3].fallback === "The full parts list for this scope is under BOM.",
+     m.scopes[1].fallback === null && m.scopes[0].fallback === "The full parts list for this scope is under Itemized." && m.scopes[2].fallback === "Installation, commissioning & project management." &&
+     m.scopes[3].fallback === "The full parts list for this scope is under Itemized.", // Batch 5 #63: the toggle reads Overview / Itemized
     "#301 model: every printed scope; key-product photos; a scope with no text says where its parts are; labor reads the labor wording");
   ok(!JSON.stringify(m).includes("[needs a paragraph]"), "#301 model: the staff placeholder never reaches a client");
   ok(m.summary === "This estimate includes 4 scopes: Rigging, Lighting, Install and Empty narrative." && m.notIncluded.join("|") === "Permits|Painting" &&
@@ -52282,7 +52286,7 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
     frozen: { coverSummary: "Our summary.", notIncluded: "Permits\nPainting" }, state: { kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never,
     headerLine: "EST-1 · Rev 1 · sent Oct 5, 2026", currentHref: null, base: "/share/quote/Q-293/t", letterheadSrc: "/_test/lh.jpg" };
   const narr = e301bvRender(e301bvEl(PackageView301, { model: e301bmModel({ ...base, view: "narrative" }) }));
-  const order = ["Narrative test", "EST-1 · Rev 1", "Our summary.", ">Narrative<", ">Rigging<", "Your goals", "Even front light.", "A bright fresnel.", ">Install<", "ADD OPTION 1", "Not included", "Permits"]
+  const order = ["Narrative test", "EST-1 · Rev 1", "Our summary.", ">Overview<", ">Rigging<", "Your goals", "Even front light.", "A bright fresnel.", ">Install<", "ADD OPTION 1", "Not included", "Permits"]
     .map((s) => narr.indexOf(s));
   ok(order.every((v, i) => v >= 0 && (i === 0 || v > order[i - 1])), `#301 view: §5 order — header, summary, toggle, scopes (goals, intro, key products), options, Not included (${order.join(",")})`);
   ok(narr.includes('src="/share/quote/Q-293/t/photo/PD-5"') && narr.includes('aria-current="page"') && narr.includes('href="/share/quote/Q-293/t?view=bom"') &&
@@ -56043,7 +56047,7 @@ async function p3SendAsyncChecks(): Promise<void> {
     ok(legacy?.dataBase64 === "QUJD" && notB64 === null && reads.length === 2, "#P3 send fix: data-URL attachments resolve exactly as before (non-base64 skipped, no storage read)");
     const bridge = readFileSync(join(process.cwd(), "src/lib/gmail/bridge.ts"), "utf8");
     const threadPdf = readFileSync(join(process.cwd(), "src/lib/thread-pdf-read.ts"), "utf8");
-    ok(bridge.includes("attachmentMimePart(a, readPdfForThread)") && bridge.includes("readThreadPdf(path, t)") && threadPdf.includes("pdfPathFitsLink(path, t.link) ? readQuotePdf(path)") && threadPdf.includes("pdfStorage()"),
+    ok(bridge.includes("attachmentMimePart(a, readPdfForThread") && bridge.includes("readThreadPdf(path, t)") && threadPdf.includes("pdfPathFitsLink(path, t.link) ? readQuotePdf(path)") && threadPdf.includes("pdfStorage()"),
       "#P3 send fix: the Gmail bridge builds MIME parts through attachmentMimePart with the quote-PDF store, scoped to the thread's linked quote (fix round 2)");
     const { pdfPathFitsLink } = await import("@/lib/comms-attachments");
     ok(pdfPathFitsLink("quote-pdfs/Q-P3S/rev-4.pdf", { type: "quote", id: "Q-P3S" }) && !pdfPathFitsLink("quote-pdfs/Q-OTHER/rev-4.pdf", { type: "quote", id: "Q-P3S" }) &&
@@ -56696,11 +56700,11 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
       "#P3 final review (I1): delivery — a timed-out send is unknown, a refused one failed, a gmailId wins, not connected stays local");
     const api = rd("src/lib/gmail/api.ts");
     const gapiSrc = api.slice(api.indexOf("async function gapi<T>("), api.indexOf("/** Send a raw RFC-2822 message"));
-    ok(gapiSrc.indexOf("await accessTokenFor(mailboxKey)") < gapiSrc.indexOf("try {") && gapiSrc.includes("signal: AbortSignal.timeout(20_000)") && gapiSrc.includes("if (isAbortError(err)) throw new GmailTimeoutError(path);") &&
+    ok(gapiSrc.indexOf("await accessTokenFor(mailboxKey)") < gapiSrc.indexOf("try {") && gapiSrc.includes("signal: AbortSignal.timeout(opts.timeoutMs ?? 20_000)") && gapiSrc.includes("if (isAbortError(err)) throw new GmailTimeoutError(path);") &&
        gapiSrc.includes('(await res.text().catch(() => ""))'),
       "#P3 final review (I1): gapi maps only the Gmail call's own timeout (after the token) to GmailTimeoutError; a refusal stays a plain error");
     const bridge = rd("src/lib/gmail/bridge.ts");
-    ok(bridge.includes("const pending = (t.messages || []).filter(isAutoDeliverable);") && bridge.includes("const failure = sendFailureKind(err);") && bridge.includes("if (target && !target.gmailId) target.sendFailure = failure;"),
+    ok(bridge.includes("const pending = (t.messages || []).filter(isAutoDeliverable);") && bridge.includes("const failure = sendFailureKind(err);") && /if \(target && !target\.gmailId\) \{\s*target\.sendFailure = failure;/.test(bridge),
       "#P3 final review (I1): deliverThreadOutbound sends only isAutoDeliverable messages and stamps how a send failed");
     const send = rd("src/lib/estimate-email/send-server.ts");
     ok(send.includes('if (delivery !== "gmail") await holdOutbound(draft.id, delivery);') && send.includes("await holdLastOutbound(threadId, delivery)"),

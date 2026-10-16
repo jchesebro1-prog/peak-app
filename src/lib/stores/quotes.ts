@@ -27,7 +27,8 @@ import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
-import { canHavePdf, nextSendRevNo, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
+import { canHavePdf, latestSentRevision, nextSendRevNo, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
+import { isReopen, reopenTarget, REOPEN_AUTOSAVE_NOTE, sameWonContent, tracksWonVersion, WON_SNAPSHOT_NOTE, wonRevision } from "@/lib/quote-won-version";
 import { SHARE_DEFAULT_TTL_MS, newShareNonce } from "@/lib/quote-share/token";
 import { nextOpens, type ShareOpens } from "@/lib/estimate-output/opens";
 import { appendPackageFile, cleanPackageFiles, type PackageFile } from "@/lib/estimate-output/package-files";
@@ -362,6 +363,13 @@ export type Quote = {
    *  recordShareOpen under the row lock; update() drops it; never content,
    *  never snapshotted, never copied by buildQuote. Staff-only. */
   shareOpens?: ShareOpens | null;
+  /** Batch 5 #59 — the revision that holds the version that WON (a sent one,
+   *  or a manual "Won — the version that won" snapshot). Written only by
+   *  setStatus at the Won transition (system estimates, never Daylite
+   *  history); update() drops it; never content, never snapshotted, never
+   *  copied by buildQuote. Reopening (won → draft / sent) puts that version
+   *  back when edits saved after the win changed it (quote-won-version.ts). */
+  wonRev?: number | null;
   /** #301 slice C (D-j, R13) — drawings shown under "Plans & risers" on the
    *  package page. Written only by addPackageFile / removePackageFile under
    *  the row lock (update() drops it); frozen into every new revision's
@@ -970,6 +978,8 @@ export async function update(
     delete clean.shareLink;
     // #301 slice B: the open counter is recordShareOpen's alone.
     delete clean.shareOpens;
+    // Batch 5 #59: the won-version pointer is setStatus's alone.
+    delete clean.wonRev;
     // #301 slice C: the drawings list and the client responses have their own writers.
     delete clean.packageFiles;
     delete clean.clientResponses;
@@ -1786,6 +1796,60 @@ function withRestoredCredit(doc: Quote, credit: number): void {
   doc.spec = { ...spec, sections: withRewardCredit(sections, credit, maxId + 1) };
 }
 
+/* ---------- Batch 5 #59 — reopening a won estimate at the version that won ---------- */
+
+type LiveRenames = Awaited<ReturnType<typeof liveRenameRefs>>;
+/** A spec brought to today's SKUs (#304) — a rename alone is never "a change". */
+const renameRewriter = (renames: LiveRenames) => (s: unknown) => (s && renames.m.size ? rewriteQuoteSpec(s, renames.m, renames.models) ?? s : s);
+
+/** What a reopen puts back, worked out once before the approval gate. */
+export type ReopenPlan = { target: QuoteRevision; credit: number; gross: number; rewrite: (s: unknown) => unknown };
+
+/**
+ * The restore a move from Won to `status` would make, or null (not a reopen,
+ * not a tracked estimate, a historical import, no won version, or nothing
+ * changed since the win). The credit goes through restoredCreditFor →
+ * settleCredit while `q` is still won — the locked amount — so the ledger
+ * reconcile sees a plain revise.
+ */
+export async function reopenPlanFor(q: Quote, status: QuoteStatus, opts: Pick<SetStatusOpts, "bypassApprovalGate"> = {}): Promise<ReopenPlan | null> {
+  if (opts.bypassApprovalGate === "historical-import") return null;
+  if (!isReopen(q.status, status) || !tracksWonVersion(q) || !wonRevision(q)) return null;
+  const rewrite = renameRewriter(await liveRenameRefs());
+  const target = reopenTarget(q, status, rewrite);
+  if (!target) return null;
+  const { restoredCreditFor } = await import("./reward-ledger");
+  const c = await restoredCreditFor(q, target, true);
+  return { target, credit: c.credit, gross: c.gross, rewrite };
+}
+
+/** Put the plan's version on `doc` (the priced fields a revision recall puts back; the header stays). */
+function applyReopen(doc: Quote, plan: ReopenPlan): void {
+  const target = plan.target;
+  doc.name = target.name;
+  doc.value = Math.round(Math.max(0, plan.gross - plan.credit));
+  doc.margin = target.margin;
+  doc.pricingTier = target.pricingTier ?? doc.pricingTier ?? null;
+  doc.tierMargin = target.tierMargin ?? doc.tierMargin ?? null;
+  doc.spec = plan.rewrite(target.spec ?? null) ?? null;
+  doc.flameTest = target.flameTest ?? null;
+  doc.repair = target.repair ?? null;
+  doc.inspection = target.inspection ?? null;
+  doc.consulting = target.consulting ?? null;
+  doc.rental = target.rental ?? null;
+  withRestoredCredit(doc, plan.credit);
+  doc.vendorQuotes = mergeVendorQuotes(doc.vendorQuotes, target.vendorQuotes);
+}
+
+/** #355 review I1 — the quote as it will stand once the plan is applied: what
+ *  the approval gate judges, and what a new approval stamp fingerprints. */
+export function asReopened(q: Quote, plan: ReopenPlan | null): Quote {
+  if (!plan) return q;
+  const copy: Quote = { ...q };
+  applyReopen(copy, plan);
+  return copy;
+}
+
 /**
  * Explicit opt-out from the approval gate below (punch #60 follow-up — the
  * gate moved from the two estimator actions INTO `setStatus` itself so all
@@ -1984,7 +2048,9 @@ export async function checkApprovalGate(
   actor: string | null = null
 ): Promise<ApprovalGateResult> {
   if (!q) return requireApprovalToAdvance(null, status === "won" ? "won" : "send");
-  const d = decideApprovalGate(status, q, await loadReviewLimitContext(), {}, Date.now(), actor);
+  // #355 review I1: a won → sent reopen is judged on the version it will send (the one that won).
+  const plan = await reopenPlanFor(q, status);
+  const d = decideApprovalGate(status, asReopened(q, plan), await loadReviewLimitContext(), {}, Date.now(), actor);
   return d.ok ? { ok: true } : d;
 }
 
@@ -2122,6 +2188,8 @@ export async function setStatus(
   const sentCut = { value: false };
   // #352 review I1: set when this call really moved a sent / won / lost quote back to Draft (a revise).
   const revised = { value: false };
+  // #355 review I2: set when a reopen put the won version back (its PDF must re-render, won → sent too).
+  const reopened = { value: false };
   // Estimator bonuses: read before the transaction — the patch mutator is synchronous.
   // A failed users read must never block marking Won — credits then fall back to no userId.
   const bonusUsers = status === "won" ? await bonusUserList() : [];
@@ -2162,11 +2230,16 @@ export async function setStatus(
   // legacy approval passes on its own record, so it makes exactly the DB
   // reads it made before #242 (#242 final).
   const gated = !resolveStatusGate(status, null, opts).ok;
+  // Batch 5 #59 / #355 review I1: a reopen (won → draft / sent) that puts the
+  // won version back is worked out BEFORE the gate, which judges — and an
+  // approver's stamp fingerprints — the version the move will leave.
+  const reopen = await reopenPlanFor(q, status, opts);
+  const gateQ = asReopened(q, reopen);
   // #284: a snapshot-stale approval also needs the context (the approver moving it may approve it, #287).
   const needsLimits =
-    gated && !(hasApproval(q.review) && q.review?.method !== "auto_limit" && approvalSnapshotMatches(q));
+    gated && !(hasApproval(gateQ.review) && gateQ.review?.method !== "auto_limit" && approvalSnapshotMatches(gateQ));
   const limits = needsLimits ? await loadReviewLimitContext() : NO_REVIEW_LIMITS;
-  const gate = decideApprovalGate(status, q, limits, opts, Date.now(), by ?? null);
+  const gate = decideApprovalGate(status, gateQ, limits, opts, Date.now(), by ?? null);
   // #174: a TYPED refusal. The gate is the only throw here whose message is
   // meant for the user; everything below this line that throws is a defect,
   // and callers tell the two apart with `statusFailureMessage`.
@@ -2175,15 +2248,35 @@ export async function setStatus(
   const autoStamp = gate.stamp;
   // Loaded before the patch: the stage snaps to the new status inside the same write (§3.4).
   const pipes = carriesPipeline(q.quoteType) ? await loadPipelines() : null;
+  // Batch 5 #59 (#355 review M3): the Won move compares the live quote with the
+  // latest send at today's SKUs, so a rename since the send adds no snapshot.
+  const recordsWon = status === "won" && tracksWonVersion(q) && opts.bypassApprovalGate !== "historical-import";
+  const wonRewrite = recordsWon ? renameRewriter(await liveRenameRefs()) : null;
   const result = await patchQuote(id, (doc) => {
     const t = Date.now();
     if (autoStamp) doc.review = autoStamp;
+    if (reopen) {
+      // Non-destructive, like restoreQuoteRevision: the post-win edits become a revision first.
+      pushRevision(doc, by || DEFAULT_ACTOR, "manual", REOPEN_AUTOSAVE_NOTE);
+      applyReopen(doc, reopen);
+      reopened.value = true;
+    }
     doc.history = doc.history || [];
     doc.history.push({ at: t, from: doc.status, to: status });
     // #352 review I1: a revise — the document now prints the NEXT send's Rev (D1125).
     if (status === "draft" && doc.status !== "draft") revised.value = true;
     doc.status = status;
     moved.value = true;
+    // Batch 5 #59: record which version won — the latest send when the live
+    // quote still matches it, else a snapshot of what was marked Won.
+    if (status === "won" && wonRewrite) {
+      const sent = latestSentRevision(doc.revisions);
+      const sentLive = sent ? { ...sent, spec: wonRewrite(sent.spec ?? null) } : null;
+      doc.wonRev = sent && sentLive && sameWonContent(sentLive, doc) ? sent.rev : pushRevision(doc, by || DEFAULT_ACTOR, "manual", WON_SNAPSHOT_NOTE).rev;
+    } else if (status === "won") {
+      // #355 review M1: a Won move that records no version clears any older pointer.
+      doc.wonRev = null;
+    }
     // Estimator bonuses: Won records the payout; leaving Won withdraws it.
     if (status === "won") {
       const secs = (doc.spec as { sections?: SpecSection[] } | undefined)?.sections;
@@ -2275,7 +2368,9 @@ export async function setStatus(
   // #352 review I1: every revise (the Estimator's status menu, the Quotes hub, a stage move, a bid addendum, a
   // portal refresh) re-renders the PDF, so Send waits for a file that prints the next Rev — a resend with no edits
   // can never carry the previous send's file. Outside a request it is only marked stale (Send still waits).
-  if (out && revised.value) await scheduleRevisePdfSafely(id);
+  // #355 review I2: a reopen that put the won version back changed the document — on won → sent too, where the
+  // copy above found no current file — so it re-renders and the generator settles the new sent revision's PDF.
+  if (out && (revised.value || reopened.value)) await scheduleRevisePdfSafely(id);
   // #282 phase 2: the Rewards ledger follows every real transition — earn +
   // redeem on won, reverse + unredeem on leaving won. Never for an imported
   // row (historical-import records history, it is not a sale made here), and

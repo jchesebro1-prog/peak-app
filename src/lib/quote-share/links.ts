@@ -14,7 +14,7 @@ import {
   ONLINE_COPY, onlineEstimateState, shareEligibility, sharePath,
   type OnlineEstimateState, type ShareLinkStatus, type ShareLinkView,
 } from "./view";
-import { packageState, sentRevisionRows, type VisiblePackageState } from "./package-view";
+import { packageState, sentRevisionRows, viewedStamp, type VisiblePackageState } from "./package-view";
 
 /**
  * #293 slice 3 — client share links, server side (spec §5.3, §5.5, §7).
@@ -59,7 +59,7 @@ export function shareLinkView(q: Pick<Quote, "id" | "shareLink" | "revisions">, 
 /** The Client link panel's read: the paths only for a Send holder; the
  *  per-revision rows (no paths) for anyone signed in. */
 export function shareLinkStatus(q: Quote, canSend: boolean, secret: string, now: number): ShareLinkStatus {
-  return { state: shareEligibility(q), canSend, link: shareLinkView(q, secret, now, canSend), sentRevs: sentRevisionRows(q) };
+  return { state: shareEligibility(q), canSend, link: shareLinkView(q, secret, now, canSend), sentRevs: sentRevisionRows(q), viewed: viewedStamp(q) };
 }
 
 export type ShareWrite = { ok: true; link: ShareLinkView } | { ok: false; error: string };

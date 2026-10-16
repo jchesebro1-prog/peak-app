@@ -56,7 +56,8 @@ import {
   GmailTimeoutError,
   type GmailLabelEvent,
 } from "./api";
-import { attachmentMimePart } from "@/lib/comms-attachments";
+import { attachmentMimePart, messageTooLargeError } from "@/lib/comms-attachments";
+import { readMailRefForThread } from "@/lib/mail-attachments-server";
 import { readPdfForThread as readThreadPdf } from "@/lib/thread-pdf-read";
 import { icsMimeType } from "@/lib/ics";
 import { sendWithMailboxFallback, visitInviteGmailIds, type InviteVisitShape } from "@/lib/visit-invite-plan";
@@ -113,6 +114,24 @@ function mailboxOfKey(key: MailboxKey): { mailbox: MailboxId; userName: string |
 
 /* ---- outbound ------------------------------------------------------------- */
 
+/** #356 review — who one outbound message goes to: the thread's contact (a forward is its own thread, whose contact
+ *  is the typed To), and the message's own Cc when it carries one (Reply all) else the thread's. Pure. */
+export function outboundAddressing(
+  t: Pick<CommThread, "contactEmail" | "contactName" | "cc">,
+  m: Pick<CommMessage, "cc">,
+): { to: string; cc: string | undefined } {
+  const to = t.contactEmail || (t.contactName || "customer").toLowerCase().replace(/\s+/g, ".") + "@email.com";
+  return { to, cc: (m.cc || "").trim() || t.cc || undefined };
+}
+
+/** #356 review — a send that can never succeed as built (over Gmail's size limit): held back with a reason the rep sees. */
+export class MessageTooLargeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MessageTooLargeError";
+  }
+}
+
 /** I1 — how a send threw: no answer in time ("timeout": Gmail may have
  *  accepted it) vs anything else ("error"). */
 export function sendFailureKind(err: unknown): "timeout" | "error" {
@@ -140,9 +159,6 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
   if (!pending.length) return;
 
   const fromAddr = info.address || boxAddress(t.mailbox || "info", t.mailboxUser || undefined);
-  const toAddr =
-    t.contactEmail ||
-    (t.contactName || "customer").toLowerCase().replace(/\s+/g, ".") + "@email.com";
   const lastIn = lastInbound(t);
   const inReplyTo = lastIn?.gmailMessageId || undefined;
 
@@ -155,18 +171,23 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
       // unreadable one throws, so the message is never sent without it.
       const attachments = (
         // A quote-linked thread only reads that quote's own PDFs (a refused path reads as missing → throws).
-        await Promise.all((m.attachments || []).map((a) => attachmentMimePart(a, readPdfForThread)))
+        // Batch 6 #64: a composer upload / a document is read by reference too (re-checked against this thread).
+        await Promise.all((m.attachments || []).map((a) => attachmentMimePart(a, readPdfForThread, (r) => readMailRefForThread(r, t))))
       ).filter((a): a is NonNullable<typeof a> => !!a);
+      const addr = outboundAddressing(t, m);
       const raw = buildRaw({
         from: fromAddr,
-        to: toAddr,
-        cc: t.cc || undefined,
+        to: addr.to,
+        cc: addr.cc,
         subject: t.subject || "(no subject)",
         body: m.body || "",
         attachments,
         inReplyTo,
         references: inReplyTo,
       });
+      // #356 review — Gmail counts the encoded message (25 MB): refused here, never retried, shown on the message
+      const tooBig = messageTooLargeError(raw);
+      if (tooBig) throw new MessageTooLargeError(tooBig);
       const sent = await sendRaw(key, raw, t.gmailThreadId || undefined);
       // stamp the ids back atomically
       await patchDoc<CommThread>("comms", threadId, (d) => {
@@ -184,9 +205,17 @@ export async function deliverThreadOutbound(threadId: string): Promise<void> {
       // sender holds it back — noAutoRetry). Record HOW it failed: a timeout
       // may have been accepted by Gmail (I1 "unknown").
       const failure = sendFailureKind(err);
+      const tooLarge = err instanceof MessageTooLargeError;
       await patchDoc<CommThread>("comms", threadId, (d) => {
         const target = (d.messages || []).find((x) => x.id === m.id);
-        if (target && !target.gmailId) target.sendFailure = failure;
+        if (target && !target.gmailId) {
+          target.sendFailure = failure;
+          if (tooLarge) {
+            target.sendError = err.message;
+            target.noAutoRetry = true;
+            target.deliveryNote = "failed";
+          }
+        }
       }).catch((e: unknown) => console.error("[gmail] stamping the send failure failed", threadId, m.id, e));
     }
   }

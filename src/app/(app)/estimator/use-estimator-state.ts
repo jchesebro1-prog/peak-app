@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { NEW_SYSTEM_PRESENTATION, presentationForNewSystem } from "@/lib/estimate-output/fields";
 import { SIDE_OPEN_KEY } from "./estimator-styles";
 import { surveyGoalsAction } from "./output-actions";
 import { listReviewCommentsAction } from "./review-actions";
@@ -82,7 +83,7 @@ export const TAX_RATE_PCT = 0;
  *  the freight rule itself. */
 const freshSections = (freightPct: number): SpecSection[] => [
   // #267: a new system's auto price rounds up to the next $25.
-  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, items: [] },
+  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: NEW_SYSTEM_PRESENTATION, items: [] },
 ];
 
 /** Phase 2a — unmarkEdited, blind to the Rewards credit line. The credit
@@ -1498,6 +1499,12 @@ export function useEstimatorState(props: EstimatorProps) {
           // bar shows the right stage highlighted without another round trip.
           if (res.pipelineId) setPipelineId(res.pipelineId);
           if (res.stage) setStage(res.stage);
+          // #355 review M2: the save's status move reopened a won estimate at the
+          // version that won — this document holds the edits; load it afresh.
+          if (res.reopenedAtWon) {
+            window.location.reload();
+            return false;
+          }
         }
         if (res.ok) {
           setActionError(null);
@@ -1546,6 +1553,12 @@ export function useEstimatorState(props: EstimatorProps) {
       setStatusChanging(true);
       startTransition(async () => {
         try {
+          // #355 review I3: leaving Won with unsaved edits — save them first, so
+          // the reopen's snapshot keeps them before the won version comes back.
+          if (prevStatus === "won" && v !== "won" && pdfDirty && (await saveNow()) === false) {
+            setStatus(prevStatus);
+            return;
+          }
           const r = await setStatusAction(id, v, v === "won" && alternatesTouched ? { alternatesTaken } : undefined);
           if (!r.ok) {
             // Punch #60: server rejected the transition (e.g. "won" without an
@@ -1560,6 +1573,12 @@ export function useEstimatorState(props: EstimatorProps) {
           setGateRefused(false);
           applySync(r);
           postChanged("quote", id);
+          // Batch 5 #59: the server put the won version back (the post-win edits are a
+          // revision now) — this document holds the edits, so load the quote afresh.
+          if (r.reopenedAtWon) {
+            window.location.reload();
+            return;
+          }
           // #282 follow-up: the server cleared the credit when the quote went
           // Lost — take the line off the open document too.
           if (v === "lost") setSections((ss) => (rewardCreditOf(ss) > 0 ? withoutRewardCredit(ss) : ss));
@@ -1589,6 +1608,12 @@ export function useEstimatorState(props: EstimatorProps) {
     setStatusChanging(true);
     startTransition(async () => {
       try {
+        // #355 review I3: same as changeStatus — a stage move can leave Won.
+        if (prevStatus === "won" && pdfDirty && (await saveNow()) === false) {
+          setStage(prevStage);
+          setStatus(prevStatus);
+          return;
+        }
         const r = await setQuoteStageAction(id, stageId, alternatesTouched ? alternatesTaken : undefined);
         if (!r.ok) {
           setStage(prevStage);
@@ -1601,6 +1626,10 @@ export function useEstimatorState(props: EstimatorProps) {
         setGateRefused(false);
         applyStageSync(r);
         postChanged("quote", id);
+        if (r.reopenedAtWon) {
+          window.location.reload();
+          return;
+        }
       } finally {
         setStatusChanging(false);
       }
@@ -2045,7 +2074,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const groupId = sections.find((s) => s.id === activeId)?.groupId;
     setSections((ss) => normalizeSystemOrder([
       ...ss,
-      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, items: [], ...(groupId ? { groupId } : {}) },
+      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: presentationForNewSystem(ss), items: [], ...(groupId ? { groupId } : {}) },
     ], groups));
     setActiveId(id);
     openInputMethod("catalog", id);
@@ -2065,6 +2094,7 @@ export function useEstimatorState(props: EstimatorProps) {
       groupId,
       freightPct: freightDefault.pct,
       priceRound: SYSTEM_PRICE_STEP,
+      presentation: presentationForNewSystem(sections),
     });
     setSections((ss) => normalizeSystemOrder([...ss, sec], groups));
     setActiveId(sec.id);
@@ -2091,6 +2121,7 @@ export function useEstimatorState(props: EstimatorProps) {
       groupId,
       freightPct: freightDefault.pct,
       priceRound: SYSTEM_PRICE_STEP,
+      presentation: presentationForNewSystem(sections),
     });
     setSections((ss) => normalizeSystemOrder([...ss, sec], groups));
     setSuggestionTargets((m) => ({ ...m, [systemKey]: sec.id }));

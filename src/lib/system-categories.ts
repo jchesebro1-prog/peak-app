@@ -221,6 +221,8 @@ export type SystemFromCategoryCtx = {
   groupId?: string;
   freightPct: number;
   priceRound: number;
+  /** #355 review M6 — the new system's presentation (presentationForNewSystem); absent = none stored (Itemized). */
+  presentation?: NonNullable<SpecSection["presentation"]>;
 };
 
 /**
@@ -269,6 +271,7 @@ export function systemFromCategory(
     freightPct: ctx.freightPct,
     freightAuto: true,
     priceRound: ctx.priceRound,
+    ...(ctx.presentation ? { presentation: ctx.presentation } : {}),
     items,
     ...(ctx.groupId ? { groupId: ctx.groupId } : {}),
   };
