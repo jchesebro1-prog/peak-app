@@ -9,6 +9,7 @@ import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat } from "./
 import VendorCompanyField from "@/components/vendors/vendor-company-field";
 import { VENDOR_COPY } from "@/lib/vendor-quotes/rules";
 import { VENDOR_PDF_COPY } from "@/lib/vendor-pdf/extraction";
+import { DISCARD_COPY } from "@/lib/estimate-steps/discard-confirm";
 
 /**
  * Vendor quote form (#143, D162) — the sixth add-part input method, split off
@@ -198,6 +199,9 @@ export default function VendorQuoteModal({
   /** #348 slice 4: the email hand-off is still copying the PDF in. */
   const copying = handoff?.status === "loading";
   const busy = uploading || copying || reading;
+  /* #348 follow-up, fix round 1: a file still uploading lives only in this form's state, so the × / backdrop asks here
+     first; otherwise it defers to the hook's check. No confirmClose handed in = none here either. */
+  const closeGuard = confirmClose ? () => (uploading ? window.confirm(DISCARD_COPY.vendorUploading) : confirmClose()) : undefined;
   const valid =
     (draft.vendor || "").trim().length > 0 &&
     (draft.quoteNumber || "").trim().length > 0 &&
@@ -374,7 +378,7 @@ export default function VendorQuoteModal({
       title={editing ? "Edit vendor quote" : "Vendor quote"}
       sub={editing ? <>In {secName}</> : <>Adds to {secName}</>}
       onClose={onClose}
-      confirmClose={confirmClose}
+      confirmClose={closeGuard}
       footerLeft={
         <>
           <Stat

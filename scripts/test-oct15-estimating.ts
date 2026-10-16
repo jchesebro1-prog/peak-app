@@ -603,6 +603,9 @@ export function discardConfirmChecks(ok: Ok) {
   ok(draftChanged(base, { ...fresh, total: null }), "discard: null is not missing (a cleared value counts)");
   ok(!draftChanged(null, { ...fresh, vendor: "x" }) && !draftChanged(undefined, { vendor: "x" }), "discard: no baseline yet (still settling) is clean");
   ok(inputIsDirty({ baseline: base, current: fresh, reading: true }) && !inputIsDirty({ baseline: base, current: fresh, reading: false }), "discard: a Read the PDF in progress is dirty on its own");
+  ok(inputIsDirty({ baseline: base, current: fresh, copying: true }) && inputIsDirty({ baseline: null, current: fresh, copying: true }) && !inputIsDirty({ baseline: base, current: fresh, copying: false }),
+    "discard (fix 1): the Inbox hand-off still copying the PDF is dirty on its own (even before the baseline settles)");
+  ok(DISCARD_COPY.vendorUploading === "Discard this vendor quote? The file is still uploading.", "discard (fix 1): the upload-in-flight copy");
   const fill = (d: typeof fresh) => (d.id !== "VQ-1" ? d : { ...d, vendor: d.vendor || "Filled Co" });
   const rebased = rebaseDraft<typeof fresh>(base, fill);
   ok(!draftChanged(rebased, fill(fresh)) && draftChanged(rebased, { ...fill(fresh), total: "9" }), "discard: the hand-off fill re-bases the baseline — the filled form is clean, a later edit dirty");
@@ -625,8 +628,11 @@ export function discardConfirmChecks(ok: Ok) {
   for (const [tag, f] of [["CurtainModal", "curtain-modal"], ["TrackModal", "track-modal"], ["FixtureModal", "fixture-modal"], ["LaborModal", "labor-modal"], ["VendorQuoteModal", "vendor-quote-modal"]] as const) {
     const at = bs.indexOf(`<${tag}`), end = bs.indexOf("/>", bs.indexOf("onClose={closeInput}", at));
     ok(at > 0 && bs.slice(at, end).includes("confirmClose={confirmDiscardInput}"), `discard pins: build-step passes confirmClose to ${tag}`);
-    ok(/confirmClose=\{confirmClose\}/.test(code(`src/app/(app)/estimator/${f}.tsx`)), `discard pins: ${tag} hands confirmClose to ConfigModal`);
+    ok(new RegExp(tag === "VendorQuoteModal" ? "confirmClose=\\{closeGuard\\}" : "confirmClose=\\{confirmClose\\}").test(code(`src/app/(app)/estimator/${f}.tsx`)), `discard pins: ${tag} hands confirmClose to ConfigModal`);
   }
+  const vqm = code("src/app/(app)/estimator/vendor-quote-modal.tsx");
+  ok(vqm.includes("const closeGuard = confirmClose ? () => (uploading ? window.confirm(DISCARD_COPY.vendorUploading) : confirmClose()) : undefined;") &&
+     (vqm.match(/confirmClose=\{/g) || []).length === 1, "discard pins (fix 1): the vendor form asks while its own upload is in flight, else defers to the hook (no prop → no guard)");
   ok(!/confirmClose/.test(code("src/app/(app)/estimator/ai-scope-modal.tsx")) && !/confirmClose/.test(code("src/app/(app)/estimator/add-system-modal.tsx")) &&
      /<AiScopeModal[\s\S]*?onClose=\{\(\) => setAiOpen\(false\)\}/.test(bs), "discard pins: AI scope and Add a system don't pass confirmClose (they close as before)");
   const hook = code("src/app/(app)/estimator/use-estimator-state.ts");
@@ -645,7 +651,8 @@ export function discardConfirmChecks(ok: Ok) {
     ok(body.length > 0 && body.length < 900 && body.includes("if (!confirmDiscardInput()) return;"), `discard pins: ${n} asks before its close-then-seed`);
   }
   ok(/const confirmDiscardInput = \(\): boolean => \{\s*const d = openInputDirty\(\);\s*return !d \|\| window\.confirm\(discardConfirmText\(d\.kind, \{ read: d\.read \}\)\);/.test(hook) &&
-     /reading = cur\.kind === "vendor" && \(vendorPdfBusyRef\.current \|\| !!vendorPdf\.busy\)/.test(hook) && /read: cur\.kind === "vendor" && \(reading \|\| !!vendorDraft\.pdfRead\)/.test(hook),
+     /reading = cur\.kind === "vendor" && \(vendorPdfBusyRef\.current \|\| !!vendorPdf\.busy\)/.test(hook) &&
+     /const copying = cur\.kind === "vendor" && vendorHandoff\?\.status === "loading";\s*if \(!inputIsDirty\(\{ baseline: draftBaselineRef\.current\[cur\.kind\], current: modalDrafts\[cur\.kind\], reading, copying \}\)\) return null;/.test(hook) && /read: cur\.kind === "vendor" && \(reading \|\| !!vendorDraft\.pdfRead\)/.test(hook),
     "discard pins: the confirm compares the open pop-up's draft (a running read counts; a read names it)");
   ok((hook.match(/markDraftBaseline\(/g) || []).length === 2 && hook.includes('markDraftBaseline("labor");') &&
      /draftBaselineRef\.current\.vendor = rebaseDraft<VendorDraft>\(draftBaselineRef\.current\.vendor, fill\);/.test(hook) && hook.includes("setVendorDraft(fill);"),

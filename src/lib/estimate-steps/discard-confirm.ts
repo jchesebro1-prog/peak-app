@@ -32,9 +32,10 @@ export function draftChanged(baseline: string | null | undefined, current: unkno
   return stableDraftJson(current) !== baseline;
 }
 
-/** The open pop-up is dirty when its draft moved off the baseline, or (vendor) while Read the PDF is running. */
-export function inputIsDirty(a: { baseline: string | null | undefined; current: unknown; reading?: boolean }): boolean {
-  return !!a.reading || draftChanged(a.baseline, a.current);
+/** The open pop-up is dirty when its draft moved off the baseline, or (vendor) while Read the PDF is running or the
+ *  Inbox hand-off is still copying the PDF in (fix round 1). */
+export function inputIsDirty(a: { baseline: string | null | undefined; current: unknown; reading?: boolean; copying?: boolean }): boolean {
+  return !!a.reading || !!a.copying || draftChanged(a.baseline, a.current);
 }
 
 /** Re-base a stored baseline through the same change the form just took (the Inbox hand-off's fill), so typing done
@@ -52,6 +53,8 @@ export const DISCARD_COPY = {
   noun: { curtain: "curtain", track: "track", fixture: "assembly", labor: "labor", vendor: "vendor quote" } as Record<ModalInputKind, string>,
   generic: (noun: string) => `Discard this ${noun}? Your changes will be lost.`,
   vendorRead: "Discard this vendor quote? The PDF read and your changes will be lost.",
+  /** Fix round 1: the vendor form's own file upload is still in flight (asked by the modal, before the hook's check). */
+  vendorUploading: "Discard this vendor quote? The file is still uploading.",
 } as const;
 
 /** The confirm text: a vendor quote with a PDF read (or one running) names the read; every other pop-up the generic. */

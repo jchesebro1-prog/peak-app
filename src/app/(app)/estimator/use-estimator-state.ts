@@ -2490,7 +2490,9 @@ export function useEstimatorState(props: EstimatorProps) {
     const cur = openInputRef.current;
     if (!cur || !isModalInputKind(cur.kind)) return null;
     const reading = cur.kind === "vendor" && (vendorPdfBusyRef.current || !!vendorPdf.busy);
-    if (!inputIsDirty({ baseline: draftBaselineRef.current[cur.kind], current: modalDrafts[cur.kind], reading })) return null;
+    // Fix round 1: the Inbox hand-off still copying the PDF in counts too (closing drops the copy).
+    const copying = cur.kind === "vendor" && vendorHandoff?.status === "loading";
+    if (!inputIsDirty({ baseline: draftBaselineRef.current[cur.kind], current: modalDrafts[cur.kind], reading, copying })) return null;
     return { kind: cur.kind, read: cur.kind === "vendor" && (reading || !!vendorDraft.pdfRead) };
   };
 
