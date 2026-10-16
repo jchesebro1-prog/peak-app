@@ -27,7 +27,8 @@ import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
-import { canHavePdf, nextSendRevNo, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
+import { canHavePdf, latestSentRevision, nextSendRevNo, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
+import { isReopen, reopenTarget, REOPEN_AUTOSAVE_NOTE, sameWonContent, tracksWonVersion, WON_SNAPSHOT_NOTE, wonRevision } from "@/lib/quote-won-version";
 import { SHARE_DEFAULT_TTL_MS, newShareNonce } from "@/lib/quote-share/token";
 import { nextOpens, type ShareOpens } from "@/lib/estimate-output/opens";
 import { appendPackageFile, cleanPackageFiles, type PackageFile } from "@/lib/estimate-output/package-files";
@@ -362,6 +363,13 @@ export type Quote = {
    *  recordShareOpen under the row lock; update() drops it; never content,
    *  never snapshotted, never copied by buildQuote. Staff-only. */
   shareOpens?: ShareOpens | null;
+  /** Batch 5 #59 — the revision that holds the version that WON (a sent one,
+   *  or a manual "Won — the version that won" snapshot). Written only by
+   *  setStatus at the Won transition (system estimates, never Daylite
+   *  history); update() drops it; never content, never snapshotted, never
+   *  copied by buildQuote. Reopening (won → draft / sent) puts that version
+   *  back when edits saved after the win changed it (quote-won-version.ts). */
+  wonRev?: number | null;
   /** #301 slice C (D-j, R13) — drawings shown under "Plans & risers" on the
    *  package page. Written only by addPackageFile / removePackageFile under
    *  the row lock (update() drops it); frozen into every new revision's
@@ -970,6 +978,8 @@ export async function update(
     delete clean.shareLink;
     // #301 slice B: the open counter is recordShareOpen's alone.
     delete clean.shareOpens;
+    // Batch 5 #59: the won-version pointer is setStatus's alone.
+    delete clean.wonRev;
     // #301 slice C: the drawings list and the client responses have their own writers.
     delete clean.packageFiles;
     delete clean.clientResponses;
@@ -2175,15 +2185,55 @@ export async function setStatus(
   const autoStamp = gate.stamp;
   // Loaded before the patch: the stage snaps to the new status inside the same write (§3.4).
   const pipes = carriesPipeline(q.quoteType) ? await loadPipelines() : null;
+  // Batch 5 #59: reopening a won estimate (won → draft / sent) loads the version
+  // that won when edits saved after the win changed it. Read before the patch
+  // (the mutator is synchronous): catalog renames since (a rename alone is no
+  // change), and the credit through settleCredit — q is still won here, so it
+  // is the locked amount, and the ledger reconcile below sees a plain revise.
+  let reopen: { target: QuoteRevision; credit: number; gross: number; rewrite: (s: unknown) => unknown } | null = null;
+  if (isReopen(q.status, status) && tracksWonVersion(q) && wonRevision(q)) {
+    const renames = await liveRenameRefs();
+    const rewrite = (s: unknown) => (s && renames.m.size ? rewriteQuoteSpec(s, renames.m, renames.models) ?? s : s);
+    const target = reopenTarget(q, status, rewrite);
+    if (target) {
+      const { restoredCreditFor } = await import("./reward-ledger");
+      const c = await restoredCreditFor(q, target, true);
+      reopen = { target, credit: c.credit, gross: c.gross, rewrite };
+    }
+  }
   const result = await patchQuote(id, (doc) => {
     const t = Date.now();
     if (autoStamp) doc.review = autoStamp;
+    if (reopen) {
+      // Non-destructive, like restoreQuoteRevision: the post-win edits become a revision first.
+      const target = reopen.target;
+      pushRevision(doc, by || DEFAULT_ACTOR, "manual", REOPEN_AUTOSAVE_NOTE);
+      doc.name = target.name;
+      doc.value = Math.round(Math.max(0, reopen.gross - reopen.credit));
+      doc.margin = target.margin;
+      doc.pricingTier = target.pricingTier ?? doc.pricingTier ?? null;
+      doc.tierMargin = target.tierMargin ?? doc.tierMargin ?? null;
+      doc.spec = reopen.rewrite(target.spec ?? null) ?? null;
+      doc.flameTest = target.flameTest ?? null;
+      doc.repair = target.repair ?? null;
+      doc.inspection = target.inspection ?? null;
+      doc.consulting = target.consulting ?? null;
+      doc.rental = target.rental ?? null;
+      withRestoredCredit(doc, reopen.credit);
+      doc.vendorQuotes = mergeVendorQuotes(doc.vendorQuotes, target.vendorQuotes);
+    }
     doc.history = doc.history || [];
     doc.history.push({ at: t, from: doc.status, to: status });
     // #352 review I1: a revise — the document now prints the NEXT send's Rev (D1125).
     if (status === "draft" && doc.status !== "draft") revised.value = true;
     doc.status = status;
     moved.value = true;
+    // Batch 5 #59: record which version won — the latest send when the live
+    // quote still matches it, else a snapshot of what was marked Won.
+    if (status === "won" && tracksWonVersion(doc) && opts.bypassApprovalGate !== "historical-import") {
+      const sent = latestSentRevision(doc.revisions);
+      doc.wonRev = sent && sameWonContent(sent, doc) ? sent.rev : pushRevision(doc, by || DEFAULT_ACTOR, "manual", WON_SNAPSHOT_NOTE).rev;
+    }
     // Estimator bonuses: Won records the payout; leaving Won withdraws it.
     if (status === "won") {
       const secs = (doc.spec as { sections?: SpecSection[] } | undefined)?.sections;

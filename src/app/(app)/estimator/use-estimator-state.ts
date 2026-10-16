@@ -1556,6 +1556,12 @@ export function useEstimatorState(props: EstimatorProps) {
           setGateRefused(false);
           applySync(r);
           postChanged("quote", id);
+          // Batch 5 #59: the server put the won version back (the post-win edits are a
+          // revision now) — this document holds the edits, so load the quote afresh.
+          if (r.reopenedAtWon) {
+            window.location.reload();
+            return;
+          }
           // #282 follow-up: the server cleared the credit when the quote went
           // Lost — take the line off the open document too.
           if (v === "lost") setSections((ss) => (rewardCreditOf(ss) > 0 ? withoutRewardCredit(ss) : ss));
@@ -1597,6 +1603,10 @@ export function useEstimatorState(props: EstimatorProps) {
         setGateRefused(false);
         applyStageSync(r);
         postChanged("quote", id);
+        if (r.reopenedAtWon) {
+          window.location.reload();
+          return;
+        }
       } finally {
         setStatusChanging(false);
       }
