@@ -31256,7 +31256,7 @@ import { fixtureId as r242Fx, registerFixture as r242Reg } from "./test-fixtures
   const qs = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
   const setStatusBody = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("export async function setQuoteStage("));
   ok(
-    setStatusBody.includes("decideApprovalGate(status, q, ") && setStatusBody.includes("doc.review = autoStamp") && !setStatusBody.includes("resolveStatusGate(status, q.review"),
+    setStatusBody.includes("decideApprovalGate(status, gateQ, ") && setStatusBody.includes("doc.review = autoStamp") && !setStatusBody.includes("resolveStatusGate(status, q.review"),
     "#242: setStatus consults decideApprovalGate and writes the stamp inside the status patch"
   );
   const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
@@ -31720,9 +31720,9 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
   const qs = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
   const ss = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("export async function setQuoteStage("));
   ok(
-    /const needsLimits =\s*gated && !\(hasApproval\(q\.review\) && q\.review\?\.method !== "auto_limit" && approvalSnapshotMatches\(q\)\);/.test(ss) &&
+    /const needsLimits =\s*gated && !\(hasApproval\(gateQ\.review\) && gateQ\.review\?\.method !== "auto_limit" && approvalSnapshotMatches\(gateQ\)\);/.test(ss) &&
       ss.includes("const limits = needsLimits ? await loadReviewLimitContext() : NO_REVIEW_LIMITS;") &&
-      ss.includes("decideApprovalGate(status, q, limits, opts, Date.now(), by ?? null)"),
+      ss.includes("decideApprovalGate(status, gateQ, limits, opts, Date.now(), by ?? null)"), // #355 review I1: gateQ = the quote as the move will leave it
     "#242 final: setStatus loads review limits only for an unapproved or auto-approved quote, and passes the actor (#284: snapshot-aware)"
   );
 
@@ -40295,7 +40295,7 @@ import { settleCredit as r282rSettle } from "@/lib/rewards/service-credit";
   const qa = r282cRead("src/app/(app)/quotes/actions.ts", "utf8");
   const qp = r282cRead("src/app/(app)/quotes/page.tsx", "utf8");
   ok(/restoreQuoteRevision\(id, rev, user\.name, \{ mayApplyCredit: can\("create", user\.roles\) \}\)/.test(qa) && /"creditNotice=" \+ encodeURIComponent\(res\.creditNotice\)/.test(qa) &&
-     /const creditNotice = one\(sp\.creditNotice\) \|\| null;/.test(qp) && /back=\{backHref\}/.test(qp),
+     /const creditNotice = one\(sp\.creditNotice\) \|\| one\(sp\.statusNotice\) \|\| null;/.test(qp) && /back=\{backHref\}/.test(qp),
     "#282 P3 restore wiring: Recall passes the create perm and returns to the quote row with the credit notice");
 }
 
