@@ -238,6 +238,10 @@ const ROUTES = [
   "/portal/quotes/Q-2041?preview=lakefront",
   "/portal/quotes/Q-2041?preview=lakefront&view=bom",
   "/portal/quotes/Q-0?preview=lakefront",
+  // #348 slice 6 Task 4 — a bidder company's previews (no seeded bids): Home compiles the Bids-card branch (no card
+  // without a bid) and the online page runs its bidder branch on another company's quote → the unavailable card.
+  "/portal?preview=northridge",
+  "/portal/quotes/Q-2041?preview=northridge",
   // #293 slice 3 — the signed share page: a well-formed token that passes the
   // shape check and reaches the DB read + HMAC verify (and fails it), and a
   // malformed one refused before any read — both the one 200 "isn't active" card.

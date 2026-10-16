@@ -1471,6 +1471,30 @@ export function portalBidPureChecks(ok: Ok) {
     ok(ownerBom(mk({}, [frozenQty]), frozenQty, new Map(), "Owner").showQty === false, "owner-bom: the revision's frozen Qty choice wins over the live one");
     ok(ownerBom(mk(), rev(3, "sent"), new Map(), "Owner").systems.length === 0, "owner-bom: a revision with no spec has no systems");
   }
+  // #348 slice 6 Task 4 — Home's Bids card and the read-only bid row.
+  {
+    const rd = (f: string) => readFileSync(join(__dirname, "..", f), "utf8");
+    const codeOf = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    const bidRow = rd("src/app/portal/bid-row.tsx"), bidCode = codeOf(bidRow);
+    ok(!/["']use client["']/.test(bidRow), "bids-card: the bid row is a server component");
+    ok(!/AcceptDialog|RefreshPricingButton|RenameQuote|copyQuoteToCart|Quote again|portalDecline/.test(bidCode), "bids-card: the bid row has no Accept, Refresh pricing, Rename, Copy, Quote again or decline note");
+    ok(bidCode.includes("bid.rev.name") && bidCode.includes("bid.rev.value") && bidCode.includes("PORTAL_BID_COPY.badge") && bidCode.includes("portalBidChip(q.status, bid)") &&
+       bidCode.includes("onlineHeaderLine(q, bid.rev)") && !/\bq\.(name|value)\b/.test(bidCode),
+      "bids-card: the bid row shows the revision's frozen name and value, the Bid badge and the status chip — never the live q.name / q.value");
+    ok(bidCode.includes("Open PDF ↗") && bidCode.includes("/pdf") && bidCode.includes("prefetch={false}"), "bids-card: the bid row links the online page and Open PDF");
+    ok(!/@\/lib\/stores\/(parties|bids)|-server|addressee/.test(bidCode), "bids-card: the bid row imports no party store, bid store or -server module");
+    const homeSrc = codeOf(rd("src/app/portal/page.tsx"));
+    ok(homeSrc.includes("portalBidRowsForCompany(cid)") && homeSrc.includes("portalBidList(quotes, cid, bidRows)") && homeSrc.includes("homePortalQuotes(quotes, cid)") &&
+       homeSrc.includes("PORTAL_BID_COPY.card") && homeSrc.includes("PORTAL_BID_COPY.cardSub(companyName)") && homeSrc.includes("<PortalBidRow"),
+      "bids-card: Home loads the company's bidder rows, lists them through portalBidList and keeps homePortalQuotes");
+    ok(homeSrc.indexOf("PORTAL_BID_COPY.card") > -1 && homeSrc.indexOf("PORTAL_BID_COPY.card") < homeSrc.indexOf("Your quotes &amp; estimates"), "bids-card: the card sits above Your quotes & estimates");
+    ok(homeSrc.includes("bidGroups.open.length + bidGroups.history.length > 0"), "bids-card: the card renders only when there is a bid to show");
+    const smoke = rd("scripts/smoke-routes.ts");
+    ok(smoke.includes('"/portal?preview=northridge"') && smoke.includes('"/portal/quotes/Q-2041?preview=northridge"'), "bids-card: the smoke routes cover the Bids branch of Home and the bidder branch of the online page");
+    // The card's items carry only { q, bid, closed } — no party list.
+    const l = portalBidList([mk()], "CA", [A]);
+    ok(l.open.length === 1 && Object.keys(l.open[0]).sort().join() === "bid,closed,q" && !/"companyId"|recordId/.test(JSON.stringify(l.open[0].bid)), "bids-card: a list item is { q, bid, closed } with no party row");
+  }
   // Boundary.
   {
     const src = readFileSync(join(__dirname, "../src/lib/parties/portal-bid.ts"), "utf8");
@@ -1820,11 +1844,9 @@ export async function portalBidDbChecks(ok: Ok) {
       ok(reads.length >= 3 && reads.every((f) => NO_BIDDER_ROWS_NEEDED.includes(f) || readFileSync(join(root, f), "utf8").includes("portalBidRowsFor(")),
         `portal-bid db: every portal file that reads a quote loads the bidder rows (${reads.join(", ")})`);
       // Any VALUE import from @/lib/stores/quotes (any alias) must gate through portalBidRowsFor( or portalListsQuote(.
-      const QUOTE_READ_ALLOW: Record<string, string> = {
-        // Home: its quote lists go through homePortalQuotes / myQuotesCounts (portalListsQuote inside lib/portal-quotes)
-        // and `q.customerId === cid`; slice 6 Task 4 adds the Bids card through portalBidRowsForCompany.
-        "page.tsx": "Home",
-      };
+      // Empty: Home left the list in slice 6 Task 4 — it reads the company's bidder rows (portalBidRowsForCompany) and
+      // lists bids through portalBidList, alongside homePortalQuotes (portalListsQuote inside lib/portal-quotes).
+      const QUOTE_READ_ALLOW: Record<string, string> = {};
       const quoteValueImport = (src: string) =>
         [...src.matchAll(/import\s+(type\s+)?([^;]*?)\s+from\s+["']@\/lib\/stores\/quotes["']/g)].some((m) => {
           if (m[1]) return false;
@@ -1833,11 +1855,11 @@ export async function portalBidDbChecks(ok: Ok) {
         });
       const ungated = files.filter((f) => {
         const src = readFileSync(join(root, f), "utf8");
-        return quoteValueImport(src) && !(f in QUOTE_READ_ALLOW) && !src.includes("portalBidRowsFor(") && !src.includes("portalListsQuote(");
+        return quoteValueImport(src) && !(f in QUOTE_READ_ALLOW) && !src.includes("portalBidRowsFor(") && !src.includes("portalBidRowsForCompany(") && !src.includes("portalListsQuote(");
       });
       const valueImporters = files.filter((f) => quoteValueImport(readFileSync(join(root, f), "utf8")));
       ok(valueImporters.length >= 5 && !valueImporters.includes("quote-row.tsx") && ungated.length === 0,
-        `portal-bid db: every portal file with a value import from stores/quotes gates through portalBidRowsFor / portalListsQuote (${ungated.join(", ")})`);
+        `portal-bid db: every portal file with a value import from stores/quotes gates through portalBidRowsFor / portalBidRowsForCompany / portalListsQuote (${ungated.join(", ")})`);
       ok(quoteValueImport('import {\n  getAll as allQuotes,\n  type Quote,\n} from "@/lib/stores/quotes";') && !quoteValueImport('import type { Quote } from "@/lib/stores/quotes";') &&
          !quoteValueImport('import { type Quote } from "@/lib/stores/quotes";') && quoteValueImport('import * as Q from "@/lib/stores/quotes";'),
         "portal-bid db: the import scan catches multi-line, aliased and namespace imports and skips type-only ones");

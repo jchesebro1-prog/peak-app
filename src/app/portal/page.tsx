@@ -23,7 +23,9 @@ import { PortalSignedOut } from "./signed-out";
 import { portalNav } from "./nav";
 import { getCart } from "@/lib/stores/portal-carts";
 import { Chip, fmtDate, money, PortalBidOwnerRow, PortalQuoteRow } from "./quote-row";
-import { portalBidderQuoteIds } from "@/lib/parties/portal-bid-server";
+import { portalBidderQuoteIds, portalBidRowsForCompany } from "@/lib/parties/portal-bid-server";
+import { PORTAL_BID_COPY, portalBidList } from "@/lib/parties/portal-bid";
+import { PortalBidRow } from "./bid-row";
 import { documentsForCustomer } from "@/lib/stores/documents";
 import { activeDocumentCategories, resolveDocumentCategories } from "@/lib/document-categories";
 import { groupForPortal } from "@/lib/document-rules";
@@ -182,7 +184,7 @@ export default async function PortalPage({
 
   /* -------- tenant-scoped data (customerId comes from the grant ONLY) -------- */
   const cid = session.customerId;
-  const [cust, quotes, leads, fRenewals, iRenewals, projects, cart, rewards] = await Promise.all([
+  const [cust, quotes, leads, fRenewals, iRenewals, projects, cart, rewards, bidRows] = await Promise.all([
     getCustomer(cid),
     allQuotes(),
     allLeads(),
@@ -193,6 +195,8 @@ export default async function PortalPage({
     preview ? Promise.resolve(null) : getCart(session.grantId, cid),
     // #282 phase 4: the grant's company only (null while the program is off).
     portalRewards(cid),
+    // #348 slice 6 Task 4: this company's GC / EC bidder rows — read in a team preview too (it shows what the company sees).
+    portalBidRowsForCompany(cid),
   ]);
   const custName = cust?.name || "your organization";
   const venues = cust?.locations || [];
@@ -217,6 +221,8 @@ export default async function PortalPage({
   const quoteGroups = groupPortalQuotes(published);
   const mine = myQuotesCounts(quotes, cid);
   const mineTotal = mine.open + mine.accepted + mine.closed;
+  // #348 slice 6 Task 4: the bids other customers sent THIS company (it is a GC / EC bidder, never the quote's customer).
+  const bidGroups = portalBidList(quotes, cid, bidRows);
 
   // #220: project history, app-era only (never Daylite imports), through the
   // portalProjectView whitelist — value only when known and the quote is won.
@@ -514,6 +520,32 @@ export default async function PortalPage({
           )}
         </div>
       </div>
+
+      {/* #348 slice 6 Task 4 — Bids: read-only rows for a bidder company (the revision it was sent; Open PDF; no Accept) */}
+      {bidGroups.open.length + bidGroups.history.length > 0 && (
+        <div style={CARD}>
+          <div style={CARD_HEAD}>
+            <div style={{ fontSize: 14.5, fontWeight: 600 }}>{PORTAL_BID_COPY.card}</div>
+            <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>{PORTAL_BID_COPY.cardSub(companyName)}</div>
+          </div>
+          {bidGroups.open.length > 0 && (
+            <div>
+              <div style={GROUP_HEAD}>Open</div>
+              {bidGroups.open.map((b) => (
+                <PortalBidRow key={b.q.id} q={b.q} bid={b.bid} closed={b.closed} cid={cid} preview={preview} />
+              ))}
+            </div>
+          )}
+          {bidGroups.history.length > 0 && (
+            <div>
+              <div style={GROUP_HEAD}>History</div>
+              {bidGroups.history.map((b) => (
+                <PortalBidRow key={b.q.id} q={b.q} bid={b.bid} closed={b.closed} cid={cid} preview={preview} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* quotes — #220: Open (sent) + History (won, lost); each opens its saved PDF (#222). #288: Peak-sent estimates only */}
       <div style={CARD}>
