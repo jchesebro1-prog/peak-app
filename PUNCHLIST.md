@@ -10033,7 +10033,8 @@ Gates: tsc 0; test:specs 9495 PASS / 0 FAIL (+88); test:smoke 172/0; eslint 0 er
 Browser-verified (inspection $2,450 − $300 → letter $2,150; won → $300 redeemed + $32.25 earned at Silver 1.5 %;
 delete → both reversed; repair capped at its $825 total). Reviewed, no findings.
 
-**Jeff-gated:** review the defaults in Settings → Rewards (thresholds, earn %, starting-credit rate and cap), add
+**Jeff-gated:** ~~review the defaults in Settings → Rewards (thresholds, earn %, starting-credit rate and cap)~~ **confirmed
+2026-10-15 (Jeff) — the defaults are his numbers (D493)**; add
 perks, post starting credit, then turn the program on. The next production deploy applies migration 0034.
 **Lost quotes out of the program (2026-09-30, D505):** Jeff: "lost quotes shouldn't place into the rewards program."
 Marking a quote Lost (`setStatus`, every path) strips its credit — the Estimator line(s) and the service section's

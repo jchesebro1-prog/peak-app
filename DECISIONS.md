@@ -8171,6 +8171,10 @@ customer; no perks. The program is **disabled** until an admin turns it on in Se
 the first time it turns on and never moves. Reading sanitizes quietly (thresholds forced ascending, % clamped 0–20,
 caps ≥ 0, perk ids unique); the Settings save refuses bad input with a named error instead.
 
+**Confirmed 2026-10-15 (Jeff, decision record items 52–55):** these are no longer placeholders — the thresholds,
+earn rates and the 1 % / $1,000 starting credit are Jeff's numbers. The program still stays **off** until Jeff turns
+it on in Settings → Rewards. No code change.
+
 ## D494. The Rewards nav item always shows; the page handles "off" (#282, 2026-09-30)
 
 The nav can't hide items conditionally, so Customers → Rewards is always listed. While the program is off, `/rewards`
