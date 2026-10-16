@@ -942,9 +942,10 @@ export function useEstimatorState(props: EstimatorProps) {
      and wrap onto a second grid row. #269: 84px internally, room for the
      labor lines' ✎ Edit labor button beside them. #293: +20px for the ★
      key-product toggle — five 20px buttons + 1px gaps (✎ ★ ↑ ↓ × on a
-     labor, track or curtain line) need 104px in BOTH views. */
+     labor, track or curtain line) need 104px in BOTH views. #356: +22px
+     internally for ⇄ Move to another system — six buttons (✎ ★ ⇄ ↑ ↓ ×). */
   const cols = isInternal
-    ? "minmax(150px,1.3fr) 104px 92px 136px 116px 104px"
+    ? "minmax(150px,1.3fr) 104px 92px 136px 116px 126px"
     : "minmax(150px,1.3fr) 104px 136px 116px 104px";
 
   /* ---------------- travel (seeded + fetched on demand, punch #89) ----------------

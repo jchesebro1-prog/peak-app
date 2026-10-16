@@ -47969,8 +47969,8 @@ async function narrativeFinal293AsyncChecks(): Promise<void> {
   ok(star.includes("updateSection(secId, (s) => toggleKeyProduct(s, itemId, text));") && star.includes(".ensure([sku])") && star.includes("fillEmptyKeyProductText(s, itemId, sku, para)") &&
      star.indexOf("toggleKeyProduct(s, itemId, text)") < star.indexOf(".ensure([sku])"),
     "#293 fix ★: marks first, awaits the library row, then fills an empty block on the live section");
-  ok(cli.includes('"minmax(150px,1.3fr) 104px 92px 136px 116px 104px"') && cli.includes('"minmax(150px,1.3fr) 104px 136px 116px 104px"'),
-    "#293 fix actions cell: 104px in both views — five 20px buttons (✎ ★ ↑ ↓ ×) fit");
+  ok(cli.includes('"minmax(150px,1.3fr) 104px 92px 136px 116px 126px"') && cli.includes('"minmax(150px,1.3fr) 104px 136px 116px 104px"'),
+    "#293 fix actions cell: five 20px buttons (✎ ★ ↑ ↓ ×) fit in 104px; #356: 126px internally for ⇄ (six)");
   ok(card.includes('aria-label="Key product — featured in the narrative"'), "#293 fix ★: the star has an aria-label");
   ok(/<NarrativeColumn\s+key=\{narrSec\.id\}/.test(cli), "#293 fix: the narrative column remounts per system (key={narrSec.id})");
   ok(photos.includes("Promise.race([read(d.blobKey as string, caps.perImage, abort.signal), expired])") && photos.includes("getBlobStream(blobKey, { signal })"),

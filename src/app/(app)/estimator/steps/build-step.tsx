@@ -12,6 +12,8 @@ import { fmt, short, systemSellTotal } from "../pricing";
 import { vendorAttachmentLoad } from "../types";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
 import SectionCard from "../section-card";
+import MoveLinesBar from "../move-lines-bar";
+import { isMovableLine } from "@/lib/estimate-line-move/move";
 import { CommentPin, useCommentsFocusRefresh, useResolveComment } from "../comment-pins";
 import SystemLibraryModal from "../system-library-modal";
 import AiScopeModal from "../ai-scope-modal";
@@ -123,6 +125,9 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     loadVendorLines,
     loadedId,
     moveItem,
+    moveLinesHere,
+    moveLinesToEstimate,
+    movingLines,
     moveSystem,
     openCurtainEdit,
     openCustomEdit,
@@ -221,6 +226,32 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
   useCommentsFocusRefresh(s);
   /* #348 slice 5: Read the PDF — only for a user the server gate passed, and only on a PDF attachment. */
   const readPdf = vendorPdfEnabled && !!vendorDraft.attachment && isPdfAttachment(vendorDraft.attachment);
+
+  /* #356: ticked lines and a row's ⇄ feed the Move bar. Build unmounts on a step
+     change (estimator-client renders one step at a time), which clears both; an id
+     that no longer exists (deleted, moved away) simply drops out of liveSelected. */
+  const [selectedLines, setSelectedLines] = useState<Set<number>>(() => new Set());
+  const [rowMove, setRowMove] = useState<number | null>(null);
+  // Another quote loaded into this same screen: its line ids are not ours. (null → id is a first save — keep the ticks.)
+  const [selQuote, setSelQuote] = useState(loadedId);
+  if (selQuote !== loadedId) {
+    setSelQuote(loadedId);
+    if (selQuote) {
+      setSelectedLines(new Set());
+      setRowMove(null);
+    }
+  }
+  const movableIds = useMemo(() => new Set(sections.flatMap((x) => x.items.filter(isMovableLine).map((it) => it.id))), [sections]);
+  const liveSelected = useMemo(() => [...selectedLines].filter((id) => movableIds.has(id)), [selectedLines, movableIds]);
+  const toggleLine = (id: number) =>
+    setSelectedLines((cur) => {
+      const n = new Set(cur);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const rowLive = rowMove != null && movableIds.has(rowMove);
+  const barIds = rowLive ? [rowMove] : liveSelected;
 
   return (
     <div
@@ -527,6 +558,9 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     onSetPrice={setItemPrice}
                     onSetExtSell={setItemExtSell}
                     onMoveItem={(itemId, direction) => moveItem(sec.id, itemId, direction)}
+                    selectedLines={isInternal ? selectedLines : undefined}
+                    onToggleLineSelected={isInternal ? toggleLine : undefined}
+                    onMoveLine={isInternal ? setRowMove : undefined}
                     onRemoveItem={removeItem}
                     onToggleKeyProduct={(itemId) => toggleKeyProductLine(sec.id, itemId)}
                     onToggleCatalog={() => openInputMethod("catalog", sec.id)}
@@ -617,6 +651,27 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           >
             + From library…
           </button>
+          {isInternal && barIds.length > 0 && (
+            <MoveLinesBar
+              key={rowLive ? "row-" + rowMove : "ticks"}
+              sections={sections}
+              groups={groups}
+              lineIds={barIds}
+              single={rowLive}
+              openMenu={rowLive}
+              moving={movingLines}
+              onClear={() => {
+                if (rowLive) setRowMove(null);
+                else {
+                  setSelectedLines(new Set());
+                  setRowMove(null);
+                }
+              }}
+              onMoveHere={(t) => moveLinesHere(barIds, t)}
+              onMoveToEstimate={(d) => moveLinesToEstimate(barIds, d)}
+              searchQuotes={searchQuotes}
+            />
+          )}
           {addSystemOpen && (
             <AddSystemModal
               categories={initial.systemCategories}

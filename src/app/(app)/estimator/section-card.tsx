@@ -18,6 +18,7 @@ import {
   systemSellWarning,
 } from "./pricing";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { isMovableLine } from "@/lib/estimate-line-move/move";
 import { CUSTOM_PART_MARGIN } from "./tier-reprice";
 import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
@@ -166,6 +167,12 @@ export type SectionCardProps = {
   onSetPrice: (id: number, v: string) => void;
   onSetExtSell: (id: number, v: string) => void;
   onMoveItem: (id: number, direction: -1 | 1) => void;
+  /** #356: the Build step's ticked lines (staff only; absent = no checkboxes). */
+  selectedLines?: ReadonlySet<number>;
+  /** #356: tick / untick a line for the Move bar. */
+  onToggleLineSelected?: (itemId: number) => void;
+  /** #356: ⇄ — open the Move bar's menu for just this line. */
+  onMoveLine?: (itemId: number) => void;
   onRemoveItem: (id: number) => void;
   /** #293: ★ — mark / unmark this line as a key product (narrative block). */
   onToggleKeyProduct: (itemId: number) => void;
@@ -1101,7 +1108,18 @@ export default function SectionCard(p: SectionCardProps) {
                     borderTop: "1px solid #f5f6f8",
                   }}
                 >
-                  <div style={{ minWidth: 0 }}>
+                  <div style={{ minWidth: 0, display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    {p.onToggleLineSelected && isMovableLine(it) && (
+                      <input
+                        type="checkbox"
+                        checked={!!p.selectedLines?.has(it.id)}
+                        onChange={() => p.onToggleLineSelected?.(it.id)}
+                        aria-label={`Select ${it.desc}`}
+                        title="Select to move"
+                        style={{ marginTop: 2, flexShrink: 0, accentColor: "var(--accent)" }}
+                      />
+                    )}
+                    <div style={{ minWidth: 0, flex: 1 }}>
                     <div
                       title={laborEditable ? lineDesc + " — click to edit this labor" : trackEditable ? lineDesc + " — click to edit this track" : curtainEditable ? lineDesc + " — click to edit this curtain" : customEditable ? lineDesc + " — click to edit this custom part" : lineDesc}
                       onClick={lineEditable ? openLine : undefined}
@@ -1344,6 +1362,7 @@ export default function SectionCard(p: SectionCardProps) {
                         {vqNotes && <span> · Notes: {vqNotes}</span>}
                       </div>
                     )}
+                    </div>
                   </div>
                   <div
                     style={{
@@ -1482,6 +1501,9 @@ export default function SectionCard(p: SectionCardProps) {
                       >
                         {kpStar === "on" ? "★" : "☆"}
                       </button>
+                    )}
+                    {p.onMoveLine && isMovableLine(it) && (
+                      <button type="button" className="est-action-btn" onClick={() => p.onMoveLine?.(it.id)} title="Move to another system…" aria-label={`Move ${it.desc} to another system`} style={ACTION_BTN}>⇄</button>
                     )}
                     <button type="button" className="est-action-btn" onClick={() => p.onMoveItem(it.id, -1)} title="Move line up" style={ACTION_BTN}>↑</button>
                     <button type="button" className="est-action-btn" onClick={() => p.onMoveItem(it.id, 1)} title="Move line down" style={ACTION_BTN}>↓</button>
