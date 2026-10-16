@@ -11352,6 +11352,7 @@ import { popoutPureChecks } from "./test-popout";
 import { assessmentChecks, assessmentDbChecks } from "./test-assessments";
 import { partyChecks, partyDbChecks } from "./test-parties";
 import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, portalBidPureChecks, portalBidDbChecks, bidReportPureChecks, bidReportWidgetChecks, bidReportDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
+import { lineMoveChecks } from "./test-estimate-line-move";
 import { vendorChecks, vendorDbChecks, vendorPdfDbChecks, vendorPdfPureChecks, vendorPdfFillChecks } from "./test-vendors";
 import { oct15PureChecks, oct15DbChecks, discardConfirmChecks } from "./test-oct15-estimating";
 import { vaNotesChecks, vaNotesDbChecks } from "./test-va-notes";
@@ -11766,6 +11767,7 @@ seeded()
   .then(() => settingsRaceCallerChecks(ok))
   .then(() => settingsRaceBlobChecks(ok))
   .then(() => settingsRaceFollowupChecks(ok))
+  .then(() => lineMoveChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
