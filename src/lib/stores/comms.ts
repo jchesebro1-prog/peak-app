@@ -226,6 +226,9 @@ export type CommAttachment = {
   blobPath?: string;
   /** Batch 6 #64 — a Documents record (#218) of the email's company / project, by reference */
   documentId?: string;
+  /** #356 review — a forwarded Gmail attachment: the SOURCE message it is read from (with gmailPartId), checked
+   *  against the forward's own mailbox owner in the bridge (mail-attachments-server readMailRefForThread). */
+  fwdFrom?: { threadId: string; messageId: string };
 };
 
 export type CommMessage = {
@@ -269,6 +272,9 @@ export type CommMessage = {
    *  have been accepted) or "error" (refused / couldn't be built). Cleared
    *  by nothing; a later successful send stamps gmailId. */
   sendFailure?: "timeout" | "error";
+  /** #356 review — why the bridge will never send this message, in words the rep can act on (e.g. attachments over
+   *  Gmail's limit). Stamped with noAutoRetry; shown on the message in the reader. */
+  sendError?: string;
   /** I1 — never handed to Gmail by a later send on the thread (the bridge
    *  skips it). Stamped on an estimate email (or its inline reply) that did
    *  not go out through Gmail, so a later reply can't silently push it —
@@ -1573,12 +1579,14 @@ export function replyLeft(t: CommThread | null): boolean {
  *  (a server action schedules it with after() so the send returns fast). */
 export async function reply(
   threadId: string,
-  opts: { body?: string; status?: ThreadStatus; me?: string; postReply?: "await" | "caller"; attachments?: CommAttachment[] } = {}
+  opts: { body?: string; status?: ThreadStatus; me?: string; postReply?: "await" | "caller"; attachments?: CommAttachment[]; cc?: string } = {}
 ): Promise<CommThread | null> {
   const res = await addMessage(threadId, {
     direction: "out",
     channel: "email",
     body: opts.body || "",
+    // #356 review — Reply all's Cc rides on the message itself; the bridge sends it (outboundAddressing)
+    ...(opts.cc ? { cc: opts.cc } : {}),
     // Batch 6 #64 — the reply composer's attachments (by reference, already checked by the caller)
     ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
     status: opts.status,

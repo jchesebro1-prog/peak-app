@@ -9,6 +9,7 @@ import {
   logNoteAction,
   reopenAction,
   replyAction,
+  forwardAction,
   setMessageLinkAction,
   setStatusAction,
   unarchiveAction,
@@ -247,6 +248,11 @@ function ExpandedMessage({
               }}
             >
               Outbox · sending
+            </span>
+          )}
+          {m.sendError && (
+            <span role="alert" title="Gmail did not send this message" style={{ fontSize: 11, fontWeight: 600, color: "#9b3a2a" }}>
+              Not sent — {m.sendError}
             </span>
           )}
           <span style={{ fontSize: 11, color: "#aab0bb" }}>{m.time}</span>
@@ -559,6 +565,8 @@ export default function ThreadReader({
 
   // email composer state (component is keyed by thread id — resets per thread)
   const [mode, setMode] = useState<Mode | null>(null);
+  // #356 review — Forward carries the forwarded message's own attachments unless unticked
+  const [fwdOriginals, setFwdOriginals] = useState(true);
   const [cTo, setCTo] = useState("");
   const [cCc, setCCc] = useState("");
   const [cSubject, setCSubject] = useState("");
@@ -732,6 +740,7 @@ export default function ThreadReader({
         )
       );
       setAtt(initialAttachState([]));
+      setFwdOriginals(true);
     } else {
       setMode(m);
       setCTo(vm.contactEmail || "");
@@ -836,7 +845,29 @@ export default function ThreadReader({
       // I2 — the #127 flow ran (and gets the final say on the body,
       // signature kept or stripped) whenever this account has a signature
       // configured; the server skips its own legacy footer in that case.
-      const res = await replyAction(vm.id, b, !!signature, attachPayload(att));
+      // #356 review (Critical 1) — Forward is a NEW message to the typed To / Cc, never a reply to this thread's contact
+      if (mode === "forward") {
+        const fwd = await forwardAction({
+          threadId: vm.id,
+          to: cTo,
+          cc: cCc,
+          subject: cSubject,
+          body: b,
+          signatureHandled: !!signature,
+          includeOriginal: fwdOriginals,
+          attachments: attachPayload(att),
+        });
+        if (!fwd.ok) {
+          setAtt((s) => ({ ...s, error: fwd.error }));
+          return;
+        }
+        postChanged("thread", fwd.id);
+        closeComposer();
+        router.refresh();
+        return;
+      }
+      // #356 review — Reply all sends its Cc
+      const res = await replyAction(vm.id, b, !!signature, attachPayload(att), mode === "replyAll" ? cCc : undefined);
       // Batch 6 #64 — an attachment the server refused keeps the composer open with the reason
       if (!res.ok && "error" in res && res.error) {
         setAtt((s) => ({ ...s, error: res.error ?? null }));
@@ -894,6 +925,7 @@ export default function ThreadReader({
 
   // #127 — a signature alone (nothing typed above it) is not a real message
   const sendReady = stripSignature(cBody, signature).trim().length > 0 && cTo.trim().length > 0;
+  const fwdOriginalCount = (vm.messages[vm.messages.length - 1]?.attachments || []).length;
   const sigOn = hasSignature(cBody);
   const composerOpen = vm.isEmail && !!mode;
   const modeLabel = mode === "forward" ? "Forward" : mode === "replyAll" ? "Reply all" : "Reply";
@@ -1666,6 +1698,12 @@ export default function ThreadReader({
                 </button>
               </div>
               <div style={{ background: "#fafbfc", paddingBottom: 10 }}>
+                {mode === "forward" && fwdOriginalCount > 0 && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 20px 0", fontSize: 12, color: "#3a3f4a" }}>
+                    <input type="checkbox" checked={fwdOriginals} onChange={(e) => setFwdOriginals(e.target.checked)} />
+                    Include the original’s {fwdOriginalCount} attachment{fwdOriginalCount === 1 ? "" : "s"}
+                  </label>
+                )}
                 <AttachPicker state={att} setState={setAtt} threadId={vm.id} customerId="" />
               </div>
             </div>

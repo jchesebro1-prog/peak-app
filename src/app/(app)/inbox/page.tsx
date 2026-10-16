@@ -996,6 +996,7 @@ export default async function InboxPage({
       out: m.direction === "out",
       tag: tagFor(m),
       queued: !!m.queued,
+      ...(m.sendError ? { sendError: m.sendError } : {}),
       time: timeFull(m.at),
       body: m.body,
       attachments: (m.attachments || []).map((a, i) => {

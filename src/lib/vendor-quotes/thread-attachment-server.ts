@@ -44,6 +44,14 @@ export async function readThreadAttachment(
     } catch {
       return fail(VENDOR_COPY.copyFailed);
     }
+  } else if (att.fwdFrom && att.gmailPartId) {
+    // #356 review — a forwarded Gmail attachment: read from its source message (same-mailbox checked)
+    try {
+      bytes = await readMailRefForThread(att, t);
+    } catch {
+      bytes = null;
+    }
+    if (!bytes) return fail(VENDOR_COPY.copyFailed);
   } else if (att.gmailPartId) {
     if (!gmailEnabled()) return fail(VENDOR_COPY.noGmail);
     try {

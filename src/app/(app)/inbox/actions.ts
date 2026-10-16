@@ -71,6 +71,7 @@ import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
 import { ownThread, ownThreadIds } from "@/lib/inbox-thread-guard";
 import { emailDocContext, resolveComposeAttachments } from "@/lib/mail-attachments-server";
 import { parseComposeAttachments } from "@/lib/mail-attachments";
+import { cleanAddressList, forwardThread } from "@/lib/inbox-forward";
 import { actorByName, mailboxViewer } from "@/lib/mailbox-viewer";
 
 /**
@@ -400,7 +401,7 @@ export async function setMessageLinkAction(
 
 /** `signatureHandled` — see email-signature.ts applyOutboundSignature's doc
  *  comment for the full #127-vs-legacy-footer rule (I2, round-3 review). */
-export async function replyAction(id: string, body: string, signatureHandled?: boolean, attachments?: unknown) {
+export async function replyAction(id: string, body: string, signatureHandled?: boolean, attachments?: unknown, cc?: unknown) {
   const user = await requireUser();
   const b = (body || "").trim();
   if (!b) return { ok: false as const };
@@ -413,10 +414,41 @@ export async function replyAction(id: string, body: string, signatureHandled?: b
   const profile = await getUser(user.id);
   const out = applyOutboundSignature(b, signatureHandled, profile || { name: user.name, email: user.email });
   // #335 — archive-on-reply runs after the response, off the send's path
-  const sent = await reply(id, { body: out, me: user.name, postReply: "caller", ...(atts.attachments.length ? { attachments: atts.attachments } : {}) });
+  // #356 review — Reply all's Cc reaches the Gmail send (stamped on the message; bridge outboundAddressing)
+  const ccLine = cleanAddressList(cc);
+  const sent = await reply(id, { body: out, me: user.name, postReply: "caller", ...(atts.attachments.length ? { attachments: atts.attachments } : {}), ...(ccLine ? { cc: ccLine } : {}) });
   if (replyLeft(sent)) after(() => runPostReply(id));
   revalidate();
   return { ok: true as const };
+}
+
+/** #356 review (Critical 1) — Forward: a NEW message to the typed To / Cc (never the source thread's customer
+ *  contact), "Fwd: …" + the quoted original, optionally the original's attachments plus the rep's own (lib/inbox-forward).
+ *  The source thread must be the caller's own (#341/#349). */
+export async function forwardAction(d: {
+  threadId: string;
+  to: string;
+  cc?: string;
+  subject?: string;
+  body: string;
+  signatureHandled?: boolean;
+  includeOriginal?: boolean;
+  attachments?: unknown;
+}): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const source = await ownThread(d?.threadId, user);
+  if (!source) return { ok: false, error: "Email not found." };
+  const b = String(d.body ?? "").trim();
+  if (!b) return { ok: false, error: "Write a message first." };
+  const profile = await getUser(user.id);
+  const body = applyOutboundSignature(b, d.signatureHandled, profile || { name: user.name, email: user.email });
+  const res = await forwardThread(
+    source,
+    { to: String(d.to ?? ""), cc: String(d.cc ?? ""), subject: String(d.subject ?? ""), body, includeOriginal: d.includeOriginal !== false, attachments: parseComposeAttachments(d.attachments) },
+    { id: user.id, name: user.name },
+  );
+  revalidate();
+  return res;
 }
 
 export async function logNoteAction(

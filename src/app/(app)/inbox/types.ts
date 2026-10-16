@@ -157,6 +157,8 @@ export type MessageVM = {
   out: boolean;
   tag: string;
   queued: boolean;
+  /** #356 review — the bridge will never send this message (e.g. too large for Gmail): the reason, shown on it. */
+  sendError?: string;
   time: string;
   body: string;
   attachments?: AttachmentVM[];

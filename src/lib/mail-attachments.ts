@@ -10,13 +10,18 @@
  *    body), then checked by finalizeMailUploadAction (size, program bytes);
  *  - a Documents record (#218) of the email's linked company or project,
  *    read at send time.
- * Together with any file already on the draft, at most 25 MB and 20 files.
+ * Together with any file already on the draft, at most 18 MB of files and 20
+ * files: Gmail's 25 MB limit counts the ENCODED message, and base64 grows the
+ * files by a third (#356 review). The bridge also refuses a built message over
+ * 25 MB (comms-attachments messageTooLargeError).
  * The Gmail bridge reads the bytes when it sends (comms-attachments.ts).
  */
 import { blockedExtension, customerPathSegment, displayFileName, isUploadKey, safeFileName } from "@/lib/document-files";
 
-export const MAIL_ATTACH_MAX_BYTES = 25 * 1024 * 1024;
-export const MAIL_ATTACH_MAX_LABEL = "25 MB";
+export const MAIL_ATTACH_MAX_BYTES = 18 * 1024 * 1024;
+export const MAIL_ATTACH_MAX_LABEL = "18 MB";
+/** The rep's message when the files are over the cap (#356 review). */
+export const MAIL_ATTACH_TOO_LARGE = "Attachments too large for Gmail — 18 MB max.";
 export const MAIL_ATTACH_MAX_FILES = 20;
 export const MAIL_ATTACH_PREFIX = "mail-attachments/";
 
@@ -102,7 +107,7 @@ export function parseComposeAttachments(raw: unknown): ComposeAttachments | null
 export function mailAttachNameError(name: string, size: number): string | null {
   const shown = displayFileName(name);
   if (!(size > 0)) return `${shown} is empty.`;
-  if (size > MAIL_ATTACH_MAX_BYTES) return `${shown} is over ${MAIL_ATTACH_MAX_LABEL} — Gmail won't send it.`;
+  if (size > MAIL_ATTACH_MAX_BYTES) return `${shown}: ${MAIL_ATTACH_TOO_LARGE}`;
   const ext = blockedExtension(shown);
   return ext ? `${shown} is a program or script (.${ext}) — those can't be attached.` : null;
 }
@@ -111,7 +116,7 @@ export function mailAttachNameError(name: string, size: number): string | null {
 export function attachLimitError(list: ReadonlyArray<{ size?: number }>): string | null {
   if (list.length > MAIL_ATTACH_MAX_FILES) return `At most ${MAIL_ATTACH_MAX_FILES} attachments on one email.`;
   const total = list.reduce((s, a) => s + Math.max(0, Number(a.size) || 0), 0);
-  return total > MAIL_ATTACH_MAX_BYTES ? `Attachments are over ${MAIL_ATTACH_MAX_LABEL} together — remove one or send a link.` : null;
+  return total > MAIL_ATTACH_MAX_BYTES ? MAIL_ATTACH_TOO_LARGE : null;
 }
 
 /** May a document be attached to an email for this company / project? (its own company's files, or the project's) */

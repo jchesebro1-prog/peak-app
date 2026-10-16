@@ -9,14 +9,14 @@
  *    the draft's own files the composer kept (by key; a browser can only keep
  *    or drop, never invent one), plus each new upload (re-checked: the
  *    caller's own path, its real size) and each new document (its own
- *    company's or project's, name and size from the record). 25 MB / 20 files.
+ *    company's or project's, name and size from the record). 18 MB / 20 files.
  *  - readMailRefForThread: the bytes of a by-reference upload or document at
  *    send / download time, re-checked against the thread.
  */
 import { deleteBlob, getBlobBytes, getBlobHead } from "@/lib/blob";
 import { getDocument } from "@/lib/stores/documents";
 import type { DocumentRecord } from "@/lib/document-rules";
-import type { CommAttachment, CommThread } from "@/lib/stores/comms";
+import { get as getThread, type CommAttachment, type CommThread } from "@/lib/stores/comms";
 import { blockedExtension, checkDocumentBytes, displayFileName, DOCUMENT_SNIFF_BYTES, customerPathSegment } from "@/lib/document-files";
 import {
   attachKey,
@@ -117,6 +117,12 @@ export async function resolveComposeAttachments(
   return over ? { ok: false, error: over } : { ok: true, attachments: out };
 }
 
+/** Two threads in one mailbox: the same personal owner, or the same shared box (no personal owner). Pure. */
+export function sameMailbox(a: Pick<CommThread, "mailbox" | "mailboxOwnerId">, b: Pick<CommThread, "mailbox" | "mailboxOwnerId">): boolean {
+  if (a.mailboxOwnerId || b.mailboxOwnerId) return !!a.mailboxOwnerId && a.mailboxOwnerId === b.mailboxOwnerId;
+  return !!a.mailbox && a.mailbox !== "personal" && a.mailbox === b.mailbox;
+}
+
 /** The thread's company and (work-link) project — what a document must belong to. */
 export function emailDocContext(t: Pick<CommThread, "customerId" | "link">): { customerId: string | null; projectId: string | null } {
   return { customerId: t.customerId || null, projectId: t.link?.type === "project" ? t.link.id : null };
@@ -127,7 +133,16 @@ export function emailDocContext(t: Pick<CommThread, "customerId" | "link">): { c
  * treats null as "can't send"). An upload must be a composer path, and the thread owner's own when the thread has one;
  * a document must still exist and belong to the thread's company or project.
  */
-export async function readMailRefForThread(a: Pick<CommAttachment, "blobPath" | "documentId">, t: CommThread): Promise<Buffer | null> {
+export async function readMailRefForThread(a: Pick<CommAttachment, "blobPath" | "documentId" | "gmailPartId" | "fwdFrom">, t: CommThread): Promise<Buffer | null> {
+  if (a.fwdFrom && a.gmailPartId) {
+    // #356 review — a forwarded Gmail attachment: read from its source message, only when the source thread sits in
+    // the same mailbox as the forward (the same owner, or the same shared box).
+    const src = await getThread(a.fwdFrom.threadId);
+    if (!src || !sameMailbox(src, t)) return null;
+    const { fetchMessageAttachment } = await import("@/lib/gmail/bridge");
+    const r = await fetchMessageAttachment(src.id, a.fwdFrom.messageId, a.gmailPartId, MAIL_ATTACH_MAX_BYTES);
+    return Buffer.isBuffer(r) ? r : null;
+  }
   if (a.blobPath) {
     if (!isMailBlobPath(a.blobPath)) return null;
     if (t.mailboxOwnerId && mailBlobOwnerSegment(a.blobPath) !== customerPathSegment(t.mailboxOwnerId)) return null;
