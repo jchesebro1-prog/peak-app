@@ -1,11 +1,14 @@
 /**
  * Batch 6 / #66 (Jeff 2026-10-15) — most-quoted products and projected
- * sourcing: every catalog part on an OPEN estimate (status draft or sent),
+ * sourcing: every catalog part on an OPEN estimate (sent, or a recent draft),
  * summed by part and by manufacturer, weighted by the chance it is won.
  *
  * The win chance is the manufacturer analytics rule (#298): the
  * manufacturer's own won ÷ (won + lost) by cost, else the shop's rate, else 0
  * (`rateFor`, built from `manufacturerAnalytics`).
+ *
+ * Open = sent, or a draft touched in the last 12 months (#356 review: an
+ * abandoned draft is not demand).
  *
  * Lines counted (the analytics rule, plus assembly expansion): labor sections
  * and lines, the hidden bonus lines (#330), option / allowance /
@@ -29,7 +32,7 @@ import { expandLine, type FixtureLookup } from "@/lib/quote-line-members";
 import { partModel } from "@/lib/catalog-rename/sku";
 import { toCsv } from "@/lib/assessments/csv";
 
-export type SourcingQuote = { id: string; status: string; spec?: unknown };
+export type SourcingQuote = { id: string; status: string; spec?: unknown; updatedAt?: number; createdAt?: number };
 export type SourcingPart = {
   sku: string;
   mfr?: string;
@@ -54,6 +57,16 @@ export type SourcingReport = { parts: SourcingPartRow[]; manufacturers: Sourcing
 
 /** The statuses an estimate is still open in. */
 export const OPEN_STATUSES = ["draft", "sent"] as const;
+/** A draft older than this (last touched) is not counted as open. */
+export const OPEN_DRAFT_WINDOW_MS = 365 * 24 * 3600 * 1000;
+
+/** Is this estimate open for sourcing: sent, or a draft updated within 12 months of `now`. Pure. */
+export function isOpenForSourcing(q: Pick<SourcingQuote, "status" | "updatedAt" | "createdAt">, now: number): boolean {
+  if (q.status === "sent") return true;
+  if (q.status !== "draft") return false;
+  const at = Number(q.updatedAt ?? q.createdAt ?? 0);
+  return Number.isFinite(at) && at >= now - OPEN_DRAFT_WINDOW_MS;
+}
 
 const num = (n: unknown): number => {
   const v = typeof n === "number" ? n : Number(n);
@@ -127,7 +140,7 @@ export function sourcingHits(
 export function sourcingReport(
   quotes: readonly SourcingQuote[],
   partsBySku: ReadonlyMap<string, SourcingPart>,
-  opts: { canonical?: (key: string) => string; rateFor: (mfrKey: string) => number; fixtureOf?: FixtureLookup },
+  opts: { canonical?: (key: string) => string; rateFor: (mfrKey: string) => number; fixtureOf?: FixtureLookup; now?: number },
 ): SourcingReport {
   const canonical = opts.canonical ?? ((k: string) => k);
   const rate = (k: string) => {
@@ -137,7 +150,7 @@ export function sourcingReport(
   const parts = new Map<string, SourcingPartRow & { ids: Set<string> }>();
   let openEstimates = 0;
   for (const q of quotes) {
-    if (!(OPEN_STATUSES as readonly string[]).includes(q.status)) continue;
+    if (!isOpenForSourcing(q, opts.now ?? Date.now())) continue;
     const hits = sourcingHits(q.spec, partsBySku, opts.fixtureOf);
     if (!hits.length) continue;
     openEstimates++;

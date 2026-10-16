@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/session";
 import { ownThread } from "@/lib/inbox-thread-guard";
 import { getProject } from "@/lib/stores/projects";
 import { documentsForCustomer } from "@/lib/stores/documents";
+import { nameFor } from "@/lib/stores/customers";
 import { emailDocContext, finalizeMailUpload } from "@/lib/mail-attachments-server";
 import { documentFitsEmail, mailAttachNameError, mailBlobPath } from "@/lib/mail-attachments";
 import { newUploadKey } from "@/lib/document-files";
@@ -31,7 +32,7 @@ export async function finalizeMailUploadAction(input: { uploadKey: string; blobP
   return r.ok ? { ok: true as const, attachment: { name: r.attachment.name, size: r.attachment.size, mime: r.attachment.mime, blobPath: r.attachment.blobPath! } } : r;
 }
 
-export type AttachableDoc = { id: string; title: string; fileName: string; size: number; category: string; project: boolean };
+export type AttachableDoc = { id: string; title: string; fileName: string; size: number; category: string; project: boolean; internal: boolean };
 
 /**
  * The Documents the email may attach: its company's files and its project's.
@@ -39,7 +40,7 @@ export type AttachableDoc = { id: string; title: string; fileName: string; size:
  * only the thread's owner (#341/#349); a new message reads the company picked
  * in its Client row.
  */
-export async function attachableDocumentsAction(input: { threadId?: string | null; customerId?: string | null }): Promise<{ ok: true; docs: AttachableDoc[] } | { ok: false; error: string }> {
+export async function attachableDocumentsAction(input: { threadId?: string | null; customerId?: string | null }): Promise<{ ok: true; docs: AttachableDoc[]; heading: string } | { ok: false; error: string }> {
   const user = await requireUser();
   let ctx: { customerId: string | null; projectId: string | null };
   if (input?.threadId) {
@@ -51,15 +52,20 @@ export async function attachableDocumentsAction(input: { threadId?: string | nul
   }
   const companies = new Set<string>();
   if (ctx.customerId) companies.add(ctx.customerId);
+  // #356 review — the picker's header names the company and project the files come from
+  const names: string[] = [];
+  if (ctx.customerId) names.push((await nameFor(ctx.customerId)) || ctx.customerId);
   if (ctx.projectId) {
     const p = await getProject(ctx.projectId);
     if (p?.customerId) companies.add(p.customerId);
+    names.push(p ? `${p.id} · ${p.name}` : ctx.projectId);
   }
-  if (!companies.size) return { ok: true, docs: [] };
+  const heading = names.join(" — ");
+  if (!companies.size) return { ok: true, docs: [], heading };
   const rows = (await Promise.all([...companies].map((c) => documentsForCustomer(c)))).flat();
   const docs = rows
     .filter((d) => documentFitsEmail(d, ctx))
     .slice(0, 300)
-    .map((d) => ({ id: d.id, title: d.title, fileName: d.fileName, size: d.size, category: d.category, project: !!ctx.projectId && d.projectId === ctx.projectId }));
-  return { ok: true, docs };
+    .map((d) => ({ id: d.id, title: d.title, fileName: d.fileName, size: d.size, category: d.category, project: !!ctx.projectId && d.projectId === ctx.projectId, internal: d.visibility === "internal" }));
+  return { ok: true, docs, heading };
 }

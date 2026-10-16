@@ -5,13 +5,13 @@ import { upload } from "@vercel/blob/client";
 import type { AttachmentMetaVM } from "./types";
 import { PaperclipIcon } from "./icons";
 import { attachableDocumentsAction, finalizeMailUploadAction, mailUploadTargetAction, type AttachableDoc } from "./attach-actions";
-import { MAIL_ATTACH_MAX_BYTES, MAIL_ATTACH_MAX_FILES, MAIL_ATTACH_MAX_LABEL, mailAttachNameError, type AttachRef, type ComposeAttachments } from "@/lib/mail-attachments";
+import { MAIL_ATTACH_MAX_BYTES, MAIL_ATTACH_MAX_FILES, MAIL_ATTACH_MAX_LABEL, MAIL_ATTACH_TOO_LARGE, mailAttachNameError, type AttachRef, type ComposeAttachments } from "@/lib/mail-attachments";
 
 /**
  * Batch 6 / #64 — the Inbox composer's Attach button: files from the computer
  * (straight to private Blob through /api/inbox/attach-upload — never through
  * a server action) and the linked company's / project's Documents. Chips with
- * ✕; 25 MB and 20 files together. The server re-checks everything on save /
+ * ✕; 18 MB and 20 files together (Gmail's 25 MB counts the encoded message). The server re-checks everything on save /
  * send (lib/mail-attachments-server.ts).
  */
 
@@ -64,11 +64,12 @@ export default function AttachPicker({
   const [docs, setDocs] = useState<AttachableDoc[] | null>(null);
   const [docsOpen, setDocsOpen] = useState(false);
   const [docsErr, setDocsErr] = useState<string | null>(null);
+  const [docsHeading, setDocsHeading] = useState("");
   const total = state.items.reduce((s, i) => s + i.size, 0);
 
   const fail = (error: string) => setState((s) => ({ ...s, error }));
 
-  /** The files that fit (name, size, the 25 MB / 20-file room left), checked against the list as it stands now. */
+  /** The files that fit (name, size, the 18 MB / 20-file room left), checked against the list as it stands now. */
   function addFiles(files: File[]) {
     let used = total;
     let count = state.items.length;
@@ -79,7 +80,7 @@ export default function AttachPicker({
         continue;
       }
       if (count + 1 > MAIL_ATTACH_MAX_FILES || used + file.size > MAIL_ATTACH_MAX_BYTES) {
-        fail(`Attachments can be ${MAIL_ATTACH_MAX_LABEL} and ${MAIL_ATTACH_MAX_FILES} files together — ${file.name} doesn’t fit.`);
+        fail(count + 1 > MAIL_ATTACH_MAX_FILES ? `At most ${MAIL_ATTACH_MAX_FILES} attachments on one email.` : `${file.name}: ${MAIL_ATTACH_TOO_LARGE}`);
         continue;
       }
       used += file.size;
@@ -125,7 +126,10 @@ export default function AttachPicker({
     setDocs(null);
     const r = await attachableDocumentsAction({ threadId, customerId: threadId ? null : customerId || null });
     if (!r.ok) setDocsErr(r.error);
-    else setDocs(r.docs);
+    else {
+      setDocs(r.docs);
+      setDocsHeading(r.heading);
+    }
   }
 
   function addDoc(d: AttachableDoc) {
@@ -133,7 +137,7 @@ export default function AttachPicker({
       if (s.items.some((i) => i.ref?.kind === "document" && i.ref.documentId === d.id)) return s;
       const used = s.items.reduce((n, i) => n + i.size, 0);
       if (s.items.length >= MAIL_ATTACH_MAX_FILES || used + d.size > MAIL_ATTACH_MAX_BYTES) {
-        return { ...s, error: `Attachments can be ${MAIL_ATTACH_MAX_LABEL} and ${MAIL_ATTACH_MAX_FILES} files together — ${d.fileName} doesn’t fit.` };
+        return { ...s, error: s.items.length >= MAIL_ATTACH_MAX_FILES ? `At most ${MAIL_ATTACH_MAX_FILES} attachments on one email.` : `${d.fileName}: ${MAIL_ATTACH_TOO_LARGE}` };
       }
       return { ...s, error: null, dirty: true, items: [...s.items, { id: nextId(), name: d.fileName, size: d.size, ref: { kind: "document", documentId: d.id } }] };
     });
@@ -191,7 +195,7 @@ export default function AttachPicker({
       {docsOpen && (
         <div style={{ marginTop: 8, border: "1px solid #e8eaee", borderRadius: 10, maxHeight: 220, overflowY: "auto" }}>
           <div style={{ display: "flex", alignItems: "center", padding: "7px 10px", borderBottom: "1px solid #f0f1f4", fontSize: 11.5, fontWeight: 600, color: "#5b616e" }}>
-            <span style={{ flex: 1 }}>Documents</span>
+            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Documents{docsHeading ? ` — ${docsHeading}` : ""}</span>
             <button type="button" onClick={() => setDocsOpen(false)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#8c919c", fontSize: 14 }} aria-label="Close Documents">
               ✕
             </button>
@@ -211,7 +215,12 @@ export default function AttachPicker({
               >
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "#16181d", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title || d.fileName}</span>
-                  <span style={{ display: "block", fontSize: 11, color: "#9aa0ab" }}>{d.category}{d.project ? " · project" : ""} · {d.fileName}</span>
+                  <span style={{ display: "block", fontSize: 11, color: "#9aa0ab" }}>{d.internal && (
+                      <span title="Internal — not shared on the customer portal" style={{ fontSize: 9.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dd", border: "1px solid #f0e2bd", borderRadius: 4, padding: "0 5px", marginRight: 5 }}>
+                        Internal
+                      </span>
+                    )}
+                    {d.category}{d.project ? " · project" : ""} · {d.fileName}</span>
                 </span>
                 <span style={{ fontSize: 11, color: "#9aa0ab", fontFamily: "var(--font-mono)" }}>{on ? "Added" : sizeLabel(d.size)}</span>
               </button>

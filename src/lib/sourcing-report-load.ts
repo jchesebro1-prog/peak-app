@@ -12,7 +12,8 @@ import { sourcingReport, type SourcingPart, type SourcingReport } from "@/lib/so
 
 export async function loadSourcingReport(now: number = Date.now()): Promise<SourcingReport & { shopWinRate: number | null }> {
   const [parts, records, fixtures, quotes] = await Promise.all([listCatalog(), listManufacturers(), listFixtures(), allQuotes()]);
-  const analytics = await loadManufacturerAnalytics(now, { parts, records });
+  // #356 review — one read of every quote, shared with the analytics
+  const analytics = await loadManufacturerAnalytics(now, { parts, records, quotes });
   const partsBySku = new Map<string, SourcingPart>();
   for (const p of parts) {
     const sp: SourcingPart = {
@@ -28,6 +29,7 @@ export async function loadSourcingReport(now: number = Date.now()): Promise<Sour
     canonical: analytics.canonical,
     rateFor: (k) => analytics.byKey.get(k)?.winRate ?? analytics.shopWinRate ?? 0,
     fixtureOf: (id) => fixtureById.get(id),
+    now,
   });
   return { ...report, shopWinRate: analytics.shopWinRate };
 }

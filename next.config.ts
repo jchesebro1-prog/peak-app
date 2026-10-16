@@ -123,6 +123,12 @@ const nextConfig: NextConfig = {
       { source: "/field-survey/:path*", destination: "/venue-assessments/:path*", permanent: true },
     ];
   },
+  // #356 review — browsers that ask for /favicon.ico get the Branding-logo
+  // icon (src/app/icons/app; the old default favicon.ico was removed).
+  // /favicon.ico is already outside the session gate (middleware.ts).
+  async rewrites() {
+    return [{ source: "/favicon.ico", destination: "/icons/app/32.png" }];
+  },
   // Dev-only: let other machines on the LAN load the app (Next 16 blocks
   // dev resources from non-localhost origins by default). Covers the Mac's
   // Bonjour name and common private-network IPs. No effect in production.

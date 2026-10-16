@@ -10,7 +10,7 @@ export const maxDuration = 60;
 
 /**
  * Batch 6 / #66 — most-quoted products and projected sourcing across OPEN
- * estimates (draft or sent), weighted by win chance (lib/sourcing-report.ts).
+ * estimates (sent, or a draft touched in 12 months), weighted by win chance (lib/sourcing-report.ts).
  * Cost is shown only to staff holding `approve` — the same gate Reports puts
  * on its margin and profit widgets (lib/dashboard/registry.ts).
  */
@@ -56,7 +56,7 @@ export default async function SourcingReportPage({
         </div>
       </div>
       <div className="pk-page-sub" style={{ marginBottom: 16 }}>
-        Parts on {report.openEstimates} open estimate{report.openEstimates === 1 ? "" : "s"} (draft or sent), weighted by the chance each is won —
+        Parts on {report.openEstimates} open estimate{report.openEstimates === 1 ? "" : "s"} (sent, or a draft touched in the last 12 months), weighted by the chance each is won —
         the manufacturer&rsquo;s own win rate, else the shop&rsquo;s ({pct(report.shopWinRate)}). Assemblies count their parts; labor, options,
         allowances and alternates are left out.
       </div>
