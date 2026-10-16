@@ -17,6 +17,8 @@ import type { Quote, QuoteRevision, QuoteStatus } from "@/lib/stores/quotes";
 
 export const WON_SNAPSHOT_NOTE = "Won — the version that won";
 export const REOPEN_AUTOSAVE_NOTE = "Auto-saved before reopening at the version that won";
+/** #355 review M8 — what Home and the Quotes hub say after such a move. */
+export const REOPENED_AT_WON_NOTICE = "Reopened at the version that won — changes made after the win are saved as a revision.";
 
 /** The priced fields a revision recall puts back (restoreQuoteRevision) — what "the version" means. */
 export type WonContent = Pick<QuoteRevision, "name" | "value" | "margin" | "pricingTier" | "tierMargin" | "spec" | "flameTest" | "repair" | "inspection" | "consulting" | "rental">;

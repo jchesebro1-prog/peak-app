@@ -64,6 +64,18 @@ function viewedChecks(ok: Ok) {
   ok(viewedStamp(q) === "Viewed Oct 6, 9:05 PM", "#58: the stamp is in Chicago time, date and time (02:05 UTC Oct 7 = 9:05 PM CDT Oct 6)");
   ok(lastViewedAt({ revisions: [rev(1, "manual", T1)], shareOpens: { "1": { first: T1, last: T3, count: 1 } } }) === null, "#58: opens of a never-sent revision don't stamp");
   ok(opensChip(q)?.title.startsWith("Viewed Oct 6, 9:05 PM — Client link — ") === true, "#58: the Quotes hub's Opened chip tooltip leads with the Viewed stamp");
+  const hub = src("src/app/(app)/quotes/page.tsx");
+  ok(opensChip(q)?.viewed === "Viewed Oct 6, 9:05 PM" && hub.includes('{opened?.viewed ? <span data-testid="quote-viewed-stamp"') && hub.includes("{opened.viewed}</span>"),
+    "#355 review M7: the Viewed stamp also shows as visible text on the Quotes hub row");
+  // #355 review M8 — Home and the Quotes hub say when a move reopened a won estimate at the version that won.
+  const qa = src("src/app/(app)/quotes/actions.ts");
+  const ha = src("src/app/(app)/home-actions.ts");
+  const sheet = src("src/app/(app)/home-stage-sheet.tsx");
+  ok(qa.includes('if (reopenedAtWonVersion(before, q)) redirect(back + (back.includes("?") ? "&" : "?") + "statusNotice=" + encodeURIComponent(REOPENED_AT_WON_NOTICE));') &&
+     hub.includes("const creditNotice = one(sp.creditNotice) || one(sp.statusNotice) || null;"), "#355 review M8: the Quotes hub shows the reopen notice");
+  ok(ha.includes("return reopenedAtWonVersion(before, after) ? { ok: true, notice: REOPENED_AT_WON_NOTICE } : { ok: true };") && sheet.includes("if (res.notice) {") &&
+     sheet.includes('data-testid="reopened-at-won-notice"') && !sheet.includes("@/lib/stores/") && !sheet.includes("quote-won-version"),
+    "#355 review M8: Home's stage sheet shows the reopen notice (the client sheet imports no store)");
   const panel = src("src/app/(app)/estimator/client-link-panel.tsx");
   ok(panel.includes('data-testid="client-link-viewed"') && panel.includes("{status.viewed}"), "#58: Send & track's Client link panel shows the Viewed stamp");
   ok(/sentRevs: sentRevisionRows\(q\), viewed: viewedStamp\(q\) \}/.test(src("src/lib/quote-share/links.ts")), "#58: the panel's status carries the stamp (staff-only server action)");

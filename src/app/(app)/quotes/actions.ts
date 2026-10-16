@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { REOPENED_AT_WON_NOTICE, reopenedAtWonVersion } from "@/lib/quote-won-version";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
@@ -52,6 +53,8 @@ export async function setQuoteStatus(formData: FormData): Promise<void> {
   // single shared branch: the gate's sentence verbatim, anything else logged
   // and shown as the generic line.
   let q: Awaited<ReturnType<typeof setStatus>>;
+  // #355 review M8: read first, to say so when the move reopened a won estimate at the version that won.
+  const before = await get(id);
   try {
     // The actor is passed through so the automatic on-send revision is
     // attributed to whoever sent it (item 24).
@@ -65,6 +68,7 @@ export async function setQuoteStatus(formData: FormData): Promise<void> {
   // type-specific spawn inside the same transaction, so no caller can forget
   // downstream work or leave a won quote half-materialized.
   revalidatePath("/", "layout");
+  if (reopenedAtWonVersion(before, q)) redirect(back + (back.includes("?") ? "&" : "?") + "statusNotice=" + encodeURIComponent(REOPENED_AT_WON_NOTICE));
 }
 
 /** One-click quote-originated client package (#40): the quote need not be a

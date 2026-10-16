@@ -128,10 +128,12 @@ export function viewedStamp(q: OpensSource | null | undefined): string {
 
 /** The Quotes hub chip: "Opened" once any sent revision's link was opened;
  *  its tooltip leads with the latest open's date and time (Batch 5 #58). */
-export function opensChip(q: OpensSource | null | undefined): { label: string; title: string } | null {
+export function opensChip(q: OpensSource | null | undefined): { label: string; title: string; viewed: string } | null {
   const opened = sentRevisionRows(q).filter((r) => r.opens);
   if (!opened.length) return null;
-  return { label: PACKAGE_COPY.openedChip, title: `${viewedStamp(q)} — ${PACKAGE_COPY.clientLink} — ${opened.map((r) => r.line).join("; ")}` };
+  const viewed = viewedStamp(q);
+  // #355 review M7: `viewed` also prints on the hub row itself, not only in the tooltip.
+  return { label: PACKAGE_COPY.openedChip, title: `${viewed} — ${PACKAGE_COPY.clientLink} — ${opened.map((r) => r.line).join("; ")}`, viewed };
 }
 
 /** The lead drawer's line: the latest revision's row, once anything was opened. */
