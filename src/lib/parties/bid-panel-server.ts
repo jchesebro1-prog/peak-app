@@ -5,6 +5,7 @@ import { addendaAfterLatestSend, addendaSinceRow, bidderEmailNeed, bidderEmailUs
 import { bidDueText, bidderOpensText, bidderOpensTitle, bidderStatusText, BID_RESULT_LABEL, canAward as canAwardStatus, canUndoAward, currentRev, needsRev } from "@/lib/parties/bids";
 import type { BidCandidateVM, BidderVM, BidPanelResult } from "@/lib/parties/bid-vm";
 import { bidderRecipient } from "@/lib/parties/addressee-server";
+import { portalQuoteHasBidders } from "@/lib/parties/portal-bid-server";
 import { partyVMs } from "@/lib/parties/view-server";
 import { listBidders } from "@/lib/stores/bids";
 import { listFor } from "@/lib/stores/parties";
@@ -74,6 +75,14 @@ export async function loadBidPanel(quoteId: string, viewer: BidViewer): Promise<
   }
   const awardedPartyId = q.bid?.awardedPartyId ?? null;
   const dueAt = q.bid?.dueAt ?? null;
+  // #348 follow-up: the staff label only. A failed read shows no label (and is logged); the portal's own check — which
+  // is what keeps prices from the owner — runs on every portal read and is unaffected.
+  let scopeOnly = false;
+  try {
+    scopeOnly = await portalQuoteHasBidders(q);
+  } catch (e) {
+    console.error(`loadBidPanel(${quoteId}): the Scope-only check failed — showing no label`, e);
+  }
   return {
     ok: true,
     panel: {
@@ -94,6 +103,7 @@ export async function loadBidPanel(quoteId: string, viewer: BidViewer): Promise<
       canCopyLink: viewer.canLink && shareEligibility(q) === "ok",
       plan: viewer.canSend ? bidderSendPlan(q, rows) : { ids: [], label: null, noEmail: 0 },
       addendaAfterSend: q.status === "sent" ? addendaAfterLatestSend(q) : [],
+      scopeOnly,
     },
   };
 }

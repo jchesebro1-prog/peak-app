@@ -1417,7 +1417,7 @@ See `.env.example`.
     list and the pick lists in `field-lists.ts`, tell the reps older surveys
     ask for Scope first, send the CW Elevation and line set schedule sheets,
     try a real assessment end to end. Punch item #344.
-62. 🚧 **Estimate parties — slices 1, 2a, 2b-i, 2b-ii, 3, 4 + 5** (#348, D1058–D1062, D1074–D1097, D1105–D1119, D1140–D1157) — Jeff, Oct 14: an
+62. 🚧 **Estimate parties — slices 1, 2a, 2b-i, 2b-ii, 3, 4, 5 + 6** (#348, D1058–D1062, D1074–D1097, D1105–D1119, D1140–D1157, D1166–D1184) — Jeff, Oct 14: an
     estimate can name more than one company. Slice 1 is the parties core: a
     `record_parties` doc collection (migration 0041; id `pty_` + sha1 of
     record type, record id, company and role) with roles owner · gc · ec ·
@@ -1526,8 +1526,36 @@ See `.env.example`.
     first save, any later read replaces the earlier run, and Settings → Assist
     pilot → Vendor PDFs reports by model and vendor. Pure modules in
     `src/lib/vendor-pdf/`; tests in `scripts/test-vendors.ts`.
-    Remaining: slice 6 (portal + reports), plus Jeff's confirms and prod checks
-    for slice 5 (PUNCHLIST #348).
+    ✅ Slice 6 (D1166–D1184, Oct 15) — portal + reports. **Portal bidder rule:**
+    a GC/EC with a grant sees, read-only, the estimates it bid on — its own
+    latest revision (delivered to it, or frozen to it after the award; a
+    frozen one counts without `revSent`), result pending or awarded, Lost shown
+    as "Closed", Won to the awarded bidder only, Draft "being revised". One
+    gate: `portalOnlineEstimateState` in `src/lib/quote-pdf/portal-access.ts`
+    composes `portalBidState` (`src/lib/parties/portal-bid.ts`) with rows passed
+    explicitly (none = unavailable); `portal-bid-server.ts` is the only portal
+    reader of `record_parties`; every portal write stays customer-only. The
+    online page is addressed to the bidder, and its PDF renders on demand at that
+    revision (`renderBidderPdf` with `rev`, 6/min per grant, `maxDuration = 60`;
+    a non-404 failure shows one line and logs the reason). **Owner Scope only:**
+    once an estimate has bidders, the owner's portal shows a BOM with no prices
+    (`portal-owner-bom.ts`; no PDF, photos, Accept, Refresh, Copy or Rename;
+    vendor lines show the description only), sticky via the store-owned
+    `Quote.bidScopeOnly` stamp (`markBidScopeOnly`; set by `addBidder` and by
+    re-adding a removed bidder company; soft-deleted rows count; carried by
+    Move/Copy system → New estimate for the same customer, fail-closed; not by
+    a Move/Copy into an existing estimate). Portal only — staff Send & track and
+    the owner's client links are unchanged. **Report:** Reports → Bids by GC/EC
+    (`bids-by-bidder`; `bid-report.ts`, `bid-report-server.ts`,
+    `_dashboard/widgets/bids.tsx`; no perm, after Pipeline by estimator in the
+    preset): Sent = delivered, Open = pending on a draft/sent estimate, GC
+    awarded = awarded + lost, Awarded to us, Withdrew/no bid apart, rate =
+    awarded ÷ decided ("—" if none), period = due date (a future one counts as
+    now) else last send, one row per company and role, bounded to 5,000 rows.
+    Tests: `scripts/test-bids.ts` (in test:specs), including the portal file
+    inventory.
+    Remaining: Jeff's confirms and prod checks for slices 5 and 6 (PUNCHLIST
+    #348). All #348 slices are built.
 
 63. ✅ **Mailbox identity** (#349, D1063–D1073) — mailbox ownership follows the user's id (`CommThread.mailboxOwnerId`; one rule `ownsMailbox`, stamp → Gmail key → a name only one user holds, else nobody; `ownMailboxCond` in SQL; viewers from `src/lib/mailbox-viewer.ts`), assignments carry `assignedToId`, creators refuse a blank owner, legacy threads stamp lazily in write guards and via `npm run comms:stamp-owners` (Jeff-gated prod run; shared names get the `"unresolved"` tombstone), a rename or new hire never moves mail (`src/lib/mailbox-names.ts`), and Settings → Team refuses duplicate names. Punch item #349.
 

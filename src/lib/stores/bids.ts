@@ -1,6 +1,6 @@
 import { getDoc } from "@/db/doc-store";
 import type { EstimateEmailEntry, Quote } from "@/lib/stores/quotes";
-import { get as getQuote, patchQuoteBid, recordEstimateEmail, setStatus, statusFailureMessage, withQuoteRowLock } from "@/lib/stores/quotes";
+import { get as getQuote, markBidScopeOnly, patchQuoteBid, recordEstimateEmail, setStatus, statusFailureMessage, withQuoteRowLock } from "@/lib/stores/quotes";
 import { addParty, listFor, setPartyBid } from "@/lib/stores/parties";
 import type { BidderState, Party } from "@/lib/parties/rules";
 import {
@@ -84,6 +84,9 @@ export async function addBidder(
     const added = await addParty({ recordType: "quote", recordId: q.id, companyId: input.companyId, contactId: input.contactId ?? null, role: input.role }, by);
     if (!added.ok) return added;
     const party = added.party.bid ? added.party : (await setPartyBid(added.party.id, newBidderState(input.submitVia))) ?? added.party;
+    // #348 slice 6 (Jeff 2026-10-15): "Scope only" for good — stamped in the same transaction as the bidder row, and
+    // never cleared (removeParty leaves it), so the owner's portal never shows this estimate's prices again.
+    await markBidScopeOnly(q.id);
     return { ok: true as const, party, q, existed: wasBidder };
   });
   if (!gate.ok) return gate;

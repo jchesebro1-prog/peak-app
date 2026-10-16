@@ -390,6 +390,14 @@ export type Quote = {
    *  patchQuoteBid under the row lock; update() drops it. Content (QUOTE_CONTENT_FIELDS): the awarded bidder
    *  prints as "Prepared for" and the bid line prints under the meta grid; never bumps updatedAt. */
   bid?: QuoteBid | null;
+  /** #348 slice 6 (Jeff 2026-10-15) — "Scope only" for good: once this estimate has had a GC/EC bidder (or was
+   *  split off one that had), the owner's portal shows it as a BOM with no prices, even after every bidder row is
+   *  removed. Store-owned: written only by markBidScopeOnly (addBidder, and a party write that revives a removed
+   *  bidder row — a key-level write that never bumps updatedAt) and by create() when a SERVER caller passes
+   *  `opts.bidScopeOnly` (Move system → New estimate and Copy system → New estimate, same customer only) —
+   *  buildQuote never copies it from `partial`, and update() drops it, so no client save can set or clear it.
+   *  Never content, never snapshotted. Read through portalQuoteHasBidders (stamp OR bidder rows incl. deleted). */
+  bidScopeOnly?: true;
   /** Estimator Phase 3 — the comms threads this estimate was emailed on
    *  (spec §10.1 step 6), oldest first, ≤ 50, one per threadId. Written only
    *  by recordEstimateEmail under the row lock; update() drops it so an
@@ -920,14 +928,18 @@ export function buildQuote(
 }
 
 /** Create a new quote; returns the created record. Id: Q-#### from base 2041. */
-export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
+export async function create(partial: Partial<Quote> = {}, opts: { bidScopeOnly?: boolean } = {}): Promise<Quote> {
   const t = Date.now();
   const quoteType = partial.quoteType || "system";
   // System quotes enter their pipeline at its first stage (spec §3.4); a caller-chosen
   // pipeline is honoured when it exists, else the Settings default.
   const pipes = carriesPipeline(quoteType) ? await loadPipelines() : null;
   const pl = pipes ? quotePipelineFor(pipes, { pipelineId: partial.pipelineId || pipes.defaultQuotePipelineId }) : null;
-  const build = (id: string): Quote => buildQuote(id, partial, quoteType, pl, t);
+  // #348 slice 6: the Scope-only stamp comes only from the server-side second argument, never from `partial`.
+  const build = (id: string): Quote => {
+    const q = buildQuote(id, partial, quoteType, pl, t);
+    return opts.bidScopeOnly === true ? { ...q, bidScopeOnly: true } : q;
+  };
   // Explicit caller-supplied id (not a minted one) — no race to guard, keep
   // the prior upsert semantics. #223: an id that already exists keeps its
   // number — upsertDoc never replaces a stored estNo/estSuffix (doc-store).
@@ -968,6 +980,8 @@ export async function update(
     delete clean.packagePeakHeader;
     // #348: bid details are patchQuoteBid's alone.
     delete clean.bid;
+    // #348 slice 6: the Scope-only stamp is markBidScopeOnly's alone — a save can never set or clear it.
+    delete clean.bidScopeOnly;
     // Phase 3: the emailed-thread list is recordEstimateEmail's alone.
     delete clean.estimateEmails;
     // #333 review (B): the package selection is setPackageSelection's alone — a
@@ -984,6 +998,16 @@ export async function update(
     Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
+}
+
+/** #348 slice 6 (Jeff 2026-10-15) — the ONLY writer of `Quote.bidScopeOnly` after create: set it (never clear
+ *  it) as one key-level write (`doc || {bidScopeOnly: true}` in SQL), the setAssistNudge precedent — no
+ *  read-modify-write, so it can't race an Estimator save; estNo/estSuffix and updatedAt are left as stored (no
+ *  version bump, nothing stales). Joins the caller's transaction (addBidder's row lock). False = missing / deleted. */
+export async function markBidScopeOnly(quoteId: string): Promise<boolean> {
+  if (!quoteId) return false;
+  const res = await patchDocKey("quotes", [quoteId], "bidScopeOnly", true);
+  return res.ids.length > 0;
 }
 
 /** AI daily brief (spec §2) — the ONLY writer of `Quote.assistNudge`: set

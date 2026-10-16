@@ -13,7 +13,8 @@ import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { PortalShell } from "../shell";
 import { PortalSignedOut } from "../signed-out";
 import { portalNav } from "../nav";
-import { PortalQuoteRow } from "../quote-row";
+import { PortalBidOwnerRow, PortalQuoteRow } from "../quote-row";
+import { portalBidderQuoteIds } from "@/lib/parties/portal-bid-server";
 
 export const dynamic = "force-dynamic";
 /** #222/#245: Refresh pricing and Rename (#288) schedule the quote's saved
@@ -93,6 +94,8 @@ export default async function PortalMyQuotesPage({
   ]);
   const custName = cust?.name || "your organization";
   const view = myQuotesView(quotes, cid, filter);
+  // #348 slice 6 Task 3 (Jeff 2026-10-15): a listed quote that has bidders shows as scope only (no value, no actions).
+  const bidOwnerIds = await portalBidderQuoteIds(view.rows.map((r) => r.q));
   // The banner names the generated quote's estimate number — looked up among
   // THIS customer's listed, customer-built quotes only, so a hand-edited ?q=
   // shows nothing.
@@ -217,9 +220,13 @@ export default async function PortalMyQuotesPage({
           marginBottom: 18,
         }}
       >
-        {view.rows.map((r) => (
-          <PortalQuoteRow key={r.q.id} q={r.q} cid={cid} preview={preview} acceptCategories={acceptCategories} mine={{ renamable: r.renamable }} />
-        ))}
+        {view.rows.map((r) =>
+          bidOwnerIds.has(r.q.id) ? (
+            <PortalBidOwnerRow key={r.q.id} q={r.q} cid={cid} preview={preview} />
+          ) : (
+            <PortalQuoteRow key={r.q.id} q={r.q} cid={cid} preview={preview} acceptCategories={acceptCategories} mine={{ renamable: r.renamable }} />
+          )
+        )}
         {view.rows.length === 0 && (
           <div style={{ padding: "26px 20px", fontSize: 12.5, color: "#9aa0ab", textAlign: "center" }}>
             {view.filter === "open" ? (

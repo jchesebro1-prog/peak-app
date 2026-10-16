@@ -67,6 +67,7 @@ import { catalogAddPrice, customPartSell, repriceForTier } from "./tier-reprice"
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 import { postChanged } from "@/lib/popout/channel";
 import { setUnsavedHold } from "@/lib/popout/hold";
+import { discardConfirmText, inputIsDirty, isModalInputKind, MODAL_INPUT_KINDS, rebaseDraft, stableDraftJson, type ModalInputKind } from "@/lib/estimate-steps/discard-confirm";
 
 /** #333 review (F): how long Send waits for an in-flight Client package write. */
 const SELECTION_SETTLE_TIMEOUT_MS = 10_000;
@@ -744,6 +745,28 @@ export function useEstimatorState(props: EstimatorProps) {
   const [laborDraft, setLaborDraft] = useState<LaborDraft>(() =>
     freshLabor(null, initial.tierMargin, (initial.sections ?? freshSections(initialFreightDefault.pct))[0]?.name || "")
   );
+  /* #348 follow-up (Jeff 2026-10-15): the five configurator pop-ups ask before a stray click discards unsaved work.
+     ONE helper, markDraftBaseline, marks an open's baseline pending wherever its draft is (re)initialized — every open
+     through openInputMethod (fresh, an edit's seed, the hand-off's blank seed), and the labor travel reseed; the effect
+     below snapshots the COMMITTED draft (so a seed set in the same click is in it). The hand-off's fill re-bases the
+     stored baseline instead (rebaseDraft). confirmDiscardInput compares at close; Add / Save never asks. */
+  const modalDrafts = useMemo<Record<ModalInputKind, unknown>>(
+    () => ({ curtain: { draft: curtainDraft, track: curtainTrack }, track: trackDraft, fixture: fixtureDraft, labor: laborDraft, vendor: vendorDraft }),
+    [curtainDraft, curtainTrack, trackDraft, fixtureDraft, laborDraft, vendorDraft]
+  );
+  /** Per pop-up: the clean draft's stableDraftJson, or null while pending (snapshotted after the next commit). */
+  const draftBaselineRef = useRef<Partial<Record<ModalInputKind, string | null>>>({});
+  const [draftBaselineTick, setDraftBaselineTick] = useState(0);
+  const markDraftBaseline = (kind: InputKind) => {
+    if (!isModalInputKind(kind)) return;
+    draftBaselineRef.current[kind] = null;
+    setDraftBaselineTick((t) => t + 1); // guarantees the snapshot runs even when the seed equals the old draft
+  };
+  useEffect(() => {
+    for (const k of MODAL_INPUT_KINDS) {
+      if (draftBaselineRef.current[k] === null) draftBaselineRef.current[k] = stableDraftJson(modalDrafts[k]);
+    }
+  }, [draftBaselineTick, modalDrafts]);
   const [, startTransition] = useTransition();
 
   /* ---- AI scope draft (Phase 8, D4) — drafts only, estimator sets prices ---- */
@@ -1892,7 +1915,9 @@ export function useEstimatorState(props: EstimatorProps) {
           contactName: contactName || "",
           tierMargin: tierMarginRef.current,
         },
-        usedVq
+        usedVq,
+        // #348 slice 6: the server reads the stored source's Scope-only state; an unsaved estimate has none.
+        loadedId || null
       );
       if (!res.ok) {
         setMoveNotice({ ok: false, error: res.error || "Could not copy that system." });
@@ -2455,8 +2480,27 @@ export function useEstimatorState(props: EstimatorProps) {
         setLaborDraft(
           freshLabor(est, tierMargin, sections.find((section) => section.id === secId)?.name || "")
         );
+        markDraftBaseline("labor"); // #348 follow-up: the travel reseed is the new clean point
       });
     }
+  };
+
+  /** #348 follow-up: whether the open pop-up holds unsaved work (null when clean, or not one of the five). */
+  const openInputDirty = (): { kind: ModalInputKind; read: boolean } | null => {
+    const cur = openInputRef.current;
+    if (!cur || !isModalInputKind(cur.kind)) return null;
+    const reading = cur.kind === "vendor" && (vendorPdfBusyRef.current || !!vendorPdf.busy);
+    // Fix round 1: the Inbox hand-off still copying the PDF in counts too (closing drops the copy).
+    const copying = cur.kind === "vendor" && vendorHandoff?.status === "loading";
+    if (!inputIsDirty({ baseline: draftBaselineRef.current[cur.kind], current: modalDrafts[cur.kind], reading, copying })) return null;
+    return { kind: cur.kind, read: cur.kind === "vendor" && (reading || !!vendorDraft.pdfRead) };
+  };
+
+  /** #348 follow-up: true = OK to discard the open pop-up — it's clean, or the user confirmed. The pop-ups' × and
+   *  backdrop (ConfigModal's confirmClose) and a switch away (openInputMethod) ask; Add / Save call closeInput directly. */
+  const confirmDiscardInput = (): boolean => {
+    const d = openInputDirty();
+    return !d || window.confirm(discardConfirmText(d.kind, { read: d.read }));
   };
 
   /** Close whatever input method is open, discarding its draft. */
@@ -2477,6 +2521,8 @@ export function useEstimatorState(props: EstimatorProps) {
    *  is already open on that system closes it — which discards it too. */
   const openInputMethod = (kind: InputKind, secId: string) => {
     const cur = openInputRef.current;
+    // #348 follow-up: closing or switching away from a pop-up with unsaved work asks first.
+    if (cur && !confirmDiscardInput()) return;
     if (cur && cur.kind === kind && cur.secId === secId) {
       closeInput();
       return;
@@ -2488,6 +2534,7 @@ export function useEstimatorState(props: EstimatorProps) {
     openInputRef.current = { kind, secId };
     setOpenInput({ kind, secId });
     seedDraft(kind, secId);
+    markDraftBaseline(kind);
   };
 
   /** Open the vendor form on a STORED quote (#144), so editing participates in
@@ -2497,6 +2544,7 @@ export function useEstimatorState(props: EstimatorProps) {
        open on this system" as a toggle and would close the form we are about to
        seed, and its discard of the outgoing draft would clear the pending seed
        set below. After closeInput there is nothing open left to discard. */
+    if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
     vendorEditRef.current = vqId;
     openInputMethod("vendor", secId);
@@ -2553,7 +2601,7 @@ export function useEstimatorState(props: EstimatorProps) {
           return;
         }
         const p = r.prefill;
-        setVendorDraft((d) => {
+        const fill = (d: VendorDraft): VendorDraft => {
           // The user closed (or switched) the form meanwhile — this result belongs to no open draft.
           if (d.id !== seed.id) return d;
           /* Apply the vendor only while the draft's vendor is still the seeded blank — never over what the user
@@ -2567,7 +2615,11 @@ export function useEstimatorState(props: EstimatorProps) {
             attachmentPreview: p.attachment ? p.preview : d.attachmentPreview,
             fromThreadId: p.fromThreadId,
           };
-        });
+        };
+        setVendorDraft(fill);
+        /* #348 follow-up: the filled form is the new clean point — the same fill applied to the baseline, so what the
+           user typed while the PDF copied still counts as theirs (a pending baseline snapshots the filled draft). */
+        draftBaselineRef.current.vendor = rebaseDraft<VendorDraft>(draftBaselineRef.current.vendor, fill);
         setVendorHandoff((h) => (h ? { status: "done", note: p.note } : h));
       } catch {
         setVendorHandoff((h) => (h ? { status: "failed", note: VENDOR_COPY.copyFailed } : h));
@@ -2584,6 +2636,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const sec = sections.find((s) => s.id === secId);
     const rec = sec ? laborGroupRecord(sec, group) : null;
     if (!sec || !rec) return;
+    if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
     laborEditRef.current = { group, draft: rec.draft, ...laborGroupEdits(sec, group) };
     openInputMethod("labor", secId);
@@ -2596,6 +2649,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
     if (!it?.track) return;
     const gone = !trackSeries.some((s) => s.id === it.track!.seriesId);
+    if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
     trackEditRef.current = {
       lineId,
@@ -2610,6 +2664,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const openCustomEdit = (secId: string, lineId: number) => {
     const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
     if (!it || !isCustomLineEditable(it)) return;
+    if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
     customEditRef.current = { lineId, draft: customDraftFromLine(it) };
     openInputMethod("custom", secId);
@@ -2620,6 +2675,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
     if (!it?.curtain) return;
     const linked = linkCurtainTracks(sections).links.get(it);
+    if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
     curtainEditRef.current = { lineId, draft: curtainDraftFromLine(it, defaultFabric, fabrics, (d) => computeCurtain(d, fabrics, { sewingPct: curtainSewingPct }, tierMargin ?? undefined).costEach), linkedTrack: linked?.track ? String(linked.track.mounting) : null };
     openInputMethod("curtain", secId);
@@ -3333,6 +3389,7 @@ export function useEstimatorState(props: EstimatorProps) {
     changeStatus,
     checkedAssumptions,
     closeInput,
+    confirmDiscardInput,
     closeQd,
     closeTitle,
     cols,

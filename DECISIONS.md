@@ -13388,3 +13388,112 @@ Church family only, the Auto-fill frame sets `sideInside`: side lights hang 0.02
 ## D1165. Spec Library numbers follow Fall Creek (Bray 3748); the renumber script finds nothing to change (#354, Jeff 2026-10-15 item 47; answers #265 "spec numbers vs Bray's TOC")
 
 `npm run specs:renumber-bray` (scripts/specs-renumber-bray.ts, the geo-recheck pattern: dry run by default, `--apply`, `--yes` for a hosted DB, an explicit DATABASE_URL / PGLITE_PATH target only, `--map` for another file) reads `docs/specs-seed/bray-toc-map.json` — `{ source, confirmed: true, sections: [{ from, to, title? }] }` — and renumbers each mapped `spec_sections.number` (and title, when given; `updateSection`) and every `spec_records.section` in it through `saveSpecRecord`, so each record keeps its old number as a revision. Record ids (`PS-116123-003`), section ids, article links and saved project specs (SP-####) never change. Pure plan `src/lib/specs/bray-renumber.ts`: refuses an unconfirmed map, malformed numbers, a number listed twice, two sections onto one number, a target that is another entry's source (a swap or chain — #354 review), or a target held by a section that stays; idempotent (a second run plans nothing). **Source (Jeff, same day): Fall Creek, Bray project 3748.** No Fall Creek table of contents (00 01 10) or project manual is on this Mac or in Jeff's Dropbox, and its drawings cite no spec sections, so the authority is the numbers Bray's own Fall Creek section files print — there is one, `Fall Creek HS Auditorium AV Written Spec Section 27-41-00.docx` (Dropbox: Computer Backups/Downloads; "DOCUMENT 27 41 00 – MULTI-PURPOSE AUDIO-VIDEO SYSTEM", Construction Documents, 2026-10-14). `docs/specs-seed/bray-toc-map.json` is confirmed with that source and maps 27 41 00 → 27 41 00 (title kept: "Multi-Purpose" names Fall Creek's room). **No changes needed:** a dry run on a scratch PGlite seeded with the library (the North HS seed, the 2026-09-26 library export and the 46 v1 records — 11 sections) plans 0 sections and 0 records. Every other library section has no Fall Creek counterpart and keeps its number: 11 61 13, 11 61 14, 11 61 23, 11 61 33, 11 61 43, 26 09 23, 26 09 61, 26 55 61, 27 41 16. When Bray issues more Fall Creek sections or its TOC, add them to the map and dry-run again. Background: the only complete Bray tables of contents found — Neenah HS (Bray 3314, 2021-11-22) and Westosha Central HS (Bray 3423, 2022-03-28), both in Jeff's Dropbox Cavanaugh Tocci examples — number our sections 11 06 10 / 11 60 01 / 11 61 25 / 26 50 00 / 27 40 00, while Bray's own 2026 jobs — Oshkosh North HS (3580: 11 61 13, 11 61 14, 11 61 23, 26 09 61, 27 41 00) and Fall Creek HS (3748: 27 41 00) — use the numbers the library has today. The Neenah TOC stays in the repo as an unconfirmed draft (`docs/specs-seed/bray-toc-map.draft-neenah-2021.json`, superseded by Jeff's Fall Creek choice; the script refuses it as-is). The script was tried on scratch PGlite only (dry run, apply, re-run = no-op); never on production or `.data/pglite`.
+
+## D1166. The portal bidder rule (#348 slice 6, 2026-10-15; Jeff's answers to questions 4 and 5)
+
+A GC or EC company with a bidder row on an estimate sees that estimate in its own portal, read-only. The rule is `portalBidState` (`src/lib/parties/portal-bid.ts`).
+- **Which bids:** the row's result must be pending or awarded. Withdrew, no bid and lost are hidden. Once a bid is awarded, only the awarded row counts. The estimate must be a plain quote (no service quote types, no Daylite history), and not the company's own (the owner's quotes are "Your quotes").
+- **Only their latest revision (Jeff):** a bidder sees the latest revision delivered to it (`bid.revSent`), or a sent revision frozen as addressed to it after the award. The frozen one counts even with no `revSent` (controller ruling, so an awarded GC still sees the copy addressed to it after a post-award send). Older revisions are never shown.
+- **By estimate status:** Draft is "being revised" (no content, not listed). Sent is shown. Won is shown to the awarded bidder only. Lost stays visible to a pending or awarded bidder as "Closed" (Jeff), never as "Lost".
+- **Chip:** the Home Bids card and its chip read "Due <date>" (or "Bid submitted" with no due date), "Awarded" or "Closed". It never shows a count or another company.
+
+## D1167. One portal gate, and every portal write stays customer-only (#348 slice 6, 2026-10-15)
+
+`src/lib/quote-pdf/portal-access.ts` composes the bidder rule into `portalOnlineEstimateState`. The bidder rows are passed in explicitly; a caller that passes none gets "unavailable", so an absent row fails closed. The customer's own rules are unchanged. The owner check is `portalOwnerHasBidders`.
+- **Writes:** Accept, Decline, Refresh pricing, Rename, Copy and Quote again stay behind the customer-only list rule (`portalListsQuote`). A bidder has none of them.
+- **Reads:** `portal-bid-server.ts` is the only portal reader of `record_parties`. A test (`scripts/test-bids.ts`) keeps an inventory of the portal files and fails if one reads quotes without going through the gate or the owner check.
+
+## D1168. Their copy: the online page and an on-demand PDF (#348 slice 6, 2026-10-15)
+
+- **Online page:** `/portal/quotes/[id]` is addressed only to the bidder ("Prepared for <GC>", the Owner line, no other GC named), at the bidder's revision.
+- **PDF:** rendered on demand at that revision (`renderBidderPdf` with `rev`), never a later one. It is named after the revision (`bidderPdfFileName`, the revision's own name and number). Limit 6 per minute per grant (`PORTAL_BID_PDF_PER_MIN`). The route has `maxDuration = 60`.
+- **Failures:** a 404 reads "Not found". Any other failure shows one portal line, "The PDF couldn't be made right now — try again in a minute." The real reason (it can name server env vars) is only logged.
+
+## D1169. Bidders are read-only; the v3 link stays their response channel (#348 slice 6, 2026-10-15)
+
+A bidder's portal page has no Accept, Refresh, Rename, Copy or Quote again. To answer, a bidder keeps using the v3 client link from its email (choose scopes, ask a question). Portal views are not counted as opens; opens stay a per-bidder count from the link (D1091).
+
+## D1170. The owner's portal on an estimate with bidders is Scope only (#348 slice 6, 2026-10-15; Jeff's answer to question 8)
+
+Once an estimate has bidders, the owner (the estimate's customer) sees it in the portal as a BOM with no prices, always, before and after the award.
+- **What shows:** the systems and their parts with quantities, one muted line ("Pricing for this project comes from your contractor.") and a "Scope only" chip on Home. The online page is `/portal/quotes/[id]/bom-view.tsx`, built by `ownerBom` (`src/lib/parties/portal-owner-bom.ts`).
+- **What does not:** no price or value anywhere (the project value is hidden too), no PDF, no photos, no Accept, Refresh, Copy or Rename.
+- **Portal only:** staff Send & track and the owner's client links are unchanged.
+- **Vendor-quoted lines** show the description only. No vendor, quote number, manufacturer or model.
+- **Rewards** for a won bid estimate stay on the owner.
+- **Catalog:** the portal catalog and its "quoted before" shelf are unchanged (a BOM model can still be priced there as an ordinary catalog part).
+
+## D1171. "Scope only" is sticky (#348 slice 6, 2026-10-15; Jeff)
+
+The estimate stays Scope only for good, even if every bidder is later removed. `Quote.bidScopeOnly` is a store-owned stamp: only `markBidScopeOnly` writes it (a key-level write; a save can never set or clear it). `quoteIsScopeOnly` is the one rule: the stamp, or any bidder row on the estimate, soft-deleted rows included.
+- **Set by:** `addBidder`, and by re-adding a removed bidder company (including reviving a removed row as a plain party, which keeps Scope only).
+- **Carried by:** Move system → New estimate and Copy system → New estimate, for the same customer only. A different customer's new estimate is not stamped.
+- **Fail-closed:** if the source can't be read, the new estimate is stamped anyway, and the log names both quote ids.
+- **Not carried:** Move or Copy into an EXISTING estimate does not stamp it.
+
+## D1172. The report counts and what each column means (#348 slice 6, 2026-10-15; Jeff's answer to question 1)
+
+Reports → "Bids by GC/EC" (`bidsByBidder`, `src/lib/parties/bid-report.ts`). One row per company and role.
+- **Sent:** a bid delivered to the bidder (`bid.revSent` is a number, by email or website).
+- **Open:** sent, result pending, and the estimate still draft or sent. A pending row on a won or lost estimate counts in Sent only.
+- **GC awarded (decided):** awarded plus lost.
+- **Awarded to us:** result awarded.
+- **Withdrew / no bid:** counted apart, never in decided.
+- **Rate (Jeff):** awarded ÷ decided, rounded to a whole percent. "—" when nothing is decided. The total row is recomputed from the summed counts, not averaged, and its "companies" is the number of distinct companies.
+- **Removed bidders** drop out of the report.
+
+## D1173. Which period a bid falls in (#348 slice 6, 2026-10-15; controller ruling, default for question 3)
+
+A bid belongs to the period of the estimate's bid due date, else its last send. A due date still in the future counts as now, so a bid that was sent and is due next week shows in the current period instead of in none. Because of that, a bid's period can shift after its due date passes (it then moves to the period of the due date). Past periods can therefore change once. Jeff to confirm.
+
+## D1174. How the report loads (#348 slice 6, 2026-10-15)
+
+`loadBidReportData` (`bid-report-server.ts`) does one bounded `listDocsWhere` on `record_parties` for delivered GC/EC quote rows (`bid.revSent` filled), then one batched read of those quotes and one of the companies' names. Cap 5,000 rows, found by asking for one more (limit + 1): over the cap keeps the first 5,000 by id (not the newest) and the card says it is truncated. Quote status is not filtered in SQL; the pure code decides Open. A deleted quote reads as missing and is skipped.
+
+## D1175. Where the report lives (#348 slice 6, 2026-10-15)
+
+The widget is `bids-by-bidder`, on Reports only. It needs no permission beyond seeing Reports. It sits in the Reports preset right after Pipeline by estimator; saved layouts are unchanged (add it from the widget picker). The period follows the page's range, like the other history widgets.
+
+## D1176. Withdrew and no-bid bids count in Sent (#348 slice 6, 2026-10-15; default, Jeff to confirm question 2)
+
+A bid that was delivered and then withdrawn or marked no bid still counts in Sent, and shows in the Withdrew / no bid column. It is not in decided.
+
+## D1177. A revision frozen to the awarded bidder is theirs (#348 slice 6, 2026-10-15; default, Jeff to confirm question 6)
+
+After the award, a sent revision frozen as addressed to the awarded bidder counts as that bidder's even if Send & track's To list was changed after the send.
+
+## D1178. The bidder PDF is re-rendered, not the emailed file (#348 slice 6, 2026-10-15; default, Jeff to confirm question 7)
+
+The portal PDF is rendered again on demand at the bidder's revision, so it is not the exact file that was emailed. Same revision and the same content, but it uses the bidder's current contact name, and each open is a fresh render (no cache yet). The alternative is to store the emailed file's path on the bidder row at send; website rows have no stored file today.
+
+## D1179. Portal views are not opens (#348 slice 6, 2026-10-15; default, Jeff to confirm question 9)
+
+Opening an estimate or its PDF in the portal does not count toward a bidder's "Opened N×". Only the v3 link counts.
+
+## D1180. The awarded bidder's portal doesn't list the project (#348 slice 6, 2026-10-15; default, Jeff to confirm question 10)
+
+After a win, the awarded GC sees the estimate with its Awarded chip, but the install project (where it is the Bill to) is not listed in its portal. Not built in this slice.
+
+## D1181. The widget is in the default Reports layout (#348 slice 6, 2026-10-15; default, Jeff to confirm question 11)
+
+See D1175. Jeff may prefer it opt-in.
+
+## D1182. Old v3 links keep today's behavior (#348 slice 6, 2026-10-15; default, Jeff to confirm question 12)
+
+An old v3 bidder link offers "View the current version", which opens that bidder's page at the latest sent revision even if it was never sent to them. The portal never does that. Matching the link to the portal is out of scope here, and the link is left as it is.
+
+## D1183. A website bid made in Draft stays hidden until a revision is sent (#348 slice 6, 2026-10-15; default, Jeff to confirm question 13)
+
+A bid marked submitted (website) while the estimate is in Draft has no delivered revision yet. The bidder sees nothing in the portal until a revision is sent.
+
+## D1184. The due date shown is the one printed on their revision (#348 slice 6, 2026-10-15; default, Jeff to confirm question 14)
+
+The bidder's "Due …" is the due date frozen on its revision (`docFields.bid`); a revision from before slice 2b falls back to the estimate's current due date. A later change to the due date does not change an already-sent revision's copy.
+
+## D1185. Staff see when the owner's portal is Scope only (#348 follow-up, 2026-10-15)
+
+The Send & track Bidders card shows a muted line when the owner sees the estimate as Scope only in the portal, and the Bid chip's dialog shows "Owner portal: Scope only". The chip's own label is unchanged. It reads the same server rule as the portal (`portalQuoteHasBidders`), so it stays after every bidder is removed. It is read-only, and there is no way to clear it (Jeff: sticky for good). If the check fails, the label is left off and the error is logged. The portal's own check still protects the prices.
+
+## D1186. Ask before a stray click discards an Estimator pop-up (#348 follow-up, 2026-10-15)
+
+The Curtain, Track, Add assembly, Labor and Vendor quote pop-ups ask before the backdrop click or × discards unsaved work. Each open's draft is snapshotted once it settles and compared at close; key order and undefined-vs-missing don't count. A vendor quote with a PDF read, or a read still running, says the read will be lost. Switching to another input asks the same way. Add / Save never asks. A vendor quote also asks while the Inbox hand-off is still copying its PDF in, and while its own file is still uploading ("Discard this vendor quote? The file is still uploading."). A clean form closes silently. AI scope and Add a system close as before. Custom part is inline, not a pop-up, and doesn't ask.

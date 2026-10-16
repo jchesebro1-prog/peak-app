@@ -133,4 +133,7 @@ export const BID_SEND_COPY = {
    *  is added; this shows when a sent estimate's addenda changed by another path. */
   addendumHint: (nos: number[]) => `Addendum ${nos.join(", ")} came in after the last send — move the estimate back to Draft, then Send revision to all bidders.`,
   linkCopied: "Link copied.",
+  /** #348 follow-up (Jeff 2026-10-15): read-only, sticky — the Bidders card line and the Bid chip's dialog line. */
+  scopeOnlyNote: "The owner sees this estimate as Scope only in the portal — a parts list with no prices, no PDF and no Accept. This stays on even if bidders are removed.",
+  scopeOnlyChip: "Owner portal: Scope only",
 } as const;

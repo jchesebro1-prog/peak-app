@@ -133,6 +133,7 @@ export default function LaborModal({
   onAdd,
   editing,
   onClose,
+  confirmClose,
 }: {
   secName: string;
   draft: LaborDraft;
@@ -154,6 +155,8 @@ export default function LaborModal({
   /** #269: set when reopened from a labor group's line — Update mode. */
   editing?: { group: string; handEdited: number; removed: number } | null;
   onClose: () => void;
+  /** #348 follow-up: ConfigModal asks this before the × / backdrop discards the form. */
+  confirmClose?: () => boolean;
 }) {
   const lr = computeLabor(draft, rate);
 
@@ -213,6 +216,7 @@ export default function LaborModal({
         )
       }
       onClose={onClose}
+      confirmClose={confirmClose}
       footerLeft={
         <div style={{ display: "flex", alignItems: "center", gap: 22 }}>
           <Stat label="Cost" value={fmt(lr.totalCost)} color="#8c919c" />

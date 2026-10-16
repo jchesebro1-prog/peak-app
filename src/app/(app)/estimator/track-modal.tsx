@@ -296,6 +296,7 @@ export default function TrackModal({
   onSet,
   onAdd,
   onClose,
+  confirmClose,
 }: {
   secName: string;
   draft: TrackDraft;
@@ -311,6 +312,8 @@ export default function TrackModal({
   onSet: TrackSetter;
   onAdd: () => void;
   onClose: () => void;
+  /** #348 follow-up: ConfigModal asks this before the × / backdrop discards the form. */
+  confirmClose?: () => boolean;
 }) {
   const swallowOpeningDoubleClick = useSwallowOpeningDoubleClick();
   const config = trackConfigFromDraft(draft);
@@ -340,6 +343,7 @@ export default function TrackModal({
         )
       }
       onClose={onClose}
+      confirmClose={confirmClose}
       footerLeft={
         <>
           <Stat label="Track length" value={bom.trackLengthFt > 0 ? fmtFt(bom.trackLengthFt) + (qty > 1 ? " × " + qty : "") : "—"} />

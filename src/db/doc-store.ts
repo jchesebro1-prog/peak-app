@@ -319,12 +319,14 @@ export async function getDocsByIdAnyCase<T extends Doc = Doc>(
  * final fix wave). `field` is a code constant, passed as a bound parameter.
  * `nullFields` (#218) further keeps only rows where each of those top-level
  * fields is absent or JSON null (`doc->>f IS NULL`) — also code constants.
+ * `includeDeleted` (#348 slice 6) also returns soft-deleted rows — for a rule
+ * that must remember a removed row; every other caller keeps live rows only.
  */
 export async function listDocsByField<T extends Doc = Doc>(
   coll: CollectionName,
   field: string,
   values: readonly string[],
-  opts: { nullFields?: readonly string[] } = {}
+  opts: { nullFields?: readonly string[]; includeDeleted?: boolean } = {}
 ): Promise<T[]> {
   const unique = [...new Set(values)].filter(Boolean);
   if (!unique.length) return [];
@@ -337,7 +339,7 @@ export async function listDocsByField<T extends Doc = Doc>(
       .from(t)
       .where(
         and(
-          eq(t.deleted, false),
+          opts.includeDeleted ? undefined : eq(t.deleted, false),
           inArray(sql<string>`${t.doc}->>${field}`, unique.slice(i, i + DOC_BATCH_CHUNK)),
           ...(opts.nullFields ?? []).map((f) => sql`${t.doc}->>${f} IS NULL`)
         )
