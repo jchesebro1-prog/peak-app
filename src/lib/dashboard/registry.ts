@@ -30,6 +30,7 @@ export type WidgetDef = {
 
 const HOME: readonly Surface[] = ["home"];
 const BOTH: readonly Surface[] = ["home", "reports"];
+const REPORTS: readonly Surface[] = ["reports"];
 
 export const WIDGETS = [
   /* ---- Home cards (personal, home-only) ---- */
@@ -58,6 +59,8 @@ export const WIDGETS = [
   { id: "win-donut", title: "Win rate (decided)", desc: "Won vs lost quotes decided in the period.", size: "half", timeframe: "history", surfaces: BOTH },
   { id: "top-customers", title: "Top customers", desc: "Customers by won value in the period.", size: "half", timeframe: "history", surfaces: BOTH },
   { id: "pipeline-by-estimator", title: "Pipeline by estimator", desc: "Open, won and win rate per team member, all time.", size: "full", timeframe: "none", surfaces: BOTH },
+  // #348 slice 6 — no perm: Reports is a team page, so the bid list stays staff-only.
+  { id: "bids-by-bidder", title: "Bids by GC/EC", desc: "Bids sent per GC and EC, decided, and the awarded-to-us rate.", size: "full", timeframe: "history", surfaces: REPORTS },
   /* ---- Reports: Installs (forward = next 12 months) ---- */
   { id: "backlog-value", title: "Backlog value", desc: "Open project value landing in the next 12 months.", size: "tile", timeframe: "forward", surfaces: BOTH },
   { id: "to-be-billed", title: "To be billed", desc: "Value billed at landing in the next 12 months.", size: "tile", timeframe: "forward", surfaces: BOTH },
@@ -109,7 +112,7 @@ export const PRESETS: Record<Surface, readonly WidgetId[]> = {
   ],
   reports: [
     "total-quoted", "won-value", "win-rate", "avg-quote",
-    "quoted-vs-won", "pipeline-by-stage", "win-donut", "top-customers", "pipeline-by-estimator",
+    "quoted-vs-won", "pipeline-by-stage", "win-donut", "top-customers", "pipeline-by-estimator", "bids-by-bidder",
     "backlog-value", "to-be-billed", "expected-collected", "book-margin",
     "billing-forecast", "backlog-by-stage", "margin-donut", "upcoming-completions",
     "completion-timeline", "project-locations",

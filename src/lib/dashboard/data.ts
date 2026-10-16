@@ -19,6 +19,7 @@ import { openWaitingTasksBy } from "@/lib/stores/tasks";
 import { loadHomeAgenda } from "@/lib/agenda";
 import { getSettings } from "@/lib/settings";
 import { loadTaskPlans, VIEW_PLAN_CALENDAR_MS, type PersonPlan } from "@/lib/task-plan/load";
+import { loadBidReportData } from "@/lib/parties/bid-report-server";
 import { once } from "./once";
 import { mailboxViewer } from "@/lib/mailbox-viewer";
 
@@ -68,6 +69,8 @@ export function makeDashboardData(user: SessionUser) {
       return Promise.all(boxes.map((b) => folderCounts(b.id, v)));
     }),
     settings: once(getSettings),
+    /** #348 slice 6 — Reports › Bids by GC/EC: delivered bidder rows only (bounded query). */
+    bidReport: once(loadBidReportData),
   };
 }
 

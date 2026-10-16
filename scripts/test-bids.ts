@@ -29,6 +29,12 @@ import { selectBidDue } from "../src/lib/triage/feeds/quotes";
 import { closedKeys } from "../src/lib/triage/liveness";
 import type { SnapshotRow } from "../src/lib/triage/types";
 import { bidReportAnchor, bidsByBidder, BID_REPORT_COPY, type BidReportInput } from "../src/lib/parties/bid-report";
+import { BID_REPORT_MAX, loadBidReportData } from "../src/lib/parties/bid-report-server";
+import { BIDS_RENDERERS } from "../src/app/(app)/_dashboard/widgets/bids";
+import { galleryFor, presetFor, widgetDef } from "../src/lib/dashboard/registry";
+import type { WidgetCtx } from "../src/lib/dashboard/context";
+import { renderToStaticMarkup as bidReportRender } from "react-dom/server";
+import type { ReactElement } from "react";
 import { factLabel, pointsFor } from "../src/lib/triage/rank";
 import type { Quote } from "../src/lib/stores/quotes";
 import { portalBidCandidates, portalBidChip, portalBidDueAt, portalBidList, portalBidState, PORTAL_BID_COPY, quoteHasBidders, type PortalBidRow } from "../src/lib/parties/portal-bid";
@@ -2020,8 +2026,111 @@ export function bidReportPureChecks(ok: Ok) {
   ok(!/@\/db|node:|-server["']/.test(src), "bid-report: pure — no @/db, node: or -server anywhere in the code");
 }
 
+/** #348 slice 6 task 6 — the Reports widget: renderer (stubbed data), registry placement and source pins. No DB. */
+export async function bidReportWidgetChecks(ok: Ok) {
+  const NOW = Date.UTC(2026, 9, 15, 17, 0);
+  const DAY = 86_400_000;
+  const q = { id: "Q-w", status: "sent", bid: { dueAt: NOW - DAY, addenda: [], awardedPartyId: null } } as unknown as BidReportInput["quote"];
+  const inp = (companyId: string, role: "gc" | "ec", result: string, sentAt: number): BidReportInput =>
+    ({ party: { id: `P-${companyId}-${result}`, companyId, role, recordId: "Q-w", bid: { result, submitVia: "email", revSent: 1, sentAt } } as never, quote: q });
+  const inputs = [inp("CW1", "gc", "awarded", NOW - 2 * DAY), inp("CW1", "gc", "lost", NOW - 3 * DAY), inp("CW2", "ec", "pending", NOW - 4 * DAY)];
+  const names = new Map([["CW1", "Widget Builders & Co"], ["CW2", "Sparky Electric"]]);
+  const ctxFor = (data: { inputs: BidReportInput[]; names: Map<string, string>; truncated: boolean }, range = "12m") =>
+    ({ user: { id: "u1", name: "Test", roles: ["Admin"] }, surface: "reports", range, now: NOW, sp: {}, data: { bidReport: async () => data } } as unknown as WidgetCtx);
+  let html = "";
+  try {
+    const el = await BIDS_RENDERERS["bids-by-bidder"](ctxFor({ inputs, names, truncated: false }));
+    html = bidReportRender(el as ReactElement);
+  } catch (e) {
+    ok(false, `bid-report widget: the renderer throws (${(e as Error).message})`);
+  }
+  ok(html.includes("Bids by GC/EC") && html.includes("Widget Builders &amp; Co") && html.includes("50%"), "bid-report widget: renders the title, the company name and the 50% rate");
+  ok(html.includes(`href="/companies/CW1"`) && html.includes(`href="/companies/CW2"`), "bid-report widget: company names link to /companies/<id>");
+  ok(/>GC</.test(html) && />EC</.test(html), "bid-report widget: the role shows as ROLE_SHORT (GC / EC)");
+  ok(html.includes("—"), "bid-report widget: a null rate (nothing decided) shows —");
+  ok(html.includes("Oct 13"), "bid-report widget: the last-sent date is a Chicago short date");
+  ok(html.includes("All GCs and ECs") && html.lastIndexOf("All GCs and ECs") > html.lastIndexOf("Sparky Electric"), "bid-report widget: the total row comes last");
+  ok(BID_REPORT_COPY.cols.every((c) => html.includes(c.replace("&", "&amp;"))), "bid-report widget: every column header shows");
+  ok(!html.includes("Showing the first 5,000 bids."), "bid-report widget: no truncation note when not truncated");
+  const trunc = bidReportRender((await BIDS_RENDERERS["bids-by-bidder"](ctxFor({ inputs, names, truncated: true }))) as ReactElement);
+  ok(trunc.includes("Showing the first 5,000 bids."), "bid-report widget: a truncated load says so");
+  const empty = bidReportRender((await BIDS_RENDERERS["bids-by-bidder"](ctxFor({ inputs: [], names, truncated: false }))) as ReactElement);
+  ok(empty.includes(BID_REPORT_COPY.empty) && !empty.includes("All GCs and ECs"), "bid-report widget: nothing in the period → the empty line, no total row");
+  const outOfRange = bidReportRender((await BIDS_RENDERERS["bids-by-bidder"]({ ...ctxFor({ inputs, names, truncated: false }), now: NOW + 400 * DAY })) as ReactElement);
+  ok(outOfRange.includes(BID_REPORT_COPY.empty), "bid-report widget: the period comes from ?range (bids a year before the window are left out)");
+
+  // Registry.
+  const def = widgetDef("bids-by-bidder");
+  ok(!!def && def.title === "Bids by GC/EC" && JSON.stringify(def.surfaces) === JSON.stringify(["reports"]) && def.perm === undefined && def.timeframe === "history" && def.size === "full",
+    "bid-report registry: reports-only, no perm, history timeframe, full width");
+  const rep = presetFor("reports", ["Admin"]);
+  ok(rep.indexOf("bids-by-bidder") === rep.indexOf("pipeline-by-estimator") + 1 && rep.indexOf("pipeline-by-estimator") >= 0, "bid-report registry: the reports preset lists it right after pipeline-by-estimator");
+  ok(presetFor("reports", ["Estimator"]).includes("bids-by-bidder"), "bid-report registry: any team role gets it (no perm)");
+  ok(!presetFor("home", ["Admin"]).includes("bids-by-bidder" as never) && !galleryFor("home", ["Admin"]).some((w) => w.id === "bids-by-bidder"), "bid-report registry: not on Home (preset or gallery)");
+  ok(galleryFor("reports", ["Admin"]).some((w) => w.id === "bids-by-bidder"), "bid-report registry: offered in the Reports gallery");
+
+  // Source pins.
+  const rd = (f: string) => readFileSync(join(__dirname, "..", f), "utf8");
+  const code = (f: string) => rd(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const server = code("src/lib/parties/bid-report-server.ts");
+  ok(/listDocsWhere<[^>]*>\(\s*"record_parties"/.test(server) && /const limit = opts\.limit \?\? BID_REPORT_MAX;/.test(server) && /\{\s*limit\s*\}\s*\)/.test(server) && /truncated:\s*rows\.length === limit/.test(server) && BID_REPORT_MAX === 5000, "bid-report pins: the loader runs one bounded listDocsWhere(\"record_parties\") query (LIMIT 5000)");
+  ok(!/\bgetAll\b|listDocs\(|allCompanies\(/.test(server), "bid-report pins: the loader never scans (no getAll / listDocs / allCompanies)");
+  ok(/is:\s*"quote"/.test(server) && /in:\s*\[\s*"gc",\s*"ec"\s*\]/.test(server) && /path:\s*\[\s*"bid",\s*"revSent"\s*\]/.test(server), "bid-report pins: the query reads delivered quote GC/EC rows only");
+  ok(/bidReport:\s*once\(loadBidReportData\)/.test(code("src/lib/dashboard/data.ts")), "bid-report pins: data.ts memoises the loader once per request");
+  ok(/\.\.\.BIDS_RENDERERS/.test(code("src/app/(app)/_dashboard/renderers.tsx")), "bid-report pins: renderers spread BIDS_RENDERERS");
+}
+
+/** #348 slice 6 task 6 — the report loader against the DB: delivered GC/EC rows only, joined to their quote and names. */
+export async function bidReportDbChecks(ok: Ok) {
+  const own = fixtureId(348, "irown"), g1 = fixtureId(348, "irgc1"), g2 = fixtureId(348, "irec2"), g3 = fixtureId(348, "irgc3");
+  const irq = fixtureId(348, "irq");
+  const T = Date.UTC(2034, 4, 12, 17, 0);
+  const DAY = 86_400_000;
+  const regAll = async () => { for (const p of await listFor("quote", irq)) registerFixture("record_parties", p.id); };
+  const dropIds = async () => { const db = await getDb(); await db.delete(companies).where(like(companies.id, "TEST348:ir%")); };
+  try {
+    await dropIds();
+    const NAMES: Record<string, string> = { [own]: "Report Owner IR", [g1]: "Report GC One IR", [g2]: "Report EC Two IR", [g3]: "Report GC Three IR" };
+    for (const id of [own, g1, g2, g3]) await saveCompany({ id, name: NAMES[id], type: "customer", lifecycle: "active", deleted: false });
+    await createFixture("quotes", buildQuote(irq, { name: "Report bid quote", customer: NAMES[own], customerId: own, value: 1000 } as never, "system", null, Date.now()) as never);
+    const a1 = await addBidder({ quoteId: irq, companyId: g1, role: "gc" }, "u");
+    const a2 = await addBidder({ quoteId: irq, companyId: g2, role: "ec" }, "u");
+    const a3 = await addBidder({ quoteId: irq, companyId: g3, role: "gc" }, "u");
+    await regAll();
+    if (!a1.ok || !a2.ok || !a3.ok) throw new Error("report bidders missing");
+    const d = await setBidDetails(irq, { dueAt: T, addenda: [] });
+    const m1 = await markSubmitted(a1.party.id, "u", "");
+    const m2 = await markSubmitted(a2.party.id, "u", "");
+    const aw = await awardBid(irq, a1.party.id);
+    ok(d.ok && m1.ok && m2.ok && aw.ok, "bid-report db: fixture — due date, two submitted, one awarded");
+
+    const data = await loadBidReportData();
+    const mine = data.inputs.filter((x) => x.party.recordId === irq);
+    const pids = new Set(mine.map((x) => x.party.id));
+    ok(mine.length === 2 && pids.has(a1.party.id) && pids.has(a2.party.id) && !pids.has(a3.party.id), "bid-report db: the loader returns the two delivered bidder rows, not the unsent one");
+    ok(data.inputs.every((x) => (x.party.role === "gc" || x.party.role === "ec") && x.party.bid != null && typeof x.party.bid.revSent === "number"), "bid-report db: every loaded row is a delivered GC/EC row (never the owner row)");
+    ok(mine.every((x) => x.quote?.id === irq && x.quote.bid?.dueAt === T), "bid-report db: each row carries its quote with the bid due date");
+    ok(data.names.get(g1) === NAMES[g1] && data.names.get(g2) === NAMES[g2] && !data.names.has(own), "bid-report db: names for the bidder companies only");
+    ok(data.truncated === false, "bid-report db: a small book is not truncated");
+
+    const r = bidsByBidder(mine, data.names, { start: T - DAY, end: T + DAY });
+    const r1 = r.rows.find((x) => x.companyId === g1), r2 = r.rows.find((x) => x.companyId === g2);
+    ok(r.rows.length === 2 && !!r1 && r1.awarded === 1 && r1.decided === 1 && r1.rate === 100 && r1.name === NAMES[g1], "bid-report db: the awarded GC → awarded 1, rate 100");
+    ok(!!r2 && r2.role === "ec" && r2.decided === 1 && r2.awarded === 0 && r2.rate === 0, "bid-report db: the other bidder → decided 1, awarded 0, rate 0");
+    ok(bidsByBidder(mine, data.names, { start: T + DAY, end: T + 2 * DAY }).rows.length === 0, "bid-report db: a period that excludes the due date → no rows");
+
+    const capped = await loadBidReportData({ limit: 1 });
+    ok(capped.inputs.length === 1 && capped.truncated === true, "bid-report db: hitting the cap marks the load truncated");
+
+  } finally {
+    try { await regAll(); } catch {}
+    await dropFixtures(348);
+    await dropIds();
+  }
+}
+
 if (process.argv[1]?.endsWith("test-bids.ts")) {
   let pass = 0, fail = 0;
   const okf: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
-  bidChecks(okf).then(() => bidSendChecks(okf)).then(() => bidSendFakeChecks(okf)).then(() => bidFollowupChecks(okf)).then(() => portalBidPureChecks(okf)).then(() => bidReportPureChecks(okf)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
+  bidChecks(okf).then(() => bidSendChecks(okf)).then(() => bidSendFakeChecks(okf)).then(() => bidFollowupChecks(okf)).then(() => portalBidPureChecks(okf)).then(() => bidReportPureChecks(okf)).then(() => bidReportWidgetChecks(okf)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
 }

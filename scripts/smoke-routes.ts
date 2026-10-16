@@ -274,7 +274,9 @@ const ROUTES = [
  * "That design no longer exists" page instead of a 404, so status alone
  * cannot distinguish a rendered editor from a miss.
  */
-const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: true }> = [
+const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: true; expect?: string }> = [
+  // #348 slice 6 — the Reports preset renders Bids by GC/EC (a widget that throws is swallowed into a note, so look for both).
+  { route: "/reports?range=12m", reject: "Couldn't load this widget.", expect: "Bids by GC/EC" },
   { route: "/projects/P-3001" },
   { route: "/api/projects/P-3001/handoff" },
   { route: "/inspections/RI-2042" },
@@ -582,7 +584,8 @@ async function checkRoute(
   route: string,
   jar: CookieJar | null,
   reject?: string,
-  expectNotFound?: boolean
+  expectNotFound?: boolean,
+  expect?: string
 ): Promise<{ route: string; ok: boolean; detail: string }> {
   try {
     const res = await fetch(base + route, {
@@ -604,6 +607,9 @@ async function checkRoute(
     );
     if (!problem && reject && body.includes(reject)) {
       problem = `body contains "${reject}" — the route answered 200 without rendering the record`;
+    }
+    if (!problem && expect && !body.includes(expect)) {
+      problem = `body lacks "${expect}"`;
     }
     if (problem) {
       return { route, ok: false, detail: `status ${res.status}, final ${finalUrl.pathname}${finalUrl.search} — ${problem}` };
@@ -712,7 +718,7 @@ async function main() {
 
     console.log("[smoke] --- dynamic [id] routes ---");
     for (const d of DYNAMIC_ROUTES) {
-      const r = await checkRoute(base, d.route, jar, d.reject, d.expectNotFound);
+      const r = await checkRoute(base, d.route, jar, d.reject, d.expectNotFound, d.expect);
       report(r.ok, `${d.route} (${r.detail})`);
     }
 
