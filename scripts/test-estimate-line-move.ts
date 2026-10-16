@@ -1,4 +1,4 @@
-/* #356 — move estimator lines between systems. Pure checks; run alone with
+/* #357 — move estimator lines between systems. Pure checks; run alone with
    `npx tsx scripts/test-estimate-line-move.ts`. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -355,7 +355,7 @@ export async function lineMoveChecks(ok: Ok) {
   lineMoveUiChecks(ok);
 }
 
-/** #356 — source checks on the Build UI (staff gate, movable gate, the bar's failure path). */
+/** #357 — source checks on the Build UI (staff gate, movable gate, the bar's failure path). */
 export function lineMoveUiChecks(ok: Ok) {
   const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const build = src("src/app/(app)/estimator/steps/build-step.tsx");

@@ -47974,7 +47974,7 @@ async function narrativeFinal293AsyncChecks(): Promise<void> {
      star.indexOf("toggleKeyProduct(s, itemId, text)") < star.indexOf(".ensure([sku])"),
     "#293 fix ★: marks first, awaits the library row, then fills an empty block on the live section");
   ok(cli.includes('"minmax(150px,1.3fr) 104px 92px 136px 116px 126px"') && cli.includes('"minmax(150px,1.3fr) 104px 136px 116px 104px"'),
-    "#293 fix actions cell: five 20px buttons (✎ ★ ↑ ↓ ×) fit in 104px; #356: 126px internally for ⇄ (six)");
+    "#293 fix actions cell: five 20px buttons (✎ ★ ↑ ↓ ×) fit in 104px; #357: 126px internally for ⇄ (six)");
   ok(card.includes('aria-label="Key product — featured in the narrative"'), "#293 fix ★: the star has an aria-label");
   ok(/<NarrativeColumn\s+key=\{narrSec\.id\}/.test(cli), "#293 fix: the narrative column remounts per system (key={narrSec.id})");
   ok(photos.includes("Promise.race([read(d.blobKey as string, caps.perImage, abort.signal), expired])") && photos.includes("getBlobStream(blobKey, { signal })"),
@@ -54710,7 +54710,7 @@ import * as p2a from "@/lib/estimate-groups/groups";
   ok(/groups\?: SystemGroup\[\]/.test(actionsSrc) && /export type SavePayload[\s\S]*?groups\?: SystemGroup\[\]/.test(actionsSrc), "#P2a persistence: SavePayload.groups is optional (older callers keep stored groups)");
   ok(/const groups = sanitizeGroups\(payload\.groups \?\? \(prior\?\.spec as \{ groups\?: unknown \} \| null \| undefined\)\?\.groups\)/.test(actionsSrc), "#P2a persistence: saveQuoteAction sanitises payload.groups, falling back to the stored spec.groups");
   ok(/spec: \{ sections: normalizeSystemOrder\(savedSections, groups\), mobs: payload\.mobs, groups, \.\.\.\(docSave\.document \? \{ document: docSave\.document \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: saveQuoteAction writes spec { sections (normalised), mobs, groups }");
-  // #356: the stripped system is re-id'd against the target first (reIdIncomingSection), then appended.
+  // #357: the stripped system is re-id'd against the target first (reIdIncomingSection), then appended.
   ok(/const incoming = reIdIncomingSection\(stripBonusLines\(withoutGroupMeta\(placed\)\), /.test(actionsSrc) && /\.\.\.withoutRewardCredit\(\[incoming\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
   ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\), await loadBonusRates\(\)\)/.test(actionsSrc) && /spec: \{ sections: newSections, mobs: \[\] \}/.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
   ok(/groups = sanitizeGroups\(spec\?\.groups\)/.test(pageSrc) && /normalizeSystemOrder\(spec\.sections as SpecSection\[\], groups\)/.test(pageSrc) && /^\s+groups,$/m.test(pageSrc) && /groups: \[\],/.test(pageSrc), "#P2a persistence: page.tsx reads spec.groups through sanitizeGroups into initial.groups (new quotes: [])");

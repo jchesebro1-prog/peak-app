@@ -1,5 +1,5 @@
 /**
- * #356 — a system landing in an EXISTING estimate (Move/Copy system, #266, and
+ * #357 — a system landing in an EXISTING estimate (Move/Copy system, #266, and
  * Move lines → Another estimate) keeps its item ids unless one is already
  * used anywhere in the target estimate. A colliding line gets the next free id
  * above everything the target uses — its lines and the ids its package

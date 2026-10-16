@@ -1,4 +1,4 @@
-# Estimator — Move Lines Between Systems (#356) Implementation Plan
+# Estimator — Move Lines Between Systems (#357) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -71,7 +71,7 @@ Expected: `all pure`. If any file is `"use client"` or `server-only`, copy the o
 - [ ] **Step 2: Write the failing checks** — `scripts/test-estimate-line-move.ts`:
 
 ```ts
-/* #356 — move estimator lines between systems. Pure checks; run alone with
+/* #357 — move estimator lines between systems. Pure checks; run alone with
    `npx tsx scripts/test-estimate-line-move.ts`. */
 import type { Ok } from "./test-inbox-org";
 import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
@@ -248,7 +248,7 @@ Expected: fails to resolve `../src/lib/estimate-line-move/move`.
 
 ```ts
 /**
- * #356 — move estimator lines between systems. Pure: no React, no server.
+ * #357 — move estimator lines between systems. Pure: no React, no server.
  *
  * planLineMove expands the selection with its partners (curtain ↔ track as
  * the cut sheets resolve them; a whole labor group) and lists every side
@@ -528,7 +528,7 @@ movingLines: boolean;
 - [ ] **Step 2: Add the two functions** right after `copySystem` in `use-estimator-state.ts` (import the Task 1 functions at the top with the other `@/lib` imports):
 
 ```ts
-  /** #356: move ticked lines (and their partners) to another system here or a
+  /** #357: move ticked lines (and their partners) to another system here or a
    *  new one. Client-only — kept by the next Save, like ↑/↓. */
   const moveLinesHere = (selected: number[], target: { kind: "system"; sectionId: string } | { kind: "new"; name: string }) => {
     const resolved = target.kind === "new" ? { kind: "new" as const, id: "sys" + nextId(), name: target.name.trim() || "New System" } : target;
@@ -542,7 +542,7 @@ movingLines: boolean;
     requestAnimationFrame(() => requestAnimationFrame(() => selectSystem(targetId)));
   };
 
-  /** #356: move ticked lines to another estimate — bundled as one section and
+  /** #357: move ticked lines to another estimate — bundled as one section and
    *  sent through Move system's own server path; they leave this estimate only
    *  once the server confirms. */
   const [movingLines, setMovingLines] = useState(false);
@@ -723,7 +723,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 3: Docs.** Right before writing, recompute the next free D-number and punch number across `origin/main` and live branches (`git show <ref>:DECISIONS.md | grep -o 'D1[0-9]\{3\}' | sort -u | tail -1`; other sessions held D1187–D1199 and #355 on Oct 16). Add:
   - DECISIONS: one entry per default taken — partners always travel; typed sell cleared on both sides; stars dropped on dup/full; labor-group id re-mint on collision; another-estimate lands as one "(moved)" system through `moveSystemToEstimateAction`; emptied systems kept; selection is staff-only and Build-only.
-  - PUNCHLIST: #356 done, with "Remaining: try it on a real estimate in production".
+  - PUNCHLIST: #357 done, with "Remaining: try it on a real estimate in production".
   - AGENTS.md: a short phase-list entry after the last one.
 
 - [ ] **Step 4: Commit.**

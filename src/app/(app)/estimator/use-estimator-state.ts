@@ -484,7 +484,7 @@ export function useEstimatorState(props: EstimatorProps) {
     | { ok: false; error: string }
     | null
   >(null);
-  /** #356: a "move lines to another estimate" round trip is in flight. */
+  /** #357: a "move lines to another estimate" round trip is in flight. */
   const [movingLines, setMovingLines] = useState(false);
   const [custName, setCustName] = useState(initial.custName);
   const [customerId, setCustomerId] = useState(initial.customerId);
@@ -943,7 +943,7 @@ export function useEstimatorState(props: EstimatorProps) {
      and wrap onto a second grid row. #269: 84px internally, room for the
      labor lines' ✎ Edit labor button beside them. #293: +20px for the ★
      key-product toggle — five 20px buttons + 1px gaps (✎ ★ ↑ ↓ × on a
-     labor, track or curtain line) need 104px in BOTH views. #356: +22px
+     labor, track or curtain line) need 104px in BOTH views. #357: +22px
      internally for ⇄ Move to another system — six buttons (✎ ★ ⇄ ↑ ↓ ×). */
   const cols = isInternal
     ? "minmax(150px,1.3fr) 104px 92px 136px 116px 126px"
@@ -1997,7 +1997,7 @@ export function useEstimatorState(props: EstimatorProps) {
       }
     });
   };
-  /** #356: move ticked lines (and their partners) to another system here or a
+  /** #357: move ticked lines (and their partners) to another system here or a
    *  new one. Client-only — kept by the next Save, like ↑/↓. */
   const moveLinesHere = (selected: LineRef[], target: { kind: "system"; sectionId: string } | { kind: "new"; name: string }) => {
     const resolved = target.kind === "new" ? { kind: "new" as const, id: "sys" + nextId(), name: target.name.trim() || "New System" } : target;
@@ -2013,7 +2013,7 @@ export function useEstimatorState(props: EstimatorProps) {
     requestAnimationFrame(() => requestAnimationFrame(() => selectSystem(targetId)));
   };
 
-  /** #356: move ticked lines to another estimate — bundled as one section and
+  /** #357: move ticked lines to another estimate — bundled as one section and
    *  sent through Move system's own server path; they leave this estimate only
    *  once the server confirms. */
   const moveLinesToEstimate = (selected: LineRef[], dest: MoveSystemTarget) => {

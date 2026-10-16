@@ -957,7 +957,7 @@ async function placeSystemInEstimate(
     const existingGroups = sanitizeGroups(existingSpec?.groups);
     // #282 phase 2: the target's own Rewards credit stays on ITS last system —
     // re-pinned after the order is normalised, so it really is the last one.
-    // #356: item ids are unique per system only — an incoming line whose id the target already uses anywhere is
+    // #357: item ids are unique per system only — an incoming line whose id the target already uses anywhere is
     // re-minted above the target's ids and its package document's floor (computeNid's), its star following.
     const incoming = reIdIncomingSection(stripBonusLines(withoutGroupMeta(placed)), existingSpec?.sections || [], docIdFloor(existingDoc));
     const appendedRaw = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([incoming])], existingGroups);

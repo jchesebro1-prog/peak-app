@@ -79,7 +79,7 @@ const PORTAL_FIELD: CSSProperties = {
   background: "#fff",
 };
 
-/** #356: the line-select checkbox (fixed size, no UA margin) and its gap — the
+/** #357: the line-select checkbox (fixed size, no UA margin) and its gap — the
  *  column header's "Item" pads by both so it stays over the descriptions. */
 const LINE_CHECK_SIZE = 13;
 const LINE_CHECK_GAP = 8;
@@ -173,13 +173,13 @@ export type SectionCardProps = {
   onSetPrice: (id: number, v: string) => void;
   onSetExtSell: (id: number, v: string) => void;
   onMoveItem: (id: number, direction: -1 | 1) => void;
-  /** #356: the Build step's ticked lines (staff only; absent = no checkboxes). */
+  /** #357: the Build step's ticked lines (staff only; absent = no checkboxes). */
   selectedLines?: ReadonlySet<number>;
-  /** #356: tick / untick a line for the Move bar. */
+  /** #357: tick / untick a line for the Move bar. */
   onToggleLineSelected?: (itemId: number) => void;
-  /** #356: ⇄ — open the Move bar's menu for just this line. */
+  /** #357: ⇄ — open the Move bar's menu for just this line. */
   onMoveLine?: (itemId: number) => void;
-  /** #356: an estimate move is running — the checkbox and ⇄ stay in place, disabled. */
+  /** #357: an estimate move is running — the checkbox and ⇄ stay in place, disabled. */
   lineSelectDisabled?: boolean;
   onRemoveItem: (id: number) => void;
   /** #293: ★ — mark / unmark this line as a key product (narrative block). */
@@ -993,7 +993,7 @@ export default function SectionCard(p: SectionCardProps) {
                 alignItems: "center",
               }}
             >
-              {/* #356: line up with the descriptions, which sit right of the select checkbox. */}
+              {/* #357: line up with the descriptions, which sit right of the select checkbox. */}
               <span style={p.onToggleLineSelected ? { paddingLeft: LINE_CHECK_PAD } : undefined}>Item</span>
               <span style={{ textAlign: "center" }}>Qty</span>
               {isInternal && <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>Unit cost</span>}
@@ -1027,7 +1027,7 @@ export default function SectionCard(p: SectionCardProps) {
                       background: "#f7f8fa",
                     }}
                   >
-                    {/* #356: no checkbox here, but line up under "Item" with the rows that have one. */}
+                    {/* #357: no checkbox here, but line up under "Item" with the rows that have one. */}
                     <div style={{ minWidth: 0, ...(p.onToggleLineSelected ? { paddingLeft: LINE_CHECK_PAD } : null) }}>
                       <div style={{ lineHeight: 1.3 }}>
                         <span aria-hidden="true" style={{ marginRight: 6 }}>{"\u{1F512}"}</span>
@@ -1130,7 +1130,7 @@ export default function SectionCard(p: SectionCardProps) {
                         style={{ width: LINE_CHECK_SIZE, height: LINE_CHECK_SIZE, margin: "2px 0 0", flexShrink: 0, accentColor: "var(--accent)" }}
                       />
                     )}
-                    {/* #356: a line that can't move (the Rewards credit) keeps the checkbox's room, so its description lines up. */}
+                    {/* #357: a line that can't move (the Rewards credit) keeps the checkbox's room, so its description lines up. */}
                     {p.onToggleLineSelected && !isMovableLine(it) && <span aria-hidden="true" data-line-check-pad="" style={{ width: LINE_CHECK_SIZE, flexShrink: 0 }} />}
                     <div style={{ minWidth: 0, flex: 1 }}>
                     <div

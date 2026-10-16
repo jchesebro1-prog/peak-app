@@ -228,7 +228,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
   /* #348 slice 5: Read the PDF — only for a user the server gate passed, and only on a PDF attachment. */
   const readPdf = vendorPdfEnabled && !!vendorDraft.attachment && isPdfAttachment(vendorDraft.attachment);
 
-  /* #356: ticked lines and a row's ⇄ feed the Move bar. Build unmounts on a step
+  /* #357: ticked lines and a row's ⇄ feed the Move bar. Build unmounts on a step
      change (estimator-client renders one step at a time), which clears both; a line
      that no longer exists (deleted, moved away) simply drops out of liveSelected.
      Item ids are unique per SYSTEM only (Copy/Move system keeps them), so a tick is

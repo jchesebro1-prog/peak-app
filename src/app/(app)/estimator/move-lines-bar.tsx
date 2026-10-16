@@ -8,7 +8,7 @@ import type { QuoteLite, SpecSection } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 
 /**
- * #356 — the Build step's Move bar: "N selected · Move to ▾ · Clear", the Move
+ * #357 — the Build step's Move bar: "N selected · Move to ▾ · Clear", the Move
  * to menu (this estimate's systems under their group headings, New system…,
  * Another estimate…) and a preview of every side effect before anything moves.
  * The rules live in `@/lib/estimate-line-move/move`; this only asks and shows.
