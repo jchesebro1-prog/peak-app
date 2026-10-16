@@ -46,13 +46,18 @@ Nothing moves a line across systems.
 - After a move: selection clears, the target system is selected and scrolled
   to, and a dismissable notice says "Moved 4 lines to Rigging". Saved by the
   next Save, like ↑/↓.
-- Selection clears on step change, on load of another quote, and drops any id
-  that no longer exists (deleted line, moved system).
+- Selection clears on step change, on load of another quote, and drops any
+  line that no longer exists (deleted line, moved system) or whose system was
+  marked built (collapsed).
 
 ## Rules — one pure module `src/lib/estimate-line-move/`
 
-`planLineMove(sections, selectedIds, target) → LineMovePlan` and
-`applyLineMove(sections, plan) → SpecSection[]`, both pure, both unit-tested.
+`planLineMove(sections, selected, target) → LineMovePlan` and
+`applyLineMove(sections, selected, target, opts) → { sections, plan }`, both
+pure, both unit-tested. A line is addressed by `LineRef = { sectionId, id }`
+(never a bare id — see rule 9); the plan's `lines`, `added` and `droppedStars`
+are LineRefs, the Build selection is a set of `"<sectionId>:<id>"` keys, and
+`removeLinesFromSources(sections, lines)` removes by LineRef.
 `target` = `{ kind: "system", sectionId }` | `{ kind: "new", section: { id, name } }`.
 For another estimate, `extractLinesAsSection(sections, plan)` builds the
 outgoing section instead (see below).
@@ -61,8 +66,14 @@ outgoing section instead (see below).
    - curtain ↔ track: the pairs `linkCurtainTracks(sections)` resolves
      (`src/lib/curtain-cut-sheets/track-link.ts`) — keyed pairs AND its
      legacy adjacency pairs, so the cut sheet still finds the track after the
-     move;
-   - labor group: every line in the source system with the same `laborGroup`.
+     move. A legacy key-less pair that moves together is stamped with one
+     fresh `newCurtainTrackKey(curtainId)` on both lines, so it can't re-pair
+     by adjacency in the target. Non-moving legacy lines are left alone, so
+     one source-side case remains: a key-less curtain that stays behind can
+     re-pair by adjacency with a different key-less track that the move left
+     right after it;
+   - labor group: every line in the source system with the same `laborGroup`
+     (labor partners never cross systems).
    - Never added: bonus lines, the Rewards credit.
    The plan lists which ids were added and why.
 2. **Price:** items are carried byte-for-byte (cost, price, sellOverride,
@@ -74,9 +85,11 @@ outgoing section instead (see below).
    the target.
 4. **Labor group drafts** (`SpecSection.laborGroups[id]`): a group whose lines
    all left travels to the target (removed from the source). Partner expansion
-   guarantees a group never splits. If the target already has a group with that
-   id (copies share ids), the moving group's id is re-minted on its lines and
-   record.
+   guarantees a group never splits. If the target already uses that id — a
+   `laborGroups` record key OR a target line's `laborGroup` with no record
+   (copies share ids) — the moving group's id is re-minted on its lines and
+   record, so it never merges with target lines that a later Edit labor
+   (`withLaborGroup`) would replace.
 5. **Key-product stars** (`SpecSection.keyProducts`, anchored by
    `lineKey = String(item.id)` + sku): a moving line's block moves with it,
    appended to the target's list. It is dropped (and listed in the preview)
@@ -89,8 +102,21 @@ outgoing section instead (see below).
    `built` on every touched system (no new code).
 8. **Bonus lines:** not moved; the existing bonus re-derive rebuilds both
    systems' bonus lines on the next derive (as on any edit).
-9. **Item ids are kept** within an estimate (ids are unique per quote), so
-   stars, review rows and the package document's line references still resolve.
+9. **Item ids are unique per system, not per quote** — Copy/Move system into
+   an existing estimate (#266) keeps them, so one estimate can hold id 105 in
+   two systems. A moved line keeps its id unless that id is already used in
+   the target (or by an earlier moving line from another system); then it is
+   re-minted (`opts.mintItemId`, the Estimator's `nextId`) and its key-product
+   star follows (`remapKeyProducts`, which also re-points a `line:<id>`
+   token). `curtainTrackKey` strings are untouched. `extractLinesAsSection`
+   de-duplicates ids across sources the same way, and on the server
+   `placeSystemInEstimate`'s existing-target branch (Move lines → another
+   estimate and #266 Move/Copy system alike) re-ids any incoming line whose id
+   the target estimate already uses anywhere, from max(target ids,
+   `docIdFloor(target document)`) + 1 upward, remapping that system's stars
+   and keeping everything else byte-for-byte (`reIdIncomingSection`,
+   `src/lib/estimate-line-move/reid.ts`). A re-minted line's review comments
+   or package-document references, which name the old id, no longer point at it.
 10. **Vendor lines** (`vendorQuoteId`): the VendorQuote record is quote-level;
     a move inside the estimate leaves it alone.
 
@@ -115,7 +141,9 @@ and the error shows in the bar.
 
 Drag and drop; copying lines (only move); moving into a specific system of
 another estimate; moving lines in Quick Design / Grid / service builders;
-re-pricing at the target's margin.
+re-pricing at the target's margin. The estimate move posts a click-time
+snapshot of the lines: an edit made to them during the server round trip is
+lost, the same as Move system today (accepted).
 
 ## Tests
 
@@ -124,6 +152,10 @@ re-pricing at the target's margin.
   sellOverride clearing on both sides, labor-group record travel + id
   re-mint on collision, key-product carry / sku-conflict drop / cap drop,
   ordering + lineOrder, empty source kept, target holding all selected ⇒ no-op,
-  extractLinesAsSection field whitelist, prices unchanged.
+  extractLinesAsSection field whitelist, prices unchanged; duplicate ids
+  across systems (A:105 + C:105 + B:107: only the ticked line moves, A:105 → C
+  is a real move, C:105 → A never leaves two 105s), landing re-id + star
+  remap, extract de-dup, a record-less target labor-group id, legacy pair
+  re-key, and the server's `reIdIncomingSection`.
 - Browser pass on a real estimate: tick across two systems → Move to → existing,
   New system…, Another estimate (new) → Save → reload shows the move.
