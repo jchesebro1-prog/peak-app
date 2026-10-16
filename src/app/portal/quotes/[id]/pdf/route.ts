@@ -2,7 +2,7 @@ import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { pdfResponse } from "@/lib/quote-pdf/http";
 import { portalBidPdfSource, portalQuotePdfPreparing, portalQuotePdfSource, portalQuotePdfUnavailable } from "@/lib/quote-pdf/portal-access";
-import { portalBidPdfResponse, portalBidRowsFor, portalQuoteHasBidders } from "@/lib/parties/portal-bid-server";
+import { portalBidPdfResponse, portalBidRowsFor, portalOwnerHasBidders } from "@/lib/parties/portal-bid-server";
 import { pdfFileName } from "@/lib/quote-pdf/state";
 import { get as getQuote } from "@/lib/stores/quotes";
 
@@ -44,7 +44,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     });
   }
   // Task 3: the owner of a bid estimate — one indexed read, only for the quote's own customer.
-  const hasBidders = q && q.customerId === session.customerId ? await portalQuoteHasBidders(q) : false;
+  const hasBidders = q ? await portalOwnerHasBidders(q, session.customerId) : false;
   if (q && hasBidders) return new Response("Not found", { status: 404 });
   const src = q ? portalQuotePdfSource(q, session.customerId, { hasBidders }) : null;
   if (q && !src && portalQuotePdfPreparing(q, session.customerId)) {

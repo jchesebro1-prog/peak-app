@@ -15,7 +15,7 @@ import { priceServiceRequest, type ServiceRequest } from "@/lib/portal-service-p
 import { carryLift } from "@/lib/service-pricing";
 import { getLiftRate } from "@/lib/service-quote-inputs";
 import { copySentRevisionPdf } from "@/lib/quote-pdf/generate";
-import { portalQuoteHasBidders } from "@/lib/parties/portal-bid-server";
+import { portalOwnerHasBidders } from "@/lib/parties/portal-bid-server";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { rateLimit, rateLimitRefund } from "@/lib/rate-limit";
 import { get as getCustomer } from "@/lib/stores/customers";
@@ -210,10 +210,10 @@ export const PORTAL_NOT_FOUND_COPY = "We couldn't find that quote.";
 
 /** #348 slice 6 Task 3 (Jeff 2026-10-15) — the owner's portal on a bid estimate is a BOM with no prices: every
  *  owner-portal write (accept, refresh pricing, copy to cart, rename) refuses it with the uniform not-found answer
- *  once the quote has bidders (portalQuoteHasBidders — any GC/EC row with bid state, whatever its result). Staff
+ *  once the quote has bidders (portalOwnerHasBidders — any GC/EC row with bid state, whatever its result). Staff
  *  Approve / Decline (the Estimator's Portal panel) never comes through here. */
 async function ownerBidRefused(q: Pick<Quote, "id" | "customerId">, cid: string): Promise<boolean> {
-  return q.customerId === cid && (await portalQuoteHasBidders(q));
+  return portalOwnerHasBidders(q, cid);
 }
 export const ACCEPT_ALREADY_COPY = "This quote was already accepted.";
 export const ACCEPT_NOT_READY_COPY = "This quote isn't ready to accept yet.";

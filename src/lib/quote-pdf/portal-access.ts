@@ -33,7 +33,7 @@ export type PortalOnlineState =
   | Exclude<OnlineEstimateState, { kind: "ok" }>
   | { kind: "ok"; rev: QuoteRevision; closed: boolean; bidder?: PortalBid; bomOnly?: true };
 
-/** #348 slice 6 Task 3 — whether the quote has bidders (portalQuoteHasBidders). Every portal route passes it explicitly;
+/** #348 slice 6 Task 3 — whether the owner's quote has bidders (portalOwnerHasBidders). Every portal route passes it explicitly;
  *  callers that pass nothing keep today's answer. */
 export type PortalOwnerOpts = { hasBidders?: boolean };
 
@@ -49,7 +49,7 @@ export type PortalOwnerOpts = { hasBidders?: boolean };
  * portalBidRowsFor). No rows → unavailable (fails closed).
  *
  * Task 3 (Jeff 2026-10-15) — the customer (owner) of a quote that has bidders (`opts.hasBidders`, from
- * portalQuoteHasBidders) sees it as a BOM with no prices: an ok state carries `bomOnly: true`, before and after the
+ * portalOwnerHasBidders) sees it as a BOM with no prices: an ok state carries `bomOnly: true`, before and after the
  * award. The revision is unchanged (the owner's latest sent); revising and unavailable are unchanged.
  */
 export function portalOnlineEstimateState(q: Quote, customerId: string, bids: readonly PortalBidRow[] = [], opts: PortalOwnerOpts = {}): PortalOnlineState {

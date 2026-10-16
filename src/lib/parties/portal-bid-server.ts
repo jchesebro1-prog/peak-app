@@ -44,6 +44,13 @@ export async function portalQuoteHasBidders(q: Pick<Quote, "id">): Promise<boole
   return quoteHasBidders(q.id, (await listFor("quote", q.id)).map(toRow));
 }
 
+/** Task 3 — the ONE owner check every portal route and write spells the same way: the session company is this
+ *  quote's customer AND the quote has bidders. Any other company (or an empty cid) → false without a read. */
+export async function portalOwnerHasBidders(q: Pick<Quote, "id" | "customerId">, cid: string): Promise<boolean> {
+  if (!cid || !q?.id || q.customerId !== cid) return false;
+  return portalQuoteHasBidders(q);
+}
+
 /** Task 3 — Home: which of these quotes have bidders, in one read bounded to those ids (listForRecords, chunked). */
 export async function portalBidderQuoteIds(quoteIds: readonly string[]): Promise<Set<string>> {
   const out = new Set<string>();

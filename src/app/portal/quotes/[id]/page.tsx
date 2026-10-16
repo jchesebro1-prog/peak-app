@@ -6,7 +6,7 @@ import { get as getQuote } from "@/lib/stores/quotes";
 import { getCart } from "@/lib/stores/portal-carts";
 import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { portalOnlineEstimateState, portalQuotePdfSource } from "@/lib/quote-pdf/portal-access";
-import { portalBidRowsFor, portalOwnerBom, portalQuoteHasBidders } from "@/lib/parties/portal-bid-server";
+import { portalBidRowsFor, portalOwnerBom, portalOwnerHasBidders } from "@/lib/parties/portal-bid-server";
 import { loadQuoteDocumentProps } from "@/lib/quote-pdf/document-loader";
 import { ONLINE_COPY, onlineHeaderLine, onlineView } from "@/lib/quote-share/view";
 import { OnlineEstimateCard, OnlineEstimateView } from "@/components/online-estimate/online-estimate";
@@ -74,7 +74,7 @@ export default async function PortalQuotePage({
   // #348 slice 6: this company's bidder rows on the quote ([] without a read for the quote's own customer).
   const bids = q ? await portalBidRowsFor(q, cid) : [];
   // Task 3: whether the owner's quote has bidders — one indexed read, only for the quote's own customer.
-  const hasBidders = q && q.customerId === cid ? await portalQuoteHasBidders(q) : false;
+  const hasBidders = q ? await portalOwnerHasBidders(q, cid) : false;
   const state = q ? portalOnlineEstimateState(q, cid, bids, { hasBidders }) : ({ kind: "unavailable" } as const);
   const pv = preview ? `preview=${encodeURIComponent(cid)}` : "";
   const withQs = (path: string, extra = "") => {

@@ -32,7 +32,7 @@ import { factLabel, pointsFor } from "../src/lib/triage/rank";
 import type { Quote } from "../src/lib/stores/quotes";
 import { portalBidCandidates, portalBidChip, portalBidDueAt, portalBidList, portalBidState, PORTAL_BID_COPY, quoteHasBidders, type PortalBidRow } from "../src/lib/parties/portal-bid";
 import { portalBidPdfSource, portalOnlineEstimateState, portalQuotePdfSource } from "../src/lib/quote-pdf/portal-access";
-import { portalBidPdfResponse, portalBidRowsFor, portalBidRowsForCompany, portalBidderQuoteIds, portalOwnerBom, portalQuoteHasBidders, PORTAL_BID_PDF_PER_MIN } from "../src/lib/parties/portal-bid-server";
+import { portalBidPdfResponse, portalBidRowsFor, portalBidRowsForCompany, portalBidderQuoteIds, portalOwnerBom, portalOwnerHasBidders, portalQuoteHasBidders, PORTAL_BID_PDF_PER_MIN } from "../src/lib/parties/portal-bid-server";
 import { ownerBom, ownerBomSections } from "../src/lib/parties/portal-owner-bom";
 import { acceptPortal, copyToCart, PORTAL_NOT_FOUND_COPY, refreshPortalQuote, renamePortalQuote } from "../src/lib/portal-quotes";
 import { serviceRequestFromQuoteId } from "../src/lib/portal-service-quotes";
@@ -1577,6 +1577,8 @@ export async function portalBidDbChecks(ok: Ok) {
       const q = (await getQuote(iq))!;
       const hb = await portalQuoteHasBidders(q);
       ok(hb && (await portalBidRowsFor(q, own)).length === 0, "owner-bom db: the owner's quote has bidders (and the bidder loader still reads nothing for the owner)");
+      ok((await portalOwnerHasBidders(q, own)) === true && (await portalOwnerHasBidders(q, gc1)) === false && (await portalOwnerHasBidders(q, oth)) === false && (await portalOwnerHasBidders(q, "")) === false,
+        "owner-bom db: portalOwnerHasBidders is true only for the quote's own customer (a bidder, a stranger and an empty company are false)");
       const s = portalOnlineEstimateState(q, own, [], { hasBidders: hb });
       ok(s.kind === "ok" && s.bomOnly === true && !s.bidder && s.rev.rev === r1, "owner-bom db: the owner's page state is bomOnly on its latest sent revision");
       const withPdf = { ...q, revisions: (q.revisions ?? []).map((r) => (r.reason === "sent" ? { ...r, pdfBlobPath: "quote-pdfs/x.pdf" } : r)) } as Quote;
@@ -1606,7 +1608,7 @@ export async function portalBidDbChecks(ok: Ok) {
     {
       await setStatus(iq2, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
       const q2 = (await getQuote(iq2))!;
-      const hb2 = await portalQuoteHasBidders(q2);
+      const hb2 = await portalOwnerHasBidders(q2, own);
       ok(!hb2 && JSON.stringify(portalOnlineEstimateState(q2, own, [], { hasBidders: hb2 })) === JSON.stringify(portalOnlineEstimateState(q2, own)) &&
          portalOnlineEstimateState(q2, own).kind === "ok" && !("bomOnly" in portalOnlineEstimateState(q2, own, [], { hasBidders: hb2 })),
         "owner-bom db: an estimate with no bidders has today's state, no bomOnly");
@@ -1787,16 +1789,16 @@ export async function portalBidDbChecks(ok: Ok) {
          !/money\(|fmt\(|QuoteDocument|AcceptDialog|pdf/i.test(bomView) && !/["']use client["']/.test(bomView) && !/money\(|fmt\(|totals\(|systemSellTotal/.test(ownerBomSrc),
         "owner-bom pins: the BOM view renders packageBomRows rows (via ownerBom) and carries no money, document, Accept or download");
       const bomBranch = page.slice(page.indexOf("if (state.bomOnly) {"), page.indexOf("const docProps = await loadQuoteDocumentProps("));
-      ok(page.includes("portalQuoteHasBidders(q)") && bomBranch.includes("<BomView") && bomBranch.includes("portalOwnerBom(q, state.rev,") && !/QuoteDocument|OnlineEstimateView|pdfHref|onlineCutSheets/.test(bomBranch) &&
+      ok(page.includes("const hasBidders = q ? await portalOwnerHasBidders(q, cid) : false;") && bomBranch.includes("<BomView") && bomBranch.includes("portalOwnerBom(q, state.rev,") && !/QuoteDocument|OnlineEstimateView|pdfHref|onlineCutSheets/.test(bomBranch) &&
          page.indexOf("if (state.bomOnly) {") > -1 && page.indexOf("if (state.bomOnly) {") < page.indexOf("loadQuoteDocumentProps(q, {") && page.includes("portalQuotePdfSource(q, cid, { hasBidders })") && !page.includes("portalQuotePdfSource(q, cid)"),
         "owner-bom pins: the page's bomOnly branch renders <BomView before the priced document is ever loaded");
-      ok(pdf.includes("portalQuoteHasBidders(q)") && pdf.indexOf('if (q && hasBidders) return new Response("Not found", { status: 404 });') > -1 &&
+      ok(pdf.includes("const hasBidders = q ? await portalOwnerHasBidders(q, session.customerId) : false;") && pdf.indexOf('if (q && hasBidders) return new Response("Not found", { status: 404 });') > -1 &&
          pdf.indexOf('if (q && hasBidders) return new Response("Not found", { status: 404 });') < pdf.indexOf("portalQuotePdfPreparing(q, session.customerId)"),
         "owner-bom pins: the PDF route answers the owner of a bid estimate with a plain 404 first");
-      ok(photo.includes("portalQuoteHasBidders(q)") && photo.includes("state.bomOnly"), "owner-bom pins: the photo route refuses the BOM-only owner");
+      ok(photo.includes("const hasBidders = q ? await portalOwnerHasBidders(q, session.customerId) : false;") && photo.includes("state.bomOnly"), "owner-bom pins: the photo route refuses the BOM-only owner");
       const pq = rd("src/lib/portal-quotes.ts");
       const gates = pq.match(/if \(!q \|\| !portalListsQuote\(q, session\.customerId\)\) return \{ ok: false, error: PORTAL_NOT_FOUND_COPY \};\n  if \(await ownerBidRefused\(q, session\.customerId\)\) return \{ ok: false, error: PORTAL_NOT_FOUND_COPY \};/g) || [];
-      ok(pq.includes("portalQuoteHasBidders(q)") && gates.length === 4 && (pq.match(/ownerBidRefused\(q, session\.customerId\)/g) || []).length === 4,
+      ok(pq.includes("  return portalOwnerHasBidders(q, cid);") && !pq.includes("portalQuoteHasBidders(") && gates.length === 4 && (pq.match(/ownerBidRefused\(q, session\.customerId\)/g) || []).length === 4,
         "owner-bom pins: accept, refresh, copy and rename each refuse the owner of a bid estimate right after the list rule");
       const home = rd("src/app/portal/page.tsx"), mine = rd("src/app/portal/my-quotes/page.tsx"), rowSrc = rd("src/app/portal/quote-row.tsx");
       ok(home.includes("portalBidderQuoteIds([") && home.includes("<PortalBidOwnerRow") && home.includes("!bidOwnerIds.has(p.quoteId)") && mine.includes("portalBidderQuoteIds(") && mine.includes("<PortalBidOwnerRow"),
@@ -1841,6 +1843,31 @@ export async function portalBidDbChecks(ok: Ok) {
         "portal-bid db: the import scan catches multi-line, aliased and namespace imports and skips type-only ones");
       const leaks = files.filter((f) => /@\/lib\/stores\/parties|@\/lib\/stores\/bids|@\/lib\/parties\/addressee-server/.test(readFileSync(join(root, f), "utf8")));
       ok(files.length > 10 && leaks.length === 0, `portal-bid db: no portal file imports the party stores or addressee-server (${leaks.join(", ")})`);
+      // Task 3 fix round 1 — the owner's fail-open default (hasBidders omitted = today's priced answer) is enforced:
+      // any portal file that asks the PDF / online-state rule must also ask the one owner check, or be listed here.
+      const OWNER_CHECK_ALLOW: Record<string, string> = {
+        // PortalQuoteRow calls both with no hasBidders: it is only ever rendered for quotes WITHOUT bidders — Home and
+        // My quotes swap a bid estimate to PortalBidOwnerRow first (portalBidderQuoteIds, pinned above). PortalBidOwnerRow
+        // itself passes { hasBidders: true }.
+        "quote-row.tsx": "Home / My quotes swap rows",
+      };
+      const codeOf = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+      const needsOwnerCheck = (src: string) => {
+        const code = codeOf(src);
+        return /\bportal(QuotePdfSource|OnlineEstimateState)\(/.test(code) && !/\bportal(Owner|Quote)HasBidders\(/.test(code);
+      };
+      ok(needsOwnerCheck("const s = portalOnlineEstimateState(q, cid, bids);") && needsOwnerCheck("x = portalQuotePdfSource(q, cid); // portalOwnerHasBidders(q, cid)") &&
+         !needsOwnerCheck("const hb = await portalOwnerHasBidders(q, cid);\nconst s = portalOnlineEstimateState(q, cid, bids, { hasBidders: hb });") &&
+         !needsOwnerCheck("import { portalOnlineEstimateState } from \"x\";") && !needsOwnerCheck("/* calls portalQuotePdfSource(q, cid) */"),
+        "owner-bom pins: the owner-check scanner flags an unchecked call (even with the check only in a comment) and passes a checked one, an import or a comment");
+      const ownerScan = [
+        ...files.map((f) => ({ f, src: readFileSync(join(root, f), "utf8") })),
+        { f: "src/lib/portal-quotes.ts", src: readFileSync(join(__dirname, "../src/lib/portal-quotes.ts"), "utf8") },
+      ];
+      const unchecked = ownerScan.filter((x) => !(x.f in OWNER_CHECK_ALLOW) && needsOwnerCheck(x.src)).map((x) => x.f);
+      const asks = ownerScan.filter((x) => /\bportal(QuotePdfSource|OnlineEstimateState)\(/.test(codeOf(x.src))).map((x) => x.f);
+      ok(asks.length >= 4 && unchecked.length === 0 && Object.keys(OWNER_CHECK_ALLOW).every((f) => asks.includes(f)),
+        `owner-bom pins: every portal file that asks the PDF / online-state rule also runs the owner check, or is allowlisted (${unchecked.join(", ")})`);
       const count = (f: string) => (readFileSync(join(__dirname, "..", f), "utf8").match(/portalListsQuote\(/g) || []).length;
       ok(count("src/lib/portal-quotes.ts") === 4 && count("src/lib/portal-service-quotes.ts") === 1, "portal-bid db: the portal write actions still gate on portalListsQuote (4 + 1)");
     }
