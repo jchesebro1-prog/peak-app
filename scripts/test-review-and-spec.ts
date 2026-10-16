@@ -48547,7 +48547,7 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
   const place = cli.slice(cli.indexOf("const placeLibrarySystem = "), cli.indexOf("const pushItems = "));
   ok(place.includes("placeLoadedSection(res.section, { id: newId, nextId, autoFreightPct: freightDefault.pct })") && place.includes("selectSystem(newId)") && place.includes('verb: "Loaded"') && place.includes("loadNotice(res)"),
     "#293s UI: a loaded system gets fresh ids (blocks remapped), lands after the active system, is selected, and the notice reports the re-price");
-  ok(cli.includes('verb?: "Moved" | "Copied" | "Loaded";') && cli.includes('moveNotice.ok && moveNotice.verb === "Loaded" ?'), "#293s UI: the result banner shows the Load notice");
+  ok(cli.includes('verb?: "Moved" | "Copied" | "Loaded" | "Lines";') && cli.includes('moveNotice.ok && (moveNotice.verb === "Loaded" || moveNotice.verb === "Lines") ?'), "#293s UI: the result banner shows the Load notice");
 }
 
 /* ======================================================================
