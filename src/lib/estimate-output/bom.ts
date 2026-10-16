@@ -47,7 +47,27 @@ export function packageBomSkus(sections: SpecSection[]): string[] {
   return [...out];
 }
 
-export function packageBomRows(sec: SpecSection, catalog: ReadonlyMap<string, BomCatalogPart>, vendorQuotes: readonly VendorQuote[] = []): PackageBomRow[] {
+/** A vendor line's own desc as the Estimator stamps it — "Vendor · Quote # — description". */
+const VENDOR_DESC_RE = /^[\s\S]*? \u00b7 [\s\S]*? \u2014 ([\s\S]*)$/;
+
+/** #348 slice 6 (Jeff 2026-10-15) — a vendor-quoted line's description with no vendor name and no vendor quote #:
+ *  the vendor quote's own description, else the line's desc with the stamped "Vendor · Quote # — " prefix removed. */
+export function vendorFreeDescription(it: Pick<SpecItem, "desc">, vq: Pick<VendorQuote, "description"> | undefined): string {
+  const own = str(vq?.description);
+  if (own) return own;
+  const desc = str(it.desc);
+  const m = VENDOR_DESC_RE.exec(desc);
+  return m ? m[1].trim() : desc;
+}
+
+/** `hideVendor` (#348 slice 6, the owner's Scope-only BOM): a vendor-quoted line prints its description only — no
+ *  vendor name, no vendor quote #, no Manufacturer / Model. Off (the #301 package page) the output is unchanged. */
+export function packageBomRows(
+  sec: SpecSection,
+  catalog: ReadonlyMap<string, BomCatalogPart>,
+  vendorQuotes: readonly VendorQuote[] = [],
+  opts: { hideVendor?: boolean } = {}
+): PackageBomRow[] {
   if (!sec) return [];
   if (sec.kind === "labor") return [{ key: "labor", qty: null, unit: "", manufacturer: "", part: "", description: LABOR_BOM_DESC }];
   const rows: PackageBomRow[] = [];
@@ -55,6 +75,17 @@ export function packageBomRows(sec: SpecSection, catalog: ReadonlyMap<string, Bo
     const it = cl.item;
     if (!it || it.labor) continue;
     const vq = it.vendorQuoteId ? vendorQuotes.find((v) => v.id === it.vendorQuoteId) : undefined;
+    if (opts.hideVendor && it.vendorQuoteId) {
+      rows.push({
+        key: String(it.id),
+        qty: typeof it.qty === "number" && Number.isFinite(it.qty) ? it.qty : null,
+        unit: str(it.unit),
+        manufacturer: "",
+        part: "",
+        description: vendorFreeDescription(it, vq),
+      });
+      continue;
+    }
     const sku = bomCatalogSku(it);
     const part = sku ? catalog.get(sku) : undefined;
     rows.push({

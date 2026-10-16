@@ -37,9 +37,10 @@ import { renderToStaticMarkup as bidReportRender } from "react-dom/server";
 import type { ReactElement } from "react";
 import { factLabel, pointsFor } from "../src/lib/triage/rank";
 import type { Quote } from "../src/lib/stores/quotes";
-import { portalBidCandidates, portalBidChip, portalBidDueAt, portalBidList, portalBidState, PORTAL_BID_COPY, quoteHasBidders, type PortalBidRow } from "../src/lib/parties/portal-bid";
+import { portalBidCandidates, portalBidChip, portalBidDueAt, portalBidList, portalBidState, PORTAL_BID_COPY, quoteHasBidders, quoteIsScopeOnly, type PortalBidRow } from "../src/lib/parties/portal-bid";
 import { portalBidPdfSource, portalOnlineEstimateState, portalQuotePdfSource } from "../src/lib/quote-pdf/portal-access";
-import { portalBidPdfResponse, portalBidRowsFor, portalBidRowsForCompany, portalBidderQuoteIds, portalOwnerBom, portalOwnerHasBidders, portalQuoteHasBidders, PORTAL_BID_PDF_PER_MIN } from "../src/lib/parties/portal-bid-server";
+import { portalBidPdfResponse, portalBidRowsFor, portalBidRowsForCompany, portalBidderQuoteIds, portalOwnerBom, portalOwnerHasBidders, portalQuoteHasBidders, PORTAL_BID_PDF_PER_MIN, splitInheritsScopeOnly } from "../src/lib/parties/portal-bid-server";
+import { packageBomRows, vendorFreeDescription } from "../src/lib/estimate-output/bom";
 import { ownerBom, ownerBomSections } from "../src/lib/parties/portal-owner-bom";
 import { acceptPortal, copyToCart, PORTAL_NOT_FOUND_COPY, refreshPortalQuote, renamePortalQuote } from "../src/lib/portal-quotes";
 import { serviceRequestFromQuoteId } from "../src/lib/portal-service-quotes";
@@ -49,10 +50,10 @@ import { companies, contactEmails, contacts as contactsTable } from "../src/db/s
 import { saveCompany } from "../src/lib/identity/companies";
 import { saveContact, setEmails } from "../src/lib/identity/contacts";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
-import { addQuoteRevision, buildQuote, get as getQuote, portalListsQuote, revisionDocFields, setStatus, update as updateQuote, type QuoteRevision } from "../src/lib/stores/quotes";
+import { addQuoteRevision, buildQuote, create as createQuote, get as getQuote, markBidScopeOnly, portalListsQuote, revisionDocFields, setStatus, update as updateQuote, type QuoteRevision } from "../src/lib/stores/quotes";
 import { getProjectByQuote } from "../src/lib/stores/projects";
 import { autoTaskId } from "../src/lib/stores/tasks";
-import { addParty, listFor, setPartyBid, setPartyContact } from "../src/lib/stores/parties";
+import { addParty, listFor, listForRecordsIncludingDeleted, removeParty, setPartyBid, setPartyContact } from "../src/lib/stores/parties";
 import { loadBidPanel } from "../src/lib/parties/bid-panel-server";
 import { awardedRecipient, bidderRecipient, documentAddressee, touchAwardedAddressee } from "../src/lib/parties/addressee-server";
 import { renderBidderPdf } from "../src/lib/quote-pdf/bidder-pdf-server";
@@ -1477,6 +1478,36 @@ export function portalBidPureChecks(ok: Ok) {
     const frozenQty = rev(1, "sent", { spec, docFields: { pdfOptions: { pdfQty: false } } });
     ok(ownerBom(mk({}, [frozenQty]), frozenQty, new Map(), "Owner").showQty === false, "owner-bom: the revision's frozen Qty choice wins over the live one");
     ok(ownerBom(mk(), rev(3, "sent"), new Map(), "Owner").systems.length === 0, "owner-bom: a revision with no spec has no systems");
+
+    // Final fix #3 (Jeff 2026-10-15): a vendor-quoted line shows its description only in the owner's BOM.
+    const vq = { id: "vq1", vendor: "Rose Brand Textiles", quoteNumber: "RBQ-90417", description: "Main drape, IFR velour", lines: [], terms: "", notes: "", total: 900, includesFreight: false, display: "single" };
+    const vItem = item(7, { sku: "RBQ-90417", desc: "Rose Brand Textiles \u00b7 RBQ-90417 \u2014 Main drape, IFR velour", vendorQuoteId: "vq1", qty: 1, unit: "lot", manufacturer: "Rose Brand Textiles" });
+    const vSpec = { sections: [{ id: "v1", name: "Drapery", kind: "materials", mfr: "", freightPct: 0, items: [vItem, item(8, { manufacturer: "Acme", manufacturerModelNumber: "AX-2" })] }] };
+    const vRev = rev(1, "sent", { spec: vSpec, vendorQuotes: [vq] });
+    const vBom = ownerBom(mk({}, [vRev]), vRev, new Map(), "Owner");
+    const vRows = vBom.systems.flatMap((x) => x.rows), vJson = JSON.stringify(vBom);
+    ok(vRows.length === 2 && vRows[0].description === "Main drape, IFR velour" && vRows[0].manufacturer === "" && vRows[0].part === "" && vRows[0].qty === 1,
+      "owner-bom: a vendor-quoted line shows the vendor quote's description only (no Manufacturer / Model)");
+    ok(!vJson.includes("Rose Brand") && !vJson.includes("RBQ-90417") && !JSON.stringify(vRows).includes("\u00b7"), "owner-bom: no vendor name, no vendor quote # anywhere in the owner's BOM");
+    ok(vRows[1].manufacturer === "Acme" && vRows[1].part === "AX-2" && vRows[1].description === "Item 8", "owner-bom: a non-vendor line is unchanged");
+    const vNoRec = rev(1, "sent", { spec: vSpec });
+    const vNoRecJson = JSON.stringify(ownerBom(mk({}, [vNoRec]), vNoRec, new Map(), "Owner"));
+    ok(!vNoRecJson.includes("Rose Brand") && !vNoRecJson.includes("RBQ-90417") && vNoRecJson.includes("Main drape, IFR velour"),
+      "owner-bom: with the vendor record missing, the stamped \"Vendor · Quote # — \" prefix is stripped from the line's own desc");
+    ok(vendorFreeDescription({ desc: "Hand typed" }, undefined) === "Hand typed" && vendorFreeDescription({ desc: "x" }, { description: " Own " }) === "Own",
+      "owner-bom: vendorFreeDescription — a desc without the stamp is kept; the vendor record's description wins");
+    // The #301 package page's BOM is unchanged: no option → "Vendor · Quote # — description" exactly as before.
+    const pkgRows = packageBomRows(vSpec.sections[0] as never, new Map(), [vq as never]);
+    ok(pkgRows[0].description === "Rose Brand Textiles · RBQ-90417 — Main drape, IFR velour" && pkgRows[0].manufacturer === "Rose Brand Textiles" &&
+       JSON.stringify(pkgRows) === JSON.stringify(packageBomRows(vSpec.sections[0] as never, new Map(), [vq as never], { hideVendor: false })),
+      "owner-bom: the #301 package BOM still prints \"Vendor · Quote # — description\" (unchanged without hideVendor)");
+    const pkgModel = readFileSync(join(__dirname, "../src/lib/estimate-output/package-model.ts"), "utf8");
+    ok(pkgModel.includes("packageBomRows(sec, i.catalog, d.vendorQuotes || [])") && !pkgModel.includes("hideVendor"), "owner-bom pins: the package page never passes hideVendor");
+
+    // Final fix #2 (Jeff 2026-10-15): Scope only is the stamp OR a bidder row (removed rows included — the caller's read).
+    ok(quoteIsScopeOnly({ id: "Q-1", bidScopeOnly: true }, []) && quoteIsScopeOnly({ id: "Q-1" }, [A]) && !quoteIsScopeOnly({ id: "Q-1" }, []) &&
+       !quoteIsScopeOnly({ id: "" , bidScopeOnly: true }, [A]) && !quoteIsScopeOnly({ id: "Q-1" }, [row("O", "OWN", "owner" as never, {})]),
+      "scope-only: the stamp alone, or a GC/EC bidder row, makes it Scope only; nothing else does");
   }
   // #348 slice 6 Task 4 — Home's Bids card and the read-only bid row.
   {
@@ -1528,6 +1559,11 @@ async function dropPortalBidIdentityFixtures() {
   await db.delete(contactEmails).where(like(contactEmails.contactId, "TEST348:i%"));
   await db.delete(contactsTable).where(like(contactsTable.id, "TEST348:i%"));
   await db.delete(companies).where(like(companies.id, "TEST348:i%"));
+}
+
+/** A source file with comments stripped (pins). */
+function codeOfSrc(f: string): string {
+  return readFileSync(join(__dirname, "..", f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
 }
 
 /** #348 slice 6 task 2 — the portal loader, the three portal quote routes' rule and the bidder PDF response, against the DB. */
@@ -1640,9 +1676,11 @@ export async function portalBidDbChecks(ok: Ok) {
         "owner-bom db: the BOM is the sent revision's printed system — Qty · Manufacturer · Model, the option line left out");
       ok(rows.every((r) => Object.keys(r).sort().join() === "description,key,manufacturer,part,qty,unit"), "owner-bom db: every BOM row has only the PackageBomRow fields");
       ok(!/1234|5678|99991|22713|\$/.test(JSON.stringify(bom)), "owner-bom db: no price, cost, option price or total in the owner's BOM");
-      const ids = await portalBidderQuoteIds([iq, iq2, "", fixtureId(348, "imissing")]);
+      const ids = await portalBidderQuoteIds([q, (await getQuote(iq2))!, { id: "" }, { id: fixtureId(348, "imissing") }]);
       ok(ids.has(iq) && !ids.has(iq2) && ids.size === 1, "owner-bom db: portalBidderQuoteIds picks the bid estimate only");
       ok((await portalBidderQuoteIds([])).size === 0, "owner-bom db: no ids, no read, empty set");
+      ok((await portalBidderQuoteIds([{ id: fixtureId(348, "inorows"), bidScopeOnly: true }])).has(fixtureId(348, "inorows")), "scope-only db: a stamped quote is Scope only with no party rows at all");
+      ok(q.bidScopeOnly === true, "scope-only db: addBidder stamped the estimate (bidScopeOnly)");
     }
     // T3. The owner's estimate without bidders behaves exactly as today — Accept still works.
     {
@@ -1656,6 +1694,82 @@ export async function portalBidDbChecks(ok: Ok) {
       ok(JSON.stringify(portalQuotePdfSource(w2, own, { hasBidders: hb2 })) === JSON.stringify(portalQuotePdfSource(w2, own)) && portalQuotePdfSource(w2, own) !== null, "owner-bom db: its PDF source is today's");
       const acc2 = await acceptPortal(ses(own), { quoteId: iq2, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "Owen", signerTitle: "Director" }, Date.now(), { notify: async () => {} });
       ok(acc2.ok && !!(await getQuote(iq2))?.portalAcceptance, "owner-bom db: Accept still works on the owner's estimate with no bidders");
+      const q2b = (await getQuote(iq2))!;
+      ok(!("bidScopeOnly" in q2b) && (await portalBidderQuoteIds([q2b])).size === 0, "scope-only db: an estimate that never had bidders carries no stamp and is not Scope only");
+    }
+
+    // Final fix #2 (Jeff 2026-10-15): "Scope only" is sticky — removing every bidder, legacy rows, and a split.
+    {
+      const iq3 = fixtureId(348, "iq3"), iq4 = fixtureId(348, "iq4"), is1 = fixtureId(348, "isplit1"), is2 = fixtureId(348, "isplit2"), is3 = fixtureId(348, "isplit3");
+      const regRows = async (qid: string) => { for (const p of (await listForRecordsIncludingDeleted("quote", [qid])).get(qid) ?? []) registerFixture("record_parties", p.id); };
+      await createFixture("quotes", buildQuote(iq3, { name: "Owner sticky quote", customer: NAMES.own, customerId: own, value: 700, spec: iSpec } as never, "system", null, NOW) as never);
+      const before3 = (await getQuote(iq3))!;
+      const b3 = await addBidder({ quoteId: iq3, companyId: gc1, contactId: ct1, role: "gc" }, "u");
+      await regRows(iq3);
+      const after3 = (await getQuote(iq3))!;
+      ok(b3.ok && after3.bidScopeOnly === true && after3.updatedAt === before3.updatedAt, "scope-only db: adding a bidder stamps the estimate without bumping updatedAt");
+      ok(await markBidScopeOnly(iq3) && (await getQuote(iq3))!.updatedAt === before3.updatedAt && !(await markBidScopeOnly(fixtureId(348, "imissing"))),
+        "scope-only db: markBidScopeOnly is idempotent, never bumps updatedAt, and is false for a missing quote");
+      await updateQuote(iq3, { bidScopeOnly: undefined, name: "Owner sticky quote" } as never);
+      ok((await getQuote(iq3))!.bidScopeOnly === true, "scope-only db: an Estimator save (update) can't clear the stamp");
+      await setStatus(iq3, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+      for (const p of await listBidders(iq3)) await removeParty(p.id);
+      const q3 = (await getQuote(iq3))!;
+      ok((await listBidders(iq3)).length === 0 && q3.bidScopeOnly === true, "scope-only db: every bidder removed — the stamp stays");
+      const hb3 = await portalOwnerHasBidders(q3, own);
+      const s3 = portalOnlineEstimateState(q3, own, [], { hasBidders: hb3 });
+      ok(hb3 && s3.kind === "ok" && s3.bomOnly === true, "scope-only db: with every bidder removed the owner still sees the BOM only");
+      const w3 = { ...q3, revisions: (q3.revisions ?? []).map((r) => (r.reason === "sent" ? { ...r, pdfBlobPath: "quote-pdfs/z.pdf" } : r)) } as Quote;
+      ok(portalQuotePdfSource(w3, own, { hasBidders: hb3 }) === null, "scope-only db: no PDF source (the PDF route answers 404 on hasBidders)");
+      const acc3 = await acceptPortal(ses(own), { quoteId: iq3, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "Owen", signerTitle: "Director" }, Date.now(), { notify: async () => {} });
+      ok(!acc3.ok && acc3.error === PORTAL_NOT_FOUND_COPY && !(await getQuote(iq3))!.portalAcceptance, "scope-only db: Accept is still refused after the bidders are removed");
+      ok((await portalBidderQuoteIds([q3])).has(iq3), "scope-only db: Home / My quotes agree (portalBidderQuoteIds)");
+
+      // Legacy: bidder rows from before the stamp existed (no stamp), then removed — the deleted rows still count.
+      await createFixture("quotes", buildQuote(iq4, { name: "Owner legacy quote", customer: NAMES.own, customerId: own, value: 300, spec: iSpec } as never, "system", null, NOW) as never);
+      const lp = await addParty({ recordType: "quote", recordId: iq4, companyId: gc2, role: "gc" }, "u");
+      if (lp.ok) await setPartyBid(lp.party.id, newBidderState("email"));
+      await regRows(iq4);
+      const q4 = (await getQuote(iq4))!;
+      ok(lp.ok && !("bidScopeOnly" in q4) && (await portalQuoteHasBidders(q4)), "scope-only db: an unstamped estimate with a live bidder row is Scope only");
+      if (lp.ok) await removeParty(lp.party.id);
+      const q4b = (await getQuote(iq4))!;
+      ok((await listFor("quote", iq4)).every((p) => p.role !== "gc") && !("bidScopeOnly" in q4b) && (await portalQuoteHasBidders(q4b)) && (await portalBidderQuoteIds([q4b])).has(iq4),
+        "scope-only db: its bidder row removed (soft-deleted), it stays Scope only — listFor still hides the row");
+
+      // Split (Move system → New estimate): the action's decision + create(…, { bidScopeOnly }).
+      ok((await splitInheritsScopeOnly(q3, false)) && (await splitInheritsScopeOnly(q4b, false)) && !(await splitInheritsScopeOnly((await getQuote(iq2))!, false)),
+        "scope-only db: a split inherits Scope only from a stamped source and from a source with removed bidders, not from a normal one");
+      ok(!(await splitInheritsScopeOnly(null, false)) && (await splitInheritsScopeOnly(null, true)), "scope-only db: no source → normal; a failed source read fails closed (Scope only)");
+      const mkSplit = async (id: string, scopeOnly: boolean, extra: Record<string, unknown> = {}) => {
+        registerFixture("quotes", id);
+        await createQuote({ id, name: "Split (moved)", customer: NAMES.own, customerId: own, source: "estimator", status: "draft", spec: iSpec, value: 100, owner: "Test", ...extra } as never, { bidScopeOnly: scopeOnly });
+        await setStatus(id, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+        return (await getQuote(id))!;
+      };
+      const sp1 = await mkSplit(is1, await splitInheritsScopeOnly(q3, false));
+      const hs1 = await portalOwnerHasBidders(sp1, own);
+      const ss1 = portalOnlineEstimateState(sp1, own, [], { hasBidders: hs1 });
+      ok(sp1.bidScopeOnly === true && ((await listForRecordsIncludingDeleted("quote", [is1])).get(is1) ?? []).length === 0 && hs1 && ss1.kind === "ok" && ss1.bomOnly === true,
+        "scope-only db: a split off a Scope-only estimate is stamped and its owner sees the BOM only (no bidder rows needed)");
+      const sp2 = await mkSplit(is2, await splitInheritsScopeOnly((await getQuote(iq2))!, false));
+      const hs2 = await portalOwnerHasBidders(sp2, own);
+      ok(!("bidScopeOnly" in sp2) && !hs2 && JSON.stringify(portalOnlineEstimateState(sp2, own, [], { hasBidders: hs2 })) === JSON.stringify(portalOnlineEstimateState(sp2, own)) &&
+         !("bomOnly" in portalOnlineEstimateState(sp2, own, [], { hasBidders: hs2 })),
+        "scope-only db: a split off a normal estimate is unchanged (no stamp, today's state)");
+      const sp3 = await mkSplit(is3, false, { bidScopeOnly: true });
+      ok(!("bidScopeOnly" in sp3), "scope-only db: create() never takes the stamp from the partial (only the server-side option)");
+      // The action's wiring (requireUser keeps the action itself out of the harness).
+      const act = codeOfSrc("src/app/(app)/estimator/actions.ts");
+      const place = act.slice(act.indexOf("async function placeSystemInEstimate("));
+      const existingBranch = place.slice(0, place.indexOf("const newSections = canonicalBonusSections("));
+      ok(place.includes("splitInheritsScopeOnly(splitSource, splitReadFailed)") && place.includes("}, { bidScopeOnly: splitScopeOnly });") &&
+         place.includes("const splitScopeOnly = opts.splitFrom") && existingBranch.length > 0 && existingBranch.length < place.length && !existingBranch.includes("bidScopeOnly") && !existingBranch.includes("markBidScopeOnly"),
+        "scope-only pins: Move → New stamps the split from the stored source at create; Move into an existing estimate never touches the stamp");
+      const bidsSrc = codeOfSrc("src/lib/stores/bids.ts"), partiesSrc = codeOfSrc("src/lib/stores/parties.ts"), quotesSrc = codeOfSrc("src/lib/stores/quotes.ts");
+      ok(bidsSrc.includes("await markBidScopeOnly(q.id);") && !partiesSrc.includes("bidScopeOnly") && quotesSrc.includes("delete clean.bidScopeOnly;") &&
+         (quotesSrc.match(/"bidScopeOnly"/g) || []).length === 1,
+        "scope-only pins: addBidder stamps, removeParty never clears, update() drops it, and markBidScopeOnly is the one key-level writer");
     }
 
     // 2. Refused, the same as missing.
@@ -1825,7 +1939,7 @@ export async function portalBidDbChecks(ok: Ok) {
       ok(photo.includes("portalOnlineEstimateState(q, session.customerId, bids, { hasBidders })") && photo.includes("servePhotoForRevision(req, state.rev, docId)"), "portal-bid db: photos come from the bidder's own revision");
       // Task 3 pins (Jeff 2026-10-15): the owner of a bid estimate — BOM only, no prices, no PDF, no Accept.
       const bomView = rd("src/app/portal/quotes/[id]/bom-view.tsx"), ownerBomSrc = rd("src/lib/parties/portal-owner-bom.ts");
-      ok(bomView.includes('import type { OwnerBom } from "@/lib/parties/portal-owner-bom";') && ownerBomSrc.includes("packageBomRows(sec, catalog, vendorQuotes)") &&
+      ok(bomView.includes('import type { OwnerBom } from "@/lib/parties/portal-owner-bom";') && ownerBomSrc.includes("packageBomRows(sec, catalog, vendorQuotes, { hideVendor: true })") &&
          !/money\(|fmt\(|QuoteDocument|AcceptDialog|pdf/i.test(bomView) && !/["']use client["']/.test(bomView) && !/money\(|fmt\(|totals\(|systemSellTotal/.test(ownerBomSrc),
         "owner-bom pins: the BOM view renders packageBomRows rows (via ownerBom) and carries no money, document, Accept or download");
       const bomBranch = page.slice(page.indexOf("if (state.bomOnly) {"), page.indexOf("const docProps = await loadQuoteDocumentProps("));
@@ -2030,6 +2144,25 @@ export function bidReportPureChecks(ok: Ok) {
   const tieNames = new Map([["C1", "Same"], ["C2", "Same"]]);
   const tie = bidsByBidder([inp("C2", "gc", {}), inp("C1", "gc", {}), inp("C2", "ec", {})], tieNames, P).rows.map((x) => `${x.companyId}/${x.role}`);
   ok(tie.join() === "C2/ec,C1/gc,C2/gc", `bid-report: equal sent and name sort by role, then company id (${tie.join()})`);
+
+  // Final fix #1: a pending row counts in Open only while the estimate is draft or sent; on won / lost it is Sent only.
+  {
+    const qs = (status: string, awardedPartyId: string | null = null) =>
+      ({ id: "Q-1", status, bid: { dueAt: D, addenda: [], awardedPartyId } }) as unknown as BidReportInput["quote"];
+    const one = (status: string, awarded: string | null = null) => bidsByBidder([inp("CA", "gc", { result: "pending" }, qs(status, awarded))], names, P).rows[0];
+    const lost = one("lost"), won = one("won"), sent = one("sent"), draft = one("draft");
+    ok(!!lost && lost.sent === 1 && lost.open === 0 && lost.decided === 0 && lost.awarded === 0 && lost.out === 0 && lost.rate === null,
+      "bid-report: a pending row on a Lost estimate counts in Sent only (not Open, not decided, no rate)");
+    ok(!!won && won.sent === 1 && won.open === 0 && won.decided === 0 && won.rate === null, "bid-report: a pending row on a Won estimate with no award counts in Sent only");
+    ok(!!sent && sent.sent === 1 && sent.open === 1, "bid-report: a pending row on a Sent estimate is Open");
+    ok(!!draft && draft.sent === 1 && draft.open === 1, "bid-report: a pending row on a Draft (revising) estimate is Open");
+    const mixed = bidsByBidder([
+      inp("CA", "gc", { result: "pending" }, qs("lost")), inp("CA", "gc", { result: "pending" }, qs("sent")),
+      inp("CA", "gc", { result: "awarded" }, qs("won", "x")), inp("CA", "gc", { result: "lost" }, qs("lost")),
+    ], names, P);
+    ok(mixed.rows[0].sent === 4 && mixed.rows[0].open === 1 && mixed.rows[0].decided === 2 && mixed.rows[0].awarded === 1 && mixed.rows[0].rate === 50 && mixed.total.open === 1,
+      "bid-report: awarded / lost rows are unchanged by status; only the pending row on the open estimate is Open (total too)");
+  }
 
   // Copy + boundary.
   ok(BID_REPORT_COPY.cols.length === 9 && BID_REPORT_COPY.title === "Bids by GC/EC" && BID_REPORT_COPY.empty === "No bids sent in this period.", "bid-report: the copy constants");

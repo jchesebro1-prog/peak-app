@@ -56,7 +56,8 @@ export function ownerBom(
     systems: ownerBomSections(rev).map((sec) => ({
       id: sec.id,
       name: sec.name || "",
-      rows: packageBomRows(sec, catalog, vendorQuotes).map((r) => (showQty ? r : { ...r, qty: null, unit: "" })),
+      // Jeff 2026-10-15: a vendor-quoted line shows its description only — no vendor name, no vendor quote #.
+      rows: packageBomRows(sec, catalog, vendorQuotes, { hideVendor: true }).map((r) => (showQty ? r : { ...r, qty: null, unit: "" })),
     })),
   };
 }

@@ -983,14 +983,21 @@ async function placeSystemInEstimate(
   // simply has none. The id only says which stored quote to read.
   // A read failure only skips the carry; a deleted lead isn't carried.
   let splitSource: Quote | null = null;
+  let splitReadFailed = false;
   if (opts.splitFrom) {
     try {
       splitSource = await get(opts.splitFrom.quoteId);
     } catch (e) {
+      splitReadFailed = true;
       console.error("moveSystemToEstimateAction: reading the source quote failed", opts.splitFrom.quoteId, e);
     }
   }
   const splitLeadId = splitSource ? await leadIdForCreate(splitSource.leadId) : null;
+  // #348 slice 6 (Jeff 2026-10-15): a split off a Scope-only estimate (its stamp, or bidders now or ever) is Scope
+  // only too — stamped at create, in the same insert. Only a split (Move → New); an existing target changes nothing.
+  const splitScopeOnly = opts.splitFrom
+    ? await (await import("@/lib/parties/portal-bid-server")).splitInheritsScopeOnly(splitSource, splitReadFailed)
+    : false;
   let created: Quote;
   try {
     created = await create({
@@ -1006,7 +1013,7 @@ async function placeSystemInEstimate(
       margin: t.margin,
       owner: opts.owner,
       ...(opts.tier ? { pricingTier: opts.tier.pricingTier, tierMargin: opts.tier.tierMargin } : {}),
-    });
+    }, { bidScopeOnly: splitScopeOnly });
   } catch (e) {
     return {
       ok: false,

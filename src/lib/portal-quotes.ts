@@ -210,9 +210,10 @@ export const PORTAL_NOT_FOUND_COPY = "We couldn't find that quote.";
 
 /** #348 slice 6 Task 3 (Jeff 2026-10-15) — the owner's portal on a bid estimate is a BOM with no prices: every
  *  owner-portal write (accept, refresh pricing, copy to cart, rename) refuses it with the uniform not-found answer
- *  once the quote has bidders (portalOwnerHasBidders — any GC/EC row with bid state, whatever its result). Staff
+ *  once the quote is Scope only (portalOwnerHasBidders — its stamp, or any GC/EC row with bid state, whatever its
+ *  result, removed rows included). Staff
  *  Approve / Decline (the Estimator's Portal panel) never comes through here. */
-async function ownerBidRefused(q: Pick<Quote, "id" | "customerId">, cid: string): Promise<boolean> {
+async function ownerBidRefused(q: Pick<Quote, "id" | "customerId" | "bidScopeOnly">, cid: string): Promise<boolean> {
   return portalOwnerHasBidders(q, cid);
 }
 export const ACCEPT_ALREADY_COPY = "This quote was already accepted.";

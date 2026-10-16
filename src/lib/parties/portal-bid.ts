@@ -149,6 +149,15 @@ export function quoteHasBidders(quoteId: string, rows: readonly PortalBidRow[]):
   return rows.some((r) => !!r && r.recordType === "quote" && r.recordId === quoteId && (r.role === "gc" || r.role === "ec") && !!r.bid);
 }
 
+/** #348 slice 6 (Jeff 2026-10-15) — "Scope only" is sticky for good: the quote's own stamp (`bidScopeOnly`, set by
+ *  addBidder and inherited by a split) OR quoteHasBidders over its rows — rows that INCLUDE soft-deleted (removed)
+ *  ones, so an estimate whose bidders were all removed, or that had bidders before the stamp existed, stays Scope
+ *  only. The ONE rule behind portalQuoteHasBidders / portalOwnerHasBidders / portalBidderQuoteIds. */
+export function quoteIsScopeOnly(q: { id: string; bidScopeOnly?: true | null }, rowsInclDeleted: readonly PortalBidRow[]): boolean {
+  if (!q?.id) return false;
+  return q.bidScopeOnly === true || quoteHasBidders(q.id, rowsInclDeleted);
+}
+
 /** Chip: sent+pending → due text (or "Bid submitted" with no due date); awarded (sent or won) → "Awarded"; lost → "Closed".
  *  Never "Lost", never a count or another company. */
 export function portalBidChip(status: string, bid: PortalBid): string {

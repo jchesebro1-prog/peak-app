@@ -1,8 +1,9 @@
 /* #348 slice 6 — Reports → "Bids by GC/EC": the loader. One bounded SQL query over `record_parties` for the
    delivered bidder rows only (a quote's GC/EC row with bid.revSent set), then one batched read of their quotes and
    one of their companies' names. Never a full quote or company scan. The pure aggregation (bid-report.ts) does
-   the period and the counting; quote status is deliberately not filtered here — a sent bid counts whatever
-   happened to the estimate afterwards, and a deleted quote reads null and is skipped there. */
+   the period and the counting; quote status is deliberately not filtered here — a sent bid counts in Sent whatever
+   happened to the estimate afterwards (bidsByBidder keeps a pending row out of Open once the estimate is won / lost),
+   and a deleted quote reads null and is skipped there. */
 import { listDocsWhere } from "@/db/doc-store";
 import { getCompanies } from "@/lib/identity/companies";
 import { getMany as getQuotes } from "@/lib/stores/quotes";
@@ -25,6 +26,8 @@ export async function loadBidReportData(opts: { limit?: number } = {}): Promise<
       all: [
         { path: ["recordType"], is: "quote" },
         { path: ["role"], in: ["gc", "ec"] },
+        // "text" is right for the NUMERIC revSent: docCondSql reads the path with ->> (text), so this only asks
+        // "present and not blank" — do not "fix" it into a number-type check.
         { path: ["bid", "revSent"], filled: "text" },
       ],
     },

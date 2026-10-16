@@ -42,6 +42,23 @@ export async function listForRecords(recordType: PartyRecordType, recordIds: rea
   return out;
 }
 
+/** #348 slice 6 (Jeff 2026-10-15) — like listForRecords, but soft-deleted (removed) rows come back too. Only for a
+ *  rule that must remember a party once removed — the portal's "Scope only" (portalQuoteHasBidders). Every other
+ *  reader keeps listFor / listForRecords, which return live rows only. */
+export async function listForRecordsIncludingDeleted(recordType: PartyRecordType, recordIds: readonly string[]): Promise<Map<string, Party[]>> {
+  const out = new Map<string, Party[]>();
+  const ids = [...new Set(recordIds.filter(Boolean))];
+  if (!ids.length) return out;
+  const rows = await listDocsByField<Party>("record_parties", "recordId", ids, { includeDeleted: true });
+  for (const p of sortParties(rows)) {
+    if (p.recordType !== recordType) continue;
+    const list = out.get(p.recordId) ?? [];
+    list.push(p);
+    out.set(p.recordId, list);
+  }
+  return out;
+}
+
 export async function listForCompany(companyId: string): Promise<Party[]> {
   if (!companyId) return [];
   return sortParties(await listDocsByField<Party>("record_parties", "companyId", [companyId]));

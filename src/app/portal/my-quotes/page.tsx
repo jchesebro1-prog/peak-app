@@ -95,7 +95,7 @@ export default async function PortalMyQuotesPage({
   const custName = cust?.name || "your organization";
   const view = myQuotesView(quotes, cid, filter);
   // #348 slice 6 Task 3 (Jeff 2026-10-15): a listed quote that has bidders shows as scope only (no value, no actions).
-  const bidOwnerIds = await portalBidderQuoteIds(view.rows.map((r) => r.q.id));
+  const bidOwnerIds = await portalBidderQuoteIds(view.rows.map((r) => r.q));
   // The banner names the generated quote's estimate number — looked up among
   // THIS customer's listed, customer-built quotes only, so a hand-edited ?q=
   // shows nothing.

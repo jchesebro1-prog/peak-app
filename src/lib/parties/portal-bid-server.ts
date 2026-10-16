@@ -6,12 +6,12 @@ import { getCompany } from "@/lib/identity/companies";
 import { bidderPdfFileName } from "@/lib/parties/addressee";
 import { bidderPartyFor } from "@/lib/parties/addressee-server";
 import { catalogFor } from "@/lib/estimate-output/package-loader";
-import { PORTAL_BID_COPY, quoteHasBidders, type PortalBidRow } from "@/lib/parties/portal-bid";
+import { PORTAL_BID_COPY, quoteIsScopeOnly, type PortalBidRow } from "@/lib/parties/portal-bid";
 import { ownerBom, ownerBomSkus, type OwnerBom } from "@/lib/parties/portal-owner-bom";
 import type { Party } from "@/lib/parties/rules";
 import { renderBidderPdf } from "@/lib/quote-pdf/bidder-pdf-server";
 import { rateLimit } from "@/lib/rate-limit";
-import { listFor, listForCompany, listForRecords } from "@/lib/stores/parties";
+import { listFor, listForCompany, listForRecordsIncludingDeleted } from "@/lib/stores/parties";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 
 /** Only the fields the rule reads — the portal never holds a party's contact, author or timestamps. */
@@ -37,29 +37,55 @@ export async function portalBidRowsForCompany(cid: string): Promise<PortalBidRow
   return (await listForCompany(cid)).filter((p) => isCompanyBidRow(p, cid)).map(toRow);
 }
 
-/** Task 3 (Jeff 2026-10-15) — whether this quote has bidders (quoteHasBidders over one indexed listFor read). Takes no
- *  company: the caller decides it is the owner (q.customerId === cid); a bidder company is the bidder rule's call. */
-export async function portalQuoteHasBidders(q: Pick<Quote, "id">): Promise<boolean> {
+/** The quote fields the Scope-only rule reads: its id and its own stamp. */
+type ScopeQuote = Pick<Quote, "id" | "bidScopeOnly">;
+
+/** Task 3 + final fix (Jeff 2026-10-15) — which of these quotes are "Scope only" for their owner, for good:
+ *  quoteIsScopeOnly (the stamp, else a GC/EC bidder row INCLUDING removed ones). Stamped quotes need no read; the
+ *  rest are one read bounded to their ids (listForRecordsIncludingDeleted, chunked). The ONE server check: the page,
+ *  PDF and photo routes, the owner-portal writes (portalOwnerHasBidders), Home and My quotes all come through here. */
+export async function portalBidderQuoteIds(quotes: readonly ScopeQuote[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  const unstamped: string[] = [];
+  for (const q of quotes) {
+    if (!q || typeof q.id !== "string" || !q.id) continue;
+    if (quoteIsScopeOnly(q, [])) out.add(q.id);
+    else unstamped.push(q.id);
+  }
+  const ids = [...new Set(unstamped)];
+  if (!ids.length) return out;
+  for (const [id, rows] of await listForRecordsIncludingDeleted("quote", ids)) {
+    if (quoteIsScopeOnly({ id }, rows.map(toRow))) out.add(id);
+  }
+  return out;
+}
+
+/** Task 3 — whether this quote is Scope only (portalBidderQuoteIds over one quote). Takes no company: the caller
+ *  decides it is the owner (q.customerId === cid); a bidder company is the bidder rule's call. */
+export async function portalQuoteHasBidders(q: ScopeQuote): Promise<boolean> {
   if (!q?.id) return false;
-  return quoteHasBidders(q.id, (await listFor("quote", q.id)).map(toRow));
+  return (await portalBidderQuoteIds([q])).has(q.id);
 }
 
 /** Task 3 — the ONE owner check every portal route and write spells the same way: the session company is this
- *  quote's customer AND the quote has bidders. Any other company (or an empty cid) → false without a read. */
-export async function portalOwnerHasBidders(q: Pick<Quote, "id" | "customerId">, cid: string): Promise<boolean> {
+ *  quote's customer AND the quote is Scope only. Any other company (or an empty cid) → false without a read. */
+export async function portalOwnerHasBidders(q: Pick<Quote, "id" | "customerId" | "bidScopeOnly">, cid: string): Promise<boolean> {
   if (!cid || !q?.id || q.customerId !== cid) return false;
   return portalQuoteHasBidders(q);
 }
 
-/** Task 3 — Home: which of these quotes have bidders, in one read bounded to those ids (listForRecords, chunked). */
-export async function portalBidderQuoteIds(quoteIds: readonly string[]): Promise<Set<string>> {
-  const out = new Set<string>();
-  const ids = [...new Set(quoteIds.filter((id) => typeof id === "string" && !!id))];
-  if (!ids.length) return out;
-  for (const [id, rows] of await listForRecords("quote", ids)) {
-    if (quoteHasBidders(id, rows.map(toRow))) out.add(id);
+/** Final fix (Jeff 2026-10-15) — Move system → New estimate: the split estimate inherits "Scope only" from its
+ *  source (the same rule). Fails closed: a source read that failed, or a rule read that throws, stamps the split
+ *  (an owner seeing no prices is recoverable; prices shown after a bid are not). No source (unsaved) → false. */
+export async function splitInheritsScopeOnly(source: ScopeQuote | null, sourceReadFailed: boolean): Promise<boolean> {
+  if (sourceReadFailed) return true;
+  if (!source?.id) return false;
+  try {
+    return await portalQuoteHasBidders(source);
+  } catch (e) {
+    console.error(`splitInheritsScopeOnly(${source.id}): the bidder read failed — stamping the split Scope only`, e);
+    return true;
   }
-  return out;
 }
 
 /** Task 3 — the owner's BOM-only view of a bid estimate's sent revision: the pure ownerBom over the package page's

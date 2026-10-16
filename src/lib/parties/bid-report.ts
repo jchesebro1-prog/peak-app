@@ -15,7 +15,8 @@ export type BidReportRow = {
   role: "gc" | "ec";
   /** delivered: bid.revSent is a number (email or website) */
   sent: number;
-  /** sent and result pending */
+  /** sent, result pending, and the estimate still open (draft or sent) — a pending row on a won / lost estimate
+   *  counts in Sent only */
   open: number;
   /** spec "GC awarded": sent and result awarded | lost */
   decided: number;
@@ -62,7 +63,7 @@ export function bidsByBidder(
 ): { rows: BidReportRow[]; total: BidReportTotal } {
   const acc = new Map<string, Acc>();
   for (const { party, quote } of inputs) {
-    if (!quote) continue; // quote.status is intentionally ignored — the loader decides which quotes reach this
+    if (!quote) continue;
 
     if (party.role !== "gc" && party.role !== "ec") continue;
     const bid = party.bid;
@@ -76,7 +77,9 @@ export function bidsByBidder(
       acc.set(key, a);
     }
     a.sent++;
-    if (bid.result === "pending") a.open++;
+    // quote.status matters for a pending row only: it is Open while the estimate is draft or sent; on a won / lost
+    // estimate (a Lost, or a Won with no award) it is Sent only — never Open, never decided, never in the rate.
+    if (bid.result === "pending") { if (quote.status === "draft" || quote.status === "sent") a.open++; }
     else if (bid.result === "awarded") { a.decided++; a.awarded++; }
     else if (bid.result === "lost") a.decided++;
     else if (bid.result === "withdrew" || bid.result === "no_bid") a.out++;

@@ -235,11 +235,16 @@ export default async function PortalPage({
   // Only this customer's quotes (#222 final wave B): a project's quoteId is
   // never trusted to point inside the tenant.
   const quoteStatusById = new Map(quotes.filter((q) => q.customerId === cid).map((q) => [q.id, q.status]));
-  // #348 slice 6 Task 3 (Jeff 2026-10-15): the owner's estimates that have bidders show as scope only — no value,
-  // no Accept, no PDF — and a project built from one never shows its value. One read bounded to these ids.
+  const ownQuoteById = new Map(quotes.filter((q) => q.customerId === cid).map((q) => [q.id, q]));
+  // #348 slice 6 Task 3 (Jeff 2026-10-15): the owner's estimates that are Scope only (a bidder now or ever, or split
+  // off one) show as scope only — no value, no Accept, no PDF — and a project built from one never shows its value.
+  // One read bounded to the unstamped ones (portalBidderQuoteIds — the same rule as the page and routes).
   const bidOwnerIds = await portalBidderQuoteIds([
-    ...published.map((q) => q.id),
-    ...projects.flatMap((p) => (p.customerId === cid && p.quoteId && quoteStatusById.has(p.quoteId) ? [p.quoteId] : [])),
+    ...published,
+    ...projects.flatMap((p) => {
+      const pq = p.customerId === cid && p.quoteId ? ownQuoteById.get(p.quoteId) : undefined;
+      return pq ? [pq] : [];
+    }),
   ]);
   const venueNameOf = (locationId: string | null) => {
     const l = locationId ? venues.find((v) => v.id === locationId) : undefined;
