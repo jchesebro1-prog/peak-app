@@ -1892,7 +1892,9 @@ export function useEstimatorState(props: EstimatorProps) {
           contactName: contactName || "",
           tierMargin: tierMarginRef.current,
         },
-        usedVq
+        usedVq,
+        // #348 slice 6: the server reads the stored source's Scope-only state; an unsaved estimate has none.
+        loadedId || null
       );
       if (!res.ok) {
         setMoveNotice({ ok: false, error: res.error || "Could not copy that system." });

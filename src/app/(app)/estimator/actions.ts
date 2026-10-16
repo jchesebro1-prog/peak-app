@@ -878,7 +878,10 @@ export async function moveSystemToEstimateAction(
     owner: user.name,
     by: user.id,
     // #348 slice 3: only a Move into a NEW estimate splits off the source's lead and companies.
-    ...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId ? { splitFrom: { quoteId: sourceQuoteId, userId: user.id } } : {}),
+    // #348 slice 6: and a new estimate inherits Scope only from its source (scopeOnlyFrom).
+    ...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId
+      ? { splitFrom: { quoteId: sourceQuoteId, userId: user.id }, scopeOnlyFrom: sourceQuoteId }
+      : {}),
   });
   if (!placed.ok) return placed;
   return { ok: true, targetId: placed.targetId, targetName: placed.targetName, targetNumber: placed.targetNumber };
@@ -915,6 +918,9 @@ async function placeSystemInEstimate(
     tier?: { pricingTier: string; tierMargin: number };
     /** #348 slice 3 — Move into a NEW estimate: the stored source quote lends its lead and non-bidder companies. */
     splitFrom?: { quoteId: string; userId: string };
+    /** #348 slice 6 — Move or Copy into a NEW estimate: the stored source quote whose "Scope only" the new estimate
+     *  inherits (same customer only; newEstimateScopeOnly). Ignored for an existing target. */
+    scopeOnlyFrom?: string;
   }
 ): Promise<{ ok: true; targetId: string; targetName: string; targetNumber: string } | { ok: false; error: string }> {
   const placedIds = vendorIdsInSections([placed]);
@@ -982,22 +988,25 @@ async function placeSystemInEstimate(
   // #348 slice 3: the lead comes from the STORED source quote (never from the client); an unsaved or missing source
   // simply has none. The id only says which stored quote to read.
   // A read failure only skips the carry; a deleted lead isn't carried.
-  let splitSource: Quote | null = null;
-  let splitReadFailed = false;
-  if (opts.splitFrom) {
+  // The stored source quote (Move → New: lead + companies + Scope only; Copy → New: Scope only). Never the client's copy.
+  const sourceId = opts.splitFrom?.quoteId || opts.scopeOnlyFrom || null;
+  let sourceQuote: Quote | null = null;
+  let sourceReadFailed = false;
+  if (sourceId) {
     try {
-      splitSource = await get(opts.splitFrom.quoteId);
+      sourceQuote = await get(sourceId);
     } catch (e) {
-      splitReadFailed = true;
-      console.error("moveSystemToEstimateAction: reading the source quote failed", opts.splitFrom.quoteId, e);
+      sourceReadFailed = true;
+      console.error("placeSystemInEstimate: reading the source quote failed", sourceId, e);
     }
   }
+  const splitSource: Quote | null = opts.splitFrom ? sourceQuote : null;
   const splitLeadId = splitSource ? await leadIdForCreate(splitSource.leadId) : null;
-  // #348 slice 6 (Jeff 2026-10-15): a split off a Scope-only estimate (its stamp, or bidders now or ever) is Scope
-  // only too — stamped at create, in the same insert. Only a split (Move → New); an existing target changes nothing.
-  const splitScopeOnly = opts.splitFrom
-    ? await (await import("@/lib/parties/portal-bid-server")).splitInheritsScopeOnly(splitSource, splitReadFailed)
-    : false;
+  // #348 slice 6 (Jeff 2026-10-15): a new estimate made off a Scope-only estimate (its stamp, or bidders now or ever)
+  // for the same customer is Scope only too — stamped at create, in the same insert. An existing target changes nothing.
+  const scopeOnly = sourceId
+    ? await (await import("@/lib/parties/portal-bid-server")).newEstimateScopeOnly(sourceQuote, sourceReadFailed, opts.sourceContext.customerId)
+    : { stamp: false, failedClosed: false };
   let created: Quote;
   try {
     created = await create({
@@ -1013,7 +1022,7 @@ async function placeSystemInEstimate(
       margin: t.margin,
       owner: opts.owner,
       ...(opts.tier ? { pricingTier: opts.tier.pricingTier, tierMargin: opts.tier.tierMargin } : {}),
-    }, { bidScopeOnly: splitScopeOnly });
+    }, { bidScopeOnly: scopeOnly.stamp });
   } catch (e) {
     return {
       ok: false,
@@ -1022,6 +1031,9 @@ async function placeSystemInEstimate(
           ? e.message
           : "Could not create the new estimate — please try again.",
     };
+  }
+  if (scopeOnly.failedClosed) {
+    console.error("placeSystemInEstimate: the source couldn't be checked — the new estimate was stamped Scope only (fail closed)", { source: sourceId, created: created.id });
   }
   // #348 slice 3: the split estimate starts with the source's companies (never its bidders).
   if (splitSource && opts.splitFrom) {
@@ -1101,7 +1113,8 @@ export async function copySystemToEstimateAction(
     contactName: string;
     tierMargin: number | null;
   },
-  vendorQuotes: VendorQuote[] = []
+  vendorQuotes: VendorQuote[] = [],
+  sourceQuoteId: string | null = null
 ): Promise<CopySystemResult> {
   const user = await requireUser();
   // #293: blocks ride copySectionForTarget's section spread — sanitized first.
@@ -1169,6 +1182,8 @@ export async function copySystemToEstimateAction(
     owner: user.name,
     by: user.id,
     tier: stamp,
+    // #348 slice 6: a Copy into a NEW estimate inherits Scope only from the stored source (same customer only).
+    ...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId ? { scopeOnlyFrom: sourceQuoteId } : {}),
   });
   if (!placed.ok) return placed;
   return {

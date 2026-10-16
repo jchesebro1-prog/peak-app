@@ -74,17 +74,24 @@ export async function portalOwnerHasBidders(q: Pick<Quote, "id" | "customerId" |
   return portalQuoteHasBidders(q);
 }
 
-/** Final fix (Jeff 2026-10-15) — Move system → New estimate: the split estimate inherits "Scope only" from its
- *  source (the same rule). Fails closed: a source read that failed, or a rule read that throws, stamps the split
- *  (an owner seeing no prices is recoverable; prices shown after a bid are not). No source (unsaved) → false. */
-export async function splitInheritsScopeOnly(source: ScopeQuote | null, sourceReadFailed: boolean): Promise<boolean> {
-  if (sourceReadFailed) return true;
-  if (!source?.id) return false;
+/** Final fix (Jeff 2026-10-15) — a NEW estimate made from another one (Move system → New estimate, Copy system → New
+ *  estimate) inherits "Scope only" from its source through the same rule (portalQuoteHasBidders), but only when it
+ *  is for the SAME customer: a different owner never saw the bid. Fails closed: a source read that failed, or a rule
+ *  read that throws, stamps it (an owner seeing no prices is recoverable; prices shown after a bid are not) and
+ *  reports `failedClosed` so the caller logs both quote ids once the new one exists. No source (unsaved) → false. */
+export async function newEstimateScopeOnly(
+  source: Pick<Quote, "id" | "bidScopeOnly" | "customerId"> | null,
+  sourceReadFailed: boolean,
+  targetCustomerId: string | null
+): Promise<{ stamp: boolean; failedClosed: boolean }> {
+  if (sourceReadFailed) return { stamp: true, failedClosed: true };
+  if (!source?.id) return { stamp: false, failedClosed: false };
+  if ((source.customerId || null) !== (targetCustomerId || null)) return { stamp: false, failedClosed: false };
   try {
-    return await portalQuoteHasBidders(source);
+    return { stamp: await portalQuoteHasBidders(source), failedClosed: false };
   } catch (e) {
-    console.error(`splitInheritsScopeOnly(${source.id}): the bidder read failed — stamping the split Scope only`, e);
-    return true;
+    console.error(`newEstimateScopeOnly(${source.id}): the bidder read failed — stamping the new estimate Scope only`, e);
+    return { stamp: true, failedClosed: true };
   }
 }
 

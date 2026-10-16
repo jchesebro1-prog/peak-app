@@ -39,7 +39,7 @@ import { factLabel, pointsFor } from "../src/lib/triage/rank";
 import type { Quote } from "../src/lib/stores/quotes";
 import { portalBidCandidates, portalBidChip, portalBidDueAt, portalBidList, portalBidState, PORTAL_BID_COPY, quoteHasBidders, quoteIsScopeOnly, type PortalBidRow } from "../src/lib/parties/portal-bid";
 import { portalBidPdfSource, portalOnlineEstimateState, portalQuotePdfSource } from "../src/lib/quote-pdf/portal-access";
-import { portalBidPdfResponse, portalBidRowsFor, portalBidRowsForCompany, portalBidderQuoteIds, portalOwnerBom, portalOwnerHasBidders, portalQuoteHasBidders, PORTAL_BID_PDF_PER_MIN, splitInheritsScopeOnly } from "../src/lib/parties/portal-bid-server";
+import { portalBidPdfResponse, portalBidRowsFor, portalBidRowsForCompany, portalBidderQuoteIds, portalOwnerBom, portalOwnerHasBidders, portalQuoteHasBidders, PORTAL_BID_PDF_PER_MIN, newEstimateScopeOnly } from "../src/lib/parties/portal-bid-server";
 import { packageBomRows, vendorFreeDescription } from "../src/lib/estimate-output/bom";
 import { ownerBom, ownerBomSections } from "../src/lib/parties/portal-owner-bom";
 import { acceptPortal, copyToCart, PORTAL_NOT_FOUND_COPY, refreshPortalQuote, renamePortalQuote } from "../src/lib/portal-quotes";
@@ -1738,21 +1738,24 @@ export async function portalBidDbChecks(ok: Ok) {
         "scope-only db: its bidder row removed (soft-deleted), it stays Scope only — listFor still hides the row");
 
       // Split (Move system → New estimate): the action's decision + create(…, { bidScopeOnly }).
-      ok((await splitInheritsScopeOnly(q3, false)) && (await splitInheritsScopeOnly(q4b, false)) && !(await splitInheritsScopeOnly((await getQuote(iq2))!, false)),
+      const inh = async (src: Quote | null, failed = false, cust: string | null = own) => newEstimateScopeOnly(src, failed, cust);
+      ok((await inh(q3)).stamp && (await inh(q4b)).stamp && !(await inh((await getQuote(iq2))!)).stamp && !(await inh(q3)).failedClosed,
         "scope-only db: a split inherits Scope only from a stamped source and from a source with removed bidders, not from a normal one");
-      ok(!(await splitInheritsScopeOnly(null, false)) && (await splitInheritsScopeOnly(null, true)), "scope-only db: no source → normal; a failed source read fails closed (Scope only)");
+      const failed = await inh(null, true);
+      ok(!(await inh(null)).stamp && failed.stamp && failed.failedClosed, "scope-only db: no source → normal; a failed source read fails closed (Scope only, failedClosed for the log)");
+      ok(!(await inh(q3, false, oth)).stamp && !(await inh(q3, false, null)).stamp, "scope-only db: a new estimate for a DIFFERENT customer (or none) does not inherit Scope only");
       const mkSplit = async (id: string, scopeOnly: boolean, extra: Record<string, unknown> = {}) => {
         registerFixture("quotes", id);
         await createQuote({ id, name: "Split (moved)", customer: NAMES.own, customerId: own, source: "estimator", status: "draft", spec: iSpec, value: 100, owner: "Test", ...extra } as never, { bidScopeOnly: scopeOnly });
         await setStatus(id, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
         return (await getQuote(id))!;
       };
-      const sp1 = await mkSplit(is1, await splitInheritsScopeOnly(q3, false));
+      const sp1 = await mkSplit(is1, (await inh(q3)).stamp);
       const hs1 = await portalOwnerHasBidders(sp1, own);
       const ss1 = portalOnlineEstimateState(sp1, own, [], { hasBidders: hs1 });
       ok(sp1.bidScopeOnly === true && ((await listForRecordsIncludingDeleted("quote", [is1])).get(is1) ?? []).length === 0 && hs1 && ss1.kind === "ok" && ss1.bomOnly === true,
         "scope-only db: a split off a Scope-only estimate is stamped and its owner sees the BOM only (no bidder rows needed)");
-      const sp2 = await mkSplit(is2, await splitInheritsScopeOnly((await getQuote(iq2))!, false));
+      const sp2 = await mkSplit(is2, (await inh((await getQuote(iq2))!)).stamp);
       const hs2 = await portalOwnerHasBidders(sp2, own);
       ok(!("bidScopeOnly" in sp2) && !hs2 && JSON.stringify(portalOnlineEstimateState(sp2, own, [], { hasBidders: hs2 })) === JSON.stringify(portalOnlineEstimateState(sp2, own)) &&
          !("bomOnly" in portalOnlineEstimateState(sp2, own, [], { hasBidders: hs2 })),
@@ -1762,10 +1765,28 @@ export async function portalBidDbChecks(ok: Ok) {
       // The action's wiring (requireUser keeps the action itself out of the harness).
       const act = codeOfSrc("src/app/(app)/estimator/actions.ts");
       const place = act.slice(act.indexOf("async function placeSystemInEstimate("));
-      const existingBranch = place.slice(0, place.indexOf("const newSections = canonicalBonusSections("));
-      ok(place.includes("splitInheritsScopeOnly(splitSource, splitReadFailed)") && place.includes("}, { bidScopeOnly: splitScopeOnly });") &&
-         place.includes("const splitScopeOnly = opts.splitFrom") && existingBranch.length > 0 && existingBranch.length < place.length && !existingBranch.includes("bidScopeOnly") && !existingBranch.includes("markBidScopeOnly"),
-        "scope-only pins: Move → New stamps the split from the stored source at create; Move into an existing estimate never touches the stamp");
+      const existingBranch = place.slice(place.indexOf('if (target.kind === "existing") {'), place.indexOf("const newSections = canonicalBonusSections("));
+      ok(place.includes("newEstimateScopeOnly(sourceQuote, sourceReadFailed, opts.sourceContext.customerId)") && place.includes("}, { bidScopeOnly: scopeOnly.stamp });") &&
+         place.includes("const sourceId = opts.splitFrom?.quoteId || opts.scopeOnlyFrom || null;") &&
+         existingBranch.length > 0 && existingBranch.length < place.length && !/bidScopeOnly|scopeOnly|markBidScopeOnly/.test(existingBranch),
+        "scope-only pins: a new estimate is stamped from the stored source at create; Move / Copy into an existing estimate never touches the stamp");
+      ok(/if \(scopeOnly\.failedClosed\) \{\s*console\.error\([^;]*\{ source: sourceId, created: created\.id \}\);/.test(place),
+        "scope-only pins: a fail-closed stamp is logged with both quote ids (source and the new estimate)");
+      const moveFn = act.slice(act.indexOf("export async function moveSystemToEstimateAction("), act.indexOf("async function placeSystemInEstimate("));
+      const copyFn = act.slice(act.indexOf("export async function copySystemToEstimateAction("), act.indexOf("export async function updateQuoteMetaAction("));
+      ok(moveFn.includes('{ splitFrom: { quoteId: sourceQuoteId, userId: user.id }, scopeOnlyFrom: sourceQuoteId }') && moveFn.includes('target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId'),
+        "scope-only pins: Move → New passes its stored source for Scope only (with the split)");
+      ok(copyFn.includes('sourceQuoteId: string | null = null') && copyFn.includes('...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId ? { scopeOnlyFrom: sourceQuoteId } : {}),') && !copyFn.includes("splitFrom"),
+        "scope-only pins: Copy → New passes its stored source for Scope only (never the split's lead / companies); Copy → existing / same passes nothing");
+      const est = codeOfSrc("src/app/(app)/estimator/use-estimator-state.ts");
+      const copyCall = est.slice(est.indexOf("await copySystemToEstimateAction("), est.indexOf("await copySystemToEstimateAction(") + 400);
+      ok(/usedVq,\s*loadedId \|\| null\s*\)/.test(copyCall), "scope-only pins: the Estimator sends the saved source id with Copy (an unsaved estimate sends none)");
+      // Copy → New from a Scope-only estimate: the same helper + create option (the action needs a signed-in user).
+      const cp1 = await mkSplit(fixtureId(348, "icopy1"), (await inh(q3)).stamp);
+      const cp2 = await mkSplit(fixtureId(348, "icopy2"), (await inh((await getQuote(iq2))!)).stamp);
+      const hc1 = await portalOwnerHasBidders(cp1, own), sc1 = portalOnlineEstimateState(cp1, own, [], { hasBidders: hc1 });
+      ok(cp1.bidScopeOnly === true && hc1 && sc1.kind === "ok" && sc1.bomOnly === true, "scope-only db: Copy → New from a Scope-only estimate is stamped (owner sees the BOM only)");
+      ok(!("bidScopeOnly" in cp2) && !(await portalOwnerHasBidders(cp2, own)), "scope-only db: Copy → New from a normal estimate is not stamped");
       const bidsSrc = codeOfSrc("src/lib/stores/bids.ts"), partiesSrc = codeOfSrc("src/lib/stores/parties.ts"), quotesSrc = codeOfSrc("src/lib/stores/quotes.ts");
       ok(bidsSrc.includes("await markBidScopeOnly(q.id);") && !partiesSrc.includes("bidScopeOnly") && quotesSrc.includes("delete clean.bidScopeOnly;") &&
          (quotesSrc.match(/"bidScopeOnly"/g) || []).length === 1,
