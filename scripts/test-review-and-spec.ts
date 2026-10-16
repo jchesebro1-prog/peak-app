@@ -56042,7 +56042,7 @@ async function p3SendAsyncChecks(): Promise<void> {
     ok(legacy?.dataBase64 === "QUJD" && notB64 === null && reads.length === 2, "#P3 send fix: data-URL attachments resolve exactly as before (non-base64 skipped, no storage read)");
     const bridge = readFileSync(join(process.cwd(), "src/lib/gmail/bridge.ts"), "utf8");
     const threadPdf = readFileSync(join(process.cwd(), "src/lib/thread-pdf-read.ts"), "utf8");
-    ok(bridge.includes("attachmentMimePart(a, readPdfForThread)") && bridge.includes("readThreadPdf(path, t)") && threadPdf.includes("pdfPathFitsLink(path, t.link) ? readQuotePdf(path)") && threadPdf.includes("pdfStorage()"),
+    ok(bridge.includes("attachmentMimePart(a, readPdfForThread") && bridge.includes("readThreadPdf(path, t)") && threadPdf.includes("pdfPathFitsLink(path, t.link) ? readQuotePdf(path)") && threadPdf.includes("pdfStorage()"),
       "#P3 send fix: the Gmail bridge builds MIME parts through attachmentMimePart with the quote-PDF store, scoped to the thread's linked quote (fix round 2)");
     const { pdfPathFitsLink } = await import("@/lib/comms-attachments");
     ok(pdfPathFitsLink("quote-pdfs/Q-P3S/rev-4.pdf", { type: "quote", id: "Q-P3S" }) && !pdfPathFitsLink("quote-pdfs/Q-OTHER/rev-4.pdf", { type: "quote", id: "Q-P3S" }) &&
@@ -56695,7 +56695,7 @@ async function p3FinalReviewAsyncChecks(): Promise<void> {
       "#P3 final review (I1): delivery — a timed-out send is unknown, a refused one failed, a gmailId wins, not connected stays local");
     const api = rd("src/lib/gmail/api.ts");
     const gapiSrc = api.slice(api.indexOf("async function gapi<T>("), api.indexOf("/** Send a raw RFC-2822 message"));
-    ok(gapiSrc.indexOf("await accessTokenFor(mailboxKey)") < gapiSrc.indexOf("try {") && gapiSrc.includes("signal: AbortSignal.timeout(20_000)") && gapiSrc.includes("if (isAbortError(err)) throw new GmailTimeoutError(path);") &&
+    ok(gapiSrc.indexOf("await accessTokenFor(mailboxKey)") < gapiSrc.indexOf("try {") && gapiSrc.includes("signal: AbortSignal.timeout(opts.timeoutMs ?? 20_000)") && gapiSrc.includes("if (isAbortError(err)) throw new GmailTimeoutError(path);") &&
        gapiSrc.includes('(await res.text().catch(() => ""))'),
       "#P3 final review (I1): gapi maps only the Gmail call's own timeout (after the token) to GmailTimeoutError; a refusal stays a plain error");
     const bridge = rd("src/lib/gmail/bridge.ts");

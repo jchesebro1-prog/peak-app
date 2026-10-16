@@ -1024,7 +1024,7 @@ export async function syncPullRoleChecks(ok: Ok): Promise<void> {
   ok(/if \(!session\?\.user\?\.active\) \{[\s\S]{0,120}status: 401 \}\);\s*\}\s*if \(!mayPullFieldData\(session\.user\.roles\)\) \{\s*return NextResponse\.json\(\{ error: "forbidden" \}, \{ status: 403 \}\);/.test(route),
     "sync pull (#39): the route answers 403 to a non-field role before reading anything");
   const eng = readFileSync("src/lib/sync/engine.ts", "utf8");
-  ok(/if \(!this\.connected\(\) \|\| this\.pullForbidden\) return;/.test(eng) && /if \(pullStopsOn\(res\.status\)\) \{[\s\S]{0,120}this\.pullForbidden = true;\s*if \(this\.pollTimer\) clearInterval\(this\.pollTimer\);/.test(eng),
+  ok(/if \(!\(opts\.force \? this\.isOnline\(\) : this\.connected\(\)\) \|\| this\.pullForbidden\) return false;/.test(eng) && /if \(pullStopsOn\(res\.status\)\) \{[\s\S]{0,120}this\.pullForbidden = true;\s*if \(this\.pollTimer\) clearInterval\(this\.pollTimer\);/.test(eng),
     "sync pull (#39): on a 403 the engine stops the poll and never pulls again this page");
   const mirror = [
     { key: "tasks::T-1", collection: "tasks" },

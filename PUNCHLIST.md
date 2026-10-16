@@ -12637,3 +12637,26 @@ The app is safe before step 4: ownership already resolves the same way lazily (G
 - A venue type already set to "Church — Contemporary" keeps the earlier drawing until it is re-picked in Settings → Venue types.
 - Try Link to rack… / Unlink on a real Grid design with a rack built in the Assembly Builder.
 - The first supplement price file on production: check its parts read the new date and the rest of the book keeps its old one.
+
+## 356. Jeff's 2026-10-15 decisions — Batch 6 (Round 2 items 64–68 + Field Work task-id fix) — DONE 2026-10-16 on `batch6-jeff-decisions` (D1194–D1199)
+
+Decision record: `docs/decisions/2026-10-15-jeff-decisions.md` (on `worktree-assist-layer`), Round 2 items 64–68.
+
+- **#64 Attach in the Inbox composer (D1194).** New message, Edit draft and the reply composer (its Attach was a demo) attach computer files and the linked company's / project's Documents; chips with ✕; 25 MB / 20 files together. Uploads go straight to private Blob (`mail-attachments/<user>/<key>/`, `/api/inbox/attach-upload`, the server mints the path), re-checked by `finalizeMailUploadAction`; attachments ride by reference (`blobPath` / `documentId`) and are re-checked on save / send / reply after the owner check and again in the Gmail bridge; over 4 MB sends through Gmail's upload endpoint. `src/lib/mail-attachments.ts`, `mail-attachments-server.ts`, `inbox/attach-actions.ts`, `inbox/attach-picker.tsx`.
+- **#65 Download today's jobs (D1195).** Nav sync panel, phone drawer and Field Work, `create` holders only. `GET /api/sync/today` (`src/lib/sync/today-jobs.ts`) → forced pull into the mirror → the service worker keeps each page (MessagePort reply) → "Ready offline: N jobs".
+- **#66 Most-quoted products (D1196).** `/reports/sourcing` + CSV: parts and manufacturers across open estimates, weighted by the #298 win rate; assemblies expanded, bonus lines skipped; cost for `approve` holders only. `src/lib/sourcing-report.ts`.
+- **#67 App icon from the Branding logo (D1197).** `/icons/app/*.png` (sharp, cached by logo version), generated `src/app/manifest.ts`, versioned favicon / apple-touch-icon; built-in mark when no logo. Native shells need their own icon sets + a rebuild (DEPLOY.md §8).
+- **#68 July defaults accepted (D1198).** MASTER-QUESTIONS B1–B3, F6, F7, F9–F11, F14, G2, G3, H1, H3, I4–I7, J1–J4, J6, K2, K4–K6 answered; F17, J5, K1, K3 answered by the builds above.
+- **Bug fix (D1199).** `addFieldTask` could overwrite any task by id; `createFieldTask` takes only `tk-` ids, inserts once, treats the caller's own repeat as idempotent and refuses the rest.
+
+Tests: `scripts/test-batch6.ts` (chained into test:specs; 72 pure / 89 with the DB half), plus targeted pin updates in `test-review-and-spec.ts`, `test-thread-visibility.ts` (attach-actions joins the #341 action audit) and `test-ask.ts`. Smoke adds `/reports/sourcing` and a manifest content check. No migration, no new env var.
+
+**Gates:** tsc 0; `scripts/test-batch6.ts` 72 PASS pure / 89 PASS with the DB half, 0 FAIL; test:specs 24,229 PASS / 0 FAIL; test:smoke 264 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors on the 39 changed src/scripts .ts/.tsx files (1 pre-existing warning, `field-work/page.tsx` Date.now; `test-review-and-spec.ts` skipped — eslint crashes on the harness). Not browser-verified.
+
+**Rollback:** safe. New optional fields only (`CommAttachment.blobPath` / `documentId`); older code ignores them (an email drafted with one would send without it on old code, since the old bridge skips unknown attachments). Rolling back restores the static manifest only if `public/manifest.webmanifest` comes back with it.
+
+**Remaining (Jeff-gated):**
+- Attach a computer file and a company Document to a real email on production (needs `BLOB_READ_WRITE_TOKEN` and a connected Gmail); try one over 4 MB.
+- Press Download today's jobs on a phone with a real day's assignments, then go offline and open each job.
+- Upload the real logos in Settings → Branding and check the home-screen icon; replace the native app icon sets and rebuild if the apps should match.
+- Look at Reports → Most-quoted products with real open estimates.
