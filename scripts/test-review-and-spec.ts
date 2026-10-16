@@ -59245,7 +59245,8 @@ import * as rean312 from "@/lib/package-doc/reanchor";
   ok(JSON.stringify(rean312.reanchorDocLine(nested, "s1", "7", "Q")).includes('"sku":"Q"'), "#312 fix1: reanchorDocLine also reaches nested blocks");
 
   // 3-5. Source pins on the hook.
-  ok(hook.includes('import { reanchorDocLine } from "@/lib/package-doc/reanchor";') && hook.includes("reanchorDocLine(packageDocRef.current, secId, res.anchor.lineKey, res.anchor.sku)") && hook.includes("setPackageDoc(nd);"),
+  // #357: the same import also brings reanchorPackageDoc (moving lines re-anchors the document too).
+  ok(/import \{ reanchorDocLine(, reanchorPackageDoc)? \} from "@\/lib\/package-doc\/reanchor";/.test(hook) && hook.includes("reanchorDocLine(packageDocRef.current, secId, res.anchor.lineKey, res.anchor.sku)") && hook.includes("setPackageDoc(nd);"),
     "#312 fix1: a changed anchor rewrites the Build package document through the existing setPackageDoc");
   ok(hook.includes('if (isNaN(qty) || qty < 0 || (qty === 0 && editId == null)) qty = 1;'), "#312 fix1: an edited line keeps qty 0; only an add defaults to 1");
   ok((hook.match(/if \(lineGone\(\)\) \{\n\s+setCustomError\(GONE\);\n\s+return;/g) || []).length === 2 && hook.includes('const GONE = "That line was removed \\u2014 nothing was changed.";') &&
