@@ -16,6 +16,7 @@
 import { hasDeliberateLink, saveDraft, sendDraft, type CommAttachment, type CommThread, type MailboxId } from "@/lib/stores/comms";
 import { emailDocContext, resolveComposeAttachments, type MailAttachDeps } from "@/lib/mail-attachments-server";
 import { attachLimitError, type ComposeAttachments } from "@/lib/mail-attachments";
+import { FORWARD_ATTS_LOADING } from "@/lib/inbox-forward-copy";
 
 export type ForwardInput = {
   to: string;
@@ -65,6 +66,11 @@ export function forwardableAttachments(source: Pick<CommThread, "id" | "messages
   return out;
 }
 
+/** A Gmail message whose attachments haven't been listed yet (#348 slice 4 lazy listing). Pure. */
+export function attachmentsPending(m: { gmailId?: string; attsListed?: true; attachments?: unknown[] } | null | undefined): boolean {
+  return !!m?.gmailId && !m.attsListed && !(m.attachments || []).length;
+}
+
 export type ForwardResult = { ok: true; id: string } | { ok: false; error: string };
 
 export async function forwardThread(
@@ -76,6 +82,8 @@ export async function forwardThread(
   const to = cleanAddressList(input.to);
   if (!to) return { ok: false, error: "Add who to forward it to." };
   const cc = cleanAddressList(input.cc);
+  // #356 re-review — the original's Gmail attachments not listed yet: refuse rather than leave them off silently
+  if (input.includeOriginal !== false && attachmentsPending(forwardedMessage(source))) return { ok: false, error: FORWARD_ATTS_LOADING };
   const keepCompany = hasDeliberateLink(source);
   const ctx = keepCompany ? emailDocContext(source) : { customerId: null, projectId: null };
   const picked = await resolveComposeAttachments([], input.attachments ?? null, { userId: me.id, ...ctx }, deps);
