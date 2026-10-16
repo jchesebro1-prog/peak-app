@@ -13,7 +13,8 @@ import { qdP2bNoAltCases } from "./qd293-cases";
 import { lastViewedAt, opensChip, viewedStamp } from "../src/lib/quote-share/package-view";
 import type { Quote, QuoteRevision } from "../src/lib/stores/quotes";
 import { isReopen, reopenedAtWonVersion, reopenTarget, REOPEN_AUTOSAVE_NOTE, sameWonContent, tracksWonVersion, WON_SNAPSHOT_NOTE, wonRevision } from "../src/lib/quote-won-version";
-import { createFixture, dropFixtures, fixtureId } from "./test-fixtures";
+import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
+import { compareImages } from "../src/lib/part-docs/types";
 
 const ROOT = join(__dirname, "..");
 const src = (p: string) => readFileSync(join(ROOT, p), "utf8");
@@ -99,10 +100,23 @@ function wonVersionChecks(ok: Ok) {
   ok((us.match(/if \(r\.reopenedAtWon\) \{\s*window\.location\.reload\(\);/g) || []).length === 2, "#59: the Estimator reloads after a status or stage move that put the won version back");
 }
 
+/* --- #60 a key product with no photo uses its datasheet's page-1 thumbnail (already so — pinned) --- */
+function thumbnailPhotoChecks(ok: Ok) {
+  const real = { source: "upload" as const, sort: null, uploadedAt: 200 };
+  const thumb = { source: "datasheet-render" as const, sort: 0, uploadedAt: 100 };
+  ok(compareImages(thumb, real) > 0 && compareImages(real, thumb) < 0, "#60: a datasheet-render thumbnail sorts after every real photo, whatever its sort or age (a real photo always wins)");
+  const ph = src("src/lib/narrative/photos.ts");
+  ok(ph.includes("const { parts, images } = await partsAndImagesBySku(") && ph.includes("images.get(read(sku))?.[0]") && ph.indexOf("images.get(read(sku))?.[0]") < ph.indexOf("manufacturerImageLookup("),
+    "#60: document photos take the part's first visible image (own photo, else its datasheet thumbnail) before the manufacturer image");
+  ok(/\.filter\(\(l\) => l\.kind === "image" && !l\.hidden\)/.test(src("src/lib/stores/part-documents.ts")), "#60: a thumbnail hidden on the part never prints");
+  for (const f of ["src/lib/quote-pdf/document-loader.ts", "src/lib/quote-share/photo-response.ts"]) ok(src(f).includes("keyProductPhotoDocs("), `#60: ${f} reads the one chain (PDF, online and package photos)`);
+}
+
 export async function batch5PureChecks(ok: Ok) {
   coverHeadingChecks(ok);
   viewedChecks(ok);
   wonVersionChecks(ok);
+  thumbnailPhotoChecks(ok);
 }
 
 async function wonVersionDbChecks(ok: Ok) {
@@ -175,8 +189,38 @@ async function wonVersionDbChecks(ok: Ok) {
   }
 }
 
+async function thumbnailPhotoDbChecks(ok: Ok) {
+  const DS = await import("../src/db/doc-store");
+  const D = await import("../src/lib/stores/part-documents");
+  const { keyProductPhotoDocs } = await import("../src/lib/narrative/photos");
+  const SKU = fixtureId("b5", "ph-part");
+  try {
+    await DS.upsertDoc("catalog_parts", { id: SKU, sku: SKU, desc: "B5 photo part", category: "Other", unit: "ea", list: 40, cost: 20, mfr: "B5 Photo Mfr" } as never);
+    registerFixture("catalog_parts", SKU);
+    const mk = async (fileName: string, source: "upload" | "datasheet-render") => {
+      const d = await D.createDocument({ kind: "image", fileName, contentType: "image/webp", size: 1000, blobKey: `part-docs/PD-fixture-b5/${fileName}`, sourceUrl: null, source, by: "Test" });
+      if (!d) throw new Error("#60: fixture document failed");
+      registerFixture("part_documents", d.id);
+      await D.attachDocument(d.id, [SKU], "Test");
+      registerFixture("part_document_links", D.documentLinkId(SKU, d.id));
+      return d;
+    };
+    const sections = [{ id: "s1", name: "Lights", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", narrative: "Intro.",
+      items: [{ id: 1, sku: SKU, desc: "Line", qty: 1, unit: "ea", cost: 10, price: 25 }],
+      keyProducts: [{ lineKey: "1", sku: SKU, text: "The light.", photo: true }] }] as never[];
+    ok(!(await keyProductPhotoDocs(sections)).has(SKU), "#60 db: no photo and no thumbnail → nothing (the rest of the chain decides)");
+    const thumb = await mk("b5-thumb.webp", "datasheet-render");
+    ok((await keyProductPhotoDocs(sections)).get(SKU)?.id === thumb.id, "#60 db: no real photo → the datasheet's page-1 thumbnail prints");
+    const photo = await mk("b5-photo.webp", "upload");
+    ok((await keyProductPhotoDocs(sections)).get(SKU)?.id === photo.id, "#60 db: a real photo always wins over the thumbnail");
+  } finally {
+    await dropFixtures("b5");
+  }
+}
+
 export async function batch5DbChecks(ok: Ok) {
   await wonVersionDbChecks(ok);
+  await thumbnailPhotoDbChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-batch5.ts")) {
