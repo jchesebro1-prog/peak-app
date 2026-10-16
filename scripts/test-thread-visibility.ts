@@ -953,7 +953,7 @@ export async function taskShareDbChecks(ok: Ok): Promise<void> {
     await createFixture("tasks", pushedOver as never);
     ok((await sees(ME, ids.a)) && !(await sees(ME, ids.pushed)) && (await getDoc<{ id: string; threadId?: string }>("tasks", at!.id))?.threadId === ids.a, "task share db (#351): a pushed update keeps the stored threadId and stamp — it can't re-point the share");
     const route = readFileSync("src/app/api/sync/push/route.ts", "utf8");
-    ok(/let doc: Record<string, unknown> = sanitizePushedDoc\(coll, \{ \.\.\.rec\.doc, id: rec\.id \}, existing\.length \? \{ doc: existing\[0\]\.doc, deleted: !!existing\[0\]\.deleted \} : null\);/.test(route), "sync push (#351): the push route sanitises every document before insert or update");
+    ok(/let doc: Record<string, unknown> = sanitizePushedDoc\(coll, \{ \.\.\.(?:rec\.doc|pushDoc), id: rec\.id \}, existing\.length \? \{ doc: existing\[0\]\.doc, deleted: !!existing\[0\]\.deleted \} : null\);/.test(route), "sync push (#351): the push route sanitises every document before insert or update");
 
     /* a promise-task never shares */
     const p = await T.createTaskOnce({ id: id("k-promise"), title: "Promise", assigneeUserId: ME.id, assigneeName: ME.name, threadId: ids.promise, threadShare: { threadId: ids.promise, by: OWNER.id, to: ME.id, at: NOW } }, { id: "system", name: "System" });
