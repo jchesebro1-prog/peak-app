@@ -114,6 +114,11 @@ function wonVersionChecks(ok: Ok) {
   ok(st.includes("if (out && (revised.value || reopened.value)) await scheduleRevisePdfSafely(id);"), "#355 review I2: a restoring reopen re-renders its PDF (won → sent too)");
   const us = src("src/app/(app)/estimator/use-estimator-state.ts");
   ok((us.match(/if \(r\.reopenedAtWon\) \{\s*window\.location\.reload\(\);/g) || []).length === 2, "#59: the Estimator reloads after a status or stage move that put the won version back");
+  ok(/if \(res\.reopenedAtWon\) \{\s*window\.location\.reload\(\);/.test(us) && src("src/app/(app)/estimator/actions.ts").includes("reopenedAtWon = reopenedAtWonVersion(beforeMove, q);"),
+    "#355 review M2: a Save whose status move reopened a won estimate reloads too");
+  ok(us.includes('if (prevStatus === "won" && v !== "won" && pdfDirty && (await saveNow()) === false) {') && us.includes('if (prevStatus === "won" && pdfDirty && (await saveNow()) === false) {') &&
+     us.indexOf('if (prevStatus === "won" && v !== "won" && pdfDirty') < us.indexOf("const r = await setStatusAction(id, v,"),
+    "#355 review I3: leaving Won with unsaved edits saves them first (status menu and stage bar), so the reopen snapshot keeps them");
 }
 
 /* --- #60 a key product with no photo uses its datasheet's page-1 thumbnail (already so — pinned) --- */

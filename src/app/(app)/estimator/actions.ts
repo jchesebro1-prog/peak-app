@@ -243,6 +243,9 @@ export type SaveResult = {
   /** Estimate suggestion — true when this save linked the quote to the
    *  posted `suggestionId` (the builder stops sending it). */
   suggestionLinked?: boolean;
+  /** #355 review M2 — this save's status move reopened a won estimate at the
+   *  version that won; the open document holds the edits, so reload. */
+  reopenedAtWon?: boolean;
 };
 
 export type ReviewSync = {
@@ -547,6 +550,8 @@ export async function saveQuoteAction(
   patch.spec = await quoteSpecFollowingRenames(patch.spec);
   let q: Quote | null = null;
   let statusError: string | undefined;
+  // #355 review M2: set when this save's status move put the won version back.
+  let reopenedAtWon = false;
   let statusNotice: string | undefined = credit.notice;
   let pdfState: QuotePdfView | null = null;
   /* #143: keep only the vendor quotes something still references. Deleting a
@@ -614,7 +619,9 @@ export async function saveQuoteAction(
       const decision = resolveSaveStatusChange(payload.status, payload.baseStatus, q.status);
       if (decision.kind === "apply") {
         try {
+          const beforeMove = q;
           q = (await setStatus(loadedId, payload.status, user.name)) ?? q;
+          reopenedAtWon = reopenedAtWonVersion(beforeMove, q);
         } catch (e) {
           // Same split as the create branch below: the gate's refusal is
           // the user's to read (#174); the field edits above are still saved.
@@ -738,6 +745,7 @@ export async function saveQuoteAction(
     ...(statusError ? { error: statusError } : {}),
     ...(statusNotice ? { notice: statusNotice } : {}),
     ...(suggestionLinked ? { suggestionLinked: true } : {}),
+    ...(reopenedAtWon ? { reopenedAtWon: true } : {}),
   };
 }
 

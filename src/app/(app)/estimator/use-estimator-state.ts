@@ -1495,6 +1495,12 @@ export function useEstimatorState(props: EstimatorProps) {
           // bar shows the right stage highlighted without another round trip.
           if (res.pipelineId) setPipelineId(res.pipelineId);
           if (res.stage) setStage(res.stage);
+          // #355 review M2: the save's status move reopened a won estimate at the
+          // version that won — this document holds the edits; load it afresh.
+          if (res.reopenedAtWon) {
+            window.location.reload();
+            return false;
+          }
         }
         if (res.ok) {
           setActionError(null);
@@ -1543,6 +1549,12 @@ export function useEstimatorState(props: EstimatorProps) {
       setStatusChanging(true);
       startTransition(async () => {
         try {
+          // #355 review I3: leaving Won with unsaved edits — save them first, so
+          // the reopen's snapshot keeps them before the won version comes back.
+          if (prevStatus === "won" && v !== "won" && pdfDirty && (await saveNow()) === false) {
+            setStatus(prevStatus);
+            return;
+          }
           const r = await setStatusAction(id, v, v === "won" && alternatesTouched ? { alternatesTaken } : undefined);
           if (!r.ok) {
             // Punch #60: server rejected the transition (e.g. "won" without an
@@ -1592,6 +1604,12 @@ export function useEstimatorState(props: EstimatorProps) {
     setStatusChanging(true);
     startTransition(async () => {
       try {
+        // #355 review I3: same as changeStatus — a stage move can leave Won.
+        if (prevStatus === "won" && pdfDirty && (await saveNow()) === false) {
+          setStage(prevStage);
+          setStatus(prevStatus);
+          return;
+        }
         const r = await setQuoteStageAction(id, stageId, alternatesTouched ? alternatesTaken : undefined);
         if (!r.ok) {
           setStage(prevStage);
