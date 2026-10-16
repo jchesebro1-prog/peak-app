@@ -84,7 +84,7 @@ export function TrackFields({
   const current = series.find((s) => s.id === draft.seriesId) || null;
   const cord = isCordOperated(draft.operation);
   const gap = compact ? 12 : 16;
-  const spacing = spacingDefaults(current);
+  const spacing = spacingDefaults(current, draft.mounting);
   const canCurve = !!current?.curvedSectionFt;
 
   if (!options.length && !current && !disabled) return <NoTrackSeries />;
@@ -141,6 +141,13 @@ export function TrackFields({
             </button>
           ))}
         </div>
+        {/* Oct 15 #45: a walk-along curtain in two halves — built like a bi-part (overlap, lapped legs), 4 end stops. */}
+        {draft.operation === "walkalong" && (
+          <label style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8, fontSize: 12.5, color: "#5b616e", cursor: "pointer" }}>
+            <input type="checkbox" checked={!!draft.walkAlongBipart} onChange={(e) => onSet("walkAlongBipart", e.target.checked)} />
+            Two halves (walk-along bi-part)
+          </label>
+        )}
       </div>
 
       {/* shape + mounting */}

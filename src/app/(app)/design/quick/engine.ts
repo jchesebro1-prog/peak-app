@@ -208,10 +208,14 @@ export const VENUES: VenueDef[] = [
   { key: "pac", label: "PAC", sub: "Performing arts", kind: "proscenium", w: 48, d: 34, g: 58, wing: 18, ph: 28, sys: { rigging: true, curtains: true, lighting: true, controls: true, audio: true, video: true, acoustical: true, pit: true } },
   { key: "concenter", label: "Conference", sub: "Conference center", kind: "flat", w: 50, d: 30, g: 34, wing: 0, ph: 24, sys: { rigging: true, curtains: true, lighting: true, controls: true, audio: true, video: true, acoustical: false, pit: false } },
   { key: "blackbox", label: "Black Box", sub: "Black box theater", kind: "blackbox", w: 26, d: 24, g: 18, wing: 0, ph: 16, sys: { rigging: true, curtains: true, lighting: true, controls: true, audio: true, video: false, acoustical: true, pit: false } },
-  // #255 fix: Jeff's Gym Stage drawing — a 40' opening, 10' wings, a 20' stage (the gym floor is the house fields).
-  { key: "gym", label: "Gym Stage", sub: "Gymnasium stage", kind: "gym", w: 40, d: 20, g: 26, wing: 10, ph: 14, sys: { rigging: true, curtains: true, lighting: true, controls: false, audio: true, video: false, acoustical: false, pit: false } },
+  // #255 fix: Jeff's Gym Stage drawing — a 40' opening, 10' wings (the gym floor is the house fields).
+  // Oct 15 #46 (Jeff): the default stage is 30' deep (it was the drawing's 20').
+  { key: "gym", label: "Gym Stage", sub: "Gymnasium stage", kind: "gym", w: 40, d: 30, g: 26, wing: 10, ph: 14, sys: { rigging: true, curtains: true, lighting: true, controls: false, audio: true, video: false, acoustical: false, pit: false } },
   // #255: Jeff's Arena drawing — width / depth are the end stage's (the floor and bowl are the drawing's own rows).
-  { key: "arena", label: "Arena", sub: "Arena / open floor", kind: "arena", w: 40, d: 24, g: 60, wing: 0, ph: 20, sys: { rigging: true, curtains: false, lighting: true, controls: true, audio: true, video: true, acoustical: false, pit: false } },
+  // Oct 15 #46 (Jeff): the default stage is 16' deep (it was 24'). On the default 134' floor the court ends 20' from
+  // each end wall (ARENA_COURT_SHARE), so a 24' stage covered 4' of the court; 16' clears it at every size preset
+  // (Large: 16 × 1.28 ≈ 20', flush with the court line). A design keeps the depth it saved.
+  { key: "arena", label: "Arena", sub: "Arena / open floor", kind: "arena", w: 40, d: 16, g: 60, wing: 0, ph: 20, sys: { rigging: true, curtains: false, lighting: true, controls: true, audio: true, video: true, acoustical: false, pit: false } },
 ];
 
 export const LIM: Record<DimField, [number, number]> = {

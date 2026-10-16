@@ -123,10 +123,11 @@ export type AppSettingsData = {
   fixtureAssemblies?: import("@/lib/fixture-assemblies").FixtureAssembly[];
   /** Per-manufacturer "price list effective" date (PUNCHLIST #133, D156),
    *  keyed by mfrKey() from lib/catalog-books (lowercase alphanumerics) →
-   *  epoch ms. Written by the Catalog banner's date input (the one-time
-   *  backfill for parts that predate `pricedAt`) and by both importers when
-   *  an import writes rows. A part's effective date is the LATER of its own
-   *  `pricedAt` and this — see effectivePriceDate. Absent = no book dates. */
+   *  epoch ms. Written only by the Catalog banner's date input (a by-hand
+   *  "the whole book is confirmed as of D"); since Oct 15 #32 the importers
+   *  date each part they carry (`priceDate`) instead of the whole book. A
+   *  part's effective date is the LATEST of its own `pricedAt`, its
+   *  `priceDate` and this — see effectivePriceDate. Absent = no book dates. */
   priceListEffective?: Record<string, number>;
   /** Grid symbol per catalog category (#131, D154) — FULL REPLACEMENT on
    *  save (the wireTypes idiom): resolveCategoryShapes in

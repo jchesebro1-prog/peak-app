@@ -36,9 +36,9 @@ import { commitCatalogImport } from "./catalog-commit";
  * regression harness can drive it): the wrong-manufacturer guard per
  * manufacturer in the file, normalization to each manufacturer's existing
  * spelling (#132), the form's effective date as `pricedAt` on rows whose
- * price changes, and the manufacturer book date — stamped per manufacturer
- * group that was actually written, never in "skip" mode and never for a
- * file with no price column (#133, D156).
+ * price changes, and (Oct 15 #32) `priceDate` on every row a priced file
+ * writes — never in "skip" mode, never for a file with no price column, and
+ * never the whole manufacturer's book (#133, D156).
  */
 export async function importRecords(formData: FormData): Promise<void> {
   const me = await requirePerm("manage_users");

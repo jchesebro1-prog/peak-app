@@ -1,0 +1,17 @@
+{
+  "source": "DRAFT — Neenah High School, Bray Associates project 3314, Bid Package 5 Project Manual, Table of Contents 00 01 00, 2021-11-22",
+  "confirmed": false,
+  "notes": [
+    "Oct 15 #47 draft only — NOT applied. specs:renumber-bray refuses a map without \"confirmed\": true and reads docs/specs-seed/bray-toc-map.json by default, not this file.",
+    "Built from the one complete Bray TOC found (Dropbox: Computer Backups/Downloads/DRAFTING EXAMPLES/Cavanaugh Tocci Examples/Cavanaugh Tocci - Neenah HS/210210 NJSD New HS BP 05 Remaining Spec 11-22-2021 2 of 2.pdf). Westosha Central HS (Bray 3423, 2022-03-28) uses the same numbers for the sections it has (11 06 10, 26 50 00, 27 40 00).",
+    "It conflicts with Bray's own newer numbering: Oshkosh North HS (Bray 3580, 2026) issued 11 61 13 / 11 61 14 / 11 61 23 / 26 09 61 / 27 41 00 — the numbers the library uses today — and Fall Creek HS (Bray 3748, 2026-10-14) issued 27 41 00. Jeff picks which TOC wins.",
+    "To use it: check each line against the TOC you want, set \"confirmed\": true, save as docs/specs-seed/bray-toc-map.json, dry-run, back up, then --apply."
+  ],
+  "sections": [
+    { "from": "11 61 23", "to": "11 06 10", "title": "Stage Rigging and Curtains" },
+    { "from": "11 61 13", "to": "11 60 01", "title": "Acoustical Shell" },
+    { "from": "11 61 14", "to": "11 61 25", "title": "Orchestra Pit Filler" },
+    { "from": "26 09 61", "to": "26 50 00", "title": "Theatrical Lighting Controls and Fixtures" },
+    { "from": "27 41 00", "to": "27 40 00", "title": "Auditorium Audio-Video System" }
+  ]
+}

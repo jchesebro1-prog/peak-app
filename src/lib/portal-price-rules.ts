@@ -1,4 +1,6 @@
 /** Portal unit pricing rules (#245, spec §2.1). Pure; sell-only outputs. */
+/** `pricedAt` = the part's own latest price date (catalog-books effectivePriceDate without the book date: when the
+ *  price moved, or a priced import last confirmed it — #354 review), the clock the stale-cost rule reads. */
 export type PriceInput = { cost: number | null | undefined; list: number | null | undefined; note?: string | null; pricedAt?: number | null };
 export type PriceRuleOpts = { margin: number; staleCostMonths: number; now: number };
 export type UnitPrice = { unitPrice: number | null; por: boolean; porReason?: "no-price" | "verify-price" | "stale-cost" };

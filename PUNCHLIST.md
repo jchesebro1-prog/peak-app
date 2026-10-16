@@ -9485,8 +9485,9 @@ Spec: `docs/superpowers/specs/2026-09-28-church-template-design.md` (as-built no
 - Review the renders in `docs/venue-templates/renders/` (and a real plan per venue type on the preview deploy).
 - Confirm the Arena's corner radius (13', the floor's; the bowl's 13' + bowl depth) and the Contemporary back-wall
   rule (the back wall keeps the platform's width).
-- Confirm Traditional's upstage side lights landing in the Choir / Electrical rooms, and Contemporary's Green Room /
-  Electrical Room narrowing as the nave deepens (D462, D463).
+- ~~Confirm Traditional's upstage side lights landing in the Choir / Electrical rooms, and Contemporary's Green Room /
+  Electrical Room narrowing as the nave deepens (D462, D463).~~ **ANSWERED 2026-10-15 (Jeff): fix both, plus the
+  arena's 24' end stage covering 4' of the court and a 30' default gym stage — built in #354 (D1162–D1164).**
 - Pick a Background for any custom venue types in Settings → Venue types.
 - A real-DWG check of the Gym Stage Booth positions (back / left / right walls).
 - More drawings arrive as data + keys (the README recipe) — no new engine work expected.
@@ -9657,7 +9658,9 @@ New spec: known project numbers pre-fill the header. Harness checks added.
 Shell file was a hand-edited North HS original (see the follow-up below). **Was open:** where the reviewer's Acoustic
 Shell file came from (no Fall Creek 11 61 13 spec was ever saved — the library's 1.2/G numbers 1., 2., 3.); spec
 numbers vs Bray's TOC (MasterFormat has 11 61 23 as Folding and Portable Stages; SP-1002 and SP-1004 are both
-26 55 61; 26 09 61 "Controls and Fixtures" overlaps 26 55 61).
+26 55 61; 26 09 61 "Controls and Fixtures" overlaps 26 55 61). **ANSWERED 2026-10-15 (Jeff): renumber to Bray's TOC.
+Jeff chose Fall Creek (Bray 3748); its only Bray-issued section, 27 41 00, already matches the library, so #354
+(D1165) found no changes needed (`docs/specs-seed/bray-toc-map.json`, `npm run specs:renumber-bray`).**
 
 **Follow-up (same day) — Acoustic Shell + Pit Filler (D478).** Jeff's Acoustic Shell file turned out to be the North HS
 Word original edited by hand (its own list definitions: `lvlRestart=0` → 1.2/G numbered 4.–6., Times labels on Arial
@@ -10228,7 +10231,9 @@ hints) were fixed and re-reviewed.
    through the screen's own save action (ids `adc-280-black` … `adc-132-black`, 90 live SKUs), each priced with the real
    engine against production catalog costs (40' bi-parting 280 on a batten: 2 × 22' sticks, 8 hanging + 8 pipe clamps,
    2 lap clamps, 134' of #12 — $2,024.78 cost, matched by hand).
-2. Out of scope, for Jeff: walk-along bi-parts needing 4 end stops; center pipe supports (CPS) at the overlap; curve
+2. **ANSWERED 2026-10-15 (Jeff): walk-along end stops (4 on a walk-along bi-part), center pipe supports and separate
+   ceiling vs batten spacing are built in #354 (D1160, D1161); curve idlers are not wanted.** Was: out of scope, for
+   Jeff: walk-along bi-parts needing 4 end stops; center pipe supports (CPS) at the overlap; curve
    spindles/idlers on curved 140 cord runs; 220's floor pulley (ADC 1145 is not in the catalog — Jeff 2026-10-01: use the 2865BL, mapped;
    a cord-operated 220 now prices); pipe-clamp part numbers for 500 and 220 (ADC doesn't publish them); a
    separate ceiling vs batten hanger spacing; 170 has no black ceiling bracket in the catalog (ceiling-mounted 170 is
@@ -12578,3 +12583,30 @@ The app is safe before step 4: ownership already resolves the same way lazily (G
 - Try `/quotes` and `/companies` on production (Prev / Next, a search for a contact's email, a bell link to an old quote).
 - Look at BID SPEC in Settings → Pipelines once after deploy (Lead / Qualify should sit before Collect Information exactly once).
 
+---
+
+## 354. Jeff's 2026-10-15 decisions — Batch 4 (Grid, specs, catalog) — DONE 2026-10-15 on `worktree-assist-layer` (D1158–D1165)
+
+**Asked (Jeff, 2026-10-15 decision session — `docs/decisions/2026-10-15-jeff-decisions.md`, items 32, 43, 45, 46, 47).** The last batch.
+
+**Done:**
+- **#32 Partial price files (D1158):** each catalog part carries its own `priceDate`; both importers stamp it on every row a priced file writes and no longer re-date the manufacturer's whole book, so a supplement dates only its own lines. The by-hand Catalog banner date stays as the fallback. Builders keep the newest date (item 33), price books the oldest, both read per part. Answers MASTER-QUESTIONS E6.
+- **#43 Grid rack group ↔ rack (D1159):** a placed rack assembly shows its Assembly Builder rack's RU devices read-only in the Property Editor with **Open rack →**; **Link to rack…** makes a plain holder that rack (priced as the rack, no double counting); **Unlink** gives it its own part back and copies the rack's devices in as an ordinary group. Answers Grid notes #4's open question.
+- **#45 ADC track extras (D1160, D1161):** walk-along end stops (2 per curtain half; a walk-along can now be two halves — 4 stops, lapped legs, 2 masters), center pipe supports per a per-series "every X ft" (blank = off), and separate batten / ceiling hanging-point spacing (both fall back to the shared one). Optional roles, priced only when mapped. No curve idlers. Answers #291 Remaining 2.
+- **#46 Venue drawings (D1162–D1164):** `church-contemporary@2` keeps the Green / Electrical Rooms at their drawn width however deep the nave (new `houseCapped` y-span; @1 retired but still drawing for stamped sheets and designs that picked it); the arena's default end stage is 16' (24' covered 4' of the court); church Auto fill hangs side lights inside the platform, never in the side rooms; the Gym Stage default stage is 30'. Renders regenerated: `church-contemporary-4-deep-nave.png`, `arena-1-default.png`, `gym-stage-1-default.png`. Answers #255's open questions.
+- **#47 Bray TOC (D1165) — Fall Creek is the source; no changes needed:** `npm run specs:renumber-bray` renumbers sections and records from `docs/specs-seed/bray-toc-map.json` (dry run by default, `--apply`, `--yes` on a hosted DB; records keep their old number as a revision; ids never change). Jeff chose Fall Creek (Bray 3748). No Fall Creek TOC exists on file, so the map (confirmed) uses the numbers Bray's own Fall Creek section prints — `Fall Creek HS Auditorium AV Written Spec Section 27-41-00.docx`, 27 41 00 — which the library already has. Dry run on a scratch DB seeded with the library: 0 sections, 0 records would change. Sections with no Fall Creek counterpart keep their numbers (11 61 13, 11 61 14, 11 61 23, 11 61 33, 11 61 43, 26 09 23, 26 09 61, 26 55 61, 27 41 16). Answers #265's open question.
+
+**Tests:** new `scripts/test-oct15-batch4.ts` (pure + DB, chained into test:specs; `npx tsx scripts/test-oct15-batch4.ts` runs the pure half, with `PGLITE_PATH` the DB half): per-part dating and the price-book / builder / vendor dates, the store's stamping; the Contemporary @2 identity, shallow-nave parity, room widths at 55–200' naves and the 240-size fold / overlap / self-crossing sweep, side lights on the Platform for both church drawings, the arena stage at every size preset, the gym default; walk-along / two-halves / center-support / spacing quantities, sanitize and the form round-trip; the rack-link refusals, derived rows, snapshot, settle repair and the store's link / unlink / part-swap; the Bray map parse, plan, collision and idempotency, and a renumbered record's revision. `scripts/test-review-regressions.ts` updated for the per-part dating; harness expectations updated where behaviour changed (#255 template lists and gym default, #255 picker pin, #274 fixture roles). No migration, no env var.
+
+**Gates:** tsc 0; `scripts/test-oct15-batch4.ts` 87 PASS pure / 100 PASS with the DB half, 0 FAIL; `test:review:regressions` passed; test:specs 23,439 PASS / 0 FAIL; test:smoke 259 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors on the 43 changed src/scripts files (31 warnings, all on untouched lines). Not browser-verified.
+
+**Review fixes (same day, #354 review "With fixes"):** I1 — a blank-price row in a priced file dates nothing (both importers; tests). I2 — "Remove the N devices inside first — the rack supplies them." plus a one-step Link and remove its N devices (one write, confirmed inline, not undoable). M1 — Unlink copies the rack-level parts too; the toast counts them. M2 — a lot marker can't link. M3 — nothing goes inside a rack placed from the library either (existing members stay). M4 — link / unlink refused on an estimate-owned option. M5 — D1158 says a full re-import leaves parts missing from the file as stale as they were. M6 — the part form copy and the portal's stale-cost clock read the per-part date. M7 — a Bray map with a swap or chain is refused. M8 — cut sheets say "two-half walk-along". Expected production cases for M3's "existing members inside a library rack": none known (groups shipped Oct 12; not checked on production). Review-fix gates: tsc 0; `test-oct15-batch4.ts` 118 PASS / 0 FAIL (with the DB half); `test:review:regressions` passed; test:specs 23,459 PASS / 0 FAIL; test:smoke 259 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors on the 14 changed src/scripts files (1 pre-existing warning, `catalog/page.tsx` Date.now).
+
+**Rollback:** safe. New optional JSON only (`catalog_parts.priceDate`, `GridPlacement.rackId` / `rackHolderPartId`, track-series spacing / center-support fields and roles, `walkAlongBipart` on track lines); older code ignores them. After a rollback a design using `church-contemporary@2` falls back to its venue type's drawing, and a linked rack still prices as the rack.
+
+**Remaining (Jeff-gated):**
+- **Bray TOC:** nothing to run today. If Bray issues Fall Creek's project-manual TOC or more of its sections, add their numbers to `docs/specs-seed/bray-toc-map.json`; if the dry run then shows changes: `npm run db:export`, `DATABASE_URL=… npm run specs:renumber-bray` (dry run), then `-- --apply --yes`.
+- Map the new track roles on the ADC series (walk-along end stop, center pipe support) and set "Center supports every" and the batten / ceiling spacings where ADC's binders give them.
+- A venue type already set to "Church — Contemporary" keeps the earlier drawing until it is re-picked in Settings → Venue types.
+- Try Link to rack… / Unlink on a real Grid design with a rack built in the Assembly Builder.
+- The first supplement price file on production: check its parts read the new date and the rest of the book keeps its old one.

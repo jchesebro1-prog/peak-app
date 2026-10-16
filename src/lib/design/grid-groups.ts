@@ -28,6 +28,8 @@ export type GroupLite = {
   groupId?: string;
   spaceId?: string;
   curtain?: unknown;
+  /** Oct 15 #43: set on a holder linked to a rack assembly — its devices come from the rack, never from members. */
+  rackId?: string;
 };
 
 export const GROUP_CURTAIN_HOLD = "Curtains can't hold other devices.";
@@ -38,6 +40,7 @@ export const GROUP_SELF = "A device can't go inside itself.";
 export const GROUP_HOLDER_GONE = "That device is no longer on this design — reload and try again.";
 export const GROUP_OTHER_OPTION = "Devices can only go into a device on the same option.";
 export const GROUP_OTHER_PAGE = "Devices can only go into a device on the same sheet and page.";
+export const GROUP_RACK_LINKED = "This device is linked to a rack — its devices come from the rack. Open the rack to change them.";
 export const groupFull = (name: string) => `${name} already holds ${MAX_GROUP_MEMBERS} devices.`;
 
 const optionOf = (pl: GroupLite, defaultOpt: string) => pl.optionId || defaultOpt;
@@ -64,6 +67,8 @@ export function holderOf<P extends GroupLite>(pl: GroupLite, byId: ReadonlyMap<s
 export function holdRefusal(holder: GroupLite): string | null {
   if (holder.curtain) return GROUP_CURTAIN_HOLD;
   if (holder.groupId) return GROUP_HOLDER_IS_MEMBER;
+  // Oct 15 #43: a rack-linked holder's group is the rack's own devices (read-only on the Grid).
+  if (holder.rackId) return GROUP_RACK_LINKED;
   return null;
 }
 
@@ -204,7 +209,7 @@ export function settleGroups<P extends GroupLite>(placements: readonly P[], defa
   const named = new Set<string>();
   for (const pl of placements) {
     const h = pl.groupId && pl.groupId !== pl.id ? byId.get(pl.groupId) : undefined;
-    if (h && !h.curtain && !pl.curtain && optionOf(pl, defaultOpt) === optionOf(h, defaultOpt) && pl.sheetId === h.sheetId && pl.page === h.page) named.add(h.id);
+    if (h && !h.curtain && !h.rackId && !pl.curtain && optionOf(pl, defaultOpt) === optionOf(h, defaultOpt) && pl.sheetId === h.sheetId && pl.page === h.page) named.add(h.id);
   }
   // A named holder keeps its members and loses its own link (one level).
   const valid = new Map<string, string>();
@@ -216,6 +221,8 @@ export function settleGroups<P extends GroupLite>(placements: readonly P[], defa
       !!holder &&
       holder.id !== pl.id &&
       !holder.curtain &&
+      // Oct 15 #43: a rack-linked holder takes no members (its devices come from the rack).
+      !holder.rackId &&
       !pl.curtain &&
       // A member never holds: one that is named by others keeps them and
       // loses its own link (its holder, being named, never has one kept).

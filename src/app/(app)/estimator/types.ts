@@ -375,6 +375,8 @@ export type TrackDraft = {
   label: string;
   carrierSpacing: string;
   hangerSpacing: string;
+  /** Oct 15 #45 — walk-along only: two curtain halves (a walk-along bi-part). */
+  walkAlongBipart?: boolean;
 };
 
 /** #274: one catalog part a track series maps a role to, as the Estimator
@@ -502,6 +504,8 @@ export type CatalogHit = {
   list: number;
   mfr: string;
   pricedAt?: number;
+  /** Oct 15 #32 — the last priced file that listed this part (lib/catalog-books). */
+  priceDate?: number;
   /** #304 — Model # and MFR P/N (omitted when blank): the staff row leads with the model, the order # beside it. */
   model?: string;
   mpn?: string;

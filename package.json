@@ -27,6 +27,7 @@
     "symbols:davinci": "tsx scripts/symbols-davinci.ts",
     "fixtures:convert": "tsx scripts/fixtures-convert.ts",
     "geo:recheck-venues": "tsx scripts/geo-recheck-venues.ts",
+    "specs:renumber-bray": "tsx scripts/specs-renumber-bray.ts",
     "tasks:backfill-due": "tsx scripts/backfill-task-due.ts",
     "comms:stamp-owners": "tsx scripts/comms-stamp-owners.ts",
     "specs:seed": "tsx scripts/seed-specs-once.ts --local",

@@ -200,7 +200,7 @@ Estimating Rules — these just need real values before go-live)
   ones (Import → Catalog). ☐ real price book file exists: ______
 - **E5.** Quick Design tier pricing + system-sizing factors: keep demo
   values until real ones supplied. ☐ notes: ______
-- **E6.** Catalog price dates (D156, built 2026-09-21) — two model choices
+- ~~**E6.** Catalog price dates (D156, built 2026-09-21) — two model choices
   taken by default, both easy to change:
   **(a) A partial file re-dates the whole book.** An import that passes the
   manufacturer guard (one overlapping SKU is enough) sets that manufacturer's
@@ -220,7 +220,12 @@ Estimating Rules — these just need real values before go-live)
   Home card / Catalog banner date a book by its OLDEST part (one stale line
   makes the book outdated — decision A from #14). ✦ keep both as built
   ☐ builders should show the oldest date too (a build with one stale part
-  reads as stale) ☐ show both ("as of … / oldest line …") ☐ other: ______
+  reads as stale) ☐ show both ("as of … / oldest line …") ☐ other: ______~~
+  **ANSWERED 2026-10-15 (Jeff): (a) a partial price file dates only the parts in
+  the file — each part carries its own price date (`priceDate`), and an import
+  no longer re-dates the whole manufacturer; (b) builders keep showing the
+  newest date (price books stay oldest-wins, read per part). Built in #354
+  (D1158).**
 - ~~**E7.** Consulting projects added by hand (D155, built 2026-09-21) seed
   EVERY phase on the Settings phase menu, all pending — the "+ New consulting
   project" modal has no phase picker. A project born from a won quote is

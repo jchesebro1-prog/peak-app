@@ -4,15 +4,20 @@
  * banner, the store's stamping rule and the spec harness all share one
  * definition of "when is this price from" without touching the database.
  *
- * Two dates feed every answer:
+ * Three dates feed every answer:
  * - `part.pricedAt` — epoch ms of the price list this line's price came
  *   from; the store stamps it ONLY when `list` or `cost` actually changes
  *   (see nextPricedAt), so it means "when this price last moved".
+ * - `part.priceDate` — the effective date of the last PRICED file that
+ *   listed this part (Oct 15 #32, D-entry in DECISIONS): both importers
+ *   stamp it on every row the file carries, changed price or not, so a
+ *   partial file (a supplement, one category) dates only its own lines.
  * - `settings.priceListEffective[mfrKey(mfr)]` — the manufacturer's
- *   "price list effective" date, set by the Catalog banner (the one-time
- *   backfill) and by every import that writes rows. A list confirmed on
- *   day D confirms every line on it, so a line's effective date is the
- *   LATER of its own date and the book date.
+ *   "price list effective" date. Since Oct 15 #32 only the Catalog banner
+ *   sets it (a by-hand "the whole book is confirmed as of D"); imports no
+ *   longer move it. It stays the fallback for parts that carry neither
+ *   per-part date (everything imported before #32).
+ * A line's effective date is the LATEST of the three.
  */
 
 const DAY = 86400000;
@@ -40,12 +45,17 @@ function validMs(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
 }
 
+/** The fields a price date is read from (a CatalogPart is assignable). */
+export type DatedPricePart = { mfr?: string; pricedAt?: number; priceDate?: number };
+
 /** The date a part's price is effective as of, or null when nothing dates it. */
 export function effectivePriceDate(
-  part: { mfr?: string; pricedAt?: number },
+  part: DatedPricePart,
   settings: PriceDateSettings = {}
 ): number | null {
-  const own = validMs(part.pricedAt);
+  const moved = validMs(part.pricedAt);
+  const listed = validMs(part.priceDate);
+  const own = moved == null ? listed : listed == null ? moved : Math.max(moved, listed);
   const key = mfrKey(part.mfr);
   const book = key ? validMs(settings.priceListEffective?.[key]) : null;
   if (own == null) return book;
@@ -126,7 +136,7 @@ function monoOf(name: string): string {
  * is exactly what the Catalog banner's date input provides in one click.
  */
 export function priceBooks(
-  parts: Array<{ mfr?: string; pricedAt?: number }>,
+  parts: DatedPricePart[],
   settings: PriceDateSettings = {},
   opts: { now?: number; limit?: number } = {}
 ): PriceBookRow[] {
