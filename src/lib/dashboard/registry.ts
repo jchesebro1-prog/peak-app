@@ -102,8 +102,10 @@ export function galleryFor(surface: Surface, roles: string[]): WidgetDef[] {
 }
 
 /** Starting layouts. Home = today's Dashboard order; Reports = today's
- *  Sales view then today's Installs view. The new backward widgets are
- *  gallery picks, not defaults, so nobody's screen changes on upgrade. */
+ *  Sales view then today's Installs view. The spec-task-4 backward widgets
+ *  are gallery picks, not defaults. #348's Bids by GC/EC IS a Reports default
+ *  (Jeff, Open question 11), right after Pipeline by estimator — a user with
+ *  a saved layout is unaffected and adds it from the gallery. */
 export const PRESETS: Record<Surface, readonly WidgetId[]> = {
   home: [
     "my-open-pipeline", "my-win-rate", "my-out-for-signature", "my-avg-quote",

@@ -9,7 +9,7 @@ import { getMany as getQuotes } from "@/lib/stores/quotes";
 import type { Party } from "./rules";
 import type { BidReportInput } from "./bid-report";
 
-/** The most bidder rows one report reads; hitting it marks the load truncated (the widget says so). */
+/** The most bidder rows one report reads; more than this marks the load truncated (the widget says so). */
 export const BID_REPORT_MAX = 5000;
 
 const NAME_CHUNK = 500;
@@ -19,7 +19,7 @@ export type BidReportData = { inputs: BidReportInput[]; names: Map<string, strin
 /** `limit` exists for the harness (a cap it can reach); the dashboard always uses BID_REPORT_MAX. */
 export async function loadBidReportData(opts: { limit?: number } = {}): Promise<BidReportData> {
   const limit = opts.limit ?? BID_REPORT_MAX;
-  const rows = await listDocsWhere<Party>(
+  const found = await listDocsWhere<Party>(
     "record_parties",
     {
       all: [
@@ -28,8 +28,12 @@ export async function loadBidReportData(opts: { limit?: number } = {}): Promise<
         { path: ["bid", "revSent"], filled: "text" },
       ],
     },
-    { limit }
+    // One row past the cap tells "exactly at the cap" from "more than the cap". Rows come back in id order
+    // (listDocsWhere), so a truncated load keeps the first `limit` by id — not the newest.
+    { limit: limit + 1 }
   );
+  const truncated = found.length > limit;
+  const rows = truncated ? found.slice(0, limit) : found;
   const quoteIds = [...new Set(rows.map((p) => p.recordId).filter(Boolean))];
   const companyIds = [...new Set(rows.map((p) => p.companyId).filter(Boolean))];
   const [quotes, names] = await Promise.all([getQuotes(quoteIds), loadNames(companyIds)]);
@@ -40,7 +44,7 @@ export async function loadBidReportData(opts: { limit?: number } = {}): Promise<
       quote: q ? { id: q.id, status: q.status, bid: q.bid } : null,
     };
   });
-  return { inputs, names, truncated: rows.length === limit };
+  return { inputs, names, truncated };
 }
 
 async function loadNames(ids: string[]): Promise<Map<string, string>> {

@@ -39,10 +39,12 @@ export const BID_REPORT_COPY = {
 
 const isNum = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
 
-/** The date a bid falls on for the period: the estimate's bid due date, else the row's last send. null = skipped. */
-export function bidReportAnchor(q: Pick<Quote, "bid">, bid: BidderState): number | null {
+/** The date a bid falls on for the period: the estimate's bid due date, else the row's last send. null = skipped.
+ *  A due date still in the future is clamped to `now` — the period ends at now, so an in-flight bid (sent, due next
+ *  week) would otherwise sit in no period until it passed, and the default view would miss the bids people wait on. */
+export function bidReportAnchor(q: Pick<Quote, "bid">, bid: BidderState, now: number): number | null {
   const due = q.bid?.dueAt;
-  if (isNum(due)) return due;
+  if (isNum(due)) return Math.min(due, now);
   return isNum(bid.sentAt) ? bid.sentAt : null;
 }
 
@@ -55,7 +57,8 @@ type Acc = { companyId: string; role: "gc" | "ec"; sent: number; open: number; d
 export function bidsByBidder(
   inputs: readonly BidReportInput[],
   names: ReadonlyMap<string, string>,
-  period: { start: number; end: number }
+  /** [start, end) plus `now`, which clamps a future due date (bidReportAnchor) */
+  period: { start: number; end: number; now: number }
 ): { rows: BidReportRow[]; total: BidReportTotal } {
   const acc = new Map<string, Acc>();
   for (const { party, quote } of inputs) {
@@ -64,7 +67,7 @@ export function bidsByBidder(
     if (party.role !== "gc" && party.role !== "ec") continue;
     const bid = party.bid;
     if (!bid || !isNum(bid.revSent)) continue; // not delivered → counts nowhere
-    const at = bidReportAnchor(quote, bid);
+    const at = bidReportAnchor(quote, bid, period.now);
     if (at === null || at < period.start || at >= period.end) continue;
     const key = `${party.companyId}\u0000${party.role}`;
     let a = acc.get(key);

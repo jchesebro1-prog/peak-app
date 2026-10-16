@@ -1924,7 +1924,8 @@ export async function portalBidDbChecks(ok: Ok) {
 export function bidReportPureChecks(ok: Ok) {
   const D = Date.UTC(2026, 9, 20, 22, 0);
   const DAY = 86_400_000;
-  const P = { start: Date.UTC(2026, 9, 1), end: Date.UTC(2026, 10, 1) };
+  // `now` well after the period: no due date in these fixtures is in the future, so nothing clamps.
+  const P = { start: Date.UTC(2026, 9, 1), end: Date.UTC(2026, 10, 1), now: Date.UTC(2027, 0, 1) };
   const names = new Map([["CA", "Alpha GC"], ["CB", "Beta Electric"], ["CC", "Gamma"]]);
   const q = (dueAt: number | null = D) => ({ id: "Q-1", status: "sent", bid: { dueAt, addenda: [], awardedPartyId: null } }) as unknown as BidReportInput["quote"];
   const inp = (companyId: string, role: string, bid: Record<string, unknown> | null, quote: BidReportInput["quote"] = q()): BidReportInput =>
@@ -1964,9 +1965,22 @@ export function bidReportPureChecks(ok: Ok) {
 
   // Period anchor.
   const sentOnly = { dueAt: null, addenda: [], awardedPartyId: null };
-  ok(bidReportAnchor({ bid: { dueAt: D, addenda: [], awardedPartyId: null } }, { result: "pending", submitVia: "email", sentAt: 5 }) === D, "bid-report: the anchor is the due date over the send");
-  ok(bidReportAnchor({ bid: sentOnly }, { result: "pending", submitVia: "email", sentAt: 5 }) === 5 && bidReportAnchor({ bid: null }, { result: "pending", submitVia: "email", sentAt: 5 }) === 5, "bid-report: no due date → the last send");
-  ok(bidReportAnchor({ bid: sentOnly }, { result: "pending", submitVia: "email", sentAt: null }) === null, "bid-report: neither → null (skipped)");
+  ok(bidReportAnchor({ bid: { dueAt: D, addenda: [], awardedPartyId: null } }, { result: "pending", submitVia: "email", sentAt: 5 }, P.now) === D, "bid-report: the anchor is the due date over the send");
+  ok(bidReportAnchor({ bid: sentOnly }, { result: "pending", submitVia: "email", sentAt: 5 }, P.now) === 5 && bidReportAnchor({ bid: null }, { result: "pending", submitVia: "email", sentAt: 5 }, P.now) === 5, "bid-report: no due date → the last send");
+  ok(bidReportAnchor({ bid: sentOnly }, { result: "pending", submitVia: "email", sentAt: null }, P.now) === null, "bid-report: neither → null (skipped)");
+  // In-flight bids (controller, review round 1): a future due date clamps to now, so the current period shows them.
+  {
+    const NOW = Date.UTC(2026, 9, 15, 17, 0), WEEK = 7 * DAY;
+    const fut = { dueAt: NOW + WEEK, addenda: [], awardedPartyId: null }, past = { dueAt: NOW - WEEK, addenda: [], awardedPartyId: null };
+    ok(bidReportAnchor({ bid: fut }, { result: "pending", submitVia: "email", sentAt: NOW - DAY }, NOW) === NOW, "bid-report: a due date next week anchors on now");
+    ok(bidReportAnchor({ bid: past }, { result: "pending", submitVia: "email", sentAt: NOW - DAY }, NOW) === NOW - WEEK, "bid-report: a past due date still anchors on itself");
+    ok(bidReportAnchor({ bid: sentOnly }, { result: "pending", submitVia: "email", sentAt: NOW - 2 * DAY }, NOW) === NOW - 2 * DAY, "bid-report: no due date → sentAt (never clamped)");
+    const cur = { start: Date.UTC(2026, 9, 1), end: NOW + 1, now: NOW };
+    const inflight = bidsByBidder([inp("CA", "gc", { result: "pending", sentAt: NOW - DAY }, q(NOW + WEEK))], names, cur);
+    ok(inflight.rows.length === 1 && inflight.rows[0].open === 1 && inflight.rows[0].sent === 1, "bid-report: a sent pending bid due next week counts in the current period");
+    ok(bidsByBidder([inp("CA", "gc", { result: "pending", sentAt: NOW - DAY }, q(NOW + WEEK))], names, { start: NOW + 1, end: NOW + 2 * WEEK, now: NOW }).rows.length === 0,
+      "bid-report: clamped to now, it no longer lands in a window after now");
+  }
   const per = bidsByBidder([
     inp("CA", "gc", { sentAt: P.start - DAY }, q(P.start - DAY)), // before
     inp("CA", "gc", {}, q(P.start)),                              // start inclusive
@@ -2047,7 +2061,8 @@ export async function bidReportWidgetChecks(ok: Ok) {
   ok(html.includes("Bids by GC/EC") && html.includes("Widget Builders &amp; Co") && html.includes("50%"), "bid-report widget: renders the title, the company name and the 50% rate");
   ok(html.includes(`href="/companies/CW1"`) && html.includes(`href="/companies/CW2"`), "bid-report widget: company names link to /companies/<id>");
   ok(/>GC</.test(html) && />EC</.test(html), "bid-report widget: the role shows as ROLE_SHORT (GC / EC)");
-  ok(html.includes("—"), "bid-report widget: a null rate (nothing decided) shows —");
+  const rateCell = (key: string) => html.match(new RegExp(`data-bidder="${key}"[\\s\\S]*?data-cell="rate"[^>]*>([^<]*)</span>`))?.[1];
+  ok(rateCell("CW2:ec") === "—" && rateCell("CW1:gc") === "50%" && rateCell("total") === "50%", "bid-report widget: the rate cell of a row with nothing decided shows —; decided rows and the total show their %");
   ok(html.includes("Oct 13"), "bid-report widget: the last-sent date is a Chicago short date");
   ok(html.includes("All GCs and ECs") && html.lastIndexOf("All GCs and ECs") > html.lastIndexOf("Sparky Electric"), "bid-report widget: the total row comes last");
   ok(BID_REPORT_COPY.cols.every((c) => html.includes(c.replace("&", "&amp;"))), "bid-report widget: every column header shows");
@@ -2073,7 +2088,7 @@ export async function bidReportWidgetChecks(ok: Ok) {
   const rd = (f: string) => readFileSync(join(__dirname, "..", f), "utf8");
   const code = (f: string) => rd(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
   const server = code("src/lib/parties/bid-report-server.ts");
-  ok(/listDocsWhere<[^>]*>\(\s*"record_parties"/.test(server) && /const limit = opts\.limit \?\? BID_REPORT_MAX;/.test(server) && /\{\s*limit\s*\}\s*\)/.test(server) && /truncated:\s*rows\.length === limit/.test(server) && BID_REPORT_MAX === 5000, "bid-report pins: the loader runs one bounded listDocsWhere(\"record_parties\") query (LIMIT 5000)");
+  ok(/listDocsWhere<[^>]*>\(\s*"record_parties"/.test(server) && /const limit = opts\.limit \?\? BID_REPORT_MAX;/.test(server) && /\{\s*limit:\s*limit \+ 1\s*\}/.test(server) && /truncated = found\.length > limit/.test(server) && BID_REPORT_MAX === 5000, "bid-report pins: the loader runs one bounded listDocsWhere(\"record_parties\") query (LIMIT 5000)");
   ok(!/\bgetAll\b|listDocs\(|allCompanies\(/.test(server), "bid-report pins: the loader never scans (no getAll / listDocs / allCompanies)");
   ok(/is:\s*"quote"/.test(server) && /in:\s*\[\s*"gc",\s*"ec"\s*\]/.test(server) && /path:\s*\[\s*"bid",\s*"revSent"\s*\]/.test(server), "bid-report pins: the query reads delivered quote GC/EC rows only");
   ok(/bidReport:\s*once\(loadBidReportData\)/.test(code("src/lib/dashboard/data.ts")), "bid-report pins: data.ts memoises the loader once per request");
@@ -2113,14 +2128,17 @@ export async function bidReportDbChecks(ok: Ok) {
     ok(data.names.get(g1) === NAMES[g1] && data.names.get(g2) === NAMES[g2] && !data.names.has(own), "bid-report db: names for the bidder companies only");
     ok(data.truncated === false, "bid-report db: a small book is not truncated");
 
-    const r = bidsByBidder(mine, data.names, { start: T - DAY, end: T + DAY });
+    const r = bidsByBidder(mine, data.names, { start: T - DAY, end: T + DAY, now: T + 30 * DAY });
     const r1 = r.rows.find((x) => x.companyId === g1), r2 = r.rows.find((x) => x.companyId === g2);
     ok(r.rows.length === 2 && !!r1 && r1.awarded === 1 && r1.decided === 1 && r1.rate === 100 && r1.name === NAMES[g1], "bid-report db: the awarded GC → awarded 1, rate 100");
     ok(!!r2 && r2.role === "ec" && r2.decided === 1 && r2.awarded === 0 && r2.rate === 0, "bid-report db: the other bidder → decided 1, awarded 0, rate 0");
-    ok(bidsByBidder(mine, data.names, { start: T + DAY, end: T + 2 * DAY }).rows.length === 0, "bid-report db: a period that excludes the due date → no rows");
+    ok(bidsByBidder(mine, data.names, { start: T + DAY, end: T + 2 * DAY, now: T + 30 * DAY }).rows.length === 0, "bid-report db: a period that excludes the due date → no rows");
 
-    const capped = await loadBidReportData({ limit: 1 });
-    ok(capped.inputs.length === 1 && capped.truncated === true, "bid-report db: hitting the cap marks the load truncated");
+    const n = data.inputs.length;
+    const exact = await loadBidReportData({ limit: n });
+    const over = await loadBidReportData({ limit: n - 1 });
+    ok(exact.inputs.length === n && exact.truncated === false, "bid-report db: exactly the cap is not truncated");
+    ok(n >= 2 && over.inputs.length === n - 1 && over.truncated === true, "bid-report db: more rows than the cap → truncated, sliced to the cap");
 
   } finally {
     try { await regAll(); } catch {}

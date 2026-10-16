@@ -259,6 +259,17 @@ const ROUTES = [
 ];
 
 /**
+ * Content checks: a 200 isn't enough where the page swallows a failure. The
+ * dashboard host turns a widget that throws into a "Couldn't load this
+ * widget." note and still answers 200, so /reports is checked for that note
+ * (any Reports preset widget throwing fails it) and for #348's Bids by GC/EC
+ * widget, which the preset renders.
+ */
+const CONTENT_CHECKS: Array<{ route: string; reject: string; expect: string; label: string }> = [
+  { route: "/reports?range=12m", reject: "Couldn't load this widget.", expect: "Bids by GC/EC", label: "Reports preset: every widget renders, incl. Bids by GC/EC" },
+];
+
+/**
  * Dynamic `[id]` routes (punch #79). The top-level pass above never compiles
  * these, which is where most of the app's behaviour lives — #76's
  * "use server" illegal-export bug sat in design/grid/[id]/actions.ts and
@@ -274,9 +285,7 @@ const ROUTES = [
  * "That design no longer exists" page instead of a 404, so status alone
  * cannot distinguish a rendered editor from a miss.
  */
-const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: true; expect?: string }> = [
-  // #348 slice 6 — the Reports preset renders Bids by GC/EC (a widget that throws is swallowed into a note, so look for both).
-  { route: "/reports?range=12m", reject: "Couldn't load this widget.", expect: "Bids by GC/EC" },
+const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: true }> = [
   { route: "/projects/P-3001" },
   { route: "/api/projects/P-3001/handoff" },
   { route: "/inspections/RI-2042" },
@@ -718,8 +727,14 @@ async function main() {
 
     console.log("[smoke] --- dynamic [id] routes ---");
     for (const d of DYNAMIC_ROUTES) {
-      const r = await checkRoute(base, d.route, jar, d.reject, d.expectNotFound, d.expect);
+      const r = await checkRoute(base, d.route, jar, d.reject, d.expectNotFound);
       report(r.ok, `${d.route} (${r.detail})`);
+    }
+
+    console.log("[smoke] --- content checks ---");
+    for (const c of CONTENT_CHECKS) {
+      const r = await checkRoute(base, c.route, jar, c.reject, false, c.expect);
+      report(r.ok, `${c.route} — ${c.label} (${r.ok ? r.detail : `${r.detail}; a Reports preset widget threw or Bids by GC/EC is missing`})`);
     }
 
     if (!auth.ok) {

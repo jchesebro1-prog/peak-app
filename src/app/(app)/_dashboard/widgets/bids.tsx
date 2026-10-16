@@ -6,7 +6,7 @@ import { ROLE_SHORT } from "@/lib/parties/rules";
 import { chicagoShortDate } from "@/lib/triage/clock";
 
 /** #348 slice 6 — Reports › "Bids by GC/EC". Period = ?range (history contract), anchored on each bid's due date
- *  (else its last send). Staff-only by being on the team Reports page; the loader reads delivered bidder rows only. */
+ *  (else its last send; a future due date counts as now, so in-flight bids show). Staff-only by being on the team Reports page; the loader reads delivered bidder rows only. */
 
 const COLS = "minmax(160px,1fr) 44px 48px 48px 72px 76px 80px 84px 66px";
 const MONO = { fontFamily: "var(--font-mono)", textAlign: "right" } as const;
@@ -17,7 +17,7 @@ export const BIDS_RENDERERS = {
   "bids-by-bidder": async (ctx) => {
     const { inputs, names, truncated } = await ctx.data.bidReport();
     const { start, end } = periodBounds(ctx.range, ctx.now);
-    const { rows, total } = bidsByBidder(inputs, names, { start, end });
+    const { rows, total } = bidsByBidder(inputs, names, { start, end, now: ctx.now });
 
     const numbers = (r: { sent: number; open: number; decided: number; awarded: number; out: number; rate: number | null; lastSentAt: number | null }) => (
       <>
@@ -26,7 +26,7 @@ export const BIDS_RENDERERS = {
         <span style={MONO}>{r.decided}</span>
         <span style={{ ...MONO, color: "#1f7a52" }}>{r.awarded}</span>
         <span style={{ ...MONO, color: "#8c919c" }}>{r.out}</span>
-        <span style={{ ...MONO, color: "#5b616e" }}>{pct(r.rate)}</span>
+        <span data-cell="rate" style={{ ...MONO, color: "#5b616e" }}>{pct(r.rate)}</span>
         <span style={{ ...MONO, color: "#8c919c" }}>{day(r.lastSentAt)}</span>
       </>
     );
@@ -63,6 +63,7 @@ export const BIDS_RENDERERS = {
             {rows.map((r) => (
               <div
                 key={`${r.companyId}:${r.role}`}
+                data-bidder={`${r.companyId}:${r.role}`}
                 style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "11px 20px", fontSize: 12.5, alignItems: "center", borderBottom: "1px solid #f5f6f8" }}
               >
                 <Link
@@ -79,6 +80,7 @@ export const BIDS_RENDERERS = {
               <div style={{ padding: "22px 20px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>{BID_REPORT_COPY.empty}</div>
             ) : (
               <div
+                data-bidder="total"
                 style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "11px 20px", fontSize: 12.5, alignItems: "center", fontWeight: 700, background: "#fafbfc" }}
               >
                 <span style={{ minWidth: 0 }}>
