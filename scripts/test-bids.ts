@@ -28,6 +28,7 @@ import { quoteMatchesSearch } from "../src/lib/estimate-number";
 import { selectBidDue } from "../src/lib/triage/feeds/quotes";
 import { closedKeys } from "../src/lib/triage/liveness";
 import type { SnapshotRow } from "../src/lib/triage/types";
+import { bidReportAnchor, bidsByBidder, BID_REPORT_COPY, type BidReportInput } from "../src/lib/parties/bid-report";
 import { factLabel, pointsFor } from "../src/lib/triage/rank";
 import type { Quote } from "../src/lib/stores/quotes";
 import { portalBidCandidates, portalBidChip, portalBidDueAt, portalBidList, portalBidState, PORTAL_BID_COPY, quoteHasBidders, type PortalBidRow } from "../src/lib/parties/portal-bid";
@@ -1914,8 +1915,99 @@ export async function portalBidDbChecks(ok: Ok) {
   }
 }
 
+export function bidReportPureChecks(ok: Ok) {
+  const D = Date.UTC(2026, 9, 20, 22, 0);
+  const DAY = 86_400_000;
+  const P = { start: Date.UTC(2026, 9, 1), end: Date.UTC(2026, 10, 1) };
+  const names = new Map([["CA", "Alpha GC"], ["CB", "Beta Electric"], ["CC", "Gamma"]]);
+  const q = (dueAt: number | null = D) => ({ id: "Q-1", status: "sent", bid: { dueAt, addenda: [], awardedPartyId: null } }) as unknown as BidReportInput["quote"];
+  const inp = (companyId: string, role: string, bid: Record<string, unknown> | null, quote: BidReportInput["quote"] = q()): BidReportInput =>
+    ({ party: { id: `P-${Math.random()}`, companyId, role, recordId: "Q-1", bid: bid === null ? null : ({ result: "pending", submitVia: "email", revSent: 1, sentAt: D - DAY, ...bid }) } as never, quote });
+
+  const matrix: BidReportInput[] = [
+    inp("CA", "gc", { result: "awarded", sentAt: D - 3 * DAY }),
+    inp("CA", "gc", { result: "lost", sentAt: D - 1 * DAY }),
+    inp("CA", "gc", { result: "pending", sentAt: D - 2 * DAY }),
+    inp("CB", "ec", { result: "no_bid", sentAt: D - 5 * DAY }),
+    inp("CB", "ec", { result: "pending", revSent: null, sentAt: null }),
+    inp("CB", "gc", { result: "pending" }),
+    inp("CC", "ec", { result: "withdrew" }),
+  ];
+  const r = bidsByBidder(matrix, names, P);
+  const row = (cid: string, role: string) => r.rows.find((x) => x.companyId === cid && x.role === role);
+  const ca = row("CA", "gc");
+  ok(!!ca && ca.sent === 3 && ca.open === 1 && ca.decided === 2 && ca.awarded === 1 && ca.out === 0 && ca.rate === 50 && ca.name === "Alpha GC", "bid-report: a GC with awarded + lost + pending → sent 3, open 1, decided 2, awarded 1, rate 50");
+  ok(ca?.lastSentAt === D - 1 * DAY, "bid-report: lastSentAt is the max sentAt");
+  const cb = row("CB", "ec");
+  ok(!!cb && cb.sent === 1 && cb.out === 1 && cb.decided === 0 && cb.open === 0 && cb.rate === null && cb.lastSentAt === D - 5 * DAY, "bid-report: an EC no-bid plus an unsent pending → sent 1, out 1, decided 0, rate null");
+  ok(!!row("CB", "gc") && r.rows.filter((x) => x.companyId === "CB").length === 2, "bid-report: the same company as GC and EC is two rows");
+  ok(r.rows.length === 4, "bid-report: four (company, role) rows");
+
+  // Excluded.
+  const ex = bidsByBidder([
+    inp("CA", "gc", { result: "awarded" }, null),
+    inp("CA", "gc", null),
+    inp("CA", "owner", { result: "awarded" }),
+    inp("CA", "vendor", { result: "awarded" }),
+    inp("CA", "gc", { result: "awarded", revSent: null, sentAt: null }),
+    inp("CA", "gc", { result: "awarded", revSent: undefined }),
+    inp("CA", "gc", { result: "lost" }),
+  ], names, P);
+  ok(ex.rows.length === 1 && ex.rows[0].sent === 1 && ex.rows[0].awarded === 0 && ex.rows[0].decided === 1 && ex.rows[0].rate === 0,
+    "bid-report: orphan quote, null bid, owner / vendor and unsent awarded rows count nowhere (an unsent award never inflates the rate)");
+
+  // Period anchor.
+  const sentOnly = { dueAt: null, addenda: [], awardedPartyId: null };
+  ok(bidReportAnchor({ bid: { dueAt: D, addenda: [], awardedPartyId: null } }, { result: "pending", submitVia: "email", sentAt: 5 }) === D, "bid-report: the anchor is the due date over the send");
+  ok(bidReportAnchor({ bid: sentOnly }, { result: "pending", submitVia: "email", sentAt: 5 }) === 5 && bidReportAnchor({ bid: null }, { result: "pending", submitVia: "email", sentAt: 5 }) === 5, "bid-report: no due date → the last send");
+  ok(bidReportAnchor({ bid: sentOnly }, { result: "pending", submitVia: "email", sentAt: null }) === null, "bid-report: neither → null (skipped)");
+  const per = bidsByBidder([
+    inp("CA", "gc", { sentAt: P.start - DAY }, q(P.start - DAY)), // before
+    inp("CA", "gc", {}, q(P.start)),                              // start inclusive
+    inp("CA", "gc", {}, q(P.end)),                                // end exclusive
+    inp("CA", "gc", {}, q(P.end - 1)),                            // last ms in
+    inp("CB", "gc", { sentAt: P.start + DAY }, q(null)),          // no due → sentAt
+    inp("CB", "gc", { sentAt: P.start - DAY }, q(null)),          // no due, sent before
+    inp("CC", "gc", { sentAt: P.start + DAY }, q(P.end + DAY)),   // due outside beats an inside send
+    inp("CC", "gc", { sentAt: P.start - DAY }, q(P.start + DAY)), // due inside beats an outside send
+    inp("CC", "gc", { revSent: 1, sentAt: null }, q(null)),       // delivered, nothing to anchor on
+  ], names, P);
+  ok(per.rows.find((x) => x.companyId === "CA")?.sent === 2, "bid-report: the start is inclusive, the end exclusive");
+  ok(per.rows.find((x) => x.companyId === "CB")?.sent === 1 && per.rows.find((x) => x.companyId === "CC")?.sent === 1, "bid-report: due date over send; sentAt when no due date; unanchored rows skipped");
+
+  // Total row.
+  const tot = bidsByBidder([
+    inp("CA", "gc", { result: "awarded", sentAt: D }), inp("CA", "gc", { result: "lost" }),
+    inp("CB", "gc", { result: "lost" }), inp("CB", "gc", { result: "lost" }), inp("CB", "ec", { result: "pending" }),
+    inp("CC", "ec", { result: "no_bid", sentAt: D - 9 * DAY }),
+  ], names, P);
+  const T = tot.total;
+  ok(T.name === "All GCs and ECs" && T.sent === 6 && T.open === 1 && T.decided === 4 && T.awarded === 1 && T.out === 1 && T.companies === 3, "bid-report: the total row sums the counts (distinct companies)");
+  ok(T.rate === 25 && tot.rows.map((x) => x.rate).join() !== "", "bid-report: the total rate is recomputed from the sums (1 ÷ 4), not averaged (50 and 0)");
+  ok(T.lastSentAt === D, "bid-report: the total lastSentAt is the max over rows");
+  const empty = bidsByBidder([], names, P);
+  ok(empty.rows.length === 0 && empty.total.sent === 0 && empty.total.rate === null && empty.total.lastSentAt === null && empty.total.companies === 0, "bid-report: empty input → no rows, a zero total with a null rate");
+  ok(bidsByBidder([inp("ZZ", "gc", {})], names, P).rows[0].name === "Unknown company", "bid-report: a company with no name reads Unknown company");
+  ok(bidsByBidder([inp("CA", "gc", { result: "awarded" }), inp("CA", "gc", { result: "awarded" })], names, P).rows[0].rate === 100 &&
+     bidsByBidder([inp("CA", "gc", { result: "awarded" }), inp("CA", "gc", { result: "lost" }), inp("CA", "gc", { result: "lost" })], names, P).rows[0].rate === 33, "bid-report: the rate rounds (100, 33)");
+
+  // Sort: sent desc, then name.
+  const sorted = bidsByBidder([
+    inp("CC", "gc", {}), inp("CB", "gc", {}), inp("CA", "gc", {}), inp("CA", "ec", {}), inp("CA", "ec", {}),
+  ], names, P).rows.map((x) => `${x.name}/${x.role}/${x.sent}`);
+  ok(sorted.join() === "Alpha GC/ec/2,Alpha GC/gc/1,Beta Electric/gc/1,Gamma/gc/1", `bid-report: sorted by sent desc then name (${sorted.join()})`);
+
+  // Copy + boundary.
+  ok(BID_REPORT_COPY.cols.length === 9 && BID_REPORT_COPY.title === "Bids by GC/EC" && BID_REPORT_COPY.empty === "No bids sent in this period.", "bid-report: the copy constants");
+  const src = readFileSync(join(__dirname, "../src/lib/parties/bid-report.ts"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const valueImports = [...src.matchAll(/^\s*import\s+(?!type\b)[^;]*?from\s+["']([^"']+)["']/gm)].map((m) => m[1]);
+  ok(valueImports.every((f) => f.startsWith("./")), `bid-report: pure — no value import from the stores (${valueImports.join(", ")})`);
+  ok(!/@\/db|node:|-server["']/.test(src), "bid-report: pure — no @/db, node: or -server anywhere in the code");
+}
+
 if (process.argv[1]?.endsWith("test-bids.ts")) {
   let pass = 0, fail = 0;
   const okf: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
-  bidChecks(okf).then(() => bidSendChecks(okf)).then(() => bidSendFakeChecks(okf)).then(() => bidFollowupChecks(okf)).then(() => portalBidPureChecks(okf)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
+  bidChecks(okf).then(() => bidSendChecks(okf)).then(() => bidSendFakeChecks(okf)).then(() => bidFollowupChecks(okf)).then(() => portalBidPureChecks(okf)).then(() => bidReportPureChecks(okf)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
 }
