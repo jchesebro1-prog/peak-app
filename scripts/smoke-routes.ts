@@ -107,6 +107,7 @@ const ROUTES = [
   "/schedule?view=people", // #145 D172 — the By person portfolio view
   "/calendar",
   "/reports",
+  "/reports/sourcing", // Batch 6 #66 — most-quoted products / projected sourcing
   "/reviews",
   "/settings",
   "/settings?section=admin", // retired D99 Admin section → Team & Access (settings cleanup)

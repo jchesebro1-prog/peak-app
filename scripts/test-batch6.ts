@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import { FIELD_TASK_ID_RE, fieldTaskIdDecision } from "../src/lib/stores/tasks";
+import { sourcingReport, sourcingCsv, sortForNoCost, type SourcingPart } from "../src/lib/sourcing-report";
 
 const ROOT = join(__dirname, "..");
 const src = (p: string) => readFileSync(join(ROOT, p), "utf8");
@@ -56,8 +57,64 @@ async function fieldTaskDbChecks(ok: Ok) {
   ok(srv.ok && /^T-\d+$/.test(srv.task.id), "fieldtask db: no client id gets a server-allocated T-#### id");
 }
 
+/* --- #66 most-quoted products / projected sourcing --- */
+function sourcingChecks(ok: Ok) {
+  const parts = new Map<string, SourcingPart>([
+    ["ETC:S4", { sku: "ETC:S4", mfr: "ETC", desc: "Source Four", cost: 200, manufacturerModelNumber: "Source Four 750" }],
+    ["ETC:LAMP", { sku: "ETC:LAMP", mfr: "ETC", desc: "Lamp", cost: 20 }],
+    ["Shure:SM58", { sku: "Shure:SM58", mfr: "Shure", desc: "Mic", cost: 100 }],
+    ["doc-id-58", { sku: "Shure:SM58", mfr: "Shure", desc: "Mic", cost: 100 }],
+    ["RACK-PANEL", { sku: "RACK-PANEL", mfr: "Middle Atlantic", desc: "Panel", cost: 30 }],
+  ]);
+  const sec = (items: unknown[], extra: Record<string, unknown> = {}) => ({ id: "s", name: "S", items, ...extra });
+  const q = (id: string, status: string, spec: unknown) => ({ id, status, spec });
+  const quotes = [
+    q("Q1", "sent", { sections: [sec([
+      { sku: "ETC:S4", qty: 4, cost: 180, price: 300 },
+      { sku: "BONUS", qty: 1, cost: 50, bonus: "package" },
+      { sku: "ETC:S4", qty: 9, cost: 180, option: true },
+      { sku: "LAB", qty: 8, cost: 50, labor: true },
+      { sku: "ASM-1", qty: 2, fixture: true, components: [{ sku: "ETC:S4", qty: 1, cost: 150, role: "fixture" }, { sku: "ETC:LAMP", qty: 2, cost: 15 }] },
+    ]), sec([{ sku: "Shure:SM58", qty: 50, cost: 100 }], { alternate: true }), sec([{ sku: "ETC:S4", qty: 99, cost: 1 }], { kind: "labor" })] }),
+    q("Q2", "draft", { lines: [{ sku: "doc-id-58", qty: 3 }, { sku: "allow:x", qty: 1 }, { sku: "asm:R1", qty: 1 }] }),
+    q("Q3", "won", { sections: [sec([{ sku: "ETC:S4", qty: 100, cost: 180 }])] }),
+    q("Q4", "lost", { sections: [sec([{ sku: "Shure:SM58", qty: 100, cost: 100 }])] }),
+    q("Q5", "draft", { sections: [sec([{ sku: "CUSTOM", qty: 1, cost: 10 }])] }),
+  ];
+  const fixtureOf = (id: string) => (id === "R1" ? ({ id: "R1", kind: "system", label: "R", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] }, parts: [{ sku: "RACK-PANEL", qty: 2 }] } as never) : null);
+  const rates: Record<string, number> = { etc: 0.5, shure: 0.25 };
+  const rep = sourcingReport(quotes, parts, { rateFor: (k) => rates[k] ?? 0.1, fixtureOf });
+  const s4 = rep.parts.find((r) => r.sku === "ETC:S4");
+  ok(!!s4 && s4.qty === 6 && s4.estimates === 1, "#66: Source Four counts its own line (4) + the assembly's member (2 × 1); options, bonus, labor and won/lost quotes are left out");
+  ok(!!s4 && s4.weightedQty === 3 && s4.weightedCost === (4 * 180 + 2 * 150) * 0.5, "#66: weighted qty / cost = qty / cost × the manufacturer's win rate (a member at its component's quoted cost)");
+  ok(s4?.model === "Source Four 750", "#66: the part column is the Model # (#304 partModel)");
+  const lamp = rep.parts.find((r) => r.sku === "ETC:LAMP");
+  ok(!!lamp && lamp.qty === 4 && lamp.weightedCost === 4 * 15 * 0.5, "#66: an assembly's members count (qty × line qty)");
+  const mic = rep.parts.find((r) => r.sku === "Shure:SM58");
+  ok(!!mic && mic.qty === 3 && mic.estimates === 1 && mic.weightedCost === 3 * 100 * 0.25, "#66: an Alternate group is left out; a Grid line by document id counts once under its real sku at catalog cost");
+  const panel = rep.parts.find((r) => r.sku === "RACK-PANEL");
+  ok(rep.parts.every((r) => r.sku !== "CUSTOM" && r.sku !== "ASM-1" && r.sku !== "BONUS"), "#66: only catalog parts are listed (no custom, no assembly id, no bonus line)");
+  ok(rep.openEstimates === 2, "#66: open estimates = draft + sent quotes with a counted part");
+  const etc = rep.manufacturers.find((m) => m.mfrKey === "etc");
+  ok(!!etc && etc.parts === 2 && etc.qty === 10 && etc.estimates === 1, "#66: the manufacturer table sums its parts");
+  ok(rep.manufacturers[0].weightedCost >= rep.manufacturers[rep.manufacturers.length - 1].weightedCost, "#66: rows sort by weighted cost");
+  ok(!!panel && panel.qty === 2 && panel.weightedCost === 2 * 30 * 0.1, "#66: a Grid asm: line expands into its live members at catalog cost (shop rate when the maker has none)");
+  const csv = sourcingCsv([{ ...s4!, model: "=HYPERLINK(1)", desc: "+cmd", manufacturer: "@x" }], true);
+  ok(csv.includes("'=HYPERLINK(1)") && csv.includes("'+cmd") && csv.includes("'@x") && csv.startsWith("﻿Model #"), "#66: CSV cells starting = + - @ get a leading '");
+  const noCost = sourcingCsv([s4!], false);
+  ok(!noCost.includes("Weighted cost") && !noCost.includes(String((4 * 180 + 2 * 150) * 0.5)), "#66: the CSV leaves cost out for a viewer without approve");
+  const sorted = sortForNoCost([{ weightedQty: 1, qty: 1, n: "b" }, { weightedQty: 5, qty: 5, n: "a" }], (x) => x.n);
+  ok(sorted[0].n === "a", "#66: without cost the rows sort by weighted qty");
+  const page = src("src/app/(app)/reports/sourcing/page.tsx");
+  const route = src("src/app/(app)/reports/sourcing/export/route.ts");
+  ok(/const showCost = can\("approve", me\.roles\)/.test(page) && /\{showCost && <th/.test(page) && /const withCost = can\("approve", me\.roles\)/.test(route),
+    "#66: cost shows only to approve holders (the Reports margin-widget gate), page and CSV alike");
+  ok(src("src/app/(app)/reports/page.tsx").includes('href="/reports/sourcing"'), "#66: Reports links to the table");
+}
+
 export async function batch6PureChecks(ok: Ok) {
   fieldTaskPureChecks(ok);
+  sourcingChecks(ok);
 }
 
 export async function batch6DbChecks(ok: Ok) {
