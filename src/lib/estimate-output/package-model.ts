@@ -176,7 +176,7 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
     ...(alternates.length ? { alternates } : {}),
     notIncluded: notIncludedItems(i.frozen.notIncluded),
     ...(documentApplies(d.document)
-      ? { document: resolvePackageDoc(d.document, { sections: d.sections, t: d.t, quoteId: d.quoteId, taxRatePct: d.taxRatePct, totalLabel: t.totalLabel, photos: i.photos }) }
+      ? { document: resolvePackageDoc(d.document, { sections: d.sections, t: d.t, quoteId: d.quoteId, taxRatePct: d.taxRatePct, totalLabel: t.totalLabel, photos: i.photos, models: i.models }) }
       : {}),
   };
 }

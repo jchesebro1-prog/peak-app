@@ -10,7 +10,8 @@ import type { ImageAlign, LineAnchor } from "@/lib/package-doc/types";
 import { AtomRemove } from "./atom-remove";
 import { usePackageDocEnv } from "./editor-context";
 import { setImageAttrs } from "./editor-commands";
-import { isLineTokenSku, linePhotoPreview, withImage, type ImageAttrs } from "./editor-model";
+import { editorPhotoTag, isLineTokenSku, linePhotoPreview, withImage, type ImageAttrs } from "./editor-model";
+import { photoTagStyle } from "@/lib/estimate-output/photo-spread";
 import { walkPhotoSides } from "@/lib/package-doc/photo-sides";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
@@ -20,7 +21,8 @@ import type { Node as PMNode } from "@tiptap/pm/model";
  * full width, centred) exactly like the print, so the paragraphs after it
  * wrap beside it here too. Same photo source as an older product block's
  * preview (linePhotoPreview: own photo → kind placeholder → manufacturer
- * image). Drag the image to move it anywhere in the document. Selected: a
+ * image), with its model tag on the outer bottom corner like the print
+ * (editorPhotoTag). Drag the image to move it anywhere in the document. Selected: a
  * small strip with Left / Right / Full, Size and Remove. Amber outline +
  * `No longer in BOM` while its line is gone (it still prints). With no photo
  * it shows a `No photo for this part` box — in the editor only; it prints
@@ -32,7 +34,7 @@ const BTN: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 11, fontWei
 const ALIGNS: Array<[ImageAlign, string]> = [["auto", "Auto"], ["left", "Left"], ["right", "Right"], ["full", "Full"]];
 const AMBER = "#d9a63a";
 
-/** Where the image sits: the print's float (package-doc-view photoStyle), on the
+/** Where the image sits: the print's float (package-doc-view DocFigure), on the
  *  wrapper. `clear: both` starts each image below an earlier float (consecutive
  *  photos stack instead of sitting side by side), like `.pd-doc .pd-image`. */
 function wrapperStyle(img: ImageAttrs): CSSProperties {
@@ -66,6 +68,7 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
   const rows = env?.library.rows;
   const row = !isLineTokenSku(a.sku) && a.sku && rows && Object.hasOwn(rows, a.sku) ? rows[a.sku] : undefined;
   const preview = linePhotoPreview(a, sections, row);
+  const tag = editorPhotoTag(a, sections, row);
   const inBom = !env || lineAnchorInBom(a, sections);
   const line = inBom ? findLine(findSection(sections, a.sectionId), a.lineKey) : null;
   const name = (line && keyProductHeading(line)) || (row && row.desc) || a.sku || "Product";
@@ -138,6 +141,7 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
             No photo for this part
           </div>
         )}
+        {preview && tag ? <span style={photoTagStyle(shown.align === "left" ? "left" : shown.align === "full" ? "full" : "right", 10)}>{tag}</span> : null}
         {!inBom && (
           <span style={{ position: "absolute", top: 4, left: 4, fontSize: 10.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dd", borderRadius: 999, padding: "1px 8px" }}>No longer in BOM</span>
         )}

@@ -2,7 +2,7 @@ import type { KeyProduct, SpecItem, SpecSection } from "./types";
 import { systemPrintsInBody } from "./quote-document-view";
 import { isPlaceholderSku } from "@/lib/specs/record-keys";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
-import { lineOwnModel } from "@/lib/catalog-rename/sku";
+import { lineOwnModel, type ModelPartLike } from "@/lib/catalog-rename/sku";
 /**
  * #281 — a system narrative's plain-text formatting, turned into printable
  * blocks. Pure (no React) so the test:specs harness can import it.
@@ -99,6 +99,9 @@ export type KeyProductLibraryRow = LibraryInfo & {
    *  member (the light engine, else the first included part). Its paragraph
    *  and photo are that part's; Save to library writes to it. */
   viaSku?: string;
+  /** Photo wrap (2026-10-16) — the read part's model fields (the member's on a #332 alias row), so the editor tags a
+   *  photo exactly as print does (lineModel). Absent when the sku is not a live catalog part. */
+  modelPart?: ModelPartLike;
 };
 /** saveProductParagraphAction's answer — declared here because a "use server"
  *  file may export only async functions. */

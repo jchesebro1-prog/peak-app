@@ -15,6 +15,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { packageViewModel } from "../src/lib/estimate-output/package-model";
 import PackageView, { PACKAGE_LEFT_PHOTO_CSS, PACKAGE_WEB_CSS } from "../src/components/estimate-output/package-view";
+import { resolvePackageDoc } from "../src/lib/package-doc/resolve";
+import PackageDocView, { PACKAGE_DOC_CSS } from "../src/components/package-doc/package-doc-view";
+import { editorPhotoTag } from "../src/components/package-doc/editor/editor-model";
 
 export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
@@ -180,11 +183,50 @@ function packagePagePhotoChecks(ok: Ok) {
     ok(rd(f).includes("loadKeyProductModels(packagePhotoSections(doc.sections), doc.document)") && rd(f).includes("models,"), `photo wrap (package): ${f} reads the models for every scope's key products`);
 }
 
+function packageDocPhotoChecks(ok: Ok) {
+  const sections = wrapSections();
+  const PB = (lineKey: string, sku: string, text: string, photo = { show: true, align: "right", width: 40 }) =>
+    ({ type: "productBlock", attrs: { sectionId: "s2", lineKey, sku, photo }, content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+  const IMG = (lineKey: string, sku: string, align = "left") => ({ type: "productImage", attrs: { sectionId: "s2", lineKey, sku, align, width: 34 } });
+  const doc = { type: "doc", version: 1, content: [PB("5", "SKU-5", "Five words."), { type: "paragraph", content: [{ type: "text", text: "After five." }] }, IMG("6", "SKU-6")] } as never;
+  const ctx = { sections, t: { grand: 1, tax: 0, credit: 0 } as never, quoteId: "Q-1", photos: PHOTOS, models: { "SKU-5": "Jupiter 4" } };
+  const r = resolvePackageDoc(doc, ctx);
+  const prod = r.blocks[0] as { t: string; model?: string }, img = r.blocks[2] as { t: string; model?: string };
+  ok(prod.t === "product" && prod.model === "Jupiter 4" && img.t === "image" && img.model === "PN-6", "photo wrap (pkg doc): resolved product blocks and images carry their tag text");
+  const bare = resolvePackageDoc(doc, { ...ctx, models: undefined, sections: qd293Sections() });
+  ok(!("model" in (bare.blocks[0] as object)) && !("model" in (bare.blocks[2] as object)), "photo wrap (pkg doc): no models and no line model → no `model` key (old documents resolve as before)");
+  const html = renderToStaticMarkup(createElement(PackageDocView, { doc, ctx }));
+  ok(html.includes('<div class="pd-product" data-sku="SKU-5" style="display:block;margin:12px 0"><figure class="pd-ph" style="float:right;width:40%;margin:0 0 8px 14px;position:relative;break-inside:avoid">') &&
+     html.indexOf("Five words.") < html.indexOf("After five.") && !html.includes("display:flow-root;margin:12px 0"),
+    "photo wrap (pkg doc): a product block with its photo is a plain block, so the following paragraphs keep wrapping");
+  ok(html.includes('<span class="pd-ph-tag"') && html.includes(">Jupiter 4</span>") && html.includes('<div class="pd-image" data-sku="SKU-6"><figure class="pd-ph" style="float:left;width:34%') && html.includes(">PN-6</span>"),
+    "photo wrap (pkg doc): product photos and product images both carry the tag");
+  ok(PACKAGE_DOC_CSS.includes(".pd-doc { display: flow-root; }") && PACKAGE_DOC_CSS.includes(".pd-doc .pd-product { break-inside: avoid; page-break-inside: avoid; }") &&
+     PACKAGE_DOC_CSS.includes(".pd-doc .pd-ph { break-inside: avoid; page-break-inside: avoid; }") && PACKAGE_DOC_CSS.includes(".pd-doc .pd-ph-tag { font-size: 10px; }") &&
+     PACKAGE_DOC_CSS.includes("@media print { .pd-doc .pd-ph-tag { font-size: 9px; } }") && PACKAGE_DOC_CSS.includes("@media print { .pd-doc .pd-pagebreak { border-top: 0 !important; margin: 0 !important; } }") &&
+     /@media \(max-width: 480px\) \{\s*\.pd-doc \.pd-ph \{ float: none !important; display: block !important; width: 100% !important; margin: 0 0 10px 0 !important; \}\s*\.pd-doc \.pd-ph img \{ max-height: 3in !important; object-position: right top !important; \}\s*\.pd-doc \.pd-ph-tag \{ left: auto !important; right: 0 !important; \}\s*\}/.test(PACKAGE_DOC_CSS),
+    "photo wrap (pkg doc): the document is the float container; tags 10px on screen, 9px in print; phones full width with the tag bottom-right");
+
+  // Editor: the same tag rule, from the library row.
+  const row = { inCatalog: true, desc: "Five", paragraph: null, paragraphUpdatedAt: null, paragraphUpdatedBy: null, photoDocId: "PD-abcdef", fallbackDocId: null, fallbackLabel: null,
+    modelPart: { sku: "SKU-5", manufacturerModelNumber: "Jupiter 4" } };
+  const a5 = { sectionId: "s2", lineKey: "5", sku: "SKU-5" };
+  ok(editorPhotoTag(a5, sections, row) === "Jupiter 4" && editorPhotoTag(a5, sections, { ...row, photoDocId: null }) === "" && editorPhotoTag({ sectionId: "s2", lineKey: "6", sku: "SKU-6" }, sections, null) === "",
+    "photo wrap (editor): an own photo tags from the part; no photo source → no tag");
+  const ED = "src/components/package-doc/editor";
+  const pbv = rd(`${ED}/product-block-view.tsx`), iv = rd(`${ED}/product-image-view.tsx`);
+  ok(pbv.includes('display: "block",') && !pbv.includes('"flow-root"') && pbv.includes("editorPhotoTag(block.attrs, sections, row)") && pbv.includes("photoTagStyle(photo.align, 10)"),
+    "photo wrap (editor): a product block is never a float box in the editor either, and its photo shows the tag");
+  ok(iv.includes("editorPhotoTag(a, sections, row)") && iv.includes("photoTagStyle("), "photo wrap (editor): a product image shows the tag");
+  ok(rd("src/lib/narrative/library.ts").includes("modelPart:"), "photo wrap (editor): library rows carry the part's model fields");
+}
+
 export async function photoWrapPureChecks(ok: Ok) {
   spreadChecks(ok);
   modelChecks(ok);
   quoteDocPhotoChecks(ok);
   packagePagePhotoChecks(ok);
+  packageDocPhotoChecks(ok);
 }
 
 export async function photoWrapDbChecks(_ok: Ok) {
