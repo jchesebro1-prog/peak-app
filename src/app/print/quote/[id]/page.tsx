@@ -1,4 +1,5 @@
 import peakLetterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import QuoteDocument, { QUOTE_PRINT_CSS } from "@/app/(app)/estimator/quote-document";
 import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
@@ -17,6 +18,9 @@ import { quoteAsOfRevision } from "@/lib/quote-share/view";
 import { loadCutSheets } from "@/lib/curtain-cut-sheets/load";
 import { CUT_SHEET_APPEND_LOAD_MS, settleWithin } from "@/lib/curtain-cut-sheets/deadline";
 import { CutSheetPages, CLIENT_PRINT_CSS } from "@/components/cutsheets/cut-sheet-pages";
+import { printOriginFor } from "@/lib/quote-pdf/origin";
+import { loadDatasheetLinkRows } from "@/lib/estimate-output/datasheet-links-server";
+import DatasheetLinksPage from "@/components/estimate-output/datasheet-links-page";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Quote", robots: { index: false, follow: false } };
@@ -52,6 +56,11 @@ export default async function PrintQuotePage({
   const rawRev = sp.rev;
   if (rawRev !== undefined && (!bidder || typeof rawRev !== "string" || !/^[1-9]\d{0,5}$/.test(rawRev))) notFound();
   const rev = typeof rawRev === "string" ? Number(rawRev) : null;
+  // Spec 2026-10-16 §5: `part` splits the customer PDF around the drawings the generator merges in — "main" is the
+  // document + cut sheets, "tail" only the datasheet links. Never on a bidder's PDF (no drawings, no links there).
+  const rawPart = sp.part;
+  if (rawPart !== undefined && (bidder || typeof rawPart !== "string" || (rawPart !== "main" && rawPart !== "tail"))) notFound();
+  const part = rawPart as "main" | "tail" | undefined;
   if (!tokenOk(t, "quote", bidder ? (rev ? `${id}~${bidder}~r${rev}` : `${id}~${bidder}`) : id)) notFound();
   const q = await getQuote(id);
   if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") notFound();
@@ -61,7 +70,11 @@ export default async function PrintQuotePage({
   const src = revision ? quoteAsOfRevision(q, revision) : q;
   // A revision render shows what was sent: live edits since that revision (content changed after it was cut) would make the live-built cut sheets disagree, so they are skipped.
   const cutSheetsOk = !revision || !(typeof q.contentChangedAt === "number" && q.contentChangedAt > revision.at);
-  const [addressee, cust, settings, perks, cutSheets] = await Promise.all([
+  // The links' absolute origin — the print origin, the Cover PDF's way (spec §5). Unresolvable → no links page.
+  const h = await headers();
+  const where = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
+  const origin = "origin" in where ? where.origin : "";
+  const [addressee, cust, settings, perks, cutSheets, links] = await Promise.all([
     // Strict: an explicit bidder that is no longer a live bidder on this quote (deleted since signing) is a 404, never the awarded default.
     bidder ? documentAddressee(src, bidder, { strict: true }) : documentAddressee(q),
     getCustomer(src.customerId),
@@ -69,7 +82,9 @@ export default async function PrintQuotePage({
     // #282 perks+points — the customer's purchase perks line (program on only).
     purchasePerksForCompany(src.customerId),
     // #292 — Client-style cut sheets after the estimate, only when the quote asks for them. A failure or a slow load (8 s) drops them, never the PDF — and says so in the server log.
-    cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
+    part !== "tail" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
+    // Spec 2026-10-16 §5 — the datasheet links: the customer PDF only (never a bidder's), never in the "main" part.
+    !bidder && part !== "main" ? loadDatasheetLinkRows(q, origin) : [],
   ]);
   if (bidder && !addressee) notFound();
   const doc = quoteDocumentDataFor(src, cust, settings, addressee);
@@ -77,18 +92,26 @@ export default async function PrintQuotePage({
   // Never throws — a photo that can't be read just isn't printed.
   // Phase 5: plus the package document's photo-on product blocks.
   // Photo wrap: each photo's model tag, read beside it (never throws either).
-  const [keyProductPhotos, keyProductModels] = await Promise.all([keyProductPhotoDataUris(doc.sections, doc.document), loadKeyProductModels(doc.sections, doc.document)]);
+  // The "tail" part prints only the links, so it reads neither.
+  const noPhotos: [Record<string, { src: string; alt: string }>, Record<string, string>] = [{}, {}];
+  const [keyProductPhotos, keyProductModels] = part === "tail" ? noPhotos : await Promise.all([keyProductPhotoDataUris(doc.sections, doc.document), loadKeyProductModels(doc.sections, doc.document)]);
   return (
     <main>
       <style>{QUOTE_PRINT_CSS}</style>
-      <QuoteDocument {...doc} keyProductPhotos={keyProductPhotos} keyProductModels={keyProductModels} rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
-      {/* #292 — its own page after the estimate; the Client resets (width/padding) ride along. */}
-      {cutSheets?.ok && cutSheets.models.client.length > 0 && (
-        <div style={{ breakBefore: "page" }}>
-          <style>{CLIENT_PRINT_CSS}</style>
-          <CutSheetPages models={cutSheets.models.client} style="client" photos={cutSheets.photos} letterheadSrc={peakLetterhead.src} />
-        </div>
+      {part !== "tail" && (
+        <>
+          <QuoteDocument {...doc} keyProductPhotos={keyProductPhotos} keyProductModels={keyProductModels} rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
+          {/* #292 — its own page after the estimate; the Client resets (width/padding) ride along. */}
+          {cutSheets?.ok && cutSheets.models.client.length > 0 && (
+            <div style={{ breakBefore: "page" }}>
+              <style>{CLIENT_PRINT_CSS}</style>
+              <CutSheetPages models={cutSheets.models.client} style="client" photos={cutSheets.photos} letterheadSrc={peakLetterhead.src} />
+            </div>
+          )}
+        </>
       )}
+      {/* Spec 2026-10-16 §5 — last: the datasheet links (the generator moves them after any merged drawings). */}
+      <DatasheetLinksPage rows={links} quoteNumber={doc.quoteId} projectName={doc.projectName} />
     </main>
   );
 }

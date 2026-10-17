@@ -21,6 +21,8 @@ import { editorPhotoTag } from "../src/components/package-doc/editor/editor-mode
 import { datasheetLinkPath, datasheetLinkSig, verifyDatasheetLinkSig, DATASHEET_SIG_RE } from "../src/lib/estimate-output/datasheet-link";
 import { serveEstimateDatasheet } from "../src/lib/estimate-output/datasheet-link-server";
 import { inlineDisposition } from "../src/lib/document-files";
+import { datasheetLinkRows } from "../src/lib/estimate-output/datasheet-links";
+import DatasheetLinksPage, { DATASHEET_LINKS_CSS } from "../src/components/estimate-output/datasheet-links-page";
 
 export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
@@ -339,6 +341,39 @@ async function datasheetLinkChecks(ok: Ok) {
     "ds link: one 'is this document on this package' rule for the share route and the permanent link");
 }
 
+function datasheetLinksPageChecks(ok: Ok) {
+  const rows = datasheetLinkRows({
+    bom: [{ sku: "ETC:CS-SPOT" }, { sku: "ETC:LENS" }, { sku: "Symetrix:Jupiter 4" }, { sku: "NODOC" }],
+    parts: [
+      { sku: "ETC:CS-SPOT", mfr: "ETC", desc: "ColorSource Spot", manufacturerModelNumber: "CS Spot" },
+      { sku: "ETC:LENS", mfr: "ETC", desc: "Lens tube" },
+      { sku: "Symetrix:Jupiter 4", mfr: "Symetrix", desc: "DSP", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043" },
+      { sku: "NODOC", mfr: "X", desc: "No sheet" },
+    ],
+    documents: [
+      { documentId: "PD-spot0001", kind: "datasheet", skus: ["ETC:CS-SPOT", "ETC:LENS"] },
+      { documentId: "PD-urlonly1", kind: "datasheet", skus: ["Symetrix:Jupiter 4"] },
+      { documentId: "PD-spec0001", kind: "specsheet", skus: ["ETC:CS-SPOT"] },
+    ],
+    hosted: (id) => id !== "PD-urlonly1",
+    href: (id) => "https://app.test/d/ds/Q-1/" + id + "/sig",
+  });
+  ok(JSON.stringify(rows.map((r) => [r.manufacturer, r.model, r.description, r.href.slice(-15)])) ===
+     JSON.stringify([["ETC", "CS Spot", "ColorSource Spot", "PD-spot0001/sig"], ["ETC", "LENS", "Lens tube", "PD-spot0001/sig"]]),
+    "ds page: one row per (part, hosted datasheet) in BOM order — a fixture sheet covering an accessory lists both; spec sheets and URL-only sheets don't print");
+  const html = renderToStaticMarkup(createElement(DatasheetLinksPage, { rows, quoteNumber: "EST-1042", projectName: "North HS" }));
+  ok(html.includes('class="est-dslinks"') && html.includes(">Manufacturer</th>") && html.includes(">Model</th>") && html.includes(">Description</th>") &&
+     html.includes('href="https://app.test/d/ds/Q-1/PD-spot0001/sig"') && html.includes("Datasheet ↗") && html.includes("EST-1042"),
+    "ds page: Manufacturer · Model · Description · Datasheet ↗ (absolute links)");
+  ok(renderToStaticMarkup(createElement(DatasheetLinksPage, { rows: [], quoteNumber: "EST-1", projectName: "" })) === "", "ds page: no rows → no page");
+  ok(DATASHEET_LINKS_CSS.includes(".est-dslinks { break-before: page; page-break-before: always;") && DATASHEET_LINKS_CSS.includes(".est-dslinks tr { break-inside: avoid; page-break-inside: avoid; }"),
+    "ds page: starts its own page; a row never splits");
+  const pr = rd("src/app/print/quote/[id]/page.tsx");
+  ok(pr.includes('rawPart !== "main" && rawPart !== "tail"') && /if \(rawPart !== undefined && \(bidder \|\|/.test(pr), "ds page: ?part= is main | tail only, and never with a bidder");
+  ok(pr.includes('!bidder && part !== "main" ? loadDatasheetLinkRows(q, origin) : []') && pr.includes("<DatasheetLinksPage") && pr.includes('part !== "tail" &&'),
+    "ds page: the customer PDF ends with the links (main hides them; tail prints only them); the bidder PDF never has them");
+}
+
 export async function photoWrapPureChecks(ok: Ok) {
   spreadChecks(ok);
   modelChecks(ok);
@@ -347,6 +382,7 @@ export async function photoWrapPureChecks(ok: Ok) {
   packageDocPhotoChecks(ok);
   titlePageChecks(ok);
   await datasheetLinkChecks(ok);
+  datasheetLinksPageChecks(ok);
 }
 
 export async function photoWrapDbChecks(_ok: Ok) {
