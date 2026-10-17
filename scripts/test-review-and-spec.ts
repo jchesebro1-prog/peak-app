@@ -57890,7 +57890,8 @@ import { renderToStaticMarkup as p5rMarkup } from "react-dom/server";
   ok(/<figure class="pd-ph" style="float:right;width:40%;[^"]*"><img src="data:image\/png;base64,P5R5" alt="Five" style="display:block;width:100%;max-height:2.4in/.test(blk("SKU-5")) && blk("SKU-5").includes(">Line 5</div>") && blk("SKU-5").includes("Five words."),
     "#P5 render: product block — the line's heading, its own paragraphs, the photo floated right at its width %");
   ok(/<figure class="pd-ph" style="float:left;width:30%;margin:0 14px 8px 0;[^"]*">/.test(blk("SKU-6")), "#P5 render: product block photo floated left at 30 %");
-  ok(/<figure class="pd-ph" style="display:block;width:60%;margin:0 auto 10px;[^"]*"><img src="data:image\/png;base64,P5R1" alt="One" style="display:block;width:100%;max-height:4in;object-fit:contain;[^"]*"\/>/.test(blk("SKU-1")) && !blk("SKU-1").includes("float"),
+  // Photo wrap fix round 1: a full photo's figure shrinks to the picture, at most its width %, centred.
+  ok(/<figure class="pd-ph pd-ph-full" style="display:block;width:fit-content;max-width:60%;margin:0 auto 10px;[^"]*"><img src="data:image\/png;base64,P5R1" alt="One" style="display:block;width:auto;max-width:100%;max-height:4in;object-fit:contain"\/>/.test(blk("SKU-1")) && !blk("SKU-1").includes("float"),
     "#P5 render: a full photo prints block-level above the text (its width %, centred), not floated");
   ok(!blk("SKU-4").includes("<img") && blk("SKU-4").includes("Hidden photo."), "#P5 render: photo hidden → no image, words kept");
   ok(blk("SKU-2").includes('src="/placeholders/allowance.webp"') && blk("SKU-2").includes(">Budget allowance — Line 2</div>"), "#P5 render: an allowance line with no photo prints the allowance placeholder (the key-product rule)");
@@ -59313,12 +59314,12 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
   // (3) Renderer.
   const html = p5rMarkup(p5rEl(PackageDocView312, { doc: p5San(doc([{ type: "heading", attrs: { level: 2 }, content: [T("Rigging")] }, IMG("s2", "5", "SKU-5", "left", 40), PB("s2", "5", "SKU-5", "Words beside.", { show: false }), IMG("s1", "2", "line:2", "full", 60), IMG("s2", "6", "SKU-6")]))!, ctx }));
   ok(html.includes('<div class="pd-image" data-sku="SKU-5"><figure class="pd-ph" style="float:left;width:40%;margin:0 14px 8px 0;position:relative;break-inside:avoid"><img src="data:image/png;base64,I5" alt="Five" style="display:block;width:100%;max-height:2.4in;object-fit:contain;object-position:left top"/></figure></div>') &&
-     html.includes('<div class="pd-image" data-sku="line:2"><figure class="pd-ph" style="display:block;width:60%;margin:0 auto 10px;position:relative;break-inside:avoid"><img src="/placeholders/allowance.webp" alt="" style="display:block;width:100%;max-height:4in;object-fit:contain;object-position:center top"/></figure></div>') &&
+     html.includes('<div class="pd-image" data-sku="line:2"><figure class="pd-ph pd-ph-full" style="display:block;width:fit-content;max-width:60%;margin:0 auto 10px;position:relative;break-inside:avoid;clear:both"><img src="/placeholders/allowance.webp" alt="" style="display:block;width:auto;max-width:100%;max-height:4in;object-fit:contain"/></figure></div>') &&
      !html.includes('data-sku="SKU-6"') && html.indexOf('class="pd-image" data-sku="SKU-5"') < html.indexOf("Words beside.") &&
      html.includes('<div class="pd-product" data-sku="SKU-5" style="display:block;margin:12px 0">'),
     "#312 images: renders just the image — floated left/right at width % (max-height 2.4in) or full (block, centred, max-height 4in), the picture held to its alignment edge (object-position) — before the words, which (a plain block, not a flow-root) wrap beside it; no source prints nothing (photo wrap: as a figure)");
   ok(p5rCss.includes(".pd-doc h2, .pd-doc h3, .pd-doc h4, .pd-doc .pd-pagebreak { clear: both; }") && p5rCss.includes(".pd-doc .pd-ph { break-inside: avoid; page-break-inside: avoid; }") &&
-     /@media \(max-width: 480px\) \{\s*\.pd-doc \.pd-ph \{ float: none !important; display: block !important; width: 100% !important; margin: 0 0 10px 0 !important; \}\s*\.pd-doc \.pd-ph img \{ max-height: 3in !important; object-position: right top !important; \}\s*\.pd-doc \.pd-ph-tag \{ left: auto !important; right: 0 !important; \}\s*\}/.test(p5rCss),
+     /@media \(max-width: 480px\) \{\s*\.pd-doc \.pd-ph \{ float: none !important; display: block !important; width: 100% !important; margin: 0 0 10px 0 !important; \}\s*\.pd-doc \.pd-ph img \{ max-height: 3in !important; object-position: right top !important; \}\s*\.pd-doc \.pd-ph-tag \{ left: auto !important; right: 0 !important; \}\s*\.pd-doc \.pd-ph\.pd-ph-full \{ width: fit-content !important; max-width: 100% !important; margin: 0 auto 10px !important; \}\s*\}/.test(p5rCss),
     "#312 images: headings (and page breaks) clear floats so an image never spills into the next system; images keep together in print; phones (≤ 480px) put every image full width");
   const printed = p5rRender({ ...p5rProps({ sections: base, document: doc([P("Before."), IMG("s2", "5", "SKU-5"), PB("s2", "5", "SKU-5", "Five words.", { show: false })]) }), keyProductPhotos: { "SKU-5": { src: "data:image/png;base64,I5P", alt: "Five" } } });
   const noPhoto = p5rRender(p5rProps({ sections: base, document: doc([P("Before."), IMG("s2", "5", "SKU-5")]) }));
@@ -59340,9 +59341,15 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
   const nowHtml = p5rMarkup(p5rEl(PackageDocView312, { doc: oldDoc, ctx: oldCtx })).replace(/<style>[\s\S]*?<\/style>/, "");
   // Photo wrap (2026-10-16): every product block is a plain block now and each photo is a figure — same words, same photos.
   const textOf = (h: string) => h.replace(/<[^>]+>/g, "");
-  ok(textOf(nowHtml) === textOf(OLD_HTML) && !nowHtml.includes("display:flow-root;margin:12px 0") &&
-     (nowHtml.match(/style="display:block;margin:12px 0"><figure class="pd-ph"/g) || []).length === 4,
-    "#312 images (photo wrap): an old document prints the same words and photos; every product block is a plain block with its photo as a figure");
+  // Each block's photo as "sku:src:side:width" — the float side (or full) and width % read off the old <img> or the new figure.
+  const photosOf = (h: string) => [...h.matchAll(/<div class="pd-product" data-sku="([^"]*)"[^>]*>(?:<figure class="[^"]*" style="([^"]*)"><img src="([^"]*)"|<img src="([^"]*)" alt="[^"]*" style="([^"]*)")?/g)].map((m) => {
+    const style = m[2] ?? m[5] ?? "", src = m[3] ?? m[4] ?? "";
+    return [m[1], src, /float:(left|right)/.exec(style)?.[1] ?? (src ? "full" : ""), /(?:^|;)(?:max-)?width:(\d+%)/.exec(style)?.[1] ?? ""].join(":");
+  });
+  ok(textOf(nowHtml) === textOf(OLD_HTML) && J(photosOf(nowHtml)) === J(photosOf(OLD_HTML)) && photosOf(OLD_HTML).filter((x) => x.includes(":right:") || x.includes(":left:") || x.includes(":full:")).length === 4 &&
+     !nowHtml.includes("display:flow-root;margin:12px 0") &&
+     (nowHtml.match(/style="display:block;margin:12px 0"><figure class="pd-ph[ "]/g) || []).length === 4,
+    "#312 images (photo wrap): an old document prints the same words and the same photos (src, side, width %) per block; every product block is a plain block with its photo as a figure");
 
   // (5) Seed + insert shapes.
   const s2 = { ...secs.find((s) => s.id === "s2")!, keyProducts: [{ lineKey: "5", sku: "SKU-5", text: "Five.", photo: true }, { lineKey: "6", sku: "SKU-6", text: "Six.", photo: false }] } as Secs[number];

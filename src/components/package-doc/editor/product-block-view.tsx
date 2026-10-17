@@ -9,7 +9,7 @@ import type { PDProductBlock, PhotoAlign, PhotoAttrs } from "@/lib/package-doc/t
 import { usePackageDocEnv } from "./editor-context";
 import { addPhoto, deleteNodeAt, docHasImageFor, revertProductBlock, separatePhoto, setBlockPhoto } from "./editor-commands";
 import { customLineTagText, editorPhotoTag, isLineTokenSku, productBlockLabel, productPhotoPreview, productTagState, productTagText, SAVED_TO_PRODUCT_MS, withPhoto } from "./editor-model";
-import { photoFigureStyle, photoImgStyle, photoTagStyle } from "@/lib/estimate-output/photo-spread";
+import { docPhotoFigureStyle, docPhotoImgStyle, photoTagStyle } from "@/lib/estimate-output/photo-spread";
 
 /**
  * Estimator Phase 5 — a product-linked block: one BOM line's paragraph(s).
@@ -238,9 +238,10 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
       )}
 
       {ownPhoto && preview && (
-        <figure contentEditable={false} style={photoFigureStyle(photo.align, photo.width)}>
+        // The print's DocFigure styles (a full photo shrinks to the picture and clears earlier floats).
+        <figure contentEditable={false} style={docPhotoFigureStyle(photo.align, photo.width)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={preview.src} alt="" draggable={false} style={photoImgStyle(photo.align, photo.align === "full" ? "4in" : "2.4in")} />
+          <img src={preview.src} alt="" draggable={false} style={docPhotoImgStyle(photo.align)} />
           {tag ? <span style={photoTagStyle(photo.align, 10)}>{tag}</span> : null}
         </figure>
       )}

@@ -1,7 +1,7 @@
 import { Fragment, type CSSProperties, type ReactNode } from "react";
 import { resolvePackageDoc, type PackageDocCtx, type RBlock, type RImage, type RInline, type RList, type RParagraph, type RPhoto, type RPriceTable, type RProduct, type RSysTotal, type ResolvedPackageDoc } from "@/lib/package-doc/resolve";
 import type { PackageDoc } from "@/lib/package-doc/types";
-import { photoFigureStyle, photoImgStyle, photoTagStyle } from "@/lib/estimate-output/photo-spread";
+import { docPhotoFigureStyle, docPhotoImgStyle, photoTagStyle } from "@/lib/estimate-output/photo-spread";
 
 /**
  * Estimator Phase 5 — the package document as the CLIENT reads it: the
@@ -21,8 +21,9 @@ import { photoFigureStyle, photoImgStyle, photoTagStyle } from "@/lib/estimate-o
  *   chip → its resolved value as plain text (a missing one prints nothing)
  *   productBlock → bold heading (the line's name, while in the BOM), the
  *     block's own paragraphs, the photo as a figure floated left/right at
- *     `width` % of the column (or "full": block-level above the text, `width`
- *     % wide, centred) with its model tag; phones (≤ 480px) always put it
+ *     `width` % of the column (or "full": block-level above the text, shrunk
+ *     to the picture at most `width` % wide, centred, clearing earlier floats)
+ *     with its model tag; phones (≤ 480px) always put it
  *     full width above. The block itself is a plain block (photo wrap
  *     2026-10-16), so later paragraphs wrap too; the document is the float
  *     container.
@@ -56,6 +57,7 @@ export const PACKAGE_DOC_CSS = `
   .pd-doc .pd-ph { float: none !important; display: block !important; width: 100% !important; margin: 0 0 10px 0 !important; }
   .pd-doc .pd-ph img { max-height: 3in !important; object-position: right top !important; }
   .pd-doc .pd-ph-tag { left: auto !important; right: 0 !important; }
+  .pd-doc .pd-ph.pd-ph-full { width: fit-content !important; max-width: 100% !important; margin: 0 auto 10px !important; }
 }
 `;
 
@@ -101,13 +103,14 @@ function List({ list }: { list: RList }) {
   return list.t === "ol" ? <ol start={list.start} style={style}>{items}</ol> : <ul style={style}>{items}</ul>;
 }
 
-/** Photo wrap — a document photo: the figure floats left/right at `width` % (or is a centred full-width block),
- *  the image fills it (2.4in cap; 4in when full), the model tag sits on the outer bottom corner. */
+/** Photo wrap — a document photo: the figure floats left/right at `width` % with the image filling it (2.4in cap),
+ *  or ("full") shrinks to the picture, at most `width` %, centred, clearing earlier floats (4in cap); the model tag
+ *  sits on the outer bottom corner (a full photo's bottom-right, on the picture itself). */
 function DocFigure({ ph, model }: { ph: RPhoto; model?: string }) {
   return (
-    <figure className="pd-ph" style={photoFigureStyle(ph.align, ph.width)}>
+    <figure className={ph.align === "full" ? "pd-ph pd-ph-full" : "pd-ph"} style={docPhotoFigureStyle(ph.align, ph.width)}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={ph.src} alt={ph.alt} style={photoImgStyle(ph.align, ph.align === "full" ? "4in" : "2.4in")} />
+      <img src={ph.src} alt={ph.alt} style={docPhotoImgStyle(ph.align)} />
       {model ? (
         <span className="pd-ph-tag" style={photoTagStyle(ph.align)}>
           {model}

@@ -1,10 +1,10 @@
 import { keyProductHeading } from "@/app/(app)/estimator/narrative";
 import type { KeyProductLibraryRow } from "@/app/(app)/estimator/narrative";
 import type { SpecSection } from "@/app/(app)/estimator/types";
-import { lineModel, lineOwnModel } from "@/lib/catalog-rename/sku";
+import { lineModel, lineOwnModel, partModel } from "@/lib/catalog-rename/sku";
 import { photoTagText } from "@/lib/estimate-output/photo-models";
 import { findLine, findSection } from "@/lib/package-doc/chips";
-import { productBlockInBom } from "@/lib/package-doc/gaps";
+import { lineAnchorInBom, productBlockInBom } from "@/lib/package-doc/gaps";
 import { linePlaceholder } from "@/lib/package-doc/print";
 import { clampPhotoWidth, DEFAULT_IMAGE, isImageAlign, isPhotoAlign, MAX_BLOCK_TEXT, MAX_DEPTH, MAX_JSON_CHARS, MAX_NODES } from "@/lib/package-doc/schema";
 import { countNodes, sanitizePackageDoc } from "@/lib/package-doc/sanitize";
@@ -100,12 +100,14 @@ export function linePhotoPreview(
 
 /** Photo wrap — the tag the editor shows on a line-anchored photo: linePhotoPreview's order (own photo → kind
  *  placeholder → manufacturer image); an own photo or manufacturer image tags from the part (lineModel), a
- *  placeholder only from the line's own Model # / MFR P/N; no photo → "". */
+ *  placeholder only from the line's own Model # / MFR P/N; no photo → "". The line counts only while the anchor
+ *  is in the BOM (print's photoModelOf / keyProductModelsFor): a stale anchor tags from its own part alone. */
 export function editorPhotoTag(a: LineAnchor | null | undefined, sections: readonly SpecSection[], row?: KeyProductLibraryRow | null): string {
   if (!a || !linePhotoPreview(a, sections, row)) return "";
-  const line = findLine(findSection(sections, a.sectionId), a.lineKey);
+  const line = lineAnchorInBom(a, sections) ? findLine(findSection(sections, a.sectionId), a.lineKey) : undefined;
   const own = !!row?.photoDocId || (!linePlaceholder(a, sections) && !!row?.fallbackDocId);
-  return photoTagText({ ownPhoto: own, partModel: own && line && row?.modelPart ? lineModel(line, row.modelPart) : null, ownModel: lineOwnModel(line) });
+  const part = own && row?.modelPart ? (line ? lineModel(line, row.modelPart) : partModel(row.modelPart)) : null;
+  return photoTagText({ ownPhoto: own, partModel: part, ownModel: lineOwnModel(line) });
 }
 
 /** A photo patch, clamped like the validator (width 25–100, align left/right/full). */

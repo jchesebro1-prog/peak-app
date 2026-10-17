@@ -11,7 +11,7 @@ import { AtomRemove } from "./atom-remove";
 import { usePackageDocEnv } from "./editor-context";
 import { setImageAttrs } from "./editor-commands";
 import { editorPhotoTag, isLineTokenSku, linePhotoPreview, withImage, type ImageAttrs } from "./editor-model";
-import { photoTagStyle } from "@/lib/estimate-output/photo-spread";
+import { docPhotoImgStyle, photoTagStyle } from "@/lib/estimate-output/photo-spread";
 import { walkPhotoSides } from "@/lib/package-doc/photo-sides";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
@@ -36,9 +36,10 @@ const AMBER = "#d9a63a";
 
 /** Where the image sits: the print's float (package-doc-view DocFigure), on the
  *  wrapper. `clear: both` starts each image below an earlier float (consecutive
- *  photos stack instead of sitting side by side), like `.pd-doc .pd-image`. */
+ *  photos stack instead of sitting side by side), like `.pd-doc .pd-image`. A full
+ *  image shrinks to the picture (at most `width` %, centred), so its tag sits on it. */
 function wrapperStyle(img: ImageAttrs): CSSProperties {
-  if (img.align === "full") return { display: "block", width: `${img.width}%`, margin: "4px auto 10px", clear: "both" };
+  if (img.align === "full") return { display: "block", width: "fit-content", maxWidth: `${img.width}%`, margin: "4px auto 10px", clear: "both" };
   if (img.align === "left") return { float: "left", width: `${img.width}%`, margin: "4px 14px 8px 0", clear: "both" };
   return { float: "right", width: `${img.width}%`, margin: "4px 0 8px 14px", clear: "both" };
 }
@@ -79,6 +80,9 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
     const r = !isLineTokenSku(anchor.sku) && anchor.sku && rows && Object.hasOwn(rows, anchor.sku) ? rows[anchor.sku] : undefined;
     return !!linePhotoPreview(anchor, sections, r);
   }) }, {});
+
+  /** The previewed side as the print's PhotoAlign (an unresolved Auto previews right). */
+  const shownAlign = shown.align === "left" ? "left" : shown.align === "full" ? "full" : "right";
 
   const patch = (p: Partial<ImageAttrs>) => {
     const at = getPos();
@@ -128,12 +132,7 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
       <div data-drag-handle="" title={`${name} — drag to move`} style={{ position: "relative", cursor: "grab" }}>
         {preview ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={preview.src}
-            alt={name}
-            draggable={false}
-            style={{ display: "block", width: "100%", maxHeight: shown.align === "full" ? "4in" : "2.4in", objectFit: "contain", objectPosition: shown.align === "left" ? "left top" : shown.align === "right" ? "right top" : "center top" }}
-          />
+          <img src={preview.src} alt={name} draggable={false} style={docPhotoImgStyle(shownAlign)} />
         ) : (
           <div
             style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 84, padding: 8, border: "1.5px dashed #cfd3da", borderRadius: 6, background: "#fafbfc", fontSize: 11, color: "#8c919c", textAlign: "center" }}
@@ -141,7 +140,7 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
             No photo for this part
           </div>
         )}
-        {preview && tag ? <span style={photoTagStyle(shown.align === "left" ? "left" : shown.align === "full" ? "full" : "right", 10)}>{tag}</span> : null}
+        {tag ? <span style={photoTagStyle(shownAlign, 10)}>{tag}</span> : null}
         {!inBom && (
           <span style={{ position: "absolute", top: 4, left: 4, fontSize: 10.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dd", borderRadius: 999, padding: "1px 8px" }}>No longer in BOM</span>
         )}

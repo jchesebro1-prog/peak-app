@@ -2,6 +2,7 @@ import { isLineToken, resolveKeyProducts } from "@/app/(app)/estimator/narrative
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 import { lineModel, partModel, type ModelPartLike } from "@/lib/catalog-rename/sku";
 import { findLine, findSection } from "@/lib/package-doc/chips";
+import { lineAnchorInBom } from "@/lib/package-doc/gaps";
 import { docLineNodes } from "@/lib/package-doc/text";
 import type { PackageDoc } from "@/lib/package-doc/types";
 
@@ -49,6 +50,8 @@ export function keyProductModelsFor(i: {
     const a = n.attrs;
     const s = a?.sku;
     if (typeof s !== "string" || !want.has(s) || lineOf.has(s)) continue;
+    // A stale anchor (its line key now holds another part) never lends that line's model.
+    if (!lineAnchorInBom(a, i.sections)) continue;
     const line = findLine(findSection(i.sections, a.sectionId), a.lineKey);
     if (line) lineOf.set(s, line);
   }

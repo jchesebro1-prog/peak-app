@@ -57,3 +57,22 @@ export function photoTagStyle(align: PhotoAlign3, fontPx?: number): CSSPropertie
     textOverflow: "ellipsis",
   };
 }
+
+/** Package document (print + editor) — a full-width photo's figure shrinks to the rendered picture (at most
+ *  `widthPct` % of the column, centred) so its bottom-right tag sits on the picture, and clears earlier floats. */
+export function photoFullFigureStyle(widthPct: number): CSSProperties {
+  return { display: "block", width: "fit-content", maxWidth: `${widthPct}%`, margin: "0 auto 10px", position: "relative", breakInside: "avoid", clear: "both" };
+}
+
+/** The picture inside a full figure: its own size, never wider than the figure, height-capped. */
+export function photoFullImgStyle(maxHeight = "4in"): CSSProperties {
+  return { display: "block", width: "auto", maxWidth: "100%", maxHeight, objectFit: "contain" };
+}
+
+/** A package-document photo (print + editor, one rule): left/right floats at `widthPct` % (2.4in cap), full = the shrink-wrapped figure (4in cap). */
+export function docPhotoFigureStyle(align: PhotoAlign3, widthPct: number): CSSProperties {
+  return align === "full" ? photoFullFigureStyle(widthPct) : photoFigureStyle(align, widthPct);
+}
+export function docPhotoImgStyle(align: PhotoAlign3): CSSProperties {
+  return align === "full" ? photoFullImgStyle("4in") : photoImgStyle(align, "2.4in");
+}

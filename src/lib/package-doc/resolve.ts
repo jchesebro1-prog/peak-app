@@ -7,7 +7,7 @@ import { photoTagText } from "@/lib/estimate-output/photo-models";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import { findLine, findSection, resolveChip } from "./chips";
-import { productBlockInBom } from "./gaps";
+import { lineAnchorInBom, productBlockInBom } from "./gaps";
 import { linePlaceholder } from "./print";
 import { clampPhotoWidth, LIST_START_MAX } from "./schema";
 import type { LineAnchor, PackageDoc, PDBlock, PDBulletList, PDInline, PDMark, PDListItem, PDOrderedList, PDParagraph, PDProductBlock, PDProductImage, PhotoAlign } from "./types";
@@ -108,12 +108,15 @@ export function linePhotoSource(a: LineAnchor, ctx: Pick<PackageDocCtx, "section
 }
 
 /** Photo wrap (2026-10-16 §2) — the tag on a line-anchored photo: the part-aware model for the part's own photo
- *  (photos[sku], incl. a manufacturer image), the line's own Model # / MFR P/N for a kind placeholder. */
+ *  (photos[sku], incl. a manufacturer image), the line's own Model # / MFR P/N for a kind placeholder. The line
+ *  counts only while the anchor is still in the BOM (the heading's rule): a stale anchor whose line key now holds
+ *  another part never borrows that part's model — its own photo tags from models[sku] alone. */
 export function photoModelOf(a: LineAnchor, ctx: Pick<PackageDocCtx, "sections" | "photos" | "models">): string {
   const sku = typeof a?.sku === "string" ? a.sku : "";
   const own = !!sku && !!ctx.photos && Object.hasOwn(ctx.photos, sku);
   const partModel = sku && ctx.models && Object.hasOwn(ctx.models, sku) ? ctx.models[sku] : null;
-  return photoTagText({ ownPhoto: own, partModel, ownModel: lineOwnModel(findLine(findSection(ctx.sections, a?.sectionId ?? ""), a?.lineKey ?? "")) });
+  const line = lineAnchorInBom(a, ctx.sections) ? findLine(findSection(ctx.sections, a.sectionId), a.lineKey) : undefined;
+  return photoTagText({ ownPhoto: own, partModel, ownModel: lineOwnModel(line) });
 }
 
 const alignOf = (v: unknown): PhotoAlign => (v === "left" || v === "full" ? v : "right");

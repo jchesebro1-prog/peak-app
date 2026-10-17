@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
-import { spreadPhotoAnchors, photoFigureStyle, photoImgStyle, photoTagStyle, PHOTO_TAG_BG } from "../src/lib/estimate-output/photo-spread";
+import { spreadPhotoAnchors, photoFigureStyle, photoImgStyle, photoTagStyle, PHOTO_TAG_BG, docPhotoFigureStyle, docPhotoImgStyle } from "../src/lib/estimate-output/photo-spread";
 import { cleanTag, photoTagText, keyProductModelsFor, PHOTO_TAG_MAX } from "../src/lib/estimate-output/photo-models";
 import { lineOwnModel } from "../src/lib/catalog-rename/sku";
 import type { SpecSection } from "../src/app/(app)/estimator/types";
@@ -15,7 +15,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { packageViewModel } from "../src/lib/estimate-output/package-model";
 import PackageView, { PACKAGE_LEFT_PHOTO_CSS, PACKAGE_WEB_CSS } from "../src/components/estimate-output/package-view";
-import { resolvePackageDoc } from "../src/lib/package-doc/resolve";
+import { photoModelOf, resolvePackageDoc } from "../src/lib/package-doc/resolve";
 import PackageDocView, { PACKAGE_DOC_CSS } from "../src/components/package-doc/package-doc-view";
 import { editorPhotoTag } from "../src/components/package-doc/editor/editor-model";
 
@@ -204,8 +204,8 @@ function packageDocPhotoChecks(ok: Ok) {
   ok(PACKAGE_DOC_CSS.includes(".pd-doc { display: flow-root; }") && PACKAGE_DOC_CSS.includes(".pd-doc .pd-product { break-inside: avoid; page-break-inside: avoid; }") &&
      PACKAGE_DOC_CSS.includes(".pd-doc .pd-ph { break-inside: avoid; page-break-inside: avoid; }") && PACKAGE_DOC_CSS.includes(".pd-doc .pd-ph-tag { font-size: 10px; }") &&
      PACKAGE_DOC_CSS.includes("@media print { .pd-doc .pd-ph-tag { font-size: 9px; } }") && PACKAGE_DOC_CSS.includes("@media print { .pd-doc .pd-pagebreak { border-top: 0 !important; margin: 0 !important; } }") &&
-     /@media \(max-width: 480px\) \{\s*\.pd-doc \.pd-ph \{ float: none !important; display: block !important; width: 100% !important; margin: 0 0 10px 0 !important; \}\s*\.pd-doc \.pd-ph img \{ max-height: 3in !important; object-position: right top !important; \}\s*\.pd-doc \.pd-ph-tag \{ left: auto !important; right: 0 !important; \}\s*\}/.test(PACKAGE_DOC_CSS),
-    "photo wrap (pkg doc): the document is the float container; tags 10px on screen, 9px in print; phones full width with the tag bottom-right");
+     /@media \(max-width: 480px\) \{\s*\.pd-doc \.pd-ph \{ float: none !important; display: block !important; width: 100% !important; margin: 0 0 10px 0 !important; \}\s*\.pd-doc \.pd-ph img \{ max-height: 3in !important; object-position: right top !important; \}\s*\.pd-doc \.pd-ph-tag \{ left: auto !important; right: 0 !important; \}\s*\.pd-doc \.pd-ph\.pd-ph-full \{ width: fit-content !important; max-width: 100% !important; margin: 0 auto 10px !important; \}\s*\}/.test(PACKAGE_DOC_CSS),
+    "photo wrap (pkg doc): the document is the float container; tags 10px on screen, 9px in print; phones full width with the tag bottom-right (a full photo still shrinks to its picture)");
 
   // Editor: the same tag rule, from the library row.
   const row = { inCatalog: true, desc: "Five", paragraph: null, paragraphUpdatedAt: null, paragraphUpdatedBy: null, photoDocId: "PD-abcdef", fallbackDocId: null, fallbackLabel: null,
@@ -219,6 +219,63 @@ function packageDocPhotoChecks(ok: Ok) {
     "photo wrap (editor): a product block is never a float box in the editor either, and its photo shows the tag");
   ok(iv.includes("editorPhotoTag(a, sections, row)") && iv.includes("photoTagStyle("), "photo wrap (editor): a product image shows the tag");
   ok(rd("src/lib/narrative/library.ts").includes("modelPart:"), "photo wrap (editor): library rows carry the part's model fields");
+  packageDocFixRound1Checks(ok);
+}
+
+/** Task 4 review fix round 1: stale anchors, full-width figures, the editor's placeholder and manufacturer paths. */
+function packageDocFixRound1Checks(ok: Ok) {
+  // (1) A stale anchor: its line key now holds another part (SKU-9, "WRONG-9"). Its own SKU-5 photo still prints,
+  // but never borrows that line's model — print, editor and the server's models map alike.
+  const stale = wrapSections().map((s) =>
+    s.id === "s2" ? { ...s, keyProducts: [], items: s.items.map((it) => (it.id === 5 ? { ...it, sku: "SKU-9", manufacturerModelNumber: "WRONG-9" } : it)) } : s
+  );
+  const a5 = { sectionId: "s2", lineKey: "5", sku: "SKU-5" };
+  const sdoc = { type: "doc", version: 1, content: [{ type: "productImage", attrs: { ...a5, align: "right", width: 34 } }] } as never;
+  const sctx = { sections: stale, t: { grand: 1, tax: 0, credit: 0 } as never, quoteId: "Q-1", photos: PHOTOS };
+  const noModels = resolvePackageDoc(sdoc, sctx).blocks[0] as { t: string; model?: string };
+  const withModels = resolvePackageDoc(sdoc, { ...sctx, models: { "SKU-5": "Jupiter 4" } }).blocks[0] as { t: string; model?: string };
+  ok(noModels.t === "image" && !("model" in noModels) && withModels.model === "Jupiter 4" && photoModelOf(a5, sctx) === "",
+    "photo wrap fix 1 (print): a stale anchor's photo never prints the other part's model — only its own sku's (models[sku]) or none");
+  const row = { inCatalog: true, desc: "Five", paragraph: null, paragraphUpdatedAt: null, paragraphUpdatedBy: null, photoDocId: "PD-abcdef", fallbackDocId: null, fallbackLabel: null,
+    modelPart: { sku: "SKU-5", manufacturerPartNumber: "PN-5" } };
+  ok(editorPhotoTag(a5, stale, row) === "PN-5" && editorPhotoTag(a5, stale, { ...row, modelPart: undefined }) === "",
+    "photo wrap fix 1 (editor): a stale anchor tags from its own part (partModel), never the line's other part; no part → no tag");
+  const parts = new Map([["SKU-5", { sku: "SKU-5", manufacturerPartNumber: "PN-5" }]]);
+  const m = keyProductModelsFor({ sections: stale, document: sdoc, skus: ["SKU-5"], parts });
+  const live = keyProductModelsFor({ sections: wrapSections().map((s) => (s.id === "s2" ? { ...s, keyProducts: [], items: s.items.map((it) => (it.id === 5 ? { ...it, manufacturerModelNumber: "LINE-5" } : it)) } : s)), document: sdoc, skus: ["SKU-5"], parts });
+  ok(m["SKU-5"] === "PN-5" && live["SKU-5"] === "LINE-5",
+    "photo wrap fix 1 (keyProductModelsFor): a stale document anchor lends no line (the part's own model); a live one still does");
+
+  // (2) + (3) A full photo: the figure shrinks to the picture (≤ width %, centred), clears earlier floats, tag bottom-right on it.
+  const fdoc = { type: "doc", version: 1, content: [
+    { type: "productBlock", attrs: { ...a5, photo: { show: true, align: "full", width: 60 } }, content: [{ type: "paragraph", content: [{ type: "text", text: "Full words." }] }] },
+    { type: "productImage", attrs: { sectionId: "s2", lineKey: "6", sku: "SKU-6", align: "full", width: 50 } },
+  ] } as never;
+  const fhtml = renderToStaticMarkup(createElement(PackageDocView, { doc: fdoc, ctx: { ...sctx, sections: wrapSections(), models: { "SKU-5": "Jupiter 4" } } }));
+  const FULL_IMG = 'style="display:block;width:auto;max-width:100%;max-height:4in;object-fit:contain"/>';
+  ok(fhtml.includes('<figure class="pd-ph pd-ph-full" style="display:block;width:fit-content;max-width:60%;margin:0 auto 10px;position:relative;break-inside:avoid;clear:both"><img src="data:image/png;base64,QUFB" alt="Five" ' + FULL_IMG) &&
+     fhtml.includes('<div class="pd-image" data-sku="SKU-6"><figure class="pd-ph pd-ph-full" style="display:block;width:fit-content;max-width:50%;margin:0 auto 10px;position:relative;break-inside:avoid;clear:both"><img src="data:image/png;base64,QkJC" alt="Six" ' + FULL_IMG),
+    "photo wrap fix 2+3 (print): a full photo (product block and product image) is a shrink-wrapped, centred figure ≤ its width % that clears earlier floats");
+  ok(/<span class="pd-ph-tag" style="position:absolute;bottom:0;right:0;[^"]*">Jupiter 4<\/span>/.test(fhtml) && !/<span class="pd-ph-tag" style="[^"]*left:0/.test(fhtml),
+    "photo wrap fix 3 (print): a full photo's tag sits bottom-right, on the picture's own corner");
+  const ED = "src/components/package-doc/editor";
+  const pbv = rd(`${ED}/product-block-view.tsx`), iv = rd(`${ED}/product-image-view.tsx`);
+  const fig = docPhotoFigureStyle("full", 60);
+  ok(pbv.includes("style={docPhotoFigureStyle(photo.align, photo.width)}") && pbv.includes("style={docPhotoImgStyle(photo.align)}") && rd("src/components/package-doc/package-doc-view.tsx").includes("style={docPhotoFigureStyle(ph.align, ph.width)}") &&
+     fig.clear === "both" && fig.width === "fit-content" && fig.maxWidth === "60%" && docPhotoImgStyle("full").width === "auto" && docPhotoImgStyle("right").width === "100%",
+    "photo wrap fix 2+3 (editor): a product block's photo uses the print's own figure/img styles (a full one shrinks and clears)");
+  ok(iv.includes('if (img.align === "full") return { display: "block", width: "fit-content", maxWidth: `${img.width}%`, margin: "4px auto 10px", clear: "both" };') &&
+     iv.includes("style={docPhotoImgStyle(shownAlign)}") && iv.includes("{tag ? <span style={photoTagStyle(shownAlign, 10)}>{tag}</span> : null}") && !iv.includes("preview && tag"),
+    "photo wrap fix 3+5 (editor): a full product image shrinks to its picture like print; the img uses the shared style; no redundant guard");
+
+  // (4) The editor tag's placeholder and manufacturer-image paths.
+  const alw = qd293Sections().map((s) => (s.id === "s1" ? { ...s, items: s.items.map((it) => (it.id === 2 ? { ...it, manufacturerPartNumber: "ALW-2" } : it)) } : s));
+  const a2 = { sectionId: "s1", lineKey: "2", sku: "SKU-2" };
+  const mfrRow = { ...row, photoDocId: null, fallbackDocId: "PD-mfr000", fallbackLabel: "Acme", modelPart: { sku: "SKU-2", manufacturerModelNumber: "PART-M" } };
+  ok(editorPhotoTag(a2, alw, mfrRow) === "ALW-2" && editorPhotoTag(a2, qd293Sections(), mfrRow) === "",
+    "photo wrap fix 4 (editor): a kind placeholder tags only from the line's own model — never row.modelPart (none → no tag)");
+  ok(editorPhotoTag(a5, wrapSections(), { ...mfrRow, modelPart: { sku: "SKU-5", manufacturerModelNumber: "Jupiter 4" } }) === "Jupiter 4",
+    "photo wrap fix 4 (editor): a manufacturer image tags from the part, like an own photo");
 }
 
 export async function photoWrapPureChecks(ok: Ok) {
