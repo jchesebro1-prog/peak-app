@@ -5,7 +5,7 @@
  * controls.tsx verbatim — everything it used to close over arrives as props.
  * ============================================================ */
 
-import type { CSSProperties, ChangeEvent } from "react";
+import type { CSSProperties, ChangeEvent, ReactNode } from "react";
 import type { Draft, FieldDef } from "./types";
 import type { DisciplineKey, DisciplineValue } from "@/lib/stores/survey-intake";
 import { inpStyle, labelStyle, measStyle, selStyle, taStyle } from "./styles";
@@ -21,6 +21,8 @@ export interface FieldRenderProps {
   /** discipline-bound selects (`disc` set) read and write through these */
   dv?: (disc: DisciplineKey, key: string) => DisciplineValue;
   setDisc?: (disc: DisciplineKey, key: string, val: DisciplineValue | undefined) => void;
+  /** #344 C6 — something shown beside an on-file check (a sketch pad), or null */
+  aside?: (key: string) => ReactNode;
 }
 
 const hintStyle: CSSProperties = { fontSize: 12, color: "#7a808c", marginTop: 5 };
@@ -67,12 +69,14 @@ export function renderField(f: FieldDef, p: FieldRenderProps) {
   }
   if (f.kind === "checkMeasure") {
     const c = !!mv(f.key);
+    const beside = p.aside?.(f.key) ?? null;
     return (
-      <div key={f.key} style={{ gridColumn: "1 / -1" }}>
-        <div onClick={() => toggleMeasure(f.key)} style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 13px", border: "1px solid #e4e7ec", borderRadius: 10, cursor: "pointer", background: "#fff" }}>
+      <div key={f.key} style={{ gridColumn: "1 / -1", display: "flex", gap: 10, alignItems: "stretch" }}>
+        <div onClick={() => toggleMeasure(f.key)} style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 11, padding: "12px 13px", border: "1px solid #e4e7ec", borderRadius: 10, cursor: "pointer", background: "#fff" }}>
           <span style={boxStyle(c)}>{c ? "✓" : ""}</span>
           <span style={{ fontSize: 14, fontWeight: 500, color: "#3a3f4a" }}>{f.label}</span>
         </div>
+        {beside}
       </div>
     );
   }

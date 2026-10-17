@@ -717,11 +717,14 @@ export async function patchDocKey(
   return { ids: done, complete: true };
 }
 
-/** Read-modify-write with rev bump; returns null if the doc doesn't exist. */
+/** Read-modify-write with rev bump; returns null if the doc doesn't exist.
+ *  `opts.bumpRev: false` (#344 C-final E) leaves the row's `rev` as stored — the row's `seq` still moves (the 0012
+ *  BEFORE UPDATE trigger), so pull still sees the write. Omitted, every caller bumps rev exactly as before. */
 export async function patchDoc<T extends Doc = Doc>(
   coll: CollectionName,
   id: string,
-  mutate: (doc: T) => T | void
+  mutate: (doc: T) => T | void,
+  opts?: { bumpRev?: boolean }
 ): Promise<T | null> {
   const current = await getDoc<T>(coll, id);
   if (!current) return null;
@@ -735,7 +738,7 @@ export async function patchDoc<T extends Doc = Doc>(
       .update(t)
       .set({
         doc: docOnUpdate(coll, sql`${JSON.stringify(next)}::jsonb`),
-        rev: sql`${t.rev} + 1`,
+        ...(opts?.bumpRev === false ? {} : { rev: sql`${t.rev} + 1` }),
         updatedAt: Date.now(),
         receivedAt: Date.now(),
       })
@@ -755,7 +758,7 @@ export async function patchDoc<T extends Doc = Doc>(
     .update(t)
     .set({
       doc: next,
-      rev: sql`${t.rev} + 1`,
+      ...(opts?.bumpRev === false ? {} : { rev: sql`${t.rev} + 1` }),
       updatedAt: Date.now(),
       receivedAt: Date.now(),
     })

@@ -61,6 +61,15 @@ export function mirrorKeysToClear(
   return mirror.filter((m) => fieldCollections.includes(m.collection) && !pending.has(m.key)).map((m) => m.key);
 }
 
+/** #356 review — a push refused for the user's role: every entry it carried is parked as read-only (state "error" —
+ *  never pushed again until re-saved). Re-review: only the push route's OWN refusal, a 403 whose body is
+ *  `{ error: "read-only" }`; any other 403 (a proxy, a WAF, an expired session page) is transient like any other
+ *  failure — the entries stay pending and retry. Pure. */
+export function pushParksOn(status: number, body?: unknown): boolean {
+  return status === 403 && !!body && typeof body === "object" && (body as { error?: unknown }).error === "read-only";
+}
+export const PUSH_READ_ONLY_MESSAGE = "Read-only — your role can't save field work. Ask an admin for access.";
+
 /** How long a `retry` reply waits before the next flush. */
 const RETRY_DELAY_MS = 30_000;
 
@@ -291,13 +300,14 @@ class SyncEngine {
     id: string,
     doc: Record<string, unknown>,
     rev = 1,
-    opts?: { keepEntry?: (entryDoc: Record<string, unknown>) => boolean }
+    opts?: { keepEntry?: (entryDoc: Record<string, unknown>, state?: "pending" | "error") => boolean }
   ): Promise<void> {
     const key = outboxKey(collection, id);
     // #340 final review (I1): a caller that knows the save did NOT carry everything the entry holds keeps it for
-    // the sync push, instead of losing a capture the online save never sent.
+    // the sync push, instead of losing a capture the online save never sent. #344 C-final F: the entry's state rides
+    // along (a parked entry may need keeping); a callback that ignores it behaves as before.
     const entry = opts?.keepEntry ? await idb.get<OutboxEntry>("outbox", key) : undefined;
-    if (!entry || !opts?.keepEntry?.(entry.doc)) await idb.delete("outbox", key);
+    if (!entry || !opts?.keepEntry?.(entry.doc, entry.state)) await idb.delete("outbox", key);
     await this.writeMirror(collection, id, doc, rev, false);
     await this.refreshCounts();
   }
@@ -396,6 +406,11 @@ class SyncEngine {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ collections }),
       });
+      if (res.status === 403 && pushParksOn(res.status, await res.clone().json().catch(() => null))) {
+        for (const e of outbox) await idb.put("outbox", { ...e, state: "error", error: PUSH_READ_ONLY_MESSAGE });
+        await this.refreshCounts();
+        return;
+      }
       if (!res.ok) throw new Error(`push ${res.status}`);
       const data = (await res.json()) as {
         results: Record<
@@ -464,9 +479,12 @@ class SyncEngine {
     }
   }
 
-  /** Pull office changes into the local mirror and advance cursors. */
-  async pull(): Promise<void> {
-    if (!this.connected() || this.pullForbidden) return;
+  /** Pull office changes into the local mirror and advance cursors.
+   *  Batch 6 #65 — `force` pulls while "Work offline" is on (a deliberate
+   *  "Download today's jobs" while there is still a connection); it reports
+   *  whether the pull reached the server. */
+  async pull(opts: { force?: boolean } = {}): Promise<boolean> {
+    if (!(opts.force ? this.isOnline() : this.connected()) || this.pullForbidden) return false;
     try {
       const cursors =
         (await idb.getMeta<Record<string, number>>(CURSORS_META)) || {};
@@ -483,9 +501,9 @@ class SyncEngine {
         this.pollTimer = null;
         // M4 — and drop what an earlier pull left in this browser (cursors too, so a later grant starts clean)
         await this.clearFieldMirror();
-        return;
+        return false;
       }
-      if (!res.ok) return;
+      if (!res.ok) return false;
       const data = (await res.json()) as {
         changes: Record<
           string,
@@ -515,8 +533,10 @@ class SyncEngine {
       if (applied > 0 && typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent(DATA_PULLED_EVENT));
       }
+      return true;
     } catch {
       /* offline — ignore */
+      return false;
     }
   }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { getEngine } from "./engine";
+import { SaveTimeoutError, withSaveTimeout } from "./save-timeout";
 
 /**
  * The one seam every offline-capable capture editor saves through. It keeps
@@ -39,21 +40,26 @@ export async function saveThroughOutbox(opts: {
   doc: Record<string, unknown>;
   action: () => Promise<void | ServerSaveResult>;
   /** After a successful online save: true keeps this record's existing outbox entry (the save didn't carry all of
-   *  it) for the sync push instead of clearing it. Omitted, the entry is cleared as before. */
-  keepOutbox?: (entryDoc: Record<string, unknown>) => boolean;
+   *  it) for the sync push instead of clearing it. Omitted, the entry is cleared as before. `state` is the entry's
+   *  outbox state (#344 C-final F: `error` = parked). */
+  keepOutbox?: (entryDoc: Record<string, unknown>, state?: "pending" | "error") => boolean;
+  /** #344 C-final B: an online action that hasn't answered within this many ms is treated like a lost connection —
+   *  the doc goes to the outbox (the late answer, if any, is ignored). Omitted = no limit. */
+  timeoutMs?: number;
 }): Promise<SaveResult> {
   const engine = getEngine();
   const rev = Number(opts.doc.rev) || 1;
 
   if (engine.connected()) {
     try {
-      const result = await opts.action();
+      const result = await withSaveTimeout(opts.action(), opts.timeoutMs);
       if (result && !result.ok) throw new Error(result.error);
       await engine.recordSynced(opts.collection, opts.id, opts.doc, rev, opts.keepOutbox ? { keepEntry: opts.keepOutbox } : undefined);
       return { queued: false };
     } catch (e) {
       if (isControlFlowError(e)) throw e; // redirect/notFound — let it propagate
-      if (!isOfflineError(e)) throw e; // real server error — surface it
+      // A real server error surfaces; a timeout (#344 C-final B) is a connection that died without saying so.
+      if (!(e instanceof SaveTimeoutError) && !isOfflineError(e)) throw e;
       // Lost the connection during the save — fall through to the outbox.
       await engine.enqueue(opts.collection, opts.id, opts.doc, rev);
       return { queued: true };

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { NEW_SYSTEM_PRESENTATION, presentationForNewSystem } from "@/lib/estimate-output/fields";
 import { SIDE_OPEN_KEY } from "./estimator-styles";
 import { surveyGoalsAction } from "./output-actions";
 import { listReviewCommentsAction } from "./review-actions";
@@ -39,7 +40,7 @@ import { excludeRefusal, normalizePackageSelection, selectionKey, type PackageSe
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { PackageDoc } from "@/lib/package-doc/types";
 import { docIdFloor } from "@/lib/package-doc/ids";
-import { reanchorDocLine } from "@/lib/package-doc/reanchor";
+import { reanchorDocLine, reanchorPackageDoc } from "@/lib/package-doc/reanchor";
 import { PACKAGE_DOC_TOO_LARGE } from "@/lib/package-doc/save";
 import { docProductSkus } from "@/lib/package-doc/text";
 import { pdfDocKey, withSavedMeta, type PdfDocKeyInput } from "./pdf-doc-key";
@@ -66,6 +67,7 @@ import { defaultSuggestionTarget, sendSuggestionId, suggestPanelFirstRead, sugge
 import { catalogAddPrice, customPartSell, repriceForTier } from "./tier-reprice";
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 import { postChanged } from "@/lib/popout/channel";
+import { applyLineMove, extractLinesAsSection, lineRefKey, planLineMove, removeLinesFromSources, type LineRef } from "@/lib/estimate-line-move/move";
 import { setUnsavedHold } from "@/lib/popout/hold";
 import { discardConfirmText, inputIsDirty, isModalInputKind, MODAL_INPUT_KINDS, rebaseDraft, stableDraftJson, type ModalInputKind } from "@/lib/estimate-steps/discard-confirm";
 
@@ -81,7 +83,7 @@ export const TAX_RATE_PCT = 0;
  *  the freight rule itself. */
 const freshSections = (freightPct: number): SpecSection[] => [
   // #267: a new system's auto price rounds up to the next $25.
-  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, items: [] },
+  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: NEW_SYSTEM_PRESENTATION, items: [] },
 ];
 
 /** Phase 2a — unmarkEdited, blind to the Rewards credit line. The credit
@@ -475,13 +477,15 @@ export function useEstimatorState(props: EstimatorProps) {
         targetName: string;
         targetNumber: string;
         /** #266: "Copied" reuses this banner; absent = the original Moved wording. */
-        verb?: "Moved" | "Copied" | "Loaded";
+        verb?: "Moved" | "Copied" | "Loaded" | "Lines";
         /** #266: the re-price summary; a copy within this estimate has no targetId. */
         detail?: string;
       }
     | { ok: false; error: string }
     | null
   >(null);
+  /** #357: a "move lines to another estimate" round trip is in flight. */
+  const [movingLines, setMovingLines] = useState(false);
   const [custName, setCustName] = useState(initial.custName);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [locationId, setLocationId] = useState(initial.locationId);
@@ -940,9 +944,10 @@ export function useEstimatorState(props: EstimatorProps) {
      and wrap onto a second grid row. #269: 84px internally, room for the
      labor lines' ✎ Edit labor button beside them. #293: +20px for the ★
      key-product toggle — five 20px buttons + 1px gaps (✎ ★ ↑ ↓ × on a
-     labor, track or curtain line) need 104px in BOTH views. */
+     labor, track or curtain line) need 104px in BOTH views. #357: +22px
+     internally for ⇄ Move to another system — six buttons (✎ ★ ⇄ ↑ ↓ ×). */
   const cols = isInternal
-    ? "minmax(150px,1.3fr) 104px 92px 136px 116px 104px"
+    ? "minmax(150px,1.3fr) 104px 92px 136px 116px 126px"
     : "minmax(150px,1.3fr) 104px 136px 116px 104px";
 
   /* ---------------- travel (seeded + fetched on demand, punch #89) ----------------
@@ -1495,6 +1500,12 @@ export function useEstimatorState(props: EstimatorProps) {
           // bar shows the right stage highlighted without another round trip.
           if (res.pipelineId) setPipelineId(res.pipelineId);
           if (res.stage) setStage(res.stage);
+          // #355 review M2: the save's status move reopened a won estimate at the
+          // version that won — this document holds the edits; load it afresh.
+          if (res.reopenedAtWon) {
+            window.location.reload();
+            return false;
+          }
         }
         if (res.ok) {
           setActionError(null);
@@ -1543,6 +1554,12 @@ export function useEstimatorState(props: EstimatorProps) {
       setStatusChanging(true);
       startTransition(async () => {
         try {
+          // #355 review I3: leaving Won with unsaved edits — save them first, so
+          // the reopen's snapshot keeps them before the won version comes back.
+          if (prevStatus === "won" && v !== "won" && pdfDirty && (await saveNow()) === false) {
+            setStatus(prevStatus);
+            return;
+          }
           const r = await setStatusAction(id, v, v === "won" && alternatesTouched ? { alternatesTaken } : undefined);
           if (!r.ok) {
             // Punch #60: server rejected the transition (e.g. "won" without an
@@ -1557,6 +1574,12 @@ export function useEstimatorState(props: EstimatorProps) {
           setGateRefused(false);
           applySync(r);
           postChanged("quote", id);
+          // Batch 5 #59: the server put the won version back (the post-win edits are a
+          // revision now) — this document holds the edits, so load the quote afresh.
+          if (r.reopenedAtWon) {
+            window.location.reload();
+            return;
+          }
           // #282 follow-up: the server cleared the credit when the quote went
           // Lost — take the line off the open document too.
           if (v === "lost") setSections((ss) => (rewardCreditOf(ss) > 0 ? withoutRewardCredit(ss) : ss));
@@ -1586,6 +1609,12 @@ export function useEstimatorState(props: EstimatorProps) {
     setStatusChanging(true);
     startTransition(async () => {
       try {
+        // #355 review I3: same as changeStatus — a stage move can leave Won.
+        if (prevStatus === "won" && pdfDirty && (await saveNow()) === false) {
+          setStage(prevStage);
+          setStatus(prevStatus);
+          return;
+        }
         const r = await setQuoteStageAction(id, stageId, alternatesTouched ? alternatesTaken : undefined);
         if (!r.ok) {
           setStage(prevStage);
@@ -1598,6 +1627,10 @@ export function useEstimatorState(props: EstimatorProps) {
         setGateRefused(false);
         applyStageSync(r);
         postChanged("quote", id);
+        if (r.reopenedAtWon) {
+          window.location.reload();
+          return;
+        }
       } finally {
         setStatusChanging(false);
       }
@@ -1965,6 +1998,73 @@ export function useEstimatorState(props: EstimatorProps) {
       }
     });
   };
+  /** #357: move ticked lines (and their partners) to another system here or a
+   *  new one. Client-only — kept by the next Save, like ↑/↓. */
+  const moveLinesHere = (selected: LineRef[], target: { kind: "system"; sectionId: string } | { kind: "new"; name: string }) => {
+    const resolved = target.kind === "new" ? { kind: "new" as const, id: "sys" + nextId(), name: target.name.trim() || "New System" } : target;
+    // Ids are unique per system only: a line whose id the target already holds lands with a fresh one.
+    const { sections: next, plan, moved } = applyLineMove(sections, selected, resolved, { mintItemId: nextId });
+    if (plan.noop) return;
+    // The package document's product blocks / images / line-quantity chips follow their lines (system, and a
+    // re-minted id) — through the same setter as #312's re-anchor, saved with the next Save. No document: nothing.
+    const nd = reanchorPackageDoc(packageDocRef.current, moved);
+    if (nd !== packageDocRef.current) setPackageDoc(nd);
+    // The over-cap draft (restored on return to Build package) follows too.
+    const od = reanchorPackageDoc(packageDocOverDraft as PackageDoc | null, moved);
+    if (od !== packageDocOverDraft) setPackageDocOverDraft(od);
+    const targetId = resolved.kind === "new" ? resolved.id : resolved.sectionId;
+    const targetName = resolved.kind === "new" ? resolved.name : sections.find((s) => s.id === targetId)?.name || "that system";
+    // Same order as reorderSections: a system inserted last must not leave the Rewards credit off the last row.
+    setSections(withRewardCredit(normalizeSystemOrder(next, groups), rewardCreditOf(sections), nextId()));
+    const n = plan.lines.length;
+    setMoveNotice({ ok: true, targetId: "", targetName: "", targetNumber: "", verb: "Lines", detail: `Moved ${n} line${n === 1 ? "" : "s"} to ${targetName}` });
+    requestAnimationFrame(() => requestAnimationFrame(() => selectSystem(targetId)));
+  };
+
+  /** #357: move ticked lines to another estimate — bundled as one section and
+   *  sent through Move system's own server path; they leave this estimate only
+   *  once the server confirms. */
+  const moveLinesToEstimate = (selected: LineRef[], dest: MoveSystemTarget) => {
+    const plan = planLineMove(sections, selected, { kind: "estimate" });
+    if (plan.noop || movingLines) return;
+    // Lines from two systems may share an id: the outgoing section gets them unique (the server re-ids against the target).
+    const outgoing = extractLinesAsSection(sections, plan, { mintItemId: nextId });
+    const usedVqIds = new Set(outgoing.items.map((it) => it.vendorQuoteId).filter((id): id is string => !!id));
+    const usedVq = vendorQuotes.filter((v) => usedVqIds.has(v.id));
+    const cname = customerId ? customers.find((c) => c.id === customerId)?.name || custName : custName;
+    setMoveNotice(null);
+    setMovingLines(true);
+    startTransition(async () => {
+      try {
+        const res = await moveSystemToEstimateAction(
+          outgoing,
+          dest,
+          { customerId: customerId || null, locationId: locationId || null, customer: cname, contactName: contactName || "" },
+          usedVq,
+          loadedId || null
+        );
+        if (!res.ok) {
+          setMoveNotice({ ok: false, error: res.error || "Could not move those lines." });
+          return;
+        }
+        postChanged("quote", res.targetId);
+        const gone = new Set(plan.lines.map(lineRefKey));
+        const stillUsed = new Set(
+          sectionsRef.current
+            .flatMap((s) => s.items.filter((it) => !gone.has(lineRefKey({ sectionId: s.id, id: it.id }))))
+            .map((it) => it.vendorQuoteId)
+            .filter((id): id is string => !!id)
+        );
+        setSections((ss) => removeLinesFromSources(ss, plan.lines));
+        if (usedVq.length) setVendorQuotes((vs) => vs.filter((v) => !usedVqIds.has(v.id) || stillUsed.has(v.id)));
+        setMoveNotice({ ok: true, targetId: res.targetId, targetName: res.targetName, targetNumber: res.targetNumber });
+      } catch {
+        setMoveNotice({ ok: false, error: "Could not move those lines." });
+      } finally {
+        setMovingLines(false);
+      }
+    });
+  };
   const searchQuotes = (q: string) => searchQuotesAction(q, loadedId);
 
   const scrollToCard = (id: string) => {
@@ -1982,7 +2082,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const groupId = sections.find((s) => s.id === activeId)?.groupId;
     setSections((ss) => normalizeSystemOrder([
       ...ss,
-      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, items: [], ...(groupId ? { groupId } : {}) },
+      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: presentationForNewSystem(ss), items: [], ...(groupId ? { groupId } : {}) },
     ], groups));
     setActiveId(id);
     openInputMethod("catalog", id);
@@ -2002,6 +2102,7 @@ export function useEstimatorState(props: EstimatorProps) {
       groupId,
       freightPct: freightDefault.pct,
       priceRound: SYSTEM_PRICE_STEP,
+      presentation: presentationForNewSystem(sections),
     });
     setSections((ss) => normalizeSystemOrder([...ss, sec], groups));
     setActiveId(sec.id);
@@ -2028,6 +2129,7 @@ export function useEstimatorState(props: EstimatorProps) {
       groupId,
       freightPct: freightDefault.pct,
       priceRound: SYSTEM_PRICE_STEP,
+      presentation: presentationForNewSystem(sections),
     });
     setSections((ss) => normalizeSystemOrder([...ss, sec], groups));
     setSuggestionTargets((m) => ({ ...m, [systemKey]: sec.id }));
@@ -3451,6 +3553,9 @@ export function useEstimatorState(props: EstimatorProps) {
     loadedId,
     locationId,
     moveItem,
+    moveLinesHere,
+    moveLinesToEstimate,
+    movingLines,
     moveNotice,
     moveSystem,
     narrRef,

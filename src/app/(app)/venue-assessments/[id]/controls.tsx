@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import type {
   SurveyRecord,
-  SurveyPhoto,
   SurveyStage,
   MeasureGroup,
 } from "@/lib/stores/surveys";
+import { editsUnchangedSince, fileOnlyPatch, photoCountsBySection, unionUnseenFileRefs, type SketchRef, type SurveyPhotoRef } from "@/lib/field-files/files";
+import { pendingPhotoCount, subscribePhotoQueue } from "@/lib/assessments/photo-queue";
 import {
   VENUE_CLASSES,
   VISIT_PURPOSES,
@@ -30,10 +31,12 @@ import {
   REPLACE_VS_REUSE_OPTIONS,
 } from "@/lib/stores/survey-intake";
 import { LIFT_TYPES, LOADING_DOOR_TYPES, distanceText, shouldAutoFillTravel, showLiftDetails, travelTimeText } from "@/lib/field-lists";
-import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, printSurveySheet, type SurveyPatch } from "./actions";
+import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, type SurveyPatch } from "./actions";
 import Venue3D from "./venue-3d";
 import SuggestEstimate from "@/components/assist/suggest-estimate";
 import { saveThroughOutbox } from "@/lib/sync/save";
+import { SAVE_ACTION_TIMEOUT_MS } from "@/lib/sync/save-timeout";
+import { keepOutboxAfterFileSave, newEditorId, pendingStageSettled, type SaveStamp } from "@/lib/field-files/save-stamp";
 import { RecordingsStrip, type RecordingStripItem } from "@/components/recordings/recordings-strip";
 import { FromRecordingPanel, type FromRecordingPanelData } from "@/components/recordings/from-recording-panel";
 import type { Draft, EditorCustomer, EditorMeta, FieldDef, SectionDef } from "./sections/types";
@@ -49,6 +52,8 @@ import { RecapSection } from "./sections/recap";
 import { FinalThoughtsSection } from "./sections/final-thoughts";
 import { OlderNotes } from "./sections/older-notes";
 import { PhotosSection } from "./sections/photos";
+import { useSectionPhotos } from "./sections/section-photos";
+import { useSectionSketches } from "./sections/sketch-tile";
 import { SystemsSection } from "./sections/systems";
 import { LinesetsSection } from "./sections/linesets";
 import { linesetsInUse } from "@/lib/stores/linesets";
@@ -73,12 +78,6 @@ const DISC_SECTION_ID: Record<DisciplineKey, string> = { rigging: "dRigging", cu
 /** Display label for a venue class — the derived `venueType` fallback. */
 function classLabel(cls: VenueClass): string {
   return (VENUE_CLASSES.find((c) => c.key === cls) || VENUE_CLASSES[0]).label;
-}
-
-let photoSeq = 0;
-function newPhotoId(): string {
-  photoSeq += 1;
-  return "p" + Date.now().toString(36) + photoSeq.toString(36);
 }
 
 function timeAgo(ts: number | null | undefined): string {
@@ -168,6 +167,8 @@ function toDraft(r: SurveyRecord, travel: TravelSuggestion = null): Draft {
     measurements: { ...(r.measurements || {}) },
     conditions: [...(r.conditions || [])],
     photos: [...(r.photos || [])],
+    photoRefs: Array.isArray(r.photoRefs) ? [...r.photoRefs] : [],
+    sketches: r.sketches && typeof r.sketches === "object" && !Array.isArray(r.sketches) ? { ...r.sketches } : {},
     auditoriumSize: r.auditoriumSize || "",
     yearBuilt: r.yearBuilt || "",
     systemsState: { ...blankSystemsState(), ...(r.systemsState || {}) },
@@ -244,6 +245,8 @@ export default function SurveyEditor({
   canSuggest = false,
   suggestionHref = null,
   travelSuggestion = null,
+  blobEnabled = false,
+  me = "",
 }: {
   record: SurveyRecord;
   customers: EditorCustomer[];
@@ -263,10 +266,35 @@ export default function SurveyEditor({
   suggestionHref?: string | null;
   /** #344 B5 — one-way drive to the venue's verified address, for a blank Travel time / Distance; null when none. */
   travelSuggestion?: TravelSuggestion;
+  /** #344 C5 — the server's Blob flag: photos upload to private Blob, else (local dev) inline */
+  blobEnabled?: boolean;
+  /** #344 C5 — the signed-in user's id, stamped on photos taken here */
+  me?: string;
 }) {
   const initial = useMemo<Draft>(() => toDraft(record, travelSuggestion), [record, travelSuggestion]);
   const [draft, setDraft] = useState<Draft>(initial);
   const [dirty, setDirty] = useState(false);
+  // #344 C-final B: the newest draft, for a save that finishes after the user typed more (it stays dirty then)
+  const draftRef = useRef<Draft>(initial);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+  // #344 C-final B: this survey's files still on the device queue (the header says "N uploading")
+  const [uploading, setUploading] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const off = subscribePhotoQueue(() => {
+      void pendingPhotoCount(record.id)
+        .then((n) => {
+          if (alive) setUploading(n);
+        })
+        .catch(() => undefined);
+    });
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [record.id]);
   // A "From recording" Insert (spec §4.4) writes into the SAVED survey and
   // refreshes the route. Adopt the refreshed record so the appended text
   // shows and the next Save doesn't overwrite it with this stale draft —
@@ -274,11 +302,86 @@ export default function SurveyEditor({
   // clean draft (the panel disables Insert while dirty).
   const [seenInitial, setSeenInitial] = useState(initial);
   const [adoptNextRecord, setAdoptNextRecord] = useState(false);
+  // #344 C5 fix: the last draft the server holds (a photo save sends this + the current photo refs, never the user's
+  // unsaved edits) and the current photo refs (every save sends them). Both reset when a refreshed record is adopted.
+  const [adoptedBase, setAdoptedBase] = useState(initial);
+  const lastSaved = useRef<Draft>(initial);
+  const refsNow = useRef<SurveyPhotoRef[]>(initial.photoRefs);
+  const sketchesNow = useRef<Record<string, SketchRef>>(initial.sketches); // #344 C6: the current sketches, same rule
+  // #344 C-final: every photo ref / sketch id this editor has seen — loaded, refreshed in, or created here. Every save
+  // sends them; the store deletes only refs and sketches listed here, so this editor never deletes another device's.
+  const seenPhotoIds = useRef<Set<string>>(new Set(initial.photoRefs.map((r) => r.id)));
+  const seenSketchIds = useRef<Set<string>>(new Set(Object.values(initial.sketches).map((k) => k.id)));
+  /** #344 C-final C: this editor mount's id and save counter. Each serialSave run takes the next seq; buildPatch (and so
+   *  buildFullDoc, the outbox copy) stamps it, so a timed-out save that lands late never overwrites a newer one. */
+  const [editorId] = useState(() => newEditorId());
+  const saveSeq = useRef(0);
+  const stampNow = useRef<SaveStamp | null>(null);
+  /** #344 C-final D/E: the stage this editor moved to that no online save has confirmed yet (the move timed out to the
+   *  outbox, or is still running), else null; `pendingFrom` is the server's stage when that move was made. While set,
+   *  every save carries `stage: pendingStage.current` — the move's own target, never draft.stage (an adopted record can
+   *  reset the draft) — so a later field save, which makes the move's late action stale, re-carries the stage instead
+   *  of losing it, and a queued whole-doc copy never reverts it. Cleared when a save carrying it lands online, and in
+   *  the `[initial]` effect when the server shows it (confirmed) or shows a later stage set elsewhere
+   *  (`pendingStageSettled`) — so a move that landed late never comes back over the office's "Create quote →" hours
+   *  later. An editor that hasn't moved the stage never sends one. */
+  const pendingStage = useRef<SurveyStage | null>(null);
+  const pendingFrom = useRef<SurveyStage | null>(null);
+  /** #344 C-final F: every target this editor has sent while moves were pending and not had confirmed. A refresh that
+   *  shows one of them is our own earlier move landing late (Onsite → Completed timed out, then back → Onsite: move 1
+   *  lands, the server shows Completed) — never "a later stage set elsewhere", so it doesn't settle the newer move.
+   *  Cleared whenever the pending stage clears. A new move starts from the pending target (else the record's stage). */
+  const unconfirmedTargets = useRef<Set<SurveyStage>>(new Set());
+  /** #344 C-final E: the stamp seq of the save whose outbox entry holds field edits no online save has carried yet (a
+   *  Save changes / stage move that went to the outbox, or a later save whose whole-doc copy replaced that entry), else
+   *  null. A file-only save that lands online keeps that entry, plus any other mount's / tab's entry carrying field
+   *  edits and any parked one (`keepOutboxAfterFileSave`, #344 C-final F). Cleared when a field save or stage move lands
+   *  online (it carried the whole draft). The engine doesn't report an entry's push to the editor, so a value can
+   *  outlive its entry; a later queued photo save then takes it over and that copy (already-saved fields) is kept by
+   *  the next file-only success — it pushes through the rev check like any queued whole doc. */
+  const unsentFieldSeq = useRef<number | null>(null);
+  useEffect(() => {
+    lastSaved.current = adoptedBase;
+    refsNow.current = adoptedBase.photoRefs;
+    sketchesNow.current = adoptedBase.sketches;
+    // #344 C-final C: the adopted record's refs replace refsNow before the union below can mark them — mark them here,
+    // or the next save wouldn't list them as seen (and a photo deleted here later would come back)
+    for (const r of adoptedBase.photoRefs) seenPhotoIds.current.add(r.id);
+    for (const k of Object.values(adoptedBase.sketches)) seenSketchIds.current.add(k.id);
+  }, [adoptedBase]);
+  // A refreshed record (the router refresh after any save) may carry photos / sketches another device added: union
+  // the unseen ones in by id, even while the draft is dirty (photo state is independent of the dirty fields).
+  // #344 C-final E: a refreshed record shows the server confirmed this editor's pending stage move, or moved past it
+  // elsewhere — stop re-sending it
+  useEffect(() => {
+    if (pendingStageSettled(pendingStage.current, pendingFrom.current, initial.stage, unconfirmedTargets.current)) {
+      pendingStage.current = null;
+      pendingFrom.current = null;
+      unconfirmedTargets.current.clear();
+    }
+  }, [initial]);
+  useEffect(() => {
+    const u = unionUnseenFileRefs(
+      { photoRefs: refsNow.current, sketches: sketchesNow.current },
+      initial,
+      { photos: seenPhotoIds.current, sketches: seenSketchIds.current },
+    );
+    if (!u) return;
+    for (const id of u.added.photos) seenPhotoIds.current.add(id);
+    for (const id of u.added.sketches) seenSketchIds.current.add(id);
+    refsNow.current = u.photoRefs;
+    sketchesNow.current = u.sketches;
+    lastSaved.current = { ...lastSaved.current, photoRefs: u.photoRefs, sketches: u.sketches };
+    setDraft((d) => ({ ...d, photoRefs: u.photoRefs, sketches: u.sketches }));
+  }, [initial]);
   if (initial !== seenInitial) {
     setSeenInitial(initial);
     if (adoptNextRecord) {
       setAdoptNextRecord(false);
-      if (!dirty) setDraft(initial);
+      if (!dirty) {
+        setDraft(initial);
+        setAdoptedBase(initial);
+      }
     }
   }
   const [saving, setSaving] = useState(false);
@@ -440,62 +543,6 @@ export default function SurveyEditor({
     patchDraft(patch);
   }
 
-  /* ---------- photos (client-side downscale — metadata-only placeholder, no upload) ---------- */
-  function readPhoto(file: File): Promise<SurveyPhoto | null> {
-    return new Promise((resolve) => {
-      const fr = new FileReader();
-      fr.onload = () => {
-        const result = fr.result as string;
-        const img = new Image();
-        img.onload = () => {
-          const max = 1200;
-          let w = img.width;
-          let h = img.height;
-          if (w > max || h > max) {
-            const r = Math.min(max / w, max / h);
-            w = Math.round(w * r);
-            h = Math.round(h * r);
-          }
-          let url: string;
-          try {
-            const c = document.createElement("canvas");
-            c.width = w;
-            c.height = h;
-            c.getContext("2d")!.drawImage(img, 0, 0, w, h);
-            url = c.toDataURL("image/jpeg", 0.7);
-          } catch {
-            url = result;
-          }
-          resolve({ id: newPhotoId(), name: file.name || "photo.jpg", dataUrl: url });
-        };
-        img.onerror = () => resolve(null);
-        img.src = result;
-      };
-      fr.onerror = () => resolve(null);
-      fr.readAsDataURL(file);
-    });
-  }
-  async function onPhotos(e: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files || []);
-    try {
-      e.target.value = "";
-    } catch {}
-    if (!files.length) return;
-    const room = Math.max(0, 8 - draft.photos.length);
-    if (room <= 0) {
-      setSaveError("Up to 8 photos per survey. Remove one to add another.");
-      return;
-    }
-    const added: SurveyPhoto[] = [];
-    for (const f of files.slice(0, room)) {
-      const p = await readPhoto(f);
-      if (p) added.push(p);
-    }
-    setSaveError("");
-    patchDraft({ photos: draft.photos.concat(added) });
-  }
-  const removePhoto = (id: string) => patchDraft({ photos: draft.photos.filter((p) => p.id !== id) });
-
   /* ---------- sections ---------- */
   const sections = useMemo<SectionDef[]>(() => {
     // the quick measurement set is the venue class's own field set (D132)
@@ -633,7 +680,8 @@ export default function SurveyEditor({
     });
     secs.push({ id: "linesets", title: "Lineset schedule", subtitle: "Physical positions, loads, trim and condition", group: "intake", step: 3, advanced: true, kind: "linesets" });
     secs.push({ id: "assessmentToggle", title: "Condition & Needs assessment", subtitle: "Add an advisory layer when the customer needs Peak's opinion", group: "intake", step: 3, kind: "assessmentToggle" });
-    secs.push({ id: "photos", title: "Photos", subtitle: "Up to 8", group: "field", step: 4, kind: "photos" });
+    // #344 C5: photos live in each section now; the old inline photos stay readable (findings may link them)
+    if (draft.photos.length > 0) secs.push({ id: "photos", title: "Earlier photos", subtitle: "Read-only", group: "field", step: 4, kind: "photos" });
     secs.push({
       id: "notes", title: "Scope & notes", subtitle: "Free text", group: "field", step: 4, kind: "fields",
       fields: [
@@ -678,7 +726,8 @@ export default function SurveyEditor({
     setSaveError("");
     return true;
   }
-  function buildPatch(over?: Partial<SurveyPatch>): SurveyPatch {
+  function buildPatch(over?: Partial<SurveyPatch>, d: Draft = draft): SurveyPatch {
+    const draft = d;
     return {
       customer: draft.customer,
       customerId: draft.customerId,
@@ -742,6 +791,18 @@ export default function SurveyEditor({
       measurements: draft.measurements as Record<string, string>,
       conditions: draft.conditions,
       photos: draft.photos,
+      // #344 C5 — whole list every save (a ref absent from a save is deleted); finished slots are kept by the store
+      // once photos were touched in this session they are always sent (deleting the only one must reach the server)
+      // #344 C-final: with the ids this editor has seen — the store deletes only those, never another device's photos
+      // #344 C-final C: this save run's order stamp (the action's patch and its outbox copy carry the same one)
+      ...(stampNow.current ? { saveStamp: stampNow.current } : {}),
+      ...(draft.photoRefs.length || Array.isArray(record.photoRefs) || photosTouched.current
+        ? { photoRefs: draft.photoRefs, photoRefIdsSeen: [...seenPhotoIds.current] }
+        : {}),
+      // #344 C6 — sketch pads, sent whole once there are any (a stored finished slot is kept by the store)
+      ...(Object.keys(draft.sketches).length || (record.sketches && typeof record.sketches === "object") || sketchesTouched.current
+        ? { sketches: draft.sketches, sketchIdsSeen: [...seenSketchIds.current] }
+        : {}),
       auditoriumSize: draft.auditoriumSize,
       yearBuilt: draft.yearBuilt,
       systemsState: draft.systemsState,
@@ -760,6 +821,8 @@ export default function SurveyEditor({
       // an unanswered scope stays unset (R2) so the read-time seed can still run
       scope: draft.scope.length ? draft.scope : undefined,
       internalTags: draft.internalTags,
+      // #344 C-final D/E: while this editor's stage move is unconfirmed, every save re-carries the stage it moved to
+      ...(pendingStage.current ? { stage: pendingStage.current } : {}),
       ...over,
     };
   }
@@ -769,14 +832,18 @@ export default function SurveyEditor({
    * the editor patch and stamp it the way the store's update() would when a
    * write reaches the cloud (synced, rev bumped).
    */
-  function buildFullDoc(over?: Partial<SurveyPatch>): Record<string, unknown> {
+  function buildFullDoc(over?: Partial<SurveyPatch>, d: Draft = draft): Record<string, unknown> {
     // legacyNotes is derived on every read (src/lib/survey-migrate.ts) — never write it back
     const { legacyNotes: _legacy, ...rec } = record as unknown as Record<string, unknown>;
     void _legacy;
     return {
       ...rec,
-      ...(buildPatch(over) as Record<string, unknown>),
+      ...(buildPatch(over, d) as Record<string, unknown>),
       updatedAt: Date.now(),
+      // #344 C-final B: never a finalize's rev. The push is a conflict only when the stored rev is above this one —
+      // one intervening write (a field write: stored rev = record.rev + 1) is NOT a conflict: the push merges over it;
+      // only two or more field writes are. A photo / sketch save (file-only) never bumps rev (#344 C-final E), so any
+      // number of them can land first. This editor's own earlier saves are ordered by the save stamp (C-final C).
       rev: (record.rev || 1) + 1,
       syncState: "synced",
     };
@@ -784,15 +851,35 @@ export default function SurveyEditor({
   async function onSave() {
     if (!validate() || saving) return;
     setSaving(true);
+    const edits = draft; // the user's draft as of this click; the photo refs are read when the save runs
     try {
-      const patch = buildPatch();
-      const { queued } = await saveThroughOutbox({
-        collection: "surveys",
-        id: record.id,
-        doc: buildFullDoc(),
-        action: () => saveSurvey(record.id, patch),
+      const { queued } = await serialSave(async () => {
+        const sent: Draft = { ...edits, photoRefs: refsNow.current, sketches: sketchesNow.current };
+        const seq = stampNow.current?.seq ?? null;
+        const carried = pendingStage.current; // this save re-carries an unconfirmed stage move (#344 C-final D/E)
+        const patch = buildPatch(undefined, sent);
+        const res = await saveThroughOutbox({
+          collection: "surveys",
+          id: record.id,
+          doc: buildFullDoc(undefined, sent),
+          action: () => saveSurvey(record.id, patch),
+          timeoutMs: SAVE_ACTION_TIMEOUT_MS,
+        });
+        if (res.queued) unsentFieldSeq.current = seq; // its outbox entry holds these field edits (#344 C-final E)
+        else {
+          unsentFieldSeq.current = null;
+          if (carried !== null && pendingStage.current === carried) {
+            pendingStage.current = null;
+            pendingFrom.current = null;
+            unconfirmedTargets.current.clear();
+          }
+        }
+        lastSaved.current = sent;
+        setPhotoUnsaved(false);
+        return res;
       });
-      setDirty(false);
+      // #344 C-final B: typing while the save ran (or waited in the queue) keeps the draft dirty — that text wasn't sent
+      if (editsUnchangedSince(draftRef.current, edits)) setDirty(false);
       setDraft((d) => ({ ...d, updatedAt: Date.now() }));
       flash(
         queued
@@ -808,16 +895,40 @@ export default function SurveyEditor({
   async function advanceStage(target: SurveyStage) {
     if (!validate() || saving) return;
     setSaving(true);
+    const edits = draft;
     try {
-      const patch = buildPatch({ stage: target });
-      const { queued } = await saveThroughOutbox({
-        collection: "surveys",
-        id: record.id,
-        doc: buildFullDoc({ stage: target }),
-        action: () => advanceSurveyStage(record.id, patch, target),
+      const { queued } = await serialSave(async () => {
+        const sent: Draft = { ...edits, photoRefs: refsNow.current, sketches: sketchesNow.current };
+        const seq = stampNow.current?.seq ?? null;
+        // until a save carrying the stage lands online, or the server shows it (#344 C-final D/E). #344 C-final F: every
+        // sent target is remembered so its late landing isn't read as a stage set elsewhere; a move made while another is
+        // pending keeps the first move's start (the server's stage before any of them), which the set doesn't cover
+        pendingFrom.current = pendingStage.current ? pendingFrom.current : (record.stage || "requested") as SurveyStage;
+        pendingStage.current = target;
+        unconfirmedTargets.current.add(target);
+        const patch = buildPatch({ stage: target }, sent);
+        const res = await saveThroughOutbox({
+          collection: "surveys",
+          id: record.id,
+          doc: buildFullDoc({ stage: target }, sent),
+          action: () => advanceSurveyStage(record.id, patch, target),
+          timeoutMs: SAVE_ACTION_TIMEOUT_MS,
+        });
+        if (res.queued) unsentFieldSeq.current = seq; // the move (+ its fields) waits in the outbox (#344 C-final E)
+        else {
+          unsentFieldSeq.current = null;
+          if (pendingStage.current === target) {
+            pendingStage.current = null;
+            pendingFrom.current = null;
+            unconfirmedTargets.current.clear();
+          }
+        }
+        lastSaved.current = { ...sent, stage: target };
+        setPhotoUnsaved(false);
+        return res;
       });
+      if (editsUnchangedSince(draftRef.current, edits)) setDirty(false); // #344 C-final B: same rule as Save changes
       setDraft((d) => ({ ...d, stage: target, updatedAt: Date.now() }));
-      setDirty(false);
       flash(
         queued
           ? `Moved to ${meta.stageMeta[target].label} — will sync when you're back online`
@@ -833,7 +944,8 @@ export default function SurveyEditor({
     if (!validate() || saving) return;
     setSaving(true);
     try {
-      await createQuoteFromSurvey(record.id, buildPatch({ stage: "completed" }));
+      const edits = draft;
+      await serialSave(() => createQuoteFromSurvey(record.id, buildPatch({ stage: "completed" }, { ...edits, photoRefs: refsNow.current, sketches: sketchesNow.current })));
       // redirect happens server-side
     } catch {
       setSaveError("Could not create the quote — please try again.");
@@ -856,12 +968,21 @@ export default function SurveyEditor({
     const preview = window.open("", "_blank");
     setSaving(true);
     try {
-      const result = await printSurveySheet(record.id, buildPatch());
-      if (!result.ok) throw new Error(result.error);
-      const bytes = Uint8Array.from(atob(result.base64), (char) => char.charCodeAt(0));
-      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      // The saved record supplies Earlier photos; sending them inline would only bloat the request.
+      const { photos: _earlier, saveStamp: _stamp, ...patch } = buildPatch(undefined, { ...draft, photoRefs: refsNow.current, sketches: sketchesNow.current });
+      void _earlier;
+      void _stamp; // a print is not a save — no order stamp
+      const res = await fetch(`/api/surveys/${encodeURIComponent(record.id)}/sheet-pdf`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // an expired session can follow a redirect to /login with a 200 — only a PDF becomes the preview
+      if (!(res.headers.get("content-type") || "").startsWith("application/pdf")) throw new Error("Not a PDF");
+      const url = URL.createObjectURL(await res.blob());
       if (preview) preview.location.href = url;
-      else window.location.href = url;
+      else window.location.assign(url);
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch {
       if (preview) preview.close();
@@ -870,6 +991,93 @@ export default function SurveyEditor({
       setSaving(false);
     }
   }
+
+  /* ---------- per-section photos (#344 C5) ---------- */
+  /** Once photos change in this session, every save carries photoRefs (even an empty list). */
+  const photosTouched = useRef(false);
+  /** Same for sketches: once they change in this session every save carries them (even an empty set). */
+  const sketchesTouched = useRef(false);
+  /** A photo (true) or sketch ("drawing") save failed and nothing has saved since — the pill says so instead of "Saved". */
+  const [photoUnsaved, setPhotoUnsaved] = useState<boolean | "drawing">(false);
+  /** Save changes, stage moves and photo saves run one at a time (each reads the newest refs when it runs). */
+  const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  function serialSave<T>(fn: () => Promise<T>): Promise<T> {
+    const stamped = () => {
+      stampNow.current = { editor: editorId, seq: ++saveSeq.current };
+      return fn();
+    };
+    const run = saveChain.current.then(stamped, stamped);
+    saveChain.current = run.catch(() => undefined);
+    return run;
+  }
+  /** A photo change saves the current refs + sketches: the user's unsaved edits stay unsaved (and dirty), and are
+   *  never saved half-typed or past validate(). Online (#344 C-final B) the patch carries ONLY the file keys + their
+   *  seen ids — the store merges it over the stored doc, so another device's field edits are never reverted; the
+   *  offline outbox still needs a whole doc (the last-saved draft + the refs), which the push rev check protects. */
+  async function savePhotoRefs(kind: "photo" | "drawing" = "photo") {
+    try {
+      await serialSave(async () => {
+        const sent: Draft = { ...lastSaved.current, photoRefs: refsNow.current, sketches: sketchesNow.current };
+        const seq = stampNow.current?.seq ?? null;
+        const filePatch = fileOnlyPatch(buildPatch(undefined, sent));
+        const res = await saveThroughOutbox({
+          collection: "surveys",
+          id: record.id,
+          doc: buildFullDoc(undefined, sent),
+          action: () => saveSurvey(record.id, filePatch),
+          // #344 C-final D/E/F: this online save carried only the file keys — the queued entry holding this editor's unsent
+          // field edits (a timed-out Save changes / stage move) stays for the sync push (the store applies its fields
+          // and leaves the newer file lists alone; file-only saves don't bump rev, so it still pushes cleanly). So does
+          // another mount's / tab's entry carrying field edits (one entry per record, shared on the device) and a parked
+          // one. This mount's other entries (a timed-out photo save's copy of already-saved fields) are cleared.
+          keepOutbox: (entryDoc, state) => keepOutboxAfterFileSave(entryDoc, state, editorId, unsentFieldSeq.current),
+          timeoutMs: SAVE_ACTION_TIMEOUT_MS,
+        });
+        // queued while field edits were unsent: its whole-doc copy (lastSaved = that save's draft) replaced their entry
+        if (res.queued && unsentFieldSeq.current !== null) unsentFieldSeq.current = seq;
+        lastSaved.current = { ...lastSaved.current, photoRefs: sent.photoRefs, sketches: sent.sketches };
+        setPhotoUnsaved(false);
+      });
+    } catch (e) {
+      if (kind === "drawing") setPhotoUnsaved("drawing");
+      else setPhotoUnsaved(true);
+      throw e;
+    }
+  }
+  // #344 C6 — sketch pads save through the same file save (last-saved draft + current photos + current sketches)
+  const sectionSketches = useSectionSketches({
+    recordId: record.id,
+    me,
+    sketches: draft.sketches,
+    survey: draft,
+    liveSketches: () => sketchesNow.current,
+    onSketches: (next) => {
+      for (const k of Object.values(next)) seenSketchIds.current.add(k.id);
+      sketchesNow.current = next;
+      sketchesTouched.current = true;
+      setDraft((d) => ({ ...d, sketches: next }));
+    },
+    save: () => savePhotoRefs("drawing"),
+  });
+  const sectionPhotos = useSectionPhotos({
+    recordId: record.id,
+    me,
+    blobEnabled,
+    refs: draft.photoRefs,
+    liveRefs: () => refsNow.current,
+    onRefs: (next) => {
+      for (const r of next) seenPhotoIds.current.add(r.id);
+      refsNow.current = next;
+      photosTouched.current = true;
+      setDraft((d) => ({ ...d, photoRefs: next }));
+    },
+    save: () => savePhotoRefs("photo"),
+    sectionTitle: (id) => sections.find((s) => s.id === id)?.title ?? "another section",
+    foldOther: (fileId, slot) => sectionSketches.fold(fileId, slot),
+    discardOther: (fileId) => sectionSketches.discard(fileId),
+    describeOther: (fileId) => sectionSketches.describe(fileId),
+  });
+  const photoCounts = photoCountsBySection(draft.photoRefs);
 
   /* ---------- derived ---------- */
   const stageKey = draft.stage || "requested";
@@ -882,6 +1090,10 @@ export default function SurveyEditor({
   let savePillInk: string;
   if (dirty) {
     savePillLabel = "Unsaved changes";
+    savePillBg = "#fbf3dd";
+    savePillInk = "#9a6a1f";
+  } else if (photoUnsaved) {
+    savePillLabel = photoUnsaved === "drawing" ? "Drawing not saved yet" : "Photo not saved yet";
     savePillBg = "#fbf3dd";
     savePillInk = "#9a6a1f";
   } else {
@@ -1031,7 +1243,10 @@ export default function SurveyEditor({
       label: sec.title,
       done: p.done,
       total: p.total,
-      badges: p.gate ? [{ tone: "prompt", n: 1, title: LOCKED_MSG, text: "needs answers" }] : [],
+      badges: [
+        ...(p.gate ? [{ tone: "prompt" as const, n: 1, title: LOCKED_MSG, text: "needs answers" }] : []),
+        ...(photoCounts[sec.id] ? [{ tone: "photo" as const, n: photoCounts[sec.id], title: `${photoCounts[sec.id]} photo${photoCounts[sec.id] === 1 ? "" : "s"}`, text: `${photoCounts[sec.id]} photo${photoCounts[sec.id] === 1 ? "" : "s"}` }] : []),
+      ],
       muted: sec.kind === "discipline" && !tier1Done,
     };
   });
@@ -1064,6 +1279,11 @@ export default function SurveyEditor({
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#aab0bb" }}>{sub}</span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: savePillInk, background: savePillBg }}>{savePillLabel}</span>
+              {uploading > 0 && (
+                <span role="status" title="Photos and drawings still on this device — they upload when there is a connection" style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: "#1f5f9a", background: "#e8f0f8" }}>
+                  {uploading} uploading
+                </span>
+              )}
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: intakeMeta.ink, background: intakeMeta.soft, border: `1px solid ${intakeMeta.bd}` }}>{intakeMeta.label}</span>
             </div>
           </div>
@@ -1137,6 +1357,8 @@ export default function SurveyEditor({
           )}
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {sectionSketches.overlay}
+              {sectionPhotos.overlay}
               {meetingsSlot}
               {visibleSections.map((sec, secIdx) => {
                 const locked = sec.kind === "discipline" && !tier1Done;
@@ -1185,6 +1407,7 @@ export default function SurveyEditor({
                           {sec.subtitle && <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2 }}>{locked ? "Locked — answer the kill questions above first" : sec.subtitle}</div>}
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                          {!locked && sec.kind !== "photos" && sectionPhotos.addButton(sec.id)}
                           {locked && (
                             <span style={{ display: "inline-flex", color: "#aab0bb" }} title="Complete the kill questions to unlock">
                               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1199,8 +1422,10 @@ export default function SurveyEditor({
                         </div>
                       </div>
 
+                      {!locked && sectionPhotos.strip(sec.id)}
                       {open && (
                         <div id={"sec-body-" + sec.id} style={{ padding: "4px 18px 20px" }}>
+                          {sectionSketches.tiles(sec.id, sec.kind === "fields" ? sec.fields.map((f) => f.key) : undefined)}
                           {sec.kind === "custvenue" && (
                             <CustVenueSection
                               draft={draft}
@@ -1229,6 +1454,7 @@ export default function SurveyEditor({
                               boxStyle={boxStyle}
                               dv={dv}
                               setDisc={setDisc}
+                              aside={sectionSketches.aside}
                             />
                           )}
                           {sec.id === "notes" && fromRecording.length > 0 && (
@@ -1310,6 +1536,7 @@ export default function SurveyEditor({
                           })()}
                           {sec.kind === "linesets" && (
                             <LinesetsSection
+                              handSheet={sectionSketches.linesetSheet()}
                               qty={draft.linesetQty}
                               rows={draft.linesets}
                               onApply={applyLinesets}
@@ -1348,7 +1575,7 @@ export default function SurveyEditor({
                           )}
                           {sec.kind === "viz3d" && <Venue3D venueClass={draft.venueClass} venueSubtype={draft.venueSubtype} measurements={draft.measurements} />}
                           {sec.kind === "photos" && (
-                            <PhotosSection draft={draft} onPhotos={onPhotos} removePhoto={removePhoto} />
+                            <PhotosSection draft={draft} />
                           )}
                           <OlderNotes notes={draft.legacyNotes.filter((n) => n.section === sec.id)} />
                         </div>

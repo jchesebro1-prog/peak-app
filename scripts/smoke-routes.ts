@@ -107,6 +107,7 @@ const ROUTES = [
   "/schedule?view=people", // #145 D172 — the By person portfolio view
   "/calendar",
   "/reports",
+  "/reports/sourcing", // Batch 6 #66 — most-quoted products / projected sourcing
   "/reviews",
   "/settings",
   "/settings?section=admin", // retired D99 Admin section → Team & Access (settings cleanup)
@@ -267,6 +268,8 @@ const ROUTES = [
  */
 const CONTENT_CHECKS: Array<{ route: string; reject: string; expect: string; label: string }> = [
   { route: "/reports?range=12m", reject: "Couldn't load this widget.", expect: "Bids by GC/EC", label: "Reports preset: every widget renders, incl. Bids by GC/EC" },
+  // Batch 6 #67 — the generated manifest lists the Branding-logo icons.
+  { route: "/manifest.webmanifest", reject: "Internal Server Error", expect: "/icons/app/192.png?v=", label: "Manifest: icons drawn from the Branding logo" },
 ];
 
 /**

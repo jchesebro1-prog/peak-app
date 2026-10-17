@@ -29,6 +29,7 @@ import {
   type QuoteReview,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
+import { reopenedAtWonVersion } from "@/lib/quote-won-version";
 import { travelForId } from "@/lib/stores/customers";
 import { clearPricedPor, sourceForSave } from "@/lib/portal-quote-mode";
 import { declinePortalAcceptance } from "@/lib/portal-quotes";
@@ -49,6 +50,8 @@ import { normalizeSystemOrder, sanitizeGroups, sanitizeSectionGroupMeta, without
 import { packageDocForSave } from "@/lib/package-doc/save";
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import type { PackageDoc } from "@/lib/package-doc/types";
+import { docIdFloor } from "@/lib/package-doc/ids";
+import { reIdIncomingSection } from "@/lib/estimate-line-move/reid";
 import { copyPricingFor } from "./copy-pricing";
 import { seedMarginOf, usableTierMargin } from "./tier-reprice";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
@@ -243,6 +246,9 @@ export type SaveResult = {
   /** Estimate suggestion — true when this save linked the quote to the
    *  posted `suggestionId` (the builder stops sending it). */
   suggestionLinked?: boolean;
+  /** #355 review M2 — this save's status move reopened a won estimate at the
+   *  version that won; the open document holds the edits, so reload. */
+  reopenedAtWon?: boolean;
 };
 
 export type ReviewSync = {
@@ -257,6 +263,9 @@ export type ReviewSync = {
   /** #284 — set on `ok: false` when the approval gate itself refused, so the
    *  banner can offer the next step (Submit for approval) right there. */
   gateRefused?: boolean;
+  /** Batch 5 #59 — the move reopened a won estimate at the version that won
+   *  (edits saved after the win became a revision); the open document is stale, reload it. */
+  reopenedAtWon?: boolean;
 };
 
 function refresh() {
@@ -285,6 +294,8 @@ export type StageSync = {
   /** #284 — see ReviewSync.next / gateRefused. */
   next?: QuoteNextStepView | null;
   gateRefused?: boolean;
+  /** Batch 5 #59 — see ReviewSync.reopenedAtWon. */
+  reopenedAtWon?: boolean;
 };
 
 async function stageSyncOf(id: string, user: { name: string; roles: string[] }): Promise<StageSync> {
@@ -542,6 +553,8 @@ export async function saveQuoteAction(
   patch.spec = await quoteSpecFollowingRenames(patch.spec);
   let q: Quote | null = null;
   let statusError: string | undefined;
+  // #355 review M2: set when this save's status move put the won version back.
+  let reopenedAtWon = false;
   let statusNotice: string | undefined = credit.notice;
   let pdfState: QuotePdfView | null = null;
   /* #143: keep only the vendor quotes something still references. Deleting a
@@ -609,7 +622,9 @@ export async function saveQuoteAction(
       const decision = resolveSaveStatusChange(payload.status, payload.baseStatus, q.status);
       if (decision.kind === "apply") {
         try {
+          const beforeMove = q;
           q = (await setStatus(loadedId, payload.status, user.name)) ?? q;
+          reopenedAtWon = reopenedAtWonVersion(beforeMove, q);
         } catch (e) {
           // Same split as the create branch below: the gate's refusal is
           // the user's to read (#174); the field edits above are still saved.
@@ -733,6 +748,7 @@ export async function saveQuoteAction(
     ...(statusError ? { error: statusError } : {}),
     ...(statusNotice ? { notice: statusNotice } : {}),
     ...(suggestionLinked ? { suggestionLinked: true } : {}),
+    ...(reopenedAtWon ? { reopenedAtWon: true } : {}),
   };
 }
 
@@ -942,7 +958,10 @@ async function placeSystemInEstimate(
     const existingGroups = sanitizeGroups(existingSpec?.groups);
     // #282 phase 2: the target's own Rewards credit stays on ITS last system —
     // re-pinned after the order is normalised, so it really is the last one.
-    const appendedRaw = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))])], existingGroups);
+    // #357: item ids are unique per system only — an incoming line whose id the target already uses anywhere is
+    // re-minted above the target's ids and its package document's floor (computeNid's), its star following.
+    const incoming = reIdIncomingSection(stripBonusLines(withoutGroupMeta(placed)), existingSpec?.sections || [], docIdFloor(existingDoc));
+    const appendedRaw = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([incoming])], existingGroups);
     // Estimator bonuses: re-derive on the merged list with the TARGET's own
     // source / quoteType / status (a won or portal target is left untouched).
     // Before the credit re-pin below, so value/margin include the bonus.
@@ -1351,6 +1370,8 @@ export async function setStatusAction(
 ): Promise<ReviewSync> {
   const user = await requireUser();
   if (!id || !STAGES.includes(status)) return { ok: false, review: null, status: null };
+  // Batch 5 #59: read before the move, to tell the client when a reopen put the won version back.
+  const before = await get(id);
   // Punch #60 (D84 hole): marking a quote WON or SENT requires an approval
   // record — in-app or attested. Every other stage transition stays open to
   // any signed-in user, as before. Pre-checked here so the UI gets the same
@@ -1391,7 +1412,8 @@ export async function setStatusAction(
     };
   }
   refresh();
-  return syncOf(id, user);
+  const sync = await syncOf(id, user);
+  return reopenedAtWonVersion(before, await get(id)) ? { ...sync, reopenedAtWon: true } : sync;
 }
 
 /** Estimator bonuses — save the Lead / Prepared-by split of the 2% (approvers only). */
@@ -1456,6 +1478,8 @@ export async function declinePortalAcceptanceAction(
 export async function setQuoteStageAction(id: string, stageId: string, alternatesTaken?: string[]): Promise<StageSync> {
   const user = await requireUser();
   if (!id || !stageId) return { ok: false, status: null, review: null, pipelineId: null, stage: null };
+  // Batch 5 #59: a stage move can reopen a won estimate too.
+  const before = await get(id);
   let q: Awaited<ReturnType<typeof setQuoteStage>>;
   try {
     q = await setQuoteStage(id, stageId, user.name, Array.isArray(alternatesTaken) ? alternatesTaken.filter((x): x is string => typeof x === "string") : undefined);
@@ -1490,7 +1514,8 @@ export async function setQuoteStageAction(id: string, stageId: string, alternate
     };
   }
   refresh();
-  return stageSyncOf(id, user);
+  const sync = await stageSyncOf(id, user);
+  return reopenedAtWonVersion(before, await get(id)) ? { ...sync, reopenedAtWon: true } : sync;
 }
 
 /**

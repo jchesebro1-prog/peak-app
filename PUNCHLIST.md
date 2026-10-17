@@ -10033,7 +10033,8 @@ Gates: tsc 0; test:specs 9495 PASS / 0 FAIL (+88); test:smoke 172/0; eslint 0 er
 Browser-verified (inspection $2,450 − $300 → letter $2,150; won → $300 redeemed + $32.25 earned at Silver 1.5 %;
 delete → both reversed; repair capped at its $825 total). Reviewed, no findings.
 
-**Jeff-gated:** review the defaults in Settings → Rewards (thresholds, earn %, starting-credit rate and cap), add
+**Jeff-gated:** ~~review the defaults in Settings → Rewards (thresholds, earn %, starting-credit rate and cap)~~ **confirmed
+2026-10-15 (Jeff) — the defaults are his numbers (D493)**; add
 perks, post starting credit, then turn the program on. The next production deploy applies migration 0034.
 **Lost quotes out of the program (2026-09-30, D505):** Jeff: "lost quotes shouldn't place into the rewards program."
 Marking a quote Lost (`setStatus`, every path) strips its credit — the Estimator line(s) and the service section's
@@ -10356,18 +10357,23 @@ are additive JSONB that older code ignores. Rotating `AUTH_SECRET` also kills ev
 
 **For Jeff.**
 - Open questions in spec §12: ~~photo side~~ (**ANSWERED 2026-10-15: photos alternate right, left, right — #352,
-  D1131**), datasheet thumbnails as photos, default presentation, who manages intros.
+  D1131**), ~~datasheet thumbnails as photos, default presentation, who manages intros~~ (**ANSWERED 2026-10-15
+  (Jeff): a part with no real photo uses its datasheet thumbnail — already so, D1190; new systems default to Narrative —
+  built in #355, D1191; anyone with `create` manages intros — already so, D1192**).
 - Toggle title says "every narrative system's" though By-section prints every system — reword?
 - Paragraphs live on catalog parts, so take `npm run db:export` before Clear catalog price list or the go-live wipe.
 - Preview deploys share the production DB, so a paragraph or intro saved on a preview is a production write.
 - ~~Spec §12 q7 — vendor-quote lines are left out of Load system; say if you'd rather carry them with their files.~~
   **ANSWERED 2026-10-15 (Jeff): bring them, flagged "Old vendor price — re-quote". Built in #352 (D1132).**
 - Portal-built quotes are excluded from the library — keep that?
-- Should a won quote recalled after its last send load the last SENT version (current) or the version that won?
+- ~~Should a won quote recalled after its last send load the last SENT version (current) or the version that won?~~
+  **ANSWERED 2026-10-15 (Jeff): the version that won. Built in #355 (D1189) — reopening a won estimate puts the won
+  version back; the online page still shows the last send (its PDF).**
 - Client links: copy them from production only. Preview deploys share the production DB, so a link copied there
   carries the preview origin.
 - Spec §12 q4: is 60 days right for a client link?
-- View tracking is deliberately left out (a public GET never writes). Want "viewed" stamps?
+- ~~View tracking is deliberately left out (a public GET never writes). Want "viewed" stamps?~~ **ANSWERED 2026-10-15
+  (Jeff): yes, staff only. Opens are counted since #301 (D625); the "Viewed <date time>" stamp is #355 (D1188).**
 - The online header says "sent <date>" using the PDF's issue date.
 - Cut sheets stay PDF-only online; the online pages don't show them. Want them online too?
 - The BOM toggle shows quantities and descriptions even when the estimate was sent narrative-only.
@@ -10890,9 +10896,10 @@ disappear. Rotating `AUTH_SECRET` kills every link, as before.
    #352 (D1125).**
 3. ~~**BOM quantities** show on the package page even when the estimate PDF hides them. Keep?~~ **ANSWERED 2026-10-15
    (Jeff): the package-page BOM follows the PDF's quantities setting. Built in #352 (D1126).**
-4. **Per-scope heading on the cover.** The price line names the scope ("Lighting scope: $28,500.00"); there is no separate
-   heading. Want one?
-5. **Letterhead on page 1 only**; the footer repeats on every page. OK?
+4. ~~**Per-scope heading on the cover.** The price line names the scope ("Lighting scope: $28,500.00"); there is no separate
+   heading. Want one?~~ **ANSWERED 2026-10-15 (Jeff): yes — each scope gets its own heading. Built in #355 (D1187).**
+5. ~~**Letterhead on page 1 only**; the footer repeats on every page. OK?~~ **ANSWERED 2026-10-15 (Jeff): keep — page 1
+   only (decision item 57).**
 6. **Open counts are best effort.** One per device per half hour, per server instance; a mail scanner that runs JS can still
    count once. A signal, not proof. Fine?
 7. **A honeypot hit shows the normal "Thanks" and writes nothing** (a bot gets no signal). A real person who autofills the
@@ -12254,7 +12261,7 @@ Follow-up to #342. A writer that computed a key's new value from its current one
 
 **Remaining:** none. Watch: a long outer transaction that calls one of these holds the row lock until it commits.
 
-## 344. Venue Assessment notes (Jeff, Oct 14) — 23 notes in three slices — slices A and B DONE 2026-10-14 on `feat/344-va-notes` (D1019–D1032, D1038–D1051), slice C pending
+## 344. Venue Assessment notes (Jeff, Oct 14) — 23 notes in three slices — slices A and B DONE 2026-10-14 on `feat/344-va-notes` (D1019–D1032, D1038–D1051); slice C merged to main 2026-10-17 (D1208–D1218), Jeff's iPad + Pencil test still to run
 
 Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`) editor, designed in `docs/superpowers/specs/2026-10-14-venue-assessment-notes-design.md` and built as three slices on one branch. Slice A plan: `docs/superpowers/plans/2026-10-14-va-notes-slice-a.md`.
 
@@ -12273,12 +12280,43 @@ Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`
 - Per-discipline scope-first chips with Other, goals as lists, curtain rows (fabric, oz, track series, size, condition), lighting positions with a Position column on the fixtures inventory, the Bad→New condition slider, and a quantity-first line set schedule (Fill down, Mark spare).
 - Field sheet, findings text, Assist, Ask AI and the recap print only what the editor shows (`survey-format.ts`, `survey-measure-fields.ts`). Tests in `scripts/test-va-notes.ts`. No migration, no env var. **No instant rollback past this merge** (D1043).
 
-**Slice C — pending (drawing & photo capture, spec C1–C8; Jeff to send the CW Elevation sheet and the line set schedule sheet):** ink model and pad, generated pad backgrounds, a shared photo / sketch pipeline, sketch pads, per-section photos with caption and markup, field-sheet output, 3D presets. Needs a real iPad + Apple Pencil test (pressure, palm rejection, offline capture and later sync) before merge.
+**Slice C ✅ — merged to main 2026-10-17 at Jeff's request, before the iPad + Apple Pencil test (run it on production now)** (drawing & photo capture; plan `docs/superpowers/plans/2026-10-14-va-notes-slice-c.md`; D1208–D1218):
+- A Pencil-first ink pad (`src/components/ink/ink-pad.tsx`, pure model `src/lib/ink/`): pen in three colours, eraser, text labels, undo / redo, clear, pinch and pan, palm rejection once a Pencil is seen, **Draw with finger** override; Done saves the strokes (re-editable) and a flattened JPEG.
+- Sketch pads in their sections: Beams & rigging, CW elevation and Brick (counterweight only), Stage plan, Stage section, House section, House plan, and the line set schedule's **Fill in by hand** sheet (30 rows a page). Backgrounds are drawn from the survey's measurements (`src/lib/ink/backgrounds.ts`); CW Elevation and the line set sheet are placeholders until Jeff's real sheets arrive.
+- **Add photo** on every section (camera or library, several at once), thumbnails in the section and a count on the rail; a viewer with caption, Mark up / Edit markup / View original / Remove markup, Delete. The original is never changed.
+- Files go through the Assessments engine's device queue (now record-kind aware: `AS-` / `FS-`) to private Blob at `surveys/<FS-id>/…`; offline captures wait on the device and upload on reconnect. One merge rule on every write path, an advisory lock, seen-id deletes and per-editor save stamps keep two devices, the outbox and late saves from losing a photo or a field (D1212–D1213).
+- The field sheet prints each section's photos (marked-up version) with captions and its sketches, streamed from `/api/surveys/[id]/sheet-pdf` (20 MB image budget).
+- 3D view: Orbit / Plan / Section / Elevation presets and a Wireframe toggle (on by default).
+- **Tests:** `scripts/test-va-notes.ts` (`#344 C1…C8`, `C-final A…G`). No migration, no env var.
+- **Verified on desktop** (scratch DB, Blob off, 2026-10-15): photo + caption + markup (pen, colour, text label), View original, Edit markup reloads the strokes, Remove markup keeps the caption, Beams / Stage plan / line set sheet drawn, reload keeps everything, the printed PDF embeds the marked-up photo and three sketches, 3D presets + Wireframe. Not verifiable on desktop: Pencil pressure, palm rejection, a real Blob upload.
+
+**Slice C — Jeff's iPad test (on production or any Vercel deployment with Blob, NOT local dev — use a throwaway survey and delete it after):** use a throwaway survey; keep ONE editor open on it at a time unless the step says otherwise.
+1. **Pencil + palm.** Open Beams & rigging → Draw. Rest your palm on the screen *before* the first Pencil stroke, then draw. Palm should leave no marks. Pinch / pan with fingers while the Pencil rests. Write a few words with Scribble in a text label.
+2. **Finger toggle.** In a pad, tap **Draw with finger**, draw with a finger, turn it off — the Pencil should own drawing again.
+3. **Dense handwriting.** Line set schedule → Fill in by hand. Fill several rows in small handwriting; zoom in and out; Done. Reopen — strokes come back editable; the tile is legible.
+4. **Photos in bursts on weak Wi-Fi.** Add 5–6 photos quickly in two sections. Watch "N uploading". Force-quit Safari mid-upload, reopen the survey — nothing lost; anything stuck shows Retry / Discard.
+5. **Airplane mode.** Turn on airplane mode, take photos and draw a sketch, edit a few fields, Save. Turn airplane mode off, wait for the sync chip to settle, reload — everything is there. Then **Print sheet** — photos and sketches print.
+6. **Markup twice.** Mark up a photo, Done; mark it up again, Done. View original shows the clean photo; Remove markup keeps the photo and caption.
+7. **Leave while uploading.** Add photos and immediately go back to the list; come back — they finish or show Retry.
+8. **Rotate** the iPad with a pad open and with the viewer open.
+9. **3D.** Orbit, Plan, Section, Elevation; Wireframe on / off. (Wireframe shows each face's diagonal — say if you want outlines only.)
+Report anything odd with the survey id and the step number.
+
+**Slice C follow-ups (from the review ledger, none block the iPad test):**
+- A stage move made offline can push an older stage over a later office move on the same survey — the server has no forward-only stage rule (a stamped push could refuse to move a stage back past a stage write made after the stamp's time).
+- A pending stage clears only when the editor sees a refreshed record; an editor that never refreshes can re-send its own last move once over an office move.
+- A queued save from before a reload (another mount's entry, kept because it holds field edits) is pushed with its file lists: if it never reached the server, it can drop a markup made after the reload or bring back a photo deleted after it. Needs markup-version ids in the merge to fix.
+- The editor never learns when its queued field save pushed, so a later queued photo save can carry already-saved fields and revert one field write from another device.
+- Wireframe shows each face's triangle diagonal (material wireframe); edges-only outlines if Jeff wants them.
+- Replaced and deleted survey files stay in Blob (D1215); a sweep is a later job.
+- The desktop pass photographed one section (the plan said two); multi-section capture is covered by the iPad script.
+- Smoke (`test:smoke`) deferred: 29 GB free, under the 45 GB the run needs.
 
 **Jeff-gated:**
 - Review the internal tag list in Settings → Field & Venues (nine starter tags).
 - Older in-progress surveys ask for **Scope** (and **Rigging system**) before their intakes unlock (D1023) — tell the reps.
 - Send the real CW Elevation Sheet and the line set schedule sheet (slice C; placeholders are generated until then).
+- Run the slice C iPad test (script above) on a deployment with Blob; say whether you want wireframe outlines without diagonals.
 - Review the pick lists in `src/lib/field-lists.ts` (lift, loading door, track series, positions, console).
 - Try a real assessment end to end (travel fill, curtain rows, lighting positions, line sets, the printed sheet).
 
@@ -12305,7 +12343,7 @@ Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`
 - A null measurement counts as answered; Safari IME Enter guard on goal entry; a button-name polish on goal move / remove.
 - No dark-mode tokens for `--cond-0…4` (the app has no dark theme).
 
-**Remaining:** slice C (needs a real iPad + Apple Pencil test before merge), plus the Jeff-gated items above.
+**Remaining:** Jeff's iPad + Apple Pencil test of slice C on production (script above), plus the Jeff-gated items above.
 
 ## 345. Inbox Organize is hard to find, and it suggests junk companies ("UNKNOWN") — DONE 2026-10-14 on `worktree-assist-layer` (D1033–D1037)
 
@@ -12638,11 +12676,85 @@ The app is safe before step 4: ownership already resolves the same way lazily (G
 - Try Link to rack… / Unlink on a real Grid design with a rack built in the Assembly Builder.
 - The first supplement price file on production: check its parts read the new date and the rest of the book keeps its old one.
 
-## TBD. Estimate photo wrap, model tags, PDF title page, drawings + datasheet links — DONE 2026-10-17 on `feat/narrative-photo-wrap` (D-TBD-a…i)
+---
+
+## 355. Jeff's 2026-10-15 decisions — Batch 5 (Estimate output leftovers) — DONE 2026-10-16 on `worktree-assist-layer` (D1187–D1193)
+
+**Asked (Jeff, 2026-10-15/16 decision session — `docs/decisions/2026-10-15-jeff-decisions.md`, Round 2 items 55–63).** The #301 / #293 leftovers.
+
+**Done:**
+- **#55 Rewards numbers (D493 amended):** no code change — the thresholds, earn rates and 1 % / $1,000 starting credit are Jeff's confirmed numbers; the program stays off until he turns it on in Settings → Rewards.
+- **#56 Cover heading (D1187):** each scope on the cover PDF opens with its own heading — the system's name, else its discipline, else "Scope N" — inside the scope's no-break block. Answers #301 question 4. (#57, letterhead on page 1 only, is a Keep — #301 question 5.)
+- **#58 Viewed stamp (D1188):** "Viewed Oct 6, 9:05 PM" — the latest open of any sent revision's client link, Chicago time — on the Client link panel (Send & track, Customer review) and leading the Quotes hub's Opened chip tooltip. Staff only; no customer page reads `shareOpens`.
+- **#59 Won version (D1189):** the Won transition records `Quote.wonRev` (the latest send when it still matches, else a "Won — the version that won" snapshot); reopening (won → draft / sent) puts that version back when edits were saved after the win — the edits become a revision first, the credit is the locked amount through `restoredCreditFor` → `settleCredit`, the ledger sees a plain revise, and the Estimator reloads. Every non-Daylite system quote; never a historical import. Only the priced fields come back — the header stays. The online page still shows the last send.
+- **#60 Datasheet thumbnail (D1190):** already so — a key product with no real photo prints its datasheet's page-1 thumbnail (a real photo always wins), on the PDF, online and the package page. Pinned. Sent PDFs stay frozen; online views of old sent quotes read photos live.
+- **#61 Narrative default (D1191):** a new estimate starts Narrative; + Add system follows the estimate's first system (review M6); systems saved without the key stay Itemized, so existing estimates keep their setting.
+- **#62 Intros (D1192):** already so — `create` edits the shared system intros. Pinned.
+- **#63 Toggle labels (D1193):** the online estimate and package page toggle reads Overview / Itemized ("…is under Itemized."); `?view=bom` unchanged; staff labels unchanged.
+
+**Tests:** new `scripts/test-batch5.ts` (pure + DB, chained into test:specs; `npx tsx scripts/test-batch5.ts` runs the pure half, with `PGLITE_PATH` the DB half): the cover heading rule and render, the Viewed stamp and the customer pages' absence of it, the won-version rules plus a DB run of send → win → edit → reopen (spec, value, credit, auto-save revision, ledger redeem / unredeem once), won from an edited draft, won → sent, a historical import, the thumbnail order and a DB run (no photo → thumbnail → real photo wins), the Narrative default and old systems still Itemized, the intro permission, the toggle labels. Harness expectations updated where behaviour changed: the #301 chip tooltip (#58), the #301 package-page order / fallback text (#63); the #P2b no-alternates fixture regenerated for the cover heading (#56) and the toggle labels (#63). No migration, no env var.
+
+**Gates:** tsc 0; `scripts/test-batch5.ts` 89 PASS pure / 103 PASS with the DB half, 0 FAIL; test:specs 24,243 PASS / 0 FAIL; test:smoke 262 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors, 0 warnings on the 15 changed src/scripts files (the harness file excluded, targeted edits only). Not browser-verified.
+
+**Review fixes (2026-10-16, #355 review "With fixes"):** I1 — the reopen is planned before the approval gate; setStatus and `checkApprovalGate` judge the restored version, so a non-approver can reopen an approved-then-edited won quote to Sent and an approver's stamp fingerprints the restored content (DB-tested, no bypass). I2 — a restoring reopen schedules its PDF, won → sent too. I3 — the Estimator saves unsaved edits before leaving Won (status menu and stage bar). M1 — a historical-import move never restores; a Won move that records nothing sets `wonRev` null. M2 — a Save whose status move reopens also reloads. M3 — the Won move compares at today's SKUs. M4/M5 — D1189 scope (every non-Daylite system quote) and "the header isn't restored". M6 — Narrative only for a NEW estimate; + Add system follows the estimate's first system; Send & track warns "N narrative systems have no intro text" (never blocks). M7 — the Viewed stamp shows on the Quotes hub row. M8 — Home's stage sheet and the Quotes hub say "Reopened at the version that won…". Review-fix gates: tsc 0; `scripts/test-batch5.ts` 99 PASS pure / 122 PASS with the DB half, 0 FAIL; test:specs 24,262 PASS / 0 FAIL; test:smoke 262 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors, 0 warnings on the 14 changed src/scripts files. Not browser-verified.
+
+**Rollback:** safe. New optional JSON only (`Quote.wonRev`, and the "Won — the version that won" / "Auto-saved before reopening…" revisions, which older code reads as ordinary manual revisions); older code ignores them. Rolling back restores the old cover, labels, default presentation and reopen behaviour.
+
+**Remaining (Jeff-gated):**
+- Look at a cover PDF with three or more scopes on production (headings, still 1–2 pages).
+- Open a sent estimate's client link from another device, then check the Viewed stamp on Send & track and the Quotes hub tooltip.
+- Win an estimate, edit it, revise it (status → Draft): the Estimator reloads at the won version and Revisions lists the edits as "Auto-saved before reopening at the version that won".
+- The datasheet thumbnail only exists where the admin datasheet-thumbnail render has run — run it on production (#245 remaining).
+- Still open from #301: open counts best effort (question 6), the honeypot (7), starter paragraphs (9). From #293: the Itemized appendix hint "Every narrative system's full line list…" wording (not the online toggle).
+## 356. Jeff's 2026-10-15 decisions — Batch 6 (Round 2 items 64–68 + Field Work task-id fix) — DONE 2026-10-16 on `batch6-jeff-decisions` (D1194–D1199)
+
+Decision record: `docs/decisions/2026-10-15-jeff-decisions.md` (on `worktree-assist-layer`), Round 2 items 64–68.
+
+- **#64 Attach in the Inbox composer (D1194).** New message, Edit draft and the reply composer (its Attach was a demo) attach computer files and the linked company's / project's Documents; chips with ✕; 18 MB of files / 20 files together (Gmail's 25 MB counts the encoded message). Uploads go straight to private Blob (`mail-attachments/<user>/<key>/`, `/api/inbox/attach-upload`, the server mints the path), re-checked by `finalizeMailUploadAction`; attachments ride by reference (`blobPath` / `documentId`) and are re-checked on save / send / reply after the owner check and again in the Gmail bridge; over 4 MB sends through Gmail's upload endpoint. `src/lib/mail-attachments.ts`, `mail-attachments-server.ts`, `inbox/attach-actions.ts`, `inbox/attach-picker.tsx`.
+- **#65 Download today's jobs (D1195).** Nav sync panel, phone drawer and Field Work, `create` holders only. `GET /api/sync/today` (`src/lib/sync/today-jobs.ts`) → forced pull into the mirror → the service worker keeps each page (MessagePort reply) → "Ready offline: N jobs".
+- **#66 Most-quoted products (D1196).** `/reports/sourcing` + CSV: parts and manufacturers across open estimates (sent, or drafts touched in 12 months), weighted by the #298 win rate; assemblies expanded, bonus lines skipped; cost for `approve` holders only. `src/lib/sourcing-report.ts`.
+- **#67 App icon from the Branding logo (D1197).** `/icons/app/*.png` (sharp, cached by logo version), generated `src/app/manifest.ts`, versioned favicon / apple-touch-icon; built-in mark when no logo. Native shells need their own icon sets + a rebuild (DEPLOY.md §8).
+- **#68 July defaults accepted (D1198).** MASTER-QUESTIONS B1–B3, F6, F7, F9–F11, F14, G2, G3, H1, H3, I4–I7, J1–J4, J6, K2, K4–K6 answered; F17, J5, K1, K3 answered by the builds above.
+- **Bug fix (D1199).** `addFieldTask` could overwrite any task by id; `createFieldTask` takes only `tk-` ids, inserts once, treats the caller's own repeat as idempotent and refuses the rest.
+
+Tests: `scripts/test-batch6.ts` (chained into test:specs; 72 pure / 89 with the DB half), plus targeted pin updates in `test-review-and-spec.ts`, `test-thread-visibility.ts` (attach-actions joins the #341 action audit) and `test-ask.ts`. Smoke adds `/reports/sourcing` and a manifest content check. No migration, no new env var.
+
+**Gates:** tsc 0; `scripts/test-batch6.ts` 72 PASS pure / 89 PASS with the DB half, 0 FAIL; test:specs 24,229 PASS / 0 FAIL; test:smoke 264 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 errors on the 39 changed src/scripts .ts/.tsx files (1 pre-existing warning, `field-work/page.tsx` Date.now; `test-review-and-spec.ts` skipped — eslint crashes on the harness). Not browser-verified.
+
+**Review fixes (#356 review "With fixes", 2026-10-16):** Critical 1 — Forward is a real new message (`forwardAction`, `src/lib/inbox-forward.ts`): its own thread addressed only to the typed To / Cc, "Fwd: …" + the quoted original, optionally the forwarded message's attachments (a Gmail one read from its source, same mailbox only) plus the rep's picks; a private source stays private (#341). Reply all sends its Cc (stamped on the message; bridge `outboundAddressing`). Important 2 — 18 MB of files ("Attachments too large for Gmail — 18 MB max."); the bridge refuses a built message over 25 MB encoded and shows "Not sent — …" on it (never retried). Important 3 — `/api/sync/push` takes the pull's `create` gate (403 parks the outbox entries as read-only); a `tasks` push inserts only new `tk-` tasks on a live project and updates only `tk-` tasks on their own live project or tasks the pusher is assigned to / created (`src/lib/sync/task-push.ts`); `toggleFieldTask` / `addFieldTask` need `create` and a task on a live project. Minor — sourcing reads quotes once and counts drafts touched in 12 months only; one cached settings read in the root layout; the Documents picker tags Internal files and names the company / project; `/favicon.ico` rewrites to `/icons/app/32.png`; the caller's own unassigned `tk-` capture answers ok. D1194, D1196, D1199 updated. Review-fix gates: tsc 0; `scripts/test-batch6.ts` 95 PASS pure / 119 PASS with the DB half, 0 FAIL; test:specs 24,259 PASS / 0 FAIL (includes test-thread-visibility; its "push stays open" pin now pins the new gate); test:smoke 264 PASS / 0 FAIL (`.next` deleted, run alone); `next build` OK; eslint 0 problems on the 27 changed src/scripts files + next.config.ts. Not browser-verified.
+
+**Rollback:** safe. New optional fields only (`CommAttachment.blobPath` / `documentId` / `fwdFrom`, `CommMessage.sendError`); older code ignores them (an email drafted with one would send without it on old code, since the old bridge skips unknown attachments). Rolling back restores the static manifest only if `public/manifest.webmanifest` comes back with it.
+
+**Remaining (Jeff-gated):**
+- Attach a computer file and a company Document to a real email on production (needs `BLOB_READ_WRITE_TOKEN` and a connected Gmail); try one over 4 MB.
+- Press Download today's jobs on a phone with a real day's assignments, then go offline and open each job.
+- Upload the real logos in Settings → Branding and check the home-screen icon; replace the native app icon sets and rebuild if the apps should match.
+- Look at Reports → Most-quoted products with real open estimates.
+- **Question for Jeff (review item 9):** on a shared device, the offline mirror and the cached job pages stay after sign-out — another person signing in on that tablet could read them offline. Should sign-out clear the device (the mirror and the page cache, keeping unsent captures), or are field devices personal?
+- **Follow-up (review item 7):** sweep orphaned composer uploads — files under `mail-attachments/` that no draft or sent message references (a discarded composer), e.g. older than 7 days.
+- Forward a real email with a Gmail attachment on production and check the vendor gets the file; try Reply all with a Cc.
+- **Re-review fixes (2026-10-16, D1200):** To is read-only on Reply / Reply all (only Forward sends to a typed address); the shown Cc row always goes out; Reply all Cc's the replied-to message's other recipients (not our own mailbox); a push parks as read-only only on the route's own `403 { error: "read-only" }`; an offline tick (status / doneAt / updatedAt only, live task on a live project) syncs like the online tick, other fields from the stored copy; Forward waits for the original's attachments to finish loading. Gates: tsc 0; `test-batch6.ts` 105 PASS pure / 131 PASS with the DB half, 0 FAIL; test:specs 24,271 PASS / 0 FAIL (includes test-thread-visibility); `next build` OK; eslint 0 problems on the 11 changed files; smoke not rerun (no page route touched). Not browser-verified.
+- **Left as is (re-review item 6):** forwarding a legacy attachment stored inline as a data URL copies its bytes into the new forward's comms document (which every page's nav data reads). Rare (pre-Gmail-reference attachments only); forward by reference later.
+
+## 357. Move estimator lines between systems — DONE 2026-10-16 on `feat/356-move-lines` (D1201–D1207)
+
+Jeff, Oct 16: "the ability to move each individual line in the estimator to different packages — or select multiple and move them to different systems." Spec `docs/superpowers/specs/2026-10-16-estimator-move-lines-design.md`; plan `docs/superpowers/plans/2026-10-16-estimator-move-lines.md`.
+
+**Built:** on Build, a checkbox on every movable line, a ⇄ per line, and a sticky **N selected · Move to ▾ · Clear** bar (`move-lines-bar.tsx`). Targets: this estimate's systems, **New system…**, and **Another estimate…** (new or existing; lands as one "<name> (moved)" system through `moveSystemToEstimateAction`). A preview lists linked lines that come along, typed prices that clear, stars that drop, and systems left empty. Pure rules in `src/lib/estimate-line-move/` (`move.ts`, `reid.ts`). Package-document anchors follow (`src/lib/package-doc/reanchor.ts`), and the server re-ids colliding ids on any move or copy into an existing estimate.
+
+**Gates:** tsc 0; `scripts/test-estimate-line-move.ts` 100 PASS / 0 FAIL (in test:specs); test:specs 24,493 PASS / 0 FAIL (after merging main); test:smoke 262 PASS / 0 FAIL (before the merge); `next build` OK; eslint 0 on the touched files (`scripts/test-review-and-spec.ts` overflows eslint's react-hooks rule, as before). A browser pass on a scratch copy of the dev DB covered: tick 2 lines → existing system; ⇄ → New system "Sound" (inserted after its source); Save + reload kept both; ⇄ → Another estimate → New estimate (the line left and arrived at the same price; the preview said the source would be empty); the bar at 900px with no page overflow.
+
+**Rollback:** safe. No migration, no new stored fields. Older code reads moved lines like any others. The server re-id only changes ids that would have collided.
+
+**Remaining:**
+- Jeff: try it on a real estimate in production. A curtain with its track, a labor group, and a starred product make the best test.
+- Follow-up: `removeItem` / `patchItem` in `use-estimator-state.ts` still match a bare id across systems, so an estimate that already holds the same id in two systems (from a pre-#357 Move/Copy system into an existing estimate) can delete or edit both twins.
+
+## 358. Estimate photo wrap, model tags, PDF title page, drawings + datasheet links — DONE 2026-10-17 on `feat/narrative-photo-wrap` (D1219–D1227)
 
 Spec `docs/superpowers/specs/2026-10-16-estimate-photo-wrap-title-page-design.md`; plan `docs/superpowers/plans/2026-10-16-estimate-photo-wrap-title-page.md`. Key-product photos spread through each system's narrative with a model-number tag in the outer bottom corner (PDF, online estimate, package page, Build package document + editor). The PDF opens on a title page with the cover note, has no investment band, and puts pricing after the narratives and the BOM appendix last. The customer PDF then appends the client's drawings (merged with pdf-lib at their own page size; the finished PDF kept ≤ 14 MB for email, drawings that don't fit left out with a note and kept on the package page) and a page of permanent datasheet links (`/d/ds/…`). Drawing upload / remove / Generate from Grid and the Client package Drawings switch / left-out datasheets re-render it (`pdfAppendixKey`) without bumping updatedAt. The bidder PDF gets the title page and order, never drawings or links. No migration.
 
-**Verification (final, after the side-figure fix):** tsc 0 errors; `scripts/test-photo-wrap.ts` 127 PASS / 0 FAIL (incl. two Chrome layout checks); test:specs 24,282 PASS / 0 FAIL; test:smoke 263 PASS / 0 FAIL (`.next` deleted, run alone; a first attempt 500'd on every route including `/api/auth/csrf` — environment, the rerun passed); eslint 0 errors / 0 warnings on the 44 changed src/scripts files; `next build` OK. Real render (scratch PGlite, Blob token empty): the print route's main + links parts rendered with `renderPrintRouteToPdf` and merged by `prepareDrawings` + `mergeEstimateAppendices` with a synthetic 2-page 11×17 PDF and a PNG — 8 pages: title page (cover note, no totals), narrative with tagged placeholder photos, pricing, itemized BOM on a new page, two 792×1224 drawing pages, one landscape letter image page, the datasheet links page last with live `/d/ds/` URI annotations; no investment band anywhere. Artifacts in `docs/superpowers/fixtures/photo-wrap-render/`. Review fix: side photos (PDF, online estimate, package page, package document + editor) shrink the figure to the picture — at most 34 % wide and 2.4in tall — so a tall photo no longer leaves white space before the text; in Chrome a 300×600 photo's figure is 14.1 % of the column (was 34 %); a photo smaller than its box prints at its natural size, never upscaled (D-TBD-i). Real drawings from Blob were not rendered (the dev server can't read Blob).
+**Verification (final, after the side-figure fix):** tsc 0 errors; `scripts/test-photo-wrap.ts` 127 PASS / 0 FAIL (incl. two Chrome layout checks); test:specs 24,282 PASS / 0 FAIL; test:smoke 263 PASS / 0 FAIL (`.next` deleted, run alone; a first attempt 500'd on every route including `/api/auth/csrf` — environment, the rerun passed); eslint 0 errors / 0 warnings on the 44 changed src/scripts files; `next build` OK. Real render (scratch PGlite, Blob token empty): the print route's main + links parts rendered with `renderPrintRouteToPdf` and merged by `prepareDrawings` + `mergeEstimateAppendices` with a synthetic 2-page 11×17 PDF and a PNG — 8 pages: title page (cover note, no totals), narrative with tagged placeholder photos, pricing, itemized BOM on a new page, two 792×1224 drawing pages, one landscape letter image page, the datasheet links page last with live `/d/ds/` URI annotations; no investment band anywhere. Artifacts in `docs/superpowers/fixtures/photo-wrap-render/`. Review fix: side photos (PDF, online estimate, package page, package document + editor) shrink the figure to the picture — at most 34 % wide and 2.4in tall — so a tall photo no longer leaves white space before the text; in Chrome a 300×600 photo's figure is 14.1 % of the column (was 34 %); a photo smaller than its box prints at its natural size, never upscaled (D1227). Real drawings from Blob were not rendered (the dev server can't read Blob).
 
 **Rollback:** safe. Only new optional JSON (`pdf.notes`). Old PDFs stay as stored; the datasheet links printed in new PDFs stop working after a rollback (the route is gone).
 

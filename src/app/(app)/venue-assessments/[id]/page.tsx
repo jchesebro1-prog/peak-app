@@ -24,6 +24,7 @@ import { MeetingsCard } from "@/components/meetings/meetings-card";
 import { visitIdsForSurvey } from "@/lib/stores/site-visits";
 import { estimateSuggestEnabled, suggestionReadyHref } from "@/lib/assist/suggest-entry-server";
 import { surveyTravelSuggestion } from "@/lib/survey-travel-server";
+import { blobEnabled } from "@/lib/blob";
 
 export const metadata = { title: "Site survey — Quartzite-6" };
 
@@ -120,6 +121,9 @@ export default async function SurveyEditorPage({
         canSuggest={canSuggest}
         suggestionHref={suggestionHref}
         travelSuggestion={travelSuggestion}
+        // #344 C5 — photos upload to private Blob when it is configured, else (local dev) inline
+        blobEnabled={blobEnabled()}
+        me={user.id}
         // #323 — Krisp meetings linked to this survey or one of its site visits (site visits have no page of
         // their own; their meetings show here, like their recordings do).
         meetingsSlot={<MeetingsCard kind="work" id={[rec.id, ...visitIds]} viewerId={user.id} />}

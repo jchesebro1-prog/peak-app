@@ -12,6 +12,12 @@ export type ResolvableAttachment = {
   dataUrl?: string;
   pdfPath?: string;
   href?: string;
+  /** Batch 6 #64 — a composer upload / a Documents record, by reference (lib/mail-attachments.ts). */
+  blobPath?: string;
+  documentId?: string;
+  /** #356 review — a forwarded Gmail attachment, read from its source message. */
+  gmailPartId?: string;
+  fwdFrom?: { threadId: string; messageId: string };
 };
 
 /** A same-origin path (`/…`, never `//host` or `/\\host`). */
@@ -36,7 +42,10 @@ export type MimeAttachment = { name: string; mime: string; dataBase64: string };
  */
 export async function attachmentMimePart(
   a: ResolvableAttachment,
-  readPdf: (path: string) => Promise<Buffer | null>
+  readPdf: (path: string) => Promise<Buffer | null>,
+  /** Batch 6 #64 — reads a composer upload / a document (mail-attachments-server readMailRefForThread). A missing or
+   *  refused one THROWS, like a missing PDF: the email never goes out without a file it lists. */
+  readRef?: (a: ResolvableAttachment) => Promise<Buffer | null>
 ): Promise<MimeAttachment | null> {
   const name = a.name || "attachment";
   if (a.dataUrl) {
@@ -49,7 +58,27 @@ export async function attachmentMimePart(
     if (!bytes || !bytes.length) throw new Error(`attachment ${name} could not be read from storage`);
     return { name, mime: a.mime || "application/pdf", dataBase64: bytes.toString("base64") };
   }
+  if (a.blobPath || a.documentId || (a.fwdFrom && a.gmailPartId)) {
+    const bytes = readRef ? await readRef(a) : null;
+    if (!bytes || !bytes.length) throw new Error(`attachment ${name} could not be read from storage`);
+    return { name, mime: a.mime || "application/octet-stream", dataBase64: bytes.toString("base64") };
+  }
   return null;
+}
+
+/** #356 review — Gmail's 25 MB limit counts the encoded (RFC 822) message, attachments already base64 inside it. */
+export const GMAIL_MAX_MESSAGE_BYTES = 25 * 1024 * 1024;
+/** The rep's words for a message the bridge refuses as too large (mail-attachments MAIL_ATTACH_TOO_LARGE). */
+export const MESSAGE_TOO_LARGE = "Attachments too large for Gmail — 18 MB max.";
+
+/** The encoded message's size in bytes from the bridge's base64url `raw`. Pure. */
+export function rawMessageBytes(rawBase64Url: string): number {
+  return Math.floor((rawBase64Url.replace(/=+$/, "").length * 3) / 4);
+}
+
+/** Refusal text when the built message is over Gmail's limit (never sent), else null. */
+export function messageTooLargeError(rawBase64Url: string): string | null {
+  return rawMessageBytes(rawBase64Url) > GMAIL_MAX_MESSAGE_BYTES ? MESSAGE_TOO_LARGE : null;
 }
 
 /**

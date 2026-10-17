@@ -14,6 +14,8 @@ import { recordNudgeOpened } from "@/lib/brief/nudge-outcome";
 import { after } from "next/server";
 import { readerPreDraft } from "@/lib/brief/reader-predraft";
 import { attachmentHref } from "@/lib/comms-attachments";
+import { attachKey } from "@/lib/mail-attachments";
+import { replyAllCc } from "@/lib/reply-all";
 import { isPdfAttachment, isVendorPickerType, threadAttachmentHref, threadAttachmentRef } from "@/lib/vendor-quotes/rules";
 import { groupCompanyOptions } from "@/lib/vendor-status";
 import { all as allCustomers } from "@/lib/stores/customers";
@@ -624,9 +626,10 @@ export default async function InboxPage({
               body: t.draft?.body || "",
               customerId: t.customerId || "",
               contactName: t.contactName || "",
-              attachments: (t.draft?.attachments || []).map((a) => ({
+              attachments: (t.draft?.attachments || []).map((a, i) => ({
                 name: a.name,
                 size: a.size,
+                key: attachKey(a, i),
               })),
             }
           : null,
@@ -994,6 +997,7 @@ export default async function InboxPage({
       out: m.direction === "out",
       tag: tagFor(m),
       queued: !!m.queued,
+      ...(m.sendError ? { sendError: m.sendError } : {}),
       time: timeFull(m.at),
       body: m.body,
       attachments: (m.attachments || []).map((a, i) => {
@@ -1006,7 +1010,8 @@ export default async function InboxPage({
           pdf: isPdfAttachment(a) && !a.pdfPath,
           // #348 slice 4 — an imported Gmail attachment downloads through the
           // visibility-checked route (bytes stay in Gmail until asked for)
-          href: attachmentHref(a) || (a.gmailPartId ? threadAttachmentHref(ref) : ""),
+          // Batch 6 #64 — a composer upload / a document too (read by reference)
+          href: attachmentHref(a) || (a.gmailPartId || a.blobPath || a.documentId ? threadAttachmentHref(ref) : ""),
         };
       }),
       link: m.link
@@ -1041,6 +1046,11 @@ export default async function InboxPage({
       chanIcon: chanIconOf(sel.channel),
       boxLabel: bm?.label || "Info",
       boxAddress: bm?.address || "",
+      // #356 re-review — Reply all Cc: the replied-to message's other recipients, never our own address or the contact
+      replyAllCc: replyAllCc(
+        [...(sel.messages || [])].reverse().find((m) => m.direction === "in") || (sel.messages || [])[(sel.messages || []).length - 1],
+        [bm?.address, user.email, sel.contactEmail],
+      ),
       boxColor: bm?.color || "#8a6d1f",
       contactName: sel.contactName || "Customer",
       contactEmail: sel.contactEmail || "",
@@ -1232,9 +1242,10 @@ export default async function InboxPage({
       body: d.body || "",
       customerId: openDraftThread.customerId || "",
       contactName: openDraftThread.contactName || "",
-      attachments: (d.attachments || []).map((a) => ({
+      attachments: (d.attachments || []).map((a, i) => ({
         name: a.name,
         size: a.size,
+        key: attachKey(a, i),
       })),
     };
   } else if (nudge) {

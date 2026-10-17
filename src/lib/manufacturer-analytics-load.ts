@@ -20,10 +20,10 @@ export type LoadedAnalytics = AnalyticsResult & {
 /** A page that already read the catalog / manufacturer records passes them in so they aren't read twice. */
 export async function loadManufacturerAnalytics(
   now: number = Date.now(),
-  preloaded: { parts?: readonly CatalogPart[]; records?: readonly Manufacturer[] } = {},
+  preloaded: { parts?: readonly CatalogPart[]; records?: readonly Manufacturer[]; quotes?: Awaited<ReturnType<typeof allQuotes>> } = {},
 ): Promise<LoadedAnalytics> {
   const [quotes, parts, records] = await Promise.all([
-    allQuotes(),
+    preloaded.quotes ?? allQuotes(),
     preloaded.parts ?? listCatalog(),
     preloaded.records ?? listManufacturers(),
   ]);

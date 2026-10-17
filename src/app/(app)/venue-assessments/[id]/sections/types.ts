@@ -10,6 +10,7 @@ import type {
   SurveyStageMeta,
 } from "@/lib/stores/surveys";
 import type { VenueClass } from "@/lib/stores/venue-classes";
+import type { SketchRef, SurveyPhotoRef } from "@/lib/field-files/files";
 import type { LinesetRow } from "@/lib/stores/linesets";
 import type { AssessmentData, InspectionRef } from "@/lib/stores/assessment";
 import type { DisciplineData, DisciplineKey, InventoryRow, SystemState } from "@/lib/stores/survey-intake";
@@ -114,7 +115,12 @@ export type Draft = {
   requestedBy: string;
   measurements: Record<string, string | boolean>;
   conditions: string[];
+  /** legacy inline photos — shown read-only as "Earlier photos"; assessment findings still reference their ids */
   photos: SurveyPhoto[];
+  /** #344 C5 — per-section photos; a change is saved on its own (it never dirties the draft) */
+  photoRefs: SurveyPhotoRef[];
+  /** #344 C6 — sketch pads by SketchKey; a change is saved on its own (it never dirties the draft) */
+  sketches: Record<string, SketchRef>;
   // Site Intake extension (IDEAS #45)
   auditoriumSize: string;
   yearBuilt: string;

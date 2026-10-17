@@ -599,7 +599,7 @@ function finalReviewChecks(ok: Ok) {
   ok(/outboxEntry\("assessments", id\)/.test(ed) && /type: "foldOutbox"/.test(ed) && /await outboxFolded\.current/.test(ed) && /keepOutbox: \(entryDoc\) => !outboxEntryCovered\(/.test(ed), "final I1: the editor folds this device's entry before saving and guards recordSynced with keepOutbox");
   const sv = readFileSync(join(ROOT, "src/lib/sync/save.ts"), "utf8");
   const en = readFileSync(join(ROOT, "src/lib/sync/engine.ts"), "utf8");
-  ok(/keepEntry: opts\.keepOutbox/.test(sv) && /!opts\?\.keepEntry\?\.\(entry\.doc\)/.test(en), "final I1: saveThroughOutbox passes keepOutbox to recordSynced, which keeps an uncovered entry");
+  ok(/keepEntry: opts\.keepOutbox/.test(sv) && /!opts\?\.keepEntry\?\.\(entry\.doc(, entry\.state)?\)/.test(en), "final I1: saveThroughOutbox passes keepOutbox to recordSynced, which keeps an uncovered entry");
 
   // I3: the save-status label
   type LI = Parameters<typeof saveStatusLabel>[0];

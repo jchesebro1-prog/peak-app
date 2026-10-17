@@ -1368,7 +1368,7 @@ See `.env.example`.
     re-link old hand-made customer links that should be shared, try two
     accounts on production. Punch item #341.
 
-61. 🚧 **Venue Assessment notes** (#344, D1019–D1032, D1038–D1051) — Jeff's Oct 14 notes on
+61. ✅ **Venue Assessment notes** (#344, D1019–D1032, D1038–D1051, D1208–D1218) — Jeff's Oct 14 notes on
     the Venue Assessments (`FS-####`) editor, three slices on one branch
     (spec `docs/superpowers/specs/2026-10-14-venue-assessment-notes-design.md`).
     ✅ **Slice A (form structure & flow):** a new section order with **Kill
@@ -1412,8 +1412,28 @@ See `.env.example`.
     the editor shows. No migration, no env var. **No instant rollback past the
     slice B merge** — a slice A build reads list goals as empty and deletes them
     on the next save; roll forward.
-    Remaining: slice C (ink pad, photos and sketches; needs a real iPad +
-    Apple Pencil test before merge), plus Jeff-gated: review the internal tag
+    ✅ **Slice C (drawing & photo capture, D1208–D1218) — merged
+    2026-10-17 at Jeff's request, before his iPad + Apple Pencil test:**
+    a Pencil-first ink pad (`src/components/ink/`, pure model `src/lib/ink/`;
+    palm rejection, Draw with finger) saving strokes JSON + a flattened JPEG;
+    sketch pads in their sections (Beams, CW elevation / Brick with
+    counterweight, Stage plan / section, House section / plan, the line set
+    schedule's Fill in by hand sheet) on backgrounds drawn from the
+    measurements (`src/lib/ink/backgrounds.ts`; CW Elevation and the line set
+    sheet are placeholders); Add photo on every section with caption and
+    markup that never touches the original; files through the engine's device
+    queue (kind from the `AS-` / `FS-` prefix) to private Blob at
+    `surveys/<FS-id>/<p_|m_|k_|s_…>` (`src/lib/field-files/`, broker
+    `/api/surveys/[id]/files/upload`, bytes `/api/surveys/[id]/files/[fileId]`);
+    one merge rule (`mergeSurveyFileRefs`: a finished slot wins, delete only
+    seen ids), the survey advisory lock, per-editor save stamps
+    (`save-stamp.ts`, hidden `_saveSeqs` with `fullSeq`) and file-only writes
+    that never bump rev; a streamed field-sheet PDF with photos and sketches
+    (`/api/surveys/[id]/sheet-pdf`); 3D Orbit / Plan / Section / Elevation +
+    Wireframe. Replaced files stay in Blob (D1215). No migration, no env var.
+    Remaining: Jeff's iPad + Pencil test on production (script in PUNCHLIST
+    #344); plus
+    Jeff-gated: review the internal tag
     list and the pick lists in `field-lists.ts`, tell the reps older surveys
     ask for Scope first, send the CW Elevation and line set schedule sheets,
     try a real assessment end to end. Punch item #344.
@@ -1559,7 +1579,23 @@ See `.env.example`.
 
 63. ✅ **Mailbox identity** (#349, D1063–D1073) — mailbox ownership follows the user's id (`CommThread.mailboxOwnerId`; one rule `ownsMailbox`, stamp → Gmail key → a name only one user holds, else nobody; `ownMailboxCond` in SQL; viewers from `src/lib/mailbox-viewer.ts`), assignments carry `assignedToId`, creators refuse a blank owner, legacy threads stamp lazily in write guards and via `npm run comms:stamp-owners` (Jeff-gated prod run; shared names get the `"unresolved"` tombstone), a rename or new hire never moves mail (`src/lib/mailbox-names.ts`), and Settings → Team refuses duplicate names. Punch item #349.
 
-64. ✅ **Estimate photo wrap + PDF appendices** (#TBD, D-TBD-a…i) — key-product photos spread
+64. ✅ **Move lines between systems** (#357, D1201–D1207) — on the Estimator's
+    Build step, tick lines (or ⇄ one) and move them to another system, a New
+    system… (inserted after the source) or Another estimate… (lands as one
+    "<name> (moved)" system through `moveSystemToEstimateAction`). A preview
+    lists every side effect first. Lines keep their prices byte-for-byte;
+    partners travel (curtain ↔ track per `linkCurtainTracks`, whole labor
+    groups); a typed system price clears on both sides; stars and labor drafts
+    follow, re-minted on collision. Lines are addressed by `{ sectionId, id }`
+    because ids are unique per system only. The server now re-ids colliding
+    ids on any move or copy into an existing estimate (`reid.ts`), and the
+    package document's anchors follow a move (`package-doc/reanchor.ts`). Pure
+    rules in `src/lib/estimate-line-move/`; UI `move-lines-bar.tsx`; checks in
+    `scripts/test-estimate-line-move.ts`. No migration. Remaining: Jeff tries
+    it in production; follow-up for `removeItem` / `patchItem` bare-id
+    matching on estimates that already hold duplicate ids. Punch item #357.
+
+65. ✅ **Estimate photo wrap + PDF appendices** (#358, D1219–D1227) — key-product photos spread
     down each system's text (`src/lib/estimate-output/photo-spread.ts`: photo k before unit k,
     sides alternating, the system body the only float box) with a model-number tag on the outer
     bottom corner (`photo-models.ts`, `loadKeyProductModels`), in the PDF, online estimate,
@@ -1575,7 +1611,7 @@ See `.env.example`.
     (`appendix-key.ts`) re-renders on drawing / selection changes without bumping updatedAt.
     Bidder PDFs get the order but no drawings or links. No migration. Remaining is Jeff-gated:
     `QUOTE_PDF_ORIGIN` in production, a real estimate with drawings and datasheets on
-    production, and a long cover note. Punch item #TBD.
+    production, and a long cover note. Punch item #358.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

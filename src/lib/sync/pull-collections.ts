@@ -1,4 +1,5 @@
 import { SYNCABLE_COLLECTIONS, SYNCABLE_SET, type CollectionName } from "@/db/doc-tables";
+import { withoutSaveFields } from "@/lib/field-files/save-stamp";
 import { can } from "@/lib/team";
 
 /**
@@ -24,4 +25,12 @@ export function pullCollections(param: string | null | undefined): CollectionNam
   if (param == null) return [...SYNCABLE_COLLECTIONS];
   const asked = param.split(",").map((s) => s.trim()).filter(Boolean);
   return [...new Set(asked)].filter((c): c is CollectionName => SYNCABLE_SET.has(c));
+}
+
+/** #344 C-final D — what GET /api/sync/pull serves for one collection's changes: a survey's server-only save-order map
+ *  (`_saveSeqs`, random editor ids + seqs) and any stray save stamp are stripped before the device caches the doc
+ *  (pushes ignore them anyway); every other collection passes through unchanged. */
+export function pulledChanges<C extends { doc: Record<string, unknown> }>(coll: string, changes: C[]): C[] {
+  if (coll !== "surveys") return changes;
+  return changes.map((c) => ({ ...c, doc: withoutSaveFields(c.doc) }));
 }

@@ -179,7 +179,8 @@ export default async function QuotesPage({
   const statusError = one(sp.statusError) || null;
   const packageError = one(sp.packageError) || null;
   // #282 phase 3: a Recall that reduced or removed the revision's Rewards credit.
-  const creditNotice = one(sp.creditNotice) || null;
+  // #355 review M8: …or a status move that reopened a won estimate at the version that won (same notice line).
+  const creditNotice = one(sp.creditNotice) || one(sp.statusNotice) || null;
   // #35 one-click both ways: the engagement referencing the selected quote
   // (as its source proposal OR as Peak's install bid). Selected row only.
   const selEng = selectedId ? await getEngagementForQuoteRef(selectedId) : null;
@@ -804,6 +805,8 @@ export default async function QuotesPage({
                     }}
                   >
                     {displayQuoteNumber(q)} · {owner}{preparedNote}
+                    {/* #355 review M7: the client's latest open, visible on the row (staff only). */}
+                    {opened?.viewed ? <span data-testid="quote-viewed-stamp" style={{ color: "#3155a8" }}> · {opened.viewed}</span> : null}
                   </div>
                 </div>
                 <div

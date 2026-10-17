@@ -710,6 +710,7 @@ const ACTION_FILES = [
   "src/app/(app)/inbox/task-actions.ts",
   "src/app/(app)/inbox/assist-actions.ts",
   "src/app/(app)/inbox/vendor-file-actions.ts",
+  "src/app/(app)/inbox/attach-actions.ts", // Batch 6 #64
 ];
 /** A parameter list that carries a thread id. */
 const THREAD_PARAM = /\b(?:id|threadId|threadIds|ids|list)\??\s*:|\bthreadId\b|\bComposePayload\b|\bCreateSiteVisitInput\b|\bThreadTaskRequest\b/;
@@ -952,7 +953,7 @@ export async function taskShareDbChecks(ok: Ok): Promise<void> {
     await createFixture("tasks", pushedOver as never);
     ok((await sees(ME, ids.a)) && !(await sees(ME, ids.pushed)) && (await getDoc<{ id: string; threadId?: string }>("tasks", at!.id))?.threadId === ids.a, "task share db (#351): a pushed update keeps the stored threadId and stamp — it can't re-point the share");
     const route = readFileSync("src/app/api/sync/push/route.ts", "utf8");
-    ok(/let doc: Record<string, unknown> = sanitizePushedDoc\(coll, \{ \.\.\.rec\.doc, id: rec\.id \}, existing\.length \? \{ doc: existing\[0\]\.doc, deleted: !!existing\[0\]\.deleted \} : null\);/.test(route), "sync push (#351): the push route sanitises every document before insert or update");
+    ok(/let doc: Record<string, unknown> = sanitizePushedDoc\(coll, \{ \.\.\.(?:rec\.doc|pushDoc), id: rec\.id \}, existing\.length \? \{ doc: existing\[0\]\.doc, deleted: !!existing\[0\]\.deleted \} : null\);/.test(route), "sync push (#351): the push route sanitises every document before insert or update");
 
     /* a promise-task never shares */
     const p = await T.createTaskOnce({ id: id("k-promise"), title: "Promise", assigneeUserId: ME.id, assigneeName: ME.name, threadId: ids.promise, threadShare: { threadId: ids.promise, by: OWNER.id, to: ME.id, at: NOW } }, { id: "system", name: "System" });
@@ -1023,7 +1024,7 @@ export async function syncPullRoleChecks(ok: Ok): Promise<void> {
   ok(/if \(!session\?\.user\?\.active\) \{[\s\S]{0,120}status: 401 \}\);\s*\}\s*if \(!mayPullFieldData\(session\.user\.roles\)\) \{\s*return NextResponse\.json\(\{ error: "forbidden" \}, \{ status: 403 \}\);/.test(route),
     "sync pull (#39): the route answers 403 to a non-field role before reading anything");
   const eng = readFileSync("src/lib/sync/engine.ts", "utf8");
-  ok(/if \(!this\.connected\(\) \|\| this\.pullForbidden\) return;/.test(eng) && /if \(pullStopsOn\(res\.status\)\) \{[\s\S]{0,120}this\.pullForbidden = true;\s*if \(this\.pollTimer\) clearInterval\(this\.pollTimer\);/.test(eng),
+  ok(/if \(!\(opts\.force \? this\.isOnline\(\) : this\.connected\(\)\) \|\| this\.pullForbidden\) return false;/.test(eng) && /if \(pullStopsOn\(res\.status\)\) \{[\s\S]{0,120}this\.pullForbidden = true;\s*if \(this\.pollTimer\) clearInterval\(this\.pollTimer\);/.test(eng),
     "sync pull (#39): on a 403 the engine stops the poll and never pulls again this page");
   const mirror = [
     { key: "tasks::T-1", collection: "tasks" },
@@ -1036,7 +1037,8 @@ export async function syncPullRoleChecks(ok: Ok): Promise<void> {
   ok(/\/\/ M4 — and drop what an earlier pull left in this browser[^\n]*\n\s*await this\.clearFieldMirror\(\);/.test(eng) && /for \(const key of mirrorKeysToClear\(mirror, outbox, FIELD_COLLECTIONS\)\) await idb\.delete\("mirror", key\);\s*await idb\.setMeta\(CURSORS_META, \{\}\);/.test(eng),
     "sync pull (#351 M4): the engine deletes those mirror rows and resets the pull cursors on the 403");
   const push = readFileSync("src/app/api/sync/push/route.ts", "utf8");
-  ok(!push.includes("mayPullFieldData"), "sync pull (#39): push stays open to any active user (the field editors save through it)");
+  // #356 review — push now takes the same `create` gate as pull (was open to any active user)
+  ok(/if \(!mayPullFieldData\(session\.user\.roles\)\) \{\s*return NextResponse\.json\(\{ error: "read-only" \}, \{ status: 403 \}\);/.test(push), "sync push (#356 review): only field roles (`create`) push; others get 403 read-only");
 }
 
 if (process.argv[1] && /test-thread-visibility\.ts$/.test(process.argv[1])) {

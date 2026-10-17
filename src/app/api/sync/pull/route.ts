@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { listSince } from "@/db/doc-store";
-import { mayPullFieldData, pullCollections } from "@/lib/sync/pull-collections";
+import { mayPullFieldData, pullCollections, pulledChanges } from "@/lib/sync/pull-collections";
 
 /**
  * Cursor-based pull — GET /api/sync/pull?cursors={"comms":123,...}
@@ -39,7 +39,7 @@ export async function GET(req: Request) {
   const nextCursors: Record<string, number> = {};
   for (const coll of collections) {
     const res = await listSince(coll, Number(cursors[coll] || 0));
-    changes[coll] = res.changes;
+    changes[coll] = pulledChanges(coll, res.changes); // #344 C-final D: a survey's _saveSeqs never reaches the device
     nextCursors[coll] = res.cursor;
   }
   return NextResponse.json({ changes, cursors: nextCursors });
