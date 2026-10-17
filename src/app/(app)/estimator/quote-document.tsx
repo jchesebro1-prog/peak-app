@@ -139,7 +139,8 @@ export const QUOTE_WEB_CSS = `
 }
 @media (max-width: 480px) {
   .est-web .est-ph { float: none !important; display: block; width: 100% !important; margin: 0 0 10px 0 !important; }
-  .est-web .est-ph img { max-height: 3in !important; }
+  .est-web .est-ph img { max-height: 3in !important; object-position: right top !important; }
+  .est-web .est-ph-tag { left: auto !important; right: 0 !important; }
 }
 @media print {
   html, body { background: #fff !important; }
@@ -161,7 +162,8 @@ export const QUOTE_WEB_EMBED_CSS = `
 }
 @media (max-width: 480px) {
   .est-web .est-ph { float: none !important; display: block; width: 100% !important; margin: 0 0 10px 0 !important; }
-  .est-web .est-ph img { max-height: 3in !important; }
+  .est-web .est-ph img { max-height: 3in !important; object-position: right top !important; }
+  .est-web .est-ph-tag { left: auto !important; right: 0 !important; }
 }
 @media print {
   .est-web { box-shadow: none !important; padding: 0 !important; max-width: none !important; }
@@ -506,9 +508,6 @@ function keyProductPhotoOf(kp: DocSystem["keyProducts"][number], p: QuoteDocumen
   if (own) return { ...own, own: true };
   return kp.photo && kp.placeholder ? { src: PLACEHOLDER_SRC[kp.placeholder], alt: "", own: false } : undefined;
 }
-function keyProductPhoto(kp: DocSystem["keyProducts"][number], p: QuoteDocumentProps) {
-  return keyProductPhotoOf(kp, p);
-}
 
 /** Photo wrap — one printed photo: the figure floats, the img fills it, the model tag sits on the outer bottom corner. */
 function PhotoFigure({ src, alt, side, model, web }: { src: string; alt: string; side: "left" | "right"; model: string; web: boolean }) {
@@ -666,7 +665,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
   const photoSides = alternatingPhotoSides(
     [...previewSections, ...alternateGroups.flatMap((ag) => ag.systems.map((x) => x.ps))]
       .filter((ps) => ps.presentation === "narrative")
-      .flatMap((ps) => ps.keyProducts.filter((kp) => !!keyProductPhoto(kp, p)).map((kp) => ps.id + "|" + kp.sku))
+      .flatMap((ps) => ps.keyProducts.filter((kp) => !!keyProductPhotoOf(kp, p)).map((kp) => ps.id + "|" + kp.sku))
   );
   // The alternate systems that actually print in the Alternates block; an
   // alternate that doesn't (no sell, so nothing prints) can't carry its option

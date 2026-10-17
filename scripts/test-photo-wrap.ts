@@ -108,7 +108,8 @@ function quoteDocPhotoChecks(ok: Ok) {
   const plain = renderQuoteDocument293(qd293Props());
   ok(!plain.includes("display:flow-root") && !plain.includes("est-ph"), "photo wrap (doc): a system with no photo renders with no float container");
   const web = renderQuoteDocument293({ ...qd293Props({ sections: wrapSections() }), keyProductPhotos: PHOTOS, keyProductModels: { "SKU-5": "Jupiter 4" }, layout: "web" });
-  ok(web.includes("font-size:10px") && web.includes(">Jupiter 4</span>"), "photo wrap (doc): the web tag is 10px");
+  ok(/class="est-ph-tag" style="[^"]*font-size:10px[^"]*">Jupiter 4<\/span>/.test(web) && !/class="est-ph-tag" style="[^"]*font-size:9px/.test(web),
+    "photo wrap (doc): the web tag is 10px");
   const noModels = renderQuoteDocument293({ ...qd293Props({ sections: wrapSections().map((s) => ({ ...s, items: s.items.map((it) => ({ ...it, manufacturerPartNumber: undefined })) })) }), keyProductPhotos: PHOTOS });
   ok(noModels.includes('<figure class="est-ph"') && !noModels.includes("est-ph-tag"), "photo wrap (doc): no model anywhere → no tag");
 
@@ -130,6 +131,12 @@ function quoteDocPhotoChecks(ok: Ok) {
   for (const css of [webCss.QUOTE_WEB_CSS, webCss.QUOTE_WEB_EMBED_CSS])
     ok(/@media \(max-width: 480px\)[\s\S]*\.est-web \.est-ph \{ float: none !important; display: block; width: 100% !important; margin: 0 0 10px 0 !important; \}/.test(css) && !css.includes(".est-kp img"),
       "photo wrap (doc): a phone puts each photo full width (web + embedded CSS)");
+  for (const css of [webCss.QUOTE_WEB_CSS, webCss.QUOTE_WEB_EMBED_CSS]) {
+    const phone = css.slice(css.indexOf("@media (max-width: 480px)"));
+    ok(phone.includes(".est-web .est-ph-tag { left: auto !important; right: 0 !important; }") && phone.includes(".est-web .est-ph img { max-height: 3in !important; object-position: right top !important; }") &&
+       phone.indexOf(".est-ph-tag") < phone.indexOf("@media print"),
+      "photo wrap (doc): on a phone the full-width photo's tag sits bottom-right, on the picture's corner (web + embedded CSS)");
+  }
 
   const pr = rd("src/app/print/quote/[id]/page.tsx"), loader = rd("src/lib/quote-pdf/document-loader.ts");
   ok(pr.includes("loadKeyProductModels(doc.sections, doc.document)") && loader.includes("loadKeyProductModels(doc.sections, doc.document)") && pr.includes("keyProductModels={keyProductModels}"),
