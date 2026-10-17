@@ -139,8 +139,8 @@ export const QUOTE_WEB_CSS = `
   .est-web .est-meta, .est-web .est-sig { grid-template-columns: 1fr !important; gap: 10px !important; }
 }
 @media (max-width: 480px) {
-  .est-web .est-ph { float: none !important; display: block; width: 100% !important; margin: 0 0 10px 0 !important; }
-  .est-web .est-ph img { max-height: 3in !important; object-position: right top !important; }
+  .est-web .est-ph { float: none !important; display: block; width: 100% !important; max-width: 100% !important; margin: 0 0 10px 0 !important; }
+  .est-web .est-ph img { width: 100% !important; max-height: 3in !important; object-position: right top !important; }
   .est-web .est-ph-tag { left: auto !important; right: 0 !important; }
 }
 @media print {
@@ -162,8 +162,8 @@ export const QUOTE_WEB_EMBED_CSS = `
   .est-web .est-meta, .est-web .est-sig { grid-template-columns: 1fr !important; gap: 10px !important; }
 }
 @media (max-width: 480px) {
-  .est-web .est-ph { float: none !important; display: block; width: 100% !important; margin: 0 0 10px 0 !important; }
-  .est-web .est-ph img { max-height: 3in !important; object-position: right top !important; }
+  .est-web .est-ph { float: none !important; display: block; width: 100% !important; max-width: 100% !important; margin: 0 0 10px 0 !important; }
+  .est-web .est-ph img { width: 100% !important; max-height: 3in !important; object-position: right top !important; }
   .est-web .est-ph-tag { left: auto !important; right: 0 !important; }
 }
 @media print {

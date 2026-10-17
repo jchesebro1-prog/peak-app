@@ -31,7 +31,6 @@ export type PackageSlots = {
  *  corner). Printed only on a page that has one, so a page whose photos don't alternate renders exactly as before. */
 export const PACKAGE_LEFT_PHOTO_CSS = `
 .pkg-ph.pkg-ph-left { float: left; margin: 0 14px 8px 0; }
-.pkg-ph.pkg-ph-left img { object-position: left top; }
 .pkg-ph.pkg-ph-left .pkg-ph-tag { right: auto; left: 0; }
 @media (max-width: 600px) {
   .pkg-ph.pkg-ph-left { float: none; margin: 0 0 10px; }
@@ -72,8 +71,8 @@ export const PACKAGE_WEB_CSS = `
 .pkg-label { font-size: 11px; font-weight: 700; color: #5b616e; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
 .pkg-kp { margin-top: 14px; }
 .pkg-body-ph { display: flow-root; }
-.pkg-ph { float: right; width: 34%; margin: 0 0 8px 14px; position: relative; break-inside: avoid; page-break-inside: avoid; }
-.pkg-ph img { display: block; width: 100%; max-height: 2.4in; object-fit: contain; object-position: right top; }
+.pkg-ph { float: right; width: fit-content; max-width: 34%; margin: 0 0 8px 14px; position: relative; break-inside: avoid; page-break-inside: avoid; }
+.pkg-ph img { display: block; width: auto; height: auto; max-width: 100%; max-height: 2.4in; object-fit: contain; }
 .pkg-ph-tag { position: absolute; bottom: 0; right: 0; max-width: 100%; box-sizing: border-box; padding: 2px 6px; background: rgba(22,24,29,.86); color: #fff; font-family: var(--font-mono); font-size: 10px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pkg-bom-wrap { overflow-x: auto; }
 .pkg-bom { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -88,8 +87,8 @@ export const PACKAGE_WEB_CSS = `
 @media (max-width: 600px) {
   .pkg-card { padding: 18px 16px; }
   .pkg-grand { text-align: left; }
-  .pkg-ph { float: none; width: 100%; margin: 0 0 10px; }
-  .pkg-ph img { max-height: 3in; object-position: right top; }
+  .pkg-ph { float: none; width: 100%; max-width: 100%; margin: 0 0 10px; }
+  .pkg-ph img { width: 100%; max-height: 3in; object-position: right top; }
 }
 @page { size: letter; margin: 0.6in; }
 @media print {

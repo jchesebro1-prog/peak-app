@@ -47723,7 +47723,7 @@ import { appendixSystemIds as p293AppendixIds } from "@/app/(app)/estimator/quot
   const html = p293Render({ ...p293Props({ sections: secs }), keyProductPhotos: { "SKU-5": { src: "data:image/png;base64,QUFB", alt: "Five" }, "SKU-1": { src: "data:image/png;base64,WFhY", alt: "One" }, "SKU-8": { src: "data:image/png;base64,ODg4", alt: "Eight" } } });
   ok((html.match(/class="est-kp"/g) || []).length === 3, "#293 print: one est-kp block per resolved key product of a narrative system (a removed line's block is skipped)");
   ok(!html.includes("Itemized never prints me") && !html.includes("Never prints"), "#293 print: an itemized system's blocks and unresolved blocks never print");
-  ok(html.includes('src="data:image/png;base64,QUFB"') && /float:right;width:34%/.test(html) && (html.match(/<img[^>]+src="data:image/g) || []).length === 1,
+  ok(html.includes('src="data:image/png;base64,QUFB"') && /float:right;width:fit-content;max-width:34%/.test(html) && (html.match(/<img[^>]+src="data:image/g) || []).length === 1,
     "#293 print: the photo floats right beside its paragraph; a block with no photo src or photo off prints full width");
   ok(html.includes("Para five.") && html.includes("<li>Bright</li>") && html.includes(">Line 6</div>") && html.includes("Intro para."), "#293 print: intro first, then each heading + paragraph blocks; empty text prints the heading only");
   ok(!html.includes("System scope and pricing are included in the total above.") && base.itemized.includes("System scope and pricing are included in the total above."),
@@ -49996,7 +49996,7 @@ import { qd293Props as mfdQdProps, qd293Sections as mfdQdSections, renderQuoteDo
   const html = mfdQdRender({ ...mfdQdProps({ sections: secs }), keyProductPhotos: { "SKU-5": { src: "data:image/png;base64,QUFB", alt: "Five" } } });
   ok(html.includes('src="/placeholders/allowance.webp"') && html.includes('src="/placeholders/custom-device.webp"') && html.includes('src="data:image/png;base64,QUFB"'),
     "mfr images: an allowance/custom key product prints its placeholder; a catalog photo still prints");
-  ok((html.match(/<figure class="est-ph" style="float:right;width:34%/g) || []).length === 2 && (html.match(/<figure class="est-ph" style="float:left;width:34%/g) || []).length === 1 && html.includes("Budget allowance — Fixture allowance"),
+  ok((html.match(/<figure class="est-ph" style="float:right;width:fit-content;max-width:34%/g) || []).length === 2 && (html.match(/<figure class="est-ph" style="float:left;width:fit-content;max-width:34%/g) || []).length === 1 && html.includes("Budget allowance — Fixture allowance"),
     "mfr images: placeholders float like a photo (alternating right, left, right — Jeff 2026-10-15 #20); a catalog block with no photo prints full width");
   secs[1].keyProducts = secs[1].keyProducts.map((k) => ({ ...k, photo: false }));
   const off = mfdQdRender({ ...mfdQdProps({ sections: secs }), keyProductPhotos: {} });
@@ -57901,9 +57901,9 @@ import { renderToStaticMarkup as p5rMarkup } from "react-dom/server";
   // product blocks
   const blk = (sku: string) => { const i = html.indexOf(`data-sku="${sku}"`); return html.slice(i, html.indexOf("</p></div>", i) + 10); };
   // Photo wrap (2026-10-16): the float sits on the photo's figure, the image fills it (max-height on the img).
-  ok(/<figure class="pd-ph" style="float:right;width:40%;[^"]*"><img src="data:image\/png;base64,P5R5" alt="Five" style="display:block;width:100%;max-height:2.4in/.test(blk("SKU-5")) && blk("SKU-5").includes(">Line 5</div>") && blk("SKU-5").includes("Five words."),
-    "#P5 render: product block — the line's heading, its own paragraphs, the photo floated right at its width %");
-  ok(/<figure class="pd-ph" style="float:left;width:30%;margin:0 14px 8px 0;[^"]*">/.test(blk("SKU-6")), "#P5 render: product block photo floated left at 30 %");
+  ok(/<figure class="pd-ph" style="float:right;width:fit-content;max-width:40%;[^"]*"><img src="data:image\/png;base64,P5R5" alt="Five" style="display:block;width:auto;height:auto;max-width:100%;max-height:2.4in/.test(blk("SKU-5")) && blk("SKU-5").includes(">Line 5</div>") && blk("SKU-5").includes("Five words."),
+    "#P5 render: product block — the line's heading, its own paragraphs, the photo floated right, at most its width % (shrunk to the picture)");
+  ok(/<figure class="pd-ph" style="float:left;width:fit-content;max-width:30%;[^"]*margin:0 14px 8px 0">/.test(blk("SKU-6")), "#P5 render: product block photo floated left, at most 30 %");
   // Photo wrap fix round 1: a full photo's figure shrinks to the picture, at most its width %, centred.
   ok(/<figure class="pd-ph pd-ph-full" style="display:block;width:fit-content;max-width:60%;margin:0 auto 10px;[^"]*"><img src="data:image\/png;base64,P5R1" alt="One" style="display:block;width:auto;max-width:100%;max-height:4in;object-fit:contain"\/>/.test(blk("SKU-1")) && !blk("SKU-1").includes("float"),
     "#P5 render: a full photo prints block-level above the text (its width %, centred), not floated");
@@ -59329,13 +59329,13 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
 
   // (3) Renderer.
   const html = p5rMarkup(p5rEl(PackageDocView312, { doc: p5San(doc([{ type: "heading", attrs: { level: 2 }, content: [T("Rigging")] }, IMG("s2", "5", "SKU-5", "left", 40), PB("s2", "5", "SKU-5", "Words beside.", { show: false }), IMG("s1", "2", "line:2", "full", 60), IMG("s2", "6", "SKU-6")]))!, ctx }));
-  ok(html.includes('<div class="pd-image" data-sku="SKU-5"><figure class="pd-ph" style="float:left;width:40%;margin:0 14px 8px 0;position:relative;break-inside:avoid"><img src="data:image/png;base64,I5" alt="Five" style="display:block;width:100%;max-height:2.4in;object-fit:contain;object-position:left top"/></figure></div>') &&
+  ok(html.includes('<div class="pd-image" data-sku="SKU-5"><figure class="pd-ph" style="float:left;width:fit-content;max-width:40%;position:relative;break-inside:avoid;margin:0 14px 8px 0"><img src="data:image/png;base64,I5" alt="Five" style="display:block;width:auto;height:auto;max-width:100%;max-height:2.4in;object-fit:contain"/></figure></div>') &&
      html.includes('<div class="pd-image" data-sku="line:2"><figure class="pd-ph pd-ph-full" style="display:block;width:fit-content;max-width:60%;margin:0 auto 10px;position:relative;break-inside:avoid;clear:both"><img src="/placeholders/allowance.webp" alt="" style="display:block;width:auto;max-width:100%;max-height:4in;object-fit:contain"/></figure></div>') &&
      !html.includes('data-sku="SKU-6"') && html.indexOf('class="pd-image" data-sku="SKU-5"') < html.indexOf("Words beside.") &&
      html.includes('<div class="pd-product" data-sku="SKU-5" style="display:block;margin:12px 0">'),
     "#312 images: renders just the image — floated left/right at width % (max-height 2.4in) or full (block, centred, max-height 4in), the picture held to its alignment edge (object-position) — before the words, which (a plain block, not a flow-root) wrap beside it; no source prints nothing (photo wrap: as a figure)");
   ok(p5rCss.includes(".pd-doc h2, .pd-doc h3, .pd-doc h4, .pd-doc .pd-pagebreak { clear: both; }") && p5rCss.includes(".pd-doc .pd-ph { break-inside: avoid; page-break-inside: avoid; }") &&
-     /@media \(max-width: 480px\) \{\s*\.pd-doc \.pd-ph \{ float: none !important; display: block !important; width: 100% !important; margin: 0 0 10px 0 !important; \}\s*\.pd-doc \.pd-ph img \{ max-height: 3in !important; object-position: right top !important; \}\s*\.pd-doc \.pd-ph-tag \{ left: auto !important; right: 0 !important; \}\s*\.pd-doc \.pd-ph\.pd-ph-full \{ width: fit-content !important; max-width: 100% !important; margin: 0 auto 10px !important; \}\s*\}/.test(p5rCss),
+     /@media \(max-width: 480px\) \{\s*\.pd-doc \.pd-ph \{ float: none !important; display: block !important; width: 100% !important; max-width: 100% !important; margin: 0 0 10px 0 !important; \}\s*\.pd-doc \.pd-ph img \{ width: 100% !important; max-height: 3in !important; object-position: right top !important; \}\s*\.pd-doc \.pd-ph-tag \{ left: auto !important; right: 0 !important; \}\s*\.pd-doc \.pd-ph\.pd-ph-full \{ width: fit-content !important; max-width: 100% !important; margin: 0 auto 10px !important; \}\s*\.pd-doc \.pd-ph\.pd-ph-full img \{ width: auto !important; \}\s*\}/.test(p5rCss),
     "#312 images: headings (and page breaks) clear floats so an image never spills into the next system; images keep together in print; phones (≤ 480px) put every image full width");
   const printed = p5rRender({ ...p5rProps({ sections: base, document: doc([P("Before."), IMG("s2", "5", "SKU-5"), PB("s2", "5", "SKU-5", "Five words.", { show: false })]) }), keyProductPhotos: { "SKU-5": { src: "data:image/png;base64,I5P", alt: "Five" } } });
   const noPhoto = p5rRender(p5rProps({ sections: base, document: doc([P("Before."), IMG("s2", "5", "SKU-5")]) }));
@@ -59466,7 +59466,7 @@ import { NodeSelection as F312NodeSel, EditorState as F312State } from "@tiptap/
   const iv = rd(`${ED}/product-image-view.tsx`), pbv = rd(`${ED}/product-block-view.tsx`), ed = rd(`${ED}/package-doc-editor.tsx`);
   const view = rd("src/components/package-doc/package-doc-view.tsx");
   // (1) the image sits above the following block's positioned wrapper; (2) clears earlier floats.
-  ok(/position: "relative",\s*zIndex: selected \? 5 : 2,\s*\.\.\.wrapperStyle\((img|shown)\)/.test(iv) && iv.includes("zIndex: 4"), // #352 M4: `shown` = the previewed side
+  ok(/position: "relative",\s*zIndex: selected \? 5 : 2,\s*\.\.\.wrapperStyle\((img|shown)(, !!preview)?\)/.test(iv) && iv.includes("zIndex: 4"), // #352 M4: `shown` = the previewed side; photo wrap fix: `!!preview` shrinks it to the picture
     "#312 fix round 1: the image's float wrapper is position: relative with z-index 2 (5 selected), above the next product block's own relative wrapper, and the strip sits inside it");
   ok((iv.match(/clear: "both"/g) || []).length === 3 && view.includes(".pd-doc .pd-image { clear: both; }") && ed.includes(".pd-ed-prose .node-productImage { clear: both; }"),
     "#312 fix round 1: an image starts below any earlier float — editor wrapper (all three aligns), .node-productImage and print .pd-image clear both");

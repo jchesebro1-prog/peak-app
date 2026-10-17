@@ -54,10 +54,11 @@ export const PACKAGE_DOC_CSS = `
 @media print { .pd-doc .pd-pagebreak { border-top: 0 !important; margin: 0 !important; } }
 @media print { .pd-doc .pd-ph-tag { font-size: 9px; } }
 @media (max-width: 480px) {
-  .pd-doc .pd-ph { float: none !important; display: block !important; width: 100% !important; margin: 0 0 10px 0 !important; }
-  .pd-doc .pd-ph img { max-height: 3in !important; object-position: right top !important; }
+  .pd-doc .pd-ph { float: none !important; display: block !important; width: 100% !important; max-width: 100% !important; margin: 0 0 10px 0 !important; }
+  .pd-doc .pd-ph img { width: 100% !important; max-height: 3in !important; object-position: right top !important; }
   .pd-doc .pd-ph-tag { left: auto !important; right: 0 !important; }
   .pd-doc .pd-ph.pd-ph-full { width: fit-content !important; max-width: 100% !important; margin: 0 auto 10px !important; }
+  .pd-doc .pd-ph.pd-ph-full img { width: auto !important; }
 }
 `;
 

@@ -38,10 +38,12 @@ const AMBER = "#d9a63a";
  *  wrapper. `clear: both` starts each image below an earlier float (consecutive
  *  photos stack instead of sitting side by side), like `.pd-doc .pd-image`. A full
  *  image shrinks to the picture (at most `width` %, centred), so its tag sits on it. */
-function wrapperStyle(img: ImageAttrs): CSSProperties {
+/** Matches the print's figure: a photo shrinks the box to the picture (at most `width` %); the "No photo" box keeps the full `width` %. */
+function wrapperStyle(img: ImageAttrs, hasPhoto: boolean): CSSProperties {
   if (img.align === "full") return { display: "block", width: "fit-content", maxWidth: `${img.width}%`, margin: "4px auto 10px", clear: "both" };
-  if (img.align === "left") return { float: "left", width: `${img.width}%`, margin: "4px 14px 8px 0", clear: "both" };
-  return { float: "right", width: `${img.width}%`, margin: "4px 0 8px 14px", clear: "both" };
+  const box: CSSProperties = hasPhoto ? { width: "fit-content", maxWidth: `${img.width}%` } : { width: `${img.width}%` };
+  if (img.align === "left") return { float: "left", ...box, margin: "4px 14px 8px 0", clear: "both" };
+  return { float: "right", ...box, margin: "4px 0 8px 14px", clear: "both" };
 }
 
 /** The side an image at `pos` previews on: its own align, or — for Auto — the print's alternation up to it. */
@@ -123,7 +125,7 @@ export default function ProductImageView({ node, editor, getPos, selected }: Rea
         // swallows its clicks; the selected image (and its strip) sits higher.
         position: "relative",
         zIndex: selected ? 5 : 2,
-        ...wrapperStyle(shown),
+        ...wrapperStyle(shown, !!preview),
         borderRadius: 4,
         outline: selected ? "2px solid #6b8fd1" : !inBom ? `2px solid ${AMBER}` : hover ? "1.5px dashed #b9bec8" : "1.5px dashed transparent",
         outlineOffset: 3,

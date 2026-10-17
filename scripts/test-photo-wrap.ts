@@ -39,6 +39,7 @@ import { quotePathSegment } from "../src/lib/estimate-output/package-files";
 import { loadDatasheetLinkRows } from "../src/lib/estimate-output/datasheet-links-server";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
 import { pdfAppendixKey } from "../src/lib/quote-pdf/appendix-key";
+import { chromeLaunch } from "../src/lib/quote-pdf/render";
 
 export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
@@ -48,14 +49,15 @@ function spreadChecks(ok: Ok) {
   ok(JSON.stringify(spreadPhotoAnchors(0, 2)) === "[0,0]", "photo wrap: no units → every photo anchors at 0");
   ok(JSON.stringify(spreadPhotoAnchors(5, 0)) === "[]" && JSON.stringify(spreadPhotoAnchors(NaN, -1)) === "[]", "photo wrap: no photos (or junk counts) → no anchors");
   const r = photoFigureStyle("right"), l = photoFigureStyle("left"), f = photoFigureStyle("full", 60);
-  ok(r.float === "right" && r.width === "34%" && r.margin === "0 0 8px 14px" && r.position === "relative" && r.breakInside === "avoid",
-    "photo wrap: a right figure keeps #293's float, 34 % and the 14px gutter, and is the tag's positioning box");
+  ok(r.float === "right" && r.width === "fit-content" && r.maxWidth === "34%" && r.margin === "0 0 8px 14px" && r.position === "relative" && r.breakInside === "avoid" &&
+     photoFigureStyle("left", 40).maxWidth === "40%",
+    "photo wrap: a right figure keeps #293's float and 14px gutter, shrinks to its picture at most 34 % wide, and is the tag's positioning box");
   ok(l.float === "left" && l.margin === "0 14px 8px 0", "photo wrap: a left figure mirrors it");
   ok(f.float === undefined && f.display === "block" && f.width === "60%" && f.margin === "0 auto 10px", "photo wrap: a full figure is a centred block at its width");
   const img = photoImgStyle("right");
-  ok(img.display === "block" && img.width === "100%" && img.maxHeight === "2.4in" && img.objectFit === "contain" && img.objectPosition === "right top" &&
-     photoImgStyle("left").objectPosition === "left top" && photoImgStyle("full", "4in").maxHeight === "4in" && photoImgStyle("full").objectPosition === "center top",
-    "photo wrap: the image fills its figure, height-capped, pushed to the outer side so the corner tag sits on it");
+  ok(img.display === "block" && img.width === "auto" && img.height === "auto" && img.maxWidth === "100%" && img.maxHeight === "2.4in" && img.objectFit === "contain" && img.objectPosition === undefined &&
+     JSON.stringify(photoImgStyle("left")) === JSON.stringify(img) && photoImgStyle("full", "4in").maxHeight === "4in" && photoImgStyle("full").objectPosition === "center top",
+    "photo wrap: a side image keeps its proportions — no wider than its figure (34 %), no taller than 2.4in — so the figure (and the corner tag) is exactly the picture");
   const tr = photoTagStyle("right", 9), tl = photoTagStyle("left", 10), tf = photoTagStyle("full");
   ok(tr.position === "absolute" && tr.bottom === 0 && tr.right === 0 && tr.left === undefined && tr.background === PHOTO_TAG_BG && PHOTO_TAG_BG === "rgba(22,24,29,.86)" &&
      tr.color === "#fff" && tr.fontSize === 9 && tr.padding === "2px 6px" && tr.maxWidth === "100%" && tr.whiteSpace === "nowrap" && tr.textOverflow === "ellipsis" && tr.overflow === "hidden",
@@ -123,8 +125,8 @@ function quoteDocPhotoChecks(ok: Ok) {
   const p1 = html.indexOf(">Para one.<"), p2 = html.indexOf(">Para two.<"), p3 = html.indexOf(">Para three.<");
   ok(f1 > 0 && f2 > 0 && f1 < p1 && p1 < f2 && f2 < p2 && p2 < p3 && html.indexOf('<figure class="est-ph"', f2 + 1) === -1,
     "photo wrap (doc): photo 1 sits at the first paragraph, photo 2 at the next — the system narrative wraps them");
-  ok(/<figure class="est-ph" style="float:right;width:34%;margin:0 0 8px 14px;position:relative;break-inside:avoid">/.test(html.slice(f1)) &&
-     /^<figure class="est-ph" style="float:left;width:34%;margin:0 14px 8px 0/.test(html.slice(f2)),
+  ok(/^<figure class="est-ph" style="float:right;width:fit-content;max-width:34%;position:relative;break-inside:avoid;margin:0 0 8px 14px">/.test(html.slice(f1)) &&
+     /^<figure class="est-ph" style="float:left;width:fit-content;max-width:34%;position:relative;break-inside:avoid;margin:0 14px 8px 0/.test(html.slice(f2)),
     "photo wrap (doc): sides still alternate right, left");
   ok(html.slice(f1, f2).includes('class="est-ph-tag"') && html.slice(f1, f2).includes(">Jupiter 4</span>") && html.slice(f1, f2).includes("font-size:9px") &&
      html.slice(f2, p2).includes(">PN-6</span>") && html.slice(f2, p2).includes("left:0"),
@@ -157,11 +159,11 @@ function quoteDocPhotoChecks(ok: Ok) {
   ok(QUOTE_PRINT_CSS.includes(".est-doc .est-kp { break-inside: avoid; page-break-inside: avoid; }") && QUOTE_PRINT_CSS.includes(".est-doc .est-ph { break-inside: avoid; page-break-inside: avoid; }"),
     "photo wrap (doc): print keeps a product heading with its lines and never splits a photo");
   for (const css of [webCss.QUOTE_WEB_CSS, webCss.QUOTE_WEB_EMBED_CSS])
-    ok(/@media \(max-width: 480px\)[\s\S]*\.est-web \.est-ph \{ float: none !important; display: block; width: 100% !important; margin: 0 0 10px 0 !important; \}/.test(css) && !css.includes(".est-kp img"),
+    ok(/@media \(max-width: 480px\)[\s\S]*\.est-web \.est-ph \{ float: none !important; display: block; width: 100% !important; max-width: 100% !important; margin: 0 0 10px 0 !important; \}/.test(css) && !css.includes(".est-kp img"),
       "photo wrap (doc): a phone puts each photo full width (web + embedded CSS)");
   for (const css of [webCss.QUOTE_WEB_CSS, webCss.QUOTE_WEB_EMBED_CSS]) {
     const phone = css.slice(css.indexOf("@media (max-width: 480px)"));
-    ok(phone.includes(".est-web .est-ph-tag { left: auto !important; right: 0 !important; }") && phone.includes(".est-web .est-ph img { max-height: 3in !important; object-position: right top !important; }") &&
+    ok(phone.includes(".est-web .est-ph-tag { left: auto !important; right: 0 !important; }") && phone.includes(".est-web .est-ph img { width: 100% !important; max-height: 3in !important; object-position: right top !important; }") &&
        phone.indexOf(".est-ph-tag") < phone.indexOf("@media print"),
       "photo wrap (doc): on a phone the full-width photo's tag sits bottom-right, on the picture's corner (web + embedded CSS)");
   }
@@ -185,16 +187,17 @@ function packagePagePhotoChecks(ok: Ok) {
   ok(body.includes('<span class="pkg-ph-tag">Jupiter 4</span>') && body.includes('<span class="pkg-ph-tag">PN-6</span>') && body.includes('href="/ds"'),
     "photo wrap (package): tags print; the datasheet link stays under its key product");
   ok(PACKAGE_WEB_CSS.includes(".pkg-kp { margin-top: 14px; }") && !PACKAGE_WEB_CSS.includes("overflow: hidden; margin-top: 14px") &&
-     PACKAGE_WEB_CSS.includes(".pkg-body-ph { display: flow-root; }") && PACKAGE_WEB_CSS.includes(".pkg-ph { float: right; width: 34%; margin: 0 0 8px 14px; position: relative;") &&
+     PACKAGE_WEB_CSS.includes(".pkg-body-ph { display: flow-root; }") && PACKAGE_WEB_CSS.includes(".pkg-ph { float: right; width: fit-content; max-width: 34%; margin: 0 0 8px 14px; position: relative;") &&
+     PACKAGE_WEB_CSS.includes(".pkg-ph img { display: block; width: auto; height: auto; max-width: 100%; max-height: 2.4in; object-fit: contain; }") &&
      PACKAGE_WEB_CSS.includes("background: rgba(22,24,29,.86)") && /@media print \{[\s\S]*\.pkg-ph-tag \{ font-size: 9px; \}/.test(PACKAGE_WEB_CSS) &&
-     /@media \(max-width: 600px\) \{[\s\S]*\.pkg-ph \{ float: none; width: 100%; margin: 0 0 10px; \}/.test(PACKAGE_WEB_CSS),
+     /@media \(max-width: 600px\) \{[\s\S]*\.pkg-ph \{ float: none; width: 100%; max-width: 100%; margin: 0 0 10px; \}/.test(PACKAGE_WEB_CSS),
     "photo wrap (package): the scope body is the float container; 34 % photos, dark tag (9px in print), full width on a phone");
   ok(PACKAGE_LEFT_PHOTO_CSS.includes(".pkg-ph.pkg-ph-left { float: left; margin: 0 14px 8px 0; }") && PACKAGE_LEFT_PHOTO_CSS.includes(".pkg-ph.pkg-ph-left .pkg-ph-tag { right: auto; left: 0; }"),
     "photo wrap (package): a left photo's tag sits bottom-left");
   // Task 2 review: on a phone the photo is full width, so the tag returns to the bottom-right corner (left or right photo alike).
   const phone = PACKAGE_WEB_CSS.slice(PACKAGE_WEB_CSS.indexOf("@media (max-width: 600px)"), PACKAGE_WEB_CSS.indexOf("@page"));
   const phoneLeft = PACKAGE_LEFT_PHOTO_CSS.slice(PACKAGE_LEFT_PHOTO_CSS.indexOf("@media (max-width: 600px)"));
-  ok(phone.includes(".pkg-ph img { max-height: 3in; object-position: right top; }") && /\.pkg-ph\.pkg-ph-left \.pkg-ph-tag \{ left: auto; right: 0; \}/.test(phoneLeft) &&
+  ok(phone.includes(".pkg-ph img { width: 100%; max-height: 3in; object-position: right top; }") && /\.pkg-ph\.pkg-ph-left \.pkg-ph-tag \{ left: auto; right: 0; \}/.test(phoneLeft) &&
      /\.pkg-ph\.pkg-ph-left img \{ object-position: right top; \}/.test(phoneLeft),
     "photo wrap (package): on a phone the tag is bottom-right and the image pushed right, for a left photo too");
   // The tag's web size is checked on the tag rule itself, not page-wide.
@@ -217,15 +220,15 @@ function packageDocPhotoChecks(ok: Ok) {
   const bare = resolvePackageDoc(doc, { ...ctx, models: undefined, sections: qd293Sections() });
   ok(!("model" in (bare.blocks[0] as object)) && !("model" in (bare.blocks[2] as object)), "photo wrap (pkg doc): no models and no line model → no `model` key (old documents resolve as before)");
   const html = renderToStaticMarkup(createElement(PackageDocView, { doc, ctx }));
-  ok(html.includes('<div class="pd-product" data-sku="SKU-5" style="display:block;margin:12px 0"><figure class="pd-ph" style="float:right;width:40%;margin:0 0 8px 14px;position:relative;break-inside:avoid">') &&
+  ok(html.includes('<div class="pd-product" data-sku="SKU-5" style="display:block;margin:12px 0"><figure class="pd-ph" style="float:right;width:fit-content;max-width:40%;position:relative;break-inside:avoid;margin:0 0 8px 14px">') &&
      html.indexOf("Five words.") < html.indexOf("After five.") && !html.includes("display:flow-root;margin:12px 0"),
     "photo wrap (pkg doc): a product block with its photo is a plain block, so the following paragraphs keep wrapping");
-  ok(html.includes('<span class="pd-ph-tag"') && html.includes(">Jupiter 4</span>") && html.includes('<div class="pd-image" data-sku="SKU-6"><figure class="pd-ph" style="float:left;width:34%') && html.includes(">PN-6</span>"),
+  ok(html.includes('<span class="pd-ph-tag"') && html.includes(">Jupiter 4</span>") && html.includes('<div class="pd-image" data-sku="SKU-6"><figure class="pd-ph" style="float:left;width:fit-content;max-width:34%') && html.includes(">PN-6</span>"),
     "photo wrap (pkg doc): product photos and product images both carry the tag");
   ok(PACKAGE_DOC_CSS.includes(".pd-doc { display: flow-root; }") && PACKAGE_DOC_CSS.includes(".pd-doc .pd-product { break-inside: avoid; page-break-inside: avoid; }") &&
      PACKAGE_DOC_CSS.includes(".pd-doc .pd-ph { break-inside: avoid; page-break-inside: avoid; }") && PACKAGE_DOC_CSS.includes(".pd-doc .pd-ph-tag { font-size: 10px; }") &&
      PACKAGE_DOC_CSS.includes("@media print { .pd-doc .pd-ph-tag { font-size: 9px; } }") && PACKAGE_DOC_CSS.includes("@media print { .pd-doc .pd-pagebreak { border-top: 0 !important; margin: 0 !important; } }") &&
-     /@media \(max-width: 480px\) \{\s*\.pd-doc \.pd-ph \{ float: none !important; display: block !important; width: 100% !important; margin: 0 0 10px 0 !important; \}\s*\.pd-doc \.pd-ph img \{ max-height: 3in !important; object-position: right top !important; \}\s*\.pd-doc \.pd-ph-tag \{ left: auto !important; right: 0 !important; \}\s*\.pd-doc \.pd-ph\.pd-ph-full \{ width: fit-content !important; max-width: 100% !important; margin: 0 auto 10px !important; \}\s*\}/.test(PACKAGE_DOC_CSS),
+     /@media \(max-width: 480px\) \{\s*\.pd-doc \.pd-ph \{ float: none !important; display: block !important; width: 100% !important; max-width: 100% !important; margin: 0 0 10px 0 !important; \}\s*\.pd-doc \.pd-ph img \{ width: 100% !important; max-height: 3in !important; object-position: right top !important; \}\s*\.pd-doc \.pd-ph-tag \{ left: auto !important; right: 0 !important; \}\s*\.pd-doc \.pd-ph\.pd-ph-full \{ width: fit-content !important; max-width: 100% !important; margin: 0 auto 10px !important; \}\s*\.pd-doc \.pd-ph\.pd-ph-full img \{ width: auto !important; \}\s*\}/.test(PACKAGE_DOC_CSS),
     "photo wrap (pkg doc): the document is the float container; tags 10px on screen, 9px in print; phones full width with the tag bottom-right (a full photo still shrinks to its picture)");
 
   // Editor: the same tag rule, from the library row.
@@ -283,7 +286,8 @@ function packageDocFixRound1Checks(ok: Ok) {
   const pbv = rd(`${ED}/product-block-view.tsx`), iv = rd(`${ED}/product-image-view.tsx`);
   const fig = docPhotoFigureStyle("full", 60);
   ok(pbv.includes("style={docPhotoFigureStyle(photo.align, photo.width)}") && pbv.includes("style={docPhotoImgStyle(photo.align)}") && rd("src/components/package-doc/package-doc-view.tsx").includes("style={docPhotoFigureStyle(ph.align, ph.width)}") &&
-     fig.clear === "both" && fig.width === "fit-content" && fig.maxWidth === "60%" && docPhotoImgStyle("full").width === "auto" && docPhotoImgStyle("right").width === "100%",
+     fig.clear === "both" && fig.width === "fit-content" && fig.maxWidth === "60%" && docPhotoImgStyle("full").width === "auto" && docPhotoImgStyle("right").width === "auto" && docPhotoImgStyle("right").maxHeight === "2.4in" &&
+     docPhotoFigureStyle("left", 40).width === "fit-content" && docPhotoFigureStyle("left", 40).maxWidth === "40%",
     "photo wrap fix 2+3 (editor): a product block's photo uses the print's own figure/img styles (a full one shrinks and clears)");
   ok(iv.includes('if (img.align === "full") return { display: "block", width: "fit-content", maxWidth: `${img.width}%`, margin: "4px auto 10px", clear: "both" };') &&
      iv.includes("style={docPhotoImgStyle(shownAlign)}") && iv.includes("{tag ? <span style={photoTagStyle(shownAlign, 10)}>{tag}</span> : null}") && !iv.includes("preview && tag"),
@@ -439,6 +443,44 @@ function rerenderChecks(ok: Ok) {
   ok(/const r = await updateQuoteMetaAction\(id, \{ packageSelection: latest \}\);[\s\S]{0,200}if \(r\.pdf\) setPdf\(r\.pdf\);/.test(hook) && panel.includes("onPdf?.(r.pdf)"),
     "rerender: the Estimator's PDF view follows (Updating PDF…)");
   ok(!rd("src/app/(app)/estimator/pdf-doc-key.ts").includes("packageFiles"), "rerender: the client's Unsaved-changes key is untouched (these writes save themselves)");
+}
+
+/* ---- Task 9 fix round 1: in a real Chrome, a side figure is exactly its picture (skipped, with the reason, without Chrome) ---- */
+async function sideFigureLayoutChecks(ok: Ok) {
+  const launch = await chromeLaunch();
+  if ("unavailable" in launch) {
+    console.log(`SKIP photo wrap layout: ${launch.unavailable}`);
+    return;
+  }
+  const png = async (w: number, h: number) => "data:image/png;base64," + (await sharp({ create: { width: w, height: h, channels: 3, background: "#a8a" } }).png().toBuffer()).toString("base64");
+  const long = "The narrative keeps going so it wraps around the photos. ".repeat(12);
+  const sections = qd293Sections().map((s) => (s.id === "s2" ? { ...s, narrative: [long, long].join("\n\n"),
+    keyProducts: [{ lineKey: "5", sku: "SKU-5", text: "Five.", photo: true }, { lineKey: "6", sku: "SKU-6", text: "Six.", photo: true }] } : s));
+  const doc = async (six: string) => `<!doctype html><meta charset="utf-8"><style>${quoteDocumentModule293().QUOTE_PRINT_CSS}</style>` +
+    renderQuoteDocument293({ ...qd293Props({ sections: sections as never }), keyProductPhotos: { "SKU-5": { src: await png(600, 600), alt: "" }, "SKU-6": { src: six, alt: "" } }, keyProductModels: { "SKU-5": "SQ-1", "SKU-6": "TALL-1" } });
+  const puppeteer = (await import("puppeteer-core")).default;
+  const browser = await puppeteer.launch({ executablePath: launch.executablePath, args: launch.args, headless: true, defaultViewport: { width: 816, height: 1056 } });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(await doc(await png(300, 600)), { waitUntil: "load" });
+    // [figure width ÷ the system body's content width, figure w/h − picture w/h, tag on the picture's outer bottom corner]
+    const m = await page.evaluate(() => [...document.querySelectorAll("figure.est-ph")].map((f) => {
+      const body = f.parentElement as HTMLElement, cs = getComputedStyle(body);
+      const content = body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const fr = f.getBoundingClientRect(), ir = (f.querySelector("img") as HTMLElement).getBoundingClientRect(), tr = (f.querySelector(".est-ph-tag") as HTMLElement).getBoundingClientRect();
+      const left = getComputedStyle(f).float === "left";
+      return { pct: (fr.width / content) * 100, gap: Math.abs(fr.width - ir.width) + Math.abs(fr.height - ir.height), h: ir.height, w: ir.width,
+        tag: Math.abs(tr.bottom - ir.bottom) < 1 && (left ? Math.abs(tr.left - ir.left) < 1 : Math.abs(tr.right - ir.right) < 1) };
+    }));
+    const [sq, tall] = m;
+    ok(m.length === 2 && tall.pct < 34 && Math.abs(tall.h - 2.4 * 96) < 1 && Math.abs(tall.w - tall.h / 2) < 1 && tall.gap < 1 && tall.tag,
+      "photo wrap (Chrome): a tall photo's figure shrinks to the picture (narrower than 34 %, 2.4in high) — no gap before the text; tag on its corner");
+    const column = (sq.w * 100) / sq.pct; // the system body's content width
+    ok(Math.abs(sq.w - Math.min(2.4 * 96, 0.34 * column)) < 1 && Math.abs(sq.h - sq.w) < 1 && sq.gap < 1 && sq.tag,
+      "photo wrap (Chrome): a square photo is as big as before — capped by 34 % of the column and by 2.4in");
+  } finally {
+    await browser.close();
+  }
 }
 
 async function appendixPureChecks(ok: Ok) {
@@ -597,6 +639,7 @@ async function photoWrapPureChecksLoud(ok: Ok) {
   datasheetLinksPageChecks(ok);
   await appendixPureChecks(ok);
   rerenderChecks(ok);
+  await sideFigureLayoutChecks(ok);
 }
 
 const FIX = "photo-wrap";

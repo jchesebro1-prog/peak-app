@@ -23,19 +23,20 @@ export function spreadPhotoAnchors(unitCount: number, photoCount: number): numbe
   return Array.from({ length: n }, (_, k) => Math.min(k, last));
 }
 
-/** The figure carries the float (or the full-width block) and is the tag's positioning box. */
+/** The figure carries the float (or the full-width block) and is the tag's positioning box. A side (left /
+ *  right) figure shrinks to the rendered picture — at most `widthPct` % of the column — so the text wraps right
+ *  at the picture's edge (a tall photo no longer leaves a gap) and the corner tag sits on it. */
 export function photoFigureStyle(align: PhotoAlign3, widthPct = 34): CSSProperties {
-  const width = `${widthPct}%`;
-  if (align === "full") return { display: "block", width, margin: "0 auto 10px", position: "relative", breakInside: "avoid" };
-  return align === "left"
-    ? { float: "left", width, margin: "0 14px 8px 0", position: "relative", breakInside: "avoid" }
-    : { float: "right", width, margin: "0 0 8px 14px", position: "relative", breakInside: "avoid" };
+  if (align === "full") return { display: "block", width: `${widthPct}%`, margin: "0 auto 10px", position: "relative", breakInside: "avoid" };
+  const box: CSSProperties = { width: "fit-content", maxWidth: `${widthPct}%`, position: "relative", breakInside: "avoid" };
+  return align === "left" ? { float: "left", ...box, margin: "0 14px 8px 0" } : { float: "right", ...box, margin: "0 0 8px 14px" };
 }
 
-/** The image fills the figure's width, height-capped; a height-capped image is pushed to the
- *  figure's outer side (only horizontal letterboxing can happen with height:auto) so the corner tag sits on it. */
+/** A side picture keeps its own proportions: never wider than its figure (`widthPct` %) nor taller than
+ *  `maxHeight` — a square or wide photo is as big as before, a tall one is just narrower. Full: fills its figure. */
 export function photoImgStyle(align: PhotoAlign3, maxHeight = "2.4in"): CSSProperties {
-  return { display: "block", width: "100%", maxHeight, objectFit: "contain", objectPosition: align === "left" ? "left top" : align === "right" ? "right top" : "center top" };
+  if (align === "full") return { display: "block", width: "100%", maxHeight, objectFit: "contain", objectPosition: "center top" };
+  return { display: "block", width: "auto", height: "auto", maxWidth: "100%", maxHeight, objectFit: "contain" };
 }
 
 /** The model tag: outer bottom corner (bottom-left on a left float, else bottom-right). */
@@ -69,7 +70,7 @@ export function photoFullImgStyle(maxHeight = "4in"): CSSProperties {
   return { display: "block", width: "auto", maxWidth: "100%", maxHeight, objectFit: "contain" };
 }
 
-/** A package-document photo (print + editor, one rule): left/right floats at `widthPct` % (2.4in cap), full = the shrink-wrapped figure (4in cap). */
+/** A package-document photo (print + editor, one rule): left/right floats shrink-wrapped to at most `widthPct` % (2.4in cap), full = the shrink-wrapped figure (4in cap). */
 export function docPhotoFigureStyle(align: PhotoAlign3, widthPct: number): CSSProperties {
   return align === "full" ? photoFullFigureStyle(widthPct) : photoFigureStyle(align, widthPct);
 }

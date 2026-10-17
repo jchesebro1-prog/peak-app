@@ -139,7 +139,7 @@ export async function oct15PureChecks(ok: Ok) {
     ok(JSON.stringify(walkPhotoSides(["auto", null, "auto", "right", "auto", "full", "auto"])) === JSON.stringify(["right", null, "left", "right", "left", "full", "right"]),
       "M4: one alternation rule — Auto opposite the last printed side, an explicit side sets it, Full and photo-less blocks leave it");
     const piv = rd("src/components/package-doc/editor/product-image-view.tsx");
-    ok(piv.includes("walkPhotoSides(items)[at]") && piv.includes("...wrapperStyle(shown),") && rd("src/lib/package-doc/resolve.ts").includes("resolveAutoAlign(\"auto\", last)"),
+    ok(piv.includes("walkPhotoSides(items)[at]") && piv.includes("...wrapperStyle(shown, !!preview),") && rd("src/lib/package-doc/resolve.ts").includes("resolveAutoAlign(\"auto\", last)"),
       "M4: the editor previews an Auto image on the side the print gives it (the same walk as resolvePackageDoc)");
   }
   /* ---- #21 — Load system brings vendor-quoted lines, flagged "Old vendor price — re-quote" ---- */
