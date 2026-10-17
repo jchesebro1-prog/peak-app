@@ -12,7 +12,7 @@ Bugs are fixed and pushed as they land; features get a plan here first.
 | 5 | Preload wire types into the Grid and Catalog — "a major thing I am missing" | Feature | ✅ Shipped `ccd4ed28`+`5e237f04` — admin **Load starter cables** (20 cables, $0 drafts, OD from datasheets) + **Sync per-foot cables to the Grid** in Grid Settings → Wire types; Needs price chip. Jeff: confirm riser symbols SP/A/V/F/LV/PW/M, then price the cables |
 | 6 | Product Library shows only a small slice of the catalog | Gap | ✅ Shipped `bcf3e8c8`+`614465e3` — "From the catalog" server search (every word, honours the node, 40 results); placing adds it to the library |
 | 7 | Client package "rough drawings" have no devices and no title block | Bug | ✅ Shipped `d90cbf89`+`83cc466c` — ZIP ships the title-blocked drawing set (live design); rough drawings + raw plans only as a fallback with a gap |
-| 8 | Combined datasheet PDF with a cover: Peak logo, job name, contact, venue, location, customer logo | Feature | Building |
+| 8 | Combined datasheet PDF with a cover: Peak logo, job name, contact, venue, location, customer logo | Feature | ✅ Shipped `371444b9` (D840–D842) — built on #329's datasheet book: job cover with the customer logo, Download all datasheets on the Grid, estimate and client link page, logo upload on the company record. The earlier standalone attempt (`feat/datasheet-package`, never merged) is superseded |
 | 9 | The specification and all documents carry the Peak standard header at the top unless otherwise selected | Feature | Building |
 
 ## #2 Type editing — findings
