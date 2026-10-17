@@ -1569,7 +1569,8 @@ See `.env.example`.
     with pdf-lib at their own page size (`src/lib/quote-pdf/appendix-*.ts`; 25 MB a file, the
     finished PDF kept ≤ 14 MB for email — drawings that don't fit are left out with a note and
     stay on the package page; notes on `pdf.notes`, never a failure) and a page of permanent
-    datasheet links (`/d/ds/<quote>/<doc>/<sig>`, `datasheet-link*.ts`, public in middleware).
+    datasheet links (`/d/ds/<quote>/<doc>/<sig>`,
+    `src/lib/estimate-output/datasheet-link*.ts`, public in middleware).
     The print route's `?part=main|tail` splits around the drawings; `pdfAppendixKey`
     (`appendix-key.ts`) re-renders on drawing / selection changes without bumping updatedAt.
     Bidder PDFs get the order but no drawings or links. No migration. Remaining is Jeff-gated:
