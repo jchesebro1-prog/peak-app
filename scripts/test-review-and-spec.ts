@@ -52261,7 +52261,7 @@ import type { SpecSection as E301bbSec } from "@/app/(app)/estimator/types";
     "#301 model: the scope price only — never a line or unit price, cost, internal note or room (§10)");
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   ok(!/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/(pricing|quote-document-view)"|@\/lib\/specs\/record-keys"|@\/lib\/catalog-rename\/sku")/m.test(rd("src/lib/estimate-output/bom.ts")) &&
-     !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/pricing"|\.\/scopes"|\.\/bom"|@\/lib\/quote-share\/package-view"|@\/lib\/part-image-fallback"|@\/lib\/package-doc\/(print|resolve)"|@\/lib\/parties\/addressee")/m.test(rd("src/lib/estimate-output/package-model.ts")),
+     !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/pricing"|\.\/scopes"|\.\/bom"|@\/lib\/quote-share\/package-view"|@\/lib\/part-image-fallback"|@\/lib\/package-doc\/(print|resolve)"|@\/lib\/parties\/addressee"|\.\/photo-models")/m.test(rd("src/lib/estimate-output/package-model.ts")),
     "#301 purity: bom.ts and package-model.ts are pure and client-safe");
 }
 
@@ -52305,7 +52305,7 @@ import { renderToStaticMarkup as e301bvRender } from "react-dom/server";
     "#301 view: phone rules, a print stylesheet, and a BOM that scrolls inside its card (no page-wide horizontal scroll)");
   const comp = readFileSync(join(process.cwd(), "src/components/estimate-output/package-view.tsx"), "utf8");
   ok(!comp.includes('"use client"') && !/\buse(State|Effect|Ref|Transition)\(/.test(comp) && !comp.includes("onClick=") && !comp.includes(".jpg") && !comp.includes("next/link") &&
-     !/^import (?!type)[^\n]*from "(?!react"|@\/lib\/quote-share\/package-view"|@\/components\/package-doc\/package-doc-view")/m.test(comp),
+     !/^import (?!type)[^\n]*from "(?!react"|@\/lib\/quote-share\/package-view"|@\/lib\/estimate-output\/photo-spread"|@\/components\/package-doc\/package-doc-view")/m.test(comp),
     "#301 view: a server component with pure props — no hooks, handlers, image import or server module");
 }
 

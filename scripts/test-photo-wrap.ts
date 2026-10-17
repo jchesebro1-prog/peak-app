@@ -11,6 +11,10 @@ import { lineOwnModel } from "../src/lib/catalog-rename/sku";
 import type { SpecSection } from "../src/app/(app)/estimator/types";
 import { qd293Props, qd293Sections, quoteDocumentModule293, renderQuoteDocument293 } from "./qd293-cases";
 import { printableKeyProducts } from "../src/app/(app)/estimator/narrative";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { packageViewModel } from "../src/lib/estimate-output/package-model";
+import PackageView, { PACKAGE_LEFT_PHOTO_CSS, PACKAGE_WEB_CSS } from "../src/components/estimate-output/package-view";
 
 export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
@@ -143,10 +147,44 @@ function quoteDocPhotoChecks(ok: Ok) {
     "photo wrap (doc): the print route and the portal/share loader read the models beside the photos");
 }
 
+function packagePagePhotoChecks(ok: Ok) {
+  const doc = qd293Props({ sections: wrapSections() });
+  const model = packageViewModel({ doc, photos: PHOTOS, models: { "SKU-5": "Jupiter 4" }, catalog: new Map(), frozen: { coverSummary: "", notIncluded: "" },
+    state: { kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never, headerLine: "EST-1 · Rev 1", currentHref: null, view: "narrative", base: "/b", letterheadSrc: "/lh.jpg" });
+  const s2 = model.scopes.find((s) => s.id === "s2")!;
+  ok(s2.keyProducts[0].model === "Jupiter 4" && s2.keyProducts[1].model === "PN-6" && s2.keyProducts[1].side === "left", "photo wrap (package): key products carry their tag text and side");
+  const html = renderToStaticMarkup(createElement(PackageView, { model, slots: { keyProductExtra: { "SKU-5": createElement("a", { href: "/ds" }, "Datasheet") } } }));
+  const body = html.slice(html.indexOf('data-scope="s2"'));
+  const f1 = body.indexOf('<figure class="pkg-ph"'), f2 = body.indexOf('<figure class="pkg-ph pkg-ph-left"');
+  ok(body.includes('<div class="pkg-body pkg-body-ph">') && f1 > 0 && f1 < body.indexOf(">Para one.<") && body.indexOf(">Para one.<") < f2 && f2 < body.indexOf(">Para two.<"),
+    "photo wrap (package): photos spread down the scope's text, alternating");
+  ok(body.includes('<span class="pkg-ph-tag">Jupiter 4</span>') && body.includes('<span class="pkg-ph-tag">PN-6</span>') && body.includes('href="/ds"'),
+    "photo wrap (package): tags print; the datasheet link stays under its key product");
+  ok(PACKAGE_WEB_CSS.includes(".pkg-kp { margin-top: 14px; }") && !PACKAGE_WEB_CSS.includes("overflow: hidden; margin-top: 14px") &&
+     PACKAGE_WEB_CSS.includes(".pkg-body-ph { display: flow-root; }") && PACKAGE_WEB_CSS.includes(".pkg-ph { float: right; width: 34%; margin: 0 0 8px 14px; position: relative;") &&
+     PACKAGE_WEB_CSS.includes("background: rgba(22,24,29,.86)") && /@media print \{[\s\S]*\.pkg-ph-tag \{ font-size: 9px; \}/.test(PACKAGE_WEB_CSS) &&
+     /@media \(max-width: 600px\) \{[\s\S]*\.pkg-ph \{ float: none; width: 100%; margin: 0 0 10px; \}/.test(PACKAGE_WEB_CSS),
+    "photo wrap (package): the scope body is the float container; 34 % photos, dark tag (9px in print), full width on a phone");
+  ok(PACKAGE_LEFT_PHOTO_CSS.includes(".pkg-ph.pkg-ph-left { float: left; margin: 0 14px 8px 0; }") && PACKAGE_LEFT_PHOTO_CSS.includes(".pkg-ph.pkg-ph-left .pkg-ph-tag { right: auto; left: 0; }"),
+    "photo wrap (package): a left photo's tag sits bottom-left");
+  // Task 2 review: on a phone the photo is full width, so the tag returns to the bottom-right corner (left or right photo alike).
+  const phone = PACKAGE_WEB_CSS.slice(PACKAGE_WEB_CSS.indexOf("@media (max-width: 600px)"), PACKAGE_WEB_CSS.indexOf("@page"));
+  const phoneLeft = PACKAGE_LEFT_PHOTO_CSS.slice(PACKAGE_LEFT_PHOTO_CSS.indexOf("@media (max-width: 600px)"));
+  ok(phone.includes(".pkg-ph img { max-height: 3in; object-position: right top; }") && /\.pkg-ph\.pkg-ph-left \.pkg-ph-tag \{ left: auto; right: 0; \}/.test(phoneLeft) &&
+     /\.pkg-ph\.pkg-ph-left img \{ object-position: right top; \}/.test(phoneLeft),
+    "photo wrap (package): on a phone the tag is bottom-right and the image pushed right, for a left photo too");
+  // The tag's web size is checked on the tag rule itself, not page-wide.
+  const tagRule = PACKAGE_WEB_CSS.match(/\.pkg-ph-tag \{[^}]*\}/)?.[0] ?? "";
+  ok(tagRule.includes("font-size: 10px") && tagRule.includes("var(--font-mono)") && tagRule.includes("padding: 2px 6px"), "photo wrap (package): the web tag is 10px mono with 2px 6px padding");
+  for (const f of ["src/lib/estimate-output/package-loader.ts", "src/lib/estimate-output/package-live-loader.ts"])
+    ok(rd(f).includes("loadKeyProductModels(packagePhotoSections(doc.sections), doc.document)") && rd(f).includes("models,"), `photo wrap (package): ${f} reads the models for every scope's key products`);
+}
+
 export async function photoWrapPureChecks(ok: Ok) {
   spreadChecks(ok);
   modelChecks(ok);
   quoteDocPhotoChecks(ok);
+  packagePagePhotoChecks(ok);
 }
 
 export async function photoWrapDbChecks(_ok: Ok) {

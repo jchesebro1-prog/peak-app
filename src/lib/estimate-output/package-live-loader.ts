@@ -5,6 +5,7 @@ import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
 import { rewardsVisibleFor } from "@/lib/parties/addressee";
 import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
 import { keyProductPhotoLinks } from "@/lib/quote-pdf/document-loader";
+import { loadKeyProductModels } from "@/lib/narrative/photos";
 import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
 import { documentAddressee } from "@/lib/parties/addressee-server";
 import { latestSentRevision } from "@/lib/quote-pdf/state";
@@ -60,8 +61,9 @@ export async function loadLivePackagePreview(
   opts: { view: "narrative" | "bom"; letterheadSrc: string },
 ): Promise<{ model: PackageViewProps; extras: StaffPackageExtras }> {
   const doc = await liveQuoteDocumentProps(q);
-  const [photos, catalog, defaults, extras] = await Promise.all([
+  const [photos, models, catalog, defaults, extras] = await Promise.all([
     keyProductPhotoLinks(packagePhotoSections(doc.sections), staffPartDocHref, doc.document),
+    loadKeyProductModels(packagePhotoSections(doc.sections), doc.document),
     catalogFor(packageBomSkus(doc.sections)),
     getEstimateOutputDefaults(),
     liveExtras(q),
@@ -69,6 +71,7 @@ export async function loadLivePackagePreview(
   const model = packageViewModel({
     doc,
     photos,
+    models,
     catalog,
     // The live quote's own cover fields (a revision freezes these at send).
     frozen: packageFrozenFields({ coverSummary: q.coverSummary ?? "", notIncluded: q.notIncluded ?? null }, defaults.notIncluded),

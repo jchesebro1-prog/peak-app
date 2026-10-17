@@ -121,7 +121,7 @@ export async function oct15PureChecks(ok: Ok) {
     ok(qd.includes("side={photoSides?.get(ps.id + \"|\" + s.kp.sku) ?? \"right\"}") && qd.includes("[...previewSections, ...alternateGroups.flatMap((ag) => ag.systems.map((x) => x.ps))]"),
       "oct15 #20: the PDF / online document numbers photos across the body's narrative systems, then the alternates");
     const pv = rd("src/components/estimate-output/package-view.tsx");
-    ok(pv.includes(".pkg-kp.pkg-kp-left img { float: left;") && pv.includes("<style>{PACKAGE_LEFT_PHOTO_CSS}</style>}") && pv.includes('className={kp.side === "left" ? "pkg-kp pkg-kp-left" : "pkg-kp"}') && rd("src/lib/estimate-output/package-model.ts").includes("n++ % 2 === 1"),
+    ok(pv.includes(".pkg-ph.pkg-ph-left { float: left;") && pv.includes("<style>{PACKAGE_LEFT_PHOTO_CSS}</style>}") && pv.includes('className={kp.side === "left" ? "pkg-ph pkg-ph-left" : "pkg-ph"}') && rd("src/lib/estimate-output/package-model.ts").includes("n++ % 2 === 1"),
       "oct15 #20: the package page alternates too (stacked on a phone)");
     // The TipTap document: a new image is "auto" and alternates; an explicit choice wins.
     ok(DEFAULT_IMAGE.align === "auto" && productImageFor("s1", 1, "A").attrs.align === "auto" && productImageFor("s1", 1, "A", { align: "left" }).attrs.align === "left", "oct15 #20: a new document image defaults to Auto");

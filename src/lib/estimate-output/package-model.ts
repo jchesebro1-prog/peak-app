@@ -10,6 +10,7 @@ import { packageBomRows, type BomCatalogPart, type PackageBomRow } from "./bom";
 import { ownerNameFromLine } from "@/lib/parties/addressee";
 import { PACKAGE_COPY, packageBanner, type PackageBanner, type VisiblePackageState } from "@/lib/quote-share/package-view";
 import { documentApplies } from "@/lib/package-doc/print";
+import { photoTagText } from "./photo-models";
 import { resolvePackageDoc, type ResolvedPackageDoc } from "@/lib/package-doc/resolve";
 
 /**
@@ -40,8 +41,9 @@ export function packagePhotoSections(sections: SpecSection[]): SpecSection[] {
   return (Array.isArray(sections) ? sections : []).map((s) => (s && (s.presentation || "itemized") !== "narrative" ? { ...s, presentation: "narrative" as const } : s));
 }
 
-/** `side` (Jeff 2026-10-15 #20): "left" on every other printed photo — the page alternates right, left, right. */
-export type PackageKeyProduct = { sku: string; heading: string; blocks: NarrativeBlock[]; photo: { src: string; alt: string } | null; side?: "left" };
+/** `side` (Jeff 2026-10-15 #20): "left" on every other printed photo — the page alternates right, left, right.
+ *  `model` (photo wrap 2026-10-16): the photo's model-number tag; absent when none. */
+export type PackageKeyProduct = { sku: string; heading: string; blocks: NarrativeBlock[]; photo: { src: string; alt: string } | null; side?: "left"; model?: string };
 
 export type PackageScopeView = {
   id: string;
@@ -92,6 +94,8 @@ export type PackageViewProps = {
 export type PackageViewInput = {
   doc: QuoteDocumentProps;
   photos: Record<string, { src: string; alt: string }>;
+  /** Photo wrap — sku → model tag (loadKeyProductModels over packagePhotoSections). */
+  models?: Record<string, string>;
   catalog: ReadonlyMap<string, BomCatalogPart>;
   frozen: { coverSummary: string; notIncluded: string };
   state: VisiblePackageState;
@@ -139,12 +143,12 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
     narrativeHref: i.base,
     bomHref: i.base + "?view=bom",
     scopes: withAlternatingSides(scopes.map((s) => {
-      const keyProducts: PackageKeyProduct[] = s.keyProducts.map((kp) => ({
-        sku: kp.sku,
-        heading: kp.heading,
-        blocks: kp.blocks,
-        photo: kp.photo ? (i.photos[kp.sku] ?? (kp.placeholder ? { src: PLACEHOLDER_SRC[kp.placeholder], alt: "" } : null)) : null,
-      }));
+      const keyProducts: PackageKeyProduct[] = s.keyProducts.map((kp) => {
+        const own = kp.photo && Object.hasOwn(i.photos, kp.sku) ? i.photos[kp.sku] : undefined;
+        const photo = kp.photo ? (own ?? (kp.placeholder ? { src: PLACEHOLDER_SRC[kp.placeholder], alt: "" } : null)) : null;
+        const model = photo ? photoTagText({ ownPhoto: !!own, partModel: i.models && Object.hasOwn(i.models, kp.sku) ? i.models[kp.sku] : null, ownModel: kp.ownModel }) : "";
+        return { sku: kp.sku, heading: kp.heading, blocks: kp.blocks, photo, ...(model ? { model } : {}) };
+      });
       const hasText = s.introBlocks.length > 0 || keyProducts.length > 0;
       const sec = byId.get(s.id);
       return {
