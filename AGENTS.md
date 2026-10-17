@@ -1368,7 +1368,7 @@ See `.env.example`.
     re-link old hand-made customer links that should be shared, try two
     accounts on production. Punch item #341.
 
-61. 🚧 **Venue Assessment notes** (#344, D1019–D1032, D1038–D1051, D1208–D1218) — Jeff's Oct 14 notes on
+61. ✅ **Venue Assessment notes** (#344, D1019–D1032, D1038–D1051, D1208–D1218) — Jeff's Oct 14 notes on
     the Venue Assessments (`FS-####`) editor, three slices on one branch
     (spec `docs/superpowers/specs/2026-10-14-venue-assessment-notes-design.md`).
     ✅ **Slice A (form structure & flow):** a new section order with **Kill
@@ -1412,8 +1412,8 @@ See `.env.example`.
     the editor shows. No migration, no env var. **No instant rollback past the
     slice B merge** — a slice A build reads list goals as empty and deletes them
     on the next save; roll forward.
-    🚧 **Slice C (drawing & photo capture, D1208–D1218) — built on
-    `feat/344-va-notes`, NOT on main until Jeff's iPad + Apple Pencil test:**
+    ✅ **Slice C (drawing & photo capture, D1208–D1218) — merged
+    2026-10-17 at Jeff's request, before his iPad + Apple Pencil test:**
     a Pencil-first ink pad (`src/components/ink/`, pure model `src/lib/ink/`;
     palm rejection, Draw with finger) saving strokes JSON + a flattened JPEG;
     sketch pads in their sections (Beams, CW elevation / Brick with
@@ -1431,7 +1431,8 @@ See `.env.example`.
     that never bump rev; a streamed field-sheet PDF with photos and sketches
     (`/api/surveys/[id]/sheet-pdf`); 3D Orbit / Plan / Section / Elevation +
     Wireframe. Replaced files stay in Blob (D1215). No migration, no env var.
-    Remaining: Jeff's iPad test (script in PUNCHLIST #344), then merge; plus
+    Remaining: Jeff's iPad + Pencil test on production (script in PUNCHLIST
+    #344); plus
     Jeff-gated: review the internal tag
     list and the pick lists in `field-lists.ts`, tell the reps older surveys
     ask for Scope first, send the CW Elevation and line set schedule sheets,

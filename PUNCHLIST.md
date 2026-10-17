@@ -12261,7 +12261,7 @@ Follow-up to #342. A writer that computed a key's new value from its current one
 
 **Remaining:** none. Watch: a long outer transaction that calls one of these holds the row lock until it commits.
 
-## 344. Venue Assessment notes (Jeff, Oct 14) — 23 notes in three slices — slices A and B DONE 2026-10-14 on `feat/344-va-notes` (D1019–D1032, D1038–D1051); slice C BUILT 2026-10-15, awaiting Jeff's iPad + Pencil test (D1208–D1218)
+## 344. Venue Assessment notes (Jeff, Oct 14) — 23 notes in three slices — slices A and B DONE 2026-10-14 on `feat/344-va-notes` (D1019–D1032, D1038–D1051); slice C merged to main 2026-10-17 (D1208–D1218), Jeff's iPad + Pencil test still to run
 
 Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`) editor, designed in `docs/superpowers/specs/2026-10-14-venue-assessment-notes-design.md` and built as three slices on one branch. Slice A plan: `docs/superpowers/plans/2026-10-14-va-notes-slice-a.md`.
 
@@ -12280,7 +12280,7 @@ Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`
 - Per-discipline scope-first chips with Other, goals as lists, curtain rows (fabric, oz, track series, size, condition), lighting positions with a Position column on the fixtures inventory, the Bad→New condition slider, and a quantity-first line set schedule (Fill down, Mark spare).
 - Field sheet, findings text, Assist, Ask AI and the recap print only what the editor shows (`survey-format.ts`, `survey-measure-fields.ts`). Tests in `scripts/test-va-notes.ts`. No migration, no env var. **No instant rollback past this merge** (D1043).
 
-**Slice C — BUILT 2026-10-15, awaiting Jeff's iPad + Apple Pencil test; not merged** (drawing & photo capture; plan `docs/superpowers/plans/2026-10-14-va-notes-slice-c.md`; D1208–D1218):
+**Slice C ✅ — merged to main 2026-10-17 at Jeff's request, before the iPad + Apple Pencil test (run it on production now)** (drawing & photo capture; plan `docs/superpowers/plans/2026-10-14-va-notes-slice-c.md`; D1208–D1218):
 - A Pencil-first ink pad (`src/components/ink/ink-pad.tsx`, pure model `src/lib/ink/`): pen in three colours, eraser, text labels, undo / redo, clear, pinch and pan, palm rejection once a Pencil is seen, **Draw with finger** override; Done saves the strokes (re-editable) and a flattened JPEG.
 - Sketch pads in their sections: Beams & rigging, CW elevation and Brick (counterweight only), Stage plan, Stage section, House section, House plan, and the line set schedule's **Fill in by hand** sheet (30 rows a page). Backgrounds are drawn from the survey's measurements (`src/lib/ink/backgrounds.ts`); CW Elevation and the line set sheet are placeholders until Jeff's real sheets arrive.
 - **Add photo** on every section (camera or library, several at once), thumbnails in the section and a count on the rail; a viewer with caption, Mark up / Edit markup / View original / Remove markup, Delete. The original is never changed.
@@ -12290,7 +12290,7 @@ Jeff's 23 notes (`docs/notes-2026-10-14.md`) on the Venue Assessments (`FS-####`
 - **Tests:** `scripts/test-va-notes.ts` (`#344 C1…C8`, `C-final A…G`). No migration, no env var.
 - **Verified on desktop** (scratch DB, Blob off, 2026-10-15): photo + caption + markup (pen, colour, text label), View original, Edit markup reloads the strokes, Remove markup keeps the caption, Beams / Stage plan / line set sheet drawn, reload keeps everything, the printed PDF embeds the marked-up photo and three sketches, 3D presets + Wireframe. Not verifiable on desktop: Pencil pressure, palm rejection, a real Blob upload.
 
-**Slice C — Jeff's iPad test (on a Vercel deployment with Blob, NOT local dev — a branch preview shares the production database, so use a throwaway survey and delete it after):** use a throwaway survey; keep ONE editor open on it at a time unless the step says otherwise.
+**Slice C — Jeff's iPad test (on production or any Vercel deployment with Blob, NOT local dev — use a throwaway survey and delete it after):** use a throwaway survey; keep ONE editor open on it at a time unless the step says otherwise.
 1. **Pencil + palm.** Open Beams & rigging → Draw. Rest your palm on the screen *before* the first Pencil stroke, then draw. Palm should leave no marks. Pinch / pan with fingers while the Pencil rests. Write a few words with Scribble in a text label.
 2. **Finger toggle.** In a pad, tap **Draw with finger**, draw with a finger, turn it off — the Pencil should own drawing again.
 3. **Dense handwriting.** Line set schedule → Fill in by hand. Fill several rows in small handwriting; zoom in and out; Done. Reopen — strokes come back editable; the tile is legible.
@@ -12343,7 +12343,7 @@ Report anything odd with the survey id and the step number.
 - A null measurement counts as answered; Safari IME Enter guard on goal entry; a button-name polish on goal move / remove.
 - No dark-mode tokens for `--cond-0…4` (the app has no dark theme).
 
-**Remaining:** Jeff's iPad + Apple Pencil test of slice C (script above) — slice C merges to main only after it — plus the Jeff-gated items above.
+**Remaining:** Jeff's iPad + Apple Pencil test of slice C on production (script above), plus the Jeff-gated items above.
 
 ## 345. Inbox Organize is hard to find, and it suggests junk companies ("UNKNOWN") — DONE 2026-10-14 on `worktree-assist-layer` (D1033–D1037)
 
