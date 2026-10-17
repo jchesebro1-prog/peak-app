@@ -69,7 +69,8 @@ export const PACKAGE_WEB_CSS = `
 .pkg-price { font-weight: 700; font-variant-numeric: tabular-nums; }
 .pkg-goals { background: #f7f8fa; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
 .pkg-label { font-size: 11px; font-weight: 700; color: #5b616e; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
-.pkg-kp { margin-top: 14px; }
+.pkg-kp { margin-top: 14px; padding-bottom: 10px; }
+.pkg-kp > :last-child { margin-bottom: 0; }
 .pkg-body-ph { display: flow-root; }
 .pkg-ph { float: right; width: fit-content; max-width: 34%; margin: 0 0 8px 14px; position: relative; break-inside: avoid; page-break-inside: avoid; }
 .pkg-ph img { display: block; width: auto; height: auto; max-width: 100%; max-height: 2.4in; object-fit: contain; }

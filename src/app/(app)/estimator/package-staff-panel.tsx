@@ -7,6 +7,7 @@ import { openGridDesignForQuoteAction } from "./grid-design-actions";
 import { GRID_LINK_COPY } from "@/lib/design/estimate-grid-link";
 import { addPackageFileAction, generateGridDrawingsAction, packagePanelAction, rebuildPackageZipAction, removePackageFileAction, setPackagePeakHeaderAction } from "./package-actions";
 import { putPackageFile } from "./package-file-upload";
+import { retryQuotePdfAction } from "@/app/(app)/quotes/pdf-actions";
 import { PACKAGE_FILE_ACCEPT, PACKAGE_FILE_KIND_LABEL, PACKAGE_FILE_KINDS, PACKAGE_FILES_COPY, type PackageFileKind } from "@/lib/estimate-output/package-files";
 import type { PackagePanel } from "@/lib/estimate-output/package-panel-server";
 import { GRID_SET_COPY } from "@/lib/design/grid-set-print";
@@ -173,6 +174,12 @@ export function PackageStaffPanel({
       if (r.ok && r.pdf) onPdf?.(r.pdf);
       if (!r.ok) setErr(r.error);
       else postChanged("quote", quoteId);
+      // Spec 2026-10-16 §4: the drawing set used this request's time — the PDF renders in a new request
+      // (the PDF's own Retry path). If this call fails the PDF already reads "Out of date" with Retry.
+      if (r.ok && r.appendixMoved) {
+        const next = await retryQuotePdfAction(quoteId).catch(() => null);
+        if (next) onPdf?.(next);
+      }
       await reload();
     });
 

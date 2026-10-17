@@ -30,7 +30,8 @@ import { planDrawings, imagePagePlacement, pdfNotesOf, drawingSkipNote, drawings
 import { mergeEstimateAppendices, prepareDrawings, prepareDrawingImage, DRAWING_IMAGE_DPI } from "../src/lib/quote-pdf/appendix-merge-server";
 import { PDF_NOTES_MAX as STATE_NOTES_MAX } from "../src/lib/quote-pdf/state";
 import { appendixFits, generateQuotePdf } from "../src/lib/quote-pdf/generate";
-import { pdfView, settlePdf } from "../src/lib/quote-pdf/state";
+import { pdfRetryPlan, pdfView, settlePdf, stalePdf } from "../src/lib/quote-pdf/state";
+import { markQuotePdfStale } from "../src/lib/quote-pdf/schedule";
 import { pdfBanner } from "../src/components/quote-pdf/pdf-banner";
 import { ESTIMATE_EMAIL_ATTACH_MAX } from "../src/lib/estimate-email/compose";
 import { pdfStorage } from "../src/lib/quote-pdf/storage";
@@ -70,6 +71,8 @@ function modelChecks(ok: Ok) {
   ok(lineOwnModel({ manufacturerModelNumber: " ION-XE ", manufacturerPartNumber: "7410A" }) === "ION-XE" && lineOwnModel({ manufacturerPartNumber: "7410A" }) === "7410A" &&
      lineOwnModel({ sku: "ETC:ION" }) === "" && lineOwnModel(null) === "", "photo wrap: a line's own model is its Model #, else its MFR P/N, never its SKU");
   ok(cleanTag("  Jupiter\n 4 ") === "Jupiter 4" && cleanTag(null) === "" && cleanTag("x".repeat(80)).length === PHOTO_TAG_MAX, "photo wrap: tag text is one trimmed line, capped");
+  const cut = cleanTag("x".repeat(PHOTO_TAG_MAX - 1) + "   tail");
+  ok(cut === "x".repeat(PHOTO_TAG_MAX - 1) && !/\s$/.test(cut), "photo wrap: a tag cut at a space is trimmed after the cut — no trailing space");
   ok(photoTagText({ ownPhoto: true, partModel: "Jupiter 4", ownModel: "80-0043" }) === "Jupiter 4", "photo wrap: an own photo prints the part-aware model");
   ok(photoTagText({ ownPhoto: true, partModel: null, ownModel: "80-0043" }) === "80-0043", "photo wrap: an own photo with no part read falls back to the line's own model");
   ok(photoTagText({ ownPhoto: false, partModel: "Jupiter 4", ownModel: "" }) === "", "photo wrap: a placeholder with no real model on the line gets no tag");
@@ -186,12 +189,12 @@ function packagePagePhotoChecks(ok: Ok) {
     "photo wrap (package): photos spread down the scope's text, alternating");
   ok(body.includes('<span class="pkg-ph-tag">Jupiter 4</span>') && body.includes('<span class="pkg-ph-tag">PN-6</span>') && body.includes('href="/ds"'),
     "photo wrap (package): tags print; the datasheet link stays under its key product");
-  ok(PACKAGE_WEB_CSS.includes(".pkg-kp { margin-top: 14px; }") && !PACKAGE_WEB_CSS.includes("overflow: hidden; margin-top: 14px") &&
+  ok(PACKAGE_WEB_CSS.includes(".pkg-kp { margin-top: 14px; padding-bottom: 10px; }\n.pkg-kp > :last-child { margin-bottom: 0; }") && !PACKAGE_WEB_CSS.includes("overflow: hidden; margin-top: 14px") &&
      PACKAGE_WEB_CSS.includes(".pkg-body-ph { display: flow-root; }") && PACKAGE_WEB_CSS.includes(".pkg-ph { float: right; width: fit-content; max-width: 34%; margin: 0 0 8px 14px; position: relative;") &&
      PACKAGE_WEB_CSS.includes(".pkg-ph img { display: block; width: auto; height: auto; max-width: 100%; max-height: 2.4in; object-fit: contain; }") &&
      PACKAGE_WEB_CSS.includes("background: rgba(22,24,29,.86)") && /@media print \{[\s\S]*\.pkg-ph-tag \{ font-size: 9px; \}/.test(PACKAGE_WEB_CSS) &&
      /@media \(max-width: 600px\) \{[\s\S]*\.pkg-ph \{ float: none; width: 100%; max-width: 100%; margin: 0 0 10px; \}/.test(PACKAGE_WEB_CSS),
-    "photo wrap (package): the scope body is the float container; 34 % photos, dark tag (9px in print), full width on a phone");
+    "photo wrap (package): the scope body is the float container (a key product isn't, yet keeps its 24px gap: 10px padding + 14px margin); 34 % photos, dark tag (9px in print), full width on a phone");
   ok(PACKAGE_LEFT_PHOTO_CSS.includes(".pkg-ph.pkg-ph-left { float: left; margin: 0 14px 8px 0; }") && PACKAGE_LEFT_PHOTO_CSS.includes(".pkg-ph.pkg-ph-left .pkg-ph-tag { right: auto; left: 0; }"),
     "photo wrap (package): a left photo's tag sits bottom-left");
   // Task 2 review: on a phone the photo is full width, so the tag returns to the bottom-right corner (left or right photo alike).
@@ -225,6 +228,10 @@ function packageDocPhotoChecks(ok: Ok) {
     "photo wrap (pkg doc): a product block with its photo is a plain block, so the following paragraphs keep wrapping");
   ok(html.includes('<span class="pd-ph-tag"') && html.includes(">Jupiter 4</span>") && html.includes('<div class="pd-image" data-sku="SKU-6"><figure class="pd-ph" style="float:left;width:fit-content;max-width:34%') && html.includes(">PN-6</span>"),
     "photo wrap (pkg doc): product photos and product images both carry the tag");
+  // Final review: a price table starts below any photo still floating, like the system price line (print and editor).
+  const ptHtml = renderToStaticMarkup(createElement(PackageDocView, { doc: { type: "doc", version: 1, content: [IMG("6", "SKU-6", "right"), { type: "priceTable" }] } as never, ctx }));
+  ok(ptHtml.includes('<div class="pd-pricewrap" style="margin:10px 0 14px;clear:both">') && rd("src/components/package-doc/editor/price-table-view.tsx").includes('style={{ position: "relative", clear: "both", margin: "10px 0"'),
+    "photo wrap (pkg doc): a price table clears floated photos in print and in the editor");
   ok(PACKAGE_DOC_CSS.includes(".pd-doc { display: flow-root; }") && PACKAGE_DOC_CSS.includes(".pd-doc .pd-product { break-inside: avoid; page-break-inside: avoid; }") &&
      PACKAGE_DOC_CSS.includes(".pd-doc .pd-ph { break-inside: avoid; page-break-inside: avoid; }") && PACKAGE_DOC_CSS.includes(".pd-doc .pd-ph-tag { font-size: 10px; }") &&
      PACKAGE_DOC_CSS.includes("@media print { .pd-doc .pd-ph-tag { font-size: 9px; } }") && PACKAGE_DOC_CSS.includes("@media print { .pd-doc .pd-pagebreak { border-top: 0 !important; margin: 0 !important; } }") &&
@@ -436,9 +443,26 @@ function rerenderChecks(ok: Ok) {
   ok(k0 === pdfAppendixKey({ packageFiles: files, packageSelection: { estimatePdf: false, coverPdf: false } }), "rerender: the email attachment defaults never re-render the PDF");
   ok(k0 !== pdfAppendixKey({ packageFiles: files, packageSelection: { drawings: false } }) && k0 !== pdfAppendixKey({ packageFiles: files, packageSelection: { excludedDatasheets: ["ETC:SPOT"] } }) &&
      k0 !== pdfAppendixKey({ packageFiles: files.slice(1), packageSelection: null }), "rerender: drawings on/off, a left-out datasheet and an added/removed drawing each change what the PDF prints");
+  ok(pdfAppendixKey({ packageFiles: [], packageSelection: { drawings: false } }) === pdfAppendixKey({ packageFiles: [], packageSelection: { drawings: true } }) &&
+     pdfAppendixKey({ packageFiles: [], packageSelection: { drawings: false } }) === pdfAppendixKey({ packageFiles: [], packageSelection: null }),
+    "rerender: the Drawings switch with no drawings to show changes nothing, so it re-renders nothing");
   ok(pdfAppendixKey(null) === "" && pdfAppendixKey({}) === pdfAppendixKey({ packageFiles: [], packageSelection: undefined }), "rerender: no quote / nothing → a stable key");
   const pa = rd("src/app/(app)/estimator/package-actions.ts"), act = rd("src/app/(app)/estimator/actions.ts"), hook = rd("src/app/(app)/estimator/use-estimator-state.ts"), panel = rd("src/app/(app)/estimator/package-staff-panel.tsx");
-  ok((pa.match(/rerenderIfAppendixMoved\(/g) || []).length === 4 && pa.includes("scheduleQuotePdf(") && pa.includes("pdfAppendixKey("), "rerender: drawing upload, remove and Generate from Grid re-render the PDF when the shown drawings moved");
+  ok((pa.match(/rerenderIfAppendixMoved\(/g) || []).length === 3 && pa.includes("scheduleQuotePdf(") && pa.includes("pdfAppendixKey("), "rerender: drawing upload and remove re-render the PDF when the shown drawings moved");
+  // Final review I1: the Grid drawing set can use 105 s of the request's 120 s — the PDF never renders in that request.
+  const grid = pa.slice(pa.indexOf("export async function generateGridDrawingsAction("));
+  const gridBody = grid.slice(0, grid.indexOf("\n}\n") + 3);
+  ok(gridBody.length > 100 && !gridBody.includes("rerenderIfAppendixMoved(") && !gridBody.includes("scheduleQuotePdf(") && gridBody.includes("markStaleIfAppendixMoved(") &&
+     gridBody.includes("appendixMoved: true") && /if \(!q \|\| pdfAppendixKey\(q\) === beforeKey\) return \{ moved: false \};\s*return \{ moved: true, pdf: \(await markQuotePdfStale\(q\.id\)\)/.test(pa),
+    "rerender (Grid): Generate from Grid only marks the PDF out of date when the drawings moved, and says so (appendixMoved) — no after() render inherits what the drawing set left of the budget");
+  const gen = panel.slice(panel.indexOf("const generate = () =>"), panel.indexOf("const saveBeforeGrid"));
+  ok(/if \(r\.ok && r\.appendixMoved\) \{\s*const next = await retryQuotePdfAction\(quoteId\)\.catch\(\(\) => null\);\s*if \(next\) onPdf\?\.\(next\);/.test(gen) &&
+     gen.indexOf("generateGridDrawingsAction(quoteId)") < gen.indexOf("retryQuotePdfAction(quoteId)") && panel.includes('import { retryQuotePdfAction } from "@/app/(app)/quotes/pdf-actions";'),
+    "rerender (Grid): the panel then starts the render in a new request through the PDF's own Retry, and shows its state");
+  const stale = stalePdf({ status: "ready", at: 10, savedAt: 10, blobPath: "q/x.pdf" }, 2_000, 2_000);
+  const plan = pdfRetryPlan({ pdf: stale, contentChangedAt: 10 }, 2_001);
+  ok(pdfView(stale, 2_001)?.outOfDate === true && pdfView(stale, 2_001)?.status === "failed" && "savedAt" in plan && plan.savedAt === 2_000,
+    "rerender (Grid): the out-of-date mark is never a live render to wait on — Retry renders it at once for that mark");
   ok(act.includes("pdfAppendixKey(") && act.includes("selectionPdf"), "rerender: a Client package selection write re-renders the PDF when its drawings / datasheets changed");
   ok(/const r = await updateQuoteMetaAction\(id, \{ packageSelection: latest \}\);[\s\S]{0,200}if \(r\.pdf\) setPdf\(r\.pdf\);/.test(hook) && panel.includes("onPdf?.(r.pdf)"),
     "rerender: the Estimator's PDF view follows (Updating PDF…)");
@@ -602,6 +626,15 @@ async function appendixPureChecks(ok: Ok) {
   ok(JSON.stringify(view.notes) === JSON.stringify(ready.notes) && !("notes" in pdfView(plain, 10)!) && pdfBanner({ quoteId: "Q-1", pdf: view, dirty: false, timedOut: false, retrying: false }).some((n) => n.tone === "warn" && n.text === "Drawing “x” was left out."),
     "drawings: Customer review → Document shows each note as a warning");
   ok(!pdfBanner({ quoteId: "Q-1", pdf: view, dirty: true, timedOut: false, retrying: false }).some((n) => n.text === "Drawing “x” was left out."), "drawings: an unsaved estimate doesn't show the last file's notes");
+  // Final review: a note that says "Use Retry" always has the Retry beside it — once, on the first such note.
+  const rv = pdfView(settlePdf({ status: "pending", at: 1, savedAt: 5 }, 5, { ok: true, blobPath: "p.pdf", notes: ["Drawing “x” was left out.", APPENDIX_COPY.lateDrawings, APPENDIX_COPY.linksMissing] }, 9)!, 10)!;
+  const rb = pdfBanner({ quoteId: "Q-1", pdf: rv, dirty: false, timedOut: false, retrying: false });
+  ok(JSON.stringify(rb.map((n) => n.action ?? "")) === JSON.stringify(["", "Retry", ""]) && rb[1].text === APPENDIX_COPY.lateDrawings &&
+     !pdfBanner({ quoteId: "Q-1", pdf: rv, dirty: false, timedOut: false, retrying: true }).some((n) => n.action) &&
+     !pdfBanner({ quoteId: "Q-1", pdf: view, dirty: false, timedOut: false, retrying: false }).some((n) => n.action),
+    "drawings: a retryable note (out of time, not merged, links missing) offers the PDF's Retry once; a per-drawing note offers none");
+  ok([APPENDIX_COPY.late, APPENDIX_COPY.lateDrawings, APPENDIX_COPY.notMerged, APPENDIX_COPY.notMergedDrawings, APPENDIX_COPY.linksMissing].every((t) => t.includes("Use Retry") && !/save again/i.test(t)),
+    "drawings: those notes point at Retry, not at a save that may not exist");
 
   // Carry-overs from Task 7: an empty tail is never printed (no blank page); an unresolvable print origin is logged.
   const pr = rd("src/app/print/quote/[id]/page.tsx");
@@ -795,10 +828,29 @@ async function datasheetRouteDbChecks(ok: Ok) {
   }
 }
 
+/* ---- Final review I1 (DB): Generate from Grid's out-of-date mark, then the Retry that renders it in a new request ---- */
+async function gridStaleDbChecks(ok: Ok) {
+  try {
+    const qid = fixtureId(FIX, "grid-stale");
+    const sec = { id: "sysG", name: "PW", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "PW-1", desc: "Fixture", qty: 1, unit: "ea", cost: 10, price: 20 }] };
+    await createFixture("quotes", { ...buildQuote(qid, { name: "PW grid stale", customer: "PW", value: 20, spec: { sections: [sec], mobs: [] } } as never, "system", null, Date.now()) } as never);
+    const t0 = Date.now() - 60_000;
+    await updateQuotePdf(qid, () => ({ status: "ready", at: t0, savedAt: t0, blobPath: "quote-pdfs/pw-grid.pdf" }));
+    const view = await markQuotePdfStale(qid);
+    const q = await getQuote(qid);
+    const plan = pdfRetryPlan(q ?? {}, Date.now());
+    ok(view?.outOfDate === true && view.hasFile && q?.pdf?.stale === true && q.pdf.blobPath === "quote-pdfs/pw-grid.pdf" && "savedAt" in plan && plan.savedAt === q.pdf.savedAt && plan.savedAt > t0,
+      "rerender (Grid, DB): the mark keeps the last file, reads Out of date, and the Retry that follows renders it at once (no wait)");
+  } finally {
+    await dropFixtures(FIX);
+  }
+}
+
 export async function photoWrapDbChecks(ok: Ok) {
   await quietWarnings(async () => {
     await appendixDbChecks(ok);
     await datasheetRouteDbChecks(ok);
+    await gridStaleDbChecks(ok);
   });
 }
 

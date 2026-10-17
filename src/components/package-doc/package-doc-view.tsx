@@ -149,7 +149,7 @@ function PriceTable({ b }: { b: RPriceTable }) {
   const cell: CSSProperties = { borderBottom: "1px solid #eef0f3", padding: "6px 0" };
   const total: CSSProperties = { padding: "8px 0 4px", fontWeight: 700, color: INK, borderTop: `1.5px solid ${INK}` };
   return (
-    <div className="pd-pricewrap" style={{ margin: "10px 0 14px" }}>
+    <div className="pd-pricewrap" style={{ margin: "10px 0 14px", clear: "both" }}>
       <table className="pd-price" style={{ width: "100%", borderCollapse: "collapse", fontSize: "1em" }}>
         <tbody>
           {[...b.rows, ...b.extra].map((r, i) => (

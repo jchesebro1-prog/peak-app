@@ -74,15 +74,19 @@ const LEFT_OUT: Record<DrawingSkipReason, string> = {
 
 /** PDF-level notes say only what is true: the links are named only when this PDF would have had a links page. */
 export const APPENDIX_COPY = {
-  late: "The drawings and datasheet links were left out — the PDF ran out of time. Save again to retry.",
-  lateDrawings: "The drawings were left out — the PDF ran out of time. Save again to retry.",
-  notMerged: "The drawings and datasheet links couldn’t be added to this PDF — save again to retry.",
-  notMergedDrawings: "The drawings couldn’t be added to this PDF — save again to retry.",
-  linksMissing: "The datasheet links page couldn’t be added — save again to retry.",
+  late: "The drawings and datasheet links were left out — the PDF ran out of time. Use Retry to make it again.",
+  lateDrawings: "The drawings were left out — the PDF ran out of time. Use Retry to make it again.",
+  notMerged: "The drawings and datasheet links couldn’t be added to this PDF. Use Retry to make it again.",
+  notMergedDrawings: "The drawings couldn’t be added to this PDF. Use Retry to make it again.",
+  linksMissing: "The datasheet links page couldn’t be added. Use Retry to make it again.",
   /** Defensive only (A1): drawings never push the PDF past 14 MB, so this is an estimate that is too large on its own. */
   tooLargeToEmail: (mb: string) => `This PDF is ${mb} MB — too large to attach to an email; send the link instead.`,
   more: (n: number) => `…and ${n} more.`,
 } as const;
+
+/** The notes a fresh render can clear (out of time, a merge that failed, a missing links page): the PDF viewer
+ *  offers its Retry (retryQuotePdfAction) beside the first one, so the copy's "Use Retry" is always there. */
+export const RETRYABLE_PDF_NOTES: readonly string[] = [APPENDIX_COPY.late, APPENDIX_COPY.lateDrawings, APPENDIX_COPY.notMerged, APPENDIX_COPY.notMergedDrawings, APPENDIX_COPY.linksMissing];
 
 /** The one note for the whole appendix when it didn't happen (out of time, or the estimate pdf-lib couldn't merge). */
 export function appendixLeftOutNote(why: "late" | "unmergeable", hasLinks: boolean): string {

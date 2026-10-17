@@ -1,3 +1,4 @@
+import { RETRYABLE_PDF_NOTES } from "@/lib/quote-pdf/appendix-plan";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 
 /**
@@ -36,7 +37,15 @@ export function pdfBanner(s: {
     notes.push({ tone: s.pdf.outOfDate ? "warn" : "error", text: s.pdf.error || "The PDF couldn’t be made.", action: "Retry" });
   else if (!s.pdf && !s.dirty) notes.push({ tone: "warn", text: "No PDF yet for this quote.", action: "Create PDF" });
   // Spec 2026-10-16 §4: what the ready file left out (a drawing, the links page), and an over-email-size PDF.
-  if (!s.dirty && s.pdf?.status === "ready") for (const text of s.pdf.notes ?? []) notes.push({ tone: "warn", text });
+  // A note a fresh render can clear ("Use Retry…") carries the one Retry, on the first such note.
+  if (!s.dirty && s.pdf?.status === "ready") {
+    let offered = false;
+    for (const text of s.pdf.notes ?? []) {
+      const retry = !offered && !s.retrying && RETRYABLE_PDF_NOTES.includes(text);
+      if (retry) offered = true;
+      notes.push({ tone: "warn", text, ...(retry ? { action: "Retry" as const } : {}) });
+    }
+  }
   return notes;
 }
 

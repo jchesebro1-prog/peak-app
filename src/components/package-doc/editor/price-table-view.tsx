@@ -18,7 +18,7 @@ export default function PriceTableView({ selected, editor, getPos }: ReactNodeVi
       data-drag-handle=""
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      style={{ position: "relative", margin: "10px 0", borderRadius: 6, outline: selected ? "2px solid #6b8fd1" : "1px dashed #d5d8de", outlineOffset: 4, cursor: "grab" }}
+      style={{ position: "relative", clear: "both", margin: "10px 0", borderRadius: 6, outline: selected ? "2px solid #6b8fd1" : "1px dashed #d5d8de", outlineOffset: 4, cursor: "grab" }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
         <span style={{ fontSize: 10.5, fontWeight: 600, color: "#8c919c", letterSpacing: ".04em", textTransform: "uppercase" }}>Price table · live</span>

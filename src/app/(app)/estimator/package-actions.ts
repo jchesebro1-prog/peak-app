@@ -8,7 +8,7 @@ import { clearPackageZipCache } from "@/lib/estimate-output/package-zip-server";
 import { loadPackagePanel, type PackagePanel } from "@/lib/estimate-output/package-panel-server";
 import { printOriginFor } from "@/lib/quote-pdf/origin";
 import { pdfAppendixKey } from "@/lib/quote-pdf/appendix-key";
-import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
+import { markQuotePdfStale, scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import { ONLINE_COPY } from "@/lib/quote-share/view";
 import { requireUser } from "@/lib/session";
@@ -117,8 +117,27 @@ export async function setPackagePeakHeaderAction(quoteId: string, on: boolean | 
   }
 }
 
+/**
+ * Spec 2026-10-16 §4, Generate from Grid: the drawing set can use up to 105 s of this request's 120 s
+ * (GRID_SET_DEADLINE_MS), so the customer PDF is NOT rendered here — an after() render would inherit what is left.
+ * The PDF is only marked out of date (a quick locked write: "Out of date" with Retry if nothing follows), and
+ * `appendixMoved` tells the panel to start the render in a NEW request through the PDF's own Retry
+ * (retryQuotePdfAction → pdfRetryPlan → scheduleQuotePdf), which gets the page's full budget.
+ */
+async function markStaleIfAppendixMoved(quoteId: string, beforeKey: string): Promise<{ pdf?: QuotePdfView; moved: boolean }> {
+  try {
+    const q = await getQuote(quoteId);
+    if (!q || pdfAppendixKey(q) === beforeKey) return { moved: false };
+    return { moved: true, pdf: (await markQuotePdfStale(q.id)) ?? undefined };
+  } catch (e) {
+    // The drawing write already landed — a failed re-read never reports it as failed (the PDF offers Retry).
+    console.error("[package] PDF re-render check failed", quoteId, e);
+    return { moved: false };
+  }
+}
+
 /** D-j — "Generate from Grid". Runs under the Estimator page's maxDuration (120 s); one render with 25 s steps fits. */
-export async function generateGridDrawingsAction(quoteId: string): Promise<{ ok: true; pdf?: QuotePdfView } | { ok: false; error: string }> {
+export async function generateGridDrawingsAction(quoteId: string): Promise<{ ok: true; pdf?: QuotePdfView; appendixMoved?: true } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!can("send", user.roles)) return { ok: false, error: ONLINE_COPY.needsSend };
   try {
@@ -128,8 +147,8 @@ export async function generateGridDrawingsAction(quoteId: string): Promise<{ ok:
     const before = pdfAppendixKey(await getQuote(String(quoteId || "")));
     const r = await generateGridDrawingSet(String(quoteId || ""), user.name, where.origin);
     if (!r.ok) return { ok: false, error: r.error };
-    const pdf = await rerenderIfAppendixMoved(String(quoteId || ""), before);
-    return { ok: true, ...(pdf ? { pdf } : {}) };
+    const { moved, pdf } = await markStaleIfAppendixMoved(String(quoteId || ""), before);
+    return { ok: true, ...(pdf ? { pdf } : {}), ...(moved ? { appendixMoved: true as const } : {}) };
   } catch (e) {
     console.error("[package] generate from grid failed", e);
     return { ok: false, error: GRID_SET_COPY.failed };

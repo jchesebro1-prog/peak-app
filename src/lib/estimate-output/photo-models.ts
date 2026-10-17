@@ -15,8 +15,9 @@ import type { PackageDoc } from "@/lib/package-doc/types";
 
 export const PHOTO_TAG_MAX = 60;
 
+/** One line, trimmed, at most PHOTO_TAG_MAX — trimmed again after the cut, so a tag cut at a space ends on a character. */
 export function cleanTag(v: unknown): string {
-  return typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, PHOTO_TAG_MAX) : "";
+  return typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, PHOTO_TAG_MAX).trimEnd() : "";
 }
 
 /** `ownPhoto`: the part's own photo or its manufacturer's image (not a kind placeholder).
