@@ -3,8 +3,8 @@ import { cleanPackageFiles, MAX_PACKAGE_FILE_BYTES, shownPackageFiles, type Pack
 import { loadDatasheetLinkRows } from "@/lib/estimate-output/datasheet-links-server";
 import { readBlobCapped } from "@/lib/narrative/photos";
 import { ESTIMATE_EMAIL_ATTACH_MAX } from "@/lib/estimate-email/compose";
-import { APPENDIX_COPY, drawingSkipNote, drawingsBudget, pdfNotesOf, planDrawings, sizeMb } from "./appendix-plan";
-import { mergeEstimateAppendices, type DrawingInput } from "./appendix-merge-server";
+import { APPENDIX_COPY, appendixLeftOutNote, drawingSkipNote, drawingsBudget, pdfNotesOf, planDrawings, sizeMb } from "./appendix-plan";
+import { mergeEstimateAppendices, prepareDrawings, type DrawingInput } from "./appendix-merge-server";
 import { isAppOrigin, originFrom } from "./origin";
 import { renderPrintRouteToPdf } from "./render";
 import {
@@ -72,8 +72,8 @@ export type GenerateInput = {
   deadlineSignal?: (ms: number) => AbortSignal;
   /** Spec 2026-10-16 §4–5 seam — the shown drawings and whether a datasheet links page prints (default loadAppendixSources). */
   appendix?: (q: Quote, origin: string) => Promise<AppendixSources>;
-  /** Spec-harness seam — one drawing's bytes (default: its private Blob, capped at 25 MB). */
-  readDrawing?: (file: PackageFile, signal: AbortSignal) => Promise<Uint8Array | null>;
+  /** Spec-harness seam — one drawing's bytes, null past `maxBytes` (default: its private Blob). */
+  readDrawing?: (file: PackageFile, signal: AbortSignal, maxBytes: number) => Promise<Uint8Array | null>;
 };
 
 /**
@@ -143,7 +143,7 @@ export async function loadAppendixSources(q: Quote, origin: string): Promise<App
   return { drawings, hasLinks: (await loadDatasheetLinkRows(q, origin)).length > 0 };
 }
 
-const readDrawingFromBlob = (file: PackageFile, signal: AbortSignal) => readBlobCapped(file.blobPath, MAX_PACKAGE_FILE_BYTES, signal);
+const readDrawingFromBlob = (file: PackageFile, signal: AbortSignal, maxBytes: number) => readBlobCapped(file.blobPath, maxBytes, signal);
 
 const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -266,11 +266,13 @@ export async function generateQuotePdf(input: GenerateInput): Promise<QuotePdfSt
         }
       }
     }
+    // PDF-level notes first, then one per skipped drawing — so only drawings ever fold into "…and N more".
     const notes: string[] = [];
+    const drawingNotes: string[] = [];
     if (split) {
       // Opportunistic, like the stamp re-render: only while APPENDIX_MIN_MS fits, hard-stopped before the upload allowance.
       const elapsed = clock() - startedAt;
-      if (!appendixFits(elapsed)) notes.push(APPENDIX_COPY.late);
+      if (!appendixFits(elapsed)) notes.push(appendixLeftOutNote("late", appendix.hasLinks));
       else {
         const ms = stampRerenderDeadlineMs(elapsed);
         const signal = (input.deadlineSignal ?? ((m: number) => AbortSignal.timeout(m)))(ms);
@@ -287,26 +289,36 @@ export async function generateQuotePdf(input: GenerateInput): Promise<QuotePdfSt
         // A1: drawings take what is left of the 14 MB ceiling after the estimate and links pages, in list order.
         const read = input.readDrawing ?? readDrawingFromBlob;
         const caps = { perFile: MAX_PACKAGE_FILE_BYTES, total: drawingsBudget(bytes.length, tail?.length ?? 0) };
+        // Each read stops at min(25 MB, what is left of the budget) — a stored size that lied never pulls in more.
+        let left = caps.total;
         const drawings: DrawingInput[] = [];
         for (const { file, skip } of planDrawings(appendix.drawings, caps)) {
           if (skip) drawings.push({ name: file.name, contentType: file.contentType, bytes: null, skip });
           else if (signal.aborted) drawings.push({ name: file.name, contentType: file.contentType, bytes: null, skip: "late" });
           else {
             try {
-              drawings.push({ name: file.name, contentType: file.contentType, bytes: await read(file, signal) });
+              const got = await read(file, signal, Math.min(MAX_PACKAGE_FILE_BYTES, left));
+              left -= got?.byteLength ?? 0;
+              drawings.push({ name: file.name, contentType: file.contentType, bytes: got });
             } catch {
               drawings.push({ name: file.name, contentType: file.contentType, bytes: null, skip: signal.aborted ? "late" : "unreadable" });
             }
           }
         }
-        const merged = await mergeEstimateAppendices({ main: bytes, drawings, tail, deadline, now: clock });
+        // Images converted ONCE here (sharp), so the merge's size-guard retries reuse the small bytes.
+        const prepared = await prepareDrawings(drawings, { deadline, now: clock });
+        const merged = await mergeEstimateAppendices({ main: bytes, drawings: prepared, tail, deadline, now: clock });
         bytes = merged.bytes;
-        notes.push(...merged.skipped.map(drawingSkipNote));
-        if (appendix.hasLinks && !merged.tailAdded) notes.push(APPENDIX_COPY.linksMissing);
+        if (merged.fallback) notes.push(appendixLeftOutNote(merged.fallback, appendix.hasLinks));
+        else {
+          if (appendix.hasLinks && !merged.tailAdded) notes.push(APPENDIX_COPY.linksMissing);
+          drawingNotes.push(...merged.skipped.map(drawingSkipNote));
+        }
       }
     }
     // Defensive (A1 keeps drawings under the limit): an estimate too large to attach on its own says so.
     if (kind === "quote" && bytes.length > ESTIMATE_EMAIL_ATTACH_MAX) notes.push(APPENDIX_COPY.tooLargeToEmail(sizeMb(bytes.length)));
+    notes.push(...drawingNotes);
     const path = await store.put(pdfStoragePath(quoteId, String(savedAt)), bytes);
     let res: Awaited<ReturnType<typeof updateQuotePdf>>;
     try {

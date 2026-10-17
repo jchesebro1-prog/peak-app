@@ -1,4 +1,7 @@
 import { MAX_PACKAGE_FILE_BYTES, type PackageFile } from "@/lib/estimate-output/package-files";
+import { PDF_NOTES_MAX } from "./state";
+
+export { PDF_NOTES_MAX };
 
 /**
  * Spec 2026-10-16 §4 — the drawings merged into the customer PDF, the pure
@@ -15,7 +18,6 @@ import { MAX_PACKAGE_FILE_BYTES, type PackageFile } from "@/lib/estimate-output/
  */
 
 export const ESTIMATE_PDF_TARGET_MAX_BYTES = 14 * 1024 * 1024;
-export const PDF_NOTES_MAX = 6;
 const NOTE_MAX = 200;
 
 export type DrawingSkipReason = "too-big" | "over-total" | "unreadable" | "encrypted" | "late";
@@ -28,15 +30,17 @@ export function drawingsBudget(mainBytes: number, tailBytes: number): number {
   return Math.max(0, ESTIMATE_PDF_TARGET_MAX_BYTES - mainBytes - tail);
 }
 
-/** List order: a file over the per-file cap (or with no size) is `too-big`; then each file is taken while the
- *  running total stays inside `total` — one that doesn't fit is `over-total` and a smaller one after it may still. */
+/** List order: a file with no usable size is `unreadable`, one over the per-file cap `too-big`; then each file is
+ *  taken while the running total stays inside `total` — one that doesn't fit is `over-total` and a smaller one
+ *  after it may still (skip and continue, confirmed in review). */
 export function planDrawings(
   files: readonly PackageFile[],
   caps: { perFile: number; total: number } = { perFile: MAX_PACKAGE_FILE_BYTES, total: ESTIMATE_PDF_TARGET_MAX_BYTES }
 ): Array<{ file: PackageFile; skip: DrawingSkipReason | null }> {
   let total = 0;
   return files.map((file) => {
-    if (!(file.size > 0) || file.size > caps.perFile) return { file, skip: "too-big" as const };
+    if (!(file.size > 0)) return { file, skip: "unreadable" as const };
+    if (file.size > caps.perFile) return { file, skip: "too-big" as const };
     if (total + file.size > caps.total) return { file, skip: "over-total" as const };
     total += file.size;
     return { file, skip: null };
@@ -68,19 +72,30 @@ const LEFT_OUT: Record<DrawingSkipReason, string> = {
   late: "left out of the PDF: the PDF ran out of time",
 };
 
+/** PDF-level notes say only what is true: the links are named only when this PDF would have had a links page. */
 export const APPENDIX_COPY = {
   late: "The drawings and datasheet links were left out — the PDF ran out of time. Save again to retry.",
+  lateDrawings: "The drawings were left out — the PDF ran out of time. Save again to retry.",
+  notMerged: "The drawings and datasheet links couldn’t be added to this PDF — save again to retry.",
+  notMergedDrawings: "The drawings couldn’t be added to this PDF — save again to retry.",
   linksMissing: "The datasheet links page couldn’t be added — save again to retry.",
   /** Defensive only (A1): drawings never push the PDF past 14 MB, so this is an estimate that is too large on its own. */
   tooLargeToEmail: (mb: string) => `This PDF is ${mb} MB — too large to attach to an email; send the link instead.`,
   more: (n: number) => `…and ${n} more.`,
 } as const;
 
+/** The one note for the whole appendix when it didn't happen (out of time, or the estimate pdf-lib couldn't merge). */
+export function appendixLeftOutNote(why: "late" | "unmergeable", hasLinks: boolean): string {
+  if (why === "late") return hasLinks ? APPENDIX_COPY.late : APPENDIX_COPY.lateDrawings;
+  return hasLinks ? APPENDIX_COPY.notMerged : APPENDIX_COPY.notMergedDrawings;
+}
+
 export function drawingSkipNote(s: DrawingSkip): string {
   return `Drawing “${s.name}” was ${LEFT_OUT[s.reason]}.`;
 }
 
-/** Trimmed, de-duplicated, each ≤ 200 chars, at most PDF_NOTES_MAX (the last says how many more). */
+/** Trimmed, de-duplicated, each ≤ 200 chars, at most PDF_NOTES_MAX (the last says how many more). Callers put the
+ *  PDF-level notes first, so only per-drawing notes ever fold into "…and N more". */
 export function pdfNotesOf(lines: readonly string[]): string[] {
   const clean = [...new Set(lines.map((l) => String(l ?? "").trim().slice(0, NOTE_MAX)).filter(Boolean))];
   return clean.length <= PDF_NOTES_MAX ? clean : [...clean.slice(0, PDF_NOTES_MAX - 1), APPENDIX_COPY.more(clean.length - (PDF_NOTES_MAX - 1))];

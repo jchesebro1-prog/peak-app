@@ -114,6 +114,9 @@ export type QuotePdfView = {
 
 export type PdfOutcome = { ok: true; blobPath: string; printed?: DocumentRevStamp | null; notes?: string[] | null } | { ok: false; error: string };
 
+/** Spec 2026-10-16 §4 — the most notes a ready PDF keeps (the last says how many more; appendix-plan pdfNotesOf). */
+export const PDF_NOTES_MAX = 6;
+
 /** A render still "pending" this long after it started died with its function. */
 export const PDF_PENDING_STALE_MS = 150_000;
 export const PDF_STALE_ERROR = "The PDF didn’t finish rendering — try again.";
@@ -178,7 +181,7 @@ export function settlePdf(
       savedAt,
       blobPath: outcome.blobPath,
       ...(outcome.printed ? { printed: outcome.printed } : {}),
-      ...(outcome.notes && outcome.notes.length ? { notes: outcome.notes.slice(0, 6) } : {}),
+      ...(outcome.notes && outcome.notes.length ? { notes: outcome.notes.slice(0, PDF_NOTES_MAX) } : {}),
     };
   return failedPdf(cur, savedAt, outcome.error, now);
 }
