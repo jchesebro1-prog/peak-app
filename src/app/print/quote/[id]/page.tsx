@@ -11,7 +11,7 @@ import { rewardsVisibleFor } from "@/lib/parties/addressee";
 import { documentAddressee } from "@/lib/parties/addressee-server";
 import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
 import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
-import { keyProductPhotoDataUris } from "@/lib/narrative/photos";
+import { keyProductPhotoDataUris, loadKeyProductModels } from "@/lib/narrative/photos";
 import { normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { quoteAsOfRevision } from "@/lib/quote-share/view";
 import { loadCutSheets } from "@/lib/curtain-cut-sheets/load";
@@ -76,11 +76,12 @@ export default async function PrintQuotePage({
   // #293: key-product photos inlined as data URIs (this route has no session).
   // Never throws — a photo that can't be read just isn't printed.
   // Phase 5: plus the package document's photo-on product blocks.
-  const keyProductPhotos = await keyProductPhotoDataUris(doc.sections, doc.document);
+  // Photo wrap: each photo's model tag, read beside it (never throws either).
+  const [keyProductPhotos, keyProductModels] = await Promise.all([keyProductPhotoDataUris(doc.sections, doc.document), loadKeyProductModels(doc.sections, doc.document)]);
   return (
     <main>
       <style>{QUOTE_PRINT_CSS}</style>
-      <QuoteDocument {...doc} keyProductPhotos={keyProductPhotos} rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
+      <QuoteDocument {...doc} keyProductPhotos={keyProductPhotos} keyProductModels={keyProductModels} rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
       {/* #292 — its own page after the estimate; the Client resets (width/padding) ride along. */}
       {cutSheets?.ok && cutSheets.models.client.length > 0 && (
         <div style={{ breakBefore: "page" }}>

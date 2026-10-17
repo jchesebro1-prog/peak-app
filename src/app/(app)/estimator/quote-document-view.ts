@@ -119,13 +119,6 @@ export function alternatingPhotoSides(keys: readonly string[]): Map<string, "rig
   return out;
 }
 
-/** The float a key-product photo prints with on that side (#293's right float, mirrored for left). */
-export function keyProductPhotoStyle(side: "right" | "left"): { float: "right" | "left"; width: string; maxHeight: string; objectFit: "contain"; margin: string } {
-  return side === "left"
-    ? { float: "left", width: "34%", maxHeight: "2.4in", objectFit: "contain", margin: "0 14px 8px 0" }
-    : { float: "right", width: "34%", maxHeight: "2.4in", objectFit: "contain", margin: "0 0 8px 14px" };
-}
-
 /** #293 slice 3 (spec §2.3) — the online BOM view: every system itemized,
  *  descriptions on, the appendix off. Prices keep the quote's own choice (an
  *  estimator who hid prices still hides them), and so do quantities (Jeff

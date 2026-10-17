@@ -9,6 +9,8 @@ import { spreadPhotoAnchors, photoFigureStyle, photoImgStyle, photoTagStyle, PHO
 import { cleanTag, photoTagText, keyProductModelsFor, PHOTO_TAG_MAX } from "../src/lib/estimate-output/photo-models";
 import { lineOwnModel } from "../src/lib/catalog-rename/sku";
 import type { SpecSection } from "../src/app/(app)/estimator/types";
+import { qd293Props, qd293Sections, quoteDocumentModule293, renderQuoteDocument293 } from "./qd293-cases";
+import { printableKeyProducts } from "../src/app/(app)/estimator/narrative";
 
 export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
@@ -70,9 +72,74 @@ function modelChecks(ok: Ok) {
   ok(m["ASM-1"] === "7460A1001", "photo wrap: an assembly line (package-doc anchor) reads its aliased member part");
 }
 
+function wrapSections(): SpecSection[] {
+  return qd293Sections().map((s) =>
+    s.id === "s2"
+      ? {
+          ...s,
+          narrative: "Para one.\n\nPara two.\n\nPara three.",
+          items: s.items.map((it) => (it.id === 6 ? { ...it, manufacturerPartNumber: "PN-6" } : it)),
+          keyProducts: [
+            { lineKey: "5", sku: "SKU-5", text: "Five.", photo: true },
+            { lineKey: "6", sku: "SKU-6", text: "Six.", photo: true },
+          ],
+        }
+      : s
+  );
+}
+const PHOTOS = { "SKU-5": { src: "data:image/png;base64,QUFB", alt: "Five" }, "SKU-6": { src: "data:image/png;base64,QkJC", alt: "Six" } };
+
+function quoteDocPhotoChecks(ok: Ok) {
+  const html = renderQuoteDocument293({ ...qd293Props({ sections: wrapSections() }), keyProductPhotos: PHOTOS, keyProductModels: { "SKU-5": "Jupiter 4" } });
+  const f1 = html.indexOf('<figure class="est-ph"'), f2 = html.indexOf('<figure class="est-ph"', f1 + 1);
+  const p1 = html.indexOf(">Para one.<"), p2 = html.indexOf(">Para two.<"), p3 = html.indexOf(">Para three.<");
+  ok(f1 > 0 && f2 > 0 && f1 < p1 && p1 < f2 && f2 < p2 && p2 < p3 && html.indexOf('<figure class="est-ph"', f2 + 1) === -1,
+    "photo wrap (doc): photo 1 sits at the first paragraph, photo 2 at the next — the system narrative wraps them");
+  ok(/<figure class="est-ph" style="float:right;width:34%;margin:0 0 8px 14px;position:relative;break-inside:avoid">/.test(html.slice(f1)) &&
+     /^<figure class="est-ph" style="float:left;width:34%;margin:0 14px 8px 0/.test(html.slice(f2)),
+    "photo wrap (doc): sides still alternate right, left");
+  ok(html.slice(f1, f2).includes('class="est-ph-tag"') && html.slice(f1, f2).includes(">Jupiter 4</span>") && html.slice(f1, f2).includes("font-size:9px") &&
+     html.slice(f2, p2).includes(">PN-6</span>") && html.slice(f2, p2).includes("left:0"),
+    "photo wrap (doc): each photo carries its model tag on the outer bottom corner (9px in print); no part read → the line's own model");
+  ok((html.match(/class="est-kp" style="margin-top:12px"/g) || []).length === 2 && !/class="est-kp" style="display:flow-root/.test(html),
+    "photo wrap (doc): a key product is a plain block (no longer its own float box)");
+  const sysDiv = html.lastIndexOf("<div", f1);
+  ok(html.slice(sysDiv, f1).includes("display:flow-root"), "photo wrap (doc): the system body is the float container");
+  const plain = renderQuoteDocument293(qd293Props());
+  ok(!plain.includes("display:flow-root") && !plain.includes("est-ph"), "photo wrap (doc): a system with no photo renders with no float container");
+  const web = renderQuoteDocument293({ ...qd293Props({ sections: wrapSections() }), keyProductPhotos: PHOTOS, keyProductModels: { "SKU-5": "Jupiter 4" }, layout: "web" });
+  ok(web.includes("font-size:10px") && web.includes(">Jupiter 4</span>"), "photo wrap (doc): the web tag is 10px");
+  const noModels = renderQuoteDocument293({ ...qd293Props({ sections: wrapSections().map((s) => ({ ...s, items: s.items.map((it) => ({ ...it, manufacturerPartNumber: undefined })) })) }), keyProductPhotos: PHOTOS });
+  ok(noModels.includes('<figure class="est-ph"') && !noModels.includes("est-ph-tag"), "photo wrap (doc): no model anywhere → no tag");
+
+  // Placeholders: an allowance block prints its placeholder; tagged only with the line's own model.
+  const allow = (own?: string) => qd293Sections().map((s) =>
+    s.id === "s2" ? { ...s, items: [...s.items, { id: 12, sku: "ALLOW-1", desc: "Rigging allowance", qty: 1, unit: "ls", cost: 1, price: 2, allowance: true, ...(own ? { manufacturerModelNumber: own } : {}) }],
+      keyProducts: [{ lineKey: "12", sku: "ALLOW-1", text: "", photo: true }] } : s) as SpecSection[];
+  const a0 = renderQuoteDocument293({ ...qd293Props({ sections: allow() }), keyProductPhotos: {}, keyProductModels: { "ALLOW-1": "SHOULD-NOT-PRINT" } });
+  const a1 = renderQuoteDocument293({ ...qd293Props({ sections: allow("AL-500") }), keyProductPhotos: {} });
+  ok(a0.includes("/placeholders/allowance.webp") && !a0.includes("est-ph-tag") && a1.includes(">AL-500</span>"),
+    "photo wrap (doc): a placeholder is tagged only when its line has a real model number");
+  ok(printableKeyProducts(allow("AL-500").find((s) => s.id === "s2")!)[0].ownModel === "AL-500" && !("ownModel" in printableKeyProducts(allow().find((s) => s.id === "s2")!)[0]),
+    "photo wrap (doc): printable key products carry the line's own model only when it has one");
+
+  const { QUOTE_PRINT_CSS } = quoteDocumentModule293();
+  const webCss = (quoteDocumentModule293() as unknown as { QUOTE_WEB_CSS: string; QUOTE_WEB_EMBED_CSS: string });
+  ok(QUOTE_PRINT_CSS.includes(".est-doc .est-kp { break-inside: avoid; page-break-inside: avoid; }") && QUOTE_PRINT_CSS.includes(".est-doc .est-ph { break-inside: avoid; page-break-inside: avoid; }"),
+    "photo wrap (doc): print keeps a product heading with its lines and never splits a photo");
+  for (const css of [webCss.QUOTE_WEB_CSS, webCss.QUOTE_WEB_EMBED_CSS])
+    ok(/@media \(max-width: 480px\)[\s\S]*\.est-web \.est-ph \{ float: none !important; display: block; width: 100% !important; margin: 0 0 10px 0 !important; \}/.test(css) && !css.includes(".est-kp img"),
+      "photo wrap (doc): a phone puts each photo full width (web + embedded CSS)");
+
+  const pr = rd("src/app/print/quote/[id]/page.tsx"), loader = rd("src/lib/quote-pdf/document-loader.ts");
+  ok(pr.includes("loadKeyProductModels(doc.sections, doc.document)") && loader.includes("loadKeyProductModels(doc.sections, doc.document)") && pr.includes("keyProductModels={keyProductModels}"),
+    "photo wrap (doc): the print route and the portal/share loader read the models beside the photos");
+}
+
 export async function photoWrapPureChecks(ok: Ok) {
   spreadChecks(ok);
   modelChecks(ok);
+  quoteDocPhotoChecks(ok);
 }
 
 export async function photoWrapDbChecks(_ok: Ok) {

@@ -2,6 +2,7 @@ import type { KeyProduct, SpecItem, SpecSection } from "./types";
 import { systemPrintsInBody } from "./quote-document-view";
 import { isPlaceholderSku } from "@/lib/specs/record-keys";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { lineOwnModel } from "@/lib/catalog-rename/sku";
 /**
  * #281 — a system narrative's plain-text formatting, turned into printable
  * blocks. Pure (no React) so the test:specs harness can import it.
@@ -402,22 +403,25 @@ export type PrintableKeyProduct = {
   /** An allowance / custom line: what prints when the block has no photo of
    *  its own (Manufacturer section Part 1). Absent on every other block. */
   placeholder?: "allowance" | "custom-device";
+  /** Photo wrap (2026-10-16): the line's own Model # / MFR P/N — the only tag a placeholder photo may carry. Absent when blank. */
+  ownModel?: string;
 };
 /** What prints for a narrative system: resolved "ok" blocks in order. */
 export function printableKeyProducts(sec: SpecSection): PrintableKeyProduct[] {
-  return resolveKeyProducts(sec).flatMap((r) =>
-    r.status === "ok"
-      ? [
-          {
-            sku: r.kp.sku,
-            heading: keyProductHeading(r.item),
-            blocks: narrativeBlocks(typeof r.kp.text === "string" ? r.kp.text : ""),
-            photo: r.kp.photo !== false,
-            ...(r.item.allowance ? { placeholder: "allowance" as const } : r.item.custom ? { placeholder: "custom-device" as const } : {}),
-          },
-        ]
-      : []
-  );
+  return resolveKeyProducts(sec).flatMap((r) => {
+    if (r.status !== "ok") return [];
+    const ownModel = lineOwnModel(r.item);
+    return [
+      {
+        sku: r.kp.sku,
+        heading: keyProductHeading(r.item),
+        blocks: narrativeBlocks(typeof r.kp.text === "string" ? r.kp.text : ""),
+        photo: r.kp.photo !== false,
+        ...(r.item.allowance ? { placeholder: "allowance" as const } : r.item.custom ? { placeholder: "custom-device" as const } : {}),
+        ...(ownModel ? { ownModel } : {}),
+      },
+    ];
+  });
 }
 
 /** Skus whose photo the document prints: printed (revenue-carrying)

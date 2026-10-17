@@ -37,7 +37,8 @@ import { canonicalBonusSections } from "../src/lib/estimate-bonus/canonical";
 import { GROUPS, setValue, loadBonusRates } from "../src/lib/stores/pricing";
 import { flagOldVendorLine, OLD_VENDOR_PRICE_NOTE } from "../src/lib/narrative/system-library";
 import { estimateReadiness, requoteCount } from "../src/lib/estimate-steps/readiness";
-import { alternatingPhotoSides, keyProductPhotoStyle } from "../src/app/(app)/estimator/quote-document-view";
+import { alternatingPhotoSides } from "../src/app/(app)/estimator/quote-document-view";
+import { photoFigureStyle } from "../src/lib/estimate-output/photo-spread";
 import { resolvePackageDoc } from "../src/lib/package-doc/resolve";
 import { productImageFor } from "../src/lib/package-doc/seed";
 import { sanitizePackageDoc } from "../src/lib/package-doc/sanitize";
@@ -114,10 +115,10 @@ export async function oct15PureChecks(ok: Ok) {
   {
     const sides = alternatingPhotoSides(["a|1", "a|2", "b|1", "a|1"]);
     ok(sides.get("a|1") === "right" && sides.get("a|2") === "left" && sides.get("b|1") === "right" && sides.size === 3, "oct15 #20: printed photos alternate right, left, right in document order");
-    ok(keyProductPhotoStyle("right").float === "right" && keyProductPhotoStyle("right").margin === "0 0 8px 14px" && keyProductPhotoStyle("left").float === "left" && keyProductPhotoStyle("left").margin === "0 14px 8px 0",
+    ok(photoFigureStyle("right").float === "right" && photoFigureStyle("right").margin === "0 0 8px 14px" && photoFigureStyle("left").float === "left" && photoFigureStyle("left").margin === "0 14px 8px 0",
       "oct15 #20: the first photo keeps #293's right float; the next mirrors it");
     const qd = rd("src/app/(app)/estimator/quote-document.tsx");
-    ok(qd.includes("style={keyProductPhotoStyle(photoSides?.get(ps.id + \"|\" + kp.sku) ?? \"right\")}") && qd.includes("[...previewSections, ...alternateGroups.flatMap((ag) => ag.systems.map((x) => x.ps))]"),
+    ok(qd.includes("side={photoSides?.get(ps.id + \"|\" + s.kp.sku) ?? \"right\"}") && qd.includes("[...previewSections, ...alternateGroups.flatMap((ag) => ag.systems.map((x) => x.ps))]"),
       "oct15 #20: the PDF / online document numbers photos across the body's narrative systems, then the alternates");
     const pv = rd("src/components/estimate-output/package-view.tsx");
     ok(pv.includes(".pkg-kp.pkg-kp-left img { float: left;") && pv.includes("<style>{PACKAGE_LEFT_PHOTO_CSS}</style>}") && pv.includes('className={kp.side === "left" ? "pkg-kp pkg-kp-left" : "pkg-kp"}') && rd("src/lib/estimate-output/package-model.ts").includes("n++ % 2 === 1"),

@@ -49009,9 +49009,9 @@ import { quoteDocumentDataFor as n293tDocData } from "@/lib/quote-pdf/quote-docu
     "#293t web: fluid up to 740px, with the header grid marked for the phone layout");
   const css = (p293Mod() as unknown as { QUOTE_WEB_CSS: string }).QUOTE_WEB_CSS;
   ok(/@media \(max-width: 600px\)[\s\S]*\.est-web \{ padding: 20px 16px !important; \}/.test(css) &&
-     /@media \(max-width: 480px\)[\s\S]*\.est-web \.est-kp img \{ float: none !important;/.test(css) &&
+     /@media \(max-width: 480px\)[\s\S]*\.est-web \.est-ph \{ float: none !important;/.test(css) &&
      /@media \(max-width: 760px\)[\s\S]*box-shadow: none !important/.test(css) && css.includes(".pk-no-print { display: none !important; }"),
-    "#293t web: phone padding < 600px, photo above its paragraph < 480px, sheet chrome only > 760px, page chrome dropped in print");
+    "#293t web: phone padding < 600px, photo full width < 480px, sheet chrome only > 760px, page chrome dropped in print");
 
   // Never rendered (spec §5.6): internal money, notes, vendor terms, review, links.
   const AT = Date.UTC(2026, 9, 1, 15);
@@ -49111,7 +49111,7 @@ import { quoteDocumentDataFor as n293tDocData } from "@/lib/quote-pdf/quote-docu
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const loader = rd("src/lib/quote-pdf/document-loader.ts");
   const print = rd("src/app/print/quote/[id]/page.tsx");
-  ok(["quoteDocumentDataFor(", "purchasePerksForCompany(", "purchasePerksDocLine(", "keyProductPhotoDataUris(", "getCustomer(", "getSettings("].every((c) => loader.includes(c) && print.includes(c)),
+  ok(["quoteDocumentDataFor(", "purchasePerksForCompany(", "purchasePerksDocLine(", "keyProductPhotoDataUris(", "loadKeyProductModels(", "getCustomer(", "getSettings("].every((c) => loader.includes(c) && print.includes(c)),
     "#293t loader: the web loader and the print route build the document from the same calls (no drift until the print route moves onto the loader)");
   ok(loader.includes("quoteAsOfRevision(q, opts.revision)") && loader.includes("keyProductPhotoDocs("), "#293t loader: a revision renders as sent; web photos are the printed docs as scoped URLs");
   ok(loader.includes('if (opts.photos !== "inline" && !webRevisionOk(q, opts.revision)) return null;') && loader.includes('rev.reason === "sent"') && loader.includes("q.revisions.includes(rev)") &&
@@ -49131,7 +49131,7 @@ import { quoteDocumentDataFor as n293tDocData } from "@/lib/quote-pdf/quote-docu
   const asOfCallers = all.filter(([, t]) => t.includes("quoteAsOfRevision(")).map(([f]) => f).sort();
   ok(JSON.stringify(asOfCallers) === JSON.stringify(["src/app/print/quote/[id]/page.tsx", "src/lib/quote-pdf/document-loader.ts", "src/lib/quote-share/view.ts"]),
     `#293t binding: quoteAsOfRevision is called only by the document loader and (#348 2b-ii) the signed bidder-revision print variant (got ${asOfCallers.join(", ")})`);
-  ok(!/["']use (client|server)["']/.test(loader) && !/\.pdf\b|pdfBlobPath|shareLink|generateMetadata/.test(loader) && /return \{ \.\.\.doc, keyProductPhotos, rewardsLine: rewardsVisibleFor\(addressee\) \? purchasePerksDocLine\(perks\) : "" \};/.test(loader),
+  ok(!/["']use (client|server)["']/.test(loader) && !/\.pdf\b|pdfBlobPath|shareLink|generateMetadata/.test(loader) && /return \{ \.\.\.doc, keyProductPhotos, keyProductModels, rewardsLine: rewardsVisibleFor\(addressee\) \? purchasePerksDocLine\(perks\) : "" \};/.test(loader),
     "#293t binding: the loader is server-only, returns QuoteDocument props only, and never reads the live PDF or the share link");
   const clientImporters = all.filter(([, t]) => /^["']use client["'];?\s*$/m.test(t) && /from ["']@\/lib\/(quote-pdf\/document-loader|quote-share\/photo-response)["']/.test(t)).map(([f]) => f);
   ok(clientImporters.length === 0, `#293t binding: no client component imports the loader or the photo responder (got ${clientImporters.join(", ")})`);
@@ -49989,7 +49989,7 @@ import { qd293Props as mfdQdProps, qd293Sections as mfdQdSections, renderQuoteDo
   const html = mfdQdRender({ ...mfdQdProps({ sections: secs }), keyProductPhotos: { "SKU-5": { src: "data:image/png;base64,QUFB", alt: "Five" } } });
   ok(html.includes('src="/placeholders/allowance.webp"') && html.includes('src="/placeholders/custom-device.webp"') && html.includes('src="data:image/png;base64,QUFB"'),
     "mfr images: an allowance/custom key product prints its placeholder; a catalog photo still prints");
-  ok((html.match(/<img[^>]+float:right;width:34%/g) || []).length === 2 && (html.match(/<img[^>]+float:left;width:34%/g) || []).length === 1 && html.includes("Budget allowance — Fixture allowance"),
+  ok((html.match(/<figure class="est-ph" style="float:right;width:34%/g) || []).length === 2 && (html.match(/<figure class="est-ph" style="float:left;width:34%/g) || []).length === 1 && html.includes("Budget allowance — Fixture allowance"),
     "mfr images: placeholders float like a photo (alternating right, left, right — Jeff 2026-10-15 #20); a catalog block with no photo prints full width");
   secs[1].keyProducts = secs[1].keyProducts.map((k) => ({ ...k, photo: false }));
   const off = mfdQdRender({ ...mfdQdProps({ sections: secs }), keyProductPhotos: {} });

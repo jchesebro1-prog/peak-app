@@ -9,6 +9,8 @@ import { docManufacturerFallbackSkus, documentApplies, keyProductPrintSections }
 import { docPhotoSkus } from "@/lib/package-doc/text";
 import type { PackageDoc } from "@/lib/package-doc/types";
 import { memberAliases } from "@/lib/quote-line-members";
+import { getManyBySku } from "@/lib/stores/catalog";
+import { keyProductModelsFor } from "@/lib/estimate-output/photo-models";
 
 /**
  * #293 — key-product photos for the customer document. The photo is the
@@ -53,18 +55,9 @@ export type PhotoCaps = { perImage: number; total: number; concurrency: number; 
  *  bands (the alternates — keyProductPrintSections). Without one, exactly
  *  as before. */
 export async function keyProductPhotoDocs(sections: SpecSection[], document?: PackageDoc | null): Promise<Map<string, PartDocument>> {
-  const kpSections = keyProductPrintSections(sections, document);
-  const docSkus = documentApplies(document) ? docPhotoSkus(document) : [];
-  const skus = [...photoSkusOf(kpSections)];
-  for (const s of docSkus) if (!skus.includes(s)) skus.push(s);
+  const { kpSections, docSkus, skus, read } = photoReadPlan(sections, document);
   const out = new Map<string, PartDocument>();
   if (!skus.length) return out;
-  // #332: an assembly line's photo is its primary member's (the light engine,
-  // else the first included part), else that part's manufacturer image —
-  // read under the member's sku, stored under the line's. Racks and tracks
-  // keep their own (quote-line-members.ts isAssemblyLine).
-  const readSkuOf = photoAliases(sections, skus);
-  const read = (sku: string) => readSkuOf.get(sku) ?? sku;
   // #304: keyed by the sku the section names — a sent revision keeps a
   // renamed part's old SKU, and its photo is found under the new one.
   const { parts, images } = await partsAndImagesBySku([...new Set(skus.map(read))]);
@@ -93,6 +86,34 @@ export async function keyProductPhotoDocs(sections: SpecSection[], document?: Pa
     }
   }
   return out;
+}
+
+/** The photo skus a document prints and how each is read (#332 assembly alias) — keyProductPhotoDocs' plan, shared
+ *  with loadKeyProductModels so the tags come from exactly the parts whose photos print. #332: an assembly line's
+ *  photo is its primary member's (the light engine, else the first included part), else that part's manufacturer
+ *  image — read under the member's sku, stored under the line's. Racks and tracks keep their own
+ *  (quote-line-members.ts isAssemblyLine). */
+export function photoReadPlan(sections: SpecSection[], document?: PackageDoc | null): { kpSections: SpecSection[]; docSkus: string[]; skus: string[]; read: (sku: string) => string } {
+  const kpSections = keyProductPrintSections(sections, document);
+  const docSkus = documentApplies(document) ? docPhotoSkus(document) : [];
+  const skus = [...photoSkusOf(kpSections)];
+  for (const s of docSkus) if (!skus.includes(s)) skus.push(s);
+  const readSkuOf = photoAliases(sections, skus);
+  return { kpSections, docSkus, skus, read: (sku: string) => readSkuOf.get(sku) ?? sku };
+}
+
+/** Photo wrap (2026-10-16 §2) — sku → model tag for the printed photo skus, one batched catalog read
+ *  (run beside the photo read). Never throws: a failure prints the photos untagged. */
+export async function loadKeyProductModels(sections: SpecSection[], document?: PackageDoc | null): Promise<Record<string, string>> {
+  try {
+    const { skus, read } = photoReadPlan(sections, document);
+    if (!skus.length) return {};
+    const parts = await getManyBySku([...new Set(skus.map(read))]);
+    return keyProductModelsFor({ sections, document: documentApplies(document) ? document : null, skus, parts, readSku: read });
+  } catch (e) {
+    console.warn("[narrative] key-product models unavailable", e instanceof Error ? e.message : e);
+    return {};
+  }
 }
 
 /** #332 — each wanted sku that names an assembly line → its primary member's

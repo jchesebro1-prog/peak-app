@@ -5,12 +5,14 @@ import { systemSellTotal } from "./pricing";
 import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 import { narrativeBlocks, printableKeyProducts, type NarrativeBlock } from "./narrative";
-import { alternateGroupsForPrint, alternatingPhotoSides, documentAppendixSystemIds, keyProductPhotoStyle, printedGroupHeadings } from "./quote-document-view";
+import { alternateGroupsForPrint, alternatingPhotoSides, documentAppendixSystemIds, printedGroupHeadings } from "./quote-document-view";
 import type { SystemGroup } from "@/lib/estimate-groups/groups";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 import PackageDocView from "@/components/package-doc/package-doc-view";
 import { documentApplies } from "@/lib/package-doc/print";
 import type { PackageDoc } from "@/lib/package-doc/types";
+import { photoFigureStyle, photoImgStyle, photoTagStyle, spreadPhotoAnchors } from "@/lib/estimate-output/photo-spread";
+import { photoTagText } from "@/lib/estimate-output/photo-models";
 
 /**
  * The customer quote document (#222) — ONE component for both places it
@@ -91,6 +93,10 @@ export type QuoteDocumentProps = {
   /** #293 — sku → the photo a key product prints beside its paragraph. The
    *  print route inlines data URIs (it has no session); absent = no photos. */
   keyProductPhotos?: Record<string, { src: string; alt: string }>;
+  /** Photo wrap (2026-10-16 §2) — sku → the model-number tag a key-product
+   *  photo carries (same keys as keyProductPhotos; built server-side beside
+   *  the photos, loadKeyProductModels). Absent = no part-aware tags. */
+  keyProductModels?: Record<string, string>;
   /** #293 slice 3 — "web" for the portal and share pages: fluid up to the
    *  sheet's 740px, with QUOTE_WEB_CSS's phone rules. Absent / "sheet" renders
    *  byte-for-byte as before (the PDF and the baseline fixture). */
@@ -114,12 +120,13 @@ nextjs-portal { display: none !important; }
 .est-doc .est-secband { break-inside: avoid; break-after: avoid; page-break-after: avoid; }
 .est-doc .est-line, .est-doc .est-optbox, .est-doc .est-totals, .est-doc .est-terms, .est-doc .est-accept, .est-doc .est-sig { break-inside: avoid; page-break-inside: avoid; }
 .est-doc .est-kp { break-inside: avoid; page-break-inside: avoid; }
+.est-doc .est-ph { break-inside: avoid; page-break-inside: avoid; }
 .est-doc .est-appendix { break-before: page; page-break-before: always; }
 `;
 
 /** #293 slice 3 — page CSS for layout="web" (the portal and share pages):
  *  phone padding under 600px with one-column header and signature grids, a
- *  key-product photo full width above its paragraph under 480px, the sheet
+ *  key-product photo full width under 480px, the sheet
  *  chrome (shadow, radius) only above 760px, and the page chrome dropped
  *  when the page is printed. !important because the document's own styles
  *  are inline. */
@@ -131,7 +138,8 @@ export const QUOTE_WEB_CSS = `
   .est-web .est-meta, .est-web .est-sig { grid-template-columns: 1fr !important; gap: 10px !important; }
 }
 @media (max-width: 480px) {
-  .est-web .est-kp img { float: none !important; display: block; width: 100% !important; max-height: 3in !important; margin: 0 0 10px 0 !important; }
+  .est-web .est-ph { float: none !important; display: block; width: 100% !important; margin: 0 0 10px 0 !important; }
+  .est-web .est-ph img { max-height: 3in !important; }
 }
 @media print {
   html, body { background: #fff !important; }
@@ -152,7 +160,8 @@ export const QUOTE_WEB_EMBED_CSS = `
   .est-web .est-meta, .est-web .est-sig { grid-template-columns: 1fr !important; gap: 10px !important; }
 }
 @media (max-width: 480px) {
-  .est-web .est-kp img { float: none !important; display: block; width: 100% !important; max-height: 3in !important; margin: 0 0 10px 0 !important; }
+  .est-web .est-ph { float: none !important; display: block; width: 100% !important; margin: 0 0 10px 0 !important; }
+  .est-web .est-ph img { max-height: 3in !important; }
 }
 @media print {
   .est-web { box-shadow: none !important; padding: 0 !important; max-width: none !important; }
@@ -192,25 +201,26 @@ type DocLine = {
 };
 
 /** #281 blocks — blank line = paragraph, "- " = bullet, single breaks kept. */
-function renderNarrativeBlocks(blocks: NarrativeBlock[]) {
-  return blocks.map((b, bi) =>
-    b.kind === "ul" ? (
-      <ul key={bi} style={{ margin: bi ? "6px 0 0" : 0, paddingLeft: 18, listStyleType: "disc" }}>
-        {b.items.map((it, ii) => (
-          <li key={ii}>{it}</li>
-        ))}
-      </ul>
-    ) : (
-      <p key={bi} style={{ margin: bi ? "6px 0 0" : 0 }}>
-        {b.lines.map((ln, li) => (
-          <Fragment key={li}>
-            {li > 0 && <br />}
-            {ln}
-          </Fragment>
-        ))}
-      </p>
-    )
+function renderNarrativeBlock(b: NarrativeBlock, bi: number) {
+  return b.kind === "ul" ? (
+    <ul key={bi} style={{ margin: bi ? "6px 0 0" : 0, paddingLeft: 18, listStyleType: "disc" }}>
+      {b.items.map((it, ii) => (
+        <li key={ii}>{it}</li>
+      ))}
+    </ul>
+  ) : (
+    <p key={bi} style={{ margin: bi ? "6px 0 0" : 0 }}>
+      {b.lines.map((ln, li) => (
+        <Fragment key={li}>
+          {li > 0 && <br />}
+          {ln}
+        </Fragment>
+      ))}
+    </p>
   );
+}
+function renderNarrativeBlocks(blocks: NarrativeBlock[]) {
+  return blocks.map(renderNarrativeBlock);
 }
 
 /** Estimator Phase 2a — a group's heading row: a light divider (not a band)
@@ -490,54 +500,84 @@ type DocSystem = ReturnType<typeof docSystem>;
  *  itemized lines, or (sectioned detail) a line-count row. Shared by the body
  *  and the Phase 2b Alternates block so the two can't drift. */
 /** The photo a key product prints (own photo, else its placeholder), or undefined — one rule for SystemBody and the
- *  document-order alternation (Jeff 2026-10-15 #20). */
-function keyProductPhoto(kp: DocSystem["keyProducts"][number], p: QuoteDocumentProps) {
+ *  document-order alternation (Jeff 2026-10-15 #20). `own` = the part's own photo / manufacturer image. */
+function keyProductPhotoOf(kp: DocSystem["keyProducts"][number], p: QuoteDocumentProps): { src: string; alt: string; own: boolean } | undefined {
   const own = kp.photo ? p.keyProductPhotos?.[kp.sku] : undefined;
-  return own ?? (kp.photo && kp.placeholder ? { src: PLACEHOLDER_SRC[kp.placeholder], alt: "" } : undefined);
+  if (own) return { ...own, own: true };
+  return kp.photo && kp.placeholder ? { src: PLACEHOLDER_SRC[kp.placeholder], alt: "", own: false } : undefined;
+}
+function keyProductPhoto(kp: DocSystem["keyProducts"][number], p: QuoteDocumentProps) {
+  return keyProductPhotoOf(kp, p);
+}
+
+/** Photo wrap — one printed photo: the figure floats, the img fills it, the model tag sits on the outer bottom corner. */
+function PhotoFigure({ src, alt, side, model, web }: { src: string; alt: string; side: "left" | "right"; model: string; web: boolean }) {
+  return (
+    <figure className="est-ph" style={photoFigureStyle(side)}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={alt} style={photoImgStyle(side)} />
+      {model ? (
+        <span className="est-ph-tag" style={photoTagStyle(side, web ? 10 : 9)}>
+          {model}
+        </span>
+      ) : null}
+    </figure>
+  );
 }
 
 function SystemBody({ ps, p, lineCols, freightRowLabel, alternate, photoSides }: { ps: DocSystem; p: QuoteDocumentProps; lineCols: string; freightRowLabel: string; alternate?: boolean; photoSides?: ReadonlyMap<string, "right" | "left"> }) {
   const isItemized = p.detail === "itemized";
   const showLines = p.pdfQty || p.pdfNotes || p.pdfPrices;
-  return ps.presentation === "narrative" ? (
-    <div style={{ padding: "10px 13px 12px", fontSize: 12.5, color: "#3a3f4a", lineHeight: 1.55, borderBottom: "1px solid #f0f1f4" }}>
-      {/* #281: blank line = paragraph, "- " = bullet, single breaks kept.
-          #293: then each key product — heading, paragraph, photo floated right. */}
-      {(() => {
-        const blocks = narrativeBlocks(ps.narrative);
-        // Phase 2b: an empty alternate never claims to be "included in the total".
-        if (!blocks.length && !ps.keyProducts.length)
-          return alternate ? "Scope and pricing for this alternate are shown above." : "System scope and pricing are included in the total above.";
-        return (
-          <>
-            {renderNarrativeBlocks(blocks)}
-            {ps.keyProducts.map((kp, ki) => {
-              // Own photo (or its manufacturer's image) first; an allowance /
-              // custom line with neither prints its placeholder (a public
-              // /placeholders/ URL — same origin for print, share and portal).
-              const photo = keyProductPhoto(kp, p);
-              return (
-                <div key={"kp-" + kp.sku} className="est-kp" style={{ display: "flow-root", marginTop: blocks.length || ki ? 12 : 0 }}>
-                  {photo ? (
-                    <>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={photo.src}
-                        alt={photo.alt}
-                        style={keyProductPhotoStyle(photoSides?.get(ps.id + "|" + kp.sku) ?? "right")}
-                      />
-                    </>
-                  ) : null}
-                  <div style={{ fontWeight: 600, color: "#16181d", marginBottom: kp.blocks.length ? 3 : 0 }}>{kp.heading}</div>
-                  {renderNarrativeBlocks(kp.blocks)}
-                </div>
-              );
-            })}
-          </>
-        );
-      })()}
-    </div>
-  ) : isItemized && showLines ? (
+  if (ps.presentation === "narrative") {
+    const blocks = narrativeBlocks(ps.narrative);
+    // Photo wrap (2026-10-16 §1): the system's photo'd key products, in order, spread down its text.
+    const shown = ps.keyProducts.flatMap((kp) => {
+      const photo = keyProductPhotoOf(kp, p);
+      return photo ? [{ kp, photo }] : [];
+    });
+    return (
+      <div style={{ padding: "10px 13px 12px", fontSize: 12.5, color: "#3a3f4a", lineHeight: 1.55, borderBottom: "1px solid #f0f1f4", ...(shown.length ? { display: "flow-root" as const } : {}) }}>
+        {/* #281: blank line = paragraph, "- " = bullet, single breaks kept.
+            #293: then each key product — heading + paragraph. Photo wrap: photo k
+            floats before text unit k (spreadPhotoAnchors); the system body is the
+            only float container. */}
+        {(() => {
+          // Phase 2b: an empty alternate never claims to be "included in the total".
+          if (!blocks.length && !ps.keyProducts.length)
+            return alternate ? "Scope and pricing for this alternate are shown above." : "System scope and pricing are included in the total above.";
+          const units = [
+            ...blocks.map((b, bi) => renderNarrativeBlock(b, bi)),
+            ...ps.keyProducts.map((kp, ki) => (
+              <div key={"kp-" + kp.sku} className="est-kp" style={{ marginTop: blocks.length || ki ? 12 : 0 }}>
+                <div style={{ fontWeight: 600, color: "#16181d", marginBottom: kp.blocks.length ? 3 : 0 }}>{kp.heading}</div>
+                {renderNarrativeBlocks(kp.blocks)}
+              </div>
+            )),
+          ];
+          const anchors = spreadPhotoAnchors(units.length, shown.length);
+          const models = p.keyProductModels;
+          return units.map((u, ui) => (
+            <Fragment key={"u" + ui}>
+              {shown.map((s, k) =>
+                anchors[k] === ui ? (
+                  <PhotoFigure
+                    key={"ph-" + s.kp.sku}
+                    src={s.photo.src}
+                    alt={s.photo.alt}
+                    side={photoSides?.get(ps.id + "|" + s.kp.sku) ?? "right"}
+                    model={photoTagText({ ownPhoto: s.photo.own, partModel: models && Object.hasOwn(models, s.kp.sku) ? models[s.kp.sku] : null, ownModel: s.kp.ownModel })}
+                    web={p.layout === "web"}
+                  />
+                ) : null
+              )}
+              {u}
+            </Fragment>
+          ));
+        })()}
+      </div>
+    );
+  }
+  return isItemized && showLines ? (
     <ItemizedLines
       lines={ps.lines}
       hasFreight={ps.hasFreight}
@@ -850,6 +890,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                   taxRatePct: p.taxRatePct,
                   totalLabel: anyPorPrinted ? "Total (excludes items pending price)" : "Total",
                   photos: p.keyProductPhotos,
+                  models: p.keyProductModels,
                 }}
               />
             </div>

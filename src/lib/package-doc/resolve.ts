@@ -44,6 +44,8 @@ export type PackageDocCtx = {
   totalLabel?: string;
   /** sku → photo (data URI for print, a scoped photo route on the web). */
   photos?: Record<string, { src: string; alt: string }>;
+  /** Photo wrap (2026-10-16 §2) — sku → model-number tag (QuoteDocument's keyProductModels). */
+  models?: Record<string, string>;
 };
 
 export type RInline = { t: "text"; text: string; bold?: true; italic?: true } | { t: "br" } | { t: "chip"; text: string };
