@@ -49476,7 +49476,8 @@ import { RERENDER_MIN_MS as n293tFRerenderMinMs, stampRerenderDeadlineMs as n293
   ok(srp.includes("if (r && !r.pdfBlobPath) {") && srp.includes("revNo: p.revNum, issuedAt: p.revDateMs") && srp.includes("r.pdfSavedAt = file.savedAt"),
     "#293t final 1: the stamp is frozen once, in the same write as the revision's PDF copy");
   const gen = rd("src/lib/quote-pdf/generate.ts");
-  ok(gen.includes("const first = await printedStamp(quoteId, q);") && gen.includes("{ ok: true, blobPath: path, printed }") &&
+  // Photo wrap (spec 2026-10-16 §4): the settle also carries the file's notes.
+  ok(gen.includes("const first = await printedStamp(quoteId, q);") && gen.includes("{ ok: true, blobPath: path, printed, notes: pdfNotesOf(notes) }") &&
      gen.includes("{ savedAt: pdf.savedAt, printed: pdf.printed ?? null }"),
     "#293t final 1: the generator records what a quote file printed and the sent-revision copy carries it");
   // Fix round 2: the stamp re-render's budget gate.
@@ -49490,7 +49491,8 @@ import { RERENDER_MIN_MS as n293tFRerenderMinMs, stampRerenderDeadlineMs as n293
      PDF_COALESCE_MS222 + n293tFRerenderDeadline(PDF_COALESCE_MS222) + PDF_UPLOAD_ALLOWANCE_MS222 === n293tFBudgetMs,
     "#293t fix round 2b: the re-render's hard stop is 120 − 20 − elapsed (60 s in → 40 s), so render 2 can never eat the upload allowance");
   ok(gen.includes("isPendingFor(first.after.pdf, savedAt) && stampRerenderFits(elapsed)") && gen.includes("(stampRerenderDeadlineMs(elapsed))") &&
-     gen.includes("AbortSignal.timeout(ms)") && (gen.match(/await render\(/g) || []).length === 2,
+     // Photo wrap (spec 2026-10-16 §5): the third render is the datasheet links tail, under the appendix's own deadline signal.
+     gen.includes("AbortSignal.timeout(ms)") && (gen.match(/await render\(/g) || []).length === 3 && gen.includes('tail = await render(printUrl("tail"), { signal });'),
     "#293t fix round 2: the generator re-renders at most once, only for a still-pending save with budget left, under a deadline signal");
   const qdd = rd("src/lib/quote-pdf/quote-document-data.ts");
   ok(qdd.includes("const stamp = documentRevStamp(q);") && qdd.includes("revNum: stamp.revNum,") && qdd.includes("revDateMs: stamp.revDateMs,") &&

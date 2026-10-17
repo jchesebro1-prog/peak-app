@@ -2,8 +2,11 @@
    (docs/superpowers/specs/2026-10-16-estimate-photo-wrap-title-page-design.md) — harness checks.
    `photoWrapPureChecks` needs no database; `photoWrapDbChecks` needs the test DB (test:specs runs both).
    Run the pure half alone with `npx tsx scripts/test-photo-wrap.ts`. */
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from "pdf-lib";
+import sharp from "sharp";
 import type { Ok } from "./test-inbox-org";
 import { spreadPhotoAnchors, photoFigureStyle, photoImgStyle, photoTagStyle, PHOTO_TAG_BG, docPhotoFigureStyle, docPhotoImgStyle } from "../src/lib/estimate-output/photo-spread";
 import { cleanTag, photoTagText, keyProductModelsFor, PHOTO_TAG_MAX } from "../src/lib/estimate-output/photo-models";
@@ -23,6 +26,17 @@ import { serveEstimateDatasheet } from "../src/lib/estimate-output/datasheet-lin
 import { inlineDisposition } from "../src/lib/document-files";
 import { datasheetLinkRows } from "../src/lib/estimate-output/datasheet-links";
 import DatasheetLinksPage, { DATASHEET_LINKS_CSS } from "../src/components/estimate-output/datasheet-links-page";
+import { planDrawings, imagePagePlacement, pdfNotesOf, drawingSkipNote, drawingsBudget, APPENDIX_COPY, PDF_NOTES_MAX, ESTIMATE_PDF_TARGET_MAX_BYTES } from "../src/lib/quote-pdf/appendix-plan";
+import { mergeEstimateAppendices } from "../src/lib/quote-pdf/appendix-merge-server";
+import { appendixFits, generateQuotePdf } from "../src/lib/quote-pdf/generate";
+import { pdfView, settlePdf } from "../src/lib/quote-pdf/state";
+import { pdfBanner } from "../src/components/quote-pdf/pdf-banner";
+import { ESTIMATE_EMAIL_ATTACH_MAX } from "../src/lib/estimate-email/compose";
+import { pdfStorage } from "../src/lib/quote-pdf/storage";
+import { buildQuote, get as getQuote, updateQuotePdf } from "../src/lib/stores/quotes";
+import { quotePathSegment } from "../src/lib/estimate-output/package-files";
+import { loadDatasheetLinkRows } from "../src/lib/estimate-output/datasheet-links-server";
+import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
 
 export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
@@ -374,6 +388,130 @@ function datasheetLinksPageChecks(ok: Ok) {
     "ds page: the customer PDF ends with the links (main hides them; tail prints only them); the bidder PDF never has them");
 }
 
+export async function mkPdf(sizes: Array<[number, number]>, uri?: string): Promise<Buffer> {
+  const d = await PDFDocument.create();
+  for (const [w, h] of sizes) {
+    const pg = d.addPage([w, h]);
+    if (uri) {
+      const link = d.context.register(d.context.obj({ Type: "Annot", Subtype: "Link", Rect: [72, 700, 200, 720], Border: [0, 0, 0], A: { Type: "Action", S: "URI", URI: PDFString.of(uri) } }));
+      pg.node.set(PDFName.of("Annots"), d.context.obj([link]));
+    }
+  }
+  return Buffer.from(await d.save());
+}
+export function uriOf(page: import("pdf-lib").PDFPage): string | null {
+  const annots = page.node.lookupMaybe(PDFName.of("Annots"), PDFArray);
+  const a0 = annots?.lookupMaybe(0, PDFDict);
+  const act = a0?.lookupMaybe(PDFName.of("A"), PDFDict);
+  const u = act?.lookupMaybe(PDFName.of("URI"), PDFString);
+  return u ? u.decodeText() : null;
+}
+/** A one-page PDF carrying `px`² of incompressible noise (~3·px² bytes) — for the size guard. */
+async function noisePdf(px: number, seed: number): Promise<Buffer> {
+  const raw = Buffer.alloc(px * px * 3);
+  let x = seed * 2654435761 >>> 0;
+  for (let i = 0; i < raw.length; i++) { x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; raw[i] = x & 255; }
+  const png = await sharp(raw, { raw: { width: px, height: px, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer();
+  const d = await PDFDocument.create();
+  const img = await d.embedPng(png);
+  d.addPage([612, 792]).drawImage(img, { x: 36, y: 36, width: 540, height: 540 });
+  return Buffer.from(await d.save());
+}
+const pf = (id: string, name: string, size: number, contentType = "application/pdf") =>
+  ({ id, kind: "plan", name, blobPath: `estimate-files/Q-1/UP-0123456789abcdef/${name}`, contentType, size, source: "upload", addedAt: 1, addedBy: "Pat" }) as never;
+
+async function appendixPureChecks(ok: Ok) {
+  const MB = 1024 * 1024;
+  // Amendment A1 (Jeff, Oct 16): the finished PDF stays ≤ 14 MB so Send can still attach it (15 MB email limit).
+  ok(ESTIMATE_PDF_TARGET_MAX_BYTES === 14 * MB && ESTIMATE_PDF_TARGET_MAX_BYTES < ESTIMATE_EMAIL_ATTACH_MAX,
+    "drawings: the estimate PDF's ceiling is 14 MB — headroom under the 15 MB email attachment limit");
+  ok(drawingsBudget(3 * MB, 1 * MB) === 10 * MB && drawingsBudget(20 * MB, 0) === 0 && drawingsBudget(NaN, 0) === 0 && drawingsBudget(2 * MB, -5) === 12 * MB,
+    "drawings: the drawings budget is 14 MB less the estimate and links pages (never negative)");
+  const plan = planDrawings([pf("PF-000000000001", "a.pdf", 30 * MB), pf("PF-000000000002", "b.pdf", 6 * MB), pf("PF-000000000003", "c.pdf", 5 * MB), pf("PF-000000000004", "d.pdf", 4 * MB), pf("PF-000000000005", "e.pdf", 1 * MB), pf("PF-000000000006", "f.pdf", 0)],
+    { perFile: 25 * MB, total: 12 * MB });
+  ok(JSON.stringify(plan.map((e) => [e.file.name, e.skip])) === JSON.stringify([["a.pdf", "too-big"], ["b.pdf", null], ["c.pdf", null], ["d.pdf", "over-total"], ["e.pdf", null], ["f.pdf", "too-big"]]),
+    "drawings: list order, 25 MB per file, then whatever fits the budget — a drawing that doesn't fit is skipped, never the PDF");
+  ok(planDrawings([pf("PF-000000000001", "a.pdf", 13 * MB), pf("PF-000000000002", "b.pdf", 2 * MB)]).map((e) => e.skip).join() === ",over-total",
+    "drawings: with no budget given, the 14 MB ceiling is the most drawings can take");
+  const land = imagePagePlacement(2000, 1000)!, port = imagePagePlacement(100, 300)!;
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+  ok(land.pageW === 792 && land.pageH === 612 && near(land.w, 720) && near(land.h, 360) && near(land.x, 36) && near(land.y, 126), "drawings: a wide image gets a landscape letter page, fitted inside 0.5in margins, centred");
+  ok(port.pageW === 612 && port.pageH === 792 && Math.abs(port.h - 720) < 1e-9 && Math.abs(port.x - (612 - 240) / 2) < 1e-9 && imagePagePlacement(0, 10) === null && imagePagePlacement(NaN, 1) === null,
+    "drawings: a tall image gets a portrait page; a sizeless image is refused");
+  const many = pdfNotesOf(Array.from({ length: 9 }, (_, i) => "note " + i).concat(["note 0", " "]));
+  ok(many.length === PDF_NOTES_MAX && many[PDF_NOTES_MAX - 1] === APPENDIX_COPY.more(4) && drawingSkipNote({ name: "Plan A.pdf", reason: "encrypted" }).includes("Plan A.pdf"),
+    "drawings: PDF notes are de-duplicated and capped with '…and N more'");
+  ok(drawingSkipNote({ name: "Set.pdf", reason: "over-total" }) === "Drawing “Set.pdf” was left out to keep the PDF under 15 MB for email; it’s on the client package page." &&
+     drawingSkipNote({ name: "Big.pdf", reason: "too-big" }) === "Drawing “Big.pdf” was left out of the PDF: it is over 25 MB.",
+    "drawings: an over-budget drawing's note says why (email size) and where it still is (the client package page)");
+  const srcs = ["src/lib/quote-pdf/appendix-plan.ts", "src/lib/quote-pdf/appendix-merge-server.ts", "src/lib/quote-pdf/generate.ts"].map(rd).join("\n");
+  const oldCap = 8 * 10; // the plan's original drawings total, replaced by A1 (spelled out here so the literal appears nowhere)
+  ok(!srcs.includes(`${oldCap} MB`) && !srcs.includes(`${oldCap} * 1024`) && !srcs.includes("DRAWINGS_TOTAL_MAX_BYTES"), "drawings: the plan's old drawings total cap is gone everywhere (A1)");
+  ok(appendixFits(85_000) && !appendixFits(85_001) && !appendixFits(-1) && !appendixFits(NaN), "drawings: the appendix starts only while 15 s + the upload allowance fit in the 120 s budget");
+
+  // pdf-lib merge: main, a 2-page 11×17 PDF, a PNG, a WebP, junk; then the links page with its URI annotation.
+  const main = await mkPdf([[612, 792], [612, 792]]);
+  const tabloid = await mkPdf([[792, 1224], [792, 1224]]);
+  const png = await sharp({ create: { width: 400, height: 200, channels: 3, background: "#ccc" } }).png().toBuffer();
+  const webp = await sharp({ create: { width: 100, height: 300, channels: 3, background: "#999" } }).webp().toBuffer();
+  const jpg = await sharp({ create: { width: 300, height: 200, channels: 3, background: "#777" } }).jpeg().toBuffer();
+  const URI = "https://app.test/d/ds/Q-1/PD-spot0001/AAAAAAAAAAAAAAAAAAAAAA";
+  const tail = await mkPdf([[612, 792]], URI);
+  const m = await mergeEstimateAppendices({ main, tail, drawings: [
+    { name: "set.pdf", contentType: "application/pdf", bytes: tabloid },
+    { name: "plan.png", contentType: "image/png", bytes: png },
+    { name: "riser.webp", contentType: "image/webp", bytes: webp },
+    { name: "photo.jpg", contentType: "image/jpeg", bytes: jpg },
+    { name: "junk.pdf", contentType: "application/pdf", bytes: new Uint8Array([1, 2, 3]) },
+    { name: "huge.pdf", contentType: "application/pdf", bytes: null, skip: "too-big" },
+  ] });
+  const out = await PDFDocument.load(m.bytes);
+  const sizes = out.getPages().map((p) => { const s = p.getSize(); return `${Math.round(s.width)}x${Math.round(s.height)}`; });
+  ok(m.merged && m.tailAdded && JSON.stringify(sizes) === JSON.stringify(["612x792", "612x792", "792x1224", "792x1224", "792x612", "612x792", "792x612", "612x792"]),
+    "drawings: estimate pages, then each drawing at its own size (11×17 stays 11×17; images on a letter page of their orientation), then the links page");
+  ok(uriOf(out.getPage(7)) === URI, "drawings: the links page's URI annotation survives the merge");
+  ok(JSON.stringify(m.skipped) === JSON.stringify([{ name: "junk.pdf", reason: "unreadable" }, { name: "huge.pdf", reason: "too-big" }]), "drawings: an unreadable or over-cap drawing is skipped and reported");
+  const enc = await PDFDocument.load(tabloid);
+  (enc.context.trailerInfo as { Encrypt?: unknown }).Encrypt = enc.context.obj({ Filter: "Standard" });
+  const encrypted = await mergeEstimateAppendices({ main, tail: null, drawings: [{ name: "locked.pdf", contentType: "application/pdf", bytes: await enc.save() }] });
+  ok(encrypted.merged && (await PDFDocument.load(encrypted.bytes)).getPageCount() === 2 && encrypted.skipped[0]?.reason === "encrypted", "drawings: a password-protected PDF is skipped as encrypted (the datasheet book's rule)");
+  const late = await mergeEstimateAppendices({ main, tail: null, drawings: [{ name: "set.pdf", contentType: "application/pdf", bytes: tabloid }], deadline: 10, now: () => 11 });
+  ok((await PDFDocument.load(late.bytes)).getPageCount() === 2 && late.skipped[0]?.reason === "late", "drawings: past the deadline a drawing is skipped as late");
+  const broken = await mergeEstimateAppendices({ main: new Uint8Array([9, 9]), tail, drawings: [{ name: "set.pdf", contentType: "application/pdf", bytes: tabloid }] });
+  ok(!broken.merged && Buffer.compare(broken.bytes, Buffer.from([9, 9])) === 0 && broken.skipped[0]?.reason === "unreadable", "drawings: an unreadable estimate keeps Chrome's bytes untouched (never fails)");
+
+  // A1 final guard: a merged file still over the ceiling drops drawings from the END and re-merges (≤ 3 tries), then main + links only.
+  const noise = await Promise.all([1, 2, 3, 4].map((n) => noisePdf(160, n)));
+  const one = noise[0].length;
+  const base = await mergeEstimateAppendices({ main, tail, drawings: [] });
+  const cap = base.bytes.length + Math.round(one * 2.5);
+  const guard = await mergeEstimateAppendices({ main, tail, maxBytes: cap, drawings: noise.map((b, n) => ({ name: `n${n + 1}.pdf`, contentType: "application/pdf", bytes: b })) });
+  const gOut = await PDFDocument.load(guard.bytes);
+  ok(guard.merged && guard.tailAdded && guard.bytes.length <= cap && gOut.getPageCount() === 2 + 2 + 1 && uriOf(gOut.getPage(4)) === URI &&
+     JSON.stringify(guard.skipped) === JSON.stringify([{ name: "n3.pdf", reason: "over-total" }, { name: "n4.pdf", reason: "over-total" }]),
+    "drawings: a merged PDF over the ceiling drops drawings from the end (as over-total) until it fits, keeping the first ones and the links page");
+  const floor = await mergeEstimateAppendices({ main, tail, maxBytes: 1, drawings: noise.map((b, n) => ({ name: `n${n + 1}.pdf`, contentType: "application/pdf", bytes: b })) });
+  const fOut = await PDFDocument.load(floor.bytes);
+  ok(floor.merged && floor.tailAdded && fOut.getPageCount() === 3 && uriOf(fOut.getPage(2)) === URI && floor.skipped.length === 4 && floor.skipped.every((s) => s.reason === "over-total"),
+    "drawings: when nothing fits, the PDF is the estimate + links only — every drawing left out with a note, never a failure");
+  ok(rd("src/lib/quote-pdf/appendix-merge-server.ts").includes("appendPdfPages(out, d.bytes)") && rd("src/lib/part-docs/datasheet-book-server.ts").includes("appendPdfPages(out, d.bytes)"),
+    "drawings: one PDF load / copy / page-box rule shared with the datasheet book");
+
+  // The PDF state carries the notes; the banner shows them on a ready file.
+  const ready = settlePdf({ status: "pending", at: 1, savedAt: 5 }, 5, { ok: true, blobPath: "p.pdf", notes: ["Drawing “x” was left out."] }, 9)!;
+  const plain = settlePdf({ status: "pending", at: 1, savedAt: 5 }, 5, { ok: true, blobPath: "p.pdf" }, 9)!;
+  ok(JSON.stringify(ready.notes) === JSON.stringify(["Drawing “x” was left out."]) && !("notes" in plain), "drawings: a ready PDF records its notes (none → no key)");
+  const view = pdfView(ready, 10)!;
+  ok(JSON.stringify(view.notes) === JSON.stringify(ready.notes) && !("notes" in pdfView(plain, 10)!) && pdfBanner({ quoteId: "Q-1", pdf: view, dirty: false, timedOut: false, retrying: false }).some((n) => n.tone === "warn" && n.text === "Drawing “x” was left out."),
+    "drawings: Customer review → Document shows each note as a warning");
+  ok(!pdfBanner({ quoteId: "Q-1", pdf: view, dirty: true, timedOut: false, retrying: false }).some((n) => n.text === "Drawing “x” was left out."), "drawings: an unsaved estimate doesn't show the last file's notes");
+
+  // Carry-overs from Task 7: an empty tail is never printed (no blank page); an unresolvable print origin is logged.
+  const pr = rd("src/app/print/quote/[id]/page.tsx");
+  ok(pr.includes('if (part === "tail" && !links.length) notFound();') && pr.includes('console.warn("[quote-pdf] no print origin — the PDF has no datasheet links", id, where.error)'),
+    "drawings: a tail with no link rows is a 404 (never a blank page); a missing print origin says why in the log");
+}
+
 export async function photoWrapPureChecks(ok: Ok) {
   spreadChecks(ok);
   modelChecks(ok);
@@ -383,10 +521,143 @@ export async function photoWrapPureChecks(ok: Ok) {
   titlePageChecks(ok);
   await datasheetLinkChecks(ok);
   datasheetLinksPageChecks(ok);
+  await appendixPureChecks(ok);
 }
 
-export async function photoWrapDbChecks(_ok: Ok) {
-  // Tasks 8 adds the generator checks here.
+const FIX = "photo-wrap";
+
+/* ---- Spec §4–5: the generator end to end — drawings merged after the estimate, the links page last ---- */
+async function appendixDbChecks(ok: Ok) {
+  const keys = ["BLOB_READ_WRITE_TOKEN", "VERCEL", "QUOTE_PDF_DIR"] as const;
+  const prev = keys.map((k) => [k, process.env[k]] as const);
+  delete process.env.BLOB_READ_WRITE_TOKEN;
+  delete process.env.VERCEL;
+  const root = mkdtempSync(join(tmpdir(), "quote-pdfs-pw-"));
+  process.env.QUOTE_PDF_DIR = root;
+  try {
+    const qid = fixtureId(FIX, "drawings");
+    const seg = quotePathSegment(qid);
+    const file = (id: string, name: string, contentType: string, size: number) =>
+      ({ id, kind: "plan", name, blobPath: `estimate-files/${seg}/UP-0123456789abcdef/${name}`, contentType, size, source: "upload", addedAt: 1, addedBy: "Pat" });
+    const sec = { id: "sysP", name: "PW", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "PW-1", desc: "Fixture", qty: 1, unit: "ea", cost: 10, price: 20 }] };
+    const quote = { ...buildQuote(qid, { name: "PW drawings", customer: "PW", value: 20, spec: { sections: [sec], mobs: [] } } as never, "system", null, Date.now()),
+      packageFiles: [file("PF-0000000000a1", "set.pdf", "application/pdf", 2000), file("PF-0000000000a2", "plan.png", "image/png", 2000)] };
+    await createFixture("quotes", quote as never);
+    const tabloid = await mkPdf([[792, 1224]]);
+    const png = await sharp({ create: { width: 300, height: 200, channels: 3, background: "#ddd" } }).png().toBuffer();
+    const urls: string[] = [];
+    const render = async (url: string) => { urls.push(url); return url.includes("&part=tail") ? mkPdf([[612, 792]], "https://print.test/d/ds/x/PD-spot0001/AAAAAAAAAAAAAAAAAAAAAA") : mkPdf([[612, 792], [612, 792]]); };
+    const readDrawing = async (f: { name: string }) => (f.name === "set.pdf" ? tabloid : png);
+    const run = async (extra: Record<string, unknown>) => {
+      const s = Date.now();
+      await updateQuotePdf(qid, () => ({ status: "pending", at: s, savedAt: s }));
+      urls.length = 0;
+      await generateQuotePdf({ quoteId: qid, savedAt: s, origin: "http://print.test", secret: "pw-secret", render, readDrawing, ...extra } as never);
+      const q = await getQuote(qid);
+      const store = pdfStorage();
+      const bytes = q?.pdf?.blobPath && !("unavailable" in store) ? await store.read(q.pdf.blobPath) : null;
+      return { q, doc: bytes ? await PDFDocument.load(bytes) : null };
+    };
+
+    // The quote's own Plans & risers (no datasheets in the test catalog → no links render).
+    const a = await run({});
+    ok(urls.length === 1 && urls[0].includes("&part=main") && a.q?.pdf?.status === "ready" && a.doc?.getPageCount() === 4 &&
+       JSON.stringify(a.doc!.getPages().map((p) => Math.round(p.getSize().height))) === "[792,792,1224,612]" && !a.q?.pdf?.notes,
+      "generate: a quote with drawings prints the estimate (part=main), then its 11×17 set and its PNG on a landscape page");
+
+    // With a links page: rendered as the tail, after the drawings; a broken drawing becomes a note.
+    const b = await run({ appendix: async () => ({ drawings: [...quote.packageFiles, file("PF-0000000000a3", "bad.pdf", "application/pdf", 10)], hasLinks: true }),
+      readDrawing: async (f: { name: string }) => (f.name === "set.pdf" ? tabloid : f.name === "plan.png" ? png : new Uint8Array([1])) });
+    ok(urls.length === 2 && urls[1].includes("&part=tail") && b.doc?.getPageCount() === 5 && uriOf(b.doc!.getPage(4)) !== null &&
+       (b.q?.pdf?.notes || []).some((n) => n.includes("bad.pdf")),
+      "generate: the datasheet links come last (after the drawings) and a drawing that couldn't be read is a note on the PDF");
+
+    // A1: drawings take only what's left of 14 MB after the estimate and links pages (a 14 MB drawing never fits beside them).
+    const big = await run({ appendix: async () => ({ drawings: [file("PF-0000000000b1", "big.pdf", "application/pdf", 14 * 1024 * 1024), ...quote.packageFiles], hasLinks: false }),
+      readDrawing: async (f: { name: string }) => { if (f.name === "big.pdf") throw new Error("read an over-budget drawing"); return f.name === "set.pdf" ? tabloid : png; } });
+    ok(big.q?.pdf?.status === "ready" && big.doc?.getPageCount() === 4 && (big.q?.pdf?.notes || []).length === 1 &&
+       (big.q?.pdf?.notes || [])[0] === "Drawing “big.pdf” was left out to keep the PDF under 15 MB for email; it’s on the client package page.",
+      "generate: a drawing that would push the PDF past 14 MB is never read — it is left out with a note, the others still print");
+
+    // The links render fails: the drawings still print and the PDF says the links page is missing.
+    const failTail = async (url: string) => { urls.push(url); if (url.includes("&part=tail")) throw new Error("The print page answered 404."); return mkPdf([[612, 792], [612, 792]]); };
+    const c0 = await run({ render: failTail, appendix: async () => ({ drawings: quote.packageFiles, hasLinks: true }) });
+    ok(c0.q?.pdf?.status === "ready" && c0.doc?.getPageCount() === 4 && (c0.q?.pdf?.notes || []).includes(APPENDIX_COPY.linksMissing), "generate: a links render that fails leaves a note, never a blank page or a failed PDF");
+
+    // Out of time: estimate only + a note; never a failure.
+    let t = 0;
+    const c = await run({ now: () => (t += 50_000) });
+    ok(c.q?.pdf?.status === "ready" && c.doc?.getPageCount() === 2 && (c.q?.pdf?.notes || []).includes(APPENDIX_COPY.late), "generate: no time left → the estimate alone, with a note");
+
+    // No drawings → exactly today's single render (no part, no pdf-lib).
+    const d = await run({ appendix: async () => ({ drawings: [], hasLinks: false }) });
+    ok(urls.length === 1 && !urls[0].includes("part=") && d.doc?.getPageCount() === 2 && !d.q?.pdf?.notes, "generate: no drawings → one render, as before");
+
+    // The sources fail to load → the PDF prints as before (never fails).
+    const e = await run({ appendix: async () => { throw new Error("db down"); } });
+    ok(urls.length === 1 && !urls[0].includes("part=") && e.q?.pdf?.status === "ready" && e.doc?.getPageCount() === 2, "generate: drawings that can't be loaded never fail the PDF");
+
+    // Drawings off in the Client package → no drawings, one render.
+    await createFixture("quotes", { ...quote, packageSelection: { drawings: false } } as never);
+    const f = await run({});
+    ok(urls.length === 1 && !urls[0].includes("part=") && f.doc?.getPageCount() === 2, "generate: Client package → Drawings off → the PDF has no drawings");
+  } finally {
+    await dropFixtures(FIX);
+    for (const [k, v] of prev) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+/* ---- Spec §5: /d/ds/ and the links page agree on the REAL lookup (packageDocForSpec over the live quote) ---- */
+async function datasheetRouteDbChecks(ok: Ok) {
+  const C = await import("../src/lib/stores/catalog");
+  const D = await import("../src/lib/stores/part-documents");
+  const Q = await import("../src/lib/stores/quotes");
+  try {
+    const [LISTED, SPEC, LEFT, URLONLY] = ["listed", "spec", "left", "url"].map((x) => fixtureId(FIX, "ds-" + x));
+    for (const sku of [LISTED, SPEC, LEFT, URLONLY]) {
+      await C.upsert({ sku, desc: "Part " + sku, mfr: "PW", category: "Other", unit: "ea", list: 10, cost: 5 } as never);
+      registerFixture("catalog_parts", sku);
+    }
+    const mk = async (kind: "datasheet" | "specsheet", fileName: string, blobKey: string | null, sku: string) => {
+      const doc = await D.createDocument({ kind, fileName, contentType: "application/pdf", size: 1000, blobKey, sourceUrl: blobKey ? null : "https://mfr.test/" + fileName, source: blobKey ? "upload" : "fetch", by: "Test" });
+      if (!doc) throw new Error("photo-wrap ds: fixture document failed");
+      registerFixture("part_documents", doc.id);
+      await D.attachDocument(doc.id, [sku], "Test");
+      registerFixture("part_document_links", D.documentLinkId(sku, doc.id));
+      return doc;
+    };
+    const listed = await mk("datasheet", "pw-listed.pdf", "part-docs/PD-fixture-pw/pw-listed.pdf", LISTED);
+    const spec = await mk("specsheet", "pw-spec.pdf", "part-docs/PD-fixture-pw/pw-spec.pdf", SPEC);
+    const left = await mk("datasheet", "pw-left.pdf", "part-docs/PD-fixture-pw/pw-left.pdf", LEFT);
+    const urlOnly = await mk("datasheet", "pw-url.pdf", null, URLONLY);
+    const QID = fixtureId(FIX, "ds-quote");
+    const line = (id: number, sku: string) => ({ id, sku, desc: sku, qty: 1, unit: "ea", cost: 1, price: 2 });
+    await Q.create({ id: QID, name: "PW ds links", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator",
+      spec: { sections: [{ id: "s1", name: "Lighting", kind: "materials", mfr: "", freightPct: 0, items: [line(1, LISTED), line(2, SPEC), line(3, LEFT), line(4, URLONLY)] }], mobs: [] } } as never);
+    registerFixture("quotes", QID);
+    if (!(await Q.setPackageSelection(QID, { excludedDatasheets: [LEFT] })).ok) throw new Error("photo-wrap ds: selection not set");
+    const S = "pw-ds-secret";
+    const req = new Request("http://app.test/d/ds/x");
+    const served: string[] = [];
+    // Only the rate limit, the secret and the Blob read are stubbed — the quote read and the datasheet lookup are the real ones.
+    const deps = { secret: S, allow: () => true, stream: async (k: string) => { served.push(k); return new Blob(["%PDF-1.4 " + k]).stream(); } };
+    const status = async (docId: string) => (await serveEstimateDatasheet(req, { quoteId: QID, docId, sig: datasheetLinkSig(S, QID, docId) }, deps)).status;
+    ok((await status(listed.id)) === 200 && served.join() === "part-docs/PD-fixture-pw/pw-listed.pdf", "ds link (DB): a listed datasheet with a stored file is served");
+    ok((await status(spec.id)) === 404 && (await status(left.id)) === 404 && (await status(urlOnly.id)) === 404 && served.length === 1,
+      "ds link (DB): a spec sheet, a left-out datasheet and a URL-only datasheet are the same 404 (nothing read)");
+    const q = (await Q.get(QID))!;
+    const rows = await loadDatasheetLinkRows(q, "https://app.test", S);
+    ok(rows.length === 1 && rows[0].href === "https://app.test" + datasheetLinkPath(S, QID, listed.id),
+      "ds page (DB): the links page lists exactly the datasheet the route serves");
+  } finally {
+    await dropFixtures(FIX);
+  }
+}
+
+export async function photoWrapDbChecks(ok: Ok) {
+  await appendixDbChecks(ok);
+  await datasheetRouteDbChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-photo-wrap.ts")) {

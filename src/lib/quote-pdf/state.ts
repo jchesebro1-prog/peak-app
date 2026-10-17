@@ -36,6 +36,8 @@ export type QuotePdfState = {
    * online pages print exactly what the customer's PDF says.
    */
   printed?: DocumentRevStamp;
+  /** Spec 2026-10-16 §4 — what this READY file left out (a skipped drawing, a missing links page, too large to email). Absent = nothing. */
+  notes?: string[];
 };
 
 /**
@@ -106,9 +108,11 @@ export type QuotePdfView = {
   hasFile: boolean;
   /** A stale mark (QuotePdfState.stale): reported `failed` with PDF_OUT_OF_DATE. */
   outOfDate?: boolean;
+  /** The ready file's notes (Customer review → Document shows them as warnings). */
+  notes?: string[];
 };
 
-export type PdfOutcome = { ok: true; blobPath: string; printed?: DocumentRevStamp | null } | { ok: false; error: string };
+export type PdfOutcome = { ok: true; blobPath: string; printed?: DocumentRevStamp | null; notes?: string[] | null } | { ok: false; error: string };
 
 /** A render still "pending" this long after it started died with its function. */
 export const PDF_PENDING_STALE_MS = 150_000;
@@ -167,7 +171,15 @@ export function settlePdf(
   now: number
 ): QuotePdfState | undefined {
   if (!cur || cur.savedAt !== savedAt) return undefined;
-  if (outcome.ok) return { status: "ready", at: now, savedAt, blobPath: outcome.blobPath, ...(outcome.printed ? { printed: outcome.printed } : {}) };
+  if (outcome.ok)
+    return {
+      status: "ready",
+      at: now,
+      savedAt,
+      blobPath: outcome.blobPath,
+      ...(outcome.printed ? { printed: outcome.printed } : {}),
+      ...(outcome.notes && outcome.notes.length ? { notes: outcome.notes.slice(0, 6) } : {}),
+    };
   return failedPdf(cur, savedAt, outcome.error, now);
 }
 
@@ -183,6 +195,7 @@ export function pdfView(pdf: QuotePdfState | null | undefined, now: number): Quo
     savedAt: pdf.savedAt,
     error: stale ? PDF_STALE_ERROR : pdf.error ?? null,
     hasFile: !!pdf.blobPath,
+    ...(pdf.status === "ready" && Array.isArray(pdf.notes) && pdf.notes.length ? { notes: pdf.notes } : {}),
   };
 }
 

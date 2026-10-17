@@ -74,6 +74,7 @@ export default async function PrintQuotePage({
   const h = await headers();
   const where = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
   const origin = "origin" in where ? where.origin : "";
+  if ("error" in where) console.warn("[quote-pdf] no print origin — the PDF has no datasheet links", id, where.error);
   const [addressee, cust, settings, perks, cutSheets, links] = await Promise.all([
     // Strict: an explicit bidder that is no longer a live bidder on this quote (deleted since signing) is a 404, never the awarded default.
     bidder ? documentAddressee(src, bidder, { strict: true }) : documentAddressee(q),
@@ -87,6 +88,8 @@ export default async function PrintQuotePage({
     !bidder && part !== "main" ? loadDatasheetLinkRows(q, origin) : [],
   ]);
   if (bidder && !addressee) notFound();
+  // An empty links part would print a blank page — refuse it, so the generator's tail render fails and says the links are missing.
+  if (part === "tail" && !links.length) notFound();
   const doc = quoteDocumentDataFor(src, cust, settings, addressee);
   // #293: key-product photos inlined as data URIs (this route has no session).
   // Never throws — a photo that can't be read just isn't printed.

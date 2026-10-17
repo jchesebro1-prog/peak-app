@@ -35,6 +35,8 @@ export function pdfBanner(s: {
   else if (s.pdf?.status === "failed")
     notes.push({ tone: s.pdf.outOfDate ? "warn" : "error", text: s.pdf.error || "The PDF couldn’t be made.", action: "Retry" });
   else if (!s.pdf && !s.dirty) notes.push({ tone: "warn", text: "No PDF yet for this quote.", action: "Create PDF" });
+  // Spec 2026-10-16 §4: what the ready file left out (a drawing, the links page), and an over-email-size PDF.
+  if (!s.dirty && s.pdf?.status === "ready") for (const text of s.pdf.notes ?? []) notes.push({ tone: "warn", text });
   return notes;
 }
 

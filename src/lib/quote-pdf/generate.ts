@@ -1,4 +1,10 @@
-import { get as getQuote, setRevisionPdfPath, updateQuotePdf } from "@/lib/stores/quotes";
+import { get as getQuote, setRevisionPdfPath, updateQuotePdf, type Quote } from "@/lib/stores/quotes";
+import { cleanPackageFiles, MAX_PACKAGE_FILE_BYTES, shownPackageFiles, type PackageFile } from "@/lib/estimate-output/package-files";
+import { loadDatasheetLinkRows } from "@/lib/estimate-output/datasheet-links-server";
+import { readBlobCapped } from "@/lib/narrative/photos";
+import { ESTIMATE_EMAIL_ATTACH_MAX } from "@/lib/estimate-email/compose";
+import { APPENDIX_COPY, drawingSkipNote, drawingsBudget, pdfNotesOf, planDrawings, sizeMb } from "./appendix-plan";
+import { mergeEstimateAppendices, type DrawingInput } from "./appendix-merge-server";
 import { isAppOrigin, originFrom } from "./origin";
 import { renderPrintRouteToPdf } from "./render";
 import {
@@ -64,6 +70,10 @@ export type GenerateInput = {
   now?: () => number;
   /** Spec-harness seam for the re-render's hard stop; defaults to AbortSignal.timeout. */
   deadlineSignal?: (ms: number) => AbortSignal;
+  /** Spec 2026-10-16 §4–5 seam — the shown drawings and whether a datasheet links page prints (default loadAppendixSources). */
+  appendix?: (q: Quote, origin: string) => Promise<AppendixSources>;
+  /** Spec-harness seam — one drawing's bytes (default: its private Blob, capped at 25 MB). */
+  readDrawing?: (file: PackageFile, signal: AbortSignal) => Promise<Uint8Array | null>;
 };
 
 /**
@@ -111,6 +121,29 @@ export function stampRerenderFits(elapsedMs: number): boolean {
 export function stampRerenderDeadlineMs(elapsedMs: number): number {
   return Math.max(1, PDF_FUNCTION_BUDGET_MS - PDF_UPLOAD_ALLOWANCE_MS - elapsedMs);
 }
+
+/**
+ * Spec 2026-10-16 §4–5 — the least time worth starting the drawings appendix (the links render, the drawing
+ * reads and the merge). Like the stamp re-render it is opportunistic: it starts only while elapsed + this +
+ * the upload allowance fit the 120 s budget (elapsed ≤ 85 s) and is hard-stopped at stampRerenderDeadlineMs.
+ */
+export const APPENDIX_MIN_MS = 15_000;
+
+export function appendixFits(elapsedMs: number): boolean {
+  return Number.isFinite(elapsedMs) && elapsedMs >= 0 && elapsedMs + APPENDIX_MIN_MS + PDF_UPLOAD_ALLOWANCE_MS <= PDF_FUNCTION_BUDGET_MS;
+}
+
+export type AppendixSources = { drawings: PackageFile[]; hasLinks: boolean };
+
+/** The drawings the client is shown (Client package → Drawings off = none) and — only when there are drawings to
+ *  put before them — whether the links page has rows. With no drawings the links print in the one render. */
+export async function loadAppendixSources(q: Quote, origin: string): Promise<AppendixSources> {
+  const drawings = shownPackageFiles(cleanPackageFiles(q.packageFiles), q.packageSelection);
+  if (!drawings.length) return { drawings, hasLinks: false };
+  return { drawings, hasLinks: (await loadDatasheetLinkRows(q, origin)).length > 0 };
+}
+
+const readDrawingFromBlob = (file: PackageFile, signal: AbortSignal) => readBlobCapped(file.blobPath, MAX_PACKAGE_FILE_BYTES, signal);
 
 const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -186,10 +219,23 @@ export async function generateQuotePdf(input: GenerateInput): Promise<QuotePdfSt
     const store = pdfStorage();
     if ("unavailable" in store) return await settleFailed(store.unavailable);
     const render = input.render ?? renderPrintRouteToPdf;
-    const printUrl = () => `${input.origin}${printPathFor(kind, quoteId)}?t=${encodeURIComponent(signPrintToken(secret, kind, quoteId, Date.now()))}`;
+    // Spec 2026-10-16 §4–5: the customer PDF's drawings (+ links after them). Never fails the PDF.
+    let appendix: AppendixSources = { drawings: [], hasLinks: false };
+    if (kind === "quote") {
+      try {
+        appendix = await (input.appendix ?? loadAppendixSources)(q, input.origin);
+      } catch (e) {
+        console.warn("[quote-pdf] drawings unavailable — printing without them", quoteId, reason(e));
+      }
+    }
+    // No drawings → exactly the one render as before (no part, no pdf-lib); the links print at its end.
+    const split = appendix.drawings.length > 0;
+    const printUrl = (part?: "main" | "tail") =>
+      `${input.origin}${printPathFor(kind, quoteId)}?t=${encodeURIComponent(signPrintToken(secret, kind, quoteId, Date.now()))}${part ? "&part=" + part : ""}`;
+    const mainPart = split ? ("main" as const) : undefined;
     let bytes: Buffer;
     try {
-      bytes = await render(printUrl());
+      bytes = await render(printUrl(mainPart));
     } catch (e) {
       return await settleFailed(reason(e));
     }
@@ -211,7 +257,7 @@ export async function generateQuotePdf(input: GenerateInput): Promise<QuotePdfSt
       if (!printed && first.after && isPendingFor(first.after.pdf, savedAt) && stampRerenderFits(elapsed)) {
         const signal = (input.deadlineSignal ?? ((ms: number) => AbortSignal.timeout(ms)))(stampRerenderDeadlineMs(elapsed));
         try {
-          const again = await render(printUrl(), { signal });
+          const again = await render(printUrl(mainPart), { signal });
           const second = await printedStamp(quoteId, first.after);
           bytes = again;
           printed = second.stamp;
@@ -220,10 +266,51 @@ export async function generateQuotePdf(input: GenerateInput): Promise<QuotePdfSt
         }
       }
     }
+    const notes: string[] = [];
+    if (split) {
+      // Opportunistic, like the stamp re-render: only while APPENDIX_MIN_MS fits, hard-stopped before the upload allowance.
+      const elapsed = clock() - startedAt;
+      if (!appendixFits(elapsed)) notes.push(APPENDIX_COPY.late);
+      else {
+        const ms = stampRerenderDeadlineMs(elapsed);
+        const signal = (input.deadlineSignal ?? ((m: number) => AbortSignal.timeout(m)))(ms);
+        const deadline = clock() + ms;
+        // The links page renders only when it has rows (an empty tail would be a blank page; the print route 404s one).
+        let tail: Buffer | null = null;
+        if (appendix.hasLinks) {
+          try {
+            tail = await render(printUrl("tail"), { signal });
+          } catch (e) {
+            console.warn("[quote-pdf] datasheet links render failed", quoteId, reason(e));
+          }
+        }
+        // A1: drawings take what is left of the 14 MB ceiling after the estimate and links pages, in list order.
+        const read = input.readDrawing ?? readDrawingFromBlob;
+        const caps = { perFile: MAX_PACKAGE_FILE_BYTES, total: drawingsBudget(bytes.length, tail?.length ?? 0) };
+        const drawings: DrawingInput[] = [];
+        for (const { file, skip } of planDrawings(appendix.drawings, caps)) {
+          if (skip) drawings.push({ name: file.name, contentType: file.contentType, bytes: null, skip });
+          else if (signal.aborted) drawings.push({ name: file.name, contentType: file.contentType, bytes: null, skip: "late" });
+          else {
+            try {
+              drawings.push({ name: file.name, contentType: file.contentType, bytes: await read(file, signal) });
+            } catch {
+              drawings.push({ name: file.name, contentType: file.contentType, bytes: null, skip: signal.aborted ? "late" : "unreadable" });
+            }
+          }
+        }
+        const merged = await mergeEstimateAppendices({ main: bytes, drawings, tail, deadline, now: clock });
+        bytes = merged.bytes;
+        notes.push(...merged.skipped.map(drawingSkipNote));
+        if (appendix.hasLinks && !merged.tailAdded) notes.push(APPENDIX_COPY.linksMissing);
+      }
+    }
+    // Defensive (A1 keeps drawings under the limit): an estimate too large to attach on its own says so.
+    if (kind === "quote" && bytes.length > ESTIMATE_EMAIL_ATTACH_MAX) notes.push(APPENDIX_COPY.tooLargeToEmail(sizeMb(bytes.length)));
     const path = await store.put(pdfStoragePath(quoteId, String(savedAt)), bytes);
     let res: Awaited<ReturnType<typeof updateQuotePdf>>;
     try {
-      res = await updatePdf(quoteId, (cur) => settleIfPending(cur, savedAt, { ok: true, blobPath: path, printed }));
+      res = await updatePdf(quoteId, (cur) => settleIfPending(cur, savedAt, { ok: true, blobPath: path, printed, notes: pdfNotesOf(notes) }));
     } catch (e) {
       // The settle never committed, so nothing records this file — drop it
       // before recording the failure (the last good file stays current).

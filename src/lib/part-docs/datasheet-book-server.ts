@@ -404,6 +404,30 @@ function drawFront(page: PDFPage, ops: Op[], f: Fonts, logo: PDFImage | null, cu
 
 const tick = () => new Promise<void>((r) => setImmediate(r));
 
+/** A PDF the merge refuses because it is password-protected (its own class, so a caller can say so). */
+export class EncryptedPdfError extends Error {
+  constructor() {
+    super("encrypted PDF");
+  }
+}
+
+/**
+ * Load one PDF and append every page to `out` at its own size — the book's
+ * rule, shared with the estimate PDF's drawings (spec 2026-10-16 §4): an
+ * encrypted file is refused (EncryptedPdfError), a file with no pages or an
+ * unusable page box throws before anything is added. Returns the pages added.
+ */
+export async function appendPdfPages(out: PDFDocument, bytes: Uint8Array): Promise<number> {
+  const src = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  if (src.isEncrypted) throw new EncryptedPdfError();
+  const copied = await out.copyPages(src, src.getPageIndices());
+  if (!copied.length) throw new Error("PDF has no pages");
+  // #329 review: a missing or bad /MediaBox, /CropBox or /Rotate fails THIS document here, never the stamp loop.
+  copied.forEach((p, i) => checkPageBox(p, i + 1));
+  for (const p of copied) out.addPage(p);
+  return copied.length;
+}
+
 /**
  * Build the book. Documents are merged in the plan's order (manufacturer
  * A→Z, each once); the index's page numbers count the front pages.
@@ -430,14 +454,7 @@ export async function buildDatasheetBook(input: BuildBookInput): Promise<BuiltBo
         continue;
       }
       try {
-        const src = await PDFDocument.load(d.bytes, { ignoreEncryption: true, updateMetadata: false });
-        if (src.isEncrypted) throw new Error("encrypted PDF");
-        const copied = await out.copyPages(src, src.getPageIndices());
-        if (!copied.length) throw new Error("PDF has no pages");
-        // #329 review: a missing or bad /MediaBox, /CropBox or /Rotate fails THIS document here, never the stamp loop.
-        copied.forEach((p, i) => checkPageBox(p, i + 1));
-        for (const p of copied) out.addPage(p);
-        pages.set(id, copied.length);
+        pages.set(id, await appendPdfPages(out, d.bytes));
       } catch (err) {
         console.warn(`${tag} datasheet ${id} not merged: ${err instanceof Error ? err.message : String(err)}`);
         reasons.set(id, BOOK_REASON.unreadable);
