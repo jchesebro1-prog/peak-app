@@ -42774,7 +42774,8 @@ import { quoteDocumentDataFor as p285DocData } from "@/lib/quote-pdf/quote-docum
   ok(noPrep.preparedByName === "Nic Trapani", "#287 B document: a blank preparedBy falls back to the owner");
   const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const docSrc = src("src/app/(app)/estimator/quote-document.tsx");
-  ok(docSrc.includes("<div style={microLabel}>Prepared by</div>\n              <div style={{ fontWeight: 600 }}>{p.preparedByName}</div>")
+  // Photo wrap §3: the meta grid is the hoisted metaEl constant now (title page / online header share it).
+  ok(docSrc.includes("<div style={microLabel}>Prepared by</div>\n        <div style={{ fontWeight: 600 }}>{p.preparedByName}</div>")
     && docSrc.includes("Questions? Reach out to {p.ownerName}"),
     "#287 B document: the Prepared by block prints preparedByName; Questions? still names the lead estimator");
   const hub = src("src/app/(app)/quotes/page.tsx");
@@ -47736,8 +47737,12 @@ import { appendixSystemIds as p293AppendixIds } from "@/app/(app)/estimator/quot
   const added = (h: string, off: string, name: string) => band(h, name) - band(off, name);
   const on = p293Render(p293Props({ pdfOptions: { pdfItemizedAppendix: true } }));
   ok(on.includes('class="est-appendix"') && on.includes("Appendix — Itemized bill of materials"), "#293 appendix: the toggle prints the appendix heading");
-  ok(on.indexOf("Appendix — Itemized") > on.indexOf("Signature — accepted for") && on.indexOf("Appendix — Itemized") < on.indexOf("Questions? Reach out to"),
-    "#293 appendix: after the signature block, before the footer");
+  // Photo wrap §3 (2026-10-16): the PDF puts the appendix last, after the footer and assumptions, on its own
+  // page; the online estimate keeps it after the signature block, before the footer.
+  const onWeb = p293Render({ ...p293Props({ pdfOptions: { pdfItemizedAppendix: true } }), layout: "web" });
+  ok(on.indexOf("Appendix — Itemized") > on.indexOf("Signature — accepted for") && on.indexOf("Appendix — Itemized") > on.indexOf("Questions? Reach out to") && on.indexOf("Appendix — Itemized") > on.indexOf("Assumptions &amp; exceptions")
+    && onWeb.indexOf("Appendix — Itemized") > onWeb.indexOf("Signature — accepted for") && onWeb.indexOf("Appendix — Itemized") < onWeb.indexOf("Questions? Reach out to"),
+    "#293 appendix: after the signature block — last in the PDF (after the footer and assumptions), before the footer online");
   ok(added(on, base.itemized, "Lighting") === 1 && added(on, base.itemized, "Empty narrative") === 1 && added(on, base.itemized, "Rigging") === 0 && added(on, base.itemized, "Install") === 0 && on.includes("Line 5") && on.includes("Line 8"),
     "#293 appendix (itemized detail): only the narrative systems repeat, with their lines");
   ok(JSON.stringify(p293Props({ pdfOptions: { pdfItemizedAppendix: true } }).t) === JSON.stringify(p293Props().t) && on.split("Total investment").length === base.itemized.split("Total investment").length,
@@ -54922,7 +54927,7 @@ import { qd293Props as p2adProps, qd293Sections as p2adSections, renderQuoteDocu
   const loader = rd("src/lib/quote-pdf/document-loader.ts");
   const printPage = rd("src/app/print/quote/[id]/page.tsx");
   ok(doc.includes("groups?: SystemGroup[];") && doc.includes("printedGroupHeadings(p.sections, p.groups)") && doc.includes("groupHeadings.has(ps.id) && (") && doc.includes("<GroupHeading")
-    && doc.indexOf("<GroupHeading") < doc.indexOf("<SectionBand num={ps.num}"),
+    && doc.indexOf("<GroupHeading", doc.indexOf("{docOn ? (")) < doc.indexOf("<SectionBand num={ps.num}", doc.indexOf("{docOn ? (")),
     "#P2a document: QuoteDocument renders a GroupHeading from printedGroupHeadings before the matching band");
   ok(doc.includes('className="est-secband est-grouphead"') && doc.includes("textTransform: \"uppercase\"") && doc.includes("fmt(groupHeadings.get(ps.id)!.subtotal)"),
     "#P2a document: the heading row is uppercase name + subtotal, and keeps with its band (est-secband break rules)");
@@ -55299,12 +55304,18 @@ import { qd293Props as p2bdProps, qd293Sections as p2bdSections, qdP2bNoAltCases
     const body = html.slice(0, iBlock);
     ok(!body.includes("LED Upgrade") && !body.includes("Upgrades") && !body.includes(">05<") && ["01", "02", "03", "04"].every((n) => body.includes(`>${n}<`)),
       `#P2b document (${tag}): the body bands, numbering and group headings cover In-total systems only`);
-    ok(html.includes("4 systems · 7 line items · 3 alternates · 1 optional") && plain.includes("4 systems · 7 line items · 1 optional"),
-      `#P2b document (${tag}): the header adds · N alternates (alternate systems); systems and line items count In-total only`);
+    // Photo wrap §3 (2026-10-16): the investment band (and its counts line) prints online only; the PDF drops it.
+    if (layout === "web") {
+      ok(html.includes("4 systems · 7 line items · 3 alternates · 1 optional") && plain.includes("4 systems · 7 line items · 1 optional"),
+        `#P2b document (${tag}): the header adds · N alternates (alternate systems); systems and line items count In-total only`);
+    } else {
+      ok(!html.includes("Total investment") && !plain.includes("Total investment") && !html.includes("systems ·"),
+        `#P2b document (${tag}): the PDF prints no investment band or counts line (title page, spec 2026-10-16 §3)`);
+    }
     const tot = (h: string) => h.slice(h.indexOf('class="est-totals"'), h.indexOf('class="est-terms"'));
     const invest = (h: string) => h.slice(h.indexOf("Total investment"), h.indexOf("systems ·"));
-    ok(tot(html) === tot(plain) && tot(html).length > 100 && invest(html) === invest(plain),
-      `#P2b document (${tag}): the totals and the Total investment band are the same as the In-total-only quote's`);
+    ok(tot(html) === tot(plain) && tot(html).length > 100 && (layout !== "web" || (invest(html) === invest(plain) && invest(html).length > 0)),
+      `#P2b document (${tag}): the totals and the Total investment band (online) are the same as the In-total-only quote's`);
     const box = html.slice(html.indexOf("Optional additions"), html.indexOf('class="est-totals"'));
     ok(!box.includes("Alt option line") && box.includes(">Line 3<!-- -->") === plain.slice(plain.indexOf("Optional additions")).includes(">Line 3<!-- -->") && block.includes("Alt option line") && block.includes("Optional — not included in this alternate’s price"),
       `#P2b document (${tag}): an alternate's option line prints inside the alternate, not in the Optional additions box`);
@@ -55312,10 +55323,11 @@ import { qd293Props as p2bdProps, qd293Sections as p2bdSections, qdP2bNoAltCases
   }
 
   // singular count; options off hides the alternate's option line too; an empty alternate group prints no block
-  const one = p2bdRender(p2bdProps({ sections: [...inTotal(), alts()[2]], groups: G }));
+  const one = p2bdRender({ ...p2bdProps({ sections: [...inTotal(), alts()[2]], groups: G }), layout: "web" }); // the counts line is online only (§3)
   ok(one.includes("· 1 alternate ·") && !one.includes("1 alternates") && one.includes(">A1<") && !one.includes(">A2<"), "#P2b document: one alternate system reads · 1 alternate");
   const offOpts = p2bdRender(p2bdProps({ sections: [...inTotal(), ...alts()], groups: G, pdfOptions: { pdfOptions: false } }));
-  ok(!offOpts.includes("Alt option line") && !offOpts.includes("Optional additions") && offOpts.includes("4 systems · 7 line items · 3 alternates<"),
+  const offOptsWeb = p2bdRender({ ...p2bdProps({ sections: [...inTotal(), ...alts()], groups: G, pdfOptions: { pdfOptions: false } }), layout: "web" });
+  ok([offOpts, offOptsWeb].every((h) => !h.includes("Alt option line") && !h.includes("Optional additions")) && offOptsWeb.includes("4 systems · 7 line items · 3 alternates<"),
     "#P2b document: Show options off hides option lines everywhere (box and alternates)");
   const ghostOnly = p2bdRender(p2bdProps({ sections: [...inTotal(), alts()[3]], groups: G }));
   ok(!ghostOnly.includes("est-alts") && !ghostOnly.includes("alternate"), "#P2b document: an Alternate group that prints nothing → no block, no header count");
@@ -57919,9 +57931,11 @@ import { renderToStaticMarkup as p5rMarkup } from "react-dom/server";
   const preApx = html.slice(0, html.indexOf('class="est-appendix"'));
   ok(html.includes('class="est-appendix"') && !preApx.includes('class="est-secband"') && !preApx.includes(">01<") && !html.includes("Intro para.") && !body.slice(0, body.indexOf("Optional additions")).includes('class="est-line"') && !body.includes("Customer note") && !html.includes("System scope and pricing are included"),
     "#P5 render: the document replaces ALL In-total bands — no band, numbering, narrative, key products or itemized lines (itemized systems too)");
-  ok(html.includes(">QUOTE</div>") && html.includes("Total investment") && html.includes("4 systems · 7 line items · 1 optional") && html.includes("Cover note.") && html.includes("Optional additions") &&
+  // Photo wrap §3 (2026-10-16): the PDF drops the investment band (its counts line too); the online estimate keeps it.
+  const htmlWeb = p5rRender({ ...pr, layout: "web" });
+  ok(html.includes(">QUOTE</div>") && !html.includes("Total investment") && htmlWeb.includes("Total investment") && htmlWeb.includes("4 systems · 7 line items · 1 optional") && html.includes("Cover note.") && html.includes("Optional additions") &&
      html.includes('class="est-totals"') && html.includes('class="est-terms"') && html.includes('class="est-accept"') && html.includes("Assumptions &amp; exceptions") && body.length > 1000,
-    "#P5 render: kept — header, investment band (counts unchanged), cover note, Optional additions, totals, terms, signature, assumptions");
+    "#P5 render: kept — header, investment band online (counts unchanged; none in the PDF), cover note, Optional additions, totals, terms, signature, assumptions");
   ok(html.indexOf('class="est-pkgdoc"') < html.indexOf("Optional additions") && html.indexOf("Cover note.") < html.indexOf('class="est-pkgdoc"'), "#P5 render: the document sits where the bands were (after the cover note, before Optional additions)");
   const apxOff = p5rRender(props());
   const apxOn = p5rRender(props({ pdfOptions: { pdfItemizedAppendix: true } }));

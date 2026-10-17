@@ -3,7 +3,8 @@
  *  before quote-document.tsx is edited (it was run against afa0495e+680eba80):
  *    npx tsx scripts/qdp5-baseline.ts
  *  Pure render; opens no database.
- *  Re-captured 2026-10-16 for the photo wrap (key products are plain blocks; photos are figures). */
+ *  Re-captured 2026-10-16 for the photo wrap (key products are plain blocks; photos are figures).
+ *  Re-captured 2026-10-16 for the PDF title page / print order. */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { qdP5NoDocCases, renderQuoteDocument293 } from "./qd293-cases";
 

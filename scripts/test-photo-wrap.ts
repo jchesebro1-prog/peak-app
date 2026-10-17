@@ -278,12 +278,31 @@ function packageDocFixRound1Checks(ok: Ok) {
     "photo wrap fix 4 (editor): a manufacturer image tags from the part, like an own photo");
 }
 
+function titlePageChecks(ok: Ok) {
+  const props = qd293Props({ pdfOptions: { pdfItemizedAppendix: true } });
+  const print = renderQuoteDocument293(props);
+  const tp = print.indexOf('<div class="est-titlepage">');
+  const at = (s: string) => print.indexOf(s);
+  ok(tp > 0 && at(">QUOTE</div>") > tp && at(">Prepared for</div>") > tp && at("Cover note.") > tp && at("Cover note.") < at('class="est-secband"'),
+    "title page: letterhead, title block, meta and the cover note open the PDF");
+  ok(!print.includes("Total investment"), "title page: the PDF drops the investment band (the totals block shows the Total)");
+  ok(at('class="est-secband"') < at('class="est-totals"') && at('class="est-totals"') < at("Questions? Reach out") && at("Questions? Reach out") < at("Assume access.") && at("Assume access.") < at('class="est-appendix"'),
+    "title page: narratives → pricing (totals, terms, acceptance, footer, assumptions) → the BOM appendix last");
+  const web = renderQuoteDocument293({ ...props, layout: "web" });
+  ok(!web.includes("est-titlepage") && web.includes("Total investment") && web.indexOf('class="est-appendix"') < web.indexOf("Questions? Reach out"),
+    "title page: the online estimate keeps today's order (investment band, appendix inside the totals)");
+  const { QUOTE_PRINT_CSS } = quoteDocumentModule293();
+  ok(QUOTE_PRINT_CSS.includes(".est-doc .est-titlepage { break-after: page; page-break-after: always; }") && QUOTE_PRINT_CSS.includes(".est-doc .est-appendix { break-before: page; page-break-before: always; }"),
+    "title page: the title page ends its page; the BOM starts a new one");
+}
+
 export async function photoWrapPureChecks(ok: Ok) {
   spreadChecks(ok);
   modelChecks(ok);
   quoteDocPhotoChecks(ok);
   packagePagePhotoChecks(ok);
   packageDocPhotoChecks(ok);
+  titlePageChecks(ok);
 }
 
 export async function photoWrapDbChecks(_ok: Ok) {

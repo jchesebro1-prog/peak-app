@@ -1,7 +1,8 @@
 /** #293 — writes the pre-change QuoteDocument render the harness compares
  *  against. Run ONCE, before quote-document.tsx is edited:
  *    npx tsx scripts/qd293-baseline.ts
- *  Pure render; opens no database. */
+ *  Pure render; opens no database.
+ *  Re-captured 2026-10-16 for the PDF title page / print order. */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { qd293Cases, renderQuoteDocument293 } from "./qd293-cases";
 

@@ -121,6 +121,7 @@ nextjs-portal { display: none !important; }
 .est-doc .est-line, .est-doc .est-optbox, .est-doc .est-totals, .est-doc .est-terms, .est-doc .est-accept, .est-doc .est-sig { break-inside: avoid; page-break-inside: avoid; }
 .est-doc .est-kp { break-inside: avoid; page-break-inside: avoid; }
 .est-doc .est-ph { break-inside: avoid; page-break-inside: avoid; }
+.est-doc .est-titlepage { break-after: page; page-break-after: always; }
 .est-doc .est-appendix { break-before: page; page-break-before: always; }
 `;
 
@@ -704,6 +705,195 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
   const appendixSections = appendixIds ? previewSections.filter((ps) => appendixIds.has(ps.id)) : [];
   const appendixCols = ["1fr", p.pdfQty ? "70px" : "", p.pdfPrices ? "104px" : ""].filter(Boolean).join(" ");
 
+  // Spec 2026-10-16 §3 — the same pieces, two orders: the PDF (layout ≠ "web") opens on a title page and puts
+  // pricing after the narratives (no investment band — the totals block shows the Total; the BOM appendix last,
+  // on its own page); the online estimate keeps today's order.
+  // letterhead — #331: an estimate always prints the full baked Peak
+  // letterhead sheet, even when Settings → Branding has a dark logo
+  // (letters/reports keep the D59 uploaded-logo ladder).
+  const letterheadEl = (
+    <div style={{ borderBottom: `3px solid var(--accent)`, paddingBottom: 16, marginBottom: 22 }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={letterhead.src}
+        alt={p.companyName}
+        style={{ display: "block", width: "100%", height: "auto" }}
+      />
+    </div>
+  );
+  // document title
+  const titleEl = (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "flex-end",
+        gap: 16,
+        marginBottom: 22,
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontSize: 27,
+            fontWeight: 700,
+            letterSpacing: ".14em",
+            lineHeight: 1,
+            color: "#16181d",
+          }}
+        >
+          QUOTE
+        </div>
+        <div
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+            color: ACCENT_INK,
+            marginTop: 7,
+          }}
+        >
+          {p.quoteId} · REV {p.revNum}
+        </div>
+      </div>
+      <div
+        style={{
+          textAlign: "right",
+          fontSize: 11.5,
+          color: "#5b616e",
+          lineHeight: 1.75,
+        }}
+      >
+        <div>
+          Issued <strong style={{ color: "#16181d" }}>{revDateLabel}</strong>
+        </div>
+        <div>
+          {p.validUntilMs != null ? "Valid until" : "Valid through"}{" "}
+          <strong style={{ color: "#16181d" }}>{validThruLabel}</strong>
+        </div>
+      </div>
+    </div>
+  );
+  // prepared for / project / prepared by
+  const metaEl = (
+    <div
+      className={web ? "est-meta" : undefined}
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1.1fr 1.3fr 1fr",
+        gap: 18,
+        marginBottom: 20,
+        fontSize: 12,
+      }}
+    >
+      <div>
+        <div style={microLabel}>Prepared for</div>
+        <div style={{ fontWeight: 600 }}>{p.custName}</div>
+        {p.hasAttn && <div style={{ color: "#5b616e" }}>Attn: {p.attnLine}</div>}
+      </div>
+      <div>
+        <div style={microLabel}>Project</div>
+        <div style={{ fontWeight: 600 }}>{p.projectName || "Stage systems package"}</div>
+        {p.venueLabel && <div style={{ color: "#5b616e" }}>{p.venueLabel}</div>}
+        {p.ownerLine && <div style={{ color: "#5b616e" }}>{p.ownerLine}</div>}
+      </div>
+      <div>
+        <div style={microLabel}>Prepared by</div>
+        <div style={{ fontWeight: 600 }}>{p.preparedByName}</div>
+        <div style={{ color: "#5b616e" }}>{p.companyName}</div>
+      </div>
+    </div>
+  );
+  const bidEl = p.bidLine ? <div style={{ color: "#5b616e", fontSize: 11.5, margin: "-10px 0 16px" }}>{p.bidLine}</div> : null;
+  // at-a-glance investment band (online only)
+  const investEl = (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 14,
+        flexWrap: "wrap",
+        background: "var(--accent-soft)",
+        border: `1px solid ${ACCENT_BD}`,
+        borderRadius: 8,
+        padding: "13px 16px",
+        marginBottom: 24,
+      }}
+    >
+      <div>
+        <div style={{ ...microLabel, color: ACCENT_INK, marginBottom: 2 }}>
+          Total investment
+        </div>
+        <div
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 21,
+            fontWeight: 600,
+            letterSpacing: "-.01em",
+            color: "#16181d",
+          }}
+        >
+          {fmt(p.t.grand)}
+        </div>
+      </div>
+      <div style={{ textAlign: "right", fontSize: 11.5, color: "#5b616e", lineHeight: 1.7 }}>
+        <div>
+          {previewSections.length} {previewSections.length === 1 ? "system" : "systems"} ·{" "}
+          {lineCount} line {lineCount === 1 ? "item" : "items"}
+          {(altCount > 0 ? ` · ${altCount} ${altCount === 1 ? "alternate" : "alternates"}` : "") +
+            (optionItems.length > 0 && showOptions
+            ? ` · ${optionItems.length} optional`
+            : "")}
+        </div>
+        {inclusions && <div>{inclusions}</div>}
+      </div>
+    </div>
+  );
+  const coverEl = showCover ? (
+    <div
+      style={{
+        fontSize: 12.5,
+        color: "#3a3f4a",
+        lineHeight: 1.7,
+        marginBottom: 26,
+        paddingLeft: 14,
+        borderLeft: `3px solid ${ACCENT_BD}`,
+      }}
+    >
+      {p.quoteNote}
+    </div>
+  ) : null;
+  // #293: Itemized appendix — restates, never adds to the totals.
+  const appendixEl = appendixSections.length > 0 ? (
+    <div className="est-appendix" style={{ marginTop: 22 }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "#16181d", marginBottom: 2 }}>
+        Appendix — Itemized bill of materials
+      </div>
+      {appendixSections.map((ps) => (
+        <div key={"apx-" + ps.num + ps.name}>
+          <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
+          <ItemizedLines
+            lines={ps.lines}
+            hasFreight={ps.hasFreight}
+            freightLabel={ps.freightLabel}
+            freightRowLabel={freightRowLabel}
+            showDesc
+            showAllComments
+            pdfQty={p.pdfQty}
+            pdfPrices={p.pdfPrices}
+            lineCols={appendixCols}
+          />
+        </div>
+      ))}
+    </div>
+  ) : null;
+  const assumptionsEl = p.assumptions.trim() ? (
+    <div style={{ marginTop: 18, padding: "12px 14px", background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 8 }}>
+      <div style={{ ...microLabel, marginBottom: 5 }}>Assumptions &amp; exceptions</div>
+      <div style={{ whiteSpace: "pre-wrap", fontSize: 12.5, color: "#5b616e", lineHeight: 1.55 }}>{p.assumptions}</div>
+    </div>
+  ) : null;
+
   return (
         <div
           className={web ? "est-doc est-web" : "est-doc"}
@@ -717,163 +907,29 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
             height: "fit-content",
           }}
         >
-          {/* letterhead — #331: an estimate always prints the full baked Peak
-              letterhead sheet, even when Settings → Branding has a dark logo
-              (letters/reports keep the D59 uploaded-logo ladder). */}
-          <div style={{ borderBottom: `3px solid var(--accent)`, paddingBottom: 16, marginBottom: 22 }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={letterhead.src}
-              alt={p.companyName}
-              style={{ display: "block", width: "100%", height: "auto" }}
-            />
-          </div>
-
-          {/* document title */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-end",
-              gap: 16,
-              marginBottom: 22,
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: 27,
-                  fontWeight: 700,
-                  letterSpacing: ".14em",
-                  lineHeight: 1,
-                  color: "#16181d",
-                }}
-              >
-                QUOTE
-              </div>
-              <div
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 12,
-                  color: ACCENT_INK,
-                  marginTop: 7,
-                }}
-              >
-                {p.quoteId} · REV {p.revNum}
-              </div>
-            </div>
-            <div
-              style={{
-                textAlign: "right",
-                fontSize: 11.5,
-                color: "#5b616e",
-                lineHeight: 1.75,
-              }}
-            >
-              <div>
-                Issued <strong style={{ color: "#16181d" }}>{revDateLabel}</strong>
-              </div>
-              <div>
-                {p.validUntilMs != null ? "Valid until" : "Valid through"}{" "}
-                <strong style={{ color: "#16181d" }}>{validThruLabel}</strong>
-              </div>
-            </div>
-          </div>
-
-          {/* prepared for / project / prepared by */}
-          <div
-            className={web ? "est-meta" : undefined}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.1fr 1.3fr 1fr",
-              gap: 18,
-              marginBottom: 20,
-              fontSize: 12,
-            }}
-          >
-            <div>
-              <div style={microLabel}>Prepared for</div>
-              <div style={{ fontWeight: 600 }}>{p.custName}</div>
-              {p.hasAttn && <div style={{ color: "#5b616e" }}>Attn: {p.attnLine}</div>}
-            </div>
-            <div>
-              <div style={microLabel}>Project</div>
-              <div style={{ fontWeight: 600 }}>{p.projectName || "Stage systems package"}</div>
-              {p.venueLabel && <div style={{ color: "#5b616e" }}>{p.venueLabel}</div>}
-              {p.ownerLine && <div style={{ color: "#5b616e" }}>{p.ownerLine}</div>}
-            </div>
-            <div>
-              <div style={microLabel}>Prepared by</div>
-              <div style={{ fontWeight: 600 }}>{p.preparedByName}</div>
-              <div style={{ color: "#5b616e" }}>{p.companyName}</div>
-            </div>
-          </div>
-
-          {p.bidLine && <div style={{ color: "#5b616e", fontSize: 11.5, margin: "-10px 0 16px" }}>{p.bidLine}</div>}
-
-          {/* at-a-glance investment band */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 14,
-              flexWrap: "wrap",
-              background: "var(--accent-soft)",
-              border: `1px solid ${ACCENT_BD}`,
-              borderRadius: 8,
-              padding: "13px 16px",
-              marginBottom: 24,
-            }}
-          >
-            <div>
-              <div style={{ ...microLabel, color: ACCENT_INK, marginBottom: 2 }}>
-                Total investment
-              </div>
-              <div
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 21,
-                  fontWeight: 600,
-                  letterSpacing: "-.01em",
-                  color: "#16181d",
-                }}
-              >
-                {fmt(p.t.grand)}
-              </div>
-            </div>
-            <div style={{ textAlign: "right", fontSize: 11.5, color: "#5b616e", lineHeight: 1.7 }}>
-              <div>
-                {previewSections.length} {previewSections.length === 1 ? "system" : "systems"} ·{" "}
-                {lineCount} line {lineCount === 1 ? "item" : "items"}
-                {(altCount > 0 ? ` · ${altCount} ${altCount === 1 ? "alternate" : "alternates"}` : "") +
-                  (optionItems.length > 0 && showOptions
-                  ? ` · ${optionItems.length} optional`
-                  : "")}
-              </div>
-              {inclusions && <div>{inclusions}</div>}
-            </div>
-          </div>
-
-          {showCover && (
-            <div
-              style={{
-                fontSize: 12.5,
-                color: "#3a3f4a",
-                lineHeight: 1.7,
-                marginBottom: 26,
-                paddingLeft: 14,
-                borderLeft: `3px solid ${ACCENT_BD}`,
-              }}
-            >
-          {p.quoteNote}
+          {web ? (
+            <>
+              {letterheadEl}
+              {titleEl}
+              {metaEl}
+              {bidEl}
+              {investEl}
+              {coverEl}
+            </>
+          ) : (
+            <div className="est-titlepage">
+              {letterheadEl}
+              {titleEl}
+              {metaEl}
+              {bidEl}
+              {coverEl}
             </div>
           )}
 
           {/* sections — Phase 5: a package document replaces ALL In-total
               system bands (itemized ones too: prices live in its chips and
-              price table). Kept unchanged around it: the header, the
-              investment band, the cover note, the Alternates block (its
+              price table). Kept unchanged around it: the header (the title
+              page in print), the investment band (online only), the cover note, the Alternates block (its
               bands stay the priced record of the alternates, even when the
               document also writes about them), Optional additions, the
               totals, terms, signature, the Itemized appendix and the
@@ -1151,30 +1207,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
               </>
             )}
 
-            {/* #293: Itemized appendix — restates, never adds to the totals. */}
-            {appendixSections.length > 0 && (
-              <div className="est-appendix" style={{ marginTop: 22 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#16181d", marginBottom: 2 }}>
-                  Appendix — Itemized bill of materials
-                </div>
-                {appendixSections.map((ps) => (
-                  <div key={"apx-" + ps.num + ps.name}>
-                    <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
-                    <ItemizedLines
-                      lines={ps.lines}
-                      hasFreight={ps.hasFreight}
-                      freightLabel={ps.freightLabel}
-                      freightRowLabel={freightRowLabel}
-                      showDesc
-                      showAllComments
-                      pdfQty={p.pdfQty}
-                      pdfPrices={p.pdfPrices}
-                      lineCols={appendixCols}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
+            {web ? appendixEl : null}
 
             {/* footer */}
             <div
@@ -1197,12 +1230,8 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
               </span>
             </div>
           </div>
-          {p.assumptions.trim() && (
-            <div style={{ marginTop: 18, padding: "12px 14px", background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 8 }}>
-              <div style={{ ...microLabel, marginBottom: 5 }}>Assumptions &amp; exceptions</div>
-              <div style={{ whiteSpace: "pre-wrap", fontSize: 12.5, color: "#5b616e", lineHeight: 1.55 }}>{p.assumptions}</div>
-            </div>
-          )}
+          {assumptionsEl}
+          {web ? null : appendixEl}
         </div>
   );
 }
