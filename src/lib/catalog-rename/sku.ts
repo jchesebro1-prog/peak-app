@@ -83,3 +83,9 @@ export function lineModel(line: ModelLineLike, part?: Partial<ModelPartLike> | n
   if (part) return partModel({ sku: part.sku ?? line.sku ?? "", manufacturerPartNumber: part.manufacturerPartNumber });
   return "";
 }
+
+/** A quote line's OWN printable model — its frozen Model #, else its MFR P/N, else "".
+ *  Never the SKU: a placeholder photo's tag prints only a real model the line carries. */
+export function lineOwnModel(line?: ModelLineLike | null): string {
+  return line?.manufacturerModelNumber?.trim() || line?.manufacturerPartNumber?.trim() || "";
+}
