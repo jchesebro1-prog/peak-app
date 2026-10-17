@@ -109,13 +109,20 @@ export function revisionPackageDocs(rev: Pick<QuoteRevision, "spec" | "docFields
 
 const SERVED_KINDS: ReadonlySet<string> = new Set(["datasheet", "specsheet"]);
 
-/** The blob-backed datasheet / spec sheet `docId` IF this revision's package lists it; else null. */
-export async function packageDocForRevision(rev: Pick<QuoteRevision, "spec" | "docFields">, docId: string): Promise<PartDocument | null> {
+/** The blob-backed document `docId` IF this spec's package lists it with one of `kinds` (with the selection's
+ *  left-out datasheets applied); else null. The share route asks for a sent revision; the permanent datasheet
+ *  link (spec 2026-10-16 §5) asks for the live quote, datasheets only. */
+export async function packageDocForSpec(spec: unknown, sel: DatasheetSelection | null | undefined, docId: string, kinds: ReadonlySet<string> = SERVED_KINDS): Promise<PartDocument | null> {
   if (!isDocumentId(docId)) return null;
-  const d = await revisionPackageDocs(rev);
-  if (!d.documents.some((x) => x.documentId === docId && SERVED_KINDS.has(x.kind))) return null;
+  const d = await specPackageDocs(spec, sel ?? null);
+  if (!d.documents.some((x) => x.documentId === docId && kinds.has(x.kind))) return null;
   const doc = d.index.docsById.get(docId);
-  return doc && doc.blobKey && SERVED_KINDS.has(doc.kind) ? doc : null;
+  return doc && doc.blobKey && kinds.has(doc.kind) ? doc : null;
+}
+
+/** The blob-backed datasheet / spec sheet `docId` IF this revision's package lists it; else null. */
+export function packageDocForRevision(rev: Pick<QuoteRevision, "spec" | "docFields">, docId: string): Promise<PartDocument | null> {
+  return packageDocForSpec(rev.spec, rev.docFields?.packageSelection ?? null, docId);
 }
 
 /** Staff gap chip: catalog parts on this spec whose datasheet slot is not satisfied (#333: a left-out one is never a gap). */

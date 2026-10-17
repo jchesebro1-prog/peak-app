@@ -417,6 +417,8 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/share/quote/Q-2041/1.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/photo/PD-1", expectNotFound: true },
   // #301 slice C — the package datasheet route with a v2 token that fails the verify: a clean 404.
   { route: "/share/quote/Q-2041/1.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/doc/PD-1", expectNotFound: true },
+  // Photo wrap (2026-10-16 §5) — a permanent datasheet link with a well-formed bad signature: a clean 404 after the route compiles.
+  { route: "/d/ds/Q-2041/PD-abcdef12/AAAAAAAAAAAAAAAAAAAAAA", expectNotFound: true },
   // #301 slice C — the package zip with a v2 token that fails the verify: a clean 404, nothing built.
   { route: "/share/quote/Q-2041/1.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/package.zip", expectNotFound: true },
   // #301 slice C — the package file route with a v2 token that fails the verify: a clean 404.

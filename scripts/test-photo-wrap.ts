@@ -18,6 +18,9 @@ import PackageView, { PACKAGE_LEFT_PHOTO_CSS, PACKAGE_WEB_CSS } from "../src/com
 import { photoModelOf, resolvePackageDoc } from "../src/lib/package-doc/resolve";
 import PackageDocView, { PACKAGE_DOC_CSS } from "../src/components/package-doc/package-doc-view";
 import { editorPhotoTag } from "../src/components/package-doc/editor/editor-model";
+import { datasheetLinkPath, datasheetLinkSig, verifyDatasheetLinkSig, DATASHEET_SIG_RE } from "../src/lib/estimate-output/datasheet-link";
+import { serveEstimateDatasheet } from "../src/lib/estimate-output/datasheet-link-server";
+import { inlineDisposition } from "../src/lib/document-files";
 
 export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
@@ -296,6 +299,46 @@ function titlePageChecks(ok: Ok) {
     "title page: the title page ends its page; the BOM starts a new one");
 }
 
+async function datasheetLinkChecks(ok: Ok) {
+  const S = "pw-secret", Q = "Q-2041", D = "PD-abcdef12";
+  const sig = datasheetLinkSig(S, Q, D);
+  ok(DATASHEET_SIG_RE.test(sig) && sig.length === 22 && datasheetLinkSig(S, Q, D) === sig, "ds link: a stable 22-char base64url signature");
+  ok(verifyDatasheetLinkSig(S, Q, D, sig) && !verifyDatasheetLinkSig(S, "Q-2042", D, sig) && !verifyDatasheetLinkSig(S, Q, "PD-abcdef13", sig) && !verifyDatasheetLinkSig("other", Q, D, sig) &&
+     !verifyDatasheetLinkSig("", Q, D, sig) && !verifyDatasheetLinkSig(S, Q, D, sig.slice(0, 21) + (sig[21] === "A" ? "B" : "A")) && !verifyDatasheetLinkSig(S, Q, D, sig + "x"),
+    "ds link: bound to exactly this quote + datasheet + secret; tampered, short or long signatures fail");
+  ok(datasheetLinkPath(S, Q, D) === `/d/ds/Q-2041/PD-abcdef12/${sig}` && datasheetLinkPath(S, "Q 1/2", D).startsWith("/d/ds/Q%201%2F2/"), "ds link: the path encodes the quote id");
+  ok(inlineDisposition("Spot sheet.pdf").startsWith('inline; filename="Spot sheet.pdf"'), "ds link: inline disposition keeps the attachment name rules");
+
+  const doc = { id: D, kind: "datasheet", title: "Spot", fileName: "spot.pdf", contentType: "application/pdf", size: 9, blobKey: "part-docs/spot.pdf" };
+  const q = { id: Q, spec: {}, packageSelection: null };
+  const base = { secret: S, allow: () => true, getQuote: async (id: string) => (id === Q ? (q as never) : null), docFor: async (_q: unknown, id: string) => (id === D ? (doc as never) : null),
+    stream: async (): Promise<ReadableStream | null> => new Blob(["%PDF-1.4 spot"]).stream() };
+  const req = new Request("http://app.test/d/ds/x");
+  const good = await serveEstimateDatasheet(req, { quoteId: Q, docId: D, sig }, base);
+  ok(good.status === 200 && good.headers.get("content-type") === "application/pdf" && (good.headers.get("content-disposition") || "").startsWith("inline;") &&
+     good.headers.get("x-content-type-options") === "nosniff" && good.headers.get("cache-control") === "private, max-age=300" && (await good.text()) === "%PDF-1.4 spot",
+    "ds link: a good link streams the stored datasheet inline, nosniff, private cache");
+  const statusOf = async (p: { quoteId: string; docId: string; sig: string }, d: Partial<typeof base> = {}) => (await serveEstimateDatasheet(req, p, { ...base, ...d })).status;
+  ok((await statusOf({ quoteId: Q, docId: D, sig: "A".repeat(22) })) === 404 && (await statusOf({ quoteId: Q, docId: "nope", sig })) === 404 &&
+     (await statusOf({ quoteId: Q, docId: D, sig }, { getQuote: async () => null })) === 404 && (await statusOf({ quoteId: Q, docId: D, sig }, { docFor: async () => null })) === 404 &&
+     (await statusOf({ quoteId: Q, docId: D, sig }, { getQuote: async () => { throw new Error("db down"); } })) === 404 && (await statusOf({ quoteId: Q, docId: D, sig }, { stream: async () => null })) === 404,
+    "ds link: bad signature, bad id, deleted quote, a datasheet no longer listed, a DB error, a missing file → the same 404");
+  ok((await statusOf({ quoteId: Q, docId: D, sig }, { stream: async () => { throw new Error("blob"); } })) === 502 && (await statusOf({ quoteId: Q, docId: D, sig }, { allow: () => false })) === 429,
+    "ds link: a storage error is 502 (no vendor text); over the per-IP rate → 429");
+  const img = await serveEstimateDatasheet(req, { quoteId: Q, docId: D, sig }, { ...base, docFor: async () => ({ ...doc, contentType: "image/png", fileName: "spot.png" }) as never });
+  ok((img.headers.get("content-disposition") || "").startsWith("attachment;") && (img.headers.get("content-security-policy") || "").includes("sandbox"), "ds link: anything but a PDF downloads, sandboxed");
+
+  const mw = rd("src/middleware.ts"), route = rd("src/app/d/ds/[quoteId]/[docId]/[sig]/route.ts"), pds = rd("src/lib/estimate-output/package-docs-server.ts");
+  ok(mw.includes("|share/|d/ds/|"), "ds link: the route is outside the team login (middleware matcher)");
+  const matcherSrc = /matcher:\s*\[\s*"([^"]+)"/.exec(mw)?.[1]?.replace(/\\\\/g, "\\") ?? "";
+  const gated = (path: string) => new RegExp("^" + matcherSrc + "$").test(path);
+  ok(!!matcherSrc && !gated("/share/quote/x") && !gated("/d/ds/Q-2041/PD-abcdef12/" + sig) && gated("/d/ds") && gated("/d/dsx/a") && gated("/d/other") && gated("/dashboard") && gated("/quotes"),
+    "ds link: the exemption covers exactly the /d/ds/ prefix — nothing broader");
+  ok(route.includes("serveEstimateDatasheet(req, await ctx.params)") && route.includes('export const dynamic = "force-dynamic"'), "ds link: the route only delegates");
+  ok(pds.includes("export async function packageDocForSpec(") && pds.includes("return packageDocForSpec(rev.spec, rev.docFields?.packageSelection ?? null, docId);"),
+    "ds link: one 'is this document on this package' rule for the share route and the permanent link");
+}
+
 export async function photoWrapPureChecks(ok: Ok) {
   spreadChecks(ok);
   modelChecks(ok);
@@ -303,6 +346,7 @@ export async function photoWrapPureChecks(ok: Ok) {
   packagePagePhotoChecks(ok);
   packageDocPhotoChecks(ok);
   titlePageChecks(ok);
+  await datasheetLinkChecks(ok);
 }
 
 export async function photoWrapDbChecks(_ok: Ok) {
