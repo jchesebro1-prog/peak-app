@@ -2516,8 +2516,10 @@ export async function patchQuoteBid(id: string, mutate: (bid: QuoteBid) => Quote
  * the exclusions. `followRenames` moves left-out SKUs onto renamed parts
  * (catalog-renames.ts; passed in, so this store imports no other store).
  * Never touches the revision clock: the selection is not content, so a write
- * never stales the PDF, an approval, or an in-flight Send's version check —
- * the setPackagePeakHeader precedent.
+ * never stales an approval or an in-flight Send's version check — the
+ * setPackagePeakHeader precedent. Since 2026-10-16 the drawings switch and
+ * left-out datasheets print in the customer PDF (merged drawings, datasheet
+ * links), so its caller re-renders the PDF when they moved (pdfAppendixKey).
  */
 export async function setPackageSelection(
   id: string,

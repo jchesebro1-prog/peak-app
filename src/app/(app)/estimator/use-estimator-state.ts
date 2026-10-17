@@ -826,6 +826,7 @@ export function useEstimatorState(props: EstimatorProps) {
         const r = await updateQuoteMetaAction(id, { packageSelection: latest });
         if (!r || !r.ok) throw new Error((r && r.error) || SELECTION_NOT_SAVED);
         selectionAckedKey.current = key;
+        if (r.pdf) setPdf(r.pdf); // spec 2026-10-16 §4: drawings / left-out datasheets re-rendered the PDF
         postChanged("quote", id);
         if (selectionKey(selectionLatest.current) === key) setSelectionError(null);
       })

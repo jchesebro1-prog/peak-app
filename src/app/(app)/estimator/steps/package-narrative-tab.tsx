@@ -86,6 +86,7 @@ export function PackageNarrativeTab({ s, active, presentationHref, onOpenPresent
     setPackageDocOver,
     t,
     updateSection,
+    setPdf,
   } = s;
   useCommentsFocusRefresh(s);
   const pinned = useMemo(
@@ -339,7 +340,7 @@ export function PackageNarrativeTab({ s, active, presentationHref, onOpenPresent
           notIncludedDefault={notIncludedDefault}
         />
         {loadedId ? (
-          <PackageStaffPanel quoteId={loadedId} section="grid" beforeGrid={pdfDirty ? saveNow : undefined} />
+          <PackageStaffPanel quoteId={loadedId} section="grid" beforeGrid={pdfDirty ? saveNow : undefined} onPdf={setPdf} />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
             {/* #314 — disabled until the quote is saved: the Grid design links to a saved estimate. */}

@@ -26788,7 +26788,7 @@ async function withPdfEnv222(run: () => Promise<void>): Promise<void> {
   const renewal = src("src/lib/renewal-outreach.ts");
   ok((renewal.match(/await scheduleRenewalPdf\(quote\.id\);/g) || []).length === 2, "#222 T4 fix: both renewal re-prices schedule the new quote's PDF");
   const est = src("src/app/(app)/estimator/actions.ts");
-  ok(/await scheduleQuotePdf\(updated\.id\);/.test(est) && /await scheduleQuotePdf\(created\.id\);\n  refresh\(\);\n  return \{ ok: true, targetId: created\.id/.test(est) && /const pdf = q && q\.contentChangedAt === q\.updatedAt \? await scheduleQuotePdf\(q\.id\) : undefined;/.test(est), "#222 T4 fix: Estimator move-system (both targets) and header edits schedule the PDF");
+  ok(/await scheduleQuotePdf\(updated\.id\);/.test(est) && /await scheduleQuotePdf\(created\.id\);\n  refresh\(\);\n  return \{ ok: true, targetId: created\.id/.test(est) && /const pdf = q && q\.contentChangedAt === q\.updatedAt \? await scheduleQuotePdf\(q\.id\) : selectionPdf;/.test(est), "#222 T4 fix: Estimator move-system (both targets) and header edits schedule the PDF (spec 2026-10-16: else the selection write\'s own re-render, if its drawings / datasheets moved)");
   ok(/if \(res\.ok\) await scheduleQuotePdf\(id\);/.test(src("src/app/(app)/quotes/actions.ts")), "#222 T4 fix: recalling a revision schedules the PDF");
   ok(/markQuotePdfStale\(updated\.id, updated\.contentChangedAt\)/.test(src("src/app/(app)/import/registry.ts")), "#222 T4 fix: the CSV import marks a changed quote's PDF stale");
   const gen = src("src/lib/quote-pdf/generate.ts");

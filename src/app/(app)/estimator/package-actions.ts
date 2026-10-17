@@ -7,6 +7,9 @@ import { PACKAGE_FILES_COPY } from "@/lib/estimate-output/package-files";
 import { clearPackageZipCache } from "@/lib/estimate-output/package-zip-server";
 import { loadPackagePanel, type PackagePanel } from "@/lib/estimate-output/package-panel-server";
 import { printOriginFor } from "@/lib/quote-pdf/origin";
+import { pdfAppendixKey } from "@/lib/quote-pdf/appendix-key";
+import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
+import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import { ONLINE_COPY } from "@/lib/quote-share/view";
 import { requireUser } from "@/lib/session";
 import { get as getQuote, setPackagePeakHeader } from "@/lib/stores/quotes";
@@ -20,24 +23,43 @@ import { can } from "@/lib/team";
  * link shows), answered with a message, never requirePerm's redirect.
  */
 
-export async function addPackageFileAction(quoteId: string, input: { uploadKey: string; blobPath: string; fileName: string; kind: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+/** Spec 2026-10-16 §4 — the drawings print in the customer PDF: re-render it when the shown list moved. */
+async function rerenderIfAppendixMoved(quoteId: string, beforeKey: string): Promise<QuotePdfView | undefined> {
+  try {
+    const q = await getQuote(quoteId);
+    if (!q || pdfAppendixKey(q) === beforeKey) return undefined;
+    return (await scheduleQuotePdf(q.id)) ?? undefined;
+  } catch (e) {
+    // The drawing write already landed — a failed re-read never reports it as failed (the PDF offers Retry).
+    console.error("[package] PDF re-render check failed", quoteId, e);
+    return undefined;
+  }
+}
+
+export async function addPackageFileAction(quoteId: string, input: { uploadKey: string; blobPath: string; fileName: string; kind: string }): Promise<{ ok: true; pdf?: QuotePdfView } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!can("send", user.roles)) return { ok: false, error: ONLINE_COPY.needsSend };
   try {
+    const before = pdfAppendixKey(await getQuote(String(quoteId || "")));
     const r = await finalizePackageFileUpload(String(quoteId || ""), input, user.name);
-    return r.ok ? { ok: true } : { ok: false, error: r.error };
+    if (!r.ok) return { ok: false, error: r.error };
+    const pdf = await rerenderIfAppendixMoved(String(quoteId || ""), before);
+    return { ok: true, ...(pdf ? { pdf } : {}) };
   } catch (e) {
     console.error("[package] add drawing failed", e);
     return { ok: false, error: PACKAGE_FILES_COPY.failed };
   }
 }
 
-export async function removePackageFileAction(quoteId: string, fileId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function removePackageFileAction(quoteId: string, fileId: string): Promise<{ ok: true; pdf?: QuotePdfView } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!can("send", user.roles)) return { ok: false, error: ONLINE_COPY.needsSend };
   try {
+    const before = pdfAppendixKey(await getQuote(String(quoteId || "")));
     const r = await removePackageFileAndBlob(String(quoteId || ""), String(fileId || ""));
-    return r.ok ? { ok: true } : { ok: false, error: r.error };
+    if (!r.ok) return { ok: false, error: r.error };
+    const pdf = await rerenderIfAppendixMoved(String(quoteId || ""), before);
+    return { ok: true, ...(pdf ? { pdf } : {}) };
   } catch (e) {
     console.error("[package] remove drawing failed", e);
     return { ok: false, error: PACKAGE_FILES_COPY.failed };
@@ -96,15 +118,18 @@ export async function setPackagePeakHeaderAction(quoteId: string, on: boolean | 
 }
 
 /** D-j — "Generate from Grid". Runs under the Estimator page's maxDuration (120 s); one render with 25 s steps fits. */
-export async function generateGridDrawingsAction(quoteId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function generateGridDrawingsAction(quoteId: string): Promise<{ ok: true; pdf?: QuotePdfView } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!can("send", user.roles)) return { ok: false, error: ONLINE_COPY.needsSend };
   try {
     const h = await headers();
     const where = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
     if ("error" in where) return { ok: false, error: where.error };
+    const before = pdfAppendixKey(await getQuote(String(quoteId || "")));
     const r = await generateGridDrawingSet(String(quoteId || ""), user.name, where.origin);
-    return r.ok ? { ok: true } : { ok: false, error: r.error };
+    if (!r.ok) return { ok: false, error: r.error };
+    const pdf = await rerenderIfAppendixMoved(String(quoteId || ""), before);
+    return { ok: true, ...(pdf ? { pdf } : {}) };
   } catch (e) {
     console.error("[package] generate from grid failed", e);
     return { ok: false, error: GRID_SET_COPY.failed };

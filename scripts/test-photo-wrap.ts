@@ -38,6 +38,7 @@ import { buildQuote, get as getQuote, updateQuotePdf } from "../src/lib/stores/q
 import { quotePathSegment } from "../src/lib/estimate-output/package-files";
 import { loadDatasheetLinkRows } from "../src/lib/estimate-output/datasheet-links-server";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
+import { pdfAppendixKey } from "../src/lib/quote-pdf/appendix-key";
 
 export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
@@ -424,6 +425,22 @@ async function noisePdf(px: number, seed: number): Promise<Buffer> {
 const pf = (id: string, name: string, size: number, contentType = "application/pdf") =>
   ({ id, kind: "plan", name, blobPath: `estimate-files/Q-1/UP-0123456789abcdef/${name}`, contentType, size, source: "upload", addedAt: 1, addedBy: "Pat" }) as never;
 
+/* ---- Spec §4 staleness (Task 9): drawing / datasheet-choice writes re-render the PDF without becoming content ---- */
+function rerenderChecks(ok: Ok) {
+  const files = [pf("PF-000000000001", "a.pdf", 10), { ...(pf("PF-000000000002", "b.pdf", 10) as Record<string, unknown>), source: "grid", blobPath: "estimate-files/Q-1/grid/drawing-set.pdf" }];
+  const k0 = pdfAppendixKey({ packageFiles: files, packageSelection: null });
+  ok(k0 === pdfAppendixKey({ packageFiles: files, packageSelection: { estimatePdf: false, coverPdf: false } }), "rerender: the email attachment defaults never re-render the PDF");
+  ok(k0 !== pdfAppendixKey({ packageFiles: files, packageSelection: { drawings: false } }) && k0 !== pdfAppendixKey({ packageFiles: files, packageSelection: { excludedDatasheets: ["ETC:SPOT"] } }) &&
+     k0 !== pdfAppendixKey({ packageFiles: files.slice(1), packageSelection: null }), "rerender: drawings on/off, a left-out datasheet and an added/removed drawing each change what the PDF prints");
+  ok(pdfAppendixKey(null) === "" && pdfAppendixKey({}) === pdfAppendixKey({ packageFiles: [], packageSelection: undefined }), "rerender: no quote / nothing → a stable key");
+  const pa = rd("src/app/(app)/estimator/package-actions.ts"), act = rd("src/app/(app)/estimator/actions.ts"), hook = rd("src/app/(app)/estimator/use-estimator-state.ts"), panel = rd("src/app/(app)/estimator/package-staff-panel.tsx");
+  ok((pa.match(/rerenderIfAppendixMoved\(/g) || []).length === 4 && pa.includes("scheduleQuotePdf(") && pa.includes("pdfAppendixKey("), "rerender: drawing upload, remove and Generate from Grid re-render the PDF when the shown drawings moved");
+  ok(act.includes("pdfAppendixKey(") && act.includes("selectionPdf"), "rerender: a Client package selection write re-renders the PDF when its drawings / datasheets changed");
+  ok(/const r = await updateQuoteMetaAction\(id, \{ packageSelection: latest \}\);[\s\S]{0,200}if \(r\.pdf\) setPdf\(r\.pdf\);/.test(hook) && panel.includes("onPdf?.(r.pdf)"),
+    "rerender: the Estimator's PDF view follows (Updating PDF…)");
+  ok(!rd("src/app/(app)/estimator/pdf-doc-key.ts").includes("packageFiles"), "rerender: the client's Unsaved-changes key is untouched (these writes save themselves)");
+}
+
 async function appendixPureChecks(ok: Ok) {
   const MB = 1024 * 1024;
   // Amendment A1 (Jeff, Oct 16): the finished PDF stays ≤ 14 MB so Send can still attach it (15 MB email limit).
@@ -579,6 +596,7 @@ async function photoWrapPureChecksLoud(ok: Ok) {
   await datasheetLinkChecks(ok);
   datasheetLinksPageChecks(ok);
   await appendixPureChecks(ok);
+  rerenderChecks(ok);
 }
 
 const FIX = "photo-wrap";

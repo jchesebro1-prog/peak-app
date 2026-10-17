@@ -1559,5 +1559,22 @@ See `.env.example`.
 
 63. ✅ **Mailbox identity** (#349, D1063–D1073) — mailbox ownership follows the user's id (`CommThread.mailboxOwnerId`; one rule `ownsMailbox`, stamp → Gmail key → a name only one user holds, else nobody; `ownMailboxCond` in SQL; viewers from `src/lib/mailbox-viewer.ts`), assignments carry `assignedToId`, creators refuse a blank owner, legacy threads stamp lazily in write guards and via `npm run comms:stamp-owners` (Jeff-gated prod run; shared names get the `"unresolved"` tombstone), a rename or new hire never moves mail (`src/lib/mailbox-names.ts`), and Settings → Team refuses duplicate names. Punch item #349.
 
+64. ✅ **Estimate photo wrap + PDF appendices** (#TBD, D-TBD-a…i) — key-product photos spread
+    down each system's text (`src/lib/estimate-output/photo-spread.ts`: photo k before unit k,
+    sides alternating, the system body the only float box) with a model-number tag on the outer
+    bottom corner (`photo-models.ts`, `loadKeyProductModels`), in the PDF, online estimate,
+    package page and the Build package document (product blocks are plain blocks now) + editor.
+    The PDF (print layout only) opens on a title page (cover note there, no investment band),
+    pricing follows the narratives, the BOM appendix is last; then the client's drawings merged
+    with pdf-lib at their own page size (`src/lib/quote-pdf/appendix-*.ts`; 25 MB a file, the
+    finished PDF kept ≤ 14 MB for email — drawings that don't fit are left out with a note and
+    stay on the package page; notes on `pdf.notes`, never a failure) and a page of permanent
+    datasheet links (`/d/ds/<quote>/<doc>/<sig>`, `datasheet-link*.ts`, public in middleware).
+    The print route's `?part=main|tail` splits around the drawings; `pdfAppendixKey`
+    (`appendix-key.ts`) re-renders on drawing / selection changes without bumping updatedAt.
+    Bidder PDFs get the order but no drawings or links. No migration. Remaining is Jeff-gated:
+    `QUOTE_PDF_ORIGIN` in production, a real estimate with drawings and datasheets on
+    production, and a long cover note. Punch item #TBD.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

@@ -12637,3 +12637,16 @@ The app is safe before step 4: ownership already resolves the same way lazily (G
 - A venue type already set to "Church — Contemporary" keeps the earlier drawing until it is re-picked in Settings → Venue types.
 - Try Link to rack… / Unlink on a real Grid design with a rack built in the Assembly Builder.
 - The first supplement price file on production: check its parts read the new date and the rest of the book keeps its old one.
+
+## TBD. Estimate photo wrap, model tags, PDF title page, drawings + datasheet links — DONE 2026-10-17 on `feat/narrative-photo-wrap` (D-TBD-a…i)
+
+Spec `docs/superpowers/specs/2026-10-16-estimate-photo-wrap-title-page-design.md`; plan `docs/superpowers/plans/2026-10-16-estimate-photo-wrap-title-page.md`. Key-product photos spread through each system's narrative with a model-number tag in the outer bottom corner (PDF, online estimate, package page, Build package document + editor). The PDF opens on a title page with the cover note, has no investment band, and puts pricing after the narratives and the BOM appendix last. The customer PDF then appends the client's drawings (merged with pdf-lib at their own page size; the finished PDF kept ≤ 14 MB for email, drawings that don't fit left out with a note and kept on the package page) and a page of permanent datasheet links (`/d/ds/…`). Drawing upload / remove / Generate from Grid and the Client package Drawings switch / left-out datasheets re-render it (`pdfAppendixKey`) without bumping updatedAt. The bidder PDF gets the title page and order, never drawings or links. No migration.
+
+**Verification:** tsc 0 errors; `scripts/test-photo-wrap.ts` 125 PASS / 0 FAIL (pure); test:specs 24,280 PASS / 0 FAIL; test:smoke 263 PASS / 0 FAIL (`.next` deleted, run alone; a first attempt 500'd on every route including `/api/auth/csrf` — environment, the rerun passed); eslint 0 errors / 0 warnings on the 44 changed src/scripts files; `next build` OK. Real render (scratch PGlite, Blob token empty): the print route's main + links parts rendered with `renderPrintRouteToPdf` and merged by `prepareDrawings` + `mergeEstimateAppendices` with a synthetic 2-page 11×17 PDF and a PNG — 8 pages: title page (cover note, no totals), narrative with tagged placeholder photos, pricing, itemized BOM on a new page, two 792×1224 drawing pages, one landscape letter image page, the datasheet links page last with live `/d/ds/` URI annotations; no investment band anywhere. Artifacts in `docs/superpowers/fixtures/photo-wrap-render/`. Real drawings from Blob were not rendered (the dev server can't read Blob).
+
+**Rollback:** safe. Only new optional JSON (`pdf.notes`). Old PDFs stay as stored; the datasheet links printed in new PDFs stop working after a rollback (the route is gone).
+
+**Remaining (Jeff-gated):**
+- Set `QUOTE_PDF_ORIGIN` to the production host before relying on the datasheet links (they print the print origin, and break if AUTH_SECRET ever rotates).
+- On production after merge: open one real estimate with drawings + datasheets and check the page order, an 11×17 drawing at full size, the 14 MB ceiling note when a drawing set is too big, and that a datasheet link opens without signing in.
+- Try a long cover note on the title page (it should stay on page 1 or flow cleanly).

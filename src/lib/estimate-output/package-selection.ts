@@ -2,8 +2,10 @@
  * #333 (spec 2026-10-12 §5.1) — what the client gets on this project: the
  * per-quote `Quote.packageSelection`. Pure and client-safe (no imports).
  *
- * Not content (never a QUOTE_CONTENT_FIELDS member): nothing here prints on
- * the estimate PDF, so a change never stales the PDF or an approval. It is
+ * Not content (never a QUOTE_CONTENT_FIELDS member): a change never stales an
+ * approval; since 2026-10-16 the drawings switch and left-out datasheets print
+ * in the customer PDF (merged drawings, datasheet links), so their writers
+ * re-render it (pdfAppendixKey). It is
  * frozen into a revision's `docFields.packageSelection` only when the live
  * quote has one; absent always reads as DEFAULT_PACKAGE_SELECTION, which is
  * exactly today's behaviour. Every reader goes through

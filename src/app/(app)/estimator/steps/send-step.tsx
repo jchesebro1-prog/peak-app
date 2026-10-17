@@ -69,6 +69,7 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
     templateSets,
     tierResolving,
     next,
+    setPdf,
   } = s;
   /** Bumped after a send so the Activity card re-reads at once. */
   const [trackKey, setTrackKey] = useState(0);
@@ -284,7 +285,7 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
             <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate first.</div>
           </>
         )}
-        {loadedId && <PackageStaffPanel quoteId={loadedId} section="responses" />}
+        {loadedId && <PackageStaffPanel quoteId={loadedId} section="responses" onPdf={setPdf} />}
       </section>
     ),
     tasks: (

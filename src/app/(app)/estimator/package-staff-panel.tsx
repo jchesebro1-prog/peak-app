@@ -12,6 +12,7 @@ import type { PackagePanel } from "@/lib/estimate-output/package-panel-server";
 import { GRID_SET_COPY } from "@/lib/design/grid-set-print";
 import { BOOK_COVER_COPY } from "@/lib/part-docs/datasheet-book-cover";
 import { postChanged } from "@/lib/popout/channel";
+import type { QuotePdfView } from "@/lib/quote-pdf/state";
 
 /**
  * #301 slice C — the package's staff side under the Client link block:
@@ -41,6 +42,7 @@ export function PackageStaffPanel({
   beforeGrid,
   refreshKey,
   onFiles,
+  onPdf,
 }: {
   quoteId: string;
   section?: "all" | "documents" | "grid" | "responses";
@@ -50,6 +52,8 @@ export function PackageStaffPanel({
   onFiles?: (visible: number) => void;
   /** #316: saves the estimate's unsaved edits first (the Estimator's awaitable `saveNow`) — the Grid's From-estimate tray reads the SAVED quote. Resolves to false when nothing was written. Omitted = nothing to save. */
   beforeGrid?: () => Promise<number | false>;
+  /** Spec 2026-10-16 §4: a drawing change re-rendered the customer PDF — hand the Estimator its view (Updating PDF…). */
+  onPdf?: (v: QuotePdfView) => void;
 }) {
   const [panel, setPanel] = useState<PackagePanel | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -110,6 +114,7 @@ export function PackageStaffPanel({
         setErr(FAILED);
         return;
       }
+      if (r.ok && r.pdf) onPdf?.(r.pdf);
       if (r.ok) {
         postChanged("quote", quoteId);
         setNote(`${file.name} added.`);
@@ -129,6 +134,7 @@ export function PackageStaffPanel({
         return;
       }
       setConfirmId(null);
+      if (r.ok && r.pdf) onPdf?.(r.pdf);
       if (!r.ok) setErr(r.error);
       else postChanged("quote", quoteId);
       await reload();
@@ -164,6 +170,7 @@ export function PackageStaffPanel({
         return;
       }
       setNote(r.ok ? GRID_SET_COPY.generated : null);
+      if (r.ok && r.pdf) onPdf?.(r.pdf);
       if (!r.ok) setErr(r.error);
       else postChanged("quote", quoteId);
       await reload();

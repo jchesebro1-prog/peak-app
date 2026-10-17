@@ -66,6 +66,7 @@ import {
 import { companyCredit } from "@/lib/stores/reward-ledger";
 import { normalizePdfOptions, type QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
+import { pdfAppendixKey } from "@/lib/quote-pdf/appendix-key";
 import { documentRevStamp, type QuotePdfView } from "@/lib/quote-pdf/state";
 import { activeUsers } from "@/lib/users";
 import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
@@ -1242,16 +1243,30 @@ export async function updateQuoteMetaAction(
   // wins) through the store's one writer — a checked partial merged under the
   // row lock; null / non-object input is ignored; an over-cap list is refused
   // with its reason. It never bumps updatedAt, so it can't fail an in-flight
-  // Send ("changed since") and never re-renders the PDF.
+  // Send ("changed since"), and it re-renders the PDF only when the drawings
+  // or left-out datasheets changed (spec 2026-10-16).
   let selectionError: string | undefined;
+  let selectionPdf: QuotePdfView | undefined;
   if (meta.packageSelection !== undefined) {
+    const before = pdfAppendixKey(await get(id));
     const r = await setPackageSelection(id, meta.packageSelection, selectionFollowingRenames);
     if (!r.ok) selectionError = r.error;
+    else {
+      // Spec 2026-10-16 §4: the drawings switch and left-out datasheets print in the customer PDF (drawings,
+      // datasheet links) — still not content (no updatedAt bump), but the PDF re-renders when they moved.
+      try {
+        const now = await get(id);
+        if (now && pdfAppendixKey(now) !== before) selectionPdf = (await scheduleQuotePdf(id)) ?? undefined;
+      } catch (e) {
+        // The selection is saved — a failed re-read never reports it as unsaved (the PDF offers Retry).
+        console.error("[quote-pdf] selection re-render check failed", id, e);
+      }
+    }
   }
   if (!Object.keys(patch).length) {
     // Selection-only (or empty): no update(), so no updatedAt bump.
     if (!selectionError) refresh();
-    return selectionError ? { ok: false, error: selectionError } : { ok: true };
+    return selectionError ? { ok: false, error: selectionError } : { ok: true, ...(selectionPdf ? { pdf: selectionPdf } : {}) };
   }
 
   // #254 review: the tier stamp is NOT written here any more. It is saved
@@ -1264,7 +1279,7 @@ export async function updateQuoteMetaAction(
   // that changed one (patchQuote stamps contentChangedAt with this write's
   // updatedAt) re-renders it; a category-only edit doesn't.
   // The preview takes the scheduled state back so it shows "Updating PDF…".
-  const pdf = q && q.contentChangedAt === q.updatedAt ? await scheduleQuotePdf(q.id) : undefined;
+  const pdf = q && q.contentChangedAt === q.updatedAt ? await scheduleQuotePdf(q.id) : selectionPdf;
   refresh();
   return { ok: !!q && !selectionError, ...(selectionError ? { error: selectionError } : {}), ...(pdf ? { pdf } : {}) };
 }
