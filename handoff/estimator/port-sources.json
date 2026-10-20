@@ -528,6 +528,16 @@
           "sha256": "f7945462a49ed49a5cd048796a9a20c3e9c7d7e6219a0041dc33bbdc16308b19"
         }
       ]
+    },
+    {
+      "port": "handoff/estimator/fetch-photos.ts",
+      "what": "blobKeyBelongsTo — the blob-path guard (part-docs/<docId>/<one safe segment>) applied to every export-supplied key before a Blob read",
+      "originals": [
+        {
+          "path": "src/lib/part-docs/types.ts",
+          "sha256": "323603005a26859e095efbe8bc00a0e182ab9b49ca136706c36ba70cf2bfe5a0"
+        }
+      ]
     }
   ]
 }

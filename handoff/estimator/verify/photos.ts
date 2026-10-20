@@ -109,6 +109,12 @@ export async function photosCheck(pkgDir: string): Promise<PhotosResult> {
   const sink = newSink();
   const steps: PhotosResult["steps"] = [];
   const step = (name: string, ok: boolean, detail?: string) => steps.push({ step: name, ok, ...(detail ? { detail } : {}) });
+  // The package the recipient gets must not carry a private Blob pathname anywhere: data/photo-manifest.json (the
+  // selection, an input of handoff:photos only) is gone, and no file — bundle included — names "part-docs/".
+  const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]));
+  const pkgFiles = walk(pkgDir);
+  const leaky = pkgFiles.filter((f) => readFileSync(f).includes("part-docs/")).map((f) => path.relative(pkgDir, f));
+  step("the package carries no private Blob pathname (no file contains \"part-docs/\") and no data/photo-manifest.json", leaky.length === 0 && !existsSync(path.join(pkgDir, "data", "photo-manifest.json")), leaky.join(", ") || `${pkgFiles.length} files scanned`);
   const screenshots: string[] = [];
   const shot = async (page: Page, name: string) => {
     const file = path.join(VERIFY_DIR, `photos-${name}.png`);

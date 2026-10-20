@@ -101,7 +101,7 @@ docs/estimating-core/handoff-fixtures/export-v2.json   # synthetic export incl. 
   - `data/estimates.js` → `window.PEAK_ESTIMATES = [ ...quote docs ]`
   - `data/customers.js` → `window.PEAK_CUSTOMERS = { companies, sites, contacts, contactEmails, contactPhones, geoCache }`
   - `data/team.js` → `window.PEAK_TEAM = [ { id, name, roles, status, title, initials, color } ]`
-  - `data/photo-manifest.json` (not loaded by the page; input for Task 11) → `[{ sku, docId, blobKey, sourceUrl }]`
+  - ~~`data/photo-manifest.json`~~ — dropped in the Task 11 fix pass: the selection carries private Blob pathnames, so it is never written into the package; `handoff:photos` recomputes it from the export.
 - Exports from `slice-rules.ts`:
   - `pickFields(doc, allow): object`
   - `scanForSecrets(json: string): string[]` (returns the matched rule names; empty means clean)

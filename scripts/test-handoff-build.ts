@@ -10,7 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { isUseServer, exportNames, shimPlugin } from "../handoff/estimator/esbuild-plugins";
-import { dataScripts, forbiddenBundleInputs, outDirProblem } from "../handoff/estimator/build";
+import { dataScripts, forbiddenBundleInputs, outDirProblem, privatePathLeaks, referencedImageFiles, stageImages } from "../handoff/estimator/build";
 import { classifyRequest } from "../handoff/estimator/verify";
 import type { Ok } from "./test-inbox-org";
 
@@ -37,7 +37,7 @@ export async function handoffBuildChecks(ok: Ok) {
   // --- dataScripts ---
   const order = dataScripts([
     "meta.js", "estimates.js", "catalog-10.js", "catalog-2.js", "catalog-9.js", "catalog-1.js",
-    "fixtures.js", "customers.js", "team.js", "rules.js", "photo-manifest.json", "photos.js",
+    "fixtures.js", "customers.js", "team.js", "rules.js", "photos.js",
   ]);
   ok(
     order.join(",") === "rules.js,team.js,customers.js,fixtures.js,catalog-1.js,catalog-2.js,catalog-9.js,catalog-10.js,estimates.js,photos.js,meta.js",
@@ -82,6 +82,50 @@ export async function handoffBuildChecks(ok: Ok) {
     ok((await run('import "client-only";\nexport const y = 1;\nconsole.log(y);')) === null, "handoff:build: client-only still bundles as a no-op");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+
+  // --- images: only what images/manifest.json references ships; no private Blob pathname anywhere in data/ or images/ ---
+  const st = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-stage-"));
+  try {
+    const mk = (dir: string, files: Record<string, string>) => {
+      fs.mkdirSync(dir, { recursive: true });
+      for (const [n, b] of Object.entries(files)) fs.writeFileSync(path.join(dir, n), b);
+    };
+    const manifest = JSON.stringify({ version: 1, bySku: { A: "PD-1" }, byDoc: { "PD-1": "PD-1.webp", "PD-2": "PD-2.png", "PD-3": "PD-3.webp" }, linkOnly: [], failed: [] });
+    const src = path.join(st, "src");
+    mk(src, { "manifest.json": manifest, "PD-1.webp": "a", "PD-2.png": "b", "PD-old.webp": "stale", "notes.txt": "n", "PD-1.webp.part": "half" });
+    fs.mkdirSync(path.join(src, "sub"));
+    ok(referencedImageFiles(src).files.join() === "PD-1.webp,PD-2.png", "handoff:build: referencedImageFiles — manifest entries whose file exists (PD-3 is listed but missing)");
+    const dst = path.join(st, "pkg", "images");
+    fs.mkdirSync(dst, { recursive: true });
+    fs.writeFileSync(path.join(dst, "old-stuff.webp"), "x");
+    const copied = stageImages(src, dst);
+    ok(fs.readdirSync(dst).sort().join() === "PD-1.webp,PD-2.png,manifest.json" && copied.dropped.join() === "PD-1.webp.part,PD-old.webp,notes.txt,sub",
+      `handoff:build: stageImages from another folder copies ONLY the referenced files + manifest.json (${fs.readdirSync(dst).join(",")})`);
+    const inplace = stageImages(null, src);
+    ok(fs.readdirSync(src).sort().join() === "PD-1.webp,PD-2.png,manifest.json" && inplace.dropped.length === 4, "handoff:build: stageImages in place removes every unreferenced entry (stale images, notes, .part files, sub-folders)");
+    const noMan = path.join(st, "noman");
+    mk(noMan, { "PD-1.webp": "a" });
+    stageImages(null, noMan);
+    ok(!fs.existsSync(noMan), "handoff:build: stageImages — an images folder with no manifest ships nothing (the folder is removed)");
+    const noManCopy = path.join(st, "pkg2", "images");
+    mk(path.join(st, "noman2"), { "PD-1.webp": "a" });
+    stageImages(path.join(st, "noman2"), noManCopy);
+    ok(!fs.existsSync(noManCopy), "handoff:build: stageImages — copying from a folder with no manifest creates no images/");
+    mk(path.join(st, "badman"), { "manifest.json": "{ nope" });
+    let threw = "";
+    try { stageImages(path.join(st, "badman"), path.join(st, "pkg3")); } catch (e) { threw = (e as Error).message; }
+    ok(/is unreadable — re-run handoff:photos/.test(threw), "handoff:build: stageImages — an unreadable manifest fails the build with a clear message");
+
+    const pkg = path.join(st, "leakpkg");
+    mk(path.join(pkg, "data"), { "estimates.js": "window.PEAK_ESTIMATES = [];\n", "photos.js": 'window.PEAK_PHOTOS = {"bySku":{},"byDoc":{"PD-1":"images/PD-1.webp"}};' });
+    mk(path.join(pkg, "images"), { "manifest.json": JSON.stringify({ version: 1, bySku: {}, byDoc: {}, linkOnly: [], failed: [{ docId: "PD-9", error: "blob path outside part-docs/<docId>/" }] }) });
+    mk(pkg, { "index.html": "<html></html>" });
+    ok(privatePathLeaks(pkg).length === 0, "handoff:build: privatePathLeaks — a clean package (the 'blob path outside part-docs/<docId>/' failure text is not a pathname)");
+    fs.writeFileSync(path.join(pkg, "data", "photo-manifest.json"), '[{"sku":"A","blobKey":"part-docs/PD-1/a.webp"}]');
+    ok(privatePathLeaks(pkg).join() === path.join("data", "photo-manifest.json"), "handoff:build: privatePathLeaks — flags a data file carrying a part-docs/<id>/… pathname");
+  } finally {
+    fs.rmSync(st, { recursive: true, force: true });
   }
 
   // --- --out guard ---

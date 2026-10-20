@@ -8,11 +8,18 @@
  *
  * Then re-run handoff:slice (it writes data/photos.js when images/manifest.json exists) and handoff:build.
  * Options: --dry-run · --verbose (list every pick) · --force (re-download files already in the folder) ·
+ *          --prune (delete image files in the folder the manifest does not reference) ·
  *          --concurrency N (default 6) · --retries N (default 2).
+ *
+ * The selection (sku → document → private Blob pathname) is recomputed from the export on every run; the Blob pathnames
+ * are never written into the package (images/manifest.json holds file names only). Each pathname is checked against the
+ * app's own rule (part-docs/<docId>/<one safe file name>) before anything is fetched. Files are written to <file>.part
+ * and renamed; a file already in the folder is re-checked (format, completeness) before it is reused. Three
+ * consecutive 401/403 responses abort the run.
  *
  * Which photo: photo-select.ts (the app's own rule). Files are kept exactly as stored (WebP) — no transcoding —
  * and named <docId>.<ext>. A link-only document (no stored file) is recorded in manifest.json, not downloaded.
- * Exit codes: 0 done · 1 some downloads failed (manifest still written for the rest) · 2 usage / missing token / bad export.
+ * Exit codes: 0 done · 1 some downloads failed (manifest still written for the rest) or the token was rejected · 2 usage / missing token / bad export.
  * Plan: PR 2 Task 11.
  */
 import * as fs from "node:fs";
@@ -25,20 +32,52 @@ import type { ExportV2 } from "./slice";
 export const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 export const DEFAULT_CONCURRENCY = 6;
 export const DEFAULT_RETRIES = 2;
+/** Consecutive 401/403 responses after which the run stops (a rejected token fails every document alike). */
+export const AUTH_ABORT_AFTER = 3;
+export const AUTH_ABORT_MESSAGE = "Blob token rejected — check BLOB_READ_WRITE_TOKEN";
+
+/** A Blob read the store refused for want of valid credentials (HTTP 401/403). */
+export class BlobAuthError extends Error {
+  constructor(message = "access denied") {
+    super(message);
+    this.name = "BlobAuthError";
+  }
+}
+
+/** True for our own BlobAuthError, the SDK's BlobAccessError, or anything carrying an HTTP status of 401/403. */
+export function isAuthError(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  const status = (e as { status?: unknown; statusCode?: unknown }).status ?? (e as { statusCode?: unknown }).statusCode;
+  return e instanceof BlobAuthError || e.name === "BlobAccessError" || status === 401 || status === 403;
+}
+
+/**
+ * Mirrors src/lib/part-docs/types.ts blobPathBelongsTo (a strict allow-list: `get` concatenates the pathname into a URL,
+ * so literal ".." / "/" blocklists can be bypassed by encoded or backslash traversal). The key must be
+ * `part-docs/<docId>/<one file segment>`; the segment starts with a letter, digit, "_" or "-", and holds only
+ * letters, digits, ".", "_", "-" (no "%", "\\", "?", "#", spaces, control characters, slashes or a leading dot).
+ */
+const SAFE_FILE_SEGMENT = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,254}$/;
+export function blobKeyBelongsTo(blobKey: unknown, docId: string): blobKey is string {
+  if (typeof blobKey !== "string" || !DOC_ID_RE.test(docId)) return false;
+  const prefix = `part-docs/${docId}/`;
+  return blobKey.startsWith(prefix) && SAFE_FILE_SEGMENT.test(blobKey.slice(prefix.length));
+}
 
 /** What a Blob read returns: the bytes, or null when the blob does not exist (never retried). Throws on anything else. */
 export type BlobClient = { read(blobKey: string): Promise<Uint8Array | null> };
 
 /** The real client: @vercel/blob get(key, { access: "private" }), authorized by BLOB_READ_WRITE_TOKEN (src/lib/blob.ts's call). */
 export async function vercelBlobClient(): Promise<BlobClient> {
-  const { get } = await import("@vercel/blob");
+  const { get, BlobNotFoundError, BlobAccessError } = await import("@vercel/blob");
   return {
     async read(blobKey) {
       let res: Awaited<ReturnType<typeof get>>;
       try {
         res = await get(blobKey, { access: "private" });
       } catch (e) {
-        if (e instanceof Error && e.name === "BlobNotFoundError") return null;
+        if (e instanceof BlobNotFoundError) return null;
+        if (e instanceof BlobAccessError) throw new BlobAuthError(e.message);
         throw e;
       }
       if (!res || res.statusCode !== 200 || !res.stream) return null;
@@ -75,6 +114,20 @@ export function sniffImageExt(b: Uint8Array): "webp" | "png" | "jpg" | "gif" | n
   return null;
 }
 
+/**
+ * A stored image that really is whole: right format AND its own end marker (WebP: RIFF length = file length; PNG ends in
+ * IEND + CRC; JPEG ends FFD9; GIF ends 3B). Catches a truncated copy left by an interrupted run. Returns the format or null.
+ */
+export function completeImageExt(b: Uint8Array): "webp" | "png" | "jpg" | "gif" | null {
+  const ext = sniffImageExt(b);
+  const n = b.length;
+  if (!ext) return null;
+  if (ext === "webp") return n >= 12 && (b[4] | (b[5] << 8) | (b[6] << 16) | (b[7] << 24)) + 8 === n ? ext : null;
+  if (ext === "png") return n >= 20 && b[n - 8] === 0x49 && b[n - 7] === 0x45 && b[n - 6] === 0x4e && b[n - 5] === 0x44 ? ext : null;
+  if (ext === "jpg") return n >= 4 && b[n - 2] === 0xff && b[n - 1] === 0xd9 ? ext : null;
+  return n >= 7 && b[n - 1] === 0x3b ? ext : null;
+}
+
 export type DownloadResult = {
   /** document id → file name written (or already present) in the folder. */
   files: Record<string, string>;
@@ -82,6 +135,8 @@ export type DownloadResult = {
   downloaded: number;
   reused: number;
   bytes: number;
+  /** Set when the run stopped early (a rejected token); documents not attempted are in neither files nor failed. */
+  aborted?: string;
 };
 
 export type DownloadOptions = {
@@ -96,11 +151,12 @@ export type DownloadOptions = {
   redact?: string[];
 };
 
+/** A usable copy already in the folder: the file is re-read and must be a whole image whose format matches its extension. */
 const existingFile = (dir: string, docId: string): string | null => {
   for (const ext of ["webp", "png", "jpg", "gif"]) {
     const f = `${docId}.${ext}`;
     try {
-      if (fs.statSync(path.join(dir, f)).size > 0) return f;
+      if (completeImageExt(fs.readFileSync(path.join(dir, f))) === ext) return f;
     } catch {
       /* not there */
     }
@@ -111,6 +167,8 @@ const existingFile = (dir: string, docId: string): string | null => {
 function redacted(msg: string, secrets: readonly string[]): string {
   let out = msg;
   for (const s of secrets) if (s) out = out.split(s).join("[redacted]");
+  // a Blob error often quotes the pathname it was asked for; those are private and never go into the manifest
+  out = out.replace(/part-docs\/[^\s"'`]*/g, "[blob path]");
   return out.slice(0, 300);
 }
 
@@ -122,9 +180,15 @@ export async function downloadPhotos(items: ReadonlyArray<{ docId: string; blobK
   fs.mkdirSync(opts.outDir, { recursive: true });
   const res: DownloadResult = { files: {}, failed: [], downloaded: 0, reused: 0, bytes: 0 };
   let next = 0;
+  let authStreak = 0;
   const one = async (it: { docId: string; blobKey: string }) => {
     if (!DOC_ID_RE.test(it.docId)) {
       res.failed.push({ docId: it.docId, error: "document id is not a safe file name" });
+      return;
+    }
+    // The export is data, not trust: only part-docs/<this doc>/<one safe segment> is ever handed to the Blob client.
+    if (!blobKeyBelongsTo(it.blobKey, it.docId)) {
+      res.failed.push({ docId: it.docId, error: "blob path outside part-docs/<docId>/" });
       return;
     }
     if (!opts.force) {
@@ -135,11 +199,13 @@ export async function downloadPhotos(items: ReadonlyArray<{ docId: string; blobK
         return;
       }
     }
+    if (res.aborted) return;
     let lastErr = "";
     for (let attempt = 0; attempt <= retries; attempt++) {
       if (attempt > 0 && backoff > 0) await new Promise((r) => setTimeout(r, backoff * 2 ** (attempt - 1)));
       try {
         const bytes = await opts.client.read(it.blobKey);
+        authStreak = 0;
         if (bytes === null) {
           res.failed.push({ docId: it.docId, error: "not found in Blob" });
           return;
@@ -154,13 +220,29 @@ export async function downloadPhotos(items: ReadonlyArray<{ docId: string; blobK
           res.failed.push({ docId: it.docId, error: "unsafe file name" });
           return;
         }
-        fs.writeFileSync(path.join(opts.outDir, file), bytes);
+        // a stale copy of this document in another format is removed so the folder holds exactly one file per document
+        for (const other of ["webp", "png", "jpg", "gif"]) if (`${it.docId}.${other}` !== file) fs.rmSync(path.join(opts.outDir, `${it.docId}.${other}`), { force: true });
+        const dest = path.join(opts.outDir, file);
+        const tmp = `${dest}.part`;
+        try {
+          fs.writeFileSync(tmp, bytes);
+          fs.renameSync(tmp, dest);
+        } catch (we) {
+          fs.rmSync(tmp, { force: true });
+          throw we;
+        }
         res.files[it.docId] = file;
         res.downloaded++;
         res.bytes += bytes.byteLength;
         return;
       } catch (e) {
         lastErr = redacted(e instanceof Error ? e.message : String(e), opts.redact ?? []);
+        if (isAuthError(e)) {
+          // a refused token is not transient: no retry for this document, and a streak stops the whole run
+          if (++authStreak >= AUTH_ABORT_AFTER && !res.aborted) res.aborted = AUTH_ABORT_MESSAGE;
+          break;
+        }
+        authStreak = 0;
       }
     }
     res.failed.push({ docId: it.docId, error: lastErr || "failed" });
@@ -168,7 +250,7 @@ export async function downloadPhotos(items: ReadonlyArray<{ docId: string; blobK
   const worker = async () => {
     for (;;) {
       const i = next++;
-      if (i >= items.length) return;
+      if (i >= items.length || res.aborted) return;
       await one(items[i]);
     }
   };
@@ -189,6 +271,28 @@ export function buildPhotoManifest(picks: readonly PhotoPick[], result: Download
   }
   const { linkOnly } = downloadPlan(picks);
   return { version: PHOTO_MANIFEST_VERSION, bySku, byDoc, linkOnly: linkOnly.map(({ sku, docId }) => ({ sku, docId })), failed: result.failed };
+}
+
+/** Entries of the images folder the manifest does not reference (manifest.json itself and in-flight .part files excluded from "referenced" only for the manifest). Pure on the listing. */
+export function unreferencedFiles(names: readonly string[], manifest: Pick<PhotoManifest, "byDoc">): string[] {
+  const keep = new Set<string>(["manifest.json", ...Object.values(manifest.byDoc)]);
+  return names.filter((n) => !keep.has(n)).sort();
+}
+
+/** Lists the folder's top-level entries and returns the unreferenced ones; with `prune`, deletes only the IMAGE_FILE_RE matches among them. */
+export function reconcileImagesDir(dir: string, manifest: Pick<PhotoManifest, "byDoc">, prune: boolean): { unreferenced: string[]; pruned: string[]; remaining: string[] } {
+  const unreferenced = unreferencedFiles(fs.readdirSync(dir), manifest);
+  const pruned: string[] = [];
+  if (prune) {
+    for (const n of unreferenced) {
+      if (!IMAGE_FILE_RE.test(n)) continue;
+      const p = path.join(dir, n);
+      if (!fs.statSync(p).isFile()) continue;
+      fs.rmSync(p);
+      pruned.push(n);
+    }
+  }
+  return { unreferenced, pruned, remaining: unreferenced.filter((n) => !pruned.includes(n)) };
 }
 
 /** The selection for an export, exactly as the slicer will slice it (same estimates, fixtures). */
@@ -225,7 +329,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
   const input = val("--in"), out = val("--out");
   const dry = argv.includes("--dry-run");
   if (!input || !out) {
-    console.error("usage: npm run handoff:photos -- --in <export.json> --out <images dir> [--dry-run] [--verbose] [--force] [--concurrency N] [--retries N]");
+    console.error("usage: npm run handoff:photos -- --in <export.json> --out <images dir> [--dry-run] [--verbose] [--force] [--prune] [--concurrency N] [--retries N]");
     return 2;
   }
   let exp: ExportV2;
@@ -266,6 +370,10 @@ export async function main(argv: string[], env: Record<string, string | undefine
     force: argv.includes("--force"),
     redact: [token],
   });
+  if (result.aborted) {
+    console.error(`${result.aborted}. Stopped after ${AUTH_ABORT_AFTER} consecutive 401/403 responses; ${result.downloaded} downloaded before that. images/manifest.json was not written.`);
+    return 1;
+  }
   const manifest = buildPhotoManifest(sel.picks, result);
   const body = JSON.stringify(manifest, null, 2) + "\n";
   const hits = scanForSecrets(body);
@@ -273,11 +381,16 @@ export async function main(argv: string[], env: Record<string, string | undefine
     console.error(`SECRET SCAN: images/manifest.json matches ${hits.join(", ")}; not written.`);
     return 1;
   }
-  fs.writeFileSync(path.join(outDir, "manifest.json"), body);
+  const manifestFile = path.join(outDir, "manifest.json");
+  fs.writeFileSync(`${manifestFile}.part`, body);
+  fs.renameSync(`${manifestFile}.part`, manifestFile);
   console.log(`downloaded ${result.downloaded} (${(result.bytes / 1e6).toFixed(2)} MB), already present ${result.reused}, failed ${result.failed.length}, link-only ${plan.linkOnly.length} in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   for (const f of result.failed) console.error(`  FAILED ${f.docId}: ${f.error}`);
   for (const l of plan.linkOnly) console.log(`  link-only (not downloaded) ${l.sku} ← ${l.docId} ${l.sourceUrl ?? ""}`);
   console.log(`wrote ${path.join(outDir, "manifest.json")} (${Object.keys(manifest.byDoc).length} images for ${Object.keys(manifest.bySku).length} parts)`);
+  const rec = reconcileImagesDir(outDir, manifest, argv.includes("--prune"));
+  if (rec.pruned.length) console.log(`pruned ${rec.pruned.length} unreferenced image file(s): ${rec.pruned.join(", ")}`);
+  if (rec.remaining.length) console.warn(`WARNING: ${rec.remaining.length} unreferenced files in images/ — delete them or pass --prune${argv.includes("--prune") ? " (--prune removes image files only; the rest need deleting by hand)" : ""}: ${rec.remaining.slice(0, 10).join(", ")}${rec.remaining.length > 10 ? ", …" : ""}`);
   console.log("next: npm run handoff:slice (writes data/photos.js), then npm run handoff:build");
   return result.failed.length ? 1 : 0;
 }

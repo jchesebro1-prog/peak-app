@@ -9,7 +9,8 @@
  *                           [--images <dir>]   (default: ../images beside the data dir)
  *
  * Run handoff:photos first: when <images>/manifest.json exists the slice also writes data/photos.js, the browser's
- * photo map (photo-select.ts). Without it the page shows placeholders.
+ * photo map (photo-select.ts). Without it the page shows placeholders. The photo SELECTION (which Blob pathname feeds which
+ * part) is private and never part of the package: handoff:photos recomputes it from the export.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -46,6 +47,8 @@ export type SliceResult = {
   hits: Array<{ file: string; rules: string[] }>;
   /** Files over MAX_FILE_BYTES; non-empty = refuse to write. */
   oversize: Array<{ file: string; bytes: number }>;
+  /** Parts the sliced estimates/fixtures name that have a photo in Peak but none in the supplied images/manifest.json (only computed when one was supplied). */
+  photosMissing: string[];
   /** Free-text values blanked because they were secret-shaped. */
   scrubbed: Array<{ file: string; id: string; field: string; rule: string }>;
   counts: Record<string, number>;
@@ -164,10 +167,11 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[]; 
   counts.team = team.length;
 
   // --- photos: the selection (the app's own primary-image rule + manufacturer fallback, over the parts the sliced
-  // estimates and fixtures name) is the input for handoff:photos; data/photos.js — the browser's map — exists only
-  // when handoff:photos has already written images/manifest.json (opts.photos). Not loaded without it: placeholders show. ---
+  // estimates and fixtures name) only sizes the counts here — it carries PRIVATE Blob pathnames, so it is not written to
+  // the package (handoff:photos recomputes it from the export). data/photos.js — the browser's map, sku → document →
+  // file name — exists only when handoff:photos has already written images/manifest.json (opts.photos). Not loaded
+  // without it: placeholders show. ---
   const selection = selectPhotos(exp, estimates, fixtures);
-  files["data/photo-manifest.json"] = JSON.stringify(selection.picks) + "\n";
   counts.photos = selection.picks.length;
   if (opts.photos) {
     files["data/photos.js"] = photosScript(opts.photos);
@@ -191,7 +195,8 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[]; 
     const bytes = Buffer.byteLength(body);
     if (bytes > MAX_FILE_BYTES) oversize.push({ file, bytes });
   }
-  return { files, hits, oversize, scrubbed, counts };
+  const photosMissing = opts.photos ? selection.picks.filter((p) => !Object.prototype.hasOwnProperty.call(opts.photos!.bySku, p.sku)).map((p) => p.sku) : [];
+  return { files, hits, oversize, scrubbed, photosMissing, counts };
 }
 
 /** Writes the slice into `outDir` (the prototype's data folder). Refuses — writing nothing — if the scan or size check failed. */
@@ -201,6 +206,8 @@ export function writeSlice(r: SliceResult, outDir: string): boolean {
   for (const f of fs.readdirSync(outDir)) if (/^catalog-\d+\.js$/.test(f)) fs.rmSync(path.join(outDir, f));
   // a photos.js from an earlier run must not outlive the images/manifest.json that justified it
   if (!("data/photos.js" in r.files)) fs.rmSync(path.join(outDir, "photos.js"), { force: true });
+  // an earlier slicer wrote the private selection here; it must never ship
+  fs.rmSync(path.join(outDir, "photo-manifest.json"), { force: true });
   for (const [file, body] of Object.entries(r.files)) fs.writeFileSync(path.join(outDir, path.basename(file)), body);
   return true;
 }
@@ -217,17 +224,24 @@ export function loadPhotoManifest(imagesDir: string): { manifest: PhotoManifest 
   return { manifest: m, missing };
 }
 
-function main() {
-  const arg = (name: string) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined; };
+/** The CLI. Returns the exit code (0 written · 1 refused/unreadable · 2 usage or a bad export). */
+export function run(argv: string[]): number {
+  const arg = (name: string) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
   const input = arg("--in"), out = arg("--out"), extra = arg("--extra-estimates"), imagesArg = arg("--images");
   if (!input || !out) {
     console.error("usage: npm run handoff:slice -- --in <export.json> --out <data dir> [--extra-estimates <export.json>] [--images <dir>]");
-    process.exit(2);
+    return 2;
   }
-  const exp = JSON.parse(fs.readFileSync(input, "utf8")) as ExportV2;
+  let exp: ExportV2;
+  try {
+    exp = JSON.parse(fs.readFileSync(input, "utf8")) as ExportV2;
+  } catch (e) {
+    console.error(`${input}: cannot read the export (${e instanceof Error ? e.message : String(e)})`);
+    return 2;
+  }
   if (exp.meta?.format !== 2) {
     console.error(`${input}: expected a format-2 export (re-run npm run db:export); got format ${exp.meta?.format ?? "?"}`);
-    process.exit(2);
+    return 2;
   }
   let extraEstimates: QuoteDoc[] | undefined;
   if (extra) {
@@ -236,15 +250,22 @@ function main() {
     console.log(`--extra-estimates: ${extraEstimates.length} estimate(s) from ${extra} (dev only — never for production)`);
   }
   const imagesDir = path.resolve(imagesArg ?? path.join(path.dirname(path.resolve(out)), "images"));
-  const photos = loadPhotoManifest(imagesDir);
+  let photos: ReturnType<typeof loadPhotoManifest>;
+  try {
+    photos = loadPhotoManifest(imagesDir);
+  } catch {
+    console.error(`${path.join(imagesDir, "manifest.json")} is unreadable — re-run handoff:photos`);
+    return 1;
+  }
   if (photos.manifest) console.log(`photos: ${Object.keys(photos.manifest.byDoc).length} image(s) from ${imagesDir}${photos.missing.length ? ` (${photos.missing.length} listed in manifest.json but missing from the folder — left out)` : ""}`);
   else console.log(`photos: no ${path.join(imagesDir, "manifest.json")} — no data/photos.js (placeholders only); run npm run handoff:photos first for product photos`);
   const r = sliceExport(exp, { extraEstimates, photos: photos.manifest });
+  if (r.photosMissing.length) console.warn(`WARNING: ${r.photosMissing.length} picked parts have no downloaded photo (${r.photosMissing.slice(0, 8).join(", ")}${r.photosMissing.length > 8 ? ", …" : ""}) — re-run handoff:photos; they show the placeholder`);
   for (const h of r.hits) console.error(`SECRET SCAN: ${h.file} matches ${h.rules.join(", ")}`);
   for (const o of r.oversize) console.error(`TOO BIG: ${o.file} is ${o.bytes} bytes (limit ${MAX_FILE_BYTES})`);
   if (!writeSlice(r, out)) {
     console.error("handoff:slice refused to write (see above); nothing was written.");
-    process.exit(1);
+    return 1;
   }
   let total = 0;
   console.log(`Slice written to ${out}`);
@@ -257,6 +278,7 @@ function main() {
   console.log("  counts: " + Object.entries(r.counts).map(([k, v]) => `${k}=${v}`).join(" "));
   console.log(`  secret scan: clean (${r.scrubbed.length} value(s) scrubbed)`);
   for (const s of r.scrubbed) console.log(`    scrubbed ${s.file} ${s.id}.${s.field} (${s.rule})`);
+  return 0;
 }
 
-if (/handoff[\\/]estimator[\\/]slice\.ts$/.test(path.resolve(process.argv[1] ?? ""))) main();
+if (/handoff[\\/]estimator[\\/]slice\.ts$/.test(path.resolve(process.argv[1] ?? ""))) process.exit(run(process.argv.slice(2)));

@@ -1,6 +1,7 @@
 /**
  * Estimator handoff — which product photo each part ships with, and the browser's photo map (PR 2 Task 11).
- * Pure: no I/O, no store. Shared by handoff:slice (data/photo-manifest.json, data/photos.js) and handoff:photos.
+ * Pure: no I/O, no store. Shared by handoff:slice (data/photos.js, the counts) and handoff:photos (which recomputes the selection from the export;
+ * it carries private Blob pathnames and is never written into the package).
  *
  * The rule is the app's own, ported over the export's collections instead of the store:
  *   own photo       src/lib/stores/part-documents.ts visibleImagesForParts — a part's live, non-hidden image links in

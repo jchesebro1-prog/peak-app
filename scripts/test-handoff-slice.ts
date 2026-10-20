@@ -12,9 +12,9 @@ import {
   CATALOG_FIELDS, FIXTURE_FIELDS, QUOTE_FIELDS, BLOB_IDS, SETTINGS_FIELDS, COMPANY_COLS, SITE_COLS, CONTACT_COLS,
   pickFields, scanForSecrets, selectEstimates, catalogChunks,
 } from "../handoff/estimator/slice-rules";
-import { sliceExport, writeSlice, loadPhotoManifest, type ExportV2 } from "../handoff/estimator/slice";
+import { sliceExport, writeSlice, loadPhotoManifest, run as sliceRun, type ExportV2 } from "../handoff/estimator/slice";
 import { downloadPlan, manufacturerImageIds, parsePhotoManifest, photoScopeSkus, photosScript, selectPhotos } from "../handoff/estimator/photo-select";
-import { buildPhotoManifest, describeSelection, downloadPhotos, main as photosMain, selectionForExport, sniffImageExt, type BlobClient } from "../handoff/estimator/fetch-photos";
+import { AUTH_ABORT_MESSAGE, BlobAuthError, blobKeyBelongsTo, buildPhotoManifest, completeImageExt, describeSelection, downloadPhotos, main as photosMain, reconcileImagesDir, selectionForExport, sniffImageExt, type BlobClient } from "../handoff/estimator/fetch-photos";
 import type { Ok } from "./test-inbox-org";
 
 export const FIXTURE_V2 = "docs/estimating-core/handoff-fixtures/export-v2.json";
@@ -103,7 +103,7 @@ export async function handoffSliceChecks(ok: Ok) {
   const r = sliceExport(exp);
   ok(r.hits.length === 0, "handoff:slice: the fixture slice passes the final secret scan" + (r.hits.length ? ` — ${JSON.stringify(r.hits)}` : ""));
   const names = Object.keys(r.files).sort();
-  ok(["data/meta.js", "data/rules.js", "data/catalog-1.js", "data/fixtures.js", "data/estimates.js", "data/customers.js", "data/team.js", "data/photo-manifest.json"].every((n) => names.includes(n)),
+  ok(["data/meta.js", "data/rules.js", "data/catalog-1.js", "data/fixtures.js", "data/estimates.js", "data/customers.js", "data/team.js"].every((n) => names.includes(n)),
     `handoff:slice: all contract files emitted (${names.join(", ")})`);
   ok(names.filter((n) => n.endsWith(".js")).every((n) => /^\(window\.PEAK_|^window\.PEAK_/.test(r.files[n])), "handoff:slice: every .js file starts with (window.PEAK_ / window.PEAK_");
   ok(names.every((n) => Buffer.byteLength(r.files[n]) <= 15_000_000), "handoff:slice: every emitted file ≤ 15,000,000 bytes");
@@ -185,11 +185,8 @@ export async function handoffSliceChecks(ok: Ok) {
   const fx = fixtures[0] as Record<string, unknown>;
   ok(!("internalNote" in fx) && fx.createdBy === "u1" && fx.kind === "fixture" && Array.isArray(fx.lines) && FIXTURE_FIELDS.includes("lines"),
     "handoff:slice: fixtures are picked to FIXTURE_FIELDS — an unknown field is dropped, FixtureRecord fields kept");
-  const manifest = JSON.parse(r.files["data/photo-manifest.json"]) as Array<Record<string, unknown>>;
-  ok(manifest.map((m) => `${m.sku}:${m.docId}:${m.via}`).join(",") === "SKU-A:PD-1:own,SKU-B:PD-5:manufacturer" && manifest[0].blobKey === "part-docs/PD-1/a.webp" && "sourceUrl" in manifest[0],
-    `handoff:slice: photo-manifest = one pick per part the sliced estimates/fixtures name { sku, docId, blobKey, sourceUrl, via } (${manifest.map((m) => `${m.sku}:${m.docId}:${m.via}`).join(",")})`);
-  ok(manifest[0].sourceUrl === "https://example.com/a.webp" && !r.files["data/photo-manifest.json"].includes("token=") && !r.files["data/photo-manifest.json"].includes("#frag"),
-    "handoff:slice: photo-manifest sourceUrl drops the query string and fragment (scheme + host + path only)");
+  ok(!("data/photo-manifest.json" in r.files) && Object.values(r.files).every((b) => !b.includes("part-docs/")),
+    "handoff:slice: the private photo selection is not part of the slice — no data/photo-manifest.json, no file names a Blob pathname (part-docs/…)");
   ok(!("data/photos.js" in r.files), "handoff:slice: no data/photos.js without an images/manifest.json (placeholders only)");
   const meta = load("data/meta.js").PEAK_META as { sliceVersion: number; counts: Record<string, number> };
   ok(meta.sliceVersion === 1 && meta.counts.estimates === 3 && meta.counts.catalog === 2 && meta.counts.companies === 2, "handoff:slice: meta.js carries sliceVersion 1 and counts");
@@ -210,7 +207,9 @@ export async function handoffSliceChecks(ok: Ok) {
     const outBad = path.join(tmp, "bad");
     ok(writeSlice(rb, outBad) === false && !fs.existsSync(outBad), "handoff:slice: writeSlice refuses (writes nothing) when the scan is not clean");
     const outGood = path.join(tmp, "good", "data");
-    ok(writeSlice(r, outGood) === true && fs.existsSync(path.join(outGood, "estimates.js")) && fs.existsSync(path.join(outGood, "photo-manifest.json")), "handoff:slice: writeSlice writes the clean slice (paths relative to the out dir)");
+    ok(writeSlice(r, outGood) === true && fs.existsSync(path.join(outGood, "estimates.js")) && !fs.existsSync(path.join(outGood, "photo-manifest.json")), "handoff:slice: writeSlice writes the clean slice (paths relative to the out dir), without a photo-manifest.json");
+    fs.writeFileSync(path.join(outGood, "photo-manifest.json"), "[]");
+    ok(writeSlice(r, outGood) === true && !fs.existsSync(path.join(outGood, "photo-manifest.json")), "handoff:slice: a photo-manifest.json left by an earlier slicer is removed on re-slice");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -259,21 +258,23 @@ export async function handoffSliceChecks(ok: Ok) {
 // ---------------------------------------------------------------------------------------------------------------
 // Task 11 — product photos: the selection (the app's own rule), the download (fake Blob client), the CLI.
 
-const WEBP = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0x10, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x20]);
-const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+const WEBP = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0x08, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x20]);
+const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]);
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 const mkRow = (id: string, doc: Record<string, unknown>, deleted = false) => ({ id, doc, deleted });
 
 async function quiet<T>(fn: () => Promise<T>): Promise<{ value: T; out: string; err: string }> {
-  const log = console.log, error = console.error;
+  const log = console.log, error = console.error, warn = console.warn;
   let out = "", err = "";
   console.log = (...a: unknown[]) => { out += a.join(" ") + "\n"; };
   console.error = (...a: unknown[]) => { err += a.join(" ") + "\n"; };
+  console.warn = (...a: unknown[]) => { err += a.join(" ") + "\n"; };
   try {
     return { value: await fn(), out, err };
   } finally {
     console.log = log;
     console.error = error;
+    console.warn = warn;
   }
 }
 
@@ -469,5 +470,142 @@ async function photoChecks(ok: Ok, exp: ExportV2) {
     ok(c2.status === 2 && /BLOB_READ_WRITE_TOKEN/.test(c2.stderr) && !fs.existsSync(path.join(dl, "cli-out")), `handoff:photos: CLI without a token exits 2 (exit ${c2.status})`);
   } finally {
     fs.rmSync(dl, { recursive: true, force: true });
+  }
+  await photoFixChecks(ok, exp);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Task 11 fix pass — Blob-key guard, atomic writes + safe resume, auth abort, prune, slicer warnings, private selection.
+
+async function photoFixChecks(ok: Ok, exp: ExportV2) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-photos-fix-"));
+  try {
+    // --- 1. the Blob-key guard (mirrors blobPathBelongsTo) ---
+    ok(blobKeyBelongsTo("part-docs/PD-1/a.webp", "PD-1") && blobKeyBelongsTo("part-docs/PD-1/a-b_c.1.webp", "PD-1"), "handoff:photos: blobKeyBelongsTo — part-docs/<docId>/<safe file> passes");
+    const badKeys: Array<[string, string]> = [
+      ["documents/PD-1/secret.pdf", "PD-1"], ["part-docs/PD-2/a.webp", "PD-1"], ["part-docs/PD-1/../PD-2/a.webp", "PD-1"], ["part-docs/PD-1/a/b.webp", "PD-1"],
+      ["part-docs/PD-1/..", "PD-1"], ["part-docs/PD-1/.hidden", "PD-1"], ["part-docs/PD-1/a\u0001.webp", "PD-1"], ["part-docs/PD-1/%2e%2e.webp", "PD-1"],
+      ["part-docs/PD-1/..\\PD-2\\x.webp", "PD-1"], ["part-docs/PD-1/", "PD-1"], ["part-docs/PD-1/a b.webp", "PD-1"], ["/part-docs/PD-1/a.webp", "PD-1"], ["part-docs/PD-1/a.webp", "../PD-1"],
+    ];
+    ok(badKeys.every(([k, d]) => !blobKeyBelongsTo(k, d)) && !blobKeyBelongsTo(null, "PD-1") && !blobKeyBelongsTo(42, "PD-1"),
+      `handoff:photos: blobKeyBelongsTo — out-of-prefix, other-document, traversal, nested, encoded, control-character and empty keys all refused (${badKeys.filter(([k, d]) => blobKeyBelongsTo(k, d)).map(([k]) => k).join("|")})`);
+    const gdir = path.join(tmp, "guard");
+    const fetched: string[] = [];
+    const gclient: BlobClient = { async read(k) { fetched.push(k); return WEBP; } };
+    const gres = await downloadPhotos([
+      { docId: "PD-evil", blobKey: "documents/X/secret.pdf" }, { docId: "PD-cross", blobKey: "part-docs/PD-other/a.webp" }, { docId: "PD-trav", blobKey: "part-docs/PD-trav/../x.webp" },
+      { docId: "PD-fine", blobKey: "part-docs/PD-fine/a.webp" },
+    ], { client: gclient, outDir: gdir, backoffMs: 0 });
+    ok(fetched.join() === "part-docs/PD-fine/a.webp" && gres.failed.length === 3 && gres.failed.every((f) => f.error === "blob path outside part-docs/<docId>/") && Object.keys(gres.files).join() === "PD-fine",
+      `handoff:photos: download — a blobKey outside part-docs/<docId>/ is recorded as failed and nothing is fetched for it (fetched ${fetched.join("|")})`);
+
+    // --- 2. atomic writes + resume safety ---
+    const rdir = path.join(tmp, "resume");
+    fs.mkdirSync(path.join(rdir, "PD-dir.webp"), { recursive: true });
+    fs.writeFileSync(path.join(rdir, "PD-dir.webp", "keep.txt"), "x");
+    fs.writeFileSync(path.join(rdir, "PD-good.webp"), WEBP);
+    fs.writeFileSync(path.join(rdir, "PD-trunc.webp"), WEBP.slice(0, 10));
+    fs.writeFileSync(path.join(rdir, "PD-empty.webp"), "");
+    fs.writeFileSync(path.join(rdir, "PD-wrongfmt.webp"), PNG);
+    fs.writeFileSync(path.join(rdir, "PD-fmt.png"), WEBP);
+    fs.writeFileSync(path.join(rdir, "PD-new.webp.part"), "half a file");
+    const rcalls: string[] = [];
+    const rclient: BlobClient = { async read(k) { rcalls.push(k); return WEBP; } };
+    const ids = ["PD-good", "PD-trunc", "PD-empty", "PD-wrongfmt", "PD-fmt", "PD-new", "PD-dir"];
+    const rres = await downloadPhotos(ids.map((d) => ({ docId: d, blobKey: `part-docs/${d}/p.webp` })), { client: rclient, outDir: rdir, backoffMs: 0 });
+    ok(!rcalls.includes("part-docs/PD-good/p.webp") && rres.reused === 1 && ["PD-trunc", "PD-empty", "PD-wrongfmt", "PD-fmt", "PD-new"].every((d) => rcalls.includes(`part-docs/${d}/p.webp`)),
+      `handoff:photos: resume — a whole file is reused; a truncated, empty, wrong-format or wrong-extension file is re-downloaded (calls ${rcalls.length})`);
+    ok(["PD-trunc", "PD-empty", "PD-wrongfmt", "PD-new", "PD-fmt"].every((d) => fs.readFileSync(path.join(rdir, `${d}.webp`)).equals(Buffer.from(WEBP))) && !fs.existsSync(path.join(rdir, "PD-fmt.png")),
+      "handoff:photos: resume — the re-downloaded files are whole, and a stale copy in another format is removed");
+    ok(!fs.readdirSync(rdir).some((n) => n.endsWith(".part")) && rres.failed.length === 1 && rres.failed[0].docId === "PD-dir" && fs.existsSync(path.join(rdir, "PD-dir.webp", "keep.txt")),
+      "handoff:photos: writes go to <file>.part then rename — a failed write is recorded and leaves no .part file behind");
+    ok(completeImageExt(WEBP) === "webp" && completeImageExt(WEBP.slice(0, 10)) === null && completeImageExt(PNG) === "png" && completeImageExt(PNG.slice(0, 15)) === null &&
+      completeImageExt(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 0xff, 0xd9])) === "jpg" && completeImageExt(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2])) === null &&
+      completeImageExt(new Uint8Array([...new TextEncoder().encode("GIF89a"), 0, 0x3b])) === "gif" && completeImageExt(new TextEncoder().encode("GIF89a\0\0")) === null,
+      "handoff:photos: completeImageExt — format plus its own end marker (WebP length, PNG IEND, JPEG FFD9, GIF trailer)");
+
+    // --- 3. a rejected token aborts early ---
+    const acalls: string[] = [];
+    const authFail: BlobClient = { async read(k) { acalls.push(k); throw new BlobAuthError("Access denied, please provide a valid token for this resource."); } };
+    const aitems = Array.from({ length: 10 }, (_, i) => ({ docId: `PD-a${i}`, blobKey: `part-docs/PD-a${i}/p.webp` }));
+    const ares = await downloadPhotos(aitems, { client: authFail, outDir: path.join(tmp, "auth"), concurrency: 1, backoffMs: 0 });
+    ok(acalls.length === 3 && ares.aborted === AUTH_ABORT_MESSAGE && ares.failed.length === 3, `handoff:photos: 3 consecutive auth failures stop the run (no retries, ${acalls.length} of 10 documents tried)`);
+    const status403: BlobClient = { async read(k) { acalls.push(k); throw Object.assign(new Error("Forbidden"), { status: 403 }); } };
+    acalls.length = 0;
+    ok((await downloadPhotos(aitems, { client: status403, outDir: path.join(tmp, "auth"), concurrency: 1, backoffMs: 0 })).aborted === AUTH_ABORT_MESSAGE && acalls.length === 3, "handoff:photos: an error carrying HTTP status 403 (or 401) counts as an auth failure");
+    let n = 0;
+    const mixed: BlobClient = { async read() { n++; if (n % 3 === 0) return WEBP; throw new BlobAuthError(); } };
+    const mres = await downloadPhotos(aitems, { client: mixed, outDir: path.join(tmp, "auth2"), concurrency: 1, backoffMs: 0 });
+    ok(!mres.aborted && mres.downloaded === 3 && mres.failed.length === 7, "handoff:photos: a success resets the streak — only CONSECUTIVE auth failures abort");
+    // main(): needs three documents to download
+    const big = clone(exp);
+    const bdocs = big.collections!.part_documents as unknown[];
+    const blinks = big.collections!.part_document_links as unknown[];
+    const fa = (big.collections!.subassemblies as Array<{ id: string; doc: Record<string, unknown> }>).find((f) => f.id === "fa-1")!;
+    const extraLines: Array<{ sku: string; qty: number }> = [];
+    for (let i = 0; i < 4; i++) {
+      bdocs.push(mkRow(`PD-X${i}`, { id: `PD-X${i}`, kind: "image", blobKey: `part-docs/PD-X${i}/x.webp`, source: "upload" }));
+      blinks.push({ id: `LX${i}`, doc: { id: `LX${i}`, partSku: `SKU-X${i}`, documentId: `PD-X${i}`, kind: "image" } });
+      extraLines.push({ sku: `SKU-X${i}`, qty: 1 });
+    }
+    fa.doc.lines = [...((fa.doc.lines as Array<{ sku: string; qty: number }>) ?? []), ...extraLines];
+    const bigPath = path.join(tmp, "big.json");
+    fs.writeFileSync(bigPath, JSON.stringify(big));
+    const outAuth = path.join(tmp, "pkg-auth", "images");
+    const authRun = await quiet(() => photosMain(["--in", bigPath, "--out", outAuth, "--concurrency", "1"], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => authFail));
+    ok(authRun.value === 1 && authRun.err.includes(AUTH_ABORT_MESSAGE) && !fs.existsSync(path.join(outAuth, "manifest.json")), "handoff:photos: main — a rejected token exits 1 with 'Blob token rejected — check BLOB_READ_WRITE_TOKEN' and writes no manifest");
+
+    // --- 5. unreferenced files: warn, --prune ---
+    const pdir = path.join(tmp, "pkg-prune", "images");
+    const pclient: BlobClient = { async read(k) { return k.includes("PD-X0") ? PNG : WEBP; } };
+    fs.mkdirSync(pdir, { recursive: true });
+    for (const f of ["PD-OLD.webp", "PD-OLD2.png"]) fs.writeFileSync(path.join(pdir, f), WEBP);
+    fs.writeFileSync(path.join(pdir, "notes.txt"), "keep me");
+    const warnRun = await quiet(async () => { const w: string[] = []; const o = console.warn; console.warn = (...a: unknown[]) => { w.push(a.join(" ")); }; try { return { code: await photosMain(["--in", bigPath, "--out", pdir], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => pclient), w }; } finally { console.warn = o; } });
+    ok(warnRun.value.code === 0 && warnRun.value.w.some((l) => /3 unreferenced files in images\/ — delete them or pass --prune/.test(l)) && fs.existsSync(path.join(pdir, "PD-OLD.webp")),
+      `handoff:photos: after a run, unreferenced files in images/ are warned about, not deleted (${warnRun.value.w.join(" / ").slice(0, 120)})`);
+    const pruneRun = await quiet(() => photosMain(["--in", bigPath, "--out", pdir, "--prune"], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => pclient));
+    const left = fs.readdirSync(pdir).sort();
+    ok(pruneRun.value === 0 && !left.includes("PD-OLD.webp") && !left.includes("PD-OLD2.png") && left.includes("notes.txt") && left.includes("manifest.json") && left.includes("PD-1.webp") && left.includes("PD-X0.png"),
+      `handoff:photos: --prune deletes only unreferenced IMAGE_FILE_RE files (a notes.txt and every referenced file stay) — left: ${left.join(",")}`);
+    const rec = reconcileImagesDir(pdir, { byDoc: { "PD-1": "PD-1.webp" } }, true);
+    ok(rec.pruned.includes("PD-X0.png") && rec.remaining.join() === "notes.txt", "handoff:photos: reconcileImagesDir — prune never touches a non-image file");
+
+    // --- 7/8. the private selection never ships; fetch errors are secret-scanned ---
+    const sl = sliceExport(exp);
+    ok(!("data/photo-manifest.json" in sl.files) && Object.values(sl.files).every((b) => !b.includes("part-docs/")), "handoff:slice: no sliced file contains a private Blob pathname");
+    const leaky: BlobClient = { async read() { throw new Error("upstream said: " + T.github + " bad"); } };
+    const outLeak = path.join(tmp, "pkg-leak", "images");
+    const leakRun = await quiet(() => photosMain(["--in", bigPath, "--out", outLeak, "--retries", "0"], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => leaky));
+    ok(leakRun.value === 1 && /SECRET SCAN/.test(leakRun.err) && !fs.existsSync(path.join(outLeak, "manifest.json")) && !leakRun.err.includes(T.github) && !leakRun.out.includes(T.github),
+      "handoff:photos: a secret-shaped fetch error recorded in failed[] stops images/manifest.json from being written");
+    const pathy: BlobClient = { async read(k) { throw new Error(`The requested blob does not exist: ${k}`); } };
+    const outPathy = path.join(tmp, "pkg-pathy", "images");
+    await quiet(() => photosMain(["--in", bigPath, "--out", outPathy, "--retries", "0"], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => pathy));
+    ok(fs.existsSync(path.join(outPathy, "manifest.json")) && !fs.readFileSync(path.join(outPathy, "manifest.json"), "utf8").includes("part-docs/"), "handoff:photos: a Blob pathname quoted in an error never reaches images/manifest.json");
+
+    // token-shaped sku key in the photo manifest → the slicer refuses (data/photos.js is scanned)
+    const tokenSku = sliceExport(exp, { photos: { version: 1, bySku: { [T.github]: "PD-1" }, byDoc: { "PD-1": "PD-1.webp" }, linkOnly: [], failed: [] } });
+    ok(tokenSku.hits.some((h) => h.file === "data/photos.js") && writeSlice(tokenSku, path.join(tmp, "refused")) === false && !fs.existsSync(path.join(tmp, "refused")),
+      "handoff:slice: a token-shaped sku key in the photo manifest makes the slicer refuse (data/photos.js is scanned) and write nothing");
+
+    // --- 6. slicer: missing-photo warning, unreadable manifest ---
+    const expPath = path.join(tmp, "export.json");
+    fs.writeFileSync(expPath, JSON.stringify(exp));
+    const pkg = path.join(tmp, "slice-pkg");
+    fs.mkdirSync(path.join(pkg, "images"), { recursive: true });
+    fs.writeFileSync(path.join(pkg, "images", "PD-1.webp"), WEBP);
+    fs.writeFileSync(path.join(pkg, "images", "manifest.json"), JSON.stringify({ version: 1, bySku: { "SKU-A": "PD-1" }, byDoc: { "PD-1": "PD-1.webp" }, linkOnly: [], failed: [] }));
+    const sw = await quiet(async () => { const w: string[] = []; const o = console.warn; console.warn = (...a: unknown[]) => { w.push(a.join(" ")); }; try { return { code: sliceRun(["--in", expPath, "--out", path.join(pkg, "data")]), w }; } finally { console.warn = o; } });
+    ok(sw.value.code === 0 && sw.value.w.some((l) => /1 picked parts have no downloaded photo \(SKU-B\)/.test(l)) && fs.existsSync(path.join(pkg, "data", "photos.js")),
+      `handoff:slice: a manifest lacking picked skus warns 'N picked parts have no downloaded photo' (${sw.value.w.join(" / ").slice(0, 100)})`);
+    fs.writeFileSync(path.join(pkg, "images", "manifest.json"), "{ not json");
+    const bad = await quiet(async () => sliceRun(["--in", expPath, "--out", path.join(pkg, "data2")]));
+    ok(bad.value === 1 && /images[\\/]manifest\.json is unreadable — re-run handoff:photos/.test(bad.err) && !/\bat \w|Error:|node:/.test(bad.err) && !fs.existsSync(path.join(pkg, "data2")),
+      `handoff:slice: a malformed images/manifest.json exits 1 with a one-line message, no stack, nothing written (${bad.err.trim().slice(0, 120)})`);
+    fs.writeFileSync(path.join(pkg, "images", "manifest.json"), JSON.stringify({ version: 9 }));
+    ok((await quiet(async () => sliceRun(["--in", expPath, "--out", path.join(pkg, "data2")]))).value === 1, "handoff:slice: a manifest of another version also exits 1 cleanly");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 }

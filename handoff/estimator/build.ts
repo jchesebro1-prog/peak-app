@@ -5,16 +5,19 @@
  *
  * Writes <out>/{index.html, app/app.js, app/app.css, app/assets/*, CONFIDENTIAL.txt}.
  * The slice (handoff:slice) and photos normally live in <out>/data and <out>/images already;
- * --data / --images copy them in from elsewhere. Every emitted file must stay ≤ 15,000,000
+ * --data / --images copy them in from elsewhere. Only the files images/manifest.json references (plus the manifest)
+ * ship; anything else in an images folder stays out (copied folder) or is removed (in-place folder). Nothing in
+ * data/ or images/ may name a private Blob pathname ("part-docs/") — the build fails if one does. Every emitted file must stay ≤ 15,000,000
  * bytes (the Artifact limit) or the build fails. Build diagnostics (discovered server actions,
  * esbuild metafile) go to output/handoff-build/, outside the package. Plan: PR 2 Task 2.
  */
 import * as esbuild from "esbuild";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import postcss from "postcss";
 import tailwindcss from "@tailwindcss/postcss";
 import { FORBIDDEN_PACKAGES } from "../../scripts/core-check";
+import { parsePhotoManifest } from "./photo-select";
 import { APP_OVERRIDES, appOverridePlugin, bakeModules, bakePlugin, imagePlugin, shimPlugin, serverActionStubPlugin } from "./esbuild-plugins";
 
 const HERE = __dirname;
@@ -108,6 +111,58 @@ function syncDir(from: string | null, to: string, label: string): boolean {
   return existsSync(to);
 }
 
+/** Files of the images folder `from` that ship: the manifest's referenced files (that exist) plus manifest.json itself. */
+export function referencedImageFiles(from: string): { manifest: boolean; files: string[] } {
+  const mf = path.join(from, "manifest.json");
+  if (!existsSync(mf)) return { manifest: false, files: [] };
+  let m: ReturnType<typeof parsePhotoManifest>;
+  try {
+    m = parsePhotoManifest(JSON.parse(readFileSync(mf, "utf8")));
+  } catch {
+    m = null;
+  }
+  if (!m) throw new Error(`${mf} is unreadable — re-run handoff:photos`);
+  return { manifest: true, files: [...new Set(Object.values(m.byDoc))].filter((f) => existsSync(path.join(from, f))).sort() };
+}
+
+/**
+ * Puts only the referenced images (+ manifest.json) into the package's images/ folder. From another folder: a fresh copy of
+ * just those. In place (from === to, the usual case): every other entry of the folder is deleted. No manifest = no images.
+ * Returns what shipped and what was left out / removed.
+ */
+export function stageImages(from: string | null, to: string): { shipped: string[]; dropped: string[] } {
+  const src = from ?? to;
+  if (!existsSync(src)) {
+    if (from) throw new Error(`--images ${from} does not exist`);
+    return { shipped: [], dropped: [] };
+  }
+  const { manifest, files } = referencedImageFiles(src);
+  const keep = new Set<string>(manifest ? [...files, "manifest.json"] : []);
+  const dropped = readdirSync(src).filter((n) => !keep.has(n)).sort();
+  if (path.resolve(src) === path.resolve(to)) {
+    for (const n of dropped) rmSync(path.join(to, n), { recursive: true, force: true });
+    if (!manifest) rmSync(to, { recursive: true, force: true });
+  } else {
+    rmSync(to, { recursive: true, force: true });
+    if (manifest) {
+      mkdirSync(to, { recursive: true });
+      for (const n of keep) copyFileSync(path.join(src, n), path.join(to, n));
+    }
+  }
+  return { shipped: [...keep].sort(), dropped };
+}
+
+/** Package files that carry a private Blob pathname ("part-docs/<id>/…"; the failure text "part-docs/<docId>/" is not one): data/*, images/manifest.json, index.html. [] = clean. */
+export function privatePathLeaks(pkg: string): string[] {
+  const bad: string[] = [];
+  const candidates = [...listFiles(path.join(pkg, "data")).map((f) => path.join("data", f)), path.join("images", "manifest.json"), "index.html"];
+  for (const rel of candidates) {
+    const p = path.join(pkg, rel);
+    if (existsSync(p) && statSync(p).isFile() && /part-docs\/[A-Za-z0-9_-]+\//.test(readFileSync(p, "utf8"))) bad.push(rel);
+  }
+  return bad;
+}
+
 function listFiles(dir: string, base = dir): string[] {
   if (!existsSync(dir)) return [];
   const out: string[] = [];
@@ -133,7 +188,10 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
   rmSync(path.join(OUT, "index.html"), { force: true });
 
   const hasData = syncDir(args.data, path.join(OUT, "data"), "data");
-  const hasImages = syncDir(args.images, path.join(OUT, "images"), "images");
+  // a data/photo-manifest.json from an earlier slicer carried private Blob pathnames; it never ships
+  rmSync(path.join(OUT, "data", "photo-manifest.json"), { force: true });
+  const staged = stageImages(args.images, path.join(OUT, "images"));
+  const hasImages = existsSync(path.join(OUT, "images"));
 
   // --- JS: the real Estimator client, server actions swapped for registry stubs ---
   const discovered: Record<string, string[]> = {};
@@ -199,6 +257,9 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
   writeFileSync(path.join(diag, "meta.json"), JSON.stringify(result.metafile));
   writeFileSync(path.join(diag, "discovered-actions.json"), JSON.stringify(discovered, null, 2) + "\n");
 
+  const leaks = privatePathLeaks(OUT);
+  if (leaks.length) throw new Error(`private Blob pathnames ("part-docs/") found in the package: ${leaks.join(", ")}`);
+
   const files = listFiles(OUT).map((f) => ({ file: f, bytes: statSync(path.join(OUT, f)).size }));
   const oversize = files.filter((f) => f.bytes > MAX_FILE_BYTES).map((f) => f.file);
 
@@ -210,6 +271,7 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
   for (const w of result.warnings) console.log(`  WARN ${w.text}${w.location ? ` (${w.location.file}:${w.location.line})` : ""}`);
   if (!hasData) console.log("  no data/ — the page mounts with an empty slice (run npm run handoff:slice first)");
   if (!hasImages) console.log("  no images/ (optional)");
+  else console.log(`  images: ${staged.shipped.length ? staged.shipped.length - 1 : 0} referenced file(s) shipped${staged.dropped.length ? `; ${staged.dropped.length} unreferenced left out (${staged.dropped.slice(0, 5).join(", ")}${staged.dropped.length > 5 ? ", …" : ""})` : ""}`);
   console.log(`  data scripts: ${scripts.join(", ") || "(none)"}`);
   let total = 0;
   for (const f of files) {
