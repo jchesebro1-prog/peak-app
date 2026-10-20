@@ -14,7 +14,7 @@
  */
 import { useSyncExternalStore } from "react";
 import { refresh } from "../runtime/router";
-import { composeHistoryUrl, mapAppHref, normalizedLocation, NOT_IN_PROTOTYPE_COPY, parseRoute, routeHash, routeSearch, type Route } from "../runtime/routes";
+import { adoptedLocation, composeHistoryUrl, mapAppHref, NEW_ESTIMATE_ID, normalizedLocation, NOT_IN_PROTOTYPE_COPY, parseRoute, routeHash, routeSearch, withForeignParams, type Route } from "../runtime/routes";
 
 const EVT = "peak-handoff-locationchange";
 /** Fired on window with a `detail` saying who moved the location. */
@@ -24,15 +24,78 @@ let patched = false;
 
 const emit = (source: LocationChange["source"]) => window.dispatchEvent(new CustomEvent<LocationChange>(EVT, { detail: { source } }));
 
-/** Scrolls to `#id`, retrying for a moment: the Estimator pushes the anchor in the same tick it switches the tab. */
+/** How long an in-page anchor waits for its element (a tab that mounts lazily, a panel shown a moment later). */
+export const ANCHOR_WAIT_MS = 5000;
+let cancelAnchor: (() => void) | null = null;
+
+/**
+ * Scrolls to `#id` once the element exists and is laid out — the Estimator pushes the anchor in the same tick it
+ * switches the step/tab, and the target panel mounts (or stops being display:none) after that. Watches the DOM
+ * (MutationObserver) for up to ANCHOR_WAIT_MS; a newer anchor request replaces a pending one.
+ */
 export function scrollToAnchor(id: string): void {
-  let tries = 0;
-  const step = () => {
+  cancelAnchor?.();
+  const ready = () => {
     const el = document.getElementById(id);
-    if (el && el.getClientRects().length) el.scrollIntoView({ block: "start" });
-    else if (++tries < 20) setTimeout(step, 50);
+    return el && el.getClientRects().length ? el : null;
   };
-  step();
+  const now = ready();
+  if (now) {
+    now.scrollIntoView({ block: "start" });
+    return;
+  }
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    obs.disconnect();
+    clearTimeout(timer);
+    if (cancelAnchor === finish) cancelAnchor = null;
+  };
+  const obs = new MutationObserver(() => {
+    const el = ready();
+    if (!el) return;
+    finish();
+    // After this frame's layout, so a panel that just turned visible has its final position.
+    requestAnimationFrame(() => el.scrollIntoView({ block: "start" }));
+  });
+  obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class", "hidden", "id"] });
+  const timer = setTimeout(finish, ANCHOR_WAIT_MS);
+  cancelAnchor = finish;
+}
+
+/* ------------------------------------------------------------------ a new estimate's history entries */
+
+/**
+ * Every history entry on an estimate route carries a session token in its state (`__handoffEstimate`). A new
+ * estimate's first save records token → minted id; when the user later comes back (Back / Forward) to an entry of
+ * that session still on `#/estimate/new`, normalizeLocation re-points it at the saved estimate instead of opening a
+ * blank new one. Kept in sessionStorage so it survives a reload of the window.
+ */
+const TOKEN = "__handoffEstimate";
+const ADOPTED_KEY = "peak-handoff-adopted";
+const adopted = new Map<string, string>();
+try {
+  const raw = typeof sessionStorage === "undefined" ? null : sessionStorage.getItem(ADOPTED_KEY);
+  if (raw) for (const [k, v] of Object.entries(JSON.parse(raw) as Record<string, string>)) if (typeof v === "string") adopted.set(k, v);
+} catch {
+  /* no sessionStorage — adoption lasts until the window closes */
+}
+const tokenOf = (state: unknown): string | null => {
+  const t = state && typeof state === "object" ? (state as Record<string, unknown>)[TOKEN] : null;
+  return typeof t === "string" ? t : null;
+};
+const mintToken = () => `e${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype;
+/** `data` with the token added (null → a fresh object; a non-plain state is left as the caller gave it). */
+const withToken = (data: unknown, token: string): unknown => (data == null ? { [TOKEN]: token } : isPlainObject(data) ? { ...data, [TOKEN]: token } : data);
+function adopt(token: string, id: string): void {
+  adopted.set(token, id);
+  try {
+    sessionStorage.setItem(ADOPTED_KEY, JSON.stringify(Object.fromEntries(adopted)));
+  } catch {
+    /* in memory only */
+  }
 }
 
 function patchHistory(): void {
@@ -54,8 +117,25 @@ function patchHistory(): void {
           /* an unparseable url goes to the browser as given */
         }
       }
+      // The entry's estimate session (see TOKEN): a shell push to an estimate starts one; anything else continues it.
+      const before = currentRoute();
+      const beforeToken = tokenOf(window.history.state);
+      let state = data;
+      let after: Route | null = null;
       try {
-        orig(data, unused, target);
+        const u = new URL(target == null ? window.location.href : String(target), window.location.href);
+        after = parseRoute(u.hash, u.search);
+      } catch {
+        /* leave the state as given */
+      }
+      if (after?.name === "estimate") {
+        const token = (m === "pushState" && explicit) || !beforeToken ? mintToken() : beforeToken;
+        state = withToken(data, token);
+        // A new estimate's first save: its entries (this one and any pushed before it) now belong to the saved id.
+        if (!explicit && before.name === "estimate" && before.id === NEW_ESTIMATE_ID && after.id !== NEW_ESTIMATE_ID) adopt(token, after.id);
+      }
+      try {
+        orig(state, unused, target);
       } catch (e) {
         // Some engines refuse query changes on file:// URLs; the page stays put.
         console.warn(`[handoff] history.${m} refused`, String(url), e);
@@ -127,7 +207,8 @@ export function showShellNotice(text: string): void {
 
 /** Moves to a shell route (a history entry, or in place with `replace`). The Estimator's own params ride in `search`. */
 export function goTo(route: Route, opts: { replace?: boolean; search?: string; anchor?: string | null } = {}): void {
-  const search = opts.search ?? routeSearch(route);
+  // The route's own params, plus any the host put on the URL (a version or token param an Artifact adds).
+  const search = withForeignParams(opts.search ?? routeSearch(route), window.location.search);
   const hash = routeHash(route);
   const url = window.location.pathname + search + hash;
   // Already there (a nav tab clicked twice): no new history entry.
@@ -137,11 +218,16 @@ export function goTo(route: Route, opts: { replace?: boolean; search?: string; a
 
 /**
  * Makes the location consistent with its route (hash wins): a pre-shell deep link (`?id=X`, no hash), a typed hash
- * whose search names another estimate, a stale search left on a non-estimate route. In place — no history entry.
+ * whose search names another estimate, a stale search left on a non-estimate route. An entry of a new estimate whose
+ * session has since been saved is re-pointed at the saved id (adoptedLocation), so Back / Forward into it reopens that
+ * estimate instead of a blank one. An estimate entry with no session token gets one. In place — no history entry.
  */
 export function normalizeLocation(): void {
-  const fixed = normalizedLocation(window.location.href);
-  if (fixed) window.history.replaceState(null, "", fixed);
+  const token = tokenOf(window.history.state);
+  const savedAs = token ? adopted.get(token) : undefined;
+  const fixed = (savedAs && adoptedLocation(window.location.href, savedAs)) || normalizedLocation(window.location.href);
+  if (fixed) window.history.replaceState(window.history.state, "", fixed);
+  else if (!token && currentRoute().name === "estimate" && (window.history.state == null || isPlainObject(window.history.state))) window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search + window.location.hash);
 }
 
 function navigate(kind: "push" | "replace", href: string): void {

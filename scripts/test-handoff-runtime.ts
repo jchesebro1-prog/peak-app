@@ -54,7 +54,7 @@ import { previewPath } from "@/lib/estimate-output/package-preview";
 import * as nodePath from "node:path";
 import { NOT_IN_PROTOTYPE } from "../handoff/estimator/runtime/actions-registry";
 import { reviewOps } from "../handoff/estimator/runtime/review-ops";
-import { composeHistoryUrl, mapAppHref, normalizedLocation, parseRoute, routeHash, routeSearch, sameRoute, type Route } from "../handoff/estimator/runtime/routes";
+import { adoptedLocation, composeHistoryUrl, foreignOnly, mapAppHref, normalizedLocation, parseRoute, routeHash, routeSearch, sameRoute, withForeignParams, type Route } from "../handoff/estimator/runtime/routes";
 import { filterRows, listRows, statusCounts, updatedLabel } from "../handoff/estimator/runtime/estimates-list-model";
 import { canonicalTotals } from "../handoff/estimator/runtime/estimate-totals";
 import { runReset } from "../handoff/estimator/runtime/reset";
@@ -1408,7 +1408,28 @@ export async function handoffShellChecks(ok: Ok) {
   ok(normalizedLocation(at("#/estimate/Q-G001", "?id=Q-G001&step=review")) === null && normalizedLocation(at("#/estimates")) === null && normalizedLocation(at("#/estimate/new", "?new=1")) === null, "handoff shell: a consistent location is left alone");
   ok(normalizedLocation(at("", "?id=Q-G001&step=review"))?.endsWith("?id=Q-G001&step=review#/estimate/Q-G001") === true, "handoff shell: ?id= with no hash gets its hash");
   ok(normalizedLocation(at("#/estimate/Q-G002", "?id=Q-G001&step=send"))?.endsWith("?id=Q-G002&step=send#/estimate/Q-G002") === true, "handoff shell: the hash wins over a stale ?id=");
-  ok(normalizedLocation(at("#/estimates", "?id=Q-G001&step=send"))?.endsWith("/index.html#/estimates") === true && normalizedLocation(at("#/catalog", "?x=1"))?.endsWith("index.html#/catalog") === true, "handoff shell: a stale search is dropped from a non-estimate route");
+  ok(normalizedLocation(at("#/estimates", "?id=Q-G001&step=send"))?.endsWith("/index.html#/estimates") === true && normalizedLocation(at("#/catalog", "?step=review&ptab=client"))?.endsWith("index.html#/catalog") === true, "handoff shell: a stale (page-owned) search is dropped from a non-estimate route");
+  ok(normalizedLocation(at("#/catalog", "?x=1")) === null && normalizedLocation(at("#/estimates", "?v=7&id=Q-G001&step=send"))?.endsWith("/index.html?v=7#/estimates") === true, "handoff shell: a host's own param (?v=, ?x=) stays on a non-estimate route");
+  ok(normalizedLocation(at("#/estimate/Q-9", "?token=abc"))?.endsWith("?token=abc&id=Q-9#/estimate/Q-9") === true, "handoff shell: …and on an estimate route");
+
+  // --- a host's params survive every navigation (an Artifact may add a version / token param) ---
+  ok(withForeignParams("?id=Q-1", "?v=3&id=Q-2&step=send") === "?id=Q-1&v=3" && withForeignParams("", "?v=3&step=send") === "?v=3" && withForeignParams("?id=Q-1", "?step=send") === "?id=Q-1" && withForeignParams("?v=4", "?v=3") === "?v=4", "handoff shell: withForeignParams carries the host's params, never the page's own, never over a named one");
+  ok(withForeignParams("", "?tag=a&tag=b") === "?tag=a&tag=b" && foreignOnly("?id=Q-1&v=3&ptab=client&lead=L-1") === "?v=3" && foreignOnly("?step=review") === "", "handoff shell: repeated host params kept; foreignOnly strips the page's params (incl. intake hand-off ones)");
+  // goTo = pushState(pathname + withForeignParams(routeSearch(route), location.search) + routeHash(route)), then composeHistoryUrl.
+  const goToUrl = (here: string, r: Route) => composeHistoryUrl(here, "/Users/x/prototype/index.html" + withForeignParams(routeSearch(r), new URL(here).search) + routeHash(r)).url;
+  const g1 = goToUrl(at("#/estimates", "?v=3"), estimate("Q-1"));
+  const g2 = goToUrl("file://" + g1, { name: "catalog" });
+  const g3 = goToUrl("file://" + g2, { name: "estimates" });
+  ok(g1.endsWith("index.html?id=Q-1&v=3#/estimate/Q-1") && g2.endsWith("index.html?v=3#/catalog") && g3.endsWith("index.html?v=3#/estimates"), `handoff shell: a host param survives goTo round trips list → estimate → catalog → list (${g1} · ${g2} · ${g3})`);
+  const s1 = composeHistoryUrl(at("#/estimate/Q-1", "?id=Q-1&v=3"), "/Users/x/prototype/index.html?id=Q-1&step=package");
+  const s2 = composeHistoryUrl("file://" + s1.url, "/Users/x/prototype/index.html?id=Q-1");
+  ok(s1.url.endsWith("?id=Q-1&step=package&v=3#/estimate/Q-1") && s2.url.endsWith("?id=Q-1&v=3#/estimate/Q-1"), "handoff shell: the Estimator's own step pushes (which never name the host's params) keep them");
+  const s3 = composeHistoryUrl(at("#/estimate/new", "?new=1&v=3"), "/Users/x/prototype/index.html?new=1&id=Q-2045");
+  ok(s3.url.endsWith("?new=1&id=Q-2045&v=3#/estimate/Q-2045"), "handoff shell: …and the first save's id rewrite");
+
+  // --- a new estimate's older history entries follow its first save ---
+  ok(adoptedLocation(at("#/estimate/new", "?new=1&step=package&v=3"), "Q-2045")?.endsWith("index.html?step=package&v=3&id=Q-2045#/estimate/Q-2045") === true, "handoff shell: an entry of a saved new estimate is re-pointed at the saved id (its step and host params kept)");
+  ok(adoptedLocation(at("#/estimate/Q-1", "?id=Q-1"), "Q-2045") === null && adoptedLocation(at("#/estimates"), "Q-2045") === null && adoptedLocation(at("#/estimate/new", "?new=1"), "new") === null, "handoff shell: only #/estimate/new entries are re-pointed, and only at a real id");
   ok(normalizedLocation(at("#/estimate/Q-9", ""))?.endsWith("?id=Q-9#/estimate/Q-9") === true && normalizedLocation(at("#/estimate/new", ""))?.endsWith("?new=1#/estimate/new") === true, "handoff shell: an estimate route typed without a search gets ?id= / ?new=1");
   ok(normalizedLocation(at("#/zzz")) === null, "handoff shell: an unknown route is left as typed");
 

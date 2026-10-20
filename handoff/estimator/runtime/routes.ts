@@ -67,6 +67,42 @@ export function routeSearch(r: Route): string {
 
 const isRouteHash = (hash: string): boolean => hash.startsWith("#/");
 
+/* ------------------------------------------------------------------ query params the page owns vs. a host's */
+
+/**
+ * The query params the shell and the Estimator own: the estimate's id / new flag, its step and Build package tab
+ * (stepSearch / packageTabSearch), and the intake hand-off params a new estimate opens with (readHandoff). Every
+ * OTHER param is the host's — an Artifact or a share link may add e.g. a version or token param — and survives every
+ * navigation the shell or the Estimator makes (`withForeignParams`).
+ */
+export const OWNED_PARAMS: ReadonlySet<string> = new Set(["id", "new", "step", "ptab", "type", "category", "customer", "venue", "contact", "name", "replaces", "thread", "lead", "suggestion"]);
+
+const paramsOf = (search: string) => new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+const searchOf = (p: URLSearchParams) => {
+  const s = p.toString();
+  return s ? "?" + s : "";
+};
+
+/** `next` plus every param of `from` the page does not own and `next` does not name. */
+export function withForeignParams(next: string, from: string): string {
+  const out = paramsOf(next);
+  const keep = paramsOf(from);
+  let added = false;
+  for (const k of new Set(keep.keys())) {
+    if (OWNED_PARAMS.has(k) || out.has(k)) continue;
+    for (const v of keep.getAll(k)) out.append(k, v);
+    added = true;
+  }
+  return added ? searchOf(out) : next;
+}
+
+/** `search` without the params the page owns (a non-estimate route's search: only the host's params). */
+export function foreignOnly(search: string): string {
+  const p = paramsOf(search);
+  for (const k of [...new Set(p.keys())]) if (OWNED_PARAMS.has(k)) p.delete(k);
+  return searchOf(p);
+}
+
 /**
  * The route a location names. A `#/…` hash decides. Without one (a bare file, a pre-shell deep link such as
  * `index.html?id=Q-G001&step=review`, or an in-page anchor like `#systems`) the search decides: `?id=` → that
@@ -191,7 +227,9 @@ export type HistoryUrl = {
 export function composeHistoryUrl(currentHref: string, url: string): HistoryUrl {
   const cur = new URL(currentHref);
   const next = new URL(url, currentHref);
-  if (isRouteHash(next.hash)) return { url: next.pathname + next.search + next.hash, anchor: null, explicit: true };
+  // A host's own params (anything the page doesn't own) ride along — the app only ever writes its own.
+  const search = withForeignParams(next.search, cur.search);
+  if (isRouteHash(next.hash)) return { url: next.pathname + search + next.hash, anchor: null, explicit: true };
   const anchor = next.hash.length > 1 ? next.hash.slice(1) : null;
   const here = parseRoute(cur.hash, cur.search);
   let hash = cur.hash;
@@ -199,13 +237,14 @@ export function composeHistoryUrl(currentHref: string, url: string): HistoryUrl 
     const id = next.searchParams.get("id");
     hash = routeHash(id ? { name: "estimate", id } : here);
   }
-  return { url: next.pathname + next.search + hash, anchor, explicit: false };
+  return { url: next.pathname + search + hash, anchor, explicit: false };
 }
 
 /**
  * Makes the location consistent with its route after a shell navigation (popstate, a typed hash, a pre-shell deep
  * link): the hash is the truth, so an estimate route gets `?id=<id>` (`?new=1` for a new one) and any other route a
- * clean search. Returns the corrected `pathname + search + hash`, or null when it is already consistent.
+ * search with none of the page's own params (a host's params stay). Returns the corrected `pathname + search + hash`,
+ * or null when it is already consistent.
  */
 export function normalizedLocation(href: string): string | null {
   const u = new URL(href);
@@ -223,10 +262,26 @@ export function normalizedLocation(href: string): string | null {
       params.delete("new");
       search = "?" + params.toString();
     }
-  } else if (search !== "") {
-    search = "";
+  } else {
+    search = foreignOnly(search);
   }
   const hash = route.name === "unknown" ? u.hash : routeHash(route);
   const out = u.pathname + search + hash;
   return out === u.pathname + u.search + u.hash ? null : out;
+}
+
+/**
+ * A location on `#/estimate/new` re-pointed at the id its first save minted (`?new=1&step=package#/estimate/new` →
+ * `?id=Q-2045&step=package#/estimate/Q-2045`): history entries pushed before that save still name the new estimate,
+ * and the shim re-points one when the user comes back to it (shims/next-navigation.ts). Null when `href` is not on
+ * `#/estimate/new`.
+ */
+export function adoptedLocation(href: string, id: string): string | null {
+  const u = new URL(href);
+  const route = parseRoute(u.hash, u.search);
+  if (route.name !== "estimate" || route.id !== NEW_ESTIMATE_ID || !id || id === NEW_ESTIMATE_ID) return null;
+  const p = paramsOf(u.search);
+  p.delete("new");
+  p.set("id", id);
+  return u.pathname + searchOf(p) + routeHash({ name: "estimate", id });
 }

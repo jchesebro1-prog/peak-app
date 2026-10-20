@@ -6,7 +6,7 @@
  * Estimator's props depend on the viewer) or the data is reset — but NOT when a first save gives a new estimate its id
  * (that is the same screen, announced by the app, not a navigation). Plan: PR 2 Task 7.
  */
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from "react";
 import EstimatorClient from "@/app/(app)/estimator/estimator-client";
 import type { EstimatorProps } from "@/app/(app)/estimator/types";
 import { currentRoute, normalizeLocation, subscribeLocation } from "../shims/next-navigation";
@@ -74,7 +74,7 @@ function Placeholder({ title, onReady }: { title: string; onReady: () => void })
 
 function BackToEstimates() {
   return (
-    <a href="/quotes" className="pk-btn-outline" style={{ display: "inline-block", marginTop: 16, textDecoration: "none" }}>
+    <a href="#/estimates" className="pk-btn-outline" style={{ display: "inline-block", marginTop: 16, textDecoration: "none" }}>
       ← Back to the estimates
     </a>
   );
@@ -210,15 +210,60 @@ function UserSwitcher({ viewerId, onPick }: { viewerId: string; onPick: (id: str
   );
 }
 
-function ResetDialog({ store, onClose }: { store: HandoffStore; onClose: () => void }) {
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * The Reset confirm dialog — modal: focus starts on its primary control (Reset), Tab / Shift+Tab stay inside it,
+ * Escape (or Cancel) closes it, and focus goes back to `returnTo` (the nav's Reset button) when it closes.
+ */
+function ResetDialog({ store, onClose, returnTo }: { store: HandoffStore; onClose: () => void; returnTo: RefObject<HTMLElement | null> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const confirmRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    confirmRef.current?.focus();
+    const back = returnTo;
+    return () => {
+      // Back to whatever opened the dialog (if it is still in the page).
+      const el = back.current;
+      if (el?.isConnected) el.focus();
+    };
+  }, [returnTo]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy) onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (!busy) onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const box = boxRef.current;
+      if (!box) return;
+      const items = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      if (!items.length) {
+        e.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const at = document.activeElement;
+      if (!box.contains(at) || (e.shiftKey ? at === first : at === last)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Focus that leaves the dialog any other way (a click on the page behind the scrim) comes back to it.
+    const onFocusIn = (e: FocusEvent) => {
+      const box = boxRef.current;
+      if (box && e.target instanceof Node && !box.contains(e.target)) (box.querySelector<HTMLElement>(FOCUSABLE) ?? box).focus();
+    };
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("focusin", onFocusIn);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("focusin", onFocusIn);
+    };
   }, [busy, onClose]);
   const confirm = async () => {
     setBusy(true);
@@ -231,11 +276,15 @@ function ResetDialog({ store, onClose }: { store: HandoffStore; onClose: () => v
     setError(r.error);
     setBusy(false);
   };
+  // Busy disables both buttons (focus falls to the body); once the outcome is in, focus returns to the primary control.
+  useEffect(() => {
+    if (!busy && error) confirmRef.current?.focus();
+  }, [busy, error]);
   return (
-    <div className="pk-modal-scrim" role="dialog" aria-modal="true" aria-label={RESET_COPY.title} data-handoff-reset-dialog="">
-      <div className="pk-modal">
-        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>{RESET_COPY.title}</div>
-        <div style={{ fontSize: 13.5, color: "#5b616e", lineHeight: 1.5 }}>{RESET_COPY.body}</div>
+    <div className="pk-modal-scrim" data-handoff-reset-dialog="">
+      <div ref={boxRef} className="pk-modal" role="dialog" aria-modal="true" aria-labelledby="handoff-reset-title" aria-describedby="handoff-reset-body" tabIndex={-1}>
+        <div id="handoff-reset-title" style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>{RESET_COPY.title}</div>
+        <div id="handoff-reset-body" style={{ fontSize: 13.5, color: "#5b616e", lineHeight: 1.5 }}>{RESET_COPY.body}</div>
         {error && (
           <div role="alert" data-handoff-reset-error="" style={{ marginTop: 12, fontSize: 13, color: "#a33a2b" }}>
             {error}
@@ -245,7 +294,7 @@ function ResetDialog({ store, onClose }: { store: HandoffStore; onClose: () => v
           <button type="button" className="pk-btn-outline" data-handoff-reset-cancel="" disabled={busy} onClick={onClose}>
             {RESET_COPY.cancel}
           </button>
-          <button type="button" className="pk-btn-danger" data-handoff-reset-confirm="" disabled={busy} onClick={confirm} style={{ padding: "7px 14px" }}>
+          <button ref={confirmRef} type="button" className="pk-btn-danger" data-handoff-reset-confirm="" disabled={busy} onClick={confirm} style={{ padding: "7px 14px" }}>
             {busy ? RESET_COPY.busy : RESET_COPY.confirm}
           </button>
         </div>
@@ -260,6 +309,8 @@ export function Shell({ store }: { store: HandoffStore }) {
   const persistent = useSyncExternalStore(store.subscribe, () => store.persistent, () => store.persistent);
   const [viewerId, setViewerId] = useState(() => users.current().id);
   const [resetting, setResetting] = useState(false);
+  const resetBtn = useRef<HTMLButtonElement | null>(null);
+  const closeReset = useCallback(() => setResetting(false), []);
   const readyOnce = useRef(false);
   // verify.ts waits for this: the first routed screen has rendered its content.
   const onReady = useCallback(() => {
@@ -295,7 +346,7 @@ export function Shell({ store }: { store: HandoffStore }) {
         </div>
         <div className="pk-nav-right">
           <UserSwitcher viewerId={viewerId} onPick={pick} />
-          <button type="button" data-handoff-reset="" onClick={() => setResetting(true)} style={{ ...NAV_FIELD, cursor: "pointer", fontWeight: 600 }}>
+          <button ref={resetBtn} type="button" data-handoff-reset="" aria-haspopup="dialog" onClick={() => setResetting(true)} style={{ ...NAV_FIELD, cursor: "pointer", fontWeight: 600 }}>
             {RESET_COPY.button}
           </button>
         </div>
@@ -303,7 +354,7 @@ export function Shell({ store }: { store: HandoffStore }) {
       <main style={{ flex: 1, minHeight: 0, position: "relative", background: "#f7f8fa" }}>
         <Screen key={`${key}:${viewerId}`} route={route} store={store} onReady={onReady} />
       </main>
-      {resetting && <ResetDialog store={store} onClose={() => setResetting(false)} />}
+      {resetting && <ResetDialog store={store} onClose={closeReset} returnTo={resetBtn} />}
       <PreviewOverlay />
     </div>
   );

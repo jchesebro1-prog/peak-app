@@ -127,14 +127,15 @@ export function EstimatesList({ store, onReady }: { store: HandoffStore; onReady
                 key={r.id}
                 data-estimate-id={r.id}
                 onClick={(e) => {
-                  // A click on the name link already navigated (the link router prevents the default).
-                  if (!e.defaultPrevented) open(r.id);
+                  // The name link routes itself (ui/link-routing.ts, after this handler) — one history entry per click.
+                  if ((e.target as Element).closest("a")) return;
+                  open(r.id);
                 }}
                 style={{ cursor: "pointer" }}
               >
                 <td data-col="number" style={{ ...TD, fontFamily: "var(--font-mono)", fontSize: 12, color: "#5b616e", whiteSpace: "nowrap" }}>{r.number}</td>
                 <td data-col="name" style={{ ...TD, fontWeight: 600, maxWidth: 320 }}>
-                  <a href={`/estimator?id=${encodeURIComponent(r.id)}`} style={{ color: "inherit", textDecoration: "none" }}>{r.name}</a>
+                  <a href={`#/estimate/${encodeURIComponent(r.id)}`} style={{ color: "inherit", textDecoration: "none" }}>{r.name}</a>
                 </td>
                 <td data-col="customer" style={{ ...TD, color: "#5b616e", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.customer || "—"}</td>
                 <td data-col="status" style={{ ...TD, textAlign: "center" }}>

@@ -34,19 +34,21 @@ async function boot() {
   // every other app link → a shell route, a same-page change or the "Not part of the prototype" notice.
   installAssetUrlRewrite();
   installPreviewRouting();
-  installLinkRouting();
   // The route is the hash; a pre-shell deep link (`?id=…` with no hash) or a stale search is put in line with it.
   normalizeLocation();
   // verify.ts drives the overlay and the router through this handle (put → reload → read back → reset; push → route).
   const w = window as unknown as { __peakHandoff?: Record<string, unknown> };
   w.__peakHandoff = { ...(w.__peakHandoff ?? {}), store, router: appRouter };
-  createRoot(el, {
+  const root = createRoot(el, {
     // Log the component stack, then report as React would by default (a pageerror — verify.ts fails on it).
     onUncaughtError: (e, info) => {
       console.error("[handoff] uncaught render error", info?.componentStack);
       window.reportError(e);
     },
-  }).render(<Shell store={store} />);
+  });
+  // After createRoot, so the root-level link router runs after React's own click handlers (ui/link-routing.ts).
+  installLinkRouting(el);
+  root.render(<Shell store={store} />);
 }
 
 boot().catch((e: unknown) => {
