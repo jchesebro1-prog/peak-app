@@ -227,6 +227,15 @@ note it.
 
 - `output/peak-estimator-handoff.zip` is handed to Jeff in this app as a file. Claude does not
   upload, email or publish it.
+- **Live demo as an Artifact** (Jeff, 2026-10-20: "Zip + artifact link"). The same build also
+  publishes as a private claude.ai Artifact: `index.html` is the page, and `app/*.js`, `data/*.js`,
+  `images/` and `spec/` are supporting files (each ≤ 16 MB; the catalog splits into
+  `data/catalog-1.js` … when it's larger). The page loads only from the Artifact's own files and
+  allowed CDNs, and works the same from `file://` and from the Artifact URL. Each viewer's edits stay
+  in their own browser (IndexedDB), with no shared database. Because the data is confidential, the
+  build is **prepared as files first and published only when Jeff says so**; Jeff decides who gets
+  the link. The zip stays the real handoff, since it carries the spec, the readable engine and the
+  golden totals.
 - New DECISIONS entries cover the extraction, the ports and the slice allow-list. A punch item is
   numbered at merge time, recomputed against main right before the docs commit. #57 gets a one-line
   note that this is a handoff, not multi-tenancy.
@@ -239,7 +248,8 @@ note it.
 2. **Slicer (§5)** plus its tests; Jeff runs the production export.
 3. **Prototype UI (§4)** on the extracted core, screen by screen.
 4. **Spec docs (§2 `spec/`)**, screenshots and the golden set.
-5. **Verification (§6)**, then the zip goes to Jeff.
+5. **Verification (§6)**, then the zip goes to Jeff. The Artifact version (§7) is published from
+   the same build only on Jeff's go-ahead, and the §6 browser check is re-run against its URL.
 
 Steps 2–5 live under `handoff/` and touch no app code, so they can land as a second PR.
 
