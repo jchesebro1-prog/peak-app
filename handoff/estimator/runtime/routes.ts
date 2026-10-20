@@ -7,6 +7,7 @@
  *   #/estimate/<id>        one estimate, in the real Estimator   (search: ?id=<id>[&step=…&ptab=…])
  *   #/estimate/new         a clean new estimate                  (search: ?new=1)
  *   #/catalog  #/assemblies  #/rules
+ *   #/assemblies/rack/<id> one rack's submittal sheets (Task 9)
  *
  * The estimate's id and step ALSO stay in `location.search` (`?id=…&step=review`), because the real Estimator reads
  * and writes exactly those with `useSearchParams` / `history.pushState` (stepSearch, packageTabSearch). So the search
@@ -26,6 +27,8 @@ export type Route =
   | { name: "estimate"; id: string }
   | { name: "catalog" }
   | { name: "assemblies" }
+  /** One saved rack's submittal sheets (the app's /design/assemblies/rack/<id>). */
+  | { name: "rack"; id: string }
   | { name: "rules" }
   | { name: "unknown"; path: string };
 
@@ -52,6 +55,8 @@ export function routeHash(r: Route): string {
   switch (r.name) {
     case "estimate":
       return `#/estimate/${encodeURIComponent(r.id)}`;
+    case "rack":
+      return `#/assemblies/rack/${encodeURIComponent(r.id)}`;
     case "unknown":
       return `#/${r.path.replace(/^\/+/, "")}`;
     default:
@@ -66,6 +71,15 @@ export function routeSearch(r: Route): string {
 }
 
 const isRouteHash = (hash: string): boolean => hash.startsWith("#/");
+
+/** A path segment, percent-decoded (the raw segment when it is malformed). */
+function decodeSegment(seg: string): string {
+  try {
+    return decodeURIComponent(seg);
+  } catch {
+    return seg;
+  }
+}
 
 /* ------------------------------------------------------------------ query params the page owns vs. a host's */
 
@@ -123,6 +137,7 @@ export function parseRoute(hash: string, search: string): Route {
       }
       return { name: "estimate", id };
     }
+    if (head === "assemblies" && rest.length === 2 && rest[0] === "rack" && rest[1]) return { name: "rack", id: decodeSegment(rest[1]) };
     if (rest.length === 0 && SIMPLE[head]) return SIMPLE[head];
     return { name: "unknown", path };
   }
@@ -137,6 +152,7 @@ export function parseRoute(hash: string, search: string): Route {
 export function sameRoute(a: Route, b: Route): boolean {
   if (a.name !== b.name) return false;
   if (a.name === "estimate" && b.name === "estimate") return a.id === b.id;
+  if (a.name === "rack" && b.name === "rack") return a.id === b.id;
   if (a.name === "unknown" && b.name === "unknown") return a.path === b.path;
   return true;
 }
@@ -184,6 +200,9 @@ export function mapAppHref(href: string, current: Route): AppTarget {
   }
   if (raw.startsWith("?")) return { kind: "page", search: u.search, anchor };
   const path = u.pathname.replace(/\/+$/, "") || "/";
+  // A rack's submittal sheets (the Assembly Builder's "Submittal" links).
+  const rack = /^\/design\/assemblies\/rack\/([^/]+)$/.exec(path);
+  if (rack) return { kind: "route", route: { name: "rack", id: decodeSegment(rack[1]) }, search: "", anchor: null };
   switch (path) {
     case "/estimator": {
       const params = new URLSearchParams(u.search);

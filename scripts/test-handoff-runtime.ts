@@ -10,7 +10,7 @@ import * as vm from "node:vm";
 import { ROLE_PERMS, type Perm, type Role } from "@/lib/team";
 import { DB_NAME, overlayFromRows, overlayMerge, openStore, RESET_BLOCKED_MESSAGE, storeSeedFrom, type HandoffStore } from "../handoff/estimator/runtime/store";
 import {
-  clock, configurePorts, customers, customersFrom, email, nextEstNoFrom, numbering, onWon, resolveTierFor, travelFromParts, users,
+  clock, configurePorts, customers, customersFrom, email, nextEstNoFrom, numbering, onWon, refreshPortsFromStore, resolveTierFor, travelFromParts, users,
 } from "../handoff/estimator/runtime/ports";
 import { bySkuResolver, buildEstimatorProps } from "../handoff/estimator/runtime/props/estimator";
 import type { SeedCustomers, SeedRules, SeedTeamUser } from "../handoff/estimator/runtime/seed";
@@ -72,6 +72,14 @@ import { prototypeNotesFor } from "../handoff/estimator/ui/send-overrides";
 import { onRefresh } from "../handoff/estimator/runtime/router";
 import { canAttestApproval, decidableUnderLock, validateAttestationNote } from "../handoff/estimator/runtime/quote-model";
 import { unregisteredExports } from "../handoff/estimator/verify";
+import { ASSEMBLIES_ACTIONS_KEY, assembliesActions, refusedAssembliesActions } from "../handoff/estimator/runtime/actions/assemblies-actions";
+import { createFixtureLocal, getFixtureLocal, removeFixtureLocal } from "../handoff/estimator/runtime/fixtures-repo";
+import { assemblyAccessoryLinks, buildAssemblyBuilderProps, rackDefaultsNow } from "../handoff/estimator/runtime/props/assemblies";
+import { loadRackForSheetsLocal } from "../handoff/estimator/runtime/loaders/rack";
+import { getManyLocal, listFixtures } from "../handoff/estimator/runtime/readers";
+import { memberCoverageLabel, pairKey } from "@/lib/part-docs/assembly-graph";
+import { emptyRackLayout } from "@/lib/rack/layout";
+import type { FixtureInput, FixtureRecord } from "@/lib/fixture-assemblies";
 
 const FIXTURE_V2 = "docs/estimating-core/handoff-fixtures/export-v2.json";
 const GOLDEN_EXPORT = "docs/estimating-core/golden-fixtures/export.json";
@@ -580,6 +588,7 @@ export async function handoffRuntimeChecks(ok: Ok) {
   await handoffReviewChecks(ok);
   await handoffSendChecks(ok);
   await handoffShellChecks(ok);
+  await handoffAssemblyChecks(ok);
 }
 
 /* ------------------------------------------------------------------ PR 2 Task 4: the Estimator's actions in the browser */
@@ -1387,7 +1396,7 @@ export async function handoffShellChecks(ok: Ok) {
   const withAnchor = map("?step=package&ptab=client#systems");
   ok(withAnchor.kind === "page" && withAnchor.anchor === "systems" && withAnchor.search === "?step=package&ptab=client", "handoff shell: an in-page anchor rides a same-page change (scrolled to, never the route)");
   ok(routeOf("/estimator?step=review", list) === "#/estimate/new?new=1&step=review" && routeOf("/estimator", list) === "#/estimate/new?new=1" && routeOf("/estimator?new=1", on) === "#/estimate/new?new=1", "handoff shell: /estimator with no id and no open estimate (or ?new=1) starts a new estimate");
-  ok(map("/design/grid/G-1").kind === "unsupported" && map("/design/specs/new?quote=Q-1").kind === "unsupported" && map("/catalog/documents").kind === "unsupported" && map("/design/assemblies/rack/R1").kind === "unsupported" && map("/inbox").kind === "unsupported", "handoff shell: any other app path is not part of the prototype");
+  ok(map("/design/grid/G-1").kind === "unsupported" && map("/design/specs/new?quote=Q-1").kind === "unsupported" && map("/catalog/documents").kind === "unsupported" && map("/design/assemblies/rack/R1/x").kind === "unsupported" && map("/inbox").kind === "unsupported", "handoff shell: any other app path is not part of the prototype (a rack's sheets route since Task 9; a deeper path does not)");
   const unsupported = map("/design/grid/G-1?x=1");
   ok(unsupported.kind === "unsupported" && unsupported.path === "/design/grid/G-1?x=1", "handoff shell: the notice names the path");
   ok(map("https://example.com/").kind === "external" && map("mailto:a@b.test").kind === "external" && map("images/x.webp").kind === "external" && map("./a").kind === "external" && map("//cdn.test/a").kind === "external" && map("").kind === "external", "handoff shell: other sites, mailto:, packaged files and relative paths are the browser's");
@@ -1676,4 +1685,180 @@ export async function handoffShellChecks(ok: Ok) {
       }
     }
   }
+}
+
+
+/* ------------------------------------------------------------------ PR 2 Task 9: the Assembly Builder and racks */
+
+/** Task 9 — the Assembly Builder's routes, props, fixtures store port, actions and the rack sheets' loader. */
+export async function handoffAssemblyChecks(ok: Ok) {
+  // --- routes ---
+  const rack = parseRoute("#/assemblies/rack/SA-1%20X", "");
+  ok(rack.name === "rack" && rack.id === "SA-1 X" && routeHash(rack) === "#/assemblies/rack/SA-1%20X" && routeSearch(rack) === "", "handoff assemblies: #/assemblies/rack/<id> is the rack route (id decoded, hash re-encoded, no search)");
+  ok(parseRoute("#/assemblies/rack", "").name === "unknown" && parseRoute("#/assemblies/rack/a/b", "").name === "unknown" && parseRoute("#/assemblies/x", "").name === "unknown" && parseRoute("#/assemblies", "").name === "assemblies",
+    "handoff assemblies: a rack route needs exactly one id; #/assemblies stays the builder");
+  ok(sameRoute({ name: "rack", id: "A" }, { name: "rack", id: "A" }) && !sameRoute({ name: "rack", id: "A" }, { name: "rack", id: "B" }) && !sameRoute({ name: "rack", id: "A" }, { name: "assemblies" }), "handoff assemblies: sameRoute compares rack ids");
+  const mapped = mapAppHref("/design/assemblies/rack/SA-1%20X", { name: "assemblies" });
+  ok(mapped.kind === "route" && mapped.route.name === "rack" && (mapped.route as { id: string }).id === "SA-1 X", `handoff assemblies: the builder's Submittal link /design/assemblies/rack/<id> → the rack route (${JSON.stringify(mapped)})`);
+  ok(mapAppHref("/design/assemblies/rack/A/b", { name: "assemblies" }).kind === "unsupported" && mapAppHref("/api/racks/SA-1/submittal", { name: "rack", id: "SA-1" }).kind === "unsupported",
+    "handoff assemblies: a deeper path and the submittal zip / csv routes are not in the prototype (the notice)");
+  ok(newTabHref(mapped, { href: "file:///p/index.html?v=1#/assemblies", search: "?v=1", hash: "#/assemblies" }) === "file:///p/index.html?v=1#/assemblies/rack/SA-1%20X", "handoff assemblies: a modified click on Submittal opens the rack route in a new tab (host params kept)");
+
+  // --- a store: four parts (one renamed), the convert flag, rack defaults absent ---
+  const part = (sku: string, over: Record<string, unknown> = {}) => ({ id: sku, sku, desc: `${sku} desc`, category: "Lighting", unit: "ea", cost: 100, list: 180, mfr: "Acme", ...over });
+  const catalog = docs([
+    part("ETC:S4", { cost: 300, list: 500, pricedAt: 1_700_000_000_000 }),
+    part("ETC:LENS", { cost: 40, list: 75 }),
+    part("ETC:YOKE", { cost: 10, list: 20 }),
+    part("AV:AMP", { cost: 400, list: 700, ruHeight: 2, weightLb: 30, powerWatts: 200, rackMount: "rack" }),
+    { id: "OLD:LENS", sku: "OLD:LENS", renamedTo: "ETC:LENS" },
+  ]);
+  const team: SeedTeamUser[] = [
+    { id: "u1", name: "Ann Admin", roles: ["Admin"], status: "active" },
+    { id: "u3", name: "Rex Reviewer", roles: ["Reviewer"], status: "active" },
+  ];
+  const seedRules = { settings: { companyName: "Peak Systems Group", priceListEffective: { acme: 1_710_000_000_000 } }, blobs: { fixtures_convert: { convertedAt: 1 } } };
+  const mk = (rules: { settings: Record<string, unknown>; blobs: Record<string, unknown> }, fixtures: Array<{ id: string }> = []) =>
+    openStore(
+      storeSeedFrom({ estimates: [], catalog: catalog as never, fixtures: fixtures as never, rules: rules as SeedRules, meta: null }),
+      { idb: null },
+    );
+  const store = await mk(seedRules);
+  configurePorts({ store, customers: EMPTY_CUSTOMERS, rules: null, team });
+  users.setCurrent("u1");
+  let refreshes = 0;
+  const offRefresh = onRefresh(() => void refreshes++);
+  const A = assembliesActions(store);
+
+  // --- props on an empty slice: an empty list renders cleanly ---
+  const p0 = await buildAssemblyBuilderProps(store);
+  ok(p0.initial.length === 0 && p0.parts.length === 0 && JSON.stringify(p0.coverage) === "{}" && p0.portalCategories.length === 0 && JSON.stringify(p0.rackDefaults) === "{}" && p0.priceListEffective.acme === 1_710_000_000_000,
+    "handoff assemblies: no fixtures → an empty list, no parts, no coverage; rack_defaults absent → {} (the app's defaults); priceListEffective from the settings");
+
+  // --- the picker search is the Estimator's ---
+  const s1 = await A.searchAssemblyPartsAction("etc");
+  const est = await estimatorActions(store).searchCatalog("etc", "", 40);
+  ok(s1.total === est.total && s1.hits.map((h) => h.sku).join() === est.hits.map((h) => h.sku).join() && s1.hits.every((h) => "cost" in h && "list" in h && !("model" in h)),
+    `handoff assemblies: searchAssemblyPartsAction ranks exactly like searchCatalog, reshaped to PartHit (${s1.hits.map((h) => h.sku).join()})`);
+  ok((await A.searchAssemblyPartsAction("a", 1)).hits.length === 1 && (await A.searchAssemblyPartsAction("a", 9999)).hits.length <= 100 && (await A.searchAssemblyPartsAction("  ")).hits.length === 0,
+    "handoff assemblies: the picker limit is clamped (clampPickerLimit); a blank query finds nothing");
+  ok(((await A.searchAssemblyPartsAction("amp")).hits[0]?.rack?.ruHeight ?? 0) === 2, "handoff assemblies: hits carry the part's rack facts (the rack tray reads them)");
+
+  // --- saveFixtureAction: validation, snapshot, stamps ---
+  const fx = (over: Partial<FixtureInput> = {}): FixtureInput => ({ id: null, kind: "fixture", label: "Source Four", description: "", lightEngineSku: "ETC:S4", lensSku: "OLD:LENS", lines: { data: [], power: [], mounting: [{ sku: "ETC:YOKE", qty: 2 }], accessories: [] }, ...over }) as FixtureInput;
+  ok(JSON.stringify(await A.saveFixtureAction(fx({ label: "  " }))) === JSON.stringify({ ok: false, error: "Add a label." }) && !(await A.saveFixtureAction(fx({ lightEngineSku: "" }))).ok,
+    "handoff assemblies: saveFixtureAction refuses what sanitizeFixtureInput refuses (no label, no light engine)");
+  ok(!(await A.saveFixtureAction(fx({ id: "SA-NOPE" }))).ok && ((await A.saveFixtureAction(fx({ id: "SA-NOPE" }))) as { error: string }).error === "This assembly was deleted — reload the page.", "handoff assemblies: saving an id with no row is refused as deleted");
+  refreshes = 0;
+  const r1 = await A.saveFixtureAction(fx());
+  ok(r1.ok && /^SA-[0-9A-Z]+$/.test((r1 as { id: string }).id) && refreshes === 1, `handoff assemblies: a new fixture saves with an SA-<TS36> id and refreshes the screen (${JSON.stringify(r1)})`);
+  const id1 = (r1 as { id: string }).id;
+  const rec1 = (await getFixtureLocal(store, id1))!;
+  // OLD:LENS was renamed to ETC:LENS: getMany follows the rename, but resolveFixture keys by the line's own sku — the app's behaviour.
+  ok(!!rec1 && rec1.createdBy === "Ann Admin" && rec1.updatedBy === "Ann Admin" && rec1.snapshot!.cost === 300 + 2 * 10 && rec1.snapshot!.price === 500 + 2 * 20 && rec1.snapshot!.pricedAt === 1_710_000_000_000,
+    `handoff assemblies: the snapshot prices from this record's SKUs at save (renamed lens unmatched by its old sku, as the app), pricesAsOf from priceListEffective (${JSON.stringify(rec1?.snapshot)})`);
+  const r2 = await A.saveFixtureAction(fx({ lensSku: "ETC:LENS" }));
+  const rec2 = (await getFixtureLocal(store, (r2 as { id: string }).id))!;
+  ok(rec2.snapshot!.cost === 300 + 40 + 20 && rec2.snapshot!.price === 500 + 75 + 40, `handoff assemblies: light engine + lens + 2 yokes snapshot cost 360 / sell 615 (${JSON.stringify(rec2.snapshot)})`);
+  ok(!(await A.saveFixtureAction(fx({ id: id1, kind: "system", scope: "Audio", parts: [{ sku: "AV:AMP", qty: 1 }] }))).ok, "handoff assemblies: an assembly can't change kind after it's created");
+
+  // --- update keeps id / kind / created stamps / legacy-only keys, clears needsReview and a cleared optional ---
+  await store.put("fixtures", { ...rec1, needsReview: true, position: "FOH 1", lightEngineName: "legacy name" });
+  users.setCurrent("u3");
+  const r3 = await A.saveFixtureAction(fx({ id: id1, label: "Source Four v2", position: "" }));
+  const rec3 = (await store.get<FixtureRecord & Record<string, unknown>>("fixtures", id1))!;
+  ok(r3.ok && rec3.label === "Source Four v2" && rec3.createdBy === "Ann Admin" && rec3.updatedBy === "Rex Reviewer" && rec3.createdAt === rec1.createdAt && rec3.lightEngineName === "legacy name" && !("needsReview" in rec3) && !("position" in rec3),
+    "handoff assemblies: an update keeps id, kind and created stamps, carries legacy-only keys, drops needsReview and a cleared optional (anyone signed in may save)");
+  users.setCurrent("u1");
+
+  // --- props after saves: parts referenced, coverage from the implied accessory links ---
+  const p1 = await buildAssemblyBuilderProps(store);
+  ok(p1.initial.map((f) => f.label).join() === "Source Four,Source Four v2" && p1.parts.map((h) => h.sku).sort().join() === "ETC:LENS,ETC:S4,ETC:YOKE",
+    `handoff assemblies: the list is by label; parts = only the SKUs saved fixtures reference, renames followed (${p1.parts.map((h) => h.sku).join()})`);
+  const cov = p1.coverage[pairKey("ETC:S4", "ETC:YOKE")];
+  ok(!!cov && cov.linked && !cov.own && memberCoverageLabel(cov) === "Fixture has no datasheet yet" && assemblyAccessoryLinks(p1.initial).every((l) => l.source === "assembly" && l.sourceRef?.startsWith("fixture:")),
+    "handoff assemblies: a saved fixture's members read as linked (the links saveFixtureAction would sync), with no datasheets in the prototype");
+  ok(JSON.stringify(await A.saveFixtureAction(fx({ portalCategory: "Lighting packages" }))).includes('"ok":true') && (await buildAssemblyBuilderProps(store)).portalCategories.join() === "Lighting packages",
+    "handoff assemblies: the portal categories datalist is the fixtures' own, unique and sorted");
+
+  // --- the Estimator sees the saved fixtures (after a refresh) at the builder's sell ---
+  const eprops = await buildEstimatorProps(store, null, new URLSearchParams());
+  const asm = eprops.fixtureAssemblies.find((a) => a.id === rec2.id);
+  ok(!!asm && asm.kind === "fixture" && asm.components.reduce((n, c) => n + c.list * c.defaultQty, 0) === 615, "handoff assemblies: the Estimator's + Add assembly lists the saved fixture, its components summing to the builder's sell");
+
+  // --- delete: a soft-delete marker; listFixtures and the Estimator skip it; the id is never minted again ---
+  refreshes = 0;
+  ok(JSON.stringify(await A.deleteFixtureAction(rec2.id)) === '{"ok":true}' && refreshes === 1, "handoff assemblies: deleteFixtureAction answers { ok: true } and refreshes");
+  const marker = await store.get<{ deleted?: boolean; label?: string }>("fixtures", rec2.id);
+  ok(marker?.deleted === true && marker.label === rec2.label && (await getFixtureLocal(store, rec2.id)) === null && !(await listFixtures(store)).some((f) => f.id === rec2.id)
+    && !(await buildEstimatorProps(store, null, new URLSearchParams())).fixtureAssemblies.some((a) => a.id === rec2.id),
+    "handoff assemblies: a deleted fixture is a marker row (body kept), reads as missing and leaves the builder and the Estimator");
+  ok(!(await A.saveFixtureAction(fx({ id: rec2.id }))).ok, "handoff assemblies: saving a deleted fixture is refused");
+  const fixedNow = 1_790_000_000_000;
+  const clean = { kind: "hardware", label: "Chain", description: "", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] }, parts: [{ sku: "ETC:YOKE", qty: 1 }] } as never;
+  const c1 = await createFixtureLocal(store, clean, "Ann Admin", { cost: 0, price: 0, pricedAt: null }, fixedNow);
+  await removeFixtureLocal(store, c1.id);
+  const c2 = await createFixtureLocal(store, clean, "Ann Admin", { cost: 0, price: 0, pricedAt: null }, fixedNow);
+  const c3 = await createFixtureLocal(store, clean, "Ann Admin", { cost: 0, price: 0, pricedAt: null }, fixedNow);
+  ok(c1.id === `SA-${fixedNow.toString(36).toUpperCase()}` && c2.id === `${c1.id}-2` && c3.id === `${c1.id}-3`, `handoff assemblies: a same-millisecond id takes -2, -3 — a deleted id is never minted again (${c1.id}, ${c2.id}, ${c3.id})`);
+
+  // --- the settings-backed fallback while unconverted ---
+  const legacy = [{ id: "fa-1", name: "Legacy PAR", components: [{ sku: "ETC:S4", label: "PAR", role: "fixture", defaultQty: 1 }] }];
+  const un = await mk({ settings: { fixtureAssemblies: legacy }, blobs: {} });
+  configurePorts({ store: un, rules: null });
+  await refreshPortsFromStore(un);
+  ok((await listFixtures(un)).map((f) => f.id).join() === "fa-1" && (await getFixtureLocal(un, "fa-1"))?.label === "Legacy PAR", "handoff assemblies: unconverted → the settings-backed assemblies are served in memory");
+  const U = assembliesActions(un);
+  const up = await U.saveFixtureAction({ id: "fa-1", kind: "fixture", label: "Legacy PAR (edited)", description: "", lightEngineSku: "ETC:S4", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] } } as FixtureInput);
+  ok(up.ok && (await un.get<{ label: string; legacy?: unknown }>("fixtures", "fa-1"))?.label === "Legacy PAR (edited)" && (await listFixtures(un)).length === 1, "handoff assemblies: saving an in-memory fa- record writes its row under the same id (listed once)");
+  const un2 = await mk({ settings: { fixtureAssemblies: legacy }, blobs: {} });
+  configurePorts({ store: un2, rules: null });
+  await refreshPortsFromStore(un2);
+  await assembliesActions(un2).deleteFixtureAction("fa-1");
+  ok((await listFixtures(un2)).length === 0 && (await un2.get<{ deleted?: boolean }>("fixtures", "fa-1"))?.deleted === true, "handoff assemblies: deleting an in-memory fa- record leaves a marker, so the settings copy stays gone");
+  const un3 = await mk({ settings: { fixtureAssemblies: legacy }, blobs: {} }, [{ id: "fa-1", label: "Seed row", kind: "fixture", lightEngineSku: "ETC:S4" } as { id: string }]);
+  configurePorts({ store: un3, rules: null });
+  await refreshPortsFromStore(un3);
+  await un3.remove("fixtures", "fa-1");
+  ok((await listFixtures(un3)).length === 0 && (await getFixtureLocal(un3, "fa-1")) === null, "handoff assemblies: a deleted seed row is never replaced by the settings copy");
+  configurePorts({ store, rules: null });
+  await refreshPortsFromStore(store);
+
+  // --- rack defaults ---
+  users.setCurrent("u3");
+  ok(JSON.stringify(await A.saveRackDefaultsAction({ blankSku: "ETC:YOKE" })) === JSON.stringify({ ok: false, error: "Needs the Create permission." }), "handoff assemblies: saveRackDefaultsAction needs Create");
+  users.setCurrent("u1");
+  const d1 = await A.saveRackDefaultsAction({ blankSku: " ETC:YOKE ", ventSku: "x".repeat(81), junk: 1 } as never);
+  ok(d1.ok && JSON.stringify((d1 as { value: unknown }).value) === '{"blankSku":"ETC:YOKE"}' && JSON.stringify(rackDefaultsNow()) === '{"blankSku":"ETC:YOKE"}', "handoff assemblies: rack defaults are sanitized and stored under `defaults`");
+  await A.saveRackDefaultsAction({ ventSku: "ETC:LENS" });
+  ok(JSON.stringify(rackDefaultsNow()) === '{"ventSku":"ETC:LENS"}', "handoff assemblies: a save replaces the defaults (a cleared SKU clears)");
+  ok((await buildAssemblyBuilderProps(store)).parts.some((h) => h.sku === "ETC:LENS") && (await buildAssemblyBuilderProps(store)).rackDefaults.ventSku === "ETC:LENS", "handoff assemblies: the builder's props carry the defaults and price their SKUs");
+
+  // --- a rack: save, then its sheets ---
+  const layout = emptyRackLayout(12);
+  layout.placements.push({ id: "RP-1", kind: "device", sku: "AV:AMP", ruStart: 1, ruHeight: 2, face: "front" });
+  const rr = await A.saveFixtureAction({ id: null, kind: "rack", label: "Amp rack", description: "", scope: "Audio", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] }, parts: [{ sku: "ETC:YOKE", qty: 4 }], rack: layout } as FixtureInput);
+  ok(rr.ok, `handoff assemblies: a rack with one device and a rack-level part saves (${JSON.stringify(rr)})`);
+  const rid = (rr as { id: string }).id;
+  const rackRec = (await getFixtureLocal(store, rid))!;
+  ok(rackRec.snapshot!.price === 700 + 4 * 20 && rackRec.snapshot!.cost === 400 + 4 * 10, `handoff assemblies: a rack prices its placements and rack-level parts (${JSON.stringify(rackRec.snapshot)})`);
+  ok(!(await A.saveFixtureAction({ id: null, kind: "rack", label: "Empty", description: "", scope: "Audio", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] }, parts: [], rack: emptyRackLayout() } as FixtureInput)).ok,
+    "handoff assemblies: an empty rack is refused (sanitizeFixtureInput)");
+  const sheets = await loadRackForSheetsLocal(store, rid, fixedNow);
+  ok(!!sheets && sheets.rec.id === rid && sheets.lookup("AV:AMP")?.found === true && sheets.lookup("AV:AMP")?.ruHeight === 2 && sheets.dateLabel === "Sep 21, 2026" && sheets.company.name === "Peak Systems Group" && sheets.company.offices.length === 2,
+    `handoff assemblies: loadRackForSheetsLocal — the rack, a lookup over its SKUs, the Chicago date, Peak's branding (${sheets?.dateLabel})`);
+  ok(JSON.stringify(sheets!.submittal) === JSON.stringify((await import("@/lib/rack/submittal")).rackSubmittal(rackRec, sheets!.lookup)), "handoff assemblies: the submittal is the app's rackSubmittal over that lookup");
+  ok((await loadRackForSheetsLocal(store, id1)) === null && (await loadRackForSheetsLocal(store, "SA-NOPE")) === null && (await loadRackForSheetsLocal(store, "")) === null, "handoff assemblies: not a rack / missing / blank id → null (the page's notFound)");
+  await A.deleteFixtureAction(rid);
+  ok((await loadRackForSheetsLocal(store, rid)) === null, "handoff assemblies: a deleted rack has no sheets");
+  ok((await getManyLocal(store, ["OLD:LENS", "ETC:LENS", "NOPE"])).map((p) => p.sku).join() === "ETC:LENS", "handoff assemblies: getManyLocal follows renames, dedupes, drops unknown SKUs");
+
+  // --- registrations: the datasheet toggle is refused; every export of the original is registered ---
+  ok(JSON.stringify(await (refusedAssembliesActions().setOwnDatasheetAction as () => Promise<unknown>)()) === JSON.stringify(NOT_IN_PROTOTYPE), "handoff assemblies: setOwnDatasheetAction is refused (NOT_IN_PROTOTYPE)");
+  const regs = actionRegistrations(store).filter(([k]) => k === ASSEMBLIES_ACTIONS_KEY).flatMap(([, impls]) => Object.keys(impls));
+  const want = exportNames(fs.readFileSync(ASSEMBLIES_ACTIONS_KEY, "utf8"));
+  ok(want.length === 5 && want.every((n) => regs.includes(n)), `handoff assemblies: all ${want.length} exports of the builder's actions are registered (${regs.join(", ")})`);
+
+  offRefresh();
+  configurePorts({ store: null, customers: null, rules: null, team: null });
 }

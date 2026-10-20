@@ -217,10 +217,15 @@ export async function shellCheck(pkgDir: string): Promise<ShellResult> {
     // 5 — the nav
     for (const [nav, label] of [["catalog", "Catalog"], ["assemblies", "Assemblies"], ["rules", "Estimating Rules"]] as const) {
       await page.click(`[data-handoff-nav="${nav}"]`);
-      // Catalog is a real screen since Task 8 (walked by --catalog); the others stay placeholders until their tasks.
+      // Catalog is a real screen since Task 8 (walked by --catalog), Assemblies since Task 9 (--assemblies); Rules stays a placeholder until its task.
       if (nav === "catalog") {
         const ok = await waitFor(async () => (await shellLoc(page)).hash === "#/catalog" && (await page.evaluate(() => !!document.querySelector("[data-handoff-catalog] [data-catalog-rows] tr"))), 8000);
         step(`nav → ${label}: #/${nav}, the Catalog screen`, ok && !(await page.evaluate(() => !!document.querySelector("[data-handoff-placeholder]"))));
+        continue;
+      }
+      if (nav === "assemblies") {
+        const ok = await waitFor(async () => (await shellLoc(page)).hash === "#/assemblies" && (await page.evaluate(() => !!document.querySelector("[data-handoff-assemblies]"))), 8000);
+        step(`nav → ${label}: #/${nav}, the Assembly Builder`, ok && !(await page.evaluate(() => !!document.querySelector("[data-handoff-placeholder]"))));
         continue;
       }
       const ok = await waitFor(async () => (await shellLoc(page)).hash === `#/${nav}` && (await page.evaluate(() => !!document.querySelector("[data-handoff-placeholder]"))), 5000);
@@ -258,7 +263,7 @@ export async function shellCheck(pkgDir: string): Promise<ShellResult> {
     await page.evaluate(() => history.pushState(null, "", location.pathname + location.search + "#systems"));
     const loc4 = await shellLoc(page);
     step("an in-page anchor push (#systems) keeps the route hash", loc4.hash === `#/estimate/${second.id}` && loc4.route === "estimate", JSON.stringify(loc4));
-    for (const [from, hash] of [["/quotes", "#/estimates"], ["/catalog", "#/catalog"], ["/design/assemblies", "#/assemblies"], ["/estimating-rules", "#/rules"]] as const) {
+    for (const [from, hash] of [["/quotes", "#/estimates"], ["/catalog", "#/catalog"], ["/design/assemblies", "#/assemblies"], ["/design/assemblies/rack/SA-1", "#/assemblies/rack/SA-1"], ["/estimating-rules", "#/rules"]] as const) {
       await push(page, from);
       step(`router.push(${from}) → ${hash}`, await waitFor(async () => (await shellLoc(page)).hash === hash, 5000));
     }

@@ -290,6 +290,90 @@
           "sha256": "f6e725c43d166865bf7e53ca707a711b319daf7f4d0b8d97ba39526bc48bb4fa"
         }
       ]
+    },
+    {
+      "port": "handoff/estimator/runtime/fixtures-repo.ts",
+      "what": "the fixtures store's getFixture / createFixture / updateFixture / removeFixture (soft delete as a marker row)",
+      "originals": [
+        {
+          "path": "src/lib/stores/fixtures.ts",
+          "sha256": "90c7b33fcce8c63a815a7229ef8811a03943c9008d2c0ae9461cd73c4f6f855a"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/readers.ts",
+      "what": "listFixtures (stores/fixtures, soft-delete markers skipped) and getManyLocal (catalog getMany, renames followed) — the readers Task 9 changed",
+      "originals": [
+        {
+          "path": "src/lib/stores/fixtures.ts",
+          "sha256": "90c7b33fcce8c63a815a7229ef8811a03943c9008d2c0ae9461cd73c4f6f855a"
+        },
+        {
+          "path": "src/lib/stores/catalog.ts",
+          "sha256": "c991d6d2f32d1777de5e19f119e8a2036892f19f67a7e3b0230921c4a1f4d2bc"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/props/assemblies.ts",
+      "what": "AssemblyBuilderPage's props (coverage from the implied accessory links; rack defaults blob)",
+      "originals": [
+        {
+          "path": "src/app/(app)/design/assemblies/page.tsx",
+          "sha256": "af53140f514a121725f6945620432cfc38d2ebfd6818d7dc519531b51cb0bfd1"
+        },
+        {
+          "path": "src/lib/stores/rack-defaults.ts",
+          "sha256": "c81dee0f1ca7c7c1c4679c00b15993adf2bb0e30af9c06f1854bc60ceb55a6cc"
+        },
+        {
+          "path": "src/lib/part-docs/load.ts",
+          "sha256": "a39bc42cc30b0aaedbe6234d0eee8da349d3237ac7ed6d7a793f17eb1d456d33"
+        },
+        {
+          "path": "src/lib/stores/part-accessory-links.ts",
+          "sha256": "2d77270e5d07721dc31219a5e260da8889cc7377356895931ac884b7ecbabf87"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/assemblies-actions.ts",
+      "what": "the Assembly Builder's actions (search, save, delete, rack defaults; setOwnDatasheet refused)",
+      "originals": [
+        {
+          "path": "src/app/(app)/design/assemblies/actions.ts",
+          "sha256": "6d56005c5dbc6744bdaf68229d5a6431d1613da7adce8a11b0f1c8a170acb006"
+        },
+        {
+          "path": "src/lib/stores/rack-defaults.ts",
+          "sha256": "c81dee0f1ca7c7c1c4679c00b15993adf2bb0e30af9c06f1854bc60ceb55a6cc"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/loaders/rack.ts",
+      "what": "loadRackForSheets",
+      "originals": [
+        {
+          "path": "src/lib/rack/load.ts",
+          "sha256": "b7dbf21ead765d79e3be2a2fc744d7a337a7dd782d5660e49be7cb27881bc934"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/ui/assemblies.tsx",
+      "what": "the Assembly Builder page and the rack submittal page (markup around FixtureBuilder / RackSheets)",
+      "originals": [
+        {
+          "path": "src/app/(app)/design/assemblies/page.tsx",
+          "sha256": "af53140f514a121725f6945620432cfc38d2ebfd6818d7dc519531b51cb0bfd1"
+        },
+        {
+          "path": "src/app/(app)/design/assemblies/rack/[id]/page.tsx",
+          "sha256": "eab560e74c633efd74dde4246171a303bd6fbb0fbc0db54e3d2352d28c959f5f"
+        }
+      ]
     }
   ]
 }

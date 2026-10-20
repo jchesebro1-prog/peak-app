@@ -42,16 +42,36 @@ export function bySkuResolver<P extends Pick<CatalogPart, "sku">>(rows: readonly
   };
 }
 
-/** stores/fixtures listFixtures over the store: live rows normalized; until converted, the settings-backed assemblies no row holds. By label, then id. */
+/**
+ * stores/fixtures listFixtures over the store: live rows normalized; until converted, the settings-backed assemblies no
+ * row holds. By label, then id. A soft-delete marker row (`deleted: true`, written by fixtures-repo.ts removeFixtureLocal)
+ * is not listed but still counts as a row, as is a deleted seed doc — a deleted id is never served from settings.
+ */
 export async function listFixtures(store: HandoffStore, settings: Record<string, unknown> = settingsView()): Promise<FixtureRecord[]> {
-  const rows = (await store.all<RawFixtureRow>("fixtures")).map(normalizeFixtureRow);
+  const stored = await store.all<RawFixtureRow & { deleted?: unknown }>("fixtures");
+  const rows = stored.filter((r) => r.deleted !== true).map(normalizeFixtureRow);
   const flag = blobData("fixtures_convert") as { convertedAt?: unknown };
   if (!(typeof flag.convertedAt === "number" && flag.convertedAt > 0)) {
-    // The slice holds live rows only, so a soft-deleted id can't be told apart here (the app checks includeDeleted).
-    const have = new Set(rows.map((r) => r.id));
+    const have = new Set([...stored, ...(await store.allIncludingDeleted<{ id: string }>("fixtures"))].map((r) => r.id));
     for (const a of sanitizeFixtureAssemblies(settings.fixtureAssemblies)) if (!have.has(a.id)) rows.push(assemblyToFixture(a, 0));
   }
   return rows.sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
+}
+
+/** catalog getMany over the slice: the live part for each requested sku (renames followed), each part once. */
+export async function getManyLocal(store: HandoffStore, skus: readonly string[]): Promise<LivePart[]> {
+  if (!skus.length) return [];
+  const resolve = bySkuResolver(await liveCatalog(store), store.catalogRenames);
+  const seen = new Set<string>();
+  const out: LivePart[] = [];
+  for (const s of skus) {
+    const p = resolve(s);
+    if (p && !seen.has(p.sku)) {
+      seen.add(p.sku);
+      out.push(p);
+    }
+  }
+  return out;
 }
 
 /** A general Estimating Rules rate (pricing.ts value() for store "general"): pricing_rules[id] ?? its registry default. */

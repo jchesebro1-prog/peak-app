@@ -10,7 +10,8 @@
  *          load; any unregistered server action outside SMOKE_ALLOWED_UNREGISTERED.
  *          Screenshot: output/verify/smoke-build.png; result: output/verify/smoke.json.
  *          --all-steps (Task 6): also walks every slice estimate through Build, the three Build package tabs,
- *          each Customer review tab and Send & track, collecting mount-time calls from all of them; and fails
+ *          each Customer review tab and Send & track, then the Catalog, the Assembly Builder and a rack's sheets
+ *          (SHELL_SCREENS, Task 9), collecting mount-time calls from all of them; and fails
  *          on any discovered "use server" export (output/handoff-build/discovered-actions.json) that the page
  *          has no registration for. SMOKE_ALLOWED_UNREGISTERED is empty.
  *
@@ -80,6 +81,15 @@
  *          its LIST price, a part with a cost at cost ÷ (1 − margin) (catalogAddPrice) and its list does not move the line;
  *          a new part's SKU must be unique; a Reviewer-only role can look but not edit; Reset restores the snapshot. The walk
  *          lives in verify/catalog.ts. Screenshots: output/verify/catalog-*.png; result: output/verify/catalog.json.
+ *
+ *   npm run handoff:verify -- --assemblies [--out <package dir>]
+ *
+ * --assemblies  the Assembly Builder (Task 9): #/assemblies runs the app's real FixtureBuilder and lists the slice's
+ *          fixtures (each at its live sell); a fixture built from two catalog parts saves to the overlay; the Estimator's
+ *          "+ Add assembly" lists it and the line it adds prices at the fixture's sell; a rack with a device placed on its
+ *          elevation saves and its Submittal link opens #/assemblies/rack/<id> with the elevation SVG; delete soft-deletes;
+ *          Reset restores. The walk lives in verify/assemblies.ts. Screenshots: output/verify/assemblies-*.png; result:
+ *          output/verify/assemblies.json.
  *
  *   npm run handoff:verify -- --drift [--update]
  *
@@ -158,6 +168,13 @@ export const ALL_STEP_VIEWS: ReadonlyArray<{ query: string; tabs?: readonly stri
   { query: "step=package&ptab=client" },
   { query: "step=review", tabs: ["Document", "Package page", "BOM", "Cut sheets", "Datasheets", "Drawings"] },
   { query: "step=send" },
+];
+
+/** The shell screens --smoke --all-steps also opens (hash → the element that says it rendered): the Catalog, the Assembly Builder, a rack's sheets (an unknown id → its not-found screen). */
+export const SHELL_SCREENS: ReadonlyArray<readonly [string, string]> = [
+  ["#/catalog", "[data-catalog-painted]"],
+  ["#/assemblies", "[data-handoff-assemblies]"],
+  ["#/assemblies/rack/SA-NONE", "[data-handoff-missing]"],
 ];
 
 /** "fileKey#name" of every discovered server-action export the page has no registration for. Pure. */
@@ -254,6 +271,21 @@ async function smoke(pkgDir: string, allSteps = false): Promise<SmokeResult> {
           }
           for (const x of await readUnregistered()) seen.add(x);
         }
+      }
+      // The shell's other app screens: their mount-time actions count too (Task 9: the Assembly Builder and a rack's sheets).
+      for (const [hash, sel] of SHELL_SCREENS) {
+        await openUrl(page, `${url}${hash}`);
+        const ok = await page.waitForSelector(sel, { timeout: 15_000 }).then(
+          () => true,
+          () => false,
+        );
+        if (!ok) {
+          pageErrors.push(`[verify] ${hash}: ${sel} never appeared within 15 s`);
+          continue;
+        }
+        await new Promise((r) => setTimeout(r, 1200));
+        walked.push(hash);
+        for (const x of await readUnregistered()) seen.add(x);
       }
       // Structural: every "use server" export the bundle stubs has a registration (implemented or refused).
       const discoveredFile = path.join(ROOT, "output", "handoff-build", "discovered-actions.json");
@@ -1325,9 +1357,10 @@ async function main() {
   const send = sendAt >= 0 ? (argv[sendAt + 1] && !argv[sendAt + 1].startsWith("--") ? argv[sendAt + 1] : "") : undefined;
   const shell = argv.includes("--shell");
   const catalog = argv.includes("--catalog");
+  const assemblies = argv.includes("--assemblies");
   const drift = argv.includes("--drift");
-  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !shell && !catalog && !drift) {
-    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --catalog | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] [--out <package dir>] | --drift [--update]");
+  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !shell && !catalog && !assemblies && !drift) {
+    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --catalog | --assemblies | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] [--out <package dir>] | --drift [--update]");
     process.exit(2);
   }
   mkdirSync(VERIFY_DIR, { recursive: true });
@@ -1377,6 +1410,14 @@ async function main() {
     const r = await catalogCheck(pkgDir);
     writeFileSync(path.join(VERIFY_DIR, "catalog.json"), JSON.stringify(r, null, 2) + "\n");
     printCatalog(r);
+    pass &&= r.pass;
+  }
+  if (assemblies) {
+    // verify/assemblies.ts imports this module's helpers; loaded here, once this module has finished evaluating.
+    const { assembliesCheck, printAssemblies } = await import("./verify/assemblies");
+    const r = await assembliesCheck(pkgDir);
+    writeFileSync(path.join(VERIFY_DIR, "assemblies.json"), JSON.stringify(r, null, 2) + "\n");
+    printAssemblies(r);
     pass &&= r.pass;
   }
   if (!pass) process.exit(1);
