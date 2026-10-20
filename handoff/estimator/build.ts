@@ -14,6 +14,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statS
 import path from "node:path";
 import postcss from "postcss";
 import tailwindcss from "@tailwindcss/postcss";
+import { FORBIDDEN_PACKAGES } from "../../scripts/core-check";
 import { imagePlugin, shimPlugin, serverActionStubPlugin } from "./esbuild-plugins";
 
 const HERE = __dirname;
@@ -53,6 +54,36 @@ written permission. Delete it when the evaluation ends.
 Open index.html in a browser. Nothing in the prototype sends or saves anything
 to Peak.
 `;
+
+/** Browser-legitimate packages that core-check's list also names (it forbids UI packages for the pure core). */
+const BROWSER_OK_PACKAGES = new Set(["react", "react-dom"]);
+
+/** Bundled inputs that must never reach the browser: the DB layer, the stores, and server packages
+ *  (core-check's FORBIDDEN_PACKAGES minus react/react-dom). Input paths are repo-relative, as in esbuild's metafile. */
+export function forbiddenBundleInputs(inputPaths: string[]): string[] {
+  const bad: string[] = [];
+  for (const rel of inputPaths) {
+    if (/^src\/db\//.test(rel) || /^src\/lib\/stores\//.test(rel)) {
+      bad.push(rel);
+      continue;
+    }
+    const i = rel.lastIndexOf("node_modules/");
+    if (i < 0) continue;
+    const [a, b] = rel.slice(i + "node_modules/".length).split("/");
+    const pkg = a.startsWith("@") ? `${a}/${b}` : a;
+    if (FORBIDDEN_PACKAGES.has(pkg) && !BROWSER_OK_PACKAGES.has(pkg)) bad.push(rel);
+  }
+  return bad;
+}
+
+/** null when `out` is inside <root>/output/ (and not output/ itself), else the reason it is refused. */
+export function outDirProblem(root: string, out: string): string | null {
+  const rel = path.relative(path.join(root, "output"), path.resolve(out));
+  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
+    return `--out must be inside ${path.join(root, "output")}${path.sep} (got ${out}); refusing to clean and write there`;
+  }
+  return null;
+}
 
 type Args = { out: string; data: string | null; images: string | null; minify: boolean };
 
@@ -123,13 +154,17 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
     sourcemap: args.minify ? false : "inline",
     metafile: true,
     logLevel: "silent",
+    absWorkingDir: ROOT,
     tsconfig: path.join(ROOT, "tsconfig.json"),
     define: { "process.env.NODE_ENV": '"production"' },
-    banner: { js: 'var process = globalThis.process || { env: { NODE_ENV: "production" } };' },
     loader: { ".jpg": "file", ".jpeg": "file", ".png": "file", ".webp": "file", ".gif": "file", ".svg": "file", ".woff2": "file", ".woff": "file" },
     plugins: [shimPlugin(), imagePlugin(), serverActionStubPlugin(ROOT, discovered)],
   });
   const jsMs = Date.now() - t0;
+  const leaked = forbiddenBundleInputs(Object.keys(result.metafile.inputs));
+  if (leaked.length) {
+    throw new Error(`server code reached the browser bundle (${leaked.length} input(s)):\n  ${leaked.slice(0, 20).join("\n  ")}`);
+  }
 
   // --- CSS: Quartzite's Tailwind + pk-* styles, plus any CSS the bundle imported ---
   const t1 = Date.now();
@@ -174,7 +209,13 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
 }
 
 async function main() {
-  const r = await build(parseArgs(process.argv.slice(2)));
+  const args = parseArgs(process.argv.slice(2));
+  const problem = outDirProblem(ROOT, args.out);
+  if (problem) {
+    console.error(`handoff:build: ${problem}`);
+    process.exit(2);
+  }
+  const r = await build(args);
   if (r.oversize.length) {
     console.error(`handoff:build: ${r.oversize.length} file(s) over ${MAX_FILE_BYTES} bytes: ${r.oversize.join(", ")}`);
     process.exit(1);

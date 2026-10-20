@@ -38,14 +38,30 @@ function subscribe(cb: () => void): () => void {
 const getSearch = () => window.location.search;
 const getPath = () => window.location.pathname;
 
-// One URLSearchParams per search string, so the hook's value is referentially stable.
+/** Like Next's ReadonlyURLSearchParams: reads work, every mutator throws. */
+class ReadonlySearchParams extends URLSearchParams {
+  append(): never {
+    throw new Error("URLSearchParams is read-only in the prototype");
+  }
+  delete(): never {
+    throw new Error("URLSearchParams is read-only in the prototype");
+  }
+  set(): never {
+    throw new Error("URLSearchParams is read-only in the prototype");
+  }
+  sort(): never {
+    throw new Error("URLSearchParams is read-only in the prototype");
+  }
+}
+
+// One read-only view per search string, so the hook's value is referentially stable.
 const paramsCache = new Map<string, URLSearchParams>();
 
 export function useSearchParams(): URLSearchParams {
   const s = useSyncExternalStore(subscribe, getSearch, getSearch);
   let p = paramsCache.get(s);
   if (!p) {
-    p = new URLSearchParams(s);
+    p = new ReadonlySearchParams(s);
     paramsCache.set(s, p);
   }
   return p;
