@@ -12184,3 +12184,17 @@ link/archive paths a person would.
 - **Slice 4 — Flame test, service checks, re-inspection:** per-curtain inventory → flame-test results, fire-curtain and emergency-lighting checks, re-inspection of open findings, status driven by repair jobs (D965).
 - **Slice 5 — Portal and reminders:** customer register, acknowledgment, immediate-hazard alerts, next-due reminders (fire curtain 90 days, emergency lighting, flame cert, E1.47 rigging) (D966).
 - **Open questions:** (a) S2 as one scope with a screen/full depth toggle (assumed) or two scopes — revisit in slice 3; (b) reminder lead times and recipients; (c) whether outside specialists use the app directly or only receive the findings PDF (slice 1 assumes the latter; Peak staff enter the specialist rating).
+
+## 360. Parts list CSV v2 + BOM quote PDF — DONE 2026-10-20 on `feat/parts-csv-bom-pdf` (D1231–D1232)
+
+Jeff: the Parts list (CSV) should show item name, description, cost, sell margin and where the pricing came from ("Catalog" for catalog items), and Build package → BOM quote should export to PDF. Specs `docs/superpowers/specs/2026-10-20-parts-list-csv-price-source-design.md` and `docs/superpowers/specs/2026-10-20-bom-quote-pdf-design.md`; plan `docs/superpowers/plans/`.
+
+**Built:** Estimator → More ▾ → Parts list (CSV) now prints Item name (model, else SKU), Description, Unit Cost, Unit Sell, Line margin, Effective margin and Price source ("Catalog" for catalog parts; vendor quote / custom / allowance / curtain / POR / sell edited / not in catalog otherwise). Build package → BOM quote gains Download PDF / Open PDF ↗ for the saved estimate's BOM view (`<number> BOM.pdf`). Cover + BOM share one PDF render; PDF downloads open in a new tab.
+
+**Gates:** tsc 0 errors (`.next` deleted first); test:specs 21,570 PASS / 0 FAIL (includes the `#262 v2` and `BOM PDF` harness blocks, 25 PASS lines); test:smoke 261 PASS / 0 FAIL (`.next` deleted, run alone); eslint 0 problems on the 11 changed src/scripts files (`scripts/test-review-and-spec.ts` overflows eslint's react-hooks rule, as before, so it is excluded).
+
+**Rollback:** safe. No migration, no stored fields.
+
+**Remaining (Jeff-gated):**
+- Open one real estimate's CSV in Excel and check the labels and margins.
+- Download one BOM PDF on production (needs `QUOTE_PDF_ORIGIN`, like every estimate PDF).
