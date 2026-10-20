@@ -101,6 +101,15 @@
  *          production snapshot restore the margin and the stick. The walk lives in verify/rules.ts. Screenshots:
  *          output/verify/rules-*.png; result: output/verify/rules.json.
  *
+ *   npm run handoff:verify -- --photos [--out <package dir>]
+ *
+ * --photos  packaged product photos (Task 11), on a scratch COPY of the package (output/verify/photos-pkg): the harness writes
+ *          two tiny images + images/manifest.json + the data/photos.js handoff:slice would emit, then checks, from file://,
+ *          that the Catalog thumbnail of a part with a photo and the quote document's key-product photo both load that
+ *          images/ file (file: request, naturalWidth > 0), and that a part with no photo, and one whose file is missing,
+ *          show the "Image coming soon" placeholder. The walk lives in verify/photos.ts. Screenshots: output/verify/photos-*.png;
+ *          result: output/verify/photos.json.
+ *
  *   npm run handoff:verify -- --drift [--update [<port> …]]
  *
  * --drift  the ported server logic's originals (port-sources.json, port-drift.ts): recomputes each
@@ -1384,9 +1393,10 @@ async function main() {
   const catalog = argv.includes("--catalog");
   const assemblies = argv.includes("--assemblies");
   const rules = argv.includes("--rules");
+  const photos = argv.includes("--photos");
   const drift = argv.includes("--drift");
-  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !shell && !catalog && !assemblies && !rules && !drift) {
-    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --catalog | --assemblies | --rules | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] [--out <package dir>] | --drift [--update [<port> …]]");
+  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !shell && !catalog && !assemblies && !rules && !photos && !drift) {
+    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --catalog | --assemblies | --rules | --photos | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] [--out <package dir>] | --drift [--update [<port> …]]");
     process.exit(2);
   }
   mkdirSync(VERIFY_DIR, { recursive: true });
@@ -1458,6 +1468,14 @@ async function main() {
     const r = await rulesCheck(pkgDir);
     writeFileSync(path.join(VERIFY_DIR, "rules.json"), JSON.stringify(r, null, 2) + "\n");
     printRules(r);
+    pass &&= r.pass;
+  }
+  if (photos) {
+    // verify/photos.ts imports this module's helpers; loaded here, once this module has finished evaluating.
+    const { photosCheck, printPhotos } = await import("./verify/photos");
+    const r = await photosCheck(pkgDir);
+    writeFileSync(path.join(VERIFY_DIR, "photos.json"), JSON.stringify(r, null, 2) + "\n");
+    printPhotos(r);
     pass &&= r.pass;
   }
   if (!pass) process.exit(1);

@@ -41,7 +41,7 @@ import { clientPackageActions } from "../handoff/estimator/runtime/actions/clien
 import { packageActions, refusedPackageActions, REFUSED_PACKAGE_ACTIONS } from "../handoff/estimator/runtime/actions/package-actions";
 import { outputActions } from "../handoff/estimator/runtime/actions/output-actions";
 import { pdfActions } from "../handoff/estimator/runtime/actions/pdf-actions";
-import { assetUrl, PLACEHOLDER_DIR, partPhotoSrc } from "../handoff/estimator/runtime/assets";
+import { assetUrl, PLACEHOLDER_DIR, partDocumentSrc, partPhotoSrc } from "../handoff/estimator/runtime/assets";
 import { applyDraft, addLineSell, browseCatalog, draftFromPart, facetLabel, money, pageBounds, PAGE_SIZE, parsePrice, partFingerprint, skuIndex, validateSku } from "../handoff/estimator/runtime/catalog-model";
 import { rankCatalogParts } from "@/lib/estimating-core/catalog-rank";
 import type { LivePart } from "../handoff/estimator/runtime/readers";
@@ -948,7 +948,19 @@ export async function handoffReviewChecks(ok: Ok) {
   await store.put("quotes", q1);
   const partOf = await catalogResolver(store);
   const kpSections = [{ ...sections[0], presentation: "narrative", keyProducts: [{ lineKey: "1", sku: "ETC:CS15", text: "x", photo: true }] }] as unknown as SpecSection[];
-  ok(photoDocIdForSku("ETC:CS15") === null && Object.keys(keyProductPhotosLocal(kpSections, null, partOf)).length === 0, "handoff review: no packaged photos yet → no key-product photo (Task 11 plugs them in)");
+  ok(photoDocIdForSku("ETC:CS15") === null && Object.keys(keyProductPhotosLocal(kpSections, null, partOf)).length === 0, "handoff review: no packaged photos yet → no key-product photo");
+  {
+    // the packaged photo map (window.PEAK_PHOTOS = { bySku, byDoc }): the printed key-product photo comes from the same sku → doc → file lookup as the Catalog thumbnails
+    const hadWin = Object.getOwnPropertyDescriptor(globalThis, "window");
+    Object.defineProperty(globalThis, "window", { value: { PEAK_PHOTOS: { bySku: { "ETC:CS15": "PD-15" }, byDoc: { "PD-15": "images/PD-15.webp" } } }, configurable: true, writable: true });
+    try {
+      const kp = keyProductPhotosLocal(kpSections, null, partOf);
+      ok(photoDocIdForSku("ETC:CS15") === "PD-15" && kp["ETC:CS15"]?.src === "images/PD-15.webp", `handoff review: a key product's printed photo is the packaged one, through the same map as the Catalog thumbnails (${JSON.stringify(kp)})`);
+    } finally {
+      if (hadWin) Object.defineProperty(globalThis, "window", hadWin);
+      else delete (globalThis as Record<string, unknown>).window;
+    }
+  }
 
   // --- the package loader port (package-live-loader.ts) ---
   const pkg = await loadPackagePreviewLocal(store, "Q-3001", "narrative", "./lh.jpg");
@@ -1590,9 +1602,12 @@ export async function handoffShellChecks(ok: Ok) {
     // thumbnails: the packaged photo when the package ships one, else the "coming soon" placeholder
     ok(partPhotoSrc("ETC:CS40") === PLACEHOLDER_DIR + "coming-soon.webp", "handoff catalog: partPhotoSrc — no packaged photo → the placeholder");
     const hadWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-    Object.defineProperty(globalThis, "window", { value: { PEAK_PHOTOS: { "ETC:CS40": "images/cs40.webp" } }, configurable: true, writable: true });
+    Object.defineProperty(globalThis, "window", { value: { PEAK_PHOTOS: { bySku: { "ETC:CS40": "PD-40", "Shure:SM58": "PD-GONE" }, byDoc: { "PD-40": "images/PD-40.webp" } } }, configurable: true, writable: true });
     try {
-      ok(partPhotoSrc("ETC:CS40") === "images/cs40.webp" && partPhotoSrc("Shure:SM58") === PLACEHOLDER_DIR + "coming-soon.webp", "handoff catalog: partPhotoSrc — PEAK_PHOTOS[sku] when present, the placeholder otherwise");
+      ok(partPhotoSrc("ETC:CS40") === "images/PD-40.webp" && partPhotoSrc("Shure:SM58") === PLACEHOLDER_DIR + "coming-soon.webp" && partPhotoSrc("constructor") === PLACEHOLDER_DIR + "coming-soon.webp",
+        "handoff catalog: partPhotoSrc — PEAK_PHOTOS.bySku[sku] → byDoc[docId] when present; a sku whose doc has no file, or an Object.prototype name, gets the placeholder");
+      ok(photoDocIdForSku("ETC:CS40") === "PD-40" && photoDocIdForSku("Shure:SM58") === null && partDocumentSrc("PD-40") === "images/PD-40.webp" && assetUrl("/api/part-documents/PD-40") === "images/PD-40.webp" && assetUrl("/api/part-documents/PD-x") === PLACEHOLDER_DIR + "coming-soon.webp",
+        "handoff catalog: the document lookups use the same map — photoDocIdForSku, partDocumentSrc and /api/part-documents/<docId> all resolve through it");
     } finally {
       if (hadWindow) Object.defineProperty(globalThis, "window", hadWindow);
       else delete (globalThis as Record<string, unknown>).window;

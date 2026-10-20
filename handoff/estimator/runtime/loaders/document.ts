@@ -29,7 +29,7 @@ import type { HandoffStore } from "../store";
 import { customers, refreshPortsFromStore, settingsView } from "../ports";
 import { quoteRepo } from "../quote-repo";
 import { bySkuResolver, liveCatalog, type LivePart } from "../readers";
-import { partDocumentSrc } from "../assets";
+import { partDocumentSrc, photoDocIdForSku } from "../assets";
 
 /**
  * photos.ts photoReadPlan, ported (that module reaches the part-documents store): the photo skus a document
@@ -47,14 +47,9 @@ export function photoReadPlan(sections: SpecSection[], document?: PackageDoc | n
   return { skus, read: (sku: string) => alias.get(sku) ?? sku };
 }
 
-/**
- * The part document a sku prints as its photo (its primary visible image). The slice carries no part
- * documents, so this is null until Task 11 packages product photos — then it answers from them.
- */
-export function photoDocIdForSku(sku: string): string | null {
-  void sku;
-  return null;
-}
+/** The part document a sku prints as its photo (its primary visible image, else its manufacturer's): the packaged
+ *  photo map's sku → docId (assets.ts photoDocIdForSku); null when the package ships none for it. */
+export { photoDocIdForSku };
 
 /** sku → { src, alt } for the printed photo-on blocks, through the one asset rewrite (assets.ts). Never throws. */
 export function keyProductPhotosLocal(sections: SpecSection[], document: PackageDoc | null | undefined, partOf: (sku: string) => LivePart | undefined): Record<string, { src: string; alt: string }> {

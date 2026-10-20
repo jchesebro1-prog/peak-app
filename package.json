@@ -21,6 +21,7 @@
     "db:seed": "tsx scripts/seed.ts",
     "db:export": "tsx scripts/export.ts",
     "handoff:slice": "tsx handoff/estimator/slice.ts",
+    "handoff:photos": "tsx handoff/estimator/fetch-photos.ts",
     "handoff:build": "tsx handoff/estimator/build.ts",
     "handoff:verify": "tsx handoff/estimator/verify.ts",
     "davinci:extract": "tsx scripts/davinci-extract.ts",

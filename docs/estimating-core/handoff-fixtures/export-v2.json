@@ -961,6 +961,10 @@
       {
        "sku": "SKU-B",
        "qty": 1
+      },
+      {
+       "sku": "SKU-A",
+       "qty": 2
       }
      ],
      "internalNote": "staff-only scratch",
@@ -988,6 +992,23 @@
    }
   ],
   "part_documents": [
+   {
+    "id": "PD-4",
+    "doc": {
+     "id": "PD-4",
+     "kind": "image",
+     "blobKey": "part-docs/PD-4/a-alt.webp",
+     "sourceUrl": null,
+     "source": "upload",
+     "uploadedAt": 1760000000000
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   },
    {
     "id": "PD-1",
     "doc": {
@@ -1035,9 +1056,42 @@
     "receivedAt": 1760000000000,
     "review": null,
     "deleted": false
+   },
+   {
+    "id": "PD-5",
+    "doc": {
+     "id": "PD-5",
+     "kind": "image",
+     "blobKey": "part-docs/PD-5/beta.webp",
+     "sourceUrl": null,
+     "source": "manufacturer",
+     "uploadedAt": 1760000000000
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
    }
   ],
   "part_document_links": [
+   {
+    "id": "L4",
+    "doc": {
+     "id": "L4",
+     "partSku": "SKU-A",
+     "documentId": "PD-4",
+     "kind": "image",
+     "sort": 1
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   },
    {
     "id": "L1",
     "doc": {
@@ -1091,7 +1145,30 @@
     "id": "MF-acme",
     "doc": {
      "id": "MF-acme",
-     "mfrKey": "acme"
+     "key": "acme",
+     "name": "Acme",
+     "imageDocumentId": null,
+     "imageHistory": [],
+     "aliasKeys": [],
+     "mergedInto": null
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   },
+   {
+    "id": "MF-beta",
+    "doc": {
+     "id": "MF-beta",
+     "key": "beta",
+     "name": "Beta",
+     "imageDocumentId": "PD-5",
+     "imageHistory": [],
+     "aliasKeys": [],
+     "mergedInto": null
     },
     "rev": 1,
     "seq": 1,

@@ -12,7 +12,9 @@ import {
   CATALOG_FIELDS, FIXTURE_FIELDS, QUOTE_FIELDS, BLOB_IDS, SETTINGS_FIELDS, COMPANY_COLS, SITE_COLS, CONTACT_COLS,
   pickFields, scanForSecrets, selectEstimates, catalogChunks,
 } from "../handoff/estimator/slice-rules";
-import { sliceExport, writeSlice, type ExportV2 } from "../handoff/estimator/slice";
+import { sliceExport, writeSlice, loadPhotoManifest, type ExportV2 } from "../handoff/estimator/slice";
+import { downloadPlan, manufacturerImageIds, parsePhotoManifest, photoScopeSkus, photosScript, selectPhotos } from "../handoff/estimator/photo-select";
+import { buildPhotoManifest, describeSelection, downloadPhotos, main as photosMain, selectionForExport, sniffImageExt, type BlobClient } from "../handoff/estimator/fetch-photos";
 import type { Ok } from "./test-inbox-org";
 
 export const FIXTURE_V2 = "docs/estimating-core/handoff-fixtures/export-v2.json";
@@ -184,10 +186,11 @@ export async function handoffSliceChecks(ok: Ok) {
   ok(!("internalNote" in fx) && fx.createdBy === "u1" && fx.kind === "fixture" && Array.isArray(fx.lines) && FIXTURE_FIELDS.includes("lines"),
     "handoff:slice: fixtures are picked to FIXTURE_FIELDS — an unknown field is dropped, FixtureRecord fields kept");
   const manifest = JSON.parse(r.files["data/photo-manifest.json"]) as Array<Record<string, unknown>>;
-  ok(manifest.length === 1 && manifest[0].sku === "SKU-A" && manifest[0].docId === "PD-1" && manifest[0].blobKey === "part-docs/PD-1/a.webp" && "sourceUrl" in manifest[0],
-    "handoff:slice: photo-manifest lists visible image links { sku, docId, blobKey, sourceUrl }");
+  ok(manifest.map((m) => `${m.sku}:${m.docId}:${m.via}`).join(",") === "SKU-A:PD-1:own,SKU-B:PD-5:manufacturer" && manifest[0].blobKey === "part-docs/PD-1/a.webp" && "sourceUrl" in manifest[0],
+    `handoff:slice: photo-manifest = one pick per part the sliced estimates/fixtures name { sku, docId, blobKey, sourceUrl, via } (${manifest.map((m) => `${m.sku}:${m.docId}:${m.via}`).join(",")})`);
   ok(manifest[0].sourceUrl === "https://example.com/a.webp" && !r.files["data/photo-manifest.json"].includes("token=") && !r.files["data/photo-manifest.json"].includes("#frag"),
     "handoff:slice: photo-manifest sourceUrl drops the query string and fragment (scheme + host + path only)");
+  ok(!("data/photos.js" in r.files), "handoff:slice: no data/photos.js without an images/manifest.json (placeholders only)");
   const meta = load("data/meta.js").PEAK_META as { sliceVersion: number; counts: Record<string, number> };
   ok(meta.sliceVersion === 1 && meta.counts.estimates === 3 && meta.counts.catalog === 2 && meta.counts.companies === 2, "handoff:slice: meta.js carries sliceVersion 1 and counts");
 
@@ -248,5 +251,223 @@ export async function handoffSliceChecks(ok: Ok) {
     ok(c3.status === 0 && fs.existsSync(path.join(out3, "estimates.js")), `handoff:slice: CLI — a clean format-2 export exits 0 and writes the slice (exit ${c3.status})`);
   } finally {
     fs.rmSync(tmp2, { recursive: true, force: true });
+  }
+
+  await photoChecks(ok, exp);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Task 11 — product photos: the selection (the app's own rule), the download (fake Blob client), the CLI.
+
+const WEBP = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0x10, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x20]);
+const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
+const mkRow = (id: string, doc: Record<string, unknown>, deleted = false) => ({ id, doc, deleted });
+
+async function quiet<T>(fn: () => Promise<T>): Promise<{ value: T; out: string; err: string }> {
+  const log = console.log, error = console.error;
+  let out = "", err = "";
+  console.log = (...a: unknown[]) => { out += a.join(" ") + "\n"; };
+  console.error = (...a: unknown[]) => { err += a.join(" ") + "\n"; };
+  try {
+    return { value: await fn(), out, err };
+  } finally {
+    console.log = log;
+    console.error = error;
+  }
+}
+
+async function photoChecks(ok: Ok, exp: ExportV2) {
+  // --- selection on the export-v2 fixture: PD-4 (listed first, sort 1) loses to PD-1 (sort 0); L2/PD-2 is hidden; L3 is a datasheet ---
+  const sel = selectionForExport(exp);
+  ok(sel.scopeSkus.includes("SKU-A") && sel.scopeSkus.includes("SKU-B") && sel.scopeSkus.includes("ETC:CS15") && sel.scopeSkus.includes("Symetrix:Jupiter 4"),
+    `handoff:photos: scope = the skus the sliced estimates (Q-G001..3) and the fixture name (${sel.scopeSkus.length})`);
+  ok(!sel.scopeSkus.includes("X") && !sel.scopeSkus.includes("SKU-C"), "handoff:photos: scope leaves out a Daylite/deleted/flame-test quote's skus and unreferenced parts");
+  const pick = (res: typeof sel, sku: string) => res.picks.find((p) => p.sku === sku);
+  ok(pick(sel, "SKU-A")?.docId === "PD-1" && pick(sel, "SKU-A")?.via === "own", "handoff:photos: selection — the higher-ranked image wins (PD-1 sort 0 over PD-4 sort 1, though PD-4 comes first in the file)");
+  ok(sel.picks.every((p) => p.docId !== "PD-2" && p.docId !== "PD-3"), "handoff:photos: selection — a hidden image link (PD-2) and a datasheet link (PD-3) are never picked");
+  ok(pick(sel, "SKU-B")?.docId === "PD-5" && pick(sel, "SKU-B")?.via === "manufacturer", "handoff:photos: selection — a part with no image of its own gets its manufacturer's image (Beta → PD-5)");
+  ok(sel.withoutPhoto.includes("ETC:CS15") && !sel.withoutPhoto.includes("SKU-A"), "handoff:photos: selection — an in-scope part with no photo is listed as withoutPhoto");
+  ok(pick(sel, "SKU-A")?.sourceUrl === "https://example.com/a.webp", "handoff:photos: selection — sourceUrl is scheme + host + path only");
+
+  const variant = (edit: (e: ExportV2) => void): ReturnType<typeof selectPhotos> => {
+    const e = clone(exp);
+    edit(e);
+    return selectionForExport(e);
+  };
+  const links = (e: ExportV2) => e.collections!.part_document_links as Array<{ id: string; doc: Record<string, unknown> }>;
+  const docs = (e: ExportV2) => e.collections!.part_documents as Array<{ id: string; doc: Record<string, unknown>; deleted?: boolean }>;
+  const flip = variant((e) => { links(e).find((l) => l.id === "L1")!.doc.sort = 5; });
+  ok(pick(flip, "SKU-A")?.docId === "PD-4", "handoff:photos: selection — re-ordering the links (explicit sort) changes the primary");
+  const unhidden = variant((e) => { delete links(e).find((l) => l.id === "L2")!.doc.hidden; });
+  ok(pick(unhidden, "SKU-A")?.docId === "PD-1", "handoff:photos: selection — an un-hidden link without a sort ranks after the sorted ones");
+  const bySource = variant((e) => {
+    for (const l of links(e)) delete l.doc.sort;
+    delete links(e).find((l) => l.id === "L2")!.doc.hidden;
+    docs(e).find((d) => d.id === "PD-1")!.doc.source = "fetch";
+    docs(e).find((d) => d.id === "PD-2")!.doc.source = "upload";
+  });
+  ok(["PD-2", "PD-4"].includes(pick(bySource, "SKU-A")!.docId) && pick(bySource, "SKU-A")!.docId !== "PD-1", "handoff:photos: selection — with no explicit sort an upload outranks a fetched image (IMAGE_SOURCE_RANK)");
+  const render = variant((e) => {
+    docs(e).find((d) => d.id === "PD-1")!.doc.source = "datasheet-render";
+    links(e).find((l) => l.id === "L1")!.doc.sort = 0;
+  });
+  ok(pick(render, "SKU-A")?.docId === "PD-4", "handoff:photos: selection — a datasheet-render thumbnail sorts after every real image whatever its sort");
+  const noMfr = variant((e) => { (e.collections!.manufacturers as Array<{ id: string }>).splice(1, 1); });
+  ok(!pick(noMfr, "SKU-B") && noMfr.withoutPhoto.includes("SKU-B"), "handoff:photos: selection — no manufacturer record → no photo");
+  const ownBeatsMfr = variant((e) => {
+    (e.collections!.manufacturers as Array<{ doc: Record<string, unknown> }>)[0].doc.imageDocumentId = "PD-5";
+  });
+  ok(pick(ownBeatsMfr, "SKU-A")?.docId === "PD-1" && pick(ownBeatsMfr, "SKU-A")?.via === "own", "handoff:photos: selection — a manufacturer image never replaces a part's own photo");
+  const merged = variant((e) => {
+    const parts = e.collections!.catalog_parts as Array<{ id: string; doc: Record<string, unknown> }>;
+    parts.find((p) => p.id === "SKU-B")!.doc.mfr = "Beta Lighting";
+    (e.collections!.manufacturers as unknown[]).push(mkRow("MF-betalighting", { id: "MF-betalighting", key: "betalighting", mergedInto: "beta" }));
+    (e.collections!.manufacturers as Array<{ id: string; doc: Record<string, unknown> }>).find((m) => m.id === "MF-beta")!.doc.aliasKeys = ["betalighting"];
+  });
+  ok(pick(merged, "SKU-B")?.docId === "PD-5", "handoff:photos: selection — a merged-away manufacturer spelling resolves to its target's image (canonicalKeyMap)");
+  const lookup = manufacturerImageIds([{ key: "a", imageDocumentId: "PD-9", mergedInto: "b" }, { key: "b", imageDocumentId: "PD-8", aliasKeys: ["a"] }]);
+  ok(lookup("A") === "PD-8" && lookup("zzz") === null, "handoff:photos: manufacturerImageIds — a merged-away record never supplies an image; lookup is mfrKey-normalized");
+  const badMfrDoc = variant((e) => { docs(e).find((d) => d.id === "PD-5")!.doc.kind = "datasheet"; });
+  ok(!pick(badMfrDoc, "SKU-B"), "handoff:photos: selection — a manufacturer 'image' that is not an image document is ignored");
+  const deletedDoc = variant((e) => { docs(e).find((d) => d.id === "PD-1")!.deleted = true; });
+  ok(pick(deletedDoc, "SKU-A")?.docId === "PD-4", "handoff:photos: selection — a deleted document is skipped (the next-ranked image is the primary)");
+  const outOfScope = variant((e) => {
+    (e.collections!.catalog_parts as unknown[]).push(mkRow("SKU-X", { sku: "SKU-X", desc: "unused", mfr: "Beta" }));
+    links(e).push({ id: "LX", doc: { id: "LX", partSku: "SKU-X", documentId: "PD-4", kind: "image" } });
+  });
+  ok(!pick(outOfScope, "SKU-X") && !outOfScope.scopeSkus.includes("SKU-X"), "handoff:photos: selection — a part no sliced estimate or fixture names gets no photo");
+  const linkOnly = variant((e) => {
+    docs(e).push(mkRow("PD-8", { id: "PD-8", kind: "image", blobKey: null, sourceUrl: "https://cdn.example.com/p.jpg?sig=zzz#x", source: "fetch" }) as never);
+    docs(e).push(mkRow("PD-9", { id: "PD-9", kind: "image", blobKey: null, sourceUrl: null, source: "fetch" }) as never);
+    links(e).push({ id: "L8", doc: { id: "L8", partSku: "SKU-B", documentId: "PD-8", kind: "image" } });
+    links(e).push({ id: "L9", doc: { id: "L9", partSku: "SKU-B", documentId: "PD-9", kind: "image", sort: -1 } });
+  });
+  ok(pick(linkOnly, "SKU-B")?.docId === "PD-8" && pick(linkOnly, "SKU-B")?.blobKey === null && pick(linkOnly, "SKU-B")?.sourceUrl === "https://cdn.example.com/p.jpg",
+    "handoff:photos: selection — a link-only document can be the primary (kept, sourceUrl cleaned); a document with neither file nor link is dead and skipped");
+  const plan = downloadPlan(linkOnly.picks);
+  ok(plan.download.map((d) => d.docId).join(",") === "PD-1" && plan.linkOnly.map((l) => `${l.sku}:${l.docId}`).join(",") === "SKU-B:PD-8",
+    "handoff:photos: downloadPlan — link-only picks are recorded, not downloaded; one entry per document");
+  const renamed = variant((e) => {
+    (e.collections!.catalog_parts as unknown[]).push(mkRow("OLD-A", { sku: "OLD-A", renamedTo: "SKU-A" }, true));
+    (e.collections!.subassemblies as Array<{ id: string; doc: Record<string, unknown> }>).find((f) => f.id === "fa-1")!.doc.lines = [{ sku: "OLD-A", qty: 1 }];
+  });
+  ok(renamed.scopeSkus.includes("SKU-A") && !renamed.scopeSkus.includes("OLD-A") && pick(renamed, "SKU-A")?.docId === "PD-1", "handoff:photos: selection — a retired SKU on a fixture follows its rename to the part that carries the photos");
+  ok(photoScopeSkus([{ spec: { sections: [{ items: [{ sku: "A", components: [{ sku: "B" }] }] }] } }], [{ lightEngineSku: "C", lensSku: "D", rack: { placements: [{ sku: "E" }] } }]).join(",") === "A,B,C,D,E",
+    "handoff:photos: scope — line skus, components, light engine / lens and rack placements");
+  const lines = describeSelection(sel).join("\n");
+  ok(/with a photo: 2 /.test(lines) && /documents to download from private Blob: 2/.test(lines) && /SKU-A {2}←/.test(lines), "handoff:photos: describeSelection — counts and the pick list");
+
+  // --- the browser's map ---
+  const manifest = { version: 1 as const, bySku: { "SKU-A": "PD-1", "SKU-B": "PD-5", "SKU-Z": "PD-404" }, byDoc: { "PD-1": "PD-1.webp", "PD-5": "PD-5.png", "../evil": "x.webp", "PD-7": "../../etc/passwd" }, linkOnly: [], failed: [] };
+  const parsed = parsePhotoManifest(manifest)!;
+  ok(Object.keys(parsed.byDoc).join() === "PD-1,PD-5" && Object.keys(parsed.bySku).join() === "SKU-A,SKU-B", "handoff:photos: parsePhotoManifest drops unsafe file names, unsafe ids and skus whose document is unknown");
+  ok(parsePhotoManifest({ version: 2 }) === null && parsePhotoManifest(null) === null, "handoff:photos: parsePhotoManifest refuses a manifest of another version");
+  const w: Record<string, unknown> = {};
+  new Function("window", photosScript(parsed))(w);
+  ok(JSON.stringify(w.PEAK_PHOTOS) === JSON.stringify({ bySku: { "SKU-A": "PD-1", "SKU-B": "PD-5" }, byDoc: { "PD-1": "images/PD-1.webp", "PD-5": "images/PD-5.png" } }),
+    "handoff:photos: photosScript = window.PEAK_PHOTOS { bySku: sku → docId, byDoc: docId → images/<file> }");
+  const withPhotos = sliceExport(exp, { photos: parsed });
+  ok("data/photos.js" in withPhotos.files && withPhotos.hits.length === 0 && withPhotos.counts.photoFiles === 2, "handoff:slice: photos in → data/photos.js out (and the final scan still clean)");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-photos-"));
+  try {
+    const dataDir = path.join(tmp, "data"), imgDir = path.join(tmp, "images");
+    fs.mkdirSync(imgDir, { recursive: true });
+    ok(loadPhotoManifest(imgDir).manifest === null, "handoff:slice: loadPhotoManifest — no images/manifest.json → null");
+    fs.writeFileSync(path.join(imgDir, "manifest.json"), JSON.stringify(manifest));
+    fs.writeFileSync(path.join(imgDir, "PD-1.webp"), WEBP);
+    const lm = loadPhotoManifest(imgDir);
+    ok(lm.manifest !== null && Object.keys(lm.manifest.byDoc).join() === "PD-1" && lm.missing.join() === "PD-5" && Object.keys(lm.manifest.bySku).join() === "SKU-A",
+      "handoff:slice: loadPhotoManifest — a document whose file is missing from images/ is left out of the map");
+    ok(writeSlice(sliceExport(exp, { photos: lm.manifest }), dataDir) && fs.existsSync(path.join(dataDir, "photos.js")), "handoff:slice: writeSlice writes data/photos.js");
+    ok(writeSlice(sliceExport(exp), dataDir) && !fs.existsSync(path.join(dataDir, "photos.js")), "handoff:slice: a re-slice without a manifest removes a stale data/photos.js");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+
+  // --- sniffing ---
+  ok(sniffImageExt(WEBP) === "webp" && sniffImageExt(PNG) === "png" && sniffImageExt(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0])) === "jpg" && sniffImageExt(new TextEncoder().encode("GIF89a")) === "gif" &&
+    sniffImageExt(new TextEncoder().encode("<html>nope</html>")) === null, "handoff:photos: sniffImageExt — webp/png/jpg/gif by magic bytes; HTML is not an image");
+
+  // --- the download, with a fake Blob client ---
+  const dl = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-photos-dl-"));
+  try {
+    const calls = new Map<string, number>();
+    let inflight = 0, peak = 0;
+    const secret = "tok_" + "SECRETVALUE123";
+    const client: BlobClient = {
+      async read(key) {
+        calls.set(key, (calls.get(key) ?? 0) + 1);
+        inflight++;
+        peak = Math.max(peak, inflight);
+        await new Promise((r) => setTimeout(r, 5));
+        inflight--;
+        const n = calls.get(key)!;
+        if (key.includes("flaky") && n < 3) throw new Error("socket hang up");
+        if (key.includes("dead")) throw new Error("503 using " + secret);
+        if (key.includes("gone")) return null;
+        if (key.includes("html")) return new TextEncoder().encode("<html>login</html>");
+        return key.endsWith(".png") ? PNG : WEBP;
+      },
+    };
+    const items = [
+      ...Array.from({ length: 14 }, (_, i) => ({ docId: `PD-ok${i}`, blobKey: `part-docs/PD-ok${i}/p.webp` })),
+      { docId: "PD-png", blobKey: "part-docs/PD-png/p.png" },
+      { docId: "PD-flaky", blobKey: "part-docs/PD-flaky/p.webp" },
+      { docId: "PD-dead", blobKey: "part-docs/PD-dead/p.webp" },
+      { docId: "PD-gone", blobKey: "part-docs/PD-gone/p.webp" },
+      { docId: "PD-html", blobKey: "part-docs/PD-html/p.webp" },
+      { docId: "../bad", blobKey: "part-docs/x/p.webp" },
+    ];
+    const res = await downloadPhotos(items, { client, outDir: path.join(dl, "images"), backoffMs: 0, redact: [secret] });
+    ok(res.downloaded === 16 && res.failed.length === 4, `handoff:photos: download — 16 written, 4 failed (${res.downloaded}/${res.failed.length})`);
+    ok(fs.readFileSync(path.join(dl, "images", "PD-ok0.webp")).equals(Buffer.from(WEBP)) && fs.existsSync(path.join(dl, "images", "PD-png.png")), "handoff:photos: download — files keep their stored bytes, named <docId>.<ext> by their real format");
+    ok(peak <= 6 && peak > 1, `handoff:photos: download — at most 6 in flight, and actually concurrent (peak ${peak})`);
+    ok(calls.get("part-docs/PD-flaky/p.webp") === 3 && res.files["PD-flaky"] === "PD-flaky.webp", "handoff:photos: download — a flaky read is retried (2 retries → 3 attempts) and then lands");
+    ok(calls.get("part-docs/PD-dead/p.webp") === 3 && res.failed.some((f) => f.docId === "PD-dead"), "handoff:photos: download — a persistent failure stops after 3 attempts and is recorded");
+    ok(calls.get("part-docs/PD-gone/p.webp") === 1 && res.failed.find((f) => f.docId === "PD-gone")?.error === "not found in Blob", "handoff:photos: download — a missing blob is not retried");
+    ok(res.failed.find((f) => f.docId === "PD-html")?.error === "the stored file is not an image" && !fs.existsSync(path.join(dl, "images", "PD-html.webp")), "handoff:photos: download — a non-image body is refused, not written");
+    ok(!JSON.stringify(res.failed).includes(secret), "handoff:photos: download — the token is redacted from recorded errors");
+    ok(res.failed.some((f) => f.docId === "../bad") && !fs.existsSync(path.join(dl, "bad.webp")), "handoff:photos: download — an unsafe document id is refused");
+    const before = [...calls.values()].reduce((a, b) => a + b, 0);
+    const again = await downloadPhotos(items.slice(0, 3), { client, outDir: path.join(dl, "images"), backoffMs: 0 });
+    ok(again.reused === 3 && again.downloaded === 0 && [...calls.values()].reduce((a, b) => a + b, 0) === before, "handoff:photos: download — files already in the folder are reused (resume), --force would re-fetch");
+    const bm = buildPhotoManifest([{ sku: "S1", docId: "PD-ok0", blobKey: "k", sourceUrl: null, via: "own" }, { sku: "S2", docId: "PD-dead", blobKey: "k", sourceUrl: null, via: "own" }, { sku: "S3", docId: "PD-L", blobKey: null, sourceUrl: "https://x.test/a", via: "own" }], res);
+    ok(JSON.stringify(bm.bySku) === '{"S1":"PD-ok0"}' && bm.linkOnly.length === 1 && bm.linkOnly[0].sku === "S3" && bm.failed.some((f) => f.docId === "PD-dead"), "handoff:photos: manifest — maps only skus whose file exists; link-only and failed are recorded");
+
+    // --- main(): dry run, missing token, a full run with the fake client ---
+    const expPath = path.join(dl, "export.json");
+    fs.writeFileSync(expPath, JSON.stringify(exp));
+    const outDir = path.join(dl, "pkg", "images");
+    const dry = await quiet(() => photosMain(["--in", expPath, "--out", outDir, "--dry-run"], {}, async () => { throw new Error("must not build a client in a dry run"); }));
+    ok(dry.value === 0 && !fs.existsSync(outDir) && /with a photo: 2/.test(dry.out) && /dry run/.test(dry.out), "handoff:photos: --dry-run prints the selection, needs no token, writes nothing");
+    const noTok = await quiet(() => photosMain(["--in", expPath, "--out", outDir], {}, async () => { throw new Error("must not build a client without a token"); }));
+    ok(noTok.value === 2 && /BLOB_READ_WRITE_TOKEN/.test(noTok.err) && !fs.existsSync(outDir), "handoff:photos: no BLOB_READ_WRITE_TOKEN → exit 2 with a clear message, nothing written");
+    const usageRun = await quiet(() => photosMain(["--out", outDir], {}));
+    ok(usageRun.value === 2, "handoff:photos: missing --in → exit 2");
+    const v1Path = path.join(dl, "v1.json");
+    fs.writeFileSync(v1Path, JSON.stringify({ ...exp, meta: { ...exp.meta, format: 1 } }));
+    ok((await quiet(() => photosMain(["--in", v1Path, "--out", outDir, "--dry-run"], {}))).value === 2, "handoff:photos: a format-1 export → exit 2");
+    const keys: string[] = [];
+    const fake: BlobClient = { async read(k) { keys.push(k); return k.includes("PD-5") ? PNG : WEBP; } };
+    const full = await quiet(() => photosMain(["--in", expPath, "--out", outDir], { BLOB_READ_WRITE_TOKEN: secret }, async () => fake));
+    const written = JSON.parse(fs.readFileSync(path.join(outDir, "manifest.json"), "utf8")) as { bySku: Record<string, string>; byDoc: Record<string, string> };
+    ok(full.value === 0 && keys.sort().join() === "part-docs/PD-1/a.webp,part-docs/PD-5/beta.webp" && JSON.stringify(written.bySku) === '{"SKU-A":"PD-1","SKU-B":"PD-5"}' && written.byDoc["PD-5"] === "PD-5.png" &&
+      !JSON.stringify(written).includes("part-docs") && !full.out.includes(secret) && !full.err.includes(secret),
+      "handoff:photos: a run with a fake client downloads the 2 picked documents and writes images/manifest.json (no Blob keys, no token in output)");
+    const failing: BlobClient = { async read() { throw new Error("boom"); } };
+    const outFail = path.join(dl, "pkg-fail", "images");
+    const bad = await quiet(() => photosMain(["--in", expPath, "--out", outFail, "--retries", "0"], { BLOB_READ_WRITE_TOKEN: secret }, async () => failing));
+    ok(bad.value === 1 && fs.existsSync(path.join(outFail, "manifest.json")) && /FAILED PD-1/.test(bad.err), "handoff:photos: failed downloads → exit 1, the manifest still written for the rest");
+    // the real entry point
+    const cleanEnv = { ...process.env };
+    delete cleanEnv.BLOB_READ_WRITE_TOKEN;
+    const cli = (args: string[]) => spawnSync("npx", ["tsx", "handoff/estimator/fetch-photos.ts", ...args], { cwd: process.cwd(), encoding: "utf8", timeout: 120_000, env: cleanEnv });
+    const c1 = cli(["--in", expPath, "--out", path.join(dl, "cli-out"), "--dry-run"]);
+    ok(c1.status === 0 && /with a photo: 2/.test(c1.stdout) && !fs.existsSync(path.join(dl, "cli-out")), `handoff:photos: CLI --dry-run exits 0 without a token (exit ${c1.status})`);
+    const c2 = cli(["--in", expPath, "--out", path.join(dl, "cli-out")]);
+    ok(c2.status === 2 && /BLOB_READ_WRITE_TOKEN/.test(c2.stderr) && !fs.existsSync(path.join(dl, "cli-out")), `handoff:photos: CLI without a token exits 2 (exit ${c2.status})`);
+  } finally {
+    fs.rmSync(dl, { recursive: true, force: true });
   }
 }

@@ -510,6 +510,24 @@
           "sha256": "2bb443403f0a2336444b86760aa27443d4b038a0f53d21d0f3b898c3ac371b37"
         }
       ]
+    },
+    {
+      "port": "handoff/estimator/photo-select.ts",
+      "what": "a part's primary photo (visibleImagesForParts + compareImages order) and its manufacturer-image fallback (manufacturerImageLookup, keyProductPhotoDocs), over the export's collections",
+      "originals": [
+        {
+          "path": "src/lib/stores/part-documents.ts",
+          "sha256": "707ee15d49f96ce7b938e8d3bdd150904fb543b2a7ba837f930aea603248e3fb"
+        },
+        {
+          "path": "src/lib/stores/manufacturers.ts",
+          "sha256": "dd91f64b1354b25f45c7ed33078faefa0d7c5c34ad957aca6a4b8499465124c7"
+        },
+        {
+          "path": "src/lib/narrative/photos.ts",
+          "sha256": "f7945462a49ed49a5cd048796a9a20c3e9c7d7e6219a0041dc33bbdc16308b19"
+        }
+      ]
     }
   ]
 }

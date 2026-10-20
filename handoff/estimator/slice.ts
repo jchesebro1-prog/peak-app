@@ -6,6 +6,10 @@
  *
  *   npm run handoff:slice -- --in <export.json> --out output/peak-estimator-handoff/data
  *                           [--extra-estimates <other-export.json>]   (dev only)
+ *                           [--images <dir>]   (default: ../images beside the data dir)
+ *
+ * Run handoff:photos first: when <images>/manifest.json exists the slice also writes data/photos.js, the browser's
+ * photo map (photo-select.ts). Without it the page shows placeholders.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -14,6 +18,7 @@ import {
   pickAndScrub, pickFields, scanForSecrets, scrubValue, selectEstimates, packCatalog, catalogBody,
   type DocRow, type QuoteDoc, type ScrubEntry,
 } from "./slice-rules";
+import { parsePhotoManifest, photosScript, selectPhotos, type PhotoManifest } from "./photo-select";
 
 export const SLICE_VERSION = 1;
 export const MAX_FILE_BYTES = 15_000_000;
@@ -48,17 +53,6 @@ export type SliceResult = {
 
 const r4 = (n: number | string) => (Math.round(Number(n) * 1e4) / 1e4).toFixed(4);
 
-/** scheme + host + path only: signed-URL query strings, fragments and credentials never reach the manifest. */
-function cleanSourceUrl(u: unknown): string | null {
-  if (typeof u !== "string" || u === "") return null;
-  try {
-    const x = new URL(u);
-    return `${x.protocol}//${x.host}${x.pathname}`;
-  } catch {
-    return u.split(/[?#]/)[0] || null;
-  }
-}
-
 const js = (name: string, value: unknown) => `window.${name} = ${JSON.stringify(value)};\n`;
 
 function liveDocs(file: ExportV2, collection: string): Array<{ id: string; doc: Row }> {
@@ -67,7 +61,7 @@ function liveDocs(file: ExportV2, collection: string): Array<{ id: string; doc: 
     .map((r) => ({ id: r.id, doc: (r.doc ?? {}) as Row }));
 }
 
-export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[] } = {}): SliceResult {
+export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[]; photos?: PhotoManifest | null } = {}): SliceResult {
   const files: Record<string, string> = {};
   const scrubbed: SliceResult["scrubbed"] = [];
   const counts: Record<string, number> = {};
@@ -169,24 +163,16 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[] }
   files["data/team.js"] = js("PEAK_TEAM", team);
   counts.team = team.length;
 
-  // --- photo manifest (input for the photo task; not loaded by the page) ---
-  const docs = new Map(liveDocs(exp, "part_documents").map((d) => [d.id, d.doc]));
-  const skus = new Set(parts.map((p) => String(p.sku ?? p.id)));
-  const links = liveDocs(exp, "part_document_links")
-    .map((l) => l.doc)
-    .filter((l) => l.kind === "image" && !l.hidden && skus.has(String(l.partSku)))
-    .sort((a, b) =>
-      String(a.partSku).localeCompare(String(b.partSku)) ||
-      ((typeof a.sort === "number" ? a.sort : 1e9) - (typeof b.sort === "number" ? b.sort : 1e9)) ||
-      String(a.documentId).localeCompare(String(b.documentId)));
-  const manifest: Array<{ sku: string; docId: string; blobKey: string | null; sourceUrl: string | null }> = [];
-  for (const l of links) {
-    const d = docs.get(String(l.documentId));
-    if (!d || d.kind !== "image" || (!d.blobKey && !d.sourceUrl)) continue;
-    manifest.push({ sku: String(l.partSku), docId: String(l.documentId), blobKey: (d.blobKey as string | null) ?? null, sourceUrl: cleanSourceUrl(d.sourceUrl) });
+  // --- photos: the selection (the app's own primary-image rule + manufacturer fallback, over the parts the sliced
+  // estimates and fixtures name) is the input for handoff:photos; data/photos.js — the browser's map — exists only
+  // when handoff:photos has already written images/manifest.json (opts.photos). Not loaded without it: placeholders show. ---
+  const selection = selectPhotos(exp, estimates, fixtures);
+  files["data/photo-manifest.json"] = JSON.stringify(selection.picks) + "\n";
+  counts.photos = selection.picks.length;
+  if (opts.photos) {
+    files["data/photos.js"] = photosScript(opts.photos);
+    counts.photoFiles = Object.keys(opts.photos.byDoc).length;
   }
-  files["data/photo-manifest.json"] = JSON.stringify(manifest) + "\n";
-  counts.photos = manifest.length;
 
   // --- meta ---
   files["data/meta.js"] = js("PEAK_META", {
@@ -213,15 +199,29 @@ export function writeSlice(r: SliceResult, outDir: string): boolean {
   if (r.hits.length > 0 || r.oversize.length > 0) return false;
   fs.mkdirSync(outDir, { recursive: true });
   for (const f of fs.readdirSync(outDir)) if (/^catalog-\d+\.js$/.test(f)) fs.rmSync(path.join(outDir, f));
+  // a photos.js from an earlier run must not outlive the images/manifest.json that justified it
+  if (!("data/photos.js" in r.files)) fs.rmSync(path.join(outDir, "photos.js"), { force: true });
   for (const [file, body] of Object.entries(r.files)) fs.writeFileSync(path.join(outDir, path.basename(file)), body);
   return true;
 }
 
+/** images/manifest.json → the photo map, keeping only documents whose file is really in the folder. null = no manifest. */
+export function loadPhotoManifest(imagesDir: string): { manifest: PhotoManifest | null; missing: string[] } {
+  const file = path.join(imagesDir, "manifest.json");
+  if (!fs.existsSync(file)) return { manifest: null, missing: [] };
+  const m = parsePhotoManifest(JSON.parse(fs.readFileSync(file, "utf8")));
+  if (!m) throw new Error(`${file} is not a handoff:photos manifest; re-run npm run handoff:photos`);
+  const missing = Object.entries(m.byDoc).filter(([, f]) => !fs.existsSync(path.join(imagesDir, f))).map(([id]) => id);
+  for (const id of missing) delete m.byDoc[id];
+  for (const [sku, id] of Object.entries(m.bySku)) if (!(id in m.byDoc)) delete m.bySku[sku];
+  return { manifest: m, missing };
+}
+
 function main() {
   const arg = (name: string) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined; };
-  const input = arg("--in"), out = arg("--out"), extra = arg("--extra-estimates");
+  const input = arg("--in"), out = arg("--out"), extra = arg("--extra-estimates"), imagesArg = arg("--images");
   if (!input || !out) {
-    console.error("usage: npm run handoff:slice -- --in <export.json> --out <data dir> [--extra-estimates <export.json>]");
+    console.error("usage: npm run handoff:slice -- --in <export.json> --out <data dir> [--extra-estimates <export.json>] [--images <dir>]");
     process.exit(2);
   }
   const exp = JSON.parse(fs.readFileSync(input, "utf8")) as ExportV2;
@@ -235,7 +235,11 @@ function main() {
     extraEstimates = selectEstimates((other.collections?.quotes ?? []) as DocRow[]);
     console.log(`--extra-estimates: ${extraEstimates.length} estimate(s) from ${extra} (dev only — never for production)`);
   }
-  const r = sliceExport(exp, { extraEstimates });
+  const imagesDir = path.resolve(imagesArg ?? path.join(path.dirname(path.resolve(out)), "images"));
+  const photos = loadPhotoManifest(imagesDir);
+  if (photos.manifest) console.log(`photos: ${Object.keys(photos.manifest.byDoc).length} image(s) from ${imagesDir}${photos.missing.length ? ` (${photos.missing.length} listed in manifest.json but missing from the folder — left out)` : ""}`);
+  else console.log(`photos: no ${path.join(imagesDir, "manifest.json")} — no data/photos.js (placeholders only); run npm run handoff:photos first for product photos`);
+  const r = sliceExport(exp, { extraEstimates, photos: photos.manifest });
   for (const h of r.hits) console.error(`SECRET SCAN: ${h.file} matches ${h.rules.join(", ")}`);
   for (const o of r.oversize) console.error(`TOO BIG: ${o.file} is ${o.bytes} bytes (limit ${MAX_FILE_BYTES})`);
   if (!writeSlice(r, out)) {
