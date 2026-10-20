@@ -217,6 +217,12 @@ export async function shellCheck(pkgDir: string): Promise<ShellResult> {
     // 5 — the nav
     for (const [nav, label] of [["catalog", "Catalog"], ["assemblies", "Assemblies"], ["rules", "Estimating Rules"]] as const) {
       await page.click(`[data-handoff-nav="${nav}"]`);
+      // Catalog is a real screen since Task 8 (walked by --catalog); the others stay placeholders until their tasks.
+      if (nav === "catalog") {
+        const ok = await waitFor(async () => (await shellLoc(page)).hash === "#/catalog" && (await page.evaluate(() => !!document.querySelector("[data-handoff-catalog] [data-catalog-rows] tr"))), 8000);
+        step(`nav → ${label}: #/${nav}, the Catalog screen`, ok && !(await page.evaluate(() => !!document.querySelector("[data-handoff-placeholder]"))));
+        continue;
+      }
       const ok = await waitFor(async () => (await shellLoc(page)).hash === `#/${nav}` && (await page.evaluate(() => !!document.querySelector("[data-handoff-placeholder]"))), 5000);
       step(`nav → ${label}: #/${nav}, a placeholder`, ok && (await pageHasText(page, "Coming in this prototype")));
     }

@@ -41,7 +41,10 @@ import { clientPackageActions } from "../handoff/estimator/runtime/actions/clien
 import { packageActions, refusedPackageActions, REFUSED_PACKAGE_ACTIONS } from "../handoff/estimator/runtime/actions/package-actions";
 import { outputActions } from "../handoff/estimator/runtime/actions/output-actions";
 import { pdfActions } from "../handoff/estimator/runtime/actions/pdf-actions";
-import { assetUrl, PLACEHOLDER_DIR } from "../handoff/estimator/runtime/assets";
+import { assetUrl, PLACEHOLDER_DIR, partPhotoSrc } from "../handoff/estimator/runtime/assets";
+import { applyDraft, addLineSell, browseCatalog, draftFromPart, facetLabel, money, pageBounds, PAGE_SIZE, skuIndex, validateSku } from "../handoff/estimator/runtime/catalog-model";
+import { rankCatalogParts } from "@/lib/estimating-core/catalog-rank";
+import type { LivePart } from "../handoff/estimator/runtime/readers";
 import { POPOUT_NOTICE, PRINT_FOOTER_TEXT, previewTargetOf, windowOpenRoute } from "../handoff/estimator/ui/preview-routes";
 import { cutSheetAppendixModels } from "../handoff/estimator/runtime/loaders/cut-sheets";
 import { packagePanelFor } from "../handoff/estimator/runtime/actions/package-actions";
@@ -1457,6 +1460,93 @@ export async function handoffShellChecks(ok: Ok) {
   ok(counts.all === 4 && counts.draft === 2 && counts.sent === 1 && counts.won === 1 && counts.lost === 0, "handoff shell: status counts");
   ok(updatedLabel(Date.UTC(2026, 9, 14, 3, 0)) === "Oct 13, 2026" && updatedLabel(0) === "—", "handoff shell: Updated prints in Chicago time (Oct 14 03:00 UTC is still Oct 13 there)");
   ok(listRows([mk("Q-9", { customerId: "c1" })], general, (q) => (q.customerId ? "Resolved Co" : ""))[0].customer === "Resolved Co", "handoff shell: the customer column resolves a customer id");
+
+  // --- the Catalog screen's rules (Task 8) ---
+  {
+    const P = (sku: string, over: Record<string, unknown> = {}) => ({ id: sku, sku, desc: `${sku} desc`, category: "Audio", unit: "ea", cost: 100, list: 200, mfr: "Acme", ...over }) as LivePart;
+    const cat = [
+      P("ETC:CS40", { desc: "ColorSource 40 console", category: "Controls", mfr: "ETC", manufacturerModelNumber: "CS40" }),
+      P("ETC:CSPAR", { desc: "ColorSource PAR", category: "Fixtures", mfr: "ETC", cost: 0 }),
+      P("Shure:SM58", { desc: "Dynamic mic", category: "Audio", mfr: "Shure", formerSkus: ["SM58-OLD"] }),
+      P("Shure:SM57", { desc: "Instrument mic", category: "Audio", mfr: "Shure" }),
+      P("Blank:1", { desc: "Nothing", category: "", mfr: "" }),
+    ];
+    const skus = (xs: LivePart[]) => xs.map((x) => x.sku).join();
+    // the ranking is the picker's: same function, same order — for a query, and for the empty query (alphabetical by description)
+    for (const q of ["", "colorsource", "mic", "sm5", "etc"]) {
+      ok(skus(browseCatalog(cat, { query: q, category: null, mfr: null }).rows) === skus(rankCatalogParts(cat, q).map((r) => r.p)), `handoff catalog: browse "${q}" lists rankCatalogParts' order`);
+    }
+    const catStoreA = await openStore({ catalog: docs(cat as never), quotes: [] }, { idb: null });
+    const picker = (await estimatorActions(catStoreA).searchCatalog("mic")).hits.map((h) => h.sku).join();
+    ok(picker === skus(browseCatalog(cat, { query: "mic", category: null, mfr: null }).rows), `handoff catalog: the Estimator picker (searchCatalog) and the Catalog search agree (${picker})`);
+    // facets: exact match, crossed counts, "(none)" for blank
+    const all = browseCatalog(cat, { query: "", category: null, mfr: null });
+    ok(all.categories.map((f) => `${f.value}:${f.count}`).join() === "Audio:2,:1,Controls:1,Fixtures:1" && all.manufacturers.map((f) => `${f.value}:${f.count}`).join() === "ETC:2,Shure:2,:1", `handoff catalog: facet counts — biggest first, ties by name (${all.categories.map((f) => `${f.value}:${f.count}`).join()})`);
+    ok(facetLabel("") === "(none)" && facetLabel("Audio") === "Audio", "handoff catalog: a blank facet value reads (none)");
+    const byMfr = browseCatalog(cat, { query: "", category: null, mfr: "Shure" });
+    ok(skus(byMfr.rows) === "Shure:SM58,Shure:SM57" && byMfr.categories.length === 1 && byMfr.categories[0].value === "Audio" && byMfr.manufacturers.length === 3, "handoff catalog: a manufacturer pick narrows the rows and the category counts, not its own facet's list");
+    const both = browseCatalog(cat, { query: "", category: "Audio", mfr: "ETC" });
+    ok(both.rows.length === 0, "handoff catalog: category AND manufacturer both apply");
+    ok(skus(browseCatalog(cat, { query: "", category: "", mfr: "" }).rows) === "Blank:1", "handoff catalog: a blank category / manufacturer is a real facet value");
+    ok(skus(browseCatalog(cat, { query: "sm58-old", category: null, mfr: null }).rows) === "Shure:SM58", "handoff catalog: a former SKU finds the part (the picker's rule)");
+    // paging
+    ok(JSON.stringify(pageBounds(250, 0)) === JSON.stringify({ page: 0, pages: 3, start: 0, end: 100 }) && pageBounds(250, 2).end === 250 && pageBounds(250, 9).page === 2 && pageBounds(250, -3).page === 0 && pageBounds(0, 0).pages === 1 && pageBounds(0, 0).end === 0 && PAGE_SIZE === 100, "handoff catalog: pageBounds — 100 a page, clamped, an empty list is one page");
+    ok(money(1234.5) === "$1,234.50" && money(undefined) === "$0.00" && money(0) === "$0.00", "handoff catalog: money cells print dollars and cents");
+    // SKUs: live, formerSkus, retired stubs, case-insensitive
+    const idx = skuIndex(cat, new Map([["RETIRED:OLD", "ETC:CS40"]]));
+    ok(validateSku("", idx) === "A SKU is required." && validateSku("  ", idx) === "A SKU is required.", "handoff catalog: validateSku — blank refused");
+    ok(/reserved/.test(validateSku("custom", idx) ?? "") && /under 120/.test(validateSku("x".repeat(121), idx) ?? "") && /control/.test(validateSku("a\u0001b", idx) ?? ""), "handoff catalog: validateSku — CUSTOM, over-long and control characters refused");
+    ok(/ETC:CS40 is already in the catalog/.test(validateSku("etc:cs40", idx) ?? "") && /already in the catalog/.test(validateSku(" Shure:SM57 ", idx) ?? ""), "handoff catalog: validateSku — a live SKU is taken, in any case, trimmed");
+    ok(/retired by a SKU rename/.test(validateSku("retired:old", idx) ?? "") && /retired by a SKU rename/.test(validateSku("sm58-old", idx) ?? ""), "handoff catalog: validateSku — a retired SKU (rename stub or a part's formerSkus) is never reused");
+    ok(validateSku("Brand:Model 9", idx) === null, "handoff catalog: validateSku — a fresh Brand:Model SKU (spaces fine) is free");
+    // drafts
+    const base = P("ETC:CS40", { desc: "ColorSource 40 console", cost: 3000, list: 4500, mfr: "ETC", pricedAt: 111, updatedAt: 111, ruHeight: 2, rackMount: "rack", note: "kept", deviceTypeKey: "dt" });
+    const d0 = draftFromPart(base);
+    ok(d0.sku === "ETC:CS40" && d0.cost === "3000" && d0.list === "4500" && d0.rack.ruHeight === "2" && d0.rack.rackMount === "rack" && d0.rack.depthIn === "", "handoff catalog: draftFromPart — a part's own values, rack blanks stay blank");
+    ok(draftFromPart(null).unit === "ea" && draftFromPart(null).cost === "0" && draftFromPart(null).sku === "", "handoff catalog: draftFromPart(null) — a blank new part");
+    const same = applyDraft(base, d0, { now: 999, by: "Ann" });
+    ok(same.ok && same.part.pricedAt === 111 && same.part.updatedAt === 999 && same.part.note === "kept" && (same.part as { deviceTypeKey?: string }).deviceTypeKey === "dt" && same.part.ruHeight === 2, "handoff catalog: applyDraft — an untouched price keeps pricedAt; fields the editor doesn't own ride along");
+    const moved = applyDraft(base, { ...d0, list: "$4,600.50" }, { now: 999, by: "Ann" });
+    ok(moved.ok && moved.part.list === 4600.5 && moved.part.cost === 3000 && moved.part.pricedAt === 999, "handoff catalog: applyDraft — a moved list price re-stamps pricedAt (writePart's rule); \"$4,600.50\" parses");
+    const cleared = applyDraft(base, { ...d0, mfr: "", manufacturerModelNumber: "  CS-40  ", rack: { ...d0.rack, ruHeight: "", rackMount: "" } }, { now: 5, by: "Ann" });
+    ok(cleared.ok && !("mfr" in cleared.part) && cleared.part.manufacturerModelNumber === "CS-40" && !("ruHeight" in cleared.part) && !("rackMount" in cleared.part), "handoff catalog: applyDraft — a blank optional field or rack field clears the key; text is trimmed");
+    const nar = applyDraft(base, { ...d0, narrativeText: "  Para\r\nTwo  " }, { now: 7, by: "Ann Admin" });
+    ok(nar.ok && nar.part.narrativeText === "Para\nTwo" && nar.part.narrativeUpdatedAt === 7 && nar.part.narrativeUpdatedBy === "Ann Admin", "handoff catalog: applyDraft — a new narrative paragraph is normalized and stamped with when and who");
+    const nar2 = applyDraft(nar.ok ? nar.part : base, { ...draftFromPart(nar.ok ? nar.part : base), narrativeText: "" }, { now: 8, by: "Bob" });
+    ok(nar2.ok && !("narrativeText" in nar2.part) && !("narrativeUpdatedAt" in nar2.part) && !("narrativeUpdatedBy" in nar2.part), "handoff catalog: applyDraft — clearing the paragraph drops its three keys");
+    const nar3 = applyDraft(nar.ok ? nar.part : base, { ...draftFromPart(nar.ok ? nar.part : base), cost: "5" }, { now: 9, by: "Bob" });
+    ok(nar3.ok && nar3.part.narrativeUpdatedAt === 7 && nar3.part.narrativeUpdatedBy === "Ann Admin", "handoff catalog: applyDraft — an untouched paragraph keeps its stamp");
+    const bad = applyDraft(base, { ...d0, desc: " ", cost: "-1", list: "abc", rack: { ...d0.rack, ruHeight: "0.3" } }, { now: 1, by: "A" });
+    ok(!bad.ok && !!bad.errors.desc && !!bad.errors.cost && !!bad.errors.list && /RU height/.test(bad.errors.rack ?? ""), "handoff catalog: applyDraft — every invalid field is reported at once");
+    ok(!applyDraft(base, { ...d0, cost: "10000001" }, { now: 1, by: "A" }).ok && applyDraft(base, { ...d0, cost: "", list: "" }, { now: 1, by: "A" }).ok, "handoff catalog: applyDraft — an absurd price is refused; a blank price is 0");
+    const keep = applyDraft(base, { ...d0, sku: "OTHER:SKU" }, { now: 1, by: "A" });
+    ok(keep.ok && keep.part.sku === "ETC:CS40" && keep.part.id === "ETC:CS40", "handoff catalog: applyDraft — an existing part's SKU never changes");
+    const fresh = applyDraft(null, { ...draftFromPart(null), sku: " NEW:1 ", desc: "A new part", cost: "10", list: "25" }, { now: 50, by: "A", index: idx });
+    ok(fresh.ok && fresh.part.id === "NEW:1" && fresh.part.sku === "NEW:1" && fresh.part.category === "Uncategorized" && fresh.part.unit === "ea" && fresh.part.pricedAt === 50 && fresh.part.updatedAt === 50, "handoff catalog: applyDraft — a new part: id = sku, upsertPart's default category, priced now");
+    const dupNew = applyDraft(null, { ...draftFromPart(null), sku: "shure:sm58", desc: "x" }, { now: 1, by: "A", index: idx });
+    ok(!dupNew.ok && /already in the catalog/.test(dupNew.errors.sku ?? ""), "handoff catalog: applyDraft — a new part's SKU must be unique against the index");
+    // what a catalog price does to an estimate line: catalogAddPrice
+    ok(addLineSell({ cost: 0, list: 733 }, 0.3) === 733 && addLineSell({ cost: 294, list: 1200 }, 0.3) === 420 && addLineSell({ cost: 100, list: 5 }, null) === 142.86 && addLineSell({ cost: 0, list: 9 }, null) === 9,
+      "handoff catalog: addLineSell — no cost sells at list; a cost sells at cost ÷ (1 − margin), list ignored (margin defaults to 30%)");
+    // edit → the picker and the resolver read the overlay at once; Reset puts it back
+    const stCat = await openStore({ catalog: docs(cat as never), quotes: [] }, { idb: null });
+    const edited = applyDraft(cat[1], { ...draftFromPart(cat[1]), list: "955.5" }, { now: 1, by: "A" });
+    if (edited.ok) await stCat.put("catalog", edited.part);
+    const hit = (await estimatorActions(stCat).searchCatalog("ETC:CSPAR")).hits[0];
+    ok(hit?.sku === "ETC:CSPAR" && hit.list === 955.5 && hit.cost === 0, "handoff catalog: a saved edit is what the Estimator's picker returns (list 955.5, cost 0)");
+    await stCat.reset();
+    ok((await estimatorActions(stCat).searchCatalog("ETC:CSPAR")).hits[0]?.list === 200, "handoff catalog: Reset restores the slice's price");
+    // thumbnails: the packaged photo when the package ships one, else the "coming soon" placeholder
+    ok(partPhotoSrc("ETC:CS40") === PLACEHOLDER_DIR + "coming-soon.webp", "handoff catalog: partPhotoSrc — no packaged photo → the placeholder");
+    const hadWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    Object.defineProperty(globalThis, "window", { value: { PEAK_PHOTOS: { "ETC:CS40": "images/cs40.webp" } }, configurable: true, writable: true });
+    try {
+      ok(partPhotoSrc("ETC:CS40") === "images/cs40.webp" && partPhotoSrc("Shure:SM58") === PLACEHOLDER_DIR + "coming-soon.webp", "handoff catalog: partPhotoSrc — PEAK_PHOTOS[sku] when present, the placeholder otherwise");
+    } finally {
+      if (hadWindow) Object.defineProperty(globalThis, "window", hadWindow);
+      else delete (globalThis as Record<string, unknown>).window;
+    }
+  }
 
   // --- Reset ---
   const blocked = await runReset({ reset: () => Promise.reject(new Error(RESET_BLOCKED_MESSAGE)) });

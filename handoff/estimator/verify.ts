@@ -71,6 +71,16 @@
  *          prototype windows and try again." in the dialog); no IndexedDB → the not-persistent notice. The walk lives
  *          in verify/shell.ts. Screenshots: output/verify/shell-*.png; result: output/verify/shell.json.
  *
+ *   npm run handoff:verify -- --catalog [--out <package dir>]
+ *
+ * --catalog  the Catalog screen (Task 8): #/catalog paints its first page within 2 s over the whole slice (the time is logged) and
+ *          never holds more than 100 rows; the Category / Manufacturer facets count what they filter (crossed); the search
+ *          lists the Estimator picker's own ranking; a known SKU is the first result; editing a part's list price saves to
+ *          the overlay and survives a reload; the Estimator then adds the part at that price — a part with no cost sells at
+ *          its LIST price, a part with a cost at cost ÷ (1 − margin) (catalogAddPrice) and its list does not move the line;
+ *          a new part's SKU must be unique; a Reviewer-only role can look but not edit; Reset restores the snapshot. The walk
+ *          lives in verify/catalog.ts. Screenshots: output/verify/catalog-*.png; result: output/verify/catalog.json.
+ *
  *   npm run handoff:verify -- --drift [--update]
  *
  * --drift  the ported server logic's originals (port-sources.json, port-drift.ts): recomputes each
@@ -1314,9 +1324,10 @@ async function main() {
   const sendAt = argv.indexOf("--send");
   const send = sendAt >= 0 ? (argv[sendAt + 1] && !argv[sendAt + 1].startsWith("--") ? argv[sendAt + 1] : "") : undefined;
   const shell = argv.includes("--shell");
+  const catalog = argv.includes("--catalog");
   const drift = argv.includes("--drift");
-  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !shell && !drift) {
-    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] [--out <package dir>] | --drift [--update]");
+  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !shell && !catalog && !drift) {
+    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --catalog | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] [--out <package dir>] | --drift [--update]");
     process.exit(2);
   }
   mkdirSync(VERIFY_DIR, { recursive: true });
@@ -1358,6 +1369,14 @@ async function main() {
     const r = await shellCheck(pkgDir);
     writeFileSync(path.join(VERIFY_DIR, "shell.json"), JSON.stringify(r, null, 2) + "\n");
     printShell(r);
+    pass &&= r.pass;
+  }
+  if (catalog) {
+    // verify/catalog.ts imports this module's helpers; loaded here, once this module has finished evaluating.
+    const { catalogCheck, printCatalog } = await import("./verify/catalog");
+    const r = await catalogCheck(pkgDir);
+    writeFileSync(path.join(VERIFY_DIR, "catalog.json"), JSON.stringify(r, null, 2) + "\n");
+    printCatalog(r);
     pass &&= r.pass;
   }
   if (!pass) process.exit(1);

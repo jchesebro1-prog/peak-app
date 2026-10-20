@@ -3,7 +3,7 @@
  * ports at it, registers the Estimator's server actions, and mounts the shell (ui/shell.tsx): the confidential banner,
  * the top nav, the acting-user switcher, Reset to production snapshot and a hash-routed screen — the Estimates list by
  * default, one estimate in the real EstimatorClient at `#/estimate/<id>` (props from runtime/props/estimator.ts, the
- * prototype's EstimatorPage), and placeholders for Catalog, Assemblies and Estimating Rules (runtime/routes.ts). A
+ * prototype's EstimatorPage), the Catalog screen (ui/catalog.tsx) and placeholders for Assemblies and Estimating Rules (runtime/routes.ts). A
  * pre-shell deep link (`index.html?id=Q-G001&step=review`, `?new=1`) is put onto its hash route first. `router.refresh()`
  * re-reads the props for the estimate the route names now (a new estimate's first save puts its id there). The root
  * gets `data-handoff-ready` once the first screen has rendered (verify.ts waits for it). Task 5: the customer-facing

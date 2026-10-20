@@ -1,6 +1,6 @@
 /**
  * Estimator handoff — the app shell: the permanent confidential banner, the top nav (Estimates · Catalog · Assemblies ·
- * Estimating Rules), the acting-user switcher, Reset to production snapshot, and the routed screen. Routes are hash
+ * Estimating Rules), the acting-user switcher, Reset to production snapshot, and the routed screen (Task 8: Catalog is a real screen). Routes are hash
  * routes (runtime/routes.ts), so file:// and an Artifact behave the same; the Estimator keeps its `?id=` / `?step=` in
  * the search. The routed screen is remounted when the route names another estimate, another user is picked (the
  * Estimator's props depend on the viewer) or the data is reset — but NOT when a first save gives a new estimate its id
@@ -16,6 +16,7 @@ import { users } from "../runtime/ports";
 import { buildEstimatorProps } from "../runtime/props/estimator";
 import { RESET_COPY, runReset } from "../runtime/reset";
 import type { HandoffStore } from "../runtime/store";
+import { CatalogScreen } from "./catalog";
 import { EstimatesList } from "./estimates-list";
 import { PreviewOverlay } from "./preview-overlay";
 
@@ -179,7 +180,7 @@ function Screen({ route, store, onReady }: { route: Route; store: HandoffStore; 
     case "estimate":
       return route.id === NEW_ESTIMATE_ID && !users.can("create") ? <NewEstimateRefused onReady={onReady} /> : <EstimateScreen store={store} initialId={route.id} onReady={onReady} />;
     case "catalog":
-      return <Placeholder title="Catalog" onReady={onReady} />;
+      return <CatalogScreen store={store} onReady={onReady} />;
     case "assemblies":
       return <Placeholder title="Assemblies" onReady={onReady} />;
     case "rules":

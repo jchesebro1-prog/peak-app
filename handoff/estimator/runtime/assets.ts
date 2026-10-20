@@ -48,6 +48,14 @@ export function partDocumentSrc(docId: string): string {
   return packagedPhotoFor(docId) ?? placeholderSrc("coming-soon");
 }
 
+/**
+ * A catalog part's thumbnail: its packaged primary photo (`PEAK_PHOTOS[sku]`, Task 11), else the "coming soon" placeholder.
+ * The same lookup partDocumentSrc does — the Catalog table (ui/catalog.tsx) goes through this one mapping.
+ */
+export function partPhotoSrc(sku: string): string {
+  return partDocumentSrc(sku);
+}
+
 /** The prototype's URL for an app image URL; anything else comes back unchanged. */
 export function assetUrl(url: string): string {
   if (typeof url !== "string" || !url.startsWith("/")) return url;

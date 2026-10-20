@@ -272,6 +272,20 @@
           "sha256": "f334a6538c23508cfac5f2fe0b4a2d5482fa1b2f34a5ba4f7d2f5a547df243c9"
         }
       ]
+    },
+    {
+      "port": "handoff/estimator/runtime/catalog-model.ts",
+      "what": "the Catalog part editor save (upsertPart over mergeUpsert → writePart: updatedAt, pricedAt via nextPricedAt, rack data, the narrative stamp) and the new-part SKU rules",
+      "originals": [
+        {
+          "path": "src/app/(app)/catalog/actions.ts",
+          "sha256": "95f0f5135f0af7a5bdcea49055fa797a363ac448130152b1f3e0206e8590c9ef"
+        },
+        {
+          "path": "src/lib/stores/catalog.ts",
+          "sha256": "c991d6d2f32d1777de5e19f119e8a2036892f19f67a7e3b0230921c4a1f4d2bc"
+        }
+      ]
     }
   ]
 }
