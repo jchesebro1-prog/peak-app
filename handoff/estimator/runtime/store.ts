@@ -11,7 +11,9 @@
  * window" (live: `subscribe` tells the shell when the flag flips — a failed write, or another window
  * deleting the database, also turns it off). Docs handed out by `get` are copies; docs from `all`
  * are shared — never mutate them. Overlay docs are stored as `{ id, seq, doc }` rows; `seq` is the
- * put order, so `all()` keeps it across reloads. Plan: PR 2 Task 3.
+ * put order, so `all()` keeps it across reloads. Parts retired by a SKU rename ({ id, sku, renamedTo } stubs)
+ * are not catalog docs: `storeSeedFrom` splits them into `catalogRenames`, which only the sku resolver reads.
+ * Plan: PR 2 Task 3.
  */
 import { seedCatalog, seedEstimates, seedFixtures, seedMeta, seedRules, type SeedEstimate, type SeedFixture, type SeedMeta, type SeedPart, type SeedRules } from "./seed";
 
@@ -31,7 +33,9 @@ export const RESET_BLOCKED_MESSAGE = "Close other prototype windows and try agai
 export interface HandoffStore {
   /** false = in-memory fallback: edits last until the window closes. Flips to false (never back, except
    *  after a successful reset) on a failed write or when another window deletes the database. */
-  persistent: boolean;
+  readonly persistent: boolean;
+  /** old sku → renamedTo for parts retired by a SKU rename (#304). Read-only seed data, never listed by `all("catalog")`. */
+  readonly catalogRenames: ReadonlyMap<string, string>;
   /** Calls `fn` whenever `persistent` changes. Returns the unsubscribe. Stable identity — fine for useSyncExternalStore. */
   subscribe(fn: () => void): () => void;
   /** overlay ?? seed; a tombstone reads as undefined. Returns a copy. */
@@ -44,13 +48,23 @@ export interface HandoffStore {
   /**
    * Deletes the IndexedDB database and drops the in-memory overlay — back to the snapshot. Other
    * windows on the same database close their connection (and go non-persistent) so the delete can
-   * proceed. Rejects with RESET_BLOCKED_MESSAGE when a window does not let go within RESET_TIMEOUT_MS;
-   * the overlay is then left as it was and this window turns non-persistent.
+   * proceed. The window reads non-persistent while the reset runs; writes made meanwhile survive it
+   * (kept in memory, written to the fresh database after the reopen).
+   *
+   * - In-memory fallback (IndexedDB never opened): just clears the overlay; deleteDatabase is not called.
+   * - deleteDatabase fails with an error: the overlay is cleared and the reset resolves, but this window
+   *   stays non-persistent (the old database may still be on disk).
+   * - Rejects with RESET_BLOCKED_MESSAGE when a window does not let go within RESET_TIMEOUT_MS; the overlay
+   *   is then left as it was and this window turns non-persistent. **The deleteDatabase request stays queued in
+   *   the browser** — it still runs (and wipes the saved overlay) as soon as the blocking window closes or reloads.
    */
   reset(): Promise<void>;
 }
 
-export type StoreSeed = { [K in Coll]?: Array<{ id: string }> };
+export type StoreSeed = { [K in Coll]?: Array<{ id: string }> } & {
+  /** Retired-SKU stubs — kept out of the `catalog` collection so no reader can list a blank part. */
+  catalogRenames?: Array<{ id: string; sku?: string; renamedTo?: string }>;
+};
 
 /**
  * The merged view of one collection: each seed doc in seed order, replaced by its overlay doc
@@ -103,9 +117,17 @@ export function storeSeedFrom(g: {
   rules: SeedRules;
   meta: SeedMeta | null;
 }): StoreSeed {
+  // A retired part (#304) arrives as { id, sku, renamedTo }: it is a redirect, not a part.
+  const live: SeedPart[] = [];
+  const catalogRenames: Array<{ id: string; sku?: string; renamedTo?: string }> = [];
+  for (const p of g.catalog) {
+    if (typeof p.renamedTo === "string" && p.renamedTo !== "") catalogRenames.push({ id: p.id, sku: p.sku ?? p.id, renamedTo: p.renamedTo });
+    else live.push(p);
+  }
   return {
     quotes: g.estimates,
-    catalog: g.catalog,
+    catalog: live,
+    catalogRenames,
     fixtures: g.fixtures,
     // one row per table row, as in the app: settings row "main", blobs by id — { id, data }
     settings: [{ id: "main", data: g.rules.settings ?? {} } as { id: string }],
@@ -210,13 +232,20 @@ export async function openStore(seed: StoreSeed, opts: { idb?: IDBFactory | null
     return m;
   };
 
+  // Mutable state and listeners come first: a versionchange can fire while the database is still loading.
   const listeners = new Set<() => void>();
+  let persistent = false;
   let db: IDBDatabase | null = null;
   let seq = 0;
+  /** IndexedDB opened and loaded at startup. False = the in-memory fallback: there is no database to delete. */
+  let opened = false;
+  /** Writes made while reset() is running — they survive it (replayed into memory, written after the reopen). */
+  let midReset: Array<{ c: Coll; id: string; doc: { id: string } | null; at: number }> | null = null;
+  let resetting: Promise<void> | null = null;
 
   const setPersistent = (v: boolean) => {
-    if (store.persistent === v) return;
-    store.persistent = v;
+    if (persistent === v) return;
+    persistent = v;
     for (const fn of [...listeners]) {
       try {
         fn();
@@ -240,9 +269,11 @@ export async function openStore(seed: StoreSeed, opts: { idb?: IDBFactory | null
 
   if (idb) {
     try {
-      db = await openDb(idb);
-      watch(db);
-      seq = await loadOverlay(db, overlay);
+      const conn = await openDb(idb);
+      db = conn;
+      watch(conn);
+      seq = await loadOverlay(conn, overlay);
+      opened = true;
     } catch (e) {
       console.warn("[handoff] IndexedDB unavailable — changes won't be saved in this window", e);
       try {
@@ -254,14 +285,18 @@ export async function openStore(seed: StoreSeed, opts: { idb?: IDBFactory | null
       for (const m of overlay.values()) m.clear();
     }
   }
+  persistent = !!db;
 
   /** The next put order: strictly increasing here, and clock-ish so two windows rarely tie. */
   const nextSeq = () => (seq = Math.max(seq + 1, Date.now()));
 
-  /** Mirrors one overlay change into IndexedDB. A failed write keeps the in-memory change and turns persistence off. */
+  /** Mirrors one overlay change into IndexedDB. A failed write — or no connection to write to — keeps the in-memory change and turns persistence off. */
   const persist = async (c: Coll, id: string, doc: { id: string } | null, at: number) => {
     const conn = db;
-    if (!conn) return;
+    if (!conn) {
+      setPersistent(false); // the write is skipped: never report it as saved
+      return;
+    }
     try {
       const tx = conn.transaction([c, TOMBSTONES], "readwrite");
       const done = txDone(tx);
@@ -287,7 +322,16 @@ export async function openStore(seed: StoreSeed, opts: { idb?: IDBFactory | null
     }
   };
 
-  /** deleteDatabase, waiting through `blocked` for the other windows to close. Resolves false on timeout. */
+  /** A write: into memory (the caller did that), then IndexedDB — or, during a reset, the queue the reset drains. */
+  const write = async (c: Coll, id: string, doc: { id: string } | null) => {
+    const at = nextSeq();
+    if (midReset) {
+      midReset.push({ c, id, doc, at });
+      await resetting?.catch(() => undefined); // resolves once the reset has written it (or given up)
+    } else await persist(c, id, doc, at);
+  };
+
+  /** deleteDatabase, waiting through `blocked` for the other windows to close. Resolves false on timeout; rejects on an error. */
   const deleteDb = (factory: IDBFactory) =>
     new Promise<boolean>((resolve, reject) => {
       const timer = setTimeout(() => resolve(false), resetTimeout);
@@ -310,8 +354,73 @@ export async function openStore(seed: StoreSeed, opts: { idb?: IDBFactory | null
       r.onblocked = () => console.warn("[handoff] reset is waiting for other prototype windows to close");
     });
 
+  const clearOverlay = () => {
+    for (const m of overlay.values()) m.clear();
+    seq = 0;
+  };
+
+  const doReset = async (factory: IDBFactory) => {
+    const queue: NonNullable<typeof midReset> = (midReset = []);
+    setPersistent(false); // honest until the reopen: nothing written meanwhile is on disk yet
+    try {
+      db?.close();
+    } catch {
+      /* already closed */
+    }
+    db = null;
+    let deleted = false;
+    let failed = false;
+    try {
+      deleted = await deleteDb(factory);
+    } catch (e) {
+      console.warn("[handoff] could not delete the IndexedDB overlay", e);
+      failed = true;
+    }
+    if (!deleted && !failed) {
+      // Timed out. We let go of our connection; the delete stays queued behind the other window's. The overlay in
+      // memory (mid-reset writes included) is untouched, and nothing more is saved here until the window reloads.
+      midReset = null;
+      throw new Error(RESET_BLOCKED_MESSAGE);
+    }
+    // Back to the snapshot — but a write made while the reset ran is newer than the reset: replay it.
+    const replay = queue.splice(0);
+    clearOverlay();
+    for (const w of replay) {
+      const m = overlay.get(w.c)!;
+      m.delete(w.id);
+      m.set(w.id, w.doc);
+      seq = Math.max(seq, w.at);
+    }
+    if (failed) {
+      // The old database may still be on disk, so don't reopen it over a cleared memory: stay non-persistent.
+      midReset = null;
+      return;
+    }
+    // Reopen so later writes persist again (an empty database), then write what came in meanwhile.
+    try {
+      const conn = await openDb(factory);
+      db = conn;
+      watch(conn);
+    } catch (e) {
+      console.warn("[handoff] IndexedDB did not reopen after reset — in memory from here", e);
+      midReset = null;
+      return;
+    }
+    const flush = replay;
+    while (flush.length || queue.length) {
+      flush.push(...queue.splice(0));
+      const w = flush.shift()!;
+      await persist(w.c, w.id, w.doc, w.at);
+    }
+    midReset = null;
+    if (db) setPersistent(true); // a failed flush closed the connection and left it off
+  };
+
   const store: HandoffStore = {
-    persistent: !!db,
+    get persistent() {
+      return persistent;
+    },
+    catalogRenames: new Map((seed.catalogRenames ?? []).filter((r) => r.renamedTo).map((r) => [r.sku ?? r.id, r.renamedTo as string])),
     subscribe(fn) {
       listeners.add(fn);
       return () => void listeners.delete(fn);
@@ -330,49 +439,26 @@ export async function openStore(seed: StoreSeed, opts: { idb?: IDBFactory | null
       const m = overlay.get(c)!;
       m.delete(copy.id); // a re-put moves to the end, the order IndexedDB's seq reproduces after a reload
       m.set(copy.id, copy);
-      await persist(c, copy.id, copy, nextSeq());
+      await write(c, copy.id, copy);
     },
     async remove(c: Coll, id: string) {
       const m = overlay.get(c)!;
       m.delete(id);
       m.set(id, null);
-      await persist(c, id, null, nextSeq());
+      await write(c, id, null);
     },
-    async reset() {
-      if (!idb) {
-        for (const m of overlay.values()) m.clear();
-        return;
+    reset() {
+      if (resetting) return resetting;
+      if (!idb || !opened) {
+        // In-memory fallback: there is no database to delete.
+        clearOverlay();
+        return Promise.resolve();
       }
-      try {
-        db?.close();
-      } catch {
-        /* already closed */
-      }
-      db = null;
-      let deleted: boolean;
-      try {
-        deleted = await deleteDb(idb);
-      } catch (e) {
-        console.warn("[handoff] could not delete the IndexedDB overlay", e);
-        deleted = false;
-      }
-      if (!deleted) {
-        // We let go of our connection; the delete stays queued behind the other window's. The overlay in
-        // memory is untouched, and nothing more is saved here until the window reloads.
-        setPersistent(false);
-        throw new Error(RESET_BLOCKED_MESSAGE);
-      }
-      for (const m of overlay.values()) m.clear();
-      seq = 0;
-      // Reopen so later writes persist again (an empty database).
-      try {
-        db = await openDb(idb);
-        watch(db);
-        setPersistent(true);
-      } catch (e) {
-        console.warn("[handoff] IndexedDB did not reopen after reset — in memory from here", e);
-        setPersistent(false);
-      }
+      const p = doReset(idb).finally(() => {
+        resetting = null;
+      });
+      resetting = p;
+      return p;
     },
   };
   return store;

@@ -24,7 +24,7 @@ export const BLOB_IDS = [
 /** Fields of `appSettings` row "main" (.data) that reach the prototype. */
 export const SETTINGS_FIELDS = [
   "companyName", "logoDark", "offices", "reviewLimits", "peakHeader", "catalogCategoryMap",
-  "priceListEffective", "fixtureAssemblies", "quotePipelines", "consultingAssumptions", "accent",
+  "priceListEffective", "fixtureAssemblies", "quotePipelines", "defaultQuotePipelineId", "consultingAssumptions", "accent",
 ] as const;
 
 /** Every quote field the Estimator page reads. Excluded on purpose: shareLink shareOpens packageFiles

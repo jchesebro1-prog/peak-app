@@ -55,9 +55,11 @@ async function storeFor(g: Globals): Promise<HandoffStore> {
  * delete in a transaction, close, onversionchange, deleteDatabase with `blocked`). getAll returns rows in key
  * order, as the real thing does, so the stored `seq` is what restores the put order.
  */
-function fakeIdb(opts: { failWrites?: boolean } = {}) {
+function fakeIdb(opts: { failWrites?: boolean; failOpen?: boolean; deleteError?: boolean; versionchangeOnOpen?: boolean } = {}) {
   const data = new Map<string, { keyPath: string | null; rows: Map<string, { key: unknown; value: unknown }> }>();
   let exists = false;
+  const calls = { opens: 0, deletes: 0 };
+  const errors: unknown[] = []; // anything a connection's onversionchange handler threw
   const conns = new Set<{ onversionchange: null | (() => void); close(): void }>();
   const later = (fn: () => void, ms = 0) => void setTimeout(fn, ms);
   type Req = { result?: unknown; error?: unknown; onsuccess?: () => void; onerror?: () => void; onupgradeneeded?: () => void; onblocked?: () => void };
@@ -102,18 +104,33 @@ function fakeIdb(opts: { failWrites?: boolean } = {}) {
   const factory = {
     open() {
       const r: Req = {};
+      calls.opens++;
       later(() => {
+        if (opts.failOpen) {
+          r.error = new Error("SecurityError (fake)");
+          r.onerror?.();
+          return;
+        }
         const fresh = !exists;
         exists = true;
-        r.result = openConn();
+        const conn = openConn();
+        r.result = conn;
         if (fresh) r.onupgradeneeded?.();
         r.onsuccess?.();
+        // another window starts a delete right as this one is still loading its overlay
+        if (opts.versionchangeOnOpen) later(() => { try { conn.onversionchange?.(); } catch (e) { errors.push(e); } });
       });
       return r;
     },
     deleteDatabase() {
       const r: Req = {};
+      calls.deletes++;
       later(() => {
+        if (opts.deleteError) {
+          r.error = new Error("delete failed (fake)");
+          r.onerror?.();
+          return;
+        }
         for (const c of [...conns]) c.onversionchange?.();
         let warned = false;
         const wait = () => {
@@ -131,7 +148,7 @@ function fakeIdb(opts: { failWrites?: boolean } = {}) {
       return r;
     },
   };
-  return { factory: factory as unknown as IDBFactory, conns, data, hold: () => openConn() };
+  return { factory: factory as unknown as IDBFactory, conns, data, calls, errors, hold: () => openConn() };
 }
 
 export async function handoffRuntimeChecks(ok: Ok) {
@@ -206,7 +223,7 @@ export async function handoffRuntimeChecks(ok: Ok) {
     ok(ids(await w3.all("meta")) === "s1", "handoff runtime: idb store — nothing the closed window wrote reached the database");
     await w1.put("meta", { id: "after-reset" });
     ok(ids(await (await openStore(seedDocs, { idb: fake.factory })).all("meta")) === "s1,after-reset", "handoff runtime: idb store — writes persist again after a reset");
-    ok(w1Changes === 0, "handoff runtime: idb store — a successful reset never flips persistent (no notification)");
+    ok(w1Changes === 2, `handoff runtime: idb store — a reset reads non-persistent while it runs and persistent again after (changes ${w1Changes})`);
   }
   {
     const fake = fakeIdb({ failWrites: true });
@@ -234,7 +251,74 @@ export async function handoffRuntimeChecks(ok: Ok) {
     ok(msg === RESET_BLOCKED_MESSAGE && /Close other prototype windows/.test(msg), `handoff runtime: idb store — a reset blocked by another window rejects with the close-windows message (got "${msg}")`);
     ok(w.persistent === false && ids(await w.all("meta")) === "s1,mine", "handoff runtime: idb store — a blocked reset leaves the overlay in place and turns this window non-persistent");
     stuck.close();
+    const calls = fake.calls.deletes;
+    ok(calls === 1, "handoff runtime: idb store — the rejected reset's deleteDatabase request was issued once (it stays queued in the browser)");
     ok(DB_NAME === "peak-estimator-handoff", "handoff runtime: idb store — database name");
+  }
+
+  // memory fallback (IndexedDB never opened): reset clears memory and never touches deleteDatabase
+  {
+    const fake = fakeIdb({ failOpen: true });
+    const w = await openStore({ meta: docs([{ id: "s1" }]) }, { idb: fake.factory, resetTimeoutMs: 40 });
+    ok(w.persistent === false, "handoff runtime: idb store — an open that fails falls back to memory, non-persistent");
+    await w.put("meta", { id: "mine" });
+    let n = 0;
+    w.subscribe(() => void n++);
+    let err = "";
+    await w.reset().catch((e: Error) => void (err = e.message));
+    ok(err === "" && ids(await w.all("meta")) === "s1" && fake.calls.deletes === 0 && n === 0,
+      `handoff runtime: idb store — reset in the memory fallback clears the overlay without deleteDatabase (err "${err}", deletes ${fake.calls.deletes}, notifications ${n})`);
+    await w.put("meta", { id: "again" });
+    ok(ids(await w.all("meta")) === "s1,again" && w.persistent === false, "handoff runtime: idb store — the memory fallback keeps working after a reset");
+  }
+  // deleteDatabase fails with an error (not a timeout): memory is cleared, the reset resolves, the window stays non-persistent
+  {
+    const fake = fakeIdb({ deleteError: true });
+    const w = await openStore({ meta: docs([{ id: "s1" }]) }, { idb: fake.factory, resetTimeoutMs: 40 });
+    await w.put("meta", { id: "mine" });
+    let err = "";
+    await w.reset().catch((e: Error) => void (err = e.message));
+    ok(err === "" && ids(await w.all("meta")) === "s1", `handoff runtime: idb store — a failed deleteDatabase still clears memory and resolves (err "${err}")`);
+    ok(w.persistent === false && fake.calls.deletes === 1 && fake.calls.opens === 1, "handoff runtime: idb store — …and the window stays non-persistent without reopening the old database");
+    await w.put("meta", { id: "after" });
+    ok(ids(await w.all("meta")) === "s1,after" && ids(await (await openStore({ meta: docs([{ id: "s1" }]) }, { idb: fake.factory })).all("meta")) === "s1,mine", "handoff runtime: idb store — later edits stay in memory only");
+  }
+  // writes made while a reset runs are not reported as saved, and survive it
+  {
+    const fake = fakeIdb();
+    const seedDocs = { meta: docs([{ id: "s1" }]) };
+    const w = await openStore(seedDocs, { idb: fake.factory });
+    await w.put("meta", { id: "before" });
+    const seen: boolean[] = [];
+    w.subscribe(() => void seen.push(w.persistent));
+    const r = w.reset();
+    ok(w.persistent === false, "handoff runtime: idb store — a store reads non-persistent while its reset runs");
+    const p1 = w.put("meta", { id: "mid1" });
+    const p2 = w.remove("meta", "s1");
+    await Promise.all([r, p1, p2]);
+    ok(ids(await w.all("meta")) === "mid1" && (await w.get("meta", "before")) === undefined, `handoff runtime: idb store — mid-reset writes survive the reset, older ones are gone (got ${ids(await w.all("meta"))})`);
+    ok(w.persistent === true && seen.join() === "false,true", `handoff runtime: idb store — persistent again after the flush (notified ${seen.join()})`);
+    const w2 = await openStore(seedDocs, { idb: fake.factory });
+    ok(ids(await w2.all("meta")) === "mid1", `handoff runtime: idb store — the mid-reset writes reached the new database (a reload sees ${ids(await w2.all("meta"))})`);
+    // a flush that fails is not reported as saved
+    const o = { failWrites: false };
+    const bad = fakeIdb(o);
+    const wb = await openStore(seedDocs, { idb: bad.factory });
+    o.failWrites = true; // the fresh database refuses writes
+    const rb = wb.reset();
+    const pb = wb.put("meta", { id: "x" });
+    await Promise.all([rb, pb]);
+    ok(wb.persistent === false && ids(await wb.all("meta")) === "s1,x", "handoff runtime: idb store — a mid-reset write that can't be flushed keeps the doc and leaves the window non-persistent");
+  }
+  // a versionchange that fires while the overlay is still loading must not throw (state is declared before watch())
+  {
+    const fake = fakeIdb({ versionchangeOnOpen: true });
+    const w = await openStore({ meta: docs([{ id: "s1" }]) }, { idb: fake.factory });
+    await new Promise((res) => setTimeout(res, 20));
+    ok(fake.errors.length === 0, `handoff runtime: idb store — a versionchange during startup does not throw (${fake.errors.map((e) => (e as Error).message).join("; ")})`);
+    ok(w.persistent === false && fake.conns.size === 0 && ids(await w.all("meta")) === "s1", "handoff runtime: idb store — …it closes the connection and the window reads non-persistent");
+    await w.put("meta", { id: "x" });
+    ok(ids(await w.all("meta")) === "s1,x" && w.persistent === false, "handoff runtime: idb store — a skipped write is never reported as saved (stays non-persistent, edit kept in memory)");
   }
 
   // --- numbering ---
@@ -357,20 +441,43 @@ export async function handoffRuntimeChecks(ok: Ok) {
   ok(legacy.initial.pipelineId === defPipe.id && legacy.initial.stage === sentStage.id,
     `handoff runtime: props — a legacy stage + no pipelineId normalize on read to the default pipeline's sent stage (got ${legacy.initial.pipelineId}/${legacy.initial.stage}, want ${defPipe.id}/${sentStage.id})`);
   ok(((await store.get<{ stage?: string }>("quotes", "Q-G001")))?.stage === "legacy-proposal-xyz", "handoff runtime: props — normalizing never writes back to the store");
+  // …and the stored default pipeline (settings.defaultQuotePipelineId, as Settings → Pipelines saves it) decides which one
+  const settingsRow = (await store.get<{ id: string; data: Record<string, unknown> }>("settings", "main"))!;
+  await store.put("settings", { ...settingsRow, data: { ...settingsRow.data, defaultQuotePipelineId: "bid-spec" } });
+  const bidDefault = await buildEstimatorProps(store, "Q-G001", new URLSearchParams());
+  ok(bidDefault.pipelines.defaultQuotePipelineId === "bid-spec" && bidDefault.initial.pipelineId === "bid-spec" && bidDefault.initial.stage === "bid-sent",
+    `handoff runtime: props — a stored defaultQuotePipelineId drives the default pipeline and the legacy quote's normalization (got ${bidDefault.pipelines.defaultQuotePipelineId}/${bidDefault.initial.pipelineId}/${bidDefault.initial.stage})`);
+  await store.put("settings", { ...settingsRow, data: { ...settingsRow.data, defaultQuotePipelineId: "no-such-pipeline" } });
+  ok((await buildEstimatorProps(store, "Q-G001", new URLSearchParams())).pipelines.defaultQuotePipelineId === "estimate-design", "handoff runtime: props — an unknown stored default falls back to the app's");
+  await store.put("settings", settingsRow);
   await store.put("quotes", q1 as { id: string });
 
   // renamed SKUs: an old sku resolves to the part it became (catalog getManyBySku)
-  const parts = [
-    { sku: "OLD-1", renamedTo: "MID-1" }, { sku: "MID-1", renamedTo: "Brand:New 1" }, { sku: "Brand:New 1" },
-    { sku: "LOOP-A", renamedTo: "LOOP-B" }, { sku: "LOOP-B", renamedTo: "LOOP-A" }, { sku: "GONE-1", renamedTo: "NOT-THERE" }, { sku: "LIVE-1" },
-  ];
-  const res = bySkuResolver(parts);
+  const parts = [{ sku: "Brand:New 1" }, { sku: "LIVE-1" }];
+  const renames = new Map([
+    ["OLD-1", "MID-1"], ["MID-1", "Brand:New 1"], ["LOOP-A", "LOOP-B"], ["LOOP-B", "LOOP-A"], ["GONE-1", "NOT-THERE"],
+    ["H0", "H1"], ["H1", "H2"], ["H2", "H3"], ["H3", "H4"], ["H4", "H5"], ["H5", "H6"], ["H6", "H7"], ["H7", "H8"], ["H8", "LIVE-1"],
+  ]);
+  const res = bySkuResolver(parts, renames);
   ok(res("Brand:New 1")?.sku === "Brand:New 1" && res("LIVE-1")?.sku === "LIVE-1" && res("OLD-1")?.sku === "Brand:New 1" && res("MID-1")?.sku === "Brand:New 1",
-    "handoff runtime: bySkuResolver — live skus resolve to themselves, retired ones follow renamedTo through the chain");
+    "handoff runtime: bySkuResolver — live skus resolve to themselves, retired ones follow renames through the chain");
   ok(res("LOOP-A") === undefined && res("GONE-1") === undefined && res("nope") === undefined, "handoff runtime: bySkuResolver — a cycle, a dead redirect and an unknown sku are absent");
+  ok(res("H1")?.sku === "LIVE-1" && res("H0") === undefined, "handoff runtime: bySkuResolver — at most 8 hops (H1 is 8 away, H0 is 9)");
+  ok(bySkuResolver(parts)("OLD-1") === undefined && bySkuResolver(parts)("LIVE-1")?.sku === "LIVE-1", "handoff runtime: bySkuResolver — no renames given: live skus only");
+  // stubs are split out of the catalog at the seed: no reader of the catalog collection can list a blank part
+  const split = storeSeedFrom({
+    estimates: [], fixtures: [], rules: { settings: {}, blobs: {} }, meta: null,
+    catalog: [{ id: "OLD-1", sku: "OLD-1", renamedTo: "Brand:New 1" }, { id: "Brand:New 1", sku: "Brand:New 1", desc: "New thing" }, { id: "OLD-2", renamedTo: "Brand:New 1" }],
+  });
+  ok((split.catalog ?? []).map((x) => x.id).join() === "Brand:New 1" && (split.catalogRenames ?? []).map((x) => `${x.sku}>${x.renamedTo}`).join() === "OLD-1>Brand:New 1,OLD-2>Brand:New 1",
+    "handoff runtime: storeSeedFrom — retired stubs leave the catalog and become catalogRenames (a stub without sku keys on its id)");
+  const splitStore = await openStore(split, { idb: null });
+  ok((await splitStore.all<{ id: string }>("catalog")).map((x) => x.id).join() === "Brand:New 1" && splitStore.catalogRenames.get("OLD-1") === "Brand:New 1" && (await splitStore.get("catalog", "OLD-1")) === undefined,
+    "handoff runtime: store — all(\"catalog\") / get never see a retired stub; catalogRenames hands the redirects to the resolver");
   const renStore = await openStore(
     {
-      catalog: docs([{ id: "OLD-1", sku: "OLD-1", renamedTo: "Brand:New 1" }, { id: "Brand:New 1", sku: "Brand:New 1", desc: "New thing", unit: "ea", cost: 10, list: 20 }]),
+      catalog: docs([{ id: "Brand:New 1", sku: "Brand:New 1", desc: "New thing", unit: "ea", cost: 10, list: 20 }]),
+      catalogRenames: [{ id: "OLD-1", sku: "OLD-1", renamedTo: "Brand:New 1" }],
       blobs: docs([{ id: "system_categories", data: { categories: [{ id: "cat-x", name: "Retired SKU", items: [{ sku: "OLD-1", qty: 2 }] }] } }]),
       quotes: [],
     },

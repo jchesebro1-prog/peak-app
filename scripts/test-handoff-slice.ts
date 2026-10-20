@@ -151,6 +151,14 @@ export async function handoffSliceChecks(ok: Ok) {
   ok(catR.map((x) => x.id).sort().join(",") === "OLD-SKU,SKU-A,SKU-B" && !catR.some((x) => x.id === "SKU-C"), "handoff:slice: a deleted part without renamedTo stays out of the catalog");
   const metaR = loadR("data/meta.js").PEAK_META as { counts: Record<string, number> };
   ok(metaR.counts.catalog === 2 && metaR.counts.catalogRetired === 1 && rr.hits.length === 0, "handoff:slice: meta counts live parts and retired stubs apart");
+  // the stored default quote pipeline reaches the prototype (Settings → Pipelines' defaultQuotePipelineId)
+  ok(SETTINGS_FIELDS.includes("defaultQuotePipelineId" as never), "handoff:slice: SETTINGS_FIELDS carries defaultQuotePipelineId");
+  const withDefault = JSON.parse(JSON.stringify(exp)) as ExportV2;
+  (withDefault.appSettings!.find((a) => a.id === "main")!.data as Record<string, unknown>).defaultQuotePipelineId = "bid-spec";
+  const wd = sliceExport(withDefault);
+  const wdw: Record<string, unknown> = {};
+  new Function("window", wd.files["data/rules.js"])(wdw);
+  ok((wdw.PEAK_RULES as { settings: Record<string, unknown> }).settings.defaultQuotePipelineId === "bid-spec", "handoff:slice: settings.defaultQuotePipelineId reaches rules.js");
   const partA = catalog.find((p) => p.sku === "SKU-A");
   ok(partA?.note === "", "handoff:slice: scrub — a secret-shaped catalog note is replaced with \"\"");
   ok((est.find((q) => q.id === "Q-G001") as Record<string, unknown> | undefined)?.quoteNote === "" &&

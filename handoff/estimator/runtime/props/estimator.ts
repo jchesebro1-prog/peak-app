@@ -218,16 +218,21 @@ async function listFixtures(store: HandoffStore, settings: Record<string, unknow
 }
 
 /**
- * catalog getManyBySku over the rows the slice holds: the live part for each sku, following `renamedTo` through
- * retired stubs (a stub is `{ id, sku, renamedTo }` — #304 sets renamedTo only on a retired part). A stub that
- * leads nowhere live (missing, a cycle, more than 8 hops) is absent, as in the app.
+ * catalog getManyBySku over the rows the slice holds: the live part for each sku, following `renames`
+ * (old sku → renamedTo, from the retired stubs #304 leaves behind) up to 8 hops. A redirect that leads
+ * nowhere live (missing, a cycle, more than 8 hops) is absent, as in the app.
  */
-export function bySkuResolver<P extends Pick<CatalogPart, "sku" | "renamedTo">>(rows: readonly P[]): (sku: string) => P | undefined {
+export function bySkuResolver<P extends Pick<CatalogPart, "sku">>(rows: readonly P[], renames: ReadonlyMap<string, string> = new Map()): (sku: string) => P | undefined {
   const map = new Map(rows.map((p) => [p.sku, p]));
   return (sku) => {
-    let p = map.get(sku);
-    for (let hop = 0; p && p.renamedTo && p.renamedTo !== p.sku && hop < 8; hop++) p = map.get(p.renamedTo);
-    return p && !p.renamedTo ? p : undefined;
+    let cur: string | undefined = sku;
+    for (let hop = 0; cur !== undefined && hop <= 8; hop++) {
+      const live = map.get(cur);
+      if (live) return live;
+      const next = renames.get(cur);
+      cur = next && next !== cur ? next : undefined;
+    }
+    return undefined;
   };
 }
 
@@ -262,9 +267,8 @@ export async function buildEstimatorProps(store: HandoffStore, quoteId: string |
   const raw = quoteId ? await store.get<QuoteDoc>("quotes", quoteId) : undefined;
   const q = raw ? normalizeQuotePipeline(raw as QuoteDoc & { status: string }, pipelines) : null;
   // The page redirects a service quote to its own builder (estimatorShouldRedirect); the slice holds system estimates only.
-  const allRows = (await store.all<CatalogPart & { id: string }>("catalog")).map((p) => (p.sku ? p : { ...p, sku: p.id }));
-  // Retired stubs (renamedTo) only feed the sku resolver; every other catalog reader sees live parts.
-  const catalogRows = allRows.filter((p) => !p.renamedTo);
+  // The catalog collection is live parts only: retired-SKU stubs live in store.catalogRenames, for the resolver alone.
+  const catalogRows = (await store.all<CatalogPart & { id: string }>("catalog")).map((p) => (p.sku ? p : { ...p, sku: p.id }));
   const fixtures = await listFixtures(store, settings);
   const roster = users.all();
   const fixtureRates: FixtureRates = { ...FIXTURE_RATE_DEFAULTS, ...(blobData("fixture_rates") as Partial<FixtureRates>) };
@@ -282,7 +286,7 @@ export async function buildEstimatorProps(store: HandoffStore, quoteId: string |
   const estimateOutputDefaults = sanitizeEstimateOutputDefaults(blobData(ESTIMATE_OUTPUT_BLOB));
 
   // Phase 6 categories, each typical part resolved against the live catalog (fail-soft → Blank only).
-  const liveBySku = bySkuResolver(allRows);
+  const liveBySku = bySkuResolver(catalogRows, store.catalogRenames);
   let systemCategories: CategoryOption[] = [];
   try {
     systemCategories = sanitizeSystemCategories(blobData(SYSTEM_CATEGORIES_BLOB)).map((c) => ({
