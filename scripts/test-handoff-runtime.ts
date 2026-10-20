@@ -42,7 +42,7 @@ import { packageActions, refusedPackageActions, REFUSED_PACKAGE_ACTIONS } from "
 import { outputActions } from "../handoff/estimator/runtime/actions/output-actions";
 import { pdfActions } from "../handoff/estimator/runtime/actions/pdf-actions";
 import { assetUrl, PLACEHOLDER_DIR, partPhotoSrc } from "../handoff/estimator/runtime/assets";
-import { applyDraft, addLineSell, browseCatalog, draftFromPart, facetLabel, money, pageBounds, PAGE_SIZE, skuIndex, validateSku } from "../handoff/estimator/runtime/catalog-model";
+import { applyDraft, addLineSell, browseCatalog, draftFromPart, facetLabel, money, pageBounds, PAGE_SIZE, parsePrice, partFingerprint, skuIndex, validateSku } from "../handoff/estimator/runtime/catalog-model";
 import { rankCatalogParts } from "@/lib/estimating-core/catalog-rank";
 import type { LivePart } from "../handoff/estimator/runtime/readers";
 import { POPOUT_NOTICE, PRINT_FOOTER_TEXT, previewTargetOf, windowOpenRoute } from "../handoff/estimator/ui/preview-routes";
@@ -1525,6 +1525,39 @@ export async function handoffShellChecks(ok: Ok) {
     ok(fresh.ok && fresh.part.id === "NEW:1" && fresh.part.sku === "NEW:1" && fresh.part.category === "Uncategorized" && fresh.part.unit === "ea" && fresh.part.pricedAt === 50 && fresh.part.updatedAt === 50, "handoff catalog: applyDraft — a new part: id = sku, upsertPart's default category, priced now");
     const dupNew = applyDraft(null, { ...draftFromPart(null), sku: "shure:sm58", desc: "x" }, { now: 1, by: "A", index: idx });
     ok(!dupNew.ok && /already in the catalog/.test(dupNew.errors.sku ?? ""), "handoff catalog: applyDraft — a new part's SKU must be unique against the index");
+    // parsePrice: plain decimals only; no silent sub-cent rounding; an untouched field round-trips
+    const pp = (raw: string, stored?: number) => { const r = parsePrice(raw, stored); return r.ok ? r.value : r.error; };
+    ok(pp("$1,234.50") === 1234.5 && pp("1,234") === 1234 && pp("12") === 12 && pp(".5") === 0.5 && pp("") === 0 && pp("  $ 7.25 ") === 7.25 && pp("1,234,567.89") === 1234567.89, "handoff catalog: parsePrice — $, valid thousands commas, decimals, blank = 0");
+    ok(["0x10", "1e3", "1E3", "1,23,4", "12,34", "1234,567", ",100", "1,,000", "-5", "+5", "5.", ".", "1.2.3", "abc", "Infinity", "$$5", "5 5"].every((raw) => pp(raw) === "Enter a number, zero or more."), "handoff catalog: parsePrice — hex, exponent, garbled commas, signs and junk refused");
+    ok(pp("1.234") === "Use at most 2 decimal places." && pp("0.005") === "Use at most 2 decimal places." && pp("12.345", 12.34) === "Use at most 2 decimal places.", "handoff catalog: parsePrice — more than 2 decimals is refused, never rounded");
+    ok(pp("12.345", 12.345) === 12.345 && pp("1.5", 1.5) === 1.5, "handoff catalog: parsePrice — a >2-decimal value equal to the stored one is accepted unchanged");
+    {
+      const sub = P("SUB:1", { desc: "Sub-cent part", cost: 12.345, list: 20.999, pricedAt: 5 });
+      const keepSub = applyDraft(sub, { ...draftFromPart(sub), desc: "Sub-cent part 2" }, { now: 9, by: "A" });
+      ok(keepSub.ok && keepSub.part.cost === 12.345 && keepSub.part.list === 20.999 && keepSub.part.pricedAt === 5, "handoff catalog: applyDraft — an untouched sub-cent price round-trips exactly and keeps pricedAt");
+      const typedSub = applyDraft(sub, { ...draftFromPart(sub), cost: "12.346" }, { now: 9, by: "A" });
+      ok(!typedSub.ok && typedSub.errors.cost === "Use at most 2 decimal places.", "handoff catalog: applyDraft — a typed sub-cent price is refused with the message");
+      const hexCost = applyDraft(base, { ...d0, cost: "0x10" }, { now: 1, by: "A" });
+      ok(!hexCost.ok && !!hexCost.errors.cost, "handoff catalog: applyDraft — a hex cost is refused");
+    }
+    // fabric guard: the app's own fabricRateProblem / fabricFactsProblem over the facts a part already carries
+    {
+      const fab = P("FAB:1", { desc: "Velour", category: "Fabric", unit: "sqft", cost: 2, list: 3, curtainAreaRate: 4.5, oz: 25, ozBasis: "lin-yd", flameRating: "NFPA 701" });
+      const fd = draftFromPart(fab);
+      const toCat = applyDraft(fab, { ...fd, category: "Cable" }, { now: 1, by: "A" });
+      ok(!toCat.ok && /Only a fabric part \(category Fabric/.test(toCat.errors.category ?? ""), "handoff catalog: fabric guard — moving a fabric out of Fabric is refused with the app's rate message");
+      const soft = P("FAB:2", { desc: "Sewn goods", category: "Theatrical/Soft Goods", unit: "sq ft", curtainAreaRate: 3 });
+      ok(applyDraft(soft, draftFromPart(soft), { now: 1, by: "A" }).ok, "handoff catalog: fabric guard — Soft Goods sold per sq ft is still a fabric");
+      const softUnit = applyDraft(soft, { ...draftFromPart(soft), unit: "ea" }, { now: 1, by: "A" });
+      ok(!softUnit.ok && /Only a fabric part/.test(softUnit.errors.category ?? softUnit.errors.unit ?? "") && !!softUnit.errors.unit, "handoff catalog: fabric guard — changing Soft Goods away from per-sq-ft is refused (error on the unit)");
+      const ozOnly = P("FAB:3", { desc: "Weighted", category: "Fabric", unit: "lin-yd", oz: 20, ozBasis: "lin-yd" });
+      const ozMove = applyDraft(ozOnly, { ...draftFromPart(ozOnly), category: "Hardware" }, { now: 1, by: "A" });
+      ok(!ozMove.ok && /weight or flame rating/.test(ozMove.errors.category ?? ""), "handoff catalog: fabric guard — a weight / flame rating strands too (the app's facts message)");
+      const flameOnly = P("FAB:4", { desc: "Rated", category: "Fabric", unit: "lin-yd", flameRating: "NFPA 701" });
+      ok(!applyDraft(flameOnly, { ...draftFromPart(flameOnly), category: "Hardware" }, { now: 1, by: "A" }).ok && applyDraft(flameOnly, { ...draftFromPart(flameOnly), desc: "Rated 2" }, { now: 1, by: "A" }).ok, "handoff catalog: fabric guard — a fabric edited in place saves; a non-fabric part is never blocked");
+      ok(applyDraft(base, { ...d0, category: "Anything" }, { now: 1, by: "A" }).ok && applyDraft(null, { ...draftFromPart(null), sku: "Z:1", desc: "z", category: "Cable" }, { now: 1, by: "A", index: idx }).ok, "handoff catalog: fabric guard — ordinary parts and new parts are unaffected");
+    }
+    ok(partFingerprint({ a: 1, b: { y: 2, x: [3, { q: 1, p: 2 }] } }) === partFingerprint({ b: { x: [3, { p: 2, q: 1 }], y: 2 }, a: 1 }) && partFingerprint({ a: 1 }) !== partFingerprint({ a: 2 }), "handoff catalog: partFingerprint — key order never matters, a changed value does");
     // what a catalog price does to an estimate line: catalogAddPrice
     ok(addLineSell({ cost: 0, list: 733 }, 0.3) === 733 && addLineSell({ cost: 294, list: 1200 }, 0.3) === 420 && addLineSell({ cost: 100, list: 5 }, null) === 142.86 && addLineSell({ cost: 0, list: 9 }, null) === 9,
       "handoff catalog: addLineSell — no cost sells at list; a cost sells at cost ÷ (1 − margin), list ignored (margin defaults to 30%)");

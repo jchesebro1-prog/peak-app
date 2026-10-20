@@ -275,7 +275,7 @@
     },
     {
       "port": "handoff/estimator/runtime/catalog-model.ts",
-      "what": "the Catalog part editor save (upsertPart over mergeUpsert → writePart: updatedAt, pricedAt via nextPricedAt, rack data, the narrative stamp) and the new-part SKU rules",
+      "what": "PARTIAL port of the Catalog part editor. Ported: the save semantics (upsertPart → mergeUpsert → writePart: updatedAt, pricedAt via nextPricedAt, rack data via cleanRackFacts, optionalPartFields' only-submitted-keys/blank-clears rule), the narrative stamp (saveProductParagraph) and the fabric guards (part-form.ts fabricRateProblem / fabricFactsProblem, imported). New prototype logic with no app counterpart: browse/facets/paging, new-part SKU uniqueness (upsertPart has no SKU uniqueness check), parsePrice and the price-cell rules, the open-drawer fingerprint compare",
       "originals": [
         {
           "path": "src/app/(app)/catalog/actions.ts",
@@ -284,6 +284,10 @@
         {
           "path": "src/lib/stores/catalog.ts",
           "sha256": "c991d6d2f32d1777de5e19f119e8a2036892f19f67a7e3b0230921c4a1f4d2bc"
+        },
+        {
+          "path": "src/app/(app)/catalog/part-form.ts",
+          "sha256": "f6e725c43d166865bf7e53ca707a711b319daf7f4d0b8d97ba39526bc48bb4fa"
         }
       ]
     }

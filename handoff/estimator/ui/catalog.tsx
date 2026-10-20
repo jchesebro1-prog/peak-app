@@ -5,7 +5,7 @@
  * manufacturer, category, unit, cost, list). A row opens the part editor drawer (description, category, unit, cost, list,
  * manufacturer, MFR part #, model #, rack data, narrative paragraph); "New part" starts a blank one whose SKU must be
  * unique. Save writes the catalog overlay (store.put), which the Estimator's picker reads at once; Reset to production
- * snapshot restores it. Reading is open to everyone; editing needs `create`, as in the app. Rules: runtime/catalog-model.ts.
+ * snapshot restores it. Reading is open to everyone; editing needs `create` — stricter than the app, whose part editor only requires a signed-in user (requireUser); the prototype keeps the stricter gate. Rules: runtime/catalog-model.ts.
  * Plan: PR 2 Task 8.
  */
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -14,7 +14,7 @@ import { liveCatalog, type LivePart } from "../runtime/readers";
 import { partPhotoSrc } from "../runtime/assets";
 import type { HandoffStore } from "../runtime/store";
 import {
-  addLineSell, applyDraft, browseCatalog, draftFromPart, facetLabel, money, pageBounds, RACK_ENUMS, RACK_LABEL, skuIndex, validateSku,
+  addLineSell, applyDraft, browseCatalog, draftFromPart, facetLabel, money, pageBounds, partFingerprint, RACK_ENUMS, RACK_LABEL, skuIndex, validateSku,
   type DraftField, type Facet, type PartDraft,
 } from "../runtime/catalog-model";
 import { RACK_FACT_KEYS, type RackFactKey } from "@/lib/rack/types";
@@ -275,6 +275,7 @@ export function CatalogScreen({ store, onReady }: { store: HandoffStore; onReady
         <PartDrawer
           key={editing.sku ?? "(new)"}
           store={store}
+          isNew={editing.sku === null}
           part={editingPart}
           parts={parts}
           canEdit={canEdit}
@@ -342,9 +343,16 @@ function Field({ label, error, hint, children }: { label: string; error?: string
 const GRID2: CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
 const SECTION: CSSProperties = { fontSize: 10.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "#8c919c", margin: "18px 0 8px" };
 
-function PartDrawer({ store, part, parts, canEdit, onClose, onSaved }: { store: HandoffStore; part: LivePart | null; parts: LivePart[]; canEdit: boolean; onClose: () => void; onSaved: (sku: string, isNew: boolean) => void | Promise<void> }) {
-  const isNew = part === null;
-  const initial = useMemo(() => draftFromPart(part), [part]);
+function PartDrawer({ store, isNew, part: livePart, parts, canEdit, onClose, onSaved }: { store: HandoffStore; isNew: boolean; part: LivePart | null; parts: LivePart[]; canEdit: boolean; onClose: () => void; onSaved: (sku: string, isNew: boolean) => void | Promise<void> }) {
+  // New-part mode is the drawer's own flag (editing.sku === null), never "no part found". The part is snapshotted when the
+  // drawer opens: a change from another window does not move `initial` under the open form — Save compares instead.
+  const [opened, setOpened] = useState<LivePart | null>(livePart);
+  const [gone, setGone] = useState(false);
+  const [stale, setStale] = useState(false);
+  const part = opened;
+  // The parts list refreshes on focus; a part that is no longer in it (reset or removed elsewhere) can't be saved.
+  const removed = !isNew && (gone || livePart === null);
+  const initial = useMemo(() => draftFromPart(opened), [opened]);
   const [draft, setDraft] = useState<PartDraft>(initial);
   const [errors, setErrors] = useState<Partial<Record<DraftField, string>>>({});
   const [saving, setSaving] = useState(false);
@@ -355,6 +363,7 @@ function PartDrawer({ store, part, parts, canEdit, onClose, onSaved }: { store: 
   const index = useMemo(() => (isNew ? skuIndex(parts, store.catalogRenames) : null), [isNew, parts, store]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
   const readOnly = !canEdit;
+  const noSave = readOnly || removed;
   const categories = useMemo(() => categoryNames(parts), [parts]);
 
   useEffect(() => {
@@ -396,13 +405,38 @@ function PartDrawer({ store, part, parts, canEdit, onClose, onSaved }: { store: 
   };
   const skuError = isNew && draft.sku.trim() && index ? validateSku(draft.sku, index) : null;
 
+  const reload = async () => {
+    const fresh = opened ? await store.get<LivePart>("catalog", opened.id) : null;
+    setStale(false);
+    if (!fresh) {
+      setGone(true);
+      return;
+    }
+    const next = fresh.sku ? fresh : { ...fresh, sku: fresh.id };
+    setOpened(next);
+    setDraft(draftFromPart(next));
+    setErrors({});
+  };
+
   const save = async () => {
-    if (saving || readOnly) return;
+    if (saving || noSave) return;
     setFailure(null);
     // Re-read the catalog now: another window may have taken the SKU since the editor opened.
     const live = isNew ? await liveCatalog(store) : null;
     const idx = live ? skuIndex(live, store.catalogRenames) : undefined;
-    const base = isNew ? null : ((await store.get<LivePart>("catalog", part.id)) ?? part);
+    let base: LivePart | null = null;
+    if (!isNew) {
+      const row = opened ? await store.get<LivePart>("catalog", opened.id) : null;
+      if (!row || !opened) {
+        setGone(true);
+        return;
+      }
+      base = row.sku ? row : { ...row, sku: row.id };
+      if (partFingerprint(base) !== partFingerprint(opened)) {
+        setStale(true);
+        return;
+      }
+    }
     const r = applyDraft(base, draft, { now: clock.now(), by: users.current().name, index: idx });
     if (!r.ok) {
       setErrors(r.errors);
@@ -428,7 +462,7 @@ function PartDrawer({ store, part, parts, canEdit, onClose, onSaved }: { store: 
       <aside ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="catalog-drawer-title" className="pk-drawer-panel" style={{ width: 560 }}>
         <div className="pk-drawer-head">
           <h2 id="catalog-drawer-title" className="pk-drawer-title">
-            {isNew ? "New part" : part.sku}
+            {isNew ? "New part" : (part?.sku ?? "Part")}
           </h2>
           <button ref={closeRef} type="button" aria-label="Close part editor" className="pk-drawer-close" data-catalog-close="" onClick={() => !saving && onClose()}>
             ✕
@@ -440,10 +474,23 @@ function PartDrawer({ store, part, parts, canEdit, onClose, onSaved }: { store: 
               {CATALOG_COPY.readOnly}
             </div>
           )}
+          {removed && (
+            <div role="alert" data-catalog-removed="" style={{ margin: "12px 0 0", padding: "8px 10px", borderRadius: 8, background: "#fbeeeb", fontSize: 12.5, color: "#a33a2b" }}>
+              This part was reset or removed — close this editor and pick it again from the list. Nothing can be saved here.
+            </div>
+          )}
+          {stale && !removed && (
+            <div role="alert" data-catalog-stale="" style={{ margin: "12px 0 0", padding: "8px 10px", borderRadius: 8, background: "#fdf3dd", fontSize: 12.5, color: "#7a5a12", display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ flex: 1 }}>This part changed in another window — reload it? Your edits here are replaced.</span>
+              <button type="button" className="pk-btn-outline" data-catalog-reload="" onClick={reload}>
+                Reload
+              </button>
+            </div>
+          )}
           <div style={SECTION}>Part</div>
           <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 12 }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={partPhotoSrc(isNew ? draft.sku.trim() : part.sku)} alt="" width={64} height={64} data-catalog-drawer-photo="" style={{ width: 64, height: 64, objectFit: "contain", borderRadius: 8, background: "#f4f5f7", flexShrink: 0 }} />
+            <img src={partPhotoSrc(isNew ? draft.sku.trim() : (part?.sku ?? ""))} alt="" width={64} height={64} data-catalog-drawer-photo="" style={{ width: 64, height: 64, objectFit: "contain", borderRadius: 8, background: "#f4f5f7", flexShrink: 0 }} />
             <div style={{ fontSize: 12, color: "#8c919c", lineHeight: 1.5 }}>Bundled photos only — the prototype doesn&apos;t take uploads.</div>
           </div>
           <div style={{ display: "grid", gap: 12 }}>
@@ -469,10 +516,10 @@ function PartDrawer({ store, part, parts, canEdit, onClose, onSaved }: { store: 
           <div style={SECTION}>Pricing</div>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={GRID2}>
-              <Field label="Category">
+              <Field label="Category" error={errors.category}>
                 <input className="pk-input" data-catalog-field="category" list="catalog-categories" value={draft.category} disabled={readOnly} onChange={(e) => set("category", e.target.value)} />
               </Field>
-              <Field label="Unit">
+              <Field label="Unit" error={errors.unit}>
                 <input className="pk-input" data-catalog-field="unit" value={draft.unit} disabled={readOnly} onChange={(e) => set("unit", e.target.value)} />
               </Field>
             </div>
@@ -550,7 +597,7 @@ function PartDrawer({ store, part, parts, canEdit, onClose, onSaved }: { store: 
             {readOnly ? "Close" : "Cancel"}
           </button>
           {!readOnly && (
-            <button type="button" className="pk-btn-accent" data-catalog-save="" disabled={saving || (!isNew && !dirty)} onClick={save}>
+            <button type="button" className="pk-btn-accent" data-catalog-save="" disabled={saving || removed || (!isNew && !dirty)} onClick={save}>
               {saving ? "Saving…" : isNew ? "Add part" : "Save"}
             </button>
           )}

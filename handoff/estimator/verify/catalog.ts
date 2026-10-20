@@ -16,6 +16,7 @@ import * as vm from "node:vm";
 import { pathToFileURL } from "node:url";
 import type { Page } from "puppeteer-core";
 import { chromeLaunch } from "@/lib/quote-pdf/render";
+import { isFabricPart } from "@/lib/fabric-part";
 import { rankCatalogParts } from "@/lib/estimating-core/catalog-rank";
 import { catalogAddPrice, seedMarginOf } from "@/lib/estimating-core/tier-reprice";
 import { CURRENT_USER_KEY } from "../runtime/ports";
@@ -23,7 +24,7 @@ import { money } from "../runtime/catalog-model";
 import { clickButton, estimateUrl, newPage, newSink, openUrl, pageHasText, ROOT, SMOKE_ALLOWED_UNREGISTERED, unregisteredOn, VERIFY_DIR, waitFor, waitMounted, type EditH, type PageSink } from "../verify";
 import { VERIFY_REVIEWER } from "./shell";
 
-type SlicePart = { id: string; sku?: string; desc?: string; category?: string; unit?: string; cost?: number; list?: number; mfr?: string; manufacturerModelNumber?: string; formerSkus?: string[]; renamedTo?: string; pricedAt?: number };
+type SlicePart = { id: string; sku?: string; desc?: string; category?: string; unit?: string; cost?: number; list?: number; mfr?: string; manufacturerModelNumber?: string; formerSkus?: string[]; renamedTo?: string; pricedAt?: number; curtainAreaRate?: number; oz?: number; ozBasis?: string; flameRating?: string };
 type CatalogResult = { pass: boolean; parts: number; firstPaintMs: number | null; steps: Array<{ step: string; ok: boolean; detail?: string }>; screenshots: string[]; unexpectedUnregistered: string[] } & PageSink;
 
 /** The slice's live catalog parts (retired-SKU stubs left out, as the store does). */
@@ -56,6 +57,8 @@ export async function catalogCheck(pkgDir: string): Promise<CatalogResult> {
   const partA = catalog.find((p) => !(p.cost && p.cost > 0) && (p.list ?? 0) > 0 && firstHit(p));
   const partB = catalog.find((p) => (p.cost ?? 0) > 0 && (p.list ?? 0) > 0 && p !== partA && firstHit(p));
   if (!partA || !partB) throw new Error("the slice has no cost-less and costed parts that rank first for their own SKU");
+  // A fabric part carrying fabric facts (rate / weight / flame rating), if the slice has one that ranks first for its SKU.
+  const partF = catalog.find((p) => isFabricPart(p) && (p.curtainAreaRate || p.oz || p.flameRating) && firstHit(p) && p !== partA && p !== partB);
   const listA = partA.list as number;
   const newListA = Math.round((listA + 123) * 100) / 100;
   const costB = partB.cost as number;
@@ -237,7 +240,29 @@ export async function catalogCheck(pkgDir: string): Promise<CatalogResult> {
     await setField(page, "rack_ruHeight", "0.3");
     await page.click("[data-catalog-save]");
     step("an RU height that isn't in half-RU steps is refused", await waitFor(() => page.evaluate(() => /RU height/.test(document.querySelector("[data-catalog-drawer]")?.textContent ?? "")), 3000));
+    await setField(page, "rack_ruHeight", "2");
+    for (const [raw, label] of [["1e3", "an exponent"], ["0x10", "a hex number"], ["1,23,4", "garbled commas"]] as const) {
+      await setField(page, "list", raw);
+      await page.click("[data-catalog-save]");
+      step(`a list price of ${label} ("${raw}") is refused`, await waitFor(() => page.evaluate(() => /Enter a number, zero or more/.test(document.querySelector("[data-catalog-drawer]")?.textContent ?? "")), 3000));
+    }
+    await setField(page, "list", "12.345");
+    await page.click("[data-catalog-save]");
+    step("a list price with more than 2 decimals is refused, not rounded", (await waitFor(() => page.evaluate(() => /Use at most 2 decimal places/.test(document.querySelector("[data-catalog-drawer]")?.textContent ?? "")), 3000)) && ((await stored(page, sku(partA)))?.list === newListA));
     await page.click("[data-catalog-cancel]");
+    if (partF) {
+      await search(page, sku(partF));
+      await settle(page, (s) => s[0] === sku(partF));
+      await openPart(page, sku(partF));
+      await setField(page, "category", "Cable");
+      await page.click("[data-catalog-save]");
+      step(`a fabric part (${sku(partF)}) moved out of Fabric is refused with the app's message`, await waitFor(() => page.evaluate(() => /Only a fabric part/.test(document.querySelector("[data-catalog-drawer]")?.textContent ?? "")), 3000));
+      const fStored = await stored(page, sku(partF));
+      step("…and the stored fabric facts are untouched", !fStored || (fStored.category === partF.category && fStored.curtainAreaRate === partF.curtainAreaRate && fStored.oz === partF.oz && fStored.flameRating === partF.flameRating));
+      await page.click("[data-catalog-cancel]");
+    } else {
+      step("fabric guard in the browser: the slice has no fabric part with fabric facts that ranks first — unit test only", true, "see scripts/test-handoff-runtime.ts");
+    }
 
     // the edit to part B: cost and list both move
     await search(page, sku(partB));
@@ -257,6 +282,27 @@ export async function catalogCheck(pkgDir: string): Promise<CatalogResult> {
     await search(page, sku(partA));
     await settle(page, (s) => s[0] === sku(partA));
     step("after a reload the edited list price is still there", (await cell(page, sku(partA), "list")) === money(newListA), (await cell(page, sku(partA), "list")) ?? "");
+    // an open drawer is not rebuilt under the user; Save notices a change made since it opened. (The store keeps each window's
+    // overlay in memory, so another WINDOW's write is invisible until a reload — the changes here come from the same store
+    // object through the page, standing in for any other writer.)
+    await search(page, sku(partB));
+    await settle(page, (s) => s[0] === sku(partB));
+    await openPart(page, sku(partB));
+    await setField(page, "desc", "Typed in window 1");
+    await page.evaluate(async (s) => {
+      const st = (window as unknown as EditH).__peakHandoff.store;
+      const cur = (await st.get("catalog", s)) as Record<string, unknown>;
+      await st.put("catalog", { ...cur, desc: "Written by another writer", updatedAt: Date.now() + 1 } as unknown as { id: string });
+    }, sku(partB));
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await new Promise((r) => setTimeout(r, 400));
+    step("a change elsewhere does not rewrite the open form (your typing and Save stay)", (await page.$eval(field("desc"), (i) => (i as HTMLTextAreaElement).value)) === "Typed in window 1" && !(await page.$eval("[data-catalog-save]", (b) => (b as HTMLButtonElement).disabled)));
+    await page.click("[data-catalog-save]");
+    step("Save then refuses: “This part changed in another window — reload it?”", await waitFor(() => page.evaluate(() => /changed in another window — reload it\?/.test(document.querySelector("[data-catalog-stale]")?.textContent ?? "")), 3000));
+    step("…and the other writer's description is still what is stored", (await stored(page, sku(partB)))?.desc === "Written by another writer");
+    await page.click("[data-catalog-reload]");
+    step("Reload brings the stored version into the form and clears the notice", (await waitFor(() => page.evaluate(() => !document.querySelector("[data-catalog-stale]")), 3000)) && (await page.$eval(field("desc"), (i) => (i as HTMLTextAreaElement).value)) === "Written by another writer" && (await page.$eval("[data-catalog-save]", (b) => (b as HTMLButtonElement).disabled)));
+    await page.click("[data-catalog-cancel]");
     await page.close();
 
     // 7 — the Estimator adds both parts at the edited prices
@@ -341,6 +387,21 @@ export async function catalogCheck(pkgDir: string): Promise<CatalogResult> {
     step("…and its editor is read-only: a notice, disabled fields, no Save", (await rv.evaluate(() => !!document.querySelector("[data-catalog-readonly]"))) && (await rv.$eval(field("list"), (i) => (i as HTMLInputElement).disabled)) && !(await rv.evaluate(() => !!document.querySelector("[data-catalog-save]"))));
     await rv.evaluate((k) => localStorage.removeItem(k), CURRENT_USER_KEY);
     await rv.close();
+
+    // 9b — a part removed under an open drawer (the same store object stands in for a reset elsewhere)
+    const dw = await newPage(browser, sink);
+    await openUrl(dw, catalogUrl);
+    await waitFor(() => dw.evaluate(() => !!document.querySelector("[data-catalog-painted]")), 15_000);
+    await search(dw, NEW_SKU);
+    await settle(dw, (s) => s[0] === NEW_SKU);
+    await openPart(dw, NEW_SKU);
+    await setField(dw, "desc", "Typed under a doomed drawer");
+    await dw.evaluate(async (s) => {
+      await (window as unknown as EditH).__peakHandoff.store.remove("catalog", s);
+      window.dispatchEvent(new Event("focus"));
+    }, NEW_SKU);
+    step("a drawer whose part disappears says “This part was reset or removed”, still titled as the part, and cannot save", (await waitFor(() => dw.evaluate(() => /This part was reset or removed/.test(document.querySelector("[data-catalog-removed]")?.textContent ?? "")), 5000)) && (await dw.$eval("[data-catalog-save]", (b) => (b as HTMLButtonElement).disabled)) && (await dw.evaluate(() => document.querySelector("#catalog-drawer-title")?.textContent === "ZZ-VERIFY-PART-1")));
+    await dw.close();
 
     // 10 — Reset puts the snapshot back
     const rp = await newPage(browser, sink);

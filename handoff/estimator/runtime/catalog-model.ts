@@ -8,8 +8,8 @@
  * manufacturer pick, the manufacturer counts honour the search and the category pick. The page never holds more than
  * PAGE_SIZE rows.
  *
- * Edit: a slim port of the app's part editor save (src/app/(app)/catalog/actions.ts upsertPart over catalog.ts
- * mergeUpsert → writePart): `updatedAt` stamped, `pricedAt` stamped only when the cost or list moved (nextPricedAt),
+ * Edit: a PARTIAL port of the app's part editor save (src/app/(app)/catalog/actions.ts upsertPart over catalog.ts
+ * mergeUpsert → writePart); the fabric guards are the app's own (part-form.ts), imported: `updatedAt` stamped, `pricedAt` stamped only when the cost or list moved (nextPricedAt),
  * rack data through cleanRackFacts (a blank clears the field), the narrative paragraph stamped with who and when.
  * A new part's SKU is unique against the live catalog AND every retired SKU (the rename stubs and parts' `formerSkus`),
  * case-insensitively — the sku resolver lowercases, so two spellings would shadow each other.
@@ -18,8 +18,10 @@
  * sells at catalogAddPrice(cost, list, tierMargin) — cost ÷ (1 − margin) when the part has a cost, else its list price.
  * `addLineSell` states it for the verify walk. Plan: PR 2 Task 8.
  */
+import { fabricFactsProblem, fabricRateProblem } from "@/app/(app)/catalog/part-form";
 import { rankCatalogParts } from "@/lib/estimating-core/catalog-rank";
 import { catalogAddPrice } from "@/lib/estimating-core/tier-reprice";
+import { isFabricPart } from "@/lib/fabric-part";
 import { MAX_PARAGRAPH } from "@/lib/estimating-core/narrative";
 import { nextPricedAt } from "@/lib/catalog-books";
 import { cleanRackFacts } from "@/lib/rack/part-facts";
@@ -171,14 +173,48 @@ export function draftFromPart(p: LivePart | null): PartDraft {
   };
 }
 
-/** A price cell → dollars: blank = 0; "$1,234.50" is fine; junk, negative or absurd is an error. */
-export function parsePrice(raw: string): { ok: true; value: number } | { ok: false; error: string } {
-  const s = (raw ?? "").trim().replace(/^\$/, "").replace(/,/g, "");
+/** A decimal the editor accepts: "1234.5", "1,234.50", ".5" — commas only as thousands separators in the right places. */
+const PLAIN_DECIMAL = /^(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?$/;
+
+/**
+ * A price cell → dollars: blank = 0; "$1,234.50" is fine. Only plain decimals — hex, exponents ("1e3"), signs and garbled commas
+ * ("1,23,4") are refused. A value with more than 2 decimals is never rounded silently: it is refused ("Use at most 2 decimal
+ * places") unless it IS the stored value (`stored`) — an untouched field has to round-trip unchanged.
+ */
+export function parsePrice(raw: string, stored?: number): { ok: true; value: number } | { ok: false; error: string } {
+  const s = (raw ?? "").trim().replace(/^\$\s*/, "");
   if (s === "") return { ok: true, value: 0 };
-  const n = Number(s);
-  if (!Number.isFinite(n) || n < 0) return { ok: false, error: "Enter a number, zero or more." };
+  if (s === "." || !PLAIN_DECIMAL.test(s)) return { ok: false, error: "Enter a number, zero or more." };
+  const n = Number(s.replace(/,/g, ""));
+  if (!Number.isFinite(n)) return { ok: false, error: "Enter a number, zero or more." };
   if (n > PRICE_MAX) return { ok: false, error: `That is above ${PRICE_MAX.toLocaleString("en-US")} — check for a typo.` };
-  return { ok: true, value: Math.round(n * 100) / 100 };
+  const decimals = s.split(".")[1]?.length ?? 0;
+  if (decimals > 2 && n !== stored) return { ok: false, error: "Use at most 2 decimal places." };
+  return { ok: true, value: n };
+}
+
+/** A part's identity for "did it change since I opened it?" — key order does not matter. */
+export function partFingerprint(p: unknown): string {
+  const sort = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(sort) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, sort(x)])) : v;
+  return JSON.stringify(sort(p));
+}
+
+/**
+ * The app's fabric guards (part-form.ts fabricRateProblem / fabricFactsProblem — the same functions, imported) over the fabric
+ * facts a part already carries. The editor doesn't edit curtainAreaRate / oz / ozBasis / flameRating; they ride along, so the
+ * only way to break the rule here is a category or unit change that stops the part being a fabric. null = fine.
+ */
+export function fabricStrandProblem(base: LivePart | null, category: string, unit: string): string | null {
+  if (!base) return null;
+  const b = base as LivePart & { curtainAreaRate?: number; oz?: number; ozBasis?: "lin-yd" | "sq-yd"; flameRating?: string };
+  if (isFabricPart({ category, unit })) return null;
+  const rateRaw = (base as Record<string, unknown>).curtainAreaRate;
+  const rate = typeof rateRaw === "number" && Number.isFinite(rateRaw) && rateRaw > 0 ? rateRaw : undefined;
+  return (
+    fabricRateProblem(category, rate, unit) ??
+    fabricFactsProblem(category, unit, { oz: b.oz, ozBasis: b.ozBasis, flameRating: b.flameRating })
+  );
 }
 
 export type DraftResult = { ok: true; part: LivePart } | { ok: false; errors: Partial<Record<DraftField, string>> };
@@ -198,10 +234,16 @@ export function applyDraft(base: LivePart | null, draft: PartDraft, ctx: { now: 
   }
   const desc = draft.desc.trim();
   if (!desc) errors.desc = "A description is required.";
-  const cost = parsePrice(draft.cost);
+  // An untouched price keeps the stored number exactly (never re-rounded); a typed one is parsed.
+  const was = draftFromPart(base);
+  const cost = base && draft.cost === was.cost ? ({ ok: true, value: base.cost ?? 0 } as const) : parsePrice(draft.cost, base?.cost);
   if (!cost.ok) errors.cost = cost.error;
-  const list = parsePrice(draft.list);
+  const list = base && draft.list === was.list ? ({ ok: true, value: base.list ?? 0 } as const) : parsePrice(draft.list, base?.list);
   if (!list.ok) errors.list = list.error;
+  const category = draft.category.trim() || DEFAULT_CATEGORY;
+  const unit = draft.unit.trim() || "ea";
+  const stranded = fabricStrandProblem(base, category, unit);
+  if (stranded) errors[base && category === (base.category || DEFAULT_CATEGORY) ? "unit" : "category"] = stranded;
   const rack = cleanRackFacts(draft.rack);
   if (!rack.ok) errors.rack = rack.error;
   const narrative = draft.narrativeText.replace(/\r\n?/g, "\n").trim();
@@ -209,8 +251,8 @@ export function applyDraft(base: LivePart | null, draft: PartDraft, ctx: { now: 
   if (Object.keys(errors).length || !cost.ok || !list.ok || !rack.ok) return { ok: false, errors };
 
   const next: Record<string, unknown> = { ...(base ?? {}), id: base ? base.id : sku, sku, desc };
-  next.category = draft.category.trim() || DEFAULT_CATEGORY;
-  next.unit = draft.unit.trim() || "ea";
+  next.category = category;
+  next.unit = unit;
   next.cost = cost.value;
   next.list = list.value;
   for (const k of OPTIONAL_TEXT) {

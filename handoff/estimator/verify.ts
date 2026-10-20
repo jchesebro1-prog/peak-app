@@ -600,7 +600,7 @@ function printEstimator(r: EstimatorResult): void {
 
 type EditResult = { pass: boolean; id: string; steps: Array<{ step: string; ok: boolean; detail?: string }>; unexpectedUnregistered: string[] } & PageSink;
 
-export type EditH = { __peakHandoff: { store: { get(c: string, id: string): Promise<unknown>; all(c: string): Promise<unknown[]>; reset(): Promise<void> } } };
+export type EditH = { __peakHandoff: { store: { get(c: string, id: string): Promise<unknown>; all(c: string): Promise<unknown[]>; put(c: string, doc: { id: string }): Promise<void>; remove(c: string, id: string): Promise<void>; reset(): Promise<void> } } };
 
 /** Clicks the first visible button whose trimmed text is `text` (or starts with it, `prefix`). */
 export const clickButton = (page: Page, text: string, prefix = false) =>
