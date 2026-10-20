@@ -68,7 +68,7 @@ export function CoverPackagePanel(p: CoverPackagePanelProps) {
       <span style={hint}>One item per line — prints as one “Not included:” paragraph on the cover.</span>
       {p.savedQuoteId ? (
         <>
-          <a href={`/api/quotes/${encodeURIComponent(p.savedQuoteId)}/cover-pdf?download=1`} style={{ ...actionLink, color: "#fff", background: "var(--accent)" }}>
+          <a href={`/api/quotes/${encodeURIComponent(p.savedQuoteId)}/cover-pdf?download=1`} target="_blank" rel="noopener noreferrer" style={{ ...actionLink, color: "#fff", background: "var(--accent)" }}>
             Cover PDF
           </a>
           <a href={`/api/quotes/${encodeURIComponent(p.savedQuoteId)}/cover-pdf`} target="_blank" rel="noopener noreferrer" style={{ ...actionLink, color: "#16181d", background: "#f1f2f5" }}>

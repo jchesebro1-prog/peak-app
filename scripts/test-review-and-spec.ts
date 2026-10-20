@@ -51859,12 +51859,15 @@ import { signPrintToken as e301rSign, verifyPrintToken as e301rVerify } from "@/
   ok(page.includes('verifyPrintToken(process.env.AUTH_SECRET || "", t, "cover", id, Date.now())') && page.includes("notFound()") && page.includes("force-dynamic") &&
      page.includes("index: false") && page.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && page.includes("await headers()") && page.includes("loadCoverDocumentProps(") &&
      page.indexOf("tokenOk(") < page.indexOf("getQuote("), "#301 route: the print page checks its token before any read, 404s otherwise, is dynamic and noindex");
-  // Phase 3: the render moved to cover-pdf-server.ts (shared with the send action); the pin reads both.
-  const route = rd("src/app/api/quotes/[id]/cover-pdf/route.ts") + rd("src/lib/estimate-output/cover-pdf-server.ts");
+  // Phase 3: the render moved to cover-pdf-server.ts (shared with the send action); the BOM-PDF fix then moved the render
+  // body + response tail into the one shared quote-pdf/signed-print-pdf.ts — the pin reads all three.
+  const route = rd("src/app/api/quotes/[id]/cover-pdf/route.ts") + rd("src/lib/estimate-output/cover-pdf-server.ts") + rd("src/lib/quote-pdf/signed-print-pdf.ts");
   ok(route.includes("export const maxDuration = 60;") && route.includes("await requireUser();") && route.includes("printOriginFor(process.env,") &&
-     route.includes('signPrintToken(secret, "cover", q.id, Date.now())') && route.includes("renderPrintRouteToPdf(") && route.includes("PdfRenderUnavailable") &&
-     route.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && route.includes("COVER_RENDER_TIMEOUT_MS = 45_000") && route.includes("COVER_RENDER_DEADLINE_MS = 55_000") &&
-     route.includes("timeoutMs: COVER_RENDER_TIMEOUT_MS") && route.includes("signal: AbortSignal.timeout(COVER_RENDER_DEADLINE_MS)") && route.includes("coverPdfFileName(displayQuoteNumber(q))") && route.includes('"x-content-type-options": "nosniff"'),
+     route.includes('kind: "cover"') && route.includes("/print/cover/${encodeURIComponent(id)}?t=${encodeURIComponent(t)}") && route.includes("signPrintToken(secret, opts.kind, q.id, Date.now())") &&
+     route.includes("renderPrintRouteToPdf(") && route.includes("PdfRenderUnavailable") &&
+     route.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && route.includes("SIGNED_PRINT_RENDER_TIMEOUT_MS = 45_000") && route.includes("SIGNED_PRINT_RENDER_DEADLINE_MS = 55_000") &&
+     route.includes("timeoutMs: SIGNED_PRINT_RENDER_TIMEOUT_MS") && route.includes("signal: AbortSignal.timeout(SIGNED_PRINT_RENDER_DEADLINE_MS)") && route.includes("coverPdfFileName(displayQuoteNumber(q))") &&
+     route.includes('"x-content-type-options": "nosniff"') && route.includes('"cache-control": "private, no-store"'),
     "#301 route: signed-in only, 60 s, the shared print origin, system quotes only, \"EST-#### Cover.pdf\" (R7)");
   const panel = rd("src/app/(app)/estimator/cover-package-panel.tsx");
   ok(panel.includes("/cover-pdf") && panel.includes(">Cover PDF<") && panel.includes("Open cover ↗") && panel.includes("Save first — the cover prints the saved estimate.") && panel.includes("Save to create the cover."),
@@ -70157,16 +70160,28 @@ import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate
   ok(page.includes("!bom && normalizePdfOptions(q.pdfOptions).pdfCutSheets") && page.indexOf("if (bom)") < page.indexOf("keyProductPhotoDataUris("),
     "BOM PDF print: the BOM view appends no cut sheets and reads no key-product photos");
   ok(page.indexOf('tokenOk(t, "quote", id)') > -1 && page.indexOf('tokenOk(t, "quote", id)') < page.indexOf("getQuote("), "BOM PDF print: the quote token is still checked before any read");
-  const route = has("src/app/api/quotes/[id]/bom-pdf/route.ts") && has("src/lib/estimate-output/bom-pdf-server.ts")
-    ? rd("src/app/api/quotes/[id]/bom-pdf/route.ts") + rd("src/lib/estimate-output/bom-pdf-server.ts") : "";
+  const route = has("src/app/api/quotes/[id]/bom-pdf/route.ts") && has("src/lib/estimate-output/bom-pdf-server.ts") && has("src/lib/quote-pdf/signed-print-pdf.ts")
+    ? rd("src/app/api/quotes/[id]/bom-pdf/route.ts") + rd("src/lib/estimate-output/bom-pdf-server.ts") + rd("src/lib/quote-pdf/signed-print-pdf.ts") : "";
   ok(route.includes("export const maxDuration = 60;") && route.includes("await requireUser();") && route.includes("printOriginFor(process.env,") &&
-     route.includes('signPrintToken(secret, "quote", q.id, Date.now())') && route.includes("&view=bom") && route.includes("renderPrintRouteToPdf(") && route.includes("PdfRenderUnavailable") &&
-     route.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && route.includes("BOM_RENDER_TIMEOUT_MS = 45_000") && route.includes("BOM_RENDER_DEADLINE_MS = 55_000") &&
+     route.includes('kind: "quote"') && route.includes("signPrintToken(secret, opts.kind, q.id, Date.now())") && route.includes("&view=bom") && route.includes("renderPrintRouteToPdf(") && route.includes("PdfRenderUnavailable") &&
+     route.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && route.includes("SIGNED_PRINT_RENDER_TIMEOUT_MS = 45_000") && route.includes("SIGNED_PRINT_RENDER_DEADLINE_MS = 55_000") &&
+     route.includes("timeoutMs: SIGNED_PRINT_RENDER_TIMEOUT_MS") && route.includes("signal: AbortSignal.timeout(SIGNED_PRINT_RENDER_DEADLINE_MS)") &&
      route.includes("bomPdfFileName(displayQuoteNumber(q))") && route.includes('"x-content-type-options": "nosniff"') && route.includes('"cache-control": "private, no-store"'),
     "BOM PDF route: signed-in only, 60 s, the shared print origin, system quotes only, the quote token + view=bom, \"EST-#### BOM.pdf\"");
+  {
+    const coverSrv = rd("src/lib/estimate-output/cover-pdf-server.ts"), bomSrv = rd("src/lib/estimate-output/bom-pdf-server.ts");
+    const coverRoute = rd("src/app/api/quotes/[id]/cover-pdf/route.ts"), bomRoute = rd("src/app/api/quotes/[id]/bom-pdf/route.ts");
+    ok(coverSrv.includes("renderSignedQuotePrintPdf(") && bomSrv.includes("renderSignedQuotePrintPdf(") && coverRoute.includes("signedPdfResponse(r, download)") && bomRoute.includes("signedPdfResponse(r, download)") &&
+       !coverSrv.includes("renderPrintRouteToPdf(") && !bomSrv.includes("renderPrintRouteToPdf(") && !coverRoute.includes("new Response(") && !bomRoute.includes("new Response("),
+      "BOM PDF: Cover and BOM share one render (renderSignedQuotePrintPdf) and one response tail (signedPdfResponse) — neither keeps its own copy");
+  }
   const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
   ok(tab.includes('downloadPdf: "Download PDF"') && tab.includes('openPdf: "Open PDF ↗"') && tab.includes('saveFirst: "Save first — the PDF prints the saved estimate."') && tab.includes('saveToCreate: "Save to create the PDF."'),
     "BOM PDF tab: the four copy strings");
+  const panelSrc = rd("src/app/(app)/estimator/cover-package-panel.tsx");
+  ok(tab.includes('href={bomPdfPath(loadedId, true)} target="_blank" rel="noopener noreferrer"') && tab.includes('href={bomPdfPath(loadedId, false)} target="_blank" rel="noopener noreferrer"') &&
+     panelSrc.includes('cover-pdf?download=1`} target="_blank" rel="noopener noreferrer"'),
+    "BOM PDF tab + Cover panel: the PDF download links open in a new tab (a failed render is plain text and must not replace the Estimator)");
   ok(tab.includes("href={bomPdfPath(loadedId, true)}") && tab.includes("href={bomPdfPath(loadedId, false)}") && tab.includes("{pdfDirty && ") && !/from "@\/lib\/stores\//.test(tab),
     "BOM PDF tab: Download / Open use bomPdfPath, the save-first note follows pdfDirty, and the tab still imports no store");
   const smoke = rd("scripts/smoke-routes.ts");

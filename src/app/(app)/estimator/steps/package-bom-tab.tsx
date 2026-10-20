@@ -124,7 +124,7 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
           )}
           {loadedId ? (
             <>
-              <a href={bomPdfPath(loadedId, true)} style={LINK}>
+              <a href={bomPdfPath(loadedId, true)} target="_blank" rel="noopener noreferrer" style={LINK}>
                 {BOM_TAB_COPY.downloadPdf}
               </a>
               <a href={bomPdfPath(loadedId, false)} target="_blank" rel="noopener noreferrer" style={LINK}>
