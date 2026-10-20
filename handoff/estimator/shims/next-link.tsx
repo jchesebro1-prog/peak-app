@@ -1,6 +1,7 @@
 /**
- * Estimator handoff — `next/link` as a plain <a>. App paths are dead under file:// until the
- * shell maps them onto hash routes (Task 7).
+ * Estimator handoff — `next/link` as a plain <a>. App paths are dead under file://, so the shell's one
+ * capture-phase click handler (ui/link-routing.ts) sends a click on one through the router mapping
+ * (runtime/routes.ts mapAppHref): a hash route, a same-page change, or the "Not part of the prototype" notice.
  */
 import { forwardRef, type AnchorHTMLAttributes } from "react";
 

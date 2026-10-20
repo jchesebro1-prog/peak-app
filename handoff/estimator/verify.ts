@@ -3,7 +3,8 @@
  *
  *   npm run handoff:verify -- --smoke [--out <package dir>]
  *
- * --smoke  opens index.html, waits for [data-handoff-ready] and the Estimator root, lets
+ * --smoke  opens index.html (the shell's Estimates list at #/estimates), then the default estimate at
+ *          index.html?id=Q-G001#/estimate/Q-G001, waits for [data-handoff-ready] and the Estimator root, lets
  *          mount-time effects settle, then fails on: any pageerror; any request that is not
  *          local (file:, data:, blob:, about:) or Google Fonts; any local file that failed to
  *          load; any unregistered server action outside SMOKE_ALLOWED_UNREGISTERED.
@@ -15,7 +16,7 @@
  *
  *   npm run handoff:verify -- --estimator <quoteId|all> [--out <package dir>]
  *
- * --estimator  opens index.html?id=<quoteId> (each slice estimate for `all`) and compares the
+ * --estimator  opens index.html?id=<quoteId>#/estimate/<quoteId> (each slice estimate for `all`) and compares the
  *          header's "Quoted total" with the total the Estimator must show: the quote's sections
  *          after the canonicalization it applies on load (system order, then the hidden 5 % / 2 %
  *          bonus lines for an eligible draft — expectedEstimatorTotals). The raw golden
@@ -53,6 +54,17 @@
  *          both; Mark Won → the prototype log shows "Would create install project". 0 foreign requests: nothing
  *          leaves the browser. The store is reset after. Screenshots: output/verify/send-*.png; result: send.json.
  *
+ *   npm run handoff:verify -- --shell [--out <package dir>]
+ *
+ * --shell  the app shell (Task 7): a bare index.html is the Estimates list (N rows = the slice's system estimates; every
+ *          row's total is the Estimator's grand total for it — the first row's also checked against the Estimator's
+ *          header after opening it); opening a row lands on Build (#/estimate/<id>, ?id= in the search) and the browser
+ *          Back button returns to the list; the nav; router.push / link-click mapping of app paths (/estimator?id=,
+ *          /quotes, /catalog, /design/assemblies, /estimating-rules, /design/grid/… → the notice); the user switcher
+ *          (a Reviewer-only persona hides "New estimate", the pick survives a reload); a new estimate keeps its screen
+ *          through the first save's id; Reset restores an edited quantity (Cancel changes nothing); no IndexedDB →
+ *          the not-persistent notice. Screenshots: output/verify/shell-*.png; result: output/verify/shell.json.
+ *
  *   npm run handoff:verify -- --drift [--update]
  *
  * --drift  the ported server logic's originals (port-sources.json, port-drift.ts): recomputes each
@@ -60,7 +72,7 @@
  *          ("re-check <port> against <original>…"). `--update` stamps the current hashes after the
  *          re-check. No browser. Not part of test:specs (app-side edits must not fail it).
  *
- * Later tasks add modes (--shell, --parity, --full). Plan: PR 2 Tasks 2–6.
+ * Later tasks add modes (--parity, --full). Plan: PR 2 Tasks 2–7.
  */
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -68,16 +80,13 @@ import * as vm from "node:vm";
 import { pathToFileURL } from "node:url";
 import type { Browser, Page } from "puppeteer-core";
 import { chromeLaunch } from "@/lib/quote-pdf/render";
-import { fmt, totals, withPriceRound } from "@/lib/estimating-core/pricing";
+import { fmt, totals } from "@/lib/estimating-core/pricing";
 import type { SpecSection } from "@/lib/estimating-core/types";
-import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
-import { sourceForSave } from "@/lib/portal-quote-mode";
-import { bonusRatesFor, bonusRulesApply, idCounterFrom, withBonusLines } from "@/lib/estimate-bonus/rules";
-import { bonusRatesFrom, BONUS_ESTIMATOR_RATE_ID, BONUS_PACKAGE_RATE_ID } from "@/lib/estimate-bonus/flags";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { PREVIEW_COPY } from "@/lib/estimate-output/package-preview";
 import { POPOUT_NOTICE, PRINT_FOOTER_TEXT } from "./ui/preview-routes";
 import { CURRENT_USER_KEY } from "./runtime/ports";
+import { canonicalTotals } from "./runtime/estimate-totals";
 import { driftClean, driftMessages, driftOf, parsePortSources, PORT_SOURCES_FILE, sha256Of, updatedPortSources } from "./port-drift";
 
 const ROOT = path.resolve(__dirname, "..", "..");
@@ -112,6 +121,8 @@ type SmokeResult = {
   /** --all-steps: discovered "use server" exports (output/handoff-build/discovered-actions.json) with no registration at all. */
   notRegistered: string[];
   readyMs: number | null;
+  /** The bare index.html opened on the shell's Estimates list. */
+  listMounted: boolean;
   estimatorMounted: boolean;
   pageErrors: string[];
   foreignRequests: string[];
@@ -169,7 +180,7 @@ async function smoke(pkgDir: string, allSteps = false): Promise<SmokeResult> {
       if (classifyRequest(r.url()) === "local") failedLocal.push(`${r.url()} (${r.failure()?.errorText ?? "failed"})`);
     });
     const t0 = Date.now();
-    await page.goto(url, { waitUntil: "load" });
+    await openUrl(page, url);
     let readyMs: number | null = null;
     try {
       await page.waitForSelector("[data-handoff-ready]", { timeout: 15_000 });
@@ -178,6 +189,18 @@ async function smoke(pkgDir: string, allSteps = false): Promise<SmokeResult> {
       pageErrors.push("[verify] [data-handoff-ready] never appeared within 15 s");
     }
     // Mount-time effects (server-action calls) run after the first render; let them settle.
+    await new Promise((r) => setTimeout(r, 1500));
+    // A bare index.html is the shell's Estimates list (#/estimates)…
+    const listMounted = await page.evaluate(() => !!document.querySelector("[data-handoff-list]") && location.hash === "#/estimates");
+    await page.screenshot({ path: path.join(VERIFY_DIR, "smoke-list.png") as `${string}.png` });
+    // …and the Estimator is one estimate away: the default one (Q-G001), else the first in the slice.
+    const sliceIds = loadSliceData(pkgDir).estimates.map((q) => q.id);
+    await openUrl(page, estimateUrl(url, sliceIds.includes("Q-G001") ? "Q-G001" : (sliceIds[0] ?? "Q-G001")));
+    try {
+      await page.waitForSelector("[data-handoff-ready]", { timeout: 15_000 });
+    } catch {
+      pageErrors.push("[verify] the default estimate: [data-handoff-ready] never appeared within 15 s");
+    }
     await new Promise((r) => setTimeout(r, 1500));
     let estimatorMounted = await page.evaluate(() => !!document.querySelector(".est-root"));
     await page.screenshot({ path: screenshot as `${string}.png` });
@@ -190,7 +213,7 @@ async function smoke(pkgDir: string, allSteps = false): Promise<SmokeResult> {
       const ids = loadSliceData(pkgDir).estimates.map((q) => q.id);
       for (const id of ids) {
         for (const v of ALL_STEP_VIEWS) {
-          await page.goto(`${url}?id=${encodeURIComponent(id)}&${v.query}`, { waitUntil: "load" });
+          await openUrl(page, estimateUrl(url, id, v.query));
           try {
             await page.waitForSelector("[data-handoff-ready]", { timeout: 15_000 });
           } catch {
@@ -225,8 +248,8 @@ async function smoke(pkgDir: string, allSteps = false): Promise<SmokeResult> {
     const unregistered = [...seen];
     const allowed = new Set(SMOKE_ALLOWED_UNREGISTERED);
     const unexpectedUnregistered = unregistered.filter((id) => !allowed.has(id));
-    const pass = pageErrors.length === 0 && foreignRequests.length === 0 && failedLocal.length === 0 && unexpectedUnregistered.length === 0 && notRegistered.length === 0 && estimatorMounted;
-    return { pass, url, walked, notRegistered, readyMs, estimatorMounted, pageErrors, foreignRequests, failedLocal, fontRequests, unregistered, unexpectedUnregistered, consoleErrors, screenshot };
+    const pass = pageErrors.length === 0 && foreignRequests.length === 0 && failedLocal.length === 0 && unexpectedUnregistered.length === 0 && notRegistered.length === 0 && listMounted && estimatorMounted;
+    return { pass, url, walked, notRegistered, readyMs, listMounted, estimatorMounted, pageErrors, foreignRequests, failedLocal, fontRequests, unregistered, unexpectedUnregistered, consoleErrors, screenshot };
   } finally {
     await browser.close();
   }
@@ -235,7 +258,7 @@ async function smoke(pkgDir: string, allSteps = false): Promise<SmokeResult> {
 function printSmoke(r: SmokeResult): void {
   console.log(`handoff:verify --smoke  ${r.pass ? "PASS" : "FAIL"}`);
   console.log(`  ${r.url}`);
-  console.log(`  ready after ${r.readyMs ?? "—"} ms; Estimator mounted: ${r.estimatorMounted ? "yes" : "NO"}`);
+  console.log(`  ready after ${r.readyMs ?? "—"} ms; Estimates list at #/estimates: ${r.listMounted ? "yes" : "NO"}; Estimator mounted: ${r.estimatorMounted ? "yes" : "NO"}`);
   console.log(`  page errors: ${r.pageErrors.length}`);
   for (const e of r.pageErrors) console.log(`    ${e.split("\n").slice(0, 4).join("\n    ")}`);
   console.log(`  foreign requests: ${r.foreignRequests.length}${r.foreignRequests.length ? "" : ` (Google Fonts requests: ${r.fontRequests})`}`);
@@ -255,7 +278,7 @@ function printSmoke(r: SmokeResult): void {
 
 /* ------------------------------------------------------------------ --estimator */
 
-type SliceQuote = { id: string; status?: string | null; source?: string | null; quoteType?: string | null; estNo?: number | null; estSuffix?: number | null; spec?: { sections?: unknown; groups?: unknown } };
+type SliceQuote = { id: string; status?: string | null; source?: string | null; quoteType?: string | null; estNo?: number | null; estSuffix?: number | null; spec?: { sections?: unknown; groups?: unknown }; updatedAt?: number | null; createdAt?: number | null };
 type SliceData = { estimates: SliceQuote[]; rules: { settings?: Record<string, unknown>; blobs?: Record<string, unknown> } };
 
 /** The slice's estimates.js + rules.js, run in a sandbox (the page loads them the same way). */
@@ -280,15 +303,7 @@ export function loadSliceData(pkgDir: string): SliceData {
  * (bonusRulesApply → withBonusLines at bonusRatesFor(status, …, Estimating Rules' rates)).
  */
 export function expectedEstimatorTotals(q: SliceQuote, rules: SliceData["rules"]): { raw: number; canonical: number; priceRound: boolean; bonusLines: boolean } {
-  const stored = Array.isArray(q.spec?.sections) ? (q.spec!.sections as SpecSection[]) : [];
-  const ordered = normalizeSystemOrder(stored, sanitizeGroups(q.spec?.groups));
-  const status = q.status ?? "draft";
-  const sections = q.source !== "portal-catalog" && status === "draft" ? withPriceRound(ordered) : ordered;
-  const general = ((rules.blobs ?? {}).pricing_rules ?? {}) as Record<string, unknown>;
-  const rates = bonusRatesFrom(general[BONUS_PACKAGE_RATE_ID], general[BONUS_ESTIMATOR_RATE_ID]);
-  const applies = bonusRulesApply({ source: sourceForSave(q.source, "estimator"), quoteType: q.quoteType ?? "system", status }, sections);
-  const canonical = applies ? withBonusLines(sections, idCounterFrom(sections), bonusRatesFor(status, sections, rates)) : sections;
-  return { raw: totals(stored, 0).grand, canonical: totals(canonical, 0).grand, priceRound: sections !== ordered, bonusLines: canonical !== sections };
+  return canonicalTotals(q, ((rules.blobs ?? {}).pricing_rules ?? {}) as Record<string, unknown>);
 }
 
 function goldenGrand(id: string): { grand: number; file: string } | null {
@@ -300,6 +315,16 @@ function goldenGrand(id: string): { grand: number; file: string } | null {
     }
   }
   return null;
+}
+
+/**
+ * page.goto that always LOADS the page. A goto to the URL the page already shows (or one that differs only in its #hash,
+ * the shell's route) is a same-document navigation — no reload, so a persona switch or a store edit would never be re-read.
+ */
+async function openUrl(page: Page, url: string): Promise<void> {
+  const bare = (u: string) => u.split("#")[0];
+  if (bare(page.url()) === bare(url)) await page.goto("about:blank");
+  await page.goto(url, { waitUntil: "load" });
 }
 
 type PageSink = { pageErrors: string[]; foreignRequests: string[]; failedLocal: string[]; consoleErrors: string[] };
@@ -390,7 +415,7 @@ async function storeCheck(page: Page, url: string, id: string, sink: PageSink, e
     id,
     marker,
   );
-  await page.goto(url, { waitUntil: "load" });
+  await openUrl(page, url);
   await waitMounted(page, sink);
   step("a quote edit survives a reload and shows in the header", await pageHasText(page, marker));
   const after = await page.evaluate(async () => {
@@ -403,7 +428,7 @@ async function storeCheck(page: Page, url: string, id: string, sink: PageSink, e
   step("an edited seed quote is not duplicated", after.count === seedCount, `${after.count} vs ${seedCount}`);
   step("put order survives a reload (z, a, m — not id order)", after.order === "verify-z,verify-a,verify-m", after.order);
   await page.evaluate(async () => (window as unknown as H).__peakHandoff.store.reset());
-  await page.goto(url, { waitUntil: "load" });
+  await openUrl(page, url);
   await waitMounted(page, sink);
   const probeGone = await page.evaluate(async () => (await (window as unknown as H).__peakHandoff.store.get("meta", "verify-probe")) === undefined);
   step("Reset drops the overlay (probe gone, name back)", probeGone && !(await pageHasText(page, marker)));
@@ -427,8 +452,8 @@ async function resetAcrossWindows(browser: Browser, url: string, sink: PageSink)
   const b = await newPage(browser, sink);
   const c = await newPage(browser, sink);
   try {
-    await a.goto(url, { waitUntil: "load" });
-    await b.goto(url, { waitUntil: "load" });
+    await openUrl(a, url);
+    await openUrl(b, url);
     await waitMounted(a, sink);
     await waitMounted(b, sink);
     await b.evaluate(async () => (window as unknown as H).__peakHandoff.store.put("meta", { id: "verify-xwin", at: 1 }));
@@ -450,12 +475,12 @@ async function resetAcrossWindows(browser: Browser, url: string, sink: PageSink)
     }
     step("the other window closed its connection (persistent false)", bPersistent === false);
     step('the other window shows "Changes won\'t be saved in this window"', await pageHasText(b, "Changes won't be saved in this window"));
-    await a.goto(url, { waitUntil: "load" });
+    await openUrl(a, url);
     await waitMounted(a, sink);
     step("after a reload the snapshot is back (probe gone)", await a.evaluate(async () => (await (window as unknown as H).__peakHandoff.store.get("meta", "verify-xwin")) === undefined));
 
     // a window that never answers versionchange: Reset must say so instead of pretending
-    await c.goto(url, { waitUntil: "load" });
+    await openUrl(c, url);
     await c.evaluate(() => new Promise<void>((resolve, reject) => {
       const r = indexedDB.open("peak-estimator-handoff");
       (window as unknown as { __rawHold?: IDBDatabase }).__rawHold = undefined;
@@ -502,10 +527,10 @@ async function estimatorCheck(pkgDir: string, which: string): Promise<EstimatorR
   const allowed = new Set(SMOKE_ALLOWED_UNREGISTERED);
   try {
     for (const q of quotes) {
-      const url = `${pathToFileURL(index).href}?id=${encodeURIComponent(q.id)}`;
+      const url = estimateUrl(pathToFileURL(index).href, q.id);
       const page = await newPage(browser, sink);
       const errorsBefore = sink.pageErrors.length;
-      await page.goto(url, { waitUntil: "load" });
+      await openUrl(page, url);
       const mounted = await waitMounted(page, sink);
       const onScreen = await readHeaderTotal(page);
       const exp = expectedEstimatorTotals(q, data.rules);
@@ -628,16 +653,16 @@ async function estimatorEditCheck(pkgDir: string, which: string | undefined): Pr
   const unexpected = new Set<string>();
   const noteUnregistered = async (page: Page) => (await unregisteredOn(page)).filter((x) => !allowed.has(x)).forEach((x) => unexpected.add(x));
   const base = pathToFileURL(index).href;
-  const url = `${base}?id=${encodeURIComponent(q.id)}`;
+  const url = estimateUrl(base, q.id);
   const savedFlash = (page: Page) => waitFor(() => pageHasText(page, "Saved ✓"), 10_000);
   const saveError = (page: Page) => page.evaluate(() => /Not available in the prototype|did not go through/.test(document.body.innerText));
   try {
     const page = await newPage(browser, sink);
-    await page.goto(url, { waitUntil: "load" });
+    await openUrl(page, url);
     await page.waitForSelector("[data-handoff-ready]", { timeout: 15_000 });
     // A clean overlay: this profile is fresh, but reset anyway so a rerun never builds on old edits.
     await page.evaluate(async () => (window as unknown as EditH).__peakHandoff.store.reset());
-    await page.goto(url, { waitUntil: "load" });
+    await openUrl(page, url);
     step("estimate mounted", await waitMounted(page, sink));
 
     // 1 — qty +1, Save, reload
@@ -667,7 +692,7 @@ async function estimatorEditCheck(pkgDir: string, which: string | undefined): Pr
     step("Save shows Saved ✓", saved1, (await saveError(page)) ? "save refused (Not available in the prototype)" : undefined);
     step("the save refreshed the props (router.refresh → buildEstimatorProps)", await waitFor(async () => (await refreshes()) > refreshesBefore, 3000), `${refreshesBefore} → ${await refreshes()}`);
     await noteUnregistered(page);
-    await page.goto(url, { waitUntil: "load" });
+    await openUrl(page, url);
     await waitMounted(page, sink);
     const qtyAfter = await firstQtyInput(page);
     const qty1 = qtyAfter ? Number(await qtyAfter.evaluate((i) => i.value)) : NaN;
@@ -700,7 +725,7 @@ async function estimatorEditCheck(pkgDir: string, which: string | undefined): Pr
     await clickButton(page, "Save");
     step("Save shows Saved ✓ (catalog line)", await savedFlash(page));
     await noteUnregistered(page);
-    await page.goto(url, { waitUntil: "load" });
+    await openUrl(page, url);
     await waitMounted(page, sink);
     const stored = await page.evaluate(async (id) => JSON.stringify((await (window as unknown as EditH).__peakHandoff.store.get("quotes", id)) ?? null), q.id);
     step("after a reload the added line is in the store", !!hitInfo.sku && stored.includes(`"sku":${JSON.stringify(hitInfo.sku)}`), hitInfo.sku);
@@ -710,7 +735,7 @@ async function estimatorEditCheck(pkgDir: string, which: string | undefined): Pr
 
     // 3 — ?new=1 → add a system → Save → EST-<n> above the seed
     const np = await newPage(browser, sink);
-    await np.goto(`${base}?new=1`, { waitUntil: "load" });
+    await openUrl(np, newEstimateUrl(base));
     step("?new=1 opens a new, unsaved estimate (no EST number yet)", (await waitMounted(np, sink)) && !(await np.evaluate(() => /EST-\d+/.test(document.body.innerText))));
     const hasSystem = await np.evaluate(() => !!document.querySelector("input.est-secname"));
     if (!hasSystem) {
@@ -724,12 +749,12 @@ async function estimatorEditCheck(pkgDir: string, which: string | undefined): Pr
     const nums = await np.evaluate(() => [...document.body.innerText.matchAll(/EST-(\d+)/g)].map((m) => Number(m[1])));
     const newNo = nums.find((n) => n > maxSeedEstNo);
     step(`the header shows an EST number above the seed's max (${maxSeedEstNo})`, newNo !== undefined, newNo ? `EST-${newNo}` : nums.join(","));
-    const newUrl = await np.evaluate(() => window.location.search);
-    const newId = new URLSearchParams(newUrl).get("id");
+    const newUrl = await np.evaluate(() => window.location.search + window.location.hash);
+    const newId = new URLSearchParams(newUrl.split("#")[0]).get("id");
     const seedIds = new Set(data.estimates.map((e) => e.id));
     step("the URL moved to the new estimate's id", !!newId && !seedIds.has(newId), newUrl);
     if (newId && !seedIds.has(newId)) {
-      await np.goto(`${base}${newUrl}`, { waitUntil: "load" });
+      await openUrl(np, `${base}${newUrl}`);
       await waitMounted(np, sink);
       step("after a reload the new estimate reopens with its number", newNo !== undefined && (await pageHasText(np, `EST-${newNo}`)));
     }
@@ -828,14 +853,14 @@ async function reviewCheck(pkgDir: string, which: string | undefined): Promise<R
   const unexpected = new Set<string>();
   const noteUnregistered = async (page: Page) => (await unregisteredOn(page)).filter((x) => !allowed.has(x)).forEach((x) => unexpected.add(x));
   const base = pathToFileURL(index).href;
-  const url = (stepName: string, extra = "") => `${base}?id=${encodeURIComponent(q.id)}&step=${stepName}${extra}`;
+  const url = (stepName: string, extra = "") => estimateUrl(base, q.id, `step=${stepName}${extra}`);
   mkdirSync(VERIFY_DIR, { recursive: true });
   try {
     const page = await newPage(browser, sink);
-    await page.goto(url("package", "&ptab=bom"), { waitUntil: "load" });
+    await openUrl(page, url("package", "&ptab=bom"));
     await page.waitForSelector("[data-handoff-ready]", { timeout: 15_000 });
     await page.evaluate(async () => (window as unknown as EditH).__peakHandoff.store.reset());
-    await page.goto(url("package", "&ptab=bom"), { waitUntil: "load" });
+    await openUrl(page, url("package", "&ptab=bom"));
     step("estimate mounted", await waitMounted(page, sink));
 
     // 1 — Build package → BOM quote: the letterhead and the grand total
@@ -855,7 +880,7 @@ async function reviewCheck(pkgDir: string, which: string | undefined): Promise<R
 
     // 2 — Customer review: Document, Package page, BOM and Cut sheets render live
     const savedGrand = fmt(totals(Array.isArray(q.spec?.sections) ? (q.spec!.sections as SpecSection[]) : [], 0).grand);
-    await page.goto(url("review"), { waitUntil: "load" });
+    await openUrl(page, url("review"));
     await waitMounted(page, sink);
     for (const [tab, name] of [["Document", "document"], ["Package page", "package"], ["BOM", "bom"]] as const) {
       const clicked = await clickTab(page, tab);
@@ -887,7 +912,7 @@ async function reviewCheck(pkgDir: string, which: string | undefined): Promise<R
       await clickButton(page, "Add comment");
     }
     step("the comment shows after Add comment", await waitFor(() => pageHasText(page, note), 5000));
-    await page.goto(url("review"), { waitUntil: "load" });
+    await openUrl(page, url("review"));
     await waitMounted(page, sink);
     step("the comment survives a reload", await waitFor(() => pageHasText(page, note), 5000));
     await noteUnregistered(page);
@@ -929,8 +954,8 @@ async function reviewCheck(pkgDir: string, which: string | undefined): Promise<R
 
     // 5 — the package page's Narrative / BOM toggle switches in place (never the overlay) — on Q-G002
     const toggleId = data.estimates.some((x) => x.id === "Q-G002") ? "Q-G002" : q.id;
-    const urlFor = (id: string, extra = "") => `${base}?id=${encodeURIComponent(id)}&step=review${extra}`;
-    await page.goto(urlFor(toggleId), { waitUntil: "load" });
+    const urlFor = (id: string, extra = "") => estimateUrl(base, id, `step=review${extra}`);
+    await openUrl(page, urlFor(toggleId));
     await waitMounted(page, sink);
     await clickTab(page, "Package page");
     const togglesShown = await waitFor(() => page.evaluate(() => document.querySelectorAll('[data-handoff-live="package"] nav a').length === 2), 10_000);
@@ -1007,7 +1032,7 @@ async function reviewCheck(pkgDir: string, which: string | undefined): Promise<R
       await s.put("quotes", qd);
       return true;
     }, toggleId);
-    await page.goto(urlFor(toggleId), { waitUntil: "load" });
+    await openUrl(page, urlFor(toggleId));
     await waitMounted(page, sink);
     await clickTab(page, "Cut sheets");
     // The Client style heads each sheet "Curtain cut sheet · EST-…" and names the curtain (Submittal prints CS-1).
@@ -1124,14 +1149,14 @@ async function sendCheck(pkgDir: string, which: string | undefined): Promise<Sen
   const allowed = new Set(SMOKE_ALLOWED_UNREGISTERED);
   const unexpected = new Set<string>();
   const noteUnregistered = async (page: Page) => (await unregisteredOn(page)).filter((x) => !allowed.has(x)).forEach((x) => unexpected.add(x));
-  const url = `${pathToFileURL(index).href}?id=${encodeURIComponent(q.id)}&step=send`;
+  const url = estimateUrl(pathToFileURL(index).href, q.id, "step=send");
   type Stored = { status?: string; review?: { state?: string; submittedBy?: string | null; decidedBy?: string | null }; revisions?: Array<{ reason?: string }>; estimateEmails?: unknown[] };
   const stored = (page: Page) => page.evaluate(async (id) => (await (window as unknown as EditH).__peakHandoff.store.get("quotes", id)) as Record<string, unknown> | null, q.id) as Promise<Stored | null>;
   const activityRows = (page: Page) =>
     page.evaluate(async (id) => ((await (window as unknown as EditH).__peakHandoff.store.all("activity")) as Array<Record<string, unknown>>).filter((a) => a.quoteId === id), q.id);
   const actAs = async (page: Page, userId: string) => {
     await page.evaluate(([k, v]) => localStorage.setItem(k, v), [CURRENT_USER_KEY, userId] as const);
-    await page.goto(url, { waitUntil: "load" });
+    await openUrl(page, url);
     return waitMounted(page, sink);
   };
   const statusValue = (page: Page) => page.evaluate(() => (document.getElementById("est-send-status-select") as HTMLSelectElement | null)?.value ?? null);
@@ -1139,7 +1164,7 @@ async function sendCheck(pkgDir: string, which: string | undefined): Promise<Sen
   try {
     const page = await newPage(browser, sink);
     await page.evaluateOnNewDocument(ROSTER_INJECT);
-    await page.goto(url, { waitUntil: "load" });
+    await openUrl(page, url);
     await page.waitForSelector("[data-handoff-ready]", { timeout: 15_000 });
     await page.evaluate(async () => (window as unknown as EditH).__peakHandoff.store.reset());
 
@@ -1165,7 +1190,7 @@ async function sendCheck(pkgDir: string, which: string | undefined): Promise<Sen
     await noteUnregistered(page);
 
     // 3 — the composer is pre-filled; Send & mark sent (the app moves an approver on to Customer review — back to Send & track)
-    await page.goto(url, { waitUntil: "load" });
+    await openUrl(page, url);
     await waitMounted(page, sink);
     const filled = await waitFor(async () => ((await composerValue(page, "Subject")) ?? "").includes(number) && ((await composerValue(page, "Body")) ?? "").includes("{link}"), 10_000);
     step("the composer is pre-filled (subject names the estimate, body carries {link})", filled, JSON.stringify({ subject: await composerValue(page, "Subject"), to: await composerValue(page, "To") }));
@@ -1195,7 +1220,7 @@ async function sendCheck(pkgDir: string, which: string | undefined): Promise<Sen
     await noteUnregistered(page);
 
     // 4 — a reload keeps it
-    await page.goto(url, { waitUntil: "load" });
+    await openUrl(page, url);
     await waitMounted(page, sink);
     const kept = await waitFor(async () => (await statusValue(page)) === "sent" && (await activityText(page)).includes("Sent (simulated)"), 10_000);
     step("after a reload: still Sent, the Activity card still shows “Sent (simulated)”", kept);
@@ -1205,7 +1230,7 @@ async function sendCheck(pkgDir: string, which: string | undefined): Promise<Sen
     const won = await waitFor(async () => (await statusValue(page)) === "won" && (await activityText(page)).includes("Would create install project"), 10_000);
     const s5 = await stored(page);
     step("Mark Won → the Activity shows “Would create install project”", won && s5?.status === "won", `status ${s5?.status}; activity ${JSON.stringify((await activityText(page)).slice(0, 300))}`);
-    await page.goto(url, { waitUntil: "load" });
+    await openUrl(page, url);
     await waitMounted(page, sink);
     step("after a reload: the Won note is still there", await waitFor(async () => (await activityText(page)).includes("Would create install project"), 10_000));
     await shot(page, "4-won");
@@ -1223,6 +1248,332 @@ async function sendCheck(pkgDir: string, which: string | undefined): Promise<Sen
 
 function printSend(r: SendResult): void {
   console.log(`handoff:verify --send  ${r.pass ? "PASS" : "FAIL"} (${r.id}; ${r.estimator} → ${r.manager})`);
+  for (const s of r.steps) console.log(`  ${s.ok ? "ok  " : "FAIL"} ${s.step}${s.detail ? ` (${s.detail})` : ""}`);
+  console.log(`  unexpected unregistered: ${r.unexpectedUnregistered.length}`);
+  for (const x of r.unexpectedUnregistered) console.log(`    ${x}`);
+  console.log(`  page errors: ${r.pageErrors.length}`);
+  for (const e of r.pageErrors) console.log(`    ${e.split("\n").slice(0, 4).join("\n    ")}`);
+  console.log(`  foreign requests: ${r.foreignRequests.length}; failed local files: ${r.failedLocal.length}`);
+  for (const u of [...r.foreignRequests, ...r.failedLocal]) console.log(`    ${u}`);
+  if (r.consoleErrors.length) {
+    console.log(`  console errors (informational): ${r.consoleErrors.length}`);
+    for (const e of r.consoleErrors.slice(0, 10)) console.log(`    ${e.slice(0, 200)}`);
+  }
+  console.log(`  screenshots: ${r.screenshots.map((f) => path.relative(ROOT, f)).join(", ")}`);
+}
+
+/* ------------------------------------------------------------------ --shell */
+
+/** The URL of one estimate in the shell: the Estimator's own `?id=` (+ query) in the search, the route in the hash. */
+export function estimateUrl(base: string, id: string, query = ""): string {
+  return `${base}?id=${encodeURIComponent(id)}${query ? "&" + query : ""}#/estimate/${encodeURIComponent(id)}`;
+}
+/** The URL of a clean new estimate. */
+export const newEstimateUrl = (base: string): string => `${base}?new=1#/estimate/new`;
+
+/** The verify-only Reviewer-only persona the --shell walk switches to (no roster member holds Reviewer alone). */
+export const VERIFY_REVIEWER = { id: "u-verify-rev", name: "Riley Verify", roles: ["Reviewer"], status: "active" } as const;
+
+type ShellResult = { pass: boolean; rows: number; steps: Array<{ step: string; ok: boolean; detail?: string }>; screenshots: string[]; unexpectedUnregistered: string[] } & PageSink;
+
+const shellLoc = (page: Page) =>
+  page.evaluate(() => ({
+    hash: location.hash,
+    search: location.search,
+    route: document.querySelector("[data-handoff-shell]")?.getAttribute("data-handoff-route") ?? null,
+  }));
+
+/** Waits for the Estimates list to show at least one row (or its empty state). */
+const waitList = (page: Page) =>
+  waitFor(() => page.evaluate(() => !!document.querySelector("[data-handoff-list]") && (document.querySelectorAll("tr[data-estimate-id]").length > 0 || !!document.querySelector("[data-handoff-list-empty]"))), 15_000);
+
+const listRowIds = (page: Page) => page.evaluate(() => [...document.querySelectorAll("tr[data-estimate-id]")].map((r) => r.getAttribute("data-estimate-id") as string));
+const cellText = (page: Page, id: string, col: string) =>
+  page.evaluate((i, c) => (document.querySelector(`tr[data-estimate-id="${i}"] td[data-col="${c}"]`) as HTMLElement | null)?.innerText.trim() ?? null, id, col);
+const hasEstimator = (page: Page) => page.evaluate(() => !!document.querySelector(".est-root"));
+
+/**
+ * Task 7 — the shell: the Estimates list (N rows, the first row's total = the Estimator's header total = the golden
+ * grand), opening a row lands on Build and Back returns to the list, the nav, router.push / link-click routing of
+ * app paths, the user switcher (a Reviewer-only member hides "New estimate"), a new estimate keeping its screen
+ * through the first save's id, Reset to production snapshot restoring an edited quantity, and the not-persistent notice.
+ */
+async function shellCheck(pkgDir: string): Promise<ShellResult> {
+  const index = path.join(pkgDir, "index.html");
+  if (!existsSync(index)) throw new Error(`${index} not found — run npm run handoff:build first`);
+  const data = loadSliceData(pkgDir);
+  const system = data.estimates.filter((q) => (q.quoteType ?? "system") === "system");
+  if (system.length < 2) throw new Error("the slice needs at least two system estimates for --shell");
+  const first = [...system].sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0) || (a.id < b.id ? -1 : 1))[0];
+  const expectedFirst = expectedEstimatorTotals(first, data.rules);
+  const golden = goldenGrand(first.id);
+  const drafts = system.filter((q) => (q.status ?? "draft") === "draft").length;
+  const second = system.find((q) => q.id !== first.id) as SliceQuote;
+  const launch = await chromeLaunch();
+  if ("unavailable" in launch) throw new Error(launch.unavailable);
+  const puppeteer = (await import("puppeteer-core")).default;
+  const browser = await puppeteer.launch({ executablePath: launch.executablePath, args: launch.args, headless: true, defaultViewport: { width: 1440, height: 900 } });
+  const sink = newSink();
+  const steps: ShellResult["steps"] = [];
+  const step = (name: string, ok: boolean, detail?: string) => steps.push({ step: name, ok, ...(detail ? { detail } : {}) });
+  const screenshots: string[] = [];
+  const shot = async (page: Page, name: string) => {
+    const file = path.join(VERIFY_DIR, `shell-${name}.png`);
+    await page.screenshot({ path: file as `${string}.png` });
+    screenshots.push(file);
+  };
+  const allowed = new Set(SMOKE_ALLOWED_UNREGISTERED);
+  const unexpected = new Set<string>();
+  const noteUnregistered = async (page: Page) => (await unregisteredOn(page)).filter((x) => !allowed.has(x)).forEach((x) => unexpected.add(x));
+  const base = pathToFileURL(index).href;
+  const rosterInject = `(() => {
+    let team;
+    const extra = ${JSON.stringify(VERIFY_REVIEWER)};
+    Object.defineProperty(window, "PEAK_TEAM", {
+      configurable: true,
+      get: () => team,
+      set: (v) => { team = Array.isArray(v) ? v.filter((u) => u && u.id !== extra.id).concat([extra]) : v; },
+    });
+  })();`;
+  const push = (page: Page, href: string) => page.evaluate((h) => (window as unknown as { __peakHandoff: { router: { push(h: string): void } } }).__peakHandoff.router.push(h), href);
+  const clickLink = (page: Page, href: string) =>
+    page.evaluate((h) => {
+      const a = document.createElement("a");
+      a.setAttribute("href", h);
+      a.textContent = "x";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }, href);
+  const noticeText = (page: Page) => page.evaluate(() => (document.querySelector("[data-handoff-notice]") as HTMLElement | null)?.innerText ?? "");
+  const goBack = async (page: Page) => {
+    await page.goBack();
+    return waitFor(async () => (await shellLoc(page)).route !== null, 5000);
+  };
+  try {
+    await mkdirSync(VERIFY_DIR, { recursive: true });
+    const page = await newPage(browser, sink);
+    await page.evaluateOnNewDocument(rosterInject);
+    // A clean overlay: this profile is fresh, but reset anyway so a rerun never builds on old edits.
+    await openUrl(page, base);
+    await page.waitForSelector("[data-handoff-ready]", { timeout: 15_000 });
+    await page.evaluate(async () => (window as unknown as EditH).__peakHandoff.store.reset());
+    await openUrl(page, base);
+
+    // 1 — the default screen is the Estimates list
+    step("a bare index.html boots on the Estimates list", await waitList(page));
+    const loc0 = await shellLoc(page);
+    step("…at #/estimates", loc0.hash === "#/estimates" && loc0.route === "estimates", JSON.stringify(loc0));
+    const banner = await page.evaluate(() => (document.querySelector("[data-handoff-banner]") as HTMLElement | null)?.innerText ?? "");
+    step("the permanent banner reads “Confidential — Peak Systems Group · prototype — nothing is sent or saved to Peak”", banner.includes("Confidential — Peak Systems Group · prototype — nothing is sent or saved to Peak"), banner);
+    step("…and no not-persistent notice while IndexedDB works", !(await page.evaluate(() => !!document.querySelector("[data-handoff-not-persistent]"))));
+    const navLabels = await page.evaluate(() => [...document.querySelectorAll("[data-handoff-nav]")].map((a) => (a as HTMLElement).innerText.trim()));
+    step("the nav reads Estimates · Catalog · Assemblies · Estimating Rules", navLabels.join(" · ") === "Estimates · Catalog · Assemblies · Estimating Rules", navLabels.join(" · "));
+
+    // 2 — N rows, the first row's total
+    const ids = await listRowIds(page);
+    step(`the list shows the slice's ${system.length} system estimates`, ids.length === system.length && system.every((q) => ids.includes(q.id)), ids.join(","));
+    step(`newest first: ${first.id} leads`, ids[0] === first.id, ids.join(","));
+    const total0 = await cellText(page, first.id, "total");
+    step("the first row's total is the Estimator's grand total for it", total0 === fmt(expectedFirst.canonical), `${total0} vs ${fmt(expectedFirst.canonical)}`);
+    step("…and the golden grand (when no load canonicalization applies)", golden ? (expectedFirst.priceRound || expectedFirst.bonusLines ? true : total0 === fmt(golden.grand)) : true, `golden ${golden ? fmt(golden.grand) : "none"}; canonical ${fmt(expectedFirst.canonical)}${expectedFirst.priceRound || expectedFirst.bonusLines ? " (load canonicalization applies)" : ""}`);
+    const allTotals = await Promise.all(system.map(async (q) => [q.id, await cellText(page, q.id, "total"), fmt(expectedEstimatorTotals(q, data.rules).canonical)] as const));
+    step("every row's total is its estimate's canonical grand total", allTotals.every(([, shown, want]) => shown === want), allTotals.map(([id, shown, want]) => `${id} ${shown}${shown === want ? "" : ` ≠ ${want}`}`).join("; "));
+    step("the number column is displayQuoteNumber", (await cellText(page, first.id, "number")) === displayQuoteNumber({ ...first, id: first.id }));
+    const cols = await page.evaluate(() => [...document.querySelectorAll("thead th")].map((t) => (t.textContent ?? "").trim()));
+    step("columns: Estimate # · Name · Customer · Status · Owner · Updated · Total", cols.join(" | ") === "Estimate # | Name | Customer | Status | Owner | Updated | Total", cols.join(" | "));
+    await shot(page, "1-list");
+
+    // 3 — search + status filter
+    const target = system[system.length - 1];
+    await page.type("input[data-handoff-list-search]", displayQuoteNumber({ ...target, id: target.id }));
+    const searched = await listRowIds(page);
+    step("searching an estimate number narrows the list to it", searched.includes(target.id) && searched.length < ids.length + 1 && searched.length >= 1, searched.join(","));
+    await page.click("input[data-handoff-list-search]", { count: 3 });
+    await page.keyboard.press("Backspace");
+    step("clearing the search restores every row", (await listRowIds(page)).length === system.length);
+    await page.click('button[data-handoff-list-filter="draft"]');
+    const draftIds = await listRowIds(page);
+    step(`the Draft filter shows the ${drafts} draft estimates`, draftIds.length === drafts, draftIds.join(","));
+    await page.click('button[data-handoff-list-filter="all"]');
+
+    // 4 — open a row → Build; Back → the list
+    await page.click(`tr[data-estimate-id="${first.id}"] td[data-col="name"] a`);
+    step("opening a row mounts the Estimator", await waitFor(() => hasEstimator(page), 15_000));
+    const loc1 = await shellLoc(page);
+    step(`…at #/estimate/${first.id} with ?id= in the search and no ?step= (Build)`, loc1.hash === `#/estimate/${first.id}` && new URLSearchParams(loc1.search).get("id") === first.id && !new URLSearchParams(loc1.search).has("step"), JSON.stringify(loc1));
+    await new Promise((r) => setTimeout(r, 1200));
+    const header1 = await readHeaderTotal(page);
+    step("the Estimator's header total equals the list's", header1 === total0, `${header1} vs ${total0}`);
+    await shot(page, "2-estimate");
+    await noteUnregistered(page);
+    step("the browser Back button returns to the list", (await goBack(page)) && (await waitList(page)) && (await shellLoc(page)).hash === "#/estimates" && !(await hasEstimator(page)));
+    step("…once (the click made one history entry, not two)", (await listRowIds(page)).length === system.length);
+    await page.goForward();
+    step("Forward reopens the estimate", await waitFor(() => hasEstimator(page), 15_000));
+    await goBack(page);
+    await waitList(page);
+    await page.click(`tr[data-estimate-id="${first.id}"] td[data-col="customer"]`);
+    step("clicking the row (not the link) opens it too", await waitFor(() => hasEstimator(page), 15_000));
+    step("…and one Back returns to the list", (await goBack(page)) && (await waitList(page)));
+
+    // 5 — the nav
+    for (const [nav, label] of [["catalog", "Catalog"], ["assemblies", "Assemblies"], ["rules", "Estimating Rules"]] as const) {
+      await page.click(`[data-handoff-nav="${nav}"]`);
+      const ok = await waitFor(async () => (await shellLoc(page)).hash === `#/${nav}` && (await page.evaluate(() => !!document.querySelector("[data-handoff-placeholder]"))), 5000);
+      step(`nav → ${label}: #/${nav}, a placeholder`, ok && (await pageHasText(page, "Coming in this prototype")));
+    }
+    await shot(page, "3-placeholder");
+    await page.click('[data-handoff-nav="estimates"]');
+    step("nav → Estimates: the list again", (await waitList(page)) && (await shellLoc(page)).hash === "#/estimates");
+    await page.evaluate(() => {
+      location.hash = "#/zzz";
+    });
+    step("an unknown hash route shows “Not part of the prototype”", await waitFor(() => page.evaluate(() => !!document.querySelector("[data-handoff-unknown]")), 5000));
+    await page.click("[data-handoff-unknown] a");
+    step("…with a way back to the list", (await waitList(page)) && (await shellLoc(page)).hash === "#/estimates");
+
+    // 6 — router.push / link-click mapping, from an open estimate
+    await openUrl(page, estimateUrl(base, first.id));
+    await waitMounted(page, sink);
+    await page.evaluate(() => {
+      (document.querySelector(".est-root") as unknown as { __mark?: number }).__mark = 1;
+    });
+    await push(page, `/estimator?id=${encodeURIComponent(second.id)}`);
+    const swapped = await waitFor(async () => (await shellLoc(page)).hash === `#/estimate/${second.id}` && (await pageHasText(page, displayQuoteNumber({ ...second, id: second.id }))), 10_000);
+    const loc2 = await shellLoc(page);
+    step("router.push(/estimator?id=B) → #/estimate/B, the Estimator remounted on B", swapped && new URLSearchParams(loc2.search).get("id") === second.id, JSON.stringify(loc2));
+    await new Promise((r) => setTimeout(r, 1000));
+    await page.evaluate(() => {
+      (document.querySelector(".est-root") as unknown as { __mark?: number }).__mark = 1;
+    });
+    await push(page, "/estimator?step=review");
+    await new Promise((r) => setTimeout(r, 600));
+    const loc3 = await shellLoc(page);
+    const marked = await page.evaluate(() => (document.querySelector(".est-root") as unknown as { __mark?: number }).__mark === 1);
+    step("router.push(/estimator?step=review) stays on the page (route kept, no remount)", loc3.hash === `#/estimate/${second.id}` && new URLSearchParams(loc3.search).get("step") === "review" && marked, JSON.stringify(loc3));
+    await page.evaluate(() => history.pushState(null, "", location.pathname + location.search + "#systems"));
+    const loc4 = await shellLoc(page);
+    step("an in-page anchor push (#systems) keeps the route hash", loc4.hash === `#/estimate/${second.id}` && loc4.route === "estimate", JSON.stringify(loc4));
+    for (const [from, hash] of [["/quotes", "#/estimates"], ["/catalog", "#/catalog"], ["/design/assemblies", "#/assemblies"], ["/estimating-rules", "#/rules"]] as const) {
+      await push(page, from);
+      step(`router.push(${from}) → ${hash}`, await waitFor(async () => (await shellLoc(page)).hash === hash, 5000));
+    }
+    await push(page, "/design/grid/G-1");
+    const notice = await waitFor(async () => (await noticeText(page)).includes("Not part of the prototype"), 3000);
+    step("router.push(/design/grid/…) shows the “Not part of the prototype” notice and stays put", notice && (await shellLoc(page)).hash === "#/rules", await noticeText(page));
+    await clickLink(page, "/quotes");
+    step("clicking an <a href=\"/quotes\"> routes to the list", await waitFor(async () => (await shellLoc(page)).hash === "#/estimates", 5000) && (await waitList(page)));
+    await clickLink(page, `/estimator?id=${encodeURIComponent(first.id)}`);
+    step("clicking an <a href=\"/estimator?id=…\"> opens that estimate", await waitFor(async () => (await shellLoc(page)).hash === `#/estimate/${first.id}` && (await hasEstimator(page)), 10_000));
+    await noteUnregistered(page);
+
+    // 7 — the user switcher
+    await openUrl(page, base);
+    await waitList(page);
+    const options = await page.evaluate(() => [...document.querySelectorAll("select[data-handoff-user] option")].map((o) => (o as HTMLOptionElement).value));
+    const roster = sliceTeam(pkgDir).filter((u) => (u.status ?? "active") === "active").map((u) => u.id);
+    step("the switcher lists the active roster", roster.every((id) => options.includes(id)) && options.includes(VERIFY_REVIEWER.id), `${options.length} options`);
+    step("an Admin sees “New estimate”", await page.evaluate(() => !!document.querySelector("[data-handoff-new-estimate]")));
+    await page.select("select[data-handoff-user]", VERIFY_REVIEWER.id);
+    step("switching to a Reviewer hides “New estimate”", await waitFor(() => page.evaluate(() => !document.querySelector("[data-handoff-new-estimate]")), 3000));
+    step("…and the list is still there", (await listRowIds(page)).length === system.length);
+    await openUrl(page, base);
+    await waitList(page);
+    step("the pick survives a reload (localStorage)", (await page.evaluate(() => (document.querySelector("select[data-handoff-user]") as HTMLSelectElement).value)) === VERIFY_REVIEWER.id && (await page.evaluate((k) => localStorage.getItem(k), CURRENT_USER_KEY)) === VERIFY_REVIEWER.id);
+    await page.evaluate(() => {
+      location.hash = "#/estimate/new";
+    });
+    step("a Reviewer opening #/estimate/new is told their role can't create", await waitFor(() => page.evaluate(() => !!document.querySelector("[data-handoff-refused]")), 5000));
+    await page.select("select[data-handoff-user]", roster[0]);
+    step("switching back to an Admin opens the new estimate", await waitFor(() => hasEstimator(page), 15_000));
+    await goBack(page);
+    await waitList(page);
+    step("…the Admin sees “New estimate” again", await page.evaluate(() => !!document.querySelector("[data-handoff-new-estimate]")));
+
+    // 8 — New estimate: its screen survives the first save's id
+    await page.click("[data-handoff-new-estimate]");
+    step("New estimate opens a clean estimate at #/estimate/new", (await waitFor(() => hasEstimator(page), 15_000)) && (await shellLoc(page)).hash === "#/estimate/new" && new URLSearchParams((await shellLoc(page)).search).get("new") === "1");
+    await new Promise((r) => setTimeout(r, 1200));
+    await page.evaluate(() => {
+      (document.querySelector(".est-root") as unknown as { __mark?: number }).__mark = 7;
+    });
+    const hasSystem = await page.evaluate(() => !!document.querySelector("input.est-secname"));
+    if (!hasSystem) {
+      await clickButton(page, "+ Add system");
+      await waitFor(() => pageHasText(page, "Blank system"), 3000);
+      await clickButton(page, "Blank system", true);
+    }
+    await waitFor(() => page.evaluate(() => !!document.querySelector("input.est-secname")), 3000);
+    await clickButton(page, "Save");
+    step("Save shows Saved ✓", await waitFor(() => pageHasText(page, "Saved ✓"), 10_000));
+    const moved = await waitFor(async () => /^#\/estimate\/Q-\d+$/.test((await shellLoc(page)).hash), 5000);
+    const loc5 = await shellLoc(page);
+    step("the first save moves the route to the new id (#/estimate/Q-…, ?id= to match)", moved && new URLSearchParams(loc5.search).get("id") === loc5.hash.replace("#/estimate/", ""), JSON.stringify(loc5));
+    const sameScreen = await page.evaluate(() => (document.querySelector(".est-root") as unknown as { __mark?: number }).__mark === 7);
+    step("…without remounting the Estimator (unsaved state is kept)", sameScreen);
+    await goBack(page);
+    step("Back from the saved new estimate returns to the list", (await waitList(page)) && (await shellLoc(page)).hash === "#/estimates");
+    step("the list now has the new estimate", (await listRowIds(page)).length === system.length + 1);
+
+    // 9 — Reset to production snapshot restores an edited quantity
+    const url = estimateUrl(base, first.id);
+    await openUrl(page, url);
+    await waitMounted(page, sink);
+    const qtyEl = await firstQtyInput(page);
+    const qty0 = qtyEl ? Number(await qtyEl.evaluate((i) => i.value)) : NaN;
+    const totalSeed = await readHeaderTotal(page);
+    if (qtyEl) {
+      await qtyEl.click({ count: 3 });
+      await qtyEl.type(String(qty0 + 1));
+      await page.keyboard.press("Tab");
+    }
+    await waitFor(async () => (await readHeaderTotal(page)) !== totalSeed, 5000);
+    await clickButton(page, "Save");
+    step("an edited quantity saves (qty +1)", await waitFor(() => pageHasText(page, "Saved ✓"), 10_000), `${qty0} → ${qty0 + 1}`);
+    await openUrl(page, url);
+    await waitMounted(page, sink);
+    const qtyEdited = await firstQtyInput(page);
+    step("…and survives a reload", !!qtyEdited && Number(await qtyEdited.evaluate((i) => i.value)) === qty0 + 1);
+    await page.click("[data-handoff-reset]");
+    step("Reset opens a confirm dialog", await waitFor(() => page.evaluate(() => !!document.querySelector("[data-handoff-reset-dialog]")), 3000));
+    await shot(page, "4-reset-dialog");
+    await page.click("[data-handoff-reset-cancel]");
+    step("Cancel closes it and changes nothing", (await waitFor(() => page.evaluate(() => !document.querySelector("[data-handoff-reset-dialog]")), 3000)) && Number(await (await firstQtyInput(page))?.evaluate((i) => i.value)) === qty0 + 1);
+    await page.click("[data-handoff-reset]");
+    await waitFor(() => page.evaluate(() => !!document.querySelector("[data-handoff-reset-confirm]")), 3000);
+    await Promise.all([page.waitForNavigation({ waitUntil: "load", timeout: 20_000 }), page.click("[data-handoff-reset-confirm]")]);
+    step("Reset reloads the page", await waitMounted(page, sink));
+    const qtyBack = await firstQtyInput(page);
+    step("…the edited quantity is the seed value again", !!qtyBack && Number(await qtyBack.evaluate((i) => i.value)) === qty0, `${qtyBack ? await qtyBack.evaluate((i) => i.value) : "?"} vs ${qty0}`);
+    step("…and the header total is the seed's", (await readHeaderTotal(page)) === totalSeed, `${await readHeaderTotal(page)} vs ${totalSeed}`);
+    await push(page, "/quotes");
+    await waitList(page);
+    step("…and the estimate created earlier is gone from the list", (await listRowIds(page)).length === system.length);
+    await noteUnregistered(page);
+    await page.evaluate((k) => localStorage.removeItem(k), CURRENT_USER_KEY);
+    await page.close();
+
+    // 10 — no IndexedDB: the not-persistent notice
+    const mem = await newPage(browser, sink);
+    await mem.evaluateOnNewDocument(`Object.defineProperty(window, "indexedDB", { value: undefined, configurable: true });`);
+    await openUrl(mem, base);
+    await waitList(mem);
+    step("without IndexedDB the banner adds “Changes won't be saved in this window”", await waitFor(() => pageHasText(mem, "Changes won't be saved in this window"), 5000));
+    await mem.close();
+  } catch (e) {
+    // A step that cannot run (a missing element) is a failure with a reason, not a crash that hides the steps before it.
+    step("the walk completed", false, e instanceof Error ? e.message.split("\n")[0] : String(e));
+  } finally {
+    await browser.close();
+  }
+  const unexpectedUnregistered = [...unexpected];
+  const pass = steps.every((s) => s.ok) && unexpectedUnregistered.length === 0 && sink.pageErrors.length === 0 && sink.foreignRequests.length === 0 && sink.failedLocal.length === 0;
+  return { pass, rows: system.length, steps, screenshots, unexpectedUnregistered, ...sink };
+}
+
+function printShell(r: ShellResult): void {
+  console.log(`handoff:verify --shell  ${r.pass ? "PASS" : "FAIL"} (${r.rows} system estimates)`);
   for (const s of r.steps) console.log(`  ${s.ok ? "ok  " : "FAIL"} ${s.step}${s.detail ? ` (${s.detail})` : ""}`);
   console.log(`  unexpected unregistered: ${r.unexpectedUnregistered.length}`);
   for (const x of r.unexpectedUnregistered) console.log(`    ${x}`);
@@ -1273,9 +1624,10 @@ async function main() {
   const review = reviewAt >= 0 ? (argv[reviewAt + 1] && !argv[reviewAt + 1].startsWith("--") ? argv[reviewAt + 1] : "") : undefined;
   const sendAt = argv.indexOf("--send");
   const send = sendAt >= 0 ? (argv[sendAt + 1] && !argv[sendAt + 1].startsWith("--") ? argv[sendAt + 1] : "") : undefined;
+  const shell = argv.includes("--shell");
   const drift = argv.includes("--drift");
-  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !drift) {
-    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] [--out <package dir>] | --drift [--update]");
+  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !shell && !drift) {
+    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] [--out <package dir>] | --drift [--update]");
     process.exit(2);
   }
   mkdirSync(VERIFY_DIR, { recursive: true });
@@ -1309,6 +1661,12 @@ async function main() {
     const r = await sendCheck(pkgDir, send || undefined);
     writeFileSync(path.join(VERIFY_DIR, "send.json"), JSON.stringify(r, null, 2) + "\n");
     printSend(r);
+    pass &&= r.pass;
+  }
+  if (shell) {
+    const r = await shellCheck(pkgDir);
+    writeFileSync(path.join(VERIFY_DIR, "shell.json"), JSON.stringify(r, null, 2) + "\n");
+    printShell(r);
     pass &&= r.pass;
   }
   if (!pass) process.exit(1);

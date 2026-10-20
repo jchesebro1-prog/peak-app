@@ -54,6 +54,10 @@ import { previewPath } from "@/lib/estimate-output/package-preview";
 import * as nodePath from "node:path";
 import { NOT_IN_PROTOTYPE } from "../handoff/estimator/runtime/actions-registry";
 import { reviewOps } from "../handoff/estimator/runtime/review-ops";
+import { composeHistoryUrl, mapAppHref, normalizedLocation, parseRoute, routeHash, routeSearch, sameRoute, type Route } from "../handoff/estimator/runtime/routes";
+import { filterRows, listRows, statusCounts, updatedLabel } from "../handoff/estimator/runtime/estimates-list-model";
+import { canonicalTotals } from "../handoff/estimator/runtime/estimate-totals";
+import { runReset } from "../handoff/estimator/runtime/reset";
 import { nextStepActions } from "../handoff/estimator/runtime/actions/next-step-actions";
 import {
   NO_FOLLOW_UP_TASK, REFUSED_SEND_ACTIONS, refusedSendActions, SEND_COPY, sendActions, SIMULATED_LINK, SIMULATED_SEND_MARK, TRACK_GONE, trackedEmailsOf,
@@ -571,6 +575,7 @@ export async function handoffRuntimeChecks(ok: Ok) {
   await handoffActionChecks(ok);
   await handoffReviewChecks(ok);
   await handoffSendChecks(ok);
+  await handoffShellChecks(ok);
 }
 
 /* ------------------------------------------------------------------ PR 2 Task 4: the Estimator's actions in the browser */
@@ -1346,4 +1351,97 @@ export async function handoffSendChecks(ok: Ok) {
   ok(unregisteredExports({ "a.ts": ["x", "y"], "b.ts": ["z"] }, ["a.ts#x"]).join() === "a.ts#y,b.ts#z", "handoff send: unregisteredExports — the discovered exports with no registration (verify --all-steps)");
   offRefresh();
   configurePorts({ store: null, customers: null, rules: null, team: null });
+}
+
+
+/** Task 7 — the shell's pure parts: hash routes, app-path mapping, history rewriting, the Estimates list's rows, Reset. */
+export async function handoffShellChecks(ok: Ok) {
+  const FILE = "file:///Users/x/prototype/index.html";
+  const estimate = (id: string): Route => ({ name: "estimate", id });
+  const same = (a: Route, b: Route) => sameRoute(a, b);
+
+  // --- parseRoute / routeHash / routeSearch ---
+  ok(same(parseRoute("", ""), { name: "estimates" }) && same(parseRoute("#/estimates", ""), { name: "estimates" }) && same(parseRoute("#/", ""), { name: "estimates" }), "handoff shell: no route (or #/estimates) is the Estimates list");
+  ok(same(parseRoute("#/estimate/Q-G001", "?id=Q-G001&step=review"), estimate("Q-G001")) && same(parseRoute("#/estimate/new", "?new=1"), estimate("new")), "handoff shell: #/estimate/<id> and #/estimate/new");
+  ok(same(parseRoute("#/estimate/Q%20x", ""), estimate("Q x")) && routeHash(estimate("Q x")) === "#/estimate/Q%20x", "handoff shell: an estimate id is URI-encoded in the hash and decoded back");
+  ok(same(parseRoute("#/catalog", ""), { name: "catalog" }) && same(parseRoute("#/assemblies", ""), { name: "assemblies" }) && same(parseRoute("#/rules", ""), { name: "rules" }), "handoff shell: #/catalog, #/assemblies, #/rules");
+  ok(parseRoute("#/zzz", "").name === "unknown" && parseRoute("#/estimate", "").name === "unknown" && parseRoute("#/estimate/a/b", "").name === "unknown" && parseRoute("#/catalog/x", "").name === "unknown", "handoff shell: an unknown hash route is 'unknown', never a screen");
+  ok(same(parseRoute("", "?id=Q-G002&step=send"), estimate("Q-G002")) && same(parseRoute("", "?new=1"), estimate("new")) && same(parseRoute("#systems", "?id=Q-G002"), estimate("Q-G002")) && same(parseRoute("#systems", ""), { name: "estimates" }), "handoff shell: a pre-shell deep link (?id= / ?new=1, or an in-page anchor) names its estimate");
+  ok(routeSearch(estimate("Q-1")) === "?id=Q-1" && routeSearch(estimate("new")) === "?new=1" && routeSearch({ name: "catalog" }) === "", "handoff shell: routeSearch — the Estimator's ?id= / ?new=1, nothing for the other screens");
+
+  // --- mapAppHref ---
+  const on = estimate("Q-G001");
+  const list: Route = { name: "estimates" };
+  const map = (href: string, cur: Route = on) => mapAppHref(href, cur);
+  const routeOf = (href: string, cur: Route = on) => {
+    const t = map(href, cur);
+    return t.kind === "route" ? `${routeHash(t.route)}${t.search}` : t.kind;
+  };
+  ok(routeOf("/estimator?id=Q-2041") === "#/estimate/Q-2041?id=Q-2041" && routeOf("/estimator?id=Q-2041&step=review") === "#/estimate/Q-2041?id=Q-2041&step=review", "handoff shell: /estimator?id=X → #/estimate/X, the Estimator's own params kept");
+  ok(routeOf("/quotes") === "#/estimates" && routeOf("/catalog") === "#/catalog" && routeOf("/design/assemblies") === "#/assemblies" && routeOf("/estimating-rules") === "#/rules" && routeOf("/quotes/") === "#/estimates", "handoff shell: /quotes, /catalog, /design/assemblies, /estimating-rules → their routes");
+  ok(map("?step=review").kind === "page" && map("/estimator?step=review").kind === "page" && map("/estimator?step=package&ptab=client#systems", on).kind === "page", "handoff shell: a query change on the open estimate stays on the page");
+  const withAnchor = map("?step=package&ptab=client#systems");
+  ok(withAnchor.kind === "page" && withAnchor.anchor === "systems" && withAnchor.search === "?step=package&ptab=client", "handoff shell: an in-page anchor rides a same-page change (scrolled to, never the route)");
+  ok(routeOf("/estimator?step=review", list) === "#/estimate/new?new=1&step=review" && routeOf("/estimator", list) === "#/estimate/new?new=1" && routeOf("/estimator?new=1", on) === "#/estimate/new?new=1", "handoff shell: /estimator with no id and no open estimate (or ?new=1) starts a new estimate");
+  ok(map("/design/grid/G-1").kind === "unsupported" && map("/design/specs/new?quote=Q-1").kind === "unsupported" && map("/catalog/documents").kind === "unsupported" && map("/design/assemblies/rack/R1").kind === "unsupported" && map("/inbox").kind === "unsupported", "handoff shell: any other app path is not part of the prototype");
+  const unsupported = map("/design/grid/G-1?x=1");
+  ok(unsupported.kind === "unsupported" && unsupported.path === "/design/grid/G-1?x=1", "handoff shell: the notice names the path");
+  ok(map("https://example.com/").kind === "external" && map("mailto:a@b.test").kind === "external" && map("images/x.webp").kind === "external" && map("./a").kind === "external" && map("//cdn.test/a").kind === "external" && map("").kind === "external", "handoff shell: other sites, mailto:, packaged files and relative paths are the browser's");
+  ok(map("#systems").kind === "anchor" && routeOf("#/catalog") === "#/catalog" && map("#/zzz").kind === "unsupported", "handoff shell: #anchor scrolls; #/route routes; an unknown #/route is not part of the prototype");
+
+  // --- composeHistoryUrl: the Estimator rewrites the search; the hash is the shell's ---
+  const at = (hash: string, search = "") => `${FILE}${search}${hash}`;
+  const c1 = composeHistoryUrl(at("#/estimate/Q-G001", "?id=Q-G001"), "/Users/x/prototype/index.html?id=Q-G001&step=review");
+  ok(c1.url === "/Users/x/prototype/index.html?id=Q-G001&step=review#/estimate/Q-G001" && !c1.explicit && c1.anchor === null, "handoff shell: pushState(pathname + ?search) keeps the route hash");
+  const c2 = composeHistoryUrl(at("#/estimate/new", "?new=1"), "/Users/x/prototype/index.html?new=1&id=Q-2045");
+  ok(c2.url.endsWith("#/estimate/Q-2045") && !c2.explicit, "handoff shell: a first save puts ?id= in the search → the hash follows to the new id");
+  const c3 = composeHistoryUrl(at("#/estimate/new", "?new=1"), "/Users/x/prototype/index.html?new=1&step=package");
+  ok(c3.url.endsWith("#/estimate/new"), "handoff shell: a new estimate with no id yet keeps #/estimate/new");
+  const c4 = composeHistoryUrl(at("#/estimate/Q-G001", "?id=Q-G001"), "/Users/x/prototype/index.html?id=Q-G001&step=package&ptab=client#systems");
+  ok(c4.anchor === "systems" && c4.url.endsWith("#/estimate/Q-G001") && c4.url.includes("ptab=client"), "handoff shell: #systems is taken out of the URL (scrolled to) — the route hash stays");
+  const c5 = composeHistoryUrl(at("#/estimates"), "/Users/x/prototype/index.html#/estimate/Q-1");
+  ok(c5.explicit && c5.url.endsWith("#/estimate/Q-1"), "handoff shell: a #/route URL is the shell's own and passes through");
+  const c6 = composeHistoryUrl(at("", "?id=Q-G002"), "/Users/x/prototype/index.html?id=Q-G002&step=send");
+  ok(c6.url.endsWith("#/estimate/Q-G002"), "handoff shell: with no hash yet (a pre-shell deep link) the route is derived from the search");
+
+  // --- normalizedLocation ---
+  ok(normalizedLocation(at("#/estimate/Q-G001", "?id=Q-G001&step=review")) === null && normalizedLocation(at("#/estimates")) === null && normalizedLocation(at("#/estimate/new", "?new=1")) === null, "handoff shell: a consistent location is left alone");
+  ok(normalizedLocation(at("", "?id=Q-G001&step=review"))?.endsWith("?id=Q-G001&step=review#/estimate/Q-G001") === true, "handoff shell: ?id= with no hash gets its hash");
+  ok(normalizedLocation(at("#/estimate/Q-G002", "?id=Q-G001&step=send"))?.endsWith("?id=Q-G002&step=send#/estimate/Q-G002") === true, "handoff shell: the hash wins over a stale ?id=");
+  ok(normalizedLocation(at("#/estimates", "?id=Q-G001&step=send"))?.endsWith("/index.html#/estimates") === true && normalizedLocation(at("#/catalog", "?x=1"))?.endsWith("index.html#/catalog") === true, "handoff shell: a stale search is dropped from a non-estimate route");
+  ok(normalizedLocation(at("#/estimate/Q-9", ""))?.endsWith("?id=Q-9#/estimate/Q-9") === true && normalizedLocation(at("#/estimate/new", ""))?.endsWith("?new=1#/estimate/new") === true, "handoff shell: an estimate route typed without a search gets ?id= / ?new=1");
+  ok(normalizedLocation(at("#/zzz")) === null, "handoff shell: an unknown route is left as typed");
+
+  // --- the Estimates list rows ---
+  const sec = (price: number, cost: number) => [{ id: "s1", name: "Sys", items: [{ id: "i1", sku: "X", desc: "A part", qty: 1, cost, price, unit: "ea", margin: null }] }];
+  const mk = (id: string, extra: Record<string, unknown> = {}) => ({ id, estNo: null, name: id + " name", customer: "Acme", owner: "Ann", updatedAt: 1, status: "draft", quoteType: "system", source: "estimator", spec: { sections: sec(1000, 800), groups: [] }, ...extra });
+  const quotes = [
+    mk("Q-1", { updatedAt: 100, estNo: 1001, status: "sent" }),
+    mk("Q-2", { updatedAt: 300, name: "Zeta", customer: "Beta Hall" }),
+    mk("Q-3", { updatedAt: 200, quoteType: "flame_test" }),
+    mk("Q-4", { updatedAt: 300, status: undefined, customer: "" }),
+    mk("Q-5", { updatedAt: 50, status: "won", owner: "Bob", name: "" }),
+  ];
+  const general: Record<string, unknown> = {};
+  const rows = listRows(quotes, general, (q) => (q.customerId ? "Resolved" : q.customer ?? ""));
+  ok(rows.map((r) => r.id).join() === "Q-2,Q-4,Q-1,Q-5", `handoff shell: the list is system estimates only, newest first, ties by id (${rows.map((r) => r.id).join()})`);
+  ok(rows[0].number === "Q-2" && rows[2].number === "EST-1001" && rows[3].name === "Untitled estimate", "handoff shell: number = displayQuoteNumber (EST-#### once numbered, else the id); a missing name reads Untitled estimate");
+  ok(rows[1].status === "draft" && rows[2].status === "sent", "handoff shell: a quote with no status is a draft (the golden fixtures carry none)");
+  const t2 = canonicalTotals(quotes[1], general);
+  ok(rows[0].grand === t2.canonical && rows[0].total === `$${t2.canonical.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "handoff shell: a row's total is the Estimator's canonical grand total, printed like its header");
+  ok(expectedEstimatorTotals(quotes[1] as never, { blobs: {} }).canonical === t2.canonical && t2.raw === totals(sec(1000, 800) as never, 0).grand, "handoff shell: verify's expectedEstimatorTotals and the list read the same canonicalTotals (raw = the stored sections' totals)");
+  ok(filterRows(rows, "draft", "").map((r) => r.id).join() === "Q-2,Q-4" && filterRows(rows, "all", "beta").map((r) => r.id).join() === "Q-2" && filterRows(rows, "all", "EST-1001").map((r) => r.id).join() === "Q-1" && filterRows(rows, "won", "bob").length === 1 && filterRows(rows, "sent", "bob").length === 0, "handoff shell: the status filter and the search (number, name, customer, owner) combine");
+  const counts = statusCounts(rows);
+  ok(counts.all === 4 && counts.draft === 2 && counts.sent === 1 && counts.won === 1 && counts.lost === 0, "handoff shell: status counts");
+  ok(updatedLabel(Date.UTC(2026, 9, 14, 3, 0)) === "Oct 13, 2026" && updatedLabel(0) === "—", "handoff shell: Updated prints in Chicago time (Oct 14 03:00 UTC is still Oct 13 there)");
+  ok(listRows([mk("Q-9", { customerId: "c1" })], general, (q) => (q.customerId ? "Resolved Co" : ""))[0].customer === "Resolved Co", "handoff shell: the customer column resolves a customer id");
+
+  // --- Reset ---
+  const blocked = await runReset({ reset: () => Promise.reject(new Error(RESET_BLOCKED_MESSAGE)) });
+  ok(!blocked.ok && blocked.error === "Close other prototype windows and try again.", "handoff shell: a blocked reset surfaces the store's message verbatim");
+  const odd = await runReset({ reset: () => Promise.reject("boom") });
+  ok(!odd.ok && odd.error.includes("did not go through"), "handoff shell: a reset that rejects with a non-Error still reads sensibly");
+  let called = 0;
+  const fine = await runReset({ reset: async () => void (called += 1) });
+  ok(fine.ok && called === 1, "handoff shell: a clean reset resolves ok after exactly one store.reset()");
 }

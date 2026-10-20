@@ -6,14 +6,15 @@
  *   /estimator-preview/<quoteId>?tab=package|bom|cutsheets       (the BOM quote tab's "Open saved preview ↗")
  *
  * Under file:// those paths are dead, so `installPreviewRouting` catches them — a click on such a link, or
- * window.open of one — and opens this overlay with the same live view (ui/live-views.tsx) instead. Task 7's
- * shell can route them as pages; until then the overlay stands in. The ⧉ pop-out (popout/open.ts opens a named
+ * window.open of one — and opens this overlay with the same live view (ui/live-views.tsx) instead. The shell
+ * (ui/shell.tsx) leaves them to the overlay: ui/link-routing.ts skips any href this module recognizes. The ⧉ pop-out (popout/open.ts opens a named
  * `peak-pop:*` window) gets an inert window and a short "not in the prototype" notice — the prototype is one
  * window. Plan: PR 2 Task 5.
  */
 import { useEffect, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { CutSheetStyle } from "@/lib/curtain-cut-sheets/model";
 import { LiveBom, LiveCutSheets, LivePackagePage } from "./live-views";
+import { NOTICE_EVT } from "../shims/next-navigation";
 import { POPOUT_NOTICE, previewTargetOf, windowOpenRoute, type PreviewTarget } from "./preview-routes";
 
 export { POPOUT_NOTICE, previewTargetOf, type PreviewTarget };
@@ -104,6 +105,8 @@ let installed = false;
 export function installPreviewRouting(): void {
   if (installed || typeof window === "undefined") return;
   installed = true;
+  // The router shim's "Not part of the prototype" (and any other shell notice) arrives as an event.
+  window.addEventListener(NOTICE_EVT, (e) => showNotice(String((e as CustomEvent<string>).detail ?? "")));
   document.addEventListener(
     "click",
     (e) => {
