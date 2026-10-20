@@ -12769,7 +12769,7 @@ Jeff: the Parts list (CSV) should show item name, description, cost, sell margin
 
 **Built:** Estimator → More ▾ → Parts list (CSV) now prints Item name (model, else SKU), Description, Unit Cost, Unit Sell, Line margin, Effective margin and Price source ("Catalog" for catalog parts; vendor quote / custom / allowance / curtain / POR / sell edited / not in catalog otherwise). Build package → BOM quote gains Download PDF / Open PDF ↗ for the saved estimate's BOM view (`<number> BOM.pdf`). Cover + BOM share one PDF render; PDF downloads open in a new tab.
 
-**Gates:** tsc 0 errors (`.next` deleted first); test:specs 21,570 PASS / 0 FAIL (includes the `#262 v2` and `BOM PDF` harness blocks, 25 PASS lines); test:smoke 261 PASS / 0 FAIL (`.next` deleted, run alone); eslint 0 problems on the 11 changed src/scripts files (`scripts/test-review-and-spec.ts` overflows eslint's react-hooks rule, as before, so it is excluded).
+**Gates:** tsc 0 errors (`.next` deleted first); test:specs 25,016 PASS / 0 FAIL (includes the `#262 v2`, `#262 final` and `BOM PDF` harness blocks); test:smoke 268 PASS / 0 FAIL (`.next` deleted, run alone); eslint 0 problems on the 3 changed src files (`scripts/test-review-and-spec.ts` overflows eslint's react-hooks rule, as before, so it is excluded).
 
 **Rollback:** safe. No migration, no stored fields.
 

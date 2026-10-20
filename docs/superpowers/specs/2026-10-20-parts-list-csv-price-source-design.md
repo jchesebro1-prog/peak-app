@@ -62,6 +62,8 @@ First match wins:
 The sell-edited suffix applies only in rule 8. A component inherits no suffix from
 its parent line.
 
+A vendor quote that is found but has no lines (a typed total) still reads `Vendor quote — …` (rule 1); only a `vendorQuoteId` pointing at a missing quote falls through. Placeholder SKUs (`CUSTOM`, `AI`, `CURTAIN`, `CRT-n`; `isPlaceholderSku`) count as no SKU on plain lines and components: Item name is the line's own model / P/N or blank, they are never looked up in the catalog, and with no SKU or model the merge key includes the description, so different custom lines stay apart.
+
 ## Data changes (pure, `src/app/(app)/estimator/parts-csv.ts`)
 
 - `PartsListRow` gains `source: string` and `lineSell: number` (unit sell before
