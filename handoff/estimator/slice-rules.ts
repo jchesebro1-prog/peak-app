@@ -51,7 +51,7 @@ export const COMPANY_COLS = [
 ] as const;
 export const SITE_COLS = [
   "id", "companyId", "name", "locationName", "legacyLocId", "isPrimary", "address", "city", "state", "zip", "kind",
-  "lat", "lng", "venueKind", "nameAuto", "travelMiles", "travelMin", "geoStatus",
+  "lat", "lng", "venueKind", "nameAuto", "travelMiles", "travelMin", "geoStatus", "createdAt",
 ] as const;
 export const CONTACT_COLS = [
   "id", "firstName", "lastName", "homeCompanyId", "title", "pricingTier", "status", "isPrimary",

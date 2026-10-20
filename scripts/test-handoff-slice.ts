@@ -138,6 +138,19 @@ export async function handoffSliceChecks(ok: Ok) {
 
   const catalog = (load("data/catalog-1.js").PEAK_CATALOG ?? []) as Array<Record<string, unknown>>;
   ok(catalog.map((p) => p.sku).sort().join(",") === "SKU-A,SKU-B" && catalog.every((p) => !("portalHidden" in p)), "handoff:slice: catalog = live parts, allow-listed fields only");
+  ok(SITE_COLS.includes("createdAt") && cust.sites.every((x) => typeof x.createdAt === "number"),
+    "handoff:slice: sites carry createdAt (the venue order's tie-break)");
+  // a part retired by a SKU rename rides along as a { id, sku, renamedTo } stub; a plain delete (SKU-C) stays out
+  const withRetired = JSON.parse(JSON.stringify(exp)) as ExportV2;
+  withRetired.collections!.catalog_parts.push({ id: "OLD-SKU", deleted: true, doc: { sku: "OLD-SKU", desc: "Retired part", cost: 99, renamedTo: "SKU-A" } } as never);
+  const rr = sliceExport(withRetired);
+  const loadR = (n: string) => { const w: Record<string, unknown> = {}; new Function("window", rr.files[n])(w); return w; };
+  const catR = (loadR("data/catalog-1.js").PEAK_CATALOG ?? []) as Array<Record<string, unknown>>;
+  const stub = catR.find((x) => x.id === "OLD-SKU");
+  ok(JSON.stringify(stub) === JSON.stringify({ id: "OLD-SKU", sku: "OLD-SKU", renamedTo: "SKU-A" }), `handoff:slice: a retired part is emitted as { id, sku, renamedTo } only (got ${JSON.stringify(stub)})`);
+  ok(catR.map((x) => x.id).sort().join(",") === "OLD-SKU,SKU-A,SKU-B" && !catR.some((x) => x.id === "SKU-C"), "handoff:slice: a deleted part without renamedTo stays out of the catalog");
+  const metaR = loadR("data/meta.js").PEAK_META as { counts: Record<string, number> };
+  ok(metaR.counts.catalog === 2 && metaR.counts.catalogRetired === 1 && rr.hits.length === 0, "handoff:slice: meta counts live parts and retired stubs apart");
   const partA = catalog.find((p) => p.sku === "SKU-A");
   ok(partA?.note === "", "handoff:slice: scrub — a secret-shaped catalog note is replaced with \"\"");
   ok((est.find((q) => q.id === "Q-G001") as Record<string, unknown> | undefined)?.quoteNote === "" &&

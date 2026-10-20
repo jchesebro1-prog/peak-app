@@ -287,6 +287,8 @@ async function storeCheck(page: Page, url: string, id: string, sink: PageSink, e
       await s.put("meta", { id: "verify-probe", at: 1 });
       await s.put("meta", { id: "verify-tomb", at: 1 });
       await s.remove("meta", "verify-tomb");
+      // put order z → a → m: a reload must keep it (IndexedDB hands rows back in id order)
+      for (const k of ["verify-z", "verify-a", "verify-m"]) await s.put("meta", { id: k, at: 1 });
     },
     id,
     marker,
@@ -296,11 +298,13 @@ async function storeCheck(page: Page, url: string, id: string, sink: PageSink, e
   step("a quote edit survives a reload and shows in the header", await pageHasText(page, marker));
   const after = await page.evaluate(async () => {
     const s = (window as unknown as H).__peakHandoff.store;
-    return { probe: !!(await s.get("meta", "verify-probe")), tomb: (await s.get("meta", "verify-tomb")) === undefined, count: (await s.all("quotes")).length };
+    const order = (await s.all("meta")).map((d) => (d as { id: string }).id).filter((i) => i.startsWith("verify-") && i !== "verify-probe" && i !== "verify-tomb");
+    return { probe: !!(await s.get("meta", "verify-probe")), tomb: (await s.get("meta", "verify-tomb")) === undefined, count: (await s.all("quotes")).length, order: order.join(",") };
   });
   step("a put doc survives a reload", after.probe);
   step("a tombstone survives a reload", after.tomb);
   step("an edited seed quote is not duplicated", after.count === seedCount, `${after.count} vs ${seedCount}`);
+  step("put order survives a reload (z, a, m — not id order)", after.order === "verify-z,verify-a,verify-m", after.order);
   await page.evaluate(async () => (window as unknown as H).__peakHandoff.store.reset());
   await page.goto(url, { waitUntil: "load" });
   await waitMounted(page, sink);
@@ -309,6 +313,79 @@ async function storeCheck(page: Page, url: string, id: string, sink: PageSink, e
   const total = await readHeaderTotal(page);
   step("after Reset the header total is the snapshot's", total === expectedTotal, `${total} vs ${expectedTotal}`);
   return { pass: steps.every((s) => s.ok), steps };
+}
+
+
+/**
+ * Reset from a second window (same file:// origin): the other window lets go of the database and goes
+ * non-persistent, the reset completes and restores the snapshot; and a window that never lets go makes
+ * reset() reject with "Close other prototype windows and try again.".
+ */
+async function resetAcrossWindows(browser: Browser, url: string, sink: PageSink): Promise<StoreCheck["steps"]> {
+  const steps: StoreCheck["steps"] = [];
+  const step = (name: string, ok: boolean, detail?: string) => steps.push({ step: name, ok, ...(detail ? { detail } : {}) });
+  type S = { persistent: boolean; put(c: string, d: unknown): Promise<void>; get(c: string, id: string): Promise<unknown>; reset(): Promise<void> };
+  type H = { __peakHandoff: { store: S } };
+  const a = await newPage(browser, sink);
+  const b = await newPage(browser, sink);
+  const c = await newPage(browser, sink);
+  try {
+    await a.goto(url, { waitUntil: "load" });
+    await b.goto(url, { waitUntil: "load" });
+    await waitMounted(a, sink);
+    await waitMounted(b, sink);
+    await b.evaluate(async () => (window as unknown as H).__peakHandoff.store.put("meta", { id: "verify-xwin", at: 1 }));
+    const aRes = await a.evaluate(async () => {
+      const s = (window as unknown as H).__peakHandoff.store;
+      try {
+        await s.reset();
+        return { ok: true, persistent: s.persistent, probe: !!(await s.get("meta", "verify-xwin")) };
+      } catch (e) {
+        return { ok: false, persistent: s.persistent, probe: true, error: (e as Error).message };
+      }
+    });
+    step("Reset in one window completes while another has the data open", aRes.ok === true, aRes.error);
+    step("the resetting window stays persistent and the probe is gone", aRes.persistent === true && aRes.probe === false);
+    let bPersistent = true;
+    for (let i = 0; i < 30 && bPersistent; i++) {
+      bPersistent = await b.evaluate(() => (window as unknown as H).__peakHandoff.store.persistent);
+      if (bPersistent) await new Promise((r) => setTimeout(r, 100));
+    }
+    step("the other window closed its connection (persistent false)", bPersistent === false);
+    step('the other window shows "Changes won\'t be saved in this window"', await pageHasText(b, "Changes won't be saved in this window"));
+    await a.goto(url, { waitUntil: "load" });
+    await waitMounted(a, sink);
+    step("after a reload the snapshot is back (probe gone)", await a.evaluate(async () => (await (window as unknown as H).__peakHandoff.store.get("meta", "verify-xwin")) === undefined));
+
+    // a window that never answers versionchange: Reset must say so instead of pretending
+    await c.goto(url, { waitUntil: "load" });
+    await c.evaluate(() => new Promise<void>((resolve, reject) => {
+      const r = indexedDB.open("peak-estimator-handoff");
+      (window as unknown as { __rawHold?: IDBDatabase }).__rawHold = undefined;
+      r.onsuccess = () => {
+        (window as unknown as { __rawHold?: IDBDatabase }).__rawHold = r.result; // no onversionchange handler
+        resolve();
+      };
+      r.onerror = () => reject(r.error);
+    }));
+    const blocked = await a.evaluate(async () => {
+      const s = (window as unknown as H).__peakHandoff.store;
+      try {
+        await s.reset();
+        return { ok: true, message: "" };
+      } catch (e) {
+        return { ok: false, message: (e as Error).message };
+      }
+    });
+    step("a blocked Reset fails with the close-other-windows message", blocked.ok === false && /Close other prototype windows/.test(blocked.message), blocked.message);
+    step("…and the window reports it can't save", (await a.evaluate(() => (window as unknown as H).__peakHandoff.store.persistent)) === false);
+    await c.evaluate(() => (window as unknown as { __rawHold?: IDBDatabase }).__rawHold?.close());
+  } finally {
+    await a.close();
+    await b.close();
+    await c.close();
+  }
+  return steps;
 }
 
 async function estimatorCheck(pkgDir: string, which: string): Promise<EstimatorResult> {
@@ -346,8 +423,12 @@ async function estimatorCheck(pkgDir: string, which: string): Promise<EstimatorR
         numberShown, mounted, unexpectedUnregistered, screenshot,
         pass: mounted && numberShown && onScreen === expected && unexpectedUnregistered.length === 0 && sink.pageErrors.length === errorsBefore,
       });
-      if (!store) store = await storeCheck(page, url, q.id, sink, expected);
-      await page.close();
+      if (!store) {
+        store = await storeCheck(page, url, q.id, sink, expected);
+        await page.close();
+        store.steps.push(...(await resetAcrossWindows(browser, url, sink)));
+        store.pass = store.steps.every((s) => s.ok);
+      } else await page.close();
     }
   } finally {
     await browser.close();

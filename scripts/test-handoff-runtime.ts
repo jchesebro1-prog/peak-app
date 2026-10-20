@@ -8,11 +8,11 @@
 import * as fs from "node:fs";
 import * as vm from "node:vm";
 import { ROLE_PERMS, type Perm, type Role } from "@/lib/team";
-import { overlayMerge, openStore, storeSeedFrom, type HandoffStore } from "../handoff/estimator/runtime/store";
+import { DB_NAME, overlayFromRows, overlayMerge, openStore, RESET_BLOCKED_MESSAGE, storeSeedFrom, type HandoffStore } from "../handoff/estimator/runtime/store";
 import {
-  clock, configurePorts, customers, email, nextEstNoFrom, numbering, onWon, resolveTierFor, travelFromParts, users,
+  clock, configurePorts, customers, customersFrom, email, nextEstNoFrom, numbering, onWon, resolveTierFor, travelFromParts, users,
 } from "../handoff/estimator/runtime/ports";
-import { buildEstimatorProps } from "../handoff/estimator/runtime/props/estimator";
+import { bySkuResolver, buildEstimatorProps } from "../handoff/estimator/runtime/props/estimator";
 import type { SeedCustomers, SeedRules, SeedTeamUser } from "../handoff/estimator/runtime/seed";
 import { sliceExport, type ExportV2 } from "../handoff/estimator/slice";
 import { expectedEstimatorTotals } from "../handoff/estimator/verify";
@@ -49,6 +49,91 @@ async function storeFor(g: Globals): Promise<HandoffStore> {
   );
 }
 
+
+/**
+ * A minimal in-memory IndexedDB — just what runtime/store.ts uses (open / upgrade, getAll / getAllKeys / put /
+ * delete in a transaction, close, onversionchange, deleteDatabase with `blocked`). getAll returns rows in key
+ * order, as the real thing does, so the stored `seq` is what restores the put order.
+ */
+function fakeIdb(opts: { failWrites?: boolean } = {}) {
+  const data = new Map<string, { keyPath: string | null; rows: Map<string, { key: unknown; value: unknown }> }>();
+  let exists = false;
+  const conns = new Set<{ onversionchange: null | (() => void); close(): void }>();
+  const later = (fn: () => void, ms = 0) => void setTimeout(fn, ms);
+  type Req = { result?: unknown; error?: unknown; onsuccess?: () => void; onerror?: () => void; onupgradeneeded?: () => void; onblocked?: () => void };
+
+  function openConn() {
+    const conn = {
+      onversionchange: null as null | (() => void),
+      close() { conns.delete(conn); },
+      objectStoreNames: { contains: (n: string) => data.has(n) },
+      createObjectStore(n: string, o?: { keyPath?: string }) { data.set(n, { keyPath: o?.keyPath ?? null, rows: new Map() }); },
+      transaction(names: string[], mode: string) {
+        if (mode === "readwrite" && opts.failWrites) throw new Error("QuotaExceededError (fake)");
+        let pending = 0;
+        const tx: { oncomplete?: () => void; onerror?: () => void; onabort?: () => void; error?: unknown; objectStore(n: string): unknown } = {
+          objectStore(n: string) {
+            const st = data.get(n);
+            if (!names.includes(n) || !st) throw new Error(`no store ${n}`);
+            const request = (fn: () => unknown) => {
+              const r: Req = {};
+              pending++;
+              later(() => { r.result = fn(); pending--; r.onsuccess?.(); });
+              return r;
+            };
+            const sorted = () => [...st.rows.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map((e) => e[1]);
+            return {
+              getAll: () => request(() => sorted().map((e) => e.value)),
+              getAllKeys: () => request(() => sorted().map((e) => e.key)),
+              put: (value: { id?: string }, key?: unknown) => request(() => { const k = st.keyPath ? (value as Record<string, unknown>)[st.keyPath] : key; st.rows.set(JSON.stringify(k), { key: k, value }); }),
+              delete: (key: unknown) => request(() => void st.rows.delete(JSON.stringify(key))),
+            };
+          },
+        };
+        const finish = () => (pending > 0 ? later(finish) : void tx.oncomplete?.());
+        later(finish);
+        return tx;
+      },
+    };
+    conns.add(conn);
+    return conn;
+  }
+
+  const factory = {
+    open() {
+      const r: Req = {};
+      later(() => {
+        const fresh = !exists;
+        exists = true;
+        r.result = openConn();
+        if (fresh) r.onupgradeneeded?.();
+        r.onsuccess?.();
+      });
+      return r;
+    },
+    deleteDatabase() {
+      const r: Req = {};
+      later(() => {
+        for (const c of [...conns]) c.onversionchange?.();
+        let warned = false;
+        const wait = () => {
+          if (conns.size > 0) {
+            if (!warned) { warned = true; r.onblocked?.(); }
+            return later(wait, 2);
+          }
+          data.clear();
+          exists = false;
+          r.result = undefined;
+          r.onsuccess?.();
+        };
+        wait();
+      });
+      return r;
+    },
+  };
+  return { factory: factory as unknown as IDBFactory, conns, data, hold: () => openConn() };
+}
+
 export async function handoffRuntimeChecks(ok: Ok) {
   // --- overlayMerge ---
   const seed = [{ id: "a", v: 1 }, { id: "b", v: 1 }, { id: "c", v: 1 }];
@@ -76,6 +161,81 @@ export async function handoffRuntimeChecks(ok: Ok) {
   ok((await mem.get<{ name: string }>("quotes", "Q-2"))?.name === "new", "handoff runtime: store — get hands back a copy");
   await mem.reset();
   ok(ids(await mem.all("quotes")) === "Q-1" && (await mem.get<{ name: string }>("quotes", "Q-1"))?.name === "one", "handoff runtime: store — reset drops the overlay, back to the seed");
+
+  // --- overlay order: seq, not id order, decides it after a reload ---
+  const reloaded = overlayFromRows([
+    { id: "a", seq: 30, doc: { id: "a" } },
+    { id: "m", seq: 10, doc: { id: "m" } },
+    { id: "z", seq: 20, doc: { id: "z" } },
+    { id: "legacy" }, // a bare doc written before seq existed reads as seq 0
+  ]);
+  ok([...reloaded.keys()].join(",") === "legacy,m,z,a", `handoff runtime: overlayFromRows — put order by seq, not id order (got ${[...reloaded.keys()].join(",")})`);
+  ok(ids(overlayMerge([{ id: "s" }], reloaded as Map<string, { id: string } | null>)) === "s,legacy,m,z,a", "handoff runtime: overlayFromRows → overlayMerge keeps the put order after the seed");
+
+  // --- the IndexedDB overlay over a fake: persistence, order, versionchange, failed writes, reset ---
+  {
+    const fake = fakeIdb();
+    const seedDocs = { meta: docs([{ id: "s1" }]), quotes: docs([{ id: "Q-S", name: "seed" }]) };
+    const w1 = await openStore(seedDocs, { idb: fake.factory });
+    ok(w1.persistent === true, "handoff runtime: idb store — opens persistent");
+    let w1Changes = 0;
+    w1.subscribe(() => void w1Changes++);
+    await w1.put("meta", { id: "zeta" });
+    await w1.put("meta", { id: "alpha" });
+    await w1.put("meta", { id: "mid" });
+    await w1.put("meta", { id: "zeta", again: true }); // a re-put moves to the end
+    await w1.put("quotes", { id: "Q-S", name: "edited" });
+    await w1.put("meta", { id: "gone" });
+    await w1.remove("meta", "gone");
+    await w1.remove("quotes", "Q-NOPE");
+    const live = ids(await w1.all("meta"));
+    ok(live === "s1,alpha,mid,zeta", `handoff runtime: idb store — in-session put order (got ${live})`);
+    const w2 = await openStore(seedDocs, { idb: fake.factory }); // a reload: IndexedDB hands rows back in id order
+    ok(w2.persistent === true && ids(await w2.all("meta")) === live, `handoff runtime: idb store — the put order survives a reload (got ${ids(await w2.all("meta"))})`);
+    ok((await w2.get<{ name: string }>("quotes", "Q-S"))?.name === "edited" && (await w2.get("meta", "gone")) === undefined && (await w2.get("quotes", "Q-NOPE")) === undefined, "handoff runtime: idb store — edits and tombstones survive a reload");
+    // another window resets: the first connection closes, the reset completes, the seed is back
+    let w2Changes = 0;
+    w2.subscribe(() => void w2Changes++);
+    await w1.reset();
+    ok(w1.persistent === true && ids(await w1.all("meta")) === "s1" && (await w1.get<{ name: string }>("quotes", "Q-S"))?.name === "seed", "handoff runtime: idb store — reset restores the seed and stays persistent");
+    ok(w2.persistent === false && w2Changes === 1, `handoff runtime: idb store — another window's reset turns this one non-persistent and notifies once (changes ${w2Changes})`);
+    ok(fake.conns.size === 1, `handoff runtime: idb store — only the resetting window holds a connection (got ${fake.conns.size})`);
+    await w2.put("meta", { id: "late" });
+    ok(ids(await w2.all("meta")) === "s1,alpha,mid,zeta,late", "handoff runtime: idb store — a non-persistent window keeps its edits and keeps editing in memory");
+    const w3 = await openStore(seedDocs, { idb: fake.factory });
+    ok(ids(await w3.all("meta")) === "s1", "handoff runtime: idb store — nothing the closed window wrote reached the database");
+    await w1.put("meta", { id: "after-reset" });
+    ok(ids(await (await openStore(seedDocs, { idb: fake.factory })).all("meta")) === "s1,after-reset", "handoff runtime: idb store — writes persist again after a reset");
+    ok(w1Changes === 0, "handoff runtime: idb store — a successful reset never flips persistent (no notification)");
+  }
+  {
+    const fake = fakeIdb({ failWrites: true });
+    const w = await openStore({ meta: [] }, { idb: fake.factory });
+    let n = 0;
+    const off = w.subscribe(() => void n++);
+    ok(w.persistent === true, "handoff runtime: idb store — a store whose writes will fail still opens persistent");
+    await w.put("meta", { id: "x" });
+    ok(w.persistent === false && n === 1 && ids(await w.all("meta")) === "x", "handoff runtime: idb store — the first failed write turns persistence off, notifies once, keeps the edit");
+    await w.put("meta", { id: "y" });
+    ok(n === 1 && ids(await w.all("meta")) === "x,y", "handoff runtime: idb store — later writes don't notify again");
+    off();
+  }
+  {
+    const fake = fakeIdb();
+    const w = await openStore({ meta: docs([{ id: "s1" }]) }, { idb: fake.factory, resetTimeoutMs: 40 });
+    await w.put("meta", { id: "mine" });
+    const stuck = fake.hold(); // a window that never answers versionchange
+    let msg = "";
+    try {
+      await w.reset();
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    ok(msg === RESET_BLOCKED_MESSAGE && /Close other prototype windows/.test(msg), `handoff runtime: idb store — a reset blocked by another window rejects with the close-windows message (got "${msg}")`);
+    ok(w.persistent === false && ids(await w.all("meta")) === "s1,mine", "handoff runtime: idb store — a blocked reset leaves the overlay in place and turns this window non-persistent");
+    stuck.close();
+    ok(DB_NAME === "peak-estimator-handoff", "handoff runtime: idb store — database name");
+  }
 
   // --- numbering ---
   ok(nextEstNoFrom([2696, 9001, "x", null, 9003.5], null) === 9002, "handoff runtime: numbering — after the max integer estNo");
@@ -185,6 +345,57 @@ export async function handoffRuntimeChecks(ok: Ok) {
 
   await store.put("quotes", { ...(await store.get<{ id: string }>("quotes", "Q-G001"))!, name: "Overlay name" });
   ok((await buildEstimatorProps(store, "Q-G001", new URLSearchParams())).initial.projectName === "Overlay name", "handoff runtime: props — read through the overlay");
+
+  // a legacy stage key and no pipelineId read as the app's getQuote reads them (normalizeQuotePipeline)
+  const q1 = (await store.get<Record<string, unknown>>("quotes", "Q-G001"))!;
+  const q1NoPipe: Record<string, unknown> = { ...q1 };
+  delete q1NoPipe.pipelineId;
+  await store.put("quotes", { ...q1NoPipe, id: "Q-G001", status: "sent", stage: "legacy-proposal-xyz" } as { id: string });
+  const legacy = await buildEstimatorProps(store, "Q-G001", new URLSearchParams());
+  const defPipe = legacy.pipelines.quote.find((pl) => pl.id === legacy.pipelines.defaultQuotePipelineId)!;
+  const sentStage = defPipe.stages.find((st) => st.tag === "sent")!;
+  ok(legacy.initial.pipelineId === defPipe.id && legacy.initial.stage === sentStage.id,
+    `handoff runtime: props — a legacy stage + no pipelineId normalize on read to the default pipeline's sent stage (got ${legacy.initial.pipelineId}/${legacy.initial.stage}, want ${defPipe.id}/${sentStage.id})`);
+  ok(((await store.get<{ stage?: string }>("quotes", "Q-G001")))?.stage === "legacy-proposal-xyz", "handoff runtime: props — normalizing never writes back to the store");
+  await store.put("quotes", q1 as { id: string });
+
+  // renamed SKUs: an old sku resolves to the part it became (catalog getManyBySku)
+  const parts = [
+    { sku: "OLD-1", renamedTo: "MID-1" }, { sku: "MID-1", renamedTo: "Brand:New 1" }, { sku: "Brand:New 1" },
+    { sku: "LOOP-A", renamedTo: "LOOP-B" }, { sku: "LOOP-B", renamedTo: "LOOP-A" }, { sku: "GONE-1", renamedTo: "NOT-THERE" }, { sku: "LIVE-1" },
+  ];
+  const res = bySkuResolver(parts);
+  ok(res("Brand:New 1")?.sku === "Brand:New 1" && res("LIVE-1")?.sku === "LIVE-1" && res("OLD-1")?.sku === "Brand:New 1" && res("MID-1")?.sku === "Brand:New 1",
+    "handoff runtime: bySkuResolver — live skus resolve to themselves, retired ones follow renamedTo through the chain");
+  ok(res("LOOP-A") === undefined && res("GONE-1") === undefined && res("nope") === undefined, "handoff runtime: bySkuResolver — a cycle, a dead redirect and an unknown sku are absent");
+  const renStore = await openStore(
+    {
+      catalog: docs([{ id: "OLD-1", sku: "OLD-1", renamedTo: "Brand:New 1" }, { id: "Brand:New 1", sku: "Brand:New 1", desc: "New thing", unit: "ea", cost: 10, list: 20 }]),
+      blobs: docs([{ id: "system_categories", data: { categories: [{ id: "cat-x", name: "Retired SKU", items: [{ sku: "OLD-1", qty: 2 }] }] } }]),
+      quotes: [],
+    },
+    { idb: null },
+  );
+  configurePorts({ store: renStore, customers: EMPTY_CUSTOMERS, rules: { settings: {}, blobs: {} }, team: [] });
+  const ren = await buildEstimatorProps(renStore, null, new URLSearchParams());
+  const renItem = ren.initial.systemCategories.find((c) => c.id === "cat-x")?.items[0];
+  ok(renItem?.part?.sku === "Brand:New 1" && renItem.part.desc === "New thing" && renItem.part.cost === 10, `handoff runtime: props — a system-category item with a retired sku resolves to the renamed part (got ${JSON.stringify(renItem?.part)})`);
+  configurePorts({ store, customers: seedCustomers, rules, team: g.PEAK_TEAM as SeedTeamUser[] });
+
+  // venue order: primary first, then createdAt, then id (venue-types compareVenueOrder)
+  const venueDir: SeedCustomers = {
+    ...EMPTY_CUSTOMERS,
+    companies: [{ id: "co", name: "Order Co" }],
+    sites: [
+      { id: "s-b", companyId: "co", name: "B", legacyLocId: "locB", createdAt: 200 },
+      { id: "s-a", companyId: "co", name: "A", legacyLocId: "locA", createdAt: 300 },
+      { id: "s-p", companyId: "co", name: "P", legacyLocId: "locP", isPrimary: true, createdAt: 900 },
+      { id: "s-old", companyId: "co", name: "Old", legacyLocId: "locOld", createdAt: 100 },
+      { id: "s-c1", companyId: "co", name: "C1", legacyLocId: "locC1", createdAt: 200 },
+    ],
+  };
+  ok(customersFrom(venueDir)[0].locations.map((l) => l.id).join(",") === "locP,locOld,locB,locC1,locA",
+    `handoff runtime: customers — venues order primary → createdAt → id (got ${customersFrom(venueDir)[0].locations.map((l) => l.id).join(",")})`);
 
   // the dev slice has estimates but no customer tables — nothing may crash
   const bare = await openStore(storeSeedFrom({ estimates: g.PEAK_ESTIMATES as never, catalog: [], fixtures: [], rules: { settings: {}, blobs: {} }, meta: null }), { idb: null });

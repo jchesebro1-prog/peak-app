@@ -94,7 +94,12 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[] }
   const parts = catalogRows
     .map((r) => pickAndScrub({ ...r.doc, id: r.id }, CATALOG_FIELDS, r.id, catalogLog))
     .sort((a, b) => String(a.id).localeCompare(String(b.id)));
-  const groups = packCatalog(parts, MAX_FILE_BYTES);
+  // Parts retired by a SKU rename (#304) ride along as { id, sku, renamedTo } so an old SKU on a quote or
+  // category still resolves to the part it became (catalog getManyBySku). Nothing else of them is kept.
+  const retired = (exp.collections?.catalog_parts ?? [])
+    .filter((r) => r.deleted && typeof (r.doc as Row | null | undefined)?.renamedTo === "string" && (r.doc as Row).renamedTo !== "")
+    .map((r) => pickAndScrub({ id: r.id, sku: r.id, renamedTo: (r.doc as Row).renamedTo }, CATALOG_FIELDS, r.id, catalogLog));
+  const groups = packCatalog([...parts, ...retired].sort((a, b) => String(a.id).localeCompare(String(b.id))), MAX_FILE_BYTES);
   const fileOfPart = new Map<string, string>();
   groups.forEach((g, i) => {
     const name = `data/catalog-${i + 1}.js`;
@@ -103,6 +108,7 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[] }
   });
   for (const e of catalogLog) scrubbed.push({ file: fileOfPart.get(e.id) ?? "data/catalog-1.js", ...e });
   counts.catalog = parts.length;
+  counts.catalogRetired = retired.length;
   counts.catalogFiles = groups.length;
 
   // --- fixtures (subassemblies) ---

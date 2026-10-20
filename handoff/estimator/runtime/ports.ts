@@ -9,9 +9,10 @@
  * which reach the database and so can never be bundled; pure helpers are imported instead.
  * Plan: PR 2 Task 3.
  */
-import { ROLE_PERMS, type Perm, type Role } from "@/lib/team";
+import { can, type Perm } from "@/lib/team";
 import { DEFAULT_PRICING_TIER, PRICING_TIERS, type PricingTier } from "@/lib/identity/config";
 import { displayQuoteNumber, isEstimateNo } from "@/lib/estimate-number";
+import { compareVenueOrder } from "@/lib/venue-types";
 import type { CustomerLite } from "@/app/(app)/estimator/types";
 import type { TravelLite } from "@/lib/estimating-core/types";
 import type { Office } from "@/lib/settings";
@@ -84,13 +85,6 @@ export function settingsView(): Record<string, unknown> & typeof HANDOFF_SETTING
 
 /* ------------------------------------------------------------------ users */
 
-/** Perms a role list holds (team.ts permsFor over ROLE_PERMS). */
-export function permsOf(roles: readonly string[] | null | undefined): Set<Perm> {
-  const out = new Set<Perm>();
-  for (const r of roles ?? []) for (const p of ROLE_PERMS[r as Role] ?? []) out.add(p);
-  return out;
-}
-
 /** Who the prototype acts as when the roster is empty. */
 export const STAND_IN_USER: TeamUser = { id: "handoff", name: "Peak estimator", roles: ["Admin"], status: "active", initials: "PE" };
 
@@ -126,12 +120,12 @@ export const users = {
     }
   },
   /** team.ts `can(perm, roles)` for the current user — ROLE_PERMS decides. */
-  can(perm: "create" | "approve" | "send" | "manage_users"): boolean {
-    return permsOf(users.current().roles).has(perm);
+  can(perm: Perm): boolean {
+    return can(perm, users.current().roles);
   },
   /** Active users holding `approve` (users.ts reviewers()), roster order. */
   approvers(): TeamUser[] {
-    return users.all().filter((u) => permsOf(u.roles).has("approve"));
+    return users.all().filter((u) => can("approve", u.roles));
   },
   /** The active roster (users.ts activeUsers()); [STAND_IN_USER] when the slice has none. */
   all(): TeamUser[] {
@@ -148,11 +142,12 @@ const numOrNull = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-/** identity/sites compareVenueOrder: primary first, then creation order, then id. */
+/** identity/sites venue order (venue-types compareVenueOrder): primary first, then createdAt, then id. */
 function venueOrder(a: SeedSite, b: SeedSite): number {
-  const ca = typeof a.createdAt === "number" ? a.createdAt : 0;
-  const cb = typeof b.createdAt === "number" ? b.createdAt : 0;
-  return Number(!!b.isPrimary) - Number(!!a.isPrimary) || ca - cb || String(a.id).localeCompare(String(b.id));
+  return compareVenueOrder(
+    { isPrimary: !!a.isPrimary, createdAt: Number(a.createdAt) || 0, id: String(a.id) },
+    { isPrimary: !!b.isPrimary, createdAt: Number(b.createdAt) || 0, id: String(b.id) },
+  );
 }
 
 const contactName = (c: SeedContact) => `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim();
@@ -399,6 +394,8 @@ let numberQueue: Promise<unknown> = Promise.resolve();
  * Estimate numbers (the EST/FLM/… counter). Quartzite: one database counter (stores/estimate-numbers).
  * Prototype: starts after the highest estNo in the store (seed ∪ overlay) and remembers the last
  * number it issued in `meta/estNo`; calls are serialized, so no two estimates share a number.
+ * Numbers are unique per window only — two open windows can issue the same one; the real
+ * numbering port must be atomic (one database counter).
  */
 export const numbering = {
   async nextEstNo(): Promise<number> {

@@ -6,7 +6,7 @@
  * `data-handoff-ready` after the first render (verify.ts waits for it).
  */
 import "./shims/next-navigation"; // patch history before the app mounts
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import EstimatorClient from "@/app/(app)/estimator/estimator-client";
 import type { EstimatorProps } from "@/app/(app)/estimator/types";
@@ -33,6 +33,8 @@ const bannerStyle = {
 
 function App({ store, quoteId, first }: { store: HandoffStore; quoteId: string | null; first: EstimatorProps }) {
   const [props, setProps] = useState(first);
+  // The store flips this live: a failed write, or another window resetting the data (runtime/store.ts).
+  const persistent = useSyncExternalStore(store.subscribe, () => store.persistent, () => store.persistent);
   // router.refresh() → re-read the props from the store (client state is kept, as with a server re-render).
   useEffect(
     () =>
@@ -50,7 +52,7 @@ function App({ store, quoteId, first }: { store: HandoffStore; quoteId: string |
     <>
       <div style={bannerStyle} data-handoff-banner="">
         Confidential — Peak Systems Group · prototype — nothing is sent or saved to Peak
-        {store.persistent ? null : <span data-handoff-not-persistent=""> · Changes won&apos;t be saved in this window</span>}
+        {persistent ? null : <span data-handoff-not-persistent=""> · Changes won&apos;t be saved in this window</span>}
       </div>
       <EstimatorClient {...props} />
     </>

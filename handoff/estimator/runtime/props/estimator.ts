@@ -13,7 +13,7 @@ import { allAssembliesFrom, sanitizeFixtureAssemblies, type FixtureRecord } from
 import { assemblyToFixture, normalizeFixtureRow, type RawFixtureRow } from "@/lib/fixtures-convert";
 import { fabricAreaRateOf, sewingPctFrom, SEWING_PCT_ID } from "@/lib/design/curtain-pricing";
 import { isFabricPart } from "@/lib/fabric-part";
-import { resolvePipelines } from "@/lib/pipelines";
+import { normalizeQuotePipeline, resolvePipelines } from "@/lib/pipelines";
 import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/fixture-rates";
 import { bonusRatesFrom, BONUS_ESTIMATOR_RATE_ID, BONUS_PACKAGE_RATE_ID } from "@/lib/estimate-bonus/flags";
 import { DEFAULT_FREIGHT_RULE, FREIGHT_RATE_IDS, type FreightRule } from "@/lib/freight-rule";
@@ -32,8 +32,9 @@ import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/grou
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import { quoteNextStep, type QuoteNextStepView } from "@/lib/quote-next-step";
 import { approvalHolds, reviewLimitChip, reviewLimitsFrom, type ReviewLimitContext } from "@/lib/review-limits";
+import { can as roleCan } from "@/lib/team";
 import type { HandoffStore } from "../store";
-import { blobData, customers as customerPort, permsOf, refreshPortsFromStore, resolveTierFor, settingsView, users, type TeamUser } from "../ports";
+import { blobData, customers as customerPort, refreshPortsFromStore, resolveTierFor, settingsView, users, type TeamUser } from "../ports";
 
 /** The page's server-only props, fixed for the prototype (spec: no Blob, no Assist, no tasks/templates/spec records). */
 export const FIXED = {
@@ -48,7 +49,7 @@ export const FIXED = {
   specKeys: [],
   portalStatusError: null,
   canApplyCredit: false,
-} as const;
+} satisfies Partial<EstimatorProps>;
 
 type QuoteDoc = Omit<Partial<Quote>, "spec"> & {
   id: string;
@@ -179,9 +180,8 @@ function timeAgo(ts: number | null | undefined, now: number): string {
 export function nextStepFor(q: QuoteDoc, viewer: TeamUser, roster: TeamUser[], reviewLimits: unknown, now: number): QuoteNextStepView {
   const ctx: ReviewLimitContext = {
     limits: reviewLimitsFrom(reviewLimits),
-    roster: roster.map((u) => ({ id: u.id, name: u.name, status: u.status ?? "active", canApprove: permsOf(u.roles).has("approve") })),
+    roster: roster.map((u) => ({ id: u.id, name: u.name, status: u.status ?? "active", canApprove: roleCan("approve", u.roles) })),
   };
-  const perms = permsOf(viewer.roles);
   const quote = q as unknown as Quote;
   return quoteNextStep({
     status: quote.status,
@@ -190,11 +190,11 @@ export function nextStepFor(q: QuoteDoc, viewer: TeamUser, roster: TeamUser[], r
     chip: reviewLimitChip(quote, ctx, viewer.name),
     owner: (q.owner || q.preparedBy || "").trim(),
     viewer: viewer.name,
-    viewerCanApprove: perms.has("approve"),
-    viewerCanCreate: perms.has("create"),
-    viewerCanSend: perms.has("send"),
+    viewerCanApprove: roleCan("approve", viewer.roles),
+    viewerCanCreate: roleCan("create", viewer.roles),
+    viewerCanSend: roleCan("send", viewer.roles),
     submittedAgo: q.review?.submittedAt ? timeAgo(q.review.submittedAt, now) : "",
-    reviewers: roster.filter((u) => permsOf(u.roles).has("approve")).map((u) => u.name),
+    reviewers: roster.filter((u) => roleCan("approve", u.roles)).map((u) => u.name),
     asOf: typeof q.updatedAt === "number" ? q.updatedAt : 0,
   });
 }
@@ -217,13 +217,17 @@ async function listFixtures(store: HandoffStore, settings: Record<string, unknow
   return rows.sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
 }
 
-/** catalog getManyBySku: the live part for each sku, following `renamedTo`. */
-function bySkuResolver(catalog: CatalogPart[]): (sku: string) => CatalogPart | undefined {
-  const map = new Map(catalog.map((p) => [p.sku, p]));
+/**
+ * catalog getManyBySku over the rows the slice holds: the live part for each sku, following `renamedTo` through
+ * retired stubs (a stub is `{ id, sku, renamedTo }` — #304 sets renamedTo only on a retired part). A stub that
+ * leads nowhere live (missing, a cycle, more than 8 hops) is absent, as in the app.
+ */
+export function bySkuResolver<P extends Pick<CatalogPart, "sku" | "renamedTo">>(rows: readonly P[]): (sku: string) => P | undefined {
+  const map = new Map(rows.map((p) => [p.sku, p]));
   return (sku) => {
     let p = map.get(sku);
     for (let hop = 0; p && p.renamedTo && p.renamedTo !== p.sku && hop < 8; hop++) p = map.get(p.renamedTo);
-    return p;
+    return p && !p.renamedTo ? p : undefined;
   };
 }
 
@@ -251,14 +255,19 @@ export async function buildEstimatorProps(store: HandoffStore, quoteId: string |
   const preCustomer = handoff?.customerId || undefined;
   const preCategory = handoff?.category || undefined;
 
-  const q = quoteId ? ((await store.get<QuoteDoc>("quotes", quoteId)) ?? null) : null;
-  // The page redirects a service quote to its own builder (estimatorShouldRedirect); the slice holds system estimates only.
   const settings = settingsView();
-  const catalogRows = (await store.all<CatalogPart & { id: string }>("catalog")).map((p) => (p.sku ? p : { ...p, sku: p.id }));
+  const pipelines = resolvePipelines(settings as Parameters<typeof resolvePipelines>[0]);
+  // stores/quotes get(): a quote reads with its pipeline and a stage matching its status (legacy keys convert here).
+  // `get` hands back a copy, so normalizing in place never touches the store.
+  const raw = quoteId ? await store.get<QuoteDoc>("quotes", quoteId) : undefined;
+  const q = raw ? normalizeQuotePipeline(raw as QuoteDoc & { status: string }, pipelines) : null;
+  // The page redirects a service quote to its own builder (estimatorShouldRedirect); the slice holds system estimates only.
+  const allRows = (await store.all<CatalogPart & { id: string }>("catalog")).map((p) => (p.sku ? p : { ...p, sku: p.id }));
+  // Retired stubs (renamedTo) only feed the sku resolver; every other catalog reader sees live parts.
+  const catalogRows = allRows.filter((p) => !p.renamedTo);
   const fixtures = await listFixtures(store, settings);
   const roster = users.all();
   const fixtureRates: FixtureRates = { ...FIXTURE_RATE_DEFAULTS, ...(blobData("fixture_rates") as Partial<FixtureRates>) };
-  const pipelines = resolvePipelines(settings as Parameters<typeof resolvePipelines>[0]);
   const general = blobData("pricing_rules");
   const curtainSewingPct = sewingPctFrom(general[SEWING_PCT_ID]);
   const bonusRates = bonusRatesFrom(general[BONUS_PACKAGE_RATE_ID], general[BONUS_ESTIMATOR_RATE_ID]);
@@ -273,7 +282,7 @@ export async function buildEstimatorProps(store: HandoffStore, quoteId: string |
   const estimateOutputDefaults = sanitizeEstimateOutputDefaults(blobData(ESTIMATE_OUTPUT_BLOB));
 
   // Phase 6 categories, each typical part resolved against the live catalog (fail-soft → Blank only).
-  const liveBySku = bySkuResolver(catalogRows);
+  const liveBySku = bySkuResolver(allRows);
   let systemCategories: CategoryOption[] = [];
   try {
     systemCategories = sanitizeSystemCategories(blobData(SYSTEM_CATEGORIES_BLOB)).map((c) => ({
@@ -344,7 +353,7 @@ export async function buildEstimatorProps(store: HandoffStore, quoteId: string |
   }
 
   const next = q ? nextStepFor(q, user, roster, settings.reviewLimits, now) : null;
-  const can = (perm: "create" | "approve") => permsOf(user.roles).has(perm);
+  const can = (perm: "create" | "approve") => roleCan(perm, user.roles);
 
   return {
     initial,
@@ -375,9 +384,5 @@ export async function buildEstimatorProps(store: HandoffStore, quoteId: string |
     narrativeIntros,
     notIncludedDefault: estimateOutputDefaults.notIncluded,
     ...FIXED,
-    quoteTasks: [],
-    templateSets: [],
-    specKeys: [],
-    suggestionParts: {},
   };
 }
