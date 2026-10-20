@@ -13,8 +13,8 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { lineExtSellOf, systemSellTotal, totals, type QuoteTotals } from "@/app/(app)/estimator/pricing";
-import type { SpecSection } from "@/app/(app)/estimator/types";
+import { lineExtSellOf, systemSellTotal, totals, type QuoteTotals } from "@/lib/estimating-core/pricing";
+import type { SpecSection } from "@/lib/estimating-core/types";
 import type { Ok } from "./test-inbox-org";
 
 /** use-estimator-state.ts TAX_RATE_PCT — the Estimator prices with no tax. */
