@@ -57,6 +57,7 @@ export async function refreshPortsFromStore(store: HandoffStore): Promise<void> 
 }
 
 const team = (): SeedTeamUser[] => ctx.team ?? seedTeam();
+const activeTeam = (): SeedTeamUser[] => team().filter((u) => (u.status ?? "active") === "active");
 const rules = (): SeedRules => ctx.rules ?? seedRules();
 const directory = (): SeedCustomers => ctx.customers ?? seedCustomers();
 const needStore = (port: string): HandoffStore => {
@@ -106,13 +107,13 @@ function readCurrentId(): string | null {
 export const users = {
   /** The acting user: the last setCurrent pick if still on the roster, else the first Admin, else the first user, else STAND_IN_USER. */
   current(): TeamUser {
-    const list = team();
+    const list = activeTeam();
     const id = readCurrentId();
     return list.find((u) => u.id === id) ?? list.find((u) => (u.roles ?? []).includes("Admin")) ?? list[0] ?? STAND_IN_USER;
   },
   /** Act as roster member `id` (ignored when not on the roster). Remembered in localStorage when available. */
   setCurrent(id: string): void {
-    if (!team().some((u) => u.id === id)) return;
+    if (!activeTeam().some((u) => u.id === id)) return;
     ctx.currentId = id;
     try {
       if (typeof localStorage !== "undefined") localStorage.setItem(CURRENT_USER_KEY, id);
@@ -130,7 +131,12 @@ export const users = {
   },
   /** The active roster (users.ts activeUsers()); [STAND_IN_USER] when the slice has none. */
   all(): TeamUser[] {
-    const list = team().filter((u) => (u.status ?? "active") === "active");
+    const list = activeTeam();
+    return list.length ? list : [STAND_IN_USER];
+  },
+  /** Everyone on the roster, inactive included (users.ts allUsers()) — name resolution (bonus records) only. */
+  everyone(): TeamUser[] {
+    const list = team();
     return list.length ? list : [STAND_IN_USER];
   },
 };
@@ -161,6 +167,16 @@ type Directory = {
   companies: SeedCustomers["companies"];
   geo: Map<string, { miles: number; minutes: number }>;
 };
+
+function venueOf(d: Directory, locationId: string | null | undefined, customerId?: string | null): SeedSite | undefined {
+  if (customerId) {
+    const list = d.sitesByCo.get(customerId) ?? [];
+    return (locationId ? list.find((s) => s.legacyLocId === locationId || s.id === locationId) : undefined) ?? list.find((s) => s.isPrimary) ?? list[0];
+  }
+  if (locationId) return [...d.sitesByCo.values()].flat().find((s) => s.legacyLocId === locationId || s.id === locationId);
+  return undefined;
+}
+
 let custCache: { src: SeedCustomers; dir: Directory } | null = null;
 
 /** The Estimator's CustomerLite list from the slice's identity rows (customers.ts all(): by name; venues primary-first; contacts primary-first then name). Pure. */
@@ -356,6 +372,10 @@ export const customers = {
   tierFor(customerId: string | null | undefined, contactName?: string | null): string {
     return resolveTierFor(customerId, contactName).tier;
   },
+  /** True when `travelFor` has a venue to travel to (travelForId's `locationById` found one; false = it returns null). */
+  hasVenue(locationId: string | null | undefined, customerId?: string | null): boolean {
+    return !!venueOf(dir(), locationId, customerId);
+  },
   /**
    * Travel to a venue (customers.ts travelForId): the venue `locationId` (legacyLocId or site id) of
    * `customerId` when given, else that customer's primary venue; then travelFromParts from the
@@ -363,13 +383,7 @@ export const customers = {
    */
   travelFor(locationId: string | null | undefined, customerId?: string | null): TravelLite {
     const d = dir();
-    let site: SeedSite | undefined;
-    if (customerId) {
-      const list = d.sitesByCo.get(customerId) ?? [];
-      site = (locationId ? list.find((s) => s.legacyLocId === locationId || s.id === locationId) : undefined) ?? list.find((s) => s.isPrimary) ?? list[0];
-    } else if (locationId) {
-      site = [...d.sitesByCo.values()].flat().find((s) => s.legacyLocId === locationId || s.id === locationId);
-    }
+    const site = venueOf(d, locationId, customerId);
     if (!site) return { miles: null, minutes: null, officeName: null };
     const offices = (Array.isArray(settingsView().offices) ? settingsView().offices : []) as Office[];
     const venue: Target = {
@@ -408,7 +422,7 @@ export const numbering = {
   async nextEstNo(): Promise<number> {
     const store = needStore("numbering");
     const run = numberQueue.then(async () => {
-      const quotes = await store.all<{ estNo?: unknown }>("quotes");
+      const quotes = await store.allIncludingDeleted<{ estNo?: unknown }>("quotes");
       const last = await store.get<{ id: string; last?: number }>("meta", "estNo");
       const n = nextEstNoFrom(quotes.map((q) => q.estNo), last?.last ?? null);
       await store.put("meta", { id: "estNo", last: n });

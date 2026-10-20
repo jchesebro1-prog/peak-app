@@ -59,6 +59,8 @@ export const CONTACT_COLS = [
 export const CONTACT_EMAIL_COLS = ["id", "contactId", "email", "label", "isPrimary"] as const;
 export const CONTACT_PHONE_COLS = ["id", "contactId", "phone", "label", "isPrimary"] as const;
 export const TEAM_FIELDS = ["id", "name", "roles", "status", "title", "initials", "color"] as const;
+/** An inactive user rides along for name resolution only (the bonus record's roster): nothing else about them. */
+export const INACTIVE_TEAM_FIELDS = ["id", "name", "roles", "status"] as const;
 
 /** A document row as db:export writes it. */
 export type DocRow = { id: string; doc?: Record<string, unknown> | null; deleted?: boolean | null };

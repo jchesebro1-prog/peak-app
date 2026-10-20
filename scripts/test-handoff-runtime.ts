@@ -590,8 +590,10 @@ export async function handoffActionChecks(ok: Ok) {
   ok(wrongValue.ok && wrongValue.valueAdjusted && wrongValue.patch.value !== 1, "handoff actions: planSave — a posted value that disagrees is replaced, never trusted");
   const neg = planSave(null, payloadFor([sec("n", [{ price: -5 }])]), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
   ok(!neg.ok && neg.refusedBeforeWrite === "credit", "handoff actions: planSave — a negative line outside the credit line refuses the save");
-  const bigDoc = planSave(null, payloadFor(s1, { document: { type: "doc", content: "x".repeat(10) } as unknown as SavePayload["document"] }), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
-  ok(bigDoc.ok || bigDoc.refusedBeforeWrite === "document", "handoff actions: planSave — a malformed document is sanitized or refused before any write");
+  // a document over the caps (16 × 20,000-char paragraphs > the 200 KB JSON cap) refuses the whole save before any write
+  const hugeDoc = { type: "doc", content: Array.from({ length: 16 }, () => ({ type: "paragraph", content: [{ type: "text", text: "x".repeat(20000) }] })) } as unknown as SavePayload["document"];
+  const bigDoc = planSave(null, payloadFor(s1, { document: hugeDoc }), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
+  ok(!bigDoc.ok && bigDoc.refusedBeforeWrite === "document" && /too large/.test(bigDoc.error), "handoff actions: planSave — a package document over the caps refuses the save before any write");
   const keepGroups = planSave({ ...built, spec: { sections: [], groups: [{ id: "g-base", name: "Base" }] } } as Quote, payloadFor(s1, { groups: undefined }), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
   ok(keepGroups.ok && keepGroups.patch.spec!.groups?.[0]?.id === "g-base", "handoff actions: planSave — an older caller without groups keeps the stored ones");
   ok(settleRewardCreditOffline(s1, null).ok, "handoff actions: settleRewardCreditOffline — no credit line, nothing to settle");
@@ -653,6 +655,15 @@ export async function handoffActionChecks(ok: Ok) {
   ok(after1.value === Math.round(totals((after1.spec as { sections: SpecSection[] }).sections, 0).grand) && (after1.spec as { sections: SpecSection[] }).sections.some((x) => x.items.some(isBonusItem)),
     "handoff actions: saveQuoteAction — the stored sections carry the re-derived bonus lines and the stored value is their total (a re-open shows the same total)");
   ok(save1.next !== undefined && save1.pdf === null && save1.rewardCredit === 0, "handoff actions: saveQuoteAction — next-step view, no PDF, no credit");
+  // the document gate end to end: an over-cap document refuses the save, returns no id / number, and the stored quote is untouched
+  const storedBeforeDoc = JSON.stringify(await store.get("quotes", "Q-G001"));
+  const quotesBeforeDoc = (await store.all("quotes")).length;
+  const hugeDocPayload = { type: "doc", content: Array.from({ length: 16 }, () => ({ type: "paragraph", content: [{ type: "text", text: "x".repeat(20000) }] })) } as unknown as SavePayload["document"];
+  const docRefused = await A.saveQuoteAction("Q-G001", payloadFor(sections, { name: "Should not save", document: hugeDocPayload }));
+  const docRefusedNew = await A.saveQuoteAction(null, payloadFor(sections, { name: "Should not create", document: hugeDocPayload }));
+  ok(!docRefused.ok && docRefused.id === null && docRefused.number === null && /too large/.test(docRefused.error ?? "") && JSON.stringify(await store.get("quotes", "Q-G001")) === storedBeforeDoc,
+    "handoff actions: saveQuoteAction — an over-cap package document refuses the save: no id, no number, the stored quote unchanged");
+  ok(!docRefusedNew.ok && docRefusedNew.id === null && docRefusedNew.number === null && (await store.all("quotes")).length === quotesBeforeDoc, "handoff actions: saveQuoteAction — an over-cap document on a NEW estimate creates nothing");
   const created = await A.saveQuoteAction(null, payloadFor([sec("sysN", [{ qty: 1 }])], { name: "Brand new" }));
   const createdDoc = created.id ? await repo.get(created.id) : null;
   ok(created.ok && !!createdDoc && createdDoc.owner === "Ann Admin" && createdDoc.status === "draft" && /^EST-\d+$/.test(created.number ?? "") && created.pipelineId !== null,
@@ -729,6 +740,9 @@ export async function handoffActionChecks(ok: Ok) {
   ok(tierR.ok && tierR.pricingTier === "base" && tierR.label === "Base", `handoff actions: resolveTierAction — via ports (got ${JSON.stringify(tierR)})`);
   ok((await A.travelForSelectionAction("c-alpha", "loc1"))?.miles === 12 && (await A.travelForSelectionAction(null, null)) === null && (await A.travelForSelectionAction("zz", null)) === null,
     "handoff actions: travelForSelectionAction — the venue's travel; no customer / unknown customer → null");
+  const noOffice = await A.travelForSelectionAction("c-beta", null);
+  ok(customers.hasVenue(null, "c-beta") === (noOffice !== null) && (customers.hasVenue(null, "c-alpha") ? (await A.travelForSelectionAction("c-alpha", null)) !== null : true),
+    `handoff actions: travelForSelectionAction — null only when there is no venue (a venue with no estimate still answers all-null) (got ${JSON.stringify(noOffice)})`);
 
   // search / move / copy
   const hits = await A.searchQuotesAction("9001", null);
@@ -765,6 +779,62 @@ export async function handoffActionChecks(ok: Ok) {
   ok(!!cpId && (await repo.get(cpId))?.status === "lost", "handoff actions: setQuoteStatus — the hub's form action moves the status");
   const del = await QA.deleteQuoteAction(cpId);
   ok(del.ok && !!cpId && (await repo.get(cpId)) === null, "handoff actions: deleteQuoteAction — a tombstone");
+
+  // --- review fixes: id / number reuse, bonus roster, raw writes ---
+  {
+    const mk = async (extra: Array<{ id: string } & Record<string, unknown>>, teamIn: SeedTeamUser[]) => {
+      const st = await openStore({ quotes: docs(extra), catalog: [], fixtures: [] }, { idb: null });
+      configurePorts({ store: st, customers: EMPTY_CUSTOMERS, rules: { settings: {}, blobs: {} }, team: teamIn });
+      return st;
+    };
+    const q0 = (id: string, estNo: number, over: Record<string, unknown> = {}) =>
+      ({ id, estNo, name: id, status: "draft", quoteType: "system", source: "estimator", value: 0, margin: 0, createdAt: 1, updatedAt: 1, history: [], revisions: [], spec: { sections: [], mobs: [] }, ...over });
+    const t2: SeedTeamUser[] = [
+      { id: "u1", name: "Ann Admin", roles: ["Admin"], status: "active" },
+      { id: "u3", name: "Gone Person", roles: ["Estimator"], status: "inactive" },
+    ];
+
+    // deleting the highest seed quote never frees its id or its estimate number
+    const stR = await mk([q0("Q-2050", 1050), q0("Q-2060", 1060)], t2);
+    const repoR = quoteRepo(stR);
+    await repoR.remove("Q-2060");
+    const nq = await repoR.create({ name: "After delete" });
+    const nq2 = await repoR.create({ name: "After delete 2" });
+    ok(nq.id === "Q-2061" && (nq.estNo ?? 0) === 1061 && nq2.id === "Q-2062" && (nq2.estNo ?? 0) === 1062,
+      `handoff actions: repo.create — after deleting the highest SEED quote, its id and estimate number are never reused (got ${nq.id}/${nq.estNo}, ${nq2.id}/${nq2.estNo})`);
+    ok((await stR.allIncludingDeleted<{ id: string }>("quotes")).some((q) => q.id === "Q-2060") && !(await stR.all<{ id: string }>("quotes")).some((q) => q.id === "Q-2060"),
+      "handoff store: allIncludingDeleted lists a tombstoned seed doc; all() does not");
+    await repoR.remove(nq2.id);
+    const nq3 = await repoR.create({ name: "After deleting a new one" });
+    ok(nq3.id === "Q-2063" && (nq3.estNo ?? 0) === 1063, `handoff actions: repo.create — a deleted NEW quote's id and number are remembered too (got ${nq3.id}/${nq3.estNo})`);
+
+    // the roster: users.all() stays active-only, everyone() adds the inactive (name + status + roles only)
+    ok(users.all().map((u) => u.id).join() === "u1" && users.everyone().map((u) => u.id).join() === "u1,u3", "handoff runtime: users.all — active only; users.everyone — inactive included");
+    users.setCurrent("u3");
+    ok(users.current().id === "u1", "handoff runtime: users.setCurrent — an inactive user can't be acted as");
+
+    // a won quote's bonus record resolves an inactive owner's userId from the FULL roster
+    const AR = estimatorActions(stR);
+    const gp = await AR.saveQuoteAction(null, payloadFor([sec("bon", [{ qty: 2, cost: 50, price: 100 }, { sku: "LAB", qty: 4, cost: 20, price: 40, labor: true }])], { name: "Gone owner" }));
+    await repoR.update(gp.id!, { owner: "Gone Person", preparedBy: "Ann Admin" } as Partial<Quote>);
+    const wonGp = await repoR.setStatus(gp.id!, "won", "Ann Admin", { bypassApprovalGate: "historical-import" } as never);
+    const credits = (wonGp?.bonusRecord as { credits?: Array<{ name: string; userId: string | null }> } | null | undefined)?.credits ?? [];
+    ok(credits.length > 0 && credits.find((c) => c.name === "Gone Person")?.userId === "u3" && credits.find((c) => c.name === "Ann Admin")?.userId === "u1",
+      `handoff actions: bonus record — an inactive owner still resolves to a userId (got ${JSON.stringify(credits)})`);
+
+    // writes mutate the RAW stored doc: a legacy stage key stays as stored after an unrelated update; reads still normalize
+    const stW = await mk([q0("Q-2070", 1070, { stage: "legacy-stage-key" })], t2);
+    const repoW = quoteRepo(stW);
+    const readBefore = await repoW.get("Q-2070");
+    await repoW.update("Q-2070", { name: "Renamed" });
+    const rawAfter = (await stW.get<Quote>("quotes", "Q-2070"))!;
+    const readAfter = (await repoW.get("Q-2070"))!;
+    ok(rawAfter.name === "Renamed" && rawAfter.stage === "legacy-stage-key" && rawAfter.pipelineId === undefined, `handoff actions: repo.update — the stored doc keeps its raw legacy stage (got ${rawAfter.stage}/${rawAfter.pipelineId})`);
+    ok(!!readBefore && readBefore.stage !== "legacy-stage-key" && readAfter.stage !== "legacy-stage-key" && !!readAfter.pipelineId && readAfter.name === "Renamed",
+      "handoff actions: repo.get — reads still normalize onto the pipeline");
+    await repoW.setQuotePeople("Q-2070", { preparedBy: "Ann Admin" });
+    ok((await stW.get<Quote>("quotes", "Q-2070"))?.stage === "legacy-stage-key", "handoff actions: repo.setQuotePeople — another raw patch keeps the legacy stage too");
+  }
 
   // refusals
   const ref = refusedEstimatorActions();

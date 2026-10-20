@@ -16,11 +16,12 @@ import type { HandoffStore } from "../store";
 import { refreshPortsFromStore, users } from "../ports";
 import { quoteRepo } from "../quote-repo";
 import { STAGES, statusFailureMessage } from "../quote-model";
+import type { Impl as ImplOf } from "./util";
 
 export const QUOTES_ACTIONS_KEY = "src/app/(app)/quotes/actions.ts";
 
 type A = typeof Original;
-type Impl<K extends keyof A> = A[K] extends (...a: infer P) => Promise<infer R> ? (...a: P) => Promise<R> : never;
+type Impl<K extends keyof A> = ImplOf<A, K>;
 
 export type ImplementedQuotesAction = "setQuoteStatus" | "deleteQuoteAction";
 

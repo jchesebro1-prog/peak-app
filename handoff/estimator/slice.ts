@@ -10,7 +10,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  BLOB_IDS, COMPANY_COLS, CONTACT_COLS, CONTACT_EMAIL_COLS, CONTACT_PHONE_COLS, CATALOG_FIELDS, FIXTURE_FIELDS, SETTINGS_FIELDS, SITE_COLS, TEAM_FIELDS,
+  BLOB_IDS, COMPANY_COLS, CONTACT_COLS, CONTACT_EMAIL_COLS, CONTACT_PHONE_COLS, CATALOG_FIELDS, FIXTURE_FIELDS, SETTINGS_FIELDS, SITE_COLS, TEAM_FIELDS, INACTIVE_TEAM_FIELDS,
   pickAndScrub, pickFields, scanForSecrets, scrubValue, selectEstimates, packCatalog, catalogBody,
   type DocRow, type QuoteDoc, type ScrubEntry,
 } from "./slice-rules";
@@ -163,8 +163,9 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[] }
   files["data/customers.js"] = js("PEAK_CUSTOMERS", customers);
   for (const [k, v] of Object.entries(customers)) counts[k] = v.length;
 
-  // --- team: active users only, no contact details ---
-  const team = (exp.users ?? []).filter((u) => u.status === "active").map((u) => pickFields(u, TEAM_FIELDS));
+  // --- team: active users (no contact details) + inactive users as { id, name, status, roles } only — the bonus
+  // record names a split's people from the FULL roster (users.ts allUsers()), so a departed owner still resolves ---
+  const team = (exp.users ?? []).map((u) => pickFields(u, u.status === "active" ? TEAM_FIELDS : INACTIVE_TEAM_FIELDS));
   files["data/team.js"] = js("PEAK_TEAM", team);
   counts.team = team.length;
 

@@ -130,7 +130,12 @@ export async function handoffSliceChecks(ok: Ok) {
   ok(!cust.contacts.some((c) => c.id === "ct-4") && cust.contacts.some((c) => c.id === "ct-1"), "handoff:slice: the deleted contact ct-4 is excluded");
 
   const team = load("data/team.js").PEAK_TEAM as Array<Record<string, unknown>>;
-  ok(team.length === 2 && team.every((u) => u.status === "active" && !("email" in u) && !("googleEmail" in u) && !("phone" in u)), "handoff:slice: team = active users, no emails or phones");
+  const activeTeam = team.filter((u) => u.status === "active");
+  const inactiveTeam = team.filter((u) => u.status !== "active");
+  ok(team.length === 3 && activeTeam.length === 2 && !team.some((u) => "email" in u || "googleEmail" in u || "phone" in u),
+    "handoff:slice: team = every user, no emails or phones");
+  ok(inactiveTeam.length === 1 && inactiveTeam.every((u) => Object.keys(u).sort().join() === "id,name,roles,status"),
+    `handoff:slice: an inactive user rides along as { id, name, roles, status } only (got ${JSON.stringify(inactiveTeam)})`);
 
   const rules = load("data/rules.js").PEAK_RULES as { settings: Record<string, unknown>; blobs: Record<string, unknown> };
   ok(Object.keys(rules.blobs).join(",") === "pricing_rules" && !("assist_secrets" in rules.blobs) && !("portal_departments" in rules.blobs), "handoff:slice: only allow-listed blobs reach rules.js");

@@ -14,49 +14,41 @@
 import type * as Original from "@/app/(app)/estimator/actions";
 import type { Quote } from "@/lib/stores/quotes";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
-import type { CatalogSearch, QuoteLite, SpecMob, SpecSection, TravelLite, VendorQuote } from "@/app/(app)/estimator/types";
-import type { SystemGroup } from "@/lib/estimate-groups/groups";
-import type { CopyCatalogPart, CopyFixture } from "@/lib/estimating-core/copy-system";
+import type { CatalogSearch, QuoteLite, TravelLite } from "@/app/(app)/estimator/types";
 import { copySectionForTarget } from "@/lib/estimating-core/copy-system";
 import { rankCatalogParts } from "@/lib/estimating-core/catalog-rank";
 import { withSanitizedKeyProducts } from "@/lib/estimating-core/narrative";
 import { seedMarginOf, usableTierMargin } from "@/lib/estimating-core/tier-reprice";
-import { sanitizeSystemSell, totals } from "@/lib/estimating-core/pricing";
+import { sanitizeSystemSell } from "@/lib/estimating-core/pricing";
 import { COVER_SUMMARY_MAX, NOT_INCLUDED_MAX, cleanPlainText, withSanitizedOutputFields } from "@/lib/estimate-output/fields";
-import { normalizeSystemOrder, sanitizeGroups, withoutGroupMeta } from "@/lib/estimate-groups/groups";
-import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
-import { docIdFloor } from "@/lib/package-doc/ids";
-import { reIdIncomingSection } from "@/lib/estimate-line-move/reid";
-import { canonicalBonusSections } from "@/lib/estimate-bonus/canonical";
-import { stripBonusLines } from "@/lib/estimate-bonus/rules";
-import { rewardCreditOf, quoteRewardCredit, withRewardCredit, withoutRewardCredit } from "@/lib/rewards/credit-line";
-import { normalizePackageSelection, type PackageSelection } from "@/lib/estimate-output/package-selection";
+import { withoutGroupMeta } from "@/lib/estimate-groups/groups";
+import { quoteRewardCredit, withoutRewardCredit } from "@/lib/rewards/credit-line";
 import { normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { documentRevStamp } from "@/lib/quote-pdf/state";
 import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
 import { PRICING_TIER_LABEL } from "@/lib/identity/config";
 import { rackFactsOrUndefined } from "@/lib/rack/part-facts";
-import { allAssembliesFrom, fixtureSkus, type FixtureRecord } from "@/lib/fixture-assemblies";
 import { reopenedAtWonVersion } from "@/lib/quote-won-version";
 import { quoteOwnerName } from "@/lib/review-limits";
 import { sameName } from "@/lib/quote-approval-rules";
 import { canChangeQuotePeople, PEOPLE_LOCKED_AFTER_SEND } from "@/lib/quote-people-lock";
-import { rewriteQuoteSpec } from "@/lib/catalog-rename/rewrite";
 import { NOT_IN_PROTOTYPE, type ActionImpl } from "../actions-registry";
 import { refresh } from "../router";
 import type { HandoffStore } from "../store";
 import { clock, customers, refreshPortsFromStore, resolveTierFor, settingsView, users, type TeamUser } from "../ports";
-import { bonusRatesNow, bySkuResolver, listFixtures, liveCatalog, renameRefs } from "../readers";
+import { bonusRatesNow, liveCatalog } from "../readers";
 import { nextStepFor } from "../props/estimator";
-import { quoteRepo, type QuoteRepo } from "../quote-repo";
+import { quoteRepo } from "../quote-repo";
 import { isApprovalGateRefusal, resolveSaveStatusChange, STAGES, statusFailureMessage } from "../quote-model";
-import { planSave, vendorIdsInSections, vendorQuoteRows, vendorQuotesForSave, type QuotePatch } from "./save-core";
+import type { Impl as ImplOf } from "./util";
+import { placeSystemInEstimate, copyPricingFor, renameHelpers } from "./place-system";
+import { planSave, vendorQuotesForSave, type QuotePatch } from "./save-core";
 
 export const ESTIMATOR_ACTIONS_KEY = "src/app/(app)/estimator/actions.ts";
 
 type A = typeof Original;
 /** The original action's own signature, resolved (args → awaited result). */
-type Impl<K extends keyof A> = A[K] extends (...a: infer P) => Promise<infer R> ? (...a: P) => Promise<R> : never;
+type Impl<K extends keyof A> = ImplOf<A, K>;
 
 export type ImplementedEstimatorAction =
   | "saveQuoteAction"
@@ -92,138 +84,6 @@ const NO_PERMISSION = "You don't have permission to do that.";
 
 const nextFor = (q: Quote | null, user: TeamUser): QuoteNextStepView | null =>
   q ? nextStepFor(q as Parameters<typeof nextStepFor>[0], user, users.all(), settingsView().reviewLimits, clock.now()) : null;
-
-/** catalog-renames quoteSpecFollowingRenames / selectionFollowingRenames over the slice's rename stubs. */
-async function renameHelpers(store: HandoffStore) {
-  const { m, models } = await renameRefs(store);
-  return {
-    rewriteSpec: <T,>(spec: T): T => {
-      if (!m.size) return spec;
-      const next = rewriteQuoteSpec(spec, m, models);
-      return next === null ? spec : (next as T);
-    },
-    followSelection: async (sel: PackageSelection): Promise<PackageSelection> => {
-      if (!sel.excludedDatasheets.length || !m.size || !sel.excludedDatasheets.some((s) => m.has(s))) return sel;
-      return normalizePackageSelection({ ...sel, excludedDatasheets: sel.excludedDatasheets.map((s) => m.get(s) ?? s) });
-    },
-    renames: { m, models },
-  };
-}
-
-/** copy-pricing copyPricingFor over the store: today's catalog + resolved fixtures for exactly these lines' SKUs. */
-async function copyPricingFor(store: HandoffStore, items: readonly SpecSection["items"][number][]) {
-  const skus = new Set<string>();
-  const fixtureIds = new Set<string>();
-  for (const it of items) {
-    if (it?.sku) skus.add(it.sku);
-    const comps = Array.isArray(it?.components) ? it.components : [];
-    if (comps.length) {
-      if (!it.track) fixtureIds.add(it.fixtureId || it.sku);
-      comps.forEach((c) => c?.sku && skus.add(c.sku));
-    }
-  }
-  let fixtureRecords: FixtureRecord[] = [];
-  if (fixtureIds.size) {
-    fixtureRecords = (await listFixtures(store)).filter((r) => fixtureIds.has(r.id));
-    fixtureRecords.forEach((r) => fixtureSkus(r).forEach((s) => skus.add(s)));
-  }
-  const rows = await liveCatalog(store);
-  const resolve = bySkuResolver(rows, store.catalogRenames);
-  const found = new Map<string, (typeof rows)[number]>();
-  for (const s of skus) {
-    const p = resolve(s);
-    if (p) found.set(s, p);
-  }
-  const parts = [...new Map([...found.values()].map((p) => [p.sku, p] as const)).values()];
-  const catalog = new Map<string, CopyCatalogPart>();
-  for (const [sku, p] of found) {
-    const cost = Number(p.cost);
-    if (!p.sku || !(Number.isFinite(cost) && cost > 0) || catalog.has(sku)) continue;
-    catalog.set(sku, { sku: p.sku, cost, list: Number(p.list) || 0 });
-  }
-  const fixtures = new Map<string, CopyFixture>();
-  if (fixtureRecords.length) {
-    for (const a of allAssembliesFrom(fixtureRecords, parts)) {
-      fixtures.set(a.id, {
-        id: a.id,
-        components: a.components.filter((c) => c.found && (c.cost > 0 || c.costOverride !== undefined)).map((c) => ({ sku: c.sku, cost: c.cost, list: c.list })),
-      });
-    }
-  }
-  return { catalog, fixtures, renames: (await renameHelpers(store)).renames };
-}
-
-type SourceContext = { customerId: string | null; locationId: string | null; customer: string; contactName: string };
-
-/**
- * actions.ts placeSystemInEstimate — the shared tail of Move and Copy: an existing target gains the
- * section (re-id'd, bonus lines re-derived, its own credit re-pinned); a new target is a draft for the
- * source's customer. Only the vendor quotes this section's own lines name travel. Left out: vendor
- * parties, the lead/companies split and Scope-only inheritance (#348 — no parties in the prototype), PDFs.
- */
-async function placeSystemInEstimate(
-  store: HandoffStore,
-  repo: QuoteRepo,
-  placed: SpecSection,
-  target: Original.MoveSystemTarget,
-  opts: { newName: string; sourceContext: SourceContext; vendorQuotes: VendorQuote[]; owner: string; tier?: { pricingTier: string; tierMargin: number } },
-): Promise<{ ok: true; targetId: string; targetName: string; targetNumber: string } | { ok: false; error: string }> {
-  const placedIds = vendorIdsInSections([placed]);
-  const rates = bonusRatesNow();
-  // Only records this section's own lines name travel; stamped against the target's own rows (prepareVendorQuotesForSave).
-  const carry = (targetRows: unknown) =>
-    vendorQuotesForSave({ vendorQuotes: targetRows, revisions: [] }, vendorQuoteRows(opts.vendorQuotes).filter((vq) => placedIds.has(vq.id)), [placed], clock.now(), customers.isVendorCompany);
-  if (target.kind === "existing") {
-    const existing = await repo.get(target.quoteId);
-    if (!existing) return { ok: false, error: "That estimate could not be found." };
-    const placedVq = carry(existing.vendorQuotes);
-    const existingSpec = existing.spec as { sections?: SpecSection[]; mobs?: SpecMob[]; groups?: SystemGroup[]; document?: unknown } | null | undefined;
-    const existingDoc = sanitizePackageDoc(existingSpec?.document);
-    const existingGroups = sanitizeGroups(existingSpec?.groups);
-    const incoming = reIdIncomingSection(stripBonusLines(withoutGroupMeta(placed)), existingSpec?.sections || [], docIdFloor(existingDoc));
-    const appendedRaw = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([incoming])], existingGroups);
-    const appended = canonicalBonusSections({ source: existing.source, quoteType: existing.quoteType, status: existing.status }, appendedRaw, rates);
-    const maxItemId = appended.reduce((m, sec) => Math.max(m, ...(sec?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
-    const mergedSections = withRewardCredit(appended, rewardCreditOf(appended), maxItemId + 1);
-    const t = totals(mergedSections, 0);
-    const updated = await repo.update(target.quoteId, {
-      spec: { sections: normalizeSystemOrder(mergedSections, existingGroups), mobs: existingSpec?.mobs || [], groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}) },
-      value: t.grand,
-      margin: t.margin,
-      ...(placedVq.length ? { vendorQuotes: [...vendorQuoteRows(existing.vendorQuotes).filter((vq) => !placedIds.has(vq.id)), ...placedVq] } : {}),
-    } as QuotePatch);
-    if (!updated) return { ok: false, error: "That estimate could not be found." };
-    refresh();
-    return { ok: true, targetId: updated.id, targetName: updated.name, targetNumber: displayQuoteNumber(updated) };
-  }
-  const placedVq = carry([]);
-  const newSections = canonicalBonusSections({ source: "estimator", status: "draft" }, withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))]), rates);
-  const t = totals(newSections, 0);
-  let created: Quote;
-  try {
-    created = await repo.create({
-      name: opts.newName,
-      customer: opts.sourceContext.customer,
-      customerId: opts.sourceContext.customerId,
-      locationId: opts.sourceContext.locationId,
-      source: "estimator",
-      status: "draft",
-      spec: { sections: newSections, mobs: [] },
-      value: t.grand,
-      margin: t.margin,
-      owner: opts.owner,
-      ...(opts.tier ? { pricingTier: opts.tier.pricingTier, tierMargin: opts.tier.tierMargin } : {}),
-    });
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not create the new estimate — please try again." };
-  }
-  const withContact = await repo.update(created.id, {
-    contactName: opts.sourceContext.contactName || "",
-    ...(placedVq.length ? { vendorQuotes: placedVq } : {}),
-  } as QuotePatch);
-  refresh();
-  return { ok: true, targetId: created.id, targetName: (withContact || created).name, targetNumber: displayQuoteNumber(withContact || created) };
-}
 
 /** The browser implementations, over `store`. Every action re-reads the settings / blobs first (refreshPortsFromStore). */
 export function estimatorActions(store: HandoffStore): { [K in ImplementedEstimatorAction]: Impl<K> } {
@@ -417,9 +277,9 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
   const travelForSelectionAction: Impl<"travelForSelectionAction"> = async (customerId, locationId): Promise<TravelLite | null> => {
     if (!customerId) return null;
     await ready();
-    const est = customers.travelFor(locationId || null, customerId);
-    // travelForId returns null when the customer has no venue to travel to.
-    return est.miles == null && est.minutes == null && est.officeName == null ? null : est;
+    // travelForId returns null when the customer has no venue to travel to — and only then (a venue
+    // with no office or coordinates still answers with all-null fields, like the app).
+    return customers.hasVenue(locationId || null, customerId) ? customers.travelFor(locationId || null, customerId) : null;
   };
 
   const updateQuoteMetaAction: Impl<"updateQuoteMetaAction"> = async (id, meta) => {

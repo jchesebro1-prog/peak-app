@@ -21,6 +21,7 @@ import { quoteRewardCredit, rewardCreditOf, sanitizeRewardCredit, withRewardCred
 import { normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { keepLiveVendorCompanies, stampVendorQuotes, vendorCompanyIdsOf } from "@/lib/vendor-quotes/rules";
 import { ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
+import { maxItemId } from "./util";
 
 /** The Estimator's quote doc fields beyond the promoted Quote columns (actions.ts QuoteExtras). */
 export type QuotePatch = Partial<Quote> & {
@@ -50,8 +51,7 @@ export function settleRewardCreditOffline(
     const locked = quoteRewardCredit(prior as Quote);
     const check = sanitizeRewardCredit(sections, Number.POSITIVE_INFINITY);
     if (!check.ok) return check;
-    const maxId = sections.reduce((m, s) => Math.max(m, ...(s?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
-    const out = withRewardCredit(check.sections, locked, maxId + 1);
+    const out = withRewardCredit(check.sections, locked, maxItemId(sections) + 1);
     return { ok: true, sections: out, credit: rewardCreditOf(out) };
   }
   const res = sanitizeRewardCredit(sections, 0);

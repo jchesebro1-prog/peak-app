@@ -42,6 +42,12 @@ export interface HandoffStore {
   get<T>(c: Coll, id: string): Promise<T | undefined>;
   /** seed ∪ overlay − tombstones, overlay wins, seed order kept, new ids appended. Shared — never mutate. */
   all<T>(c: Coll): Promise<T[]>;
+  /**
+   * `all()` plus the docs that were deleted: every seed doc (a tombstoned one reads as its seed copy) ∪ the live overlay
+   * docs. For id / number counters only — a deleted seed id or number is never handed out again. (An overlay-only doc
+   * that was deleted is gone; the `meta/*` counters remember what was minted.) Shared — never mutate.
+   */
+  allIncludingDeleted<T>(c: Coll): Promise<T[]>;
   put<T extends { id: string }>(c: Coll, doc: T): Promise<void>;
   /** Writes a tombstone (hides a seed doc too). */
   remove(c: Coll, id: string): Promise<void>;
@@ -432,6 +438,11 @@ export async function openStore(seed: StoreSeed, opts: { idb?: IDBFactory | null
     },
     async all<T>(c: Coll) {
       return overlayMerge(seedOf(c), overlay.get(c)!) as T[];
+    },
+    async allIncludingDeleted<T>(c: Coll) {
+      const live = new Map<string, { id: string } | null>();
+      for (const [id, d] of overlay.get(c)!) if (d) live.set(id, d);
+      return overlayMerge(seedOf(c), live) as T[];
     },
     async put<T extends { id: string }>(c: Coll, doc: T) {
       if (!doc || typeof doc.id !== "string" || doc.id === "") throw new Error(`put(${c}): a doc needs a string id`);

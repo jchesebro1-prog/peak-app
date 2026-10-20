@@ -70,26 +70,33 @@ async function renameRewriter(store: HandoffStore): Promise<(s: unknown) => unkn
   return (s) => (s && r.m.size ? rewriteQuoteSpec(s, r.m, r.models) ?? s : s);
 }
 
-const bonusUsers = () => users.all().map((u) => ({ id: u.id, name: u.name }));
+/** The bonus record names its people from the FULL roster, inactive included (users.ts allUsers()). */
+const bonusUsers = () => users.everyone().map((u) => ({ id: u.id, name: u.name }));
 
 export type QuoteRepo = ReturnType<typeof quoteRepo>;
 
 /** The quotes store over `store`. Every read is normalized onto its pipeline (stores/quotes get()). */
 export function quoteRepo(store: HandoffStore) {
+  /** The stored doc as written — what getDoc hands the app's writers (a copy: the store clones on get). */
+  const raw = async (id: string): Promise<Quote | null> => (id ? (await store.get<Quote>("quotes", id)) ?? null : null);
+  /** A read view: the doc onto its pipeline, on a copy (the stored doc is never rewritten by a read). */
+  const view = (q: Quote): Quote => normalizeQuotePipeline(structuredClone(q), pipelinesNow());
   const read = async (id: string): Promise<Quote | null> => {
-    if (!id) return null;
-    const q = await store.get<Quote>("quotes", id);
-    return q ? normalizeQuotePipeline(q, pipelinesNow()) : null;
+    const q = await raw(id);
+    return q ? view(q) : null;
   };
 
-  /** quotes.ts patchQuote: read → mutate → write under the lock. Null when the quote is missing. */
+  /**
+   * quotes.ts patchQuote: read the RAW doc → mutate → write it back under the lock (a legacy stage key stays
+   * as stored; only reads normalize). Returns the written doc as a read sees it. Null when the quote is missing.
+   */
   const patch = (id: string, mutate: (doc: Quote) => void): Promise<Quote | null> =>
     withLock(`quote:${id}`, async () => {
-      const doc = await read(id);
+      const doc = await raw(id);
       if (!doc) return null;
       mutate(doc);
       await store.put("quotes", doc);
-      return doc;
+      return view(doc);
     });
 
   const repo = {
@@ -113,7 +120,7 @@ export function quoteRepo(store: HandoffStore) {
         const quoteType = partial.quoteType || "system";
         const pipes = carriesPipeline(quoteType) ? pipelinesNow() : null;
         const pl = pipes ? quotePipelineFor(pipes, { pipelineId: partial.pipelineId || pipes.defaultQuotePipelineId }) : null;
-        const all = await store.all<{ id: string }>("quotes");
+        const all = await store.allIncludingDeleted<{ id: string }>("quotes");
         const last = await store.get<{ id: string; last?: number }>("meta", "quoteId");
         const { id, n } = nextQuoteId(all.map((q) => q.id), last?.last ?? null);
         const estNo = await numbering.nextEstNo();
@@ -149,10 +156,10 @@ export function quoteRepo(store: HandoffStore) {
       let moved = false;
       const rewrite = await renameRewriter(store);
       const out = await withLock(`quote:${id}`, async () => {
-        const q = await read(id);
+        const q = await raw(id); // the stored doc, like setStatus's getDoc
         if (!q) return null;
         if (typeof opts.expectUpdatedAt === "number" && q.updatedAt !== opts.expectUpdatedAt) throw new QuoteVersionChanged();
-        if (q.status === status) return q;
+        if (q.status === status) return view(q);
         const gated = !resolveStatusGate(status, null, opts).ok;
         const reopen = opts.bypassApprovalGate === "historical-import" ? null : reopenPlanFor(q, status, rewrite);
         const gateQ = asReopened(q, reopen);
@@ -174,7 +181,7 @@ export function quoteRepo(store: HandoffStore) {
         });
         await store.put("quotes", q);
         moved = true;
-        return q;
+        return view(q);
       });
       if (out && moved && status === "won") {
         try {
