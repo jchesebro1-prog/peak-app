@@ -1,0 +1,46 @@
+{
+  "id": "Q-G002",
+  "estNo": 9002,
+  "systems": [
+    {
+      "id": "s1",
+      "name": "Main curtain",
+      "alternate": false,
+      "sell": 9100,
+      "lines": [
+        {
+          "id": 1,
+          "sku": "CUSTOM",
+          "ext": 9100
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "name": "Motorized main (alternate)",
+      "alternate": true,
+      "sell": 10616,
+      "lines": [
+        {
+          "id": 1,
+          "sku": "CUSTOM",
+          "ext": 10400
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "mat": 9100,
+    "lab": 0,
+    "fr": 0,
+    "opt": 0,
+    "rev": 9100,
+    "cost": 6400,
+    "tax": 0,
+    "grand": 9100,
+    "margin": 0.2967032967032967,
+    "adj": 0,
+    "credit": 0,
+    "alt": 10616
+  }
+}

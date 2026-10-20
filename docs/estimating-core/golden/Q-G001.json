@@ -1,0 +1,42 @@
+{
+  "id": "Q-G001",
+  "estNo": 9001,
+  "systems": [
+    {
+      "id": "s1",
+      "name": "Stage lighting",
+      "alternate": false,
+      "sell": 6744,
+      "lines": [
+        {
+          "id": 1,
+          "sku": "ETC:CS15",
+          "ext": 5000
+        },
+        {
+          "id": 2,
+          "sku": "LABOR",
+          "ext": 1520
+        },
+        {
+          "id": 3,
+          "sku": "ETC:IONXE",
+          "ext": 12500
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "mat": 5000,
+    "lab": 1520,
+    "fr": 224,
+    "opt": 12500,
+    "rev": 6520,
+    "cost": 4480,
+    "tax": 0,
+    "grand": 6744,
+    "margin": 0.3128834355828221,
+    "adj": 0,
+    "credit": 0
+  }
+}
