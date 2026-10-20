@@ -19,8 +19,10 @@ import type { SystemIntro } from "@/lib/narrative/intros";
 import type { EstimateSuggestionView, SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 import type { VendorPdfExtraction } from "@/lib/vendor-pdf/extraction";
 import type { VendorPdfReadUi } from "@/lib/vendor-pdf/fill";
-export * from "@/lib/estimating-core/types";
 import type { PaymentTerms, SpecSection, TrackPart, FabricOpt, TravelLite } from "@/lib/estimating-core/types";
+export * from "@/lib/estimating-core/types";
+
+/* ---------------- vendor quotes (#143, D162) ---------------- */
 
 /**
  * What the vendor-quote attachments on ONE estimate may weigh, as data-URL
@@ -146,6 +148,8 @@ export type VendorDraft = {
   extracted: VendorQuoteExtracted | null;
   pdfRead: VendorPdfReadUi | null;
 };
+
+/* ---------------- server → client props ---------------- */
 
 /** One catalog search hit for the estimator's "Add part from catalog" picker. */
 export type CatalogHit = {

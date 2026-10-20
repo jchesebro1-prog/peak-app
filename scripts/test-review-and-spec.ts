@@ -373,6 +373,15 @@ const atCore = (rel: string): string => {
   const m = /^src\/app\/\(app\)\/estimator\/([a-z-]+)\.ts$/.exec(rel);
   return m && MOVED_TO_CORE.includes(m[1]) ? `${CORE_DIR}/${m[1]}.ts` : rel;
 };
+/* Every moved helper's old route path stays exactly its one-line re-export shim, so a merge can't revive a second copy there. */
+function coreShimChecks(ok: (cond: boolean, msg: string) => void) {
+  for (const name of MOVED_TO_CORE) {
+    const src = readFileSync(join(process.cwd(), EST_DIR, `${name}.ts`), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "").trim();
+    ok(src === `export * from "@/lib/estimating-core/${name}";`,
+      `estimating-core: ${name} at its old route path is only the re-export shim (a merge can't revive a second copy)`);
+  }
+}
 const ESTIMATOR_FILES = [
   "estimator-client.tsx",
   "use-estimator-state.ts",
@@ -11746,7 +11755,7 @@ seeded()
   .then(() => inboxGmailLabelChecks(ok))
   .then(() => popoutPureChecks(ok))
   .then(() => assessmentChecks(ok)).then(() => assessmentDbChecks(ok))
-  .then(() => goldenChecks(ok)).then(() => coreCheckChecks(ok))
+  .then(() => goldenChecks(ok)).then(() => coreCheckChecks(ok)).then(() => coreShimChecks(ok))
   .then(() => partyChecks(ok)).then(() => partyDbChecks(ok))
   .then(() => bidChecks(ok)).then(() => bidDbChecks(ok)).then(() => bidSendChecks(ok)).then(() => bidSendFakeChecks(ok)).then(() => bidSendDbChecks(ok)).then(() => bidFollowupChecks(ok)).then(() => bidFollowupDbChecks(ok)).then(() => vendorChecks(ok)).then(() => vendorDbChecks(ok)).then(() => vendorPdfDbChecks(ok)).then(() => vendorPdfPureChecks(ok)).then(() => vendorPdfFillChecks(ok)).then(() => portalBidPureChecks(ok)).then(() => portalBidDbChecks(ok)).then(() => bidReportPureChecks(ok)).then(() => bidReportWidgetChecks(ok)).then(() => bidReportDbChecks(ok))
   .then(() => oct15PureChecks(ok)).then(() => discardConfirmChecks(ok)).then(() => oct15DbChecks(ok))

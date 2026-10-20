@@ -1,5 +1,4 @@
-import { systemSellTotal } from "./pricing";
-import { systemPrintsInBody } from "@/lib/estimating-core/pricing";
+import { systemSellTotal, systemPrintsInBody } from "@/lib/estimating-core/pricing";
 import type { SpecSection } from "./types";
 import type { QuoteDocumentProps } from "./quote-document";
 import type { SystemGroup } from "@/lib/estimate-groups/groups";
@@ -11,7 +10,6 @@ import type { PackageDoc } from "@/lib/package-doc/types";
  * (which imports a .jpg the Node harness can't load). The printed-systems
  * predicate is QuoteDocument's own `previewSections` filter, verbatim.
  */
-
 
 /** Estimator Phase 2a — a group heading row on the customer document: one per
  *  group with at least one PRINTED system (systemPrintsInBody), placed before

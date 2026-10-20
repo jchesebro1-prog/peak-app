@@ -7,11 +7,17 @@
  * run in a browser with no server, so nothing it reaches may live under
  * src/db, src/lib/stores, src/app or src/components, be a *-server.ts or .tsx
  * file, or come from a server/UI package. A violation names the clean file
- * that imports it — that import is the edge to cut.
+ * that imports it — that import is the edge to cut. An import TypeScript
+ * cannot resolve is an edge too: a Node built-in (fs, node:crypto) or a
+ * forbidden package (server-only) is refused by name, anything else is refused
+ * as unverifiable. A file opening with "use server" / "use client" is refused.
  *
  *   npm run core:check   → prints the closure size; exits 1 on any violation
  *   test:specs           → coreCheckChecks(ok)
  */
+import * as fs from "node:fs";
+import { isBuiltin } from "node:module";
+import * as os from "node:os";
 import * as path from "node:path";
 import ts from "typescript";
 import type { Ok } from "./test-inbox-org";
@@ -49,7 +55,24 @@ function packageOf(rel: string): string | null {
   return pkg;
 }
 
+const UNRESOLVED = "unresolved:";
+
+/** `@a/b/c` → `@a/b`, `x/y` → `x`. */
+function barePackage(spec: string): string {
+  const [a, b] = spec.split("/");
+  return a.startsWith("@") && b ? `${a}/${b}` : a;
+}
+
 export function whyForbidden(rel: string): string | null {
+  if (rel.startsWith(UNRESOLVED)) {
+    const spec = rel.slice(UNRESOLVED.length);
+    if (spec.startsWith("node:") || isBuiltin(spec)) return "Node built-in";
+    if (!spec.startsWith(".") && !spec.startsWith("/")) {
+      const name = barePackage(spec);
+      if (FORBIDDEN_PACKAGES.has(name)) return `server/UI package "${name}"`;
+    }
+    return "unresolved import (cannot verify)";
+  }
   const pkg = packageOf(rel);
   if (pkg !== null) return FORBIDDEN_PACKAGES.has(pkg) ? `server/UI package "${pkg}"` : null;
   for (const [re, why] of FORBIDDEN_PATHS) if (re.test(rel)) return why;
@@ -61,7 +84,9 @@ export function whyForbidden(rel: string): string | null {
 export function moduleSpecifiers(sf: ts.SourceFile): string[] {
   const out: string[] = [];
   const visit = (node: ts.Node) => {
-    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+    if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference) && ts.isStringLiteral(node.moduleReference.expression)) {
+      out.push(node.moduleReference.expression.text);
+    } else if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
       out.push(node.moduleSpecifier.text);
     } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument) && ts.isStringLiteral(node.argument.literal)) {
       out.push(node.argument.literal.text);
@@ -74,36 +99,52 @@ export function moduleSpecifiers(sf: ts.SourceFile): string[] {
   return out;
 }
 
-export function coreReport(root: string = process.cwd()): CoreReport {
+/** The "use server" / "use client" directive a file opens with, if any. */
+export function fileDirective(sf: ts.SourceFile): string | null {
+  const first = sf.statements[0];
+  if (first && ts.isExpressionStatement(first) && ts.isStringLiteral(first.expression)) {
+    const t = first.expression.text;
+    if (t === "use server" || t === "use client") return t;
+  }
+  return null;
+}
+
+export function coreReport(root: string = process.cwd(), entry: string = CORE_ENTRY): CoreReport {
   const cfg = ts.readConfigFile(path.join(root, "tsconfig.json"), ts.sys.readFile);
   const parsed = ts.parseJsonConfigFileContent(cfg.config, ts.sys, root);
   // types: [] — only what the core actually imports, not every @types package.
   const options: ts.CompilerOptions = { ...parsed.options, noEmit: true, incremental: false, types: [] };
-  const program = ts.createProgram([path.join(root, CORE_ENTRY)], options);
+  const program = ts.createProgram([path.join(root, entry)], options);
   const rel = (f: string) => path.relative(root, f).split(path.sep).join("/");
   const sources = program.getSourceFiles().filter((sf) => !program.isSourceFileDefaultLibrary(sf));
 
   const imports = new Map<string, string[]>();
+  const directives = new Map<string, string>();
   for (const sf of sources) {
     const from = rel(sf.fileName);
     const to: string[] = [];
     for (const spec of moduleSpecifiers(sf)) {
       const hit = ts.resolveModuleName(spec, sf.fileName, options, ts.sys).resolvedModule;
-      if (hit) to.push(rel(hit.resolvedFileName));
+      to.push(hit ? rel(hit.resolvedFileName) : `${UNRESOLVED}${spec}`);
     }
     imports.set(from, to);
+    const d = fileDirective(sf);
+    if (d) directives.set(from, d);
   }
 
   // Walk from the entry through clean files only, so each violation is the
   // first forbidden file on a path — the import edge to cut — not everything
   // behind it.
   const byFile = new Map<string, CoreViolation>();
-  const seen = new Set<string>([CORE_ENTRY]);
-  const queue = [CORE_ENTRY];
+  const seen = new Set<string>([entry]);
+  const queue = [entry];
+  const entryDirective = directives.get(entry);
+  if (entryDirective) byFile.set(entry, { file: entry, why: `client/server directive "${entryDirective}"`, importedBy: [] });
   while (queue.length) {
     const from = queue.shift()!;
     for (const to of imports.get(from) ?? []) {
-      const why = whyForbidden(to);
+      const directive = directives.get(to);
+      const why = whyForbidden(to) ?? (directive ? `client/server directive "${directive}"` : null);
       if (why) {
         const v = byFile.get(to) ?? { file: to, why, importedBy: [] };
         if (!v.importedBy.includes(from)) v.importedBy.push(from);
@@ -131,6 +172,36 @@ export async function coreCheckChecks(ok: Ok) {
     (r.violations.length ? `\n${formatViolations(r.violations)}` : ""));
   const probe = ts.createSourceFile("probe.ts", 'export * as ns from "a"; import type { T } from "b"; type U = import("c").U; export { x } from "d"; void import("e");', ts.ScriptTarget.ES2017);
   ok(moduleSpecifiers(probe).join(",") === "a,b,c,d,e", "core:check: moduleSpecifiers sees export * as, import type, import() types, re-exports and dynamic import()");
+  ok(moduleSpecifiers(ts.createSourceFile("p2.ts", 'import fs = require("fs");', ts.ScriptTarget.ES2017)).join(",") === "fs",
+    "core:check: moduleSpecifiers sees import x = require()");
+  ok(whyForbidden("unresolved:fs") === "Node built-in" && whyForbidden("unresolved:node:crypto") === "Node built-in" &&
+    whyForbidden("unresolved:server-only") === 'server/UI package "server-only"' &&
+    whyForbidden("unresolved:@vercel/blob/client") === 'server/UI package "@vercel/blob"' &&
+    whyForbidden("unresolved:left-pad") === "unresolved import (cannot verify)",
+    "core:check: unresolved imports classify as Node built-ins, forbidden packages or unverifiable");
+  // End to end on a throwaway project: each bad entry must come back as a violation.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "core-check-"));
+  try {
+    fs.writeFileSync(path.join(tmp, "tsconfig.json"), JSON.stringify({ compilerOptions: { target: "ES2020", module: "esnext", moduleResolution: "bundler", strict: true, skipLibCheck: true }, include: [] }));
+    const cases: Array<[string, string, string]> = [
+      ["server-only", 'import "server-only";\nexport const a = 1;', 'server/UI package "server-only"'],
+      ["node:fs", 'import "node:fs";\nexport const a = 1;', "Node built-in"],
+      ["fs", 'import { readFileSync } from "fs";\nexport const a = readFileSync;', "Node built-in"],
+      ["import = require", 'import fs = require("fs");\nexport const a = fs;', "Node built-in"],
+      ["use server file", 'import { b } from "./b";\nexport const a = b;', 'client/server directive "use server"'],
+    ];
+    fs.writeFileSync(path.join(tmp, "b.ts"), '"use server";\nexport const b = 1;');
+    for (const [name, src, why] of cases) {
+      fs.writeFileSync(path.join(tmp, "entry.ts"), src);
+      const rep = coreReport(tmp, "entry.ts");
+      ok(rep.violations.some((v) => v.why === why), `core:check: the gate refuses ${name} (${rep.violations.map((v) => v.why).join("; ") || "no violation"})`);
+    }
+    fs.writeFileSync(path.join(tmp, "entry.ts"), 'import { b } from "./c";\nexport const a = b;');
+    fs.writeFileSync(path.join(tmp, "c.ts"), "export const b = 1;");
+    ok(coreReport(tmp, "entry.ts").violations.length === 0, "core:check: a clean synthetic entry has no violations");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
   ok(whyForbidden("src/lib/stores/quotes.ts") !== null && whyForbidden("node_modules/@types/react/index.d.ts") !== null &&
     whyForbidden("node_modules/zod/index.d.ts") === null && whyForbidden("src/lib/rack/rules.ts") === null,
     "core:check: the forbidden-path rules classify stores, @types/react, zod and a pure lib module correctly");

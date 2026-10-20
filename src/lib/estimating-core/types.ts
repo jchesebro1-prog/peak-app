@@ -150,8 +150,6 @@ export type SpecItem = {
   rewardCredit?: boolean;
 };
 
-/* ---------------- vendor quotes (#143, D162) ---------------- */
-
 /** #293: a product the customer narrative features — its paragraph prints
  *  (Narrative presentation only) with the part's photo floated beside it.
  *  Anchored to one line of THIS section: item ids are unique per section

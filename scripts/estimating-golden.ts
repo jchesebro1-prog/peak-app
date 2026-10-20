@@ -12,6 +12,7 @@
  *   test:specs → goldenChecks(ok) over docs/estimating-core/golden-fixtures + golden
  */
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { lineExtSellOf, systemSellTotal, totals, type QuoteTotals } from "@/lib/estimating-core/pricing";
 import type { SpecSection } from "@/lib/estimating-core/types";
@@ -102,9 +103,27 @@ export async function goldenChecks(ok: Ok) {
     "core:golden: only live system quotes with lines (deleted, flame-test and empty quotes skipped)");
   const problems = checkGolden(file, FIXTURE_GOLDEN);
   ok(problems.length === 0, `core:golden: fixture totals match ${FIXTURE_GOLDEN}` + (problems.length ? ` — ${problems.join("; ")}` : ""));
-  const alt = goldenFor(quotes[1]);
-  ok(alt.totals.alt === alt.systems[1].sell && alt.totals.rev === alt.systems[0].sell,
+  const alt = quotes.length >= 2 ? goldenFor(quotes[1]) : null;
+  ok(!!alt && alt.systems.length >= 2 && alt.totals.alt === alt.systems[1].sell && alt.totals.rev === alt.systems[0].sell,
     "core:golden: an alternate system prices into totals.alt only, never rev");
+
+  // Negative probes on a throwaway copy of the goldens: the check must notice a changed price and a missing file.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "core-golden-"));
+  try {
+    for (const f of fs.readdirSync(FIXTURE_GOLDEN).filter((n) => n.endsWith(".json"))) fs.copyFileSync(path.join(FIXTURE_GOLDEN, f), path.join(tmp, f));
+    const names = fs.readdirSync(tmp).filter((n) => n.endsWith(".json")).sort();
+    if (names.length < 2) { ok(false, "core:golden: the fixture goldens have at least two files to probe"); return; }
+    const target = path.join(tmp, names[0]);
+    const text = fs.readFileSync(target, "utf8");
+    const bumped = text.replace(/"ext": (\d)/, (_m, d: string) => `"ext": ${(Number(d) + 1) % 10}`);
+    ok(bumped !== text, "core:golden: the probe changed one digit of a line price");
+    fs.writeFileSync(target, bumped);
+    ok(checkGolden(file, tmp).some((p) => p === `${names[0]}: totals differ`), "core:golden: a changed price in a golden file is reported as totals differ");
+    fs.rmSync(path.join(tmp, names[1]));
+    ok(checkGolden(file, tmp).some((p) => p === `${names[1]}: no golden file`), "core:golden: a missing golden file is reported");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 if (process.argv[1]?.endsWith("estimating-golden.ts")) {
