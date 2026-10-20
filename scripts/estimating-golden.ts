@@ -55,7 +55,16 @@ export function systemQuotesOf(file: ExportFile): SystemQuote[] {
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-export function goldenFor(q: SystemQuote): GoldenQuote {
+/** The three engine functions a golden file is computed with — the app's own (goldenFor) or another
+ *  build of the same engine (the handoff's readable app/estimating-core.js, handoff:verify --parity). */
+export type GoldenEngine = {
+  systemSellTotal: (sec: SpecSection) => number;
+  lineExtSellOf: (it: SpecSection["items"][number]) => number;
+  totals: (sections: SpecSection[], taxRatePct: number) => QuoteTotals;
+};
+
+/** One quote's golden figures, computed with `e`. */
+export function goldenWith(e: GoldenEngine, q: SystemQuote): GoldenQuote {
   return {
     id: q.id,
     estNo: q.estNo,
@@ -63,11 +72,15 @@ export function goldenFor(q: SystemQuote): GoldenQuote {
       id: s.id,
       name: s.name,
       alternate: s.alternate === true,
-      sell: systemSellTotal(s),
-      lines: (s.items ?? []).map((it) => ({ id: it.id, sku: it.sku, ext: lineExtSellOf(it) })),
+      sell: e.systemSellTotal(s),
+      lines: (s.items ?? []).map((it) => ({ id: it.id, sku: it.sku, ext: e.lineExtSellOf(it) })),
     })),
-    totals: totals(q.sections, GOLDEN_TAX_RATE_PCT),
+    totals: e.totals(q.sections, GOLDEN_TAX_RATE_PCT),
   };
+}
+
+export function goldenFor(q: SystemQuote): GoldenQuote {
+  return goldenWith({ systemSellTotal, lineExtSellOf, totals }, q);
 }
 
 export const goldenFileName = (id: string) => `${id.replace(/[^A-Za-z0-9._-]/g, "_")}.json`;

@@ -119,7 +119,24 @@
  *          nothing) after re-checking them; a bare `--update` re-stamps every entry. No browser. Not part of
  *          test:specs (app-side edits must not fail it).
  *
- * Later tasks add modes (--parity, --full). Plan: PR 2 Tasks 2–7.
+ *   npm run handoff:verify -- --parity [--export <export.json> …] [--out <package dir>]
+ *
+ * --parity  the readable engine (Task 12): app/estimating-core.js, loaded in Node (vm and require()), has the source
+ *          index.ts's exact export surface and reproduces every spec/golden/<id>.json byte for byte (goldenWith over
+ *          data/estimates.js); with --export (repeatable), core:golden over that export reproduces them too. No browser.
+ *          The walk lives in verify/parity.ts. Result: output/verify/parity.json.
+ *
+ *   npm run handoff:verify -- --full [--require-features] [--out <package dir>]
+ *
+ * --full  the whole package (Task 12): the folder audit (≤ 15,000,000 bytes a file, ≤ 150 MB, no "part-docs/", nothing
+ *          missing), --parity, --smoke --all-steps over the sampled estimates, 1440×900 screenshots into the package's spec/screenshots/, a sample
+ *          of 20 estimates (seeded; one per feature first — alternate, rack, curtain + track, bonus) whose header totals
+ *          must equal the Estimator's post-load totals, the edit → persist → Reset cycle, 0 page errors / foreign requests
+ *          / unregistered calls; features the sample doesn't cover are reported (--require-features: they fail). On PASS
+ *          the zip is rewritten with the screenshots and read back; on FAIL it is removed. The walk lives in
+ *          verify/full.ts. Result: output/verify/full.json.
+ *
+ * Plan: PR 2 Tasks 2–12.
  */
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -160,7 +177,7 @@ export function classifyRequest(url: string): "local" | "fonts" | "foreign" {
   return "foreign";
 }
 
-type SmokeResult = {
+export type SmokeResult = {
   pass: boolean;
   url: string;
   /** --all-steps: every view walked (estimate · step · tab) — mount-time calls of all four steps count. */
@@ -209,7 +226,8 @@ export function unregisteredExports(discovered: Record<string, string[]>, regist
   return Object.entries(discovered).flatMap(([file, names]) => names.map((n) => `${file}#${n}`)).filter((id) => !have.has(id));
 }
 
-async function smoke(pkgDir: string, allSteps = false): Promise<SmokeResult> {
+/** `onlyIds` (--full): walk --all-steps over these estimates instead of every slice estimate (a production slice can hold hundreds). */
+export async function smoke(pkgDir: string, allSteps = false, onlyIds?: readonly string[]): Promise<SmokeResult> {
   const index = path.join(pkgDir, "index.html");
   if (!existsSync(index)) throw new Error(`${index} not found — run npm run handoff:build first`);
   const launch = await chromeLaunch();
@@ -269,7 +287,7 @@ async function smoke(pkgDir: string, allSteps = false): Promise<SmokeResult> {
     let notRegistered: string[] = [];
     if (allSteps) {
       // Every slice estimate × every step (and every tab that mounts its own components).
-      const ids = loadSliceData(pkgDir).estimates.map((q) => q.id);
+      const ids = onlyIds ? [...onlyIds] : loadSliceData(pkgDir).estimates.map((q) => q.id);
       for (const id of ids) {
         for (const v of ALL_STEP_VIEWS) {
           await openUrl(page, estimateUrl(url, id, v.query));
@@ -329,7 +347,7 @@ async function smoke(pkgDir: string, allSteps = false): Promise<SmokeResult> {
   }
 }
 
-function printSmoke(r: SmokeResult): void {
+export function printSmoke(r: SmokeResult): void {
   console.log(`handoff:verify --smoke  ${r.pass ? "PASS" : "FAIL"}`);
   console.log(`  ${r.url}`);
   console.log(`  ready after ${r.readyMs ?? "—"} ms; Estimates list at #/estimates: ${r.listMounted ? "yes" : "NO"}; Estimator mounted: ${r.estimatorMounted ? "yes" : "NO"}`);
@@ -1395,8 +1413,11 @@ async function main() {
   const rules = argv.includes("--rules");
   const photos = argv.includes("--photos");
   const drift = argv.includes("--drift");
-  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !shell && !catalog && !assemblies && !rules && !photos && !drift) {
-    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --catalog | --assemblies | --rules | --photos | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] [--out <package dir>] | --drift [--update [<port> …]]");
+  const parity = argv.includes("--parity");
+  const full = argv.includes("--full");
+  const exportFiles = argv.flatMap((a, i) => (a === "--export" && argv[i + 1] && !argv[i + 1].startsWith("--") ? [path.resolve(argv[i + 1])] : []));
+  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !shell && !catalog && !assemblies && !rules && !photos && !drift && !parity && !full) {
+    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --catalog | --assemblies | --rules | --photos | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] | --parity [--export <export.json> …] | --full [--require-features] [--out <package dir>] | --drift [--update [<port> …]]");
     process.exit(2);
   }
   mkdirSync(VERIFY_DIR, { recursive: true });
@@ -1476,6 +1497,21 @@ async function main() {
     const r = await photosCheck(pkgDir);
     writeFileSync(path.join(VERIFY_DIR, "photos.json"), JSON.stringify(r, null, 2) + "\n");
     printPhotos(r);
+    pass &&= r.pass;
+  }
+  if (parity) {
+    const { parityCheck, printParity } = await import("./verify/parity");
+    const r = await parityCheck(pkgDir, exportFiles);
+    writeFileSync(path.join(VERIFY_DIR, "parity.json"), JSON.stringify(r, null, 2) + "\n");
+    printParity(r);
+    pass &&= r.pass;
+  }
+  if (full) {
+    // verify/full.ts imports this module's helpers; loaded here, once this module has finished evaluating.
+    const { fullCheck, printFull } = await import("./verify/full");
+    const r = await fullCheck(pkgDir, { requireFeatures: argv.includes("--require-features") });
+    writeFileSync(path.join(VERIFY_DIR, "full.json"), JSON.stringify(r, null, 2) + "\n");
+    printFull(r);
     pass &&= r.pass;
   }
   if (!pass) process.exit(1);

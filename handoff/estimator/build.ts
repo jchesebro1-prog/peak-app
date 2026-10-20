@@ -1,9 +1,13 @@
 /**
  * handoff:build — bundles the real Estimator client for a server-less, file:// page.
  *
- *   npm run handoff:build [-- --out <dir>] [--data <slice dir>] [--images <dir>] [--no-minify]
+ *   npm run handoff:build [-- --out <dir>] [--data <slice dir>] [--images <dir>] [--no-minify] [--no-zip]
  *
- * Writes <out>/{index.html, app/app.js, app/app.css, app/assets/*, CONFIDENTIAL.txt}.
+ * Writes <out>/{index.html, app/app.js, app/app.css, app/assets/*, CONFIDENTIAL.txt}, and (Task 12) the founder half:
+ * app/estimating-core.js (the readable engine, package.ts), spec/{README,data-model,pricing,ports}.md (handoff/estimator/spec/
+ * with their generated blocks expanded from the source, spec-gen.ts), spec/golden/<id>.json (core:golden's figures for every
+ * sliced estimate) — spec/screenshots/ (handoff:verify --full) is kept — then audits the folder (auditPackage) and zips it
+ * to <out>.zip (output/peak-estimator-handoff.zip; --no-zip skips it). handoff:verify --full re-zips after its screenshots.
  * The slice (handoff:slice) and photos normally live in <out>/data and <out>/images already;
  * --data / --images copy them in from elsewhere. Only the files images/manifest.json references (plus the manifest)
  * ship; anything else in an images folder stays out (copied folder) or is removed (in-place folder). Nothing in
@@ -19,6 +23,7 @@ import tailwindcss from "@tailwindcss/postcss";
 import { FORBIDDEN_PACKAGES } from "../../scripts/core-check";
 import { parsePhotoManifest } from "./photo-select";
 import { APP_OVERRIDES, appOverridePlugin, bakeModules, bakePlugin, imagePlugin, shimPlugin, serverActionStubPlugin } from "./esbuild-plugins";
+import { auditPackage, buildEngineBundle, ENGINE_FILE, MAX_TOTAL_BYTES, readSliceGlobals, sliceSystemQuotes, stageSpecDocs, writeGoldenFiles, writeZip, zipDateOf } from "./package";
 
 const HERE = __dirname;
 const ROOT = path.resolve(HERE, "..", "..");
@@ -88,7 +93,7 @@ export function outDirProblem(root: string, out: string): string | null {
   return null;
 }
 
-type Args = { out: string; data: string | null; images: string | null; minify: boolean };
+type Args = { out: string; data: string | null; images: string | null; minify: boolean; zip: boolean };
 
 function parseArgs(argv: string[]): Args {
   const val = (name: string) => {
@@ -98,7 +103,7 @@ function parseArgs(argv: string[]): Args {
   const out = path.resolve(ROOT, val("--out") ?? "output/peak-estimator-handoff");
   const data = val("--data");
   const images = val("--images");
-  return { out, data: data ? path.resolve(data) : null, images: images ? path.resolve(images) : null, minify: !argv.includes("--no-minify") };
+  return { out, data: data ? path.resolve(data) : null, images: images ? path.resolve(images) : null, minify: !argv.includes("--no-minify"), zip: !argv.includes("--no-zip") };
 }
 
 /** Copies `from` into `to` (replacing it) unless they are the same directory. */
@@ -180,12 +185,17 @@ async function buildCss(): Promise<string> {
   return r.css;
 }
 
-export async function build(args: Args): Promise<{ files: Array<{ file: string; bytes: number }>; oversize: string[] }> {
+/** The zip beside a package folder: output/peak-estimator-handoff → output/peak-estimator-handoff.zip. */
+export const zipPathFor = (out: string): string => `${path.resolve(out)}.zip`;
+
+export async function build(args: Args): Promise<{ files: Array<{ file: string; bytes: number }>; oversize: string[]; problems: string[] }> {
   const OUT = args.out;
   const APP = path.join(OUT, "app");
   mkdirSync(OUT, { recursive: true });
   rmSync(APP, { recursive: true, force: true });
   rmSync(path.join(OUT, "index.html"), { force: true });
+  // a zip from an earlier build no longer matches the folder: it is rewritten below (or by handoff:verify --full)
+  rmSync(zipPathFor(OUT), { force: true });
 
   const hasData = syncDir(args.data, path.join(OUT, "data"), "data");
   // a data/photo-manifest.json from an earlier slicer carried private Blob pathnames; it never ships
@@ -257,14 +267,31 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
   writeFileSync(path.join(diag, "meta.json"), JSON.stringify(result.metafile));
   writeFileSync(path.join(diag, "discovered-actions.json"), JSON.stringify(discovered, null, 2) + "\n");
 
+  // --- the founder half (Task 12): readable engine, spec docs, golden totals ---
+  const t2 = Date.now();
+  const engine = await buildEngineBundle(ROOT);
+  writeFileSync(path.join(OUT, ENGINE_FILE), engine.text);
+  const estimates = (readSliceGlobals(OUT, hasData ? ["estimates.js"] : []).PEAK_ESTIMATES ?? []) as Array<{ id: string } & Record<string, unknown>>;
+  const goldens = writeGoldenFiles(OUT, sliceSystemQuotes(estimates));
+  const docs = stageSpecDocs(OUT, ROOT);
+  const specMs = Date.now() - t2;
+
   const leaks = privatePathLeaks(OUT);
   if (leaks.length) throw new Error(`private Blob pathnames ("part-docs/") found in the package: ${leaks.join(", ")}`);
 
-  const files = listFiles(OUT).map((f) => ({ file: f, bytes: statSync(path.join(OUT, f)).size }));
-  const oversize = files.filter((f) => f.bytes > MAX_FILE_BYTES).map((f) => f.file);
+  const audit = auditPackage(OUT);
+  const files = audit.files;
+  const oversize = audit.oversize;
+  const problems = [
+    ...(audit.totalOver ? [`the package is ${audit.totalBytes} bytes, over ${MAX_TOTAL_BYTES}`] : []),
+    ...audit.privatePaths.map((f) => `${f} contains a private Blob pathname ("part-docs/")`),
+    ...audit.missing.map((f) => `${f} is missing`),
+  ];
 
   const actions = Object.values(discovered).reduce((n, v) => n + v.length, 0);
-  console.log(`handoff:build → ${path.relative(ROOT, OUT)}  (JS ${jsMs} ms, CSS ${cssMs} ms)`);
+  console.log(`handoff:build → ${path.relative(ROOT, OUT)}  (JS ${jsMs} ms, CSS ${cssMs} ms, engine + spec ${specMs} ms)`);
+  console.log(`  ${ENGINE_FILE}: ${engine.inputs.length} source modules, readable; spec: ${docs.written.join(", ")}; golden: ${goldens} estimate(s)`);
+  if (docs.undocumented.length) console.log(`  WARN fields printed with no note (add a doc comment or a spec-gen HAND_NOTES entry): ${docs.undocumented.join(", ")}`);
   console.log(`  "use server" modules stubbed: ${Object.keys(discovered).length} (${actions} exports) → output/handoff-build/discovered-actions.json`);
   for (const [orig, importers] of overridden) console.log(`  override ${orig} → ${APP_OVERRIDES[orig]} (imported by ${[...importers].join(", ")})`);
   for (const abs of baked.keys()) console.log(`  baked ${path.relative(ROOT, abs)}${result.metafile.inputs[path.relative(ROOT, abs)] ? "" : " (not imported by the bundle)"}`);
@@ -279,7 +306,14 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
     console.log(`  ${f.file.padEnd(40)} ${String(f.bytes).padStart(11)} bytes${f.bytes > MAX_FILE_BYTES ? "  ← OVER 15,000,000" : ""}`);
   }
   console.log(`  total ${(total / 1e6).toFixed(2)} MB in ${files.length} files`);
-  return { files, oversize };
+  if (audit.junk.length) console.log(`  never zipped: ${audit.junk.join(", ")}`);
+  for (const p of problems) console.log(`  PROBLEM ${p}`);
+  if (args.zip && !oversize.length && !problems.length) {
+    const zipFile = zipPathFor(OUT);
+    const z = await writeZip(OUT, zipFile, zipDateOf(OUT));
+    console.log(`  zip: ${path.relative(ROOT, zipFile)} ${z.bytes} bytes (${(z.bytes / 1e6).toFixed(2)} MB), ${z.entries.length} entries — run handoff:verify --full to add the screenshots and re-zip`);
+  }
+  return { files, oversize, problems };
 }
 
 async function main() {
@@ -292,6 +326,10 @@ async function main() {
   const r = await build(args);
   if (r.oversize.length) {
     console.error(`handoff:build: ${r.oversize.length} file(s) over ${MAX_FILE_BYTES} bytes: ${r.oversize.join(", ")}`);
+    process.exit(1);
+  }
+  if (r.problems.length) {
+    console.error(`handoff:build: ${r.problems.join("; ")}`);
     process.exit(1);
   }
 }
