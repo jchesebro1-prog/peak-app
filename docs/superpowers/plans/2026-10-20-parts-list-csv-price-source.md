@@ -1,14 +1,14 @@
-# Parts list (CSV) v2 Implementation Plan
+# Parts list (CSV) v2 + BOM quote PDF Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** The Estimator's More ▾ → Parts list (CSV) prints Item name, Description, cost, sell, Line margin, Effective margin and Price source on every row.
+**Goal:** The Estimator's More ▾ → Parts list (CSV) prints Item name, Description, cost, sell, Line margin, Effective margin and Price source on every row (Task 1). Build package → BOM quote gains Download PDF / Open PDF ↗ for the saved estimate's BOM view (Task 2).
 
-**Architecture:** This is a pure change to one module, `src/app/(app)/estimator/parts-csv.ts`. Each `PartsListRow` gains `source` (a label derived from the flags the estimate line already carries) and `lineSell` (unit sell before the system's freight/rounding factor `k`). `source` joins the consolidation key. The CSV writer prints the 12-column header and formats the margins. No server, store, migration or UI change. The caller in `use-estimator-state.ts` already passes `PARTS_CSV_HEADER` and `partsListCsvRows(rows)` through untouched.
+**Architecture:** This is a pure change to one module, `src/app/(app)/estimator/parts-csv.ts`. Each `PartsListRow` gains `source` (a label derived from the flags the estimate line already carries) and `lineSell` (unit sell before the system's freight/rounding factor `k`). `source` joins the consolidation key. The CSV writer prints the 12-column header and formats the margins. Task 1 has no server, store, migration or UI change; the caller in `use-estimator-state.ts` already passes `PARTS_CSV_HEADER` and `partsListCsvRows(rows)` through untouched. Task 2 copies the Cover PDF (#301): a `view=bom` mode on the existing signed `/print/quote/[id]` page, a `renderBomPdf` helper, and a staff `GET /api/quotes/[id]/bom-pdf` route linked from the BOM tab. There's no migration and nothing stored.
 
 **Tech Stack:** TypeScript, Next.js 16 app (client-side CSV via `downloadCsv`), spec harness `scripts/test-review-and-spec.ts` run with `tsx`.
 
-**Spec:** `docs/superpowers/specs/2026-10-20-parts-list-csv-price-source-design.md`
+**Specs:** `docs/superpowers/specs/2026-10-20-parts-list-csv-price-source-design.md` (Task 1), `docs/superpowers/specs/2026-10-20-bom-quote-pdf-design.md` (Task 2)
 
 ## Global Constraints
 
@@ -19,6 +19,7 @@
 - Unchanged invariants: Σ qty × Unit Cost = material cost. Per system, Σ qty × Unit Sell = the system price less labor lines' share.
 - Unchanged row set: labor, options, alternates, bonus lines and the Rewards credit stay out. Assemblies and vendor quotes still explode.
 - No new `SpecItem` field, no migration, no AI.
+- BOM PDF: renders the SAVED estimate only. File `<number> BOM.pdf`. Copy, verbatim: `Download PDF`, `Open PDF ↗`, `Save first — the PDF prints the saved estimate.`, `Save to create the PDF.` Never stored, never attached to a send, never in the portal or client link. The BOM tab must import nothing from `@/lib/stores/`.
 - The dev DB is single-process. `npm run test:specs` uses its own temp datadir, so it's safe. Never run another `tsx` db script alongside it, and check `ps aux | grep tsx` first.
 
 ---
@@ -487,14 +488,330 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 2: Docs and the verification gate
+### Task 2: BOM quote PDF from the Build package tab
+
+**Spec:** `docs/superpowers/specs/2026-10-20-bom-quote-pdf-design.md`
+
+**Files:**
+- Create: `src/lib/estimate-output/bom-pdf.ts` (pure helpers)
+- Create: `src/lib/estimate-output/bom-pdf-server.ts` (render)
+- Create: `src/app/api/quotes/[id]/bom-pdf/route.ts` (download route)
+- Modify: `src/app/print/quote/[id]/page.tsx` (`view=bom`)
+- Modify: `src/app/(app)/estimator/steps/package-bom-tab.tsx` (buttons + copy)
+- Modify: `scripts/smoke-routes.ts` (two 404 entries)
+- Test: `scripts/test-review-and-spec.ts` (new block at the end of the file)
+
+**Interfaces:**
+- Consumes: `bomViewProps(p: QuoteDocumentProps): QuoteDocumentProps` from `@/app/(app)/estimator/quote-document-view`. `signPrintToken(secret, "quote", id, nowMs)` from `@/lib/quote-pdf/token`. `printOriginFor(env, host, proto)` from `@/lib/quote-pdf/origin`. `renderPrintRouteToPdf(url, { timeoutMs, signal })` and `PdfRenderUnavailable` from `@/lib/quote-pdf/render`. `displayQuoteNumber` from `@/lib/estimate-number`. `attachmentDisposition` from `@/lib/document-files`. `pdfDirty: boolean` and `loadedId` on `EstimatorState` (both exist).
+- Produces:
+  - `bomPdfFileName(number: string): string` and `bomPdfPath(quoteId: string, download: boolean): string`.
+  - `renderBomPdf(quoteId: string, host: string | null, proto: string | null): Promise<BomRender>`.
+  - `BOM_TAB_COPY` gains `downloadPdf`, `openPdf`, `saveFirst`, `saveToCreate`.
+
+- [ ] **Step 1: Write the failing harness block**
+
+Append at the very end of `scripts/test-review-and-spec.ts`, after the last block's closing `}`. `readFileSync` and `join` are already imported at the top of the file. Keep the import with the block, as the rest of the file does.
+
+```ts
+/* --- BOM quote PDF (2026-10-20 spec): Build package → BOM quote → Download PDF / Open PDF ↗ --- */
+import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate-output/bom-pdf";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const has = (p: string) => existsSync(join(process.cwd(), p));
+  ok(bq1File("EST-1234") === "EST-1234 BOM.pdf" && bq1File("") === "Estimate BOM.pdf" && bq1File("A/B") === "A_B BOM.pdf", "BOM PDF: \"<number> BOM.pdf\", Estimate when blank, unsafe characters → _");
+  ok(bq1Path("Q-1", true) === "/api/quotes/Q-1/bom-pdf?download=1" && bq1Path("Q 1", false) === "/api/quotes/Q%201/bom-pdf", "BOM PDF: bomPdfPath encodes the id; download adds ?download=1");
+  const page = rd("src/app/print/quote/[id]/page.tsx");
+  ok(page.includes('import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";') && /const bom = \(Array\.isArray\(sp\.view\) \? sp\.view\[0\] : sp\.view\) === "bom";/.test(page) && page.includes("<QuoteDocument {...bomViewProps(doc)} rewardsLine={purchasePerksDocLine(perks)} />"),
+    "BOM PDF print: ?view=bom renders bomViewProps(doc) — the saved BOM preview's own transform");
+  ok(page.includes("!bom && normalizePdfOptions(q.pdfOptions).pdfCutSheets") && page.indexOf("if (bom)") < page.indexOf("keyProductPhotoDataUris("),
+    "BOM PDF print: the BOM view appends no cut sheets and reads no key-product photos");
+  ok(page.indexOf('tokenOk(t, "quote", id)') > -1 && page.indexOf('tokenOk(t, "quote", id)') < page.indexOf("getQuote("), "BOM PDF print: the quote token is still checked before any read");
+  const route = has("src/app/api/quotes/[id]/bom-pdf/route.ts") && has("src/lib/estimate-output/bom-pdf-server.ts")
+    ? rd("src/app/api/quotes/[id]/bom-pdf/route.ts") + rd("src/lib/estimate-output/bom-pdf-server.ts") : "";
+  ok(route.includes("export const maxDuration = 60;") && route.includes("await requireUser();") && route.includes("printOriginFor(process.env,") &&
+     route.includes('signPrintToken(secret, "quote", q.id, Date.now())') && route.includes("&view=bom") && route.includes("renderPrintRouteToPdf(") && route.includes("PdfRenderUnavailable") &&
+     route.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && route.includes("BOM_RENDER_TIMEOUT_MS = 45_000") && route.includes("BOM_RENDER_DEADLINE_MS = 55_000") &&
+     route.includes("bomPdfFileName(displayQuoteNumber(q))") && route.includes('"x-content-type-options": "nosniff"') && route.includes('"cache-control": "private, no-store"'),
+    "BOM PDF route: signed-in only, 60 s, the shared print origin, system quotes only, the quote token + view=bom, \"EST-#### BOM.pdf\"");
+  const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
+  ok(tab.includes('downloadPdf: "Download PDF"') && tab.includes('openPdf: "Open PDF ↗"') && tab.includes('saveFirst: "Save first — the PDF prints the saved estimate."') && tab.includes('saveToCreate: "Save to create the PDF."'),
+    "BOM PDF tab: the four copy strings");
+  ok(tab.includes("href={bomPdfPath(loadedId, true)}") && tab.includes("href={bomPdfPath(loadedId, false)}") && tab.includes("{pdfDirty && ") && !/from "@\/lib\/stores\//.test(tab),
+    "BOM PDF tab: Download / Open use bomPdfPath, the save-first note follows pdfDirty, and the tab still imports no store");
+  const smoke = rd("scripts/smoke-routes.ts");
+  ok(smoke.includes('{ route: "/api/quotes/Q-0/bom-pdf", expectNotFound: true }') && smoke.includes('{ route: "/print/quote/Q-2041?view=bom", expectNotFound: true }'), "BOM PDF: smoke covers the 404 paths");
+}
+```
+
+- [ ] **Step 2: Run it and confirm it fails**
+
+```bash
+ps aux | grep -c "[t]sx"
+npm run test:specs 2>&1 | grep -E "BOM PDF" | head -20
+```
+
+Expected: the harness fails to start, because `@/lib/estimate-output/bom-pdf` doesn't exist yet and the import can't resolve. That's the RED. Every other assertion depends on files created below.
+
+- [ ] **Step 3: Create `src/lib/estimate-output/bom-pdf.ts`**
+
+```ts
+/**
+ * BOM quote PDF (2026-10-20 spec) — pure, client-safe helpers shared by the
+ * Build package → BOM quote tab and the render. The tab imports nothing from
+ * a store (#333), so these live apart from bom-pdf-server.ts.
+ */
+
+/** "<estimate number> BOM.pdf" — the Cover PDF's character rule (coverPdfFileName). */
+export function bomPdfFileName(number: string): string {
+  return `${(number || "Estimate").replace(/[^A-Za-z0-9 _-]/g, "_")} BOM.pdf`;
+}
+
+/** The staff download route; `download` sends it as an attachment, else it opens inline. */
+export function bomPdfPath(quoteId: string, download: boolean): string {
+  return `/api/quotes/${encodeURIComponent(quoteId)}/bom-pdf${download ? "?download=1" : ""}`;
+}
+```
+
+- [ ] **Step 4: Create `src/lib/estimate-output/bom-pdf-server.ts`**
+
+```ts
+import { displayQuoteNumber } from "@/lib/estimate-number";
+import { printOriginFor } from "@/lib/quote-pdf/origin";
+import { PdfRenderUnavailable, renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
+import { pdfKindForQuoteType } from "@/lib/quote-pdf/state";
+import { signPrintToken } from "@/lib/quote-pdf/token";
+import { get as getQuote } from "@/lib/stores/quotes";
+import { bomPdfFileName } from "./bom-pdf";
+
+/**
+ * BOM quote PDF (2026-10-20 spec) — one headless-Chrome render of a system
+ * estimate's itemized BOM view, from the SAVED quote through the signed
+ * /print/quote/[id]?view=bom route (the estimate's own print page and token
+ * kind; `view` only re-lays-out what the token already authorizes). Mirrors
+ * renderCoverPdf. Never stored, never attached to a send. Server-only.
+ */
+
+/** The render's own budget: it fails cleanly inside the route's maxDuration. */
+export const BOM_RENDER_TIMEOUT_MS = 45_000;
+/** Bounds the queue wait too. */
+export const BOM_RENDER_DEADLINE_MS = 55_000;
+
+export const BOM_RENDER_FAILED = "The BOM PDF couldn’t be rendered — try again.";
+export const BOM_NO_SECRET = "BOM PDFs aren’t set up on this server (AUTH_SECRET is missing).";
+
+/** `status` mirrors the route's answer: 404 not a system estimate / unknown,
+ *  503 not set up here (secret, origin, Chrome), 500 the render failed. */
+export type BomRender = { ok: true; pdf: Buffer; fileName: string } | { ok: false; status: 404 | 500 | 503; error: string };
+
+/** `host` / `proto`: the request's (x-forwarded-)host and proto — printOriginFor decides the origin. */
+export async function renderBomPdf(quoteId: string, host: string | null, proto: string | null): Promise<BomRender> {
+  try {
+    if (!quoteId || quoteId.length > 64) return { ok: false, status: 404, error: "Not found" };
+    const q = await getQuote(quoteId);
+    if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") return { ok: false, status: 404, error: "Not found" };
+    const secret = process.env.AUTH_SECRET || "";
+    if (!secret) return { ok: false, status: 503, error: BOM_NO_SECRET };
+    const where = printOriginFor(process.env, host, proto);
+    if ("error" in where) return { ok: false, status: 503, error: where.error };
+    const t = signPrintToken(secret, "quote", q.id, Date.now());
+    const pdf = await renderPrintRouteToPdf(`${where.origin}/print/quote/${encodeURIComponent(q.id)}?t=${encodeURIComponent(t)}&view=bom`, {
+      timeoutMs: BOM_RENDER_TIMEOUT_MS,
+      signal: AbortSignal.timeout(BOM_RENDER_DEADLINE_MS),
+    });
+    return { ok: true, pdf, fileName: bomPdfFileName(displayQuoteNumber(q)) };
+  } catch (e) {
+    if (e instanceof PdfRenderUnavailable) return { ok: false, status: 503, error: e.message };
+    console.error("[bom-pdf] BOM PDF render failed", e);
+    return { ok: false, status: 500, error: BOM_RENDER_FAILED };
+  }
+}
+```
+
+- [ ] **Step 5: Create `src/app/api/quotes/[id]/bom-pdf/route.ts`**
+
+```ts
+import { attachmentDisposition } from "@/lib/document-files";
+import { renderBomPdf } from "@/lib/estimate-output/bom-pdf-server";
+import { requireUser } from "@/lib/session";
+
+/** One headless-Chrome render of the BOM view. */
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+
+const text = (body: string, status: number) =>
+  new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "private, no-store" } });
+
+/**
+ * BOM quote PDF (2026-10-20 spec) — a system estimate's itemized BOM view as a
+ * PDF for staff, rendered on demand from the SAVED quote (renderBomPdf).
+ * `?download=1` downloads; otherwise it opens inline. A service quote and an
+ * unknown id answer the same 404.
+ */
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  // Outside the render: a signed-out request redirects to the login page.
+  await requireUser();
+  const { id } = await params;
+  const h = request.headers;
+  const r = await renderBomPdf(id, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
+  if (!r.ok) return text(r.error, r.status);
+  const disposition = attachmentDisposition(r.fileName);
+  const download = new URL(request.url).searchParams.get("download") === "1";
+  return new Response(new Uint8Array(r.pdf), {
+    headers: {
+      "content-type": "application/pdf",
+      "content-disposition": download ? disposition : "inline" + disposition.slice("attachment".length),
+      "x-content-type-options": "nosniff",
+      "cache-control": "private, no-store",
+    },
+  });
+}
+```
+
+- [ ] **Step 6: Teach the print page `view=bom`**
+
+In `src/app/print/quote/[id]/page.tsx`:
+
+(a) Add the import after the `QuoteDocument` import line:
+
+```ts
+import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";
+```
+
+(b) Directly after `const t = Array.isArray(sp.t) ? sp.t[0] : sp.t;` add:
+
+```ts
+  // BOM quote PDF (2026-10-20 spec): ?view=bom prints the saved BOM preview — itemized bands, no package document, no cut sheets, no photos.
+  const bom = (Array.isArray(sp.view) ? sp.view[0] : sp.view) === "bom";
+```
+
+(c) In the `Promise.all`, change the cut-sheets entry from
+
+```ts
+    normalizePdfOptions(q.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
+```
+
+to
+
+```ts
+    !bom && normalizePdfOptions(q.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
+```
+
+(d) Directly after `const doc = quoteDocumentDataFor(q, cust, settings);` add:
+
+```tsx
+  if (bom) {
+    return (
+      <main>
+        <style>{QUOTE_PRINT_CSS}</style>
+        <QuoteDocument {...bomViewProps(doc)} rewardsLine={purchasePerksDocLine(perks)} />
+      </main>
+    );
+  }
+```
+
+Update the route's doc comment ("Signed print route for an Estimator quote (#222)…") with one more sentence: `` `?view=bom` (2026-10-20) prints the BOM view instead — bomViewProps, no cut sheets, no photos — for the Build package BOM PDF.``
+
+- [ ] **Step 7: Add the buttons to the BOM quote tab**
+
+In `src/app/(app)/estimator/steps/package-bom-tab.tsx`:
+
+(a) Add the import after the `previewPath` import:
+
+```ts
+import { bomPdfPath } from "@/lib/estimate-output/bom-pdf";
+```
+
+(b) Extend `BOM_TAB_COPY`. Add these four keys after `openSaved`:
+
+```ts
+  downloadPdf: "Download PDF",
+  openPdf: "Open PDF ↗",
+  saveFirst: "Save first — the PDF prints the saved estimate.",
+  saveToCreate: "Save to create the PDF.",
+```
+
+(c) Add `pdfDirty,` to the destructured fields of `s`, after `loadedId,`.
+
+(d) In the strip, directly after the existing `{loadedId && ( … openSaved … )}` block, leaving that block unchanged, add:
+
+```tsx
+          {loadedId ? (
+            <>
+              <a href={bomPdfPath(loadedId, true)} style={LINK}>
+                {BOM_TAB_COPY.downloadPdf}
+              </a>
+              <a href={bomPdfPath(loadedId, false)} target="_blank" rel="noopener noreferrer" style={LINK}>
+                {BOM_TAB_COPY.openPdf}
+              </a>
+              {pdfDirty && <span style={{ color: "#8a6d1f" }}>{BOM_TAB_COPY.saveFirst}</span>}
+            </>
+          ) : (
+            <span aria-disabled="true" style={{ color: "#9aa0ab", fontWeight: 600 }}>
+              {BOM_TAB_COPY.downloadPdf} — {BOM_TAB_COPY.saveToCreate}
+            </span>
+          )}
+```
+
+Update the component's doc comment with one line: `Download PDF / Open PDF ↗ (2026-10-20) print the SAVED estimate's BOM view through /api/quotes/[id]/bom-pdf.`
+
+- [ ] **Step 8: Add the smoke entries**
+
+In `scripts/smoke-routes.ts`, directly after the `{ route: "/api/quotes/Q-0/cover-pdf", expectNotFound: true },` line, add:
+
+```ts
+  // BOM quote PDF (2026-10-20) — an unknown quote is a clean 404, never a render; the print view without a token is a 404 before any read.
+  { route: "/api/quotes/Q-0/bom-pdf", expectNotFound: true },
+  { route: "/print/quote/Q-2041?view=bom", expectNotFound: true },
+```
+
+- [ ] **Step 9: Run the harness and confirm the block passes**
+
+```bash
+npm run test:specs 2>&1 | grep -E "BOM PDF|#333 BOM tab|#333 review K|#333 review L"
+npm run test:specs 2>&1 | grep -E "^FAIL" | head -20
+```
+
+Expected: all nine `BOM PDF` assertions PASS, and the existing `#333 BOM tab` / `review K` / `review L` assertions still PASS. The FAIL listing is empty, or shows only failures already present on `main`.
+
+- [ ] **Step 10: Type-check, lint, smoke**
+
+```bash
+npx tsc --noEmit -p . 2>&1 | grep -E "bom-pdf|print/quote|package-bom-tab|smoke-routes" | head
+npx eslint src/lib/estimate-output/bom-pdf.ts src/lib/estimate-output/bom-pdf-server.ts "src/app/api/quotes/[id]/bom-pdf/route.ts" "src/app/print/quote/[id]/page.tsx" "src/app/(app)/estimator/steps/package-bom-tab.tsx"
+npm run test:smoke 2>&1 | grep -E "bom-pdf|view=bom|FAIL|passed|failed" | head
+```
+
+Expected: no tsc lines for these files, no eslint output, and both new smoke routes report the expected 404. `test:smoke` starts its own server. Before running it, check that no other `next dev` holds the dev DB (`lsof -i :3000`, `ps aux | grep "[n]ext dev"`). If one does, stop it, or run smoke after Step 11.
+
+- [ ] **Step 11: See one real PDF on the dev server (GET only)**
+
+1. Run `ps aux | grep -E "[t]sx|[n]ext dev"` and make sure nothing else holds `.data/pglite`.
+2. Start the dev server with `preview_start` (the main checkout's `.claude/launch.json`).
+3. Open `/quotes`, pick any **saved system estimate**, and open it in the Estimator → Build package → BOM quote. Confirm the strip shows **Download PDF** and **Open PDF ↗**.
+4. Click **Open PDF ↗** (or navigate to `/api/quotes/<id>/bom-pdf`). Confirm a PDF loads, with the full Peak letterhead and the systems itemized like the tab.
+5. Take a screenshot as proof. Don't edit or save the estimate, because the dev DB holds the real book.
+
+If the render answers 503 (no local Chrome or print origin), record the message. That's an environment gap, not a code failure. Confirm instead that `/print/quote/<id>?view=bom` without a token is a 404. Then stop the server (`preview_stop`, then make sure no `next dev` remains).
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add src/lib/estimate-output/bom-pdf.ts src/lib/estimate-output/bom-pdf-server.ts "src/app/api/quotes/[id]/bom-pdf/route.ts" "src/app/print/quote/[id]/page.tsx" "src/app/(app)/estimator/steps/package-bom-tab.tsx" scripts/smoke-routes.ts scripts/test-review-and-spec.ts
+git commit -m "feat(estimator): BOM quote PDF — Download / Open from Build package → BOM quote
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 3: Docs and the verification gate
 
 **Files:**
 - Modify: `DECISIONS.md` (append one entry)
 - Modify: `PUNCHLIST.md` (append one shipped item)
 
 **Interfaces:**
-- Consumes: Task 1's committed change.
+- Consumes: Task 1's and Task 2's committed changes.
 - Produces: nothing code-facing.
 
 - [ ] **Step 1: Pick the numbers right before writing**
@@ -509,7 +826,7 @@ grep -oE '#[0-9]{3}\b' PUNCHLIST.md | sed 's/#//' | sort -n | tail -1
 git show origin/main:PUNCHLIST.md | grep -oE '#[0-9]{3}\b' | sed 's/#//' | sort -n | tail -1
 ```
 
-Use D = (max of the two D numbers) + 1 and punch # = (max of the two punch numbers) + 1. Below they're written `D<N>` and `#<P>`; substitute the real numbers.
+Use D = (max of the two D numbers) + 1 for the CSV entry and D + 1 for the BOM PDF entry. Use punch # = (max of the two punch numbers) + 1. Below they're written `D<N>`, `D<N+1>` and `#<P>`; substitute the real numbers.
 
 - [ ] **Step 2: Append the DECISIONS.md entry**
 
@@ -519,6 +836,10 @@ Append at the end of `DECISIONS.md`, matching the existing `## D…` format:
 ## D<N>. Parts list CSV v2: Item name, two margins, Price source (#<P>, 2026-10-20)
 
 Jeff asked that the Estimator's Parts list (CSV) cover item name, description, cost, sell margin and where the pricing came from, "Catalog" for catalog items. The #262 header becomes twelve columns: Manufacturer, Item name, Description, Room, System, Qty, Unit Cost, Unit Sell, Line margin, Effective margin, Price source, Notes. **Item name** renames Model number (same rule, now falling back to the SKU), and Description moves up beside it. **Line margin** is the line as priced, before the system's freight / $25 rounding / typed sell. **Effective margin** is from the file's own Unit Cost and Unit Sell. Both are blank at zero sell and on cost-adjustment rows. **Price source** is derived from the line's existing flags, first match wins: vendor quote (`Vendor quote — <vendor> #<n>`), `Adjustment`, exploded components `Catalog`, `Price on request`, `Allowance`, `Curtain calculator`, `Custom`, a resolved SKU `Catalog` (or `Catalog — sell edited` when `sellOverride` / `extSellOverride` is set), else `Not in catalog`. Source joins the consolidation key. Rows, totals and invariants are unchanged; no stored field. `src/app/(app)/estimator/parts-csv.ts`; spec `docs/superpowers/specs/2026-10-20-parts-list-csv-price-source-design.md`; harness `#262 v2`.
+
+## D<N+1>. BOM quote PDF from Build package (#<P>, 2026-10-20)
+
+Jeff asked to export the Build package → BOM quote render. The tab gains **Download PDF** / **Open PDF ↗**, which render the SAVED estimate's BOM view through headless Chrome. It's the same pattern as the Cover PDF (#301): `GET /api/quotes/[id]/bom-pdf` (signed-in, 60 s, system estimates only) → `renderBomPdf` (`src/lib/estimate-output/bom-pdf-server.ts`) → the existing signed `/print/quote/[id]` page with `?view=bom`, which renders `bomViewProps(doc)` with no cut sheets and no photos. It reuses the `quote` token kind, because `view` only re-lays-out data that token already authorizes. Unsaved edits don't print: the tab says "Save first — the PDF prints the saved estimate." A live, unsaved PDF was considered and left out to keep one server render path. File `<number> BOM.pdf`. Never stored, never attached to a send, not in the portal or client link. Spec `docs/superpowers/specs/2026-10-20-bom-quote-pdf-design.md`; harness `BOM PDF`.
 ```
 
 - [ ] **Step 3: Append the PUNCHLIST.md item**
@@ -526,7 +847,7 @@ Jeff asked that the Estimator's Parts list (CSV) cover item name, description, c
 Read the last shipped item in `PUNCHLIST.md` and copy its heading level and layout exactly. Then append an item with this content:
 
 ```markdown
-#<P> ✅ Parts list CSV v2 (2026-10-20, D<N>) — Estimator → More ▾ → Parts list (CSV) now prints Item name (model, else SKU), Description, Unit Cost, Unit Sell, Line margin, Effective margin and Price source ("Catalog" for catalog parts; vendor quote / custom / allowance / curtain / POR / sell edited / not in catalog otherwise). Remaining: Jeff opens one real estimate's export in Excel and checks the labels and margins read right.
+#<P> ✅ Parts list CSV v2 + BOM quote PDF (2026-10-20, D<N>–D<N+1>) — Estimator → More ▾ → Parts list (CSV) now prints Item name (model, else SKU), Description, Unit Cost, Unit Sell, Line margin, Effective margin and Price source ("Catalog" for catalog parts; vendor quote / custom / allowance / curtain / POR / sell edited / not in catalog otherwise). Build package → BOM quote gains Download PDF / Open PDF ↗ for the saved estimate's BOM view (`<number> BOM.pdf`). Remaining: Jeff opens one real estimate's CSV in Excel and checks the labels and margins, and downloads one BOM PDF on production (needs `QUOTE_PDF_ORIGIN`, like every estimate PDF).
 ```
 
 - [ ] **Step 4: Run the full verification gate and record real numbers**
@@ -536,7 +857,7 @@ npx tsc --noEmit -p . 2>&1 | tail -3
 npm run test:specs 2>&1 | tail -5
 npm run test:specs 2>&1 | grep -c "^FAIL"
 npm run test:smoke 2>&1 | tail -5
-npx eslint "src/app/(app)/estimator/parts-csv.ts" scripts/test-review-and-spec.ts
+npx eslint "src/app/(app)/estimator/parts-csv.ts" src/lib/estimate-output/bom-pdf.ts src/lib/estimate-output/bom-pdf-server.ts "src/app/api/quotes/[id]/bom-pdf/route.ts" "src/app/print/quote/[id]/page.tsx" "src/app/(app)/estimator/steps/package-bom-tab.tsx" scripts/test-review-and-spec.ts
 ```
 
 Expected:
@@ -550,7 +871,7 @@ Report the actual PASS/FAIL counts, not "all green".
 
 ```bash
 git add DECISIONS.md PUNCHLIST.md
-git commit -m "docs: D<N> / #<P> — parts list CSV v2
+git commit -m "docs: D<N>–D<N+1> / #<P> — parts list CSV v2 + BOM quote PDF
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -559,5 +880,5 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ## Not in this plan
 
-- No browser check. The export is a client-side download of `partsListCsvRows` output, and the menu wiring in `use-estimator-state.ts:2150-2170` is untouched. If you want it seen, open an estimate on the dev server, use More ▾ → Parts list (CSV), and open the file.
+- No browser check for the CSV. It's a client-side download of `partsListCsvRows` output, and the menu wiring in `use-estimator-state.ts:2150-2170` is untouched. The BOM PDF does get a real render in Task 2 Step 11.
 - No push. Pushing to `origin/main` is Jeff's call after review.
