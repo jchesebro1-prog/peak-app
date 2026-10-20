@@ -13674,3 +13674,20 @@ Controller decision (on purpose: upscaling a low-resolution image only makes it 
 - Full-width photos in the Build package document: the box is the block's width % of the column and 4in tall; a smaller picture shows at its natural size, so the Size slider does nothing until its cap is below the picture's width.
 
 Catalog photos have no minimum size: `src/lib/part-docs/shrink.ts` only caps the longest edge at 1,600 px (`withoutEnlargement`), and #322's 1,600 px square photos were not run on production. So a small upload does print smaller than it used to. (1,254 px is the size of the placeholder images, not a catalog minimum.) On phones, side photos still stretch to full width (unchanged); a full-width package-document photo stays at its natural size there too.
+
+## D1228. The Estimator's pricing domain is a library: src/lib/estimating-core
+
+The persisted spec types (SpecItem, SpecSection, configurator drafts) and twelve pure helpers (pricing, estimator-data, tier-reprice, labor-group, labor-defaults, track-bom, curtain-line, fixture-bom, freight-default, catalog-rank, copy-system, narrative) moved out of `src/app/(app)/estimator/` into `src/lib/estimating-core/`, with one entry `index.ts`. Every old path is a one-line `export *` shim, so the ~400 existing importers are unchanged. Only the `src/lib` modules inside the core's own closure were repointed. Re-pointing the rest is optional, later work. `systemPrintsInBody` moved into core pricing; `quote-document-view.ts` re-exports it. Why: the Estimator handoff (spec 2026-10-20) bundles the real engine into a browser prototype, and the domain no longer lives in a route folder.
+
+## D1229. core:check: the core may not reach a store, the database, a route folder, React or a server package
+
+`scripts/core-check.ts` builds a TypeScript program from `src/lib/estimating-core/index.ts` and walks value and type imports (including `export * as`, which `ts.preProcessFile` misses). It refuses `src/db`, `src/lib/stores`, `src/app`, `src/components`, `*-server.ts`, `.tsx`, and the server/UI packages listed in the file. It reports only the first forbidden file on each path, plus the clean file that imports it: the edge to cut. It runs in test:specs. Three type-only edges were cut to pass it:
+- Quick Design types → `src/lib/design/quick-types.ts`
+- `fixture-assemblies` types catalog rows structurally
+- `ClientResponse` → `estimate-output/response-types.ts`
+
+One extra step during execution: the test harness's source-text pins that read the moved files by their old route paths were repointed at the estimating-core paths. 11 had started failing and 7 negative pins had become vacuous (they were reading 2-line shims), so every pin reads real code again (commit 49ca1570).
+
+## D1230. Golden totals guard the Estimator's pricing
+
+`npm run core:golden` prices every live system quote in a `db:export` file and writes one JSON per quote: per-system sell, per-line extended sell, and `totals()` at tax 0. Six synthetic fixture quotes (`docs/estimating-core/golden-fixtures/export.json`) and their committed goldens run in test:specs. The extraction was also checked against a copy of the local dev database: the one live system quote with lines was byte-identical before and after. The local dev database has few estimates, so the meaningful real-data check is the production export in handoff PR 2. Handoff PR 2 reuses the same files to prove the bundled prototype prices to the cent.
