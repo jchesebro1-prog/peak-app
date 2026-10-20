@@ -73,6 +73,14 @@ export async function handoffSliceChecks(ok: Ok) {
   ok(ruleOf("AI" + "za" + "SyA-1234567890abcdefghijklmnopqrstu", "google-api-key"), "handoff:slice: rule google-api-key fires");
   ok(ruleOf("ey" + "JhbGciOiJIUzI1NiJ9." + "ey" + "JzdWIiOiIxMjM0NTY3ODkwIn0.sig", "jwt"), "handoff:slice: rule jwt fires");
   ok(ruleOf("Authorization: Bear" + "er abcDEF0123456789.abcDEF0123456789", "bearer-token"), "handoff:slice: rule bearer-token fires");
+  // a key directly after a JSON escape (the final scan runs on JSON.stringify output)
+  const skKey = "sk-" + "proj_" + "a1B2-c3D4_".repeat(3);
+  ok(ruleOf(JSON.stringify("line one\n" + skKey), "sk-key"), "handoff:slice: sk-key fires after a JSON \\n escape");
+  ok(ruleOf(JSON.stringify("col\t" + skKey), "sk-key"), "handoff:slice: sk-key fires after a JSON \\t escape");
+  ok(scanForSecrets(JSON.stringify("line one\n" + skKey)).length > 0 && scanForSecrets(JSON.stringify("col\t" + skKey)).length > 0,
+    "handoff:slice: scanForSecrets is non-empty for an sk-proj_ key after \\n and \\t");
+  // a Bearer token carrying the base64 / URL-safe characters
+  ok(ruleOf("Authorization: Bear" + "er " + "aB+/=cD".repeat(4), "bearer-token"), "handoff:slice: bearer-token fires on a token containing + / =");
   ok(ruleOf("postgres" + "://neon_user:p4ssw0rd@ep-cool.neon.tech/db", "postgres-credentials") && ruleOf("postgresql" + "://u:p@h/db", "postgres-credentials"),
     "handoff:slice: rule postgres-credentials fires on a URL with credentials");
   ok(!rulesHit("postgres://localhost:5432/peak") && !rulesHit("risk-based-assessment-plan-for-the-venue") && !rulesHit("Bearer token required"),
