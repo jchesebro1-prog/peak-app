@@ -1,0 +1,235 @@
+/**
+ * handoff:slice — cuts a db:export (format 2) into the Estimator handoff prototype's
+ * data/*.js globals. Only allow-listed collections, blobs, settings fields and columns
+ * are read (slice-rules.ts); secret-shaped text is scrubbed and the final file bodies are
+ * scanned — any hit means exit 1 and nothing is written.
+ *
+ *   npm run handoff:slice -- --in <export.json> --out output/peak-estimator-handoff/data
+ *                           [--extra-estimates <other-export.json>]   (dev only)
+ */
+import * as fs from "node:fs";
+import * as path from "node:path";
+import {
+  BLOB_IDS, COMPANY_COLS, CONTACT_COLS, CONTACT_EMAIL_COLS, CONTACT_PHONE_COLS, CATALOG_FIELDS, SETTINGS_FIELDS, SITE_COLS, TEAM_FIELDS,
+  pickAndScrub, pickFields, scanForSecrets, scrubValue, selectEstimates, packCatalog, catalogBody,
+  type DocRow, type QuoteDoc, type ScrubEntry,
+} from "./slice-rules";
+
+export const SLICE_VERSION = 1;
+export const MAX_FILE_BYTES = 15_000_000;
+
+type Row = Record<string, unknown>;
+export type ExportV2 = {
+  meta?: { app?: string; exportedAt?: string; source?: string; format?: number };
+  users?: Row[];
+  appSettings?: Array<{ id: string; data?: Row }>;
+  blobs?: Array<{ id: string; data?: Row }>;
+  geoCache?: Array<{ key: string; data?: Row }>;
+  companies?: Row[];
+  contacts?: Row[];
+  contactEmails?: Row[];
+  contactPhones?: Row[];
+  sites?: Row[];
+  collections?: Record<string, DocRow[]>;
+  [other: string]: unknown;
+};
+
+export type SliceResult = {
+  /** Output files keyed `data/<name>`. */
+  files: Record<string, string>;
+  /** Final-scan secret hits per file; non-empty = refuse to write. */
+  hits: Array<{ file: string; rules: string[] }>;
+  /** Files over MAX_FILE_BYTES; non-empty = refuse to write. */
+  oversize: Array<{ file: string; bytes: number }>;
+  /** Free-text values blanked because they were secret-shaped. */
+  scrubbed: Array<{ file: string; id: string; field: string; rule: string }>;
+  counts: Record<string, number>;
+};
+
+const r4 = (n: number | string) => (Math.round(Number(n) * 1e4) / 1e4).toFixed(4);
+
+const js = (name: string, value: unknown) => `window.${name} = ${JSON.stringify(value)};\n`;
+
+function liveDocs(file: ExportV2, collection: string): Array<{ id: string; doc: Row }> {
+  return (file.collections?.[collection] ?? [])
+    .filter((r) => !r.deleted)
+    .map((r) => ({ id: r.id, doc: (r.doc ?? {}) as Row }));
+}
+
+export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[] } = {}): SliceResult {
+  const files: Record<string, string> = {};
+  const scrubbed: SliceResult["scrubbed"] = [];
+  const counts: Record<string, number> = {};
+  const noteScrub = (file: string, log: ScrubEntry[]) => { for (const e of log) scrubbed.push({ file, ...e }); };
+
+  // --- estimates (+ dev-only extras), scrubbed deep ---
+  const picked = selectEstimates((exp.collections?.quotes ?? []) as DocRow[]);
+  const have = new Set(picked.map((q) => q.id));
+  for (const q of opts.extraEstimates ?? []) if (!have.has(q.id)) { picked.push(q); have.add(q.id); }
+  picked.sort((a, b) => a.id.localeCompare(b.id));
+  const estimates: QuoteDoc[] = picked.map((q) => {
+    const log: ScrubEntry[] = [];
+    const out: Row = {};
+    for (const [k, v] of Object.entries(q)) out[k] = scrubValue(v, q.id, k, log);
+    noteScrub("data/estimates.js", log);
+    return out as QuoteDoc;
+  });
+  files["data/estimates.js"] = js("PEAK_ESTIMATES", estimates);
+  counts.estimates = estimates.length;
+
+  // --- catalog, chunked ---
+  const catalogRows = liveDocs(exp, "catalog_parts");
+  const catalogLog: ScrubEntry[] = [];
+  const parts = catalogRows
+    .map((r) => pickAndScrub({ ...r.doc, id: r.id }, CATALOG_FIELDS, r.id, catalogLog))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const groups = packCatalog(parts, MAX_FILE_BYTES);
+  const fileOfPart = new Map<string, string>();
+  groups.forEach((g, i) => {
+    const name = `data/catalog-${i + 1}.js`;
+    files[name] = catalogBody(g);
+    for (const p of g) fileOfPart.set(String(p.id), name);
+  });
+  for (const e of catalogLog) scrubbed.push({ file: fileOfPart.get(e.id) ?? "data/catalog-1.js", ...e });
+  counts.catalog = parts.length;
+  counts.catalogFiles = groups.length;
+
+  // --- fixtures (subassemblies) ---
+  const fixLog: ScrubEntry[] = [];
+  const fixtures = liveDocs(exp, "subassemblies")
+    .map((r) => {
+      const out: Row = {};
+      for (const [k, v] of Object.entries({ ...r.doc, id: r.id })) out[k] = scrubValue(v, r.id, k, fixLog);
+      return out;
+    })
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  noteScrub("data/fixtures.js", fixLog);
+  files["data/fixtures.js"] = js("PEAK_FIXTURES", fixtures);
+  counts.fixtures = fixtures.length;
+
+  // --- rules: allow-listed settings + blobs ---
+  const main = (exp.appSettings ?? []).find((r) => r.id === "main");
+  const settings = pickFields((main?.data ?? {}) as Row, SETTINGS_FIELDS);
+  const blobs: Record<string, unknown> = {};
+  for (const id of BLOB_IDS) {
+    const b = (exp.blobs ?? []).find((x) => x.id === id);
+    if (b) blobs[id] = b.data;
+  }
+  files["data/rules.js"] = js("PEAK_RULES", { settings, blobs });
+  counts.blobs = Object.keys(blobs).length;
+
+  // --- customers: only what the selected estimates reference ---
+  const refIds = new Set(estimates.map((q) => q.customerId).filter((x): x is string => typeof x === "string" && x !== ""));
+  const companies = (exp.companies ?? []).filter((c) => !c.deleted && refIds.has(String(c.id)));
+  const keptCo = new Set(companies.map((c) => String(c.id)));
+  const sites = (exp.sites ?? []).filter((s) => !s.deleted && keptCo.has(String(s.companyId)));
+  const contacts = (exp.contacts ?? []).filter((c) => !c.deleted && keptCo.has(String(c.homeCompanyId)));
+  const keptCt = new Set(contacts.map((c) => String(c.id)));
+  const coords = new Set<string>();
+  for (const s of sites) if (s.lat != null && s.lng != null && s.lat !== "" && s.lng !== "" && Number.isFinite(Number(s.lat)) && Number.isFinite(Number(s.lng))) coords.add(`${r4(s.lat as string)},${r4(s.lng as string)}`);
+  const geoCache = (exp.geoCache ?? [])
+    .filter((g) => String(g.key).split("|").some((half) => coords.has(half)))
+    .map((g) => ({ key: g.key, data: g.data }));
+  const customers = {
+    companies: companies.map((c) => pickFields(c, COMPANY_COLS)),
+    sites: sites.map((s) => pickFields(s, SITE_COLS)),
+    contacts: contacts.map((c) => pickFields(c, CONTACT_COLS)),
+    contactEmails: (exp.contactEmails ?? []).filter((e) => keptCt.has(String(e.contactId))).map((e) => pickFields(e, CONTACT_EMAIL_COLS)),
+    contactPhones: (exp.contactPhones ?? []).filter((p) => keptCt.has(String(p.contactId))).map((p) => pickFields(p, CONTACT_PHONE_COLS)),
+    geoCache,
+  };
+  files["data/customers.js"] = js("PEAK_CUSTOMERS", customers);
+  for (const [k, v] of Object.entries(customers)) counts[k] = v.length;
+
+  // --- team: active users only, no contact details ---
+  const team = (exp.users ?? []).filter((u) => u.status === "active").map((u) => pickFields(u, TEAM_FIELDS));
+  files["data/team.js"] = js("PEAK_TEAM", team);
+  counts.team = team.length;
+
+  // --- photo manifest (input for the photo task; not loaded by the page) ---
+  const docs = new Map(liveDocs(exp, "part_documents").map((d) => [d.id, d.doc]));
+  const skus = new Set(parts.map((p) => String(p.sku ?? p.id)));
+  const links = liveDocs(exp, "part_document_links")
+    .map((l) => l.doc)
+    .filter((l) => l.kind === "image" && !l.hidden && skus.has(String(l.partSku)))
+    .sort((a, b) =>
+      String(a.partSku).localeCompare(String(b.partSku)) ||
+      ((typeof a.sort === "number" ? a.sort : 1e9) - (typeof b.sort === "number" ? b.sort : 1e9)) ||
+      String(a.documentId).localeCompare(String(b.documentId)));
+  const manifest: Array<{ sku: string; docId: string; blobKey: string | null; sourceUrl: string | null }> = [];
+  for (const l of links) {
+    const d = docs.get(String(l.documentId));
+    if (!d || d.kind !== "image" || (!d.blobKey && !d.sourceUrl)) continue;
+    manifest.push({ sku: String(l.partSku), docId: String(l.documentId), blobKey: (d.blobKey as string | null) ?? null, sourceUrl: (d.sourceUrl as string | null) ?? null });
+  }
+  files["data/photo-manifest.json"] = JSON.stringify(manifest) + "\n";
+  counts.photos = manifest.length;
+
+  // --- meta ---
+  files["data/meta.js"] = js("PEAK_META", {
+    exportedAt: exp.meta?.exportedAt ?? null,
+    source: exp.meta?.source ?? null,
+    sliceVersion: SLICE_VERSION,
+    counts,
+  });
+
+  // --- final backstop ---
+  const hits: SliceResult["hits"] = [];
+  const oversize: SliceResult["oversize"] = [];
+  for (const [file, body] of Object.entries(files)) {
+    const rules = scanForSecrets(body);
+    if (rules.length) hits.push({ file, rules });
+    const bytes = Buffer.byteLength(body);
+    if (bytes > MAX_FILE_BYTES) oversize.push({ file, bytes });
+  }
+  return { files, hits, oversize, scrubbed, counts };
+}
+
+/** Writes the slice into `outDir` (the prototype's data folder). Refuses — writing nothing — if the scan or size check failed. */
+export function writeSlice(r: SliceResult, outDir: string): boolean {
+  if (r.hits.length > 0 || r.oversize.length > 0) return false;
+  fs.mkdirSync(outDir, { recursive: true });
+  for (const f of fs.readdirSync(outDir)) if (/^catalog-\d+\.js$/.test(f)) fs.rmSync(path.join(outDir, f));
+  for (const [file, body] of Object.entries(r.files)) fs.writeFileSync(path.join(outDir, path.basename(file)), body);
+  return true;
+}
+
+function main() {
+  const arg = (name: string) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined; };
+  const input = arg("--in"), out = arg("--out"), extra = arg("--extra-estimates");
+  if (!input || !out) {
+    console.error("usage: npm run handoff:slice -- --in <export.json> --out <data dir> [--extra-estimates <export.json>]");
+    process.exit(2);
+  }
+  const exp = JSON.parse(fs.readFileSync(input, "utf8")) as ExportV2;
+  if (exp.meta?.format !== 2) {
+    console.error(`${input}: expected a format-2 export (re-run npm run db:export); got format ${exp.meta?.format ?? "?"}`);
+    process.exit(2);
+  }
+  let extraEstimates: QuoteDoc[] | undefined;
+  if (extra) {
+    const other = JSON.parse(fs.readFileSync(extra, "utf8")) as ExportV2;
+    extraEstimates = selectEstimates((other.collections?.quotes ?? []) as DocRow[]);
+    console.log(`--extra-estimates: ${extraEstimates.length} estimate(s) from ${extra} (dev only — never for production)`);
+  }
+  const r = sliceExport(exp, { extraEstimates });
+  for (const h of r.hits) console.error(`SECRET SCAN: ${h.file} matches ${h.rules.join(", ")}`);
+  for (const o of r.oversize) console.error(`TOO BIG: ${o.file} is ${o.bytes} bytes (limit ${MAX_FILE_BYTES})`);
+  if (!writeSlice(r, out)) {
+    console.error("handoff:slice refused to write (see above); nothing was written.");
+    process.exit(1);
+  }
+  let total = 0;
+  console.log(`Slice written to ${out}`);
+  for (const [file, body] of Object.entries(r.files)) {
+    const bytes = Buffer.byteLength(body);
+    total += bytes;
+    console.log(`  ${path.basename(file).padEnd(22)} ${String(bytes).padStart(11)} bytes`);
+  }
+  console.log(`  total ${(total / 1e6).toFixed(2)} MB`);
+  console.log("  counts: " + Object.entries(r.counts).map(([k, v]) => `${k}=${v}`).join(" "));
+  console.log(`  secret scan: clean (${r.scrubbed.length} value(s) scrubbed)`);
+  for (const s of r.scrubbed) console.log(`    scrubbed ${s.file} ${s.id}.${s.field} (${s.rule})`);
+}
+
+if (process.argv[1]?.endsWith("slice.ts")) main();
