@@ -66,7 +66,7 @@ function warnOnce(name: string): void {
 }
 
 /** Explicit refusals for module M's `names` — each must be refusable (tsc). */
-function refusals<M>(names: readonly RefusableKey<M>[]): Record<string, ActionImpl> {
+export function refusals<M>(names: readonly RefusableKey<M>[]): Record<string, ActionImpl> {
   return Object.fromEntries(
     names.map((n) => [
       n,
@@ -159,6 +159,8 @@ export function miscActions(store: HandoffStore): Record<string, Record<string, 
   // leaves it reading "Not available in the prototype" in place of the card. share-links.ts shareLinkStatus with
   // no share secret (no links can be minted offline): the online state, the viewer's Send permission, no link,
   // the sent revisions and the last open. Copy client link then refuses (getShareLinkAction → NOT_IN_PROTOTYPE).
+  // `link: null` is always right here: the slicer strips `shareLink` from every quote (QUOTE_FIELDS omits it), so no
+  // link or secret ever exists in the prototype to report.
   const shareLinkStatusAction: Impl<typeof ShareActions, "shareLinkStatusAction"> = async (quoteId) => {
     const q = await repo.get(String(quoteId || ""));
     if (!q) return { ok: false, error: ONLINE_COPY.gone };

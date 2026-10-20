@@ -564,7 +564,7 @@ export async function handoffRuntimeChecks(ok: Ok) {
   const e1 = expectedEstimatorTotals(gq("Q-G001"), { blobs: {} });
   ok(e1.raw === 6744 && e1.canonical === 7225 && e1.priceRound && e1.bonusLines, `handoff runtime: expectedEstimatorTotals — Q-G001 golden 6744 → 7225 on screen (got ${e1.raw} → ${e1.canonical})`);
   const e2 = expectedEstimatorTotals(gq("Q-G002"), { blobs: {} });
-  ok(e2.raw === 9100 && e2.canonical === 20150, `handoff runtime: expectedEstimatorTotals — Q-G002's ungrouped alternate is counted after normalizeSystemOrder (got ${e2.raw} → ${e2.canonical})`);
+  ok(e2.raw === 9100 && e2.canonical === 9300, `handoff runtime: expectedEstimatorTotals — Q-G002's alternate sits in an Alternate group, so it stays out of the total through normalizeSystemOrder (got ${e2.raw} → ${e2.canonical})`);
   const sentQ = expectedEstimatorTotals({ ...gq("Q-G001"), status: "sent" }, { blobs: {} });
   ok(sentQ.canonical === sentQ.raw && !sentQ.priceRound && !sentQ.bonusLines, "handoff runtime: expectedEstimatorTotals — a sent quote without bonus lines prices as stored");
 
@@ -1142,8 +1142,10 @@ export async function handoffSendChecks(ok: Ok) {
   const qb = { ...base, id: "Q-4002", estNo: 4002, name: "Second", status: "draft", updatedAt: 1_790_000_000_000, vendorQuotes: [{ id: "vq1", vendorCompanyId: "c1", quoteNumber: "V-1", total: 10 }, { id: "vq2", vendorCompanyId: "c-gone" }] };
   const qc = { ...base, id: "Q-4003", estNo: 4003, name: "Third", status: "draft", updatedAt: 1_790_000_000_000 };
   const qWon = { ...base, id: "Q-4004", estNo: 4004, name: "Closed", status: "won", updatedAt: 1 };
+  const { status: _noStatus, ...qNoStatus } = { ...base, id: "Q-4006", estNo: 4006, name: "Fixture-like", status: "draft", updatedAt: 1_790_000_000_000 }; // the golden fixtures carry no status
+  void _noStatus;
   const flame = { id: "Q-4005", estNo: 4005, name: "Flame", status: "draft", quoteType: "flame", source: "flame", createdAt: 1, updatedAt: 1, history: [], revisions: [], spec: {} };
-  const store = await openStore({ quotes: docs([qa, qb, qc, qWon, flame]), catalog: [], fixtures: [], blobs: [], settings: [{ id: "main", data: { companyName: "Peak Systems Group" } } as { id: string }] }, { idb: null });
+  const store = await openStore({ quotes: docs([qa, qb, qc, qWon, flame, qNoStatus]), catalog: [], fixtures: [], blobs: [], settings: [{ id: "main", data: { companyName: "Peak Systems Group" } } as { id: string }] }, { idb: null });
   configurePorts({ store, customers: cust, rules: { settings: { companyName: "Peak Systems Group" }, blobs: {} }, team });
   const repo = quoteRepo(store);
   const ops = reviewOps(repo);
@@ -1220,7 +1222,23 @@ export async function handoffSendChecks(ok: Ok) {
   ok(!gated.ok && /approval on record before it can be sent/.test(gated.error ?? "") && (await repo.get(fresh.id))!.status === "draft", "handoff send: an Estimator can't send an unapproved quote (the gate), nothing written");
   as("u3");
   const sendRex = await NS.nsSendAction("Q-4003");
-  ok(sendRex.ok && sendRex.status === "sent" && (await repo.get("Q-4003"))!.revisions?.at(-1)?.reason === "sent", "handoff send: an approver (Reviewer: approve, no send) may send — status sent, the sent revision cut");
+  ok(sendRex.ok && sendRex.status === "sent" && (await repo.get("Q-4003"))!.revisions?.at(-1)?.reason === "sent" && (await repo.get("Q-4003"))!.review.state === "approved",
+    "handoff send: an approver (Reviewer: approve, no send) may send — status sent, the sent revision cut, the approval still stamped (approved earlier by Mia)");
+  // an owner who holds approve self-approves on send (method "self")
+  as("u1");
+  const selfQ = await repo.create({ name: "Owner sends", source: "estimator", owner: "Ann Admin", spec: { sections, mobs: [] } } as Partial<Quote>);
+  const selfSend = await NS.nsSendAction(selfQ.id);
+  const selfAfter = (await repo.get(selfQ.id))!;
+  ok(selfSend.ok && selfAfter.status === "sent" && selfAfter.review.state === "approved" && selfAfter.review.method === "self" && selfAfter.review.decidedBy === "Ann Admin",
+    `handoff send: an owner holding approve self-approves on send — method "self", decidedBy the owner (${JSON.stringify(selfAfter.review)})`);
+  // a quote stored with NO status (the golden fixtures) reads as a draft everywhere: it can be submitted, and the stored doc keeps no status
+  as("u2");
+  const nsq = (await repo.get("Q-4006"))!;
+  const nsSub = await NS.nsSubmitAction("Q-4006", null);
+  const nsStored = await store.get<{ status?: string; review?: { state: string } }>("quotes", "Q-4006");
+  ok(nsq.status === "draft" && nsSub.ok && nsSub.review?.state === "in_review" && nsStored?.review?.state === "in_review" && nsStored.status === undefined,
+    `handoff send: a status-less quote reads as a draft — Submit works, and the stored doc is not given the default (${nsStored?.status})`);
+  as("u3");
   ok((await NS.nsSendAction("Q-4003")).error === "This quote has already been sent.", "handoff send: sending twice — already sent");
   ok((await ops.sendQuoteToCustomer("Q-nope", { name: "x", roles: ["Admin"] })).ok === false && (await NS.nsSendAction("Q-nope")).next === null, "handoff send: a missing quote — not found, next null");
 
@@ -1265,6 +1283,27 @@ export async function handoffSendChecks(ok: Ok) {
     "handoff send: sendTrackAction — each recorded email, newest first, reads 'Sent (simulated)', delivered locally, no Reply");
   ok((await SA.sendTrackAction("Q-nope")).ok === false && ((await SA.sendTrackAction("Q-nope")) as { error: string }).error === TRACK_GONE, "handoff send: track — a missing quote is 'Not found.'");
   ok(trackedEmailsOf({ estimateEmails: [{ threadId: "gone", rev: 1, at: 1, by: "x", to: "y" }] } as unknown as Quote, []).length === 0, "handoff send: track — a recorded email with no activity row is skipped");
+  // the email port throwing after the draft was marked sent → the original's partial result (not a throw), with the fresh view
+  as("u1");
+  const failQ = await repo.create({ name: "Port fails", source: "estimator", owner: "Ann Admin", customerId: "c1", customer: "Acme Theatre", spec: { sections, mobs: [] } } as Partial<Quote>);
+  const realSend = email.send;
+  email.send = async () => {
+    throw new Error("port down");
+  };
+  let partial: Awaited<ReturnType<typeof SA.sendEstimateEmailAction>> | null = null;
+  let partialThrew = false;
+  try {
+    partial = await SA.sendEstimateEmailAction(failQ.id, input({ subject: "Port fails", followUpDays: 0 }));
+  } catch {
+    partialThrew = true;
+  }
+  const retry = await SA.sendEstimateEmailAction("Q-4001", input({ followUpDays: 0 })).catch(() => null);
+  email.send = realSend;
+  const failAfter = (await repo.get(failQ.id))!;
+  ok(!partialThrew && partial !== null && !partial.ok && partial.error === SEND_COPY.partialNoThread && partial.markedSent === true && partial.status === "sent" && partial.next !== undefined
+    && failAfter.status === "sent" && !failAfter.estimateEmails?.length,
+    `handoff send: the email port throwing after mark-sent → the partial result (markedSent, the fresh view), not a throw (${JSON.stringify(partial)?.slice(0, 160)})`);
+  ok(retry !== null && !retry.ok && retry.error === SEND_COPY.notSent && !("markedSent" in retry && retry.markedSent), "handoff send: the port throwing on an already-sent quote → the plain 'didn't go out' (nothing marked)");
   const R = refusedSendActions();
   ok(REFUSED_SEND_ACTIONS.every((n) => JSON.stringify((R[n] as () => unknown)()) === JSON.stringify(NOT_IN_PROTOTYPE)), "handoff send: Open in Inbox / Reply / Mark read refuse");
   // Won → the onWon note shows in the prototype log

@@ -83,8 +83,21 @@ export type QuoteRepo = ReturnType<typeof quoteRepo>;
 
 /** The quotes store over `store`. Every read is normalized onto its pipeline (stores/quotes get()). */
 export function quoteRepo(store: HandoffStore) {
-  /** The stored doc as written — what getDoc hands the app's writers (a copy: the store clones on get). */
-  const raw = async (id: string): Promise<Quote | null> => (id ? (await store.get<Quote>("quotes", id)) ?? null : null);
+  /**
+   * The stored doc — what getDoc hands the app's writers (a copy: the store clones on get). A doc with NO
+   * status (the golden fixtures Q-G001..3) reads as "draft", exactly as props/estimator and listQuoteRows
+   * already treat it, so the UI and the ops agree; the injected default is remembered (`defaulted`) and
+   * stripped again before a write that left the status alone, so the default is never persisted.
+   */
+  const defaulted = new WeakSet<object>();
+  const raw = async (id: string): Promise<Quote | null> => {
+    const q = id ? (await store.get<Quote>("quotes", id)) ?? null : null;
+    if (q && (q as { status?: unknown }).status == null) {
+      q.status = "draft";
+      defaulted.add(q);
+    }
+    return q;
+  };
   /** A read view: the doc onto its pipeline, on a copy (the stored doc is never rewritten by a read). */
   const view = (q: Quote): Quote => normalizeQuotePipeline(structuredClone(q), pipelinesNow());
   const read = async (id: string): Promise<Quote | null> => {
@@ -101,8 +114,10 @@ export function quoteRepo(store: HandoffStore) {
       const doc = await raw(id);
       if (!doc) return null;
       mutate(doc);
+      const out = view(doc);
+      if (defaulted.has(doc) && doc.status === "draft") delete (doc as { status?: unknown }).status; // keep the raw doc as stored
       await store.put("quotes", doc);
-      return view(doc);
+      return out;
     });
 
   const repo = {

@@ -39,9 +39,10 @@ import { latestSentRevision, pdfFileName, pdfKindForQuoteType } from "@/lib/quot
 import { coverPdfFileName } from "@/lib/estimate-output/cover";
 import { can } from "@/lib/team";
 import type { Quote, QuoteStatus } from "@/lib/stores/quotes";
-import { NOT_IN_PROTOTYPE, type ActionImpl } from "../actions-registry";
+import type { ActionImpl } from "../actions-registry";
 import type { HandoffStore } from "../store";
 import { clock, customers, email, refreshPortsFromStore, users, type EmailActivity, type TeamUser } from "../ports";
+import { refusals } from "./misc-refusals";
 import { quoteRepo } from "../quote-repo";
 import { reviewOps } from "../review-ops";
 import { refresh } from "../router";
@@ -296,16 +297,23 @@ export function sendActions(store: HandoffStore): { [K in ImplementedSendAction]
           return { ok: false, error: markedSent ? SEND_COPY.partialNoThread : SEND_COPY.notSent, ...(markedSent ? { markedSent: true } : {}) };
         }
 
-        // The email — recorded by the email port, never sent.
-        const sent = await email.send({
-          to: p.to.split(", ").filter(Boolean),
-          cc: p.cc ? p.cc.split(", ").filter(Boolean) : [],
-          subject: p.subject,
-          body: bodyWithLink(p.body, SIMULATED_LINK),
-          quoteId: q.id,
-          rev: rev.rev,
-          attachments: attachmentNames(q, input),
-        });
+        // The email — recorded by the email port, never sent. A throw here is send-server's "the email didn't go
+        // out": after the mark-sent it is the partial result (the fresh view rides along), before it a plain retry.
+        let sent;
+        try {
+          sent = await email.send({
+            to: p.to.split(", ").filter(Boolean),
+            cc: p.cc ? p.cc.split(", ").filter(Boolean) : [],
+            subject: p.subject,
+            body: bodyWithLink(p.body, SIMULATED_LINK),
+            quoteId: q.id,
+            rev: rev.rev,
+            attachments: attachmentNames(q, input),
+          });
+        } catch (e) {
+          console.error("[handoff] send: the email port threw", e);
+          return { ok: false, error: markedSent ? SEND_COPY.partialNoThread : SEND_COPY.notSent, ...(markedSent ? { markedSent: true } : {}) };
+        }
         const warnings = [SIMULATED_SEND_WARNING];
         try {
           if (!(await repo.recordEstimateEmail(q.id, { threadId: sent.id, rev: rev.rev, at: clock.now(), by: user.name, to: p.to }))) warnings.push(SEND_COPY.recordFailed);
@@ -340,15 +348,7 @@ export function sendActions(store: HandoffStore): { [K in ImplementedSendAction]
 /** No Inbox in the prototype: a draft can't be opened there, and there is no thread to reply to or mark read. */
 export const REFUSED_SEND_ACTIONS = ["openEstimateInInboxAction", "replyToEstimateEmailAction", "markEstimateEmailReadAction"] as const satisfies readonly Exclude<keyof A, ImplementedSendAction>[];
 
-/** Registered as explicit refusals (NOT_IN_PROTOTYPE + one console.warn per name). Every original's result type admits `{ ok: false, error }`. */
+/** Registered as explicit refusals (NOT_IN_PROTOTYPE + one console.warn per name). Every original's result type admits `{ ok: false, error }` (tsc, via `refusals`). */
 export function refusedSendActions(): Record<(typeof REFUSED_SEND_ACTIONS)[number], ActionImpl> {
-  const warned = new Set<string>();
-  const refuse = (name: string) => () => {
-    if (!warned.has(name)) {
-      warned.add(name);
-      console.warn(`[handoff] ${name} is not in the prototype`);
-    }
-    return { ...NOT_IN_PROTOTYPE };
-  };
-  return Object.fromEntries(REFUSED_SEND_ACTIONS.map((n) => [n, refuse(n)])) as Record<(typeof REFUSED_SEND_ACTIONS)[number], ActionImpl>;
+  return refusals<A>(REFUSED_SEND_ACTIONS) as Record<(typeof REFUSED_SEND_ACTIONS)[number], ActionImpl>;
 }

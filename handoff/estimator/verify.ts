@@ -46,7 +46,7 @@
  *
  *   npm run handoff:verify -- --send [quoteId] [--out <package dir>]
  *
- * --send  Send & track, simulated (Task 6), on the first draft estimate: a verify-only Estimator persona
+ * --send  Send & track, simulated (Task 6), on the default estimate Q-G001 (or the given id): a verify-only Estimator persona
  *          (VERIFY_ESTIMATOR, appended to the roster before the page loads) Submits for approval; a Manager
  *          from the roster (switched through localStorage, ports CURRENT_USER_KEY) Approves only; the composer
  *          is pre-filled; Send & mark sent → Sent, the Activity card reads "Sent (simulated)", a reload keeps
@@ -1099,9 +1099,11 @@ async function sendCheck(pkgDir: string, which: string | undefined): Promise<Sen
   const index = path.join(pkgDir, "index.html");
   if (!existsSync(index)) throw new Error(`${index} not found — run npm run handoff:build first`);
   const data = loadSliceData(pkgDir);
-  // Default: the first stored DRAFT system estimate. The golden fixtures (Q-G001…) carry no `status`, and the review
-  // ops refuse a quote whose status isn't "draft" exactly as quote-review-ops.ts does ("Only a draft quote…").
-  const q = (which ? data.estimates.find((x) => x.id === which) : data.estimates.find((x) => x.status === "draft" && (x.quoteType ?? "system") === "system") ?? data.estimates[0]) ?? null;
+  // Default: the default estimate, Q-G001 (a golden fixture, stored as a draft) — the whole Submit → Approve → Send → Won
+  // flow runs on what a first-time user sees; with no Q-G001 in the slice, the first stored draft system estimate.
+  const q = (which
+    ? data.estimates.find((x) => x.id === which)
+    : data.estimates.find((x) => x.id === "Q-G001") ?? data.estimates.find((x) => x.status === "draft" && (x.quoteType ?? "system") === "system") ?? data.estimates[0]) ?? null;
   if (!q) throw new Error(`no estimate${which ? ` "${which}"` : ""} in the slice`);
   const manager = sliceTeam(pkgDir).find((u) => (u.status ?? "active") === "active" && (u.roles ?? []).includes("Manager"));
   if (!manager) throw new Error("the slice's roster has no active Manager");
