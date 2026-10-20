@@ -37315,7 +37315,7 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   const near = (a: number, b: number) => Math.abs(a - b) < 0.01;
   const costSum = (rs: typeof rows) => rs.reduce((a, r) => a + r.qty * r.unitCost, 0);
   const sellSum = (rs: typeof rows) => rs.reduce((a, r) => a + r.qty * r.unitSell, 0);
-  ok(p262Header.join(",") === "Manufacturer,Model number,Room,System,Qty,Unit Cost,Unit Sell,Description,Notes", "#262 parts list: the CSV header is Jeff's nine columns, in order");
+  ok(p262Header.join(",") === "Manufacturer,Item name,Description,Room,System,Qty,Unit Cost,Unit Sell,Line margin,Effective margin,Price source,Notes", "#262 v2 parts list: the CSV header is the twelve columns, in order");
   ok(!["LAB-1", "LAB-X", "OPT-1", "ZERO", "SA-F1", "SA-F2", "SAFETY", "VQ"].some((s) => rows.some((r) => r.sku === s)), "#262 parts list: labor sections, labor items, options, zero-qty items, the assembly line itself, qty-0 components and an expanded vendor-quote line never appear");
   ok(rows.map((r) => r.sku || r.modelNumber || r.desc).join("|") === "LAMP-A|CLAMP|Cost adjustment — Wash (line cost differs from its parts)|PLAIN-1|PLAIN-2|UNKNOWN-9|CAT-ONLY|TR-10|Base plate|VQ2|CABLE-FT|CLAMP", "#262 parts list: rows come out in first-appearance order");
   ok(rows.filter((r) => r.system === "Lighting").every((r) => r.room === "Stage") && by("CLAMP", "Rigging")!.room === "Main Hall", "#262 parts list: room is the section's own room, else the defaultRoom fallback");
@@ -37351,13 +37351,50 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   ok(near(sellSum(rows), expectedSell), "#262 parts list: Σ qty × Unit Sell equals the estimate's material sell");
   const csv = p262Csv(rows);
   ok(csv.length === rows.length && !csv.some((r) => r.includes("Total")), "#262 parts list: the CSV has one line per row and no Total row");
-  ok(csv[1].join("|") === "Altman|C-CLAMP-PN|Stage|Lighting|8|10.00|20.00|Clamp|Part of: Cyc light, Wash", "#262 parts list: a CSV row prints Jeff's columns, cents, and \"Part of:\" in Notes");
-  ok(csv.find((r) => r[7] === "Plain one")![8] === "Hang on 1st elec" && csv.find((r) => r[7] === "Cable")![8] === "per ft", "#262 parts list: the internal note (trimmed) and a non-ea unit (\"per ft\") land in Notes");
+  ok(csv[1].join("|") === "Altman|C-CLAMP-PN|Clamp|Stage|Lighting|8|10.00|20.00|50.0%|50.0%|Catalog|Part of: Cyc light, Wash", "#262 v2 parts list: a CSV row prints the twelve columns, cents, margins, source and \"Part of:\" in Notes");
+  ok(csv.find((r) => r[2] === "Plain one")?.[11] === "Hang on 1st elec" && csv.find((r) => r[2] === "Cable")?.[11] === "per ft", "#262 parts list: the internal note (trimmed) and a non-ea unit (\"per ft\") land in Notes");
   ok(p262Csv([]).length === 0, "#262 parts list: an empty list has no rows");
   const manualVq = p262Rows([{ id: "s3", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "", "Acme truss package", 1, 350, { vendorQuoteId: "VQ-1" })] }], vqs, {});
   const vAdj = manualVq.find((r) => r.desc.startsWith("Cost adjustment"));
   ok(vAdj?.unitCost === 50 && vAdj.unitSell === 0 && vAdj.partOf.join(";") === "Vendor quote Acme #Q-77" && vAdj.desc === "Cost adjustment — Vendor quote Acme #Q-77 (quote total differs from its lines)" && near(costSum(manualVq), 350) && near(sellSum(manualVq), 700), "#262 parts list: a typed vendor total that differs from its lines adds an adjustment row, so the file still totals to the line cost and sell");
   ok(p262Skus(sections).join(",") === "LAMP-A,CLAMP,PLAIN-1,PLAIN-2,UNKNOWN-9,CAT-ONLY,VQ,VQ2,CABLE-FT", "#262 parts list: partsListSkus lists component SKUs, never the assembly line's own SKU (a vendor-quote line's SKU is kept — it can't see the vendor quotes)");
+  // --- v2 (2026-10-20 spec): Item name, Line / Effective margin, Price source ---
+  ok(rows.map((r) => r.source).join("|") === "Catalog|Catalog|Adjustment|Catalog|Not in catalog|Not in catalog|Catalog|Vendor quote — Acme #Q-77|Vendor quote — Acme #Q-77|Not in catalog|Not in catalog|Catalog", "#262 v2 parts list: components and catalog SKUs say Catalog, vendor lines name the vendor + quote #, cost-adjustment rows say Adjustment, unresolved SKUs (and a missing vendor quote) say Not in catalog");
+  ok(lamp.lineSell === 200 && clamp.lineSell === 20 && truss.lineSell === 100, "#262 v2 parts list: lineSell is the allocated unit sell before the system factor (LAMP 200, CLAMP 20, truss 100)");
+  ok(csv.find((r) => r[2] === "Mystery part")?.[1] === "UNKNOWN-9" && csv.find((r) => r[2] === "Source Four 750W")?.[1] === "S4-750" && csv.find((r) => r[2] === "Base plate")?.[1] === "", "#262 v2 parts list: Item name is the model number, else the SKU, else blank");
+  const adjCsv = csv.find((r) => String(r[2]).startsWith("Cost adjustment — Wash"));
+  ok(adjCsv?.[8] === "" && adjCsv?.[9] === "" && adjCsv?.[10] === "Adjustment", "#262 v2 parts list: a cost-adjustment row prints no margins");
+
+  const srcInfo: Record<string, P262Info> = { CAT: { mfr: "ETC" }, CAT2: { mfr: "ETC" }, CAT3: { mfr: "ETC" }, DUP: { mfr: "ETC" } };
+  const srcSec: P262Section = { id: "s5", name: "Sources", kind: "materials", mfr: "", freightPct: 0, items: [
+    it(1, "POR-1", "Customer asked", 1, 0, { por: true, price: 0 }),
+    it(2, "", "Rigging allowance", 1, 500, { allowance: true }),
+    it(3, "", "Main drape", 1, 800, { curtain: true }),
+    it(4, "CUSTOM", "Custom bracket", 2, 30, { custom: true }),
+    it(5, "CAT", "Catalog plain", 1, 40),
+    it(6, "CAT2", "Catalog typed unit sell", 1, 40, { sellOverride: true, price: 100 }),
+    it(7, "CAT3", "Catalog typed ext sell", 2, 40, { extSellOverride: 150 }),
+    it(8, "DUP", "Dup part", 1, 10),
+    it(9, "DUP", "Dup part", 1, 10, { custom: true }),
+    it(10, "", "Bolt pipe", 1, 60, { vendorQuoteId: "VQ-2" }),
+  ] };
+  const vq2: P262Vq = { id: "VQ-2", vendor: "Bolt", quoteNumber: "", description: "", terms: "", notes: "", total: 60, includesFreight: false, display: "single",
+    lines: [{ id: 1, description: "Pipe", qty: 2, unit: "ea", amount: 60 }] };
+  const srcRows = p262Rows([srcSec], [vq2], srcInfo);
+  const srcCsv = p262Csv(srcRows);
+  ok(srcRows.map((r) => r.source).join("|") === "Price on request|Allowance|Curtain calculator|Custom|Catalog|Catalog — sell edited|Catalog — sell edited|Catalog|Custom|Vendor quote — Bolt", "#262 v2 parts list: POR, allowance, curtain, custom, catalog, a typed unit sell, a typed extended sell, and a vendor quote with no number each get their label");
+  ok(srcRows.filter((r) => r.sku === "DUP").map((r) => `${r.source}:${r.qty}`).join("|") === "Catalog:1|Custom:1", "#262 v2 parts list: the same part as a catalog line and as a custom line stays two rows (source is in the merge key)");
+  const sc = (desc: string) => srcCsv.find((r) => r[2] === desc);
+  ok(sc("Catalog plain")?.[8] === "50.0%" && sc("Catalog plain")?.[9] === "50.0%", "#262 v2 parts list: with no freight or rounding, Line margin = Effective margin (80 sell / 40 cost → 50.0%)");
+  ok(sc("Catalog typed unit sell")?.[8] === "60.0%" && sc("Catalog typed ext sell")?.[8] === "46.7%", "#262 v2 parts list: margins follow a typed unit sell (100 → 60.0%) and a typed extended sell (150 / 2 = 75 → 46.7%)");
+  ok(sc("Customer asked")?.[8] === "" && sc("Customer asked")?.[9] === "", "#262 v2 parts list: a zero-sell row prints blank margins");
+
+  const typed = p262Rows([{ id: "s6", name: "Typed", kind: "materials", mfr: "", freightPct: 0, sellOverride: 125, items: [it(1, "CAT", "Catalog plain", 1, 50, { price: 100 })] }], [], srcInfo);
+  const typedCsv = p262Csv(typed);
+  ok(typed[0]?.lineSell === 100 && typedCsv[0][7] === "125.00" && typedCsv[0][8] === "50.0%" && typedCsv[0][9] === "60.0%", "#262 v2 parts list: a typed system sell lifts Unit Sell and the Effective margin (60.0%) but not the Line margin (50.0%)");
+  const below = p262Csv(p262Rows([{ id: "s7", name: "Below", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "CAT", "Below cost", 1, 50, { price: 40 })] }], [], srcInfo));
+  ok(below[0][8] === "-25.0%" && below[0][9] === "-25.0%", "#262 v2 parts list: a below-cost line prints a negative margin");
+  ok(srcCsv.every((r) => r.length === 12) && csv.every((r) => r.length === 12), "#262 v2 parts list: every CSV row has twelve cells");
 }
 
 /* --- #261: Quick Design plan text stays a fixed on-screen size however wide the plan draws; dimensions smaller still (D468) --- */
