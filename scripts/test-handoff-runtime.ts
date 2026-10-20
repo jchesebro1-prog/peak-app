@@ -48,8 +48,8 @@ import type { LivePart } from "../handoff/estimator/runtime/readers";
 import { POPOUT_NOTICE, PRINT_FOOTER_TEXT, previewTargetOf, windowOpenRoute } from "../handoff/estimator/ui/preview-routes";
 import { cutSheetAppendixModels } from "../handoff/estimator/runtime/loaders/cut-sheets";
 import { packagePanelFor } from "../handoff/estimator/runtime/actions/package-actions";
-import { driftClean, driftMessages, driftOf, parsePortSources, PORT_SOURCES_FILE, sha256Of, updatedPortSources } from "../handoff/estimator/port-drift";
-import { APP_OVERRIDES, exportNames } from "../handoff/estimator/esbuild-plugins";
+import { driftClean, driftMessages, driftOf, parsePortSources, PORT_SOURCES_FILE, sha256Of, unknownPorts, updatedPortSources } from "../handoff/estimator/port-drift";
+import { APP_OVERRIDES, BAKED_MODULES, bakedSource, exportNames } from "../handoff/estimator/esbuild-plugins";
 import { fmt } from "@/lib/estimating-core/pricing";
 import { CUT_SHEETS_NO_QUOTE, CUT_SHEETS_WRONG_TYPE } from "@/lib/curtain-cut-sheets/model";
 import { REVIEW_COMMENT_COPY } from "@/lib/estimate-review/comments";
@@ -589,6 +589,7 @@ export async function handoffRuntimeChecks(ok: Ok) {
   await handoffSendChecks(ok);
   await handoffShellChecks(ok);
   await handoffAssemblyChecks(ok);
+  await handoffRulesChecks(ok);
 }
 
 /* ------------------------------------------------------------------ PR 2 Task 4: the Estimator's actions in the browser */
@@ -1113,11 +1114,18 @@ export async function handoffReviewChecks(ok: Ok) {
   const dirty = driftOf(man, hashOf, (p) => p in files);
   const msgs = driftMessages(dirty);
   ok(!driftClean(dirty) && dirty.changed.length === 1 && dirty.changed[0].original === "src/b.ts" && dirty.missing[0]?.original === "src/c.ts" && dirty.portsMissing.join() === "h/gone.ts"
-    && msgs[0] === `re-check h/a.ts against src/b.ts, then update ${PORT_SOURCES_FILE} with \`--drift --update\`` && msgs.length === 3,
+    && msgs[0] === `re-check h/a.ts against src/b.ts, then update ${PORT_SOURCES_FILE} with \`--drift --update h/a.ts\`` && msgs.length === 3,
     "handoff drift: a changed original names its port and the re-check; a gone original and a missing port are listed too");
   const upd = updatedPortSources(man, hashOf);
   ok(upd.ports[0].originals[1].sha256 === sha256Of("two, edited") && upd.ports[1].originals[0].sha256 === sha256Of("three") && driftOf(upd, hashOf, () => true).changed.length === 0,
     "handoff drift: --update stamps current hashes (a gone original keeps its old one)");
+  // Task 10 — `--drift --update <port> …` re-stamps the named entries only.
+  files["src/c.ts"] = "three, edited";
+  const one = updatedPortSources(man, hashOf, ["h/a.ts"]);
+  ok(one.ports[0].originals[1].sha256 === sha256Of("two, edited") && one.ports[1] === man.ports[1] && one.ports[1].originals[0].sha256 === sha256Of("three"),
+    "handoff drift: --update <port> re-stamps that entry only (every other entry left exactly as it was)");
+  ok(updatedPortSources(man, hashOf, []).ports.every((p, i) => p === man.ports[i]) && unknownPorts(man, ["h/a.ts", "h/typo.ts"]).join() === "h/typo.ts" && unknownPorts(man, ["h/gone.ts"]).length === 0,
+    "handoff drift: an empty name list stamps nothing; unknownPorts names a port the manifest lacks (verify refuses to write then)");
   let threw = false;
   try {
     parsePortSources({ ports: [{ port: "x", what: "y", originals: [] }] });
@@ -1129,8 +1137,9 @@ export async function handoffReviewChecks(ok: Ok) {
   ok(real.ports.length >= 13 && real.ports.every((p) => fs.existsSync(p.port) && p.originals.every((o) => /^[0-9a-f]{64}$/.test(o.sha256))),
     `handoff drift: ${PORT_SOURCES_FILE} parses, every port module exists and every original has a stamped hash (whether originals still match is --drift's job)`);
 
-  // --- the component overrides export every value name their originals do ---
+  // --- the component overrides export every value name their originals do (a BAKED data override: see handoffRulesChecks) ---
   for (const [orig, repl] of Object.entries(APP_OVERRIDES)) {
+    if (BAKED_MODULES.includes(repl)) continue;
     const want = exportNames(fs.readFileSync(orig, "utf8"));
     const have = new Set(exportNames(fs.readFileSync(nodePath.join("handoff/estimator", repl), "utf8")));
     const missingNames = want.filter((n) => !have.has(n));
@@ -1858,6 +1867,221 @@ export async function handoffAssemblyChecks(ok: Ok) {
   const regs = actionRegistrations(store).filter(([k]) => k === ASSEMBLIES_ACTIONS_KEY).flatMap(([, impls]) => Object.keys(impls));
   const want = exportNames(fs.readFileSync(ASSEMBLIES_ACTIONS_KEY, "utf8"));
   ok(want.length === 5 && want.every((n) => regs.includes(n)), `handoff assemblies: all ${want.length} exports of the builder's actions are registered (${regs.join(", ")})`);
+
+  offRefresh();
+  configurePorts({ store: null, customers: null, rules: null, team: null });
+}
+
+/* ------------------------------------------------------------------ PR 2 Task 10: Estimating Rules */
+
+/** Task 10 — the rules registry (baked), the rules store port, the editors' props and actions, and pricing reading the store. */
+export async function handoffRulesChecks(ok: Ok) {
+  const Pricing = await import("@/lib/stores/pricing");
+  const Registry = await import("../handoff/estimator/runtime/baked/pricing-registry");
+  const VenueClasses = await import("@/lib/stores/venue-classes");
+  const BakedVenue = await import("../handoff/estimator/runtime/baked/venue-classes");
+  const PR = await import("../handoff/estimator/runtime/pricing-rules");
+  const RP = await import("../handoff/estimator/runtime/props/rules");
+  const RA = await import("../handoff/estimator/runtime/actions/rules-actions");
+  const { RULES_PAGES } = await import("../handoff/estimator/runtime/routes");
+  const { NOT_IN_PROTOTYPE: NIP } = await import("../handoff/estimator/runtime/actions-registry");
+  const { resolveVenueDoctrine } = await import("@/lib/venue-doctrine");
+
+  // --- baking: the bundle's copy of each baked module is the app's own values ---
+  const evalBaked = (src: string): Record<string, unknown> => {
+    // Evaluated in this realm (a vm context's objects carry another realm's prototypes, which isDeepStrictEqual compares).
+    const exportsObj: Record<string, unknown> = {};
+    new Function("exportsObj", src.replace(/^export const (\w+) = /gm, "exportsObj.$1 = "))(exportsObj);
+    return exportsObj;
+  };
+  const { isDeepStrictEqual } = await import("node:util");
+  const bakedReg = evalBaked(bakedSource(Registry as unknown as Record<string, unknown>));
+  ok(isDeepStrictEqual(bakedReg.GROUPS, Pricing.GROUPS) && isDeepStrictEqual(bakedReg.FLAMETEST_RATE_DEFAULTS, Pricing.FLAMETEST_RATE_DEFAULTS) && bakedReg.CATALOG_RATES_BLOB === "catalog_rates" && Object.keys(bakedReg).length === 12,
+    "handoff rules: the baked pricing registry IS the app's GROUPS + engine defaults (bakedSource round-trips, 12 exports)");
+  const bakedVenue = evalBaked(bakedSource(BakedVenue as unknown as Record<string, unknown>));
+  ok(isDeepStrictEqual(bakedVenue.VENUE_CLASSES, VenueClasses.VENUE_CLASSES) && Object.keys(bakedVenue).join() === "VENUE_CLASSES", "handoff rules: the baked venue classes are the original's VENUE_CLASSES");
+  const overrideNames = exportNames(fs.readFileSync("handoff/estimator/runtime/baked/venue-classes.ts", "utf8"));
+  const controlsImports = /import \{([^}]*)\} from "@\/lib\/stores\/venue-classes"/.exec(fs.readFileSync("src/app/(app)/estimating-rules/controls.tsx", "utf8"))?.[1].split(",").map((x) => x.trim()).filter((x) => x && !x.startsWith("type ")) ?? [];
+  ok(APP_OVERRIDES["src/lib/stores/venue-classes.ts"] === "runtime/baked/venue-classes.ts" && BAKED_MODULES.includes("runtime/baked/venue-classes.ts") && controlsImports.length > 0 && controlsImports.every((n) => overrideNames.includes(n)) && overrideNames.every((n) => exportNames(fs.readFileSync("src/lib/stores/venue-classes.ts", "utf8")).includes(n)),
+    `handoff rules: the venue-classes override exports every value controls.tsx imports (${controlsImports.join()}), each an export of the original`);
+  let bakeThrew = 0;
+  for (const bad of [{ f: () => 1 }, { n: NaN }, { u: undefined }, { m: new Map() }]) {
+    try {
+      bakedSource(bad as Record<string, unknown>);
+    } catch {
+      bakeThrew++;
+    }
+  }
+  ok(bakeThrew === 4 && bakedSource({ B: [1, "x"], A: { k: null } }) === '// Baked at build time from the app (handoff/estimator/esbuild-plugins.ts bakePlugin) — do not edit.\nexport const A = {"k":null};\nexport const B = [1,"x"];\n',
+    "handoff rules: bakedSource — sorted `export const` JSON literals; a function / NaN / undefined / Map refuses");
+
+  // --- a store: parts, an Admin and an Estimator, a Gold company, a labor % that follows a stored install % ---
+  const part = (sku: string, over: Record<string, unknown> = {}) => ({ id: sku, sku, desc: `${sku} desc`, category: "Rigging", unit: "ea", cost: 100, list: 180, mfr: "Acme", ...over });
+  const catalog = docs([part("ADC:280"), part("ADC:SPL"), part("ADC:CAR"), part("ADC:MC"), part("ADC:END"), part("ADC:BC"), part("ADC:CLAMP", { cost: 12, list: 20 }), { id: "OLD:CAR", sku: "OLD:CAR", renamedTo: "ADC:CAR" }]);
+  const team: SeedTeamUser[] = [
+    { id: "u1", name: "Ann Admin", roles: ["Admin"], status: "active" },
+    { id: "u2", name: "Eve Estimator", roles: ["Estimator"], status: "active" },
+  ];
+  const cust: SeedCustomers = { ...EMPTY_CUSTOMERS, companies: [{ id: "co-g", name: "Gold Co", pricingTier: "gold" }] };
+  const rulesSeed: SeedRules = { settings: { companyName: "Peak Systems Group" }, blobs: { pricing_rules: { "system.installPct": 15 }, fixtures_convert: { convertedAt: 1 } } };
+  const store = await openStore(storeSeedFrom({ estimates: [], catalog: catalog as never, fixtures: [], rules: rulesSeed, meta: null }), { idb: null });
+  configurePorts({ store, customers: cust, rules: null, team });
+  users.setCurrent("u1");
+  let refreshes = 0;
+  const offRefresh = onRefresh(() => void refreshes++);
+  await refreshPortsFromStore(store);
+
+  // --- pricing-rules: value / defaultOf / setValue / resetValue / resetAll / exports ---
+  ok((await PR.value(store, "tiers.gold")) === 20 && (await PR.defaultOf(store, "tiers.gold")) === 20 && (await PR.value(store, "nope")) === null && (await PR.value(store, "system.rollup")) === null,
+    "handoff rules: a general rate reads its registry default; an unknown id or a formula → null");
+  ok((await PR.value(store, "labor.audio.pct")) === 15 && (await PR.defaultOf(store, "labor.audio.pct")) === 15, "handoff rules: an unset labor % follows the stored install % (#232) — value and default 15");
+  ok((await PR.value(store, "catalog.defaultMargin")) === 30 && (await PR.value(store, "fixture.mountCclamp")) === 18, "handoff rules: engine rates read their engine defaults (a pctStored fraction shown as a percent)");
+  await PR.setValue(store, "tiers.gold", 99);
+  ok((await PR.value(store, "tiers.gold")) === 60, "handoff rules: setValue clamps to the rate's max (99 → 60)");
+  await PR.setValue(store, "catalog.defaultMargin", "35");
+  const catBlob = (await store.get<{ data: Record<string, number> }>("blobs", "catalog_rates"))?.data;
+  ok(catBlob?.defaultMargin === 0.35 && (await PR.value(store, "catalog.defaultMargin")) === 35, "handoff rules: a pctStored engine rate stores a fraction in its own blob (35 → catalog_rates.defaultMargin 0.35)");
+  await PR.setValue(store, "labor.audio.pct", 22);
+  await PR.resetValue(store, "labor.audio.pct");
+  ok((await store.get<{ data: Record<string, unknown> }>("blobs", "pricing_rules"))?.data["labor.audio.pct"] === null && (await PR.value(store, "labor.audio.pct")) === 15, "handoff rules: resetValue on a labor % clears it to null — it follows the install % again");
+  await PR.resetValue(store, "tiers.gold");
+  ok((await store.get<{ data: Record<string, unknown> }>("blobs", "pricing_rules"))?.data["tiers.gold"] === 20, "handoff rules: resetValue on any other rate writes its registry def");
+  await Promise.all([PR.setBlobLocal(store, "pricing_rules", { "tiers.silver": 21 }), PR.setBlobLocal(store, "pricing_rules", { "tiers.copper": 26 })]);
+  const pr1 = (await store.get<{ data: Record<string, unknown> }>("blobs", "pricing_rules"))?.data ?? {};
+  ok(pr1["tiers.silver"] === 21 && pr1["tiers.copper"] === 26 && pr1["system.installPct"] === 15, "handoff rules: two writes to one blob at once keep both keys (setBlob's per-key merge, serialized)");
+  const csv = await PR.exportCSV(store);
+  const rows = Pricing.GROUPS.reduce((n, g) => n + g.items.length, 0);
+  ok(csv.startsWith("Area,Item,Type,Value,Unit,Detail\n") && csv.trim().split("\n").length >= rows + 1 && csv.includes("Customer tiers,Silver margin,Rate,21,%,"),
+    `handoff rules: exportCSV — the header, one line per registry row (${rows}), the stored values`);
+  const json = JSON.parse(await PR.exportJSON(store, new Date(Date.UTC(2026, 9, 20)))) as { exportedAt: string; version: number; rates: Record<string, number | null> };
+  ok(json.version === 1 && json.exportedAt === "2026-10-20T00:00:00.000Z" && json.rates["tiers.silver"] === 21 && json.rates["catalog.defaultMargin"] === 35 && !("system.rollup" in json.rates), "handoff rules: exportJSON — every rate's value, no formulas");
+  ok(/^Peak_estimating_rules_\d{8}\.csv$/.test(PR.exportFileName("csv")) && PR.exportFileName("json", new Date(2026, 0, 5)) === "Peak_estimating_rules_20260105.json", "handoff rules: exportFileName — Peak_estimating_rules_YYYYMMDD.<ext>");
+  await PR.resetAll(store);
+  const prAll = (await store.get<{ data: Record<string, unknown> }>("blobs", "pricing_rules"))?.data ?? {};
+  const generalIds = Pricing.GROUPS.flatMap((g) => g.items).filter((it) => it.kind === "rate" && it.store === "general").map((it) => it.id);
+  ok(generalIds.every((id) => prAll[id] === null) && prAll["system.installPct"] === 15 && JSON.stringify((await store.get<{ data: unknown }>("blobs", "catalog_rates"))?.data) === JSON.stringify(Pricing.CATALOG_RATE_DEFAULTS)
+    && JSON.stringify((await store.get<{ data: unknown }>("blobs", "flametest_rates"))?.data) === JSON.stringify(Pricing.FLAMETEST_RATE_DEFAULTS),
+    "handoff rules: resetAll nulls every general rate (the retired install % untouched) and writes each engine blob back to its defaults");
+
+  // --- props ---
+  const p1 = await RP.buildRulesProps(store);
+  const goldVM = p1.groups.find((g) => g.key === "tiers")?.items.find((it) => it.id === "tiers.gold");
+  ok(p1.isAdmin && p1.groups.length === Pricing.GROUPS.length && goldVM?.kind === "rate" && goldVM.value === 20 && goldVM.def === 20 && isDeepStrictEqual(p1.venueDoctrine, resolveVenueDoctrine(undefined)),
+    "handoff rules: buildRulesProps — every group, each rate's value and effective default, the default venue doctrine");
+  users.setCurrent("u2");
+  const locked = await RP.buildRulesProps(store);
+  ok(!locked.isAdmin && locked.groups.length === 0 && !(await RP.buildTrackSeriesProps(store)).isAdmin && !(await RP.buildCurtainMountsProps(store)).isAdmin && !(await RP.buildSystemCategoriesProps(store)).isAdmin,
+    "handoff rules: a non-admin gets the pages' lock (no groups, no data)");
+
+  // --- actions: permission, validation, writes, refresh ---
+  const regs = new Map<string, Record<string, (...a: unknown[]) => unknown>>();
+  for (const [file, impls] of actionRegistrations(store)) regs.set(file, { ...(regs.get(file) ?? {}), ...(impls as Record<string, (...a: unknown[]) => unknown>) });
+  const call = (file: string, name: string, ...args: unknown[]) => Promise.resolve(regs.get(file)![name](...args));
+  ok(JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "setValueAction", "tiers.gold", 25)) === '{"ok":false}' && JSON.stringify(await call(RA.TRACK_SERIES_ACTIONS_KEY, "saveTrackSeriesAction", {})) === JSON.stringify({ ok: false, error: RA.NO_PERMISSION }),
+    "handoff rules: a non-admin's writes are refused (the refusal each original's type admits)");
+  let exportThrew = false;
+  try {
+    await call(RA.RULES_ACTIONS_KEY, "exportCsvAction");
+  } catch (e) {
+    exportThrew = e instanceof Error && e.message === RA.NO_PERMISSION;
+  }
+  ok(exportThrew, "handoff rules: a non-admin export throws (the original's requirePerm), its type has no refusal");
+  users.setCurrent("u1");
+  const r0 = refreshes;
+  ok(JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "setValueAction", "tiers.gold", "25")) === '{"ok":false}' && JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "setValueAction", "tiers.gold", NaN)) === '{"ok":false}' && refreshes === r0,
+    "handoff rules: setValueAction refuses a non-number silently and writes nothing");
+  ok(JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "setValueAction", "tiers.gold", 25)) === '{"ok":true}' && refreshes === r0 + 1, "handoff rules: setValueAction writes and refreshes");
+  ok(JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "resetItemAction", "system.rollup")) === '{"ok":false}' && JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "resetItemAction", "nope")) === '{"ok":false}', "handoff rules: resetItemAction refuses a formula or an unknown id");
+  const csvR = (await call(RA.RULES_ACTIONS_KEY, "exportCsvAction")) as { csv: string; name: string };
+  const jsonR = (await call(RA.RULES_ACTIONS_KEY, "exportJsonAction")) as { json: string; name: string };
+  ok(csvR.csv.includes("Gold margin,Rate,25,%") && csvR.name.endsWith(".csv") && (JSON.parse(jsonR.json) as { rates: Record<string, number> }).rates["tiers.gold"] === 25 && jsonR.name.endsWith(".json"), "handoff rules: the export actions carry the edited rate and their file names");
+
+  // --- the store is what pricing reads: tiers, fixture rates, bonus, freight, sewing ---
+  ok(resolveTierFor("co-g").margin === 0.25 && resolveTierFor("co-g").tier === "gold", "handoff rules: after the edit the Gold company resolves at 25 % (ports read the store, refreshed by the action)");
+  const newGold = await buildEstimatorProps(store, null, new URLSearchParams("new=1&customer=co-g"));
+  ok(newGold.initial.customerId === "co-g" && newGold.initial.pricingTier === "gold" && newGold.initial.tierMargin === 0.25, `handoff rules: a new estimate for the Gold company opens at the edited 25 % (${newGold.initial.tierMargin})`);
+  await call(RA.RULES_ACTIONS_KEY, "setValueAction", "fixture.mountCclamp", 21);
+  await call(RA.RULES_ACTIONS_KEY, "setValueAction", "bonus.packagePct", 4);
+  await call(RA.RULES_ACTIONS_KEY, "setValueAction", "freight.basePct", 6);
+  await call(RA.RULES_ACTIONS_KEY, "setValueAction", "curtains.sewingPct", 12);
+  const edited = await buildEstimatorProps(store, null, new URLSearchParams("new=1"));
+  ok(edited.fixtureRates.mountCclamp === 21 && edited.bonusRates?.packagePct === 0.04 && edited.freightRule.basePct === 6 && edited.curtainSewingPct === 12 && edited.initial.tierMargin === 0.3,
+    `handoff rules: the Estimator's props read the edited fixture rate, bonus, freight and sewing from the store (${JSON.stringify({ c: edited.fixtureRates.mountCclamp, b: edited.bonusRates, f: edited.freightRule.basePct, s: edited.curtainSewingPct })})`);
+  ok(JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "resetAllAction")) === '{"ok":true}' && resolveTierFor("co-g").margin === 0.2 && (await buildEstimatorProps(store, null, new URLSearchParams("new=1"))).fixtureRates.mountCclamp === 18,
+    "handoff rules: resetAllAction puts every rate back — Gold 20 %, the fixture rate 18");
+
+  // --- venue doctrine ---
+  ok(JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "saveVenueDoctrineAction", "arena", { curtains: "", lighting: "", confirmed: true })) === '{"ok":false}'
+    && JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "saveVenueDoctrineAction", "theatre", { curtains: 1, lighting: "", confirmed: true })) === '{"ok":false}', "handoff rules: saveVenueDoctrineAction refuses an unknown class or a malformed entry");
+  ok(JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "saveVenueDoctrineAction", "theatre", { curtains: "  Velour  " + "x".repeat(600), lighting: "Ion", confirmed: false })) === '{"ok":true}', "handoff rules: saveVenueDoctrineAction saves a valid entry");
+  const vd = (await RP.buildRulesProps(store)).venueDoctrine;
+  ok(vd.theatre.curtains.startsWith("Velour") && vd.theatre.curtains.length === 500 && vd.theatre.lighting === "Ion" && !vd.theatre.confirmed && isDeepStrictEqual(vd.gym, resolveVenueDoctrine(undefined).gym),
+    "handoff rules: the doctrine entry is trimmed to 500 and stored on the settings row; the other classes keep their defaults");
+
+  // --- track series ---
+  const seriesIn = (over: Record<string, unknown> = {}) => ({ name: "ADC 280", manufacturer: "ADC", sticks: [{ lengthFt: "16", sku: "ADC:280" }], carrierSpacingIn: "12", hangerSpacingFt: "5", overlapFt: "0",
+    parts: { splice: { sku: "ADC:SPL" }, carrier: { sku: "OLD:CAR" }, masterCarrier: { sku: "ADC:MC" }, endStop: { sku: "ADC:END" }, battenClamp: { sku: "ADC:BC" } }, ...over });
+  const notLive = (await call(RA.TRACK_SERIES_ACTIONS_KEY, "saveTrackSeriesAction", { ...seriesIn(), active: true })) as { ok: boolean; error?: string };
+  ok(!notLive.ok && /Can't mark it active yet: .*Carrier/.test(notLive.error ?? ""), `handoff rules: Active is refused while a mapped SKU isn't live (a renamed one counts as unmapped): ${notLive.error}`);
+  const made = (await call(RA.TRACK_SERIES_ACTIONS_KEY, "saveTrackSeriesAction", { ...seriesIn({ parts: { ...seriesIn().parts, carrier: { sku: "ADC:CAR" } } }), active: true })) as { ok: boolean; id: string };
+  const ts1 = (await RP.buildTrackSeriesProps(store)).series.find((s) => s.id === made.id);
+  ok(made.ok && made.id === "adc-280" && !!ts1?.active && ts1.updatedBy === "Ann Admin" && ts1.stickLengthFt === 16, `handoff rules: a new series gets an id from its name, saves active and stamped (${made.id})`);
+  ok(!((await call(RA.TRACK_SERIES_ACTIONS_KEY, "saveTrackSeriesAction", seriesIn({ name: "adc 280" }))) as { ok: boolean }).ok
+    && ((await call(RA.TRACK_SERIES_ACTIONS_KEY, "saveTrackSeriesAction", seriesIn({ id: "gone-1" }))) as { error?: string }).error === "This series no longer exists — reload the page."
+    && ((await call(RA.TRACK_SERIES_ACTIONS_KEY, "saveTrackSeriesAction", { name: "" })) as { error?: string }).error === "Give the series a name.",
+    "handoff rules: a duplicate name (any case), a vanished id and a blank name are refused");
+  const upd = (await call(RA.TRACK_SERIES_ACTIONS_KEY, "saveTrackSeriesAction", { ...seriesIn({ id: made.id, sticks: [{ lengthFt: 20, sku: "ADC:280" }], parts: { ...seriesIn().parts, carrier: { sku: "ADC:CAR" } } }), active: true })) as { ok: boolean };
+  const estTrack = (await buildEstimatorProps(store, null, new URLSearchParams("new=1"))).trackSeries.find((s) => s.id === made.id);
+  ok(upd.ok && estTrack?.stickLengthFt === 20 && estTrack.sticks?.[0].lengthFt === 20 && !!(await buildEstimatorProps(store, null, new URLSearchParams("new=1"))).trackParts["ADC:280"],
+    "handoff rules: a stick length edit (16 → 20) is what the Estimator's track configurator reads next (props.trackSeries / trackParts)");
+  const tp = await RP.buildTrackSeriesProps(store);
+  ok(Object.keys(tp.parts).sort().join() === "ADC:280,ADC:BC,ADC:CAR,ADC:END,ADC:MC,ADC:SPL" && tp.parts["ADC:280"].desc === "ADC:280 desc", "handoff rules: the track series page reads only the series' SKUs");
+  ok(JSON.stringify(await call(RA.TRACK_SERIES_ACTIONS_KEY, "deleteTrackSeriesAction", made.id)) === '{"ok":true}' && ((await store.get<{ data: Record<string, unknown> }>("blobs", "track_series"))?.data[made.id] === null)
+    && ((await call(RA.TRACK_SERIES_ACTIONS_KEY, "deleteTrackSeriesAction", made.id)) as { error?: string }).error === "This series no longer exists.",
+    "handoff rules: delete writes { id: null } (the key stays); a second delete is refused");
+  const again = (await call(RA.TRACK_SERIES_ACTIONS_KEY, "saveTrackSeriesAction", seriesIn())) as { ok: boolean; id: string };
+  ok(again.ok && again.id !== made.id && again.id.startsWith("adc-280"), `handoff rules: a deleted series' id is never handed out again (${again.id})`);
+
+  // --- curtain mounts ---
+  ok(((await call(RA.CURTAIN_MOUNTS_ACTIONS_KEY, "saveCurtainMountAction", "nope", [])) as { error?: string }).error === "Unknown mount type.", "handoff rules: an unknown mount type is refused");
+  const { CURTAIN_MOUNT_TYPES } = await import("@/lib/curtain-cut-sheets/vocab");
+  const mountId = CURTAIN_MOUNT_TYPES[0].id;
+  ok(((await call(RA.CURTAIN_MOUNTS_ACTIONS_KEY, "saveCurtainMountAction", mountId, [{ sku: "NOPE:1", rule: { kind: "perCurtain", qty: 2 } }])) as { error?: string }).error === "Not in the catalog: NOPE:1.", "handoff rules: a SKU missing from the catalog is refused by name");
+  ok(JSON.stringify(await call(RA.CURTAIN_MOUNTS_ACTIONS_KEY, "saveCurtainMountAction", mountId, [{ sku: "ADC:CLAMP", rule: { kind: "perCurtain", qty: "2" } }])) === '{"ok":true}', "handoff rules: a valid mount saves");
+  const cm = await RP.buildCurtainMountsProps(store);
+  ok(cm.mounts[mountId]?.rows[0].sku === "ADC:CLAMP" && cm.mounts[mountId]?.updatedBy === "Ann Admin" && cm.parts["ADC:CLAMP"].cost === 12, "handoff rules: the mount reads back with its part's live facts");
+
+  // --- system categories ---
+  const sc0 = await RP.buildSystemCategoriesProps(store);
+  ok(sc0.categories.length === 7 && sc0.categories.every((c) => c.items.length === 0), "handoff rules: never saved → the seven default categories, no parts");
+  const withPart = sc0.categories.map((c, i) => (i === 0 ? { ...c, items: [{ sku: "OLD:CAR", qty: 2 }] } : c));
+  const scR = (await call(RA.SYSTEM_CATEGORIES_ACTIONS_KEY, "saveSystemCategoriesAction", withPart)) as { ok: boolean; categories: Array<{ items: Array<{ sku: string }> }> };
+  const sc1 = await RP.buildSystemCategoriesProps(store);
+  ok(scR.ok && scR.categories[0].items[0].sku === "OLD:CAR" && sc1.parts["OLD:CAR"]?.sku === "ADC:CAR", "handoff rules: categories save; a renamed SKU resolves to its live part (getManyBySku)");
+  ok((await buildEstimatorProps(store, null, new URLSearchParams("new=1"))).initial.systemCategories[0].items[0].part?.sku === "ADC:CAR", "handoff rules: the Estimator's + Add system reads the saved typical parts");
+  const hits = (await call(RA.SYSTEM_CATEGORIES_ACTIONS_KEY, "searchCategoryPartsAction", "adc")) as { hits: Array<Record<string, unknown>>; total: number };
+  const eq = (await call(RA.GRID_SETTINGS_ACTIONS_KEY, "searchEquipmentPartsAction", "adc")) as { hits: unknown[]; total: number };
+  ok(hits.total === 7 && hits.hits.length === 7 && Object.keys(hits.hits[0]).sort().join() === "category,cost,desc,list,sku,unit" && isDeepStrictEqual(eq, hits), "handoff rules: the part pickers search the catalog (EquipPartHit shape; the PartPicker's default search answers the same)");
+
+  // --- the Grid settings / conduit registrations ---
+  ok(JSON.stringify(await call(RA.GRID_SETTINGS_ACTIONS_KEY, "saveEquipmentRowAction", "x", {})) === JSON.stringify(NIP) && JSON.stringify(await call(RA.GRID_SETTINGS_ACTIONS_KEY, "saveWireTypesAction", [])) === JSON.stringify(NIP)
+    && JSON.stringify(await call(RA.GRID_SETTINGS_ACTIONS_KEY, "saveRiserBoxTypesAction", [])) === JSON.stringify({ ...NIP, errors: [] }) && (await call(RA.GRID_SETTINGS_ACTIONS_KEY, "saveDeviceTypeIconsAction", {})) === undefined
+    && JSON.stringify(await call(RA.GRID_SETTINGS_ACTIONS_KEY, "suggestEquipmentPartsAction", "x")) === '{"hits":[]}'
+    && JSON.stringify(await call(RA.CONDUIT_SIZES_ACTIONS_KEY, "saveConduitSizesAction", [])) === JSON.stringify(NIP) && JSON.stringify(await call(RA.CONDUIT_SIZES_ACTIONS_KEY, "searchConduitPartsAction", "emt")) === '{"hits":[],"total":0}',
+    "handoff rules: the Grid's own settings writers and Conduit sizes are refused (NOT_IN_PROTOTYPE / the richer refusal / void); their searches answer empty");
+  const ruleFiles = [RA.RULES_ACTIONS_KEY, RA.TRACK_SERIES_ACTIONS_KEY, RA.CURTAIN_MOUNTS_ACTIONS_KEY, RA.SYSTEM_CATEGORIES_ACTIONS_KEY, RA.CONDUIT_SIZES_ACTIONS_KEY, RA.GRID_SETTINGS_ACTIONS_KEY];
+  const gaps = ruleFiles.flatMap((f) => exportNames(fs.readFileSync(f, "utf8")).filter((n) => !(n in (regs.get(f) ?? {}))).map((n) => `${f}#${n}`));
+  ok(gaps.length === 0 && ruleFiles.every((f) => regs.has(f)), `handoff rules: every export of the six rules / Grid-settings / conduit action modules is registered (missing: ${gaps.join(", ") || "none"})`);
+
+  // --- routes ---
+  ok(RULES_PAGES.every((p) => { const r = parseRoute(`#/rules/${p}`, ""); return r.name === "rules-page" && r.page === p && routeHash(r) === `#/rules/${p}` && routeSearch(r) === ""; }), "handoff rules: #/rules/<page> is each sub-page's route");
+  ok(parseRoute("#/rules/conduit-sizes", "").name === "unknown" && parseRoute("#/rules/x/y", "").name === "unknown" && parseRoute("#/rules", "").name === "rules", "handoff rules: Conduit sizes and deeper paths are not routes; #/rules stays the editor");
+  ok(sameRoute({ name: "rules-page", page: "track-series" }, { name: "rules-page", page: "track-series" }) && !sameRoute({ name: "rules-page", page: "track-series" }, { name: "rules-page", page: "curtain-mounts" }) && !sameRoute({ name: "rules-page", page: "track-series" }, { name: "rules" }),
+    "handoff rules: sameRoute compares the sub-page");
+  const ts = mapAppHref("/estimating-rules/track-series", { name: "estimate", id: "Q-1" });
+  ok(ts.kind === "route" && ts.route.name === "rules-page" && mapAppHref("/estimating-rules/conduit-sizes", { name: "rules" }).kind === "unsupported" && mapAppHref("/estimating-rules", { name: "rules-page", page: "track-series" }).kind === "route",
+    "handoff rules: the Rules cards and the Estimator's “Estimating Rules → Track series” link map to the sub-page; Conduit sizes → the notice; ← Estimating rules → #/rules");
+  ok(newTabHref(ts, { href: "file:///p/index.html?v=1#/rules", search: "?v=1", hash: "#/rules" }) === "file:///p/index.html?v=1#/rules/track-series", "handoff rules: a modified click on a card opens the sub-page in a new tab");
 
   offRefresh();
   configurePorts({ store: null, customers: null, rules: null, team: null });

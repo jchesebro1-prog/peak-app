@@ -3,7 +3,7 @@
  * render, and the Node checks (scripts/test-handoff-runtime.ts) prove each registered file covers every export
  * of its original. Refusals first, then the real implementations (a real one wins a name). Since Task 6 every
  * "use server" module the bundle stubs is here — `verify.ts --smoke --all-steps` fails on any it isn't.
- * Plan: PR 2 Tasks 4–6, 9.
+ * Plan: PR 2 Tasks 4–6, 9, 10.
  */
 import type { ActionImpl } from "../actions-registry";
 import type { HandoffStore } from "../store";
@@ -20,6 +20,7 @@ import { refusedSendActions, SEND_ACTIONS_KEY, sendActions } from "./send-action
 import { NEXT_STEP_ACTIONS_KEY, nextStepActions } from "./next-step-actions";
 import { miscActions } from "./misc-refusals";
 import { ASSEMBLIES_ACTIONS_KEY, assembliesActions, refusedAssembliesActions } from "./assemblies-actions";
+import { rulesActions } from "./rules-actions";
 
 /** [fileKey, implementations] pairs; a fileKey may appear more than once (registerActions merges). */
 export function actionRegistrations(store: HandoffStore): Array<[string, Record<string, ActionImpl>]> {
@@ -42,5 +43,8 @@ export function actionRegistrations(store: HandoffStore): Array<[string, Record<
     ...Object.entries(miscActions(store)),
     // Task 9 — the Assembly Builder (#/assemblies): saves, deletes, rack defaults and the part pickers; the datasheet toggle refused.
     [ASSEMBLIES_ACTIONS_KEY, { ...refusedAssembliesActions(), ...assembliesActions(store) }],
+    // Task 10 — Estimating Rules (#/rules): the rates, the venue doctrine, track series, curtain mounts, system categories,
+    // the shared PartPicker's search (Grid settings — the rest of that module refused) and Conduit sizes (refused).
+    ...Object.entries(rulesActions(store)),
   ];
 }

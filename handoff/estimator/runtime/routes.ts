@@ -8,6 +8,7 @@
  *   #/estimate/new         a clean new estimate                  (search: ?new=1)
  *   #/catalog  #/assemblies  #/rules
  *   #/assemblies/rack/<id> one rack's submittal sheets (Task 9)
+ *   #/rules/<page>         an Estimating Rules sub-page: track-series · curtain-mounts · system-categories (Task 10)
  *
  * The estimate's id and step ALSO stay in `location.search` (`?id=…&step=review`), because the real Estimator reads
  * and writes exactly those with `useSearchParams` / `history.pushState` (stepSearch, packageTabSearch). So the search
@@ -30,7 +31,14 @@ export type Route =
   /** One saved rack's submittal sheets (the app's /design/assemblies/rack/<id>). */
   | { name: "rack"; id: string }
   | { name: "rules" }
+  /** An Estimating Rules sub-page (the app's /estimating-rules/<page>). Conduit sizes is a Grid concern: not here. */
+  | { name: "rules-page"; page: RulesPage }
   | { name: "unknown"; path: string };
+
+/** The Estimating Rules sub-pages the prototype has (the app's /estimating-rules/<page>). */
+export const RULES_PAGES = ["track-series", "curtain-mounts", "system-categories"] as const;
+export type RulesPage = (typeof RULES_PAGES)[number];
+const isRulesPage = (s: string): s is RulesPage => (RULES_PAGES as readonly string[]).includes(s);
 
 /** The top-nav entries, in order. */
 export const NAV_ROUTES = [
@@ -57,6 +65,8 @@ export function routeHash(r: Route): string {
       return `#/estimate/${encodeURIComponent(r.id)}`;
     case "rack":
       return `#/assemblies/rack/${encodeURIComponent(r.id)}`;
+    case "rules-page":
+      return `#/rules/${r.page}`;
     case "unknown":
       return `#/${r.path.replace(/^\/+/, "")}`;
     default:
@@ -138,6 +148,7 @@ export function parseRoute(hash: string, search: string): Route {
       return { name: "estimate", id };
     }
     if (head === "assemblies" && rest.length === 2 && rest[0] === "rack" && rest[1]) return { name: "rack", id: decodeSegment(rest[1]) };
+    if (head === "rules" && rest.length === 1 && isRulesPage(rest[0])) return { name: "rules-page", page: rest[0] };
     if (rest.length === 0 && SIMPLE[head]) return SIMPLE[head];
     return { name: "unknown", path };
   }
@@ -153,6 +164,7 @@ export function sameRoute(a: Route, b: Route): boolean {
   if (a.name !== b.name) return false;
   if (a.name === "estimate" && b.name === "estimate") return a.id === b.id;
   if (a.name === "rack" && b.name === "rack") return a.id === b.id;
+  if (a.name === "rules-page" && b.name === "rules-page") return a.page === b.page;
   if (a.name === "unknown" && b.name === "unknown") return a.path === b.path;
   return true;
 }
@@ -203,6 +215,9 @@ export function mapAppHref(href: string, current: Route): AppTarget {
   // A rack's submittal sheets (the Assembly Builder's "Submittal" links).
   const rack = /^\/design\/assemblies\/rack\/([^/]+)$/.exec(path);
   if (rack) return { kind: "route", route: { name: "rack", id: decodeSegment(rack[1]) }, search: "", anchor: null };
+  // An Estimating Rules sub-page (the Rules cards, the Estimator's "Estimating Rules → Track series" link). Conduit sizes isn't one.
+  const rulesPage = /^\/estimating-rules\/([^/]+)$/.exec(path);
+  if (rulesPage && isRulesPage(rulesPage[1])) return { kind: "route", route: { name: "rules-page", page: rulesPage[1] }, search: "", anchor: null };
   switch (path) {
     case "/estimator": {
       const params = new URLSearchParams(u.search);

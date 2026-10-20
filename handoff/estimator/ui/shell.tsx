@@ -1,6 +1,6 @@
 /**
  * Estimator handoff — the app shell: the permanent confidential banner, the top nav (Estimates · Catalog · Assemblies ·
- * Estimating Rules), the acting-user switcher, Reset to production snapshot, and the routed screen (Task 8: Catalog is a real screen; Task 9: Assemblies and a rack's sheets). Routes are hash
+ * Estimating Rules), the acting-user switcher, Reset to production snapshot, and the routed screen (Task 8: Catalog is a real screen; Task 9: Assemblies and a rack's sheets; Task 10: Estimating Rules and its sub-pages). Routes are hash
  * routes (runtime/routes.ts), so file:// and an Artifact behave the same; the Estimator keeps its `?id=` / `?step=` in
  * the search. The routed screen is remounted when the route names another estimate, another user is picked (the
  * Estimator's props depend on the viewer) or the data is reset — but NOT when a first save gives a new estimate its id
@@ -18,13 +18,13 @@ import { RESET_COPY, runReset } from "../runtime/reset";
 import type { HandoffStore } from "../runtime/store";
 import { CatalogScreen } from "./catalog";
 import { AssembliesScreen, RackScreen } from "./assemblies";
+import { RulesPageScreen, RulesScreen } from "./rules";
 import { EstimatesList } from "./estimates-list";
 import { errorMessage, LoadError } from "./load-error";
 import { PreviewOverlay } from "./preview-overlay";
 
 export const BANNER_TEXT = "Confidential — Peak Systems Group · prototype — nothing is sent or saved to Peak";
 export const NOT_PERSISTENT_TEXT = "Changes won't be saved in this window";
-export const PLACEHOLDER_COPY = "Coming in this prototype";
 
 /* ------------------------------------------------------------------ route state */
 
@@ -62,16 +62,6 @@ function Centered({ children, attr }: { children: ReactNode; attr: string }) {
     <div {...{ [attr]: "" }} style={{ ...FILL, overflow: "auto", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "56px 24px" }}>
       <div style={{ maxWidth: 520, textAlign: "center" }}>{children}</div>
     </div>
-  );
-}
-
-function Placeholder({ title, onReady }: { title: string; onReady: () => void }) {
-  useEffect(onReady, [onReady]);
-  return (
-    <Centered attr="data-handoff-placeholder">
-      <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em" }}>{title}</div>
-      <div style={{ fontSize: 14, color: "#8c919c", marginTop: 8 }}>{PLACEHOLDER_COPY}</div>
-    </Centered>
   );
 }
 
@@ -192,7 +182,9 @@ function Screen({ route, store, onReady }: { route: Route; store: HandoffStore; 
     case "rack":
       return <RackScreen store={store} id={route.id} onReady={onReady} />;
     case "rules":
-      return <Placeholder title="Estimating Rules" onReady={onReady} />;
+      return <RulesScreen store={store} onReady={onReady} />;
+    case "rules-page":
+      return <RulesPageScreen store={store} page={route.page} onReady={onReady} />;
     case "unknown":
       return <NotPartOfPrototype path={`/${route.path}`} onReady={onReady} />;
   }
@@ -344,7 +336,7 @@ export function Shell({ store }: { store: HandoffStore }) {
           <span className="pk-beta">PROTOTYPE</span>
           <nav className="pk-tabs" aria-label="Prototype">
             {NAV_ROUTES.map((n) => {
-              const active = n.name === route.name || (n.name === "estimates" && route.name === "estimate") || (n.name === "assemblies" && route.name === "rack");
+              const active = n.name === route.name || (n.name === "estimates" && route.name === "estimate") || (n.name === "assemblies" && route.name === "rack") || (n.name === "rules" && route.name === "rules-page");
               return (
                 <a key={n.name} className={"pk-tab" + (active ? " active" : "")} href={`#/${n.name}`} data-handoff-nav={n.name} aria-current={active ? "page" : undefined}>
                   {n.label}

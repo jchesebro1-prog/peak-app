@@ -1,5 +1,5 @@
 {
-  "$comment": "Ported server logic → the original(s) it copies, with each original's sha256 at port time. `npm run handoff:verify -- --drift` fails when an original changes; re-check the port, then `--drift --update`. Not in test:specs (handoff/estimator/port-drift.ts).",
+  "$comment": "Ported server logic → the original(s) it copies, with each original's sha256 at port time. `npm run handoff:verify -- --drift` fails when an original changes; re-check the port, then `--drift --update <port>` (that entry only; a bare `--update` re-stamps every entry). Not in test:specs (handoff/estimator/port-drift.ts).",
   "ports": [
     {
       "port": "handoff/estimator/runtime/actions/narrative-actions.ts",
@@ -147,7 +147,7 @@
     },
     {
       "port": "handoff/estimator/runtime/ports.ts",
-      "what": "travel (geo.ts estimate) and the customer directory",
+      "what": "travel (geo.ts estimate) and the customer directory; the tier margins (pricing-tiers.ts tierMargin / resolveTier)",
       "originals": [
         {
           "path": "src/lib/geo.ts",
@@ -156,6 +156,10 @@
         {
           "path": "src/lib/stores/customers.ts",
           "sha256": "d8fa7f94aea30a66c07055d7bdc880d0b8c40fe5914a9d5da5853f1fd382b85c"
+        },
+        {
+          "path": "src/lib/pricing-tiers.ts",
+          "sha256": "11ad58e3d838fa3a1cfdced64e401c15967fb62aec27cbc27a210b8e89650b68"
         }
       ]
     },
@@ -307,7 +311,7 @@
     },
     {
       "port": "handoff/estimator/runtime/readers.ts",
-      "what": "listFixtures (stores/fixtures, soft-delete markers skipped) and getManyLocal (catalog getMany, renames followed) — the readers Task 9 changed",
+      "what": "listFixtures (stores/fixtures, soft-delete markers skipped) and getManyLocal (catalog getMany, renames followed) — the readers Task 9 changed; generalRate / bonusRatesNow (pricing.ts value / loadBonusRates)",
       "originals": [
         {
           "path": "src/lib/stores/fixtures.ts",
@@ -316,6 +320,10 @@
         {
           "path": "src/lib/stores/catalog.ts",
           "sha256": "c991d6d2f32d1777de5e19f119e8a2036892f19f67a7e3b0230921c4a1f4d2bc"
+        },
+        {
+          "path": "src/lib/stores/pricing.ts",
+          "sha256": "3d9e2110fca84c94cec166a6e9875346fe52f2b65de2be9da33433b0c943eff3"
         }
       ]
     },
@@ -376,6 +384,130 @@
         {
           "path": "src/app/(app)/design/assemblies/rack/[id]/page.tsx",
           "sha256": "eab560e74c633efd74dde4246171a303bd6fbb0fbc0db54e3d2352d28c959f5f"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/pricing-rules.ts",
+      "what": "pricing.ts value / defaultOf / setValue / resetValue / resetAll / exportCSV / exportJSON / exportFileName over the store's blobs (setBlob → setBlobLocal)",
+      "originals": [
+        {
+          "path": "src/lib/stores/pricing.ts",
+          "sha256": "3d9e2110fca84c94cec166a6e9875346fe52f2b65de2be9da33433b0c943eff3"
+        },
+        {
+          "path": "src/db/doc-store.ts",
+          "sha256": "525d41a11df774f975cb5e1b379684be017e47f0e97fb177f8a7bb4809efb833"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/baked/pricing-registry.ts",
+      "what": "the export list baked from pricing.ts (GROUPS, the engine-rate defaults and blob names) — re-check the names when the original's exports change",
+      "originals": [
+        {
+          "path": "src/lib/stores/pricing.ts",
+          "sha256": "3d9e2110fca84c94cec166a6e9875346fe52f2b65de2be9da33433b0c943eff3"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/baked/venue-classes.ts",
+      "what": "the venue-classes export the bundle imports (VENUE_CLASSES), baked — re-check the names a bundled importer needs",
+      "originals": [
+        {
+          "path": "src/lib/stores/venue-classes.ts",
+          "sha256": "d421603f3a8d278d9ed21dbb0ccc856b938b9e7a1c55d0ea5408a3b3ec983de5"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/props/rules.ts",
+      "what": "the four Estimating Rules pages' props (rates + effective defaults, venue doctrine, track series, curtain mounts, system categories)",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimating-rules/page.tsx",
+          "sha256": "428f80ffc76826ec56ac5d326bf0d513802f7b74ee2baabdd010d8f87e2c47a5"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/track-series/page.tsx",
+          "sha256": "84883a118a547b1219d7284665e166ba6f1e5e2b64a267b38bfc08e5a96aa9aa"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/curtain-mounts/page.tsx",
+          "sha256": "0a3d365a2b37af39d823cfd9268b097518ebaf75d529ddc345141bd8ebd9ac64"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/system-categories/page.tsx",
+          "sha256": "2bb443403f0a2336444b86760aa27443d4b038a0f53d21d0f3b898c3ac371b37"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/rules-actions.ts",
+      "what": "the Estimating Rules actions and their stores (track series, curtain mounts, system categories, the venue doctrine entry), the PartPicker's searchEquipmentPartsAction",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimating-rules/actions.ts",
+          "sha256": "26153fd7c35f9da138344319f2762d885dcf04d61914662656f0d6d75b3bbbcf"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/track-series/actions.ts",
+          "sha256": "5d82054701b80fd9bc9e3bbdc1b68c19c7a7d05c6c2fef98f6ea82eadd5e18a1"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/curtain-mounts/actions.ts",
+          "sha256": "280d290626855a60c5690ad408b63494df4aeabb8138df36568d217ce3518f8d"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/system-categories/actions.ts",
+          "sha256": "c6c4141d5b663f63825e04ba95dd08822ff0901f06a2d39491dca6c24414f499"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/conduit-sizes/actions.ts",
+          "sha256": "e0e007d9a9c68b4c17fea67b0e6fd8378df91eadb8c1a1a5367378837f784711"
+        },
+        {
+          "path": "src/app/(app)/design/grid/settings/actions.ts",
+          "sha256": "78815aa2036129861397eccfa61e5d23e9a6fd7d4e02688b5ec4eea15df9e601"
+        },
+        {
+          "path": "src/lib/stores/track-series.ts",
+          "sha256": "e5a584e2602dc3bbff2912d287b36b92105a6ff77c6869fbc19fb203c8e41801"
+        },
+        {
+          "path": "src/lib/stores/curtain-mounts.ts",
+          "sha256": "6b04301661ac25ea6ebd878da64ac86990fd96a8b893045a66dd784575233bed"
+        },
+        {
+          "path": "src/lib/stores/system-categories.ts",
+          "sha256": "36483d27e8b9585fd868f343d85e51d0a0880c45c80e5be92fe28543ad98fbbb"
+        },
+        {
+          "path": "src/lib/settings.ts",
+          "sha256": "f7413ba153ed3bd609f4ff469fd523b0613727dc854fce434bc483603b2d488d"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/ui/rules.tsx",
+      "what": "the four Estimating Rules pages' markup (header, cards, admin lock, sub-page headings)",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimating-rules/page.tsx",
+          "sha256": "428f80ffc76826ec56ac5d326bf0d513802f7b74ee2baabdd010d8f87e2c47a5"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/track-series/page.tsx",
+          "sha256": "84883a118a547b1219d7284665e166ba6f1e5e2b64a267b38bfc08e5a96aa9aa"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/curtain-mounts/page.tsx",
+          "sha256": "0a3d365a2b37af39d823cfd9268b097518ebaf75d529ddc345141bd8ebd9ac64"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/system-categories/page.tsx",
+          "sha256": "2bb443403f0a2336444b86760aa27443d4b038a0f53d21d0f3b898c3ac371b37"
         }
       ]
     }

@@ -3,7 +3,8 @@
  * server code it cannot import (store readers and writers, loaders, the save pipeline, the review tabs);
  * port-sources.json records, for each port, the original file(s) it copies and a sha256 of each original
  * at port time. `npm run handoff:verify -- --drift` recomputes the hashes and fails, naming every port
- * whose original has changed since; after re-checking the port, `--drift --update` stamps the new hashes.
+ * whose original has changed since; after re-checking the port, `--drift --update <port> …` stamps the new hashes of
+ * the named ports only (a bare `--drift --update` re-stamps every entry — only right after re-checking them all).
  *
  * Deliberately NOT part of test:specs: an app-side edit to an original must not fail the app team's
  * unrelated work. It runs in the handoff verify flow only. Plan: PR 2 Task 5 (review fix 6).
@@ -66,13 +67,23 @@ export const driftClean = (r: DriftResult): boolean => !r.changed.length && !r.m
 /** One line per finding, each saying what to do. Pure. */
 export function driftMessages(r: DriftResult): string[] {
   return [
-    ...r.changed.map((c) => `re-check ${c.port} against ${c.original}, then update ${PORT_SOURCES_FILE} with \`--drift --update\``),
-    ...r.missing.map((c) => `${c.original} is gone — find where ${c.port}'s original moved, fix the entry in ${PORT_SOURCES_FILE}, then \`--drift --update\``),
+    ...r.changed.map((c) => `re-check ${c.port} against ${c.original}, then update ${PORT_SOURCES_FILE} with \`--drift --update ${c.port}\``),
+    ...r.missing.map((c) => `${c.original} is gone — find where ${c.port}'s original moved, fix the entry in ${PORT_SOURCES_FILE}, then \`--drift --update ${c.port}\``),
     ...r.portsMissing.map((p) => `${p} is listed in ${PORT_SOURCES_FILE} but doesn't exist — remove or fix its entry`),
   ];
 }
 
-/** The manifest with every original's hash recomputed (a gone original keeps its old hash). Pure. */
-export function updatedPortSources(m: PortSources, hashOf: (path: string) => string | null): PortSources {
-  return { ...m, ports: m.ports.map((p) => ({ ...p, originals: p.originals.map((o) => ({ ...o, sha256: hashOf(o.path) ?? o.sha256 })) })) };
+/**
+ * The manifest with each original's hash recomputed (a gone original keeps its old hash) — every port's, or, with
+ * `only`, just the named ports' (each other entry is left exactly as it was). Pure.
+ */
+export function updatedPortSources(m: PortSources, hashOf: (path: string) => string | null, only?: readonly string[]): PortSources {
+  const pick = only ? new Set(only) : null;
+  return { ...m, ports: m.ports.map((p) => (pick && !pick.has(p.port) ? p : { ...p, originals: p.originals.map((o) => ({ ...o, sha256: hashOf(o.path) ?? o.sha256 })) })) };
+}
+
+/** The names in `only` that match no port in the manifest (a typo must not silently stamp nothing). Pure. */
+export function unknownPorts(m: PortSources, only: readonly string[]): string[] {
+  const have = new Set(m.ports.map((p) => p.port));
+  return only.filter((n) => !have.has(n));
 }

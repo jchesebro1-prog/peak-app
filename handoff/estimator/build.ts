@@ -15,7 +15,7 @@ import path from "node:path";
 import postcss from "postcss";
 import tailwindcss from "@tailwindcss/postcss";
 import { FORBIDDEN_PACKAGES } from "../../scripts/core-check";
-import { APP_OVERRIDES, appOverridePlugin, imagePlugin, shimPlugin, serverActionStubPlugin } from "./esbuild-plugins";
+import { APP_OVERRIDES, appOverridePlugin, bakeModules, bakePlugin, imagePlugin, shimPlugin, serverActionStubPlugin } from "./esbuild-plugins";
 
 const HERE = __dirname;
 const ROOT = path.resolve(HERE, "..", "..");
@@ -138,6 +138,8 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
   // --- JS: the real Estimator client, server actions swapped for registry stubs ---
   const discovered: Record<string, string[]> = {};
   const overridden = new Map<string, Set<string>>();
+  // Plain data from app modules the bundle can't include (a store), read here in Node (BAKED_MODULES).
+  const baked = await bakeModules();
   const t0 = Date.now();
   const result = await esbuild.build({
     entryPoints: [path.join(HERE, "main.tsx")],
@@ -159,7 +161,7 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
     tsconfig: path.join(ROOT, "tsconfig.json"),
     define: { "process.env.NODE_ENV": '"production"' },
     loader: { ".jpg": "file", ".jpeg": "file", ".png": "file", ".webp": "file", ".gif": "file", ".svg": "file", ".woff2": "file", ".woff": "file" },
-    plugins: [appOverridePlugin(ROOT, APP_OVERRIDES, overridden), shimPlugin(), imagePlugin(), serverActionStubPlugin(ROOT, discovered)],
+    plugins: [appOverridePlugin(ROOT, APP_OVERRIDES, overridden), shimPlugin(), imagePlugin(), bakePlugin(baked), serverActionStubPlugin(ROOT, discovered)],
   });
   const jsMs = Date.now() - t0;
   // An override nothing imported any more is stale: the app moved on and the prototype would silently show the original.
@@ -204,6 +206,7 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
   console.log(`handoff:build → ${path.relative(ROOT, OUT)}  (JS ${jsMs} ms, CSS ${cssMs} ms)`);
   console.log(`  "use server" modules stubbed: ${Object.keys(discovered).length} (${actions} exports) → output/handoff-build/discovered-actions.json`);
   for (const [orig, importers] of overridden) console.log(`  override ${orig} → ${APP_OVERRIDES[orig]} (imported by ${[...importers].join(", ")})`);
+  for (const abs of baked.keys()) console.log(`  baked ${path.relative(ROOT, abs)}${result.metafile.inputs[path.relative(ROOT, abs)] ? "" : " (not imported by the bundle)"}`);
   for (const w of result.warnings) console.log(`  WARN ${w.text}${w.location ? ` (${w.location.file}:${w.location.line})` : ""}`);
   if (!hasData) console.log("  no data/ — the page mounts with an empty slice (run npm run handoff:slice first)");
   if (!hasImages) console.log("  no images/ (optional)");

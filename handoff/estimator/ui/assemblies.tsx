@@ -6,55 +6,21 @@
  * browser ones in runtime/actions/assemblies-actions.ts. `router.refresh()` (after a save or delete) re-reads the props,
  * as a server re-render would — the builder keeps its client state across it. Plan: PR 2 Task 9.
  */
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, type CSSProperties } from "react";
 import Link from "next/link";
 import FixtureBuilder from "@/app/(app)/design/assemblies/fixture-builder";
 import { PrintButton } from "@/components/letter/print-button";
 import { RackSheets } from "@/components/rack/RackSheets";
 import { RACK_PREVIEW_CSS } from "@/components/rack/rack-sheet-css";
 import type { LoadedRackSheets } from "@/lib/rack/load";
-import { onRefresh } from "../runtime/router";
 import { settingsView } from "../runtime/ports";
 import { buildAssemblyBuilderProps, type AssemblyBuilderProps } from "../runtime/props/assemblies";
 import { loadRackForSheetsLocal } from "../runtime/loaders/rack";
 import type { HandoffStore } from "../runtime/store";
-import { errorMessage, LoadError } from "./load-error";
+import { LoadError } from "./load-error";
+import { useRefreshedProps } from "./use-refreshed-props";
 
 const FILL: CSSProperties = { position: "absolute", inset: 0, overflow: "auto" };
-
-/**
- * Re-reads `load()` on mount and on every router.refresh(); refreshes are serialized and only the latest one lands.
- * `onReady` fires once the first read is in.
- */
-function useRefreshedProps<T>(load: () => Promise<T>, onReady: () => void, what: string): { value: T } | { error: string } | undefined {
-  const [state, setState] = useState<{ value: T } | { error: string } | undefined>(undefined);
-  useEffect(() => {
-    let alive = true;
-    let seq = 0;
-    const run = () => {
-      const mine = ++seq;
-      load().then(
-        (value) => {
-          if (alive && mine === seq) setState({ value });
-        },
-        (e: unknown) => {
-          console.error(`[handoff] ${what}: could not build the props`, e);
-          if (alive && mine === seq) setState({ error: errorMessage(e) });
-        },
-      );
-    };
-    run();
-    const off = onRefresh(run);
-    return () => {
-      alive = false;
-      off();
-    };
-  }, [load, what]);
-  useEffect(() => {
-    if (state) onReady();
-  }, [state, onReady]);
-  return state;
-}
 
 /** AssemblyBuilderPage, in the browser. */
 export function AssembliesScreen({ store, onReady }: { store: HandoffStore; onReady: () => void }) {

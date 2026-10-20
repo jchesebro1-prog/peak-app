@@ -11,11 +11,15 @@
  *   appOverridePlugin       app component files replaced by handoff modules, by RESOLVED path
  *                           (APP_OVERRIDES): every import of the original resolves to the handoff
  *                           module, except the handoff module's own imports of it
+ *   bakePlugin              BAKED_MODULES — handoff modules that re-export plain data from an app module
+ *                           the bundle can't include (a store): their bundled contents are JSON literals
+ *                           of those values, read from the original in Node at build time (bakedSource)
  *
- * Plan: PR 2 Task 2 (from the spike, .data-spike/build.ts); app overrides Task 5.
+ * Plan: PR 2 Task 2 (from the spike, .data-spike/build.ts); app overrides Task 5; baked modules Task 10.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type * as esbuild from "esbuild";
 
 const HERE = __dirname;
@@ -152,7 +156,58 @@ export const APP_OVERRIDES: Record<string, string> = {
   "src/app/(app)/estimator/steps/review-tabs.tsx": "ui/review-overrides.tsx",
   // Task 6: the Send & track Activity card + the prototype log (the onWon port's note).
   "src/app/(app)/estimator/steps/send-activity.tsx": "ui/send-overrides.tsx",
+  // Task 10: Estimating Rules' venue-doctrine editor lists the venue classes — pure data, but under src/lib/stores/ (BAKED).
+  "src/lib/stores/venue-classes.ts": "runtime/baked/venue-classes.ts",
 };
+
+/**
+ * Handoff modules (relative to this directory) whose exports are plain data re-exported from an app module the bundle
+ * must not include — a store that reaches the database. In Node they ARE that re-export (tests compare against the real
+ * values); in the bundle bakePlugin swaps their contents for bakedSource() of the values, read at build time.
+ */
+export const BAKED_MODULES: readonly string[] = ["runtime/baked/pricing-registry.ts", "runtime/baked/venue-classes.ts"];
+
+/**
+ * A module of `export const <name> = <JSON>;` for each value export of `mod` (sorted by name). Throws when a value
+ * doesn't survive JSON (a function, undefined, NaN / Infinity, a Map…) — such an export can't be baked. Pure.
+ */
+export function bakedSource(mod: Record<string, unknown>, label = "baked module"): string {
+  const names = Object.keys(mod).filter((n) => n !== "default" && n !== "__esModule").sort();
+  if (!names.length) throw new Error(`${label}: nothing to bake (no value exports)`);
+  const lines = [`// Baked at build time from the app (handoff/estimator/esbuild-plugins.ts bakePlugin) — do not edit.`];
+  for (const n of names) {
+    const v = mod[n];
+    const json = JSON.stringify(v);
+    if (json === undefined || !isDeepStrictEqual(JSON.parse(json), v)) throw new Error(`${label}: export ${n} is not plain JSON data and can't be baked`);
+    lines.push(`export const ${n} = ${json};`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+/** Replaces each baked module's contents (`baked`: absolute path → bakedSource) when the bundle loads it. */
+export function bakePlugin(baked: ReadonlyMap<string, string>): esbuild.Plugin {
+  return {
+    name: "handoff-baked-modules",
+    setup(build) {
+      build.onLoad({ filter: /[\\/]handoff[\\/]estimator[\\/]runtime[\\/]baked[\\/][^\\/]+\.ts$/ }, (args) => {
+        const contents = baked.get(args.path);
+        if (contents === undefined) return { errors: [{ text: `${args.path} is under runtime/baked/ but not in BAKED_MODULES — add it there` }] };
+        return { contents, loader: "js", resolveDir: path.dirname(args.path) };
+      });
+    },
+  };
+}
+
+/** Imports each BAKED_MODULES entry in Node (its re-exports reach the real values) and bakes it: absolute path → source. */
+export async function bakeModules(modules: readonly string[] = BAKED_MODULES): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const rel of modules) {
+    const abs = path.resolve(HERE, rel);
+    const mod = (await import(abs)) as Record<string, unknown>;
+    out.set(abs, bakedSource(mod, rel));
+  }
+  return out;
+}
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

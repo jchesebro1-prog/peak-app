@@ -10,8 +10,9 @@
  *          load; any unregistered server action outside SMOKE_ALLOWED_UNREGISTERED.
  *          Screenshot: output/verify/smoke-build.png; result: output/verify/smoke.json.
  *          --all-steps (Task 6): also walks every slice estimate through Build, the three Build package tabs,
- *          each Customer review tab and Send & track, then the Catalog, the Assembly Builder and a rack's sheets
- *          (SHELL_SCREENS, Task 9), collecting mount-time calls from all of them; and fails
+ *          each Customer review tab and Send & track, then the Catalog, the Assembly Builder, a rack's sheets
+ *          (SHELL_SCREENS, Task 9) and Estimating Rules with its sub-pages (Task 10), collecting mount-time calls from
+ *          all of them; and fails
  *          on any discovered "use server" export (output/handoff-build/discovered-actions.json) that the page
  *          has no registration for. SMOKE_ALLOWED_UNREGISTERED is empty.
  *
@@ -91,12 +92,23 @@
  *          Reset restores. The walk lives in verify/assemblies.ts. Screenshots: output/verify/assemblies-*.png; result:
  *          output/verify/assemblies.json.
  *
- *   npm run handoff:verify -- --drift [--update]
+ *   npm run handoff:verify -- --rules [--out <package dir>]
+ *
+ * --rules  Estimating Rules (Task 10): #/rules runs the app's real editors; a Gold margin edit saves to the store and the
+ *          next new Gold estimate adds a catalog part at the new margin; a track series' stick length edit shows in the
+ *          Estimator's track configurator; Curtain mounts / System categories mount (a category save writes the store); the
+ *          venue doctrine saves; Conduit sizes is the notice; a non-admin is locked out; the editor's Reset and Reset to
+ *          production snapshot restore the margin and the stick. The walk lives in verify/rules.ts. Screenshots:
+ *          output/verify/rules-*.png; result: output/verify/rules.json.
+ *
+ *   npm run handoff:verify -- --drift [--update [<port> …]]
  *
  * --drift  the ported server logic's originals (port-sources.json, port-drift.ts): recomputes each
  *          original's sha256 and fails, listing every port whose original changed since it was ported
- *          ("re-check <port> against <original>…"). `--update` stamps the current hashes after the
- *          re-check. No browser. Not part of test:specs (app-side edits must not fail it).
+ *          ("re-check <port> against <original>…"). `--update <port> …` stamps the current hashes of the named
+ *          ports only (repo-relative paths, as port-sources.json lists them; an unknown name fails and writes
+ *          nothing) after re-checking them; a bare `--update` re-stamps every entry. No browser. Not part of
+ *          test:specs (app-side edits must not fail it).
  *
  * Later tasks add modes (--parity, --full). Plan: PR 2 Tasks 2–7.
  */
@@ -113,7 +125,7 @@ import { PREVIEW_COPY } from "@/lib/estimate-output/package-preview";
 import { POPOUT_NOTICE, PRINT_FOOTER_TEXT } from "./ui/preview-routes";
 import { CURRENT_USER_KEY } from "./runtime/ports";
 import { canonicalTotals } from "./runtime/estimate-totals";
-import { driftClean, driftMessages, driftOf, parsePortSources, PORT_SOURCES_FILE, sha256Of, updatedPortSources } from "./port-drift";
+import { driftClean, driftMessages, driftOf, parsePortSources, PORT_SOURCES_FILE, sha256Of, unknownPorts, updatedPortSources } from "./port-drift";
 
 export const ROOT = path.resolve(__dirname, "..", "..");
 export const VERIFY_DIR = path.join(ROOT, "output", "verify");
@@ -175,6 +187,11 @@ export const SHELL_SCREENS: ReadonlyArray<readonly [string, string]> = [
   ["#/catalog", "[data-catalog-painted]"],
   ["#/assemblies", "[data-handoff-assemblies]"],
   ["#/assemblies/rack/SA-NONE", "[data-handoff-missing]"],
+  // Task 10: Estimating Rules and its three sub-pages.
+  ["#/rules", "[data-handoff-rules]"],
+  ["#/rules/track-series", '[data-handoff-rules-page="track-series"]'],
+  ["#/rules/curtain-mounts", '[data-handoff-rules-page="curtain-mounts"]'],
+  ["#/rules/system-categories", '[data-handoff-rules-page="system-categories"]'],
 ];
 
 /** "fileKey#name" of every discovered server-action export the page has no registration for. Pure. */
@@ -1321,8 +1338,11 @@ export const newEstimateUrl = (base: string): string => `${base}?new=1#/estimate
 
 /* ------------------------------------------------------------------ --drift */
 
-/** --drift [--update]: the ported originals against port-sources.json (port-drift.ts). Returns pass. */
-function driftCheck(update: boolean): boolean {
+/**
+ * --drift [--update [<port> …]]: the ported originals against port-sources.json (port-drift.ts). `update` false = check
+ * only; [] = re-stamp every entry; names = re-stamp those ports only (an unknown name fails and writes nothing). Returns pass.
+ */
+function driftCheck(update: false | readonly string[]): boolean {
   const file = path.join(ROOT, PORT_SOURCES_FILE);
   const manifest = parsePortSources(JSON.parse(readFileSync(file, "utf8")));
   const hashOf = (p: string) => {
@@ -1331,8 +1351,13 @@ function driftCheck(update: boolean): boolean {
   };
   const exists = (p: string) => existsSync(path.join(ROOT, p));
   if (update) {
-    writeFileSync(file, JSON.stringify(updatedPortSources(manifest, hashOf), null, 2) + "\n");
-    console.log(`handoff:verify --drift --update  wrote ${PORT_SOURCES_FILE}`);
+    const unknown = unknownPorts(manifest, update);
+    if (unknown.length) {
+      console.log(`handoff:verify --drift --update  FAIL: not a port in ${PORT_SOURCES_FILE}: ${unknown.join(", ")} (nothing written)`);
+      return false;
+    }
+    writeFileSync(file, JSON.stringify(updatedPortSources(manifest, hashOf, update.length ? update : undefined), null, 2) + "\n");
+    console.log(`handoff:verify --drift --update  wrote ${PORT_SOURCES_FILE} (${update.length ? `re-stamped ${update.join(", ")}` : "re-stamped every entry"})`);
   }
   const r = driftOf(update ? parsePortSources(JSON.parse(readFileSync(file, "utf8"))) : manifest, hashOf, exists);
   const ok = driftClean(r);
@@ -1358,14 +1383,21 @@ async function main() {
   const shell = argv.includes("--shell");
   const catalog = argv.includes("--catalog");
   const assemblies = argv.includes("--assemblies");
+  const rules = argv.includes("--rules");
   const drift = argv.includes("--drift");
-  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !shell && !catalog && !assemblies && !drift) {
-    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --catalog | --assemblies | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] [--out <package dir>] | --drift [--update]");
+  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !shell && !catalog && !assemblies && !rules && !drift) {
+    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --catalog | --assemblies | --rules | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] [--out <package dir>] | --drift [--update [<port> …]]");
     process.exit(2);
   }
   mkdirSync(VERIFY_DIR, { recursive: true });
   let pass = true;
-  if (drift) pass &&= driftCheck(argv.includes("--update"));
+  if (drift) {
+    // `--update` takes the port paths that follow it (up to the next --flag); none = every entry.
+    const at = argv.indexOf("--update");
+    const named: string[] = [];
+    if (at >= 0) for (let i = at + 1; i < argv.length && !argv[i].startsWith("--"); i++) named.push(argv[i]);
+    pass &&= driftCheck(at >= 0 ? named : false);
+  }
   if (argv.includes("--smoke")) {
     const r = await smoke(pkgDir, argv.includes("--all-steps"));
     writeFileSync(path.join(VERIFY_DIR, "smoke.json"), JSON.stringify(r, null, 2) + "\n");
@@ -1418,6 +1450,14 @@ async function main() {
     const r = await assembliesCheck(pkgDir);
     writeFileSync(path.join(VERIFY_DIR, "assemblies.json"), JSON.stringify(r, null, 2) + "\n");
     printAssemblies(r);
+    pass &&= r.pass;
+  }
+  if (rules) {
+    // verify/rules.ts imports this module's helpers; loaded here, once this module has finished evaluating.
+    const { rulesCheck, printRules } = await import("./verify/rules");
+    const r = await rulesCheck(pkgDir);
+    writeFileSync(path.join(VERIFY_DIR, "rules.json"), JSON.stringify(r, null, 2) + "\n");
+    printRules(r);
     pass &&= r.pass;
   }
   if (!pass) process.exit(1);

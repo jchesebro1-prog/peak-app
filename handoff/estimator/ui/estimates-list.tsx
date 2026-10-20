@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
 import { appRouter } from "../shims/next-navigation";
 import { onRefresh } from "../runtime/router";
-import { blobData, customers, users } from "../runtime/ports";
+import { blobData, customers, refreshPortsFromStore, users } from "../runtime/ports";
 import type { HandoffStore } from "../runtime/store";
 import { filterRows, listRows, STATUS_FILTER_LABEL, STATUS_FILTERS, STATUS_LABEL, statusCounts, updatedLabel, type ListQuote, type ListRow, type StatusFilter } from "../runtime/estimates-list-model";
 
@@ -31,6 +31,8 @@ export function EstimatesList({ store, onReady }: { store: HandoffStore; onReady
 
   const load = useCallback(async () => {
     const quotes = await store.all<ListQuote>("quotes");
+    // The bonus rates as the store holds them (an Estimating Rules edit), not a stale snapshot.
+    await refreshPortsFromStore(store);
     const general = blobData("pricing_rules");
     return listRows(quotes, general, (q) => customers.resolve(q.customerId || q.customer)?.name ?? q.customer ?? "");
   }, [store]);

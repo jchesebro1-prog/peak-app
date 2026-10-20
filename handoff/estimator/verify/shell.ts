@@ -217,7 +217,7 @@ export async function shellCheck(pkgDir: string): Promise<ShellResult> {
     // 5 — the nav
     for (const [nav, label] of [["catalog", "Catalog"], ["assemblies", "Assemblies"], ["rules", "Estimating Rules"]] as const) {
       await page.click(`[data-handoff-nav="${nav}"]`);
-      // Catalog is a real screen since Task 8 (walked by --catalog), Assemblies since Task 9 (--assemblies); Rules stays a placeholder until its task.
+      // Catalog is a real screen since Task 8 (walked by --catalog), Assemblies since Task 9 (--assemblies), Estimating Rules since Task 10 (--rules).
       if (nav === "catalog") {
         const ok = await waitFor(async () => (await shellLoc(page)).hash === "#/catalog" && (await page.evaluate(() => !!document.querySelector("[data-handoff-catalog] [data-catalog-rows] tr"))), 8000);
         step(`nav → ${label}: #/${nav}, the Catalog screen`, ok && !(await page.evaluate(() => !!document.querySelector("[data-handoff-placeholder]"))));
@@ -228,10 +228,10 @@ export async function shellCheck(pkgDir: string): Promise<ShellResult> {
         step(`nav → ${label}: #/${nav}, the Assembly Builder`, ok && !(await page.evaluate(() => !!document.querySelector("[data-handoff-placeholder]"))));
         continue;
       }
-      const ok = await waitFor(async () => (await shellLoc(page)).hash === `#/${nav}` && (await page.evaluate(() => !!document.querySelector("[data-handoff-placeholder]"))), 5000);
-      step(`nav → ${label}: #/${nav}, a placeholder`, ok && (await pageHasText(page, "Coming in this prototype")));
+      const ok = await waitFor(async () => (await shellLoc(page)).hash === `#/${nav}` && (await page.evaluate(() => !!document.querySelector("[data-handoff-rules]"))), 8000);
+      step(`nav → ${label}: #/${nav}, the Estimating Rules editor`, ok && (await pageHasText(page, "Estimating rules")));
     }
-    await shot(page, "3-placeholder");
+    await shot(page, "3-rules");
     await page.click('[data-handoff-nav="estimates"]');
     step("nav → Estimates: the list again", (await waitList(page)) && (await shellLoc(page)).hash === "#/estimates");
     await page.evaluate(() => {

@@ -3,7 +3,7 @@
  * ports at it, registers the Estimator's server actions, and mounts the shell (ui/shell.tsx): the confidential banner,
  * the top nav, the acting-user switcher, Reset to production snapshot and a hash-routed screen — the Estimates list by
  * default, one estimate in the real EstimatorClient at `#/estimate/<id>` (props from runtime/props/estimator.ts, the
- * prototype's EstimatorPage), the Catalog screen (ui/catalog.tsx), the Assembly Builder + rack sheets (ui/assemblies.tsx) and a placeholder for Estimating Rules (runtime/routes.ts). A
+ * prototype's EstimatorPage), the Catalog screen (ui/catalog.tsx), the Assembly Builder + rack sheets (ui/assemblies.tsx) and the Estimating Rules editors (ui/rules.tsx). A
  * pre-shell deep link (`index.html?id=Q-G001&step=review`, `?new=1`) is put onto its hash route first. `router.refresh()`
  * re-reads the props for the estimate the route names now (a new estimate's first save puts its id there). The root
  * gets `data-handoff-ready` once the first screen has rendered (verify.ts waits for it). Task 5: the customer-facing
@@ -14,7 +14,7 @@
 import { appRouter, normalizeLocation } from "./shims/next-navigation"; // patches history before the app mounts
 import { createRoot } from "react-dom/client";
 import { openStore, seedFromSlice } from "./runtime/store";
-import { configurePorts } from "./runtime/ports";
+import { configurePorts, refreshPortsFromStore } from "./runtime/ports";
 import { registerActions } from "./runtime/actions-registry";
 import { actionRegistrations } from "./runtime/actions/registrations";
 import { installAssetUrlRewrite } from "./runtime/assets";
@@ -27,6 +27,9 @@ async function boot() {
   if (!el) throw new Error("#root is missing from index.html");
   const store = await openStore(seedFromSlice());
   configurePorts({ store });
+  // The ports' rate / settings snapshot starts as the store's (seed ∪ this browser's overlay — an Estimating Rules edit
+  // made earlier), never the bare slice; every writer re-reads it after a write (Task 10).
+  await refreshPortsFromStore(store);
   // The Estimator's server actions, in the browser (before the first render — mount effects call some):
   // every "use server" module the bundle stubs (runtime/actions/registrations.ts).
   for (const [fileKey, impls] of actionRegistrations(store)) registerActions(fileKey, impls);
