@@ -52,6 +52,18 @@ import { CUT_SHEETS_NO_QUOTE, CUT_SHEETS_WRONG_TYPE } from "@/lib/curtain-cut-sh
 import { REVIEW_COMMENT_COPY } from "@/lib/estimate-review/comments";
 import { previewPath } from "@/lib/estimate-output/package-preview";
 import * as nodePath from "node:path";
+import { NOT_IN_PROTOTYPE } from "../handoff/estimator/runtime/actions-registry";
+import { reviewOps } from "../handoff/estimator/runtime/review-ops";
+import { nextStepActions } from "../handoff/estimator/runtime/actions/next-step-actions";
+import {
+  NO_FOLLOW_UP_TASK, REFUSED_SEND_ACTIONS, refusedSendActions, SEND_COPY, sendActions, SIMULATED_LINK, SIMULATED_SEND_MARK, TRACK_GONE, trackedEmailsOf,
+} from "../handoff/estimator/runtime/actions/send-actions";
+import { emptyBidPanel, miscActions, PARTIES_ACTIONS_KEY, QUOTES_HUB_ACTIONS_KEY } from "../handoff/estimator/runtime/actions/misc-refusals";
+import { actionRegistrations } from "../handoff/estimator/runtime/actions/registrations";
+import { prototypeNotesFor } from "../handoff/estimator/ui/send-overrides";
+import { onRefresh } from "../handoff/estimator/runtime/router";
+import { canAttestApproval, decidableUnderLock, validateAttestationNote } from "../handoff/estimator/runtime/quote-model";
+import { unregisteredExports } from "../handoff/estimator/verify";
 
 const FIXTURE_V2 = "docs/estimating-core/handoff-fixtures/export-v2.json";
 const GOLDEN_EXPORT = "docs/estimating-core/golden-fixtures/export.json";
@@ -558,6 +570,7 @@ export async function handoffRuntimeChecks(ok: Ok) {
 
   await handoffActionChecks(ok);
   await handoffReviewChecks(ok);
+  await handoffSendChecks(ok);
 }
 
 /* ------------------------------------------------------------------ PR 2 Task 4: the Estimator's actions in the browser */
@@ -1105,4 +1118,193 @@ export async function handoffReviewChecks(ok: Ok) {
     const missingNames = want.filter((n) => !have.has(n));
     ok(want.length > 0 && missingNames.length === 0, `handoff review: override ${orig} → ${repl} exports every name the original does (missing: ${missingNames.join(", ") || "none"})`);
   }
+}
+
+/* ------------------------------------------------------------------ PR 2 Task 6: Send & track (simulated), the next-step flow, the refusals */
+
+export async function handoffSendChecks(ok: Ok) {
+  const cust: SeedCustomers = {
+    companies: [{ id: "c1", name: "Acme Theatre" }],
+    sites: [{ id: "s1", companyId: "c1", name: "Main Hall", city: "Madison", isPrimary: true }],
+    contacts: [{ id: "k1", firstName: "Pat", lastName: "Lee", homeCompanyId: "c1", title: "TD", isPrimary: true }],
+    contactEmails: [{ id: "e2", contactId: "k1", email: "pat.other@acme.test", isPrimary: false }, { id: "e1", contactId: "k1", email: "pat@acme.test", isPrimary: true }],
+    contactPhones: [], geoCache: [],
+  };
+  const team: SeedTeamUser[] = [
+    { id: "u1", name: "Ann Admin", roles: ["Admin"], status: "active" },
+    { id: "u2", name: "Eve Estimator", roles: ["Estimator"], status: "active" },
+    { id: "u3", name: "Rex Reviewer", roles: ["Reviewer"], status: "active" },
+    { id: "u4", name: "Mia Manager", roles: ["Manager"], status: "active" },
+  ];
+  const sections = [sec("s1", [{ sku: "ETC:CS15", desc: "ColorSource 15", qty: 4, cost: 900, price: 1250 }], { name: "Stage lighting" })];
+  const base = { quoteType: "system", source: "estimator", customerId: "c1", customer: "Acme Theatre", contactName: "Pat Lee", owner: "Ann Admin", createdAt: 1, history: [], revisions: [], spec: { sections, mobs: [] } };
+  const qa = { ...base, id: "Q-4001", estNo: 4001, name: "Main stage", status: "draft", updatedAt: 1_790_000_000_000 };
+  const qb = { ...base, id: "Q-4002", estNo: 4002, name: "Second", status: "draft", updatedAt: 1_790_000_000_000, vendorQuotes: [{ id: "vq1", vendorCompanyId: "c1", quoteNumber: "V-1", total: 10 }, { id: "vq2", vendorCompanyId: "c-gone" }] };
+  const qc = { ...base, id: "Q-4003", estNo: 4003, name: "Third", status: "draft", updatedAt: 1_790_000_000_000 };
+  const qWon = { ...base, id: "Q-4004", estNo: 4004, name: "Closed", status: "won", updatedAt: 1 };
+  const flame = { id: "Q-4005", estNo: 4005, name: "Flame", status: "draft", quoteType: "flame", source: "flame", createdAt: 1, updatedAt: 1, history: [], revisions: [], spec: {} };
+  const store = await openStore({ quotes: docs([qa, qb, qc, qWon, flame]), catalog: [], fixtures: [], blobs: [], settings: [{ id: "main", data: { companyName: "Peak Systems Group" } } as { id: string }] }, { idb: null });
+  configurePorts({ store, customers: cust, rules: { settings: { companyName: "Peak Systems Group" }, blobs: {} }, team });
+  const repo = quoteRepo(store);
+  const ops = reviewOps(repo);
+  const NS = nextStepActions(store);
+  let refreshes = 0;
+  const offRefresh = onRefresh(() => void refreshes++);
+  const as = (id: string) => {
+    users.setCurrent(id);
+    const u = users.current();
+    return { name: u.name, roles: u.roles ?? [] };
+  };
+
+  // --- the pure review rules (quotes.ts) ---
+  ok(!validateAttestationNote("  ").ok && validateAttestationNote(" by phone ").ok && (validateAttestationNote(" by phone ") as { note: string }).note === "by phone",
+    "handoff send: validateAttestationNote — a blank note is refused, a note is trimmed");
+  ok(!canAttestApproval({ state: "changes" } as Quote["review"]).ok && canAttestApproval(null).ok, "handoff send: canAttestApproval — a reviewer's changes can't be attested past");
+  const inRev = { status: "draft", updatedAt: 5, review: { state: "in_review" } } as unknown as Quote;
+  ok(decidableUnderLock(inRev, {}) && !decidableUnderLock(inRev, { expectUpdatedAt: 4 }) && !decidableUnderLock({ ...inRev, review: { state: "none" } } as Quote, {})
+    && decidableUnderLock({ ...inRev, review: { state: "none" } } as Quote, { allowUnsubmitted: true }) && !decidableUnderLock({ ...inRev, status: "sent", review: { state: "none" } } as Quote, { allowUnsubmitted: true }),
+    "handoff send: decidableUnderLock — in review at the version shown; approve-only also takes an unsubmitted DRAFT");
+
+  // --- the review ops (quote-review-ops.ts), through the next-step actions ---
+  as("u2");
+  const sub = await NS.nsSubmitAction("Q-4001", null);
+  ok(sub.ok && sub.status === "draft" && sub.review?.state === "in_review" && sub.review.submittedBy === "Eve Estimator" && !!sub.next && /^In review/.test(sub.next.pill.label),
+    `handoff send: nsSubmitAction — a non-owner Estimator submits; the sync carries review, status and the re-evaluated next step (${sub.next?.pill.label})`);
+  ok(refreshes >= 1, "handoff send: a successful next-step action refreshes the page (revalidatePath → router.refresh)");
+  const again = await NS.nsSubmitAction("Q-4001", null);
+  ok(!again.ok && again.error === "This quote is already waiting for approval." && again.review?.state === "in_review", "handoff send: submitting twice — 'already waiting', the fresh state still returned");
+  as("u1");
+  const own = await NS.nsApproveAction("Q-4001");
+  ok(!own.ok && /can't approve your own quote/.test(own.error ?? ""), "handoff send: the owner can't approve their own quote in review");
+  as("u2");
+  ok(!(await NS.nsApproveAction("Q-4001")).ok, "handoff send: an Estimator (no approve) can't decide");
+  as("u4");
+  const stale = await NS.nsApproveAction("Q-4001", 123);
+  ok(!stale.ok && stale.error === "This quote changed since you opened it — reload to review the current version." && stale.review?.state === "in_review",
+    "handoff send: approving a version the approver wasn't shown is refused (CHANGED_SINCE), nothing decided");
+  const shown = (await repo.get("Q-4001"))!.updatedAt;
+  const appr = await NS.nsApproveAction("Q-4001", shown);
+  const apprQ = (await repo.get("Q-4001"))!;
+  ok(appr.ok && apprQ.review.state === "approved" && apprQ.review.method === "in_app" && apprQ.review.decidedBy === "Mia Manager" && apprQ.review.submittedBy === "Eve Estimator" && !!apprQ.review.approvedAgainst,
+    "handoff send: a Manager approves the version shown — in_app, decidedBy, the submitter kept, the approval fingerprint stamped");
+  as("u2");
+  ok((await NS.nsWithdrawAction("Q-4001")).error === "This quote isn't waiting for approval.", "handoff send: withdraw after the decision — not waiting");
+  // send back + resubmit + attest
+  as("u2");
+  await NS.nsSubmitAction("Q-4002", null);
+  as("u3");
+  ok((await NS.nsSendBackAction("Q-4002", "  ")).error === "Say what needs to change.", "handoff send: send back needs a note");
+  const back = await NS.nsSendBackAction("Q-4002", "Add labor");
+  ok(back.ok && back.review?.state === "changes" && back.review.note === "Add labor" && back.review.decidedBy === "Rex Reviewer" && /^Changes requested/.test(back.next?.pill.label ?? ""),
+    "handoff send: a Reviewer sends it back — changes, the note, the pill");
+  as("u1");
+  const att = await NS.nsAttestAction("Q-4002", "Reviewed by Jeff on a call");
+  ok(!att.ok && /asked for changes/.test(att.error ?? ""), "handoff send: the owner can't attest past a reviewer's changes");
+  as("u2");
+  const resub = await NS.nsSubmitAction("Q-4002", "Rex Reviewer");
+  ok(resub.ok && resub.review?.state === "in_review" && resub.review.reviewer === "Rex Reviewer", "handoff send: resubmit after changes, assigned to a named approver");
+  ok((await NS.nsSubmitAction("Q-4003", "Nobody Here")).error === "Pick an approver from the list.", "handoff send: an assignee must be an approver on the roster");
+  ok((await NS.nsWithdrawAction("Q-4002")).ok && (await repo.get("Q-4002"))!.review.state === "none", "handoff send: the submitter withdraws");
+  as("u1");
+  ok((await NS.nsAttestAction("Q-4002", "")).error?.startsWith("An attested approval requires a note") === true, "handoff send: attest needs a note");
+  const attOk = await NS.nsAttestAction("Q-4002", "Reviewed by Jeff on a Teams call");
+  ok(attOk.ok && attOk.review?.state === "approved" && (await repo.get("Q-4002"))!.review.method === "attested", "handoff send: the owner attests an off-platform review");
+  // approve-only on an unsubmitted draft, then a non-approver's send (gate passes on the approval)
+  as("u4");
+  const only = await NS.nsApproveAction("Q-4003", (await repo.get("Q-4003"))!.updatedAt);
+  ok(only.ok && only.review?.state === "approved" && only.review.reviewer === "Mia Manager", "handoff send: Approve only (owner sends) on a draft that was never submitted");
+  // send-to-customer gating
+  as("u2");
+  const fresh = await repo.create({ name: "Unapproved", source: "estimator", owner: "Eve Estimator" });
+  const gated = await NS.nsSendAction(fresh.id);
+  ok(!gated.ok && /approval on record before it can be sent/.test(gated.error ?? "") && (await repo.get(fresh.id))!.status === "draft", "handoff send: an Estimator can't send an unapproved quote (the gate), nothing written");
+  as("u3");
+  const sendRex = await NS.nsSendAction("Q-4003");
+  ok(sendRex.ok && sendRex.status === "sent" && (await repo.get("Q-4003"))!.revisions?.at(-1)?.reason === "sent", "handoff send: an approver (Reviewer: approve, no send) may send — status sent, the sent revision cut");
+  ok((await NS.nsSendAction("Q-4003")).error === "This quote has already been sent.", "handoff send: sending twice — already sent");
+  ok((await ops.sendQuoteToCustomer("Q-nope", { name: "x", roles: ["Admin"] })).ok === false && (await NS.nsSendAction("Q-nope")).next === null, "handoff send: a missing quote — not found, next null");
+
+  // --- send-actions (Send & track) ---
+  const SA = sendActions(store);
+  as("u1");
+  const defs = await SA.estimateEmailDefaultsAction("Q-4001");
+  ok(defs.ok && defs.to === "pat@acme.test" && defs.cc === "" && defs.subject === "Main stage — estimate EST-4001" && defs.body.startsWith("Hi Pat,") && defs.body.includes("{link}") && defs.body.includes("Thanks,\nAnn Admin") && !defs.gmailConnected,
+    `handoff send: estimateEmailDefaultsAction — To = the contact's primary email, the subject / greeting / {link} line / sign-off, Gmail not connected (${JSON.stringify(defs).slice(0, 160)})`);
+  ok((await SA.estimateEmailDefaultsAction("Q-4005")).ok === false && (await SA.estimateEmailDefaultsAction("Q-nope")).ok === false, "handoff send: defaults — a flame quote isn't an estimate; a missing quote is gone");
+  const errOf = (r: { ok: boolean }) => (r as { error?: string }).error;
+  const input = (over: Record<string, unknown> = {}) => ({ to: "pat@acme.test", cc: "pat@acme.test, boss@acme.test", subject: "Main stage — estimate EST-4001", body: "Hi Pat,\nSee {link}\nThanks", attachEstimate: true, attachCover: true, followUpDays: 5, ...over });
+  ok(errOf(await SA.sendEstimateEmailAction("Q-4001", input({ to: "" }))) === SEND_COPY.noTo, "handoff send: send — no To is refused");
+  ok(errOf(await SA.sendEstimateEmailAction("Q-4001", input({ to: "not-an-address" }))) === SEND_COPY.badTo(["not-an-address"]), "handoff send: send — a bad To names it");
+  ok(errOf(await SA.sendEstimateEmailAction("Q-4001", input({ followUpDays: 4 }))) === SEND_COPY.badFollowUp, "handoff send: send — the follow-up must be one of the choices");
+  const staleSend = await SA.sendEstimateEmailAction("Q-4001", input({ asOf: 42 }));
+  ok(!staleSend.ok && staleSend.error === SEND_COPY.changedSince && staleSend.next !== undefined && staleSend.status === "draft", "handoff send: a version the sender wasn't shown — refused, with the fresh view to retry against");
+  ok(errOf(await SA.sendEstimateEmailAction("Q-4004", input())) === SEND_COPY.closed, "handoff send: a won estimate can't be emailed");
+  as("u2");
+  const gatedSend = await SA.sendEstimateEmailAction(fresh.id, input());
+  ok(!gatedSend.ok && /approval on record/.test(gatedSend.error) && !(await store.all<{ quoteId: string }>("activity")).some((a) => a.quoteId === fresh.id),
+    "handoff send: the approval gate refuses the first send — nothing recorded, nothing marked");
+  const actsBefore = (await store.all("activity")).length;
+  const [p1, p2] = await Promise.all([SA.sendEstimateEmailAction("Q-4001", input()), SA.sendEstimateEmailAction("Q-4001", input())]);
+  const sentOk = p1.ok ? p1 : p2;
+  const other = p1.ok ? p2 : p1;
+  ok(sentOk.ok && !other.ok && other.error === SEND_COPY.inProgress, `handoff send: two sends at once — one goes, the other is 'in progress' (${JSON.stringify([p1.ok, p2.ok])})`);
+  const sq = (await repo.get("Q-4001"))!;
+  const acts = (await store.all<Record<string, unknown>>("activity")).filter((a) => a.quoteId === "Q-4001" && a.kind === "email");
+  ok(sentOk.ok && sentOk.delivery === "local" && sentOk.status === "sent" && sq.status === "sent" && sq.revisions?.at(-1)?.reason === "sent" && sq.estimateEmails?.length === 1 && sq.estimateEmails[0].threadId === sentOk.threadId,
+    "handoff send: the first send marks the draft sent (the sent revision) and records the email on the quote");
+  const row = acts[0] as { to: string[]; cc?: string[]; body: string; attachments?: string[]; rev?: number; by: string } | undefined;
+  ok((await store.all("activity")).length === actsBefore + 1 && !!row && row.to.join() === "pat@acme.test" && row.cc?.join() === "boss@acme.test" && row.body.includes(SIMULATED_LINK) && !row.body.includes("{link}")
+    && row.attachments?.join() === "EST-4001.pdf,EST-4001 Cover.pdf" && row.rev === sq.revisions?.at(-1)?.rev && row.by === "Eve Estimator",
+    `handoff send: the email port records one row — To, Cc without the To, the body with the link placeholder, the would-be attachments, the rev (${JSON.stringify(row).slice(0, 220)})`);
+  ok(sentOk.ok && (sentOk.warning ?? "").includes("Simulated") && (sentOk.warning ?? "").includes(NO_FOLLOW_UP_TASK) && sentOk.next !== undefined, "handoff send: the result says it was simulated, that no follow-up task was made, and carries the next step");
+  const resend = await SA.sendEstimateEmailAction("Q-4001", input({ followUpDays: 0, attachCover: false }));
+  ok(resend.ok && resend.status === "sent" && (await repo.get("Q-4001"))!.estimateEmails?.length === 2 && !(resend.warning ?? "").includes(NO_FOLLOW_UP_TASK), "handoff send: a re-send on a sent quote records a second email, status stays sent");
+  const track = await SA.sendTrackAction("Q-4001");
+  ok(track.ok && track.emails.length === 2 && track.emails.every((e) => e.messages.length === 1 && e.messages[0].snippet.startsWith(SIMULATED_SEND_MARK) && e.delivery === "local" && !e.canReply && e.rev >= 1)
+    && track.emails[0].sentAt >= track.emails[1].sentAt && track.newReplies === 0 && track.opens.total === 0,
+    "handoff send: sendTrackAction — each recorded email, newest first, reads 'Sent (simulated)', delivered locally, no Reply");
+  ok((await SA.sendTrackAction("Q-nope")).ok === false && ((await SA.sendTrackAction("Q-nope")) as { error: string }).error === TRACK_GONE, "handoff send: track — a missing quote is 'Not found.'");
+  ok(trackedEmailsOf({ estimateEmails: [{ threadId: "gone", rev: 1, at: 1, by: "x", to: "y" }] } as unknown as Quote, []).length === 0, "handoff send: track — a recorded email with no activity row is skipped");
+  const R = refusedSendActions();
+  ok(REFUSED_SEND_ACTIONS.every((n) => JSON.stringify((R[n] as () => unknown)()) === JSON.stringify(NOT_IN_PROTOTYPE)), "handoff send: Open in Inbox / Reply / Mark read refuse");
+  // Won → the onWon note shows in the prototype log
+  as("u1");
+  await repo.setStatus("Q-4001", "won", "Ann Admin");
+  const notes = prototypeNotesFor(await store.all("activity"), "Q-4001");
+  ok(notes.length === 1 && notes[0].kind === "won" && /Would create install project/.test(notes[0].note ?? ""), "handoff send: Mark Won → the prototype log lists the onWon port's note (emails are the card's)");
+
+  // --- the misc registrations: shape-valid empties and refusals ---
+  const M = miscActions(store);
+  const call = (file: string, name: string, ...args: unknown[]) => (M[file][name] as (...a: unknown[]) => Promise<unknown> | unknown)(...args);
+  const bp = (await call("src/app/(app)/estimator/bid-actions.ts", "bidPanelAction", "Q-4002")) as { ok: boolean; panel?: ReturnType<typeof emptyBidPanel> };
+  ok(bp.ok && bp.panel!.bidders.length === 0 && !bp.panel!.canEdit && !bp.panel!.canSend && bp.panel!.ownerName === "Acme Theatre" && bp.panel!.rev === 1,
+    "handoff send: bidPanelAction — the original's empty panel (no bidders, nothing editable)");
+  ok(((await call("src/app/(app)/estimator/bid-actions.ts", "bidPanelAction", "Q-nope")) as { ok: boolean }).ok === false, "handoff send: bidPanelAction — a missing quote refuses");
+  as("u2");
+  const shDraft = (await call("src/app/(app)/estimator/share-actions.ts", "shareLinkStatusAction", "Q-4002")) as { ok: boolean; status: { state: string; canSend: boolean; link: unknown; sentRevs: unknown[] } };
+  const shSent = (await call("src/app/(app)/estimator/share-actions.ts", "shareLinkStatusAction", "Q-4003")) as { ok: boolean; status: { state: string; sentRevs: unknown[] } };
+  ok(shDraft.ok && shDraft.status.state === "not-sent" && shDraft.status.canSend && shDraft.status.link === null && shDraft.status.sentRevs.length === 0 && shSent.status.state === "ok" && shSent.status.sentRevs.length === 1,
+    "handoff send: shareLinkStatusAction — the online state and sent revisions, no link (none can be minted)");
+  const vp = (await call("src/app/(app)/estimator/vendor-actions.ts", "vendorsPanelAction", "Q-4002")) as { ok: boolean; companies: Array<{ id: string; name: string }>; threads: unknown[] };
+  ok(vp.ok && vp.companies.map((c) => `${c.id}=${c.name}`).join() === "c1=Acme Theatre,c-gone=c-gone" && vp.threads.length === 0, "handoff send: vendorsPanelAction — the quote's vendor companies, named from the directory (else the id), no threads");
+  ok(Array.isArray(await call(PARTIES_ACTIONS_KEY, "listPartiesAction", "quote", "Q-4001")) && ((await call(PARTIES_ACTIONS_KEY, "listPartiesAction", "quote", "Q-4001")) as unknown[]).length === 0,
+    "handoff send: listPartiesAction — the original's list type, empty");
+  const rc = (await call("src/app/(app)/rewards/actions.ts", "rewardCreditInfoAction", "c1", "Q-4001")) as { enabled: boolean; balance: number };
+  ok(rc.enabled === false && rc.balance === 0 && (await call("src/app/(app)/rewards/actions.ts", "purchasePerksBannerAction", "c1")) === "", "handoff send: Rewards off — credit info disabled, no perks banner");
+  ok(((await call("src/app/(app)/inbox/link-popup-actions.ts", "searchLinkTargetsAction", "acme")) as { companies: unknown[] }).companies.length === 0
+    && ((await call("src/app/(app)/vendors/actions.ts", "searchVendorCompaniesAction", "acme")) as unknown[]).length === 0, "handoff send: the list-returning searches answer empty lists (no refusal member in their types)");
+  ok(JSON.stringify(await call("src/app/(app)/estimator/bid-actions.ts", "addBidderAction", "Q-4001", {})) === JSON.stringify(NOT_IN_PROTOTYPE)
+    && ((await call("src/app/(app)/estimator/bid-send-actions.ts", "sendToBidderAction", "Q-4001", "pty_1")) as { partyId: string; scope: string; ok: boolean }).scope === "quote"
+    && ((await call("src/app/(app)/estimator/vendor-pdf-actions.ts", "readVendorPdfAction", {})) as { runId: unknown }).runId === null
+    && (await call(QUOTES_HUB_ACTIONS_KEY, "saveQuoteRevisionAction", new FormData())) === undefined,
+    "handoff send: refusals — NOT_IN_PROTOTYPE, the richer refusal shapes (bidder send, vendor PDF), the hub's void form actions");
+
+  // --- every registered file covers every export of its "use server" original ---
+  const regs = new Map<string, Set<string>>();
+  for (const [file, impls] of actionRegistrations(store)) regs.set(file, new Set([...(regs.get(file) ?? []), ...Object.keys(impls)]));
+  const gaps = [...regs].flatMap(([file, have]) => exportNames(fs.readFileSync(file, "utf8")).filter((n) => !have.has(n)).map((n) => `${file}#${n}`));
+  ok(regs.size >= 22 && gaps.length === 0, `handoff send: every registered "use server" file covers all its exports (${regs.size} files; missing: ${gaps.join(", ") || "none"})`);
+  ok(unregisteredExports({ "a.ts": ["x", "y"], "b.ts": ["z"] }, ["a.ts#x"]).join() === "a.ts#y,b.ts#z", "handoff send: unregisteredExports — the discovered exports with no registration (verify --all-steps)");
+  offRefresh();
+  configurePorts({ store: null, customers: null, rules: null, team: null });
 }

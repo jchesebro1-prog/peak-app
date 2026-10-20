@@ -10,7 +10,7 @@
  * renders/copies, the system-library index, `contentChangedAt` (it only drives PDF staleness).
  * Plan: PR 2 Task 4.
  */
-import type { Quote, QuoteStatus } from "@/lib/stores/quotes";
+import type { EstimateEmailEntry, Quote, QuoteStatus, ReviewOpts } from "@/lib/stores/quotes";
 import type { BonusSplit } from "@/lib/estimate-bonus/record";
 import { buildBonusRecord, normalizeSplit, quoteHasBonusLines } from "@/lib/estimate-bonus/record";
 import { isBonusEligibleQuote } from "@/lib/estimate-bonus/rules";
@@ -26,7 +26,13 @@ import { clock, numbering, onWon, users } from "./ports";
 import { pipelinesNow, renameRefs, reviewLimitContextNow } from "./readers";
 import {
   ApprovalGateRefused,
+  applyApprove,
+  applyAttestApproval,
+  applyRecordEstimateEmail,
+  applyRequestChanges,
   applyStatusMove,
+  applySubmitForReview,
+  applyWithdrawReview,
   applyUpdate,
   asReopened,
   buildQuote,
@@ -292,6 +298,44 @@ export function quoteRepo(store: HandoffStore) {
         if (typeof people.preparedBy === "string") doc.preparedBy = people.preparedBy;
         doc.updatedAt = clock.now();
       });
+    },
+
+    /* the review workflow (#284/#287) — each one write under the lock, re-checked there; the caller reads the outcome from the returned quote */
+
+    /** submitForReview(): in_review, stamped with the submitter and the optional assignee. */
+    submitForReview(id: string, opts: ReviewOpts = {}): Promise<Quote | null> {
+      return patch(id, (doc) => applySubmitForReview(doc, opts, clock.now()));
+    },
+
+    /** withdrawReview(): an in-review quote back to not submitted (a no-op otherwise). */
+    withdrawReview(id: string): Promise<Quote | null> {
+      return patch(id, (doc) => applyWithdrawReview(doc, clock.now()));
+    },
+
+    /** approve(): an approver's in_app approval of the version shown (approve-only takes an unsubmitted draft). */
+    approve(id: string, opts: ReviewOpts = {}): Promise<Quote | null> {
+      return patch(id, (doc) => applyApprove(doc, opts, clock.now()));
+    },
+
+    /** attestApproval(): the owner's attested approval (an empty note writes nothing). */
+    async attestApproval(id: string, opts: { by?: string | null; note: string }): Promise<Quote | null> {
+      const note = (opts.note || "").trim();
+      if (!note) return null;
+      return patch(id, (doc) => applyAttestApproval(doc, { by: opts.by, note }, clock.now()));
+    },
+
+    /** requestChanges(): send back with a note (same under-lock check as approve). */
+    requestChanges(id: string, opts: ReviewOpts = {}): Promise<Quote | null> {
+      return patch(id, (doc) => applyRequestChanges(doc, opts, clock.now()));
+    },
+
+    /** recordEstimateEmail(): one tracked email on the quote (Send & track's Activity) — no updatedAt bump. True when it wrote. */
+    async recordEstimateEmail(id: string, entry: EstimateEmailEntry): Promise<boolean> {
+      let wrote = false;
+      await patch(id, (doc) => {
+        wrote = applyRecordEstimateEmail(doc, entry);
+      });
+      return wrote;
     },
 
     /** remove(): soft delete → a tombstone in the overlay. */

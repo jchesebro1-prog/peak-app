@@ -186,6 +186,92 @@
           "sha256": "a46c38b6025a249e34b29e02db6ef6d64f45c598cdfeb3be0e3307fbfe141ae8"
         }
       ]
+    },
+    {
+      "port": "handoff/estimator/runtime/review-ops.ts",
+      "what": "quote-review-ops (submit / withdraw / approve / approve-only / send back / attest / send to customer) over the quote-repo review writers",
+      "originals": [
+        {
+          "path": "src/lib/quote-review-ops.ts",
+          "sha256": "425ec5fcddc7183c490d264166cda508f4ddb643b99ce38eeaa01cb06d6a4649"
+        },
+        {
+          "path": "src/lib/stores/quotes.ts",
+          "sha256": "fc9b9d5d3b98e3ef571a376289e796afb3bcaf4aedb744324b07859ca3f55866"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/next-step-actions.ts",
+      "what": "the next-step control's actions (nsSubmit … nsSend) and their NextStepSync",
+      "originals": [
+        {
+          "path": "src/app/(app)/quotes/review-actions.ts",
+          "sha256": "acbd53378f51fd4564306cd6a21f23552169fcfbda05d3b16ac1359b24f140ba"
+        },
+        {
+          "path": "src/lib/quote-next-step-server.ts",
+          "sha256": "94f8c9d0fa8b247f806a17fc3a15c2f1f2fa45fa6db5719f55b0424ae7e60608"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/send-actions.ts",
+      "what": "Send & track: composer defaults, the ordered send (simulated), the Activity read",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/send-actions.ts",
+          "sha256": "a72b7460d8d67ca6a4cf0ceeec91b46d0f1572dba7062b69ce5d88c340d52340"
+        },
+        {
+          "path": "src/lib/estimate-email/send-server.ts",
+          "sha256": "d20042f84c3bbc44feb6f7f8df1cdb7ec21ddf60458d949d24a248ebaaf9a1c5"
+        },
+        {
+          "path": "src/lib/estimate-email/track-server.ts",
+          "sha256": "9a0e4ae61d03dc7768c7c800af6382e67cbf70360c83531594956c9b375a9f21"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/misc-refusals.ts",
+      "what": "shape-valid empties: loadBidPanel, shareLinkStatus, loadVendorsPanel, rewardCreditInfoAction (program off)",
+      "originals": [
+        {
+          "path": "src/lib/parties/bid-panel-server.ts",
+          "sha256": "478adaeef2d70adc1b991f732cca8751f2a0e310fe3daba8596ec3307e22875d"
+        },
+        {
+          "path": "src/lib/quote-share/links.ts",
+          "sha256": "b5eb54f208877995be092eab416e0cacc22eb1bd972e9d48e77d8624a9dbff0e"
+        },
+        {
+          "path": "src/lib/vendor-quotes/threads-server.ts",
+          "sha256": "191227d8ddc3589707fb1f11686fdd5708993d1fcfe6514a884f73cfb3514798"
+        },
+        {
+          "path": "src/app/(app)/rewards/actions.ts",
+          "sha256": "657773b7742e23f1bd74ebf7da4ff31d56bce7e62b1cece49d20729aa74434b4"
+        },
+        {
+          "path": "src/app/(app)/estimator/share-actions.ts",
+          "sha256": "33a29a1862cb1b40c35893b963423b1ad905ac85e1eb3b06c9d56d3e7e2e3d74"
+        },
+        {
+          "path": "src/app/(app)/estimator/vendor-actions.ts",
+          "sha256": "a81d2debad93f25f7b559555e756e0d9597797844d007893e087a07916d23d6b"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/ui/send-overrides.tsx",
+      "what": "SendActivity (wrapped, plus the prototype log)",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/steps/send-activity.tsx",
+          "sha256": "f334a6538c23508cfac5f2fe0b4a2d5482fa1b2f34a5ba4f7d2f5a547df243c9"
+        }
+      ]
     }
   ]
 }

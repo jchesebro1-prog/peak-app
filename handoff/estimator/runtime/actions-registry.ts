@@ -41,8 +41,13 @@ export function calledUnregistered(): string[] {
   return [...unregistered];
 }
 
-// verify.ts reads the list from the page (puppeteer page.evaluate).
+/** "fileKey#name" of every registered action (implemented or an explicit refusal) — verify.ts compares it with the bundle's discovered exports. */
+export function registeredActions(): string[] {
+  return [...registry].flatMap(([fileKey, impls]) => Object.keys(impls).map((n) => `${fileKey}#${n}`));
+}
+
+// verify.ts reads both lists from the page (puppeteer page.evaluate).
 if (typeof window !== "undefined") {
   const w = window as unknown as { __peakHandoff?: Record<string, unknown> };
-  w.__peakHandoff = { ...(w.__peakHandoff ?? {}), calledUnregistered };
+  w.__peakHandoff = { ...(w.__peakHandoff ?? {}), calledUnregistered, registeredActions };
 }

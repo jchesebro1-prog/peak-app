@@ -34,7 +34,8 @@ type Ctx = {
 };
 
 const ctx: Ctx = { store: null, team: null, customers: null, rules: null, currentId: null };
-const CURRENT_USER_KEY = "peak-handoff-current-user";
+/** localStorage key that remembers the acting roster member (users.setCurrent; the shell's switcher, Task 7). */
+export const CURRENT_USER_KEY = "peak-handoff-current-user";
 
 /**
  * Points the ports at their data. Anything left out keeps its current value; a port with no
@@ -169,6 +170,8 @@ type Directory = {
   lite: CustomerLite[];
   sitesByCo: Map<string, SeedSite[]>;
   contactsByCo: Map<string, SeedContact[]>;
+  /** contact id → its email addresses, primary first (identity/contacts emailsForContacts). */
+  emailsByContact: Map<string, string[]>;
   companies: SeedCustomers["companies"];
   geo: Map<string, { miles: number; minutes: number }>;
 };
@@ -205,6 +208,12 @@ function buildDirectory(src: SeedCustomers): Directory {
   }
   for (const [k, v] of contactsByCo)
     contactsByCo.set(k, v.sort((a, b) => Number(!!b.isPrimary) - Number(!!a.isPrimary) || contactName(a).localeCompare(contactName(b))));
+  const emailRows = live(src.contactEmails ?? []).slice().sort((a, b) => Number(!!b.isPrimary) - Number(!!a.isPrimary));
+  const emailsByContact = new Map<string, string[]>();
+  for (const e of emailRows) {
+    const k = String(e.contactId ?? "");
+    if (typeof e.email === "string" && e.email) emailsByContact.set(k, [...(emailsByContact.get(k) ?? []), e.email]);
+  }
   const geo = new Map<string, { miles: number; minutes: number }>();
   for (const g of src.geoCache ?? []) {
     const d = g.data as { miles?: unknown; minutes?: unknown } | undefined;
@@ -216,7 +225,7 @@ function buildDirectory(src: SeedCustomers): Directory {
     locations: (sitesByCo.get(c.id) ?? []).map((s) => ({ id: locIdOf(s), label: String(s.name ?? ""), city: String(s.city ?? ""), primary: !!s.isPrimary })),
     contacts: (contactsByCo.get(c.id) ?? []).map((ct) => ({ name: contactName(ct), role: String(ct.title ?? ""), primary: !!ct.isPrimary })),
   }));
-  return { lite, sitesByCo, contactsByCo, companies, geo };
+  return { lite, sitesByCo, contactsByCo, emailsByContact, companies, geo };
 }
 
 function dir(): Directory {
@@ -367,6 +376,17 @@ export const customers = {
     const s = String(idOrName).toLowerCase();
     return lite.find((c) => c.name.toLowerCase() === s) ?? null;
   },
+  /**
+   * A company's contact by exact display name (customers.ts contactByName): `{ name, role, email }`, the email
+   * being the contact's primary-first first address ("" when none); null for an unknown company or name.
+   */
+  contactByName(customerId: string | null | undefined, name: string | null | undefined): { name: string; role: string; email: string } | null {
+    if (!customerId || !name) return null;
+    const d = dir();
+    if (!d.companies.some((c) => c.id === customerId)) return null;
+    const hit = (d.contactsByCo.get(customerId) ?? []).find((c) => contactName(c) === name);
+    return hit ? { name: contactName(hit), role: String(hit.title ?? ""), email: d.emailsByContact.get(hit.id)?.[0] ?? "" } : null;
+  },
   /** Is `id` a live company whose type the vendor picker lists (vendor-quotes/rules isVendorPickerType)? */
   isVendorCompany(id: string | null | undefined): boolean {
     if (!id) return false;
@@ -443,17 +463,40 @@ export const numbering = {
 let actSeq = 0;
 const activityId = (at: number) => `act-${at.toString(36)}-${(++actSeq).toString(36)}`;
 
+/** One outbound estimate email as the `email` port records it (an `activity` row, kind "email"). */
+export type EmailActivity = {
+  id: string;
+  kind: "email";
+  at: number;
+  by: string;
+  to: string[];
+  cc?: string[];
+  subject: string;
+  body: string;
+  quoteId: string;
+  /** The sent revision the email carried (Send & track's "Rev N"). */
+  rev?: number;
+  /** The PDFs Quartzite would have attached (file names only — nothing is rendered or attached). */
+  attachments?: string[];
+};
+
 /**
  * Outbound email. Quartzite: Gmail from the sender's own mailbox (lib/gmail, Send & track).
  * Prototype: NEVER sends — records the message as an `activity` row (kind "email") and returns
  * its id and time, so the Send & track card can show it.
  */
 export const email = {
-  async send(msg: { to: string[]; subject: string; body: string; quoteId: string }): Promise<{ id: string; at: number }> {
+  async send(msg: { to: string[]; cc?: string[]; subject: string; body: string; quoteId: string; rev?: number; attachments?: string[] }): Promise<{ id: string; at: number }> {
     const store = needStore("email");
     const at = clock.now();
     const id = activityId(at);
-    await store.put("activity", { id, kind: "email", at, by: users.current().name, to: [...msg.to], subject: msg.subject, body: msg.body, quoteId: msg.quoteId });
+    const row: EmailActivity = {
+      id, kind: "email", at, by: users.current().name, to: [...msg.to], subject: msg.subject, body: msg.body, quoteId: msg.quoteId,
+      ...(msg.cc?.length ? { cc: [...msg.cc] } : {}),
+      ...(typeof msg.rev === "number" ? { rev: msg.rev } : {}),
+      ...(msg.attachments?.length ? { attachments: [...msg.attachments] } : {}),
+    };
+    await store.put("activity", row);
     return { id, at };
   },
 };

@@ -8,6 +8,10 @@
  *          local (file:, data:, blob:, about:) or Google Fonts; any local file that failed to
  *          load; any unregistered server action outside SMOKE_ALLOWED_UNREGISTERED.
  *          Screenshot: output/verify/smoke-build.png; result: output/verify/smoke.json.
+ *          --all-steps (Task 6): also walks every slice estimate through Build, the three Build package tabs,
+ *          each Customer review tab and Send & track, collecting mount-time calls from all of them; and fails
+ *          on any discovered "use server" export (output/handoff-build/discovered-actions.json) that the page
+ *          has no registration for. SMOKE_ALLOWED_UNREGISTERED is empty.
  *
  *   npm run handoff:verify -- --estimator <quoteId|all> [--out <package dir>]
  *
@@ -40,6 +44,15 @@
  *          the Cut sheets tab and, with "Cut sheets" on the PDF, prints after the document. The store is reset after.
  *          Screenshots: output/verify/review-*.png; result: output/verify/review.json.
  *
+ *   npm run handoff:verify -- --send [quoteId] [--out <package dir>]
+ *
+ * --send  Send & track, simulated (Task 6), on the first draft estimate: a verify-only Estimator persona
+ *          (VERIFY_ESTIMATOR, appended to the roster before the page loads) Submits for approval; a Manager
+ *          from the roster (switched through localStorage, ports CURRENT_USER_KEY) Approves only; the composer
+ *          is pre-filled; Send & mark sent → Sent, the Activity card reads "Sent (simulated)", a reload keeps
+ *          both; Mark Won → the prototype log shows "Would create install project". 0 foreign requests: nothing
+ *          leaves the browser. The store is reset after. Screenshots: output/verify/send-*.png; result: send.json.
+ *
  *   npm run handoff:verify -- --drift [--update]
  *
  * --drift  the ported server logic's originals (port-sources.json, port-drift.ts): recomputes each
@@ -47,7 +60,7 @@
  *          ("re-check <port> against <original>…"). `--update` stamps the current hashes after the
  *          re-check. No browser. Not part of test:specs (app-side edits must not fail it).
  *
- * Later tasks add modes (--shell, --parity, --full). Plan: PR 2 Tasks 2–5.
+ * Later tasks add modes (--shell, --parity, --full). Plan: PR 2 Tasks 2–6.
  */
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -64,22 +77,16 @@ import { bonusRatesFrom, BONUS_ESTIMATOR_RATE_ID, BONUS_PACKAGE_RATE_ID } from "
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { PREVIEW_COPY } from "@/lib/estimate-output/package-preview";
 import { POPOUT_NOTICE, PRINT_FOOTER_TEXT } from "./ui/preview-routes";
+import { CURRENT_USER_KEY } from "./runtime/ports";
 import { driftClean, driftMessages, driftOf, parsePortSources, PORT_SOURCES_FILE, sha256Of, updatedPortSources } from "./port-drift";
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const VERIFY_DIR = path.join(ROOT, "output", "verify");
 
-/** Actions the Build step calls on mount that have no browser implementation yet (spike
- *  REPORT "Stubs hit"). Later tasks register them and this list empties. */
-export const SMOKE_ALLOWED_UNREGISTERED: readonly string[] = [
-  "src/app/(app)/parties/actions.ts#listPartiesAction",
-  "src/app/(app)/estimator/bid-actions.ts#bidPanelAction",
-  // Task 6: the Build package's BOM quote tab mounts VendorsCard, which reads its panel (refused → it hides).
-  "src/app/(app)/estimator/vendor-actions.ts#vendorsPanelAction",
-  // Task 3: called on mount once the estimate has a linked customer (the dev slice has none, so
-  // Task 2's smoke never saw it); refused, the Rewards line just doesn't show.
-  "src/app/(app)/rewards/actions.ts#rewardCreditInfoAction",
-];
+/** Mount-time actions allowed to be unregistered. Empty since Task 6: every server action the bundle stubs is
+ *  registered — implemented, shape-valid empty or an explicit refusal (runtime/actions/misc-refusals.ts) — and
+ *  `--smoke --all-steps` fails on any discovered export without a registration. */
+export const SMOKE_ALLOWED_UNREGISTERED: readonly string[] = [];
 
 const LOCAL_SCHEMES = new Set(["file:", "data:", "blob:", "about:"]);
 const FONT_HOSTS = new Set(["fonts.googleapis.com", "fonts.gstatic.com"]);
@@ -100,6 +107,10 @@ export function classifyRequest(url: string): "local" | "fonts" | "foreign" {
 type SmokeResult = {
   pass: boolean;
   url: string;
+  /** --all-steps: every view walked (estimate · step · tab) — mount-time calls of all four steps count. */
+  walked: string[];
+  /** --all-steps: discovered "use server" exports (output/handoff-build/discovered-actions.json) with no registration at all. */
+  notRegistered: string[];
   readyMs: number | null;
   estimatorMounted: boolean;
   pageErrors: string[];
@@ -112,7 +123,23 @@ type SmokeResult = {
   screenshot: string;
 };
 
-async function smoke(pkgDir: string): Promise<SmokeResult> {
+/** The views --smoke --all-steps opens on each slice estimate: Build, the three Build package tabs, each Customer review tab, Send & track. */
+export const ALL_STEP_VIEWS: ReadonlyArray<{ query: string; tabs?: readonly string[] }> = [
+  { query: "step=build" },
+  { query: "step=package&ptab=narrative" },
+  { query: "step=package&ptab=bom" },
+  { query: "step=package&ptab=client" },
+  { query: "step=review", tabs: ["Document", "Package page", "BOM", "Cut sheets", "Datasheets", "Drawings"] },
+  { query: "step=send" },
+];
+
+/** "fileKey#name" of every discovered server-action export the page has no registration for. Pure. */
+export function unregisteredExports(discovered: Record<string, string[]>, registered: readonly string[]): string[] {
+  const have = new Set(registered);
+  return Object.entries(discovered).flatMap(([file, names]) => names.map((n) => `${file}#${n}`)).filter((id) => !have.has(id));
+}
+
+async function smoke(pkgDir: string, allSteps = false): Promise<SmokeResult> {
   const index = path.join(pkgDir, "index.html");
   if (!existsSync(index)) throw new Error(`${index} not found — run npm run handoff:build first`);
   const launch = await chromeLaunch();
@@ -152,15 +179,54 @@ async function smoke(pkgDir: string): Promise<SmokeResult> {
     }
     // Mount-time effects (server-action calls) run after the first render; let them settle.
     await new Promise((r) => setTimeout(r, 1500));
-    const estimatorMounted = await page.evaluate(() => !!document.querySelector(".est-root"));
+    let estimatorMounted = await page.evaluate(() => !!document.querySelector(".est-root"));
     await page.screenshot({ path: screenshot as `${string}.png` });
-    const unregistered = await page.evaluate(
-      () => (window as unknown as { __peakHandoff?: { calledUnregistered?: () => string[] } }).__peakHandoff?.calledUnregistered?.() ?? [],
-    );
+    const readUnregistered = () => page.evaluate(() => (window as unknown as { __peakHandoff?: { calledUnregistered?: () => string[] } }).__peakHandoff?.calledUnregistered?.() ?? []);
+    const seen = new Set<string>(await readUnregistered());
+    const walked: string[] = [];
+    let notRegistered: string[] = [];
+    if (allSteps) {
+      // Every slice estimate × every step (and every tab that mounts its own components).
+      const ids = loadSliceData(pkgDir).estimates.map((q) => q.id);
+      for (const id of ids) {
+        for (const v of ALL_STEP_VIEWS) {
+          await page.goto(`${url}?id=${encodeURIComponent(id)}&${v.query}`, { waitUntil: "load" });
+          try {
+            await page.waitForSelector("[data-handoff-ready]", { timeout: 15_000 });
+          } catch {
+            pageErrors.push(`[verify] ${id} ${v.query}: [data-handoff-ready] never appeared within 15 s`);
+            continue;
+          }
+          await new Promise((r) => setTimeout(r, 1200));
+          estimatorMounted &&= await page.evaluate(() => !!document.querySelector(".est-root"));
+          walked.push(`${id} ${v.query}`);
+          for (const tab of v.tabs ?? []) {
+            const clicked = await page.evaluate((t) => {
+              const b = [...document.querySelectorAll('[role="tab"]')].find((x) => x.textContent?.trim() === t && (x as HTMLElement).offsetParent !== null) as HTMLElement | undefined;
+              b?.click();
+              return !!b;
+            }, tab);
+            if (!clicked) {
+              pageErrors.push(`[verify] ${id} ${v.query}: no "${tab}" tab`);
+              continue;
+            }
+            await new Promise((r) => setTimeout(r, 800));
+            walked.push(`${id} ${v.query} → ${tab}`);
+          }
+          for (const x of await readUnregistered()) seen.add(x);
+        }
+      }
+      // Structural: every "use server" export the bundle stubs has a registration (implemented or refused).
+      const discoveredFile = path.join(ROOT, "output", "handoff-build", "discovered-actions.json");
+      const discovered = existsSync(discoveredFile) ? (JSON.parse(readFileSync(discoveredFile, "utf8")) as Record<string, string[]>) : {};
+      const registered = await page.evaluate(() => (window as unknown as { __peakHandoff?: { registeredActions?: () => string[] } }).__peakHandoff?.registeredActions?.() ?? []);
+      notRegistered = Object.keys(discovered).length ? unregisteredExports(discovered, registered) : ["(output/handoff-build/discovered-actions.json missing — run npm run handoff:build)"];
+    }
+    const unregistered = [...seen];
     const allowed = new Set(SMOKE_ALLOWED_UNREGISTERED);
     const unexpectedUnregistered = unregistered.filter((id) => !allowed.has(id));
-    const pass = pageErrors.length === 0 && foreignRequests.length === 0 && failedLocal.length === 0 && unexpectedUnregistered.length === 0 && estimatorMounted;
-    return { pass, url, readyMs, estimatorMounted, pageErrors, foreignRequests, failedLocal, fontRequests, unregistered, unexpectedUnregistered, consoleErrors, screenshot };
+    const pass = pageErrors.length === 0 && foreignRequests.length === 0 && failedLocal.length === 0 && unexpectedUnregistered.length === 0 && notRegistered.length === 0 && estimatorMounted;
+    return { pass, url, walked, notRegistered, readyMs, estimatorMounted, pageErrors, foreignRequests, failedLocal, fontRequests, unregistered, unexpectedUnregistered, consoleErrors, screenshot };
   } finally {
     await browser.close();
   }
@@ -176,6 +242,8 @@ function printSmoke(r: SmokeResult): void {
   for (const u of r.foreignRequests) console.log(`    ${u}`);
   console.log(`  failed local files: ${r.failedLocal.length}`);
   for (const u of r.failedLocal) console.log(`    ${u}`);
+  if (r.walked.length) console.log(`  --all-steps: walked ${r.walked.length} views; discovered exports with no registration: ${r.notRegistered.length}`);
+  for (const id of r.notRegistered) console.log(`    NOT REGISTERED ${id}`);
   console.log(`  unregistered server actions called: ${r.unregistered.length} (unexpected: ${r.unexpectedUnregistered.length})`);
   for (const id of r.unregistered) console.log(`    ${r.unexpectedUnregistered.includes(id) ? "UNEXPECTED " : "allowed    "}${id}`);
   if (r.consoleErrors.length) {
@@ -981,6 +1049,192 @@ function printReview(r: ReviewResult): void {
   console.log(`  screenshots: ${r.screenshots.map((f) => path.relative(ROOT, f)).join(", ")}`);
 }
 
+/* ------------------------------------------------------------------ --send */
+
+type SendResult = { pass: boolean; id: string; estimator: string; manager: string; steps: Array<{ step: string; ok: boolean; detail?: string }>; screenshots: string[]; unexpectedUnregistered: string[] } & PageSink;
+
+/** The verify-only Estimator persona the --send walk acts as (the dev slice's roster holds no Estimator-only member). */
+export const VERIFY_ESTIMATOR = { id: "u-verify-est", name: "Erin Verify", roles: ["Estimator"], status: "active" } as const;
+
+/**
+ * Appends VERIFY_ESTIMATOR to the roster data/team.js sets (window.PEAK_TEAM), before any page script runs. A string,
+ * not a function: tsx's keepNames would wrap a named inner function in __name, which the page lacks.
+ */
+const ROSTER_INJECT = `(() => {
+  let team;
+  const extra = ${JSON.stringify(VERIFY_ESTIMATOR)};
+  Object.defineProperty(window, "PEAK_TEAM", {
+    configurable: true,
+    get: () => team,
+    set: (v) => { team = Array.isArray(v) ? v.filter((u) => u && u.id !== extra.id).concat([extra]) : v; },
+  });
+})();`;
+
+/** The slice's team.js roster (Node sandbox). */
+function sliceTeam(pkgDir: string): Array<{ id: string; name: string; roles?: string[]; status?: string }> {
+  const window: Record<string, unknown> = {};
+  const file = path.join(pkgDir, "data", "team.js");
+  if (existsSync(file)) vm.runInContext(readFileSync(file, "utf8"), vm.createContext({ window }), { filename: file });
+  return Array.isArray(window.PEAK_TEAM) ? (window.PEAK_TEAM as Array<{ id: string; name: string; roles?: string[]; status?: string }>) : [];
+}
+
+/** The Send & track Activity card's text ("" when it isn't on the page). */
+const activityText = (page: Page) => page.evaluate(() => (document.querySelector('section[aria-label="Activity"]') as HTMLElement | null)?.innerText ?? "");
+
+/** The composer field labelled `label` (To / Cc / Subject / Body) → its current value, or null. */
+const composerValue = (page: Page, label: string) =>
+  page.evaluate((l) => {
+    const lab = [...document.querySelectorAll('section[aria-label="Email the estimate"] label')].find((x) => x.querySelector("span")?.textContent?.trim() === l);
+    const f = lab?.querySelector("input,textarea") as HTMLInputElement | HTMLTextAreaElement | null;
+    return f ? f.value : null;
+  }, label);
+
+/**
+ * Task 6 — Send & track, simulated: as an Estimator-only member, Submit for approval; as a Manager, Approve only (owner
+ * sends); the composer opens pre-filled; Send & mark sent → the quote is Sent, the Activity card shows "Sent (simulated)"
+ * and a reload keeps both; Mark Won → the Activity shows the onWon port's "Would create install project" note. Nothing
+ * leaves the browser (0 foreign requests). The store is reset after.
+ */
+async function sendCheck(pkgDir: string, which: string | undefined): Promise<SendResult> {
+  const index = path.join(pkgDir, "index.html");
+  if (!existsSync(index)) throw new Error(`${index} not found — run npm run handoff:build first`);
+  const data = loadSliceData(pkgDir);
+  // Default: the first stored DRAFT system estimate. The golden fixtures (Q-G001…) carry no `status`, and the review
+  // ops refuse a quote whose status isn't "draft" exactly as quote-review-ops.ts does ("Only a draft quote…").
+  const q = (which ? data.estimates.find((x) => x.id === which) : data.estimates.find((x) => x.status === "draft" && (x.quoteType ?? "system") === "system") ?? data.estimates[0]) ?? null;
+  if (!q) throw new Error(`no estimate${which ? ` "${which}"` : ""} in the slice`);
+  const manager = sliceTeam(pkgDir).find((u) => (u.status ?? "active") === "active" && (u.roles ?? []).includes("Manager"));
+  if (!manager) throw new Error("the slice's roster has no active Manager");
+  const number = displayQuoteNumber({ ...q, id: q.id });
+  const launch = await chromeLaunch();
+  if ("unavailable" in launch) throw new Error(launch.unavailable);
+  const puppeteer = (await import("puppeteer-core")).default;
+  const browser = await puppeteer.launch({ executablePath: launch.executablePath, args: launch.args, headless: true, defaultViewport: { width: 1440, height: 1000 } });
+  const sink = newSink();
+  const steps: SendResult["steps"] = [];
+  const step = (name: string, ok: boolean, detail?: string) => steps.push({ step: name, ok, ...(detail ? { detail } : {}) });
+  const screenshots: string[] = [];
+  const shot = async (page: Page, name: string) => {
+    const file = path.join(VERIFY_DIR, `send-${name}.png`);
+    await page.screenshot({ path: file as `${string}.png`, fullPage: true });
+    screenshots.push(file);
+  };
+  const allowed = new Set(SMOKE_ALLOWED_UNREGISTERED);
+  const unexpected = new Set<string>();
+  const noteUnregistered = async (page: Page) => (await unregisteredOn(page)).filter((x) => !allowed.has(x)).forEach((x) => unexpected.add(x));
+  const url = `${pathToFileURL(index).href}?id=${encodeURIComponent(q.id)}&step=send`;
+  type Stored = { status?: string; review?: { state?: string; submittedBy?: string | null; decidedBy?: string | null }; revisions?: Array<{ reason?: string }>; estimateEmails?: unknown[] };
+  const stored = (page: Page) => page.evaluate(async (id) => (await (window as unknown as EditH).__peakHandoff.store.get("quotes", id)) as Record<string, unknown> | null, q.id) as Promise<Stored | null>;
+  const activityRows = (page: Page) =>
+    page.evaluate(async (id) => ((await (window as unknown as EditH).__peakHandoff.store.all("activity")) as Array<Record<string, unknown>>).filter((a) => a.quoteId === id), q.id);
+  const actAs = async (page: Page, userId: string) => {
+    await page.evaluate(([k, v]) => localStorage.setItem(k, v), [CURRENT_USER_KEY, userId] as const);
+    await page.goto(url, { waitUntil: "load" });
+    return waitMounted(page, sink);
+  };
+  const statusValue = (page: Page) => page.evaluate(() => (document.getElementById("est-send-status-select") as HTMLSelectElement | null)?.value ?? null);
+  mkdirSync(VERIFY_DIR, { recursive: true });
+  try {
+    const page = await newPage(browser, sink);
+    await page.evaluateOnNewDocument(ROSTER_INJECT);
+    await page.goto(url, { waitUntil: "load" });
+    await page.waitForSelector("[data-handoff-ready]", { timeout: 15_000 });
+    await page.evaluate(async () => (window as unknown as EditH).__peakHandoff.store.reset());
+
+    // 1 — the Estimator submits for approval
+    step(`acting as ${VERIFY_ESTIMATOR.name} (Estimator only) — Send & track mounted`, await actAs(page, VERIFY_ESTIMATOR.id));
+    const submitted = (await waitFor(() => clickButton(page, "Submit for approval"), 5000)) && (await waitFor(() => pageHasText(page, "In review"), 10_000));
+    const s1 = await stored(page);
+    step("Submit for approval → In review", submitted && s1?.review?.state === "in_review" && s1.review.submittedBy === VERIFY_ESTIMATOR.name, JSON.stringify(s1?.review ?? null));
+    await shot(page, "1-submitted");
+    await noteUnregistered(page);
+
+    // 2 — the Manager approves (Approve only — the composer sends)
+    step(`acting as ${manager.name} (Manager)`, await actAs(page, manager.id));
+    step("the Manager sees Approve & send →", await waitFor(() => pageHasText(page, "Approve & send →"), 5000));
+    const menu = await page.evaluate(() => {
+      const b = [...document.querySelectorAll('button[aria-label="More approval actions"]')].find((x) => (x as HTMLElement).offsetParent !== null) as HTMLElement | undefined;
+      b?.click();
+      return !!b;
+    });
+    const approved = menu && (await waitFor(() => clickButton(page, "Approve only (owner sends)"), 3000)) && (await waitFor(() => pageHasText(page, "Approved · "), 10_000));
+    const s2 = await stored(page);
+    step("Approve only → Approved", approved && s2?.review?.state === "approved" && s2.review.decidedBy === manager.name, JSON.stringify(s2?.review ?? null));
+    await noteUnregistered(page);
+
+    // 3 — the composer is pre-filled; Send & mark sent (the app moves an approver on to Customer review — back to Send & track)
+    await page.goto(url, { waitUntil: "load" });
+    await waitMounted(page, sink);
+    const filled = await waitFor(async () => ((await composerValue(page, "Subject")) ?? "").includes(number) && ((await composerValue(page, "Body")) ?? "").includes("{link}"), 10_000);
+    step("the composer is pre-filled (subject names the estimate, body carries {link})", filled, JSON.stringify({ subject: await composerValue(page, "Subject"), to: await composerValue(page, "To") }));
+    // Before typing: a full-page screenshot resizes the viewport, which remounts the composer (its fields reset).
+    await shot(page, "2-composer");
+    // The slice's estimates carry no customer contact, so To starts blank — type one (the fields enable once settled).
+    const toInput = () =>
+      page.evaluateHandle(() => [...document.querySelectorAll('section[aria-label="Email the estimate"] label')].find((x) => x.querySelector("span")?.textContent?.trim() === "To")?.querySelector("input") ?? null);
+    const toReady = await waitFor(() => page.evaluate(() => {
+      const i = [...document.querySelectorAll('section[aria-label="Email the estimate"] label')].find((x) => x.querySelector("span")?.textContent?.trim() === "To")?.querySelector("input");
+      return !!i && !i.disabled;
+    }), 10_000);
+    if (toReady && !(await composerValue(page, "To"))) {
+      const el = (await toInput()).asElement() as import("puppeteer-core").ElementHandle<HTMLInputElement> | null;
+      if (el) await el.type("client@example.com");
+    }
+    step("To holds a recipient", ((await composerValue(page, "To")) ?? "").includes("@"), String(await composerValue(page, "To")));
+    const sendClicked = await waitFor(() => clickButton(page, "Send & mark sent →"), 5000);
+    const sentUi = await waitFor(async () => (await statusValue(page)) === "sent" && (await activityText(page)).includes("Sent (simulated)"), 10_000);
+    const s3 = await stored(page);
+    const rows3 = await activityRows(page);
+    const notice = await page.evaluate(() => [...document.querySelectorAll('section[aria-label="Email the estimate"] [role="status"]')].map((x) => (x as HTMLElement).innerText).join(" | "));
+    step("Send & mark sent → status Sent and the Activity card shows “Sent (simulated)”", sendClicked && sentUi, `clicked ${sendClicked}; status ${await statusValue(page)}; notice ${JSON.stringify(notice)}; activity ${JSON.stringify((await activityText(page)).slice(0, 200))}`);
+    step("the store: status sent, a sent revision, one recorded estimate email, an email activity row", s3?.status === "sent" && s3.revisions?.at(-1)?.reason === "sent" && (s3.estimateEmails?.length ?? 0) === 1 && rows3.some((a) => a.kind === "email"),
+      JSON.stringify({ status: s3?.status, rev: s3?.revisions?.at(-1)?.reason, emails: s3?.estimateEmails?.length, rows: rows3.map((a) => a.kind) }));
+    await shot(page, "3-sent");
+    await noteUnregistered(page);
+
+    // 4 — a reload keeps it
+    await page.goto(url, { waitUntil: "load" });
+    await waitMounted(page, sink);
+    const kept = await waitFor(async () => (await statusValue(page)) === "sent" && (await activityText(page)).includes("Sent (simulated)"), 10_000);
+    step("after a reload: still Sent, the Activity card still shows “Sent (simulated)”", kept);
+
+    // 5 — Mark Won: the onWon port's note shows in the Activity
+    await page.select("#est-send-status-select", "won");
+    const won = await waitFor(async () => (await statusValue(page)) === "won" && (await activityText(page)).includes("Would create install project"), 10_000);
+    const s5 = await stored(page);
+    step("Mark Won → the Activity shows “Would create install project”", won && s5?.status === "won", `status ${s5?.status}; activity ${JSON.stringify((await activityText(page)).slice(0, 300))}`);
+    await page.goto(url, { waitUntil: "load" });
+    await waitMounted(page, sink);
+    step("after a reload: the Won note is still there", await waitFor(async () => (await activityText(page)).includes("Would create install project"), 10_000));
+    await shot(page, "4-won");
+    await noteUnregistered(page);
+    await page.evaluate(async () => (window as unknown as EditH).__peakHandoff.store.reset());
+    await page.evaluate((k) => localStorage.removeItem(k), CURRENT_USER_KEY);
+    await page.close();
+  } finally {
+    await browser.close();
+  }
+  const unexpectedUnregistered = [...unexpected];
+  const pass = steps.every((s) => s.ok) && unexpectedUnregistered.length === 0 && sink.pageErrors.length === 0 && sink.foreignRequests.length === 0 && sink.failedLocal.length === 0;
+  return { pass, id: q.id, estimator: VERIFY_ESTIMATOR.name, manager: manager.name, steps, screenshots, unexpectedUnregistered, ...sink };
+}
+
+function printSend(r: SendResult): void {
+  console.log(`handoff:verify --send  ${r.pass ? "PASS" : "FAIL"} (${r.id}; ${r.estimator} → ${r.manager})`);
+  for (const s of r.steps) console.log(`  ${s.ok ? "ok  " : "FAIL"} ${s.step}${s.detail ? ` (${s.detail})` : ""}`);
+  console.log(`  unexpected unregistered: ${r.unexpectedUnregistered.length}`);
+  for (const x of r.unexpectedUnregistered) console.log(`    ${x}`);
+  console.log(`  page errors: ${r.pageErrors.length}`);
+  for (const e of r.pageErrors) console.log(`    ${e.split("\n").slice(0, 4).join("\n    ")}`);
+  console.log(`  foreign requests: ${r.foreignRequests.length}; failed local files: ${r.failedLocal.length}`);
+  for (const u of [...r.foreignRequests, ...r.failedLocal]) console.log(`    ${u}`);
+  if (r.consoleErrors.length) {
+    console.log(`  console errors (informational): ${r.consoleErrors.length}`);
+    for (const e of r.consoleErrors.slice(0, 10)) console.log(`    ${e.slice(0, 200)}`);
+  }
+  console.log(`  screenshots: ${r.screenshots.map((f) => path.relative(ROOT, f)).join(", ")}`);
+}
+
 /* ------------------------------------------------------------------ --drift */
 
 /** --drift [--update]: the ported originals against port-sources.json (port-drift.ts). Returns pass. */
@@ -1015,16 +1269,18 @@ async function main() {
   const edit = editAt >= 0 ? (argv[editAt + 1] && !argv[editAt + 1].startsWith("--") ? argv[editAt + 1] : "") : undefined;
   const reviewAt = argv.indexOf("--review");
   const review = reviewAt >= 0 ? (argv[reviewAt + 1] && !argv[reviewAt + 1].startsWith("--") ? argv[reviewAt + 1] : "") : undefined;
+  const sendAt = argv.indexOf("--send");
+  const send = sendAt >= 0 ? (argv[sendAt + 1] && !argv[sendAt + 1].startsWith("--") ? argv[sendAt + 1] : "") : undefined;
   const drift = argv.includes("--drift");
-  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && !drift) {
-    console.error("usage: npm run handoff:verify -- --smoke | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] [--out <package dir>] | --drift [--update]");
+  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !drift) {
+    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] [--out <package dir>] | --drift [--update]");
     process.exit(2);
   }
   mkdirSync(VERIFY_DIR, { recursive: true });
   let pass = true;
   if (drift) pass &&= driftCheck(argv.includes("--update"));
   if (argv.includes("--smoke")) {
-    const r = await smoke(pkgDir);
+    const r = await smoke(pkgDir, argv.includes("--all-steps"));
     writeFileSync(path.join(VERIFY_DIR, "smoke.json"), JSON.stringify(r, null, 2) + "\n");
     printSmoke(r);
     pass &&= r.pass;
@@ -1045,6 +1301,12 @@ async function main() {
     const r = await reviewCheck(pkgDir, review || undefined);
     writeFileSync(path.join(VERIFY_DIR, "review.json"), JSON.stringify(r, null, 2) + "\n");
     printReview(r);
+    pass &&= r.pass;
+  }
+  if (send !== undefined) {
+    const r = await sendCheck(pkgDir, send || undefined);
+    writeFileSync(path.join(VERIFY_DIR, "send.json"), JSON.stringify(r, null, 2) + "\n");
+    printSend(r);
     pass &&= r.pass;
   }
   if (!pass) process.exit(1);

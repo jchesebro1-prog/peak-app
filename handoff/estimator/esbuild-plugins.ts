@@ -150,6 +150,8 @@ export const APP_OVERRIDES: Record<string, string> = {
   "src/app/(app)/estimator/preview-doc.tsx": "ui/review-overrides.tsx",
   "src/components/quote-pdf/quote-pdf-viewer.tsx": "ui/review-overrides.tsx",
   "src/app/(app)/estimator/steps/review-tabs.tsx": "ui/review-overrides.tsx",
+  // Task 6: the Send & track Activity card + the prototype log (the onWon port's note).
+  "src/app/(app)/estimator/steps/send-activity.tsx": "ui/send-overrides.tsx",
 };
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

@@ -6,7 +6,7 @@
  * PDFs, assignments, the system-library index — lives in the store-side caller (quote-repo.ts), not here.
  * Plan: PR 2 Task 4.
  */
-import type { Quote, QuoteHistoryEntry, QuoteReview, QuoteRevision, QuoteRevisionDocFields, QuoteStatus } from "@/lib/stores/quotes";
+import type { EstimateEmailEntry, Quote, QuoteHistoryEntry, QuoteReview, QuoteRevision, QuoteRevisionDocFields, QuoteStatus, ReviewOpts } from "@/lib/stores/quotes";
 import type { SpecSection } from "@/lib/estimating-core/types";
 import { normalizePackageSelection } from "@/lib/estimate-output/package-selection";
 import { withoutEstimateFields } from "@/lib/estimate-number";
@@ -16,7 +16,7 @@ import { cleanPackageFiles } from "@/lib/estimate-output/package-files";
 import { latestSentRevision, nextSendRevNo } from "@/lib/quote-pdf/state";
 import { REOPEN_AUTOSAVE_NOTE, reopenTarget, sameWonContent, tracksWonVersion, WON_SNAPSHOT_NOTE, isReopen, wonRevision } from "@/lib/quote-won-version";
 import { carriesPipeline, firstStage, quotePipelineFor, quoteStageForStatus, type Pipelines, type QuotePipeline } from "@/lib/pipelines";
-import { approvalHolds, approverOnTransition, autoSnapshotStale, canAutoApprove, quoteOwnerName, type AutoApprovalEval, type ReviewLimitContext } from "@/lib/review-limits";
+import { approvalHolds, approverOnTransition, autoSnapshotStale, canAutoApprove, NO_REVIEW_LIMITS, quoteOwnerName, type AutoApprovalEval, type ReviewLimitContext } from "@/lib/review-limits";
 import { approvalFingerprint } from "@/lib/approval-snapshot";
 import { isBonusEligibleQuote } from "@/lib/estimate-bonus/rules";
 import { buildBonusRecord, defaultAlternatesTaken, quoteHasBonusLines } from "@/lib/estimate-bonus/record";
@@ -493,4 +493,125 @@ export function applyStatusMove(doc: Quote, m: StatusMoveInput): { revised: bool
   }
   doc.updatedAt = t;
   return { revised, reopened, sentCut };
+}
+
+/* ------------------------------------------------------------------ the review workflow's writers (#60, #284, #287) */
+
+/** quotes.ts validateAttestationNote — verbatim. */
+export function validateAttestationNote(note: string | null | undefined): { ok: true; note: string } | { ok: false; error: string } {
+  const trimmed = (note || "").trim();
+  if (!trimmed) {
+    return {
+      ok: false,
+      error:
+        'An attested approval requires a note naming who reviewed this quote and how (e.g. "Reviewed by Jeff on a Teams call, 2026-08-01").',
+    };
+  }
+  return { ok: true, note: trimmed };
+}
+
+/** quotes.ts canAttestApproval — verbatim: a reviewer's "changes" can't be attested past. */
+export function canAttestApproval(review: QuoteReview | null | undefined): { ok: true } | { ok: false; error: string } {
+  if (review?.state === "changes") {
+    return {
+      ok: false,
+      error:
+        "A reviewer asked for changes on this quote. Address them and resubmit for review — a self-attested approval can't override a review that happened in the app.",
+    };
+  }
+  return { ok: true };
+}
+
+/** quotes.ts decidableUnderLock — an approver decides an in-review quote (or, approve-only, an unsubmitted draft) at the version shown. */
+export function decidableUnderLock(q: Quote, opts: ReviewOpts): boolean {
+  const state = q.review?.state || "none";
+  const ok =
+    state === "in_review" ||
+    (!!opts.allowUnsubmitted &&
+      q.status === "draft" &&
+      (state === "none" || state === "changes" || (state === "approved" && !approvalHolds(q, opts.holdsCtx ?? NO_REVIEW_LIMITS))));
+  if (!ok) return false;
+  return typeof opts.expectUpdatedAt !== "number" || q.updatedAt === opts.expectUpdatedAt;
+}
+
+/** quotes.ts submitForReview's mutator. Mutates `q`. */
+export function applySubmitForReview(q: Quote, opts: ReviewOpts, now: number): void {
+  q.review = rv("in_review", { reviewer: opts.reviewer || null, submittedBy: opts.by || null, submittedAt: now });
+  q.updatedAt = now;
+}
+
+/** quotes.ts withdrawReview's mutator — re-checked under the lock: only an in-review quote. Mutates `q`. */
+export function applyWithdrawReview(q: Quote, now: number): void {
+  if (q.review?.state !== "in_review") return;
+  q.review = rv("none");
+  q.updatedAt = now;
+}
+
+/** quotes.ts approve's mutator — a no-op unless decidableUnderLock. Mutates `q`. */
+export function applyApprove(q: Quote, opts: ReviewOpts, now: number): void {
+  if (!decidableUnderLock(q, opts)) return;
+  const inReview = q.review?.state === "in_review";
+  const review = q.review || rv("none");
+  review.state = "approved";
+  review.decidedBy = opts.by || null;
+  review.reviewer = (inReview && review.reviewer) || review.decidedBy;
+  review.decidedAt = now;
+  review.note = opts.note || "";
+  review.auto = null;
+  review.method = "in_app";
+  review.approvedAgainst = approvalFingerprint(q);
+  q.review = review;
+  q.updatedAt = now;
+}
+
+/** quotes.ts attestApproval's mutator (the caller validated the note). Mutates `q`. */
+export function applyAttestApproval(q: Quote, opts: { by?: string | null; note: string }, now: number): void {
+  const review = q.review || rv("in_review");
+  review.state = "approved";
+  review.decidedBy = opts.by || null;
+  review.reviewer = review.reviewer || opts.by || null;
+  review.decidedAt = now;
+  review.note = opts.note;
+  review.auto = null;
+  review.method = "attested";
+  review.approvedAgainst = approvalFingerprint(q);
+  q.review = review;
+  q.updatedAt = now;
+}
+
+/** quotes.ts requestChanges' mutator — same under-lock check as approve. Mutates `q`. */
+export function applyRequestChanges(q: Quote, opts: ReviewOpts, now: number): void {
+  if (!decidableUnderLock(q, opts)) return;
+  const review = q.review;
+  review.state = "changes";
+  review.decidedBy = opts.by || null;
+  review.reviewer = review.reviewer || review.decidedBy;
+  review.decidedAt = now;
+  review.note = opts.note || "";
+  review.auto = null;
+  review.approvedAgainst = null;
+  q.review = review;
+  q.updatedAt = now;
+}
+
+/** quotes.ts ESTIMATE_EMAILS_MAX. */
+export const ESTIMATE_EMAILS_MAX = 50;
+
+/** quotes.ts recordEstimateEmail's checks + mutator: a clean entry appended once per thread (no updatedAt bump). Returns whether it wrote. */
+export function applyRecordEstimateEmail(doc: Quote, entry: EstimateEmailEntry): boolean {
+  const threadId = typeof entry?.threadId === "string" ? entry.threadId.trim() : "";
+  if (!threadId || threadId.length > 200) return false;
+  if (!Number.isSafeInteger(entry.rev) || entry.rev < 0 || !Number.isFinite(entry.at)) return false;
+  const clean: EstimateEmailEntry = {
+    threadId,
+    rev: entry.rev,
+    at: entry.at,
+    by: String(entry.by ?? "").slice(0, 200),
+    to: String(entry.to ?? "").slice(0, 1000),
+    ...(typeof entry.partyId === "string" && /^pty_[0-9a-f]{16}$/.test(entry.partyId) ? { partyId: entry.partyId } : {}),
+  };
+  const cur = Array.isArray(doc.estimateEmails) ? doc.estimateEmails : [];
+  if (cur.some((e) => !!e && e.threadId === threadId)) return false;
+  doc.estimateEmails = [...cur, clean].slice(-ESTIMATE_EMAILS_MAX);
+  return true;
 }
