@@ -1,0 +1,78 @@
+/**
+ * Estimator handoff — the drift guard for ported server logic. The prototype carries browser copies of
+ * server code it cannot import (store readers and writers, loaders, the save pipeline, the review tabs);
+ * port-sources.json records, for each port, the original file(s) it copies and a sha256 of each original
+ * at port time. `npm run handoff:verify -- --drift` recomputes the hashes and fails, naming every port
+ * whose original has changed since; after re-checking the port, `--drift --update` stamps the new hashes.
+ *
+ * Deliberately NOT part of test:specs: an app-side edit to an original must not fail the app team's
+ * unrelated work. It runs in the handoff verify flow only. Plan: PR 2 Task 5 (review fix 6).
+ */
+import { createHash } from "node:crypto";
+
+export const PORT_SOURCES_FILE = "handoff/estimator/port-sources.json";
+
+export type PortOriginal = { path: string; sha256: string };
+export type PortEntry = { port: string; what: string; originals: PortOriginal[] };
+export type PortSources = { $comment?: string; ports: PortEntry[] };
+
+export type DriftResult = {
+  /** Originals compared. */
+  checked: number;
+  /** An original whose hash differs from the one recorded at port time. */
+  changed: Array<{ port: string; original: string }>;
+  /** An original that no longer exists (moved or deleted). */
+  missing: Array<{ port: string; original: string }>;
+  /** A port module listed in the manifest that doesn't exist. */
+  portsMissing: string[];
+};
+
+/** sha256 hex of a file's bytes. */
+export function sha256Of(bytes: Buffer | string): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/** Throws on a manifest that isn't `{ ports: [{ port, what, originals: [{ path, sha256 }] }] }`. Pure. */
+export function parsePortSources(raw: unknown): PortSources {
+  const m = raw as PortSources;
+  const ok =
+    !!m &&
+    Array.isArray(m.ports) &&
+    m.ports.every(
+      (p) =>
+        p && typeof p.port === "string" && typeof p.what === "string" && Array.isArray(p.originals) && p.originals.length > 0 && p.originals.every((o) => o && typeof o.path === "string" && typeof o.sha256 === "string"),
+    );
+  if (!ok) throw new Error(`${PORT_SOURCES_FILE}: expected { ports: [{ port, what, originals: [{ path, sha256 }] }] }`);
+  return m;
+}
+
+/** Compares each recorded hash with the original's current one (`hashOf` → null when the file is gone). Pure. */
+export function driftOf(m: PortSources, hashOf: (path: string) => string | null, exists: (path: string) => boolean): DriftResult {
+  const out: DriftResult = { checked: 0, changed: [], missing: [], portsMissing: [] };
+  for (const p of m.ports) {
+    if (!exists(p.port)) out.portsMissing.push(p.port);
+    for (const o of p.originals) {
+      out.checked++;
+      const now = hashOf(o.path);
+      if (now === null) out.missing.push({ port: p.port, original: o.path });
+      else if (now !== o.sha256) out.changed.push({ port: p.port, original: o.path });
+    }
+  }
+  return out;
+}
+
+export const driftClean = (r: DriftResult): boolean => !r.changed.length && !r.missing.length && !r.portsMissing.length;
+
+/** One line per finding, each saying what to do. Pure. */
+export function driftMessages(r: DriftResult): string[] {
+  return [
+    ...r.changed.map((c) => `re-check ${c.port} against ${c.original}, then update ${PORT_SOURCES_FILE} with \`--drift --update\``),
+    ...r.missing.map((c) => `${c.original} is gone — find where ${c.port}'s original moved, fix the entry in ${PORT_SOURCES_FILE}, then \`--drift --update\``),
+    ...r.portsMissing.map((p) => `${p} is listed in ${PORT_SOURCES_FILE} but doesn't exist — remove or fix its entry`),
+  ];
+}
+
+/** The manifest with every original's hash recomputed (a gone original keeps its old hash). Pure. */
+export function updatedPortSources(m: PortSources, hashOf: (path: string) => string | null): PortSources {
+  return { ...m, ports: m.ports.map((p) => ({ ...p, originals: p.originals.map((o) => ({ ...o, sha256: hashOf(o.path) ?? o.sha256 })) })) };
+}

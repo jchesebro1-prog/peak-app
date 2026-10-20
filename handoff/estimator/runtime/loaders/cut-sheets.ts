@@ -21,6 +21,7 @@ import { isFabricPart, SOFT_GOODS_CATEGORY } from "@/lib/fabric-part";
 import { CURTAIN_MOUNTS_BLOB, sanitizeCurtainMounts } from "@/lib/curtain-mounts";
 import { sanitizeTrackSeriesBlob, TRACK_SERIES_BLOB } from "@/lib/track-series";
 import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
+import { normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { collectCurtainTypes, type CollectInput, type CollectResult } from "@/lib/curtain-cut-sheets/collect";
 import { curtainFabricLookups } from "@/lib/curtain-cut-sheets/estimator-curtains";
 import { CUT_SHEETS_NO_QUOTE, CUT_SHEETS_WRONG_TYPE, cutSheetModel, isCutSheetQuoteType, type CutSheetModel, type CutSheetStyle } from "@/lib/curtain-cut-sheets/model";
@@ -102,4 +103,15 @@ export async function loadCutSheetsLocal(store: HandoffStore, quoteId: string | 
     client: result.types.map((t, i) => cutSheetModel(t, ctx("client", i + 1))),
   };
   return { ok: true, quote, result, models, photos: new Map() };
+}
+
+/**
+ * The print route's cut-sheet appendix (src/app/print/quote/[id]/page.tsx): the Client-style sheets printed
+ * after the estimate — only when the saved quote's PDF options ask for them
+ * (`normalizePdfOptions(q.pdfOptions).pdfCutSheets`) and they loaded; none on a failed load, an estimate
+ * with no curtains, or the option off. Pure.
+ */
+export function cutSheetAppendixModels(loaded: LocalCutSheets | { ok: false; error: string } | null | undefined): CutSheetModel[] {
+  if (!loaded || !loaded.ok || !normalizePdfOptions(loaded.quote.pdfOptions).pdfCutSheets) return [];
+  return loaded.models.client;
 }

@@ -7,14 +7,16 @@
  *
  * Under file:// those paths are dead, so `installPreviewRouting` catches them — a click on such a link, or
  * window.open of one — and opens this overlay with the same live view (ui/live-views.tsx) instead. Task 7's
- * shell can route them as pages; until then the overlay stands in. Plan: PR 2 Task 5.
+ * shell can route them as pages; until then the overlay stands in. The ⧉ pop-out (popout/open.ts opens a named
+ * `peak-pop:*` window) gets an inert window and a short "not in the prototype" notice — the prototype is one
+ * window. Plan: PR 2 Task 5.
  */
 import { useEffect, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { CutSheetStyle } from "@/lib/curtain-cut-sheets/model";
 import { LiveBom, LiveCutSheets, LivePackagePage } from "./live-views";
-import { previewTargetOf, type PreviewTarget } from "./preview-routes";
+import { POPOUT_NOTICE, previewTargetOf, windowOpenRoute, type PreviewTarget } from "./preview-routes";
 
-export { previewTargetOf, type PreviewTarget };
+export { POPOUT_NOTICE, previewTargetOf, type PreviewTarget };
 
 let current: PreviewTarget | null = null;
 const listeners = new Set<() => void>();
@@ -37,8 +39,20 @@ const subscribe = (fn: () => void) => {
   };
 };
 
-/** A stand-in for the window `window.open("", "_blank")` returns: navigating it opens the overlay (or, for any other URL, a real window). */
+/**
+ * A stand-in for the window `window.open("", "_blank")` returns (openCutSheets, use-estimator-state.ts:
+ * opened inside the click, navigated once the save lands). Navigating it — `location.href = url`,
+ * `location.assign(url)` or `location.replace(url)` — opens the overlay for a preview route, or a real
+ * window for any other URL. `close()` before that navigates nowhere.
+ */
 function deferredWindow(realOpen: typeof window.open): Window {
+  const go = (url: string | URL) => {
+    if (stub.closed) return;
+    const s = String(url);
+    const t = previewTargetOf(s);
+    if (t) openPreview(t);
+    else realOpen.call(window, s, "_blank");
+  };
   const stub = {
     closed: false,
     close() {
@@ -47,22 +61,46 @@ function deferredWindow(realOpen: typeof window.open): Window {
     focus() {},
     location: {
       set href(url: string) {
-        if (stub.closed) return;
-        const t = previewTargetOf(url);
-        if (t) openPreview(t);
-        else realOpen.call(window, url, "_blank");
+        go(url);
       },
       get href() {
         return "about:blank";
       },
+      assign: go,
+      replace: go,
     },
   };
   return stub as unknown as Window;
 }
 
+/** An inert pop-out window: about:blank that never navigates, so openPopout (popout/open.ts) neither reloads nor reports it blocked. */
+function inertPopout(): Window {
+  const noop = () => {};
+  return { closed: false, close: noop, focus: noop, location: { href: "about:blank", assign: noop, replace: noop } } as unknown as Window;
+}
+
+let notice: { text: string; at: number } | null = null;
+const noticeListeners = new Set<() => void>();
+
+/** Shows a small, non-blocking notice (bottom of the window) for a few seconds. */
+export function showNotice(text: string): void {
+  notice = { text, at: Date.now() };
+  noticeListeners.forEach((fn) => fn());
+}
+
+const subscribeNotice = (fn: () => void) => {
+  noticeListeners.add(fn);
+  return () => {
+    noticeListeners.delete(fn);
+  };
+};
+
 let installed = false;
 
-/** Routes the two preview URLs to the overlay: link clicks (capture phase) and window.open. Idempotent. */
+/**
+ * Routes the two preview URLs to the overlay: link clicks (capture phase) and window.open. Idempotent.
+ * A Narrative / BOM toggle inside a live package page is left to the page itself (it switches in place).
+ */
 export function installPreviewRouting(): void {
   if (installed || typeof window === "undefined") return;
   installed = true;
@@ -75,6 +113,8 @@ export function installPreviewRouting(): void {
       if (!href) return;
       const t = previewTargetOf(href);
       if (!t) return;
+      // LivePackagePage's own toggle (its onClickCapture runs after this document-level listener).
+      if (t.kind === "package" && a?.closest('[data-handoff-live="package"]')) return;
       e.preventDefault();
       openPreview(t);
     },
@@ -82,11 +122,14 @@ export function installPreviewRouting(): void {
   );
   const realOpen = window.open;
   window.open = function (url?: string | URL, target?: string, features?: string): Window | null {
-    const s = url === undefined ? "" : String(url);
-    if (s === "" || s === "about:blank") return deferredWindow(realOpen);
-    const t = previewTargetOf(s);
-    if (t) {
-      openPreview(t);
+    const route = windowOpenRoute(url === undefined ? "" : String(url), target, features);
+    if (route.kind === "popout") {
+      showNotice(POPOUT_NOTICE);
+      return inertPopout();
+    }
+    if (route.kind === "deferred") return deferredWindow(realOpen);
+    if (route.kind === "preview") {
+      openPreview(route.target);
       return null;
     }
     return realOpen.call(window, url, target, features);
@@ -100,8 +143,38 @@ const LINK_BTN = (on: boolean): CSSProperties => ({ border: "none", background: 
 
 const TITLE: Record<PreviewTarget["kind"], string> = { cutsheets: "Cut sheets", package: "Package page", bom: "BOM" };
 
-/** The overlay itself — mounted once by main.tsx. Esc or ✕ closes it. */
+const NOTICE_MS = 4000;
+const NOTICE: CSSProperties = { position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 1100, padding: "8px 14px", borderRadius: 8, background: "#2b2e35", color: "#fff", fontFamily: "var(--font-ui)", fontSize: 12.5, fontWeight: 600, boxShadow: "0 4px 16px rgba(0,0,0,.25)", pointerEvents: "none" };
+
+/** The last notice, for a few seconds — non-blocking (no focus, no pointer events). */
+function Notice() {
+  const n = useSyncExternalStore(subscribeNotice, () => notice, () => null);
+  const [hiddenAt, setHiddenAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (!n) return;
+    const t = setTimeout(() => setHiddenAt(n.at), NOTICE_MS);
+    return () => clearTimeout(t);
+  }, [n]);
+  if (!n || hiddenAt === n.at) return null;
+  return (
+    <div role="status" style={NOTICE} data-handoff-notice="">
+      {n.text}
+    </div>
+  );
+}
+
+/** The overlay and the notice — mounted once by main.tsx. */
 export function PreviewOverlay() {
+  return (
+    <>
+      <Overlay />
+      <Notice />
+    </>
+  );
+}
+
+/** The overlay itself. Esc or ✕ closes it. */
+function Overlay() {
   const t = useSyncExternalStore(subscribe, () => current, () => null);
   const [style, setStyle] = useState<CutSheetStyle | null>(null);
   useEffect(() => {

@@ -1,0 +1,191 @@
+{
+  "$comment": "Ported server logic → the original(s) it copies, with each original's sha256 at port time. `npm run handoff:verify -- --drift` fails when an original changes; re-check the port, then `--drift --update`. Not in test:specs (handoff/estimator/port-drift.ts).",
+  "ports": [
+    {
+      "port": "handoff/estimator/runtime/actions/narrative-actions.ts",
+      "what": "keyProductLibrary, saveProductParagraph, the system intros",
+      "originals": [
+        {
+          "path": "src/lib/narrative/library.ts",
+          "sha256": "fba2efb2db12e105961aa0b631d3ee7b66866340879156102ca9178a724880db"
+        },
+        {
+          "path": "src/lib/stores/catalog.ts",
+          "sha256": "c991d6d2f32d1777de5e19f119e8a2036892f19f67a7e3b0230921c4a1f4d2bc"
+        },
+        {
+          "path": "src/app/(app)/estimator/narrative-actions.ts",
+          "sha256": "527f1c217f5031e4d2114877bc55a22a95ebe155c228b391d9c82d0f9a133ce7"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/review-actions.ts",
+      "what": "the review-comment writers (addReviewComment / resolve / delete) and their actions",
+      "originals": [
+        {
+          "path": "src/lib/stores/quotes.ts",
+          "sha256": "fc9b9d5d3b98e3ef571a376289e796afb3bcaf4aedb744324b07859ca3f55866"
+        },
+        {
+          "path": "src/app/(app)/estimator/review-actions.ts",
+          "sha256": "a0664cdb61160486f45c28aea1de7c94d027b14015965021b250d735901dda85"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/loaders/document.ts",
+      "what": "loadQuoteDocumentProps (photos inline) + the print route's document",
+      "originals": [
+        {
+          "path": "src/lib/quote-pdf/document-loader.ts",
+          "sha256": "4ff62b04d6511bd9706adc214a8f817c6e098fa29df1ab4b6acf531dbff116cf"
+        },
+        {
+          "path": "src/app/print/quote/[id]/page.tsx",
+          "sha256": "111fea1608362557a8a26bf1a1ff7f62f83ef93ec0f765213abea88b73128a49"
+        },
+        {
+          "path": "src/lib/narrative/photos.ts",
+          "sha256": "f7945462a49ed49a5cd048796a9a20c3e9c7d7e6219a0041dc33bbdc16308b19"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/loaders/package.ts",
+      "what": "loadLivePackagePreview",
+      "originals": [
+        {
+          "path": "src/lib/estimate-output/package-live-loader.ts",
+          "sha256": "3cba8c4150924b992b34d480bb13cced6ee57191792cb9ae7a3f42ab61e374e6"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/loaders/cut-sheets.ts",
+      "what": "loadCutSheets + the print route's cut-sheet appendix",
+      "originals": [
+        {
+          "path": "src/lib/curtain-cut-sheets/load.ts",
+          "sha256": "93f20871cb46aa480020261f2300a407287c0e082d4d02991ca7e0c9e1aa144e"
+        },
+        {
+          "path": "src/app/print/quote/[id]/page.tsx",
+          "sha256": "111fea1608362557a8a26bf1a1ff7f62f83ef93ec0f765213abea88b73128a49"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/library-actions.ts",
+      "what": "the system library index, search and Load system",
+      "originals": [
+        {
+          "path": "src/lib/narrative/load-system.ts",
+          "sha256": "2668b1705c90fc47d94222540819504c734dbcc3014e375de83e5c6b6a157dc0"
+        },
+        {
+          "path": "src/lib/narrative/system-library-index.ts",
+          "sha256": "b5089203867d49785e86e6f0cdde5378be2350f0b9c1bf966d1dc029b0a5fd18"
+        },
+        {
+          "path": "src/app/(app)/estimator/library-actions.ts",
+          "sha256": "baaf8fb05410a4a93878c633a6aacb118f0d7dd8e9cb0c885bec01b318d41f41"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/package-actions.ts",
+      "what": "loadPackagePanel's pure parts",
+      "originals": [
+        {
+          "path": "src/lib/estimate-output/package-panel-server.ts",
+          "sha256": "99e68a7454d03fb88ef0c9d0288b95961454d865f00a555edde91d60bed85152"
+        },
+        {
+          "path": "src/app/(app)/estimator/package-actions.ts",
+          "sha256": "e72ab75be482ebd2b218c1de055f1530a0b44876085dbdbf108d28bd8b89b3f0"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/save-core.ts",
+      "what": "saveQuoteAction's decisions before it writes",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/actions.ts",
+          "sha256": "f73415c046f4d7859f06b77cda4c37d3de12c2be159ac4710a23f7fd011b574e"
+        },
+        {
+          "path": "src/lib/stores/quotes.ts",
+          "sha256": "fc9b9d5d3b98e3ef571a376289e796afb3bcaf4aedb744324b07859ca3f55866"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/quote-model.ts",
+      "what": "the quote lifecycle rules (build / update / setStatus / revisions)",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/actions.ts",
+          "sha256": "f73415c046f4d7859f06b77cda4c37d3de12c2be159ac4710a23f7fd011b574e"
+        },
+        {
+          "path": "src/lib/stores/quotes.ts",
+          "sha256": "fc9b9d5d3b98e3ef571a376289e796afb3bcaf4aedb744324b07859ca3f55866"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/quote-repo.ts",
+      "what": "the quotes store's writers over the browser store",
+      "originals": [
+        {
+          "path": "src/lib/stores/quotes.ts",
+          "sha256": "fc9b9d5d3b98e3ef571a376289e796afb3bcaf4aedb744324b07859ca3f55866"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/ports.ts",
+      "what": "travel (geo.ts estimate) and the customer directory",
+      "originals": [
+        {
+          "path": "src/lib/geo.ts",
+          "sha256": "904fd42ff4ded4a829f9fa5f98aa9e4c835cd1d952c5483083d67e88923e3237"
+        },
+        {
+          "path": "src/lib/stores/customers.ts",
+          "sha256": "d8fa7f94aea30a66c07055d7bdc880d0b8c40fe5914a9d5da5853f1fd382b85c"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/props/estimator.ts",
+      "what": "EstimatorPage's props",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/page.tsx",
+          "sha256": "6ec3756a5f7bab93ce007229d713c36f70b65710437ef39f086ea1d9d0033f4a"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/ui/review-overrides.tsx",
+      "what": "PdfPreviewPane, QuotePdfViewer and ReviewTabs (re-implemented markup)",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/preview-doc.tsx",
+          "sha256": "c10e6279d81c5fd650e5fa60f589bf21e6bb7621589bda18af812761618b3ebc"
+        },
+        {
+          "path": "src/components/quote-pdf/quote-pdf-viewer.tsx",
+          "sha256": "8e03fdf56b67ed10f9fae6a0cca37812028c4074719a7a9183c3ad55156af091"
+        },
+        {
+          "path": "src/app/(app)/estimator/steps/review-tabs.tsx",
+          "sha256": "a46c38b6025a249e34b29e02db6ef6d64f45c598cdfeb3be0e3307fbfe141ae8"
+        }
+      ]
+    }
+  ]
+}

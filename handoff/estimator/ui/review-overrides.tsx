@@ -10,7 +10,8 @@
  * In the app the Document tab shows the SAVED quote's headless-Chrome PDF and the Package page / BOM / Cut
  * sheets tabs frame /estimator-preview/:id; neither exists offline. Here the Document is the same
  * QuoteDocument the print route renders, drawn live from the store (ui/live-views.tsx), with a
- * **Print / Save as PDF** button (window.print(); print CSS shows only the document — a portal on <body>),
+ * **Print / Save as PDF** button (window.print(); print CSS shows only the document — a portal on <body> —
+ * then the Client cut sheets when the quote asks for them, with a confidential footer on every page),
  * and the framed tabs render the same components the preview route renders. Datasheets and Drawings read
  * "Not included in the prototype" (no part documents or drawing files are sliced). Plan: PR 2 Task 5.
  */
@@ -25,7 +26,8 @@ import {
 import type { ReviewDocsResult } from "@/app/(app)/estimator/review-actions";
 import type { EstimatorState } from "@/app/(app)/estimator/use-estimator-state";
 import type { PdfPreviewProps } from "@/app/(app)/estimator/preview-doc";
-import { LIVE_COPY, LiveBom, LiveCutSheets, LiveDocument, LivePackagePage } from "./live-views";
+import { PRINT_FOOTER_TEXT } from "./preview-routes";
+import { LIVE_COPY, LiveBom, LiveCutSheets, LiveDocument, LivePackagePage, PrintCutSheets } from "./live-views";
 
 // The Build package's Show-on-PDF controls are unchanged — the original module's own export.
 export { PdfLineDetailGroup } from "@/app/(app)/estimator/preview-doc";
@@ -42,13 +44,20 @@ export const PRINT_COPY = {
 /** The print root's id — the only thing on the page that prints. */
 export const PRINT_ROOT_ID = "handoff-print-root";
 
-/** Print media shows only the print root (the saved document); the screen never shows it. */
+// Every printed page's footer — a printed prototype PDF says what it is (the on-screen banner never prints).
+export { PRINT_FOOTER_TEXT };
+
+/**
+ * Print media shows only the print root (the saved document, then any cut-sheet appendix) and its footer,
+ * fixed at the bottom of every printed page; the screen never shows any of it.
+ */
 export const PRINT_ROOT_CSS = `
-#${PRINT_ROOT_ID} { display: none; }
+#${PRINT_ROOT_ID}, #${PRINT_ROOT_ID} .handoff-print-footer { display: none; }
 @media print {
 ${QUOTE_PRINT_CSS}
   body > *:not(#${PRINT_ROOT_ID}) { display: none !important; }
   #${PRINT_ROOT_ID} { display: block !important; }
+  #${PRINT_ROOT_ID} .handoff-print-footer { display: block !important; position: fixed; left: 0; right: 0; bottom: 0; text-align: center; font: 7.5pt/1.2 Arial, Helvetica, sans-serif; color: #8c919c; }
 }
 `;
 
@@ -161,8 +170,12 @@ const bannerStyle = (tone: "info" | "warn"): CSSProperties => ({
 
 const EMPTY: CSSProperties = { flex: 1, minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, background: "#fff", color: "#9aa0ab", fontSize: 13 };
 
-/** The saved document in the print root (a portal on <body>), and the print dialog's file name while it prints. */
-function PrintRoot({ doc }: { doc: QuoteDocumentProps }) {
+/**
+ * The saved document in the print root (a portal on <body>), as the print route lays it out — the document,
+ * then the Client cut sheets when the quote asks for them (#292) — plus the confidential footer, and the
+ * print dialog's file name while it prints.
+ */
+function PrintRoot({ quoteId, doc }: { quoteId: string; doc: QuoteDocumentProps }) {
   useEffect(() => {
     let prev: string | null = null;
     const before = () => {
@@ -184,6 +197,10 @@ function PrintRoot({ doc }: { doc: QuoteDocumentProps }) {
     <div id={PRINT_ROOT_ID}>
       <style>{PRINT_ROOT_CSS}</style>
       <QuoteDocument {...doc} />
+      <PrintCutSheets quoteId={quoteId} />
+      <div className="handoff-print-footer" data-handoff-print-footer="">
+        {PRINT_FOOTER_TEXT}
+      </div>
     </div>,
     document.body,
   );
@@ -214,7 +231,7 @@ export function QuotePdfViewer({ quoteId, dirty }: { quoteId: string | null; pdf
               <div style={{ display: "flex", justifyContent: "center" }}>
                 <QuoteDocument {...doc} />
               </div>
-              <PrintRoot doc={doc} />
+              <PrintRoot quoteId={quoteId} doc={doc} />
             </>
           )}
         />

@@ -42,7 +42,10 @@ import { packageActions, refusedPackageActions, REFUSED_PACKAGE_ACTIONS } from "
 import { outputActions } from "../handoff/estimator/runtime/actions/output-actions";
 import { pdfActions } from "../handoff/estimator/runtime/actions/pdf-actions";
 import { assetUrl, PLACEHOLDER_DIR } from "../handoff/estimator/runtime/assets";
-import { previewTargetOf } from "../handoff/estimator/ui/preview-routes";
+import { POPOUT_NOTICE, PRINT_FOOTER_TEXT, previewTargetOf, windowOpenRoute } from "../handoff/estimator/ui/preview-routes";
+import { cutSheetAppendixModels } from "../handoff/estimator/runtime/loaders/cut-sheets";
+import { packagePanelFor } from "../handoff/estimator/runtime/actions/package-actions";
+import { driftClean, driftMessages, driftOf, parsePortSources, PORT_SOURCES_FILE, sha256Of, updatedPortSources } from "../handoff/estimator/port-drift";
 import { APP_OVERRIDES, exportNames } from "../handoff/estimator/esbuild-plugins";
 import { fmt } from "@/lib/estimating-core/pricing";
 import { CUT_SHEETS_NO_QUOTE, CUT_SHEETS_WRONG_TYPE } from "@/lib/curtain-cut-sheets/model";
@@ -934,6 +937,16 @@ export async function handoffReviewChecks(ok: Ok) {
   const cs = await loadCutSheetsLocal(store, "Q-3004");
   ok(cs.ok && cs.models.client.length === 1 && cs.models.submittal.length === 1 && cs.models.client[0].sheetNo === "CS-1" && cs.result.types[0].curtains[0].fabric?.sku === "FAB-CH25",
     `handoff review: cut sheets — a curtain line gets CS-1 in both styles, its fabric from the store's catalog (got ${cs.ok ? cs.models.client.map((m) => m.sheetNo).join() : "error"})`);
+  // The print route's #292 appendix: Client sheets only when the saved quote's PDF options ask for them.
+  await store.put("quotes", { ...curtainQ, pdfOptions: { pdfCutSheets: true } });
+  const csOn = await loadCutSheetsLocal(store, "Q-3004");
+  ok(cutSheetAppendixModels(csOn).length === 1 && cutSheetAppendixModels(csOn)[0].sheetNo === "CS-1" && cutSheetAppendixModels(csOn)[0] === (csOn.ok ? csOn.models.client[0] : null),
+    "handoff review: cut-sheet appendix — pdfCutSheets on + a curtain → the Client-style sheets print after the document");
+  ok(cutSheetAppendixModels(cs).length === 0 && cutSheetAppendixModels(none).length === 0 && cutSheetAppendixModels(noQ).length === 0 && cutSheetAppendixModels(null).length === 0,
+    "handoff review: cut-sheet appendix — option off (the default), no curtains, a failed load or nothing loaded → none");
+  await store.put("quotes", { ...curtainQ, pdfOptions: { pdfCutSheets: false } });
+  ok(cutSheetAppendixModels(await loadCutSheetsLocal(store, "Q-3004")).length === 0, "handoff review: cut-sheet appendix — pdfCutSheets explicitly off → none");
+  await store.put("quotes", curtainQ);
 
   // --- review comments (the `reviewComments` collection) ---
   const ra = reviewActions(store);
@@ -1013,6 +1026,17 @@ export async function handoffReviewChecks(ok: Ok) {
   ok(panel.ok && panel.panel.files.length === 0 && panel.panel.responses.length === 0 && !panel.panel.canSend && !panel.panel.uploads && panel.panel.grid === null && !panel.panel.gridEligible && panel.panel.peakHeader === true && Array.isArray(panel.panel.gaps),
     "handoff review: packagePanelAction — a shape-valid panel with no files, uploads, Grid or sends");
   ok(!(await pa.packagePanelAction("Q-nope")).ok, "handoff review: packagePanelAction — a missing quote refuses");
+  // The Peak header default comes from the sliced settings (letterhead-server.ts loadPeakHeaderDefault: on unless stored false).
+  await store.put("settings", { id: "main", data: { ...rules.settings, peakHeader: false } });
+  const offPanel = await pa.packagePanelAction("Q-3001");
+  await store.put("quotes", { ...q1, packagePeakHeader: true });
+  const ownPanel = await pa.packagePanelAction("Q-3001");
+  ok(offPanel.ok && offPanel.panel.peakHeaderDefault === false && offPanel.panel.peakHeader === false && ownPanel.ok && ownPanel.panel.peakHeaderDefault === false && ownPanel.panel.peakHeader === true,
+    "handoff review: packagePanelAction — settings.peakHeader false → default off; the quote's own choice still wins");
+  await store.put("quotes", q1);
+  await store.put("settings", { id: "main", data: rules.settings });
+  ok(packagePanelFor(q1 as unknown as Quote, {}).peakHeaderDefault === true && packagePanelFor(q1 as unknown as Quote, { peakHeader: "junk" }).peakHeaderDefault === true && packagePanelFor(q1 as unknown as Quote, { peakHeader: false }).peakHeaderDefault === false,
+    "handoff review: packagePanelFor — absent / non-false peakHeader → on (peakHeaderDefault's rule)");
   const refusedP = refusedPackageActions();
   ok(REFUSED_PACKAGE_ACTIONS.every((n) => (refusedP[n] as () => { ok: boolean; error: string })().error === "Not available in the prototype"), "handoff review: the package panel's writes refuse with NOT_IN_PROTOTYPE");
   const cp = await clientPackageActions().clientPackageDocsAction({ sections });
@@ -1036,6 +1060,43 @@ export async function handoffReviewChecks(ok: Ok) {
     && previewTargetOf("/estimator/cut-sheets?id=Q-1")?.kind === "cutsheets" && (previewTargetOf("/estimator/cut-sheets?id=Q-1") as { style?: string }).style === "submittal"
     && previewTargetOf("/estimator?id=Q-1") === null && previewTargetOf("https://example.com/estimator-preview/Q-1") === null && previewTargetOf("/estimator/cut-sheets") === null,
     "handoff review: previewTargetOf — the two routes parse (style / tab / view); anything else, another site, or no id is null");
+  const r = windowOpenRoute;
+  ok(r("", "_blank").kind === "deferred" && r("about:blank", "_blank").kind === "deferred",
+    'handoff review: windowOpenRoute — openCutSheets\' exact shape (window.open("", "_blank"), no features) → the stand-in');
+  ok(r("", "peak-pop:estimate:Q-1", "width=800").kind === "popout" && r("/estimator?id=Q-1", "peak-pop:estimate:Q-1").kind === "popout",
+    "handoff review: windowOpenRoute — a peak-pop:* target (the ⧉ pop-out) → the notice, whatever the URL");
+  ok(r("", "_blank", "noopener").kind === "real" && r("").kind === "real" && r("", "other").kind === "real" && r("https://example.com", "_blank").kind === "real",
+    "handoff review: windowOpenRoute — any other empty-URL open (features, another target) and other URLs → the real window.open");
+  const pv = r("/estimator/cut-sheets?id=Q-1", "_blank", "noopener");
+  ok(pv.kind === "preview" && pv.target.kind === "cutsheets", "handoff review: windowOpenRoute — a preview route → the overlay");
+  ok(POPOUT_NOTICE === "Pop-out windows aren't available in the prototype" && PRINT_FOOTER_TEXT === "Confidential — Peak Systems Group · prototype", "handoff review: the pop-out notice and print footer copy");
+
+  // --- the port drift guard (port-drift.ts; run by handoff:verify --drift, never by test:specs) ---
+  const man = parsePortSources({ ports: [{ port: "h/a.ts", what: "x", originals: [{ path: "src/a.ts", sha256: sha256Of("one") }, { path: "src/b.ts", sha256: sha256Of("two") }] }, { port: "h/gone.ts", what: "y", originals: [{ path: "src/c.ts", sha256: sha256Of("three") }] }] });
+  const files: Record<string, string> = { "h/a.ts": "", "src/a.ts": "one", "src/b.ts": "two", "src/c.ts": "three" };
+  const hashOf = (p: string) => (p in files ? sha256Of(files[p]) : null);
+  const clean = driftOf(man, hashOf, (p) => p in files || p === "h/gone.ts");
+  ok(driftClean(clean) && clean.checked === 3 && driftMessages(clean).length === 0, "handoff drift: unchanged originals → clean");
+  files["src/b.ts"] = "two, edited";
+  delete files["src/c.ts"];
+  const dirty = driftOf(man, hashOf, (p) => p in files);
+  const msgs = driftMessages(dirty);
+  ok(!driftClean(dirty) && dirty.changed.length === 1 && dirty.changed[0].original === "src/b.ts" && dirty.missing[0]?.original === "src/c.ts" && dirty.portsMissing.join() === "h/gone.ts"
+    && msgs[0] === `re-check h/a.ts against src/b.ts, then update ${PORT_SOURCES_FILE} with \`--drift --update\`` && msgs.length === 3,
+    "handoff drift: a changed original names its port and the re-check; a gone original and a missing port are listed too");
+  const upd = updatedPortSources(man, hashOf);
+  ok(upd.ports[0].originals[1].sha256 === sha256Of("two, edited") && upd.ports[1].originals[0].sha256 === sha256Of("three") && driftOf(upd, hashOf, () => true).changed.length === 0,
+    "handoff drift: --update stamps current hashes (a gone original keeps its old one)");
+  let threw = false;
+  try {
+    parsePortSources({ ports: [{ port: "x", what: "y", originals: [] }] });
+  } catch {
+    threw = true;
+  }
+  ok(threw, "handoff drift: a port with no originals is a malformed manifest");
+  const real = parsePortSources(JSON.parse(fs.readFileSync(PORT_SOURCES_FILE, "utf8")));
+  ok(real.ports.length >= 13 && real.ports.every((p) => fs.existsSync(p.port) && p.originals.every((o) => /^[0-9a-f]{64}$/.test(o.sha256))),
+    `handoff drift: ${PORT_SOURCES_FILE} parses, every port module exists and every original has a stamped hash (whether originals still match is --drift's job)`);
 
   // --- the component overrides export every value name their originals do ---
   for (const [orig, repl] of Object.entries(APP_OVERRIDES)) {

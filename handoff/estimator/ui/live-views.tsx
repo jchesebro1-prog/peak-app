@@ -8,6 +8,7 @@
  *   LivePackagePage PackageView (+ the staff preview's slots)     ← loadPackagePreviewLocal
  *   LiveBom         QuoteDocument (bomViewProps, web layout)      ← loadQuoteDocumentPropsLocal
  *   LiveCutSheets   CutSheetPages (Client or Submittal style)     ← loadCutSheetsLocal
+ *   PrintCutSheets  the print route's Client cut-sheet appendix   ← loadCutSheetsLocal (pdfCutSheets on)
  *
  * Each reads the SAVED quote (what the client would get), and re-reads after every router.refresh() —
  * a Save or a status change — as the framed page reloaded on a new save.
@@ -17,7 +18,7 @@ import { useEffect, useState, type CSSProperties, type MouseEvent, type ReactNod
 import letterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
 import QuoteDocument, { QUOTE_WEB_EMBED_CSS, type QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";
-import { CLIENT_PRINT_CSS, CutSheetPages, SUBMITTAL_PRINT_CSS } from "@/components/cutsheets/cut-sheet-pages";
+import { CLIENT_PRINT_CSS, CutSheetPages } from "@/components/cutsheets/cut-sheet-pages";
 import { DatasheetLink, PackagePlans } from "@/components/estimate-output/package-extras";
 import PackageView, { type PackageSlots } from "@/components/estimate-output/package-view";
 import { CUT_SHEETS_NONE, type CutSheetStyle } from "@/lib/curtain-cut-sheets/model";
@@ -26,7 +27,7 @@ import { onRefresh } from "../runtime/router";
 import { configuredStore } from "../runtime/ports";
 import { loadQuoteDocumentPropsLocal } from "../runtime/loaders/document";
 import { loadPackagePreviewLocal, type LocalPackagePreview } from "../runtime/loaders/package";
-import { loadCutSheetsLocal, type LocalCutSheets } from "../runtime/loaders/cut-sheets";
+import { cutSheetAppendixModels, loadCutSheetsLocal, type LocalCutSheets } from "../runtime/loaders/cut-sheets";
 
 /** What a live view loads: the kind, the quote, and the package page's Narrative / BOM view. */
 type LoadSpec = { kind: "document"; quoteId: string } | { kind: "package"; quoteId: string; view: "narrative" | "bom" } | { kind: "cutsheets"; quoteId: string };
@@ -150,7 +151,7 @@ export function LivePackagePage({ quoteId, initialView = "narrative" }: { quoteI
 }
 
 /** Customer review → Cut sheets (Client style), and the ⋯ menu's Cut sheets (`style` from its link). */
-export function LiveCutSheets({ quoteId, style = "client", withPrintCss = false }: { quoteId: string; style?: CutSheetStyle; withPrintCss?: boolean }) {
+export function LiveCutSheets({ quoteId, style = "client" }: { quoteId: string; style?: CutSheetStyle }) {
   const { data, error } = useLive({ kind: "cutsheets", quoteId });
   if (!data || data.kind !== "cutsheets") return <Status error={error} />;
   const loaded = data.sheets;
@@ -164,10 +165,26 @@ export function LiveCutSheets({ quoteId, style = "client", withPrintCss = false 
   }
   return (
     <div style={{ overflowX: "auto", padding: "24px 16px 40px" }} data-handoff-live="cutsheets">
-      {withPrintCss && <style>{style === "submittal" ? SUBMITTAL_PRINT_CSS : CLIENT_PRINT_CSS}</style>}
       <div style={{ width: "max-content", margin: "0 auto" }}>
         <CutSheetPages models={models} style={style} photos={loaded.photos} letterheadSrc={letterhead.src} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * The print route's #292 appendix: the Client cut sheets on their own page after the estimate, when the
+ * saved quote's PDF options ask for them (`cutSheetAppendixModels`). Renders nothing otherwise — or while loading.
+ */
+export function PrintCutSheets({ quoteId }: { quoteId: string }) {
+  const { data } = useLive({ kind: "cutsheets", quoteId });
+  const loaded = data?.kind === "cutsheets" ? data.sheets : null;
+  const models = cutSheetAppendixModels(loaded);
+  if (!models.length || !loaded?.ok) return null;
+  return (
+    <div style={{ breakBefore: "page" }} data-handoff-print-cutsheets="">
+      <style>{CLIENT_PRINT_CSS}</style>
+      <CutSheetPages models={models} style="client" photos={loaded.photos} letterheadSrc={letterhead.src} />
     </div>
   );
 }

@@ -32,8 +32,20 @@
  * --review  the customer-facing views render live from the store (Task 5): Build package → BOM quote
  *          shows the letterhead and the expected grand total; Customer review's Document, Package
  *          page and BOM tabs each render content with no /estimator-preview frame; a review comment
- *          survives a reload; Print → PDF (print media) shows the document only, the chrome hidden.
+ *          survives a reload; Print → PDF (print media) shows the document only, the chrome hidden,
+ *          with the confidential footer. Then (Q-G002): the package page's Narrative / BOM toggle switches
+ *          in place with no overlay; the ⧉ pop-out shows its notice and opens no window; More ▾ → Cut
+ *          sheets opens the overlay (Esc / ✕ close it, and the window.open("", "_blank") stand-in
+ *          navigates through location.replace); an injected curtain line shows its Client cut sheet on
+ *          the Cut sheets tab and, with "Cut sheets" on the PDF, prints after the document. The store is reset after.
  *          Screenshots: output/verify/review-*.png; result: output/verify/review.json.
+ *
+ *   npm run handoff:verify -- --drift [--update]
+ *
+ * --drift  the ported server logic's originals (port-sources.json, port-drift.ts): recomputes each
+ *          original's sha256 and fails, listing every port whose original changed since it was ported
+ *          ("re-check <port> against <original>…"). `--update` stamps the current hashes after the
+ *          re-check. No browser. Not part of test:specs (app-side edits must not fail it).
  *
  * Later tasks add modes (--shell, --parity, --full). Plan: PR 2 Tasks 2–5.
  */
@@ -50,6 +62,9 @@ import { sourceForSave } from "@/lib/portal-quote-mode";
 import { bonusRatesFor, bonusRulesApply, idCounterFrom, withBonusLines } from "@/lib/estimate-bonus/rules";
 import { bonusRatesFrom, BONUS_ESTIMATOR_RATE_ID, BONUS_PACKAGE_RATE_ID } from "@/lib/estimate-bonus/flags";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import { PREVIEW_COPY } from "@/lib/estimate-output/package-preview";
+import { POPOUT_NOTICE, PRINT_FOOTER_TEXT } from "./ui/preview-routes";
+import { driftClean, driftMessages, driftOf, parsePortSources, PORT_SOURCES_FILE, sha256Of, updatedPortSources } from "./port-drift";
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const VERIFY_DIR = path.join(ROOT, "output", "verify");
@@ -699,6 +714,22 @@ const panelState = (page: Page) =>
     };
   });
 
+/** Under print media: the print root's footer text, whether its cut-sheet appendix shows (and its text), and the banner. */
+const printRootState = (page: Page) =>
+  page.evaluate(() => {
+    // No named inner functions here: tsx's keepNames would wrap them in __name, which the page lacks.
+    const [footer, cs, banner] = ["#handoff-print-root [data-handoff-print-footer]", "#handoff-print-root [data-handoff-print-cutsheets]", "[data-handoff-banner]"].map((sel) => {
+      const el = document.querySelector(sel) as HTMLElement | null;
+      return el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden" ? el : null;
+    });
+    return {
+      footer: footer ? footer.innerText.trim() : null,
+      cutSheets: !!cs,
+      cutSheetText: cs ? cs.innerText.slice(0, 2000) : "",
+      banner: !!banner,
+    };
+  });
+
 /**
  * Task 5 — the customer-facing views render live from the store: Build package → BOM quote (letterhead +
  * expected grand total), Customer review's Document / Package page / BOM tabs (content, no
@@ -754,19 +785,28 @@ async function reviewCheck(pkgDir: string, which: string | undefined): Promise<R
     await shot(page, "package-bom");
     await noteUnregistered(page);
 
-    // 2 — Customer review: Document, Package page and BOM render live
+    // 2 — Customer review: Document, Package page, BOM and Cut sheets render live
+    const savedGrand = fmt(totals(Array.isArray(q.spec?.sections) ? (q.spec!.sections as SpecSection[]) : [], 0).grand);
     await page.goto(url("review"), { waitUntil: "load" });
     await waitMounted(page, sink);
     for (const [tab, name] of [["Document", "document"], ["Package page", "package"], ["BOM", "bom"]] as const) {
       const clicked = await clickTab(page, tab);
       let st = await panelState(page);
+      // The package page: the saved grand total and its Summary heading (PackageView), not just "some text".
+      const packageOk = (x: typeof st) => x.text.includes(savedGrand) && /\bSummary\b/.test(x.text);
+      const ready = (x: typeof st) => x.text.length > 200 && (tab === "Package page" ? packageOk(x) : x.letterhead);
       await waitFor(async () => {
         st = await panelState(page);
-        return st.text.length > 200 && (tab === "Package page" || st.letterhead);
+        return ready(st);
       }, 10_000);
-      step(`Customer review → ${tab} renders content (no /estimator-preview frame)`, clicked && st.text.length > 200 && !st.previewFrame && (tab === "Package page" || st.letterhead), `${st.text.length} chars, frames ${st.anyFrame}${tab === "Package page" ? "" : `, letterhead ${st.letterhead}`}`);
-      if (tab === "BOM") step("Customer review → BOM shows the saved grand total", st.text.includes(fmt(totals(Array.isArray(q.spec?.sections) ? (q.spec!.sections as SpecSection[]) : [], 0).grand)));
+      step(`Customer review → ${tab} renders content (no /estimator-preview frame)`, clicked && ready(st) && !st.previewFrame, `${st.text.length} chars, frames ${st.anyFrame}${tab === "Package page" ? `, total ${savedGrand} + Summary ${packageOk(st)}` : `, letterhead ${st.letterhead}`}`);
+      if (tab === "BOM") step("Customer review → BOM shows the saved grand total", st.text.includes(savedGrand));
       await shot(page, `tab-${name}`);
+    }
+    {
+      const clicked = await clickTab(page, "Cut sheets");
+      const shown = await waitFor(async () => (await panelState(page)).text.includes(PREVIEW_COPY.noCurtains), 10_000);
+      step("Customer review → Cut sheets renders live (no curtains on this estimate → the app's copy)", clicked && shown && !(await panelState(page)).previewFrame);
     }
     await noteUnregistered(page);
 
@@ -812,8 +852,109 @@ async function reviewCheck(pkgDir: string, which: string | undefined): Promise<R
     });
     step("print media hides the Estimator chrome (banner, header, step tabs)", !printView.banner && !printView.stepTabs && !printView.root, JSON.stringify(printView));
     step("print media shows the document", printView.doc === 1 && printView.docText > 200, `${printView.doc} document(s), ${printView.docText} chars`);
+    const printExtras = await printRootState(page);
+    step("print media shows the confidential footer", printExtras.footer === PRINT_FOOTER_TEXT, JSON.stringify(printExtras));
+    step("print media: no cut-sheet appendix when the quote doesn't ask for one", !printExtras.cutSheets, JSON.stringify(printExtras));
     await shot(page, "print");
     await page.emulateMediaType("screen");
+    await noteUnregistered(page);
+
+    // 5 — the package page's Narrative / BOM toggle switches in place (never the overlay) — on Q-G002
+    const toggleId = data.estimates.some((x) => x.id === "Q-G002") ? "Q-G002" : q.id;
+    const urlFor = (id: string, extra = "") => `${base}?id=${encodeURIComponent(id)}&step=review${extra}`;
+    await page.goto(urlFor(toggleId), { waitUntil: "load" });
+    await waitMounted(page, sink);
+    await clickTab(page, "Package page");
+    const togglesShown = await waitFor(() => page.evaluate(() => document.querySelectorAll('[data-handoff-live="package"] nav a').length === 2), 10_000);
+    const clickToggle = (bom: boolean) =>
+      page.evaluate((b) => {
+        const a = [...document.querySelectorAll('[data-handoff-live="package"] nav a')].find((x) => (x.getAttribute("href") || "").includes("view=bom") === b) as HTMLElement | undefined;
+        a?.click();
+        return !!a;
+      }, bom);
+    const toggleState = () =>
+      page.evaluate(() => {
+        const cur = document.querySelector('[data-handoff-live="package"] nav a[aria-current="page"]');
+        return { overlay: !!document.querySelector("[data-handoff-overlay]"), view: cur ? ((cur.getAttribute("href") || "").includes("view=bom") ? "bom" : "narrative") : null, href: location.href.split("?")[1] ?? "" };
+      });
+    const hrefBefore = (await toggleState()).href;
+    const toBom = togglesShown && (await clickToggle(true));
+    const bomIn = await waitFor(async () => (await toggleState()).view === "bom", 5000);
+    const afterBom = await toggleState();
+    step(`Package page → BOM toggle switches the tab in place, no overlay (${toggleId})`, toBom && bomIn && !afterBom.overlay && afterBom.href === hrefBefore, JSON.stringify(afterBom));
+    await shot(page, "package-toggle-bom");
+    const toNarr = await clickToggle(false);
+    const narrIn = await waitFor(async () => (await toggleState()).view === "narrative", 5000);
+    const afterNarr = await toggleState();
+    step(`Package page → Narrative toggle switches back in place, no overlay (${toggleId})`, toNarr && narrIn && !afterNarr.overlay, JSON.stringify(afterNarr));
+
+    // 6 — the ⧉ pop-out: a notice, no window, no overlay
+    const pagesBefore = (await browser.pages()).length;
+    const popClicked = await page.evaluate(() => {
+      const b = [...document.querySelectorAll('button[aria-label="Open in its own window"]')].find((x) => (x as HTMLElement).offsetParent !== null) as HTMLElement | undefined;
+      b?.click();
+      return !!b;
+    });
+    const noticeShown = await waitFor(() => page.evaluate((t) => document.querySelector("[data-handoff-notice]")?.textContent === t, POPOUT_NOTICE), 3000);
+    const popState = await page.evaluate(() => ({ overlay: !!document.querySelector("[data-handoff-overlay]"), est: !!document.querySelector(".est-root") }));
+    step("the ⧉ pop-out shows the 'not in the prototype' notice and opens no window", popClicked && noticeShown && !popState.overlay && popState.est && (await browser.pages()).length === pagesBefore, `clicked ${popClicked}, pages ${pagesBefore} → ${(await browser.pages()).length}`);
+
+    // 7 — More ▾ → Cut sheets opens the overlay; Esc closes it; the deferred stand-in (window.open("", "_blank")) navigates via replace; ✕ closes
+    const overlayKind = () => page.evaluate(() => document.querySelector("[data-handoff-overlay]")?.getAttribute("data-handoff-overlay") ?? null);
+    const more = await clickButton(page, "More ▾");
+    const cutItem = more && (await page.evaluate(() => {
+      const b = [...document.querySelectorAll('[role="menuitem"]')].find((x) => x.textContent?.trim() === "Cut sheets") as HTMLElement | undefined;
+      b?.click();
+      return !!b;
+    }));
+    const opened = await waitFor(async () => (await overlayKind()) === "cutsheets", 5000);
+    step("More ▾ → Cut sheets opens the cut-sheet overlay", !!cutItem && opened, `kind ${await overlayKind()}`);
+    await page.keyboard.press("Escape");
+    step("Esc closes the overlay", await waitFor(async () => (await overlayKind()) === null, 3000));
+    const stub = await page.evaluate((id) => {
+      const w = window.open("", "_blank");
+      if (!w) return "null";
+      w.location.replace(`/estimator/cut-sheets?id=${encodeURIComponent(id)}&style=client`);
+      return "ok";
+    }, toggleId);
+    step('window.open("", "_blank") → location.replace(cut sheets) opens the overlay (openCutSheets\' dirty path)', stub === "ok" && (await waitFor(async () => (await overlayKind()) === "cutsheets", 3000)));
+    await shot(page, "overlay-cutsheets");
+    const closed = await page.evaluate(() => {
+      const b = document.querySelector('[data-handoff-overlay] button[aria-label="Close"]') as HTMLElement | null;
+      b?.click();
+      return !!b;
+    });
+    step("✕ closes the overlay", closed && (await waitFor(async () => (await overlayKind()) === null, 3000)));
+    await noteUnregistered(page);
+
+    // 8 — a curtain line + "Cut sheets" on the PDF: the Cut sheets tab shows its sheet, and the print root appends them (print route #292)
+    const injected = await page.evaluate(async (id) => {
+      const s = (window as unknown as { __peakHandoff: { store: { all(c: string): Promise<Array<Record<string, unknown>>>; get(c: string, id: string): Promise<Record<string, unknown> | null>; put(c: string, d: unknown): Promise<void> } } }).__peakHandoff.store;
+      const fab = (await s.all("catalog")).find((p) => p.category === "Fabric");
+      const qd = (await s.get("quotes", id)) as { spec: { sections: Array<{ items: Array<Record<string, unknown>> }> }; pdfOptions?: Record<string, unknown> } | null;
+      const it = qd?.spec?.sections?.[0]?.items?.[0];
+      if (!qd || !it) return false;
+      qd.spec.sections[0].items[0] = { ...it, curtain: true, curtainInputs: { name: "Main Drape", fabricSku: (fab?.sku as string) ?? "", fabricName: (fab?.desc as string) ?? "Velour", qty: "2", width: "21.5", height: "18", fullness: "50", mountType: "wall-hookloop" } };
+      qd.pdfOptions = { ...(qd.pdfOptions ?? {}), pdfCutSheets: true };
+      await s.put("quotes", qd);
+      return true;
+    }, toggleId);
+    await page.goto(urlFor(toggleId), { waitUntil: "load" });
+    await waitMounted(page, sink);
+    await clickTab(page, "Cut sheets");
+    // The Client style heads each sheet "Curtain cut sheet · EST-…" and names the curtain (Submittal prints CS-1).
+    const sheetShown = (t: string) => t.includes("Curtain cut sheet") && t.includes("Main Drape");
+    const cs1 = await waitFor(async () => sheetShown((await panelState(page)).text), 10_000);
+    step(`Customer review → Cut sheets shows the curtain line's Client cut sheet (${toggleId}, injected)`, injected && cs1);
+    await shot(page, "tab-cutsheets");
+    await clickTab(page, "Document");
+    await waitFor(() => page.evaluate(() => !!document.querySelector("#handoff-print-root [data-handoff-print-cutsheets]")), 10_000);
+    await page.emulateMediaType("print");
+    const withSheets = await printRootState(page);
+    step("print media appends the Client cut sheets when the quote asks for them", withSheets.cutSheets && sheetShown(withSheets.cutSheetText) && withSheets.footer === PRINT_FOOTER_TEXT && !withSheets.banner, JSON.stringify(withSheets));
+    await shot(page, "print-cutsheets");
+    await page.emulateMediaType("screen");
+    await page.evaluate(async () => (window as unknown as EditH).__peakHandoff.store.reset());
     await noteUnregistered(page);
     await page.close();
   } finally {
@@ -840,6 +981,28 @@ function printReview(r: ReviewResult): void {
   console.log(`  screenshots: ${r.screenshots.map((f) => path.relative(ROOT, f)).join(", ")}`);
 }
 
+/* ------------------------------------------------------------------ --drift */
+
+/** --drift [--update]: the ported originals against port-sources.json (port-drift.ts). Returns pass. */
+function driftCheck(update: boolean): boolean {
+  const file = path.join(ROOT, PORT_SOURCES_FILE);
+  const manifest = parsePortSources(JSON.parse(readFileSync(file, "utf8")));
+  const hashOf = (p: string) => {
+    const abs = path.join(ROOT, p);
+    return existsSync(abs) ? sha256Of(readFileSync(abs)) : null;
+  };
+  const exists = (p: string) => existsSync(path.join(ROOT, p));
+  if (update) {
+    writeFileSync(file, JSON.stringify(updatedPortSources(manifest, hashOf), null, 2) + "\n");
+    console.log(`handoff:verify --drift --update  wrote ${PORT_SOURCES_FILE}`);
+  }
+  const r = driftOf(update ? parsePortSources(JSON.parse(readFileSync(file, "utf8"))) : manifest, hashOf, exists);
+  const ok = driftClean(r);
+  console.log(`handoff:verify --drift  ${ok ? "PASS" : "FAIL"} (${manifest.ports.length} ports, ${r.checked} originals; changed ${r.changed.length}, missing ${r.missing.length}, ports missing ${r.portsMissing.length})`);
+  for (const m of driftMessages(r)) console.log(`  ${m}`);
+  return ok;
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const val = (name: string) => {
@@ -852,12 +1015,14 @@ async function main() {
   const edit = editAt >= 0 ? (argv[editAt + 1] && !argv[editAt + 1].startsWith("--") ? argv[editAt + 1] : "") : undefined;
   const reviewAt = argv.indexOf("--review");
   const review = reviewAt >= 0 ? (argv[reviewAt + 1] && !argv[reviewAt + 1].startsWith("--") ? argv[reviewAt + 1] : "") : undefined;
-  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined) {
-    console.error("usage: npm run handoff:verify -- --smoke | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] [--out <package dir>]");
+  const drift = argv.includes("--drift");
+  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && !drift) {
+    console.error("usage: npm run handoff:verify -- --smoke | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] [--out <package dir>] | --drift [--update]");
     process.exit(2);
   }
   mkdirSync(VERIFY_DIR, { recursive: true });
   let pass = true;
+  if (drift) pass &&= driftCheck(argv.includes("--update"));
   if (argv.includes("--smoke")) {
     const r = await smoke(pkgDir);
     writeFileSync(path.join(VERIFY_DIR, "smoke.json"), JSON.stringify(r, null, 2) + "\n");

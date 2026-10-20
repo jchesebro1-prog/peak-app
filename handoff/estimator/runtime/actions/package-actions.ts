@@ -6,7 +6,8 @@
  * pure parts): no drawing files (no Blob storage in the prototype — `uploads: false`), no client responses,
  * no linked Grid design and none can be started (the Grid is not in the prototype), the gap chips from
  * the quote's own systems (`packageGapChips`; datasheet gaps 0 — no part documents are sliced) and the Peak
- * header as stored over the company default (on). `canSend` is false so the panel offers no writes it
+ * header as stored over the company default (the sliced `settings.peakHeader`, letterhead-server.ts
+ * loadPeakHeaderDefault's rule: on unless stored false). `canSend` is false so the panel offers no writes it
  * couldn't do. Every write (drawing add / remove, Rebuild package, the header choice, Generate from Grid)
  * is refused with NOT_IN_PROTOTYPE — they all need Blob storage, the zip builder or the Grid.
  * Plan: PR 2 Task 5.
@@ -16,11 +17,12 @@ import type { SpecSection } from "@/app/(app)/estimator/types";
 import { keyProductsNeedingText, packageGapChips, scopesWithoutGoals } from "@/lib/estimate-output/package-gaps";
 import { normalizePackageSelection } from "@/lib/estimate-output/package-selection";
 import { responseRows } from "@/lib/estimate-output/responses";
-import { resolvePeakHeader } from "@/lib/letterhead";
+import { peakHeaderDefault, resolvePeakHeader } from "@/lib/letterhead";
 import { sentDocumentStamp, ONLINE_COPY } from "@/lib/quote-share/view";
 import type { Quote } from "@/lib/stores/quotes";
 import { NOT_IN_PROTOTYPE, type ActionImpl } from "../actions-registry";
 import type { HandoffStore } from "../store";
+import { refreshPortsFromStore, settingsView } from "../ports";
 import { quoteRepo } from "../quote-repo";
 import type { Impl as ImplOf } from "./util";
 
@@ -35,9 +37,10 @@ const sectionsOf = (q: Quote): SpecSection[] => {
   return s && Array.isArray(s.sections) ? (s.sections as SpecSection[]) : [];
 };
 
-/** loadPackagePanel's pure parts for the prototype (no files, Grid, uploads or sends). */
-export function packagePanelFor(q: Quote): Panel {
+/** loadPackagePanel's pure parts for the prototype (no files, Grid, uploads or sends). `settings` = getSettings(). */
+export function packagePanelFor(q: Quote, settings: Record<string, unknown> = settingsView()): Panel {
   const sections = sectionsOf(q);
+  const headerDefault = peakHeaderDefault({ peakHeader: settings.peakHeader });
   const revNoOf = (rev: number) => {
     const r = (q.revisions || []).find((x) => x.rev === rev);
     return r ? sentDocumentStamp(q, r).revNo : rev;
@@ -57,8 +60,8 @@ export function packagePanelFor(q: Quote): Panel {
     grid: null,
     gridEligible: false,
     canCreate: false,
-    peakHeader: resolvePeakHeader(q.packagePeakHeader, true),
-    peakHeaderDefault: true,
+    peakHeader: resolvePeakHeader(q.packagePeakHeader, headerDefault),
+    peakHeaderDefault: headerDefault,
   };
 }
 
@@ -69,7 +72,8 @@ export function packageActions(store: HandoffStore): { [K in ImplementedPackageA
   const packagePanelAction: Impl<"packagePanelAction"> = async (quoteId) => {
     const q = await repo.get(String(quoteId || ""));
     if (!q) return { ok: false, error: ONLINE_COPY.gone };
-    return { ok: true, panel: packagePanelFor(q) };
+    await refreshPortsFromStore(store);
+    return { ok: true, panel: packagePanelFor(q, settingsView()) };
   };
   return { packagePanelAction };
 }
