@@ -1,4 +1,6 @@
-import type { CatalogPart } from "@/lib/stores/catalog";
+/** The catalog fields fixture pricing reads — structural, so this pure
+ *  module never imports the catalog store (estimating-core purity). */
+type CatalogPart = { sku: string; desc: string; unit: string; cost: number; list: number };
 import { effectivePriceDate, type PriceDateSettings } from "./catalog-books";
 import { capGraphemes, INVISIBLE_STRIP } from "./portal-quote-names";
 import { sanitizeRackLayout } from "./rack/layout";

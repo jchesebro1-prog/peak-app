@@ -1,5 +1,5 @@
-import { fmt, systemSellTotal } from "@/app/(app)/estimator/pricing";
-import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
+import { fmt, systemSellTotal } from "@/lib/estimating-core/pricing";
+import type { SpecItem, SpecSection } from "@/lib/estimating-core/types";
 import type { ChipKind, PDChip } from "./types";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 

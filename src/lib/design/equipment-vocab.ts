@@ -14,7 +14,7 @@
  * (Controls / Acoustical / Pit are not Grid scopes; Quick Design still prices
  * them). `search` feeds the Equipment map's suggested catalog matches.
  */
-import type { SysKey } from "@/app/(app)/design/quick/engine";
+import type { SysKey } from "@/lib/design/quick-types";
 
 export type EquipPlace = "each" | "lot" | "curtain" | "none";
 export type CurtainRowType = { drape: "Draw" | "Legs" | "Border" | "Rear"; grid: "Draw" | "Leg" | "Border" | "Full" };

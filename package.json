@@ -45,6 +45,7 @@
     "test:sweep-fixtures": "tsx scripts/sweep-test-fixtures.ts",
     "test:smoke": "tsx scripts/smoke-routes.ts",
     "core:golden": "tsx scripts/estimating-golden.ts",
+    "core:check": "tsx scripts/core-check.ts",
     "test:assist": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-assist.ts; s=$?; rm -rf \"$TEST_DB\"; exit $s",
     "test:inbox-org": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-inbox-org.ts; s=$?; rm -rf \"$TEST_DB\"; exit $s",
     "test:popout": "TEST_DB=$(mktemp -d) && PGLITE_PATH=\"$TEST_DB\" tsx scripts/test-popout.ts; s=$?; rm -rf \"$TEST_DB\"; exit $s",

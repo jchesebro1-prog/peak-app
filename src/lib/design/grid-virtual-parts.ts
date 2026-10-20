@@ -14,7 +14,7 @@
  * confirmed — prices $0, says why in its desc and carries `virtualDead`: the
  * quote refuses it by name and the editor says "needs a part" (D313).
  */
-import type { TierKey } from "@/app/(app)/design/quick/engine";
+import type { TierKey } from "@/lib/design/quick-types";
 import type { PartLite } from "./grid-bom";
 import { EQUIPMENT_ROWS, EQUIPMENT_ROW_BY_KEY } from "./equipment-vocab";
 import { isLaborSku } from "./wire-labor";
