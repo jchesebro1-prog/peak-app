@@ -37473,6 +37473,34 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   const below = p262Csv(p262Rows([{ id: "s7", name: "Below", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "CAT", "Below cost", 1, 50, { price: 40 })] }], [], srcInfo));
   ok(below[0][8] === "-25.0%" && below[0][9] === "-25.0%", "#262 v2 parts list: a below-cost line prints a negative margin");
   ok(srcCsv.every((r) => r.length === 12) && csv.every((r) => r.length === 12), "#262 v2 parts list: every CSV row has twelve cells");
+
+  // Final review A — a saved vendor quote with no lines (typed total) still reads "Vendor quote — …"
+  const vq3: P262Vq = { id: "VQ-3", vendor: "Crane", quoteNumber: "Q-9", description: "", terms: "", notes: "", total: 500, includesFreight: false, display: "single", lines: [] };
+  const vq3Rows = p262Rows([{ id: "s8", name: "NoLines", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "Q-9", "Crane lift", 1, 500, { vendorQuoteId: "VQ-3" })] }], [vq3], srcInfo);
+  ok(vq3Rows.length === 1 && vq3Rows[0].source === "Vendor quote — Crane #Q-9", "#262 final A: a vendor quote with no lines still reads Vendor quote — <vendor> #<number>: " + JSON.stringify(vq3Rows.map((r) => r.source)));
+  const vqMiss = p262Rows([{ id: "s8b", name: "Miss", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "Q-9", "Crane lift", 1, 500, { vendorQuoteId: "VQ-GONE" })] }], [vq3], srcInfo);
+  ok(vqMiss.length === 1 && vqMiss[0].source === "Not in catalog", "#262 final A: a vendorQuoteId pointing at a missing vendor quote still falls through to the plain label");
+
+  // Final review B — placeholder SKUs (CUSTOM, AI, CURTAIN, CRT-n) count as no SKU
+  const phSec: P262Section = { id: "s9", name: "Placeholders", kind: "materials", mfr: "", freightPct: 0, items: [
+    it(1, "CUSTOM", "Custom bracket", 1, 30, { custom: true }),
+    it(2, "CUSTOM", "Custom plate", 3, 30, { custom: true }),
+    it(3, "CUSTOM", "Custom plate", 2, 30, { custom: true }),
+    it(4, "AI", "AI drafted thing", 1, 12),
+    it(5, "CRT-12", "Main drape", 1, 800, { curtain: true }),
+    it(6, "CUSTOM", "Custom with PN", 1, 5, { custom: true, manufacturerPartNumber: "PN-X" }),
+  ] };
+  const phRows = p262Rows([phSec], [], srcInfo);
+  const phCsv = p262Csv(phRows);
+  ok(phRows.length === 5 && phRows.every((r) => !["CUSTOM", "AI", "CRT-12"].includes(r.sku)), "#262 final B: placeholder SKUs are blanked on the row; distinct custom lines no longer merge, same-description ones do: " + JSON.stringify(phRows.map((r) => [r.sku, r.desc, r.qty])));
+  ok(phRows.find((r) => r.desc === "Custom bracket")?.qty === 1 && phRows.find((r) => r.desc === "Custom plate")?.qty === 5, "#262 final B: two custom lines with the same description still merge (3 + 2 = 5)");
+  const phItem = (d: string) => phCsv.find((r) => r[2] === d);
+  ok(phItem("Custom bracket")?.[1] === "" && phItem("AI drafted thing")?.[1] === "" && phItem("Main drape")?.[1] === "", "#262 final B: Item name is blank for CUSTOM, AI and CRT-n lines");
+  ok(phItem("Custom with PN")?.[1] === "PN-X", "#262 final B: a placeholder-SKU line with its own P/N prints the P/N as Item name");
+  ok(phItem("AI drafted thing")?.[10] === "Not in catalog" && phItem("Main drape")?.[10] === "Curtain calculator" && phItem("Custom bracket")?.[10] === "Custom", "#262 final B: price source is unchanged by the placeholder rule");
+  ok(p262Skus([phSec]).length === 0, "#262 final B: partsListSkus never asks the catalog about placeholders");
+  const phComp = p262Rows([{ id: "s10", name: "Comp", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "SA-9", "Kit — thing", 1, 10, { components: [comp("CUSTOM", "Loose item", 1, 10)] })] }], [], srcInfo);
+  ok(phComp[0]?.sku === "" && p262Csv(phComp)[0][1] === "", "#262 final B: an assembly component with a placeholder SKU is also treated as no SKU");
 }
 
 /* --- #261: Quick Design plan text stays a fixed on-screen size however wide the plan draws; dimensions smaller still (D468) --- */
@@ -70279,7 +70307,7 @@ import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate
   ok(bq1File("EST-1234") === "EST-1234 BOM.pdf" && bq1File("") === "Estimate BOM.pdf" && bq1File("A/B") === "A_B BOM.pdf", "BOM PDF: \"<number> BOM.pdf\", Estimate when blank, unsafe characters → _");
   ok(bq1Path("Q-1", true) === "/api/quotes/Q-1/bom-pdf?download=1" && bq1Path("Q 1", false) === "/api/quotes/Q%201/bom-pdf", "BOM PDF: bomPdfPath encodes the id; download adds ?download=1");
   const page = rd("src/app/print/quote/[id]/page.tsx");
-  ok(page.includes('import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";') && /const bom = \(Array\.isArray\(sp\.view\) \? sp\.view\[0\] : sp\.view\) === "bom";/.test(page) && page.includes('<QuoteDocument {...bomViewProps(doc)} rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />'),
+  ok(page.includes('import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";') && /const bom = \(Array\.isArray\(sp\.view\) \? sp\.view\[0\] : sp\.view\) === "bom";/.test(page) && page.includes('<QuoteDocument {...bomViewProps(doc)} layout="web" rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />'),
     "BOM PDF print: ?view=bom renders bomViewProps(doc) — the saved BOM preview's own transform");
   ok(page.includes("!bom && part !== \"tail\" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets") && page.includes("!bom && !bidder && part !== \"main\" ? loadDatasheetLinkRows(q, origin) : []") &&
      page.indexOf("if (bom) {") > -1 && page.indexOf("if (bom) {") < page.indexOf("keyProductPhotoDataUris("),
@@ -70290,6 +70318,16 @@ import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate
       "BOM PDF print: ?view=bom is the plain customer quote only — a bidder, rev or part param is a 404, before the token check");
   }
   ok(page.indexOf('if (!tokenOk(t, "quote", ') > -1 && page.indexOf('if (!tokenOk(t, "quote", ') < page.indexOf("getQuote("), "BOM PDF print: the quote token is still checked before any read");
+  {
+    // Final review C — the BOM PDF prints the BOM tab's own layout (web), not the customer PDF's title-page layout
+    const bomBranch = page.slice(page.indexOf("if (bom) {"), page.indexOf("// #293: key-product photos"));
+    ok(bomBranch.includes('layout="web"') && bomBranch.includes("<style>{QUOTE_WEB_EMBED_CSS}</style>") && bomBranch.includes("<style>{QUOTE_PRINT_CSS}</style>") && /import QuoteDocument, \{[^}]*QUOTE_WEB_EMBED_CSS[^}]*\} from "@\/app\/\(app\)\/estimator\/quote-document";/.test(page),
+      "BOM PDF print: the BOM branch renders layout=\"web\" with QUOTE_WEB_EMBED_CSS — the BOM tab's own layout (no title page)");
+    const customerRender = page.slice(page.indexOf("<QuoteDocument {...doc} keyProductPhotos"));
+    ok(!customerRender.slice(0, customerRender.indexOf("/>")).includes("layout="), "BOM PDF print: the customer render is unchanged — no layout= prop");
+    // Final review D — a BOM render reads no headers()/print origin
+    ok(/if \(!bom\) \{\s*const h = await headers\(\);/.test(page), "BOM PDF print: the print origin / headers() read happens only for the customer render");
+  }
   const route = has("src/app/api/quotes/[id]/bom-pdf/route.ts") && has("src/lib/estimate-output/bom-pdf-server.ts") && has("src/lib/quote-pdf/signed-print-pdf.ts")
     ? rd("src/app/api/quotes/[id]/bom-pdf/route.ts") + rd("src/lib/estimate-output/bom-pdf-server.ts") + rd("src/lib/quote-pdf/signed-print-pdf.ts") : "";
   ok(route.includes("export const maxDuration = 60;") && route.includes("await requireUser();") && route.includes("printOriginFor(process.env,") &&

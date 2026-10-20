@@ -1,7 +1,7 @@
 import peakLetterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import QuoteDocument, { QUOTE_PRINT_CSS } from "@/app/(app)/estimator/quote-document";
+import QuoteDocument, { QUOTE_PRINT_CSS, QUOTE_WEB_EMBED_CSS } from "@/app/(app)/estimator/quote-document";
 import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";
 import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
 import { pdfKindForQuoteType, type PdfKind } from "@/lib/quote-pdf/state";
@@ -77,10 +77,14 @@ export default async function PrintQuotePage({
   // A revision render shows what was sent: live edits since that revision (content changed after it was cut) would make the live-built cut sheets disagree, so they are skipped.
   const cutSheetsOk = !revision || !(typeof q.contentChangedAt === "number" && q.contentChangedAt > revision.at);
   // The links' absolute origin — the print origin, the Cover PDF's way (spec §5). Unresolvable → no links page.
-  const h = await headers();
-  const where = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
-  const origin = "origin" in where ? where.origin : "";
-  if ("error" in where) console.warn("[quote-pdf] no print origin — the PDF has no datasheet links", id, where.error);
+  // A BOM render has no links page, so it needs no origin.
+  let origin = "";
+  if (!bom) {
+    const h = await headers();
+    const where = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
+    origin = "origin" in where ? where.origin : "";
+    if ("error" in where) console.warn("[quote-pdf] no print origin — the PDF has no datasheet links", id, where.error);
+  }
   const [addressee, cust, settings, perks, cutSheets, links] = await Promise.all([
     // Strict: an explicit bidder that is no longer a live bidder on this quote (deleted since signing) is a 404, never the awarded default.
     bidder ? documentAddressee(src, bidder, { strict: true }) : documentAddressee(q),
@@ -101,7 +105,9 @@ export default async function PrintQuotePage({
     return (
       <main>
         <style>{QUOTE_PRINT_CSS}</style>
-        <QuoteDocument {...bomViewProps(doc)} rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
+        {/* The BOM tab's own layout (web: no title page, the investment band kept) — Jeff, 2026-10-20. */}
+        <style>{QUOTE_WEB_EMBED_CSS}</style>
+        <QuoteDocument {...bomViewProps(doc)} layout="web" rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
       </main>
     );
   }

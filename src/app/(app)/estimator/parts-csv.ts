@@ -3,6 +3,7 @@ import { lineModel, partModel } from "@/lib/catalog-rename/sku";
 import { lineExtSellOf, systemItemsRev, systemSellTotal } from "./pricing";
 import type { SpecItem, SpecSection, VendorQuote } from "./types";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { isPlaceholderSku } from "@/lib/specs/record-keys";
 
 /** The Estimator's "Parts list (CSV)" export for the project manager (#262) —
  *  every orderable part in the estimate's material systems, assemblies
@@ -93,6 +94,13 @@ function plainSource(item: SpecItem, inCatalog: boolean): string {
   return edited ? "Catalog — sell edited" : "Catalog";
 }
 
+/** The trimmed SKU, or "" for a placeholder (CUSTOM, AI, CURTAIN, CRT-n) —
+ *  those count as no SKU: never printed, never looked up, never a merge key. */
+function realSku(raw: string | undefined): string {
+  const sku = (raw || "").trim();
+  return isPlaceholderSku(sku) ? "" : sku;
+}
+
 /** Every emitted entry, in order, before consolidation (#262). */
 function expand(
   sections: SpecSection[],
@@ -124,9 +132,11 @@ function expand(
       const notes = note ? [note] : [];
 
       const vq = item.vendorQuoteId ? vendorQuotes.find((v) => v.id === item.vendorQuoteId) : undefined;
+      // A found vendor quote names the line even when it has no lines (a typed total).
+      const vqLabel = vq ? `${vq.vendor}${vq.quoteNumber ? " #" + vq.quoteNumber : ""}` : "";
+      const vqName = `Vendor quote ${vqLabel}`;
+      const vqSource = `Vendor quote — ${vqLabel}`;
       if (vq && vq.lines.length > 0) {
-        const vqName = `Vendor quote ${vq.vendor}${vq.quoteNumber ? " #" + vq.quoteNumber : ""}`;
-        const vqSource = `Vendor quote — ${vq.vendor}${vq.quoteNumber ? " #" + vq.quoteNumber : ""}`;
         let linesTotal = 0;
         for (const line of vq.lines) if (line.qty > 0) linesTotal += line.amount;
         for (const line of vq.lines) {
@@ -185,7 +195,7 @@ function expand(
             : partsList > 0 ? comp.price * lineSell / partsList
             : 0;
         for (const comp of included) {
-          const sku = comp.sku.trim();
+          const sku = realSku(comp.sku);
           const p = infoOf(info, sku);
           const sell = sellOf(comp);
           out.push({
@@ -226,7 +236,7 @@ function expand(
         continue;
       }
 
-      const sku = (item.sku || "").trim();
+      const sku = realSku(item.sku);
       const p = infoOf(info, sku);
       out.push({
         manufacturer: item.manufacturer?.trim() || p?.mfr?.trim() || "",
@@ -240,7 +250,7 @@ function expand(
         unitCost: item.cost,
         unitSell: lineSell,
         lineSell,
-        source: plainSource(item, !!p),
+        source: vq ? vqSource : plainSource(item, !!p),
         partOf: [],
         notes,
       });
