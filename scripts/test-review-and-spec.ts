@@ -362,6 +362,17 @@ const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m)
    preview-doc.tsx read all of them, in a fixed order, so a verbatim move
    between them never breaks a pin. Missing files are skipped. */
 const EST_DIR = "src/app/(app)/estimator";
+/* Estimating-core extraction: these Estimator files moved to src/lib/estimating-core/ and left a two-line `export *` shim at the
+   old path. A source-text pin that names the old path reads the file where its text lives now (atCore); a pin that never maps
+   through here would read the shim and pass (or fail) for the wrong reason. The persisted-domain half of types.ts lives in
+   core types (CORE_TYPES); the page/view half stays in the route folder's types.ts. */
+const CORE_DIR = "src/lib/estimating-core";
+const CORE_TYPES = `${CORE_DIR}/types.ts`;
+const MOVED_TO_CORE = ["pricing", "estimator-data", "tier-reprice", "labor-group", "labor-defaults", "track-bom", "curtain-line", "fixture-bom", "freight-default", "catalog-rank", "copy-system", "narrative"];
+const atCore = (rel: string): string => {
+  const m = /^src\/app\/\(app\)\/estimator\/([a-z-]+)\.ts$/.exec(rel);
+  return m && MOVED_TO_CORE.includes(m[1]) ? `${CORE_DIR}/${m[1]}.ts` : rel;
+};
 const ESTIMATOR_FILES = [
   "estimator-client.tsx",
   "use-estimator-state.ts",
@@ -11129,7 +11140,7 @@ ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
 
 /* --- #304 Task 6: every part search matches Model # and former SKUs --- */
 {
-  const src304 = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+  const src304 = (rel: string) => readFileSync(join(process.cwd(), atCore(rel)), "utf8");
   const pinRel = (rel: string, name: string) => ok(/from "@\/lib\/catalog-rename\/sku"/.test(src304(rel)) && src304(rel).includes(name), `#304 search ${rel}: reads the shared haystack (${name})`);
   pinRel("src/lib/search/global-search.ts", "partSearchHaystack(");
   pinRel("src/app/(app)/catalog/page.tsx", "partSearchHaystack(");
@@ -23835,7 +23846,7 @@ import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
   ];
   for (const f of mirrors227) {
     // #299: the Grid editor's logic moved to use-grid-editor.ts — scanned under the editor's entry.
-    const s = readFileSync(join(process.cwd(), f), "utf8") +
+    const s = readFileSync(join(process.cwd(), atCore(f)), "utf8") +
       (f.endsWith("/grid/[id]/editor.tsx") ? readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/use-grid-editor.ts"), "utf8") + readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/plan-canvas.tsx"), "utf8") + gridWorkspaceSource : "");
     ok(!/makingRate|MAKING_RATE|sellCoeffs|SellCoeffs|makingPerFt|curtainCoeffs/.test(s), `#227: ${f} carries no making term or sell coefficients`);
     if (f !== "src/lib/design/curtain-pricing.ts") ok(!/curtainAreaRate\s*\?\?|SEED_FABRIC_RATES\[/.test(s), `#227: ${f} resolves a fabric rate only through fabricAreaRateOf`);
@@ -23987,7 +23998,7 @@ import { LEGACY_HINTS as r233Hints } from "@/lib/design/equipment-legacy-hints";
       !/addFix\("[a-z]+", fx\.[a-z]+, "/.test(engSrc) && !/addDrape\([^)]*"curtains:[a-z]+", "/.test(engSrc),
     "#233: compute() carries no item-name literals — one source");
   const vocabSrc = readFileSync(join(process.cwd(), "src/lib/design/equipment-vocab.ts"), "utf8");
-  ok(!/^import\s+(?!type\b)[^;]*from\s+"@\/app\/\(app\)\/design\/quick\/engine"/m.test(vocabSrc),
+  ok(!/^import\s+(?!type\b)[^;]*from\s+"(?:@\/app\/\(app\)\/design\/quick\/engine|@\/lib\/design\/quick-types)"/m.test(vocabSrc),
     "#233: the vocabulary imports only types from the engine (no runtime cycle)");
 
   // Quick Design qty overrides keyed by the OLD label read under the new one.
@@ -27908,7 +27919,7 @@ import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
   // Labels: the catalog rate is fabric cost.
   ok(sew227Unit === "sq ft fabric" && sew227Label(3.64) === "$3.64/sq ft fabric" && sew227Label(0) === "No $/sq ft set", `#227 late: a fabric rate reads $X/sq ft fabric (${sew227Label(3.64)})`);
   ok(sew227SellLabel(5.72) === "$5.72/sq ft sewn (incl. sewing)" && sew227SellLabel(0) === "No $/sq ft set", "#227 late: the Grid drop-in's sell rate says sewing is in it");
-  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const rd = (f: string) => readFileSync(join(process.cwd(), atCore(f)), "utf8");
   const frf = rd("src/app/(app)/catalog/fabric-rate-field.tsx");
   ok(frf.includes("$/sq ft fabric") && frf.includes("Fabric cost only — estimates add sewing labor (Estimating Rules, default 10 %)") && frf.includes("sqftRateFromLinearYard") && frf.includes("sqftRateFromSquareYard"),
     "#227 late: the part editor's field reads $/sq ft fabric with the sewing help, and keeps the $/lin-yd and $/sq yd converter");
@@ -34864,7 +34875,7 @@ async function specKeyPickersAsyncChecks(): Promise<void> {
   ok(/specKey: curtainSpecKey\(undefined, name\) \|\| undefined/.test(addCurtain), "spec pickers: an estimator curtain add defaults its specKey from the curtain name");
   ok(/const setItemSpecKey = /.test(client) && /setItemSpecKey\(r\.item\.id, v\)/.test(client) && /options=\{specKeys\}/.test(client),
     "spec pickers: the Spec options and setter reach the review sidebar's Specs card (#312 moved them off the Build rows)");
-  ok(!/specKey/.test(client.slice(client.indexOf("const freshCustom ="), client.indexOf("const freshCustom =") + 600)) && !/CustomDraft = \{[^}]*specKey/.test(src("src/app/(app)/estimator/types.ts")), "spec pickers: the custom-part draft has no spec key field (#312 fix round 1: the dead CustomDraft.specKey is gone)");
+  ok(!/specKey/.test(client.slice(client.indexOf("const freshCustom ="), client.indexOf("const freshCustom =") + 600)) && !/CustomDraft = \{[^}]*specKey/.test(src(CORE_TYPES)), "spec pickers: the custom-part draft has no spec key field (#312 fix round 1: the dead CustomDraft.specKey is gone)");
   const card = src("src/app/(app)/estimator/section-card.tsx");
   const sidebar = src("src/app/(app)/estimator/steps/review-sidebar.tsx");
   ok(/item\.custom \|\| item\.curtain/.test(src("src/lib/estimate-review/review-ui.ts")) && /auto=\{autoSpecKeyFor\(r\.item\)\}/.test(sidebar) && /value=\{r\.item\.specKey \|\| ""\}/.test(sidebar),
@@ -35126,7 +35137,7 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
 
   // Structural: wiring, Undo, next-edit clear, client safety, customer document.
   const t254Client = estimatorSource();
-  const t254Pure = readFileSync(join(process.cwd(), "src/app/(app)/estimator/tier-reprice.ts"), "utf8");
+  const t254Pure = readFileSync(join(process.cwd(), atCore("src/app/(app)/estimator/tier-reprice.ts")), "utf8");
   const t254Persist = t254Client.slice(t254Client.indexOf("const persistMeta = "), t254Client.indexOf("const openTitle = "));
   ok(/await updateQuoteMetaAction\(id, meta\)/.test(t254Persist) && !/applyTierStamp|tierMargin/.test(t254Persist),
     "#254 wiring (review): persistMeta no longer applies a tier stamp — picks resolve it through resolveTierFor");
@@ -37603,7 +37614,7 @@ import type { PartLite as C264Lite } from "@/lib/design/grid-bom";
   const est = src("src/app/(app)/estimator/page.tsx");
   const line = src("src/app/(app)/design/lineset/page.tsx");
   ok(est.includes("fabricParts(),") && !est.includes('byCategory("Fabric")') && line.includes("listFabricParts()") && !line.includes('byCategory("Fabric")'), "#264: the Estimator and Lineset read fabrics through fabricParts(), not byCategory(\"Fabric\")");
-  const ea = src("src/app/(app)/estimator/catalog-rank.ts");
+  const ea = src(atCore("src/app/(app)/estimator/catalog-rank.ts"));
   ok(ea.includes('cat === "Fabric" ? isFabricPart(p)'), "#264: searchCatalog's \"Fabric\" filter (the Grid curtain swap) matches every fabric part");
   const lib = ["src/lib/design/grid-palette.ts", "src/lib/design/grid-accessories.ts", "src/lib/stores/grid-projects.ts", "src/lib/stores/grid-catalog.ts", "src/lib/portal-catalog-index.ts", "src/lib/design/grid-curtains.ts", "src/lib/design/equipment-map.ts", "src/lib/design/equipment-map-view.ts"];
   ok(lib.every((f) => !/category\s*[!=]==\s*"Fabric"/.test(src(f)) && src(f).includes("isFabricPart")), "#264: no Grid, portal or Equipment-map fabric test reads category === \"Fabric\" directly — all go through isFabricPart");
@@ -45677,7 +45688,7 @@ import { readFileSync as c296cRead } from "node:fs";
   ok(!!fxLine && !("rackId" in fxLine), "#296 rack consumers: fixtureBomLine on a fixture has no rackId");
   const ec = estimatorSource();
   ok(ec.includes("...(line.rackId ? { rackId: line.rackId } : {})"), "#296 rack consumers: the Estimator line gets rackId from the BOM line");
-  const ty = c296cRead(join(process.cwd(), "src/app/(app)/estimator/types.ts"), "utf8");
+  const ty = c296cRead(join(process.cwd(), CORE_TYPES), "utf8");
   ok(/rackId\?: string;/.test(ty), "#296 rack consumers: SpecItem declares rackId");
 
   const item = { id: 1, sku: rackAsm.id, desc: rackLine!.desc, qty: 1, unit: "ea", cost: rackLine!.cost, price: rackLine!.price, fixture: true, components: rackLine!.components, rackId: rackLine!.rackId };
@@ -48057,7 +48068,7 @@ import { curtainDesc as f292CurtainDesc } from "@/lib/design/grid-bom";
     "#292 final #1: Copy here — the copy's curtain/track pair gets a fresh key and both systems keep their own track link");
   const readBoth = f292Read({ sections: [source, copied] }, C292_FABS, C292_SERIES, null);
   ok(readBoth.curtains.length === 2 && readBoth.curtains.every((c) => c.mount.source === "track"), "#292 final #1: neither the source nor the copy falls back to the assumed tie-batten mount");
-  ok(rd("src/app/(app)/estimator/copy-system.ts").includes("items: remapCurtainTrackKeys(items)"), "#292 source: copySectionForTarget re-keys the copied pairs (Copy here, to new, to existing)");
+  ok(rd(atCore("src/app/(app)/estimator/copy-system.ts")).includes("items: remapCurtainTrackKeys(items)"), "#292 source: copySectionForTarget re-keys the copied pairs (Copy here, to new, to existing)");
 
   // #1 (c) already-saved collisions: same-section tracks win
   const a = c292Sec("a", [cur(1, { curtainTrackKey: "ct-5" }), trk(2, { curtainTrackKey: "ct-5" })]);
@@ -54714,10 +54725,11 @@ import * as p2a from "@/lib/estimate-groups/groups";
   const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const actionsSrc = src("src/app/(app)/estimator/actions.ts");
   const pageSrc = src("src/app/(app)/estimator/page.tsx");
-  const copySrc = src("src/app/(app)/estimator/copy-system.ts");
+  const copySrc = src(atCore("src/app/(app)/estimator/copy-system.ts"));
   const libSrc = src("src/lib/narrative/system-library.ts");
   const keySrc = src("src/app/(app)/estimator/pdf-doc-key.ts");
-  const typesSrc = src("src/app/(app)/estimator/types.ts");
+  // SpecSection.groupId/built live in estimating-core types; InitialQuote.groups stays in the route folder's types.
+  const typesSrc = src(CORE_TYPES) + "\n" + src("src/app/(app)/estimator/types.ts");
 
   ok(/groups\?: SystemGroup\[\]/.test(actionsSrc) && /export type SavePayload[\s\S]*?groups\?: SystemGroup\[\]/.test(actionsSrc), "#P2a persistence: SavePayload.groups is optional (older callers keep stored groups)");
   ok(/const groups = sanitizeGroups\(payload\.groups \?\? \(prior\?\.spec as \{ groups\?: unknown \} \| null \| undefined\)\?\.groups\)/.test(actionsSrc), "#P2a persistence: saveQuoteAction sanitises payload.groups, falling back to the stored spec.groups");
@@ -59737,8 +59749,12 @@ import {
      panel.includes("gridSaving ? GRID_LINK_COPY.saving : GRID_LINK_COPY.open"),
     "#316 pin: 'Open Grid design →' stays a real link; a plain left click saves first (stop with the save-first message on failure, else router.push) and a modified or middle click is left to the browser");
   // Every in-Estimator trip into the Grid (anchor or router.push) lives in the panel that saves first — no other estimator file links to /design/grid/<id>.
-  const estFiles316 = gemReaddir5("src/app/(app)/estimator", { recursive: true }).map(String).filter((f) => /\.tsx?$/.test(f) && !f.endsWith("package-staff-panel.tsx"));
-  ok(estFiles316.length > 20 && estFiles316.every((f) => !/["'`]\/design\/grid\/\$?\{?/.test(rd("src/app/(app)/estimator/" + f))),
+  // The moved Estimator files (src/lib/estimating-core) are still Estimator source for this scan.
+  const estFiles316 = [
+    ...gemReaddir5("src/app/(app)/estimator", { recursive: true }).map((f) => "src/app/(app)/estimator/" + String(f)),
+    ...gemReaddir5(CORE_DIR, { recursive: true }).map((f) => CORE_DIR + "/" + String(f)),
+  ].filter((f) => /\.tsx?$/.test(f) && !f.endsWith("package-staff-panel.tsx"));
+  ok(estFiles316.length > 20 && estFiles316.every((f) => !/["'`]\/design\/grid\/\$?\{?/.test(rd(f))),
     "#316 pin: no other Estimator source links into /design/grid/<id> — the package panel is the only way in, and it saves first");
   ok(rd("src/lib/design/estimate-grid-link.ts").includes("didn't save, so the Grid would miss your latest changes."),
     "#316 copy: the save-failed sentence names why the Grid did not open");
@@ -64539,7 +64555,7 @@ async function riserPolish3Checks(): Promise<void> {
   // ---- 3. conduit-part search filters per-foot inside the catalog query, before the cap
   const est = srcOf("src/app/(app)/estimator/actions.ts");
   const sc = est.slice(est.indexOf("export async function searchCatalog("), est.indexOf("export type ResolvedCatalogSku"));
-  const rank = srcOf("src/app/(app)/estimator/catalog-rank.ts");
+  const rank = srcOf(atCore("src/app/(app)/estimator/catalog-rank.ts"));
   ok(/limit = 40,\s*perLengthOnly = false/.test(sc) && rank.includes(".filter((p) => !opts.perLengthOnly || isPerLengthUnit(p.unit || \"\"))") && sc.includes("rankCatalogParts(parts, q, { category: cat, perLengthOnly })") && sc.indexOf("rankCatalogParts(") < sc.indexOf(".slice(0, Math.max(1, limit))") && sc.includes("total: scored.length"),
     "#321 polish conduit search: searchCatalog takes perLengthOnly and applies it before scoring, the cap and the total");
   const csa = srcOf("src/app/(app)/estimating-rules/conduit-sizes/actions.ts");
@@ -67952,7 +67968,7 @@ function bnLeakFixture(): EstimatorSpecSection[] {
     "src/app/(app)/estimator/parts-csv.ts", "src/lib/manufacturer-analytics.ts", "src/lib/dashboard/metrics.ts",
     "src/lib/part-docs/quoted-parts.ts", "src/lib/design/estimate-tray.ts", "src/lib/package-doc/chips.ts",
     "src/lib/portal-pricing.ts", "src/app/(app)/estimator/copy-system.ts", "src/lib/narrative/system-library.ts",
-  ]) ok(src(p).includes("isBonusItem"), "#bonus leak pin: " + p + " skips bonus lines");
+  ]) ok(src(atCore(p)).includes("isBonusItem"), "#bonus leak pin: " + p + " skips bonus lines");
 }
 async function bonusLeakChecks(): Promise<void> {
   const { bomFromQuote } = await import("@/lib/specs/quote-bom");
@@ -68249,7 +68265,7 @@ import { repriceForTier as bnfReprice } from "@/app/(app)/estimator/tier-reprice
   ok(/const statusBeforeSave = baseStatus;/.test(save) && /syncBonusAfterStatus\(statusBeforeSave, res\.status\);\s*setStatus\(res\.status\);/.test(save), "#bonus M5 source pin: a save that moves to/from Won refreshes the bonus card");
   const sum = bnfRead("src/app/(app)/estimator/review-cost-summary.tsx");
   ok(sum.includes("Package bonus (payout)") && sum.includes("bonusSum(isPackageBonusItem, (it) => it.qty * it.cost)"), "#bonus M8: the cost summary shows the 5% as its payout (package line cost)");
-  const pr = bnfRead("src/app/(app)/estimator/pricing.ts");
+  const pr = bnfRead(atCore("src/app/(app)/estimator/pricing.ts"));
   const prDoc = pr.slice(pr.lastIndexOf("/**", pr.indexOf("function customerLinesRaw(")), pr.indexOf("function customerLinesRaw("));
   ok(/bonus: "package"/.test(prDoc) && /bonus: "estimator"/.test(prDoc) && /absorbSellAdjustment/.test(prDoc), "#bonus M11: customerLinesRaw's doc comment covers the 5% fold and the 2% spread");
   ok(bnfRead("src/app/(app)/estimator/parts-csv.ts").includes("less the labor lines' share (header above)") && bnfRead("src/app/(app)/reports/estimator-bonuses/page.tsx").includes("Only system quotes carry a bonus record"), "#bonus M11: parts-csv and the bonuses report carry accurate comments");
@@ -70033,11 +70049,13 @@ import * as p3Cpu from "@/lib/estimate-output/client-package-ui";
 {
   const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
   const root = join(process.cwd(), "src/app/(app)/estimator");
+  const coreRoot = join(process.cwd(), CORE_DIR);
   const walk = (dir: string): string[] => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : /\.(ts|tsx)$/.test(n) ? [p] : []; });
   const callers: string[] = [];
   const writers: string[] = [];
-  for (const f of walk(root)) {
-    const rel = f.slice(root.length + 1);
+  // The moved Estimator files (estimating-core) are still "estimator files" for this scan.
+  for (const f of [...walk(root), ...walk(coreRoot)]) {
+    const rel = f.startsWith(coreRoot + "/") ? f.slice(coreRoot.length + 1) : f.slice(root.length + 1);
     const src = readFileSync(f, "utf8");
     if (/(?<!const )setSystemPresentation\(/.test(src) && rel !== "steps/client-package-tab.tsx") callers.push(rel);
     // Any other write of a system's presentation: only Draft narrative's switch (narrative.ts) and the BOM view's itemized copy may.
@@ -70050,7 +70068,7 @@ import * as p3Cpu from "@/lib/estimate-output/client-package-ui";
     "#333 Q4: the Build card's presentation select is a read-only \"Customer: … ↗\" chip linking to Client package");
   const cli = readFileSync(join(root, "estimator-client.tsx"), "utf8");
   ok(cli.includes('packageTabSearch(stepSearch(window.location.search, "package"), "client") + "#systems"'), "#333 Q4: the chip lands on Build package → Client package → #systems");
-  ok(readFileSync(join(root, "narrative.ts"), "utf8").includes('presentation: "narrative"'), "#333 Q4: Draft narrative still switches its system to Narrative (same field)");
+  ok(readFileSync(join(process.cwd(), CORE_DIR, "narrative.ts"), "utf8").includes('presentation: "narrative"'), "#333 Q4: Draft narrative still switches its system to Narrative (same field)");
 }
 
 // ---- Task 14: Send & track's attachment ticks start from the Client package choices (Q5) ----
