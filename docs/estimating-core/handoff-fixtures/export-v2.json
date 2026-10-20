@@ -78,7 +78,9 @@
     "offices": [
      {
       "id": "o1",
-      "name": "Wisconsin"
+      "name": "Wisconsin",
+      "lat": 43.0,
+      "lng": -89.0
      }
     ],
     "accent": "#1f6feb",
@@ -110,7 +112,7 @@
    "id": "assist_secrets",
    "updatedAt": 1760000000000,
    "data": {
-    "apiKey": "sk-ant-api03-SECRET"
+    "apiKey": "@@SECRET_ANT@@"
    }
   },
   {
@@ -125,8 +127,8 @@
  "gmailConnections": [
   {
    "id": "personal:u1",
-   "refreshToken": "1//0abcdEFGHijkl-SECRET",
-   "accessToken": "ya29.fake",
+   "refreshToken": "@@SECRET_GOOGLE_REFRESH@@",
+   "accessToken": "@@SECRET_GOOGLE_ACCESS@@",
    "email": "jeff@example.com"
   }
  ],
@@ -141,10 +143,37 @@
    "updatedAt": 1760000000000
   },
   {
+   "key": "43.1000,-89.5000|43.2000,-89.3000",
+   "data": {
+    "miles": 12,
+    "minutes": 20,
+    "ts": 1
+   },
+   "updatedAt": 1760000000000
+  },
+  {
+   "key": "43.0731,-89.4012|44.0000,-88.0000",
+   "data": {
+    "miles": 12,
+    "minutes": 20,
+    "ts": 1
+   },
+   "updatedAt": 1760000000000
+  },
+  {
    "key": "43.0000,-89.0000|44.0000,-88.0000",
    "data": {
-    "miles": 90,
-    "minutes": 100,
+    "miles": 12,
+    "minutes": 20,
+    "ts": 1
+   },
+   "updatedAt": 1760000000000
+  },
+  {
+   "key": "43.0731,-89.4012|10.0000,10.0000",
+   "data": {
+    "miles": 12,
+    "minutes": 20,
     "ts": 1
    },
    "updatedAt": 1760000000000
@@ -542,12 +571,31 @@
      "customer": "Alpha Schools",
      "name": "Alpha Auditorium Lighting",
      "status": "draft",
-     "quoteNote": "Call Pat. Key: sk-ant-api03-SECRET-do-not-share",
+     "quoteNote": "Call Pat. Key: @@SECRET_ANT@@-do-not-share",
      "shareLink": {
       "token": "x"
      },
      "leadId": "L-1",
-     "updatedAt": 1760000000000
+     "updatedAt": 1760000000000,
+     "clientResponses": [
+      {
+       "id": "r1",
+       "email": "respondent@example.org",
+       "note": "Please call"
+      }
+     ],
+     "bonusRecord": {
+      "pool": 123,
+      "split": [
+       {
+        "userId": "u1",
+        "amount": 60
+       }
+      ]
+     },
+     "estimatorBonusSplit": {
+      "u1": 0.5
+     }
     }
    },
    {
@@ -603,7 +651,7 @@
      "locationId": "loc2",
      "customer": "Alpha Schools",
      "status": "sent",
-     "assumptions": "Union labor. token 1//0abcdEFGHijkl-SECRET end",
+     "assumptions": "Union labor. token @@SECRET_GOOGLE_REFRESH@@ end",
      "packageFiles": [
       {
        "id": "f1"
@@ -834,7 +882,7 @@
      "customer": "Alpha Schools",
      "name": "Alpha Auditorium Lighting",
      "status": "draft",
-     "quoteNote": "Call Pat. Key: sk-ant-api03-SECRET-do-not-share",
+     "quoteNote": "Call Pat. Key: @@SECRET_ANT@@-do-not-share",
      "shareLink": {
       "token": "x"
      },
@@ -855,7 +903,7 @@
      "cost": 100,
      "list": 180,
      "mfr": "Acme",
-     "note": "vendor portal pw ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+     "note": "vendor portal pw @@SECRET_GITHUB@@",
      "portalHidden": true,
      "updatedAt": 1760000000000
     },
@@ -914,7 +962,9 @@
        "sku": "SKU-B",
        "qty": 1
       }
-     ]
+     ],
+     "internalNote": "staff-only scratch",
+     "createdBy": "u1"
     },
     "rev": 1,
     "seq": 1,
@@ -944,7 +994,7 @@
      "id": "PD-1",
      "kind": "image",
      "blobKey": "part-docs/PD-1/a.webp",
-     "sourceUrl": "https://example.com/a.webp",
+     "sourceUrl": "https://example.com/a.webp?token=abc123&X-Amz-Signature=deadbeef#frag",
      "source": "fetch"
     },
     "rev": 1,

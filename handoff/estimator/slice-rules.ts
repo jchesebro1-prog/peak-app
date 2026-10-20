@@ -28,13 +28,22 @@ export const SETTINGS_FIELDS = [
 ] as const;
 
 /** Every quote field the Estimator page reads. Excluded on purpose: shareLink shareOpens packageFiles
- *  estimateEmails bid vendorQuotes assistDraft portal* leadId. */
+ *  estimateEmails bid vendorQuotes assistDraft portal* leadId — and, as data minimization (a controller
+ *  decision, to be confirmed by Jeff later): clientResponses (third-party respondent emails),
+ *  bonusRecord and estimatorBonusSplit (staff pay). The prototype does not need them to price an estimate. */
 export const QUOTE_FIELDS = [
   "id", "estNo", "estSuffix", "status", "quoteType", "source", "pipelineId", "stage", "name", "category",
   "customer", "customerId", "locationId", "contactName", "quoteNote", "assumptions", "installTimeframe",
   "paymentTerms", "coverSummary", "notIncluded",
   "owner", "preparedBy", "revisions", "history", "updatedAt", "createdAt", "pricingTier", "tierMargin", "spec",
-  "pdfOptions", "packageSelection", "review", "clientResponses", "bonusRecord", "estimatorBonusSplit", "groups",
+  "pdfOptions", "packageSelection", "review", "groups",
+] as const;
+
+/** FixtureRecord shape (src/lib/fixture-assemblies.ts) — anything else on a subassemblies doc is dropped. */
+export const FIXTURE_FIELDS = [
+  "id", "kind", "label", "description", "scope", "portalCategory", "lightEngineSku", "lensSku",
+  "lightEngineLine", "lensLine", "lamp", "position", "circuit", "lines", "parts", "rack", "snapshot",
+  "needsReview", "createdAt", "createdBy", "updatedAt", "updatedBy", "legacy",
 ] as const;
 
 export const COMPANY_COLS = [
@@ -66,8 +75,15 @@ export function pickFields(doc: Record<string, unknown>, allow: readonly string[
 
 const SECRET_RULES: Array<[string, RegExp]> = [
   ["sk-ant", /sk-ant-/],
-  ["sk-key", /sk-[A-Za-z0-9]{20,}/],
+  // not preceded by a letter/digit, so ordinary words ("risk-based-assessment-plan…") do not trip it
+  ["sk-key", /(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}/],
   ["github-token", /ghp_[A-Za-z0-9]{30,}/],
+  ["github-pat", /github_pat_[A-Za-z0-9_]{20,}/],
+  ["github-oauth-token", /gh[opsu]_[A-Za-z0-9]{30,}/],
+  ["google-api-key", /AIza[0-9A-Za-z_-]{35}/],
+  ["jwt", /eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}/],
+  ["bearer-token", /Bearer [A-Za-z0-9._-]{20,}/],
+  ["postgres-credentials", /postgres(?:ql)?:\/\/[^\s:@/]+:[^\s@/]+@/],
   ["google-refresh-token", /1\/\/0[A-Za-z0-9_-]{10,}/],
   ["google-access-token", /ya29\./],
   ["slack-token", /xox[baprs]-/],

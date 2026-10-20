@@ -10,7 +10,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  BLOB_IDS, COMPANY_COLS, CONTACT_COLS, CONTACT_EMAIL_COLS, CONTACT_PHONE_COLS, CATALOG_FIELDS, SETTINGS_FIELDS, SITE_COLS, TEAM_FIELDS,
+  BLOB_IDS, COMPANY_COLS, CONTACT_COLS, CONTACT_EMAIL_COLS, CONTACT_PHONE_COLS, CATALOG_FIELDS, FIXTURE_FIELDS, SETTINGS_FIELDS, SITE_COLS, TEAM_FIELDS,
   pickAndScrub, pickFields, scanForSecrets, scrubValue, selectEstimates, packCatalog, catalogBody,
   type DocRow, type QuoteDoc, type ScrubEntry,
 } from "./slice-rules";
@@ -47,6 +47,17 @@ export type SliceResult = {
 };
 
 const r4 = (n: number | string) => (Math.round(Number(n) * 1e4) / 1e4).toFixed(4);
+
+/** scheme + host + path only: signed-URL query strings, fragments and credentials never reach the manifest. */
+function cleanSourceUrl(u: unknown): string | null {
+  if (typeof u !== "string" || u === "") return null;
+  try {
+    const x = new URL(u);
+    return `${x.protocol}//${x.host}${x.pathname}`;
+  } catch {
+    return u.split(/[?#]/)[0] || null;
+  }
+}
 
 const js = (name: string, value: unknown) => `window.${name} = ${JSON.stringify(value)};\n`;
 
@@ -97,11 +108,7 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[] }
   // --- fixtures (subassemblies) ---
   const fixLog: ScrubEntry[] = [];
   const fixtures = liveDocs(exp, "subassemblies")
-    .map((r) => {
-      const out: Row = {};
-      for (const [k, v] of Object.entries({ ...r.doc, id: r.id })) out[k] = scrubValue(v, r.id, k, fixLog);
-      return out;
-    })
+    .map((r) => pickAndScrub({ ...r.doc, id: r.id }, FIXTURE_FIELDS, r.id, fixLog))
     .sort((a, b) => String(a.id).localeCompare(String(b.id)));
   noteScrub("data/fixtures.js", fixLog);
   files["data/fixtures.js"] = js("PEAK_FIXTURES", fixtures);
@@ -122,13 +129,22 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[] }
   const refIds = new Set(estimates.map((q) => q.customerId).filter((x): x is string => typeof x === "string" && x !== ""));
   const companies = (exp.companies ?? []).filter((c) => !c.deleted && refIds.has(String(c.id)));
   const keptCo = new Set(companies.map((c) => String(c.id)));
+  // Every non-deleted site of a referenced company is emitted (not only the quotes' locationId): the Estimator's
+  // venue picker lists all of a company's venues. Deleted sites and contacts never are.
   const sites = (exp.sites ?? []).filter((s) => !s.deleted && keptCo.has(String(s.companyId)));
   const contacts = (exp.contacts ?? []).filter((c) => !c.deleted && keptCo.has(String(c.homeCompanyId)));
   const keptCt = new Set(contacts.map((c) => String(c.id)));
+  // geoCache keys are routeKey(a, b) = "lat,lng|lat,lng" at 4 dp. A row is kept only when BOTH halves are a kept
+  // site's coordinate or an office coordinate from the sliced settings — never a pairing with an unreferenced venue.
+  const coordOf = (lat: unknown, lng: unknown) =>
+    lat != null && lng != null && lat !== "" && lng !== "" && Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))
+      ? `${r4(lat as string)},${r4(lng as string)}` : null;
   const coords = new Set<string>();
-  for (const s of sites) if (s.lat != null && s.lng != null && s.lat !== "" && s.lng !== "" && Number.isFinite(Number(s.lat)) && Number.isFinite(Number(s.lng))) coords.add(`${r4(s.lat as string)},${r4(s.lng as string)}`);
+  for (const s of sites) { const c = coordOf(s.lat, s.lng); if (c) coords.add(c); }
+  const offices = Array.isArray(settings.offices) ? (settings.offices as Row[]) : [];
+  for (const o of offices) { const c = coordOf(o?.lat, o?.lng); if (c) coords.add(c); }
   const geoCache = (exp.geoCache ?? [])
-    .filter((g) => String(g.key).split("|").some((half) => coords.has(half)))
+    .filter((g) => { const halves = String(g.key).split("|"); return halves.length === 2 && halves.every((h) => coords.has(h)); })
     .map((g) => ({ key: g.key, data: g.data }));
   const customers = {
     companies: companies.map((c) => pickFields(c, COMPANY_COLS)),
@@ -160,7 +176,7 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[] }
   for (const l of links) {
     const d = docs.get(String(l.documentId));
     if (!d || d.kind !== "image" || (!d.blobKey && !d.sourceUrl)) continue;
-    manifest.push({ sku: String(l.partSku), docId: String(l.documentId), blobKey: (d.blobKey as string | null) ?? null, sourceUrl: (d.sourceUrl as string | null) ?? null });
+    manifest.push({ sku: String(l.partSku), docId: String(l.documentId), blobKey: (d.blobKey as string | null) ?? null, sourceUrl: cleanSourceUrl(d.sourceUrl) });
   }
   files["data/photo-manifest.json"] = JSON.stringify(manifest) + "\n";
   counts.photos = manifest.length;
@@ -232,4 +248,4 @@ function main() {
   for (const s of r.scrubbed) console.log(`    scrubbed ${s.file} ${s.id}.${s.field} (${s.rule})`);
 }
 
-if (process.argv[1]?.endsWith("slice.ts")) main();
+if (/handoff[\\/]estimator[\\/]slice\.ts$/.test(path.resolve(process.argv[1] ?? ""))) main();
