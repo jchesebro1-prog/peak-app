@@ -12767,7 +12767,7 @@ Spec `docs/superpowers/specs/2026-10-16-estimate-photo-wrap-title-page-design.md
 
 ## 359. Estimator handoff, PR 1: estimating-core extraction, DONE
 
-**Area:** `src/lib/estimating-core/`, `scripts/core-check.ts`, `scripts/estimating-golden.ts`, the 12 route shims under `src/app/(app)/estimator/`
+**Area:** `src/lib/estimating-core/`, `scripts/core-check.ts`, `scripts/estimating-golden.ts`, the 12 helper shims and `types.ts` under `src/app/(app)/estimator/`
 **Reported:** 2026-10-20 (Jeff: share the estimator as HTML with the founder for their software)
 
 Spec `docs/superpowers/specs/2026-10-20-estimator-handoff-package-design.md`; plan `docs/superpowers/plans/2026-10-20-estimating-core-extraction.md`. D1228–D1230. No behaviour change: golden totals identical on the fixtures and on the one live local system quote; core:check 0 violations.
