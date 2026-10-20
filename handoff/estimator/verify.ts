@@ -21,7 +21,13 @@
  *          survives a reload and shows in the header, a tombstone survives a reload, and Reset
  *          brings the snapshot back. Result: output/verify/estimator.json.
  *
- * Later tasks add modes (--shell, --parity, --full). Plan: PR 2 Tasks 2–3.
+ *   npm run handoff:verify -- --estimator-edit [quoteId] [--out <package dir>]
+ *
+ * --estimator-edit  the Build step's real work (Task 4): a qty edit, a catalog add and a brand-new
+ *          estimate (`?new=1`) each Save, survive a reload, and the new one gets the next EST number.
+ *          Result: output/verify/estimator-edit.json.
+ *
+ * Later tasks add modes (--shell, --parity, --full). Plan: PR 2 Tasks 2–4.
  */
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -458,6 +464,208 @@ function printEstimator(r: EstimatorResult): void {
   }
 }
 
+/* ------------------------------------------------------------------ --estimator-edit */
+
+type EditResult = { pass: boolean; id: string; steps: Array<{ step: string; ok: boolean; detail?: string }>; unexpectedUnregistered: string[] } & PageSink;
+
+type EditH = { __peakHandoff: { store: { get(c: string, id: string): Promise<unknown>; all(c: string): Promise<unknown[]>; reset(): Promise<void> } } };
+
+/** Clicks the first visible button whose trimmed text is `text` (or starts with it, `prefix`). */
+const clickButton = (page: Page, text: string, prefix = false) =>
+  page.evaluate(
+    (t, pre) => {
+      const b = [...document.querySelectorAll("button")].find((x) => {
+        const s = x.textContent?.trim() ?? "";
+        return (pre ? s.startsWith(t) : s === t) && (x as HTMLElement).offsetParent !== null && !(x as HTMLButtonElement).disabled;
+      });
+      if (!b) return false;
+      (b as HTMLButtonElement).click();
+      return true;
+    },
+    text,
+    prefix,
+  );
+
+async function waitFor(fn: () => Promise<boolean>, ms = 10_000, every = 150): Promise<boolean> {
+  const end = Date.now() + ms;
+  for (;;) {
+    if (await fn()) return true;
+    if (Date.now() > end) return false;
+    await new Promise((r) => setTimeout(r, every));
+  }
+}
+
+/** Body text plus every input's value (line descriptions can live in inputs). */
+const pageHasTextOrValue = (page: Page, text: string) =>
+  page.evaluate((t) => document.body.innerText.includes(t) || [...document.querySelectorAll("input,textarea")].some((i) => (i as HTMLInputElement).value.includes(t)), text);
+
+/** The first priced line's qty input — the est-input with no aria-label in the row that holds the first "Unit sell for …" input. */
+async function firstQtyInput(page: Page) {
+  const handle = await page.evaluateHandle(() => {
+    const unit = document.querySelector('input[aria-label^="Unit sell for "]');
+    let row: Element | null = unit?.parentElement ?? null;
+    while (row && row.querySelectorAll('input[aria-label^="Unit sell for "]').length === 1) {
+      const qty = [...row.querySelectorAll("input.est-input")].find((i) => !i.getAttribute("aria-label"));
+      if (qty) return qty;
+      row = row.parentElement;
+    }
+    return null;
+  });
+  return handle.asElement() as import("puppeteer-core").ElementHandle<HTMLInputElement> | null;
+}
+
+/**
+ * The Build step really saves (PR 2 Task 4): qty +1 → Save → reload keeps the qty and the header total;
+ * "+ Add part from catalog" → search → Add → Save → reload keeps the line; `?new=1` → add a system →
+ * Save → the header shows an EST number above every seed estimate's.
+ */
+async function estimatorEditCheck(pkgDir: string, which: string | undefined): Promise<EditResult> {
+  const index = path.join(pkgDir, "index.html");
+  if (!existsSync(index)) throw new Error(`${index} not found — run npm run handoff:build first`);
+  const data = loadSliceData(pkgDir);
+  const q = (which && which !== "all" ? data.estimates.find((x) => x.id === which) : data.estimates.find((x) => x.id === "Q-G001") ?? data.estimates[0]) ?? null;
+  if (!q) throw new Error(`no estimate${which ? ` "${which}"` : ""} in the slice`);
+  const maxSeedEstNo = Math.max(0, ...data.estimates.map((e) => (typeof e.estNo === "number" ? e.estNo : 0)));
+  const launch = await chromeLaunch();
+  if ("unavailable" in launch) throw new Error(launch.unavailable);
+  const puppeteer = (await import("puppeteer-core")).default;
+  const browser = await puppeteer.launch({ executablePath: launch.executablePath, args: launch.args, headless: true, defaultViewport: { width: 1440, height: 900 } });
+  const sink = newSink();
+  const steps: EditResult["steps"] = [];
+  const step = (name: string, ok: boolean, detail?: string) => steps.push({ step: name, ok, ...(detail ? { detail } : {}) });
+  const allowed = new Set(SMOKE_ALLOWED_UNREGISTERED);
+  const unexpected = new Set<string>();
+  const noteUnregistered = async (page: Page) => (await unregisteredOn(page)).filter((x) => !allowed.has(x)).forEach((x) => unexpected.add(x));
+  const base = pathToFileURL(index).href;
+  const url = `${base}?id=${encodeURIComponent(q.id)}`;
+  const savedFlash = (page: Page) => waitFor(() => pageHasText(page, "Saved ✓"), 10_000);
+  const saveError = (page: Page) => page.evaluate(() => /Not available in the prototype|did not go through/.test(document.body.innerText));
+  try {
+    const page = await newPage(browser, sink);
+    await page.goto(url, { waitUntil: "load" });
+    await page.waitForSelector("[data-handoff-ready]", { timeout: 15_000 });
+    // A clean overlay: this profile is fresh, but reset anyway so a rerun never builds on old edits.
+    await page.evaluate(async () => (window as unknown as EditH).__peakHandoff.store.reset());
+    await page.goto(url, { waitUntil: "load" });
+    step("estimate mounted", await waitMounted(page, sink));
+
+    // 1 — qty +1, Save, reload
+    const qtyEl = await firstQtyInput(page);
+    const qty0 = qtyEl ? Number(await qtyEl.evaluate((i) => i.value)) : NaN;
+    step("found the first line's qty", !!qtyEl && Number.isFinite(qty0), String(qty0));
+    const total0 = await readHeaderTotal(page);
+    if (qtyEl) {
+      await qtyEl.click({ count: 3 });
+      await qtyEl.type(String(qty0 + 1));
+      await page.keyboard.press("Tab");
+    }
+    const changed = await waitFor(async () => (await readHeaderTotal(page)) !== total0, 5000);
+    // The bonus lines and the $25 round re-derive in effects after the edit — wait for the figure to settle.
+    let total1 = await readHeaderTotal(page);
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      const t = await readHeaderTotal(page);
+      if (t === total1 && i >= 3) break;
+      total1 = t;
+    }
+    step("the header total moved with the qty", changed, `${total0} → ${total1}`);
+    const refreshes = () => page.evaluate(() => (window as unknown as { __peakHandoff?: { propsRefreshes?: number } }).__peakHandoff?.propsRefreshes ?? 0);
+    const refreshesBefore = await refreshes();
+    await clickButton(page, "Save");
+    const saved1 = await savedFlash(page);
+    step("Save shows Saved ✓", saved1, (await saveError(page)) ? "save refused (Not available in the prototype)" : undefined);
+    step("the save refreshed the props (router.refresh → buildEstimatorProps)", await waitFor(async () => (await refreshes()) > refreshesBefore, 3000), `${refreshesBefore} → ${await refreshes()}`);
+    await noteUnregistered(page);
+    await page.goto(url, { waitUntil: "load" });
+    await waitMounted(page, sink);
+    const qtyAfter = await firstQtyInput(page);
+    const qty1 = qtyAfter ? Number(await qtyAfter.evaluate((i) => i.value)) : NaN;
+    step("after a reload the qty is the saved one", qty1 === qty0 + 1, `${qty1} vs ${qty0 + 1}`);
+    const totalAfter = await readHeaderTotal(page);
+    step("after a reload the header total is the saved one", totalAfter === total1 && total1 !== total0, `${totalAfter} vs ${total1}`);
+    const storedValue = await page.evaluate(async (id) => ((await (window as unknown as EditH).__peakHandoff.store.get("quotes", id)) as { value?: number } | undefined)?.value ?? null, q.id);
+    const shown = Number(String(totalAfter ?? "").replace(/[^0-9.-]/g, ""));
+    step("the stored value is the header total (server-reconciled)", storedValue !== null && Math.round(shown) === storedValue, `${storedValue} vs ${totalAfter}`);
+
+    // 2 — + Add part from catalog → search → Add → Save → reload
+    const opened = await clickButton(page, "+ Add part from catalog");
+    step("+ Add part from catalog opens the picker", opened && (await waitFor(() => page.evaluate(() => !!document.querySelector('input[placeholder^="Search the catalog"]')), 3000)));
+    const search = await page.$('input[placeholder^="Search the catalog"]');
+    await search?.type("ColorSource");
+    const hit = await waitFor(() => page.evaluate(() => document.querySelectorAll(".est-sug").length > 0), 5000);
+    const hitInfo = await page.evaluate(() => {
+      const row = document.querySelector(".est-sug");
+      const desc = row?.querySelector("span span")?.textContent?.trim() ?? "";
+      const sku = (row?.querySelector("span span + span")?.textContent ?? "").split(" · ")[0].trim();
+      return { desc, sku };
+    });
+    step('searching "ColorSource" lists catalog parts', hit, `${hitInfo.desc} (${hitInfo.sku})`);
+    const added = await page.evaluate(() => {
+      const b = [...(document.querySelector(".est-sug")?.querySelectorAll("button") ?? [])].find((x) => x.textContent?.trim() === "Add");
+      b?.click();
+      return !!b;
+    });
+    step("Add puts the part on the system", added && (await waitFor(() => pageHasText(page, "✓ Added"), 3000)));
+    await clickButton(page, "Save");
+    step("Save shows Saved ✓ (catalog line)", await savedFlash(page));
+    await noteUnregistered(page);
+    await page.goto(url, { waitUntil: "load" });
+    await waitMounted(page, sink);
+    const stored = await page.evaluate(async (id) => JSON.stringify((await (window as unknown as EditH).__peakHandoff.store.get("quotes", id)) ?? null), q.id);
+    step("after a reload the added line is in the store", !!hitInfo.sku && stored.includes(`"sku":${JSON.stringify(hitInfo.sku)}`), hitInfo.sku);
+    step("after a reload the added line is on the page", !!hitInfo.desc && (await pageHasTextOrValue(page, hitInfo.desc)), hitInfo.desc);
+    await noteUnregistered(page);
+    await page.close();
+
+    // 3 — ?new=1 → add a system → Save → EST-<n> above the seed
+    const np = await newPage(browser, sink);
+    await np.goto(`${base}?new=1`, { waitUntil: "load" });
+    step("?new=1 opens a new, unsaved estimate (no EST number yet)", (await waitMounted(np, sink)) && !(await np.evaluate(() => /EST-\d+/.test(document.body.innerText))));
+    const hasSystem = await np.evaluate(() => !!document.querySelector("input.est-secname"));
+    if (!hasSystem) {
+      await clickButton(np, "+ Add system");
+      await waitFor(() => pageHasText(np, "Blank system"), 3000);
+      await clickButton(np, "Blank system", true);
+    }
+    step(hasSystem ? "the new estimate has a system (it opens with one)" : "the new estimate has a system (+ Add system → Blank system)", await waitFor(() => np.evaluate(() => !!document.querySelector("input.est-secname")), 3000));
+    await clickButton(np, "Save");
+    step("Save shows Saved ✓ (new estimate)", await savedFlash(np), (await saveError(np)) ? "save refused" : undefined);
+    const nums = await np.evaluate(() => [...document.body.innerText.matchAll(/EST-(\d+)/g)].map((m) => Number(m[1])));
+    const newNo = nums.find((n) => n > maxSeedEstNo);
+    step(`the header shows an EST number above the seed's max (${maxSeedEstNo})`, newNo !== undefined, newNo ? `EST-${newNo}` : nums.join(","));
+    const newUrl = await np.evaluate(() => window.location.search);
+    const newId = new URLSearchParams(newUrl).get("id");
+    const seedIds = new Set(data.estimates.map((e) => e.id));
+    step("the URL moved to the new estimate's id", !!newId && !seedIds.has(newId), newUrl);
+    if (newId && !seedIds.has(newId)) {
+      await np.goto(`${base}${newUrl}`, { waitUntil: "load" });
+      await waitMounted(np, sink);
+      step("after a reload the new estimate reopens with its number", newNo !== undefined && (await pageHasText(np, `EST-${newNo}`)));
+    }
+    await noteUnregistered(np);
+    await np.close();
+  } finally {
+    await browser.close();
+  }
+  const unexpectedUnregistered = [...unexpected];
+  const pass = steps.every((s) => s.ok) && unexpectedUnregistered.length === 0 && sink.pageErrors.length === 0 && sink.foreignRequests.length === 0 && sink.failedLocal.length === 0;
+  return { pass, id: q.id, steps, unexpectedUnregistered, ...sink };
+}
+
+function printEdit(r: EditResult): void {
+  console.log(`handoff:verify --estimator-edit  ${r.pass ? "PASS" : "FAIL"} (${r.id})`);
+  for (const s of r.steps) console.log(`  ${s.ok ? "ok  " : "FAIL"} ${s.step}${s.detail ? ` (${s.detail})` : ""}`);
+  console.log(`  unexpected unregistered: ${r.unexpectedUnregistered.length}`);
+  for (const x of r.unexpectedUnregistered) console.log(`    ${x}`);
+  console.log(`  page errors: ${r.pageErrors.length}`);
+  for (const e of r.pageErrors) console.log(`    ${e.split("\n").slice(0, 4).join("\n    ")}`);
+  console.log(`  foreign requests: ${r.foreignRequests.length}; failed local files: ${r.failedLocal.length}`);
+  if (r.consoleErrors.length) {
+    console.log(`  console errors (informational): ${r.consoleErrors.length}`);
+    for (const e of r.consoleErrors.slice(0, 10)) console.log(`    ${e.slice(0, 200)}`);
+  }
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const val = (name: string) => {
@@ -466,8 +674,10 @@ async function main() {
   };
   const pkgDir = path.resolve(ROOT, val("--out") ?? "output/peak-estimator-handoff");
   const est = val("--estimator");
-  if (!argv.includes("--smoke") && !est) {
-    console.error("usage: npm run handoff:verify -- --smoke | --estimator <quoteId|all> [--out <package dir>]");
+  const editAt = argv.indexOf("--estimator-edit");
+  const edit = editAt >= 0 ? (argv[editAt + 1] && !argv[editAt + 1].startsWith("--") ? argv[editAt + 1] : "") : undefined;
+  if (!argv.includes("--smoke") && !est && edit === undefined) {
+    console.error("usage: npm run handoff:verify -- --smoke | --estimator <quoteId|all> | --estimator-edit [quoteId] [--out <package dir>]");
     process.exit(2);
   }
   mkdirSync(VERIFY_DIR, { recursive: true });
@@ -482,6 +692,12 @@ async function main() {
     const r = await estimatorCheck(pkgDir, est);
     writeFileSync(path.join(VERIFY_DIR, "estimator.json"), JSON.stringify(r, null, 2) + "\n");
     printEstimator(r);
+    pass &&= r.pass;
+  }
+  if (edit !== undefined) {
+    const r = await estimatorEditCheck(pkgDir, edit || undefined);
+    writeFileSync(path.join(VERIFY_DIR, "estimator-edit.json"), JSON.stringify(r, null, 2) + "\n");
+    printEdit(r);
     pass &&= r.pass;
   }
   if (!pass) process.exit(1);

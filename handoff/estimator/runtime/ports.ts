@@ -13,6 +13,7 @@ import { can, type Perm } from "@/lib/team";
 import { DEFAULT_PRICING_TIER, PRICING_TIERS, type PricingTier } from "@/lib/identity/config";
 import { displayQuoteNumber, isEstimateNo } from "@/lib/estimate-number";
 import { compareVenueOrder } from "@/lib/venue-types";
+import { isVendorPickerType } from "@/lib/vendor-quotes/rules";
 import type { CustomerLite } from "@/app/(app)/estimator/types";
 import type { TravelLite } from "@/lib/estimating-core/types";
 import type { Office } from "@/lib/settings";
@@ -344,6 +345,12 @@ export const customers = {
     if (byId) return byId;
     const s = String(idOrName).toLowerCase();
     return lite.find((c) => c.name.toLowerCase() === s) ?? null;
+  },
+  /** Is `id` a live company whose type the vendor picker lists (vendor-quotes/rules isVendorPickerType)? */
+  isVendorCompany(id: string | null | undefined): boolean {
+    if (!id) return false;
+    const c = dir().companies.find((x) => x.id === id);
+    return !!c && isVendorPickerType(typeof c.type === "string" ? c.type : null);
   },
   /** The pricing tier key ("base", "gold"…): the attn contact's, else the company's, else "base". Margin: resolveTierFor. */
   tierFor(customerId: string | null | undefined, contactName?: string | null): string {

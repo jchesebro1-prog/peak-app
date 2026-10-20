@@ -17,6 +17,20 @@ import type { SeedCustomers, SeedRules, SeedTeamUser } from "../handoff/estimato
 import { sliceExport, type ExportV2 } from "../handoff/estimator/slice";
 import { expectedEstimatorTotals } from "../handoff/estimator/verify";
 import type { Ok } from "./test-inbox-org";
+import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
+import type { SavePayload } from "@/app/(app)/estimator/actions";
+import type { SpecSection } from "@/lib/estimating-core/types";
+import { totals } from "@/lib/estimating-core/pricing";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { DEFAULT_BONUS_RATES } from "@/lib/estimate-bonus/flags";
+import {
+  applyUpdate, buildQuote, decideApprovalGate, isApprovalGateRefusal, nextQuoteId, pushRevision, resolveSaveStatusChange, STATUS_CHANGE_FAILED, statusFailureMessage,
+} from "../handoff/estimator/runtime/quote-model";
+import { quoteRepo, withLock } from "../handoff/estimator/runtime/quote-repo";
+import { planSave, settleRewardCreditOffline, vendorQuotesForSave } from "../handoff/estimator/runtime/actions/save-core";
+import { estimatorActions, refusedEstimatorActions, REFUSED_ESTIMATOR_ACTIONS } from "../handoff/estimator/runtime/actions/estimator-actions";
+import { quotesActions } from "../handoff/estimator/runtime/actions/quotes-actions";
+import { renameMapOf } from "../handoff/estimator/runtime/readers";
 
 const FIXTURE_V2 = "docs/estimating-core/handoff-fixtures/export-v2.json";
 const GOLDEN_EXPORT = "docs/estimating-core/golden-fixtures/export.json";
@@ -520,4 +534,240 @@ export async function handoffRuntimeChecks(ok: Ok) {
   ok(e2.raw === 9100 && e2.canonical === 20150, `handoff runtime: expectedEstimatorTotals — Q-G002's ungrouped alternate is counted after normalizeSystemOrder (got ${e2.raw} → ${e2.canonical})`);
   const sentQ = expectedEstimatorTotals({ ...gq("Q-G001"), status: "sent" }, { blobs: {} });
   ok(sentQ.canonical === sentQ.raw && !sentQ.priceRound && !sentQ.bonusLines, "handoff runtime: expectedEstimatorTotals — a sent quote without bonus lines prices as stored");
+
+  await handoffActionChecks(ok);
 }
+
+/* ------------------------------------------------------------------ PR 2 Task 4: the Estimator's actions in the browser */
+
+const sec = (id: string, items: Array<Partial<SpecSection["items"][number]>>, extra: Partial<SpecSection> = {}): SpecSection =>
+  ({ id, name: id, kind: "lighting", freightPct: 0, items: items.map((it, i) => ({ id: i + 1, sku: "X", desc: "x", qty: 1, unit: "ea", cost: 50, price: 100, ...it })), ...extra }) as SpecSection;
+
+const payloadFor = (sections: SpecSection[], over: Partial<SavePayload> = {}): SavePayload => {
+  const t = totals(sections, 0);
+  return {
+    name: "Test estimate", customer: "", customerId: null, locationId: null, contactName: "", quoteNote: "", assumptions: "", installTimeframe: "TBD",
+    paymentTerms: "Unknown", category: "", value: t.grand, margin: t.margin, status: "draft", baseStatus: "draft", sections, mobs: [], groups: [],
+    vendorQuotes: [], pdfOptions: { pdfQty: true, pdfNotes: true, pdfCover: true, pdfTerms: true, pdfOptions: true, pdfPrices: true, pdfItemizedAppendix: false, pdfCutSheets: false } as SavePayload["pdfOptions"],
+    ...over,
+  };
+};
+
+export async function handoffActionChecks(ok: Ok) {
+  // --- quote-model (pure ports of stores/quotes) ---
+  ok(nextQuoteId(["Q-2044", "Q-G001", "L-9999"]).id === "Q-2045" && nextQuoteId([]).id === "Q-2042" && nextQuoteId(["Q-2044"], 2050).id === "Q-2051",
+    "handoff actions: nextQuoteId — one past the highest Q-<n>, the last minted, and the 2041 base");
+  ok(resolveSaveStatusChange("draft", "draft", "draft").kind === "unchanged" && resolveSaveStatusChange("sent", "draft", "draft").kind === "apply"
+    && resolveSaveStatusChange("draft", "draft", "sent").kind === "stalePassive" && resolveSaveStatusChange("won", "draft", "sent").kind === "staleConflict",
+    "handoff actions: resolveSaveStatusChange — unchanged / apply / stalePassive / staleConflict");
+  const built = buildQuote("Q-9", { name: "", owner: "Ann", value: 10.6, source: "estimator" }, "system", { id: "p", label: "P", stages: [{ id: "st1", label: "One", tag: "draft" }] }, 5);
+  ok(built.name === "Untitled estimate" && built.preparedBy === "Ann" && built.value === 11 && built.status === "draft" && built.pipelineId === "p" && built.stage === "st1"
+    && built.history.length === 1 && built.review.state === "none" && built.createdAt === 5, "handoff actions: buildQuote — create()'s document (defaults, rounded value, first stage, history)");
+  const upd = applyUpdate({ ...built }, { name: "N", value: 99.4, estNo: 7, bonusRecord: { x: 1 }, packageSelection: { drawings: false }, wonRev: 3 } as unknown as Partial<Quote>, 77);
+  ok(upd.name === "N" && upd.value === 99 && upd.updatedAt === 77 && upd.estNo === undefined && upd.bonusRecord === undefined && upd.packageSelection === undefined && upd.wonRev === undefined,
+    "handoff actions: applyUpdate — merges, rounds value, bumps updatedAt, never writes a number or an owned field");
+  const revDoc = { ...built, revisions: [] as QuoteRevision[] };
+  pushRevision(revDoc, "Ann", "manual", "m", 1);
+  const sentRev = pushRevision(revDoc, "Ann", "sent", "Sent to customer", 2);
+  ok(revDoc.revisions.length === 2 && sentRev.rev === 2 && sentRev.docFields?.revNo === 1 && sentRev.spec === null, "handoff actions: pushRevision — 1-based revs; a sent one stamps the next Rev");
+  const ctx = { limits: {}, roster: [{ id: "u1", name: "Ann", status: "active", canApprove: true }, { id: "u2", name: "Eve", status: "active", canApprove: false }] };
+  const g1 = decideApprovalGate("sent", { ...built, owner: "Eve" }, ctx, {}, 1, "Eve");
+  ok(!g1.ok && /approval on record before it can be sent/.test(g1.error), "handoff actions: decideApprovalGate — a non-approver can't send an unapproved quote");
+  const g2 = decideApprovalGate("sent", { ...built, owner: "Ann" }, ctx, {}, 1, "Ann");
+  ok(g2.ok && g2.stamp?.method === "self" && g2.stamp.decidedBy === "Ann", "handoff actions: decideApprovalGate — an approver owner self-approves on send");
+  ok(decideApprovalGate("lost", { ...built }, ctx).ok, "handoff actions: decideApprovalGate — lost / draft are never gated");
+  ok(statusFailureMessage(new Error("boom"), "test (expected log)") === STATUS_CHANGE_FAILED, "handoff actions: statusFailureMessage — a defect reads as the generic line");
+
+  // --- save-core (the pure half of saveQuoteAction) ---
+  const rewrite = <T,>(x: T) => x;
+  const tier = { tier: "base", margin: 0.3 };
+  const s1 = [sec("sysA", [{ qty: 2, cost: 50, price: 100 }, { sku: "LAB", qty: 4, cost: 20, price: 40, labor: true }])];
+  const plan1 = planSave(null, payloadFor(s1), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
+  ok(plan1.ok && plan1.patch.spec!.sections[0].items.some(isBonusItem), "handoff actions: planSave — a new draft gets its bonus lines server-side");
+  ok(plan1.ok && Math.abs((plan1.patch.value ?? 0) - totals(plan1.patch.spec!.sections, 0).grand) < 0.01 && plan1.patch.pricingTier === "base" && plan1.patch.source === "estimator",
+    "handoff actions: planSave — value is the server's own totals() over the stored sections; tier + source stamped");
+  const wrongValue = planSave(null, payloadFor(s1, { value: 1 }), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
+  ok(wrongValue.ok && wrongValue.valueAdjusted && wrongValue.patch.value !== 1, "handoff actions: planSave — a posted value that disagrees is replaced, never trusted");
+  const neg = planSave(null, payloadFor([sec("n", [{ price: -5 }])]), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
+  ok(!neg.ok && neg.refusedBeforeWrite === "credit", "handoff actions: planSave — a negative line outside the credit line refuses the save");
+  const bigDoc = planSave(null, payloadFor(s1, { document: { type: "doc", content: "x".repeat(10) } as unknown as SavePayload["document"] }), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
+  ok(bigDoc.ok || bigDoc.refusedBeforeWrite === "document", "handoff actions: planSave — a malformed document is sanitized or refused before any write");
+  const keepGroups = planSave({ ...built, spec: { sections: [], groups: [{ id: "g-base", name: "Base" }] } } as Quote, payloadFor(s1, { groups: undefined }), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
+  ok(keepGroups.ok && keepGroups.patch.spec!.groups?.[0]?.id === "g-base", "handoff actions: planSave — an older caller without groups keeps the stored ones");
+  ok(settleRewardCreditOffline(s1, null).ok, "handoff actions: settleRewardCreditOffline — no credit line, nothing to settle");
+  const vqSecs = [sec("v", [{ vendorQuoteId: "vq-live" }])];
+  const vqs = vendorQuotesForSave(
+    { vendorQuotes: [{ id: "vq-rev", vendor: "Old" }], revisions: [{ spec: { sections: [sec("r", [{ vendorQuoteId: "vq-rev" }])] } } as unknown as QuoteRevision] },
+    [{ id: "vq-live", vendor: "A" }, { id: "vq-orphan", vendor: "B" }] as never,
+    vqSecs, 1000, () => false,
+  );
+  ok(vqs.map((v) => v.id).sort().join() === "vq-live,vq-rev", `handoff actions: vendorQuotesForSave — keeps what a live line or a revision names, drops orphans (got ${vqs.map((v) => v.id).join()})`);
+  ok(renameMapOf(new Map([["a", "b"], ["b", "c"], ["x", "y"], ["y", "x"]])).get("a") === "c", "handoff actions: renameMapOf — a chain collapses");
+
+  // --- the store-backed repo + actions on the export-v2 slice ---
+  const exp = JSON.parse(fs.readFileSync(FIXTURE_V2, "utf8")) as ExportV2;
+  const g = sliceGlobals(sliceExport(exp).files);
+  const store = await storeFor(g);
+  const team: SeedTeamUser[] = [
+    { id: "u1", name: "Ann Admin", roles: ["Admin"], status: "active" },
+    { id: "u2", name: "Eve Estimator", roles: ["Estimator"], status: "active" },
+  ];
+  configurePorts({ store, customers: g.PEAK_CUSTOMERS as SeedCustomers, rules: g.PEAK_RULES as SeedRules, team });
+  users.setCurrent("u1");
+  const repo = quoteRepo(store);
+  const maxSeedNo = Math.max(...(await store.all<{ estNo?: number }>("quotes")).map((q) => q.estNo ?? 0));
+  const [c1, c2] = await Promise.all([repo.create({ name: "One", source: "estimator", owner: "Ann Admin" }), repo.create({ name: "Two", source: "estimator", owner: "Ann Admin" })]);
+  ok(c1.id !== c2.id && c1.estNo !== c2.estNo && (c1.estNo ?? 0) > maxSeedNo && (c2.estNo ?? 0) > maxSeedNo,
+    `handoff actions: repo.create — concurrent creates get distinct ids and numbers above the seed (${c1.id}/${c1.estNo}, ${c2.id}/${c2.estNo})`);
+  await repo.remove(c2.id);
+  const c3 = await repo.create({ name: "Three" });
+  ok(c3.id !== c2.id && (await repo.get(c2.id)) === null, "handoff actions: repo.remove tombstones; a deleted id is never minted again");
+  const order: string[] = [];
+  await Promise.all([withLock("k", async () => { await new Promise((r) => setTimeout(r, 5)); order.push("a"); }), withLock("k", async () => void order.push("b"))]);
+  ok(order.join() === "a,b", "handoff actions: withLock — one key's calls run one after another");
+
+  // status: a non-approver is refused on send; an approver self-approves, cuts the sent revision and snaps the stage
+  users.setCurrent("u2");
+  let refused: unknown = null;
+  try { await repo.setStatus(c1.id, "sent", "Eve Estimator"); } catch (e) { refused = e; }
+  ok(isApprovalGateRefusal(refused) && (await repo.get(c1.id))?.status === "draft", "handoff actions: repo.setStatus — the gate refuses an unapproved send (typed, nothing written)");
+  users.setCurrent("u1");
+  const sentQ = await repo.setStatus(c1.id, "sent", "Ann Admin");
+  ok(sentQ?.status === "sent" && sentQ.review.method === "self" && sentQ.revisions?.at(-1)?.reason === "sent" && sentQ.history.at(-1)?.to === "sent",
+    "handoff actions: repo.setStatus — an approver owner's send stamps the approval, history and the sent revision");
+  const wonQ = await repo.setStatus(c1.id, "won", "Ann Admin");
+  const acts = await store.all<{ kind: string; quoteId: string }>("activity");
+  ok(wonQ?.status === "won" && typeof wonQ.wonRev === "number" && acts.some((a) => a.kind === "won" && a.quoteId === c1.id), "handoff actions: repo.setStatus — Won records the won version and runs the onWon port (an activity row)");
+  ok((await repo.setQuotePipeline(c1.id, "bid-spec")) === null, "handoff actions: repo.setQuotePipeline — refused outside draft");
+  ok((await repo.setStatus(c1.id, "won", "Ann Admin"))?.history.length === wonQ?.history.length, "handoff actions: repo.setStatus — a same-status move is a no-op");
+
+  // the actions themselves
+  const A = estimatorActions(store);
+  const QA = quotesActions(store);
+  const q1 = (await store.get<Quote>("quotes", "Q-G001"))!;
+  const sections = (q1.spec as { sections: SpecSection[] }).sections;
+  const save1 = await A.saveQuoteAction("Q-G001", payloadFor(sections, { name: "Edited name", customer: "Alpha Schools", customerId: "c-alpha", contactName: "Pat Lee", status: q1.status, baseStatus: q1.status }));
+  const after1 = (await repo.get("Q-G001"))!;
+  ok(save1.ok && save1.id === "Q-G001" && after1.name === "Edited name" && save1.number === "EST-9001" && save1.updatedAt === after1.updatedAt,
+    `handoff actions: saveQuoteAction — an update writes the header and returns the id, number and version (${JSON.stringify({ ok: save1.ok, err: save1.error, n: save1.number })})`);
+  ok(after1.value === Math.round(totals((after1.spec as { sections: SpecSection[] }).sections, 0).grand) && (after1.spec as { sections: SpecSection[] }).sections.some((x) => x.items.some(isBonusItem)),
+    "handoff actions: saveQuoteAction — the stored sections carry the re-derived bonus lines and the stored value is their total (a re-open shows the same total)");
+  ok(save1.next !== undefined && save1.pdf === null && save1.rewardCredit === 0, "handoff actions: saveQuoteAction — next-step view, no PDF, no credit");
+  const created = await A.saveQuoteAction(null, payloadFor([sec("sysN", [{ qty: 1 }])], { name: "Brand new" }));
+  const createdDoc = created.id ? await repo.get(created.id) : null;
+  ok(created.ok && !!createdDoc && createdDoc.owner === "Ann Admin" && createdDoc.status === "draft" && /^EST-\d+$/.test(created.number ?? "") && created.pipelineId !== null,
+    `handoff actions: saveQuoteAction — a create mints the quote, numbers it and enters the pipeline (${created.id} ${created.number})`);
+  const stale = await A.saveQuoteAction(created.id, payloadFor([sec("sysN", [{ qty: 1 }])], { status: "lost", baseStatus: "sent" }));
+  ok(!stale.ok && /changed elsewhere/.test(stale.error ?? "") && (await repo.get(created.id!))?.status === "draft", "handoff actions: saveQuoteAction — a stale tab's status change is refused, the edits still save");
+  users.setCurrent("u2");
+  const gated = await A.saveQuoteAction(created.id, payloadFor([sec("sysN", [{ qty: 1 }])], { status: "sent", baseStatus: "draft" }));
+  ok(!gated.ok && /approval on record/.test(gated.error ?? "") && gated.id === created.id, "handoff actions: saveQuoteAction — a refused status advance keeps the id (the quote saved)");
+  users.setCurrent("u1");
+  const sa = await A.setStatusAction(created.id!, "lost");
+  ok(sa.ok && sa.status === "lost", "handoff actions: setStatusAction — lost is open to anyone");
+  const back = await A.setStatusAction(created.id!, "draft");
+  ok(back.ok && back.status === "draft", "handoff actions: setStatusAction — back to draft");
+  const bogus = await A.setStatusAction(created.id!, "nope" as never);
+  ok(!bogus.ok && bogus.status === null, "handoff actions: setStatusAction — an unknown status is refused");
+
+  const nameBefore = (await repo.get(created.id!))!.name;
+  const meta = await A.updateQuoteMetaAction(created.id!, { quoteNote: "Note!", name: "  ", status: "won", value: 1 } as never);
+  const metaDoc = (await repo.get(created.id!))!;
+  ok(meta.ok && metaDoc.quoteNote === "Note!" && metaDoc.name === nameBefore && metaDoc.status === "draft" && metaDoc.value !== 1,
+    `handoff actions: updateQuoteMetaAction — the header allowlist only (blank name kept; status/value ignored) (got ${JSON.stringify({ ok: meta.ok, note: metaDoc.quoteNote, name: metaDoc.name, status: metaDoc.status, value: metaDoc.value })})`);
+  const sel = await A.updateQuoteMetaAction(created.id!, { packageSelection: { drawings: false } });
+  ok(sel.ok && (await repo.get(created.id!))?.packageSelection?.drawings === false, "handoff actions: updateQuoteMetaAction — the package selection merges through its own writer");
+
+  const ppl = await A.setQuotePeopleAction(created.id!, { preparedBy: "Eve Estimator" });
+  ok(ppl.ok && ppl.preparedBy === "Eve Estimator" && (await repo.get(created.id!))?.preparedBy === "Eve Estimator", "handoff actions: setQuotePeopleAction — a roster name saves");
+  const pplBad = await A.setQuotePeopleAction(created.id!, { owner: "Nobody Here" });
+  ok(!pplBad.ok && pplBad.error === "Pick someone on the team.", "handoff actions: setQuotePeopleAction — an unknown name is refused");
+  users.setCurrent("u2");
+  const pplTake = await A.setQuotePeopleAction(created.id!, { owner: "Eve Estimator" });
+  ok(pplTake.ok && pplTake.owner === "Eve Estimator", "handoff actions: setQuotePeopleAction — anyone with create may take a quote over");
+  const pplHand = await A.setQuotePeopleAction(created.id!, { owner: "Ann Admin" });
+  ok(!pplHand.ok && /Only an approver/.test(pplHand.error ?? ""), "handoff actions: setQuotePeopleAction — a non-approver can't hand the lead to someone else (users.can)");
+  const split = await A.saveBonusSplitAction(created.id!, 60);
+  ok(!split.ok, "handoff actions: saveBonusSplitAction — approvers only");
+  users.setCurrent("u1");
+  ok((await A.saveBonusSplitAction(created.id!, 60)).ok && (await repo.get(created.id!))?.estimatorBonusSplit?.leadPct === 60, "handoff actions: saveBonusSplitAction — stores the split");
+  ok((await A.saveBonusAlternatesAction(created.id!, [])).error === "Only a won estimate records alternates here", "handoff actions: saveBonusAlternatesAction — won estimates only");
+
+  const pipeIds = (await buildEstimatorProps(store, created.id, new URLSearchParams())).pipelines.quote.map((x) => x.id);
+  const curPipe = (await repo.get(created.id!))?.pipelineId;
+  const other = pipeIds.find((x) => x !== curPipe);
+  if (other) {
+    const sp = await A.setQuotePipelineAction(created.id!, other);
+    ok(sp.ok && sp.pipelineId === other, "handoff actions: setQuotePipelineAction — a draft switches pipeline, first stage");
+  }
+  const stageBad = await A.setQuoteStageAction(created.id!, "no-such-stage");
+  ok(!stageBad.ok && /stage isn't available/.test(stageBad.error ?? ""), "handoff actions: setQuoteStageAction — a stage outside the pipeline is refused");
+
+  // catalog: search, resolve, custom part
+  const catStore = await openStore({ catalog: docs([
+    { id: "ETC:CS40", sku: "ETC:CS40", desc: "ColorSource 40 console", category: "Lighting Controls", unit: "ea", cost: 3000, list: 4500, mfr: "ETC" },
+    { id: "ETC:CSPAR", sku: "ETC:CSPAR", desc: "ColorSource PAR, XLR, black", category: "Fixtures", unit: "ea", cost: 600, list: 900, mfr: "ETC" },
+    { id: "XX:1", sku: "XX:1", desc: "Unrelated", category: "Audio", unit: "ea", cost: 1, list: 2, mfr: "Other" },
+  ]), quotes: [] }, { idb: null });
+  const CA = estimatorActions(catStore);
+  const found = await CA.searchCatalog("ColorSource");
+  ok(found.total === 2 && found.hits.every((h) => h.sku.startsWith("ETC:CS")) && found.hits[0].list > 0, `handoff actions: searchCatalog — ranks the local catalog (got ${found.hits.map((h) => h.sku).join()})`);
+  ok((await CA.searchCatalog("", "")).total === 0 && (await CA.searchCatalog("", "Audio")).hits[0]?.sku === "XX:1", "handoff actions: searchCatalog — blank query = nothing; a category alone lists it");
+  const resolved = await CA.resolveCatalogSkusAction(["etc:cs40", "NOPE"]);
+  ok(resolved["etc:cs40"]?.sku === "ETC:CS40" && !("NOPE" in resolved), "handoff actions: resolveCatalogSkusAction — case-insensitive, keyed as asked, unknown absent");
+  const dup = await CA.saveEstimatorCustomPartAction({ sku: "ETC:CS40", desc: "d", category: "", unit: "", cost: 1, list: 2, mfr: "", manufacturerPartNumber: "", priceGoodThrough: "" });
+  ok(!dup.ok && /already in the catalog/.test(dup.error), "handoff actions: saveEstimatorCustomPartAction — never overwrites a live part");
+  const made = await CA.saveEstimatorCustomPartAction({ sku: "CUST-1", desc: "Custom thing", category: "", unit: "", cost: 5, list: 9, mfr: "", manufacturerPartNumber: "", priceGoodThrough: "2026-12-31" });
+  const madeDoc = await catStore.get<{ category: string; note: string }>("catalog", "CUST-1");
+  ok(made.ok && madeDoc?.category === "Custom Parts" && madeDoc.note === "Price good through 2026-12-31" && (await CA.searchCatalog("Custom thing")).total === 1,
+    "handoff actions: saveEstimatorCustomPartAction — writes the catalog overlay; searchable at once");
+  ok(!(await CA.saveEstimatorCustomPartAction({ sku: "custom", desc: "x", category: "", unit: "", cost: 1, list: 2, mfr: "", manufacturerPartNumber: "", priceGoodThrough: "" })).ok, "handoff actions: saveEstimatorCustomPartAction — CUSTOM is not a SKU");
+  configurePorts({ store, customers: g.PEAK_CUSTOMERS as SeedCustomers, rules: g.PEAK_RULES as SeedRules, team });
+
+  // tiers / travel through the customers port
+  const tierR = await A.resolveTierAction("c-alpha", "Pat Lee");
+  ok(tierR.ok && tierR.pricingTier === "base" && tierR.label === "Base", `handoff actions: resolveTierAction — via ports (got ${JSON.stringify(tierR)})`);
+  ok((await A.travelForSelectionAction("c-alpha", "loc1"))?.miles === 12 && (await A.travelForSelectionAction(null, null)) === null && (await A.travelForSelectionAction("zz", null)) === null,
+    "handoff actions: travelForSelectionAction — the venue's travel; no customer / unknown customer → null");
+
+  // search / move / copy
+  const hits = await A.searchQuotesAction("9001", null);
+  ok(hits[0]?.id === "Q-G001" && hits[0].number === "EST-9001", "handoff actions: searchQuotesAction — the estimate number ranks first");
+  ok((await A.searchQuotesAction("", "Q-G001")).every((h) => h.id !== "Q-G001"), "handoff actions: searchQuotesAction — excludes the source");
+  const ctxSrc = { customerId: "c-alpha", locationId: "loc1", customer: "Alpha Schools", contactName: "Pat Lee" };
+  const mv = await A.moveSystemToEstimateAction(sections[0], { kind: "new" }, ctxSrc, [], "Q-G001");
+  const mvDoc = mv.ok ? await repo.get(mv.targetId) : null;
+  ok(mv.ok && !!mvDoc?.name.endsWith("(moved)") && mvDoc.customerId === "c-alpha" && mvDoc.contactName === "Pat Lee" && (mvDoc.spec as { sections: SpecSection[] }).sections.length === 1,
+    "handoff actions: moveSystemToEstimateAction — a new estimate for the source's customer, with the system");
+  const before = ((await repo.get(created.id!))!.spec as { sections: SpecSection[] }).sections.length;
+  const mvEx = await A.moveSystemToEstimateAction(sections[0], { kind: "existing", quoteId: created.id! }, ctxSrc);
+  const exSecs = ((await repo.get(created.id!))!.spec as { sections: SpecSection[] }).sections;
+  const exIds = exSecs.flatMap((x) => x.items.map((it) => `${x.id}:${it.id}`));
+  ok(mvEx.ok && exSecs.length === before + 1 && new Set(exIds).size === exIds.length, "handoff actions: moveSystemToEstimateAction — an existing target gains the system, ids unique");
+  const vqSec = sec("sysVQ", [{ vendorQuoteId: "vq-carry", sku: "VQ" }, { sku: "PLAIN" }]);
+  const mvVq = await A.moveSystemToEstimateAction(vqSec, { kind: "existing", quoteId: created.id! }, ctxSrc, [{ id: "vq-carry", vendor: "Vend" }, { id: "vq-stray", vendor: "Other" }] as never);
+  const tgtVq = ((await repo.get(created.id!))!.vendorQuotes ?? []) as Array<{ id: string; addedAt?: number }>;
+  ok(mvVq.ok && tgtVq.map((v) => v.id).join() === "vq-carry" && typeof tgtVq[0].addedAt === "number",
+    `handoff actions: moveSystemToEstimateAction — only the vendor quotes the moved lines name travel, stamped (got ${JSON.stringify(tgtVq.map((v) => v.id))})`);
+  ok(!(await A.moveSystemToEstimateAction(sections[0], { kind: "existing", quoteId: "Q-NOPE" }, ctxSrc)).ok, "handoff actions: moveSystemToEstimateAction — an unknown target is refused");
+  const cpSame = await A.copySystemToEstimateAction(sections[0], { kind: "same" }, { ...ctxSrc, tierMargin: 0.3 });
+  ok(cpSame.ok && cpSame.kind === "same" && cpSame.section.id !== sections[0].id && cpSame.section.items.length > 0, "handoff actions: copySystemToEstimateAction — same: returns the re-priced section, writes nothing");
+  const cpNew = await A.copySystemToEstimateAction(sections[0], { kind: "new" }, { ...ctxSrc, tierMargin: 0.3 });
+  const cpId = cpNew.ok && cpNew.kind !== "same" ? cpNew.targetId : "";
+  ok(!!cpId && (await repo.get(cpId))?.name.endsWith("(copy)") === true && (await repo.get(cpId))?.pricingTier === "base",
+    "handoff actions: copySystemToEstimateAction — new: a copy estimate stamped with the destination tier");
+
+  // quotes/actions
+  const fd = new FormData();
+  fd.set("id", cpId);
+  fd.set("status", "lost");
+  await QA.setQuoteStatus(fd);
+  ok(!!cpId && (await repo.get(cpId))?.status === "lost", "handoff actions: setQuoteStatus — the hub's form action moves the status");
+  const del = await QA.deleteQuoteAction(cpId);
+  ok(del.ok && !!cpId && (await repo.get(cpId)) === null, "handoff actions: deleteQuoteAction — a tombstone");
+
+  // refusals
+  const ref = refusedEstimatorActions();
+  ok(REFUSED_ESTIMATOR_ACTIONS.every((n) => (ref[n] as () => { ok: boolean; error: string })().error === "Not available in the prototype"), "handoff actions: the refused actions return NOT_IN_PROTOTYPE");
+}
+

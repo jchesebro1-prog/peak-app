@@ -6,16 +6,13 @@
  * they do). Server-only features are fixed off (see FIXED). Plan: PR 2 Task 3.
  */
 import type { Quote, QuoteReview } from "@/lib/stores/quotes";
-import type { CatalogPart } from "@/lib/stores/catalog";
 import type { CustomerLite, EstimatorProps, InitialQuote, PaymentTerms, SpecSection, TrackPart, TravelLite, VendorQuote } from "@/app/(app)/estimator/types";
 import { DEFAULT_PACKAGE_SELECTION, normalizePackageSelection } from "@/lib/estimate-output/package-selection";
-import { allAssembliesFrom, sanitizeFixtureAssemblies, type FixtureRecord } from "@/lib/fixture-assemblies";
-import { assemblyToFixture, normalizeFixtureRow, type RawFixtureRow } from "@/lib/fixtures-convert";
+import { allAssembliesFrom } from "@/lib/fixture-assemblies";
 import { fabricAreaRateOf, sewingPctFrom, SEWING_PCT_ID } from "@/lib/design/curtain-pricing";
 import { isFabricPart } from "@/lib/fabric-part";
 import { normalizeQuotePipeline, resolvePipelines } from "@/lib/pipelines";
 import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/fixture-rates";
-import { bonusRatesFrom, BONUS_ESTIMATOR_RATE_ID, BONUS_PACKAGE_RATE_ID } from "@/lib/estimate-bonus/flags";
 import { DEFAULT_FREIGHT_RULE, FREIGHT_RATE_IDS, type FreightRule } from "@/lib/freight-rule";
 import { sanitizeTrackSeriesBlob, seriesSkus, TRACK_SERIES_BLOB } from "@/lib/track-series";
 import { sanitizeSystemCategories, SYSTEM_CATEGORIES_BLOB, type CategoryOption } from "@/lib/system-categories";
@@ -35,6 +32,9 @@ import { approvalHolds, reviewLimitChip, reviewLimitsFrom, type ReviewLimitConte
 import { can as roleCan } from "@/lib/team";
 import type { HandoffStore } from "../store";
 import { blobData, customers as customerPort, refreshPortsFromStore, resolveTierFor, settingsView, users, type TeamUser } from "../ports";
+import { bonusRatesNow, bySkuResolver, generalRate, liveCatalog, listFixtures } from "../readers";
+
+export { bySkuResolver };
 
 /** The page's server-only props, fixed for the prototype (spec: no Blob, no Assist, no tasks/templates/spec records). */
 export const FIXED = {
@@ -199,43 +199,6 @@ export function nextStepFor(q: QuoteDoc, viewer: TeamUser, roster: TeamUser[], r
   });
 }
 
-/** A general Estimating Rules rate (pricing.ts value() for store "general"): pricing_rules[id] ?? its registry default. */
-function generalRate(id: string, def: number): number {
-  const v = blobData("pricing_rules")[id];
-  return v != null && typeof v === "number" ? v : def;
-}
-
-/** stores/fixtures listFixtures over the store: live rows normalized; until converted, the settings-backed assemblies no row holds. By label, then id. */
-async function listFixtures(store: HandoffStore, settings: Record<string, unknown>): Promise<FixtureRecord[]> {
-  const rows = (await store.all<RawFixtureRow>("fixtures")).map(normalizeFixtureRow);
-  const flag = blobData("fixtures_convert") as { convertedAt?: unknown };
-  if (!(typeof flag.convertedAt === "number" && flag.convertedAt > 0)) {
-    // The slice holds live rows only, so a soft-deleted id can't be told apart here (the app checks includeDeleted).
-    const have = new Set(rows.map((r) => r.id));
-    for (const a of sanitizeFixtureAssemblies(settings.fixtureAssemblies)) if (!have.has(a.id)) rows.push(assemblyToFixture(a, 0));
-  }
-  return rows.sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
-}
-
-/**
- * catalog getManyBySku over the rows the slice holds: the live part for each sku, following `renames`
- * (old sku → renamedTo, from the retired stubs #304 leaves behind) up to 8 hops. A redirect that leads
- * nowhere live (missing, a cycle, more than 8 hops) is absent, as in the app.
- */
-export function bySkuResolver<P extends Pick<CatalogPart, "sku">>(rows: readonly P[], renames: ReadonlyMap<string, string> = new Map()): (sku: string) => P | undefined {
-  const map = new Map(rows.map((p) => [p.sku, p]));
-  return (sku) => {
-    let cur: string | undefined = sku;
-    for (let hop = 0; cur !== undefined && hop <= 8; hop++) {
-      const live = map.get(cur);
-      if (live) return live;
-      const next = renames.get(cur);
-      cur = next && next !== cur ? next : undefined;
-    }
-    return undefined;
-  };
-}
-
 /** Converts URLSearchParams into the page's searchParams record (repeated keys → arrays). */
 function spRecord(search: URLSearchParams): Record<string, string | string[] | undefined> {
   const out: Record<string, string | string[] | undefined> = {};
@@ -268,13 +231,13 @@ export async function buildEstimatorProps(store: HandoffStore, quoteId: string |
   const q = raw ? normalizeQuotePipeline(raw as QuoteDoc & { status: string }, pipelines) : null;
   // The page redirects a service quote to its own builder (estimatorShouldRedirect); the slice holds system estimates only.
   // The catalog collection is live parts only: retired-SKU stubs live in store.catalogRenames, for the resolver alone.
-  const catalogRows = (await store.all<CatalogPart & { id: string }>("catalog")).map((p) => (p.sku ? p : { ...p, sku: p.id }));
+  const catalogRows = await liveCatalog(store);
   const fixtures = await listFixtures(store, settings);
   const roster = users.all();
   const fixtureRates: FixtureRates = { ...FIXTURE_RATE_DEFAULTS, ...(blobData("fixture_rates") as Partial<FixtureRates>) };
   const general = blobData("pricing_rules");
   const curtainSewingPct = sewingPctFrom(general[SEWING_PCT_ID]);
-  const bonusRates = bonusRatesFrom(general[BONUS_PACKAGE_RATE_ID], general[BONUS_ESTIMATOR_RATE_ID]);
+  const bonusRates = bonusRatesNow();
   const freightRule: FreightRule = {
     basePct: generalRate(FREIGHT_RATE_IDS.base, DEFAULT_FREIGHT_RULE.basePct),
     stepMiles: generalRate(FREIGHT_RATE_IDS.stepMiles, DEFAULT_FREIGHT_RULE.stepMiles),
