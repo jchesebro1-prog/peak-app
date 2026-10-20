@@ -10,7 +10,7 @@
  * that imports it — that import is the edge to cut. An import TypeScript
  * cannot resolve is an edge too: a Node built-in (fs, node:crypto) or a
  * forbidden package (server-only) is refused by name, anything else is refused
- * as unverifiable. A file opening with "use server" / "use client" is refused.
+ * as unverifiable. A file whose directive prologue holds "use server" / "use client" is refused.
  *
  *   npm run core:check   → prints the closure size; exits 1 on any violation
  *   test:specs           → coreCheckChecks(ok)
@@ -80,7 +80,8 @@ export function whyForbidden(rel: string): string | null {
 }
 
 /** Every module a file names: import/export … from (incl. `export * as ns`,
- *  which ts.preProcessFile misses), `import("x")` types and dynamic import(). */
+ *  which ts.preProcessFile misses), `import("x")` types, dynamic import() and
+ *  CommonJS `require("x")` calls. */
 export function moduleSpecifiers(sf: ts.SourceFile): string[] {
   const out: string[] = [];
   const visit = (node: ts.Node) => {
@@ -92,6 +93,8 @@ export function moduleSpecifiers(sf: ts.SourceFile): string[] {
       out.push(node.argument.literal.text);
     } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) {
       out.push(node.arguments[0].text);
+    } else if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "require" && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) {
+      out.push(node.arguments[0].text);
     }
     ts.forEachChild(node, visit);
   };
@@ -99,11 +102,13 @@ export function moduleSpecifiers(sf: ts.SourceFile): string[] {
   return out;
 }
 
-/** The "use server" / "use client" directive a file opens with, if any. */
+/** The "use server" / "use client" directive a file opens with, if any — the
+ *  whole directive prologue (the leading run of string-literal statements), so
+ *  `"use strict"; "use client"` is caught. */
 export function fileDirective(sf: ts.SourceFile): string | null {
-  const first = sf.statements[0];
-  if (first && ts.isExpressionStatement(first) && ts.isStringLiteral(first.expression)) {
-    const t = first.expression.text;
+  for (const st of sf.statements) {
+    if (!(ts.isExpressionStatement(st) && ts.isStringLiteral(st.expression))) break;
+    const t = st.expression.text;
     if (t === "use server" || t === "use client") return t;
   }
   return null;
@@ -174,6 +179,12 @@ export async function coreCheckChecks(ok: Ok) {
   ok(moduleSpecifiers(probe).join(",") === "a,b,c,d,e", "core:check: moduleSpecifiers sees export * as, import type, import() types, re-exports and dynamic import()");
   ok(moduleSpecifiers(ts.createSourceFile("p2.ts", 'import fs = require("fs");', ts.ScriptTarget.ES2017)).join(",") === "fs",
     "core:check: moduleSpecifiers sees import x = require()");
+  ok(moduleSpecifiers(ts.createSourceFile("p3.ts", 'const fs = require("fs"); const n = require(name); foo("zz");', ts.ScriptTarget.ES2017)).join(",") === "fs",
+    "core:check: moduleSpecifiers sees CommonJS require(\"x\") calls (string literal only)");
+  ok(fileDirective(ts.createSourceFile("d1.ts", '"use strict";\n"use client";\nexport const a = 1;', ts.ScriptTarget.ES2017)) === "use client" &&
+    fileDirective(ts.createSourceFile("d2.ts", '"use strict";\nexport const a = 1;', ts.ScriptTarget.ES2017)) === null &&
+    fileDirective(ts.createSourceFile("d3.ts", 'export const a = 1;\n"use client";', ts.ScriptTarget.ES2017)) === null,
+    "core:check: fileDirective scans the whole directive prologue and stops at the first real statement");
   ok(whyForbidden("unresolved:fs") === "Node built-in" && whyForbidden("unresolved:node:crypto") === "Node built-in" &&
     whyForbidden("unresolved:server-only") === 'server/UI package "server-only"' &&
     whyForbidden("unresolved:@vercel/blob/client") === 'server/UI package "@vercel/blob"' &&
@@ -188,9 +199,14 @@ export async function coreCheckChecks(ok: Ok) {
       ["node:fs", 'import "node:fs";\nexport const a = 1;', "Node built-in"],
       ["fs", 'import { readFileSync } from "fs";\nexport const a = readFileSync;', "Node built-in"],
       ["import = require", 'import fs = require("fs");\nexport const a = fs;', "Node built-in"],
+      ["require()", 'const fs = require("fs");\nexport const a = fs;', "Node built-in"],
       ["use server file", 'import { b } from "./b";\nexport const a = b;', 'client/server directive "use server"'],
+      ["use client file", 'import { d } from "./d";\nexport const a = d;', 'client/server directive "use client"'],
+      ["use strict + use client prologue", 'import { e } from "./e";\nexport const a = e;', 'client/server directive "use client"'],
     ];
     fs.writeFileSync(path.join(tmp, "b.ts"), '"use server";\nexport const b = 1;');
+    fs.writeFileSync(path.join(tmp, "d.ts"), '"use client";\nexport const d = 1;');
+    fs.writeFileSync(path.join(tmp, "e.ts"), '"use strict";\n"use client";\nexport const e = 1;');
     for (const [name, src, why] of cases) {
       fs.writeFileSync(path.join(tmp, "entry.ts"), src);
       const rep = coreReport(tmp, "entry.ts");
