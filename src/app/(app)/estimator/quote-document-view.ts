@@ -1,4 +1,5 @@
-import { systemFreight, systemItemsRev, systemSellTotal } from "./pricing";
+import { systemSellTotal } from "./pricing";
+import { systemPrintsInBody } from "@/lib/estimating-core/pricing";
 import type { SpecSection } from "./types";
 import type { QuoteDocumentProps } from "./quote-document";
 import type { SystemGroup } from "@/lib/estimate-groups/groups";
@@ -11,11 +12,6 @@ import type { PackageDoc } from "@/lib/package-doc/types";
  * predicate is QuoteDocument's own `previewSections` filter, verbatim.
  */
 
-/** QuoteDocument's `previewSections` filter: a system prints in the body
- *  only when it carries some revenue. */
-export function systemPrintsInBody(sec: SpecSection): boolean {
-  return systemItemsRev(sec) > 0 || systemFreight(sec) > 0 || systemSellTotal(sec) > 0;
-}
 
 /** Estimator Phase 2a — a group heading row on the customer document: one per
  *  group with at least one PRINTED system (systemPrintsInBody), placed before
@@ -144,3 +140,5 @@ export function bomViewProps(p: QuoteDocumentProps): QuoteDocumentProps {
 export function offersBomView(sections: SpecSection[], detail: "itemized" | "sectioned", document?: PackageDoc | null): boolean {
   return appendixSystemIds(sections, documentApplies(document) ? "sectioned" : detail).length > 0;
 }
+
+export { systemPrintsInBody };
