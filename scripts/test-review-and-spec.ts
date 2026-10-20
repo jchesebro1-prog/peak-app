@@ -70143,3 +70143,32 @@ async function pkg333ReviewStoreChecks(): Promise<void> {
   const miss = await Q.setPackageSelection(fixtureId(333, "nope"), { drawings: false });
   ok(!miss.ok, "#333 review store: an unknown quote → not ok");
 }
+
+/* --- BOM quote PDF (2026-10-20 spec): Build package → BOM quote → Download PDF / Open PDF ↗ --- */
+import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate-output/bom-pdf";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const has = (p: string) => existsSync(join(process.cwd(), p));
+  ok(bq1File("EST-1234") === "EST-1234 BOM.pdf" && bq1File("") === "Estimate BOM.pdf" && bq1File("A/B") === "A_B BOM.pdf", "BOM PDF: \"<number> BOM.pdf\", Estimate when blank, unsafe characters → _");
+  ok(bq1Path("Q-1", true) === "/api/quotes/Q-1/bom-pdf?download=1" && bq1Path("Q 1", false) === "/api/quotes/Q%201/bom-pdf", "BOM PDF: bomPdfPath encodes the id; download adds ?download=1");
+  const page = rd("src/app/print/quote/[id]/page.tsx");
+  ok(page.includes('import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";') && /const bom = \(Array\.isArray\(sp\.view\) \? sp\.view\[0\] : sp\.view\) === "bom";/.test(page) && page.includes("<QuoteDocument {...bomViewProps(doc)} rewardsLine={purchasePerksDocLine(perks)} />"),
+    "BOM PDF print: ?view=bom renders bomViewProps(doc) — the saved BOM preview's own transform");
+  ok(page.includes("!bom && normalizePdfOptions(q.pdfOptions).pdfCutSheets") && page.indexOf("if (bom)") < page.indexOf("keyProductPhotoDataUris("),
+    "BOM PDF print: the BOM view appends no cut sheets and reads no key-product photos");
+  ok(page.indexOf('tokenOk(t, "quote", id)') > -1 && page.indexOf('tokenOk(t, "quote", id)') < page.indexOf("getQuote("), "BOM PDF print: the quote token is still checked before any read");
+  const route = has("src/app/api/quotes/[id]/bom-pdf/route.ts") && has("src/lib/estimate-output/bom-pdf-server.ts")
+    ? rd("src/app/api/quotes/[id]/bom-pdf/route.ts") + rd("src/lib/estimate-output/bom-pdf-server.ts") : "";
+  ok(route.includes("export const maxDuration = 60;") && route.includes("await requireUser();") && route.includes("printOriginFor(process.env,") &&
+     route.includes('signPrintToken(secret, "quote", q.id, Date.now())') && route.includes("&view=bom") && route.includes("renderPrintRouteToPdf(") && route.includes("PdfRenderUnavailable") &&
+     route.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && route.includes("BOM_RENDER_TIMEOUT_MS = 45_000") && route.includes("BOM_RENDER_DEADLINE_MS = 55_000") &&
+     route.includes("bomPdfFileName(displayQuoteNumber(q))") && route.includes('"x-content-type-options": "nosniff"') && route.includes('"cache-control": "private, no-store"'),
+    "BOM PDF route: signed-in only, 60 s, the shared print origin, system quotes only, the quote token + view=bom, \"EST-#### BOM.pdf\"");
+  const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
+  ok(tab.includes('downloadPdf: "Download PDF"') && tab.includes('openPdf: "Open PDF ↗"') && tab.includes('saveFirst: "Save first — the PDF prints the saved estimate."') && tab.includes('saveToCreate: "Save to create the PDF."'),
+    "BOM PDF tab: the four copy strings");
+  ok(tab.includes("href={bomPdfPath(loadedId, true)}") && tab.includes("href={bomPdfPath(loadedId, false)}") && tab.includes("{pdfDirty && ") && !/from "@\/lib\/stores\//.test(tab),
+    "BOM PDF tab: Download / Open use bomPdfPath, the save-first note follows pdfDirty, and the tab still imports no store");
+  const smoke = rd("scripts/smoke-routes.ts");
+  ok(smoke.includes('{ route: "/api/quotes/Q-0/bom-pdf", expectNotFound: true }') && smoke.includes('{ route: "/print/quote/Q-2041?view=bom", expectNotFound: true }'), "BOM PDF: smoke covers the 404 paths");
+}

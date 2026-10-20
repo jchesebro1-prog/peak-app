@@ -4,6 +4,7 @@ import { memo, useMemo, useState, type CSSProperties } from "react";
 import QuoteDocument, { QUOTE_WEB_EMBED_CSS } from "../quote-document";
 import { liveBomDocumentProps } from "@/lib/estimate-output/live-bom";
 import { previewPath } from "@/lib/estimate-output/package-preview";
+import { bomPdfPath } from "@/lib/estimate-output/bom-pdf";
 import type { EstimatorState } from "../use-estimator-state";
 
 /** Copy for the BOM quote tab (spec 2026-10-12 §4.3). */
@@ -11,6 +12,10 @@ export const BOM_TAB_COPY = {
   live: "Live",
   liveNote: "shows unsaved changes. The client sees this view once it's saved and sent.",
   openSaved: "Open saved preview ↗",
+  downloadPdf: "Download PDF",
+  openPdf: "Open PDF ↗",
+  saveFirst: "Save first — the PDF prints the saved estimate.",
+  saveToCreate: "Save to create the PDF.",
   pricesHidden: "Prices are hidden on client documents (Client package → Line detail).",
   empty: "Add a system on Build to see the BOM.",
 } as const;
@@ -25,7 +30,7 @@ const LINK: CSSProperties = { color: "var(--accent)", fontWeight: 600, textDecor
  * quoteDocumentDataFor — the saved preview's own path), so every edit on
  * Build shows on the next render with no network call. Read-only. Code-split
  * by the shell (next/dynamic), so QuoteDocument and the letterhead reach only
- * this chunk.
+ * this chunk. Download PDF / Open PDF ↗ (2026-10-20) print the SAVED estimate's BOM view through /api/quotes/[id]/bom-pdf.
  */
 type LiveBomInput = Parameters<typeof liveBomDocumentProps>[0];
 
@@ -65,6 +70,7 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
     logoDark,
     purchasePerksDocLine,
     loadedId,
+    pdfDirty,
   } = s;
   const portal = initial.portal;
   // #333 review (K): the input is a cheap memo; the props (and the document)
@@ -115,6 +121,21 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
             <a href={previewPath(loadedId, "bom")} target="_blank" rel="noopener noreferrer" style={LINK}>
               {BOM_TAB_COPY.openSaved}
             </a>
+          )}
+          {loadedId ? (
+            <>
+              <a href={bomPdfPath(loadedId, true)} style={LINK}>
+                {BOM_TAB_COPY.downloadPdf}
+              </a>
+              <a href={bomPdfPath(loadedId, false)} target="_blank" rel="noopener noreferrer" style={LINK}>
+                {BOM_TAB_COPY.openPdf}
+              </a>
+              {pdfDirty && <span style={{ color: "#8a6d1f" }}>{BOM_TAB_COPY.saveFirst}</span>}
+            </>
+          ) : (
+            <span aria-disabled="true" style={{ color: "#9aa0ab", fontWeight: 600 }}>
+              {BOM_TAB_COPY.downloadPdf} — {BOM_TAB_COPY.saveToCreate}
+            </span>
           )}
           {!pdfOpts.pdfPrices && <span style={{ flexBasis: "100%", color: "#8a6d1f" }}>{BOM_TAB_COPY.pricesHidden}</span>}
         </div>
