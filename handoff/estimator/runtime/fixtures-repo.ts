@@ -33,7 +33,7 @@ async function inMemoryFixture(id: string): Promise<FixtureRecord | null> {
 
 /** Every id that has a row — live, soft-deleted (marker) or a deleted seed doc. Insert-if-absent and the settings fallback both check it. */
 export async function fixtureIdsWithRows(store: HandoffStore): Promise<Set<string>> {
-  return new Set([...(await store.all<StoredFixtureRow>("fixtures")), ...(await store.allIncludingDeleted<StoredFixtureRow>("fixtures"))].map((r) => r.id));
+  return new Set((await store.allIncludingDeleted<StoredFixtureRow>("fixtures")).map((r) => r.id));
 }
 
 /** stores/fixtures getFixture: a live row normalized, or — while unconverted and no row holds the id — the settings-backed record. A soft-deleted id reads as null. */

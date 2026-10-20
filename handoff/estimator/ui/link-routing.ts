@@ -12,8 +12,8 @@
  * as well as on the document covers a React handler that stops propagation (React calls the native
  * stopPropagation at the root, which still runs the root's other listeners — this one is added after React's).
  *
- * Modified clicks (⌘ / ctrl / shift / alt) and middle-clicks (`auxclick`, button 1) on an app path would open a dead
- * tab (file:///estimator… or <host>/estimator…), so they are claimed too: a path that maps to a prototype route opens
+ * Modified clicks (⌘ / ctrl / shift / alt), middle-clicks (`auxclick`, button 1) and plain clicks on a `target="_blank"`
+ * link to an app path would open a dead tab (file:///estimator… or <host>/estimator…), so they are claimed too: a path that maps to a prototype route opens
  * that route's hash URL in a new tab (the current page without its hash or the Estimator's own params, plus the
  * route); an app path the prototype has shows the "Not part of the prototype" notice; a preview route (middle-click;
  * installPreviewRouting already claims the others) opens the in-window overlay.
@@ -37,10 +37,12 @@ const roots = new WeakSet<Element>();
 function handle(e: MouseEvent, aux: boolean): void {
   if (e.defaultPrevented) return;
   if (aux ? e.button !== 1 : e.button !== 0) return;
-  const modified = aux || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey;
   const a = (e.target as Element | null)?.closest?.("a");
   const href = a?.getAttribute("href");
   if (!href) return;
+  // A `target="_blank"` link opens a new tab in the app (the Assembly form's Submittal link keeps its open draft alive
+  // that way); in place it would drop the draft, since a hash navigation fires no beforeunload. Treated as a modified click.
+  const modified = aux || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (a as HTMLAnchorElement).target === "_blank";
   const preview = previewTargetOf(href);
   if (preview) {
     // A left click (modified or not) was claimed by installPreviewRouting's capture listener; a middle-click was not.

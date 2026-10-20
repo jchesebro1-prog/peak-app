@@ -17,6 +17,7 @@
  */
 import { seedCatalog, seedEstimates, seedFixtures, seedMeta, seedRules, type SeedEstimate, type SeedFixture, type SeedMeta, type SeedPart, type SeedRules } from "./seed";
 
+// "fixtures" rows with `deleted: true` are soft-delete markers — readers must skip them (use readers.listFixtures).
 export type Coll = "quotes" | "catalog" | "fixtures" | "blobs" | "settings" | "reviewComments" | "activity" | "intros" | "meta";
 
 export const COLLS: readonly Coll[] = ["quotes", "catalog", "fixtures", "blobs", "settings", "reviewComments", "activity", "intros", "meta"];

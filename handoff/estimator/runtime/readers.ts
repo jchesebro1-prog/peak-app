@@ -14,6 +14,7 @@ import { can as roleCan } from "@/lib/team";
 import { sanitizeIntroList, type SystemIntro } from "@/lib/narrative/intros";
 import type { HandoffStore } from "./store";
 import { blobData, settingsView, users } from "./ports";
+import { fixturesConvertedNow } from "./fixtures-repo";
 
 /** A catalog part as the store holds it (the slice keys parts by sku; `sku` defaults to the id). */
 export type LivePart = CatalogPart & { id: string };
@@ -43,6 +44,7 @@ export function bySkuResolver<P extends Pick<CatalogPart, "sku">>(rows: readonly
 }
 
 /**
+ * (The "fixtures" collection also holds soft-delete markers — `deleted: true` rows — which readers must skip: use this.)
  * stores/fixtures listFixtures over the store: live rows normalized; until converted, the settings-backed assemblies no
  * row holds. By label, then id. A soft-delete marker row (`deleted: true`, written by fixtures-repo.ts removeFixtureLocal)
  * is not listed but still counts as a row, as is a deleted seed doc — a deleted id is never served from settings.
@@ -50,8 +52,7 @@ export function bySkuResolver<P extends Pick<CatalogPart, "sku">>(rows: readonly
 export async function listFixtures(store: HandoffStore, settings: Record<string, unknown> = settingsView()): Promise<FixtureRecord[]> {
   const stored = await store.all<RawFixtureRow & { deleted?: unknown }>("fixtures");
   const rows = stored.filter((r) => r.deleted !== true).map(normalizeFixtureRow);
-  const flag = blobData("fixtures_convert") as { convertedAt?: unknown };
-  if (!(typeof flag.convertedAt === "number" && flag.convertedAt > 0)) {
+  if (!fixturesConvertedNow()) {
     const have = new Set([...stored, ...(await store.allIncludingDeleted<{ id: string }>("fixtures"))].map((r) => r.id));
     for (const a of sanitizeFixtureAssemblies(settings.fixtureAssemblies)) if (!have.has(a.id)) rows.push(assemblyToFixture(a, 0));
   }

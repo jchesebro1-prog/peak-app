@@ -293,11 +293,15 @@
     },
     {
       "port": "handoff/estimator/runtime/fixtures-repo.ts",
-      "what": "the fixtures store's getFixture / createFixture / updateFixture / removeFixture (soft delete as a marker row)",
+      "what": "the fixtures store's getFixture / createFixture / updateFixture / removeFixture (soft delete as a marker row), and fixtures-migrate fixturesConverted",
       "originals": [
         {
           "path": "src/lib/stores/fixtures.ts",
           "sha256": "90c7b33fcce8c63a815a7229ef8811a03943c9008d2c0ae9461cd73c4f6f855a"
+        },
+        {
+          "path": "src/lib/fixtures-migrate.ts",
+          "sha256": "e7cfbd8d5a9afcbfda7df7bc1803ffac48d4297745ee3abd2e1fc54ebe79be99"
         }
       ]
     },

@@ -251,6 +251,60 @@ export async function assembliesCheck(pkgDir: string): Promise<AssembliesResult>
     step(`…stored as a rack (scope Audio) with ${partC.sku} placed on the elevation`, !!savedR && savedR.kind === "rack" && savedR.scope === "Audio" && placed.some((p) => p.sku === partC.sku), JSON.stringify(placed.map((p) => ({ sku: p.sku, ruStart: p.ruStart, ruHeight: p.ruHeight }))));
     const rowR = (await listRows(page)).find((r) => r.label === RACK_LABEL);
     step("…and its list row shows the rack's scope and RU line", !!rowR && /Rack · Audio/i.test(rowR.text) && /RU/.test(rowR.text), rowR?.text.replace(/\s+/g, " ").slice(0, 160));
+    // 4b — the form's own Submittal link (target="_blank") opens a new tab, so an unsaved draft survives
+    const rackRowButton = (text: string) =>
+      page.evaluate(
+        (label, t) => {
+          const h = [...document.querySelectorAll("[data-handoff-assemblies] span")].find((x) => x.textContent?.trim() === label);
+          let row: Element | null | undefined = h;
+          while (row && ![...row.querySelectorAll("button")].some((b) => b.textContent?.trim() === t)) row = row.parentElement;
+          const b = [...(row?.querySelectorAll("button") ?? [])].find((x) => x.textContent?.trim() === t) as HTMLButtonElement | undefined;
+          b?.click();
+          return !!b;
+        },
+        RACK_LABEL,
+        text,
+      );
+    const FORM_LINK = 'a[title^="Opens the saved rack"]';
+    const opened = (await rackRowButton("Edit")) && (await waitFor(() => page.evaluate((sel) => !!document.querySelector(sel), FORM_LINK), 5000));
+    step("Edit opens the saved rack in the form, with its Submittal link", opened);
+    const labelSel = 'input[placeholder^="e.g. AV head-end rack"]';
+    await page.click(labelSel);
+    await page.keyboard.press("End");
+    await page.type(labelSel, " (unsaved)");
+    const dirtyBefore = () =>
+      page.evaluate(() => {
+        const ev = new Event("beforeunload", { cancelable: true });
+        window.dispatchEvent(ev);
+        return ev.defaultPrevented;
+      });
+    step("…the edit makes the draft dirty (a beforeunload would ask first)", await waitFor(dirtyBefore, 3000));
+    const hashBefore = await page.evaluate(() => location.hash);
+    const newTarget = new Promise<string | null>((resolve) => {
+      const t = setTimeout(() => resolve(null), 5000);
+      browser.once("targetcreated", (tg) => {
+        clearTimeout(t);
+        resolve(tg.url());
+      });
+    });
+    const linkClicked = await page.evaluate((sel) => {
+      const a = document.querySelector(sel) as HTMLAnchorElement | null;
+      a?.click();
+      return !!a && a.target === "_blank";
+    }, FORM_LINK);
+    const openedUrl = await newTarget;
+    // The new tab's url may still be about:blank when the target is created: look it up once it has navigated.
+    const tabUrls = async () => (await browser.pages()).map((p) => p.url());
+    const wantHash = `#/assemblies/rack/${encodeURIComponent(savedR?.id ?? "")}`;
+    const gotTab = linkClicked && (await waitFor(async () => (await tabUrls()).some((u) => u.endsWith(wantHash)), 6000));
+    step("clicking the form's Submittal link (target=_blank) opens a NEW tab at #/assemblies/rack/<id>", !!gotTab && openedUrl !== null, JSON.stringify({ created: openedUrl, tabs: await tabUrls() }).slice(0, 300));
+    step("…the original page is still on #/assemblies", (await page.evaluate(() => location.hash)) === hashBefore && hashBefore === "#/assemblies", hashBefore);
+    step("…and its draft is still dirty (edit kept, beforeunload still asks)", (await dirtyBefore()) && (await page.evaluate((sel) => (document.querySelector(sel) as HTMLInputElement | null)?.value.endsWith("(unsaved)") ?? false, labelSel)));
+    for (const p of await browser.pages()) if (p !== page && p.url().endsWith(wantHash)) await p.close().catch(() => {});
+    // discard the draft (Cancel), back to the list
+    await clickButton(page, "Cancel");
+    await waitFor(() => page.evaluate((sel) => !document.querySelector(sel), FORM_LINK), 4000);
+
     const clicked = await page.evaluate((label) => {
       const h = [...document.querySelectorAll("[data-handoff-assemblies] span")].find((s) => s.textContent?.trim() === label);
       let row: Element | null | undefined = h;

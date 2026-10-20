@@ -18,6 +18,7 @@ import { settingsView } from "../runtime/ports";
 import { buildAssemblyBuilderProps, type AssemblyBuilderProps } from "../runtime/props/assemblies";
 import { loadRackForSheetsLocal } from "../runtime/loaders/rack";
 import type { HandoffStore } from "../runtime/store";
+import { errorMessage, LoadError } from "./load-error";
 
 const FILL: CSSProperties = { position: "absolute", inset: 0, overflow: "auto" };
 
@@ -25,8 +26,8 @@ const FILL: CSSProperties = { position: "absolute", inset: 0, overflow: "auto" }
  * Re-reads `load()` on mount and on every router.refresh(); refreshes are serialized and only the latest one lands.
  * `onReady` fires once the first read is in.
  */
-function useRefreshedProps<T>(load: () => Promise<T>, onReady: () => void, what: string): T | undefined {
-  const [state, setState] = useState<{ value: T } | undefined>(undefined);
+function useRefreshedProps<T>(load: () => Promise<T>, onReady: () => void, what: string): { value: T } | { error: string } | undefined {
+  const [state, setState] = useState<{ value: T } | { error: string } | undefined>(undefined);
   useEffect(() => {
     let alive = true;
     let seq = 0;
@@ -36,7 +37,10 @@ function useRefreshedProps<T>(load: () => Promise<T>, onReady: () => void, what:
         (value) => {
           if (alive && mine === seq) setState({ value });
         },
-        (e: unknown) => console.error(`[handoff] ${what}: could not build the props`, e),
+        (e: unknown) => {
+          console.error(`[handoff] ${what}: could not build the props`, e);
+          if (alive && mine === seq) setState({ error: errorMessage(e) });
+        },
       );
     };
     run();
@@ -49,14 +53,16 @@ function useRefreshedProps<T>(load: () => Promise<T>, onReady: () => void, what:
   useEffect(() => {
     if (state) onReady();
   }, [state, onReady]);
-  return state?.value;
+  return state;
 }
 
 /** AssemblyBuilderPage, in the browser. */
 export function AssembliesScreen({ store, onReady }: { store: HandoffStore; onReady: () => void }) {
   const load = useCallback(() => buildAssemblyBuilderProps(store), [store]);
-  const props: AssemblyBuilderProps | undefined = useRefreshedProps(load, onReady, "assemblies");
-  if (!props) return <div style={FILL} data-handoff-loading="" />;
+  const loaded = useRefreshedProps<AssemblyBuilderProps>(load, onReady, "assemblies");
+  if (!loaded) return <div style={FILL} data-handoff-loading="" />;
+  if ("error" in loaded) return <LoadError message={loaded.error} onReady={onReady} />;
+  const props = loaded.value;
   return (
     <div style={FILL} data-handoff-assemblies="">
       <div className="pk-content" style={{ maxWidth: 1080 }}>
@@ -83,9 +89,10 @@ const LINK = { fontFamily: "var(--font-ui)", fontSize: 12.5, color: "var(--accen
 /** RackSubmittalPage, in the browser: the elevation, schedule and power/heat sheets of one saved rack. */
 export function RackScreen({ store, id, onReady }: { store: HandoffStore; id: string; onReady: () => void }) {
   const load = useCallback(async () => ({ data: await loadRackForSheetsLocal(store, id) }), [store, id]);
-  const loaded: { data: LoadedRackSheets | null } | undefined = useRefreshedProps(load, onReady, "rack sheets");
+  const loaded = useRefreshedProps<{ data: LoadedRackSheets | null }>(load, onReady, "rack sheets");
   if (!loaded) return <div style={FILL} data-handoff-loading="" />;
-  const { data } = loaded;
+  if ("error" in loaded) return <LoadError message={loaded.error} onReady={onReady} />;
+  const { data } = loaded.value;
   if (!data) {
     // The page's notFound().
     return (

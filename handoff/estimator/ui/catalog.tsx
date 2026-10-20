@@ -13,6 +13,7 @@ import { clock, users } from "../runtime/ports";
 import { liveCatalog, type LivePart } from "../runtime/readers";
 import { partPhotoSrc } from "../runtime/assets";
 import type { HandoffStore } from "../runtime/store";
+import { errorMessage, LoadError } from "./load-error";
 import {
   addLineSell, applyDraft, browseCatalog, draftFromPart, facetLabel, money, pageBounds, partFingerprint, RACK_ENUMS, RACK_LABEL, skuIndex, validateSku,
   type DraftField, type Facet, type PartDraft,
@@ -46,6 +47,7 @@ const probe = (): CatalogProbe | null => {
 
 export function CatalogScreen({ store, onReady }: { store: HandoffStore; onReady: () => void }) {
   const [parts, setParts] = useState<LivePart[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
   const [mfr, setMfr] = useState<string | null>(null);
@@ -66,7 +68,10 @@ export function CatalogScreen({ store, onReady }: { store: HandoffStore; onReady
     const run = () =>
       liveCatalog(store).then(
         (p) => alive && setParts(p),
-        (e: unknown) => console.error("[handoff] catalog: could not read the catalog", e),
+        (e: unknown) => {
+          console.error("[handoff] catalog: could not read the catalog", e);
+          if (alive) setLoadError(errorMessage(e));
+        },
       );
     void run();
     window.addEventListener("focus", run);
@@ -111,6 +116,8 @@ export function CatalogScreen({ store, onReady }: { store: HandoffStore; onReady
       cancelAnimationFrame(raf2);
     };
   }, [results, onReady]);
+
+  if (loadError && !parts) return <LoadError message={loadError} onReady={onReady} />;
 
   const editingPart = editing?.sku ? (parts?.find((p) => p.sku === editing.sku) ?? null) : null;
 

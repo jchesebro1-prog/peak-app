@@ -19,6 +19,7 @@ import type { HandoffStore } from "../runtime/store";
 import { CatalogScreen } from "./catalog";
 import { AssembliesScreen, RackScreen } from "./assemblies";
 import { EstimatesList } from "./estimates-list";
+import { errorMessage, LoadError } from "./load-error";
 import { PreviewOverlay } from "./preview-overlay";
 
 export const BANNER_TEXT = "Confidential — Peak Systems Group · prototype — nothing is sent or saved to Peak";
@@ -95,7 +96,7 @@ function NotPartOfPrototype({ path, onReady }: { path: string; onReady: () => vo
   );
 }
 
-type EstimateState = { kind: "loading" } | { kind: "missing" } | { kind: "ready"; props: EstimatorProps };
+type EstimateState = { kind: "loading" } | { kind: "missing" } | { kind: "error"; message: string } | { kind: "ready"; props: EstimatorProps };
 
 /**
  * One estimate in the real Estimator. Props are built from the store for the id the ROUTE names; a router.refresh()
@@ -116,7 +117,10 @@ function EstimateScreen({ store, initialId, onReady }: { store: HandoffStore; in
     let alive = true;
     build().then(
       (s) => alive && setState(s),
-      (e: unknown) => console.error("[handoff] could not build the Estimator props", e),
+      (e: unknown) => {
+        console.error("[handoff] could not build the Estimator props", e);
+        if (alive) setState({ kind: "error", message: errorMessage(e) });
+      },
     );
     return () => {
       alive = false;
@@ -146,6 +150,7 @@ function EstimateScreen({ store, initialId, onReady }: { store: HandoffStore; in
   }, [state.kind, onReady]);
 
   if (state.kind === "loading") return <div style={FILL} data-handoff-loading="" />;
+  if (state.kind === "error") return <LoadError message={state.message} onReady={onReady} />;
   if (state.kind === "missing")
     return (
       <Centered attr="data-handoff-missing">
