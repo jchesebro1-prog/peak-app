@@ -27,7 +27,15 @@
  *          estimate (`?new=1`) each Save, survive a reload, and the new one gets the next EST number.
  *          Result: output/verify/estimator-edit.json.
  *
- * Later tasks add modes (--shell, --parity, --full). Plan: PR 2 Tasks 2–4.
+ *   npm run handoff:verify -- --review [quoteId] [--out <package dir>]
+ *
+ * --review  the customer-facing views render live from the store (Task 5): Build package → BOM quote
+ *          shows the letterhead and the expected grand total; Customer review's Document, Package
+ *          page and BOM tabs each render content with no /estimator-preview frame; a review comment
+ *          survives a reload; Print → PDF (print media) shows the document only, the chrome hidden.
+ *          Screenshots: output/verify/review-*.png; result: output/verify/review.json.
+ *
+ * Later tasks add modes (--shell, --parity, --full). Plan: PR 2 Tasks 2–5.
  */
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -51,8 +59,8 @@ const VERIFY_DIR = path.join(ROOT, "output", "verify");
 export const SMOKE_ALLOWED_UNREGISTERED: readonly string[] = [
   "src/app/(app)/parties/actions.ts#listPartiesAction",
   "src/app/(app)/estimator/bid-actions.ts#bidPanelAction",
-  "src/app/(app)/estimator/review-actions.ts#listReviewCommentsAction",
-  "src/app/(app)/estimator/narrative-actions.ts#keyProductLibraryAction",
+  // Task 6: the Build package's BOM quote tab mounts VendorsCard, which reads its panel (refused → it hides).
+  "src/app/(app)/estimator/vendor-actions.ts#vendorsPanelAction",
   // Task 3: called on mount once the estimate has a linked customer (the dev slice has none, so
   // Task 2's smoke never saw it); refused, the Rewards line just doesn't show.
   "src/app/(app)/rewards/actions.ts#rewardCreditInfoAction",
@@ -666,6 +674,172 @@ function printEdit(r: EditResult): void {
   }
 }
 
+/* ------------------------------------------------------------------ --review */
+
+type ReviewResult = { pass: boolean; id: string; steps: Array<{ step: string; ok: boolean; detail?: string }>; screenshots: string[]; unexpectedUnregistered: string[] } & PageSink;
+
+/** The visible tab button (role=tab) whose text is `label` → click it. */
+const clickTab = (page: Page, label: string) =>
+  page.evaluate((t) => {
+    const b = [...document.querySelectorAll('[role="tab"]')].find((x) => x.textContent?.trim() === t && (x as HTMLElement).offsetParent !== null) as HTMLElement | undefined;
+    b?.click();
+    return !!b;
+  }, label);
+
+/** The open review tabpanel's text and whether it holds a frame of the staff preview route. */
+const panelState = (page: Page) =>
+  page.evaluate(() => {
+    const panel = document.querySelector('[role="tabpanel"]') as HTMLElement | null;
+    const frames = [...document.querySelectorAll("iframe")].map((f) => f.getAttribute("src") || "");
+    return {
+      text: (panel?.innerText ?? "").trim(),
+      previewFrame: frames.some((s) => s.includes("/estimator-preview")),
+      anyFrame: frames.length,
+      letterhead: [...(panel?.querySelectorAll("img") ?? [])].some((i) => /peak-letterhead/.test(i.getAttribute("src") || "") && (i as HTMLImageElement).naturalWidth > 0),
+    };
+  });
+
+/**
+ * Task 5 — the customer-facing views render live from the store: Build package → BOM quote (letterhead +
+ * expected grand total), Customer review's Document / Package page / BOM tabs (content, no
+ * /estimator-preview frame), a review comment that survives a reload, and Print → PDF (print media shows
+ * the document only).
+ */
+async function reviewCheck(pkgDir: string, which: string | undefined): Promise<ReviewResult> {
+  const index = path.join(pkgDir, "index.html");
+  if (!existsSync(index)) throw new Error(`${index} not found — run npm run handoff:build first`);
+  const data = loadSliceData(pkgDir);
+  const q = (which ? data.estimates.find((x) => x.id === which) : data.estimates.find((x) => x.id === "Q-G001") ?? data.estimates[0]) ?? null;
+  if (!q) throw new Error(`no estimate${which ? ` "${which}"` : ""} in the slice`);
+  const expected = fmt(expectedEstimatorTotals(q, data.rules).canonical);
+  const launch = await chromeLaunch();
+  if ("unavailable" in launch) throw new Error(launch.unavailable);
+  const puppeteer = (await import("puppeteer-core")).default;
+  const browser = await puppeteer.launch({ executablePath: launch.executablePath, args: launch.args, headless: true, defaultViewport: { width: 1440, height: 900 } });
+  const sink = newSink();
+  const steps: ReviewResult["steps"] = [];
+  const step = (name: string, ok: boolean, detail?: string) => steps.push({ step: name, ok, ...(detail ? { detail } : {}) });
+  const screenshots: string[] = [];
+  const shot = async (page: Page, name: string) => {
+    const file = path.join(VERIFY_DIR, `review-${name}.png`);
+    await page.screenshot({ path: file as `${string}.png` });
+    screenshots.push(file);
+  };
+  const allowed = new Set(SMOKE_ALLOWED_UNREGISTERED);
+  const unexpected = new Set<string>();
+  const noteUnregistered = async (page: Page) => (await unregisteredOn(page)).filter((x) => !allowed.has(x)).forEach((x) => unexpected.add(x));
+  const base = pathToFileURL(index).href;
+  const url = (stepName: string, extra = "") => `${base}?id=${encodeURIComponent(q.id)}&step=${stepName}${extra}`;
+  mkdirSync(VERIFY_DIR, { recursive: true });
+  try {
+    const page = await newPage(browser, sink);
+    await page.goto(url("package", "&ptab=bom"), { waitUntil: "load" });
+    await page.waitForSelector("[data-handoff-ready]", { timeout: 15_000 });
+    await page.evaluate(async () => (window as unknown as EditH).__peakHandoff.store.reset());
+    await page.goto(url("package", "&ptab=bom"), { waitUntil: "load" });
+    step("estimate mounted", await waitMounted(page, sink));
+
+    // 1 — Build package → BOM quote: the letterhead and the grand total
+    await clickTab(page, "BOM quote");
+    const bom = await waitFor(
+      () =>
+        page.evaluate((total) => {
+          const doc = document.querySelector(".est-doc") as HTMLElement | null;
+          const img = [...(doc?.querySelectorAll("img") ?? [])].find((i) => /peak-letterhead/.test(i.getAttribute("src") || ""));
+          return !!doc && !!img && (img as HTMLImageElement).naturalWidth > 0 && doc.innerText.includes(total);
+        }, expected),
+      10_000,
+    );
+    step("Build package → BOM quote shows the letterhead and the grand total", bom, expected);
+    await shot(page, "package-bom");
+    await noteUnregistered(page);
+
+    // 2 — Customer review: Document, Package page and BOM render live
+    await page.goto(url("review"), { waitUntil: "load" });
+    await waitMounted(page, sink);
+    for (const [tab, name] of [["Document", "document"], ["Package page", "package"], ["BOM", "bom"]] as const) {
+      const clicked = await clickTab(page, tab);
+      let st = await panelState(page);
+      await waitFor(async () => {
+        st = await panelState(page);
+        return st.text.length > 200 && (tab === "Package page" || st.letterhead);
+      }, 10_000);
+      step(`Customer review → ${tab} renders content (no /estimator-preview frame)`, clicked && st.text.length > 200 && !st.previewFrame && (tab === "Package page" || st.letterhead), `${st.text.length} chars, frames ${st.anyFrame}${tab === "Package page" ? "" : `, letterhead ${st.letterhead}`}`);
+      if (tab === "BOM") step("Customer review → BOM shows the saved grand total", st.text.includes(fmt(totals(Array.isArray(q.spec?.sections) ? (q.spec!.sections as SpecSection[]) : [], 0).grand)));
+      await shot(page, `tab-${name}`);
+    }
+    await noteUnregistered(page);
+
+    // 3 — a review comment survives a reload
+    const note = `VERIFY comment ${Date.now()}`;
+    const box = await page.$('textarea[placeholder="What should change?"]');
+    step("the comment box is there", !!box);
+    if (box) {
+      await box.type(note);
+      await clickButton(page, "Add comment");
+    }
+    step("the comment shows after Add comment", await waitFor(() => pageHasText(page, note), 5000));
+    await page.goto(url("review"), { waitUntil: "load" });
+    await waitMounted(page, sink);
+    step("the comment survives a reload", await waitFor(() => pageHasText(page, note), 5000));
+    await noteUnregistered(page);
+
+    // 4 — Print → PDF: print media shows the document only
+    await clickTab(page, "Document");
+    await page.evaluate(() => {
+      (window as unknown as { __printed?: number }).__printed = 0;
+      window.print = () => {
+        const w = window as unknown as { __printed?: number };
+        w.__printed = (w.__printed ?? 0) + 1;
+      };
+    });
+    const printed = await clickButton(page, "Print / Save as PDF");
+    step("Print / Save as PDF calls window.print()", printed && (await page.evaluate(() => (window as unknown as { __printed?: number }).__printed === 1)));
+    await page.emulateMediaType("print");
+    const printView = await page.evaluate(() => {
+      // No named inner functions here: tsx's keepNames would wrap them in __name, which the page lacks.
+      const visible = [...document.querySelectorAll("[data-handoff-banner], .est-root, .est-doc, button")].filter(
+        (el) => (el as HTMLElement).getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden",
+      );
+      const docs = visible.filter((el) => el.classList.contains("est-doc"));
+      return {
+        banner: visible.some((el) => el.hasAttribute("data-handoff-banner")),
+        stepTabs: visible.some((el) => el.tagName === "BUTTON" && /^\d · /.test(el.textContent?.trim() ?? "")),
+        root: visible.some((el) => el.classList.contains("est-root")),
+        doc: docs.length,
+        docText: docs.map((d) => (d as HTMLElement).innerText.length).reduce((a, b) => a + b, 0),
+      };
+    });
+    step("print media hides the Estimator chrome (banner, header, step tabs)", !printView.banner && !printView.stepTabs && !printView.root, JSON.stringify(printView));
+    step("print media shows the document", printView.doc === 1 && printView.docText > 200, `${printView.doc} document(s), ${printView.docText} chars`);
+    await shot(page, "print");
+    await page.emulateMediaType("screen");
+    await noteUnregistered(page);
+    await page.close();
+  } finally {
+    await browser.close();
+  }
+  const unexpectedUnregistered = [...unexpected];
+  const pass = steps.every((s) => s.ok) && unexpectedUnregistered.length === 0 && sink.pageErrors.length === 0 && sink.foreignRequests.length === 0 && sink.failedLocal.length === 0;
+  return { pass, id: q.id, steps, screenshots, unexpectedUnregistered, ...sink };
+}
+
+function printReview(r: ReviewResult): void {
+  console.log(`handoff:verify --review  ${r.pass ? "PASS" : "FAIL"} (${r.id})`);
+  for (const s of r.steps) console.log(`  ${s.ok ? "ok  " : "FAIL"} ${s.step}${s.detail ? ` (${s.detail})` : ""}`);
+  console.log(`  unexpected unregistered: ${r.unexpectedUnregistered.length}`);
+  for (const x of r.unexpectedUnregistered) console.log(`    ${x}`);
+  console.log(`  page errors: ${r.pageErrors.length}`);
+  for (const e of r.pageErrors) console.log(`    ${e.split("\n").slice(0, 4).join("\n    ")}`);
+  console.log(`  foreign requests: ${r.foreignRequests.length}; failed local files: ${r.failedLocal.length}`);
+  for (const u of [...r.foreignRequests, ...r.failedLocal]) console.log(`    ${u}`);
+  if (r.consoleErrors.length) {
+    console.log(`  console errors (informational): ${r.consoleErrors.length}`);
+    for (const e of r.consoleErrors.slice(0, 10)) console.log(`    ${e.slice(0, 200)}`);
+  }
+  console.log(`  screenshots: ${r.screenshots.map((f) => path.relative(ROOT, f)).join(", ")}`);
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const val = (name: string) => {
@@ -676,8 +850,10 @@ async function main() {
   const est = val("--estimator");
   const editAt = argv.indexOf("--estimator-edit");
   const edit = editAt >= 0 ? (argv[editAt + 1] && !argv[editAt + 1].startsWith("--") ? argv[editAt + 1] : "") : undefined;
-  if (!argv.includes("--smoke") && !est && edit === undefined) {
-    console.error("usage: npm run handoff:verify -- --smoke | --estimator <quoteId|all> | --estimator-edit [quoteId] [--out <package dir>]");
+  const reviewAt = argv.indexOf("--review");
+  const review = reviewAt >= 0 ? (argv[reviewAt + 1] && !argv[reviewAt + 1].startsWith("--") ? argv[reviewAt + 1] : "") : undefined;
+  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined) {
+    console.error("usage: npm run handoff:verify -- --smoke | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] [--out <package dir>]");
     process.exit(2);
   }
   mkdirSync(VERIFY_DIR, { recursive: true });
@@ -698,6 +874,12 @@ async function main() {
     const r = await estimatorEditCheck(pkgDir, edit || undefined);
     writeFileSync(path.join(VERIFY_DIR, "estimator-edit.json"), JSON.stringify(r, null, 2) + "\n");
     printEdit(r);
+    pass &&= r.pass;
+  }
+  if (review !== undefined) {
+    const r = await reviewCheck(pkgDir, review || undefined);
+    writeFileSync(path.join(VERIFY_DIR, "review.json"), JSON.stringify(r, null, 2) + "\n");
+    printReview(r);
     pass &&= r.pass;
   }
   if (!pass) process.exit(1);

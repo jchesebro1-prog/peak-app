@@ -31,6 +31,24 @@ import { planSave, settleRewardCreditOffline, vendorQuotesForSave } from "../han
 import { estimatorActions, refusedEstimatorActions, REFUSED_ESTIMATOR_ACTIONS } from "../handoff/estimator/runtime/actions/estimator-actions";
 import { quotesActions } from "../handoff/estimator/runtime/actions/quotes-actions";
 import { renameMapOf } from "../handoff/estimator/runtime/readers";
+import { catalogResolver, keyProductPhotosLocal, loadQuoteDocumentPropsLocal, photoDocIdForSku } from "../handoff/estimator/runtime/loaders/document";
+import { loadPackagePreviewLocal } from "../handoff/estimator/runtime/loaders/package";
+import { loadCutSheetsLocal } from "../handoff/estimator/runtime/loaders/cut-sheets";
+import { REVIEW_DOCS_NOT_IN_PROTOTYPE, reviewActions } from "../handoff/estimator/runtime/actions/review-actions";
+import { INTROS_DOC_ID, listIntrosLocal, narrativeActions } from "../handoff/estimator/runtime/actions/narrative-actions";
+import { libraryActions } from "../handoff/estimator/runtime/actions/library-actions";
+import { clientPackageActions } from "../handoff/estimator/runtime/actions/client-package-actions";
+import { packageActions, refusedPackageActions, REFUSED_PACKAGE_ACTIONS } from "../handoff/estimator/runtime/actions/package-actions";
+import { outputActions } from "../handoff/estimator/runtime/actions/output-actions";
+import { pdfActions } from "../handoff/estimator/runtime/actions/pdf-actions";
+import { assetUrl, PLACEHOLDER_DIR } from "../handoff/estimator/runtime/assets";
+import { previewTargetOf } from "../handoff/estimator/ui/preview-routes";
+import { APP_OVERRIDES, exportNames } from "../handoff/estimator/esbuild-plugins";
+import { fmt } from "@/lib/estimating-core/pricing";
+import { CUT_SHEETS_NO_QUOTE, CUT_SHEETS_WRONG_TYPE } from "@/lib/curtain-cut-sheets/model";
+import { REVIEW_COMMENT_COPY } from "@/lib/estimate-review/comments";
+import { previewPath } from "@/lib/estimate-output/package-preview";
+import * as nodePath from "node:path";
 
 const FIXTURE_V2 = "docs/estimating-core/handoff-fixtures/export-v2.json";
 const GOLDEN_EXPORT = "docs/estimating-core/golden-fixtures/export.json";
@@ -536,6 +554,7 @@ export async function handoffRuntimeChecks(ok: Ok) {
   ok(sentQ.canonical === sentQ.raw && !sentQ.priceRound && !sentQ.bonusLines, "handoff runtime: expectedEstimatorTotals — a sent quote without bonus lines prices as stored");
 
   await handoffActionChecks(ok);
+  await handoffReviewChecks(ok);
 }
 
 /* ------------------------------------------------------------------ PR 2 Task 4: the Estimator's actions in the browser */
@@ -841,3 +860,188 @@ export async function handoffActionChecks(ok: Ok) {
   ok(REFUSED_ESTIMATOR_ACTIONS.every((n) => (ref[n] as () => { ok: boolean; error: string })().error === "Not available in the prototype"), "handoff actions: the refused actions return NOT_IN_PROTOTYPE");
 }
 
+
+/* ------------------------------------------------------------------ PR 2 Task 5: customer-facing views + their actions */
+
+export async function handoffReviewChecks(ok: Ok) {
+  const cust: SeedCustomers = {
+    companies: [{ id: "c1", name: "Acme Theatre" }],
+    sites: [{ id: "s1", companyId: "c1", name: "Main Hall", city: "Madison", isPrimary: true }],
+    contacts: [{ id: "k1", firstName: "Pat", lastName: "Lee", homeCompanyId: "c1", title: "TD", isPrimary: true }],
+    contactEmails: [], contactPhones: [], geoCache: [],
+  };
+  const team: SeedTeamUser[] = [
+    { id: "u1", name: "Ann Admin", roles: ["Admin"], status: "active" },
+    { id: "u2", name: "Eve Estimator", roles: ["Estimator"], status: "active" },
+    { id: "u3", name: "Rex Reviewer", roles: ["Reviewer"], status: "active" },
+  ];
+  const sections = [
+    sec("s1", [{ sku: "ETC:CS15", desc: "ColorSource 15", qty: 4, cost: 900, price: 1250 }, { sku: "LAB", desc: "Install", qty: 8, cost: 55, price: 95, labor: true }], { name: "Stage lighting" }),
+    sec("s2", [{ sku: "ETC:CS15", desc: "Spare", qty: 1, cost: 900, price: 1250 }], { name: "Spares" }),
+  ];
+  const q1 = { id: "Q-3001", estNo: 3001, name: "Main stage", status: "draft", quoteType: "system", source: "estimator", customerId: "c1", customer: "Acme Theatre", owner: "Ann Admin", createdAt: 1, updatedAt: 1_790_000_000_000, history: [], revisions: [], notIncluded: null, spec: { sections, mobs: [] } };
+  const wonQ = { id: "Q-3002", estNo: 3002, name: "Old job", status: "won", quoteType: "system", source: "estimator", customerId: "c1", tierMargin: 0.3, createdAt: 1, updatedAt: 1_780_000_000_000, history: [], revisions: [],
+    spec: { sections: [sec("w1", [{ sku: "ETC:CS15", desc: "ColorSource 15", qty: 2, cost: 800, price: 1100 }], { name: "Dimming rack" })], mobs: [] } };
+  const flame = { id: "Q-3003", estNo: 3003, name: "Flame", status: "draft", quoteType: "flame", source: "flame", createdAt: 1, updatedAt: 1, history: [], revisions: [], spec: {} };
+  const curtainQ = { id: "Q-3004", estNo: 3004, name: "Drapes", status: "draft", quoteType: "system", source: "estimator", createdAt: 1, updatedAt: 1, history: [], revisions: [],
+    spec: { mobs: [], sections: [{ id: "c1", name: "Curtains", kind: "materials", mfr: "", freightPct: 0, items: [
+      { id: 1, sku: "X", desc: "Main Drape", qty: 2, unit: "ea", cost: 0, price: 0, curtain: true,
+        curtainInputs: { name: "Main Drape", fabricSku: "FAB-CH25", fabricName: "Charisma Velour 25 oz", qty: "2", width: "21.5", height: "18", fullness: "50", mountType: "wall-hookloop" } },
+    ] }] } };
+  const catalog = [
+    { id: "ETC:CS15", sku: "ETC:CS15", desc: "ColorSource 15 fixture", category: "Lighting", unit: "ea", cost: 900, list: 1300, mfr: "ETC", manufacturerModelNumber: "CS15" },
+    { id: "FAB-CH25", sku: "FAB-CH25", desc: "Charisma Velour 25 oz", category: "Fabric", unit: "lin-yd", cost: 20, list: 30, oz: 25, ozBasis: "lin-yd", boltWidthIn: 54 },
+  ];
+  const rules: SeedRules = { settings: { companyName: "Peak Systems Group" }, blobs: {
+    estimate_output_defaults: { notIncluded: "Permits\nPower", website: "" },
+    narrative_intros: { intros: [{ id: "NI-aaaaaaaa", title: "Lighting", text: "Lights.", updatedAt: 1, updatedBy: "Ann Admin" }] },
+  } };
+  const store = await openStore({ quotes: docs([q1, wonQ, flame, curtainQ]), catalog: docs(catalog), fixtures: [], blobs: Object.entries(rules.blobs).map(([id, data]) => ({ id, data }) as { id: string }), settings: [{ id: "main", data: rules.settings } as { id: string }] }, { idb: null });
+  configurePorts({ store, customers: cust, rules, team });
+  users.setCurrent("u1");
+  const grand1 = totals(sections, 0).grand;
+
+  // --- the document loader port (document-loader.ts over the store) ---
+  const doc = await loadQuoteDocumentPropsLocal(store, "Q-3001");
+  ok(!!doc && doc.custName === "Acme Theatre" && doc.attnLine === "Pat Lee · TD" && doc.venueLabel === "Main Hall — Madison" && doc.projectName === "Main stage",
+    `handoff review: document loader — the customer, attn contact ladder and primary venue come from the customer port (got ${doc?.custName} / ${doc?.attnLine} / ${doc?.venueLabel})`);
+  ok(!!doc && doc.t.grand === grand1 && doc.quoteId === "EST-3001" && doc.rewardsLine === "" && doc.companyName === "Peak Systems Group" && doc.ownerName === "Ann Admin",
+    "handoff review: document loader — totals of the SAVED sections, the estimate number, no rewards line, settings' company");
+  ok((await loadQuoteDocumentPropsLocal(store, "Q-nope")) === null && (await loadQuoteDocumentPropsLocal(store, null)) === null, "handoff review: document loader — a missing quote is null");
+  await store.put("quotes", { ...q1, name: "Renamed in the overlay" });
+  ok((await loadQuoteDocumentPropsLocal(store, "Q-3001"))?.projectName === "Renamed in the overlay", "handoff review: document loader — reads the overlay (a saved edit shows)");
+  await store.put("quotes", q1);
+  const partOf = await catalogResolver(store);
+  const kpSections = [{ ...sections[0], presentation: "narrative", keyProducts: [{ lineKey: "1", sku: "ETC:CS15", text: "x", photo: true }] }] as unknown as SpecSection[];
+  ok(photoDocIdForSku("ETC:CS15") === null && Object.keys(keyProductPhotosLocal(kpSections, null, partOf)).length === 0, "handoff review: no packaged photos yet → no key-product photo (Task 11 plugs them in)");
+
+  // --- the package loader port (package-live-loader.ts) ---
+  const pkg = await loadPackagePreviewLocal(store, "Q-3001", "narrative", "./lh.jpg");
+  ok(!!pkg && pkg.model.total === fmt(grand1) && pkg.model.logo.src === "./lh.jpg" && pkg.model.logo.full && pkg.model.view === "narrative" && pkg.model.scopes.length === 2,
+    `handoff review: package loader — the saved total, the full letterhead and one scope per printed system (got ${pkg?.model.total}, ${pkg?.model.scopes.length})`);
+  ok(!!pkg && pkg.model.notIncluded.join("|") === "Permits|Power" && pkg.model.bomHref === previewPath("Q-3001", "package", "bom") && pkg.model.narrativeHref === previewPath("Q-3001", "package"),
+    "handoff review: package loader — Not included from the Estimate output default (notIncluded null); the toggle links name the preview route");
+  ok(!!pkg && pkg.extras.plans.length === 0 && pkg.extras.downloads === null && Object.keys(pkg.extras.datasheets).length === 0, "handoff review: package loader — no part documents → no datasheet links, downloads or plans");
+  const pkgBom = await loadPackagePreviewLocal(store, "Q-3001", "bom", "./lh.jpg");
+  ok(pkgBom?.model.view === "bom" && (await loadPackagePreviewLocal(store, "Q-nope", "bom", "x")) === null, "handoff review: package loader — the BOM view; a missing quote is null");
+
+  // --- the cut-sheet loader port (curtain-cut-sheets/load.ts) ---
+  const noQ = await loadCutSheetsLocal(store, "Q-nope");
+  const wrongType = await loadCutSheetsLocal(store, "Q-3003");
+  ok(!noQ.ok && noQ.error === CUT_SHEETS_NO_QUOTE && !wrongType.ok && wrongType.error === CUT_SHEETS_WRONG_TYPE, "handoff review: cut sheets — a missing quote / a non-system quote refuse with the app's copy");
+  const none = await loadCutSheetsLocal(store, "Q-3001");
+  ok(none.ok && none.models.client.length === 0, "handoff review: cut sheets — an estimate with no curtains has no sheets");
+  const cs = await loadCutSheetsLocal(store, "Q-3004");
+  ok(cs.ok && cs.models.client.length === 1 && cs.models.submittal.length === 1 && cs.models.client[0].sheetNo === "CS-1" && cs.result.types[0].curtains[0].fabric?.sku === "FAB-CH25",
+    `handoff review: cut sheets — a curtain line gets CS-1 in both styles, its fabric from the store's catalog (got ${cs.ok ? cs.models.client.map((m) => m.sheetNo).join() : "error"})`);
+
+  // --- review comments (the `reviewComments` collection) ---
+  const ra = reviewActions(store);
+  const l0 = await ra.listReviewCommentsAction("Q-3001");
+  ok(l0.ok && l0.comments.length === 0 && l0.numbered.length === 0, "handoff review: listReviewCommentsAction — an empty list is { ok, comments: [], numbered: [] }");
+  ok(!(await ra.listReviewCommentsAction("Q-nope")).ok, "handoff review: listReviewCommentsAction — a missing quote refuses");
+  const before = JSON.stringify(await store.get("quotes", "Q-3001"));
+  const [a1, a2] = await Promise.all([ra.addReviewCommentAction("Q-3001", null, "  Whole thing  "), ra.addReviewCommentAction("Q-3001", "s2", "Spares too many")]);
+  const after2 = await ra.listReviewCommentsAction("Q-3001");
+  ok(a1.ok && a2.ok && after2.ok && after2.comments.length === 2 && after2.comments[0].body === "Whole thing" && after2.comments.every((c) => c.by === "Ann Admin" && /^rc-/.test(c.id)),
+    "handoff review: addReviewCommentAction — two at once both land, bodies cleaned, author = the acting user");
+  ok(after2.ok && after2.numbered.length === 2 && JSON.stringify(await store.get("quotes", "Q-3001")) === before, "handoff review: comments are numbered against the saved systems and never touch the quote doc (no updatedAt bump)");
+  const bad = await ra.addReviewCommentAction("Q-3001", "gone-system", "x");
+  const empty = await ra.addReviewCommentAction("Q-3001", null, "   ");
+  ok(!bad.ok && bad.error === REVIEW_COMMENT_COPY.noSystem && !empty.ok && empty.error === REVIEW_COMMENT_COPY.empty, "handoff review: addReviewCommentAction — a system not on the saved estimate / an empty body refuse with the app's copy");
+  const cid = after2.ok ? after2.comments[0].id : "";
+  users.setCurrent("u2");
+  const del2 = await ra.deleteReviewCommentAction("Q-3001", cid);
+  ok(!del2.ok && del2.error === REVIEW_COMMENT_COPY.cantDelete, "handoff review: deleteReviewCommentAction — someone else's comment is refused for a non-approver");
+  const res = await ra.resolveReviewCommentAction("Q-3001", cid);
+  const res2 = await ra.resolveReviewCommentAction("Q-3001", cid);
+  ok(res.ok && res.comments[0].resolvedBy === "Eve Estimator" && res.numbered.length === 1 && res2.ok && res2.comments[0].resolvedBy === "Eve Estimator", "handoff review: resolveReviewCommentAction — resolves once (idempotent), drops it from the numbered list");
+  users.setCurrent("u3");
+  ok(!(await ra.resolveReviewCommentAction("Q-3001", cid)).ok, "handoff review: resolveReviewCommentAction — needs Create (a Reviewer can't)");
+  const del3 = await ra.deleteReviewCommentAction("Q-3001", cid);
+  ok(del3.ok && del3.comments.length === 1, "handoff review: deleteReviewCommentAction — an approver deletes any comment");
+  const missing = await ra.deleteReviewCommentAction("Q-3001", cid);
+  ok(!missing.ok && missing.error === REVIEW_COMMENT_COPY.missing, "handoff review: deleteReviewCommentAction — an already-gone comment says so");
+  const docsR = await ra.reviewDocsAction("Q-3001");
+  ok(!docsR.ok && docsR.error === REVIEW_DOCS_NOT_IN_PROTOTYPE, "handoff review: reviewDocsAction — { ok: false } with the prototype's note (no part documents)");
+  users.setCurrent("u1");
+
+  // --- narrative: key-product library, paragraphs, intros ---
+  const na = narrativeActions(store);
+  const lib = await na.keyProductLibraryAction(["ETC:CS15", "NOPE", "line:7", " ETC:CS15 "], { "ASM-1": "ETC:CS15" });
+  ok(lib["ETC:CS15"]?.inCatalog === true && lib["ETC:CS15"].desc === "ColorSource 15 fixture" && lib["ETC:CS15"].paragraph === null && lib["ETC:CS15"].photoDocId === null && lib["ETC:CS15"].modelPart?.manufacturerModelNumber === "CS15",
+    "handoff review: keyProductLibraryAction — a catalog part's row (desc, no paragraph, no photo yet, model fields)");
+  ok(lib.NOPE?.inCatalog === false && !("line:7" in lib) && Object.keys(lib).length === 2, "handoff review: keyProductLibraryAction — a miss gets a row; line tokens get none; skus deduped");
+  const viaLib = await na.keyProductLibraryAction(["ASM-1"], { "ASM-1": "ETC:CS15" });
+  ok(viaLib["ASM-1"]?.inCatalog === true && viaLib["ASM-1"].viaSku === "ETC:CS15", "handoff review: keyProductLibraryAction — an assembly alias reads its member (viaSku)");
+  const saved = await na.saveProductParagraphAction("ETC:CS15", "A bright fixture.", null);
+  ok(saved.ok && saved.row.paragraph === "A bright fixture." && saved.row.paragraphUpdatedBy === "Ann Admin" && (await store.get<{ narrativeText?: string }>("catalog", "ETC:CS15"))?.narrativeText === "A bright fixture.",
+    "handoff review: saveProductParagraphAction — writes narrativeText to the catalog overlay and answers the fresh row");
+  const stale = await na.saveProductParagraphAction("ETC:CS15", "Again", null);
+  ok(!stale.ok && !!stale.stale && stale.stale.paragraph === "A bright fixture.", "handoff review: saveProductParagraphAction — a stale expectUpdatedAt is refused with the current paragraph");
+  ok(!(await na.saveProductParagraphAction("NOPE", "x")).ok && !(await na.saveProductParagraphAction("ETC:CS15", "  ")).ok, "handoff review: saveProductParagraphAction — not a catalog part / empty text refuse");
+  users.setCurrent("u3");
+  const noCreate = await na.saveProductParagraphAction("ETC:CS15", "x");
+  const noIntro = await na.upsertSystemIntroAction({ title: "T", text: "x" });
+  ok(!noCreate.ok && noCreate.error === "Needs the Create permission." && !noIntro.ok, "handoff review: library writes need Create (a Reviewer is refused)");
+  users.setCurrent("u1");
+  ok((await listIntrosLocal(store)).map((i) => i.id).join() === "NI-aaaaaaaa", "handoff review: intros — seeded from the narrative_intros blob");
+  const up = await na.upsertSystemIntroAction({ title: "Audio", text: "Sound." });
+  ok(up.ok && /^NI-[0-9a-z]{8}$/.test(up.id ?? "") && up.intros.length === 2 && (await store.get<{ intros: unknown[] }>("intros", INTROS_DOC_ID))?.intros.length === 2,
+    "handoff review: upsertSystemIntroAction — a new NI- id, the list stored in the intros collection");
+  const propsAfter = await buildEstimatorProps(store, "Q-3001", new URLSearchParams());
+  ok(propsAfter.narrativeIntros.length === 2 && propsAfter.narrativeIntros.some((i) => i.title === "Audio"), "handoff review: the Estimator props read the intros the store holds (a reload sees a saved intro)");
+  const delI = await na.deleteSystemIntroAction("NI-aaaaaaaa");
+  ok(delI.ok && delI.intros.length === 1 && (await listIntrosLocal(store)).length === 1, "handoff review: deleteSystemIntroAction — one operation on the stored list");
+
+  // --- system library ---
+  const la = libraryActions(store);
+  const hits = await la.searchSystemLibraryAction("dimming");
+  ok(hits.length === 1 && hits[0].systemName === "Dimming rack" && hits[0].customer === "Acme Theatre" && hits[0].status === "won", "handoff review: searchSystemLibraryAction — a won estimate's system, by name, with the customer's name");
+  ok((await la.searchSystemLibraryAction("stage lighting")).length === 0, "handoff review: searchSystemLibraryAction — drafts never join the library");
+  const entry = await la.getSystemLibraryEntryAction(hits[0]?.key ?? "");
+  ok(!!entry && entry.quoteId === "Q-3002" && (await la.getSystemLibraryEntryAction("nope")) === null, "handoff review: getSystemLibraryEntryAction — the entry by key; an unknown key is null");
+  const loaded = await la.loadLibrarySystemAction(hits[0]?.key ?? "", { tierMargin: 0.3 });
+  ok(loaded.ok && loaded.systemName === "Dimming rack" && loaded.estNumber === "EST-3002" && loaded.section.items.length === 1 && loaded.section.items[0].cost === 900 && loaded.costsUpdated > 0,
+    `handoff review: loadLibrarySystemAction — re-priced at today's catalog cost (got ${loaded.ok ? `${loaded.section.items[0].cost}, ${loaded.costsUpdated} updated` : loaded.error})`);
+  const gone = await la.loadLibrarySystemAction("Q-3002:live:missing", { tierMargin: null });
+  ok(!gone.ok && !(await la.loadLibrarySystemAction("garbage", { tierMargin: null })).ok, "handoff review: loadLibrarySystemAction — a missing system / a malformed key refuse");
+
+  // --- package panel, client package, output, PDF status ---
+  const pa = packageActions(store);
+  const panel = await pa.packagePanelAction("Q-3001");
+  ok(panel.ok && panel.panel.files.length === 0 && panel.panel.responses.length === 0 && !panel.panel.canSend && !panel.panel.uploads && panel.panel.grid === null && !panel.panel.gridEligible && panel.panel.peakHeader === true && Array.isArray(panel.panel.gaps),
+    "handoff review: packagePanelAction — a shape-valid panel with no files, uploads, Grid or sends");
+  ok(!(await pa.packagePanelAction("Q-nope")).ok, "handoff review: packagePanelAction — a missing quote refuses");
+  const refusedP = refusedPackageActions();
+  ok(REFUSED_PACKAGE_ACTIONS.every((n) => (refusedP[n] as () => { ok: boolean; error: string })().error === "Not available in the prototype"), "handoff review: the package panel's writes refuse with NOT_IN_PROTOTYPE");
+  const cp = await clientPackageActions().clientPackageDocsAction({ sections });
+  ok(cp.ok && cp.rows.length === 0 && cp.truncated === 0, "handoff review: clientPackageDocsAction — the empty success (no part documents)");
+  const oa = outputActions();
+  const sg = await oa.surveyGoalsAction("");
+  const sg2 = await oa.surveyGoalsAction("SV-1");
+  const sv = await oa.siteVisitGoalsAction({ quoteId: "Q-3001", customerId: "c1" });
+  ok(!sg.ok && sg.error === "No site visit is linked." && !sg2.ok && sg2.error === "That site visit no longer exists." && sv.ok && sv.options.length === 0, "handoff review: output actions — no site visits in the prototype (the originals' own answers)");
+  const pdfA = pdfActions(store);
+  ok((await pdfA.quotePdfStatusAction("Q-3001")) === null && (await pdfA.retryQuotePdfAction("Q-nope")) === null, "handoff review: quotePdfStatusAction — no stored PDF reads null (pdfView)");
+
+  // --- the asset rewrite and the preview routes ---
+  ok(assetUrl("/placeholders/allowance.webp") === PLACEHOLDER_DIR + "allowance.webp" && assetUrl("/api/part-documents/pd%201") === PLACEHOLDER_DIR + "coming-soon.webp"
+    && assetUrl("./app/assets/x.jpg") === "./app/assets/x.jpg" && assetUrl("data:image/png;base64,AA") === "data:image/png;base64,AA" && assetUrl("/other/x.png") === "/other/x.png",
+    "handoff review: assetUrl — placeholders → app/assets/placeholders, part documents → the placeholder chain's last link, anything else unchanged");
+  const t1 = previewTargetOf("/estimator/cut-sheets?id=Q-1&style=client");
+  const t2 = previewTargetOf("/estimator-preview/Q%2D1?tab=package&view=bom");
+  const t3 = previewTargetOf("/estimator-preview/Q-1?tab=bom");
+  ok(t1?.kind === "cutsheets" && t1.style === "client" && t1.quoteId === "Q-1" && t2?.kind === "package" && t2.view === "bom" && t2.quoteId === "Q-1" && t3?.kind === "bom"
+    && previewTargetOf("/estimator/cut-sheets?id=Q-1")?.kind === "cutsheets" && (previewTargetOf("/estimator/cut-sheets?id=Q-1") as { style?: string }).style === "submittal"
+    && previewTargetOf("/estimator?id=Q-1") === null && previewTargetOf("https://example.com/estimator-preview/Q-1") === null && previewTargetOf("/estimator/cut-sheets") === null,
+    "handoff review: previewTargetOf — the two routes parse (style / tab / view); anything else, another site, or no id is null");
+
+  // --- the component overrides export every value name their originals do ---
+  for (const [orig, repl] of Object.entries(APP_OVERRIDES)) {
+    const want = exportNames(fs.readFileSync(orig, "utf8"));
+    const have = new Set(exportNames(fs.readFileSync(nodePath.join("handoff/estimator", repl), "utf8")));
+    const missingNames = want.filter((n) => !have.has(n));
+    ok(want.length > 0 && missingNames.length === 0, `handoff review: override ${orig} → ${repl} exports every name the original does (missing: ${missingNames.join(", ") || "none"})`);
+  }
+}

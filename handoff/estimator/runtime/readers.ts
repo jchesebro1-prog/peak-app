@@ -11,6 +11,7 @@ import { resolvePipelines, type Pipelines } from "@/lib/pipelines";
 import { bonusRatesFrom, BONUS_ESTIMATOR_RATE_ID, BONUS_PACKAGE_RATE_ID, type BonusRates } from "@/lib/estimate-bonus/flags";
 import { reviewLimitsFrom, type ReviewLimitContext } from "@/lib/review-limits";
 import { can as roleCan } from "@/lib/team";
+import { sanitizeIntroList, type SystemIntro } from "@/lib/narrative/intros";
 import type { HandoffStore } from "./store";
 import { blobData, settingsView, users } from "./ports";
 
@@ -104,4 +105,14 @@ export async function renameRefs(store: HandoffStore): Promise<{ m: Map<string, 
     }
   }
   return { m, models };
+}
+
+/** The system-intro library's home in the store: the `intros` collection, doc id = the app's blob name. */
+export const INTROS_DOC_ID = "narrative_intros";
+export type IntrosDoc = { id: string; intros: SystemIntro[] };
+
+/** stores/narrative-intros listIntros over the store: the collection doc (the prototype's writes), else the sliced blob. */
+export async function listIntrosLocal(store: HandoffStore): Promise<SystemIntro[]> {
+  const doc = await store.get<IntrosDoc>("intros", INTROS_DOC_ID);
+  return sanitizeIntroList(doc ? doc.intros : blobData(INTROS_DOC_ID).intros);
 }

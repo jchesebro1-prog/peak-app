@@ -15,7 +15,7 @@ import path from "node:path";
 import postcss from "postcss";
 import tailwindcss from "@tailwindcss/postcss";
 import { FORBIDDEN_PACKAGES } from "../../scripts/core-check";
-import { imagePlugin, shimPlugin, serverActionStubPlugin } from "./esbuild-plugins";
+import { APP_OVERRIDES, appOverridePlugin, imagePlugin, shimPlugin, serverActionStubPlugin } from "./esbuild-plugins";
 
 const HERE = __dirname;
 const ROOT = path.resolve(HERE, "..", "..");
@@ -137,6 +137,7 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
 
   // --- JS: the real Estimator client, server actions swapped for registry stubs ---
   const discovered: Record<string, string[]> = {};
+  const overridden = new Map<string, Set<string>>();
   const t0 = Date.now();
   const result = await esbuild.build({
     entryPoints: [path.join(HERE, "main.tsx")],
@@ -158,13 +159,20 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
     tsconfig: path.join(ROOT, "tsconfig.json"),
     define: { "process.env.NODE_ENV": '"production"' },
     loader: { ".jpg": "file", ".jpeg": "file", ".png": "file", ".webp": "file", ".gif": "file", ".svg": "file", ".woff2": "file", ".woff": "file" },
-    plugins: [shimPlugin(), imagePlugin(), serverActionStubPlugin(ROOT, discovered)],
+    plugins: [appOverridePlugin(ROOT, APP_OVERRIDES, overridden), shimPlugin(), imagePlugin(), serverActionStubPlugin(ROOT, discovered)],
   });
   const jsMs = Date.now() - t0;
+  // An override nothing imported any more is stale: the app moved on and the prototype would silently show the original.
+  const stale = Object.keys(APP_OVERRIDES).filter((orig) => !overridden.has(orig));
+  if (stale.length) throw new Error(`app override(s) never applied (nothing imports the original any more): ${stale.join(", ")}`);
   const leaked = forbiddenBundleInputs(Object.keys(result.metafile.inputs));
   if (leaked.length) {
     throw new Error(`server code reached the browser bundle (${leaked.length} input(s)):\n  ${leaked.slice(0, 20).join("\n  ")}`);
   }
+
+  // --- the placeholder images the app's absolute /placeholders/*.webp URLs point at (runtime/assets.ts) ---
+  const placeholders = path.join(ROOT, "public", "placeholders");
+  if (existsSync(placeholders)) cpSync(placeholders, path.join(APP, "assets", "placeholders"), { recursive: true });
 
   // --- CSS: Quartzite's Tailwind + pk-* styles, plus any CSS the bundle imported ---
   const t1 = Date.now();
@@ -195,6 +203,7 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
   const actions = Object.values(discovered).reduce((n, v) => n + v.length, 0);
   console.log(`handoff:build → ${path.relative(ROOT, OUT)}  (JS ${jsMs} ms, CSS ${cssMs} ms)`);
   console.log(`  "use server" modules stubbed: ${Object.keys(discovered).length} (${actions} exports) → output/handoff-build/discovered-actions.json`);
+  for (const [orig, importers] of overridden) console.log(`  override ${orig} → ${APP_OVERRIDES[orig]} (imported by ${[...importers].join(", ")})`);
   for (const w of result.warnings) console.log(`  WARN ${w.text}${w.location ? ` (${w.location.file}:${w.location.line})` : ""}`);
   if (!hasData) console.log("  no data/ — the page mounts with an empty slice (run npm run handoff:slice first)");
   if (!hasImages) console.log("  no images/ (optional)");

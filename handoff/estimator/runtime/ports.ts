@@ -49,6 +49,11 @@ export function configurePorts(next: Partial<Omit<Ctx, "currentId">>): void {
   custCache = null;
 }
 
+/** The store configurePorts was given (null before boot) — for the live views (ui/*.tsx), which have no props to carry it. */
+export function configuredStore(): HandoffStore | null {
+  return ctx.store;
+}
+
 /** Re-reads the store's settings row and rate blobs into the ports' snapshot (the shell edits them later). */
 export async function refreshPortsFromStore(store: HandoffStore): Promise<void> {
   const main = await store.get<{ id: string; data?: Record<string, unknown> }>("settings", "main");

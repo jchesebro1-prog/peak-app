@@ -16,7 +16,6 @@ import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/fixture-rates";
 import { DEFAULT_FREIGHT_RULE, FREIGHT_RATE_IDS, type FreightRule } from "@/lib/freight-rule";
 import { sanitizeTrackSeriesBlob, seriesSkus, TRACK_SERIES_BLOB } from "@/lib/track-series";
 import { sanitizeSystemCategories, SYSTEM_CATEGORIES_BLOB, type CategoryOption } from "@/lib/system-categories";
-import { sanitizeIntroList } from "@/lib/narrative/intros";
 import { ESTIMATE_OUTPUT_BLOB, sanitizeEstimateOutputDefaults } from "@/lib/estimate-output/fields";
 import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { documentRevStamp, pdfView } from "@/lib/quote-pdf/state";
@@ -32,7 +31,7 @@ import { approvalHolds, reviewLimitChip, reviewLimitsFrom, type ReviewLimitConte
 import { can as roleCan } from "@/lib/team";
 import type { HandoffStore } from "../store";
 import { blobData, customers as customerPort, refreshPortsFromStore, resolveTierFor, settingsView, users, type TeamUser } from "../ports";
-import { bonusRatesNow, bySkuResolver, generalRate, liveCatalog, listFixtures } from "../readers";
+import { bonusRatesNow, bySkuResolver, generalRate, listIntrosLocal, liveCatalog, listFixtures } from "../readers";
 
 export { bySkuResolver };
 
@@ -245,7 +244,8 @@ export async function buildEstimatorProps(store: HandoffStore, quoteId: string |
     capPct: generalRate(FREIGHT_RATE_IDS.cap, DEFAULT_FREIGHT_RULE.capPct),
   };
   const trackSeries = sanitizeTrackSeriesBlob(blobData(TRACK_SERIES_BLOB));
-  const narrativeIntros = sanitizeIntroList(blobData("narrative_intros").intros);
+  // The intro library as the store holds it (Task 5: the narrative actions write the `intros` collection).
+  const narrativeIntros = await listIntrosLocal(store);
   const estimateOutputDefaults = sanitizeEstimateOutputDefaults(blobData(ESTIMATE_OUTPUT_BLOB));
 
   // Phase 6 categories, each typical part resolved against the live catalog (fail-soft → Blank only).

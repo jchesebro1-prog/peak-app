@@ -6,7 +6,8 @@
  * else a clean new estimate. The Estimator's server actions are registered (runtime/actions/*) before
  * the first render. `router.refresh()` re-reads the props for the estimate the URL names now (a new
  * estimate's first save puts its id there). The root gets `data-handoff-ready` after the first render
- * (verify.ts waits for it).
+ * (verify.ts waits for it). Task 5: the customer-facing views' actions, the image URL rewrite
+ * (runtime/assets.ts) and the cut-sheet / preview overlay (ui/preview-overlay.tsx).
  */
 import "./shims/next-navigation"; // patch history before the app mounts
 import { useEffect, useState, useSyncExternalStore } from "react";
@@ -20,6 +21,15 @@ import { buildEstimatorProps } from "./runtime/props/estimator";
 import { registerActions } from "./runtime/actions-registry";
 import { ESTIMATOR_ACTIONS_KEY, estimatorActions, refusedEstimatorActions } from "./runtime/actions/estimator-actions";
 import { QUOTES_ACTIONS_KEY, quotesActions } from "./runtime/actions/quotes-actions";
+import { REVIEW_ACTIONS_KEY, reviewActions } from "./runtime/actions/review-actions";
+import { NARRATIVE_ACTIONS_KEY, narrativeActions } from "./runtime/actions/narrative-actions";
+import { LIBRARY_ACTIONS_KEY, libraryActions } from "./runtime/actions/library-actions";
+import { CLIENT_PACKAGE_ACTIONS_KEY, clientPackageActions } from "./runtime/actions/client-package-actions";
+import { PACKAGE_ACTIONS_KEY, packageActions, refusedPackageActions } from "./runtime/actions/package-actions";
+import { OUTPUT_ACTIONS_KEY, outputActions } from "./runtime/actions/output-actions";
+import { PDF_ACTIONS_KEY, pdfActions } from "./runtime/actions/pdf-actions";
+import { installAssetUrlRewrite } from "./runtime/assets";
+import { installPreviewRouting, PreviewOverlay } from "./ui/preview-overlay";
 
 const DEFAULT_ESTIMATE_ID = "Q-G001";
 
@@ -76,6 +86,7 @@ function App({ store, first }: { store: HandoffStore; first: EstimatorProps }) {
         {persistent ? null : <span data-handoff-not-persistent=""> · Changes won&apos;t be saved in this window</span>}
       </div>
       <EstimatorClient {...props} />
+      <PreviewOverlay />
     </>
   );
 }
@@ -88,6 +99,17 @@ async function boot() {
   // The Estimator's server actions, in the browser (before the first render — mount effects call some).
   registerActions(ESTIMATOR_ACTIONS_KEY, { ...refusedEstimatorActions(), ...estimatorActions(store) });
   registerActions(QUOTES_ACTIONS_KEY, quotesActions(store));
+  // Task 5 — the customer-facing views' actions (review comments, narrative / system library, package panel, PDF status).
+  registerActions(REVIEW_ACTIONS_KEY, reviewActions(store));
+  registerActions(NARRATIVE_ACTIONS_KEY, narrativeActions(store));
+  registerActions(LIBRARY_ACTIONS_KEY, libraryActions(store));
+  registerActions(CLIENT_PACKAGE_ACTIONS_KEY, clientPackageActions());
+  registerActions(PACKAGE_ACTIONS_KEY, { ...refusedPackageActions(), ...packageActions(store) });
+  registerActions(OUTPUT_ACTIONS_KEY, outputActions());
+  registerActions(PDF_ACTIONS_KEY, pdfActions(store));
+  // App image URLs (/placeholders/*, /api/part-documents/*) → packaged files; the two preview routes → the overlay.
+  installAssetUrlRewrite();
+  installPreviewRouting();
   // verify.ts drives the overlay through this handle (put → reload → read back → reset).
   const w = window as unknown as { __peakHandoff?: Record<string, unknown> };
   w.__peakHandoff = { ...(w.__peakHandoff ?? {}), store };

@@ -8,8 +8,11 @@
  *                           client-only → shims/*; server-only → a build error
  *   imagePlugin             Next-style static image imports (`import x from "./a.jpg"`) →
  *                           `{ src }`, the file emitted by esbuild's file loader into app/assets/
+ *   appOverridePlugin       app component files replaced by handoff modules, by RESOLVED path
+ *                           (APP_OVERRIDES): every import of the original resolves to the handoff
+ *                           module, except the handoff module's own imports of it
  *
- * Plan: PR 2 Task 2 (from the spike, .data-spike/build.ts).
+ * Plan: PR 2 Task 2 (from the spike, .data-spike/build.ts); app overrides Task 5.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -118,16 +121,67 @@ export function imagePlugin(): esbuild.Plugin {
   return {
     name: "handoff-image-imports",
     setup(build) {
-      build.onResolve({ filter: IMAGE_RE }, (args) => {
+      build.onResolve({ filter: IMAGE_RE }, async (args) => {
         if (args.kind !== "import-statement" && args.kind !== "dynamic-import") return undefined;
         if (args.namespace === "handoff-img") return undefined; // the inner import → the file loader
-        return { path: path.resolve(args.resolveDir, args.path), namespace: "handoff-img" };
+        if ((args.pluginData as { handoffImg?: boolean } | undefined)?.handoffImg) return undefined;
+        if (args.path.startsWith(".") || path.isAbsolute(args.path)) return { path: path.resolve(args.resolveDir, args.path), namespace: "handoff-img" };
+        // A path alias ("@/app/…/peak-letterhead.jpg"): let esbuild resolve it (tsconfig paths) first.
+        const r = await build.resolve(args.path, { kind: args.kind, importer: args.importer, resolveDir: args.resolveDir, pluginData: { handoffImg: true } });
+        if (r.errors.length) return { errors: r.errors };
+        return { path: r.path, namespace: "handoff-img" };
       });
       build.onLoad({ filter: /.*/, namespace: "handoff-img" }, (args) => ({
         contents: `import src from ${JSON.stringify(args.path)};\nexport default { src };\n`,
         loader: "js",
         resolveDir: path.dirname(args.path),
       }));
+    },
+  };
+}
+
+/**
+ * App component files the prototype replaces (repo-relative original → handoff module, relative to this
+ * directory). The handoff module exports the same names and props; it may import the original (e.g. to
+ * re-export what it doesn't replace) — that one import resolves to the real file. Task 5: the customer-facing
+ * views (the saved PDF and the /estimator-preview frames) render live from the browser store.
+ */
+export const APP_OVERRIDES: Record<string, string> = {
+  "src/app/(app)/estimator/preview-doc.tsx": "ui/review-overrides.tsx",
+  "src/components/quote-pdf/quote-pdf-viewer.tsx": "ui/review-overrides.tsx",
+  "src/app/(app)/estimator/steps/review-tabs.tsx": "ui/review-overrides.tsx",
+};
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Redirects imports of each APP_OVERRIDES original to its handoff module. Only import specifiers whose last
+ * segment names an overridden file (with or without the extension) are resolved twice; the redirect is decided
+ * on the resolved absolute path, so "@/…", "../…" and "./…" spellings all match. `applied` collects
+ * original → importers that were redirected (the build reports it; a stale entry fails the build).
+ */
+export function appOverridePlugin(root: string, overrides: Record<string, string> = APP_OVERRIDES, applied: Map<string, Set<string>> = new Map()): esbuild.Plugin {
+  const byAbs = new Map<string, string>();
+  for (const [orig, repl] of Object.entries(overrides)) byAbs.set(path.resolve(root, orig), path.resolve(HERE, repl));
+  const replacements = new Set(byAbs.values());
+  const stems = [...new Set([...byAbs.keys()].map((abs) => path.basename(abs).replace(/\.[^.]+$/, "")))];
+  const filter = new RegExp(`(^|/)(${stems.map(escapeRe).join("|")})(\\.tsx?)?$`);
+  return {
+    name: "handoff-app-overrides",
+    setup(build) {
+      build.onResolve({ filter }, async (args) => {
+        if ((args.pluginData as { handoffOverride?: boolean } | undefined)?.handoffOverride) return undefined;
+        // A handoff module importing its original gets the real file.
+        if (replacements.has(args.importer)) return undefined;
+        const r = await build.resolve(args.path, { kind: args.kind, importer: args.importer, resolveDir: args.resolveDir, pluginData: { handoffOverride: true } });
+        if (r.errors.length) return undefined;
+        const to = byAbs.get(r.path);
+        if (!to) return undefined;
+        const key = fileKeyOf(root, r.path);
+        if (!applied.has(key)) applied.set(key, new Set());
+        applied.get(key)!.add(fileKeyOf(root, args.importer));
+        return { path: to };
+      });
     },
   };
 }
