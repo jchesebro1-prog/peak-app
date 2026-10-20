@@ -3,6 +3,7 @@ import { lineModel, partModel } from "@/lib/catalog-rename/sku";
 import { lineExtSellOf, systemItemsRev, systemSellTotal } from "./pricing";
 import type { SpecItem, SpecSection, VendorQuote } from "./types";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { isPlaceholderSku } from "@/lib/specs/record-keys";
 
 /** The Estimator's "Parts list (CSV)" export for the project manager (#262) —
  *  every orderable part in the estimate's material systems, assemblies
@@ -12,14 +13,18 @@ import { isBonusItem } from "@/lib/estimate-bonus/flags";
  *  system's price including freight (typed, or rounded up to $25; exact for
  *  a legacy system) less any labor lines' share (#276, #279) — freight has
  *  no row of its own but is carried in the parts' sell.
+ *  v2 (2026-10-20 spec): every row also says where its price came from and
+ *  carries its line margin (before freight) beside the effective margin.
  *  Pure: no React, no server imports. */
 
 /** Catalog facts for one SKU, keyed by the trimmed SKU (#262). */
 export type PartInfo = { mfr?: string; manufacturerPartNumber?: string; manufacturerModelNumber?: string; desc?: string };
 
-/** One consolidated row of the parts list (#262). `unitCost`/`unitSell` stay
- *  unrounded; `sku` and `unit` are kept for merging + the unit note, never
- *  printed as columns. */
+/** One consolidated row of the parts list (#262). `unitCost`/`unitSell`/
+ *  `lineSell` stay unrounded; `sku` and `unit` are kept for merging + the
+ *  unit note, never printed as their own columns. `lineSell` is the unit
+ *  sell before the system's freight / rounding / typed-sell factor; `source`
+ *  is the Price source label (v2). */
 export type PartsListRow = {
   manufacturer: string;
   modelNumber: string;
@@ -31,21 +36,29 @@ export type PartsListRow = {
   unit: string;
   unitCost: number;
   unitSell: number;
+  lineSell: number;
+  source: string;
   partOf: string[];
   notes: string[];
 };
 
 export const PARTS_CSV_HEADER: string[] = [
   "Manufacturer",
-  "Model number",
+  "Item name",
+  "Description",
   "Room",
   "System",
   "Qty",
   "Unit Cost",
   "Unit Sell",
-  "Description",
+  "Line margin",
+  "Effective margin",
+  "Price source",
   "Notes",
 ];
+
+/** Price source of a cost-adjustment row (v2) — it carries no margins. */
+const ADJUSTMENT = "Adjustment";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -66,6 +79,26 @@ function lineSellOf(item: SpecItem): number {
   return typeof item.extSellOverride === "number" && Number.isFinite(item.extSellOverride)
     ? item.extSellOverride / item.qty
     : item.price;
+}
+
+/** Price source of a plain line — not a vendor quote, not exploded (v2 spec
+ *  rules 4–9, first match wins). */
+function plainSource(item: SpecItem, inCatalog: boolean): string {
+  if (item.por) return "Price on request";
+  if (item.allowance) return "Allowance";
+  if (item.curtain) return "Curtain calculator";
+  if (item.custom) return "Custom";
+  if (!inCatalog) return "Not in catalog";
+  const edited = item.sellOverride === true
+    || (typeof item.extSellOverride === "number" && Number.isFinite(item.extSellOverride));
+  return edited ? "Catalog — sell edited" : "Catalog";
+}
+
+/** The trimmed SKU, or "" for a placeholder (CUSTOM, AI, CURTAIN, CRT-n) —
+ *  those count as no SKU: never printed, never looked up, never a merge key. */
+function realSku(raw: string | undefined): string {
+  const sku = (raw || "").trim();
+  return isPlaceholderSku(sku) ? "" : sku;
 }
 
 /** Every emitted entry, in order, before consolidation (#262). */
@@ -99,12 +132,16 @@ function expand(
       const notes = note ? [note] : [];
 
       const vq = item.vendorQuoteId ? vendorQuotes.find((v) => v.id === item.vendorQuoteId) : undefined;
+      // A found vendor quote names the line even when it has no lines (a typed total).
+      const vqLabel = vq ? `${vq.vendor}${vq.quoteNumber ? " #" + vq.quoteNumber : ""}` : "";
+      const vqName = `Vendor quote ${vqLabel}`;
+      const vqSource = `Vendor quote — ${vqLabel}`;
       if (vq && vq.lines.length > 0) {
-        const vqName = `Vendor quote ${vq.vendor}${vq.quoteNumber ? " #" + vq.quoteNumber : ""}`;
         let linesTotal = 0;
         for (const line of vq.lines) if (line.qty > 0) linesTotal += line.amount;
         for (const line of vq.lines) {
           if (!(line.qty > 0)) continue;
+          const sell = linesTotal > 0 ? (lineSell * line.amount / linesTotal) / line.qty : 0;
           out.push({
             manufacturer: "",
             modelNumber: line.manufacturerPartNumber?.trim() || "",
@@ -115,7 +152,9 @@ function expand(
             qty: line.qty * item.qty,
             unit: line.unit || "ea",
             unitCost: line.amount / line.qty,
-            unitSell: linesTotal > 0 ? (lineSell * line.amount / linesTotal) / line.qty : 0,
+            unitSell: sell,
+            lineSell: sell,
+            source: vqSource,
             partOf: [vqName],
             notes: [...notes],
           });
@@ -135,6 +174,8 @@ function expand(
             unit: "ea",
             unitCost: item.cost - linesTotal,
             unitSell: 0,
+            lineSell: 0,
+            source: ADJUSTMENT,
             partOf: [vqName],
             notes: [],
           });
@@ -154,8 +195,9 @@ function expand(
             : partsList > 0 ? comp.price * lineSell / partsList
             : 0;
         for (const comp of included) {
-          const sku = comp.sku.trim();
+          const sku = realSku(comp.sku);
           const p = infoOf(info, sku);
+          const sell = sellOf(comp);
           out.push({
             manufacturer: p?.mfr?.trim() || "",
             modelNumber: modelFromInfo(info, sku),
@@ -166,7 +208,9 @@ function expand(
             qty: comp.qty * item.qty,
             unit: comp.unit || "ea",
             unitCost: comp.cost,
-            unitSell: sellOf(comp),
+            unitSell: sell,
+            lineSell: sell,
+            source: "Catalog",
             partOf: [assemblyName],
             notes: [...notes],
           });
@@ -183,6 +227,8 @@ function expand(
             unit: "ea",
             unitCost: item.cost - partsCost,
             unitSell: 0,
+            lineSell: 0,
+            source: ADJUSTMENT,
             partOf: [assemblyName],
             notes: [],
           });
@@ -190,7 +236,7 @@ function expand(
         continue;
       }
 
-      const sku = (item.sku || "").trim();
+      const sku = realSku(item.sku);
       const p = infoOf(info, sku);
       out.push({
         manufacturer: item.manufacturer?.trim() || p?.mfr?.trim() || "",
@@ -203,10 +249,13 @@ function expand(
         unit: item.unit || "ea",
         unitCost: item.cost,
         unitSell: lineSell,
+        lineSell,
+        source: vq ? vqSource : plainSource(item, !!p),
         partOf: [],
         notes,
       });
     }
+    // k scales the exported Unit Sell only; lineSell keeps the line as priced.
     if (k !== 1) for (let i = start; i < out.length; i++) out[i].unitSell *= k;
   }
   return out;
@@ -223,7 +272,10 @@ export function partsListSkus(sections: SpecSection[]): string[] {
 }
 
 /** The consolidated parts list (#262) — identical parts within one room +
- *  system merged, first-appearance order. */
+ *  system merged, first-appearance order. v2: the price source is part of
+ *  the key, so a catalog part and the same part typed in as custom stay
+ *  apart. Merged rows share system, unit cost and unit sell, so their
+ *  lineSell agrees; the first row's is kept. */
 export function partsListRows(
   sections: SpecSection[],
   vendorQuotes: VendorQuote[],
@@ -233,8 +285,8 @@ export function partsListRows(
   const rows = new Map<string, PartsListRow>();
   for (const e of expand(sections, vendorQuotes, info, defaultRoom)) {
     const key = e.sku || e.modelNumber
-      ? `p|${e.room}|${e.system}|${e.manufacturer}|${e.modelNumber}|${e.sku}|${e.unit}|${round2(e.unitCost)}|${round2(e.unitSell)}`
-      : `d|${e.room}|${e.system}|${e.desc}|${e.unit}|${round2(e.unitCost)}|${round2(e.unitSell)}`;
+      ? `p|${e.room}|${e.system}|${e.manufacturer}|${e.modelNumber}|${e.sku}|${e.unit}|${round2(e.unitCost)}|${round2(e.unitSell)}|${e.source}`
+      : `d|${e.room}|${e.system}|${e.desc}|${e.unit}|${round2(e.unitCost)}|${round2(e.unitSell)}|${e.source}`;
     const row = rows.get(key);
     if (row) {
       row.qty += e.qty;
@@ -247,23 +299,37 @@ export function partsListRows(
   return [...rows.values()];
 }
 
-/** CSV body rows under PARTS_CSV_HEADER (#262); [] when empty. Notes carries
- *  "Part of: …", a "per <unit>" for anything not sold each, then internal notes. */
+/** A margin as a one-decimal percent (v2) — "" when the sell is zero or not
+ *  finite; negative when below cost; never "-0.0%". */
+function marginPct(sell: number, cost: number): string {
+  if (!Number.isFinite(sell) || !Number.isFinite(cost) || Math.abs(sell) < 1e-9) return "";
+  const v = Math.round(((sell - cost) / sell) * 1000) / 10;
+  return (v === 0 ? 0 : v).toFixed(1) + "%";
+}
+
+/** CSV body rows under PARTS_CSV_HEADER (#262, v2); [] when empty. Item name
+ *  is the model number, else the SKU. Notes carries "Part of: …", a "per
+ *  <unit>" for anything not sold each, then internal notes. Cost-adjustment
+ *  rows print no margins. */
 export function partsListCsvRows(rows: PartsListRow[]): (string | number)[][] {
   return rows.map((r) => {
     const notes: string[] = [];
     if (r.partOf.length > 0) notes.push("Part of: " + r.partOf.join(", "));
     if (r.unit !== "ea") notes.push("per " + r.unit);
     notes.push(...r.notes);
+    const adjustment = r.source === ADJUSTMENT;
     return [
       r.manufacturer,
-      r.modelNumber,
+      r.modelNumber || r.sku,
+      r.desc,
       r.room,
       r.system,
       r.qty,
       r.unitCost.toFixed(2),
       r.unitSell.toFixed(2),
-      r.desc,
+      adjustment ? "" : marginPct(r.lineSell, r.unitCost),
+      adjustment ? "" : marginPct(r.unitSell, r.unitCost),
+      r.source,
       notes.join("; "),
     ];
   });

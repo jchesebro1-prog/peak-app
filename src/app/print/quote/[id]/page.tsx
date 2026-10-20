@@ -1,7 +1,8 @@
 import peakLetterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import QuoteDocument, { QUOTE_PRINT_CSS } from "@/app/(app)/estimator/quote-document";
+import QuoteDocument, { QUOTE_PRINT_CSS, QUOTE_WEB_EMBED_CSS } from "@/app/(app)/estimator/quote-document";
+import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";
 import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
 import { pdfKindForQuoteType, type PdfKind } from "@/lib/quote-pdf/state";
 import { verifyPrintToken } from "@/lib/quote-pdf/token";
@@ -37,6 +38,7 @@ function tokenOk(t: string | undefined, kind: PdfKind, id: string): boolean {
  * with a 120 s token and prints it to the saved PDF. Outside the team login
  * (middleware exempts /print/); the token is the only key, checked before any
  * read. Renders from saved data only — the same QuoteDocument the team sees.
+ * `?view=bom` (2026-10-20) prints the BOM view instead — bomViewProps, no cut sheets, no photos — for the Build package BOM PDF.
  */
 export default async function PrintQuotePage({
   params,
@@ -47,6 +49,8 @@ export default async function PrintQuotePage({
 }) {
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const t = Array.isArray(sp.t) ? sp.t[0] : sp.t;
+  // BOM quote PDF (2026-10-20 spec): ?view=bom prints the saved BOM preview — itemized bands, no package document, no cut sheets, no photos.
+  const bom = (Array.isArray(sp.view) ? sp.view[0] : sp.view) === "bom";
   // #348 2b-i: a per-bidder variant (`?bidder=pty_…`) needs a token signed for `${id}~${bidder}`; a plain-id token never unlocks it.
   // A bidder param that is present but malformed (or repeated) is a 404, never a fall-through to the plain document.
   const rawBidder = sp.bidder;
@@ -61,6 +65,8 @@ export default async function PrintQuotePage({
   const rawPart = sp.part;
   if (rawPart !== undefined && (bidder || typeof rawPart !== "string" || (rawPart !== "main" && rawPart !== "tail"))) notFound();
   const part = rawPart as "main" | "tail" | undefined;
+  // The BOM PDF is the plain customer quote only — never a bidder copy, a revision or a split part.
+  if (bom && (rawBidder !== undefined || rawRev !== undefined || rawPart !== undefined)) notFound();
   if (!tokenOk(t, "quote", bidder ? (rev ? `${id}~${bidder}~r${rev}` : `${id}~${bidder}`) : id)) notFound();
   const q = await getQuote(id);
   if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") notFound();
@@ -71,10 +77,14 @@ export default async function PrintQuotePage({
   // A revision render shows what was sent: live edits since that revision (content changed after it was cut) would make the live-built cut sheets disagree, so they are skipped.
   const cutSheetsOk = !revision || !(typeof q.contentChangedAt === "number" && q.contentChangedAt > revision.at);
   // The links' absolute origin — the print origin, the Cover PDF's way (spec §5). Unresolvable → no links page.
-  const h = await headers();
-  const where = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
-  const origin = "origin" in where ? where.origin : "";
-  if ("error" in where) console.warn("[quote-pdf] no print origin — the PDF has no datasheet links", id, where.error);
+  // A BOM render has no links page, so it needs no origin.
+  let origin = "";
+  if (!bom) {
+    const h = await headers();
+    const where = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
+    origin = "origin" in where ? where.origin : "";
+    if ("error" in where) console.warn("[quote-pdf] no print origin — the PDF has no datasheet links", id, where.error);
+  }
   const [addressee, cust, settings, perks, cutSheets, links] = await Promise.all([
     // Strict: an explicit bidder that is no longer a live bidder on this quote (deleted since signing) is a 404, never the awarded default.
     bidder ? documentAddressee(src, bidder, { strict: true }) : documentAddressee(q),
@@ -83,14 +93,24 @@ export default async function PrintQuotePage({
     // #282 perks+points — the customer's purchase perks line (program on only).
     purchasePerksForCompany(src.customerId),
     // #292 — Client-style cut sheets after the estimate, only when the quote asks for them. A failure or a slow load (8 s) drops them, never the PDF — and says so in the server log.
-    part !== "tail" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
+    !bom && part !== "tail" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
     // Spec 2026-10-16 §5 — the datasheet links: the customer PDF only (never a bidder's), never in the "main" part.
-    !bidder && part !== "main" ? loadDatasheetLinkRows(q, origin) : [],
+    !bom && !bidder && part !== "main" ? loadDatasheetLinkRows(q, origin) : [],
   ]);
   if (bidder && !addressee) notFound();
   // An empty links part would print a blank page — refuse it, so the generator's tail render fails and says the links are missing.
   if (part === "tail" && !links.length) notFound();
   const doc = quoteDocumentDataFor(src, cust, settings, addressee);
+  if (bom) {
+    return (
+      <main>
+        <style>{QUOTE_PRINT_CSS}</style>
+        {/* The BOM tab's own layout (web: no title page, the investment band kept) — Jeff, 2026-10-20. */}
+        <style>{QUOTE_WEB_EMBED_CSS}</style>
+        <QuoteDocument {...bomViewProps(doc)} layout="web" rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
+      </main>
+    );
+  }
   // #293: key-product photos inlined as data URIs (this route has no session).
   // Never throws — a photo that can't be read just isn't printed.
   // Phase 5: plus the package document's photo-on product blocks.

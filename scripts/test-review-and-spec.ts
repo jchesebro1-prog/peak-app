@@ -37416,7 +37416,7 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   const near = (a: number, b: number) => Math.abs(a - b) < 0.01;
   const costSum = (rs: typeof rows) => rs.reduce((a, r) => a + r.qty * r.unitCost, 0);
   const sellSum = (rs: typeof rows) => rs.reduce((a, r) => a + r.qty * r.unitSell, 0);
-  ok(p262Header.join(",") === "Manufacturer,Model number,Room,System,Qty,Unit Cost,Unit Sell,Description,Notes", "#262 parts list: the CSV header is Jeff's nine columns, in order");
+  ok(p262Header.join(",") === "Manufacturer,Item name,Description,Room,System,Qty,Unit Cost,Unit Sell,Line margin,Effective margin,Price source,Notes", "#262 v2 parts list: the CSV header is the twelve columns, in order");
   ok(!["LAB-1", "LAB-X", "OPT-1", "ZERO", "SA-F1", "SA-F2", "SAFETY", "VQ"].some((s) => rows.some((r) => r.sku === s)), "#262 parts list: labor sections, labor items, options, zero-qty items, the assembly line itself, qty-0 components and an expanded vendor-quote line never appear");
   ok(rows.map((r) => r.sku || r.modelNumber || r.desc).join("|") === "LAMP-A|CLAMP|Cost adjustment — Wash (line cost differs from its parts)|PLAIN-1|PLAIN-2|UNKNOWN-9|CAT-ONLY|TR-10|Base plate|VQ2|CABLE-FT|CLAMP", "#262 parts list: rows come out in first-appearance order");
   ok(rows.filter((r) => r.system === "Lighting").every((r) => r.room === "Stage") && by("CLAMP", "Rigging")!.room === "Main Hall", "#262 parts list: room is the section's own room, else the defaultRoom fallback");
@@ -37452,13 +37452,78 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   ok(near(sellSum(rows), expectedSell), "#262 parts list: Σ qty × Unit Sell equals the estimate's material sell");
   const csv = p262Csv(rows);
   ok(csv.length === rows.length && !csv.some((r) => r.includes("Total")), "#262 parts list: the CSV has one line per row and no Total row");
-  ok(csv[1].join("|") === "Altman|C-CLAMP-PN|Stage|Lighting|8|10.00|20.00|Clamp|Part of: Cyc light, Wash", "#262 parts list: a CSV row prints Jeff's columns, cents, and \"Part of:\" in Notes");
-  ok(csv.find((r) => r[7] === "Plain one")![8] === "Hang on 1st elec" && csv.find((r) => r[7] === "Cable")![8] === "per ft", "#262 parts list: the internal note (trimmed) and a non-ea unit (\"per ft\") land in Notes");
+  ok(csv[1].join("|") === "Altman|C-CLAMP-PN|Clamp|Stage|Lighting|8|10.00|20.00|50.0%|50.0%|Catalog|Part of: Cyc light, Wash", "#262 v2 parts list: a CSV row prints the twelve columns, cents, margins, source and \"Part of:\" in Notes");
+  ok(csv.find((r) => r[2] === "Plain one")?.[11] === "Hang on 1st elec" && csv.find((r) => r[2] === "Cable")?.[11] === "per ft", "#262 parts list: the internal note (trimmed) and a non-ea unit (\"per ft\") land in Notes");
   ok(p262Csv([]).length === 0, "#262 parts list: an empty list has no rows");
   const manualVq = p262Rows([{ id: "s3", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "", "Acme truss package", 1, 350, { vendorQuoteId: "VQ-1" })] }], vqs, {});
   const vAdj = manualVq.find((r) => r.desc.startsWith("Cost adjustment"));
   ok(vAdj?.unitCost === 50 && vAdj.unitSell === 0 && vAdj.partOf.join(";") === "Vendor quote Acme #Q-77" && vAdj.desc === "Cost adjustment — Vendor quote Acme #Q-77 (quote total differs from its lines)" && near(costSum(manualVq), 350) && near(sellSum(manualVq), 700), "#262 parts list: a typed vendor total that differs from its lines adds an adjustment row, so the file still totals to the line cost and sell");
   ok(p262Skus(sections).join(",") === "LAMP-A,CLAMP,PLAIN-1,PLAIN-2,UNKNOWN-9,CAT-ONLY,VQ,VQ2,CABLE-FT", "#262 parts list: partsListSkus lists component SKUs, never the assembly line's own SKU (a vendor-quote line's SKU is kept — it can't see the vendor quotes)");
+  // --- v2 (2026-10-20 spec): Item name, Line / Effective margin, Price source ---
+  ok(rows.map((r) => r.source).join("|") === "Catalog|Catalog|Adjustment|Catalog|Not in catalog|Not in catalog|Catalog|Vendor quote — Acme #Q-77|Vendor quote — Acme #Q-77|Not in catalog|Not in catalog|Catalog", "#262 v2 parts list: components and catalog SKUs say Catalog, vendor lines name the vendor + quote #, cost-adjustment rows say Adjustment, unresolved SKUs (and a missing vendor quote) say Not in catalog");
+  ok(lamp.lineSell === 200 && clamp.lineSell === 20 && truss.lineSell === 100, "#262 v2 parts list: lineSell is the allocated unit sell before the system factor (LAMP 200, CLAMP 20, truss 100)");
+  ok(csv.find((r) => r[2] === "Mystery part")?.[1] === "UNKNOWN-9" && csv.find((r) => r[2] === "Source Four 750W")?.[1] === "S4-750" && csv.find((r) => r[2] === "Base plate")?.[1] === "", "#262 v2 parts list: Item name is the model number, else the SKU, else blank");
+  const adjCsv = csv.find((r) => String(r[2]).startsWith("Cost adjustment — Wash"));
+  ok(adjCsv?.[8] === "" && adjCsv?.[9] === "" && adjCsv?.[10] === "Adjustment", "#262 v2 parts list: a cost-adjustment row prints no margins");
+
+  const srcInfo: Record<string, P262Info> = { CAT: { mfr: "ETC" }, CAT2: { mfr: "ETC" }, CAT3: { mfr: "ETC" }, DUP: { mfr: "ETC" } };
+  const srcSec: P262Section = { id: "s5", name: "Sources", kind: "materials", mfr: "", freightPct: 0, items: [
+    it(1, "POR-1", "Customer asked", 1, 0, { por: true, price: 0 }),
+    it(2, "", "Rigging allowance", 1, 500, { allowance: true }),
+    it(3, "", "Main drape", 1, 800, { curtain: true }),
+    it(4, "CUSTOM", "Custom bracket", 2, 30, { custom: true }),
+    it(5, "CAT", "Catalog plain", 1, 40),
+    it(6, "CAT2", "Catalog typed unit sell", 1, 40, { sellOverride: true, price: 100 }),
+    it(7, "CAT3", "Catalog typed ext sell", 2, 40, { extSellOverride: 150 }),
+    it(8, "DUP", "Dup part", 1, 10),
+    it(9, "DUP", "Dup part", 1, 10, { custom: true }),
+    it(10, "", "Bolt pipe", 1, 60, { vendorQuoteId: "VQ-2" }),
+  ] };
+  const vq2: P262Vq = { id: "VQ-2", vendor: "Bolt", quoteNumber: "", description: "", terms: "", notes: "", total: 60, includesFreight: false, display: "single",
+    lines: [{ id: 1, description: "Pipe", qty: 2, unit: "ea", amount: 60 }] };
+  const srcRows = p262Rows([srcSec], [vq2], srcInfo);
+  const srcCsv = p262Csv(srcRows);
+  ok(srcRows.map((r) => r.source).join("|") === "Price on request|Allowance|Curtain calculator|Custom|Catalog|Catalog — sell edited|Catalog — sell edited|Catalog|Custom|Vendor quote — Bolt", "#262 v2 parts list: POR, allowance, curtain, custom, catalog, a typed unit sell, a typed extended sell, and a vendor quote with no number each get their label");
+  ok(srcRows.filter((r) => r.sku === "DUP").map((r) => `${r.source}:${r.qty}`).join("|") === "Catalog:1|Custom:1", "#262 v2 parts list: the same part as a catalog line and as a custom line stays two rows (source is in the merge key)");
+  const sc = (desc: string) => srcCsv.find((r) => r[2] === desc);
+  ok(sc("Catalog plain")?.[8] === "50.0%" && sc("Catalog plain")?.[9] === "50.0%", "#262 v2 parts list: with no freight or rounding, Line margin = Effective margin (80 sell / 40 cost → 50.0%)");
+  ok(sc("Catalog typed unit sell")?.[8] === "60.0%" && sc("Catalog typed ext sell")?.[8] === "46.7%", "#262 v2 parts list: margins follow a typed unit sell (100 → 60.0%) and a typed extended sell (150 / 2 = 75 → 46.7%)");
+  ok(sc("Customer asked")?.[8] === "" && sc("Customer asked")?.[9] === "", "#262 v2 parts list: a zero-sell row prints blank margins");
+
+  const typed = p262Rows([{ id: "s6", name: "Typed", kind: "materials", mfr: "", freightPct: 0, sellOverride: 125, items: [it(1, "CAT", "Catalog plain", 1, 50, { price: 100 })] }], [], srcInfo);
+  const typedCsv = p262Csv(typed);
+  ok(typed[0]?.lineSell === 100 && typedCsv[0][7] === "125.00" && typedCsv[0][8] === "50.0%" && typedCsv[0][9] === "60.0%", "#262 v2 parts list: a typed system sell lifts Unit Sell and the Effective margin (60.0%) but not the Line margin (50.0%)");
+  const below = p262Csv(p262Rows([{ id: "s7", name: "Below", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "CAT", "Below cost", 1, 50, { price: 40 })] }], [], srcInfo));
+  ok(below[0][8] === "-25.0%" && below[0][9] === "-25.0%", "#262 v2 parts list: a below-cost line prints a negative margin");
+  ok(srcCsv.every((r) => r.length === 12) && csv.every((r) => r.length === 12), "#262 v2 parts list: every CSV row has twelve cells");
+
+  // Final review A — a saved vendor quote with no lines (typed total) still reads "Vendor quote — …"
+  const vq3: P262Vq = { id: "VQ-3", vendor: "Crane", quoteNumber: "Q-9", description: "", terms: "", notes: "", total: 500, includesFreight: false, display: "single", lines: [] };
+  const vq3Rows = p262Rows([{ id: "s8", name: "NoLines", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "Q-9", "Crane lift", 1, 500, { vendorQuoteId: "VQ-3" })] }], [vq3], srcInfo);
+  ok(vq3Rows.length === 1 && vq3Rows[0].source === "Vendor quote — Crane #Q-9", "#262 final A: a vendor quote with no lines still reads Vendor quote — <vendor> #<number>: " + JSON.stringify(vq3Rows.map((r) => r.source)));
+  const vqMiss = p262Rows([{ id: "s8b", name: "Miss", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "Q-9", "Crane lift", 1, 500, { vendorQuoteId: "VQ-GONE" })] }], [vq3], srcInfo);
+  ok(vqMiss.length === 1 && vqMiss[0].source === "Not in catalog", "#262 final A: a vendorQuoteId pointing at a missing vendor quote still falls through to the plain label");
+
+  // Final review B — placeholder SKUs (CUSTOM, AI, CURTAIN, CRT-n) count as no SKU
+  const phSec: P262Section = { id: "s9", name: "Placeholders", kind: "materials", mfr: "", freightPct: 0, items: [
+    it(1, "CUSTOM", "Custom bracket", 1, 30, { custom: true }),
+    it(2, "CUSTOM", "Custom plate", 3, 30, { custom: true }),
+    it(3, "CUSTOM", "Custom plate", 2, 30, { custom: true }),
+    it(4, "AI", "AI drafted thing", 1, 12),
+    it(5, "CRT-12", "Main drape", 1, 800, { curtain: true }),
+    it(6, "CUSTOM", "Custom with PN", 1, 5, { custom: true, manufacturerPartNumber: "PN-X" }),
+  ] };
+  const phRows = p262Rows([phSec], [], srcInfo);
+  const phCsv = p262Csv(phRows);
+  ok(phRows.length === 5 && phRows.every((r) => !["CUSTOM", "AI", "CRT-12"].includes(r.sku)), "#262 final B: placeholder SKUs are blanked on the row; distinct custom lines no longer merge, same-description ones do: " + JSON.stringify(phRows.map((r) => [r.sku, r.desc, r.qty])));
+  ok(phRows.find((r) => r.desc === "Custom bracket")?.qty === 1 && phRows.find((r) => r.desc === "Custom plate")?.qty === 5, "#262 final B: two custom lines with the same description still merge (3 + 2 = 5)");
+  const phItem = (d: string) => phCsv.find((r) => r[2] === d);
+  ok(phItem("Custom bracket")?.[1] === "" && phItem("AI drafted thing")?.[1] === "" && phItem("Main drape")?.[1] === "", "#262 final B: Item name is blank for CUSTOM, AI and CRT-n lines");
+  ok(phItem("Custom with PN")?.[1] === "PN-X", "#262 final B: a placeholder-SKU line with its own P/N prints the P/N as Item name");
+  ok(phItem("AI drafted thing")?.[10] === "Not in catalog" && phItem("Main drape")?.[10] === "Curtain calculator" && phItem("Custom bracket")?.[10] === "Custom", "#262 final B: price source is unchanged by the placeholder rule");
+  ok(p262Skus([phSec]).length === 0, "#262 final B: partsListSkus never asks the catalog about placeholders");
+  const phComp = p262Rows([{ id: "s10", name: "Comp", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "SA-9", "Kit — thing", 1, 10, { components: [comp("CUSTOM", "Loose item", 1, 10)] })] }], [], srcInfo);
+  ok(phComp[0]?.sku === "" && p262Csv(phComp)[0][1] === "", "#262 final B: an assembly component with a placeholder SKU is also treated as no SKU");
 }
 
 /* --- #261: Quick Design plan text stays a fixed on-screen size however wide the plan draws; dimensions smaller still (D468) --- */
@@ -51937,12 +52002,15 @@ import { signPrintToken as e301rSign, verifyPrintToken as e301rVerify } from "@/
   ok(page.includes('verifyPrintToken(process.env.AUTH_SECRET || "", t, "cover", id, Date.now())') && page.includes("notFound()") && page.includes("force-dynamic") &&
      page.includes("index: false") && page.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && page.includes("await headers()") && page.includes("loadCoverDocumentProps(") &&
      page.indexOf("tokenOk(") < page.indexOf("getQuote("), "#301 route: the print page checks its token before any read, 404s otherwise, is dynamic and noindex");
-  // Phase 3: the render moved to cover-pdf-server.ts (shared with the send action); the pin reads both.
-  const route = rd("src/app/api/quotes/[id]/cover-pdf/route.ts") + rd("src/lib/estimate-output/cover-pdf-server.ts");
+  // Phase 3: the render moved to cover-pdf-server.ts (shared with the send action); the BOM-PDF fix then moved the render
+  // body + response tail into the one shared quote-pdf/signed-print-pdf.ts — the pin reads all three.
+  const route = rd("src/app/api/quotes/[id]/cover-pdf/route.ts") + rd("src/lib/estimate-output/cover-pdf-server.ts") + rd("src/lib/quote-pdf/signed-print-pdf.ts");
   ok(route.includes("export const maxDuration = 60;") && route.includes("await requireUser();") && route.includes("printOriginFor(process.env,") &&
-     route.includes('signPrintToken(secret, "cover", q.id, Date.now())') && route.includes("renderPrintRouteToPdf(") && route.includes("PdfRenderUnavailable") &&
-     route.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && route.includes("COVER_RENDER_TIMEOUT_MS = 45_000") && route.includes("COVER_RENDER_DEADLINE_MS = 55_000") &&
-     route.includes("timeoutMs: COVER_RENDER_TIMEOUT_MS") && route.includes("signal: AbortSignal.timeout(COVER_RENDER_DEADLINE_MS)") && route.includes("coverPdfFileName(displayQuoteNumber(q))") && route.includes('"x-content-type-options": "nosniff"'),
+     route.includes('kind: "cover"') && route.includes("/print/cover/${encodeURIComponent(id)}?t=${encodeURIComponent(t)}") && route.includes("signPrintToken(secret, opts.kind, q.id, Date.now())") &&
+     route.includes("renderPrintRouteToPdf(") && route.includes("PdfRenderUnavailable") &&
+     route.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && route.includes("SIGNED_PRINT_RENDER_TIMEOUT_MS = 45_000") && route.includes("SIGNED_PRINT_RENDER_DEADLINE_MS = 55_000") &&
+     route.includes("timeoutMs: SIGNED_PRINT_RENDER_TIMEOUT_MS") && route.includes("signal: AbortSignal.timeout(SIGNED_PRINT_RENDER_DEADLINE_MS)") && route.includes("coverPdfFileName(displayQuoteNumber(q))") &&
+     route.includes('"x-content-type-options": "nosniff"') && route.includes('"cache-control": "private, no-store"'),
     "#301 route: signed-in only, 60 s, the shared print origin, system quotes only, \"EST-#### Cover.pdf\" (R7)");
   const panel = rd("src/app/(app)/estimator/cover-package-panel.tsx");
   ok(panel.includes("/cover-pdf") && panel.includes(">Cover PDF<") && panel.includes("Open cover ↗") && panel.includes("Save first — the cover prints the saved estimate.") && panel.includes("Save to create the cover."),
@@ -70259,4 +70327,61 @@ async function pkg333ReviewStoreChecks(): Promise<void> {
   ok(d.name === "renamed" && SK(d.packageSelection) === SK(b.packageSelection), "#333 review B: update() can't write packageSelection (a stale Save never reverts a tick)");
   const miss = await Q.setPackageSelection(fixtureId(333, "nope"), { drawings: false });
   ok(!miss.ok, "#333 review store: an unknown quote → not ok");
+}
+
+/* --- BOM quote PDF (2026-10-20 spec): Build package → BOM quote → Download PDF / Open PDF ↗ --- */
+import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate-output/bom-pdf";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const has = (p: string) => existsSync(join(process.cwd(), p));
+  ok(bq1File("EST-1234") === "EST-1234 BOM.pdf" && bq1File("") === "Estimate BOM.pdf" && bq1File("A/B") === "A_B BOM.pdf", "BOM PDF: \"<number> BOM.pdf\", Estimate when blank, unsafe characters → _");
+  ok(bq1Path("Q-1", true) === "/api/quotes/Q-1/bom-pdf?download=1" && bq1Path("Q 1", false) === "/api/quotes/Q%201/bom-pdf", "BOM PDF: bomPdfPath encodes the id; download adds ?download=1");
+  const page = rd("src/app/print/quote/[id]/page.tsx");
+  ok(page.includes('import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";') && /const bom = \(Array\.isArray\(sp\.view\) \? sp\.view\[0\] : sp\.view\) === "bom";/.test(page) && page.includes('<QuoteDocument {...bomViewProps(doc)} layout="web" rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />'),
+    "BOM PDF print: ?view=bom renders bomViewProps(doc) — the saved BOM preview's own transform");
+  ok(page.includes("!bom && part !== \"tail\" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets") && page.includes("!bom && !bidder && part !== \"main\" ? loadDatasheetLinkRows(q, origin) : []") &&
+     page.indexOf("if (bom) {") > -1 && page.indexOf("if (bom) {") < page.indexOf("keyProductPhotoDataUris("),
+    "BOM PDF print: the BOM view appends no cut sheets, no datasheet links and reads no key-product photos");
+  {
+    const gate = "if (bom && (rawBidder !== undefined || rawRev !== undefined || rawPart !== undefined)) notFound();";
+    ok(page.indexOf(gate) > -1 && page.indexOf(gate) < page.indexOf('tokenOk(t, "quote", '),
+      "BOM PDF print: ?view=bom is the plain customer quote only — a bidder, rev or part param is a 404, before the token check");
+  }
+  ok(page.indexOf('if (!tokenOk(t, "quote", ') > -1 && page.indexOf('if (!tokenOk(t, "quote", ') < page.indexOf("getQuote("), "BOM PDF print: the quote token is still checked before any read");
+  {
+    // Final review C — the BOM PDF prints the BOM tab's own layout (web), not the customer PDF's title-page layout
+    const bomBranch = page.slice(page.indexOf("if (bom) {"), page.indexOf("// #293: key-product photos"));
+    ok(bomBranch.includes('layout="web"') && bomBranch.includes("<style>{QUOTE_WEB_EMBED_CSS}</style>") && bomBranch.includes("<style>{QUOTE_PRINT_CSS}</style>") && /import QuoteDocument, \{[^}]*QUOTE_WEB_EMBED_CSS[^}]*\} from "@\/app\/\(app\)\/estimator\/quote-document";/.test(page),
+      "BOM PDF print: the BOM branch renders layout=\"web\" with QUOTE_WEB_EMBED_CSS — the BOM tab's own layout (no title page)");
+    const customerRender = page.slice(page.indexOf("<QuoteDocument {...doc} keyProductPhotos"));
+    ok(!customerRender.slice(0, customerRender.indexOf("/>")).includes("layout="), "BOM PDF print: the customer render is unchanged — no layout= prop");
+    // Final review D — a BOM render reads no headers()/print origin
+    ok(/if \(!bom\) \{\s*const h = await headers\(\);/.test(page), "BOM PDF print: the print origin / headers() read happens only for the customer render");
+  }
+  const route = has("src/app/api/quotes/[id]/bom-pdf/route.ts") && has("src/lib/estimate-output/bom-pdf-server.ts") && has("src/lib/quote-pdf/signed-print-pdf.ts")
+    ? rd("src/app/api/quotes/[id]/bom-pdf/route.ts") + rd("src/lib/estimate-output/bom-pdf-server.ts") + rd("src/lib/quote-pdf/signed-print-pdf.ts") : "";
+  ok(route.includes("export const maxDuration = 60;") && route.includes("await requireUser();") && route.includes("printOriginFor(process.env,") &&
+     route.includes('kind: "quote"') && route.includes("signPrintToken(secret, opts.kind, q.id, Date.now())") && route.includes("&view=bom") && route.includes("renderPrintRouteToPdf(") && route.includes("PdfRenderUnavailable") &&
+     route.includes('pdfKindForQuoteType(q.quoteType) !== "quote"') && route.includes("SIGNED_PRINT_RENDER_TIMEOUT_MS = 45_000") && route.includes("SIGNED_PRINT_RENDER_DEADLINE_MS = 55_000") &&
+     route.includes("timeoutMs: SIGNED_PRINT_RENDER_TIMEOUT_MS") && route.includes("signal: AbortSignal.timeout(SIGNED_PRINT_RENDER_DEADLINE_MS)") &&
+     route.includes("bomPdfFileName(displayQuoteNumber(q))") && route.includes('"x-content-type-options": "nosniff"') && route.includes('"cache-control": "private, no-store"'),
+    "BOM PDF route: signed-in only, 60 s, the shared print origin, system quotes only, the quote token + view=bom, \"EST-#### BOM.pdf\"");
+  {
+    const coverSrv = rd("src/lib/estimate-output/cover-pdf-server.ts"), bomSrv = rd("src/lib/estimate-output/bom-pdf-server.ts");
+    const coverRoute = rd("src/app/api/quotes/[id]/cover-pdf/route.ts"), bomRoute = rd("src/app/api/quotes/[id]/bom-pdf/route.ts");
+    ok(coverSrv.includes("renderSignedQuotePrintPdf(") && bomSrv.includes("renderSignedQuotePrintPdf(") && coverRoute.includes("signedPdfResponse(r, download)") && bomRoute.includes("signedPdfResponse(r, download)") &&
+       !coverSrv.includes("renderPrintRouteToPdf(") && !bomSrv.includes("renderPrintRouteToPdf(") && !coverRoute.includes("new Response(") && !bomRoute.includes("new Response("),
+      "BOM PDF: Cover and BOM share one render (renderSignedQuotePrintPdf) and one response tail (signedPdfResponse) — neither keeps its own copy");
+  }
+  const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
+  ok(tab.includes('downloadPdf: "Download PDF"') && tab.includes('openPdf: "Open PDF ↗"') && tab.includes('saveFirst: "Save first — the PDF prints the saved estimate."') && tab.includes('saveToCreate: "Save to create the PDF."'),
+    "BOM PDF tab: the four copy strings");
+  const panelSrc = rd("src/app/(app)/estimator/cover-package-panel.tsx");
+  ok(tab.includes('href={bomPdfPath(loadedId, true)} target="_blank" rel="noopener noreferrer"') && tab.includes('href={bomPdfPath(loadedId, false)} target="_blank" rel="noopener noreferrer"') &&
+     panelSrc.includes('cover-pdf?download=1`} target="_blank" rel="noopener noreferrer"'),
+    "BOM PDF tab + Cover panel: the PDF download links open in a new tab (a failed render is plain text and must not replace the Estimator)");
+  ok(tab.includes("href={bomPdfPath(loadedId, true)}") && tab.includes("href={bomPdfPath(loadedId, false)}") && tab.includes("{pdfDirty && ") && !/from "@\/lib\/stores\//.test(tab),
+    "BOM PDF tab: Download / Open use bomPdfPath, the save-first note follows pdfDirty, and the tab still imports no store");
+  const smoke = rd("scripts/smoke-routes.ts");
+  ok(smoke.includes('{ route: "/api/quotes/Q-0/bom-pdf", expectNotFound: true }') && smoke.includes('{ route: "/print/quote/Q-2041?view=bom", expectNotFound: true }') && smoke.includes('{ route: "/print/quote/Q-2041?view=bom&part=main", expectNotFound: true }'), "BOM PDF: smoke covers the 404 paths");
 }

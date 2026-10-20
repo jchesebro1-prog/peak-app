@@ -12775,3 +12775,17 @@ Spec `docs/superpowers/specs/2026-10-20-estimator-handoff-package-design.md`; pl
 **Verification:** test:specs 25,016 PASS / 0 FAIL (baseline 24,980); test:smoke 265 PASS / 0 FAIL; tsc exit 0; `next build` exit 0; core:check 82 files, 0 violations; eslint 0 problems on every changed file except `scripts/test-review-and-spec.ts`, which crashes eslint (react-hooks RangeError) identically on origin/main.
 
 **Next:** PR 2 (slicer, prototype UI, spec docs, verification, zip), planned after this merges. It needs Jeff's production export (`DATABASE_URL=<prod> OUT=~/peak-prod-export.json npm run db:export`).
+
+## 360. Parts list CSV v2 + BOM quote PDF — DONE 2026-10-20 on `feat/parts-csv-bom-pdf` (D1231–D1232)
+
+Jeff: the Parts list (CSV) should show item name, description, cost, sell margin and where the pricing came from ("Catalog" for catalog items), and Build package → BOM quote should export to PDF. Specs `docs/superpowers/specs/2026-10-20-parts-list-csv-price-source-design.md` and `docs/superpowers/specs/2026-10-20-bom-quote-pdf-design.md`; plan `docs/superpowers/plans/`.
+
+**Built:** Estimator → More ▾ → Parts list (CSV) now prints Item name (model, else SKU), Description, Unit Cost, Unit Sell, Line margin, Effective margin and Price source ("Catalog" for catalog parts; vendor quote / custom / allowance / curtain / POR / sell edited / not in catalog otherwise). Build package → BOM quote gains Download PDF / Open PDF ↗ for the saved estimate's BOM view (`<number> BOM.pdf`). Cover + BOM share one PDF render; PDF downloads open in a new tab.
+
+**Gates:** tsc 0 errors (`.next` deleted first); test:specs 25,016 PASS / 0 FAIL (includes the `#262 v2`, `#262 final` and `BOM PDF` harness blocks); test:smoke 268 PASS / 0 FAIL (`.next` deleted, run alone); eslint 0 problems on the 3 changed src files (`scripts/test-review-and-spec.ts` overflows eslint's react-hooks rule, as before, so it is excluded).
+
+**Rollback:** safe. No migration, no stored fields.
+
+**Remaining (Jeff-gated):**
+- Open one real estimate's CSV in Excel and check the labels and margins.
+- Download one BOM PDF on production (needs `QUOTE_PDF_ORIGIN`, like every estimate PDF).
