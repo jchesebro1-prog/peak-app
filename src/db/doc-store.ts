@@ -1,5 +1,5 @@
-import { and, asc, desc, eq, gt, inArray, sql, type SQL } from "drizzle-orm";
-import { getDb } from "@/db";
+import { and, asc, desc, eq, gt, inArray, sql, type SQL, type SQLWrapper } from "drizzle-orm";
+import { getDb, withTransaction } from "@/db";
 import { DOC_TABLES, blobs, type CollectionName } from "./doc-tables";
 
 /**
@@ -74,6 +74,80 @@ export async function listDeletedDocs<T extends Doc = Doc>(coll: CollectionName)
 }
 
 /**
+ * #341 — a small predicate language over a doc's JSON, compiled to SQL by
+ * `docCondSql` (searchDocs' `where`). `path` is a field path from the doc
+ * root (["customerId"], ["link", "type"]); every segment and value is a bound
+ * parameter. Leaves:
+ *  - `is`: the text at path equals the value (null/absent never matches);
+ *  - `isNot`: the text at path, absent read as "", differs from the value;
+ *  - `isFolded`: the text at path, trimmed and lower-cased, equals the value
+ *    (pass the value already folded; "" never matches);
+ *  - `filled: "text"`: a non-empty string; `filled: "array"`: a non-empty
+ *    JSON array;
+ *  - `empty: "text"` (#349): the text at path, absent / null read as "", is
+ *    "" (the exact complement of `filled: "text"`);
+ *  - `in` (Jeff 2026-10-15 #26): the text at path is one of the values
+ *    (null/absent never matches; no values never matches);
+ *  - `idIn` (#351 review): the ROW id is one of the values (the id column
+ *    when the caller passes it — every doc-store reader does — else the
+ *    document's own `id`); no values never matches.
+ * `all` of nothing is true; `any` of nothing is false.
+ */
+export type DocCond =
+  | { all: readonly DocCond[] }
+  | { any: readonly DocCond[] }
+  | { path: readonly string[]; is: string }
+  | { path: readonly string[]; isNot: string }
+  | { path: readonly string[]; isFolded: string }
+  | { path: readonly string[]; filled: "text" | "array" }
+  | { path: readonly string[]; empty: "text" }
+  | { path: readonly string[]; in: readonly string[] }
+  | { idIn: readonly string[] };
+
+/** JS whitespace `trim()` strips, for the SQL btrim in `isFolded`. */
+const TRIM_CHARS = " \t\n\r\f\v\u00a0\ufeff";
+
+function jsonAtPath(doc: SQLWrapper, path: readonly string[]): SQL {
+  let e: SQL = sql`${doc}`;
+  for (const seg of path) e = sql`(${e} -> ${seg})`;
+  return e;
+}
+
+function textAtPath(doc: SQLWrapper, path: readonly string[]): SQL {
+  if (!path.length) throw new Error("DocCond: empty path");
+  return sql`(${jsonAtPath(doc, path.slice(0, -1))} ->> ${path[path.length - 1]})`;
+}
+
+export function docCondSql(doc: SQLWrapper, c: DocCond, rowId?: SQLWrapper): SQL {
+  if ("all" in c) return c.all.length ? sql`(${sql.join(c.all.map((x) => docCondSql(doc, x, rowId)), sql` AND `)})` : sql`TRUE`;
+  if ("any" in c) return c.any.length ? sql`(${sql.join(c.any.map((x) => docCondSql(doc, x, rowId)), sql` OR `)})` : sql`FALSE`;
+  if ("idIn" in c) {
+    if (!c.idIn.length) return sql`FALSE`;
+    const target = rowId ? sql`${rowId}` : sql`(${doc} ->> 'id')`;
+    return sql`(${target} IN (${sql.join(c.idIn.map((v) => sql`${v}`), sql`, `)}))`;
+  }
+  if ("is" in c) return sql`(${textAtPath(doc, c.path)} = ${c.is})`;
+  if ("in" in c) {
+    if (!c.in.length) return sql`FALSE`;
+    return sql`(${textAtPath(doc, c.path)} IN (${sql.join(c.in.map((v) => sql`${v}`), sql`, `)}))`;
+  }
+  if ("isNot" in c) return sql`(coalesce(${textAtPath(doc, c.path)}, '') <> ${c.isNot})`;
+  if ("isFolded" in c) {
+    if (!c.isFolded) return sql`FALSE`;
+    return sql`(lower(btrim(coalesce(${textAtPath(doc, c.path)}, ''), ${TRIM_CHARS})) = ${c.isFolded})`;
+  }
+  if (!c.path.length) throw new Error("DocCond: empty path");
+  if ("empty" in c) return sql`(coalesce(${textAtPath(doc, c.path)}, '') = '')`;
+  if (c.filled === "array") {
+    const j = jsonAtPath(doc, c.path);
+    // CASE, not AND: Postgres doesn't promise AND short-circuits, and
+    // jsonb_array_length throws on a non-array.
+    return sql`(CASE WHEN jsonb_typeof(${j}) = 'array' THEN jsonb_array_length(${j}) > 0 ELSE FALSE END)`;
+  }
+  return sql`(coalesce(${textAtPath(doc, c.path)}, '') <> '')`;
+}
+
+/**
  * Candidate rows whose JSON contains `query` (case-insensitive), capped at
  * `limit`. Filters in SQL so global search never materializes a whole table
  * (the catalog is ~10.7k rows) — the caller applies its precise per-field
@@ -85,12 +159,18 @@ export async function listDeletedDocs<T extends Doc = Doc>(coll: CollectionName)
  * (one user's mailbox) is never crowded out by rows it would discard. Field
  * names are code constants, passed as bound parameters. Omitted = the
  * unscoped query exactly as before.
+ *
+ * `where` (#341) is one more predicate over the doc, built from `DocCond`
+ * (and / or / equals / not-equals / folded-equals / filled), also applied in
+ * SQL before the LIMIT — how ⌘K keeps only the email threads the viewer may
+ * see (comms-visibility.ts canSeeThreadCond) without other mailboxes'
+ * threads crowding the visible ones out of the candidate cut.
  */
 export async function searchDocs<T extends Doc = Doc>(
   coll: CollectionName,
   query: string,
   limit: number,
-  opts: { fieldEquals?: Readonly<Record<string, string>> } = {}
+  opts: { fieldEquals?: Readonly<Record<string, string>>; where?: DocCond } = {}
 ): Promise<T[]> {
   const q = query.trim();
   if (!q) return [];
@@ -99,10 +179,11 @@ export async function searchDocs<T extends Doc = Doc>(
   // Escape LIKE metacharacters so a user typing % or _ isn't a wildcard.
   const pattern = "%" + q.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
   const eqs = Object.entries(opts.fieldEquals ?? {}).map(([f, v]) => sql`${t.doc}->>${f} = ${v}`);
+  const extra = opts.where ? [docCondSql(t.doc, opts.where, t.id)] : [];
   const rows = await db
     .select()
     .from(t)
-    .where(and(eq(t.deleted, false), sql`${t.doc}::text ILIKE ${pattern}`, ...eqs))
+    .where(and(eq(t.deleted, false), sql`${t.doc}::text ILIKE ${pattern}`, ...eqs, ...extra))
     .orderBy(asc(t.id))
     .limit(limit);
   return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
@@ -164,9 +245,16 @@ export async function listDocsFiltered<T extends Doc = Doc>(
   const order = opts.orderByNumericDesc
     ? desc(sql`(${t.doc}->>${opts.orderByNumericDesc})::numeric`)
     : asc(t.id);
+  // #353 review M2: the projection reads the document ONCE per row. `doc->'f'` per field detoasts (decompresses) a
+  // large document again for every field; `jsonb_to_record` over one `doc` reference pulls every wanted field in
+  // one call, each kept as jsonb (so a value's JSON type is untouched and JSON null still strips), giving the same
+  // object the per-field build did.
   const doc = opts.fields?.length
-    ? sql`jsonb_strip_nulls(jsonb_build_object(${sql.join(
-        opts.fields.map((f) => sql`${f}::text, ${t.doc}->${f}`),
+    ? sql`(SELECT jsonb_strip_nulls(jsonb_build_object(${sql.join(
+        opts.fields.map((f) => sql`${f}::text, x.${sql.identifier(f)}`),
+        sql`, `
+      )})) FROM jsonb_to_record(${t.doc}) AS x(${sql.join(
+        opts.fields.map((f) => sql`${sql.identifier(f)} jsonb`),
         sql`, `
       )}))`
     : t.doc;
@@ -231,12 +319,14 @@ export async function getDocsByIdAnyCase<T extends Doc = Doc>(
  * final fix wave). `field` is a code constant, passed as a bound parameter.
  * `nullFields` (#218) further keeps only rows where each of those top-level
  * fields is absent or JSON null (`doc->>f IS NULL`) — also code constants.
+ * `includeDeleted` (#348 slice 6) also returns soft-deleted rows — for a rule
+ * that must remember a removed row; every other caller keeps live rows only.
  */
 export async function listDocsByField<T extends Doc = Doc>(
   coll: CollectionName,
   field: string,
   values: readonly string[],
-  opts: { nullFields?: readonly string[] } = {}
+  opts: { nullFields?: readonly string[]; includeDeleted?: boolean } = {}
 ): Promise<T[]> {
   const unique = [...new Set(values)].filter(Boolean);
   if (!unique.length) return [];
@@ -249,7 +339,7 @@ export async function listDocsByField<T extends Doc = Doc>(
       .from(t)
       .where(
         and(
-          eq(t.deleted, false),
+          opts.includeDeleted ? undefined : eq(t.deleted, false),
           inArray(sql<string>`${t.doc}->>${field}`, unique.slice(i, i + DOC_BATCH_CHUNK)),
           ...(opts.nullFields ?? []).map((f) => sql`${t.doc}->>${f} IS NULL`)
         )
@@ -258,6 +348,19 @@ export async function listDocsByField<T extends Doc = Doc>(
     for (const r of rows) out.push({ ...(r.doc as T), id: r.id });
   }
   return out;
+}
+
+/**
+ * #349 — live rows matching one `DocCond` (the thread-ownership predicate),
+ * filtered in SQL, in id order; `limit` caps the rows. Every path segment and
+ * value is a bound parameter (docCondSql).
+ */
+export async function listDocsWhere<T extends Doc = Doc>(coll: CollectionName, where: DocCond, opts: { limit?: number } = {}): Promise<T[]> {
+  const db = await getDb();
+  const t = table(coll);
+  const q = db.select().from(t).where(and(eq(t.deleted, false), docCondSql(t.doc, where, t.id))).orderBy(asc(t.id));
+  const rows = opts.limit != null ? await q.limit(opts.limit) : await q;
+  return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
 }
 
 /**
@@ -331,6 +434,25 @@ export async function casDocKey(coll: CollectionName, id: string, key: string, e
     .where(and(eq(t.id, id), eq(t.deleted, false), sql`(${same})`))
     .returning({ id: t.id });
   return rows.length > 0;
+}
+
+/**
+ * #349 review — compare-and-set ONE top-level key on every live row matching
+ * `where`, in one UPDATE: writes `value` only where the key is still absent
+ * (or null) — the same key-level CAS as `casDocKey(…, undefined, value)`, for
+ * a set of rows (a rename handing over its name-only threads). Returns the ids
+ * written. Every path and value is a bound parameter (docCondSql).
+ */
+export async function casDocKeyWhere(coll: CollectionName, where: DocCond, key: string, value: unknown): Promise<string[]> {
+  const db = await getDb();
+  const t = table(coll);
+  const now = Date.now();
+  const rows = await db
+    .update(t)
+    .set({ doc: sql`(${t.doc} || jsonb_build_object(${key}::text, ${JSON.stringify(value)}::jsonb))`, rev: sql`${t.rev} + 1`, updatedAt: now, receivedAt: now })
+    .where(and(eq(t.deleted, false), docCondSql(t.doc, where, t.id), sql`((${t.doc}->${key}) IS NULL OR jsonb_typeof(${t.doc}->${key}) = 'null')`))
+    .returning({ id: t.id });
+  return rows.map((r) => r.id);
 }
 
 export async function getDoc<T extends Doc = Doc>(
@@ -595,11 +717,14 @@ export async function patchDocKey(
   return { ids: done, complete: true };
 }
 
-/** Read-modify-write with rev bump; returns null if the doc doesn't exist. */
+/** Read-modify-write with rev bump; returns null if the doc doesn't exist.
+ *  `opts.bumpRev: false` (#344 C-final E) leaves the row's `rev` as stored — the row's `seq` still moves (the 0012
+ *  BEFORE UPDATE trigger), so pull still sees the write. Omitted, every caller bumps rev exactly as before. */
 export async function patchDoc<T extends Doc = Doc>(
   coll: CollectionName,
   id: string,
-  mutate: (doc: T) => T | void
+  mutate: (doc: T) => T | void,
+  opts?: { bumpRev?: boolean }
 ): Promise<T | null> {
   const current = await getDoc<T>(coll, id);
   if (!current) return null;
@@ -613,7 +738,7 @@ export async function patchDoc<T extends Doc = Doc>(
       .update(t)
       .set({
         doc: docOnUpdate(coll, sql`${JSON.stringify(next)}::jsonb`),
-        rev: sql`${t.rev} + 1`,
+        ...(opts?.bumpRev === false ? {} : { rev: sql`${t.rev} + 1` }),
         updatedAt: Date.now(),
         receivedAt: Date.now(),
       })
@@ -633,7 +758,7 @@ export async function patchDoc<T extends Doc = Doc>(
     .update(t)
     .set({
       doc: next,
-      rev: sql`${t.rev} + 1`,
+      ...(opts?.bumpRev === false ? {} : { rev: sql`${t.rev} + 1` }),
       updatedAt: Date.now(),
       receivedAt: Date.now(),
     })
@@ -824,6 +949,56 @@ export async function setBlob(
         updatedAt: Date.now(),
       },
     });
+}
+
+/**
+ * Read-modify-write of blob `id` under a row lock (#343) — the closing of the
+ * "residual gap" setBlob's comment above describes. For a writer whose new
+ * value depends on the current one (append to a list kept under one key, edit
+ * one entry of it, a check-then-set), so concurrent writers never lose each
+ * other's change.
+ *
+ * Runs in a transaction (joins an outer one): `SELECT data … FOR UPDATE`,
+ * then `fn(current)` returns a top-level patch merged exactly like setBlob
+ * (a key replaces the stored value; an `undefined` value is skipped — use
+ * null to clear, as setBlob callers do), or `null` to write nothing. `current`
+ * is the raw stored object ({} when the blob doesn't exist). `fn` must be
+ * pure, synchronous and fast: it can run more than once and runs while the
+ * row is locked. A missing row: `fn({})` is asked first (null → nothing is
+ * written), then `INSERT … ON CONFLICT DO NOTHING` and a re-select FOR
+ * UPDATE, so a racing first writer is waited on, never overwritten. Returns
+ * the stored object after the call.
+ */
+export async function updateBlob(
+  id: string,
+  fn: (current: Record<string, unknown>) => Record<string, unknown> | null
+): Promise<Record<string, unknown>> {
+  return withTransaction(async () => {
+    const db = await getDb();
+    const lock = () =>
+      db.select({ data: blobs.data }).from(blobs).where(eq(blobs.id, id)).for("update").limit(1);
+    let rows = await lock();
+    if (!rows.length) {
+      if (fn({}) === null) return {};
+      await db
+        .insert(blobs)
+        .values({ id, data: {}, updatedAt: Date.now() })
+        .onConflictDoNothing({ target: blobs.id });
+      rows = await lock();
+    }
+    const current = ((rows[0]?.data as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+    const patch = fn(current);
+    if (patch === null) return current;
+    const next: Record<string, unknown> = { ...current };
+    const kept: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) if (v !== undefined) next[k] = kept[k] = v;
+    // Only the patched keys travel (setBlob's `data || patch`), not the whole row.
+    await db
+      .update(blobs)
+      .set({ data: sql`${blobs.data} || ${JSON.stringify(kept)}::jsonb`, updatedAt: Date.now() })
+      .where(eq(blobs.id, id));
+    return next;
+  });
 }
 
 /**

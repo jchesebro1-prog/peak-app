@@ -57,6 +57,7 @@ export default async function AppLayout({
             color: user.color,
             roleLabel: user.roles.join(" · "),
             isAdmin: can("manage_users", user.roles),
+            canFieldDownload: can("create", user.roles),
           }}
           companyName={settings.companyName}
           logoLight={settings.logoLight || null}

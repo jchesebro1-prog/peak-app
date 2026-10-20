@@ -1,6 +1,7 @@
 import { Fragment, type CSSProperties, type ReactNode } from "react";
 import { resolvePackageDoc, type PackageDocCtx, type RBlock, type RImage, type RInline, type RList, type RParagraph, type RPhoto, type RPriceTable, type RProduct, type RSysTotal, type ResolvedPackageDoc } from "@/lib/package-doc/resolve";
 import type { PackageDoc } from "@/lib/package-doc/types";
+import { docPhotoFigureStyle, docPhotoImgStyle, photoTagStyle } from "@/lib/estimate-output/photo-spread";
 
 /**
  * Estimator Phase 5 — the package document as the CLIENT reads it: the
@@ -19,10 +20,13 @@ import type { PackageDoc } from "@/lib/package-doc/types";
  *   text → <strong> (bold) / <em> (italic); hardBreak → <br/>
  *   chip → its resolved value as plain text (a missing one prints nothing)
  *   productBlock → bold heading (the line's name, while in the BOM), the
- *     block's own paragraphs, the photo floated left/right at `width` % of
- *     the column, or ("full") block-level above the text, `width` % wide,
- *     centred; phones (≤ 480px) always put it full width above. Only a block
- *     with a photo is a flow-root.
+ *     block's own paragraphs, the photo as a figure floated left/right at
+ *     `width` % of the column (or "full": block-level above the text, shrunk
+ *     to the picture at most `width` % wide, centred, clearing earlier floats)
+ *     with its model tag; phones (≤ 480px) always put it
+ *     full width above. The block itself is a plain block (photo wrap
+ *     2026-10-16), so later paragraphs wrap too; the document is the float
+ *     container.
  *   productImage (#312) → just the photo (`.pd-image`), floated left/right at
  *     `width` % of the column (max-height 2.4in) so the paragraphs after it
  *     wrap beside it, or full (block, centred, max-height 4in); phones
@@ -36,19 +40,25 @@ import type { PackageDoc } from "@/lib/package-doc/types";
  *   pageBreak → break-after: page in print, a thin dashed rule on screen
  */
 
-/** Shared page rules: print page breaks, keep-together, phone photos. */
+/** Shared page rules: print page breaks, keep-together, phone photos (full width, tag bottom-right). */
 export const PACKAGE_DOC_CSS = `
-.pd-doc .pd-product { display: flow-root; break-inside: avoid; page-break-inside: avoid; }
+.pd-doc { display: flow-root; }
+.pd-doc .pd-product { break-inside: avoid; page-break-inside: avoid; }
 .pd-doc h2, .pd-doc h3, .pd-doc h4 { break-after: avoid; page-break-after: avoid; }
 .pd-doc h2, .pd-doc h3, .pd-doc h4, .pd-doc .pd-pagebreak { clear: both; }
 .pd-doc .pd-image { clear: both; }
-.pd-doc .pd-image, .pd-doc .pd-image img { break-after: avoid; page-break-after: avoid; }
-.pd-doc .pd-image, .pd-doc .pd-image img { break-inside: avoid; page-break-inside: avoid; }
+.pd-doc .pd-image, .pd-doc .pd-image .pd-ph { break-after: avoid; page-break-after: avoid; }
+.pd-doc .pd-ph { break-inside: avoid; page-break-inside: avoid; }
+.pd-doc .pd-ph-tag { font-size: 10px; }
 .pd-doc .pd-price tr { break-inside: avoid; page-break-inside: avoid; }
 @media print { .pd-doc .pd-pagebreak { border-top: 0 !important; margin: 0 !important; } }
+@media print { .pd-doc .pd-ph-tag { font-size: 9px; } }
 @media (max-width: 480px) {
-  .pd-doc .pd-product img { float: none !important; display: block; width: 100% !important; max-height: 3in !important; margin: 0 0 10px 0 !important; }
-  .pd-doc .pd-image img { float: none !important; display: block; width: 100% !important; max-height: 3in !important; margin: 0 0 10px 0 !important; }
+  .pd-doc .pd-ph { float: none !important; display: block !important; width: 100% !important; max-width: 100% !important; margin: 0 0 10px 0 !important; }
+  .pd-doc .pd-ph img { width: 100% !important; max-height: 3in !important; object-position: right top !important; }
+  .pd-doc .pd-ph-tag { left: auto !important; right: 0 !important; }
+  .pd-doc .pd-ph.pd-ph-full { width: fit-content !important; max-width: 100% !important; margin: 0 auto 10px !important; }
+  .pd-doc .pd-ph.pd-ph-full img { width: auto !important; }
 }
 `;
 
@@ -94,27 +104,29 @@ function List({ list }: { list: RList }) {
   return list.t === "ol" ? <ol start={list.start} style={style}>{items}</ol> : <ul style={style}>{items}</ul>;
 }
 
-/** A photo's float: left / right at `width` % (max-height 2.4in) or full (block, centred, max-height 4in). */
-function photoStyle(ph: RPhoto): CSSProperties {
-  return ph.align === "full"
-    ? { display: "block", width: `${ph.width}%`, maxHeight: "4in", objectFit: "contain", margin: "0 auto 10px" }
-    : ph.align === "left"
-      ? { float: "left", width: `${ph.width}%`, maxHeight: "2.4in", objectFit: "contain", margin: "0 14px 8px 0" }
-      : { float: "right", width: `${ph.width}%`, maxHeight: "2.4in", objectFit: "contain", margin: "0 0 8px 14px" };
+/** Photo wrap — a document photo: the figure floats left/right at `width` % with the image filling it (2.4in cap),
+ *  or ("full") shrinks to the picture, at most `width` %, centred, clearing earlier floats (4in cap); the model tag
+ *  sits on the outer bottom corner (a full photo's bottom-right, on the picture itself). */
+function DocFigure({ ph, model }: { ph: RPhoto; model?: string }) {
+  return (
+    <figure className={ph.align === "full" ? "pd-ph pd-ph-full" : "pd-ph"} style={docPhotoFigureStyle(ph.align, ph.width)}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={ph.src} alt={ph.alt} style={docPhotoImgStyle(ph.align)} />
+      {model ? (
+        <span className="pd-ph-tag" style={photoTagStyle(ph.align)}>
+          {model}
+        </span>
+      ) : null}
+    </figure>
+  );
 }
 
 function Product({ b, extra }: { b: RProduct; extra?: ReactNode }) {
-  const ph = b.photo;
-  const imgStyle: CSSProperties | null = ph ? photoStyle(ph) : null;
   return (
-    // A block with its own photo is a flow-root (the float stays inside); a
-    // words-only block (#312) is a plain block, so a product image floated
-    // before it wraps its text — the same lines either way when nothing floats.
-    <div className="pd-product" data-sku={b.sku} style={{ display: ph ? "flow-root" : "block", margin: "12px 0" }}>
-      {ph && imgStyle ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={ph.src} alt={ph.alt} style={imgStyle} />
-      ) : null}
+    // Photo wrap (2026-10-16): always a plain block — its photo floats into the
+    // paragraphs that follow too, like a product image; headings / page breaks clear it.
+    <div className="pd-product" data-sku={b.sku} style={{ display: "block", margin: "12px 0" }}>
+      {b.photo ? <DocFigure ph={b.photo} model={b.model} /> : null}
       {b.heading ? <div style={{ fontWeight: 600, color: INK, marginBottom: 3 }}>{b.heading}</div> : null}
       {b.paras.map((p, i) => (
         <Paragraph key={i} p={p} style={i === b.paras.length - 1 ? { margin: 0 } : undefined} />
@@ -124,17 +136,11 @@ function Product({ b, extra }: { b: RProduct; extra?: ReactNode }) {
   );
 }
 
-/** #312 — a product's photo on its own. The wrapper is a plain block (not a
- *  flow-root), so a floated photo lets the following paragraphs wrap beside it. */
+/** #312 — a product's photo on its own; the wrapper is a plain block, so the following paragraphs wrap beside it. */
 function ProductImage({ b }: { b: RImage }) {
   return (
     <div className="pd-image" data-sku={b.sku}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={b.photo.src}
-        alt={b.photo.alt}
-        style={{ ...photoStyle(b.photo), objectPosition: b.photo.align === "left" ? "left top" : b.photo.align === "right" ? "right top" : "center top" }}
-      />
+      <DocFigure ph={b.photo} model={b.model} />
     </div>
   );
 }
@@ -143,7 +149,7 @@ function PriceTable({ b }: { b: RPriceTable }) {
   const cell: CSSProperties = { borderBottom: "1px solid #eef0f3", padding: "6px 0" };
   const total: CSSProperties = { padding: "8px 0 4px", fontWeight: 700, color: INK, borderTop: `1.5px solid ${INK}` };
   return (
-    <div className="pd-pricewrap" style={{ margin: "10px 0 14px" }}>
+    <div className="pd-pricewrap" style={{ margin: "10px 0 14px", clear: "both" }}>
       <table className="pd-price" style={{ width: "100%", borderCollapse: "collapse", fontSize: "1em" }}>
         <tbody>
           {[...b.rows, ...b.extra].map((r, i) => (

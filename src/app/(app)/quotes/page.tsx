@@ -2,7 +2,8 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import { requireUser } from "@/lib/session";
 import {
-  getAll,
+  listQuoteRows,
+  getMany as getQuotesMany,
   timeAgo,
   STAGES,
   STAGE_LABEL,
@@ -11,7 +12,6 @@ import {
 } from "@/lib/stores/quotes";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { quoteStagePillLabel } from "@/lib/pipelines";
-import { all as allCustomers } from "@/lib/stores/customers";
 import { getEngagementForQuoteRef, ENGAGEMENT_STATUS_LABEL } from "@/lib/stores/engagements";
 import { allUsers } from "@/lib/users";
 import { can, deriveInitials, fallbackColor, firstName } from "@/lib/team";
@@ -29,8 +29,15 @@ import { approvalHolds, reviewLimitChip } from "@/lib/review-limits";
 import { shownReviewState } from "@/lib/review-line";
 import { loadReviewLimitContext } from "@/lib/review-limits-server";
 import { ReviewLimitChip } from "@/components/review-limit-chip";
-import { displayQuoteNumber, quoteMatchesSearch, quoteSearchRank } from "@/lib/estimate-number";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { opensChip } from "@/lib/quote-share/package-view";
+import { listForRecords } from "@/lib/stores/parties";
+import { companiesByNames, getCompanies } from "@/lib/identity/companies";
+import { bidDueText } from "@/lib/parties/bids";
+import { HUB_TYPE_KEYS, quotesHubView } from "@/lib/quotes-hub-view";
+import { paginate, parsePageParam, resolvePage, withPage } from "@/lib/list-paging";
+import { ListPager } from "@/components/list-pager";
+import type { BidderState } from "@/lib/parties/rules";
 
 export const metadata = { title: "Quotes — Quartzite-6" };
 /** #222 fix wave 1: recalling a revision renders the quote's saved PDF in `after()`, inside this budget. */
@@ -117,28 +124,35 @@ export default async function QuotesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, quotes, customers, users, pipes, limitCtx] = await Promise.all([
+  // Jeff 2026-10-15 #11 — every filter, count and stat runs over a slim SQL projection of ALL quotes
+  // (`listQuoteRows`: no spec / revisions / history); only the 50 rows of the page are read in full.
+  const [user, sp, quotes, users, pipes, limitCtx] = await Promise.all([
     requireUser(),
     searchParams,
-    getAll(),
-    allCustomers(),
+    listQuoteRows(),
     allUsers(),
     loadPipelines(),
     loadReviewLimitContext(),
   ]);
   const me = user.name;
 
-  /* ---- identity + customer lookups (port of Team.person / CustomerStore) ---- */
+  /* ---- #348 bids: one batched party read + one batched company-name read for the whole hub (no per-row reads).
+     A bidder is a gc/ec party row carrying bid state; a quote is a bid iff it has at least one. ---- */
+  const partiesByQuote = await listForRecords("quote", quotes.map((q) => q.id));
+  const biddersByQuote = new Map<string, Array<{ companyId: string; bid: BidderState }>>();
+  for (const [qid, list] of partiesByQuote) {
+    const b = list.filter((p) => p.bid && (p.role === "gc" || p.role === "ec"));
+    if (b.length) biddersByQuote.set(qid, b.map((p) => ({ companyId: p.companyId, bid: p.bid! })));
+  }
+  const bidderCompanyIds = [...new Set([...biddersByQuote.values()].flatMap((l) => l.map((b) => b.companyId)))];
+  const bidderCompanies = await getCompanies(bidderCompanyIds);
+  const bidderNames = (qid: string): string[] =>
+    (biddersByQuote.get(qid) ?? []).map((b) => bidderCompanies.get(b.companyId)?.name || "").filter(Boolean);
+
+  /* ---- identity lookups (port of Team.person) ---- */
   const identity = new Map(users.map((u) => [u.name, { color: u.color, initials: u.initials }]));
   const colorOf = (n: string) => identity.get(n)?.color || fallbackColor(n || "");
   const initialsOf = (n: string) => identity.get(n)?.initials || deriveInitials(n || "");
-  const custById = new Map(customers.map((c) => [c.id, c.name || ""]));
-  const custIdByName = new Map(customers.map((c) => [(c.name || "").toLowerCase(), c.id]));
-  const customerLabel = (q: Quote) => {
-    const cid =
-      q.customerId || custIdByName.get((q.customer || "").toLowerCase()) || null;
-    return (cid ? custById.get(cid) || "" : "") || q.customer || "—";
-  };
 
   /* ---- URL state: ownership scope, status filter, selected row ---- */
   const whoRaw = one(sp.who);
@@ -151,9 +165,10 @@ export default async function QuotesPage({
   const statusParam = one(sp.status);
   const filter =
     (STAGES as readonly string[]).includes(statusParam) ? (statusParam as QuoteStatus) : "all";
-  const TYPE_KEYS = ["system", "flame_test", "repair", "inspection", "consulting", "rental"] as const;
+  const TYPE_KEYS = HUB_TYPE_KEYS;
   const typeParam = one(sp.type);
   const typeFilter = (TYPE_KEYS as readonly string[]).includes(typeParam) ? typeParam : "all";
+  const bidFilter = one(sp.bid) === "open";
   const selectedId = one(sp.id);
   // #223 — search by estimate number (FLM-1002, 1002), old id, name, customer.
   const searchTerm = one(sp.q).trim();
@@ -164,7 +179,8 @@ export default async function QuotesPage({
   const statusError = one(sp.statusError) || null;
   const packageError = one(sp.packageError) || null;
   // #282 phase 3: a Recall that reduced or removed the revision's Rewards credit.
-  const creditNotice = one(sp.creditNotice) || null;
+  // #355 review M8: …or a status move that reopened a won estimate at the version that won (same notice line).
+  const creditNotice = one(sp.creditNotice) || one(sp.statusNotice) || null;
   // #35 one-click both ways: the engagement referencing the selected quote
   // (as its source proposal OR as Peak's install bid). Selected row only.
   const selEng = selectedId ? await getEngagementForQuoteRef(selectedId) : null;
@@ -175,6 +191,9 @@ export default async function QuotesPage({
     type?: string;
     id?: string | null;
     q?: string;
+    bid?: string;
+    /** Keep this page (row select / deselect); filter links leave it out and land on page 1. */
+    page?: number;
   }) => {
     const qs = new URLSearchParams();
     const w = over.who ?? (scope === "all" ? "all" : scope);
@@ -183,36 +202,24 @@ export default async function QuotesPage({
     if (w && w !== "all") qs.set("who", w);
     if (st && st !== "all") qs.set("status", st);
     if (ty && ty !== "all") qs.set("type", ty);
+    if ((over.bid ?? (bidFilter ? "open" : "")) === "open") qs.set("bid", "open");
     const term = over.q ?? searchTerm;
     if (term) qs.set("q", term);
     if (over.id) qs.set("id", over.id);
-    const s = qs.toString();
-    return "/quotes" + (s ? "?" + s : "");
+    return withPage("/quotes", qs, over.page ?? 1);
   };
 
-  /* ---- ownership scope ---- */
-  let scoped = quotes;
-  if (scope === "mine") scoped = quotes.filter((q) => q.owner === me);
-  else if (scope !== "all") scoped = quotes.filter((q) => q.owner === scope);
-
-  /* ---- #223 search (before the type counts, so the rail counts matches).
-     Exact-number hits list first; within a tier getAll()'s order holds. ---- */
-  if (searchTerm) {
-    scoped = scoped
-      .filter((q) => quoteMatchesSearch(q, searchTerm))
-      .map((q, i) => ({ q, i, r: quoteSearchRank(q, searchTerm) ?? Number.MAX_SAFE_INTEGER }))
-      .sort((a, b) => a.r - b.r || a.i - b.i)
-      .map((x) => x.q);
-  }
-
-  /* ---- quote-type filter (IDEAS #22 — one hub, filtered by type; a quote
-     with no quoteType is a system quote) ---- */
-  const typeOf = (q: Quote) => q.quoteType || "system";
-  const typeCounts: Record<string, number> = { all: scoped.length };
-  TYPE_KEYS.forEach((k) => {
-    typeCounts[k] = scoped.filter((q) => typeOf(q) === k).length;
-  });
-  if (typeFilter !== "all") scoped = scoped.filter((q) => typeOf(q) === typeFilter);
+  /* ---- ownership scope, #223 search, type chips (IDEAS #22), #348 Out to bid and the status pipeline —
+     all over the FULL set (src/lib/quotes-hub-view.ts), before the page is cut ---- */
+  const view = quotesHubView(
+    quotes,
+    { scope, me, status: filter, type: typeFilter, bid: bidFilter, q: searchTerm },
+    (id) => biddersByQuote.get(id) ?? [],
+    bidderNames
+  );
+  const scoped = view.scoped;
+  const typeCounts = view.typeCounts;
+  const outToBidCount = view.outToBidCount;
 
   const roster = users.filter((u) => u.status === "active");
   const ownerOptions = [
@@ -227,13 +234,7 @@ export default async function QuotesPage({
   const ownerSelectValue = scope === "all" ? "all" : scope === "mine" ? "mine" : scope;
 
   /* ---- status pipeline filter (over the scoped set) ---- */
-  const counts: Record<string, number> = {
-    all: scoped.length,
-    draft: scoped.filter((q) => q.status === "draft").length,
-    sent: scoped.filter((q) => q.status === "sent").length,
-    won: scoped.filter((q) => q.status === "won").length,
-    lost: scoped.filter((q) => q.status === "lost").length,
-  };
+  const counts = view.statusCounts;
   const filterDefs: Array<[string, string]> = [
     ["all", "All"],
     ["draft", STAGE_LABEL.draft],
@@ -242,9 +243,23 @@ export default async function QuotesPage({
     ["lost", STAGE_LABEL.lost],
   ];
 
-  const filtered = scoped.filter((q) => filter === "all" || q.status === filter);
+  const filtered = view.filtered;
+  /* ---- Jeff 2026-10-15 #11: 50 a page. A `?id=` link (bell, search, a record's quote link) opens on its row's page. ---- */
+  const paged = paginate(filtered, resolvePage(parsePageParam(one(sp.page)), selectedId ? filtered.findIndex((x) => x.id === selectedId) : -1));
+  const fullById = await getQuotesMany(paged.rows.map((r) => r.id));
+  const pageQuotes = paged.rows.map((r) => fullById.get(r.id)).filter((x): x is Quote => !!x);
+  /* ---- customer labels for the page only: the linked company's current name, else the company with that name ---- */
+  const [custById, custByName] = await Promise.all([
+    getCompanies([...new Set(pageQuotes.map((q) => q.customerId).filter((x): x is string => !!x))]),
+    companiesByNames(pageQuotes.filter((q) => !q.customerId).map((q) => q.customer || "")),
+  ]);
+  const customerLabel = (q: Quote) => {
+    const co = q.customerId ? custById.get(q.customerId) : custByName.get((q.customer || "").toLowerCase());
+    return co?.name || q.customer || "—";
+  };
+  const pageParams = new URLSearchParams(hrefFor({}).split("?")[1] || "");
   // #284 — only one row is expanded, so the next-step view is computed for that row alone.
-  const selectedQuote = selectedId ? filtered.find((x) => x.id === selectedId) : undefined;
+  const selectedQuote = selectedId ? pageQuotes.find((x) => x.id === selectedId) : undefined;
   const selectedNext = selectedQuote ? await quoteNextStepFor(selectedQuote, user) : null;
 
   /* ---- stat tiles (over the scoped set) ---- */
@@ -382,6 +397,7 @@ export default async function QuotesPage({
             {scope !== "all" && <input type="hidden" name="who" value={scope} />}
             {filter !== "all" && <input type="hidden" name="status" value={filter} />}
             {typeFilter !== "all" && <input type="hidden" name="type" value={typeFilter} />}
+            {bidFilter && <input type="hidden" name="bid" value="open" />}
             <input
               type="search"
               name="q"
@@ -505,6 +521,29 @@ export default async function QuotesPage({
             </Link>
           );
         })}
+        <Link
+          href={hrefFor({ bid: bidFilter ? "" : "open" })}
+          data-testid="quote-bid-filter"
+          title={bidFilter ? "Showing estimates still out to bid — click to show all" : "Estimates with a bidder still pending"}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontFamily: "var(--font-ui)",
+            fontSize: 12,
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+            padding: "6px 12px",
+            borderRadius: 20,
+            textDecoration: "none",
+            border: bidFilter ? "1px solid var(--accent)" : "1px solid #e4e7ec",
+            background: bidFilter ? "var(--accent)" : "#fff",
+            color: bidFilter ? "#fff" : "#5b616e",
+          }}
+        >
+          Out to bid{" "}
+          <span style={{ fontFamily: "var(--font-mono)", opacity: 0.65 }}>{outToBidCount}</span>
+        </Link>
       </div>
 
       {/* quotes table */}
@@ -543,7 +582,7 @@ export default async function QuotesPage({
           </span>
         </div>
 
-        {filtered.map((q) => {
+        {pageQuotes.map((q) => {
           const nextStep = q.id === selectedId ? selectedNext : null;
           const reviewLimit = reviewLimitChip(q, limitCtx, me);
           // #301 slice B: the client opened the package link (any sent revision).
@@ -563,7 +602,7 @@ export default async function QuotesPage({
           return (
             <div key={q.id}>
               <PopLink
-                href={hrefFor({ id: selected ? null : q.id })}
+                href={hrefFor({ id: selected ? null : q.id, page: paged.page })}
                 popKind="estimate"
                 popId={q.id}
                 popUrl={quoteBuilderHref(q)}
@@ -679,6 +718,39 @@ export default async function QuotesPage({
                         Portal
                       </span>
                     )}
+                    {(() => {
+                      const bidders = biddersByQuote.get(q.id);
+                      if (!bidders) return null;
+                      const awarded = !!q.bid?.awardedPartyId;
+                      const closed = q.status === "won" || q.status === "lost";
+                      const label = awarded
+                        ? "Awarded"
+                        : q.bid?.dueAt && !closed
+                          ? `Bid · due ${bidDueText(q.bid.dueAt).split(",")[0]}`
+                          : "Bid";
+                      return (
+                        <span
+                          data-testid="quote-bid-chip"
+                          title={`${bidders.length} ${bidders.length === 1 ? "bidder" : "bidders"}${
+                            q.bid?.dueAt ? ` · due ${bidDueText(q.bid.dueAt)}` : ""
+                          }`}
+                          style={{
+                            flexShrink: 0,
+                            fontSize: 9,
+                            fontWeight: 700,
+                            letterSpacing: ".04em",
+                            textTransform: "uppercase",
+                            color: awarded ? "#1f7a52" : "#3a3f4a",
+                            background: awarded ? "#eaf6ef" : "#f1f2f5",
+                            border: awarded ? "1px solid #cce9da" : "1px solid #e4e7ec",
+                            padding: "2px 6px",
+                            borderRadius: 4,
+                          }}
+                        >
+                          {label}
+                        </span>
+                      );
+                    })()}
                     {q.portalAcceptance && q.status === "sent" && (
                       <span
                         title={
@@ -733,6 +805,8 @@ export default async function QuotesPage({
                     }}
                   >
                     {displayQuoteNumber(q)} · {owner}{preparedNote}
+                    {/* #355 review M7: the client's latest open, visible on the row (staff only). */}
+                    {opened?.viewed ? <span data-testid="quote-viewed-stamp" style={{ color: "#3155a8" }}> · {opened.viewed}</span> : null}
                   </div>
                 </div>
                 <div
@@ -802,7 +876,7 @@ export default async function QuotesPage({
                       ? { id: selEng.id, stage: ENGAGEMENT_STATUS_LABEL[selEng.status] }
                       : null
                   }
-                  backHref={hrefFor({ id: q.id })}
+                  backHref={hrefFor({ id: q.id, page: paged.page })}
                   statusError={statusError}
                   packageError={packageError}
                   creditNotice={creditNotice}
@@ -835,6 +909,16 @@ export default async function QuotesPage({
           </div>
         )}
       </div>
+      <ListPager
+        page={paged.page}
+        pageCount={paged.pageCount}
+        total={paged.total}
+        from={paged.from}
+        to={paged.to}
+        prevHref={paged.page > 1 ? withPage("/quotes", pageParams, paged.page - 1) : null}
+        nextHref={paged.page < paged.pageCount ? withPage("/quotes", pageParams, paged.page + 1) : null}
+        noun="quotes"
+      />
     </div>
   );
 }

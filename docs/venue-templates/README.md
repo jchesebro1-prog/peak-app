@@ -38,6 +38,18 @@ Ids are versioned: a redrawn DWG ships as `<kind>@2`; Grid sheets keep the id
 (`intake.baseSheetTemplate`) and the movable-room positions
 (`intake.baseSheetMovables`) they were stamped with.
 
+A changed stretch of the same drawing also ships as a new id (Oct 15 #46):
+`church-contemporary@2` reuses `church-contemporary.json` with
+`CHURCH_CONTEMPORARY_V2_KEYS` (the nave's front part is `houseCapped`, so a deep
+nave no longer squeezes the Green Room / Electrical Room). The old id stays in
+the registry with `retired: true`: it still draws for Grid sheets stamped with it,
+designs that picked it and venue types whose Background it is, but pickers list it
+only while it is the current value, and it is never a default. Re-pick
+"Church — Contemporary" on a venue type to move it to @2.
+
+Renders regenerated for #46: `church-contemporary-4-deep-nave.png` (@2),
+`gym-stage-1-default.png` (30' stage), `arena-1-default.png` (16' end stage).
+
 ## What a keys file can say
 
 Span maps (`x`: spans / blend / profile, with `face` spans for splayed

@@ -9,6 +9,8 @@ import type { ParticipantRole } from "@/lib/inbox-participants";
 import type { ThreadTaskLinkKind, ThreadTaskRow } from "@/lib/inbox-task";
 import type { VenueType } from "@/lib/venue-types";
 import type { ReaderPreDraftVM } from "@/lib/brief/types";
+import type { OrganizeArchiveTarget } from "./organize/format";
+import type { CardGmailChip } from "@/lib/gmail/user-label-rules";
 
 export type Opt = { value: string; label: string };
 
@@ -71,12 +73,18 @@ export type AttachmentVM = {
   mime: string;
   size: number;
   href: string;
+  /** #348 slice 4 — `threadId~messageId~index` (lib/vendor-quotes/rules threadAttachmentRef) */
+  ref: string;
+  /** #348 slice 4 — a PDF that could be a vendor quote (never our own by-reference estimate PDF) */
+  pdf: boolean;
 };
 
 /** Composer-side attachment chip (no bytes shipped to the client). */
 export type AttachmentMetaVM = {
   name: string;
   size: number;
+  /** Batch 6 #64 — lib/mail-attachments attachKey: the composer keeps or drops a draft's file by it. */
+  key?: string;
 };
 
 export type DraftPayload = {
@@ -149,6 +157,8 @@ export type MessageVM = {
   out: boolean;
   tag: string;
   queued: boolean;
+  /** #356 review — the bridge will never send this message (e.g. too large for Gmail): the reason, shown on it. */
+  sendError?: string;
   time: string;
   body: string;
   attachments?: AttachmentVM[];
@@ -157,6 +167,8 @@ export type MessageVM = {
 
 export type LinkVM = {
   type: string;
+  /** #348 slice 4 — the linked record's id (the Add-as-vendor-quote dialog pre-picks a linked estimate) */
+  id: string;
   kindLabel: string;
   label: string;
   color: string;
@@ -166,6 +178,20 @@ export type LinkVM = {
 export type ReaderVM = {
   id: string;
   unread: boolean;
+  /** #341 — the thread is not in the viewer's own mailbox (they see it
+   *  because it is linked to an entity or assigned to them): the reader shows
+   *  a banner and no control that writes; the server actions refuse it too. */
+  readOnly: boolean;
+  /** "Jeff Chesebro’s mailbox — read only" (or "Shared mailbox — read only"); "" when not readOnly. */
+  readOnlyLabel: string;
+  /** #341 — the customer a read-only thread is deliberately linked to ("" =
+   *  none, or only an automatic sender match, which is never shown). */
+  readOnlyLinkedTo: string;
+  /** #348 slice 4 — some Gmail message here was imported before attachments
+   *  were recorded: the reader runs the one-time lazy listing (owner only). */
+  attachmentsPending: boolean;
+  /** #348 slice 4 — the vendor company this thread is filed under (Task 6). */
+  vendorCompany: { id: string; name: string } | null;
   /** Thread is out of the inbox (locally archived OR archived on the Gmail
    *  side) — drives the Archive/Unarchive toggle. Unarchive clears the local
    *  flag and, with two-way archive (D74), pushes INBOX back onto the Gmail
@@ -184,6 +210,8 @@ export type ReaderVM = {
   chanIcon: ChanIcon;
   boxLabel: string;
   boxAddress: string;
+  /** #356 re-review — Reply all's Cc pre-fill (lib/reply-all): the other To / Cc recipients of the replied-to message. */
+  replyAllCc: string;
   boxColor: string;
   contactName: string;
   contactEmail: string;
@@ -273,6 +301,15 @@ export type ReaderVM = {
   /** #335 inbox organization — court chip, noise tag, filing line and
    *  promise-task (null on a thread the pipeline never touched) */
   org?: ReaderOrgVM | null;
+  /** #346 / #347 — the sidebar's Labels card: the Gmail labels the thread
+   *  carries (the person's own and Starred / Important editable, the app's
+   *  Peak/* read-only), whether they can be changed here (a Gmail thread in
+   *  my own mailbox), and the Colour row (the Inbox's category, one per
+   *  thread — Categorize ▾). null on a read-only thread. */
+  labels?: { current: CategoryOpt | null; options: CategoryOpt[]; gmail: CardGmailChip[]; gmailEditable: boolean } | null;
+  /** #346 — set when the thread was opened from the Organize view: the
+   *  reader's Archive takes the row off To file / Noise and moves on. */
+  organize?: OrganizeArchiveTarget | null;
   /** AI daily brief §4 — the stored pre-draft, only for a fresh, court-me
    *  thread of mine (`readerPreDraft`); null → the live Assist paths. */
   preDraft?: ReaderPreDraftVM | null;

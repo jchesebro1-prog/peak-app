@@ -17,7 +17,7 @@
  * Nothing here sends mail. Results are typed; a refusal is
  * `{ ok: false, error, message }`, never a throw (except a DB failure).
  */
-import { getDoc, listDocs, listDocsByField } from "@/db/doc-store";
+import { casDocKey, getDoc, listDocs, listDocsByField } from "@/db/doc-store";
 import {
   archive,
   casOrg,
@@ -25,10 +25,14 @@ import {
   setLink,
   setOrg,
   setStatus,
+  resolveMailboxOwnerId,
+  stampMailboxOwner,
   unarchive,
   visibleTo,
   type CommThread,
+  type MailboxViewer,
 } from "@/lib/stores/comms";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { linkThread, restoreThreadIdentity, setThreadSite } from "@/lib/gmail/linking";
 import { domainOf, isPublicDomain } from "@/lib/gmail/config";
 import { get as getCustomer } from "@/lib/stores/customers";
@@ -49,7 +53,18 @@ import {
   type OrgContext,
 } from "./pipeline";
 import { inboxOrgDisabled } from "./kill-switch";
-import type { Court, CourtOwner, Filing, FilingAction, FilingApplied, SenderRule } from "./types";
+import { isPlaceholderCompany } from "./placeholder";
+import type {
+  Court,
+  CourtOwner,
+  Filing,
+  FilingAction,
+  FilingApplied,
+  NoiseFlag,
+  OrganizeArchiveTab,
+  OrganizeArchiveUndo,
+  SenderRule,
+} from "./types";
 
 const lc = (s: string | null | undefined) => String(s ?? "").trim().toLowerCase();
 
@@ -65,7 +80,9 @@ export type ApplyError =
   | "nothing-to-file"
   | "bad-target"
   | "forbidden"
-  | "bad-rule";
+  | "bad-rule"
+  /** #346 — a compare-and-set kept losing to other writes */
+  | "conflict";
 
 export type ApplyFail = { ok: false; error: ApplyError; message: string };
 
@@ -96,10 +113,28 @@ export type RuleOffer = {
 /* ---- shared helpers ------------------------------------------------------------ */
 
 /** The thread, when it exists and is `me`'s own (and not a draft or in
- *  Deleted). */
+ *  Deleted). #349 — by identity; an action path, so a thread owned through
+ *  its Gmail key or a unique legacy name is stamped with its owner. */
+/** #349 review — one users-table read per actor object: a bulk action (Archive
+ *  N rows, approve all, a CAS retry loop) passes the same `me` to every
+ *  myThread call, so the viewer is resolved once per call, not per row. */
+const viewerCache = new WeakMap<object, Promise<MailboxViewer>>();
+function viewerFor(me: OrgActor): Promise<MailboxViewer> {
+  let v = viewerCache.get(me);
+  if (!v) {
+    v = mailboxViewer(me);
+    viewerCache.set(me, v);
+    v.catch(() => viewerCache.delete(me));
+  }
+  return v;
+}
+
 async function myThread(threadId: string, me: OrgActor): Promise<CommThread | null> {
   const t = await getThread(threadId);
-  if (!t || t.deleted || t.status === "draft" || !visibleTo(t, me.name)) return null;
+  if (!t || t.deleted || t.status === "draft") return null;
+  const viewer = await viewerFor(me);
+  if (!visibleTo(t, viewer)) return null;
+  await stampMailboxOwner(t, viewer);
   return t;
 }
 
@@ -158,11 +193,17 @@ async function resolveTarget(target: FilingTarget, keepLabel?: string): Promise<
   if (customerId) {
     const c = await getCustomer(customerId);
     if (!c) return null;
-    customerName = c.name || "";
-    const site = String(target.siteId || "").trim();
-    if (site) {
-      if (!(c.locations || []).some((l) => l.id === site)) return null;
-      siteId = site;
+    if (isPlaceholderCompany(c.name)) {
+      // #345 — a placeholder company ("UNKNOWN" …) is never filed under: the
+      // work record (if any) is filed alone, else there is nothing to file
+      customerId = null;
+    } else {
+      customerName = c.name || "";
+      const site = String(target.siteId || "").trim();
+      if (site) {
+        if (!(c.locations || []).some((l) => l.id === site)) return null;
+        siteId = site;
+      }
     }
   } else if (target.siteId) return null;
   if (!customerId && !work) return null;
@@ -178,9 +219,10 @@ function settled(f: Filing): Filing {
   return out;
 }
 
+/** #349 — the owner's id by identity (the stamp, else the Gmail key, else a
+ *  unique legacy name — never a shared name). */
 function ownerIdOf(t: CommThread, ctx: OrgContext): string | null {
-  const u = ctx.users.find((x) => lc(x.name) === lc(t.mailboxUser));
-  return u?.id ?? null;
+  return resolveMailboxOwnerId(t, ctx.nameRoster);
 }
 
 /** Log an action on a suggestion: for an AI suggestion, a person's action
@@ -246,8 +288,10 @@ async function fileThread(t: CommThread, base: Filing, target: ResolvedTarget, o
       suggestedCustomerId: t.suggestedCustomerId ?? null,
       candidates: t.candidates ?? [],
       siteId: t.siteId ?? null,
+      linkedBy: t.linkedBy ?? null,
     };
-    await linkThread(t.id, target.customerId, t.resolvedContactId ?? null);
+    // #341 — filing for the owner is a deliberate link (shared with the team); Undo restores the flag
+    await linkThread(t.id, target.customerId, t.resolvedContactId ?? null, "filing");
   }
   const w = target.work;
   if (w && !(t.link && t.link.type === w.type && t.link.id === w.id)) {
@@ -478,6 +522,116 @@ export async function undoFiling(threadId: string, me: OrgActor, now: number = D
   return { ok: true, filing };
 }
 
+/* ---- archive from Organize (#346) -------------------------------------------------- */
+
+/** The most threads one Organize Archive (or its Undo) takes. */
+export const ORGANIZE_ARCHIVE_MAX = 500;
+
+/** Archive from the Organize view: the Inbox's own archive (`comms.archive`
+ *  — Gmail follows through the inbox-state sync). On To file and Noise it
+ *  also takes the row off that list the way Skip does: a waiting suggestion
+ *  becomes `skipped` (logged like Skip — the AI run's outcome `discarded`),
+ *  and a Noise row is `cleared`; new mail brings either back. On Filed it
+ *  only archives — the filing is left as it is. Returns what it changed, for
+ *  Undo. */
+export async function archiveFromOrganize(
+  threadId: string,
+  tab: OrganizeArchiveTab,
+  me: OrgActor,
+  now: number = Date.now(),
+  deps: { cas?: FilingCas } = {}
+): Promise<{ ok: true; undo: OrganizeArchiveUndo } | ApplyFail> {
+  const t = await myThread(threadId, me);
+  if (!t) return NOT_FOUND();
+  let unskip = false;
+  let unclear = false;
+  if (tab !== "filed") {
+    // compare-and-set: a filing the pipeline / AI pass rewrote meanwhile is
+    // re-read, never overwritten
+    const sk = await casFiling(t.id, me, (f) => (f && f.state === "suggested" ? { ...settled(f), state: "skipped" } : null), deps.cas);
+    // the skip kept losing to other writes: say so — and archive nothing
+    if (sk === "conflict") return fail("conflict", "Couldn't update — try again.");
+    if (sk !== "none") {
+      await logAction(sk.thread, sk.prev, "skipped", { userId: me.id, outcome: "discarded", state: "skipped", now });
+      unskip = true;
+    }
+    if (tab === "noise") unclear = await casNoise(t.id, (n) => (n?.flagged && !n.rescued && !n.cleared ? { ...n, cleared: true } : null));
+  }
+  // already archived by the reader's rule (app or Gmail side): Undo never
+  // re-inboxes mail Gmail had already archived
+  const wasArchived = !!t.archived || t.gmailInboxed === false;
+  if (!t.archived) await archive(t.id);
+  return { ok: true, undo: { threadId: t.id, unarchive: !wasArchived, unskip, unclear } };
+}
+
+const CAS_TRIES = 3;
+
+/** The filing compare-and-set (comms.casOrg); a test passes its own. */
+export type FilingCas = (threadId: string, key: "filing", expected: Filing | undefined, next: Filing | undefined) => Promise<boolean>;
+
+/** Compare-and-set `filing` from the thread as read now: `next(current)`
+ *  (null = nothing to write). A conflicting write re-reads and retries. The
+ *  thread is re-checked as `me`'s own on every read. Returns the thread and
+ *  filing it replaced, "none" when there was nothing to write, or
+ *  "conflict" when every try lost to another write. */
+async function casFiling(
+  threadId: string,
+  me: OrgActor,
+  next: (f: Filing | undefined) => Filing | null,
+  cas: FilingCas = casOrg
+): Promise<{ thread: CommThread; prev: Filing } | "none" | "conflict"> {
+  for (let i = 0; i < CAS_TRIES; i++) {
+    const t = await myThread(threadId, me);
+    if (!t) return "none";
+    const want = next(t.filing);
+    if (!want || !t.filing) return "none";
+    if (await cas(t.id, "filing", t.filing, want)) return { thread: t, prev: t.filing };
+  }
+  return "conflict";
+}
+
+/** Compare-and-set `noise` the same way (a key-level CAS; re-read on conflict). */
+async function casNoise(threadId: string, next: (n: NoiseFlag | undefined) => NoiseFlag | null): Promise<boolean> {
+  for (let i = 0; i < CAS_TRIES; i++) {
+    const t = await getThread(threadId);
+    if (!t) return false;
+    const want = next(t.noise ?? undefined);
+    if (!want) return false;
+    if (await casDocKey("comms", t.id, "noise", t.noise ?? undefined, want)) return true;
+  }
+  return false;
+}
+
+/** Undo an Organize Archive: put back each part it changed, only while that
+ *  change is still there (a suggestion new mail has already reset, or a
+ *  thread someone un-archived since, is left alone). The skip's undo is
+ *  logged like Undo. */
+export async function undoArchiveFromOrganize(
+  u: OrganizeArchiveUndo,
+  me: OrgActor,
+  now: number = Date.now()
+): Promise<{ ok: true } | ApplyFail> {
+  const t = await myThread(u.threadId, me);
+  if (!t) return NOT_FOUND();
+  if (u.unskip) {
+    const us = await casFiling(t.id, me, (f) => (f && f.state === "skipped" ? { ...f, state: "suggested", at: now } : null));
+    if (us === "conflict") return fail("conflict", "Couldn't update — try again.");
+    if (us !== "none") await logAction(us.thread, us.prev, "undone", { userId: me.id, outcome: "undo", state: "suggested", now });
+  }
+  if (u.unclear)
+    await casNoise(t.id, (n) => {
+      if (!n?.cleared) return null;
+      const out: NoiseFlag = { ...n };
+      delete out.cleared;
+      return out;
+    });
+  if (u.unarchive) {
+    const cur = await getThread(t.id);
+    if (cur && (cur.archived || cur.gmailInboxed === false)) await unarchive(t.id);
+  }
+  return { ok: true };
+}
+
 /* ---- approve all strong ---------------------------------------------------------- */
 
 export const APPROVE_ALL_MAX = 500;
@@ -513,15 +667,18 @@ export function isToFileRow(t: CommThread): boolean {
 
 /** The Organize view's Noise tab rule (spec §2 "everything flagged as noise"):
  *  flagged and not rescued — moved (archived) or only tagged and still in the
- *  inbox. Shared with the daily brief's Organize counts. */
+ *  inbox. Shared with the daily brief's Organize counts. #346 — a row
+ *  archived from the Noise tab (`cleared`) is off it until new mail
+ *  re-flags the thread. */
 export function isNoiseRow(t: CommThread): boolean {
-  return t.mailbox === "personal" && !t.deleted && t.status !== "draft" && !!t.noise?.flagged && !t.noise.rescued;
+  return t.mailbox === "personal" && !t.deleted && t.status !== "draft" && !!t.noise?.flagged && !t.noise.rescued && !t.noise.cleared;
 }
 
 /** The person's To file list (spec §2), newest first. Task 6's selector. */
-export async function toFileThreads(me: Pick<OrgActor, "name">): Promise<CommThread[]> {
+export async function toFileThreads(me: MailboxViewer | Pick<OrgActor, "id" | "name">): Promise<CommThread[]> {
+  const viewer = "nameUnique" in me ? me : await mailboxViewer(me); // #349 — by identity
   return (await listDocs<CommThread>("comms"))
-    .filter((t) => visibleTo(t, me.name) && isToFileRow(t))
+    .filter((t) => visibleTo(t, viewer) && isToFileRow(t))
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
@@ -537,7 +694,7 @@ export async function approveAllStrong(
   const budget = opts.budgetMs ?? APPROVE_ALL_BUDGET_MS;
   const list =
     ids === "all-visible"
-      ? (await toFileThreads(me)).filter(isStrongRow).map((t) => t.id)
+      ? (await toFileThreads(await viewerFor(me))).filter(isStrongRow).map((t) => t.id)
       : [...new Set(ids.map((x) => String(x || "").trim()).filter(Boolean))];
   let approved = 0;
   let skipped = 0;
@@ -641,6 +798,7 @@ async function sweepSender(
   const started = Date.now();
   const budget = opts.budgetMs ?? RULE_SWEEP_BUDGET_MS;
   const ctx = await loadOrgContext({ fresh: true });
+  const viewer = await viewerFor(me); // #349 — my mailbox by identity
   const all = await listDocs<CommThread>("comms");
   const candidates = all
     .filter(
@@ -648,7 +806,7 @@ async function sweepSender(
         t.mailbox === "personal" &&
         !t.deleted &&
         t.status !== "draft" &&
-        (rule.scope === "company" || visibleTo(t, me.name)) &&
+        (rule.scope === "company" || visibleTo(t, viewer)) &&
         t.filing?.state !== "filed" &&
         t.filing?.state !== "dismissed" &&
         (inInbox(t) || isToFileRow(t)) &&
@@ -664,7 +822,7 @@ async function sweepSender(
       break;
     }
     try {
-      const mine = visibleTo(t, me.name);
+      const mine = visibleTo(t, viewer);
       if (mine && t.filing?.state === "skipped") await setOrg(t.id, { filing: { ...t.filing, state: "suggested" } });
       await organizeThread(t.id, { ctx });
       checked++;
@@ -717,8 +875,12 @@ export async function archiveAfterReply(
   if (inboxOrgDisabled()) return { ok: true, archived: false, filed: false, skipped: "disabled" };
   const t = await getThread(threadId);
   if (!t || t.deleted || t.status === "draft" || t.mailbox !== "personal") return { ok: true, archived: false, filed: false, skipped: "not-applicable" };
-  if (me && !visibleTo(t, me.name)) return NOT_FOUND();
-  if (await keepInInbox(t.mailboxUser || "")) {
+  if (me && !visibleTo(t, await viewerFor(me))) return NOT_FOUND(); // #349 — by identity
+  // #349 review — the OWNER's preference, found through the owner id (their
+  // current name on the roster; the preference store stays keyed by name)
+  const ownerId = resolveMailboxOwnerId(t, (await loadOrgContext()).nameRoster);
+  const ownerName = ownerId ? (await loadOrgContext()).nameRoster.find((u) => u.id === ownerId)?.name ?? "" : "";
+  if (await keepInInbox(ownerName)) {
     if (by === "teammate-reply" && opts.wasArchived && !t.archived) {
       await archive(t.id, { quiet: true });
       return { ok: true, archived: true, filed: false };

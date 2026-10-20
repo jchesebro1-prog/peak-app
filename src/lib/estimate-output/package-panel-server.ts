@@ -7,7 +7,9 @@ import { datasheetGapCount, type DatasheetSelection } from "./package-docs-serve
 import { keyProductsNeedingText, packageGapChips, scopesWithoutGoals } from "./package-gaps";
 import { cleanPackageFiles, packageFileRows, visiblePackageFiles, type PackageFileRow } from "./package-files";
 import { normalizePackageSelection } from "./package-selection";
-import { responseRows, type ResponseRow } from "./responses";
+import { cleanBidderName, cleanClientResponses, responseRows, type ResponseRow } from "./responses";
+import { getCompany } from "@/lib/identity/companies";
+import { listBidders } from "@/lib/stores/bids";
 import { quoteQualifiesForGrid } from "@/lib/design/estimate-grid-link";
 import { resolvePeakHeader } from "@/lib/letterhead";
 import { loadPeakHeaderDefault } from "@/lib/letterhead-server";
@@ -44,8 +46,21 @@ type PanelDeps = {
   uploads: () => boolean;
   findGrid: (quoteId: string) => Promise<{ project: GridProject; optionId: string } | null>;
   peakHeaderDefault: () => Promise<boolean>;
+  /** #348 2b-ii — partyId → the bidder company's (clean) name, for responses that came through a bidder's v3 link. */
+  bidderNames: (quoteId: string) => Promise<Map<string, string>>;
 };
-const liveDeps: PanelDeps = { datasheetGaps: datasheetGapCount, uploads: blobEnabled, findGrid: gridProjectForQuote, peakHeaderDefault: loadPeakHeaderDefault };
+
+async function bidderNamesFor(quoteId: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const b of await listBidders(quoteId)) {
+    const co = await getCompany(b.companyId);
+    const name = cleanBidderName(co?.name);
+    if (name) out.set(b.id, name);
+  }
+  return out;
+}
+
+const liveDeps: PanelDeps = { datasheetGaps: datasheetGapCount, uploads: blobEnabled, findGrid: gridProjectForQuote, peakHeaderDefault: loadPeakHeaderDefault, bidderNames: bidderNamesFor };
 
 function liveSections(q: Quote): SpecSection[] {
   const s = q.spec as { sections?: unknown } | null | undefined;
@@ -82,6 +97,16 @@ export async function loadPackagePanel(q: Quote, canSend: boolean, deps: Partial
   } catch (e) {
     console.warn("[package] settings read failed", e instanceof Error ? e.message : e);
   }
+  // Only when a response came through a bidder link; a read failure leaves the rows unnamed (never fails the panel).
+  let bidderNames = new Map<string, string>();
+  if (cleanClientResponses(q.clientResponses).some((r) => !!r.partyId)) {
+    try {
+      bidderNames = await d.bidderNames(q.id);
+    } catch (e) {
+      console.warn("[package] bidder names unavailable", e instanceof Error ? e.message : e);
+      bidderNames = new Map();
+    }
+  }
   const revNoOf = (rev: number) => {
     const r = (q.revisions || []).find((x) => x.rev === rev);
     return r ? sentDocumentStamp(q, r).revNo : rev;
@@ -90,7 +115,7 @@ export async function loadPackagePanel(q: Quote, canSend: boolean, deps: Partial
     canSend,
     uploads: d.uploads(),
     files: packageFileRows(files),
-    responses: responseRows(q.clientResponses, revNoOf),
+    responses: responseRows(q.clientResponses, revNoOf, (partyId) => bidderNames.get(partyId) ?? ""),
     gaps: packageGapChips({
       noDatasheet,
       drawings: visiblePackageFiles(files).length,

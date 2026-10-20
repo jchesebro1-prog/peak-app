@@ -21,6 +21,11 @@ const OTHER_RIGGING = [
   "core.last_inspection_date", "core.last_inspection_firm", "core.last_inspection_level", "core.last_inspection_report",
 ];
 const FULL_INTAKE = ["rigging.lineset_schedule", "rigging.hardware_inventory", "rigging.dimensions"];
+/** Jeff 2026-10-15 #8 — the depth answered in the form wins; unanswered reads as the scope's own depth (the visit
+    type's default, "screen" for a Condition assessment), so an assessment from before the toggle evaluates as before. */
+const DEPTH_UNANSWERED: Cond = { key: "rigging.depth", state: "unanswered" };
+export const RIG_FULL: Cond = { any: [is("rigging.depth", "full"), { all: [DEPTH_UNANSWERED, { scopeDepth: "S2", is: "full" }] }] };
+export const RIG_QUICK: Cond = { not: RIG_FULL };
 const QUOTE_OR_PROJECT: Cond = { any: [{ scopeOn: "S8" }, { visitType: ["quote"] }] };
 
 export const RULES: Rule[] = [
@@ -33,8 +38,8 @@ export const RULES: Rule[] = [
   { id: "R3", when: is("rigging.overhead", "counterweight", "mixed"), show: ["rigging.counterweight", "rigging.wire_rope"] },
   { id: "R4", when: is("rigging.overhead", "motorized", "mixed"), show: ["rigging.motorized"] },
   { id: "R5", when: is("rigging.rope_sets", "yes"), show: ["rigging.rope_set_detail"] },
-  { id: "R6", when: { scopeDepth: "S2", is: "screen" }, skip: FULL_INTAKE },
-  { id: "R7", when: { scopeDepth: "S2", is: "full" }, show: FULL_INTAKE },
+  { id: "R6", when: RIG_QUICK, skip: FULL_INTAKE },
+  { id: "R7", when: RIG_FULL, show: FULL_INTAKE },
   { id: "R8", when: is("rigging.access", "grid", "loading_bridge", "catwalk"), show: ["rigging.access_fall"] },
   {
     id: "R9",

@@ -3,8 +3,8 @@ import { ALTERNATES_NOTE, ALTERNATES_TITLE, COVER_LINK_LEAD, type CoverDocumentP
 
 /**
  * #301 slice A — the cover PDF (spec §4): standalone, letterhead + footer,
- * Arial, an underlined centered title, a paragraph and a bold price line per
- * scope, the summary, the total, add options, Not included, the link line and
+ * Arial, an underlined centered title, a heading (Batch 5 #56), a paragraph
+ * and a bold price line per scope, the summary, the total, add options, Not included, the link line and
  * the signature block. A server component with pure props (no hooks, no
  * handlers, no image import — the print page passes the letterhead src), so
  * the harness renders it in Node. Printed by /print/cover/[id].
@@ -35,6 +35,7 @@ export default function CoverDocument(p: CoverDocumentProps) {
   const left: Array<[string, string]> = [
     ["Customer", p.project.customer],
     ["Attn", p.project.attn],
+    ["Owner", p.project.owner || ""],
     ["Venue", p.project.venue],
   ].filter(([, v]) => !!(v || "").trim()) as Array<[string, string]>;
   const right: Array<[string, string]> = [
@@ -75,6 +76,7 @@ export default function CoverDocument(p: CoverDocumentProps) {
 
               {p.scopes.map((s) => (
                 <div key={s.id} className="cov-scope" style={{ marginBottom: "10pt" }}>
+                  <h2 className="cov-scope-h" style={{ fontSize: "11pt", fontWeight: 700, margin: "0 0 2pt" }}>{s.heading}</h2>
                   <p style={{ margin: 0, whiteSpace: "pre-line", ...(s.missing ? { color: "#888", fontStyle: "italic" } : {}) }}>{s.text}</p>
                   <div style={{ textAlign: "right", fontWeight: 700, marginTop: "3pt" }}>{s.priceLabel}</div>
                 </div>

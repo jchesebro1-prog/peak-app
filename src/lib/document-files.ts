@@ -237,6 +237,11 @@ export function attachmentDisposition(fileName: string): string {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${star}`;
 }
 
+/** RFC 6266 inline (a PDF the browser shows), with attachmentDisposition's name rules. */
+export function inlineDisposition(fileName: string): string {
+  return attachmentDisposition(fileName).replace(/^attachment;/, "inline;");
+}
+
 /** Every document download, team or portal: a file, never rendered. */
 export function documentDownloadHeaders(fileName: string): Record<string, string> {
   return {

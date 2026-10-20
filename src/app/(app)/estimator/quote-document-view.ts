@@ -101,16 +101,36 @@ export function documentAppendixSystemIds(
     .map((sec) => sec.id);
 }
 
+/**
+ * Jeff 2026-10-15 #20 — narrative photos alternate right, left, right in
+ * document order: the n-th printed photo (0-based) floats right when n is
+ * even, left when odd. `keys` are the printed photos in order; a key may
+ * repeat (the same part in two systems) — each occurrence is its own photo,
+ * so callers key by system + sku. Pure.
+ */
+export function alternatingPhotoSides(keys: readonly string[]): Map<string, "right" | "left"> {
+  const out = new Map<string, "right" | "left">();
+  let n = 0;
+  for (const k of keys) {
+    if (out.has(k)) continue;
+    out.set(k, n % 2 === 0 ? "right" : "left");
+    n++;
+  }
+  return out;
+}
+
 /** #293 slice 3 (spec §2.3) — the online BOM view: every system itemized,
- *  quantities and descriptions on, the appendix off. Prices keep the quote's
- *  own choice (an estimator who hid prices still hides them). Pure. */
+ *  descriptions on, the appendix off. Prices keep the quote's own choice (an
+ *  estimator who hid prices still hides them), and so do quantities (Jeff
+ *  2026-10-15 #14: one switch — the PDF's Qty — for the PDF and every online
+ *  BOM). Pure. */
 export function bomViewProps(p: QuoteDocumentProps): QuoteDocumentProps {
   return {
     ...p,
     // Phase 5: the BOM view is the itemized bands — never the package document.
     document: null,
     detail: "itemized",
-    pdfQty: true,
+    pdfQty: p.pdfQty,
     pdfNotes: true,
     pdfItemizedAppendix: false,
     sections: p.sections.map((s) => ({ ...s, presentation: "itemized" as const })),

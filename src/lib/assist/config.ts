@@ -2,10 +2,10 @@
 import type { AssistFeature, AssistSettings, Env } from "./types";
 import { modelFor } from "./models";
 
-export const ASSIST_FEATURES: AssistFeature[] = ["tasks", "reply", "estimate", "file", "promise", "brief", "ask"];
+export const ASSIST_FEATURES: AssistFeature[] = ["tasks", "reply", "estimate", "file", "promise", "brief", "ask", "vendorpdf"];
 export const DEFAULT_CAP_USD = 200;
-/** Features that stay off until an admin turns them on (D897; `brief` — AI daily brief; `ask` — Ask AI). */
-export const OPT_IN_FEATURES: ReadonlySet<AssistFeature> = new Set<AssistFeature>(["file", "promise", "brief", "ask"]);
+/** Features that stay off until an admin turns them on (D897; `brief` — AI daily brief; `ask` — Ask AI; `vendorpdf` — Read the PDF). */
+export const OPT_IN_FEATURES: ReadonlySet<AssistFeature> = new Set<AssistFeature>(["file", "promise", "brief", "ask", "vendorpdf"]);
 
 type StoredAssist = {
   assistUsers?: unknown;
@@ -44,6 +44,12 @@ export function assistGate(
 ): { ok: true } | { ok: false; reason: string } {
   if ((env.ASSIST_DISABLED || "").trim() === "true") return { ok: false, reason: "Assist is switched off." };
   if (!assistConfigured(env).ok) return { ok: false, reason: "Assist is not set up." };
+  return assistAccess(feature, userId, settings);
+}
+
+/** The pilot-list + feature-switch half of assistGate — needs no env, so a caller can refuse a non-pilot user
+ *  before reading the stored key (#348 slice 5: the Estimator page runs Read the PDF's gate on every load). */
+export function assistAccess(feature: AssistFeature, userId: string, settings: AssistSettings): { ok: true } | { ok: false; reason: string } {
   if (!userId || !settings.users.includes(userId)) return { ok: false, reason: "Assist isn't enabled for you." };
   if (!settings.features[feature]) return { ok: false, reason: "This Assist feature is turned off." };
   return { ok: true };
@@ -117,7 +123,7 @@ export function assistStatusLine(env: Env = process.env, keyInfo?: AssistKeyInfo
   if ((env.ASSIST_DISABLED || "").trim() === "true") return "Kill switch on (ASSIST_DISABLED=true) — Assist is off.";
   const c = assistConfigured(env);
   if (!c.ok) return keyInfo ? "Not configured — paste a Claude API key below, or set ANTHROPIC_API_KEY." : "Not configured — set ANTHROPIC_API_KEY.";
-  const models = `tasks ${modelFor("tasks", env)} · reply ${modelFor("reply", env)} · estimate ${modelFor("extract", env)} → ${modelFor("estimate", env)} · file ${modelFor("file", env)} · promise ${modelFor("promise", env)} · brief ${modelFor("brief", env)} · ask ${modelFor("ask", env)} / ${modelFor("askHard", env)}`;
+  const models = `tasks ${modelFor("tasks", env)} · reply ${modelFor("reply", env)} · estimate ${modelFor("extract", env)} → ${modelFor("estimate", env)} · file ${modelFor("file", env)} · promise ${modelFor("promise", env)} · brief ${modelFor("brief", env)} · ask ${modelFor("ask", env)} / ${modelFor("askHard", env)} · vendorpdf ${modelFor("vendorpdf", env)} / ${modelFor("vendorpdfHard", env)}`;
   if (c.provider === "local") {
     const hasKey = !!(env.ANTHROPIC_API_KEY || "").trim();
     const fb = hasKey ? `, Claude Haiku fallback${keyInfo ? ` (key ${keySourceNote(keyInfo)})` : ""}` : ", no fallback";

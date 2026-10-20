@@ -1,4 +1,4 @@
-import { byCustomer as commsByCustomer } from "@/lib/stores/comms";
+import { byCustomer as commsByCustomer, canSeeThread, isSharedThread } from "@/lib/stores/comms";
 import { getAll as getAllFlame } from "@/lib/stores/flame-jobs";
 import { completedAtOf, getAll as getAllInspections } from "@/lib/stores/inspections";
 import { notesForCustomer } from "@/lib/stores/notes";
@@ -23,6 +23,7 @@ import {
   visitFeedRows,
   type FeedRow,
 } from "@/lib/customer-feed-rows";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 /**
  * #21 customer Activity feed loader — SERVER-ONLY (fans out over the doc
@@ -45,7 +46,14 @@ export const FEED_CAP = 60;
  * (canSeeMeeting, inside meetingRowsLinkedTo); without it — the vendor page, the company summary — no meeting
  * rows are read at all.
  */
-export async function loadCustomerFeed(cust: { id: string; name: string }, viewerId?: string): Promise<FeedRow[]> {
+export async function loadCustomerFeed(
+  cust: { id: string; name: string },
+  viewerId?: string,
+  /** #341 — the viewer: their own threads on this company show too (#349 —
+   *  by identity, so it carries the id and name) */
+  viewer?: { id: string; name: string }
+): Promise<FeedRow[]> {
+  const mailbox = viewer?.id ? await mailboxViewer(viewer) : null;
   const [notes, quotes, threads, visits, flames, repairs, inspections, surveys, projects, pipes, meetings] =
     await Promise.all([
       notesForCustomer(cust.id),
@@ -72,7 +80,13 @@ export async function loadCustomerFeed(cust: { id: string; name: string }, viewe
   for (const q of quotes.filter((qt) => (qt.customerId ? qt.customerId === cust.id : qt.customer === cust.name)))
     rows.push(...quoteFeedRows(q));
 
-  for (const t of threads) rows.push(...commFeedRows(t));
+  // #341 — with a viewer (the company page): what they may see (canSeeThread —
+  // their own, or deliberately linked / filed). With none (the vendor page,
+  // the company summary): shared threads only (isSharedThread). A thread on
+  // this customer only through the automatic sender match is private to its
+  // mailbox. The rows open the Inbox reader, read-only for anyone but the owner.
+  const seen = mailbox ? (t: (typeof threads)[number]) => canSeeThread(t, mailbox) : isSharedThread;
+  for (const t of threads.filter(seen)) rows.push(...commFeedRows(t));
   for (const v of visits) rows.push(...visitFeedRows(v));
 
   for (const f of flames.filter((r) => r.customerId === cust.id))

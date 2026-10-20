@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { clearAssistKeyAction, setAssistKeyAction, setAssistSettingsAction, testAssistKeyAction } from "../actions";
 import { inputStyle, type Run } from "./shared";
 import type { AssistVM, UserVM } from "./types";
-import type { ReportRow } from "@/lib/assist/report";
+import type { ReportRow, VendorPdfReportRow } from "@/lib/assist/report";
 import { AssistOrgSettings, FilingReportTable } from "./assist-org";
 
 /**
@@ -27,7 +27,9 @@ const FEATURES = [
   { key: "promise", label: "Promise tasks" },
   { key: "brief", label: "Daily brief" },
   { key: "ask", label: "Ask AI" },
+  { key: "vendorpdf", label: "Read the PDF" },
 ] as const;
+type FeatureKey = (typeof FEATURES)[number]["key"];
 
 const money = (n: number) => (n > 0 && n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
 
@@ -161,6 +163,77 @@ function AskReportTable({ ask }: { ask: AssistVM["ask"] }) {
   );
 }
 
+/** #348 slice 5 — one Vendor PDFs sub-table (By model or By vendor). */
+function VendorPdfRowsTable({ title, keyLabel, rows, total, empty }: { title: string; keyLabel: string; rows: VendorPdfReportRow[]; total: VendorPdfReportRow | null; empty: string }) {
+  const all = total ? [...rows, total] : rows;
+  return (
+    <div style={{ marginTop: 6, overflowX: "auto" }}>
+      <div style={{ fontSize: 11.5, color: "#8c919c", marginBottom: 2 }}>{title}</div>
+      <table style={{ borderCollapse: "collapse", minWidth: 760, width: "100%" }}>
+        <thead>
+          <tr>
+            <th style={{ ...th, textAlign: "left" }}>{keyLabel}</th>
+            <th style={th}>Reads</th>
+            <th style={th}>Try harder</th>
+            <th style={th} title="kept on a vendor quote when the estimate was saved — scored once, at that first save">Saved</th>
+            <th style={th} title="a later read (Read again or Try harder) replaced it before any save">Replaced</th>
+            <th style={th}>Lines read</th>
+            <th style={th}>Kept</th>
+            <th style={th}>Edited</th>
+            <th style={th}>Deleted</th>
+            <th style={th}>Added</th>
+            <th style={th}>Kept %</th>
+            <th style={th}>Total changed</th>
+            <th style={th} title="line math or sum-vs-total disagreements found in what was read (flagged, never fixed)">Math flags</th>
+            <th style={th}>Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {all.length === 0 && (
+            <tr>
+              <td colSpan={14} style={{ ...td, textAlign: "left", color: "#9aa0ab", fontFamily: "inherit" }}>
+                {empty}
+              </td>
+            </tr>
+          )}
+          {all.map((r) => (
+            <tr key={r === total ? "__total" : r.key} style={{ borderTop: "1px solid #f3f4f7", fontWeight: r === total ? 600 : undefined }}>
+              <td style={{ ...td, textAlign: "left", fontFamily: "inherit" }}>{r.key}</td>
+              <td style={td}>{r.reads}</td>
+              <td style={td}>{r.tryHarder}</td>
+              <td style={td}>{r.saved}</td>
+              <td style={td}>{r.replaced}</td>
+              <td style={td}>{r.linesRead}</td>
+              <td style={td}>{r.kept}</td>
+              <td style={td}>{r.edited}</td>
+              <td style={td}>{r.deleted}</td>
+              <td style={td}>{r.added}</td>
+              <td style={td}>{r.keptPct !== null ? `${r.keptPct}%` : "—"}</td>
+              <td style={td}>{r.totalChanged}</td>
+              <td style={td}>{r.mathFlags}</td>
+              <td style={td}>{money(r.costUsd)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** #348 slice 5 — Read the PDF: every read by model (+ the total), and saved reads by vendor. Accuracy is scored once,
+ *  at the first estimate save that keeps a read. */
+function VendorPdfReportTable({ vendorPdf }: { vendorPdf: AssistVM["vendorPdf"] }) {
+  const any = vendorPdf.total.reads > 0;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>Vendor PDFs</div>
+      <VendorPdfRowsTable title="By model" keyLabel="Model" rows={any ? vendorPdf.byModel : []} total={any ? vendorPdf.total : null} empty="No reads this month." />
+      <VendorPdfRowsTable title="By vendor" keyLabel="Vendor" rows={vendorPdf.byVendor} total={null} empty={any ? "No saved reads this month." : "No reads this month."} />
+      <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>By vendor counts saved reads only — the vendor is known when the quote is saved.</div>
+    </div>
+  );
+}
+
 const SAVED_FMT = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric" });
 
 /** D881 — the one line saying where the Claude key comes from. Never the key: last four characters at most. */
@@ -286,6 +359,35 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
   const capNum = Number(cap);
   const capDirty = cap.trim() !== "" && Number.isFinite(capNum) && capNum !== settings.capUsd;
 
+  // #342 — a feature switch saves on click. While one save is in flight every
+  // switch is disabled, and the clicked value shows at once (optimistic) until
+  // the refreshed settings carry it; a failed save reverts it. An optimistic
+  // entry only applies while the stored value is still the one it was clicked
+  // from (`base`), so it expires by itself once the refresh lands.
+  const [savingFeature, setSavingFeature] = useState(false);
+  const [optimistic, setOptimistic] = useState<Partial<Record<FeatureKey, { value: boolean; base: boolean } | null>>>({});
+  const shownFeature = (k: FeatureKey): boolean => {
+    const o = optimistic[k];
+    return o && settings.features[k] === o.base ? o.value : settings.features[k];
+  };
+  const toggleFeature = (key: FeatureKey, checked: boolean) => {
+    setSavingFeature(true);
+    setOptimistic((prev) => ({ ...prev, [key]: { value: checked, base: settings.features[key] } }));
+    const revert = () => setOptimistic((prev) => ({ ...prev, [key]: null }));
+    run(async () => {
+      try {
+        const res = await setAssistSettingsAction({ features: { [key]: checked } });
+        if (!res.ok) revert();
+        return res;
+      } catch (e) {
+        revert();
+        throw e;
+      } finally {
+        setSavingFeature(false);
+      }
+    });
+  };
+
   return (
     <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f7" }}>
       <div style={{ fontSize: 13.5, fontWeight: 600 }}>Assist pilot</div>
@@ -329,21 +431,28 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
       {/* Feature switches */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 18px", marginTop: 12 }}>
         {FEATURES.map((f) => (
-          <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, cursor: "pointer" }}>
+          <label
+            key={f.key}
+            style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, cursor: savingFeature ? "progress" : "pointer", opacity: savingFeature ? 0.7 : 1 }}
+          >
             <input
               type="checkbox"
-              checked={settings.features[f.key]}
-              onChange={(e) => run(() => setAssistSettingsAction({ features: { [f.key]: e.target.checked } }))}
+              checked={shownFeature(f.key)}
+              disabled={savingFeature}
+              onChange={(e) => toggleFeature(f.key, e.target.checked)}
             />
             {f.label}
           </label>
         ))}
       </div>
       <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 4 }}>
-        Inbox organization, Promise tasks, Daily brief and Ask AI start off — turn them on for the pilot users above.
+        Inbox organization, Promise tasks, Daily brief, Ask AI and Read the PDF start off — turn them on for the pilot users above.
       </div>
       <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 2 }}>
         Ask AI (in ⌘K search) answers with {assist.askModels.ask}; Try harder re-asks with {assist.askModels.askHard}. It needs a Claude API key, reads only what each person can open, and changes nothing until they confirm a card.
+      </div>
+      <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 2 }}>
+        Read the PDF (vendor quote form) reads with {assist.vendorPdfModels.read}; Try harder with {assist.vendorPdfModels.hard}. It needs a Claude API key and only fills the form — nothing saves until the estimate is saved.
       </div>
 
       {/* Monthly cap */}
@@ -398,6 +507,7 @@ export function AssistPilotCard({ assist, users, run }: { assist: AssistVM; user
       <ReportTable title="By model" rows={report.byModel} />
       <BriefReportTable brief={assist.brief} />
       <AskReportTable ask={assist.ask} />
+      <VendorPdfReportTable vendorPdf={assist.vendorPdf} />
       <FilingReportTable report={assist.org.filing} cleanupSuggested={assist.org.cleanupSuggested} />
       <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 8 }}>
         Costs are estimates from token counts × list prices; check the Claude Console for the bill.

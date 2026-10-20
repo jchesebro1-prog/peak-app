@@ -11,7 +11,7 @@ import { authConfig } from "./auth.config";
  * headless-Chrome print route for saved quote PDFs (#222); it checks its own
  * 120 s signed token and 404s without one. /share/quote/[id]/[token] is the client share page (#293 slice 3): a
  * public, read-only view of a quote's latest sent version that checks its
- * own HMAC token (lib/quote-share) and never reads either session. /pdf.worker.min.mjs is the
+ * own HMAC token (lib/quote-share) and never reads either session. /d/ds/<quote>/<doc>/<sig> is the estimate PDF's permanent datasheet link (spec 2026-10-16 §5): public, it checks its own HMAC and that the live quote still lists the datasheet. /pdf.worker.min.mjs is the
  * public pdf.js worker (a static library file, no data) that the
  * /print/part-thumb page loads — headless Chrome has no session, so it must
  * be reachable without one (#245). /placeholders/ holds the four static
@@ -34,6 +34,6 @@ export default NextAuth(authConfig).auth;
 
 export const config = {
   matcher: [
-    "/((?!api/auth|api/native/auth|api/leads/intake|api/gmail/sync|api/triage/build|api/drive/sync|api/recordings/upload|login|lead-intake|portal|print/|share/|pdf\\.worker\\.min\\.mjs|placeholders/|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
+    "/((?!api/auth|api/native/auth|api/leads/intake|api/gmail/sync|api/triage/build|api/drive/sync|api/recordings/upload|login|lead-intake|portal|print/|share/|d/ds/|pdf\\.worker\\.min\\.mjs|placeholders/|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
   ],
 };

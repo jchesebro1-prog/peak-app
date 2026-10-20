@@ -10,10 +10,13 @@ import type {
   SurveyStageMeta,
 } from "@/lib/stores/surveys";
 import type { VenueClass } from "@/lib/stores/venue-classes";
+import type { SketchRef, SurveyPhotoRef } from "@/lib/field-files/files";
 import type { LinesetRow } from "@/lib/stores/linesets";
 import type { AssessmentData, InspectionRef } from "@/lib/stores/assessment";
 import type { DisciplineData, DisciplineKey, InventoryRow, SystemState } from "@/lib/stores/survey-intake";
-import type { VenueDoctrine } from "@/lib/venue-doctrine";
+import type { LegacyNote } from "@/lib/survey-migrate";
+import type { SurveyTag } from "@/lib/survey-tags";
+import type { FlowGroup } from "@/lib/survey-flow";
 
 /* ============================================================
  * Serializable props from the server. The store is DB-backed and cannot be
@@ -35,14 +38,16 @@ export type EditorMeta = {
   liftTypes: string[];
   liftSuppliers: string[];
   installTimeframes: string[];
-  conditions: string[];
   stages: Array<{ key: SurveyStage; label: string }>;
   stageMeta: Record<SurveyStage, SurveyStageMeta>;
   measureGroups: MeasureGroup[];
   /** settings-merged site-intake type catalog, keyed by category */
   intakeCatalog: Record<string, string[]>;
   autoCerts: Record<string, InspectionRef>;
-  venueDoctrine: VenueDoctrine;
+  /** #344 — Final thoughts tags (settings, starter list when absent) */
+  internalTags: SurveyTag[];
+  /** #344 B4 — fabric names for the curtain rows' Fabric type datalist (catalog fabric parts) */
+  fabricOptions: string[];
 };
 
 /** Local draft — the editable slice of the record plus updatedAt for display. */
@@ -64,6 +69,8 @@ export type Draft = {
   visitPurpose: string;
   reason: string;
   travelTime: string;
+  /** #344 B-final — Travel was auto-filled once (stored on the next save; never refilled) */
+  travelAutoFilled?: true;
   distance: string;
   hasBOM: boolean;
   hasDrawings: boolean;
@@ -81,6 +88,13 @@ export type Draft = {
   // ---- site-visit sheet additions (D132) ----
   loadingDoorSize: string;
   liftHeight: string;
+  // #344 B5 — the access fields that replace loadingDoorSize / liftNeeded / liftHeight on screen
+  loadingDoorType: string;
+  loadingDoorLocation: string;
+  loadingDoorWH: string;
+  liftRequired: "" | "yes" | "no";
+  liftType: string;
+  liftWorkingHeight: string;
   pathToFloor: string;
   workingHours: string;
   blackoutDates: string;
@@ -101,7 +115,12 @@ export type Draft = {
   requestedBy: string;
   measurements: Record<string, string | boolean>;
   conditions: string[];
+  /** legacy inline photos — shown read-only as "Earlier photos"; assessment findings still reference their ids */
   photos: SurveyPhoto[];
+  /** #344 C5 — per-section photos; a change is saved on its own (it never dirties the draft) */
+  photoRefs: SurveyPhotoRef[];
+  /** #344 C6 — sketch pads by SketchKey; a change is saved on its own (it never dirties the draft) */
+  sketches: Record<string, SketchRef>;
   // Site Intake extension (IDEAS #45)
   auditoriumSize: string;
   yearBuilt: string;
@@ -112,6 +131,7 @@ export type Draft = {
   intakeReady: boolean;
   linesetsEnabled: boolean;
   linesets: LinesetRow[];
+  linesetQty?: number;
   assessmentEnabled: boolean;
   assessment: AssessmentData;
   templateRev: string;
@@ -124,6 +144,12 @@ export type Draft = {
     reviewerRole: string;
     reviewerSignedAt: string;
   };
+  /** #344 — scope kill question (DisciplineKey[]; empty = unanswered) */
+  scope: string[];
+  /** #344 — Final thoughts internal tag ids */
+  internalTags: string[];
+  /** #344 — derived by the read-time migration; shown under "Older notes"; never saved */
+  legacyNotes: LegacyNote[];
   updatedAt: number;
 };
 
@@ -132,8 +158,15 @@ export type Draft = {
 /** Draft keys holding a flat string sub-object, addressable by `kind: "sub"`. */
 export type SubObjKey = "lifeSafety";
 export type FieldDef =
-  | { kind: "text"; key: string; label: string; full?: boolean; type?: string; inputMode?: string; placeholder?: string }
-  | { kind: "select"; key: string; label: string; options: string[]; full?: boolean; measure?: boolean }
+  /** `hint` — one muted line under the input (#344 B5: "From the venue's verified address") */
+  | { kind: "text"; key: string; label: string; full?: boolean; type?: string; inputMode?: string; placeholder?: string; hint?: string }
+  /** `disc` — reads/writes disciplines[disc][key] instead of a top-level draft key (#344 B5 Final questions) */
+  | { kind: "select"; key: string; label: string; options: readonly string[]; full?: boolean; measure?: boolean; disc?: DisciplineKey }
+  /** toggle-style buttons whose stored value differs from the label (#344 B5: Lift needed? stores "yes" / "no");
+      tapping the selected one clears it to "" */
+  | { kind: "choice"; key: string; label: string; options: ReadonlyArray<{ value: string; label: string }>; full?: boolean }
+  /** a read-only line spanning the grid (#344 B5: the structural drawing note) */
+  | { kind: "note"; key: string; text: string }
   | { kind: "measure"; key: string; label: string; full?: boolean }
   | { kind: "toggle"; key: string; label: string; full?: boolean }
   | { kind: "textarea"; key: string; label: string; placeholder?: string }
@@ -146,13 +179,14 @@ export type SectionDef = {
   id: string;
   title: string;
   subtitle: string;
-  group: "brief" | "field" | "intake" | "assessment";
+  group: FlowGroup;
   step: number;
   advanced?: boolean;
 } & (
   | { kind: "custvenue" }
   | { kind: "fields"; fields: FieldDef[] }
-  | { kind: "conditions" }
+  | { kind: "recap" }
+  | { kind: "finalThoughts" }
   | { kind: "photos" }
   | { kind: "viz3d" }
   | { kind: "tier1" }
@@ -161,6 +195,5 @@ export type SectionDef = {
   | { kind: "assessmentUsage" }
   | { kind: "assessmentCondition" }
   | { kind: "assessmentFindings" }
-  | { kind: "signoff" }
   | { kind: "discipline"; disc: DisciplineKey }
 );

@@ -1,9 +1,9 @@
 import { cleanOpens } from "@/lib/estimate-output/opens";
-import { leadEstimator } from "@/lib/estimate-output/responses";
 import { get as getThreadLive, markRead as markReadLive, reply as replyLive } from "@/lib/stores/comms";
 import { get as getQuoteLive, type Quote } from "@/lib/stores/quotes";
 import { can } from "@/lib/team";
-import { activeUsers } from "@/lib/users";
+import { allUsers } from "@/lib/users";
+import { ownsMailbox, viewerFrom, type MailboxViewer } from "@/lib/stores/comms-visibility";
 import { summarizeThread, type ThreadSummary } from "./compose";
 import {
   applySenderSignature, BODY_MAX, deliveryOfThread, gmailConnectedFor, holdOutbound, type EmailDelivery, type RosterUser, type SendActor,
@@ -46,8 +46,6 @@ export type TrackDeps = {
   getThread: (id: string) => Promise<unknown | null>;
   /** The sender's signature, applied as the Inbox applies it at send. */
   applySignature: (body: string, actor: SendActor) => Promise<string>;
-  /** The thread owner's user id for a mailbox name (null = not on the roster). */
-  userIdByName: (name: string) => Promise<string | null>;
   /** Can Gmail be involved in this user's mail at all? */
   gmailConnected: (userId: string) => Promise<boolean>;
   /** Append an outbound email message to the thread as `me`; null = the thread is gone. */
@@ -56,17 +54,19 @@ export type TrackDeps = {
   markRead: (threadId: string) => Promise<unknown | null>;
   /** Hold the thread's latest outbound email back from later bridge sends (I1). */
   holdBack: (threadId: string, delivery: Exclude<EmailDelivery, "gmail">) => Promise<void>;
-  /** The team roster — the quote's Lead estimator (shared leadEstimator rule). */
+  /** The team roster, any status — (#349) whether a legacy name-only
+   *  thread's owner name is unique. */
   roster: () => Promise<RosterUser[]>;
 };
 
 export type TrackOpens = { total: number; byRev: Record<string, number> };
 
 /**
- * One tracked email as a viewer may see it. Metadata (subject, recipient, sent
- * time, rev, delivery, unread count) is for everyone who can see the estimate;
- * the message text only for the thread's owner, send|approve holders and the
- * quote's Lead estimator — otherwise `messages` is empty and `textHidden` set.
+ * One tracked email as a viewer may see it. Metadata and the message text
+ * (subject, recipient, sent time, rev, delivery, unread count, every message)
+ * are for everyone who can open the estimate (Jeff 2026-10-15 #25);
+ * before it the text was the owner's, send|approve holders' and the
+ * Lead estimator's only. Reply and Mark read stay the owner's (#349).
  */
 export type TrackedEmail = ThreadSummary & {
   /** The estimate revision this email carried (from the recorded entry). */
@@ -76,7 +76,6 @@ export type TrackedEmail = ThreadSummary & {
   /** The viewer is the owner (Reply / Mark read are theirs alone) and the
    *  email was actually sent to someone (never a draft — final review I2). */
   canReply: boolean;
-  textHidden: boolean;
 };
 
 export type TrackViewer = Pick<SendActor, "id" | "name" | "roles">;
@@ -118,11 +117,6 @@ export function opensOf(q: Pick<Quote, "shareOpens">): TrackOpens {
   return { total, byRev };
 }
 
-const sameName = (a: string | null | undefined, b: string | null | undefined) => {
-  const x = String(a ?? "").trim().toLowerCase();
-  return !!x && x === String(b ?? "").trim().toLowerCase();
-};
-
 /** Final review (I2) — a thread can be replied to only once it has really
  *  gone out: not a draft, at least one outbound message, and a recipient. */
 function replyable(raw: unknown): boolean {
@@ -133,29 +127,40 @@ function replyable(raw: unknown): boolean {
   return msgs.some((m) => m?.direction === "out");
 }
 
-/** The quote's Lead estimator by name (owner, else preparedBy when the owner
- *  isn't an active team member) — estimate-output/responses leadEstimator. */
-async function leadNameOf(deps: TrackDeps, q: Pick<Quote, "owner" | "preparedBy">): Promise<string> {
-  try {
-    const active = (await deps.roster()).filter((u) => (u.status ?? "active") === "active");
-    return leadEstimator(q.owner, q.preparedBy, active)?.name ?? "";
-  } catch (e) {
-    console.error("[estimate-email] track: roster read failed", e);
-    return "";
-  }
-}
-
-/** The mailbox a raw comms thread lives in (a person's name; "" = not personal). */
+/** The mailbox a raw comms thread lives in, for display (a person's name;
+ *  "" = not personal). Never an ownership test — that is `ownedBy`. */
 function mailboxOwnerOf(raw: unknown): string {
   const u = (raw as { mailboxUser?: unknown } | null)?.mailboxUser;
   return typeof u === "string" ? u.trim() : "";
+}
+
+/** #349 — the viewer for `who` against the whole roster. A failed read fails
+ *  closed (#349 review): `nameUnique: false`, so only a stamped / Gmail-keyed
+ *  thread can be theirs — never a legacy name-only one. */
+async function viewerOf(deps: TrackDeps, who: { id: string; name: string }): Promise<MailboxViewer> {
+  try {
+    const roster: RosterUser[] = await deps.roster();
+    return viewerFrom(who, roster.map((u) => ({ id: u.id, name: u.name })));
+  } catch (e) {
+    console.error("[estimate-email] track: roster read failed", e);
+    return { id: typeof who?.id === "string" ? who.id : "", name: typeof who?.name === "string" ? who.name : "", nameUnique: false };
+  }
+}
+
+/** #349 — is `viewer` the raw thread's mailbox owner? By identity
+ *  (ownsMailbox: the owner stamp, the Gmail key, else a unique legacy name).
+ *  A thread with no `mailbox` field reads as personal (create's default). */
+function ownedBy(raw: unknown, viewer: MailboxViewer): boolean {
+  const t = raw as Parameters<typeof ownsMailbox>[0] | null;
+  if (!t || typeof t !== "object") return false;
+  return ownsMailbox({ ...t, mailbox: t.mailbox ?? "personal" }, viewer);
 }
 
 /**
  * The quote's tracked emails, newest first (by when each went out; the
  * later-recorded wins a tie), threads that no longer exist skipped, plus the
  * link-open totals and the count of unread customer replies across them. The
- * message text follows the viewer (see TrackedEmail).
+ * message text goes to every viewer (Jeff 2026-10-15 #25); Reply follows the owner.
  */
 export async function trackEstimate(deps: TrackDeps, viewer: TrackViewer, quoteId: string): Promise<TrackResult> {
   const id = String(quoteId || "");
@@ -166,13 +171,14 @@ export async function trackEstimate(deps: TrackDeps, viewer: TrackViewer, quoteI
   for (const e of Array.isArray(q.estimateEmails) ? q.estimateEmails : []) {
     if (e && typeof e.threadId === "string" && Number.isFinite(e.rev)) revOf.set(e.threadId, e.rev);
   }
-  const holdsPerm = can("send", viewer.roles) || can("approve", viewer.roles);
-  const isLead = sameName(await leadNameOf(deps, q), viewer.name);
+  const me = await viewerOf(deps, viewer);
   const loaded = await Promise.all(ids.map(async (tid) => {
     try {
       const raw = await deps.getThread(tid);
+      // #351 review M5 — a thread in Deleted is not listed
+      if ((raw as { deleted?: unknown } | null)?.deleted) return null;
       const s = summarizeThread(raw);
-      return s ? { s, owner: mailboxOwnerOf(raw), replyable: replyable(raw) } : null;
+      return s ? { s, owner: mailboxOwnerOf(raw), mine: ownedBy(raw, me), replyable: replyable(raw) } : null;
     } catch (e) {
       console.error("[estimate-email] track: thread read failed", e);
       return null;
@@ -180,18 +186,17 @@ export async function trackEstimate(deps: TrackDeps, viewer: TrackViewer, quoteI
   }));
   const emails = loaded
     .map((x, i) => ({ x, i }))
-    .filter((r): r is { x: { s: ThreadSummary; owner: string; replyable: boolean }; i: number } => !!r.x)
+    .filter((r): r is { x: { s: ThreadSummary; owner: string; mine: boolean; replyable: boolean }; i: number } => !!r.x)
     .sort((a, b) => b.x.s.sentAt - a.x.s.sentAt || a.i - b.i)
     .map(({ x }): TrackedEmail => {
-      const isOwner = sameName(x.owner, viewer.name);
-      const textHidden = !(isOwner || holdsPerm || isLead);
+      const isOwner = x.mine; // #349 — by identity, never the display name
       return {
         ...x.s,
-        messages: textHidden ? [] : x.s.messages,
+        // Jeff 2026-10-15 #25 — the text is readable by anyone who can open the quote
+        messages: x.s.messages,
         rev: revOf.get(x.s.threadId) ?? 0,
         ownerName: x.owner,
         canReply: isOwner && x.replyable,
-        textHidden,
       };
     });
   return { ok: true, emails, opens: opensOf(q), newReplies: emails.reduce((n, e) => n + e.unread, 0) };
@@ -219,7 +224,8 @@ export async function replyToEstimateEmail(deps: TrackDeps, actor: SendActor, qu
   const raw = await deps.getThread(owned.id);
   if (!raw) return { ok: false, error: TRACK_COPY.gone };
   const owner = mailboxOwnerOf(raw);
-  if (!sameName(owner, actor.name)) return { ok: false, error: TRACK_COPY.notOwnerReply(owner) };
+  // #349 — the owner by identity: a teammate who shares the display name is refused
+  if (!ownedBy(raw, await viewerOf(deps, actor))) return { ok: false, error: TRACK_COPY.notOwnerReply(owner) };
   // An Open-in-Inbox draft (or a thread with nobody to send to) has nothing to reply to.
   if (!replyable(raw)) return { ok: false, error: TRACK_COPY.notSentYet };
   const text = typeof body === "string" ? body.trim() : "";
@@ -234,7 +240,8 @@ export async function replyToEstimateEmail(deps: TrackDeps, actor: SendActor, qu
     console.error("[estimate-email] track: signature failed", e);
     return { ok: false, error: TRACK_COPY.replyFailed };
   }
-  const connected = await deps.gmailConnected((await deps.userIdByName(owner)) ?? actor.id);
+  // the actor IS the owner (checked above, by id), so delivery is looked up for the actor's own account
+  const connected = await deps.gmailConnected(actor.id);
   try {
     if (!(await deps.reply(owned.id, signed, actor.name))) return { ok: false, error: TRACK_COPY.gone };
   } catch (e) {
@@ -263,13 +270,14 @@ export async function replyToEstimateEmail(deps: TrackDeps, actor: SendActor, qu
 }
 
 /** Clear unread on one of the quote's estimate emails — the thread owner's alone. */
-export async function markEstimateEmailRead(deps: TrackDeps, actor: Pick<SendActor, "name">, quoteId: string, threadId: string): Promise<TrackReadResult> {
+export async function markEstimateEmailRead(deps: TrackDeps, actor: Pick<SendActor, "id" | "name">, quoteId: string, threadId: string): Promise<TrackReadResult> {
   const owned = await ownedThread(deps, quoteId, threadId);
   if (!owned.ok) return owned;
   const raw = await deps.getThread(owned.id);
   if (!raw) return { ok: false, error: TRACK_COPY.gone };
   const owner = mailboxOwnerOf(raw);
-  if (!sameName(owner, actor.name)) return { ok: false, error: TRACK_COPY.notOwnerRead(owner) };
+  // #349 — the owner by identity
+  if (!ownedBy(raw, await viewerOf(deps, actor))) return { ok: false, error: TRACK_COPY.notOwnerRead(owner) };
   await deps.markRead(owned.id);
   const summary = summarizeThread(await deps.getThread(owned.id));
   return summary ? { ok: true, summary } : { ok: false, error: TRACK_COPY.gone };
@@ -282,11 +290,12 @@ export function liveTrackDeps(): TrackDeps {
     getQuote: getQuoteLive,
     getThread: getThreadLive,
     applySignature: applySenderSignature,
-    userIdByName: async (name) => (await activeUsers()).find((u) => sameName(u.name, name))?.id ?? null,
     gmailConnected: gmailConnectedFor,
     reply: (threadId, body, me) => replyLive(threadId, { body, me }),
     markRead: markReadLive,
     holdBack: holdOutbound,
-    roster: async () => (await activeUsers()).map((u) => ({ id: u.id, name: u.name, status: u.status })),
+    // #349 — every user (any status): an archived namesake still makes a
+    // legacy owner name ambiguous
+    roster: async () => (await allUsers()).map((u) => ({ id: u.id, name: u.name, status: u.status })),
   };
 }

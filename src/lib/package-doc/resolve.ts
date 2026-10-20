@@ -2,13 +2,16 @@ import { fmt, systemSellTotal, type QuoteTotals } from "@/app/(app)/estimator/pr
 import { keyProductHeading } from "@/app/(app)/estimator/narrative";
 import { systemPrintsInBody } from "@/app/(app)/estimator/quote-document-view";
 import type { SpecSection } from "@/app/(app)/estimator/types";
+import { lineOwnModel } from "@/lib/catalog-rename/sku";
+import { photoTagText } from "@/lib/estimate-output/photo-models";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import { findLine, findSection, resolveChip } from "./chips";
-import { productBlockInBom } from "./gaps";
+import { lineAnchorInBom, productBlockInBom } from "./gaps";
 import { linePlaceholder } from "./print";
 import { clampPhotoWidth, LIST_START_MAX } from "./schema";
 import type { LineAnchor, PackageDoc, PDBlock, PDBulletList, PDInline, PDMark, PDListItem, PDOrderedList, PDParagraph, PDProductBlock, PDProductImage, PhotoAlign } from "./types";
+import { nextLastSide, resolveAutoAlign, type Side } from "./photo-sides";
 
 /**
  * Estimator Phase 5 — the package document resolved for a CLIENT output:
@@ -43,15 +46,18 @@ export type PackageDocCtx = {
   totalLabel?: string;
   /** sku → photo (data URI for print, a scoped photo route on the web). */
   photos?: Record<string, { src: string; alt: string }>;
+  /** Photo wrap (2026-10-16 §2) — sku → model-number tag (QuoteDocument's keyProductModels, loadKeyProductModels);
+   *  absent = only the lines' own models. */
+  models?: Record<string, string>;
 };
 
 export type RInline = { t: "text"; text: string; bold?: true; italic?: true } | { t: "br" } | { t: "chip"; text: string };
 export type RParagraph = { t: "p"; content: RInline[] };
 export type RList = { t: "ul" | "ol"; /** An ordered list that does not begin at 1. */ start?: number; items: Array<Array<RParagraph | RList>> };
 export type RPhoto = { src: string; alt: string; align: PhotoAlign; width: number };
-export type RProduct = { t: "product"; sku: string; heading: string | null; photo: RPhoto | null; paras: RParagraph[] };
+export type RProduct = { t: "product"; sku: string; heading: string | null; photo: RPhoto | null; paras: RParagraph[]; /** Photo wrap — the photo's model tag (only with a photo). */ model?: string };
 /** #312 — a product's photo on its own (no words, no heading). */
-export type RImage = { t: "image"; sku: string; photo: RPhoto };
+export type RImage = { t: "image"; sku: string; photo: RPhoto; /** Photo wrap — the photo's model tag. */ model?: string };
 export type RPriceRow = { name: string; price: string };
 export type RPriceTable = { t: "price"; rows: RPriceRow[]; extra: RPriceRow[]; totalLabel: string; total: string; alternates: RPriceRow[] };
 /** A system's price line: its name and systemSellTotal; `alternate` adds " — priced separately". */
@@ -101,28 +107,45 @@ export function linePhotoSource(a: LineAnchor, ctx: Pick<PackageDocCtx, "section
   return own ?? (ph ? { src: PLACEHOLDER_SRC[ph], alt: "" } : undefined);
 }
 
+/** Photo wrap (2026-10-16 §2) — the tag on a line-anchored photo: the part-aware model for the part's own photo
+ *  (photos[sku], incl. a manufacturer image), the line's own Model # / MFR P/N for a kind placeholder. The line
+ *  counts only while the anchor is still in the BOM (the heading's rule): a stale anchor whose line key now holds
+ *  another part never borrows that part's model — its own photo tags from models[sku] alone. */
+export function photoModelOf(a: LineAnchor, ctx: Pick<PackageDocCtx, "sections" | "photos" | "models">): string {
+  const sku = typeof a?.sku === "string" ? a.sku : "";
+  const own = !!sku && !!ctx.photos && Object.hasOwn(ctx.photos, sku);
+  const partModel = sku && ctx.models && Object.hasOwn(ctx.models, sku) ? ctx.models[sku] : null;
+  const line = lineAnchorInBom(a, ctx.sections) ? findLine(findSection(ctx.sections, a.sectionId), a.lineKey) : undefined;
+  return photoTagText({ ownPhoto: own, partModel, ownModel: lineOwnModel(line) });
+}
+
 const alignOf = (v: unknown): PhotoAlign => (v === "left" || v === "full" ? v : "right");
 
 function product(b: PDProductBlock, ctx: PackageDocCtx): RProduct {
   const a = b.attrs;
   const line = productBlockInBom(b, ctx.sections) ? findLine(findSection(ctx.sections, a.sectionId), a.lineKey) : undefined;
   const src = a.photo?.show ? linePhotoSource(a, ctx) : undefined;
+  const model = src ? photoModelOf(a, ctx) : "";
   return {
     t: "product",
     sku: a.sku,
     heading: line ? keyProductHeading(line) : null,
     photo: src ? { src: src.src, alt: src.alt, align: alignOf(a.photo.align), width: clampPhotoWidth(a.photo.width) } : null,
     paras: (Array.isArray(b.content) ? b.content : []).map((p) => para(p, ctx)),
+    ...(model ? { model } : {}),
   };
 }
 
 /** A product image: its photo source with its own align / width, or null
- *  (prints nothing) when no source resolves. */
-export function productImageOf(b: PDProductImage, ctx: Pick<PackageDocCtx, "sections" | "photos">): RImage | null {
+ *  (prints nothing) when no source resolves. Jeff 2026-10-15 #20: an "auto"
+ *  image takes `autoSide` (resolvePackageDoc alternates it in document order). */
+export function productImageOf(b: PDProductImage, ctx: Pick<PackageDocCtx, "sections" | "photos" | "models">, autoSide: "left" | "right" = "right"): RImage | null {
   const a = b?.attrs;
   if (!a) return null;
   const src = linePhotoSource(a, ctx);
-  return src ? { t: "image", sku: a.sku, photo: { src: src.src, alt: src.alt, align: alignOf(a.align), width: clampPhotoWidth(a.width) } } : null;
+  if (!src) return null;
+  const model = photoModelOf(a, ctx);
+  return { t: "image", sku: a.sku, photo: { src: src.src, alt: src.alt, align: a.align === "auto" ? autoSide : alignOf(a.align), width: clampPhotoWidth(a.width) }, ...(model ? { model } : {}) };
 }
 
 /** The live price table — the same numbers as QuoteDocument's totals block. */
@@ -176,9 +199,16 @@ function block(b: PDBlock, ctx: PackageDocCtx): RBlock | null {
 
 export function resolvePackageDoc(doc: PackageDoc, ctx: PackageDocCtx): ResolvedPackageDoc {
   const blocks: RBlock[] = [];
+  // Jeff 2026-10-15 #20: an "auto" product image floats opposite the last printed side photo (the first one right),
+  // so photos alternate right, left, right; an explicit Left / Right (image or product-block photo) sets the side.
+  // One rule with the editor's preview (photo-sides.ts).
+  let last: Side | null = null;
   for (const b of doc && Array.isArray(doc.content) ? doc.content : []) {
-    const r = block(b, ctx);
-    if (r) blocks.push(r);
+    const r: RBlock | null = b?.type === "productImage" ? productImageOf(b, ctx, resolveAutoAlign("auto", last) as Side) : block(b, ctx);
+    if (!r) continue;
+    blocks.push(r);
+    const ph: RPhoto | null = r.t === "image" || r.t === "product" ? r.photo : null;
+    if (ph) last = nextLastSide(last, ph.align);
   }
   return { blocks };
 }

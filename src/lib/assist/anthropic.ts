@@ -12,7 +12,18 @@ export function buildAnthropicParams(req: ProviderRequest) {
     model: req.model,
     max_tokens: req.maxTokens,
     system: [{ type: "text" as const, text: req.system, cache_control: { type: "ephemeral" as const } }],
-    messages: [{ role: "user" as const, content: req.user }],
+    messages: [
+      {
+        role: "user" as const,
+        // #348 slice 5 — a PDF rides as a document block before the text; no cache_control, no citations.
+        content: req.document
+          ? [
+              { type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf" as const, data: req.document.base64 } },
+              { type: "text" as const, text: req.user },
+            ]
+          : req.user,
+      },
+    ],
     output_config: {
       effort: req.effort,
       ...(req.jsonSchema ? { format: { type: "json_schema" as const, schema: req.jsonSchema } } : {}),

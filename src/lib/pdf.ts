@@ -178,7 +178,11 @@ export type LetterBlock =
   | { kind: "bullets"; heading: string; items: string[] };
 
 export type FieldSheetRow = { label: string; value: string };
-export type FieldSheetSection = { heading: string; rows: FieldSheetRow[] };
+/** One picture in a field-sheet section (#344 C7): JPEG bytes (DCTDecode pass-through), an optional caption printed
+ *  under it, and `full` for content width (sketches) instead of two to a row (photos). Bytes that aren't a JPEG
+ *  print as their caption in text. */
+export type FieldSheetImage = { jpeg: Buffer; caption?: string; full?: boolean };
+export type FieldSheetSection = { heading: string; rows: FieldSheetRow[]; images?: FieldSheetImage[] };
 export type FieldSheetPage = { title: string; sections: FieldSheetSection[] };
 export type FieldSheetDoc = {
   job: string;
@@ -374,6 +378,16 @@ class Pdf {
     this.rect(MARGIN_L, y, CONTENT_W, weight, color);
   }
 
+  /** Draw an image XObject at an absolute position (bottom-left `x`, `y`); the cursor doesn't move. */
+  imageAt(name: string, x: number, y: number, w: number, h: number): void {
+    this.op(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /${name} Do Q`);
+  }
+
+  /** One already-WinAnsi text run at an absolute baseline; the cursor doesn't move. */
+  textAt(t: string, x: number, y: number, size: number, color: string): void {
+    this.op(`BT /F1 ${size} Tf ${rgb(color)} rg 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm (${esc(t)}) Tj ET`);
+  }
+
   image(name: string, x: number, w: number, h: number): void {
     this.ensure(h);
     this.y -= h;
@@ -457,6 +471,109 @@ function initPdf(): Pdf {
   return pdf;
 }
 
+/* ---------------- field-sheet images (#344 C7) ----------------------------- */
+
+const IMG_GAP = 12;
+const IMG_HALF_W = (CONTENT_W - IMG_GAP) / 2;
+/** Tallest a photo (two to a row) / a sketch (full width) draws — both leave room under any header band. */
+const IMG_HALF_MAX_H = 190;
+const IMG_FULL_MAX_H = 420;
+const CAP_SIZE = 8.5;
+const CAP_LEAD = CAP_SIZE * 1.3;
+const CAP_MAX_LINES = 3;
+
+/** A caption wrapped to `w`, at most 3 lines — the last one ends in an ellipsis when the text runs on. */
+function captionLines(caption: string | undefined, w: number): string[] {
+  const t = winAnsi(String(caption ?? "").trim());
+  if (!t) return [];
+  /* newlines split first; a single token wider than the cell is hard-broken */
+  const lines: string[] = [];
+  for (const para of t.split(/\r\n|\r|\n/)) {
+    for (const ln of wrap(para.trim(), CAP_SIZE, false, w)) {
+      let rest = ln;
+      while (rest.length > 1 && measure(rest, CAP_SIZE, false) > w) {
+        let n = rest.length - 1;
+        while (n > 1 && measure(rest.slice(0, n), CAP_SIZE, false) > w) n--;
+        lines.push(rest.slice(0, n));
+        rest = rest.slice(n);
+      }
+      lines.push(rest);
+    }
+  }
+  while (lines.length > 1 && !lines[lines.length - 1]) lines.pop();
+  if (lines.length <= CAP_MAX_LINES) return lines;
+  const out = lines.slice(0, CAP_MAX_LINES);
+  let last = out[CAP_MAX_LINES - 1].replace(/\s+$/, "");
+  while (last && measure(last + "\x85", CAP_SIZE, false) > w) last = last.slice(0, -1).replace(/\s+$/, "");
+  out[CAP_MAX_LINES - 1] = last + "\x85";
+  return out;
+}
+
+/** The height of the first image row of a section (what a heading must keep company with): the same scaling and caption
+ *  rule `sheetImages` draws with, without registering anything. Unembeddable images print a one-line text row. */
+function firstImageRowHeight(images: FieldSheetImage[]): number {
+  const h = (img: FieldSheetImage): number => {
+    const info = img.jpeg && jpegInfo(img.jpeg);
+    if (!info || info.w <= 0 || info.h <= 0) return 14;
+    const boxW = img.full ? CONTENT_W : IMG_HALF_W;
+    const maxH = img.full ? IMG_FULL_MAX_H : IMG_HALF_MAX_H;
+    const caps = captionLines(img.caption, boxW).length;
+    return info.h * Math.min(boxW / info.w, maxH / info.h) + (caps ? 3 + caps * CAP_LEAD : 0);
+  };
+  const first = images[0];
+  const row = first.full ? [first] : images.slice(0, 2).filter((i) => !i.full);
+  return 6 + Math.max(...row.map(h)) + 4;
+}
+
+/** Image blocks inside a field-sheet section: photos two to a row, sketches content width, each scaled to fit its box
+ *  (aspect kept) with its caption right under it; a row that doesn't fit moves to the next page (the header redraws).
+ *  Bytes that aren't a JPEG print their caption as a text row instead — nothing un-embeddable reaches the PDF. */
+function sheetImages(pdf: Pdf, images: FieldSheetImage[]): void {
+  type Cell = { name: string; w: number; h: number; caps: string[] };
+  const cell = (img: FieldSheetImage, info: JpegInfo): Cell => {
+    const boxW = img.full ? CONTENT_W : IMG_HALF_W;
+    const maxH = img.full ? IMG_FULL_MAX_H : IMG_HALF_MAX_H;
+    const scale = Math.min(boxW / info.w, maxH / info.h);
+    return { name: pdf.addJpeg(img.jpeg, info), w: info.w * scale, h: info.h * scale, caps: captionLines(img.caption, boxW) };
+  };
+  const drawRow = (cells: Cell[]) => {
+    const rowH = 6 + Math.max(...cells.map((c) => c.h + (c.caps.length ? 3 + c.caps.length * CAP_LEAD : 0))) + 4;
+    pdf.ensure(rowH);
+    const top = pdf.y - 6;
+    cells.forEach((c, i) => {
+      const x = MARGIN_L + i * (IMG_HALF_W + IMG_GAP);
+      pdf.imageAt(c.name, x, top - c.h, c.w, c.h);
+      c.caps.forEach((t, j) => pdf.textAt(t, x, top - c.h - 3 - (j + 1) * CAP_LEAD + 2.5, CAP_SIZE, SOFT_INK));
+    });
+    pdf.y -= rowH;
+  };
+  let pair: Cell[] = [];
+  const flush = () => {
+    if (pair.length) drawRow(pair);
+    pair = [];
+  };
+  for (const img of images) {
+    const info = img.jpeg && jpegInfo(img.jpeg);
+    if (!info || info.w <= 0 || info.h <= 0) {
+      flush();
+      pdf.para(`${img.full ? "Sketch" : "Photo"}:  ${String(img.caption ?? "").trim() || "Untitled"} — could not be printed`, {
+        size: 9.5,
+        leadingMult: 1.35,
+        after: 1,
+      });
+      continue;
+    }
+    if (img.full) {
+      flush();
+      drawRow([cell(img, info)]);
+      continue;
+    }
+    pair.push(cell(img, info));
+    if (pair.length === 2) flush();
+  }
+  flush();
+}
+
 function renderFieldSheetPdf(doc: LetterDoc, sheet: FieldSheetDoc): Buffer {
   const pdf = initPdf();
   const jpeg = doc.headerJpeg || null;
@@ -504,6 +621,8 @@ function renderFieldSheetPdf(doc: LetterDoc, sheet: FieldSheetDoc): Buffer {
     drawHeaderBand(false);
 
     for (const section of page.sections) {
+      /* an images-only section keeps its heading with (most of) its first picture row (#344 C7) */
+      if (section.images?.length && !section.rows.length) pdf.ensure(24 + firstImageRowHeight(section.images));
       pdf.line(section.heading.toUpperCase(), {
         size: 9.5,
         bold: true,
@@ -516,6 +635,7 @@ function renderFieldSheetPdf(doc: LetterDoc, sheet: FieldSheetDoc): Buffer {
         const value = row.value || "________________________________";
         pdf.para(`${row.label}:  ${value}`, { size: 9.5, leadingMult: 1.35, after: 1 });
       }
+      if (section.images?.length) sheetImages(pdf, section.images);
       pdf.space(8);
     }
 

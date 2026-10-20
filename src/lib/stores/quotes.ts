@@ -1,9 +1,11 @@
+import { EMPTY_BID, type QuoteBid } from "@/lib/parties/bids";
 import { checkSelectionPatch, DEFAULT_PACKAGE_SELECTION, mergePackageSelection, normalizePackageSelection, type PackageSelection } from "@/lib/estimate-output/package-selection";
 import {
   getDoc,
   getDocRows,
   insertWithPrefixedId,
   listDocs,
+  listDocsFiltered,
   casDocKey,
   patchDoc,
   patchDocKey,
@@ -25,7 +27,8 @@ import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
-import { canHavePdf, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
+import { canHavePdf, latestSentRevision, nextSendRevNo, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
+import { isReopen, reopenTarget, REOPEN_AUTOSAVE_NOTE, sameWonContent, tracksWonVersion, WON_SNAPSHOT_NOTE, wonRevision } from "@/lib/quote-won-version";
 import { SHARE_DEFAULT_TTL_MS, newShareNonce } from "@/lib/quote-share/token";
 import { nextOpens, type ShareOpens } from "@/lib/estimate-output/opens";
 import { appendPackageFile, cleanPackageFiles, type PackageFile } from "@/lib/estimate-output/package-files";
@@ -266,6 +269,10 @@ export type Quote = {
     purchaseMethod?: "po" | "card" | "check" | "other";
     notes?: string;
     poDocumentId?: string | null;
+    /** Jeff 2026-10-15 #15 — who signed it online (typed; required on every new acceptance) and an optional PO #. */
+    signerName?: string;
+    signerTitle?: string;
+    poNumber?: string;
   } | null;
   /** #245 (spec §4.2) — a FIRM portal-catalog generation: every line priced by
    *  rule (portal-pricing.ts), sent at once, good until `validUntil`. Absent /
@@ -356,6 +363,13 @@ export type Quote = {
    *  recordShareOpen under the row lock; update() drops it; never content,
    *  never snapshotted, never copied by buildQuote. Staff-only. */
   shareOpens?: ShareOpens | null;
+  /** Batch 5 #59 — the revision that holds the version that WON (a sent one,
+   *  or a manual "Won — the version that won" snapshot). Written only by
+   *  setStatus at the Won transition (system estimates, never Daylite
+   *  history); update() drops it; never content, never snapshotted, never
+   *  copied by buildQuote. Reopening (won → draft / sent) puts that version
+   *  back when edits saved after the win changed it (quote-won-version.ts). */
+  wonRev?: number | null;
   /** #301 slice C (D-j, R13) — drawings shown under "Plans & risers" on the
    *  package page. Written only by addPackageFile / removePackageFile under
    *  the row lock (update() drops it); frozen into every new revision's
@@ -364,7 +378,7 @@ export type Quote = {
    *  `blobPath` never leaves the server (the page links /share/.../file/<id>). */
   packageFiles?: PackageFile[] | null;
   /** #301 slice C (D-m) — client scope selections and questions from the
-   *  package page, append-only, ≤ 200. Written only by appendClientResponse;
+   *  package page, append-only, ≤ 200 per responder (#348: the owner, and each bidder by partyId). Written only by appendClientResponse;
    *  update() drops it; never content, never snapshotted. Staff-only. */
   clientResponses?: ClientResponse[] | null;
   /** Estimator bonuses — the payout record written when the quote goes Won
@@ -380,6 +394,18 @@ export type Quote = {
    *  Branding). Written only by setPackagePeakHeader (update() drops it);
    *  never content, never snapshotted — read when a package is built. */
   packagePeakHeader?: boolean | null;
+  /** #348 slice 2a — bid details (due date, addenda, the awarded bidder's party id). Written only by
+   *  patchQuoteBid under the row lock; update() drops it. Content (QUOTE_CONTENT_FIELDS): the awarded bidder
+   *  prints as "Prepared for" and the bid line prints under the meta grid; never bumps updatedAt. */
+  bid?: QuoteBid | null;
+  /** #348 slice 6 (Jeff 2026-10-15) — "Scope only" for good: once this estimate has had a GC/EC bidder (or was
+   *  split off one that had), the owner's portal shows it as a BOM with no prices, even after every bidder row is
+   *  removed. Store-owned: written only by markBidScopeOnly (addBidder, and a party write that revives a removed
+   *  bidder row — a key-level write that never bumps updatedAt) and by create() when a SERVER caller passes
+   *  `opts.bidScopeOnly` (Move system → New estimate and Copy system → New estimate, same customer only) —
+   *  buildQuote never copies it from `partial`, and update() drops it, so no client save can set or clear it.
+   *  Never content, never snapshotted. Read through portalQuoteHasBidders (stamp OR bidder rows incl. deleted). */
+  bidScopeOnly?: true;
   /** Estimator Phase 3 — the comms threads this estimate was emailed on
    *  (spec §10.1 step 6), oldest first, ≤ 50, one per threadId. Written only
    *  by recordEstimateEmail under the row lock; update() drops it so an
@@ -432,7 +458,7 @@ export const ESTIMATE_EMAIL_CLAIM_MS = 120_000;
 
 /** One emailed copy of the estimate: the comms thread, the sent revision it
  *  carried, when, by whom (user name) and the To line. */
-export type EstimateEmailEntry = { threadId: string; rev: number; at: number; by: string; to: string };
+export type EstimateEmailEntry = { threadId: string; rev: number; at: number; by: string; to: string; partyId?: string };
 
 /** Most entries kept on a quote; the oldest are dropped past it. */
 export const ESTIMATE_EMAILS_MAX = 50;
@@ -480,12 +506,24 @@ export const QUOTE_CONTENT_FIELDS = [
   "pdfOptions",
   // #245: a firm portal quote prints "Valid until <date>".
   "portalFirm",
+  // #348 2b-i: prints as Prepared for (awarded bidder) and the bid line.
+  "bid",
 ] as const;
 
 /** A comparable key of what the customer document shows. Pure. */
 export function quoteContentKey(q: Partial<Quote> | null | undefined): string {
   const rec = (q || {}) as Record<string, unknown>;
-  return JSON.stringify(QUOTE_CONTENT_FIELDS.map((k) => rec[k] ?? null));
+  return JSON.stringify(
+    QUOTE_CONTENT_FIELDS.map((k) => {
+      // #348 2b-i: `bid` prints only once awarded (Prepared for + the bid line need an addressee), so only an
+      // awarded bid counts as content — pre-award bid edits never stale the PDF; award / undo / post-award edits do.
+      if (k === "bid") {
+        const bid = rec.bid as { awardedPartyId?: string | null } | null | undefined;
+        return bid?.awardedPartyId ? bid : null;
+      }
+      return rec[k] ?? null;
+    })
+  );
 }
 
 /** #293 slice 3 (spec §1.5) — the non-payload fields the customer document
@@ -518,6 +556,13 @@ export type QuoteRevisionDocFields = {
   /** #333 — the package selection as sent. Present only when the live quote
    *  had one; absent = defaults (everything on, nothing left out). */
   packageSelection?: PackageSelection;
+  /** #348 2b-i — the awarded bidder's party id when the revision was cut (null = owner-addressed). The online
+   *  page addresses a sent revision to THIS bidder, never the live award, so it matches the frozen PDF. Absent
+   *  on older revisions = owner-addressed. Never part of the header spread. */
+  awardedPartyId?: string | null;
+  /** #348 2b-i — the bid (due date, addenda) as sent; present only when the quote had one. Spread over the
+   *  live bid by quoteAsOfRevision so the bid line prints as sent. Absent = the live bid (older revisions). */
+  bid?: QuoteBid;
   /** #293 slice 3 — the Rev N and the date the revision's PDF printed
    *  (QuotePdfState.printed), stamped once with the PDF copy
    *  (setRevisionPdfPath). Absent until then, when the render couldn't be
@@ -771,6 +816,35 @@ export async function getAll(): Promise<Quote[]> {
   return list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
+/** Jeff 2026-10-15 #11 — the top-level quote fields the Quotes hub filters, counts and searches over, and the
+ *  Companies directory rolls up. A SQL projection (`listDocsFiltered` `fields`), so a list read never ships a
+ *  quote's spec, revisions or history. */
+export const QUOTE_LIST_FIELDS = [
+  "name", "customer", "customerId", "locationId", "owner", "status", "quoteType", "value", "estNo", "estSuffix", "updatedAt", "bid",
+] as const;
+export type QuoteListRow = Pick<Quote, "id" | "name" | "customer" | "customerId" | "owner" | "status" | "value" | "updatedAt"> & {
+  locationId?: string | null;
+  quoteType?: string;
+  estNo?: number;
+  estSuffix?: number;
+  bid?: QuoteBid | null;
+};
+
+/** Every live quote as a `QuoteListRow`, newest first — getAll()'s order, without the documents. */
+export async function listQuoteRows(): Promise<QuoteListRow[]> {
+  const rows = await listDocsFiltered<QuoteListRow & { id: string }>("quotes", { fields: QUOTE_LIST_FIELDS });
+  for (const r of rows) {
+    r.name = r.name || "";
+    r.customer = r.customer || "";
+    r.customerId = r.customerId || null;
+    r.owner = r.owner || "";
+    r.status = (r.status || "draft") as QuoteStatus;
+    r.value = Number(r.value) || 0;
+    r.updatedAt = Number(r.updatedAt) || 0;
+  }
+  return rows.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
 export async function get(id: string): Promise<Quote | null> {
   const q = await getDoc<Quote>("quotes", id);
   return q ? normalizeQuotePipeline(q, await loadPipelines()) : null;
@@ -862,14 +936,18 @@ export function buildQuote(
 }
 
 /** Create a new quote; returns the created record. Id: Q-#### from base 2041. */
-export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
+export async function create(partial: Partial<Quote> = {}, opts: { bidScopeOnly?: boolean } = {}): Promise<Quote> {
   const t = Date.now();
   const quoteType = partial.quoteType || "system";
   // System quotes enter their pipeline at its first stage (spec §3.4); a caller-chosen
   // pipeline is honoured when it exists, else the Settings default.
   const pipes = carriesPipeline(quoteType) ? await loadPipelines() : null;
   const pl = pipes ? quotePipelineFor(pipes, { pipelineId: partial.pipelineId || pipes.defaultQuotePipelineId }) : null;
-  const build = (id: string): Quote => buildQuote(id, partial, quoteType, pl, t);
+  // #348 slice 6: the Scope-only stamp comes only from the server-side second argument, never from `partial`.
+  const build = (id: string): Quote => {
+    const q = buildQuote(id, partial, quoteType, pl, t);
+    return opts.bidScopeOnly === true ? { ...q, bidScopeOnly: true } : q;
+  };
   // Explicit caller-supplied id (not a minted one) — no race to guard, keep
   // the prior upsert semantics. #223: an id that already exists keeps its
   // number — upsertDoc never replaces a stored estNo/estSuffix (doc-store).
@@ -900,6 +978,8 @@ export async function update(
     delete clean.shareLink;
     // #301 slice B: the open counter is recordShareOpen's alone.
     delete clean.shareOpens;
+    // Batch 5 #59: the won-version pointer is setStatus's alone.
+    delete clean.wonRev;
     // #301 slice C: the drawings list and the client responses have their own writers.
     delete clean.packageFiles;
     delete clean.clientResponses;
@@ -908,6 +988,10 @@ export async function update(
     delete clean.estimatorBonusSplit;
     // Grid notes #9: the package header choice is setPackagePeakHeader's alone.
     delete clean.packagePeakHeader;
+    // #348: bid details are patchQuoteBid's alone.
+    delete clean.bid;
+    // #348 slice 6: the Scope-only stamp is markBidScopeOnly's alone — a save can never set or clear it.
+    delete clean.bidScopeOnly;
     // Phase 3: the emailed-thread list is recordEstimateEmail's alone.
     delete clean.estimateEmails;
     // #333 review (B): the package selection is setPackageSelection's alone — a
@@ -924,6 +1008,16 @@ export async function update(
     Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
+}
+
+/** #348 slice 6 (Jeff 2026-10-15) — the ONLY writer of `Quote.bidScopeOnly` after create: set it (never clear
+ *  it) as one key-level write (`doc || {bidScopeOnly: true}` in SQL), the setAssistNudge precedent — no
+ *  read-modify-write, so it can't race an Estimator save; estNo/estSuffix and updatedAt are left as stored (no
+ *  version bump, nothing stales). Joins the caller's transaction (addBidder's row lock). False = missing / deleted. */
+export async function markBidScopeOnly(quoteId: string): Promise<boolean> {
+  if (!quoteId) return false;
+  const res = await patchDocKey("quotes", [quoteId], "bidScopeOnly", true);
+  return res.ids.length > 0;
 }
 
 /** AI daily brief (spec §2) — the ONLY writer of `Quote.assistNudge`: set
@@ -986,6 +1080,9 @@ export function revisionDocFields(doc: Quote): QuoteRevisionDocFields {
     packageFiles: cleanPackageFiles(d.packageFiles),
     // #333: only when the live quote has one — an untouched quote's revision is byte-identical.
     ...(d.packageSelection ? { packageSelection: normalizePackageSelection(d.packageSelection) } : {}),
+    // #348 2b-i: who the document was addressed to, and the bid line as sent.
+    awardedPartyId: d.bid?.awardedPartyId ?? null,
+    ...(d.bid ? { bid: { ...d.bid, addenda: [...(d.bid.addenda || [])] } } : {}),
   };
 }
 
@@ -1054,6 +1151,9 @@ function pushRevision(
 ): QuoteRevision {
   const revs = Array.isArray(doc.revisions) ? doc.revisions : [];
   const r = snapshotOf(doc, revs.length + 1, by, reason, note);
+  // Jeff 2026-10-15 #13: every send stamps its Rev — the previous max + 1 — so two sends never print the
+  // same number. The PDF copy (setRevisionPdfPath) overwrites it with what the file really printed.
+  if (reason === "sent" && r.docFields) r.docFields = { ...r.docFields, revNo: nextSendRevNo(revs) };
   doc.revisions = [...revs, r];
   return r;
 }
@@ -1108,6 +1208,32 @@ async function patchQuote(id: string, mutate: (doc: Quote) => Quote | void): Pro
   return withTransaction(async () => {
     await lockQuoteRow(id);
     return patchDoc<Quote>("quotes", id, (doc) => stampContentChange(doc, mutate));
+  });
+}
+
+/**
+ * #348 2b-i — stamp `contentChangedAt` (now) without any other change and without bumping `updatedAt`: for a
+ * change OUTSIDE the quote doc that the customer document prints — the awarded bidder's contact (Attn). The PDF
+ * saved before it is then stale, so Send waits for the re-render the caller schedules (scheduleQuotePdf).
+ */
+export async function touchQuoteContent(id: string): Promise<Quote | null> {
+  return withTransaction(async () => {
+    await lockQuoteRow(id);
+    return patchDoc<Quote>("quotes", id, (doc) => {
+      doc.contentChangedAt = Math.max(Date.now(), (doc.contentChangedAt ?? 0) + 1);
+    });
+  });
+}
+
+/**
+ * #348 — run `fn` in a transaction holding the quote ROW lock (FOR UPDATE). Same lock order as setStatus:
+ * row lock first, advisory (withQuoteLock) only afterwards, so a bid write can never invert against a
+ * "won" spawn. Nested patchQuote calls join this transaction and re-lock the same row harmlessly.
+ */
+export async function withQuoteRowLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  return withTransaction(async () => {
+    await lockQuoteRow(id);
+    return fn();
   });
 }
 
@@ -1193,6 +1319,10 @@ export async function setRevisionPdfPath(
     let hit = false;
     await patchDoc<Quote>("quotes", id, (doc) => {
       const r = (doc.revisions || []).find((x) => x.rev === rev);
+      // #352 review I1: a file that printed another Rev than the send stamped is never recorded on it.
+      const stamped = r?.docFields?.revNo;
+      const printedRev = file.printed?.revNum;
+      if (r && typeof stamped === "number" && typeof printedRev === "number" && printedRev !== stamped) return;
       if (r && !r.pdfBlobPath) {
         r.pdfBlobPath = path;
         if (typeof file.savedAt === "number" && Number.isFinite(file.savedAt)) r.pdfSavedAt = file.savedAt;
@@ -1290,6 +1420,8 @@ export async function recordEstimateEmail(id: string, entry: EstimateEmailEntry)
     at: entry.at,
     by: String(entry.by ?? "").slice(0, 200),
     to: String(entry.to ?? "").slice(0, 1000),
+    // #348 2b-ii — which bidder this email went to (a bidder send only).
+    ...(typeof entry.partyId === "string" && /^pty_[0-9a-f]{16}$/.test(entry.partyId) ? { partyId: entry.partyId } : {}),
   };
   let wrote = false;
   await patchQuote(id, (doc) => {
@@ -1494,7 +1626,7 @@ export type ClientResponseWrite = { ok: true; response: ClientResponse } | { ok:
  * #301 slice C (D-m) — the ONLY writer of `Quote.clientResponses`. Under the
  * row lock the pinned revision must still be the latest sent one and the
  * quote must be `sent` (canAct — a recall, a re-send, a win or a loss since
- * the page loaded refuses). Append-only, ≤ 200. Never changes status, never
+ * the page loaded refuses). Append-only, ≤ 200 per responder (#348). Never changes status, never
  * bumps updatedAt.
  */
 export async function appendClientResponse(id: string, pinnedRev: number, r: CleanResponse, now: number, newId: string): Promise<ClientResponseWrite> {
@@ -1520,6 +1652,16 @@ export async function appendClientResponse(id: string, pinnedRev: number, r: Cle
 /** After a send commits: copy the current PDF onto the new sent revision (#222).
  *  Never fails the send — a missing copy is logged, and the generator retries
  *  it when a still-rendering PDF lands. */
+/** #352 review I1 — schedule the revised draft's PDF (it now prints the next Rev). Never fails the status change. */
+async function scheduleRevisePdfSafely(id: string): Promise<void> {
+  try {
+    const { scheduleQuotePdf } = await import("../quote-pdf/schedule");
+    await scheduleQuotePdf(id);
+  } catch (e) {
+    console.error("[quotes] scheduling the revised PDF failed", id, e);
+  }
+}
+
 async function copySentPdfSafely(id: string): Promise<void> {
   try {
     const { copySentRevisionPdf } = await import("../quote-pdf/generate");
@@ -1652,6 +1794,60 @@ function withRestoredCredit(doc: Quote, credit: number): void {
     0
   );
   doc.spec = { ...spec, sections: withRewardCredit(sections, credit, maxId + 1) };
+}
+
+/* ---------- Batch 5 #59 — reopening a won estimate at the version that won ---------- */
+
+type LiveRenames = Awaited<ReturnType<typeof liveRenameRefs>>;
+/** A spec brought to today's SKUs (#304) — a rename alone is never "a change". */
+const renameRewriter = (renames: LiveRenames) => (s: unknown) => (s && renames.m.size ? rewriteQuoteSpec(s, renames.m, renames.models) ?? s : s);
+
+/** What a reopen puts back, worked out once before the approval gate. */
+export type ReopenPlan = { target: QuoteRevision; credit: number; gross: number; rewrite: (s: unknown) => unknown };
+
+/**
+ * The restore a move from Won to `status` would make, or null (not a reopen,
+ * not a tracked estimate, a historical import, no won version, or nothing
+ * changed since the win). The credit goes through restoredCreditFor →
+ * settleCredit while `q` is still won — the locked amount — so the ledger
+ * reconcile sees a plain revise.
+ */
+export async function reopenPlanFor(q: Quote, status: QuoteStatus, opts: Pick<SetStatusOpts, "bypassApprovalGate"> = {}): Promise<ReopenPlan | null> {
+  if (opts.bypassApprovalGate === "historical-import") return null;
+  if (!isReopen(q.status, status) || !tracksWonVersion(q) || !wonRevision(q)) return null;
+  const rewrite = renameRewriter(await liveRenameRefs());
+  const target = reopenTarget(q, status, rewrite);
+  if (!target) return null;
+  const { restoredCreditFor } = await import("./reward-ledger");
+  const c = await restoredCreditFor(q, target, true);
+  return { target, credit: c.credit, gross: c.gross, rewrite };
+}
+
+/** Put the plan's version on `doc` (the priced fields a revision recall puts back; the header stays). */
+function applyReopen(doc: Quote, plan: ReopenPlan): void {
+  const target = plan.target;
+  doc.name = target.name;
+  doc.value = Math.round(Math.max(0, plan.gross - plan.credit));
+  doc.margin = target.margin;
+  doc.pricingTier = target.pricingTier ?? doc.pricingTier ?? null;
+  doc.tierMargin = target.tierMargin ?? doc.tierMargin ?? null;
+  doc.spec = plan.rewrite(target.spec ?? null) ?? null;
+  doc.flameTest = target.flameTest ?? null;
+  doc.repair = target.repair ?? null;
+  doc.inspection = target.inspection ?? null;
+  doc.consulting = target.consulting ?? null;
+  doc.rental = target.rental ?? null;
+  withRestoredCredit(doc, plan.credit);
+  doc.vendorQuotes = mergeVendorQuotes(doc.vendorQuotes, target.vendorQuotes);
+}
+
+/** #355 review I1 — the quote as it will stand once the plan is applied: what
+ *  the approval gate judges, and what a new approval stamp fingerprints. */
+export function asReopened(q: Quote, plan: ReopenPlan | null): Quote {
+  if (!plan) return q;
+  const copy: Quote = { ...q };
+  applyReopen(copy, plan);
+  return copy;
 }
 
 /**
@@ -1852,7 +2048,9 @@ export async function checkApprovalGate(
   actor: string | null = null
 ): Promise<ApprovalGateResult> {
   if (!q) return requireApprovalToAdvance(null, status === "won" ? "won" : "send");
-  const d = decideApprovalGate(status, q, await loadReviewLimitContext(), {}, Date.now(), actor);
+  // #355 review I1: a won → sent reopen is judged on the version it will send (the one that won).
+  const plan = await reopenPlanFor(q, status);
+  const d = decideApprovalGate(status, asReopened(q, plan), await loadReviewLimitContext(), {}, Date.now(), actor);
   return d.ok ? { ok: true } : d;
 }
 
@@ -1988,6 +2186,10 @@ export async function setStatus(
   opts: SetStatusOpts = {}
 ): Promise<Quote | null> {
   const sentCut = { value: false };
+  // #352 review I1: set when this call really moved a sent / won / lost quote back to Draft (a revise).
+  const revised = { value: false };
+  // #355 review I2: set when a reopen put the won version back (its PDF must re-render, won → sent too).
+  const reopened = { value: false };
   // Estimator bonuses: read before the transaction — the patch mutator is synchronous.
   // A failed users read must never block marking Won — credits then fall back to no userId.
   const bonusUsers = status === "won" ? await bonusUserList() : [];
@@ -2028,11 +2230,16 @@ export async function setStatus(
   // legacy approval passes on its own record, so it makes exactly the DB
   // reads it made before #242 (#242 final).
   const gated = !resolveStatusGate(status, null, opts).ok;
+  // Batch 5 #59 / #355 review I1: a reopen (won → draft / sent) that puts the
+  // won version back is worked out BEFORE the gate, which judges — and an
+  // approver's stamp fingerprints — the version the move will leave.
+  const reopen = await reopenPlanFor(q, status, opts);
+  const gateQ = asReopened(q, reopen);
   // #284: a snapshot-stale approval also needs the context (the approver moving it may approve it, #287).
   const needsLimits =
-    gated && !(hasApproval(q.review) && q.review?.method !== "auto_limit" && approvalSnapshotMatches(q));
+    gated && !(hasApproval(gateQ.review) && gateQ.review?.method !== "auto_limit" && approvalSnapshotMatches(gateQ));
   const limits = needsLimits ? await loadReviewLimitContext() : NO_REVIEW_LIMITS;
-  const gate = decideApprovalGate(status, q, limits, opts, Date.now(), by ?? null);
+  const gate = decideApprovalGate(status, gateQ, limits, opts, Date.now(), by ?? null);
   // #174: a TYPED refusal. The gate is the only throw here whose message is
   // meant for the user; everything below this line that throws is a defect,
   // and callers tell the two apart with `statusFailureMessage`.
@@ -2041,13 +2248,35 @@ export async function setStatus(
   const autoStamp = gate.stamp;
   // Loaded before the patch: the stage snaps to the new status inside the same write (§3.4).
   const pipes = carriesPipeline(q.quoteType) ? await loadPipelines() : null;
+  // Batch 5 #59 (#355 review M3): the Won move compares the live quote with the
+  // latest send at today's SKUs, so a rename since the send adds no snapshot.
+  const recordsWon = status === "won" && tracksWonVersion(q) && opts.bypassApprovalGate !== "historical-import";
+  const wonRewrite = recordsWon ? renameRewriter(await liveRenameRefs()) : null;
   const result = await patchQuote(id, (doc) => {
     const t = Date.now();
     if (autoStamp) doc.review = autoStamp;
+    if (reopen) {
+      // Non-destructive, like restoreQuoteRevision: the post-win edits become a revision first.
+      pushRevision(doc, by || DEFAULT_ACTOR, "manual", REOPEN_AUTOSAVE_NOTE);
+      applyReopen(doc, reopen);
+      reopened.value = true;
+    }
     doc.history = doc.history || [];
     doc.history.push({ at: t, from: doc.status, to: status });
+    // #352 review I1: a revise — the document now prints the NEXT send's Rev (D1125).
+    if (status === "draft" && doc.status !== "draft") revised.value = true;
     doc.status = status;
     moved.value = true;
+    // Batch 5 #59: record which version won — the latest send when the live
+    // quote still matches it, else a snapshot of what was marked Won.
+    if (status === "won" && wonRewrite) {
+      const sent = latestSentRevision(doc.revisions);
+      const sentLive = sent ? { ...sent, spec: wonRewrite(sent.spec ?? null) } : null;
+      doc.wonRev = sent && sentLive && sameWonContent(sentLive, doc) ? sent.rev : pushRevision(doc, by || DEFAULT_ACTOR, "manual", WON_SNAPSHOT_NOTE).rev;
+    } else if (status === "won") {
+      // #355 review M1: a Won move that records no version clears any older pointer.
+      doc.wonRev = null;
+    }
     // Estimator bonuses: Won records the payout; leaving Won withdraws it.
     if (status === "won") {
       const secs = (doc.spec as { sections?: SpecSection[] } | undefined)?.sections;
@@ -2136,6 +2365,12 @@ export async function setStatus(
   // the stamp, though swallowed here, leaves the outer Postgres transaction
   // aborted, so the caller's next statement fails instead of committing.
   if (out && sentCut.value) await copySentPdfSafely(id);
+  // #352 review I1: every revise (the Estimator's status menu, the Quotes hub, a stage move, a bid addendum, a
+  // portal refresh) re-renders the PDF, so Send waits for a file that prints the next Rev — a resend with no edits
+  // can never carry the previous send's file. Outside a request it is only marked stale (Send still waits).
+  // #355 review I2: a reopen that put the won version back changed the document — on won → sent too, where the
+  // copy above found no current file — so it re-renders and the generator settles the new sent revision's PDF.
+  if (out && (revised.value || reopened.value)) await scheduleRevisePdfSafely(id);
   // #282 phase 2: the Rewards ledger follows every real transition — earn +
   // redeem on won, reverse + unredeem on leaving won. Never for an imported
   // row (historical-import records history, it is not a sale made here), and
@@ -2356,6 +2591,17 @@ export async function setPackagePeakHeader(id: string, on: boolean | null): Prom
   });
 }
 
+/** #348 slice 2a — the ONLY writer of `Quote.bid`. `mutate` gets the current bid (EMPTY_BID when none) and
+ *  returns the next one; runs under the row lock. `bid` is content (2b-i), so a change stamps `contentChangedAt`
+ *  (patchQuote) and the caller re-renders the PDF (scheduleQuotePdf). It does NOT bump `updatedAt` — no version
+ *  bump, so an open composer, an approval or an in-flight Send's version check isn't staled (the
+ *  setPackagePeakHeader precedent). */
+export async function patchQuoteBid(id: string, mutate: (bid: QuoteBid) => QuoteBid): Promise<Quote | null> {
+  return patchQuote(id, (doc) => {
+    doc.bid = mutate(doc.bid ? { ...doc.bid, addenda: [...doc.bid.addenda] } : { ...EMPTY_BID, addenda: [] });
+  });
+}
+
 /**
  * #333 review (B, C, D, G) — the ONLY writer of `Quote.packageSelection` after
  * create. `raw` is untrusted: checkSelectionPatch ignores null / non-object
@@ -2365,8 +2611,10 @@ export async function setPackagePeakHeader(id: string, on: boolean | null): Prom
  * the exclusions. `followRenames` moves left-out SKUs onto renamed parts
  * (catalog-renames.ts; passed in, so this store imports no other store).
  * Never touches the revision clock: the selection is not content, so a write
- * never stales the PDF, an approval, or an in-flight Send's version check —
- * the setPackagePeakHeader precedent.
+ * never stales an approval or an in-flight Send's version check — the
+ * setPackagePeakHeader precedent. Since 2026-10-16 the drawings switch and
+ * left-out datasheets print in the customer PDF (merged drawings, datasheet
+ * links), so its caller re-renders the PDF when they moved (pdfAppendixKey).
  */
 export async function setPackageSelection(
   id: string,

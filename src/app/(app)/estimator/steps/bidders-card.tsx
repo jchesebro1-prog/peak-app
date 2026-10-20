@@ -1,0 +1,371 @@
+"use client";
+
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import CompanySearch from "@/components/parties/company-search";
+import type { BidderVM, BidPanelVM } from "@/lib/parties/bid-vm";
+import { BID_SEND_COPY } from "@/lib/parties/bid-send";
+import { SEND_UI_COPY } from "@/lib/estimate-email/send-ui";
+import {
+  addBidderAction,
+  awardBidAction,
+  bidPanelAction,
+  markSubmittedAction,
+  undoAwardAction,
+  updateBidderAction,
+  type BidPanelResult,
+} from "../bid-actions";
+import { bidderEmailDefaultsAction } from "../bid-send-actions";
+import { BidderRow, BTN } from "./bidder-row";
+import { BidderSendPanel, type BidderEmailDefaults } from "./bidder-send-panel";
+import { useBidderWalk, type BidSendCtx } from "./use-bidder-walk";
+
+export type { BidSendCtx } from "./use-bidder-walk";
+
+const CARD_LABEL = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase" } as const;
+const SR_ONLY: CSSProperties = { position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap", border: 0 };
+const FIELD: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12, padding: "4px 6px", border: "1px solid #dcdfe5", borderRadius: 6, background: "#fff" };
+
+/**
+ * #348 slice 2a — the Send & track step's Bidders card: the GCs / ECs this estimate goes to, each with how it is
+ * submitted, whether the current revision went out, and Award / Undo. The owner stays the customer. Loads on
+ * mount and when `refreshKey` changes; every mutation replaces the panel from the action's own result.
+ */
+export function BiddersCard({ quoteId, refreshKey, sendCtx }: { quoteId: string; refreshKey: number; sendCtx: BidSendCtx }) {
+  const [panel, setPanel] = useState<BidPanelVM | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  // Button-driven mutations count toward the card-wide `busy`; blur-saves only lock their own input.
+  const [pending, setPending] = useState(0);
+  const [savingFields, setSavingFields] = useState<string[]>([]);
+  // #348 2b-ii — the email panel's targets (null = closed), its defaults (loaded once per mount) and the walk.
+  const [target, setTarget] = useState<{ ids: string[]; retryUnknown: boolean } | null>(null);
+  const [defaults, setDefaults] = useState<BidderEmailDefaults | null>(null);
+  const [defaultsErr, setDefaultsErr] = useState<string | null>(null);
+  const defaultsAsked = useRef(false);
+  // Each walk result replaces the panel; the walk's end bumps `refreshKey` (onSent), so a fresh load lands last.
+  const { progress, walkMsg, clearWalkMsg, walking, walk, stop } = useBidderWalk(quoteId, sendCtx, { panel: setPanel });
+  const busy = pending > 0 || walking;
+  const [adding, setAdding] = useState(false);
+  const [role, setRole] = useState<"gc" | "ec">("gc");
+  const [via, setVia] = useState<"email" | "website">("email");
+  const [company, setCompany] = useState<{ id: string; name: string } | null>(null);
+
+  // One counter for the load and every mutation: only the newest request may write the panel / error.
+  const reqRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // "Try again" after a failed first load bumps this to re-run the load effect.
+  const [retryKey, setRetryKey] = useState(0);
+  useEffect(() => {
+    const id = ++reqRef.current;
+    const isLatest = () => mountedRef.current && id === reqRef.current;
+    bidPanelAction(quoteId).then(
+      (r) => {
+        if (!isLatest()) return;
+        if (r.ok) {
+          setPanel(r.panel);
+          setErr(null);
+        } else setErr(r.error);
+      },
+      () => {
+        if (isLatest()) setErr("Couldn't load the bidders. Try again.");
+      }
+    );
+  }, [quoteId, refreshKey, retryKey]);
+
+  // #348 (Jeff 2026-10-15): a Bid chip save can move the estimate back to Draft (an addendum after a send) — reload
+  // so the plan offers "Send revision to all bidders". Only the chip's own event; this card's events come from itself.
+  useEffect(() => {
+    const onChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ quoteId?: string; source?: string }>).detail;
+      if (detail?.quoteId === quoteId && detail.source === "chip") setRetryKey((k) => k + 1);
+    };
+    window.addEventListener("peak:bid-changed", onChanged);
+    return () => window.removeEventListener("peak:bid-changed", onChanged);
+  }, [quoteId]);
+
+  /** `field` marks a blur-save (locks just that input); without it the whole card is busy. */
+  async function run(call: () => Promise<BidPanelResult>, field?: string): Promise<boolean> {
+    const id = ++reqRef.current;
+    const isLatest = () => mountedRef.current && id === reqRef.current;
+    if (field) setSavingFields((f) => [...f, field]);
+    else setPending((n) => n + 1);
+    setErr(null);
+    setNote(null);
+    clearWalkMsg();
+    let ok = false;
+    try {
+      const r = await call();
+      // Tell the header's Bid chip (same window) to reload its label.
+      if (r.ok) window.dispatchEvent(new CustomEvent("peak:bid-changed", { detail: { quoteId } }));
+      if (isLatest()) {
+        if (r.ok) {
+          setPanel(r.panel);
+          setNote(r.note ?? null);
+          ok = true;
+        } else setErr(r.error);
+      } else ok = r.ok;
+    } catch {
+      if (isLatest()) setErr("That didn't save. Try again.");
+    } finally {
+      if (mountedRef.current) {
+        if (field) setSavingFields((f) => {
+            const i = f.indexOf(field);
+            return i < 0 ? f : [...f.slice(0, i), ...f.slice(i + 1)];
+          });
+        else setPending((n) => n - 1);
+      }
+    }
+    return ok;
+  }
+
+  const resetAdd = () => {
+    setAdding(false);
+    setCompany(null);
+    setVia("email");
+    setRole("gc");
+  };
+  const add = (input: { companyId: string; contactId?: string | null; role: "gc" | "ec" }) =>
+    run(() => addBidderAction(quoteId, { ...input, submitVia: via })).then((ok) => ok && resetAdd());
+
+  const onSubmitted = (b: BidderVM) => {
+    const conf = window.prompt(`Confirmation # for ${b.companyName} (optional)`, "");
+    if (conf === null) return;
+    void run(() => markSubmittedAction(b.id, conf));
+  };
+  const onAward = (b: BidderVM) => {
+    if (!panel) return;
+    const owner = panel.ownerName || "the owner";
+    if (!window.confirm(`Award this estimate to ${b.companyName}? The other pending bidders become 'Lost the award'. The customer stays ${owner}.`)) return;
+    void run(() => awardBidAction(quoteId, b.id));
+  };
+
+  function openSend(ids: string[], retryUnknown = false) {
+    setTarget({ ids, retryUnknown });
+    setErr(null);
+    setNote(null);
+    clearWalkMsg();
+    if (defaultsAsked.current) return;
+    defaultsAsked.current = true;
+    bidderEmailDefaultsAction(quoteId).then(
+      (r) => {
+        if (!mountedRef.current) return;
+        if (r.ok) {
+          setDefaults({ subject: r.subject, body: r.body, gmailConnected: r.gmailConnected, fromAddress: r.fromAddress });
+          setDefaultsErr(null);
+        } else {
+          defaultsAsked.current = false; // the next open tries again
+          setDefaultsErr(r.error);
+        }
+      },
+      () => {
+        defaultsAsked.current = false;
+        if (mountedRef.current) setDefaultsErr(SEND_UI_COPY.failed);
+      }
+    );
+  }
+  const onSend = (b: BidderVM) => {
+    if (b.failedUnknown) {
+      if (!window.confirm(BID_SEND_COPY.unknownConfirm(b.companyName))) return;
+      openSend([b.id], true);
+    } else openSend([b.id]);
+  };
+  const targeted = target && panel ? panel.bidders.filter((b) => target.ids.includes(b.id)) : [];
+
+  const edit = !!panel?.canEdit;
+  const addendaText = panel?.addenda.length ? `Addenda: ${panel.addenda.map((a) => a.no).join(", ")}` : "";
+  const errLine = err && (
+    <div role="alert" style={{ marginTop: 8, fontSize: 12, color: "#8a2f22" }}>
+      {err}
+    </div>
+  );
+  // #348 follow-up (Jeff 2026-10-15): why the owner sees no prices — read-only, and it stays after the bidders go.
+  const scopeOnlyLine = panel?.scopeOnly ? <div style={{ marginTop: 8, fontSize: 11.5, color: "#8c919c" }}>{BID_SEND_COPY.scopeOnlyNote}</div> : null;
+  // No bidders and not adding one: a compact one-line card instead of the full empty block.
+  if (panel && panel.bidders.length === 0 && !adding) {
+    return (
+      <div>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+          <div style={CARD_LABEL}>Bidders</div>
+          <span style={{ fontSize: 12, color: "#5b616e" }}>Not a bid</span>
+          {edit && !panel.awardedPartyId && (
+            <>
+              <span aria-hidden style={{ fontSize: 12, color: "#aab0bb" }}>·</span>
+              <button type="button" disabled={busy} onClick={() => setAdding(true)} style={BTN}>
+                + Add bidder
+              </button>
+            </>
+          )}
+        </div>
+        {scopeOnlyLine}
+        {errLine}
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 10 }}>
+        <div style={CARD_LABEL}>Bidders{panel ? ` · ${panel.bidders.length}` : ""}</div>
+        {panel?.dueText && <span style={{ fontSize: 11.5, color: "#5b616e" }}>Due {panel.dueText}</span>}
+        {addendaText && <span style={{ fontSize: 10.5, fontWeight: 600, borderRadius: 20, padding: "2px 8px", background: "#f1f2f5", color: "#5b616e" }}>{addendaText}</span>}
+        {panel?.plan.label && panel.canSend && !walking && (
+          <button type="button" disabled={busy} onClick={() => openSend(panel.plan.ids)} style={{ ...BTN, background: "var(--accent)", color: "#fff" }}>
+            {panel.plan.label}
+          </button>
+        )}
+        <span aria-live="polite" style={progress ? { fontSize: 12, fontWeight: 600, color: "#16181d" } : SR_ONLY}>
+          {progress ? (progress.i === 0 ? BID_SEND_COPY.preparing : BID_SEND_COPY.progress(progress.i, progress.n)) : ""}
+        </span>
+        {progress && (
+          <button type="button" aria-label={BID_SEND_COPY.stopLabel} onClick={stop} style={BTN}>
+            {BID_SEND_COPY.stop}
+          </button>
+        )}
+        {edit && panel?.canUndo && (
+          <button type="button" disabled={busy} onClick={() => void run(() => undoAwardAction(quoteId))} style={{ ...BTN, marginLeft: "auto" }}>
+            Undo award
+          </button>
+        )}
+      </div>
+      {/* #348 (Jeff 2026-10-15): the Bid chip now moves a sent estimate back to Draft when an addendum is added, so this
+          shows only as a fallback — a sent estimate whose addenda changed by another path (addendaAfterSend is [] off sent). */}
+      {!!panel?.addendaAfterSend.length && (
+        <div style={{ marginBottom: 10, fontSize: 12, fontWeight: 600, color: "#9a6a00" }}>{BID_SEND_COPY.addendumHint(panel.addendaAfterSend)}</div>
+      )}
+      {panel?.scopeOnly && <div style={{ marginBottom: 10, fontSize: 11.5, color: "#8c919c" }}>{BID_SEND_COPY.scopeOnlyNote}</div>}
+      {!panel && !err && <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Loading…</div>}
+      {!panel && err && (
+        <button
+          type="button"
+          onClick={() => {
+            setErr(null);
+            setRetryKey((k) => k + 1);
+          }}
+          style={BTN}
+        >
+          Try again
+        </button>
+      )}
+      {panel && panel.bidders.length === 0 && <div style={{ fontSize: 12, color: "#5b616e" }}>Not a bid. Add the GCs or ECs this estimate goes to.</div>}
+      {panel && panel.bidders.length > 0 && (
+        <ul role="list" style={{ margin: 0, padding: 0, display: "grid", gap: 8 }}>
+          {panel.bidders.map((b) => (
+            <BidderRow
+              key={b.id}
+              b={b}
+              panel={panel}
+              busy={busy}
+              walking={walking}
+              savingFields={savingFields}
+              onPatch={(id, patch, field) => void run(() => updateBidderAction(id, patch), field ? `${id}:${field}` : undefined)}
+              onSubmitted={onSubmitted}
+              onAward={onAward}
+              onSend={onSend}
+            />
+          ))}
+        </ul>
+      )}
+      {target && panel && (
+        <div style={{ marginTop: 10 }}>
+          <BidderSendPanel
+            names={targeted.map((b) => b.companyName)}
+            revisedSubject={targeted.find((b) => b.revisedSubject)?.revisedSubject ?? ""}
+            defaults={defaults}
+            loadError={defaultsErr}
+            disabled={busy}
+            onCancel={() => setTarget(null)}
+            onSend={(c) => {
+              const t = target;
+              setTarget(null);
+              void walk(t.ids.filter((id) => targeted.some((b) => b.id === id)), c, { retryUnknown: t.retryUnknown });
+            }}
+          />
+        </div>
+      )}
+      {edit && panel && !panel.awardedPartyId && (
+        <div style={{ marginTop: 10 }}>
+          {!adding ? (
+            <button type="button" disabled={busy} onClick={() => setAdding(true)} style={BTN}>
+              + Add bidder
+            </button>
+          ) : (
+            <div style={{ display: "grid", gap: 8, border: "1px solid #ececf0", borderRadius: 9, padding: 10 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                <label style={{ fontSize: 11.5, color: "#5b616e" }}>
+                  Role{" "}
+                  <select aria-label="Bidder role" value={role} disabled={busy} onChange={(e) => setRole(e.target.value as "gc" | "ec")} style={FIELD}>
+                    <option value="gc">GC</option>
+                    <option value="ec">EC</option>
+                  </select>
+                </label>
+                <label style={{ fontSize: 11.5, color: "#5b616e" }}>
+                  Submit via{" "}
+                  <select aria-label="New bidder submit via" value={via} disabled={busy} onChange={(e) => setVia(e.target.value as "email" | "website")} style={FIELD}>
+                    <option value="email">Email</option>
+                    <option value="website">Their bid website</option>
+                  </select>
+                </label>
+              </div>
+              {panel.candidates.filter((c) => c.role === role).length > 0 && (
+                <div style={{ display: "grid", gap: 4 }}>
+                  <div style={{ fontSize: 11.5, color: "#5b616e" }}>From the lead</div>
+                  {panel.candidates
+                    .filter((c) => c.role === role)
+                    .map((c) => (
+                      <button key={`${c.role}:${c.companyId}`} type="button" disabled={busy} onClick={() => void add({ companyId: c.companyId, contactId: c.contactId, role: c.role })} style={{ ...BTN, textAlign: "left" }}>
+                        {c.companyName}
+                      </button>
+                    ))}
+                </div>
+              )}
+              <div style={{ display: "grid", gap: 4, fontSize: 11.5, color: "#5b616e" }}>
+                <span>Or search companies</span>
+                {company ? (
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 13, color: "#16181d" }}>{company.name}</span>
+                    <button type="button" disabled={busy} onClick={() => setCompany(null)} style={BTN}>
+                      Change
+                    </button>
+                  </div>
+                ) : (
+                  <CompanySearch placeholder="Search companies to add as a bidder" disabled={busy} onPick={setCompany} />
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" disabled={busy || !company} onClick={() => company && void add({ companyId: company.id, role })} style={{ ...BTN, background: "var(--accent)", color: "#fff" }}>
+                  {busy ? "Adding…" : "Add"}
+                </button>
+                <button type="button" disabled={busy} onClick={resetAdd} style={BTN}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {note && !err && (
+        <div role="status" style={{ marginTop: 8, fontSize: 12, color: "#5b616e" }}>
+          {note}
+        </div>
+      )}
+      {walkMsg && (
+        <div
+          role={walkMsg.tone === "error" ? "alert" : "status"}
+          style={{ marginTop: 8, fontSize: 12, color: walkMsg.tone === "error" ? "#8a2f22" : "#5b616e", display: "flex", gap: 8, alignItems: "baseline" }}
+        >
+          <span>{walkMsg.text}</span>
+          <button type="button" aria-label="Dismiss message" onClick={clearWalkMsg} style={{ fontFamily: "var(--font-ui)", fontSize: 11.5, fontWeight: 600, background: "none", border: "none", padding: 0, color: "inherit", cursor: "pointer", textDecoration: "underline" }}>
+            Dismiss
+          </button>
+        </div>
+      )}
+      {errLine}
+    </div>
+  );
+}

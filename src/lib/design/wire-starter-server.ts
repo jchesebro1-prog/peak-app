@@ -1,6 +1,6 @@
 import { list as listCatalog, listDeleted as listDeletedCatalog, getMany as getCatalogParts, insertIfAbsent, type CatalogPart } from "@/lib/stores/catalog";
 import { ensureGridSymbolsForMany } from "@/lib/stores/grid-catalog";
-import { getSettingsStrict, setSettings } from "@/lib/settings";
+import { settingsFrom, updateSettings } from "@/lib/settings";
 import { isPerLengthUnit } from "@/lib/design/grid-bom";
 import { cleanCableOd } from "@/lib/design/conduit-riser/cable-od";
 import { findExistingCable, linkStarterWireTypes, WIRE_STARTER, WIRE_STARTER_LINKS, type WireStarterCable } from "@/lib/design/wire-starter";
@@ -111,9 +111,24 @@ export async function loadWireStarter(
     const s = linkSku.get(l.cableSku);
     return !!s && liveSkus.has(s);
   });
-  const settings = await getSettingsStrict();
-  const { wireTypes, linked } = linkStarterWireTypes(settings.wireTypes, (s) => linkSku.get(s) ?? s, linkable);
-  if (linked > 0) await setSettings({ wireTypes });
+  const linked = await linkStoredWireTypes((s) => linkSku.get(s) ?? s, linkable);
 
   return { partsAdded, partsExisting, heldDeleted: heldDeletedNames.length, heldDeletedNames, libraryAdded, wireTypesLinked: linked };
+}
+
+/** #343 — link the starter cables onto the STORED wire-type list under the
+ *  settings row lock, so a Wire types save landing meanwhile is linked on top
+ *  of, never overwritten by the list read before. Returns how many wire types
+ *  changed (nothing is written when none did). */
+export async function linkStoredWireTypes(
+  skuFor: (starterSku: string) => string,
+  links: Parameters<typeof linkStarterWireTypes>[2]
+): Promise<number> {
+  let linked = 0;
+  await updateSettings((cur) => {
+    const r = linkStarterWireTypes(settingsFrom(cur).wireTypes, skuFor, links);
+    linked = r.linked;
+    return r.linked > 0 ? { wireTypes: r.wireTypes } : null;
+  });
+  return linked;
 }

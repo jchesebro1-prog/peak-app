@@ -83,6 +83,7 @@ import FindingsPanel, { FINDINGS_CSS, PromptChip } from "./findings-panel";
 import { FailedPhotos, PHOTO_CSS, PhotoButton, PhotoSlots, PhotoThumbs } from "./photo-button";
 import Question from "./question";
 import ScopeRail from "./scope-rail";
+import { SECTION_RAIL_CSS } from "@/components/section-rail/section-rail";
 import SyncBanners, { type OutboxError, type Refusal } from "./sync-banners";
 
 const SAVE_DEBOUNCE_MS = 600;
@@ -90,13 +91,8 @@ const SAVE_DEBOUNCE_MS = 600;
 const PHOTO_SET_MODULE = "core.photo_set";
 
 const CSS = `
+  ${SECTION_RAIL_CSS}
   .as-layout { display: grid; grid-template-columns: 250px minmax(0,1fr); gap: 18px; align-items: start; }
-  .as-rail { padding: 6px; position: sticky; top: 12px; }
-  .as-rail-sheet { display: none; }
-  .as-rail-row { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; background: none; border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; font: inherit; color: #3a3f4a; }
-  .as-rail-row:hover { background: #f6f7f9; }
-  .as-rail-row.on { background: #f1f2f5; font-weight: 600; }
-  .as-rail-title { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .as-scope-edit { padding: 4px 10px 10px; display: grid; gap: 6px; }
   .as-scope-opt { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: #3a3f4a; }
   .as-mono-sm { font-family: var(--font-mono); font-size: 11px; color: #8c919c; font-weight: 400; }
@@ -147,8 +143,6 @@ const CSS = `
   .as-hidden-row { font-size: 12.5px; color: #9aa0ab; padding: 5px 0; border-top: 1px solid #f2f3f6; }
   @media (max-width: 759px) {
     .as-layout { grid-template-columns: minmax(0,1fr); }
-    .as-rail { display: none; }
-    .as-rail-sheet { display: block; position: sticky; top: 0; z-index: 15; background: var(--bg, #f7f8fa); padding: 6px 0 10px; }
     .as-contact { grid-template-columns: minmax(0,1fr); }
     .as-module { padding: 14px 14px; }
   }

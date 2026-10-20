@@ -201,6 +201,20 @@ export type ManualFee =
     };
 
 /**
+ * Jeff 2026-10-15 #34 (MASTER-QUESTIONS E7) — the phases a hand-added consulting project starts with, from the
+ * "+ New consulting project" checklist (every phase ticked by default). Posted names are kept only when they are on
+ * the Settings phase menu, in the MENU's order. `undefined` (a client that predates the checklist) = the whole menu,
+ * as before; an empty pick = null (the action refuses it: a project needs at least one phase).
+ */
+export function pickManualPhases(menu: readonly string[], posted: unknown): string[] | null {
+  if (posted === undefined) return [...menu];
+  if (!Array.isArray(posted)) return null;
+  const want = new Set(posted.filter((x): x is string => typeof x === "string").map((x) => x.trim().toLowerCase()));
+  const picked = menu.filter((m) => want.has(m.trim().toLowerCase()));
+  return picked.length ? picked : null;
+}
+
+/**
  * What a manual engagement's milestones seed from — the pure half of
  * createManualEngagement, mirroring milestoneSeeds above. A fixed fee becomes
  * ONE unscheduled "Fee" milestone carrying the amount; a schedule keeps its

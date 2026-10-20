@@ -202,7 +202,7 @@ export default function AssessmentReport(p: AssessmentReportProps) {
 
         <Section n={2}>
           <ul style={{ margin: "4pt 0", paddingLeft: "16pt" }}>
-            {m.scopesRun.map((s) => <li key={s.title}>{s.title}{s.depth ? ` — ${s.depth.toLowerCase()} depth` : ""}</li>)}
+            {m.scopesRun.map((s) => <li key={s.title}>{s.title}{s.depth ? ` — ${s.depth.toLowerCase()}` : ""}</li>)}
           </ul>
           <p>{m.standingLine}</p>
           <h4>Areas not accessible</h4>

@@ -58,7 +58,7 @@ export async function emailAssessmentReportAction(id: string): Promise<EmailRepo
   }
   const thread = await saveDraft({
     mailbox: "personal",
-    mailboxUser: user.name,
+    owner: { id: user.id, name: user.name }, // #349 — owned by identity
     customerId: a.customerId,
     customer,
     contactName: contact.name ?? "",
@@ -66,7 +66,6 @@ export async function emailAssessmentReportAction(id: string): Promise<EmailRepo
     subject: copy.subject,
     body: copy.body,
     attachments: [attachment],
-    me: user.name,
   });
   redirect(`/inbox?draft=${encodeURIComponent(thread.id)}`);
 }

@@ -40,6 +40,8 @@ function roleNeed(role: TrackRole): string {
   if (role === "pipeClamp") return "Optional — batten mounting";
   if (role === "lapClamp") return "Optional — bi-parting on a batten";
   if (role === "deadPulleyOneWay") return "Optional — one-way";
+  if (role === "walkAlongEndStop") return "Optional — walk-along";
+  if (role === "centerPipeSupport") return "Optional — batten, needs Center supports every";
   return "";
 }
 
@@ -59,6 +61,9 @@ type Draft = {
   minRadiusFt: string;
   carrierSpacingIn: string;
   hangerSpacingFt: string;
+  ceilingSpacingFt: string;
+  battenSpacingFt: string;
+  centerSupportEveryFt: string;
   overlapFt: string;
   parts: Partial<Record<TrackRole, string>>;
   active: boolean;
@@ -78,6 +83,9 @@ function draftOf(s: TrackSeries | null): Draft {
       minRadiusFt: "",
       carrierSpacingIn: String(NEW_SERIES_DEFAULTS.carrierSpacingIn),
       hangerSpacingFt: String(NEW_SERIES_DEFAULTS.hangerSpacingFt),
+      ceilingSpacingFt: "",
+      battenSpacingFt: "",
+      centerSupportEveryFt: "",
       overlapFt: String(NEW_SERIES_DEFAULTS.overlapFt),
       parts: {},
       active: false,
@@ -95,6 +103,9 @@ function draftOf(s: TrackSeries | null): Draft {
     minRadiusFt: str(s.minRadiusFt),
     carrierSpacingIn: String(s.carrierSpacingIn),
     hangerSpacingFt: String(s.hangerSpacingFt),
+    ceilingSpacingFt: str(s.ceilingSpacingFt),
+    battenSpacingFt: str(s.battenSpacingFt),
+    centerSupportEveryFt: str(s.centerSupportEveryFt),
     overlapFt: String(s.overlapFt),
     parts,
     active: s.active,
@@ -177,7 +188,10 @@ export default function TrackSeriesClient({ series, parts }: { series: TrackSeri
               s.curvedSectionFt ? `curved section ${s.curvedSectionFt}'` : "no curved track",
               s.minRadiusFt ? `min radius ${s.minRadiusFt}'` : "",
               `carriers every ${s.carrierSpacingIn}"`,
-              `clamps/hangers every ${s.hangerSpacingFt}'`,
+              s.ceilingSpacingFt || s.battenSpacingFt
+                ? `clamps every ${s.battenSpacingFt || s.hangerSpacingFt}', hangers every ${s.ceilingSpacingFt || s.hangerSpacingFt}'`
+                : `clamps/hangers every ${s.hangerSpacingFt}'`,
+              s.centerSupportEveryFt ? `center supports every ${s.centerSupportEveryFt}'` : "",
               s.overlapFt ? `bi-parting overlap ${s.overlapFt}'` : "",
               s.lineAllowanceFt ? `line +${s.lineAllowanceFt}' tie-off` : "",
             ]
@@ -271,6 +285,9 @@ function SeriesEditor({ series, parts, onClose }: { series: TrackSeries | null; 
     minRadiusFt: draft.minRadiusFt,
     carrierSpacingIn: draft.carrierSpacingIn,
     hangerSpacingFt: draft.hangerSpacingFt,
+    ceilingSpacingFt: draft.ceilingSpacingFt,
+    battenSpacingFt: draft.battenSpacingFt,
+    centerSupportEveryFt: draft.centerSupportEveryFt,
     overlapFt: draft.overlapFt,
     parts: Object.fromEntries(Object.entries(draft.parts).filter(([r, sku]) => r !== "track" && sku).map(([r, sku]) => [r, { sku }])),
   };
@@ -291,7 +308,12 @@ function SeriesEditor({ series, parts, onClose }: { series: TrackSeries | null; 
       }
     });
 
-  const field = (label: string, key: "lineAllowanceFt" | "curvedSectionFt" | "minRadiusFt" | "carrierSpacingIn" | "hangerSpacingFt" | "overlapFt", unit: string, placeholder = "") => (
+  const field = (
+    label: string,
+    key: "lineAllowanceFt" | "curvedSectionFt" | "minRadiusFt" | "carrierSpacingIn" | "hangerSpacingFt" | "ceilingSpacingFt" | "battenSpacingFt" | "centerSupportEveryFt" | "overlapFt",
+    unit: string,
+    placeholder = ""
+  ) => (
     <label style={{ display: "block" }}>
       <div style={LABEL}>{label}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -318,6 +340,9 @@ function SeriesEditor({ series, parts, onClose }: { series: TrackSeries | null; 
         {field("Min radius", "minRadiusFt", "ft")}
         {field("Carrier spacing", "carrierSpacingIn", "in")}
         {field("Clamp / hanger spacing", "hangerSpacingFt", "ft")}
+        {field("Batten clamp spacing", "battenSpacingFt", "ft", "blank = above")}
+        {field("Ceiling hanger spacing", "ceilingSpacingFt", "ft", "blank = above")}
+        {field("Center supports every", "centerSupportEveryFt", "ft", "blank = none")}
         {field("Bi-parting overlap", "overlapFt", "ft")}
         {field("Line tie-off allowance", "lineAllowanceFt", "ft", "ADC: 10")}
       </div>

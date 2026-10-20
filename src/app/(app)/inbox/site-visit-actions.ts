@@ -5,6 +5,7 @@ import { after } from "next/server";
 import { requireUser } from "@/lib/session";
 import { createVisit } from "@/lib/stores/site-visits";
 import { update as updateThread } from "@/lib/stores/comms";
+import { ownThread } from "@/lib/inbox-thread-guard";
 import { activeUsers } from "@/lib/users";
 import { dispatchVisitInvite } from "@/lib/visit-invite";
 import { cleanAttendees } from "@/lib/visit-plan/people";
@@ -59,9 +60,12 @@ export async function createSiteVisitAction(
   // D76-G: scheduling from an unlinked thread adopts the resolved customer
   // onto the thread first, same as the record pickers do.
   if (input.adoptThreadId) {
+    // #341 — only my own thread adopts the customer (refused before anything is created)
+    if (!(await ownThread(input.adoptThreadId, me))) return { ok: false, error: "Thread not found." };
     await updateThread(input.adoptThreadId, {
       customerId: input.customerId,
       customer: input.customer,
+      linkedBy: "user", // #341 — a person scheduled from it: a deliberate link
     });
   }
 

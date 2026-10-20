@@ -7,6 +7,7 @@ import { withSanitizedSurveyGoals } from "@/lib/estimate-output/goals";
 import {
   get,
   update,
+  updateChecked,
   setStage,
   assign,
   remove,
@@ -14,10 +15,6 @@ import {
   type SurveyStage,
 } from "@/lib/stores/surveys";
 import { create as createQuote } from "@/lib/stores/quotes";
-import { getSettings } from "@/lib/settings";
-import { buildAssessmentSheet } from "@/lib/venue-assessment-sheet";
-import { renderLetterPdf } from "@/lib/pdf";
-import { letterheadJpeg } from "@/lib/renewal-outreach";
 
 /**
  * Survey capture-editor mutations (port of the Survey.dc.html save / stage /
@@ -44,6 +41,7 @@ export type SurveyPatch = Partial<
     | "visitType"
     | "reason"
     | "travelTime"
+    | "travelAutoFilled"
     | "distance"
     | "hasBOM"
     | "hasDrawings"
@@ -67,6 +65,10 @@ export type SurveyPatch = Partial<
     | "measurements"
     | "conditions"
     | "photos"
+    // #344 C5 — per-section photo refs (file slots are sanitized + merged by the store)
+    | "photoRefs"
+    // #344 C6 — sketch pads (file slots and keys are sanitized + merged by the store)
+    | "sketches"
     // Site Intake extension (IDEAS #45)
     | "auditoriumSize"
     | "yearBuilt"
@@ -81,6 +83,13 @@ export type SurveyPatch = Partial<
     | "visitPurpose"
     | "loadingDoorSize"
     | "liftHeight"
+    // #344 B5 — access fields replacing loadingDoorSize / liftNeeded / liftHeight (those keys stay stored)
+    | "loadingDoorType"
+    | "loadingDoorLocation"
+    | "loadingDoorWH"
+    | "liftRequired"
+    | "liftType"
+    | "liftWorkingHeight"
     | "pathToFloor"
     | "workingHours"
     | "blackoutDates"
@@ -94,14 +103,25 @@ export type SurveyPatch = Partial<
     | "lifeSafety"
     | "linesetsEnabled"
     | "linesets"
+    | "linesetQty"
     | "assessmentEnabled"
     | "assessment"
     | "templateRev"
     | "signoff"
     | "leadId"
     | "visitId"
+    | "scope"
+    | "internalTags"
   >
->;
+> & {
+  /** #344 C-final — transport-only: the photo ref / sketch ids this editor has seen. The store deletes only refs and
+   *  sketches listed here (a second device's photos survive this editor's save) and never stores the lists. */
+  photoRefIdsSeen?: string[];
+  sketchIdsSeen?: string[];
+  /** #344 C-final C — transport-only: this editor mount's id + its save run's seq (the outbox copy carries the same).
+   *  The store skips a stamped save no newer than the last one it applied from that editor and never stores it. */
+  saveStamp?: { editor: string; seq: number };
+};
 
 /** Persist the whole editor draft (Save survey / Save changes). */
 export async function saveSurvey(id: string, patch: SurveyPatch): Promise<void> {
@@ -112,26 +132,6 @@ export async function saveSurvey(id: string, patch: SurveyPatch): Promise<void> 
   // #301 (R4): Client goals are trimmed and capped (≤ 1,000) on the way in.
   await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);
   revalidatePath("/", "layout");
-}
-
-/** Render the current editor draft without forcing a save first. */
-export async function printSurveySheet(id: string, patch: SurveyPatch) {
-  await requireUser();
-  const existing = id ? await get(id) : null;
-  if (!existing) return { ok: false as const, error: "Assessment not found." };
-  const settings = await getSettings();
-  const header = await letterheadJpeg(settings);
-  const doc = buildAssessmentSheet({ ...existing, ...patch });
-  doc.companyName = settings.companyName;
-  doc.accent = settings.accent;
-  doc.headerJpeg = header.jpeg;
-  doc.headerFull = header.full;
-  const pdf = renderLetterPdf(doc);
-  return {
-    ok: true as const,
-    filename: `${id}-venue-assessment.pdf`,
-    base64: pdf.toString("base64"),
-  };
 }
 
 /**
@@ -150,7 +150,14 @@ export async function advanceSurveyStage(
   const existing = await get(id);
   if (!existing) return;
   // #301 (R4): Client goals are trimmed and capped (≤ 1,000) on the way in.
-  await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);
+  const res = await updateChecked(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);
+  // #344 C-final C/D: a stale stamped save — a newer save from this editor that wrote fields already landed (and, while
+  // this move is unconfirmed, every such save carries its stage too) — moves no stage either. A move that only
+  // file-only saves came after is NOT stale: its stage, assignment and fields apply (`fields` verdict, applied).
+  if (!res.applied) {
+    revalidatePath("/", "layout");
+    return;
+  }
   if (target === "scheduled") {
     await assign(id, patch.assignedTo ?? existing.assignedTo, patch.scheduledDate ?? existing.scheduledDate);
   } else {

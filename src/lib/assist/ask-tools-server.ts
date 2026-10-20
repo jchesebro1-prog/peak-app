@@ -2,7 +2,8 @@
  * Ask AI read tools (spec 2026-10-13-ask-ai-design.md §3) — the eleven
  * read-only lookups the model may call, each run as the asking user under
  * that user's access rule:
- *  - thread: `loadThreadFor` (a live email thread in the user's own mailbox);
+ *  - thread: `loadThreadReadable` (#341 — a live email thread the user may
+ *    see: their own, assigned to them, or linked to an entity; canSeeThread);
  *  - meeting: `canSeeMeeting` (the reader's rule) — never the transcript;
  *  - my_tasks / task: the user's own tasks and assignments;
  *  - everything else: any signed-in team member (the record pages are
@@ -31,7 +32,8 @@ import { allAssignments, getAssignment, type Assignment } from "@/lib/stores/ass
 import { get as getPart, type CatalogPart } from "@/lib/stores/catalog";
 import { getMeeting } from "@/lib/stores/meetings";
 import { resolveQuoteInput } from "@/lib/stores/estimate-numbers";
-import { visibleTo, type CommThread } from "@/lib/stores/comms";
+import { canSeeThread, canSeeThreadCond, visibleTo, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import type { NoteRecord } from "@/lib/stores/notes";
 import { getSite, sitesForCompany } from "@/lib/identity/sites";
 import { displayName, getContact } from "@/lib/identity/contacts";
@@ -47,7 +49,7 @@ import { globalSearch, type Group } from "@/lib/search/global-search";
 import { customerLines, lineExtSellOf, systemSellTotal } from "@/app/(app)/estimator/pricing";
 import { rankCatalogParts } from "@/app/(app)/estimator/catalog-rank";
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
-import { loadThreadFor } from "./thread-access";
+import { loadThreadReadable } from "./thread-access";
 import { toJsonSchema } from "./run";
 import { chicagoToday } from "./config";
 import { hrefFor, type RefHrefHint, type RefKind } from "./features/ask-refs";
@@ -62,7 +64,17 @@ import { surveyText } from "./features/suggest-sources";
 export type AskUser = { id: string; name: string };
 
 /** One record a tool exposed: becomes a `ref` event (the panel's link whitelist). */
-export type AskToolRef = { kind: RefKind; id: string; title: string; href: string };
+export type AskToolRef = {
+  kind: RefKind;
+  id: string;
+  title: string;
+  href: string;
+  /** #341 — a thread outside the asker's own mailbox (readable because it is
+   *  linked or assigned): Ask may show and quote it, but a task card never
+   *  links it (the Inbox's own-only task rule). Server-side only — never
+   *  emitted to the panel. */
+  readOnly?: true;
+};
 
 export type ReadToolResult = {
   /** The wrapped, capped tool result the model reads. */
@@ -154,9 +166,9 @@ export const ASK_READ_TOOLS: readonly ReadToolDef[] = [
   def("get_venue", "One venue: its facts, owning company, latest flame-test / inspection / repair records and its quotes.", IdInput),
   def("get_quote", "One quote by internal id or estimate number: number, name, type, status, customer, lead estimator, dates, total (sell) and each system's lines (sku, description, qty, line sell).", QuoteIdInput),
   def("list_quotes", "Quotes filtered by company, status, type and recency, newest first: number, name, status, total, date.", ListQuotesInput),
-  def("get_lead", "One lead / opportunity: its fields, first-response SLA and the subjects of the user's email threads linked to it.", IdInput),
+  def("get_lead", "One lead / opportunity: its fields, first-response SLA and the subjects of the email threads linked to it (any teammate's — a link makes a thread shared).", IdInput),
   def("get_project", "One install project or order: stage, dates, crew, procurement summary and open tasks.", IdInput),
-  def("get_thread", "One email thread in the user's own mailbox: subject, participants and the latest messages.", IdInput),
+  def("get_thread", "One email thread the user may see (their own mailbox, assigned to them, or linked to a company, venue, person or record): subject, participants and the latest messages.", IdInput),
   def("get_meeting", "One Krisp meeting the user may see: title, date, attendees, summary, key points and to-dos (never the transcript).", IdInput),
   def("search_catalog", "Search the parts catalog: sku / model, manufacturer, description, unit, cost and list price.", CatalogInput),
   def("my_tasks", "The user's own open tasks and assignments (title, due date, links), soonest first.", NoInput),
@@ -190,6 +202,12 @@ function mkRef(kind: RefKind, id: string, title: string, hint?: RefHrefHint): As
 const quoteTitle = (q: Pick<Quote, "id" | "name"> & Parameters<typeof displayQuoteNumber>[0]) => `${displayQuoteNumber(q)} ${q.name || ""}`.trim();
 const quoteRef = (q: Quote) => mkRef("quote", q.id, quoteTitle(q), { quoteType: q.quoteType ?? null });
 const companyRef = (c: { id: string; name?: string | null }) => mkRef("company", c.id, c.name || c.id);
+/** #341 — a thread ref, flagged readOnly when it isn't in my own mailbox
+ *  (#349 — by identity: `viewer` is mailboxViewer(me)). */
+const threadRef = (th: Pick<CommThread, "id" | "subject" | "mailbox" | "mailboxUser" | "mailboxOwnerId" | "gmailAccountKey">, viewer: MailboxViewer, title?: string): AskToolRef => {
+  const r = mkRef("thread", th.id, title ?? (th.subject || th.id));
+  return visibleTo(th, viewer) ? r : { ...r, readOnly: true };
+};
 
 /** A long list: the first ASK_LIST_CAP rows, then "…N more". */
 function capList(rows: string[], cap = ASK_LIST_CAP): string[] {
@@ -439,21 +457,22 @@ async function loadLead(id: string, me: AskUser): Promise<Loaded | null> {
   if (!l) return null;
   const refs: AskToolRef[] = [];
   const self = mkRef("lead", l.id, leadTitle(l));
-  const [cust, converted, quote, mine] = await Promise.all([
+  const viewer = await mailboxViewer(me);
+  const [cust, converted, quote, leadThreads] = await Promise.all([
     companyLink(l.customerId),
     l.convertedCustomerId && l.convertedCustomerId !== l.customerId ? companyLink(l.convertedCustomerId) : Promise.resolve(null),
     l.convertedQuoteId ? getQuote(l.convertedQuoteId) : Promise.resolve(null),
-    // my own mailbox's threads that mention the lead id (in SQL); the exact link is checked below
-    searchDocs<CommThread>("comms", l.id, 200, { fieldEquals: { mailbox: "personal", mailboxUser: me.name, channel: "email" } }),
+    // #341 — email threads I may see that mention the lead id (in SQL); the exact link is checked below
+    searchDocs<CommThread>("comms", l.id, 200, { fieldEquals: { channel: "email" }, where: canSeeThreadCond(viewer) }),
   ]);
   for (const x of [cust, converted]) if (x) refs.push(x.ref);
   if (quote) refs.push(quoteRef(quote));
-  // Only the user's own mailbox: another rep's thread subject is theirs (loadThreadFor's rule).
-  const threads = mine
-    .filter((th) => !th.deleted && th.channel === "email" && visibleTo(th, me.name) && th.link?.type === "lead" && th.link.id === l.id)
+  // #341 — every live email thread linked to this lead (a link makes it shared; canSeeThread re-checks)
+  const threads = leadThreads
+    .filter((th) => th.channel === "email" && canSeeThread(th, viewer) && th.link?.type === "lead" && th.link.id === l.id)
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
     .slice(0, 10);
-  for (const th of threads) refs.push(mkRef("thread", th.id, th.subject || th.id));
+  for (const th of threads) refs.push(threadRef(th, viewer));
   const s = sla(l);
   const emails = new Set<string>();
   pushEmail(emails, l.email);
@@ -478,7 +497,7 @@ async function loadLead(id: string, me: AskUser): Promise<Loaded | null> {
     quote ? `Converted quote: ${tok("quote", quote.id)} ${f(quoteTitle(quote))}` : "",
     `Created: ${day(l.createdAt)} · Last activity: ${day(l.lastActivityAt || l.updatedAt)}`,
     l.message ? `Message:\n${(l.message || "").slice(0, 2000)}` : "",
-    threads.length ? `Your email threads linked to it:\n${threads.map((th) => `- ${tok("thread", th.id)} ${f(th.subject, 200)} — ${day(th.updatedAt)}`).join("\n")}` : "Your email threads linked to it: none",
+    threads.length ? `Email threads linked to it:\n${threads.map((th) => `- ${tok("thread", th.id)} ${f(th.subject, 200)} — ${day(th.updatedAt)}`).join("\n")}` : "Email threads linked to it: none",
   ]);
   return { self, body, refs: [self, ...refs], emails: [...emails] };
 }
@@ -519,10 +538,11 @@ async function loadProject(id: string): Promise<Loaded | null> {
 }
 
 async function loadThread(id: string, me: AskUser): Promise<Loaded | null> {
-  const th = await loadThreadFor(id, me.name);
+  const viewer = await mailboxViewer(me);
+  const th = await loadThreadReadable(id, viewer);
   if (!th) return null;
   const refs: AskToolRef[] = [];
-  const self = mkRef("thread", th.id, th.subject || th.id);
+  const self = threadRef(th, viewer);
   const cust = await companyLink(th.customerId);
   if (cust) refs.push(cust.ref);
   const emails = new Set<string>();
@@ -662,8 +682,10 @@ const SEARCH_GROUP_KIND: Readonly<Record<string, RefKind>> = {
 };
 
 async function runSearch(query: string, me: AskUser): Promise<Loaded> {
-  // threadsOf: only the user's own mailbox reaches the email-thread group, before its cut to 5.
-  const groups: Group[] = await globalSearch(query, me, { threadsOf: me.name });
+  // #341 — globalSearch keeps only the email threads I may see (canSeeThreadCond), before its cut to 5.
+  const groups: Group[] = await globalSearch(query, me, { emailOnly: true });
+  // #349 review — the viewer (a users-table read) once per search, not per hit
+  let viewer: MailboxViewer | null = null;
   const refs: AskToolRef[] = [];
   const blocks: string[] = [];
   for (const g of groups) {
@@ -671,9 +693,11 @@ async function runSearch(query: string, me: AskUser): Promise<Loaded> {
     const rows: string[] = [];
     for (const item of g.items) {
       if (kind === "thread") {
-        // ⌘K lists every mailbox's subjects; Ask reads only the user's own (loadThreadFor).
-        if (!(await loadThreadFor(item.id, me.name))) continue;
-        refs.push(mkRef("thread", item.id, item.title));
+        // the read rule once more, row by row (loadThreadReadable)
+        viewer ??= await mailboxViewer(me);
+        const th = await loadThreadReadable(item.id, viewer);
+        if (!th) continue;
+        refs.push(threadRef(th, viewer, item.title));
       } else if (kind === "quote") {
         const q = await getQuote(item.id);
         if (!q) continue;
@@ -925,8 +949,9 @@ export async function resolveAskRef(kind: RefKind, id: string, me: AskUser): Pro
       return p ? mkRef("project", p.id, p.name || p.id) : null;
     }
     case "thread": {
-      const th = await loadThreadFor(id, me.name);
-      return th ? mkRef("thread", th.id, th.subject || th.id) : null;
+      const viewer = await mailboxViewer(me);
+      const th = await loadThreadReadable(id, viewer);
+      return th ? threadRef(th, viewer) : null;
     }
     case "meeting": {
       const m = await getMeeting(id).catch(() => null);

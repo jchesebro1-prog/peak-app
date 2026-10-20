@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
-import { getSettings, getSettingsStrict, setSettings, type Office } from "@/lib/settings";
+import { getSettings, mergeSettingsObject, removeOffice, setDefaultQuoteOffice, setSettings, upsertOffice, type Office } from "@/lib/settings";
 import {
   geocode as geoGeocode,
   type GeoSearchHit,
@@ -18,9 +18,10 @@ import {
   type UserStatus,
 } from "@/lib/users";
 import { permsFor, ROLES } from "@/lib/team";
-import { assistSettingsOf, cleanApiKey } from "@/lib/assist/config";
+import { ASSIST_FEATURES, cleanApiKey } from "@/lib/assist/config";
 import { clearAssistKey, getAssistEnv, saveAssistKey } from "@/lib/assist/key-store";
 import { pingAnthropicKey } from "@/lib/assist/anthropic";
+import type { AssistFeature } from "@/lib/assist/types";
 import { invalidateOrgContext } from "@/lib/inbox-org/pipeline";
 import { FREEMAIL_DOMAINS } from "@/lib/inbox-org/internal";
 import { removeSenderRule, setOwnDomainOverride } from "@/lib/stores/inbox-org";
@@ -35,17 +36,17 @@ import {
 } from "@/lib/customer-fields";
 import type { DashboardLayout } from "@/lib/dashboard-layout";
 import { savePipelines, moveStageRecords } from "@/lib/pipelines-server";
-import {
-  mergeDocumentCategories,
-  resolveDocumentCategories,
-  type DocumentCategoryInput,
-} from "@/lib/document-categories";
+import type { DocumentCategoryInput } from "@/lib/document-categories";
+import type { SurveyTagInput } from "@/lib/survey-tags";
 import type { ProjectPipeline, QuotePipeline } from "@/lib/pipelines";
-import { mergeVenueTypes, venueTypesFrom, type VenueTypeInput } from "@/lib/venue-types";
+import type { VenueTypeInput } from "@/lib/venue-types";
+import { saveDocumentCategoriesLocked, saveSurveyTagsLocked, saveVenueTypesLocked } from "@/lib/settings-lists";
 import { sanitizeReviewLimits, type ReviewLimits } from "@/lib/review-limits";
 import { countSitesByVenueKind, storedSiteVenueKinds } from "@/lib/identity/sites";
 import { rederiveVenueNamesForTypes } from "@/lib/identity/venue-save";
 import { withTransaction } from "@/db";
+import { foldTeamName, teamNameError } from "@/lib/team-names";
+import { handOverNameOnly, retireNameForNewcomer } from "@/lib/mailbox-names";
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
@@ -89,7 +90,11 @@ export async function addUserAction(input: {
 }) {
   await requirePerm("manage_users");
   const name = (input.name || "").trim();
-  if (!name) return { ok: false as const, error: "Name is required." };
+  // #349 — never blank, never another teammate's name (mailboxes follow identity)
+  const nameError = teamNameError(name, await allUsers());
+  if (nameError) return { ok: false as const, error: nameError };
+  // #349 review — a newcomer inherits no older name-only mail that carries this name
+  await retireNameForNewcomer(name);
   await addUser({
     name,
     email: (input.email || "").trim(),
@@ -125,7 +130,27 @@ export async function updateMemberAction(
 ) {
   await requirePerm("manage_users");
   const clean: Parameters<typeof updateUser>[1] = {};
-  if (patch.name !== undefined && patch.name.trim()) clean.name = patch.name.trim();
+  if (patch.name !== undefined) {
+    // #349 — a rename is refused when blank or another teammate's name; an
+    // unchanged name (even one that is already a duplicate) never blocks the
+    // rest of the edit. "Changed" is the trimmed, whitespace-collapsed value
+    // (a case-only rename saves); the fold is only the duplicate check.
+    const next = patch.name.trim().replace(/\s+/g, " ");
+    if (!next) return { ok: false as const, error: "Name is required." };
+    const current = await getUser(id);
+    const users = await allUsers();
+    const nameError = foldTeamName(next) !== foldTeamName(current?.name) ? teamNameError(next, users, id) : null;
+    if (nameError) return { ok: false as const, error: nameError };
+    if (current && next !== current.name) {
+      clean.name = next;
+      const renameFrom = { id: current.id, name: current.name };
+      // #349 review — BEFORE the rename: the old name's name-only mail is pinned to
+      // this user (their name alone) or to nobody (a shared name), and anything
+      // already carrying the new name is retired — a rename never moves mail
+      await handOverNameOnly(renameFrom, users.map((u) => ({ id: u.id, name: u.name })));
+      await retireNameForNewcomer(next);
+    }
+  }
   if (patch.email !== undefined) clean.email = patch.email.trim();
   if (patch.googleEmail !== undefined) clean.googleEmail = patch.googleEmail.trim() || null;
   if (patch.title !== undefined) clean.title = patch.title.trim() || null;
@@ -506,11 +531,11 @@ export async function saveOfficeAction(input: {
     }
   }
 
-  const settings = await getSettings();
-  const offices = Array.isArray(settings.offices) ? settings.offices.slice() : [];
   const isNew = !input.id;
   const clean: Office = {
-    id: isNew ? "of" + Date.now() : (input.id as string),
+    // #343: a random suffix keeps two locations added in the same
+    // millisecond apart (nothing parses the id).
+    id: isNew ? "of" + Date.now() + Math.random().toString(36).slice(2, 6) : (input.id as string),
     type,
     name,
     street: (input.street || "").trim(),
@@ -525,40 +550,23 @@ export async function saveOfficeAction(input: {
     lng,
     timezone: (input.timezone || "America/Chicago").trim() || "America/Chicago",
   };
-  if (isNew) {
-    if (!offices.some((o) => o.quoteDefault)) clean.quoteDefault = true;
-    offices.push(clean);
-  } else {
-    const i = offices.findIndex((o) => o.id === input.id);
-    if (i >= 0) offices[i] = { ...offices[i], ...clean };
-    else offices.push(clean);
-  }
-  await setSettings({ offices });
+  // #343 — one entry of `offices`, edited under the settings row lock.
+  await upsertOffice(clean, isNew);
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
 
 export async function removeOfficeAction(id: string) {
   await requirePerm("manage_users");
-  const settings = await getSettings();
-  const offices = (Array.isArray(settings.offices) ? settings.offices : []).filter(
-    (o) => o.id !== id
-  );
-  if (offices.length && !offices.some((o) => o.quoteDefault)) offices[0].quoteDefault = true;
-  await setSettings({ offices });
+  await removeOffice(id);
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
 
 export async function setDefaultQuoteOfficeAction(id: string) {
   await requirePerm("manage_users");
-  const settings = await getSettings();
-  const current = Array.isArray(settings.offices) ? settings.offices : [];
-  if (!current.some((o) => o.id === id))
+  if (!(await setDefaultQuoteOffice(id)))
     return { ok: false as const, error: "Location not found." };
-  await setSettings({
-    offices: current.map((o) => ({ ...o, quoteDefault: o.id === id })),
-  });
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
@@ -674,21 +682,12 @@ export async function saveVenueTypesAction(
   input: VenueTypeInput[]
 ): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
   await requirePerm("manage_users");
-  const current = venueTypesFrom((await getSettings()).venueTypes);
   // Keys still on any site (soft-deleted too) are never minted again.
   const reserved = await storedSiteVenueKinds();
-  const res = mergeVenueTypes(current, Array.isArray(input) ? input : [], reserved);
+  // #343 — merged with the stored list under the settings row lock; a type
+  // removed outright is refused while any venue uses it.
+  const res = await saveVenueTypesLocked(Array.isArray(input) ? input : [], reserved, countSitesByVenueKind);
   if (!res.ok) return res;
-  if (res.removed.length) {
-    const used = await countSitesByVenueKind(res.removed);
-    const busy = res.removed.find((k) => (used[k] || 0) > 0);
-    if (busy) {
-      const label = current.find((t) => t.key === busy)?.label ?? busy;
-      const n = used[busy];
-      return { ok: false, error: `"${label}" is used by ${n} venue${n === 1 ? "" : "s"} — archive it instead of removing it.` };
-    }
-  }
-  await setSettings({ venueTypes: res.types });
   let warning: string | undefined;
   if (res.renamed.length) {
     try {
@@ -758,7 +757,7 @@ export async function setRecordingsBetaUsersAction(userIds: string[]) {
  *  switches and the monthly spend cap. Each field is optional; omitted = untouched. */
 export async function setAssistSettingsAction(patch: {
   users?: string[];
-  features?: Partial<Record<"tasks" | "reply" | "estimate" | "file" | "promise" | "brief" | "ask", boolean>>;
+  features?: Partial<Record<AssistFeature, boolean>>;
   capUsd?: number;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   await requirePerm("manage_users");
@@ -767,24 +766,24 @@ export async function setAssistSettingsAction(patch: {
     const known = new Set((await allUsers()).map((u) => u.id));
     next.assistUsers = Array.from(new Set(patch.users.filter((id) => typeof id === "string" && known.has(id))));
   }
+  // #342 — only the switches PRESENT in the patch are written, as a nested
+  // atomic merge: one click can no longer rewrite (and lose a concurrent click
+  // on) the other six. Absent keys keep their stored value, or
+  // assistSettingsOf's default when never stored.
+  const featurePartial: Record<string, boolean> = {};
   if (patch.features && typeof patch.features === "object") {
-    const cur = assistSettingsOf(await getSettings()).features;
-    next.assistFeatures = {
-      tasks: typeof patch.features.tasks === "boolean" ? patch.features.tasks : cur.tasks,
-      reply: typeof patch.features.reply === "boolean" ? patch.features.reply : cur.reply,
-      estimate: typeof patch.features.estimate === "boolean" ? patch.features.estimate : cur.estimate,
-      file: typeof patch.features.file === "boolean" ? patch.features.file : cur.file,
-      promise: typeof patch.features.promise === "boolean" ? patch.features.promise : cur.promise,
-      brief: typeof patch.features.brief === "boolean" ? patch.features.brief : cur.brief,
-      ask: typeof patch.features.ask === "boolean" ? patch.features.ask : cur.ask,
-    };
+    for (const f of ASSIST_FEATURES) {
+      const v = patch.features[f];
+      if (typeof v === "boolean") featurePartial[f] = v;
+    }
   }
   if (patch.capUsd !== undefined) {
     const n = Number(patch.capUsd);
     if (!Number.isFinite(n) || n < 0 || n > 10_000) return { ok: false, error: "Cap must be between $0 and $10,000." };
     next.assistMonthlyCapUsd = Math.round(n * 100) / 100;
   }
-  await setSettings(next);
+  if (Object.keys(next).length) await setSettings(next);
+  if (Object.keys(featurePartial).length) await mergeSettingsObject("assistFeatures", featurePartial);
   // #335 — the pilot list / file + promise switches gate the inbox pipeline
   invalidateOrgContext();
   revalidatePath("/", "layout");
@@ -904,12 +903,24 @@ export async function saveDocumentCategoriesAction(
   input: DocumentCategoryInput[]
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await requirePerm("manage_users");
-  // Strict read: a failed read must never pass for "no list saved yet" —
-  // merging onto the seed would silently lose every custom category.
-  const stored = resolveDocumentCategories((await getSettingsStrict()).documentCategories);
-  const merged = mergeDocumentCategories(stored, input);
+  // #343 — merged on the stored list under the settings row lock (a failed
+  // read throws: it must never pass for "no list saved yet").
+  const merged = await saveDocumentCategoriesLocked(input);
   if (!merged.ok) return merged;
-  await setSettings({ documentCategories: merged.categories });
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/* ---- Venue Assessments internal tags (#344) ---- */
+
+/** Whole-list save of Settings → Field → Final thoughts tags, merged on the stored list under the settings lock
+ *  (a failed read throws — it must never merge onto the starter list and silently drop custom tags). */
+export async function saveSurveyTagsAction(
+  input: SurveyTagInput[]
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requirePerm("manage_users");
+  const merged = await saveSurveyTagsLocked(input);
+  if (!merged.ok) return merged;
   revalidatePath("/", "layout");
   return { ok: true };
 }

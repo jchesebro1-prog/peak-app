@@ -3,12 +3,18 @@ import { createHmac } from "node:crypto";
 import { rateLimit, rateLimitRefund } from "@/lib/rate-limit";
 import { SHARE_OPEN_DEDUPE_MS } from "@/lib/estimate-output/opens";
 import { latestSentRevision } from "@/lib/quote-pdf/state";
-import { parseShareToken, SHARE_TOKEN_RE, signShareToken, signShareTokenV2, verifyShareToken, verifyShareTokenV2 } from "./token";
+import { parseShareToken, SHARE_TOKEN_RE, signShareToken, signShareTokenV2, signShareTokenV3, verifyShareToken, verifyShareTokenV2, verifyShareTokenV3 } from "./token";
+import { getCompany } from "@/lib/identity/companies";
+import { bidderPartyFor } from "@/lib/parties/addressee-server";
+import { BID_SEND_COPY, isPartyId, latestSentRev } from "@/lib/parties/bid-send";
+import type { BidderState } from "@/lib/parties/rules";
+import { recordBidderOpen } from "@/lib/stores/bids";
+import { cleanBidderName } from "@/lib/estimate-output/responses";
 import {
   ONLINE_COPY, onlineEstimateState, shareEligibility, sharePath,
   type OnlineEstimateState, type ShareLinkStatus, type ShareLinkView,
 } from "./view";
-import { packageState, sentRevisionRows, type VisiblePackageState } from "./package-view";
+import { packageState, sentRevisionRows, viewedStamp, type VisiblePackageState } from "./package-view";
 
 /**
  * #293 slice 3 — client share links, server side (spec §5.3, §5.5, §7).
@@ -53,7 +59,7 @@ export function shareLinkView(q: Pick<Quote, "id" | "shareLink" | "revisions">, 
 /** The Client link panel's read: the paths only for a Send holder; the
  *  per-revision rows (no paths) for anyone signed in. */
 export function shareLinkStatus(q: Quote, canSend: boolean, secret: string, now: number): ShareLinkStatus {
-  return { state: shareEligibility(q), canSend, link: shareLinkView(q, secret, now, canSend), sentRevs: sentRevisionRows(q) };
+  return { state: shareEligibility(q), canSend, link: shareLinkView(q, secret, now, canSend), sentRevs: sentRevisionRows(q), viewed: viewedStamp(q) };
 }
 
 export type ShareWrite = { ok: true; link: ShareLinkView } | { ok: false; error: string };
@@ -124,13 +130,19 @@ export async function resolveSharedQuote(
   return { q, state: onlineEstimateState(q) };
 }
 
+/** #348 2b-ii — the bidder a v3 link is addressed to (a live GC/EC bidder row on the quote, its company live). */
+export type SharedBidder = { partyId: string; companyId: string; companyName: string; result: BidderState["result"] };
+
 /** #301 slice B — a rev-pinned (v2) package link, resolved. `currentPath`:
- *  the v2 link to the latest sent revision when this one is superseded. */
-export type SharedPackage = { q: Quote; rev: QuoteRevision; state: VisiblePackageState; currentPath: string | null };
+ *  the v2 link to the latest sent revision when this one is superseded.
+ *  #348 2b-ii: a v3 link carries its `bidder` (and its `currentPath` is the
+ *  same bidder's v3); a v2 link has `bidder: null`. */
+export type SharedPackage = { q: Quote; rev: QuoteRevision; state: VisiblePackageState; currentPath: string | null; bidder?: SharedBidder | null };
 
 /** The package page's (and its photo route's) one check, in order: shape
- *  (no DB read for a malformed id or a non-v2 token) → get → v2 verify →
- *  packageState. Read-only. null = the one "isn't active" card. */
+ *  (no DB read for a malformed id or a non-package token) → get → v2/v3
+ *  verify → packageState → (v3) the bidder row + company. Read-only. null =
+ *  the one "isn't active" card — a removed bidder or a deleted company too. */
 export async function resolveSharedPackage(
   id: string,
   token: string,
@@ -138,18 +150,77 @@ export async function resolveSharedPackage(
 ): Promise<SharedPackage | null> {
   if (typeof id !== "string" || !id || id.length > SHARE_ID_MAX) return null;
   const parsed = parseShareToken(token);
-  if (!parsed || parsed.v !== 2) return null;
+  if (!parsed || (parsed.v !== 2 && parsed.v !== 3)) return null;
   const secret = opts.secret ?? shareSecret();
   if (!secret) return null;
   const q = await getQuote(id);
   if (!q || q.id !== id || !q.shareLink) return null;
-  const rev = verifyShareTokenV2(secret, token, id, q.shareLink, opts.now ?? Date.now());
-  if (rev == null) return null;
+  const now = opts.now ?? Date.now();
+  let rev: number;
+  let partyId: string | null = null;
+  if (parsed.v === 2) {
+    const r2 = verifyShareTokenV2(secret, token, id, q.shareLink, now);
+    if (r2 == null) return null;
+    rev = r2;
+  } else {
+    const r3 = verifyShareTokenV3(secret, token, id, q.shareLink, now);
+    if (!r3) return null;
+    rev = r3.rev;
+    partyId = r3.partyId;
+  }
   const state = packageState(q, rev);
   if (state.kind === "inactive") return null;
   const l = q.shareLink;
-  const currentPath = state.kind === "superseded" ? sharePath(id, signShareTokenV2(secret, id, state.latestRev, l.nonce, l.expiresAt)) : null;
-  return { q, rev: state.rev, state, currentPath };
+  if (partyId == null) {
+    const currentPath = state.kind === "superseded" ? sharePath(id, signShareTokenV2(secret, id, state.latestRev, l.nonce, l.expiresAt)) : null;
+    return { q, rev: state.rev, state, currentPath, bidder: null };
+  }
+  // v3: the bidder must still be a live bidder row on THIS quote with a known result, its company live. Any miss → null.
+  const party = await bidderPartyFor(q.id, partyId);
+  const result = party?.bid?.result;
+  if (!party || !result) return null;
+  const company = await getCompany(party.companyId);
+  if (!company) return null;
+  // Superseded: the SAME bidder's v3 at the latest sent revision — never the owner's v2.
+  const currentPath = state.kind === "superseded" ? sharePath(id, signShareTokenV3(secret, id, state.latestRev, party.id, l.nonce, l.expiresAt)) : null;
+  return {
+    q,
+    rev: state.rev,
+    state,
+    currentPath,
+    bidder: { partyId: party.id, companyId: party.companyId, companyName: cleanBidderName(company.name), result },
+  };
+}
+
+/** #348 2b-ii — a bidder's own v3 path to one SENT revision, or null unless the link is active (nonce, unexpired),
+ *  `rev` is one of this quote's sent revisions and `partyId` has the bidder-id shape. Pure (no reads). */
+export function bidderSharePath(q: Pick<Quote, "id" | "shareLink" | "revisions">, partyId: string, rev: number, secret: string, now: number): string | null {
+  const l = q.shareLink;
+  if (!secret || !l || typeof l.nonce !== "string" || !l.nonce || !(l.expiresAt > now)) return null;
+  if (!isPartyId(partyId) || !Number.isSafeInteger(rev)) return null;
+  const revs = Array.isArray(q.revisions) ? q.revisions : [];
+  if (!revs.some((r) => !!r && r.rev === rev && r.reason === "sent")) return null;
+  return sharePath(q.id, signShareTokenV3(secret, q.id, rev, partyId, l.nonce, l.expiresAt));
+}
+
+/** #348 2b-ii — the bidder's link: ensure the quote's share link (its refusals pass through), then sign a v3 for
+ *  this bidder at `opts.rev` (default: the latest sent revision). */
+export async function bidderLinkPath(
+  quoteId: string,
+  partyId: string,
+  by: string,
+  opts: { rev?: number; secret?: string; now?: number } = {}
+): Promise<{ ok: true; path: string; rev: number } | { ok: false; error: string }> {
+  const now = opts.now ?? Date.now();
+  const secret = opts.secret ?? shareSecret();
+  const ensured = await ensureShareLink(quoteId, by, { secret, now });
+  if (!ensured.ok) return ensured;
+  const q = await getQuote(quoteId);
+  if (!q) return { ok: false, error: ONLINE_COPY.gone };
+  if (!(await bidderPartyFor(q.id, partyId))) return { ok: false, error: BID_SEND_COPY.gone };
+  const rev = opts.rev ?? latestSentRev(q);
+  const path = rev == null ? null : bidderSharePath(q, partyId, rev, secret, now);
+  return path && rev != null ? { ok: true, path, rev } : { ok: false, error: ONLINE_COPY.gone };
 }
 
 /** Cheap per-IP guard before any read, for the open beacon. */
@@ -167,16 +238,23 @@ export function openIpKey(ip: string): string {
  * most one open per IP-hash per pinned revision per 30 minutes — in memory
  * (the rate limiter), so a restart or a second instance can count one more;
  * best-effort by design. The caller has already skipped team users.
+ * #348 2b-ii: a v3 (bidder) open counts on the bidder's party row only
+ * (recordBidderOpen), deduped per bidder — never Quote.shareOpens, so the
+ * owner's "Opened" chip and Client link rows are unaffected.
  */
 export async function recordSharedOpen(id: string, token: string, ip: string, opts: { secret?: string; now?: number } = {}): Promise<boolean> {
   const hit = await resolveSharedPackage(id, token, opts);
   if (!hit) return false;
-  const slot = `share-open:${hit.q.id}:${hit.rev.rev}:${openIpKey(ip)}`;
+  const bidder = hit.bidder ?? null;
+  const slot = bidder
+    ? `share-open:${hit.q.id}:${hit.rev.rev}:${bidder.partyId}:${openIpKey(ip)}`
+    : `share-open:${hit.q.id}:${hit.rev.rev}:${openIpKey(ip)}`;
   if (!rateLimit(slot, 1, SHARE_OPEN_DEDUPE_MS).ok) return false;
   // A failed write must not suppress this IP for the whole window: refund the slot.
+  const now = opts.now ?? Date.now();
   let recorded = false;
   try {
-    recorded = await recordShareOpen(hit.q.id, hit.rev.rev, opts.now ?? Date.now());
+    recorded = bidder ? await recordBidderOpen(hit.q.id, bidder.partyId, now) : await recordShareOpen(hit.q.id, hit.rev.rev, now);
   } catch (e) {
     rateLimitRefund(slot);
     throw e;

@@ -19,6 +19,8 @@ import type { TrackConfig } from "@/lib/track-engine";
 import type { TrackMounting, TrackOperation, TrackSeries } from "@/lib/track-series";
 import type { SystemIntro } from "@/lib/narrative/intros";
 import type { EstimateSuggestionView, SuggestionParts } from "@/lib/assist/features/suggestion-panel";
+import type { VendorPdfExtraction } from "@/lib/vendor-pdf/extraction";
+import type { VendorPdfReadUi } from "@/lib/vendor-pdf/fill";
 
 export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
 export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
@@ -102,6 +104,9 @@ export type SpecItem = {
    * folded into other rows on every customer surface by `customerLines`.
    */
   bonus?: "package" | "estimator";
+  /** Jeff 2026-10-15 #19 — the rate (fraction) a bonus line was figured at, present only when it isn't the default
+   *  5 % / 2 % (Estimating Rules → Estimator bonuses). Written only by `withBonusLines`. */
+  bonusPct?: number;
   /** #270: a mobilization's travel cost as its own internal line (mileage,
    *  hotel, per diem, lift rental). Like `laborOverhead` the CUSTOMER
    *  document never shows it — `customerLines` folds its sell into the
@@ -184,7 +189,12 @@ export type VendorQuoteLine = {
   qty: number;
   unit: string;
   amount: number;
+  /** #348 slice 5 — index into extracted.data.lines this line was filled from (absent = typed). */
+  extractedIndex?: number;
 };
+
+/** #348 slice 5 — the Read-the-PDF result a saved vendor quote keeps (server-verified at save). */
+export type VendorQuoteExtracted = { runId: string; model: string; at: number; data: VendorPdfExtraction };
 
 /**
  * A vendor's quote imported into an estimate. Persisted TOP-LEVEL on the
@@ -213,6 +223,14 @@ export type VendorQuote = {
   includesFreight: boolean;
   /** LIVE on the record, not frozen at add time — flippable from the row. */
   display: "single" | "itemized";
+  /** #348 slice 4 — the vendor company (Customers directory, a vendor type); `vendor` stays the display / typed fallback. Absent on legacy quotes. */
+  vendorCompanyId?: string | null;
+  /** #348 slice 4 — first saved (server-stamped; absent on quotes saved before slice 4). */
+  addedAt?: number;
+  /** #348 slice 4 — the email thread this quote came from (Add as vendor quote…). */
+  fromThreadId?: string | null;
+  /** #348 slice 5 — what Read the PDF read from this quote's file (absent = never read). */
+  extracted?: VendorQuoteExtracted | null;
 };
 
 /** Data-URL characters the estimate's vendor attachments already spend of
@@ -357,6 +375,8 @@ export type TrackDraft = {
   label: string;
   carrierSpacing: string;
   hangerSpacing: string;
+  /** Oct 15 #45 — walk-along only: two curtain halves (a walk-along bi-part). */
+  walkAlongBipart?: boolean;
 };
 
 /** #274: one catalog part a track series maps a role to, as the Estimator
@@ -371,6 +391,8 @@ export type VendorLineDraft = {
   qty: string;
   unit: string;
   amount: string;
+  /** #348 slice 5 — the extracted line this row was filled from (absent = typed). */
+  fromRead?: number;
 };
 
 export type VendorDraft = {
@@ -403,6 +425,12 @@ export type VendorDraft = {
   total: string;
   includesFreight: boolean;
   display: "single" | "itemized";
+  /** #348 slice 4 — the picked vendor company (null = typed name only) and the email the quote came from. */
+  vendorCompanyId: string | null;
+  fromThreadId: string | null;
+  /** #348 slice 5 — the read this form keeps (saved with the quote) and the banner state (never persisted). */
+  extracted: VendorQuoteExtracted | null;
+  pdfRead: VendorPdfReadUi | null;
 };
 
 export type FixtureDraft = {
@@ -476,6 +504,8 @@ export type CatalogHit = {
   list: number;
   mfr: string;
   pricedAt?: number;
+  /** Oct 15 #32 — the last priced file that listed this part (lib/catalog-books). */
+  priceDate?: number;
   /** #304 — Model # and MFR P/N (omitted when blank): the staff row leads with the model, the order # beside it. */
   model?: string;
   mpn?: string;
@@ -531,6 +561,10 @@ export type PortalPanelData = {
     purchaseMethod?: "po" | "card" | "check" | "other";
     notes?: string;
     poDocumentId?: string | null;
+    /** Jeff 2026-10-15 #15 — the signer and PO # typed at Accept. */
+    signerName?: string;
+    signerTitle?: string;
+    poNumber?: string;
   } | null;
   portalDecline: { at: number; by: string; note: string } | null;
   porItems: Array<{ desc: string; qty: number }>;
@@ -637,6 +671,8 @@ export type AssistDraftView = {
 
 export type EstimatorProps = {
   initial: InitialQuote;
+  /** #348 slice 4 — ?vq= hand-off ref (validated shape), else null. */
+  vendorFromThread?: string | null;
   /** Settings → Pipelines (Task 6) — the Daylite stage bar reads the loaded
    *  quote's pipeline from here; loaded once server-side (loadPipelines()). */
   pipelines: Pipelines;
@@ -704,6 +740,11 @@ export type EstimatorProps = {
   viewerName: string;
   /** #287 task B — may this user make someone else the lead estimator (`approve`)? */
   viewerCanApprove: boolean;
+  /** Jeff 2026-10-15 #18 — the loaded quote has been sent at least once (quoteSentOnce): Lead estimator and
+   *  Prepared by are then read-only for non-approvers. Absent = false. */
+  peopleSentOnce?: boolean;
+  /** Jeff 2026-10-15 #19 — Estimating Rules' bonus rates (fractions) for a draft's live bonus lines. Absent = 5 % / 2 %. */
+  bonusRates?: import("@/lib/estimate-bonus/flags").BonusRates;
   /** Estimator Phase 4 — the signed-in user's roles, for the review-comment
    *  rules (src/lib/estimate-review/comments.ts: add / resolve / delete). */
   viewerRoles: string[];
@@ -721,4 +762,15 @@ export type EstimatorProps = {
    *  suggestion's own sku (a rename resolves to the new part); a sku missing
    *  here lands as an unpriced custom line. */
   suggestionParts?: SuggestionParts;
+  /** #348 slice 5 — Read the PDF is offered: `vendorPdfGateFor` passed on the server (a pilot user, the feature on,
+   *  the kill switch off, and a Claude key). Never derived from assistUiFlags, which reports true under the local
+   *  provider with no key. */
+  vendorPdfEnabled: boolean;
+};
+
+/** #348 slice 5 — the vendor form's Read the PDF state (transient; reset whenever the form or its file changes).
+ *  `error.hard` = the failed attempt was a Try harder, so it isn't offered again. */
+export type VendorPdfFormState = {
+  busy: null | "read" | "hard";
+  error: { text: string; tooLarge: boolean; hard: boolean } | null;
 };

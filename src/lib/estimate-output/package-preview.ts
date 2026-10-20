@@ -62,7 +62,7 @@ const chicagoDate = (ms: number) =>
  *  date (the PDF's rule, documentRevStamp); the client's page prints the sent
  *  revision's stamp instead (onlineHeaderLine), which a draft doesn't have. */
 export function previewHeaderLine(
-  q: QuoteNumberFields & { id: string; revisions?: readonly unknown[] | null; updatedAt?: number | null; createdAt?: number | null },
+  q: QuoteNumberFields & { id: string; status?: string | null; revisions?: readonly unknown[] | null; updatedAt?: number | null; createdAt?: number | null },
 ): string {
   const s = documentRevStamp(q);
   return `${displayQuoteNumber(q)} · Rev ${s.revNum}${s.revDateMs ? ` · saved ${chicagoDate(s.revDateMs)}` : ""}`;

@@ -33,8 +33,11 @@ import { runAssist, type RunDeps } from "@/lib/assist/run";
 import type { AssistSettings, Env } from "@/lib/assist/types";
 import { AI_CALL_MARGIN_MS, callWorstCaseMs, passHasFallback, runAiPass } from "@/lib/inbox-org/ai-pass";
 import { isNoiseRow, isStrongRow, isToFileRow } from "@/lib/inbox-org/apply";
+import { isPlaceholderCompany, withoutPlaceholderCustomer } from "@/lib/inbox-org/placeholder";
+import { allCompanies } from "@/lib/identity/companies";
 import { quoteAwaitsApprovalBy } from "@/lib/quote-approval-rules";
-import { getAll as allThreads, visibleTo, type CommThread } from "@/lib/stores/comms";
+import { getAll as allThreads, visibleTo, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
 import { normalizeTask, type TaskRecord } from "@/lib/stores/tasks";
@@ -173,15 +176,21 @@ const soft = async <T>(label: string, p: Promise<T>, fallback: T): Promise<T> =>
   }
 };
 
-export function organizeCounts(threads: readonly CommThread[], me: { name: string }): BriefOrganize {
+/** #345 — `isPlaceholderId` marks a placeholder company ("UNKNOWN" …): a suggestion
+ *  under one is still To file but never counted strong (the Organize view's own read). */
+export function organizeCounts(
+  threads: readonly CommThread[],
+  me: MailboxViewer,
+  isPlaceholderId: (id: string) => boolean = () => false
+): BriefOrganize {
   let toFile = 0;
   let strong = 0;
   let noise = 0;
   for (const t of threads) {
-    if (!visibleTo(t, me.name)) continue;
+    if (!visibleTo(t, me)) continue;
     if (isToFileRow(t)) {
       toFile++;
-      if (isStrongRow(t)) strong++;
+      if (isStrongRow({ filing: t.filing ? withoutPlaceholderCustomer(t.filing, isPlaceholderId) : t.filing })) strong++;
     }
     if (isNoiseRow(t)) noise++;
   }
@@ -294,7 +303,10 @@ export async function buildBrief(me: TriageUser, slot: BriefSlot, now: number, o
       marks
     );
   }
-  const organize = organizeCounts(threads, me);
+  const placeholderIds = new Set(
+    (await soft("placeholder companies", allCompanies(), [])).filter((c) => isPlaceholderCompany(c.name)).map((c) => c.id)
+  );
+  const organize = organizeCounts(threads, await mailboxViewer(me), (id) => placeholderIds.has(id));
   const newPromiseTasks = newPromiseTasksFrom(myTasks, me.id, prevBrief?.builtAt ?? now - PROMISE_FALLBACK_WINDOW_MS);
   const quiet = selectQuietQuotes(quotes, threads, me, now);
   const approvals = quotes.filter((q) => quoteAwaitsApprovalBy(q, me.name, me.canApprove)).length;

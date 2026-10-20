@@ -195,31 +195,27 @@ function EmailRow({ quoteId, email: e, onPatch }: { quoteId: string; email: Trac
         To {e.to || "—"}
         {!e.isDraft && <> · {activityTime(e.sentAt)}</>}
       </div>
-      {e.textHidden ? (
-        <div style={{ ...SMALL, marginTop: 8, color: "#8a8f99" }}>{SEND_UI_COPY.textHidden(e.ownerName)}</div>
-      ) : (
-        e.messages.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-            {e.messages.map((m, i) => (
-              <div
-                key={i}
-                style={{
-                  borderRadius: 8,
-                  padding: "7px 10px",
-                  background: m.unread ? ACCENT_SOFT : "#f7f8fa",
-                  borderLeft: "3px solid " + (m.unread ? "var(--accent)" : m.direction === "in" ? "#c9ccd3" : "#e4e6eb"),
-                }}
-              >
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, fontSize: 11, color: "#6b7079" }}>
-                  <span style={{ fontWeight: 700, color: m.unread ? ACCENT_INK : "#5b616e" }}>{m.direction === "in" ? "Reply" : "Sent"}</span>
-                  <span style={{ overflowWrap: "anywhere" }}>{m.from}</span>
-                  <span>· {activityTime(m.at)}</span>
-                </div>
-                {m.snippet && <div style={{ fontSize: 12.5, color: "#16181d", marginTop: 3, lineHeight: 1.45, overflowWrap: "anywhere" }}>{m.snippet}</div>}
+      {e.messages.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+          {e.messages.map((m, i) => (
+            <div
+              key={i}
+              style={{
+                borderRadius: 8,
+                padding: "7px 10px",
+                background: m.unread ? ACCENT_SOFT : "#f7f8fa",
+                borderLeft: "3px solid " + (m.unread ? "var(--accent)" : m.direction === "in" ? "#c9ccd3" : "#e4e6eb"),
+              }}
+            >
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, fontSize: 11, color: "#6b7079" }}>
+                <span style={{ fontWeight: 700, color: m.unread ? ACCENT_INK : "#5b616e" }}>{m.direction === "in" ? "Reply" : "Sent"}</span>
+                <span style={{ overflowWrap: "anywhere" }}>{m.from}</span>
+                <span>· {activityTime(m.at)}</span>
               </div>
-            ))}
-          </div>
-        )
+              {m.snippet && <div style={{ fontSize: 12.5, color: "#16181d", marginTop: 3, lineHeight: 1.45, overflowWrap: "anywhere" }}>{m.snippet}</div>}
+            </div>
+          ))}
+        </div>
       )}
       {e.canReply && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>

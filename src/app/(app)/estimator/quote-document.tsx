@@ -5,12 +5,14 @@ import { systemSellTotal } from "./pricing";
 import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 import { narrativeBlocks, printableKeyProducts, type NarrativeBlock } from "./narrative";
-import { alternateGroupsForPrint, documentAppendixSystemIds, printedGroupHeadings } from "./quote-document-view";
+import { alternateGroupsForPrint, alternatingPhotoSides, documentAppendixSystemIds, printedGroupHeadings } from "./quote-document-view";
 import type { SystemGroup } from "@/lib/estimate-groups/groups";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 import PackageDocView from "@/components/package-doc/package-doc-view";
 import { documentApplies } from "@/lib/package-doc/print";
 import type { PackageDoc } from "@/lib/package-doc/types";
+import { photoFigureStyle, photoImgStyle, photoTagStyle, spreadPhotoAnchors } from "@/lib/estimate-output/photo-spread";
+import { photoTagText } from "@/lib/estimate-output/photo-models";
 
 /**
  * The customer quote document (#222) — ONE component for both places it
@@ -36,6 +38,10 @@ export type QuoteDocumentProps = {
   projectName: string;
   /** "Label — City" for the selected customer venue ("" when none). */
   venueLabel: string;
+  /** #348 2b-i — "Owner: <company>" under the project name (bidder-addressed documents only). */
+  ownerLine?: string;
+  /** #348 2b-i — "Bid due … · Addenda acknowledged: …" under the meta grid (bidder-addressed documents only). */
+  bidLine?: string;
   /** The lead estimator (`owner`) — "Questions? Reach out to …". */
   ownerName: string;
   /** #287 task B — "Prepared by": `preparedBy`, else the owner, else the company. */
@@ -87,6 +93,10 @@ export type QuoteDocumentProps = {
   /** #293 — sku → the photo a key product prints beside its paragraph. The
    *  print route inlines data URIs (it has no session); absent = no photos. */
   keyProductPhotos?: Record<string, { src: string; alt: string }>;
+  /** Photo wrap (2026-10-16 §2) — sku → the model-number tag a key-product
+   *  photo carries (same keys as keyProductPhotos; built server-side beside
+   *  the photos, loadKeyProductModels). Absent = no part-aware tags. */
+  keyProductModels?: Record<string, string>;
   /** #293 slice 3 — "web" for the portal and share pages: fluid up to the
    *  sheet's 740px, with QUOTE_WEB_CSS's phone rules. Absent / "sheet" renders
    *  byte-for-byte as before (the PDF and the baseline fixture). */
@@ -110,12 +120,14 @@ nextjs-portal { display: none !important; }
 .est-doc .est-secband { break-inside: avoid; break-after: avoid; page-break-after: avoid; }
 .est-doc .est-line, .est-doc .est-optbox, .est-doc .est-totals, .est-doc .est-terms, .est-doc .est-accept, .est-doc .est-sig { break-inside: avoid; page-break-inside: avoid; }
 .est-doc .est-kp { break-inside: avoid; page-break-inside: avoid; }
+.est-doc .est-ph { break-inside: avoid; page-break-inside: avoid; }
+.est-doc .est-titlepage { break-after: page; page-break-after: always; }
 .est-doc .est-appendix { break-before: page; page-break-before: always; }
 `;
 
 /** #293 slice 3 — page CSS for layout="web" (the portal and share pages):
  *  phone padding under 600px with one-column header and signature grids, a
- *  key-product photo full width above its paragraph under 480px, the sheet
+ *  key-product photo full width under 480px, the sheet
  *  chrome (shadow, radius) only above 760px, and the page chrome dropped
  *  when the page is printed. !important because the document's own styles
  *  are inline. */
@@ -127,7 +139,9 @@ export const QUOTE_WEB_CSS = `
   .est-web .est-meta, .est-web .est-sig { grid-template-columns: 1fr !important; gap: 10px !important; }
 }
 @media (max-width: 480px) {
-  .est-web .est-kp img { float: none !important; display: block; width: 100% !important; max-height: 3in !important; margin: 0 0 10px 0 !important; }
+  .est-web .est-ph { float: none !important; display: block; width: 100% !important; max-width: 100% !important; margin: 0 0 10px 0 !important; }
+  .est-web .est-ph img { width: 100% !important; max-height: 3in !important; object-position: right top !important; }
+  .est-web .est-ph-tag { left: auto !important; right: 0 !important; }
 }
 @media print {
   html, body { background: #fff !important; }
@@ -148,7 +162,9 @@ export const QUOTE_WEB_EMBED_CSS = `
   .est-web .est-meta, .est-web .est-sig { grid-template-columns: 1fr !important; gap: 10px !important; }
 }
 @media (max-width: 480px) {
-  .est-web .est-kp img { float: none !important; display: block; width: 100% !important; max-height: 3in !important; margin: 0 0 10px 0 !important; }
+  .est-web .est-ph { float: none !important; display: block; width: 100% !important; max-width: 100% !important; margin: 0 0 10px 0 !important; }
+  .est-web .est-ph img { width: 100% !important; max-height: 3in !important; object-position: right top !important; }
+  .est-web .est-ph-tag { left: auto !important; right: 0 !important; }
 }
 @media print {
   .est-web { box-shadow: none !important; padding: 0 !important; max-width: none !important; }
@@ -188,25 +204,26 @@ type DocLine = {
 };
 
 /** #281 blocks — blank line = paragraph, "- " = bullet, single breaks kept. */
-function renderNarrativeBlocks(blocks: NarrativeBlock[]) {
-  return blocks.map((b, bi) =>
-    b.kind === "ul" ? (
-      <ul key={bi} style={{ margin: bi ? "6px 0 0" : 0, paddingLeft: 18, listStyleType: "disc" }}>
-        {b.items.map((it, ii) => (
-          <li key={ii}>{it}</li>
-        ))}
-      </ul>
-    ) : (
-      <p key={bi} style={{ margin: bi ? "6px 0 0" : 0 }}>
-        {b.lines.map((ln, li) => (
-          <Fragment key={li}>
-            {li > 0 && <br />}
-            {ln}
-          </Fragment>
-        ))}
-      </p>
-    )
+function renderNarrativeBlock(b: NarrativeBlock, bi: number) {
+  return b.kind === "ul" ? (
+    <ul key={bi} style={{ margin: bi ? "6px 0 0" : 0, paddingLeft: 18, listStyleType: "disc" }}>
+      {b.items.map((it, ii) => (
+        <li key={ii}>{it}</li>
+      ))}
+    </ul>
+  ) : (
+    <p key={bi} style={{ margin: bi ? "6px 0 0" : 0 }}>
+      {b.lines.map((ln, li) => (
+        <Fragment key={li}>
+          {li > 0 && <br />}
+          {ln}
+        </Fragment>
+      ))}
+    </p>
   );
+}
+function renderNarrativeBlocks(blocks: NarrativeBlock[]) {
+  return blocks.map(renderNarrativeBlock);
 }
 
 /** Estimator Phase 2a — a group's heading row: a light divider (not a band)
@@ -485,49 +502,82 @@ type DocSystem = ReturnType<typeof docSystem>;
 /** What prints under a system's band — its narrative + key products, its
  *  itemized lines, or (sectioned detail) a line-count row. Shared by the body
  *  and the Phase 2b Alternates block so the two can't drift. */
-function SystemBody({ ps, p, lineCols, freightRowLabel, alternate }: { ps: DocSystem; p: QuoteDocumentProps; lineCols: string; freightRowLabel: string; alternate?: boolean }) {
+/** The photo a key product prints (own photo, else its placeholder), or undefined — one rule for SystemBody and the
+ *  document-order alternation (Jeff 2026-10-15 #20). `own` = the part's own photo / manufacturer image. */
+function keyProductPhotoOf(kp: DocSystem["keyProducts"][number], p: QuoteDocumentProps): { src: string; alt: string; own: boolean } | undefined {
+  const own = kp.photo ? p.keyProductPhotos?.[kp.sku] : undefined;
+  if (own) return { ...own, own: true };
+  return kp.photo && kp.placeholder ? { src: PLACEHOLDER_SRC[kp.placeholder], alt: "", own: false } : undefined;
+}
+
+/** Photo wrap — one printed photo: the figure floats, the img fills it, the model tag sits on the outer bottom corner. */
+function PhotoFigure({ src, alt, side, model, web }: { src: string; alt: string; side: "left" | "right"; model: string; web: boolean }) {
+  return (
+    <figure className="est-ph" style={photoFigureStyle(side)}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={alt} style={photoImgStyle(side)} />
+      {model ? (
+        <span className="est-ph-tag" style={photoTagStyle(side, web ? 10 : 9)}>
+          {model}
+        </span>
+      ) : null}
+    </figure>
+  );
+}
+
+function SystemBody({ ps, p, lineCols, freightRowLabel, alternate, photoSides }: { ps: DocSystem; p: QuoteDocumentProps; lineCols: string; freightRowLabel: string; alternate?: boolean; photoSides?: ReadonlyMap<string, "right" | "left"> }) {
   const isItemized = p.detail === "itemized";
   const showLines = p.pdfQty || p.pdfNotes || p.pdfPrices;
-  return ps.presentation === "narrative" ? (
-    <div style={{ padding: "10px 13px 12px", fontSize: 12.5, color: "#3a3f4a", lineHeight: 1.55, borderBottom: "1px solid #f0f1f4" }}>
-      {/* #281: blank line = paragraph, "- " = bullet, single breaks kept.
-          #293: then each key product — heading, paragraph, photo floated right. */}
-      {(() => {
-        const blocks = narrativeBlocks(ps.narrative);
-        // Phase 2b: an empty alternate never claims to be "included in the total".
-        if (!blocks.length && !ps.keyProducts.length)
-          return alternate ? "Scope and pricing for this alternate are shown above." : "System scope and pricing are included in the total above.";
-        return (
-          <>
-            {renderNarrativeBlocks(blocks)}
-            {ps.keyProducts.map((kp, ki) => {
-              // Own photo (or its manufacturer's image) first; an allowance /
-              // custom line with neither prints its placeholder (a public
-              // /placeholders/ URL — same origin for print, share and portal).
-              const own = kp.photo ? p.keyProductPhotos?.[kp.sku] : undefined;
-              const photo = own ?? (kp.photo && kp.placeholder ? { src: PLACEHOLDER_SRC[kp.placeholder], alt: "" } : undefined);
-              return (
-                <div key={"kp-" + kp.sku} className="est-kp" style={{ display: "flow-root", marginTop: blocks.length || ki ? 12 : 0 }}>
-                  {photo ? (
-                    <>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={photo.src}
-                        alt={photo.alt}
-                        style={{ float: "right", width: "34%", maxHeight: "2.4in", objectFit: "contain", margin: "0 0 8px 14px" }}
-                      />
-                    </>
-                  ) : null}
-                  <div style={{ fontWeight: 600, color: "#16181d", marginBottom: kp.blocks.length ? 3 : 0 }}>{kp.heading}</div>
-                  {renderNarrativeBlocks(kp.blocks)}
-                </div>
-              );
-            })}
-          </>
-        );
-      })()}
-    </div>
-  ) : isItemized && showLines ? (
+  if (ps.presentation === "narrative") {
+    const blocks = narrativeBlocks(ps.narrative);
+    // Photo wrap (2026-10-16 §1): the system's photo'd key products, in order, spread down its text.
+    const shown = ps.keyProducts.flatMap((kp) => {
+      const photo = keyProductPhotoOf(kp, p);
+      return photo ? [{ kp, photo }] : [];
+    });
+    return (
+      <div style={{ padding: "10px 13px 12px", fontSize: 12.5, color: "#3a3f4a", lineHeight: 1.55, borderBottom: "1px solid #f0f1f4", ...(shown.length ? { display: "flow-root" as const } : {}) }}>
+        {/* #281: blank line = paragraph, "- " = bullet, single breaks kept.
+            #293: then each key product — heading + paragraph. Photo wrap: photo k
+            floats before text unit k (spreadPhotoAnchors); the system body is the
+            only float container. */}
+        {(() => {
+          // Phase 2b: an empty alternate never claims to be "included in the total".
+          if (!blocks.length && !ps.keyProducts.length)
+            return alternate ? "Scope and pricing for this alternate are shown above." : "System scope and pricing are included in the total above.";
+          const units = [
+            ...blocks.map((b, bi) => renderNarrativeBlock(b, bi)),
+            ...ps.keyProducts.map((kp, ki) => (
+              <div key={"kp-" + kp.sku} className="est-kp" style={{ marginTop: blocks.length || ki ? 12 : 0 }}>
+                <div style={{ fontWeight: 600, color: "#16181d", marginBottom: kp.blocks.length ? 3 : 0 }}>{kp.heading}</div>
+                {renderNarrativeBlocks(kp.blocks)}
+              </div>
+            )),
+          ];
+          const anchors = spreadPhotoAnchors(units.length, shown.length);
+          const models = p.keyProductModels;
+          return units.map((u, ui) => (
+            <Fragment key={"u" + ui}>
+              {shown.map((s, k) =>
+                anchors[k] === ui ? (
+                  <PhotoFigure
+                    key={"ph-" + s.kp.sku}
+                    src={s.photo.src}
+                    alt={s.photo.alt}
+                    side={photoSides?.get(ps.id + "|" + s.kp.sku) ?? "right"}
+                    model={photoTagText({ ownPhoto: s.photo.own, partModel: models && Object.hasOwn(models, s.kp.sku) ? models[s.kp.sku] : null, ownModel: s.kp.ownModel })}
+                    web={p.layout === "web"}
+                  />
+                ) : null
+              )}
+              {u}
+            </Fragment>
+          ));
+        })()}
+      </div>
+    );
+  }
+  return isItemized && showLines ? (
     <ItemizedLines
       lines={ps.lines}
       hasFreight={ps.hasFreight}
@@ -611,6 +661,13 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
     systems: ag.sections.map((sec) => ({ ps: docSystem(sec, "A" + ++altNum, p), options: p.pdfOptions ? sec.items.filter((it) => it.option) : [] })),
   }));
   const altCount = altNum;
+  // Jeff 2026-10-15 #20: narrative photos alternate right, left, right in the order they print — the body's
+  // narrative systems, then the Alternates block's.
+  const photoSides = alternatingPhotoSides(
+    [...previewSections, ...alternateGroups.flatMap((ag) => ag.systems.map((x) => x.ps))]
+      .filter((ps) => ps.presentation === "narrative")
+      .flatMap((ps) => ps.keyProducts.filter((kp) => !!keyProductPhotoOf(kp, p)).map((kp) => ps.id + "|" + kp.sku))
+  );
   // The alternate systems that actually print in the Alternates block; an
   // alternate that doesn't (no sell, so nothing prints) can't carry its option
   // lines there, so they stay in the Optional additions box as before.
@@ -648,6 +705,195 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
   const appendixSections = appendixIds ? previewSections.filter((ps) => appendixIds.has(ps.id)) : [];
   const appendixCols = ["1fr", p.pdfQty ? "70px" : "", p.pdfPrices ? "104px" : ""].filter(Boolean).join(" ");
 
+  // Spec 2026-10-16 §3 — the same pieces, two orders: the PDF (layout ≠ "web") opens on a title page and puts
+  // pricing after the narratives (no investment band — the totals block shows the Total; the BOM appendix last,
+  // on its own page); the online estimate keeps today's order.
+  // letterhead — #331: an estimate always prints the full baked Peak
+  // letterhead sheet, even when Settings → Branding has a dark logo
+  // (letters/reports keep the D59 uploaded-logo ladder).
+  const letterheadEl = (
+    <div style={{ borderBottom: `3px solid var(--accent)`, paddingBottom: 16, marginBottom: 22 }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={letterhead.src}
+        alt={p.companyName}
+        style={{ display: "block", width: "100%", height: "auto" }}
+      />
+    </div>
+  );
+  // document title
+  const titleEl = (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "flex-end",
+        gap: 16,
+        marginBottom: 22,
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontSize: 27,
+            fontWeight: 700,
+            letterSpacing: ".14em",
+            lineHeight: 1,
+            color: "#16181d",
+          }}
+        >
+          QUOTE
+        </div>
+        <div
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+            color: ACCENT_INK,
+            marginTop: 7,
+          }}
+        >
+          {p.quoteId} · REV {p.revNum}
+        </div>
+      </div>
+      <div
+        style={{
+          textAlign: "right",
+          fontSize: 11.5,
+          color: "#5b616e",
+          lineHeight: 1.75,
+        }}
+      >
+        <div>
+          Issued <strong style={{ color: "#16181d" }}>{revDateLabel}</strong>
+        </div>
+        <div>
+          {p.validUntilMs != null ? "Valid until" : "Valid through"}{" "}
+          <strong style={{ color: "#16181d" }}>{validThruLabel}</strong>
+        </div>
+      </div>
+    </div>
+  );
+  // prepared for / project / prepared by
+  const metaEl = (
+    <div
+      className={web ? "est-meta" : undefined}
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1.1fr 1.3fr 1fr",
+        gap: 18,
+        marginBottom: 20,
+        fontSize: 12,
+      }}
+    >
+      <div>
+        <div style={microLabel}>Prepared for</div>
+        <div style={{ fontWeight: 600 }}>{p.custName}</div>
+        {p.hasAttn && <div style={{ color: "#5b616e" }}>Attn: {p.attnLine}</div>}
+      </div>
+      <div>
+        <div style={microLabel}>Project</div>
+        <div style={{ fontWeight: 600 }}>{p.projectName || "Stage systems package"}</div>
+        {p.venueLabel && <div style={{ color: "#5b616e" }}>{p.venueLabel}</div>}
+        {p.ownerLine && <div style={{ color: "#5b616e" }}>{p.ownerLine}</div>}
+      </div>
+      <div>
+        <div style={microLabel}>Prepared by</div>
+        <div style={{ fontWeight: 600 }}>{p.preparedByName}</div>
+        <div style={{ color: "#5b616e" }}>{p.companyName}</div>
+      </div>
+    </div>
+  );
+  const bidEl = p.bidLine ? <div style={{ color: "#5b616e", fontSize: 11.5, margin: "-10px 0 16px" }}>{p.bidLine}</div> : null;
+  // at-a-glance investment band (online only)
+  const investEl = (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 14,
+        flexWrap: "wrap",
+        background: "var(--accent-soft)",
+        border: `1px solid ${ACCENT_BD}`,
+        borderRadius: 8,
+        padding: "13px 16px",
+        marginBottom: 24,
+      }}
+    >
+      <div>
+        <div style={{ ...microLabel, color: ACCENT_INK, marginBottom: 2 }}>
+          Total investment
+        </div>
+        <div
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 21,
+            fontWeight: 600,
+            letterSpacing: "-.01em",
+            color: "#16181d",
+          }}
+        >
+          {fmt(p.t.grand)}
+        </div>
+      </div>
+      <div style={{ textAlign: "right", fontSize: 11.5, color: "#5b616e", lineHeight: 1.7 }}>
+        <div>
+          {previewSections.length} {previewSections.length === 1 ? "system" : "systems"} ·{" "}
+          {lineCount} line {lineCount === 1 ? "item" : "items"}
+          {(altCount > 0 ? ` · ${altCount} ${altCount === 1 ? "alternate" : "alternates"}` : "") +
+            (optionItems.length > 0 && showOptions
+            ? ` · ${optionItems.length} optional`
+            : "")}
+        </div>
+        {inclusions && <div>{inclusions}</div>}
+      </div>
+    </div>
+  );
+  const coverEl = showCover ? (
+    <div
+      style={{
+        fontSize: 12.5,
+        color: "#3a3f4a",
+        lineHeight: 1.7,
+        marginBottom: 26,
+        paddingLeft: 14,
+        borderLeft: `3px solid ${ACCENT_BD}`,
+      }}
+    >
+      {p.quoteNote}
+    </div>
+  ) : null;
+  // #293: Itemized appendix — restates, never adds to the totals.
+  const appendixEl = appendixSections.length > 0 ? (
+    <div className="est-appendix" style={{ marginTop: 22 }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "#16181d", marginBottom: 2 }}>
+        Appendix — Itemized bill of materials
+      </div>
+      {appendixSections.map((ps) => (
+        <div key={"apx-" + ps.num + ps.name}>
+          <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
+          <ItemizedLines
+            lines={ps.lines}
+            hasFreight={ps.hasFreight}
+            freightLabel={ps.freightLabel}
+            freightRowLabel={freightRowLabel}
+            showDesc
+            showAllComments
+            pdfQty={p.pdfQty}
+            pdfPrices={p.pdfPrices}
+            lineCols={appendixCols}
+          />
+        </div>
+      ))}
+    </div>
+  ) : null;
+  const assumptionsEl = p.assumptions.trim() ? (
+    <div style={{ marginTop: 18, padding: "12px 14px", background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 8 }}>
+      <div style={{ ...microLabel, marginBottom: 5 }}>Assumptions &amp; exceptions</div>
+      <div style={{ whiteSpace: "pre-wrap", fontSize: 12.5, color: "#5b616e", lineHeight: 1.55 }}>{p.assumptions}</div>
+    </div>
+  ) : null;
+
   return (
         <div
           className={web ? "est-doc est-web" : "est-doc"}
@@ -661,160 +907,29 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
             height: "fit-content",
           }}
         >
-          {/* letterhead — #331: an estimate always prints the full baked Peak
-              letterhead sheet, even when Settings → Branding has a dark logo
-              (letters/reports keep the D59 uploaded-logo ladder). */}
-          <div style={{ borderBottom: `3px solid var(--accent)`, paddingBottom: 16, marginBottom: 22 }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={letterhead.src}
-              alt={p.companyName}
-              style={{ display: "block", width: "100%", height: "auto" }}
-            />
-          </div>
-
-          {/* document title */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-end",
-              gap: 16,
-              marginBottom: 22,
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: 27,
-                  fontWeight: 700,
-                  letterSpacing: ".14em",
-                  lineHeight: 1,
-                  color: "#16181d",
-                }}
-              >
-                QUOTE
-              </div>
-              <div
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 12,
-                  color: ACCENT_INK,
-                  marginTop: 7,
-                }}
-              >
-                {p.quoteId} · REV {p.revNum}
-              </div>
-            </div>
-            <div
-              style={{
-                textAlign: "right",
-                fontSize: 11.5,
-                color: "#5b616e",
-                lineHeight: 1.75,
-              }}
-            >
-              <div>
-                Issued <strong style={{ color: "#16181d" }}>{revDateLabel}</strong>
-              </div>
-              <div>
-                {p.validUntilMs != null ? "Valid until" : "Valid through"}{" "}
-                <strong style={{ color: "#16181d" }}>{validThruLabel}</strong>
-              </div>
-            </div>
-          </div>
-
-          {/* prepared for / project / prepared by */}
-          <div
-            className={web ? "est-meta" : undefined}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.1fr 1.3fr 1fr",
-              gap: 18,
-              marginBottom: 20,
-              fontSize: 12,
-            }}
-          >
-            <div>
-              <div style={microLabel}>Prepared for</div>
-              <div style={{ fontWeight: 600 }}>{p.custName}</div>
-              {p.hasAttn && <div style={{ color: "#5b616e" }}>Attn: {p.attnLine}</div>}
-            </div>
-            <div>
-              <div style={microLabel}>Project</div>
-              <div style={{ fontWeight: 600 }}>{p.projectName || "Stage systems package"}</div>
-              {p.venueLabel && <div style={{ color: "#5b616e" }}>{p.venueLabel}</div>}
-            </div>
-            <div>
-              <div style={microLabel}>Prepared by</div>
-              <div style={{ fontWeight: 600 }}>{p.preparedByName}</div>
-              <div style={{ color: "#5b616e" }}>{p.companyName}</div>
-            </div>
-          </div>
-
-          {/* at-a-glance investment band */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 14,
-              flexWrap: "wrap",
-              background: "var(--accent-soft)",
-              border: `1px solid ${ACCENT_BD}`,
-              borderRadius: 8,
-              padding: "13px 16px",
-              marginBottom: 24,
-            }}
-          >
-            <div>
-              <div style={{ ...microLabel, color: ACCENT_INK, marginBottom: 2 }}>
-                Total investment
-              </div>
-              <div
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 21,
-                  fontWeight: 600,
-                  letterSpacing: "-.01em",
-                  color: "#16181d",
-                }}
-              >
-                {fmt(p.t.grand)}
-              </div>
-            </div>
-            <div style={{ textAlign: "right", fontSize: 11.5, color: "#5b616e", lineHeight: 1.7 }}>
-              <div>
-                {previewSections.length} {previewSections.length === 1 ? "system" : "systems"} ·{" "}
-                {lineCount} line {lineCount === 1 ? "item" : "items"}
-                {(altCount > 0 ? ` · ${altCount} ${altCount === 1 ? "alternate" : "alternates"}` : "") +
-                  (optionItems.length > 0 && showOptions
-                  ? ` · ${optionItems.length} optional`
-                  : "")}
-              </div>
-              {inclusions && <div>{inclusions}</div>}
-            </div>
-          </div>
-
-          {showCover && (
-            <div
-              style={{
-                fontSize: 12.5,
-                color: "#3a3f4a",
-                lineHeight: 1.7,
-                marginBottom: 26,
-                paddingLeft: 14,
-                borderLeft: `3px solid ${ACCENT_BD}`,
-              }}
-            >
-          {p.quoteNote}
+          {web ? (
+            <>
+              {letterheadEl}
+              {titleEl}
+              {metaEl}
+              {bidEl}
+              {investEl}
+              {coverEl}
+            </>
+          ) : (
+            <div className="est-titlepage">
+              {letterheadEl}
+              {titleEl}
+              {metaEl}
+              {bidEl}
+              {coverEl}
             </div>
           )}
 
           {/* sections — Phase 5: a package document replaces ALL In-total
               system bands (itemized ones too: prices live in its chips and
-              price table). Kept unchanged around it: the header, the
-              investment band, the cover note, the Alternates block (its
+              price table). Kept unchanged around it: the header (the title
+              page in print), the investment band (online only), the cover note, the Alternates block (its
               bands stay the priced record of the alternates, even when the
               document also writes about them), Optional additions, the
               totals, terms, signature, the Itemized appendix and the
@@ -830,6 +945,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                   taxRatePct: p.taxRatePct,
                   totalLabel: anyPorPrinted ? "Total (excludes items pending price)" : "Total",
                   photos: p.keyProductPhotos,
+                  models: p.keyProductModels,
                 }}
               />
             </div>
@@ -840,7 +956,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                   <GroupHeading name={groupHeadings.get(ps.id)!.name} subtotalLabel={fmt(groupHeadings.get(ps.id)!.subtotal)} />
                 )}
                 <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
-                <SystemBody ps={ps} p={p} lineCols={lineCols} freightRowLabel={freightRowLabel} />
+                <SystemBody ps={ps} p={p} lineCols={lineCols} freightRowLabel={freightRowLabel} photoSides={photoSides} />
               </div>
             ))
           )}
@@ -870,7 +986,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                   {ag.systems.map(({ ps, options }) => (
                     <div key={"alt-" + ps.id}>
                       <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
-                      <SystemBody ps={ps} p={p} lineCols={lineCols} freightRowLabel={freightRowLabel} alternate />
+                      <SystemBody ps={ps} p={p} lineCols={lineCols} freightRowLabel={freightRowLabel} alternate photoSides={photoSides} />
                       {options.length > 0 && (
                         <div style={{ padding: "0 13px", marginBottom: 6 }}>
                           {options.map((it) => (
@@ -1091,30 +1207,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
               </>
             )}
 
-            {/* #293: Itemized appendix — restates, never adds to the totals. */}
-            {appendixSections.length > 0 && (
-              <div className="est-appendix" style={{ marginTop: 22 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#16181d", marginBottom: 2 }}>
-                  Appendix — Itemized bill of materials
-                </div>
-                {appendixSections.map((ps) => (
-                  <div key={"apx-" + ps.num + ps.name}>
-                    <SectionBand num={ps.num} name={ps.name} subtotalLabel={ps.subtotalLabel} />
-                    <ItemizedLines
-                      lines={ps.lines}
-                      hasFreight={ps.hasFreight}
-                      freightLabel={ps.freightLabel}
-                      freightRowLabel={freightRowLabel}
-                      showDesc
-                      showAllComments
-                      pdfQty={p.pdfQty}
-                      pdfPrices={p.pdfPrices}
-                      lineCols={appendixCols}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
+            {web ? appendixEl : null}
 
             {/* footer */}
             <div
@@ -1137,12 +1230,8 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
               </span>
             </div>
           </div>
-          {p.assumptions.trim() && (
-            <div style={{ marginTop: 18, padding: "12px 14px", background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 8 }}>
-              <div style={{ ...microLabel, marginBottom: 5 }}>Assumptions &amp; exceptions</div>
-              <div style={{ whiteSpace: "pre-wrap", fontSize: 12.5, color: "#5b616e", lineHeight: 1.55 }}>{p.assumptions}</div>
-            </div>
-          )}
+          {assumptionsEl}
+          {web ? null : appendixEl}
         </div>
   );
 }

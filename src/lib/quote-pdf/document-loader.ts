@@ -2,9 +2,11 @@ import { get as getCustomer } from "@/lib/stores/customers";
 import { getSettings } from "@/lib/settings";
 import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
 import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
-import { keyProductPhotoDataUris, keyProductPhotoDocs, PHOTO_TYPES } from "@/lib/narrative/photos";
+import { keyProductPhotoDataUris, keyProductPhotoDocs, loadKeyProductModels, PHOTO_TYPES } from "@/lib/narrative/photos";
 import { quoteAsOfRevision } from "@/lib/quote-share/view";
 import { quoteDocumentDataFor } from "./quote-document-data";
+import { rewardsVisibleFor } from "@/lib/parties/addressee";
+import { documentAddressee } from "@/lib/parties/addressee-server";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import type { QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import type { SpecSection } from "@/app/(app)/estimator/types";
@@ -36,7 +38,7 @@ export type DocPhotos = "inline" | { href: (docId: string) => string };
 
 export type LoadQuoteDocumentOpts =
   | { revision?: QuoteRevision | null; photos: "inline" }
-  | { revision: QuoteRevision; photos: { href: (docId: string) => string } };
+  | { revision: QuoteRevision; photos: { href: (docId: string) => string }; bidderPartyId?: string };
 
 /** A web page may render only a sent revision of this very quote. */
 function webRevisionOk(q: Quote, rev: QuoteRevision | null | undefined): boolean {
@@ -57,17 +59,34 @@ export async function keyProductPhotoLinks(sections: SpecSection[], href: (docId
   }
 }
 
+/**
+ * #348 2b-i — who the document is addressed to. A sent revision is addressed to the bidder awarded when it was
+ * cut (`docFields.awardedPartyId`, strict — never today's award, so the online page matches the frozen PDF); a
+ * revision without it (cut before 2b-i, or before any award) is owner-addressed. The live quote uses the live award.
+ */
+async function revisionAddressee(src: Quote, revision: QuoteRevision | null | undefined) {
+  if (!revision) return documentAddressee(src);
+  const frozen = revision.docFields?.awardedPartyId ?? null;
+  return frozen ? documentAddressee(src, frozen, { strict: true }) : null;
+}
+
 export async function loadQuoteDocumentProps(q: Quote, opts: LoadQuoteDocumentOpts): Promise<QuoteDocumentProps | null> {
   if (opts.photos !== "inline" && !webRevisionOk(q, opts.revision)) return null;
   const src = opts.revision ? quoteAsOfRevision(q, opts.revision) : q;
-  const [cust, settings, perks] = await Promise.all([
+  // #348 2b-ii — a bidder's v3 page is addressed to that bidder, strictly: no valid bidder row → null (fail closed).
+  const bidderPartyId = opts.photos !== "inline" ? opts.bidderPartyId : undefined;
+  const [cust, settings, perks, addressee] = await Promise.all([
     getCustomer(src.customerId),
     getSettings(),
     // #282 perks+points — the customer's purchase perks line (program on only).
     purchasePerksForCompany(src.customerId),
+    bidderPartyId !== undefined ? documentAddressee(src, bidderPartyId, { strict: true }) : revisionAddressee(src, opts.revision),
   ]);
-  const doc = quoteDocumentDataFor(src, cust, settings);
-  const keyProductPhotos =
-    opts.photos === "inline" ? await keyProductPhotoDataUris(doc.sections, doc.document) : await keyProductPhotoLinks(doc.sections, opts.photos.href, doc.document);
-  return { ...doc, keyProductPhotos, rewardsLine: purchasePerksDocLine(perks) };
+  if (bidderPartyId !== undefined && !addressee) return null;
+  const doc = quoteDocumentDataFor(src, cust, settings, addressee);
+  const [keyProductPhotos, keyProductModels] = await Promise.all([
+    opts.photos === "inline" ? keyProductPhotoDataUris(doc.sections, doc.document) : keyProductPhotoLinks(doc.sections, opts.photos.href, doc.document),
+    loadKeyProductModels(doc.sections, doc.document),
+  ]);
+  return { ...doc, keyProductPhotos, keyProductModels, rewardsLine: rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : "" };
 }

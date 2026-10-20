@@ -34,6 +34,7 @@ import { getDoc, listDocsByField } from "@/db/doc-store";
 import {
   archive,
   get as getThread,
+  resolveMailboxOwnerId,
   setOrg,
   setStatus,
   unarchive,
@@ -41,9 +42,8 @@ import {
   type CommThread,
   type ThreadStatus,
 } from "@/lib/stores/comms";
-import { activeUsers } from "@/lib/users";
+import { allUsers } from "@/lib/users";
 import { listConnections } from "@/lib/gmail/connections";
-import { userIdOfKey } from "@/lib/gmail/config";
 import { parseAddress } from "@/lib/gmail/mime";
 import { resolveForThread } from "@/lib/gmail/linking";
 import type { Resolution } from "@/lib/gmail/resolve";
@@ -57,7 +57,6 @@ import { assistGate, assistSettingsOf } from "@/lib/assist/config";
 import { getAssistEnv } from "@/lib/assist/key-store";
 import type { AssistSettings, Env } from "@/lib/assist/types";
 import { displayLeadNumber, displayQuoteNumber, leadNumberMatches } from "@/lib/estimate-number";
-import { sameName } from "@/lib/quote-approval-rules";
 import {
   appendFilingLogs,
   getOwnDomainOverride,
@@ -71,6 +70,7 @@ import { noiseByRules } from "./noise";
 import { findEstimateNumbers, findRecordIds, type FoundEstimateNumber } from "./numbers";
 import { matchSenderRule } from "./sender-rules";
 import { isSignOff } from "./signoff";
+import { isPlaceholderCompanyId } from "@/lib/identity/companies";
 import type { Court, CourtOwner, Filing, NoiseFlag, SenderRule } from "./types";
 
 const lc = (s: string | null | undefined) => String(s ?? "").trim().toLowerCase();
@@ -84,6 +84,10 @@ export type OrgUser = { id: string; name: string; emails: string[] };
 export type OrgContext = {
   loadedAt: number;
   users: OrgUser[];
+  /** #349 — every user (any status) as id + name: the roster a legacy
+   *  name-only thread's owner is resolved against (resolveMailboxOwnerId —
+   *  a name an archived namesake shares owns nothing). */
+  nameRoster: Array<{ id: string; name: string }>;
   /** Every Peak address: users' emails + googleEmails + connected mailboxes. */
   teamEmails: string[];
   ownDomains: string[];
@@ -97,6 +101,8 @@ export type OrgContext = {
 
 export type OrgContextInput = {
   users: Array<{ id: string; name: string; email?: string | null; googleEmail?: string | null }>;
+  /** #349 — every user, archived included (default: `users`) */
+  allUsers?: Array<{ id: string; name: string }>;
   connections?: Array<{ address?: string | null; userId?: string | null }>;
   ownDomainOverride?: string | null;
   senderRules?: SenderRule[];
@@ -105,7 +111,7 @@ export type OrgContextInput = {
   now?: number;
 };
 
-const NO_ASSIST: AssistSettings = { users: [], features: { tasks: false, reply: false, estimate: false, file: false, promise: false, brief: false, ask: false }, capUsd: 0 };
+const NO_ASSIST: AssistSettings = { users: [], features: { tasks: false, reply: false, estimate: false, file: false, promise: false, brief: false, ask: false, vendorpdf: false }, capUsd: 0 };
 
 /** Pure: the context from already-loaded rows. Own domains are Peak's own
  *  plus the admin override's, else plus the team's (see ownDomainsFrom). */
@@ -122,6 +128,7 @@ export function buildOrgContext(input: OrgContextInput): OrgContext {
   return {
     loadedAt: input.now ?? Date.now(),
     users,
+    nameRoster: (input.allUsers ?? input.users).map((u) => ({ id: u.id, name: u.name })),
     teamEmails,
     ownDomains,
     isInternal: makeInternalChecker(teamEmails, ownDomains),
@@ -133,15 +140,16 @@ export function buildOrgContext(input: OrgContextInput): OrgContext {
 }
 
 async function readOrgContext(): Promise<OrgContext> {
-  const [users, connections, ownDomainOverride, senderRules, settings, env] = await Promise.all([
-    activeUsers(),
+  const [everyone, connections, ownDomainOverride, senderRules, settings, env] = await Promise.all([
+    allUsers(),
     listConnections(),
     getOwnDomainOverride(),
     getSenderRules(),
     getSettings(),
     getAssistEnv(),
   ]);
-  return buildOrgContext({ users, connections, ownDomainOverride, senderRules, assist: assistSettingsOf(settings), env });
+  const users = everyone.filter((u) => u.status === "active");
+  return buildOrgContext({ users, allUsers: everyone, connections, ownDomainOverride, senderRules, assist: assistSettingsOf(settings), env });
 }
 
 export const ORG_CONTEXT_TTL_MS = 60_000;
@@ -222,10 +230,11 @@ export function roleOf(t: CommThread, m: CommMessage, owner: OrgUser | null, ctx
   return from && ctx.isInternal(from) ? "teammate" : "customer";
 }
 
+/** The thread's owner among the active team — #349: by identity (the
+ *  `mailboxOwnerId` stamp, else the Gmail account key, else a legacy name
+ *  only one user holds; resolveMailboxOwnerId), never a shared name. */
 export function ownerOf(t: CommThread, ctx: OrgContext): OrgUser | null {
-  const byName = t.mailboxUser ? ctx.users.find((u) => sameName(u.name, t.mailboxUser)) : undefined;
-  if (byName) return byName;
-  const uid = t.gmailAccountKey ? userIdOfKey(t.gmailAccountKey) : null;
+  const uid = resolveMailboxOwnerId(t, ctx.nameRoster);
   return (uid && ctx.users.find((u) => u.id === uid)) || null;
 }
 
@@ -367,6 +376,20 @@ async function nameOf(customerId: string): Promise<string> {
   return (await customerNameFor(customerId).catch(() => "")) || "this customer";
 }
 
+/** #345 — a placeholder company ("UNKNOWN", "TBD" …) is never a filing
+ *  target: every step below skips one (`isPlaceholderCompany`). */
+async function isPlaceholderId(customerId: string | null | undefined): Promise<boolean> {
+  // cached per process (identity/companies) — the import checks many senders
+  return isPlaceholderCompanyId(customerId).catch(() => false);
+}
+
+/** A record-number hit whose customer is a placeholder keeps its record and
+ *  loses the customer (#345). */
+async function withoutPlaceholderHit(hit: NumberHit | null): Promise<NumberHit | null> {
+  if (hit && (await isPlaceholderId(hit.customerId))) return { ...hit, customerId: null };
+  return hit;
+}
+
 type FilingParty = {
   inbound: CommMessage | null;
   /** an internal sender (or the owner) passed along an outside email */
@@ -421,7 +444,7 @@ async function computeFiling({ t, ctx, owner, msgs, internalOnly }: FilingInput)
   const unresolved: RuleFiling = { customerId: null, work: null, noise: false, source: "identity", strength: "weak", reason: "" };
 
   if (internal) {
-    const hit = await findByNumbers(texts);
+    const hit = await withoutPlaceholderHit(await findByNumbers(texts));
     if (hit) return { filing: { ...hit, noise: false, source: "number", strength: "strong" }, quiet: false, weakOrNone: false };
     return { filing: { ...unresolved, reason: "Internal thread — no customer or record number mentioned" }, quiet: true, weakOrNone: true };
   }
@@ -429,7 +452,8 @@ async function computeFiling({ t, ctx, owner, msgs, internalOnly }: FilingInput)
   // 1. sender rule
   const rule = senderEmail ? matchSenderRule(ctx.senderRules, { email: senderEmail, userId: owner?.id ?? "" }) : null;
   const ruleWhat = rule ? `${rule.scope === "user" ? "Your" : "Company"} sender rule for ${rule.match.email || "@" + rule.match.domain}` : "";
-  if (rule?.action.type === "file") {
+  // a rule that files under a placeholder company (#345) is read as no rule
+  if (rule?.action.type === "file" && !(await isPlaceholderId(rule.action.customerId))) {
     return {
       filing: { customerId: rule.action.customerId, work: rule.action.work ?? null, noise: false, source: "rule", strength: "strong", reason: ruleWhat },
       quiet: false,
@@ -447,21 +471,24 @@ async function computeFiling({ t, ctx, owner, msgs, internalOnly }: FilingInput)
   let knownContact: boolean | null = null;
   if (externalForward) {
     const r: Resolution = await resolveForThread(senderEmail).catch(() => ({ kind: "unknown" }) as const);
-    if (r.kind === "linked" && r.via === "contact") {
+    if (r.kind === "linked" && (await isPlaceholderId(r.customerId))) {
+      // #345 — a contact parked under a placeholder company is still a known contact, never a filing target
+      if (r.via === "contact") knownContact = true;
+    } else if (r.kind === "linked" && r.via === "contact") {
       knownContact = true;
       strong = { customerId: r.customerId, reason: `Forwarded from ${senderEmail}, a known contact at ${await nameOf(r.customerId)}` };
     } else if (r.kind === "linked") {
       weak = { customerId: r.customerId, reason: `Forwarded from ${senderEmail} — same domain as ${await nameOf(r.customerId)}` };
     }
-  } else if (t.customerId) {
+  } else if (t.customerId && !(await isPlaceholderId(t.customerId))) {
     const who = t.customer || (await nameOf(t.customerId));
     strong = { customerId: t.customerId, reason: t.resolvedContactId ? `${senderEmail || "The sender"} is a known contact at ${who}` : `Linked to ${who}` };
-  } else if (t.resolution === "suggested" && t.suggestedCustomerId && !t.suggestionDismissed) {
+  } else if (t.resolution === "suggested" && t.suggestedCustomerId && !t.suggestionDismissed && !(await isPlaceholderId(t.suggestedCustomerId))) {
     weak = { customerId: t.suggestedCustomerId, reason: `${senderEmail || "The sender"} — same domain as ${await nameOf(t.suggestedCustomerId)}` };
   }
 
   // 3. numbers (a strong identity takes a number only for its own customer)
-  const hit = await findByNumbers(texts);
+  const hit = await withoutPlaceholderHit(await findByNumbers(texts));
   if (strong) {
     if (hit && hit.customerId === strong.customerId) return { filing: { ...hit, noise: false, source: "number", strength: "strong" }, quiet: false, weakOrNone: false };
     const link = !externalForward && t.link && WORK_TYPES.has(t.link.type) ? (t.link as WorkRef) : null;
@@ -691,6 +718,15 @@ export async function organizeThread(threadId: string, opts: OrganizeOpts = {}):
       else if (t.noise?.rescued) noise = { flagged: false, reason: "", moved: false, rescued: true };
       else noise = null;
     }
+  }
+
+  // #346 — a Noise row archived from Organize (`cleared`) comes back on new
+  // outside mail, whatever its filing (a dismissed — marked-noise — filing
+  // is locked above, so its flag is kept and only loses `cleared` here)
+  if (filingNew && noise?.cleared) {
+    const back: NoiseFlag = { ...noise };
+    delete back.cleared;
+    noise = back;
   }
 
   // a filing kept as it was (filed / dismissed / skipped, or an AI

@@ -8,7 +8,6 @@
  */
 import { mfrKey } from "@/lib/catalog-books";
 import { checkManufacturerGroups, type GroupCheck } from "@/lib/catalog-import-guard";
-import { setPriceListEffective } from "@/lib/settings";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { importResolverFor } from "@/lib/stores/catalog-renames";
 import { catalogGroups } from "./catalog-groups";
@@ -20,10 +19,11 @@ export type CatalogCommitInput = {
   rows: PreparedRow[];
   mode: ImportMode;
   /** Epoch ms — the price list's effective date: `pricedAt` on rows whose
-   *  price changes, and the book date of every manufacturer confirmed. */
+   *  price changes, and (Oct 15 #32) `priceDate` on every row a priced file
+   *  writes. */
   effectiveAt: number;
   /** Did the file map a List or a Cost column? A file without one confirmed
-   *  no price, so it never re-dates a book (final review item 3). */
+   *  no price, so it dates no part (final review item 3). */
   priced: boolean;
   /** #205 fix wave (Task 14, item 2) — the signed-in user, threaded into
    *  `specUpdatedBy` so an edited row is stamped with who imported it rather
@@ -33,7 +33,7 @@ export type CatalogCommitInput = {
 };
 
 export type CatalogCommitResult =
-  | { ok: true; res: ImportResult; /** mfrKeys whose book date was stamped */ stamped: string[] }
+  | { ok: true; res: ImportResult; /** mfrKeys with at least one row dated by this file (Oct 15 #32: per part, never the whole book) */ stamped: string[] }
   | { ok: false; error: string };
 
 /** #132 — a failing group's message, prefixed with the manufacturer it checked. */
@@ -59,28 +59,15 @@ export async function commitCatalogImport(input: CatalogCommitInput): Promise<Ca
     return { ...r, values: { ...r.values, mfr: spelling.get(mfrKey(mfr)) ?? mfr } };
   });
 
-  const res = await commitImport("catalog", rows, input.mode, { effectiveAt: input.effectiveAt, me: input.me });
-
-  // D156 — the file's effective date is each manufacturer's price-list date
-  // (it confirms that manufacturer's unchanged rows too). Stamped per
-  // manufacturer group, from the rows commitImport actually wrote:
-  // - "Skip duplicates" compares nothing, so it confirms nothing (item 1);
-  // - a file with no price column confirmed no price (item 3);
-  // - a group none of whose rows were written is not confirmed;
-  // - a group with a row that errored (invalid, or the write threw) is not
-  //   confirmed either — the per-group form of "errored === 0".
-  const stamped: string[] = [];
-  if (input.mode !== "skip" && input.priced) {
-    const keyOf = (r: PreparedRow) => mfrKey(String(r.values.mfr ?? ""));
-    const wrote = new Set(res.written.map(keyOf));
-    const failed = new Set(res.failed.map(keyOf));
-    for (const c of checks) {
-      if (!c.result.ok) continue;
-      const key = mfrKey(c.result.normalizedMfr);
-      if (!wrote.has(key) || failed.has(key)) continue;
-      await setPriceListEffective(key, input.effectiveAt);
-      stamped.push(key);
-    }
-  }
+  // Oct 15 #32 (supersedes D156's per-manufacturer book stamp): a priced
+  // file dates exactly the rows it writes — the catalog writer stamps
+  // `priceDate` per part — so a partial file never re-dates lines it left
+  // out, and the manufacturer's book date is set only by hand (Catalog
+  // banner). "Skip duplicates" writes nothing and so dates nothing (item 1);
+  // a file with no price column dates nothing (item 3).
+  const dating = input.mode !== "skip" && input.priced;
+  const res = await commitImport("catalog", rows, input.mode, { effectiveAt: input.effectiveAt, me: input.me, priced: dating });
+  const keyOf = (r: PreparedRow) => mfrKey(String(r.values.mfr ?? ""));
+  const stamped = dating ? [...new Set(res.written.map(keyOf))].filter(Boolean) : [];
   return { ok: true, res, stamped };
 }

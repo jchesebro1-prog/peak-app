@@ -7,8 +7,10 @@ import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 import { addOptions, alternatesListView, coverSummaryText, coverTotals, notIncludedItems, outputScopes } from "./scopes";
 import type { AlternatesListView } from "./scopes";
 import { packageBomRows, type BomCatalogPart, type PackageBomRow } from "./bom";
+import { ownerNameFromLine } from "@/lib/parties/addressee";
 import { PACKAGE_COPY, packageBanner, type PackageBanner, type VisiblePackageState } from "@/lib/quote-share/package-view";
 import { documentApplies } from "@/lib/package-doc/print";
+import { photoTagText } from "./photo-models";
 import { resolvePackageDoc, type ResolvedPackageDoc } from "@/lib/package-doc/resolve";
 
 /**
@@ -39,7 +41,9 @@ export function packagePhotoSections(sections: SpecSection[]): SpecSection[] {
   return (Array.isArray(sections) ? sections : []).map((s) => (s && (s.presentation || "itemized") !== "narrative" ? { ...s, presentation: "narrative" as const } : s));
 }
 
-export type PackageKeyProduct = { sku: string; heading: string; blocks: NarrativeBlock[]; photo: { src: string; alt: string } | null };
+/** `side` (Jeff 2026-10-15 #20): "left" on every other printed photo — the page alternates right, left, right.
+ *  `model` (photo wrap 2026-10-16): the photo's model-number tag; absent when none. */
+export type PackageKeyProduct = { sku: string; heading: string; blocks: NarrativeBlock[]; photo: { src: string; alt: string } | null; side?: "left"; model?: string };
 
 export type PackageScopeView = {
   id: string;
@@ -59,6 +63,8 @@ export type PackageViewProps = {
   companyName: string;
   title: string;
   customer: string;
+  /** #348 2b-i — the owner company, present only when the estimate is addressed to a bidder. */
+  owner?: string;
   venue: string;
   headerLine: string;
   totalLabel: string;
@@ -66,6 +72,9 @@ export type PackageViewProps = {
   banner: PackageBanner | null;
   summary: string;
   view: "narrative" | "bom";
+  /** Jeff 2026-10-15 #14 — false when the estimate PDF hides quantities (the revision's pdfOptions): the BOM drops its
+   *  Qty column. Absent = shown. */
+  showQty?: boolean;
   narrativeHref: string;
   bomHref: string;
   scopes: PackageScopeView[];
@@ -85,6 +94,8 @@ export type PackageViewProps = {
 export type PackageViewInput = {
   doc: QuoteDocumentProps;
   photos: Record<string, { src: string; alt: string }>;
+  /** Photo wrap — sku → model tag (loadKeyProductModels over packagePhotoSections). */
+  models?: Record<string, string>;
   catalog: ReadonlyMap<string, BomCatalogPart>;
   frozen: { coverSummary: string; notIncluded: string };
   state: VisiblePackageState;
@@ -93,7 +104,18 @@ export type PackageViewInput = {
   view: "narrative" | "bom";
   base: string;
   letterheadSrc: string;
+  /** #348 2b-ii — a bidder's v3 link whose bid is no longer live: the banner reads "This bid is closed." */
+  bidClosed?: boolean;
 };
+
+/** Jeff 2026-10-15 #20 — the page's photos alternate right, left, right across the scopes, in order. Pure. */
+function withAlternatingSides(scopes: PackageScopeView[]): PackageScopeView[] {
+  let n = 0;
+  return scopes.map((s) => ({
+    ...s,
+    keyProducts: s.keyProducts.map((kp) => (kp.photo ? (n++ % 2 === 1 ? { ...kp, side: "left" as const } : kp) : kp)),
+  }));
+}
 
 export function packageViewModel(i: PackageViewInput): PackageViewProps {
   const d = i.doc;
@@ -101,28 +123,32 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
   const byId = new Map((d.sections || []).map((s) => [s.id, s] as const));
   const t = coverTotals(d);
   const alternates = alternatesListView(d);
+  const owner = ownerNameFromLine(d.ownerLine);
   return {
     // #331: the package page always prints the full baked Peak letterhead, never the Branding logo.
     logo: { src: i.letterheadSrc, full: true },
     companyName: d.companyName,
     title: (d.projectName || "").trim() || PACKAGE_COPY.titleFallback,
     customer: d.custName,
+    ...(owner ? { owner } : {}),
     venue: d.venueLabel,
     headerLine: i.headerLine,
     totalLabel: t.totalLabel,
     total: fmt(t.total),
-    banner: packageBanner(i.state, i.currentHref),
+    banner: packageBanner(i.state, i.currentHref, i.bidClosed === true),
     summary: coverSummaryText(i.frozen.coverSummary, scopes.map((s) => s.name)),
     view: i.view,
+    // Only when hidden: a quote showing quantities keeps its props byte-identical.
+    ...(d.pdfQty === false ? { showQty: false } : {}),
     narrativeHref: i.base,
     bomHref: i.base + "?view=bom",
-    scopes: scopes.map((s) => {
-      const keyProducts: PackageKeyProduct[] = s.keyProducts.map((kp) => ({
-        sku: kp.sku,
-        heading: kp.heading,
-        blocks: kp.blocks,
-        photo: kp.photo ? (i.photos[kp.sku] ?? (kp.placeholder ? { src: PLACEHOLDER_SRC[kp.placeholder], alt: "" } : null)) : null,
-      }));
+    scopes: withAlternatingSides(scopes.map((s) => {
+      const keyProducts: PackageKeyProduct[] = s.keyProducts.map((kp) => {
+        const own = kp.photo && Object.hasOwn(i.photos, kp.sku) ? i.photos[kp.sku] : undefined;
+        const photo = kp.photo ? (own ?? (kp.placeholder ? { src: PLACEHOLDER_SRC[kp.placeholder], alt: "" } : null)) : null;
+        const model = photo ? photoTagText({ ownPhoto: !!own, partModel: i.models && Object.hasOwn(i.models, kp.sku) ? i.models[kp.sku] : null, ownModel: kp.ownModel }) : "";
+        return { sku: kp.sku, heading: kp.heading, blocks: kp.blocks, photo, ...(model ? { model } : {}) };
+      });
       const hasText = s.introBlocks.length > 0 || keyProducts.length > 0;
       const sec = byId.get(s.id);
       return {
@@ -134,9 +160,10 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
         intro: s.introBlocks,
         keyProducts,
         fallback: hasText ? null : s.cover.source === "missing" ? PACKAGE_COPY.seeBom : s.cover.text,
-        bom: sec ? packageBomRows(sec, i.catalog, d.vendorQuotes || []) : [],
+        // #14: with the PDF's Qty off, the online BOM carries no quantities either.
+        bom: sec ? packageBomRows(sec, i.catalog, d.vendorQuotes || []).map((r) => (d.pdfQty === false ? { ...r, qty: null, unit: "" } : r)) : [],
       };
-    }),
+    })),
     totals: {
       creditLabel: t.creditLabel,
       creditAmount: t.credit > 0 ? "−" + fmt(t.credit) : null,
@@ -149,7 +176,7 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
     ...(alternates.length ? { alternates } : {}),
     notIncluded: notIncludedItems(i.frozen.notIncluded),
     ...(documentApplies(d.document)
-      ? { document: resolvePackageDoc(d.document, { sections: d.sections, t: d.t, quoteId: d.quoteId, taxRatePct: d.taxRatePct, totalLabel: t.totalLabel, photos: i.photos }) }
+      ? { document: resolvePackageDoc(d.document, { sections: d.sections, t: d.t, quoteId: d.quoteId, taxRatePct: d.taxRatePct, totalLabel: t.totalLabel, photos: i.photos, models: i.models }) }
       : {}),
   };
 }

@@ -83,8 +83,9 @@ export default async function NewAssessmentPage({ searchParams }: { searchParams
       code: s.code,
       title: s.title,
       on: s.code === "S0" || !!vt.scopes.find((x) => x.code === s.code)?.on,
-      // Slice 1: Rigging is screened only.
-      depths: s.depths?.length ? ["screen"] : [],
+      // Jeff 2026-10-15 #8: rigging's depth (Quick check / Full inspection) is a question in the form, so the start
+      // form offers no depth; the scope keeps the visit type's default ("screen" — Quick check — until answered).
+      depths: [],
     })),
     visitTypes: VISIT_TYPES.map((v) => ({ key: v.key, title: v.title })),
   };

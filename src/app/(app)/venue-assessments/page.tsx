@@ -25,6 +25,8 @@ import { recordingCountByParent } from "../recordings/data";
 import ActionError from "@/components/action-error";
 import { addressStatesForVisits } from "@/lib/address-verify/targets";
 import { FLAG_TEXT } from "@/lib/drive-plan/plan";
+import { getSettings } from "@/lib/settings";
+import { resolveSurveyTags, activeSurveyTags } from "@/lib/survey-tags";
 
 export const metadata = { title: "Venue assessments — Quartzite-6" };
 
@@ -102,7 +104,8 @@ export default async function FieldSurveyPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, all, visits] = await Promise.all([requireUser(), searchParams, getAll(), allVisits()]);
+  const [user, sp, all, visits, settings] = await Promise.all([requireUser(), searchParams, getAll(), allVisits(), getSettings()]);
+  const tags = resolveSurveyTags(settings.surveyInternalTags);
   // Recordings spec §6 — one pass over the collection for every card's count + Record control.
   const recCounts = await recordingCountByParent("survey", all.map((s) => s.id));
 
@@ -116,6 +119,7 @@ export default async function FieldSurveyPage({
     ? (stageParam as Seg)
     : "all";
   const mine = one(sp.mine) === "1";
+  const tagFilter = (Array.isArray(sp.tag) ? sp.tag : sp.tag ? [sp.tag] : []).filter((t) => activeSurveyTags(tags).some((x) => x.id === t));
 
   const me = user.name;
   // #34 — the open-visit queue: unclaimed requests for EVERYONE, plus my
@@ -163,7 +167,9 @@ export default async function FieldSurveyPage({
     };
   });
   const stKey = (s: SurveyRecord): SurveyStage => (s.stage || "requested") as SurveyStage;
-  const base = mine ? all.filter((s) => (s.assignedTo || "") === me) : all;
+  const base = (mine ? all.filter((s) => (s.assignedTo || "") === me) : all).filter(
+    (s) => !tagFilter.length || (s.internalTags || []).some((t) => tagFilter.includes(t))
+  );
   const countFor = (k: Seg) => (k === "all" ? base.length : base.filter((s) => stKey(s) === k).length);
 
   const list = base.filter((s) => stage === "all" || stKey(s) === stage);
@@ -201,6 +207,7 @@ export default async function FieldSurveyPage({
     const params = new URLSearchParams();
     if (key !== "all") params.set("stage", key);
     if (mine) params.set("mine", "1");
+    for (const t of tagFilter) params.append("tag", t);
     const qs = params.toString();
     return "/venue-assessments" + (qs ? "?" + qs : "");
   };
@@ -208,6 +215,7 @@ export default async function FieldSurveyPage({
     const params = new URLSearchParams();
     if (stage !== "all") params.set("stage", stage);
     if (!mine) params.set("mine", "1");
+    for (const t of tagFilter) params.append("tag", t);
     const qs = params.toString();
     return "/venue-assessments" + (qs ? "?" + qs : "");
   })();
@@ -394,6 +402,43 @@ export default async function FieldSurveyPage({
           Assigned to me
         </Link>
       </div>
+
+      {(() => {
+        const used = new Set(all.flatMap((s) => s.internalTags || []));
+        const shown = activeSurveyTags(tags).filter((t) => used.has(t.id) || tagFilter.includes(t.id));
+        if (!shown.length) return null;
+        const tagHref = (id: string) => {
+          const next = tagFilter.includes(id) ? tagFilter.filter((x) => x !== id) : [...tagFilter, id];
+          const params = new URLSearchParams();
+          if (stage !== "all") params.set("stage", stage);
+          if (mine) params.set("mine", "1");
+          next.forEach((t) => params.append("tag", t));
+          const qs = params.toString();
+          return "/venue-assessments" + (qs ? "?" + qs : "");
+        };
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "-4px 0 16px" }}>
+            <span style={{ fontSize: 10.5, fontWeight: 600, color: "#aab0bb", letterSpacing: ".05em", textTransform: "uppercase" }}>Tags</span>
+            {shown.map((t) => {
+              const on = tagFilter.includes(t.id);
+              return (
+                <Link
+                  key={t.id}
+                  href={tagHref(t.id)}
+                  style={{
+                    fontSize: 12.5, fontWeight: 600, borderRadius: 20, padding: "7px 12px", textDecoration: "none", whiteSpace: "nowrap",
+                    border: on ? "1px solid var(--accent)" : "1px solid #e4e7ec",
+                    background: on ? ACCENT_SOFT : "#fff",
+                    color: on ? ACCENT_INK : "#5b616e",
+                  }}
+                >
+                  {t.label}
+                </Link>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* #34 — open-visit queue, ABOVE the survey cards */}
       <VisitRequests rows={visitRows} team={team} me={me} />

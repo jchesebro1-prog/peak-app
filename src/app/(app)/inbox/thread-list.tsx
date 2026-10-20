@@ -17,7 +17,7 @@ const LABEL_SWATCHES = [
   ["#7b5fb0", "#f1ebf8"],
 ] as const;
 
-function labelColors(label: { id: string; textColor?: string | null; backgroundColor?: string | null }) {
+export function labelColors(label:{ id: string; textColor?: string | null; backgroundColor?: string | null }) {
   if (label.textColor || label.backgroundColor)
     return { color: label.textColor || "#5b616e", background: label.backgroundColor || "#f1f2f5" };
   let hash = 0;
@@ -59,6 +59,7 @@ export default function ThreadList({
   onOpenResult,
   rowActions,
   width = 392,
+  top = null,
 }: {
   list: ListVM;
   selectedId: string | null;
@@ -84,6 +85,8 @@ export default function ThreadList({
   onOpenResult: (id: string) => void;
   rowActions: RowActions;
   width?: number;
+  /** #345 — the Organize entry bar (tab row + banner), above everything */
+  top?: React.ReactNode;
 }) {
   const rows = list.rows;
 
@@ -127,6 +130,7 @@ export default function ThreadList({
         minHeight: 0,
       }}
     >
+      {top}
       {/* command bar (bulk actions + filter/sort) */}
       {commandBar}
 

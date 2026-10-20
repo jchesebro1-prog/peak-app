@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { getBlob, setBlob } from "@/db/doc-store";
+import { getBlob, updateBlob } from "@/db/doc-store";
 import { applyIntroOp, newIntroId, sanitizeIntroList, type IntroOp, type SystemIntro } from "@/lib/narrative/intros";
 
 /**
@@ -19,11 +19,16 @@ export async function listIntros(): Promise<SystemIntro[]> {
 }
 
 async function write(op: IntroOp, by: string) {
-  const list = await listIntros();
-  const res = applyIntroOp(list, op, Date.now(), by, () => newIntroId(() => randomInt(0, 36) / 36));
-  if (!res.ok) return res;
-  await setBlob(INTROS_BLOB, { intros: res.list });
-  return res;
+  // #343: the one operation is applied to the STORED list under the blob's
+  // row lock, so two intros saved at the same moment both land.
+  const now = Date.now();
+  const out: { res?: ReturnType<typeof applyIntroOp> } = {};
+  await updateBlob(INTROS_BLOB, (raw) => {
+    const res = applyIntroOp(sanitizeIntroList(raw.intros), op, now, by, () => newIntroId(() => randomInt(0, 36) / 36));
+    out.res = res;
+    return res.ok ? { intros: res.list } : null;
+  });
+  return out.res!;
 }
 
 export function upsertIntro(input: unknown, by: string) {

@@ -142,6 +142,7 @@ export default function ClientPackageTab({ s, active }: { s: EstimatorState; act
     togglePdf,
     status,
     revNum,
+    setPdf,
   } = s;
 
   /* ---- datasheet rows: the unsaved BOM, debounced 800 ms, latest wins, only while shown ----
@@ -290,7 +291,7 @@ export default function ClientPackageTab({ s, active }: { s: EstimatorState; act
               <DocRow title={COPY.drawings(loadedId ? drawingCount : null)} hint={COPY.drawingsHint} on={sel.drawings} onChange={(v) => setPackageSwitch("drawings", v)}>
                 <div style={{ paddingLeft: 44 }}>
                   {loadedId ? (
-                    <PackageStaffPanel quoteId={loadedId} section="documents" refreshKey={panelKey} onFiles={setDrawingCount} />
+                    <PackageStaffPanel quoteId={loadedId} section="documents" refreshKey={panelKey} onFiles={setDrawingCount} onPdf={setPdf} />
                   ) : (
                     <span style={HINT}>{COPY.saveForDrawings}</span>
                   )}

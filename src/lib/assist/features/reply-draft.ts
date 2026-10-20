@@ -1,6 +1,7 @@
 /** Draft reply (spec §8). Pure. */
 import { stripSignature } from "@/lib/inbox-signature";
 import { cleanPromptField, defangWrappers, UNTRUSTED_NOTE } from "./thread-text";
+import { ownsMailbox, type MailboxViewer } from "@/lib/stores/comms-visibility";
 
 export const REPLY_SYSTEM = [
   "You draft email replies for a staff member at Peak Systems Group (theatrical rigging, curtains, lighting and AV).",
@@ -34,7 +35,7 @@ export function openQuotesFor(quotes: QuoteLike[], customerId: string | null): O
 }
 
 type ThreadLike = {
-  id: string; mailbox?: string; mailboxUser?: string | null; deleted?: boolean;
+  id: string; mailbox?: string; mailboxUser?: string | null; mailboxOwnerId?: string | null; gmailAccountKey?: string; deleted?: boolean;
   messages?: Array<{ direction: string; channel?: string | null; queued?: boolean | null; author?: string; at: number; body?: string }>;
 };
 
@@ -59,11 +60,12 @@ export function stripQuotedText(body: string): string {
  *  in the writer's own box is theirs: Gmail-imported mail carries the Gmail
  *  display name as author, so the author is not matched. Logged
  *  calls/meetings, queued (unsent) outbound and deleted threads are never
- *  examples. */
-export function pickStyleExamples(threads: ThreadLike[], me: string, excludeThreadId: string, signature: string, n = 5, maxChars = 1200): string[] {
+ *  examples. #349 — "my own box" is by identity (ownsMailbox): a teammate
+ *  who shares my display name never lends me their sent mail. */
+export function pickStyleExamples(threads: ThreadLike[], me: MailboxViewer, excludeThreadId: string, signature: string, n = 5, maxChars = 1200): string[] {
   const msgs: Array<{ at: number; body: string }> = [];
   for (const t of threads) {
-    if (t.deleted || t.id === excludeThreadId || t.mailbox !== "personal" || t.mailboxUser !== me) continue;
+    if (t.deleted || t.id === excludeThreadId || t.mailbox !== "personal" || !ownsMailbox({ ...t, mailbox: "personal" }, me)) continue;
     for (const m of t.messages ?? []) {
       if (m.channel && m.channel !== "email") continue;
       if (m.queued) continue;

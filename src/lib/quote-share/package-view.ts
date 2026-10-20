@@ -1,6 +1,6 @@
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import { latestSentRevision, pdfKindForQuoteType } from "@/lib/quote-pdf/state";
-import { ONLINE_COPY, sentDocumentStamp } from "./view";
+import { ONLINE_COPY, ONLINE_VIEW_LABELS, sentDocumentStamp } from "./view";
 import { ALTERNATES_NOTE, ALTERNATES_TITLE } from "@/lib/estimate-output/alternates-copy";
 import { opensFor, opensSummary, type ShareOpenStat } from "@/lib/estimate-output/opens";
 
@@ -19,10 +19,11 @@ export const PACKAGE_COPY = {
   viewCurrent: "View the current version",
   summary: "Summary",
   goals: "Your goals",
-  narrative: "Narrative",
-  bom: "BOM",
+  /** Batch 5 #63 — the toggle reads Overview / Itemized. */
+  narrative: ONLINE_VIEW_LABELS.narrative,
+  bom: ONLINE_VIEW_LABELS.bom,
   bomHead: ["Qty", "Manufacturer", "Model", "Description"],
-  seeBom: "The full parts list for this scope is under BOM.",
+  seeBom: `The full parts list for this scope is under ${ONLINE_VIEW_LABELS.bom}.`,
   noParts: "No parts listed for this scope.",
   options: "Add options",
   /** Estimator Phase 2b — the Alternates card; the cover's own shared copy (alternates-copy.ts). */
@@ -31,7 +32,16 @@ export const PACKAGE_COPY = {
   notIncluded: "Not included",
   clientLink: "Client link",
   openedChip: "Opened",
+  /** Batch 5 #58 — staff only (Client link panel, Quotes hub tooltip); never on a customer page. */
+  viewed: "Viewed",
+  /** #348 2b-ii — a bidder's v3 link once the bid is no longer live; says nothing about the award. */
+  bidClosed: "This bid is closed.",
 } as const;
+
+/** A bidder's link may act only while their bid is pending or awarded; the owner's v2 (no bidder) always may. */
+export function bidderCanAct(result: string | null | undefined): boolean {
+  return result == null || result === "pending" || result === "awarded";
+}
 
 export type PackageState =
   | { kind: "ok"; rev: QuoteRevision; closed: boolean; won: boolean }
@@ -65,7 +75,8 @@ export type PackageBanner = { tone: "info" | "warn"; text: string; href: string 
 
 const longDate = (ms: number) => new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" });
 
-export function packageBanner(s: VisiblePackageState, currentHref: string | null): PackageBanner | null {
+export function packageBanner(s: VisiblePackageState, currentHref: string | null, bidClosed = false): PackageBanner | null {
+  if (bidClosed) return { tone: "info", text: PACKAGE_COPY.bidClosed, href: null, linkText: null };
   if (s.kind === "superseded")
     return { tone: "info", text: `${PACKAGE_COPY.supersededLead} ${longDate(s.sentAt)}.`, href: currentHref, linkText: currentHref ? PACKAGE_COPY.viewCurrent : null };
   if (s.kind === "revising") return { tone: "warn", text: PACKAGE_COPY.revising, href: null, linkText: null };
@@ -100,11 +111,29 @@ export function sentRevisionRows(q: OpensSource | null | undefined): SentRevRow[
   return rows.reverse();
 }
 
-/** The Quotes hub chip: "Opened" once any sent revision's link was opened. */
-export function opensChip(q: OpensSource | null | undefined): { label: string; title: string } | null {
+/** Batch 5 #58 (Jeff, 2026-10-15) — staff only: the latest time the client
+ *  opened ANY sent revision's package link (the #301 beacon's `last`), or
+ *  null when it was never opened. Never shown to the customer. */
+export function lastViewedAt(q: OpensSource | null | undefined): number | null {
+  let last = 0;
+  for (const r of sentRevisionRows(q)) if (r.opens && r.opens.last > last) last = r.opens.last;
+  return last > 0 ? last : null;
+}
+
+/** "Viewed Oct 6, 10:42 AM" (Chicago) — the staff stamp; "" when never opened. */
+export function viewedStamp(q: OpensSource | null | undefined): string {
+  const at = lastViewedAt(q);
+  return at ? `${PACKAGE_COPY.viewed} ${sentStamp(at)}` : "";
+}
+
+/** The Quotes hub chip: "Opened" once any sent revision's link was opened;
+ *  its tooltip leads with the latest open's date and time (Batch 5 #58). */
+export function opensChip(q: OpensSource | null | undefined): { label: string; title: string; viewed: string } | null {
   const opened = sentRevisionRows(q).filter((r) => r.opens);
   if (!opened.length) return null;
-  return { label: PACKAGE_COPY.openedChip, title: `${PACKAGE_COPY.clientLink} — ${opened.map((r) => r.line).join("; ")}` };
+  const viewed = viewedStamp(q);
+  // #355 review M7: `viewed` also prints on the hub row itself, not only in the tooltip.
+  return { label: PACKAGE_COPY.openedChip, title: `${viewed} — ${PACKAGE_COPY.clientLink} — ${opened.map((r) => r.line).join("; ")}`, viewed };
 }
 
 /** The lead drawer's line: the latest revision's row, once anything was opened. */

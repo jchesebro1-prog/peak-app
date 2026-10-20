@@ -10,8 +10,8 @@
  * checks the connection's gmail.modify scope first (same check as
  * syncPeakLabels) so a read-only mailbox never attempts a Gmail write.
  */
-import { listDocs, patchDoc } from "@/db/doc-store";
-import { assign, setLink, setStatus, type CommThread } from "@/lib/stores/comms";
+import { casDocKey, getDoc, listDocs, patchDoc } from "@/db/doc-store";
+import { assign, setLink, setStatus, type CommMessage, type CommThread } from "@/lib/stores/comms";
 import { allCompanies } from "@/lib/identity/companies";
 import { create as createLead } from "@/lib/stores/leads";
 import { activeUsers } from "@/lib/users";
@@ -21,8 +21,66 @@ import { getConnectionInfo, listCachedLabels } from "./connections";
 import { GMAIL_MODIFY_SCOPE, type MailboxKey, userIdOfKey } from "./config";
 import { linkThread, rememberAddress } from "./linking";
 import { resolveAddressFor } from "@/lib/inbox-identity";
-import { desiredPeakLabels, parsePeakLabel, type PeakCommand } from "./peak-labels";
+import { desiredPeakLabels, isPlaceholderCustomerLabel, parsePeakLabel, type PeakCommand } from "./peak-labels";
 import { ensureLabelId } from "./label-sync";
+import { isPickableLabel, USER_LABEL_ECHO_MS } from "./user-label-rules";
+
+/** #347 — a label id the Labels card shows as editable: a known user label
+ *  (not Peak/*) or Starred / Important. An id the cache doesn't know (a
+ *  label made in Gmail since the last label sync) counts when it looks like
+ *  a user label id (`Label_…`), so a new label still shows. */
+export function isCardLabel(id: string, row: { labelId: string; name: string; type: "system" | "user" } | undefined): boolean {
+  if (row) return isPickableLabel(row);
+  return /^Label_/.test(id);
+}
+
+/** #347 — pure: the person's own label changes in `events` (history order),
+ *  per Gmail thread → Gmail message → label id → on/off; the last event for
+ *  a message + label wins. */
+export function userLabelChanges(
+  events: ReadonlyArray<GmailLabelEvent>,
+  isCard: (id: string) => boolean
+): Map<string, Map<string, Map<string, boolean>>> {
+  const out = new Map<string, Map<string, Map<string, boolean>>>();
+  for (const ev of events) {
+    const touched = [...ev.added.filter(isCard).map((id) => [id, true] as const), ...ev.removed.filter(isCard).map((id) => [id, false] as const)];
+    if (!touched.length) continue;
+    let byMsg = out.get(ev.threadId);
+    if (!byMsg) out.set(ev.threadId, (byMsg = new Map()));
+    let byLabel = byMsg.get(ev.messageId);
+    if (!byLabel) byMsg.set(ev.messageId, (byLabel = new Map()));
+    for (const [id, on] of touched) byLabel.set(id, on);
+  }
+  return out;
+}
+
+/** #347 — pure: `messages` with those changes applied, skipping a label the
+ *  card changed within the echo window; null when nothing changes. */
+export function applyUserLabelChanges(
+  messages: ReadonlyArray<CommMessage>,
+  perMessage: ReadonlyMap<string, ReadonlyMap<string, boolean>>,
+  ops: CommThread["userLabelOps"],
+  now: number,
+  echoMs: number = USER_LABEL_ECHO_MS
+): CommMessage[] | null {
+  const held = (id: string) => {
+    const op = ops?.[id];
+    return !!op && op.at > now - echoMs;
+  };
+  let changed = false;
+  const out = messages.map((m) => {
+    const ch = m.gmailId ? perMessage.get(m.gmailId) : undefined;
+    if (!ch) return m;
+    let ids = m.gmailLabelIds || [];
+    for (const [id, on] of ch) {
+      if (held(id) || ids.includes(id) === on) continue;
+      ids = on ? [...ids, id] : ids.filter((x) => x !== id);
+      changed = true;
+    }
+    return ids === (m.gmailLabelIds || []) ? m : { ...m, gmailLabelIds: ids };
+  });
+  return changed ? out : null;
+}
 
 /** No echo-window constant lives in label-sync.ts (the writer stamps
  *  peakLabelsAppliedAt but doesn't need its own window) — 2 minutes here. */
@@ -127,6 +185,7 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
   const canModify = !!conn && (conn.scope || "").includes(GMAIL_MODIFY_SCOPE);
   const cache = await listCachedLabels(key);
   const idToName = new Map(cache.map((l) => [l.labelId, l.name]));
+  const cacheById = new Map(cache.map((l) => [l.labelId, l]));
   const all = await listDocs<CommThread>("comms");
   const byGmailThread = new Map(
     all.filter((t) => t.gmailAccountKey === key && t.gmailThreadId).map((t) => [t.gmailThreadId!, t])
@@ -138,6 +197,8 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
     if (!t) continue;
     const addedNames = ev.added.map((id) => idToName.get(id) || "").filter((n) => n.startsWith("Peak/"));
     const removedNames = ev.removed.map((id) => idToName.get(id) || "").filter((n) => n.startsWith("Peak/"));
+    // (the person's own labels are recorded by the #347 pass below, whatever
+    // else the event carries)
     if (!addedNames.length && !removedNames.length) continue;
 
     // Our own echo: the writer just wrote exactly this add/remove set for
@@ -166,15 +227,22 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
           (x) => x.name.split(" ")[0].toLowerCase() === cmd.firstName.toLowerCase()
         );
         if (matches.length === 1) {
-          await assign(t.id, matches[0].name);
+          await assign(t.id, { id: matches[0].id, name: matches[0].name }); // #349 — by identity
           applied++;
         } else {
           console.warn("[gmail] ambiguous/unknown assignee, skipping:", cmd.firstName, t.id);
         }
       } else if (cmd.kind === "customer") {
+        // #345 — Peak/Customers/UNKNOWN (a placeholder company) links nothing
+        if (isPlaceholderCustomerLabel("Peak/Customers/" + cmd.name)) continue;
         const c = await findCustomerBySanitizedName(cmd.name);
         if (c) {
-          await linkThread(t.id, c.id);
+          // #341 — a person labelling the thread in their own Gmail is a
+          // deliberate link; a label that only echoes the customer the app
+          // already holds (the label writer's own, after the echo window)
+          // keeps the thread's flag as it was, so an automatic match never
+          // becomes shared through its own label.
+          await linkThread(t.id, c.id, null, t.customerId === c.id ? null : "user");
           // I review — the picked identity message's address (#125) when
           // one is set, else the thread contact; a Peak/Customers label
           // applied on a multi-party or forwarded thread must remember the
@@ -186,10 +254,15 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
           // customer's own contact address.
           const identityEmail = resolveAddressFor(t, conn?.address);
           if (identityEmail) {
-            await rememberAddress(c.id, identityEmail, t.contactName, null, {
-              id: userIdOfKey(key) || "u1",
-              name: "Gmail label",
-            });
+            await rememberAddress(
+              c.id,
+              identityEmail,
+              t.contactName,
+              null,
+              { id: userIdOfKey(key) || "u1", name: "Gmail label" },
+              // #341 — the backlog resweep stays in this mailbox
+              { accountKey: key }
+            );
           }
           applied++;
         } else {
@@ -247,6 +320,7 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
           d.customer = "";
           d.resolution = "unknown";
           d.siteId = null; // #124 — no customer, no venue
+          delete d.linkedBy; // #341 — unlinked, so no longer shared
         });
         applied++;
       }
@@ -258,19 +332,43 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
     // each one), so update every message this event actually touched, not
     // just one.
     const touchedMessageIds = new Set(ev.messageIds);
+    // #347 — the person's own labels are left to the ordered pass below
+    const notCard = (id: string) => !isCardLabel(id, cacheById.get(id));
+    const evAdded = ev.added.filter(notCard);
+    const evRemoved = ev.removed.filter(notCard);
     await patchDoc<CommThread>("comms", t.id, (d) => {
       d.messages = (d.messages || []).map((m) =>
         m.gmailId && touchedMessageIds.has(m.gmailId)
           ? {
               ...m,
               gmailLabelIds: Array.from(
-                new Set([...(m.gmailLabelIds || []).filter((id) => !ev.removed.includes(id)), ...ev.added])
+                new Set([...(m.gmailLabelIds || []).filter((id) => !evRemoved.includes(id)), ...evAdded])
               ),
             }
           : m
       );
       d.peakLabelsAppliedAt = Date.now();
     });
+  }
+
+  // #347 — the person's own labels (and Starred / Important) changed in
+  // Gmail: no command, just record them so the Labels card shows them —
+  // from every event, Peak/* or not. In history order (the last event for a
+  // message + label wins, so an add then a remove nets to removed). A label
+  // the card changed within the echo window is ignored (`userLabelOps`): the
+  // card's state wins, so a stale echo never re-adds a label it removed.
+  // Compare-and-set on `messages`, re-read on conflict.
+  const isCard = (id: string) => isCardLabel(id, cacheById.get(id));
+  for (const [gThread, perMessage] of userLabelChanges(events, isCard)) {
+    const t0 = byGmailThread.get(gThread);
+    if (!t0) continue;
+    for (let i = 0; i < 5; i++) {
+      const t = await getDoc<CommThread>("comms", t0.id);
+      if (!t) break;
+      const next = applyUserLabelChanges(t.messages || [], perMessage, t.userLabelOps, Date.now());
+      if (!next) break;
+      if (await casDocKey("comms", t.id, "messages", t.messages, next)) break;
+    }
   }
   return applied;
 }

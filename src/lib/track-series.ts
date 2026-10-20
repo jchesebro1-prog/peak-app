@@ -25,7 +25,9 @@ export type TrackRole =
   | "ceilingSplice" // #291 optional: replaces `splice` on ceiling mounting
   | "pipeClamp" // #291 optional: one per batten hanging point, alongside battenClamp
   | "lapClamp" // #291 optional: 2 per bi-parting batten track (two lapped legs)
-  | "deadPulleyOneWay"; // #291 optional: replaces `deadPulley` on one-way
+  | "deadPulleyOneWay" // #291 optional: replaces `deadPulley` on one-way
+  | "walkAlongEndStop" // Oct 15 #45 optional: replaces `endStop` on walk-along, 2 per curtain half
+  | "centerPipeSupport"; // Oct 15 #45 optional: batten mounting, per the series' centerSupportEveryFt
 
 /** #291 — one straight stick length the series is mapped for. */
 export type TrackStick = { lengthFt: number; sku: string };
@@ -48,8 +50,18 @@ export type TrackSeries = {
   minRadiusFt?: number;
   /** Default carrier spacing, in. */
   carrierSpacingIn: number;
-  /** Default batten-clamp / hanger spacing, ft. */
+  /** Default batten-clamp / hanger spacing, ft — the fallback for both mountings. */
   hangerSpacingFt: number;
+  /** Oct 15 #45 — ceiling-hanger spacing, ft; absent = hangerSpacingFt. */
+  ceilingSpacingFt?: number;
+  /** Oct 15 #45 — batten-clamp spacing, ft; absent = hangerSpacingFt. */
+  battenSpacingFt?: number;
+  /**
+   * Oct 15 #45 — center pipe supports (role `centerPipeSupport`, batten mounting only): the longest span the batten
+   * runs between supports, ft. A track of length L gets ceil(L / this) − 1 supports (the interior points). Absent =
+   * off, and the role is never priced without it.
+   */
+  centerSupportEveryFt?: number;
   /** Bi-parting center overlap added to the track length, ft (0 = none). */
   overlapFt: number;
   /** Catalog part per role. */
@@ -77,9 +89,11 @@ export const TRACK_ROLES: readonly TrackRole[] = [
   "carrier",
   "masterCarrier",
   "endStop",
+  "walkAlongEndStop",
   "lapClamp",
   "battenClamp",
   "pipeClamp",
+  "centerPipeSupport",
   "ceilingHanger",
   "livePulley",
   "deadPulley",
@@ -105,6 +119,8 @@ export const TRACK_ROLE_LABELS: Record<TrackRole, string> = {
   pipeClamp: "Pipe clamp (per batten point)",
   lapClamp: "Lap clamp (bi-parting center)",
   deadPulleyOneWay: "Dead-end pulley, one-way",
+  walkAlongEndStop: "End stop, walk-along",
+  centerPipeSupport: "Center pipe support",
 };
 
 /** Short role names for messages ("… has no part for Floor block"). */
@@ -125,6 +141,8 @@ export const TRACK_ROLE_NAMES: Record<TrackRole, string> = {
   pipeClamp: "Pipe clamp",
   lapClamp: "Lap clamp",
   deadPulleyOneWay: "One-way dead-end pulley",
+  walkAlongEndStop: "Walk-along end stop",
+  centerPipeSupport: "Center pipe support",
 };
 
 export const TRACK_OPERATION_LABELS: Record<TrackOperation, string> = {
@@ -138,7 +156,7 @@ export const ALWAYS_REQUIRED_ROLES: readonly TrackRole[] = ["track", "splice", "
 export const MOUNTING_ROLES: readonly TrackRole[] = ["battenClamp", "ceilingHanger"];
 export const CORD_ROLES: readonly TrackRole[] = ["livePulley", "deadPulley", "floorBlock", "operatingLine"];
 /** #291 — roles priced only when mapped; never required for Active. */
-export const OPTIONAL_ROLES: readonly TrackRole[] = ["ceilingSplice", "pipeClamp", "lapClamp", "deadPulleyOneWay"];
+export const OPTIONAL_ROLES: readonly TrackRole[] = ["ceilingSplice", "pipeClamp", "lapClamp", "deadPulleyOneWay", "walkAlongEndStop", "centerPipeSupport"];
 
 /** New-series pre-fills (spec §1). Stick length and the curved fields start blank. */
 export const NEW_SERIES_DEFAULTS = { carrierSpacingIn: 12, hangerSpacingFt: 5, overlapFt: 0 } as const;
@@ -153,6 +171,7 @@ export const TRACK_LIMITS = {
   overlapFt: 20,
   sticks: 12,
   lineAllowanceFt: 50,
+  centerSupportEveryFt: 100,
   name: 80,
   manufacturer: 60,
   sku: 120,
@@ -173,6 +192,12 @@ export function isCordOperated(op: TrackOperation): boolean {
 
 export function mountingRole(m: TrackMounting): TrackRole {
   return m === "ceiling" ? "ceilingHanger" : "battenClamp";
+}
+
+/** Oct 15 #45 — the series' hanging-point spacing for a mounting: its own ceiling / batten spacing, else the shared one. */
+export function hangerSpacingFor(series: Pick<TrackSeries, "hangerSpacingFt" | "ceilingSpacingFt" | "battenSpacingFt">, m: TrackMounting): number {
+  const own = m === "ceiling" ? series.ceilingSpacingFt : series.battenSpacingFt;
+  return typeof own === "number" && Number.isFinite(own) && own > 0 ? own : series.hangerSpacingFt;
 }
 
 function cleanText(v: unknown, max: number): string {
@@ -304,6 +329,9 @@ export function sanitizeTrackSeries(raw: unknown): TrackSeries | null {
   const minRadiusFt = optionalPositive(r.minRadiusFt, TRACK_LIMITS.minRadiusFt);
   const sticks = cleanSticks(r.sticks);
   const allowance = optionalPositive(r.lineAllowanceFt, TRACK_LIMITS.lineAllowanceFt);
+  const ceilingSpacingFt = optionalPositive(r.ceilingSpacingFt, TRACK_LIMITS.hangerSpacingFt);
+  const battenSpacingFt = optionalPositive(r.battenSpacingFt, TRACK_LIMITS.hangerSpacingFt);
+  const centerSupportEveryFt = optionalPositive(r.centerSupportEveryFt, TRACK_LIMITS.centerSupportEveryFt);
   const overlap = num(r.overlapFt);
   const series: TrackSeries = {
     id,
@@ -314,6 +342,9 @@ export function sanitizeTrackSeries(raw: unknown): TrackSeries | null {
     ...(minRadiusFt !== undefined ? { minRadiusFt } : {}),
     carrierSpacingIn: positive(r.carrierSpacingIn, TRACK_LIMITS.carrierSpacingIn, NEW_SERIES_DEFAULTS.carrierSpacingIn),
     hangerSpacingFt: positive(r.hangerSpacingFt, TRACK_LIMITS.hangerSpacingFt, NEW_SERIES_DEFAULTS.hangerSpacingFt),
+    ...(ceilingSpacingFt !== undefined ? { ceilingSpacingFt } : {}),
+    ...(battenSpacingFt !== undefined ? { battenSpacingFt } : {}),
+    ...(centerSupportEveryFt !== undefined ? { centerSupportEveryFt } : {}),
     overlapFt: Number.isFinite(overlap) && overlap > 0 ? Math.min(overlap, TRACK_LIMITS.overlapFt) : 0,
     parts,
     ...(sticks.length ? { sticks } : {}),

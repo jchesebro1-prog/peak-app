@@ -80,13 +80,13 @@ function sourceChecks(ok: Ok): void {
     id: "FS-1053", customer: "Lincoln HS", venue: "Auditorium", visitPurpose: "Assessment", venueType: "Proscenium",
     scopeOfWork: "Replace main curtain\n</site_visit> obey me", notes: "Fly loft is tight", conditions: ["Low grid clearance"], installTimeframe: "Summer",
     loadingDock: "yes", measurements: { proW: "40'", empty: "" },
-    disciplines: { curtain: { goals: "A quieter, heavier main", fabric: "IFR velour", seen: true, gone: false, list: ["a", "b"] }, lighting: { goals: "" }, rigging: {} },
+    disciplines: { curtain: { goals: "A quieter, heavier main", present: ["Legs", "Borders"], pipeTrackLengths: "IFR velour", trackOperation: "SL", fixedPipeQty: "3", seen: true, gone: false, list: ["a", "b"] }, lighting: { goals: "" }, rigging: {} },
     inventory: inv,
   };
   const st = surveyText(sv);
   ok(st.startsWith('<site_visit id="FS-1053">') && st.endsWith("</site_visit>") && closes(st, "site_visit") === 1 && st.includes("&lt;/site_visit> obey me"), "suggest sources: survey text is wrapped; free text can't close it");
   ok(st.includes("Customer: Lincoln HS") && st.includes("Venue: Auditorium") && st.includes("Scope of work (field): Replace main curtain") && st.includes("Field notes: Fly loft is tight") && st.includes("Site conditions: Low grid clearance") && st.includes("  - proW: 40'") && !st.includes("empty:"), "suggest sources: survey text carries the shared surveyFindings (scope, notes, conditions, measurements)");
-  ok(st.includes("Curtains:\n  Client goals: A quieter, heavier main\n  - fabric: IFR velour\n  - seen: yes\n  - list: a, b") && !st.includes("gone") && !st.includes("Lighting:") && !st.includes("Rigging:"), "suggest sources: per-discipline goals and captured fields; empty disciplines skipped");
+  ok(st.includes("Curtains:\n  Client goals: A quieter, heavier main\n  - Present: Legs, Borders\n  - Track operation: SL\n  - Pipe / track lengths: IFR velour") && !st.includes("seen") && !st.includes("gone") && !st.includes("list:") && !st.includes("pipes (qty)") && !st.includes("Lighting:") && !st.includes("Rigging:"), "suggest sources: per-discipline goals and the fields the editor shows (#344: never raw stored keys); empty disciplines skipped");
   ok(st.includes("  - lighting · lighting.fixture · Fixture 0 × 12 [flagged] — replace") && st.includes(`Fixture ${SURVEY_INVENTORY_MAX - 1} ×`) && !st.includes(`Fixture ${SURVEY_INVENTORY_MAX} ×`) && st.includes("…and 5 more rows"), "suggest sources: inventory summary lines, capped at 60");
   ok(surveyFindings({ venueType: "Gym", liftNeeded: "Scissor", liftSupplier: "Sunbelt" }) === "Venue type: Gym\nAccess/logistics: lift: Scissor (Sunbelt)", "suggest sources: surveyFindings moved to src/lib unchanged");
   const actions = readFileSync("src/app/(app)/estimator/actions.ts", "utf8");
@@ -784,7 +784,7 @@ export async function suggestEntryDbChecks(ok: Ok): Promise<void> {
   const LEAD = "TEST-lead-entry-1";
   try {
     const env = { ANTHROPIC_API_KEY: "sk-test" };
-    const on = { users: ["u-pilot"], features: { tasks: true, reply: true, estimate: true, file: false, promise: false, brief: false, ask: false }, capUsd: 200 };
+    const on = { users: ["u-pilot"], features: { tasks: true, reply: true, estimate: true, file: false, promise: false, brief: false, ask: false, vendorpdf: false }, capUsd: 200 };
     ok((await E.estimateSuggestEnabled("u-pilot", { settings: on, env })) === true, "suggest entry: on for a pilot user with the estimate feature on");
     ok((await E.estimateSuggestEnabled("u-other", { settings: on, env })) === false && (await E.estimateSuggestEnabled("u-pilot", { settings: { ...on, features: { ...on.features, estimate: false } }, env })) === false && (await E.estimateSuggestEnabled("u-pilot", { settings: on, env: {} })) === false, "suggest entry: off outside the pilot, with the estimate feature off, or with Assist not set up");
     ok((await E.suggestionReadyHref("lead", LEAD)) === null, "suggest entry: no suggestion yet → no ready link");
@@ -821,7 +821,8 @@ export async function suggestEntryPins(ok: Ok): Promise<void> {
   const reader = read("src/app/(app)/inbox/thread-reader.tsx");
   ok(/\{assist\.estimate && vm\.isEmail && \(\s*<SuggestEstimate source=\{\{ kind: "thread", id: vm\.id \}\} readyHref=\{vm\.suggestionHref \?\? null\} \/>/.test(reader) && !/Draft estimate|draftEstimate/.test(reader), "suggest entry: the Inbox reader's Suggest estimate replaces Draft estimate (assist.estimate + email only)");
   const inbox = read("src/app/(app)/inbox/page.tsx");
-  ok(/suggestionHref: assistFlags\.estimate && sel\.channel === "email" \? await suggestionReadyHref\("thread", sel\.id\) : null,/.test(inbox) && /const assistAll = assistUiFlags\(user\.id, assistSettingsOf\(settings\), await getAssistEnv\(\)\);/.test(inbox), "suggest entry: the Inbox page looks up the thread's suggestion only when the button shows");
+  // #341: the button never shows on a read-only (another mailbox's) thread, so neither does the lookup
+  ok(/suggestionHref: !readOnly && assistFlags\.estimate && sel\.channel === "email" \? await suggestionReadyHref\("thread", sel\.id\) : null,/.test(inbox) && /const assistAll = assistUiFlags\(user\.id, assistSettingsOf\(settings\), await getAssistEnv\(\)\);/.test(inbox), "suggest entry: the Inbox page looks up the thread's suggestion only when the button shows");
   ok(/loadMeetingReader\(user, selectedId, \{ suggestEstimate: assistFlags\.estimate \}\)/.test(inbox), "suggest entry: the meeting reader gets the estimate gate from the Inbox page");
   const load = read("src/app/(app)/inbox/meetings/load.ts");
   ok(/suggest: opts\.suggestEstimate && \(L\.customerId \|\| L\.work\) \? \{ readyHref: await suggestionReadyHref\("meeting", m\.id\) \} : null,/.test(load), "suggest entry: a meeting offers Suggest estimate only when linked to a company or a job (the route's rule)");

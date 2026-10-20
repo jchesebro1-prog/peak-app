@@ -2,6 +2,9 @@
  *  scope picker output of quotes without alternates, which the harness
  *  compares against. Run ONCE, before the estimate-output modules are edited:
  *    npx tsx scripts/outputs-p2b-baseline.ts
+ *  Re-captured 2026-10-16 for the photo wrap (scope body + figure CSS).
+ *  Re-captured 2026-10-17 for side photos shrinking to the picture (width: fit-content; max-width: 34%).
+ *  Re-captured 2026-10-17 (final review) for the key-product gap restored to 24px (.pkg-kp padding + last-child margin).
  *  Pure; opens no database. */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createElement } from "react";

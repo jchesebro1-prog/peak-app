@@ -1,13 +1,15 @@
 import { keyProductHeading } from "@/app/(app)/estimator/narrative";
 import type { KeyProductLibraryRow } from "@/app/(app)/estimator/narrative";
 import type { SpecSection } from "@/app/(app)/estimator/types";
+import { lineModel, lineOwnModel, partModel } from "@/lib/catalog-rename/sku";
+import { photoTagText } from "@/lib/estimate-output/photo-models";
 import { findLine, findSection } from "@/lib/package-doc/chips";
-import { productBlockInBom } from "@/lib/package-doc/gaps";
+import { lineAnchorInBom, productBlockInBom } from "@/lib/package-doc/gaps";
 import { linePlaceholder } from "@/lib/package-doc/print";
-import { clampPhotoWidth, DEFAULT_IMAGE, isPhotoAlign, MAX_BLOCK_TEXT, MAX_DEPTH, MAX_JSON_CHARS, MAX_NODES } from "@/lib/package-doc/schema";
+import { clampPhotoWidth, DEFAULT_IMAGE, isImageAlign, isPhotoAlign, MAX_BLOCK_TEXT, MAX_DEPTH, MAX_JSON_CHARS, MAX_NODES } from "@/lib/package-doc/schema";
 import { countNodes, sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import { normalizeProductText } from "@/lib/package-doc/text";
-import type { LineAnchor, PackageDoc, PDProductBlock, PhotoAlign, PhotoAttrs } from "@/lib/package-doc/types";
+import type { ImageAlign, LineAnchor, PackageDoc, PDProductBlock, PhotoAttrs } from "@/lib/package-doc/types";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
 
 /**
@@ -96,6 +98,18 @@ export function linePhotoPreview(
   return null;
 }
 
+/** Photo wrap — the tag the editor shows on a line-anchored photo: linePhotoPreview's order (own photo → kind
+ *  placeholder → manufacturer image); an own photo or manufacturer image tags from the part (lineModel), a
+ *  placeholder only from the line's own Model # / MFR P/N; no photo → "". The line counts only while the anchor
+ *  is in the BOM (print's photoModelOf / keyProductModelsFor): a stale anchor tags from its own part alone. */
+export function editorPhotoTag(a: LineAnchor | null | undefined, sections: readonly SpecSection[], row?: KeyProductLibraryRow | null): string {
+  if (!a || !linePhotoPreview(a, sections, row)) return "";
+  const line = lineAnchorInBom(a, sections) ? findLine(findSection(sections, a.sectionId), a.lineKey) : undefined;
+  const own = !!row?.photoDocId || (!linePlaceholder(a, sections) && !!row?.fallbackDocId);
+  const part = own && row?.modelPart ? (line ? lineModel(line, row.modelPart) : partModel(row.modelPart)) : null;
+  return photoTagText({ ownPhoto: own, partModel: part, ownModel: lineOwnModel(line) });
+}
+
 /** A photo patch, clamped like the validator (width 25–100, align left/right/full). */
 export function withPhoto(photo: Partial<PhotoAttrs> | null | undefined, patch: Partial<PhotoAttrs>): PhotoAttrs {
   const cur = { show: true, align: "right" as const, width: 34, ...(photo || {}) };
@@ -103,12 +117,12 @@ export function withPhoto(photo: Partial<PhotoAttrs> | null | undefined, patch: 
   return { show: next.show !== false, align: isPhotoAlign(next.align) ? next.align : "right", width: clampPhotoWidth(next.width) };
 }
 
-export type ImageAttrs = { align: PhotoAlign; width: number };
+export type ImageAttrs = { align: ImageAlign; width: number };
 
-/** A product-image patch, clamped like the validator (width 25–100, align left/right/full). */
+/** A product-image patch, clamped like the validator (width 25–100, align auto/left/right/full — Jeff 2026-10-15 #20). */
 export function withImage(img: Partial<ImageAttrs> | null | undefined, patch: Partial<ImageAttrs>): ImageAttrs {
   const next = { ...DEFAULT_IMAGE, ...(img || {}), ...patch };
-  return { align: isPhotoAlign(next.align) ? next.align : DEFAULT_IMAGE.align, width: clampPhotoWidth(next.width) };
+  return { align: isImageAlign(next.align) ? next.align : DEFAULT_IMAGE.align, width: clampPhotoWidth(next.width) };
 }
 
 export type DocSizeState = {

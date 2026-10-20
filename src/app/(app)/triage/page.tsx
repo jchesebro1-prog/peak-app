@@ -4,6 +4,7 @@ import { can } from "@/lib/team";
 import { activeUsers, userCan } from "@/lib/users";
 import { chicagoTime, slotLabel } from "@/lib/triage/clock";
 import { loadTriageView, triageNow, triageUserFromSession } from "@/lib/triage/service";
+import { redactRowsForViewer } from "@/lib/triage/redact-server";
 import TriageRows from "@/components/triage/triage-rows";
 import HomeTabs from "../home-tabs";
 
@@ -27,14 +28,16 @@ export default async function TriagePage({
   const target = other ? { id: other.id, name: other.name, canApprove: userCan(other, "approve") } : triageUserFromSession(user);
   const viewingSelf = target.id === user.id;
   const view = await loadTriageView(target, triageNow());
-  const teammates = roster.map((u) => u.name).filter((n) => n !== user.name);
+  // #341 — a teammate's list: email rows I can't see myself are "Private email" (redacted here, on the server)
+  const rows = viewingSelf ? view.rows : await redactRowsForViewer(view.rows, user);
+  const teammates = roster.filter((u) => u.id !== user.id).map((u) => u.name); // #349 — by id, not name
 
   return (
     <HomeTabs active="dashboard">
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", marginBottom: 6 }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16181d", margin: 0 }}>Start here</h1>
         <span style={{ fontSize: 12.5, color: "#8c919c" }}>
-          {viewingSelf ? "Your" : `${target.name}’s`} {slotLabel(view.snapshot.slot).toLowerCase()} · built {chicagoTime(view.snapshot.builtAt)} · {view.rows.length} items
+          {viewingSelf ? "Your" : `${target.name}’s`} {slotLabel(view.snapshot.slot).toLowerCase()} · built {chicagoTime(view.snapshot.builtAt)} · {rows.length} items
         </span>
       </div>
       {isAdmin && (
@@ -62,7 +65,7 @@ export default async function TriagePage({
         <div key={e.source} style={{ fontSize: 12, color: "#8a6d1f", margin: "6px 0" }}>{e.message}</div>
       ))}
       <section className="pk-card" style={{ padding: "4px 18px 8px" }}>
-        <TriageRows rows={view.rows} readOnly={!viewingSelf} teammates={teammates} />
+        <TriageRows rows={rows} readOnly={!viewingSelf} teammates={teammates} />
       </section>
     </HomeTabs>
   );

@@ -14,6 +14,10 @@
 /** Every vendor-quote file lives under this prefix, and nothing else does. */
 export const VENDOR_QUOTE_BLOB_PREFIX = "vendor-quotes/";
 
+/** The client's vendor-quote id shape: "vq" + base36 time + base36 random.
+ *  It lands in a storage path, so it is validated, never sanitized-and-used. */
+export const VENDOR_QUOTE_ID_RE = /^vq[a-z0-9]{4,32}$/;
+
 /**
  * Largest file the upload route accepts (#143 re-review).
  *

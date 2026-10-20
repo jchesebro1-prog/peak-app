@@ -1,7 +1,7 @@
 /* S7 Access and logistics — load-in, lifts, ladders, fall protection, working conditions for later crews
    (rules X1, X2). */
 import type { ScopeDef } from "../types";
-import { RULE_ONLY, text, yn } from "../q";
+import { ftin, one, RULE_ONLY, text, yn } from "../q";
 
 export const ACCESS_SCOPE: ScopeDef = {
   code: "S7",
@@ -22,6 +22,7 @@ export const ACCESS_SCOPE: ScopeDef = {
       title: "Load-in",
       when: RULE_ONLY,
       questions: [
+        one("access.load_in_door_type", "Load-in door type", "door_type"),
         text("access.load_in_door", "Load-in dock or door location"),
         text("access.load_in_size", "Dock or door size"),
         text("access.load_in_route", "Route to the stage"),
@@ -34,6 +35,8 @@ export const ACCESS_SCOPE: ScopeDef = {
       title: "Lift for the work",
       when: RULE_ONLY,
       questions: [
+        one("access.lift_type", "Lift type", "lift_type"),
+        ftin("access.lift_height", "Working height"),
         text("access.lift_supplier", "Who supplies the lift"),
         yn("access.lift_fits", "Can it get into the building?"),
       ],

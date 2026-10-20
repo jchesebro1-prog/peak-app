@@ -39,8 +39,8 @@ export async function pushDueDateAction(input: unknown): Promise<WriteResult> {
 }
 
 export async function handOffAction(input: unknown): Promise<WriteResult> {
-  await requireUser();
-  return finish(() => handOff(input));
+  const u = await requireUser();
+  return finish(() => handOff(input, { id: u.id, name: u.name }));
 }
 
 export async function setTierSizeAction(input: unknown): Promise<WriteResult> {

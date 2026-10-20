@@ -1,4 +1,4 @@
-import { getBlob, setBlob } from "@/db/doc-store";
+import { getBlob, setBlob, updateBlob } from "@/db/doc-store";
 import {
   DEFAULT_TZ,
   emptyVenueCalendar,
@@ -64,7 +64,6 @@ export async function addWindow(
   input: { kind: "open" | "blocked"; start: number; end: number; allDay: boolean; label: string },
   by: string
 ): Promise<VenueCalendar> {
-  const cal = await getVenueCalendar(locationId);
   const w: AvailWindow = {
     id: newWindowId(),
     kind: input.kind,
@@ -74,7 +73,23 @@ export async function addWindow(
     label: (input.label || "").trim(),
     source: "manual",
   };
-  return patchCalendar(locationId, { windows: [...cal.windows, w] }, by);
+  return editWindows(locationId, (windows) => [...windows, w], by);
+}
+
+/** #343 — the manual/csv `windows` list edited under the blob's row lock
+ *  (`edit` gets the stored list and must be pure), so two windows added or
+ *  removed at the same moment both land. Returns the post-write calendar. */
+async function editWindows(
+  locationId: string,
+  edit: (windows: AvailWindow[]) => AvailWindow[],
+  by: string
+): Promise<VenueCalendar> {
+  const at = Date.now();
+  await updateBlob(blobId(locationId), (raw) => {
+    const cal = { ...emptyVenueCalendar(locationId), ...raw } as VenueCalendar;
+    return { windows: edit(Array.isArray(cal.windows) ? cal.windows : []), updatedAt: at, updatedBy: by };
+  });
+  return getVenueCalendar(locationId);
 }
 
 /** Only a manual or csv-sourced window can be removed here — an ics window
@@ -82,8 +97,7 @@ export async function addWindow(
  *  so "delete" for one of those means "remove the feed" (setIcsUrl(null))
  *  or fix the source calendar, not a per-window action. */
 export async function removeWindow(locationId: string, windowId: string, by: string): Promise<VenueCalendar> {
-  const cal = await getVenueCalendar(locationId);
-  return patchCalendar(locationId, { windows: cal.windows.filter((w) => w.id !== windowId) }, by);
+  return editWindows(locationId, (windows) => windows.filter((w) => w.id !== windowId), by);
 }
 
 /**
@@ -100,9 +114,11 @@ export async function importCsvWindows(
   tz: string = DEFAULT_TZ
 ): Promise<{ cal: VenueCalendar; errors: { line: number; message: string }[] }> {
   const { windows: parsed, errors } = parseAvailabilityCsv(text, tz);
-  const cal = await getVenueCalendar(locationId);
-  const kept = mode === "replace-csv" ? cal.windows.filter((w) => w.source !== "csv") : cal.windows;
-  const next = await patchCalendar(locationId, { windows: [...kept, ...parsed] }, by);
+  const next = await editWindows(
+    locationId,
+    (windows) => [...(mode === "replace-csv" ? windows.filter((w) => w.source !== "csv") : windows), ...parsed],
+    by
+  );
   return { cal: next, errors };
 }
 

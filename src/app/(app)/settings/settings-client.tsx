@@ -117,6 +117,7 @@ export default function SettingsClient({
             venueTypes={data.venueTypes}
             intakeCatalog={data.intakeCatalog}
             visitReasons={data.visitReasons}
+            surveyTags={data.surveyTags}
             run={run}
           />
         );

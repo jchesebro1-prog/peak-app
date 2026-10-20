@@ -5,19 +5,21 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { create, get, update, type SurveyStage } from "@/lib/stores/surveys";
 import { create as createQuote } from "@/lib/stores/quotes";
+import { chicagoDayKey } from "@/lib/drive-plan/day";
 
 /**
  * Field-survey inbox mutation. `createSurvey` mirrors the prototype's
  * "New request" button (Field Survey.dc.html → Survey.dc.html?new=1): we spin
  * up a fresh `requested` survey owned by the acting user (recorded as the
  * requester) and open its capture editor. FormData-shaped so the button works
- * without client JS.
+ * without client JS. #344: it opens assigned to the creator and scheduled for
+ * today (Chicago); both stay editable and the stage stays requested.
  */
 export async function createSurvey(): Promise<void> {
   const user = await requireUser();
   let rec;
   try {
-    rec = await create({ owner: user.name, requestedBy: user.name, stage: "requested" }, user.name);
+    rec = await create({ owner: user.name, requestedBy: user.name, stage: "requested", assignedTo: user.name, scheduledDate: chicagoDayKey(Date.now()) }, user.name);
   } catch (error) {
     console.error("createSurvey: record mint failed", error);
     redirect("/venue-assessments?err=" + encodeURIComponent("Couldn’t create the venue assessment — please try again."));

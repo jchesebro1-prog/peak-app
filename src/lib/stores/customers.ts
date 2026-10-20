@@ -415,6 +415,23 @@ export async function all(): Promise<CustomerDoc[]> {
   );
 }
 
+/**
+ * Jeff 2026-10-15 #11 — the Companies directory's read: every company with its
+ * venues, sorted by name like all(), WITHOUT contacts, emails and phones (the
+ * directory shows none of them; they were most of all()'s cost at ~1,700
+ * companies). `contacts` is always [] here — never write a record built from
+ * this back through upsert().
+ */
+export async function allForDirectory(): Promise<CustomerDoc[]> {
+  const companies = await allCompanies();
+  const [siteMap, owners] = await Promise.all([sitesForCompanies(companies.map((c) => c.id)), ownerNames()]);
+  const none = new Map<string, ContactEmailRow[]>();
+  const nonePh = new Map<string, ContactPhoneRow[]>();
+  return companies.map((co) =>
+    composeDoc(co, siteMap.get(co.id) ?? [], [], none, nonePh, co.ownerUserId ? owners.get(co.ownerUserId) : undefined)
+  );
+}
+
 export async function get(id: string | null | undefined): Promise<CustomerDoc | null> {
   if (!id) return null;
   const co = await getCompany(id);

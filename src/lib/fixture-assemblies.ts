@@ -125,10 +125,10 @@ export function toSkuMap<P extends { sku: string }>(catalog: SkuLookup<P>): Read
 }
 
 /** "Prices as of": the NEWEST effective price date among the given SKUs
- *  (own pricedAt or the manufacturer's book date), null when none is dated. */
+ *  (lib/catalog-books effectivePriceDate), null when none is dated. */
 export function pricesAsOf(
   skus: string[],
-  catalog: SkuLookup<{ sku: string; mfr?: string; pricedAt?: number }>,
+  catalog: SkuLookup<{ sku: string; mfr?: string; pricedAt?: number; priceDate?: number }>,
   settings: PriceDateSettings = {}
 ): number | null {
   const bySku = toSkuMap(catalog);
@@ -173,7 +173,7 @@ export type ResolvedSubassembly = {
  */
 export function resolveSubassembly(
   sub: SubassemblyInput,
-  catalog: Array<Pick<CatalogPart, "sku" | "desc" | "cost"> & { mfr?: string; pricedAt?: number }>,
+  catalog: Array<Pick<CatalogPart, "sku" | "desc" | "cost"> & { mfr?: string; pricedAt?: number; priceDate?: number }>,
   settings: PriceDateSettings = {}
 ): ResolvedSubassembly {
   const bySku = new Map(catalog.map((p) => [p.sku, p]));
@@ -283,7 +283,7 @@ export type FixtureRecord = {
 /** #296: "rack" = a rack placement group (one per SKU). */
 export type FixtureSlot = "lightEngine" | "lens" | FixtureBox | "parts" | "rack";
 
-export type FixtureCatalogPart = { sku: string; desc: string; unit?: string; cost: number; list: number; mfr?: string; pricedAt?: number };
+export type FixtureCatalogPart = { sku: string; desc: string; unit?: string; cost: number; list: number; mfr?: string; pricedAt?: number; priceDate?: number };
 
 export type FixtureResolvable = Pick<FixtureRecord, "id" | "kind" | "label" | "lightEngineSku" | "lensSku" | "lines"> &
   Partial<Pick<FixtureRecord, "lightEngineLine" | "lensLine" | "parts" | "legacy" | "position" | "circuit" | "rack" | "scope">>;

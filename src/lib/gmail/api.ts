@@ -31,19 +31,21 @@ export function isAbortError(err: unknown): boolean {
 async function gapi<T>(
   mailboxKey: string,
   path: string,
-  init: RequestInit = {}
+  init: RequestInit = {},
+  /** Batch 6 #64 — the upload endpoint (a large send) and a longer wait for it. */
+  opts: { base?: string; timeoutMs?: number } = {}
 ): Promise<T> {
   const token = await accessTokenFor(mailboxKey);
   if (!token) throw new Error("Mailbox not connected: " + mailboxKey);
   try {
-    const res = await fetch(GMAIL_API_BASE + path, {
+    const res = await fetch((opts.base ?? GMAIL_API_BASE) + path, {
       ...init,
       headers: {
         Authorization: "Bearer " + token,
         "Content-Type": "application/json",
         ...(init.headers || {}),
       },
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 20_000),
     });
     // Gmail answered with a refusal: a definite failure, whatever the body read does.
     if (!res.ok) {
@@ -65,12 +67,38 @@ export async function sendRaw(
   rawBase64Url: string,
   threadId?: string
 ): Promise<{ id: string; threadId: string }> {
+  // Batch 6 #64 — a message carrying big attachments goes through the upload endpoint (Gmail takes up to 35 MB there);
+  // everything else is the plain JSON send, exactly as before.
+  if (rawBase64Url.length > SIMPLE_SEND_MAX_CHARS) {
+    const boundary = "peak_send_" + Math.random().toString(36).slice(2, 12);
+    return gapi(
+      mailboxKey,
+      "/messages/send?uploadType=multipart",
+      { method: "POST", headers: { "Content-Type": `multipart/related; boundary=${boundary}` }, body: new Uint8Array(multipartSendBody(rawBase64Url, threadId, boundary)) },
+      { base: GMAIL_UPLOAD_BASE, timeoutMs: 120_000 },
+    );
+  }
   const body: Record<string, unknown> = { raw: rawBase64Url };
   if (threadId) body.threadId = threadId;
   return gapi(mailboxKey, "/messages/send", {
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+/** Batch 6 #64 — above this many base64url characters a send uses the upload endpoint. */
+export const SIMPLE_SEND_MAX_CHARS = 4 * 1024 * 1024;
+const GMAIL_UPLOAD_BASE = GMAIL_API_BASE.replace("/gmail/v1/", "/upload/gmail/v1/");
+
+/** The multipart/related body of an upload send: the metadata (thread) as JSON, then the raw RFC 822 message. Pure. */
+export function multipartSendBody(rawBase64Url: string, threadId: string | undefined, boundary: string): Buffer {
+  const meta = JSON.stringify(threadId ? { threadId } : {});
+  const message = Buffer.from(rawBase64Url.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+  return Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: message/rfc822\r\n\r\n`, "utf8"),
+    message,
+    Buffer.from(`\r\n--${boundary}--\r\n`, "utf8"),
+  ]);
 }
 
 export type GmailMessageMeta = { id: string; threadId: string };
@@ -127,10 +155,13 @@ export async function listThreadIds(
 
 export type GmailHeader = { name: string; value: string };
 export type GmailPart = {
+  /** #348 slice 4 — Gmail's part path ("0", "1", "0.1"), the stable key an
+   *  imported attachment is stored by (attachment ids change per fetch). */
+  partId?: string;
   mimeType?: string;
   filename?: string;
   headers?: GmailHeader[];
-  body?: { data?: string; size?: number };
+  body?: { data?: string; size?: number; attachmentId?: string };
   parts?: GmailPart[];
 };
 export type GmailFullMessage = {
@@ -148,6 +179,16 @@ export async function getMessage(
   id: string
 ): Promise<GmailFullMessage> {
   return gapi(mailboxKey, "/messages/" + id + "?format=full");
+}
+
+/** #348 slice 4 — one attachment's bytes (base64url `data`), read by
+ *  reference when someone downloads or copies an imported attachment. */
+export async function getAttachment(
+  mailboxKey: string,
+  messageId: string,
+  attachmentId: string
+): Promise<{ data?: string; size?: number }> {
+  return gapi(mailboxKey, "/messages/" + encodeURIComponent(messageId) + "/attachments/" + encodeURIComponent(attachmentId));
 }
 
 /** #214 — headers only (format=metadata): the link panel's lazy Cc fetch

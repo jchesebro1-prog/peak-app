@@ -133,7 +133,7 @@ const compact = (v: string) => v.replace(/[\s\-_#./]+/g, "").toUpperCase();
  * internal id, the name or the customer — so "Q-2041" still finds its quote.
  */
 export function quoteSearchRank(
-  q: QuoteNumberFields & { id: string; name?: string | null; customer?: string | null },
+  q: QuoteNumberFields & { id: string; name?: string | null; customer?: string | null; bidders?: readonly string[] | null },
   term: string
 ): number | null {
   const t = term.trim().toLowerCase();
@@ -145,7 +145,7 @@ export function quoteSearchRank(
       : SEARCH_RANK.numberOtherPrefix;
   }
   const shown = formatQuoteNumber(q);
-  const hit = [q.id, shown, q.name, q.customer].some((f) => typeof f === "string" && f.toLowerCase().includes(t));
+  const hit = [q.id, shown, q.name, q.customer, ...(q.bidders ?? [])].some((f) => typeof f === "string" && f.toLowerCase().includes(t));
   if (hit) return SEARCH_RANK.text;
   const ct = compact(t);
   return ct && shown && compact(shown).includes(ct) ? SEARCH_RANK.text : null;
@@ -153,7 +153,7 @@ export function quoteSearchRank(
 
 /** quoteSearchRank as a filter: does the term find this quote at all? */
 export function quoteMatchesSearch(
-  q: QuoteNumberFields & { id: string; name?: string | null; customer?: string | null },
+  q: QuoteNumberFields & { id: string; name?: string | null; customer?: string | null; bidders?: readonly string[] | null },
   term: string
 ): boolean {
   return quoteSearchRank(q, term) !== null;

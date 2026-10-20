@@ -26,7 +26,11 @@ export type VenueTemplate = {
 /** A region outline or named line: corner points and arc runs (sampled `from` → `to` degrees, either direction). */
 export type PathItem = Pt | { arc: { cx: number; cy: number; r: number; from: number; to: number } };
 
-export type YDrive = "fixed" | "stageDepth" | "houseOpen";
+/**
+ * "houseCapped" (Oct 15 #46): a house span that stretches with the house depth like "houseOpen" while the house is
+ * shallower than drawn, but never past its drawn length — beyond that the "houseOpen" spans take the rest.
+ */
+export type YDrive = "fixed" | "stageDepth" | "houseOpen" | "houseCapped";
 
 /**
  * #255: one span of a side-to-side map, from the previous span's end (0 = the

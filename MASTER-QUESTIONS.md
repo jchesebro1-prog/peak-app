@@ -114,12 +114,15 @@ guide; I do all terminal work.
 
 ## B. Sign-in & team
 
-- **B1.** Sign-in methods. ✦ Google only ☐ also Microsoft ☐ also
-  email+password
-- **B2.** Who gets in. ✦ invite list = Settings → Team (active members
-  only) ☐ anyone @peaksystemsgroup.com domain
-- **B3.** Roles. ✦ the prototype's four (Admin / Manager / Estimator /
-  Reviewer) ☐ add field-tech-limited role: ______
+- ~~**B1.** Sign-in methods. ✦ Google only ☐ also Microsoft ☐ also
+  email+password~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**B2.** Who gets in. ✦ invite list = Settings → Team (active members
+  only) ☐ anyone @peaksystemsgroup.com domain~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**B3.** Roles. ✦ the prototype's four (Admin / Manager / Estimator /
+  Reviewer) ☐ add field-tech-limited role: ______~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
 - **B4.** Real roster — names, sign-in emails, roles (replaces the six
   demo people; you can also just edit Settings → Team yourself):
   ______
@@ -200,7 +203,7 @@ Estimating Rules — these just need real values before go-live)
   ones (Import → Catalog). ☐ real price book file exists: ______
 - **E5.** Quick Design tier pricing + system-sizing factors: keep demo
   values until real ones supplied. ☐ notes: ______
-- **E6.** Catalog price dates (D156, built 2026-09-21) — two model choices
+- ~~**E6.** Catalog price dates (D156, built 2026-09-21) — two model choices
   taken by default, both easy to change:
   **(a) A partial file re-dates the whole book.** An import that passes the
   manufacturer guard (one overlapping SKU is enough) sets that manufacturer's
@@ -220,14 +223,22 @@ Estimating Rules — these just need real values before go-live)
   Home card / Catalog banner date a book by its OLDEST part (one stale line
   makes the book outdated — decision A from #14). ✦ keep both as built
   ☐ builders should show the oldest date too (a build with one stale part
-  reads as stale) ☐ show both ("as of … / oldest line …") ☐ other: ______
-- **E7.** Consulting projects added by hand (D155, built 2026-09-21) seed
+  reads as stale) ☐ show both ("as of … / oldest line …") ☐ other: ______~~
+  **ANSWERED 2026-10-15 (Jeff): (a) a partial price file dates only the parts in
+  the file — each part carries its own price date (`priceDate`), and an import
+  no longer re-dates the whole manufacturer; (b) builders keep showing the
+  newest date (price books stay oldest-wins, read per part). Built in #354
+  (D1158).**
+- ~~**E7.** Consulting projects added by hand (D155, built 2026-09-21) seed
   EVERY phase on the Settings phase menu, all pending — the "+ New consulting
   project" modal has no phase picker. A project born from a won quote is
   different: it seeds only the phases ticked on that proposal.
   ✦ keep full-menu — an unwanted phase is removed on the project page in one
   click ☐ give the modal a phase checklist (same list the fee proposal uses)
-  ☐ seed a shorter default set instead: ______ ☐ other: ______
+  ☐ seed a shorter default set instead: ______ ☐ other: ______~~
+  **ANSWERED 2026-10-15 (Jeff): give the modal a phase checklist, every phase
+  ticked by default; only ticked phases get tasks and milestones. Built in
+  #353 (D1137).**
 
 ## F. Service-line product decisions (from IDEAS.md)
 
@@ -242,32 +253,37 @@ Estimating Rules — these just need real values before go-live)
 - **F4.** Should "Start new repair" replace or sit beside the
   "Go to inspections →" link on the Repairs header? ✦ beside ☐ replace
 - **F5.** Service contracts (IDEAS #33). ✦ parked for v2 ☐ spec now: ______
-- **F6.** Quotes hub. ✦ one Quotes list with a type filter
-  (design/service/flame/inspection/repair) ☐ separate tabs per type
-- **F7.** Renewals-due panel = only customers NOT yet contacted this cycle
+- ~~**F6.** Quotes hub. ✦ one Quotes list with a type filter
+  (design/service/flame/inspection/repair) ☐ separate tabs per type~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**F7.** Renewals-due panel = only customers NOT yet contacted this cycle
   (IDEAS #37). ✦ yes, with a "Reached out — awaiting" secondary view
-  ☐ keep pure date window
+  ☐ keep pure date window~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
 - **F8.** Flame-test renewal quote regeneration. ~~✦ last year's price
   verbatim (per your comment) ☐ re-price at current rates~~
   **✓ Decided Jul 12 (your follow-up): re-price at THIS year's rates**;
   the outreach email cites last year's price for comparison and outlines
   why the number moved (rate/travel/scope changes — D69). Applies to both
   flame and inspection renewals.
-- **F9.** Repair scheduling + results screens were **modeled on the
+- ~~**F9.** Repair scheduling + results screens were **modeled on the
   flame-test scheduler/results** (the prototype only shipped a Repairs
   dashboard mock, no scheduling/results mock). Adapted fields: date
   performed, performed-by, warranty months, scope-of-work reference,
-  work-performed, parts-used, follow-up. ☐ correct? / changes: ______
-- **F10.** There is **no separate "Repair Quote" screen** — "New repair",
+  work-performed, parts-used, follow-up. ☐ correct? / changes: ______~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**F10.** There is **no separate "Repair Quote" screen** — "New repair",
   "Quote repair", and warranty "Re-quote" all deep-link to the Estimator
   (they lose the inspection/customer pre-fill). And completed repairs show
   their logged **Results** screen rather than a standalone printable Repair
   Report. ✦ acceptable for now ☐ build a dedicated repair quote +
-  report doc (needs a mock/spec): ______
-- **F11.** Inspection → renovation-quote **back-link isn't persisted** (the
+  report doc (needs a mock/spec): ______~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**F11.** Inspection → renovation-quote **back-link isn't persisted** (the
   typed inspection/quote records have no field for it). The button still
   creates a sourced quote and opens the Estimator, but the report won't
-  later show "view existing renovation quote". ✦ fine ☐ add the link field
+  later show "view existing renovation quote". ✦ fine ☐ add the link field~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
 - **F12.** *(Jul 12 — IDEAS #44 completion)* **Repair report default
   variant:** compare at /repairs/report/options. ✦ 2c service report
   ☐ 2a letter ☐ 2b letter + service panel. **Inspection report default
@@ -278,27 +294,31 @@ Estimating Rules — these just need real values before go-live)
   Level 2, $650 job minimum, 30-pt margin. All editable in Estimating
   Rules → "Inspection pricing" (changes reprice live). ☐ real numbers:
   ______
-- **F14.** *(Jul 12)* A multi-venue inspection quote spawns **one requested
+- ~~**F14.** *(Jul 12)* A multi-venue inspection quote spawns **one requested
   inspection per venue**, splitting the quote value evenly across venues
   (records/reports are per-venue; travel was priced once for the trip).
-  ✦ even split is fine ☐ weight by line-set count instead
+  ✦ even split is fine ☐ weight by line-set count instead~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
 - **F15.** *(Jul 12 — customer portal)* **Department scoping:** v1 portal
   logins show the customer org's whole published world. Your design call was
   person → department scope → optional cross-links; to wire it I need the
   department per contact for real customers. ✦ org-wide is fine for beta
   ☐ department map: ______
-- **F16.** *(Jul 12 — customer portal)* Portal access links are copied
+- ~~**F16.** *(Jul 12 — customer portal)* Portal access links are copied
   manually from the customer record for now. Once Gmail is connected
   (GMAIL_ENABLED), should "Create access link" also **email it to the
-  contact automatically**? ✦ yes, auto-send ☐ keep manual copy.
+  contact automatically**? ✦ yes, auto-send ☐ keep manual copy.~~
+  **ANSWERED 2026-10-15 (Jeff): yes — from the granter's own mailbox, Copy
+  link kept as the fallback. Built in #351 (D1104).**
   *(Update, same day: the non-binding "Accept quote" button shipped — D64 —
   so the remaining portal slice is photo/document uploads on requests,
   which also needs the object-storage call from IDEAS #46.)*
-- **F17.** *(Jul 12 — IDEAS #36)* Attachments are real now, but they're
+- ~~**F17.** *(Jul 12 — IDEAS #36)* Attachments are real now, but they're
   born only from the ✉ renewal flow — the composer has **no manual
   file-upload button** yet (the old "Attach (demo)" stub was removed as
   misleading, D66). Want manual attachments on ordinary emails?
-  ✦ later, when a real need shows up ☐ add now
+  ✦ later, when a real need shows up ☐ add now~~
+  **ANSWERED 2026-10-15 (Jeff): build it — the Inbox composer's Attach button (computer files + the company's / project's Documents, 18 MB of files, sent through Gmail). Built in Batch 6 #356 (D1194).**
 - **F18.** *(Jul 12 — IDEAS #36, ties G1)* The renewal-quote **PDF embeds
   JPEG letterheads only** (D67): the baked-in Peak sheet works today, and a
   JPEG logoDark upload will too — but if your real logo (G1) is a **PNG**,
@@ -318,16 +338,19 @@ Estimating Rules — these just need real values before go-live)
   image (`peak-letterhead.jpg`); the **inspection report** still uses a
   typographic letterhead (company name + tagline). Once the final logo
   files land, both should point at the same asset for one consistent look.
-- **G2.** Results letter signer. ✦ the job's performing tech/owner
-  ☐ always "Jeff Chesebro, Sales/Design"
-- **G3.** Letters brand. ✦ app company name (Settings → Branding)
-  ☐ different letterhead: ______
+- ~~**G2.** Results letter signer. ✦ the job's performing tech/owner
+  ☐ always "Jeff Chesebro, Sales/Design"~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**G3.** Letters brand. ✦ app company name (Settings → Branding)
+  ☐ different letterhead: ______~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
 
 ## H. Installs & scheduling
 
-- **H1.** Billing forecast. ✦ simulated milestone draws (deposit →
+- ~~**H1.** Billing forecast. ✦ simulated milestone draws (deposit →
   materials → install → final, net-30 collection) forecast-only
-  ☐ real invoicing/QuickBooks integration (Phase 10+): ______
+  ☐ real invoicing/QuickBooks integration (Phase 10+): ______~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
 - **H2.** Crew board: keep prototype behaviors (time-off, mobilization
   chips, federal holidays toggle). ☐ changes: ______
   Note (Phase 5): the schedule/field-work screens ship as server-rendered
@@ -336,9 +359,10 @@ Estimating Rules — these just need real values before go-live)
   localStorage-only in the prototype, no backing store). Confirm whether true
   drag scheduling + time-off tracking are required (each needs a client
   scheduler component + a new store field) or the form flow is sufficient.
-- **H3.** Field-work note photos: post-a-note is text-only for now (the
+- ~~**H3.** Field-work note photos: post-a-note is text-only for now (the
   prototype downscaled a captured image to a data URL). ✦ enable later with
-  the Phase 6 offline capture work ☐ needed sooner: ______
+  the Phase 6 offline capture work ☐ needed sooner: ______~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
 
 ## I. Data migration & go-live (Phase 9 — tooling built ✅)
 
@@ -356,13 +380,17 @@ dry run on your real files.
   data fits? ☐ yes ☐ no — I'll shape templates around your actual files
 - **I3.** History depth. ✦ active + last 3 years compliance ☐ everything
   ☐ other: ______
-- **I4.** Who tests each area before the team is invited? ✦ you for
-  Sales/Service ☐ field tech ______ for Field Work/Surveys
-- **I5.** Backups. ✦ Neon automatic point-in-time + monthly export to
-  Google Drive ☐ different: ______
-- **I6.** Cutover. ✦ per-module switch as each area is verified ☐ parallel
-  run ☐ hard switch
-- **I7.** Phones. ✦ installable web app (PWA — built) ☐ native app later
+- ~~**I4.** Who tests each area before the team is invited? ✦ you for
+  Sales/Service ☐ field tech ______ for Field Work/Surveys~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**I5.** Backups. ✦ Neon automatic point-in-time + monthly export to
+  Google Drive ☐ different: ______~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**I6.** Cutover. ✦ per-module switch as each area is verified ☐ parallel
+  run ☐ hard switch~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**I7.** Phones. ✦ installable web app (PWA — built) ☐ native app later~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
 
 ## J. Phase 5 review — Installs + General (screens built 2026-07-11)
 
@@ -372,30 +400,36 @@ plus full Settings + Account are live, verified against seed data. Items below
 are deliberate deviations that touch the **data model** or need a product call —
 everything else was ported faithfully.
 
-- **J1.** Customer record shape. The ported `customers` store persists only
+- ~~**J1.** Customer record shape. The ported `customers` store persists only
   `{name, type, location(s), contact(s)}`. The prototype's Customer Context also
   showed **Notes**, **"Customer since"**, and **per-venue stage dimensions**
   (W×D×H, grid clearance) — these are currently **not stored** and are omitted
   from the detail view + edit modal. ✦ add these fields to the customer store
-  ☐ leave out: ______
-- **J2.** Account owner is **derived** (newest linked quote/project owner), not
+  ☐ leave out: ______~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**J2.** Account owner is **derived** (newest linked quote/project owner), not
   a stored field — it drives the directory owner column + "My work" filter.
-  ✦ keep the heuristic ☐ add an explicit owner field to the customer record
-- **J3.** Data import is **lossy** for columns the store doesn't hold (customer
+  ✦ keep the heuristic ☐ add an explicit owner field to the customer record~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**J3.** Data import is **lossy** for columns the store doesn't hold (customer
   phone/street/zip). Import dedupe is **name-based**. ✦ fine ☐ add those
-  columns / change dedupe key: ______
-- **J4.** Access gates: **Import/Export** and **Estimating Rules** are
+  columns / change dedupe key: ______~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**J4.** Access gates: **Import/Export** and **Estimating Rules** are
   admin-only (`manage_users`, matching the prototype); **Catalog** is open to
-  any signed-in user (prototype had no gate). ✦ keep ☐ change: ______
-- **J5.** Reports "most-quoted products · projected sourcing" table was
+  any signed-in user (prototype had no gate). ✦ keep ☐ change: ______~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**J5.** Reports "most-quoted products · projected sourcing" table was
   **synthetic demo data** in the prototype (seed quotes carry no product line
   items) — replaced with a real **"Pipeline by estimator"** breakdown. To build
   the real projected-sourcing table, quotes need product-level line items.
-  ☐ product line items are a requirement: ______
-- **J6.** Settings **Beta → "Clear all data"** (destructive wipe) was **not**
+  ☐ product line items are a requirement: ______~~
+  **ANSWERED 2026-10-15 (Jeff): build it — Reports → Most-quoted products: parts and manufacturers across open estimates, weighted by win chance. Built in Batch 6 #356 (D1196).**
+- ~~**J6.** Settings **Beta → "Clear all data"** (destructive wipe) was **not**
   ported — kept the reversible demo-seed toggle instead. There is no store-wipe
   function and mass hard-delete is out of scope. ☐ a real "clear all" is wanted
-  (needs a backing function): ______
+  (needs a backing function): ______~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
 - **J7.** Field Survey **measurement check-fields** (loading bridge, HH sheet,
   brick drawing) are stored as booleans but the store types `measurements` as
   `Record<string, string>` (cast at the save boundary). Minor store-type
@@ -409,29 +443,35 @@ capture with no signal and sync when the connection returns (decisions
 D26–D32). Items below are deliberate limits / product calls — everything else
 follows the sync-architecture spec.
 
-- **K1.** **App icon** is a placeholder monogram (`public/icon.svg`, dark "P").
-  ✦ swap for the real logo when the G1 files land ☐ specific icon: ______
-- **K2.** **Conflict policy** when a record is edited in the office *and* on an
+- ~~**K1.** **App icon** is a placeholder monogram (`public/icon.svg`, dark "P").
+  ✦ swap for the real logo when the G1 files land ☐ specific icon: ______~~
+  **ANSWERED 2026-10-15 (Jeff): build it — the app icon is drawn from the Settings → Branding logo (native shells need a rebuild). Built in Batch 6 #356 (D1197).**
+- ~~**K2.** **Conflict policy** when a record is edited in the office *and* on an
   offline device at the same time: the office version wins and the field
   device notes it in the sync panel (no manual merge screen). ✦ keep
-  ☐ want a "review my un-synced change" merge step: ______
-- **K3.** **Cold open needs signal.** You can capture offline on any job you
+  ☐ want a "review my un-synced change" merge step: ______~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**K3.** **Cold open needs signal.** You can capture offline on any job you
   opened while online, and any page you visited reloads offline — but opening a
   brand-new job for the first time needs a connection. ✦ fine
   ☐ pre-download all of a tech's assigned jobs for the day (a "download for
-  offline" button): ______
-- **K4.** **Survey/field photos** ride on the record as downscaled data-URLs
+  offline" button): ______~~
+  **ANSWERED 2026-10-15 (Jeff): build it — "Download today's jobs" pulls a tech's jobs for the day into the device and keeps their pages offline. Built in Batch 6 #356 (D1195).**
+- ~~**K4.** **Survey/field photos** ride on the record as downscaled data-URLs
   (as in the prototype) and sync with it in the same outbox — no separate
   blob/object-storage upload yet. ✦ fine for now ☐ move photos to cloud
   storage (needed if photo volume grows): ______ — this also unblocks
-  field-work note photos (H3).
-- **K5.** **Online-only actions** (need a server round-trip, so they show an
+  field-work note photos (H3).~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**K5.** **Online-only actions** (need a server round-trip, so they show an
   error with no signal rather than queueing): delete, "create quote from
   survey/inspection", and office review/approve. ✦ correct — these aren't
-  field operations ☐ change: ______
-- **K6.** **Background sync** is a 60-second poll + on-reconnect flush (no push
+  field operations ☐ change: ______~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
+- ~~**K6.** **Background sync** is a 60-second poll + on-reconnect flush (no push
   server yet). ✦ fine; live push (SSE) can come with Gmail/Phase 7
-  ☐ want instant office↔field updates sooner: ______
+  ☐ want instant office↔field updates sooner: ______~~
+  **ANSWERED 2026-10-15 (Jeff): default accepted by Jeff 2026-10-15 (D1198).**
 
 ## O. Daylite pipelines + history import (built 2026-09-24, #187)
 
@@ -439,21 +479,25 @@ Install projects and system quotes now run on Daylite-named pipelines you can
 edit in Settings → Pipelines (D236–D239), and `/import/daylite` brings in the
 project and opportunity history (D241–D242).
 
-- **O1.** Does the **BID SPEC** pipeline have a stage before **Collect
+- ~~**O1.** Does the **BID SPEC** pipeline have a stage before **Collect
   Information**? The Daylite export numbers Create BID as "3", which suggests
   one. ✦ no — Collect Information is first ☐ yes, it is called: ______ (it
   would be added as a Draft stage; you can also add it yourself in Settings →
-  Pipelines)
+  Pipelines)~~ **ANSWERED 2026-10-15 (Jeff): yes — "Lead / Qualify", a Draft
+  stage before Collect Information, added to stored pipelines once. Built in
+  #353 (D1135).**
 
 ## P. Morning triage (built 2026-10-10, #324)
 
 The Start here card on Home and `/triage` rank what needs you each morning and
 midday (D707–D711).
 
-- **P1.** **Morning triage — "Not mine" is permanent per record.** A dismissed
+- ~~**P1.** **Morning triage — "Not mine" is permanent per record.** A dismissed
   quote later resubmitted for approval, or a dismissed lead that later
   breaches its SLA, never returns to your list. ✦ keep permanent ☐ let a new
-  event (resubmit / SLA breach) bring it back: ______
+  event (resubmit / SLA breach) bring it back: ______~~ **ANSWERED 2026-10-15
+  (Jeff): it comes back when it escalates — a new customer message, a resubmit
+  or an SLA breach. Built in #351 (D1102).**
 
 ## Q. Address verification + drive time (built 2026-10-10, #325)
 
@@ -490,8 +534,10 @@ Jeff confirmed all four calls as built (logged as D762 in DECISIONS.md):
 Attendees, per-person invites, conflict checks and Edit on scheduled visits
 (D775–D783).
 
-- **T1.** **Who can edit a scheduled visit.** Anyone signed in can edit/re-lead a scheduled visit or remove attendees, which emails/cancels teammates' calendar copies — keep open, or restrict to the lead/approvers?
-  ✦ keep open to everyone signed in ☐ only the lead and approvers ☐ other: ______
+- ~~**T1.** **Who can edit a scheduled visit.** Anyone signed in can edit/re-lead a scheduled visit or remove attendees, which emails/cancels teammates' calendar copies — keep open, or restrict to the lead/approvers?
+  ✦ keep open to everyone signed in ☐ only the lead and approvers ☐ other: ______~~
+  **ANSWERED 2026-10-15 (Jeff): only the lead and approvers (everyone holds
+  `approve` today, so nothing changes until that does). Built in #353 (D1136).**
 
 ## U. Auto task calendar (built 2026-10-10, #327)
 

@@ -2,7 +2,9 @@
 
 import { upload } from "@vercel/blob/client";
 import { finalizeAssessmentPhoto, removePendingPhotoAction } from "@/app/(app)/assessments/photo-actions";
-import { INLINE_BLOB_MAX, photoBackoffMs, photoBlobPath, photoTooOld } from "./photos";
+import { finalizeSurveyFile } from "@/app/(app)/venue-assessments/file-actions";
+import { INLINE_BLOB_MAX, photoBackoffMs, photoTooOld } from "./photos";
+import { INLINE_CAPS, fileBlobPath, fileContentType, fileRouteKind, inlinePrefix, recordKind } from "@/lib/field-files/files";
 import { shrinkForInline } from "./photo-resize";
 
 /*
@@ -29,6 +31,20 @@ import { shrinkForInline } from "./photo-resize";
  * the backoff of every non-failed photo so recovery is immediate), and when a backed-off photo comes due — once
  * `configurePhotoQueue` has been called by the editor.
  *
+ * Files of a record (#344 C4): an item is any file of an assessment (`AS-…`, photos) or a survey (`FS-…`: photos,
+ * markup images, strokes JSON, sketches). The record's kind is read from its id prefix (`recordKind`) and picks the
+ * broker and the finalize: `assessment` → `/api/assessments/<id>/photos/upload` (`{photoId}`) +
+ * `finalizeAssessmentPhoto` — exactly as before; `survey` → `/api/surveys/<id>/files/upload` (`{fileId}`) +
+ * `finalizeSurveyFile`. The upload path is `fileBlobPath(recordId, fileId)` (an assessment photo's is unchanged:
+ * `assessments/<AS>/<p_…>.jpg`). The database, its version, stores and keys are unchanged; the meta's `assessmentId` /
+ * `photoId` fields hold the record id / file id (kept, so photos already queued on a device still drain), plus an
+ * optional `contentType` (absent = `image/jpeg`; set only for a strokes `k_` file). Without Blob a `.jpg` file is
+ * shrunk + inlined as before, a `.json` one inlined as a `data:application/json;base64,…` string ≤ INLINE_CAPS.json.
+ *
+ * ONE queue drains every record's files whichever editor configured it, so an `onDone` handler is called for files
+ * of OTHER records and kinds too and must ignore any `recordId` it doesn't own (the server has already recorded the
+ * file either way).
+ *
  * Client-only: this module must not import a server module (stores / db / blob.ts). The server actions are reached
  * through their "use server" file only.
  */
@@ -46,8 +62,12 @@ export type PhotoDoneHandler = (assessmentId: string, photoId: string, ref: Phot
 export type PhotoQueueOptions = { blobEnabled: boolean };
 
 type PhotoMeta = {
+  /** the record id (`AS-…` / `FS-…`) — field name kept for photos already queued on a device */
   assessmentId: string;
+  /** the file id (`p_` / `m_` / `k_` / `s_`) */
   photoId: string;
+  /** absent = image/jpeg (every assessment photo); `application/json` for a strokes file */
+  contentType?: string;
   /** epoch-ms the photo was parked; an item older than 7 days is given up on. */
   createdAt: number;
   tries: number;
@@ -199,13 +219,18 @@ export function subscribePhotoQueue(cb: Listener): () => void {
   };
 }
 
-/** Park a resized photo on the device and start uploading it (when the editor has called `configurePhotoQueue`). */
-export async function enqueuePhoto(assessmentId: string, photoId: string, blob: Blob): Promise<void> {
-  await putNew({ assessmentId, photoId, createdAt: Date.now(), tries: 0, nextAt: 0 }, blob);
+/** Park a file of a record (a resized photo, a markup / sketch JPEG, a strokes JSON) on the device and start uploading
+ *  it (when an editor has called `configurePhotoQueue`). `recordId` is an `AS-…` or `FS-…` id. */
+export async function enqueuePhoto(recordId: string, fileId: string, blob: Blob): Promise<void> {
+  const contentType = fileContentType(fileId);
+  await putNew({ assessmentId: recordId, photoId: fileId, createdAt: Date.now(), tries: 0, nextAt: 0, ...(contentType !== "image/jpeg" ? { contentType } : {}) }, blob);
   await emit();
   installTriggers();
   void drainConfigured();
 }
+
+/** `enqueuePhoto` by its general name: any file of an assessment or survey. */
+export const enqueueFile = enqueuePhoto;
 
 /** How many photos are still on this device (all assessments, or one) — failed ones included: they still block Mark complete. */
 export function pendingPhotoCount(assessmentId?: string): Promise<number> {
@@ -260,6 +285,16 @@ export async function retryPhoto(assessmentId: string, photoId: string): Promise
  */
 export async function discardPhoto(assessmentId: string, photoId: string): Promise<{ refRemoved: boolean; rev?: number; error?: string }> {
   let res: { refRemoved: boolean; rev?: number; error?: string };
+  if (recordKind(assessmentId) !== "assessment") {
+    // A survey file (#344 C4): the server keeps no pending-file escape hatch — the survey editor drops the ref from its
+    // own draft and saves. Only the device copy goes here.
+    try {
+      await deleteItem(assessmentId, photoId);
+    } finally {
+      await emit();
+    }
+    return { refRemoved: false, error: "Remove it from the survey and save to finish." };
+  }
   try {
     const r = await withTimeout(removePendingPhotoAction(assessmentId, photoId), FINALIZE_TIMEOUT_MS, "The server didn't answer in time.");
     res = r.ok ? { refRemoved: true, rev: r.rev } : { refRemoved: false, error: r.error };
@@ -310,8 +345,47 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 /** A terminal outcome for one item: the queue marks it failed and moves on. */
 class TerminalFailure extends Error {}
 
+/** The record kind's broker URL + client payload and its finalize action (#344 C4). Assessments: unchanged. */
+function routeFor(recordId: string, fileId: string) {
+  const kind = fileRouteKind(recordId, fileId); // a bad file id on a valid record → null: terminal, never retried for a week
+  if (kind === "assessment") {
+    return {
+      handleUploadUrl: `/api/assessments/${recordId}/photos/upload`,
+      clientPayload: JSON.stringify({ photoId: fileId }),
+      finalize: (path: string | null, inline?: string) => finalizeAssessmentPhoto(recordId, fileId, path, inline),
+    };
+  }
+  if (kind === "survey") {
+    return {
+      handleUploadUrl: `/api/surveys/${recordId}/files/upload`,
+      clientPayload: JSON.stringify({ fileId }),
+      finalize: (path: string | null, inline?: string) => finalizeSurveyFile(recordId, fileId, path, inline),
+    };
+  }
+  return null;
+}
+
+/** Local dev without Blob: the file as a small data URL. A JPEG is shrunk to fit (the engine's rule); a strokes JSON is
+ *  inlined as-is and refused for good past INLINE_CAPS.json. Assessment photos take exactly the old path. */
+async function inlineBody(recordId: string, fileId: string, blob: Blob): Promise<string> {
+  if (recordKind(recordId) === "assessment") {
+    const body = blob.size > INLINE_BLOB_MAX ? await shrinkForInline(blob, INLINE_BLOB_MAX) : blob;
+    return blobToDataUrl(body);
+  }
+  const json = fileContentType(fileId) === "application/json";
+  const body = !json && blob.size > INLINE_BLOB_MAX ? await shrinkForInline(blob, INLINE_BLOB_MAX) : blob;
+  const raw = await blobToDataUrl(body);
+  // The browser labels the data URL with the Blob's own type; the server trusts only the file id's.
+  const url = inlinePrefix(fileId) + raw.slice(raw.indexOf(",") + 1);
+  const cap = json ? INLINE_CAPS.json : INLINE_CAPS.jpeg;
+  if (url.length > cap) throw new TerminalFailure(`This ${json ? "drawing" : "image"} is too big to keep without file storage (local dev).`);
+  return url;
+}
+
 async function uploadOne(meta: PhotoMeta, cfg: { blobEnabled: boolean; onDone: PhotoDoneHandler }): Promise<void> {
-  const { assessmentId, photoId } = meta;
+  const { assessmentId, photoId } = meta; // the record id + file id
+  const route = routeFor(assessmentId, photoId);
+  if (!route) throw new TerminalFailure("This file doesn't belong to an assessment photo or a survey.");
   const blob = await getBlob(assessmentId, photoId); // the bytes of THIS item only
   if (!blob) {
     await deleteItem(assessmentId, photoId); // meta without bytes: nothing to upload
@@ -325,11 +399,11 @@ async function uploadOne(meta: PhotoMeta, cfg: { blobEnabled: boolean; onDone: P
       const timer = setTimeout(() => ctrl.abort(), UPLOAD_TIMEOUT_MS);
       try {
         const res = await withTimeout(
-          upload(photoBlobPath(assessmentId, photoId), blob, {
+          upload(fileBlobPath(assessmentId, photoId), blob, {
             access: "private",
-            handleUploadUrl: `/api/assessments/${assessmentId}/photos/upload`,
-            clientPayload: JSON.stringify({ photoId }),
-            contentType: "image/jpeg",
+            handleUploadUrl: route.handleUploadUrl,
+            clientPayload: route.clientPayload,
+            contentType: meta.contentType ?? "image/jpeg",
             abortSignal: ctrl.signal,
           }),
           UPLOAD_TIMEOUT_MS,
@@ -345,11 +419,10 @@ async function uploadOne(meta: PhotoMeta, cfg: { blobEnabled: boolean; onDone: P
       // The bytes are safe on Blob: a failed finalize never re-uploads. (A photo discarded meanwhile stays discarded.)
       await patchMeta(assessmentId, photoId, (m) => ({ ...m, uploadedPath: path }));
     }
-    result = await withTimeout(finalizeAssessmentPhoto(assessmentId, photoId, path), FINALIZE_TIMEOUT_MS, "The server didn't answer in time; it will be retried.");
+    result = await withTimeout(route.finalize(path), FINALIZE_TIMEOUT_MS, "The server didn't answer in time; it will be retried.");
   } else {
-    const body = blob.size > INLINE_BLOB_MAX ? await shrinkForInline(blob, INLINE_BLOB_MAX) : blob;
     result = await withTimeout(
-      finalizeAssessmentPhoto(assessmentId, photoId, null, await blobToDataUrl(body)),
+      route.finalize(null, await inlineBody(assessmentId, photoId, blob)),
       FINALIZE_TIMEOUT_MS,
       "The server didn't answer in time; it will be retried.",
     );

@@ -26,7 +26,7 @@ export async function suggestTasksForThread(
 ): Promise<TaskSuggestResult> {
   const refused = await gateFor("tasks", me.id, deps);
   if (refused) return { ok: false, error: refused, kind: "gate", runId: null };
-  const t = await loadThreadFor(threadId, me.name);
+  const t = await loadThreadFor(threadId, me);
   if (!t) return { ok: false, error: "That email isn't available.", kind: "thread", runId: null };
   const [team, links] = await Promise.all([
     deps.preloaded?.team ?? activeUsers().then((users) => users.map((u) => ({ id: u.id, name: u.name }))),

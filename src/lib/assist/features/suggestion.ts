@@ -187,6 +187,7 @@ export function systemFromSuggestion(system: SuggestionSystem, parts: PartsLooku
     freightPct: ctx.freightPct,
     freightAuto: true,
     priceRound: ctx.priceRound,
+    ...(ctx.presentation ? { presentation: ctx.presentation } : {}),
     items,
     ...(ctx.groupId ? { groupId: ctx.groupId } : {}),
   };

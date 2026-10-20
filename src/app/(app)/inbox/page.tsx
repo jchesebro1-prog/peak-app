@@ -14,6 +14,9 @@ import { recordNudgeOpened } from "@/lib/brief/nudge-outcome";
 import { after } from "next/server";
 import { readerPreDraft } from "@/lib/brief/reader-predraft";
 import { attachmentHref } from "@/lib/comms-attachments";
+import { attachKey } from "@/lib/mail-attachments";
+import { replyAllCc } from "@/lib/reply-all";
+import { isPdfAttachment, isVendorPickerType, threadAttachmentHref, threadAttachmentRef } from "@/lib/vendor-quotes/rules";
 import { groupCompanyOptions } from "@/lib/vendor-status";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { get as getQuote, getAll as allQuotes } from "@/lib/stores/quotes";
@@ -46,6 +49,7 @@ import {
   flaggedCount,
   folderCounts,
   forwardAddress,
+  canOpenThread,
   get as getThread,
   getAll as allThreads,
   hasQueued,
@@ -57,6 +61,8 @@ import {
   resolveCustomerId,
   snippet,
   statusMeta,
+  isThreadLinked,
+  readOnlyBanner,
   threadsIn,
   timeAgo,
   timeFull,
@@ -93,9 +99,14 @@ import { loadMeetingReader, loadMeetingsBox, toFileCount } from "./meetings/load
 import { meetingsReadOr } from "@/lib/meetings/safe-read";
 import { MEETINGS_BASE_HREF, meetingsHref, meetingsTabOf } from "./meetings/format";
 import OrganizeBox from "./organize/organize-box";
-import { buildReaderOrg, loadOrganize, organizeToFileCount } from "./organize/load";
+import { buildReaderOrg, loadOrganize, organizeEntryCounts } from "./organize/load";
+import { organizeEntryVM } from "./organize/entry";
+import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
+import { isPlaceholderCompany, withoutPlaceholderLink } from "@/lib/inbox-org/placeholder";
 import { cleanupVMOf, getCleanupState } from "@/lib/inbox-org/cleanup";
-import { ORGANIZE_BASE_HREF, organizeTabOf } from "./organize/format";
+import { ORGANIZE_BASE_HREF, organizeArchiveTarget, organizeTabOf } from "./organize/format";
+import { threadGmailLabels } from "./row-labels";
+import { cardGmailChips } from "@/lib/gmail/user-label-rules";
 import { getTask } from "@/lib/stores/tasks";
 import { can } from "@/lib/team";
 import HomeTabs from "../home-tabs";
@@ -104,6 +115,7 @@ import { leadNumbersFor, quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { assistSettingsOf, assistUiFlags } from "@/lib/assist/config";
 import { getAssistEnv } from "@/lib/assist/key-store";
 import { suggestionReadyHref } from "@/lib/assist/suggest-entry-server";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 export const metadata = { title: "Inbox — Quartzite-6" };
 
@@ -226,6 +238,8 @@ export default async function InboxPage({
   const params = await searchParams;
   const user = await requireUser();
   const me = user.name;
+  // #349 — every ownership check is by identity (id; a legacy name only while unique)
+  const viewer = await mailboxViewer(user);
   const settings = await getSettings();
   // #334 — Assist buttons render only for gated-in users (no provider = none).
   const assistAll = assistUiFlags(user.id, assistSettingsOf(settings), await getAssistEnv());
@@ -288,9 +302,15 @@ export default async function InboxPage({
     : "inbox";
 
   const threadParam = str(params.thread);
-  const explicitThread = threadParam ? await getThread(threadParam) : null;
-  // deep links carry only ?thread= (global search does) — land in its mailbox
-  if (explicitThread && !params.box && !view && !isMeetings && !isOrganize) {
+  // #341 — ?thread= opens a thread only when the viewer may see it: their
+  // own (Deleted included), assigned to them, or linked to an entity
+  // (canOpenThread). Anything else reads as no thread at all. A thread that
+  // isn't in their own mailbox opens read-only (reader.readOnly below).
+  const threadHit = threadParam ? await getThread(threadParam) : null;
+  const explicitThread = threadHit && canOpenThread(threadHit, viewer) ? threadHit : null;
+  // deep links carry only ?thread= (global search does) — land in its
+  // mailbox, but only ever my own (never switch to someone else's box)
+  if (explicitThread && visibleTo(explicitThread, viewer) && !params.box && !view && !isMeetings && !isOrganize) {
     box = explicitThread.mailbox === "personal" ? "personal" : explicitThread.mailbox;
     folder = "inbox";
   }
@@ -299,8 +319,9 @@ export default async function InboxPage({
   // composer (the ✉ renewal outreach redirects here after landing its draft)
   const draftParam = str(params.draft);
   const draftThread = draftParam ? await getThread(draftParam) : null;
+  // #341 — only my own draft opens in the composer
   const openDraftThread =
-    draftThread && draftThread.status === "draft" ? draftThread : null;
+    draftThread && draftThread.status === "draft" && visibleTo(draftThread, viewer) ? draftThread : null;
 
   const isView = !!view || isMeetings || isOrganize;
   const isDrafts = !isView && folder === "drafts";
@@ -324,13 +345,13 @@ export default async function InboxPage({
     customers,
     labelOptions,
     meetingsToFile,
-    organizeToFile,
+    organizeCounts,
   ] = await Promise.all([
     Promise.resolve(mailboxes(me, boxOpts)),
-    folderCounts("personal", me),
-    needsReplyCount(me),
-    callsCount(me),
-    flaggedCount(me),
+    folderCounts("personal", viewer),
+    needsReplyCount(viewer),
+    callsCount(viewer),
+    flaggedCount(viewer),
     view === "unmatched" ? allThreads() : Promise.resolve([] as CommThread[]),
     followUpCount({ unownedOrMine: true, me }),
     // Unmatched builds its own list from allComms — skip the query it would
@@ -338,7 +359,7 @@ export default async function InboxPage({
     // Organize view (#335) builds its own rows.
     view === "unmatched" || isMeetings || isOrganize
       ? Promise.resolve([] as CommThread[])
-      : threadsIn(view ?? box, view ? "inbox" : folder, me, {
+      : threadsIn(view ?? box, view ? "inbox" : folder, viewer, {
           filter,
           sort: sortParam,
           crmMode,
@@ -348,9 +369,9 @@ export default async function InboxPage({
     allCustomers(),
     labelOptionsFor(box, user.id),
     meetingsReadOr(toFileCount(user.id), 0, "inbox count"),
-    organizeToFileCount(user).catch((err) => {
+    organizeEntryCounts(user).catch((err) => {
       console.error("[inbox-org] To file count failed", err);
-      return 0;
+      return { toFile: 0, strong: 0, noise: 0 };
     }),
   ]);
 
@@ -358,7 +379,7 @@ export default async function InboxPage({
   // channel, but only the mailbox the signed-in user can see (same rule as
   // every other view), never deleted, never a draft, not already resolved.
   const isUnmatched = (t: CommThread) =>
-    visibleTo(t, me) &&
+    visibleTo(t, viewer) &&
     !t.deleted &&
     t.status !== "draft" &&
     !t.customerId &&
@@ -483,7 +504,7 @@ export default async function InboxPage({
         key: "organize",
         label: "Organize",
         active: isOrganize,
-        count: organizeToFile,
+        count: organizeCounts.toFile,
         badge: "accent",
         href: viewHref("organize"),
         icon: "archived",
@@ -538,8 +559,8 @@ export default async function InboxPage({
       : t.customer || t.contactName || "Customer";
     const bm = boxMeta(t.mailbox || "personal", t.mailboxUser || undefined, {
       domain,
-      userColor: t.mailboxUser === me ? user.color : undefined,
-      personalAddress: t.mailboxUser === me ? myAddress : undefined,
+      userColor: visibleTo(t, viewer) ? user.color : undefined,
+      personalAddress: visibleTo(t, viewer) ? myAddress : undefined,
     });
     const snip = snippet(t);
     const cat = categoryMeta(t.category);
@@ -554,13 +575,7 @@ export default async function InboxPage({
       pinned: !!t.pinned,
       categoryColor: cat?.color || "",
       categoryLabel: cat?.label || "",
-      labels: labelOptions
-        // System labels are useful context too (e.g. Starred, Important,
-        // Sent); Gmail's inbox/sent/draft routing labels are omitted because
-        // the folder already communicates them.
-        .filter((l) => l.type === "user" || !["INBOX", "SENT", "DRAFT", "TRASH", "SPAM", "ALL_MAIL"].includes(l.id))
-        .filter((l) => (t.messages || []).some((m) => (m.gmailLabelIds || []).includes(l.id)))
-        .slice(0, 4),
+      labels: threadGmailLabels(t.messages || [], labelOptions),
       name: nm,
       msgCount: (t.messages || []).length,
       messagePreviews: (t.messages || []).slice(-8).map((m) => ({
@@ -611,9 +626,10 @@ export default async function InboxPage({
               body: t.draft?.body || "",
               customerId: t.customerId || "",
               contactName: t.contactName || "",
-              attachments: (t.draft?.attachments || []).map((a) => ({
+              attachments: (t.draft?.attachments || []).map((a, i) => ({
                 name: a.name,
                 size: a.size,
+                key: attachKey(a, i),
               })),
             }
           : null,
@@ -678,20 +694,29 @@ export default async function InboxPage({
     ? threads.find((t) => t.status !== "draft") || null
     : null;
   // Organize opens only the thread a row points at — and only one of mine
-  const sel = isMeetings
+  const selRaw = isMeetings
     ? null
     : isOrganize
-      ? explicitThread && visibleTo(explicitThread, me) && !explicitThread.deleted ? explicitThread : null
+      ? explicitThread && visibleTo(explicitThread, viewer) && !explicitThread.deleted ? explicitThread : null
       : explicitThread ?? autoThread;
+  // #345 — a link the contact matcher stamped to a placeholder company
+  // ("UNKNOWN" …) before it learned to skip them reads as no customer here;
+  // the stored thread is left as it is
+  const placeholderNames = new Map(customers.map((c) => [c.id, c.name]));
+  const sel = selRaw ? withoutPlaceholderLink(selRaw, (id) => isPlaceholderCompany(placeholderNames.get(id))) : null;
 
   let reader: ReaderVM | null = null;
   if (sel) {
+    // #341 — a thread outside my own mailbox (linked or assigned to me) is
+    // read-only: no reply, status, filing, links, tasks or Assist — every
+    // write action refuses it server-side too (lib/inbox-thread-guard.ts).
+    const readOnly = !visibleTo(sel, viewer);
     const sm = statusMeta(sel.status);
     const cm = channelMeta(sel.channel);
     const bm = boxMeta(sel.mailbox || "personal", sel.mailboxUser || undefined, {
       domain,
-      userColor: sel.mailboxUser === me ? user.color : undefined,
-      personalAddress: sel.mailboxUser === me ? myAddress : undefined,
+      userColor: visibleTo(sel, viewer) ? user.color : undefined,
+      personalAddress: visibleTo(sel, viewer) ? myAddress : undefined,
     });
     const resolvedCid = await resolveCustomerId(sel);
     const resolvedCustomer = resolvedCid
@@ -945,7 +970,7 @@ export default async function InboxPage({
 
     // AI daily brief §4 — a fresh, court-me pre-draft of mine (else null). The
     // stored suggestions keep only this dialog's link keys and team ids.
-    const storedDraft = readerPreDraft(sel, { id: user.id, name: me });
+    const storedDraft = readOnly ? null : readerPreDraft(sel, viewer);
     const linkKeySet = new Set(taskLinks.map((l) => l.key));
     const teamIds = new Set(roster.map((u) => u.id));
     const preDraft: ReaderVM["preDraft"] = storedDraft
@@ -972,17 +997,27 @@ export default async function InboxPage({
       out: m.direction === "out",
       tag: tagFor(m),
       queued: !!m.queued,
+      ...(m.sendError ? { sendError: m.sendError } : {}),
       time: timeFull(m.at),
       body: m.body,
-      attachments: (m.attachments || []).map((a) => ({
-        name: a.name,
-        mime: a.mime,
-        size: a.size,
-        href: attachmentHref(a),
-      })),
+      attachments: (m.attachments || []).map((a, i) => {
+        const ref = { threadId: sel.id, messageId: m.id, index: i };
+        return {
+          name: a.name,
+          mime: a.mime,
+          size: a.size,
+          ref: threadAttachmentRef(ref),
+          pdf: isPdfAttachment(a) && !a.pdfPath,
+          // #348 slice 4 — an imported Gmail attachment downloads through the
+          // visibility-checked route (bytes stay in Gmail until asked for)
+          // Batch 6 #64 — a composer upload / a document too (read by reference)
+          href: attachmentHref(a) || (a.gmailPartId || a.blobPath || a.documentId ? threadAttachmentHref(ref) : ""),
+        };
+      }),
       link: m.link
         ? {
             type: m.link.type,
+            id: m.link.id,
             kindLabel: m.link.type.charAt(0).toUpperCase() + m.link.type.slice(1),
             label: linkLabel(m.link),
             color: LINK_KIND_COLOR[m.link.type] || "#5b616e",
@@ -993,7 +1028,10 @@ export default async function InboxPage({
 
     reader = {
       id: sel.id,
-      unread: !!sel.unread,
+      // #341 — another person's read state is never mine to show or clear
+      unread: readOnly ? false : !!sel.unread,
+      readOnly,
+      readOnlyLabel: readOnly ? readOnlyBanner(sel) : "",
       archived: !!sel.archived || sel.gmailInboxed === false,
       subject: sel.subject,
       status: sel.status,
@@ -1008,6 +1046,11 @@ export default async function InboxPage({
       chanIcon: chanIconOf(sel.channel),
       boxLabel: bm?.label || "Info",
       boxAddress: bm?.address || "",
+      // #356 re-review — Reply all Cc: the replied-to message's other recipients, never our own address or the contact
+      replyAllCc: replyAllCc(
+        [...(sel.messages || [])].reverse().find((m) => m.direction === "in") || (sel.messages || [])[(sel.messages || []).length - 1],
+        [bm?.address, user.email, sel.contactEmail],
+      ),
       boxColor: bm?.color || "#8a6d1f",
       contactName: sel.contactName || "Customer",
       contactEmail: sel.contactEmail || "",
@@ -1018,6 +1061,7 @@ export default async function InboxPage({
       link: sel.link
         ? {
             type: sel.link.type,
+            id: sel.link.id,
             kindLabel:
               sel.link.type.charAt(0).toUpperCase() + sel.link.type.slice(1),
             label: linkLabel(sel.link),
@@ -1029,7 +1073,7 @@ export default async function InboxPage({
       resolvedCustomerName: resolvedCustomer || sel.customer || "this contact",
       needsAdopt: !sel.customerId && !!resolvedCid,
       linkOptions,
-      visit,
+      visit: readOnly ? null : visit,
       lastBody: lastMsg(sel)?.body || "",
       forwardFrom: sel.contactName || sel.contactEmail || "",
       resolution,
@@ -1062,11 +1106,63 @@ export default async function InboxPage({
       taskTeam: roster.map((u) => ({ id: u.id, name: u.name })),
       meId: user.id,
       threadTasks,
-      org,
+      org: readOnly ? null : org,
+      // #346 — the sidebar's Labels card (own threads only: a read-only
+      // thread has no sidebar and no label to change)
+      labels: readOnly
+        ? null
+        : {
+            current: categoryMeta(sel.category),
+            options: CATEGORIES,
+            // #347 — the person's own Gmail labels (editable), Peak/* read-only
+            gmail: cardGmailChips(
+              sel.messages || [],
+              labelOptions.map((l) => ({ labelId: l.id, name: l.name, type: l.type, textColor: l.textColor, backgroundColor: l.backgroundColor }))
+            ),
+            gmailEditable: sel.mailbox === "personal" && !!sel.gmailThreadId,
+          },
+      // #346 — set below when the thread is opened from the Organize view
+      organize: null,
       // Estimate suggestion (spec 2026-10-13 §3): looked up only when the button shows.
-      suggestionHref: assistFlags.estimate && sel.channel === "email" ? await suggestionReadyHref("thread", sel.id) : null,
+      suggestionHref: !readOnly && assistFlags.estimate && sel.channel === "email" ? await suggestionReadyHref("thread", sel.id) : null,
+      attachmentsPending:
+        !readOnly && gmailEnabled() && (sel.messages || []).some((m) => m.gmailId && !m.attsListed && !(m.attachments || []).length),
+      // #348 slice 4 — the owner's reader only (a read-only reader below resets it): the vendor company the thread is filed under
+      vendorCompany: (() => {
+        const vc = sel.customerId ? customers.find((c) => c.id === sel.customerId) : null;
+        return vc && isVendorPickerType(vc.type) ? { id: vc.id, name: vc.name } : null;
+      })(),
+      readOnlyLinkedTo: "",
       preDraft,
     };
+    // #341 — a read-only thread carries none of the link / task data the
+    // hidden sidebar and pickers would use, and names its customer only when
+    // the thread is deliberately linked (isThreadLinked) — never the
+    // automatic sender match (resolveCustomerId).
+    if (readOnly) {
+      reader = {
+        ...reader,
+        readOnlyLinkedTo:
+          isThreadLinked(sel) && sel.customerId ? customers.find((c) => c.id === sel.customerId)?.name || sel.customer || "" : "",
+        resolvedCustomerId: null,
+        resolvedCustomerName: "",
+        needsAdopt: false,
+        linkOptions: { quote: [], lead: [], survey: [], inspection: [], project: [] },
+        taskLinks: [],
+        threadTasks: [],
+        customerCard: null,
+        suggested: null,
+        candidates: [],
+        linkedPeople: [],
+        siteId: null,
+        siteOptions: [],
+        contactOptions: [],
+        customerOptions: [],
+        customerOptionGroups: [],
+        attachmentsPending: false,
+        vendorCompany: null,
+      };
+    }
   }
 
   /* ---- compose / log modal data ---- */
@@ -1146,9 +1242,10 @@ export default async function InboxPage({
       body: d.body || "",
       customerId: openDraftThread.customerId || "",
       contactName: openDraftThread.contactName || "",
-      attachments: (d.attachments || []).map((a) => ({
+      attachments: (d.attachments || []).map((a, i) => ({
         name: a.name,
         size: a.size,
+        key: attachKey(a, i),
       })),
     };
   } else if (nudge) {
@@ -1228,12 +1325,39 @@ export default async function InboxPage({
     });
     // #335 §6 — "Organize my inbox" is for Assist pilot users (feature `file`)
     const cleanup = assistAll.file ? { state: cleanupVMOf(await getCleanupState(user.id).catch(() => null)) } : null;
+    // #346 — the reader's Archive, opened from this tab: what it does and
+    // where the selection goes next (own threads only)
+    if (reader && !reader.readOnly) reader = { ...reader, organize: organizeArchiveTarget(vm, reader.id) };
     organizeSlot = {
       // keyed by tab: a tab switch remounts the box, so its confirm / rule
       // offer / note state never carries over to another tab
-      list: <OrganizeBox key={`organize-list-${vm.tab}`} vm={vm} selectedId={reader ? reader.id : null} cleanup={cleanup} />,
+      list: (
+        <OrganizeBox
+          key={`organize-list-${vm.tab}`}
+          vm={vm}
+          selectedId={reader ? reader.id : null}
+          cleanup={cleanup}
+          // #345 — the brief's "Organize my inbox" link calls the button out
+          cleanupPrompt={str(params.cleanup) === "1" && vm.tab === "to-file"}
+        />
+      ),
     };
   }
+
+  // #345 — Organize's entry points above the list (tab row + banner): on the
+  // plain inbox and inside Organize, whenever Organize is available (everyone,
+  // unless INBOX_ORG_DISABLED). The banner says "N emails to file · S ready to approve".
+  const organizeEntry = organizeEntryVM({
+    available: !inboxOrgDisabled(),
+    toFile: organizeCounts.toFile,
+    strong: organizeCounts.strong,
+    noise: organizeCounts.noise,
+    where: isOrganize
+      ? { kind: "organize", tab: organizeTab }
+      : !isView && box === "personal" && folder === "inbox"
+        ? { kind: "inbox" }
+        : { kind: "other" },
+  });
 
   return (
     <>
@@ -1298,6 +1422,7 @@ export default async function InboxPage({
             meetings={meetingsSlot}
             organize={organizeSlot}
             organizeTab={organizeTab}
+            organizeEntry={organizeEntry}
             assist={assistFlags}
             askCompose={askCompose && !initialCompose ? str(params.n).slice(0, 24) || "1" : null}
           />

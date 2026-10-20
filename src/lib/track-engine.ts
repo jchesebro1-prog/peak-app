@@ -1,5 +1,6 @@
 import {
   TRACK_OPERATION_LABELS,
+  hangerSpacingFor,
   isCordOperated,
   mountingRole,
   seriesSticks,
@@ -28,9 +29,12 @@ import {
  *             radius < minRadiusFt
  *   carriers  ceil(runFt × 12 / carrierSpacingIn); masters 2 (bi-parting) or
  *             1, each replacing one ordinary carrier (floor 0)
- *   end stops 2
- *   mounting  legs × (ceil(leg / hangerSpacingFt) + 1) batten clamps or
- *             ceiling hangers — hanging points per leg, both ends supported
+ *   end stops 2 (Oct 15 #45: walk-along — 2 per curtain half, so 4 on a
+ *             walk-along bi-part — as walk-along end stops when mapped)
+ *   mounting  legs × (ceil(leg / spacing) + 1) batten clamps or ceiling
+ *             hangers — hanging points per leg, both ends supported; spacing =
+ *             the line's override, else (Oct 15 #45) the series' ceiling or
+ *             batten spacing, else its shared hangerSpacingFt
  *   cord      (bi-parting, one-way) 1 live pulley, 1 dead pulley, 1 floor
  *             block, operating line ceil(2L + 2·trim + series.lineAllowanceFt)
  *             ft (trim default 20)
@@ -38,8 +42,13 @@ import {
  *             replaces the splice on ceiling mounting; pipe clamp = one per
  *             batten hanging point; lap clamp = 2 per bi-parting batten track
  *             (series with an overlap); one-way dead-end pulley replaces the
- *             dead pulley on one-way
- *   walk-along no pulleys, floor block or line
+ *             dead pulley on one-way; (Oct 15 #45) center pipe supports on a
+ *             batten = ceil(L / series.centerSupportEveryFt) − 1, only when the
+ *             series sets that number
+ *   walk-along no pulleys, floor block or line. Oct 15 #45: a walk-along
+ *             bi-part (`walkAlongBipart`) is built like a bi-parting track —
+ *             the overlap, two lapped legs, 2 masters, lap clamps — with
+ *             no cord
  */
 
 export type TrackConfig = {
@@ -59,6 +68,8 @@ export type TrackConfig = {
   carrierSpacingIn?: number;
   /** Overrides the series default, ft. */
   hangerSpacingFt?: number;
+  /** Oct 15 #45 — walk-along only: two curtain halves walked apart (a walk-along bi-part). */
+  walkAlongBipart?: boolean;
   /** Optional name, e.g. "Main drape track". */
   label?: string;
 };
@@ -79,9 +90,14 @@ function ceilSafe(x: number): number {
 
 const OPERATIONS: ReadonlySet<string> = new Set(Object.keys(TRACK_OPERATION_LABELS));
 
+/** Oct 15 #45 — a track whose two halves part at center: bi-parting, or a walk-along bi-part. */
+export function partsAtCenter(config: Pick<TrackConfig, "operation" | "walkAlongBipart">): boolean {
+  return config.operation === "biparting" || (config.operation === "walkalong" && config.walkAlongBipart === true);
+}
+
 /** Track length for one track: the run plus the bi-parting overlap. */
-export function trackLengthFt(config: Pick<TrackConfig, "runFt" | "operation">, series: Pick<TrackSeries, "overlapFt">): number {
-  return config.runFt + (config.operation === "biparting" ? series.overlapFt || 0 : 0);
+export function trackLengthFt(config: Pick<TrackConfig, "runFt" | "operation" | "walkAlongBipart">, series: Pick<TrackSeries, "overlapFt">): number {
+  return config.runFt + (partsAtCenter(config) ? series.overlapFt || 0 : 0);
 }
 
 /** An override when it's a positive finite number, else the series default. */
@@ -117,8 +133,9 @@ export function trackQuantities(config: TrackConfig, series: TrackSeries): Track
   if (errors.length) return { rows: [], errors };
 
   const L = trackLengthFt(config, series);
+  const bipart = partsAtCenter(config);
   // #291: a lapped bi-part is two legs that meet at center; neither a stick nor a splice crosses it.
-  const legs = config.operation === "biparting" && series.overlapFt > 0 ? 2 : 1;
+  const legs = bipart && series.overlapFt > 0 ? 2 : 1;
   const leg = L / legs;
   const mapped = (role: TrackRole) => !!series.parts[role]?.sku;
   let piece: TrackRow;
@@ -134,9 +151,9 @@ export function trackQuantities(config: TrackConfig, series: TrackSeries): Track
   }
   const splices = legs * Math.max(0, nLeg - 1);
   const carrierSpacing = spacing(config.carrierSpacingIn, series.carrierSpacingIn);
-  const hangerSpacing = spacing(config.hangerSpacingFt, series.hangerSpacingFt);
+  const hangerSpacing = spacing(config.hangerSpacingFt, hangerSpacingFor(series, config.mounting));
   const allCarriers = ceilSafe((run * 12) / carrierSpacing);
-  const masters = config.operation === "biparting" ? 2 : 1;
+  const masters = bipart ? 2 : 1;
   const carriers = Math.max(0, allCarriers - masters);
   const mounts = legs * (ceilSafe(leg / hangerSpacing) + 1);
   const batten = config.mounting === "batten";
@@ -146,11 +163,16 @@ export function trackQuantities(config: TrackConfig, series: TrackSeries): Track
     { role: !batten && mapped("ceilingSplice") ? "ceilingSplice" : "splice", qty: splices },
     { role: "carrier", qty: carriers },
     { role: "masterCarrier", qty: masters },
-    { role: "endStop", qty: 2 },
+    // Oct 15 #45: a walk-along curtain stops at both ends of each half (4 on a walk-along bi-part).
+    config.operation === "walkalong"
+      ? { role: mapped("walkAlongEndStop") ? "walkAlongEndStop" : "endStop", qty: 2 * (bipart ? 2 : 1) }
+      : { role: "endStop", qty: 2 },
   ];
-  if (config.operation === "biparting" && batten && series.overlapFt > 0 && mapped("lapClamp")) per.push({ role: "lapClamp", qty: 2 });
+  if (bipart && batten && series.overlapFt > 0 && mapped("lapClamp")) per.push({ role: "lapClamp", qty: 2 });
   per.push({ role: mountingRole(config.mounting), qty: mounts });
   if (batten && mapped("pipeClamp")) per.push({ role: "pipeClamp", qty: mounts });
+  const every = series.centerSupportEveryFt;
+  if (batten && mapped("centerPipeSupport") && typeof every === "number" && every > 0) per.push({ role: "centerPipeSupport", qty: Math.max(0, ceilSafe(L / every) - 1) });
   if (cord) {
     per.push(
       { role: "livePulley", qty: 1 },

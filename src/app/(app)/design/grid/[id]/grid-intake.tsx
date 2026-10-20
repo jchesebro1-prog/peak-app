@@ -13,7 +13,7 @@ import {
 } from "@/app/(app)/design/quick/engine";
 import { coverAutoName, coverFromVenue, gridIntakeDefaults, intakeScopeInputs, UNTITLED_GRID_DESIGN } from "@/lib/design/grid-intake";
 import { houseFields, type HouseField } from "@/lib/design/venue-templates/house-dims";
-import { effectiveTemplateFor, planKindTemplates, resolveBackground, sanitizeTemplateId, templateEntry } from "@/lib/design/venue-templates";
+import { effectiveTemplateFor, pickerTemplates, planKindTemplates, resolveBackground, sanitizeTemplateId, templateEntry } from "@/lib/design/venue-templates";
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import type { AutoEstimate } from "@/lib/design/grid-auto-model";
 import type { VenueType } from "@/lib/venue-types";
@@ -482,7 +482,8 @@ export default function GridIntake({
                         ))}
                         {(() => {
                           // #249/#255: the house / nave the effective template stretches to, and a drawing choice when the kind has more than one.
-                          const choices = planKindTemplates(venue.kind);
+                          // Oct 15 #46: a retired drawing is listed only while this design picked it.
+                          const choices = pickerTemplates(planKindTemplates(venue.kind), sanitizeTemplateId(venue.kind, a.templateId));
                           const f = houseFields(a, tplId);
                           const setHouse = (key: HouseField["key"], raw: number | string, lim: [number, number]) =>
                             update({ [key]: Math.max(lim[0], Math.min(lim[1], Math.round(Number(raw)) || lim[0])) } as Partial<AState>);

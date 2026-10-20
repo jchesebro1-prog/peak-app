@@ -12,10 +12,8 @@ import { revalidatePath } from "next/cache";
 import { requireUser, type SessionUser } from "@/lib/session";
 import { patchDoc } from "@/db/doc-store";
 import {
-  get as getThread,
   resolveCustomerId,
   timeFull,
-  visibleTo,
   type CommMessage,
   type CommThread,
 } from "@/lib/stores/comms";
@@ -24,7 +22,8 @@ import { domainOf, gmailEnabled, personalKey, shouldStampCcFetched } from "@/lib
 import { getConnectionInfo } from "@/lib/gmail/connections";
 import { customersForDomain } from "@/lib/gmail/domains";
 import { linkThread } from "@/lib/gmail/linking";
-import { allCompanies, getCompany, getCompanies } from "@/lib/identity/companies";
+import { allCompanies, getCompany, getCompanies, isPlaceholderCompanyId, placeholderCompanyIds } from "@/lib/identity/companies";
+import { isPlaceholderCompany } from "@/lib/inbox-org/placeholder";
 import {
   allContacts,
   displayName,
@@ -51,6 +50,7 @@ import {
   type LinkTargetKind,
 } from "@/lib/inbox-link-targets";
 import type { LinkPopupData, PopupParticipant } from "./types";
+import { ownThread } from "@/lib/inbox-thread-guard";
 
 type R = { ok: true; note?: string } | { ok: false; error: string };
 type DataR = { ok: true; data: LinkPopupData } | { ok: false; error: string };
@@ -88,8 +88,8 @@ function senderOf(m: CommMessage, t: CommThread, own: readonly string[] = []): P
 type Loaded = { ok: true; t: CommThread; m: CommMessage } | { ok: false; error: string };
 
 async function loadThread(threadId: string, messageId: string, me: SessionUser): Promise<Loaded> {
-  const t = await getThread(threadId);
-  if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
+  const t = await ownThread(threadId, me); // #349 — my own, by identity (stamps a legacy owner)
+  if (!t) return { ok: false, error: "Thread not found." };
   const m = (t.messages || []).find((x) => x.id === messageId);
   if (!m) return { ok: false, error: "That message isn't on this thread." };
   return { ok: true, t, m };
@@ -110,9 +110,13 @@ async function buildPopupData(t: CommThread, m: CommMessage, me: SessionUser): P
     (c): c is NonNullable<typeof c> => !!c
   );
   const contactById = new Map(contactRows.map((c) => [c.id, c]));
-  const companies = await getCompanies(
-    contactRows.map((c) => c.homeCompanyId).filter((v): v is string => !!v)
-  );
+  // #345 — a home company that is a placeholder ("UNKNOWN" …) is shown and
+  // used as no company
+  const homeIds = contactRows.map((c) => c.homeCompanyId).filter((v): v is string => !!v);
+  const placeholders = await placeholderCompanyIds(homeIds);
+  const homeOf = (c: { homeCompanyId?: string | null } | null | undefined) =>
+    c?.homeCompanyId && !placeholders.has(c.homeCompanyId) ? c.homeCompanyId : null;
+  const companies = await getCompanies(homeIds.filter((id) => !placeholders.has(id)));
   const companyName = (id: string | null | undefined) => (id ? companies.get(id)?.name || "" : "");
 
   const participants: PopupParticipant[] = parts.map((p) => {
@@ -124,8 +128,8 @@ async function buildPopupData(t: CommThread, m: CommMessage, me: SessionUser): P
       role: p.role,
       contactId: c?.id ?? null,
       contactName: c ? displayName(c) : "",
-      companyId: c?.homeCompanyId ?? null,
-      companyName: companyName(c?.homeCompanyId),
+      companyId: homeOf(c),
+      companyName: companyName(homeOf(c)),
       ambiguous: !!h && "ambiguous" in h,
       linked: !!c && linkedIds.includes(c.id),
     };
@@ -135,7 +139,7 @@ async function buildPopupData(t: CommThread, m: CommMessage, me: SessionUser): P
     .filter((id) => !onMessage.has(id))
     .map((id) => contactById.get(id))
     .filter((c): c is NonNullable<typeof c> => !!c)
-    .map((c) => ({ id: c.id, name: displayName(c), companyName: companyName(c.homeCompanyId) }));
+    .map((c) => ({ id: c.id, name: displayName(c), companyName: companyName(homeOf(c)) }));
 
   const sender = senderOf(m, t, own);
   const signature = sender ? extractSignature(m.body || "", { name: sender.name, email: sender.email }) : null;
@@ -149,12 +153,15 @@ async function buildPopupData(t: CommThread, m: CommMessage, me: SessionUser): P
     const phones = await phonesFor(senderContactId);
     missing = missingContactFields({ title: c?.title ?? "", phones: phones.map((p) => p.phone) }, signature);
   } else if (sender && !senderRow?.ambiguous) {
-    const owners = await customersForDomain(domainOf(sender.email));
-    let companyId: string | null = owners.length === 1 ? owners[0].customerId : null;
+    // #345 — a placeholder company never pre-fills the new contact
+    const claimed = (await customersForDomain(domainOf(sender.email))).map((o) => o.customerId);
+    const phOwners = await placeholderCompanyIds(claimed);
+    const owners = claimed.filter((id) => !phOwners.has(id));
+    let companyId: string | null = owners.length === 1 ? owners[0] : null;
     if (!companyId && signature?.company) {
       companyId = companyByExactName(
         signature.company,
-        (await allCompanies()).map((c) => ({ id: c.id, name: c.name }))
+        (await allCompanies()).filter((c) => !isPlaceholderCompany(c.name)).map((c) => ({ id: c.id, name: c.name }))
       );
     }
     const phone = signature?.phones.find((p) => p.label === "mobile") ?? signature?.phones[0];
@@ -233,8 +240,8 @@ export async function setThreadContactsAction(
   on: boolean
 ): Promise<R> {
   const me = await requireUser();
-  const t = await getThread(threadId);
-  if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
+  const t = await ownThread(threadId, me); // #349 — my own, by identity (stamps a legacy owner)
+  if (!t) return { ok: false, error: "Thread not found." };
   const c = on ? await getContact(contactId) : null;
   if (on && !c) return { ok: false, error: "Person not found." };
   const pre = applyContactLink(t, contactId, on);
@@ -251,7 +258,9 @@ export async function setThreadContactsAction(
   // (mirroring linkThreadToCustomerAction's getCustomer check) is skipped
   // for a dead/missing company, never the link itself (#214 fix wave 2).
   let note: string | undefined;
-  if (on && c?.homeCompanyId && !(t.customerId || (await resolveCustomerId(t)))) {
+  // #345 — a placeholder home company ("UNKNOWN" …) is never auto-linked, and
+  // a stored placeholder link doesn't count as "already has a company"
+  if (on && c?.homeCompanyId && !(await isPlaceholderCompanyId(c.homeCompanyId)) && !(await resolveCustomerId(t))) {
     if (await getCompany(c.homeCompanyId)) {
       await linkThread(threadId, c.homeCompanyId, pre.resolvedContactId);
     } else {

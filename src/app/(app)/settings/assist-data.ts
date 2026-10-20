@@ -2,7 +2,7 @@ import { assistSettingsOf, assistStatusLine, monthKeyChicago, type AssistKeyInfo
 import { assistKeyInfo, getAssistEnv } from "@/lib/assist/key-store";
 import { estimateRunOutcome, estimateRunQuoteId, suggestionCatalogLines, suggestionSuperseded, type DraftLine, type EstimateRunOutcome } from "@/lib/assist/outcome";
 import { getSuggestion, suggestionForSource } from "@/lib/stores/estimate-suggestions";
-import { askReport, assistReport, briefReport, filingReport, recentMonthKeys, type BriefBuildRow, type FilingReport } from "@/lib/assist/report";
+import { askReport, assistReport, briefReport, filingReport, recentMonthKeys, vendorPdfReport, type BriefBuildRow, type FilingReport } from "@/lib/assist/report";
 import { modelFor } from "@/lib/assist/models";
 import { briefIdsInMonth } from "@/lib/brief/slots";
 import { getBlob, listBlobIds } from "@/db/doc-store";
@@ -77,6 +77,8 @@ export async function loadAssistVM(settings: AppSettingsData, monthParam?: strin
     brief: briefReport(runs, await loadBriefBuilds(month)),
     ask: askReport(runs),
     askModels: { ask: modelFor("ask", env), askHard: modelFor("askHard", env) },
+    vendorPdf: vendorPdfReport(runs),
+    vendorPdfModels: { read: modelFor("vendorpdf", env), hard: modelFor("vendorpdfHard", env) },
     org,
   };
 }

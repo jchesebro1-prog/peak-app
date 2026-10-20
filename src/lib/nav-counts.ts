@@ -12,7 +12,8 @@ import {
 } from "@/lib/stores/repair-jobs";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { allVisits } from "@/lib/stores/site-visits";
-import { getAll as allComms, waitHours, unreadCountFrom } from "@/lib/stores/comms";
+import { getAll as allComms, isAssignedTo, waitHours, unreadCountFrom } from "@/lib/stores/comms";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { getPrefs } from "@/lib/stores/notif-prefs";
 import { allTasks, taskBellItems, isOverdue } from "@/lib/stores/tasks";
 import { countOpenImmediateFindings } from "@/lib/stores/findings";
@@ -102,6 +103,7 @@ export async function navData(me: string, canApprove = false, meId: string | nul
     unseenDocs,
     perkRedemptions,
     immediateFindingCount,
+    viewer,
   ] = await Promise.all([
     allQuotes(),
     // Fix wave 3 (I3): the badge needs review / owner only — a plain record
@@ -127,6 +129,8 @@ export async function navData(me: string, canApprove = false, meId: string | nul
       console.error("[assessments] nav badge: findings count failed", error);
       return 0;
     }),
+    // #349 — mailbox / assignment checks are by identity (no id: owns nothing)
+    mailboxViewer({ id: meId || "", name: me }),
   ]);
   // Everything below is derived from the arrays already fetched above — no
   // extra table scans. Previously these re-fetched inspections+repairs
@@ -135,7 +139,7 @@ export async function navData(me: string, canApprove = false, meId: string | nul
   // every app page, so this is per-navigation overhead removed.
   const flagged = await flaggedFromInspections({ jobs: repairs, inspections });
   const leadCount = leadFollowUps.length;
-  const inboxUnread = unreadCountFrom(comms, me);
+  const inboxUnread = unreadCountFrom(comms, viewer);
 
   const approvalBell = quoteApprovalBell(quotes, me, canApprove);
   const reviewDesigns = designs.filter(
@@ -161,7 +165,8 @@ export async function navData(me: string, canApprove = false, meId: string | nul
     .filter(
       (t) =>
         t.status === "waiting_us" &&
-        t.assignedTo === me &&
+        isAssignedTo(t, viewer) && // #349 — by identity
+        !t.deleted && // #341 — never a thread in Deleted
         !t.archived &&
         t.gmailInboxed !== false
     )
@@ -193,7 +198,8 @@ export async function navData(me: string, canApprove = false, meId: string | nul
       id: t.id,
       title: t.customer || t.contactName || t.contactEmail || t.subject,
       sub: `${t.subject} · waiting ${Math.round(waitHours(t))}h`,
-      href: "/inbox",
+      // #341 — open the thread itself (read-only when it isn't in my mailbox)
+      href: `/inbox?thread=${encodeURIComponent(t.id)}`,
       letter: "@",
       color: "#b4543a",
     }))

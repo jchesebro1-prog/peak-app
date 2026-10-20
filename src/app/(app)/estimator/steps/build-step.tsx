@@ -12,6 +12,8 @@ import { fmt, short, systemSellTotal } from "../pricing";
 import { vendorAttachmentLoad } from "../types";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
 import SectionCard from "../section-card";
+import MoveLinesBar from "../move-lines-bar";
+import { isMovableLine, lineRefKey, parseLineRefKey, type LineRef } from "@/lib/estimate-line-move/move";
 import { CommentPin, useCommentsFocusRefresh, useResolveComment } from "../comment-pins";
 import SystemLibraryModal from "../system-library-modal";
 import AiScopeModal from "../ai-scope-modal";
@@ -21,6 +23,9 @@ import AddSystemModal from "../add-system-modal";
 import LaborModal from "../labor-modal";
 import TrackModal from "../track-modal";
 import VendorQuoteModal from "../vendor-quote-modal";
+import { ReadPdfButton, VendorPdfPanel } from "../vendor-pdf-panel";
+import { vendorPdfLineHints } from "@/lib/vendor-pdf/fill";
+import { isPdfAttachment } from "@/lib/vendor-quotes/rules";
 import { PortalPanel } from "../portal-panel";
 import { AssistDraftBanner } from "../assist-draft-banner";
 import { SuggestedBomPanel } from "../suggested-bom-panel";
@@ -83,6 +88,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     canApplyCredit,
     cardRefs,
     closeInput,
+    confirmDiscardInput,
     cols,
     commitVendorQuote,
     copySystem,
@@ -119,6 +125,10 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     loadVendorLines,
     loadedId,
     moveItem,
+    moveLinesHere,
+    moveLinesToEstimate,
+    movingLines,
+    moveNotice,
     moveSystem,
     openCurtainEdit,
     openCustomEdit,
@@ -193,6 +203,12 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     vendorEditingRec,
     vendorFor,
     vendorFormMargin,
+    vendorHandoff,
+    vendorPdf,
+    vendorPdfEnabled,
+    readVendorPdf,
+    retargetVendor,
+    setVendorCompany,
     vendorPreviews,
     vendorQuotes,
     vendorSec,
@@ -209,6 +225,61 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
   const mayResolveComments = canResolve(s.viewerRoles, {});
   const resolveComment = useResolveComment(s);
   useCommentsFocusRefresh(s);
+  /* #348 slice 5: Read the PDF — only for a user the server gate passed, and only on a PDF attachment. */
+  const readPdf = vendorPdfEnabled && !!vendorDraft.attachment && isPdfAttachment(vendorDraft.attachment);
+
+  /* #357: ticked lines and a row's ⇄ feed the Move bar. Build unmounts on a step
+     change (estimator-client renders one step at a time), which clears both; a line
+     that no longer exists (deleted, moved away) simply drops out of liveSelected.
+     Item ids are unique per SYSTEM only (Copy/Move system keeps them), so a tick is
+     keyed "<sectionId>:<id>" (lineRefKey) — never the bare id. */
+  const [selectedLines, setSelectedLines] = useState<Set<string>>(() => new Set());
+  const [rowMove, setRowMove] = useState<LineRef | null>(null);
+  // Another quote loaded into this same screen: its line ids are not ours. (null → id is a first save — keep the ticks.)
+  const [selQuote, setSelQuote] = useState(loadedId);
+  if (selQuote !== loadedId) {
+    setSelQuote(loadedId);
+    if (selQuote) {
+      setSelectedLines(new Set());
+      setRowMove(null);
+    }
+  }
+  // A built (collapsed) system shows no rows, so its lines can't be ticked — and a tick made before it was marked built no longer counts.
+  const movableKeys = useMemo(
+    () => new Set(sections.filter((x) => x.built !== true).flatMap((x) => x.items.filter(isMovableLine).map((it) => lineRefKey({ sectionId: x.id, id: it.id })))),
+    [sections]
+  );
+  const liveSelected = useMemo(() => [...selectedLines].filter((k) => movableKeys.has(k)), [selectedLines, movableKeys]);
+  /** Each system's own ticked line ids — so ticking A:105 never ticks C:105. */
+  const selectedBySection = useMemo(() => {
+    const m = new Map<string, Set<number>>();
+    for (const k of liveSelected) {
+      const r = parseLineRefKey(k);
+      if (!r) continue;
+      const set = m.get(r.sectionId) || new Set<number>();
+      set.add(r.id);
+      m.set(r.sectionId, set);
+    }
+    return m;
+  }, [liveSelected]);
+  const toggleLine = (ref: LineRef) =>
+    setSelectedLines((cur) => {
+      const k = lineRefKey(ref);
+      const n = new Set(cur);
+      if (n.has(k)) n.delete(k);
+      else n.add(k);
+      return n;
+    });
+  // A successful move takes its lines away (out of the estimate, or a ⇄ line already
+  // moved): drop the ids that left and end row mode, so the bar closes cleanly.
+  // (Adjusted during render, like selQuote above.)
+  if (rowMove != null && !movableKeys.has(lineRefKey(rowMove))) setRowMove(null);
+  if (liveSelected.length !== selectedLines.size) setSelectedLines(new Set(liveSelected));
+  const rowLive = rowMove != null && movableKeys.has(lineRefKey(rowMove));
+  const barLines: LineRef[] = useMemo(
+    () => (rowLive && rowMove ? [rowMove] : liveSelected.map(parseLineRefKey).filter((r): r is LineRef => !!r)),
+    [rowLive, rowMove, liveSelected]
+  );
 
   return (
     <div
@@ -515,6 +586,11 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     onSetPrice={setItemPrice}
                     onSetExtSell={setItemExtSell}
                     onMoveItem={(itemId, direction) => moveItem(sec.id, itemId, direction)}
+                    selectedLines={isInternal ? selectedBySection.get(sec.id) : undefined}
+                    onToggleLineSelected={isInternal ? (itemId) => toggleLine({ sectionId: sec.id, id: itemId }) : undefined}
+                    onMoveLine={isInternal ? (itemId) => setRowMove({ sectionId: sec.id, id: itemId }) : undefined}
+                    // While an estimate move runs, no tick or ⇄ may remount the waiting bar — kept in place, disabled.
+                    lineSelectDisabled={movingLines}
                     onRemoveItem={removeItem}
                     onToggleKeyProduct={(itemId) => toggleKeyProductLine(sec.id, itemId)}
                     onToggleCatalog={() => openInputMethod("catalog", sec.id)}
@@ -605,6 +681,28 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           >
             + From library…
           </button>
+          {isInternal && barLines.length > 0 && (
+            <MoveLinesBar
+              key={rowLive && rowMove ? "row-" + lineRefKey(rowMove) : "ticks"}
+              sections={sections}
+              groups={groups}
+              lines={barLines}
+              single={rowLive}
+              openMenu={rowLive}
+              moving={movingLines}
+              onClear={() => {
+                if (rowLive) setRowMove(null);
+                else {
+                  setSelectedLines(new Set());
+                  setRowMove(null);
+                }
+              }}
+              onMoveHere={(t) => moveLinesHere(barLines, t)}
+              onMoveToEstimate={(d) => moveLinesToEstimate(barLines, d)}
+              searchQuotes={searchQuotes}
+              moveError={moveNotice && !moveNotice.ok ? moveNotice.error : undefined}
+            />
+          )}
           {addSystemOpen && (
             <AddSystemModal
               categories={initial.systemCategories}
@@ -650,6 +748,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           onSet={setCurtainField}
           onAdd={() => addCurtain(curtainFor)}
           onClose={closeInput}
+          confirmClose={confirmDiscardInput}
           track={curtainTrack}
           trackSeries={trackSeries}
           trackParts={trackParts}
@@ -669,6 +768,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           onSet={(field, val) => setTrackDraft((d) => ({ ...d, [field]: val }))}
           onAdd={() => addTrack(trackFor)}
           onClose={closeInput}
+          confirmClose={confirmDiscardInput}
         />
       )}
       {fixtureFor && (
@@ -681,6 +781,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           onComponentQty={setFixtureComponentQty}
           onAdd={() => addFixture(fixtureFor)}
           onClose={closeInput}
+          confirmClose={confirmDiscardInput}
         />
       )}
       {laborFor && (
@@ -704,6 +805,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           onAdd={() => addLabor(laborFor)}
           editing={laborEdit}
           onClose={closeInput}
+          confirmClose={confirmDiscardInput}
         />
       )}
       {vendorFor && (
@@ -741,6 +843,21 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           editing={!!vendorEditingRec}
           onAdd={() => commitVendorQuote(vendorFor)}
           onClose={closeInput}
+          confirmClose={confirmDiscardInput}
+          /* #348 slice 4: the vendor company picker (typed name as the fallback) and the email hand-off. */
+          onPickVendor={(c) => setVendorCompany(c)}
+          onTypedVendor={(name) => setVendorField("vendor", name)}
+          onUnlinkVendor={() => setVendorCompany(null)}
+          handoff={vendorHandoff}
+          systems={sections.map((sec) => ({ id: sec.id, name: sec.name }))}
+          systemId={vendorFor}
+          onPickSystem={retargetVendor}
+          /* #348 slice 5: Read the PDF (pilot users with a Claude key; PDFs only) — the file-row button, the
+             results panel, the per-line hints, and Add waiting while it reads. */
+          fileActions={readPdf ? <ReadPdfButton busy={vendorPdf.busy} onRead={() => void readVendorPdf(false)} /> : undefined}
+          readPanel={readPdf ? <VendorPdfPanel draft={vendorDraft} state={vendorPdf} onTryHarder={() => void readVendorPdf(true)} /> : undefined}
+          lineHints={readPdf ? vendorPdfLineHints(vendorDraft) : undefined}
+          reading={readPdf && !!vendorPdf.busy}
         />
       )}
       {aiSource && aiOpen && (

@@ -6,6 +6,9 @@ import { loadProjectsData, one, normFilter } from "../data";
 import ActionError from "@/components/action-error";
 import { MeetingsCard } from "@/components/meetings/meetings-card";
 import { AssessmentsCard } from "@/components/assessments/assessment-cards";
+import { PartiesCard } from "@/components/parties/parties-card";
+import { ProjectVendorsCard } from "@/components/vendors/project-vendors-card";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 export const metadata = { title: "Project — Quartzite-6" };
 
@@ -62,8 +65,10 @@ export default async function ProjectDetailPage({
           <>
             <MeetingsCard kind="work" id={sel.id} viewerId={user.id} style={{ marginTop: 18 }} />
             <AssessmentsCard projectId={sel.id} customerId={sel.customerId ?? undefined} compact />
+            <PartiesCard recordType="project" recordId={sel.id} title="Companies on this project" />
           </>
         }
+        procurementSlot={tab === "procurement" ? <ProjectVendorsCard project={sel} viewer={await mailboxViewer(user)} /> : null}
       />
     </>
   );

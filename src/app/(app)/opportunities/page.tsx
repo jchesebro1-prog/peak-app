@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
 import { getAll as allLeads } from "@/lib/stores/leads";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
+import { leadIdsWithEstimates } from "@/lib/parties/rules";
 import { companyFacts } from "@/lib/stores/customers";
 import {
   OPP_COLUMNS,
@@ -130,6 +131,8 @@ export default async function OpportunitiesPage({
   };
 
   /* ---- union + filters + totals ---- */
+  // #348 — a lead whose estimates are on the board is not counted twice.
+  const withEstimates = leadIdsWithEstimates(quotes);
   const rows = buildOpportunities(
     leads.map((l) => ({
       id: l.id,
@@ -144,6 +147,7 @@ export default async function OpportunitiesPage({
       convertedCustomerId: l.convertedCustomerId ?? null,
       convertedQuoteId: l.convertedQuoteId ?? null,
       forecastAt: l.forecastAt ?? null,
+      hasEstimates: withEstimates.has(l.id),
     })),
     quotes.map((q) => ({
       id: q.id,
@@ -156,6 +160,7 @@ export default async function OpportunitiesPage({
       updatedAt: q.updatedAt || 0,
       customerId: q.customerId ?? null,
       poReceivedAt: q.poReceivedAt ?? null,
+      leadId: q.leadId ?? null,
     }))
   );
 

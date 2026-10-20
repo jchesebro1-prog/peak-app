@@ -2,6 +2,7 @@ import { Fragment, type ReactNode } from "react";
 import type { NarrativeBlock } from "@/app/(app)/estimator/narrative";
 import type { PackageScopeView, PackageViewProps } from "@/lib/estimate-output/package-model";
 import { PACKAGE_COPY } from "@/lib/quote-share/package-view";
+import { spreadPhotoAnchors } from "@/lib/estimate-output/photo-spread";
 import { ResolvedPackageDocView } from "@/components/package-doc/package-doc-view";
 
 /**
@@ -22,7 +23,21 @@ export type PackageSlots = {
   downloads?: ReactNode;
   actions?: ReactNode;
   keyProductExtra?: Record<string, ReactNode>;
+  /** Jeff 2026-10-15 #22 — the Client-style curtain cut sheets, when the sent PDF carries them. */
+  cutSheets?: ReactNode;
 };
+
+/** Jeff 2026-10-15 #20 — every other key-product photo floats left (stacked on a phone, tag back on the bottom-right
+ *  corner). Printed only on a page that has one, so a page whose photos don't alternate renders exactly as before. */
+export const PACKAGE_LEFT_PHOTO_CSS = `
+.pkg-ph.pkg-ph-left { float: left; margin: 0 14px 8px 0; }
+.pkg-ph.pkg-ph-left .pkg-ph-tag { right: auto; left: 0; }
+@media (max-width: 600px) {
+  .pkg-ph.pkg-ph-left { float: none; margin: 0 0 10px; }
+  .pkg-ph.pkg-ph-left img { object-position: right top; }
+  .pkg-ph.pkg-ph-left .pkg-ph-tag { left: auto; right: 0; }
+}
+`;
 
 export const PACKAGE_WEB_CSS = `
 .pkg { display: flex; flex-direction: column; gap: 14px; font-size: 14px; line-height: 1.55; color: #16181d; overflow-wrap: break-word; }
@@ -54,8 +69,12 @@ export const PACKAGE_WEB_CSS = `
 .pkg-price { font-weight: 700; font-variant-numeric: tabular-nums; }
 .pkg-goals { background: #f7f8fa; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
 .pkg-label { font-size: 11px; font-weight: 700; color: #5b616e; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
-.pkg-kp { overflow: hidden; margin-top: 14px; }
-.pkg-kp img { float: right; width: 34%; max-height: 2.4in; object-fit: contain; margin: 0 0 8px 14px; }
+.pkg-kp { margin-top: 14px; padding-bottom: 10px; }
+.pkg-kp > :last-child { margin-bottom: 0; }
+.pkg-body-ph { display: flow-root; }
+.pkg-ph { float: right; width: fit-content; max-width: 34%; margin: 0 0 8px 14px; position: relative; break-inside: avoid; page-break-inside: avoid; }
+.pkg-ph img { display: block; width: auto; height: auto; max-width: 100%; max-height: 2.4in; object-fit: contain; }
+.pkg-ph-tag { position: absolute; bottom: 0; right: 0; max-width: 100%; box-sizing: border-box; padding: 2px 6px; background: rgba(22,24,29,.86); color: #fff; font-family: var(--font-mono); font-size: 10px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pkg-bom-wrap { overflow-x: auto; }
 .pkg-bom { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pkg-bom th { white-space: nowrap; text-align: left; font-size: 11px; font-weight: 700; color: #5b616e; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #e4e7ec; padding: 6px 8px; }
@@ -69,44 +88,85 @@ export const PACKAGE_WEB_CSS = `
 @media (max-width: 600px) {
   .pkg-card { padding: 18px 16px; }
   .pkg-grand { text-align: left; }
-  .pkg-kp img { float: none; display: block; width: 100%; max-height: 3in; margin: 0 0 10px; }
+  .pkg-ph { float: none; width: 100%; max-width: 100%; margin: 0 0 10px; }
+  .pkg-ph img { width: 100%; max-height: 3in; object-position: right top; }
 }
 @page { size: letter; margin: 0.6in; }
 @media print {
   html, body { background: #fff !important; }
   .pk-no-print { display: none !important; }
   .pkg-card { border: 0; border-radius: 0; padding: 0 0 12px; }
+  .pkg-ph-tag { font-size: 9px; }
   .pkg-kp, .pkg-goals, .pkg-bom tr, .pkg-row { break-inside: avoid; page-break-inside: avoid; }
   .pkg-scope-head { break-after: avoid; page-break-after: avoid; }
 }
 `;
 
+function Block({ b }: { b: NarrativeBlock }) {
+  return b.kind === "p" ? (
+    <p className="pkg-p">
+      {b.lines.map((l, j) => (
+        <Fragment key={j}>
+          {j > 0 && <br />}
+          {l}
+        </Fragment>
+      ))}
+    </p>
+  ) : (
+    <ul className="pkg-ul">
+      {b.items.map((it, j) => (
+        <li key={j}>{it}</li>
+      ))}
+    </ul>
+  );
+}
+
 function Blocks({ blocks }: { blocks: NarrativeBlock[] }) {
   return (
     <>
-      {blocks.map((b, i) =>
-        b.kind === "p" ? (
-          <p key={i} className="pkg-p">
-            {b.lines.map((l, j) => (
-              <Fragment key={j}>
-                {j > 0 && <br />}
-                {l}
-              </Fragment>
-            ))}
-          </p>
-        ) : (
-          <ul key={i} className="pkg-ul">
-            {b.items.map((it, j) => (
-              <li key={j}>{it}</li>
-            ))}
-          </ul>
-        )
-      )}
+      {blocks.map((b, i) => (
+        <Block key={i} b={b} />
+      ))}
     </>
   );
 }
 
-function Scope({ s, bom, extra }: { s: PackageScopeView; bom: boolean; extra: Record<string, ReactNode> }) {
+/** Photo wrap (2026-10-16 §1): the scope's text as units — intro blocks, then key products — with photo k before unit k. */
+function ScopeBody({ s, extra }: { s: PackageScopeView; extra: Record<string, ReactNode> }) {
+  const units: ReactNode[] = [
+    ...s.intro.map((b, i) => <Block key={"i" + i} b={b} />),
+    ...(s.fallback ? [<p key="fb" className="pkg-p">{s.fallback}</p>] : []),
+    ...s.keyProducts.map((kp) => (
+      <div key={kp.sku} className="pkg-kp">
+        <h3>{kp.heading}</h3>
+        <Blocks blocks={kp.blocks} />
+        {extra[kp.sku]}
+      </div>
+    )),
+  ];
+  const shown = s.keyProducts.filter((kp) => !!kp.photo);
+  const anchors = spreadPhotoAnchors(units.length, shown.length);
+  return (
+    <div className={shown.length ? "pkg-body pkg-body-ph" : "pkg-body"}>
+      {units.map((u, ui) => (
+        <Fragment key={ui}>
+          {shown.map((kp, k) =>
+            anchors[k] === ui && kp.photo ? (
+              <figure key={"ph-" + kp.sku} className={kp.side === "left" ? "pkg-ph pkg-ph-left" : "pkg-ph"}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={kp.photo.src} alt={kp.photo.alt} />
+                {kp.model ? <span className="pkg-ph-tag">{kp.model}</span> : null}
+              </figure>
+            ) : null
+          )}
+          {u}
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+function Scope({ s, bom, extra, showQty = true }: { s: PackageScopeView; bom: boolean; extra: Record<string, ReactNode>; showQty?: boolean }) {
   return (
     <section className="pkg-card pkg-scope" data-scope={s.id}>
       <div className="pkg-scope-head">
@@ -124,30 +184,15 @@ function Scope({ s, bom, extra }: { s: PackageScopeView; bom: boolean; extra: Re
           </p>
         </div>
       )}
-      {!bom && (
-        <>
-          <Blocks blocks={s.intro} />
-          {s.fallback && <p className="pkg-p">{s.fallback}</p>}
-          {s.keyProducts.map((kp) => (
-            <div key={kp.sku} className="pkg-kp">
-              {kp.photo && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={kp.photo.src} alt={kp.photo.alt} />
-              )}
-              <h3>{kp.heading}</h3>
-              <Blocks blocks={kp.blocks} />
-              {extra[kp.sku]}
-            </div>
-          ))}
-        </>
-      )}
+      {!bom && <ScopeBody s={s} extra={extra} />}
       {bom &&
         (s.bom.length ? (
           <div className="pkg-bom-wrap">
             <table className="pkg-bom">
               <thead>
                 <tr>
-                  {PACKAGE_COPY.bomHead.map((h) => (
+                  {/* Jeff 2026-10-15 #14: no Qty column when the estimate PDF hides quantities. */}
+                  {PACKAGE_COPY.bomHead.filter((h, i) => showQty || i > 0).map((h) => (
                     <th key={h} scope="col">{h}</th>
                   ))}
                 </tr>
@@ -155,7 +200,7 @@ function Scope({ s, bom, extra }: { s: PackageScopeView; bom: boolean; extra: Re
               <tbody>
                 {s.bom.map((r) => (
                   <tr key={r.key}>
-                    <td className="pkg-qty">{r.qty == null ? "" : `${r.qty}${r.unit ? " " + r.unit : ""}`}</td>
+                    {showQty && <td className="pkg-qty">{r.qty == null ? "" : `${r.qty}${r.unit ? " " + r.unit : ""}`}</td>}
                     <td>{r.manufacturer}</td>
                     <td>{r.part}</td>
                     <td>{r.description}</td>
@@ -177,13 +222,14 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
   return (
     <div className="pkg" data-view={m.view}>
       <style>{PACKAGE_WEB_CSS}</style>
+      {m.scopes.some((s) => s.keyProducts.some((kp) => kp.side === "left")) && <style>{PACKAGE_LEFT_PHOTO_CSS}</style>}
       <header className="pkg-card">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={m.logo.src} alt={m.companyName} className={m.logo.full ? "pkg-logo-full" : "pkg-logo"} />
         <div className="pkg-head-row">
           <div style={{ minWidth: 0 }}>
             <h1 className="pkg-title">{m.title}</h1>
-            <div className="pkg-meta">{[m.customer, m.venue].filter(Boolean).join(" · ")}</div>
+            <div className="pkg-meta">{[m.customer, m.owner ? `Owner: ${m.owner}` : "", m.venue].filter(Boolean).join(" · ")}</div>
             <div className="pkg-stamp">{m.headerLine}</div>
           </div>
           <div className="pkg-grand">
@@ -223,7 +269,7 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
           <ResolvedPackageDocView resolved={m.document} productExtra={extra} />
         </section>
       ) : (
-        m.scopes.map((s) => <Scope key={s.id} s={s} bom={bom} extra={extra} />)
+        m.scopes.map((s) => <Scope key={s.id} s={s} bom={bom} extra={extra} showQty={m.showQty !== false} />)
       )}
       <section className="pkg-card">
         {m.totals.creditLabel && m.totals.creditAmount && (
@@ -268,6 +314,7 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
         </section>
       )}
       {slots.plans && <section data-mount="plans">{slots.plans}</section>}
+      {slots.cutSheets && <section data-mount="cutsheets" className="pkg-card">{slots.cutSheets}</section>}
       {m.options.length > 0 && (
         <section className="pkg-card">
           <h2>{PACKAGE_COPY.options}</h2>

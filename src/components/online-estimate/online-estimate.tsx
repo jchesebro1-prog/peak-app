@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import QuoteDocument, { QUOTE_WEB_CSS, type QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import { bomViewProps, offersBomView } from "@/app/(app)/estimator/quote-document-view";
-import { ONLINE_COPY } from "@/lib/quote-share/view";
+import { ONLINE_COPY, ONLINE_VIEW_LABELS } from "@/lib/quote-share/view";
 
 /**
  * #293 slice 3 — the online estimate, shared by the portal page and the share
@@ -63,10 +63,10 @@ export function OnlineEstimateView({
           {offers && (
             <nav aria-label="Estimate view" style={seg}>
               <Link href={narrativeHref} prefetch={false} aria-current={!showBom ? "page" : undefined} style={segItem(!showBom)}>
-                Narrative
+                {ONLINE_VIEW_LABELS.narrative}
               </Link>
               <Link href={bomHref} prefetch={false} aria-current={showBom ? "page" : undefined} style={segItem(showBom)}>
-                BOM
+                {ONLINE_VIEW_LABELS.bom}
               </Link>
             </nav>
           )}

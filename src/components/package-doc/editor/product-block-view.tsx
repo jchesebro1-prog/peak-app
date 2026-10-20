@@ -8,7 +8,8 @@ import { productBlockText } from "@/lib/package-doc/text";
 import type { PDProductBlock, PhotoAlign, PhotoAttrs } from "@/lib/package-doc/types";
 import { usePackageDocEnv } from "./editor-context";
 import { addPhoto, deleteNodeAt, docHasImageFor, revertProductBlock, separatePhoto, setBlockPhoto } from "./editor-commands";
-import { customLineTagText, isLineTokenSku, productBlockLabel, productPhotoPreview, productTagState, productTagText, SAVED_TO_PRODUCT_MS, withPhoto } from "./editor-model";
+import { customLineTagText, editorPhotoTag, isLineTokenSku, productBlockLabel, productPhotoPreview, productTagState, productTagText, SAVED_TO_PRODUCT_MS, withPhoto } from "./editor-model";
+import { docPhotoFigureStyle, docPhotoImgStyle, photoTagStyle } from "@/lib/estimate-output/photo-spread";
 
 /**
  * Estimator Phase 5 — a product-linked block: one BOM line's paragraph(s).
@@ -22,8 +23,9 @@ import { customLineTagText, isLineTokenSku, productBlockLabel, productPhotoPrevi
  * controls). An OLDER block whose photo still shows keeps its preview with
  * Left / Right / Full, size and Hide photo when selected, plus `Separate
  * photo` (the photo becomes a productImage before the block, one undo step).
- * Only a block that shows a photo is a flow-root (its own float stays
- * inside); a words-only block lets a product image before it wrap its text.
+ * A block is never a flow-root (photo wrap 2026-10-16): its photo wraps the
+ * paragraphs after it, as in print; a words-only block lets a product image
+ * before it wrap its text. The photo carries its model tag.
  */
 
 const BTN: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 11, fontWeight: 600, color: "#3a3f4a", background: "#f1f2f5", border: "none", borderRadius: 5, padding: "3px 7px", cursor: "pointer" };
@@ -59,6 +61,7 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
   const label = productBlockLabel(block, sections, row);
   const inBom = productBlockInBom(block, sections);
   const preview = productPhotoPreview(block, sections, row);
+  const tag = editorPhotoTag(block.attrs, sections, row);
   const active = selected || !!selectionInside;
   const outlined = active || hover;
   const note = msg || (savedFor !== null && savedFor === text ? SAVED : "");
@@ -130,13 +133,6 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
     if (p !== null) addPhoto(editor, p);
   };
 
-  const imgStyle: CSSProperties =
-    photo.align === "full"
-      ? { display: "block", width: `${photo.width}%`, maxHeight: "4in", objectFit: "contain", margin: "0 auto 10px" }
-      : photo.align === "left"
-      ? { float: "left", width: `${photo.width}%`, maxHeight: "2.4in", objectFit: "contain", margin: "0 14px 8px 0" }
-      : { float: "right", width: `${photo.width}%`, maxHeight: "2.4in", objectFit: "contain", margin: "0 0 8px 14px" };
-
   return (
     <NodeViewWrapper
       className="pd-ed-product"
@@ -145,7 +141,7 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
       onMouseLeave={() => setHover(false)}
       style={{
         position: "relative",
-        display: photo.show ? "flow-root" : "block",
+        display: "block",
         margin: "14px -10px",
         padding: "6px 10px 8px",
         borderRadius: 6,
@@ -242,8 +238,12 @@ export default function ProductBlockView({ node, editor, getPos, selected, selec
       )}
 
       {ownPhoto && preview && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={preview.src} alt="" contentEditable={false} draggable={false} style={imgStyle} />
+        // The print's DocFigure styles (a full photo shrinks to the picture and clears earlier floats).
+        <figure contentEditable={false} style={docPhotoFigureStyle(photo.align, photo.width)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={preview.src} alt="" draggable={false} style={docPhotoImgStyle(photo.align)} />
+          {tag ? <span style={photoTagStyle(photo.align, 10)}>{tag}</span> : null}
+        </figure>
       )}
 
       <NodeViewContent className="pd-ed-product-text" />

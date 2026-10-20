@@ -36,22 +36,67 @@ export type QuotePdfState = {
    * online pages print exactly what the customer's PDF says.
    */
   printed?: DocumentRevStamp;
+  /** Spec 2026-10-16 §4 — what this READY file left out (a skipped drawing, a missing links page, too large to email). Absent = nothing. */
+  notes?: string[];
 };
 
 /**
  * #293 slice 3 — the Rev N and date the customer QuoteDocument prints for a
- * quote as it stands at render time: Rev = the revisions cut so far (at
- * least 1), the date = the last update. quoteDocumentDataFor reads exactly
+ * quote as it stands at render time. quoteDocumentDataFor reads exactly
  * this, so the generator can record what a file printed. Pure.
+ *
+ * Jeff 2026-10-15 #13 — Rev is the SEND number and never repeats (it used to
+ * be the revisions cut so far, so a revise + resend printed Rev 1 twice):
+ * - a quote shown as one sent revision (`docRevNo`, quoteAsOfRevision) prints that revision's Rev;
+ * - a sent / won / lost quote prints its latest send's Rev (sentRevNo — the
+ *   frozen docFields.revNo, else the old counting rule, so history keeps what it printed);
+ * - anything else (a draft, a revise in progress) prints the NEXT send's Rev:
+ *   the highest Rev any send printed + 1 (1 before the first send).
+ * The date is the last update, as before.
  */
 export type DocumentRevStamp = { revNum: number; revDateMs: number };
+
+type RevLike = { rev?: unknown; reason?: unknown; docFields?: { revNo?: unknown } | null } | null | undefined;
+
+const validRevNo = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 1;
+
+/** The Rev one sent revision printed: its frozen docFields.revNo, else the
+ *  pre-#13 counting rule (the revisions before it, at least 1) — what an
+ *  older PDF printed. Pure. */
+export function sentRevNo(revisions: readonly unknown[] | null | undefined, r: RevLike): number {
+  if (r && validRevNo(r.docFields?.revNo)) return r.docFields.revNo;
+  const revs = Array.isArray(revisions) ? (revisions as RevLike[]) : [];
+  const idx = r ? revs.findIndex((x) => !!x && x.rev === r.rev) : -1;
+  const rev = r && typeof r.rev === "number" ? r.rev : 1;
+  return Math.max(1, idx >= 0 ? idx : rev - 1);
+}
+
+/** Jeff 2026-10-15 #13 — the highest Rev any send printed (0 = never sent). Pure. */
+export function maxSentRevNo(revisions: readonly unknown[] | null | undefined): number {
+  const revs = Array.isArray(revisions) ? (revisions as RevLike[]) : [];
+  let max = 0;
+  for (const r of revs) if (r && r.reason === "sent") max = Math.max(max, sentRevNo(revs, r));
+  return max;
+}
+
+/** Jeff 2026-10-15 #13 — the Rev the next send prints: previous max + 1. Pure. */
+export function nextSendRevNo(revisions: readonly unknown[] | null | undefined): number {
+  return maxSentRevNo(revisions) + 1;
+}
 
 export function documentRevStamp(q: {
   revisions?: readonly unknown[] | null;
   updatedAt?: number | null;
   createdAt?: number | null;
+  status?: string | null;
+  /** Set only by quoteAsOfRevision: the Rev the shown sent revision printed. */
+  docRevNo?: number | null;
 }): DocumentRevStamp {
-  return { revNum: Math.max(1, q.revisions?.length || 1), revDateMs: q.updatedAt || q.createdAt || 0 };
+  const revDateMs = q.updatedAt || q.createdAt || 0;
+  if (validRevNo(q.docRevNo)) return { revNum: q.docRevNo, revDateMs };
+  const max = maxSentRevNo(q.revisions);
+  const shownAsSent = q.status === "sent" || q.status === "won" || q.status === "lost";
+  return { revNum: shownAsSent && max > 0 ? max : max + 1, revDateMs };
 }
 
 /** What a browser sees: the state without the storage path. */
@@ -63,9 +108,14 @@ export type QuotePdfView = {
   hasFile: boolean;
   /** A stale mark (QuotePdfState.stale): reported `failed` with PDF_OUT_OF_DATE. */
   outOfDate?: boolean;
+  /** The ready file's notes (Customer review → Document shows them as warnings). */
+  notes?: string[];
 };
 
-export type PdfOutcome = { ok: true; blobPath: string; printed?: DocumentRevStamp | null } | { ok: false; error: string };
+export type PdfOutcome = { ok: true; blobPath: string; printed?: DocumentRevStamp | null; notes?: string[] | null } | { ok: false; error: string };
+
+/** Spec 2026-10-16 §4 — the most notes a ready PDF keeps (the last says how many more; appendix-plan pdfNotesOf). */
+export const PDF_NOTES_MAX = 6;
 
 /** A render still "pending" this long after it started died with its function. */
 export const PDF_PENDING_STALE_MS = 150_000;
@@ -124,7 +174,15 @@ export function settlePdf(
   now: number
 ): QuotePdfState | undefined {
   if (!cur || cur.savedAt !== savedAt) return undefined;
-  if (outcome.ok) return { status: "ready", at: now, savedAt, blobPath: outcome.blobPath, ...(outcome.printed ? { printed: outcome.printed } : {}) };
+  if (outcome.ok)
+    return {
+      status: "ready",
+      at: now,
+      savedAt,
+      blobPath: outcome.blobPath,
+      ...(outcome.printed ? { printed: outcome.printed } : {}),
+      ...(outcome.notes && outcome.notes.length ? { notes: outcome.notes.slice(0, PDF_NOTES_MAX) } : {}),
+    };
   return failedPdf(cur, savedAt, outcome.error, now);
 }
 
@@ -140,6 +198,7 @@ export function pdfView(pdf: QuotePdfState | null | undefined, now: number): Quo
     savedAt: pdf.savedAt,
     error: stale ? PDF_STALE_ERROR : pdf.error ?? null,
     hasFile: !!pdf.blobPath,
+    ...(pdf.status === "ready" && Array.isArray(pdf.notes) && pdf.notes.length ? { notes: pdf.notes } : {}),
   };
 }
 
@@ -148,6 +207,39 @@ type RevisionPdfFields = { rev: number; at: number; reason: string; pdfBlobPath?
 /** A sent revision still owed a copy of the PDF made from a save at/before it. */
 export function revisionAwaitingPdf(rev: RevisionPdfFields | null | undefined, pdfSavedAt: number): boolean {
   return !!rev && rev.reason === "sent" && !rev.pdfBlobPath && rev.at >= pdfSavedAt;
+}
+
+/**
+ * #352 review I1 — what copySentRevisionPdf does with the current READY file
+ * for a sent revision still owed a copy:
+ * - "copy": a file made from a save at/before the send whose printed Rev is
+ *   the revision's stamped Rev (or either is unknown — older revisions and
+ *   unstamped renders keep the pre-#13 behaviour); or a file rendered AFTER
+ *   the send while nothing printed has changed since (it shows the revision's
+ *   content) and it printed exactly the stamped Rev;
+ * - "rerender": a pre-send file that printed a different Rev (a revise
+ *   resent with no edits still holds the old Rev's file) while nothing
+ *   printed has changed since the send — the re-render prints the stamped Rev
+ *   and is copied by the rule above (a post-send file never asks again, so
+ *   there is no loop);
+ * - "wait": anything else — nothing is copied, nothing scheduled. Pure.
+ */
+export type RevisionCopyPlan = "copy" | "rerender" | "wait";
+
+export function revisionCopyPlan(
+  rev: (RevisionPdfFields & { docFields?: { revNo?: unknown } | null }) | null | undefined,
+  pdf: { savedAt: number; printed?: DocumentRevStamp | null },
+  contentChangedAt: number | null | undefined
+): RevisionCopyPlan {
+  if (!rev || rev.reason !== "sent" || rev.pdfBlobPath) return "wait";
+  const stamped = validRevNo(rev.docFields?.revNo) ? rev.docFields.revNo : null;
+  const printed = pdf.printed && validRevNo(pdf.printed.revNum) ? pdf.printed.revNum : null;
+  const unchangedSince = (contentChangedAt ?? 0) <= rev.at;
+  if (rev.at >= pdf.savedAt) {
+    if (stamped !== null && printed !== null && printed !== stamped) return unchangedSince ? "rerender" : "wait";
+    return "copy";
+  }
+  return unchangedSince && stamped !== null && printed === stamped ? "copy" : "wait";
 }
 
 export function latestSentRevision<R extends RevisionPdfFields>(revisions: R[] | null | undefined): R | null {

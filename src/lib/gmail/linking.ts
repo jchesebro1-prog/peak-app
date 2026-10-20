@@ -14,8 +14,11 @@ import {
   setEmails,
 } from "@/lib/identity/contacts";
 import { mintId } from "@/lib/identity/ids";
+import { isPlaceholderCompanyId, placeholderCompanyIds } from "@/lib/identity/companies";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
-import type { CommLink, CommThread } from "@/lib/stores/comms";
+import type { CommLink, CommThread, LinkedBy } from "@/lib/stores/comms";
+import { ownsMailbox, type MailboxViewer } from "@/lib/stores/comms-visibility";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { domainOf, isPublicDomain } from "./config";
 import { claimDomain, customersForDomain, customersForDomains } from "./domains";
 import { resolveSender, type Resolution } from "./resolve";
@@ -27,10 +30,14 @@ export async function resolveForThread(email: string): Promise<Resolution> {
   return resolveSender(email, {
     contactByEmail,
     customersByDomain: async (d) => (await customersForDomain(d)).map((r) => r.customerId),
+    // #345 — a placeholder company ("UNKNOWN" …) is no company
+    placeholderIds: placeholderCompanyIds,
   });
 }
 
-/** Mutates `t` in place. Never downgrades an existing customerId. */
+/** Mutates `t` in place. Never downgrades an existing customerId. #341 — an
+ *  AUTOMATIC match: it never sets `linkedBy`, so a thread it links stays
+ *  private to its mailbox (comms-visibility.ts hasDeliberateLink). */
 export async function applyResolution(t: CommThread, r: Resolution): Promise<void> {
   if (t.customerId) {
     t.resolution = "linked";
@@ -57,6 +64,8 @@ export async function applyResolution(t: CommThread, r: Resolution): Promise<voi
     t.resolution = "unknown";
     t.suggestedCustomerId = null;
     t.candidates = [];
+    // #345 — a contact whose only company is a placeholder: the contact, no customer
+    if (r.kind === "unknown" && r.contactId) t.resolvedContactId = r.contactId;
   }
 }
 
@@ -72,7 +81,11 @@ export function applyResweepPatch(d: CommThread, next: CommThread): boolean {
   // Fresh doc has a customer the snapshot didn't — never downgrade.
   if (d.customerId && !next.customerId) return false;
   // #124 — a venue belongs to one customer; a different customer drops it.
-  if (d.customerId !== next.customerId) d.siteId = null;
+  // #341 — and an automatic customer change is never a deliberate link.
+  if (d.customerId !== next.customerId) {
+    d.siteId = null;
+    delete d.linkedBy;
+  }
   d.customerId = next.customerId;
   d.customer = next.customer;
   d.resolvedContactId = next.resolvedContactId ?? null;
@@ -98,20 +111,33 @@ function matchesFilter(t: CommThread, f?: { email?: string; domain?: string }): 
   return true;
 }
 
+/** #341 — which mailbox a resweep may touch. A resweep a PERSON triggered
+ *  (adding a contact or customer, claiming a domain, a Gmail label) passes
+ *  their own mailbox (`owner`, #349: a MailboxViewer — by identity, never a
+ *  name) or account (`accountKey`); only a system resweep with no acting
+ *  user (the import backfill) runs over every mailbox — and what it links
+ *  stays private anyway (no `linkedBy`). */
+export type ResweepScope = { owner?: MailboxViewer; accountKey?: string };
+
 /** Re-run the resolver over unlinked threads. Idempotent; patches only when
  *  something changes. Resolves in two batched queries (every candidate
- *  address, every candidate domain) rather than two per thread. */
+ *  address, every candidate domain) rather than two per thread. `scope`: a
+ *  connection key (string, the import backfill) or a ResweepScope. */
 export async function resweepThreads(
   filter?: { email?: string; domain?: string },
-  onlyAccountKey?: string
+  scope?: string | ResweepScope
 ): Promise<number> {
   const started = Date.now();
+  const sc: ResweepScope = typeof scope === "string" ? { accountKey: scope } : scope ?? {};
+  // A blank scope value would read as "everything" — refuse it instead.
+  if (("owner" in sc && !sc.owner?.id) || ("accountKey" in sc && !sc.accountKey)) return 0;
   const all = await listDocs<CommThread>("comms");
   const candidates = all.filter(
     (t) =>
       !t.deleted &&
       !(t.customerId && t.resolution === "linked") &&
-      !(onlyAccountKey && t.gmailAccountKey !== onlyAccountKey) &&
+      !(sc.accountKey && t.gmailAccountKey !== sc.accountKey) &&
+      !(sc.owner && !ownsMailbox(t, sc.owner)) &&
       matchesFilter(t, filter) &&
       !!resolveAddressFor(t)
   );
@@ -121,17 +147,27 @@ export async function resweepThreads(
     contactsByEmails(addresses),
     customersForDomains(addresses.map(domainOf)),
   ]);
+  // #345 — placeholder companies among every candidate customer, one query
+  const placeholders = await placeholderCompanyIds([
+    ...[...contactHits.values()].flatMap((h) => (!h ? [] : "ambiguous" in h ? h.ambiguous : [h.customerId])),
+    ...[...domainOwners.values()].flat(),
+  ]);
   const lookups = {
     contactByEmail: async (e: string) => contactHits.get(e) ?? null,
     customersByDomain: async (d: string) => domainOwners.get(d) ?? [],
+    placeholderIds: async (ids: string[]) => {
+      const out = new Set<string>();
+      for (const id of ids) if (placeholders.has(id)) out.add(id);
+      return out;
+    },
   };
   let changed = 0;
   for (const t of candidates) {
     const r = await resolveSender(resolveAddressFor(t), lookups);
-    const before = JSON.stringify([t.customerId, t.resolution, t.suggestedCustomerId, t.candidates]);
+    const before = JSON.stringify([t.customerId, t.resolution, t.suggestedCustomerId, t.candidates, t.resolvedContactId ?? null]);
     const next = { ...t };
     await applyResolution(next, r);
-    const after = JSON.stringify([next.customerId, next.resolution, next.suggestedCustomerId, next.candidates]);
+    const after = JSON.stringify([next.customerId, next.resolution, next.suggestedCustomerId, next.candidates, next.resolvedContactId ?? null]);
     if (before === after) continue;
     let didPatch = false;
     await patchDoc<CommThread>("comms", t.id, (d) => {
@@ -187,10 +223,15 @@ export async function rememberAddress(
   email: string,
   displayName: string,
   contactId: string | null | undefined,
-  addedBy: { id: string; name: string }
+  addedBy: { id: string; name: string },
+  /** #341 — the acting person's mailbox; the backlog resweep touches only it
+   *  (default: `addedBy`'s own, by identity — #349) */
+  scope?: ResweepScope
 ): Promise<string> {
   const e = (email || "").trim().toLowerCase();
   if (!e) return "";
+  // #345 — an address is never remembered on a placeholder company ("UNKNOWN" …)
+  if (await isPlaceholderCompanyId(customerId)) return "";
   let cid = contactId || "";
   if (cid) {
     const ct = await getContact(cid);
@@ -228,7 +269,7 @@ export async function rememberAddress(
   if (d && !isPublicDomain(d) && (await customersForDomain(d)).length === 0) {
     await claimDomain(d, customerId, "learned", addedBy.name);
   }
-  await resweepThreads({ email: e });
+  await resweepThreads({ email: e }, scope ?? { owner: await mailboxViewer(addedBy) });
   return cid;
 }
 
@@ -241,10 +282,15 @@ export async function rememberAddress(
 export async function linkThread(
   threadId: string,
   customerId: string,
-  contactId?: string | null
+  contactId?: string | null,
+  /** #341 — who is linking: "user" (default — a person's link), "filing"
+   *  (#335 Inbox organization), or null to keep the thread's current flag
+   *  (a Gmail label echoing a link the app already holds). */
+  by: LinkedBy | null = "user"
 ): Promise<void> {
   const name = await customerNameFor(customerId);
   await patchDoc<CommThread>("comms", threadId, (d) => {
+    if (by) d.linkedBy = by;
     // #124 — a venue belongs to one customer; a different customer drops it.
     if (d.customerId !== customerId) d.siteId = null;
     d.customerId = customerId;
@@ -274,11 +320,16 @@ export async function restoreThreadIdentity(
     suggestedCustomerId: string | null;
     candidates: Array<{ customerId: string; name: string }>;
     siteId: string | null;
+    /** #341 — the deliberate-link flag before filing; absent on snapshots
+     *  taken before #341 (then filing had set none, so restore none). */
+    linkedBy?: LinkedBy | null;
   }
 ): Promise<boolean> {
   let restored = false;
   await patchDoc<CommThread>("comms", threadId, (d) => {
     if (d.customerId !== linkedTo) return;
+    if (prev.linkedBy) d.linkedBy = prev.linkedBy;
+    else delete d.linkedBy;
     d.customerId = prev.customerId;
     d.customer = prev.customer;
     d.resolvedContactId = prev.resolvedContactId;

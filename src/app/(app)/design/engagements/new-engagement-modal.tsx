@@ -57,12 +57,15 @@ const MAX_MILESTONES = 20;
 export function NewEngagementModal({
   customers,
   disciplineMenu,
+  phaseMenu,
   onClose,
 }: {
   customers: CustomerLite[];
   /** #145 D165 — the discipline vocabulary (Settings-merged), for the
    *  checkbox row below. */
   disciplineMenu: string[];
+  /** Jeff 2026-10-15 #34 — the Settings phase menu; every phase starts ticked. */
+  phaseMenu: string[];
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -83,6 +86,7 @@ export function NewEngagementModal({
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [disciplines, setDisciplines] = useState<string[]>([]);
+  const [phases, setPhases] = useState<string[]>(() => [...phaseMenu]);
 
   const customer = customers.find((c) => c.id === customerId) || null;
   const hasCustomer = newCustomerOpen ? !!newCustomer.name.trim() : !!customerId;
@@ -102,7 +106,9 @@ export function NewEngagementModal({
   const endAtMs = dateToEpoch(endDate);
   const spanError = validateSpan(startAtMs, endAtMs);
 
-  const canSubmit = !pending && !!name.trim() && hasCustomer && !feeError && !spanError;
+  const phaseError = phaseMenu.length > 0 && phases.length === 0 ? "Tick at least one phase." : null;
+
+  const canSubmit = !pending && !!name.trim() && hasCustomer && !feeError && !spanError && !phaseError;
 
   const fee = (): ManualFee | undefined => {
     if (feeMode === "fixed") return { mode: "fixed", amount: Number(fixedAmount) || 0 };
@@ -133,6 +139,7 @@ export function NewEngagementModal({
         startAt: startAtMs,
         endAt: endAtMs,
         disciplines,
+        phases,
       });
       if (!r.ok) {
         setError(r.error);
@@ -148,6 +155,9 @@ export function NewEngagementModal({
 
   const toggleDiscipline = (d: string) =>
     setDisciplines((ds) => (ds.includes(d) ? ds.filter((x) => x !== d) : [...ds, d]));
+  // Kept in menu order whatever order they are ticked in.
+  const togglePhase = (p: string) =>
+    setPhases((ps) => (ps.includes(p) ? ps.filter((x) => x !== p) : phaseMenu.filter((m) => m === p || ps.includes(m))));
 
   return (
     <div
@@ -247,6 +257,25 @@ export function NewEngagementModal({
               </label>
             ))}
           </div>
+
+          {phaseMenu.length > 0 && (
+            <>
+              <label style={LABEL}>Phases</label>
+              <div data-testid="new-engagement-phases" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                {phaseMenu.map((p) => (
+                  <label key={p} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, color: "#3a3f4a", cursor: "pointer" }}>
+                    <input type="checkbox" checked={phases.includes(p)} onChange={() => togglePhase(p)} />
+                    {p}
+                  </label>
+                ))}
+              </div>
+              {phaseError ? (
+                <div style={FIELD_ERR}>{phaseError}</div>
+              ) : (
+                <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 6 }}>Only ticked phases get scheduled tasks and milestones.</div>
+              )}
+            </>
+          )}
 
           <label style={LABEL}>Fee</label>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

@@ -63,6 +63,28 @@ export function estimateEmailDefaults(i: EstimateEmailDefaultsInput): EstimateEm
   return { to, cc, subject, body: i.signature ? withSignature(body, i.signature, "add") : body };
 }
 
+export type BidderEmailDefaultsInput = { projectName: string; estimateNumber: string; senderName: string; signature?: string };
+
+/** #348 2b-ii — the bidder email: no addressee greeting (one body goes to every bidder), `{link}` swapped per bidder. */
+export function bidderEmailDefaults(i: BidderEmailDefaultsInput): { subject: string; body: string } {
+  const project = String(i.projectName || "").trim();
+  const est = String(i.estimateNumber || "").trim();
+  const subject = project ? `Bid — ${project}${est ? ` (${est})` : ""}` : `Bid — ${est}`;
+  const sender = String(i.senderName || "").trim();
+  const body = [
+    "Hello,",
+    "",
+    `Attached is our bid${project ? ` for ${project}` : ""}${est ? ` (${est})` : ""}.`,
+    "",
+    `You can also view the full package online here: ${LINK_TOKEN}`,
+    "",
+    "Let me know if you have any questions.",
+    "",
+    sender ? `Thanks,\n${sender}` : "Thanks,",
+  ].join("\n");
+  return { subject, body: i.signature ? withSignature(body, i.signature, "add") : body };
+}
+
 /** Replace every `{link}`; with none present, append the URL on its own line. */
 export function withLink(body: string, url: string): string {
   const text = String(body ?? "");
@@ -295,6 +317,18 @@ const COVER_FILE_RE = /^cover-(\d{10,16})(?:-[A-Za-z0-9]{1,64})?\.pdf$/;
 /** True for a cover file name the download route may serve (no directory part). */
 export function isCoverFileName(name: unknown): name is string {
   return typeof name === "string" && COVER_FILE_RE.test(name);
+}
+
+/** A stored bidder PDF's file name: `bidder-<16 hex party id>-r<rev>-<ms>[-<Blob suffix>].pdf`. */
+const BIDDER_FILE_RE = /^bidder-([0-9a-f]{16})-r([1-9]\d{0,5})-(\d{10,16})(?:-[A-Za-z0-9]{1,64})?\.pdf$/;
+
+export function isBidderFileName(name: unknown): name is string {
+  return typeof name === "string" && BIDDER_FILE_RE.test(name);
+}
+
+export function bidderFileOf(name: unknown): { partyId: string; rev: number } | null {
+  const m = typeof name === "string" ? BIDDER_FILE_RE.exec(name) : null;
+  return m ? { partyId: "pty_" + m[1], rev: Number(m[2]) } : null;
 }
 
 /** The quote's own PDF folder (quote-pdf/state.ts pdfStoragePath). */

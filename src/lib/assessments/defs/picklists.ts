@@ -2,8 +2,12 @@
    Code values are stable: never rename or remove one (an admin can add values in Assessments → Pick lists
    (/assessments/pick-lists); those live in the `assessment_picklists` blob, not here). */
 import type { PickOption } from "./types";
+import { LIFT_TYPES, LOADING_DOOR_TYPES, LIGHTING_POSITIONS, listSlug } from "../../field-lists";
 
 const o = (value: string, label: string): PickOption => ({ value, label });
+
+/** Lists rules read value-by-value, so an admin can't add to them (Jeff 2026-10-15 #8: the rigging depth). */
+export const FIXED_PICK_LISTS: ReadonlySet<string> = new Set(["rig_depth"]);
 
 export const PICK_LISTS: Record<string, PickOption[]> = {
   // S0 core
@@ -16,6 +20,14 @@ export const PICK_LISTS: Record<string, PickOption[]> = {
   doc_format: [o("electronic", "Electronic"), o("hard_copy", "Hard copy")],
   doc_status: [o("received", "Received"), o("to_follow", "To follow")],
   insp_level: [o("level1", "Level 1"), o("level2", "Level 2"), o("unknown", "Unknown")],
+
+  // #344 B1: lists shared with the Venue Assessment survey (src/lib/field-lists.ts)
+  lift_type: LIFT_TYPES.map((l) => o(listSlug(l), l)),
+  door_type: LOADING_DOOR_TYPES.map((l) => o(listSlug(l), l)),
+  lighting_position: LIGHTING_POSITIONS.map((l) => o(listSlug(l), l)),
+
+  // S2 rigging (Jeff 2026-10-15 #8): the depth toggle. Values match the scope Depth ("screen" | "full").
+  rig_depth: [o("screen", "Quick check"), o("full", "Full inspection")],
 
   // shared
   yes_no_unknown: [o("yes", "Yes"), o("no", "No"), o("unknown", "Unknown")],
@@ -57,7 +69,7 @@ export const PICK_LISTS: Record<string, PickOption[]> = {
   protocol: [o("dmx", "DMX"), o("network", "Network (Ethernet / sACN)"), o("analog", "Analog"), o("none", "None")],
   cables: [o("all", "All fixtures"), o("some_missing", "Some missing"), o("unknown", "Unknown")],
   fixture_type: [o("profile", "Profile (ERS)"), o("par", "Par"), o("cyc", "Cyc"), o("other", "Other")],
-  connector: [o("stage_pin", "Stage pin"), o("twist_lock", "Twist-lock"), o("edison", "Edison"), o("powercon", "powerCON"), o("other", "Other")],
+  connector: [o("stage_pin", "Stage pin"), o("twist_lock", "Twist-lock"), o("edison", "Edison"), o("powercon", "powerCON"), o("other", "Other"), o("mixed", "Mixed")],
   power_hazards: [o("damaged_cable", "Damaged cable"), o("improvised_adapters", "Improvised adapters"), o("bare_end_feeders", "Bare-end feeders"), o("none", "None seen")],
 
   // S6 audio, video and comms

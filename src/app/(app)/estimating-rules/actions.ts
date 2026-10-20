@@ -12,12 +12,9 @@ import {
   exportFileName,
   type PricingEntry,
 } from "@/lib/stores/pricing";
-import { getSettings, setSettings } from "@/lib/settings";
+import { setVenueDoctrineEntry } from "@/lib/settings";
 import { VENUE_CLASSES, type VenueClass } from "@/lib/stores/venue-classes";
-import {
-  resolveVenueDoctrine,
-  type VenueDoctrineEntry,
-} from "@/lib/venue-doctrine";
+import type { VenueDoctrineEntry } from "@/lib/venue-doctrine";
 
 /**
  * Estimating Rules mutations — the pricing registry editor.
@@ -85,14 +82,12 @@ export async function saveVenueDoctrineAction(
     return { ok: false as const };
   }
 
-  const settings = await getSettings();
-  const venueDoctrine = resolveVenueDoctrine(settings.venueDoctrine);
-  venueDoctrine[venueClass] = {
+  // #343 — one class's entry, edited under the settings row lock.
+  await setVenueDoctrineEntry(venueClass, {
     curtains: entry.curtains.trim().slice(0, 500),
     lighting: entry.lighting.trim().slice(0, 500),
     confirmed: entry.confirmed,
-  };
-  await setSettings({ venueDoctrine });
+  });
   revalidatePath("/estimating-rules");
   revalidatePath("/venue-assessments", "layout");
   return { ok: true as const };

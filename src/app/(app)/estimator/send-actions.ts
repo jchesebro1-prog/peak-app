@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { estimateEmailDefaults, type EstimateEmailDefaults } from "@/lib/estimate-email/compose";
 import {
@@ -13,16 +12,17 @@ import {
   type TrackReadResult, type TrackReplyResult, type TrackResult,
 } from "@/lib/estimate-email/track-server";
 import { leadEstimator } from "@/lib/estimate-output/responses";
-import { gmailEnabled, personalKey } from "@/lib/gmail/config";
-import { getConnectionInfo } from "@/lib/gmail/connections";
+import { requestWhere } from "@/lib/estimate-email/request-where";
+import { senderMailbox } from "@/lib/estimate-email/sender-mailbox";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
-import { printOriginFor } from "@/lib/quote-pdf/origin";
 import { pdfKindForQuoteType } from "@/lib/quote-pdf/state";
 import { shareSecret } from "@/lib/quote-share/links";
 import { ONLINE_COPY } from "@/lib/quote-share/view";
 import { requireUser, type SessionUser } from "@/lib/session";
 import { contactByName } from "@/lib/stores/customers";
+import { awardedRecipient } from "@/lib/parties/addressee-server";
+import { sendDefaultsContact } from "@/lib/parties/addressee";
 import { signatureFor } from "@/lib/stores/signatures";
 import { get as getQuote, type QuoteStatus } from "@/lib/stores/quotes";
 import { can } from "@/lib/team";
@@ -56,15 +56,6 @@ function cleanInput(raw: unknown): EstimateEmailInput {
     followUpDays: typeof o.followUpDays === "number" ? o.followUpDays : Number.NaN,
     asOf: typeof o.asOf === "number" && Number.isFinite(o.asOf) ? o.asOf : undefined,
   };
-}
-
-/** The request's print origin (the cover's link line uses it too); refused before anything is touched. */
-async function requestWhere(): Promise<{ origin: string; host: string | null; proto: string | null } | { error: string }> {
-  const h = await headers();
-  const host = h.get("x-forwarded-host") || h.get("host");
-  const proto = h.get("x-forwarded-proto");
-  const where = printOriginFor(process.env, host, proto);
-  return "error" in where ? { error: where.error } : { origin: where.origin, host, proto };
 }
 
 /** The "changed since you opened it" refusal — the client needs the fresh view to retry against. */
@@ -118,8 +109,10 @@ export async function estimateEmailDefaultsAction(quoteId: string): Promise<Esti
   const q = await getQuote(String(quoteId || ""));
   if (!q) return { ok: false, error: SEND_COPY.gone };
   if (pdfKindForQuoteType(q.quoteType) !== "quote") return { ok: false, error: SEND_COPY.notEstimate };
-  const [contact, roster, me, signature] = await Promise.all([
+  const [contact, recipient, roster, me, signature] = await Promise.all([
     q.customerId && q.contactName ? contactByName(q.customerId, q.contactName).catch(() => null) : Promise.resolve(null),
+    // #348 2b-i: once a bidder is awarded the estimate is addressed to it — To and the greeting follow.
+    awardedRecipient(q).catch(() => null),
     activeUsers(),
     getUser(user.id),
     // #127 — seeded into the body so it's visible and editable; the send
@@ -128,24 +121,13 @@ export async function estimateEmailDefaultsAction(quoteId: string): Promise<Esti
   ]);
   const lead = leadEstimator(q.owner, q.preparedBy, roster);
   const senderEmail = (me?.email || user.email || "").trim();
-  let fromAddress = senderEmail;
-  let gmailConnected = false;
-  try {
-    const info = gmailEnabled() ? await getConnectionInfo(personalKey(user.id)) : null;
-    if (info) {
-      gmailConnected = true;
-      fromAddress = info.address || senderEmail;
-    }
-  } catch (e) {
-    console.error("[estimate-email] gmail connection lookup failed", e);
-  }
+  const { gmailConnected, fromAddress } = await senderMailbox(user.id, senderEmail);
   return {
     ok: true,
     ...estimateEmailDefaults({
       projectName: q.name || "",
       estimateNumber: displayQuoteNumber(q),
-      contactName: q.contactName || contact?.name || "",
-      contactEmail: contact?.email || "",
+      ...sendDefaultsContact(recipient, { name: q.contactName || contact?.name || "", email: contact?.email || "" }),
       senderName: user.name,
       senderEmail,
       leadName: lead?.name || "",
@@ -162,8 +144,9 @@ export async function estimateEmailDefaultsAction(quoteId: string): Promise<Esti
  * §10.4 — the Activity card: the quote's tracked emails (newest first), the
  * client-link opens and the unread-reply count. Anyone who can see the
  * estimate may read it (the shareLinkStatusAction rule); only threads
- * recorded on THIS quote are ever returned, and the message text only to the
- * thread's owner, send|approve holders and the quote's Lead estimator.
+ * recorded on THIS quote are ever returned, message text included (Jeff
+ * 2026-10-15 #25: anyone who can open the quote reads the replies;
+ * Reply and Mark read stay the mailbox owner's).
  */
 export async function sendTrackAction(quoteId: string): Promise<TrackResult> {
   const user = await requireUser();
@@ -186,7 +169,7 @@ export async function replyToEstimateEmailAction(quoteId: string, threadId: stri
 /** §10.4 — Mark read: clears unread on one of the quote's estimate emails (the thread owner's alone). */
 export async function markEstimateEmailReadAction(quoteId: string, threadId: string): Promise<TrackReadResult> {
   const user = await requireUser();
-  const r = await markEstimateEmailRead(liveTrackDeps(), { name: user.name }, String(quoteId || ""), String(threadId || ""));
+  const r = await markEstimateEmailRead(liveTrackDeps(), { id: user.id, name: user.name }, String(quoteId || ""), String(threadId || ""));
   if (r.ok) revalidatePath("/", "layout");
   return r;
 }

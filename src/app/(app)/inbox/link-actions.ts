@@ -10,7 +10,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { patchDoc } from "@/db/doc-store";
-import { get as getThread, resolveCustomerId, visibleTo } from "@/lib/stores/comms";
+import { resolveCustomerId } from "@/lib/stores/comms";
 import type { CommThread } from "@/lib/stores/comms";
 import { get as getCustomer, contactsForId } from "@/lib/stores/customers";
 import { saveCustomerAction } from "@/app/(app)/companies/actions";
@@ -28,6 +28,10 @@ import {
   setThreadSite,
 } from "@/lib/gmail/linking";
 import { identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
+import { isPlaceholderCompanyId } from "@/lib/identity/companies";
+import { PLACEHOLDER_PICK_ERROR } from "@/lib/inbox-org/placeholder";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
+import { ownThread } from "@/lib/inbox-thread-guard";
 
 type R = { ok: true } | { ok: false; error: string };
 const revalidate = () => revalidatePath("/", "layout");
@@ -49,9 +53,12 @@ export async function linkThreadToCustomerAction(
   }
 ): Promise<R> {
   const me = await requireUser();
-  const t = await getThread(threadId);
+  const t = await ownThread(threadId, me); // #349 — my own, by identity (stamps a legacy owner)
+  // #341 — only my own mailbox's threads are linked from here
   if (!t) return { ok: false, error: "Thread not found." };
   if (!(await getCustomer(customerId))) return { ok: false, error: "Customer not found." };
+  // #345 — never link (or remember an address / claim a domain) to a placeholder company
+  if (await isPlaceholderCompanyId(customerId)) return { ok: false, error: PLACEHOLDER_PICK_ERROR };
 
   // #125 — the picked identity message's address, else the thread contact.
   // I follow-up review — selfEmail = the signed-in user's own connected
@@ -73,7 +80,7 @@ export async function linkThreadToCustomerAction(
     const d = domainOf(senderEmail);
     if (d && !isPublicDomain(d)) {
       await claimDomain(d, customerId, "manual", me.name);
-      await resweepThreads({ domain: d });
+      await resweepThreads({ domain: d }, { owner: await mailboxViewer(me) });
     }
   }
   await linkThread(threadId, customerId, contactId);
@@ -87,8 +94,9 @@ export async function claimDomainAction(domain: string, customerId: string): Pro
   const d = (domain || "").trim().toLowerCase();
   if (!d || isPublicDomain(d)) return { ok: false, error: "That domain can't identify a customer." };
   if (!(await getCustomer(customerId))) return { ok: false, error: "Customer not found." };
+  if (await isPlaceholderCompanyId(customerId)) return { ok: false, error: PLACEHOLDER_PICK_ERROR };
   await claimDomain(d, customerId, "manual", me.name);
-  await resweepThreads({ domain: d });
+  await resweepThreads({ domain: d }, { owner: await mailboxViewer(me) });
   revalidate();
   return { ok: true };
 }
@@ -98,20 +106,21 @@ export async function claimDomainAction(domain: string, customerId: string): Pro
  *  that were only suggested by it fall back to unknown. Threads already
  *  linked stay linked (re-sweep never downgrades). */
 export async function releaseDomainAction(domain: string, customerId: string): Promise<R> {
-  await requireUser();
+  const me = await requireUser();
   const d = (domain || "").trim().toLowerCase();
   if (!d || isPublicDomain(d)) return { ok: false, error: "That domain can't identify a customer." };
   if (!customerId) return { ok: false, error: "Customer not found." };
   await releaseDomain(d, customerId);
-  await resweepThreads({ domain: d });
+  await resweepThreads({ domain: d }, { owner: await mailboxViewer(me) });
   revalidate();
   return { ok: true };
 }
 
 /** Link sidebar's "not them" on a suggested match. */
 export async function dismissSuggestionAction(threadId: string): Promise<R> {
-  await requireUser();
-  if (!(await getThread(threadId))) return { ok: false, error: "Thread not found." };
+  const me = await requireUser();
+  const t = await ownThread(threadId, me); // #349 — my own, by identity (stamps a legacy owner)
+  if (!t) return { ok: false, error: "Thread not found." };
   await patchDoc<CommThread>("comms", threadId, (d) => {
     d.suggestionDismissed = true;
     if (d.resolution === "suggested") d.resolution = "unknown";
@@ -132,7 +141,8 @@ export async function quickAddCustomerAction(input: {
   threadId: string;
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const me = await requireUser();
-  if (!(await getThread(input.threadId))) return { ok: false, error: "Thread not found." };
+  const thread = await ownThread(input.threadId, me); // #349 — my own, by identity (stamps a legacy owner)
+  if (!thread) return { ok: false, error: "Thread not found." };
   const name = (input.name || "").trim();
   if (!name) return { ok: false, error: "Enter a name for the new customer." };
 
@@ -159,7 +169,7 @@ export async function quickAddContactAction(input: {
   email: string;
   phone: string;
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
-  await requireUser();
+  const me = await requireUser();
   const nm = (input.name || "").trim();
   if (!nm) return { ok: false, error: "Enter a name." };
   const sp = nm.lastIndexOf(" ");
@@ -178,7 +188,8 @@ export async function quickAddContactAction(input: {
   };
   const res = await savePersonAction(person);
   if (!res.ok) return res;
-  if (email) await resweepThreads({ email });
+  // #341 — only my own mailbox is re-swept: a contact I add never links (or exposes) anyone else's mail
+  if (email) await resweepThreads({ email }, { owner: await mailboxViewer(me) });
   revalidate();
   return res;
 }
@@ -200,8 +211,8 @@ export async function quickAddVenueAction(input: {
   const me = await requireUser();
   const existing = await getCustomer(input.customerId);
   if (!existing) return { ok: false, error: "Customer not found." };
-  const thread = input.threadId ? await getThread(input.threadId) : null;
-  if (input.threadId && (!thread || !visibleTo(thread, me.name)))
+  const thread = input.threadId ? await ownThread(input.threadId, me) : null; // #349 — by identity
+  if (input.threadId && !thread)
     return { ok: false, error: "Thread not found." };
 
   const res = await saveVenue({
@@ -236,9 +247,11 @@ export async function quickAddVenueAction(input: {
  *  never exists without a stored customerId. */
 export async function setThreadSiteAction(threadId: string, siteId: string | null): Promise<R> {
   const me = await requireUser();
-  const t = await getThread(threadId);
-  if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
-  const customerId = t.customerId || (await resolveCustomerId(t));
+  const t = await ownThread(threadId, me); // #349 — my own, by identity (stamps a legacy owner)
+  if (!t) return { ok: false, error: "Thread not found." };
+  // #345 — placeholder-aware: a stored UNKNOWN reads as no customer, so it
+  // neither blocks the real company nor offers UNKNOWN's venues
+  const customerId = await resolveCustomerId(t);
   if (!customerId) return { ok: false, error: "Link a customer first." };
   const clean = (siteId || "").trim() || null;
   if (clean) {
@@ -246,7 +259,7 @@ export async function setThreadSiteAction(threadId: string, siteId: string | nul
     if (!(c?.locations || []).some((l) => l.id === clean))
       return { ok: false, error: "That venue isn't on this customer." };
   }
-  if (!t.customerId) await linkThread(threadId, customerId, t.resolvedContactId ?? null);
+  if (t.customerId !== customerId) await linkThread(threadId, customerId, t.resolvedContactId ?? null);
   await setThreadSite(threadId, clean);
   revalidate();
   return { ok: true };
@@ -259,8 +272,8 @@ export async function setIdentityMessageAction(
   messageId: string | null
 ): Promise<R> {
   const me = await requireUser();
-  const t = await getThread(threadId);
-  if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
+  const t = await ownThread(threadId, me); // #349 — my own, by identity (stamps a legacy owner)
+  if (!t) return { ok: false, error: "Thread not found." };
   const id = (messageId || "").trim() || null;
   if (id && !(t.messages || []).some((m) => m.id === id))
     return { ok: false, error: "That message isn't on this thread." };

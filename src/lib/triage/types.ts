@@ -47,6 +47,7 @@ export type TriageFact =
   | { kind: "call_todo" }
   | { kind: "portal_quote_review" }
   | { kind: "quote_sent_back" }
+  | { kind: "bid_due"; days: number; missing: number }
   | { kind: "renewal_past_due"; days: number }
   | { kind: "lead_next_action_overdue" }
   | { kind: "task_at_risk" }
@@ -80,6 +81,11 @@ export type TriageCandidate = {
   also?: string[];
   /** Call to-dos only: the keys of the call to-dos folded into this row (so "Not mine" can dismiss them too). */
   alsoKeys?: string[];
+  /** Jeff 2026-10-15 #37 — epoch-ms of the item's latest escalation, when the
+   *  feed has one: the newest inbound customer message (email), the latest
+   *  submit for approval (quote awaiting me), the lead's SLA deadline once
+   *  breached. A "Not mine" mark made before it no longer hides the row. */
+  escalatedAt?: number;
 };
 
 export type RankedCandidate = TriageCandidate & { score: number; reason: string };
@@ -97,6 +103,11 @@ export type SnapshotRow = {
   also: string[];
   /** Keys of the call to-dos folded into this row; absent on snapshots built before this field existed. */
   alsoKeys?: string[];
+  /** Jeff 2026-10-15 #37 — epoch-ms of the item's latest escalation, as the feed saw
+   *  it at build time (absent on older snapshots / non-escalating sources): the newest inbound customer message (email), the latest
+   *  submit for approval (quote awaiting me), the lead's SLA deadline once
+   *  breached. A "Not mine" mark made before it no longer hides the row. */
+  escalatedAt?: number;
 };
 
 export type Slot = "morning" | "midday";

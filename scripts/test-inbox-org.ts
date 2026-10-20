@@ -35,7 +35,7 @@ import {
 } from "@/lib/stores/inbox-org";
 import { crmModeOn, setCrmMode } from "@/lib/stores/notif-prefs";
 import type { Court, Filing, NoiseFlag } from "@/lib/inbox-org/types";
-import { createFixture, fixtureId, registerFixture } from "./test-fixtures";
+import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
 import { buildFilingUserText, candidateLine, customerRecordCandidates, filingFromPick, FILING_SYSTEM, sanitizeFiling, type FilingCandidate } from "@/lib/inbox-org/ai-filing";
 import { buildOrganizeVM, buildReaderOrg, dueLabel, isNoiseRow } from "@/app/(app)/inbox/organize/load";
 import { cleanupProgressText, cleanupSummaryText, courtChipLabel, filedByLabel, ORGANIZE_BASE_HREF, organizeHref, organizeTabOf, suggestionLabel } from "@/app/(app)/inbox/organize/format";
@@ -666,7 +666,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     { id: DANA_ID, name: "TEST335 Dana", email: "dana@peaksystemsgroup.com", googleEmail: null },
   ];
   const ctx = buildOrgContext({ users });
-  const pilotAssist = { users: [MIKE_ID], features: { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true }, capUsd: 200 };
+  const pilotAssist = { users: [MIKE_ID], features: { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true, vendorpdf: true }, capUsd: 200 };
   const pilot = buildOrgContext({ users, assist: pilotAssist, env: { ANTHROPIC_API_KEY: "sk-test-not-real" } });
 
   /* context + pilot gate (pure) */
@@ -765,14 +765,14 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     const tP = await read(pNoise);
     ok(tP.noise?.flagged === true && tP.noise.moved === true && tP.archived === true && tP.filing?.noise === true && tP.filing.source === "noise-rule", "org pipeline: a pilot owner's noise is moved — flagged, moved, archived");
     ok(tP.updatedAt === T0 + 5 && !rP.skipped && rP.archived === true, "org pipeline: the noise move is quiet (the list order keeps the message time)");
-    const noiseList = await threadsIn("personal", "noise", MIKE);
+    const noiseList = await threadsIn("personal", "noise", { id: MIKE_ID, name: MIKE, nameUnique: true });
     ok(noiseList.some((t) => t.id === pNoise) && !noiseList.some((t) => t.id === knownId), "org pipeline: threadsIn(…, 'noise') lists moved noise only");
-    ok(!(await threadsIn("personal", "inbox", MIKE)).some((t) => t.id === pNoise), "org pipeline: moved noise has left the inbox folder");
+    ok(!(await threadsIn("personal", "inbox", { id: MIKE_ID, name: MIKE, nameUnique: true })).some((t) => t.id === pNoise), "org pipeline: moved noise has left the inbox folder");
     const nNoise = await mk("noise-plain", promo());
     await organizeThread(nNoise, { ctx });
     const tN = await read(nNoise);
     ok(tN.noise?.flagged === true && tN.noise.moved === false && tN.archived === false, "org pipeline: a non-pilot owner's noise is only tagged (stays in the inbox)");
-    ok(!(await threadsIn("personal", "noise", MIKE)).some((t) => t.id === nNoise), "org pipeline: tagged-only noise isn't in the Noise tab");
+    ok(!(await threadsIn("personal", "noise", { id: MIKE_ID, name: MIKE, nameUnique: true })).some((t) => t.id === nNoise), "org pipeline: tagged-only noise isn't in the Noise tab");
     const rescued = await mk("noise-rescued", { ...promo(), noise: { flagged: false, reason: "", moved: false, rescued: true } });
     await organizeThread(rescued, { ctx: pilot });
     ok(!(await read(rescued)).noise?.flagged && (await read(rescued)).noise?.rescued === true && !(await read(rescued)).archived, "org pipeline: a rescued thread is never flagged again");
@@ -794,7 +794,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     await organizeThread(weakNoise, { ctx: pilot });
     const tWeak = await read(weakNoise);
     ok(tWeak.noise?.flagged === true && tWeak.noise.moved === false && tWeak.archived === false && tWeak.filing?.noise === true, "org pipeline: rule noise on a weak-domain thread is tag-only, even for a pilot owner");
-    ok(!(await threadsIn("personal", "noise", MIKE)).some((t) => t.id === weakNoise), "org pipeline: tag-only weak-domain noise stays out of the Noise tab");
+    ok(!(await threadsIn("personal", "noise", { id: MIKE_ID, name: MIKE, nameUnique: true })).some((t) => t.id === weakNoise), "org pipeline: tag-only weak-domain noise stays out of the Noise tab");
     ok(tWeak.filing?.customerId === CUST && tWeak.filing.pendingAi === true, "org pipeline: tag-only weak-domain noise keeps the guessed customer and is pendingAi for a pilot owner (the AI decides)");
     const weakNoisePlain = await mk("noise-weak-domain-plain", { resolution: "suggested", suggestedCustomerId: CUST, contactEmail: "rfp-notify@district.test", messages: [msg({ fromEmail: "rfp-notify@district.test", bulk: true })] });
     await organizeThread(weakNoisePlain, { ctx });
@@ -960,7 +960,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
         tri("C-h", { noise: { flagged: false, reason: "", moved: false, rescued: true } }),
       ],
       { quotes: new Map(), leads: new Map() },
-      { me: { id: MIKE_ID, name: MIKE } as never, now: T0 + 3 * 86_400_000 }
+      { viewer: { id: MIKE_ID, name: MIKE, nameUnique: true }, now: T0 + 3 * 86_400_000 }
     );
     ok(picked.map((c) => c.key).join(",") === "email:C-a,email:C-c,email:C-h", "org triage: waiting_us AND court 'me' (or no court); a customer / nobody court doesn't count; a rescued thread does");
     ok(!picked.some((c) => c.key === "email:C-e"), "org triage: court 'me' but status waiting_them (an in-app reply / Mark replied moved on) → not picked");
@@ -981,7 +981,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
         tri("S-nobasis", { court: { owner: "customer", reason: "", source: "rule", at: T0 + 60_000 }, messages: newMsgs }),
       ],
       { quotes: new Map(), leads: new Map() },
-      { me: { id: MIKE_ID, name: MIKE } as never, now: T0 + 3 * 86_400_000 }
+      { viewer: { id: MIKE_ID, name: MIKE, nameUnique: true }, now: T0 + 3 * 86_400_000 }
     );
     ok(fresh.map((c) => c.key).join(",") === "email:S-stale,email:S-nobasis", "org triage: a stale customer court plus new inbound mail → picked (status decides); a current customer court still hides it");
     ok(courtIsCurrent({ court: { basis: "m3", at: 0 }, messages: newMsgs }) && !courtIsCurrent({ court: { basis: "m2", at: 0 }, messages: newMsgs }) && !courtIsCurrent({ court: null, messages: newMsgs }) && courtIsCurrent({ court: { basis: "x", at: 0 }, messages: [] }), "org triage: courtIsCurrent follows the newest email message's id");
@@ -1102,7 +1102,7 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
     { id: DANA_ID, name: "TEST335 Dana", email: "dana@peaksystemsgroup.com", googleEmail: null },
   ];
   const env = { ANTHROPIC_API_KEY: "sk-test-not-real" };
-  const allOn = { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true };
+  const allOn = { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true, vendorpdf: true };
   const pilot = buildOrgContext({ users, assist: { users: [ARI_ID], features: allOn, capUsd: 200 }, env });
   const offCtx = buildOrgContext({ users, assist: { users: [], features: allOn, capUsd: 200 }, env });
   const T0 = Date.UTC(2026, 9, 12, 15, 0); // Mon 12 Oct 2026, 10:00 Chicago
@@ -1166,7 +1166,7 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   await run(routedProvider({ file: fileAns("noise") }));
   const tN = await read(nz);
   ok(tN.filing?.noise === true && tN.filing.source === "ai" && tN.noise?.flagged === true && tN.noise.moved === true && tN.archived === true, "ai pass: strong AI noise moves a pilot owner's thread with no customer guess (flagged, moved, archived)");
-  ok((await threadsIn("personal", "noise", ARI)).some((t) => t.id === nz), "ai pass: …and it lists in the Noise tab");
+  ok((await threadsIn("personal", "noise", { id: ARI_ID, name: ARI, nameUnique: true })).some((t) => t.id === nz), "ai pass: …and it lists in the Noise tab");
   const nzGuess = await mk("noise-guessed", { resolution: "suggested", suggestedCustomerId: CUST, contactEmail: "news@ai-school.test", messages: [msg({ fromEmail: "news@ai-school.test", body: "Our October newsletter" })] });
   await organizeThread(nzGuess, { ctx: pilot, backlog: true });
   await run(routedProvider({ file: fileAns("noise") }));
@@ -1747,7 +1747,7 @@ export async function inboxOrgApplyChecks(ok: Ok): Promise<void> {
       ok(kr.ok && kr.archived === false && kr.skipped === "disabled" && (await read(killT)).archived === false, "kill switch: archiveAfterReply (Mark replied / Close / reply) archives nothing");
       await runPostReply(killT);
       ok((await read(killT)).archived === false, "kill switch: the post-reply step archives nothing");
-      const killCtx = buildOrgContext({ users: [{ id: ANN_ID, name: ANN, email: "ann.t335@peaksystemsgroup.com" }], assist: { users: [ANN_ID], features: { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true }, capUsd: 200 }, env: { ANTHROPIC_API_KEY: "sk-test-not-real" } });
+      const killCtx = buildOrgContext({ users: [{ id: ANN_ID, name: ANN, email: "ann.t335@peaksystemsgroup.com" }], assist: { users: [ANN_ID], features: { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true, vendorpdf: true }, capUsd: 200 }, env: { ANTHROPIC_API_KEY: "sk-test-not-real" } });
       const kp = await runAiPass({ ownerIds: [ANN_ID] }, { ctx: killCtx });
       ok(kp.looked === 0 && kp.calls === 0 && kp.cleared === 0, "kill switch: the AI pass does nothing");
     } finally {
@@ -2007,9 +2007,9 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
     ok(existsSync(`${DIR}/${f}`), `ui: organize/${f} exists`);
   const page = read("src/app/(app)/inbox/page.tsx");
   ok(page.includes('const isOrganize = viewParam === "organize";') && page.includes("<OrganizeBox") && page.includes("loadOrganize(user, organizeTab"), "ui: /inbox?view=organize renders the Organize box from loadOrganize");
-  ok(page.includes('key: "organize"') && page.includes("count: organizeToFile") && page.includes('href: viewHref("organize")'), "ui: the Inbox nav carries an Organize row with the To file count");
+  ok(page.includes('key: "organize"') && page.includes("count: organizeCounts.toFile") && page.includes('href: viewHref("organize")'), "ui: the Inbox nav carries an Organize row with the To file count");
   ok(page.includes("view === \"unmatched\" || isMeetings || isOrganize") && page.includes("const isView = !!view || isMeetings || isOrganize;"), "ui: Organize is a view and skips the thread-list query");
-  ok(page.includes("explicitThread && visibleTo(explicitThread, me)"), "ui: Organize opens only my own thread in the reader");
+  ok(page.includes("explicitThread && visibleTo(explicitThread, viewer)"), "ui: Organize opens only my own thread in the reader (#349: by identity)");
   ok(page.includes("org,") && page.includes("buildReaderOrg(sel,"), "ui: the reader VM carries the organization strip");
   const shell = read("src/app/(app)/inbox/inbox-shell.tsx");
   ok(shell.includes("meetings || organize ?") && shell.includes("organize?.list") && shell.includes('{ value: "organize", label: "Organize" }'), "ui: the shell swaps the list column for the Organize box (and the narrow picker knows it)");
@@ -2055,7 +2055,7 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   ok(tr.includes("const [markPromiseDone, setMarkPromiseDone] = useState(false);") && tr.includes("Mark ‘{shortTaskTitle(openPromise.title)}’ done?"), "ui: the composer shows an unticked “Mark ‘…’ done?” while a promise-task is open");
   ok(tr.includes("if (res.ok && markPromiseDone && openPromise)") && tr.includes("await completeThreadTaskAction(openPromise.taskId);"), "ui: a ticked box completes the task via completeThreadTaskAction after a successful send");
   ok(tr.includes("const done = await completeThreadTaskAction(openPromise.taskId);") && tr.includes("if (!done.ok) setPromiseNote("), "polish: a failed “Mark done” shows a note (the reply still went out)");
-  ok(page.includes("<OrganizeBox key={`organize-list-${vm.tab}`}"), "polish: the Organize box is keyed by tab (no confirm / offer / note carry-over)");
+  ok(page.includes("<OrganizeBox\n          key={`organize-list-${vm.tab}`}"), "polish: the Organize box is keyed by tab (no confirm / offer / note carry-over)");
   ok(tr.includes("{vm.org && <ReaderOrgStrip threadId={vm.id} org={vm.org} />}"), "ui: the reader shows the organization strip");
   const ro = read(`${DIR}/reader-org.tsx`);
   ok(ro.includes('overrideCourtAction(threadId, "nobody")') && ro.includes('overrideCourtAction(threadId, "me")') && ro.includes("Not on me") && ro.includes("On me"), "ui: Not on me / On me override the court");
@@ -2064,7 +2064,7 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   ok(ro.includes('"Looks like noise"') && ro.includes("notNoiseAction(threadId)"), "ui: the Looks like noise tag offers Not noise");
   ok(ro.includes('filing.state === "suggested"') && ro.includes("approveFilingAction(threadId)"), "ui: a suggested filing line has Approve");
   const ob = read(`${DIR}/organize-box.tsx`);
-  ok(ob.includes("<CleanupButton cleanup={cleanup.state} />") && ob.includes("cleanup?: { state: CleanupVM | null } | null;"), "ui: the Organize my inbox button renders only when the page passes it (pilot users, Task 7)");
+  ok(ob.includes("<CleanupButton cleanup={cleanup.state} prompt={cleanupPrompt} />") && ob.includes("cleanup?: { state: CleanupVM | null } | null;"), "ui: the Organize my inbox button renders only when the page passes it (pilot users, Task 7)");
   ok(ob.includes("approveAllStrongAction(vm.strongIds)") && ob.includes("Approve {vm.strongIds.length} strong suggestion"), "ui: Approve all strong asks for a confirm that shows the count");
   const cf = read(`${DIR}/change-filing.tsx`);
   ok(cf.includes("searchLinkTargetsAction(query)") && cf.includes("filingRecordsAction(threadId, pickedCustomer || null)") && cf.includes("changeFilingAction(threadId, target)"), "ui: Change… reuses the link search plus the customer's quotes/projects/leads");
@@ -2110,10 +2110,10 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
   ok(ra.suggestion === "Lincoln HS → EST-1042 Main curtain" && ra.strength === "strong" && ra.canApprove && ra.href === "/inbox?view=organize&tab=to-file&thread=a", "ui vm: a row carries its suggestion, strength and reader link");
   ok(vmT.rows.find((r) => r.id === "b")!.needsReply && vmT.rows.find((r) => r.id === "c")!.archived && !vmT.rows.find((r) => r.id === "b")!.archived, "ui vm: the needs-reply dot and the Archived chip (archived-on-reply only)");
   ok(!vmT.rows.find((r) => r.id === "d")!.canApprove && vmT.rows.find((r) => r.id === "d")!.suggestion === null, "ui vm: a suggestion with nothing to file under can't be approved");
-  ok(vmT.isAdmin && vmT.noiseInInboxIds.length === 0, "ui vm: admin flag passes through; no Noise ids on To file");
+  ok(vmT.isAdmin && vmT.noiseShownIds.length === 0, "ui vm: admin flag passes through; no Noise ids on To file");
   const vmN = buildOrganizeVM(threads, { tab: "noise", now: NOW, customerName: names });
   ok(vmN.rows.map((r) => r.id).join(",") === "n,f,e" && vmN.rows[0].reason === "Newsletter" && vmN.rows[1].reason === "No-reply sender" && vmN.rows[2].reason === "Promotions", "polish: Noise lists everything flagged as noise (moved and tagged-only), newest first, each with its reason; rescued left out");
-  ok(vmN.noiseInInboxIds.join(",") === "n,f" && vmN.strongIds.length === 0 && !vmN.isAdmin, "polish: Archive all shown takes the noise still in the inbox (a tagged-only thread included)");
+  ok(vmN.noiseShownIds.join(",") === "n,f,e" && vmN.strongIds.length === 0 && !vmN.isAdmin, "Jeff 10-15 #29: Archive all shown takes every Noise row shown — still in the inbox or already archived");
   const vmF = buildOrganizeVM(threads, { tab: "filed", now: NOW, customerName: names });
   ok(vmF.rows.map((r) => r.id).join(",") === "i,g" && vmF.rows[0].filedBy === "approved" && vmF.rows[1].filedBy === "on reply" && !!vmF.rows[0].filedWhen, "ui vm: Filed lists the last 14 days, newest filing first, with how it was filed");
   const many = Array.from({ length: 205 }, (_, i) => th(`m${i}`, { filing: fil({ state: "filed", filedAt: NOW - i * 1000 }) }));
@@ -2246,7 +2246,7 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     { id: NOP_ID, name: NOP, email: "nopa.t335@peaksystemsgroup.com", googleEmail: null },
   ];
   const env = { ANTHROPIC_API_KEY: "sk-test-not-real" };
-  const allOn = { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true };
+  const allOn = { tasks: true, reply: true, estimate: true, file: true, promise: true, brief: true, ask: true, vendorpdf: true };
   const pilot = buildOrgContext({ users, assist: { users: [CLEO_ID], features: allOn, capUsd: 200 }, env });
   const NOW = Date.UTC(2026, 9, 13, 15, 0); // Tue 13 Oct 2026, 10:00 Chicago
   const DAY = 86_400_000;
@@ -2417,7 +2417,7 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     const page = read("src/app/(app)/inbox/page.tsx");
     ok(page.includes("const cleanup = assistAll.file ?") && page.includes("cleanup={cleanup}"), "cleanup: the button is passed only for Assist pilot users (feature file)");
     const box = read("src/app/(app)/inbox/organize/organize-box.tsx");
-    ok(box.includes("<CleanupButton cleanup={cleanup.state} />"), "cleanup: Organize my inbox sits in the Organize header");
+    ok(box.includes("<CleanupButton cleanup={cleanup.state} prompt={cleanupPrompt} />"), "cleanup: Organize my inbox sits in the Organize header");
     const btn = read("src/app/(app)/inbox/organize/cleanup-button.tsx");
     ok(btn.includes("await organizeInboxAction()") && btn.includes("if (r.done)") && btn.includes("r.checked === lastChecked") && btn.includes("cleanupProgressText("), "cleanup: the button loops the batch until done (stops when a batch makes no progress)");
   } finally {
@@ -2470,7 +2470,7 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
   ok(/const \{ last4 \} = await saveAssistKey\(key, me\.name\);[\s\S]{0,120}invalidateOrgContext\(\);/.test(sa) && /await clearAssistKey\(\);\s*invalidateOrgContext\(\);/.test(sa), "fix: saving or clearing the Assist key drops the cached org context");
   ok(/await setKeepInInboxAction\(v\);\s*setNote\(null\);/.test(read("src/app/(app)/account/inbox-org-card.tsx")), "fix: the account switch clears its error note after a later successful save");
   ok(/not atomic[\s\S]{0,400}Harmless/.test(read("src/lib/inbox-org/cleanup.ts")), "fix: the cleanup lease says it isn't atomic and why that's harmless");
-  ok(/export async function setAssistSettingsAction[\s\S]*?await setSettings\(next\);\s*\/\/[^\n]*\n\s*invalidateOrgContext\(\);/.test(sa), "settings: changing the pilot / feature switches drops the cached context");
+  ok(/export async function setAssistSettingsAction[\s\S]*?await mergeSettingsObject\("assistFeatures", featurePartial\);\s*\/\/[^\n]*\n\s*invalidateOrgContext\(\);/.test(sa), "settings: changing the pilot / feature switches drops the cached context");
 
   /* settings card */
   const card = read("src/app/(app)/settings/groups/assist-pilot.tsx");
@@ -2492,6 +2492,819 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     ok(src.startsWith('"use client";') && bad.length === 0, `client: ${f.split("/").pop()} imports only actions, pure modules and types${bad.length ? ` (found ${bad.join(", ")})` : ""}`);
   }
   ok(valueImports(read("src/lib/inbox-org/rule-list.ts")).length === 0, "client: inbox-org/rule-list.ts is pure (no value imports)");
+}
+
+/* ---------- #345: Organize entry points + placeholder companies ---------- */
+
+/** #345 — the Inbox's Organize entry points (tab row, banner) and the brief link: pure VM + pins. */
+export async function inboxOrgEntryChecks(ok: Ok): Promise<void> {
+  const E = await import("@/app/(app)/inbox/organize/entry");
+  const read = (p: string) => readFileSync(p, "utf8");
+
+  /* the VM: shown under the gate, hidden without it */
+  const inbox = E.organizeEntryVM({ available: true, toFile: 3, strong: 1, noise: 7, where: { kind: "inbox" } });
+  ok(
+    !!inbox &&
+      inbox.tabs.map((t) => `${t.label}:${t.count ?? "-"}:${t.active ? "on" : "off"}`).join(" ") === "Inbox:-:on Organize:3:off Noise:7:off",
+    `entry #345: the tab row reads Inbox · Organize (3) · Noise (7), Inbox active (${inbox?.tabs.map((t) => t.label).join(" · ")})`
+  );
+  ok(
+    !!inbox && inbox.tabs[0].href === "/inbox" && inbox.tabs[1].href === "/inbox?view=organize&tab=to-file" && inbox.tabs[2].href === "/inbox?view=organize&tab=noise",
+    "entry #345: Inbox → /inbox, Organize → ?view=organize (To file), Noise → ?view=organize&tab=noise (the real tab param)"
+  );
+  ok(inbox?.banner?.text === "3 emails to file · 1 ready to approve" && inbox.banner.href === "/inbox?view=organize&tab=to-file" && inbox.banner.count === 3, `entry #345: the banner on the plain inbox counts what is to file, and how many are ready to approve (${inbox?.banner?.text})`);
+  ok(E.organizeEntryVM({ available: false, toFile: 3, strong: 0, noise: 7, where: { kind: "inbox" } }) === null, "entry #345: without the gate (Organize unavailable) neither the tab row nor the banner renders");
+  ok(E.organizeEntryVM({ available: true, toFile: 3, strong: 0, noise: 7, where: { kind: "other" } }) === null, "entry #345: no tab row on Sent / Drafts / other views");
+  const inOrg = E.organizeEntryVM({ available: true, toFile: 3, strong: 0, noise: 7, where: { kind: "organize", tab: "to-file" } });
+  ok(!!inOrg && inOrg.banner === null && inOrg.tabs[1].active && !inOrg.tabs[0].active, "entry #345: inside Organize the tab row shows (Organize active) and the banner doesn't");
+  const inNoise = E.organizeEntryVM({ available: true, toFile: 3, strong: 0, noise: 7, where: { kind: "organize", tab: "noise" } });
+  ok(!!inNoise && inNoise.tabs[2].active && !inNoise.tabs[1].active, "entry #345: on the Noise tab, Noise is active");
+  ok(E.organizeEntryVM({ available: true, toFile: 3, strong: 0, noise: 0, where: { kind: "organize", tab: "filed" } })?.tabs[1].active === true, "entry #345: Filed counts as Organize");
+  ok(E.organizeEntryVM({ available: true, toFile: 0, strong: 0, noise: 2, where: { kind: "inbox" } })?.banner === null, "entry #345: no banner with nothing to file (the tab row still shows)");
+  ok(E.bannerText(1, 0) === "1 email to file" && E.bannerText(4, 0) === "4 emails to file" && E.bannerText(4, 2) === "4 emails to file · 2 ready to approve" && E.bannerText(2, 5) === "2 emails to file · 2 ready to approve", "entry #345: the banner says 'N emails to file' (it counts No match yet rows too, so it never claims they all have a suggestion) and adds '· S ready to approve' only for strong suggestions");
+  ok(!/AI has filing suggestions|have filing suggestions/.test(read("src/app/(app)/inbox/organize/entry.ts").replace(/^\s*(\*|\/\/).*$/gm, "")), "entry #345: the old 'filing suggestions' wording is gone");
+  ok(E.bannerShows(3, null) && !E.bannerShows(3, 3) && E.bannerShows(4, 3) && !E.bannerShows(2, 3) && !E.bannerShows(0, null), "entry #345: dismissed for the session — back only when the count grows");
+  ok(E.parseDismissed("5") === 5 && E.parseDismissed(null) === null && E.parseDismissed("x") === null && E.parseDismissed("-1") === null && E.parseDismissed("") === null, "entry #345: an unreadable dismissal counts as never dismissed");
+
+  /* wiring pins */
+  const page = read("src/app/(app)/inbox/page.tsx");
+  ok(
+    page.includes("const organizeEntry = organizeEntryVM({") &&
+      page.includes("available: !inboxOrgDisabled(),") &&
+      page.includes("strong: organizeCounts.strong,") &&
+      page.includes('!isView && box === "personal" && folder === "inbox"') &&
+      page.includes("organizeEntry={organizeEntry}"),
+    "entry #345: the Inbox page builds the entry VM (gate = the view's: everyone unless INBOX_ORG_DISABLED; banner counts To file + strong) and hands it to the shell"
+  );
+  ok(page.includes("organizeEntryCounts(user)") && page.includes("count: organizeCounts.toFile") && page.includes("return { toFile: 0, strong: 0, noise: 0 };"), "entry #345: one comms scan gives the To file, strong and Noise counts; the sidebar row keeps its To file count");
+  ok(page.includes('cleanupPrompt={str(params.cleanup) === "1" && vm.tab === "to-file"}'), "entry #345: ?cleanup=1 (the brief's link) calls out Organize my inbox");
+  const shell = read("src/app/(app)/inbox/inbox-shell.tsx");
+  ok(
+    shell.includes("top={organizeEntry ? <OrganizeEntryBar vm={organizeEntry} /> : null}") && shell.includes("{organize && organizeEntry ? <OrganizeEntryBar vm={organizeEntry} /> : null}"),
+    "entry #345: the shell renders the bar at the top of the list column — over the thread list and over the Organize box"
+  );
+  ok(shell.includes('{ value: "organize", label: "Organize" }'), "entry #345: the narrow picker keeps its Organize option");
+  ok(read("src/app/(app)/inbox/thread-list.tsx").includes("      {top}\n      {/* command bar"), "entry #345: the thread list puts the bar above the command bar");
+  const bar = read("src/app/(app)/inbox/organize/entry-bar.tsx");
+  ok(bar.startsWith('"use client";') && valueImports(bar).every((p) => p === "react" || p === "next/link" || p === "./entry"), "entry #345: entry-bar.tsx is a client component importing only react, next/link and the pure entry module");
+  ok(/try \{\s*raw = window\.sessionStorage\.getItem\(BANNER_DISMISS_KEY\);\s*\} catch/.test(bar) && /try \{\s*window\.sessionStorage\.setItem\(BANNER_DISMISS_KEY/.test(bar), "entry #345: sessionStorage reads and writes are wrapped in try/catch");
+  ok(bar.includes("dismissedAt !== undefined && bannerShows(") && bar.includes("data-organize-banner") && bar.includes("data-entry-tab"), "entry #345: the banner waits for the stored dismissal (no flash) and is marked for the browser check");
+  const entrySrc = read("src/app/(app)/inbox/organize/entry.ts");
+  const noComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  const colors = noComments(bar + entrySrc).match(/#[0-9a-fA-F]{3,8}\b/g) || [];
+  ok(entrySrc.includes("var(--accent)") && bar.includes("var(--accent)") && colors.every((c) => ["#5b616e", "#fff", "#e8eaee", "#000"].includes(c.toLowerCase())), `entry #345: the accent comes from --accent; only neutral greys are literal (${[...new Set(colors)].join(" ")})`);
+  ok(valueImports(entrySrc).every((p) => p === "./format"), "entry #345: entry.ts is pure (imports only format.ts)");
+  const cb = read("src/app/(app)/inbox/organize/cleanup-button.tsx");
+  ok(cb.includes("const callOut = prompt && !pending && !line && !(cleanup?.done);") && !/useEffect\([^)]*go\(/.test(cb) && !cb.includes("autoFocus"), "entry #345: the called-out button never starts the 90-day run by itself");
+}
+
+/** #345 — placeholder companies ("UNKNOWN" …) are never filing targets. */
+export async function inboxOrgPlaceholderChecks(ok: Ok): Promise<void> {
+  const { isPlaceholderCompany, withoutPlaceholderCustomer, PLACEHOLDER_COMPANY_RE } = await import("@/lib/inbox-org/placeholder");
+  const { rankLinkTargets } = await import("@/lib/inbox-link-targets");
+  const { isPlaceholderCustomerLabel } = await import("@/lib/gmail/peak-labels");
+  const { buildFilingCandidates } = await import("@/lib/inbox-org/ai-filing");
+
+  /* the helper */
+  const yes = ["UNKNOWN", "unknown", " Unknown ", "UKN", "TBD", "tbd", "N/A", "n/a"];
+  const no = ["", "Unknown Labs", "Test Kitchen HS", "NAU", "TBD Productions", "none of the above", "Lincoln HS", "N//A", "U.N.K.", "NA", "na", "None", "TEST", "Test"];
+  ok(yes.every(isPlaceholderCompany), `placeholder #345: ${yes.join(" / ")} are placeholders`);
+  ok(no.every((n) => !isPlaceholderCompany(n)) && !isPlaceholderCompany(null) && !isPlaceholderCompany(undefined), `placeholder #345: real names (and blanks) are not (${no.filter(isPlaceholderCompany).join(", ")})`);
+  ok(PLACEHOLDER_COMPANY_RE.source === "^(unknown|ukn|tbd|n\\/a)$" && PLACEHOLDER_COMPANY_RE.flags === "i", "placeholder #345: the one rule is /^(unknown|ukn|tbd|n\\/a)$/i on the trimmed name — 'N/A' needs its slash; NA / None / Test are real-sounding and left out (review)");
+  const ph = (id: string) => id === "UNK";
+  const base = { customerId: "UNK", work: null, siteId: "loc1", noise: false, strength: "strong" as "strong" | "weak", reason: "pat is a known contact at UNKNOWN" };
+  const cleared = withoutPlaceholderCustomer(base, ph);
+  ok(cleared.customerId === null && cleared.siteId === undefined && cleared.strength === "weak" && cleared.reason === "No match yet — choose a customer", "placeholder #345: a suggestion under a placeholder reads as 'No match yet' (venue dropped)");
+  const withWork = withoutPlaceholderCustomer({ ...base, work: { type: "quote", id: "Q1" } }, ph);
+  ok(withWork.customerId === null && !!withWork.work && withWork.strength === "strong", "placeholder #345: a work record on a placeholder customer stays (it is real)");
+  const real = { ...base, customerId: "C1" };
+  ok(withoutPlaceholderCustomer(real, ph) === real, "placeholder #345: a real customer's filing is returned untouched");
+
+  /* the Link popup / Change… search (shared with the AI candidates) */
+  const hits = rankLinkTargets("unknown", {
+    companies: [
+      { id: "c-unk", name: "UNKNOWN" },
+      { id: "c-labs", name: "Unknown Labs" },
+    ],
+    sites: [
+      { id: "loc-unk", companyId: "c-unk", name: "Unknown Hall" },
+      { id: "loc-labs", companyId: "c-labs", name: "Unknown Labs Theater" },
+    ],
+    people: [
+      { id: "p1", name: "Unknown Person", companyId: "c-unk", emails: [] },
+      { id: "p2", name: "Unknown Labs Person", companyId: "c-labs", emails: [] },
+      { id: "p3", name: "Unknown Freelancer", companyId: null, emails: [] },
+    ],
+  });
+  ok(hits.companies.map((c) => c.id).join(",") === "c-labs", "placeholder #345: the Link popup's company search never offers a placeholder company");
+  ok(hits.venues.map((v) => v.id).join(",") === "loc-labs", `placeholder #345 review 1: …nor a venue under one (${hits.venues.map((v) => v.id).join(",")})`);
+  ok(hits.people.map((p) => p.id).sort().join(",") === "p2,p3" && !hits.people.some((p) => p.companyName === "UNKNOWN"), `placeholder #345 review 1: …nor a person parked under one (a person with no company still shows) (${hits.people.map((p) => p.id).join(",")})`);
+  const lts = readFileSync("src/lib/inbox-link-targets.ts", "utf8");
+  ok(lts.includes("const nameOf = new Map(real.map((c) => [c.id, c.name]));"), "placeholder #345 review 1: nameOf (the venue/person filter) is built from the real companies only");
+
+  /* Gmail labels */
+  ok(isPlaceholderCustomerLabel("Peak/Customers/UNKNOWN") && isPlaceholderCustomerLabel("Peak/Customers/TBD") && !isPlaceholderCustomerLabel("Peak/Customers/Lincoln HS") && !isPlaceholderCustomerLabel("Peak/Status/Waiting"), "placeholder #345: Peak/Customers/UNKNOWN is a placeholder label");
+  const sync = readFileSync("src/lib/gmail/label-sync.ts", "utf8");
+  ok(/const add = rawAdd\.filter\(\(n\) => \{\s*\/\/ #345[^\n]*\n\s*if \(isPlaceholderCustomerLabel\(n\)\) return false;/.test(sync), "placeholder #345: the label writer never creates or applies Peak/Customers/<placeholder> (an existing one is left alone — `remove` unchanged)");
+  const interp = readFileSync("src/lib/gmail/label-interpret.ts", "utf8");
+  ok(interp.includes('if (isPlaceholderCustomerLabel("Peak/Customers/" + cmd.name)) continue;'), "placeholder #345: a Peak/Customers/UNKNOWN label applied in Gmail links nothing");
+
+  /* the pipeline, apply and the Organize read (DB) */
+  const db = await getDb();
+  const MO = "TEST345 Mo";
+  const MO_ID = "TEST345-u-mo";
+  const me = { id: MO_ID, name: MO };
+  const ctx = buildOrgContext({ users: [{ id: MO_ID, name: MO, email: "mo.t345@peaksystemsgroup.com", googleEmail: null }] });
+  const UNK = fixtureId(345, "co-unknown");
+  const REAL = fixtureId(345, "co-real");
+  const QUOTE = fixtureId(345, "quote-unk");
+  const T0 = 1_760_100_000_000;
+  let n = 0;
+  const msg = (o: Partial<CommMessage>): CommMessage =>
+    ({ id: `ph${++n}`, at: T0 + n * 60_000, direction: "in", channel: "email", author: "Pat", body: "Can you send the price?", fromEmail: "pat@ph345.test", ...o }) as CommMessage;
+  const mk = async (slug: string, o: Partial<CommThread>): Promise<string> => {
+    const id = fixtureId(345, "ph-" + slug);
+    await createFixture("comms", {
+      id, mailbox: "personal", mailboxUser: MO, unread: true, archived: false, customerId: null, customer: "", contactName: "Pat",
+      contactEmail: "pat@ph345.test", cc: "", subject: "Hello", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [msg({})], createdAt: T0, updatedAt: T0 + 5, resolution: "unknown", ...o,
+    } as unknown as CommThread);
+    return id;
+  };
+  const read = async (id: string) => (await getDoc<CommThread>("comms", id))!;
+  try {
+    await saveCompany({ id: UNK, name: "UNKNOWN", type: "other" });
+    await saveCompany({ id: REAL, name: "TEST345 Real School", type: "school" });
+    await createFixture("quotes", { id: QUOTE, name: "Stage drape", customer: "UNKNOWN", customerId: UNK, estNo: 987800, quoteType: "system", status: "sent" });
+
+    const linked = await mk("linked", { customerId: UNK, customer: "UNKNOWN", resolution: "linked" });
+    await organizeThread(linked, { ctx });
+    const tl = await read(linked);
+    ok(tl.filing?.customerId === null && tl.filing.state === "suggested" && tl.filing.reason === "No match yet — choose a customer", `placeholder #345 pipeline: a thread auto-linked to UNKNOWN gets no suggestion under it (${tl.filing?.customerId} · ${tl.filing?.reason})`);
+    ok(tl.customerId === UNK, "placeholder #345 pipeline: the thread's own link and the company record are left alone");
+
+    const guessed = await mk("guessed", { resolution: "suggested", suggestedCustomerId: UNK });
+    await organizeThread(guessed, { ctx });
+    ok((await read(guessed)).filing?.customerId === null, "placeholder #345 pipeline: a domain guess of UNKNOWN is skipped");
+
+    const numbered = await mk("number", { subject: "Re: EST-987800 drape" });
+    await organizeThread(numbered, { ctx });
+    const tn = await read(numbered);
+    ok(tn.filing?.work?.id === QUOTE && tn.filing.customerId === null && tn.filing.source === "number", "placeholder #345 pipeline: a record number keeps its quote but drops the placeholder customer");
+
+    const ruled = buildOrgContext({
+      users: [{ id: MO_ID, name: MO, email: "mo.t345@peaksystemsgroup.com", googleEmail: null }],
+      senderRules: [{ id: "SR-345", scope: "user", userId: MO_ID, match: { email: "pat@ph345.test" }, action: { type: "file", customerId: UNK }, createdBy: MO_ID, createdAt: 1 }],
+    });
+    const ruleT = await mk("rule", {});
+    await organizeThread(ruleT, { ctx: ruled });
+    ok((await read(ruleT)).filing?.source !== "rule" && (await read(ruleT)).filing?.customerId === null, "placeholder #345 pipeline: a sender rule filing under UNKNOWN is read as no rule");
+
+    /* AI candidates */
+    const cand = await buildFilingCandidates(await read(linked), { email: "pat@ph345.test", name: "Pat", body: "Thanks\n\nPat Smith\nUNKNOWN\n555-0100" });
+    ok(!cand.candidates.some((c) => c.id === UNK || c.customerId === UNK) && cand.matchedCustomerId === null, `placeholder #345 ai: the candidate list never offers UNKNOWN (${cand.candidates.map((c) => c.id).join(",") || "none"})`);
+    const cand2 = await buildFilingCandidates({ ...(await read(linked)), customer: "TEST345 Real School" }, null);
+    ok(cand2.candidates.some((c) => c.id === REAL) && !cand2.candidates.some((c) => c.id === UNK), "placeholder #345 ai: a real company named in the mail is still a candidate");
+
+    /* an OLD suggestion under UNKNOWN (stored before #345) stops showing */
+    const old = await mk("old", {});
+    await setOrg(old, {
+      filing: { customerId: UNK, work: null, noise: false, source: "identity", reason: "pat is a known contact at UNKNOWN", strength: "strong", needsReply: false, state: "suggested", at: T0 } as Filing,
+    });
+    const oldT = await read(old);
+    const names = (id: string) => (id === UNK ? "UNKNOWN" : id === REAL ? "TEST345 Real School" : null);
+    const vm = buildOrganizeVM([oldT], { tab: "to-file", now: T0 + 1000, customerName: names });
+    const row = vm.rows[0];
+    ok(vm.counts.toFile === 1 && !!row && row.suggestion === null && !row.canApprove && !row.strong && vm.strongIds.length === 0, `placeholder #345 read: a stored UNKNOWN suggestion shows as nothing suggested — no Approve, not in Approve all strong (${row?.suggestion})`);
+    const rOrg = buildReaderOrg(oldT, { customerName: names, teammateName: () => null, task: null, isAdmin: false });
+    ok(rOrg?.filing?.suggestion === null && rOrg.filing.canApprove === false, "placeholder #345 read: the reader strip doesn't offer it either");
+    const refused = await approveFiling(old, me);
+    ok(!refused.ok && (await read(old)).filing?.state === "suggested" && (await read(old)).customerId === null, "placeholder #345 apply: Approve refuses to file under UNKNOWN");
+    const ch = await changeFiling(old, { customerId: UNK }, me);
+    ok(!ch.ok && (await read(old)).customerId === null, "placeholder #345 apply: Change… to UNKNOWN is refused");
+    await approveAllStrong("all-visible", me);
+    const mine = await Promise.all([guessed, numbered, ruleT, old].map(read));
+    ok((await read(old)).filing?.state === "suggested" && mine.every((t) => t.customerId !== UNK && !(t.filing?.state === "filed" && t.filing.customerId === UNK)), "placeholder #345 apply: Approve all strong never files under UNKNOWN (the old stored suggestion stays suggested, untouched)");
+    const viaWork = await changeFiling(old, { work: { type: "quote", id: QUOTE } }, me);
+    const vw = await read(old);
+    ok(viaWork.ok && vw.link?.id === QUOTE && vw.customerId === null && vw.filing?.customerId === null, "placeholder #345 apply: filing under the quote alone links the quote, never its UNKNOWN customer");
+
+    /* the Gmail contact matcher: a placeholder company is no company (#345 follow-up) */
+    const { resolveSender } = await import("@/lib/gmail/resolve");
+    const { resolveForThread, applyResolution, resweepThreads } = await import("@/lib/gmail/linking");
+    const { resolveCustomerId } = await import("@/lib/stores/comms");
+    const { withoutPlaceholderLink } = await import("@/lib/inbox-org/placeholder");
+    const phSet = async (ids: string[]) => new Set(ids.filter((i) => i.startsWith("UNK")));
+    const lk = (hit: { contactId: string; customerId: string } | { ambiguous: string[]; contacts?: Array<{ contactId: string; customerId: string }> } | null, owners: string[] = []) => ({
+      contactByEmail: async () => hit,
+      customersByDomain: async () => owners,
+      placeholderIds: phSet,
+    });
+    const p1 = await resolveSender("pat@school.test", lk({ contactId: "ct1", customerId: "UNK" }));
+    ok(p1.kind === "unknown" && p1.contactId === "ct1", `matcher #345: a contact parked under UNKNOWN resolves to the contact only, no customer (${JSON.stringify(p1)})`);
+    const p2 = await resolveSender("pat@school.test", lk({ contactId: "ct1", customerId: "UNK" }, ["C1"]));
+    ok(p2.kind === "linked" && p2.customerId === "C1" && p2.via === "domain", "matcher #345: …and the domain step may still find the real customer");
+    const p3 = await resolveSender("pat@school.test", lk({ ambiguous: ["UNK", "C1"] }));
+    ok(p3.kind === "linked" && p3.customerId === "C1" && p3.via === "contact", "matcher #345: an address on UNKNOWN and one real customer is that customer, not ambiguous");
+    const p4 = await resolveSender("pat@school.test", lk(null, ["UNK"]));
+    ok(p4.kind === "unknown" && !("contactId" in p4 && p4.contactId), "matcher #345: a domain claimed by UNKNOWN is no claim");
+    const p5 = await resolveSender("pat@school.test", { contactByEmail: async () => ({ contactId: "ct1", customerId: "UNK" }), customersByDomain: async () => [] });
+    ok(p5.kind === "linked" && p5.customerId === "UNK", "matcher #345: without a placeholder lookup the resolver is unchanged (pure default)");
+
+    const CT = fixtureId(345, "ct-unknown");
+    await saveContact({ id: CT, firstName: "Parked", lastName: "Person", homeCompanyId: UNK, title: "" });
+    await setEmails(CT, [{ value: "parked.t345@ph345-school.test", label: "work", isPrimary: true }]);
+    const live = await resolveForThread("parked.t345@ph345-school.test");
+    ok(live.kind === "unknown" && live.contactId === CT, `matcher #345: resolveForThread — the real lookups skip UNKNOWN (${JSON.stringify(live)})`);
+    const probe = { customerId: null, customer: "", resolution: "unknown", resolvedContactId: null, suggestedCustomerId: null, candidates: [] } as unknown as CommThread;
+    await applyResolution(probe, live);
+    ok(probe.customerId === null && probe.resolvedContactId === CT && probe.resolution === "unknown", "matcher #345: applyResolution stamps the contact, no customerId (new mail / stampResolutionOnCreate)");
+    const sweepT = await mk("sweep", { contactName: "Parked Person", contactEmail: "parked.t345@ph345-school.test", messages: [msg({ fromEmail: "parked.t345@ph345-school.test" })] });
+    await resweepThreads({ email: "parked.t345@ph345-school.test" }, { owner: { id: MO_ID, name: MO, nameUnique: true } });
+    const swept = await read(sweepT);
+    ok(swept.customerId === null && swept.resolvedContactId === CT && swept.resolution === "unknown", `matcher #345: resweepThreads links the contact, never UNKNOWN (${swept.customerId} · ${swept.resolvedContactId})`);
+    ok((await resolveCustomerId(swept)) === null, "matcher #345: resolveCustomerId — the contact's UNKNOWN home company is no customer");
+    const stamped = await mk("stamped", { customerId: UNK, customer: "UNKNOWN", resolution: "linked", resolvedContactId: CT, contactEmail: "parked.t345@ph345-school.test" });
+    const st = await read(stamped);
+    ok((await resolveCustomerId(st)) === null, "matcher #345: a thread already stamped with UNKNOWN resolves to no customer at read");
+    ok(st.customerId === UNK, "matcher #345: the stored stamp is not rewritten");
+    const view = withoutPlaceholderLink(st, (id) => id === UNK);
+    ok(view.customerId === null && view.customer === "" && view.siteId === null && view.resolution === "unknown" && view !== st && st.customerId === UNK, "matcher #345: the reader's view of a stamped thread shows no customer link (a copy — stored data untouched)");
+    const sugg = withoutPlaceholderLink({ customerId: null, resolution: "suggested" as "suggested" | "unknown", suggestedCustomerId: UNK, candidates: [{ customerId: UNK, name: "UNKNOWN" }, { customerId: REAL, name: "Real" }] }, (id) => id === UNK);
+    ok(sugg.suggestedCustomerId === null && sugg.resolution === "unknown" && sugg.candidates?.length === 1, "matcher #345: a placeholder domain guess or candidate is dropped too");
+    const realT = { customerId: REAL, customer: "Real", resolution: "linked" as const };
+    ok(withoutPlaceholderLink(realT, (id) => id === UNK) === realT, "matcher #345: a real link is returned untouched");
+    const pageSrc = readFileSync("src/app/(app)/inbox/page.tsx", "utf8");
+    ok(pageSrc.includes("const sel = selRaw ? withoutPlaceholderLink(selRaw, (id) => isPlaceholderCompany(placeholderNames.get(id))) : null;"), "matcher #345: the Inbox reader reads the thread through withoutPlaceholderLink");
+
+    /* review of #345 — items 1–5, 8, 9 */
+    const { rememberAddress } = await import("@/lib/gmail/linking");
+    const { claimDomain, customersForDomain } = await import("@/lib/gmail/domains");
+    const { isPlaceholderCompanyId, placeholderCompanyIds, invalidatePlaceholderCompanies } = await import("@/lib/identity/companies");
+    const { PLACEHOLDER_PICK_ERROR } = await import("@/lib/inbox-org/placeholder");
+    const { contactByEmail } = await import("@/lib/identity/lookup");
+    // 1 — the remember / claim writes refuse a placeholder (the actions answer PLACEHOLDER_PICK_ERROR)
+    const remembered = await rememberAddress(UNK, "new.t345@ph345-claim.test", "New Person", null, { id: MO_ID, name: MO });
+    ok(remembered === "" && (await contactByEmail("new.t345@ph345-claim.test")) === null, "placeholder #345 review 1: rememberAddress never saves an address on UNKNOWN");
+    await claimDomain("ph345-claim.test", UNK, "manual", MO);
+    await claimDomain("ph345-claim.test", UNK, "learned", MO);
+    ok((await customersForDomain("ph345-claim.test")).length === 0, "placeholder #345 review 1: claimDomain (manual or learned) never claims a domain for UNKNOWN");
+    const la = readFileSync("src/app/(app)/inbox/link-actions.ts", "utf8");
+    const fnSrc = (name: string) => {
+      const i = la.indexOf(`export async function ${name}(`);
+      const j = la.indexOf("\nexport async function ", i + 1);
+      return la.slice(i, j < 0 ? undefined : j);
+    };
+    ok(
+      fnSrc("linkThreadToCustomerAction").includes("if (await isPlaceholderCompanyId(customerId)) return { ok: false, error: PLACEHOLDER_PICK_ERROR };") &&
+        fnSrc("linkThreadToCustomerAction").indexOf("isPlaceholderCompanyId(customerId)") < fnSrc("linkThreadToCustomerAction").indexOf("rememberAddress("),
+      "placeholder #345 review 1: linkThreadToCustomerAction refuses a placeholder before any link / remember / claim write"
+    );
+    ok(fnSrc("claimDomainAction").includes("return { ok: false, error: PLACEHOLDER_PICK_ERROR };"), "placeholder #345 review 1: claimDomainAction refuses a placeholder");
+    ok(PLACEHOLDER_PICK_ERROR === "That's a placeholder company — pick the real one.", "placeholder #345 review 1: the refusal reads \"That's a placeholder company — pick the real one.\"");
+    // 2 — a manual person link never auto-links a placeholder home company
+    const lpa = readFileSync("src/app/(app)/inbox/link-popup-actions.ts", "utf8");
+    ok(lpa.includes("if (on && c?.homeCompanyId && !(await isPlaceholderCompanyId(c.homeCompanyId)) && !(await resolveCustomerId(t))) {"), "placeholder #345 review 2: linking a person whose home company is UNKNOWN never auto-links UNKNOWN (and a stored UNKNOWN doesn't count as a company)");
+    // 3 — setThreadSiteAction reads the customer placeholder-aware
+    const site = fnSrc("setThreadSiteAction");
+    ok(site.includes("const customerId = await resolveCustomerId(t);") && !site.includes("t.customerId || (await resolveCustomerId(t))") && site.includes("if (t.customerId !== customerId) await linkThread("), "placeholder #345 review 3: the venue action uses resolveCustomerId (a stored UNKNOWN neither blocks the real company nor offers UNKNOWN's venues)");
+    const stampedAuto = await mk("site-auto", { customerId: UNK, customer: "UNKNOWN", resolution: "linked", contactEmail: "nobody.t345@ph345-none.test" });
+    ok((await resolveCustomerId(await read(stampedAuto))) === null, "placeholder #345 review 3: resolveCustomerId — an automatic UNKNOWN link reads as no customer");
+    const deliberate = await mk("site-deliberate", { customerId: UNK, customer: "UNKNOWN", resolution: "linked", linkedBy: "user" } as Partial<CommThread>);
+    ok((await resolveCustomerId(await read(deliberate))) === UNK, "placeholder #345 review 5: a deliberate (linkedBy) UNKNOWN link is history and stands");
+    ok(withoutPlaceholderLink(await read(deliberate), (id) => id === UNK).customerId === UNK, "placeholder #345 review 5: the reader keeps a deliberate UNKNOWN link (only automatic stamps are hidden)");
+    // 4 — the new-contact prefill never offers a placeholder
+    ok(
+      lpa.includes("const owners = claimed.filter((id) => !phOwners.has(id));") &&
+        lpa.includes("(await allCompanies()).filter((c) => !isPlaceholderCompany(c.name))") &&
+        lpa.includes("companyId: homeOf(c),") &&
+        lpa.includes("const companies = await getCompanies(homeIds.filter((id) => !placeholders.has(id)));"),
+      "placeholder #345 review 4: the link panel's participants and new-contact prefill drop a placeholder domain owner, signature company and home company"
+    );
+    // 5 — a FILED row keeps its true history in Filed and the reader
+    const filedT = await mk("filed", {});
+    await setOrg(filedT, {
+      filing: { customerId: UNK, work: null, noise: false, source: "identity", reason: "pat is a known contact at UNKNOWN", strength: "strong", needsReply: false, state: "filed", filedBy: "approved", filedAt: Date.now(), at: T0 } as Filing,
+    });
+    const fT = await read(filedT);
+    const nm = (id: string) => (id === UNK ? "UNKNOWN" : null);
+    const fvm = buildOrganizeVM([fT], { tab: "filed", now: Date.now(), customerName: nm });
+    ok(fvm.rows[0]?.suggestion === "UNKNOWN", `placeholder #345 review 5: a row already filed under UNKNOWN shows it in the Filed tab (${fvm.rows[0]?.suggestion})`);
+    ok(buildReaderOrg(fT, { customerName: nm, teammateName: () => null, task: null, isAdmin: false })?.filing?.suggestion === "UNKNOWN", "placeholder #345 review 5: …and in the reader strip");
+    ok(withoutPlaceholderCustomer({ ...base, state: "filed" as const }, ph).customerId === "UNK" && withoutPlaceholderCustomer({ ...base, state: "suggested" as const }, ph).customerId === null, "placeholder #345 review 5: only a waiting (suggested) filing is transformed");
+    // 8 — an ambiguous hit where every customer is a placeholder keeps the contact
+    const TBD = fixtureId(345, "co-tbd");
+    await saveCompany({ id: TBD, name: "TBD", type: "other" });
+    const CT2 = fixtureId(345, "ct-tbd");
+    await saveContact({ id: CT2, firstName: "Twice", lastName: "Parked", homeCompanyId: TBD, title: "" });
+    await setEmails(CT2, [{ value: "parked.t345@ph345-school.test", label: "work", isPrimary: true }]);
+    const both = await contactByEmail("parked.t345@ph345-school.test");
+    ok(!!both && "ambiguous" in both && (both.contacts || []).length === 2, "placeholder #345 review 8: (setup) the address sits on contacts under UNKNOWN and TBD — ambiguous, with its contacts");
+    const amb = await resolveForThread("parked.t345@ph345-school.test");
+    ok(amb.kind === "unknown" && amb.contactId === CT2, `placeholder #345 review 8: every customer a placeholder → the contact is kept (newest), no customer (${JSON.stringify(amb)})`);
+    const ambPure = await resolveSender("x@y.test", lk({ ambiguous: ["UNK", "UNK2"], contacts: [{ contactId: "c9", customerId: "UNK2" }, { contactId: "c8", customerId: "UNK" }] }));
+    ok(ambPure.kind === "unknown" && ambPure.contactId === "c9", "placeholder #345 review 8: pure — the newest contact is kept when the lookup can't pick a real customer");
+    const ambOne = await resolveSender("x@y.test", lk({ ambiguous: ["UNK", "C1"], contacts: [{ contactId: "c7", customerId: "C1" }, { contactId: "c8", customerId: "UNK" }] }));
+    ok(ambOne.kind === "linked" && ambOne.customerId === "C1" && ambOne.contactId === "c7", "placeholder #345 review 8: one real customer left → linked to it, with its own contact");
+    // 9 — the placeholder lookup is cached and invalidated by saveCompany
+    ok((await isPlaceholderCompanyId(UNK)) && (await isPlaceholderCompanyId(TBD)) && !(await isPlaceholderCompanyId(REAL)), "placeholder #345 review 9: isPlaceholderCompanyId");
+    await saveCompany({ id: TBD, name: "TEST345 Renamed Real", type: "other" });
+    ok(!(await isPlaceholderCompanyId(TBD)) && (await placeholderCompanyIds([UNK, TBD, REAL, null])).size === 1, "placeholder #345 review 9: renaming through saveCompany drops the cached answer at once");
+    invalidatePlaceholderCompanies();
+    const comp = readFileSync("src/lib/identity/companies.ts", "utf8");
+    ok(comp.includes("export const PLACEHOLDER_CACHE_MS = 60_000;") && /onConflictDoUpdate[\s\S]*?invalidatePlaceholderCompanies\(\);\s*\}/.test(comp), "placeholder #345 review 9: a 60 s per-process memo, invalidated on company save");
+    await db.delete(contactEmails).where(eq(contactEmails.contactId, CT2));
+    await db.delete(contacts).where(eq(contacts.id, CT2));
+    await db.delete(companies).where(eq(companies.id, TBD));
+    await db.delete(contactEmails).where(eq(contactEmails.contactId, CT));
+    await db.delete(contacts).where(eq(contacts.id, CT));
+  } finally {
+    await dropFixtures(345);
+    await db.delete(companies).where(eq(companies.id, UNK));
+    await db.delete(companies).where(eq(companies.id, REAL));
+    invalidateOrgContext();
+  }
+}
+
+/* ---------- #346: Archive + Labels from the Organize view ---------- */
+
+export async function inboxOrgArchiveLabelChecks(ok: Ok): Promise<void> {
+  const { archiveFromOrganize, undoArchiveFromOrganize, isToFileRow, ORGANIZE_ARCHIVE_MAX } = await import("@/lib/inbox-org/apply");
+  const { setCategory, CATEGORIES } = await import("@/lib/stores/comms");
+  const { threadGmailLabels } = await import("@/app/(app)/inbox/row-labels");
+  const { organizeArchiveTarget, organizeArchiveRemoves, organizeArchiveNote, ORGANIZE_ARCHIVED_EVENT } = await import("@/app/(app)/inbox/organize/format");
+  const { isPlaceholderCompany } = await import("@/lib/inbox-org/placeholder");
+  const src = (p: string) => readFileSync(p, "utf8");
+
+  /* pure: where the selection goes, and what the reader's Archive does */
+  const rows = [
+    { id: "a", href: "/inbox?view=organize&tab=to-file&thread=a" },
+    { id: "b", href: "/inbox?view=organize&tab=to-file&thread=b" },
+  ];
+  const ta = organizeArchiveTarget({ tab: "to-file", baseHref: ORGANIZE_BASE_HREF, rows }, "a");
+  const tb = organizeArchiveTarget({ tab: "to-file", baseHref: ORGANIZE_BASE_HREF, rows }, "b");
+  const tx = organizeArchiveTarget({ tab: "noise", baseHref: ORGANIZE_BASE_HREF, rows }, "zz");
+  ok(ta.inList && ta.nextHref === rows[1].href && tb.nextHref === null && tb.closeHref === "/inbox?view=organize&tab=to-file", "archive #346: after an Archive the selection moves to the next row, else clears (the tab, nothing open)");
+  ok(organizeArchiveRemoves(ta) && !organizeArchiveRemoves({ tab: "filed", inList: true }) && !organizeArchiveRemoves(tx) && !organizeArchiveRemoves(null), "archive #346: the reader's Archive leaves the list on To file / Noise only (Filed only archives; a thread not in the list toggles as in the Inbox)");
+  ok(organizeArchiveNote("to-file", 1) === "Archived — it comes back on new mail" && organizeArchiveNote("filed", 2) === "Archived 2", "archive #346: the note says a skipped row comes back on new mail");
+
+  /* pure: a cleared Noise row is off the Noise tab (and its counts) */
+  const NOW = Date.now();
+  const thv = (id: string, o: Partial<CommThread>): CommThread =>
+    ({ id, mailbox: "personal", mailboxUser: "TEST346 Vm", status: "waiting_us", archived: true, deleted: false, subject: id, updatedAt: NOW, messages: [], ...o }) as unknown as CommThread;
+  const nz = [thv("n1", { noise: { flagged: true, reason: "Promo", moved: true } }), thv("n2", { noise: { flagged: true, reason: "Promo", moved: true, cleared: true } })];
+  const vmN = buildOrganizeVM(nz, { tab: "noise", now: NOW, customerName: () => null });
+  ok(vmN.rows.map((r) => r.id).join(",") === "n1" && vmN.counts.noise === 1 && !isNoiseRow(nz[1]), "archive #346: a Noise row archived from Organize (cleared) is off the Noise tab and its count");
+
+  /* pure: labels — the Inbox's categories; Gmail chips skip placeholder labels */
+  const opts = [
+    { id: "L1", name: "Peak/Customers/UNKNOWN", type: "user" as const, textColor: null, backgroundColor: null },
+    { id: "L2", name: "Clients", type: "user" as const, textColor: null, backgroundColor: null },
+    { id: "INBOX", name: "INBOX", type: "system" as const, textColor: null, backgroundColor: null },
+  ];
+  const msgs = [{ gmailLabelIds: ["L1", "L2", "INBOX"] }];
+  ok(threadGmailLabels(msgs, opts, { skipPlaceholders: true }).map((l) => l.id).join(",") === "L2", "labels #346: the Labels card never shows a placeholder Peak/Customers label (or Gmail's routing labels)");
+  ok(threadGmailLabels(msgs, opts).map((l) => l.id).join(",") === "L1,L2", "labels #346: the Inbox row keeps its chips as before (shared helper)");
+  ok(CATEGORIES.length > 0 && CATEGORIES.every((c) => !isPlaceholderCompany(c.label) && !isPlaceholderCompany(c.key)), "labels #346: the labels offered are the Inbox's category presets — never a placeholder");
+
+  /* db */
+  const ME = "TEST346 Ann Archive";
+  const me = { id: "TEST346-u-ann", name: ME, roles: ["Estimator"] };
+  let n = 0;
+  const T0 = Date.now() - 3_600_000;
+  const msg = (o: Partial<CommMessage> = {}): CommMessage =>
+    ({ id: `ar${++n}`, at: T0 + n * 60_000, direction: "in", channel: "email", author: "Pat", body: "Can you send the price?", fromEmail: "pat@archive-346.test", ...o }) as CommMessage;
+  const mk = async (slug: string, o: Partial<CommThread> = {}): Promise<string> => {
+    const id = fixtureId(346, "ar-" + slug);
+    await createFixture("comms", {
+      id, mailbox: "personal", mailboxUser: ME, unread: false, archived: false, customerId: null, customer: "", contactName: "Pat",
+      contactEmail: "pat@archive-346.test", cc: "", subject: "Hello", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [msg()], createdAt: T0, updatedAt: T0 + 5, resolution: "unknown", ...o,
+    } as unknown as CommThread);
+    return id;
+  };
+  const read = async (id: string) => (await getDoc<CommThread>("comms", id))!;
+  const sugg = (o: Partial<Filing> = {}): Filing => ({ customerId: "TEST346-cust", work: null, noise: false, source: "identity", reason: "Known contact", strength: "weak", needsReply: true, state: "suggested", at: T0, ...o });
+  const db = await getDb();
+  const logBefore = (await db.select().from(blobs).where(eq(blobs.id, FILING_LOG_BLOB)).limit(1))[0];
+  try {
+    /* To file: archive = archive + skip; Undo puts back both */
+    const tf = await mk("to-file");
+    await setOrg(tf, { filing: sugg() });
+    ok(isToFileRow(await read(tf)), "archive #346: (setup) a To file row");
+    const r1 = await archiveFromOrganize(tf, "to-file", me);
+    const a1 = await read(tf);
+    ok(r1.ok && a1.archived === true && a1.filing?.state === "skipped" && !isToFileRow(a1), "archive #346: Archive from To file archives the thread and skips the suggestion (off the list)");
+    ok(r1.ok && r1.undo.threadId === tf && r1.undo.unarchive && r1.undo.unskip && !r1.undo.unclear, "archive #346: …and hands back what it changed for Undo");
+    ok((await getFilingLog()).some((e) => e.threadId === tf && e.action === "skipped"), "archive #346: logged like Skip (filing log 'skipped')");
+    if (r1.ok) await undoArchiveFromOrganize(r1.undo, me);
+    const u1 = await read(tf);
+    ok(u1.archived === false && u1.filing?.state === "suggested" && isToFileRow(u1), "archive #346: Undo un-archives and returns the suggestion to To file");
+    ok((await getFilingLog()).some((e) => e.threadId === tf && e.action === "undone"), "archive #346: Undo is logged like Undo");
+    const r1b = await archiveFromOrganize(tf, "to-file", me);
+    await addMessage(tf, { direction: "in", body: "Any update?" });
+    await organizeThread(tf);
+    ok(r1b.ok && (await read(tf)).filing?.state === "suggested", "archive #346: new outside mail brings an archived To file row's suggestion back (like Skip)");
+
+    /* the AI outcome is recorded the way Skip records it */
+    const ai = await mk("ai");
+    const RUN = fixtureId(346, "ar-run");
+    await upsertDoc("assist_runs" as never, { id: RUN, feature: "file", step: null, userId: me.id, userName: ME, provider: "fake", model: "m", requestedModel: "m", fellBack: false, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, latencyMs: 0, inputHash: "h", output: "", ok: true, error: null, stopReason: null, contextRef: "thread:" + ai, monthKey: "2026-10", outcome: null, outcomeDetail: null, outcomeAt: null, createdAt: Date.now() - 1000 } as never);
+    registerFixture("assist_runs" as never, RUN);
+    await setOrg(ai, { filing: sugg({ source: "ai", runId: RUN, strength: "strong" }) });
+    await archiveFromOrganize(ai, "to-file", me);
+    ok((await getRun(RUN))?.outcome === "discarded" && (await getRun(RUN))?.outcomeDetail?.action === "skipped", "archive #346: an AI suggestion archived from To file sets the run's outcome 'discarded' (action skipped), as Skip does");
+
+    /* Filed: archive only — the filing stays */
+    const fd = await mk("filed");
+    const filed = sugg({ state: "filed", filedBy: "approved", filedAt: NOW, customerId: "TEST346-cust" });
+    await setOrg(fd, { filing: filed });
+    const filedBefore = JSON.stringify((await read(fd)).filing);
+    const r2 = await archiveFromOrganize(fd, "filed", me);
+    const a2 = await read(fd);
+    ok(r2.ok && a2.archived === true && JSON.stringify(a2.filing) === filedBefore && a2.filing?.state === "filed" && a2.filing.filedBy === "approved" && !r2.undo.unskip, "archive #346: Archive from Filed only archives — the filing is untouched");
+    if (r2.ok) await undoArchiveFromOrganize(r2.undo, me);
+    ok((await read(fd)).archived === false && (await read(fd)).filing?.state === "filed", "archive #346: Undo on Filed un-archives; still filed");
+
+    /* Noise: tagged (in the inbox) and moved (already archived) */
+    const nt = await mk("noise-tagged");
+    await setOrg(nt, { filing: sugg({ noise: true, customerId: null, source: "noise-rule", strength: "strong" }), noise: { flagged: true, reason: "Promotions", moved: false } });
+    ok(isNoiseRow(await read(nt)), "archive #346: (setup) a tagged Noise row");
+    const r3 = await archiveFromOrganize(nt, "noise", me);
+    const a3 = await read(nt);
+    ok(r3.ok && a3.archived === true && a3.noise?.cleared === true && a3.filing?.state === "skipped" && !isNoiseRow(a3) && r3.undo.unclear && r3.undo.unskip, "archive #346: Archive from Noise archives, takes the row off Noise (cleared) and skips its suggestion");
+    if (r3.ok) await undoArchiveFromOrganize(r3.undo, me);
+    const u3 = await read(nt);
+    ok(u3.archived === false && u3.noise?.cleared === undefined && u3.noise?.flagged === true && u3.filing?.state === "suggested" && isNoiseRow(u3), "archive #346: Undo puts the Noise row back (in the inbox, flagged, suggested)");
+    const nm = await mk("noise-moved", { archived: true });
+    const dismissed = sugg({ noise: true, customerId: null, state: "dismissed", source: "noise-rule", basis: (await read(nm)).messages[0].id });
+    await setOrg(nm, { filing: dismissed, noise: { flagged: true, reason: "Marked as noise", moved: true } });
+    const r4 = await archiveFromOrganize(nm, "noise", me);
+    ok(r4.ok && !r4.undo.unarchive && !r4.undo.unskip && r4.undo.unclear && (await read(nm)).filing?.state === "dismissed" && !isNoiseRow(await read(nm)), "archive #346: a moved (already archived) Noise row is only cleared — still dismissed, nothing to un-archive");
+    await organizeThread(nm);
+    ok(!isNoiseRow(await read(nm)) && (await read(nm)).noise?.cleared === true, "archive #346 review: with no new mail the cleared (dismissed) row stays off Noise");
+    await addMessage(nm, { direction: "in", body: "Actually — can you quote the stage drapes?" });
+    await organizeThread(nm);
+    const back = await read(nm);
+    ok(isNoiseRow(back) && back.noise?.cleared === undefined && back.filing?.state === "dismissed", "archive #346 review: new outside mail on an archived, dismissed (marked-noise) row brings it back to the Noise tab (cleared dropped, still marked)");
+    await setOrg(nm, { noise: { flagged: true, reason: "Marked as noise", moved: true, cleared: true } });
+    await patchDoc<CommThread>("comms", nm, (d) => {
+      d.archived = true;
+      d.gmailInboxed = false;
+    });
+    await reinboxFromGmail(nm);
+    const rein = await read(nm);
+    ok(rein.archived === false && rein.gmailInboxed === true && !rein.noise?.flagged && !rein.noise?.cleared, "archive #346 review: a Gmail re-inbox (D898 — Gmail puts a new reply back in INBOX) brings an archived, dismissed row back to the Inbox (rescued)");
+
+    /* Gmail had already archived it: Undo never re-inboxes */
+    const ga = await mk("gmail-archived", { gmailInboxed: false });
+    await setOrg(ga, { filing: sugg() });
+    const r5 = await archiveFromOrganize(ga, "to-file", me);
+    ok(r5.ok && !r5.undo.unarchive && r5.undo.unskip && (await read(ga)).archived === true, "archive #346 review: a thread Gmail had already archived (gmailInboxed false) counts as archived — nothing for Undo to un-archive");
+    if (r5.ok) await undoArchiveFromOrganize(r5.undo, me);
+    ok((await read(ga)).gmailInboxed === false && (await read(ga)).filing?.state === "suggested", "archive #346 review: …so Undo puts the suggestion back but never re-inboxes it in Gmail");
+
+    /* compare-and-set: a filing rewritten meanwhile is never clobbered */
+    const cs = await mk("cas");
+    await setOrg(cs, { filing: sugg() });
+    const fresh = sugg({ customerId: "TEST346-other", reason: "New mail", at: NOW + 5 });
+    const { casOrg: realCas } = await import("@/lib/stores/comms");
+    ok(!(await realCas(cs, "filing", sugg({ reason: "stale" }), { ...fresh, state: "skipped" })) && (await read(cs)).filing?.state === "suggested", "archive #346 review: (setup) casOrg refuses a stale expected filing");
+    await setOrg(cs, { filing: fresh });
+    const r6 = await archiveFromOrganize(cs, "to-file", me);
+    const a6 = await read(cs);
+    ok(r6.ok && a6.filing?.state === "skipped" && a6.filing.customerId === "TEST346-other" && a6.filing.reason === "New mail", "archive #346 review: skip writes over the filing as read now (compare-and-set), keeping what a concurrent write put there");
+    const lose = await mk("cas-lose");
+    await setOrg(lose, { filing: sugg() });
+    let tries = 0;
+    const rl = await archiveFromOrganize(lose, "to-file", me, Date.now(), { cas: async () => (tries++, false) });
+    const al = await read(lose);
+    ok(!rl.ok && rl.error === "conflict" && /Couldn.t update — try again/.test(rl.message) && tries === 3 && al.archived === false && al.filing?.state === "suggested", "archive #346 review 2: when the skip keeps losing (3 tries) Archive answers 'Couldn't update — try again' and archives nothing");
+    const apSrc = readFileSync("src/lib/inbox-org/apply.ts", "utf8");
+    ok(/if \(await cas\(t\.id, "filing", t\.filing, want\)\) return/.test(apSrc) && /cas: FilingCas = casOrg/.test(apSrc) && !/await setOrg\(t\.id, \{ filing: \{ \.\.\.settled\(f\), state: "skipped" \} \}\)/.test(apSrc.slice(apSrc.indexOf("export async function archiveFromOrganize("))), "archive #346 review: archive / undo write the filing only through casFiling (casOrg, re-read on conflict)");
+
+    /* label: the Inbox's category action leaves the filing alone */
+    const lb = await mk("label");
+    await setOrg(lb, { filing: sugg() });
+    const before = JSON.stringify((await read(lb)).filing);
+    await setCategory(lb, "red");
+    ok((await read(lb)).category === "red" && JSON.stringify((await read(lb)).filing) === before && isToFileRow(await read(lb)), "labels #346: applying a label sets the category and leaves the filing (still in To file)");
+    await setCategory(lb, null);
+    ok(!(await read(lb)).category && JSON.stringify((await read(lb)).filing) === before, "labels #346: removing it (✕) leaves the filing too");
+
+    /* several at once: the action's loop over two rows */
+    const b1 = await mk("bulk-1");
+    const b2 = await mk("bulk-2");
+    for (const id of [b1, b2]) await setOrg(id, { filing: sugg() });
+    const rb = await Promise.all([b1, b2].map((id) => archiveFromOrganize(id, "to-file", me)));
+    ok(rb.every((r) => r.ok) && (await read(b1)).filing?.state === "skipped" && (await read(b2)).archived === true, "archive #346: two rows archive and skip independently (bulk)");
+    for (const id of [b1, b2]) await setCategory(id, "blue");
+    ok((await read(b1)).category === "blue" && (await read(b2)).filing?.state === "skipped", "labels #346: a label on several rows (bulkCategoryAction's loop) leaves each filing alone");
+
+    /* never a teammate's thread */
+    const other = await mk("other", { mailboxUser: "TEST346 Ben Other" });
+    await setOrg(other, { filing: sugg() });
+    const ro = await archiveFromOrganize(other, "to-file", me);
+    const ru = await undoArchiveFromOrganize({ threadId: other, unarchive: true, unskip: true, unclear: true }, me);
+    ok(!ro.ok && ro.error === "not-found" && !ru.ok && (await read(other)).archived === false && (await read(other)).filing?.state === "suggested", "archive #346: someone else's thread is refused (Archive and Undo) and left untouched");
+    const forged = await undoArchiveFromOrganize({ threadId: lb, unarchive: true, unskip: true, unclear: true }, me);
+    ok(forged.ok && (await read(lb)).archived === false && (await read(lb)).filing?.state === "suggested", "archive #346: Undo reverses only what is still there (a never-archived thread is left as it is)");
+    ok(ORGANIZE_ARCHIVE_MAX === 500, "archive #346: one Archive takes at most 500 threads");
+
+    /* Jeff 2026-10-15 #29 — Noise "Archive all shown": every row shown, a row's own Archive each, one Undo */
+    const ns1 = await mk("ns-tagged");
+    await setOrg(ns1, { filing: sugg({ noise: true, customerId: null, source: "noise-rule", strength: "strong" }), noise: { flagged: true, reason: "Promotions", moved: false } });
+    const ns2 = await mk("ns-moved", { archived: true });
+    await setOrg(ns2, { filing: sugg({ noise: true, customerId: null, source: "noise-rule", strength: "strong" }), noise: { flagged: true, reason: "Newsletter", moved: true } });
+    const ns3 = await mk("ns-dismissed", { archived: true });
+    await setOrg(ns3, { filing: sugg({ noise: true, customerId: null, state: "dismissed", source: "noise-rule" }), noise: { flagged: true, reason: "Marked as noise", moved: true } });
+    const nsIds = [ns1, ns2, ns3];
+    const vmBefore = buildOrganizeVM(await Promise.all(nsIds.map(read)), { tab: "noise", now: Date.now(), customerName: () => null });
+    ok(nsIds.every((x) => vmBefore.noiseShownIds.includes(x)), "Jeff 10-15 #29: (setup) Archive all shown carries every Noise row shown — in the inbox, moved and marked-noise");
+    const batch = [];
+    for (const x of vmBefore.noiseShownIds) batch.push(await archiveFromOrganize(x, "noise", me));
+    const after = await Promise.all(nsIds.map(read));
+    ok(batch.every((r) => r.ok) && after.every((t) => t.archived === true && t.noise?.cleared === true && !isNoiseRow(t)), "Jeff 10-15 #29: every row shown is archived AND cleared off the Noise tab");
+    ok(buildOrganizeVM(after, { tab: "noise", now: Date.now(), customerName: () => null }).rows.length === 0, "Jeff 10-15 #29: after Archive all shown the Noise tab shows none of them");
+    ok(after[2].filing?.state === "dismissed" && after[0].filing?.state === "skipped", "Jeff 10-15 #29: a marked-noise (dismissed) row keeps its filing; a suggested one is skipped — a row's own Archive, unchanged");
+    const undos = batch.flatMap((r) => (r.ok ? [r.undo] : []));
+    for (const u of undos) await undoArchiveFromOrganize(u, me);
+    const undone = await Promise.all(nsIds.map(read));
+    ok(undone.every((t) => isNoiseRow(t)) && undone[0].archived === false && undone[1].archived === true && undone[2].archived === true && undone[0].filing?.state === "suggested",
+      "Jeff 10-15 #29: the batch's one Undo puts every row back on Noise — only the one that was in the inbox is re-inboxed");
+  } finally {
+    await dropFixtures(346);
+    if (logBefore) await db.update(blobs).set({ data: logBefore.data, updatedAt: logBefore.updatedAt }).where(eq(blobs.id, FILING_LOG_BLOB));
+    else await db.delete(blobs).where(eq(blobs.id, FILING_LOG_BLOB));
+  }
+
+  /* source pins: actions, reader, sidebar, Organize box */
+  const oa = src("src/app/(app)/inbox/organize-actions.ts");
+  ok(/export async function archiveFromOrganizeAction\(threadIds: string\[\], tab: string\)[\s\S]*?const me = await actor\(\);[\s\S]*?await archiveFromOrganize\(id, t, me\)[\s\S]*?revalidate\(\);/.test(oa), "archive #346: archiveFromOrganizeAction loops my own threads through archiveFromOrganize, then revalidates");
+  ok(/export async function undoArchiveFromOrganizeAction\(list: OrganizeArchiveUndo\[\]\)[\s\S]*?await undoArchiveFromOrganize\([\s\S]*?u\.unarchive === true/.test(oa), "archive #346: the Undo action re-reads each flag as a strict boolean");
+  const ap = src("src/lib/inbox-org/apply.ts");
+  ok(/export async function archiveFromOrganize\([\s\S]*?const t = await myThread\(threadId, me\);\s*if \(!t\) return NOT_FOUND\(\);[\s\S]*?const wasArchived = !!t\.archived \|\| t\.gmailInboxed === false;\s*if \(!t\.archived\) await archive\(t\.id\);/.test(ap), "archive #346: archiveFromOrganize is owner-checked (myThread) and archives through comms.archive (Gmail follows)");
+  const tr = src("src/app/(app)/inbox/thread-reader.tsx");
+  ok(tr.includes("await archiveFromOrganizeAction([vm.id], org.tab);") && tr.includes("router.push(org.nextHref ?? org.closeHref)") && tr.includes("new CustomEvent(ORGANIZE_ARCHIVED_EVENT") && tr.includes('postChanged("thread", vm.id);'), "archive #346: the reader's bottom Archive, opened from Organize, archives through the Organize action, posts changed, tells the box (Undo) and moves to the next row");
+  ok(/if \(vm\.archived\) await unarchiveAction\(vm\.id\);\s*else await archiveAction\(vm\.id\);/.test(tr), "archive #346: outside Organize the reader's Archive / Unarchive is the Inbox's own");
+  const ob = src("src/app/(app)/inbox/organize/organize-box.tsx");
+  ok(ob.includes(`window.addEventListener(ORGANIZE_ARCHIVED_EVENT, on)`) && ob.includes("undoArchiveFromOrganizeAction(undo)") && ob.includes("data-organize-undo") && ob.includes("data-organize-archive") && ob.includes("archiveFromOrganizeAction(ids, tab)"), "archive #346: the Organize box shows Archived … Undo (its own row Archive and the reader's) and each row has Archive");
+  ok(/for \(const id of ids\) postChanged\("thread", id\);/.test(ob) && /for \(const u of undo\) postChanged\("thread", u\.threadId\);/.test(ob), "archive #346: Archive and Undo post changed for each thread");
+  ok(ob.includes("approveAllStrongAction(vm.strongIds)"), "archive #346: Approve all strong is still there");
+  ok(/try \{\s*const r = await archiveFromOrganize\(id, t, me\);\s*if \(r\.ok\) undo\.push\(r\.undo\);\s*else refused\+\+;\s*\} catch \(e\) \{[\s\S]{0,160}refused\+\+;\s*\}/.test(oa) && ob.includes("(r.refused ? ` · ${r.refused} couldn't be archived` : \"\")"),
+    "#351 M7: a row that throws counts as refused — the rows that archived keep their Undo, and the note names the rest");
+  ok(/const archiveShown = \(\) => archiveRows\(vm\.noiseShownIds\);/.test(ob) && !ob.includes("bulkArchiveAction") && ob.includes('(r.more ? " · press again for the rest" : "")'), "Jeff 10-15 #29: Noise's Archive all shown runs the rows' own Archive (archiveFromOrganizeAction) over every row shown, with the one Undo note");
+  ok(/const more = Array\.isArray\(threadIds\) && new Set\(threadIds\.map\(\(x\) => str\(x\)\)\.filter\(Boolean\)\)\.size > list\.length;\s*return \{ ok: true as const, archived: undo\.length, refused, undo, more \};/.test(oa), "Jeff 10-15 #29: past the 500 cap the action says there is more");
+  ok(ORGANIZE_ARCHIVED_EVENT === "peak:organize-archived", "archive #346: the reader → box event name");
+  const page = src("src/app/(app)/inbox/page.tsx");
+  ok(page.includes("if (reader && !reader.readOnly) reader = { ...reader, organize: organizeArchiveTarget(vm, reader.id) };"), "archive #346: only my own thread's reader gets the Organize Archive");
+  ok(/labels: readOnly\s*\?\s*null/.test(page) && page.includes("gmail: cardGmailChips(") && page.includes('gmailEditable: sel.mailbox === "personal" && !!sel.gmailThreadId,') && page.includes("labels: threadGmailLabels(t.messages || [], labelOptions),"), "labels #346/#347: the reader VM carries labels for my own thread only (null when read-only), Gmail chips from cardGmailChips; the Inbox row's chips keep their helper");
+  const ls = src("src/app/(app)/inbox/link-sidebar.tsx");
+  ok(ls.includes("<LabelsCard vm={vm} />"), "labels #346: the reader's sidebar has a Labels card");
+  const lc = src("src/app/(app)/inbox/labels-card.tsx");
+  ok(lc.startsWith('"use client";') && lc.includes("run(() => categoryAction(vm.id, key))") && lc.includes("run(() => categoryAction(vm.id, null))") && lc.includes('postChanged("thread", vm.id);') && lc.includes("if (!labels || vm.readOnly) return null;") && lc.includes("<CategoryMenu") && lc.includes("data-colour-row"), "labels #346/#347: the Colour row applies / removes (✕) through the Inbox's categoryAction, posts changed, and the card shows nothing on a read-only thread");
+  ok(!valueImports(lc).some((p) => /^@\/(db\b|lib\/stores\/|lib\/inbox-org\/)/.test(p)), "labels #346: labels-card imports no store, db or server module");
+  const cb = src("src/app/(app)/inbox/command-bar.tsx");
+  ok(cb.includes("export function CategoryMenu(") && /<CategoryMenu\s+trigger=\{<ActBtnInner icon=\{<TagIcon size=\{14\} \/>\} label="Categorize" caret \/>\}/.test(cb), "labels #346: the Inbox's Categorize ▾ and the Labels card share one CategoryMenu");
+  const act = src("src/app/(app)/inbox/actions.ts");
+  ok(/export async function categoryAction\(id: string, key: string \| null\) \{\s*const user = await requireUser\(\);\s*if \(!\(await ownThread\(id, user\)\)\) return;/.test(act), "labels #346: categoryAction stays owner-checked (#341, #349: by identity)");
+  const ld = src("src/app/(app)/inbox/organize/load.ts");
+  ok(ld.includes('const mine = (await listDocsWhere<CommThread>("comms", ownMailboxCond(viewer))).filter((t) => visibleTo(t, viewer));'), "archive #346: Organize lists only my own threads — a read-only #341 thread never shows there (#349: by identity, cut in SQL)");
+}
+
+/* ---------- #347: the person's own Gmail labels on the Labels card ---------- */
+
+export async function inboxGmailLabelChecks(ok: Ok): Promise<void> {
+  const R = await import("@/lib/gmail/user-label-rules");
+  const U = await import("@/lib/gmail/user-labels");
+  const { isCardLabel, interpretLabelEvents } = await import("@/lib/gmail/label-interpret");
+  const { listCachedLabels, replaceLabels } = await import("@/lib/gmail/connections");
+  const { gmailLabels } = await import("@/db/schema");
+  const src = (p: string) => readFileSync(p, "utf8");
+
+  /* pure: picker, chips, names */
+  const cache = [
+    { labelId: "INBOX", name: "INBOX", type: "system" as const },
+    { labelId: "UNREAD", name: "UNREAD", type: "system" as const },
+    { labelId: "IMPORTANT", name: "IMPORTANT", type: "system" as const },
+    { labelId: "STARRED", name: "STARRED", type: "system" as const },
+    { labelId: "CATEGORY_PROMOTIONS", name: "CATEGORY_PROMOTIONS", type: "system" as const },
+    { labelId: "Label_1", name: "Clients", type: "user" as const, backgroundColor: "#16a766", textColor: "#ffffff" },
+    { labelId: "Label_2", name: "Bids/2026", type: "user" as const },
+    { labelId: "Label_3", name: "Peak/Customers/Lincoln HS", type: "user" as const },
+    { labelId: "Label_4", name: "Peak/Customers/UNKNOWN", type: "user" as const },
+    { labelId: "Label_5", name: "Peak", type: "user" as const },
+  ];
+  const pick = R.pickerLabels(cache);
+  ok(pick.map((l) => l.name).join(",") === "Starred,Important,Bids/2026,Clients", `labels #347: the picker offers Starred, Important, then my labels A→Z — never Peak/*, a placeholder or Gmail's other system labels (${pick.map((l) => l.name).join(",")})`);
+  const chips = R.cardGmailChips([{ gmailLabelIds: ["INBOX", "UNREAD", "Label_1", "Label_3", "Label_4", "STARRED"] }, { gmailLabelIds: ["Label_2"] }], cache);
+  ok(chips.map((c) => `${c.name}:${c.editable ? "e" : "r"}`).join(",") === "Starred:e,Bids/2026:e,Clients:e,Peak/Customers/Lincoln HS:r", `labels #347: chips — my labels and Starred editable, Peak/* read-only, a placeholder label never shown (${chips.map((c) => c.name).join(",")})`);
+  ok(chips.find((c) => c.id === "Label_1")?.backgroundColor === "#16a766", "labels #347: a chip keeps its Gmail colours");
+  const bad = ["", "  ", "x".repeat(226), "/Clients", "Clients/", "Clients//Lincoln", "Peak/Foo", "peak", "Inbox", "STARRED"];
+  ok(bad.every((n) => !R.validateLabelName(n).ok), "labels #347: names refused — empty, over 225, a leading / trailing slash, an empty nested part, under Peak/, a Gmail system name");
+  const good = R.validateLabelName("  Clients /  Lincoln HS ");
+  ok(R.isPeakLabelName("Peak /X") && R.isPeakLabelName(" peak/X") && R.isPeakLabelName("PEAK") && !R.isPeakLabelName("Peakwood/X") && !R.validateLabelName("Peak /X").ok && !R.validateLabelName(" peak/X").ok, "labels #347 review: 'Peak /X' and ' peak/X' are under Peak/ (the first segment, trimmed) — refused");
+  ok(R.pickerLabels([{ labelId: "L9", name: "Peak /Odd", type: "user" }, { labelId: "L8", name: " peak/x", type: "user" }]).length === 0, "labels #347 review: …and never offered in the picker");
+  ok(good.ok && good.name === "Clients/Lincoln HS" && R.validateLabelName("x".repeat(225)).ok && R.validateLabelName("Peakwood").ok, "labels #347: a nested or 225-char name is fine (whitespace tidied); 'Peakwood' isn't under Peak/");
+  ok(isCardLabel("Label_1", cache[5]) && !isCardLabel("Label_3", cache[7]) && isCardLabel("STARRED", cache[3]) && !isCardLabel("UNREAD", cache[1]) && isCardLabel("Label_99", undefined) && !isCardLabel("CATEGORY_X", undefined), "labels #347: the history import records my labels and Starred / Important (a not-yet-cached Label_ id too) — not Peak/*, UNREAD or categories");
+
+  /* a fake Gmail */
+  type Change = { addLabelIds?: string[]; removeLabelIds?: string[] };
+  const fake = () => {
+    const st = {
+      enabled: true,
+      canModify: true,
+      labels: cache.map((l) => ({ id: l.labelId, name: l.name, type: l.type })) as Array<{ id: string; name: string; type: "system" | "user" }>,
+      lists: 0,
+      creates: [] as string[],
+      modifies: [] as Array<{ key: string; thread: string; change: Change }>,
+      modifyError: null as Error | null,
+    };
+    const client: import("@/lib/gmail/user-labels").GmailLabelClient = {
+      enabled: () => st.enabled,
+      canModify: async () => st.canModify,
+      listLabels: async () => {
+        st.lists++;
+        return st.labels.map((l) => ({ ...l }));
+      },
+      createLabel: async (_k, name) => {
+        st.creates.push(name);
+        const l = { id: `Label_n${st.creates.length}`, name, type: "user" as const };
+        st.labels.push(l);
+        return l;
+      },
+      modifyThread: async (key, thread, change) => {
+        if (st.modifyError) throw st.modifyError;
+        st.modifies.push({ key, thread, change });
+      },
+    };
+    return { st, client };
+  };
+
+  const ME = "TEST347 Ann Labels";
+  const me = { id: "TEST347-u-ann", name: ME };
+  const KEY = "personal:TEST347-u-ann";
+  const NOW = Date.now();
+  const T0 = NOW - 3_600_000;
+  const mk = async (slug: string, o: Partial<CommThread> = {}): Promise<string> => {
+    const id = fixtureId(347, "lb-" + slug);
+    await createFixture("comms", {
+      id, mailbox: "personal", mailboxUser: ME, unread: false, archived: false, customerId: null, customer: "", contactName: "Pat",
+      contactEmail: "pat@labels-347.test", cc: "", subject: "Labels", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      gmailThreadId: "gt-" + slug, gmailAccountKey: KEY,
+      messages: [
+        { id: "m1-" + slug, at: T0, direction: "in", channel: "email", author: "Pat", body: "Hi", fromEmail: "pat@labels-347.test", gmailId: "g1-" + slug, gmailLabelIds: ["INBOX", "Label_3"] },
+        { id: "m2-" + slug, at: T0 + 60_000, direction: "out", channel: "email", author: ME, body: "Reply", gmailId: "g2-" + slug },
+        { id: "m3-" + slug, at: T0 + 120_000, direction: "note", channel: "email", author: ME, body: "A note" },
+      ],
+      createdAt: T0, updatedAt: T0, resolution: "unknown",
+      filing: { customerId: null, work: null, noise: false, source: "identity", reason: "x", strength: "weak", needsReply: false, state: "suggested", at: T0 },
+      ...o,
+    } as unknown as CommThread);
+    return id;
+  };
+  const read = async (id: string) => (await getDoc<CommThread>("comms", id))!;
+  const ids = (t: CommThread) => (t.messages || []).map((m) => (m.gmailLabelIds || []).join("+")).join("|");
+  const db = await getDb();
+  try {
+    await replaceLabels(KEY, cache.map((l) => ({ id: l.labelId, name: l.name, type: l.type })));
+
+    /* the cache: fresh → no Gmail call; stale (5 min) → refreshed; Gmail off → cache */
+    const f1 = fake();
+    await U.mailboxLabels(KEY, f1.client, { now: NOW });
+    ok(f1.st.lists === 0, "labels #347: a fresh label cache is used as is (no Gmail call)");
+    f1.st.labels.push({ id: "Label_6", name: "Warranty", type: "user" });
+    const stale = await U.mailboxLabels(KEY, f1.client, { now: NOW + U.LABEL_CACHE_MS + 1000 });
+    ok(f1.st.lists === 1 && stale.some((l) => l.labelId === "Label_6") && (await listCachedLabels(KEY)).some((r) => r.labelId === "Label_6"), "labels #347: a cache older than 5 minutes is refreshed from Gmail (users.labels.list) and stored");
+    const f0 = fake();
+    f0.st.enabled = false;
+    await U.mailboxLabels(KEY, f0.client, { now: NOW + 60 * U.LABEL_CACHE_MS });
+    ok(f0.st.lists === 0, "labels #347: with Gmail off the cache is used (no call)");
+
+    /* picker */
+    const t1 = await mk("apply");
+    const pk = await U.labelPicker(t1, me, f1.client, NOW);
+    ok(pk.ok && pk.labels.some((l) => l.name === "Warranty") && !pk.labels.some((l) => l.name.startsWith("Peak")), "labels #347: the picker lists my mailbox's labels, never Peak/*");
+    // #349 — someone else's thread: their name AND their own Gmail account (ownership follows the key, not the name)
+    const other = await mk("other", { mailboxUser: "TEST347 Ben Other", gmailAccountKey: "personal:TEST347-u-ben" });
+    ok(!(await U.labelPicker(other, me, f1.client, NOW)).ok, "labels #347: the picker refuses someone else's thread");
+    const local = await mk("local", { gmailThreadId: undefined });
+    const lp = await U.labelPicker(local, me, f1.client, NOW);
+    ok(!lp.ok && lp.error === "no-gmail", "labels #347: a thread not in Gmail can't take Gmail labels");
+
+    /* apply / remove */
+    const filingBefore = JSON.stringify((await read(t1)).filing);
+    const a = await U.setThreadLabel(t1, "Label_1", true, me, f1.client, NOW);
+    const ta = await read(t1);
+    ok(a.ok && f1.st.modifies.length === 1 && f1.st.modifies[0].thread === "gt-apply" && f1.st.modifies[0].key === KEY && f1.st.modifies[0].change.addLabelIds?.[0] === "Label_1", "labels #347: apply calls Gmail threads.modify (addLabelIds) on the thread's Gmail thread");
+    ok(ids(ta) === "INBOX+Label_3+Label_1|Label_1|" && ta.userLabelOps?.Label_1?.on === true && ta.userLabelOps.Label_1.at === NOW && JSON.stringify(ta.filing) === filingBefore, `labels #347: the stored gmailLabelIds follow at once on every Gmail message (a note untouched), the card's operation is stamped per label, the filing untouched (${ids(ta)})`);
+    const rm = await U.setThreadLabel(t1, "Label_1", false, me, f1.client, NOW);
+    ok(rm.ok && f1.st.modifies[1].change.removeLabelIds?.[0] === "Label_1" && ids(await read(t1)) === "INBOX+Label_3||", "labels #347: ✕ removes it in Gmail (removeLabelIds) and in the stored labels");
+    const st = await U.setThreadLabel(t1, "STARRED", true, me, f1.client, NOW);
+    ok(st.ok && f1.st.modifies[2].change.addLabelIds?.[0] === "STARRED", "labels #347: Starred can be set from the card");
+    const pk3 = await U.setThreadLabel(t1, "Label_3", false, me, f1.client, NOW);
+    ok(!pk3.ok && pk3.error === "bad-name" && f1.st.modifies.length === 3, "labels #347: a Peak/* label is never removed (or added) from the card");
+    const miss = await U.setThreadLabel(t1, "Label_gone", true, me, f1.client, NOW);
+    ok(!miss.ok && miss.error === "label-missing" && f1.st.modifies.length === 3, "labels #347: an unknown label id says the label is missing (the list is refreshed)");
+
+    /* refusals and Gmail errors */
+    const ro = await U.setThreadLabel(other, "Label_1", true, me, f1.client, NOW);
+    ok(!ro.ok && ro.error === "not-found" && f1.st.modifies.length === 3 && ids(await read(other)) === "INBOX+Label_3||", "labels #347: someone else's thread is refused — no Gmail call, nothing stored");
+    const f2 = fake();
+    f2.st.enabled = false;
+    const off = await U.setThreadLabel(t1, "Label_1", true, me, f2.client, NOW);
+    f2.st.enabled = true;
+    f2.st.canModify = false;
+    const scope = await U.setThreadLabel(t1, "Label_1", true, me, f2.client, NOW);
+    ok(!off.ok && off.error === "no-gmail" && !scope.ok && scope.error === "no-scope" && /reconnect/i.test(scope.message), "labels #347: Gmail off → 'no Gmail'; a connection without gmail.modify → reconnect");
+    f2.st.canModify = true;
+    f2.st.modifyError = new Error("Gmail API /threads/x/modify → 429 rateLimitExceeded");
+    const q = await U.setThreadLabel(t1, "Label_1", true, me, f2.client, NOW);
+    f2.st.modifyError = new Error("Gmail API /threads/x/modify → 404 Not Found");
+    const nf = await U.setThreadLabel(t1, "Label_1", true, me, f2.client, NOW);
+    ok(!q.ok && q.error === "quota" && !nf.ok && nf.error === "thread-missing" && /no longer in Gmail/.test(nf.message) && !ids(await read(t1)).includes("Label_1"), "labels #347 review: Gmail's quota error and a 404 on the thread ('That email is no longer in Gmail') show inline; nothing is stored when Gmail refuses");
+    ok(U.gmailError(new Error("Gmail API /labels/Label_9 → 404 Not Found")) === "label-missing" && U.gmailError(new Error("Gmail API /threads/t1/modify → 404 Not Found")) === "thread-missing" && U.gmailError(new Error("Gmail API /threads/t1/modify → 400 Invalid label: Label_9")) === "label-missing" && U.gmailError(new Error("Gmail API /messages → 404")) === "failed", "labels #347 review: a 404 is 'label missing' only on a labels endpoint; on a thread it is 'no longer in Gmail'");
+
+    /* review: the thread must be bridged through MY Gmail connection */
+    // #349 — stamped mine (the owner id wins) but bridged through Ben's account
+    const foreignKey = await mk("foreign-key", { mailboxOwnerId: "TEST347-u-ann", gmailAccountKey: "personal:TEST347-u-ben" });
+    const unstamped = await mk("unstamped", { gmailAccountKey: undefined });
+    const fk = await U.setThreadLabel(foreignKey, "Label_1", true, me, f1.client, NOW);
+    const us = await U.labelPicker(unstamped, me, f1.client, NOW);
+    ok(!fk.ok && fk.error === "no-gmail" && !us.ok && us.error === "no-gmail" && f1.st.modifies.length === 3, "labels #347 review: a thread in my mailbox bridged through another Gmail account (or unstamped) is refused — the token and label cache are personalKey(me.id)'s");
+
+    /* create */
+    const f3 = fake();
+    const c1 = await U.createThreadLabel(t1, "Warranty claims", me, f3.client, NOW);
+    ok(c1.ok && c1.created && f3.st.creates[0] === "Warranty claims" && f3.st.modifies[0]?.change.addLabelIds?.[0] === c1.label.id && ids(await read(t1)).includes(c1.label.id) && (await listCachedLabels(KEY)).some((r) => r.name === "Warranty claims"), "labels #347: Create makes the label in Gmail (users.labels.create), applies it and adds it to the cache");
+    const c2 = await U.createThreadLabel(t1, "clients", me, f3.client, NOW);
+    ok(c2.ok && !c2.created && f3.st.creates.length === 1 && c2.label.id === "Label_1", "labels #347: a name that already exists (any case) is applied, not created twice");
+    const c3 = await U.createThreadLabel(t1, "Peak/Customers/Mine", me, f3.client, NOW);
+    const c4 = await U.createThreadLabel(t1, "/Bad", me, f3.client, NOW);
+    ok(!c3.ok && c3.error === "bad-name" && !c4.ok && f3.st.creates.length === 1, "labels #347: Create refuses a Peak/* or badly formed name before calling Gmail");
+    ok(!(await U.createThreadLabel(other, "Fine name", me, f3.client, NOW)).ok && f3.st.creates.length === 1, "labels #347: Create refuses someone else's thread");
+
+    /* the history import: my label changed in Gmail flows into gmailLabelIds; the card's own echo is skipped */
+    const t2 = await mk("import");
+    await interpretLabelEvents(KEY, [{ messageId: "g1-import", threadId: "gt-import", added: ["Label_2", "UNREAD"], removed: [] }]);
+    ok(ids(await read(t2)) === "INBOX+Label_3+Label_2||", `labels #347: a label added in Gmail is recorded from the history import (UNREAD is not) (${ids(await read(t2))})`);
+    await interpretLabelEvents(KEY, [{ messageId: "g1-import", threadId: "gt-import", added: [], removed: ["Label_2"] }]);
+    ok(ids(await read(t2)) === "INBOX+Label_3||", "labels #347: …and one removed in Gmail is dropped");
+    // review 3: an event carrying a Peak/* label AND one of mine keeps mine
+    await interpretLabelEvents(KEY, [{ messageId: "g1-import", threadId: "gt-import", added: ["Label_3", "Label_2"], removed: [] }]);
+    ok(ids(await read(t2)) === "INBOX+Label_3+Label_2||", `labels #347 review: a mixed event (Peak/* + my label) still records my label (${ids(await read(t2))})`);
+    // history order: an add then a remove in one sync nets to removed
+    await interpretLabelEvents(KEY, [
+      { messageId: "g1-import", threadId: "gt-import", added: ["Label_1"], removed: [] },
+      { messageId: "g1-import", threadId: "gt-import", added: [], removed: ["Label_1", "Label_2"] },
+    ]);
+    ok(ids(await read(t2)) === "INBOX+Label_3||", "labels #347 review: within one sync, the last event for a label wins (added then removed → removed)");
+
+    // review 4: per-label echo guard — card add at t0, card remove at t1, then
+    // Gmail's stale add echo arrives: it must not re-add the label
+    const fe = fake();
+    await U.setThreadLabel(t2, "Label_1", true, me, fe.client, Date.now());
+    await U.setThreadLabel(t2, "Label_1", false, me, fe.client, Date.now() + 1);
+    ok(ids(await read(t2)) === "INBOX+Label_3||" && (await read(t2)).userLabelOps?.Label_1?.on === false, "labels #347 review: (setup) the card added then removed Label_1");
+    await interpretLabelEvents(KEY, [{ messageId: "g1-import", threadId: "gt-import", added: ["Label_1"], removed: [] }]);
+    ok(!ids(await read(t2)).includes("Label_1"), "labels #347 review: a stale add echo after the card's remove never re-adds the label");
+    await interpretLabelEvents(KEY, [{ messageId: "g1-import", threadId: "gt-import", added: ["Label_2"], removed: [] }]);
+    ok(ids(await read(t2)).includes("Label_2"), "labels #347 review: the guard is per label — a Gmail change to another label in the window still lands");
+    const I = await import("@/lib/gmail/label-interpret");
+    const msgs = [{ id: "a", gmailId: "g1", gmailLabelIds: ["X"] }, { id: "b" }] as unknown as CommMessage[];
+    const per = new Map([["g1", new Map([["Y", true], ["X", false]])]]);
+    const applied = I.applyUserLabelChanges(msgs, per, { X: { on: true, at: 1000 } }, 1000 + 60_000);
+    const later = I.applyUserLabelChanges(msgs, per, { X: { on: true, at: 1000 } }, 1000 + 10 * 60_000);
+    ok(JSON.stringify(applied?.[0].gmailLabelIds) === '["X","Y"]' && JSON.stringify(later?.[0].gmailLabelIds) === '["Y"]' && I.applyUserLabelChanges(msgs, new Map(), undefined, 0) === null, `labels #347 review: applyUserLabelChanges holds a label the card changed in the window, releases it after (${JSON.stringify(applied?.[0].gmailLabelIds)} / ${JSON.stringify(later?.[0].gmailLabelIds)})`);
+    ok(U.withLabel(msgs, "Z", true)?.[0].gmailLabelIds?.join() === "X,Z" && U.withLabel(msgs, "X", true) === null && (U.withLabel(msgs, "Z", true)?.[1] as { gmailLabelIds?: string[] }).gmailLabelIds === undefined, "labels #347 review: withLabel touches Gmail messages only, null when nothing changes");
+  } finally {
+    await dropFixtures(347);
+    await db.delete(gmailLabels).where(eq(gmailLabels.mailboxKey, KEY));
+  }
+
+  /* pins: actions, card */
+  const act = src("src/app/(app)/inbox/actions.ts");
+  for (const n of ["gmailLabelPickerAction", "setGmailLabelAction", "createGmailLabelAction"])
+    ok(new RegExp(`export async function ${n}\\(threadId: string[^)]*\\) \\{\\s*const user = await requireUser\\(\\);\\s*if \\(!\\(await ownThread\\(threadId, user\\)\\)\\)`).test(act), `labels #347: ${n} is owner-checked (#341, #349: by identity) before Gmail is touched`);
+  const lc = src("src/app/(app)/inbox/labels-card.tsx");
+  ok(lc.includes("setGmailLabelAction(vm.id, g.id, false)") && lc.includes("setGmailLabelAction(vm.id, l.id, true)") && lc.includes("createGmailLabelAction(vm.id, name)") && lc.includes("gmailLabelPickerAction(threadId)"), "labels #347: the card removes (✕), applies and creates through the owner-checked actions; the picker loads when it opens");
+  ok(lc.includes("Create “{q.trim()}”") && lc.includes("validateLabelName(q)") && lc.includes('placeholder="Search or create a label…"') && lc.includes("data-peak-label") && lc.includes('role="alert"'), "labels #347: a searchable picker with Create '<typed>' at the bottom; Peak/* chips read-only; errors inline");
+  ok(lc.indexOf("data-gmail-label-add") < lc.indexOf("data-colour-row"), "labels #347: Gmail labels lead; Colour is a small row under them");
+  ok(!valueImports(lc).some((p) => /^@\/(db\b|lib\/stores\/|lib\/inbox-org\/)|^@\/lib\/gmail\/(?!user-label-rules)/.test(p)), "labels #347: the card imports only the pure label rules from lib/gmail (no store, db or Gmail client)");
+  const ul = src("src/lib/gmail/user-labels.ts");
+  ok(/casDocKey\("comms", threadId, "messages", t\.messages, next\)/.test(ul) && /casDocKey\("comms", threadId, "userLabelOps", prev, ops\)/.test(ul) && !/patchDoc/.test(ul), "labels #347 review: the label write is a compare-and-set on the messages key (re-read on conflict) — never a whole-doc rewrite that could drop a message appended meanwhile");
+  ok(/const t = await ownThread\(threadId, me\);[\s\S]*?const key = personalKey\(me\.id\);\s*if \(t\.mailbox !== "personal" \|\| !t\.gmailThreadId \|\| t\.gmailAccountKey !== key\) return failWith\("no-gmail"\);/.test(ul), "labels #347 review: the Gmail key is personalKey(me.id), and the thread must be bridged through it");
+  ok(/async function writeCache[\s\S]*?try \{\s*await replaceLabels\(key, labels\);\s*\} catch/.test(ul) && /if \(created\) \{\s*try \{/.test(ul), "labels #347 review: a cache write failing after Gmail created the label is logged, and Create still applies the label and reports success");
+  const conn = src("src/lib/gmail/connections.ts");
+  ok(/export async function replaceLabels[\s\S]*?await withTransaction\(async \(\) => \{\s*const db = await getDb\(\);\s*await db\.delete\(gmailLabels\)/.test(conn), "labels #347 review: replaceLabels deletes and inserts in one transaction");
+  const li = src("src/lib/gmail/label-interpret.ts");
+  ok(/for \(const \[gThread, perMessage\] of userLabelChanges\(events, isCard\)\)/.test(li) && /casDocKey\("comms", t\.id, "messages", t\.messages, next\)/.test(li) && /const evAdded = ev\.added\.filter\(notCard\);/.test(li), "labels #347 review: my labels are recorded from every event (Peak/* or not) by an ordered CAS pass; the Peak/* branch leaves them to it");
+  const ld = src("src/app/(app)/inbox/organize/load.ts");
+  ok(/export async function organizeEntryCounts[\s\S]*?listDocsWhere<CommThread>\("comms", ownMailboxCond\(viewer\)\)/.test(ld), "brief #347 review: the live Organize counts read only my mailbox (#349: ownMailboxCond in SQL, by identity), never the whole collection");
+  const rules = src("src/lib/gmail/user-label-rules.ts");
+  ok(valueImports(rules).length === 0, "labels #347: user-label-rules.ts has no imports (client-safe)");
+  const cfg = src("src/lib/gmail/config.ts");
+  ok(/export const GMAIL_SCOPES = \[[\s\S]*?"https:\/\/www\.googleapis\.com\/auth\/gmail\.modify"/.test(cfg), "labels #347: the Gmail connect already asks for gmail.modify (labels need nothing new)");
 }
 
 export async function inboxOrgPureChecks(ok: Ok): Promise<void> {
@@ -2524,6 +3337,10 @@ if (process.argv[1] && /test-inbox-org\.ts$/.test(process.argv[1])) {
     await inboxOrgApplyChecks(ok);
     await inboxOrgUiChecks(ok);
     await inboxOrgCleanupChecks(ok);
+    await inboxOrgEntryChecks(ok);
+    await inboxOrgPlaceholderChecks(ok);
+    await inboxOrgArchiveLabelChecks(ok);
+    await inboxGmailLabelChecks(ok);
     // later tasks append: await inboxOrgXChecks(ok);
     console.log(fail ? `\n${fail} FAILED` : "\nall inbox-org checks passed");
     process.exit(fail ? 1 : 0);

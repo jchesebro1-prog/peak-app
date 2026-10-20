@@ -1,9 +1,11 @@
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getSettings } from "@/lib/settings";
 import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
+import { rewardsVisibleFor } from "@/lib/parties/addressee";
 import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
 import { allUsers } from "@/lib/users";
 import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
+import { documentAddressee } from "@/lib/parties/addressee-server";
 import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
 import { shareLinkView, shareSecret } from "@/lib/quote-share/links";
 import { onlineEstimateState } from "@/lib/quote-share/view";
@@ -31,7 +33,8 @@ export async function loadCoverDocumentProps(
     allUsers(),
     getEstimateOutputDefaults(),
   ]);
-  const doc = { ...quoteDocumentDataFor(q, cust, settings), rewardsLine: purchasePerksDocLine(perks) };
+  const addressee = await documentAddressee(q);
+  const doc = { ...quoteDocumentDataFor(q, cust, settings, addressee), rewardsLine: rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : "" };
   const link = shareLinkView(q, shareSecret(), now);
   return coverDocumentPropsFor({
     doc,

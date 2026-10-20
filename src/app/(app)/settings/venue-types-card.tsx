@@ -10,7 +10,7 @@ import {
   type BuiltInVenueKind,
   type VenueType,
 } from "@/lib/venue-types";
-import { BUILT_IN_SCHEMATIC_LABEL, defaultBackground, templatesFor } from "@/lib/design/venue-templates";
+import { BUILT_IN_SCHEMATIC_LABEL, defaultBackground, pickerTemplates, templatesFor } from "@/lib/design/venue-templates";
 import { saveVenueTypesAction } from "./actions";
 
 /**
@@ -180,7 +180,8 @@ export function VenueTypesCard({ types }: { types: VenueType[] }) {
               <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#5b616e" }}>
                 Background
                 {(() => {
-                  const choices = templatesFor(r.worksLike as BuiltInVenueKind);
+                  // Oct 15 #46: a retired drawing is listed only while it is this type's Background.
+                  const choices = pickerTemplates(templatesFor(r.worksLike as BuiltInVenueKind), r.background);
                   return (
                     <select
                       // #255 fix: a type always has its own drawing — a row saved without one shows (and saves) its kind's default.

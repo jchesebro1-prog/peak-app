@@ -12,7 +12,7 @@ Bugs are fixed and pushed as they land; features get a plan here first.
 | 5 | Preload wire types into the Grid and Catalog — "a major thing I am missing" | Feature | ✅ Shipped `ccd4ed28`+`5e237f04` — admin **Load starter cables** (20 cables, $0 drafts, OD from datasheets) + **Sync per-foot cables to the Grid** in Grid Settings → Wire types; Needs price chip. Jeff: confirm riser symbols SP/A/V/F/LV/PW/M, then price the cables |
 | 6 | Product Library shows only a small slice of the catalog | Gap | ✅ Shipped `bcf3e8c8`+`614465e3` — "From the catalog" server search (every word, honours the node, 40 results); placing adds it to the library |
 | 7 | Client package "rough drawings" have no devices and no title block | Bug | ✅ Shipped `d90cbf89`+`83cc466c` — ZIP ships the title-blocked drawing set (live design); rough drawings + raw plans only as a fallback with a gap |
-| 8 | Combined datasheet PDF with a cover: Peak logo, job name, contact, venue, location, customer logo | Feature | Building |
+| 8 | Combined datasheet PDF with a cover: Peak logo, job name, contact, venue, location, customer logo | Feature | ✅ Shipped `371444b9` (D840–D842) — built on #329's datasheet book: job cover with the customer logo, Download all datasheets on the Grid, estimate and client link page, logo upload on the company record. The earlier standalone attempt (`feat/datasheet-package`, never merged) is superseded |
 | 9 | The specification and all documents carry the Peak standard header at the top unless otherwise selected | Feature | Building |
 
 ## #2 Type editing — findings
@@ -34,7 +34,9 @@ Bugs are fixed and pushed as they land; features get a plan here first.
 - **Jeff (Oct 12):** any device can hold a group ("Make group": a plain rack part, a rack assembly, a booth, a panel). On the plan, members are hidden inside the holder (a count badge like "Rack · 6"); the Spreadsheet lists them indented under the holder, each keeping its own designator.
 - **Jeff (Oct 12, more):** one level only; members have no plan spot (they follow the holder); three ways in — Place inside, Move existing in, drag onto the holder; Take out puts them beside it; deleting a holder asks every time (delete them too / keep them beside it); pricing and designators unchanged.
 - **Built (Oct 12, D843–D845):** `GridPlacement.groupId` = the holder's placement id (no groups list, no migration); pure rules in `lib/design/grid-groups.ts` (`groupRefusal`, `settleGroups` — the one repair + mirror run by every placement write, `takeOutPositions`, `deletePlan`, `withMembers`, `dropHolderAt`, `nestRows`); store `setPlacementsGroup` (in/out, undo inverse), `addPlacementInside`, `removePlacements(…, { members })` with a `regroup` undo half; actions `setPlacementsGroupAction`, `placeInsideAction`. Editor: members hidden on the plan, holder label `RK-1 · 6`, Place inside banner, Move into / Take out in the Property Editor, drag-onto ring, delete question over the plan, `group` undo command. Spreadsheet nests members under the holder; schedule (`/schedule`, E-60x) lists them indented under the holder's own row; Browser nests them; drawing-set plan sheets skip them. Spec `docs/superpowers/specs/2026-10-12-grid-equipment-groups-design.md`; harness "Grid notes #4:".
-- Still open: does a group feed a rack assembly's RU elevation/submittal? (later)
+- ~~Still open: does a group feed a rack assembly's RU elevation/submittal? (later)~~ **Answered 2026-10-15 (Jeff):
+  a Grid rack group links to its rack's RU elevation; the Assembly Builder rack is the source. Built in #354 (D1159):
+  a rack assembly placement shows the rack's devices read-only with Open rack →; Link to rack… / Unlink.**
 - Original questions: is the rack a placed `asm:` rack (priced as the assembly) or just a plain rack part + a group? Do grouped devices sit on the plan at their own spot, or collapse into the rack marker? Does a group feed the rack's RU elevation / submittal?
 
 ## #5 Wire types — findings

@@ -1021,7 +1021,7 @@ export async function meetings323EverywherePins(ok: Ok): Promise<void> {
   const feed = src("src/lib/customer-feed.ts");
   const company = src("src/app/(app)/companies/[id]/page.tsx");
   const rows = src("src/lib/customer-feed-rows.ts");
-  ok(/viewerId\s*\? meetingsReadOr\(meetingRowsLinkedTo\("company", cust\.id, viewerId\)/.test(feed) && /loadCustomerFeed\(\{ id: cust\.id, name: cust\.name \}, me\.id\)/.test(company) &&
+  ok(/viewerId\s*\? meetingsReadOr\(meetingRowsLinkedTo\("company", cust\.id, viewerId\)/.test(feed) && /loadCustomerFeed\(\{ id: cust\.id, name: cust\.name \}, me\.id(?:, me)?\)/.test(company) /* #341/#349: the viewer rides along for thread visibility */ &&
      /`Met with \$\{names\.join\(", "\)\} — \$\{title\}`/.test(rows) && /row\(\s*"comm",\s*`meeting:\$\{m\.id\}`/.test(rows) &&
      !/summary/.test(rows.slice(rows.indexOf("export function meetingFeedRows"), rows.indexOf("export function visitFeedRows")).replace(/no summary text is copied/, "")),
     "#323 customer feed: one 'Met with … — <title>' comm row per linked, visible meeting; the viewer is passed; no summary copied");

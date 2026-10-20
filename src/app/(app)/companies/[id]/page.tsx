@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import { requireUser } from "@/lib/session";
-import { activeUsers } from "@/lib/users";
+import { activeUsers, allUsers } from "@/lib/users";
+import { canChangeVisit } from "@/lib/visit-edit-rights";
 import { can, deriveInitials, fallbackColor } from "@/lib/team";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { visitsForCustomer } from "@/lib/stores/site-visits";
@@ -11,6 +12,8 @@ import { MeetingsCard } from "@/components/meetings/meetings-card";
 import { WaitingOnCustomerCard } from "@/components/meetings/waiting-on-card";
 import { DocumentsCard } from "@/components/documents/documents-card";
 import { AssessmentsCard, FindingsCard } from "@/components/assessments/assessment-cards";
+import { CompanyRolesCard } from "@/components/parties/company-roles-card";
+import { QuotesReceivedCard } from "@/components/vendors/quotes-received-card";
 import { RecordingCountBadge } from "@/components/recordings/record-control-link";
 import { recordingCountByParent } from "../../recordings/data";
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
@@ -19,7 +22,7 @@ import { getAllProjects, riskFlags } from "@/lib/stores/projects";
 import { isDone } from "@/lib/pipelines";
 import { formatJobValue } from "@/lib/job-value";
 import { getAll as getAllSurveys, stageMeta as surveyStageMeta } from "@/lib/stores/surveys";
-import { byCustomer as commsByCustomer, snippet as commSnippet, statusMeta as commStatusMeta } from "@/lib/stores/comms";
+import { snippet as commSnippet, statusMeta as commStatusMeta, visibleByCustomer } from "@/lib/stores/comms";
 import {
   coordsOf,
   estimate,
@@ -81,6 +84,7 @@ import { addressStatesForVisits } from "@/lib/address-verify/targets";
 import type { AddressState } from "@/lib/address-verify/types";
 import { FLAG_TEXT } from "@/lib/drive-plan/plan";
 import AddressFlagBadge from "@/components/address-fix/address-flag";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 // Visit schedule/delete actions run their after() drive re-sync (geocode + OSRM + Google writes) inside this invocation — keep the 60s ceiling.
 export const maxDuration = 60;
@@ -136,18 +140,23 @@ export default async function CustomerDetailPage({
   const cust = await getCustomer(id);
   if (!cust) notFound();
 
-  const [quotes, projects, surveys, threads, offices, users, feedRows, settings, rewardsProgram, companyLogo] = await Promise.all([
+  const [quotes, projects, surveys, threads, offices, users, feedRows, settings, rewardsProgram, companyLogo, everyone] = await Promise.all([
     getAllQuotes(),
     getAllProjects(),
     getAllSurveys(),
-    commsByCustomer(id),
+    // #341 — threads on this company are linked (customerId), so every
+    // teammate sees them, read-only when not their own; one in Deleted (or
+    // another person's draft) is not listed (canSeeThread).
+    mailboxViewer(me).then((v) => visibleByCustomer(id, v)), // #349 — by identity
     officesFromSettings(),
     activeUsers(),
-    loadCustomerFeed({ id: cust.id, name: cust.name }, me.id),
+    loadCustomerFeed({ id: cust.id, name: cust.name }, me.id, me),
     getSettings(),
     getRewardsProgram(),
     // Grid notes #8 — the customer logo on the datasheet book's cover.
     getCompanyLogo(cust.id),
+    // Jeff 2026-10-15 #35 — the whole roster (any status) for the visit lead's unique-name check (#353 review M8: in parallel).
+    allUsers(),
   ]);
   // #282 — the Rewards card shows only while the program is on.
   const [rewards, rewardCredit] = rewardsProgram.enabled
@@ -262,6 +271,8 @@ export default async function CustomerDetailPage({
   // Spec 2026-10-09 site-visit scheduling — Edit + conflict badges. A stored
   // "scheduled" visit past its end already reads "done" (deriveVisitStage).
   const teamNames = users.map((u) => u.name);
+  // Jeff 2026-10-15 #35 — a scheduled visit's Edit / Delete are live only for its lead or an approver.
+  const visitRoster = everyone.map((u) => ({ id: u.id, name: u.name }));
   const conflictVisits = visits
     .filter((v) => v.stage === "scheduled" && v.startAt != null)
     .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0))
@@ -785,6 +796,9 @@ export default async function CustomerDetailPage({
             {/* #340 assessments engine — this company's assessments and findings (with the customer code) */}
             <AssessmentsCard customerId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
             <FindingsCard customerId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
+            {/* #348 — leads / estimates / projects this company is on (owner, GC, EC, architect, vendor…) */}
+            <CompanyRolesCard companyId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
+            <QuotesReceivedCard companyId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
 
             {/* ---- details (#23) — populated custom fields ---- */}
             {detailRows.length > 0 && (
@@ -919,6 +933,7 @@ export default async function CustomerDetailPage({
                                   attendees: v.attendees,
                                 }}
                                 team={teamNames}
+                                canEdit={canChangeVisit(v, me, visitRoster)}
                               />
                             ) : null}
                             {can("create", me.roles) && (
@@ -929,7 +944,7 @@ export default async function CustomerDetailPage({
                                 Start assessment
                               </Link>
                             )}
-                            <DeleteVisitButton id={v.id} />
+                            <DeleteVisitButton id={v.id} canDelete={canChangeVisit(v, me, visitRoster)} />
                           </span>
                         </div>
                         <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>

@@ -109,6 +109,7 @@ export const assistRuns = docTable("assist_runs"); // Assist layer (#334) — on
 export const assessments = docTable("assessments"); // Assessments engine (#340) — one venue assessment per row, id AS-####; migration 0040_assessments
 export const findings = docTable("findings"); // Assessments engine (#340) — one finding per row, id fd_<16 hex>; migration 0040_assessments
 export const venueProfiles = docTable("venue_profiles"); // Assessments engine (#340) — one rolling profile per venue, id = sites.id; migration 0040_assessments
+export const recordParties = docTable("record_parties"); // Estimate parties (#348) — one company in one role on a lead / quote / project, id pty_<16 hex> = sha1(recordType, recordId, companyId, role); migration 0041_record_parties
 
 export const DOC_TABLES = {
   quotes,
@@ -160,6 +161,7 @@ export const DOC_TABLES = {
   assessments,
   findings,
   venue_profiles: venueProfiles,
+  record_parties: recordParties,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;

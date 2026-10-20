@@ -271,6 +271,7 @@ function ConsultingList({ data, canDelete }: { data: ConsultingData; canDelete: 
         <NewEngagementModal
           customers={data.customers}
           disciplineMenu={data.disciplineMenu}
+          phaseMenu={data.phaseMenu}
           onClose={() => setCreating(false)}
         />
       )}

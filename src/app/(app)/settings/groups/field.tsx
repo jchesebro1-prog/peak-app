@@ -5,6 +5,8 @@ import { saveIntakeCatalogAction, saveVisitReasonsAction } from "../actions";
 import { VenueTypesCard } from "../venue-types-card";
 import { DriveDefaultsCard } from "../drive-defaults-card";
 import { SchedulingDefaultsCard } from "../scheduling-defaults-card";
+import { SurveyTagsCard } from "../survey-tags-card";
+import type { SurveyTag } from "@/lib/survey-tags";
 import type { SchedulingSettings } from "@/lib/visit-plan/settings";
 import type { VenueType } from "@/lib/venue-types";
 import { inputStyle, labelStyle, type Run } from "./shared";
@@ -21,6 +23,7 @@ export function FieldGroup({
   venueTypes,
   intakeCatalog,
   visitReasons,
+  surveyTags,
   run,
 }: {
   driveDefaults: { driveBufferMin: number };
@@ -28,6 +31,7 @@ export function FieldGroup({
   venueTypes: VenueType[];
   intakeCatalog: Record<string, string[]>;
   visitReasons: string[];
+  surveyTags: SurveyTag[];
   run: Run;
 }) {
   /* ---- site-intake type catalog (one type per line per category) ---- */
@@ -195,6 +199,11 @@ export function FieldGroup({
           }}
         />
       </section>
+
+      <SurveyTagsCard
+        key={surveyTags.map((t) => `${t.id}:${t.label}:${t.retired ? 1 : 0}`).join("|")}
+        tags={surveyTags}
+      />
     </>
   );
 }

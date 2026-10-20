@@ -2,7 +2,8 @@
  *  without alternates, which the harness compares against. Run ONCE, before
  *  quote-document.tsx is edited:
  *    npx tsx scripts/qdp2b-baseline.ts
- *  Pure render; opens no database. */
+ *  Pure render; opens no database.
+ *  Re-captured 2026-10-16 for the PDF title page / print order. */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { qdP2bNoAltCases, renderQuoteDocument293 } from "./qd293-cases";
 

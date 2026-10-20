@@ -52,6 +52,7 @@ export default function HomeStageSheet({
    *  server-side). Either way the sheet stays open with the reason visible
    *  instead of the move silently doing nothing. */
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const close = () => router.replace(closeHref, { scroll: false });
 
@@ -61,6 +62,12 @@ export default function HomeStageSheet({
       const res = await setQuoteStatusAction(quote.id, status);
       if (!res.ok) {
         setError(res.error);
+        return;
+      }
+      // #355 review M8: a reopen that put the won version back says so — the sheet stays open with the notice.
+      if (res.notice) {
+        setNotice(res.notice);
+        router.refresh();
         return;
       }
       router.replace(closeHref, { scroll: false });
@@ -208,6 +215,24 @@ export default function HomeStageSheet({
               }}
             >
               {error}
+            </div>
+          )}
+          {notice && (
+            <div
+              role="status"
+              data-testid="reopened-at-won-notice"
+              style={{
+                marginTop: 10,
+                fontSize: 12.5,
+                lineHeight: 1.45,
+                color: "#7a5a12",
+                background: "#fdf6e7",
+                border: "1px solid #f0e0b8",
+                borderRadius: 9,
+                padding: "9px 11px",
+              }}
+            >
+              {notice}
             </div>
           )}
         </div>

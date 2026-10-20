@@ -4,11 +4,11 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { setTaskStatus } from "@/lib/stores/tasks";
 import { getAssignment, setAssignmentDone } from "@/lib/stores/assignments";
-import { assign as assignThread, setStatus as setThreadStatus } from "@/lib/stores/comms";
+import { assign as assignThread, get as getThread, setStatus as setThreadStatus } from "@/lib/stores/comms";
+import { triageMayActOnThread } from "@/lib/triage/thread-access";
 import { getRecording } from "@/lib/stores/recordings";
 import { dismissActionItem } from "@/lib/krisp/write-back";
-import { activeUsers } from "@/lib/users";
-import { sameName } from "@/lib/quote-approval-rules";
+import { actorByName, mailboxViewer } from "@/lib/mailbox-viewer";
 import { parseTriageKey } from "@/lib/triage/keys";
 import { donePlan } from "@/lib/triage/actions-plan";
 import { slotAt, snapshotId } from "@/lib/triage/clock";
@@ -26,6 +26,7 @@ type Result = { ok: true; open?: string } | { ok: false; error: string };
 
 const GONE = "That item no longer exists.";
 const NOT_LISTED = "That item isn't on your list.";
+const NOT_YOURS = "That email is no longer yours or assigned to you.";
 
 /** Every action works only on a row of the signed-in user's own snapshot for today (morning or midday). */
 async function listed(userId: string, key: string, now: number) {
@@ -66,10 +67,14 @@ export async function triageDoneAction(key: string): Promise<Result> {
       if (!(await getAssignment(plan.id))) return { ok: false, error: GONE };
       await setAssignmentDone(plan.id, true, "app");
     } else if (plan.kind === "thread") {
+      // #341 — re-read at action time: still my own thread, or still assigned to me
+      const t = await getThread(plan.id);
+      if (!t) return { ok: false, error: GONE };
+      if (!triageMayActOnThread(t, await mailboxViewer(user))) return { ok: false, error: NOT_YOURS }; // #349 — by identity
       if (!(await setThreadStatus(plan.id, "closed"))) return { ok: false, error: GONE };
     }
     // Lead/quote/visit/renewal "Done for today" intentionally records a mark even for a deleted record (it is hidden anyway).
-    await setMark({ userId: user.id, key: k, kind: "done", at: cur.now, snapshotId: cur.snapshotId, until: null });
+    await setMark({ userId: user.id, key: k, kind: "done", at: cur.now, snapshotId: cur.snapshotId, until: null }, { row });
   } catch (error) {
     console.error("triageDoneAction failed", error);
     return { ok: false, error: "Couldn’t mark that done — please try again." };
@@ -87,7 +92,7 @@ export async function triageSnoozeAction(key: string): Promise<Result> {
   if (row === undefined) return { ok: false, error: "Couldn’t check your list — please try again." };
   if (!row) return { ok: false, error: NOT_LISTED };
   try {
-    await setMark({ userId: user.id, key: k, kind: "snooze", at: cur.now, snapshotId: cur.snapshotId, until: snoozeUntil(cur.day) });
+    await setMark({ userId: user.id, key: k, kind: "snooze", at: cur.now, snapshotId: cur.snapshotId, until: snoozeUntil(cur.day) }, { row });
   } catch (error) {
     console.error("triageSnoozeAction failed", error);
     return { ok: false, error: "Couldn’t snooze that — please try again." };
@@ -112,7 +117,8 @@ export async function triageDismissAction(key: string): Promise<Result> {
         const rec = await getRecording(meetingId);
         if (rec) await dismissActionItem(rec, itemKey);
       },
-      mark: async (key) => void (await setMark({ userId: user.id, key, kind: "dismiss", at: cur.now, snapshotId: null, until: null })),
+      // #37 — the row's own key passes the row, so a Not mine on an escalated (returned) row re-dismisses it
+      mark: async (key) => void (await setMark({ userId: user.id, key, kind: "dismiss", at: cur.now, snapshotId: null, until: null }, { row: key === row.key ? row : null })),
     });
   } catch (error) {
     console.error("triageDismissAction failed", error);
@@ -127,15 +133,20 @@ export async function triageReassignAction(key: string, assignee: string): Promi
   const k = String(key || "");
   const parsed = parseTriageKey(k);
   if (!parsed || parsed.source !== "email") return { ok: false, error: "Only an email can be reassigned." };
-  const target = (await activeUsers()).find((u) => sameName(u.name, String(assignee || "")));
+  // #349 — the pick becomes an identity: exactly one active teammate by that name
+  const target = await actorByName(String(assignee || ""));
   if (!target) return { ok: false, error: "Pick a teammate." };
   const cur = currentSlot(user.id);
   const row = await listed(user.id, k, cur.now);
   if (row === undefined) return { ok: false, error: "Couldn’t check your list — please try again." };
   if (!row) return { ok: false, error: NOT_LISTED };
+  // #341 — re-read at action time: still my own thread, or still assigned to me
+  const thread = await getThread(parsed.id).catch(() => null);
+  if (!thread) return { ok: false, error: GONE };
+  if (!triageMayActOnThread(thread, await mailboxViewer(user))) return { ok: false, error: NOT_YOURS };
   try {
-    await assignThread(parsed.id, target.name);
-    await setMark({ userId: user.id, key: k, kind: "done", at: cur.now, snapshotId: cur.snapshotId, until: null });
+    await assignThread(parsed.id, target);
+    await setMark({ userId: user.id, key: k, kind: "done", at: cur.now, snapshotId: cur.snapshotId, until: null }, { row });
   } catch (error) {
     console.error("triageReassignAction failed", error);
     return { ok: false, error: "Couldn’t reassign that — please try again." };

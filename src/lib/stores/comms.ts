@@ -2,6 +2,7 @@ import { outsideTransaction } from "@/db";
 import type { Court, Filing, NoiseFlag } from "@/lib/inbox-org/types";
 import type { PreDraft } from "@/lib/brief/types";
 import { inboxOrgDisabled } from "@/lib/inbox-org/kill-switch";
+import { canSeeThread, isAssignedTo, mailboxOwnership, ownMailboxCond, visibleTo, type MailboxViewer } from "./comms-visibility";
 import {
   getDoc,
   insertWithPrefixedId,
@@ -35,7 +36,10 @@ import {
    - Persistence is the "comms" doc collection via @/db/doc-store.
    - meName()/Team.CURRENT has no server ambient — every method that
      defaulted to the current user takes an optional `me` parameter,
-     falling back to DEFAULT_USER exactly like the prototype did.
+     falling back to DEFAULT_USER exactly like the prototype did — for
+     DISPLAY only (a label, an author). #349: ownership never falls back:
+     a personal-mailbox thread is created with an explicit `owner`
+     ({ id, name }) and every read takes a MailboxViewer (identity).
    - AppSettings.companyName()/Team.color() are other modules (banned
      imports here) — address helpers take an optional `domain` and
      mailbox helpers an optional `userColor`, defaulting to the
@@ -216,6 +220,15 @@ export type CommAttachment = {
   dataUrl?: string;
   pdfPath?: string;
   href?: string;
+  /** #348 slice 4 — an imported Gmail attachment, by reference (bytes stay in Gmail; lib/vendor-quotes/thread-attachment-server.ts reads them) */
+  gmailPartId?: string;
+  /** Batch 6 #64 — a composer upload by reference: private Blob under `mail-attachments/` (lib/mail-attachments.ts) */
+  blobPath?: string;
+  /** Batch 6 #64 — a Documents record (#218) of the email's company / project, by reference */
+  documentId?: string;
+  /** #356 review — a forwarded Gmail attachment: the SOURCE message it is read from (with gmailPartId), checked
+   *  against the forward's own mailbox owner in the bridge (mail-attachments-server readMailRefForThread). */
+  fwdFrom?: { threadId: string; messageId: string };
 };
 
 export type CommMessage = {
@@ -252,11 +265,16 @@ export type CommMessage = {
   /** #214 — set once that lazy Cc fetch has run (whether or not the
    *  message had a Cc), so it never runs twice. */
   ccFetched?: true;
+  /** #348 slice 4 — the attachment list was read from Gmail (import, or the reader's one-time lazy listing) */
+  attsListed?: true;
   /** Estimator Phase 3 final review (I1) — the Gmail bridge's last send of
    *  this message threw: "timeout" (Gmail didn't answer in time — it may
    *  have been accepted) or "error" (refused / couldn't be built). Cleared
    *  by nothing; a later successful send stamps gmailId. */
   sendFailure?: "timeout" | "error";
+  /** #356 review — why the bridge will never send this message, in words the rep can act on (e.g. attachments over
+   *  Gmail's limit). Stamped with noAutoRetry; shown on the message in the reader. */
+  sendError?: string;
   /** I1 — never handed to Gmail by a later send on the thread (the bridge
    *  skips it). Stamped on an estimate email (or its inline reply) that did
    *  not go out through Gmail, so a later reply can't silently push it —
@@ -293,10 +311,20 @@ export type CommDraft = {
 
 export type SyncState = "pending" | "syncing" | "synced" | "error";
 
+/** #341 — see CommThread.linkedBy. */
+export type LinkedBy = "user" | "filing";
+
 export type CommThread = {
   id: string; // 'C-####', sequence base 1032
   mailbox: MailboxId;
-  mailboxUser?: string | null; // set when mailbox === 'personal'
+  mailboxUser?: string | null; // set when mailbox === 'personal' — the owner's NAME, for display
+  /** #349 — the users.id that owns this personal-mailbox thread: the
+   *  identity every ownership check keys on (comms-visibility.ts
+   *  ownsMailbox). Stamped by every writer since #349; absent on older
+   *  threads, which resolve by `gmailAccountKey`, else by a unique
+   *  `mailboxUser` name, and are stamped lazily (stampMailboxOwner) or by
+   *  `npm run comms:stamp-owners`. */
+  mailboxOwnerId?: string | null;
   unread: boolean;
   archived?: boolean;
   /** Follow-up flag (Outlook flag). */
@@ -317,6 +345,9 @@ export type CommThread = {
   channel: Channel;
   status: ThreadStatus;
   assignedTo: string;
+  /** #349 — the users.id behind `assignedTo` (which stays the display
+   *  name). Absent on older assignments, which match by a unique name. */
+  assignedToId?: string | null;
   link: CommLink | null;
   draft?: CommDraft | null; // present while status === 'draft'
   messages: CommMessage[];
@@ -347,12 +378,27 @@ export type CommThread = {
    *  capped at 25). Absent on older threads: they read as just
    *  resolvedContactId (linkedContactIdsOf). */
   linkedContactIds?: string[];
+  /** #341 — who linked the thread's customer DELIBERATELY: "user" (the link
+   *  sidebar / panel, + New quote, a Peak/Customers Gmail label, a thread
+   *  created in the app with a picked customer or record) or "filing" (#335
+   *  Inbox organization filing it for the owner). Absent = the customer, if
+   *  any, came from the automatic sender match and the thread stays private
+   *  (comms-visibility.ts hasDeliberateLink). Undo of a filing restores the
+   *  previous value. */
+  linkedBy?: LinkedBy | null;
   /** "Not them" on a suggestion — stop offering it for this thread. */
   suggestionDismissed?: boolean;
   /** #96 §3 — last time the Peak → Gmail label writer applied a real change
    *  (add/remove) for this thread. Echo-suppression stamp; unset until the
    *  first successful sync. */
   peakLabelsAppliedAt?: number;
+  /** #347 — the reader's Labels card's last operation on each of the
+   *  person's own Gmail labels on this thread (label id → added / removed,
+   *  when). The history import ignores Gmail's events for a label inside the
+   *  label echo window after the card changed it — the card's state wins, so
+   *  a stale echo (an add reported after a later remove) never re-adds it.
+   *  Entries older than the window are pruned on the next write. */
+  userLabelOps?: Record<string, { on: boolean; at: number }>;
   /** #124 — the linked venue: a CustomerLocation.id (directory id) of the
    *  linked customer. Cleared whenever customerId changes to a different
    *  customer (linkThread / applyResweepPatch / Peak label removal). */
@@ -459,16 +505,62 @@ export function forwardAddress(domain = DEFAULT_DOMAIN): string {
   return "log@" + domain;
 }
 
-// is a thread part of the mailbox `boxId` as seen by `me`?
-function inBox(t: CommThread, boxId: string, me: string): boolean {
-  return boxId === "personal" && t.mailbox === "personal" && t.mailboxUser === me;
+// is a thread part of the mailbox `boxId` as seen by `me`? (#349 — by identity)
+function inBox(t: CommThread, boxId: string, me: MailboxViewer): boolean {
+  return boxId === "personal" && visibleTo(t, me);
 }
 
-// Every thread the current user can see. Legacy shared-mailbox threads stay
-// stored for history but are no longer part of the active Inbox. Exported so
-// the Unmatched view (#96 §5) applies the same rule as the other views.
-export function visibleTo(t: CommThread, me: string): boolean {
-  return t.mailbox === "personal" && t.mailboxUser === me;
+// The threads in the current user's own mailbox. Legacy shared-mailbox
+// threads stay stored for history but are no longer part of the active Inbox.
+// Exported so the Unmatched view (#96 §5) applies the same rule as the other
+// views. #341: `visibleTo` and the cross-user rule (`canSeeThread` — own,
+// assigned or linked; `isOwnThread` for every write) live in the pure
+// comms-visibility.ts and are re-exported here.
+export {
+  visibleTo,
+  ownsMailbox,
+  mailboxOwnership,
+  resolveMailboxOwnerId,
+  viewerFrom,
+  ownMailboxCond,
+  assignedToCond,
+  canOpenThread,
+  canSeeThread,
+  canSeeThreadCond,
+  isAssignedTo,
+  isOwnThread,
+  isSharedThread,
+  hasDeliberateLink,
+  isThreadLinked,
+  readOnlyBanner,
+} from "./comms-visibility";
+export type { MailboxViewer, RosterEntry } from "./comms-visibility";
+
+/** #349 — who a new personal-mailbox thread belongs to (or is assigned to):
+ *  a user's id (the identity) and name (the display). */
+export type ThreadActor = { id: string; name: string };
+
+/** A usable actor — a non-blank id and name — else null. */
+export function threadActor(a: { id?: unknown; name?: unknown } | null | undefined): ThreadActor | null {
+  const id = typeof a?.id === "string" ? a.id.trim() : "";
+  const name = typeof a?.name === "string" ? a.name.trim() : "";
+  return id && name ? { id, name } : null;
+}
+
+/** #349 — the lazy backfill: stamp `mailboxOwnerId` on a thread `me` owns
+ *  by its Gmail key or a unique legacy name, so its ownership no longer
+ *  depends on the name. One compare-and-set key write (lands only while the
+ *  key is still absent; never a whole-doc rewrite). Called from the write
+ *  guards (ownThread, Organize's myThread) — never on a page render or a
+ *  read-only loader. Best-effort: a failure leaves the lazy fallback. */
+export async function stampMailboxOwner(t: CommThread, me: MailboxViewer): Promise<void> {
+  const how = mailboxOwnership(t, me);
+  if (how !== "key" && how !== "name") return;
+  try {
+    if (await casDocKey("comms", t.id, "mailboxOwnerId", undefined, me.id)) t.mailboxOwnerId = me.id;
+  } catch (err) {
+    console.error("[comms] owner stamp failed", t.id, err);
+  }
 }
 
 export type MailboxInfo = {
@@ -710,6 +802,13 @@ export async function byCustomer(customerId: string): Promise<CommThread[]> {
   return (await getAll()).filter((t) => t.customerId === customerId);
 }
 
+/** #341 — a company's threads as `me` may see them (canSeeThread): every
+ *  live, non-draft thread linked to it (from anyone's mailbox), plus my own
+ *  drafts; nothing in Deleted. The company page's Communications list. */
+export async function visibleByCustomer(customerId: string, me: MailboxViewer): Promise<CommThread[]> {
+  return (await byCustomer(customerId)).filter((t) => canSeeThread(t, me));
+}
+
 /** Client-sync bookkeeping filter (server writes land synced, so normally []). */
 export async function pending(): Promise<CommThread[]> {
   const list = await listDocs<CommThread>("comms");
@@ -720,11 +819,12 @@ export async function pending(): Promise<CommThread[]> {
 
 /* ---- folder queries -------------------------------------------------------- */
 
+/** #341/#349 — no viewer: owns nothing, is assigned nothing. */
+const NO_VIEWER: MailboxViewer = { id: "", name: "", nameUnique: false };
+
 /** "To me": assigned to the user, or in the user's own personal mailbox. */
-function toMe(t: CommThread, user: string): boolean {
-  return (
-    t.assignedTo === user || (t.mailbox === "personal" && t.mailboxUser === user)
-  );
+function toMe(t: CommThread, user: MailboxViewer): boolean {
+  return isAssignedTo(t, user) || visibleTo(t, user);
 }
 
 function hasAttachment(t: CommThread): boolean {
@@ -744,7 +844,7 @@ export function hasLabel(t: CommThread, labelId: string): boolean {
 }
 
 /** Predicate for a command-bar filter chip (new Outlook parity). */
-function filterPred(filter: FilterKey, user: string): (t: CommThread) => boolean {
+function filterPred(filter: FilterKey, user: MailboxViewer): (t: CommThread) => boolean {
   switch (filter) {
     case "unread":
       return (t) => t.unread;
@@ -789,7 +889,7 @@ function pinnedFirst(list: CommThread[]): CommThread[] {
 export async function threadsIn(
   boxId: MailboxId | SmartView,
   folder?: FolderId | OrgFolder | null,
-  me?: string,
+  me?: MailboxViewer | null,
   opts: {
     query?: string;
     filter?: FilterKey | null;
@@ -800,7 +900,9 @@ export async function threadsIn(
     labelId?: string | null;
   } = {}
 ): Promise<CommThread[]> {
-  const user = me || DEFAULT_USER;
+  // #341 — no viewer, no mailbox: never someone else's by default
+  if (!me?.id) return [];
+  const user = me;
   const all = await listDocs<CommThread>("comms");
   let base: CommThread[];
   if (boxId === "needs")
@@ -895,7 +997,7 @@ export type CommSearchScope =
   | { kind: "all" }
   | { kind: "box"; box: MailboxId; folder?: FolderId | null };
 
-function inScopeFor(t: CommThread, scope: CommSearchScope, user: string): boolean {
+function inScopeFor(t: CommThread, scope: CommSearchScope, user: MailboxViewer): boolean {
   if (t.deleted) return false;
   if (scope.kind === "box") {
     if (!inBox(t, scope.box, user)) return false;
@@ -917,10 +1019,12 @@ function inScopeFor(t: CommThread, scope: CommSearchScope, user: string): boolea
 export async function searchThreads(
   query: string,
   scope: CommSearchScope,
-  me?: string,
+  me?: MailboxViewer | null,
   labelId?: string | null
 ): Promise<CommThread[]> {
-  const user = me || DEFAULT_USER;
+  // #341 — no viewer, no mailbox: never someone else's by default
+  if (!me?.id) return [];
+  const user = me;
   const q = (query || "").trim().toLowerCase();
   if (q.length < 2 && !labelId) return [];
   if (!q.length && labelId) {
@@ -932,7 +1036,10 @@ export async function searchThreads(
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   }
   const CANDIDATES = 200;
-  const candidates = await searchDocs<CommThread>("comms", q, CANDIDATES);
+  // #341 — every scope is my own mailbox: cut to it in SQL, before the
+  // 200-row cap, so other mailboxes' matches can't crowd mine out (#349 —
+  // by identity: ownMailboxCond is ownsMailbox in SQL)
+  const candidates = await searchDocs<CommThread>("comms", q, CANDIDATES, { where: ownMailboxCond(user) });
   const hit = (t: CommThread): boolean => {
     const fields = [t.customer, t.subject, t.contactName, t.contactEmail];
     if (fields.some((s) => (s || "").toLowerCase().includes(q))) return true;
@@ -964,9 +1071,9 @@ export type FolderCounts = {
 
 export async function folderCounts(
   boxId: MailboxId,
-  me?: string
+  me?: MailboxViewer | null
 ): Promise<FolderCounts> {
-  const user = me || DEFAULT_USER;
+  const user: MailboxViewer = me ?? NO_VIEWER; // #341 — none: nobody's mailbox
   const inBoxAll = (await listDocs<CommThread>("comms")).filter((t) =>
     inBox(t, boxId, user)
   );
@@ -992,8 +1099,8 @@ export async function folderCounts(
 }
 
 /** Flagged threads visible to the user (Flagged smart view badge). */
-export async function flaggedCount(me?: string): Promise<number> {
-  const user = me || DEFAULT_USER;
+export async function flaggedCount(me?: MailboxViewer | null): Promise<number> {
+  const user: MailboxViewer = me ?? NO_VIEWER;
   const list = await listDocs<CommThread>("comms");
   return list.filter(
     (t) => visibleTo(t, user) && !!t.flagged && !t.deleted
@@ -1002,8 +1109,8 @@ export async function flaggedCount(me?: string): Promise<number> {
 
 /** Unread count from an already-loaded thread list — lets callers that have
  *  the comms array in hand (e.g. navData) avoid a second full-table scan. */
-export function unreadCountFrom(list: CommThread[], me?: string): number {
-  const user = me || DEFAULT_USER;
+export function unreadCountFrom(list: CommThread[], me?: MailboxViewer | null): number {
+  const user: MailboxViewer = me ?? NO_VIEWER;
   return list.filter(
     (t) =>
       t.unread &&
@@ -1014,12 +1121,12 @@ export function unreadCountFrom(list: CommThread[], me?: string): number {
   ).length;
 }
 
-export async function unreadCount(me?: string): Promise<number> {
+export async function unreadCount(me?: MailboxViewer | null): Promise<number> {
   return unreadCountFrom(await listDocs<CommThread>("comms"), me);
 }
 
-export async function needsReplyCount(me?: string): Promise<number> {
-  const user = me || DEFAULT_USER;
+export async function needsReplyCount(me?: MailboxViewer | null): Promise<number> {
+  const user: MailboxViewer = me ?? NO_VIEWER;
   const list = await listDocs<CommThread>("comms");
   return list.filter(
     (t) =>
@@ -1031,8 +1138,8 @@ export async function needsReplyCount(me?: string): Promise<number> {
   ).length;
 }
 
-export async function callsCount(me?: string): Promise<number> {
-  const user = me || DEFAULT_USER;
+export async function callsCount(me?: MailboxViewer | null): Promise<number> {
+  const user: MailboxViewer = me ?? NO_VIEWER;
   const list = await listDocs<CommThread>("comms");
   return list.filter(
     (t) =>
@@ -1054,8 +1161,8 @@ export type CommCounts = Record<string, number> & {
   mineOpen: number;
 };
 
-export async function counts(opts: { me?: string } = {}): Promise<CommCounts> {
-  const me = opts.me || DEFAULT_USER;
+export async function counts(opts: { me?: MailboxViewer | null } = {}): Promise<CommCounts> {
+  const me = opts.me ?? null; // #349 — no DEFAULT_USER: no viewer, nothing is "mine"
   const all = await listDocs<CommThread>("comms");
   const c: CommCounts = {
     waiting_us: 0,
@@ -1070,7 +1177,7 @@ export async function counts(opts: { me?: string } = {}): Promise<CommCounts> {
   all.forEach((t) => {
     c[t.status] = (c[t.status] || 0) + 1;
     if (!t.assignedTo) c.unassigned++;
-    if (me && t.assignedTo === me) {
+    if (me && isAssignedTo(t, me)) {
       if (t.status === "waiting_us") c.mineWaiting++;
       if (t.status !== "closed") c.mineOpen++;
     }
@@ -1237,7 +1344,10 @@ export async function restore(id: string): Promise<CommThread | null> {
 export type CreateCommInput = {
   id?: string;
   mailbox?: MailboxId;
-  mailboxUser?: string | null;
+  /** #349 — whose personal mailbox the thread lands in (id = identity, name
+   *  = `mailboxUser` display). Required for a personal-mailbox thread: a
+   *  blank or missing owner is refused — never DEFAULT_USER. */
+  owner?: ThreadActor | null;
   unread?: boolean;
   customerId?: string | null;
   customer?: string;
@@ -1247,14 +1357,17 @@ export type CreateCommInput = {
   subject?: string;
   channel?: string;
   status?: ThreadStatus;
-  assignedTo?: string;
+  /** Who it is assigned to (default: the owner). `null` = unassigned. */
+  assignee?: ThreadActor | null;
   link?: CommLink | null;
   direction?: Direction;
   author?: string;
   body?: string;
-  /** Server stand-in for Team.CURRENT (defaults to DEFAULT_USER). */
-  me?: string;
 };
+
+/** #349 — the error a thread creator throws for a personal-mailbox thread
+ *  with no usable owner (blank / missing id or name). */
+export const NO_OWNER_ERROR = "A personal-mailbox thread needs its owner (a user id and name).";
 
 /** Create a new thread from a first message (low-level). */
 export async function create(
@@ -1263,9 +1376,14 @@ export async function create(
   const t = now();
   const dir: Direction = partial.direction === "in" ? "in" : "out";
   const channel = asChannel(partial.channel, "email");
-  const me = partial.me || DEFAULT_USER;
+  const mailbox: MailboxId = partial.mailbox || "personal";
+  // #349 — a personal thread is owned by an explicit user, never DEFAULT_USER
+  const owner = threadActor(partial.owner);
+  if (mailbox === "personal" && !owner) throw new Error(NO_OWNER_ERROR);
+  const me = owner?.name || "";
+  const assignee = partial.assignee === undefined ? owner : threadActor(partial.assignee);
   const firstAuthor =
-    partial.author || (dir === "in" ? partial.contactName || "Customer" : me);
+    partial.author || (dir === "in" ? partial.contactName || "Customer" : me || "Peak");
   const msg: CommMessage = {
     id: mid(1),
     at: t,
@@ -1282,11 +1400,9 @@ export async function create(
   // collision, but the delivery/queue decision above already happened once.
   const build = (id: string): CommThread => ({
     id,
-    mailbox: partial.mailbox || "personal",
-    mailboxUser:
-      partial.mailbox === "personal" || !partial.mailbox
-        ? partial.mailboxUser || me
-        : null,
+    mailbox,
+    mailboxUser: mailbox === "personal" ? owner!.name : null,
+    ...(mailbox === "personal" ? { mailboxOwnerId: owner!.id } : {}),
     unread: partial.unread != null ? !!partial.unread : dir === "in",
     archived: false,
     customerId: partial.customerId || null,
@@ -1297,8 +1413,14 @@ export async function create(
     subject: partial.subject || "(no subject)",
     channel,
     status: partial.status || statusFromDirection(dir),
-    assignedTo: partial.assignedTo != null ? partial.assignedTo : me,
+    assignedTo: assignee?.name ?? "",
+    ...(assignee ? { assignedToId: assignee.id } : {}),
     link: partial.link || null,
+    // #341 — a customer or record handed in here was picked by a person
+    // (Compose, Log call / meeting, renewal outreach, an estimate or report
+    // email): a deliberate link. A customer only resolved from the address
+    // (stampResolutionOnCreate) leaves it unset — private.
+    ...(partial.customerId || partial.link ? { linkedBy: "user" as const } : {}),
     messages: [msg],
     createdAt: t,
     updatedAt: t,
@@ -1385,7 +1507,7 @@ export async function addMessage(
   const res = await patchDoc<CommThread>("comms", threadId, (t) => {
     const prevStatus = t.status;
     const channel = asChannel(m.channel, t.channel || "email");
-    const me = m.me || DEFAULT_USER;
+    const me = m.me || t.mailboxUser || DEFAULT_USER; // display only (the author)
     const author =
       m.author || (dir === "in" ? t.contactName || "Customer" : me);
     const msg: CommMessage = {
@@ -1457,12 +1579,16 @@ export function replyLeft(t: CommThread | null): boolean {
  *  (a server action schedules it with after() so the send returns fast). */
 export async function reply(
   threadId: string,
-  opts: { body?: string; status?: ThreadStatus; me?: string; postReply?: "await" | "caller" } = {}
+  opts: { body?: string; status?: ThreadStatus; me?: string; postReply?: "await" | "caller"; attachments?: CommAttachment[]; cc?: string } = {}
 ): Promise<CommThread | null> {
   const res = await addMessage(threadId, {
     direction: "out",
     channel: "email",
     body: opts.body || "",
+    // #356 review — Reply all's Cc rides on the message itself; the bridge sends it (outboundAddressing)
+    ...(opts.cc ? { cc: opts.cc } : {}),
+    // Batch 6 #64 — the reply composer's attachments (by reference, already checked by the caller)
+    ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
     status: opts.status,
     me: opts.me,
   });
@@ -1498,7 +1624,8 @@ export async function forward(
 export type SaveDraftInput = {
   id?: string;
   mailbox?: MailboxId;
-  mailboxUser?: string | null;
+  /** #349 — the drafting user (the mailbox owner); required, never DEFAULT_USER. */
+  owner?: ThreadActor | null;
   customerId?: string | null;
   customer?: string;
   contactName?: string;
@@ -1509,15 +1636,15 @@ export type SaveDraftInput = {
   body?: string;
   link?: CommLink | null;
   attachments?: CommAttachment[];
-  me?: string;
 };
 
 export async function saveDraft(p: SaveDraftInput = {}): Promise<CommThread> {
-  const me = p.me || DEFAULT_USER;
+  const owner = threadActor(p.owner);
+  if (!owner) throw new Error(NO_OWNER_ERROR); // #349 — never DEFAULT_USER
   const rec = await create({
     id: p.id,
     mailbox: p.mailbox || "personal",
-    mailboxUser: p.mailboxUser || me,
+    owner,
     customerId: p.customerId || null,
     customer: p.customer || "",
     contactName: p.contactName || "",
@@ -1526,10 +1653,9 @@ export async function saveDraft(p: SaveDraftInput = {}): Promise<CommThread> {
     channel: "email",
     direction: "out",
     status: "draft",
-    assignedTo: me,
+    assignee: owner,
     link: p.link || null,
     unread: false,
-    me,
   });
   // a draft holds its editable fields and no real message yet
   const t = await patchDoc<CommThread>("comms", rec.id, (d) => {
@@ -1562,19 +1688,20 @@ export async function setDraftAttachments(
 
 /** Newest un-sent draft thread linked to a given record (IDEAS #36 — clicking
  *  ✉ twice re-opens the same renewal draft instead of minting another).
- *  Estimator Phase 3 final review (I3b) — `mailboxUser` narrows it to one
- *  person's own (not deleted) drafts. */
+ *  Estimator Phase 3 final review (I3b) — `owner` narrows it to one
+ *  person's own (not deleted) drafts — by identity (#349), never a name. */
 export async function findDraftByLink(
   type: string,
   id: string,
-  opts: { mailboxUser?: string } = {}
+  opts: { owner?: MailboxViewer | null } = {}
 ): Promise<CommThread | null> {
   const list = await listDocs<CommThread>("comms");
-  const owner = (opts.mailboxUser || "").trim().toLowerCase();
+  const owner = "owner" in opts ? opts.owner : undefined;
+  if (owner !== undefined && !owner?.id) return null; // a blank owner reuses nothing
   const matches = list.filter(
     (t) =>
       t.status === "draft" && !!t.link && t.link.type === type && t.link.id === id &&
-      (!owner || (!t.deleted && (t.mailboxUser || "").trim().toLowerCase() === owner))
+      (!owner || (!t.deleted && visibleTo(t, owner)))
   );
   matches.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   return matches[0] || null;
@@ -1726,7 +1853,7 @@ function incomingQueue(): IncomingItem[] {
         subject: "Website inquiry — new stage curtains + track",
         channel: "email",
         status: "waiting_us",
-        assignedTo: "",
+        assignee: null,
         direction: "in",
         body: "Hello — we’re a 300-seat community house planning to replace our main and mid-stage curtains and add a new track this fall. Are you taking on projects that timeframe, and could we get a quote? Thanks, Tom.",
       },
@@ -1881,12 +2008,17 @@ export async function reopen(threadId: string): Promise<CommThread | null> {
   );
 }
 
+/** Assign a thread to a teammate (#349: by identity — `assignedToId` +
+ *  the display name), or clear it with null. */
 export async function assign(
   threadId: string,
-  name?: string | null
+  who?: ThreadActor | null
 ): Promise<CommThread | null> {
+  const a = threadActor(who);
   const res = await patchDoc<CommThread>("comms", threadId, (t) => {
-    t.assignedTo = name || "";
+    t.assignedTo = a?.name ?? "";
+    if (a) t.assignedToId = a.id;
+    else delete t.assignedToId;
     touch(t);
   });
   if (res) queuePeakLabelSync(threadId);
@@ -1911,11 +2043,15 @@ export async function setLink(
 export async function moveTo(
   threadId: string,
   mailbox: MailboxId,
-  user?: string
+  owner?: ThreadActor | null
 ): Promise<CommThread | null> {
+  const o = threadActor(owner);
+  if (mailbox === "personal" && !o) throw new Error(NO_OWNER_ERROR); // #349 — never DEFAULT_USER
   return patchDoc<CommThread>("comms", threadId, (t) => {
     t.mailbox = mailbox;
-    t.mailboxUser = mailbox === "personal" ? user || DEFAULT_USER : null;
+    t.mailboxUser = mailbox === "personal" ? o!.name : null;
+    if (mailbox === "personal") t.mailboxOwnerId = o!.id;
+    else delete t.mailboxOwnerId;
     touch(t);
   });
 }
@@ -1966,15 +2102,17 @@ export async function casPreDraftKey<K extends "preDraft" | "preDraftLeaseUntil"
 /** #335 — threads the AI pass still has to read (`filing.pendingAi` or
  *  `court.pendingAi`), filtered in SQL, least recently updated first, with
  *  the limit applied AFTER the owner filter: `owner` keeps one owner's
- *  threads (personal mailbox user name, compared trimmed + lower-cased, or
- *  their Gmail account key); `notOwners` keeps threads belonging to none of
+ *  threads (their #349 owner stamp, their Gmail account key, or the
+ *  personal mailbox user name, compared trimmed + lower-cased — a superset
+ *  of the identity rule); `notOwners` keeps threads belonging to none of
  *  the given owners (the unresolvable-owner sweep). The caller re-checks the
- *  owner and drops deleted-folder / draft / shared threads. */
+ *  owner (ownerOf, identity) and drops deleted-folder / draft / shared
+ *  threads. */
 export async function pendingAiThreads(
   opts: {
     limit?: number;
-    owner?: { names: string[]; keys: string[] };
-    notOwners?: { names: string[]; keys: string[] };
+    owner?: { names: string[]; keys: string[]; ids?: string[] };
+    notOwners?: { names: string[]; keys: string[]; ids?: string[] };
     /** which mark to look for (default either) */
     only?: "court" | "filing";
   } = {}
@@ -1994,6 +2132,7 @@ export async function pendingAiThreads(
             fieldIn: [
               { field: "mailboxUser", values: who.names.map((n) => n.trim().toLowerCase()).filter(Boolean), lower: true },
               { field: "gmailAccountKey", values: who.keys.filter(Boolean) },
+              { field: "mailboxOwnerId", values: (who.ids ?? []).filter(Boolean) },
             ],
             negateFieldIn: !opts.owner,
           }
@@ -2036,7 +2175,10 @@ export async function resolveCustomerId(
   t: CommThread | null | undefined
 ): Promise<string | null> {
   if (!t) return null;
-  if (t.customerId) return t.customerId;
+  const { placeholderCompanyIds } = await import("@/lib/identity/companies");
+  // #345 — an AUTOMATIC stored link to a placeholder company ("UNKNOWN" …)
+  // reads as none; a deliberate one (`linkedBy`) is history and stands
+  if (t.customerId && (t.linkedBy || !(await placeholderCompanyIds([t.customerId])).has(t.customerId))) return t.customerId;
   // #125 — the picked identity message's address, else the counterpart.
   // I follow-up review — no selfEmail here: this store-level helper has no
   // "current user"/mailbox in hand (it's called from many contexts, some
@@ -2050,7 +2192,9 @@ export async function resolveCustomerId(
   const { contactByEmail } = await import("@/lib/identity/lookup");
   const hit = await contactByEmail(email);
   // Two live customers on one address is never a silent pick (#96).
-  return hit && !("ambiguous" in hit) ? hit.customerId : null;
+  if (!hit || "ambiguous" in hit) return null;
+  // #345 — a contact parked under a placeholder company ("UNKNOWN" …) has no customer
+  return (await placeholderCompanyIds([hit.customerId])).has(hit.customerId) ? null : hit.customerId;
 }
 
 /* ---- time formatting -------------------------------------------------------------- */

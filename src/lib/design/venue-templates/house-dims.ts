@@ -47,6 +47,18 @@ export type HouseSpec = {
   extra?: { key: "bowlDepthFt"; label: string; note: string; lim: [number, number]; dflt: number };
 };
 
+const CONTEMPORARY_SPEC: HouseSpec = {
+  width: { label: "Nave width", note: "Inside, at its widest" },
+  depth: { label: "Nave depth", note: "Platform tip to back wall" },
+  widthLim: (s) => [Math.ceil(s.width || 0) + 24, 250],
+  widthDefault: (s) => Math.max(CHURCH_CONTEMPORARY_KEYS.defaults.houseWidthFt, (s.width || 0) + 24),
+  depthLim: [20, 200],
+  depthDefault: CHURCH_CONTEMPORARY_KEYS.defaults.houseDepthFt,
+  legacyHalf: false,
+  warning: (_s, raw, widthFt) => (raw < widthFt - 1e-9 ? CONTEMPORARY_NAVE_WARNING : null),
+  stageDepthMax: { max: (s) => CONTEMPORARY_PLATFORM_DEPTH_RATIO * (s.width || 0), warning: CONTEMPORARY_PLATFORM_WARNING },
+};
+
 export const HOUSE_SPECS: Record<string, HouseSpec> = {
   "proscenium@1": {
     width: { label: "House width", note: "Inside walls, at the back of the house" },
@@ -69,17 +81,9 @@ export const HOUSE_SPECS: Record<string, HouseSpec> = {
     legacyHalf: false,
     warning: (_s, raw, widthFt) => (raw < widthFt - 1e-9 ? CHURCH_NAVE_WARNING : null),
   },
-  "church-contemporary@1": {
-    width: { label: "Nave width", note: "Inside, at its widest" },
-    depth: { label: "Nave depth", note: "Platform tip to back wall" },
-    widthLim: (s) => [Math.ceil(s.width || 0) + 24, 250],
-    widthDefault: (s) => Math.max(CHURCH_CONTEMPORARY_KEYS.defaults.houseWidthFt, (s.width || 0) + 24),
-    depthLim: [20, 200],
-    depthDefault: CHURCH_CONTEMPORARY_KEYS.defaults.houseDepthFt,
-    legacyHalf: false,
-    warning: (_s, raw, widthFt) => (raw < widthFt - 1e-9 ? CONTEMPORARY_NAVE_WARNING : null),
-    stageDepthMax: { max: (s) => CONTEMPORARY_PLATFORM_DEPTH_RATIO * (s.width || 0), warning: CONTEMPORARY_PLATFORM_WARNING },
-  },
+  "church-contemporary@1": CONTEMPORARY_SPEC,
+  // Oct 15 #46: the same fields and limits; only the drawing's nave stretch differs.
+  "church-contemporary@2": CONTEMPORARY_SPEC,
   "gym-stage@1": {
     width: { label: "Gym floor width", note: "Inside walls, wall to wall" },
     depth: { label: "Gym floor depth", note: "Stage front to back wall" },

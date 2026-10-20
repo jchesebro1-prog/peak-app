@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import type {
   SurveyRecord,
-  SurveyPhoto,
   SurveyStage,
   MeasureGroup,
 } from "@/lib/stores/surveys";
+import { editsUnchangedSince, fileOnlyPatch, photoCountsBySection, unionUnseenFileRefs, type SketchRef, type SurveyPhotoRef } from "@/lib/field-files/files";
+import { pendingPhotoCount, subscribePhotoQueue } from "@/lib/assessments/photo-queue";
 import {
   VENUE_CLASSES,
   VISIT_PURPOSES,
@@ -23,13 +24,19 @@ import {
   newInventoryId,
   tier1Items,
   tier1Complete,
+  type DisciplineData,
   type DisciplineKey,
+  type DisciplineValue,
   type InventoryRow,
+  REPLACE_VS_REUSE_OPTIONS,
 } from "@/lib/stores/survey-intake";
-import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, printSurveySheet, type SurveyPatch } from "./actions";
+import { LIFT_TYPES, LOADING_DOOR_TYPES, distanceText, shouldAutoFillTravel, showLiftDetails, travelTimeText } from "@/lib/field-lists";
+import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, type SurveyPatch } from "./actions";
 import Venue3D from "./venue-3d";
 import SuggestEstimate from "@/components/assist/suggest-estimate";
 import { saveThroughOutbox } from "@/lib/sync/save";
+import { SAVE_ACTION_TIMEOUT_MS } from "@/lib/sync/save-timeout";
+import { keepOutboxAfterFileSave, newEditorId, pendingStageSettled, type SaveStamp } from "@/lib/field-files/save-stamp";
 import { RecordingsStrip, type RecordingStripItem } from "@/components/recordings/recordings-strip";
 import { FromRecordingPanel, type FromRecordingPanelData } from "@/components/recordings/from-recording-panel";
 import type { Draft, EditorCustomer, EditorMeta, FieldDef, SectionDef } from "./sections/types";
@@ -41,43 +48,36 @@ import {
 } from "./sections/styles";
 import { FieldsSection } from "./sections/fields";
 import { CustVenueSection } from "./sections/custvenue";
-import { ConditionsSection } from "./sections/conditions";
+import { RecapSection } from "./sections/recap";
+import { FinalThoughtsSection } from "./sections/final-thoughts";
+import { OlderNotes } from "./sections/older-notes";
 import { PhotosSection } from "./sections/photos";
+import { useSectionPhotos } from "./sections/section-photos";
+import { useSectionSketches } from "./sections/sketch-tile";
 import { SystemsSection } from "./sections/systems";
 import { LinesetsSection } from "./sections/linesets";
+import { linesetsInUse } from "@/lib/stores/linesets";
 import { AssessmentUsageSection } from "./sections/assessment-usage";
 import { AssessmentConditionSection } from "./sections/assessment-condition";
 import { AssessmentFindingsSection } from "./sections/assessment-findings";
-import { SignoffSection } from "./sections/signoff";
-import { blankLinesetRow, nextLinesetPosition } from "@/lib/stores/linesets";
+import {
+  SECTION_ORDER, STEP_LABELS, STEP_BY_ID, GROUP_BY_ID, GROUP_META, isQuoteVisit, sectionVisible, hasCounterweight,
+} from "@/lib/survey-flow";
+import { KillQuestions } from "./sections/kill-questions";
+import { SectionRail, SECTION_RAIL_CSS, type RailItem } from "@/components/section-rail/section-rail";
+import { sectionProgress } from "./sections/progress";
+import { useCollapsed, isCollapsed } from "./sections/collapse";
 
 /* Serializable props from the server — the store is DB-backed and cannot be
  * imported into a client bundle, so its pure meta/option-lists are handed
  * over as plain props. The shapes now live in ./sections/types. */
 export type { EditorCustomer, EditorMeta } from "./sections/types";
 
-const STEP_LABELS = ["Brief", "Site & access", "Measurements", "Site intake", "Details", "Assessment"];
-const STEP_BY_ID: Record<string, number> = {
-  cust: 0, visit: 0, project: 0, assign: 0, site: 1, conditions: 1, lifeSafety: 1,
-  mQuick: 2, mLayout: 2, mSection: 2, mBeams: 2, mFOH: 2, mHouse: 2, m3d: 2,
-  tier1: 3, dRigging: 3, dCurtain: 3, dLighting: 3, dAv: 3, linesets: 3, assessmentToggle: 3,
-  assessmentUsage: 5, assessmentCondition: 5, assessmentFindings: 5,
-  photos: 4, notes: 4, signoff: 4,
-};
-const BRIEF_IDS: Record<string, boolean> = { cust: true, visit: true, project: true, assign: true };
-const INTAKE_IDS: Record<string, boolean> = { tier1: true, dRigging: true, dCurtain: true, dLighting: true, dAv: true, linesets: true, assessmentToggle: true };
-const ORDER = ["cust", "visit", "project", "assign", "site", "conditions", "lifeSafety", "mQuick", "mLayout", "mSection", "mBeams", "mFOH", "mHouse", "m3d", "tier1", "dRigging", "dCurtain", "dLighting", "dAv", "linesets", "assessmentToggle", "photos", "notes", "signoff", "assessmentUsage", "assessmentCondition", "assessmentFindings"];
 const DISC_SECTION_ID: Record<DisciplineKey, string> = { rigging: "dRigging", curtain: "dCurtain", lighting: "dLighting", av: "dAv" };
 
 /** Display label for a venue class — the derived `venueType` fallback. */
 function classLabel(cls: VenueClass): string {
   return (VENUE_CLASSES.find((c) => c.key === cls) || VENUE_CLASSES[0]).label;
-}
-
-let photoSeq = 0;
-function newPhotoId(): string {
-  photoSeq += 1;
-  return "p" + Date.now().toString(36) + photoSeq.toString(36);
 }
 
 function timeAgo(ts: number | null | undefined): string {
@@ -93,7 +93,15 @@ function timeAgo(ts: number | null | undefined): string {
   return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function toDraft(r: SurveyRecord): Draft {
+/** #344 B5 — the page's one-way drive from the office to a verified venue address (null = none). */
+type TravelSuggestion = { min: number; miles: number } | null;
+const TRAVEL_HINT = "From the venue's verified address";
+
+/** `travel` fills a blank Travel time / Distance on open (#344 B5) — once: the fill also sets `travelAutoFilled`, which
+    the next save stores, and a record carrying it is never refilled (a cleared field stays cleared). Not a change, so
+    the draft stays clean — any save stores it. */
+function toDraft(r: SurveyRecord, travel: TravelSuggestion = null): Draft {
+  const fillTravel = shouldAutoFillTravel(r, travel) ? travel : null;
   return {
     customer: r.customer || "",
     customerId: r.customerId ?? null,
@@ -109,8 +117,9 @@ function toDraft(r: SurveyRecord): Draft {
     visitType: r.visitType || "",
     visitPurpose: r.visitPurpose || "",
     reason: r.reason || "",
-    travelTime: r.travelTime || "",
-    distance: r.distance || "",
+    travelTime: r.travelTime || (fillTravel ? travelTimeText(fillTravel.min) : ""),
+    distance: r.distance || (fillTravel ? distanceText(fillTravel.miles) : ""),
+    ...(r.travelAutoFilled === true || fillTravel ? { travelAutoFilled: true as const } : {}),
     hasBOM: !!r.hasBOM,
     hasDrawings: !!r.hasDrawings,
     hasPhotos: !!r.hasPhotos,
@@ -126,6 +135,12 @@ function toDraft(r: SurveyRecord): Draft {
     liftSupplier: r.liftSupplier || "",
     loadingDoorSize: r.loadingDoorSize || "",
     liftHeight: r.liftHeight || "",
+    loadingDoorType: r.loadingDoorType || "",
+    loadingDoorLocation: r.loadingDoorLocation || "",
+    loadingDoorWH: r.loadingDoorWH || "",
+    liftRequired: r.liftRequired === "yes" || r.liftRequired === "no" ? r.liftRequired : "",
+    liftType: r.liftType || "",
+    liftWorkingHeight: r.liftWorkingHeight || "",
     pathToFloor: r.pathToFloor || "",
     workingHours: r.workingHours || "",
     blackoutDates: r.blackoutDates || "",
@@ -152,6 +167,8 @@ function toDraft(r: SurveyRecord): Draft {
     measurements: { ...(r.measurements || {}) },
     conditions: [...(r.conditions || [])],
     photos: [...(r.photos || [])],
+    photoRefs: Array.isArray(r.photoRefs) ? [...r.photoRefs] : [],
+    sketches: r.sketches && typeof r.sketches === "object" && !Array.isArray(r.sketches) ? { ...r.sketches } : {},
     auditoriumSize: r.auditoriumSize || "",
     yearBuilt: r.yearBuilt || "",
     systemsState: { ...blankSystemsState(), ...(r.systemsState || {}) },
@@ -161,15 +178,19 @@ function toDraft(r: SurveyRecord): Draft {
     intakeReady: !!r.intakeReady,
     linesetsEnabled: !!r.linesetsEnabled,
     linesets: [...(r.linesets || [])],
+    linesetQty: typeof r.linesetQty === "number" ? r.linesetQty : undefined,
     assessmentEnabled: !!r.assessmentEnabled,
     assessment: r.assessment,
     templateRev: r.templateRev,
     signoff: { ...r.signoff },
+    scope: Array.isArray(r.scope) ? [...r.scope] : [],
+    internalTags: Array.isArray(r.internalTags) ? [...r.internalTags] : [],
+    legacyNotes: Array.isArray(r.legacyNotes) ? [...r.legacyNotes] : [],
     updatedAt: r.updatedAt || 0,
   };
 }
 
-type LayoutMode = "long" | "wizard" | "accordion";
+type LayoutMode = "long" | "wizard";
 
 /**
  * Two-step arm/confirm in front of the page's `onDelete` (never
@@ -223,6 +244,9 @@ export default function SurveyEditor({
   meetingsSlot = null,
   canSuggest = false,
   suggestionHref = null,
+  travelSuggestion = null,
+  blobEnabled = false,
+  me = "",
 }: {
   record: SurveyRecord;
   customers: EditorCustomer[];
@@ -240,10 +264,37 @@ export default function SurveyEditor({
   canSuggest?: boolean;
   /** This assessment's latest suggestion ("Suggestion ready → Open"); null when none. */
   suggestionHref?: string | null;
+  /** #344 B5 — one-way drive to the venue's verified address, for a blank Travel time / Distance; null when none. */
+  travelSuggestion?: TravelSuggestion;
+  /** #344 C5 — the server's Blob flag: photos upload to private Blob, else (local dev) inline */
+  blobEnabled?: boolean;
+  /** #344 C5 — the signed-in user's id, stamped on photos taken here */
+  me?: string;
 }) {
-  const initial = useMemo<Draft>(() => toDraft(record), [record]);
+  const initial = useMemo<Draft>(() => toDraft(record, travelSuggestion), [record, travelSuggestion]);
   const [draft, setDraft] = useState<Draft>(initial);
   const [dirty, setDirty] = useState(false);
+  // #344 C-final B: the newest draft, for a save that finishes after the user typed more (it stays dirty then)
+  const draftRef = useRef<Draft>(initial);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+  // #344 C-final B: this survey's files still on the device queue (the header says "N uploading")
+  const [uploading, setUploading] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const off = subscribePhotoQueue(() => {
+      void pendingPhotoCount(record.id)
+        .then((n) => {
+          if (alive) setUploading(n);
+        })
+        .catch(() => undefined);
+    });
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [record.id]);
   // A "From recording" Insert (spec §4.4) writes into the SAVED survey and
   // refreshes the route. Adopt the refreshed record so the appended text
   // shows and the next Save doesn't overwrite it with this stale draft —
@@ -251,11 +302,86 @@ export default function SurveyEditor({
   // clean draft (the panel disables Insert while dirty).
   const [seenInitial, setSeenInitial] = useState(initial);
   const [adoptNextRecord, setAdoptNextRecord] = useState(false);
+  // #344 C5 fix: the last draft the server holds (a photo save sends this + the current photo refs, never the user's
+  // unsaved edits) and the current photo refs (every save sends them). Both reset when a refreshed record is adopted.
+  const [adoptedBase, setAdoptedBase] = useState(initial);
+  const lastSaved = useRef<Draft>(initial);
+  const refsNow = useRef<SurveyPhotoRef[]>(initial.photoRefs);
+  const sketchesNow = useRef<Record<string, SketchRef>>(initial.sketches); // #344 C6: the current sketches, same rule
+  // #344 C-final: every photo ref / sketch id this editor has seen — loaded, refreshed in, or created here. Every save
+  // sends them; the store deletes only refs and sketches listed here, so this editor never deletes another device's.
+  const seenPhotoIds = useRef<Set<string>>(new Set(initial.photoRefs.map((r) => r.id)));
+  const seenSketchIds = useRef<Set<string>>(new Set(Object.values(initial.sketches).map((k) => k.id)));
+  /** #344 C-final C: this editor mount's id and save counter. Each serialSave run takes the next seq; buildPatch (and so
+   *  buildFullDoc, the outbox copy) stamps it, so a timed-out save that lands late never overwrites a newer one. */
+  const [editorId] = useState(() => newEditorId());
+  const saveSeq = useRef(0);
+  const stampNow = useRef<SaveStamp | null>(null);
+  /** #344 C-final D/E: the stage this editor moved to that no online save has confirmed yet (the move timed out to the
+   *  outbox, or is still running), else null; `pendingFrom` is the server's stage when that move was made. While set,
+   *  every save carries `stage: pendingStage.current` — the move's own target, never draft.stage (an adopted record can
+   *  reset the draft) — so a later field save, which makes the move's late action stale, re-carries the stage instead
+   *  of losing it, and a queued whole-doc copy never reverts it. Cleared when a save carrying it lands online, and in
+   *  the `[initial]` effect when the server shows it (confirmed) or shows a later stage set elsewhere
+   *  (`pendingStageSettled`) — so a move that landed late never comes back over the office's "Create quote →" hours
+   *  later. An editor that hasn't moved the stage never sends one. */
+  const pendingStage = useRef<SurveyStage | null>(null);
+  const pendingFrom = useRef<SurveyStage | null>(null);
+  /** #344 C-final F: every target this editor has sent while moves were pending and not had confirmed. A refresh that
+   *  shows one of them is our own earlier move landing late (Onsite → Completed timed out, then back → Onsite: move 1
+   *  lands, the server shows Completed) — never "a later stage set elsewhere", so it doesn't settle the newer move.
+   *  Cleared whenever the pending stage clears. A new move starts from the pending target (else the record's stage). */
+  const unconfirmedTargets = useRef<Set<SurveyStage>>(new Set());
+  /** #344 C-final E: the stamp seq of the save whose outbox entry holds field edits no online save has carried yet (a
+   *  Save changes / stage move that went to the outbox, or a later save whose whole-doc copy replaced that entry), else
+   *  null. A file-only save that lands online keeps that entry, plus any other mount's / tab's entry carrying field
+   *  edits and any parked one (`keepOutboxAfterFileSave`, #344 C-final F). Cleared when a field save or stage move lands
+   *  online (it carried the whole draft). The engine doesn't report an entry's push to the editor, so a value can
+   *  outlive its entry; a later queued photo save then takes it over and that copy (already-saved fields) is kept by
+   *  the next file-only success — it pushes through the rev check like any queued whole doc. */
+  const unsentFieldSeq = useRef<number | null>(null);
+  useEffect(() => {
+    lastSaved.current = adoptedBase;
+    refsNow.current = adoptedBase.photoRefs;
+    sketchesNow.current = adoptedBase.sketches;
+    // #344 C-final C: the adopted record's refs replace refsNow before the union below can mark them — mark them here,
+    // or the next save wouldn't list them as seen (and a photo deleted here later would come back)
+    for (const r of adoptedBase.photoRefs) seenPhotoIds.current.add(r.id);
+    for (const k of Object.values(adoptedBase.sketches)) seenSketchIds.current.add(k.id);
+  }, [adoptedBase]);
+  // A refreshed record (the router refresh after any save) may carry photos / sketches another device added: union
+  // the unseen ones in by id, even while the draft is dirty (photo state is independent of the dirty fields).
+  // #344 C-final E: a refreshed record shows the server confirmed this editor's pending stage move, or moved past it
+  // elsewhere — stop re-sending it
+  useEffect(() => {
+    if (pendingStageSettled(pendingStage.current, pendingFrom.current, initial.stage, unconfirmedTargets.current)) {
+      pendingStage.current = null;
+      pendingFrom.current = null;
+      unconfirmedTargets.current.clear();
+    }
+  }, [initial]);
+  useEffect(() => {
+    const u = unionUnseenFileRefs(
+      { photoRefs: refsNow.current, sketches: sketchesNow.current },
+      initial,
+      { photos: seenPhotoIds.current, sketches: seenSketchIds.current },
+    );
+    if (!u) return;
+    for (const id of u.added.photos) seenPhotoIds.current.add(id);
+    for (const id of u.added.sketches) seenSketchIds.current.add(id);
+    refsNow.current = u.photoRefs;
+    sketchesNow.current = u.sketches;
+    lastSaved.current = { ...lastSaved.current, photoRefs: u.photoRefs, sketches: u.sketches };
+    setDraft((d) => ({ ...d, photoRefs: u.photoRefs, sketches: u.sketches }));
+  }, [initial]);
   if (initial !== seenInitial) {
     setSeenInitial(initial);
     if (adoptNextRecord) {
       setAdoptNextRecord(false);
-      if (!dirty) setDraft(initial);
+      if (!dirty) {
+        setDraft(initial);
+        setAdoptedBase(initial);
+      }
     }
   }
   const [saving, setSaving] = useState(false);
@@ -265,7 +391,31 @@ export default function SurveyEditor({
   const [venueOther, setVenueOther] = useState(false);
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("long");
   const [step, setStep] = useState(0);
-  const [openSet, setOpenSet] = useState<Record<string, boolean>>({ cust: true });
+  // #344 A8: every section collapses; the choice is remembered per viewer per survey (localStorage)
+  const [collapsedMap, setCollapsedFor] = useCollapsed(record.id);
+  const [activeSec, setActiveSec] = useState("cust");
+  const headRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [headH, setHeadH] = useState(128);
+  const [railMax, setRailMax] = useState(600);
+  useEffect(() => {
+    const el = headRef.current;
+    if (!el) return;
+    const main = el.closest("main");
+    // the rail may be at most the scroll pane's height minus the sticky header and its gaps (#344 A8)
+    const measure = () => {
+      setHeadH(Math.round(el.getBoundingClientRect().height));
+      const paneH = main ? main.clientHeight : window.innerHeight;
+      setRailMax(Math.max(200, paneH - Math.round(el.getBoundingClientRect().height) - 24));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    if (typeof ResizeObserver === "undefined") return () => window.removeEventListener("resize", measure);
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    if (main) ro.observe(main);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
+  }, []);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function flash(msg: string) {
@@ -282,13 +432,6 @@ export default function SurveyEditor({
   const setMeasure = (key: string, val: string | boolean) =>
     patchDraft({ measurements: { ...draft.measurements, [key]: val } });
   const toggleMeasure = (key: string) => setMeasure(key, !mv(key));
-  const toggleCondition = (c: string) => {
-    const set = draft.conditions.slice();
-    const i = set.indexOf(c);
-    if (i >= 0) set.splice(i, 1);
-    else set.push(c);
-    patchDraft({ conditions: set });
-  };
 
   /* ---------- site intake: discipline data + inventory helpers ---------- */
   const tier1 = tier1Items(draft);
@@ -296,24 +439,21 @@ export default function SurveyEditor({
   const intakeSt = intakeStatus(draft);
   const intakeMeta = INTAKE_STATUS_META[intakeSt];
 
-  const dv = (disc: DisciplineKey, key: string): string | boolean | string[] => {
+  const dv = (disc: DisciplineKey, key: string): DisciplineValue => {
     const d = draft.disciplines[disc];
     return d && d[key] != null ? d[key] : "";
   };
-  const setDisc = (disc: DisciplineKey, key: string, val: string | boolean | string[]) =>
+  /** `undefined` removes the key (#344 B4: an unset condition level is an absent key). */
+  const setDisc = (disc: DisciplineKey, key: string, val: DisciplineValue | undefined) => {
+    const next: DisciplineData = { ...(draft.disciplines[disc] || {}) };
+    if (val === undefined) delete next[key];
+    else next[key] = val;
     patchDraft({
-      disciplines: { ...draft.disciplines, [disc]: { ...(draft.disciplines[disc] || {}), [key]: val } },
+      disciplines: { ...draft.disciplines, [disc]: next },
       disciplinesActive: draft.disciplinesActive.includes(disc)
         ? draft.disciplinesActive
         : draft.disciplinesActive.concat(disc),
     });
-  const toggleDiscScope = (disc: DisciplineKey, opt: string) => {
-    const cur = dv(disc, "scope");
-    const set = Array.isArray(cur) ? cur.slice() : [];
-    const i = set.indexOf(opt);
-    if (i >= 0) set.splice(i, 1);
-    else set.push(opt);
-    setDisc(disc, "scope", set);
   };
   const invRows = (disc: DisciplineKey, category: string) =>
     draft.inventory.filter((r) => r.discipline === disc && r.category === category);
@@ -330,10 +470,15 @@ export default function SurveyEditor({
     patchDraft({ inventory: draft.inventory.map((r) => (r.id === id ? { ...r, ...patch } : r)) });
   const removeInvRow = (id: string) =>
     patchDraft({ inventory: draft.inventory.filter((r) => r.id !== id) });
-  const addLineset = () =>
-    patchDraft({ linesets: draft.linesets.concat(blankLinesetRow(nextLinesetPosition(draft.linesets))) });
   const patchLineset = (id: string, patch: Partial<(typeof draft.linesets)[number]>) =>
-    patchDraft({ linesets: draft.linesets.map((row) => (row.id === id ? { ...row, ...patch } : row)) });
+    patchDraft({ linesets: draft.linesets.map((row) => (row.id === id ? { ...row, ...patch } : row)), linesetsEnabled: true });
+  // always a number once touched (0 = none) — an unset quantity would be reseeded on the next read
+  // #344 B-final: a schedule in use (a quantity above 0 or any row) also turns linesetsEnabled on, so every reader that
+  // gates on it shows the sets
+  const applyLinesets = (rows: typeof draft.linesets, qty?: number) => {
+    const enable = draft.linesetsEnabled || linesetsInUse(rows, qty ?? draft.linesetQty);
+    patchDraft(qty == null ? { linesets: rows, linesetsEnabled: enable } : { linesets: rows, linesetQty: qty, linesetsEnabled: enable });
+  };
   const removeLineset = (id: string) =>
     patchDraft({ linesets: draft.linesets.filter((row) => row.id !== id) });
 
@@ -398,62 +543,6 @@ export default function SurveyEditor({
     patchDraft(patch);
   }
 
-  /* ---------- photos (client-side downscale — metadata-only placeholder, no upload) ---------- */
-  function readPhoto(file: File): Promise<SurveyPhoto | null> {
-    return new Promise((resolve) => {
-      const fr = new FileReader();
-      fr.onload = () => {
-        const result = fr.result as string;
-        const img = new Image();
-        img.onload = () => {
-          const max = 1200;
-          let w = img.width;
-          let h = img.height;
-          if (w > max || h > max) {
-            const r = Math.min(max / w, max / h);
-            w = Math.round(w * r);
-            h = Math.round(h * r);
-          }
-          let url: string;
-          try {
-            const c = document.createElement("canvas");
-            c.width = w;
-            c.height = h;
-            c.getContext("2d")!.drawImage(img, 0, 0, w, h);
-            url = c.toDataURL("image/jpeg", 0.7);
-          } catch {
-            url = result;
-          }
-          resolve({ id: newPhotoId(), name: file.name || "photo.jpg", dataUrl: url });
-        };
-        img.onerror = () => resolve(null);
-        img.src = result;
-      };
-      fr.onerror = () => resolve(null);
-      fr.readAsDataURL(file);
-    });
-  }
-  async function onPhotos(e: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files || []);
-    try {
-      e.target.value = "";
-    } catch {}
-    if (!files.length) return;
-    const room = Math.max(0, 8 - draft.photos.length);
-    if (room <= 0) {
-      setSaveError("Up to 8 photos per survey. Remove one to add another.");
-      return;
-    }
-    const added: SurveyPhoto[] = [];
-    for (const f of files.slice(0, room)) {
-      const p = await readPhoto(f);
-      if (p) added.push(p);
-    }
-    setSaveError("");
-    patchDraft({ photos: draft.photos.concat(added) });
-  }
-  const removePhoto = (id: string) => patchDraft({ photos: draft.photos.filter((p) => p.id !== id) });
-
   /* ---------- sections ---------- */
   const sections = useMemo<SectionDef[]>(() => {
     // the quick measurement set is the venue class's own field set (D132)
@@ -464,6 +553,18 @@ export default function SurveyEditor({
         if (f.type === "check") return { kind: "checkMeasure", key: f.key, label: f.label };
         return { kind: "measure", key: f.key, label: f.label };
       });
+    /* #344 B5 — Beams & rigging: the drawings on file sit at the top (brick / CW elevation only with a counterweight
+       system); a structural drawing on file hides the beam measurements (their values stay stored). */
+    const DRAWING_KEYS = ["structuralDrawingOnFile", "brickDrawingOnFile", "cwElevationOnFile"];
+    const beamFields = (g: MeasureGroup): FieldDef[] => {
+      const all = groupFields(g);
+      const cw = hasCounterweight(draft);
+      const drawings = all.filter((f) => f.key === "structuralDrawingOnFile" || (cw && (f.key === "brickDrawingOnFile" || f.key === "cwElevationOnFile")));
+      if (draft.measurements.structuralDrawingOnFile) {
+        return [...drawings, { kind: "note", key: "structuralDrawingNote", text: "The structural drawing covers the beam measurements." }];
+      }
+      return [...drawings, ...all.filter((f) => !DRAWING_KEYS.includes(f.key))];
+    };
 
     const secs: SectionDef[] = [];
     secs.push({ id: "cust", title: "Customer & venue", subtitle: "Who and where", group: "brief", step: 0, kind: "custvenue" });
@@ -471,30 +572,41 @@ export default function SurveyEditor({
       id: "visit", title: "Visit", subtitle: "Purpose & travel", group: "brief", step: 0, kind: "fields",
       fields: [
         { kind: "select", key: "visitPurpose", label: "Purpose of visit", options: VISIT_PURPOSES },
-        { kind: "text", key: "travelTime", label: "Travel time", placeholder: "e.g. 35 min" },
-        { kind: "text", key: "distance", label: "Distance", placeholder: "e.g. 22 mi" },
+        // #344 B5: the hint shows while the value is still the verified-address suggestion
+        {
+          kind: "text", key: "travelTime", label: "Travel time", placeholder: "e.g. 35 min",
+          hint: travelSuggestion && draft.travelTime === travelTimeText(travelSuggestion.min) ? TRAVEL_HINT : undefined,
+        },
+        {
+          kind: "text", key: "distance", label: "Distance", placeholder: "e.g. 22 mi",
+          hint: travelSuggestion && draft.distance === distanceText(travelSuggestion.miles) ? TRAVEL_HINT : undefined,
+        },
         { kind: "textarea", key: "reason", label: "Reason / scope of visit", placeholder: "Why are we here? What triggered the visit?" },
       ],
     });
     secs.push({
       id: "project", title: "Existing materials & quote",
-      // the sheets' QUOTE QUESTIONS subtitle, kept verbatim as help text
-      subtitle: "What we have on file, and what the quote needs. A “no” does not end the visit — it changes what you collect.",
-      group: "brief", step: 1, kind: "fields",
+      subtitle: isQuoteVisit(draft)
+        ? "What we have on file, and what the quote needs. Ask these last, once the customer is comfortable."
+        : "What we have on file. The quote questions show when the purpose is New system design.",
+      group: "wrapup", step: 5, kind: "fields",
       fields: [
         { kind: "checkTop", key: "hasBOM", label: "Existing BOM on file" },
         { kind: "checkTop", key: "hasDrawings", label: "Existing drawings on file" },
         { kind: "checkTop", key: "hasPhotos", label: "Existing photos on file" },
-        { kind: "text", key: "quoteNeededBy", label: "Quote needed by", type: "date" },
-        { kind: "toggle", key: "budgetary", label: "Is it budgetary?" },
-        { kind: "text", key: "projectCompletion", label: "Project completion", type: "date" },
-        { kind: "select", key: "installTimeframe", label: "Install timeframe", options: meta.installTimeframes },
-        // QUOTE QUESTIONS, from the sheets (quoteNeededBy above is the sheets'
-        // QUOTE DEADLINE — deliberately not duplicated here)
-        { kind: "text", key: "budget", label: "Budget" },
-        { kind: "text", key: "fiscalYearSpendBy", label: "Fiscal year / spend-by date" },
-        { kind: "text", key: "whoDecides", label: "Who decides" },
-        { kind: "text", key: "targetInstallWindow", label: "Target install window" },
+        // #344 A3: the quote / budget half only on a quote visit (answers stay stored either way)
+        ...(isQuoteVisit(draft)
+          ? ([
+              { kind: "text", key: "quoteNeededBy", label: "Quote needed by", type: "date" },
+              { kind: "toggle", key: "budgetary", label: "Is it budgetary?" },
+              { kind: "text", key: "projectCompletion", label: "Project completion", type: "date" },
+              { kind: "select", key: "installTimeframe", label: "Install timeframe", options: meta.installTimeframes },
+              { kind: "text", key: "budget", label: "Budget" },
+              { kind: "text", key: "fiscalYearSpendBy", label: "Fiscal year / spend-by date" },
+              { kind: "text", key: "whoDecides", label: "Who decides" },
+              { kind: "text", key: "targetInstallWindow", label: "Target install window" },
+            ] as FieldDef[])
+          : []),
       ],
     });
     secs.push({
@@ -513,12 +625,19 @@ export default function SurveyEditor({
         { kind: "text", key: "elevatorSize", label: "Elevator size", placeholder: "e.g. 5' × 7' or none" },
         { kind: "select", key: "floorType", label: "Floor type", options: meta.floorTypes },
         { kind: "text", key: "accessDoorSize", label: "Access door size", placeholder: "e.g. 8' × 10'" },
-        { kind: "select", key: "liftNeeded", label: "Kind of lift needed", options: meta.liftTypes },
-        { kind: "select", key: "liftSupplier", label: "Who supplies lift", options: meta.liftSuppliers },
-        // ACCESS & SITE CONDITIONS, from the sheets
-        { kind: "text", key: "loadingDoorSize", label: "Loading door location & W × H" },
-        { kind: "text", key: "liftHeight", label: "Lift needed — type / height" },
-        { kind: "text", key: "pathToFloor", label: "Path: truck → floor" },
+        // #344 B5: loading door + lift replace loadingDoorSize / liftNeeded / liftHeight (old keys stay stored)
+        { kind: "select", key: "loadingDoorType", label: "Loading door type", options: LOADING_DOOR_TYPES },
+        { kind: "text", key: "loadingDoorLocation", label: "Loading door location" },
+        { kind: "text", key: "loadingDoorWH", label: "Loading door W × H", placeholder: "e.g. 10' × 12'" },
+        { kind: "choice", key: "liftRequired", label: "Lift needed?", options: [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }] },
+        ...(showLiftDetails(draft)
+          ? ([
+              { kind: "select", key: "liftType", label: "Lift type", options: LIFT_TYPES },
+              { kind: "text", key: "liftWorkingHeight", label: "Working height", placeholder: "e.g. 32'" },
+              { kind: "select", key: "liftSupplier", label: "Who supplies lift", options: meta.liftSuppliers },
+            ] as FieldDef[])
+          : []),
+        { kind: "textarea", key: "pathToFloor", label: "Path: truck → floor" },
         { kind: "text", key: "workingHours", label: "Working hours allowed" },
         { kind: "text", key: "blackoutDates", label: "Blackout dates / events" },
         { kind: "text", key: "floorProtection", label: "Floor protection required" },
@@ -526,7 +645,6 @@ export default function SurveyEditor({
         { kind: "textarea", key: "firstImpressions", label: "First impressions / notes" },
       ],
     });
-    secs.push({ id: "conditions", title: "Site conditions", subtitle: "Quick tags", group: "field", step: 1, kind: "conditions" });
     // Life safety — auditorium sheet p.5, offered on any class. Collapsed by
     // default; the values live one level down on draft.lifeSafety.
     secs.push({
@@ -543,16 +661,16 @@ export default function SurveyEditor({
       fields: quick.map((f) => ({ kind: "measure", key: f.key, label: f.label })),
     });
     meta.measureGroups.forEach((g) => {
-      secs.push({ id: g.id, title: g.title, subtitle: g.subtitle, group: "field", step: 2, advanced: true, kind: "fields", fields: groupFields(g) });
+      const fields = g.id === "mBeams" ? beamFields(g) : groupFields(g);
+      secs.push({ id: g.id, title: g.title, subtitle: g.subtitle, group: "field", step: 2, advanced: true, kind: "fields", fields });
     });
     // 3D preview (IDEAS #49 P1) — parametric model auto-built from measurements
     secs.push({ id: "m3d", title: "3D preview", subtitle: "Auto-built from measurements — drag to orbit", group: "field", step: 2, advanced: true, kind: "viz3d" });
-    // ---- Site intake (IDEAS #45): kill-question gate and discipline
-    // branches. Soft gate — sections lock until Tier 1 is done,
-    // but the record always saves as a draft.
+    // ---- Kill questions (the first step's gate) and the discipline branches. Soft gate — the
+    // discipline sections lock until the kill questions are answered, but the record always saves as a draft.
     secs.push({
-      id: "tier1", title: "Kill questions", subtitle: "Required before the discipline intakes unlock",
-      group: "intake", step: 3, kind: "tier1",
+      id: "tier1", title: "Kill questions", subtitle: "Scope, rigging system and the basics — the discipline intakes unlock once these are in",
+      group: "brief", step: 0, kind: "tier1",
     });
     DISCIPLINE_GROUPS.forEach((g) => {
       secs.push({
@@ -562,7 +680,8 @@ export default function SurveyEditor({
     });
     secs.push({ id: "linesets", title: "Lineset schedule", subtitle: "Physical positions, loads, trim and condition", group: "intake", step: 3, advanced: true, kind: "linesets" });
     secs.push({ id: "assessmentToggle", title: "Condition & Needs assessment", subtitle: "Add an advisory layer when the customer needs Peak's opinion", group: "intake", step: 3, kind: "assessmentToggle" });
-    secs.push({ id: "photos", title: "Photos", subtitle: "Up to 8", group: "field", step: 4, kind: "photos" });
+    // #344 C5: photos live in each section now; the old inline photos stay readable (findings may link them)
+    if (draft.photos.length > 0) secs.push({ id: "photos", title: "Earlier photos", subtitle: "Read-only", group: "field", step: 4, kind: "photos" });
     secs.push({
       id: "notes", title: "Scope & notes", subtitle: "Free text", group: "field", step: 4, kind: "fields",
       fields: [
@@ -571,27 +690,28 @@ export default function SurveyEditor({
         { kind: "textarea", key: "notes", label: "Generic notes", placeholder: "Access, hazards, scheduling constraints…" },
       ],
     });
-    secs.push({ id: "signoff", title: "Sign-off", subtitle: "Peak representative, site contact, and optional technical reviewer", group: "field", step: 4, kind: "signoff" });
+    // #344 B5 — wrap-up questions asked last; visible per sectionVisible (curtains in scope)
+    secs.push({
+      id: "finalQuestions", title: "Final questions", subtitle: "Last things to settle before you leave", group: "wrapup", step: 5, kind: "fields",
+      fields: [
+        { kind: "select", key: "replaceVsReuse", label: "Replace vs. reuse (curtains)", options: REPLACE_VS_REUSE_OPTIONS, disc: "curtain" },
+      ],
+    });
+    secs.push({ id: "recap", title: "Customer recap", subtitle: "Read back what we heard", group: "wrapup", step: 5, kind: "recap" });
+    secs.push({ id: "finalThoughts", title: "Final thoughts", subtitle: "Internal tags — never shown to the customer", group: "wrapup", step: 5, kind: "finalThoughts" });
     if (draft.assessmentEnabled) {
       secs.push({ id: "assessmentUsage", title: "Usage & needs profile", subtitle: "How the room is used, operated, and expected to grow", group: "assessment", step: 5, kind: "assessmentUsage" });
       secs.push({ id: "assessmentCondition", title: "Condition ratings", subtitle: "Good, monitor, or replace—with formal inspection references", group: "assessment", step: 5, kind: "assessmentCondition" });
       secs.push({ id: "assessmentFindings", title: "Findings & recommendations", subtitle: "Priorities, planning ranges, and supporting photos", group: "assessment", step: 5, kind: "assessmentFindings" });
     }
     secs.forEach((s) => {
-      if (s.group !== "assessment") {
-        s.group = BRIEF_IDS[s.id] ? "brief" : INTAKE_IDS[s.id] ? "intake" : "field";
-      }
+      if (GROUP_BY_ID[s.id]) s.group = GROUP_BY_ID[s.id];
       if (STEP_BY_ID[s.id] != null) s.step = STEP_BY_ID[s.id];
     });
-    secs.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
-    return secs;
-  }, [draft.assessmentEnabled, draft.venueClass, draft.requestedBy, meta, roster]);
-
-  const measFilled = (fields: FieldDef[]): number =>
-    fields.filter((f) => {
-      const v = mv(f.key);
-      return f.kind === "checkMeasure" ? !!v : String(v ?? "").trim() !== "";
-    }).length;
+    return secs
+      .filter((s) => sectionVisible(draft, s.id))
+      .sort((a, b) => SECTION_ORDER.indexOf(a.id) - SECTION_ORDER.indexOf(b.id));
+  }, [draft, meta, roster, travelSuggestion]);
 
   /* ---------- persistence ---------- */
   function validate(): boolean {
@@ -606,7 +726,8 @@ export default function SurveyEditor({
     setSaveError("");
     return true;
   }
-  function buildPatch(over?: Partial<SurveyPatch>): SurveyPatch {
+  function buildPatch(over?: Partial<SurveyPatch>, d: Draft = draft): SurveyPatch {
+    const draft = d;
     return {
       customer: draft.customer,
       customerId: draft.customerId,
@@ -627,6 +748,7 @@ export default function SurveyEditor({
       reason: draft.reason,
       travelTime: draft.travelTime,
       distance: draft.distance,
+      ...(draft.travelAutoFilled ? { travelAutoFilled: draft.travelAutoFilled } : {}),
       hasBOM: draft.hasBOM,
       hasDrawings: draft.hasDrawings,
       hasPhotos: draft.hasPhotos,
@@ -642,6 +764,12 @@ export default function SurveyEditor({
       liftSupplier: draft.liftSupplier,
       loadingDoorSize: draft.loadingDoorSize,
       liftHeight: draft.liftHeight,
+      loadingDoorType: draft.loadingDoorType,
+      loadingDoorLocation: draft.loadingDoorLocation,
+      loadingDoorWH: draft.loadingDoorWH,
+      liftRequired: draft.liftRequired,
+      liftType: draft.liftType,
+      liftWorkingHeight: draft.liftWorkingHeight,
       pathToFloor: draft.pathToFloor,
       workingHours: draft.workingHours,
       blackoutDates: draft.blackoutDates,
@@ -663,6 +791,18 @@ export default function SurveyEditor({
       measurements: draft.measurements as Record<string, string>,
       conditions: draft.conditions,
       photos: draft.photos,
+      // #344 C5 — whole list every save (a ref absent from a save is deleted); finished slots are kept by the store
+      // once photos were touched in this session they are always sent (deleting the only one must reach the server)
+      // #344 C-final: with the ids this editor has seen — the store deletes only those, never another device's photos
+      // #344 C-final C: this save run's order stamp (the action's patch and its outbox copy carry the same one)
+      ...(stampNow.current ? { saveStamp: stampNow.current } : {}),
+      ...(draft.photoRefs.length || Array.isArray(record.photoRefs) || photosTouched.current
+        ? { photoRefs: draft.photoRefs, photoRefIdsSeen: [...seenPhotoIds.current] }
+        : {}),
+      // #344 C6 — sketch pads, sent whole once there are any (a stored finished slot is kept by the store)
+      ...(Object.keys(draft.sketches).length || (record.sketches && typeof record.sketches === "object") || sketchesTouched.current
+        ? { sketches: draft.sketches, sketchIdsSeen: [...seenSketchIds.current] }
+        : {}),
       auditoriumSize: draft.auditoriumSize,
       yearBuilt: draft.yearBuilt,
       systemsState: draft.systemsState,
@@ -672,10 +812,17 @@ export default function SurveyEditor({
       intakeReady: draft.intakeReady,
       linesetsEnabled: draft.linesetsEnabled,
       linesets: draft.linesets,
+      // only ever a number — an unset quantity is reseeded from the rows on the next read
+      ...(typeof draft.linesetQty === "number" ? { linesetQty: draft.linesetQty } : {}),
       assessmentEnabled: draft.assessmentEnabled,
       assessment: draft.assessment,
       templateRev: draft.templateRev,
       signoff: draft.signoff,
+      // an unanswered scope stays unset (R2) so the read-time seed can still run
+      scope: draft.scope.length ? draft.scope : undefined,
+      internalTags: draft.internalTags,
+      // #344 C-final D/E: while this editor's stage move is unconfirmed, every save re-carries the stage it moved to
+      ...(pendingStage.current ? { stage: pendingStage.current } : {}),
       ...over,
     };
   }
@@ -685,11 +832,18 @@ export default function SurveyEditor({
    * the editor patch and stamp it the way the store's update() would when a
    * write reaches the cloud (synced, rev bumped).
    */
-  function buildFullDoc(over?: Partial<SurveyPatch>): Record<string, unknown> {
+  function buildFullDoc(over?: Partial<SurveyPatch>, d: Draft = draft): Record<string, unknown> {
+    // legacyNotes is derived on every read (src/lib/survey-migrate.ts) — never write it back
+    const { legacyNotes: _legacy, ...rec } = record as unknown as Record<string, unknown>;
+    void _legacy;
     return {
-      ...(record as unknown as Record<string, unknown>),
-      ...(buildPatch(over) as Record<string, unknown>),
+      ...rec,
+      ...(buildPatch(over, d) as Record<string, unknown>),
       updatedAt: Date.now(),
+      // #344 C-final B: never a finalize's rev. The push is a conflict only when the stored rev is above this one —
+      // one intervening write (a field write: stored rev = record.rev + 1) is NOT a conflict: the push merges over it;
+      // only two or more field writes are. A photo / sketch save (file-only) never bumps rev (#344 C-final E), so any
+      // number of them can land first. This editor's own earlier saves are ordered by the save stamp (C-final C).
       rev: (record.rev || 1) + 1,
       syncState: "synced",
     };
@@ -697,15 +851,35 @@ export default function SurveyEditor({
   async function onSave() {
     if (!validate() || saving) return;
     setSaving(true);
+    const edits = draft; // the user's draft as of this click; the photo refs are read when the save runs
     try {
-      const patch = buildPatch();
-      const { queued } = await saveThroughOutbox({
-        collection: "surveys",
-        id: record.id,
-        doc: buildFullDoc(),
-        action: () => saveSurvey(record.id, patch),
+      const { queued } = await serialSave(async () => {
+        const sent: Draft = { ...edits, photoRefs: refsNow.current, sketches: sketchesNow.current };
+        const seq = stampNow.current?.seq ?? null;
+        const carried = pendingStage.current; // this save re-carries an unconfirmed stage move (#344 C-final D/E)
+        const patch = buildPatch(undefined, sent);
+        const res = await saveThroughOutbox({
+          collection: "surveys",
+          id: record.id,
+          doc: buildFullDoc(undefined, sent),
+          action: () => saveSurvey(record.id, patch),
+          timeoutMs: SAVE_ACTION_TIMEOUT_MS,
+        });
+        if (res.queued) unsentFieldSeq.current = seq; // its outbox entry holds these field edits (#344 C-final E)
+        else {
+          unsentFieldSeq.current = null;
+          if (carried !== null && pendingStage.current === carried) {
+            pendingStage.current = null;
+            pendingFrom.current = null;
+            unconfirmedTargets.current.clear();
+          }
+        }
+        lastSaved.current = sent;
+        setPhotoUnsaved(false);
+        return res;
       });
-      setDirty(false);
+      // #344 C-final B: typing while the save ran (or waited in the queue) keeps the draft dirty — that text wasn't sent
+      if (editsUnchangedSince(draftRef.current, edits)) setDirty(false);
       setDraft((d) => ({ ...d, updatedAt: Date.now() }));
       flash(
         queued
@@ -721,16 +895,40 @@ export default function SurveyEditor({
   async function advanceStage(target: SurveyStage) {
     if (!validate() || saving) return;
     setSaving(true);
+    const edits = draft;
     try {
-      const patch = buildPatch({ stage: target });
-      const { queued } = await saveThroughOutbox({
-        collection: "surveys",
-        id: record.id,
-        doc: buildFullDoc({ stage: target }),
-        action: () => advanceSurveyStage(record.id, patch, target),
+      const { queued } = await serialSave(async () => {
+        const sent: Draft = { ...edits, photoRefs: refsNow.current, sketches: sketchesNow.current };
+        const seq = stampNow.current?.seq ?? null;
+        // until a save carrying the stage lands online, or the server shows it (#344 C-final D/E). #344 C-final F: every
+        // sent target is remembered so its late landing isn't read as a stage set elsewhere; a move made while another is
+        // pending keeps the first move's start (the server's stage before any of them), which the set doesn't cover
+        pendingFrom.current = pendingStage.current ? pendingFrom.current : (record.stage || "requested") as SurveyStage;
+        pendingStage.current = target;
+        unconfirmedTargets.current.add(target);
+        const patch = buildPatch({ stage: target }, sent);
+        const res = await saveThroughOutbox({
+          collection: "surveys",
+          id: record.id,
+          doc: buildFullDoc({ stage: target }, sent),
+          action: () => advanceSurveyStage(record.id, patch, target),
+          timeoutMs: SAVE_ACTION_TIMEOUT_MS,
+        });
+        if (res.queued) unsentFieldSeq.current = seq; // the move (+ its fields) waits in the outbox (#344 C-final E)
+        else {
+          unsentFieldSeq.current = null;
+          if (pendingStage.current === target) {
+            pendingStage.current = null;
+            pendingFrom.current = null;
+            unconfirmedTargets.current.clear();
+          }
+        }
+        lastSaved.current = { ...sent, stage: target };
+        setPhotoUnsaved(false);
+        return res;
       });
+      if (editsUnchangedSince(draftRef.current, edits)) setDirty(false); // #344 C-final B: same rule as Save changes
       setDraft((d) => ({ ...d, stage: target, updatedAt: Date.now() }));
-      setDirty(false);
       flash(
         queued
           ? `Moved to ${meta.stageMeta[target].label} — will sync when you're back online`
@@ -746,7 +944,8 @@ export default function SurveyEditor({
     if (!validate() || saving) return;
     setSaving(true);
     try {
-      await createQuoteFromSurvey(record.id, buildPatch({ stage: "completed" }));
+      const edits = draft;
+      await serialSave(() => createQuoteFromSurvey(record.id, buildPatch({ stage: "completed" }, { ...edits, photoRefs: refsNow.current, sketches: sketchesNow.current })));
       // redirect happens server-side
     } catch {
       setSaveError("Could not create the quote — please try again.");
@@ -769,12 +968,21 @@ export default function SurveyEditor({
     const preview = window.open("", "_blank");
     setSaving(true);
     try {
-      const result = await printSurveySheet(record.id, buildPatch());
-      if (!result.ok) throw new Error(result.error);
-      const bytes = Uint8Array.from(atob(result.base64), (char) => char.charCodeAt(0));
-      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      // The saved record supplies Earlier photos; sending them inline would only bloat the request.
+      const { photos: _earlier, saveStamp: _stamp, ...patch } = buildPatch(undefined, { ...draft, photoRefs: refsNow.current, sketches: sketchesNow.current });
+      void _earlier;
+      void _stamp; // a print is not a save — no order stamp
+      const res = await fetch(`/api/surveys/${encodeURIComponent(record.id)}/sheet-pdf`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // an expired session can follow a redirect to /login with a 200 — only a PDF becomes the preview
+      if (!(res.headers.get("content-type") || "").startsWith("application/pdf")) throw new Error("Not a PDF");
+      const url = URL.createObjectURL(await res.blob());
       if (preview) preview.location.href = url;
-      else window.location.href = url;
+      else window.location.assign(url);
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch {
       if (preview) preview.close();
@@ -783,6 +991,93 @@ export default function SurveyEditor({
       setSaving(false);
     }
   }
+
+  /* ---------- per-section photos (#344 C5) ---------- */
+  /** Once photos change in this session, every save carries photoRefs (even an empty list). */
+  const photosTouched = useRef(false);
+  /** Same for sketches: once they change in this session every save carries them (even an empty set). */
+  const sketchesTouched = useRef(false);
+  /** A photo (true) or sketch ("drawing") save failed and nothing has saved since — the pill says so instead of "Saved". */
+  const [photoUnsaved, setPhotoUnsaved] = useState<boolean | "drawing">(false);
+  /** Save changes, stage moves and photo saves run one at a time (each reads the newest refs when it runs). */
+  const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  function serialSave<T>(fn: () => Promise<T>): Promise<T> {
+    const stamped = () => {
+      stampNow.current = { editor: editorId, seq: ++saveSeq.current };
+      return fn();
+    };
+    const run = saveChain.current.then(stamped, stamped);
+    saveChain.current = run.catch(() => undefined);
+    return run;
+  }
+  /** A photo change saves the current refs + sketches: the user's unsaved edits stay unsaved (and dirty), and are
+   *  never saved half-typed or past validate(). Online (#344 C-final B) the patch carries ONLY the file keys + their
+   *  seen ids — the store merges it over the stored doc, so another device's field edits are never reverted; the
+   *  offline outbox still needs a whole doc (the last-saved draft + the refs), which the push rev check protects. */
+  async function savePhotoRefs(kind: "photo" | "drawing" = "photo") {
+    try {
+      await serialSave(async () => {
+        const sent: Draft = { ...lastSaved.current, photoRefs: refsNow.current, sketches: sketchesNow.current };
+        const seq = stampNow.current?.seq ?? null;
+        const filePatch = fileOnlyPatch(buildPatch(undefined, sent));
+        const res = await saveThroughOutbox({
+          collection: "surveys",
+          id: record.id,
+          doc: buildFullDoc(undefined, sent),
+          action: () => saveSurvey(record.id, filePatch),
+          // #344 C-final D/E/F: this online save carried only the file keys — the queued entry holding this editor's unsent
+          // field edits (a timed-out Save changes / stage move) stays for the sync push (the store applies its fields
+          // and leaves the newer file lists alone; file-only saves don't bump rev, so it still pushes cleanly). So does
+          // another mount's / tab's entry carrying field edits (one entry per record, shared on the device) and a parked
+          // one. This mount's other entries (a timed-out photo save's copy of already-saved fields) are cleared.
+          keepOutbox: (entryDoc, state) => keepOutboxAfterFileSave(entryDoc, state, editorId, unsentFieldSeq.current),
+          timeoutMs: SAVE_ACTION_TIMEOUT_MS,
+        });
+        // queued while field edits were unsent: its whole-doc copy (lastSaved = that save's draft) replaced their entry
+        if (res.queued && unsentFieldSeq.current !== null) unsentFieldSeq.current = seq;
+        lastSaved.current = { ...lastSaved.current, photoRefs: sent.photoRefs, sketches: sent.sketches };
+        setPhotoUnsaved(false);
+      });
+    } catch (e) {
+      if (kind === "drawing") setPhotoUnsaved("drawing");
+      else setPhotoUnsaved(true);
+      throw e;
+    }
+  }
+  // #344 C6 — sketch pads save through the same file save (last-saved draft + current photos + current sketches)
+  const sectionSketches = useSectionSketches({
+    recordId: record.id,
+    me,
+    sketches: draft.sketches,
+    survey: draft,
+    liveSketches: () => sketchesNow.current,
+    onSketches: (next) => {
+      for (const k of Object.values(next)) seenSketchIds.current.add(k.id);
+      sketchesNow.current = next;
+      sketchesTouched.current = true;
+      setDraft((d) => ({ ...d, sketches: next }));
+    },
+    save: () => savePhotoRefs("drawing"),
+  });
+  const sectionPhotos = useSectionPhotos({
+    recordId: record.id,
+    me,
+    blobEnabled,
+    refs: draft.photoRefs,
+    liveRefs: () => refsNow.current,
+    onRefs: (next) => {
+      for (const r of next) seenPhotoIds.current.add(r.id);
+      refsNow.current = next;
+      photosTouched.current = true;
+      setDraft((d) => ({ ...d, photoRefs: next }));
+    },
+    save: () => savePhotoRefs("photo"),
+    sectionTitle: (id) => sections.find((s) => s.id === id)?.title ?? "another section",
+    foldOther: (fileId, slot) => sectionSketches.fold(fileId, slot),
+    discardOther: (fileId) => sectionSketches.discard(fileId),
+    describeOther: (fileId) => sectionSketches.describe(fileId),
+  });
+  const photoCounts = photoCountsBySection(draft.photoRefs);
 
   /* ---------- derived ---------- */
   const stageKey = draft.stage || "requested";
@@ -795,6 +1090,10 @@ export default function SurveyEditor({
   let savePillInk: string;
   if (dirty) {
     savePillLabel = "Unsaved changes";
+    savePillBg = "#fbf3dd";
+    savePillInk = "#9a6a1f";
+  } else if (photoUnsaved) {
+    savePillLabel = photoUnsaved === "drawing" ? "Drawing not saved yet" : "Photo not saved yet";
     savePillBg = "#fbf3dd";
     savePillInk = "#9a6a1f";
   } else {
@@ -831,25 +1130,41 @@ export default function SurveyEditor({
   }, [sections]);
   const curStepIdx = stepsPresent.indexOf(step);
 
-  const isCollapsible = (sec: SectionDef) => layoutMode === "accordion" || !!sec.advanced;
-  const isOpen = (sec: SectionDef) => (isCollapsible(sec) ? !!openSet[sec.id] : true);
-  const toggleSection = (id: string) => setOpenSet((o) => ({ ...o, [id]: !o[id] }));
+  const isOpen = (sec: SectionDef) => !isCollapsed(collapsedMap, sec);
+  const toggleSection = (sec: SectionDef) => setCollapsedFor(sec.id, isOpen(sec));
 
   const visibleSections = layoutMode === "wizard" ? sections.filter((s) => s.step === step) : sections;
 
-  function jumpTo(id: string) {
+  function scrollToSection(id: string) {
     try {
       const el = document.getElementById("sec-" + id);
       if (el) {
-        const y = el.getBoundingClientRect().top + window.pageYOffset - 128;
-        window.scrollTo({ top: y, behavior: "smooth" });
+        // the app shell scrolls <main class="pk-main">, not the window, so let the browser find the container;
+        // each section card's scrollMarginTop keeps it clear of the sticky header
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     } catch {}
+  }
+  function jumpTo(id: string) {
+    // #344: Kill questions sit in Brief while the intakes they unlock sit in Site intake — in Stepped
+    // layout a jump to another step switches to it first, then scrolls once it has rendered. A collapsed
+    // target opens first (A8), so the scroll waits a frame for it to lay out.
+    const target = sections.find((s) => s.id === id);
+    // a locked discipline stays shut (and its stored choice untouched) until the kill questions are in
+    const locked = target?.kind === "discipline" && !tier1Done;
+    if (target && !locked && !isOpen(target)) setCollapsedFor(id, false);
+    setActiveSec(id);
+    if (layoutMode === "wizard" && target && target.step !== step) {
+      setStep(target.step);
+      window.setTimeout(() => scrollToSection(id), 60);
+      return;
+    }
+    requestAnimationFrame(() => scrollToSection(id));
   }
   function gotoStep(i: number) {
     setStep(i);
     try {
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch {}
   }
 
@@ -907,23 +1222,54 @@ export default function SurveyEditor({
     background: checked ? "var(--accent)" : "#fff",
   });
 
+  /* ---------- the section rail (long scroll, #344 A8) ---------- */
+  // the phone <select> is controlled — if a scope toggle hid the active section, fall back to a shown one
+  const shownActive = sections.some((s) => s.id === activeSec) ? activeSec : (sections[0]?.id ?? "cust");
+  const LOCKED_MSG = "Answer the kill questions to unlock the discipline intakes";
+  // a locked discipline picked in the rail goes to Kill questions (its own card stays shut)
+  function pickFromRail(id: string) {
+    const t = sections.find((s) => s.id === id);
+    if (t?.kind === "discipline" && !tier1Done) {
+      flash(LOCKED_MSG);
+      jumpTo("tier1");
+      return;
+    }
+    jumpTo(id);
+  }
+  const railItems: RailItem[] = sections.map((sec) => {
+    const p = sectionProgress(sec, draft, { tier1Done });
+    return {
+      key: sec.id,
+      label: sec.title,
+      done: p.done,
+      total: p.total,
+      badges: [
+        ...(p.gate ? [{ tone: "prompt" as const, n: 1, title: LOCKED_MSG, text: "needs answers" }] : []),
+        ...(photoCounts[sec.id] ? [{ tone: "photo" as const, n: photoCounts[sec.id], title: `${photoCounts[sec.id]} photo${photoCounts[sec.id] === 1 ? "" : "s"}`, text: `${photoCounts[sec.id]} photo${photoCounts[sec.id] === 1 ? "" : "s"}` }] : []),
+      ],
+      muted: sec.kind === "discipline" && !tier1Done,
+    };
+  });
+
   const stageBg = (i: number) => (i === curStageIdx ? ACCENT : i < curStageIdx ? ACCENT_SOFT : "#f1f2f5");
   const stageCol = (i: number) => (i === curStageIdx ? "#fff" : i < curStageIdx ? ACCENT_INK : "#9aa0ab");
 
-  let prevGroup: string | null = null;
-
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "var(--font-ui)", color: "#16181d", background: "#f7f8fa" }}>
+    <div ref={rootRef} style={{ minHeight: "100vh", fontFamily: "var(--font-ui)", color: "#16181d", background: "#f7f8fa" }}>
       <style>{`
         .sv-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px 14px; }
         .sv-rail::-webkit-scrollbar { display:none; }
         .sv-rail { -ms-overflow-style:none; scrollbar-width:none; }
         .sv-inv-row { display:grid; grid-template-columns:minmax(130px,1.3fr) 68px 44px minmax(110px,1fr) 40px; gap:7px; align-items:stretch; }
-        @media (max-width:640px){ .sv-grid{ grid-template-columns:1fr !important; } .sv-pad{ padding-left:15px !important; padding-right:15px !important; } .sv-inv-row{ grid-template-columns:minmax(0,1.3fr) 58px 42px minmax(0,1fr) 38px; } .va-lineset-desktop{ display:none !important; } .va-lineset-mobile{ display:flex !important; } .va-condition-row,.va-cert-row{ grid-template-columns:1fr !important; } }
+        .sv-inv-row.sv-inv-pos { grid-template-columns:minmax(120px,1.2fr) minmax(104px,.9fr) 64px 44px minmax(100px,1fr) 40px; }
+        .va-layout { display:grid; grid-template-columns: 230px minmax(0,1fr); gap: 18px; align-items: start; max-width: 1160px; margin: 0 auto; }
+        @media (max-width:759px){ .va-layout{ display:block; } }
+        ${SECTION_RAIL_CSS}
+        @media (max-width:640px){ .sv-grid{ grid-template-columns:1fr !important; } .sv-pad{ padding-left:15px !important; padding-right:15px !important; } .sv-inv-row{ grid-template-columns:minmax(0,1.3fr) 58px 42px minmax(0,1fr) 38px; } .sv-inv-row.sv-inv-pos{ grid-template-columns:minmax(0,1fr) minmax(0,1fr) 54px 42px 38px; } .sv-inv-pos .sv-inv-notes{ grid-column:1 / -1; order:1; } .va-lineset-desktop{ display:none !important; } .va-lineset-mobile{ display:flex !important; } .va-condition-row,.va-cert-row{ grid-template-columns:1fr !important; } }
       `}</style>
 
       {/* sticky header */}
-      <div style={{ position: "sticky", top: 0, zIndex: 24, background: "#fff", borderBottom: "1px solid #ececf0", boxShadow: "0 1px 2px rgba(0,0,0,.04)" }}>
+      <div ref={headRef} style={{ position: "sticky", top: 0, zIndex: 24, background: "#fff", borderBottom: "1px solid #ececf0", boxShadow: "0 1px 2px rgba(0,0,0,.04)" }}>
         <div className="sv-pad" style={{ display: "flex", alignItems: "center", gap: 14, maxWidth: 900, margin: "0 auto", padding: "11px 24px", flexWrap: "wrap", rowGap: 10 }}>
           <Link href="/venue-assessments" style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#5b616e", background: "#f1f2f5", borderRadius: 9, padding: "9px 13px", textDecoration: "none", minHeight: 42, boxSizing: "border-box" }}>
             <span style={{ fontSize: 15, lineHeight: 1 }}>←</span> Assessments
@@ -933,6 +1279,11 @@ export default function SurveyEditor({
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#aab0bb" }}>{sub}</span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: savePillInk, background: savePillBg }}>{savePillLabel}</span>
+              {uploading > 0 && (
+                <span role="status" title="Photos and drawings still on this device — they upload when there is a connection" style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: "#1f5f9a", background: "#e8f0f8" }}>
+                  {uploading} uploading
+                </span>
+              )}
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: intakeMeta.ink, background: intakeMeta.soft, border: `1px solid ${intakeMeta.bd}` }}>{intakeMeta.label}</span>
             </div>
           </div>
@@ -979,19 +1330,8 @@ export default function SurveyEditor({
             <div style={{ display: "flex", background: "#eceef1", borderRadius: 10, padding: 3 }}>
               <button onClick={() => setLayoutMode("long")} style={modeBtn(layoutMode === "long")}>Long scroll</button>
               <button onClick={() => setLayoutMode("wizard")} style={modeBtn(layoutMode === "wizard")}>Stepped</button>
-              <button onClick={() => setLayoutMode("accordion")} style={modeBtn(layoutMode === "accordion")}>Sections</button>
             </div>
           </div>
-
-          {layoutMode === "long" && (
-            <div className="sv-rail" style={{ display: "flex", alignItems: "center", gap: 7, overflowX: "auto", flex: 1, minWidth: 0 }}>
-              {sections.map((s) => (
-                <button key={s.id} onClick={() => jumpTo(s.id)} style={{ flexShrink: 0, fontFamily: "var(--font-ui)", fontSize: 12, fontWeight: 600, color: "#5b616e", background: "#f4f5f7", border: "1px solid #eceef1", borderRadius: 20, padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
-                  {s.title}
-                </button>
-              ))}
-            </div>
-          )}
 
           {layoutMode === "wizard" && (
             <div className="sv-rail" style={{ display: "flex", alignItems: "center", gap: 8, overflowX: "auto", flex: 1, minWidth: 0 }}>
@@ -1010,271 +1350,263 @@ export default function SurveyEditor({
       </div>
 
       {/* body */}
-      <div className="sv-pad" style={{ maxWidth: 900, margin: "0 auto", padding: "20px 24px 90px" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {meetingsSlot}
-          {visibleSections.map((sec) => {
-            const locked = sec.kind === "discipline" && !tier1Done;
-            const collapsible = isCollapsible(sec) || sec.kind === "discipline";
-            const open = locked ? false : isOpen(sec);
-            const showGroupHeader = layoutMode !== "wizard" && sec.group !== prevGroup;
-            prevGroup = sec.group;
-            const filled = sec.kind === "fields" && sec.advanced ? measFilled(sec.fields) : 0;
-            const discFilled =
-              sec.kind === "discipline"
-                ? Object.values(draft.disciplines[sec.disc] || {}).filter((v) =>
-                    Array.isArray(v) ? v.length > 0 : typeof v === "boolean" ? v : String(v ?? "").trim() !== ""
-                  ).length + draft.inventory.filter((r) => r.discipline === sec.disc).length
-                : 0;
-            const headerClick = collapsible
-              ? () => {
+      <div className="sv-pad" style={{ padding: "20px 24px 90px" }}>
+        <div className={layoutMode === "long" ? "va-layout" : undefined} style={layoutMode === "long" ? undefined : { maxWidth: 900, margin: "0 auto" }}>
+          {layoutMode === "long" && (
+            <SectionRail items={railItems} active={shownActive} onPick={pickFromRail} ariaLabel="Sections" sheetLabel="Jump to section" top={headH + 12} maxHeight={railMax} />
+          )}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {sectionSketches.overlay}
+              {sectionPhotos.overlay}
+              {meetingsSlot}
+              {visibleSections.map((sec, secIdx) => {
+                const locked = sec.kind === "discipline" && !tier1Done;
+                const collapsible = !locked;
+                const open = locked ? false : isOpen(sec);
+                const showGroupHeader = layoutMode !== "wizard" && (secIdx === 0 || visibleSections[secIdx - 1].group !== sec.group);
+                const headerClick = () => {
                   if (locked) {
-                    flash("Answer the kill questions to unlock the discipline intakes");
+                    flash(LOCKED_MSG);
                     jumpTo("tier1");
                   } else {
-                    toggleSection(sec.id);
+                    toggleSection(sec);
                   }
-                }
-              : undefined;
-            return (
-              <div key={sec.id}>
-                {showGroupHeader && (
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "6px 2px 10px", flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "#5b616e" }}>
-                      {sec.group === "brief" ? "Office brief" : sec.group === "intake" ? "Site intake" : sec.group === "assessment" ? "Condition & needs" : "Field capture"}
-                    </span>
-                    <span style={{ fontSize: 11.5, color: "#aab0bb" }}>
-                      {sec.group === "brief"
-                        ? "Filled when the request is created"
-                        : sec.group === "intake"
-                          ? "Venue baseline, then branch into a discipline"
-                          : sec.group === "assessment"
-                            ? "Advisory condition and planning profile"
-                          : "Filled on-site by the surveyor"}
-                    </span>
-                  </div>
-                )}
-                <div id={"sec-" + sec.id} style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 14, boxShadow: "0 1px 2px rgba(0,0,0,.04)", overflow: "hidden", opacity: locked ? 0.72 : 1 }}>
-                  <div
-                    onClick={headerClick}
-                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: `16px 18px ${open ? "10px" : "16px"}`, cursor: collapsible ? "pointer" : "default" }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 14.5, fontWeight: 600, letterSpacing: "-.01em" }}>{sec.title}</div>
-                      {sec.subtitle && <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2 }}>{locked ? "Locked — answer the kill questions above first" : sec.subtitle}</div>}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                      {sec.advanced && filled > 0 && (
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER_LT}`, padding: "3px 9px", borderRadius: 20 }}>
-                          {filled} filled
+                };
+                return (
+                  <div key={sec.id}>
+                    {showGroupHeader && (
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "6px 2px 10px", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "#5b616e" }}>
+                          {GROUP_META[sec.group].label}
                         </span>
-                      )}
-                      {sec.kind === "discipline" && !locked && discFilled > 0 && (
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER_LT}`, padding: "3px 9px", borderRadius: 20 }}>
-                          {discFilled} captured
+                        <span style={{ fontSize: 11.5, color: "#aab0bb" }}>
+                          {GROUP_META[sec.group].blurb}
                         </span>
-                      )}
-                      {locked && (
-                        <span style={{ display: "inline-flex", color: "#aab0bb" }} title="Complete the kill questions to unlock">
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <rect x="3" y="11" width="18" height="11" rx="2" />
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                          </svg>
-                        </span>
-                      )}
-                      {collapsible && !locked && (
-                        <span style={{ fontSize: 11, color: "#aab0bb", display: "inline-block", transition: "transform .15s ease", transform: open ? "rotate(180deg)" : "none" }}>▾</span>
-                      )}
-                    </div>
-                  </div>
+                      </div>
+                    )}
+                    <div id={"sec-" + sec.id} style={{ scrollMarginTop: headH + 12, background: "#fff", border: "1px solid #ececf0", borderRadius: 14, boxShadow: "0 1px 2px rgba(0,0,0,.04)", overflow: "hidden", opacity: locked ? 0.72 : 1 }}>
+                      <div
+                        onClick={headerClick}
+                        role="button"
+                        aria-disabled={locked || undefined}
+                        tabIndex={0}
+                        aria-expanded={open}
+                        aria-controls={open ? "sec-body-" + sec.id : undefined}
+                        onKeyDown={(e) => {
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            headerClick();
+                          }
+                        }}
+                        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: `16px 18px ${open ? "10px" : "16px"}`, cursor: "pointer" }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 14.5, fontWeight: 600, letterSpacing: "-.01em" }}>{sec.title}</div>
+                          {sec.subtitle && <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2 }}>{locked ? "Locked — answer the kill questions above first" : sec.subtitle}</div>}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                          {!locked && sec.kind !== "photos" && sectionPhotos.addButton(sec.id)}
+                          {locked && (
+                            <span style={{ display: "inline-flex", color: "#aab0bb" }} title="Complete the kill questions to unlock">
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <rect x="3" y="11" width="18" height="11" rx="2" />
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                              </svg>
+                            </span>
+                          )}
+                          {collapsible && (
+                            <span style={{ fontSize: 11, color: "#aab0bb", display: "inline-block", transition: "transform .15s ease", transform: open ? "rotate(180deg)" : "none" }}>▾</span>
+                          )}
+                        </div>
+                      </div>
 
-                  {open && (
-                    <div style={{ padding: "4px 18px 20px" }}>
-                      {sec.kind === "custvenue" && (
-                        <CustVenueSection
-                          draft={draft}
-                          patchDraft={patchDraft}
-                          setField={setField}
-                          customers={customers}
-                          linkedCust={linkedCust}
-                          custLocs={custLocs}
-                          venueHasLocs={venueHasLocs}
-                          custNew={custNew}
-                          setCustNew={setCustNew}
-                          venueOther={venueOther}
-                          setCustomerSel={setCustomerSel}
-                          setVenueSel={setVenueSel}
-                        />
-                      )}
-                      {sec.kind === "fields" && (
-                        <FieldsSection
-                          fields={sec.fields}
-                          draft={draft}
-                          patchDraft={patchDraft}
-                          mv={mv}
-                          setMeasure={setMeasure}
-                          toggleMeasure={toggleMeasure}
-                          toggleBtn={toggleBtn}
-                          boxStyle={boxStyle}
-                        />
-                      )}
-                      {sec.id === "notes" && fromRecording.length > 0 && (
-                        <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
-                          {fromRecording.map((p) => (
-                            <FromRecordingPanel
-                              key={p.recordingId}
-                              recordingId={p.recordingId}
-                              title={p.title}
-                              sections={p.sections}
-                              target="survey"
-                              disabled={dirty}
-                              disabledHint="Save your changes first — Insert appends to the saved survey."
-                              onInserted={() => setAdoptNextRecord(true)}
+                      {!locked && sectionPhotos.strip(sec.id)}
+                      {open && (
+                        <div id={"sec-body-" + sec.id} style={{ padding: "4px 18px 20px" }}>
+                          {sectionSketches.tiles(sec.id, sec.kind === "fields" ? sec.fields.map((f) => f.key) : undefined)}
+                          {sec.kind === "custvenue" && (
+                            <CustVenueSection
+                              draft={draft}
+                              patchDraft={patchDraft}
+                              setField={setField}
+                              customers={customers}
+                              linkedCust={linkedCust}
+                              custLocs={custLocs}
+                              venueHasLocs={venueHasLocs}
+                              custNew={custNew}
+                              setCustNew={setCustNew}
+                              venueOther={venueOther}
+                              setCustomerSel={setCustomerSel}
+                              setVenueSel={setVenueSel}
                             />
-                          ))}
+                          )}
+                          {sec.kind === "fields" && (
+                            <FieldsSection
+                              fields={sec.fields}
+                              draft={draft}
+                              patchDraft={patchDraft}
+                              mv={mv}
+                              setMeasure={setMeasure}
+                              toggleMeasure={toggleMeasure}
+                              toggleBtn={toggleBtn}
+                              boxStyle={boxStyle}
+                              dv={dv}
+                              setDisc={setDisc}
+                              aside={sectionSketches.aside}
+                            />
+                          )}
+                          {sec.id === "notes" && fromRecording.length > 0 && (
+                            <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+                              {fromRecording.map((p) => (
+                                <FromRecordingPanel
+                                  key={p.recordingId}
+                                  recordingId={p.recordingId}
+                                  title={p.title}
+                                  sections={p.sections}
+                                  target="survey"
+                                  disabled={dirty}
+                                  disabledHint="Save your changes first — Insert appends to the saved survey."
+                                  onInserted={() => setAdoptNextRecord(true)}
+                                />
+                              ))}
+                            </div>
+                          )}
+                          {sec.kind === "tier1" && (
+                            <KillQuestions
+                              draft={draft}
+                              items={tier1}
+                              onJump={jumpTo}
+                              onScope={(next) => setField("scope", next)}
+                              onRigSystems={(next) =>
+                                patchDraft({
+                                  disciplines: { ...draft.disciplines, rigging: { ...(draft.disciplines.rigging || {}), present: next } },
+                                })
+                              }
+                              mv={mv}
+                              setMeasure={setMeasure}
+                              chipStyle={chipStyle}
+                              footer={
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+                                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontWeight: 600, padding: "4px 10px", borderRadius: 20, color: intakeMeta.ink, background: intakeMeta.soft, border: `1px solid ${intakeMeta.bd}` }}>
+                                    {intakeMeta.label}
+                                  </span>
+                                  <span style={{ fontSize: 12, color: "#9aa0ab" }}>
+                                    {tier1Done
+                                      ? "Discipline intakes are unlocked."
+                                      : "The record saves as a draft any time — but discipline intakes stay locked until these are answered."}
+                                  </span>
+                                  <div style={{ flex: 1, minWidth: 8 }} />
+                                  {intakeSt === "discipline-added" && (
+                                    <button onClick={() => setField("intakeReady", true)} style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: "#1f7a52", border: "none", borderRadius: 9, padding: "9px 14px", cursor: "pointer", minHeight: 38 }}>
+                                      Mark ready for quote
+                                    </button>
+                                  )}
+                                  {intakeSt === "ready-for-quote" && (
+                                    <button onClick={() => setField("intakeReady", false)} style={{ fontSize: 12.5, fontWeight: 600, color: "#1f7a52", background: "#eaf6ef", border: "1px solid #cce9da", borderRadius: 9, padding: "9px 14px", cursor: "pointer", minHeight: 38 }}>
+                                      ✓ Ready — undo
+                                    </button>
+                                  )}
+                                </div>
+                              }
+                            />
+                          )}
+                          {sec.kind === "discipline" && (() => {
+                            const g = DISCIPLINE_GROUPS.find((x) => x.key === sec.disc);
+                            if (!g) return null;
+                            return (
+                              <SystemsSection
+                                group={g}
+                                venueClass={draft.venueClass}
+                                intakeCatalog={meta.intakeCatalog}
+                                fabricOptions={meta.fabricOptions}
+                                value={dv}
+                                setValue={setDisc}
+                                measureValue={mv}
+                                setMeasure={setMeasure}
+                                inventoryRows={invRows}
+                                addInventoryRow={addInvRow}
+                                patchInventoryRow={patchInvRow}
+                                removeInventoryRow={removeInvRow}
+                                presentFromKill={g.key === "rigging"}
+                                onJumpKill={() => jumpTo("tier1")}
+                              />
+                            );
+                          })()}
+                          {sec.kind === "linesets" && (
+                            <LinesetsSection
+                              handSheet={sectionSketches.linesetSheet()}
+                              qty={draft.linesetQty}
+                              rows={draft.linesets}
+                              onApply={applyLinesets}
+                              onRemove={removeLineset}
+                              onChange={patchLineset}
+                            />
+                          )}
+                          {sec.kind === "assessmentToggle" && (
+                            <button
+                              type="button"
+                              onClick={() => setField("assessmentEnabled", !draft.assessmentEnabled)}
+                              style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", textAlign: "left", border: `1px solid ${draft.assessmentEnabled ? ACCENT_BORDER_LT : "#e4e7ec"}`, borderRadius: 10, padding: "12px 13px", background: draft.assessmentEnabled ? ACCENT_SOFT : "#fff", color: draft.assessmentEnabled ? ACCENT_INK : "#5b616e", cursor: "pointer" }}
+                            >
+                              <span style={boxStyle(draft.assessmentEnabled)}>{draft.assessmentEnabled ? "✓" : ""}</span>
+                              <span><strong style={{ display: "block", fontSize: 13.5 }}>Add Condition & Needs assessment</strong><span style={{ display: "block", marginTop: 2, fontSize: 11.5, color: "#8c919c" }}>Use when the customer has no defined ask or needs a formal deliverable.</span></span>
+                            </button>
+                          )}
+                          {sec.kind === "assessmentUsage" && (
+                            <AssessmentUsageSection
+                              assessment={draft.assessment}
+                              roster={roster}
+                              quote={{ budget: draft.budget, fiscalYearSpendBy: draft.fiscalYearSpendBy, whoDecides: draft.whoDecides, targetInstallWindow: draft.targetInstallWindow, quoteNeededBy: draft.quoteNeededBy }}
+                              onAssessment={(assessment) => setField("assessment", assessment)}
+                              onQuoteField={(key, value) => setField(key, value)}
+                            />
+                          )}
+                          {sec.kind === "assessmentCondition" && (
+                            <AssessmentConditionSection assessment={draft.assessment} autoCerts={meta.autoCerts} onChange={(assessment) => setField("assessment", assessment)} />
+                          )}
+                          {sec.kind === "assessmentFindings" && (
+                            <AssessmentFindingsSection assessment={draft.assessment} photos={draft.photos} onChange={(assessment) => setField("assessment", assessment)} />
+                          )}
+                          {sec.kind === "recap" && <RecapSection draft={draft} />}
+                          {sec.kind === "finalThoughts" && (
+                            <FinalThoughtsSection draft={draft} tags={meta.internalTags} onTags={(next) => setField("internalTags", next)} chipStyle={chipStyle} />
+                          )}
+                          {sec.kind === "viz3d" && <Venue3D venueClass={draft.venueClass} venueSubtype={draft.venueSubtype} measurements={draft.measurements} />}
+                          {sec.kind === "photos" && (
+                            <PhotosSection draft={draft} />
+                          )}
+                          <OlderNotes notes={draft.legacyNotes.filter((n) => n.section === sec.id)} />
                         </div>
-                      )}
-                      {sec.kind === "tier1" && (
-                        <div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                            {tier1.map((item) => (
-                              <button
-                                key={item.key}
-                                onClick={() => jumpTo(item.section)}
-                                title={item.done ? "Answered" : "Missing — tap to jump to the field"}
-                                style={{
-                                  display: "flex", alignItems: "center", gap: 7,
-                                  fontFamily: "var(--font-ui)", fontSize: 12.5, fontWeight: 600,
-                                  padding: "9px 13px", borderRadius: 20, cursor: "pointer", minHeight: 40,
-                                  border: `1px solid ${item.done ? "#cce9da" : "#f0e2bd"}`,
-                                  background: item.done ? "#eaf6ef" : "#fbf3dd",
-                                  color: item.done ? "#1f7a52" : "#8a6d1f",
-                                }}
-                              >
-                                <span style={{ fontSize: 12 }}>{item.done ? "✓" : "○"}</span>
-                                {item.label}
-                              </button>
-                            ))}
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontWeight: 600, padding: "4px 10px", borderRadius: 20, color: intakeMeta.ink, background: intakeMeta.soft, border: `1px solid ${intakeMeta.bd}` }}>
-                              {intakeMeta.label}
-                            </span>
-                            <span style={{ fontSize: 12, color: "#9aa0ab" }}>
-                              {tier1Done
-                                ? "Discipline intakes are unlocked."
-                                : "The record saves as a draft any time — but discipline intakes stay locked until these are answered."}
-                            </span>
-                            <div style={{ flex: 1, minWidth: 8 }} />
-                            {intakeSt === "discipline-added" && (
-                              <button onClick={() => setField("intakeReady", true)} style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: "#1f7a52", border: "none", borderRadius: 9, padding: "9px 14px", cursor: "pointer", minHeight: 38 }}>
-                                Mark ready for quote
-                              </button>
-                            )}
-                            {intakeSt === "ready-for-quote" && (
-                              <button onClick={() => setField("intakeReady", false)} style={{ fontSize: 12.5, fontWeight: 600, color: "#1f7a52", background: "#eaf6ef", border: "1px solid #cce9da", borderRadius: 9, padding: "9px 14px", cursor: "pointer", minHeight: 38 }}>
-                                ✓ Ready — undo
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      {sec.kind === "discipline" && (() => {
-                        const g = DISCIPLINE_GROUPS.find((x) => x.key === sec.disc);
-                        if (!g) return null;
-                        return (
-                          <SystemsSection
-                            group={g}
-                            venueClass={draft.venueClass}
-                            doctrine={meta.venueDoctrine[draft.venueClass]}
-                            intakeCatalog={meta.intakeCatalog}
-                            value={dv}
-                            setValue={setDisc}
-                            toggleScope={toggleDiscScope}
-                            inventoryRows={invRows}
-                            addInventoryRow={addInvRow}
-                            patchInventoryRow={patchInvRow}
-                            removeInventoryRow={removeInvRow}
-                          />
-                        );
-                      })()}
-                      {sec.kind === "linesets" && (
-                        <LinesetsSection
-                          enabled={draft.linesetsEnabled}
-                          rows={draft.linesets}
-                          onEnabled={(enabled) => setField("linesetsEnabled", enabled)}
-                          onAdd={addLineset}
-                          onRemove={removeLineset}
-                          onChange={patchLineset}
-                        />
-                      )}
-                      {sec.kind === "assessmentToggle" && (
-                        <button
-                          type="button"
-                          onClick={() => setField("assessmentEnabled", !draft.assessmentEnabled)}
-                          style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", textAlign: "left", border: `1px solid ${draft.assessmentEnabled ? ACCENT_BORDER_LT : "#e4e7ec"}`, borderRadius: 10, padding: "12px 13px", background: draft.assessmentEnabled ? ACCENT_SOFT : "#fff", color: draft.assessmentEnabled ? ACCENT_INK : "#5b616e", cursor: "pointer" }}
-                        >
-                          <span style={boxStyle(draft.assessmentEnabled)}>{draft.assessmentEnabled ? "✓" : ""}</span>
-                          <span><strong style={{ display: "block", fontSize: 13.5 }}>Add Condition & Needs assessment</strong><span style={{ display: "block", marginTop: 2, fontSize: 11.5, color: "#8c919c" }}>Use when the customer has no defined ask or needs a formal deliverable.</span></span>
-                        </button>
-                      )}
-                      {sec.kind === "assessmentUsage" && (
-                        <AssessmentUsageSection
-                          assessment={draft.assessment}
-                          roster={roster}
-                          quote={{ budget: draft.budget, fiscalYearSpendBy: draft.fiscalYearSpendBy, whoDecides: draft.whoDecides, targetInstallWindow: draft.targetInstallWindow, quoteNeededBy: draft.quoteNeededBy }}
-                          onAssessment={(assessment) => setField("assessment", assessment)}
-                          onQuoteField={(key, value) => setField(key, value)}
-                        />
-                      )}
-                      {sec.kind === "assessmentCondition" && (
-                        <AssessmentConditionSection assessment={draft.assessment} autoCerts={meta.autoCerts} onChange={(assessment) => setField("assessment", assessment)} />
-                      )}
-                      {sec.kind === "assessmentFindings" && (
-                        <AssessmentFindingsSection assessment={draft.assessment} photos={draft.photos} onChange={(assessment) => setField("assessment", assessment)} />
-                      )}
-                      {sec.kind === "signoff" && (
-                        <SignoffSection value={draft.signoff} templateRev={draft.templateRev} onChange={(signoff) => setField("signoff", signoff)} />
-                      )}
-                      {sec.kind === "conditions" && (
-                        <ConditionsSection
-                          draft={draft}
-                          conditions={meta.conditions}
-                          toggleCondition={toggleCondition}
-                          chipStyle={chipStyle}
-                        />
-                      )}
-                      {sec.kind === "viz3d" && <Venue3D venueClass={draft.venueClass} venueSubtype={draft.venueSubtype} measurements={draft.measurements} />}
-                      {sec.kind === "photos" && (
-                        <PhotosSection draft={draft} onPhotos={onPhotos} removePhoto={removePhoto} />
                       )}
                     </div>
-                  )}
-                </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {saveError && (
+              <div style={{ marginTop: 16, display: "flex", alignItems: "flex-start", gap: 9, background: "#f9ece8", border: "1px solid #f0d6cd", borderRadius: 11, padding: "13px 15px", color: "#b4543a", fontSize: 13, lineHeight: 1.5 }}>
+                {saveError}
               </div>
-            );
-          })}
+            )}
+
+            {layoutMode === "wizard" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
+                {curStepIdx > 0 && (
+                  <button onClick={() => gotoStep(stepsPresent[Math.max(0, curStepIdx - 1)])} style={{ fontSize: 13.5, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 10, padding: "12px 20px", cursor: "pointer", minHeight: 46 }}>← Back</button>
+                )}
+                <div style={{ flex: 1 }} />
+                {curStepIdx < stepsPresent.length - 1 ? (
+                  <button onClick={() => gotoStep(stepsPresent[Math.min(stepsPresent.length - 1, curStepIdx + 1)])} style={{ fontSize: 13.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", borderRadius: 10, padding: "12px 22px", cursor: "pointer", minHeight: 46 }}>Next →</button>
+                ) : (
+                  <button onClick={onSave} disabled={saving} style={{ fontSize: 13.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", borderRadius: 10, padding: "12px 22px", cursor: saving ? "default" : "pointer", minHeight: 46 }}>{saving ? "Saving…" : "Save changes"}</button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-
-        {saveError && (
-          <div style={{ marginTop: 16, display: "flex", alignItems: "flex-start", gap: 9, background: "#f9ece8", border: "1px solid #f0d6cd", borderRadius: 11, padding: "13px 15px", color: "#b4543a", fontSize: 13, lineHeight: 1.5 }}>
-            {saveError}
-          </div>
-        )}
-
-        {layoutMode === "wizard" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
-            {curStepIdx > 0 && (
-              <button onClick={() => gotoStep(stepsPresent[Math.max(0, curStepIdx - 1)])} style={{ fontSize: 13.5, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 10, padding: "12px 20px", cursor: "pointer", minHeight: 46 }}>← Back</button>
-            )}
-            <div style={{ flex: 1 }} />
-            {curStepIdx < stepsPresent.length - 1 ? (
-              <button onClick={() => gotoStep(stepsPresent[Math.min(stepsPresent.length - 1, curStepIdx + 1)])} style={{ fontSize: 13.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", borderRadius: 10, padding: "12px 22px", cursor: "pointer", minHeight: 46 }}>Next →</button>
-            ) : (
-              <button onClick={onSave} disabled={saving} style={{ fontSize: 13.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", borderRadius: 10, padding: "12px 22px", cursor: saving ? "default" : "pointer", minHeight: 46 }}>{saving ? "Saving…" : "Save changes"}</button>
-            )}
-          </div>
-        )}
       </div>
 
       {toast && (

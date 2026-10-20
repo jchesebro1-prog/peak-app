@@ -21,6 +21,7 @@ import { RouteEditor } from "../wires-panel";
 import { SpacePinControl, TypeEditControl } from "./type-space-controls";
 import { TYPE_NOT_UNDOABLE } from "@/lib/design/grid-type-edit";
 import { groupRefusal, holdRefusal } from "@/lib/design/grid-groups";
+import { rackHref, rackLinkMemberCount, rackLinkRefusal } from "@/lib/design/grid-rack-link";
 import Menu from "./menu";
 import type { GridEditor } from "../use-grid-editor";
 
@@ -320,6 +321,7 @@ function DeviceProps({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
         )}
       </PropRow>
       {!selectedPlacement.curtain && <GroupRow key={`group:${selectedPlacement.id}`} ed={ed} pl={selectedPlacement} />}
+      {!selectedPlacement.curtain && <RackRow key={`rack:${selectedPlacement.id}`} ed={ed} pl={selectedPlacement} />}
       <PropRow label="Qty">{qty}</PropRow>
       <PropRow label="Sell">
         <span style={{ fontWeight: 600 }}>
@@ -478,12 +480,17 @@ function GroupRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
   }
   if (holdRefusal(pl)) return null;
   const n = holderCounts.get(pl.id) || 0;
+  // #354 review: a rack placed from the library supplies its own devices (the Rack row) — only devices put inside it
+  // before that rule can still be taken out.
+  const isRack = !!ed.rackOf(pl);
+  if (isRack && !n) return null;
   const placing = placeInsideId === pl.id;
   return (
     <PropRow label="Holds" title="Any device can hold others — a rack, a booth, a panel. They list under it on the Spreadsheet.">
       <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         <span style={{ flex: 1, minWidth: 0, color: n ? undefined : "#8c919c" }}>{n ? `${n} device${n === 1 ? "" : "s"}` : "Nothing yet"}</span>
-        <button
+        {!isRack && (
+          <button
           type="button"
           style={placing ? { ...small, background: "#16181d", color: "#fff", borderColor: "#16181d" } : small}
           disabled={busy && !placing}
@@ -492,7 +499,8 @@ function GroupRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
           title="Then click parts in the Product Library — each click adds one inside this device"
         >
           {placing ? "Done" : "Place inside"}
-        </button>
+          </button>
+        )}
         {n > 0 && (
           <button type="button" style={small} disabled={busy} onClick={() => void takeOutOfGroup([pl.id])} title="Put every device inside back on the plan beside it">
             Take all out
@@ -500,6 +508,108 @@ function GroupRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
         )}
       </span>
     </PropRow>
+  );
+}
+
+/**
+ * Oct 15 #43: the rack this device draws as — its Assembly Builder rack's devices, read-only, with
+ * Open rack → (and Unlink when "Link to rack…" made it) — or, for a plain device that can hold and
+ * holds nothing yet, "Link to rack…".
+ */
+function RackRow({ ed, pl }: { ed: GridEditor; pl: GridPlacement }) {
+  const { rackOf, racks, linkRack, unlinkRack, placements, busy } = ed;
+  const rack = rackOf(pl);
+  // #354 review: "Link and remove its N devices" — picked rack waiting for the confirm (not undoable).
+  const [confirmRack, setConfirmRack] = useState<string | null>(null);
+  const small: React.CSSProperties = { ...BTN, padding: "2px 8px", fontSize: 11, flex: "0 0 auto", whiteSpace: "nowrap" };
+  if (rack) {
+    const units = rack.rows.reduce((n, r) => n + r.qty, 0);
+    return (
+      <>
+        <PropRow label="Rack" title="Its devices come from the Assembly Builder rack — change them there">
+          <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <strong style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{rack.label}</strong>
+            <a href={rackHref(rack.rackId)} target="_blank" rel="noopener noreferrer" style={{ ...small, textDecoration: "none", color: "#16181d" }}>
+              Open rack →
+            </a>
+          </span>
+        </PropRow>
+        <div style={{ padding: "4px 10px 6px", fontSize: 11, color: "#5b616e", borderBottom: "1px solid #f0f1f4" }}>
+          <div style={{ color: "#8c919c", marginBottom: 3 }}>
+            {units ? `${units} device${units === 1 ? "" : "s"} inside, from the rack (read-only)` : "No devices in the rack yet"}
+          </div>
+          {rack.rows.length > 0 && (
+            <div style={{ maxHeight: 140, overflowY: "auto" }}>
+              {rack.rows.map((r) => (
+                <div key={r.sku} style={{ display: "flex", gap: 6 }}>
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`${r.sku} — ${r.desc}`}>
+                    {r.desc}
+                  </span>
+                  <span style={{ fontFamily: "var(--font-mono)", color: "#8c919c" }}>×{r.qty}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {rack.linked && (
+            <button
+              type="button"
+              style={{ ...small, marginTop: 6 }}
+              disabled={busy}
+              onClick={() => void unlinkRack(pl.id)}
+              title="Puts this device's own part back and copies the rack's devices in as an ordinary group — each then priced on its own. Not undoable."
+            >
+              Unlink
+            </button>
+          )}
+        </div>
+      </>
+    );
+  }
+  if (!racks.length) return null;
+  const inside = rackLinkMemberCount(pl, placements);
+  // Linkable outright, or only once its devices go (the one-step link-and-remove); anything else hides the row.
+  if (rackLinkRefusal(pl, placements, { removeMembers: true })) return null;
+  const label = (r: { label: string; scope?: string }) => (r.scope ? `${r.label} (${r.scope})` : r.label);
+  const pending = confirmRack ? racks.find((r) => r.id === confirmRack) : undefined;
+  return (
+    <>
+      <PropRow
+        label="Rack"
+        title={
+          inside
+            ? `Remove the ${inside} device${inside === 1 ? "" : "s"} inside first — the rack supplies them. Or link and remove them in one step.`
+            : "Make this device an Assembly Builder rack: it prices as the rack and shows the rack's devices. Not undoable — Unlink is the way back."
+        }
+      >
+        <Menu
+          label={inside ? `Link and remove its ${inside} device${inside === 1 ? "" : "s"}…` : "Link to rack…"}
+          disabled={busy}
+          title="Pick the rack this device is"
+          items={racks.map((r) => ({ label: label(r), onSelect: () => (inside ? setConfirmRack(r.id) : void linkRack(pl.id, r.id)) }))}
+        />
+      </PropRow>
+      {pending && inside > 0 && (
+        <div style={{ padding: "6px 10px", fontSize: 11, color: "#5b616e", borderBottom: "1px solid #f0f1f4" }}>
+          {`Deletes the ${inside} device${inside === 1 ? "" : "s"} inside and links to ${label(pending)} — the rack supplies its devices. This can't be undone.`}
+          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <button
+              type="button"
+              style={{ ...BTN, padding: "2px 8px", fontSize: 11, color: "#a0442b" }}
+              disabled={busy}
+              onClick={() => {
+                setConfirmRack(null);
+                void linkRack(pl.id, pending.id, true);
+              }}
+            >
+              {`Link and remove ${inside}`}
+            </button>
+            <button type="button" style={{ ...BTN, padding: "2px 8px", fontSize: 11 }} onClick={() => setConfirmRack(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

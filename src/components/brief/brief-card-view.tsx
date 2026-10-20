@@ -5,13 +5,16 @@
  * (remembered per brief id), Rebuild, Listen / Stop, `?brief=1` scrolling,
  * and the big-text variant under 900 px (pure CSS — both variants render,
  * a media query picks one). Imports only an action, pure modules and types.
+ * Both variants show the summary, then the VM's blocks in order — Emails,
+ * Estimates, Tasks (Jeff, 2026-10-15) — with the Do-these-first picks as ★
+ * inside their own block.
  */
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { rebuildBriefAction } from "@/app/(app)/brief-actions";
 import { postChanged } from "@/lib/popout/channel";
-import type { BriefCardVM } from "@/lib/brief/card-vm";
+import type { BriefBlockItem, BriefBlockVM, BriefCardVM } from "@/lib/brief/card-vm";
 import SuggestEstimate from "@/components/assist/suggest-estimate";
 
 const COLLAPSE_KEY = (id: string) => `peak-brief-collapsed:${id}`;
@@ -22,6 +25,7 @@ const CSS = `
 .pkb-btn:hover{border-color:#c4c9d2}
 .pkb-btn:disabled{opacity:.6;cursor:default}
 .pkb-chip{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.02em;padding:1px 7px;border-radius:5px;background:color-mix(in srgb,var(--accent) 12%,#fff);color:color-mix(in srgb,var(--accent) 68%,#000)}
+.pkb-star{color:var(--accent);font-weight:700;line-height:1;cursor:help}
 .pkb-link{color:var(--accent);text-decoration:none;font-weight:600}
 .pkb-link:hover{text-decoration:underline}
 @media (max-width:899px){
@@ -186,150 +190,233 @@ function FullVariant({ vm }: { vm: BriefCardVM }) {
   return (
     <div className="pkb-full">
       {vm.since && <p style={{ margin: "2px 0 6px", fontSize: 12.5, fontWeight: 600, color: "#3a3f4a" }}>{vm.since}</p>}
-      <p style={{ margin: "2px 0 0", fontSize: 13.5, lineHeight: 1.55, color: "#16181d", whiteSpace: "pre-line" }}>{vm.summary}</p>
-
-      {vm.doFirst.length > 0 && (
-        <>
-          <div style={H}>Do these first</div>
-          <ol style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 6 }}>
-            {vm.doFirst.map((d) => (
-              <li key={d.key} style={{ fontSize: 13, lineHeight: 1.45, color: "#16181d" }}>
-                <span style={{ display: "inline-flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
-                  {d.source && <span style={{ fontSize: 11, color: "#8c919c" }}>{d.source}</span>}
-                  {d.href ? (
-                    <Link href={d.href} className="pkb-link">
-                      {d.title}
-                    </Link>
-                  ) : (
-                    <span style={{ fontWeight: 600 }}>{d.title}</span>
-                  )}
-                  {d.draftReady && <span className="pkb-chip">Draft ready</span>}
-                  {d.tasksReady && <span className="pkb-chip">Tasks ready</span>}
-                </span>
-                {d.why && <div style={{ fontSize: 12.5, color: "#5b616e" }}>{d.why}</div>}
-                {d.leadSuggest ? (
-                  <div style={{ fontSize: 12, color: "#5b616e", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
-                    Ready to quote?
-                    <SuggestEstimate
-                      source={{ kind: "lead", id: d.leadSuggest.leadId }}
-                      readyHref={d.leadSuggest.readyHref}
-                      buttonStyle={{ fontSize: 12, padding: "3px 10px", borderRadius: 7, color: "#3a3f4a" }}
-                    />
-                  </div>
-                ) : (
-                  d.leadHref && (
-                    <div style={{ fontSize: 12, color: "#5b616e" }}>
-                      Ready to quote? →{" "}
-                      <Link href={d.leadHref} className="pkb-link">
-                        Open lead
-                      </Link>
-                    </div>
-                  )
-                )}
-              </li>
-            ))}
-          </ol>
-        </>
-      )}
-
-      {vm.organize && (
-        <>
-          <div style={H}>Inbox organization</div>
-          <div style={{ fontSize: 13, color: "#3a3f4a" }}>
-            {vm.organize.label} →{" "}
-            <Link href={vm.organize.href} className="pkb-link">
-              Review
-            </Link>
-          </div>
-        </>
-      )}
-
-      {vm.promises.length > 0 && (
-        <>
-          <div style={H}>New tasks from promises</div>
-          <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 3 }}>
-            {vm.promises.map((p) => (
-              <li key={p.taskId} style={{ fontSize: 13, color: "#16181d" }}>
-                {p.title}
-                {p.dueLabel && <span style={{ color: "#8c919c" }}> · due {p.dueLabel}</span>}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-
-      {(vm.today || vm.approvals) && (
-        <>
-          <div style={H}>Today</div>
-          {vm.today && <div style={{ fontSize: 13, color: "#3a3f4a" }}>{vm.today}</div>}
-          {vm.approvals && <div style={{ fontSize: 13, color: "#3a3f4a" }}>{vm.approvals}</div>}
-        </>
-      )}
-
-      {vm.quiet.length > 0 && (
-        <>
-          <div style={H}>Quiet quotes</div>
-          <div style={{ display: "grid", gap: 8 }}>
-            {vm.quiet.map((q) => (
-              <div key={q.quoteId} style={{ border: "1px solid #f0f1f4", borderRadius: 9, padding: "8px 11px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#16181d" }}>{q.label}</span>
-                  <span style={{ fontSize: 12, color: "#8c919c" }}>{q.daysLabel}</span>
-                </div>
-                {q.note && <div style={{ fontSize: 12.5, color: "#5b616e", marginTop: 3 }}>{q.note}</div>}
-                <div style={{ display: "flex", gap: 14, marginTop: 5, fontSize: 12.5 }}>
-                  {q.nudgeHref && (
-                    <Link href={q.nudgeHref} className="pkb-link" title="Opens the Inbox composer with the follow-up — review it before sending">
-                      Send nudge
-                    </Link>
-                  )}
-                  <Link href={q.openHref} className="pkb-link">
-                    Open estimate
-                  </Link>
-                </div>
-              </div>
+      <p style={{ margin: "2px 0 0", fontSize: 13.5, lineHeight: 1.55, color: "var(--ink)", whiteSpace: "pre-line" }}>{vm.summary}</p>
+      {vm.blocks.map((block) => (
+        <section key={block.id} data-brief-block={block.id} aria-label={block.title}>
+          <div style={H}>{block.title}</div>
+          <div style={{ display: "grid", gap: 6 }}>
+            {block.items.map((it) => (
+              <FullItem key={itemKey(it)} it={it} />
             ))}
           </div>
-        </>
-      )}
+          <More block={block} size={12.5} />
+        </section>
+      ))}
     </div>
   );
 }
 
-/** Under 900 px: larger type, summary + Do these first + counts — no drafts. */
+const itemKey = (it: BriefBlockItem): string =>
+  it.kind === "row" ? it.key : it.kind === "quiet" ? `quiet:${it.quoteId}` : it.kind === "promise" ? `promise:${it.taskId}` : it.kind === "line" ? `line:${it.id}` : it.kind;
+
+/** ★ — one of the brief's Do-these-first picks; its why is the tooltip (and the small text under the row). */
+function Star({ why, size }: { why: string; size: number }) {
+  return (
+    <span className="pkb-star" style={{ fontSize: size }} title={why ? `Do this first — ${why}` : "Do this first"} aria-label="Do this first">
+      ★
+    </span>
+  );
+}
+
+function More({ block, size }: { block: BriefBlockVM; size: number }) {
+  if (!block.more.length) return null;
+  return (
+    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 5, fontSize: size }}>
+      {block.more.map((m) => (
+        <Link key={m.href} href={m.href} className="pkb-link">
+          {m.label}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function FullItem({ it }: { it: BriefBlockItem }) {
+  switch (it.kind) {
+    case "row":
+      return (
+        <div data-brief-row={it.key} data-brief-star={it.star ? "1" : undefined} style={{ fontSize: 13, lineHeight: 1.45, color: "var(--ink)" }} title={it.star ? undefined : it.hint || undefined}>
+          <span style={{ display: "inline-flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
+            {it.star && <Star why={it.why} size={13} />}
+            {it.source && <span style={{ fontSize: 11, color: "var(--muted-2)" }}>{it.source}</span>}
+            {it.href ? (
+              <Link href={it.href} className="pkb-link">
+                {it.title}
+              </Link>
+            ) : (
+              <span style={{ fontWeight: 600 }}>{it.title}</span>
+            )}
+            {it.draftReady && it.source === "Email" && it.href ? (
+              <span style={{ fontSize: 12 }}>
+                <span className="pkb-chip">Draft reply ready</span>{" "}
+                <span aria-hidden style={{ color: "var(--muted-2)" }}>
+                  ·
+                </span>{" "}
+                <Link href={it.href} className="pkb-link" title="Opens the thread — Use it puts the prepared draft in the reply; review it before sending">
+                  Use it
+                </Link>
+              </span>
+            ) : (
+              it.draftReady && <span className="pkb-chip">Draft ready</span>
+            )}
+            {it.tasksReady && <span className="pkb-chip">Tasks ready</span>}
+          </span>
+          {it.star && it.why && <div style={{ fontSize: 12.5, color: "#5b616e" }}>{it.why}</div>}
+          {it.leadSuggest ? (
+            <div style={{ fontSize: 12, color: "#5b616e", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+              Ready to quote?
+              <SuggestEstimate
+                source={{ kind: "lead", id: it.leadSuggest.leadId }}
+                readyHref={it.leadSuggest.readyHref}
+                buttonStyle={{ fontSize: 12, padding: "3px 10px", borderRadius: 7, color: "#3a3f4a" }}
+              />
+            </div>
+          ) : (
+            it.leadHref && (
+              <div style={{ fontSize: 12, color: "#5b616e" }}>
+                Ready to quote? →{" "}
+                <Link href={it.leadHref} className="pkb-link">
+                  Open lead
+                </Link>
+              </div>
+            )
+          )}
+        </div>
+      );
+    case "quiet":
+      return (
+        <div data-brief-quiet={it.quoteId} style={{ border: "1px solid var(--divider)", borderRadius: 9, padding: "8px 11px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
+              <span style={{ fontSize: 11, fontWeight: 400, color: "var(--muted-2)", marginRight: 6 }}>Quiet</span>
+              {it.label}
+            </span>
+            <span style={{ fontSize: 12, color: "var(--muted-2)" }}>{it.daysLabel}</span>
+          </div>
+          {it.note && <div style={{ fontSize: 12.5, color: "#5b616e", marginTop: 3 }}>{it.note}</div>}
+          <div style={{ display: "flex", gap: 14, marginTop: 5, fontSize: 12.5 }}>
+            {it.nudgeHref && (
+              <Link href={it.nudgeHref} className="pkb-link" title="Opens the Inbox composer with the follow-up — review it before sending">
+                Send nudge
+              </Link>
+            )}
+            <Link href={it.openHref} className="pkb-link">
+              Open estimate
+            </Link>
+          </div>
+        </div>
+      );
+    case "promise":
+      return (
+        <div data-brief-promise={it.taskId} style={{ fontSize: 13, color: "var(--ink)" }}>
+          <span style={{ fontSize: 11, color: "var(--muted-2)", marginRight: 6 }}>From a promise</span>
+          {it.title}
+          {it.dueLabel && <span style={{ color: "var(--muted-2)" }}> · due {it.dueLabel}</span>}
+        </div>
+      );
+    case "organize":
+      return (
+        <div data-brief-organize style={{ fontSize: 13, color: "#3a3f4a" }}>
+          {it.label} —{" "}
+          <Link href={it.href} className="pkb-link">
+            Review
+          </Link>
+        </div>
+      );
+    case "cleanup":
+      return (
+        <div data-brief-organize-cleanup style={{ fontSize: 12.5, color: "#5b616e" }}>
+          <Link href={it.href} className="pkb-link">
+            {it.label} →
+          </Link>{" "}
+          {it.detail}
+        </div>
+      );
+    case "line":
+      return (
+        <div data-brief-line={it.id} style={{ fontSize: 13, color: "#3a3f4a" }}>
+          {it.text}
+        </div>
+      );
+  }
+}
+
+/** Under 900 px: larger type — the summary, then the same three blocks in the same order. No drafts here (no Draft ready, notes or Send nudge). */
 function BigVariant({ vm }: { vm: BriefCardVM }) {
   return (
     <div className="pkb-big">
       {vm.since && <p style={{ margin: "4px 0 8px", fontSize: 16, fontWeight: 600, color: "#3a3f4a" }}>{vm.since}</p>}
-      <p style={{ margin: "4px 0 0", fontSize: 18, lineHeight: 1.55, color: "#16181d", whiteSpace: "pre-line" }}>{vm.summary}</p>
-      {vm.doFirst.length > 0 && (
-        <>
-          <div style={{ ...H, fontSize: 13 }}>Do these first</div>
-          <ol style={{ margin: 0, paddingLeft: 22, display: "grid", gap: 10 }}>
-            {vm.doFirst.map((d) => (
-              <li key={d.key} style={{ fontSize: 17, lineHeight: 1.45, color: "#16181d" }}>
-                {d.href ? (
-                  <Link href={d.href} className="pkb-link">
-                    {d.title}
-                  </Link>
-                ) : (
-                  <span style={{ fontWeight: 600 }}>{d.title}</span>
-                )}
-                {d.why && <div style={{ fontSize: 15, color: "#5b616e" }}>{d.why}</div>}
-              </li>
+      <p style={{ margin: "4px 0 0", fontSize: 18, lineHeight: 1.55, color: "var(--ink)", whiteSpace: "pre-line" }}>{vm.summary}</p>
+      {vm.blocks.map((block) => (
+        <section key={block.id} data-brief-big-block={block.id} aria-label={block.title}>
+          <div style={{ ...H, fontSize: 13, marginTop: 16 }}>{block.title}</div>
+          <div style={{ display: "grid", gap: 10 }}>
+            {block.items.map((it) => (
+              <BigItem key={itemKey(it)} it={it} />
             ))}
-          </ol>
-        </>
-      )}
-      {vm.counts.length > 0 && (
-        <ul style={{ margin: "12px 0 0", paddingLeft: 20, display: "grid", gap: 6 }}>
-          {vm.counts.map((c) => (
-            <li key={c} style={{ fontSize: 16, color: "#3a3f4a" }}>
-              {c}
-            </li>
-          ))}
-        </ul>
-      )}
+          </div>
+          <More block={block} size={15} />
+        </section>
+      ))}
     </div>
   );
+}
+
+function BigItem({ it }: { it: BriefBlockItem }) {
+  const text: React.CSSProperties = { fontSize: 17, lineHeight: 1.45, color: "var(--ink)" };
+  switch (it.kind) {
+    case "row":
+      return (
+        <div style={text}>
+          {it.star && (
+            <>
+              <Star why={it.why} size={17} />{" "}
+            </>
+          )}
+          {it.href ? (
+            <Link href={it.href} className="pkb-link">
+              {it.title}
+            </Link>
+          ) : (
+            <span style={{ fontWeight: 600 }}>{it.title}</span>
+          )}
+          {it.star && it.why && <div style={{ fontSize: 15, color: "#5b616e" }}>{it.why}</div>}
+        </div>
+      );
+    case "quiet":
+      return (
+        <div style={text}>
+          <Link href={it.openHref} className="pkb-link">
+            {it.label}
+          </Link>
+          <div style={{ fontSize: 15, color: "#5b616e" }}>{it.daysLabel}</div>
+        </div>
+      );
+    case "promise":
+      return (
+        <div style={text}>
+          {it.title}
+          {it.dueLabel && <span style={{ color: "var(--muted-2)" }}> · due {it.dueLabel}</span>}
+        </div>
+      );
+    case "organize":
+      return (
+        <div style={{ ...text, fontSize: 16, color: "#3a3f4a" }}>
+          Inbox: {it.label} —{" "}
+          <Link href={it.href} className="pkb-link">
+            Review inbox →
+          </Link>
+        </div>
+      );
+    case "cleanup":
+      return (
+        <div style={{ fontSize: 16 }}>
+          <Link href={it.href} className="pkb-link">
+            {it.label} →
+          </Link>
+        </div>
+      );
+    case "line":
+      return <div style={{ ...text, fontSize: 16, color: "#3a3f4a" }}>{it.text}</div>;
+  }
 }

@@ -2,6 +2,8 @@ import type { QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import { fmt } from "@/app/(app)/estimator/pricing";
 import type { OnlineEstimateState, ShareLinkView } from "@/lib/quote-share/view";
 import { addOptions, alternatesListView, coverSummaryText, coverTotals, notIncludedLine, outputScopes, scopePriceLabel, type AlternatesListView } from "./scopes";
+import { ownerNameFromLine } from "@/lib/parties/addressee";
+import { DISCIPLINE_LABEL, type ScopeDiscipline } from "./fields";
 
 /**
  * #301 slice A — the cover PDF's props (spec §4), built from the customer
@@ -25,8 +27,10 @@ export type CoverDocumentProps = {
   letterhead: { src: string; full: boolean };
   companyName: string;
   footerLine: string;
-  project: { customer: string; attn: string; venue: string; project: string; number: string; date: string };
-  scopes: Array<{ id: string; text: string; missing: boolean; priceLabel: string }>;
+  /** `owner` (#348 2b-i) — present only when the estimate is addressed to a bidder: the owner company's name. */
+  project: { customer: string; attn: string; owner?: string; venue: string; project: string; number: string; date: string };
+  /** `heading` (Batch 5 #56) — each scope's own heading: the system name, else its discipline, else "Scope N". */
+  scopes: Array<{ id: string; heading: string; text: string; missing: boolean; priceLabel: string }>;
   summary: string;
   totals: { creditLabel: string | null; creditAmount: string | null; totalLabel: string; total: string; rewardsLine: string; standingLines: string[] };
   options: Array<{ label: string; desc: string; reason: string; price: string }>;
@@ -86,6 +90,15 @@ export function coverPdfFileName(number: string): string {
   return `${(number || "Estimate").replace(/[^A-Za-z0-9 _-]/g, "_")} Cover.pdf`;
 }
 
+/** Batch 5 #56 (Jeff, 2026-10-15): the cover's per-scope heading — the
+ *  system's own name, else its (set or inferred) discipline, else "Scope N". */
+export function coverScopeHeading(s: { name: string; discipline: ScopeDiscipline | null; num: number }): string {
+  const n = (s.name || "").trim();
+  if (n) return n;
+  if (s.discipline) return DISCIPLINE_LABEL[s.discipline];
+  return `Scope ${s.num}`;
+}
+
 const chicagoLong = (ms: number) =>
   new Date(ms).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "America/Chicago" });
 
@@ -94,6 +107,7 @@ export function coverDocumentPropsFor(input: CoverInput): CoverDocumentProps {
   const scopes = outputScopes(d);
   const t = coverTotals(d);
   const alternates = alternatesListView(d);
+  const owner = ownerNameFromLine(d.ownerLine);
   return {
     title: (d.projectName || "").trim() || COVER_DEFAULT_TITLE,
     letterhead: input.letterhead,
@@ -102,12 +116,13 @@ export function coverDocumentPropsFor(input: CoverInput): CoverDocumentProps {
     project: {
       customer: d.custName,
       attn: d.hasAttn ? d.attnLine : "",
+      ...(owner ? { owner } : {}),
       venue: d.venueLabel,
       project: d.projectName,
       number: `${d.quoteId} Rev ${d.revNum}`,
       date: chicagoLong(d.revDateMs),
     },
-    scopes: scopes.map((s) => ({ id: s.id, text: s.cover.text, missing: s.cover.source === "missing", priceLabel: `${scopePriceLabel(s.name)}: ${fmt(s.price)}` })),
+    scopes: scopes.map((s) => ({ id: s.id, heading: coverScopeHeading(s), text: s.cover.text, missing: s.cover.source === "missing", priceLabel: `${scopePriceLabel(s.name)}: ${fmt(s.price)}` })),
     summary: coverSummaryText(input.coverSummary, scopes.map((s) => s.name)),
     totals: {
       creditLabel: t.creditLabel,

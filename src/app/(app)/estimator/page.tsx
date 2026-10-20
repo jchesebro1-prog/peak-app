@@ -20,7 +20,7 @@ import { getSettings, type Office } from "@/lib/settings";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
-import { getFixtureRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
+import { getFixtureRates, loadBonusRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
 import { loadFreightRule } from "@/lib/freight-rule-load";
 import { allSpecRecords } from "@/lib/stores/spec-records";
 import { listTrackSeries } from "@/lib/stores/track-series";
@@ -30,13 +30,15 @@ import { listIntros } from "@/lib/stores/narrative-intros";
 import { seriesSkus } from "@/lib/track-series";
 import { systemMatchKeys } from "@/lib/specs/records";
 import { blobEnabled } from "@/lib/blob";
+import { parseThreadAttachmentRef } from "@/lib/vendor-quotes/rules";
 import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { tasksForQuote } from "@/lib/stores/tasks";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { pickContactName, pickVenueId, readHandoff, systemQuoteName } from "@/app/(app)/quotes/new/handoff";
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
-import { pdfView } from "@/lib/quote-pdf/state";
+import { documentRevStamp, pdfView } from "@/lib/quote-pdf/state";
+import { quoteSentOnce } from "@/lib/quote-people-lock";
 import EstimatorClient from "./estimator-client";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { sourceForSave } from "@/lib/portal-quote-mode";
@@ -46,6 +48,8 @@ import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults
 import ActionError from "@/components/action-error";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import { assistDraftViewOf } from "@/lib/assist/features/estimate-draft";
+import { vendorPdfGateFor } from "@/lib/assist/gate-server";
+import { assistSettingsOf } from "@/lib/assist/config";
 import { getSuggestion, suggestionForQuote } from "@/lib/stores/estimate-suggestions";
 import { suggestionViewOf, unlinkedRetryAllowed, type EstimateSuggestionView, type SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 import type { EstimateSuggestion } from "@/lib/assist/features/suggestion";
@@ -222,10 +226,9 @@ async function initialFrom(
     // blank (a blank prints the owner, then the company, on the document).
     owner: q.owner || "",
     preparedBy: q.preparedBy || "",
-    // Real priced revisions (item 24). This used to count `history`, which is
-    // the status pipeline — so the printed "Rev N" climbed every time a quote
-    // moved draft → sent → won, with no revision having been taken.
-    revNum: Math.max(1, q.revisions?.length || 1),
+    // The printed Rev (Jeff 2026-10-15 #13): the send number — the latest
+    // send's on a sent quote, the next send's on a draft — the PDF's own rule.
+    revNum: documentRevStamp(q).revNum,
     revDateMs: q.updatedAt || Date.now(),
     // Item 11 (D87): stamped tier seeds labor/curtain margins client-side.
     pricingTier: q.pricingTier ?? null,
@@ -390,17 +393,20 @@ export default async function EstimatorPage({
   // inspection, consulting, rental) opens its own builder, not the
   // Estimator — this is the server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
+  // #348 slice 5: Read the PDF — the server gate (kill switch + pilot + feature first, then a Claude key), off the
+  // same settings load and inside the Promise.all; a failure hides it.
+  const settingsLoad = getSettings();
   // Estimate suggestion: the hand-off's `?suggestion=` (new estimate), else the
   // saved quote's linked one (else, unlinked, the one its URL still names).
   // Read inside the Promise.all below so an Estimator open doesn't wait on it serially.
-
-  const [suggestion, fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults, systemCategories] =
+  const [suggestion, fabricRows, laborRows, customerDocs, settings, vendorPdfGate, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults, systemCategories] =
     await Promise.all([
       loadSuggestion(readHandoff(sp).suggestionId, q),
       fabricParts(),
       byCategory("Labor"),
       allCustomers(),
-      getSettings(),
+      settingsLoad,
+      settingsLoad.then((st) => vendorPdfGateFor(user.id, { settings: assistSettingsOf(st) })).catch(() => "error"),
       getFixtureRates(),
       activeUsers(),
       catalogList(),
@@ -414,6 +420,7 @@ export default async function EstimatorPage({
       getEstimateOutputDefaults(),
       loadSystemCategoryOptions(),
     ]);
+  const vendorPdfEnabled = vendorPdfGate === null;
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
   const quoteTasks = q ? await tasksForQuote(q.id) : [];
@@ -557,6 +564,9 @@ export default async function EstimatorPage({
     <ActionError message={one(sp.err)} />
     <EstimatorClient
       initial={initial}
+      // #348 slice 4: the Inbox "Add as vendor quote…" hand-off — a saved estimate + a well-formed attachment ref only;
+      // the client strips it from the URL and the action re-checks the thread's visibility.
+      vendorFromThread={q && parseThreadAttachmentRef(one(sp.vq)) ? one(sp.vq)! : null}
       pipelines={pipelines}
       companyName={settings.companyName || "Peak Systems Group"}
       logoDark={settings.logoDark || null}
@@ -589,6 +599,10 @@ export default async function EstimatorPage({
       // the quote; only an approver may hand it to someone else.
       viewerName={user.name}
       viewerCanApprove={can("approve", user.roles)}
+      // Jeff 2026-10-15 #18: the people lock at the first send (approvers can still change them).
+      peopleSentOnce={quoteSentOnce(q)}
+      // Jeff 2026-10-15 #19: a draft's bonus lines follow Estimating Rules (the server re-derives them on save).
+      bonusRates={await loadBonusRates()}
       // Phase 4: the review-comment permissions (add / resolve / delete).
       viewerRoles={user.roles}
       // #293: Save to library / intros — the Spec panel's audience (#205).
@@ -600,6 +614,8 @@ export default async function EstimatorPage({
       // Estimate suggestion (spec 2026-10-13 §2): the Suggested BOM panel + its live parts.
       suggestion={suggestion.view}
       suggestionParts={suggestion.parts}
+      // #348 slice 5: the vendor form's Read the PDF (pilot users with a Claude key only).
+      vendorPdfEnabled={vendorPdfEnabled}
     />
     </>
   );

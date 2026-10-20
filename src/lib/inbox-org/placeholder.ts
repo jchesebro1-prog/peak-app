@@ -1,0 +1,96 @@
+/**
+ * #345 — placeholder companies are never filing targets. Daylite's import
+ * brought over stand-in company records ("UNKNOWN", "TBD", "N/A" …) that
+ * contacts were parked under; filing an email "under UNKNOWN" files it
+ * nowhere. Every place that builds a filing suggestion or candidate (the
+ * rules pipeline's sender-rule / identity / number steps, the AI candidate
+ * list, the Link/Change… company search, a Peak/Customers Gmail label) skips
+ * them, and the Organize view reads an old suggestion that points at one as
+ * "nothing suggested yet". The company record itself is never touched.
+ *
+ * Pure, no imports — safe in the client bundle.
+ */
+
+/** The whole name, trimmed, is one of these (any case). Deliberately narrow:
+ *  "N/A" needs its slash, and "NA" / "None" / "Test" are left out — each
+ *  could be a real name (review of #345). */
+export const PLACEHOLDER_COMPANY_RE = /^(unknown|ukn|tbd|n\/a)$/i;
+
+export function isPlaceholderCompany(name: string | null | undefined): boolean {
+  return PLACEHOLDER_COMPANY_RE.test(String(name ?? "").trim());
+}
+
+/** What a link / remember / domain-claim action answers for a placeholder company. */
+export const PLACEHOLDER_PICK_ERROR = "That's a placeholder company — pick the real one.";
+
+/** The reason an emptied suggestion shows (the pipeline's own "nothing yet" line). */
+export const NO_MATCH_REASON = "No match yet — choose a customer";
+
+type FilingLike = {
+  customerId: string | null;
+  work: unknown;
+  siteId?: string | null;
+  noise: boolean;
+  strength: "strong" | "weak";
+  reason: string;
+  state?: "suggested" | "filed" | "skipped" | "dismissed";
+};
+
+/**
+ * A filing as the Organize view should read it: a customer that is a
+ * placeholder (`isPlaceholderId`) is dropped, with its venue. A work record
+ * (quote / project / lead) stays — it is real even when its customer isn't;
+ * with nothing left the row reads as "No match yet" (weak). Returns the same
+ * object when there is nothing to drop.
+ */
+export function withoutPlaceholderCustomer<F extends FilingLike>(f: F, isPlaceholderId: (id: string) => boolean): F {
+  // only a waiting suggestion: a thread already filed (or dismissed) keeps
+  // its true history in the Filed tab and the reader
+  if (f.state !== undefined && f.state !== "suggested") return f;
+  if (!f.customerId || !isPlaceholderId(f.customerId)) return f;
+  const out: F = { ...f, customerId: null };
+  delete out.siteId;
+  if (!f.work && !f.noise) {
+    out.strength = "weak";
+    out.reason = NO_MATCH_REASON;
+  }
+  return out;
+}
+
+type LinkLike = {
+  customerId?: string | null;
+  customer?: string;
+  siteId?: string | null;
+  resolution?: "linked" | "suggested" | "ambiguous" | "unknown" | null;
+  suggestedCustomerId?: string | null;
+  candidates?: Array<{ customerId: string; name: string }>;
+  linkedBy?: "user" | "filing" | null;
+};
+
+/**
+ * A thread as the Inbox reader should show it: a stored link to a
+ * placeholder company that the contact matcher stamped AUTOMATICALLY before
+ * #345 reads as no customer — its venue with it — and a placeholder domain
+ * guess or candidate is dropped. A DELIBERATE link (`linkedBy`: a person or
+ * a filing) is true history and stays. Read-only: the stored thread is never
+ * rewritten. Returns the same object when there is nothing to drop.
+ */
+export function withoutPlaceholderLink<T extends LinkLike>(t: T, isPlaceholderId: (id: string) => boolean): T {
+  const linked = !!t.customerId && !t.linkedBy && isPlaceholderId(t.customerId);
+  const suggested = !!t.suggestedCustomerId && isPlaceholderId(t.suggestedCustomerId);
+  const cands = (t.candidates || []).filter((c) => !isPlaceholderId(c.customerId));
+  if (!linked && !suggested && cands.length === (t.candidates || []).length) return t;
+  const out: T = { ...t };
+  if (linked) {
+    out.customerId = null;
+    out.customer = "";
+    out.siteId = null;
+    if (out.resolution === "linked") out.resolution = "unknown";
+  }
+  if (suggested) {
+    out.suggestedCustomerId = null;
+    if (out.resolution === "suggested") out.resolution = "unknown";
+  }
+  if (t.candidates) out.candidates = cands;
+  return out;
+}

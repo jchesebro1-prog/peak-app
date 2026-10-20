@@ -7,7 +7,7 @@ import { applyOutboundSignature } from "@/lib/email-signature";
 import { gmailEnabled, personalKey } from "@/lib/gmail/config";
 import { getConnectionInfo } from "@/lib/gmail/connections";
 import { latestSentRevision, pdfFileName, pdfIsCurrent, pdfKindForQuoteType, pdfStoragePath, pdfView, teamPdfPath } from "@/lib/quote-pdf/state";
-import { ensureShareLink } from "@/lib/quote-share/links";
+import { bidderLinkPath, ensureShareLink } from "@/lib/quote-share/links";
 import { sendQuoteToCustomer, type ReviewOpResult } from "@/lib/quote-review-ops";
 import { findDraftByLink, get as getThread, holdLastOutbound, saveDraft, sendDraft, type CommAttachment, type CommLink } from "@/lib/stores/comms";
 import {
@@ -19,6 +19,14 @@ import { createTask } from "@/lib/stores/tasks";
 import { can } from "@/lib/team";
 import { activeUsers, getUser } from "@/lib/users";
 import { attachmentsFit, bodyWithLink, coverPdfHref, estimateDraftIsCurrent, FOLLOW_UP_CHOICES, parseRecipients, withoutAddresses } from "./compose";
+import { mailboxViewer } from "@/lib/mailbox-viewer";
+import { getCompany } from "@/lib/identity/companies";
+import { bidderPdfFileName } from "@/lib/parties/addressee";
+import { bidderPartyFor, bidderRecipient } from "@/lib/parties/addressee-server";
+import { addendaSinceRow, bidderAlreadyHas, bidderPdfRev, bidderSubject, BID_SEND_COPY, isPartyId, latestSentRev } from "@/lib/parties/bid-send";
+import type { BidderState } from "@/lib/parties/rules";
+import { renderBidderPdf as renderBidderPdfLive } from "@/lib/quote-pdf/bidder-pdf-server";
+import { markBidderSendFailed, recordBidderSend as recordBidderSendLive } from "@/lib/stores/bids";
 
 /**
  * Estimator Phase 3 (spec §10.1, §10.3) — email the estimate from the
@@ -144,6 +152,8 @@ export type EstimateEmailInput = {
 
 export type ThreadSpec = {
   mailboxUser: string;
+  /** #349 — the sender's users.id: the thread's owner (identity, never the name). */
+  mailboxOwnerId: string;
   customerId: string | null;
   customer: string;
   contactName: string;
@@ -188,7 +198,7 @@ export type EstimateEmailDeps = {
    *  the stored path, or null when storage is unavailable / the write failed. */
   storeCover: (quoteId: string, bytes: Buffer, now: number) => Promise<string | null>;
   /** The sender's newest unsent Inbox draft linked to this quote (Open in Inbox reuses it). */
-  findInboxDraft: (quoteId: string, mailboxUser: string) => Promise<InboxDraftRef | null>;
+  findInboxDraft: (quoteId: string, owner: { id: string; name: string }) => Promise<InboxDraftRef | null>;
   /** Take the quote's one in-flight send (Quote.emailSending). */
   claimSend: (id: string, by: string, now: number) => Promise<{ ok: true; claim: EstimateEmailClaim } | { ok: false; reason: "busy" | "gone" }>;
   releaseSend: (id: string, claim: EstimateEmailClaim) => Promise<void>;
@@ -269,9 +279,12 @@ type Prepared = Checked & {
   estimate: { name: string; size: number } | null;
   /** The rendered cover — stored (by reference) just before the thread is made. */
   cover: { name: string; bytes: Buffer } | null;
+  /** #348 2b-ii — the bidder's own PDF (bidder mode only): its bytes and the sent revision it was rendered at (null = live draft). */
+  bidderPdf?: { bytes: Buffer; rev: number | null };
 };
 
-type Refusal = { ok: false; error: string };
+/** `scope: "row"` (#348 2b-ii) — a refusal that belongs to one bidder row, not the whole quote. */
+type Refusal = { ok: false; error: string; scope?: "row" };
 
 function userMessage(e: unknown, fallback: string): string {
   return e instanceof EstimateEmailError ? e.message : fallback;
@@ -383,7 +396,9 @@ async function prepareClaimed(
   actor: SendActor,
   first: Checked,
   input: EstimateEmailInput,
-  mode: "send" | "inbox"
+  mode: "send" | "inbox",
+  /** #348 2b-ii — more slow work after the attachments, before the final re-read (the bidder PDF render). */
+  more?: (p: Prepared) => Promise<Prepared | Refusal>
 ): Promise<Prepared | Refusal> {
   const fresh = await deps.getQuote(first.q.id);
   if (!fresh) return { ok: false, error: SEND_COPY.gone };
@@ -391,8 +406,12 @@ async function prepareClaimed(
   if (fresh.status !== first.q.status) return { ok: false, error: SEND_COPY.changedSince };
   const again = await preflight(deps, actor, first.q.id, input, mode, fresh);
   if ("ok" in again) return again;
-  const p = await attach(deps, actor, again, input, mode);
+  let p = await attach(deps, actor, again, input, mode);
   if ("ok" in p) return p;
+  if (more) {
+    p = await more(p);
+    if ("ok" in p) return p;
+  }
   const now = await deps.getQuote(p.q.id);
   if (!now) return { ok: false, error: SEND_COPY.gone };
   if (now.status !== p.q.status || now.updatedAt !== p.q.updatedAt) return { ok: false, error: SEND_COPY.changedSince };
@@ -406,7 +425,9 @@ async function markAndLink(
   deps: EstimateEmailDeps,
   actor: SendActor,
   p: Prepared,
-  asOf: number | undefined
+  asOf: number | undefined,
+  /** #348 2b-ii — mint the link from the fresh quote + its sent revision (a bidder's v3) instead of ensureLink. */
+  linkFor?: (q: Quote, rev: QuoteRevision) => Promise<string>
 ): Promise<Linked | { ok: false; error: string; markedSent: boolean }> {
   let markedSent = false;
   if (p.q.status === "draft") {
@@ -423,11 +444,19 @@ async function markAndLink(
   }
   let linked: Linked;
   try {
-    const url = await deps.ensureLink(p.q.id);
-    const fresh = markedSent ? (await deps.getQuote(p.q.id)) ?? p.q : p.q;
-    const rev = latestSentRevision(fresh.revisions);
-    if (!rev || typeof rev.rev !== "number") throw new Error("no sent revision after send");
-    linked = { ok: true, markedSent, url, q: fresh, rev };
+    if (linkFor) {
+      // Bidder mode: always re-read — a revision cut during the render must be seen (the caller's revision guard).
+      const fresh = (await deps.getQuote(p.q.id)) ?? p.q;
+      const rev = latestSentRevision(fresh.revisions);
+      if (!rev || typeof rev.rev !== "number") throw new Error("no sent revision after send");
+      linked = { ok: true, markedSent, url: await linkFor(fresh, rev), q: fresh, rev };
+    } else {
+      const url = await deps.ensureLink(p.q.id);
+      const fresh = markedSent ? (await deps.getQuote(p.q.id)) ?? p.q : p.q;
+      const rev = latestSentRevision(fresh.revisions);
+      if (!rev || typeof rev.rev !== "number") throw new Error("no sent revision after send");
+      linked = { ok: true, markedSent, url, q: fresh, rev };
+    }
   } catch (e) {
     if (!(e instanceof EstimateEmailError)) console.error("[estimate-email] client link failed", e);
     // No thread exists yet — nothing to open in Inbox.
@@ -476,6 +505,7 @@ async function threadSpecFor(deps: EstimateEmailDeps, actor: SendActor, p: Prepa
   const q = m.q;
   return {
     mailboxUser: actor.name,
+    mailboxOwnerId: actor.id,
     customerId: q.customerId ?? null,
     customer: q.customer || "",
     contactName: q.contactName || "",
@@ -643,7 +673,7 @@ export async function openEstimateInInbox(
  */
 async function reuseInboxDraft(deps: EstimateEmailDeps, actor: SendActor, quoteId: string): Promise<OpenInInboxResult | null> {
   try {
-    const d = await deps.findInboxDraft(quoteId, actor.name);
+    const d = await deps.findInboxDraft(quoteId, { id: actor.id, name: actor.name });
     if (!d) return null;
     const q = await deps.getQuote(quoteId);
     const rev = q ? latestSentRevision(q.revisions) : null;
@@ -679,6 +709,217 @@ async function openClaimed(deps: EstimateEmailDeps, actor: SendActor, p: Prepare
   return { ok: true, href: inboxDraftHref(threadId), threadId, status: q.status, ...(warning ? { warning } : {}) };
 }
 
+/* ---- #348 2b-ii — send to ONE bidder through the same ordered pipeline ---- */
+
+/** One GC/EC bidder row on the quote and who its email goes to. */
+export type BidderTarget = { partyId: string; companyId: string; companyName: string; contactName: string; email: string; bid: BidderState };
+export type BidderEmailInput = { subject: string; body: string; asOf?: number; retryUnknown?: boolean };
+export type BidderRenderResult = { ok: true; pdf: Buffer } | { ok: false; error: string; scope: "quote" | "row" };
+
+export type BidderEmailDeps = EstimateEmailDeps & {
+  /** The live bidder row on THIS quote (with its recipient), or null. */
+  getBidder: (quoteId: string, partyId: string) => Promise<BidderTarget | null>;
+  /** The bidder's PDF — at a sent revision, or live (null) on a draft. */
+  renderBidderPdf: (q: Quote, partyId: string, rev: number | null) => Promise<BidderRenderResult>;
+  /** Keep the bidder copy in PDF storage; the stored path, or null when storage is unavailable / failed. */
+  storeBidderPdf: (quoteId: string, partyId: string, rev: number, bytes: Buffer, now: number) => Promise<string | null>;
+  /** The bidder's absolute v3 link at `rev`; throws EstimateEmailError when refused. */
+  bidderLink: (quoteId: string, partyId: string, rev: number) => Promise<string>;
+  recordBidderSend: (
+    quoteId: string,
+    partyId: string,
+    entry: EstimateEmailEntry,
+    outcome: { kind: "sent" } | { kind: "failed"; error: string; unknown?: boolean },
+    by: string
+  ) => Promise<boolean>;
+  markBidderFailed: (quoteId: string, partyId: string, f: { at: number; error: string; unknown?: boolean; threadId?: string }) => Promise<boolean>;
+};
+
+export type BidderSendResult =
+  | { ok: true; partyId: string; threadId: string; delivery: "gmail" | "local"; rev: number; status: QuoteStatus; warning?: string }
+  | { ok: true; partyId: string; skipped: true; rev: number }
+  | { ok: false; partyId: string; error: string; scope: "quote" | "row"; markedSent?: boolean };
+
+type BidderFail = Extract<BidderSendResult, { ok: false }>;
+
+/** The largest bidder PDF that may ride inline (base64 in the thread) when PDF storage is unavailable. */
+const BIDDER_INLINE_MAX = 4 * 1024 * 1024;
+
+/** The row's own refusals — no stamp, no claim. */
+function bidderRowRefusal(t: BidderTarget | null, input: BidderEmailInput): string | null {
+  if (!t) return BID_SEND_COPY.gone;
+  if (t.bid.result !== "pending") return BID_SEND_COPY.notPending;
+  if (t.bid.submitVia === "website") return BID_SEND_COPY.website;
+  if (!String(t.email || "").trim()) return BID_SEND_COPY.noEmail(t.contactName || t.companyName);
+  if (!parseRecipients(t.email).ok) return BID_SEND_COPY.badEmail(t.contactName || t.companyName);
+  if (t.bid.failed?.unknown && input.retryUnknown !== true) return BID_SEND_COPY.unknownRetry;
+  return null;
+}
+
+/**
+ * #348 2b-ii — email the estimate to ONE bidder. The customer pipeline's own steps, in its own order (preflight →
+ * claim → preflight again → attachments [+ the bidder PDF render] → re-read → mark sent (draft only) → link →
+ * thread → record), with four differences: the recipient (the bidder's addressee contact), the attachment (the
+ * bidder's own PDF, stored by reference), the link (the bidder's v3 at the sent revision) and the record (the
+ * bidder row + the estimate's Activity, via recordBidderSend). No follow-up task, no cover, no Cc. Never holds the
+ * quote row lock — only the store-owned send claim — across the render or Gmail.
+ */
+export async function sendBidderEmail(
+  deps: BidderEmailDeps,
+  actor: SendActor,
+  quoteId: string,
+  partyId: string,
+  input: BidderEmailInput
+): Promise<BidderSendResult> {
+  const row = (error: string): BidderFail => ({ ok: false, partyId, error, scope: "row" });
+  const whole = (error: string, markedSent?: boolean): BidderFail => ({ ok: false, partyId, error, scope: "quote", ...(markedSent ? { markedSent: true } : {}) });
+  // No bidder row is read for someone who can't send at all.
+  if (!can("send", actor.roles) && !can("approve", actor.roles)) return whole(SEND_COPY.needsPerm);
+  if (!isPartyId(partyId)) return row(BID_SEND_COPY.gone);
+  const t0 = await deps.getBidder(quoteId, partyId);
+  const r0 = bidderRowRefusal(t0, input);
+  if (r0 || !t0) return row(r0 ?? BID_SEND_COPY.gone);
+
+  const est: EstimateEmailInput = {
+    to: t0.email, cc: "", subject: input.subject, body: input.body, attachEstimate: false, attachCover: false, followUpDays: 0, asOf: input.asOf,
+  };
+  const c = await preflight(deps, actor, quoteId, est, "send");
+  if ("ok" in c) return whole(c.error);
+  if (bidderAlreadyHas(c.q, t0.bid)) return { ok: true, partyId, skipped: true, rev: latestSentRev(c.q) ?? 0 };
+
+  const r = await withClaim(deps, actor, c.q.id, async (): Promise<BidderSendResult> => {
+    // The idempotency point: a double click or a second tab sees the first send's stamp here.
+    const t = await deps.getBidder(quoteId, partyId);
+    const rr = bidderRowRefusal(t, input);
+    if (rr || !t) return row(rr ?? BID_SEND_COPY.gone);
+    const fq = (await deps.getQuote(c.q.id)) ?? c.q;
+    if (bidderAlreadyHas(fq, t.bid)) return { ok: true, partyId, skipped: true, rev: latestSentRev(fq) ?? 0 };
+
+    // The recipient is the claim-time re-read's, so the email and the stamp agree.
+    const p = await prepareClaimed(deps, actor, c, { ...est, to: t.email }, "send", async (pp) => {
+      const rev = bidderPdfRev(pp.q);
+      const rendered = await deps.renderBidderPdf(pp.q, partyId, rev);
+      if (!rendered.ok) return { ok: false, error: rendered.error, ...(rendered.scope === "row" ? { scope: "row" as const } : {}) };
+      if (!attachmentsFit([rendered.pdf.length])) return { ok: false, error: BID_SEND_COPY.tooLarge };
+      return { ...pp, bidderPdf: { bytes: rendered.pdf, rev } };
+    });
+    if ("ok" in p) {
+      if (p.scope !== "row") return whole(p.error);
+      try {
+        await deps.markBidderFailed(quoteId, partyId, { at: deps.now(), error: p.error });
+      } catch (e) {
+        console.error("[estimate-email] stamping the bidder failure failed", e);
+      }
+      return row(p.error);
+    }
+    return sendBidderClaimed(deps, actor, partyId, t, p, input);
+  });
+  // The claim's own refusals (busy, gone, failed) carry no partyId: they belong to the quote.
+  return "partyId" in r ? r : whole(r.error);
+}
+
+async function sendBidderClaimed(
+  deps: BidderEmailDeps,
+  actor: SendActor,
+  partyId: string,
+  t: BidderTarget,
+  p: Prepared,
+  input: BidderEmailInput
+): Promise<BidderSendResult> {
+  const quoteId = p.q.id;
+  const whole = (error: string, markedSent?: boolean): BidderFail => ({ ok: false, partyId, error, scope: "quote", ...(markedSent ? { markedSent: true } : {}) });
+  const pdf = p.bidderPdf;
+  if (!pdf) return whole(SEND_COPY.prepareFailed);
+  let bidderGone = false;
+  const m = await markAndLink(deps, actor, p, input.asOf ?? p.q.updatedAt, async (q, rev) => {
+    // A sent revision cut during the render (e.g. a portal price refresh): the PDF is of an older one — mint no link, email nothing.
+    if (pdf.rev !== null && rev.rev !== pdf.rev) throw new EstimateEmailError(SEND_COPY.changedSince);
+    try {
+      return await deps.bidderLink(q.id, partyId, rev.rev);
+    } catch (e) {
+      // The bidder was removed between the claim and the link: this row's problem, not the quote's.
+      if (e instanceof EstimateEmailError && e.message === BID_SEND_COPY.gone) bidderGone = true;
+      throw e;
+    }
+  });
+  if (!m.ok) {
+    if (bidderGone) return { ok: false, partyId, error: BID_SEND_COPY.gone, scope: "row", ...(m.markedSent ? { markedSent: true } : {}) };
+    return whole(m.error, m.markedSent);
+  }
+  const { q, markedSent } = m;
+  const rev = m.rev.rev;
+
+  // The bidder's own copy, stored now (only once the email is certain to be made); inline only when storing fails.
+  const name = bidderPdfFileName(q.name, t.companyName, rev);
+  let path: string | null = null;
+  try {
+    path = await deps.storeBidderPdf(q.id, partyId, rev, pdf.bytes, deps.now());
+  } catch (e) {
+    console.error("[estimate-email] storing the bidder PDF failed — attaching it inline", e);
+  }
+  if (!path && pdf.bytes.length > BIDDER_INLINE_MAX) return whole(BID_SEND_COPY.tooLarge, markedSent);
+  const att: CommAttachment = path
+    ? { name, mime: "application/pdf", size: pdf.bytes.length, pdfPath: path, href: coverPdfHref(q.id, path) }
+    : { name, mime: "application/pdf", size: pdf.bytes.length, dataUrl: "data:application/pdf;base64," + pdf.bytes.toString("base64") };
+  const spec: ThreadSpec = {
+    ...(await threadSpecFor(deps, actor, p, m)),
+    customerId: t.companyId,
+    customer: t.companyName,
+    contactName: t.contactName,
+    subject: bidderSubject(p.subject, (q.name || "").trim() || displayQuoteNumber(q), addendaSinceRow(q, t.bid)),
+    attachments: [att],
+  };
+
+  let sent: { threadId: string; delivery: EmailDelivery };
+  try {
+    sent = await deps.createAndSendThread(spec);
+  } catch (e) {
+    console.error("[estimate-email] bidder send failed", e);
+    const threadId = e instanceof EstimateEmailError ? e.threadId : undefined;
+    // The thread is no longer a draft: the send may have left Gmail — never a blind retry.
+    const mayHaveSent = !!threadId && e instanceof EstimateEmailError && e.stillDraft === false;
+    const error = mayHaveSent ? SEND_COPY.gmailUnknownResend : SEND_COPY.notSent;
+    try {
+      await deps.markBidderFailed(quoteId, partyId, { at: deps.now(), error, ...(mayHaveSent ? { unknown: true } : {}), ...(threadId ? { threadId } : {}) });
+    } catch (e2) {
+      console.error("[estimate-email] stamping the bidder failure failed", e2);
+    }
+    return { ok: false, partyId, error, scope: "row", ...(markedSent ? { markedSent: true } : {}) };
+  }
+  const entry: EstimateEmailEntry = { threadId: sent.threadId, rev, at: deps.now(), by: actor.name, to: t.email };
+  if (sent.delivery !== "gmail" && sent.delivery !== "local") {
+    // Gmail refused it or didn't answer (it may have been accepted): recorded on the row + Activity, held back
+    // (noAutoRetry, in createAndSendThread) — "unknown" makes the row refuse a blind retry.
+    const unknown = sent.delivery === "unknown";
+    const error = unknown ? SEND_COPY.gmailUnknownResend : SEND_COPY.gmailFailedResend;
+    try {
+      if (!(await deps.recordBidderSend(quoteId, partyId, entry, { kind: "failed", error, ...(unknown ? { unknown: true } : {}) }, actor.id))) {
+        console.error("[estimate-email] recording an undelivered bidder send wrote nothing", quoteId, partyId, sent.threadId);
+      }
+    } catch (e) {
+      console.error("[estimate-email] bidder record failed (undelivered send)", e);
+    }
+    return { ok: false, partyId, error, scope: "row", ...(markedSent ? { markedSent: true } : {}) };
+  }
+  // The email is out: a failed record never reads as a failed send (that would invite a duplicate).
+  let warning: string | undefined;
+  try {
+    if (!(await deps.recordBidderSend(quoteId, partyId, entry, { kind: "sent" }, actor.id))) warning = BID_SEND_COPY.recordFailed;
+  } catch (e) {
+    console.error("[estimate-email] bidder record failed", e);
+    warning = BID_SEND_COPY.recordFailed;
+  }
+  if (warning) {
+    // Nothing on the row says it went out: stamp it unknown so Send to all never emails it twice. Best effort.
+    try {
+      await deps.markBidderFailed(quoteId, partyId, { at: deps.now(), error: BID_SEND_COPY.recordFailed, unknown: true, threadId: sent.threadId });
+    } catch (e) {
+      console.error("[estimate-email] stamping the unrecorded bidder send failed", e);
+    }
+  }
+  return { ok: true, partyId, threadId: sent.threadId, delivery: sent.delivery, rev, status: q.status, ...(warning ? { warning } : {}) };
+}
+
 /* ---- the real deps (wired by the "use server" wrappers) ---- */
 
 /**
@@ -711,8 +952,9 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
         return null;
       }
     },
-    findInboxDraft: async (quoteId, mailboxUser) => {
-      const t = await findDraftByLink("quote", quoteId, { mailboxUser });
+    findInboxDraft: async (quoteId, owner) => {
+      // #349 — the sender's own drafts, by identity
+      const t = await findDraftByLink("quote", quoteId, { owner: await mailboxViewer(owner) });
       return t ? { threadId: t.id, createdAt: t.createdAt, attachments: t.draft?.attachments || [] } : null;
     },
     claimSend: (id, by, now) => claimEstimateEmailSend(id, by, now),
@@ -729,7 +971,7 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
     },
     createAndSendThread: async (spec) => {
       const connected = await gmailConnectedFor(opts.actor.id);
-      const draft = await saveDraft({ ...draftInput(spec), me: spec.mailboxUser });
+      const draft = await saveDraft(draftInput(spec));
       try {
         const sent = await sendDraft(draft.id, spec.mailboxUser, { stampAddresses: true });
         if (!sent) throw new Error("the draft vanished before it was sent");
@@ -744,10 +986,50 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
       if (delivery !== "gmail") await holdOutbound(draft.id, delivery);
       return { threadId: draft.id, delivery };
     },
-    createDraftThread: async (spec) => ({ threadId: (await saveDraft({ ...draftInput(spec), me: spec.mailboxUser })).id }),
+    createDraftThread: async (spec) => ({ threadId: (await saveDraft(draftInput(spec))).id }),
     recordEmail: recordEstimateEmail,
     addFollowUpTask: (spec, actor) => createTask(spec, { id: actor.id, name: actor.name }),
     roster: async () => (await activeUsers()).map((u) => ({ id: u.id, name: u.name, status: u.status })),
+  };
+}
+
+/** #348 2b-ii — the bidder send's real deps: the estimate deps plus the bidder row, render, store, link and record. */
+export function liveBidderEmailDeps(opts: { origin: string; host: string | null; proto: string | null; actor: SendActor }): BidderEmailDeps {
+  const origin = opts.origin.replace(/\/+$/, "");
+  return {
+    ...liveEstimateEmailDeps(opts),
+    getBidder: async (quoteId, partyId) => {
+      const party = await bidderPartyFor(quoteId, partyId);
+      if (!party || !party.bid) return null;
+      const company = await getCompany(party.companyId);
+      if (!company) return null;
+      const r = await bidderRecipient(party);
+      return { partyId: party.id, companyId: company.id, companyName: company.name, contactName: r.name, email: r.email, bid: party.bid };
+    },
+    renderBidderPdf: async (q, partyId, rev) => {
+      const r = await renderBidderPdfLive(q.id, partyId, opts.host, opts.proto, { rev });
+      if (r.ok) return { ok: true, pdf: r.pdf };
+      // 503: Chrome, the secret or the origin is unavailable — every row would fail the same way.
+      if (r.status === 503) return { ok: false, error: r.error, scope: "quote" };
+      return { ok: false, error: r.status === 404 ? BID_SEND_COPY.gone : r.error, scope: "row" };
+    },
+    storeBidderPdf: async (quoteId, partyId, rev, bytes, now) => {
+      const store = pdfStorage();
+      if ("unavailable" in store) return null;
+      try {
+        return await store.put(pdfStoragePath(quoteId, `bidder-${partyId.slice(4)}-r${rev}-${now}`), bytes);
+      } catch (e) {
+        console.error("[estimate-email] bidder PDF storage write failed", e);
+        return null;
+      }
+    },
+    bidderLink: async (quoteId, partyId, rev) => {
+      const r = await bidderLinkPath(quoteId, partyId, opts.actor.name, { rev });
+      if (!r.ok) throw new EstimateEmailError(r.error);
+      return origin + r.path;
+    },
+    recordBidderSend: recordBidderSendLive,
+    markBidderFailed: markBidderSendFailed,
   };
 }
 
@@ -808,7 +1090,7 @@ export async function deliveryAfterSend(connected: boolean, readThread: () => Pr
 function draftInput(spec: ThreadSpec) {
   return {
     mailbox: "personal" as const,
-    mailboxUser: spec.mailboxUser,
+    owner: { id: spec.mailboxOwnerId, name: spec.mailboxUser }, // #349 — owned by identity
     customerId: spec.customerId,
     customer: spec.customer,
     contactName: spec.contactName,

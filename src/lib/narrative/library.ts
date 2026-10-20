@@ -65,6 +65,9 @@ export async function keyProductLibrary(
       fallbackDocId,
       fallbackLabel: fallbackDocId ? mfr : null,
       ...(p && via.has(sku) ? { viaSku: p.sku } : {}),
+      ...(p
+        ? { modelPart: { sku: p.sku, ...(p.manufacturerModelNumber ? { manufacturerModelNumber: p.manufacturerModelNumber } : {}), ...(p.manufacturerPartNumber ? { manufacturerPartNumber: p.manufacturerPartNumber } : {}) } }
+        : {}),
     };
   }
   return out;
