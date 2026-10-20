@@ -315,6 +315,74 @@ export async function shellCheck(pkgDir: string): Promise<ShellResult> {
     await new Promise((r) => setTimeout(r, 500));
     step("Cover PDF “Download” (target=_blank) shows “Not part of the prototype” and opens no new page", coverClicked && coverNotice && (await browser.pages()).length === pagesBefore && (await shellLoc(page)).hash === hashBefore && (await histLen(page)) === hBefore, `${await noticeText(page)}; pages ${pagesBefore} → ${(await browser.pages()).length}`);
 
+    // 6c' — ctrl-click and middle-click on an app link never open a dead tab: a mapped path opens its #/ route in a new
+    // tab of this package; an unmapped one shows the notice; a preview route opens the in-window overlay.
+    {
+      const prefix = base.split("#")[0].split("?")[0];
+      const probe = async (href: string, how: "ctrl" | "middle") => {
+        const hashB = (await shellLoc(page)).hash;
+        const hB = await histLen(page);
+        const before = new Set(await browser.pages());
+        // Notices are read off the shell's own event (removing the React-owned element would leave a stale fiber).
+        await page.evaluate(() => {
+          const w = window as unknown as { __notices?: string[] };
+          if (!w.__notices) {
+            w.__notices = [];
+            window.addEventListener("peak-handoff-notice", (e) => w.__notices!.push(String((e as CustomEvent).detail)));
+          }
+          w.__notices.length = 0;
+        });
+        await page.evaluate((h) => {
+          document.getElementById("__probe")?.remove();
+          const a = document.createElement("a");
+          a.id = "__probe";
+          a.setAttribute("href", h);
+          a.textContent = "probe";
+          a.setAttribute("style", "position:fixed;left:8px;top:8px;z-index:2147483647;padding:10px 16px;background:#fff;color:#000");
+          document.body.appendChild(a);
+        }, href);
+        const box = await (await page.$("#__probe"))?.boundingBox();
+        if (box) {
+          const x = box.x + box.width / 2;
+          const y = box.y + box.height / 2;
+          if (how === "ctrl") {
+            // Ctrl-click is a context-menu gesture on macOS: use the platform's open-in-new-tab modifier.
+            const key = process.platform === "darwin" ? "Meta" : "Control";
+            await page.keyboard.down(key);
+            await page.mouse.click(x, y);
+            await page.keyboard.up(key);
+          } else await page.mouse.click(x, y, { button: "middle" });
+        }
+        await new Promise((r) => setTimeout(r, 900));
+        const fresh = (await browser.pages()).filter((p) => !before.has(p));
+        const urls = fresh.map((p) => p.url());
+        // A new tab loads asynchronously: give it a moment to leave about:blank.
+        if (urls.some((u) => u === "" || u === "about:blank")) await new Promise((r) => setTimeout(r, 1200));
+        const final = fresh.map((p) => p.url());
+        const notice = (await page.evaluate(() => (window as unknown as { __notices: string[] }).__notices)).some((t) => t.includes("Not part of the prototype"));
+        const stayed = (await shellLoc(page)).hash === hashB && (await histLen(page)) === hB;
+        for (const p of fresh) await p.close().catch(() => {});
+        await page.evaluate(() => document.getElementById("__probe")?.remove());
+        const overlay = await page.evaluate(() => !!document.querySelector("[data-handoff-overlay]"));
+        return { urls: final, notice, stayed, box: !!box, overlay };
+      };
+      const live = (urls: string[], route: string) => urls.length === 1 && urls[0].startsWith(prefix) && urls[0].includes("#/") && urls[0].includes(route);
+      for (const how of ["ctrl", "middle"] as const) {
+        const label = how === "ctrl" ? "⌘/ctrl-click" : "middle-click";
+        const mapped = await probe("/quotes", how);
+        step(`${label} on <a href="/quotes"> opens the list's #/estimates route in a new tab inside the package (no dead page)`, mapped.box && live(mapped.urls, "#/estimates") && mapped.stayed, JSON.stringify(mapped));
+        const est = await probe(`/estimator?id=${encodeURIComponent(first.id)}`, how);
+        step(`${label} on <a href="/estimator?id=…"> opens #/estimate/<id> in a new tab inside the package`, est.box && live(est.urls, `#/estimate/${first.id}`) && est.stayed, JSON.stringify(est));
+        const unmapped = await probe("/design/grid/G-1", how);
+        step(`${label} on an unmapped app path (/design/grid/…) shows “Not part of the prototype” and opens no tab`, unmapped.box && unmapped.notice && unmapped.urls.length === 0 && unmapped.stayed, JSON.stringify(unmapped));
+        const prev = await probe("/estimator-preview/Q-G001?tab=bom", how);
+        step(`${label} on a preview route opens no tab — the in-window overlay shows`, prev.box && prev.urls.length === 0 && prev.stayed && prev.overlay, JSON.stringify(prev));
+        await page.keyboard.press("Escape");
+        await waitFor(() => page.evaluate(() => !document.querySelector("[data-handoff-overlay]")), 3000);
+      }
+      await noteUnregistered(page);
+    }
+
     // 6d — a host's own query param survives the shell's navigations
     await openUrl(page, `${base}?v=42#/estimates`);
     await waitList(page);

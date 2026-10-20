@@ -54,10 +54,11 @@ import { previewPath } from "@/lib/estimate-output/package-preview";
 import * as nodePath from "node:path";
 import { NOT_IN_PROTOTYPE } from "../handoff/estimator/runtime/actions-registry";
 import { reviewOps } from "../handoff/estimator/runtime/review-ops";
-import { adoptedLocation, composeHistoryUrl, foreignOnly, mapAppHref, normalizedLocation, parseRoute, routeHash, routeSearch, sameRoute, withForeignParams, type Route } from "../handoff/estimator/runtime/routes";
+import { adoptedLocation, composeHistoryUrl, foreignOnly, mapAppHref, newTabHref, normalizedLocation, parseRoute, routeHash, routeSearch, sameRoute, withForeignParams, type Route } from "../handoff/estimator/runtime/routes";
 import { filterRows, listRows, statusCounts, updatedLabel } from "../handoff/estimator/runtime/estimates-list-model";
 import { canonicalTotals } from "../handoff/estimator/runtime/estimate-totals";
 import { runReset } from "../handoff/estimator/runtime/reset";
+import { ADOPTED_KEY, adopt, adopted } from "../handoff/estimator/runtime/adopted";
 import { nextStepActions } from "../handoff/estimator/runtime/actions/next-step-actions";
 import {
   NO_FOLLOW_UP_TASK, REFUSED_SEND_ACTIONS, refusedSendActions, SEND_COPY, sendActions, SIMULATED_LINK, SIMULATED_SEND_MARK, TRACK_GONE, trackedEmailsOf,
@@ -1465,4 +1466,91 @@ export async function handoffShellChecks(ok: Ok) {
   let called = 0;
   const fine = await runReset({ reset: async () => void (called += 1) });
   ok(fine.ok && called === 1, "handoff shell: a clean reset resolves ok after exactly one store.reset()");
+
+  // --- Reset clears the new-estimate adoption (sessionStorage key + in-memory map) only when it succeeded ---
+  {
+    const g = globalThis as unknown as Record<string, unknown>;
+    const had = Object.getOwnPropertyDescriptor(g, "sessionStorage");
+    const mem = new Map<string, string>();
+    Object.defineProperty(g, "sessionStorage", { configurable: true, value: { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k) } });
+    try {
+      adopt("e1", "Q-9");
+      ok(mem.has(ADOPTED_KEY) && adopted.get("e1") === "Q-9", "handoff shell: adopt() records token → id in memory and sessionStorage");
+      await runReset({ reset: () => Promise.reject(new Error("blocked")) });
+      ok(mem.has(ADOPTED_KEY) && adopted.get("e1") === "Q-9", "handoff shell: a FAILED reset keeps the adoption (nothing was discarded)");
+      await runReset({ reset: async () => {} });
+      ok(!mem.has(ADOPTED_KEY) && adopted.size === 0, "handoff shell: a successful reset clears peak-handoff-adopted and the in-memory adoption map");
+    } finally {
+      if (had) Object.defineProperty(g, "sessionStorage", had);
+      else delete g.sessionStorage;
+    }
+  }
+
+  // --- Modified / middle clicks on app links: the new-tab URL ---
+  {
+    const here = { href: "file:///pkg/index.html?v=42&id=Q-1&step=package#/estimate/Q-1", search: "?v=42&id=Q-1&step=package", hash: "#/estimate/Q-1" };
+    const route = newTabHref(mapAppHref("/estimator?id=Q-2", parseRoute(here.hash, here.search)), here);
+    ok(route === "file:///pkg/index.html?id=Q-2&v=42#/estimate/Q-2", `handoff shell: ctrl/middle-click on /estimator?id= opens the route's hash URL, host params kept, owned params replaced (${route})`);
+    ok(newTabHref(mapAppHref("/quotes", parseRoute(here.hash, here.search)), here) === "file:///pkg/index.html?v=42#/estimates", "handoff shell: …/quotes opens #/estimates without the Estimator's params");
+    const page = newTabHref(mapAppHref("/estimator?step=review", parseRoute(here.hash, here.search)), here);
+    ok(page === "file:///pkg/index.html?step=review&id=Q-1&v=42#/estimate/Q-1", `handoff shell: a same-page query change opens the same estimate in a new tab (${page})`);
+    ok(newTabHref(mapAppHref("/design/grid/G-1", parseRoute(here.hash, here.search)), here) === null && newTabHref(mapAppHref("#systems", parseRoute(here.hash, here.search)), here) === null, "handoff shell: an unmapped app path or an anchor has no tab of its own (notice / in-place scroll)");
+    ok(!/^$/.test(route ?? "") && (route ?? "").includes("#/"), "handoff shell: the new-tab URL is a full URL with a #/ route (never window.open(\"\"), which is the cut-sheet stand-in)");
+  }
+
+  // --- history patch: a refused pushState/replaceState announces nothing and cannot recurse ---
+  {
+    const g = globalThis as unknown as Record<string, unknown>;
+    const saved = ["window", "sessionStorage"].map((k) => [k, Object.getOwnPropertyDescriptor(g, k)] as const);
+    let refuse = false;
+    let calls = 0;
+    const loc = { href: "file:///pkg/index.html?id=Q-7", get search() { return new URL(this.href).search; }, get hash() { return new URL(this.href).hash; }, get pathname() { return new URL(this.href).pathname; } };
+    const hist = {
+      state: null as unknown,
+      pushState(state: unknown, _u: string, url?: string | URL | null) {
+        calls += 1;
+        if (refuse) throw new DOMException("refused", "SecurityError");
+        this.state = state;
+        if (url != null) loc.href = new URL(String(url), loc.href).href;
+      },
+      replaceState(state: unknown, _u: string, url?: string | URL | null) {
+        calls += 1;
+        if (refuse) throw new DOMException("refused", "SecurityError");
+        this.state = state;
+        if (url != null) loc.href = new URL(String(url), loc.href).href;
+      },
+    };
+    const win = Object.assign(new EventTarget(), { history: hist, location: loc });
+    Object.defineProperty(g, "window", { configurable: true, value: win });
+    Object.defineProperty(g, "sessionStorage", { configurable: true, value: { getItem: () => null, setItem() {}, removeItem() {} } });
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      const nav = await import("../handoff/estimator/shims/next-navigation");
+      let events = 0;
+      nav.subscribeLocation((c) => {
+        events += 1;
+        if (c.source === "nav") nav.normalizeLocation(); // a listener that re-normalizes on every announced change
+      });
+      refuse = true;
+      calls = 0;
+      events = 0;
+      nav.normalizeLocation();
+      ok(calls === 1 && events === 0, `handoff shell: a refused replaceState in normalizeLocation announces no change and is tried once (${calls} calls, ${events} events)`);
+      calls = 0;
+      window.history.pushState(null, "", "?step=package");
+      ok(calls === 1 && events === 0, `handoff shell: a refused pushState announces no change (${calls} calls, ${events} events)`);
+      refuse = false;
+      calls = 0;
+      events = 0;
+      nav.normalizeLocation();
+      ok(calls === 1 && events === 1 && loc.href.endsWith("#/estimate/Q-7"), `handoff shell: a successful normalize announces once, and a re-entrant normalize from its own listener is a no-op (${calls} calls, ${events} events, ${loc.href})`);
+    } finally {
+      console.warn = warn;
+      for (const [k, d] of saved) {
+        if (d) Object.defineProperty(g, k, d);
+        else delete g[k];
+      }
+    }
+  }
 }

@@ -13,6 +13,7 @@
  * raises the "Not part of the prototype" notice. Plan: PR 2 Task 7.
  */
 import { useSyncExternalStore } from "react";
+import { adopt, adopted } from "../runtime/adopted";
 import { refresh } from "../runtime/router";
 import { adoptedLocation, composeHistoryUrl, mapAppHref, NEW_ESTIMATE_ID, normalizedLocation, NOT_IN_PROTOTYPE_COPY, parseRoute, routeHash, routeSearch, withForeignParams, type Route } from "../runtime/routes";
 
@@ -73,14 +74,6 @@ export function scrollToAnchor(id: string): void {
  * blank new one. Kept in sessionStorage so it survives a reload of the window.
  */
 const TOKEN = "__handoffEstimate";
-const ADOPTED_KEY = "peak-handoff-adopted";
-const adopted = new Map<string, string>();
-try {
-  const raw = typeof sessionStorage === "undefined" ? null : sessionStorage.getItem(ADOPTED_KEY);
-  if (raw) for (const [k, v] of Object.entries(JSON.parse(raw) as Record<string, string>)) if (typeof v === "string") adopted.set(k, v);
-} catch {
-  /* no sessionStorage — adoption lasts until the window closes */
-}
 const tokenOf = (state: unknown): string | null => {
   const t = state && typeof state === "object" ? (state as Record<string, unknown>)[TOKEN] : null;
   return typeof t === "string" ? t : null;
@@ -89,14 +82,6 @@ const mintToken = () => `e${Date.now().toString(36)}${Math.random().toString(36)
 const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype;
 /** `data` with the token added (null → a fresh object; a non-plain state is left as the caller gave it). */
 const withToken = (data: unknown, token: string): unknown => (data == null ? { [TOKEN]: token } : isPlainObject(data) ? { ...data, [TOKEN]: token } : data);
-function adopt(token: string, id: string): void {
-  adopted.set(token, id);
-  try {
-    sessionStorage.setItem(ADOPTED_KEY, JSON.stringify(Object.fromEntries(adopted)));
-  } catch {
-    /* in memory only */
-  }
-}
 
 function patchHistory(): void {
   if (patched || typeof window === "undefined") return;
@@ -137,8 +122,10 @@ function patchHistory(): void {
       try {
         orig(state, unused, target);
       } catch (e) {
-        // Some engines refuse query changes on file:// URLs; the page stays put.
+        // Some engines refuse query changes on file:// URLs; the page stays put — and nothing moved, so nothing is
+        // announced (a "nav" listener would otherwise re-normalize the same location and be refused again).
         console.warn(`[handoff] history.${m} refused`, String(url), e);
+        return;
       }
       emit(explicit ? "nav" : "app");
       if (anchor) scrollToAnchor(anchor);
@@ -222,7 +209,19 @@ export function goTo(route: Route, opts: { replace?: boolean; search?: string; a
  * session has since been saved is re-pointed at the saved id (adoptedLocation), so Back / Forward into it reopens that
  * estimate instead of a blank one. An estimate entry with no session token gets one. In place — no history entry.
  */
+let normalizing = false;
 export function normalizeLocation(): void {
+  // A "nav" the rewrite below announces must not run this again from inside itself.
+  if (normalizing) return;
+  normalizing = true;
+  try {
+    normalizeOnce();
+  } finally {
+    normalizing = false;
+  }
+}
+
+function normalizeOnce(): void {
   const token = tokenOf(window.history.state);
   const savedAs = token ? adopted.get(token) : undefined;
   const fixed = (savedAs && adoptedLocation(window.location.href, savedAs)) || normalizedLocation(window.location.href);

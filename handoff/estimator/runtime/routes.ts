@@ -207,6 +207,24 @@ export function mapAppHref(href: string, current: Route): AppTarget {
   }
 }
 
+/**
+ * The full URL a modified / middle click on an app link opens in a new tab: the current page without its hash or the
+ * Estimator's own params (the host's params stay), plus the target's route hash — null when the target has no tab of
+ * its own (an anchor, an unsupported path, another site). Never "": window.open("") is the cut-sheet stand-in.
+ */
+export function newTabHref(target: AppTarget, here: { href: string; search: string; hash: string }): string | null {
+  const base = here.href.split("#")[0].split("?")[0];
+  if (target.kind === "route") return base + withForeignParams(target.search, here.search) + routeHash(target.route);
+  if (target.kind === "page") {
+    // A same-page query change (`?step=review`) keeps the estimate it is on.
+    const p = paramsOf(target.search);
+    const id = paramsOf(here.search).get("id");
+    if (id && !p.has("id")) p.set("id", id);
+    return base + withForeignParams(searchOf(p), here.search) + here.hash;
+  }
+  return null;
+}
+
 /* ------------------------------------------------------------------ history rewriting */
 
 export type HistoryUrl = {

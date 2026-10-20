@@ -3,6 +3,7 @@
  * IndexedDB overlay and may REJECT — with RESET_BLOCKED_MESSAGE ("Close other prototype windows and try again.") when
  * another window keeps the database open — and the shell shows that message instead of reloading. Plan: PR 2 Task 7.
  */
+import { clearAdopted } from "./adopted";
 import type { HandoffStore } from "./store";
 
 export type ResetOutcome = { ok: true } | { ok: false; error: string };
@@ -10,6 +11,8 @@ export type ResetOutcome = { ok: true } | { ok: false; error: string };
 export async function runReset(store: Pick<HandoffStore, "reset">): Promise<ResetOutcome> {
   try {
     await store.reset();
+    // The overlay is gone, and with it every estimate a new-estimate history entry was re-pointed at.
+    clearAdopted();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error && e.message ? e.message : "The reset did not go through. Reload this page and try again." };
