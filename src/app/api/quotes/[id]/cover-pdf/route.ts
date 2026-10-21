@@ -1,13 +1,10 @@
-import { attachmentDisposition } from "@/lib/document-files";
 import { renderCoverPdf } from "@/lib/estimate-output/cover-pdf-server";
+import { signedPdfResponse } from "@/lib/quote-pdf/signed-print-pdf";
 import { requireUser } from "@/lib/session";
 
 /** R7: one headless-Chrome render of a 1–2 page cover. */
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
-
-const text = (body: string, status: number) =>
-  new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "private, no-store" } });
 
 /**
  * #301 slice A — a system estimate's cover PDF for staff (D-p, R7): rendered
@@ -22,15 +19,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const h = request.headers;
   const r = await renderCoverPdf(id, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
-  if (!r.ok) return text(r.error, r.status);
-  const disposition = attachmentDisposition(r.fileName);
   const download = new URL(request.url).searchParams.get("download") === "1";
-  return new Response(new Uint8Array(r.pdf), {
-    headers: {
-      "content-type": "application/pdf",
-      "content-disposition": download ? disposition : "inline" + disposition.slice("attachment".length),
-      "x-content-type-options": "nosniff",
-      "cache-control": "private, no-store",
-    },
-  });
+  return signedPdfResponse(r, download);
 }

@@ -43,7 +43,7 @@
         },
         {
           "path": "src/app/print/quote/[id]/page.tsx",
-          "sha256": "111fea1608362557a8a26bf1a1ff7f62f83ef93ec0f765213abea88b73128a49"
+          "sha256": "e96a3ca32f91608e543d3bccf1f210b7d98b3d3bc8935f5f41df956d0cfa67d7"
         },
         {
           "path": "src/lib/narrative/photos.ts",
@@ -71,7 +71,7 @@
         },
         {
           "path": "src/app/print/quote/[id]/page.tsx",
-          "sha256": "111fea1608362557a8a26bf1a1ff7f62f83ef93ec0f765213abea88b73128a49"
+          "sha256": "e96a3ca32f91608e543d3bccf1f210b7d98b3d3bc8935f5f41df956d0cfa67d7"
         }
       ]
     },
