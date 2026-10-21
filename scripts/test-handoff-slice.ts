@@ -11,12 +11,13 @@ import { spawnSync } from "node:child_process";
 import ts from "typescript";
 import {
   CATALOG_FIELDS, FIXTURE_FIELDS, QUOTE_FIELDS, BLOB_IDS, SETTINGS_FIELDS, COMPANY_COLS, SITE_COLS, CONTACT_COLS,
-  REVISION_FIELDS, DOC_FIELDS, VENDOR_QUOTE_FIELDS, EXCLUDED_SOURCES,
-  pickFields, scanForSecrets, selectEstimates, catalogChunks, sanitizeQuote,
+  REVISION_FIELDS, DOC_FIELDS, VENDOR_QUOTE_FIELDS, EXCLUDED_SOURCES, DEFAULT_RECENT_DAYS, ESTIMATOR_SOURCES, SelectionError,
+  pickFields, scanForSecrets, selectEstimates, catalogChunks, sanitizeQuote, parseRecentDays, recentWindow, selectBundledEstimates,
+  selectCatalogScope, quoteStamp, noEstimatesMessage, describeEstimateSelection,
 } from "../handoff/estimator/slice-rules";
 import { sliceExport, writeSlice, loadPhotoManifest, run as sliceRun, type ExportV2 } from "../handoff/estimator/slice";
 import { downloadPlan, manufacturerImageIds, parsePhotoManifest, photoScopeSkus, photosScript, selectPhotos } from "../handoff/estimator/photo-select";
-import { AUTH_ABORT_MESSAGE, BlobAuthError, blobKeyBelongsTo, buildPhotoManifest, completeImageExt, describeSelection, downloadPhotos, DEFAULT_OUTPUT_ROOT, main as photosMain, photosOutProblem, reconcileImagesDir, selectionForExport, sniffImageExt, type BlobClient } from "../handoff/estimator/fetch-photos";
+import { AUTH_ABORT_MESSAGE, BlobAuthError, blobKeyBelongsTo, buildPhotoManifest, completeImageExt, describeSelection, downloadPhotos, DEFAULT_OUTPUT_ROOT, main as photosMain, photosOutProblem, reconcileImagesDir, estimatesForExport, selectionForExport, sniffImageExt, type BlobClient } from "../handoff/estimator/fetch-photos";
 import type { Ok } from "./test-inbox-org";
 
 export const FIXTURE_V2 = "docs/estimating-core/handoff-fixtures/export-v2.json";
@@ -53,6 +54,8 @@ export async function handoffSliceChecks(ok: Ok) {
   const rows = (exp.collections?.quotes ?? []) as Array<{ id: string; doc: Record<string, unknown>; deleted?: boolean }>;
   ok(selectEstimates(rows).map((q) => q.id).join(",") === "Q-G001,Q-G002,Q-G003",
     "handoff:slice: selectEstimates keeps live non-Daylite system quotes with lines (Q-G001..3)");
+  ok(selectBundledEstimates(rows as never, exp.meta?.exportedAt).estimates.map((q) => q.id).join(",") === "Q-G001,Q-G002,Q-G003",
+    "handoff:slice: the fixture's Q-G001..3 all fall in the default 28-day window (Q-G002 by its createdAt) and the Daylite quote does not");
   ok(rows.some((r) => (r.doc.source as string) === "daylite"), "handoff:slice: the fixture carries a Daylite quote to exclude");
   const sel = selectEstimates(rows);
   ok(sel.every((q) => !("shareLink" in q) && !("leadId" in q) && !("bid" in q) && !("packageFiles" in q) && !("shareOpens" in q)),
@@ -219,13 +222,18 @@ export async function handoffSliceChecks(ok: Ok) {
   // --extra-estimates: dev slices can carry the golden quotes (an alternate, bonus lines)
   const golden = JSON.parse(fs.readFileSync(GOLDEN_V1, "utf8")) as ExportV2;
   const base = { ...exp, collections: { ...exp.collections, quotes: [] } } as ExportV2;
-  const none = sliceExport(base);
+  let noneErr: unknown = null;
+  try { sliceExport(base); } catch (e) { noneErr = e; }
+  ok(noneErr instanceof SelectionError && noneErr.code === "no-estimates", "handoff:slice: an export with no qualifying estimate and no extras is refused (SelectionError no-estimates)");
   const withExtra = sliceExport(base, { extraEstimates: selectEstimates((golden.collections?.quotes ?? []) as never) });
   const ids = (res: typeof r) => ((): string[] => { const w: Record<string, unknown> = {}; new Function("window", res.files["data/estimates.js"])(w); return (w.PEAK_ESTIMATES as Array<{ id: string }>).map((q) => q.id); })();
-  ok(ids(none).length === 0 && ids(withExtra).join(",") === "Q-G001,Q-G002,Q-G003", "handoff:slice: --extra-estimates appends another export's selected estimates");
+  ok(ids(withExtra).join(",") === "Q-G001,Q-G002,Q-G003", "handoff:slice: --extra-estimates appends another export's selected estimates (outside the window — the golden quotes carry no stamp)");
 
   // --- final review A1–A4: revisions / vendor quotes allow-listed, portal-catalog excluded, boltWidthIn kept ---
   await revisionAllowListChecks(ok, exp);
+
+  // --- Jeff Oct 20: the recent Estimator estimates + only the catalog they (and every assembly) need ---
+  await recentSelectionChecks(ok, exp);
 
   // --- CLI exit codes (child process, real entry point) ---
   const repo = process.cwd();
@@ -742,7 +750,7 @@ async function revisionAllowListChecks(ok: Ok, exp: ExportV2) {
   withPortal.collections!.quotes.push({ id: "Q-PORTAL", doc: { ...JSON.parse(JSON.stringify(g1.doc)), source: "portal-catalog" } } as never);
   withPortal.collections!.quotes.push({ id: "Q-QUICK", doc: { ...JSON.parse(JSON.stringify(g1.doc)), source: "quick" } } as never);
   const sel = selectEstimates(withPortal.collections!.quotes as never).map((x) => x.id);
-  ok(!sel.includes("Q-PORTAL") && sel.includes("Q-QUICK") && sel.includes("Q-G001"), `handoff:slice A3: a portal-catalog quote is excluded, estimator/quick kept (${sel.join(",")})`);
+  ok(!sel.includes("Q-PORTAL") && !sel.includes("Q-QUICK") && sel.includes("Q-G001"), `handoff:slice A3: a portal-catalog quote is excluded, and so is a Quick Design one (only Estimator-built quotes ship, Oct 20); Q-G001 kept (${sel.join(",")})`);
 
   // A4 — bolt width rides with the catalog (lin-yd fabric weights)
   ok((CATALOG_FIELDS as readonly string[]).includes("boltWidthIn"), "handoff:slice A4: CATALOG_FIELDS carries boltWidthIn");
@@ -754,4 +762,287 @@ async function revisionAllowListChecks(ok: Ok, exp: ExportV2) {
   new Function("window", wb.files["data/catalog-1.js"])(cw);
   const pb = (cw.PEAK_CATALOG as Array<Record<string, unknown>>).find((x) => x.id === "SKU-B")!;
   ok(pb.boltWidthIn === 54 && pb.ozBasis === "lin-yd" && pb.oz === 16, "handoff:slice A4: a lin-yd fabric keeps oz / ozBasis / boltWidthIn in catalog-N.js");
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------
+// Jeff Oct 20 — only Estimator estimates from the last 4 weeks, and only the catalog parts they need.
+
+const DAY = 86_400_000;
+const EXPORTED = "2026-10-20T00:00:00.000Z";
+const EXPORTED_MS = Date.parse(EXPORTED);
+
+/** A one-line system quote document with one line naming `sku`. */
+const quoteDoc = (sku: string, over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  quoteType: "system", name: `Quote ${sku}`, customer: "Alpha Schools", customerId: "c-alpha", status: "draft", source: "estimator", updatedAt: EXPORTED_MS - DAY,
+  spec: { sections: [{ id: "s1", name: "Sys", kind: "lighting", mfr: "", freightPct: 0, items: [{ id: 1, sku, desc: sku, qty: 1, unit: "ea", cost: 1, price: 2 }] }] },
+  ...over,
+});
+const part = (sku: string, over: Record<string, unknown> = {}) => mkRow(sku, { sku, desc: sku, category: "Misc", unit: "ea", cost: 10, list: 20, ...over });
+
+function exportWith(base: ExportV2, o: { quotes?: Array<ReturnType<typeof mkRow>>; parts?: Array<ReturnType<typeof mkRow>>; fixtures?: Array<ReturnType<typeof mkRow>>; blobs?: Array<{ id: string; data: unknown }>; exportedAt?: string | null }): ExportV2 {
+  const e = clone(base);
+  e.meta = { ...e.meta, exportedAt: o.exportedAt === null ? undefined : (o.exportedAt ?? EXPORTED) };
+  e.collections = { ...e.collections, quotes: (o.quotes ?? []) as never, catalog_parts: (o.parts ?? []) as never, subassemblies: (o.fixtures ?? []) as never, part_documents: [], part_document_links: [], manufacturers: [] };
+  e.blobs = (o.blobs ?? []) as never;
+  return e;
+}
+
+const sliceIds = (r: ReturnType<typeof sliceExport>): string[] => {
+  const w: Record<string, unknown> = {};
+  new Function("window", r.files["data/estimates.js"])(w);
+  return (w.PEAK_ESTIMATES as Array<{ id: string }>).map((q) => q.id);
+};
+const sliceCatalog = (r: ReturnType<typeof sliceExport>): Array<Record<string, unknown>> => {
+  const out: Array<Record<string, unknown>> = [];
+  for (const f of Object.keys(r.files).filter((n) => /^data\/catalog-\d+\.js$/.test(n))) {
+    const w: Record<string, unknown> = {};
+    new Function("window", r.files[f])(w);
+    out.push(...((w.PEAK_CATALOG ?? []) as Array<Record<string, unknown>>));
+  }
+  return out;
+};
+
+async function recentSelectionChecks(ok: Ok, fixture: ExportV2) {
+  // --- parseRecentDays / the window ---
+  ok(DEFAULT_RECENT_DAYS === 28 && parseRecentDays(undefined) === 28 && parseRecentDays("7") === 7 && parseRecentDays(" 90 ") === 90 && parseRecentDays("3650") === 3650,
+    "handoff:recent: --recent-days defaults to 28 and accepts a whole number of days");
+  const bad = (raw: string) => { try { parseRecentDays(raw); return null; } catch (e) { return e instanceof SelectionError ? e.code : "other"; } };
+  ok(["0", "-1", "abc", "1.5", "", "3651", "7d", "NaN"].every((raw) => bad(raw) === "bad-recent-days"), "handoff:recent: --recent-days refuses 0, negatives, fractions, text, empty and > 3650");
+  const w = recentWindow(EXPORTED, 28);
+  ok(w.fromMs === EXPORTED_MS - 28 * DAY && w.toMs === EXPORTED_MS && w.exportedAt === EXPORTED, "handoff:recent: the window is exportedAt − days … exportedAt");
+  ok(["", null, undefined, "not a date", 0].every((x) => { try { recentWindow(x); return false; } catch (e) { return e instanceof SelectionError && e.code === "no-exported-at"; } }), "handoff:recent: an export without a usable exportedAt is refused");
+
+  // --- the boundary, anchored to exportedAt (never the clock) ---
+  const q = (id: string, over: Record<string, unknown>) => mkRow(id, quoteDoc(`P-${id}`, over));
+  const inWindow = (e: ExportV2, days?: number) => selectBundledEstimates((e.collections!.quotes) as never, e.meta?.exportedAt, days).estimates.map((x) => x.id).join(",");
+  const edge = exportWith(clone(fixture), {
+    quotes: [
+      q("Q-AT", { updatedAt: EXPORTED_MS - 28 * DAY }),              // exactly 28 days before: in
+      q("Q-JUST-OUT", { updatedAt: EXPORTED_MS - 28 * DAY - 1 }),    // 1 ms older: out
+      q("Q-NOW", { updatedAt: EXPORTED_MS }),                        // at the export: in
+      q("Q-FUTURE", { updatedAt: EXPORTED_MS + 1 }),                 // after the export (clock skew): out
+      q("Q-OLD", { updatedAt: EXPORTED_MS - 400 * DAY }),
+      q("Q-CREATED", { updatedAt: undefined, createdAt: EXPORTED_MS - 3 * DAY }), // no updatedAt → createdAt
+      q("Q-CREATED-OLD", { updatedAt: undefined, createdAt: EXPORTED_MS - 90 * DAY }),
+      q("Q-UPD-WINS", { updatedAt: EXPORTED_MS - 90 * DAY, createdAt: EXPORTED_MS - 1 * DAY }), // updatedAt, not createdAt, decides
+      q("Q-NOSTAMP", { updatedAt: undefined }),                       // neither → not recent
+      q("Q-STRING-STAMP", { updatedAt: String(EXPORTED_MS - 2 * DAY) }), // a numeric string still reads as a time (Number())
+    ],
+  });
+  ok(inWindow(edge) === "Q-AT,Q-CREATED,Q-NOW,Q-STRING-STAMP", `handoff:recent: boundary — exactly exportedAt−28d is in, 1 ms older is out, a future stamp is out, createdAt is the fallback, no stamp is out (got ${inWindow(edge)})`);
+  ok(inWindow(edge, 7) === "Q-CREATED,Q-NOW,Q-STRING-STAMP" && inWindow(edge, 1).split(",").join() === "Q-NOW", `handoff:recent: a narrower --recent-days narrows (7 days: ${inWindow(edge, 7)})`);
+  ok(inWindow(edge, 500).includes("Q-OLD") && inWindow(edge, 500).includes("Q-UPD-WINS") && !inWindow(edge, 500).includes("Q-FUTURE") && !inWindow(edge, 500).includes("Q-NOSTAMP"), "handoff:recent: a wider --recent-days (500) takes the old quotes in; future and unstamped stay out");
+  ok(quoteStamp({ updatedAt: 5, createdAt: 9 }) === 5 && quoteStamp({ createdAt: 9 }) === 9 && quoteStamp({}) === null && quoteStamp({ updatedAt: "x" }) === null, "handoff:recent: quoteStamp = updatedAt, else createdAt, else null");
+  // the same export with a later exportedAt moves the window (anchored to the export, not Date.now())
+  const later = clone(edge);
+  later.meta = { ...later.meta, exportedAt: new Date(EXPORTED_MS + 100 * DAY).toISOString() };
+  ok(inWindow(later) === "", "handoff:recent: moving exportedAt forward moves the window — a slice is reproducible, never a function of today's date");
+
+  // --- sources: only the Estimator's quotes ---
+  const sources: Array<[string | undefined | null, boolean]> = [
+    ["estimator", true], ["", true], [undefined, true], [null, true],
+    ["grid", false], ["quick", false], ["inbox", false], ["daylite", false], ["portal-catalog", false], ["portal-self-serve", false], ["portal-service", false], ["rental", false], ["assist", false], ["sandbox", false],
+  ];
+  const srcExp = exportWith(clone(fixture), { quotes: sources.map(([src], i) => q(`Q-S${i}`, src === undefined ? { source: undefined } : { source: src })) });
+  const got = inWindow(srcExp).split(",").filter(Boolean);
+  const want = sources.map(([, keep], i) => (keep ? `Q-S${i}` : "")).filter(Boolean).sort();
+  ok(got.sort().join() === want.join(), `handoff:recent: only Estimator-built quotes (source estimator / empty / absent) are bundled (got ${got.join()})`);
+  ok(ESTIMATOR_SOURCES.join("|") === "estimator|" && (EXCLUDED_SOURCES as readonly string[]).includes("daylite"), "handoff:recent: ESTIMATOR_SOURCES = estimator and empty");
+  const typed = exportWith(clone(fixture), { quotes: [q("Q-FLAME", { quoteType: "flame_test" }), q("Q-DEL", {}), mkRow("Q-DELETED", quoteDoc("P-x"), true), q("Q-EMPTY", { spec: { sections: [{ id: "s", items: [] }] } }), q("Q-OK", {})] });
+  ok(inWindow(typed) === "Q-DEL,Q-OK", `handoff:recent: the older filters stand — live, system, at least one line (got ${inWindow(typed)})`);
+
+  // --- sliceExport refuses with a clear error ---
+  const refusal = (e: ExportV2, opts: Parameters<typeof sliceExport>[1] = {}) => { try { sliceExport(e, opts); return null; } catch (err) { return err instanceof SelectionError ? err : new Error("other: " + String(err)); } };
+  const none = refusal(exportWith(clone(fixture), { quotes: [q("Q-OLD", { updatedAt: EXPORTED_MS - 90 * DAY })] }));
+  ok(none instanceof SelectionError && none.code === "no-estimates" && /28 days/.test(none.message) && /2026-09-22/.test(none.message) && /2026-10-20/.test(none.message) && /--recent-days/.test(none.message),
+    `handoff:recent: zero qualifying estimates → refused, naming the window and the flag (${none?.message.slice(0, 80)}…)`);
+  const noAt = refusal(exportWith(clone(fixture), { quotes: [q("Q-1", {})], exportedAt: null }));
+  ok(noAt instanceof SelectionError && noAt.code === "no-exported-at", "handoff:recent: no meta.exportedAt → refused (sliceExport)");
+  ok(noEstimatesMessage(w).includes("last 28 days"), "handoff:recent: the refusal text names the window");
+
+  // --- extras are exempt from the window and their SKUs ship ---
+  const extraBase = exportWith(clone(fixture), {
+    quotes: [q("Q-NEW", { updatedAt: EXPORTED_MS - DAY })],
+    parts: [part("P-Q-NEW"), part("P-EXTRA"), part("P-UNUSED")],
+  });
+  const extraDoc = { ...selectEstimates([mkRow("Q-EXTRA", quoteDoc("P-EXTRA", { updatedAt: EXPORTED_MS - 900 * DAY }))] as never)[0] };
+  const withX = sliceExport(extraBase, { extraEstimates: [extraDoc as never] });
+  ok(sliceIds(withX).join() === "Q-EXTRA,Q-NEW" && withX.selection.estimates.find((x) => x.id === "Q-EXTRA")?.extra === true && withX.selection.estimates.find((x) => x.id === "Q-NEW")?.extra === false,
+    "handoff:recent: --extra-estimates are exempt from the window (a 900-day-old extra ships) and flagged as extras in the summary");
+  ok(sliceCatalog(withX).map((p) => p.id).sort().join() === "P-EXTRA,P-Q-NEW", "handoff:recent: an extra's SKUs join the catalog; an unused part does not");
+  const extraOnly = sliceExport(exportWith(clone(fixture), { quotes: [], parts: [part("P-EXTRA")] }), { extraEstimates: [extraDoc as never] });
+  ok(sliceIds(extraOnly).join() === "Q-EXTRA", "handoff:recent: extras alone satisfy the 'at least one estimate' rule");
+
+  // --- the catalog is exactly the union ---
+  await catalogUnionChecks(ok, fixture);
+
+  // --- handoff:photos and the slicer pick the same estimates ---
+  for (const days of [1, 7, 28, 90, 500]) {
+    let a: string[] | string, b: string[] | string;
+    try { a = estimatesForExport(edge, days).estimates.map((x) => x.id); } catch (e) { a = (e as Error).name; }
+    try { b = sliceExport(edge, { recentDays: days }).selection.estimates.map((x) => x.id); } catch (e) { b = (e as Error).name; }
+    ok(JSON.stringify(a) === JSON.stringify(b), `handoff:recent: handoff:photos and handoff:slice pick identical estimates for --recent-days ${days} (${JSON.stringify(a)})`);
+  }
+  ok(sliceExport(edge, { recentDays: 7 }).counts.estimates === 3, "handoff:recent: --recent-days reaches sliceExport (7 days → 3 estimates)");
+  const picks = selectionForExport(edge, 1).scopeSkus.join();
+  ok(picks === "P-Q-NOW" && selectionForExport(edge, 28).scopeSkus.includes("P-Q-AT") && !selectionForExport(edge, 28).scopeSkus.includes("P-Q-JUST-OUT") && selectionForExport(edge, 500).scopeSkus.includes("P-Q-OLD"),
+    `handoff:recent: the photo scope follows --recent-days (1 day → ${picks})`);
+
+  // --- the summary lines ---
+  const lines = describeEstimateSelection(w, sliceExport(extraBase, { extraEstimates: [extraDoc as never] }).selection.estimates).join("\n");
+  ok(/last 28 days \(2026-09-22 → 2026-10-20\)/.test(lines) && /Q-NEW .*Quote P-Q-NEW .*Alpha Schools .*updated 2026-10-19/.test(lines) && /Q-EXTRA .*\[--extra-estimates/.test(lines),
+    "handoff:recent: the summary lists the window and each estimate's id, name, customer and updated date");
+  const fx = sliceExport(clone(fixture));
+  ok(fx.selection.estimates.map((x) => `${x.id}:${x.estNo}`).join() === "Q-G001:9001,Q-G002:9002,Q-G003:9003" && fx.selection.window.days === 28 && fx.selection.estimates[0].customer === "Alpha Schools",
+    "handoff:recent: the slice result carries each bundled estimate's id, estNo, name, customer and updatedAt");
+  const metaW: Record<string, unknown> = {};
+  new Function("window", fx.files["data/meta.js"])(metaW);
+  ok(JSON.stringify((metaW.PEAK_META as { window: unknown }).window) === JSON.stringify({ days: 28, from: "2026-09-22T00:00:00.000Z", to: EXPORTED }), "handoff:recent: data/meta.js records the window");
+
+  // --- CLI: --recent-days parsing and exit codes ---
+  const repo = process.cwd();
+  const runCli = (args: string[]) => spawnSync("npx", ["tsx", "handoff/estimator/slice.ts", ...args], { cwd: repo, encoding: "utf8", timeout: 120_000 });
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-recent-"));
+  try {
+    const stale = exportWith(clone(fixture), { quotes: [q("Q-OLD", { updatedAt: EXPORTED_MS - 90 * DAY }), q("Q-NEWER", { updatedAt: EXPORTED_MS - 40 * DAY })], parts: [part("P-Q-OLD"), part("P-Q-NEWER")] });
+    const stalePath = path.join(tmp, "stale.json");
+    fs.writeFileSync(stalePath, JSON.stringify(stale));
+    const o1 = path.join(tmp, "o1");
+    const c1 = runCli(["--in", stalePath, "--out", o1]);
+    ok(c1.status === 1 && !fs.existsSync(o1) && /28 days/.test(c1.stderr) && /--recent-days/.test(c1.stderr), `handoff:recent: CLI — nothing in the default window exits 1, names the window and writes nothing (exit ${c1.status})`);
+    const o2 = path.join(tmp, "o2");
+    const c2 = runCli(["--in", stalePath, "--out", o2, "--recent-days", "60"]);
+    ok(c2.status === 0 && fs.existsSync(path.join(o2, "estimates.js")) && /Q-NEWER/.test(c2.stdout) && !/Q-OLD /.test(c2.stdout) && /last 60 days/.test(c2.stdout),
+      `handoff:recent: CLI — --recent-days 60 widens the window; the summary lists the bundled estimates (exit ${c2.status})`);
+    ok(/catalog: 1 part\(s\)/.test(c2.stdout) && /estimate=1/.test(c2.stdout), `handoff:recent: CLI — the summary prints the catalog count and why (${(c2.stdout.match(/catalog: .*/) ?? [""])[0]})`);
+    const o3 = path.join(tmp, "o3");
+    const c3 = runCli(["--in", stalePath, "--out", o3, "--recent-days", "0"]);
+    ok(c3.status === 2 && !fs.existsSync(o3) && /--recent-days/.test(c3.stderr), `handoff:recent: CLI — --recent-days 0 exits 2 (usage) and writes nothing (exit ${c3.status})`);
+    const noAtPath = path.join(tmp, "noat.json");
+    const noAtExp = clone(stale);
+    delete (noAtExp.meta as Record<string, unknown>).exportedAt;
+    fs.writeFileSync(noAtPath, JSON.stringify(noAtExp));
+    const c4 = runCli(["--in", noAtPath, "--out", path.join(tmp, "o4")]);
+    ok(c4.status === 2 && /exportedAt/.test(c4.stderr), `handoff:recent: CLI — an export without exportedAt exits 2 (exit ${c4.status})`);
+    // handoff:photos takes the same flag
+    const pd = path.join(tmp, "pimg");
+    const p1 = await quiet(() => photosMain(["--in", stalePath, "--out", pd, "--dry-run"], {}));
+    ok(p1.value === 1 && /28 days/.test(p1.err) && !fs.existsSync(pd), "handoff:photos: no estimate in the default window → exit 1, nothing written");
+    const p2 = await quiet(() => photosMain(["--in", stalePath, "--out", pd, "--dry-run", "--recent-days", "60"], {}));
+    ok(p2.value === 0 && /last 60 days/.test(p2.out) && /Q-NEWER/.test(p2.out) && !/Q-OLD /.test(p2.out) && /parts the sliced estimates and fixtures name: 1\b/.test(p2.out), "handoff:photos: --recent-days 60 --dry-run lists the window, the estimates and the narrowed part scope");
+    ok((await quiet(() => photosMain(["--in", stalePath, "--out", pd, "--dry-run", "--recent-days", "x"], {}))).value === 2, "handoff:photos: a bad --recent-days exits 2");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+/** The catalog is exactly: estimate SKUs ∪ every assembly's SKUs ∪ rule-blob SKUs ∪ fabric picker ∪ Labor ∪ rename stubs for those. */
+async function catalogUnionChecks(ok: Ok, fixture: ExportV2) {
+  const quotes = [
+    mkRow("Q-A", quoteDoc("P-LINE", {
+      spec: { sections: [
+        { id: "s1", name: "Main", kind: "lighting", mfr: "", freightPct: 0, items: [
+          { id: 1, sku: "P-LINE", desc: "line", qty: 1, unit: "ea", cost: 1, price: 2 },
+          { id: 2, sku: "P-COMP-PARENT", desc: "assembly line", qty: 1, unit: "ea", cost: 1, price: 2, components: [{ sku: "P-COMP", label: "c", role: "x", qty: 1, unit: "ea", cost: 1, price: 2 }] },
+          { id: 3, sku: "CUSTOM", desc: "custom", qty: 1, unit: "ea", cost: 1, price: 2, custom: true },
+          { id: 4, sku: "OLD-LINE", desc: "an old sku", qty: 1, unit: "ea", cost: 1, price: 2 },
+          { id: 5, sku: "CUSTOM", desc: "drape", qty: 1, unit: "ea", cost: 1, price: 2, curtain: true, curtainInputs: { name: "Main", fabricSku: "P-FABRIC-USED", fabricName: "Velour" } },
+          { id: 6, sku: "OLD-CHAIN-1", desc: "chain", qty: 1, unit: "ea", cost: 1, price: 2 },
+        ] },
+        { id: "s2", name: "Alt", kind: "rigging", mfr: "", freightPct: 0, alternate: true, items: [{ id: 1, sku: "P-ALT", desc: "alt", qty: 1, unit: "ea", cost: 1, price: 2 }] },
+      ] },
+      revisions: [{ rev: 1, at: 1, by: "x", reason: "sent", spec: { sections: [{ id: "s1", items: [{ id: 1, sku: "P-REV", qty: 1 }] }] } }],
+    })),
+    // an out-of-window quote: its parts must NOT ship
+    mkRow("Q-OLD", quoteDoc("P-OLD-ONLY", { updatedAt: EXPORTED_MS - 200 * DAY })),
+    // a Grid quote in the window: not an Estimator quote, its part must not ship
+    mkRow("Q-GRID", quoteDoc("P-GRID-ONLY", { source: "grid" })),
+  ];
+  const fixtures = [
+    mkRow("fa-1", { id: "fa-1", kind: "fixture", label: "Spot", lightEngineSku: "P-ENGINE", lensSku: "P-LENS", lines: [{ sku: "P-MEMBER", qty: 1 }], parts: [{ sku: "P-PARTS" }] }),
+    mkRow("fa-rack", { id: "fa-rack", kind: "rack", label: "Rack", rack: { placements: [{ sku: "P-RACKED", kind: "device" }, { kind: "reserved" }] } }),
+    mkRow("fa-gone", { id: "fa-gone", kind: "fixture", lines: [{ sku: "P-DELETED-ASM" }] }, true),
+  ];
+  const blobs = [
+    { id: "track_series", data: { "adc-1": { parts: { track: { sku: "P-TRACK" }, splice: { sku: "P-SPLICE" }, carrier: { sku: "" } }, sticks: [{ lengthFt: 10, sku: "P-STICK-10" }, { lengthFt: 12, sku: "P-STICK-12" }] } } },
+    { id: "curtain_mount_hardware", data: { rows: [{ sku: "P-MOUNT", qty: 1 }] } },
+    { id: "system_categories", data: { categories: [{ id: "c1", name: "Controls", items: [{ sku: "P-TYPICAL", qty: 2 }] }] } },
+    { id: "rack_defaults", data: { blankSku: "P-BLANK", ventSku: "P-VENT" } },
+    { id: "pricing_rules", data: { tiers: { A: 0.3 } } },
+    { id: "assist_secrets", data: { sku: "P-NOT-SHIPPED-BLOB" } }, // not a shipped blob (BLOB_IDS): its SKUs never count
+  ];
+  const parts = [
+    ...["P-LINE", "P-COMP-PARENT", "P-COMP", "P-ALT", "P-REV", "P-ENGINE", "P-LENS", "P-MEMBER", "P-PARTS", "P-RACKED",
+      "P-TRACK", "P-SPLICE", "P-STICK-10", "P-STICK-12", "P-MOUNT", "P-TYPICAL", "P-BLANK", "P-VENT", "P-FABRIC-USED",
+      "NEW-LINE", "NEW-CHAIN",
+      // not referenced by anything that ships:
+      "P-OLD-ONLY", "P-GRID-ONLY", "P-DELETED-ASM", "P-NOT-SHIPPED-BLOB", "P-UNRELATED", "P-ALSO-UNRELATED"].map((s) => part(s)),
+    part("P-FABRIC", { category: "Fabric", unit: "sqft", costPerSqft: 4.5 }),            // in the curtain picker (has a rate)
+    part("P-SOFT-FAB", { category: "Theatrical/Soft Goods", unit: "sq ft", cost: 3 }),    // a Soft Goods fabric sold per sq ft (rate = its cost)
+    part("P-FABRIC-NORATE", { category: "Fabric", unit: "sqft", cost: 0 }),             // no rate → the picker skips it
+    part("P-SOFT-EACH", { category: "Theatrical/Soft Goods", unit: "ea", cost: 3 }),      // Soft Goods by the each is not a fabric
+    part("LAB-RIG", { category: "Labor", unit: "hr" }), part("LAB-PM", { category: " Labor ", unit: "hr" }),
+    mkRow("P-DELETED-PLAIN", { sku: "P-DELETED-PLAIN" }, true),
+  ];
+  // renames: OLD-LINE → NEW-LINE (the quote names the old SKU); OLD-CHAIN-1 → OLD-CHAIN-2 → NEW-CHAIN (a chain);
+  // OLD-OF-LINE → P-LINE (the target ships on its own); OLD-OF-UNRELATED → P-UNRELATED (target does not ship); OLD-LOOP loops.
+  const stubs = [
+    mkRow("OLD-LINE", { sku: "OLD-LINE", renamedTo: "NEW-LINE" }, true),
+    mkRow("OLD-CHAIN-1", { sku: "OLD-CHAIN-1", renamedTo: "OLD-CHAIN-2" }, true),
+    mkRow("OLD-CHAIN-2", { sku: "OLD-CHAIN-2", renamedTo: "NEW-CHAIN" }, true),
+    mkRow("OLD-OF-LINE", { sku: "OLD-OF-LINE", renamedTo: "P-LINE" }, true),
+    mkRow("OLD-OF-UNRELATED", { sku: "OLD-OF-UNRELATED", renamedTo: "P-UNRELATED" }, true),
+    mkRow("OLD-LOOP", { sku: "OLD-LOOP", renamedTo: "OLD-LOOP" }, true),
+  ];
+  const exp = exportWith(clone(fixture), { quotes, parts: [...parts, ...stubs], fixtures, blobs });
+  const r = sliceExport(exp);
+  const shipped = sliceCatalog(r);
+  const liveIds = shipped.filter((p) => !("renamedTo" in p)).map((p) => String(p.id)).sort();
+  const stubIds = shipped.filter((p) => "renamedTo" in p).map((p) => String(p.id)).sort();
+  const wantLive = [
+    "P-LINE", "P-COMP", "P-ALT", "P-REV", "P-FABRIC-USED", "NEW-LINE", "NEW-CHAIN",       // bundled estimate (components, alternates, revisions, curtain fabric, renamed lines)
+    "P-COMP-PARENT",
+    "P-ENGINE", "P-LENS", "P-MEMBER", "P-PARTS", "P-RACKED",                               // assemblies
+    "P-TRACK", "P-SPLICE", "P-STICK-10", "P-STICK-12", "P-MOUNT", "P-TYPICAL", "P-BLANK", "P-VENT", // rules blobs
+    "P-FABRIC", "P-SOFT-FAB", "LAB-RIG", "LAB-PM",                                         // the Estimator's fabric and labor pickers
+  ].sort();
+  ok(liveIds.join() === wantLive.join(), `handoff:catalog: the catalog is exactly the union (got ${liveIds.length} of ${wantLive.length}: missing ${wantLive.filter((x) => !liveIds.includes(x)).join()} extra ${liveIds.filter((x) => !wantLive.includes(x)).join()})`);
+  ok(!liveIds.includes("P-OLD-ONLY") && !liveIds.includes("P-GRID-ONLY"), "handoff:catalog: a part on an old, out-of-window quote (or a Grid-built quote) is NOT shipped");
+  ok(liveIds.includes("P-MEMBER") && liveIds.includes("P-RACKED") && liveIds.includes("P-ENGINE") && liveIds.includes("P-LENS") && liveIds.includes("P-PARTS"), "handoff:catalog: every assembly member ships — lines, parts, light engine / lens, rack placements");
+  ok(!liveIds.includes("P-DELETED-ASM") && !liveIds.includes("P-NOT-SHIPPED-BLOB") && !liveIds.includes("P-UNRELATED") && !liveIds.includes("P-FABRIC-NORATE") && !liveIds.includes("P-SOFT-EACH"),
+    "handoff:catalog: a deleted assembly, a blob the package does not ship, an unrelated part, a rate-less fabric and Soft Goods by the each stay out");
+  ok(liveIds.includes("P-STICK-10") && liveIds.includes("P-STICK-12") && liveIds.includes("P-TRACK"), "handoff:catalog: a track_series stick and role part ships so the track configurator prices");
+  // rename stubs: where the old SKU is named by an estimate / assembly / blob, or the target ships
+  ok(stubIds.join() === ["OLD-CHAIN-1", "OLD-CHAIN-2", "OLD-LINE", "OLD-OF-LINE"].sort().join(),
+    `handoff:catalog: rename stubs ship only where the old SKU is named or the target ships (got ${stubIds.join()})`);
+  ok(!!shipped.find((p) => p.id === "OLD-LINE") && JSON.stringify(shipped.find((p) => p.id === "OLD-LINE")) === JSON.stringify({ id: "OLD-LINE", sku: "OLD-LINE", renamedTo: "NEW-LINE" }),
+    "handoff:catalog: a stub is still { id, sku, renamedTo } only");
+  ok(r.counts.catalog === wantLive.length && r.counts.catalogRetired === 4, "handoff:catalog: meta counts follow the selection");
+  const by = r.selection.catalog.bySource;
+  ok((by.estimate ?? 0) >= 7 && (by.assembly ?? 0) >= 5 && by["rule:track_series"] === 4 && by["rule:curtain_mount_hardware"] === 1 && by["rule:system_categories"] === 1 && by["rule:rack_defaults"] === 2 && by.fabric === 2 && by.labor === 2 && !("rule:assist_secrets" in by),
+    `handoff:catalog: the per-source breakdown (${JSON.stringify(by)})`);
+  ok(r.selection.catalog.live === wantLive.length && r.selection.catalog.retired === 4 && r.selection.catalog.unresolved >= 1, "handoff:catalog: the summary carries live / retired / unresolved counts");
+
+  // the scope function on its own: the legacy settings.fixtureAssemblies backup counts as an assembly source
+  const scope = selectCatalogScope({
+    estimates: [], fixtures: [], blobs: {}, settings: { fixtureAssemblies: [{ id: "x", lightEngineSku: "P-LEGACY", options: { c: [{ sku: "P-LEGACY-OPT" }] } }] },
+    catalog: [part("P-LEGACY"), part("P-LEGACY-OPT"), part("P-NO")] as never,
+  });
+  ok(scope.live.join() === "P-LEGACY,P-LEGACY-OPT" && scope.reasons.get("P-LEGACY")?.join() === "assembly", "handoff:catalog: settings.fixtureAssemblies (the legacy backup of the assemblies) is an assembly source");
+  // a referenced SKU that is neither live nor a stub is reported, not shipped
+  const sc2 = selectCatalogScope({ estimates: [{ spec: { sections: [{ items: [{ sku: "NOT-IN-BOOK" }] }] } }], fixtures: [], blobs: {}, settings: {}, catalog: [part("P-NO")] as never });
+  ok(sc2.live.length === 0 && sc2.unresolved.join() === "NOT-IN-BOOK", "handoff:catalog: a SKU in no catalog row is reported as unresolved and ships nothing");
+
+  // photos stay inside the shipped catalog: every photo-scope SKU that is a catalog part ships
+  const photoScope = selectionForExport(exp).scopeSkus;
+  const liveSet = new Set(liveIds);
+  const bookIds = new Set(parts.filter((p) => !p.deleted).map((p) => p.id));
+  ok(photoScope.length > 0 && photoScope.filter((s) => bookIds.has(s)).every((s) => liveSet.has(s)) && !photoScope.includes("P-OLD-ONLY") && !photoScope.includes("P-GRID-ONLY"),
+    `handoff:catalog: the photo scope (${photoScope.length} SKUs) never names a part the catalog does not carry, and leaves out the old quote's parts`);
+
+  // the shipped Estimator pickers still have what they read: fabrics + labor present in the slice
+  const g: Record<string, unknown> = {};
+  for (const f of Object.keys(r.files)) new Function("window", r.files[f])(g);
+  ok(Array.isArray(g.PEAK_ESTIMATES) && (g.PEAK_ESTIMATES as unknown[]).length === 1 && r.hits.length === 0, "handoff:catalog: the union slice is one estimate and passes the final secret scan");
 }

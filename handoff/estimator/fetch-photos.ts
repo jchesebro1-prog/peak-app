@@ -9,6 +9,8 @@
  * Then re-run handoff:slice (it writes data/photos.js when images/manifest.json exists) and handoff:build.
  * --out must be inside output/ and be empty, missing, or an earlier handoff:photos folder (it holds our manifest.json);
  * anything else is refused before a byte is written (photosOutProblem).
+ * --recent-days <n> (default 28; the SAME flag and rule as handoff:slice — pass the same value to both): only the parts the
+ * Estimator estimates changed within n days of the export's exportedAt (and every assembly) use are downloaded.
  * Options: --dry-run · --verbose (list every pick) · --force (re-download files already in the folder) ·
  *          --prune (delete image files in the folder the manifest does not reference) ·
  *          --concurrency N (default 6) · --retries N (default 2).
@@ -21,13 +23,13 @@
  *
  * Which photo: photo-select.ts (the app's own rule). Files are kept exactly as stored (WebP) — no transcoding —
  * and named <docId>.<ext>. A link-only document (no stored file) is recorded in manifest.json, not downloaded.
- * Exit codes: 0 done · 1 some downloads failed (manifest still written for the rest) or the token was rejected · 2 usage / missing token / bad export.
+ * Exit codes: 0 done · 1 some downloads failed (manifest still written for the rest), the token was rejected, or no estimate falls in the window · 2 usage / missing token / bad export.
  * Plan: PR 2 Task 11.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { downloadPlan, DOC_ID_RE, IMAGE_FILE_RE, parsePhotoManifest, PHOTO_MANIFEST_VERSION, selectPhotos, type PhotoManifest, type PhotoPick, type PhotoSelection } from "./photo-select";
-import { scanForSecrets, selectEstimates, pickAndScrub, FIXTURE_FIELDS, type DocRow, type ScrubEntry } from "./slice-rules";
+import { DEFAULT_RECENT_DAYS, SelectionError, describeEstimateSelection, noEstimatesMessage, parseRecentDays, scanForSecrets, selectBundledEstimates, summarizeEstimate, pickAndScrub, FIXTURE_FIELDS, type DocRow, type QuoteDoc, type RecentWindow, type ScrubEntry } from "./slice-rules";
 import type { ExportV2 } from "./slice";
 
 /** Per-image ceiling (the app's own MAX_PART_IMAGE_BYTES); anything bigger is refused, not buffered. */
@@ -297,9 +299,19 @@ export function reconcileImagesDir(dir: string, manifest: Pick<PhotoManifest, "b
   return { unreferenced, pruned, remaining: unreferenced.filter((n) => !pruned.includes(n)) };
 }
 
+/**
+ * The estimates the slicer will bundle for this export and window (slice-rules.ts selectBundledEstimates — the very function
+ * handoff:slice calls, so the two cannot pick differently). Throws SelectionError(no-exported-at | no-estimates).
+ */
+export function estimatesForExport(exp: ExportV2, recentDays: number = DEFAULT_RECENT_DAYS): { window: RecentWindow; estimates: QuoteDoc[] } {
+  const sel = selectBundledEstimates((exp.collections?.quotes ?? []) as DocRow[], exp.meta?.exportedAt, recentDays);
+  if (sel.estimates.length === 0) throw new SelectionError("no-estimates", noEstimatesMessage(sel.window));
+  return sel;
+}
+
 /** The selection for an export, exactly as the slicer will slice it (same estimates, fixtures). */
-export function selectionForExport(exp: ExportV2): PhotoSelection {
-  const estimates = selectEstimates((exp.collections?.quotes ?? []) as DocRow[]);
+export function selectionForExport(exp: ExportV2, recentDays: number = DEFAULT_RECENT_DAYS): PhotoSelection {
+  const { estimates } = estimatesForExport(exp, recentDays);
   const log: ScrubEntry[] = [];
   const fixtures = (exp.collections?.subassemblies ?? []).filter((r) => !r.deleted).map((r) => pickAndScrub({ ...(r.doc ?? {}), id: r.id }, FIXTURE_FIELDS, r.id, log));
   return selectPhotos(exp, estimates, fixtures);
@@ -356,7 +368,14 @@ export async function main(argv: string[], env: Record<string, string | undefine
   const input = val("--in"), out = val("--out");
   const dry = argv.includes("--dry-run");
   if (!input || !out) {
-    console.error("usage: npm run handoff:photos -- --in <export.json> --out <images dir> [--dry-run] [--verbose] [--force] [--prune] [--concurrency N] [--retries N]");
+    console.error("usage: npm run handoff:photos -- --in <export.json> --out <images dir> [--recent-days <n>] [--dry-run] [--verbose] [--force] [--prune] [--concurrency N] [--retries N]");
+    return 2;
+  }
+  let recentDays: number;
+  try {
+    recentDays = parseRecentDays(val("--recent-days"));
+  } catch (e) {
+    console.error(`handoff:photos: ${e instanceof Error ? e.message : String(e)} Nothing was downloaded or written.`);
     return 2;
   }
   let exp: ExportV2;
@@ -370,7 +389,18 @@ export async function main(argv: string[], env: Record<string, string | undefine
     console.error(`${input}: expected a format-2 export (re-run npm run db:export); got format ${exp.meta?.format ?? "?"}`);
     return 2;
   }
-  const sel = selectionForExport(exp);
+  let sel: PhotoSelection;
+  try {
+    const { window, estimates } = estimatesForExport(exp, recentDays);
+    for (const l of describeEstimateSelection(window, estimates.map((q) => summarizeEstimate(q)))) console.log(l);
+    sel = selectionForExport(exp, recentDays);
+  } catch (e) {
+    if (e instanceof SelectionError) {
+      console.error(`handoff:photos: ${e.message} Nothing was downloaded or written.`);
+      return e.code === "no-estimates" ? 1 : 2;
+    }
+    throw e;
+  }
   for (const l of describeSelection(sel, argv.includes("--verbose"))) console.log(l);
   if (dry) {
     console.log("dry run: nothing downloaded, nothing written.");

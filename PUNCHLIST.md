@@ -12810,16 +12810,19 @@ Spec `docs/superpowers/specs/2026-10-20-estimator-handoff-package-design.md`; pl
 - Confirm or reverse the controller defaults: the slicer does not ship `clientResponses`, `bonusRecord`, `estimatorBonusSplit`, `shareLink` or `shareOpens` (D1238); **vendor quotes ship render-only** (no attached PDF, link, internal terms / notes, thread, Read the PDF result or vendor company — D1238); **revisions ship through an allow-list** (no PDF or drawing Blob paths, bid / award, portal stamp or service payloads — D1238); **quotes the customer portal built (`portal-catalog`) are left out** (D1238); Estimating Rules hides the service-quote and portal rules (README); and printing adds the "Confidential" footer (D1240).
 - Read the verify report and the eight screenshots with Claude. Only then does the zip go to Jeff, and the Artifact is published only on his explicit go-ahead.
 
+**Update (Oct 20, D1246): a recent sample, not the whole book.** Jeff narrowed what ships. Estimates: only **Estimator** quotes (`source` `estimator` or empty — not Grid, Quick Design, inbox-made, Daylite or portal) whose `updatedAt` (else `createdAt`) is within **28 days** of the export's `meta.exportedAt`; `--recent-days <n>` on both `handoff:slice` and `handoff:photos` (one shared function, `selectBundledEstimates`; no `exportedAt` or no qualifying estimate is a refusal naming the window). Catalog: not the ~37,000-part book but `selectCatalogScope` — the parts on the bundled estimates (incl. revisions), **all assemblies** and their members, the parts the shipped rules blobs name (track series, curtain mounts, system categories, rack defaults), every curtain fabric with an area rate, every Labor part, and rename stubs where the old SKU is named or the target ships. The slice prints the window, each estimate (id, number, name, customer, updated date) and the catalog count by reason; `data/meta.js` records the window. Consequences to know: the prototype's Add-part search, Catalog screen and vendor suggestions cover only those parts; `--full` stays strict, so a four-week sample may lack a rack / alternate / curtain + track / bonus example — widen `--recent-days` or accept `--allow-missing-features` (your call at the production run). Dev rehearsal: `--recent-days 3650 --extra-estimates docs/estimating-core/golden-fixtures/export.json` on a scratch copy of the dev DB (RUNBOOK.md).
+
 **Production run checklist** (repository root; `handoff/estimator/RUNBOOK.md` repeats it, with the time and Artifact notes — it is never shipped):
 
 ```bash
 # 1. production export (format 2 — includes the customer tables)
 DATABASE_URL=<prod> OUT=~/peak-prod-export.json npm run db:export
 # 2. photos from private Blob; --dry-run first (no token, no network), then with the production token in this shell only
-#    (--out must be inside output/ and empty, missing or an earlier handoff:photos folder)
+#    (--out must be inside output/ and empty, missing or an earlier handoff:photos folder).
+#    Only the parts the recent Estimator estimates and the assemblies use: --recent-days (default 28) — pass the same value to step 3
 npm run handoff:photos -- --in ~/peak-prod-export.json --out output/peak-estimator-handoff/images --dry-run
 BLOB_READ_WRITE_TOKEN=<prod token> npm run handoff:photos -- --in ~/peak-prod-export.json --out output/peak-estimator-handoff/images
-# 3. slice (never pass --extra-estimates here)
+# 3. slice (never pass --extra-estimates here; same --recent-days as step 2)
 npm run handoff:slice -- --in ~/peak-prod-export.json --out output/peak-estimator-handoff/data
 # 4. bundle (the audit fails on a private Blob path, a secret, a stray file or a file over 15,000,000 bytes)
 npm run handoff:build

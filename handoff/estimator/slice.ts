@@ -5,8 +5,13 @@
  * scanned — any hit means exit 1 and nothing is written.
  *
  *   npm run handoff:slice -- --in <export.json> --out output/peak-estimator-handoff/data
- *                           [--extra-estimates <other-export.json>]   (dev only)
+ *                           [--recent-days <n>]   (default 28: only Estimator estimates last changed within n days of the export's exportedAt)
+ *                           [--extra-estimates <other-export.json>]   (dev only; exempt from the window)
  *                           [--images <dir>]   (default: ../images beside the data dir)
+ *
+ * What ships (Jeff, Oct 20): the Estimator estimates changed in the last --recent-days days (slice-rules.ts selectEstimates),
+ * every assembly, and only the catalog parts those need (selectCatalogScope) — not the ~37,000-part book. handoff:photos takes
+ * the same --recent-days so both pick the same estimates.
  *
  * Run handoff:photos first: when <images>/manifest.json exists the slice also writes data/photos.js, the browser's
  * photo map (photo-select.ts). Without it the page shows placeholders. The photo SELECTION (which Blob pathname feeds which
@@ -17,7 +22,8 @@ import * as path from "node:path";
 import {
   BLOB_IDS, COMPANY_COLS, CONTACT_COLS, CONTACT_EMAIL_COLS, CONTACT_PHONE_COLS, CATALOG_FIELDS, FIXTURE_FIELDS, SETTINGS_FIELDS, SITE_COLS, TEAM_FIELDS, INACTIVE_TEAM_FIELDS,
   pickAndScrub, pickFields, sanitizeQuote, scanForSecrets, scrubValue, selectEstimates, packCatalog, catalogBody,
-  type DocRow, type QuoteDoc, type ScrubEntry,
+  DEFAULT_RECENT_DAYS, SelectionError, describeEstimateSelection, noEstimatesMessage, parseRecentDays, selectBundledEstimates, selectCatalogScope, summarizeEstimate,
+  type CatalogScope, type DocRow, type EstimateSummary, type QuoteDoc, type RecentWindow, type ScrubEntry,
 } from "./slice-rules";
 import { parsePhotoManifest, photosScript, selectPhotos, type PhotoManifest } from "./photo-select";
 
@@ -52,6 +58,12 @@ export type SliceResult = {
   /** Free-text values blanked because they were secret-shaped. */
   scrubbed: Array<{ file: string; id: string; field: string; rule: string }>;
   counts: Record<string, number>;
+  /** What was chosen and why — printed in the CLI summary. */
+  selection: {
+    window: RecentWindow;
+    estimates: EstimateSummary[];
+    catalog: { live: number; retired: number; bySource: CatalogScope["bySource"]; unresolved: number };
+  };
 };
 
 const r4 = (n: number | string) => (Math.round(Number(n) * 1e4) / 1e4).toFixed(4);
@@ -64,16 +76,19 @@ function liveDocs(file: ExportV2, collection: string): Array<{ id: string; doc: 
     .map((r) => ({ id: r.id, doc: (r.doc ?? {}) as Row }));
 }
 
-export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[]; photos?: PhotoManifest | null } = {}): SliceResult {
+export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[]; photos?: PhotoManifest | null; recentDays?: number } = {}): SliceResult {
   const files: Record<string, string> = {};
   const scrubbed: SliceResult["scrubbed"] = [];
   const counts: Record<string, number> = {};
   const noteScrub = (file: string, log: ScrubEntry[]) => { for (const e of log) scrubbed.push({ file, ...e }); };
 
-  // --- estimates (+ dev-only extras), scrubbed deep ---
-  const picked = selectEstimates((exp.collections?.quotes ?? []) as DocRow[]);
+  // --- estimates: the Estimator's recent ones (+ dev-only extras, exempt from the window), scrubbed deep ---
+  const { window, estimates: recent } = selectBundledEstimates((exp.collections?.quotes ?? []) as DocRow[], exp.meta?.exportedAt, opts.recentDays ?? DEFAULT_RECENT_DAYS);
+  const picked = [...recent];
   const have = new Set(picked.map((q) => q.id));
-  for (const q of opts.extraEstimates ?? []) if (!have.has(q.id)) { picked.push(q); have.add(q.id); }
+  const extraIds = new Set<string>();
+  for (const q of opts.extraEstimates ?? []) if (!have.has(q.id)) { picked.push(q); have.add(q.id); extraIds.add(q.id); }
+  if (picked.length === 0) throw new SelectionError("no-estimates", noEstimatesMessage(window));
   picked.sort((a, b) => a.id.localeCompare(b.id));
   // Every estimate — the export's and any dev extras — goes through sanitizeQuote again (idempotent): the top-level
   // allow-list and the nested ones (revisions → docFields / vendorQuotes, review, pdfOptions…), then the deep scrub.
@@ -86,29 +101,6 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[]; 
   });
   files["data/estimates.js"] = js("PEAK_ESTIMATES", estimates);
   counts.estimates = estimates.length;
-
-  // --- catalog, chunked ---
-  const catalogRows = liveDocs(exp, "catalog_parts");
-  const catalogLog: ScrubEntry[] = [];
-  const parts = catalogRows
-    .map((r) => pickAndScrub({ ...r.doc, id: r.id }, CATALOG_FIELDS, r.id, catalogLog))
-    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
-  // Parts retired by a SKU rename (#304) ride along as { id, sku, renamedTo } so an old SKU on a quote or
-  // category still resolves to the part it became (catalog getManyBySku). Nothing else of them is kept.
-  const retired = (exp.collections?.catalog_parts ?? [])
-    .filter((r) => r.deleted && typeof (r.doc as Row | null | undefined)?.renamedTo === "string" && (r.doc as Row).renamedTo !== "")
-    .map((r) => pickAndScrub({ id: r.id, sku: r.id, renamedTo: (r.doc as Row).renamedTo }, CATALOG_FIELDS, r.id, catalogLog));
-  const groups = packCatalog([...parts, ...retired].sort((a, b) => String(a.id).localeCompare(String(b.id))), MAX_FILE_BYTES);
-  const fileOfPart = new Map<string, string>();
-  groups.forEach((g, i) => {
-    const name = `data/catalog-${i + 1}.js`;
-    files[name] = catalogBody(g);
-    for (const p of g) fileOfPart.set(String(p.id), name);
-  });
-  for (const e of catalogLog) scrubbed.push({ file: fileOfPart.get(e.id) ?? "data/catalog-1.js", ...e });
-  counts.catalog = parts.length;
-  counts.catalogRetired = retired.length;
-  counts.catalogFiles = groups.length;
 
   // --- fixtures (subassemblies) ---
   const fixLog: ScrubEntry[] = [];
@@ -129,6 +121,36 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[]; 
   }
   files["data/rules.js"] = js("PEAK_RULES", { settings, blobs });
   counts.blobs = Object.keys(blobs).length;
+
+  // --- catalog, chunked: only the parts the prototype needs (slice-rules.ts selectCatalogScope — the bundled estimates,
+  // every assembly, the rules blobs' SKUs, the curtain-fabric and labor pickers, and rename stubs for those) ---
+  const scope = selectCatalogScope({
+    estimates, fixtures, blobs, settings,
+    catalog: (exp.collections?.catalog_parts ?? []) as DocRow[],
+  });
+  const liveWanted = new Set(scope.live);
+  const retiredWanted = new Set(scope.retired);
+  const catalogLog: ScrubEntry[] = [];
+  const parts = liveDocs(exp, "catalog_parts")
+    .filter((r) => liveWanted.has(r.id))
+    .map((r) => pickAndScrub({ ...r.doc, id: r.id }, CATALOG_FIELDS, r.id, catalogLog))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  // Parts retired by a SKU rename (#304) ride along as { id, sku, renamedTo } so an old SKU on a quote or
+  // category still resolves to the part it became (catalog getManyBySku). Nothing else of them is kept.
+  const retired = (exp.collections?.catalog_parts ?? [])
+    .filter((r) => r.deleted && retiredWanted.has(r.id) && typeof (r.doc as Row | null | undefined)?.renamedTo === "string" && (r.doc as Row).renamedTo !== "")
+    .map((r) => pickAndScrub({ id: r.id, sku: r.id, renamedTo: (r.doc as Row).renamedTo }, CATALOG_FIELDS, r.id, catalogLog));
+  const groups = packCatalog([...parts, ...retired].sort((a, b) => String(a.id).localeCompare(String(b.id))), MAX_FILE_BYTES);
+  const fileOfPart = new Map<string, string>();
+  groups.forEach((g, i) => {
+    const name = `data/catalog-${i + 1}.js`;
+    files[name] = catalogBody(g);
+    for (const p of g) fileOfPart.set(String(p.id), name);
+  });
+  for (const e of catalogLog) scrubbed.push({ file: fileOfPart.get(e.id) ?? "data/catalog-1.js", ...e });
+  counts.catalog = parts.length;
+  counts.catalogRetired = retired.length;
+  counts.catalogFiles = groups.length;
 
   // --- customers: only what the selected estimates reference ---
   const refIds = new Set(estimates.map((q) => q.customerId).filter((x): x is string => typeof x === "string" && x !== ""));
@@ -185,6 +207,7 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[]; 
     exportedAt: exp.meta?.exportedAt ?? null,
     source: exp.meta?.source ?? null,
     sliceVersion: SLICE_VERSION,
+    window: { days: window.days, from: new Date(window.fromMs).toISOString(), to: window.exportedAt },
     counts,
   });
 
@@ -198,7 +221,12 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[]; 
     if (bytes > MAX_FILE_BYTES) oversize.push({ file, bytes });
   }
   const photosMissing = opts.photos ? selection.picks.filter((p) => !Object.prototype.hasOwnProperty.call(opts.photos!.bySku, p.sku)).map((p) => p.sku) : [];
-  return { files, hits, oversize, scrubbed, photosMissing, counts };
+  const selectionOut: SliceResult["selection"] = {
+    window,
+    estimates: estimates.map((q) => summarizeEstimate(q, extraIds.has(q.id))),
+    catalog: { live: parts.length, retired: retired.length, bySource: scope.bySource, unresolved: scope.unresolved.length },
+  };
+  return { files, hits, oversize, scrubbed, photosMissing, counts, selection: selectionOut };
 }
 
 /** Writes the slice into `outDir` (the prototype's data folder). Refuses — writing nothing — if the scan or size check failed. */
@@ -231,7 +259,14 @@ export function run(argv: string[]): number {
   const arg = (name: string) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
   const input = arg("--in"), out = arg("--out"), extra = arg("--extra-estimates"), imagesArg = arg("--images");
   if (!input || !out) {
-    console.error("usage: npm run handoff:slice -- --in <export.json> --out <data dir> [--extra-estimates <export.json>] [--images <dir>]");
+    console.error("usage: npm run handoff:slice -- --in <export.json> --out <data dir> [--recent-days <n>] [--extra-estimates <export.json>] [--images <dir>]");
+    return 2;
+  }
+  let recentDays: number;
+  try {
+    recentDays = parseRecentDays(arg("--recent-days"));
+  } catch (e) {
+    console.error(`handoff:slice: ${e instanceof Error ? e.message : String(e)} Nothing was written.`);
     return 2;
   }
   let exp: ExportV2;
@@ -261,7 +296,16 @@ export function run(argv: string[]): number {
   }
   if (photos.manifest) console.log(`photos: ${Object.keys(photos.manifest.byDoc).length} image(s) from ${imagesDir}${photos.missing.length ? ` (${photos.missing.length} listed in manifest.json but missing from the folder — left out)` : ""}`);
   else console.log(`photos: no ${path.join(imagesDir, "manifest.json")} — no data/photos.js (placeholders only); run npm run handoff:photos first for product photos`);
-  const r = sliceExport(exp, { extraEstimates, photos: photos.manifest });
+  let r: SliceResult;
+  try {
+    r = sliceExport(exp, { extraEstimates, photos: photos.manifest, recentDays });
+  } catch (e) {
+    if (e instanceof SelectionError) {
+      console.error(`handoff:slice: ${e.message} Nothing was written.`);
+      return e.code === "no-estimates" ? 1 : 2;
+    }
+    throw e;
+  }
   if (r.photosMissing.length) console.warn(`WARNING: ${r.photosMissing.length} picked parts have no downloaded photo (${r.photosMissing.slice(0, 8).join(", ")}${r.photosMissing.length > 8 ? ", …" : ""}) — re-run handoff:photos; they show the placeholder`);
   for (const h of r.hits) console.error(`SECRET SCAN: ${h.file} matches ${h.rules.join(", ")}`);
   for (const o of r.oversize) console.error(`TOO BIG: ${o.file} is ${o.bytes} bytes (limit ${MAX_FILE_BYTES})`);
@@ -278,6 +322,11 @@ export function run(argv: string[]): number {
   }
   console.log(`  total ${(total / 1e6).toFixed(2)} MB`);
   console.log("  counts: " + Object.entries(r.counts).map(([k, v]) => `${k}=${v}`).join(" "));
+  for (const l of describeEstimateSelection(r.selection.window, r.selection.estimates)) console.log(`  ${l}`);
+  const cat = r.selection.catalog;
+  console.log(`  catalog: ${cat.live} part(s) + ${cat.retired} retired-SKU stub(s) — only what the above uses (the book is not shipped)`);
+  console.log("    why (a part can have several reasons): " + Object.entries(cat.bySource).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join(", "));
+  console.log(`    ${cat.unresolved} SKU(s) named by the estimates / assemblies / rules are not catalog parts (custom lines, allowances, deleted parts) — nothing to ship`);
   console.log(`  secret scan: clean (${r.scrubbed.length} value(s) scrubbed)`);
   for (const s of r.scrubbed) console.log(`    scrubbed ${s.file} ${s.id}.${s.field} (${s.rule})`);
   return 0;

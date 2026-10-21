@@ -5,6 +5,9 @@
  * emitted file bodies (scanForSecrets). Plan: PR 2 Task 1.
  */
 
+import { isFabricPart } from "@/lib/fabric-part";
+import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
+
 /** Catalog part fields the Estimator reads (pricing, rack data, narrative, spec facts). */
 export const CATALOG_FIELDS = [
   "id", "sku", "desc", "category", "unit", "cost", "list", "mfr", "manufacturerPartNumber",
@@ -230,21 +233,271 @@ export function sanitizeQuote(doc: Rec): Rec {
 /** Sources that never ship: Daylite history, and the customer portal's self-built catalog quotes (portal data). */
 export const EXCLUDED_SOURCES = ["daylite", "portal-catalog"] as const;
 
-/** Live (not deleted) system quotes with at least one line item — not Daylite history, not portal-built
- *  (EXCLUDED_SOURCES) — sanitized (sanitizeQuote), sorted by id. */
-export function selectEstimates(rows: DocRow[]): QuoteDoc[] {
+/**
+ * Which `source` values count as "an Estimator quote" (Jeff, Oct 20: the bundle is the recent Estimator estimates only).
+ * A system quote's `source` is the builder that last saved it: the Estimator stamps "estimator" on every save
+ * (src/app/(app)/estimator/actions.ts → sourceForSave, which keeps only portal-catalog / portal-service), so an
+ * estimate opened and saved in the Estimator reads "estimator"; "" / absent is a doc written before the field existed
+ * or by a path that never set one. Everything else is another builder's quote that was never opened in the Estimator and
+ * is left out: "grid" (a Grid design promoted to a quote), "quick" (Quick Design / the createQuote default), "inbox"
+ * (a placeholder made from an email thread), "daylite" (imported history), "portal-catalog" / "portal-self-serve"
+ * (customer-built), "rental" / "consulting" / "flame" / … (not system quotes at all). Found by reading every
+ * `source:` a quote is created or saved with in src/ (createQuote callers, sourceForSave, daylite/history-commit).
+ */
+export const ESTIMATOR_SOURCES = ["estimator", ""] as const;
+export const isEstimatorSource = (source: unknown): boolean =>
+  source == null || (typeof source === "string" && (ESTIMATOR_SOURCES as readonly string[]).includes(source));
+
+// ---------------------------------------------------------------------------------------------------------------
+// The recent-estimates window. One definition, shared by handoff:slice and handoff:photos so they cannot drift.
+
+export const DEFAULT_RECENT_DAYS = 28;
+export const MAX_RECENT_DAYS = 3650;
+const DAY_MS = 86_400_000;
+
+/** A selection problem the CLIs report instead of a stack trace. `code` picks the exit status (no-estimates → 1, the rest → 2). */
+export class SelectionError extends Error {
+  constructor(readonly code: "bad-recent-days" | "no-exported-at" | "no-estimates", message: string) {
+    super(message);
+    this.name = "SelectionError";
+  }
+}
+
+/** `--recent-days <n>`: undefined → the default (28); otherwise a whole number of days, 1 … 3650. */
+export function parseRecentDays(raw: string | undefined): number {
+  if (raw === undefined) return DEFAULT_RECENT_DAYS;
+  const n = /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
+  if (!Number.isSafeInteger(n) || n < 1 || n > MAX_RECENT_DAYS) {
+    throw new SelectionError("bad-recent-days", `--recent-days must be a whole number of days from 1 to ${MAX_RECENT_DAYS} (got "${raw}").`);
+  }
+  return n;
+}
+
+export type RecentWindow = {
+  days: number;
+  /** The export's own timestamp (meta.exportedAt) — the window is anchored here, never to the clock, so a slice is reproducible. */
+  exportedAt: string;
+  /** Inclusive lower bound, epoch ms: exportedAt − days. */
+  fromMs: number;
+  toMs: number;
+};
+
+/** The window ending at the export's `meta.exportedAt`. An export without a usable one is refused. */
+export function recentWindow(exportedAt: unknown, days: number = DEFAULT_RECENT_DAYS): RecentWindow {
+  const t = typeof exportedAt === "string" ? Date.parse(exportedAt) : typeof exportedAt === "number" ? exportedAt : NaN;
+  if (!Number.isFinite(t) || t <= 0) {
+    throw new SelectionError("no-exported-at", "the export has no usable meta.exportedAt, so the recent-estimates window cannot be anchored — re-run npm run db:export.");
+  }
+  return { days, exportedAt: new Date(t).toISOString(), fromMs: t - days * DAY_MS, toMs: t };
+}
+
+const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+export const windowLabel = (w: RecentWindow) => `last ${w.days} days (${isoDay(w.fromMs)} → ${isoDay(w.toMs)})`;
+
+/** The message when nothing qualifies — names the window and how to widen it. */
+export function noEstimatesMessage(w: RecentWindow): string {
+  return `no Estimator estimates qualify: none was updated in the ${windowLabel(w)} before the export (a live system quote with at least one line, saved from the Estimator). ` +
+    "Widen the window with --recent-days <n> (and check this is the right export).";
+}
+
+/** A quote's last-change time: `updatedAt`, else `createdAt` (epoch ms); null when it has neither. */
+export function quoteStamp(doc: Record<string, unknown>): number | null {
+  for (const k of ["updatedAt", "createdAt"]) {
+    const n = Number(doc[k]);
+    if (doc[k] != null && doc[k] !== "" && Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
+/** Inside the window: stamp ≥ exportedAt − days (inclusive) and not after the export. A quote with no stamp is not recent. */
+export function inRecentWindow(doc: Record<string, unknown>, w: RecentWindow): boolean {
+  const t = quoteStamp(doc);
+  return t !== null && t >= w.fromMs && t <= w.toMs;
+}
+
+/**
+ * The Estimator's estimates: live (not deleted) system quotes built in the Estimator (ESTIMATOR_SOURCES; never Daylite
+ * history or a portal-built quote — EXCLUDED_SOURCES) with at least one line item — sanitized (sanitizeQuote), sorted by
+ * id. With a `window` only quotes last changed inside it qualify; without one (dev `--extra-estimates` only) every
+ * such quote does.
+ */
+export function selectEstimates(rows: DocRow[], window?: RecentWindow | null): QuoteDoc[] {
   const out: QuoteDoc[] = [];
   for (const row of rows) {
     if (row.deleted) continue;
     const doc = (row.doc ?? {}) as Record<string, unknown>;
     if (((doc.quoteType as string | undefined) ?? "system") !== "system") continue;
     if ((EXCLUDED_SOURCES as readonly unknown[]).includes(doc.source)) continue;
+    if (!isEstimatorSource(doc.source)) continue;
     const sections = (doc.spec as { sections?: unknown } | undefined)?.sections;
     if (!Array.isArray(sections)) continue;
     if (!sections.some((s) => Array.isArray((s as { items?: unknown }).items) && ((s as { items: unknown[] }).items.length > 0))) continue;
+    if (window && !inRecentWindow(doc, window)) continue;
     out.push({ ...sanitizeQuote(doc), id: row.id });
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** The export's bundled estimates and their window — what handoff:slice and handoff:photos both start from. May be empty. */
+export function selectBundledEstimates(rows: DocRow[], exportedAt: unknown, recentDays: number = DEFAULT_RECENT_DAYS): { window: RecentWindow; estimates: QuoteDoc[] } {
+  const window = recentWindow(exportedAt, recentDays);
+  return { window, estimates: selectEstimates(rows, window) };
+}
+
+export type EstimateSummary = { id: string; estNo: number | null; name: string; customer: string; updatedAt: number | null; extra: boolean };
+
+/** One line per bundled estimate for the slice summary. */
+export function summarizeEstimate(q: Record<string, unknown>, extra = false): EstimateSummary {
+  const t = quoteStamp(q);
+  return {
+    id: String(q.id),
+    estNo: typeof q.estNo === "number" && Number.isFinite(q.estNo) ? q.estNo : null,
+    name: typeof q.name === "string" ? q.name : "",
+    customer: typeof q.customer === "string" ? q.customer : "",
+    updatedAt: t,
+    extra,
+  };
+}
+
+/** The window and the bundled estimates, as printable lines (slice summary and photos dry run). */
+export function describeEstimateSelection(w: RecentWindow, rows: readonly EstimateSummary[]): string[] {
+  const lines = [`recent-estimates window: ${windowLabel(w)} (anchored to the export's exportedAt ${w.exportedAt})`, `bundled estimates: ${rows.length}`];
+  for (const r of rows) {
+    const when = r.updatedAt === null ? "no date" : new Date(r.updatedAt).toISOString().slice(0, 10);
+    lines.push(`  ${r.id}  ${r.estNo === null ? "—" : `#${r.estNo}`}  ${r.name || "(unnamed)"}  ·  ${r.customer || "(no customer)"}  ·  updated ${when}${r.extra ? "  [--extra-estimates, outside the window]" : ""}`);
+  }
+  return lines;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Which catalog parts ship. The prototype does not carry the ~37,000-part book: only what the bundled estimates,
+// every assembly and the Estimator's own pickers actually read (Jeff, Oct 20).
+
+/** Keys that hold a catalog SKU on an estimate line, a revision, a fixture / System / Hardware / rack record. `fabricSku` is
+ *  a curtain line's structured fabric (SpecItem.curtainInputs.fabricSku). */
+const ESTIMATE_SKU_KEYS = new Set(["sku", "lightEngineSku", "lensSku", "fabricSku"]);
+/** …and in the settings blobs: the rack defaults' blank / vent panel (`blankSku`, `ventSku`); track series, curtain mounts
+ *  and system categories all use a plain `sku`. */
+const BLOB_SKU_KEYS = new Set([...ESTIMATE_SKU_KEYS, "blankSku", "ventSku"]);
+
+/** Every sku-shaped value anywhere in `value` (nested objects and arrays; depth-capped). */
+export function collectSkuValues(value: unknown, keys: ReadonlySet<string>, into: Set<string> = new Set(), depth = 0): Set<string> {
+  if (depth > 14 || value == null) return into;
+  if (Array.isArray(value)) {
+    for (const v of value) collectSkuValues(v, keys, into, depth + 1);
+    return into;
+  }
+  if (typeof value !== "object") return into;
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (keys.has(k) && typeof v === "string") {
+      const s = v.trim();
+      if (s) into.add(s);
+    } else if (v && typeof v === "object") {
+      collectSkuValues(v, keys, into, depth + 1);
+    }
+  }
+  return into;
+}
+
+/** Why a catalog part ships. A part can have several. */
+export type CatalogSource =
+  | "estimate"          // a SKU on a line (or revision) of a bundled estimate; a curtain line's fabric
+  | "assembly"          // a member / placement SKU of any fixture, System, Hardware assembly or rack (all assemblies ship)
+  | "fabric"            // the Estimator's curtain fabric picker lists every fabric part that has an area rate
+  | "labor"             // the Estimator prices a new labor line from the catalog's Labor-category parts (laborRates)
+  | "rename"            // a retired SKU stub: an estimate/assembly/rule names the old SKU, or its target ships
+  | `rule:${string}`;   // a SKU a shipped rules blob names (track_series, curtain_mount_hardware, system_categories, rack_defaults…)
+
+export type CatalogScope = {
+  /** Live part ids to ship, sorted. */
+  live: string[];
+  /** Retired SKU stub ids to ship ({ id, sku, renamedTo } only), sorted. */
+  retired: string[];
+  /** id → why (live parts and stubs). */
+  reasons: Map<string, CatalogSource[]>;
+  /** source → how many parts it brought in (not exclusive: a part named by two sources counts under both). */
+  bySource: Record<string, number>;
+  /** SKUs the estimates / assemblies / blobs name that are in neither the live nor the retired catalog (custom lines, deleted parts). */
+  unresolved: string[];
+};
+
+const FABRIC_RATE_KEYS = ["curtainAreaRate", "costPerSqft", "cost", "unit", "sku"] as const;
+
+/**
+ * The catalog parts the prototype needs — pure. The union of:
+ *  - every SKU on a bundled estimate (all systems, alternates, options and revisions; a vendor-quote line has no catalog SKU),
+ *  - every SKU of every assembly (`fixtures` — the whole `subassemblies` collection ships) and of the legacy
+ *    `settings.fixtureAssemblies` backup,
+ *  - every SKU in a shipped rules blob (`blobs`: track series sticks and roles, curtain mount hardware, system categories'
+ *    typical items, rack defaults' blank and vent panels) so the configurators still price,
+ *  - the Estimator's pickers: every fabric part with an area rate (the curtain modal's fabric list, EstimatorProps.fabrics)
+ *    and every Labor-category part (EstimatorProps.laborRates — a new labor line looks its rate up there),
+ *  - retired SKU stubs where the old SKU is named by any of the above, or the stub's target ships.
+ * An old SKU on an estimate follows `renamedTo` to the live part (chains up to 8 hops, like photo-select's renameFollower).
+ * Everything else — the other ~37,000 parts — stays out.
+ */
+export function selectCatalogScope(input: {
+  estimates: readonly Record<string, unknown>[];
+  fixtures: readonly Record<string, unknown>[];
+  blobs: Record<string, unknown>;
+  settings: Record<string, unknown>;
+  catalog: readonly DocRow[];
+}): CatalogScope {
+  const live = new Map<string, Record<string, unknown>>();
+  const stubTo = new Map<string, string>();
+  for (const r of input.catalog) {
+    const doc = (r.doc ?? {}) as Record<string, unknown>;
+    if (!r.deleted) {
+      live.set(r.id, { ...doc, id: r.id, sku: typeof doc.sku === "string" && doc.sku ? doc.sku : r.id });
+    } else if (typeof doc.renamedTo === "string" && doc.renamedTo !== "") {
+      stubTo.set(r.id, doc.renamedTo);
+    }
+  }
+
+  const reasons = new Map<string, Set<CatalogSource>>();
+  const add = (id: string, why: CatalogSource) => {
+    const set = reasons.get(id) ?? new Set<CatalogSource>();
+    set.add(why);
+    reasons.set(id, set);
+  };
+  const unresolved = new Set<string>();
+  const follow = (sku: string, why: CatalogSource) => {
+    let k = sku;
+    for (let i = 0; i < 8 && stubTo.has(k) && stubTo.get(k) !== k; i++) {
+      add(k, "rename"); // the old SKU the estimate / assembly / rule names rides along as a stub
+      k = stubTo.get(k)!;
+    }
+    if (live.has(k)) add(k, why);
+    else unresolved.add(k);
+  };
+
+  for (const s of collectSkuValues(input.estimates, ESTIMATE_SKU_KEYS)) follow(s, "estimate");
+  for (const s of collectSkuValues(input.fixtures, ESTIMATE_SKU_KEYS)) follow(s, "assembly");
+  for (const s of collectSkuValues(input.settings.fixtureAssemblies, ESTIMATE_SKU_KEYS)) follow(s, "assembly");
+  for (const [id, data] of Object.entries(input.blobs)) for (const s of collectSkuValues(data, BLOB_SKU_KEYS)) follow(s, `rule:${id}`);
+  for (const [id, p] of live) {
+    if (isFabricPart({ category: p.category as string | undefined, unit: p.unit as string | undefined }) && fabricAreaRateOf(pickFields(p, FABRIC_RATE_KEYS) as Parameters<typeof fabricAreaRateOf>[0]) > 0) add(id, "fabric");
+    if (typeof p.category === "string" && p.category.trim() === "Labor") add(id, "labor");
+  }
+
+  // A retired stub also ships when its target ships (so an old SKU still resolves); chains settle in a few passes.
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [id, to] of stubTo) if (!reasons.has(id) && reasons.has(to)) { add(id, "rename"); changed = true; }
+  }
+
+  const ids = [...reasons.keys()];
+  const liveIds = ids.filter((id) => live.has(id)).sort();
+  const retiredIds = ids.filter((id) => stubTo.has(id)).sort();
+  const bySource: Record<string, number> = {};
+  for (const set of reasons.values()) for (const why of set) bySource[why] = (bySource[why] ?? 0) + 1;
+  return {
+    live: liveIds,
+    retired: retiredIds,
+    reasons: new Map([...reasons].map(([id, set]) => [id, [...set].sort()])),
+    bySource,
+    unresolved: [...unresolved].sort(),
+  };
 }
 
 /** `push(...)` spreads its argument list; engines cap that (~65k), so a chunk also stops at this many parts. */

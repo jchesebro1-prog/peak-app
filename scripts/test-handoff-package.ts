@@ -152,6 +152,7 @@ export async function handoffPackageChecks(ok: Ok) {
     [PRINT_FOOTER_TEXT, "the print footer (its own text)"], ["Pop-out windows", "pop-outs"], ["Not\n  included in the prototype", "Datasheets / Drawings"],
     ["unique within one window", "numbers unique per window"], ["Product photos", "photos only for bundled parts"],
     ["Print / Save as PDF", "PDF via Print"], ["Sent (simulated)", "send is simulated"], ["Would create install project for", "won is simulated"],
+    ["## What data is bundled", "what data is bundled"], ["**four weeks**", "the four-week estimate window"], ["only the parts the package uses, not Peak's whole catalog", "a trimmed catalog"],
     ["through those same seams", "the founder's own data comes through the ports"], ["Changes won't be saved in this window", "no-IndexedDB notice"],
   ];
   const flat = (s: string) => s.replace(/\s+/g, " ");

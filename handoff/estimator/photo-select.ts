@@ -12,7 +12,10 @@
  * Port drift: handoff/estimator/port-sources.json lists the originals.
  *
  * Scope: only parts the sliced estimates and fixtures name (their line skus, assembly members, light engine / lens),
- * followed through SKU renames. Every other part's Catalog thumbnail stays the placeholder.
+ * followed through SKU renames. Every other part's Catalog thumbnail stays the placeholder. The estimates are the recent
+ * Estimator ones (slice-rules.ts selectBundledEstimates, the slicer's own function), and every one of these parts is in the
+ * shipped catalog (selectCatalogScope takes the same line skus and every assembly's members) — photos never name a part the
+ * package does not carry. Fabric, Labor and rules-blob parts are in the catalog but get no photo (unchanged).
  *
  * ONE scheme feeds both browser lookups (runtime/assets.ts): `bySku[sku] = docId` and `byDoc[docId] = "images/<file>"`.
  * partPhotoSrc (Catalog thumbnails) and the quote document's key-product photos both go sku → docId → file.

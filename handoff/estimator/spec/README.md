@@ -53,10 +53,11 @@ data/*.js               the data snapshot, as <script> files (file:// can't fetc
                           team.js       staff names and roles
                           customers.js  the companies the bundled estimates reference, with all their venues and contacts
                           fixtures.js   fixtures, systems, hardware assemblies and racks (the Assembly Builder)
-                          catalog-N.js  the full parts catalog, in ≤ 15 MB pieces (only the fields the Estimator reads)
+                          catalog-N.js  the catalog parts the package needs (see *What data is bundled*), in ≤ 15 MB pieces
+                                        (only the fields the Estimator reads)
                           estimates.js  the bundled system estimates (with their revisions and vendor quotes)
                           photos.js     which product photo each part shows (when photos were bundled)
-                          meta.js       when the snapshot was cut, and counts
+                          meta.js       when the snapshot was cut, the estimate window, and counts
 images/<docId>.webp     product photos for parts on the bundled estimates and fixtures (when bundled): only
                         the files photos.js names
 spec/README.md          this file
@@ -87,8 +88,9 @@ roster and roles) and **Reset to production snapshot**.
   - **Send & track**: the approval control (Submit for approval, Approve, Send to customer, Withdraw),
     status and pipeline, the email composer, and the Activity card (the real card; the prototype adds
     its own *Would create install project for …* note under it).
-- **Catalog** *(built for the prototype)*: search and browse the whole catalog, plus a part editor. A
-  slim stand-in for Quartzite's catalog page; search ranks exactly like the Estimator's catalog picker.
+- **Catalog** *(built for the prototype)*: search and browse the parts bundled in this package (not Peak's
+  whole catalog; see *What data is bundled*), plus a part editor. A slim stand-in for Quartzite's catalog
+  page; search ranks exactly like the Estimator's catalog picker.
 - **Assemblies** *(the real components)*: the Assembly Builder for fixtures, systems, hardware and racks,
   with the rack elevation and its submittal sheets.
 - **Estimating Rules** *(the real editors)*: tier margins, rates, freight, bonuses, sewing %, track
@@ -157,6 +159,25 @@ own system through those same seams.
   prototype*. So do actions that belong to those modules: bids, client share links, vendor quotes from
   email, Assist, Rewards. They answer *Not available in the prototype* and change nothing.
 - Dates print in Chicago time (America/Chicago), as in Quartzite.
+
+## What data is bundled
+
+The package is a **recent sample**, not a full copy of Peak's data:
+
+- **Estimates**: only estimates built in the Estimator that were last changed in the **four weeks** before
+  the snapshot was cut (the window is in `data/meta.js`, as `window`). Older estimates, and estimates
+  that came from other places (Grid or Quick Design quotes, imported Daylite history, the customer
+  portal), are not bundled. Their customers, venues and contacts are not bundled either.
+- **Assemblies**: all of them: every fixture, system, hardware assembly and rack, with all their parts.
+- **Catalog**: only the parts the package uses, not Peak's whole catalog. That is every part on a
+  bundled estimate (and its revisions), every part in any assembly, every part named by the bundled
+  rules (track series sticks and parts, curtain mounting hardware, the typical items of each system
+  category, the rack defaults' blank and vent panels), every fabric the curtain picker offers, and every
+  labor rate. A part that was renamed keeps its old SKU, so an old SKU still finds the new part.
+  **Consequence:** the Estimator's *Add part from catalog* search, the Catalog screen and the vendor
+  suggestions list only these parts. A part Peak sells that is not in the package is not found, and a line
+  for it is entered as a custom part. Pricing of everything that is bundled is unaffected.
+- **Photos**: for the bundled parts that the estimates and assemblies use.
 
 ## Not included
 

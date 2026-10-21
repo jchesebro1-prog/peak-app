@@ -34,8 +34,12 @@ a system can keep line ids, so always address a line as *(system id, line id)*.
 The same table also holds Peak's **service quotes**: flame test, repair, inspection, rental and
 consulting. Each has its own builder, its own pricing engine and its own sub-document (`flameTest`,
 `repair`, `inspection`, `rental`, `consulting`), and is told apart by `quoteType`. This package ships only
-**system estimates**: `quoteType` `"system"` (or absent), made in the app (not imported Daylite
-history), with at least one line, not deleted. The fields below are the ones the package carries.
+**system estimates**: `quoteType` `"system"` (or absent), built in the Estimator (`source` `"estimator"`, or
+none; not imported Daylite history, not a Grid, Quick Design or portal quote), with at least one line, not
+deleted, and last changed (`updatedAt`, else `createdAt`) within the four weeks before the snapshot was cut.
+It is a recent sample, not every estimate Peak has. The parts catalog is trimmed the same way: the parts
+those estimates and every assembly use, plus the rules' parts, the curtain fabrics and the labor rates.
+The fields below are the ones the package carries.
 
 ## Quote
 
