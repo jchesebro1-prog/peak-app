@@ -22,6 +22,7 @@
 - **A normal estimate prints byte-for-byte as before** (every new key/branch is conditional on the flag being `true`).
 - **No migration** — `boxSale` is one optional key in the quote's JSONB `doc`.
 - The email body, verbatim (box sale): `Attached is our quote … You can also view it online here: {link}` — no "full package" or alternates wording.
+- The email subject (box sale): `<project> — quote <EST>` instead of `<project> — estimate <EST>` (Jeff, 2026-10-21).
 
 ## Environment notes (every task)
 
@@ -2278,7 +2279,7 @@ function sendPackageChecks(ok: Ok) {
     "box sale send: the email says \"Attached is our quote … You can also view it online here: {link}\" — no full package, no alternates");
   ok(estimateEmailDefaults(mail).body === "Hi Pat,\n\nAttached is our estimate for Gym (EST-1042).\n\nYou can also view the full package online, and choose any alternates, here: {link}\n\nLet me know if you have any questions.\n\nThanks,\nSam Mills",
     "box sale send: a normal estimate's email is unchanged");
-  ok(estimateEmailDefaults({ ...mail, boxSale: true }).subject === estimateEmailDefaults(mail).subject, "box sale send: the subject is unchanged");
+  ok(estimateEmailDefaults({ ...mail, boxSale: true }).subject === estimateEmailDefaults(mail).subject.replace(" — estimate ", " — quote ") && / — quote EST-1042$/.test(estimateEmailDefaults({ ...mail, boxSale: true }).subject) && / — estimate EST-1042$/.test(estimateEmailDefaults(mail).subject), "box sale send: the subject says quote (Jeff 2026-10-21); a normal estimate keeps estimate");
   const bid = { projectName: "Gym", estimateNumber: "EST-1042", senderName: "Sam Mills" };
   ok(bidderEmailDefaults({ ...bid, boxSale: true }).body.includes("You can also view it online here: {link}") && !bidderEmailDefaults({ ...bid, boxSale: true }).body.includes("full package"),
     "box sale send: the bidder email drops \"full package\" too");
@@ -2442,6 +2443,19 @@ with
    *  no "full package" or alternates wording. */
   boxSale?: boolean;
 };
+```
+
+(b0) Replace
+
+```ts
+  const subject = `${project} — estimate ${est}`.trim();
+```
+
+with
+
+```ts
+  // Box goods sale (Jeff 2026-10-21): the subject says "quote", like the body.
+  const subject = `${project} — ${i.boxSale ? "quote" : "estimate"} ${est}`.trim();
 ```
 
 (b) Replace
@@ -3159,7 +3173,7 @@ Append at the end of `DECISIONS.md`:
 ```markdown
 ## D<N>. Box goods sale: one flag on the estimate, nothing deleted (#<P>, 2026-10-21)
 
-Jeff: some estimates are box goods sales — equipment and freight only, no install — and the customer should get the itemized BOM, not the narrative package. It is a flag, not a builder or quote type: `Quote.boxSale` (absent = false; stored only as `true` on an Estimator system estimate — `buildQuote` and `update()` drop it on any other quote type and `update()` removes the key on false). It is set from + New quote → **Box goods sale** (`?box=1`; the Inbox-thread intake mints a system quote with the flag) or the switch in Quote details, and shown as a header chip. Save carries it (an older caller keeps the stored flag); it is content (`QUOTE_CONTENT_FIELDS`, so a toggle stales the PDF) and frozen in a sent revision's `docFields` (`quoteAsOfRevision` reads the revision's own flag; a revision cut before the field reads false). One document rule: `quoteDocumentDataFor` returns `bomViewProps(props)` for a box sale, so the print route, portal, share pages, staff preview and bidder copies all follow; Qty and prices follow the quote's own PDF choices (bomViewProps's rule, Jeff 2026-10-15 #14). The print route prints #360's BOM layout (`layout="web"`, no title page, the investment band kept) with no cut sheets, datasheet-links page or photos, and the generator merges no drawings. The Cover PDF and its print page are a 404 (`renderSignedQuotePrintPdf`'s new `refuse`), and the send never attaches one. The client package page is the itemized list only: no Overview / Itemized toggle, summary, goals, key products, package document, Not included, Plans & risers, downloads or datasheet links (the zip and datasheet-book routes 404); options, alternates, client actions and Accept stay. The Estimator hides + Configure labor, the Customer chip, Discipline, Add narrative…, ★ key product and Draft from survey/inspection; new systems (fresh, blank, category, suggested) are Itemized, and From library keeps its own presentation (it prints itemized anyway). Build package is BOM quote only, with Lead estimator / Prepared by; Customer review is Document + BOM without the package checklist; readiness and package gap chips are quiet. The email says "Attached is our quote … You can also view it online here: {link}" (the subject is unchanged; the bidder email's link line drops "full package" too). Move / Copy system → New estimate copies the stored source's flag; into an existing estimate it leaves the target's alone. Nothing narrative is deleted, so switching off brings it all back. The 2% estimator bonus is unchanged. No migration (quotes are a JSONB doc table). `src/lib/estimate-box-sale/rules.ts`; spec `docs/superpowers/specs/2026-10-21-box-goods-sale-design.md`; harness `box sale` (`scripts/test-box-sale.ts`).
+Jeff: some estimates are box goods sales — equipment and freight only, no install — and the customer should get the itemized BOM, not the narrative package. It is a flag, not a builder or quote type: `Quote.boxSale` (absent = false; stored only as `true` on an Estimator system estimate — `buildQuote` and `update()` drop it on any other quote type and `update()` removes the key on false). It is set from + New quote → **Box goods sale** (`?box=1`; the Inbox-thread intake mints a system quote with the flag) or the switch in Quote details, and shown as a header chip. Save carries it (an older caller keeps the stored flag); it is content (`QUOTE_CONTENT_FIELDS`, so a toggle stales the PDF) and frozen in a sent revision's `docFields` (`quoteAsOfRevision` reads the revision's own flag; a revision cut before the field reads false). One document rule: `quoteDocumentDataFor` returns `bomViewProps(props)` for a box sale, so the print route, portal, share pages, staff preview and bidder copies all follow; Qty and prices follow the quote's own PDF choices (bomViewProps's rule, Jeff 2026-10-15 #14). The print route prints #360's BOM layout (`layout="web"`, no title page, the investment band kept) with no cut sheets, datasheet-links page or photos, and the generator merges no drawings. The Cover PDF and its print page are a 404 (`renderSignedQuotePrintPdf`'s new `refuse`), and the send never attaches one. The client package page is the itemized list only: no Overview / Itemized toggle, summary, goals, key products, package document, Not included, Plans & risers, downloads or datasheet links (the zip and datasheet-book routes 404); options, alternates, client actions and Accept stay. The Estimator hides + Configure labor, the Customer chip, Discipline, Add narrative…, ★ key product and Draft from survey/inspection; new systems (fresh, blank, category, suggested) are Itemized, and From library keeps its own presentation (it prints itemized anyway). Build package is BOM quote only, with Lead estimator / Prepared by; Customer review is Document + BOM without the package checklist; readiness and package gap chips are quiet. The email says "Attached is our quote … You can also view it online here: {link}" (the subject says "quote" too, Jeff 2026-10-21; the bidder email's link line drops "full package"). Move / Copy system → New estimate copies the stored source's flag; into an existing estimate it leaves the target's alone. Nothing narrative is deleted, so switching off brings it all back. The 2% estimator bonus is unchanged. No migration (quotes are a JSONB doc table). `src/lib/estimate-box-sale/rules.ts`; spec `docs/superpowers/specs/2026-10-21-box-goods-sale-design.md`; harness `box sale` (`scripts/test-box-sale.ts`).
 
 ## D<N+1>. A box goods sale refuses labor on save (#<P>, 2026-10-21)
 
@@ -3183,7 +3197,6 @@ Jeff: some estimates are box goods sales (equipment + freight, no install); the 
 
 **Remaining (Jeff-gated):**
 - On production after merge: make one real box goods sale estimate (+ New quote → Box goods sale), add equipment and freight, send it to yourself, and check the PDF (one BOM page, no cover), the email wording and the client link (itemized list only).
-- Decide whether the email subject should say "quote" instead of "estimate" for a box sale (left unchanged).
 ```
 
 `<E>`, `<SPASS>`, `<SFAIL>`, `<MPASS>`, `<MFAIL>` and `<L>` are the real numbers from Step 5, and `<CHROME>` is Step 6's one-line result ("1 page, Total investment band, no title page" or the 503 message). Substitute them, like `D<N>` / `#<P>`, before the Step 7 commit.
