@@ -12776,6 +12776,8 @@ Spec `docs/superpowers/specs/2026-10-20-estimator-handoff-package-design.md`; pl
 
 **Next:** PR 2 (slicer, prototype UI, spec docs, verification, zip), planned after this merges. It needs Jeff's production export (`DATABASE_URL=<prod> OUT=~/peak-prod-export.json npm run db:export`).
 
+**PR 2 is built:** see #361 (the prototype, D1233–D1244, and Jeff's production run checklist).
+
 ## 360. Parts list CSV v2 + BOM quote PDF — DONE 2026-10-20 on `feat/parts-csv-bom-pdf` (D1231–D1232)
 
 Jeff: the Parts list (CSV) should show item name, description, cost, sell margin and where the pricing came from ("Catalog" for catalog items), and Build package → BOM quote should export to PDF. Specs `docs/superpowers/specs/2026-10-20-parts-list-csv-price-source-design.md` and `docs/superpowers/specs/2026-10-20-bom-quote-pdf-design.md`; plan `docs/superpowers/plans/`.
@@ -12789,3 +12791,43 @@ Jeff: the Parts list (CSV) should show item name, description, cost, sell margin
 **Remaining (Jeff-gated):**
 - Open one real estimate's CSV in Excel and check the labels and margins.
 - Download one BOM PDF on production (needs `QUOTE_PDF_ORIGIN`, like every estimate PDF).
+
+## 361. Estimator handoff, PR 2: the confidential offline prototype package — BUILT 2026-10-20 on `feat/estimator-handoff-prototype` (D1233–D1244)
+
+**Area:** `handoff/estimator/` (slicer, bundler, runtime, shell, verification, founder spec docs), `scripts/export.ts` (format 2), `package.json` (`handoff:*` scripts)
+**Reported:** 2026-10-20 (Jeff: share the estimator as HTML with the founder for their software). Stacks on #359 (PR 1, `feat/estimating-core`, which has merged main incl. #360).
+
+Spec `docs/superpowers/specs/2026-10-20-estimator-handoff-package-design.md`; plan `docs/superpowers/plans/2026-10-20-estimator-handoff-prototype.md`.
+
+**Built:** a package (`output/peak-estimator-handoff/`, zipped, git-ignored, ≤ 150 MB, every file ≤ 15,000,000 bytes) that runs Peak's real Estimator (four steps), Catalog, Assembly Builder (with rack submittals) and Estimating Rules in a browser from `file://` or an Artifact, over a sliced production export, with the real pricing engine. Browser-side stand-ins replace the server: an in-browser action registry (default refusal), an IndexedDB overlay with Reset to production snapshot, hash routes, Acting-as roles, simulated Send and Won, and browser Print with a "Confidential — Peak Systems Group · prototype" footer. The founder folder `spec/` has README, data-model, pricing and ports docs (generated blocks expanded from the source), golden totals per estimate, and eight screenshots. Commands: `handoff:slice`, `handoff:photos`, `handoff:build`, `handoff:verify` (`--drift`, `--parity`, `--full`, `--smoke`, `--shell`, `--catalog`, `--assemblies`, `--rules`, `--estimator`, `--estimator-edit`, `--review`, `--send`, `--photos`). No migration. The only `src/`-side change is `scripts/export.ts` (format 2 adds companies, contacts, contact emails, contact phones, sites).
+
+**Verification (final, after merging origin/feat/estimating-core with main's #360):** tsc 0 errors; `core:check` 82 files, 0 violations; test:specs 25,817 PASS / 0 FAIL; test:smoke 268 PASS / 0 FAIL; `npx next build` exit 0; eslint 0 problems on changed files (`scripts/test-review-and-spec.ts` crashes eslint on main too). On the dev slice (4 estimates: one live plus the three golden fixtures, 14,725 catalog parts): `handoff:verify --drift` 33 ports / 85 originals PASS; `--parity` PASS (bundle vs spec/golden: 4 estimates, 0 problems); `--full --allow-missing-features` PASS (package 33 files, 7.17 MB; zip 2.54 MB, 33 entries; features covered: alternate, bonus; rack and curtain+track are not in the thin dev slice); `--smoke --all-steps` PASS (55 views, 0 unregistered actions, 0 page errors, 0 foreign requests); `--shell`, `--catalog` (first paint 146 ms), `--assemblies`, `--rules` (36 steps), `--estimator all`, `--estimator-edit`, `--review`, `--send`, `--photos` PASS. The merge of main flagged two ports (`runtime/loaders/document.ts`, `cut-sheets.ts`) because the print route gained `?view=bom`; the prototype has no PDF route and routes the BOM tab's PDF links to "Not part of the prototype", so both were re-stamped with `--drift --update <port>` and nothing was ported. Not yet run: the production slice (thin dev data), photo download (needs the production token), the founder's own machine.
+
+**Rollback:** nothing in the app depends on it. Delete `handoff/`, the `handoff:*` scripts and `output/`; revert `scripts/export.ts` (format 1 readers are unaffected either way).
+
+**Remaining (Jeff-gated):**
+- Run the production checklist below, in order, on Jeff's machine. The export and everything cut from it are confidential and stay there (never commit `~/peak-prod-export.json` or `output/`).
+- Confirm or reverse two controller defaults: the slicer does not ship `clientResponses`, `bonusRecord`, `estimatorBonusSplit`, `shareLink` or `shareOpens` (D1238), and printing adds the "Confidential" footer (D1240).
+- Read the verify report and the eight screenshots with Claude. Only then does the zip go to Jeff, and the Artifact is published only on his explicit go-ahead.
+
+**Production run checklist** (repository root; `handoff/estimator/spec/README.md` repeats it):
+
+```bash
+# 1. production export (format 2 — includes the customer tables)
+DATABASE_URL=<prod> OUT=~/peak-prod-export.json npm run db:export
+# 2. photos from private Blob; --dry-run first (no token, no network), then with the production token in this shell only
+npm run handoff:photos -- --in ~/peak-prod-export.json --out output/peak-estimator-handoff/images --dry-run
+BLOB_READ_WRITE_TOKEN=<prod token> npm run handoff:photos -- --in ~/peak-prod-export.json --out output/peak-estimator-handoff/images
+# 3. slice (never pass --extra-estimates here)
+npm run handoff:slice -- --in ~/peak-prod-export.json --out output/peak-estimator-handoff/data
+# 4. bundle
+npm run handoff:build
+# 5. strict verify: no --allow-missing-features; the slice must hold an alternate, a rack line,
+#    a curtain + track pair and bonus lines, or --full fails. The zip is written only on a pass.
+npm run handoff:verify -- --drift --parity --export ~/peak-prod-export.json --full --smoke --all-steps
+```
+
+6. Claude reviews `output/verify/full.json`, the verify report, `spec/screenshots/` and the golden files; then `output/peak-estimator-handoff.zip` goes to Jeff. The Artifact is published only on Jeff's go-ahead.
+
+**Follow-ups:** a Blob read of a photo is the only network step and has not run against production; a cross-window overlay merge (last write wins today); the Datasheets and Drawings review tabs and the Won install project are intentionally not in the prototype.
+

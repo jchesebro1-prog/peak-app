@@ -156,3 +156,35 @@ and the bonus split). The slicer works from an allow-list, so nothing else can s
 3. `pricing.md`, next to `app/estimating-core.js`: how it is priced.
 4. `golden/`: the numbers your rebuild must reproduce.
 5. `ports.md`: what your system supplies.
+
+## Production run — for Peak, producing this package (not needed to use it)
+
+The export and everything cut from it are **confidential and stay on Jeff's machine**: the export file
+(`~/peak-prod-export.json`) is as sensitive as the database, and `output/` is git-ignored. Nothing here is
+ever committed, uploaded or emailed, and the Artifact is published only on Jeff's go-ahead. Run from the
+repository root, in this order:
+
+```bash
+# 1. production export (format 2 — includes the customer tables)
+DATABASE_URL=<prod> OUT=~/peak-prod-export.json npm run db:export
+
+# 2. product photos from the private Blob store (needs the production token in this shell only).
+#    Check first with --dry-run: no token, no network.
+npm run handoff:photos -- --in ~/peak-prod-export.json --out output/peak-estimator-handoff/images --dry-run
+BLOB_READ_WRITE_TOKEN=<prod token> npm run handoff:photos -- --in ~/peak-prod-export.json --out output/peak-estimator-handoff/images
+
+# 3. slice the export through the allow-list (writes data/*.js and, with the photo manifest, data/photos.js)
+npm run handoff:slice -- --in ~/peak-prod-export.json --out output/peak-estimator-handoff/data
+
+# 4. bundle
+npm run handoff:build
+
+# 5. verify, STRICT: no --allow-missing-features. The slice must hold an alternate, a rack line,
+#    a curtain + track pair and bonus lines, or --full fails. --full writes the zip only on a pass.
+npm run handoff:verify -- --drift --parity --export ~/peak-prod-export.json --full --smoke --all-steps
+```
+
+Do **not** pass `--extra-estimates` to the slicer (dev only). Then Claude reads the verify report, the
+screenshots in `spec/screenshots/` and the golden files, and only then does `output/peak-estimator-handoff.zip`
+go to Jeff. Re-run `--drift` after every merge from main (a changed original needs its port re-checked and
+`--drift --update <port>` for that entry).
