@@ -44,8 +44,8 @@ opens the itemized list.
 ## The one document rule
 
 A pure helper `boxSaleDocProps(p: QuoteDocumentProps): QuoteDocumentProps` produces the BOM view. Its effect is
-identical to `bomViewProps`: `document: null`, `detail: "itemized"`, `pdfQty` and `pdfNotes` on,
-`pdfItemizedAppendix: false`, every section `presentation: "itemized"`. Prices follow the quote's own `pdfPrices`.
+identical to `bomViewProps`: `document: null`, `detail: "itemized"`, `pdfNotes` on (Qty and Prices follow the quote's own `pdfQty` / `pdfPrices`),
+`pdfItemizedAppendix: false`, every section `presentation: "itemized"`.
 Either reuse `bomViewProps` directly or share one implementation; never two copies.
 
 `quoteDocumentDataFor` (`src/lib/quote-pdf/quote-document-data.ts`) applies it when the quote (or the frozen revision)
