@@ -126,14 +126,15 @@
  *          data/estimates.js); with --export (repeatable), core:golden over that export reproduces them too. No browser.
  *          The walk lives in verify/parity.ts. Result: output/verify/parity.json.
  *
- *   npm run handoff:verify -- --full [--require-features] [--out <package dir>]
+ *   npm run handoff:verify -- --full [--allow-missing-features] [--out <package dir>]
  *
- * --full  the whole package (Task 12): the folder audit (≤ 15,000,000 bytes a file, ≤ 150 MB, no "part-docs/", nothing
+ * --full  the whole package (Task 12): the folder audit (≤ 15,000,000 bytes a file, ≤ 150 MB, no "part-docs/<id>/…", nothing
  *          missing), --parity, --smoke --all-steps over the sampled estimates, 1440×900 screenshots into the package's spec/screenshots/, a sample
  *          of 20 estimates (seeded; one per feature first — alternate, rack, curtain + track, bonus) whose header totals
  *          must equal the Estimator's post-load totals, the edit → persist → Reset cycle, 0 page errors / foreign requests
- *          / unregistered calls; features the sample doesn't cover are reported (--require-features: they fail). On PASS
- *          the zip is rewritten with the screenshots and read back; on FAIL it is removed. The walk lives in
+ *          / unregistered calls. Feature coverage is strict: a feature the sample doesn't cover fails the run
+ *          (--allow-missing-features, for dev runs on a slice that lacks one, only reports it). The zip is deleted at
+ *          the start and written (every entry under peak-estimator-handoff/) and read back on PASS only. The walk lives in
  *          verify/full.ts. Result: output/verify/full.json.
  *
  * Plan: PR 2 Tasks 2–12.
@@ -1417,7 +1418,7 @@ async function main() {
   const full = argv.includes("--full");
   const exportFiles = argv.flatMap((a, i) => (a === "--export" && argv[i + 1] && !argv[i + 1].startsWith("--") ? [path.resolve(argv[i + 1])] : []));
   if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !shell && !catalog && !assemblies && !rules && !photos && !drift && !parity && !full) {
-    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --catalog | --assemblies | --rules | --photos | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] | --parity [--export <export.json> …] | --full [--require-features] [--out <package dir>] | --drift [--update [<port> …]]");
+    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --catalog | --assemblies | --rules | --photos | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] | --parity [--export <export.json> …] | --full [--allow-missing-features] [--out <package dir>] | --drift [--update [<port> …]]");
     process.exit(2);
   }
   mkdirSync(VERIFY_DIR, { recursive: true });
@@ -1509,7 +1510,7 @@ async function main() {
   if (full) {
     // verify/full.ts imports this module's helpers; loaded here, once this module has finished evaluating.
     const { fullCheck, printFull } = await import("./verify/full");
-    const r = await fullCheck(pkgDir, { requireFeatures: argv.includes("--require-features") });
+    const r = await fullCheck(pkgDir, { allowMissingFeatures: argv.includes("--allow-missing-features") });
     writeFileSync(path.join(VERIFY_DIR, "full.json"), JSON.stringify(r, null, 2) + "\n");
     printFull(r);
     pass &&= r.pass;

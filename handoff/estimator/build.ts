@@ -1,33 +1,33 @@
 /**
  * handoff:build — bundles the real Estimator client for a server-less, file:// page.
  *
- *   npm run handoff:build [-- --out <dir>] [--data <slice dir>] [--images <dir>] [--no-minify] [--no-zip]
+ *   npm run handoff:build [-- --out <dir>] [--data <slice dir>] [--images <dir>] [--no-minify]
  *
  * Writes <out>/{index.html, app/app.js, app/app.css, app/assets/*, CONFIDENTIAL.txt}, and (Task 12) the founder half:
  * app/estimating-core.js (the readable engine, package.ts), spec/{README,data-model,pricing,ports}.md (handoff/estimator/spec/
  * with their generated blocks expanded from the source, spec-gen.ts), spec/golden/<id>.json (core:golden's figures for every
- * sliced estimate) — spec/screenshots/ (handoff:verify --full) is kept — then audits the folder (auditPackage) and zips it
- * to <out>.zip (output/peak-estimator-handoff.zip; --no-zip skips it). handoff:verify --full re-zips after its screenshots.
+ * sliced estimate) — spec/screenshots/ (handoff:verify --full) is kept — then audits the folder (auditPackage). The build
+ * never writes the zip: it deletes any <out>.zip first (that zip no longer matches the folder), and only a passing
+ * handoff:verify --full writes output/peak-estimator-handoff.zip, so an unverified zip never sits there looking done.
  * The slice (handoff:slice) and photos normally live in <out>/data and <out>/images already;
  * --data / --images copy them in from elsewhere. Only the files images/manifest.json references (plus the manifest)
- * ship; anything else in an images folder stays out (copied folder) or is removed (in-place folder). Nothing in
- * data/ or images/ may name a private Blob pathname ("part-docs/") — the build fails if one does. Every emitted file must stay ≤ 15,000,000
+ * ship; anything else in an images folder stays out (copied folder) or is removed (in-place folder). No package file
+ * may name a private Blob pathname ("part-docs/<id>/…") — the build fails if one does. Every emitted file must stay ≤ 15,000,000
  * bytes (the Artifact limit) or the build fails. Build diagnostics (discovered server actions,
  * esbuild metafile) go to output/handoff-build/, outside the package. Plan: PR 2 Task 2.
  */
 import * as esbuild from "esbuild";
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import postcss from "postcss";
 import tailwindcss from "@tailwindcss/postcss";
 import { FORBIDDEN_PACKAGES } from "../../scripts/core-check";
 import { parsePhotoManifest } from "./photo-select";
 import { APP_OVERRIDES, appOverridePlugin, bakeModules, bakePlugin, imagePlugin, shimPlugin, serverActionStubPlugin } from "./esbuild-plugins";
-import { auditPackage, buildEngineBundle, ENGINE_FILE, MAX_TOTAL_BYTES, readSliceGlobals, sliceSystemQuotes, stageSpecDocs, writeGoldenFiles, writeZip, zipDateOf } from "./package";
+import { auditPackage, buildEngineBundle, ENGINE_FILE, MAX_FILE_BYTES, MAX_TOTAL_BYTES, readSliceGlobals, sliceSystemQuotes, stageSpecDocs, writeGoldenFiles, zipPathFor } from "./package";
 
 const HERE = __dirname;
 const ROOT = path.resolve(HERE, "..", "..");
-export const MAX_FILE_BYTES = 15_000_000;
 
 /** Slice files in dependency order; `catalog-*` expands to every catalog-<n>.js present, by n. */
 export const DATA_ORDER = ["rules.js", "team.js", "customers.js", "fixtures.js", "catalog-*", "estimates.js", "meta.js"] as const;
@@ -93,7 +93,7 @@ export function outDirProblem(root: string, out: string): string | null {
   return null;
 }
 
-type Args = { out: string; data: string | null; images: string | null; minify: boolean; zip: boolean };
+type Args = { out: string; data: string | null; images: string | null; minify: boolean };
 
 function parseArgs(argv: string[]): Args {
   const val = (name: string) => {
@@ -103,7 +103,7 @@ function parseArgs(argv: string[]): Args {
   const out = path.resolve(ROOT, val("--out") ?? "output/peak-estimator-handoff");
   const data = val("--data");
   const images = val("--images");
-  return { out, data: data ? path.resolve(data) : null, images: images ? path.resolve(images) : null, minify: !argv.includes("--no-minify"), zip: !argv.includes("--no-zip") };
+  return { out, data: data ? path.resolve(data) : null, images: images ? path.resolve(images) : null, minify: !argv.includes("--no-minify") };
 }
 
 /** Copies `from` into `to` (replacing it) unless they are the same directory. */
@@ -157,36 +157,11 @@ export function stageImages(from: string | null, to: string): { shipped: string[
   return { shipped: [...keep].sort(), dropped };
 }
 
-/** Package files that carry a private Blob pathname ("part-docs/<id>/…"; the failure text "part-docs/<docId>/" is not one): data/*, images/manifest.json, index.html. [] = clean. */
-export function privatePathLeaks(pkg: string): string[] {
-  const bad: string[] = [];
-  const candidates = [...listFiles(path.join(pkg, "data")).map((f) => path.join("data", f)), path.join("images", "manifest.json"), "index.html"];
-  for (const rel of candidates) {
-    const p = path.join(pkg, rel);
-    if (existsSync(p) && statSync(p).isFile() && /part-docs\/[A-Za-z0-9_-]+\//.test(readFileSync(p, "utf8"))) bad.push(rel);
-  }
-  return bad;
-}
-
-function listFiles(dir: string, base = dir): string[] {
-  if (!existsSync(dir)) return [];
-  const out: string[] = [];
-  for (const name of readdirSync(dir).sort()) {
-    const p = path.join(dir, name);
-    if (statSync(p).isDirectory()) out.push(...listFiles(p, base));
-    else out.push(path.relative(base, p));
-  }
-  return out;
-}
-
 async function buildCss(): Promise<string> {
   const from = path.join(ROOT, "src/app/globals.css");
   const r = await postcss([tailwindcss({ base: ROOT })]).process(readFileSync(from, "utf8"), { from, to: from });
   return r.css;
 }
-
-/** The zip beside a package folder: output/peak-estimator-handoff → output/peak-estimator-handoff.zip. */
-export const zipPathFor = (out: string): string => `${path.resolve(out)}.zip`;
 
 export async function build(args: Args): Promise<{ files: Array<{ file: string; bytes: number }>; oversize: string[]; problems: string[] }> {
   const OUT = args.out;
@@ -194,7 +169,7 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
   mkdirSync(OUT, { recursive: true });
   rmSync(APP, { recursive: true, force: true });
   rmSync(path.join(OUT, "index.html"), { force: true });
-  // a zip from an earlier build no longer matches the folder: it is rewritten below (or by handoff:verify --full)
+  // a zip from an earlier build no longer matches the folder; only a passing handoff:verify --full writes a new one
   rmSync(zipPathFor(OUT), { force: true });
 
   const hasData = syncDir(args.data, path.join(OUT, "data"), "data");
@@ -276,15 +251,12 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
   const docs = stageSpecDocs(OUT, ROOT);
   const specMs = Date.now() - t2;
 
-  const leaks = privatePathLeaks(OUT);
-  if (leaks.length) throw new Error(`private Blob pathnames ("part-docs/") found in the package: ${leaks.join(", ")}`);
-
   const audit = auditPackage(OUT);
   const files = audit.files;
   const oversize = audit.oversize;
   const problems = [
     ...(audit.totalOver ? [`the package is ${audit.totalBytes} bytes, over ${MAX_TOTAL_BYTES}`] : []),
-    ...audit.privatePaths.map((f) => `${f} contains a private Blob pathname ("part-docs/")`),
+    ...audit.privatePaths.map((f) => `${f} contains a private Blob pathname ("part-docs/<id>/…")`),
     ...audit.missing.map((f) => `${f} is missing`),
   ];
 
@@ -308,11 +280,7 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
   console.log(`  total ${(total / 1e6).toFixed(2)} MB in ${files.length} files`);
   if (audit.junk.length) console.log(`  never zipped: ${audit.junk.join(", ")}`);
   for (const p of problems) console.log(`  PROBLEM ${p}`);
-  if (args.zip && !oversize.length && !problems.length) {
-    const zipFile = zipPathFor(OUT);
-    const z = await writeZip(OUT, zipFile, zipDateOf(OUT));
-    console.log(`  zip: ${path.relative(ROOT, zipFile)} ${z.bytes} bytes (${(z.bytes / 1e6).toFixed(2)} MB), ${z.entries.length} entries — run handoff:verify --full to add the screenshots and re-zip`);
-  }
+  if (!oversize.length && !problems.length) console.log(`  zip: not written — run handoff:verify --full; it writes ${path.relative(ROOT, zipPathFor(OUT))} on PASS`);
   return { files, oversize, problems };
 }
 

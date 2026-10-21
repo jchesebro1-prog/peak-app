@@ -10,7 +10,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { isUseServer, exportNames, shimPlugin } from "../handoff/estimator/esbuild-plugins";
-import { dataScripts, forbiddenBundleInputs, outDirProblem, privatePathLeaks, referencedImageFiles, stageImages } from "../handoff/estimator/build";
+import { dataScripts, forbiddenBundleInputs, outDirProblem, referencedImageFiles, stageImages } from "../handoff/estimator/build";
+import { privatePathFiles } from "../handoff/estimator/package";
 import { classifyRequest } from "../handoff/estimator/verify";
 import type { Ok } from "./test-inbox-org";
 
@@ -121,9 +122,12 @@ export async function handoffBuildChecks(ok: Ok) {
     mk(path.join(pkg, "data"), { "estimates.js": "window.PEAK_ESTIMATES = [];\n", "photos.js": 'window.PEAK_PHOTOS = {"bySku":{},"byDoc":{"PD-1":"images/PD-1.webp"}};' });
     mk(path.join(pkg, "images"), { "manifest.json": JSON.stringify({ version: 1, bySku: {}, byDoc: {}, linkOnly: [], failed: [{ docId: "PD-9", error: "blob path outside part-docs/<docId>/" }] }) });
     mk(pkg, { "index.html": "<html></html>" });
-    ok(privatePathLeaks(pkg).length === 0, "handoff:build: privatePathLeaks — a clean package (the 'blob path outside part-docs/<docId>/' failure text is not a pathname)");
+    ok(privatePathFiles(pkg).length === 0, "handoff:build: privatePathFiles — a clean package (the 'blob path outside part-docs/<docId>/' failure text is not a pathname)");
+    fs.writeFileSync(path.join(pkg, "data", "photos-old.js"), '[{"sku":"A","blobKey":"part-docs/PD-1/a.webp"}]');
+    ok(privatePathFiles(pkg).join() === "data/photos-old.js", "handoff:build: privatePathFiles — flags a data file carrying a part-docs/<id>/… pathname");
+    fs.rmSync(path.join(pkg, "data", "photos-old.js"));
     fs.writeFileSync(path.join(pkg, "data", "photo-manifest.json"), '[{"sku":"A","blobKey":"part-docs/PD-1/a.webp"}]');
-    ok(privatePathLeaks(pkg).join() === path.join("data", "photo-manifest.json"), "handoff:build: privatePathLeaks — flags a data file carrying a part-docs/<id>/… pathname");
+    ok(privatePathFiles(pkg).length === 0, "handoff:build: privatePathFiles — the old data/photo-manifest.json is junk (never zipped; the build deletes it), so it isn't scanned");
   } finally {
     fs.rmSync(st, { recursive: true, force: true });
   }

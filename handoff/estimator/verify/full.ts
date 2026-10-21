@@ -1,10 +1,10 @@
 /**
- * Estimator handoff — `npm run handoff:verify -- --full [--require-features] [--out <package dir>]` (PR 2 Task 12): the
+ * Estimator handoff — `npm run handoff:verify -- --full [--allow-missing-features] [--out <package dir>]` (PR 2 Task 12): the
  * whole package, the way the founder gets it. Split out of verify.ts (which loads it on demand and owns the shared page
  * helpers). In order:
  *
  *   1. The folder (auditPackage): every file ≤ 15,000,000 bytes, the total ≤ 150 MB, no file contains a private Blob
- *      pathname ("part-docs/"), the page / app / engine / docs / notice are all there.
+ *      pathname ("part-docs/<id>/…"), the page / app / engine / docs / notice are all there.
  *   2. --parity (verify/parity.ts): the readable engine reproduces every golden file byte for byte.
  *   3. --smoke --all-steps over the sample: every route — each sampled estimate × each step and tab, the Catalog,
  *      Assemblies, a rack's sheets, Estimating Rules and its sub-pages — with no page error, no foreign request, no
@@ -14,12 +14,16 @@
  *   5. A sample of SAMPLE_SIZE estimates (all when there are fewer; else a seeded, deterministic pick that first takes one
  *      estimate per feature — an alternate, a rack line, a curtain + track pair, bonus lines — found by reading
  *      spec.sections): each header's "Quoted total" equals the Estimator's post-load total (canonicalTotals) and each
- *      golden file's grand equals the stored sections' totals(). Features the sample covers are reported; with
- *      --require-features (the production run) a missing one fails.
+ *      golden file's grand equals the stored sections' totals(). The two figures differ on purpose for a draft (golden =
+ *      the engine over the stored data; the header = after the load re-derives bonus lines and the $25 round-up —
+ *      pricing.md §12). Feature coverage is STRICT: a feature the sample doesn't cover fails the run (the production
+ *      run must prove all four). `--allow-missing-features` (dev runs: the dev slice has no rack or curtain + track
+ *      estimate) reports them instead.
  *   6. The edit → persist → Reset cycle in the UI: qty +1 → Save → a reload keeps it → Reset to production snapshot →
  *      the seed qty and header total are back.
  *   7. On PASS only, the zip is rewritten (it now carries the screenshots) and read back: same entries as the folder,
- *      CONFIDENTIAL.txt at its root. On FAIL the zip is deleted — an unverified package never sits there looking done.
+ *      every entry under peak-estimator-handoff/ (ZIP_ROOT), CONFIDENTIAL.txt first. The zip is deleted when --full
+ *      starts and stays deleted on FAIL — only a passing --full produces it, so an unverified zip never sits there.
  * Result: output/verify/full.json.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -35,8 +39,7 @@ import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { goldenFileName } from "../../../scripts/estimating-golden";
 import { canonicalTotals } from "../runtime/estimate-totals";
-import { auditPackage, GOLDEN_DIR, SCREENSHOT_DIR, writeZip, zipDateOf, zipEntries, type PackageAudit } from "../package";
-import { zipPathFor } from "../build";
+import { auditPackage, GOLDEN_DIR, SCREENSHOT_DIR, writeZip, ZIP_ROOT, zipDateOf, zipEntries, zipName, zipPathFor, type PackageAudit } from "../package";
 import {
   clickButton, estimateUrl, firstQtyInput, loadSliceData, newPage, newSink, openUrl, pageHasText, printSmoke, readHeaderTotal, smoke,
   SMOKE_ALLOWED_UNREGISTERED, unregisteredOn, VERIFY_DIR, waitFor, waitMounted, type PageSink, type SliceQuote, type SmokeResult,
@@ -116,11 +119,11 @@ export type FullResult = {
   smoke: SmokeResult;
   sample: EstimateRow[];
   sliceSize: number;
-  features: { covered: Feature[]; missing: Feature[]; inSlice: Feature[]; required: boolean };
+  features: { covered: Feature[]; missing: Feature[]; inSlice: Feature[]; allowMissing: boolean };
   editCycle: Step[];
   screenshots: string[];
   unregistered: string[];
-  zip: { file: string; bytes: number; entries: number; confidentialAtRoot: boolean; matchesFolder: boolean; screenshots: number } | null;
+  zip: { file: string; bytes: number; entries: number; allUnderRoot: boolean; confidentialFirst: boolean; matchesFolder: boolean; screenshots: number } | null;
   zipRemoved: boolean;
 } & PageSink;
 
@@ -132,9 +135,13 @@ async function shot(page: Page, dir: string, name: string, list: string[]): Prom
   list.push(path.basename(file));
 }
 
-export async function fullCheck(pkgDir: string, opts: { requireFeatures: boolean }): Promise<FullResult> {
+export async function fullCheck(pkgDir: string, opts: { allowMissingFeatures: boolean }): Promise<FullResult> {
   const index = path.join(pkgDir, "index.html");
   if (!existsSync(index)) throw new Error(`${index} not found — run npm run handoff:build first`);
+  // only a passing run produces the zip: an old one goes now, so a crash or a FAIL below leaves none
+  const zipFile = zipPathFor(pkgDir);
+  const hadZip = existsSync(zipFile);
+  rmSync(zipFile, { force: true });
 
   // 1 — the folder
   const a = auditPackage(pkgDir);
@@ -266,32 +273,30 @@ export async function fullCheck(pkgDir: string, opts: { requireFeatures: boolean
   const browserOk = sink.pageErrors.length === 0 && sink.foreignRequests.length === 0 && sink.failedLocal.length === 0 && unregistered.size === 0;
   const pass =
     a.ok && parity.pass && smokeR.pass && rows.length > 0 && rows.every((r) => r.pass) && editCycle.every((s) => s.ok) && browserOk &&
-    screenshots.length === 8 && (!opts.requireFeatures || missing.length === 0);
+    screenshots.length === 8 && (opts.allowMissingFeatures || missing.length === 0);
 
-  // 7 — the zip: rewritten (with the screenshots) and read back on PASS; removed on FAIL
-  const zipFile = zipPathFor(pkgDir);
+  // 7 — the zip: written (with the screenshots) and read back on PASS only
   let zip: FullResult["zip"] = null;
-  let zipRemoved = false;
+  const zipRemoved = !pass && hadZip;
   if (pass) {
     const z = await writeZip(pkgDir, zipFile, zipDateOf(pkgDir));
     const back = await JSZip.loadAsync(readFileSync(zipFile));
     const names = Object.keys(back.files).filter((n) => !back.files[n].dir).sort();
+    const order = Object.keys(back.files).filter((n) => !back.files[n].dir);
     zip = {
       file: path.relative(process.cwd(), zipFile), bytes: z.bytes, entries: names.length,
-      confidentialAtRoot: names.includes("CONFIDENTIAL.txt"),
-      matchesFolder: names.join("\n") === zipEntries(pkgDir).join("\n"),
-      screenshots: names.filter((n) => n.startsWith(`${SCREENSHOT_DIR}/`)).length,
+      allUnderRoot: order.every((n) => n.startsWith(`${ZIP_ROOT}/`)),
+      confidentialFirst: order[0] === zipName("CONFIDENTIAL.txt"),
+      matchesFolder: order.join("\n") === zipEntries(pkgDir).map(zipName).join("\n"),
+      screenshots: names.filter((n) => n.startsWith(zipName(`${SCREENSHOT_DIR}/`))).length,
     };
-  } else if (existsSync(zipFile)) {
-    rmSync(zipFile, { force: true });
-    zipRemoved = true;
   }
-  const zipOk = !pass || (!!zip && zip.confidentialAtRoot && zip.matchesFolder && zip.screenshots === screenshots.length);
+  const zipOk = !pass || (!!zip && zip.allUnderRoot && zip.confidentialFirst && zip.matchesFolder && zip.screenshots === screenshots.length);
 
   return {
     pass: pass && zipOk,
     audit, parity, smoke: smokeR, sample: rows, sliceSize: data.estimates.length,
-    features: { covered, missing, inSlice, required: opts.requireFeatures },
+    features: { covered, missing, inSlice, allowMissing: opts.allowMissingFeatures },
     editCycle, screenshots, unregistered: [...unregistered], zip, zipRemoved, ...sink,
   };
 }
@@ -311,7 +316,7 @@ export function printFull(r: FullResult): void {
   for (const s of r.sample) {
     console.log(`    ${s.pass ? "ok  " : "FAIL"} ${s.id} (${s.number}${s.numberShown ? "" : " NOT SHOWN"}): header ${s.onScreen ?? "—"} · expected ${s.expected} · golden grand ${s.goldenGrand === null ? "—" : fmt(s.goldenGrand)}${s.goldenOk ? "" : ` ≠ totals() ${fmt(s.rawGrand)}`}${s.features.length ? ` · ${s.features.join(", ")}` : ""}`);
   }
-  console.log(`  features covered: ${r.features.covered.join(", ") || "none"}; not covered: ${r.features.missing.join(", ") || "none"}${r.features.required ? " (--require-features: missing ones FAIL)" : " (reported only; --require-features makes them fail)"}`);
+  console.log(`  features covered: ${r.features.covered.join(", ") || "none"}; not covered: ${r.features.missing.join(", ") || "none"}${r.features.missing.length ? (r.features.allowMissing ? " (--allow-missing-features: reported only)" : " — FAIL (every feature must be covered; --allow-missing-features for a dev slice)") : ""}`);
   for (const f of r.features.missing) console.log(`    not covered: ${FEATURE_LABEL[f]}${r.features.inSlice.includes(f) ? "" : " — none in the slice"}`);
   console.log("  edit → persist → Reset:");
   for (const s of r.editCycle) console.log(`    ${s.ok ? "ok  " : "FAIL"} ${s.step}${s.detail ? ` (${s.detail})` : ""}`);
@@ -319,7 +324,7 @@ export function printFull(r: FullResult): void {
   console.log(`  page errors: ${r.pageErrors.length}; foreign requests: ${r.foreignRequests.length}; failed local files: ${r.failedLocal.length}; unregistered calls: ${r.unregistered.length}`);
   for (const e of r.pageErrors) console.log(`    ${e.split("\n").slice(0, 4).join("\n    ")}`);
   for (const u of [...r.foreignRequests, ...r.failedLocal, ...r.unregistered]) console.log(`    ${u}`);
-  if (r.zip) console.log(`  zip: ${r.zip.file} ${r.zip.bytes} bytes (${(r.zip.bytes / 1e6).toFixed(2)} MB), ${r.zip.entries} entries; CONFIDENTIAL.txt at root: ${r.zip.confidentialAtRoot ? "yes" : "NO"}; matches the folder: ${r.zip.matchesFolder ? "yes" : "NO"}; screenshots: ${r.zip.screenshots}`);
-  else if (r.zipRemoved) console.log("  zip: removed (the package did not pass)");
+  if (r.zip) console.log(`  zip: ${r.zip.file} ${r.zip.bytes} bytes (${(r.zip.bytes / 1e6).toFixed(2)} MB), ${r.zip.entries} entries; all under ${ZIP_ROOT}/: ${r.zip.allUnderRoot ? "yes" : "NO"}; CONFIDENTIAL.txt first: ${r.zip.confidentialFirst ? "yes" : "NO"}; matches the folder: ${r.zip.matchesFolder ? "yes" : "NO"}; screenshots: ${r.zip.screenshots}`);
+  else console.log(`  zip: not written (the package did not pass)${r.zipRemoved ? "; the earlier zip was removed" : ""}`);
   console.log(`  result: ${path.relative(process.cwd(), path.join(VERIFY_DIR, "full.json"))}`);
 }

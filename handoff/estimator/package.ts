@@ -2,7 +2,8 @@
  * Estimator handoff — the founder-facing half of the package (PR 2 Task 12): the readable engine
  * (`app/estimating-core.js`), the spec folder (docs expanded from the source, the golden totals), the package
  * audit every Artifact / zip rule hangs on, and the deterministic zip. Node-only; handoff:build and
- * handoff:verify (--parity, --full) both use it.
+ * handoff:verify (--parity, --full) both use it. The one home of the package's shared rules (MAX_FILE_BYTES, listFiles,
+ * the private-path check, the zip's path).
  */
 import * as esbuild from "esbuild";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -24,8 +25,13 @@ export const SPEC_DOCS = ["README.md", "data-model.md", "pricing.md", "ports.md"
 export const ENGINE_GLOBAL = "PeakEstimatingCore";
 export const MAX_FILE_BYTES = 15_000_000;
 export const MAX_TOTAL_BYTES = 150_000_000;
-/** A private Blob pathname prefix: no package file may contain it (photos ship as images/<file>). */
-export const PRIVATE_PATH = "part-docs/";
+/**
+ * A private Blob pathname ("part-docs/<docId>/…"): no package file may contain one (photos ship as images/<file>). The
+ * literal text "part-docs/<docId>/" (a photo failure message) is not a pathname.
+ */
+export const PRIVATE_PATH_RE = /part-docs\/[A-Za-z0-9_-]+\//;
+/** The one folder every zip entry sits under (spec §2), so a command-line unzip doesn't spill into the current folder. */
+export const ZIP_ROOT = "peak-estimator-handoff";
 
 const ENGINE_BANNER = `/*!
  * Peak Systems Group — estimating core, readable build. CONFIDENTIAL.
@@ -211,13 +217,18 @@ export type PackageAudit = {
   oversize: string[];
   /** total > MAX_TOTAL_BYTES. */
   totalOver: boolean;
-  /** Files whose bytes contain PRIVATE_PATH. */
+  /** Files whose bytes contain a private Blob pathname (PRIVATE_PATH_RE). */
   privatePaths: string[];
   /** Junk (isJunkPath) present in the folder — never zipped, but reported. */
   junk: string[];
   missing: string[];
   ok: boolean;
 };
+
+/** Shipped package files (junk is never zipped) that carry a private Blob pathname — the package's one private-path check. [] = clean. */
+export function privatePathFiles(pkg: string, files: readonly string[] = listFiles(pkg).filter((f) => !isJunkPath(f))): string[] {
+  return files.filter((f) => PRIVATE_PATH_RE.test(readFileSync(path.join(pkg, f)).toString("latin1")));
+}
 
 /** The package folder against every size / privacy / layout rule. */
 export function auditPackage(pkg: string): PackageAudit {
@@ -226,34 +237,40 @@ export function auditPackage(pkg: string): PackageAudit {
   const files = all.filter((f) => !isJunkPath(f)).map((file) => ({ file, bytes: statSync(path.join(pkg, file)).size }));
   const totalBytes = files.reduce((n, f) => n + f.bytes, 0);
   const oversize = files.filter((f) => f.bytes > MAX_FILE_BYTES).map((f) => f.file);
-  const privatePaths = files.filter((f) => readFileSync(path.join(pkg, f.file)).includes(PRIVATE_PATH)).map((f) => f.file);
+  const privatePaths = privatePathFiles(pkg, files.map((f) => f.file));
   const have = new Set(files.map((f) => f.file));
   const missing = REQUIRED_FILES.filter((f) => !have.has(f));
   const totalOver = totalBytes > MAX_TOTAL_BYTES;
   return { files, totalBytes, oversize, totalOver, privatePaths, junk, missing, ok: !oversize.length && !totalOver && !privatePaths.length && !missing.length };
 }
 
-/** The files the zip carries, sorted: everything in the package except junk. */
-export const zipEntries = (pkg: string): string[] => listFiles(pkg).filter((f) => !isJunkPath(f));
+/** The package files the zip carries (folder-relative): everything except junk, CONFIDENTIAL.txt first, then sorted. */
+export function zipEntries(pkg: string): string[] {
+  const files = listFiles(pkg).filter((f) => !isJunkPath(f));
+  return [...files.filter((f) => f === "CONFIDENTIAL.txt"), ...files.filter((f) => f !== "CONFIDENTIAL.txt")];
+}
+
+/** A package file's name inside the zip: under ZIP_ROOT/. */
+export const zipName = (rel: string): string => `${ZIP_ROOT}/${rel}`;
 
 const STORED = /\.(webp|png|jpe?g|gif|woff2?|zip)$/i;
 
 /**
- * Writes the zip deterministically: entries at the zip root (CONFIDENTIAL.txt included) in sorted order, one fixed
+ * Writes the zip deterministically: every entry under ZIP_ROOT/ (CONFIDENTIAL.txt first, the rest sorted), one fixed
  * timestamp, no folder entries, DEFLATE for text and STORE for already-compressed images/fonts. Same package →
- * same bytes. Returns the zip's size and entries.
+ * same bytes. Returns the zip's size and entry names (with the ZIP_ROOT/ prefix).
  */
 export async function writeZip(pkg: string, zipFile: string, date: Date = new Date(Date.UTC(2026, 0, 1))): Promise<{ bytes: number; entries: string[] }> {
-  const entries = zipEntries(pkg);
-  if (!entries.includes("CONFIDENTIAL.txt")) throw new Error(`${pkg} has no CONFIDENTIAL.txt — refusing to zip`);
+  const files = zipEntries(pkg);
+  if (!files.includes("CONFIDENTIAL.txt")) throw new Error(`${pkg} has no CONFIDENTIAL.txt — refusing to zip`);
   const zip = new JSZip();
-  for (const e of entries) {
-    zip.file(e, readFileSync(path.join(pkg, e)), { date, createFolders: false, compression: STORED.test(e) ? "STORE" : "DEFLATE", compressionOptions: { level: 6 } });
+  for (const e of files) {
+    zip.file(zipName(e), readFileSync(path.join(pkg, e)), { date, createFolders: false, compression: STORED.test(e) ? "STORE" : "DEFLATE", compressionOptions: { level: 6 } });
   }
   const buf = await zip.generateAsync({ type: "nodebuffer", platform: "DOS", streamFiles: false });
   mkdirSync(path.dirname(zipFile), { recursive: true });
   writeFileSync(zipFile, buf);
-  return { bytes: buf.length, entries };
+  return { bytes: buf.length, entries: files.map(zipName) };
 }
 
 /** The slice's export time (meta.js), as the zip's fixed timestamp; Jan 1 2026 UTC when there is none. */
@@ -263,4 +280,5 @@ export function zipDateOf(pkg: string): Date {
   return d && Number.isFinite(d.getTime()) && d.getUTCFullYear() >= 1980 ? d : new Date(Date.UTC(2026, 0, 1));
 }
 
-export const ZIP_FILE = path.join(ROOT, "output", "peak-estimator-handoff.zip");
+/** The zip beside a package folder: output/peak-estimator-handoff → output/peak-estimator-handoff.zip. Only a passing --full writes it. */
+export const zipPathFor = (out: string): string => `${path.resolve(out)}.zip`;

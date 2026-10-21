@@ -115,23 +115,48 @@ An append-only, priced snapshot. Revisions are never rewritten; `rev` is 1-based
 
 ```
 draft ──send──▶ sent ──▶ won
-  ▲               │
+  │               │
   │               └────▶ lost
-  └── revise (back to draft) / reopen (won or lost → draft or sent)
+  ├──────────────────────────▶ won    (a draft can be marked won …
+  └──────────────────────────▶ lost    … or lost without a send)
+
+revise:  sent / won / lost ──▶ draft
+re-send: won / lost ──▶ sent
+leaving won (→ draft or sent) can restore the version that won — see below
 ```
+
+The status select offers all four statuses, so any status can move to any other; the approval gate
+(below) applies to every move into **sent** or **won**.
 
 - **draft**: being built. Bonus lines and the $25 system round-up are (re)derived on every load and
   save.
-- **sent**: went to the customer. Sending cuts a **"sent" revision**, the version with contractual
-  weight. A sent quote keeps the prices it was sent at, including a bonus rate changed later in
-  Estimating Rules.
+- **sent**: went to the customer. Every move into sent — including a re-send from won or lost — cuts
+  a **"sent" revision**, the version with contractual weight. A sent quote keeps the prices it was
+  sent at, including a bonus rate changed later in Estimating Rules.
 - **won**: the customer accepted. Quartzite then creates the install project; the prototype only logs
-  *Would create install project for …* (the `onWon` port). Won also records which revision won
-  (`wonRev`) and the bonus payout. If edits saved after the win changed the quote, a snapshot is cut
-  first.
-- **lost**: closed. A Lost quote drops any Rewards credit line.
-- Moving a sent quote back to draft is a **revise**. Reopening a won or lost quote first snapshots it
-  (`reason: "manual"`) so nothing is lost.
+  *Would create install project for …* (the `onWon` port). Won records which version won in
+  `wonRev`:
+  - when the live quote still matches the **latest sent revision** (compared at today's SKUs, so a
+    catalog rename alone is not a change), `wonRev` is that revision's `rev` and nothing new is cut;
+  - otherwise — for example won from a draft recalled after its last send, or never sent at all — a
+    `reason: "manual"` snapshot noted *"Won — the version that won"* (`WON_SNAPSHOT_NOTE`) is cut
+    and `wonRev` points at it.
+
+  Won also writes the bonus payout (`bonusRecord`); leaving Won clears it.
+- **lost**: closed. A Lost quote drops any Rewards credit line. No snapshot is cut, and moving a lost
+  quote back to draft or sent cuts none either (beyond the "sent" revision a move to sent always
+  cuts).
+- **Leaving Won** for draft (a revise) or sent puts the version that won back on the live quote, but
+  only when edits saved after the win changed it:
+  1. the live quote, post-win edits included, is snapshotted first — a `reason: "manual"` revision
+     noted *"Auto-saved before reopening at the version that won"* (`REOPEN_AUTOSAVE_NOTE`) — so the
+     edits are never lost;
+  2. then the `wonRev` revision's priced fields (name, value, margin, tier, spec and the service
+     blocks) are **restored** onto the live quote; the header (customer, contact, owner, …) stays.
+
+  When nothing changed since the win, neither happens. Won → lost is not a reopen: no snapshot, no
+  restore. (Quartzite's `reopenPlanFor` / `isReopen` / `applyReopen`, `src/lib/quote-won-version.ts`.)
+- Moving a sent quote back to draft is a **revise**; the next send prints the next Rev.
 - Every move appends to `history`, and the Daylite pipeline `stage` snaps to the status. A stage's tag
   *is* the status: picking a stage with another tag moves the status first.
 

@@ -14,7 +14,7 @@ import JSZip from "jszip";
 import { FIXTURE_EXPORT, FIXTURE_GOLDEN, goldenFileName, goldenFor, goldenJson, goldenWith, systemQuotesOf, type ExportFile } from "./estimating-golden";
 import {
   auditPackage, buildEngineBundle, citedEnginePaths, engineAt, isJunkPath, keepDocComments, loadEngine, MAX_FILE_BYTES, parityProblems,
-  REQUIRED_FILES, sliceSystemQuotes, SPEC_DOCS, writeGoldenFiles, writeZip, zipEntries,
+  REQUIRED_FILES, sliceSystemQuotes, SPEC_DOCS, writeGoldenFiles, writeZip, ZIP_ROOT, zipEntries, zipName,
 } from "../handoff/estimator/package";
 import { EXTRA_FIELD_NOTES, expandSpecMarkdown, fieldsTable, hasMarkers, onlyFields, typeFields, undocumentedFields } from "../handoff/estimator/spec-gen";
 import { exportNames } from "../handoff/estimator/verify/parity";
@@ -165,13 +165,17 @@ export async function handoffPackageChecks(ok: Ok) {
     ok(fs.readFileSync(zipA).equals(fs.readFileSync(zipB)), "handoff:package: writeZip is deterministic (same package → same bytes)");
     const back = await JSZip.loadAsync(fs.readFileSync(zipA));
     const names = Object.keys(back.files);
-    ok(names.includes("CONFIDENTIAL.txt") && !names.some((n) => n.includes(".DS_Store")) && names.every((n) => !back.files[n].dir) && names.join("\n") === zipEntries(pkg).join("\n") && za.entries.length === names.length, "handoff:package: the zip has CONFIDENTIAL.txt at its root, no junk, no folder entries, the folder's files in sorted order");
-    ok((await back.file("CONFIDENTIAL.txt")!.async("string")) === "CONFIDENTIAL", "handoff:package: zipped content round-trips");
+    ok(ZIP_ROOT === "peak-estimator-handoff" && names.every((n) => n.startsWith("peak-estimator-handoff/")) && names[0] === "peak-estimator-handoff/CONFIDENTIAL.txt" && !names.some((n) => n.includes(".DS_Store")) && names.every((n) => !back.files[n].dir) && names.join("\n") === zipEntries(pkg).map(zipName).join("\n") && za.entries.join("\n") === names.join("\n"),
+      `handoff:package: every zip entry sits under peak-estimator-handoff/ (CONFIDENTIAL.txt first), no junk, no folder entries, the folder's files in order (${names.slice(0, 3).join(", ")}…)`);
+    ok(!names.includes("CONFIDENTIAL.txt") && names.filter((n) => n.endsWith("CONFIDENTIAL.txt")).length === 1, "handoff:package: nothing at the zip root — one CONFIDENTIAL.txt, inside the folder");
+    ok((await back.file("peak-estimator-handoff/CONFIDENTIAL.txt")!.async("string")) === "CONFIDENTIAL", "handoff:package: zipped content round-trips");
     fs.writeFileSync(path.join(pkg, "data.js"), "x".repeat(10) + "part-docs/abc/def.webp");
     fs.writeFileSync(path.join(pkg, "big.bin"), Buffer.alloc(MAX_FILE_BYTES + 1));
     fs.rmSync(path.join(pkg, "spec", "pricing.md"));
     const a1 = auditPackage(pkg);
+    fs.writeFileSync(path.join(pkg, "notes.txt"), "photo failed: blob path outside part-docs/<docId>/");
     ok(!a1.ok && a1.privatePaths.includes("data.js") && a1.oversize.includes("big.bin") && a1.missing.includes("spec/pricing.md"), "handoff:package: auditPackage flags a private Blob path, a file over 15,000,000 bytes and a missing doc");
+    ok(!auditPackage(pkg).privatePaths.includes("notes.txt"), "handoff:package: auditPackage — the 'part-docs/<docId>/' failure text is not a private pathname");
     fs.rmSync(path.join(pkg, "CONFIDENTIAL.txt"));
     let refused = false;
     try {

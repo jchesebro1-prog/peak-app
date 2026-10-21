@@ -153,7 +153,7 @@ both is the system's in-total lines with every bonus line removed
 - **5 % package bonus**, only when the system has labor (a labor system, or any `labor: true` line,
   `PeakEstimatingCore.bonusRules.hasLaborLine`):
   - its cost is round2(base cost × 5 %);
-  - it sells at that cost × (base sell ÷ base cost), the system's blended markup;
+  - its sell is round2(that cost × (base sell ÷ base cost)), the system's blended markup;
   - it is a labor line, `noFreight`, SKU `BON-PKG-<system id>`.
   - `PeakEstimatingCore.bonusRules.packageBonus`
 - **2 % estimator bonus**: round2(2 % × (base sell + the package bonus's sell + the system's freight)).
@@ -196,17 +196,27 @@ One line per configured track: qty 1, unit `lot`, SKU `TRK-<series>`. Its parts 
 the series (Estimating Rules → Track series) and the configuration
 (`PeakEstimatingCore.trackEngine.trackQuantities`). Per track:
 
-- **Length** L = run + the series' overlap when it is bi-parting (`PeakEstimatingCore.trackEngine.trackLengthFt`).
-- **Legs**: 2 for a lapped bi-part (a bi-parting series with an overlap), else 1. Leg = L ÷ legs.
+- **Parts at center**: a bi-parting track, or a walk-along bi-part (`PeakEstimatingCore.trackEngine.partsAtCenter`).
+- **Length** L = run + the series' overlap when the track parts at center — bi-parting or a
+  walk-along bi-part (`PeakEstimatingCore.trackEngine.trackLengthFt`).
+- **Legs**: 2 for a lapped bi-part (parts at center, and the series has an overlap), else 1. Leg = L ÷ legs.
 - **Straight sticks**: per leg, n = ⌈leg ÷ the longest stick⌉, and each piece is the shortest stick ≥
   leg ÷ n. Sticks = legs × n; splices = legs × (n − 1). **Curved**: n = ⌈leg ÷ curved section length⌉
   per leg; curved track needs a series with curved sections, and a radius at least its minimum.
-- **Carriers**: ⌈run × 12 ÷ carrier spacing (in)⌉, less the master carriers (2 bi-parting, else 1).
-- **End stops**: 2. A walk-along has 2 per curtain half.
+- **Splices**: on a ceiling (not batten) mount, the series' **ceiling splice** replaces the splice
+  when the series maps one; same count.
+- **Carriers**: ⌈run × 12 ÷ carrier spacing (in)⌉, less the master carriers (2 when it parts at
+  center, else 1).
+- **End stops**: 2. A walk-along has 2 per curtain half (4 on a walk-along bi-part), as walk-along end
+  stops when the series maps them.
 - **Hanging points**: legs × (⌈leg ÷ spacing⌉ + 1), as batten clamps or ceiling hangers. Pipe clamps
-  match them on a batten when the series maps one. A lapped batten bi-part adds 2 lap clamps.
+  match them on a batten when the series maps one. A lapped batten bi-part adds 2 lap clamps (when
+  mapped).
+- **Center pipe supports** (batten mount, when the series maps one and sets "every" ft):
+  ⌈L ÷ every⌉ − 1, never below 0.
 - **Cord-operated** (bi-parting, one-way) adds a live pulley, a dead pulley, a floor block and
-  operating line = ⌈2L + 2 × trim (default 20 ft) + the series' line allowance⌉ ft.
+  operating line = ⌈2L + 2 × trim (default 20 ft) + the series' line allowance⌉ ft. On a one-way
+  track the series' **one-way dead-end pulley** replaces the dead pulley when it maps one.
 - Everything above is × the number of identical tracks.
 
 Pricing: each part is priced as a catalog add would be (`catalogAddPrice`). The line's cost is
@@ -283,12 +293,15 @@ other labor lines by sell, else into one neutral "Project management, engineerin
 ## 11. What the customer sees
 
 The customer document never shows cost, margin, overhead lines, travel lines or either bonus line, yet
-its rows always add up to the system price.
+its rows, together with the system's freight row, always add up to the system price.
 
-- **Rows** = `PeakEstimatingCore.customerLines(system)`. This applies the labor folds (§10). The 2 %
+- **Rows** = `PeakEstimatingCore.customerLines(system)`, plus a separate **Freight** row when the
+  system has freight (`PeakEstimatingCore.systemFreight`); rows + freight = the system price
+  (`PeakEstimatingCore.systemSellTotal`). This applies the labor folds (§10). The 2 %
   estimator bonus is spread over every row in proportion to its amount. The system's adjustment ($25
   rounding or typed sell) is spread the same way. The rounding remainder lands on the largest row, and
-  no row goes below $0 (`PeakEstimatingCore.absorbSellAdjustment`).
+  no row goes below $0 (`PeakEstimatingCore.absorbSellAdjustment`) — so only a typed sell below the
+  system's freight can leave the rows short of the total.
 - A system prints in the body only when it carries some revenue (`PeakEstimatingCore.systemPrintsInBody`).
 - Amounts print as `$1,234.56` (`PeakEstimatingCore.fmt`).
 
@@ -297,9 +310,16 @@ its rows always add up to the system price.
 The golden files are the engine's contract: `totals()` over the sections **as stored**. When you open a
 **draft**, the Estimator first canonicalizes the sections. It sorts the systems into group order, turns
 on the $25 round-up for every system that lacks it, and adds or refreshes the bonus lines at today's
-rates. So a draft's on-screen "Quoted total" can be higher than its golden `grand`. Saving stores the
-canonical sections, and the saved value (`PeakEstimatingCore.reconcileEstimatorValue`) is `totals()` of
-those.
+rates. So a draft's on-screen "Quoted total" can **differ** from its golden `grand` — usually higher
+(the round-up and the bonus lines add), but lower too, for example when a stored bonus line was built
+at a higher rate than today's. **Won and lost** estimates are never re-derived, and a **sent**
+estimate only refreshes the bonus lines it already has, at the rates they carry (§6) — which
+reproduces what was saved — so a sent or won estimate's header matches its golden `grand`. Saving stores the canonical sections, and the saved value
+(`PeakEstimatingCore.reconcileEstimatorValue`) is `totals()` of those.
+
+This is a deliberate invariant, not a gap: **golden = the engine contract over the stored data**
+(raw `totals()`); **the header = what the Estimator shows after load** (steps 1–4 below). The
+package's checks hold each to its own definition.
 
 In code:
 

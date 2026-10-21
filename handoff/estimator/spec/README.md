@@ -3,8 +3,8 @@
 **Confidential — Peak Systems Group.** This folder holds real Peak data: costs, margins, sell prices,
 customer names and staff names. It is shared with one named recipient for evaluation only. Do not
 forward, upload, publish or copy it, in whole or in part, without Peak Systems Group's written
-permission, and delete it when the evaluation ends. `CONFIDENTIAL.txt` at the top of the zip says the
-same.
+permission, and delete it when the evaluation ends. `CONFIDENTIAL.txt`, the first file in the package
+folder, says the same.
 
 ## What this is
 
@@ -21,7 +21,7 @@ inside your own software:
 
 ## How to open it
 
-1. Unzip the package anywhere.
+1. Unzip the package anywhere. It unzips to one folder, `peak-estimator-handoff/`.
 2. Double-click `index.html`. Chrome, Edge and Safari all work. There is no install, no server and no
    sign-in.
 
@@ -34,8 +34,9 @@ sent or saved to Peak*. That is literally true: nothing leaves your browser.
 ## What's in the folder
 
 ```
+peak-estimator-handoff/ the folder the zip unzips to; everything below is inside it
+CONFIDENTIAL.txt        read this first
 index.html              the prototype — open this
-CONFIDENTIAL.txt
 app/app.js              the prototype: Quartzite's Estimator UI + the engine + a local store and the ports (minified)
 app/app.css             Quartzite's styles (Tailwind + Peak's pk-* components)
 app/assets/             the Peak letterhead and the "no photo" placeholder images
@@ -93,7 +94,7 @@ behave as they do at Peak.
 | The data: catalog, rules, estimates, customers, staff | **Send**: nothing is emailed. The Activity card records the message as *Sent (simulated)* |
 | The approval gate, review limits, statuses, revisions, bonuses | **Won**: no install project is created. The prototype log notes *Would create install project for …* |
 | The customer document, package page, BOM and cut sheets, rendered live | **PDF**: the browser's **Print / Save as PDF** replaces Quartzite's server-rendered PDF |
-| | Estimate numbers: a local counter that starts after production's highest |
+| | Estimate numbers: a local counter that starts after the highest **bundled** estimate number. Service quotes and leads share Quartzite's counter but aren't bundled, so a prototype number may repeat one Peak already used |
 
 The faked parts are the **ports**. `ports.md` gives each one's contract, written as the interface you
 would implement in your own system. In your rebuild, quotes, customers and users would come from your
