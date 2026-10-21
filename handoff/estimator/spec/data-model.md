@@ -142,7 +142,13 @@ The status select offers all four statuses, so any status can move to any other;
     `reason: "manual"` snapshot noted *"Won — the version that won"* (`WON_SNAPSHOT_NOTE`) is cut
     and `wonRev` points at it.
 
-  Won also writes the bonus payout (`bonusRecord`); leaving Won clears it.
+  `wonRev`, and the restore below, apply only to **Estimator system estimates that are not Daylite
+  history** (`tracksWonVersion`, `src/lib/quote-won-version.ts`: no `quoteType` or `"system"`, and
+  `source` is not `"daylite"`); any other quote records no `wonRev` and a Won move clears an older one.
+
+  Won also writes the bonus payout (`bonusRecord`), but only when the quote is bonus-eligible and its
+  systems carry bonus lines; leaving Won clears it. (The snapshot ships no `bonusRecord` — it is staff
+  pay — so a prototype Won computes one fresh.)
 - **lost**: closed. A Lost quote drops any Rewards credit line. No snapshot is cut, and moving a lost
   quote back to draft or sent cuts none either (beyond the "sent" revision a move to sent always
   cuts).
@@ -151,12 +157,15 @@ The status select offers all four statuses, so any status can move to any other;
   1. the live quote, post-win edits included, is snapshotted first — a `reason: "manual"` revision
      noted *"Auto-saved before reopening at the version that won"* (`REOPEN_AUTOSAVE_NOTE`) — so the
      edits are never lost;
-  2. then the `wonRev` revision's priced fields (name, value, margin, tier, spec and the service
-     blocks) are **restored** onto the live quote; the header (customer, contact, owner, …) stays.
+  2. then the `wonRev` revision's priced fields — name, margin, tier, spec, the service blocks and the
+     **vendor quotes** (merged by id, the revision's rows winning) — are **restored** onto the live
+     quote, and `value` is the restored gross less any Rewards credit, with the credit line put back;
+     the header (customer, contact, owner, …) stays.
 
   When nothing changed since the win, neither happens. Won → lost is not a reopen: no snapshot, no
-  restore. (Quartzite's `reopenPlanFor` / `isReopen` / `applyReopen`, `src/lib/quote-won-version.ts`.)
-- Moving a sent quote back to draft is a **revise**; the next send prints the next Rev.
+  restore. (Quartzite's `isReopen` / `reopenTarget` in `src/lib/quote-won-version.ts`, and `reopenPlanFor` / `applyReopen` in its quote store.)
+- Moving any quote back to **draft** from sent, won or lost is a **revise**; the next send prints the
+  next Rev.
 - Every move appends to `history`, and the Daylite pipeline `stage` snaps to the status. A stage's tag
   *is* the status: picking a stage with another tag moves the status first.
 

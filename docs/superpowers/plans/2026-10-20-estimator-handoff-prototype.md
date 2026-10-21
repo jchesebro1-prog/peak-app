@@ -46,7 +46,7 @@ Builders: read `.data-spike/REPORT.md` before Tasks 2–5. Its code is the start
 - **Persistence:** IndexedDB overlays the read-only seed, and **Reset to production snapshot** clears the overlay. If IndexedDB is unavailable, the app runs in memory and shows "Changes won't be saved in this window".
 - **Default stub = refusal:** `{ ok: false, error: "Not available in the prototype" }` plus one `console.warn` per action name. Only registered actions do real work.
 - **Data only through the slicer's allow-list.** The slicer refuses to write output that contains anything token- or secret-shaped. `gmailConnections`, `notifPrefs`, comms, assist and portal data are never read.
-- **Confidential.** Every page view shows "Confidential — Peak Systems Group". `CONFIDENTIAL.txt` sits at the zip root.
+- **Confidential.** Every page view shows "Confidential — Peak Systems Group". `CONFIDENTIAL.txt` sits inside the top-level `peak-estimator-handoff/` folder (the zip unzips to that one folder).
 - **Never publish the Artifact**, and never upload, email or share the zip. Plan 2 ends with files on disk. Publishing is a separate step on Jeff's explicit go-ahead.
 - **Dev DB is single-process.** Use a copy plus `PGLITE_PATH` (AGENTS.md). Never `git stash`. Never `git add` under `.superpowers/`, `.data-*` or `output/`.
 - **Gate per task:** the task's own tests, plus `npx tsc --noEmit -p tsconfig.json` (exit 0) and eslint on changed files. `scripts/test-review-and-spec.ts` crashes eslint on main too, so it's exempt. The last task also runs test:specs, test:smoke (chunked if memory-bound) and `npx next build`.
@@ -503,7 +503,7 @@ docs/estimating-core/handoff-fixtures/export-v2.json   # synthetic export incl. 
   - **`spec/pricing.md`:** every formula in words (line ext sell, system sell, freight, $25 rounding/typed sell, tiers/margins, labor/mobilization, bonuses 5%/2%, alternates, options, curtains/fabric, track sticks, fixtures, racks). Each points to the function in `app/estimating-core.js`.
   - **`spec/ports.md`:** the ports' JSDoc contracts.
 - **Screenshots:** `verify --full` saves 1440×900 shots of each step plus Catalog, Assemblies and Rules into `spec/screenshots/`.
-- **Zip:** `output/peak-estimator-handoff.zip`, with `CONFIDENTIAL.txt` at the root.
+- **Zip:** `output/peak-estimator-handoff.zip`, unzipping to one `peak-estimator-handoff/` folder with `CONFIDENTIAL.txt` inside it.
 
 - [ ] **Step 1:** `--parity` and `--full` fail before the docs and `estimating-core.js` exist. **Step 2:** Implement until both PASS on the dev slice.
 - [ ] **Step 3: Full repo gate:**

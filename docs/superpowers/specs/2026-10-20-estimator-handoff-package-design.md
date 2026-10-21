@@ -74,7 +74,7 @@ Edits persist in **IndexedDB**, since the catalog is too large for localStorage.
 production snapshot** control wipes the edits. If IndexedDB is unavailable (some private windows),
 the prototype still runs and shows a "changes won't be saved" banner.
 
-The README and the zip's top-level `CONFIDENTIAL.txt` mark the package
+The README and the package folder's `CONFIDENTIAL.txt` mark the package
 **Confidential — Peak Systems Group**, because it carries real costs, margins and customer names.
 
 ## 3. Engine extraction in Quartzite (its own PR, merged first)

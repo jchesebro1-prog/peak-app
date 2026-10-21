@@ -277,21 +277,30 @@ export async function fullCheck(pkgDir: string, opts: { allowMissingFeatures: bo
 
   // 7 — the zip: written (with the screenshots) and read back on PASS only
   let zip: FullResult["zip"] = null;
-  const zipRemoved = !pass && hadZip;
+  let zipRemoved = !pass && hadZip;
   if (pass) {
-    const z = await writeZip(pkgDir, zipFile, zipDateOf(pkgDir));
-    const back = await JSZip.loadAsync(readFileSync(zipFile));
-    const names = Object.keys(back.files).filter((n) => !back.files[n].dir).sort();
-    const order = Object.keys(back.files).filter((n) => !back.files[n].dir);
-    zip = {
-      file: path.relative(process.cwd(), zipFile), bytes: z.bytes, entries: names.length,
-      allUnderRoot: order.every((n) => n.startsWith(`${ZIP_ROOT}/`)),
-      confidentialFirst: order[0] === zipName("CONFIDENTIAL.txt"),
-      matchesFolder: order.join("\n") === zipEntries(pkgDir).map(zipName).join("\n"),
-      screenshots: names.filter((n) => n.startsWith(zipName(`${SCREENSHOT_DIR}/`))).length,
-    };
+    try {
+      const z = await writeZip(pkgDir, zipFile, zipDateOf(pkgDir));
+      const back = await JSZip.loadAsync(readFileSync(zipFile));
+      const names = Object.keys(back.files).filter((n) => !back.files[n].dir).sort();
+      const order = Object.keys(back.files).filter((n) => !back.files[n].dir);
+      zip = {
+        file: path.relative(process.cwd(), zipFile), bytes: z.bytes, entries: names.length,
+        allUnderRoot: order.every((n) => n.startsWith(`${ZIP_ROOT}/`)),
+        confidentialFirst: order[0] === zipName("CONFIDENTIAL.txt"),
+        matchesFolder: order.join("\n") === zipEntries(pkgDir).map(zipName).join("\n"),
+        screenshots: names.filter((n) => n.startsWith(zipName(`${SCREENSHOT_DIR}/`))).length,
+      };
+    } catch {
+      zip = null; // a zip that cannot be read back is as bad as one that fails its checks: removed below
+    }
   }
   const zipOk = !pass || (!!zip && zip.allUnderRoot && zip.confidentialFirst && zip.matchesFolder && zip.screenshots === screenshots.length);
+  // Only a fully passing --full leaves a zip: a zip that was written but fails its read-back is deleted.
+  if (pass && !zipOk) {
+    rmSync(zipFile, { force: true });
+    zipRemoved = true;
+  }
 
   return {
     pass: pass && zipOk,
@@ -324,7 +333,7 @@ export function printFull(r: FullResult): void {
   console.log(`  page errors: ${r.pageErrors.length}; foreign requests: ${r.foreignRequests.length}; failed local files: ${r.failedLocal.length}; unregistered calls: ${r.unregistered.length}`);
   for (const e of r.pageErrors) console.log(`    ${e.split("\n").slice(0, 4).join("\n    ")}`);
   for (const u of [...r.foreignRequests, ...r.failedLocal, ...r.unregistered]) console.log(`    ${u}`);
-  if (r.zip) console.log(`  zip: ${r.zip.file} ${r.zip.bytes} bytes (${(r.zip.bytes / 1e6).toFixed(2)} MB), ${r.zip.entries} entries; all under ${ZIP_ROOT}/: ${r.zip.allUnderRoot ? "yes" : "NO"}; CONFIDENTIAL.txt first: ${r.zip.confidentialFirst ? "yes" : "NO"}; matches the folder: ${r.zip.matchesFolder ? "yes" : "NO"}; screenshots: ${r.zip.screenshots}`);
+  if (r.zip) console.log(`  zip: ${r.zip.file} ${r.zip.bytes} bytes (${(r.zip.bytes / 1e6).toFixed(2)} MB), ${r.zip.entries} entries; all under ${ZIP_ROOT}/: ${r.zip.allUnderRoot ? "yes" : "NO"}; CONFIDENTIAL.txt first: ${r.zip.confidentialFirst ? "yes" : "NO"}; matches the folder: ${r.zip.matchesFolder ? "yes" : "NO"}; screenshots: ${r.zip.screenshots}${r.zipRemoved ? " — read-back failed, the zip was REMOVED" : ""}`);
   else console.log(`  zip: not written (the package did not pass)${r.zipRemoved ? "; the earlier zip was removed" : ""}`);
   console.log(`  result: ${path.relative(process.cwd(), path.join(VERIFY_DIR, "full.json"))}`);
 }
