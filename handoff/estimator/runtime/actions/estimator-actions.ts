@@ -32,7 +32,7 @@ import { reopenedAtWonVersion } from "@/lib/quote-won-version";
 import { quoteOwnerName } from "@/lib/review-limits";
 import { sameName } from "@/lib/quote-approval-rules";
 import { canChangeQuotePeople, PEOPLE_LOCKED_AFTER_SEND } from "@/lib/quote-people-lock";
-import { NOT_IN_PROTOTYPE, type ActionImpl } from "../actions-registry";
+import type { ActionImpl } from "../actions-registry";
 import { formRefusals, refusals, type RefusableKey, type VoidKey } from "./misc-refusals";
 import { refresh } from "../router";
 import type { HandoffStore } from "../store";

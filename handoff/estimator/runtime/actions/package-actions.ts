@@ -20,7 +20,7 @@ import { responseRows } from "@/lib/estimate-output/responses";
 import { peakHeaderDefault, resolvePeakHeader } from "@/lib/letterhead";
 import { sentDocumentStamp, ONLINE_COPY } from "@/lib/quote-share/view";
 import type { Quote } from "@/lib/stores/quotes";
-import { NOT_IN_PROTOTYPE, type ActionImpl } from "../actions-registry";
+import type { ActionImpl } from "../actions-registry";
 import { refusals, type RefusableKey } from "./misc-refusals";
 import type { HandoffStore } from "../store";
 import { refreshPortsFromStore, settingsView } from "../ports";

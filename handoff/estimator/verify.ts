@@ -658,16 +658,18 @@ async function resetAcrossWindows(browser: Browser, url: string, sink: PageSink)
     step("after a reload the snapshot is back (probe gone)", await a.evaluate(async () => (await (window as unknown as H).__peakHandoff.store.get("meta", "verify-xwin")) === undefined));
 
     // a window that never answers versionchange: Reset must say so instead of pretending
+    // the raw hold opens the store's own (snapshot-keyed) database — its name read from the booted window `a`
+    const dbName = await a.evaluate(() => (window as unknown as { __peakHandoff: { store: { dbName: string } } }).__peakHandoff.store.dbName);
     await openUrl(c, url);
-    await c.evaluate(() => new Promise<void>((resolve, reject) => {
-      const r = indexedDB.open((window as unknown as { __peakHandoff: { store: { dbName: string } } }).__peakHandoff.store.dbName);
+    await c.evaluate((name) => new Promise<void>((resolve, reject) => {
+      const r = indexedDB.open(name);
       (window as unknown as { __rawHold?: IDBDatabase }).__rawHold = undefined;
       r.onsuccess = () => {
         (window as unknown as { __rawHold?: IDBDatabase }).__rawHold = r.result; // no onversionchange handler
         resolve();
       };
       r.onerror = () => reject(r.error);
-    }));
+    }), dbName);
     const blocked = await a.evaluate(async () => {
       const s = (window as unknown as H).__peakHandoff.store;
       try {

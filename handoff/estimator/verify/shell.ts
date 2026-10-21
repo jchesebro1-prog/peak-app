@@ -561,16 +561,18 @@ export async function shellCheck(pkgDir: string): Promise<ShellResult> {
     const holder = await newPage(browser, sink);
     await openUrl(holder, base);
     await holder.waitForSelector("[data-handoff-ready]", { timeout: 15_000 });
+    const holdName = await page.evaluate(() => (window as unknown as { __peakHandoff: { store: { dbName: string } } }).__peakHandoff.store.dbName);
     await holder.evaluate(
-      () =>
+      (name) =>
         new Promise<void>((resolve, reject) => {
-          const r = indexedDB.open((window as unknown as { __peakHandoff: { store: { dbName: string } } }).__peakHandoff.store.dbName);
+          const r = indexedDB.open(name);
           r.onsuccess = () => {
             (window as unknown as { __rawHold?: IDBDatabase }).__rawHold = r.result; // no onversionchange handler
             resolve();
           };
           r.onerror = () => reject(r.error);
         }),
+      holdName,
     );
     await page.bringToFront();
     await page.click("[data-handoff-reset]");
