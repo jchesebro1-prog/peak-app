@@ -4,8 +4,8 @@
 
 This is what a Peak estimate *is*: the stored shape, every field, the lifecycle and the numbering. The
 field tables below are generated from the source's own doc comments when the package is built, so they
-match the code exactly. The notes keep Quartzite's internal references (`#267`, `D87`, function names)
-because they point at the code that enforces each rule. Every function written as
+match the code exactly. The notes keep the function and file names they cite, because those point at the
+code that enforces each rule; internal tracking references are left out. Every function written as
 `PeakEstimatingCore.…` is in `app/estimating-core.js`.
 
 ## One estimate, top to bottom

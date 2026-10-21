@@ -16,7 +16,7 @@ import {
   auditPackage, auditProblems, ARTIFACT_PUBLISH_FILES, ARTIFACT_VERSION_FILES, fileCountWarnings, PRIVATE_BLOB_PREFIXES, buildEngineBundle, citedEnginePaths, engineAt, isJunkPath, keepDocComments, loadEngine, MAX_FILE_BYTES, parityProblems,
   REQUIRED_FILES, sliceSystemQuotes, SPEC_DOCS, writeGoldenFiles, writeZip, ZIP_ROOT, zipEntries, zipName,
 } from "../handoff/estimator/package";
-import { EXTRA_FIELD_NOTES, expandSpecMarkdown, fieldsTable, hasMarkers, onlyFields, typeFields, undocumentedFields } from "../handoff/estimator/spec-gen";
+import { EXTRA_FIELD_NOTES, expandSpecMarkdown, fieldsTable, hasMarkers, onlyFields, scrubNote, typeFields, undocumentedFields } from "../handoff/estimator/spec-gen";
 import { exportNames } from "../handoff/estimator/verify/parity";
 import { estimateFeatures, FEATURES, sampleEstimates, type Feature } from "../handoff/estimator/verify/full";
 import { classifyRequest, consoleErrorEntry, estimateUrl, fontsOk, isBenignConsoleError, newEstimateUrl, NO_UNREGISTERED_HOOK, SMOKE_ALLOWED_UNREGISTERED } from "../handoff/estimator/verify";
@@ -132,7 +132,12 @@ export async function handoffPackageChecks(ok: Ok) {
     ["service quotes (flame test, repair, inspection, rental, consulting)", "service quotes"],
     ["the customer portal", "portal"], ["the Grid system designer", "Grid"], ["the Specs builder", "Specs"], ["Gmail / Inbox", "Gmail / Inbox"],
     ["Assist / Ask AI", "Assist"], ["tasks, morning triage and the calendar", "tasks"], ["install projects", "projects"], ["the Daylite import", "Daylite import"],
-    ["Double-click `index.html`", "how to open it"], ["Chrome, Edge and Safari", "browsers"],
+    ["Double-click `index.html`", "how to open it"], ["verified in\n   Chrome; Edge and Safari should work but were not tested", "browsers (verified in Chrome only)"],
+    ["*(built for the prototype)*", "prototype-built screens marked"], ["prototype copies", "Customer review's tab strip / pane are copies"],
+    ["**Vendor quotes**", "vendor quotes render-only"], ["only the drive routes between the bundled\nvenues and Peak's offices are bundled", "geoCache rows ship filtered"],
+    ["Edits belong to **this snapshot**", "snapshot-keyed edits"], ["an\nArtifact publish takes 255 files and an Artifact version 511", "file-count policy"],
+    ["**What an estimate carries.**", "the dropped quote data"], ["Estimates, catalog parts and fixtures are scrubbed deep", "scrub scope"],
+    ["every estimate the\ncustomer portal built for itself", "portal-built quotes left out"],
     ["the last save\n  wins", "cross-window: last write wins"], ["until reloaded", "cross-window: reload to see changes"],
     [RESET_BLOCKED_MESSAGE, "Reset needs other windows closed (the dialog's own text)"],
     [PRINT_FOOTER_TEXT, "the print footer (its own text)"], ["Pop-out windows", "pop-outs"], ["Not\n  included in the prototype", "Datasheets / Drawings"],
@@ -144,6 +149,33 @@ export async function handoffPackageChecks(ok: Ok) {
   const missingSay = mustSay.filter(([t]) => !flat(readme).includes(flat(t))).map(([, why]) => why);
   ok(missingSay.length === 0, `handoff:package: README says everything the founder must know (${missingSay.join("; ") || "all present"})`);
   ok(POPOUT_NOTICE.startsWith("Pop-out windows"), "handoff:package: the README's pop-out wording matches the notice");
+
+  // --- final review D22: the production runbook is not shipped, and #361 carries the same commands ---
+  const runbookFile = path.join(ROOT, "handoff", "estimator", "RUNBOOK.md");
+  ok(fs.existsSync(runbookFile) && !(SPEC_DOCS as readonly string[]).includes("RUNBOOK.md") && !fs.existsSync(path.join(SPEC_SRC, "RUNBOOK.md")),
+    "handoff:package D22: RUNBOOK.md lives in handoff/estimator/ (not spec/), so the build never copies it");
+  ok(!/Production run/.test(readme) && !/\bJeff\b/.test(readme), "handoff:package D22: the shipped README has no production-run section and names no one");
+  {
+    const runbook = fs.readFileSync(runbookFile, "utf8");
+    const cmds = (md: string) => [...(/```bash\n([\s\S]*?)```/.exec(md)?.[1] ?? "").matchAll(/^(?!#)(.*npm run .*)$/gm)].map((m) => m[1].trim());
+    const punch = fs.readFileSync(path.join(ROOT, "PUNCHLIST.md"), "utf8");
+    const p361 = punch.slice(punch.indexOf("## 361."), punch.indexOf("\n## ", punch.indexOf("## 361.") + 5) > 0 ? punch.indexOf("\n## ", punch.indexOf("## 361.") + 5) : undefined);
+    const a = cmds(runbook), b = cmds(p361.slice(p361.indexOf("**Production run checklist**")));
+    ok(a.length >= 7 && a.join("\n") === b.join("\n") && a.some((c) => c.includes("--serve")) && /--smoke --all-steps/.test(runbook) && /an hour or more/.test(runbook),
+      `handoff:package D22: RUNBOOK.md and PUNCHLIST #361 run the same commands (${a.length} vs ${b.length}), incl. --serve, and the runbook warns the full walk is slow`);
+  }
+
+  // --- final review D24: the generated notes carry no people's names or internal tracking references ---
+  ok(scrubNote("#301 slice C — the drawings shown under Plans (Jeff, #143).") === "The drawings shown under Plans." &&
+    scrubNote("Append-only priced snapshots (punch item 24). Absent on pre-D84 quotes.") === "Append-only priced snapshots. Absent on older quotes." &&
+    scrubNote("Jeff's freight exemption: the price includes freight.") === "Peak's freight exemption: the price includes freight." &&
+    scrubNote("Freight as a percent of COST (pricing.md §3).") === "Freight as a percent of COST (pricing.md §3)." && scrubNote("Its sell counts in totals() (pricing.md §4).") === "Its sell counts in totals() (pricing.md §4).",
+    "handoff:package D24: scrubNote drops references and names, keeps the technical text, pricing.md § links and call parens");
+  for (const doc of SPEC_DOCS) {
+    const md = expandSpecMarkdown(fs.readFileSync(path.join(SPEC_SRC, doc), "utf8"), ROOT);
+    const hits = [...md.matchAll(/\b(?:Jeff|Isaac|Chris)\b|(?<![\w&])#\d{2,}\b|\bD-?\d{2,4}\b|\bpunch item\b|\b\d{4}-\d{2}-\d{2}\b/g)].map((m) => m[0]);
+    ok(hits.length === 0, `handoff:package D24: ${doc} (expanded) names no one and cites no internal reference (${[...new Set(hits)].slice(0, 8).join(", ") || "none"})`);
+  }
 
   // --- the package audit and the zip ---
   const t2 = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-zip-"));

@@ -19,7 +19,11 @@ Quotes themselves are stored the way `data-model.md` describes. In the prototype
 IndexedDB copy, on top of the read-only snapshot. In your rebuild they come from, and save to, your own
 system. The Estimator's server actions (save, status moves, review, comments…) become calls into that
 store under the same names. The prototype's versions are ports of Quartzite's own and keep its rules:
-the approval gate, revisions, the server-side recomputation of value, the bonus lines.
+the approval gate, revisions, the server-side recomputation of value, the bonus lines. One rule is
+switched off: **Rewards**. The prototype has no Rewards ledger, so applying a customer's credit is off,
+and reopening a Won estimate at the version that won restores it with a credit of 0 (Quartzite puts the
+customer's credit line back). Your rebuild's Rewards, if any, plug in where the credit line is priced
+(`pricing.md`).
 
 Below are the contracts exactly as the prototype's source declares them. The text is generated from
 `handoff/estimator/runtime/ports.ts` when the package is built. Read "Quartzite:" as *what the real

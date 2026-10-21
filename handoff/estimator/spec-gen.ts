@@ -164,6 +164,41 @@ export const HAND_NOTES: Record<string, string> = {
   "EmailActivity.quoteId": "The estimate it was about.",
 };
 
+/** People the source's doc comments name (the founder doc says "Peak" instead). */
+const PEOPLE = ["Jeff", "Isaac", "Chris"];
+/** An internal tracking reference in a doc comment: a punch item (#301, #293 slice 3), a decision (D84, D-j), a review
+ *  finding (R13), a batch / phase / task / item number, an internal spec section (spec §3.4) or a date. */
+const REF = String.raw`(?:(?:\bpunch\s+)?#\d+[a-z]?(?:\s+(?:slice|phase|fix wave|fix round|Task|review|follow-up|final)\s+[\w.]+)*|\bD-?\d{2,4}(?:[–-]D?\d+)?\b|\bD-[a-z]\b|\bR\d+\b|\bpunch item \d+\b|\b(?:Estimator )?(?:Batch|Phase) \d+[a-z]?(?: fix round \d+)?\b|\bTask \d+\b|\bitem \d+(?: [A-Z]\b)?|\b(?:[Ss]pec(?: records)? |[Dd]esign )+§[\d.]+|\b\d{4}-\d{2}-\d{2}\b)`;
+const PERSON = String.raw`\b(?:${PEOPLE.join("|")})\b`;
+
+/**
+ * A doc comment as the founder doc prints it: the technical content kept, internal bookkeeping removed — punch / decision
+ * / review references, dates and people's names (final review #24). A parenthetical that holds only references (and
+ * names) goes; a leading "#301 slice C — " goes; a name left in prose reads "Peak". Pure.
+ */
+export function scrubNote(text: string): string {
+  let t = text;
+  // a parenthetical made only of references, names and separators: "(Jeff, #143)", "(#223)", "(D-j, R13)"
+  t = t.replace(new RegExp(String.raw`\s*\((?:\s*(?:${REF}|${PERSON}|[,;/&]|and|per|see)\s*)+\)`, "g"), "");
+  // a leading run of references: "#301 slice C — ", "#282 phase 3: ", "Batch 5 #59 — "
+  t = t.replace(new RegExp(String.raw`^(?:\s*(?:${REF}|${PERSON})[\s,;]*)+(?:—|–|:|;|-)\s*`), "");
+  // "pre-D84 quotes" / "cut before #293" — the reference dates the field; say so without it
+  t = t.replace(new RegExp(String.raw`\bpre-${REF}`, "g"), "older").replace(new RegExp(String.raw`\bbefore\s+${REF}`, "g"), "before this field existed");
+  // any reference left inline
+  t = t.replace(new RegExp(String.raw`\s*${REF}`, "g"), "");
+  t = t.replace(new RegExp(String.raw`\b(?:${PEOPLE.join("|")})'s\b`, "g"), "Peak's").replace(new RegExp(PERSON, "g"), "Peak");
+  // tidy what the removals left: empty brackets, doubled / dangling punctuation, spaces
+  t = t
+    .replace(/(^|\s)\(\s*[,;:—–-]*\s*\)/g, "$1")
+    .replace(/\s+([,.;:)])/g, "$1")
+    .replace(/\(\s+/g, "(")
+    .replace(/([,;:])\1+/g, "$1")
+    .replace(/(^|[.;:]\s)[,;:—–-]\s*/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return t ? t[0].toUpperCase() + t.slice(1) : t;
+}
+
 const sources = new Map<string, ts.SourceFile>();
 function sourceOf(root: string, file: string): ts.SourceFile {
   const abs = path.resolve(root, file);
@@ -208,7 +243,7 @@ export function typeFields(root: string, file: string, typeName: string): FieldR
       name: m.name.getText(sf),
       optional: !!m.questionToken,
       type: m.type ? oneLine(m.type.getText(sf)) : "unknown",
-      doc: jsDocOf(m, sf) || HAND_NOTES[`${typeName}.${m.name.getText(sf)}`] || "",
+      doc: scrubNote(jsDocOf(m, sf) || HAND_NOTES[`${typeName}.${m.name.getText(sf)}`] || ""),
     }));
 }
 
@@ -258,12 +293,12 @@ export function apiSection(root: string, file: string, name: string): string {
   const sf = sourceOf(root, file);
   for (const st of sf.statements) {
     if (ts.isFunctionDeclaration(st) && st.name?.text === name) {
-      return [`### \`${name}()\``, "", jsDocOf(st, sf) || "—", "", "```ts", signatureOf(st, sf), "```"].join("\n");
+      return [`### \`${name}()\``, "", scrubNote(jsDocOf(st, sf)) || "—", "", "```ts", signatureOf(st, sf), "```"].join("\n");
     }
     if (!ts.isVariableStatement(st)) continue;
     const decl = st.declarationList.declarations.find((d) => ts.isIdentifier(d.name) && d.name.text === name);
     if (!decl) continue;
-    const out = [`### \`${name}\``, "", jsDocOf(st, sf) || "—", ""];
+    const out = [`### \`${name}\``, "", scrubNote(jsDocOf(st, sf)) || "—", ""];
     if (decl.type) out.push("```ts", `${name}: ${oneLine(decl.type.getText(sf))}`, "```", "");
     const init = decl.initializer;
     if (init && ts.isObjectLiteralExpression(init)) {
@@ -272,7 +307,7 @@ export function apiSection(root: string, file: string, name: string): string {
         if (ts.isMethodDeclaration(p)) sig = signatureOf(p, sf);
         else if (ts.isPropertyAssignment(p)) sig = `${p.name.getText(sf)}: ${oneLine(p.initializer.getText(sf))}`;
         else continue;
-        const doc = jsDocOf(p, sf);
+        const doc = scrubNote(jsDocOf(p, sf));
         out.push(`- \`${sig}\`${doc ? ` — ${doc}` : ""}`);
       }
     } else if (init && !decl.type) {
