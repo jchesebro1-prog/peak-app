@@ -13,7 +13,7 @@ import * as path from "node:path";
 import JSZip from "jszip";
 import { FIXTURE_EXPORT, FIXTURE_GOLDEN, goldenFileName, goldenFor, goldenJson, goldenWith, systemQuotesOf, type ExportFile } from "./estimating-golden";
 import {
-  auditPackage, auditProblems, ARTIFACT_PUBLISH_FILES, ARTIFACT_VERSION_FILES, fileCountWarnings, PRIVATE_BLOB_PREFIXES, buildEngineBundle, citedEnginePaths, engineAt, isJunkPath, keepDocComments, loadEngine, MAX_FILE_BYTES, parityProblems,
+  auditPackage, auditProblems, ARTIFACT_PUBLISH_FILES, ARTIFACT_VERSION_FILES, fileCountWarnings, PRIVATE_BLOB_PREFIXES, PRIVATE_PATH_RE, buildEngineBundle, citedEnginePaths, engineAt, isJunkPath, keepDocComments, scrubLineComments, loadEngine, MAX_FILE_BYTES, parityProblems,
   REQUIRED_FILES, sliceSystemQuotes, SPEC_DOCS, writeGoldenFiles, writeZip, ZIP_ROOT, zipEntries, zipName,
 } from "../handoff/estimator/package";
 import { EXTRA_FIELD_NOTES, expandSpecMarkdown, fieldsTable, hasMarkers, onlyFields, scrubNote, typeFields, undocumentedFields } from "../handoff/estimator/spec-gen";
@@ -43,6 +43,15 @@ export async function handoffPackageChecks(ok: Ok) {
   ok(want.length > 150 && have.join(",") === want.join(","), `handoff:package: the bundle exports exactly the source index.ts's names, namespaces included (${have.length} vs ${want.length})`);
   ok(inputs.every((f) => !/node_modules|src\/db\/|src\/lib\/stores\//.test(f)), "handoff:package: the engine bundle pulls in no package, store or database module");
   ok(text.includes("function totals(sections, taxRatePct)") && text.includes("EXACT port of the prototype logic"), "handoff:package: the bundle is unminified and keeps the source's doc comments");
+  {
+    const leaks = [...text.matchAll(/\b(?:Jeff|Isaac|Chris)\b|#\d{3}\b|\bD-?\d{3,4}\b/g)].map((m) => m[0]);
+    ok(leaks.length === 0, `handoff:package: the readable engine names no person and no internal punch / decision reference (${[...new Set(leaks)].slice(0, 8).join(", ") || "none"})`);
+    ok(keepDocComments("/**\n * Cut by Jeff (#301, D84).\n * The next line\n * carries on.\n */") === "/*!\n * Cut by Peak. The next line carries on.\n */"
+      && keepDocComments("/**\n * Clean one.\n * Two lines.\n */") === "/*!\n * Clean one.\n * Two lines.\n */"
+      && scrubLineComments("  // #233 late: qty = x (Jeff)\nconst a = 1; // keep\n") === "  // late: qty = x\nconst a = 1; // keep\n"
+      && keepDocComments("/** Jeff said so (#12). */").includes("Peak") && !/Jeff|#12/.test(keepDocComments("/** Jeff said so (#12). */")),
+      "handoff:package: keepDocComments — scrubs names and references from a doc comment, a paragraph it changes becomes one line, a clean one keeps its lines");
+  }
   ok(text.startsWith("/*!") && text.includes("CONFIDENTIAL"), "handoff:package: the bundle opens with its confidential banner");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-package-"));
   try {
@@ -224,6 +233,16 @@ export async function handoffPackageChecks(ok: Ok) {
     for (const prefix of PRIVATE_BLOB_PREFIXES) {
       const a = plant("data/estimates.js", `window.PEAK_ESTIMATES = [{"x":"${prefix}/Q-1/rev-1.pdf"}];`);
       ok(!a.ok && a.privatePaths.includes("data/estimates.js"), `handoff:package A5: a ${prefix}/<id>/… pathname in a data file fails the audit`);
+    }
+    for (const shape of ["vendor-quotes/vq-1-quote.pdf", "vendor-quotes/VQ-9-from-thread-att-2.pdf", "vendor-quotes/vqab12cd-attachment", "quote-pdfs/Q-1.pdf", "part-docs/PD-1/photo.webp", "https://x.private.blob.vercel-storage.com/vendor-quotes/vqab12cd-q.pdf"]) {
+      const a = plant("data/estimates.js", `window.PEAK_ESTIMATES = [{"blobPath":"${shape}"}];`);
+      ok(!a.ok && a.privatePaths.includes("data/estimates.js"), `handoff:package A5: the pathname ${shape} (one segment, or <id>/<file>) fails the audit`);
+    }
+    ok(["failed: blob path outside part-docs/<docId>/", "see part-docs/ in the app", "[blob path]", "`part-docs/`", "/api/documents/${id}", "/api/part-documents/PD-1", "src/lib/vendor-quotes/rules", "(vendor-quotes/rules isVendorPickerType)", "src/lib/cutsheets/shape-svg"].every((t) => !PRIVATE_PATH_RE.test(t)),
+      "handoff:package A5: the 'part-docs/<docId>/' failure text, a bare 'part-docs/', app routes and source paths are not pathnames");
+    {
+      const a = plant("spec/RUNBOOK.md", "x");
+      ok(!a.ok && a.unexpected.includes("spec/RUNBOOK.md"), "handoff:package A5: spec/RUNBOOK.md (not one of the four SPEC_DOCS) fails the audit");
     }
     for (const stray of ["notes.txt", "data/extra.js", "data/catalog-0.js", "spec/RUNBOOK.md.bak", "spec/golden/x.txt", "images/manifest.json.bak", "images/sub/a.webp", "spec/screenshots/a.jpg", "secrets/x.js"]) {
       const a = plant(stray, "x");

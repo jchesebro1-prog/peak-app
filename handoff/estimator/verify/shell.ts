@@ -11,6 +11,7 @@ import { SWITCH_UNSAVED_CONFIRM } from "../runtime/routes";
 import { chromeLaunch } from "@/lib/quote-pdf/render";
 import { fmt } from "@/lib/estimating-core/pricing";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import { goldenFileName } from "../../../scripts/estimating-golden";
 import { CURRENT_USER_KEY } from "../runtime/ports";
 import {
   clickButton,
@@ -105,7 +106,7 @@ export async function shellCheck(pkgDir: string): Promise<ShellResult> {
   const first = [...system].sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0) || (a.id < b.id ? -1 : 1))[0];
   const expectedFirst = expectedEstimatorTotals(first, data.rules);
   // The package's own golden file for the first row (handoff:build writes one per sliced estimate); else the repo's.
-  const pkgGolden = path.join(pkgDir, "spec", "golden", `${first.id.replace(/[^A-Za-z0-9._-]/g, "_")}.json`);
+  const pkgGolden = path.join(pkgDir, "spec", "golden", goldenFileName(first.id));
   const golden = existsSync(pkgGolden)
     ? (() => { const g = (JSON.parse(readFileSync(pkgGolden, "utf8")) as { totals?: { grand?: number } }).totals?.grand; return typeof g === "number" ? { grand: g, file: pkgGolden } : null; })()
     : goldenGrand(first.id);

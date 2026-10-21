@@ -30,7 +30,7 @@ export const SETTINGS_FIELDS = [
 ] as const;
 
 /** Every quote field the Estimator page reads. Excluded on purpose: shareLink shareOpens packageFiles
- *  estimateEmails bid assistDraft portal* leadId pdf reviewComments emailSending wonRev — and, as data
+ *  estimateEmails bid assistDraft portal* leadId pdf reviewComments emailSending — and, as data
  *  minimization (a controller decision, to be confirmed by Jeff later): clientResponses (third-party respondent
  *  emails), bonusRecord and estimatorBonusSplit (staff pay). The prototype does not need them to price an
  *  estimate. `vendorQuotes` ships render-only (VENDOR_QUOTE_FIELDS); `revisions`, `review`, `pdfOptions`,
@@ -41,6 +41,9 @@ export const QUOTE_FIELDS = [
   "paymentTerms", "coverSummary", "notIncluded",
   "owner", "preparedBy", "revisions", "history", "updatedAt", "createdAt", "pricingTier", "tierMargin", "spec",
   "pdfOptions", "packageSelection", "review", "groups", "vendorQuotes",
+  // wonRev: the revision number of the version that won (its revisions ship, so a reopened Won estimate can restore
+  // it); packagePeakHeader: the Build package "Peak header" switch the package actions read.
+  "wonRev", "packagePeakHeader",
 ] as const;
 
 /** One revision (src/lib/stores/quotes.ts QuoteRevision) — the priced snapshot and its frozen header. Dropped:

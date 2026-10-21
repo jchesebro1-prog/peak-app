@@ -51,7 +51,7 @@ app/estimating-core.js  the pricing engine, readable (also loads in Node — see
 data/*.js               the data snapshot, as <script> files (file:// can't fetch JSON):
                           rules.js      Estimating Rules, rates, tiers, track series, curtain mounts, system categories…
                           team.js       staff names and roles
-                          customers.js  only the companies, venues and contacts the bundled estimates reference
+                          customers.js  the companies the bundled estimates reference, with all their venues and contacts
                           fixtures.js   fixtures, systems, hardware assemblies and racks (the Assembly Builder)
                           catalog-N.js  the full parts catalog, in ≤ 15 MB pieces (only the fields the Estimator reads)
                           estimates.js  the bundled system estimates (with their revisions and vendor quotes)
@@ -151,8 +151,8 @@ own system through those same seams.
 - **Vendor quotes** on an estimate show what the screens print: the vendor, quote number, description,
   material lines, total and the freight flag. The attached vendor PDF, the vendor's link and the
   internal terms and notes are not bundled (Build's amber internal box shows nothing for them).
-- **A bundled Won estimate** doesn't carry which version won (`wonRev` is not bundled), so reopening it
-  keeps its current version; an estimate won inside the prototype records its won version and restores it.
+- **A bundled Won estimate** carries which version won (`wonRev`, and the revisions it points to), so
+  reopening it after an edit puts the won version back, the same as an estimate won inside the prototype.
 - A link to a part of Quartzite outside the Estimator (Inbox, Grid, Projects…) shows *Not part of the
   prototype*. So do actions that belong to those modules: bids, client share links, vendor quotes from
   email, Assist, Rewards. They answer *Not available in the prototype* and change nothing.
@@ -184,9 +184,13 @@ field not on it can't slip in). Left out, on purpose:
 
 - on the estimate: its client share link and who opened it, client responses from the package page,
   the Won bonus payout record and the bonus split, the email threads it was sent on, the bid and its
-  bidders, the drawings attached to the package page, the saved PDF (and where it is stored), review
-  comments, Assist drafts and nudges, portal fields, the lead link, which revision won (`wonRev`), and
-  the saved `value` and `margin` (the prototype recomputes both on every save);
+  bidders (and the "bidders present" stamp), the drawings attached to the package page, the saved PDF
+  (and where it is stored), review comments, Assist drafts and nudges, portal fields (acceptance, firm
+  quote, review, decline), the lead link, the renewal link, the findings it was built from, the date the
+  customer's PO arrived, the legacy owner and legacy contact fields, the "content changed" stamp, the
+  estimate's terms text, scope narrative and quote basis, the service quotes' payloads (flame test,
+  repair, inspection, consulting, rental — only system estimates are bundled), and the saved `value`
+  and `margin` (the prototype recomputes both on every save);
 - on each revision: where its sent PDF is stored, the service quotes' payloads, and, in its frozen
   header, the drawings, the bid and its awarded bidder, and the portal's firm-quote stamp;
 - on each vendor quote: the attached PDF, the vendor's link, the internal terms and notes, the email

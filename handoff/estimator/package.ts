@@ -11,7 +11,7 @@ import path from "node:path";
 import * as vm from "node:vm";
 import JSZip from "jszip";
 import { goldenFileName, goldenFor, goldenJson, goldenWith, systemQuotesOf, type GoldenEngine, type SystemQuote } from "../../scripts/estimating-golden";
-import { expandSpecMarkdown, hasMarkers, undocumentedFields } from "./spec-gen";
+import { expandSpecMarkdown, hasMarkers, scrubProse, undocumentedFields } from "./spec-gen";
 import { IMAGE_FILE_RE } from "./photo-select";
 import { scanForSecrets } from "./slice-rules";
 
@@ -39,11 +39,21 @@ export const PRIVATE_BLOB_PREFIXES = [
   "assessment-pdfs", "mail-attachments", "grid-sheets", "engagement-files", "recordings", "client-packages", "cutsheets",
   "racks", "datasheets",
 ] as const;
+const PREFIX_ALT = PRIVATE_BLOB_PREFIXES.join("|");
+const PATH_CHARS = String.raw`[^\s"'\`<>()\[\]{}*|\\]`;
 /**
- * A private Blob pathname ("<prefix>/<id>/…", PRIVATE_BLOB_PREFIXES): no package file may contain one (photos ship as
- * images/<file>). The literal text "part-docs/<docId>/" (a photo failure message) is not a pathname.
+ * A private Blob pathname: no package file may contain one (photos ship as images/<file>). Two shapes count:
+ *  - "<prefix>/<id>/…"        — part-docs/PD-1/photo.webp, quote-pdfs/Q-1/rev-1.pdf, …
+ *  - "<prefix>/<id>-<file>"   — one segment: vendor-quote uploads and thread-attachment copies are
+ *                               vendor-quotes/<vqId>-<file> (src/lib/vendor-quote-file.ts, vendor-quotes/thread-attachment-server.ts).
+ * The one-segment shape needs a "-" (the id-file join) and must not sit inside a longer path ("/api/documents/${id}",
+ * "src/lib/vendor-quotes/rules" are routes and source paths, not Blob pathnames) unless it follows a Blob host
+ * ("….vercel-storage.com/<prefix>/…"). The literal text "part-docs/<docId>/" (a photo failure message) is neither
+ * shape: "<" is not an id character.
  */
-export const PRIVATE_PATH_RE = new RegExp(`(?:${PRIVATE_BLOB_PREFIXES.join("|")})/[A-Za-z0-9_-]+/`);
+export const PRIVATE_PATH_RE = new RegExp(
+  `(?:${PREFIX_ALT})/[A-Za-z0-9_-]+/|(?:(?<![\\w./-])|(?<=vercel-storage\\.com/))(?:${PREFIX_ALT})/[A-Za-z0-9]+-${PATH_CHARS}+`,
+);
 /** The one folder every zip entry sits under (spec §2), so a command-line unzip doesn't spill into the current folder. */
 export const ZIP_ROOT = "peak-estimator-handoff";
 
@@ -67,13 +77,66 @@ const ENGINE_FOOTER = `if (typeof module === "object" && module && module.export
  * in the engine's closure, and the unit test checks the bundle still matches the source's exports.
  */
 export function keepDocComments(src: string): string {
-  return src.replace(/\/\*\*(?=[\s*])/g, "/*!");
+  return src.replace(/\/\*\*(?=[\s*])([^]*?)\*\//g, (_m, body: string) => `/*!${scrubDocBody(body)}*/`);
+}
+
+/** A line that starts a new list item / tag inside a doc comment — never joined onto the line above. */
+const DOC_ITEM_RE = /^(?:[-*•+]\s|\d+[.)]\s|@\w)/;
+/**
+ * The founder package does not name people or internal tracking: a doc comment that does (a punch / decision /
+ * review reference, a date, "Jeff") is rewritten with spec-gen's scrubProse — the same scrub data-model.md uses —
+ * paragraph by paragraph. A paragraph the scrub leaves alone keeps its exact lines; a changed one becomes one line.
+ */
+function scrubDocBody(body: string): string {
+  const lines = body.split("\n");
+  const prefixOf = (l: string) => /^\s*\*? ?/.exec(l)?.[0] ?? "";
+  const textOf = (ls: string[], first: boolean) => ls.map((l, i) => (first && i === 0 ? l : l.slice(prefixOf(l).length)).trim()).join(" ").replace(/\s+/g, " ").trim();
+  if (lines.length === 1) {
+    const t = textOf(lines, true);
+    const s = scrubProse(t);
+    return s === t ? body : ` ${s} `;
+  }
+  const out: string[] = [];
+  let unit: string[] = [];
+  let unitIsOpener = false;
+  const flush = () => {
+    if (!unit.length) return;
+    const text = textOf(unit, unitIsOpener);
+    const scrubbed = scrubProse(text);
+    if (scrubbed === text) out.push(...unit);
+    else if (scrubbed) out.push(unitIsOpener ? ` ${scrubbed}` : `${prefixOf(unit[0])}${scrubbed}`);
+    unit = [];
+    unitIsOpener = false;
+  };
+  lines.forEach((l, i) => {
+    const bare = i === 0 ? l.trim() : l.slice(prefixOf(l).length).trim();
+    if (!bare) { flush(); out.push(l); return; }
+    if (i > 0 && DOC_ITEM_RE.test(bare)) flush();
+    if (i === 0) unitIsOpener = true;
+    unit.push(l);
+    if (i === 0) flush();
+  });
+  flush();
+  return out.join("\n");
+}
+
+/**
+ * esbuild also keeps some full-line `//` comments in its output. The same scrub applies to them, line by line (a
+ * line that is nothing but a comment; code with a trailing comment is untouched — the engine's closure has none that
+ * names a person, which the unit test asserts on the built bundle).
+ */
+export function scrubLineComments(src: string): string {
+  return src.replace(/^([ \t]*\/\/ ?)(.*)$/gm, (m, lead: string, text: string) => {
+    if (!text.trim()) return m;
+    const s = scrubProse(text);
+    return s === text.trim() ? m : s ? `${lead}${s}` : lead.trimEnd();
+  });
 }
 
 const keepDocsPlugin: esbuild.Plugin = {
   name: "handoff-keep-docs",
   setup(b) {
-    b.onLoad({ filter: /\.tsx?$/ }, (args) => ({ contents: keepDocComments(readFileSync(args.path, "utf8")), loader: args.path.endsWith(".tsx") ? "tsx" : "ts" }));
+    b.onLoad({ filter: /\.tsx?$/ }, (args) => ({ contents: scrubLineComments(keepDocComments(readFileSync(args.path, "utf8"))), loader: args.path.endsWith(".tsx") ? "tsx" : "ts" }));
   },
 };
 
@@ -238,7 +301,7 @@ export function allowedPackagePath(rel: string): boolean {
   if (DATA_FILE_RE.test(rel)) return true;
   const img = /^images\/([^/]+)$/.exec(rel);
   if (img) return IMAGE_FILE_RE.test(img[1]);
-  return /^spec\/[^/]+\.md$/.test(rel) || /^spec\/golden\/[^/]+\.json$/.test(rel) || /^spec\/screenshots\/[^/]+\.png$/.test(rel);
+  return (SPEC_DOCS as readonly string[]).some((d) => rel === `${SPEC_DIR}/${d}`) || /^spec\/golden\/[^/]+\.json$/.test(rel) || /^spec\/screenshots\/[^/]+\.png$/.test(rel);
 }
 
 /** Package files read as text for the secret scan (images and fonts are binary). */

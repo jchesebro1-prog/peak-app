@@ -43,11 +43,27 @@ export const PROTOTYPE_HIDDEN_RULE_ITEMS: readonly string[] = [
   "travel.flyTravelHoursEachWay", "travel.flyHoursPerDay", "travel.fly",
   "portal.validityDays", "portal.browseMinQuotes", "portal.browseWindowMonths", "portal.staleCostMonths",
 ];
+/**
+ * What a group that keeps only some of its rows says about itself: the registry's own sub-line and note also describe
+ * the hidden rows (flights, the portal), so the visible groups carry plain replacements — nothing on screen names a
+ * rule the package does not show.
+ */
+export const PROTOTYPE_GROUP_TEXT: Readonly<Record<string, { label?: string; sub: string; note: string }>> = {
+  travel: {
+    sub: "Drive estimate (venue distance and travel time)",
+    note: "Road factor and speed feed the offline drive estimate (live OSRM routing still overrides them when a cached/live route is available).",
+  },
+  portal: {
+    label: "Freight",
+    sub: "Freight by distance",
+    note: "Freight: base % under the first step, + step % for every full step of drive miles from the quoting office, never above the cap. Unknown distance charges the cap. The Estimator pre-fills new sections with it.",
+  },
+};
 /** The registry groups the prototype shows, each without its hidden items (a group left empty goes). Pure. */
 export function prototypeRuleGroups<G extends { key: string; items: ReadonlyArray<{ id: string }> }>(groups: readonly G[]): G[] {
   return groups
     .filter((g) => !PROTOTYPE_HIDDEN_RULE_GROUPS.includes(g.key))
-    .map((g) => ({ ...g, items: g.items.filter((it) => !PROTOTYPE_HIDDEN_RULE_ITEMS.includes(it.id)) }))
+    .map((g) => ({ ...g, ...(PROTOTYPE_GROUP_TEXT[g.key] ?? {}), items: g.items.filter((it) => !PROTOTYPE_HIDDEN_RULE_ITEMS.includes(it.id)) }))
     .filter((g) => g.items.length > 0);
 }
 

@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
+import ts from "typescript";
 import {
   CATALOG_FIELDS, FIXTURE_FIELDS, QUOTE_FIELDS, BLOB_IDS, SETTINGS_FIELDS, COMPANY_COLS, SITE_COLS, CONTACT_COLS,
   REVISION_FIELDS, DOC_FIELDS, VENDOR_QUOTE_FIELDS, EXCLUDED_SOURCES,
@@ -705,6 +706,31 @@ async function revisionAllowListChecks(ok: Ok, exp: ExportV2) {
     ok(!body.includes(needle), `handoff:slice A1/A2: estimates.js never carries ${needle}`);
   ok((QUOTE_FIELDS as readonly string[]).includes("vendorQuotes"), "handoff:slice A2: vendorQuotes is on QUOTE_FIELDS (render-only)");
   ok(JSON.stringify(sanitizeQuote(sanitizeQuote(qrow.doc))) === JSON.stringify(sanitizeQuote(qrow.doc)), "handoff:slice A1: sanitizeQuote is idempotent");
+  {
+    // The README lists every Quote field the bundle drops; this fails when a field is added to / removed from the Quote
+    // type (or QUOTE_FIELDS) without that list — and the README paragraph "What an estimate carries" — being revisited.
+    const qf = "src/lib/stores/quotes.ts";
+    const sf = ts.createSourceFile(qf, fs.readFileSync(path.resolve(__dirname, "..", qf), "utf8"), ts.ScriptTarget.ES2020, true);
+    const keys: string[] = [];
+    sf.forEachChild((n) => {
+      if ((ts.isInterfaceDeclaration(n) || ts.isTypeAliasDeclaration(n)) && n.name.text === "Quote") {
+        const members = ts.isInterfaceDeclaration(n) ? n.members : (n.type as ts.TypeLiteralNode).members;
+        members.forEach((m) => { if (m.name) keys.push(m.name.getText(sf)); });
+      }
+    });
+    const dropped = keys.filter((k) => !(QUOTE_FIELDS as readonly string[]).includes(k)).sort().join(" ");
+    const expected = ["assistDraft", "assistNudge", "assistNudgeLeaseUntil", "bid", "bidScopeOnly", "bonusRecord", "clientResponses", "consulting", "contact", "contentChangedAt",
+      "emailSending", "estimateEmails", "estimatorBonusSplit", "findingKeys", "flameTest", "inspection", "leadId", "legacyOwner", "margin", "packageFiles", "pdf", "poReceivedAt",
+      "portalAcceptance", "portalDecline", "portalFirm", "portalReview", "quoteBasis", "renewalOf", "rental", "repair", "reviewComments", "scopeNarrative", "shareLink", "shareOpens",
+      "termsText", "value"].sort().join(" ");
+    ok(keys.length > 60 && dropped === expected, `handoff:slice: the Quote fields the bundle drops are exactly the README's list (${dropped === expected ? "match" : `got: ${dropped}`})`);
+  }
+  {
+    // the won version's pointer and the package header switch ship (the revisions wonRev points at ship too)
+    const sq = sanitizeQuote({ ...qrow.doc, status: "won", wonRev: 3, packagePeakHeader: false } as never) as Record<string, unknown>;
+    ok((QUOTE_FIELDS as readonly string[]).includes("wonRev") && (QUOTE_FIELDS as readonly string[]).includes("packagePeakHeader") && sq.wonRev === 3 && sq.packagePeakHeader === false,
+      "handoff:slice: wonRev and packagePeakHeader are on QUOTE_FIELDS and survive sanitizeQuote");
+  }
   // extras (dev) are sanitized too, even when handed in raw
   const raw = sliceExport({ ...exp, collections: { ...exp.collections, quotes: [] } } as ExportV2, { extraEstimates: [{ ...qrow.doc, id: "Q-X1" } as never] });
   ok(!raw.files["data/estimates.js"].includes(BLOB) && !raw.files["data/estimates.js"].includes("SECRETBYTES"), "handoff:slice A1: a raw extra estimate is sanitized by sliceExport");

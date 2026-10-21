@@ -177,6 +177,12 @@ const PERSON = String.raw`\b(?:${PEOPLE.join("|")})\b`;
  * names) goes; a leading "#301 slice C — " goes; a name left in prose reads "Peak". Pure.
  */
 export function scrubNote(text: string): string {
+  const t = scrubProse(text);
+  return t ? t[0].toUpperCase() + t.slice(1) : t;
+}
+
+/** scrubNote without the sentence-case step — for text that is a continuation (a doc-comment paragraph's own line breaks stay the caller's). Pure. */
+export function scrubProse(text: string): string {
   let t = text;
   // a parenthetical made only of references, names and separators: "(Jeff, #143)", "(#223)", "(D-j, R13)"
   t = t.replace(new RegExp(String.raw`\s*\((?:\s*(?:${REF}|${PERSON}|[,;/&]|and|per|see)\s*)+\)`, "g"), "");
@@ -196,7 +202,7 @@ export function scrubNote(text: string): string {
     .replace(/(^|[.;:]\s)[,;:—–-]\s*/g, "$1")
     .replace(/\s{2,}/g, " ")
     .trim();
-  return t ? t[0].toUpperCase() + t.slice(1) : t;
+  return t;
 }
 
 const sources = new Map<string, ts.SourceFile>();

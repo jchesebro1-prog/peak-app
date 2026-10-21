@@ -15,6 +15,7 @@ import {
 import { bySkuResolver, buildEstimatorProps } from "../handoff/estimator/runtime/props/estimator";
 import type { SeedCustomers, SeedRules, SeedTeamUser } from "../handoff/estimator/runtime/seed";
 import { sliceExport, type ExportV2 } from "../handoff/estimator/slice";
+import { sanitizeQuote } from "../handoff/estimator/slice-rules";
 import { expectedEstimatorTotals } from "../handoff/estimator/verify";
 import type { Ok } from "./test-inbox-org";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
@@ -747,6 +748,16 @@ export async function handoffActionChecks(ok: Ok) {
     const rewon = (await repo.setStatus(r.id, "won", "Ann Admin"))!;
     ok(rewon.status === "won" && qtyOf(rewon) === 2 && rewon.value === 400 && typeof rewon.wonRev === "number",
       `handoff actions B14: re-winning keeps the won version (qty ${qtyOf(rewon)}, value ${rewon.value}, wonRev ${rewon.wonRev})`);
+    {
+      // …and the same restore works on a bundled Won estimate: wonRev rides the slice (sanitizeQuote), the revision it
+      // names ships too, a post-win edit is made, and reopening puts the won version back.
+      const shipped = sanitizeQuote(JSON.parse(JSON.stringify(rewon)) as never) as unknown as Quote;
+      ok(typeof shipped.wonRev === "number" && (shipped.revisions ?? []).some((rv) => rv.rev === shipped.wonRev), "handoff actions B14: a bundled Won estimate ships wonRev and the revision it points at");
+      await store.put("quotes", { ...shipped, id: "Q-WON-SHIPPED", spec: { sections: editSecs, mobs: [] }, value: 1000 } as unknown as { id: string });
+      const back = (await repo.setStatus("Q-WON-SHIPPED", "draft", "Ann Admin"))!;
+      ok(back.status === "draft" && qtyOf(back) === 2 && back.value === 400, `handoff actions B14: reopening a bundled Won estimate restores the won version (qty ${qtyOf(back)}, value ${back.value})`);
+      await repo.remove("Q-WON-SHIPPED");
+    }
     await repo.remove(r.id);
   }
 
@@ -1154,7 +1165,7 @@ export async function handoffReviewChecks(ok: Ok) {
   // The Peak header default comes from the sliced settings (letterhead-server.ts loadPeakHeaderDefault: on unless stored false).
   await store.put("settings", { id: "main", data: { ...rules.settings, peakHeader: false } });
   const offPanel = await pa.packagePanelAction("Q-3001");
-  await store.put("quotes", { ...q1, packagePeakHeader: true });
+  await store.put("quotes", { ...(sanitizeQuote({ ...q1, packagePeakHeader: true } as never) as object), id: q1.id } as { id: string }); // round-trips the slice rules
   const ownPanel = await pa.packagePanelAction("Q-3001");
   ok(offPanel.ok && offPanel.panel.peakHeaderDefault === false && offPanel.panel.peakHeader === false && ownPanel.ok && ownPanel.panel.peakHeaderDefault === false && ownPanel.panel.peakHeader === true,
     "handoff review: packagePanelAction — settings.peakHeader false → default off; the quote's own choice still wins");
