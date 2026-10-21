@@ -5,9 +5,11 @@
  *
  * --smoke  opens index.html (the shell's Estimates list at #/estimates), then the default estimate at
  *          index.html?id=Q-G001#/estimate/Q-G001, waits for [data-handoff-ready] and the Estimator root, lets
- *          mount-time effects settle, then fails on: any pageerror; any request that is not
+ *          mount-time effects settle, then fails on: any pageerror; any console.error not on
+ *          BENIGN_CONSOLE_ERRORS (every mode: newPage counts them as page errors); any request that is not
  *          local (file:, data:, blob:, about:) or Google Fonts; any local file that failed to
- *          load; any unregistered server action outside SMOKE_ALLOWED_UNREGISTERED.
+ *          load; any unregistered server action outside SMOKE_ALLOWED_UNREGISTERED (a page with no
+ *          unregistered-call hook fails too); the app's fonts not computed on the list (readFonts).
  *          Screenshot: output/verify/smoke-build.png; result: output/verify/smoke.json.
  *          --all-steps (Task 6): also walks every slice estimate through Build, the three Build package tabs,
  *          each Customer review tab and Send & track, then the Catalog, the Assembly Builder, a rack's sheets
@@ -119,6 +121,13 @@
  *          nothing) after re-checking them; a bare `--update` re-stamps every entry. No browser. Not part of
  *          test:specs (app-side edits must not fail it).
  *
+ *   npm run handoff:verify -- --serve [--out <package dir>]
+ *
+ * --serve  the Artifact path: the package's shipped files (the zip's entries — never junk or images/manifest.json)
+ *          served over http on 127.0.0.1 and a free port, opened as index.html?v=1 (a host adds a query string), then
+ *          --smoke --all-steps over every estimate plus the fonts check (Public Sans / IBM Plex Mono computed, also with
+ *          <html>'s attributes stripped, as a host that rewrites <html> would). Result: output/verify/serve.json.
+ *
  *   npm run handoff:verify -- --parity [--export <export.json> …] [--out <package dir>]
  *
  * --parity  the readable engine (Task 12): app/estimating-core.js, loaded in Node (vm and require()), has the source
@@ -165,8 +174,11 @@ export const SMOKE_ALLOWED_UNREGISTERED: readonly string[] = [];
 const LOCAL_SCHEMES = new Set(["file:", "data:", "blob:", "about:"]);
 const FONT_HOSTS = new Set(["fonts.googleapis.com", "fonts.gstatic.com"]);
 
-/** "local" | "fonts" | "foreign" for one request URL. */
-export function classifyRequest(url: string): "local" | "fonts" | "foreign" {
+/** The --serve run's own origin (http://127.0.0.1:<port>): requests to it are the package's own files. Set by serveCheck. */
+let servedOrigin: string | null = null;
+
+/** "local" | "fonts" | "foreign" for one request URL (the --serve origin counts as local). */
+export function classifyRequest(url: string, localOrigin: string | null = servedOrigin): "local" | "fonts" | "foreign" {
   let u: URL;
   try {
     u = new URL(url);
@@ -174,8 +186,64 @@ export function classifyRequest(url: string): "local" | "fonts" | "foreign" {
     return "foreign";
   }
   if (LOCAL_SCHEMES.has(u.protocol)) return "local";
+  if (localOrigin && u.origin === localOrigin) return "local";
   if (u.protocol === "https:" && FONT_HOSTS.has(u.hostname)) return "fonts";
   return "foreign";
+}
+
+/**
+ * console.error output a run may see without failing — each one benign, with why. Everything else a page logs with
+ * console.error fails the run (it lands in pageErrors as "[console.error] …"), like an uncaught error does.
+ */
+export const BENIGN_CONSOLE_ERRORS: ReadonlyArray<{ test: (text: string, url: string) => boolean; why: string }> = [
+  // index.html's Google Fonts stylesheet is optional: offline (or a blocked network) Chrome logs the failed request,
+  // and the UI falls back to the family names. The URL is the console message's location, not its text.
+  { test: (text, url) => /^Failed to load resource\b/.test(text) && classifyRequest(url, null) === "fonts", why: "optional web fonts unreachable" },
+  // Served over http (--serve, an Artifact, any web host), the browser asks the host for /favicon.ico on its own; the
+  // package ships none, so a host without one answers 404. Not a package file, never requested by the page.
+  { test: (text, url) => /^Failed to load resource\b/.test(text) && /^https?:\/\/[^/]+\/favicon\.ico$/.test(url), why: "the host's /favicon.ico (the package has none)" },
+];
+
+/** True when a console.error is on the BENIGN_CONSOLE_ERRORS list. Pure. */
+export function isBenignConsoleError(text: string, url = ""): boolean {
+  return BENIGN_CONSOLE_ERRORS.some((b) => b.test(text, url));
+}
+
+/** The text a non-benign console.error adds to a run's page errors (with the resource URL when the message has one). */
+export const consoleErrorEntry = (text: string, url = "") => `[console.error] ${text}${url && !text.includes(url) ? ` (${url})` : ""}`;
+
+/** The unregistered-call hook's entry when a page has none: the check could not run, so it fails. */
+export const NO_UNREGISTERED_HOOK = "(no __peakHandoff.calledUnregistered hook — the unregistered-call check could not run)";
+
+/** The Public Sans / IBM Plex Mono fonts the app's CSS asks for, as computed on a page (pure on the strings). */
+export function fontsOk(f: { ui: string; mono: string }): boolean {
+  return /Public Sans/.test(f.ui) && /IBM Plex Mono/.test(f.mono);
+}
+
+/**
+ * The computed fonts of a mounted page — `body` (var(--font-ui)) and a probe element in var(--font-mono) — read twice:
+ * as served, and after every attribute of <html> is removed (what a host that rewrites <html> does). The variables
+ * live in index.html's :root rule, so both reads must name the app's fonts.
+ */
+export async function readFonts(page: Page): Promise<{ ui: string; mono: string; uiBare: string; monoBare: string }> {
+  // A string, not a function: tsx wraps named inner functions in a `__name` helper the page doesn't have.
+  return page.evaluate(`(() => {
+    const read = () => {
+      const probe = document.createElement("span");
+      probe.style.fontFamily = "var(--font-mono)";
+      document.body.appendChild(probe);
+      const out = { ui: getComputedStyle(document.body).fontFamily, mono: getComputedStyle(probe).fontFamily };
+      probe.remove();
+      return out;
+    };
+    const first = read();
+    const html = document.documentElement;
+    const saved = [...html.attributes].map((a) => [a.name, a.value]);
+    for (const [n] of saved) html.removeAttribute(n);
+    const bare = read();
+    for (const [n, v] of saved) html.setAttribute(n, v);
+    return { ui: first.ui, mono: first.mono, uiBare: bare.ui, monoBare: bare.mono };
+  })()`) as Promise<{ ui: string; mono: string; uiBare: string; monoBare: string }>;
 }
 
 export type SmokeResult = {
@@ -196,6 +264,9 @@ export type SmokeResult = {
   unregistered: string[];
   unexpectedUnregistered: string[];
   consoleErrors: string[];
+  /** The computed fonts on the Estimates list (readFonts) and whether they are the app's, also with <html> stripped. */
+  fonts: { ui: string; mono: string; uiBare: string; monoBare: string } | null;
+  fontsOk: boolean;
   screenshot: string;
 };
 
@@ -228,14 +299,15 @@ export function unregisteredExports(discovered: Record<string, string[]>, regist
 }
 
 /** `onlyIds` (--full): walk --all-steps over these estimates instead of every slice estimate (a production slice can hold hundreds). */
-export async function smoke(pkgDir: string, allSteps = false, onlyIds?: readonly string[]): Promise<SmokeResult> {
+export async function smoke(pkgDir: string, allSteps = false, onlyIds?: readonly string[], opts: { baseUrl?: string } = {}): Promise<SmokeResult> {
   const index = path.join(pkgDir, "index.html");
   if (!existsSync(index)) throw new Error(`${index} not found — run npm run handoff:build first`);
   const launch = await chromeLaunch();
   if ("unavailable" in launch) throw new Error(launch.unavailable);
   const puppeteer = (await import("puppeteer-core")).default;
   const browser = await puppeteer.launch({ executablePath: launch.executablePath, args: launch.args, headless: true, defaultViewport: { width: 1440, height: 900 } });
-  const url = pathToFileURL(index).href;
+  // file:// by default; --serve passes the package's http URL (with a host-style query string)
+  const url = opts.baseUrl ?? pathToFileURL(index).href;
   const pageErrors: string[] = [];
   const foreignRequests: string[] = [];
   const failedLocal: string[] = [];
@@ -247,7 +319,9 @@ export async function smoke(pkgDir: string, allSteps = false, onlyIds?: readonly
     const page = await browser.newPage();
     page.on("pageerror", (e) => pageErrors.push(e instanceof Error ? e.stack || e.message : String(e)));
     page.on("console", (m) => {
-      if (m.type() === "error") consoleErrors.push(m.text());
+      if (m.type() !== "error") return;
+      consoleErrors.push(m.text());
+      if (!isBenignConsoleError(m.text(), m.location()?.url ?? "")) pageErrors.push(consoleErrorEntry(m.text(), m.location()?.url ?? ""));
     });
     page.on("request", (r) => {
       const kind = classifyRequest(r.url());
@@ -270,6 +344,9 @@ export async function smoke(pkgDir: string, allSteps = false, onlyIds?: readonly
     await new Promise((r) => setTimeout(r, 1500));
     // A bare index.html is the shell's Estimates list (#/estimates)…
     const listMounted = await page.evaluate(() => !!document.querySelector("[data-handoff-list]") && location.hash === "#/estimates");
+    // the app's fonts, as served and with <html> stripped (index.html's :root rule)
+    const fonts = await readFonts(page).catch(() => null);
+    const fontsPass = !!fonts && fontsOk(fonts) && fontsOk({ ui: fonts.uiBare, mono: fonts.monoBare });
     await page.screenshot({ path: path.join(VERIFY_DIR, "smoke-list.png") as `${string}.png` });
     // …and the Estimator is one estimate away: the default one (Q-G001), else the first in the slice.
     const sliceIds = loadSliceData(pkgDir).estimates.map((q) => q.id);
@@ -282,7 +359,7 @@ export async function smoke(pkgDir: string, allSteps = false, onlyIds?: readonly
     await new Promise((r) => setTimeout(r, 1500));
     let estimatorMounted = await page.evaluate(() => !!document.querySelector(".est-root"));
     await page.screenshot({ path: screenshot as `${string}.png` });
-    const readUnregistered = () => page.evaluate(() => (window as unknown as { __peakHandoff?: { calledUnregistered?: () => string[] } }).__peakHandoff?.calledUnregistered?.() ?? []);
+    const readUnregistered = () => unregisteredOn(page);
     const seen = new Set<string>(await readUnregistered());
     const walked: string[] = [];
     let notRegistered: string[] = [];
@@ -341,8 +418,8 @@ export async function smoke(pkgDir: string, allSteps = false, onlyIds?: readonly
     const unregistered = [...seen];
     const allowed = new Set(SMOKE_ALLOWED_UNREGISTERED);
     const unexpectedUnregistered = unregistered.filter((id) => !allowed.has(id));
-    const pass = pageErrors.length === 0 && foreignRequests.length === 0 && failedLocal.length === 0 && unexpectedUnregistered.length === 0 && notRegistered.length === 0 && listMounted && estimatorMounted;
-    return { pass, url, walked, notRegistered, readyMs, listMounted, estimatorMounted, pageErrors, foreignRequests, failedLocal, fontRequests, unregistered, unexpectedUnregistered, consoleErrors, screenshot };
+    const pass = pageErrors.length === 0 && foreignRequests.length === 0 && failedLocal.length === 0 && unexpectedUnregistered.length === 0 && notRegistered.length === 0 && listMounted && estimatorMounted && fontsPass;
+    return { pass, url, walked, notRegistered, readyMs, listMounted, estimatorMounted, pageErrors, foreignRequests, failedLocal, fontRequests, unregistered, unexpectedUnregistered, consoleErrors, fonts, fontsOk: fontsPass, screenshot };
   } finally {
     await browser.close();
   }
@@ -362,10 +439,10 @@ export function printSmoke(r: SmokeResult): void {
   for (const id of r.notRegistered) console.log(`    NOT REGISTERED ${id}`);
   console.log(`  unregistered server actions called: ${r.unregistered.length} (unexpected: ${r.unexpectedUnregistered.length})`);
   for (const id of r.unregistered) console.log(`    ${r.unexpectedUnregistered.includes(id) ? "UNEXPECTED " : "allowed    "}${id}`);
-  if (r.consoleErrors.length) {
-    console.log(`  console errors (informational): ${r.consoleErrors.length}`);
-    for (const e of r.consoleErrors.slice(0, 10)) console.log(`    ${e.slice(0, 200)}`);
-  }
+  const benign = Math.max(0, r.consoleErrors.length - r.pageErrors.filter((e) => e.startsWith("[console.error] ")).length);
+  console.log(`  console errors: ${r.consoleErrors.length} (benign, allowed: ${benign}; the rest are page errors above)`);
+  for (const e of r.consoleErrors.slice(0, 10)) console.log(`    ${e.slice(0, 200)}`);
+  console.log(`  fonts: ${r.fontsOk ? "ok" : "NOT the app's"} — body ${r.fonts?.ui ?? "—"} · mono ${r.fonts?.mono ?? "—"}; with <html> stripped: ${r.fonts?.uiBare ?? "—"} · ${r.fonts?.monoBare ?? "—"}`);
   console.log(`  screenshot: ${path.relative(ROOT, r.screenshot)}`);
 }
 
@@ -430,7 +507,10 @@ export async function newPage(browser: Browser, sink: PageSink): Promise<Page> {
   const page = await browser.newPage();
   page.on("pageerror", (e) => sink.pageErrors.push(e instanceof Error ? e.stack || e.message : String(e)));
   page.on("console", (m) => {
-    if (m.type() === "error") sink.consoleErrors.push(m.text());
+    if (m.type() !== "error") return;
+    sink.consoleErrors.push(m.text());
+    // a console.error fails the run like an uncaught error does, unless it is on the benign list
+    if (!isBenignConsoleError(m.text(), m.location()?.url ?? "")) sink.pageErrors.push(consoleErrorEntry(m.text(), m.location()?.url ?? ""));
   });
   page.on("request", (r) => {
     if (classifyRequest(r.url()) === "foreign") sink.foreignRequests.push(r.url());
@@ -461,8 +541,13 @@ export const readHeaderTotal = (page: Page) =>
 
 export const pageHasText = (page: Page, text: string) => page.evaluate((t) => document.body.innerText.includes(t), text);
 
-export const unregisteredOn = (page: Page) =>
-  page.evaluate(() => (window as unknown as { __peakHandoff?: { calledUnregistered?: () => string[] } }).__peakHandoff?.calledUnregistered?.() ?? []);
+/** The unregistered server actions the page has called. A page with no hook answers NO_UNREGISTERED_HOOK, which no
+ *  allow-list holds, so a missing hook fails the run instead of reading as "none called". */
+export const unregisteredOn = (page: Page): Promise<string[]> =>
+  page.evaluate((missing) => {
+    const fn = (window as unknown as { __peakHandoff?: { calledUnregistered?: () => string[] } }).__peakHandoff?.calledUnregistered;
+    return typeof fn === "function" ? fn() : [missing];
+  }, NO_UNREGISTERED_HOOK);
 
 type EstimateCheck = {
   id: string;
@@ -575,7 +660,7 @@ async function resetAcrossWindows(browser: Browser, url: string, sink: PageSink)
     // a window that never answers versionchange: Reset must say so instead of pretending
     await openUrl(c, url);
     await c.evaluate(() => new Promise<void>((resolve, reject) => {
-      const r = indexedDB.open("peak-estimator-handoff");
+      const r = indexedDB.open((window as unknown as { __peakHandoff: { store: { dbName: string } } }).__peakHandoff.store.dbName);
       (window as unknown as { __rawHold?: IDBDatabase }).__rawHold = undefined;
       r.onsuccess = () => {
         (window as unknown as { __rawHold?: IDBDatabase }).__rawHold = r.result; // no onversionchange handler
@@ -668,7 +753,7 @@ function printEstimator(r: EstimatorResult): void {
   console.log(`  foreign requests: ${r.foreignRequests.length}; failed local files: ${r.failedLocal.length}`);
   for (const u of [...r.foreignRequests, ...r.failedLocal]) console.log(`    ${u}`);
   if (r.consoleErrors.length) {
-    console.log(`  console errors (informational): ${r.consoleErrors.length}`);
+    console.log(`  console errors (all but the benign ones are page errors too): ${r.consoleErrors.length}`);
     for (const e of r.consoleErrors.slice(0, 10)) console.log(`    ${e.slice(0, 200)}`);
   }
 }
@@ -870,7 +955,7 @@ function printEdit(r: EditResult): void {
   for (const e of r.pageErrors) console.log(`    ${e.split("\n").slice(0, 4).join("\n    ")}`);
   console.log(`  foreign requests: ${r.foreignRequests.length}; failed local files: ${r.failedLocal.length}`);
   if (r.consoleErrors.length) {
-    console.log(`  console errors (informational): ${r.consoleErrors.length}`);
+    console.log(`  console errors (all but the benign ones are page errors too): ${r.consoleErrors.length}`);
     for (const e of r.consoleErrors.slice(0, 10)) console.log(`    ${e.slice(0, 200)}`);
   }
 }
@@ -1161,7 +1246,7 @@ function printReview(r: ReviewResult): void {
   console.log(`  foreign requests: ${r.foreignRequests.length}; failed local files: ${r.failedLocal.length}`);
   for (const u of [...r.foreignRequests, ...r.failedLocal]) console.log(`    ${u}`);
   if (r.consoleErrors.length) {
-    console.log(`  console errors (informational): ${r.consoleErrors.length}`);
+    console.log(`  console errors (all but the benign ones are page errors too): ${r.consoleErrors.length}`);
     for (const e of r.consoleErrors.slice(0, 10)) console.log(`    ${e.slice(0, 200)}`);
   }
   console.log(`  screenshots: ${r.screenshots.map((f) => path.relative(ROOT, f)).join(", ")}`);
@@ -1349,7 +1434,7 @@ function printSend(r: SendResult): void {
   console.log(`  foreign requests: ${r.foreignRequests.length}; failed local files: ${r.failedLocal.length}`);
   for (const u of [...r.foreignRequests, ...r.failedLocal]) console.log(`    ${u}`);
   if (r.consoleErrors.length) {
-    console.log(`  console errors (informational): ${r.consoleErrors.length}`);
+    console.log(`  console errors (all but the benign ones are page errors too): ${r.consoleErrors.length}`);
     for (const e of r.consoleErrors.slice(0, 10)) console.log(`    ${e.slice(0, 200)}`);
   }
   console.log(`  screenshots: ${r.screenshots.map((f) => path.relative(ROOT, f)).join(", ")}`);
@@ -1359,10 +1444,68 @@ function printSend(r: SendResult): void {
 
 /** The URL of one estimate in the shell: the Estimator's own `?id=` (+ query) in the search, the route in the hash. */
 export function estimateUrl(base: string, id: string, query = ""): string {
-  return `${base}?id=${encodeURIComponent(id)}${query ? "&" + query : ""}#/estimate/${encodeURIComponent(id)}`;
+  return `${base}${base.includes("?") ? "&" : "?"}id=${encodeURIComponent(id)}${query ? "&" + query : ""}#/estimate/${encodeURIComponent(id)}`;
 }
 /** The URL of a clean new estimate. */
-export const newEstimateUrl = (base: string): string => `${base}?new=1#/estimate/new`;
+export const newEstimateUrl = (base: string): string => `${base}${base.includes("?") ? "&" : "?"}new=1#/estimate/new`;
+
+/* ------------------------------------------------------------------ --serve */
+
+const SERVE_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json",
+  ".md": "text/markdown; charset=utf-8", ".txt": "text/plain; charset=utf-8", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+  ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".woff": "font/woff",
+};
+
+/**
+ * A tiny static server over the package — only the files the zip carries (package.ts zipEntries: no junk, no
+ * images/manifest.json), as an Artifact or any web host would publish them — on 127.0.0.1 and a free port. Anything
+ * else is a 404. Returns the origin and a close().
+ */
+export async function servePackage(pkgDir: string): Promise<{ origin: string; files: number; close: () => Promise<void> }> {
+  const http = await import("node:http");
+  const { zipEntries } = await import("./package");
+  const shipped = new Set(zipEntries(pkgDir));
+  const server = http.createServer((req, res) => {
+    let rel = "";
+    try {
+      rel = decodeURIComponent(new URL(req.url ?? "/", "http://host").pathname).replace(/^\/+/, "") || "index.html";
+    } catch {
+      res.writeHead(400).end();
+      return;
+    }
+    if (!shipped.has(rel)) {
+      res.writeHead(404, { "content-type": "text/plain" }).end("not part of the package");
+      return;
+    }
+    res.writeHead(200, { "content-type": SERVE_TYPES[path.extname(rel).toLowerCase()] ?? "application/octet-stream", "cache-control": "no-store" });
+    res.end(readFileSync(path.join(pkgDir, rel)));
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const addr = server.address();
+  const port = addr && typeof addr === "object" ? addr.port : 0;
+  return { origin: `http://127.0.0.1:${port}`, files: shipped.size, close: () => new Promise<void>((r) => server.close(() => r())) };
+}
+
+/**
+ * --serve: the package over http (servePackage) instead of file:// — the Artifact path — with a host-style query
+ * string on the page URL (`index.html?v=1`): --smoke --all-steps over every estimate, plus the fonts check (smoke's
+ * readFonts, also with <html> stripped). The server's origin counts as local; any other host is foreign.
+ */
+export async function serveCheck(pkgDir: string): Promise<SmokeResult & { origin: string; servedFiles: number }> {
+  const srv = await servePackage(pkgDir);
+  servedOrigin = srv.origin;
+  try {
+    const r = await smoke(pkgDir, true, undefined, { baseUrl: `${srv.origin}/index.html?v=1` });
+    return { ...r, origin: srv.origin, servedFiles: srv.files };
+  } finally {
+    servedOrigin = null;
+    await srv.close();
+  }
+}
 
 /* ------------------------------------------------------------------ --drift */
 
@@ -1423,9 +1566,10 @@ async function main() {
   const drift = argv.includes("--drift");
   const parity = argv.includes("--parity");
   const full = argv.includes("--full");
+  const serve = argv.includes("--serve");
   const exportFiles = argv.flatMap((a, i) => (a === "--export" && argv[i + 1] && !argv[i + 1].startsWith("--") ? [path.resolve(argv[i + 1])] : []));
-  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !shell && !catalog && !assemblies && !rules && !photos && !drift && !parity && !full) {
-    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --catalog | --assemblies | --rules | --photos | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] | --parity [--export <export.json> …] | --full [--allow-missing-features] [--out <package dir>] | --drift [--update [<port> …]]");
+  if (!argv.includes("--smoke") && !est && edit === undefined && review === undefined && send === undefined && !shell && !catalog && !assemblies && !rules && !photos && !drift && !parity && !full && !serve) {
+    console.error("usage: npm run handoff:verify -- --smoke [--all-steps] | --shell | --catalog | --assemblies | --rules | --photos | --estimator <quoteId|all> | --estimator-edit [quoteId] | --review [quoteId] | --send [quoteId] | --parity [--export <export.json> …] | --full [--allow-missing-features] [--out <package dir>] | --drift [--update [<port> …]] | --serve");
     process.exit(2);
   }
   mkdirSync(VERIFY_DIR, { recursive: true });
@@ -1440,6 +1584,13 @@ async function main() {
   if (argv.includes("--smoke")) {
     const r = await smoke(pkgDir, argv.includes("--all-steps"));
     writeFileSync(path.join(VERIFY_DIR, "smoke.json"), JSON.stringify(r, null, 2) + "\n");
+    printSmoke(r);
+    pass &&= r.pass;
+  }
+  if (serve) {
+    const r = await serveCheck(pkgDir);
+    writeFileSync(path.join(VERIFY_DIR, "serve.json"), JSON.stringify(r, null, 2) + "\n");
+    console.log(`handoff:verify --serve  ${r.pass ? "PASS" : "FAIL"} — ${r.servedFiles} package files served at ${r.origin} (index.html?v=1), --smoke --all-steps + fonts:`);
     printSmoke(r);
     pass &&= r.pass;
   }

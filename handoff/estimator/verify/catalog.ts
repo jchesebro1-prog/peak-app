@@ -442,7 +442,7 @@ export function printCatalog(r: CatalogResult): void {
   console.log(`  foreign requests: ${r.foreignRequests.length}; failed local files: ${r.failedLocal.length}`);
   for (const u of [...r.foreignRequests, ...r.failedLocal]) console.log(`    ${u}`);
   if (r.consoleErrors.length) {
-    console.log(`  console errors (informational): ${r.consoleErrors.length}`);
+    console.log(`  console errors (all but the benign ones are page errors too): ${r.consoleErrors.length}`);
     for (const e of r.consoleErrors.slice(0, 10)) console.log(`    ${e.slice(0, 200)}`);
   }
   console.log(`  screenshots: ${r.screenshots.map((f) => path.relative(ROOT, f)).join(", ")}`);

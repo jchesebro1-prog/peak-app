@@ -19,6 +19,7 @@ import {
 import { EXTRA_FIELD_NOTES, expandSpecMarkdown, fieldsTable, hasMarkers, onlyFields, typeFields, undocumentedFields } from "../handoff/estimator/spec-gen";
 import { exportNames } from "../handoff/estimator/verify/parity";
 import { estimateFeatures, FEATURES, sampleEstimates, type Feature } from "../handoff/estimator/verify/full";
+import { classifyRequest, consoleErrorEntry, estimateUrl, fontsOk, isBenignConsoleError, newEstimateUrl, NO_UNREGISTERED_HOOK, SMOKE_ALLOWED_UNREGISTERED } from "../handoff/estimator/verify";
 import { POPOUT_NOTICE, PRINT_FOOTER_TEXT } from "../handoff/estimator/ui/preview-routes";
 import { RESET_BLOCKED_MESSAGE } from "../handoff/estimator/runtime/store";
 import type { Ok } from "./test-inbox-org";
@@ -229,6 +230,29 @@ export async function handoffPackageChecks(ok: Ok) {
     ok(refused && !fs.existsSync(path.join(t2, "c.zip")), "handoff:package: writeZip refuses a package with no CONFIDENTIAL.txt");
   } finally {
     fs.rmSync(t2, { recursive: true, force: true });
+  }
+
+  // --- final review C19/C20/B10: the harness's pure helpers ---
+  ok(!isBenignConsoleError("TypeError: x is undefined") && !isBenignConsoleError("Failed to load resource: net::ERR_FILE_NOT_FOUND", "file:///pkg/app/app.css") &&
+    isBenignConsoleError("Failed to load resource: net::ERR_NAME_NOT_RESOLVED", "https://fonts.googleapis.com/css2?family=X") &&
+    isBenignConsoleError("Failed to load resource: the server responded with a status of 404 (Not Found)", "http://127.0.0.1:5000/favicon.ico") &&
+    !isBenignConsoleError("Failed to load resource: the server responded with a status of 404 (Not Found)", "http://127.0.0.1:5000/app/app.js"),
+    "handoff:package C20: a console.error fails the run unless benign — only an unreachable Google Fonts request or the host's favicon");
+  ok(consoleErrorEntry("Failed to load resource: 404", "http://h/x.js") === "[console.error] Failed to load resource: 404 (http://h/x.js)" && consoleErrorEntry("boom") === "[console.error] boom",
+    "handoff:package C20: a console.error lands in the page errors as “[console.error] …” with its resource URL");
+  ok(!SMOKE_ALLOWED_UNREGISTERED.includes(NO_UNREGISTERED_HOOK) && /could not run/.test(NO_UNREGISTERED_HOOK), "handoff:package C20: a page without the unregistered-call hook reports an entry no allow-list holds (the run fails)");
+  ok(estimateUrl("http://127.0.0.1:9/index.html?v=1", "Q-1", "step=review") === "http://127.0.0.1:9/index.html?v=1&id=Q-1&step=review#/estimate/Q-1" &&
+    estimateUrl("file:///p/index.html", "Q-1") === "file:///p/index.html?id=Q-1#/estimate/Q-1" && newEstimateUrl("http://h/index.html?v=1") === "http://h/index.html?v=1&new=1#/estimate/new",
+    "handoff:package C19: estimate URLs keep a host's query string (?v=1&id=…)");
+  ok(classifyRequest("http://127.0.0.1:9/app/app.js", "http://127.0.0.1:9") === "local" && classifyRequest("http://127.0.0.1:9/app/app.js", null) === "foreign" && classifyRequest("http://127.0.0.1:10/x", "http://127.0.0.1:9") === "foreign",
+    "handoff:package C19: the --serve origin is local; any other http host is foreign");
+  ok(fontsOk({ ui: '"Public Sans", "Public Sans", sans-serif', mono: '"IBM Plex Mono", monospace' }) && !fontsOk({ ui: "Times", mono: "monospace" }),
+    "handoff:package B10: fontsOk wants Public Sans and IBM Plex Mono computed");
+  {
+    const html = fs.readFileSync("handoff/estimator/index.html", "utf8");
+    const root = /<style>[\s\S]*?:root\s*\{([\s\S]*?)\}[\s\S]*?<\/style>/.exec(html)?.[1] ?? "";
+    ok(/<html lang="en">/.test(html) && ["--accent:", "--accent-contrast:", "--font-public-sans:", "--font-plex-mono:"].every((v) => root.includes(v)),
+      "handoff:package B10: index.html defines the font and accent variables in a :root rule, not on <html style>");
   }
 
   // --- --full: feature detection and the seeded sample ---

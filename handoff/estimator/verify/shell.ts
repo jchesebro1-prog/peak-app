@@ -3,10 +3,11 @@
  * built package. Split out of verify.ts (which loads it on demand and owns the shared page helpers). See verify.ts's
  * header for what --shell covers.
  */
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Page } from "puppeteer-core";
+import type { Dialog, Page } from "puppeteer-core";
+import { SWITCH_UNSAVED_CONFIRM } from "../runtime/routes";
 import { chromeLaunch } from "@/lib/quote-pdf/render";
 import { fmt } from "@/lib/estimating-core/pricing";
 import { displayQuoteNumber } from "@/lib/estimate-number";
@@ -103,7 +104,11 @@ export async function shellCheck(pkgDir: string): Promise<ShellResult> {
   if (system.length < 2) throw new Error("the slice needs at least two system estimates for --shell");
   const first = [...system].sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0) || (a.id < b.id ? -1 : 1))[0];
   const expectedFirst = expectedEstimatorTotals(first, data.rules);
-  const golden = goldenGrand(first.id);
+  // The package's own golden file for the first row (handoff:build writes one per sliced estimate); else the repo's.
+  const pkgGolden = path.join(pkgDir, "spec", "golden", `${first.id.replace(/[^A-Za-z0-9._-]/g, "_")}.json`);
+  const golden = existsSync(pkgGolden)
+    ? (() => { const g = (JSON.parse(readFileSync(pkgGolden, "utf8")) as { totals?: { grand?: number } }).totals?.grand; return typeof g === "number" ? { grand: g, file: pkgGolden } : null; })()
+    : goldenGrand(first.id);
   const drafts = system.filter((q) => (q.status ?? "draft") === "draft").length;
   const second = system.find((q) => q.id !== first.id) as SliceQuote;
   const launch = await chromeLaunch();
@@ -173,7 +178,13 @@ export async function shellCheck(pkgDir: string): Promise<ShellResult> {
     step(`newest first: ${first.id} leads`, ids[0] === first.id, ids.join(","));
     const total0 = await cellText(page, first.id, "total");
     step("the first row's total is the Estimator's grand total for it", total0 === fmt(expectedFirst.canonical), `${total0} vs ${fmt(expectedFirst.canonical)}`);
-    step("…and the golden grand (when no load canonicalization applies)", golden ? (expectedFirst.priceRound || expectedFirst.bonusLines ? true : total0 === fmt(golden.grand)) : true, `golden ${golden ? fmt(golden.grand) : "none"}; canonical ${fmt(expectedFirst.canonical)}${expectedFirst.priceRound || expectedFirst.bonusLines ? " (load canonicalization applies)" : ""}`);
+    // The golden grand is the engine over the STORED sections (totals()); the list shows the post-load total, which differs
+    // only by the load canonicalization (the $25 round-up, derived bonus lines — pricing.md §12). So: golden = raw, always;
+    // and list = golden exactly when no canonicalization applies.
+    const canon = expectedFirst.priceRound || expectedFirst.bonusLines;
+    step("…the golden grand is totals() of the stored sections, and the list total equals it when no load canonicalization applies",
+      !!golden && fmt(golden.grand) === fmt(expectedFirst.raw) && (canon || total0 === fmt(golden.grand)),
+      `golden ${golden ? fmt(golden.grand) : "none"}; raw ${fmt(expectedFirst.raw)}; list ${total0}${canon ? " (load canonicalization applies)" : ""}`);
     const allTotals = await Promise.all(system.map(async (q) => [q.id, await cellText(page, q.id, "total"), fmt(expectedEstimatorTotals(q, data.rules).canonical)] as const));
     step("every row's total is its estimate's canonical grand total", allTotals.every(([, shown, want]) => shown === want), allTotals.map(([id, shown, want]) => `${id} ${shown}${shown === want ? "" : ` ≠ ${want}`}`).join("; "));
     step("the number column is displayQuoteNumber", (await cellText(page, first.id, "number")) === displayQuoteNumber({ ...first, id: first.id }));
@@ -408,6 +419,30 @@ export async function shellCheck(pkgDir: string): Promise<ShellResult> {
     const locV3 = await shellLoc(page);
     step("a host's ?v= param survives list → estimate → catalog → Back", [locV1, locV2, locV3].every((l) => params(l.search).get("v") === "42") && params(locV1.search).get("id") === first.id && !params(locV2.search).has("id"), [locV1, locV2, locV3].map((l) => l.search + l.hash).join(" · "));
 
+    // 7a — switching who you act as while the open estimate has unsaved edits asks first (the Estimator's unsaved hold)
+    await openUrl(page, estimateUrl(base, first.id));
+    await waitMounted(page, sink);
+    const holdQty = await firstQtyInput(page);
+    if (holdQty) {
+      const q0 = Number(await holdQty.evaluate((i) => i.value));
+      await holdQty.click({ count: 3 });
+      await holdQty.type(String(q0 + 1));
+      await page.keyboard.press("Tab");
+      await new Promise((r) => setTimeout(r, 400));
+      const who0 = await page.evaluate(() => (document.querySelector("select[data-handoff-user]") as HTMLSelectElement).value);
+      const other = sliceTeam(pkgDir).find((u) => (u.status ?? "active") === "active" && u.id !== who0)?.id ?? VERIFY_REVIEWER.id;
+      let asked = "";
+      const onDialog = (d: Dialog) => { asked = d.message(); void d.dismiss(); };
+      page.once("dialog", onDialog);
+      await page.select("select[data-handoff-user]", other);
+      await new Promise((r) => setTimeout(r, 400));
+      const who1 = await page.evaluate(() => (document.querySelector("select[data-handoff-user]") as HTMLSelectElement).value);
+      const qtyKept = await firstQtyInput(page);
+      const q1 = qtyKept ? Number(await qtyKept.evaluate((i) => i.value)) : NaN;
+      step("switching “Acting as” with unsaved edits asks first; Cancel keeps the person and the edit", asked === SWITCH_UNSAVED_CONFIRM && who1 === who0 && q1 === q0 + 1, `asked "${asked.slice(0, 40)}…"; ${who1} vs ${who0}; qty ${q1} vs ${q0 + 1}`);
+      page.off("dialog", onDialog);
+    } else step("an estimate line to edit for the unsaved-switch check", false, "no quantity input");
+
     // 7 — the user switcher
     await openUrl(page, base);
     await waitList(page);
@@ -529,7 +564,7 @@ export async function shellCheck(pkgDir: string): Promise<ShellResult> {
     await holder.evaluate(
       () =>
         new Promise<void>((resolve, reject) => {
-          const r = indexedDB.open("peak-estimator-handoff");
+          const r = indexedDB.open((window as unknown as { __peakHandoff: { store: { dbName: string } } }).__peakHandoff.store.dbName);
           r.onsuccess = () => {
             (window as unknown as { __rawHold?: IDBDatabase }).__rawHold = r.result; // no onversionchange handler
             resolve();
@@ -578,7 +613,7 @@ export function printShell(r: ShellResult): void {
   console.log(`  foreign requests: ${r.foreignRequests.length}; failed local files: ${r.failedLocal.length}`);
   for (const u of [...r.foreignRequests, ...r.failedLocal]) console.log(`    ${u}`);
   if (r.consoleErrors.length) {
-    console.log(`  console errors (informational): ${r.consoleErrors.length}`);
+    console.log(`  console errors (all but the benign ones are page errors too): ${r.consoleErrors.length}`);
     for (const e of r.consoleErrors.slice(0, 10)) console.log(`    ${e.slice(0, 200)}`);
   }
   console.log(`  screenshots: ${r.screenshots.map((f) => path.relative(ROOT, f)).join(", ")}`);
