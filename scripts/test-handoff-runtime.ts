@@ -8,7 +8,7 @@
 import * as fs from "node:fs";
 import * as vm from "node:vm";
 import { ROLE_PERMS, type Perm, type Role } from "@/lib/team";
-import { DB_NAME, overlayFromRows, overlayMerge, openStore, RESET_BLOCKED_MESSAGE, storeSeedFrom, type HandoffStore } from "../handoff/estimator/runtime/store";
+import { DB_KEY_MAX, DB_NAME, dbNameFor, overlayFromRows, overlayMerge, openStore, RESET_BLOCKED_MESSAGE, storeSeedFrom, type HandoffStore } from "../handoff/estimator/runtime/store";
 import {
   clock, configurePorts, customers, customersFrom, email, nextEstNoFrom, numbering, onWon, refreshPortsFromStore, resolveTierFor, travelFromParts, users,
 } from "../handoff/estimator/runtime/ports";
@@ -28,7 +28,7 @@ import {
 } from "../handoff/estimator/runtime/quote-model";
 import { quoteRepo, withLock } from "../handoff/estimator/runtime/quote-repo";
 import { planSave, settleRewardCreditOffline, vendorQuotesForSave } from "../handoff/estimator/runtime/actions/save-core";
-import { estimatorActions, refusedEstimatorActions, REFUSED_ESTIMATOR_ACTIONS } from "../handoff/estimator/runtime/actions/estimator-actions";
+import { estimatorActions, refusedEstimatorActions, REFUSED_ESTIMATOR_ACTIONS, REFUSED_ESTIMATOR_FORMS, REFUSED_ESTIMATOR_RESULT_ACTIONS } from "../handoff/estimator/runtime/actions/estimator-actions";
 import { quotesActions } from "../handoff/estimator/runtime/actions/quotes-actions";
 import { renameMapOf } from "../handoff/estimator/runtime/readers";
 import { catalogResolver, keyProductPhotosLocal, loadQuoteDocumentPropsLocal, photoDocIdForSku } from "../handoff/estimator/runtime/loaders/document";
@@ -121,7 +121,7 @@ async function storeFor(g: Globals): Promise<HandoffStore> {
 function fakeIdb(opts: { failWrites?: boolean; failOpen?: boolean; deleteError?: boolean; versionchangeOnOpen?: boolean } = {}) {
   const data = new Map<string, { keyPath: string | null; rows: Map<string, { key: unknown; value: unknown }> }>();
   let exists = false;
-  const calls = { opens: 0, deletes: 0 };
+  const calls = { opens: 0, deletes: 0, names: [] as string[] };
   const errors: unknown[] = []; // anything a connection's onversionchange handler threw
   const conns = new Set<{ onversionchange: null | (() => void); close(): void }>();
   const later = (fn: () => void, ms = 0) => void setTimeout(fn, ms);
@@ -165,9 +165,10 @@ function fakeIdb(opts: { failWrites?: boolean; failOpen?: boolean; deleteError?:
   }
 
   const factory = {
-    open() {
+    open(name?: string) {
       const r: Req = {};
       calls.opens++;
+      calls.names.push(`open ${name}`);
       later(() => {
         if (opts.failOpen) {
           r.error = new Error("SecurityError (fake)");
@@ -185,9 +186,10 @@ function fakeIdb(opts: { failWrites?: boolean; failOpen?: boolean; deleteError?:
       });
       return r;
     },
-    deleteDatabase() {
+    deleteDatabase(name?: string) {
       const r: Req = {};
       calls.deletes++;
+      calls.names.push(`delete ${name}`);
       later(() => {
         if (opts.deleteError) {
           r.error = new Error("delete failed (fake)");
@@ -317,6 +319,21 @@ export async function handoffRuntimeChecks(ok: Ok) {
     const calls = fake.calls.deletes;
     ok(calls === 1, "handoff runtime: idb store — the rejected reset's deleteDatabase request was issued once (it stays queued in the browser)");
     ok(DB_NAME === "peak-estimator-handoff", "handoff runtime: idb store — database name");
+  }
+  // final review B9: the overlay database is keyed by the snapshot
+  ok(dbNameFor("2026-10-20T15:04:05.123Z") === "peak-estimator-handoff:2026-10-20T15:04:05.123Z" && dbNameFor(null) === DB_NAME && dbNameFor("") === DB_NAME && dbNameFor(42) === DB_NAME,
+    "handoff runtime B9: dbNameFor — peak-estimator-handoff:<exportedAt>; none → the bare name");
+  ok(dbNameFor("a b/c<d>é") === "peak-estimator-handoff:abcd" && dbNameFor("x".repeat(200)).length === DB_NAME.length + 1 + DB_KEY_MAX && dbNameFor("A") !== dbNameFor("B"),
+    "handoff runtime B9: dbNameFor — odd characters dropped, capped, and two snapshots never share a name");
+  {
+    const fake = fakeIdb();
+    const a = await openStore({ meta: docs([{ id: "s1" }]) }, { idb: fake.factory, dbName: dbNameFor("snap-A") });
+    await a.put("meta", { id: "edit-on-A" });
+    ok(a.dbName === "peak-estimator-handoff:snap-A" && fake.calls.names.includes("open peak-estimator-handoff:snap-A"), "handoff runtime B9: openStore opens the snapshot's own database");
+    await a.reset();
+    ok(fake.calls.names.includes("delete peak-estimator-handoff:snap-A") && !fake.calls.names.some((n) => n === `delete ${DB_NAME}`), "handoff runtime B9: Reset deletes the snapshot's database (not the bare name)");
+    const dflt = await openStore({ meta: [] }, { idb: null });
+    ok(dflt.dbName === DB_NAME, "handoff runtime B9: no dbName → DB_NAME");
   }
 
   // memory fallback (IndexedDB never opened): reset clears memory and never touches deleteDatabase
@@ -490,6 +507,19 @@ export async function handoffRuntimeChecks(ok: Ok) {
   const unknown = await buildEstimatorProps(store, "Q-NOPE", new URLSearchParams());
   ok(unknown.initial.loadedId === null && unknown.initial.projectName === "New estimate", "handoff runtime: props — an unknown id opens a clean estimate");
 
+  {
+    // final review B11: the props read quotes through quoteRepo(store).get — a doc with no status reads as "draft",
+    // exactly as the actions see it, and the store keeps it as stored
+    const noStatus: Record<string, unknown> = { ...(await store.get<Record<string, unknown>>("quotes", "Q-G001"))!, id: "Q-NOSTATUS" };
+    delete noStatus.status;
+    await store.put("quotes", noStatus as { id: string });
+    const pn = await buildEstimatorProps(store, "Q-NOSTATUS", new URLSearchParams());
+    const fromRepo = await quoteRepo(store).get("Q-NOSTATUS");
+    ok(pn.initial.loadedId === "Q-NOSTATUS" && pn.initial.status === "draft" && fromRepo?.status === "draft" && pn.initial.stage === fromRepo?.stage,
+      `handoff runtime B11: props read through quoteRepo — no status → draft, the same stage the repo reads (${pn.initial.status} / ${pn.initial.stage} vs ${fromRepo?.stage})`);
+    ok(!("status" in ((await store.get<Record<string, unknown>>("quotes", "Q-NOSTATUS")) ?? {})), "handoff runtime B11: …and the stored doc is left as stored (no status written)");
+    await store.remove("quotes", "Q-NOSTATUS");
+  }
   await store.put("quotes", { ...(await store.get<{ id: string }>("quotes", "Q-G001"))!, name: "Overlay name" });
   ok((await buildEstimatorProps(store, "Q-G001", new URLSearchParams())).initial.projectName === "Overlay name", "handoff runtime: props — read through the overlay");
 
@@ -696,6 +726,29 @@ export async function handoffActionChecks(ok: Ok) {
   ok(wonQ?.status === "won" && typeof wonQ.wonRev === "number" && acts.some((a) => a.kind === "won" && a.quoteId === c1.id), "handoff actions: repo.setStatus — Won records the won version and runs the onWon port (an activity row)");
   ok((await repo.setQuotePipeline(c1.id, "bid-spec")) === null, "handoff actions: repo.setQuotePipeline — refused outside draft");
   ok((await repo.setStatus(c1.id, "won", "Ann Admin"))?.history.length === wonQ?.history.length, "handoff actions: repo.setStatus — a same-status move is a no-op");
+  {
+    // final review B14: won → draft (a revise) after a post-win edit puts the won version back (reopenPlanFor /
+    // applyReopen; the edit is kept as a "manual" revision), and re-winning keeps it. No Rewards credit in the prototype.
+    const wonSecs = [{ id: "s1", name: "Rig", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "X:1", desc: "Hoist", qty: 2, unit: "ea", cost: 100, price: 200 }] }];
+    const editSecs = [{ ...wonSecs[0], items: [{ ...wonSecs[0].items[0], qty: 5 }] }];
+    const r = await repo.create({ name: "Reopen", source: "estimator", owner: "Ann Admin", spec: { sections: wonSecs, mobs: [] } as never, value: 400 });
+    await repo.setStatus(r.id, "sent", "Ann Admin");
+    const won1 = (await repo.setStatus(r.id, "won", "Ann Admin"))!;
+    await repo.update(r.id, { spec: { sections: editSecs, mobs: [] } as never, value: 1000 });
+    const revsBefore = (await repo.get(r.id))!.revisions?.length ?? 0;
+    const reopened = (await repo.setStatus(r.id, "draft", "Ann Admin"))!;
+    const qtyOf = (q: Quote | null) => ((q?.spec as { sections: SpecSection[] } | null)?.sections[0]?.items[0]?.qty);
+    ok(reopened.status === "draft" && qtyOf(reopened) === 2 && reopened.value === won1.value && reopened.value === 400,
+      `handoff actions B14: won → draft restores the won version's sections and value (qty ${qtyOf(reopened)}, value ${reopened.value} vs ${won1.value})`);
+    const autosave = reopened.revisions?.at(-1);
+    ok((reopened.revisions?.length ?? 0) === revsBefore + 1 && autosave?.reason === "manual" && /reopening/i.test(autosave?.note ?? "") &&
+      ((autosave?.spec as { sections: SpecSection[] } | null)?.sections[0]?.items[0]?.qty === 5),
+      "handoff actions B14: …the post-win edit is snapshotted first (a manual revision noted as the reopen autosave)");
+    const rewon = (await repo.setStatus(r.id, "won", "Ann Admin"))!;
+    ok(rewon.status === "won" && qtyOf(rewon) === 2 && rewon.value === 400 && typeof rewon.wonRev === "number",
+      `handoff actions B14: re-winning keeps the won version (qty ${qtyOf(rewon)}, value ${rewon.value}, wonRev ${rewon.wonRev})`);
+    await repo.remove(r.id);
+  }
 
   // the actions themselves
   const A = estimatorActions(store);
@@ -773,7 +826,7 @@ export async function handoffActionChecks(ok: Ok) {
     { id: "ETC:CS40", sku: "ETC:CS40", desc: "ColorSource 40 console", category: "Lighting Controls", unit: "ea", cost: 3000, list: 4500, mfr: "ETC" },
     { id: "ETC:CSPAR", sku: "ETC:CSPAR", desc: "ColorSource PAR, XLR, black", category: "Fixtures", unit: "ea", cost: 600, list: 900, mfr: "ETC" },
     { id: "XX:1", sku: "XX:1", desc: "Unrelated", category: "Audio", unit: "ea", cost: 1, list: 2, mfr: "Other" },
-  ]), quotes: [] }, { idb: null });
+  ]), quotes: [], catalogRenames: [{ id: "80-0043", sku: "80-0043", renamedTo: "ETC:CS40" }] }, { idb: null });
   const CA = estimatorActions(catStore);
   const found = await CA.searchCatalog("ColorSource");
   ok(found.total === 2 && found.hits.every((h) => h.sku.startsWith("ETC:CS")) && found.hits[0].list > 0, `handoff actions: searchCatalog — ranks the local catalog (got ${found.hits.map((h) => h.sku).join()})`);
@@ -787,6 +840,15 @@ export async function handoffActionChecks(ok: Ok) {
   ok(made.ok && madeDoc?.category === "Custom Parts" && madeDoc.note === "Price good through 2026-12-31" && (await CA.searchCatalog("Custom thing")).total === 1,
     "handoff actions: saveEstimatorCustomPartAction — writes the catalog overlay; searchable at once");
   ok(!(await CA.saveEstimatorCustomPartAction({ sku: "custom", desc: "x", category: "", unit: "", cost: 1, list: 2, mfr: "", manufacturerPartNumber: "", priceGoodThrough: "" })).ok, "handoff actions: saveEstimatorCustomPartAction — CUSTOM is not a SKU");
+  {
+    // final review B12: writePart's stamps, and catalogGet's rename-following refusal
+    const stamped = await catStore.get<{ updatedAt?: number; pricedAt?: number }>("catalog", "CUST-1");
+    ok(typeof stamped?.updatedAt === "number" && Math.abs(stamped.updatedAt - Date.now()) < 5000 && stamped.pricedAt === stamped.updatedAt,
+      `handoff actions B12: saveEstimatorCustomPartAction stamps updatedAt and pricedAt like writePart (got ${JSON.stringify(stamped)})`);
+    const retired = await CA.saveEstimatorCustomPartAction({ sku: "80-0043", desc: "Old order number", category: "", unit: "", cost: 1, list: 2, mfr: "", manufacturerPartNumber: "", priceGoodThrough: "" });
+    ok(!retired.ok && /80-0043 is already in the catalog/.test(retired.error) && !(await catStore.get("catalog", "80-0043")),
+      "handoff actions B12: a retired SKU (renamed to a live part) is refused like catalogGet does — nothing written");
+  }
   configurePorts({ store, customers: g.PEAK_CUSTOMERS as SeedCustomers, rules: g.PEAK_RULES as SeedRules, team });
 
   // tiers / travel through the customers port
@@ -892,7 +954,10 @@ export async function handoffActionChecks(ok: Ok) {
 
   // refusals
   const ref = refusedEstimatorActions();
-  ok(REFUSED_ESTIMATOR_ACTIONS.every((n) => (ref[n] as () => { ok: boolean; error: string })().error === "Not available in the prototype"), "handoff actions: the refused actions return NOT_IN_PROTOTYPE");
+  ok(REFUSED_ESTIMATOR_RESULT_ACTIONS.every((n) => (ref[n] as () => { ok: boolean; error: string })().error === "Not available in the prototype"), "handoff actions: the refused actions return NOT_IN_PROTOTYPE");
+  ok(REFUSED_ESTIMATOR_FORMS.length === 3 && (await Promise.all(REFUSED_ESTIMATOR_FORMS.map((n) => (ref[n] as () => Promise<unknown>)()))).every((v) => v === undefined) &&
+    REFUSED_ESTIMATOR_ACTIONS.length === REFUSED_ESTIMATOR_RESULT_ACTIONS.length + REFUSED_ESTIMATOR_FORMS.length,
+    "handoff actions B13: the void quote-task form actions refuse by resolving to nothing, as their originals' signatures say (formRefusals)");
 }
 
 
@@ -1046,6 +1111,10 @@ export async function handoffReviewChecks(ok: Ok) {
   const saved = await na.saveProductParagraphAction("ETC:CS15", "A bright fixture.", null);
   ok(saved.ok && saved.row.paragraph === "A bright fixture." && saved.row.paragraphUpdatedBy === "Ann Admin" && (await store.get<{ narrativeText?: string }>("catalog", "ETC:CS15"))?.narrativeText === "A bright fixture.",
     "handoff review: saveProductParagraphAction — writes narrativeText to the catalog overlay and answers the fresh row");
+  {
+    const after = await store.get<{ updatedAt?: number; narrativeUpdatedAt?: number }>("catalog", "ETC:CS15");
+    ok(typeof after?.updatedAt === "number" && after.updatedAt === after.narrativeUpdatedAt, `handoff review B12: saveProductParagraphAction bumps the part's updatedAt (writePart) — got ${JSON.stringify(after)}`);
+  }
   const stale = await na.saveProductParagraphAction("ETC:CS15", "Again", null);
   ok(!stale.ok && !!stale.stale && stale.stale.paragraph === "A bright fixture.", "handoff review: saveProductParagraphAction — a stale expectUpdatedAt is refused with the current paragraph");
   ok(!(await na.saveProductParagraphAction("NOPE", "x")).ok && !(await na.saveProductParagraphAction("ETC:CS15", "  ")).ok, "handoff review: saveProductParagraphAction — not a catalog part / empty text refuse");
@@ -1997,7 +2066,9 @@ export async function handoffRulesChecks(ok: Ok) {
     `handoff rules: exportCSV — the header, one line per registry row (${rows}), the stored values`);
   const json = JSON.parse(await PR.exportJSON(store, new Date(Date.UTC(2026, 9, 20)))) as { exportedAt: string; version: number; rates: Record<string, number | null> };
   ok(json.version === 1 && json.exportedAt === "2026-10-20T00:00:00.000Z" && json.rates["tiers.silver"] === 21 && json.rates["catalog.defaultMargin"] === 35 && !("system.rollup" in json.rates), "handoff rules: exportJSON — every rate's value, no formulas");
-  ok(/^Peak_estimating_rules_\d{8}\.csv$/.test(PR.exportFileName("csv")) && PR.exportFileName("json", new Date(2026, 0, 5)) === "Peak_estimating_rules_20260105.json", "handoff rules: exportFileName — Peak_estimating_rules_YYYYMMDD.<ext>");
+  ok(/^Peak_estimating_rules_\d{8}\.csv$/.test(PR.exportFileName("csv")) && PR.exportFileName("json", new Date(Date.UTC(2026, 0, 5, 18))) === "Peak_estimating_rules_20260105.json", "handoff rules: exportFileName — Peak_estimating_rules_YYYYMMDD.<ext>");
+  ok(PR.exportFileName("csv", new Date(Date.UTC(2026, 0, 5, 3))) === "Peak_estimating_rules_20260104.csv" && PR.exportFileName("csv", new Date(Date.UTC(2026, 6, 1, 4, 59))) === "Peak_estimating_rules_20260630.csv",
+    "handoff rules B15: exportFileName stamps the America/Chicago day (03:00 UTC Jan 5 is still Jan 4 in Chicago; DST too), whatever the browser's zone");
   await PR.resetAll(store);
   const prAll = (await store.get<{ data: Record<string, unknown> }>("blobs", "pricing_rules"))?.data ?? {};
   const generalIds = Pricing.GROUPS.flatMap((g) => g.items).filter((it) => it.kind === "rate" && it.store === "general").map((it) => it.id);
@@ -2008,8 +2079,19 @@ export async function handoffRulesChecks(ok: Ok) {
   // --- props ---
   const p1 = await RP.buildRulesProps(store);
   const goldVM = p1.groups.find((g) => g.key === "tiers")?.items.find((it) => it.id === "tiers.gold");
-  ok(p1.isAdmin && p1.groups.length === Pricing.GROUPS.length && goldVM?.kind === "rate" && goldVM.value === 20 && goldVM.def === 20 && isDeepStrictEqual(p1.venueDoctrine, resolveVenueDoctrine(undefined)),
-    "handoff rules: buildRulesProps — every group, each rate's value and effective default, the default venue doctrine");
+  ok(p1.isAdmin && p1.groups.length === RP.prototypeRuleGroups(Pricing.GROUPS).length && goldVM?.kind === "rate" && goldVM.value === 20 && goldVM.def === 20 && isDeepStrictEqual(p1.venueDoctrine, resolveVenueDoctrine(undefined)),
+    "handoff rules: buildRulesProps — every shown group, each rate's value and effective default, the default venue doctrine");
+  {
+    // final review B18: the service-quote / portal rules are hidden (they never price a system estimate); the estimate's own stay
+    const keys = p1.groups.map((g) => g.key);
+    const ids = p1.groups.flatMap((g) => g.items.map((it) => it.id));
+    ok(!keys.includes("flame") && !keys.includes("repair") && !keys.includes("inspection") && ["system", "tiers", "travel", "portal", "labor", "bonuses"].every((k) => keys.includes(k)),
+      `handoff rules B18: flame / repair / inspection groups hidden; system, tiers, travel, freight, labor, bonuses shown (${keys.join(",")})`);
+    ok(ids.includes("travel.roadFactor") && ids.includes("travel.mph") && ids.includes("freight.basePct") && !ids.includes("travel.flyThreshold") && !ids.includes("portal.validityDays") && !ids.includes("travel.fly"),
+      "handoff rules B18: the drive-distance knobs and freight stay (they price estimates); flights-over-drive and portal knobs go");
+    const csv = await PR.exportCSV(store);
+    ok(csv.includes("Flame-test pricing,") && csv.includes("Inspection pricing,") && csv.includes("Portal firm quote valid for"), "handoff rules B18: hidden rules are untouched — Export still carries every rate");
+  }
   users.setCurrent("u2");
   const locked = await RP.buildRulesProps(store);
   ok(!locked.isAdmin && locked.groups.length === 0 && !(await RP.buildTrackSeriesProps(store)).isAdmin && !(await RP.buildCurtainMountsProps(store)).isAdmin && !(await RP.buildSystemCategoriesProps(store)).isAdmin,

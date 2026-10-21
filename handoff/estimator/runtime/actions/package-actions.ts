@@ -21,6 +21,7 @@ import { peakHeaderDefault, resolvePeakHeader } from "@/lib/letterhead";
 import { sentDocumentStamp, ONLINE_COPY } from "@/lib/quote-share/view";
 import type { Quote } from "@/lib/stores/quotes";
 import { NOT_IN_PROTOTYPE, type ActionImpl } from "../actions-registry";
+import { refusals, type RefusableKey } from "./misc-refusals";
 import type { HandoffStore } from "../store";
 import { refreshPortsFromStore, settingsView } from "../ports";
 import { quoteRepo } from "../quote-repo";
@@ -79,17 +80,10 @@ export function packageActions(store: HandoffStore): { [K in ImplementedPackageA
 }
 
 /** The panel's writes — Blob storage, the zip builder and the Grid aren't in the prototype. */
-export const REFUSED_PACKAGE_ACTIONS = ["addPackageFileAction", "removePackageFileAction", "rebuildPackageZipAction", "setPackagePeakHeaderAction", "generateGridDrawingsAction"] as const satisfies readonly Exclude<keyof A, ImplementedPackageAction>[];
+export const REFUSED_PACKAGE_ACTIONS = ["addPackageFileAction", "removePackageFileAction", "rebuildPackageZipAction", "setPackagePeakHeaderAction", "generateGridDrawingsAction"] as const satisfies readonly Exclude<RefusableKey<A>, ImplementedPackageAction>[];
 
-/** The panel's writes, registered as explicit refusals: NOT_IN_PROTOTYPE plus one console.warn per action name. */
+/** The panel's writes, registered as explicit refusals: NOT_IN_PROTOTYPE plus one console.warn per action name — through
+ *  misc-refusals' refusals<A>(), so tsc checks every name's original result admits `{ ok: false; error }`. */
 export function refusedPackageActions(): Record<(typeof REFUSED_PACKAGE_ACTIONS)[number], ActionImpl> {
-  const warned = new Set<string>();
-  const refuse = (name: string) => () => {
-    if (!warned.has(name)) {
-      warned.add(name);
-      console.warn(`[handoff] ${name} is not in the prototype`);
-    }
-    return { ...NOT_IN_PROTOTYPE };
-  };
-  return Object.fromEntries(REFUSED_PACKAGE_ACTIONS.map((n) => [n, refuse(n)])) as Record<(typeof REFUSED_PACKAGE_ACTIONS)[number], ActionImpl>;
+  return refusals<A>(REFUSED_PACKAGE_ACTIONS) as Record<(typeof REFUSED_PACKAGE_ACTIONS)[number], ActionImpl>;
 }

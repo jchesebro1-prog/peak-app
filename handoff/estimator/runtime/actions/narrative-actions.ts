@@ -103,7 +103,9 @@ export function narrativeActions(store: HandoffStore): { [K in keyof A]: Impl<K>
     }
     // mergeUpsert onto the live part (a renamed part's old SKU lands on the part under its own sku/id).
     const stored = (await store.get<LivePart>("catalog", part.id)) ?? part;
-    const saved: CatalogPart & { id: string } = { ...stored, narrativeText: body, narrativeUpdatedAt: Date.now(), narrativeUpdatedBy: user.name };
+    // mergeUpsert → writePart stamps updatedAt on every write (pricedAt stays: the price did not move)
+    const now = Date.now();
+    const saved: CatalogPart & { id: string } = { ...stored, narrativeText: body, narrativeUpdatedAt: now, narrativeUpdatedBy: user.name, updatedAt: now };
     await store.put("catalog", saved);
     const rows = keyProductLibraryFrom([saved.sku], null, await resolver());
     return { ok: true, row: rows[saved.sku] };

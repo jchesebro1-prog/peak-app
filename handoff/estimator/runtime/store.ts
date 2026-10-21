@@ -2,7 +2,8 @@
  * Estimator handoff — the browser store: an IndexedDB overlay over the read-only slice.
  *
  * The slice (data/*.js → runtime/seed.ts) is the "production snapshot" and is never copied into
- * IndexedDB. Every write lands in the overlay — database `peak-estimator-handoff`, one object
+ * IndexedDB. Every write lands in the overlay — database `peak-estimator-handoff:<the snapshot's
+ * exportedAt>` (dbNameFor: a new package never layers an older package's edits), one object
  * store per collection plus `tombstones` — and every read is `overlay ?? seed`, minus tombstones.
  * **Reset to production snapshot** = `reset()`, which deletes the database.
  *
@@ -21,7 +22,21 @@ import { seedCatalog, seedEstimates, seedFixtures, seedMeta, seedRules, type See
 export type Coll = "quotes" | "catalog" | "fixtures" | "blobs" | "settings" | "reviewComments" | "activity" | "intros" | "meta";
 
 export const COLLS: readonly Coll[] = ["quotes", "catalog", "fixtures", "blobs", "settings", "reviewComments", "activity", "intros", "meta"];
+/** The overlay database's base name; the real one is keyed by the snapshot (dbNameFor). */
 export const DB_NAME = "peak-estimator-handoff";
+/** Longest snapshot key kept in the database name. */
+export const DB_KEY_MAX = 64;
+
+/**
+ * The overlay database for one snapshot: `peak-estimator-handoff:<exportedAt>` (characters outside
+ * [A-Za-z0-9._:-] dropped, ≤ DB_KEY_MAX). A package sliced from another export opens its own, empty database, so
+ * an older package's edits never show over a newer snapshot (they stay in their own database). No exportedAt →
+ * the bare DB_NAME. Pure.
+ */
+export function dbNameFor(exportedAt: unknown): string {
+  const key = typeof exportedAt === "string" ? exportedAt.trim().replace(/[^A-Za-z0-9._:-]/g, "").slice(0, DB_KEY_MAX) : "";
+  return key ? `${DB_NAME}:${key}` : DB_NAME;
+}
 export const DB_VERSION = 1;
 export const TOMBSTONES = "tombstones";
 /** How long openStore waits for IndexedDB before falling back to memory. */
@@ -32,6 +47,8 @@ export const RESET_TIMEOUT_MS = 4000;
 export const RESET_BLOCKED_MESSAGE = "Close other prototype windows and try again.";
 
 export interface HandoffStore {
+  /** The IndexedDB database this store's overlay lives in (dbNameFor the snapshot; DB_NAME when none was given). */
+  readonly dbName: string;
   /** false = in-memory fallback: edits last until the window closes. Flips to false (never back, except
    *  after a successful reset) on a failed write or when another window deletes the database. */
   readonly persistent: boolean;
@@ -166,7 +183,7 @@ function txDone(tx: IDBTransaction): Promise<void> {
   });
 }
 
-function openDb(idb: IDBFactory): Promise<IDBDatabase> {
+function openDb(idb: IDBFactory, name: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     let settled = false;
     const timer = setTimeout(() => {
@@ -175,7 +192,7 @@ function openDb(idb: IDBFactory): Promise<IDBDatabase> {
     }, OPEN_TIMEOUT_MS);
     let r: IDBOpenDBRequest;
     try {
-      r = idb.open(DB_NAME, DB_VERSION);
+      r = idb.open(name, DB_VERSION);
     } catch (e) {
       clearTimeout(timer);
       reject(e);
@@ -221,11 +238,13 @@ async function loadOverlay(db: IDBDatabase, overlay: Map<Coll, Map<string, { id:
 
 /**
  * Opens the store over `seed`. `opts.idb` overrides the IndexedDB factory (null = force the
- * in-memory fallback; Node tests). Never rejects: any IndexedDB failure means memory only.
+ * in-memory fallback; Node tests); `opts.dbName` is the overlay database (main.tsx: dbNameFor the snapshot's
+ * exportedAt; default DB_NAME). Never rejects: any IndexedDB failure means memory only.
  * `opts.resetTimeoutMs` shortens how long reset() waits for other windows (tests).
  */
-export async function openStore(seed: StoreSeed, opts: { idb?: IDBFactory | null; resetTimeoutMs?: number } = {}): Promise<HandoffStore> {
+export async function openStore(seed: StoreSeed, opts: { idb?: IDBFactory | null; resetTimeoutMs?: number; dbName?: string } = {}): Promise<HandoffStore> {
   const idb = opts.idb !== undefined ? opts.idb : typeof indexedDB === "undefined" ? null : indexedDB;
+  const dbName = opts.dbName ?? DB_NAME;
   const resetTimeout = opts.resetTimeoutMs ?? RESET_TIMEOUT_MS;
   const overlay = new Map<Coll, Map<string, { id: string } | null>>(COLLS.map((c) => [c, new Map()]));
   const seedIndex = new Map<Coll, Map<string, { id: string }>>();
@@ -276,7 +295,7 @@ export async function openStore(seed: StoreSeed, opts: { idb?: IDBFactory | null
 
   if (idb) {
     try {
-      const conn = await openDb(idb);
+      const conn = await openDb(idb, dbName);
       db = conn;
       watch(conn);
       seq = await loadOverlay(conn, overlay);
@@ -344,7 +363,7 @@ export async function openStore(seed: StoreSeed, opts: { idb?: IDBFactory | null
       const timer = setTimeout(() => resolve(false), resetTimeout);
       let r: IDBOpenDBRequest;
       try {
-        r = factory.deleteDatabase(DB_NAME);
+        r = factory.deleteDatabase(dbName);
       } catch (e) {
         clearTimeout(timer);
         reject(e);
@@ -405,7 +424,7 @@ export async function openStore(seed: StoreSeed, opts: { idb?: IDBFactory | null
     }
     // Reopen so later writes persist again (an empty database), then write what came in meanwhile.
     try {
-      const conn = await openDb(factory);
+      const conn = await openDb(factory, dbName);
       db = conn;
       watch(conn);
     } catch (e) {
@@ -424,6 +443,7 @@ export async function openStore(seed: StoreSeed, opts: { idb?: IDBFactory | null
   };
 
   const store: HandoffStore = {
+    dbName,
     get persistent() {
       return persistent;
     },

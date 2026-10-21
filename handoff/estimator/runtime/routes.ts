@@ -337,3 +337,7 @@ export function adoptedLocation(href: string, id: string): string | null {
   p.set("id", id);
   return u.pathname + searchOf(p) + routeHash({ name: "estimate", id });
 }
+
+/** The "Acting as" switcher's confirm while the open estimate has unsaved work (the Estimator's own unsaved hold). */
+export const SWITCH_UNSAVED_CONFIRM =
+  "This estimate has unsaved changes. Switch who you're acting as anyway? The screen reloads for that person, so unsaved edits may be lost.";

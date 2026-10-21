@@ -30,14 +30,36 @@ export const canManageRules = (): boolean => can("manage_users", users.current()
 
 export type RulesProps = { isAdmin: boolean; groups: GroupVM[]; venueDoctrine: VenueDoctrine };
 
-/** EstimatingRulesPage: each group's rows with their current value and EFFECTIVE default (#232), plus the venue doctrine. */
+/**
+ * Estimating Rules the prototype leaves off the screen: they price Peak's service quotes (flame test, repair,
+ * inspection — not in the package), the flights-over-drive travel those quotes use, and the customer portal — never a
+ * system estimate. Hidden, not deleted: their stored values and defaults are untouched, and Export / Import still carry
+ * every rate. What stays prices estimates: System design, tiers, sizing, catalog margin, fixtures, wire, cable, labor,
+ * curtains, bonuses, the drive-distance knobs (travel.roadFactor / travel.mph → the venue's travel) and freight.
+ */
+export const PROTOTYPE_HIDDEN_RULE_GROUPS: readonly string[] = ["flame", "repair", "inspection"];
+export const PROTOTYPE_HIDDEN_RULE_ITEMS: readonly string[] = [
+  "travel.flyThreshold", "travel.airfarePerPerson", "travel.hotelPerNight", "travel.perDiemPerDay", "travel.carPerDay",
+  "travel.flyTravelHoursEachWay", "travel.flyHoursPerDay", "travel.fly",
+  "portal.validityDays", "portal.browseMinQuotes", "portal.browseWindowMonths", "portal.staleCostMonths",
+];
+/** The registry groups the prototype shows, each without its hidden items (a group left empty goes). Pure. */
+export function prototypeRuleGroups<G extends { key: string; items: ReadonlyArray<{ id: string }> }>(groups: readonly G[]): G[] {
+  return groups
+    .filter((g) => !PROTOTYPE_HIDDEN_RULE_GROUPS.includes(g.key))
+    .map((g) => ({ ...g, items: g.items.filter((it) => !PROTOTYPE_HIDDEN_RULE_ITEMS.includes(it.id)) }))
+    .filter((g) => g.items.length > 0);
+}
+
+/** EstimatingRulesPage: each group's rows with their current value and EFFECTIVE default (#232), plus the venue doctrine —
+ *  the service-quote and portal rules hidden (prototypeRuleGroups). */
 export async function buildRulesProps(store: HandoffStore): Promise<RulesProps> {
   await refreshPortsFromStore(store);
   const isAdmin = canManageRules();
   const settings = isAdmin ? settingsView() : null;
   const groups: GroupVM[] = isAdmin
     ? await Promise.all(
-        GROUPS.map(async (g) => ({
+        prototypeRuleGroups(GROUPS).map(async (g) => ({
           key: g.key,
           label: g.label,
           live: g.live,

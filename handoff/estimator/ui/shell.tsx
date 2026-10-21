@@ -11,7 +11,8 @@ import EstimatorClient from "@/app/(app)/estimator/estimator-client";
 import type { EstimatorProps } from "@/app/(app)/estimator/types";
 import { currentRoute, normalizeLocation, subscribeLocation } from "../shims/next-navigation";
 import { onRefresh } from "../runtime/router";
-import { NAV_ROUTES, NEW_ESTIMATE_ID, NOT_IN_PROTOTYPE_COPY, routeHash, sameRoute, type Route } from "../runtime/routes";
+import { NAV_ROUTES, NEW_ESTIMATE_ID, NOT_IN_PROTOTYPE_COPY, routeHash, sameRoute, SWITCH_UNSAVED_CONFIRM, type Route } from "../runtime/routes";
+import { hasUnsavedHold } from "@/lib/popout/hold";
 import { users } from "../runtime/ports";
 import { buildEstimatorProps } from "../runtime/props/estimator";
 import { RESET_COPY, runReset } from "../runtime/reset";
@@ -320,6 +321,12 @@ export function Shell({ store }: { store: HandoffStore }) {
     document.getElementById("root")?.setAttribute("data-handoff-ready", "");
   }, []);
   const pick = (id: string) => {
+    // The open estimate's unsaved work (the Estimator's own unsaved hold — edits since the last Save, or a new estimate
+    // with lines): ask first. Cancel leaves the person as they were (the controlled select snaps back).
+    if (id !== users.current().id && hasUnsavedHold() && !window.confirm(SWITCH_UNSAVED_CONFIRM)) {
+      setViewerId(users.current().id);
+      return;
+    }
     users.setCurrent(id);
     setViewerId(users.current().id);
   };

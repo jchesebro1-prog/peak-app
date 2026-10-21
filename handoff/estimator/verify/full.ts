@@ -21,14 +21,15 @@
  *      pricing.md §12). Feature coverage is STRICT: a feature the sample doesn't cover fails the run (the production
  *      run must prove all four). `--allow-missing-features` (dev runs: the dev slice has no rack or curtain + track
  *      estimate) reports them instead.
- *   6. The edit → persist → Reset cycle in the UI: qty +1 → Save → a reload keeps it → Reset to production snapshot →
- *      the seed qty and header total are back.
+ *   6. The edit → persist → Reset cycle in the UI: qty +1 → Save → a reload keeps it → a copy of the package with another
+ *      meta.exportedAt opens its own database without the edit (and the edit is still here) → Reset to production
+ *      snapshot → the seed qty and header total are back.
  *   7. On PASS only, the zip is rewritten (it now carries the screenshots) and read back: same entries as the folder,
  *      every entry under peak-estimator-handoff/ (ZIP_ROOT), CONFIDENTIAL.txt first. The zip is deleted when --full
  *      starts and stays deleted on FAIL — only a passing --full produces it, so an unverified zip never sits there.
  * Result: output/verify/full.json.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import JSZip from "jszip";
@@ -41,7 +42,7 @@ import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { goldenFileName } from "../../../scripts/estimating-golden";
 import { canonicalTotals } from "../runtime/estimate-totals";
-import { auditPackage, GOLDEN_DIR, SCREENSHOT_DIR, writeZip, ZIP_ROOT, zipDateOf, zipEntries, zipName, zipPathFor, type PackageAudit } from "../package";
+import { auditPackage, GOLDEN_DIR, readSliceGlobals, SCREENSHOT_DIR, writeZip, ZIP_ROOT, zipDateOf, zipEntries, zipName, zipPathFor, type PackageAudit } from "../package";
 import {
   clickButton, estimateUrl, firstQtyInput, loadSliceData, newPage, newSink, openUrl, pageHasText, printSmoke, readHeaderTotal, smoke,
   SMOKE_ALLOWED_UNREGISTERED, unregisteredOn, VERIFY_DIR, waitFor, waitMounted, type PageSink, type SliceQuote, type SmokeResult,
@@ -254,6 +255,28 @@ export async function fullCheck(pkgDir: string, opts: { allowMissingFeatures: bo
       const qtyAfter = await firstQtyInput(page);
       const qty1 = qtyAfter ? Number(await qtyAfter.evaluate((i) => i.value)) : NaN;
       step("after a reload the edited quantity persisted", qty1 === qty0 + 1, `${qty1} vs ${qty0 + 1}`);
+      // 6b — the same package sliced from another export (another meta.exportedAt) opens its own, clean database
+      // (runtime/store.ts dbNameFor): this package's edit never shows over the other snapshot, and stays here.
+      const other = path.join(VERIFY_DIR, "snapshot-b");
+      rmSync(other, { recursive: true, force: true });
+      cpSync(pkgDir, other, { recursive: true, filter: (src) => !src.startsWith(path.join(pkgDir, SCREENSHOT_DIR)) });
+      const metaFile = path.join(other, "data", "meta.js");
+      const meta = (readSliceGlobals(other, ["meta.js"]).PEAK_META ?? {}) as { exportedAt?: string | null };
+      writeFileSync(metaFile, `window.PEAK_META = ${JSON.stringify({ ...meta, exportedAt: `${meta.exportedAt ?? "none"}-b` })};\n`);
+      const dbNameHere = await page.evaluate(() => (window as unknown as { __peakHandoff: { store: { dbName: string } } }).__peakHandoff.store.dbName);
+      await openUrl(page, estimateUrl(pathToFileURL(path.join(other, "index.html")).href, target.id));
+      await waitMounted(page, sink);
+      const dbNameThere = await page.evaluate(() => (window as unknown as { __peakHandoff: { store: { dbName: string } } }).__peakHandoff.store.dbName);
+      const qtyOther = await firstQtyInput(page);
+      const qtyB = qtyOther ? Number(await qtyOther.evaluate((i) => i.value)) : NaN;
+      step("a package from another snapshot opens its own database, without this one's edit", dbNameThere !== dbNameHere && qtyB === qty0, `${dbNameThere} vs ${dbNameHere}; qty ${qtyB} vs ${qty0}`);
+      await note(page);
+      await openUrl(page, url);
+      await waitMounted(page, sink);
+      const qtyHere = await firstQtyInput(page);
+      const qtyH = qtyHere ? Number(await qtyHere.evaluate((i) => i.value)) : NaN;
+      step("…and this package's edit is still here", qtyH === qty0 + 1, `${qtyH} vs ${qty0 + 1}`);
+      rmSync(other, { recursive: true, force: true });
       await page.click("[data-handoff-reset]");
       await waitFor(() => page.evaluate(() => !!document.querySelector("[data-handoff-reset-confirm]")), 3000);
       await Promise.all([page.waitForNavigation({ waitUntil: "load", timeout: 20_000 }), page.click("[data-handoff-reset-confirm]")]);

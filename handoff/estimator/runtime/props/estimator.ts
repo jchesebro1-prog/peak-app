@@ -11,7 +11,8 @@ import { DEFAULT_PACKAGE_SELECTION, normalizePackageSelection } from "@/lib/esti
 import { allAssembliesFrom } from "@/lib/fixture-assemblies";
 import { fabricAreaRateOf, sewingPctFrom, SEWING_PCT_ID } from "@/lib/design/curtain-pricing";
 import { isFabricPart } from "@/lib/fabric-part";
-import { normalizeQuotePipeline, resolvePipelines } from "@/lib/pipelines";
+import { resolvePipelines } from "@/lib/pipelines";
+import { quoteRepo } from "../quote-repo";
 import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/fixture-rates";
 import { DEFAULT_FREIGHT_RULE, FREIGHT_RATE_IDS, type FreightRule } from "@/lib/freight-rule";
 import { sanitizeTrackSeriesBlob, seriesSkus, TRACK_SERIES_BLOB } from "@/lib/track-series";
@@ -224,10 +225,9 @@ export async function buildEstimatorProps(store: HandoffStore, quoteId: string |
 
   const settings = settingsView();
   const pipelines = resolvePipelines(settings as Parameters<typeof resolvePipelines>[0]);
-  // stores/quotes get(): a quote reads with its pipeline and a stage matching its status (legacy keys convert here).
-  // `get` hands back a copy, so normalizing in place never touches the store.
-  const raw = quoteId ? await store.get<QuoteDoc>("quotes", quoteId) : undefined;
-  const q = raw ? normalizeQuotePipeline(raw as QuoteDoc & { status: string }, pipelines) : null;
+  // stores/quotes get(), through the same repo the actions use (quoteRepo): a quote reads with its pipeline and a stage
+  // matching its status (legacy keys convert here), and a doc with no status reads as "draft" — on a copy, never the store.
+  const q = quoteId ? ((await quoteRepo(store).get(quoteId)) as unknown as QuoteDoc | null) : null;
   // The page redirects a service quote to its own builder (estimatorShouldRedirect); the slice holds system estimates only.
   // The catalog collection is live parts only: retired-SKU stubs live in store.catalogRenames, for the resolver alone.
   const catalogRows = await liveCatalog(store);

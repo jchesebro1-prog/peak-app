@@ -323,6 +323,12 @@ export async function assembliesCheck(pkgDir: string): Promise<AssembliesResult>
       sheets: [...document.querySelectorAll("[data-sheet]")].map((s) => s.getAttribute("data-sheet")),
     }));
     step("…under the page's title, with the schedule and power sheets, the device in the schedule", sheet.title && sheet.svg > 200 && ["elevation", "schedule", "power"].every((k) => sheet.sheets.includes(k)) && [partC.sku, partC.sku.split(":").pop() ?? partC.sku].some((t) => sheet.schedule.includes(t)), `${sheet.sheets.join(",")}; svg ${sheet.svg} chars; schedule: ${sheet.schedule.replace(/\s+/g, " ").slice(0, 200)}`);
+    const links = await page.evaluate(() => ({
+      hrefs: [...document.querySelectorAll("[data-handoff-rack] a[href]")].map((a) => a.getAttribute("href") ?? ""),
+      downloads: (document.querySelector("[data-handoff-rack-downloads]") as HTMLElement | null)?.innerText ?? "",
+    }));
+    step("the rack page has no dead link: Back is #/assemblies, the .zip / .csv downloads say “not part of the prototype” inline",
+      links.hrefs.every((h) => h.startsWith("#/")) && links.hrefs.includes("#/assemblies") && /not part of the prototype/i.test(links.downloads), `${links.hrefs.join(", ")} · ${links.downloads}`);
     await shot(page, "7-rack-sheets");
     step("the Assemblies tab stays current on a rack's sheets", (await page.evaluate(() => document.querySelector('[data-handoff-nav="assemblies"]')?.getAttribute("aria-current"))) === "page");
     // an unknown rack id reads as the page's notFound
@@ -387,7 +393,7 @@ export function printAssemblies(r: AssembliesResult): void {
   console.log(`  foreign requests: ${r.foreignRequests.length}; failed local files: ${r.failedLocal.length}`);
   for (const u of [...r.foreignRequests, ...r.failedLocal]) console.log(`    ${u}`);
   if (r.consoleErrors.length) {
-    console.log(`  console errors (informational): ${r.consoleErrors.length}`);
+    console.log(`  console errors (all but the benign ones are page errors too): ${r.consoleErrors.length}`);
     for (const e of r.consoleErrors.slice(0, 10)) console.log(`    ${e.slice(0, 200)}`);
   }
   console.log(`  screenshots: ${r.screenshots.map((f) => path.relative(ROOT, f)).join(", ")}`);

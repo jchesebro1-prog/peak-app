@@ -181,8 +181,13 @@ export async function exportJSON(store: HandoffStore, now: Date = new Date()): P
   return JSON.stringify(out, null, 2);
 }
 
-/** pricing.ts exportFileName(): Peak_estimating_rules_YYYYMMDD.<ext> (local date, as the app's server). */
+/**
+ * pricing.ts exportFileName(): Peak_estimating_rules_YYYYMMDD.<ext>. The app's server stamps its own local date; the
+ * prototype runs in whatever time zone the viewer's browser is in, so it stamps the business's day — America/Chicago,
+ * the zone every Peak date prints in — not the browser's.
+ */
 export function exportFileName(ext: "csv" | "json", d: Date = new Date()): string {
-  const p = (n: number): string => (n < 10 ? "0" + n : "" + n);
-  return `Peak_estimating_rules_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}.${ext}`;
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(d);
+  const part = (t: string) => parts.find((x) => x.type === t)?.value ?? "";
+  return `Peak_estimating_rules_${part("year")}${part("month")}${part("day")}.${ext}`;
 }

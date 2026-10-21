@@ -13,7 +13,8 @@
  */
 import { appRouter, normalizeLocation } from "./shims/next-navigation"; // patches history before the app mounts
 import { createRoot } from "react-dom/client";
-import { openStore, seedFromSlice } from "./runtime/store";
+import { dbNameFor, openStore, seedFromSlice } from "./runtime/store";
+import { seedMeta } from "./runtime/seed";
 import { configurePorts, refreshPortsFromStore } from "./runtime/ports";
 import { registerActions } from "./runtime/actions-registry";
 import { actionRegistrations } from "./runtime/actions/registrations";
@@ -25,7 +26,8 @@ import { Shell } from "./ui/shell";
 async function boot() {
   const el = document.getElementById("root");
   if (!el) throw new Error("#root is missing from index.html");
-  const store = await openStore(seedFromSlice());
+  // The overlay database is keyed by the snapshot, so a newer package never layers an older one's edits (dbNameFor).
+  const store = await openStore(seedFromSlice(), { dbName: dbNameFor(seedMeta().exportedAt) });
   configurePorts({ store });
   // The ports' rate / settings snapshot starts as the store's (seed ∪ this browser's overlay — an Estimating Rules edit
   // made earlier), never the bare slice; every writer re-reads it after a write (Task 10).

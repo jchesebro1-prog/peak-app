@@ -4,7 +4,8 @@
  * global is absent (no slice built yet), so the app still mounts.
  *
  *   data/rules.js      window.PEAK_RULES      { settings, blobs }
- *   data/team.js       window.PEAK_TEAM       active users (no contact details)
+ *   data/team.js       window.PEAK_TEAM       the roster: active users (no contact details) and inactive ones as
+ *                                             { id, name, roles, status } only (names still resolve)
  *   data/customers.js  window.PEAK_CUSTOMERS  companies / sites / contacts the estimates reference
  *   data/fixtures.js   window.PEAK_FIXTURES   fixture / System / Hardware / rack records
  *   data/catalog-N.js  window.PEAK_CATALOG    catalog parts (pushed chunk by chunk)

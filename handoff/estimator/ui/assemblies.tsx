@@ -7,7 +7,7 @@
  * as a server re-render would — the builder keeps its client state across it. Plan: PR 2 Task 9.
  */
 import { useCallback, type CSSProperties } from "react";
-import Link from "next/link";
+import { NOT_IN_PROTOTYPE_COPY } from "../runtime/routes";
 import FixtureBuilder from "@/app/(app)/design/assemblies/fixture-builder";
 import { PrintButton } from "@/components/letter/print-button";
 import { RackSheets } from "@/components/rack/RackSheets";
@@ -32,7 +32,7 @@ export function AssembliesScreen({ store, onReady }: { store: HandoffStore; onRe
   return (
     <div style={FILL} data-handoff-assemblies="">
       <div className="pk-content" style={{ maxWidth: 1080 }}>
-        <Link href="/design" style={{ fontSize: 12.5, color: "#8c919c", textDecoration: "none" }}>← Design</Link>
+        {/* The app's "← Design" link is left out: the Design hub is not in the prototype. */}
         <h1 style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em", margin: "7px 0 4px" }}>Assembly Builder</h1>
         <p style={{ color: "#8c919c", fontSize: 13, margin: "0 0 16px", maxWidth: 700 }}>
           Fixtures, systems, hardware and racks in one list. Everything prices from the live catalog — a price-list import re-prices them at once.
@@ -76,17 +76,19 @@ export function RackScreen({ store, id, onReady }: { store: HandoffStore; id: st
     );
   }
   const accent = (settingsView().accent as string) || "#b08d4a";
-  const enc = encodeURIComponent(data.rec.id);
   return (
     <div style={FILL} data-handoff-rack={data.rec.id}>
       <div className="pk-content" style={{ maxWidth: "none", padding: "22px 24px 64px" }}>
         <style>{RACK_PREVIEW_CSS}</style>
         <div className="pk-doc-toolbar pk-no-print" style={{ maxWidth: "none", justifyContent: "flex-start", flexWrap: "wrap", gap: 14 }}>
-          <Link href="/design/assemblies" style={LINK}>← Back to assemblies</Link>
+          <a href="#/assemblies" style={LINK}>← Back to assemblies</a>
           <span style={{ fontSize: 13, fontWeight: 600, fontFamily: "var(--font-ui)" }}>{`Rack submittal — ${data.rec.label}`}</span>
           <span style={{ marginLeft: "auto", display: "inline-flex", gap: 14, alignItems: "center" }}>
-            <a href={`/api/racks/${enc}/submittal`} style={LINK}>Download submittal (.zip)</a>
-            <a href={`/api/racks/${enc}/submittal?part=csv`} style={LINK}>Schedule (.csv)</a>
+            {/* The app's "Download submittal (.zip)" and "Schedule (.csv)" are server routes (the zip merges datasheet PDFs):
+                not in the prototype. Said inline, with no dead link; the sheets print with the browser. */}
+            <span data-handoff-rack-downloads="" style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "#8c919c" }}>
+              Submittal .zip and schedule .csv: {NOT_IN_PROTOTYPE_COPY.toLowerCase()} — print the sheets instead
+            </span>
             <PrintButton accent={accent} />
           </span>
         </div>

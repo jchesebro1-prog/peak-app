@@ -33,10 +33,12 @@ import { quoteOwnerName } from "@/lib/review-limits";
 import { sameName } from "@/lib/quote-approval-rules";
 import { canChangeQuotePeople, PEOPLE_LOCKED_AFTER_SEND } from "@/lib/quote-people-lock";
 import { NOT_IN_PROTOTYPE, type ActionImpl } from "../actions-registry";
+import { formRefusals, refusals, type RefusableKey, type VoidKey } from "./misc-refusals";
 import { refresh } from "../router";
 import type { HandoffStore } from "../store";
 import { clock, customers, refreshPortsFromStore, resolveTierFor, settingsView, users, type TeamUser } from "../ports";
-import { bonusRatesNow, liveCatalog } from "../readers";
+import { bonusRatesNow, bySkuResolver, liveCatalog } from "../readers";
+import { nextPricedAt } from "@/lib/catalog-books";
 import { nextStepFor } from "../props/estimator";
 import { quoteRepo } from "../quote-repo";
 import { isApprovalGateRefusal, resolveSaveStatusChange, STAGES, statusFailureMessage } from "../quote-model";
@@ -68,16 +70,19 @@ export type ImplementedEstimatorAction =
   | "copySystemToEstimateAction"
   | "searchQuotesAction";
 
-/** Registered as refusals (NOT_IN_PROTOTYPE), never as an unregistered call. */
-export const REFUSED_ESTIMATOR_ACTIONS = [
+/** Registered as refusals (NOT_IN_PROTOTYPE), never as an unregistered call — each one's original result admits
+ *  `{ ok: false; error }` (tsc: RefusableKey). */
+export const REFUSED_ESTIMATOR_RESULT_ACTIONS = [
   "draftQuoteScopeAction",
   "addQuoteTaskAction",
-  "removeQuoteTaskAction",
-  "updateQuoteTaskAction",
-  "setQuoteTaskStatusAction",
   "applyQuoteTemplateAction",
   "declinePortalAcceptanceAction",
-] as const satisfies readonly (keyof A)[];
+] as const satisfies readonly RefusableKey<A>[];
+/** The quote-task `<form action>` writers whose originals resolve to void: refused by doing nothing (one console.warn),
+ *  as their signature says (tsc: VoidKey). */
+export const REFUSED_ESTIMATOR_FORMS = ["removeQuoteTaskAction", "updateQuoteTaskAction", "setQuoteTaskStatusAction"] as const satisfies readonly VoidKey<A>[];
+/** Every refused Estimator action. */
+export const REFUSED_ESTIMATOR_ACTIONS = [...REFUSED_ESTIMATOR_RESULT_ACTIONS, ...REFUSED_ESTIMATOR_FORMS] as const;
 
 /** The Next.js permission error requirePerm would throw, as the typed refusal these actions return instead. */
 const NO_PERMISSION = "You don't have permission to do that.";
@@ -192,14 +197,21 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
     if (!desc || !Number.isFinite(input.cost) || input.cost < 0 || !Number.isFinite(input.list) || input.list <= 0) {
       return { ok: false, error: "Catalog parts need a description, cost, and sell price." };
     }
-    if ((await liveCatalog(store)).some((p) => p.sku === sku)) {
+    // catalogGet(sku): a live part with this SKU, or a retired SKU that follows its rename to one (#304) — either refuses,
+    // so a custom part never rewrites a real one (a deleted SKU reads as absent, so re-creating one is fine).
+    if (bySkuResolver(await liveCatalog(store), store.catalogRenames)(sku)) {
       return { ok: false, error: `${sku} is already in the catalog — add it with "+ Add part from catalog", or use a different SKU.` };
     }
     const mfr = input.mfr.trim();
     const mpn = input.manufacturerPartNumber.trim();
+    // writePart: a new part is stamped updatedAt now, and pricedAt now (nextPricedAt with no existing part)
+    const now = clock.now();
+    const pricedAt = nextPricedAt(null, { cost: input.cost, list: input.list }, now);
     await store.put("catalog", {
       id: sku,
       sku,
+      updatedAt: now,
+      ...(pricedAt != null ? { pricedAt } : {}),
       desc,
       category: input.category.trim() || "Custom Parts",
       unit: input.unit.trim() || "ea",
@@ -555,15 +567,8 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
   };
 }
 
-/** The refusals, as registry impls (each returns a fresh NOT_IN_PROTOTYPE). */
+/** The refusals, as registry impls — through misc-refusals' refusals<A>() (a fresh NOT_IN_PROTOTYPE) and formRefusals<A>()
+ *  (void), one console.warn per name; tsc checks each name against its original's result type. */
 export function refusedEstimatorActions(): Record<(typeof REFUSED_ESTIMATOR_ACTIONS)[number], ActionImpl> {
-  const warned = new Set<string>();
-  const refuse = (name: string) => () => {
-    if (!warned.has(name)) {
-      warned.add(name);
-      console.warn(`[handoff] ${name} is not in the prototype`);
-    }
-    return { ...NOT_IN_PROTOTYPE };
-  };
-  return Object.fromEntries(REFUSED_ESTIMATOR_ACTIONS.map((n) => [n, refuse(n)])) as Record<(typeof REFUSED_ESTIMATOR_ACTIONS)[number], ActionImpl>;
+  return { ...refusals<A>(REFUSED_ESTIMATOR_RESULT_ACTIONS), ...formRefusals<A>(REFUSED_ESTIMATOR_FORMS) } as Record<(typeof REFUSED_ESTIMATOR_ACTIONS)[number], ActionImpl>;
 }

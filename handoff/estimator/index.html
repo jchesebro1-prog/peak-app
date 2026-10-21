@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" style="--accent: #b08d4a; --accent-contrast: #16181b; --font-public-sans: &quot;Public Sans&quot;; --font-plex-mono: &quot;IBM Plex Mono&quot;">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -10,6 +10,16 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./app/app.css" />
+    <!-- The app's font and accent variables (Quartzite sets them on <html> from next/font and Settings → Branding).
+         A :root rule, not an <html style> attribute, so a host that rewrites <html> keeps them. -->
+    <style>
+      :root {
+        --accent: #b08d4a;
+        --accent-contrast: #16181b;
+        --font-public-sans: "Public Sans";
+        --font-plex-mono: "IBM Plex Mono";
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

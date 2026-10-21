@@ -56,7 +56,7 @@ type Refusal = { ok: false; error: string };
 /** The actions of module M whose original result type admits a refusal (`{ ok: false; error: string }`). */
 export type RefusableKey<M> = { [K in keyof M]: M[K] extends (...a: never[]) => Promise<infer R> ? (Refusal extends R ? K : never) : never }[keyof M];
 /** The actions of module M that resolve to void (`<form action>` writers). */
-type VoidKey<M> = { [K in keyof M]: M[K] extends (...a: never[]) => Promise<infer R> ? ([R] extends [void] ? K : never) : never }[keyof M];
+export type VoidKey<M> = { [K in keyof M]: M[K] extends (...a: never[]) => Promise<infer R> ? ([R] extends [void] ? K : never) : never }[keyof M];
 
 const warned = new Set<string>();
 function warnOnce(name: string): void {
@@ -79,7 +79,7 @@ export function refusals<M>(names: readonly RefusableKey<M>[]): Record<string, A
 }
 
 /** `<form action>` writers that resolve to void: warn and do nothing. */
-function formRefusals<M>(names: readonly VoidKey<M>[]): Record<string, ActionImpl> {
+export function formRefusals<M>(names: readonly VoidKey<M>[]): Record<string, ActionImpl> {
   return Object.fromEntries(
     names.map((n) => [
       n,
