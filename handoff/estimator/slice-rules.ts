@@ -13,6 +13,8 @@ export const CATALOG_FIELDS = [
   "powerCapacityWatts", "mountFace", "airflow", "rackNotes",
   "narrativeText", "narrativeUpdatedAt", "narrativeUpdatedBy", "flameRating", "oz", "ozBasis", "note",
   "discipline", "role", "trade", "updatedAt",
+  // cut sheets: a fabric whose oz is per linear yard (ozBasis "lin-yd") needs its bolt width to weigh a curtain
+  "boltWidthIn",
 ] as const;
 
 /** Settings blobs (table `blobs`) the pricing/estimating code reads. */
@@ -28,16 +30,63 @@ export const SETTINGS_FIELDS = [
 ] as const;
 
 /** Every quote field the Estimator page reads. Excluded on purpose: shareLink shareOpens packageFiles
- *  estimateEmails bid vendorQuotes assistDraft portal* leadId — and, as data minimization (a controller
- *  decision, to be confirmed by Jeff later): clientResponses (third-party respondent emails),
- *  bonusRecord and estimatorBonusSplit (staff pay). The prototype does not need them to price an estimate. */
+ *  estimateEmails bid assistDraft portal* leadId pdf reviewComments emailSending wonRev — and, as data
+ *  minimization (a controller decision, to be confirmed by Jeff later): clientResponses (third-party respondent
+ *  emails), bonusRecord and estimatorBonusSplit (staff pay). The prototype does not need them to price an
+ *  estimate. `vendorQuotes` ships render-only (VENDOR_QUOTE_FIELDS); `revisions`, `review`, `pdfOptions`,
+ *  `packageSelection` and `history` are allow-listed one level down too (sanitizeQuote). */
 export const QUOTE_FIELDS = [
   "id", "estNo", "estSuffix", "status", "quoteType", "source", "pipelineId", "stage", "name", "category",
   "customer", "customerId", "locationId", "contactName", "quoteNote", "assumptions", "installTimeframe",
   "paymentTerms", "coverSummary", "notIncluded",
   "owner", "preparedBy", "revisions", "history", "updatedAt", "createdAt", "pricingTier", "tierMargin", "spec",
-  "pdfOptions", "packageSelection", "review", "groups",
+  "pdfOptions", "packageSelection", "review", "groups", "vendorQuotes",
 ] as const;
+
+/** One revision (src/lib/stores/quotes.ts QuoteRevision) — the priced snapshot and its frozen header. Dropped:
+ *  pdfBlobPath / pdfSavedAt (a private Blob pathname), the service payloads (flameTest repair inspection
+ *  consulting rental — system estimates only ship). `vendorQuotes` and `docFields` are allow-listed again. */
+export const REVISION_FIELDS = [
+  "rev", "at", "by", "reason", "note", "name", "customerId", "value", "margin", "pricingTier", "tierMargin",
+  "status", "quoteType", "spec", "docFields", "vendorQuotes",
+] as const;
+
+/** A revision's frozen header (QuoteRevisionDocFields / revisionDocFields) — only the fields the document loaders
+ *  print. Dropped: packageFiles (private Blob pathnames of the drawings), bid and awardedPartyId (bidders are not
+ *  in the prototype), portalFirm (portal data never ships). */
+export const DOC_FIELDS = [
+  "customer", "locationId", "contactName", "quoteNote", "assumptions", "installTimeframe", "preparedBy", "owner",
+  "termsText", "paymentTerms", "pdfOptions", "source", "coverSummary", "notIncluded", "packageSelection",
+  "revNo", "issuedAt",
+] as const;
+
+/** QuoteReview (the approval gate's record). */
+export const REVIEW_FIELDS = [
+  "state", "reviewer", "submittedBy", "submittedAt", "decidedBy", "decidedAt", "note", "method", "auto", "approvedAgainst",
+] as const;
+
+/** QuotePdfOptions (src/lib/quote-pdf/pdf-options.ts). */
+export const PDF_OPTIONS_FIELDS = [
+  "detail", "pdfQty", "pdfNotes", "pdfPrices", "pdfCover", "pdfTerms", "pdfOptions", "pdfItemizedAppendix", "pdfCutSheets",
+] as const;
+
+/** PackageSelection (src/lib/estimate-output/package-selection.ts). */
+export const PACKAGE_SELECTION_FIELDS = ["estimatePdf", "coverPdf", "drawings", "excludedDatasheets"] as const;
+
+/** QuoteHistoryEntry. */
+export const HISTORY_FIELDS = ["at", "from", "to"] as const;
+
+/** A vendor quote (src/app/(app)/estimator/types.ts VendorQuote) — only what the section card, the customer
+ *  document, the BOM / parts list and the Vendors card RENDER. Dropped: attachment (data-URL bytes or a private
+ *  Blob pathname), link (a vendor portal URL can carry a token), terms and notes (internal — the staff Build view's
+ *  amber box shows them, the customer document never does), fromThreadId (an email thread), extracted (the Read the
+ *  PDF run), vendorCompanyId (the vendor company is not in the package; the card falls back to `vendor`). */
+export const VENDOR_QUOTE_FIELDS = [
+  "id", "vendor", "quoteNumber", "description", "lines", "total", "totalSource", "includesFreight", "display", "addedAt",
+] as const;
+
+/** VendorQuoteLine — `extractedIndex` (an index into the dropped `extracted`) is not kept. */
+export const VENDOR_LINE_FIELDS = ["id", "description", "manufacturerPartNumber", "qty", "unit", "amount"] as const;
 
 /** FixtureRecord shape (src/lib/fixture-assemblies.ts) — anything else on a subassemblies doc is dropped. */
 export const FIXTURE_FIELDS = [
@@ -130,18 +179,67 @@ export function pickAndScrub(doc: Record<string, unknown>, allow: readonly strin
   return out;
 }
 
-/** Live (not deleted), non-Daylite system quotes with at least one line item, sorted by id. */
+type Rec = Record<string, unknown>;
+const isRec = (v: unknown): v is Rec => !!v && typeof v === "object" && !Array.isArray(v);
+/** pickFields on an object (anything else — null, a string — passes through unchanged). */
+const pickObj = (v: unknown, allow: readonly string[]) => (isRec(v) ? pickFields(v, allow) : v);
+/** pickObj over every element of an array (a non-array passes through unchanged). */
+const pickEach = (v: unknown, allow: readonly string[], each?: (o: Rec) => Rec) =>
+  Array.isArray(v) ? v.map((x) => { const o = pickObj(x, allow); return each && isRec(o) ? each(o) : o; }) : v;
+
+/** One vendor quote, render fields only (VENDOR_QUOTE_FIELDS / VENDOR_LINE_FIELDS). */
+export function sanitizeVendorQuotes(v: unknown): unknown {
+  return pickEach(v, VENDOR_QUOTE_FIELDS, (o) => ("lines" in o ? { ...o, lines: pickEach(o.lines, VENDOR_LINE_FIELDS) } : o));
+}
+
+/** A revision's frozen header — DOC_FIELDS, its pdfOptions / packageSelection allow-listed again. */
+export function sanitizeDocFields(df: unknown): unknown {
+  if (!isRec(df)) return df;
+  const o = pickFields(df, DOC_FIELDS);
+  if ("pdfOptions" in o) o.pdfOptions = pickObj(o.pdfOptions, PDF_OPTIONS_FIELDS);
+  if ("packageSelection" in o) o.packageSelection = pickObj(o.packageSelection, PACKAGE_SELECTION_FIELDS);
+  return o;
+}
+
+/** One revision — REVISION_FIELDS, then its docFields and vendorQuotes allow-listed again. */
+export function sanitizeRevision(r: unknown): unknown {
+  if (!isRec(r)) return r;
+  const o = pickFields(r, REVISION_FIELDS);
+  if ("docFields" in o) o.docFields = sanitizeDocFields(o.docFields);
+  if ("vendorQuotes" in o) o.vendorQuotes = sanitizeVendorQuotes(o.vendorQuotes);
+  return o;
+}
+
+/** A quote doc as it ships: QUOTE_FIELDS, then every nested record that can carry private data allow-listed again
+ *  (revisions, vendorQuotes, review, pdfOptions, packageSelection, history). `spec` is the priced payload itself and
+ *  is deep-scrubbed by the slicer, not allow-listed. */
+export function sanitizeQuote(doc: Rec): Rec {
+  const o = pickFields(doc, QUOTE_FIELDS);
+  if ("revisions" in o) o.revisions = Array.isArray(o.revisions) ? o.revisions.map(sanitizeRevision) : o.revisions;
+  if ("vendorQuotes" in o) o.vendorQuotes = sanitizeVendorQuotes(o.vendorQuotes);
+  if ("review" in o) o.review = pickObj(o.review, REVIEW_FIELDS);
+  if ("pdfOptions" in o) o.pdfOptions = pickObj(o.pdfOptions, PDF_OPTIONS_FIELDS);
+  if ("packageSelection" in o) o.packageSelection = pickObj(o.packageSelection, PACKAGE_SELECTION_FIELDS);
+  if ("history" in o) o.history = pickEach(o.history, HISTORY_FIELDS);
+  return o;
+}
+
+/** Sources that never ship: Daylite history, and the customer portal's self-built catalog quotes (portal data). */
+export const EXCLUDED_SOURCES = ["daylite", "portal-catalog"] as const;
+
+/** Live (not deleted) system quotes with at least one line item — not Daylite history, not portal-built
+ *  (EXCLUDED_SOURCES) — sanitized (sanitizeQuote), sorted by id. */
 export function selectEstimates(rows: DocRow[]): QuoteDoc[] {
   const out: QuoteDoc[] = [];
   for (const row of rows) {
     if (row.deleted) continue;
     const doc = (row.doc ?? {}) as Record<string, unknown>;
     if (((doc.quoteType as string | undefined) ?? "system") !== "system") continue;
-    if (doc.source === "daylite") continue;
+    if ((EXCLUDED_SOURCES as readonly unknown[]).includes(doc.source)) continue;
     const sections = (doc.spec as { sections?: unknown } | undefined)?.sections;
     if (!Array.isArray(sections)) continue;
     if (!sections.some((s) => Array.isArray((s as { items?: unknown }).items) && ((s as { items: unknown[] }).items.length > 0))) continue;
-    out.push({ ...pickFields(doc, QUOTE_FIELDS), id: row.id });
+    out.push({ ...sanitizeQuote(doc), id: row.id });
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }

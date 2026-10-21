@@ -10,9 +10,10 @@
  * never writes the zip: it deletes any <out>.zip first (that zip no longer matches the folder), and only a passing
  * handoff:verify --full writes output/peak-estimator-handoff.zip, so an unverified zip never sits there looking done.
  * The slice (handoff:slice) and photos normally live in <out>/data and <out>/images already;
- * --data / --images copy them in from elsewhere. Only the files images/manifest.json references (plus the manifest)
- * ship; anything else in an images folder stays out (copied folder) or is removed (in-place folder). No package file
- * may name a private Blob pathname ("part-docs/<id>/…") — the build fails if one does. Every emitted file must stay ≤ 15,000,000
+ * --data / --images copy them in from elsewhere. Only the files images/manifest.json references ship (never the manifest
+ * itself — the browser reads data/photos.js); anything else in an images folder stays out (copied folder) or is removed
+ * (in-place folder). No package file may name a private Blob pathname (PRIVATE_BLOB_PREFIXES), match a secret rule or sit
+ * outside the package layout — the build fails if one does (auditPackage). Every emitted file must stay ≤ 15,000,000
  * bytes (the Artifact limit) or the build fails. Build diagnostics (discovered server actions,
  * esbuild metafile) go to output/handoff-build/, outside the package. Plan: PR 2 Task 2.
  */
@@ -24,7 +25,7 @@ import tailwindcss from "@tailwindcss/postcss";
 import { FORBIDDEN_PACKAGES } from "../../scripts/core-check";
 import { parsePhotoManifest } from "./photo-select";
 import { APP_OVERRIDES, appOverridePlugin, bakeModules, bakePlugin, imagePlugin, shimPlugin, serverActionStubPlugin } from "./esbuild-plugins";
-import { auditPackage, buildEngineBundle, ENGINE_FILE, MAX_FILE_BYTES, MAX_TOTAL_BYTES, readSliceGlobals, sliceSystemQuotes, stageSpecDocs, writeGoldenFiles, zipPathFor } from "./package";
+import { auditPackage, auditProblems, buildEngineBundle, ENGINE_FILE, MAX_FILE_BYTES, readSliceGlobals, sliceSystemQuotes, stageSpecDocs, writeGoldenFiles, zipPathFor } from "./package";
 
 const HERE = __dirname;
 const ROOT = path.resolve(HERE, "..", "..");
@@ -131,9 +132,11 @@ export function referencedImageFiles(from: string): { manifest: boolean; files: 
 }
 
 /**
- * Puts only the referenced images (+ manifest.json) into the package's images/ folder. From another folder: a fresh copy of
- * just those. In place (from === to, the usual case): every other entry of the folder is deleted. No manifest = no images.
- * Returns what shipped and what was left out / removed.
+ * Puts only the referenced images into the package's images/ folder. From another folder: a fresh copy of just those —
+ * never manifest.json (the browser reads data/photos.js; the manifest is handoff:photos' workspace file). In place (from
+ * === to, the usual case): every other entry of the folder is deleted, but manifest.json stays as the workspace file
+ * handoff:slice re-reads — isJunkPath keeps it out of the zip, the audit and any Artifact publish. No manifest = no images.
+ * Returns what shipped (images only) and what was left out / removed.
  */
 export function stageImages(from: string | null, to: string): { shipped: string[]; dropped: string[] } {
   const src = from ?? to;
@@ -142,19 +145,21 @@ export function stageImages(from: string | null, to: string): { shipped: string[
     return { shipped: [], dropped: [] };
   }
   const { manifest, files } = referencedImageFiles(src);
-  const keep = new Set<string>(manifest ? [...files, "manifest.json"] : []);
-  const dropped = readdirSync(src).filter((n) => !keep.has(n)).sort();
+  const ship = new Set<string>(manifest ? files : []);
   if (path.resolve(src) === path.resolve(to)) {
+    const keep = new Set<string>(manifest ? [...ship, "manifest.json"] : []);
+    const dropped = readdirSync(src).filter((n) => !keep.has(n)).sort();
     for (const n of dropped) rmSync(path.join(to, n), { recursive: true, force: true });
     if (!manifest) rmSync(to, { recursive: true, force: true });
-  } else {
-    rmSync(to, { recursive: true, force: true });
-    if (manifest) {
-      mkdirSync(to, { recursive: true });
-      for (const n of keep) copyFileSync(path.join(src, n), path.join(to, n));
-    }
+    return { shipped: [...ship].sort(), dropped };
   }
-  return { shipped: [...keep].sort(), dropped };
+  const dropped = readdirSync(src).filter((n) => !ship.has(n) && n !== "manifest.json").sort();
+  rmSync(to, { recursive: true, force: true });
+  if (ship.size) {
+    mkdirSync(to, { recursive: true });
+    for (const n of ship) copyFileSync(path.join(src, n), path.join(to, n));
+  }
+  return { shipped: [...ship].sort(), dropped };
 }
 
 async function buildCss(): Promise<string> {
@@ -254,11 +259,8 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
   const audit = auditPackage(OUT);
   const files = audit.files;
   const oversize = audit.oversize;
-  const problems = [
-    ...(audit.totalOver ? [`the package is ${audit.totalBytes} bytes, over ${MAX_TOTAL_BYTES}`] : []),
-    ...audit.privatePaths.map((f) => `${f} contains a private Blob pathname ("part-docs/<id>/…")`),
-    ...audit.missing.map((f) => `${f} is missing`),
-  ];
+  // oversize files are reported on their own (exit below); every other audit failure is a problem
+  const problems = auditProblems({ ...audit, oversize: [] });
 
   const actions = Object.values(discovered).reduce((n, v) => n + v.length, 0);
   console.log(`handoff:build → ${path.relative(ROOT, OUT)}  (JS ${jsMs} ms, CSS ${cssMs} ms, engine + spec ${specMs} ms)`);
@@ -270,7 +272,7 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
   for (const w of result.warnings) console.log(`  WARN ${w.text}${w.location ? ` (${w.location.file}:${w.location.line})` : ""}`);
   if (!hasData) console.log("  no data/ — the page mounts with an empty slice (run npm run handoff:slice first)");
   if (!hasImages) console.log("  no images/ (optional)");
-  else console.log(`  images: ${staged.shipped.length ? staged.shipped.length - 1 : 0} referenced file(s) shipped${staged.dropped.length ? `; ${staged.dropped.length} unreferenced left out (${staged.dropped.slice(0, 5).join(", ")}${staged.dropped.length > 5 ? ", …" : ""})` : ""}`);
+  else console.log(`  images: ${staged.shipped.length} referenced file(s) shipped (images/manifest.json never ships)${staged.dropped.length ? `; ${staged.dropped.length} unreferenced left out (${staged.dropped.slice(0, 5).join(", ")}${staged.dropped.length > 5 ? ", …" : ""})` : ""}`);
   console.log(`  data scripts: ${scripts.join(", ") || "(none)"}`);
   let total = 0;
   for (const f of files) {
@@ -279,6 +281,7 @@ export async function build(args: Args): Promise<{ files: Array<{ file: string; 
   }
   console.log(`  total ${(total / 1e6).toFixed(2)} MB in ${files.length} files`);
   if (audit.junk.length) console.log(`  never zipped: ${audit.junk.join(", ")}`);
+  for (const w of audit.warnings) console.log(`  WARN ${w}`);
   for (const p of problems) console.log(`  PROBLEM ${p}`);
   if (!oversize.length && !problems.length) console.log(`  zip: not written — run handoff:verify --full; it writes ${path.relative(ROOT, zipPathFor(OUT))} on PASS`);
   return { files, oversize, problems };

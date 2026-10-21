@@ -12,6 +12,8 @@ import * as vm from "node:vm";
 import JSZip from "jszip";
 import { goldenFileName, goldenFor, goldenJson, goldenWith, systemQuotesOf, type GoldenEngine, type SystemQuote } from "../../scripts/estimating-golden";
 import { expandSpecMarkdown, hasMarkers, undocumentedFields } from "./spec-gen";
+import { IMAGE_FILE_RE } from "./photo-select";
+import { scanForSecrets } from "./slice-rules";
 
 const ROOT = path.resolve(__dirname, "..", "..");
 export const ENGINE_ENTRY = "src/lib/estimating-core/index.ts";
@@ -26,10 +28,22 @@ export const ENGINE_GLOBAL = "PeakEstimatingCore";
 export const MAX_FILE_BYTES = 15_000_000;
 export const MAX_TOTAL_BYTES = 150_000_000;
 /**
- * A private Blob pathname ("part-docs/<docId>/…"): no package file may contain one (photos ship as images/<file>). The
- * literal text "part-docs/<docId>/" (a photo failure message) is not a pathname.
+ * Every private Vercel Blob prefix the app writes under (src/lib: part-docs/types.ts, quote-pdf/state.ts,
+ * vendor-quotes/thread-attachment-server.ts, part-docs/datasheet-book-download.ts, estimate-output/package-files.ts,
+ * document-files.ts, field-files/files.ts, assessments/photos.ts + report-pdf-path.ts, mail attachments,
+ * grid-sheet-file.ts, consulting-files.ts, the recorder, client-package-server.ts — whose racks/ datasheets/ cutsheets/
+ * also name package folders). No package file may name one.
  */
-export const PRIVATE_PATH_RE = /part-docs\/[A-Za-z0-9_-]+\//;
+export const PRIVATE_BLOB_PREFIXES = [
+  "part-docs", "quote-pdfs", "vendor-quotes", "estimate-package", "estimate-files", "documents", "surveys", "assessments",
+  "assessment-pdfs", "mail-attachments", "grid-sheets", "engagement-files", "recordings", "client-packages", "cutsheets",
+  "racks", "datasheets",
+] as const;
+/**
+ * A private Blob pathname ("<prefix>/<id>/…", PRIVATE_BLOB_PREFIXES): no package file may contain one (photos ship as
+ * images/<file>). The literal text "part-docs/<docId>/" (a photo failure message) is not a pathname.
+ */
+export const PRIVATE_PATH_RE = new RegExp(`(?:${PRIVATE_BLOB_PREFIXES.join("|")})/[A-Za-z0-9_-]+/`);
 /** The one folder every zip entry sits under (spec §2), so a command-line unzip doesn't spill into the current folder. */
 export const ZIP_ROOT = "peak-estimator-handoff";
 
@@ -202,10 +216,33 @@ export function listFiles(dir: string, base = dir): string[] {
   return out;
 }
 
-/** A package path that never ships: a dotfile anywhere in the path (.DS_Store …), or the old private photo manifest. */
+/**
+ * A package path that never ships: a dotfile anywhere in the path (.DS_Store …), the old private photo manifest, or
+ * images/manifest.json — handoff:photos' workspace file (handoff:slice reads it to write data/photos.js, which is all the
+ * browser needs), never zipped or published.
+ */
 export function isJunkPath(rel: string): boolean {
-  return rel.split("/").some((seg) => seg.startsWith(".")) || rel === "data/photo-manifest.json";
+  return rel.split("/").some((seg) => seg.startsWith(".")) || rel === "data/photo-manifest.json" || rel === "images/manifest.json";
 }
+
+/** One Artifact publish carries at most this many files; past it the package goes up over several publishes. */
+export const ARTIFACT_PUBLISH_FILES = 255;
+/** An Artifact version holds at most this many files — past it the package cannot be one Artifact at all. */
+export const ARTIFACT_VERSION_FILES = 511;
+
+const DATA_FILE_RE = /^data\/(?:rules|team|customers|fixtures|estimates|meta|photos|catalog-[1-9]\d*)\.js$/;
+/** Is `rel` a path the package may hold (anything else fails the audit)? The layout of spec §2. */
+export function allowedPackagePath(rel: string): boolean {
+  if (rel === "index.html" || rel === "CONFIDENTIAL.txt") return true;
+  if (/^app\/[^]+$/.test(rel) && !rel.split("/").includes("..")) return true;
+  if (DATA_FILE_RE.test(rel)) return true;
+  const img = /^images\/([^/]+)$/.exec(rel);
+  if (img) return IMAGE_FILE_RE.test(img[1]);
+  return /^spec\/[^/]+\.md$/.test(rel) || /^spec\/golden\/[^/]+\.json$/.test(rel) || /^spec\/screenshots\/[^/]+\.png$/.test(rel);
+}
+
+/** Package files read as text for the secret scan (images and fonts are binary). */
+const TEXT_FILE_RE = /\.(?:js|mjs|css|html?|md|json|txt|svg|csv|xml)$/i;
 
 /** What the package must contain (beyond data/): the page, the app, the engine, the docs, and the notice. */
 export const REQUIRED_FILES = ["index.html", "CONFIDENTIAL.txt", "app/app.js", "app/app.css", ENGINE_FILE, ...SPEC_DOCS.map((d) => `${SPEC_DIR}/${d}`)] as const;
@@ -222,8 +259,24 @@ export type PackageAudit = {
   /** Junk (isJunkPath) present in the folder — never zipped, but reported. */
   junk: string[];
   missing: string[];
+  /** Files outside the package layout (allowedPackagePath) — a stray file fails the audit. */
+  unexpected: string[];
+  /** Text files whose content matches a secret rule (scanForSecrets): file → rule names. */
+  secrets: Array<{ file: string; rules: string[] }>;
+  /** Shipped file count, and the Artifact warnings it earns (never a failure: the zip has no such limit). */
+  fileCount: number;
+  warnings: string[];
   ok: boolean;
 };
+
+/** The Artifact file-count warnings for a package of `n` files (empty under ARTIFACT_PUBLISH_FILES). */
+export function fileCountWarnings(n: number): string[] {
+  if (n > ARTIFACT_VERSION_FILES)
+    return [`!!! ${n} files — over ${ARTIFACT_VERSION_FILES}, the most one Artifact version holds: the package cannot be published as one Artifact (ship the zip, or cut images)`];
+  if (n > ARTIFACT_PUBLISH_FILES)
+    return [`${n} files — over ${ARTIFACT_PUBLISH_FILES}, one Artifact publish's limit: publish in several passes to the same Artifact (the zip is unaffected)`];
+  return [];
+}
 
 /** Shipped package files (junk is never zipped) that carry a private Blob pathname — the package's one private-path check. [] = clean. */
 export function privatePathFiles(pkg: string, files: readonly string[] = listFiles(pkg).filter((f) => !isJunkPath(f))): string[] {
@@ -241,7 +294,28 @@ export function auditPackage(pkg: string): PackageAudit {
   const have = new Set(files.map((f) => f.file));
   const missing = REQUIRED_FILES.filter((f) => !have.has(f));
   const totalOver = totalBytes > MAX_TOTAL_BYTES;
-  return { files, totalBytes, oversize, totalOver, privatePaths, junk, missing, ok: !oversize.length && !totalOver && !privatePaths.length && !missing.length };
+  const unexpected = files.map((f) => f.file).filter((f) => !allowedPackagePath(f));
+  const secrets = files
+    .filter((f) => TEXT_FILE_RE.test(f.file))
+    .map((f) => ({ file: f.file, rules: scanForSecrets(readFileSync(path.join(pkg, f.file), "utf8")) }))
+    .filter((x) => x.rules.length > 0);
+  const fileCount = files.length;
+  return {
+    files, totalBytes, oversize, totalOver, privatePaths, junk, missing, unexpected, secrets, fileCount, warnings: fileCountWarnings(fileCount),
+    ok: !oversize.length && !totalOver && !privatePaths.length && !missing.length && !unexpected.length && !secrets.length,
+  };
+}
+
+/** The audit's failures, one line each ([] = it passed). */
+export function auditProblems(a: PackageAudit): string[] {
+  return [
+    ...a.oversize.map((f) => `${f} is over ${MAX_FILE_BYTES} bytes`),
+    ...(a.totalOver ? [`the package is ${a.totalBytes} bytes, over ${MAX_TOTAL_BYTES}`] : []),
+    ...a.privatePaths.map((f) => `${f} contains a private Blob pathname (<prefix>/<id>/…)`),
+    ...a.missing.map((f) => `${f} is missing`),
+    ...a.unexpected.map((f) => `${f} is not part of the package layout (stray file)`),
+    ...a.secrets.map((s) => `${s.file} matches secret rule(s) ${s.rules.join(", ")}`),
+  ];
 }
 
 /** The package files the zip carries (folder-relative): everything except junk, CONFIDENTIAL.txt first, then sorted. */

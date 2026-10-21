@@ -10,11 +10,12 @@ import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   CATALOG_FIELDS, FIXTURE_FIELDS, QUOTE_FIELDS, BLOB_IDS, SETTINGS_FIELDS, COMPANY_COLS, SITE_COLS, CONTACT_COLS,
-  pickFields, scanForSecrets, selectEstimates, catalogChunks,
+  REVISION_FIELDS, DOC_FIELDS, VENDOR_QUOTE_FIELDS, EXCLUDED_SOURCES,
+  pickFields, scanForSecrets, selectEstimates, catalogChunks, sanitizeQuote,
 } from "../handoff/estimator/slice-rules";
 import { sliceExport, writeSlice, loadPhotoManifest, run as sliceRun, type ExportV2 } from "../handoff/estimator/slice";
 import { downloadPlan, manufacturerImageIds, parsePhotoManifest, photoScopeSkus, photosScript, selectPhotos } from "../handoff/estimator/photo-select";
-import { AUTH_ABORT_MESSAGE, BlobAuthError, blobKeyBelongsTo, buildPhotoManifest, completeImageExt, describeSelection, downloadPhotos, main as photosMain, reconcileImagesDir, selectionForExport, sniffImageExt, type BlobClient } from "../handoff/estimator/fetch-photos";
+import { AUTH_ABORT_MESSAGE, BlobAuthError, blobKeyBelongsTo, buildPhotoManifest, completeImageExt, describeSelection, downloadPhotos, DEFAULT_OUTPUT_ROOT, main as photosMain, photosOutProblem, reconcileImagesDir, selectionForExport, sniffImageExt, type BlobClient } from "../handoff/estimator/fetch-photos";
 import type { Ok } from "./test-inbox-org";
 
 export const FIXTURE_V2 = "docs/estimating-core/handoff-fixtures/export-v2.json";
@@ -221,6 +222,9 @@ export async function handoffSliceChecks(ok: Ok) {
   const withExtra = sliceExport(base, { extraEstimates: selectEstimates((golden.collections?.quotes ?? []) as never) });
   const ids = (res: typeof r) => ((): string[] => { const w: Record<string, unknown> = {}; new Function("window", res.files["data/estimates.js"])(w); return (w.PEAK_ESTIMATES as Array<{ id: string }>).map((q) => q.id); })();
   ok(ids(none).length === 0 && ids(withExtra).join(",") === "Q-G001,Q-G002,Q-G003", "handoff:slice: --extra-estimates appends another export's selected estimates");
+
+  // --- final review A1–A4: revisions / vendor quotes allow-listed, portal-catalog excluded, boltWidthIn kept ---
+  await revisionAllowListChecks(ok, exp);
 
   // --- CLI exit codes (child process, real entry point) ---
   const repo = process.cwd();
@@ -442,7 +446,7 @@ async function photoChecks(ok: Ok, exp: ExportV2) {
     const outDir = path.join(dl, "pkg", "images");
     const dry = await quiet(() => photosMain(["--in", expPath, "--out", outDir, "--dry-run"], {}, async () => { throw new Error("must not build a client in a dry run"); }));
     ok(dry.value === 0 && !fs.existsSync(outDir) && /with a photo: 2/.test(dry.out) && /dry run/.test(dry.out), "handoff:photos: --dry-run prints the selection, needs no token, writes nothing");
-    const noTok = await quiet(() => photosMain(["--in", expPath, "--out", outDir], {}, async () => { throw new Error("must not build a client without a token"); }));
+    const noTok = await quiet(() => photosMain(["--in", expPath, "--out", outDir], {}, async () => { throw new Error("must not build a client without a token"); }, dl));
     ok(noTok.value === 2 && /BLOB_READ_WRITE_TOKEN/.test(noTok.err) && !fs.existsSync(outDir), "handoff:photos: no BLOB_READ_WRITE_TOKEN → exit 2 with a clear message, nothing written");
     const usageRun = await quiet(() => photosMain(["--out", outDir], {}));
     ok(usageRun.value === 2, "handoff:photos: missing --in → exit 2");
@@ -451,14 +455,14 @@ async function photoChecks(ok: Ok, exp: ExportV2) {
     ok((await quiet(() => photosMain(["--in", v1Path, "--out", outDir, "--dry-run"], {}))).value === 2, "handoff:photos: a format-1 export → exit 2");
     const keys: string[] = [];
     const fake: BlobClient = { async read(k) { keys.push(k); return k.includes("PD-5") ? PNG : WEBP; } };
-    const full = await quiet(() => photosMain(["--in", expPath, "--out", outDir], { BLOB_READ_WRITE_TOKEN: secret }, async () => fake));
+    const full = await quiet(() => photosMain(["--in", expPath, "--out", outDir], { BLOB_READ_WRITE_TOKEN: secret }, async () => fake, dl));
     const written = JSON.parse(fs.readFileSync(path.join(outDir, "manifest.json"), "utf8")) as { bySku: Record<string, string>; byDoc: Record<string, string> };
     ok(full.value === 0 && keys.sort().join() === "part-docs/PD-1/a.webp,part-docs/PD-5/beta.webp" && JSON.stringify(written.bySku) === '{"SKU-A":"PD-1","SKU-B":"PD-5"}' && written.byDoc["PD-5"] === "PD-5.png" &&
       !JSON.stringify(written).includes("part-docs") && !full.out.includes(secret) && !full.err.includes(secret),
       "handoff:photos: a run with a fake client downloads the 2 picked documents and writes images/manifest.json (no Blob keys, no token in output)");
     const failing: BlobClient = { async read() { throw new Error("boom"); } };
     const outFail = path.join(dl, "pkg-fail", "images");
-    const bad = await quiet(() => photosMain(["--in", expPath, "--out", outFail, "--retries", "0"], { BLOB_READ_WRITE_TOKEN: secret }, async () => failing));
+    const bad = await quiet(() => photosMain(["--in", expPath, "--out", outFail, "--retries", "0"], { BLOB_READ_WRITE_TOKEN: secret }, async () => failing, dl));
     ok(bad.value === 1 && fs.existsSync(path.join(outFail, "manifest.json")) && /FAILED PD-1/.test(bad.err), "handoff:photos: failed downloads → exit 1, the manifest still written for the rest");
     // the real entry point
     const cleanEnv = { ...process.env };
@@ -552,36 +556,57 @@ async function photoFixChecks(ok: Ok, exp: ExportV2) {
     const bigPath = path.join(tmp, "big.json");
     fs.writeFileSync(bigPath, JSON.stringify(big));
     const outAuth = path.join(tmp, "pkg-auth", "images");
-    const authRun = await quiet(() => photosMain(["--in", bigPath, "--out", outAuth, "--concurrency", "1"], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => authFail));
+    const authRun = await quiet(() => photosMain(["--in", bigPath, "--out", outAuth, "--concurrency", "1"], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => authFail, tmp));
     ok(authRun.value === 1 && authRun.err.includes(AUTH_ABORT_MESSAGE) && !fs.existsSync(path.join(outAuth, "manifest.json")), "handoff:photos: main — a rejected token exits 1 with 'Blob token rejected — check BLOB_READ_WRITE_TOKEN' and writes no manifest");
 
     // --- 5. unreferenced files: warn, --prune ---
     const pdir = path.join(tmp, "pkg-prune", "images");
     const pclient: BlobClient = { async read(k) { return k.includes("PD-X0") ? PNG : WEBP; } };
     fs.mkdirSync(pdir, { recursive: true });
+    // an earlier handoff:photos folder (it holds our manifest.json) — the only kind of non-empty --out allowed
+    fs.writeFileSync(path.join(pdir, "manifest.json"), JSON.stringify({ version: 1, bySku: {}, byDoc: {}, linkOnly: [], failed: [] }));
     for (const f of ["PD-OLD.webp", "PD-OLD2.png"]) fs.writeFileSync(path.join(pdir, f), WEBP);
     fs.writeFileSync(path.join(pdir, "notes.txt"), "keep me");
-    const warnRun = await quiet(async () => { const w: string[] = []; const o = console.warn; console.warn = (...a: unknown[]) => { w.push(a.join(" ")); }; try { return { code: await photosMain(["--in", bigPath, "--out", pdir], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => pclient), w }; } finally { console.warn = o; } });
+    const warnRun = await quiet(async () => { const w: string[] = []; const o = console.warn; console.warn = (...a: unknown[]) => { w.push(a.join(" ")); }; try { return { code: await photosMain(["--in", bigPath, "--out", pdir], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => pclient, tmp), w }; } finally { console.warn = o; } });
     ok(warnRun.value.code === 0 && warnRun.value.w.some((l) => /3 unreferenced files in images\/ — delete them or pass --prune/.test(l)) && fs.existsSync(path.join(pdir, "PD-OLD.webp")),
       `handoff:photos: after a run, unreferenced files in images/ are warned about, not deleted (${warnRun.value.w.join(" / ").slice(0, 120)})`);
-    const pruneRun = await quiet(() => photosMain(["--in", bigPath, "--out", pdir, "--prune"], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => pclient));
+    const pruneRun = await quiet(() => photosMain(["--in", bigPath, "--out", pdir, "--prune"], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => pclient, tmp));
     const left = fs.readdirSync(pdir).sort();
     ok(pruneRun.value === 0 && !left.includes("PD-OLD.webp") && !left.includes("PD-OLD2.png") && left.includes("notes.txt") && left.includes("manifest.json") && left.includes("PD-1.webp") && left.includes("PD-X0.png"),
       `handoff:photos: --prune deletes only unreferenced IMAGE_FILE_RE files (a notes.txt and every referenced file stay) — left: ${left.join(",")}`);
     const rec = reconcileImagesDir(pdir, { byDoc: { "PD-1": "PD-1.webp" } }, true);
     ok(rec.pruned.includes("PD-X0.png") && rec.remaining.join() === "notes.txt", "handoff:photos: reconcileImagesDir — prune never touches a non-image file");
 
+    // --- A7. the --out guard: inside output/, and empty / missing / an earlier handoff:photos folder only ---
+    const stranger = path.join(tmp, "Downloads-like");
+    fs.mkdirSync(stranger, { recursive: true });
+    fs.writeFileSync(path.join(stranger, "family-photo.webp"), WEBP);
+    fs.writeFileSync(path.join(stranger, "taxes.pdf"), "x");
+    const strangerRun = await quiet(() => photosMain(["--in", bigPath, "--out", stranger, "--prune"], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => pclient, tmp));
+    ok(strangerRun.value === 2 && /not empty and holds no handoff:photos manifest\.json/.test(strangerRun.err) && fs.readdirSync(stranger).sort().join() === "family-photo.webp,taxes.pdf",
+      "handoff:photos A7: a non-empty --out with no handoff manifest is refused (exit 2) — --prune deletes nothing, nothing is written");
+    const outside = path.join(os.tmpdir(), "handoff-photos-outside-" + process.pid);
+    const outsideRun = await quiet(() => photosMain(["--in", bigPath, "--out", outside], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => pclient, path.join(tmp, "output")));
+    ok(outsideRun.value === 2 && /must be inside/.test(outsideRun.err) && !fs.existsSync(outside), "handoff:photos A7: an --out outside output/ is refused (exit 2), nothing written");
+    const fakeMan = path.join(tmp, "fake-man");
+    fs.mkdirSync(fakeMan, { recursive: true });
+    fs.writeFileSync(path.join(fakeMan, "manifest.json"), '{"not":"ours"}');
+    ok(photosOutProblem(tmp, fakeMan) !== null && photosOutProblem(tmp, path.join(tmp, "nope")) === null && photosOutProblem(tmp, pdir) === null && photosOutProblem(tmp, tmp) !== null,
+      "handoff:photos A7: photosOutProblem — someone else's manifest.json is refused; a missing folder and an earlier handoff folder are fine; output/ itself is refused");
+    ok(photosOutProblem(DEFAULT_OUTPUT_ROOT, path.join(DEFAULT_OUTPUT_ROOT, "peak-estimator-handoff", "images-new-" + process.pid)) === null && path.basename(DEFAULT_OUTPUT_ROOT) === "output",
+      "handoff:photos A7: the default output root is the repo's output/ folder");
+
     // --- 7/8. the private selection never ships; fetch errors are secret-scanned ---
     const sl = sliceExport(exp);
     ok(!("data/photo-manifest.json" in sl.files) && Object.values(sl.files).every((b) => !b.includes("part-docs/")), "handoff:slice: no sliced file contains a private Blob pathname");
     const leaky: BlobClient = { async read() { throw new Error("upstream said: " + T.github + " bad"); } };
     const outLeak = path.join(tmp, "pkg-leak", "images");
-    const leakRun = await quiet(() => photosMain(["--in", bigPath, "--out", outLeak, "--retries", "0"], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => leaky));
+    const leakRun = await quiet(() => photosMain(["--in", bigPath, "--out", outLeak, "--retries", "0"], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => leaky, tmp));
     ok(leakRun.value === 1 && /SECRET SCAN/.test(leakRun.err) && !fs.existsSync(path.join(outLeak, "manifest.json")) && !leakRun.err.includes(T.github) && !leakRun.out.includes(T.github),
       "handoff:photos: a secret-shaped fetch error recorded in failed[] stops images/manifest.json from being written");
     const pathy: BlobClient = { async read(k) { throw new Error(`The requested blob does not exist: ${k}`); } };
     const outPathy = path.join(tmp, "pkg-pathy", "images");
-    await quiet(() => photosMain(["--in", bigPath, "--out", outPathy, "--retries", "0"], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => pathy));
+    await quiet(() => photosMain(["--in", bigPath, "--out", outPathy, "--retries", "0"], { BLOB_READ_WRITE_TOKEN: "tok_" + "x" }, async () => pathy, tmp));
     ok(fs.existsSync(path.join(outPathy, "manifest.json")) && !fs.readFileSync(path.join(outPathy, "manifest.json"), "utf8").includes("part-docs/"), "handoff:photos: a Blob pathname quoted in an error never reaches images/manifest.json");
 
     // token-shaped sku key in the photo manifest → the slicer refuses (data/photos.js is scanned)
@@ -608,4 +633,99 @@ async function photoFixChecks(ok: Ok, exp: ExportV2) {
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+/** Final review A1–A4. Plants every dropped field on a revision, its docFields, a vendor quote (top level and in a
+ *  revision), review / pdfOptions / packageSelection / history — the slicer must strip each. */
+async function revisionAllowListChecks(ok: Ok, exp: ExportV2) {
+  const BLOB = "quote-pdfs/Q-G001/rev-1-secretpath.pdf";
+  const planted = JSON.parse(JSON.stringify(exp)) as ExportV2;
+  const qrow = (planted.collections!.quotes as Array<{ id: string; doc: Record<string, unknown> }>).find((r) => r.id === "Q-G001")!;
+  const vq = () => ({
+    id: "vq-1", vendor: "Acme Rigging", quoteNumber: "AR-77", description: "Motors", total: 1200, totalSource: "lines",
+    includesFreight: true, display: "itemized", addedAt: 5,
+    lines: [{ id: 1, description: "Hoist", manufacturerPartNumber: "H-1", qty: 2, unit: "ea", amount: 600, extractedIndex: 0 }],
+    attachment: { name: "q.pdf", mime: "application/pdf", dataUrl: "data:application/pdf;base64,SECRETBYTES", blobPath: "vendor-quotes/Q-G001/vq-1.pdf" },
+    link: "https://vendor.example/portal?token=VENDORTOKEN", terms: "NET-30-INTERNAL-TERMS", notes: "INTERNAL-VENDOR-NOTE",
+    fromThreadId: "thr-PRIVATE", extracted: { runId: "run-PRIVATE", model: "m", at: 1, data: {} }, vendorCompanyId: "c-vendor-PRIVATE",
+  });
+  qrow.doc.vendorQuotes = [vq()];
+  qrow.doc.review = { state: "approved", reviewer: "Jeff", submittedBy: null, submittedAt: null, decidedBy: "Jeff", decidedAt: 1, note: "", method: "self", smuggled: "REVIEW-EXTRA" };
+  qrow.doc.pdfOptions = { detail: "itemized", pdfQty: true, smuggled: "PDFOPT-EXTRA" };
+  qrow.doc.packageSelection = { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [], smuggled: "PKGSEL-EXTRA" };
+  qrow.doc.history = [{ at: 1, to: "draft", by: "HISTORY-EXTRA" }];
+  qrow.doc.pdf = { status: "ready", blobPath: "quote-pdfs/Q-G001/live.pdf" };
+  qrow.doc.revisions = [{
+    rev: 1, at: 1, by: "Jeff", reason: "sent", note: "", name: "Rev", customerId: "c-alpha", value: 100, margin: 0.3,
+    pricingTier: "standard", tierMargin: 0.3, status: "sent", quoteType: "system", spec: { sections: [] },
+    flameTest: { secret: "FLAME-PAYLOAD" }, repair: null, inspection: null, consulting: null, rental: null,
+    pdfBlobPath: BLOB, pdfSavedAt: 9, smuggled: "REV-EXTRA",
+    vendorQuotes: [vq()],
+    docFields: {
+      customer: "Alpha", locationId: null, contactName: null, quoteNote: "", assumptions: "", installTimeframe: "", preparedBy: "",
+      owner: "", termsText: "", paymentTerms: null, source: "estimator", coverSummary: "", notIncluded: null, revNo: 1, issuedAt: 2,
+      pdfOptions: { detail: "itemized", smuggled: "DOC-PDFOPT-EXTRA" },
+      packageSelection: { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [], smuggled: "DOC-PKGSEL-EXTRA" },
+      packageFiles: [{ id: "pf1", name: "plan.pdf", blobPath: "estimate-files/Q-G001/plan.pdf" }],
+      bid: { dueAt: 1, addenda: ["ADDENDUM-PRIVATE"] }, awardedPartyId: "pty_PRIVATE", portalFirm: { validUntil: 1 },
+    },
+  }];
+  const res = sliceExport(planted);
+  const w: Record<string, unknown> = {};
+  new Function("window", res.files["data/estimates.js"])(w);
+  const q = (w.PEAK_ESTIMATES as Array<Record<string, unknown>>).find((x) => x.id === "Q-G001")!;
+  const body = res.files["data/estimates.js"];
+  const rev = (q.revisions as Array<Record<string, unknown>>)[0];
+  ok(res.hits.length === 0, "handoff:slice A1: the planted slice still passes the final secret scan");
+  for (const k of ["pdfBlobPath", "pdfSavedAt", "flameTest", "repair", "inspection", "consulting", "rental", "smuggled"])
+    ok(!(k in rev), `handoff:slice A1: a revision's ${k} is dropped`);
+  ok(Object.keys(rev).every((k) => (REVISION_FIELDS as readonly string[]).includes(k)) && rev.rev === 1 && rev.value === 100 && rev.status === "sent",
+    `handoff:slice A1: a revision keeps only REVISION_FIELDS (got ${Object.keys(rev).join(",")})`);
+  const df = rev.docFields as Record<string, unknown>;
+  for (const k of ["packageFiles", "bid", "awardedPartyId", "portalFirm"]) ok(!(k in df), `handoff:slice A1: docFields.${k} is dropped`);
+  ok(Object.keys(df).every((k) => (DOC_FIELDS as readonly string[]).includes(k)) && df.customer === "Alpha" && df.revNo === 1 && df.issuedAt === 2,
+    "handoff:slice A1: docFields keeps only the header/print fields (DOC_FIELDS)");
+  ok(!("smuggled" in (df.pdfOptions as object)) && !("smuggled" in (df.packageSelection as object)),
+    "handoff:slice A1: docFields.pdfOptions / packageSelection are allow-listed again");
+  ok(!("smuggled" in (q.review as object)) && (q.review as Record<string, unknown>).method === "self", "handoff:slice A1: review is allow-listed (REVIEW_FIELDS)");
+  ok(!("smuggled" in (q.pdfOptions as object)) && !("smuggled" in (q.packageSelection as object)), "handoff:slice A1: top-level pdfOptions / packageSelection allow-listed");
+  ok(!("by" in (q.history as Array<Record<string, unknown>>)[0]), "handoff:slice A1: history entries keep { at, from, to } only");
+  ok(!("pdf" in q), "handoff:slice A1: the live quote's pdf state (blobPath) never ships");
+  for (const where of [["top", (q.vendorQuotes as Array<Record<string, unknown>>)[0]], ["revision", (rev.vendorQuotes as Array<Record<string, unknown>>)[0]]] as const) {
+    const v = where[1];
+    ok(!!v && v.vendor === "Acme Rigging" && v.quoteNumber === "AR-77" && v.total === 1200 && v.includesFreight === true && v.display === "itemized",
+      `handoff:slice A2: ${where[0]} vendor quote keeps its render fields`);
+    for (const k of ["attachment", "link", "terms", "notes", "fromThreadId", "extracted", "vendorCompanyId"]) ok(!(k in v), `handoff:slice A2: ${where[0]} vendor quote drops ${k}`);
+    ok(Object.keys(v).every((k) => (VENDOR_QUOTE_FIELDS as readonly string[]).includes(k)), `handoff:slice A2: ${where[0]} vendor quote keys ⊆ VENDOR_QUOTE_FIELDS`);
+    const line = (v.lines as Array<Record<string, unknown>>)[0];
+    ok(line.description === "Hoist" && line.amount === 600 && !("extractedIndex" in line), `handoff:slice A2: ${where[0]} vendor line keeps render fields, drops extractedIndex`);
+  }
+  for (const needle of [BLOB, "quote-pdfs/", "vendor-quotes/", "estimate-files/", "SECRETBYTES", "VENDORTOKEN", "NET-30-INTERNAL-TERMS", "INTERNAL-VENDOR-NOTE",
+    "thr-PRIVATE", "run-PRIVATE", "c-vendor-PRIVATE", "ADDENDUM-PRIVATE", "pty_PRIVATE", "FLAME-PAYLOAD", "EXTRA"])
+    ok(!body.includes(needle), `handoff:slice A1/A2: estimates.js never carries ${needle}`);
+  ok((QUOTE_FIELDS as readonly string[]).includes("vendorQuotes"), "handoff:slice A2: vendorQuotes is on QUOTE_FIELDS (render-only)");
+  ok(JSON.stringify(sanitizeQuote(sanitizeQuote(qrow.doc))) === JSON.stringify(sanitizeQuote(qrow.doc)), "handoff:slice A1: sanitizeQuote is idempotent");
+  // extras (dev) are sanitized too, even when handed in raw
+  const raw = sliceExport({ ...exp, collections: { ...exp.collections, quotes: [] } } as ExportV2, { extraEstimates: [{ ...qrow.doc, id: "Q-X1" } as never] });
+  ok(!raw.files["data/estimates.js"].includes(BLOB) && !raw.files["data/estimates.js"].includes("SECRETBYTES"), "handoff:slice A1: a raw extra estimate is sanitized by sliceExport");
+
+  // A3 — the portal's self-built catalog quotes never ship
+  ok((EXCLUDED_SOURCES as readonly string[]).includes("portal-catalog"), "handoff:slice A3: EXCLUDED_SOURCES names portal-catalog");
+  const withPortal = JSON.parse(JSON.stringify(exp)) as ExportV2;
+  const g1 = (withPortal.collections!.quotes as Array<{ id: string; doc: Record<string, unknown> }>).find((r) => r.id === "Q-G001")!;
+  withPortal.collections!.quotes.push({ id: "Q-PORTAL", doc: { ...JSON.parse(JSON.stringify(g1.doc)), source: "portal-catalog" } } as never);
+  withPortal.collections!.quotes.push({ id: "Q-QUICK", doc: { ...JSON.parse(JSON.stringify(g1.doc)), source: "quick" } } as never);
+  const sel = selectEstimates(withPortal.collections!.quotes as never).map((x) => x.id);
+  ok(!sel.includes("Q-PORTAL") && sel.includes("Q-QUICK") && sel.includes("Q-G001"), `handoff:slice A3: a portal-catalog quote is excluded, estimator/quick kept (${sel.join(",")})`);
+
+  // A4 — bolt width rides with the catalog (lin-yd fabric weights)
+  ok((CATALOG_FIELDS as readonly string[]).includes("boltWidthIn"), "handoff:slice A4: CATALOG_FIELDS carries boltWidthIn");
+  const withBolt = JSON.parse(JSON.stringify(exp)) as ExportV2;
+  const part = (withBolt.collections!.catalog_parts as Array<{ id: string; doc: Record<string, unknown> }>).find((r) => r.id === "SKU-B")!;
+  Object.assign(part.doc, { oz: 16, ozBasis: "lin-yd", boltWidthIn: 54 });
+  const wb = sliceExport(withBolt);
+  const cw: Record<string, unknown> = {};
+  new Function("window", wb.files["data/catalog-1.js"])(cw);
+  const pb = (cw.PEAK_CATALOG as Array<Record<string, unknown>>).find((x) => x.id === "SKU-B")!;
+  ok(pb.boltWidthIn === 54 && pb.ozBasis === "lin-yd" && pb.oz === 16, "handoff:slice A4: a lin-yd fabric keeps oz / ozBasis / boltWidthIn in catalog-N.js");
 }

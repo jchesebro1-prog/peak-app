@@ -87,3 +87,26 @@ export function unknownPorts(m: PortSources, only: readonly string[]): string[] 
   const have = new Set(m.ports.map((p) => p.port));
   return only.filter((n) => !have.has(n));
 }
+
+/** Where the completeness check looks: every runtime module (actions, loaders, props, the stores' ports). */
+export const PORT_SCAN_DIR = "handoff/estimator/runtime";
+
+/**
+ * Does this module say it ports a Quartzite module? Its leading doc comment names a src/ file together with "port" /
+ * "implementation(s) of" / "implements", or it type-checks itself against an app module (`import type * as Original
+ * from "@/…"` — the registered action implementations). Pure.
+ */
+export function claimsPort(source: string): boolean {
+  const head = /^\s*\/\*\*([\s\S]*?)\*\//.exec(source)?.[1] ?? "";
+  const named = /src\/[\w()[\]./-]+\.tsx?/.test(head) && /\bport(?:ed|s|ing)?\b|\bimplementations? of\b|\bimplements\b/i.test(head);
+  return named || /^import type \* as Original from "@\//m.test(source);
+}
+
+/**
+ * Port modules (repo-relative paths under PORT_SCAN_DIR) that claim a port (claimsPort) but have no entry in the
+ * manifest — a new port the drift guard would never watch. [] = complete. Pure over the listing and a reader.
+ */
+export function unlistedPorts(m: PortSources, files: readonly string[], read: (path: string) => string): string[] {
+  const have = new Set(m.ports.map((p) => p.port));
+  return files.filter((f) => /\.tsx?$/.test(f) && !have.has(f) && claimsPort(read(f))).sort();
+}

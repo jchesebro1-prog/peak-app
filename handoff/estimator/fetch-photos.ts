@@ -7,6 +7,8 @@
  *   npm run handoff:photos -- --in <export.json> --out output/peak-estimator-handoff/images --dry-run     (no token, no network)
  *
  * Then re-run handoff:slice (it writes data/photos.js when images/manifest.json exists) and handoff:build.
+ * --out must be inside output/ and be empty, missing, or an earlier handoff:photos folder (it holds our manifest.json);
+ * anything else is refused before a byte is written (photosOutProblem).
  * Options: --dry-run · --verbose (list every pick) · --force (re-download files already in the folder) ·
  *          --prune (delete image files in the folder the manifest does not reference) ·
  *          --concurrency N (default 6) · --retries N (default 2).
@@ -24,7 +26,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { downloadPlan, DOC_ID_RE, IMAGE_FILE_RE, PHOTO_MANIFEST_VERSION, selectPhotos, type PhotoManifest, type PhotoPick, type PhotoSelection } from "./photo-select";
+import { downloadPlan, DOC_ID_RE, IMAGE_FILE_RE, parsePhotoManifest, PHOTO_MANIFEST_VERSION, selectPhotos, type PhotoManifest, type PhotoPick, type PhotoSelection } from "./photo-select";
 import { scanForSecrets, selectEstimates, pickAndScrub, FIXTURE_FIELDS, type DocRow, type ScrubEntry } from "./slice-rules";
 import type { ExportV2 } from "./slice";
 
@@ -321,7 +323,32 @@ export function describeSelection(sel: PhotoSelection, verbose = false): string[
   return lines;
 }
 
-export async function main(argv: string[], env: Record<string, string | undefined> = process.env, makeClient: () => Promise<BlobClient> = vercelBlobClient): Promise<number> {
+/** The repo's output/ folder — the only place handoff:photos writes (like handoff:build's --out). */
+export const DEFAULT_OUTPUT_ROOT = path.resolve(__dirname, "..", "..", "output");
+
+/**
+ * Why `out` can't be handoff:photos' folder, or null when it can: it must sit inside `outputRoot` (output/), and be
+ * missing, empty, or already hold a handoff images/manifest.json — so a mistyped --out (a home folder, a Downloads
+ * folder) is refused before anything is written, and --prune can never delete files that aren't ours.
+ */
+export function photosOutProblem(outputRoot: string, out: string): string | null {
+  const abs = path.resolve(out);
+  const rel = path.relative(path.resolve(outputRoot), abs);
+  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) return `--out must be inside ${path.resolve(outputRoot)}${path.sep} (got ${out}); refusing to write there`;
+  if (!fs.existsSync(abs)) return null;
+  if (!fs.statSync(abs).isDirectory()) return `--out ${out} is a file, not a folder`;
+  const names = fs.readdirSync(abs);
+  if (names.length === 0) return null;
+  let manifest: PhotoManifest | null = null;
+  try {
+    manifest = names.includes("manifest.json") ? parsePhotoManifest(JSON.parse(fs.readFileSync(path.join(abs, "manifest.json"), "utf8"))) : null;
+  } catch {
+    manifest = null;
+  }
+  return manifest ? null : `--out ${out} is not empty and holds no handoff:photos manifest.json — refusing (it may not be an images folder; --prune would delete its files). Use an empty folder.`;
+}
+
+export async function main(argv: string[], env: Record<string, string | undefined> = process.env, makeClient: () => Promise<BlobClient> = vercelBlobClient, outputRoot: string = DEFAULT_OUTPUT_ROOT): Promise<number> {
   const val = (name: string) => {
     const i = argv.indexOf(name);
     return i >= 0 ? argv[i + 1] : undefined;
@@ -352,6 +379,11 @@ export async function main(argv: string[], env: Record<string, string | undefine
   const token = env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
     console.error("handoff:photos needs BLOB_READ_WRITE_TOKEN (the production Blob read-write token) in your shell, e.g.\n  BLOB_READ_WRITE_TOKEN=… npm run handoff:photos -- --in <export.json> --out <images dir>\nUse --dry-run to see what would be downloaded without it. Nothing was downloaded or written.");
+    return 2;
+  }
+  const outProblem = photosOutProblem(outputRoot, out);
+  if (outProblem) {
+    console.error(`handoff:photos: ${outProblem} Nothing was downloaded or written.`);
     return 2;
   }
   const plan = downloadPlan(sel.picks);

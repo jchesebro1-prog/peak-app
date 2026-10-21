@@ -139,7 +139,7 @@
  *
  * Plan: PR 2 Tasks 2–12.
  */
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import * as vm from "node:vm";
 import { pathToFileURL } from "node:url";
@@ -152,7 +152,7 @@ import { PREVIEW_COPY } from "@/lib/estimate-output/package-preview";
 import { POPOUT_NOTICE, PRINT_FOOTER_TEXT } from "./ui/preview-routes";
 import { CURRENT_USER_KEY } from "./runtime/ports";
 import { canonicalTotals } from "./runtime/estimate-totals";
-import { driftClean, driftMessages, driftOf, parsePortSources, PORT_SOURCES_FILE, sha256Of, unknownPorts, updatedPortSources } from "./port-drift";
+import { driftClean, driftMessages, driftOf, parsePortSources, PORT_SCAN_DIR, PORT_SOURCES_FILE, sha256Of, unknownPorts, unlistedPorts, updatedPortSources } from "./port-drift";
 
 export const ROOT = path.resolve(__dirname, "..", "..");
 export const VERIFY_DIR = path.join(ROOT, "output", "verify");
@@ -1387,10 +1387,17 @@ function driftCheck(update: false | readonly string[]): boolean {
     writeFileSync(file, JSON.stringify(updatedPortSources(manifest, hashOf, update.length ? update : undefined), null, 2) + "\n");
     console.log(`handoff:verify --drift --update  wrote ${PORT_SOURCES_FILE} (${update.length ? `re-stamped ${update.join(", ")}` : "re-stamped every entry"})`);
   }
-  const r = driftOf(update ? parsePortSources(JSON.parse(readFileSync(file, "utf8"))) : manifest, hashOf, exists);
-  const ok = driftClean(r);
-  console.log(`handoff:verify --drift  ${ok ? "PASS" : "FAIL"} (${manifest.ports.length} ports, ${r.checked} originals; changed ${r.changed.length}, missing ${r.missing.length}, ports missing ${r.portsMissing.length})`);
+  const now = update ? parsePortSources(JSON.parse(readFileSync(file, "utf8"))) : manifest;
+  const r = driftOf(now, hashOf, exists);
+  // completeness: every runtime module that says it ports a src/ module must be in the manifest
+  const walk = (rel: string): string[] =>
+    readdirSync(path.join(ROOT, rel)).sort().flatMap((n) => (statSync(path.join(ROOT, rel, n)).isDirectory() ? walk(`${rel}/${n}`) : [`${rel}/${n}`]));
+  const scanned = walk(PORT_SCAN_DIR);
+  const unlisted = unlistedPorts(now, scanned, (f) => readFileSync(path.join(ROOT, f), "utf8"));
+  const ok = driftClean(r) && unlisted.length === 0;
+  console.log(`handoff:verify --drift  ${ok ? "PASS" : "FAIL"} (${now.ports.length} ports, ${r.checked} originals; changed ${r.changed.length}, missing ${r.missing.length}, ports missing ${r.portsMissing.length}; ${scanned.length} runtime modules scanned, unlisted ports ${unlisted.length})`);
   for (const m of driftMessages(r)) console.log(`  ${m}`);
+  for (const f of unlisted) console.log(`  ${f} says it ports a src/ module but has no entry in ${PORT_SOURCES_FILE} — add one (its originals), then \`--drift --update ${f}\``);
   return ok;
 }
 

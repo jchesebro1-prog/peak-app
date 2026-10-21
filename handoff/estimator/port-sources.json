@@ -538,6 +538,74 @@
           "sha256": "323603005a26859e095efbe8bc00a0e182ab9b49ca136706c36ba70cf2bfe5a0"
         }
       ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/estimator-actions.ts",
+      "what": "the Estimator's own server actions (saveQuoteAction, Move / Copy system, header meta, new estimate …) — type-enforced against the original",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/actions.ts",
+          "sha256": "f73415c046f4d7859f06b77cda4c37d3de12c2be159ac4710a23f7fd011b574e"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/place-system.ts",
+      "what": "Move / Copy system → an estimate (placeSystemInEstimate), copyPricingFor, the follow-the-renames helpers",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/actions.ts",
+          "sha256": "f73415c046f4d7859f06b77cda4c37d3de12c2be159ac4710a23f7fd011b574e"
+        },
+        {
+          "path": "src/app/(app)/estimator/copy-pricing.ts",
+          "sha256": "7e58c56985f860569920ef06efe871e7d1965056a0b7d0a2494898a045a9a0f8"
+        },
+        {
+          "path": "src/lib/stores/catalog-renames.ts",
+          "sha256": "ce3e34ce479510d680c2cdced79f02d911124a8a95e201cf9aafdb24d8806941"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/client-package-actions.ts",
+      "what": "clientPackageDocsAction (the Client package tab's datasheet rows — empty: no part documents in the slice)",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/client-package-actions.ts",
+          "sha256": "a0361fead6d5158ae384e05595caf6f9b37ed3da2c8bca4efc523e387d49e945"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/output-actions.ts",
+      "what": "surveyGoalsAction / siteVisitGoalsAction (no site visits in the slice)",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/output-actions.ts",
+          "sha256": "d3216a05370aa26a94ebf08fe7ed014763c6a41ddf8275e694abdb141850d070"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/pdf-actions.ts",
+      "what": "quotePdfStatusAction / retryQuotePdfAction (the saved PDF's view; no renderer)",
+      "originals": [
+        {
+          "path": "src/app/(app)/quotes/pdf-actions.ts",
+          "sha256": "450e872a469fd3308c56b26303961f65e5ded2c972a66eff2239628b78cb5119"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/quotes-actions.ts",
+      "what": "setQuoteStatus (the Portal panel's Approve) and deleteQuoteAction",
+      "originals": [
+        {
+          "path": "src/app/(app)/quotes/actions.ts",
+          "sha256": "0d77a3eac34955614ce10ea9d746efc878168caddcd20776b3aa0b1def855d42"
+        }
+      ]
     }
   ]
 }

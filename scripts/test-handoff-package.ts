@@ -13,7 +13,7 @@ import * as path from "node:path";
 import JSZip from "jszip";
 import { FIXTURE_EXPORT, FIXTURE_GOLDEN, goldenFileName, goldenFor, goldenJson, goldenWith, systemQuotesOf, type ExportFile } from "./estimating-golden";
 import {
-  auditPackage, buildEngineBundle, citedEnginePaths, engineAt, isJunkPath, keepDocComments, loadEngine, MAX_FILE_BYTES, parityProblems,
+  auditPackage, auditProblems, ARTIFACT_PUBLISH_FILES, ARTIFACT_VERSION_FILES, fileCountWarnings, PRIVATE_BLOB_PREFIXES, buildEngineBundle, citedEnginePaths, engineAt, isJunkPath, keepDocComments, loadEngine, MAX_FILE_BYTES, parityProblems,
   REQUIRED_FILES, sliceSystemQuotes, SPEC_DOCS, writeGoldenFiles, writeZip, ZIP_ROOT, zipEntries, zipName,
 } from "../handoff/estimator/package";
 import { EXTRA_FIELD_NOTES, expandSpecMarkdown, fieldsTable, hasMarkers, onlyFields, typeFields, undocumentedFields } from "../handoff/estimator/spec-gen";
@@ -176,6 +176,49 @@ export async function handoffPackageChecks(ok: Ok) {
     fs.writeFileSync(path.join(pkg, "notes.txt"), "photo failed: blob path outside part-docs/<docId>/");
     ok(!a1.ok && a1.privatePaths.includes("data.js") && a1.oversize.includes("big.bin") && a1.missing.includes("spec/pricing.md"), "handoff:package: auditPackage flags a private Blob path, a file over 15,000,000 bytes and a missing doc");
     ok(!auditPackage(pkg).privatePaths.includes("notes.txt"), "handoff:package: auditPackage — the 'part-docs/<docId>/' failure text is not a private pathname");
+    ok(a1.unexpected.includes("data.js") && a1.unexpected.includes("big.bin"), "handoff:package A5: auditPackage — a stray file outside the layout (data.js, big.bin) fails the audit");
+    // clean the planted failures away, then plant one problem at a time on an otherwise good package
+    for (const f of ["data.js", "big.bin", "notes.txt"]) fs.rmSync(path.join(pkg, f), { force: true });
+    fs.writeFileSync(path.join(pkg, "spec", "pricing.md"), "// spec/pricing.md\n");
+    ok(auditPackage(pkg).ok, "handoff:package A5: the package is clean again");
+    const plant = (rel: string, body: string | Buffer) => {
+      fs.mkdirSync(path.dirname(path.join(pkg, rel)), { recursive: true });
+      fs.writeFileSync(path.join(pkg, rel), body);
+      const a = auditPackage(pkg);
+      fs.rmSync(path.join(pkg, rel));
+      return a;
+    };
+    for (const prefix of PRIVATE_BLOB_PREFIXES) {
+      const a = plant("data/estimates.js", `window.PEAK_ESTIMATES = [{"x":"${prefix}/Q-1/rev-1.pdf"}];`);
+      ok(!a.ok && a.privatePaths.includes("data/estimates.js"), `handoff:package A5: a ${prefix}/<id>/… pathname in a data file fails the audit`);
+    }
+    for (const stray of ["notes.txt", "data/extra.js", "data/catalog-0.js", "spec/RUNBOOK.md.bak", "spec/golden/x.txt", "images/manifest.json.bak", "images/sub/a.webp", "spec/screenshots/a.jpg", "secrets/x.js"]) {
+      const a = plant(stray, "x");
+      ok(!a.ok && a.unexpected.includes(stray), `handoff:package A5: a stray ${stray} fails the audit (layout allow-list)`);
+    }
+    for (const fine of ["data/catalog-2.js", "data/photos.js", "images/PD-1.webp", "spec/golden/Q-1.json", "spec/screenshots/01-estimates.png", "app/assets/x-ABC.jpg"]) {
+      const a = plant(fine, "x");
+      ok(a.ok && a.unexpected.length === 0, `handoff:package A5: ${fine} is part of the layout`);
+    }
+    const tok = "gh" + "p_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    for (const where of ["app/app.js", "spec/README.md", "index.html", "app/estimating-core.js"]) {
+      const before = fs.readFileSync(path.join(pkg, where));
+      fs.writeFileSync(path.join(pkg, where), before.toString() + `\n// ${tok}\n`);
+      const a = auditPackage(pkg);
+      fs.writeFileSync(path.join(pkg, where), before);
+      ok(!a.ok && a.secrets.some((x) => x.file === where && x.rules.includes("github-token")), `handoff:package A5: a token in ${where} fails the audit (secret scan over every text file)`);
+    }
+    ok(isJunkPath("images/manifest.json") && plant("images/manifest.json", "{}").ok, "handoff:package A6: images/manifest.json is never shipped (junk: not audited, not zipped)");
+    ok(fileCountWarnings(255).length === 0 && /one Artifact publish/.test(fileCountWarnings(256)[0] ?? "") && /^!!!/.test(fileCountWarnings(512)[0] ?? "") && ARTIFACT_PUBLISH_FILES === 255 && ARTIFACT_VERSION_FILES === 511,
+      "handoff:package A5: file count — no warning ≤ 255, a warning past one publish (255), a loud one past one Artifact version (511)");
+    {
+      const many = path.join(pkg, "images");
+      for (let i = 0; i < 260; i++) fs.writeFileSync(path.join(many, `F-${i}.webp`), "x");
+      const a = auditPackage(pkg);
+      ok(a.ok && a.fileCount > 255 && a.warnings.length === 1, `handoff:package A5: a 260-image package still passes, with the Artifact warning (${a.fileCount} files)`);
+      for (let i = 0; i < 260; i++) fs.rmSync(path.join(many, `F-${i}.webp`));
+    }
+    ok(auditProblems(auditPackage(pkg)).length === 0, "handoff:package A5: auditProblems is empty for a clean package");
     fs.rmSync(path.join(pkg, "CONFIDENTIAL.txt"));
     let refused = false;
     try {

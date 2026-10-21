@@ -4,7 +4,9 @@
  * helpers). In order:
  *
  *   1. The folder (auditPackage): every file ≤ 15,000,000 bytes, the total ≤ 150 MB, no file contains a private Blob
- *      pathname ("part-docs/<id>/…"), the page / app / engine / docs / notice are all there.
+ *      pathname (any app prefix — PRIVATE_BLOB_PREFIXES), no text file matches a secret rule, nothing outside the package
+ *      layout, the page / app / engine / docs / notice are all there; the file count warns past one Artifact publish (255)
+ *      and loudly past one Artifact version (511).
  *   2. --parity (verify/parity.ts): the readable engine reproduces every golden file byte for byte.
  *   3. --smoke --all-steps over the sample: every route — each sampled estimate × each step and tab, the Catalog,
  *      Assemblies, a rack's sheets, Estimating Rules and its sub-pages — with no page error, no foreign request, no
@@ -318,8 +320,10 @@ export function printFull(r: FullResult): void {
   console.log("");
   console.log(`handoff:verify --full  ${r.pass ? "PASS" : "FAIL"}`);
   const a = r.audit;
-  console.log(`  package: ${a.fileCount} files, ${(a.totalBytes / 1e6).toFixed(2)} MB (≤ 150 MB: ${a.totalOver ? "NO" : "yes"}); over 15,000,000 bytes: ${a.oversize.length}; "part-docs/": ${a.privatePaths.length}; missing: ${a.missing.length}${a.junk.length ? `; junk never zipped: ${a.junk.join(", ")}` : ""}`);
-  for (const f of [...a.oversize, ...a.privatePaths, ...a.missing]) console.log(`    ${f}`);
+  console.log(`  package: ${a.fileCount} files, ${(a.totalBytes / 1e6).toFixed(2)} MB (≤ 150 MB: ${a.totalOver ? "NO" : "yes"}); over 15,000,000 bytes: ${a.oversize.length}; private Blob paths: ${a.privatePaths.length}; missing: ${a.missing.length}; stray files: ${a.unexpected.length}; secret-scan hits: ${a.secrets.length}${a.junk.length ? `; never zipped: ${a.junk.join(", ")}` : ""}`);
+  for (const f of [...a.oversize, ...a.privatePaths, ...a.missing, ...a.unexpected]) console.log(`    ${f}`);
+  for (const h of a.secrets) console.log(`    ${h.file}: ${h.rules.join(", ")}`);
+  for (const w of a.warnings) console.log(`  WARN ${w}`);
   console.log(`  largest: ${a.largest.map((f) => `${f.file} ${f.bytes}`).join(" · ")}`);
   console.log(`  sample: ${r.sample.length} of ${r.sliceSize} estimate(s)`);
   for (const s of r.sample) {

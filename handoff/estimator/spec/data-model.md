@@ -105,9 +105,39 @@ One entry per status move, oldest first.
 
 ## Revision — `QuoteRevision`
 
-An append-only, priced snapshot. Revisions are never rewritten; `rev` is 1-based.
+An append-only, priced snapshot. Revisions are never rewritten; `rev` is 1-based. The package ships the
+fields below (the slicer's `REVISION_FIELDS`); Quartzite's revisions also carry the stored PDF's private
+Blob pathname (`pdfBlobPath`, `pdfSavedAt`) and the service quotes' payloads (`flameTest`, `repair`,
+`inspection`, `consulting`, `rental`), which never ship.
 
-<!-- @fields src/lib/stores/quotes.ts QuoteRevision -->
+<!-- @fields src/lib/stores/quotes.ts QuoteRevision only=REVISION_FIELDS -->
+
+### Revision header — `QuoteRevisionDocFields`
+
+`docFields` freezes what the customer document's header printed when the revision was cut, so an old
+revision prints as it was sent. Shipped fields (`DOC_FIELDS`; `pdfOptions` and `packageSelection` are
+allow-listed again one level down). Not shipped: the drawings attached to the package page
+(`packageFiles`, private Blob pathnames), the bid and its awarded bidder (`bid`, `awardedPartyId` —
+bidders are not in the prototype) and the portal's firm-quote stamp (`portalFirm`).
+
+<!-- @fields src/lib/stores/quotes.ts QuoteRevisionDocFields only=DOC_FIELDS -->
+
+## Vendor quote — `VendorQuote`
+
+A vendor's quote imported into an estimate, kept top-level on the quote (`vendorQuotes`, and frozen in
+each revision). One priced line per vendor quote carries the money (`SpecItem.vendorQuoteId`); the
+record supplies what that line prints. The package ships only what the screens and the customer
+document **render** (`VENDOR_QUOTE_FIELDS`, `VENDOR_LINE_FIELDS`). Not shipped: the attached PDF (its
+bytes or private Blob pathname), the vendor's link, the internal terms and notes (Build's amber
+internal box shows them in Quartzite; the customer document never does), the email thread it came
+from, the Read the PDF result and the vendor company link (the vendor company is not in the package —
+the Vendors card groups by the vendor's name).
+
+<!-- @fields src/app/(app)/estimator/types.ts VendorQuote only=VENDOR_QUOTE_FIELDS -->
+
+Each of `lines`:
+
+<!-- @fields src/app/(app)/estimator/types.ts VendorQuoteLine only=VENDOR_LINE_FIELDS -->
 
 ## Lifecycle
 

@@ -16,7 +16,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   BLOB_IDS, COMPANY_COLS, CONTACT_COLS, CONTACT_EMAIL_COLS, CONTACT_PHONE_COLS, CATALOG_FIELDS, FIXTURE_FIELDS, SETTINGS_FIELDS, SITE_COLS, TEAM_FIELDS, INACTIVE_TEAM_FIELDS,
-  pickAndScrub, pickFields, scanForSecrets, scrubValue, selectEstimates, packCatalog, catalogBody,
+  pickAndScrub, pickFields, sanitizeQuote, scanForSecrets, scrubValue, selectEstimates, packCatalog, catalogBody,
   type DocRow, type QuoteDoc, type ScrubEntry,
 } from "./slice-rules";
 import { parsePhotoManifest, photosScript, selectPhotos, type PhotoManifest } from "./photo-select";
@@ -75,10 +75,12 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[]; 
   const have = new Set(picked.map((q) => q.id));
   for (const q of opts.extraEstimates ?? []) if (!have.has(q.id)) { picked.push(q); have.add(q.id); }
   picked.sort((a, b) => a.id.localeCompare(b.id));
+  // Every estimate — the export's and any dev extras — goes through sanitizeQuote again (idempotent): the top-level
+  // allow-list and the nested ones (revisions → docFields / vendorQuotes, review, pdfOptions…), then the deep scrub.
   const estimates: QuoteDoc[] = picked.map((q) => {
     const log: ScrubEntry[] = [];
     const out: Row = {};
-    for (const [k, v] of Object.entries(q)) out[k] = scrubValue(v, q.id, k, log);
+    for (const [k, v] of Object.entries({ ...sanitizeQuote(q), id: q.id })) out[k] = scrubValue(v, q.id, k, log);
     noteScrub("data/estimates.js", log);
     return out as QuoteDoc;
   });

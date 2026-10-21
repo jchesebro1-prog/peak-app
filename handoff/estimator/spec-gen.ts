@@ -6,9 +6,10 @@
  * Markers (an HTML comment on a line of its own; the whole line is replaced):
  *
  *   <!-- @fields <file> <Type> -->                 a Field / Type / Notes table of a type alias or interface
- *   <!-- @fields <file> <Type> only=QUOTE_FIELDS --> the same, limited to the slicer's quote allow-list, in its order
- *                                                   (a listed field the type doesn't declare must have a note in
- *                                                   EXTRA_FIELD_NOTES, else the build fails)
+ *   <!-- @fields <file> <Type> only=QUOTE_FIELDS --> the same, limited to one of the slicer's allow-lists (ONLY_LISTS:
+ *                                                   QUOTE_FIELDS, REVISION_FIELDS, DOC_FIELDS, VENDOR_QUOTE_FIELDS,
+ *                                                   VENDOR_LINE_FIELDS), in its order (a listed field the type doesn't
+ *                                                   declare must have a note in EXTRA_FIELD_NOTES, else the build fails)
  *   <!-- @api <file> <name> [<name> …] -->         each exported const object (its doc + every member's signature and
  *                                                   doc) or exported function (doc + signature), in the order given
  *
@@ -18,9 +19,19 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { QUOTE_FIELDS } from "./slice-rules";
+import { DOC_FIELDS, QUOTE_FIELDS, REVISION_FIELDS, VENDOR_LINE_FIELDS, VENDOR_QUOTE_FIELDS } from "./slice-rules";
 
 export type FieldRow = { name: string; optional: boolean; type: string; doc: string };
+
+/** The slicer's allow-lists an `only=` option may name. */
+export const ONLY_LISTS: Record<string, readonly string[]> = { QUOTE_FIELDS, REVISION_FIELDS, DOC_FIELDS, VENDOR_QUOTE_FIELDS, VENDOR_LINE_FIELDS };
+function onlyListOf(opt: string | undefined): readonly string[] | null {
+  if (!opt) return null;
+  const m = /^only=([A-Z_]+)$/.exec(opt);
+  const list = m ? ONLY_LISTS[m[1]] : undefined;
+  if (!list) throw new Error(`spec-gen: unknown @fields option "${opt}"`);
+  return list;
+}
 
 /** Notes for allow-listed quote fields the `Quote` type doesn't declare (they ride on the document untyped). */
 export const EXTRA_FIELD_NOTES: Record<string, { type: string; doc: string }> = {
@@ -106,6 +117,32 @@ export const HAND_NOTES: Record<string, string> = {
   "QuoteRevision.inspection": "Service quotes only (not in this package).",
   "QuoteRevision.consulting": "Service quotes only (not in this package).",
   "QuoteRevision.rental": "Service quotes only (not in this package).",
+  "Quote.vendorQuotes": "The estimate's vendor quotes (`VendorQuote[]`, below) — the money rides on one priced line per vendor quote (`SpecItem.vendorQuoteId`). Ships render-only: see Vendor quote.",
+  "QuoteRevisionDocFields.customer": "The customer name as printed.",
+  "QuoteRevisionDocFields.locationId": "The venue as printed.",
+  "QuoteRevisionDocFields.contactName": "The attn contact as printed (null = the primary contact).",
+  "QuoteRevisionDocFields.quoteNote": "The customer-facing note as printed.",
+  "QuoteRevisionDocFields.assumptions": "The assumptions as printed.",
+  "QuoteRevisionDocFields.installTimeframe": "The install window as printed.",
+  "QuoteRevisionDocFields.preparedBy": "Prepared by, as printed.",
+  "QuoteRevisionDocFields.owner": "Lead estimator, as printed.",
+  "QuoteRevisionDocFields.termsText": "The terms text as printed (service letters; usually empty on an estimate).",
+  "QuoteRevisionDocFields.paymentTerms": "The payment terms as printed.",
+  "QuoteRevisionDocFields.pdfOptions": "The \"Show on PDF\" choices as sent.",
+  "QuoteRevisionDocFields.source": "The quote's source (estimator, quick, grid …).",
+  "QuoteRevisionDocFields.issuedAt": "Epoch ms of the date that Rev printed (with `revNo`).",
+  "VendorQuote.id": "The vendor quote's id — the priced line's `vendorQuoteId`.",
+  "VendorQuote.vendor": "The vendor's name as printed (\"vendor · quote # — description\").",
+  "VendorQuote.quoteNumber": "The vendor's own quote number.",
+  "VendorQuote.description": "What the vendor quoted, as printed.",
+  "VendorQuote.lines": "The vendor's material lines, printed as unpriced sub-rows when `display` is \"itemized\".",
+  "VendorQuote.total": "The vendor's total (the cost of the one priced line).",
+  "VendorQuoteLine.id": "Line number within the vendor quote.",
+  "VendorQuoteLine.description": "As printed.",
+  "VendorQuoteLine.manufacturerPartNumber": "Manufacturer part number (BOM, parts list).",
+  "VendorQuoteLine.qty": "Quantity.",
+  "VendorQuoteLine.unit": "Unit.",
+  "VendorQuoteLine.amount": "The line's amount on the vendor's quote (descriptive; the money is on the priced line).",
   "SeedTeamUser.id": "Roster id (`u1` …).",
   "SeedTeamUser.name": "Display name — quotes reference people by name (`owner`, `preparedBy`).",
   "SeedTeamUser.roles": "Any of Admin, Manager, Estimator, Reviewer (data-model.md → Roles).",
@@ -182,7 +219,8 @@ export function undocumentedFields(md: string, root: string): string[] {
     if (m[1] !== "fields") continue;
     const [file, typeName, opt] = m[2].split(/\s+/);
     let rows = typeFields(root, file, typeName);
-    if (opt === "only=QUOTE_FIELDS") rows = onlyFields(rows, QUOTE_FIELDS, typeName);
+    const only = onlyListOf(opt);
+    if (only) rows = onlyFields(rows, only, typeName);
     for (const r of rows) if (!r.doc) out.push(`${typeName}.${r.name}`);
   }
   return out;
@@ -255,10 +293,8 @@ export function expandSpecMarkdown(md: string, root: string): string {
       const [file, typeName, opt] = args;
       if (!file || !typeName) throw new Error(`spec-gen: "@fields ${argText}" needs <file> <Type>`);
       let rows = typeFields(root, file, typeName);
-      if (opt) {
-        if (opt !== "only=QUOTE_FIELDS") throw new Error(`spec-gen: unknown @fields option "${opt}"`);
-        rows = onlyFields(rows, QUOTE_FIELDS, typeName);
-      }
+      const only = onlyListOf(opt);
+      if (only) rows = onlyFields(rows, only, typeName);
       if (!rows.length) throw new Error(`spec-gen: ${typeName} in ${file} has no fields`);
       return fieldsTable(rows);
     }

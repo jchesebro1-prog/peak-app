@@ -48,7 +48,7 @@ import type { LivePart } from "../handoff/estimator/runtime/readers";
 import { POPOUT_NOTICE, PRINT_FOOTER_TEXT, previewTargetOf, windowOpenRoute } from "../handoff/estimator/ui/preview-routes";
 import { cutSheetAppendixModels } from "../handoff/estimator/runtime/loaders/cut-sheets";
 import { packagePanelFor } from "../handoff/estimator/runtime/actions/package-actions";
-import { driftClean, driftMessages, driftOf, parsePortSources, PORT_SOURCES_FILE, sha256Of, unknownPorts, updatedPortSources } from "../handoff/estimator/port-drift";
+import { claimsPort, driftClean, driftMessages, driftOf, parsePortSources, PORT_SCAN_DIR, PORT_SOURCES_FILE, sha256Of, unknownPorts, unlistedPorts, updatedPortSources } from "../handoff/estimator/port-drift";
 import { APP_OVERRIDES, BAKED_MODULES, bakedSource, exportNames } from "../handoff/estimator/esbuild-plugins";
 import { fmt } from "@/lib/estimating-core/pricing";
 import { CUT_SHEETS_NO_QUOTE, CUT_SHEETS_WRONG_TYPE } from "@/lib/curtain-cut-sheets/model";
@@ -981,6 +981,18 @@ export async function handoffReviewChecks(ok: Ok) {
   const cs = await loadCutSheetsLocal(store, "Q-3004");
   ok(cs.ok && cs.models.client.length === 1 && cs.models.submittal.length === 1 && cs.models.client[0].sheetNo === "CS-1" && cs.result.types[0].curtains[0].fabric?.sku === "FAB-CH25",
     `handoff review: cut sheets — a curtain line gets CS-1 in both styles, its fabric from the store's catalog (got ${cs.ok ? cs.models.client.map((m) => m.sheetNo).join() : "error"})`);
+  // final review A4: a lin-yd fabric weighs only with its bolt width (the slice now ships boltWidthIn)
+  ok(cs.ok && typeof cs.result.types[0].weightLbTotal === "number" && cs.result.types[0].weightLbTotal > 0,
+    `handoff review A4: cut sheets — a lin-yd fabric WITH boltWidthIn yields a weight (got ${cs.ok ? cs.result.types[0].weightLbTotal : "error"})`);
+  {
+    const fab = await store.get<Record<string, unknown>>("catalog", "FAB-CH25");
+    const { boltWidthIn: _bw, ...noBolt } = fab!;
+    void _bw;
+    await store.put("catalog", noBolt as { id: string });
+    const csNoBolt = await loadCutSheetsLocal(store, "Q-3004");
+    ok(csNoBolt.ok && csNoBolt.result.types[0].weightLbTotal === null, "handoff review A4: cut sheets — the same fabric WITHOUT boltWidthIn has no weight (so the slice must carry it)");
+    await store.put("catalog", fab as { id: string });
+  }
   // The print route's #292 appendix: Client sheets only when the saved quote's PDF options ask for them.
   await store.put("quotes", { ...curtainQ, pdfOptions: { pdfCutSheets: true } });
   const csOn = await loadCutSheetsLocal(store, "Q-3004");
@@ -1148,6 +1160,21 @@ export async function handoffReviewChecks(ok: Ok) {
   const real = parsePortSources(JSON.parse(fs.readFileSync(PORT_SOURCES_FILE, "utf8")));
   ok(real.ports.length >= 13 && real.ports.every((p) => fs.existsSync(p.port) && p.originals.every((o) => /^[0-9a-f]{64}$/.test(o.sha256))),
     `handoff drift: ${PORT_SOURCES_FILE} parses, every port module exists and every original has a stamped hash (whether originals still match is --drift's job)`);
+  // final review A8: completeness — a runtime module that says it ports a src/ module must have an entry
+  ok(claimsPort("/**\n * Estimator handoff — browser implementations of src/app/(app)/x/actions.ts.\n */\nexport {};") &&
+    claimsPort("/** the browser port of src/lib/a.ts */") && claimsPort('/** helpers */\nimport type * as Original from "@/app/(app)/x/actions";') &&
+    !claimsPort("/** the shell's routes (pure) */\nexport {};") && !claimsPort("/** mentions src/lib/a.ts only as a reference */"),
+    "handoff drift A8: claimsPort — a header naming a src/ file with port / implementations of, or an `import type * as Original`, claims a port; a plain mention does not");
+  {
+    const fake = { ports: [{ port: "r/listed.ts", what: "", originals: [{ path: "src/a.ts", sha256: "x" }] }] };
+    const bodies: Record<string, string> = { "r/listed.ts": "/** port of src/a.ts */", "r/new.ts": "/** the browser port of src/b.ts */", "r/pure.ts": "/** pure */", "r/notes.md": "/** port of src/c.ts */" };
+    ok(unlistedPorts(fake, Object.keys(bodies), (f) => bodies[f]).join() === "r/new.ts", "handoff drift A8: unlistedPorts names a claimed port with no manifest entry (only .ts/.tsx modules)");
+    const walk = (d: string): string[] => fs.readdirSync(d).sort().flatMap((n) => (fs.statSync(nodePath.join(d, n)).isDirectory() ? walk(`${d}/${n}`) : [`${d}/${n}`]));
+    const unlisted = unlistedPorts(real, walk(PORT_SCAN_DIR), (f) => fs.readFileSync(f, "utf8"));
+    ok(unlisted.length === 0, `handoff drift A8: every runtime module that claims a port is in ${PORT_SOURCES_FILE} (unlisted: ${unlisted.join(", ") || "none"})`);
+    for (const f of ["estimator-actions", "place-system", "client-package-actions", "output-actions", "pdf-actions", "quotes-actions"])
+      ok(real.ports.some((p) => p.port === `handoff/estimator/runtime/actions/${f}.ts`), `handoff drift A8: ${f}.ts has a manifest entry`);
+  }
 
   // --- the component overrides export every value name their originals do (a BAKED data override: see handoffRulesChecks) ---
   for (const [orig, repl] of Object.entries(APP_OVERRIDES)) {
