@@ -12776,3 +12776,16 @@ Jeff: the Parts list (CSV) should show item name, description, cost, sell margin
 **Remaining (Jeff-gated):**
 - Open one real estimate's CSV in Excel and check the labels and margins.
 - Download one BOM PDF on production (needs `QUOTE_PDF_ORIGIN`, like every estimate PDF).
+
+## 363. Estimator review spreadsheet — DONE 2026-10-22 on `feat/363-review-spreadsheet` (D1250–D1251)
+
+Jeff, 2026-10-22: the parts list should include the link when a part is custom so it can be clicked to review; rename it Review Spreadsheet; swap the effective margin column for the markup equation of the line's margin; and add three subtotals for system cost, system markup and system fees (the estimator bonus and freight combined into one item). His answers: real .xlsx; Markup is a live formula on the line's own sell before freight / rounding / bonuses; subtotals under each system; fees = freight + 2% estimator bonus + 5% package bonus + the $25 round-up / typed-price adjustment, so cost + markup + fees reconciles to the system's price.
+
+**Built:** Estimator → More ▾ → **Review spreadsheet** (replaces Parts list (CSV)) downloads `<stem>-review-spreadsheet.xlsx`: one sheet "Review" (header bold, frozen, filtered) with Manufacturer · Item name · Description · Room · System · Qty · Unit Cost · Unit Sell · Ext Cost · Ext Sell · Line margin · Markup · Price source · Link · Notes. Unit Sell is the line's own sell; Ext Cost, Ext Sell, Line margin and Markup are formulas with cached results; Link is a clickable hyperlink (a line's own http/https link, a vendor-quote row's own link else the vendor quote's; never on assembly components). Under each system: **System cost**, **System markup** (SUM formulas) and **System fees** (a number, with "Freight · Estimator bonus · Package bonus · Price rounding" in Notes), then a blank row. Two same-named systems stay separate blocks. exceljs loads on demand (its own chunk). Pure model `reviewSheetModel` / `systemFees` / `reviewLink` in `src/app/(app)/estimator/parts-csv.ts`; workbook `src/app/(app)/estimator/review-sheet-xlsx.ts`; harness `#363`.
+
+**Gates:** tsc 0 errors; test:specs 25,049 PASS / 0 FAIL (33 new `#363` checks, including the workbook read back with exceljs; the `#305 header` menu pin now names Review spreadsheet); test:smoke 268 PASS / 0 FAIL (authenticated); eslint 0 problems on the 6 changed src files (`scripts/test-review-and-spec.ts` overflows eslint's react-hooks rule, as before, so it is excluded); `next build` passes, with exceljs in a separate lazily loaded chunk.
+
+**Rollback:** safe. No migration, no stored fields.
+
+**Remaining (Jeff-gated):**
+- Download one real estimate's Review spreadsheet and open it in Excel: click a custom part's link, check Markup on a few lines, and check that System cost + System markup + System fees matches the system's price on Build (a system with labor lines reads short by the labor's sell, since labor isn't listed).
