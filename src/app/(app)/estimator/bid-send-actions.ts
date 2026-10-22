@@ -17,6 +17,7 @@ import { requireUser, type SessionUser } from "@/lib/session";
 import { get as getQuote, type QuoteStatus } from "@/lib/stores/quotes";
 import { signatureFor } from "@/lib/stores/signatures";
 import { can } from "@/lib/team";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 import { getUser } from "@/lib/users";
 
 /**
@@ -76,7 +77,7 @@ export async function bidderEmailDefaultsAction(quoteId: string): Promise<Bidder
   const mailbox = await senderMailbox(user.id, (me?.email || user.email || "").trim());
   return {
     ok: true,
-    ...bidderEmailDefaults({ projectName: q.name || "", estimateNumber: displayQuoteNumber(q), senderName: user.name, signature }),
+    ...bidderEmailDefaults({ projectName: q.name || "", estimateNumber: displayQuoteNumber(q), senderName: user.name, signature, boxSale: boxSaleOf(q) }),
     ...mailbox,
   };
 }

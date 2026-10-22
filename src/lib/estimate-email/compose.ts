@@ -28,6 +28,9 @@ export type EstimateEmailDefaultsInput = {
   /** The sender's #127 signature (lib/stores/signatures) — seeded below a
    *  "-- " line exactly as the Inbox composer seeds it; "" = none. */
   signature?: string;
+  /** Box goods sale (spec 2026-10-21): "Attached is our quote … You can also view it online here: {link}" —
+   *  no "full package" or alternates wording. */
+  boxSale?: boolean;
 };
 
 const LINK_TOKEN = "{link}";
@@ -47,14 +50,15 @@ export function estimateEmailDefaults(i: EstimateEmailDefaultsInput): EstimateEm
   const cc = leadEmail && leadEmail.toLowerCase() !== senderEmail.toLowerCase() ? leadEmail : "";
   const project = String(i.projectName || "").trim();
   const est = String(i.estimateNumber || "").trim();
-  const subject = `${project} — estimate ${est}`.trim();
+  // Box goods sale (Jeff 2026-10-21): the subject says "quote", like the body.
+  const subject = `${project} — ${i.boxSale ? "quote" : "estimate"} ${est}`.trim();
   const sender = String(i.senderName || "").trim();
   const body = [
     `Hi ${firstNameOf(i.contactName)},`,
     "",
-    `Attached is our estimate${project ? ` for ${project}` : ""}${est ? ` (${est})` : ""}.`,
+    `Attached is our ${i.boxSale ? "quote" : "estimate"}${project ? ` for ${project}` : ""}${est ? ` (${est})` : ""}.`,
     "",
-    `You can also view the full package online, and choose any alternates, here: ${LINK_TOKEN}`,
+    i.boxSale ? `You can also view it online here: ${LINK_TOKEN}` : `You can also view the full package online, and choose any alternates, here: ${LINK_TOKEN}`,
     "",
     "Let me know if you have any questions.",
     "",
@@ -63,7 +67,8 @@ export function estimateEmailDefaults(i: EstimateEmailDefaultsInput): EstimateEm
   return { to, cc, subject, body: i.signature ? withSignature(body, i.signature, "add") : body };
 }
 
-export type BidderEmailDefaultsInput = { projectName: string; estimateNumber: string; senderName: string; signature?: string };
+/** `boxSale` (spec 2026-10-21): the link line drops "the full package". */
+export type BidderEmailDefaultsInput = { projectName: string; estimateNumber: string; senderName: string; signature?: string; boxSale?: boolean };
 
 /** #348 2b-ii — the bidder email: no addressee greeting (one body goes to every bidder), `{link}` swapped per bidder. */
 export function bidderEmailDefaults(i: BidderEmailDefaultsInput): { subject: string; body: string } {
@@ -76,7 +81,7 @@ export function bidderEmailDefaults(i: BidderEmailDefaultsInput): { subject: str
     "",
     `Attached is our bid${project ? ` for ${project}` : ""}${est ? ` (${est})` : ""}.`,
     "",
-    `You can also view the full package online here: ${LINK_TOKEN}`,
+    i.boxSale ? `You can also view it online here: ${LINK_TOKEN}` : `You can also view the full package online here: ${LINK_TOKEN}`,
     "",
     "Let me know if you have any questions.",
     "",

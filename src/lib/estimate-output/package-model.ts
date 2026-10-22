@@ -89,6 +89,9 @@ export type PackageViewProps = {
    *  when the quote has one; the Narrative view then draws it in place of the
    *  scope cards (the BOM view is unchanged). */
   document?: ResolvedPackageDoc;
+  /** Box goods sale (spec 2026-10-21) — the itemized list only; PackageView drops the Overview / Itemized toggle.
+   *  Absent on every other estimate (its props stay byte-identical). */
+  boxSale?: true;
 };
 
 export type PackageViewInput = {
@@ -106,6 +109,8 @@ export type PackageViewInput = {
   letterheadSrc: string;
   /** #348 2b-ii — a bidder's v3 link whose bid is no longer live: the banner reads "This bid is closed." */
   bidClosed?: boolean;
+  /** Box goods sale (spec 2026-10-21) — the revision's (or live quote's) flag; the page becomes the itemized list. */
+  boxSale?: boolean;
 };
 
 /** Jeff 2026-10-15 #20 — the page's photos alternate right, left, right across the scopes, in order. Pure. */
@@ -124,7 +129,7 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
   const t = coverTotals(d);
   const alternates = alternatesListView(d);
   const owner = ownerNameFromLine(d.ownerLine);
-  return {
+  const model: PackageViewProps = {
     // #331: the package page always prints the full baked Peak letterhead, never the Branding logo.
     logo: { src: i.letterheadSrc, full: true },
     companyName: d.companyName,
@@ -179,4 +184,21 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
       ? { document: resolvePackageDoc(d.document, { sections: d.sections, t: d.t, quoteId: d.quoteId, taxRatePct: d.taxRatePct, totalLabel: t.totalLabel, photos: i.photos, models: i.models }) }
       : {}),
   };
+  return i.boxSale === true ? boxSalePackageView(model) : model;
+}
+
+/** Box goods sale (spec 2026-10-21) — the package page is the itemized list only: the BOM view with no summary,
+ *  goals, narrative, key products, package document or Not included. Prices, totals, add options and alternates
+ *  stay (the client actions are the slots' — package-page.tsx). Pure. */
+export function boxSalePackageView(m: PackageViewProps): PackageViewProps {
+  const out: PackageViewProps = {
+    ...m,
+    boxSale: true,
+    view: "bom",
+    summary: "",
+    notIncluded: [],
+    scopes: m.scopes.map((s) => ({ ...s, goals: "", intro: [], keyProducts: [], fallback: null })),
+  };
+  delete out.document;
+  return out;
 }

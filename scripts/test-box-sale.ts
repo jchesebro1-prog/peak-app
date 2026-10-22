@@ -31,6 +31,13 @@ import { normalizePdfOptions } from "../src/lib/quote-pdf/pdf-options";
 import { BOX_SALE_PACKAGE_TABS, boxSalePackageTab, PACKAGE_TABS, packageTabsFor, parsePackageTab } from "../src/lib/estimate-steps/package-tabs";
 import { BOX_SALE_REVIEW_TABS, nextReviewTab, REVIEW_TABS, reviewTabsFor } from "../src/lib/estimate-review/review-ui";
 import { estimateReadiness } from "../src/lib/estimate-steps/readiness";
+import { composerInitial, withoutCoverForBoxSale } from "../src/lib/estimate-email/send-ui";
+import { bidderEmailDefaults, estimateEmailDefaults } from "../src/lib/estimate-email/compose";
+import { packageViewModel } from "../src/lib/estimate-output/package-model";
+import { boxSaleExtras } from "../src/lib/estimate-output/package-extras-model";
+import PackageView from "../src/components/estimate-output/package-view";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 // (later tasks: imports above this line)
 
 export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -279,6 +286,64 @@ function packageReviewChecks(ok: Ok) {
   ok(rd("src/lib/estimate-output/package-panel-server.ts").includes("gaps: boxSaleOf(q) ? [] : packageGapChips({"), "box sale readiness (source): the package panel shows no gap chips for a box sale");
 }
 
+function sendPackageChecks(ok: Ok) {
+  const start = composerInitial(null, null);
+  ok(start.attachCover === true && withoutCoverForBoxSale(start, true).attachCover === false && withoutCoverForBoxSale(start, true).attachEstimate === true && withoutCoverForBoxSale(start, false) === start,
+    "box sale send: the composer starts with the Estimate PDF ticked and the Cover PDF off");
+  const mail = { projectName: "Gym", estimateNumber: "EST-1042", contactName: "Pat Lee", contactEmail: "pat@school.org", senderName: "Sam Mills", senderEmail: "sam@peak.com", leadName: "", leadEmail: "" };
+  ok(estimateEmailDefaults({ ...mail, boxSale: true }).body === "Hi Pat,\n\nAttached is our quote for Gym (EST-1042).\n\nYou can also view it online here: {link}\n\nLet me know if you have any questions.\n\nThanks,\nSam Mills",
+    "box sale send: the email says \"Attached is our quote … You can also view it online here: {link}\" — no full package, no alternates");
+  ok(estimateEmailDefaults(mail).body === "Hi Pat,\n\nAttached is our estimate for Gym (EST-1042).\n\nYou can also view the full package online, and choose any alternates, here: {link}\n\nLet me know if you have any questions.\n\nThanks,\nSam Mills",
+    "box sale send: a normal estimate's email is unchanged");
+  ok(estimateEmailDefaults({ ...mail, boxSale: true }).subject === estimateEmailDefaults(mail).subject.replace(" — estimate ", " — quote ") && / — quote EST-1042$/.test(estimateEmailDefaults({ ...mail, boxSale: true }).subject) && / — estimate EST-1042$/.test(estimateEmailDefaults(mail).subject), "box sale send: the subject says quote (Jeff 2026-10-21); a normal estimate keeps estimate");
+  const bid = { projectName: "Gym", estimateNumber: "EST-1042", senderName: "Sam Mills" };
+  ok(bidderEmailDefaults({ ...bid, boxSale: true }).body.includes("You can also view it online here: {link}") && !bidderEmailDefaults({ ...bid, boxSale: true }).body.includes("full package"),
+    "box sale send: the bidder email drops \"full package\" too");
+  ok(bidderEmailDefaults(bid).body === "Hello,\n\nAttached is our bid for Gym (EST-1042).\n\nYou can also view the full package online here: {link}\n\nLet me know if you have any questions.\n\nThanks,\nSam Mills",
+    "box sale send: a normal bidder email is unchanged");
+
+  const spec = { sections: [sys("s1", "Rigging", [line(1), line(9, { option: true, desc: "Spare clamp" })], { presentation: "narrative", narrative: "Intro.", clientGoals: "Safer flying." })], mobs: [], document: DOC };
+  const doc = quoteDocumentDataFor(quoteFixture({ boxSale: true, spec }), null, SET);
+  const plainDoc = quoteDocumentDataFor(quoteFixture({ spec }), null, SET);
+  const input = {
+    photos: {}, catalog: new Map(), frozen: { coverSummary: "Our summary.", notIncluded: "Electrical\nPermits" },
+    state: { kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never, headerLine: "EST-1 · Rev 1", currentHref: null, view: "narrative" as const, base: "/b", letterheadSrc: "/lh.jpg",
+  };
+  const boxM = packageViewModel({ ...input, doc, boxSale: true });
+  const plainM = packageViewModel({ ...input, doc: plainDoc });
+  ok(boxM.boxSale === true && boxM.view === "bom" && boxM.summary === "" && boxM.notIncluded.length === 0 && !("document" in boxM) &&
+     boxM.scopes.every((s) => s.goals === "" && s.intro.length === 0 && s.keyProducts.length === 0 && s.fallback === null && s.bom.length > 0),
+    "box sale package page: the itemized list only — BOM view, no summary, goals, narrative, key products, document or Not included");
+  ok(boxM.options.length > 0 && boxM.options.length === plainM.options.length && boxM.totals.total === plainM.totals.total && boxM.total === plainM.total,
+    "box sale package page: prices, totals and add options stay");
+  ok(!("boxSale" in plainM) && plainM.summary === "Our summary." && plainM.notIncluded.length === 2 && plainM.view === "narrative",
+    "box sale package page: a normal estimate's page model is unchanged");
+  const html = (m: typeof boxM) => renderToStaticMarkup(createElement(PackageView, { model: m }));
+  ok(!html(boxM).includes('aria-label="Estimate view"') && html(plainM).includes('aria-label="Estimate view"'), "box sale package page: no Overview / Itemized toggle");
+  const extras = {
+    datasheets: { "SKU-1": { href: "/d", name: "DS" } }, downloads: { zipHref: "/z", datasheetsPdfHref: null, files: [], specifications: false },
+    plans: [{ href: "/p", name: "P", kindLabel: "Plan", sizeLabel: "1 KB", isImage: false }], actions: { scopes: [] },
+  };
+  const bx = boxSaleExtras(extras);
+  ok(Object.keys(bx.datasheets).length === 0 && bx.downloads === null && bx.plans.length === 0 && bx.actions === extras.actions,
+    "box sale package page: no datasheet links, downloads or plans; the client actions (options, alternates, question) stay");
+
+  const comp = rd("src/app/(app)/estimator/steps/send-composer.tsx");
+  ok(comp.includes("useState<ComposerFields>(() => withoutCoverForBoxSale(composerInitial(null, packageSelection), boxSale))") && /\{!boxSale && \(\s*<label[^>]*>\s*<input type="checkbox" checked=\{fields\.attachCover\}/.test(comp),
+    "box sale send (source): the composer starts without the cover and never offers it");
+  ok(rd("src/app/(app)/estimator/send-actions.ts").includes("      boxSale: boxSaleOf(q),\n") && rd("src/app/(app)/estimator/bid-send-actions.ts").includes("senderName: user.name, signature, boxSale: boxSaleOf(q) }),"),
+    "box sale send (source): both email defaults read the saved estimate's flag");
+  const pkgPage = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
+  ok(pkgPage.includes("const box = revisionBoxSale(hit.rev);") && pkgPage.includes("const cut = box ? null : await onlineCutSheets(hit.q, hit.rev);") && pkgPage.includes("buildPackageSlots(box ? boxSaleExtras(extras) : extras, {"),
+    "box sale package page (source): the client link drops cut sheets, datasheet links, downloads and plans — from the revision's frozen flag");
+  const live = rd("src/lib/estimate-output/package-live-loader.ts");
+  ok(rd("src/lib/estimate-output/package-loader.ts").includes("boxSale: revisionBoxSale(hit.rev),") && live.includes("boxSale: boxSaleOf(q),") && live.includes("boxSaleOf(q) ? staffPackageExtras(null, false, [], q.id) : liveExtras(q),"),
+    "box sale package page (source): the client page and the staff preview both build the box-sale model");
+  ok(["src/app/share/quote/[id]/[token]/package.zip/route.ts", "src/app/share/quote/[id]/[token]/datasheets.pdf/route.ts"].every((f) => rd(f).includes("if (!pkg || revisionBoxSale(pkg.rev)) return notFound();")),
+    "box sale package page (source): the zip and the datasheet book are a 404 for a box sale");
+  ok(/\{!m\.boxSale && \(\s*<nav aria-label="Estimate view"/.test(rd("src/components/estimate-output/package-view.tsx")), "box sale package page (source): PackageView drops the toggle when the model says so");
+}
+
 // (later tasks: check functions above this line)
 
 export async function boxSalePureChecks(ok: Ok) {
@@ -288,6 +353,7 @@ export async function boxSalePureChecks(ok: Ok) {
   printChecks(ok);
   buildUiChecks(ok);
   packageReviewChecks(ok);
+  sendPackageChecks(ok);
   // (later tasks: pure checks above this line)
 }
 

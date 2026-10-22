@@ -87,6 +87,11 @@ export function composerInitial(d: Partial<EstimateEmailDefaults> | null | undef
   };
 }
 
+/** Box goods sale (spec 2026-10-21): no Cover PDF — the composer starts (and stays) without it. Same object when off. */
+export function withoutCoverForBoxSale(f: ComposerFields, boxSale: boolean): ComposerFields {
+  return boxSale ? { ...f, attachCover: false } : f;
+}
+
 /** The primary button's label: the first send also marks the quote sent. */
 export function primaryLabel(status: QuoteStatus): string {
   return status === "draft" ? SEND_UI_COPY.primaryDraft : SEND_UI_COPY.primarySent;

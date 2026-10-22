@@ -7,6 +7,7 @@ import { bidderCanAct } from "@/lib/quote-share/package-view";
 import { loadKeyProductModels } from "@/lib/narrative/photos";
 import { packageBomSkus, type BomCatalogPart } from "./bom";
 import { packageFrozenFields, packagePhotoSections, packageViewModel, type PackageViewProps } from "./package-model";
+import { revisionBoxSale } from "@/lib/estimate-box-sale/rules";
 
 /**
  * #301 slice B — the package page's props for a resolved v2/v3 (rev-pinned) link. The
@@ -45,6 +46,8 @@ export async function loadPackageViewProps(
     view: opts.view,
     base: opts.base,
     letterheadSrc: opts.letterheadSrc,
+    // Box goods sale (spec 2026-10-21): the revision's frozen flag.
+    boxSale: revisionBoxSale(hit.rev),
   });
 }
 

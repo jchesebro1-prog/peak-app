@@ -11,6 +11,7 @@ import {
   sendSync,
   type ComposerFields,
   type SendNotice,
+  withoutCoverForBoxSale,
 } from "@/lib/estimate-email/send-ui";
 import { estimateEmailDefaultsAction, openEstimateInInboxAction, sendEstimateEmailAction } from "../send-actions";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
@@ -65,9 +66,10 @@ function goTo(cardId: string, focusId?: string) {
  * card), Copy link only (the Client link card).
  */
 export function SendComposer({ s, collapsible, onSent }: { s: EstimatorState; collapsible: boolean; onSent: () => void }) {
-  const { applySync, loadedId, next, packageSelection, pdfDirty, saveNow, selectionSettled, setActionError, setGateRefused, status, statusChanging, tierResolving } = s;
+  const { applySync, boxSale, loadedId, next, packageSelection, pdfDirty, saveNow, selectionSettled, setActionError, setGateRefused, status, statusChanging, tierResolving } = s;
   // #333 (Q5): the PDF ticks start from Build package → Client package; the server defaults fill the rest.
-  const [fields, setFields] = useState<ComposerFields>(() => composerInitial(null, packageSelection));
+  // Box goods sale: never a cover (the send action skips one too, whatever is posted).
+  const [fields, setFields] = useState<ComposerFields>(() => withoutCoverForBoxSale(composerInitial(null, packageSelection), boxSale));
   const [loaded, setLoaded] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [gmail, setGmail] = useState<{ connected: boolean; from: string } | null>(null);
@@ -240,10 +242,12 @@ export function SendComposer({ s, collapsible, onSent }: { s: EstimatorState; co
               <input type="checkbox" checked={fields.attachEstimate} disabled={disabled} onChange={(e) => set("attachEstimate", e.target.checked)} />
               {SEND_UI_COPY.attachEstimate}
             </label>
+            {!boxSale && (
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
               <input type="checkbox" checked={fields.attachCover} disabled={disabled} onChange={(e) => set("attachCover", e.target.checked)} />
               {SEND_UI_COPY.attachCover}
             </label>
+            )}
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
               {SEND_UI_COPY.followUp}
               <select

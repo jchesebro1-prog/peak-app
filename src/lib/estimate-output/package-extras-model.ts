@@ -30,6 +30,12 @@ export type PackageExtras = {
 
 export const EMPTY_EXTRAS: PackageExtras = { datasheets: {}, downloads: null, plans: [], actions: null };
 
+/** Box goods sale (spec 2026-10-21) — the itemized list only: no datasheet links, downloads or plans; the client
+ *  actions (choose options / alternates, ask a question) stay. Pure. */
+export function boxSaleExtras(x: PackageExtras): PackageExtras {
+  return { datasheets: {}, downloads: null, plans: [], actions: x.actions };
+}
+
 export function packageDocHref(base: string, docId: string): string {
   return `${base}/doc/${encodeURIComponent(docId)}`;
 }
