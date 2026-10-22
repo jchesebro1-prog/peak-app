@@ -33462,11 +33462,14 @@ import { inclusionsLine as d251Inclusions, round2 as d251Round2, totals as d251T
   ok(qdSrc251.includes('import { customerLines, fmt, inclusionsLine, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";'),
     "#251: QuoteDocument imports inclusionsLine from ./pricing");
   ok(!qdSrc251.includes("<div>Materials, installation &amp; freight included</div>"), "#251: the old unconditional header sentence is gone from the source");
-  ok(qdSrc251.includes("const inclusions = inclusionsLine(p.t);") && qdSrc251.includes("{inclusions && <div>{inclusions}</div>}"),
+  // #364: the BOM view's show flags filter inclusionsLine's inputs and gate the Labor / freight rows (absent = p.t as before).
+  ok((qdSrc251.includes("const inclusions = inclusionsLine(p.t);") ||
+      /const inclusions = inclusionsLine\(\{\s*mat: p\.showMaterials === false \? 0 : p\.t\.mat,\s*lab: p\.showLabor === false \? 0 : p\.t\.lab,\s*fr: p\.showFreight === false \? 0 : p\.t\.fr,\s*\}\);/.test(qdSrc251)) &&
+     qdSrc251.includes("{inclusions && <div>{inclusions}</div>}"),
     "#251: the header line is built from inclusionsLine(p.t) and only prints when non-empty");
-  ok(/\{p\.t\.lab > 0 && \(\s*<div/.test(qdSrc251) && qdSrc251.includes("<span>Labor — installation &amp; commissioning</span>"),
+  ok(/\{p\.t\.lab > 0 && (p\.showLabor !== false && )?\(\s*<div/.test(qdSrc251) && qdSrc251.includes("<span>Labor — installation &amp; commissioning</span>"),
     "#251: the Labor — installation & commissioning totals row only renders when p.t.lab > 0");
-  ok(/\{p\.t\.fr > 0 && \(\s*<div/.test(qdSrc251), "#251: the freight totals row only renders when p.t.fr > 0");
+  ok(/\{p\.t\.fr > 0 && (p\.showFreight !== false && )?\(\s*<div/.test(qdSrc251), "#251: the freight totals row only renders when p.t.fr > 0");
   // The already-conditional per-system narrative freight note (#245) stays
   // untouched by this fix.
   ok(qdSrc251.includes('{ps.hasFreight ? " · includes freight & delivery" : ""}'),
@@ -70354,4 +70357,95 @@ import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate
     "BOM PDF tab: Download / Open use bomPdfPath, the save-first note follows pdfDirty, and the tab still imports no store");
   const smoke = rd("scripts/smoke-routes.ts");
   ok(smoke.includes('{ route: "/api/quotes/Q-0/bom-pdf", expectNotFound: true }') && smoke.includes('{ route: "/print/quote/Q-2041?view=bom", expectNotFound: true }') && smoke.includes('{ route: "/print/quote/Q-2041?view=bom&part=main", expectNotFound: true }'), "BOM PDF: smoke covers the 404 paths");
+}
+
+/* --- #364: Build package → BOM quote → Show on BOM (line prices · materials · labor · freight) --- */
+import { DEFAULT_PDF_OPTIONS as s364Defaults, normalizePdfOptions as s364Norm, PDF_TOGGLE_KEYS as s364Keys } from "@/lib/quote-pdf/pdf-options";
+import { bomViewProps as s364Bom } from "@/app/(app)/estimator/quote-document-view";
+import { qd293Props as s364Props, renderQuoteDocument293 as s364Render } from "./qd293-cases";
+import { qd364BomCases as s364Cases } from "./qd364-cases";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const SW = ["bomLinePrices", "bomMaterials", "bomLabor", "bomFreight"] as const;
+  // ---- storage: pdfOptions keys, defaults, round-trip ----
+  const empty = s364Norm({});
+  ok(SW.every((k) => (s364Keys as readonly string[]).includes(k) && s364Defaults[k] === true && empty[k] === true),
+    "#364 pdfOptions: the four Show on BOM keys are toggle keys, on by default, and an older quote (no keys) reads them on");
+  ok(SW.every((k) => s364Norm({ [k]: false })[k] === false && s364Norm({ [k]: false }).pdfPrices === true && s364Norm({ [k]: "no" })[k] === true && s364Norm(null)[k] === true),
+    "#364 pdfOptions: each key round-trips false on its own; a non-boolean is ignored (→ on)");
+  const saved = s364Norm(JSON.parse(JSON.stringify(s364Norm({ bomLinePrices: false, bomFreight: false, pdfQty: false }))));
+  ok(saved.bomLinePrices === false && saved.bomFreight === false && saved.bomMaterials === true && saved.bomLabor === true && saved.pdfQty === false, "#364 pdfOptions: a saved mix survives JSON + normalize (the save path)");
+
+  // ---- bomViewProps: the switches map to the document's flags; Line prices ANDs with Prices ----
+  const mk = (o: Record<string, unknown>) => s364Bom(s364Props({ pdfOptions: o }));
+  const on = mk({});
+  ok(on.pdfPrices === true && on.showMaterials === true && on.showLabor === true && on.showFreight === true, "#364 bomViewProps: an untouched quote → every flag on");
+  ok(mk({ bomLinePrices: false }).pdfPrices === false && mk({ pdfPrices: false }).pdfPrices === false && mk({ pdfPrices: false, bomLinePrices: true }).pdfPrices === false,
+    "#364 bomViewProps: line prices = pdfPrices && bomLinePrices (the quote-wide Prices still wins)");
+  ok(mk({ bomMaterials: false }).showMaterials === false && mk({ bomMaterials: false }).showLabor === true && mk({ bomLabor: false }).showLabor === false && mk({ bomFreight: false }).showFreight === false && mk({ bomFreight: false }).pdfPrices === true,
+    "#364 bomViewProps: Materials / Labor / Freight each map to their own show flag only");
+  const raw = s364Props({ pdfOptions: { bomLinePrices: false, bomMaterials: false, bomLabor: false, bomFreight: false } });
+  ok(raw.pdfPrices === true && raw.showMaterials === undefined && raw.showLabor === undefined && raw.showFreight === undefined,
+    "#364 non-BOM document props: the saved switches ride along but never touch pdfPrices or the show flags (only bomViewProps sets them)");
+
+  // ---- render: all on (or untouched) = the pre-change BOM view, byte for byte ----
+  const base = JSON.parse(rd("docs/superpowers/fixtures/364-bom-view-baseline.json")) as Record<string, string>;
+  const untouched = s364Cases();
+  const allOn = s364Cases({ bomLinePrices: true, bomMaterials: true, bomLabor: true, bomFreight: true });
+  ok(Object.keys(base).length === 5 && Object.keys(base).every((k) => s364Render(untouched[k]) === base[k] && s364Render(allOn[k]) === base[k]),
+    "#364 render: an untouched quote and all four switches on print the BOM view byte-for-byte as before (5 cases)");
+  // Non-BOM: the estimate document with every switch off is the pre-change document.
+  const p5 = JSON.parse(rd("docs/superpowers/fixtures/p5-quote-document-no-document.json")) as Record<string, string>;
+  ok(s364Render(raw) === p5["p293-itemized"] && s364Render({ ...raw, layout: "web" }) === p5["p2b-ungroupedWeb"],
+    "#364 render: the estimate PDF / online Narrative document ignores the switches (all off = the pre-change print and web render)");
+
+  // ---- render: each switch off removes its label / amount; the rest stays ----
+  const r = (o: Record<string, unknown>, k = "bomRewards") => s364Render(s364Cases(o)[k]);
+  const b = base.bomRewards;
+  const lineCol = "grid-template-columns:1fr 70px 104px";
+  const linePrice = '<span style="font-family:var(--font-mono);text-align:right;font-weight:600">';
+  const totalsRow = (label: string, amt: string) => "<span>" + label + '</span><span style="font-family:var(--font-mono)">' + amt + "</span>";
+  const always = (h: string) => h.includes(totalsRow("Sales tax (5%)", "$12.50")) && h.includes("Rewards points applied (25 pts)") && h.includes(">Total</span>") && h.includes("$340.50") && h.includes("Your Gold rewards: Free freight") &&
+    h.includes(">$153.00</span>") && h.includes(">$100.00</span>");
+  ok(b.includes(lineCol) && b.includes(linePrice) && b.includes(totalsRow("Materials", "$300.00")) && b.includes(totalsRow("Labor — installation &amp; commissioning", "$50.00")) &&
+     b.includes(totalsRow("Freight &amp; delivery", "$3.00")) && b.includes("<span>Freight &amp; delivery</span><span></span>") && b.includes("Materials, installation &amp; freight included") && always(b),
+    "#364 render (fixture sanity): the baseline carries line prices, Materials / Labor / Freight rows, a system freight row, the inclusions line, tax, credit, perks and Total");
+  const lp = r({ bomLinePrices: false });
+  ok(!lp.includes(lineCol) && !lp.includes(linePrice) && lp.includes("grid-template-columns:1fr 70px") && lp.includes(totalsRow("Materials", "$300.00")) && always(lp),
+    "#364 render: Line prices off drops every line's (and option row's) price column — system prices, totals and the Total stay");
+  const lpPrices = r({ pdfPrices: false, bomLinePrices: true });
+  ok(!lpPrices.includes(linePrice), "#364 render: Prices off on the quote hides BOM line prices even with Line prices on");
+  const mat = r({ bomMaterials: false });
+  ok(!mat.includes("<span>Materials</span>") && mat.includes(totalsRow("Labor — installation &amp; commissioning", "$50.00")) && mat.includes("Installation &amp; freight included") && mat.includes(linePrice) && always(mat),
+    "#364 render: Materials off drops the Materials row and the word from the inclusions line");
+  const lab = r({ bomLabor: false });
+  ok(!lab.includes("Labor — installation") && lab.includes(totalsRow("Materials", "$300.00")) && lab.includes("Materials &amp; freight included") && lab.includes("Installation, commissioning &amp; project management") && always(lab),
+    "#364 render: Labor off drops the Labor row and \"installation\" from the inclusions line — the labor system's own line stays");
+  const fr = r({ bomFreight: false });
+  ok(!fr.includes("Freight &amp; delivery") && !fr.includes(">$3.00<") && fr.includes("Materials &amp; installation included") && fr.includes(totalsRow("Materials", "$300.00")) && always(fr),
+    "#364 render: Freight off drops each system's freight row, the totals' freight row and \"freight\" from the inclusions line");
+  const altFr = r({ bomFreight: false }, "bomAlternates");
+  ok(base.bomAlternates.includes(">$0.80<") && !altFr.includes(">$0.80<") && !altFr.includes("Freight &amp; delivery") && altFr.includes(">$50.80</span>"),
+    "#364 render: Freight off drops an alternate system's freight row too; its subtotal still prints");
+  const none = r({ bomLinePrices: false, bomMaterials: false, bomLabor: false, bomFreight: false });
+  ok(!none.includes(linePrice) && !none.includes("<span>Materials</span>") && !none.includes("Labor — installation") && !none.includes("Freight &amp; delivery") && !none.includes(" included</div>") &&
+     none.includes("Line 1") && always(none),
+    "#364 render: everything off — parts with system prices, tax, credit and the Total only");
+
+  // ---- source pins ----
+  const qd = rd("src/app/(app)/estimator/quote-document.tsx");
+  ok(!/\bp\.bom(LinePrices|Materials|Labor|Freight)\b/.test(qd) && (qd.match(/p\.showFreight !== false/g) || []).length === 2 && qd.includes("{p.showMaterials !== false && (") && qd.includes("{p.t.lab > 0 && p.showLabor !== false && (") && qd.includes("{p.t.fr > 0 && p.showFreight !== false && ("),
+    "#364 QuoteDocument: reads only the show* flags (never the saved bom* keys) and hides only on an explicit false");
+  const assigners = ["src/app/(app)/estimator/quote-document-view.ts", "src/lib/quote-pdf/document-loader.ts", "src/lib/estimate-output/cover-loader.ts", "src/lib/estimate-output/package-live-loader.ts", "src/app/print/quote/[id]/page.tsx", "src/components/online-estimate/online-estimate.tsx"]
+    .map((f) => [f, (rd(f).match(/\bshow(Materials|Labor|Freight):/g) || []).length] as const);
+  ok(assigners.every(([f, n]) => (f.endsWith("quote-document-view.ts") ? n === 3 : n === 0)), "#364: only bomViewProps sets the show flags — the print, cover, package and online loaders don't");
+  const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
+  ok(tab.includes('showOnBom: "Show on BOM"') && tab.includes("onClick={() => togglePdf(flag)}") && tab.includes('const locked = flag === "bomLinePrices" && !pdfOpts.pdfPrices;') && tab.includes("disabled={locked}") && tab.includes("aria-pressed={on}") &&
+     ["Line prices", "Materials", "Labor", "Freight"].every((l) => tab.includes('label: "' + l + '"')),
+    "#364 BOM tab: four Show on BOM switches through togglePdf; Line prices is disabled while the quote hides prices");
+  const st = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  ok(SW.every((k) => st.includes(`useState(initial.pdfOptions.${k})`) && st.includes(`flag === "${k}"`)) && /pdfCutSheets, bomLinePrices, bomMaterials, bomLabor, bomFreight \}\),/.test(st),
+    "#364 hook: each switch loads from the saved pdfOptions, toggles through togglePdf and rides pdfOpts (so Save sends it and the PDF goes dirty)");
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  ok((act.match(/pdfOptions: normalizePdfOptions\(payload\.pdfOptions\)/g) || []).length === 2, "#364 save: both save paths sanitize pdfOptions through normalizePdfOptions (the new keys included)");
 }

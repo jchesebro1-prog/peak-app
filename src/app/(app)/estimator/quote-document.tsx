@@ -107,6 +107,21 @@ export type QuoteDocumentProps = {
    *  products / itemized lines) — prices live in its chips and price table.
    *  Absent / null / empty renders byte-for-byte as before. */
   document?: PackageDoc | null;
+  /** #364 — the saved Show on BOM switches, carried in from `pdfOptions`
+   *  (quoteDocumentDataFor spreads them). QuoteDocument never reads these:
+   *  bomViewProps turns them into `pdfPrices` and the show* flags below, so
+   *  every non-BOM document ignores them. */
+  bomLinePrices?: boolean;
+  bomMaterials?: boolean;
+  bomLabor?: boolean;
+  bomFreight?: boolean;
+  /** #364 — BOM-view render flags, set only by bomViewProps. Exactly `false`
+   *  hides the totals' Materials row / Labor row / every freight row (each
+   *  system's and the totals') and drops that word from the investment
+   *  band's "… included" line. Absent or true renders byte-for-byte as before. */
+  showMaterials?: boolean;
+  showLabor?: boolean;
+  showFreight?: boolean;
 };
 
 /** Page CSS for the print route: Letter, 0.6in margins, the on-screen sheet
@@ -580,7 +595,10 @@ function SystemBody({ ps, p, lineCols, freightRowLabel, alternate, photoSides }:
   return isItemized && showLines ? (
     <ItemizedLines
       lines={ps.lines}
-      hasFreight={ps.hasFreight}
+      // #364: Show on BOM → Freight off drops each system's freight row. (The
+      // BOM view is always itemized with no appendix, so the By-section note
+      // and the appendix's freight rows never reach it and stay as they were.)
+      hasFreight={ps.hasFreight && p.showFreight !== false}
       freightLabel={ps.freightLabel}
       freightRowLabel={freightRowLabel}
       showDesc={p.pdfNotes}
@@ -692,7 +710,12 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
   const showOptions = p.pdfOptions && optionItems.length > 0;
   // #251 (Jeff, Sep 28): name only what the quote actually carries — no
   // labor means no "includes installation", same for freight at $0.
-  const inclusions = inclusionsLine(p.t);
+  // #364: a Show on BOM switch that hides a figure drops its word here too.
+  const inclusions = inclusionsLine({
+    mat: p.showMaterials === false ? 0 : p.t.mat,
+    lab: p.showLabor === false ? 0 : p.t.lab,
+    fr: p.showFreight === false ? 0 : p.t.fr,
+  });
   // #293: the Itemized appendix — the systems the body left un-itemized.
   // Phase 5: the package document (when it applies) replaces EVERY In-total
   // band, so the body itemizes nothing — every itemized (or unset) In-total
@@ -1040,19 +1063,23 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
           {/* totals */}
           <div style={{ borderTop: "2px solid #16181d", paddingTop: 14, marginTop: 22 }}>
             <div className="est-totals">
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: 12.5,
-                color: "#5b616e",
-                marginBottom: 6,
-              }}
-            >
-              <span>Materials</span>
-              <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.mat)}</span>
-            </div>
-            {p.t.lab > 0 && (
+            {/* #364: Show on BOM → Materials / Labor / Freight hide these rows in the
+                BOM view only; tax, the Rewards credit and the Total always print. */}
+            {p.showMaterials !== false && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 12.5,
+                  color: "#5b616e",
+                  marginBottom: 6,
+                }}
+              >
+                <span>Materials</span>
+                <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.mat)}</span>
+              </div>
+            )}
+            {p.t.lab > 0 && p.showLabor !== false && (
               <div
                 style={{
                   display: "flex",
@@ -1066,7 +1093,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                 <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.lab)}</span>
               </div>
             )}
-            {p.t.fr > 0 && (
+            {p.t.fr > 0 && p.showFreight !== false && (
               <div
                 style={{
                   display: "flex",
