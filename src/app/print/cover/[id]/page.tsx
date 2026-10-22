@@ -7,6 +7,7 @@ import { printOriginFor } from "@/lib/quote-pdf/origin";
 import { pdfKindForQuoteType } from "@/lib/quote-pdf/state";
 import { verifyPrintToken } from "@/lib/quote-pdf/token";
 import { get as getQuote } from "@/lib/stores/quotes";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Estimate cover", robots: { index: false, follow: false } };
@@ -34,7 +35,8 @@ export default async function PrintCoverPage({
   const t = first(sp.t);
   if (!tokenOk(t, id)) notFound();
   const q = await getQuote(id);
-  if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") notFound();
+  // Box goods sale (spec 2026-10-21): no cover — a 404, as for a non-system quote.
+  if (!q || pdfKindForQuoteType(q.quoteType) !== "quote" || boxSaleOf(q)) notFound();
   const h = await headers();
   const where = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
   const props = await loadCoverDocumentProps(q, { origin: "origin" in where ? where.origin : null, letterheadSrc: letterhead.src });

@@ -22,6 +22,9 @@ import { buildQuote, quoteContentKey, QUOTE_CONTENT_FIELDS, revisionDocFields, t
 import { quoteAsOfRevision } from "../src/lib/quote-share/view";
 import { quoteDocumentDataFor } from "../src/lib/quote-pdf/quote-document-data";
 import { bomViewProps } from "../src/app/(app)/estimator/quote-document-view";
+import { loadAppendixSources } from "../src/lib/quote-pdf/generate";
+import { renderCoverPdf } from "../src/lib/estimate-output/cover-pdf-server";
+import { renderBomPdf } from "../src/lib/estimate-output/bom-pdf-server";
 // (later tasks: imports above this line)
 
 export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -153,17 +156,68 @@ async function storeDbChecks(ok: Ok) {
   }
 }
 
+function printChecks(ok: Ok) {
+  const page = rd("src/app/print/quote/[id]/page.tsx");
+  const srcAt = page.indexOf("const src = revision ? quoteAsOfRevision(q, revision) : q;");
+  ok(srcAt > 0 && page.indexOf("const bomLayout = bom || boxSaleOf(src);") > srcAt,
+    "box sale print (source): the BOM layout is decided from the quote as printed (a sent revision's frozen flag for a bidder copy)");
+  ok(page.includes('!bomLayout && part !== "tail" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets') && page.includes('!bomLayout && !bidder && part !== "main" ? loadDatasheetLinkRows(q, origin) : []') &&
+     /if \(!bomLayout\) \{\s*const h = await headers\(\);/.test(page) && page.indexOf("if (bomLayout) {") > 0 && page.indexOf("if (bomLayout) {") < page.indexOf("keyProductPhotoDataUris("),
+    "box sale print (source): a box sale prints #360's BOM layout — no cut sheets, no datasheet links, no photos, no print-origin read");
+  ok(page.includes("if (bom && (rawBidder !== undefined || rawRev !== undefined || rawPart !== undefined)) notFound();"),
+    "box sale print (source): ?view=bom's own param gate is unchanged — a box sale's bidder copy still renders");
+  ok(rd("src/lib/quote-pdf/generate.ts").includes("if (boxSaleOf(q)) return { drawings: [], hasLinks: false };"), "box sale print (source): loadAppendixSources returns nothing to merge for a box sale");
+  ok(rd("src/app/print/cover/[id]/page.tsx").includes('if (!q || pdfKindForQuoteType(q.quoteType) !== "quote" || boxSaleOf(q)) notFound();'), "box sale cover (source): the cover print page is a 404 for a box sale");
+  ok(rd("src/lib/estimate-output/cover-pdf-server.ts").includes("refuse: boxSaleOf,") &&
+     rd("src/lib/quote-pdf/signed-print-pdf.ts").includes('if (!q || pdfKindForQuoteType(q.quoteType) !== "quote" || opts.refuse?.(q)) return { ok: false, status: 404, error: "Not found" };') &&
+     !rd("src/lib/estimate-output/bom-pdf-server.ts").includes("refuse"),
+    "box sale cover (source): renderCoverPdf refuses a box sale through the shared render's `refuse` (404); the BOM PDF does not");
+  ok(rd("src/lib/estimate-email/send-server.ts").includes("if (input.attachCover === true && !boxSaleOf(q)) {"), "box sale cover (source): the send action never attaches a cover to a box sale");
+}
+
+async function printDbChecks(ok: Ok) {
+  const file = { id: "PF-0000000000b1", kind: "plan", name: "set.pdf", blobPath: "estimate-files/Q-box/UP-0123456789abcdef/set.pdf", contentType: "application/pdf", size: 2000, source: "upload", addedAt: 1, addedBy: "Pat" };
+  const box = await loadAppendixSources(quoteFixture({ boxSale: true, packageFiles: [file] }), "http://localhost:3000");
+  const plain = await loadAppendixSources(quoteFixture({ packageFiles: [file] }), "http://localhost:3000");
+  ok(box.drawings.length === 0 && box.hasLinks === false, "box sale print (DB): the generator merges no drawings and no links page for a box sale");
+  ok(plain.drawings.length === 1, "box sale print (DB): a normal estimate still merges its drawings");
+  const Q = await import("../src/lib/stores/quotes");
+  const BOX = fixtureId(FIX, "cover-box"), PLAIN = fixtureId(FIX, "cover-plain");
+  const base = { customer: "Spec fixture", owner: "spec", source: "estimator", quoteType: "system", spec: { sections: [sys("s1", "Rigging", [line(1)])], mobs: [] } };
+  const prev = process.env.AUTH_SECRET;
+  try {
+    // No secret: a render that gets past the quote checks stops at 503 — Chrome is never launched here.
+    delete process.env.AUTH_SECRET;
+    await Q.create({ ...base, id: BOX, name: "Cover box", boxSale: true } as never);
+    registerFixture("quotes", BOX);
+    await Q.create({ ...base, id: PLAIN, name: "Cover plain" } as never);
+    registerFixture("quotes", PLAIN);
+    const cBox = await renderCoverPdf(BOX, "localhost:3000", "http");
+    const cPlain = await renderCoverPdf(PLAIN, "localhost:3000", "http");
+    const bBox = await renderBomPdf(BOX, "localhost:3000", "http");
+    ok(!cBox.ok && cBox.status === 404, "box sale cover (DB): renderCoverPdf answers 404 for a box sale");
+    ok(!cPlain.ok && cPlain.status === 503, "box sale cover (DB): a normal estimate still gets past the quote checks (503 only because AUTH_SECRET is unset here)");
+    ok(!bBox.ok && bBox.status === 503, "box sale cover (DB): the BOM PDF still renders for a box sale (503 only for the unset secret)");
+  } finally {
+    if (prev === undefined) delete process.env.AUTH_SECRET;
+    else process.env.AUTH_SECRET = prev;
+    await dropFixtures(FIX);
+  }
+}
+
 // (later tasks: check functions above this line)
 
 export async function boxSalePureChecks(ok: Ok) {
   dataChecks(ok);
   documentChecks(ok);
   wiringChecks(ok);
+  printChecks(ok);
   // (later tasks: pure checks above this line)
 }
 
 export async function boxSaleDbChecks(ok: Ok) {
   await storeDbChecks(ok);
+  await printDbChecks(ok);
   // (later tasks: DB checks above this line)
 }
 

@@ -20,6 +20,7 @@ import { can } from "@/lib/team";
 import { activeUsers, getUser } from "@/lib/users";
 import { attachmentsFit, bodyWithLink, coverPdfHref, estimateDraftIsCurrent, FOLLOW_UP_CHOICES, parseRecipients, withoutAddresses } from "./compose";
 import { mailboxViewer } from "@/lib/mailbox-viewer";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 import { getCompany } from "@/lib/identity/companies";
 import { bidderPdfFileName } from "@/lib/parties/addressee";
 import { bidderPartyFor, bidderRecipient } from "@/lib/parties/addressee-server";
@@ -371,7 +372,8 @@ async function attach(deps: EstimateEmailDeps, actor: SendActor, c: Checked, inp
       estimate = { name: pdfFileName(number, null), size: bytes.length };
       if (!attachmentsFit([estimate.size])) return { ok: false, error: SEND_COPY.tooLarge };
     }
-    if (input.attachCover === true) {
+    // Box goods sale (spec 2026-10-21): never a cover, whatever a stale composer posts.
+    if (input.attachCover === true && !boxSaleOf(q)) {
       const bytes = await deps.renderCoverPdf(q);
       cover = { name: coverPdfFileName(number), bytes };
     }

@@ -70311,9 +70311,9 @@ import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate
   const page = rd("src/app/print/quote/[id]/page.tsx");
   ok(page.includes('import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";') && /const bom = \(Array\.isArray\(sp\.view\) \? sp\.view\[0\] : sp\.view\) === "bom";/.test(page) && page.includes('<QuoteDocument {...bomViewProps(doc)} layout="web" rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />'),
     "BOM PDF print: ?view=bom renders bomViewProps(doc) — the saved BOM preview's own transform");
-  ok(page.includes("!bom && part !== \"tail\" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets") && page.includes("!bom && !bidder && part !== \"main\" ? loadDatasheetLinkRows(q, origin) : []") &&
-     page.indexOf("if (bom) {") > -1 && page.indexOf("if (bom) {") < page.indexOf("keyProductPhotoDataUris("),
-    "BOM PDF print: the BOM view appends no cut sheets, no datasheet links and reads no key-product photos");
+  ok(page.includes("!bomLayout && part !== \"tail\" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets") && page.includes("!bomLayout && !bidder && part !== \"main\" ? loadDatasheetLinkRows(q, origin) : []") &&
+     page.indexOf("if (bomLayout) {") > -1 && page.indexOf("if (bomLayout) {") < page.indexOf("keyProductPhotoDataUris("),
+    "BOM PDF print: the BOM view (?view=bom, or a box goods sale) appends no cut sheets, no datasheet links and reads no key-product photos");
   {
     const gate = "if (bom && (rawBidder !== undefined || rawRev !== undefined || rawPart !== undefined)) notFound();";
     ok(page.indexOf(gate) > -1 && page.indexOf(gate) < page.indexOf('tokenOk(t, "quote", '),
@@ -70322,13 +70322,13 @@ import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate
   ok(page.indexOf('if (!tokenOk(t, "quote", ') > -1 && page.indexOf('if (!tokenOk(t, "quote", ') < page.indexOf("getQuote("), "BOM PDF print: the quote token is still checked before any read");
   {
     // Final review C — the BOM PDF prints the BOM tab's own layout (web), not the customer PDF's title-page layout
-    const bomBranch = page.slice(page.indexOf("if (bom) {"), page.indexOf("// #293: key-product photos"));
+    const bomBranch = page.slice(page.indexOf("if (bomLayout) {"), page.indexOf("// #293: key-product photos"));
     ok(bomBranch.includes('layout="web"') && bomBranch.includes("<style>{QUOTE_WEB_EMBED_CSS}</style>") && bomBranch.includes("<style>{QUOTE_PRINT_CSS}</style>") && /import QuoteDocument, \{[^}]*QUOTE_WEB_EMBED_CSS[^}]*\} from "@\/app\/\(app\)\/estimator\/quote-document";/.test(page),
       "BOM PDF print: the BOM branch renders layout=\"web\" with QUOTE_WEB_EMBED_CSS — the BOM tab's own layout (no title page)");
     const customerRender = page.slice(page.indexOf("<QuoteDocument {...doc} keyProductPhotos"));
     ok(!customerRender.slice(0, customerRender.indexOf("/>")).includes("layout="), "BOM PDF print: the customer render is unchanged — no layout= prop");
     // Final review D — a BOM render reads no headers()/print origin
-    ok(/if \(!bom\) \{\s*const h = await headers\(\);/.test(page), "BOM PDF print: the print origin / headers() read happens only for the customer render");
+    ok(/if \(!bomLayout\) \{\s*const h = await headers\(\);/.test(page), "BOM PDF print: the print origin / headers() read happens only for the customer render");
   }
   const route = has("src/app/api/quotes/[id]/bom-pdf/route.ts") && has("src/lib/estimate-output/bom-pdf-server.ts") && has("src/lib/quote-pdf/signed-print-pdf.ts")
     ? rd("src/app/api/quotes/[id]/bom-pdf/route.ts") + rd("src/lib/estimate-output/bom-pdf-server.ts") + rd("src/lib/quote-pdf/signed-print-pdf.ts") : "";
