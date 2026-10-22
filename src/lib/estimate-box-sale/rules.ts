@@ -1,0 +1,66 @@
+import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
+import { isBonusItem } from "@/lib/estimate-bonus/flags";
+
+/**
+ * Box goods sale (spec docs/superpowers/specs/2026-10-21-box-goods-sale-design.md): an Estimator system estimate
+ * that sells equipment + freight only. The customer gets the itemized BOM — the estimate PDF is the BOM view and the
+ * client link opens the itemized list. `Quote.boxSale` is the one stored flag (absent = false). Nothing narrative is
+ * ever deleted, so turning it off brings everything back. Pure and client-safe: type-only imports plus the
+ * import-free bonus flags.
+ */
+
+/** The server's save refusal, the browser's own refusal and the Build banner's first sentence — verbatim (spec). */
+export const BOX_SALE_LABOR_MESSAGE = "A box goods sale can't include labor — remove the labor lines or turn off Box goods sale.";
+
+type FlagQuote = { boxSale?: unknown; quoteType?: string | null } | null | undefined;
+
+/** Only an Estimator system estimate (quoteType absent or "system") can be a box goods sale. */
+export function isBoxSaleQuoteType(quoteType: string | null | undefined): boolean {
+  return !quoteType || quoteType === "system";
+}
+
+/** The live quote's flag: a stored `true` on a system estimate; anything else reads false. */
+export function boxSaleOf(q: FlagQuote): boolean {
+  return !!q && q.boxSale === true && isBoxSaleQuoteType(q.quoteType);
+}
+
+/** A sent revision's frozen flag (docFields.boxSale). A revision cut before the field existed reads false.
+ *  quoteAsOfRevision (src/lib/quote-share/view.ts) applies the same rule inline — that file may import no other module. */
+export function revisionBoxSale(rev: { docFields?: { boxSale?: unknown } | null } | null | undefined): boolean {
+  return rev?.docFields?.boxSale === true;
+}
+
+/** What an Estimator Save stores: `posted` on a system estimate; an older caller that omits it keeps the stored
+ *  flag; any other quote type never has one. */
+export function boxSaleForSave(prior: FlagQuote, posted: unknown): boolean {
+  if (!isBoxSaleQuoteType(prior?.quoteType)) return false;
+  return posted === undefined ? prior?.boxSale === true : posted === true;
+}
+
+type LaborFlags = Pick<SpecItem, "labor" | "laborOverhead" | "laborTravel" | "bonus">;
+
+/** Labor = `labor`, `laborOverhead` or `laborTravel` set (mobilization and travel lines count). The automatic
+ *  bonus lines never count: the 2% estimator bonus stays on a box sale, and the server re-derives the 5% package
+ *  bonus from the remaining lines (it exists only while the system has labor). */
+export function lineIsLabor(it: LaborFlags | null | undefined): boolean {
+  if (!it || isBonusItem(it)) return false;
+  return it.labor === true || !!it.laborOverhead || !!it.laborTravel;
+}
+
+/** A system with labor: a `kind: "labor"` system, or any labor line. */
+export function systemHasLabor(sec: Pick<SpecSection, "kind" | "items"> | null | undefined): boolean {
+  if (!sec) return false;
+  return sec.kind === "labor" || (Array.isArray(sec.items) ? sec.items : []).some((it) => lineIsLabor(it));
+}
+
+/** The names of the systems with labor, in order ("Untitled system" when blank). Junk reads as none. */
+export function boxSaleLaborSystems(sections: ReadonlyArray<Pick<SpecSection, "name" | "kind" | "items">> | null | undefined): string[] {
+  return (Array.isArray(sections) ? sections : [])
+    .filter((s) => systemHasLabor(s))
+    .map((s) => (typeof s.name === "string" && s.name.trim() ? s.name.trim() : "Untitled system"));
+}
+
+/** The save refusal for a box sale with labor, else null. */
+export function boxSaleSaveProblem(boxSale: boolean, sections: ReadonlyArray<Pick<SpecSection, "name" | "kind" | "items">> | null | undefined): string | null {
+  return boxSale && boxSaleLaborSystems(sections).length > 0 ? BOX_SALE_LABOR_MESSAGE : null;
+}

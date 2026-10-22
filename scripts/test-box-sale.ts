@@ -1,0 +1,178 @@
+/* Box goods sale (docs/superpowers/specs/2026-10-21-box-goods-sale-design.md) — harness checks.
+   `boxSalePureChecks` needs no database; `boxSaleDbChecks` needs the test DB (test:specs runs both).
+   Pure half alone: `npx tsx scripts/test-box-sale.ts`.
+   Both halves: `TEST_DB=$(mktemp -d) && PGLITE_PATH="$TEST_DB" npx tsx scripts/test-box-sale.ts; rm -rf "$TEST_DB"`
+   (never without PGLITE_PATH pointing at a fresh temp dir — the DB half writes quotes). */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { Ok } from "./test-inbox-org";
+import { dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
+import {
+  BOX_SALE_LABOR_MESSAGE,
+  boxSaleForSave,
+  boxSaleLaborSystems,
+  boxSaleOf,
+  boxSaleSaveProblem,
+  isBoxSaleQuoteType,
+  lineIsLabor,
+  revisionBoxSale,
+  systemHasLabor,
+} from "../src/lib/estimate-box-sale/rules";
+import { buildQuote, quoteContentKey, QUOTE_CONTENT_FIELDS, revisionDocFields, type Quote, type QuoteRevision } from "../src/lib/stores/quotes";
+import { quoteAsOfRevision } from "../src/lib/quote-share/view";
+import { quoteDocumentDataFor } from "../src/lib/quote-pdf/quote-document-data";
+import { bomViewProps } from "../src/app/(app)/estimator/quote-document-view";
+// (later tasks: imports above this line)
+
+export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+export const FIX = "box";
+export const SET = { companyName: "Peak", logoDark: null };
+
+type Line = Record<string, unknown>;
+export const line = (id: number, extra: Line = {}): Line => ({ id, sku: "SKU-" + id, desc: "Part " + id, qty: 2, unit: "ea", cost: 50, price: 100, ...extra });
+export const sys = (id: string, name: string, items: Line[], extra: Record<string, unknown> = {}) => ({ id, name, kind: "materials", mfr: "", freightPct: 0, items, ...extra });
+export const DOC = { type: "doc", version: 1, content: [{ type: "paragraph", content: [{ type: "text", text: "Our approach." }] }] };
+
+/** A saved system estimate: a Narrative system with an intro, an Itemized one, a package document, sectioned + appendix on, Qty off. */
+export function quoteFixture(extra: Record<string, unknown> = {}): Quote {
+  return {
+    id: "Q-box", name: "Gym", customer: "Walk-in", customerId: null, locationId: null, owner: "Sam Mills", status: "draft",
+    source: "estimator", quoteType: "system", value: 400, margin: 0.5, createdAt: 5, updatedAt: 5, history: [], review: { state: "none" },
+    pdfOptions: { detail: "sectioned", pdfQty: false, pdfNotes: false, pdfPrices: true, pdfItemizedAppendix: true },
+    spec: { sections: [sys("s1", "Rigging", [line(1)], { presentation: "narrative", narrative: "Intro." }), sys("s2", "Lighting", [line(2)], { presentation: "itemized" })], mobs: [], document: DOC },
+    ...extra,
+  } as unknown as Quote;
+}
+
+function dataChecks(ok: Ok) {
+  ok(isBoxSaleQuoteType(undefined) && isBoxSaleQuoteType(null) && isBoxSaleQuoteType("") && isBoxSaleQuoteType("system") && !isBoxSaleQuoteType("flame_test") && !isBoxSaleQuoteType("consulting"),
+    "box sale: only an Estimator system estimate (quoteType absent or \"system\") can be one");
+  ok(boxSaleOf({ boxSale: true }) && boxSaleOf({ boxSale: true, quoteType: "system" }) && !boxSaleOf({ boxSale: true, quoteType: "repair" }) && !boxSaleOf({ boxSale: "true" }) && !boxSaleOf({}) && !boxSaleOf(null),
+    "box sale: boxSaleOf is a stored true on a system estimate; anything else reads false");
+  ok(boxSaleForSave(null, true) && !boxSaleForSave(null, false) && !boxSaleForSave(null, undefined) && boxSaleForSave({ boxSale: true }, undefined) && !boxSaleForSave({ boxSale: true }, false) && !boxSaleForSave({ quoteType: "inspection" }, true),
+    "box sale: a save stores what it posts, an older caller (no field) keeps the stored flag, a service quote never gets one");
+  ok(lineIsLabor({ labor: true }) && lineIsLabor({ laborOverhead: "shop" }) && lineIsLabor({ laborTravel: "hotel" }) && !lineIsLabor({}) && !lineIsLabor({ labor: false }) && !lineIsLabor(null),
+    "box sale labor: labor, laborOverhead or laborTravel set is labor (mobilization / travel included)");
+  ok(!lineIsLabor({ bonus: "estimator" }) && !lineIsLabor({ bonus: "package", labor: true }),
+    "box sale labor: the automatic bonus lines are never labor (the 2% estimator bonus stays)");
+  ok(systemHasLabor({ kind: "labor", items: [] }) && systemHasLabor({ kind: "materials", items: [line(1), line(2, { labor: true })] as never }) && !systemHasLabor({ kind: "materials", items: [line(1)] as never }) && !systemHasLabor(null),
+    "box sale labor: a kind \"labor\" system, or any labor line, makes a system labor");
+  const secs = [sys("a", "Rigging", [line(1)]), sys("b", "Install", [line(2, { labor: true })]), sys("c", "  ", [line(3, { laborTravel: "mileage" })]), { ...sys("d", "Crew", []), kind: "labor" }, sys("e", "Freight only", [line(5, { bonus: "estimator" })])];
+  ok(JSON.stringify(boxSaleLaborSystems(secs as never)) === JSON.stringify(["Install", "Untitled system", "Crew"]) && boxSaleLaborSystems(null).length === 0 && boxSaleLaborSystems("junk" as never).length === 0,
+    "box sale labor: the systems with labor are named in order (blank → \"Untitled system\"); junk reads as none");
+  ok(BOX_SALE_LABOR_MESSAGE === "A box goods sale can't include labor — remove the labor lines or turn off Box goods sale.", "box sale labor: the refusal sentence, verbatim");
+  ok(boxSaleSaveProblem(true, secs as never) === BOX_SALE_LABOR_MESSAGE && boxSaleSaveProblem(false, secs as never) === null && boxSaleSaveProblem(true, [sys("a", "Rigging", [line(1)])] as never) === null,
+    "box sale labor: a box sale with labor is refused; without labor, or not a box sale, it saves");
+
+  ok((QUOTE_CONTENT_FIELDS as readonly string[]).includes("boxSale"), "box sale store: boxSale is a content field (a toggle stales the PDF)");
+  const plain = quoteFixture();
+  ok(quoteContentKey(plain) !== quoteContentKey({ ...plain, boxSale: true }) && quoteContentKey(plain) === quoteContentKey({ ...plain, boxSale: false } as never),
+    "box sale store: the content key changes with the flag; false and absent are the same document");
+  ok(buildQuote("Q-x", { boxSale: true }, "system", null, 1).boxSale === true && !("boxSale" in buildQuote("Q-x", {}, "system", null, 1)) &&
+     !("boxSale" in buildQuote("Q-x", { boxSale: true }, "flame_test", null, 1)) && !("boxSale" in buildQuote("Q-x", { boxSale: false }, "system", null, 1)),
+    "box sale store: buildQuote keeps the flag only as true on a system quote");
+  ok(revisionDocFields(quoteFixture({ boxSale: true })).boxSale === true && !("boxSale" in revisionDocFields(plain)),
+    "box sale store: a revision freezes the flag; a normal estimate's docFields are byte-identical (no key)");
+  const rev = (docFields: unknown) => ({ rev: 1, at: 10, by: "spec", reason: "sent", note: "", name: "Gym", value: 400, margin: 0.5, status: "sent", spec: plain.spec, docFields }) as unknown as QuoteRevision;
+  const liveBox = quoteFixture({ boxSale: true, status: "sent" });
+  const oldRev = rev({ ...revisionDocFields(plain) });
+  const boxRev = rev(revisionDocFields(liveBox));
+  ok(!("boxSale" in quoteAsOfRevision({ ...liveBox, revisions: [oldRev] } as Quote, oldRev)), "box sale revision: a revision cut without the flag reads false, even when the live quote has it");
+  ok(quoteAsOfRevision({ ...plain, revisions: [boxRev] } as Quote, boxRev).boxSale === true, "box sale revision: a box-sale revision stays one after the live switch is turned off");
+  ok(!("boxSale" in quoteAsOfRevision({ ...plain, revisions: [oldRev] } as Quote, oldRev)), "box sale revision: a normal estimate's as-sent quote has no key");
+  ok(revisionBoxSale(boxRev) && !revisionBoxSale(oldRev) && !revisionBoxSale(null) && !revisionBoxSale({ docFields: null }), "box sale revision: revisionBoxSale reads the frozen flag only");
+}
+
+function documentChecks(ok: Ok) {
+  const dPlain = quoteDocumentDataFor(quoteFixture(), null, SET);
+  const boxQ = quoteFixture({ boxSale: true });
+  const dBox = quoteDocumentDataFor(boxQ, null, SET);
+  ok(dPlain.document !== null && dPlain.detail === "sectioned" && dPlain.pdfItemizedAppendix === true && dPlain.pdfNotes === false && dPlain.sections[0].presentation === "narrative",
+    "box sale document: a normal estimate's document data is unchanged (package document, sectioned, appendix, its own Notes choice, a Narrative system)");
+  ok(dBox.document === null && dBox.detail === "itemized" && dBox.pdfItemizedAppendix === false && dBox.pdfNotes === true && dBox.sections.every((s) => s.presentation === "itemized"),
+    "box sale document: a box sale is the BOM view — no package document, itemized, notes on, no appendix, every system itemized");
+  ok(dBox.pdfQty === false && dBox.pdfPrices === true, "box sale document: Qty and prices follow the quote's own PDF choices (bomViewProps's rule)");
+  ok(JSON.stringify(dBox) === JSON.stringify(bomViewProps(dPlain)), "box sale document: the transform IS bomViewProps — one implementation");
+  ok(JSON.stringify(quoteDocumentDataFor(quoteFixture({ boxSale: true, quoteType: "flame_test" }), null, SET)) === JSON.stringify(quoteDocumentDataFor(quoteFixture({ quoteType: "flame_test" }), null, SET)),
+    "box sale document: a stray flag on a service quote changes nothing");
+  const stored = boxQ.spec as { sections: Array<{ presentation?: string; narrative?: string }>; document: unknown };
+  ok(stored.sections[0].presentation === "narrative" && stored.sections[0].narrative === "Intro." && stored.document === DOC,
+    "box sale document: the stored narrative, presentation and package document are untouched (nothing is deleted)");
+  const qdd = rd("src/lib/quote-pdf/quote-document-data.ts");
+  ok(qdd.includes('import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";') && qdd.includes("return boxSaleOf(q) ? bomViewProps(props) : props;"),
+    "box sale document (source): quoteDocumentDataFor applies bomViewProps once, at the one seam");
+}
+
+function wiringChecks(ok: Ok) {
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  const save = act.slice(act.indexOf("export async function saveQuoteAction("), act.indexOf("async function settleRewardCredit("));
+  const at = save.indexOf("const boxProblem = boxSaleSaveProblem(boxSale, Array.isArray(payload.sections) ? payload.sections : []);");
+  ok(save.includes("const boxSale = boxSaleForSave(prior, payload.boxSale);") && at > save.indexOf("if (!docSave.ok) {") && at < save.indexOf("settleRewardCredit(") && at < save.indexOf("await update(") && at < save.indexOf("await create("),
+    "box sale save (source): the labor refusal runs after the document check and before the Rewards credit or any write");
+  ok(/if \(boxProblem\) \{\s*return \{\s*ok: false,\s*id: null,\s*number: null,/.test(save) && save.includes("error: boxProblem,"),
+    "box sale save (source): a refusal returns no id — nothing is written and the edit stays unsaved");
+  ok(/\n\s+boxSale,\n/.test(save.slice(save.indexOf("const patch: QuotePatch = {"), save.indexOf("patch.spec = await quoteSpecFollowingRenames"))),
+    "box sale save (source): the patch carries the flag (create and update alike)");
+  ok(/boxSale\?: boolean;/.test(act.slice(act.indexOf("export type SavePayload"), act.indexOf("export type SaveResult"))), "box sale save (source): SavePayload carries an optional boxSale");
+  const place = act.slice(act.indexOf("async function placeSystemInEstimate("), act.indexOf("export type CopySystemTarget"));
+  const carry = place.indexOf("...(boxSaleOf(sourceQuote) ? { boxSale: true } : {}),");
+  ok(carry > place.indexOf("created = await create({") && carry < place.indexOf("}, { bidScopeOnly: scopeOnly.stamp });"),
+    "box sale move/copy (source): Move / Copy system → New estimate creates the estimate with the STORED source's flag");
+  ok(!place.slice(0, place.indexOf("// Estimator bonuses: the new draft estimate")).includes("boxSale"),
+    "box sale move/copy (source): Move / Copy into an existing estimate leaves the target's flag alone");
+  const page = rd("src/app/(app)/estimator/page.tsx");
+  ok(page.includes("    boxSale: boxSaleOf(q),\n") && page.includes("      boxSale: false,\n") && /\n  boxSale: boolean;\n/.test(rd("src/app/(app)/estimator/types.ts")),
+    "box sale load (source): initialFrom hands the Estimator the stored flag (false for a new estimate)");
+}
+
+async function storeDbChecks(ok: Ok) {
+  const Q = await import("../src/lib/stores/quotes");
+  const ID = fixtureId(FIX, "store"), SVC = fixtureId(FIX, "service");
+  const base = { customer: "Spec fixture", owner: "spec", source: "estimator", spec: { sections: [], mobs: [] } };
+  try {
+    await Q.create({ ...base, id: ID, name: "Box store", quoteType: "system", boxSale: true } as never);
+    registerFixture("quotes", ID);
+    ok((await Q.get(ID))?.boxSale === true, "box sale store (DB): a new system estimate stores the flag");
+    await Q.update(ID, { name: "Box store renamed" });
+    const kept = (await Q.get(ID))!;
+    ok(kept.boxSale === true, "box sale store (DB): a patch without boxSale leaves it alone");
+    await new Promise((r) => setTimeout(r, 5));
+    await Q.update(ID, { boxSale: false });
+    const off = (await Q.get(ID))!;
+    ok(!("boxSale" in off), "box sale store (DB): turning it off removes the key (a normal estimate's doc again)");
+    ok((off.contentChangedAt ?? 0) > (kept.contentChangedAt ?? 0), "box sale store (DB): a toggle stamps contentChangedAt — the stored PDF goes stale");
+    await Q.update(ID, { boxSale: true });
+    ok((await Q.get(ID))?.boxSale === true, "box sale store (DB): turning it back on stores it again");
+    await Q.create({ ...base, id: SVC, name: "Flame", quoteType: "flame_test", boxSale: true } as never);
+    registerFixture("quotes", SVC);
+    ok(!("boxSale" in (await Q.get(SVC))!), "box sale store (DB): create drops the flag on a service quote");
+    await Q.update(SVC, { boxSale: true });
+    ok(!("boxSale" in (await Q.get(SVC))!), "box sale store (DB): update drops it on a service quote too");
+  } finally {
+    await dropFixtures(FIX);
+  }
+}
+
+// (later tasks: check functions above this line)
+
+export async function boxSalePureChecks(ok: Ok) {
+  dataChecks(ok);
+  documentChecks(ok);
+  wiringChecks(ok);
+  // (later tasks: pure checks above this line)
+}
+
+export async function boxSaleDbChecks(ok: Ok) {
+  await storeDbChecks(ok);
+  // (later tasks: DB checks above this line)
+}
+
+if (process.argv[1]?.endsWith("test-box-sale.ts")) {
+  let pass = 0, fail = 0;
+  const okf: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
+  const db = !!process.env.PGLITE_PATH;
+  boxSalePureChecks(okf)
+    .then(() => (db ? boxSaleDbChecks(okf) : undefined))
+    .then(() => { console.log(`${pass} PASS, ${fail} FAIL${db ? "" : " (pure only — set PGLITE_PATH for the DB half)"}`); process.exit(fail ? 1 : 0); })
+    .catch((e) => { console.error(e); process.exit(1); });
+}

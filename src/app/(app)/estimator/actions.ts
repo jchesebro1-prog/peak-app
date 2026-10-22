@@ -82,6 +82,7 @@ import { addVendorPartiesForSave, prepareVendorQuotesForSave } from "@/lib/store
 import { recordVendorPdfOutcomes, verifyVendorPdfExtractions } from "@/lib/vendor-pdf/save-server";
 import { quoteSpecFollowingRenames, selectionFollowingRenames } from "@/lib/stores/catalog-renames";
 import { leadIdForCreate, linkSavedQuoteToSuggestion } from "@/lib/assist/suggestion-save";
+import { boxSaleForSave, boxSaleOf, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -208,6 +209,9 @@ export type SavePayload = {
   /** The `ES-…` suggestion the estimate was opened from: every successful
    *  save links the saved quote to it (idempotent; unknown ids ignored). */
   suggestionId?: string;
+  /** Box goods sale (spec 2026-10-21) — absent (an older caller) keeps the stored flag; dropped on any
+   *  non-system quote (boxSaleForSave). A box sale with any labor line refuses the whole save. */
+  boxSale?: boolean;
 };
 
 export type SaveResult = {
@@ -453,6 +457,24 @@ export async function saveQuoteAction(
       error: docSave.error,
     };
   }
+  // Box goods sale (spec 2026-10-21): equipment + freight only — any labor line refuses the WHOLE save before
+  // anything is written (the document refusal's shape: no id, so the edit stays visibly unsaved).
+  const boxSale = boxSaleForSave(prior, payload.boxSale);
+  const boxProblem = boxSaleSaveProblem(boxSale, Array.isArray(payload.sections) ? payload.sections : []);
+  if (boxProblem) {
+    return {
+      ok: false,
+      id: null,
+      number: null,
+      revNum: documentRevStamp(prior ?? {}).revNum,
+      updatedAt: prior?.updatedAt ?? Date.now(),
+      review: prior?.review ?? null,
+      status: prior?.status ?? null,
+      pipelineId: prior?.pipelineId ?? null,
+      stage: prior?.stage ?? null,
+      error: boxProblem,
+    };
+  }
   // #245 Task 13 (spec §4.3, controller decision 6): `por` clears on any
   // item staff have now priced; `portalReview` clears once none remain —
   // scoped to a portal-catalog quote so no other save's behavior changes.
@@ -541,6 +563,8 @@ export async function saveQuoteAction(
     source: savedSource,
     spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}) },
     pdfOptions: normalizePdfOptions(payload.pdfOptions),
+    // Box goods sale: content (QUOTE_CONTENT_FIELDS); create keeps it via buildQuote, update() stores only true.
+    boxSale,
     // #301 (R14): not content fields — they never re-render the estimate PDF.
     ...(typeof payload.coverSummary === "string" ? { coverSummary: cleanPlainText(payload.coverSummary, COVER_SUMMARY_MAX) } : {}),
     ...(typeof payload.notIncluded === "string" ? { notIncluded: cleanPlainText(payload.notIncluded, NOT_INCLUDED_MAX) } : {}),
@@ -1042,6 +1066,9 @@ async function placeSystemInEstimate(
       margin: t.margin,
       owner: opts.owner,
       ...(opts.tier ? { pricingTier: opts.tier.pricingTier, tierMargin: opts.tier.tierMargin } : {}),
+      // Box goods sale (spec 2026-10-21): Move / Copy → New estimate copies the STORED source's flag (an unsaved
+      // source has none). The labor rule applies at the new estimate's next save.
+      ...(boxSaleOf(sourceQuote) ? { boxSale: true } : {}),
     }, { bidScopeOnly: scopeOnly.stamp });
   } catch (e) {
     return {

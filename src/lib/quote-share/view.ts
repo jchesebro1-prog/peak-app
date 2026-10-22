@@ -109,7 +109,7 @@ function headerFields(df: QuoteRevision["docFields"]): Partial<Quote> {
 export function quoteAsOfRevision(q: Quote, rev: QuoteRevision): Quote {
   const revs = Array.isArray(q.revisions) ? q.revisions : [];
   const { revNo, issuedAt } = sentDocumentStamp(q, rev);
-  return {
+  const asOf: Record<string, unknown> = {
     ...q,
     ...headerFields(rev.docFields),
     name: rev.name,
@@ -121,7 +121,13 @@ export function quoteAsOfRevision(q: Quote, rev: QuoteRevision): Quote {
     // Jeff 2026-10-15 #13: documentRevStamp prints exactly this revision's Rev.
     docRevNo: revNo,
     shareLink: null,
-  } as unknown as Quote;
+  };
+  // Box goods sale (spec 2026-10-21): the revision's frozen flag, never the live one — a revision cut before the
+  // field existed reads false. Same rule as estimate-box-sale/rules.ts revisionBoxSale (this file imports only state
+  // + estimate-number, #293t).
+  if (rev.docFields?.boxSale === true) asOf.boxSale = true;
+  else delete asOf.boxSale;
+  return asOf as unknown as Quote;
 }
 
 const chicagoDate = (ms: number) =>

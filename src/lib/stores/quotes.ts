@@ -15,6 +15,7 @@ import {
 import type { AssistNudge } from "@/lib/brief/types";
 import { quotesSeed } from "@/db/seeds/quotes";
 import { withoutEstimateFields } from "@/lib/estimate-number";
+import { isBoxSaleQuoteType } from "@/lib/estimate-box-sale/rules";
 import { grossQuoteValue, quoteRewardCredit, withRewardCredit, withoutRewardCredit } from "@/lib/rewards/credit-line";
 import { serviceCreditSubdocKey } from "@/lib/rewards/service-credit";
 import type { SpecSection } from "@/app/(app)/estimator/types";
@@ -406,6 +407,12 @@ export type Quote = {
    *  buildQuote never copies it from `partial`, and update() drops it, so no client save can set or clear it.
    *  Never content, never snapshotted. Read through portalQuoteHasBidders (stamp OR bidder rows incl. deleted). */
   bidScopeOnly?: true;
+  /** Box goods sale (spec 2026-10-21) — an Estimator system estimate that sells equipment + freight only: the
+   *  customer document is the BOM view and the client link the itemized list. Absent = false; stored only as `true`
+   *  (buildQuote / update() drop it on any other quote type, and update() removes it on false). Content
+   *  (QUOTE_CONTENT_FIELDS — a toggle stales the PDF) and frozen in a sent revision's docFields. Nothing narrative is
+   *  ever deleted for it. Read through boxSaleOf (src/lib/estimate-box-sale/rules.ts). */
+  boxSale?: boolean;
   /** Estimator Phase 3 — the comms threads this estimate was emailed on
    *  (spec §10.1 step 6), oldest first, ≤ 50, one per threadId. Written only
    *  by recordEstimateEmail under the row lock; update() drops it so an
@@ -508,6 +515,8 @@ export const QUOTE_CONTENT_FIELDS = [
   "portalFirm",
   // #348 2b-i: prints as Prepared for (awarded bidder) and the bid line.
   "bid",
+  // Box goods sale (spec 2026-10-21): the whole customer document switches to the BOM view.
+  "boxSale",
 ] as const;
 
 /** A comparable key of what the customer document shows. Pure. */
@@ -521,6 +530,8 @@ export function quoteContentKey(q: Partial<Quote> | null | undefined): string {
         const bid = rec.bid as { awardedPartyId?: string | null } | null | undefined;
         return bid?.awardedPartyId ? bid : null;
       }
+      // Box goods sale: only a stored true counts — false and absent are the same document.
+      if (k === "boxSale") return rec.boxSale === true ? true : null;
       return rec[k] ?? null;
     })
   );
@@ -563,6 +574,9 @@ export type QuoteRevisionDocFields = {
   /** #348 2b-i — the bid (due date, addenda) as sent; present only when the quote had one. Spread over the
    *  live bid by quoteAsOfRevision so the bid line prints as sent. Absent = the live bid (older revisions). */
   bid?: QuoteBid;
+  /** Box goods sale (spec 2026-10-21) — present (true) only when the live quote was one; absent = a normal
+   *  estimate, and on every revision cut before the field existed. quoteAsOfRevision reads it, never the live flag. */
+  boxSale?: boolean;
   /** #293 slice 3 — the Rev N and the date the revision's PDF printed
    *  (QuotePdfState.printed), stamped once with the PDF copy
    *  (setRevisionPdfPath). Absent until then, when the render couldn't be
@@ -932,6 +946,8 @@ export function buildQuote(
     ...(partial.packageSelection ? { packageSelection: normalizePackageSelection(partial.packageSelection) } : {}),
     // #340: the assessment findings this quote answers — only when the caller set some.
     ...(Array.isArray(partial.findingKeys) && partial.findingKeys.length ? { findingKeys: partial.findingKeys } : {}),
+    // Box goods sale: only a true on a system quote — every other creator writes the doc it wrote before.
+    ...(partial.boxSale === true && isBoxSaleQuoteType(quoteType) ? { boxSale: true } : {}),
   };
 }
 
@@ -1005,6 +1021,14 @@ export async function update(
     // AI daily brief: the nudge is setAssistNudge's alone.
     delete clean.assistNudge;
     delete clean.assistNudgeLeaseUntil;
+    // Box goods sale: stored only as true on a system quote; false (or any other type) removes the key, so turning
+    // it off leaves exactly a normal estimate's doc. A patch without the key leaves it alone.
+    if ("boxSale" in clean) {
+      const on = clean.boxSale === true && isBoxSaleQuoteType(clean.quoteType ?? q.quoteType);
+      delete clean.boxSale;
+      if (on) q.boxSale = true;
+      else delete q.boxSale;
+    }
     Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
@@ -1083,6 +1107,8 @@ export function revisionDocFields(doc: Quote): QuoteRevisionDocFields {
     // #348 2b-i: who the document was addressed to, and the bid line as sent.
     awardedPartyId: d.bid?.awardedPartyId ?? null,
     ...(d.bid ? { bid: { ...d.bid, addenda: [...(d.bid.addenda || [])] } } : {}),
+    // Box goods sale: only when on — a normal estimate's revision is byte-identical.
+    ...(d.boxSale === true ? { boxSale: true } : {}),
   };
 }
 
