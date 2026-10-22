@@ -56739,7 +56739,7 @@ import { estimateReadiness as p3Ready } from "@/lib/estimate-steps/readiness";
   const sent = p3Ready({ ...base, status: "sent", track: { opens: 1, newReplies: 1 } }).send;
   ok(sent.state === "ok", "#P3 badge: state stays ok");
   const cl = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
-  ok(cl.includes("track: s.trackSummary ?? undefined") && cl.includes("s.revNum, s.trackSummary]"), "#P3 badge: the client passes the hook's trackSummary into the readiness");
+  ok(cl.includes("track: s.trackSummary ?? undefined") && cl.includes("s.revNum, s.trackSummary, s.boxSale]"), "#P3 badge: the client passes the hook's trackSummary into the readiness");
 }
 
 // ---- #P3 final review: no silent re-send, truthful Activity, drafts tied to the sent revision, cover by reference, lead estimator ----
@@ -57610,7 +57610,7 @@ import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/esti
     "#P4 review UI fix: the review comments refresh when the step opens and (debounced) on focus");
   ok(tabsSrc.includes('role="tablist"') && tabsSrc.includes('role="tab"') && tabsSrc.includes("aria-selected={tab === t}") && tabsSrc.includes("aria-controls={reviewPanelId(t)}") &&
      tabsSrc.includes("id={reviewTabId(t)}") && tabsSrc.includes('role="tabpanel"') && tabsSrc.includes("aria-labelledby={reviewTabId(tab)}") && tabsSrc.includes("id={reviewPanelId(tab)}") &&
-     tabsSrc.includes("onKeyDown={onTabKey}") && tabsSrc.includes("nextReviewTab(tab, e.key)") && tabsSrc.includes("tabIndex={tab === t ? 0 : -1}"),
+     tabsSrc.includes("onKeyDown={onTabKey}") && tabsSrc.includes("nextReviewTab(tab, e.key, tabs)") && tabsSrc.includes("tabIndex={tab === t ? 0 : -1}"),
     "#P4 review UI fix: the tabs are a tablist/tab/tabpanel with aria-selected, aria-controls, aria-labelledby, roving tabindex and arrow keys");
   ok(sideSrc.includes('aria-label={commentActionLabel("resolve", n)}') && sideSrc.includes('aria-label={commentActionLabel("delete", n)}') && sideSrc.includes("actions(comment, n)") && sideSrc.includes("actions(c, null)"),
     "#P4 review UI fix: Resolve / Delete carry per-comment aria-labels");

@@ -28,6 +28,9 @@ import { renderBomPdf } from "../src/lib/estimate-output/bom-pdf-server";
 import { BOX_SALE_COPY, boxSaleLaborBanner, newSystemPresentation } from "../src/lib/estimate-box-sale/rules";
 import { pdfDocKey } from "../src/app/(app)/estimator/pdf-doc-key";
 import { normalizePdfOptions } from "../src/lib/quote-pdf/pdf-options";
+import { BOX_SALE_PACKAGE_TABS, boxSalePackageTab, PACKAGE_TABS, packageTabsFor, parsePackageTab } from "../src/lib/estimate-steps/package-tabs";
+import { BOX_SALE_REVIEW_TABS, nextReviewTab, REVIEW_TABS, reviewTabsFor } from "../src/lib/estimate-review/review-ui";
+import { estimateReadiness } from "../src/lib/estimate-steps/readiness";
 // (later tasks: imports above this line)
 
 export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -245,6 +248,37 @@ function buildUiChecks(ok: Ok) {
     "box sale build (source): every new system (fresh, blank, category, suggested) is Itemized on a box sale");
 }
 
+function packageReviewChecks(ok: Ok) {
+  ok(packageTabsFor(true).join() === "bom" && packageTabsFor(false) === PACKAGE_TABS && BOX_SALE_PACKAGE_TABS.join() === "bom", "box sale package: Build package is the BOM quote tab alone");
+  ok(["narrative", "client", "bom", null, "junk"].every((raw) => boxSalePackageTab(parsePackageTab(raw), true) === "bom") &&
+     boxSalePackageTab(parsePackageTab("client"), false) === "client" && boxSalePackageTab(parsePackageTab(null), false) === "narrative",
+    "box sale package: ?ptab=narrative / client (or none) lands on BOM quote; a normal estimate is unchanged");
+  ok(reviewTabsFor(true).join() === "document,bom" && reviewTabsFor(false) === REVIEW_TABS && BOX_SALE_REVIEW_TABS.join() === "document,bom", "box sale review: Customer review shows Document and BOM only");
+  ok(nextReviewTab("document", "ArrowRight", BOX_SALE_REVIEW_TABS) === "bom" && nextReviewTab("bom", "ArrowRight", BOX_SALE_REVIEW_TABS) === "document" && nextReviewTab("document", "End", BOX_SALE_REVIEW_TABS) === "bom" &&
+     nextReviewTab("document", "ArrowRight") === "package" && nextReviewTab("document", "x", BOX_SALE_REVIEW_TABS) === null,
+    "box sale review: arrow keys move across the shown tabs only (the default list is unchanged)");
+  const narr = sys("n", "Rigging", [line(1)], { presentation: "narrative" });
+  const base = { saved: true, sections: [narr] as never[], review: null, status: "draft" as const, revNum: 1 };
+  const plainR = estimateReadiness(base), boxR = estimateReadiness({ ...base, boxSale: true });
+  ok(boxR.package.state === "ok" && boxR.package.label === "✓ Ready", "box sale readiness: Build package has no narrative / intro / goals / key-product gaps");
+  ok(!boxR.send.label.includes("no intro text") && plainR.send.label.includes("no intro text"), "box sale readiness: Send & track drops the no-intro warning");
+  ok(plainR.package.state === "gaps", "box sale readiness: a normal estimate still counts its gaps");
+  const shell = rd("src/app/(app)/estimator/steps/package-step.tsx");
+  ok(shell.includes('const tab = boxSalePackageTab(parsePackageTab(params.get("ptab")), s.boxSale);') && shell.includes("const tabs = packageTabsFor(s.boxSale);") &&
+     shell.includes("if (!to || !tabs.includes(to)) return;") && shell.includes("{tabs.map((t) => ("),
+    "box sale package (source): the shell lands a box sale on BOM quote and lists only its tabs");
+  const bomTab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
+  ok(/\{s\.boxSale && \(\s*<div[^>]*data-testid="box-sale-people"[^>]*>\s*<QuotePeopleFields s=\{s\} tone="light" \/>/.test(bomTab) && !/from "@\/lib\/stores\//.test(bomTab),
+    "box sale package (source): BOM quote carries Lead estimator / Prepared by on a box sale (and still imports no store)");
+  const tabsSrc = rd("src/app/(app)/estimator/steps/review-tabs.tsx");
+  ok(tabsSrc.includes("const tabs = reviewTabsFor(s.boxSale);") && tabsSrc.includes('const tab: ReviewTab = tabs.includes(picked) ? picked : "document";') && tabsSrc.includes("{tabs.map((t) => (") && tabsSrc.includes("nextReviewTab(tab, e.key, tabs)"),
+    "box sale review (source): the review tabs follow reviewTabsFor; a hidden tab reads as Document");
+  ok(rd("src/app/(app)/estimator/steps/review-sidebar.tsx").includes("{!s.boxSale && <PackageChecklist saved={!!loadedId} docs={docs} packageBadge={packageBadge} />}"), "box sale review (source): the sidebar's package checklist is hidden");
+  const client = rd("src/app/(app)/estimator/estimator-client.tsx");
+  ok(client.includes("        boxSale: s.boxSale,\n") && client.includes("s.trackSummary, s.boxSale]"), "box sale readiness (source): the step badges read the live flag");
+  ok(rd("src/lib/estimate-output/package-panel-server.ts").includes("gaps: boxSaleOf(q) ? [] : packageGapChips({"), "box sale readiness (source): the package panel shows no gap chips for a box sale");
+}
+
 // (later tasks: check functions above this line)
 
 export async function boxSalePureChecks(ok: Ok) {
@@ -253,6 +287,7 @@ export async function boxSalePureChecks(ok: Ok) {
   wiringChecks(ok);
   printChecks(ok);
   buildUiChecks(ok);
+  packageReviewChecks(ok);
   // (later tasks: pure checks above this line)
 }
 

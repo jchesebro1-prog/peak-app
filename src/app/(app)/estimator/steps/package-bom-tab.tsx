@@ -7,6 +7,7 @@ import { previewPath } from "@/lib/estimate-output/package-preview";
 import { bomPdfPath } from "@/lib/estimate-output/bom-pdf";
 import type { EstimatorState } from "../use-estimator-state";
 import { VendorsCard } from "./vendors-card";
+import { QuotePeopleFields } from "../quote-people-fields";
 
 /** Copy for the BOM quote tab (spec 2026-10-12 §4.3). */
 export const BOM_TAB_COPY = {
@@ -140,6 +141,12 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
           )}
           {!pdfOpts.pdfPrices && <span style={{ flexBasis: "100%", color: "#8a6d1f" }}>{BOM_TAB_COPY.pricesHidden}</span>}
         </div>
+        {/* Box goods sale (spec 2026-10-21): the Narrative tab's aside is gone, so Lead estimator / Prepared by live here. */}
+        {s.boxSale && (
+          <div data-testid="box-sale-people" style={{ display: "flex", flexDirection: "column", gap: 7, background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: "12px 14px", marginBottom: 12, maxWidth: 360 }}>
+            <QuotePeopleFields s={s} tone="light" />
+          </div>
+        )}
         <details open style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: "10px 14px", marginBottom: 12 }}>
           <summary style={{ cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: "#16181d" }}>
             Vendors

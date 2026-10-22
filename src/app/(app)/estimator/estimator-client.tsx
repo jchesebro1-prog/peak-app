@@ -53,8 +53,9 @@ export default function EstimatorClient(props: EstimatorProps) {
         revNum: s.revNum,
         track: s.trackSummary ?? undefined,
         document: s.packageDoc,
+        boxSale: s.boxSale,
       }),
-    [s.loadedId, s.sections, s.packageDoc, s.next, s.status, s.revNum, s.trackSummary]
+    [s.loadedId, s.sections, s.packageDoc, s.next, s.status, s.revNum, s.trackSummary, s.boxSale]
   );
 
   return (

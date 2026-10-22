@@ -13,6 +13,7 @@ import { listBidders } from "@/lib/stores/bids";
 import { quoteQualifiesForGrid } from "@/lib/design/estimate-grid-link";
 import { resolvePeakHeader } from "@/lib/letterhead";
 import { loadPeakHeaderDefault } from "@/lib/letterhead-server";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 
 /**
  * #301 slice C (spec §6, §7) — the staff side of the Client link panel:
@@ -116,7 +117,8 @@ export async function loadPackagePanel(q: Quote, canSend: boolean, deps: Partial
     uploads: d.uploads(),
     files: packageFileRows(files),
     responses: responseRows(q.clientResponses, revNoOf, (partyId) => bidderNames.get(partyId) ?? ""),
-    gaps: packageGapChips({
+    // Box goods sale (spec 2026-10-21): the client gets the BOM only — no datasheet / drawing / narrative gaps.
+    gaps: boxSaleOf(q) ? [] : packageGapChips({
       noDatasheet,
       drawings: visiblePackageFiles(files).length,
       drawingsOff: !normalizePackageSelection(q.packageSelection).drawings,
