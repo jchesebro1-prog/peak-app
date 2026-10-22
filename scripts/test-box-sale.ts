@@ -25,6 +25,9 @@ import { bomViewProps } from "../src/app/(app)/estimator/quote-document-view";
 import { loadAppendixSources } from "../src/lib/quote-pdf/generate";
 import { renderCoverPdf } from "../src/lib/estimate-output/cover-pdf-server";
 import { renderBomPdf } from "../src/lib/estimate-output/bom-pdf-server";
+import { BOX_SALE_COPY, boxSaleLaborBanner, newSystemPresentation } from "../src/lib/estimate-box-sale/rules";
+import { pdfDocKey } from "../src/app/(app)/estimator/pdf-doc-key";
+import { normalizePdfOptions } from "../src/lib/quote-pdf/pdf-options";
 // (later tasks: imports above this line)
 
 export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -205,6 +208,43 @@ async function printDbChecks(ok: Ok) {
   }
 }
 
+function buildUiChecks(ok: Ok) {
+  ok(newSystemPresentation([], false) === "narrative" && newSystemPresentation([], true) === "itemized" &&
+     newSystemPresentation([{ presentation: "narrative" }], true) === "itemized" && newSystemPresentation([{ presentation: "narrative" }], false) === "narrative" && newSystemPresentation([{}], false) === "itemized",
+    "box sale build: new systems are Itemized on a box sale; otherwise the estimate's own rule (#355 M6)");
+  ok(boxSaleLaborBanner(["Install", "Crew"]) === "A box goods sale can't include labor — remove the labor lines or turn off Box goods sale. Systems with labor: Install, Crew.",
+    "box sale build: the banner is the refusal sentence plus the systems with labor");
+  ok(BOX_SALE_COPY.label === "Box goods sale", "box sale build: the switch, the chip and the card all read \"Box goods sale\"");
+  const keyIn = { projectName: "P", custName: "C", customerId: null, locationId: null, contactName: "", quoteNote: "", assumptions: "", paymentTerms: "Unknown", sections: [], vendorQuotes: [], pdfOptions: normalizePdfOptions(null) };
+  ok(pdfDocKey(keyIn) === pdfDocKey({ ...keyIn, boxSale: false }) && pdfDocKey(keyIn) !== pdfDocKey({ ...keyIn, boxSale: true }),
+    "box sale build: the switch is a document change (asks for a Save); off is the same key as before");
+  const card = rd("src/app/(app)/estimator/section-card.tsx");
+  ok(card.includes("  boxSale?: boolean;") && card.includes("{!p.boxSale && (\n              <a\n                href={p.presentationHref}") && card.includes('sec.kind !== "labor" && !p.boxSale && (') &&
+     /\{\/\* #281: a read-only snippet[^\n]*\*\/\}\s*\{!p\.boxSale && \(\s*<button/.test(card) && card.includes('kpStar !== "none" && !p.boxSale && (') &&
+     card.includes('{!p.boxSale && addBtn("+ Configure labor", p.onToggleLabor, openMethod === "labor")}'),
+    "box sale build (source): the card hides the Customer chip, Discipline, Add narrative…, ★ key product and + Configure labor");
+  const head = rd("src/app/(app)/estimator/estimator-header.tsx");
+  ok(head.includes("{s.canBoxSale && (") && head.includes('data-testid="box-sale-switch"') && head.includes("onChange={(e) => s.setBoxSale(e.target.checked)}") && head.includes("{s.boxSale && (") && head.includes('data-testid="box-sale-chip"'),
+    "box sale build (source): the header has the switch (system estimates only) and a chip while it is on");
+  const step = rd("src/app/(app)/estimator/steps/build-step.tsx");
+  ok(step.includes("{s.boxSaleLabor.length > 0 && (") && step.includes("{boxSaleLaborBanner(s.boxSaleLabor)}") && step.includes("boxSale={s.boxSale}"),
+    "box sale build (source): Build shows the labor banner and tells each card it is a box sale");
+  ok(rd("src/app/(app)/estimator/header-more-menu.tsx").includes("{s.aiSource && !s.boxSale && ("), "box sale build (source): More ▾ hides Draft from survey/inspection");
+  const us = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  ok(us.includes("const [boxSale, setBoxSale] = useState(initial.boxSale);") && us.includes("const canBoxSale = isBoxSaleQuoteType(initial.quoteType);") &&
+     us.includes("const boxSaleLabor = useMemo(() => (boxSale ? boxSaleLaborSystems(sections) : []), [boxSale, sections]);") && /\n    boxSale,\n    boxSaleLabor,\n    canBoxSale,\n    setBoxSale,\n/.test(us),
+    "box sale build (source): the hook holds the flag and the systems with labor, and returns them");
+  const saveNow = us.slice(us.indexOf("const saveNow = async (): Promise<number | false> => {"), us.indexOf("const doSave = () => {"));
+  const refuse = saveNow.indexOf("const boxProblem = boxSaleSaveProblem(boxSale, sections);");
+  ok(refuse > 0 && refuse < saveNow.indexOf("saveQuoteAction(") && /if \(boxProblem\) \{\s*setActionNotice\(null\);\s*setGateRefused\(false\);\s*setActionError\(boxProblem\);\s*return false;\s*\}/.test(saveNow),
+    "box sale build (source): Save refuses a box sale with labor in the browser, with the same sentence, and sends nothing");
+  ok(saveNow.includes("          boxSale,\n") && us.includes("      boxSale,\n      document: packageDoc,\n    }),") && us.includes("packageDoc, boxSale, sections, groups, vendorQuotes, pdfOpts]"),
+    "box sale build (source): the flag rides every Save and is part of the document key");
+  ok(us.includes("presentation: newSystemPresentation([], boxSale)") && us.includes("presentation: newSystemPresentation(ss, boxSale)") &&
+     (us.match(/presentation: newSystemPresentation\(sections, boxSale\),/g) || []).length === 2 && us.includes("      : freshSections(initialFreightDefault.pct, initial.boxSale)"),
+    "box sale build (source): every new system (fresh, blank, category, suggested) is Itemized on a box sale");
+}
+
 // (later tasks: check functions above this line)
 
 export async function boxSalePureChecks(ok: Ok) {
@@ -212,6 +252,7 @@ export async function boxSalePureChecks(ok: Ok) {
   documentChecks(ok);
   wiringChecks(ok);
   printChecks(ok);
+  buildUiChecks(ok);
   // (later tasks: pure checks above this line)
 }
 

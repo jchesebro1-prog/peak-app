@@ -150,6 +150,8 @@ export type SectionCardProps = {
   onOpenPresentation: () => void;
   /** #301: the survey discipline this system answers ("" = auto, inferred from the name). */
   onSetDiscipline: (value: ScopeDiscipline | "") => void;
+  /** Box goods sale (spec 2026-10-21): hide + Configure labor, the Customer chip, Discipline, Add narrative… and ★. */
+  boxSale?: boolean;
   onDelete: () => void;
   onSetMargin: (v: string) => void;
   /** #267: a typed system sell (raw text; empty/0/junk clears it). */
@@ -520,6 +522,7 @@ export default function SectionCard(p: SectionCardProps) {
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, padding: "0 5px" }} onClick={(e) => e.stopPropagation()}>
+              {!p.boxSale && (
               <a
                 href={p.presentationHref}
                 data-testid="card-presentation"
@@ -533,9 +536,10 @@ export default function SectionCard(p: SectionCardProps) {
               >
                 Customer: {(sec.presentation || "itemized") === "narrative" ? "Narrative" : "Itemized"} ↗
               </a>
+              )}
               {/* #301: which site-visit discipline this system answers — matches the
                   survey's Client goals. Blank = inferred from the name (never stored). */}
-              {sec.kind !== "labor" && (
+              {sec.kind !== "labor" && !p.boxSale && (
                 <select
                   value={sec.discipline || ""}
                   onChange={(e) => p.onSetDiscipline(e.target.value as ScopeDiscipline | "")}
@@ -574,6 +578,7 @@ export default function SectionCard(p: SectionCardProps) {
                 </option>
               </select>
               {/* #281: a read-only snippet — the narrative itself is written in the right column. */}
+              {!p.boxSale && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -600,6 +605,7 @@ export default function SectionCard(p: SectionCardProps) {
               >
                 {narrativeSnippet || "Add narrative…"}
               </button>
+              )}
               {/* #262: room, for the PM parts list only — never shown on the customer document. */}
               {isInternal && (
                 <input
@@ -1493,7 +1499,7 @@ export default function SectionCard(p: SectionCardProps) {
                     {customEditable && (
                       <button type="button" className="est-action-btn" onClick={openLine} title="Edit custom part — reopens the Custom part form" aria-label={`Edit custom part ${it.desc}`} style={ACTION_BTN}>✎</button>
                     )}
-                    {kpStar !== "none" && (
+                    {kpStar !== "none" && !p.boxSale && (
                       <button
                         type="button"
                         className="est-action-btn"
@@ -1587,7 +1593,7 @@ export default function SectionCard(p: SectionCardProps) {
               {addBtn("+ Configure curtain", p.onToggleCurtain, openMethod === "curtain")}
               {addBtn("+ Configure track", p.onToggleTrack, openMethod === "track")}
               {addBtn("+ Add assembly", p.onToggleFixture, openMethod === "fixture")}
-              {addBtn("+ Configure labor", p.onToggleLabor, openMethod === "labor")}
+              {!p.boxSale && addBtn("+ Configure labor", p.onToggleLabor, openMethod === "labor")}
               {addBtn("+ Build custom part", handleToggleCustom, openMethod === "custom")}
               {addBtn("+ Vendor quote", p.onToggleVendor, openMethod === "vendor")}
               {/* Phase 2a: done with this system — mark it built and fold it away. */}

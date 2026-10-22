@@ -39,7 +39,8 @@ export function HeaderMoreMenu({ s, onStep }: { s: EstimatorState; onStep: (to: 
               <ChangeTypeControl quoteId={s.loadedId} status={s.status} tone="dark" />
             </div>
           )}
-          {s.aiSource && (
+          {/* Box goods sale: no narrative scope to draft. */}
+          {s.aiSource && !s.boxSale && (
             <button type="button" role="menuitem" style={item} onClick={() => { setOpen(false); onStep("build"); s.openAiDraft(); }} title={"Assemble the scope of work from " + s.aiSource.label}>
               Draft from survey/inspection
             </button>

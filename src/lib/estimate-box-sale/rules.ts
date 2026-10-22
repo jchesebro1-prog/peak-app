@@ -1,5 +1,6 @@
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { presentationForNewSystem } from "@/lib/estimate-output/fields";
 
 /**
  * Box goods sale (spec docs/superpowers/specs/2026-10-21-box-goods-sale-design.md): an Estimator system estimate
@@ -63,4 +64,24 @@ export function boxSaleLaborSystems(sections: ReadonlyArray<Pick<SpecSection, "n
 /** The save refusal for a box sale with labor, else null. */
 export function boxSaleSaveProblem(boxSale: boolean, sections: ReadonlyArray<Pick<SpecSection, "name" | "kind" | "items">> | null | undefined): string | null {
   return boxSale && boxSaleLaborSystems(sections).length > 0 ? BOX_SALE_LABOR_MESSAGE : null;
+}
+
+/** The Estimator's and + New quote's copy. */
+export const BOX_SALE_COPY = {
+  label: "Box goods sale",
+  switchHint: "Equipment + freight only. The customer gets the BOM PDF and the online BOM — no cover, narrative, datasheets or drawings. Turn it off to bring them back.",
+  chipTitle: "Box goods sale — equipment + freight only; the customer gets the itemized BOM",
+  cardSub: "Equipment + freight only — the customer gets the itemized BOM",
+  laborSystems: "Systems with labor:",
+} as const;
+
+/** The Build banner: the refusal sentence, then the systems that carry labor. */
+export function boxSaleLaborBanner(names: readonly string[]): string {
+  return `${BOX_SALE_LABOR_MESSAGE} ${BOX_SALE_COPY.laborSystems} ${names.join(", ")}.`;
+}
+
+/** A new system's presentation: Itemized on a box sale, else the estimate's own rule (presentationForNewSystem —
+ *  no system yet = Narrative). A system loaded From library keeps its own (it prints itemized on a box sale anyway). */
+export function newSystemPresentation(sections: ReadonlyArray<Pick<SpecSection, "presentation">>, boxSale: boolean): NonNullable<SpecSection["presentation"]> {
+  return boxSale ? "itemized" : presentationForNewSystem(sections);
 }

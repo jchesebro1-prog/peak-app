@@ -14,6 +14,7 @@ import PopoutButton from "@/components/popout/popout-button";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import PartiesChip from "./parties-chip";
 import BidChip from "./bid-chip";
+import { BOX_SALE_COPY } from "@/lib/estimate-box-sale/rules";
 
 /**
  * #305 (spec 2026-10-07 §4) — the Estimator's one header, shown on every
@@ -208,6 +209,16 @@ export function EstimatorHeader({
               {/* #348 — canApplyCredit is can("create") */}
               <PartiesChip quoteId={s.loadedId} canEdit={s.canApplyCredit} />
               <BidChip quoteId={s.loadedId} canEdit={s.canApplyCredit} onSync={(x) => applySync({ ok: true, review: null, status: x.status, next: x.next })} />
+              {/* Box goods sale (spec 2026-10-21): the mode stays visible on every step. Not accent-colored. */}
+              {s.boxSale && (
+                <span
+                  data-testid="box-sale-chip"
+                  title={BOX_SALE_COPY.chipTitle}
+                  style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, letterSpacing: ".03em", color: "#1d2026", background: "#e3c26e", borderRadius: 6, padding: "2px 7px", whiteSpace: "nowrap" }}
+                >
+                  {BOX_SALE_COPY.label}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -471,6 +482,23 @@ export function EstimatorHeader({
                   title="Quote category — shown on the Quotes hub"
                   style={{ ...DARK_SELECT, width: "100%", minWidth: 0, cursor: "text" }}
                 />
+                {/* Box goods sale (spec 2026-10-21): system estimates only; rides Save like any document edit. */}
+                {s.canBoxSale && (
+                  <>
+                    <label style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 6, fontSize: 12, fontWeight: 600, color: "#d7dae0", cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        aria-checked={s.boxSale}
+                        data-testid="box-sale-switch"
+                        checked={s.boxSale}
+                        onChange={(e) => s.setBoxSale(e.target.checked)}
+                      />
+                      <span>{BOX_SALE_COPY.label}</span>
+                    </label>
+                    <span style={META_HINT}>{BOX_SALE_COPY.switchHint}</span>
+                  </>
+                )}
               </section>
               <section style={META_SECTION}>
                 <QuotePeopleFields s={s} tone="dark" />
