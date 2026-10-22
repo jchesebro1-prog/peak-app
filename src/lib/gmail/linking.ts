@@ -364,6 +364,8 @@ export type LinkThreadToNewQuoteInput = {
   /** the intake's optional "Quote name" field; falls back to the thread
    *  subject (Re:/Fwd: stripped) when blank. */
   name?: string;
+  /** Box goods sale (spec 2026-10-21) — the + New quote card; buildQuote keeps it on a system quote only. */
+  boxSale?: boolean;
 };
 
 export type LinkThreadToNewQuoteResult =
@@ -497,6 +499,7 @@ export async function linkThreadToNewQuote(
     owner: input.owner,
     ...(leadId ? { leadId } : {}),
     ...typeFields,
+    ...(input.boxSale === true ? { boxSale: true } : {}),
   });
   if (!t.customerId) await linkThread(threadId, input.customerId, t.resolvedContactId ?? null);
   await setLink(threadId, { type: "quote", id: q.id, label: `${displayQuoteNumber(q)} · ${q.name}` });

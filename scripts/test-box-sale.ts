@@ -38,6 +38,8 @@ import { boxSaleExtras } from "../src/lib/estimate-output/package-extras-model";
 import PackageView from "../src/components/estimate-output/package-view";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { BUILDER_BASE, builderPath, isServiceType, SERVICE_TYPES } from "../src/app/(app)/quotes/new/types";
+import { quoteEditPath, quoteServiceType, readHandoff, sameBuilder } from "../src/app/(app)/quotes/new/handoff";
 // (later tasks: imports above this line)
 
 export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -355,6 +357,24 @@ function sendPackageChecks(ok: Ok) {
   ok(/\{!m\.boxSale && \(\s*<nav aria-label="Estimate view"/.test(rd("src/components/estimate-output/package-view.tsx")), "box sale package page (source): PackageView drops the toggle when the model says so");
 }
 
+function intakeChecks(ok: Ok) {
+  const card = SERVICE_TYPES.find((t) => t.key === "box_sale");
+  ok(!!card && card.label === BOX_SALE_COPY.label && card.sub === BOX_SALE_COPY.cardSub && SERVICE_TYPES[1]?.key === "box_sale" && isServiceType("box_sale"),
+    "box sale intake: + New quote has a Box goods sale card, right after System / equipment quote");
+  ok(BUILDER_BASE.box_sale === "/estimator" && builderPath("box_sale", "c1") === "/estimator?customer=c1&box=1" && !new URLSearchParams(builderPath("system", "c1").split("?")[1]).has("box"),
+    "box sale intake: the card opens the Estimator with ?box=1 (a system quote never carries it)");
+  ok(readHandoff({ box: "1" }).boxSale === true && readHandoff({}).boxSale === false && readHandoff({ box: "yes" }).boxSale === false, "box sale intake: the Estimator reads ?box=1 and nothing else");
+  ok(quoteServiceType({ quoteType: "system", boxSale: true }) === "box_sale" && quoteServiceType({ boxSale: true, category: "Gear" }) === "box_sale" && quoteServiceType({ quoteType: "repair", boxSale: true }) === "repair" &&
+     quoteEditPath({ id: "Q-1", boxSale: true }) === "/estimator?id=Q-1" && sameBuilder("box_sale", "system"),
+    "box sale intake: a stored box sale reads as the Box goods sale card and edits in the Estimator (switching it to System is not a replace)");
+  const act = rd("src/app/(app)/quotes/new/actions.ts");
+  ok(act.includes('quoteType: input.type === "custom" || input.type === "box_sale" ? "system" : input.type,') && act.includes('...(input.type === "box_sale" ? { boxSale: true } : {}),'),
+    "box sale intake (source): a draft minted from an Inbox thread is a system quote with the flag");
+  const link = rd("src/lib/gmail/linking.ts");
+  ok(link.includes("...(input.boxSale === true ? { boxSale: true } : {}),") && /boxSale\?: boolean;/.test(link), "box sale intake (source): linkThreadToNewQuote passes the flag to create");
+  ok(rd("src/app/(app)/estimator/page.tsx").includes("if (!q && handoff?.boxSale) initial.boxSale = true;"), "box sale intake (source): a new estimate opened with ?box=1 starts with the switch on");
+}
+
 // (later tasks: check functions above this line)
 
 export async function boxSalePureChecks(ok: Ok) {
@@ -365,6 +385,7 @@ export async function boxSalePureChecks(ok: Ok) {
   buildUiChecks(ok);
   packageReviewChecks(ok);
   sendPackageChecks(ok);
+  intakeChecks(ok);
   // (later tasks: pure checks above this line)
 }
 

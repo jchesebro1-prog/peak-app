@@ -510,6 +510,8 @@ export default async function EstimatorPage({
     }
   }
   if (!q) initial.leadId = handoff?.leadId || (suggSameCustomer ? sugg?.leadId : null) || null;
+  // Box goods sale (spec 2026-10-21): the + New quote card (?box=1) opens a new estimate with the switch on.
+  if (!q && handoff?.boxSale) initial.boxSale = true;
   if (preCategory && preCategory.trim()) initial.category = preCategory.trim();
   if (handoff) {
     // #160: the intake's optional name, else "<Customer> — System" (or
