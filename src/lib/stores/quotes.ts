@@ -15,7 +15,7 @@ import {
 import type { AssistNudge } from "@/lib/brief/types";
 import { quotesSeed } from "@/db/seeds/quotes";
 import { withoutEstimateFields } from "@/lib/estimate-number";
-import { isBoxSaleQuoteType } from "@/lib/estimate-box-sale/rules";
+import { isBoxSaleQuoteType, isBoxSaleSource } from "@/lib/estimate-box-sale/rules";
 import { grossQuoteValue, quoteRewardCredit, withRewardCredit, withoutRewardCredit } from "@/lib/rewards/credit-line";
 import { serviceCreditSubdocKey } from "@/lib/rewards/service-credit";
 import type { SpecSection } from "@/app/(app)/estimator/types";
@@ -947,7 +947,7 @@ export function buildQuote(
     // #340: the assessment findings this quote answers — only when the caller set some.
     ...(Array.isArray(partial.findingKeys) && partial.findingKeys.length ? { findingKeys: partial.findingKeys } : {}),
     // Box goods sale: only a true on a system quote — every other creator writes the doc it wrote before.
-    ...(partial.boxSale === true && isBoxSaleQuoteType(quoteType) ? { boxSale: true } : {}),
+    ...(partial.boxSale === true && isBoxSaleQuoteType(quoteType) && isBoxSaleSource(partial.source) ? { boxSale: true } : {}),
   };
 }
 
@@ -1024,7 +1024,7 @@ export async function update(
     // Box goods sale: stored only as true on a system quote; false (or any other type) removes the key, so turning
     // it off leaves exactly a normal estimate's doc. A patch without the key leaves it alone.
     if ("boxSale" in clean) {
-      const on = clean.boxSale === true && isBoxSaleQuoteType(clean.quoteType ?? q.quoteType);
+      const on = clean.boxSale === true && isBoxSaleQuoteType(clean.quoteType ?? q.quoteType) && isBoxSaleSource(clean.source ?? q.source);
       delete clean.boxSale;
       if (on) q.boxSale = true;
       else delete q.boxSale;

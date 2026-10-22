@@ -414,6 +414,23 @@ function vendorQuoteRows(raw: unknown): VendorQuote[] {
     : [];
 }
 
+/** A refused save (nothing written): no id and no number, so the client keeps the edit visibly unsaved instead of
+ *  adopting a returned id as "saved" (clearing the PDF-dirty / tier-reprice flags, taking the rev/date). */
+function refusedSave(prior: Quote | null, error: string): SaveResult {
+  return {
+    ok: false,
+    id: null,
+    number: null,
+    revNum: documentRevStamp(prior ?? {}).revNum,
+    updatedAt: prior?.updatedAt ?? Date.now(),
+    review: prior?.review ?? null,
+    status: prior?.status ?? null,
+    pipelineId: prior?.pipelineId ?? null,
+    stage: prior?.stage ?? null,
+    error,
+  };
+}
+
 /**
  * Save — port of the prototype's doSave(): update when a quote is loaded,
  * create otherwise. spec = { sections, mobs } (sections round-trip the
@@ -440,41 +457,12 @@ export async function saveQuoteAction(
   // over the caps refuses the WHOLE save (nothing written), so a too-large
   // edit can never wipe the stored document.
   const docSave = packageDocForSave(payload.document, (prior?.spec as { document?: unknown } | null | undefined)?.document);
-  if (!docSave.ok) {
-    // id/number null: nothing was written, and the client adopts a returned
-    // id as "saved" (clears the PDF-dirty / tier-reprice flags, takes the
-    // rev/date) — a refusal must leave the edit visibly unsaved.
-    return {
-      ok: false,
-      id: null,
-      number: null,
-      revNum: documentRevStamp(prior ?? {}).revNum,
-      updatedAt: prior?.updatedAt ?? Date.now(),
-      review: prior?.review ?? null,
-      status: prior?.status ?? null,
-      pipelineId: prior?.pipelineId ?? null,
-      stage: prior?.stage ?? null,
-      error: docSave.error,
-    };
-  }
+  if (!docSave.ok) return refusedSave(prior, docSave.error);
   // Box goods sale (spec 2026-10-21): equipment + freight only — any labor line refuses the WHOLE save before
   // anything is written (the document refusal's shape: no id, so the edit stays visibly unsaved).
   const boxSale = boxSaleForSave(prior, payload.boxSale);
   const boxProblem = boxSaleSaveProblem(boxSale, Array.isArray(payload.sections) ? payload.sections : []);
-  if (boxProblem) {
-    return {
-      ok: false,
-      id: null,
-      number: null,
-      revNum: documentRevStamp(prior ?? {}).revNum,
-      updatedAt: prior?.updatedAt ?? Date.now(),
-      review: prior?.review ?? null,
-      status: prior?.status ?? null,
-      pipelineId: prior?.pipelineId ?? null,
-      stage: prior?.stage ?? null,
-      error: boxProblem,
-    };
-  }
+  if (boxProblem) return refusedSave(prior, boxProblem);
   // #245 Task 13 (spec §4.3, controller decision 6): `por` clears on any
   // item staff have now priced; `portalReview` clears once none remain —
   // scoped to a portal-catalog quote so no other save's behavior changes.
@@ -971,6 +959,12 @@ async function placeSystemInEstimate(
     const existing = await get(target.quoteId);
     if (!existing) {
       return { ok: false, error: "That estimate could not be found." };
+    }
+    // Box goods sale (spec 2026-10-21): a system with labor can't join an existing box sale — refused before anything
+    // is written. Move/Copy into a NEW estimate is unchanged (the new estimate starts as a normal one).
+    if (boxSaleOf(existing)) {
+      const problem = boxSaleSaveProblem(true, [placed]);
+      if (problem) return { ok: false, error: problem };
     }
     const existingSpec = existing.spec as
       | { sections?: SpecSection[]; mobs?: SpecMob[]; groups?: SystemGroup[]; document?: unknown }

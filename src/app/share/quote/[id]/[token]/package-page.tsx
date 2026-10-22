@@ -30,11 +30,11 @@ export async function SharedPackagePage({ id, token, view }: { id: string; token
   const base = hit ? sharePath(hit.q.id, token) : "";
   const model = hit ? await loadPackageViewProps(hit, { base, view, letterheadSrc: letterhead.src }) : null;
   if (!hit || !model) return <OnlineEstimateCard title={ONLINE_COPY.shareInactive} />;
-  // Box goods sale (spec 2026-10-21): the itemized list only — no cut sheets, datasheet links, downloads or plans;
-  // the client actions stay. The revision's frozen flag, like the document's.
+  // Box goods sale (spec 2026-10-21): the itemized list only — no cut sheets (onlineCutSheets returns null for the
+  // revision's frozen flag), datasheet links, downloads or plans; the client actions stay.
   const box = revisionBoxSale(hit.rev);
   // Jeff 2026-10-15 #22: the cut sheets the sent PDF carries (owner-addressed, like the PDF's own).
-  const cut = box ? null : await onlineCutSheets(hit.q, hit.rev);
+  const cut = await onlineCutSheets(hit.q, hit.rev);
   const extras = await loadPackageExtras(hit, base);
   const built = buildPackageSlots(box ? boxSaleExtras(extras) : extras, {
     id: hit.q.id,

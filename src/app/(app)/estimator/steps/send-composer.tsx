@@ -239,8 +239,9 @@ export function SendComposer({ s, collapsible, onSent }: { s: EstimatorState; co
           </label>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
-              <input type="checkbox" checked={fields.attachEstimate} disabled={disabled} onChange={(e) => set("attachEstimate", e.target.checked)} />
+              <input type="checkbox" checked={boxSale || fields.attachEstimate} disabled={disabled || boxSale} onChange={(e) => set("attachEstimate", e.target.checked)} />
               {SEND_UI_COPY.attachEstimate}
+              {boxSale && <span style={SMALL}>The quote PDF is always attached.</span>}
             </label>
             {!boxSale && (
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>

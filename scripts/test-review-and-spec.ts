@@ -58090,7 +58090,7 @@ import { renderToStaticMarkup as p5rMarkup } from "react-dom/server";
   const acts = rd("src/app/(app)/estimator/actions.ts");
   const fn = acts.slice(acts.indexOf("export async function saveQuoteAction"), acts.indexOf("export async function searchQuotesAction"));
   ok(fn.indexOf("const docSave = packageDocForSave(payload.document, (prior?.spec as { document?: unknown } | null | undefined)?.document);") > 0 &&
-     fn.indexOf("if (!docSave.ok) {") < fn.indexOf("await settleRewardCredit(") && fn.indexOf("error: docSave.error,") > 0 && fn.indexOf("error: docSave.error,") < fn.indexOf("await settleRewardCredit(") &&
+     fn.indexOf("if (!docSave.ok) return refusedSave(prior, docSave.error);") > 0 && fn.indexOf("if (!docSave.ok) return refusedSave(prior, docSave.error);") < fn.indexOf("await settleRewardCredit(") &&
      fn.includes("groups, ...(docSave.document ? { document: docSave.document } : {}) }") && /document\?: PackageDoc \| null;/.test(acts.slice(acts.indexOf("export type SavePayload"))) &&
      acts.includes("spec?: { sections: SpecSection[]; mobs: SpecMob[]; groups?: SystemGroup[]; document?: PackageDoc };"),
     "#P5 save: saveQuoteAction decides the document first (a refusal writes nothing, before the credit or the patch) and writes spec.document");
@@ -58229,8 +58229,9 @@ import { renderToStaticMarkup as p5fMarkup } from "react-dom/server";
   // (2) the refused save stays unsaved
   const acts = rd("src/app/(app)/estimator/actions.ts");
   const fn = acts.slice(acts.indexOf("export async function saveQuoteAction"), acts.indexOf("await settleRewardCredit(", acts.indexOf("export async function saveQuoteAction")));
-  const refusal = fn.slice(fn.indexOf("if (!docSave.ok) {"), fn.indexOf("error: docSave.error,"));
-  ok(/ok: false,\n\s+id: null,\n\s+number: null,/.test(refusal) && !refusal.includes("id: loadedId"),
+  // Box goods sale final review: the refusal shape is one helper, shared with the labor refusal.
+  const refusal = acts.slice(acts.indexOf("function refusedSave("), acts.indexOf("export async function saveQuoteAction"));
+  ok(fn.includes("if (!docSave.ok) return refusedSave(prior, docSave.error);") && /ok: false,\n\s+id: null,\n\s+number: null,/.test(refusal) && !refusal.includes("id: loadedId"),
     "#P5 render fix: a document-too-large refusal returns id null / number null (nothing was written)");
   const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
   const save = hook.slice(hook.indexOf("const res = await saveQuoteAction(loadedId, {"), hook.indexOf("const doSave = () => {"));

@@ -20,7 +20,8 @@ import { can } from "@/lib/team";
 import { activeUsers, getUser } from "@/lib/users";
 import { attachmentsFit, bodyWithLink, coverPdfHref, estimateDraftIsCurrent, FOLLOW_UP_CHOICES, parseRecipients, withoutAddresses } from "./compose";
 import { mailboxViewer } from "@/lib/mailbox-viewer";
-import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
+import type { SpecSection } from "@/app/(app)/estimator/types";
+import { boxSaleOf, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
 import { getCompany } from "@/lib/identity/companies";
 import { bidderPdfFileName } from "@/lib/parties/addressee";
 import { bidderPartyFor, bidderRecipient } from "@/lib/parties/addressee-server";
@@ -149,7 +150,13 @@ export type EstimateEmailInput = {
   followUpDays?: number;
   /** The quote's updatedAt the sender was shown — a version they didn't see is refused (first send and re-send). */
   asOf?: number;
+  /** Internal (sendBidderEmail only; the actions' cleanInput never sets it): the bidder's own PDF rides instead, so
+   *  a box sale's "estimate PDF always attached" rule does not apply. */
+  forBidder?: boolean;
 };
+
+/** Box goods sale (spec 2026-10-21): the quote PDF always goes with the email, whatever a stale composer posts. */
+const wantsEstimatePdf = (q: Quote, input: EstimateEmailInput): boolean => input?.attachEstimate === true || (!input?.forBidder && boxSaleOf(q));
 
 export type ThreadSpec = {
   mailboxUser: string;
@@ -308,6 +315,10 @@ async function preflight(
   if (!q) return { ok: false, error: SEND_COPY.gone };
   if (pdfKindForQuoteType(q.quoteType) !== "quote") return { ok: false, error: SEND_COPY.notEstimate };
   if (q.status !== "draft" && q.status !== "sent") return { ok: false, error: SEND_COPY.closed };
+  // Box goods sale (spec 2026-10-21): equipment + freight only. Labor can still sit on one (a restored revision, a
+  // move into it from before the rule) — it is never sent, by any path: send, Open in Inbox or a bidder send.
+  const boxProblem = boxSaleSaveProblem(boxSaleOf(q), (q.spec as { sections?: SpecSection[] } | null | undefined)?.sections);
+  if (boxProblem) return { ok: false, error: boxProblem };
   // A re-send never reaches sendQuote's version check — the shown version is checked here for both.
   const asOf = input?.asOf;
   if (typeof asOf === "number" && asOf > 0 && q.updatedAt !== asOf) return { ok: false, error: SEND_COPY.changedSince };
@@ -337,7 +348,7 @@ async function preflight(
     return { ok: false, error: SEND_COPY.badFollowUp };
   }
   // A re-send whose sent revision has no PDF copy yet: never the current file.
-  if (input?.attachEstimate === true && !estimatePdfPath(q)) return { ok: false, error: SEND_COPY.pdfPreparing };
+  if (wantsEstimatePdf(q, input) && !estimatePdfPath(q)) return { ok: false, error: SEND_COPY.pdfPreparing };
   return { q, to: to.list.join(", "), cc: cc.join(", "), subject, body };
 }
 
@@ -362,7 +373,7 @@ async function attach(deps: EstimateEmailDeps, actor: SendActor, c: Checked, inp
   let estimate: Prepared["estimate"] = null;
   let cover: Prepared["cover"] = null;
   try {
-    if (input.attachEstimate === true) {
+    if (wantsEstimatePdf(q, input)) {
       const path = estimatePdfPath(q);
       if (!path) return { ok: false, error: SEND_COPY.pdfPreparing };
       // The PDF state stores no size, so the file is read to size it (and to
@@ -783,7 +794,7 @@ export async function sendBidderEmail(
   if (r0 || !t0) return row(r0 ?? BID_SEND_COPY.gone);
 
   const est: EstimateEmailInput = {
-    to: t0.email, cc: "", subject: input.subject, body: input.body, attachEstimate: false, attachCover: false, followUpDays: 0, asOf: input.asOf,
+    to: t0.email, cc: "", subject: input.subject, body: input.body, attachEstimate: false, attachCover: false, followUpDays: 0, asOf: input.asOf, forBidder: true,
   };
   const c = await preflight(deps, actor, quoteId, est, "send");
   if ("ok" in c) return whole(c.error);

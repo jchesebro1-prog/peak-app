@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { boxSaleLaborSystems, boxSaleSaveProblem, isBoxSaleQuoteType, newSystemPresentation } from "@/lib/estimate-box-sale/rules";
+import { boxSaleLaborSystems, boxSaleSaveProblem, isBoxSaleQuoteType, isBoxSaleSource, newSystemPresentation } from "@/lib/estimate-box-sale/rules";
 import { SIDE_OPEN_KEY } from "./estimator-styles";
 import { surveyGoalsAction } from "./output-actions";
 import { listReviewCommentsAction } from "./review-actions";
@@ -509,7 +509,7 @@ export function useEstimatorState(props: EstimatorProps) {
   /** Box goods sale (spec 2026-10-21) — content: rides Save (never the header autosave) and is part of the
    *  document key, so a toggle reads "Unsaved changes" like any document edit. System estimates only. */
   const [boxSale, setBoxSale] = useState(initial.boxSale);
-  const canBoxSale = isBoxSaleQuoteType(initial.quoteType);
+  const canBoxSale = isBoxSaleQuoteType(initial.quoteType) && isBoxSaleSource(initial.bonusSource);
   /** The systems whose labor blocks a box-sale Save — the Build banner names them. */
   const boxSaleLabor = useMemo(() => (boxSale ? boxSaleLaborSystems(sections) : []), [boxSale, sections]);
   const [revNum, setRevNum] = useState(initial.revNum);

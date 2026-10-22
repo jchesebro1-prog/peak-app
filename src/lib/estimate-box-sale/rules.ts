@@ -13,20 +13,27 @@ import { presentationForNewSystem } from "@/lib/estimate-output/fields";
 /** The server's save refusal, the browser's own refusal and the Build banner's first sentence — verbatim (spec). */
 export const BOX_SALE_LABOR_MESSAGE = "A box goods sale can't include labor — remove the labor lines or turn off Box goods sale.";
 
-type FlagQuote = { boxSale?: unknown; quoteType?: string | null } | null | undefined;
+type FlagQuote = { boxSale?: unknown; quoteType?: string | null; source?: string | null } | null | undefined;
 
 /** Only an Estimator system estimate (quoteType absent or "system") can be a box goods sale. */
 export function isBoxSaleQuoteType(quoteType: string | null | undefined): boolean {
   return !quoteType || quoteType === "system";
 }
 
-/** The live quote's flag: a stored `true` on a system estimate; anything else reads false. */
+/** A portal-catalog / portal-service quote opened in the Estimator can't be a box goods sale (spec: portal catalog
+ *  quotes don't change). Every other source can — an Estimator Save restamps those as "estimator" anyway
+ *  (sourceForSave keeps only the two portal sources). */
+export function isBoxSaleSource(source: string | null | undefined): boolean {
+  return source !== "portal-catalog" && source !== "portal-service";
+}
+
+/** The live quote's flag: a stored `true` on an Estimator system estimate; anything else reads false. */
 export function boxSaleOf(q: FlagQuote): boolean {
-  return !!q && q.boxSale === true && isBoxSaleQuoteType(q.quoteType);
+  return !!q && q.boxSale === true && isBoxSaleQuoteType(q.quoteType) && isBoxSaleSource(q.source);
 }
 
 /** A sent revision's frozen flag (docFields.boxSale). A revision cut before the field existed reads false.
- *  quoteAsOfRevision (src/lib/quote-share/view.ts) applies the same rule inline — that file may import no other module. */
+ *  quoteAsOfRevision (src/lib/quote-share/view.ts) applies the same rule inline rather than importing this module. */
 export function revisionBoxSale(rev: { docFields?: { boxSale?: unknown } | null } | null | undefined): boolean {
   return rev?.docFields?.boxSale === true;
 }
@@ -34,7 +41,7 @@ export function revisionBoxSale(rev: { docFields?: { boxSale?: unknown } | null 
 /** What an Estimator Save stores: `posted` on a system estimate; an older caller that omits it keeps the stored
  *  flag; any other quote type never has one. */
 export function boxSaleForSave(prior: FlagQuote, posted: unknown): boolean {
-  if (!isBoxSaleQuoteType(prior?.quoteType)) return false;
+  if (!isBoxSaleQuoteType(prior?.quoteType) || !isBoxSaleSource(prior?.source)) return false;
   return posted === undefined ? prior?.boxSale === true : posted === true;
 }
 

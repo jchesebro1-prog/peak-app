@@ -169,6 +169,13 @@ export function sameBuilder(a: ServiceType, b: ServiceType): boolean {
   return BUILDER_BASE[a] === BUILDER_BASE[b];
 }
 
+/** Change type between System and Box goods sale reopens the same estimate (sameBuilder) and never sets the flag —
+ *  the switch lives in the Estimator's Quote details. The hint to show then, else null. */
+export function boxSwitchHint(picked: ServiceType, current: ServiceType): string | null {
+  const pair = (picked === "box_sale" && current === "system") || (picked === "system" && current === "box_sale");
+  return pair ? "Use the Box goods sale switch in the Estimator's Quote details." : null;
+}
+
 export const CHANGE_TYPE_DISABLED_HINT = "Already sent — start a new quote instead.";
 
 /** D205 — only a draft's type can change. */

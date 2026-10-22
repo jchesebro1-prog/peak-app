@@ -1,3 +1,4 @@
+import { revisionBoxSale } from "@/lib/estimate-box-sale/rules";
 import { normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import { CUT_SHEET_APPEND_LOAD_MS, settleWithin } from "./deadline";
@@ -28,6 +29,9 @@ function revisionPdfOptions(q: Quote, rev: QuoteRevision): unknown {
 
 /** The Client-style sheets the online page shows for this sent revision, or null (none asked for, none built, or slow). */
 export async function onlineCutSheets(q: Quote, rev: QuoteRevision): Promise<LoadedCutSheets | null> {
+  // Box goods sale (spec 2026-10-21): no cut sheets anywhere online — the portal, the v1 share page and the package
+  // page all read this, from the revision's frozen flag.
+  if (revisionBoxSale(rev)) return null;
   if (!onlineShowsCutSheets(revisionPdfOptions(q, rev), q.contentChangedAt, rev.at)) return null;
   const loaded = await settleWithin(loadCutSheets(q.id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] online estimate ${q.id}`);
   return loaded && loaded.ok && loaded.models.client.length > 0 ? loaded : null;

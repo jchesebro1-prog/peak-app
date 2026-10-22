@@ -39,7 +39,10 @@ import PackageView from "../src/components/estimate-output/package-view";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BUILDER_BASE, builderPath, isServiceType, SERVICE_TYPES } from "../src/app/(app)/quotes/new/types";
-import { quoteEditPath, quoteServiceType, readHandoff, sameBuilder } from "../src/app/(app)/quotes/new/handoff";
+import { boxSwitchHint, quoteEditPath, quoteServiceType, readHandoff, sameBuilder } from "../src/app/(app)/quotes/new/handoff";
+import { openEstimateInInbox, sendEstimateEmail, type EstimateEmailDeps } from "../src/lib/estimate-email/send-server";
+import { onlineCutSheets } from "../src/lib/curtain-cut-sheets/online";
+import { isBoxSaleSource } from "../src/lib/estimate-box-sale/rules";
 // (later tasks: imports above this line)
 
 export const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -125,9 +128,9 @@ function wiringChecks(ok: Ok) {
   const act = rd("src/app/(app)/estimator/actions.ts");
   const save = act.slice(act.indexOf("export async function saveQuoteAction("), act.indexOf("async function settleRewardCredit("));
   const at = save.indexOf("const boxProblem = boxSaleSaveProblem(boxSale, Array.isArray(payload.sections) ? payload.sections : []);");
-  ok(save.includes("const boxSale = boxSaleForSave(prior, payload.boxSale);") && at > save.indexOf("if (!docSave.ok) {") && at < save.indexOf("settleRewardCredit(") && at < save.indexOf("await update(") && at < save.indexOf("await create("),
+  ok(save.includes("const boxSale = boxSaleForSave(prior, payload.boxSale);") && at > save.indexOf("if (!docSave.ok) return refusedSave(prior, docSave.error);") && save.includes("if (!docSave.ok) return refusedSave(prior, docSave.error);") && at < save.indexOf("settleRewardCredit(") && at < save.indexOf("await update(") && at < save.indexOf("await create("),
     "box sale save (source): the labor refusal runs after the document check and before the Rewards credit or any write");
-  ok(/if \(boxProblem\) \{\s*return \{\s*ok: false,\s*id: null,\s*number: null,/.test(save) && save.includes("error: boxProblem,"),
+  ok(save.includes("if (boxProblem) return refusedSave(prior, boxProblem);") && /function refusedSave\(prior: Quote \| null, error: string\): SaveResult \{\s*return \{\s*ok: false,\s*id: null,\s*number: null,/.test(rd("src/app/(app)/estimator/actions.ts")),
     "box sale save (source): a refusal returns no id — nothing is written and the edit stays unsaved");
   ok(/\n\s+boxSale,\n/.test(save.slice(save.indexOf("const patch: QuotePatch = {"), save.indexOf("patch.spec = await quoteSpecFollowingRenames"))),
     "box sale save (source): the patch carries the flag (create and update alike)");
@@ -136,8 +139,8 @@ function wiringChecks(ok: Ok) {
   const carry = place.indexOf("...(boxSaleOf(sourceQuote) ? { boxSale: true } : {}),");
   ok(carry > place.indexOf("created = await create({") && carry < place.indexOf("}, { bidScopeOnly: scopeOnly.stamp });"),
     "box sale move/copy (source): Move / Copy system → New estimate creates the estimate with the STORED source's flag");
-  ok(!place.slice(0, place.indexOf("// Estimator bonuses: the new draft estimate")).includes("boxSale"),
-    "box sale move/copy (source): Move / Copy into an existing estimate leaves the target's flag alone");
+  ok(!place.slice(0, place.indexOf("// Estimator bonuses: the new draft estimate")).replace("if (boxSaleOf(existing)) {\n      const problem = boxSaleSaveProblem(true, [placed]);", "").includes("boxSale"),
+    "box sale move/copy (source): Move / Copy into an existing estimate leaves the target's flag alone (it only refuses labor into a box sale)");
   const page = rd("src/app/(app)/estimator/page.tsx");
   ok(page.includes("    boxSale: boxSaleOf(q),\n") && page.includes("      boxSale: false,\n") && /\n  boxSale: boolean;\n/.test(rd("src/app/(app)/estimator/types.ts")),
     "box sale load (source): initialFrom hands the Estimator the stored flag (false for a new estimate)");
@@ -166,6 +169,12 @@ async function storeDbChecks(ok: Ok) {
     ok(!("boxSale" in (await Q.get(SVC))!), "box sale store (DB): create drops the flag on a service quote");
     await Q.update(SVC, { boxSale: true });
     ok(!("boxSale" in (await Q.get(SVC))!), "box sale store (DB): update drops it on a service quote too");
+    const POR = fixtureId(FIX, "portal");
+    await Q.create({ ...base, id: POR, name: "Portal", quoteType: "system", source: "portal-catalog", boxSale: true } as never);
+    registerFixture("quotes", POR);
+    ok(!("boxSale" in (await Q.get(POR))!), "box sale store (DB): create drops the flag on a portal-catalog quote");
+    await Q.update(POR, { boxSale: true });
+    ok(!("boxSale" in (await Q.get(POR))!), "box sale store (DB): update drops it on a portal quote too");
   } finally {
     await dropFixtures(FIX);
   }
@@ -243,7 +252,7 @@ function buildUiChecks(ok: Ok) {
     "box sale build (source): Build shows the labor banner and tells each card it is a box sale");
   ok(rd("src/app/(app)/estimator/header-more-menu.tsx").includes("{s.aiSource && !s.boxSale && ("), "box sale build (source): More ▾ hides Draft from survey/inspection");
   const us = rd("src/app/(app)/estimator/use-estimator-state.ts");
-  ok(us.includes("const [boxSale, setBoxSale] = useState(initial.boxSale);") && us.includes("const canBoxSale = isBoxSaleQuoteType(initial.quoteType);") &&
+  ok(us.includes("const [boxSale, setBoxSale] = useState(initial.boxSale);") && us.includes("const canBoxSale = isBoxSaleQuoteType(initial.quoteType) && isBoxSaleSource(initial.bonusSource);") &&
      us.includes("const boxSaleLabor = useMemo(() => (boxSale ? boxSaleLaborSystems(sections) : []), [boxSale, sections]);") && /\n    boxSale,\n    boxSaleLabor,\n    canBoxSale,\n    setBoxSale,\n/.test(us),
     "box sale build (source): the hook holds the flag and the systems with labor, and returns them");
   const saveNow = us.slice(us.indexOf("const saveNow = async (): Promise<number | false> => {"), us.indexOf("const doSave = () => {"));
@@ -347,7 +356,7 @@ function sendPackageChecks(ok: Ok) {
   ok(rd("src/app/(app)/estimator/send-actions.ts").includes("      boxSale: boxSaleOf(q),\n") && rd("src/app/(app)/estimator/bid-send-actions.ts").includes("senderName: user.name, signature, boxSale: boxSaleOf(q) }),"),
     "box sale send (source): both email defaults read the saved estimate's flag");
   const pkgPage = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
-  ok(pkgPage.includes("const box = revisionBoxSale(hit.rev);") && pkgPage.includes("const cut = box ? null : await onlineCutSheets(hit.q, hit.rev);") && pkgPage.includes("buildPackageSlots(box ? boxSaleExtras(extras) : extras, {"),
+  ok(pkgPage.includes("const box = revisionBoxSale(hit.rev);") && pkgPage.includes("const cut = await onlineCutSheets(hit.q, hit.rev);") && pkgPage.includes("buildPackageSlots(box ? boxSaleExtras(extras) : extras, {"),
     "box sale package page (source): the client link drops cut sheets, datasheet links, downloads and plans — from the revision's frozen flag");
   const live = rd("src/lib/estimate-output/package-live-loader.ts");
   ok(rd("src/lib/estimate-output/package-loader.ts").includes("boxSale: revisionBoxSale(hit.rev),") && live.includes("boxSale: boxSaleOf(q),") && live.includes("boxSaleOf(q) ? staffPackageExtras(null, false, [], q.id) : liveExtras(q),"),
@@ -375,6 +384,111 @@ function intakeChecks(ok: Ok) {
   ok(rd("src/app/(app)/estimator/page.tsx").includes("if (!q && handoff?.boxSale) initial.boxSale = true;"), "box sale intake (source): a new estimate opened with ?box=1 starts with the switch on");
 }
 
+
+/** Final review (I1–I4 + minors) — behavioural where the code takes injected deps. */
+async function finalReviewChecks(ok: Ok) {
+  const SAM = { id: "u1", name: "Sam Mills", roles: ["Admin"] };
+  const NOW = Date.UTC(2026, 9, 21, 18, 0, 0);
+  const mk = (extra: Record<string, unknown> = {}) => quoteFixture({
+    id: "Q-fr", name: "Gym", status: "draft", updatedAt: 77, estNo: 1042,
+    pdf: { status: "ready", at: 20, savedAt: 20, blobPath: "quote-pdfs/Q-fr/cur.pdf" }, contentChangedAt: 10, revisions: [], ...extra,
+  } as never);
+  const fakes = (quote: Quote) => {
+    const calls: string[] = [];
+    const st = { q: quote, threads: [] as Array<{ attachments: Array<{ name: string }> }>, drafts: [] as Array<{ attachments: Array<{ name: string }> }> };
+    const deps: EstimateEmailDeps = {
+      now: () => NOW,
+      getQuote: async (id) => (id === st.q.id ? st.q : null),
+      readPdf: async (path) => { calls.push("readPdf:" + path); return Buffer.from("%PDF-estimate"); },
+      renderCoverPdf: async () => { calls.push("renderCoverPdf"); return Buffer.from("%PDF-cover"); },
+      storeCover: async (id, _b, now) => { calls.push("storeCover"); return `quote-pdfs/${id}/cover-${now}.pdf`; },
+      findInboxDraft: async () => { calls.push("findInboxDraft"); return null; },
+      claimSend: async (_id, by, now) => { calls.push("claimSend"); return { ok: true, claim: { by, until: now + 120_000 } }; },
+      releaseSend: async () => { calls.push("releaseSend"); },
+      applySignature: async (body) => { calls.push("applySignature"); return body; },
+      sendQuote: async (_id, actor) => {
+        calls.push("sendQuote");
+        st.q = { ...st.q, status: "sent", revisions: [{ rev: 1, at: NOW, by: actor.name, reason: "sent", pdfBlobPath: "quote-pdfs/Q-fr/rev-1.pdf" }] } as never;
+        return { ok: true };
+      },
+      ensureLink: async () => { calls.push("ensureLink"); return "https://app.test/share/x"; },
+      createAndSendThread: async (spec) => { calls.push("createAndSendThread"); st.threads.push(spec as never); return { threadId: "C-1", delivery: "local" as const }; },
+      createDraftThread: async (spec) => { calls.push("createDraftThread"); st.drafts.push(spec as never); return { threadId: "C-2" }; },
+      recordEmail: async () => { calls.push("recordEmail"); return true; },
+      addFollowUpTask: async () => { calls.push("addFollowUpTask"); },
+      roster: async () => [{ id: "u1", name: "Sam Mills", status: "active" }],
+    };
+    return { deps, calls, st };
+  };
+  const input = (o: Record<string, unknown> = {}) => ({ to: "pat@school.org", cc: "", subject: "S", body: "B {link}", attachEstimate: true, attachCover: false, followUpDays: 0, asOf: 77, ...o });
+  const laborSecs = { sections: [sys("s1", "Rigging", [line(1)]), sys("s2", "Install", [line(2, { labor: true })])], mobs: [], document: DOC };
+
+  // I1a: a box sale with labor is never sent (send and Open in Inbox), before any claim / render / Gmail work.
+  {
+    const f = fakes(mk({ boxSale: true, spec: laborSecs }));
+    const r = await sendEstimateEmail(f.deps, SAM, "Q-fr", input());
+    ok(!r.ok && r.error === BOX_SALE_LABOR_MESSAGE && f.calls.length === 0 && f.st.q.status === "draft", "box sale final I1a: Send refuses a box sale with labor with the shared sentence — no claim, render, mark or Gmail work");
+    const g = fakes(mk({ boxSale: true, spec: laborSecs }));
+    const ri = await openEstimateInInbox(g.deps, SAM, "Q-fr", input());
+    ok(!ri.ok && ri.error === BOX_SALE_LABOR_MESSAGE && g.calls.length === 0, "box sale final I1a: Open in Inbox refuses it too");
+    const h = fakes(mk({ boxSale: true }));
+    const rh = await sendEstimateEmail(h.deps, SAM, "Q-fr", input());
+    ok(rh.ok && h.calls.includes("claimSend") && h.calls.includes("createAndSendThread"), "box sale final I1a: the same box sale without labor sends");
+    const n = fakes(mk({ spec: laborSecs }));
+    const rn = await sendEstimateEmail(n.deps, SAM, "Q-fr", input());
+    ok(rn.ok, "box sale final I1a: a normal estimate with labor is untouched");
+  }
+  // I4: a box sale always attaches the estimate PDF, whatever is posted.
+  {
+    const f = fakes(mk({ boxSale: true }));
+    const r = await sendEstimateEmail(f.deps, SAM, "Q-fr", input({ attachEstimate: false, attachCover: true }));
+    const names = f.st.threads[0]?.attachments.map((a) => a.name) ?? [];
+    ok(r.ok && names.length === 1 && names[0] === "EST-1042.pdf" && !f.calls.includes("renderCoverPdf"), "box sale final I4: attachEstimate false still attaches the estimate PDF (and never the cover)");
+    const g = fakes(mk({ boxSale: true }));
+    const ri = await openEstimateInInbox(g.deps, SAM, "Q-fr", input({ attachEstimate: false }));
+    ok(ri.ok && (g.st.drafts[0]?.attachments.length ?? 0) === 1, "box sale final I4: Open in Inbox attaches it too");
+    const n = fakes(mk());
+    const rn = await sendEstimateEmail(n.deps, SAM, "Q-fr", input({ attachEstimate: false }));
+    ok(rn.ok && (n.st.threads[0]?.attachments.length ?? 1) === 0, "box sale final I4: a normal estimate still honours an unticked Estimate PDF");
+  }
+  const comp = rd("src/app/(app)/estimator/steps/send-composer.tsx");
+  ok(/checked=\{boxSale \|\| fields\.attachEstimate\} disabled=\{disabled \|\| boxSale\}/.test(comp) && comp.includes("The quote PDF is always attached."), "box sale final I4 (source): the composer's Estimate PDF tick is checked and disabled on a box sale, with the line");
+  ok(rd("src/lib/estimate-email/send-server.ts").includes("boxSaleSaveProblem(boxSaleOf(q), (q.spec as { sections?: SpecSection[] } | null | undefined)?.sections)"), "box sale final I1a (source): preflight carries the labor refusal");
+
+  // I1b: Move/Copy into an EXISTING box-sale estimate refuses labor.
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  ok(/if \(boxSaleOf\(existing\)\) \{\s*const problem = boxSaleSaveProblem\(true, \[placed\]\);\s*if \(problem\) return \{ ok: false, error: problem \};/.test(act), "box sale final I1b (source): placeSystemInEstimate refuses a labor system into an existing box sale before the update");
+  ok((act.match(/refusedSave\(/g) || []).length >= 3 && !act.includes("error: boxProblem,"), "box sale final minor (source): the save refusal shape is one helper");
+
+  // I2: the online cut sheets follow the frozen flag.
+  {
+    const q = mk({ boxSale: true, pdfOptions: { detail: "sectioned", pdfCutSheets: true } });
+    const box = { rev: 1, at: 10, docFields: { boxSale: true, pdfOptions: { detail: "sectioned", pdfCutSheets: true } } } as unknown as QuoteRevision;
+    ok((await onlineCutSheets(q, box)) === null, "box sale final I2: onlineCutSheets is null for a box-sale revision, even with Cut sheets asked for");
+  }
+  const pkgPage = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
+  ok(pkgPage.includes("const cut = await onlineCutSheets(hit.q, hit.rev);") && rd("src/lib/curtain-cut-sheets/online.ts").includes("if (revisionBoxSale(rev)) return null;"), "box sale final I2 (source): the gate lives in onlineCutSheets; the package page no longer repeats it");
+
+  // I3: the hub menu entry.
+  const ctl = rd("src/app/(app)/quotes/controls.tsx");
+  ok(/System \/ equipment quote[\s\S]{0,400}<\/Link>\s*<Link\s+href="\/quotes\/new\?type=box_sale"/.test(ctl) && ctl.includes("{BOX_SALE_COPY.label}") && ctl.includes("{BOX_SALE_COPY.cardSub}"), "box sale final I3 (source): + New quote's menu lists Box goods sale right after System / equipment quote");
+
+  // Minor: the Change type hint.
+  ok(boxSwitchHint("box_sale", "system") === "Use the Box goods sale switch in the Estimator's Quote details." && boxSwitchHint("system", "box_sale") === boxSwitchHint("box_sale", "system") &&
+     boxSwitchHint("system", "system") === null && boxSwitchHint("box_sale", "box_sale") === null && boxSwitchHint("flame_test", "system") === null && boxSwitchHint("box_sale", "flame_test") === null,
+    "box sale final minor: Change type between System and Box goods sale hints at the Estimator's switch");
+  ok(rd("src/app/(app)/quotes/new/intake-form.tsx").includes("boxSwitchHint("), "box sale final minor (source): the intake shows the hint");
+
+  // Minor: portal-sourced quotes can't be box sales.
+  ok(isBoxSaleSource(undefined) && isBoxSaleSource(null) && isBoxSaleSource("estimator") && !isBoxSaleSource("portal-catalog") && !isBoxSaleSource("portal-service"), "box sale final minor: only an Estimator-source quote can be a box sale");
+  ok(!boxSaleOf({ boxSale: true, source: "portal-catalog" }) && boxSaleOf({ boxSale: true, source: "estimator" }) && !boxSaleForSave({ source: "portal-catalog" }, true) && boxSaleForSave({ source: "estimator" }, true),
+    "box sale final minor: boxSaleOf / boxSaleForSave drop the flag on a portal-catalog quote");
+  ok(!("boxSale" in buildQuote("Q-x", { boxSale: true, source: "portal-catalog" }, "system", null, 1)) && buildQuote("Q-x", { boxSale: true, source: "estimator" }, "system", null, 1).boxSale === true,
+    "box sale final minor: buildQuote drops the flag for a portal source");
+  ok(rd("src/lib/stores/quotes.ts").includes("isBoxSaleSource(clean.source ?? q.source)"), "box sale final minor (source): update() drops the flag for a portal source");
+  ok(/const canBoxSale = isBoxSaleQuoteType\(initial\.quoteType\) && isBoxSaleSource\(initial\.bonusSource\);/.test(rd("src/app/(app)/estimator/use-estimator-state.ts")), "box sale final minor (source): the switch is offered on Estimator-source quotes only");
+}
+
 // (later tasks: check functions above this line)
 
 export async function boxSalePureChecks(ok: Ok) {
@@ -386,6 +500,7 @@ export async function boxSalePureChecks(ok: Ok) {
   packageReviewChecks(ok);
   sendPackageChecks(ok);
   intakeChecks(ok);
+  await finalReviewChecks(ok);
   // (later tasks: pure checks above this line)
 }
 
