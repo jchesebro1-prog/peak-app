@@ -52,8 +52,9 @@ import { fillEmptyKeyProductText, isKeyProductEligible, isLineToken, keyProductS
 import { loadNotice, placeLoadedSection, type LoadedLibrarySystem } from "@/lib/narrative/system-library";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
-import { PARTS_CSV_HEADER, partsListCsvRows, partsListRows, partsListSkus, type PartInfo } from "./parts-csv";
-import { downloadCsv, fileStem } from "../design/export";
+import { partsListSkus, reviewSheetModel, type PartInfo } from "./parts-csv";
+import { downloadReviewSheet } from "./review-sheet-xlsx";
+import { fileStem } from "../design/export";
 import { curtainTrackDraft, curtainTrackPrefill, followCurtainPrefill, freshTrackDraft, replaceTrackLine, trackConfigFromDraft, trackDraftFromConfig, trackLine, type CurtainTrackPrefill } from "./track-bom";
 import { customDraftFromLine, isCustomLineEditable, costUntouched, saveCustomEdit, sellUntouched } from "./custom-part-edit";
 import { applyCurtainEdit, curtainDraftFromLine, curtainDraftValid, curtainItem } from "./curtain-line";
@@ -2316,10 +2317,13 @@ export function useEstimatorState(props: EstimatorProps) {
     return { fromCatalog, custom: next.length - fromCatalog };
   };
 
-  const [partsBusy, setPartsBusy] = useState(false);
-  const exportPartsList = async () => {
-    if (partsBusy) return;
-    setPartsBusy(true);
+  /* #363: More ▾ → Review spreadsheet (was Parts list (CSV), #262) — the
+     parts list as an .xlsx with links, markup formulas and per-system cost /
+     markup / fees subtotals; exceljs loads on demand inside downloadReviewSheet. */
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const exportReviewSheet = async () => {
+    if (reviewBusy) return;
+    setReviewBusy(true);
     try {
       const skus = partsListSkus(sections);
       const resolved = skus.length ? await resolveCatalogSkusAction(skus) : {};
@@ -2332,20 +2336,20 @@ export function useEstimatorState(props: EstimatorProps) {
           manufacturerModelNumber: r.manufacturerModelNumber,
         };
       }
-      const rows = partsListRows(sections, vendorQuotes, info, venueRoomName);
-      if (!rows.length) {
+      const blocks = reviewSheetModel(sections, vendorQuotes, info, venueRoomName);
+      if (!blocks.length) {
         setActionError(null);
         setGateRefused(false);
         setActionNotice("No parts to export yet.");
         return;
       }
       const name = loadedId ? quoteId : projectName || quoteId;
-      downloadCsv(`${fileStem(name, "estimate")}-parts-list`, PARTS_CSV_HEADER, partsListCsvRows(rows));
+      await downloadReviewSheet(fileStem(name, "estimate"), blocks);
     } catch {
-      setActionError("Couldn't build the parts list — try again.");
+      setActionError("Couldn't build the review spreadsheet — try again.");
       setGateRefused(false);
     } finally {
-      setPartsBusy(false);
+      setReviewBusy(false);
     }
   };
 
@@ -3524,7 +3528,7 @@ export function useEstimatorState(props: EstimatorProps) {
     deleteSystem,
     detail,
     doSave,
-    exportPartsList,
+    exportReviewSheet,
     fabrics,
     fixtureAssemblies,
     fixtureDraft,
@@ -3581,7 +3585,7 @@ export function useEstimatorState(props: EstimatorProps) {
     vendorPdf,
     readVendorPdf,
     ownerValue,
-    partsBusy,
+    reviewBusy,
     paymentTerms,
     pdf,
     pdfCover,

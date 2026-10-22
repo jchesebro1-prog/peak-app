@@ -44,9 +44,9 @@ export function HeaderMoreMenu({ s, onStep }: { s: EstimatorState; onStep: (to: 
               Draft from survey/inspection
             </button>
           )}
-          <button type="button" role="menuitem" style={{ ...item, ...(s.partsBusy ? { opacity: 0.6, cursor: "not-allowed" } : {}) }} disabled={s.partsBusy} onClick={() => { setOpen(false); s.exportPartsList(); }}
-            title="Model numbers, descriptions and cost for every part — assemblies broken into their parts. For purchasing.">
-            Parts list (CSV)
+          <button type="button" role="menuitem" style={{ ...item, ...(s.reviewBusy ? { opacity: 0.6, cursor: "not-allowed" } : {}) }} disabled={s.reviewBusy} onClick={() => { setOpen(false); void s.exportReviewSheet(); }}
+            title="Every part with cost, sell, margin, markup and links — assemblies broken into their parts, with cost / markup / fees subtotals per system.">
+            Review spreadsheet
           </button>
           {s.loadedId && (
             <button type="button" role="menuitem" style={item} onClick={() => { setOpen(false); void s.openCutSheets(); }}>
