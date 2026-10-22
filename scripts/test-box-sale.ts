@@ -281,6 +281,11 @@ function packageReviewChecks(ok: Ok) {
   ok(tabsSrc.includes("const tabs = reviewTabsFor(s.boxSale);") && tabsSrc.includes('const tab: ReviewTab = tabs.includes(picked) ? picked : "document";') && tabsSrc.includes("{tabs.map((t) => (") && tabsSrc.includes("nextReviewTab(tab, e.key, tabs)"),
     "box sale review (source): the review tabs follow reviewTabsFor; a hidden tab reads as Document");
   ok(rd("src/app/(app)/estimator/steps/review-sidebar.tsx").includes("{!s.boxSale && <PackageChecklist saved={!!loadedId} docs={docs} packageBadge={packageBadge} />}"), "box sale review (source): the sidebar's package checklist is hidden");
+  const reviewSrc = rd("src/app/(app)/estimator/steps/review-step.tsx");
+  ok(/\{!s\.boxSale && \(\s*<CoverPackagePanel/.test(reviewSrc) && reviewSrc.split("<CoverPackagePanel").length === 2,
+    "box sale review (source): the Cover PDF / package panel is not rendered for a box sale");
+  ok(reviewSrc.includes("<ClientLinkPanel quoteId={loadedId} withPackage={!s.boxSale} />") && reviewSrc.split("<ClientLinkPanel").length === 2,
+    "box sale review (source): the client link stays but its package section is off for a box sale");
   const client = rd("src/app/(app)/estimator/estimator-client.tsx");
   ok(client.includes("        boxSale: s.boxSale,\n") && client.includes("s.trackSummary, s.boxSale]"), "box sale readiness (source): the step badges read the live flag");
   ok(rd("src/lib/estimate-output/package-panel-server.ts").includes("gaps: boxSaleOf(q) ? [] : packageGapChips({"), "box sale readiness (source): the package panel shows no gap chips for a box sale");
@@ -290,6 +295,12 @@ function sendPackageChecks(ok: Ok) {
   const start = composerInitial(null, null);
   ok(start.attachCover === true && withoutCoverForBoxSale(start, true).attachCover === false && withoutCoverForBoxSale(start, true).attachEstimate === true && withoutCoverForBoxSale(start, false) === start,
     "box sale send: the composer starts with the Estimate PDF ticked and the Cover PDF off");
+  const noEst = { estimatePdf: false, coverPdf: true, drawings: true, excludedDatasheets: [] as string[] };
+  const unticked = composerInitial(null, noEst);
+  ok(unticked.attachEstimate === false && withoutCoverForBoxSale(unticked, false).attachEstimate === false && withoutCoverForBoxSale(unticked, false).attachCover === true,
+    "box sale send: a normal estimate starts with the package selection's Estimate PDF choice");
+  ok(withoutCoverForBoxSale(unticked, true).attachEstimate === true && withoutCoverForBoxSale(unticked, true).attachCover === false,
+    "box sale send: an earlier unticked Estimate PDF is forced back on (the Client package tab is hidden); Cover PDF off");
   const mail = { projectName: "Gym", estimateNumber: "EST-1042", contactName: "Pat Lee", contactEmail: "pat@school.org", senderName: "Sam Mills", senderEmail: "sam@peak.com", leadName: "", leadEmail: "" };
   ok(estimateEmailDefaults({ ...mail, boxSale: true }).body === "Hi Pat,\n\nAttached is our quote for Gym (EST-1042).\n\nYou can also view it online here: {link}\n\nLet me know if you have any questions.\n\nThanks,\nSam Mills",
     "box sale send: the email says \"Attached is our quote … You can also view it online here: {link}\" — no full package, no alternates");

@@ -87,9 +87,10 @@ export function composerInitial(d: Partial<EstimateEmailDefaults> | null | undef
   };
 }
 
-/** Box goods sale (spec 2026-10-21): no Cover PDF — the composer starts (and stays) without it. Same object when off. */
+/** Box goods sale (spec 2026-10-21): no Cover PDF, and the Estimate PDF always attached — the Client package tab
+ * where that default is chosen is hidden, so an earlier untick must not leave nothing attached. Same object when off. */
 export function withoutCoverForBoxSale(f: ComposerFields, boxSale: boolean): ComposerFields {
-  return boxSale ? { ...f, attachCover: false } : f;
+  return boxSale ? { ...f, attachEstimate: true, attachCover: false } : f;
 }
 
 /** The primary button's label: the first send also marks the quote sent. */

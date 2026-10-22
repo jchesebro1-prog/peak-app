@@ -54613,7 +54613,7 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   ok(modalMounts.length === 1 && modalMounts[0] === "steps/build-step.tsx", "#305 header: AiScopeModal is mounted only in steps/build-step.tsx");
   const rv = readFileSync(join(process.cwd(), EST_DIR, "steps/review-step.tsx"), "utf8");
   const phoneBranch = rv.slice(rv.lastIndexOf("{phone && ("));
-  ok(phoneBranch.includes("<ClientLinkPanel quoteId={loadedId} />") && phoneBranch.includes("<CoverPackagePanel"), "#305 review: the phone's bottom block mounts the cover panel and the Client link panel");
+  ok(phoneBranch.includes("<ClientLinkPanel quoteId={loadedId} withPackage={!s.boxSale} />") && phoneBranch.includes("<CoverPackagePanel"), "#305 review: the phone's bottom block mounts the cover panel and the Client link panel");
   ok(ESTIMATOR_FILES.every((f) => existsSync(join(process.cwd(), EST_DIR, f))) && PREVIEW_FILES.every((f) => existsSync(join(process.cwd(), EST_DIR, f))),
     "#305 harness: every joined Estimator file exists (a rename can't turn the joined-source pins vacuous)");
 }
