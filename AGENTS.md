@@ -1613,5 +1613,18 @@ See `.env.example`.
     `QUOTE_PDF_ORIGIN` in production, a real estimate with drawings and datasheets on
     production, and a long cover note. Punch item #358.
 
+66. ✅ **Box goods sale** (#362, D1247–D1248) — an Estimator system estimate can be a box goods
+    sale (equipment + freight only): `Quote.boxSale` (absent = false; true on system estimates only),
+    set from + New quote → Box goods sale (`?box=1`) or the Quote details switch, shown as a header
+    chip. Pure rules in `src/lib/estimate-box-sale/rules.ts`. Content and frozen in revision
+    docFields; `quoteDocumentDataFor` returns `bomViewProps` for it (one seam), the print route prints
+    #360's BOM layout with no cut sheets / links / drawings, the Cover PDF 404s and is never attached,
+    and the client package page is the itemized list only (zip / datasheet book 404). Build hides the
+    narrative and labor controls and adds systems Itemized; Build package is BOM quote only; Customer
+    review is Document + BOM; readiness is quiet; the email says "Attached is our quote … You can also
+    view it online here: {link}" (subject "quote" too). A save with any labor line is refused (server
+    and browser). Nothing narrative is deleted — switching off restores it. No migration. Remaining is
+    Jeff-gated: one real box-sale estimate sent to himself on production. Punch item #362.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

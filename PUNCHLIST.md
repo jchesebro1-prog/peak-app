@@ -12776,3 +12776,16 @@ Jeff: the Parts list (CSV) should show item name, description, cost, sell margin
 **Remaining (Jeff-gated):**
 - Open one real estimate's CSV in Excel and check the labels and margins.
 - Download one BOM PDF on production (needs `QUOTE_PDF_ORIGIN`, like every estimate PDF).
+
+## 362. Box goods sale — BOM-only estimates — DONE 2026-10-21 on `feat/box-goods-sale` (D1247–D1248)
+
+Jeff: some estimates are box goods sales (equipment + freight, no install); the customer gets the itemized BOM. Spec `docs/superpowers/specs/2026-10-21-box-goods-sale-design.md`; plan `docs/superpowers/plans/2026-10-21-box-goods-sale.md`.
+
+**Built:** + New quote → Box goods sale card and a Quote details switch (system estimates only) with a header chip. A box sale's estimate PDF is the BOM quote PDF's layout (no title page, cut sheets, datasheet links or drawings), there is no Cover PDF, the email (body and subject) says "quote" with "Attached is our quote … You can also view it online here: {link}", and the client link opens the itemized list only (no toggle, summary, goals, Not included, plans, downloads or datasheet links; options, alternates, questions and Accept still work). The Estimator hides the narrative/labor controls, adds systems Itemized, shows Build package → BOM quote only and Customer review → Document + BOM (no Cover PDF panel or package controls). A save with any labor line is refused with "A box goods sale can't include labor — remove the labor lines or turn off Box goods sale." Turning it off brings everything back; nothing is deleted.
+
+**Gates:** tsc 0 errors (`.next` deleted first); test:specs 25,123 PASS / 0 FAIL (includes the `box sale` harness block); test:smoke 268 PASS / 0 FAIL (`.next` deleted, run alone); eslint 0 problems on the changed src files (`scripts/test-review-and-spec.ts` excluded, #357); next build passes (exit 0, `.next` deleted). Chrome PDF render: run by the controller, not recorded here.
+
+**Rollback:** safe. One optional JSON key (`boxSale`) on quotes and on new revisions' docFields. A build without this feature ignores it and prints those estimates as normal estimates — their narrative fields were never deleted.
+
+**Remaining (Jeff-gated):**
+- On production after merge: make one real box goods sale estimate (+ New quote → Box goods sale), add equipment and freight, send it to yourself, and check the PDF (one BOM page, no cover), the email wording and the client link (itemized list only).
