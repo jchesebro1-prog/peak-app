@@ -12789,3 +12789,16 @@ Jeff, 2026-10-22: the parts list should include the link when a part is custom s
 
 **Remaining (Jeff-gated):**
 - Download one real estimate's Review spreadsheet and open it in Excel: click a custom part's link, check Markup on a few lines, and check that System cost + System markup + System fees matches the system's price on Build (a system with labor lines reads short by the labor's sell, since labor isn't listed).
+
+## 364. Show on BOM switches — DONE 2026-10-22 on `feat/364-bom-show-switches` (D1260–D1262)
+
+Jeff, 2026-10-22: on the Estimator's BOM export, it should be possible to choose whether freight, materials and labor costs show, or just a system total price, and each piece is chosen while building the estimate. It applies to the BOM tab, the BOM PDF, the saved preview's BOM tab and the client's online BOM view.
+
+**Built:** Build package → BOM quote gains a **Show on BOM** row with four switches: Line prices · Materials · Labor · Freight. All four are on by default, which prints today's BOM byte-for-byte. They are saved in the quote's `pdfOptions` (`bomLinePrices` / `bomMaterials` / `bomLabor` / `bomFreight`) and applied only by `bomViewProps`, so the live tab, the BOM PDF, `/estimator-preview/[id]?tab=bom` and the portal / share online BOM all follow them. System prices, group / alternate subtotals, tax, the Rewards credit and the Total always show. Line prices yields to Client package → Line detail → Prices: it is disabled while Prices is off. The estimate PDF, the Cover PDF, bidder PDFs and the package page are unchanged.
+
+**Gates:** tsc 0 errors; test:specs 25,038 PASS / 0 FAIL (22 new `#364` checks, plus the `#251` source pins widened for the new flags); test:smoke 268 PASS / 0 FAIL; eslint 0 problems on the 6 changed src files + the 2 new scripts (`scripts/test-review-and-spec.ts` excluded as before); `next build` compiled, 144/144 static pages.
+
+**Rollback:** safe. No migration. The keys are additive inside `pdfOptions`, and an older build ignores them, so the BOM then shows everything.
+
+**Remaining (Jeff-gated):**
+- Flip each switch on a real estimate, Save, and check the BOM PDF and the client link's BOM view on production.

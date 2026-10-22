@@ -52,7 +52,20 @@ const actionLink: CSSProperties = {
   border: "none",
 };
 
-export type PdfToggle = "pdfQty" | "pdfNotes" | "pdfPrices" | "pdfCover" | "pdfTerms" | "pdfOptions" | "pdfItemizedAppendix" | "pdfCutSheets";
+export type PdfToggle =
+  | "pdfQty"
+  | "pdfNotes"
+  | "pdfPrices"
+  | "pdfCover"
+  | "pdfTerms"
+  | "pdfOptions"
+  | "pdfItemizedAppendix"
+  | "pdfCutSheets"
+  // #364 — Build package → BOM quote → Show on BOM (the BOM view only).
+  | "bomLinePrices"
+  | "bomMaterials"
+  | "bomLabor"
+  | "bomFreight";
 
 /** #333 — the Client package tab's "Estimate PDF — line detail" group (the old
  *  Show-on-PDF block minus the per-system presentation list, the Itemized

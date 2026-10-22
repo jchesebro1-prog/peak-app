@@ -519,6 +519,11 @@ export function useEstimatorState(props: EstimatorProps) {
   const [pdfItemizedAppendix, setPdfItemizedAppendix] = useState(initial.pdfOptions.pdfItemizedAppendix);
   const [pdfCutSheets, setPdfCutSheets] = useState(initial.pdfOptions.pdfCutSheets);
   const [detail, setDetail] = useState<"itemized" | "sectioned">(initial.pdfOptions.detail);
+  // #364 — Build package → BOM quote → Show on BOM (the BOM view only).
+  const [bomLinePrices, setBomLinePrices] = useState(initial.pdfOptions.bomLinePrices);
+  const [bomMaterials, setBomMaterials] = useState(initial.pdfOptions.bomMaterials);
+  const [bomLabor, setBomLabor] = useState(initial.pdfOptions.bomLabor);
+  const [bomFreight, setBomFreight] = useState(initial.pdfOptions.bomFreight);
   /** #305 — one Show-on-PDF toggle (#333: Build package → Client package). */
   const togglePdf = (flag: PdfToggle) => {
     if (flag === "pdfQty") setPdfQty((v) => !v);
@@ -528,12 +533,16 @@ export function useEstimatorState(props: EstimatorProps) {
     else if (flag === "pdfOptions") setPdfOptions((v) => !v);
     else if (flag === "pdfItemizedAppendix") setPdfItemizedAppendix((v) => !v);
     else if (flag === "pdfCutSheets") setPdfCutSheets((v) => !v);
+    else if (flag === "bomLinePrices") setBomLinePrices((v) => !v);
+    else if (flag === "bomMaterials") setBomMaterials((v) => !v);
+    else if (flag === "bomLabor") setBomLabor((v) => !v);
+    else if (flag === "bomFreight") setBomFreight((v) => !v);
     else setPdfTerms((v) => !v);
   };
   /** #222 — the Show-on-PDF choices, saved with the quote (Quote.pdfOptions). */
   const pdfOpts = useMemo<QuotePdfOptions>(
-    () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets }),
-    [detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets]
+    () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets, bomLinePrices, bomMaterials, bomLabor, bomFreight }),
+    [detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets, bomLinePrices, bomMaterials, bomLabor, bomFreight]
   );
   /** #292 — how many cut sheets the saved PDF would append (client-safe count; never collect.ts). */
   const cutSheetCount = useMemo(() => countCutSheetTypes({ sections }, fabrics.map((f) => ({ sku: f.sku, desc: f.name })), trackSeries), [sections, fabrics, trackSeries]);

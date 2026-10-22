@@ -19,10 +19,26 @@ export const BOM_TAB_COPY = {
   saveToCreate: "Save to create the PDF.",
   pricesHidden: "Prices are hidden on client documents (Client package → Line detail).",
   empty: "Add a system on Build to see the BOM.",
+  // #364 — Show on BOM.
+  showOnBom: "Show on BOM",
+  showOnBomHint: "System prices, tax and the Total always show.",
 } as const;
+
+/** #364 — the four saved Show on BOM switches (pdfOptions.bom*), in order. */
+export const BOM_SHOW_SWITCHES = [
+  { flag: "bomLinePrices", label: "Line prices" },
+  { flag: "bomMaterials", label: "Materials" },
+  { flag: "bomLabor", label: "Labor" },
+  { flag: "bomFreight", label: "Freight" },
+] as const;
 
 const STRIP: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 14px", fontSize: 12, color: "#5b616e", lineHeight: 1.45, marginBottom: 12 };
 const LINK: CSSProperties = { color: "var(--accent)", fontWeight: 600, textDecoration: "none" };
+// #364: the Show on BOM switches — preview-doc.tsx's segmented ✓ toggles.
+const SEG_WRAP: CSSProperties = { display: "inline-flex", flexWrap: "wrap", gap: 2, background: "#f1f2f5", borderRadius: 7, padding: 2 };
+const SEG: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12, padding: "5px 13px", borderRadius: 5, border: "none", cursor: "pointer" };
+const SEG_ON: CSSProperties = { ...SEG, fontWeight: 600, background: "#fff", color: "#16181d", boxShadow: "0 1px 2px rgba(0,0,0,.1)" };
+const SEG_OFF: CSSProperties = { ...SEG, fontWeight: 500, background: "transparent", color: "#9aa0ab" };
 
 /**
  * #333 (spec §4.3, D-TBD-c) — Build package → BOM quote: the itemized, priced
@@ -72,6 +88,7 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
     purchasePerksDocLine,
     loadedId,
     pdfDirty,
+    togglePdf,
   } = s;
   const portal = initial.portal;
   // #333 review (K): the input is a cheap memo; the props (and the document)
@@ -139,6 +156,31 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
             </span>
           )}
           {!pdfOpts.pdfPrices && <span style={{ flexBasis: "100%", color: "#8a6d1f" }}>{BOM_TAB_COPY.pricesHidden}</span>}
+          {/* #364 — Show on BOM: saved with the quote (pdfOptions), applied by bomViewProps to this tab, the BOM PDF,
+              the saved preview's BOM and the client's online BOM. Line prices yields to the quote-wide Prices. */}
+          <span role="group" aria-label={BOM_TAB_COPY.showOnBom} style={{ flexBasis: "100%", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 10px" }}>
+            <strong style={{ color: "#16181d" }}>{BOM_TAB_COPY.showOnBom}</strong>
+            <span style={SEG_WRAP}>
+              {BOM_SHOW_SWITCHES.map(({ flag, label }) => {
+                const locked = flag === "bomLinePrices" && !pdfOpts.pdfPrices;
+                const on = pdfOpts[flag] && !locked;
+                return (
+                  <button
+                    key={flag}
+                    type="button"
+                    onClick={() => togglePdf(flag)}
+                    disabled={locked}
+                    title={locked ? BOM_TAB_COPY.pricesHidden : undefined}
+                    aria-pressed={on}
+                    style={{ ...(on ? SEG_ON : SEG_OFF), ...(locked ? { cursor: "not-allowed", opacity: 0.6 } : {}) }}
+                  >
+                    {(on ? "✓ " : "") + label}
+                  </button>
+                );
+              })}
+            </span>
+            <span style={{ color: "#8c919c" }}>{BOM_TAB_COPY.showOnBomHint}</span>
+          </span>
         </div>
         <details open style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: "10px 14px", marginBottom: 12 }}>
           <summary style={{ cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: "#16181d" }}>
