@@ -6,8 +6,8 @@ import { presentationForNewSystem } from "@/lib/estimate-output/fields";
  * Box goods sale (spec docs/superpowers/specs/2026-10-21-box-goods-sale-design.md): an Estimator system estimate
  * that sells equipment + freight only. The customer gets the itemized BOM — the estimate PDF is the BOM view and the
  * client link opens the itemized list. `Quote.boxSale` is the one stored flag (absent = false). Nothing narrative is
- * ever deleted, so turning it off brings everything back. Pure and client-safe: type-only imports plus the
- * import-free bonus flags.
+ * ever deleted, so turning it off brings everything back. Pure and client-safe: type-only imports, the import-free
+ * bonus flags and `presentationForNewSystem` (estimate-output/fields.ts, itself type-only).
  */
 
 /** The server's save refusal, the browser's own refusal and the Build banner's first sentence — verbatim (spec). */
