@@ -792,3 +792,13 @@ whose `weight_lb` matters most), ④ dimming/power (Sensor, ThruPower,
 Echo). Audio/video wait for their turn (D113: ETC lighting + rigging
 first). A part is **Grid-ready** when `symbol` is set; **submittal-ready**
 when `datasheet_url` is too.
+
+## 11. ETC dealer prices (#368, D1286–D1291)
+
+1. In MyETC, a business-account admin creates an API key and copies its secret.
+2. In Quartzite: **Catalog → Import price book → Connect a manufacturer**. Paste the secret, **Save**. It tests itself; pick Peak's ETC account if asked.
+3. **Pull prices.** Read the preview: the "new" count should be ETC parts Peak doesn't stock yet, not copies of ones it does. Spot-check a few changes against the MyETC Price List page.
+4. **Import.** Close the drawer if you like; **Continue import** picks up where it stopped.
+5. From the next morning the daily sync (on the drive-time cron, 11:00 UTC) keeps ETC prices current and adds new parts. The drawer's last-sync line shows what it did or why it failed.
+6. Sent estimates keep their prices. **Revise** re-prices their catalog lines to today's catalog and lists the changes on Build.
+7. Kill switch: `ETC_SYNC_DISABLED=true` in Vercel. Remove the key in the drawer to stop for good.

@@ -1626,5 +1626,27 @@ See `.env.example`.
     and browser). Nothing narrative is deleted — switching off restores it. No migration. Remaining is
     Jeff-gated: one real box-sale estimate sent to himself on production. On a box sale, the BOM quote tab carries Show prices / Show quantities, Payment terms, Terms, Options and Cover note (the Client package tab is hidden; the cover note's text stays in the header's Quote details) and hides #364's Labor switch (Jeff 2026-10-22). Punch item #362.
 
+67. ✅ **ETC price sync** (#368, D1286–D1291) — Catalog → Import price book →
+    **Connect a manufacturer** is a MyETC connection: an admin-only API key stored
+    encrypted in the `dealer_connections` blob (`src/lib/dealer-api/connections.ts`;
+    `etcSecret()` is the only decrypt), Test connection on v1 `/me/business-accounts`,
+    and **Pull prices** of ETC's four v0 dealer lists (finished goods, spare parts,
+    flat-rate repair, demo) into a chunked snapshot (`etc_price_pull`) with a per-list
+    preview, then a resumable **Import** (`src/lib/dealer-api/etc/`: `client`, pure
+    `parse` / `plan`, `apply`). Cost = netPrice, List = listPrice; new parts added;
+    description / category never overwritten; ETC-only matching by P/N then a guarded
+    model fallback; deleted parts never return. `CatalogPart.demoPrice` /
+    `demoPricedAt` / `etcPriceList` are internal (part editor only). A daily rider on
+    `/api/drive/sync` applies `price-updates/{baseline}` (new parts too) within a
+    bounded budget and continues a large delta next run. Sent estimates keep their
+    prices: re-pricing actions are locked until Revise (`src/lib/estimate-reprice/lock.ts`;
+    server-enforced for copy / move / Load system / the tier stamp, UI-only for the
+    configurators), and Revise re-prices plain catalog lines by ratio inside
+    `setStatus` (`estimate-reprice/rules.ts`, the save's own `deriveEstimatorSections`),
+    storing `Quote.repricedOnRevise` for a Build banner. Preview deploys and
+    `ETC_SYNC_DISABLED=true` refuse every ETC action. No migration. Remaining is
+    Jeff-gated: a MyETC API key, the first Pull on production (check the "new" count
+    against duplicates) and Import, the next morning's sync line. Punch item #368.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
