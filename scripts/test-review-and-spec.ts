@@ -70744,3 +70744,81 @@ async function bomModels365DbChecks(check: typeof ok): Promise<void> {
   const forSecs = await loadBomModelPartsFor(sections as never);
   check(!!forSecs && Object.keys(forSecs).join() === a, "#365 loader: loadBomModelPartsFor reads only the plain catalog lines' SKUs");
 }
+
+/* --- #366: project discounts on catalog parts (pure core) --- */
+import {
+  applyProjectDiscounts as pd366Apply, sanitizeProjectDiscounts as pd366Sanitize, parseDiscountPct as pd366Pct,
+  normalCostOf as pd366Normal, discountHits as pd366Hits, discountableSkus as pd366Skus, discountsForSections as pd366For,
+} from "@/lib/project-discounts/rules";
+import type { SpecItem as PD366Item, SpecSection as PD366Section } from "@/app/(app)/estimator/types";
+const pd366Round2 = (n: number) => Math.round(n * 100) / 100;
+const pd366Sec = (items: PD366Item[], extra: Partial<PD366Section> = {}): PD366Section => ({ id: "s1", name: "Lighting", items, ...extra } as PD366Section);
+const pd366Line = (o: Partial<PD366Item>): PD366Item => ({ id: 1, sku: "ETC:CS40", desc: "ColorSource 40", qty: 2, unit: "ea", cost: 2000, price: 3000, ...o } as PD366Item);
+const pd366D = { "ETC:CS40": { pct: 12, note: "Reg #4471", by: "u1", at: 1 } };
+const pd366Asm = (): PD366Item => pd366Line({ id: 9, sku: "fa-1", cost: 2600, price: 4000, fixture: true, components: [
+  { sku: "ETC:CS40", label: "Console", role: "fixture", qty: 1, unit: "ea", cost: 2000, price: 0 },
+  { sku: "ETC:CBL", label: "Cable", role: "accessory", qty: 2, unit: "ea", cost: 300, price: 0 },
+] } as Partial<PD366Item>);
+{
+  const sec = pd366Sec, line = pd366Line, d = pd366D;
+
+  ok(pd366Pct(12) === 12 && pd366Pct("12.5") === 12.5 && pd366Pct("12%") === 12 && pd366Pct(0) === null && pd366Pct(100) === null && pd366Pct(-3) === null && pd366Pct("x") === null && pd366Pct("") === null && pd366Pct(12.345) === 12.35,
+    "#366 core: pct is 0 < pct < 100, two decimals; 0/100/negative/blank/junk are null");
+
+  const [a] = pd366Apply([sec([line({})])], d);
+  ok(a.items[0].cost === 1760 && a.items[0].catalogCost === 2000 && a.items[0].projectDiscountPct === 12 && a.items[0].price === 3000,
+    "#366 core: a matching line's cost drops 12% from its normal cost; catalogCost and pct stamped; price untouched");
+
+  const once = pd366Apply([sec([line({})])], d);
+  const twice = pd366Apply(once, d);
+  ok(twice === once && twice[0].items[0].cost === 1760 && twice[0].items[0].catalogCost === 2000,
+    "#366 core: applying twice is idempotent (discounts the normal cost, never the discounted one) and returns the same array");
+
+  const [r] = pd366Apply([a], {});
+  ok(r.items[0].cost === 2000 && !("catalogCost" in r.items[0]) && !("projectDiscountPct" in r.items[0]), "#366 core: removing the entry restores the normal cost and clears both fields");
+
+  const skip = pd366Apply([sec([
+    line({ id: 2, sku: "CUSTOM" }), line({ id: 3, vendorQuoteId: "vq1" }), line({ id: 4, allowance: true }),
+    line({ id: 5, labor: true }), line({ id: 6, bonus: "package" }), line({ id: 7, curtain: true }), line({ id: 8, cost: 0 }),
+    line({ id: 11, laborOverhead: "shop" }), line({ id: 12, laborTravel: "hotel" }), line({ id: 13, rewardCredit: true }), line({ id: 14, sku: "CRT-3" }),
+  ])], { ...d, CUSTOM: { pct: 50, note: "", by: "u1", at: 1 } });
+  ok(skip[0].items.every((x) => !("catalogCost" in x) && (x.cost === 2000 || x.cost === 0)), "#366 core: placeholder, vendor-quote, allowance, labor/overhead/travel, bonus, curtain, Rewards and zero-cost lines are never discounted");
+
+  const asm = pd366Asm();
+  const [as] = pd366Apply([sec([asm])], d);
+  const c0 = as.items[0].components![0];
+  ok(c0.cost === 1760 && c0.catalogCost === 2000 && c0.projectDiscountPct === 12 && as.items[0].cost === 2360 && as.items[0].catalogCost === 2600 && as.items[0].projectDiscountPct === undefined && as.items[0].price === 4000,
+    "#366 core: a part inside an assembly is discounted; the line's cost drops by qty × Δ; line keeps its normal cost; no line pct; price untouched");
+  ok(pd366Apply([as], d)[0] === as, "#366 core: an assembly already stamped is left as is (idempotent)");
+  const [asR] = pd366Apply([as], {});
+  ok(asR.items[0].cost === 2600 && !("catalogCost" in asR.items[0]) && !("catalogCost" in asR.items[0].components![0]), "#366 core: removing restores the assembly line and its part");
+  const asm2 = line({ id: 9, sku: "fa-1", cost: 2600, fixture: true, components: [
+    { sku: "ETC:CS40", label: "Console", role: "fixture", qty: 2, unit: "ea", cost: 1000, price: 0 },
+    { sku: "ETC:CBL", label: "Cable", role: "accessory", qty: 2, unit: "ea", cost: 300, price: 0 },
+  ] } as Partial<PD366Item>);
+  const [as2] = pd366Apply([sec([asm2])], { ...d, "ETC:CBL": { pct: 50, note: "", by: "u1", at: 1 } });
+  ok(as2.items[0].cost === pd366Round2(2600 - 2 * 120 - 2 * 150), "#366 core: two parts at different rates — the line drops by Σ qty × Δ");
+
+  ok(pd366Normal({ cost: 1760, catalogCost: 2000 }) === 2000 && pd366Normal({ cost: 50 }) === 50, "#366 core: normalCostOf = catalogCost ?? cost");
+
+  const hits = pd366Hits([sec([line({}), line({ id: 2 }), asm])], d);
+  ok(hits["ETC:CS40"] === 3 && !("ETC:CBL" in hits), "#366 core: hits count lines and assembly parts (only SKUs with an entry)");
+
+  const skus = pd366Skus([sec([line({}), asm, line({ id: 10, sku: "CUSTOM" })])]);
+  ok(skus.some((s) => s.sku === "ETC:CS40") && skus.some((s) => s.sku === "ETC:CBL") && !skus.some((s) => s.sku === "CUSTOM" || s.sku === "fa-1") && skus.length === 2,
+    "#366 core: discountable SKUs list plain lines and assembly parts once each, never placeholders or the assembly's own id");
+
+  const clean = pd366Sanitize(JSON.parse(JSON.stringify({ "ETC:CS40": { pct: "12", note: "x".repeat(300), by: "u9", at: 5 }, "": { pct: 5 }, CUSTOM: { pct: 5 }, BAD: { pct: 0 }, JUNK: "x" }).replace("{", '{"__proto__":{"pct":5},')));
+  ok(Object.keys(clean).join() === "ETC:CS40" && clean["ETC:CS40"].pct === 12 && clean["ETC:CS40"].note.length === 200,
+    "#366 core: sanitize keeps valid entries only (blank/placeholder/zero/junk/proto dropped), clips the note");
+  const many: Record<string, unknown> = {};
+  for (let i = 0; i < 250; i++) many["P:" + i] = { pct: 5 };
+  ok(Object.keys(pd366Sanitize(many)).length === 200 && Object.keys(pd366Sanitize([{ pct: 5 }])).length === 0, "#366 core: at most 200 entries; an array is no map");
+
+  ok(Object.keys(pd366For([sec([line({})])], { ...d, "X:OTHER": { pct: 5, note: "", by: "u1", at: 1 } })).join() === "ETC:CS40", "#366 core: discountsForSections keeps only SKUs the sections contain");
+
+  const priced = line({ extSellOverride: 7000, sellOverride: true });
+  const [ps] = pd366Apply([sec([priced], { sellOverride: 9000, priceRound: 25 })], d);
+  ok(ps.items[0].price === 3000 && ps.items[0].extSellOverride === 7000 && ps.items[0].sellOverride === true && ps.sellOverride === 9000 && ps.priceRound === 25,
+    "#366 core: never touches price, extSellOverride, sellOverride or the system's typed sell / rounding");
+}
