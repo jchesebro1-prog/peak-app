@@ -4,6 +4,7 @@ import { hasSellOverride, isSystemLine, lineExtSellOf, systemFreight, systemItem
 import type { SpecItem, SpecSection, VendorQuote } from "./types";
 import { isBonusItem, isEstimatorBonusItem, isPackageBonusItem } from "@/lib/estimate-bonus/flags";
 import { isPlaceholderSku } from "@/lib/specs/record-keys";
+import { normalCostOf, type ProjectDiscounts } from "@/lib/project-discounts/rules";
 
 /** The Estimator's "Parts list (CSV)" export for the project manager (#262) —
  *  every orderable part in the estimate's material systems, assemblies
@@ -117,7 +118,21 @@ function plainSource(item: SpecItem, inCatalog: boolean): string {
   if (!inCatalog) return "Not in catalog";
   const edited = item.sellOverride === true
     || (typeof item.extSellOverride === "number" && Number.isFinite(item.extSellOverride));
+  // #366: a project discount is named (its own merge key too), keeping "sell edited" when that applies.
+  if (typeof item.projectDiscountPct === "number") return projectSource(item.projectDiscountPct) + (edited ? " · sell edited" : "");
   return edited ? "Catalog — sell edited" : "Catalog";
+}
+
+/** #366: the Price source of a catalog line / part carrying a project discount. */
+function projectSource(pct: number): string {
+  return `Catalog — project discount ${pct}%`;
+}
+
+/** #366: the "Project pricing: <note>" Notes entry for a discounted SKU ([] when no note, or no discount). */
+function projectNotes(discounts: ProjectDiscounts, sku: string, pct: number | undefined): string[] {
+  if (typeof pct !== "number" || !sku || !Object.prototype.hasOwnProperty.call(discounts, sku)) return [];
+  const note = (discounts[sku]?.note || "").trim();
+  return note ? [`Project pricing: ${note}`] : [];
 }
 
 /** The trimmed SKU, or "" for a placeholder (CUSTOM, AI, CURTAIN, CRT-n) —
@@ -132,7 +147,9 @@ function expand(
   sections: SpecSection[],
   vendorQuotes: VendorQuote[],
   info: Record<string, PartInfo>,
-  defaultRoom = ""
+  defaultRoom = "",
+  /** #366: the estimate's project discounts — only their notes are read (the % is stamped on the lines). */
+  discounts: ProjectDiscounts = {}
 ): PartsListRow[] {
   const out: PartsListRow[] = [];
   for (const section of sections) {
@@ -221,10 +238,12 @@ function expand(
         const included = item.components.filter((comp) => comp.qty > 0);
         const partsCost = included.reduce((a, comp) => a + comp.cost * comp.qty, 0);
         const partsList = included.reduce((a, comp) => a + comp.price * comp.qty, 0);
+        // #366: sell is shared out by NORMAL cost — a project discount lowers a part's cost, never its share of sell.
+        const partsNormal = included.reduce((a, comp) => a + normalCostOf(comp) * comp.qty, 0);
         // Sell is allocated so the parts carry the line's margin and sum to
         // the line: by cost share, else by list-price share, else nothing.
-        const sellOf = (comp: { cost: number; price: number }) =>
-          partsCost > 0 ? comp.cost * lineSell / partsCost
+        const sellOf = (comp: { cost: number; price: number; catalogCost?: number }) =>
+          partsNormal > 0 ? normalCostOf(comp) * lineSell / partsNormal
             : partsList > 0 ? comp.price * lineSell / partsList
             : 0;
         for (const comp of included) {
@@ -243,9 +262,9 @@ function expand(
             unitCost: comp.cost,
             unitSell: sell,
             lineSell: sell,
-            source: "Catalog",
+            source: typeof comp.projectDiscountPct === "number" ? projectSource(comp.projectDiscountPct) : "Catalog",
             partOf: [assemblyName],
-            notes: [...notes],
+            notes: [...notes, ...projectNotes(discounts, sku, comp.projectDiscountPct)],
             // #363: components are catalog parts — the assembly line's link isn't theirs.
             link: "",
             sectionId,
@@ -290,7 +309,7 @@ function expand(
         lineSell,
         source: vq ? vqSource : plainSource(item, !!p),
         partOf: [],
-        notes,
+        notes: vq ? notes : [...notes, ...projectNotes(discounts, sku, item.projectDiscountPct)],
         link,
         sectionId,
       });
@@ -322,10 +341,12 @@ export function partsListRows(
   sections: SpecSection[],
   vendorQuotes: VendorQuote[],
   info: Record<string, PartInfo>,
-  defaultRoom = ""
+  defaultRoom = "",
+  /** #366: the estimate's project discounts (their notes go in Notes). */
+  discounts: ProjectDiscounts = {}
 ): PartsListRow[] {
   const rows = new Map<string, PartsListRow>();
-  for (const e of expand(sections, vendorQuotes, info, defaultRoom)) {
+  for (const e of expand(sections, vendorQuotes, info, defaultRoom, discounts)) {
     const key = e.sku || e.modelNumber
       ? `p|${e.sectionId}|${e.room}|${e.system}|${e.manufacturer}|${e.modelNumber}|${e.sku}|${e.unit}|${round2(e.unitCost)}|${round2(e.unitSell)}|${e.source}|${e.link}`
       : `d|${e.sectionId}|${e.room}|${e.system}|${e.desc}|${e.unit}|${round2(e.unitCost)}|${round2(e.unitSell)}|${e.source}|${e.link}`;
@@ -447,10 +468,12 @@ export function reviewSheetModel(
   sections: SpecSection[],
   vendorQuotes: VendorQuote[],
   info: Record<string, PartInfo>,
-  defaultRoom = ""
+  defaultRoom = "",
+  /** #366: the estimate's project discounts. */
+  discounts: ProjectDiscounts = {}
 ): ReviewSheetBlock[] {
   const bySection = new Map<string, PartsListRow[]>();
-  for (const r of partsListRows(sections, vendorQuotes, info, defaultRoom)) {
+  for (const r of partsListRows(sections, vendorQuotes, info, defaultRoom, discounts)) {
     const list = bySection.get(r.sectionId);
     if (list) list.push(r);
     else bySection.set(r.sectionId, [r]);

@@ -35167,8 +35167,8 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
   ok(/const undoTierReprice = [\s\S]{0,120}setSectionsState\(tierReprice\.before\);\s*setTierReprice\(null\)/.test(t254Client) && /onClick=\{undoTierReprice\}[\s\S]{0,400}Undo/.test(t254Client),
     "#254 Undo: restores the exact sections from before the re-price and clears the banner");
   ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);[\s\S]{0,120}?setSectionsState\(\(prev\) => unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\)\);/.test(t254Client)
-    && (t254Client.match(/setSectionsState\(/g) || []).length === 6,
-    "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price, Undo, the site-visit goals pre-fill and the #bonus effect write the raw state (6)");
+    && (t254Client.match(/setSectionsState\(/g) || []).length === 7,
+    "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price, Undo, the site-visit goals pre-fill the #bonus effect and the #366 discounts effect write the raw state (7)");
   ok(/setSectionsState\(\(ss\) => applyAutoFreight\(ss[\s\S]{0,40}\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: applyAutoFreight\(n\.before/.test(t254Client),
     "#254 the automatic freight re-apply keeps a live banner and carries into its Undo snapshot");
   ok(!/from "@\/(lib\/stores|db)/.test(t254Pure) && !/import (?!type)[^;]*from "@\/(lib\/stores|db)/.test(t254Client),
@@ -37628,7 +37628,7 @@ function r363Fixture() {
     "#363 review sheet: exceljs loads on demand (type-only static import), so it stays out of the Estimator's main bundle");
   const hookSrc = readFileSync(join(process.cwd(), EST_DIR, "use-estimator-state.ts"), "utf8");
   const menuSrc = readFileSync(join(process.cwd(), EST_DIR, "header-more-menu.tsx"), "utf8");
-  ok(hookSrc.includes("reviewSheetModel(sections, vendorQuotes, info, venueRoomName)") && hookSrc.includes("await downloadReviewSheet(fileStem(name, \"estimate\"), blocks)")
+  ok(hookSrc.includes("reviewSheetModel(sections, vendorQuotes, info, venueRoomName, projectDiscounts)") /* #366: + the discounts */ && hookSrc.includes("await downloadReviewSheet(fileStem(name, \"estimate\"), blocks)")
     && hookSrc.includes("Couldn't build the review spreadsheet — try again.") && hookSrc.includes('"No parts to export yet."') && !hookSrc.includes("downloadCsv(")
     && menuSrc.includes("s.exportReviewSheet()") && menuSrc.includes("disabled={s.reviewBusy}"),
     "#363 review sheet: More ▾ → Review spreadsheet builds the model and downloads the .xlsx; the CSV download is gone");
@@ -54962,10 +54962,11 @@ import * as p2a from "@/lib/estimate-groups/groups";
 
   ok(/groups\?: SystemGroup\[\]/.test(actionsSrc) && /export type SavePayload[\s\S]*?groups\?: SystemGroup\[\]/.test(actionsSrc), "#P2a persistence: SavePayload.groups is optional (older callers keep stored groups)");
   ok(/const groups = sanitizeGroups\(payload\.groups \?\? \(prior\?\.spec as \{ groups\?: unknown \} \| null \| undefined\)\?\.groups\)/.test(actionsSrc), "#P2a persistence: saveQuoteAction sanitises payload.groups, falling back to the stored spec.groups");
-  ok(/spec: \{ sections: normalizeSystemOrder\(savedSections, groups\), mobs: payload\.mobs, groups, \.\.\.\(docSave\.document \? \{ document: docSave\.document \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: saveQuoteAction writes spec { sections (normalised), mobs, groups }");
+  // #366: each spec write now ends with the (only-when-any) projectDiscounts spread.
+  ok(/spec: \{ sections: normalizeSystemOrder\(savedSections, groups\), mobs: payload\.mobs, groups, \.\.\.\(docSave\.document \? \{ document: docSave\.document \} : \{\}\), \.\.\.\(Object\.keys\(discounts\)\.length \? \{ projectDiscounts: discounts \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: saveQuoteAction writes spec { sections (normalised), mobs, groups }");
   // #357: the stripped system is re-id'd against the target first (reIdIncomingSection), then appended.
-  ok(/const incoming = reIdIncomingSection\(stripBonusLines\(withoutGroupMeta\(placed\)\), /.test(actionsSrc) && /\.\.\.withoutRewardCredit\(\[incoming\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
-  ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\), await loadBonusRates\(\)\)/.test(actionsSrc) && /spec: \{ sections: newSections, mobs: \[\] \}/.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
+  ok(/const incoming = reIdIncomingSection\(stripBonusLines\(withoutGroupMeta\(placed\)\), /.test(actionsSrc) && /\.\.\.withoutRewardCredit\(\[incoming\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\), \.\.\.\(Object\.keys\(targetDiscounts\)\.length \? \{ projectDiscounts: targetDiscounts \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
+  ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\), await loadBonusRates\(\)\)/.test(actionsSrc) && /const newSpecSections = applyProjectDiscounts\(newSections, carriedDiscounts\);/.test(actionsSrc) && /spec: \{ sections: newSpecSections, mobs: \[\], /.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
   ok(/groups = sanitizeGroups\(spec\?\.groups\)/.test(pageSrc) && /normalizeSystemOrder\(spec\.sections as SpecSection\[\], groups\)/.test(pageSrc) && /^\s+groups,$/m.test(pageSrc) && /groups: \[\],/.test(pageSrc), "#P2a persistence: page.tsx reads spec.groups through sanitizeGroups into initial.groups (new quotes: [])");
   ok(/withoutGroupMeta\(copied\)/.test(copySrc), "#P2a persistence: copy-system strips group meta from the copy");
   ok(/withKeyProducts\(withoutGroupMeta\(base\), kps\)/.test(libSrc), "#P2a persistence: system-library load strips group meta");
@@ -54995,8 +54996,8 @@ import * as p2a from "@/lib/estimate-groups/groups";
   };
   ok(hook.includes("const [groups, setGroups] = useState<SystemGroup[]>(initial.groups ?? [])"), "#P2a hook: groups state seeds from initial.groups");
   ok(hook.includes("const blocks = useMemo(() => groupBlocks(sections, groups, { includeEmpty: true }), [sections, groups])"), "#P2a hook: blocks = groupBlocks(sections, groups, { includeEmpty: true })");
-  ok(/setSectionsState\(\(prev\) => unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\)\)/.test(hook) && (estimatorSource().match(/setSectionsState\(/g) || []).length === 6,
-    "#P2a hook: the setSections wrapper un-marks edited built systems in one functional write (6 raw writes: 5 + the #bonus effect)");
+  ok(/setSectionsState\(\(prev\) => unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\)\)/.test(hook) && (estimatorSource().match(/setSectionsState\(/g) || []).length === 7,
+    "#P2a hook: the setSections wrapper un-marks edited built systems in one functional write (7 raw writes: 5 + the #bonus effect + the #366 discounts effect)");
   const um = between("function unmarkUserEdits(", "const COLLAPSED_KEY_PREFIX");
   ok(um.includes("unmarkEdited(withoutRewardCredit(prev), withoutRewardCredit(next))") && um.includes("withoutBuilt(s)"),
     "#P2a hook: un-marking ignores the Rewards credit line (a re-pin after a reorder is not an edit)");
@@ -55035,7 +55036,7 @@ import * as p2a from "@/lib/estimate-groups/groups";
   const ret = hook.slice(hook.lastIndexOf("  return {\n    ...props,"));
   ok(["groups", "blocks", "addGroupAction", "renameGroupAction", "moveGroupByAction", "removeGroupAction", "moveSystemToAction", "moveSystemByAction", "setSystemGroup", "markBuilt", "isBuilt", "isExpanded", "toggleExpand"].every((n) => new RegExp(`\\n    ${n},\\n`).test(ret))
     && /\n    next,\n  \};\n\}/.test(ret), "#P2a hook: the state returns every group/built name, with next still last");
-  ok(/const existingGroups = sanitizeGroups\(existingSpec\?\.groups\);/.test(actionsSrc) && /spec: \{ sections: normalizeSystemOrder\(mergedSections, existingGroups\), mobs: existingSpec\?\.mobs \|\| \[\], groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\) \}/.test(actionsSrc),
+  ok(/const existingGroups = sanitizeGroups\(existingSpec\?\.groups\);/.test(actionsSrc) && /spec: \{ sections: normalizeSystemOrder\(mergedSections, existingGroups\), mobs: existingSpec\?\.mobs \|\| \[\], groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\), \.\.\.\(Object\.keys\(targetDiscounts\)\.length \? \{ projectDiscounts: targetDiscounts \} : \{\}\) \}/.test(actionsSrc), // #366: + the target's discounts
     "#P2a hook: move-to-existing normalises the merged sections against the same sanitised groups it writes");
 }
 
@@ -55222,7 +55223,7 @@ import { quoteDocumentDataFor as p2hData } from "@/lib/quote-pdf/quote-document-
   const norm = acts.indexOf("normalizeSystemOrder(sellSanitizedRaw.map(sanitizeSectionGroupMeta), groups)");
   const settle = acts.indexOf("await settleRewardCredit(sellSanitized,");
   ok(norm > 0 && settle > norm, "#P2a hardening: saveQuoteAction normalises the sections (and sanitises built/groupId) before the Rewards credit is settled");
-  ok(acts.includes("spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}) }"), "#P2a hardening: the final write stays normalised");
+  ok(acts.includes("spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}), ...(Object.keys(discounts).length ? { projectDiscounts: discounts } : {}) }"), "#P2a hardening: the final write stays normalised"); // #366: + discounts
 }
 
 /* #P2b core — Estimator Phase 2b: the derived alternate stamp, totals.alt, the Rewards credit pin and the approval fingerprint. */
@@ -57825,7 +57826,7 @@ import { commentsBySection as p4pBy, numberComments as p4pNumber } from "@/lib/e
   ok(pkgSrc.includes("pinned.bySection[x.id]") && pkgSrc.includes("on the whole estimate</span>") && pkgSrc.includes("useCommentsFocusRefresh(s)"),
     "#P4 pins: the Build package nav shows each system's open-comment count and the whole-estimate count");
   ok(!/listReviewCommentsAction/.test(buildSrc + pkgSrc + cardSrc), "#P4 pins: Build / Build package read the shared list, they don't fetch their own");
-  ok((rf(`${EST_DIR}/use-estimator-state.ts`).match(/setSectionsState\(/g) || []).length === 6, "#P4 pins: setSectionsState( count stays 6 (5 + the #bonus effect)");
+  ok((rf(`${EST_DIR}/use-estimator-state.ts`).match(/setSectionsState\(/g) || []).length === 7, "#P4 pins: setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect)");
 }
 
 // ---- #P4 polish: pin popover lifecycle + clamp, Escape, no aria-label on plain spans ----
@@ -58266,10 +58267,10 @@ import { renderToStaticMarkup as p5rMarkup } from "react-dom/server";
   const fn = acts.slice(acts.indexOf("export async function saveQuoteAction"), acts.indexOf("export async function searchQuotesAction"));
   ok(fn.indexOf("const docSave = packageDocForSave(payload.document, (prior?.spec as { document?: unknown } | null | undefined)?.document);") > 0 &&
      fn.indexOf("if (!docSave.ok) return refusedSave(prior, docSave.error);") > 0 && fn.indexOf("if (!docSave.ok) return refusedSave(prior, docSave.error);") < fn.indexOf("await settleRewardCredit(") &&
-     fn.includes("groups, ...(docSave.document ? { document: docSave.document } : {}) }") && /document\?: PackageDoc \| null;/.test(acts.slice(acts.indexOf("export type SavePayload"))) &&
-     acts.includes("spec?: { sections: SpecSection[]; mobs: SpecMob[]; groups?: SystemGroup[]; document?: PackageDoc };"),
+     fn.includes("groups, ...(docSave.document ? { document: docSave.document } : {}), ") && /document\?: PackageDoc \| null;/.test(acts.slice(acts.indexOf("export type SavePayload"))) &&
+     acts.includes("spec?: { sections: SpecSection[]; mobs: SpecMob[]; groups?: SystemGroup[]; document?: PackageDoc; projectDiscounts?: ProjectDiscounts };"), // #366: + projectDiscounts
     "#P5 save: saveQuoteAction decides the document first (a refusal writes nothing, before the credit or the patch) and writes spec.document");
-  ok(acts.includes("const existingDoc = sanitizePackageDoc(existingSpec?.document);") && acts.includes("groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}) }"),
+  ok(acts.includes("const existingDoc = sanitizePackageDoc(existingSpec?.document);") && acts.includes("groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}), "),
     "#P5 save: moving a system into another estimate keeps that estimate's document");
   ok(rd("src/lib/catalog-rename/rewrite.ts").includes("return overlay(spec, patch);"), "#P5 save: the #304 rename rewrite overlays the spec (spec.document survives quoteSpecFollowingRenames)");
   const page = rd("src/app/(app)/estimator/page.tsx");
@@ -58277,7 +58278,7 @@ import { renderToStaticMarkup as p5rMarkup } from "react-dom/server";
   ok(page.includes("document: sanitizePackageDoc(spec?.document),") && page.includes("      document: null,") && rd("src/app/(app)/estimator/types.ts").includes("document: PackageDoc | null;"),
     "#P5 save: page.tsx loads initial.document (sanitized; a new quote null)");
   ok(hook.includes("const [packageDoc, setPackageDocState] = useState<PackageDoc | null>(initial.document ?? null);") && hook.includes("document: packageDoc,\n    }),") &&
-     hook.includes("          document: docNow,\n        });") && /\n    packageDoc,\n    setPackageDoc,\n/.test(hook) && /\n    next,\n  \};\n\}/.test(hook),
+     /          document: docNow,\n(\s*\/\/ #366[^\n]*\n\s*projectDiscounts,\n)?        \}\);/.test(hook) && /\n    packageDoc,\n    setPackageDoc,\n/.test(hook) && /\n    next,\n  \};\n\}/.test(hook),
     "#P5 save: the hook holds packageDoc, puts it in docInput and the save payload, returns packageDoc / setPackageDoc with next still last");
   const kb = { quoteNumber: "Q", projectName: "P", custName: "C", customerId: null, locationId: null, contactName: "", quoteNote: "", assumptions: "", paymentTerms: "Net 30", sections: [], vendorQuotes: [], pdfOptions: {} } as unknown as Parameters<typeof p5rKey>[0];
   ok(p5rKey(kb) === p5rKey({ ...kb, document: null }) && p5rKey(kb) !== p5rKey({ ...kb, document: stored }) && p5rKey({ ...kb, document: stored }) !== p5rKey({ ...kb, document: p5San(doc([P(T("stored!"))])) }),
@@ -58636,8 +58637,8 @@ import type { PDProductBlock as P5ePB } from "@/lib/package-doc/types";
     "#P5 editor: the editor is wired to the hook's packageDoc / setPackageDoc and Save to product refreshes the library row");
   const hook = rd(`${EST_DIR}/use-estimator-state.ts`);
   ok(hook.includes("...docProductSkus(packageDoc),") && hook.includes("[narrSec, packageDoc]") && hook.includes("const kpLib = useKeyProductLibrary(narrSkus, kpAliases);") &&
-     /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 6,
-    "#P5 editor: the library prefetch covers the document's product skus; `next` stays last; setSectionsState( count stays 6 (5 + the #bonus effect)");
+     /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 7,
+    "#P5 editor: the library prefetch covers the document's product skus; `next` stays last; setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect)");
   ok(!["customerLines(", "window.print", "est-doc", "reviewBarOpen", ".components"].some((x) => pkgStep.includes(x)) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db)/m.test(pkgStep),
     "#P5 editor: package-step adds no forbidden Estimator strings or store/db value imports");
 }
@@ -58676,8 +58677,8 @@ import { MAX_DEPTH as P5F_MAX_DEPTH } from "@/lib/package-doc/schema";
     "#P5 editor fix: the editor reports over on every flush, and clears it when an outside value re-sets the content (an unmount keeps it — #P5 final)");
   ok(pkgStep.includes("onOverChange={setPackageDocOver}") && /const startDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
      /const removeDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
-     /\n {4}packageDocOver,\n {4}setPackageDocOver,\n/.test(hook) && /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 6,
-    "#P5 editor fix: Build package wires onOverChange to the hook; Start / Remove clear the flag; `next` stays last; setSectionsState( count stays 6 (5 + the #bonus effect)");
+     /\n {4}packageDocOver,\n {4}setPackageDocOver,\n/.test(hook) && /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 7,
+    "#P5 editor fix: Build package wires onOverChange to the hook; Start / Remove clear the flag; `next` stays last; setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect)");
 
   // (2) Remove document: the unmount flush never brings the removed document back.
   ok(pkgStep.includes("const discardRef = useRef(false);") && /const removeDocument = \(\) => \{\s*discardRef\.current = true;/.test(pkgStep) &&
@@ -59190,8 +59191,8 @@ import { catalogAddPrice as p6eAddPrice } from "@/app/(app)/estimator/tier-repri
   ok(page.includes("loadSystemCategoryOptions()") && page.includes("await getSystemCategories()") && page.includes("getManyBySku(skus)") && page.includes("sku: p.sku") && page.includes("part: p ? {") && page.includes(": null,"),
     "#P6 estimator: page.tsx loads the categories and resolves their parts server-side (live sku, null when gone)");
   ok(hook.includes("const addSystemFromCategory = (categoryId: string, picks: Array<{ sku: string; qty: number }>)") && hook.includes("systemFromCategory(category, picks, {") && hook.includes("price: catalogAddPrice,") && hook.includes("normalizeSystemOrder([...ss, sec], groups)") && hook.includes("setAddSystemOpen(false);") &&
-     (hook.match(/setSectionsState\(/g) || []).length === 6 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    addSystemFromCategory,"),
-    "#P6 estimator: the hook adds through the pure builder and the same setSections/normalize path; setSectionsState( count stays 6 (5 + the #bonus effect); `next` stays last");
+     (hook.match(/setSectionsState\(/g) || []).length === 7 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    addSystemFromCategory,"),
+    "#P6 estimator: the hook adds through the pure builder and the same setSections/normalize path; setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect); `next` stays last");
   // Fix round 1
   ok(page.includes(".catch((e) => {") && page.includes("return []") && /estimateOutputDefaults, systemCategories\] =/.test(page) && page.includes("loadSystemCategoryOptions(),") && !page.includes("await loadSystemCategoryOptions()"),
     "#P6 estimator: the category load is fail-soft ([] + a server warning) and runs inside the page's Promise.all, not serially after it");
@@ -59440,8 +59441,8 @@ import { specLineRows as specLineRows312 } from "@/lib/estimate-review/review-ui
     "#312 estimator: the hook stages the pre-filled draft, consumes it on open, and saves through replaceCustomLine (add path unchanged)");
   ok(/if \(d\.addToCatalog && !d\.allowance\)/.test(hook) && !/customEditRef\.current = \{ lineId, draft: \{[^}]*addToCatalog: "1"/.test(hook),
     "#312 estimator: an edit only re-saves to the catalog when 'Add to catalog' is ticked (the draft opens unticked)");
-  ok((hook.match(/setSectionsState\(/g) || []).length === 6 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    openCustomEdit,"),
-    "#312 estimator: setSectionsState( count stays 6 (5 + the #bonus effect); `next` stays last in the hook's return");
+  ok((hook.match(/setSectionsState\(/g) || []).length === 7 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    openCustomEdit,"),
+    "#312 estimator: setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect); `next` stays last in the hook's return");
 
   type R312 = { id: number; custom?: boolean; curtain?: boolean };
   const rows = specLineRows312<R312>([
@@ -70777,4 +70778,313 @@ async function bomModels365DbChecks(check: typeof ok): Promise<void> {
   const sections = [{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: a, desc: "x", qty: 1, unit: "ea", cost: 1, price: 2 }, { id: 2, sku: b, desc: "y", qty: 1, unit: "ea", cost: 1, price: 2, allowance: true }] }];
   const forSecs = await loadBomModelPartsFor(sections as never);
   check(!!forSecs && Object.keys(forSecs).join() === a, "#365 loader: loadBomModelPartsFor reads only the plain catalog lines' SKUs");
+}
+
+/* --- #366: project discounts on catalog parts (pure core) --- */
+import {
+  applyProjectDiscounts as pd366Apply, sanitizeProjectDiscounts as pd366Sanitize, parseDiscountPct as pd366Pct,
+  normalCostOf as pd366Normal, discountHits as pd366Hits, discountableSkus as pd366Skus, discountsForSections as pd366For,
+} from "@/lib/project-discounts/rules";
+import type { SpecItem as PD366Item, SpecSection as PD366Section } from "@/app/(app)/estimator/types";
+const pd366Round2 = (n: number) => Math.round(n * 100) / 100;
+const pd366Sec = (items: PD366Item[], extra: Partial<PD366Section> = {}): PD366Section => ({ id: "s1", name: "Lighting", items, ...extra } as PD366Section);
+const pd366Line = (o: Partial<PD366Item>): PD366Item => ({ id: 1, sku: "ETC:CS40", desc: "ColorSource 40", qty: 2, unit: "ea", cost: 2000, price: 3000, ...o } as PD366Item);
+const pd366D = { "ETC:CS40": { pct: 12, note: "Reg #4471", by: "u1", at: 1 } };
+const pd366Asm = (): PD366Item => pd366Line({ id: 9, sku: "fa-1", cost: 2600, price: 4000, fixture: true, components: [
+  { sku: "ETC:CS40", label: "Console", role: "fixture", qty: 1, unit: "ea", cost: 2000, price: 0 },
+  { sku: "ETC:CBL", label: "Cable", role: "accessory", qty: 2, unit: "ea", cost: 300, price: 0 },
+] } as Partial<PD366Item>);
+{
+  const sec = pd366Sec, line = pd366Line, d = pd366D;
+
+  ok(pd366Pct(12) === 12 && pd366Pct("12.5") === 12.5 && pd366Pct("12%") === 12 && pd366Pct(0) === null && pd366Pct(100) === null && pd366Pct(-3) === null && pd366Pct("x") === null && pd366Pct("") === null && pd366Pct(12.345) === 12.35,
+    "#366 core: pct is 0 < pct < 100, two decimals; 0/100/negative/blank/junk are null");
+
+  const [a] = pd366Apply([sec([line({})])], d);
+  ok(a.items[0].cost === 1760 && a.items[0].catalogCost === 2000 && a.items[0].projectDiscountPct === 12 && a.items[0].price === 3000,
+    "#366 core: a matching line's cost drops 12% from its normal cost; catalogCost and pct stamped; price untouched");
+
+  const once = pd366Apply([sec([line({})])], d);
+  const twice = pd366Apply(once, d);
+  ok(twice === once && twice[0].items[0].cost === 1760 && twice[0].items[0].catalogCost === 2000,
+    "#366 core: applying twice is idempotent (discounts the normal cost, never the discounted one) and returns the same array");
+
+  const [r] = pd366Apply([a], {});
+  ok(r.items[0].cost === 2000 && !("catalogCost" in r.items[0]) && !("projectDiscountPct" in r.items[0]), "#366 core: removing the entry restores the normal cost and clears both fields");
+
+  const skip = pd366Apply([sec([
+    line({ id: 2, sku: "CUSTOM" }), line({ id: 3, vendorQuoteId: "vq1" }), line({ id: 4, allowance: true }),
+    line({ id: 5, labor: true }), line({ id: 6, bonus: "package" }), line({ id: 7, curtain: true }), line({ id: 8, cost: 0 }),
+    line({ id: 11, laborOverhead: "shop" }), line({ id: 12, laborTravel: "hotel" }), line({ id: 13, rewardCredit: true }), line({ id: 14, sku: "CRT-3" }),
+  ])], { ...d, CUSTOM: { pct: 50, note: "", by: "u1", at: 1 } });
+  ok(skip[0].items.every((x) => !("catalogCost" in x) && (x.cost === 2000 || x.cost === 0)), "#366 core: placeholder, vendor-quote, allowance, labor/overhead/travel, bonus, curtain, Rewards and zero-cost lines are never discounted");
+
+  const asm = pd366Asm();
+  const [as] = pd366Apply([sec([asm])], d);
+  const c0 = as.items[0].components![0];
+  ok(c0.cost === 1760 && c0.catalogCost === 2000 && c0.projectDiscountPct === 12 && as.items[0].cost === 2360 && as.items[0].catalogCost === 2600 && as.items[0].projectDiscountPct === undefined && as.items[0].price === 4000,
+    "#366 core: a part inside an assembly is discounted; the line's cost drops by qty × Δ; line keeps its normal cost; no line pct; price untouched");
+  ok(pd366Apply([as], d)[0] === as, "#366 core: an assembly already stamped is left as is (idempotent)");
+  const [asR] = pd366Apply([as], {});
+  ok(asR.items[0].cost === 2600 && !("catalogCost" in asR.items[0]) && !("catalogCost" in asR.items[0].components![0]), "#366 core: removing restores the assembly line and its part");
+  const asm2 = line({ id: 9, sku: "fa-1", cost: 2600, fixture: true, components: [
+    { sku: "ETC:CS40", label: "Console", role: "fixture", qty: 2, unit: "ea", cost: 1000, price: 0 },
+    { sku: "ETC:CBL", label: "Cable", role: "accessory", qty: 2, unit: "ea", cost: 300, price: 0 },
+  ] } as Partial<PD366Item>);
+  const [as2] = pd366Apply([sec([asm2])], { ...d, "ETC:CBL": { pct: 50, note: "", by: "u1", at: 1 } });
+  ok(as2.items[0].cost === pd366Round2(2600 - 2 * 120 - 2 * 150), "#366 core: two parts at different rates — the line drops by Σ qty × Δ");
+
+  ok(pd366Normal({ cost: 1760, catalogCost: 2000 }) === 2000 && pd366Normal({ cost: 50 }) === 50, "#366 core: normalCostOf = catalogCost ?? cost");
+
+  const hits = pd366Hits([sec([line({}), line({ id: 2 }), asm])], d);
+  ok(hits["ETC:CS40"] === 3 && !("ETC:CBL" in hits), "#366 core: hits count lines and assembly parts (only SKUs with an entry)");
+
+  const skus = pd366Skus([sec([line({}), asm, line({ id: 10, sku: "CUSTOM" })])]);
+  ok(skus.some((s) => s.sku === "ETC:CS40") && skus.some((s) => s.sku === "ETC:CBL") && !skus.some((s) => s.sku === "CUSTOM" || s.sku === "fa-1") && skus.length === 2,
+    "#366 core: discountable SKUs list plain lines and assembly parts once each, never placeholders or the assembly's own id");
+
+  const clean = pd366Sanitize(JSON.parse(JSON.stringify({ "ETC:CS40": { pct: "12", note: "x".repeat(300), by: "u9", at: 5 }, "": { pct: 5 }, CUSTOM: { pct: 5 }, BAD: { pct: 0 }, JUNK: "x" }).replace("{", '{"__proto__":{"pct":5},')));
+  ok(Object.keys(clean).join() === "ETC:CS40" && clean["ETC:CS40"].pct === 12 && clean["ETC:CS40"].note.length === 200,
+    "#366 core: sanitize keeps valid entries only (blank/placeholder/zero/junk/proto dropped), clips the note");
+  const many: Record<string, unknown> = {};
+  for (let i = 0; i < 250; i++) many["P:" + i] = { pct: 5 };
+  ok(Object.keys(pd366Sanitize(many)).length === 200 && Object.keys(pd366Sanitize([{ pct: 5 }])).length === 0, "#366 core: at most 200 entries; an array is no map");
+
+  ok(Object.keys(pd366For([sec([line({})])], { ...d, "X:OTHER": { pct: 5, note: "", by: "u1", at: 1 } })).join() === "ETC:CS40", "#366 core: discountsForSections keeps only SKUs the sections contain");
+
+  const priced = line({ extSellOverride: 7000, sellOverride: true });
+  const [ps] = pd366Apply([sec([priced], { sellOverride: 9000, priceRound: 25 })], d);
+  ok(ps.items[0].price === 3000 && ps.items[0].extSellOverride === 7000 && ps.items[0].sellOverride === true && ps.sellOverride === 9000 && ps.priceRound === 25,
+    "#366 core: never touches price, extSellOverride, sellOverride or the system's typed sell / rounding");
+}
+
+/* --- #366: the customer's price is identical with or without a project discount --- */
+import { systemSellTotal as pd366Sell, systemFreight as pd366Freight, totals as pd366Totals, systemMargin as pd366Margin } from "@/app/(app)/estimator/pricing";
+import { withBonusLines as pd366Bonus, idCounterFrom as pd366Ids } from "@/lib/estimate-bonus/rules";
+import { repriceForTier as pd366Reprice, isAtTierSeed as pd366AtSeed } from "@/app/(app)/estimator/tier-reprice";
+{
+  const mk = (round: boolean, typed?: number): PD366Section => pd366Sec([
+    pd366Line({ id: 1, price: 2857.14 }),
+    pd366Line({ id: 2, sku: "LAB-INST", desc: "Install", qty: 8, unit: "hr", cost: 60, price: 95, labor: true }),
+    { ...pd366Asm(), id: 3 },
+  ], { freightPct: 3, ...(round ? { priceRound: 25 } : {}), ...(typed ? { sellOverride: typed } : {}) });
+  const bon = (s: PD366Section[]) => pd366Bonus(s, pd366Ids(s));
+  for (const [round, typed] of [[false, undefined], [true, undefined], [true, 20000]] as Array<[boolean, number | undefined]>) {
+    const tag = `(round ${round}${typed ? ", typed sell" : ""})`;
+    const base = bon([mk(round, typed)]);
+    const disc = bon(pd366Apply([mk(round, typed)], pd366D));
+    ok(disc[0].items[0].cost === 1760 && disc[0].items[2].cost === 2360, `#366 price: the discount really applied ${tag}`);
+    ok(pd366Freight(base[0]) === pd366Freight(disc[0]) && pd366Freight(base[0]) > 0, `#366 price: freight is unchanged ${tag}`);
+    ok(pd366Sell(base[0]) === pd366Sell(disc[0]), `#366 price: system sell total is unchanged ${tag}`);
+    const pb = (s: PD366Section) => s.items.find((x) => x.bonus === "package");
+    const eb = (s: PD366Section) => s.items.find((x) => x.bonus === "estimator");
+    ok(!!pb(base[0]) && !!eb(base[0]) && JSON.stringify(pb(base[0])) === JSON.stringify(pb(disc[0])) && JSON.stringify(eb(base[0])) === JSON.stringify(eb(disc[0])),
+      `#366 price: both bonus lines are identical (cost and sell) ${tag}`);
+    const tb = pd366Totals(base, 0), td = pd366Totals(disc, 0);
+    ok(tb.grand === td.grand && tb.rev === td.rev && tb.fr === td.fr && tb.mat === td.mat && tb.lab === td.lab, `#366 price: grand total (and rev / mat / lab / freight) unchanged ${tag}`);
+    ok(Math.abs((tb.cost - td.cost) - 960) < 0.005, `#366 price: quote cost drops by exactly 2 × $240 (lines) + 2 × $240 (assemblies) = $960 ${tag}`);
+    ok(Math.abs(((td.rev - td.cost) - (tb.rev - tb.cost)) - 960) < 0.005 && pd366Margin(disc[0]) > pd366Margin(base[0]), `#366 price: margin dollars rise by exactly the discounted dollars ${tag}`);
+  }
+  // Tier reprice: a discounted line still sits at the seed of its NORMAL cost and re-prices from it.
+  const tierSec = () => pd366Sec([pd366Line({ id: 1, price: 2857.14 })]);
+  const [dl] = pd366Apply([tierSec()], pd366D);
+  ok(pd366AtSeed(dl.items[0], null), "#366 tier: a discounted line priced at its normal cost's 30% seed still counts as at the seed");
+  const res = pd366Reprice([dl], null, 0.2);
+  ok(res.repriced === 1 && res.handPriced === 0 && res.sections[0].items[0].price === 2500 && res.sections[0].items[0].cost === 1760,
+    "#366 tier: a tier change re-prices a discounted line from its normal cost (2000 ÷ 0.8 = 2500), keeping the discounted cost");
+  const plain = pd366Reprice([tierSec()], null, 0.2);
+  ok(plain.sections[0].items[0].price === res.sections[0].items[0].price, "#366 tier: the same price as the undiscounted line gets");
+  const trk = pd366Sec([pd366Line({ id: 4, sku: "TRK-1", track: {} as never, cost: 2000, price: 2857.14, components: [{ sku: "ETC:CS40", label: "Part", role: "fixture", qty: 1, unit: "ea", cost: 2000, price: 2857.14 }] } as Partial<PD366Item>)]);
+  const trkRes = pd366Reprice(pd366Apply([trk], pd366D), null, 0.2);
+  ok(trkRes.repriced === 1 && trkRes.sections[0].items[0].price === 2500 && trkRes.sections[0].items[0].components![0].price === 2500,
+    "#366 tier: a track line with a discounted part re-prices from normal cost, its part too");
+}
+
+/* --- #366: the server stamps and re-applies the discounts on save, move and copy --- */
+import { mergeDiscountsForSave as pd366Merge } from "@/lib/project-discounts/rules";
+import { copySectionForTarget as pd366Copy } from "@/app/(app)/estimator/copy-system";
+import { rewriteQuoteSpec as pd366Rename } from "@/lib/catalog-rename/rewrite";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const m = pd366Merge({ A: { pct: 10, note: "", by: "u1", at: 1 }, C: { pct: 7, note: "old", by: "u1", at: 1 } },
+    { A: { pct: 10, note: "", by: "evil", at: 5 }, B: { pct: 5, note: "n", by: "evil", at: 5 }, C: { pct: 7, note: "new" }, D: { pct: 0 } }, "u2", 99);
+  ok(m.A.by === "u1" && m.A.at === 1 && m.B.by === "u2" && m.B.at === 99 && m.C.by === "u2" && m.C.at === 99 && m.C.note === "new" && !("D" in m),
+    "#366 save: an unchanged entry keeps who set it and when; new or changed ones are stamped by the saver now; a posted by/at is ignored; junk dropped");
+  ok(Object.keys(pd366Merge({ A: { pct: 10, note: "", by: "u1", at: 1 } }, {}, "u2", 9)).length === 0, "#366 save: an entry the builder removed is gone");
+
+  // A tampered payload: a line claiming a deeper cut than the map, one claiming a discount the map doesn't have.
+  const tampered = [pd366Sec([
+    pd366Line({ id: 1, cost: 1000, catalogCost: 2000, projectDiscountPct: 50 }),
+    pd366Line({ id: 2, sku: "X:OTHER", cost: 10, catalogCost: 500, projectDiscountPct: 98 }),
+  ])];
+  const fixed = pd366Apply(tampered, pd366D);
+  ok(fixed[0].items[0].cost === 1760 && fixed[0].items[0].projectDiscountPct === 12 && fixed[0].items[1].cost === 500 && !("catalogCost" in fixed[0].items[1]),
+    "#366 save: re-applying the map re-stamps a tampered payload (wrong cut → the map's 12%; an unknown discount → normal cost)");
+
+  // Move into an estimate without the discount: the target's (empty) map restores the normal cost.
+  const [movedIn] = pd366Apply(pd366Apply([pd366Sec([pd366Line({}), pd366Asm()])], pd366D), {});
+  ok(movedIn.items[0].cost === 2000 && movedIn.items[1].cost === 2600 && !("catalogCost" in movedIn.items[1].components![0]), "#366 move: into an estimate without the discount → normal cost again (lines and parts)");
+
+  // Copy re-prices from NORMAL cost: a discounted line whose catalog cost hasn't moved keeps its sell.
+  const src = pd366Apply([pd366Sec([pd366Line({ price: 2857.14 }), pd366Asm()])], pd366D)[0];
+  const cat = new Map([["ETC:CS40", { sku: "ETC:CS40", cost: 2000, list: 3500 }], ["ETC:CBL", { sku: "ETC:CBL", cost: 300, list: 400 }]]);
+  const cp = pd366Copy(src, { newSectionId: "s2", catalog: cat, fixtures: new Map(), sourceTierMargin: null, targetTierMargin: null });
+  ok(cp.costsUpdated === 0 && cp.section.items[0].cost === 2000 && cp.section.items[0].price === 2857.14 && !("catalogCost" in cp.section.items[0]) && cp.section.items[1].cost === 2600 && cp.section.items[1].price === 4000,
+    "#366 copy: the copy lands at normal cost with its sell untouched (no phantom catalog-cost change); the target re-applies its own map");
+  ok(Object.keys(pd366For([cp.section], { ...pd366D, "Z:NOTHERE": { pct: 3, note: "", by: "u", at: 1 } })).join() === "ETC:CS40", "#366 copy: a NEW estimate carries only the entries for the SKUs the system contains");
+
+  // A catalog rename moves the map's key with the lines.
+  const renamed = pd366Rename({ sections: [pd366Sec([pd366Line({ sku: "80-1" })])], projectDiscounts: { "80-1": { pct: 5, note: "n" }, KEEP: { pct: 3 } } }, new Map([["80-1", "Brand:M1"]]), new Map()) as { projectDiscounts: Record<string, unknown>; sections: PD366Section[] };
+  ok(Object.keys(renamed.projectDiscounts).join() === "Brand:M1,KEEP" && renamed.sections[0].items[0].sku === "Brand:M1", "#366 rename: a renamed SKU's discount follows it (spec.projectDiscounts keys)");
+
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  const save = act.slice(act.indexOf("export async function saveQuoteAction("), act.indexOf("export async function searchQuotesAction("));
+  ok(/mergeDiscountsForSave\(\s*priorDiscounts,\s*payload\.projectDiscounts !== undefined \? payload\.projectDiscounts : priorDiscounts,\s*user\.id,/.test(save) &&
+     save.indexOf("applyProjectDiscounts(sellNormalizedRaw, discounts)") > 0 && save.indexOf("applyProjectDiscounts(sellNormalizedRaw, discounts)") < save.indexOf("canonicalBonusSections(") &&
+     /canonicalBonusSections\([^)]*sellNormalized,/.test(save),
+    "#366 save: the action sanitizes + stamps the map (an older caller keeps the stored one) and re-applies it BEFORE the bonus lines are derived");
+  ok(save.includes("...(Object.keys(discounts).length ? { projectDiscounts: discounts } : {}) },"), "#366 save: spec.projectDiscounts is written only when the estimate has any");
+  const place = act.slice(act.indexOf("async function placeSystemInEstimate("), act.indexOf("export type CopySystemTarget"));
+  ok(place.includes("const targetDiscounts = sanitizeProjectDiscounts(existingSpec?.projectDiscounts);") &&
+     /canonicalBonusSections\(\{ source: existing\.source, [^\n]*, applyProjectDiscounts\(appendedRaw, targetDiscounts\), await loadBonusRates\(\)\)/.test(place) &&
+     place.includes("...(Object.keys(targetDiscounts).length ? { projectDiscounts: targetDiscounts } : {}) },"),
+    "#366 move/copy → existing: the TARGET's map is applied as its bonus lines are derived, and kept on its spec");
+  ok(place.includes("const carriedDiscounts = discountsForSections(newSections, sourceDiscounts);") && place.includes("const newSpecSections = applyProjectDiscounts(newSections, carriedDiscounts);") &&
+     place.includes("const t = totals(newSpecSections, 0);") && place.includes("spec: { sections: newSpecSections, mobs: [], ...(Object.keys(carriedDiscounts).length ? { projectDiscounts: carriedDiscounts } : {}) },"),
+    "#366 move/copy → new: the new estimate carries the source's entries for its SKUs, applies them, and values itself on the discounted cost");
+  ok((act.match(/projectDiscounts,\n/g) || []).length >= 2 && /sourceQuoteId: string \| null = null,\n[\s\S]{0,400}projectDiscounts\?: unknown\n\): Promise<MoveSystemResult>/.test(act) && /projectDiscounts\?: unknown\n\): Promise<CopySystemResult>/.test(act),
+    "#366 move/copy: both actions take the builder's map and hand it to placeSystemInEstimate");
+  const cs = rd("src/lib/estimating-core/copy-system.ts");
+  ok(cs.includes("const [undiscounted] = applyProjectDiscounts([section], {});") && cs.includes("(undiscounted.items || [])"), "#366 copy: copySectionForTarget (Copy system + Load system) starts from normal cost");
+  const pg = rd("src/app/(app)/estimator/page.tsx");
+  ok(pg.includes("projectDiscounts: sanitizeProjectDiscounts(spec?.projectDiscounts),"), "#366 load: the Estimator page hands the sanitized map to the builder");
+}
+
+/* --- #366: Estimator UI — hook state, the line chip / trigger, the Build card --- */
+import { createElement as pd366El } from "react";
+import { renderToStaticMarkup as pd366Render } from "react-dom/server";
+import { ProjectDiscountsCard as PD366Card, ProjectDiscountEditor as PD366Editor, linesForSku as pd366Lines, PROJECT_DISCOUNT_COPY as PD366Copy } from "@/app/(app)/estimator/project-discounts-card";
+import { projectDiscountsKey as pd366Key } from "@/lib/project-discounts/rules";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const noop = () => {};
+  const secs = pd366Apply([pd366Sec([pd366Line({}), pd366Asm()])], pd366D);
+  const html = pd366Render(pd366El(PD366Card, { sections: secs, discounts: pd366D, onSet: noop, onRemove: noop }));
+  ok(html.includes("Project discounts") && html.includes("ColorSource 40") && html.includes("12%") && html.includes("Reg #4471") && html.includes("2 lines") && html.includes("+ Add") && html.includes("ETC:CS40"),
+    "#366 card: one entry renders its part, 12%, the note, the lines it hits (a line + an assembly part = 2) and + Add");
+  const one = pd366Render(pd366El(PD366Card, { sections: [pd366Sec([pd366Line({})])], discounts: pd366D, onSet: noop, onRemove: noop }));
+  ok(one.includes("1 line<") && !one.includes("1 lines"), "#366 card: \"1 line\" (singular)");
+  ok(pd366Render(pd366El(PD366Card, { sections: [pd366Sec([pd366Line({ sku: "CUSTOM" }), pd366Line({ id: 2, labor: true })])], discounts: {}, onSet: noop, onRemove: noop })) === "",
+    "#366 card: no discounts and nothing discountable → the card renders nothing");
+  ok(pd366Render(pd366El(PD366Card, { sections: [pd366Sec([pd366Line({})])], discounts: {}, onSet: noop, onRemove: noop })).includes("+ Add"),
+    "#366 card: no discounts yet but a discountable part → the card shows with + Add");
+  const ed = pd366Render(pd366El(PD366Editor, { sku: "ETC:CS40", label: "ColorSource 40", entry: pd366D["ETC:CS40"], normalCost: 2000, hits: 3, onSave: noop, onRemove: noop, onClose: noop }));
+  ok(ed.includes("% off our cost") && ed.includes('value="12"') && ed.includes('value="Reg #4471"') && ed.includes("Normal $2,000.00 → $1,760.00") && ed.includes(">Remove<") && ed.includes('maxLength="200"'),
+    "#366 editor: prefilled % and note, a live normal → discounted preview, Remove for an existing entry, a 200-char note");
+  const ed0 = pd366Render(pd366El(PD366Editor, { sku: "ETC:CS40", label: "x", normalCost: 0, hits: 1, onSave: noop, onRemove: noop, onClose: noop }));
+  ok(ed0.includes(PD366Copy.noCost) && !ed0.includes(">Save<") && !ed0.includes(">Remove<"), "#366 editor: a part with no cost says so and offers no Save");
+  ok(PD366Copy.applied(3) === "Applied to 3 lines" && PD366Copy.applied(1) === "Applied to 1 line" && PD366Copy.chip(12) === "−12% project" && PD366Copy.badPct === "Enter a % between 0 and 100",
+    "#366 copy: Applied to N lines, the −12% project chip, the inline % error");
+  ok(pd366Lines(secs, "ETC:CS40") === 2 && pd366Lines(secs, "ETC:CBL") === 1 && pd366Lines(secs, "NOPE") === 0, "#366 card: linesForSku counts lines and parts whether or not a discount is set");
+  ok(pd366Key({ B: { pct: 5, note: "n", by: "u1", at: 1 }, A: { pct: 3, note: "", by: "", at: 0 } }) === pd366Key({ A: { pct: 3, note: "", by: "u9", at: 9 }, B: { pct: 5, note: "n", by: "", at: 0 } }) &&
+     pd366Key({ A: { pct: 3, note: "x", by: "", at: 0 } }) !== pd366Key({ A: { pct: 3, note: "", by: "", at: 0 } }),
+    "#366 hook: the unsaved-discounts key covers SKU / pct / note only (order and by/at don't matter)");
+
+  const card = rd("src/app/(app)/estimator/project-discounts-card.tsx");
+  ok(!/from "@\/lib\/stores\/|from "@\/db/.test(card) && card.startsWith('"use client";'), "#366 card: a client component that imports no store or DB");
+  const sc = rd("src/app/(app)/estimator/section-card.tsx");
+  ok(sc.includes('const discountSku = isInternal && p.projectDiscounts && p.onSetProjectDiscount ? discountSkuOf(it) : "";') &&
+     /\{isInternal && \(\s*<div style=\{\{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 \}\}>[\s\S]{0,900}\{p\.projectDiscounts && \(\(\) => \{/.test(sc) &&
+     sc.includes("PROJECT_DISCOUNT_COPY.chip(pct)") && sc.includes('className="est-pd-trigger"') && sc.includes("{discountPanel}"),
+    "#366 line: the −N% project chip and the % project trigger live inside the internal-only Unit cost cell; the editor opens inline under the line");
+  const bs = rd("src/app/(app)/estimator/steps/build-step.tsx");
+  ok(/\{isInternal && \(\s*<ProjectDiscountsCard sections=\{sections\} discounts=\{projectDiscounts\} onSet=\{setProjectDiscount\} onRemove=\{removeProjectDiscount\} \/>/.test(bs) &&
+     /\{\.\.\.\(isInternal\s*\?\s*\{\s*projectDiscounts,\s*onSetProjectDiscount: setProjectDiscount,/.test(bs) &&
+     bs.indexOf("<ProjectDiscountsCard") > bs.indexOf("Cost breakdown") && bs.indexOf("<ProjectDiscountsCard") < bs.indexOf("<RewardCreditPanel"),
+    "#366 build: the card sits under Cost breakdown and, like the line props, only in the internal view");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  const fxAt = hook.indexOf("setSectionsState((cur) => applyProjectDiscounts(cur, projectDiscounts));");
+  ok(fxAt > 0 && fxAt < hook.indexOf("withBonusLines(cur, nextId, bonusRatesFor(status, cur, bonusRates))") && hook.includes("}, [sections, projectDiscounts]);"),
+    "#366 hook: an effect re-applies the map after every sections / map change, declared before the bonus effect (bonus lines see stamped lines)");
+  ok(/document: docNow,\n\s*\/\/ #366[^\n]*\n\s*projectDiscounts,\n\s*\}\);/.test(hook) && (hook.match(/loadedId \|\| null,\n\s*(\/\/ #366[^\n]*\n\s*)?projectDiscounts( \/\/ #366)?\n/g) || []).length === 3,
+    "#366 hook: the map rides every Save, and Move system / Copy system / Move lines → another estimate all send it");
+  ok(hook.includes("useState<ProjectDiscounts>(() => initial.projectDiscounts ?? {})") && hook.includes("setSavedDiscountsKey(projectDiscountsKey(discountsAtSave));") &&
+     hook.includes("|| projectDiscountsKey(projectDiscounts) !== savedDiscountsKey;"),
+    "#366 hook: loads the map, and an unsaved discount edit (even a note) holds the window until a Save");
+  ok(/\n    projectDiscounts,\n    setProjectDiscount,\n    removeProjectDiscount,\n/.test(hook), "#366 hook: returns the map and its set / remove actions");
+}
+  ok(pd366Apply([pd366Sec([pd366Line({ custom: true })])], pd366D)[0].items[0].cost === 2000, "#366 core: a custom line is never discounted, even one saved with a real catalog SKU (its cost is typed by hand)");
+
+/* --- #366: the Review spreadsheet names project pricing (price source + note) --- */
+import { partsListRows as pd366Rows, reviewSheetModel as pd366Model, partsRowNotes as pd366Notes } from "@/app/(app)/estimator/parts-csv";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const info = { "ETC:CS40": { mfr: "ETC", desc: "ColorSource 40" }, "ETC:CBL": { mfr: "ETC", desc: "Cable" } };
+  const base = [pd366Sec([pd366Line({}), pd366Line({ id: 2, sku: "ETC:CS40", sellOverride: true, price: 3100 }), { ...pd366Asm(), id: 3 }], { kind: "materials" } as Partial<PD366Section>)];
+  const secs = pd366Apply(base, pd366D);
+  const rows = pd366Rows(secs, [], info, "", pd366D);
+  const plain = rows.find((r) => r.sku === "ETC:CS40" && r.partOf.length === 0 && r.lineSell === 3000);
+  ok(!!plain && plain.source === "Catalog — project discount 12%" && plain.unitCost === 1760 && pd366Notes(plain).includes("Project pricing: Reg #4471"),
+    "#366 sheet: a discounted line reads \"Catalog — project discount 12%\", Unit Cost is the discounted cost, Notes carry \"Project pricing: <note>\"");
+  const edited = rows.find((r) => r.sku === "ETC:CS40" && r.partOf.length === 0 && r.lineSell === 3100);
+  ok(!!edited && edited.source === "Catalog — project discount 12% · sell edited", "#366 sheet: a discounted line whose sell was edited keeps saying so");
+  const part = rows.find((r) => r.sku === "ETC:CS40" && r.partOf.length > 0);
+  const cable = rows.find((r) => r.sku === "ETC:CBL");
+  ok(!!part && part.source === "Catalog — project discount 12%" && part.unitCost === 1760 && pd366Notes(part).includes("Project pricing: Reg #4471") && !!cable && cable.source === "Catalog",
+    "#366 sheet: a discounted part inside an assembly gets the same label and note; its undiscounted sibling stays \"Catalog\"");
+  ok(!rows.some((r) => /Cost adjustment/.test(r.desc)), "#366 sheet: a discounted assembly needs no cost-adjustment row (line cost = Σ its parts' discounted costs)");
+  const undiscRows = pd366Rows(base, [], info, "", {});
+  const sellOf = (rs: typeof rows, sku: string) => rs.filter((r) => r.sku === sku && r.partOf.length > 0).map((r) => Math.round(r.lineSell * 100) / 100).join();
+  ok(sellOf(rows, "ETC:CS40") === sellOf(undiscRows, "ETC:CS40") && sellOf(rows, "ETC:CBL") === sellOf(undiscRows, "ETC:CBL"),
+    "#366 sheet: an assembly's sell is shared out by its parts' NORMAL costs — each part's sell is the same with or without the discount");
+  // An undiscounted copy of the same part (here: another estimate's line, mixed in) stays its own row.
+  const mixed = [pd366Sec([...secs[0].items.slice(0, 1), pd366Line({ id: 9 })], { kind: "materials" } as Partial<PD366Section>)];
+  const mixedRows = pd366Rows(mixed, [], info, "", pd366D).filter((r) => r.sku === "ETC:CS40");
+  ok(mixedRows.length === 2 && mixedRows.some((r) => r.source === "Catalog") && mixedRows.some((r) => r.source.startsWith("Catalog — project discount")),
+    "#366 sheet: a discounted and an undiscounted copy of one part never merge (the source is in the key)");
+  ok(pd366Rows(secs, [], info).every((r) => !r.notes.some((n) => n.startsWith("Project pricing"))), "#366 sheet: without the map (older callers) no note is added");
+  ok(pd366Model(secs, [], info, "", pd366D)[0].rows.some((r) => r.source === "Catalog — project discount 12%"), "#366 sheet: reviewSheetModel passes the map through");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  ok(hook.includes("reviewSheetModel(sections, vendorQuotes, info, venueRoomName, projectDiscounts)"), "#366 sheet: More ▾ → Review spreadsheet hands the estimate's discounts to the model");
+}
+
+/* --- #366: the won project keeps "Project pricing to request" --- */
+import { projectPricingFrom as pd366Pricing } from "@/lib/project-discounts/rules";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const secs = pd366Apply([
+    pd366Sec([pd366Line({ manufacturerModelNumber: "CS40" }), pd366Line({ id: 2, qty: 3 }), { ...pd366Asm(), id: 3, qty: 2 }, pd366Line({ id: 4, qty: 5, option: true })]),
+    pd366Sec([pd366Line({ id: 5, qty: 7 })], { id: "s2", alternate: true }),
+  ], pd366D);
+  const rows = pd366Pricing(secs, pd366D);
+  ok(rows.length === 1 && rows[0].sku === "ETC:CS40" && rows[0].qty === 2 + 3 + 2 * 1 && rows[0].pct === 12 && rows[0].normalCost === 2000 && rows[0].expectedCost === 1760 &&
+     rows[0].note === "Reg #4471" && rows[0].desc === "ColorSource 40" && rows[0].model === "CS40",
+    "#366 project: one row per discounted SKU — qty summed over lines and assembly parts (line qty × part qty), per-unit normal / expected cost, note, model");
+  ok(pd366Pricing(secs, {}).length === 0 && pd366Pricing([pd366Sec([pd366Line({ sku: "X:OTHER" })])], pd366D).length === 0,
+    "#366 project: nothing when the estimate has no discounts, or no line hits one (option lines and alternate systems aren't bought)");
+  const two = pd366Pricing(pd366Apply([pd366Sec([pd366Asm()])], { ...pd366D, "ETC:CBL": { pct: 5, note: "", by: "u", at: 1 } }), { ...pd366D, "ETC:CBL": { pct: 5, note: "", by: "u", at: 1 } });
+  ok(two.length === 2 && two.find((r) => r.sku === "ETC:CBL")?.qty === 4 && two.find((r) => r.sku === "ETC:CBL")?.model === "CBL", "#366 project: assembly parts each get their own row (2 assemblies × 2 cables = 4; model from the Brand:Model SKU)");
+  const proj = rd("src/lib/stores/projects.ts");
+  const fq = proj.slice(proj.indexOf("function fromQuote("), proj.indexOf("\n}\n", proj.indexOf("function fromQuote(")));
+  ok(fq.includes("const pricing = projectPricingFrom(") && fq.includes("sanitizeProjectDiscounts(") && fq.includes("...(pricing.length ? { projectPricing: pricing } : {}),") && proj.includes("projectPricing?: ProjectPricingRow[];"),
+    "#366 project: fromQuote freezes projectPricing at Won, only when non-empty");
+  const view = rd("src/app/(app)/projects/view.tsx");
+  ok(view.includes("Project pricing to request") && /\{p\.projectPricing && p\.projectPricing\.length > 0 && <ProjectPricingCard rows=\{p\.projectPricing\} \/>\}/.test(view) && view.includes("Ask the vendor for this project pricing when ordering."),
+    "#366 project: the project page shows the card only when there is project pricing");
+}
+
+/* --- #366: customer surfaces read sell only — a discount changes no customer row --- */
+import { customerLines as pd366CustomerLines } from "@/app/(app)/estimator/pricing";
+{
+  const mk = (): PD366Section => pd366Sec([
+    pd366Line({ id: 1, price: 2857.14 }),
+    pd366Line({ id: 2, sku: "LAB-INST", desc: "Install", qty: 8, unit: "hr", cost: 60, price: 95, labor: true, mob: { type: "Install", days: 2, crew: 2, discipline: "RIG" } }),
+    pd366Line({ id: 4, sku: "LAB-SHOP-1", desc: "Shop & engineering", qty: 1, unit: "lot", cost: 300, price: 450, labor: true, laborOverhead: "shop" }),
+    { ...pd366Asm(), id: 3 },
+  ], { freightPct: 3, priceRound: 25 });
+  const bon = (s: PD366Section[]) => pd366Bonus(s, pd366Ids(s));
+  const rows = (s: PD366Section) => JSON.stringify(pd366CustomerLines(s).map((r) => [r.item ? r.item.id : r.desc, r.item ? r.item.desc : "", Math.round(r.ext * 100) / 100]));
+  const base = bon([mk()]);
+  const disc = bon(pd366Apply([mk()], pd366D));
+  ok(rows(base[0]) === rows(disc[0]) && pd366CustomerLines(disc[0]).length > 0, "#366 customer: the customer rows (what the PDF, online estimate, package page and portal print) are identical with a discount");
 }

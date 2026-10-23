@@ -170,7 +170,22 @@ export function rewriteQuoteSpec(spec: unknown, m: RenameMap, models: RenameMap)
   if (lines) patch.lines = lines;
   const pkgDoc = rewritePackageDocSkus(spec.document, m);
   if (pkgDoc) patch.document = pkgDoc;
+  const discounts = rewriteDiscountKeys(spec.projectDiscounts, m);
+  if (discounts) patch.projectDiscounts = discounts;
   return overlay(spec, patch);
+}
+
+/** #366 — a quote's project discounts are keyed by SKU, so the keys follow a rename with the lines (else the
+ *  next apply would read a renamed line as undiscounted). An entry already under the new SKU wins. Key order kept. */
+function rewriteDiscountKeys(rec: unknown, m: RenameMap): Rec | null {
+  if (!isRec(rec) || !Object.keys(rec).some((k) => m.has(k))) return null;
+  const out: Rec = {};
+  for (const [k, v] of Object.entries(rec)) {
+    const to = m.get(k) ?? k;
+    if (to !== k && Object.hasOwn(rec, to)) continue;
+    if (!Object.hasOwn(out, to)) out[to] = v;
+  }
+  return out;
 }
 
 /**

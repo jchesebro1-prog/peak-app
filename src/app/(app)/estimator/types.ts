@@ -19,6 +19,7 @@ import type { SystemIntro } from "@/lib/narrative/intros";
 import type { EstimateSuggestionView, SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 import type { VendorPdfExtraction } from "@/lib/vendor-pdf/extraction";
 import type { VendorPdfReadUi } from "@/lib/vendor-pdf/fill";
+import type { ProjectDiscounts } from "@/lib/project-discounts/rules";
 import type { PaymentTerms, SpecSection, TrackPart, FabricOpt, TravelLite } from "@/lib/estimating-core/types";
 export * from "@/lib/estimating-core/types";
 
@@ -266,6 +267,8 @@ export type InitialQuote = {
   groups: SystemGroup[];
   /** Estimator Phase 5 — the Build package document (spec.document, sanitized); null = none. */
   document: PackageDoc | null;
+  /** #366 — the estimate's project discounts (spec.projectDiscounts, sanitized); absent / {} = none. */
+  projectDiscounts?: ProjectDiscounts;
   /** Imported vendor quotes (#143) — top-level on the doc, not in spec. */
   vendorQuotes: VendorQuote[];
   /** #160 / D205 — the draft this new estimate replaces ("Change type"); "" otherwise.
