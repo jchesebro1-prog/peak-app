@@ -71379,3 +71379,49 @@ import { withoutDemoPrice as etc368Without } from "@/lib/stores/catalog";
   const stripped = etc368Without({ sku: "A", list: 1, demoPrice: 5, demoPricedAt: 9 });
   ok(!("demoPrice" in stripped) && !("demoPricedAt" in stripped) && (stripped as { list?: number }).list === 1, "#368 catalog: withoutDemoPrice drops both fields and keeps the rest");
 }
+
+/* --- #368 catalog: the Connect ETC drawer + actions --- */
+import { createElement as etc368El } from "react";
+import { renderToStaticMarkup as etc368Render } from "react-dom/server";
+import { AppRouterContext as Etc368RouterCtx } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import { EtcConnectPanel as Etc368Panel, ETC_PANEL_COPY as ETC368_COPY, runLine as etc368RunLine } from "@/app/(app)/catalog/etc-connect-panel";
+import type { EtcStatus as Etc368Status } from "@/lib/dealer-api/connections";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const router = { push() {}, replace() {}, refresh() {}, back() {}, forward() {}, prefetch() {} };
+  const render = (isAdmin: boolean, s: Partial<Etc368Status>) => etc368Render(etc368El(Etc368RouterCtx.Provider, { value: router as never },
+    etc368El(Etc368Panel, { isAdmin, initial: { connected: false, last4: null, savedAt: null, savedBy: null, unreadable: false, accountId: null, accountName: null, baseline: null, lastRun: null, importing: null, preview: false, disabled: false, ...s } })));
+  const empty = render(true, {});
+  ok(empty.includes(ETC368_COPY.notConnected) && empty.includes('type="password"') && empty.includes('autoComplete="off"') && empty.includes(">Save<") && !empty.includes("Pull prices"),
+    "#368 drawer (admin, no key): Not connected, a password field and Save; no Pull before a key + account");
+  const conn = render(true, { connected: true, last4: "ABCD", accountId: "ba-1", accountName: "Peak Systems", baseline: { date: "2026-10-23", at: 1 } });
+  ok(conn.includes("Peak Systems") && conn.includes("••••ABCD") && conn.includes(">Replace<") && conn.includes(">Remove<") && conn.includes(">Test connection<") && conn.includes("Pull prices") &&
+     conn.includes(ETC368_COPY.dailyOn("2026-10-23")) && !conn.includes('type="password"'),
+    "#368 drawer (admin, connected): account, ••••ABCD, Replace / Remove / Test connection, Pull prices, the daily-sync line");
+  const viewer = render(false, { connected: true, last4: "ABCD", accountId: "ba-1", accountName: "Peak Systems", lastRun: { at: Date.UTC(2026, 9, 23, 16), kind: "daily", ok: false, rows: 0, pending: false, error: "ETC returned 503: down", created: 0, updated: 0, unchanged: 0, demo: 0, demoUnmatched: 0, skipped: 0 } });
+  ok(viewer.includes("Peak Systems") && viewer.includes(ETC368_COPY.adminOnly) && viewer.includes("Daily sync failed") && viewer.includes("ETC returned 503: down") &&
+     !viewer.includes("password") && !viewer.includes("Pull prices") && !viewer.includes(">Remove<") && !viewer.includes(">Save<"),
+    "#368 drawer (not admin): the status line and the last error only — no key field, no Pull, no Remove");
+  const pv = render(true, { connected: true, last4: "ABCD", accountId: "ba-1", accountName: "Peak", preview: true, disabled: true });
+  ok(pv.includes(ETC368_COPY.preview) && pv.includes(ETC368_COPY.disabled) && /<button type="button" class="pk-btn-accent" disabled="">Pull prices<\/button>/.test(pv),
+    "#368 drawer: preview-deploy and disabled notices; Pull is disabled");
+  ok(render(true, { connected: true, last4: "WXYZ", unreadable: true }).includes(ETC368_COPY.unreadable.replace("'", "&#x27;")), "#368 drawer: an unreadable saved key says so");
+  ok(etc368RunLine({ at: Date.UTC(2026, 9, 23, 16), kind: "import", ok: true, rows: 9, pending: false, error: null, created: 3, updated: 1200, unchanged: 5, demo: 2, demoUnmatched: 0, skipped: 1 }) === "Import Oct 23, 11:00 AM: 3 new, 1,200 price changes, 5 unchanged, 2 demo prices, 1 skipped.",
+    "#368 drawer: the last-run line (Chicago time, counts)");
+  const panel = rd("src/app/(app)/catalog/etc-connect-panel.tsx");
+  ok(panel.startsWith('"use client";') && !/from "@\/lib\/stores\/|from "@\/db|from "@\/lib\/dealer-api\/(connections|etc\/client|etc\/apply|etc\/plan)"/.test(panel.replace(/import type [^\n]*\n/g, "")),
+    "#368 drawer: a client component that value-imports no store, DB or ETC server module (types only)");
+  const ctl = rd("src/app/(app)/catalog/controls.tsx");
+  ok(ctl.includes('{method === "api" && <EtcConnectPanel isAdmin={etc.isAdmin} initial={etc.status} />}') && !ctl.includes("on the roadmap") && ctl.includes("Live ETC dealer pricing with an API key."),
+    "#368 drawer: Connect a manufacturer renders the ETC panel (the roadmap stub is gone)");
+  const page = rd("src/app/(app)/catalog/page.tsx");
+  ok(page.includes("etc={{ isAdmin, status: await etcStatus() }}") && page.includes("ETC demo price (internal):"), "#368 catalog page: the drawer gets the safe status; the part editor shows the internal demo price line");
+  const acts = rd("src/app/(app)/catalog/etc-actions.ts");
+  const bodies = acts.split(/\nexport async function /).slice(1);
+  const name = (b: string) => b.slice(0, b.indexOf("("));
+  ok(acts.startsWith('"use server";') && bodies.length === 7 &&
+     bodies.filter((b) => name(b) !== "etcStatusAction").every((b) => /^  (const user = )?await requirePerm\("manage_users"\);$/.test(b.split("\n")[1])) &&
+     (bodies.find((b) => name(b) === "etcStatusAction") || "").split("\n")[1] === "  await requireUser();",
+    "#368 actions: every ETC action is admin-only (requirePerm manage_users first); the status read needs a signed-in user");
+  ok(!/etcSecret|keyEnc|decryptWith/.test(acts) && !/etcSecret|keyEnc/.test(panel), "#368 actions: no action or the panel touches the secret or its ciphertext");
+}

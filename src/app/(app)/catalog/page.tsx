@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getSettings } from "@/lib/settings";
 import { list, get, withoutDemoPrice, type CatalogPart } from "@/lib/stores/catalog";
+import { etcStatus } from "@/lib/dealer-api/connections";
 import { dateYear, money } from "@/lib/format";
 import { partSearchHaystack, staffPartLabel } from "@/lib/catalog-rename/sku";
 import { effectivePriceDate, isoDateOf, mfrKey, priceBooks } from "@/lib/catalog-books";
@@ -676,7 +677,7 @@ export default async function CatalogPage({
       {/* #271 — import price book is a slide-over drawer, not a third column */}
       {importOpen && (
         <Drawer title="Import price book" closeHref={hrefForImport(hrefFor, false)}>
-          <CatalogImportPanel manufacturers={manufacturers.filter((m) => m !== UNSPEC)} accent="var(--accent)" today={isoDateOf(Date.now())} />
+          <CatalogImportPanel manufacturers={manufacturers.filter((m) => m !== UNSPEC)} accent="var(--accent)" today={isoDateOf(Date.now())} etc={{ isAdmin, status: await etcStatus() }} />
         </Drawer>
       )}
 
@@ -1000,6 +1001,13 @@ function PartFormModal({
                 {priceDate
                   ? `Price effective ${dateYear(priceDate)} — moves when the list price or cost changes here, or when a price file that lists this part is imported.`
                   : "No price date yet — a price change here, a price file that lists this part, or the manufacturer's price-list date on the Catalog banner sets one."}
+              </div>
+            )}
+            {/* #368 — ETC's demo-equipment price: internal only, shown nowhere else. */}
+            {editing && part && typeof part.demoPrice === "number" && part.demoPrice > 0 && (
+              <div style={{ fontSize: 11.5, color: "#5b616e", marginTop: -7, marginBottom: 13 }}>
+                ETC demo price (internal): <b>{money(part.demoPrice, { cents: true })}</b>
+                {typeof part.demoPricedAt === "number" ? ` · set ${dateYear(part.demoPricedAt)}` : ""}
               </div>
             )}
             <div style={{ marginBottom: 4 }}>
