@@ -37,6 +37,7 @@ import { bidderEmailDefaults, estimateEmailDefaults } from "../src/lib/estimate-
 import { packageViewModel } from "../src/lib/estimate-output/package-model";
 import { boxSaleExtras } from "../src/lib/estimate-output/package-extras-model";
 import PackageView from "../src/components/estimate-output/package-view";
+import { renderQuoteDocument293 } from "./qd293-cases";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BUILDER_BASE, builderPath, isServiceType, SERVICE_TYPES } from "../src/app/(app)/quotes/new/types";
@@ -548,6 +549,26 @@ function bomToggleChecks(ok: Ok) {
     "box sale BOM controls (source): the Cover note text (Quote note) is edited in the header's Quote details on every step, not gated on a box sale");
 }
 
+/** #365 after the merge: a box sale's whole document is the BOM view, so it prints "Model — Description" like any BOM view. */
+function modelNumberChecks(ok: Ok) {
+  const parts = { "SKU-1": { sku: "SKU-1", manufacturerModelNumber: "ZZMODEL-1" }, "SKU-2": { sku: "SKU-2", manufacturerModelNumber: "ZZMODEL-2" } };
+  const box = quoteDocumentDataFor(quoteFixture({ boxSale: true }), null, SET);
+  const plain = quoteDocumentDataFor(quoteFixture(), null, SET);
+  const render = (d: typeof box, extra: Record<string, unknown> = {}) => renderQuoteDocument293({ ...d, layout: "web", ...extra } as never);
+  ok(box.showModels === true && plain.showModels === undefined, "box sale + #365: the box sale document carries showModels through the one bomViewProps seam; a normal estimate's does not");
+  const html = render(box, { bomModelParts: parts });
+  ok(html.includes("ZZMODEL-1 — Part 1") && html.includes("ZZMODEL-2 — Part 2"), "box sale + #365: a box sale document prints \"Model — Description\" on every plain catalog line, narrative-flagged systems included");
+  ok(!render(box).includes("ZZMODEL") && !render(plain, { bomModelParts: parts }).includes("ZZMODEL"), "box sale + #365: no model without the catalog read, and a normal estimate's document never prints one");
+  const pr = rd("src/app/print/quote/[id]/page.tsx");
+  const at = pr.indexOf("if (bomLayout) {");
+  ok(at > 0 && pr.slice(at, pr.indexOf("return (", at)).includes("loadBomModelPartsFor(doc.sections)") && pr.includes("bomModelParts={bomModelParts}"),
+    "box sale + #365 (source): the print route's bomLayout branch (BOM PDF and a box sale's whole PDF) reads the models");
+  const gate = 'view === "bom" || docProps.showModels === true ? await loadBomModelPartsFor(docProps.sections) : undefined';
+  ok(rd("src/app/portal/quotes/[id]/page.tsx").includes(gate) && rd("src/app/share/quote/[id]/[token]/page.tsx").includes(gate) &&
+    rd("src/components/online-estimate/online-estimate.tsx").includes("docProps.showModels === true ? { ...docProps, bomModelParts } : docProps"),
+    "box sale + #365 (source): the portal and share pages read the models for a box sale on the default view too, and OnlineEstimateView passes them");
+}
+
 // (later tasks: check functions above this line)
 
 export async function boxSalePureChecks(ok: Ok) {
@@ -561,6 +582,7 @@ export async function boxSalePureChecks(ok: Ok) {
   intakeChecks(ok);
   await finalReviewChecks(ok);
   bomToggleChecks(ok);
+  modelNumberChecks(ok);
   // (later tasks: pure checks above this line)
 }
 

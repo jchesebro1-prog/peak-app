@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import QuoteDocument, { QUOTE_PRINT_CSS, QUOTE_WEB_EMBED_CSS } from "@/app/(app)/estimator/quote-document";
 import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";
+import { loadBomModelPartsFor } from "@/lib/estimate-output/bom-models-server";
 import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
 import { pdfKindForQuoteType, type PdfKind } from "@/lib/quote-pdf/state";
 import { verifyPrintToken } from "@/lib/quote-pdf/token";
@@ -107,12 +108,15 @@ export default async function PrintQuotePage({
   if (part === "tail" && !links.length) notFound();
   const doc = quoteDocumentDataFor(src, cust, settings, addressee);
   if (bomLayout) {
+    // #365: each plain catalog line prints "Model — Description" (never throws: a failed read prints descriptions only).
+    // A box sale's whole PDF takes this branch too, so it gets the models like any BOM view.
+    const bomModelParts = await loadBomModelPartsFor(doc.sections);
     return (
       <main>
         <style>{QUOTE_PRINT_CSS}</style>
         {/* The BOM tab's own layout (web: no title page, the investment band kept) — Jeff, 2026-10-20. */}
         <style>{QUOTE_WEB_EMBED_CSS}</style>
-        <QuoteDocument {...bomViewProps(doc)} layout="web" rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
+        <QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout="web" rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
       </main>
     );
   }

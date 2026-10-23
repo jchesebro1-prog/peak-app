@@ -13,6 +13,7 @@ import { documentApplies } from "@/lib/package-doc/print";
 import type { PackageDoc } from "@/lib/package-doc/types";
 import { photoFigureStyle, photoImgStyle, photoTagStyle, spreadPhotoAnchors } from "@/lib/estimate-output/photo-spread";
 import { photoTagText } from "@/lib/estimate-output/photo-models";
+import { bomLineModel, bomLineText, type BomModelParts } from "@/lib/estimate-output/bom-models";
 
 /**
  * The customer quote document (#222) — ONE component for both places it
@@ -122,6 +123,16 @@ export type QuoteDocumentProps = {
   showMaterials?: boolean;
   showLabor?: boolean;
   showFreight?: boolean;
+  /** #365 — BOM-view render flag, set only by bomViewProps. Exactly `true`
+   *  WITH `bomModelParts` prints each plain catalog line (and option row) as
+   *  "Model — Description" (bom-models.ts); anything else renders
+   *  byte-for-byte as before. */
+  showModels?: boolean;
+  /** #365 — trimmed sku → the catalog's model fields for the BOM's lines,
+   *  loaded by the four BOM callers (loadBomModelPartsFor on the server,
+   *  bomModelPartsAction in the live tab). Read only with `showModels`;
+   *  absent (or a failed read) = descriptions only. */
+  bomModelParts?: BomModelParts;
 };
 
 /** Page CSS for the print route: Letter, 0.6in margins, the on-screen sheet
@@ -418,6 +429,12 @@ function ItemizedLines(props: {
   );
 }
 
+/** #365 — the model a BOM line prints, or "" (every non-BOM document, and a
+ *  BOM with no model read). */
+function bomModelOf(it: SpecItem, p: QuoteDocumentProps): string {
+  return p.showModels === true && p.bomModelParts ? bomLineModel(it, p.bomModelParts) : "";
+}
+
 /** One printed system — band number, name, subtotal, narrative / key
  *  products and the customer rows. Built once per system for the body
  *  (numbered 1, 2…) and the Phase 2b Alternates block (A1, A2…). */
@@ -484,9 +501,11 @@ function docSystem(sec: SpecSection, num: number | string, p: QuoteDocumentProps
               : it.allowance
               ? "Budget allowance — " + it.desc
               : it.desc;
+            // #365: the BOM view prints a plain catalog line as "Model — Description".
+            const model = bomModelOf(it, p);
             return {
               key: String(it.id),
-              desc,
+              desc: model ? bomLineText(desc, model) : desc,
               comment: (it.comment || "").trim(),
               showComment: !!(p.pdfNotes && it.comment && it.comment.trim()),
               /* Qty/unit stay SEPARATE from the text (#143 re-review):
@@ -625,7 +644,7 @@ function SystemBody({ ps, p, lineCols, freightRowLabel, alternate, photoSides }:
 
 /** One priced option row — the Optional additions box (note = the system's
  *  name) and, Phase 2b, an alternate system's own option lines. */
-function OptionRow({ it, note, lineCols, pdfQty, pdfPrices }: { it: SpecItem; note: string; lineCols: string; pdfQty: boolean; pdfPrices: boolean }) {
+function OptionRow({ it, note, lineCols, pdfQty, pdfPrices, model }: { it: SpecItem; note: string; lineCols: string; pdfQty: boolean; pdfPrices: boolean; model?: string }) {
   return (
     <div
       className="est-line"
@@ -640,7 +659,8 @@ function OptionRow({ it, note, lineCols, pdfQty, pdfPrices }: { it: SpecItem; no
       }}
     >
       <span>
-        {it.desc}
+        {/* #365: "Model — Description" in the BOM view only (model is "" everywhere else). */}
+        {model ? bomLineText(it.desc, model) : it.desc}
         <span style={{ display: "block", fontSize: 10.5, color: "#9aa0ab", marginTop: 1 }}>
           {note}
         </span>
@@ -1013,7 +1033,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                       {options.length > 0 && (
                         <div style={{ padding: "0 13px", marginBottom: 6 }}>
                           {options.map((it) => (
-                            <OptionRow key={"alt-opt-" + it.id} it={it} note="Optional — not included in this alternate’s price" lineCols={lineCols} pdfQty={p.pdfQty} pdfPrices={p.pdfPrices} />
+                            <OptionRow key={"alt-opt-" + it.id} it={it} note="Optional — not included in this alternate’s price" lineCols={lineCols} pdfQty={p.pdfQty} pdfPrices={p.pdfPrices} model={bomModelOf(it, p)} />
                           ))}
                         </div>
                       )}
@@ -1052,7 +1072,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                 </span>
               </div>
               {optionItems.map(({ sec, it }) => (
-                <OptionRow key={sec + "-" + it.id} it={it} note={sec} lineCols={lineCols} pdfQty={p.pdfQty} pdfPrices={p.pdfPrices} />
+                <OptionRow key={sec + "-" + it.id} it={it} note={sec} lineCols={lineCols} pdfQty={p.pdfQty} pdfPrices={p.pdfPrices} model={bomModelOf(it, p)} />
               ))}
               <div style={{ fontSize: 11, color: "#8c919c", marginTop: 8, lineHeight: 1.5 }}>
                 Want any of these included? Let us know and we’ll issue a revised quote.

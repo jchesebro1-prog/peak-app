@@ -1,8 +1,10 @@
 "use client";
 
-import { memo, useMemo, useState, type CSSProperties } from "react";
+import { memo, useEffect, useMemo, useState, type CSSProperties } from "react";
 import QuoteDocument, { QUOTE_WEB_EMBED_CSS } from "../quote-document";
 import { liveBomDocumentProps } from "@/lib/estimate-output/live-bom";
+import { bomModelSkus, type BomModelPart, type BomModelParts } from "@/lib/estimate-output/bom-models";
+import { bomModelPartsAction } from "../actions";
 import { previewPath } from "@/lib/estimate-output/package-preview";
 import { bomPdfPath } from "@/lib/estimate-output/bom-pdf";
 import type { EstimatorState } from "../use-estimator-state";
@@ -129,6 +131,39 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
   const [shown, setShown] = useState<LiveBomInput | null>(null);
   if (active && shown !== input) setShown(input);
   const props = useMemo(() => (shown ? liveBomDocumentProps(shown) : null), [shown]);
+  // #365 — "Model — Description" on each plain catalog line. The SKUs come from
+  // the SHOWN input, so a hidden tab reads nothing (review K); each SKU is read
+  // once through bomModelPartsAction (the saved views' own catalog read) and a
+  // miss is remembered as null. Until the first read lands — or if it fails —
+  // the tab prints descriptions only.
+  const [modelCache, setModelCache] = useState<Record<string, BomModelPart | null>>({});
+  const modelSkus = useMemo(() => bomModelSkus(shown?.sections), [shown]);
+  const missingSkus = modelSkus.filter((sku) => !Object.prototype.hasOwnProperty.call(modelCache, sku)).join("\n");
+  useEffect(() => {
+    if (!missingSkus) return;
+    const want = missingSkus.split("\n");
+    let stale = false;
+    bomModelPartsAction(want)
+      .then((got) => {
+        if (stale) return;
+        setModelCache((c) => {
+          const next = { ...c };
+          for (const sku of want) next[sku] = Object.prototype.hasOwnProperty.call(got, sku) ? got[sku] : null;
+          return next;
+        });
+      })
+      .catch(() => {
+        /* descriptions only — the next SKU change asks again */
+      });
+    return () => {
+      stale = true;
+    };
+  }, [missingSkus]);
+  const bomModelParts = useMemo((): BomModelParts | undefined => {
+    const hits = Object.entries(modelCache).filter((e): e is [string, BomModelPart] => e[1] !== null);
+    return Object.keys(modelCache).length ? Object.fromEntries(hits) : undefined;
+  }, [modelCache]);
+  const docProps = useMemo(() => (props && bomModelParts ? { ...props, bomModelParts } : props), [props, bomModelParts]);
   const empty = (shown?.sections ?? sections).every((sec) => !sec.items.length);
 
   return (
@@ -240,8 +275,8 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
           <div style={{ background: "#fff", border: "1px solid #e4e7ec", borderRadius: 12, padding: "40px 24px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#5b616e" }}>
             {BOM_TAB_COPY.empty}
           </div>
-        ) : props ? (
-          <BomDocument props={props} />
+        ) : docProps ? (
+          <BomDocument props={docProps} />
         ) : null}
       </div>
     </div>
