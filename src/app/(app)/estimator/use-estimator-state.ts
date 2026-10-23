@@ -52,8 +52,9 @@ import { fillEmptyKeyProductText, isKeyProductEligible, isLineToken, keyProductS
 import { loadNotice, placeLoadedSection, type LoadedLibrarySystem } from "@/lib/narrative/system-library";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
-import { PARTS_CSV_HEADER, partsListCsvRows, partsListRows, partsListSkus, type PartInfo } from "./parts-csv";
-import { downloadCsv, fileStem } from "../design/export";
+import { partsListSkus, reviewSheetModel, type PartInfo } from "./parts-csv";
+import { downloadReviewSheet } from "./review-sheet-xlsx";
+import { fileStem } from "../design/export";
 import { curtainTrackDraft, curtainTrackPrefill, followCurtainPrefill, freshTrackDraft, replaceTrackLine, trackConfigFromDraft, trackDraftFromConfig, trackLine, type CurtainTrackPrefill } from "./track-bom";
 import { customDraftFromLine, isCustomLineEditable, costUntouched, saveCustomEdit, sellUntouched } from "./custom-part-edit";
 import { applyCurtainEdit, curtainDraftFromLine, curtainDraftValid, curtainItem } from "./curtain-line";
@@ -524,6 +525,11 @@ export function useEstimatorState(props: EstimatorProps) {
   const [pdfItemizedAppendix, setPdfItemizedAppendix] = useState(initial.pdfOptions.pdfItemizedAppendix);
   const [pdfCutSheets, setPdfCutSheets] = useState(initial.pdfOptions.pdfCutSheets);
   const [detail, setDetail] = useState<"itemized" | "sectioned">(initial.pdfOptions.detail);
+  // #364 — Build package → BOM quote → Show on BOM (the BOM view only).
+  const [bomLinePrices, setBomLinePrices] = useState(initial.pdfOptions.bomLinePrices);
+  const [bomMaterials, setBomMaterials] = useState(initial.pdfOptions.bomMaterials);
+  const [bomLabor, setBomLabor] = useState(initial.pdfOptions.bomLabor);
+  const [bomFreight, setBomFreight] = useState(initial.pdfOptions.bomFreight);
   /** #305 — one Show-on-PDF toggle (#333: Build package → Client package). */
   const togglePdf = (flag: PdfToggle) => {
     if (flag === "pdfQty") setPdfQty((v) => !v);
@@ -533,12 +539,16 @@ export function useEstimatorState(props: EstimatorProps) {
     else if (flag === "pdfOptions") setPdfOptions((v) => !v);
     else if (flag === "pdfItemizedAppendix") setPdfItemizedAppendix((v) => !v);
     else if (flag === "pdfCutSheets") setPdfCutSheets((v) => !v);
+    else if (flag === "bomLinePrices") setBomLinePrices((v) => !v);
+    else if (flag === "bomMaterials") setBomMaterials((v) => !v);
+    else if (flag === "bomLabor") setBomLabor((v) => !v);
+    else if (flag === "bomFreight") setBomFreight((v) => !v);
     else setPdfTerms((v) => !v);
   };
   /** #222 — the Show-on-PDF choices, saved with the quote (Quote.pdfOptions). */
   const pdfOpts = useMemo<QuotePdfOptions>(
-    () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets }),
-    [detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets]
+    () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets, bomLinePrices, bomMaterials, bomLabor, bomFreight }),
+    [detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets, bomLinePrices, bomMaterials, bomLabor, bomFreight]
   );
   /** #292 — how many cut sheets the saved PDF would append (client-safe count; never collect.ts). */
   const cutSheetCount = useMemo(() => countCutSheetTypes({ sections }, fabrics.map((f) => ({ sku: f.sku, desc: f.name })), trackSeries), [sections, fabrics, trackSeries]);
@@ -2333,10 +2343,13 @@ export function useEstimatorState(props: EstimatorProps) {
     return { fromCatalog, custom: next.length - fromCatalog };
   };
 
-  const [partsBusy, setPartsBusy] = useState(false);
-  const exportPartsList = async () => {
-    if (partsBusy) return;
-    setPartsBusy(true);
+  /* #363: More ▾ → Review spreadsheet (was Parts list (CSV), #262) — the
+     parts list as an .xlsx with links, markup formulas and per-system cost /
+     markup / fees subtotals; exceljs loads on demand inside downloadReviewSheet. */
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const exportReviewSheet = async () => {
+    if (reviewBusy) return;
+    setReviewBusy(true);
     try {
       const skus = partsListSkus(sections);
       const resolved = skus.length ? await resolveCatalogSkusAction(skus) : {};
@@ -2349,20 +2362,20 @@ export function useEstimatorState(props: EstimatorProps) {
           manufacturerModelNumber: r.manufacturerModelNumber,
         };
       }
-      const rows = partsListRows(sections, vendorQuotes, info, venueRoomName);
-      if (!rows.length) {
+      const blocks = reviewSheetModel(sections, vendorQuotes, info, venueRoomName);
+      if (!blocks.length) {
         setActionError(null);
         setGateRefused(false);
         setActionNotice("No parts to export yet.");
         return;
       }
       const name = loadedId ? quoteId : projectName || quoteId;
-      downloadCsv(`${fileStem(name, "estimate")}-parts-list`, PARTS_CSV_HEADER, partsListCsvRows(rows));
+      await downloadReviewSheet(fileStem(name, "estimate"), blocks);
     } catch {
-      setActionError("Couldn't build the parts list — try again.");
+      setActionError("Couldn't build the review spreadsheet — try again.");
       setGateRefused(false);
     } finally {
-      setPartsBusy(false);
+      setReviewBusy(false);
     }
   };
 
@@ -3545,7 +3558,7 @@ export function useEstimatorState(props: EstimatorProps) {
     deleteSystem,
     detail,
     doSave,
-    exportPartsList,
+    exportReviewSheet,
     fabrics,
     fixtureAssemblies,
     fixtureDraft,
@@ -3602,7 +3615,7 @@ export function useEstimatorState(props: EstimatorProps) {
     vendorPdf,
     readVendorPdf,
     ownerValue,
-    partsBusy,
+    reviewBusy,
     paymentTerms,
     pdf,
     pdfCover,

@@ -613,7 +613,7 @@ export default function SectionCard(p: SectionCardProps) {
                   onChange={(e) => p.onSetRoom(e.target.value)}
                   onClick={(e) => e.stopPropagation()}
                   placeholder={p.defaultRoom ? "Room: " + p.defaultRoom : "Room"}
-                  title="Room for the PM parts list — blank uses the quote's venue"
+                  title="Room for the Review spreadsheet — blank uses the quote's venue"
                   style={{ width: 150, border: "1px solid #e4e7ec", borderRadius: 6, padding: "5px 7px", fontSize: 11.5, color: "#3a3f4a" }}
                 />
               )}

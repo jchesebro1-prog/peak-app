@@ -11776,6 +11776,7 @@ seeded()
   .then(() => settingsRaceFollowupChecks(ok))
   .then(() => lineMoveChecks(ok))
   .then(() => boxSalePureChecks(ok)).then(() => boxSaleDbChecks(ok))
+  .then(() => reviewSheet363Checks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -33464,11 +33465,14 @@ import { inclusionsLine as d251Inclusions, round2 as d251Round2, totals as d251T
   ok(qdSrc251.includes('import { customerLines, fmt, inclusionsLine, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";'),
     "#251: QuoteDocument imports inclusionsLine from ./pricing");
   ok(!qdSrc251.includes("<div>Materials, installation &amp; freight included</div>"), "#251: the old unconditional header sentence is gone from the source");
-  ok(qdSrc251.includes("const inclusions = inclusionsLine(p.t);") && qdSrc251.includes("{inclusions && <div>{inclusions}</div>}"),
+  // #364: the BOM view's show flags filter inclusionsLine's inputs and gate the Labor / freight rows (absent = p.t as before).
+  ok((qdSrc251.includes("const inclusions = inclusionsLine(p.t);") ||
+      /const inclusions = inclusionsLine\(\{\s*mat: p\.showMaterials === false \? 0 : p\.t\.mat,\s*lab: p\.showLabor === false \? 0 : p\.t\.lab,\s*fr: p\.showFreight === false \? 0 : p\.t\.fr,\s*\}\);/.test(qdSrc251)) &&
+     qdSrc251.includes("{inclusions && <div>{inclusions}</div>}"),
     "#251: the header line is built from inclusionsLine(p.t) and only prints when non-empty");
-  ok(/\{p\.t\.lab > 0 && \(\s*<div/.test(qdSrc251) && qdSrc251.includes("<span>Labor — installation &amp; commissioning</span>"),
+  ok(/\{p\.t\.lab > 0 && (p\.showLabor !== false && )?\(\s*<div/.test(qdSrc251) && qdSrc251.includes("<span>Labor — installation &amp; commissioning</span>"),
     "#251: the Labor — installation & commissioning totals row only renders when p.t.lab > 0");
-  ok(/\{p\.t\.fr > 0 && \(\s*<div/.test(qdSrc251), "#251: the freight totals row only renders when p.t.fr > 0");
+  ok(/\{p\.t\.fr > 0 && (p\.showFreight !== false && )?\(\s*<div/.test(qdSrc251), "#251: the freight totals row only renders when p.t.fr > 0");
   // The already-conditional per-system narrative freight note (#245) stays
   // untouched by this fix.
   ok(qdSrc251.includes('{ps.hasFreight ? " · includes freight & delivery" : ""}'),
@@ -37503,6 +37507,146 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   ok(p262Skus([phSec]).length === 0, "#262 final B: partsListSkus never asks the catalog about placeholders");
   const phComp = p262Rows([{ id: "s10", name: "Comp", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "SA-9", "Kit — thing", 1, 10, { components: [comp("CUSTOM", "Loose item", 1, 10)] })] }], [], srcInfo);
   ok(phComp[0]?.sku === "" && p262Csv(phComp)[0][1] === "", "#262 final B: an assembly component with a placeholder SKU is also treated as no SKU");
+}
+
+/* --- #363: the Estimator's "Review spreadsheet" — links, one block per system, System fees (pure) --- */
+import {
+  partsListRows as r363Rows, reviewSheetModel as r363Model, systemFees as r363Fees, reviewLink as r363Link,
+} from "@/app/(app)/estimator/parts-csv";
+import { systemSellTotal as r363SellTotal } from "@/app/(app)/estimator/pricing";
+import {
+  buildReviewWorkbook as r363Build, feesBreakdown as r363Breakdown, REVIEW_SHEET_HEADER as r363Header,
+} from "@/app/(app)/estimator/review-sheet-xlsx";
+import type { SpecItem as R363Item, SpecSection as R363Section, VendorQuote as R363Vq } from "@/app/(app)/estimator/types";
+function r363Fixture() {
+  const it = (id: number, sku: string, desc: string, qty: number, cost: number, extra: Partial<R363Item> = {}): R363Item =>
+    ({ id, sku, desc, qty, unit: "ea", cost, price: cost * 2, ...extra });
+  const comp = (sku: string, label: string, qty: number, cost: number) =>
+    ({ sku, label, role: "other" as const, qty, unit: "ea", cost, price: cost * 2 });
+  const vqs: R363Vq[] = [{
+    id: "VQ-363", vendor: "Acme", quoteNumber: "77", description: "", terms: "", notes: "", total: 100, includesFreight: false, display: "single",
+    link: "https://vendor.example/q/77",
+    lines: [{ id: 1, description: "Truss", qty: 2, unit: "ea", amount: 100 }],
+  }];
+  const lighting: R363Section = {
+    id: "s-a", name: "Lighting", room: "Stage", kind: "materials", mfr: "", freightPct: 10, priceRound: 25,
+    items: [
+      it(1, "CUSTOM", "Bracket", 2, 30, { custom: true, link: " https://example.com/bracket " }),
+      it(2, "CUSTOM", "Bracket", 1, 30, { custom: true, link: "https://example.com/bracket-b" }),
+      it(3, "CUSTOM", "Sketchy", 1, 10, { custom: true, link: "javascript:alert(1)" }),
+      it(4, "SA-K", "Kit — Lamp; Clamp", 1, 60, { link: "https://example.com/kit", components: [comp("LAMP", "Lamp", 1, 50), comp("CLAMP", "Clamp", 1, 10)] }),
+      it(5, "", "Truss package", 1, 100, { vendorQuoteId: "VQ-363" }),
+      it(6, "", "Truss package (own page)", 1, 100, { vendorQuoteId: "VQ-363", link: "https://own.example/truss" }),
+      it(7, "PLAIN", "=HYPERLINK(\"http://evil.example\",\"x\")", 3, 7.5, { link: "ftp://example.com/x" }),
+      it(8, "", "Package bonus", 1, 12.34, { bonus: "package", price: 13.57 }),
+      it(9, "", "Estimator bonus", 1, 9.99, { bonus: "estimator", price: 9.99 }),
+      it(10, "OPT", "Optional", 1, 500, { option: true }),
+    ],
+  };
+  const lighting2: R363Section = { id: "s-b", name: "Lighting", room: "Stage", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "PLAIN", "Plain", 1, 7.5)] };
+  const labor: R363Section = { id: "s-l", name: "Labor", kind: "labor", mfr: "", freightPct: 0, items: [it(1, "LAB", "Install", 10, 80)] };
+  const alt: R363Section = { id: "s-x", name: "Alt", kind: "materials", mfr: "", freightPct: 0, alternate: true, items: [it(1, "ALT", "Alt part", 1, 10)] } as R363Section;
+  return { sections: [lighting, labor, lighting2, alt], vqs, lighting, lighting2 };
+}
+{
+  const { sections, vqs, lighting, lighting2 } = r363Fixture();
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.005;
+  ok(r363Link(" https://example.com/a ") === "https://example.com/a" && r363Link("HTTP://Example.com") === "HTTP://Example.com"
+    && ["javascript:alert(1)", "ftp://example.com/x", "mailto:a@b.c", "/relative/path", "www.example.com", "https://", "", "x".repeat(10)].every((s) => r363Link(s) === "")
+    && r363Link(42) === "" && r363Link(undefined) === "" && r363Link("https://example.com/" + "a".repeat(2100)) === "",
+    "#363 review sheet: a link is kept only as an absolute http(s) URL (trimmed); javascript:, ftp:, mailto:, relative, bare, junk and over-long links are blank");
+  const rows = r363Rows(sections, vqs, {});
+  const a = rows.filter((r) => r.sectionId === "s-a");
+  const brackets = a.filter((r) => r.desc === "Bracket");
+  ok(brackets.length === 2 && brackets[0].link === "https://example.com/bracket" && brackets[0].qty === 2 && brackets[1].link === "https://example.com/bracket-b" && brackets[1].qty === 1,
+    "#363 review sheet: a custom line's http link is kept (trimmed), and two same-named custom lines with different links stay two rows");
+  ok(a.find((r) => r.desc === "Sketchy")?.link === "", "#363 review sheet: a javascript: link is dropped");
+  ok(["LAMP", "CLAMP"].every((s) => a.find((r) => r.sku === s)?.link === ""), "#363 review sheet: an assembly's components carry no link (they are catalog parts; the kit line's link isn't theirs)");
+  const truss = a.filter((r) => r.desc === "Truss");
+  ok(truss.length === 2 && truss[0].link === "https://vendor.example/q/77" && truss[1].link === "https://own.example/truss" && truss.every((r) => r.qty === 2),
+    "#363 review sheet: a vendor-quote row falls back to the vendor quote's link; the line's own link wins — and the two stay apart");
+  ok(a.find((r) => r.sku === "PLAIN")?.link === "", "#363 review sheet: an ftp: link is dropped");
+  ok(rows.every((r) => r.sectionId === "s-a" || r.sectionId === "s-b") && rows.filter((r) => r.sku === "PLAIN").map((r) => `${r.sectionId}:${r.qty}`).join("|") === "s-a:3|s-b:1",
+    "#363 review sheet: rows carry their section id; the same part in two same-named, same-room systems never merges");
+  ok(brackets[0].lineSell === 60 && Math.abs(brackets[0].unitSell - 60) > 0.01, "#363 review sheet: lineSell stays the line's own unit sell while unitSell carries the system factor");
+
+  const fees = r363Fees(lighting);
+  ok(fees.freight === 40.48 && fees.packageBonus === 13.57 && fees.estimatorBonus === 9.99 && fees.adjustment === 20.96 && fees.total === 85 && fees.typedPrice === false,
+    "#363 systemFees: freight (10% of 404.83 → 40.48) + package bonus 13.57 + estimator bonus 9.99 + the $25 round-up (829.04 → 850: 20.96) = 85.00");
+  ok(r363Breakdown(fees) === "Freight $40.48 · Estimator bonus $9.99 · Package bonus $13.57 · Price rounding $20.96", "#363 systemFees: the Notes breakdown names each part");
+  const fees2 = r363Fees(lighting2);
+  ok(fees2.total === 0 && r363Breakdown(fees2) === "", "#363 systemFees: a system with no freight, bonus or rounding has no fees and an empty breakdown");
+
+  const model = r363Model(sections, vqs, {});
+  ok(model.map((b) => `${b.sectionId}:${b.system}:${b.room}`).join("|") === "s-a:Lighting:Stage|s-b:Lighting:Stage",
+    "#363 review sheet: one block per system with listed rows, in order — two same-named systems stay separate; labor and alternate systems get none");
+  ok(model[0].rows.length === 8 && !model[0].rows.some((r) => /bonus|Optional/i.test(r.desc)), "#363 review sheet: bonus and option lines are never listed");
+  const reconcile = (b: (typeof model)[number], sec: R363Section) => {
+    const cost = b.rows.reduce((s, r) => s + r.qty * r.unitCost, 0);
+    const sell = b.rows.reduce((s, r) => s + r.qty * r.lineSell, 0);
+    return Math.round((cost + (sell - cost) + b.fees.total) * 100) / 100 === Math.round(r363SellTotal(sec) * 100) / 100;
+  };
+  ok(reconcile(model[0], lighting) && near(r363SellTotal(lighting), 850) && reconcile(model[1], lighting2),
+    "#363 review sheet: System cost + System markup + System fees = the system's price, to the cent (850.00)");
+  const typed: R363Section = { ...lighting, id: "s-t", sellOverride: 700 };
+  const tModel = r363Model([typed], vqs, {});
+  const tFees = r363Fees(typed);
+  ok(tFees.typedPrice && tFees.adjustment === -129.04 && reconcile(tModel[0], typed) && r363Breakdown(tFees).endsWith("Typed price adjustment -$129.04"),
+    "#363 systemFees: a typed system price below the computed one is a negative adjustment, named as such, and still reconciles");
+  ok(r363Header.join(",") === "Manufacturer,Item name,Description,Room,System,Qty,Unit Cost,Unit Sell,Ext Cost,Ext Sell,Line margin,Markup,Price source,Link,Notes",
+    "#363 review sheet: the fifteen columns, in order (Markup replaces Effective margin; Ext Cost / Ext Sell / Link added)");
+  const xlsxSrc = readFileSync(join(process.cwd(), EST_DIR, "review-sheet-xlsx.ts"), "utf8");
+  ok(!/^import\s+(?!type\b)[^;]*from\s+"exceljs"/m.test(xlsxSrc) && xlsxSrc.includes('await import("exceljs")') && !/^"use client"|^import [^;]*from "@\/(lib\/stores|db)\//m.test(xlsxSrc),
+    "#363 review sheet: exceljs loads on demand (type-only static import), so it stays out of the Estimator's main bundle");
+  const hookSrc = readFileSync(join(process.cwd(), EST_DIR, "use-estimator-state.ts"), "utf8");
+  const menuSrc = readFileSync(join(process.cwd(), EST_DIR, "header-more-menu.tsx"), "utf8");
+  ok(hookSrc.includes("reviewSheetModel(sections, vendorQuotes, info, venueRoomName)") && hookSrc.includes("await downloadReviewSheet(fileStem(name, \"estimate\"), blocks)")
+    && hookSrc.includes("Couldn't build the review spreadsheet — try again.") && hookSrc.includes('"No parts to export yet."') && !hookSrc.includes("downloadCsv(")
+    && menuSrc.includes("s.exportReviewSheet()") && menuSrc.includes("disabled={s.reviewBusy}"),
+    "#363 review sheet: More ▾ → Review spreadsheet builds the model and downloads the .xlsx; the CSV download is gone");
+}
+
+/** #363: the workbook itself — built, read back with exceljs. */
+async function reviewSheet363Checks(check: typeof ok): Promise<void> {
+  const { sections, vqs } = r363Fixture();
+  const blocks = r363Model(sections, vqs, {});
+  const bytes = await r363Build(blocks);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(bytes) as never);
+  const ws = wb.getWorksheet("Review");
+  check(!!ws && wb.worksheets.length === 1, "#363 workbook: one sheet, Review");
+  if (!ws) return;
+  const text = (r: number, c: number) => {
+    const v = ws.getRow(r).getCell(c).value;
+    return typeof v === "string" ? v : "";
+  };
+  const header = r363Header.map((_, i) => text(1, i + 1));
+  check(header.join(",") === r363Header.join(",") && ws.getRow(1).getCell(1).font?.bold === true, "#363 workbook: the header row is the fifteen columns, bold");
+  check(ws.views?.[0]?.state === "frozen" && (ws.views[0] as { ySplit?: number }).ySplit === 1 && !!ws.autoFilter, "#363 workbook: the header is frozen and filters");
+  const linkCell = ws.getRow(2).getCell(14).value as { text?: string; hyperlink?: string } | null;
+  check(text(2, 3) === "Bracket" && linkCell?.hyperlink === "https://example.com/bracket" && linkCell?.text === "https://example.com/bracket",
+    "#363 workbook: the Link column is a real hyperlink cell");
+  check(ws.getRow(4).getCell(14).value == null, "#363 workbook: a row with no safe link leaves Link blank");
+  const f = (r: number, c: number) => ws.getRow(r).getCell(c).value as { formula?: string; result?: unknown } | null;
+  check(f(2, 9)?.formula === "F2*G2" && f(2, 10)?.formula === "F2*H2" && f(2, 9)?.result === 60 && f(2, 10)?.result === 120,
+    "#363 workbook: Ext Cost = Qty × Unit Cost and Ext Sell = Qty × Unit Sell are formulas with cached results");
+  check(f(2, 12)?.formula === 'IF(G2=0,"",(H2-G2)/G2)' && f(2, 12)?.result === 1 && f(2, 11)?.formula === 'IF(H2=0,"",(H2-G2)/H2)' && f(2, 11)?.result === 0.5,
+    "#363 workbook: Markup = (Unit Sell − Unit Cost) ÷ Unit Cost and Line margin are live formulas (cached 100% / 50%)");
+  check(ws.getRow(2).getCell(8).value === 60, "#363 workbook: Unit Sell is the line's own sell (before freight, rounding and bonuses)");
+  const evil = ws.getRow(9);
+  check(evil.getCell(3).value === '=HYPERLINK("http://evil.example","x")' && evil.getCell(3).type === ExcelJS.ValueType.String,
+    "#363 workbook: a description that looks like a formula is written as text");
+  check(text(10, 3) === "System cost — Lighting" && text(11, 3) === "System markup — Lighting" && text(12, 3) === "System fees — Lighting",
+    "#363 workbook: three subtotal rows close each system — System cost, System markup, System fees");
+  check(f(10, 10)?.formula === "SUM(I2:I9)" && f(10, 10)?.result === 382.5 && f(11, 10)?.formula === "SUM(J2:J9)-SUM(I2:I9)" && f(11, 10)?.result === 382.5,
+    "#363 workbook: System cost / System markup are SUM formulas over the system's rows, cached (382.50 / 382.50)");
+  check(ws.getRow(12).getCell(10).value === 85 && text(12, 15) === "Freight $40.48 · Estimator bonus $9.99 · Package bonus $13.57 · Price rounding $20.96",
+    "#363 workbook: System fees is a number (85.00) with its breakdown in Notes");
+  check(ws.getRow(10).getCell(3).font?.bold === true && ws.getRow(12).getCell(10).font?.bold === true && ws.getRow(10).getCell(1).border?.top?.style === "thin",
+    "#363 workbook: the subtotal rows are bold, the first with a thin top border");
+  check(ws.getRow(13).getCell(3).value == null && text(14, 3) === "Plain" && text(15, 3) === "System cost — Lighting" && f(15, 10)?.formula === "SUM(I14:I14)",
+    "#363 workbook: one blank spacer row, then the next system (same name, its own block and ranges)");
+  check(ws.getRow(2).getCell(7).numFmt === "$#,##0.00" && ws.getRow(2).getCell(12).numFmt === "0.0%", "#363 workbook: money and percent formats");
 }
 
 /* --- #261: Quick Design plan text stays a fixed on-screen size however wide the plan draws; dimensions smaller still (D468) --- */
@@ -54577,8 +54721,9 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   ok(/stepAfterAction\(action\)/.test(shell304), "#305 shell: a successful next-step action moves to its step");
   ok(!/setMode\(|mode === "build"|"Customer preview →"/.test(estimatorSource()), "#305 shell: the old build/preview mode and its button are gone");
   ok(/flexWrap: "wrap"/.test(header304), "#305 header: wraps instead of overflowing at 1024 px");
-  ok(["ChangeTypeControl", "Parts list (CSV)", "Draft from survey/inspection", "Cut sheets", "DeleteQuoteButton"].every((x) => more304.includes(x)) && !/Parts list \(CSV\)|DeleteQuoteButton/.test(header304),
-    "#305 header: Change type, Parts list, Draft from survey, Cut sheets and Delete live in the ⋯ menu");
+  // #363: Parts list (CSV) became Review spreadsheet.
+  ok(["ChangeTypeControl", "Review spreadsheet", "Draft from survey/inspection", "Cut sheets", "DeleteQuoteButton"].every((x) => more304.includes(x)) && !/Review spreadsheet|Parts list \(CSV\)|DeleteQuoteButton/.test(header304) && !more304.includes("Parts list (CSV)"),
+    "#305 header: Change type, Review spreadsheet, Draft from survey, Cut sheets and Delete live in the ⋯ menu");
   ok(/aria-current=\{active \? "page" : undefined\}/.test(tabs304) && /STEP_LABEL\[/.test(tabs304), "#305 tabs: labelled from STEP_LABEL, current tab marked");
 }
 
@@ -70357,4 +70502,95 @@ import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate
     "BOM PDF tab: Download / Open use bomPdfPath, the save-first note follows pdfDirty, and the tab still imports no store");
   const smoke = rd("scripts/smoke-routes.ts");
   ok(smoke.includes('{ route: "/api/quotes/Q-0/bom-pdf", expectNotFound: true }') && smoke.includes('{ route: "/print/quote/Q-2041?view=bom", expectNotFound: true }') && smoke.includes('{ route: "/print/quote/Q-2041?view=bom&part=main", expectNotFound: true }'), "BOM PDF: smoke covers the 404 paths");
+}
+
+/* --- #364: Build package → BOM quote → Show on BOM (line prices · materials · labor · freight) --- */
+import { DEFAULT_PDF_OPTIONS as s364Defaults, normalizePdfOptions as s364Norm, PDF_TOGGLE_KEYS as s364Keys } from "@/lib/quote-pdf/pdf-options";
+import { bomViewProps as s364Bom } from "@/app/(app)/estimator/quote-document-view";
+import { qd293Props as s364Props, renderQuoteDocument293 as s364Render } from "./qd293-cases";
+import { qd364BomCases as s364Cases } from "./qd364-cases";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const SW = ["bomLinePrices", "bomMaterials", "bomLabor", "bomFreight"] as const;
+  // ---- storage: pdfOptions keys, defaults, round-trip ----
+  const empty = s364Norm({});
+  ok(SW.every((k) => (s364Keys as readonly string[]).includes(k) && s364Defaults[k] === true && empty[k] === true),
+    "#364 pdfOptions: the four Show on BOM keys are toggle keys, on by default, and an older quote (no keys) reads them on");
+  ok(SW.every((k) => s364Norm({ [k]: false })[k] === false && s364Norm({ [k]: false }).pdfPrices === true && s364Norm({ [k]: "no" })[k] === true && s364Norm(null)[k] === true),
+    "#364 pdfOptions: each key round-trips false on its own; a non-boolean is ignored (→ on)");
+  const saved = s364Norm(JSON.parse(JSON.stringify(s364Norm({ bomLinePrices: false, bomFreight: false, pdfQty: false }))));
+  ok(saved.bomLinePrices === false && saved.bomFreight === false && saved.bomMaterials === true && saved.bomLabor === true && saved.pdfQty === false, "#364 pdfOptions: a saved mix survives JSON + normalize (the save path)");
+
+  // ---- bomViewProps: the switches map to the document's flags; Line prices ANDs with Prices ----
+  const mk = (o: Record<string, unknown>) => s364Bom(s364Props({ pdfOptions: o }));
+  const on = mk({});
+  ok(on.pdfPrices === true && on.showMaterials === true && on.showLabor === true && on.showFreight === true, "#364 bomViewProps: an untouched quote → every flag on");
+  ok(mk({ bomLinePrices: false }).pdfPrices === false && mk({ pdfPrices: false }).pdfPrices === false && mk({ pdfPrices: false, bomLinePrices: true }).pdfPrices === false,
+    "#364 bomViewProps: line prices = pdfPrices && bomLinePrices (the quote-wide Prices still wins)");
+  ok(mk({ bomMaterials: false }).showMaterials === false && mk({ bomMaterials: false }).showLabor === true && mk({ bomLabor: false }).showLabor === false && mk({ bomFreight: false }).showFreight === false && mk({ bomFreight: false }).pdfPrices === true,
+    "#364 bomViewProps: Materials / Labor / Freight each map to their own show flag only");
+  const raw = s364Props({ pdfOptions: { bomLinePrices: false, bomMaterials: false, bomLabor: false, bomFreight: false } });
+  ok(raw.pdfPrices === true && raw.showMaterials === undefined && raw.showLabor === undefined && raw.showFreight === undefined,
+    "#364 non-BOM document props: the saved switches ride along but never touch pdfPrices or the show flags (only bomViewProps sets them)");
+
+  // ---- render: all on (or untouched) = the pre-change BOM view, byte for byte ----
+  const base = JSON.parse(rd("docs/superpowers/fixtures/364-bom-view-baseline.json")) as Record<string, string>;
+  const untouched = s364Cases();
+  const allOn = s364Cases({ bomLinePrices: true, bomMaterials: true, bomLabor: true, bomFreight: true });
+  ok(Object.keys(base).length === 5 && Object.keys(base).every((k) => s364Render(untouched[k]) === base[k] && s364Render(allOn[k]) === base[k]),
+    "#364 render: an untouched quote and all four switches on print the BOM view byte-for-byte as before (5 cases)");
+  // Non-BOM: the estimate document with every switch off is the pre-change document.
+  const p5 = JSON.parse(rd("docs/superpowers/fixtures/p5-quote-document-no-document.json")) as Record<string, string>;
+  ok(s364Render(raw) === p5["p293-itemized"] && s364Render({ ...raw, layout: "web" }) === p5["p2b-ungroupedWeb"],
+    "#364 render: the estimate PDF / online Narrative document ignores the switches (all off = the pre-change print and web render)");
+
+  // ---- render: each switch off removes its label / amount; the rest stays ----
+  const r = (o: Record<string, unknown>, k = "bomRewards") => s364Render(s364Cases(o)[k]);
+  const b = base.bomRewards;
+  const lineCol = "grid-template-columns:1fr 70px 104px";
+  const linePrice = '<span style="font-family:var(--font-mono);text-align:right;font-weight:600">';
+  const totalsRow = (label: string, amt: string) => "<span>" + label + '</span><span style="font-family:var(--font-mono)">' + amt + "</span>";
+  const always = (h: string) => h.includes(totalsRow("Sales tax (5%)", "$12.50")) && h.includes("Rewards points applied (25 pts)") && h.includes(">Total</span>") && h.includes("$340.50") && h.includes("Your Gold rewards: Free freight") &&
+    h.includes(">$153.00</span>") && h.includes(">$100.00</span>");
+  ok(b.includes(lineCol) && b.includes(linePrice) && b.includes(totalsRow("Materials", "$300.00")) && b.includes(totalsRow("Labor — installation &amp; commissioning", "$50.00")) &&
+     b.includes(totalsRow("Freight &amp; delivery", "$3.00")) && b.includes("<span>Freight &amp; delivery</span><span></span>") && b.includes("Materials, installation &amp; freight included") && always(b),
+    "#364 render (fixture sanity): the baseline carries line prices, Materials / Labor / Freight rows, a system freight row, the inclusions line, tax, credit, perks and Total");
+  const lp = r({ bomLinePrices: false });
+  ok(!lp.includes(lineCol) && !lp.includes(linePrice) && lp.includes("grid-template-columns:1fr 70px") && lp.includes(totalsRow("Materials", "$300.00")) && always(lp),
+    "#364 render: Line prices off drops every line's (and option row's) price column — system prices, totals and the Total stay");
+  const lpPrices = r({ pdfPrices: false, bomLinePrices: true });
+  ok(!lpPrices.includes(linePrice), "#364 render: Prices off on the quote hides BOM line prices even with Line prices on");
+  const mat = r({ bomMaterials: false });
+  ok(!mat.includes("<span>Materials</span>") && mat.includes(totalsRow("Labor — installation &amp; commissioning", "$50.00")) && mat.includes("Installation &amp; freight included") && mat.includes(linePrice) && always(mat),
+    "#364 render: Materials off drops the Materials row and the word from the inclusions line");
+  const lab = r({ bomLabor: false });
+  ok(!lab.includes("Labor — installation") && lab.includes(totalsRow("Materials", "$300.00")) && lab.includes("Materials &amp; freight included") && lab.includes("Installation, commissioning &amp; project management") && always(lab),
+    "#364 render: Labor off drops the Labor row and \"installation\" from the inclusions line — the labor system's own line stays");
+  const fr = r({ bomFreight: false });
+  ok(!fr.includes("Freight &amp; delivery") && !fr.includes(">$3.00<") && fr.includes("Materials &amp; installation included") && fr.includes(totalsRow("Materials", "$300.00")) && always(fr),
+    "#364 render: Freight off drops each system's freight row, the totals' freight row and \"freight\" from the inclusions line");
+  const altFr = r({ bomFreight: false }, "bomAlternates");
+  ok(base.bomAlternates.includes(">$0.80<") && !altFr.includes(">$0.80<") && !altFr.includes("Freight &amp; delivery") && altFr.includes(">$50.80</span>"),
+    "#364 render: Freight off drops an alternate system's freight row too; its subtotal still prints");
+  const none = r({ bomLinePrices: false, bomMaterials: false, bomLabor: false, bomFreight: false });
+  ok(!none.includes(linePrice) && !none.includes("<span>Materials</span>") && !none.includes("Labor — installation") && !none.includes("Freight &amp; delivery") && !none.includes(" included</div>") &&
+     none.includes("Line 1") && always(none),
+    "#364 render: everything off — parts with system prices, tax, credit and the Total only");
+
+  // ---- source pins ----
+  const qd = rd("src/app/(app)/estimator/quote-document.tsx");
+  ok(!/\bp\.bom(LinePrices|Materials|Labor|Freight)\b/.test(qd) && (qd.match(/p\.showFreight !== false/g) || []).length === 2 && qd.includes("{p.showMaterials !== false && (") && qd.includes("{p.t.lab > 0 && p.showLabor !== false && (") && qd.includes("{p.t.fr > 0 && p.showFreight !== false && ("),
+    "#364 QuoteDocument: reads only the show* flags (never the saved bom* keys) and hides only on an explicit false");
+  const assigners = ["src/app/(app)/estimator/quote-document-view.ts", "src/lib/quote-pdf/document-loader.ts", "src/lib/estimate-output/cover-loader.ts", "src/lib/estimate-output/package-live-loader.ts", "src/app/print/quote/[id]/page.tsx", "src/components/online-estimate/online-estimate.tsx"]
+    .map((f) => [f, (rd(f).match(/\bshow(Materials|Labor|Freight):/g) || []).length] as const);
+  ok(assigners.every(([f, n]) => (f.endsWith("quote-document-view.ts") ? n === 3 : n === 0)), "#364: only bomViewProps sets the show flags — the print, cover, package and online loaders don't");
+  const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
+  ok(tab.includes('showOnBom: "Show on BOM"') && tab.includes("onClick={() => togglePdf(flag)}") && tab.includes('const locked = flag === "bomLinePrices" && !pdfOpts.pdfPrices;') && tab.includes("disabled={locked}") && tab.includes("aria-pressed={on}") &&
+     ["Line prices", "Materials", "Labor", "Freight"].every((l) => tab.includes('label: "' + l + '"')),
+    "#364 BOM tab: four Show on BOM switches through togglePdf; Line prices is disabled while the quote hides prices");
+  const st = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  ok(SW.every((k) => st.includes(`useState(initial.pdfOptions.${k})`) && st.includes(`flag === "${k}"`)) && /pdfCutSheets, bomLinePrices, bomMaterials, bomLabor, bomFreight \}\),/.test(st),
+    "#364 hook: each switch loads from the saved pdfOptions, toggles through togglePdf and rides pdfOpts (so Save sends it and the PDF goes dirty)");
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  ok((act.match(/pdfOptions: normalizePdfOptions\(payload\.pdfOptions\)/g) || []).length === 2, "#364 save: both save paths sanitize pdfOptions through normalizePdfOptions (the new keys included)");
 }
