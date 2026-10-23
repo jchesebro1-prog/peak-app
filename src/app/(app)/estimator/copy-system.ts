@@ -15,6 +15,7 @@ import {
 } from "./tier-reprice";
 import type { SpecItem, SpecSection } from "./types";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { applyProjectDiscounts } from "@/lib/project-discounts/rules";
 
 /**
  * #266 — Copy a system (SpecSection) to a new estimate, an existing one, or
@@ -115,8 +116,11 @@ export function copySectionForTarget(
   let tierRepriced = 0;
   let handPriced = 0;
 
+  // #366: the copy starts from NORMAL cost — the source's project discounts are its own (the landing estimate
+  // re-applies its map), and a stale discounted cost would read as a catalog cost change and move the sell.
+  const [undiscounted] = applyProjectDiscounts([section], {});
   // #282 phase 2: the Rewards credit is the source quote's — a copy never carries it.
-  const items = (section.items || []).filter((it) => !isRewardCreditItem(it) && !isBonusItem(it)).map((it): SpecItem => {
+  const items = (undiscounted.items || []).filter((it) => !isRewardCreditItem(it) && !isBonusItem(it)).map((it): SpecItem => {
     const comps = Array.isArray(it.components) ? it.components : [];
 
     /* #274: a track line is a tier-seeded line whose "catalog cost" is its

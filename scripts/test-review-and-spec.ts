@@ -54934,10 +54934,11 @@ import * as p2a from "@/lib/estimate-groups/groups";
 
   ok(/groups\?: SystemGroup\[\]/.test(actionsSrc) && /export type SavePayload[\s\S]*?groups\?: SystemGroup\[\]/.test(actionsSrc), "#P2a persistence: SavePayload.groups is optional (older callers keep stored groups)");
   ok(/const groups = sanitizeGroups\(payload\.groups \?\? \(prior\?\.spec as \{ groups\?: unknown \} \| null \| undefined\)\?\.groups\)/.test(actionsSrc), "#P2a persistence: saveQuoteAction sanitises payload.groups, falling back to the stored spec.groups");
-  ok(/spec: \{ sections: normalizeSystemOrder\(savedSections, groups\), mobs: payload\.mobs, groups, \.\.\.\(docSave\.document \? \{ document: docSave\.document \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: saveQuoteAction writes spec { sections (normalised), mobs, groups }");
+  // #366: each spec write now ends with the (only-when-any) projectDiscounts spread.
+  ok(/spec: \{ sections: normalizeSystemOrder\(savedSections, groups\), mobs: payload\.mobs, groups, \.\.\.\(docSave\.document \? \{ document: docSave\.document \} : \{\}\), \.\.\.\(Object\.keys\(discounts\)\.length \? \{ projectDiscounts: discounts \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: saveQuoteAction writes spec { sections (normalised), mobs, groups }");
   // #357: the stripped system is re-id'd against the target first (reIdIncomingSection), then appended.
-  ok(/const incoming = reIdIncomingSection\(stripBonusLines\(withoutGroupMeta\(placed\)\), /.test(actionsSrc) && /\.\.\.withoutRewardCredit\(\[incoming\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
-  ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\), await loadBonusRates\(\)\)/.test(actionsSrc) && /spec: \{ sections: newSections, mobs: \[\] \}/.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
+  ok(/const incoming = reIdIncomingSection\(stripBonusLines\(withoutGroupMeta\(placed\)\), /.test(actionsSrc) && /\.\.\.withoutRewardCredit\(\[incoming\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\), \.\.\.\(Object\.keys\(targetDiscounts\)\.length \? \{ projectDiscounts: targetDiscounts \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
+  ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\), await loadBonusRates\(\)\)/.test(actionsSrc) && /const newSpecSections = applyProjectDiscounts\(newSections, carriedDiscounts\);/.test(actionsSrc) && /spec: \{ sections: newSpecSections, mobs: \[\], /.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
   ok(/groups = sanitizeGroups\(spec\?\.groups\)/.test(pageSrc) && /normalizeSystemOrder\(spec\.sections as SpecSection\[\], groups\)/.test(pageSrc) && /^\s+groups,$/m.test(pageSrc) && /groups: \[\],/.test(pageSrc), "#P2a persistence: page.tsx reads spec.groups through sanitizeGroups into initial.groups (new quotes: [])");
   ok(/withoutGroupMeta\(copied\)/.test(copySrc), "#P2a persistence: copy-system strips group meta from the copy");
   ok(/withKeyProducts\(withoutGroupMeta\(base\), kps\)/.test(libSrc), "#P2a persistence: system-library load strips group meta");
@@ -55007,7 +55008,7 @@ import * as p2a from "@/lib/estimate-groups/groups";
   const ret = hook.slice(hook.lastIndexOf("  return {\n    ...props,"));
   ok(["groups", "blocks", "addGroupAction", "renameGroupAction", "moveGroupByAction", "removeGroupAction", "moveSystemToAction", "moveSystemByAction", "setSystemGroup", "markBuilt", "isBuilt", "isExpanded", "toggleExpand"].every((n) => new RegExp(`\\n    ${n},\\n`).test(ret))
     && /\n    next,\n  \};\n\}/.test(ret), "#P2a hook: the state returns every group/built name, with next still last");
-  ok(/const existingGroups = sanitizeGroups\(existingSpec\?\.groups\);/.test(actionsSrc) && /spec: \{ sections: normalizeSystemOrder\(mergedSections, existingGroups\), mobs: existingSpec\?\.mobs \|\| \[\], groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\) \}/.test(actionsSrc),
+  ok(/const existingGroups = sanitizeGroups\(existingSpec\?\.groups\);/.test(actionsSrc) && /spec: \{ sections: normalizeSystemOrder\(mergedSections, existingGroups\), mobs: existingSpec\?\.mobs \|\| \[\], groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\), \.\.\.\(Object\.keys\(targetDiscounts\)\.length \? \{ projectDiscounts: targetDiscounts \} : \{\}\) \}/.test(actionsSrc), // #366: + the target's discounts
     "#P2a hook: move-to-existing normalises the merged sections against the same sanitised groups it writes");
 }
 
@@ -55194,7 +55195,7 @@ import { quoteDocumentDataFor as p2hData } from "@/lib/quote-pdf/quote-document-
   const norm = acts.indexOf("normalizeSystemOrder(sellSanitizedRaw.map(sanitizeSectionGroupMeta), groups)");
   const settle = acts.indexOf("await settleRewardCredit(sellSanitized,");
   ok(norm > 0 && settle > norm, "#P2a hardening: saveQuoteAction normalises the sections (and sanitises built/groupId) before the Rewards credit is settled");
-  ok(acts.includes("spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}) }"), "#P2a hardening: the final write stays normalised");
+  ok(acts.includes("spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}), ...(Object.keys(discounts).length ? { projectDiscounts: discounts } : {}) }"), "#P2a hardening: the final write stays normalised"); // #366: + discounts
 }
 
 /* #P2b core — Estimator Phase 2b: the derived alternate stamp, totals.alt, the Rewards credit pin and the approval fingerprint. */
@@ -58238,10 +58239,10 @@ import { renderToStaticMarkup as p5rMarkup } from "react-dom/server";
   const fn = acts.slice(acts.indexOf("export async function saveQuoteAction"), acts.indexOf("export async function searchQuotesAction"));
   ok(fn.indexOf("const docSave = packageDocForSave(payload.document, (prior?.spec as { document?: unknown } | null | undefined)?.document);") > 0 &&
      fn.indexOf("if (!docSave.ok) return refusedSave(prior, docSave.error);") > 0 && fn.indexOf("if (!docSave.ok) return refusedSave(prior, docSave.error);") < fn.indexOf("await settleRewardCredit(") &&
-     fn.includes("groups, ...(docSave.document ? { document: docSave.document } : {}) }") && /document\?: PackageDoc \| null;/.test(acts.slice(acts.indexOf("export type SavePayload"))) &&
-     acts.includes("spec?: { sections: SpecSection[]; mobs: SpecMob[]; groups?: SystemGroup[]; document?: PackageDoc };"),
+     fn.includes("groups, ...(docSave.document ? { document: docSave.document } : {}), ") && /document\?: PackageDoc \| null;/.test(acts.slice(acts.indexOf("export type SavePayload"))) &&
+     acts.includes("spec?: { sections: SpecSection[]; mobs: SpecMob[]; groups?: SystemGroup[]; document?: PackageDoc; projectDiscounts?: ProjectDiscounts };"), // #366: + projectDiscounts
     "#P5 save: saveQuoteAction decides the document first (a refusal writes nothing, before the credit or the patch) and writes spec.document");
-  ok(acts.includes("const existingDoc = sanitizePackageDoc(existingSpec?.document);") && acts.includes("groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}) }"),
+  ok(acts.includes("const existingDoc = sanitizePackageDoc(existingSpec?.document);") && acts.includes("groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}), "),
     "#P5 save: moving a system into another estimate keeps that estimate's document");
   ok(rd("src/lib/catalog-rename/rewrite.ts").includes("return overlay(spec, patch);"), "#P5 save: the #304 rename rewrite overlays the spec (spec.document survives quoteSpecFollowingRenames)");
   const page = rd("src/app/(app)/estimator/page.tsx");
@@ -70863,4 +70864,64 @@ import { repriceForTier as pd366Reprice, isAtTierSeed as pd366AtSeed } from "@/a
   const trkRes = pd366Reprice(pd366Apply([trk], pd366D), null, 0.2);
   ok(trkRes.repriced === 1 && trkRes.sections[0].items[0].price === 2500 && trkRes.sections[0].items[0].components![0].price === 2500,
     "#366 tier: a track line with a discounted part re-prices from normal cost, its part too");
+}
+
+/* --- #366: the server stamps and re-applies the discounts on save, move and copy --- */
+import { mergeDiscountsForSave as pd366Merge } from "@/lib/project-discounts/rules";
+import { copySectionForTarget as pd366Copy } from "@/app/(app)/estimator/copy-system";
+import { rewriteQuoteSpec as pd366Rename } from "@/lib/catalog-rename/rewrite";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const m = pd366Merge({ A: { pct: 10, note: "", by: "u1", at: 1 }, C: { pct: 7, note: "old", by: "u1", at: 1 } },
+    { A: { pct: 10, note: "", by: "evil", at: 5 }, B: { pct: 5, note: "n", by: "evil", at: 5 }, C: { pct: 7, note: "new" }, D: { pct: 0 } }, "u2", 99);
+  ok(m.A.by === "u1" && m.A.at === 1 && m.B.by === "u2" && m.B.at === 99 && m.C.by === "u2" && m.C.at === 99 && m.C.note === "new" && !("D" in m),
+    "#366 save: an unchanged entry keeps who set it and when; new or changed ones are stamped by the saver now; a posted by/at is ignored; junk dropped");
+  ok(Object.keys(pd366Merge({ A: { pct: 10, note: "", by: "u1", at: 1 } }, {}, "u2", 9)).length === 0, "#366 save: an entry the builder removed is gone");
+
+  // A tampered payload: a line claiming a deeper cut than the map, one claiming a discount the map doesn't have.
+  const tampered = [pd366Sec([
+    pd366Line({ id: 1, cost: 1000, catalogCost: 2000, projectDiscountPct: 50 }),
+    pd366Line({ id: 2, sku: "X:OTHER", cost: 10, catalogCost: 500, projectDiscountPct: 98 }),
+  ])];
+  const fixed = pd366Apply(tampered, pd366D);
+  ok(fixed[0].items[0].cost === 1760 && fixed[0].items[0].projectDiscountPct === 12 && fixed[0].items[1].cost === 500 && !("catalogCost" in fixed[0].items[1]),
+    "#366 save: re-applying the map re-stamps a tampered payload (wrong cut → the map's 12%; an unknown discount → normal cost)");
+
+  // Move into an estimate without the discount: the target's (empty) map restores the normal cost.
+  const [movedIn] = pd366Apply(pd366Apply([pd366Sec([pd366Line({}), pd366Asm()])], pd366D), {});
+  ok(movedIn.items[0].cost === 2000 && movedIn.items[1].cost === 2600 && !("catalogCost" in movedIn.items[1].components![0]), "#366 move: into an estimate without the discount → normal cost again (lines and parts)");
+
+  // Copy re-prices from NORMAL cost: a discounted line whose catalog cost hasn't moved keeps its sell.
+  const src = pd366Apply([pd366Sec([pd366Line({ price: 2857.14 }), pd366Asm()])], pd366D)[0];
+  const cat = new Map([["ETC:CS40", { sku: "ETC:CS40", cost: 2000, list: 3500 }], ["ETC:CBL", { sku: "ETC:CBL", cost: 300, list: 400 }]]);
+  const cp = pd366Copy(src, { newSectionId: "s2", catalog: cat, fixtures: new Map(), sourceTierMargin: null, targetTierMargin: null });
+  ok(cp.costsUpdated === 0 && cp.section.items[0].cost === 2000 && cp.section.items[0].price === 2857.14 && !("catalogCost" in cp.section.items[0]) && cp.section.items[1].cost === 2600 && cp.section.items[1].price === 4000,
+    "#366 copy: the copy lands at normal cost with its sell untouched (no phantom catalog-cost change); the target re-applies its own map");
+  ok(Object.keys(pd366For([cp.section], { ...pd366D, "Z:NOTHERE": { pct: 3, note: "", by: "u", at: 1 } })).join() === "ETC:CS40", "#366 copy: a NEW estimate carries only the entries for the SKUs the system contains");
+
+  // A catalog rename moves the map's key with the lines.
+  const renamed = pd366Rename({ sections: [pd366Sec([pd366Line({ sku: "80-1" })])], projectDiscounts: { "80-1": { pct: 5, note: "n" }, KEEP: { pct: 3 } } }, new Map([["80-1", "Brand:M1"]]), new Map()) as { projectDiscounts: Record<string, unknown>; sections: PD366Section[] };
+  ok(Object.keys(renamed.projectDiscounts).join() === "Brand:M1,KEEP" && renamed.sections[0].items[0].sku === "Brand:M1", "#366 rename: a renamed SKU's discount follows it (spec.projectDiscounts keys)");
+
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  const save = act.slice(act.indexOf("export async function saveQuoteAction("), act.indexOf("export async function searchQuotesAction("));
+  ok(/mergeDiscountsForSave\(\s*priorDiscounts,\s*payload\.projectDiscounts !== undefined \? payload\.projectDiscounts : priorDiscounts,\s*user\.id,/.test(save) &&
+     save.indexOf("applyProjectDiscounts(sellNormalizedRaw, discounts)") > 0 && save.indexOf("applyProjectDiscounts(sellNormalizedRaw, discounts)") < save.indexOf("canonicalBonusSections(") &&
+     /canonicalBonusSections\([^)]*sellNormalized,/.test(save),
+    "#366 save: the action sanitizes + stamps the map (an older caller keeps the stored one) and re-applies it BEFORE the bonus lines are derived");
+  ok(save.includes("...(Object.keys(discounts).length ? { projectDiscounts: discounts } : {}) },"), "#366 save: spec.projectDiscounts is written only when the estimate has any");
+  const place = act.slice(act.indexOf("async function placeSystemInEstimate("), act.indexOf("export type CopySystemTarget"));
+  ok(place.includes("const targetDiscounts = sanitizeProjectDiscounts(existingSpec?.projectDiscounts);") &&
+     /canonicalBonusSections\(\{ source: existing\.source, [^\n]*, applyProjectDiscounts\(appendedRaw, targetDiscounts\), await loadBonusRates\(\)\)/.test(place) &&
+     place.includes("...(Object.keys(targetDiscounts).length ? { projectDiscounts: targetDiscounts } : {}) },"),
+    "#366 move/copy → existing: the TARGET's map is applied as its bonus lines are derived, and kept on its spec");
+  ok(place.includes("const carriedDiscounts = discountsForSections(newSections, sourceDiscounts);") && place.includes("const newSpecSections = applyProjectDiscounts(newSections, carriedDiscounts);") &&
+     place.includes("const t = totals(newSpecSections, 0);") && place.includes("spec: { sections: newSpecSections, mobs: [], ...(Object.keys(carriedDiscounts).length ? { projectDiscounts: carriedDiscounts } : {}) },"),
+    "#366 move/copy → new: the new estimate carries the source's entries for its SKUs, applies them, and values itself on the discounted cost");
+  ok((act.match(/projectDiscounts,\n/g) || []).length >= 2 && /sourceQuoteId: string \| null = null,\n[\s\S]{0,400}projectDiscounts\?: unknown\n\): Promise<MoveSystemResult>/.test(act) && /projectDiscounts\?: unknown\n\): Promise<CopySystemResult>/.test(act),
+    "#366 move/copy: both actions take the builder's map and hand it to placeSystemInEstimate");
+  const cs = rd("src/app/(app)/estimator/copy-system.ts");
+  ok(cs.includes("const [undiscounted] = applyProjectDiscounts([section], {});") && cs.includes("(undiscounted.items || [])"), "#366 copy: copySectionForTarget (Copy system + Load system) starts from normal cost");
+  const pg = rd("src/app/(app)/estimator/page.tsx");
+  ok(pg.includes("projectDiscounts: sanitizeProjectDiscounts(spec?.projectDiscounts),"), "#366 load: the Estimator page hands the sanitized map to the builder");
 }

@@ -45,6 +45,7 @@ import { sourceForSave } from "@/lib/portal-quote-mode";
 import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
+import { sanitizeProjectDiscounts } from "@/lib/project-discounts/rules";
 import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
 import ActionError from "@/components/action-error";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
@@ -104,7 +105,7 @@ type QuoteDoc = Quote & {
   quoteNote?: string;
   assumptions?: string;
   paymentTerms?: PaymentTerms;
-  spec?: { sections?: unknown; mobs?: unknown; groups?: unknown; document?: unknown } | null;
+  spec?: { sections?: unknown; mobs?: unknown; groups?: unknown; document?: unknown; projectDiscounts?: unknown } | null;
 };
 
 /**
@@ -239,6 +240,8 @@ async function initialFrom(
     groups,
     // Estimator Phase 5 — the Build package document, re-validated on read.
     document: sanitizePackageDoc(spec?.document),
+    // #366: the project discounts, re-validated on read ({} when none).
+    projectDiscounts: sanitizeProjectDiscounts(spec?.projectDiscounts),
     vendorQuotes: vendorQuotesOf(q),
     replaces: "",
     pdfOptions: normalizePdfOptions(q.pdfOptions),

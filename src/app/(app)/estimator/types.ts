@@ -21,6 +21,7 @@ import type { SystemIntro } from "@/lib/narrative/intros";
 import type { EstimateSuggestionView, SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 import type { VendorPdfExtraction } from "@/lib/vendor-pdf/extraction";
 import type { VendorPdfReadUi } from "@/lib/vendor-pdf/fill";
+import type { ProjectDiscounts } from "@/lib/project-discounts/rules";
 
 export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
 export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
@@ -624,6 +625,8 @@ export type InitialQuote = {
   groups: SystemGroup[];
   /** Estimator Phase 5 — the Build package document (spec.document, sanitized); null = none. */
   document: PackageDoc | null;
+  /** #366 — the estimate's project discounts (spec.projectDiscounts, sanitized); absent / {} = none. */
+  projectDiscounts?: ProjectDiscounts;
   /** Imported vendor quotes (#143) — top-level on the doc, not in spec. */
   vendorQuotes: VendorQuote[];
   /** #160 / D205 — the draft this new estimate replaces ("Change type"); "" otherwise.
