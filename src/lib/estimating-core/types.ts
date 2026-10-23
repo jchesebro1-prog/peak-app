@@ -107,8 +107,9 @@ export type SpecItem = {
   /** #269: every line one "Add labor" inserted shares this id; the draft
    *  that built them is `SpecSection.laborGroups[id]` (labor-group.ts). */
   laborGroup?: string;
-  /** Orderable component detail for a catalog-backed fixture assembly. */
-  components?: Array<{ sku: string; label: string; role: AssemblyRole; qty: number; unit: string; cost: number; price: number }>;
+  /** Orderable component detail for a catalog-backed fixture assembly.
+   *  #366: a part with a project discount carries catalogCost / projectDiscountPct like a line (applyProjectDiscounts). */
+  components?: Array<{ sku: string; label: string; role: AssemblyRole; qty: number; unit: string; cost: number; price: number; catalogCost?: number; projectDiscountPct?: number }>;
   /** Links this line to its VendorQuote record (#143) — one priced line per
    *  vendor quote; the materials list lives on the record, not as siblings. */
   vendorQuoteId?: string;
@@ -148,6 +149,13 @@ export type SpecItem = {
    *  allowed on). Every system-level rule skips it; `totals()` subtracts it
    *  from the grand total. See src/lib/rewards/credit-line.ts. */
   rewardCredit?: boolean;
+  /** #366 — the line's normal (undiscounted) cost while a project discount applies; absent otherwise.
+   *  On an assembly line: its cost before its discounted parts. Written only by applyProjectDiscounts
+   *  (src/lib/project-discounts/rules.ts); freight, the 5% package bonus and the tier re-price read it. */
+  catalogCost?: number;
+  /** #366 — the project discount % applied to this line (a mirror of spec.projectDiscounts[sku].pct; never
+   *  set on an assembly line, whose parts may differ). Written only by applyProjectDiscounts. */
+  projectDiscountPct?: number;
 };
 
 /** #293: a product the customer narrative features — its paragraph prints

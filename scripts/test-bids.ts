@@ -1806,7 +1806,8 @@ export async function portalBidDbChecks(ok: Ok) {
         "scope-only pins: Copy → New passes its stored source for Scope only (never the split's lead / companies); Copy → existing / same passes nothing");
       const est = codeOfSrc("src/app/(app)/estimator/use-estimator-state.ts");
       const copyCall = est.slice(est.indexOf("await copySystemToEstimateAction("), est.indexOf("await copySystemToEstimateAction(") + 400);
-      ok(/usedVq,\s*loadedId \|\| null\s*\)/.test(copyCall), "scope-only pins: the Estimator sends the saved source id with Copy (an unsaved estimate sends none)");
+      // #366: Copy also sends the builder's project discounts after the source id.
+      ok(/usedVq,\s*loadedId \|\| null\s*(,[\s\S]{0,160}?projectDiscounts\s*)?\)/.test(copyCall), "scope-only pins: the Estimator sends the saved source id with Copy (an unsaved estimate sends none)");
       // Copy → New from a Scope-only estimate: the same helper + create option (the action needs a signed-in user).
       const cp1 = await mkSplit(fixtureId(348, "icopy1"), (await inh(q3)).stamp);
       const cp2 = await mkSplit(fixtureId(348, "icopy2"), (await inh((await getQuote(iq2))!)).stamp);

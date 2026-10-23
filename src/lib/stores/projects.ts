@@ -15,6 +15,8 @@ import { createAssignment } from "@/lib/stores/assignments";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { yearAwareDate } from "@/lib/format";
 import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
+import { projectPricingFrom, sanitizeProjectDiscounts, type ProjectPricingRow } from "@/lib/project-discounts/rules";
+import type { SpecSection } from "@/app/(app)/estimator/types";
 import {
   DEFAULT_PIPELINES,
   PROJECT_TAG_RANK,
@@ -219,6 +221,9 @@ export type ProjectRecord = {
   /** Estimator bonuses — the 5% package-bonus cost carried from the won quote's
    *  record; the Performance bonus pool the PM's crew bonus draws on. */
   performanceBonusPool?: number;
+  /** #366 — the won estimate's project discounts that hit at least one bought line, frozen at Won (qty summed): the
+   *  vendor project pricing purchasing should ask for. Internal; absent when the estimate had none. */
+  projectPricing?: ProjectPricingRow[];
   value: number;
   margin: number;
   createdAt: number;
@@ -724,6 +729,11 @@ function fromQuote(q: QuoteLike, pipes: Pipelines): Omit<ProjectRecord, "id"> {
   const kind: ProjectKind = labor ? "project" : "order";
   const pl = projectPipelineFor(pipes, { kind });
   const stage = firstStage(pl).id;
+  // #366: the vendor project pricing to request, frozen from the won estimate's discounts and lines.
+  const pricing = projectPricingFrom(
+    (Array.isArray(q.spec?.sections) ? q.spec.sections : []) as unknown as SpecSection[],
+    sanitizeProjectDiscounts(q.spec?.projectDiscounts)
+  );
   return {
     kind,
     pipelineId: pl.id,
@@ -735,6 +745,7 @@ function fromQuote(q: QuoteLike, pipes: Pipelines): Omit<ProjectRecord, "id"> {
     locationId: q.locationId || null,
     owner: q.owner || DEFAULT_ACTOR,
     ...(poolOf(q) > 0 ? { performanceBonusPool: poolOf(q) } : {}),
+    ...(pricing.length ? { projectPricing: pricing } : {}),
     value: q.value || 0,
     margin: q.margin || 0,
     createdAt: t,

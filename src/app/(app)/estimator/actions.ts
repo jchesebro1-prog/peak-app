@@ -6,6 +6,7 @@ import { withSavepoint } from "@/db";
 import { canonicalBonusSections } from "@/lib/estimate-bonus/canonical";
 import { loadBonusRates } from "@/lib/stores/pricing";
 import { stripBonusLines } from "@/lib/estimate-bonus/rules";
+import { applyProjectDiscounts, discountsForSections, mergeDiscountsForSave, sanitizeProjectDiscounts, type ProjectDiscounts } from "@/lib/project-discounts/rules";
 import { readTierSize } from "@/lib/task-plan/fields";
 import { can } from "@/lib/team";
 import {
@@ -151,7 +152,7 @@ type QuoteExtras = {
   quoteNote?: string;
   assumptions?: string;
   paymentTerms?: PaymentTerms;
-  spec?: { sections: SpecSection[]; mobs: SpecMob[]; groups?: SystemGroup[]; document?: PackageDoc };
+  spec?: { sections: SpecSection[]; mobs: SpecMob[]; groups?: SystemGroup[]; document?: PackageDoc; projectDiscounts?: ProjectDiscounts };
   /** #143: top-level, NOT inside `spec` — the attachment proxy route reads
    *  `quote.vendorQuotes`, and file bytes buried in `spec` would be copied
    *  into every revision snapshot. */
@@ -192,6 +193,9 @@ export type SavePayload = {
    *  document is sanitized, and one that sanitizes to nothing (over the caps)
    *  refuses the save — never wipes the stored document (packageDocForSave). */
   document?: PackageDoc | null;
+  /** #366 — the estimate's project discounts (spec.projectDiscounts, SKU → { pct, note }). Sanitized and
+   *  re-stamped (by / at) server-side, then applied to the lines; absent (an older caller) keeps the stored map. */
+  projectDiscounts?: unknown;
   /** Always sent in full (#143) — the stored list is replaced, so removing a
    *  vendor quote in the builder actually removes it from the doc. */
   vendorQuotes: VendorQuote[];
@@ -483,7 +487,18 @@ export async function saveQuoteAction(
   // settled, so the credit always lands on the true last system. built/groupId
   // are hardened (built only when exactly true, groupId only when a string).
   const groups = sanitizeGroups(payload.groups ?? (prior?.spec as { groups?: unknown } | null | undefined)?.groups);
-  const sellNormalized = Array.isArray(sellSanitizedRaw) ? normalizeSystemOrder(sellSanitizedRaw.map(sanitizeSectionGroupMeta), groups) : sellSanitizedRaw;
+  const sellNormalizedRaw = Array.isArray(sellSanitizedRaw) ? normalizeSystemOrder(sellSanitizedRaw.map(sanitizeSectionGroupMeta), groups) : sellSanitizedRaw;
+  // #366: the project discounts are sanitized and stamped here (an unchanged entry keeps who set it and when; a
+  // posted by / at is never trusted), then RE-APPLIED to every line and assembly part — so a stale or hand-edited
+  // payload can never save a cost that disagrees with the map. Before the bonus lines, which read normal cost.
+  const priorDiscounts = sanitizeProjectDiscounts((prior?.spec as { projectDiscounts?: unknown } | null | undefined)?.projectDiscounts);
+  const discounts = mergeDiscountsForSave(
+    priorDiscounts,
+    payload.projectDiscounts !== undefined ? payload.projectDiscounts : priorDiscounts,
+    user.id,
+    Date.now()
+  );
+  const sellNormalized = Array.isArray(sellNormalizedRaw) ? applyProjectDiscounts(sellNormalizedRaw, discounts) : sellNormalizedRaw;
   // Estimator bonuses: the server re-derives the 5% package / 2% estimator
   // lines from the sanitized sections, so a stale or hand-crafted client can
   // never save a wrong bonus. Runs BEFORE the Rewards credit is settled and
@@ -551,7 +566,8 @@ export async function saveQuoteAction(
     pricingTier: tier.tier,
     tierMargin: tier.margin,
     source: savedSource,
-    spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}) },
+    // #366: projectDiscounts only when the estimate has any — an estimate without one stores exactly as before.
+    spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}), ...(Object.keys(discounts).length ? { projectDiscounts: discounts } : {}) },
     pdfOptions: normalizePdfOptions(payload.pdfOptions),
     // Box goods sale: content (QUOTE_CONTENT_FIELDS); create keeps it via buildQuote, update() stores only true.
     boxSale,
@@ -890,7 +906,10 @@ export async function moveSystemToEstimateAction(
     contactName: string;
   },
   vendorQuotes: VendorQuote[] = [],
-  sourceQuoteId: string | null = null
+  sourceQuoteId: string | null = null,
+  /** #366 — the source estimate's project discounts as the builder holds them (a NEW target carries the entries
+   *  for the SKUs this system contains; an existing target's own map decides). Absent = the stored source's. */
+  projectDiscounts?: unknown
 ): Promise<MoveSystemResult> {
   const user = await requireUser();
   // #267: a moved system keeps its own price — sanitized like a save.
@@ -908,6 +927,7 @@ export async function moveSystemToEstimateAction(
     vendorQuotes,
     owner: user.name,
     by: user.id,
+    projectDiscounts,
     // #348 slice 3: only a Move into a NEW estimate splits off the source's lead and companies.
     // #348 slice 6: and a new estimate inherits Scope only from its source (scopeOnlyFrom).
     ...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId
@@ -946,6 +966,9 @@ async function placeSystemInEstimate(
     owner: string;
     /** #348 slice 4 — the acting user's id (a vendor party's createdBy). */
     by: string;
+    /** #366 — the source's project discounts as posted (undefined = the stored source's). Only a NEW target
+     *  reads them; an existing target keeps and applies its own map. */
+    projectDiscounts?: unknown;
     tier?: { pricingTier: string; tierMargin: number };
     /** #348 slice 3 — Move into a NEW estimate: the stored source quote lends its lead and non-bidder companies. */
     splitFrom?: { quoteId: string; userId: string };
@@ -969,9 +992,11 @@ async function placeSystemInEstimate(
       if (problem) return { ok: false, error: problem };
     }
     const existingSpec = existing.spec as
-      | { sections?: SpecSection[]; mobs?: SpecMob[]; groups?: SystemGroup[]; document?: unknown }
+      | { sections?: SpecSection[]; mobs?: SpecMob[]; groups?: SystemGroup[]; document?: unknown; projectDiscounts?: unknown }
       | null
       | undefined;
+    // #366: the TARGET's own project discounts decide — a part it has no discount for goes back to its normal cost.
+    const targetDiscounts = sanitizeProjectDiscounts(existingSpec?.projectDiscounts);
     // Estimator Phase 5: the target keeps its own package document.
     const existingDoc = sanitizePackageDoc(existingSpec?.document);
     // Phase 2a: the target keeps its own (sanitised) groups; the moved system lands ungrouped.
@@ -985,7 +1010,8 @@ async function placeSystemInEstimate(
     // Estimator bonuses: re-derive on the merged list with the TARGET's own
     // source / quoteType / status (a won or portal target is left untouched).
     // Before the credit re-pin below, so value/margin include the bonus.
-    const appended = canonicalBonusSections({ source: existing.source, quoteType: existing.quoteType, status: existing.status }, appendedRaw, await loadBonusRates());
+    // #366: after the target's project discounts are applied (the bonus lines read normal cost).
+    const appended = canonicalBonusSections({ source: existing.source, quoteType: existing.quoteType, status: existing.status }, applyProjectDiscounts(appendedRaw, targetDiscounts), await loadBonusRates());
     const maxItemId = appended.reduce((m, sec) => Math.max(m, ...(sec?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
     const mergedSections = withRewardCredit(appended, rewardCreditOf(appended), maxItemId + 1);
     const t = totals(mergedSections, 0);
@@ -998,7 +1024,8 @@ async function placeSystemInEstimate(
       ? await storeVendorQuotes(target.quoteId, preparedVq)
       : [];
     const updated = await update(target.quoteId, {
-      spec: { sections: normalizeSystemOrder(mergedSections, existingGroups), mobs: existingSpec?.mobs || [], groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}) },
+      // #366: the target keeps its own project discounts.
+      spec: { sections: normalizeSystemOrder(mergedSections, existingGroups), mobs: existingSpec?.mobs || [], groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}), ...(Object.keys(targetDiscounts).length ? { projectDiscounts: targetDiscounts } : {}) },
       value: t.grand,
       margin: t.margin,
       ...(carried.length
@@ -1024,7 +1051,6 @@ async function placeSystemInEstimate(
 
   // Estimator bonuses: the new draft estimate gets its bonus lines at birth.
   const newSections = canonicalBonusSections({ source: "estimator", status: "draft" }, withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))]), await loadBonusRates());
-  const t = totals(newSections, 0);
   // #348 slice 3: the lead comes from the STORED source quote (never from the client); an unsaved or missing source
   // simply has none. The id only says which stored quote to read.
   // A read failure only skips the carry; a deleted lead isn't carried.
@@ -1040,6 +1066,15 @@ async function placeSystemInEstimate(
       console.error("placeSystemInEstimate: reading the source quote failed", sourceId, e);
     }
   }
+  // #366: a NEW estimate carries the source's discount entries for the SKUs this system contains (the builder's
+  // map, re-stamped like a save against the stored source's; the stored map alone when none was posted). Applied
+  // after the bonus lines are derived — they read normal cost, so they come out identical either way.
+  const storedSourceDiscounts = sanitizeProjectDiscounts((sourceQuote?.spec as { projectDiscounts?: unknown } | null | undefined)?.projectDiscounts);
+  const sourceDiscounts: ProjectDiscounts =
+    opts.projectDiscounts !== undefined ? mergeDiscountsForSave(storedSourceDiscounts, opts.projectDiscounts, opts.by, Date.now()) : storedSourceDiscounts;
+  const carriedDiscounts = discountsForSections(newSections, sourceDiscounts);
+  const newSpecSections = applyProjectDiscounts(newSections, carriedDiscounts);
+  const t = totals(newSpecSections, 0);
   const splitSource: Quote | null = opts.splitFrom ? sourceQuote : null;
   const splitLeadId = splitSource ? await leadIdForCreate(splitSource.leadId) : null;
   // #348 slice 6 (Jeff 2026-10-15): a new estimate made off a Scope-only estimate (its stamp, or bidders now or ever)
@@ -1057,7 +1092,7 @@ async function placeSystemInEstimate(
       locationId: opts.sourceContext.locationId,
       source: "estimator",
       status: "draft",
-      spec: { sections: newSections, mobs: [] },
+      spec: { sections: newSpecSections, mobs: [], ...(Object.keys(carriedDiscounts).length ? { projectDiscounts: carriedDiscounts } : {}) },
       value: t.grand,
       margin: t.margin,
       owner: opts.owner,
@@ -1157,7 +1192,10 @@ export async function copySystemToEstimateAction(
     tierMargin: number | null;
   },
   vendorQuotes: VendorQuote[] = [],
-  sourceQuoteId: string | null = null
+  sourceQuoteId: string | null = null,
+  /** #366 — as Move: a NEW target carries the source's entries for this system's SKUs; an existing one applies its own.
+   *  "same" returns the copy at normal cost and the builder re-applies its map. */
+  projectDiscounts?: unknown
 ): Promise<CopySystemResult> {
   const user = await requireUser();
   // #293: blocks ride copySectionForTarget's section spread — sanitized first.
@@ -1224,6 +1262,7 @@ export async function copySystemToEstimateAction(
     vendorQuotes,
     owner: user.name,
     by: user.id,
+    projectDiscounts,
     tier: stamp,
     // #348 slice 6: a Copy into a NEW estimate inherits Scope only from the stored source (same customer only).
     ...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId ? { scopeOnlyFrom: sourceQuoteId } : {}),

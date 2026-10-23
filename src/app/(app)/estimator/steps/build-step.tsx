@@ -8,6 +8,7 @@ import { pointsLabel } from "@/lib/rewards/points";
 import { SIDE_TOGGLE } from "../estimator-styles";
 import type { EstimatorState } from "../use-estimator-state";
 import { RewardCreditPanel } from "../reward-credit-panel";
+import { linesForSku, ProjectDiscountsCard } from "../project-discounts-card";
 import { fmt, short, systemSellTotal } from "../pricing";
 import { vendorAttachmentLoad } from "../types";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
@@ -141,8 +142,11 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     placeLibrarySystem,
     portalStatusError,
     assistDraft,
+    projectDiscounts,
     rate,
     removeCredit,
+    removeProjectDiscount,
+    setProjectDiscount,
     removeItem,
     removeMob,
     removeVendorLine,
@@ -415,6 +419,11 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
               )}
             </div>
 
+            {/* #366: project discounts — internal (staff view only); hidden when nothing on the estimate could carry one. */}
+            {isInternal && (
+              <ProjectDiscountsCard sections={sections} discounts={projectDiscounts} onSet={setProjectDiscount} onRemove={removeProjectDiscount} />
+            )}
+
             <RewardCreditPanel
               info={creditInfo}
               applied={appliedCredit}
@@ -647,6 +656,14 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     built={isBuilt(sec.id)}
                     onMarkBuilt={() => markBuilt(sec.id)}
                     boxSale={s.boxSale}
+                    {...(isInternal
+                      ? {
+                          projectDiscounts,
+                          onSetProjectDiscount: setProjectDiscount,
+                          onRemoveProjectDiscount: removeProjectDiscount,
+                          projectDiscountLines: (sku: string) => linesForSku(sections, sku),
+                        }
+                      : {})}
                   />
                 ))}
               </div>
