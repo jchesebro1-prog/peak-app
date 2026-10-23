@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-10-23T15:30:11.334Z",
+  "capturedAt": "2026-10-23T15:32:29.657Z",
   "commit": "a07dfea2",
   "cases": {
     "catalogAddPrice": [
@@ -753,7 +753,8 @@
         "marginAmount": 250,
         "effectiveMargin": 0.303030303030303,
         "liftSell": 0,
-        "liftLine": 0
+        "liftLine": 0,
+        "baseApplied": false
       },
       {
         "id": "flame-far",
@@ -764,7 +765,8 @@
         "marginAmount": 1085,
         "effectiveMargin": 0.30138888888888893,
         "liftSell": 0,
-        "liftLine": 0
+        "liftLine": 0,
+        "baseApplied": false
       },
       {
         "id": "flame-gold",
@@ -775,7 +777,20 @@
         "marginAmount": 102.5,
         "effectiveMargin": 0.1952380952380952,
         "liftSell": 0,
-        "liftLine": 0
+        "liftLine": 0,
+        "baseApplied": false
+      },
+      {
+        "id": "flame-basefee",
+        "totalRaw": 214.2857142857143,
+        "autoTotal": 225,
+        "total": 225,
+        "cost": 150,
+        "marginAmount": 75,
+        "effectiveMargin": 0.33333333333333337,
+        "liftSell": 0,
+        "liftLine": 0,
+        "baseApplied": true
       },
       {
         "id": "flame-typed",
@@ -786,7 +801,8 @@
         "marginAmount": 425,
         "effectiveMargin": 0.42500000000000004,
         "liftSell": 0,
-        "liftLine": 0
+        "liftLine": 0,
+        "baseApplied": false
       }
     ],
     "repair": [
@@ -801,7 +817,8 @@
         "serviceMargin": 0.3057142857142857,
         "partsSell": 0,
         "liftSell": 0,
-        "liftLine": 0
+        "liftLine": 0,
+        "calloutApplied": false
       },
       {
         "id": "repair-far",
@@ -814,7 +831,8 @@
         "serviceMargin": 0.3006849315068493,
         "partsSell": 0,
         "liftSell": 0,
-        "liftLine": 0
+        "liftLine": 0,
+        "calloutApplied": false
       },
       {
         "id": "repair-parts",
@@ -827,7 +845,50 @@
         "serviceMargin": 0.3007692307692307,
         "partsSell": 466.6666666666667,
         "liftSell": 0,
-        "liftLine": 0
+        "liftLine": 0,
+        "calloutApplied": false
+      },
+      {
+        "id": "repair-callout",
+        "totalRaw": 350,
+        "autoTotal": 350,
+        "total": 350,
+        "cost": 60.25,
+        "marginAmount": 289.75,
+        "effectiveMargin": 0.8278571428571428,
+        "serviceMargin": 0.8278571428571428,
+        "partsSell": 0,
+        "liftSell": 0,
+        "liftLine": 0,
+        "calloutApplied": true
+      },
+      {
+        "id": "repair-emergency",
+        "totalRaw": 1082.142857142857,
+        "autoTotal": 1075,
+        "total": 1075,
+        "cost": 757.5,
+        "marginAmount": 317.5,
+        "effectiveMargin": 0.2953488372093023,
+        "serviceMargin": 0.2953488372093023,
+        "partsSell": 0,
+        "liftSell": 0,
+        "liftLine": 0,
+        "calloutApplied": false
+      },
+      {
+        "id": "repair-callout-parts",
+        "totalRaw": 850,
+        "autoTotal": 850,
+        "total": 850,
+        "cost": 410.25,
+        "marginAmount": 439.75,
+        "effectiveMargin": 0.5173529411764706,
+        "serviceMargin": 0.8278571428571428,
+        "partsSell": 500.00000000000006,
+        "liftSell": 0,
+        "liftLine": 0,
+        "calloutApplied": true
       },
       {
         "id": "repair-lift",
@@ -840,7 +901,8 @@
         "serviceMargin": 0.29125,
         "partsSell": 0,
         "liftSell": 642.8571428571429,
-        "liftLine": 643
+        "liftLine": 643,
+        "calloutApplied": false
       }
     ],
     "inspection": [
@@ -853,7 +915,8 @@
         "marginAmount": 367.5,
         "effectiveMargin": 0.30625,
         "liftSell": 0,
-        "liftLine": 0
+        "liftLine": 0,
+        "minApplied": false
       },
       {
         "id": "insp-far",
@@ -864,7 +927,20 @@
         "marginAmount": 1135,
         "effectiveMargin": 0.2986842105263158,
         "liftSell": 0,
-        "liftLine": 0
+        "liftLine": 0,
+        "minApplied": false
+      },
+      {
+        "id": "insp-minfee",
+        "totalRaw": 650,
+        "autoTotal": 650,
+        "total": 650,
+        "cost": 195.25,
+        "marginAmount": 454.75,
+        "effectiveMargin": 0.6996153846153846,
+        "liftSell": 0,
+        "liftLine": 0,
+        "minApplied": true
       },
       {
         "id": "insp-l2",
@@ -875,7 +951,8 @@
         "marginAmount": 220,
         "effectiveMargin": 0.15172413793103445,
         "liftSell": 0,
-        "liftLine": 0
+        "liftLine": 0,
+        "minApplied": false
       }
     ],
     "labor": {
@@ -888,6 +965,19 @@
         {
           "cost": 1000,
           "price": 1428.57
+        }
+      ]
+    },
+    "labor22": {
+      "totalPrice": 2371.7948717948716,
+      "items": [
+        {
+          "cost": 850,
+          "price": 1089.74
+        },
+        {
+          "cost": 1000,
+          "price": 1282.05
         }
       ]
     },
