@@ -19,6 +19,7 @@ import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { defaultAlternatesTaken, normalizeSplit, type BonusRecord, type BonusSplit } from "@/lib/estimate-bonus/record";
 import { useRouter } from "next/navigation";
 import { bonusRatesFor, bonusRulesApply, isBonusEligibleQuote, withBonusLines } from "@/lib/estimate-bonus/rules";
+import { applyProjectDiscounts, parseDiscountPct, projectDiscountsKey, PROJECT_DISCOUNT_NOTE_MAX, type ProjectDiscounts } from "@/lib/project-discounts/rules";
 import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/rewards/credit-line";
 import type { WonEditField } from "@/app/(app)/quotes/new/handoff";
 import type { DraftedLine } from "./ai-scope-modal";
@@ -350,6 +351,35 @@ export function useEstimatorState(props: EstimatorProps) {
    *  in-flight change apart from a stale tab that never heard about a
    *  change made elsewhere. */
   const [baseStatus, setBaseStatus] = useState<QuoteStatus>(initial.status);
+  /** #366 — the estimate's project discounts (spec.projectDiscounts): SKU → { pct, note }. Rides every Save; the
+   *  server stamps who / when and re-applies the map itself. */
+  const [projectDiscounts, setProjectDiscounts] = useState<ProjectDiscounts>(() => initial.projectDiscounts ?? {});
+  /** #366 — the map as of the last load / successful Save (an edit that moves no line — a note — still holds the window). */
+  const [savedDiscountsKey, setSavedDiscountsKey] = useState(() => projectDiscountsKey(initial.projectDiscounts ?? {}));
+  // #366: keep every line's project discount stamped — a line added, a qty changed, a system loaded or copied in, or
+  // the map edited. applyProjectDiscounts returns the same array when nothing changes, so this settles in one pass.
+  // Declared BEFORE the bonus effect below: both queue functional updates in this order, so the bonus lines are
+  // always figured on stamped lines (they read normal cost anyway). Writes setSectionsState directly, like the bonus
+  // effect, so it never un-marks a built system or clears the tier banner.
+  useEffect(() => {
+    setSectionsState((cur) => applyProjectDiscounts(cur, projectDiscounts));
+  }, [sections, projectDiscounts]);
+  /** #366 — set (or change) one SKU's project discount; it applies to that SKU everywhere on the estimate. */
+  const setProjectDiscount = useCallback((sku: string, pct: number, note: string) => {
+    const key = sku.trim();
+    const p = parseDiscountPct(pct);
+    if (!key || p == null) return;
+    setProjectDiscounts((cur) => ({ ...cur, [key]: { pct: p, note: note.trim().slice(0, PROJECT_DISCOUNT_NOTE_MAX), by: cur[key]?.by ?? "", at: cur[key]?.at ?? 0 } }));
+  }, []);
+  /** #366 — remove one SKU's project discount (its lines go back to their normal cost). */
+  const removeProjectDiscount = useCallback((sku: string) => {
+    setProjectDiscounts((cur) => {
+      if (!Object.prototype.hasOwnProperty.call(cur, sku)) return cur;
+      const next = { ...cur };
+      delete next[sku];
+      return next;
+    });
+  }, []);
   // Estimator bonuses: keep each system's 5% / 2% lines current. Runs after
   // every sections change (all writers, including setSectionsState callers);
   // withBonusLines returns the same array when nothing changes, so this
@@ -1075,7 +1105,8 @@ export function useEstimatorState(props: EstimatorProps) {
   // Pop-outs (D912): while this estimate has unsaved work — edits since the
   // last Save, or a new estimate with lines — this window won't answer "Open
   // in main window" and skips its focus refresh. Keyed on the boolean only.
-  const unsavedHold = pdfDirty || (!loadedId && sections.some((s) => s.items.length > 0));
+  // #366: a project-discount edit that moved no line (a note) is unsaved work too.
+  const unsavedHold = pdfDirty || (!loadedId && sections.some((s) => s.items.length > 0)) || projectDiscountsKey(projectDiscounts) !== savedDiscountsKey;
   useEffect(() => {
     setUnsavedHold(unsavedHold);
     return () => setUnsavedHold(false);
@@ -1425,6 +1456,7 @@ export function useEstimatorState(props: EstimatorProps) {
       return false;
     }
     const docAtSave = { ...docInput, document: docNow };
+    const discountsAtSave = projectDiscounts; // #366
     // What the server had before this save (estimator bonuses: syncBonusAfterStatus).
     const statusBeforeSave = baseStatus;
     const repriceSeqAtSave = tierRepriceSeqRef.current;
@@ -1475,6 +1507,8 @@ export function useEstimatorState(props: EstimatorProps) {
           // autosaves through the meta action (flushSelection after the first save).
           // Estimator Phase 5: the package document rides every Save (null = remove it).
           document: docNow,
+          // #366: the project discounts ride every Save (the server stamps by / at and re-applies them).
+          projectDiscounts,
         });
         // #181: adopt the id whenever the server hands one back, even when
         // `ok` is false — the create branch mints the quote FIRST and only
@@ -1496,6 +1530,7 @@ export function useEstimatorState(props: EstimatorProps) {
           if (res.id && (!loadedId || selectionError)) flushSelection(res.id);
           // #223: this save's render prints the number the server hands back.
           setSavedDoc({ ...docAtSave, quoteNumber: res.number ?? res.id });
+          setSavedDiscountsKey(projectDiscountsKey(discountsAtSave)); // #366
           if (res.pdf) setPdf(res.pdf);
           setQuoteId(res.number ?? res.id);
           // The server may have moved attachments into Blob storage — take its
@@ -1932,7 +1967,9 @@ export function useEstimatorState(props: EstimatorProps) {
         },
         movedVq,
         // #348 slice 3: the server reads the stored source quote's lead + companies; an unsaved estimate has none.
-        loadedId || null
+        loadedId || null,
+        // #366: a NEW estimate carries the discounts for this system's SKUs (an existing one applies its own).
+        projectDiscounts
       );
       if (res.ok) {
         postChanged("quote", res.targetId);
@@ -1978,7 +2015,9 @@ export function useEstimatorState(props: EstimatorProps) {
         },
         usedVq,
         // #348 slice 6: the server reads the stored source's Scope-only state; an unsaved estimate has none.
-        loadedId || null
+        loadedId || null,
+        // #366: as Move — "same" comes back at normal cost and this builder's map re-applies.
+        projectDiscounts
       );
       if (!res.ok) {
         setMoveNotice({ ok: false, error: res.error || "Could not copy that system." });
@@ -2068,7 +2107,8 @@ export function useEstimatorState(props: EstimatorProps) {
           dest,
           { customerId: customerId || null, locationId: locationId || null, customer: cname, contactName: contactName || "" },
           usedVq,
-          loadedId || null
+          loadedId || null,
+          projectDiscounts // #366
         );
         if (!res.ok) {
           setMoveNotice({ ok: false, error: res.error || "Could not move those lines." });
@@ -3559,6 +3599,10 @@ export function useEstimatorState(props: EstimatorProps) {
     detail,
     doSave,
     exportReviewSheet,
+    // #366: project discounts.
+    projectDiscounts,
+    setProjectDiscount,
+    removeProjectDiscount,
     fabrics,
     fixtureAssemblies,
     fixtureDraft,

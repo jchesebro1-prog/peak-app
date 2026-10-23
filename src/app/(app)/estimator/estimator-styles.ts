@@ -20,6 +20,9 @@ export const CSS = `
 .est-actions { opacity: .4; transition: opacity .12s; }
 .est-row:hover .est-actions, .est-actions:focus-within { opacity: 1; }
 .est-row-kp .est-actions { opacity: 1; }
+.est-pd-trigger { opacity: 0; transition: opacity .12s; }
+.est-row:hover .est-pd-trigger, .est-pd-trigger:focus-visible { opacity: 1; }
+@media (hover: none) { .est-pd-trigger { opacity: 1; } }
 .est-action-btn:hover:not(:disabled) { background: #eef0f3 !important; }
 .est-x:hover { color: #d6584a !important; }
 .est-delsys:hover { color: #d6584a !important; }

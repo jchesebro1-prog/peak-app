@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import { Fragment, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import type { SuggestPart } from "./estimator-data";
 import {
   fmt,
@@ -31,6 +31,8 @@ import { DISCIPLINES, DISCIPLINE_LABEL, autoDisciplineLabel, type ScopeDisciplin
 import { CommentPin } from "./comment-pins";
 import type { NumberedComment } from "@/lib/estimate-review/comments";
 import { GROUPS_MAX, type SystemGroup } from "@/lib/estimate-groups/groups";
+import { discountSkuOf, normalCostOf, type ProjectDiscounts } from "@/lib/project-discounts/rules";
+import { PROJECT_DISCOUNT_COPY, ProjectDiscountEditor } from "./project-discounts-card";
 
 /** Phase 2a: the Group select's "+ New group" option value (never a group id — those are g-…). */
 const NEW_GROUP = "__new";
@@ -240,6 +242,13 @@ export type SectionCardProps = {
   /** Phase 2a: marked built (✓ Mark built & collapse); any edit clears it. */
   built: boolean;
   onMarkBuilt: () => void;
+  /** #366: the estimate's project discounts (internal view only; absent = no chip, no trigger). */
+  projectDiscounts?: ProjectDiscounts;
+  /** #366: set / change one SKU's discount — it applies estimate-wide. */
+  onSetProjectDiscount?: (sku: string, pct: number, note: string) => void;
+  onRemoveProjectDiscount?: (sku: string) => void;
+  /** #366: lines / assembly parts across the WHOLE estimate carrying `sku` (the "Applied to N lines" count). */
+  projectDiscountLines?: (sku: string) => number;
 };
 
 export default function SectionCard(p: SectionCardProps) {
@@ -249,6 +258,8 @@ export default function SectionCard(p: SectionCardProps) {
   // #302: "Saved X to the catalog" — outlives the custom form, which closes on add.
   const [customSavedNote, setCustomSavedNote] = useState("");
   const [linkRevealed, setLinkRevealed] = useState(false);
+  /** #366: the line (by id) whose Project discount popover is open. */
+  const [discountFor, setDiscountFor] = useState<number | null>(null);
   const [moveOpen, setMoveOpen] = useState(false);
   // #266: the one picker serves both Move… and Copy…; opening either while the
   // other is open just switches the mode.
@@ -1110,9 +1121,33 @@ export default function SectionCard(p: SectionCardProps) {
               };
               const lineEditable = laborEditable || trackEditable || curtainEditable || customEditable;
               const openLine = laborEditable ? openLabor : openTrack;
+              /* #366: this line's Project discount editor, opened from its chip / "% project" — an inline row under the
+                 line (the card clips overflow, so never a floating popover). */
+              const discountSku = isInternal && p.projectDiscounts && p.onSetProjectDiscount ? discountSkuOf(it) : "";
+              const discountPanel =
+                discountSku && discountFor === it.id ? (
+                  <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 20px 12px" }}>
+                    <div
+                      role="dialog"
+                      aria-label={`Project discount for ${it.desc}`}
+                      style={{ width: 280, background: "#fff", border: "1px solid #e4e7ec", borderRadius: 10, padding: 12, boxShadow: "0 4px 14px rgba(22,24,29,.08)" }}
+                    >
+                      <ProjectDiscountEditor
+                        sku={discountSku}
+                        label={it.desc || discountSku}
+                        entry={p.projectDiscounts?.[discountSku]}
+                        normalCost={normalCostOf(it)}
+                        hits={p.projectDiscountLines ? p.projectDiscountLines(discountSku) : 1}
+                        onSave={(v, note) => p.onSetProjectDiscount?.(discountSku, v, note)}
+                        onRemove={() => p.onRemoveProjectDiscount?.(discountSku)}
+                        onClose={() => setDiscountFor(null)}
+                      />
+                    </div>
+                  </div>
+                ) : null;
               return (
+                <Fragment key={it.id}>
                 <div
-                  key={it.id}
                   className={"est-row" + (kpStar === "on" ? " est-row-kp" : "")}
                   style={{
                     display: "grid",
@@ -1447,17 +1482,66 @@ export default function SectionCard(p: SectionCardProps) {
                     </button>
                   </div>
                   {isInternal && (
-                    <span
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontVariantNumeric: "tabular-nums",
-                        textAlign: "right",
-                        color: "#aab0bb",
-                        fontSize: 12,
-                      }}
-                    >
-                      {fmt(it.cost)}
-                    </span>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                      <span
+                        style={{
+                          fontFamily: "var(--font-mono)",
+                          fontVariantNumeric: "tabular-nums",
+                          textAlign: "right",
+                          color: "#aab0bb",
+                          fontSize: 12,
+                        }}
+                      >
+                        {fmt(it.cost)}
+                      </span>
+                      {/* #366: project discount — a chip on a discounted line (tooltip: normal → discounted cost · note),
+                          a hover "% project" on a line that could carry one, and a parts chip on an assembly line. */}
+                      {p.projectDiscounts && (() => {
+                        const chip: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 9.5, fontWeight: 700, color: "#1f7a52", background: "#e6f4ec", border: "none", borderRadius: 4, padding: "1px 5px", letterSpacing: ".02em", whiteSpace: "nowrap", cursor: "pointer" };
+                        const discParts = (it.components || []).filter((c) => typeof c.projectDiscountPct === "number");
+                        if (discParts.length) {
+                          // An assembly line: its PARTS carry the discount (edited from the Project discounts card).
+                          const tip = discParts.map((c) => `${c.label || c.sku}: −${c.projectDiscountPct}% (normal ${fmt(normalCostOf(c))} → ${fmt(c.cost)})`).join("\n");
+                          return (
+                            <span data-project-discount="parts" title={`${tip}\nLine: normal ${fmt(normalCostOf(it))} → ${fmt(it.cost)}`} style={{ ...chip, cursor: "default" }}>
+                              {discParts.length === 1 ? PROJECT_DISCOUNT_COPY.chip(discParts[0].projectDiscountPct!) : PROJECT_DISCOUNT_COPY.partsChip(discParts.length)}
+                            </span>
+                          );
+                        }
+                        if (!discountSku) return null;
+                        const open = discountFor === it.id;
+                        const pct = typeof it.projectDiscountPct === "number" ? it.projectDiscountPct : null;
+                        const note = p.projectDiscounts[discountSku]?.note || "";
+                        if (pct != null) {
+                          return (
+                            <button
+                              type="button"
+                              data-project-discount="chip"
+                              aria-expanded={open}
+                              onClick={() => setDiscountFor(open ? null : it.id)}
+                              title={PROJECT_DISCOUNT_COPY.normal(normalCostOf(it), it.cost) + (note ? " · " + note : "")}
+                              style={chip}
+                            >
+                              {PROJECT_DISCOUNT_COPY.chip(pct)}
+                            </button>
+                          );
+                        }
+                        if (!(normalCostOf(it) > 0)) return null;
+                        return (
+                          <button
+                            type="button"
+                            className="est-pd-trigger"
+                            data-project-discount="trigger"
+                            aria-expanded={open}
+                            onClick={() => setDiscountFor(open ? null : it.id)}
+                            title={PROJECT_DISCOUNT_COPY.triggerTitle}
+                            style={{ fontFamily: "var(--font-ui)", fontSize: 10, fontWeight: 600, color: "#8c919c", background: "transparent", border: "none", padding: 0, cursor: "pointer", whiteSpace: "nowrap", ...(open ? { opacity: 1 } : null) }}
+                          >
+                            {PROJECT_DISCOUNT_COPY.lineTrigger}
+                          </button>
+                        );
+                      })()}
+                    </div>
                   )}
                   <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end" }}>
                     <input
@@ -1537,6 +1621,8 @@ export default function SectionCard(p: SectionCardProps) {
                     </button>
                   </div>
                 </div>
+                {discountPanel}
+                </Fragment>
               );
             })}
 

@@ -92,6 +92,16 @@ export function mergeDiscountsForSave(prior: ProjectDiscounts, posted: unknown, 
   return out;
 }
 
+/** A stable fingerprint of what the user controls (SKU, pct, note — never by / at): the builder's
+ *  "unsaved discount edit" check. */
+export function projectDiscountsKey(d: ProjectDiscounts): string {
+  return JSON.stringify(
+    Object.keys(d || {})
+      .sort()
+      .map((k) => [k, d[k]?.pct, d[k]?.note || ""])
+  );
+}
+
 /** The cost a line or part would have with no project discount. Freight, the 5%
  *  package bonus and the tier re-price read this, so the customer's price never moves. */
 export function normalCostOf(it: { cost: number; catalogCost?: number }): number {
@@ -106,13 +116,15 @@ function isAssemblyLine(it: SpecItem): boolean {
 
 /**
  * The SKU a PLAIN line is discounted under, or "" when it can't carry one:
- * a vendor-quote line, allowance, curtain, any labor (labor / overhead /
- * travel), a bonus line, the Rewards credit, or an assembly / rack / track
- * line itself (an assembly's parts are discounted inside it instead).
+ * a custom line (even one saved with a real SKU — its cost is typed by hand
+ * in the Custom part form), a vendor-quote line, allowance, curtain, any labor
+ * (labor / overhead / travel), a bonus line, the Rewards credit, or an
+ * assembly / rack / track line itself (an assembly's parts are discounted
+ * inside it instead).
  */
 export function discountSkuOf(it: SpecItem): string {
   if (!it || typeof it !== "object") return "";
-  if (it.vendorQuoteId || it.allowance || it.curtain || it.labor || it.laborOverhead || it.laborTravel) return "";
+  if (it.custom || it.vendorQuoteId || it.allowance || it.curtain || it.labor || it.laborOverhead || it.laborTravel) return "";
   if (isBonusItem(it) || isRewardCreditItem(it)) return "";
   if ((Array.isArray(it.components) && it.components.length) || it.rackId || it.track || it.fixture) return "";
   return realSku(it.sku);
