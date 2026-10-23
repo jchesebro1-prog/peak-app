@@ -5,6 +5,7 @@ import { PurchasePerksBanner } from "@/components/rewards/purchase-perks-banner"
 import type { NextStepAction } from "@/lib/quote-next-step";
 import type { EstimatorState } from "./use-estimator-state";
 import { tierRepriceMessage } from "./tier-reprice";
+import { repriceLocked, tierLockedMessage } from "@/lib/estimate-reprice/lock";
 
 /**
  * #305 — the banners under the step tabs (next-step note, action error with
@@ -29,7 +30,10 @@ export function EstimatorBanners({ s, onActed }: { s: EstimatorState; onActed: (
     setGateRefused,
     setMoveNotice,
     setTierReprice,
+    setTierLocked,
+    status,
     statusChanging,
+    tierLocked,
     tierReprice,
     tierResolving,
     undoTierReprice,
@@ -211,6 +215,25 @@ export function EstimatorBanners({ s, onActed }: { s: EstimatorState; onActed: (
               padding: "2px 4px",
               flexShrink: 0,
             }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* #368: on a sent / won / lost estimate a new customer / contact's tier doesn't re-price — the stored prices
+          stay, and this says why where the re-price offer would be (a UI lock; the server keeps the stamp). */}
+      {tierLocked && repriceLocked(status) && (
+        <div
+          role="status"
+          data-testid="tier-reprice-locked"
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "9px 22px", background: "#eef3fb", borderBottom: "1px solid #cddaf0", color: "#2b4a7a", fontSize: 12.5, fontWeight: 600, flexShrink: 0 }}
+        >
+          <span>{tierLockedMessage(tierLocked.label)}</span>
+          <button
+            type="button"
+            onClick={() => setTierLocked(null)}
+            style={{ fontSize: 12.5, fontWeight: 600, color: "inherit", background: "transparent", border: "none", cursor: "pointer", padding: "2px 4px", flexShrink: 0 }}
           >
             Dismiss
           </button>

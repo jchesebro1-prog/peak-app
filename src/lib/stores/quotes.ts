@@ -2294,6 +2294,8 @@ export async function setStatus(
       : null;
   const result = await patchQuote(id, (doc) => {
     const t = Date.now();
+    // #368: the quote's own stored value before this move — the re-price banner's delta is measured from it.
+    const valueBeforeMove = typeof doc.value === "number" && Number.isFinite(doc.value) ? doc.value : 0;
     if (autoStamp) doc.review = autoStamp;
     if (reopen) {
       // Non-destructive, like restoreQuoteRevision: the post-win edits become a revision first.
@@ -2318,7 +2320,7 @@ export async function setStatus(
         doc.spec = { ...(followed || {}), sections: rp.sections };
         doc.value = Math.round(rp.value);
         doc.margin = rp.margin;
-        doc.repricedOnRevise = { at: t, by: by || DEFAULT_ACTOR, count: rp.count, delta: rp.delta, lines: rp.lines, typedSystems: rp.typedSystems };
+        doc.repricedOnRevise = { at: t, by: by || DEFAULT_ACTOR, count: rp.count, delta: doc.value - valueBeforeMove, lines: rp.lines, typedSystems: rp.typedSystems };
       } else if (doc.repricedOnRevise) {
         delete doc.repricedOnRevise;
       }

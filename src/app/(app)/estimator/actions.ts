@@ -586,6 +586,13 @@ export async function saveQuoteAction(
     ...(typeof payload.notIncluded === "string" ? { notIncluded: cleanPlainText(payload.notIncluded, NOT_INCLUDED_MAX) } : {}),
     ...(isPortalCatalog && !anyPor && !anyConfirm ? { portalReview: null } : {}),
   };
+  // #368: a sent / won / lost estimate keeps its prices until revised — and the tier stamp they were priced at, so a
+  // customer / contact change saved on it never moves the stamp under the stored lines (the client offers no tier
+  // re-price there either; that half is a UI lock — lock.ts). Server-enforced on the STORED status.
+  if (prior && repriceLocked(prior.status)) {
+    patch.pricingTier = prior.pricingTier ?? null;
+    patch.tierMargin = prior.tierMargin ?? null;
+  }
   // #304: an Estimator tab opened before a model-number rename still holds the
   // old SKUs — move the live spec onto the renamed parts (sku + model) before
   // it is written, so a save never re-introduces a retired SKU. Revisions are

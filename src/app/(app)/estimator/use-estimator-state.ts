@@ -286,6 +286,10 @@ export function useEstimatorState(props: EstimatorProps) {
   /** Bumped on every re-price, so a Save only clears the "Save to keep" of
    *  a re-price it actually carried. */
   const tierRepriceSeqRef = useRef(0);
+  /** #368 — a customer / contact pick on a sent / won / lost estimate resolved a different tier: the lines keep
+   *  their stored prices (and the stamp stays, as the server keeps it on save) — the banner says "Revise the
+   *  estimate first" where the re-price offer would be. A UI lock (lock.ts). */
+  const [tierLocked, setTierLocked] = useState<{ label: string } | null>(null);
   /** Every user edit to the sections goes through here, so the next edit
    *  clears the #254 banner (its Undo would otherwise restore over it). The
    *  tier re-price itself, Undo, and the automatic freight re-apply write
@@ -1165,6 +1169,12 @@ export function useEstimatorState(props: EstimatorProps) {
           return;
         }
         if (seq !== tierResolveSeqRef.current || !r.ok) return;
+        // #368: a non-draft estimate keeps its prices and its tier stamp until revised — no re-price, just say so.
+        if (repriceLocked(status)) {
+          setTierLocked(r.tierMargin !== tierMarginRef.current ? { label: (r.pricingTier && PRICING_TIER_LABEL[r.pricingTier as PricingTier]) || r.pricingTier || "Base" } : null);
+          return;
+        }
+        setTierLocked(null);
         const prev = tierMarginRef.current;
         tierMarginRef.current = r.tierMargin;
         setTierMargin(r.tierMargin);
@@ -2842,7 +2852,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const sec = sections.find((s) => s.id === secId);
     const rec = sec ? laborGroupRecord(sec, group) : null;
     if (!sec || !rec) return;
-    if (repriceLocked(status)) return; // #368: a sent estimate keeps its prices until revised (the ✎ is disabled)
+    if (repriceLocked(status)) return; // #368: UI lock only (the ✎ is disabled) — a save doesn't check lines; see lock.ts
     if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
     laborEditRef.current = { group, draft: rec.draft, ...laborGroupEdits(sec, group) };
@@ -3793,6 +3803,8 @@ export function useEstimatorState(props: EstimatorProps) {
     setSystemRoom,
     setSystemSell,
     setTierReprice,
+    tierLocked,
+    setTierLocked,
     setTitleDraft,
     setTrackDraft,
     setTripLocal,

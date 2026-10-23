@@ -225,9 +225,9 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
   } = s;
   // Estimator bonuses: "Bonus not figured — check line costs" only where the rules apply.
   const bonusOn = bonusRulesApply({ source: initial.bonusSource, quoteType: initial.bonusQuoteType, status }, sections);
-  // #368: a sent / won / lost estimate keeps its prices — Load system and the track / curtain / labor configurators
-  // re-open only once it is revised (the server refuses too).
-  const repriceLock = repriceLocked(status) ? REVISE_FIRST : undefined;
+  // #368: a sent / won / lost estimate keeps its prices until revised. Load system and Copy within are refused by the
+  // server too; the track / curtain / labor configurators are a UI lock only (lock.ts says what is server-enforced).
+  const uiRepriceLock = repriceLocked(status) ? REVISE_FIRST : undefined;
   /* Phase 4 — open review comments pinned to the systems (the shared list is loaded by the hook). */
   const pinned = useMemo(
     () => commentsBySection(numberComments(s.reviewComments, sections), sections.map((x) => x.id)),
@@ -636,7 +636,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     onEditTrack={(lineId) => openTrackEdit(sec.id, lineId)}
                     onEditCurtain={(lineId) => openCurtainEdit(sec.id, lineId)}
                     onEditCustom={(lineId) => openCustomEdit(sec.id, lineId)}
-                    repriceLock={repriceLock}
+                    uiRepriceLock={uiRepriceLock}
                     customEditing={!!customEdit}
                     onSetCustomDraft={setCustomField}
                     onAddCustomPart={() => addCustomPart(sec.id)}
@@ -702,8 +702,8 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
             type="button"
             className="est-addsys est-addlib"
             onClick={() => setLibraryOpen(true)}
-            disabled={!!repriceLock}
-            title={repriceLock || "Load a system from a sent or won estimate — re-priced for this one"}
+            disabled={!!uiRepriceLock}
+            title={uiRepriceLock || "Load a system from a sent or won estimate — re-priced for this one"}
             style={{
               width: "100%",
               marginTop: 8,
@@ -715,8 +715,8 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
               fontSize: 12.5,
               fontWeight: 600,
               fontFamily: "var(--font-ui)",
-              cursor: repriceLock ? "not-allowed" : "pointer",
-              opacity: repriceLock ? 0.55 : 1,
+              cursor: uiRepriceLock ? "not-allowed" : "pointer",
+              opacity: uiRepriceLock ? 0.55 : 1,
             }}
           >
             + From library…

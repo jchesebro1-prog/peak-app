@@ -48727,7 +48727,7 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
   ok((await n293sIndex()).some((e) => e.key === `${QWON}:live:sysLib`), "#293s index (DB): after invalidation a won-without-send quote is indexed from its live spec");
 
   // Load: re-read, re-priced at today's catalog and the target tier, vendor line left out.
-  const r = await n293sLoad(`${QID}:1:sysLib`, 0.2);
+  const r = await n293sLoad(`${QID}:1:sysLib`, 0.2, null);
   const vq = r.ok ? r.section.items.find((x) => x.sku === "VQ-293") : undefined;
   ok(r.ok && r.section.items.length === 2 && r.section.items[0].cost === 120 && r.section.items[0].price === n293sSeed({ cost: 120 }, 0.2) && r.costsUpdated === 1 && r.tierRepriced === 1 && r.vendorLinesFlagged === 1,
     "#293s load (DB): today's cost (100 → 120), the target tier's seed, one vendor-quote line flagged (Jeff 2026-10-15 #21)");
@@ -48737,14 +48737,14 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
      JSON.stringify(r.section.keyProducts) === JSON.stringify([{ lineKey: "1", sku: P, text: "Lib para", photo: true }, { lineKey: "2", sku: "VQ-293", text: "Vendor para", photo: true }]) && !("room" in r.section) && r.section.id !== "sysLib",
     "#293s load (DB): the SENT system's name, narrative, presentation and key products carry (the vendor line's too, #21); the room doesn't");
   ok(r.ok && (/^EST-\d+/.test(r.estNumber) || r.estNumber === QID), "#293s load (DB): the notice names the source estimate");
-  const draftLoad = await n293sLoad(`${QDRAFT}:live:sysLib`, 0.2);
+  const draftLoad = await n293sLoad(`${QDRAFT}:live:sysLib`, 0.2, null);
   ok(!draftLoad.ok && draftLoad.error === "That estimate is no longer available", "#293s load (DB): a draft's system can't be loaded");
-  ok(!(await n293sLoad("garbage", 0.2)).ok, "#293s load (DB): a malformed key is refused");
+  ok(!(await n293sLoad("garbage", 0.2, null)).ok, "#293s load (DB): a malformed key is refused");
   // Final review: warm the index right before remove(), so the drop below is remove()'s own invalidation.
   ok((await n293sIndex()).some((e) => e.quoteId === QWON), "#293s index (DB): the won quote is listed in a warm index right before remove()");
   await n293sQRemove(QWON);
   ok(!(await n293sIndex()).some((e) => e.quoteId === QWON), "#293s index (DB): deleting a quote drops it from the library (remove invalidates)");
-  const gone = await n293sLoad(`${QWON}:live:sysLib`, 0.2);
+  const gone = await n293sLoad(`${QWON}:live:sysLib`, 0.2, null);
   ok(!gone.ok && gone.error === "That estimate is no longer available", "#293s load (DB): a deleted quote's entry is refused with the spec's message");
 }
 
@@ -48890,14 +48890,14 @@ async function systemLibrary293sFinalFixAsyncChecks(): Promise<void> {
 
   // ---- a malformed key leaves a warm index warm; a parsed-but-gone key invalidates ----
   const warm2 = await n293sIndex();
-  const bad1 = await n293sLoad("garbage", 0.2);
-  const bad2 = await n293sLoad("a:b:c:d", 0.2);
+  const bad1 = await n293sLoad("garbage", 0.2, null);
+  const bad2 = await n293sLoad("a:b:c:d", 0.2, null);
   ok(!bad1.ok && !bad2.ok && (await n293sIndex()) === warm2, "#293s final (DB): a malformed key is refused and the warm index stays cached");
-  const goneKey = await n293sLoad(`${fixtureId(293, "lib-final-never")}:live:sysFin`, 0.2);
+  const goneKey = await n293sLoad(`${fixtureId(293, "lib-final-never")}:live:sysFin`, 0.2, null);
   ok(!goneKey.ok && goneKey.error === n293sGone && (await n293sIndex()) !== warm2, "#293s final (DB): control — a parsed key whose quote is gone does invalidate");
 
   // ---- a target with no tier prices at the Estimator's fallback seed, not the source's 0.2 ----
-  const nt = await n293sLoad(`${QW}:live:sysFin`, null);
+  const nt = await n293sLoad(`${QW}:live:sysFin`, null, null);
   ok(nt.ok && nt.section.items[0].cost === 120 && nt.section.items[0].price === n293sSeed({ cost: 120 }, n293fFallback) &&
      nt.section.items[0].price !== n293sSeed({ cost: 120 }, 0.2) && nt.tierRepriced === 1,
     `#293s final (DB): Load into a no-tier estimate prices at TIER_FALLBACK_MARGIN (${n293fFallback}), not the source customer's 0.2`);
@@ -48918,7 +48918,7 @@ async function systemLibrary293sFinalFixAsyncChecks(): Promise<void> {
   n293sInvalidate();
   const pidx = await n293sIndex();
   ok(!pidx.some((e) => e.quoteId === QPC) && !pidx.some((e) => e.quoteId === QPS), "#293s final (DB): sent portal-catalog and portal-service quotes are not in the library");
-  const pl = await n293sLoad(`${QPC}:1:sysFin`, 0.3);
+  const pl = await n293sLoad(`${QPC}:1:sysFin`, 0.3, null);
   ok(!pl.ok && pl.error === n293sGone, "#293s final (DB): a portal quote's system can't be loaded by key");
 }
 
@@ -54518,7 +54518,7 @@ async function modelSku304LiveWritersAsyncChecks(): Promise<void> {
     await Ren.appendSkuRenames([{ from: OLD, to: NEW, model: "Jupiter LW", at: Date.now(), by: "Test" }]);
 
     // Load system from the sent revision.
-    const loaded = await loadLibrarySystem(`${QID}:${rev.rev}:s1`, 0.3);
+    const loaded = await loadLibrarySystem(`${QID}:${rev.rev}:s1`, 0.3, null);
     const ld = loaded.ok ? (loaded.section.items[0] as { sku: string; cost: number; manufacturerModelNumber?: string }) : null;
     ok(!!ld && ld.sku === NEW && ld.manufacturerModelNumber === "Jupiter LW" && ld.cost === 20 && loaded.ok && loaded.section.keyProducts?.[0]?.sku === NEW,
       "#304 live writers: Load system from a sent revision naming the old sku writes the NEW sku (and model) on the live line and key product, priced from the live part");
@@ -71632,18 +71632,22 @@ import { REVISE_FIRST as e368ReviseFirst, repriceLocked as e368Locked } from "@/
      copy.indexOf("if (repriceLocked(existing.status)) return { ok: false, error: REVISE_FIRST };") < copy.indexOf("copySectionForTarget("),
     "#368 estimator lock: Copy into an existing sent estimate is refused before the copy is re-priced");
   const lib = rd("src/app/(app)/estimator/library-actions.ts");
-  ok(/loadLibrarySystemAction\(key: string, ctx: \{ tierMargin: number \| null; quoteId\?: string \| null \}\)/.test(lib) && lib.includes("return loadLibrarySystem(String(key ?? \"\"), tm, target);"),
-    "#368 estimator lock: Load system's action passes the estimate it lands in to the core");
+  // #368 review: the target is a REQUIRED positional argument (null only for a never-saved estimate); junk is refused.
+  ok(/loadLibrarySystemAction\(key: string, quoteId: string \| null, ctx: \{ tierMargin: number \| null \}\)/.test(lib) &&
+     lib.includes("if (quoteId !== null && (typeof quoteId !== \"string\" || !quoteId)) return { ok: false, error: LOAD_TARGET_GONE };") &&
+     lib.includes("return loadLibrarySystem(String(key ?? \"\"), tm, quoteId);"),
+    "#368 estimator lock: Load system's action requires the estimate it lands in (refuses a missing / non-string one) and passes it to the core");
   const modal = rd("src/app/(app)/estimator/system-library-modal.tsx");
-  ok(modal.includes("await loadLibrarySystemAction(key, { tierMargin, quoteId });"), "#368 estimator lock: the Load system modal sends this estimate's id");
+  ok(modal.includes("await loadLibrarySystemAction(key, quoteId, { tierMargin });") && modal.includes("quoteId: string | null;") && !modal.includes("quoteId?: string"),
+    "#368 estimator lock: the Load system modal must be given this estimate's id (a required prop) and always sends it");
   const bs = rd("src/app/(app)/estimator/steps/build-step.tsx");
-  ok(bs.includes("const repriceLock = repriceLocked(status) ? REVISE_FIRST : undefined;") && bs.includes("repriceLock={repriceLock}") &&
-     bs.includes("disabled={!!repriceLock}") && bs.includes('title={repriceLock || "Load a system from a sent or won estimate — re-priced for this one"}') &&
+  ok(bs.includes("const uiRepriceLock = repriceLocked(status) ? REVISE_FIRST : undefined;") && bs.includes("uiRepriceLock={uiRepriceLock}") &&
+     bs.includes("disabled={!!uiRepriceLock}") && bs.includes('title={uiRepriceLock || "Load a system from a sent or won estimate — re-priced for this one"}') &&
      bs.includes('<SystemLibraryModal mode="load" tierMargin={tierMargin} quoteId={loadedId} onLoaded'),
     "#368 estimator lock: Build disables + From library… with the same text, passes the lock to every system card, and the modal gets the estimate id");
   const sc = rd("src/app/(app)/estimator/section-card.tsx");
-  ok(sc.includes("const laborEditable = isInternal && !p.repriceLock &&") && sc.includes("const trackEditable = isInternal && !p.repriceLock &&") && sc.includes("const curtainEditable = isInternal && !p.repriceLock &&") &&
-     sc.includes("{configLocked && (") && sc.includes("disabled title={p.repriceLock}") && !sc.includes("const customEditable = isInternal && !p.repriceLock"),
+  ok(sc.includes("const laborEditable = isInternal && !p.uiRepriceLock &&") && sc.includes("const trackEditable = isInternal && !p.uiRepriceLock &&") && sc.includes("const curtainEditable = isInternal && !p.uiRepriceLock &&") &&
+     sc.includes("{configLocked && (") && sc.includes("disabled title={p.uiRepriceLock}") && !sc.includes("const customEditable = isInternal && !p.uiRepriceLock"),
     "#368 estimator lock: the labor / track / curtain configurators don't re-open on a locked estimate (a disabled ✎ says why); the Custom part form is unaffected");
   ok(sc.includes("const hitLocked = repriceLocked(hit.status);") && sc.includes("disabled={hitLocked}") && sc.includes("title={hitLocked ? REVISE_FIRST : undefined}"),
     "#368 estimator lock: the system's Move / Copy target picker greys out sent / won / lost estimates with the same title");
@@ -71659,7 +71663,7 @@ async function etc368LoadSystemDbChecks(check: typeof ok): Promise<void> {
   const { fixtureId, registerFixture, dropFixtures } = await import("./test-fixtures");
   const Q = await import("@/lib/stores/quotes");
   const DS = await import("@/db/doc-store");
-  const { loadLibrarySystem } = await import("@/lib/narrative/load-system");
+  const { loadLibrarySystem, LOAD_TARGET_GONE } = await import("@/lib/narrative/load-system");
   const { LIBRARY_GONE } = await import("@/lib/narrative/system-library");
   const base = { customer: "Spec fixture 368", owner: "spec", source: "estimator", quoteType: "system", spec: { sections: [], mobs: [] } };
   try {
@@ -71673,6 +71677,8 @@ async function etc368LoadSystemDbChecks(check: typeof ok): Promise<void> {
       if (st === "draft") check(!r.ok && r.error === LIBRARY_GONE, "#368 estimator lock (DB): Load system into a DRAFT estimate passes the lock (a bad key then answers as before)");
       else check(!r.ok && r.error === e368ReviseFirst, `#368 estimator lock (DB): Load system into a ${st.toUpperCase()} estimate is refused with "Revise the estimate first"`);
     }
+    const gone = await loadLibrarySystem("not-a-key", null, fixtureId(368, "lock-never-saved"));
+    check(!gone.ok && gone.error === LOAD_TARGET_GONE, "#368 estimator lock (DB, review): a target id that isn't a stored estimate is refused (never treated as unsaved)");
     const unsaved = await loadLibrarySystem("not-a-key", null, null);
     check(!unsaved.ok && unsaved.error === LIBRARY_GONE, "#368 estimator lock (DB): an unsaved estimate (no id) is never locked");
   } finally {
@@ -71752,8 +71758,7 @@ import type { SpecItem as E368Item, SpecSection as E368Section } from "@/app/(ap
     "#368 estimator reprice: the result goes through deriveEstimatorSections as a draft — bonus lines re-derived");
   ok(rv.value === e368Value(rv.sections, { value: null, margin: null }).value && rv.value % 25 === 0 && rv.margin === e368Value(rv.sections, { value: null, margin: null }).margin,
     "#368 estimator reprice: value / margin re-derived from the re-priced sections ($25 rounding included)");
-  const before = e368Value(e368Derive({ source: "estimator", quoteType: "system", status: "draft" }, plain, {}, E368_RATES), { value: null, margin: null }).value;
-  ok(rv.delta === Math.round((rv.value - before) * 100) / 100 && rv.delta > 0, "#368 estimator reprice: delta = after − before, both derived the same way");
+  ok(!("delta" in rv), "#368 estimator reprice (review): the pure re-price carries no re-derived \"before\" — the banner's delta is setStatus's (stored value after − stored value before)");
   ok(e368ForRevise({ source: "grid", quoteType: "system" }, { sections: plain }, c, E368_RATES) === null && e368ForRevise({ source: "estimator", quoteType: "flame_test" }, { sections: plain }, c, E368_RATES) === null &&
      e368ForRevise({ source: "portal-catalog", quoteType: "system" }, { sections: plain }, c, E368_RATES) === null && e368Applies({ source: "estimator" }) && e368Applies({ source: "estimator", quoteType: "" }),
     "#368 estimator reprice: only Estimator system quotes re-price (Grid, portal and service quotes never)");
@@ -71792,7 +71797,8 @@ import type { SpecItem as E368Item, SpecSection as E368Section } from "@/app/(ap
   const mut = ss.slice(ss.indexOf("const result = await patchQuote(id, (doc) => {"));
   ok(mut.indexOf("if (repriceIn && revised.value) {") > mut.indexOf("applyReopen(doc, reopen);") && mut.indexOf("if (repriceIn && revised.value) {") > mut.indexOf("doc.status = status;") &&
      mut.includes("const rp = repriceForRevise(doc, followed, repriceIn.catalog, repriceIn.bonusRates);") && mut.includes("doc.value = Math.round(rp.value);") &&
-     mut.includes("doc.repricedOnRevise = { at: t, by: by || DEFAULT_ACTOR, count: rp.count, delta: rp.delta, lines: rp.lines, typedSystems: rp.typedSystems };") &&
+     mut.includes("doc.repricedOnRevise = { at: t, by: by || DEFAULT_ACTOR, count: rp.count, delta: doc.value - valueBeforeMove, lines: rp.lines, typedSystems: rp.typedSystems };") /* #368 review: stored after − stored before */ &&
+     mut.indexOf("const valueBeforeMove = typeof doc.value === \"number\" && Number.isFinite(doc.value) ? doc.value : 0;") < mut.indexOf("applyReopen(doc, reopen);") &&
      mut.includes("} else if (doc.repricedOnRevise) {\n        delete doc.repricedOnRevise;") && !/doc\.revisions[^\n]*repric/.test(mut),
     "#368 estimator wiring: the re-price runs in the same write as the move to Draft (after a reopen), stores the summary only when something changed, clears a stale one, never touches revisions");
   ok(st.includes("delete clean.repricedOnRevise;") && !st.slice(st.indexOf("function snapshotOf("), st.indexOf("function pushRevision(")).includes("repriced"),
@@ -71843,7 +71849,9 @@ async function etc368RepriceDbChecks(check: typeof ok): Promise<void> {
       { id: "s2", name: "Typed", freightPct: 0, sellOverride: 5000, items: [it({ id: 1, sku: A, cost: 100, price: 150 })] },
     ];
     const ID = fixtureId(368, "quote");
-    await Q.create({ id: ID, name: "Reprice 368", customer: "Spec fixture 368", owner: "spec", source: "estimator", quoteType: "system", spec: { sections, mobs: [] } } as never);
+    // A realistic stored value (what a save would have stored) — the banner's delta is measured from it.
+    const storedValue = Math.round(reconcileEstimatorValue(sections, { value: null, margin: null }).value);
+    await Q.create({ id: ID, name: "Reprice 368", customer: "Spec fixture 368", owner: "spec", source: "estimator", quoteType: "system", value: storedValue, spec: { sections, mobs: [] } } as never);
     registerFixture("quotes", ID);
     await Q.setStatus(ID, "sent", "Spec", { bypassApprovalGate: "engine-owned-flow" });
     const sent = (await Q.get(ID))!;
@@ -71863,6 +71871,8 @@ async function etc368RepriceDbChecks(check: typeof ok): Promise<void> {
     const stamp = rev.repricedOnRevise!;
     check(!!stamp && stamp.count === 3 && stamp.by === "Spec Reviser" && stamp.lines.length === 3 && stamp.typedSystems.length === 1 && stamp.typedSystems[0].name === "Typed" && typeof stamp.delta === "number",
       "#368 estimator reprice (DB): repricedOnRevise records who, how many, the delta, the lines and the kept typed systems");
+    check(sent.value === storedValue && stamp.delta === rev.value - storedValue && stamp.delta !== 0,
+      "#368 estimator reprice (DB, review): the banner's delta is the stored value after the revise minus the quote's stored value before it");
     check(JSON.stringify(rev.revisions) === sentRevJson, "#368 estimator reprice (DB): the sent revision is untouched (frozen at send)");
 
     // Send the re-priced draft, then revise again with no catalog change: nothing re-prices and the stale stamp clears.
@@ -71895,7 +71905,7 @@ async function etc368RepriceDbChecks(check: typeof ok): Promise<void> {
     "#368 estimator lock: Copy within this estimate is refused on a stored sent / won / lost estimate (\"Revise the estimate first\") before any re-pricing; an unsaved estimate (no id) copies as before");
   const sc = rd("src/app/(app)/estimator/section-card.tsx");
   const hereAt = sc.indexOf("onClick={handleCopyHere}");
-  ok(hereAt > 0 && sc.slice(hereAt, hereAt + 400).includes("disabled={!!p.repriceLock}") && sc.slice(hereAt, hereAt + 400).includes("title={p.repriceLock}"),
+  ok(hereAt > 0 && sc.slice(hereAt, hereAt + 400).includes("disabled={!!p.uiRepriceLock}") && sc.slice(hereAt, hereAt + 400).includes("title={p.uiRepriceLock}"),
     "#368 estimator lock: the Copy within this estimate control is disabled on a locked estimate, titled \"Revise the estimate first\"");
   const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
   const cs = hook.slice(hook.indexOf("const copySystem = (secId: string, target: CopySystemTarget) => {"));
@@ -71909,4 +71919,40 @@ async function etc368RepriceDbChecks(check: typeof ok): Promise<void> {
     "#368 estimator wiring: an addendum that revises the estimate first runs beforeRevise (after the confirm, before the bid write); a failed save stops it");
   ok(rd("src/app/(app)/estimator/estimator-header.tsx").includes("beforeRevise={async () => !pdfDirty || (await saveNow()) !== false}"),
     "#368 estimator wiring: the Estimator header saves unsaved edits before the addendum's revise (so a re-price reload never loses them)");
+}
+
+/* --- #368 estimator review fixes: what the lock reaches is named honestly; a tier change on a sent estimate keeps the prices --- */
+import { tierLockedMessage as e368TierLockedMsg } from "@/lib/estimate-reprice/lock";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const lock = rd("src/lib/estimate-reprice/lock.ts");
+  ok(lock.includes("SERVER-ENFORCED") && lock.includes("UI LOCK ONLY") && lock.includes("saveQuoteAction accepts any posted line on a sent estimate"),
+    "#368 estimator lock (review): lock.ts says which locks the server enforces and which are UI only");
+  const sc = rd("src/app/(app)/estimator/section-card.tsx");
+  ok(!/\brepriceLock\b/.test(sc) && !/\brepriceLock\b/.test(rd("src/app/(app)/estimator/steps/build-step.tsx")) && sc.includes("uiRepriceLock?: string;") && sc.includes("A UI LOCK ONLY"),
+    "#368 estimator lock (review): the configurator lock prop is uiRepriceLock, documented as a UI lock (no stray repriceLock name left)");
+  const spec = rd("docs/superpowers/specs/2026-10-23-etc-price-sync-design.md");
+  const s9 = spec.slice(spec.indexOf("## 9. Sent estimates keep their prices"), spec.indexOf("### 9.1 Re-price on Revise"));
+  ok(s9.includes("**Server-enforced**") && s9.includes("**UI lock**") && s9.indexOf("Re-opening a **track, curtain or labor** configurator") > s9.indexOf("**UI lock**") &&
+     s9.indexOf("**Load system**") < s9.indexOf("**UI lock**") && s9.indexOf("**Copy within this estimate**") < s9.indexOf("**UI lock**"),
+    "#368 spec §9 (review): Copy / Move / copy-here, Load system and the tier stamp are server-enforced; the configurators and the tier re-price offer are a UI lock");
+
+  // Tier re-price on a non-draft estimate.
+  ok(e368TierLockedMsg("Contractor").startsWith("Revise the estimate first") && e368TierLockedMsg("Contractor").includes("Contractor") && e368TierLockedMsg("").includes("Base"),
+    "#368 estimator tier (review): the banner leads with \"Revise the estimate first\" and names the tier that would apply");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  const rt = hook.slice(hook.indexOf("const resolveTierFor = (custId: string | null, contact: string) => {"));
+  const lockAt = rt.indexOf("if (repriceLocked(status)) {");
+  ok(lockAt > rt.indexOf("if (seq !== tierResolveSeqRef.current || !r.ok) return;") && lockAt < rt.indexOf("tierMarginRef.current = r.tierMargin;") && lockAt < rt.indexOf("applyTierStamp(prev, r.tierMargin, r.pricingTier);") &&
+     rt.slice(lockAt, rt.indexOf("setTierLocked(null);")).includes("return;"),
+    "#368 estimator tier (review): on a sent / won / lost estimate a customer / contact pick neither moves the tier margin nor re-prices — it shows the lock instead");
+  const ban = rd("src/app/(app)/estimator/estimator-banners.tsx");
+  ok(ban.includes("{tierLocked && repriceLocked(status) && (") && ban.includes("{tierLockedMessage(tierLocked.label)}") && ban.indexOf("tier-reprice-locked") < ban.indexOf("{tierReprice && ("),
+    "#368 estimator tier (review): the \"Revise the estimate first\" banner sits where the tier re-price offer appears, only while the estimate is locked");
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  const save = act.slice(act.indexOf("export async function saveQuoteAction("), act.indexOf("export async function searchQuotesAction("));
+  const keepAt = save.indexOf("if (prior && repriceLocked(prior.status)) {\n    patch.pricingTier = prior.pricingTier ?? null;\n    patch.tierMargin = prior.tierMargin ?? null;\n  }");
+  ok(keepAt > save.indexOf("pricingTier: tier.tier,") && keepAt < save.indexOf("patch.spec = await quoteSpecFollowingRenames(patch.spec);") && keepAt < save.indexOf("await update(loadedId,"),
+
+    "#368 estimator tier (review): a save of a stored sent / won / lost estimate keeps its tier stamp (server-side, on the STORED status) — only a draft or new estimate re-resolves it");
 }

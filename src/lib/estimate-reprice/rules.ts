@@ -45,7 +45,8 @@ export type RepricedOnRevise = {
   by: string;
   /** Lines re-priced — may exceed `lines.length` (the list is capped). */
   count: number;
-  /** The draft's total after the re-price minus before it, both derived the same way (bonus lines, discounts, rounding). */
+  /** The stored `value` after the revise minus the quote's own stored `value` before the status change — the money
+   *  that actually moved (never a re-derived "before"). */
   delta: number;
   lines: RepriceChange[];
   /** Systems whose typed price was kept although their lines' cost moved. */
@@ -146,14 +147,15 @@ export function repriceSections(
  * followed by the caller): re-price the lines, then run the SAME derivations a
  * save runs (deriveEstimatorSections — discounts, bonus lines — as a draft, and
  * reconcileEstimatorValue for value / margin). Null when no line changed — the
- * caller then stores nothing and leaves the spec untouched.
+ * caller then stores nothing and leaves the spec untouched. The banner's delta
+ * is the caller's: stored value after − the quote's stored value before.
  */
 export function repriceForRevise(
   q: { source?: string | null; quoteType?: string | null },
   spec: { sections?: unknown; projectDiscounts?: unknown } | null | undefined,
   catalog: ReadonlyMap<string, RepriceCatalogPart>,
   bonusRates: BonusRates
-): { sections: SpecSection[]; value: number; margin: number; count: number; delta: number; lines: RepriceChange[]; typedSystems: { sectionId: string; name: string }[] } | null {
+): { sections: SpecSection[]; value: number; margin: number; count: number; lines: RepriceChange[]; typedSystems: { sectionId: string; name: string }[] } | null {
   if (!repriceAppliesTo(q)) return null;
   const sections = Array.isArray(spec?.sections) ? (spec!.sections as SpecSection[]) : [];
   const r = repriceSections(sections, catalog);
@@ -161,10 +163,8 @@ export function repriceForRevise(
   const ctx = { source: q.source, quoteType: q.quoteType, status: "draft" };
   const discounts = sanitizeProjectDiscounts(spec?.projectDiscounts);
   const after = deriveEstimatorSections(ctx, r.sections, discounts, bonusRates);
-  const before = deriveEstimatorSections(ctx, sections, discounts, bonusRates);
   const priced = reconcileEstimatorValue(after, { value: null, margin: null });
-  const was = reconcileEstimatorValue(before, { value: null, margin: null });
-  return { sections: after, value: priced.value, margin: priced.margin, count: r.count, delta: round2(priced.value - was.value), lines: r.lines, typedSystems: r.typedSystems };
+  return { sections: after, value: priced.value, margin: priced.margin, count: r.count, lines: r.lines, typedSystems: r.typedSystems };
 }
 
 /** True when `after` carries a re-price this transition made (a new stamp) — the open Estimator must reload. */

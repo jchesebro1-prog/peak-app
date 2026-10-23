@@ -134,14 +134,23 @@ Assist's catalog tool don't add it.
 ## 9. Sent estimates keep their prices
 
 Every quote already stores absolute line prices, and a send freezes a revision (research Oct 23), so
-a catalog price change never rewrites a sent quote by itself. Three staff actions re-price lines on
-an existing estimate today with no status guard; they are **locked on a sent / won / lost estimate**
-with "Revise the estimate first" (server-side refusal + disabled control with the same text):
+a catalog price change never rewrites a sent quote by itself. The staff actions that re-price lines on
+an existing estimate are **locked on a sent / won / lost estimate** with "Revise the estimate first".
+The lock is not uniform — each action is marked with how far it reaches:
 
-- Copy / Move system **into an existing** estimate (`placeSystemInEstimate`, the target picker greys
-  out non-draft targets) — Move/Copy to a **new** estimate is unaffected.
-- **Load system** from the system library.
-- Re-opening a **track, curtain or labor** configurator on a line ("Update track" etc.).
+- **Server-enforced** (the stored status is read on the server; a disabled control with the same text):
+  - Copy / Move system **into an existing** estimate (`placeSystemInEstimate`, the target picker greys
+    out non-draft targets) — Move/Copy to a **new** estimate is unaffected.
+  - **Copy within this estimate** (copy-here).
+  - **Load system** from the system library (`loadLibrarySystemAction` takes the target estimate's id as
+    a required argument — null only for one never saved).
+  - The **tier stamp** a save writes: a save of a non-draft estimate keeps the stored `pricingTier` /
+    `tierMargin` instead of re-resolving it from the customer / contact.
+- **UI lock** (client only — `saveQuoteAction` accepts any posted line on a sent estimate and does not
+  diff lines; the client prop is named `uiRepriceLock` to say so):
+  - Re-opening a **track, curtain or labor** configurator on a line ("Update track" etc.).
+  - The **tier re-price** a customer / contact pick offers: on a non-draft estimate the lines keep their
+    stored prices and the banner says "Revise the estimate first" instead.
 
 The portal's customer **Refresh pricing** stays as is: it already cuts a new sent revision.
 
