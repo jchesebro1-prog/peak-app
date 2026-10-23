@@ -114,6 +114,17 @@ function documentChecks(ok: Ok) {
     "box sale document: a box sale is the BOM view — no package document, itemized, notes on, no appendix, every system itemized");
   ok(dBox.pdfQty === false && dBox.pdfPrices === true, "box sale document: Qty and prices follow the quote's own PDF choices (bomViewProps's rule)");
   ok(JSON.stringify(dBox) === JSON.stringify(bomViewProps(dPlain)), "box sale document: the transform IS bomViewProps — one implementation");
+  // #364 merge: the Show on BOM switches (pdfOptions.bom*) reach a box sale's document through the same bomViewProps, and a
+  // second bomViewProps (the print route's / online BOM's) changes nothing.
+  const bomOff = { detail: "sectioned", pdfQty: false, pdfNotes: false, pdfPrices: true, pdfItemizedAppendix: true, bomLinePrices: false, bomMaterials: false, bomLabor: false, bomFreight: false };
+  const dBoxOff = quoteDocumentDataFor(quoteFixture({ boxSale: true, pdfOptions: bomOff }), null, SET);
+  const dPlainOff = quoteDocumentDataFor(quoteFixture({ pdfOptions: bomOff }), null, SET);
+  ok(dBoxOff.pdfPrices === false && dBoxOff.showMaterials === false && dBoxOff.showLabor === false && dBoxOff.showFreight === false && dBox.pdfPrices === true && dBox.showMaterials === true && dBox.showFreight === true,
+    "box sale document (#364): Show on BOM switches apply to a box sale's BOM — off hides line prices / materials / labor / freight, absent = on");
+  ok(dPlainOff.pdfPrices === true && !("showMaterials" in dPlainOff) && !("showFreight" in dPlainOff),
+    "box sale document (#364): a normal estimate's document ignores the switches (bomViewProps only)");
+  ok(JSON.stringify(bomViewProps(dBoxOff)) === JSON.stringify(dBoxOff) && JSON.stringify(bomViewProps(dBox)) === JSON.stringify(dBox),
+    "box sale document (#364): bomViewProps is idempotent, so the print route's second pass prints the same BOM");
   ok(JSON.stringify(quoteDocumentDataFor(quoteFixture({ boxSale: true, quoteType: "flame_test" }), null, SET)) === JSON.stringify(quoteDocumentDataFor(quoteFixture({ quoteType: "flame_test" }), null, SET)),
     "box sale document: a stray flag on a service quote changes nothing");
   const stored = boxQ.spec as { sections: Array<{ presentation?: string; narrative?: string }>; document: unknown };
