@@ -173,17 +173,27 @@ type Raw = { raw: number; unit: number } | null;
 type Diff = { group: string; path: Path; got: unknown; want: unknown };
 
 /** Leaf-wise comparison of what the engine returned against the baseline (only the baseline's keys are checked). */
-function walkDiffs(group: string, got: unknown, want: unknown, path: Path, out: Diff[]) {
+export function walkDiffs(group: string, got: unknown, want: unknown, path: Path, out: Diff[]) {
   if (want && typeof want === "object") {
+    if (Array.isArray(want) && (!Array.isArray(got) || got.length !== want.length)) {
+      out.push({ group, path, got: Array.isArray(got) ? `length ${got.length}` : got, want: `length ${want.length}` });
+      return;
+    }
     const g = (got && typeof got === "object" ? got : {}) as Record<string, unknown>;
     for (const k of Object.keys(want as object)) walkDiffs(group, g[k], (want as Record<string, unknown>)[k], [...path, Array.isArray(want) ? Number(k) : k], out);
     return;
   }
-  if (typeof want === "number" && typeof got === "number") { if (Math.abs(got - want) > 1e-6) out.push({ group, path, got, want }); return; }
+  // A numeric want is met only by a finite number within 1e-6: NaN, undefined (missing key) and non-numbers are drifts.
+  if (typeof want === "number") { if (!numNear(got, want, 1e-6)) out.push({ group, path, got, want }); return; }
   if (got !== want) out.push({ group, path, got, want });
 }
 
-/** A drift is a tie only if it is exactly one `unit` and the margin-era unrounded value sat within 1e-6 of a half unit. */
+/** True only for a finite number within `eps` of `want` — NaN and undefined never pass. */
+export function numNear(got: unknown, want: number, eps: number): boolean {
+  return typeof got === "number" && Number.isFinite(got) && Math.abs(got - want) <= eps;
+}
+
+/** Used by the grid / curtain / labor / tier groups only (never the service engines). A drift is a tie only if it is exactly one `unit` and the margin-era unrounded value sat within 1e-6 of a half unit. */
 function tieOk(d: Diff, r: Raw): boolean {
   if (!r || typeof d.got !== "number" || typeof d.want !== "number") return false;
   if (Math.abs(Math.abs(d.got - d.want) - r.unit) > 1e-9) return false;
@@ -193,7 +203,6 @@ function tieOk(d: Diff, r: Raw): boolean {
 
 export async function markupParityChecks(ok: Ok) {
   const B = baseline.cases as unknown as Record<string, unknown>;
-  const { catalogAddPrice, customPartSell, repriceForTier } = await import("../src/app/(app)/estimator/tier-reprice");
   const { repriceAtMarkup, computeLabor, buildLaborItems, totals, systemMarkup } = await import("../src/app/(app)/estimator/pricing");
   const { compute: flame } = await import("../src/lib/flametest-engine");
   const { computeEstimate: repair } = await import("../src/lib/repair-engine");
@@ -204,10 +213,17 @@ export async function markupParityChecks(ok: Ok) {
   const mk = marginToMarkup;
   ok(tieOk({ group: "t", path: [], got: 133.71, want: 133.7 }, { raw: 133.705, unit: 0.01 }) && !tieOk({ group: "t", path: [], got: 133.71, want: 133.7 }, { raw: 133.7123, unit: 0.01 })
     && !tieOk({ group: "t", path: [], got: 133.72, want: 133.7 }, { raw: 133.705, unit: 0.01 }), "markup parity: the tie rule allows only an exact one-cent drift at an exact half");
+  // Comparator self-check: NaN, a missing key and an extra array element are all drifts, never passes.
+  {
+    const probe = (got: unknown, want: unknown) => { const o: Diff[] = []; walkDiffs("p", got, want, [], o); return o.length; };
+    ok(probe(Number.NaN, 5) === 1 && probe({}, { a: 5 }) === 1 && probe([1, 2, 3], [1, 2]) === 1 && probe([1], [1, 2]) === 1 && probe("5", 5) === 1
+      && probe(Infinity, 5) === 1 && probe({ a: [1, 2] }, { a: [1, 2] }) === 0 && probe(5.0000001, 5) === 0 && !numNear(Number.NaN, 0, 1) && !numNear(undefined, 0, 1),
+      "markup parity: the comparator flags NaN, a missing key, a non-number and an extra / missing array element");
+  }
   const diffs: Diff[] = [];
   const ties: string[] = [];
   const drift: string[] = [];
-  const nAllowed = { n: 0 };
+  let nAllowed = 0;
   /** Compare a group; `rawFor` names the margin-era unrounded value behind a drifting leaf (tie rule). */
   const same = (group: string, got: unknown, want: unknown, rawFor?: (path: Path) => { raw: Raw; why: string } | null) => {
     const out: Diff[] = [];
@@ -215,12 +231,12 @@ export async function markupParityChecks(ok: Ok) {
     for (const d of out) {
       const r = rawFor ? rawFor(d.path) : null;
       const name = `${group}${d.path.map((p) => `[${p}]`).join("")}`;
-      if (r && tieOk(d, r.raw)) { ties.push(`${name}: ${r.why} → ${d.want} became ${d.got} (unrounded ${r.raw!.raw})`); nAllowed.n++; continue; }
+      if (r && tieOk(d, r.raw)) { ties.push(`${name}: ${r.why} → ${d.want} became ${d.got} (unrounded ${r.raw!.raw})`); nAllowed++; continue; }
       diffs.push(d);
       drift.push(`${name}: got ${JSON.stringify(d.got)} want ${JSON.stringify(d.want)}`);
     }
   };
-  const near1 = (name: string, got: number, want: number) => { if (Math.abs(got - want) > 1e-9) drift.push(`${name}: ${got} vs ${want}`); };
+  const near1 = (name: string, got: unknown, want: number) => { if (!numNear(got, want, 1e-9)) drift.push(`${name}: ${String(got)} vs ${want}`); };
 
   // ---- the cost × margin grid (7 costs × 8 margins) ----
   const grid = (f: (c: number, k: number) => unknown) => CASE_COSTS.map((c) => CASE_MARGINS.map((m) => f(c, mk(m))));
@@ -261,14 +277,12 @@ export async function markupParityChecks(ok: Ok) {
     const want = B[grp] as Array<Record<string, unknown> & { id: string; effectiveMargin: number; serviceMargin?: number; totalRaw: number }>;
     ok(want.length === cases.length, `markup parity: ${grp} baseline has one row per case`);
     const results = cases.map((k) => run(k.opts as never, svcRates(k.rates) as never) as Record<string, unknown>);
-    same(grp, results.map((r, i) => ({ id: cases[i].id, ...pick(r) })), want.map(({ effectiveMargin: _e, serviceMargin: _s, ...rest }) => rest), (p) => {
-      // The only unrounded dollar value behind a drifting cent is the baseline's own totalRaw; the engine cases' cents are
-      // derived from it. A tie needs a raw that sits on a half cent — none of the baseline rows do, so this stays strict.
-      const w = want[Number(p[0])]; return w ? { raw: { raw: w.totalRaw, unit: 0.01 }, why: `${w.id} ${String(p[1])}` } : null;
-    });
+    // Strict, no tie path: the engine fields are not cent-rounded from `totalRaw` (totals round to $25), so one row's
+    // totalRaw sitting on a half cent must never excuse a drift in any of its other fields.
+    same(grp, results.map((r, i) => ({ id: cases[i].id, ...pick(r) })), want.map(({ effectiveMargin: _e, serviceMargin: _s, ...rest }) => rest));
     want.forEach((b, i) => {
-      near1(`${grp}[${b.id}] effectiveMarkup`, (results[i].effectiveMarkup as number), mk(b.effectiveMargin));
-      if (b.serviceMargin != null) near1(`${grp}[${b.id}] serviceMarkup`, (results[i].serviceMarkup as number), mk(b.serviceMargin));
+      near1(`${grp}[${b.id}] effectiveMarkup`, results[i].effectiveMarkup, mk(b.effectiveMargin));
+      if (b.serviceMargin != null) near1(`${grp}[${b.id}] serviceMarkup`, results[i].serviceMarkup, mk(b.serviceMargin));
     });
   }
 
@@ -287,8 +301,10 @@ export async function markupParityChecks(ok: Ok) {
   const secs = SECTIONS as never;
   const t = totals(secs, 0) as unknown as Record<string, number>;
   const bt = B.totals as Record<string, number>;
-  same("totals$", { mat: t.mat, lab: t.lab, fr: t.fr, rev: t.rev, cost: t.cost, grand: t.grand }, { mat: bt.mat, lab: bt.lab, fr: bt.fr, rev: bt.rev, cost: bt.cost, grand: bt.grand });
-  near1("totals markup", t.markup, mk(bt.margin));
+  // Every numeric key in the baseline totals except `margin` (margin-era; compared as a markup just below).
+  const { margin: btMargin, ...btDollars } = bt;
+  same("totals$", t, btDollars);
+  near1("totals markup", t.markup, mk(btMargin));
   (B.systemMargin as number[]).forEach((m, i) => near1(`systemMarkup[${i}]`, systemMarkup((SECTIONS as never[])[i]), mk(m)));
   same("tierReprice", repriceForTier(secs, mk(0.3), mk(0.2)).sections.map((s: { items: Array<{ price: number }> }) => s.items.map((it) => it.price)), B.tierReprice, (p) => {
     const it = SECTIONS[Number(p[0])]?.items[Number(p[1])]; return it ? { raw: { raw: it.cost / (1 - 0.2), unit: 0.01 }, why: `tier re-price of cost ${it.cost} to margin 0.2` } : null;
@@ -316,10 +332,10 @@ export async function markupParityChecks(ok: Ok) {
   const listed = [
     `Base $1,000 cost: ${Math.round((1000 / 0.7) * 100) / 100} → ${catalogAddPrice(1000, 0, 0.43)}`,
     `Custom part $100: 153.85 → ${customPartSell(100)}`,
-    ...ties.map((x) => `float tie (exactly one cent/dollar off, margin-era value on an exact half): ${x}`),
+    ...ties.map((x) => `float tie (exactly one cent/dollar off in either direction, margin-era value on an exact half): ${x}`),
   ];
   console.log("markup parity — expected rounding moves:\n  " + listed.join("\n  "));
-  console.log(`markup parity — ${diffs.length} drift(s), ${nAllowed.n} allowed tie(s)`);
+  console.log(`markup parity — ${diffs.length} drift(s), ${nAllowed} allowed tie(s)`);
 }
 
 if (require.main === module) {
