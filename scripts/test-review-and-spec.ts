@@ -70822,3 +70822,45 @@ const pd366Asm = (): PD366Item => pd366Line({ id: 9, sku: "fa-1", cost: 2600, pr
   ok(ps.items[0].price === 3000 && ps.items[0].extSellOverride === 7000 && ps.items[0].sellOverride === true && ps.sellOverride === 9000 && ps.priceRound === 25,
     "#366 core: never touches price, extSellOverride, sellOverride or the system's typed sell / rounding");
 }
+
+/* --- #366: the customer's price is identical with or without a project discount --- */
+import { systemSellTotal as pd366Sell, systemFreight as pd366Freight, totals as pd366Totals, systemMargin as pd366Margin } from "@/app/(app)/estimator/pricing";
+import { withBonusLines as pd366Bonus, idCounterFrom as pd366Ids } from "@/lib/estimate-bonus/rules";
+import { repriceForTier as pd366Reprice, isAtTierSeed as pd366AtSeed } from "@/app/(app)/estimator/tier-reprice";
+{
+  const mk = (round: boolean, typed?: number): PD366Section => pd366Sec([
+    pd366Line({ id: 1, price: 2857.14 }),
+    pd366Line({ id: 2, sku: "LAB-INST", desc: "Install", qty: 8, unit: "hr", cost: 60, price: 95, labor: true }),
+    { ...pd366Asm(), id: 3 },
+  ], { freightPct: 3, ...(round ? { priceRound: 25 } : {}), ...(typed ? { sellOverride: typed } : {}) });
+  const bon = (s: PD366Section[]) => pd366Bonus(s, pd366Ids(s));
+  for (const [round, typed] of [[false, undefined], [true, undefined], [true, 20000]] as Array<[boolean, number | undefined]>) {
+    const tag = `(round ${round}${typed ? ", typed sell" : ""})`;
+    const base = bon([mk(round, typed)]);
+    const disc = bon(pd366Apply([mk(round, typed)], pd366D));
+    ok(disc[0].items[0].cost === 1760 && disc[0].items[2].cost === 2360, `#366 price: the discount really applied ${tag}`);
+    ok(pd366Freight(base[0]) === pd366Freight(disc[0]) && pd366Freight(base[0]) > 0, `#366 price: freight is unchanged ${tag}`);
+    ok(pd366Sell(base[0]) === pd366Sell(disc[0]), `#366 price: system sell total is unchanged ${tag}`);
+    const pb = (s: PD366Section) => s.items.find((x) => x.bonus === "package");
+    const eb = (s: PD366Section) => s.items.find((x) => x.bonus === "estimator");
+    ok(!!pb(base[0]) && !!eb(base[0]) && JSON.stringify(pb(base[0])) === JSON.stringify(pb(disc[0])) && JSON.stringify(eb(base[0])) === JSON.stringify(eb(disc[0])),
+      `#366 price: both bonus lines are identical (cost and sell) ${tag}`);
+    const tb = pd366Totals(base, 0), td = pd366Totals(disc, 0);
+    ok(tb.grand === td.grand && tb.rev === td.rev && tb.fr === td.fr && tb.mat === td.mat && tb.lab === td.lab, `#366 price: grand total (and rev / mat / lab / freight) unchanged ${tag}`);
+    ok(Math.abs((tb.cost - td.cost) - 960) < 0.005, `#366 price: quote cost drops by exactly 2 × $240 (lines) + 2 × $240 (assemblies) = $960 ${tag}`);
+    ok(Math.abs(((td.rev - td.cost) - (tb.rev - tb.cost)) - 960) < 0.005 && pd366Margin(disc[0]) > pd366Margin(base[0]), `#366 price: margin dollars rise by exactly the discounted dollars ${tag}`);
+  }
+  // Tier reprice: a discounted line still sits at the seed of its NORMAL cost and re-prices from it.
+  const tierSec = () => pd366Sec([pd366Line({ id: 1, price: 2857.14 })]);
+  const [dl] = pd366Apply([tierSec()], pd366D);
+  ok(pd366AtSeed(dl.items[0], null), "#366 tier: a discounted line priced at its normal cost's 30% seed still counts as at the seed");
+  const res = pd366Reprice([dl], null, 0.2);
+  ok(res.repriced === 1 && res.handPriced === 0 && res.sections[0].items[0].price === 2500 && res.sections[0].items[0].cost === 1760,
+    "#366 tier: a tier change re-prices a discounted line from its normal cost (2000 ÷ 0.8 = 2500), keeping the discounted cost");
+  const plain = pd366Reprice([tierSec()], null, 0.2);
+  ok(plain.sections[0].items[0].price === res.sections[0].items[0].price, "#366 tier: the same price as the undiscounted line gets");
+  const trk = pd366Sec([pd366Line({ id: 4, sku: "TRK-1", track: {} as never, cost: 2000, price: 2857.14, components: [{ sku: "ETC:CS40", label: "Part", role: "fixture", qty: 1, unit: "ea", cost: 2000, price: 2857.14 }] } as Partial<PD366Item>)]);
+  const trkRes = pd366Reprice(pd366Apply([trk], pd366D), null, 0.2);
+  ok(trkRes.repriced === 1 && trkRes.sections[0].items[0].price === 2500 && trkRes.sections[0].items[0].components![0].price === 2500,
+    "#366 tier: a track line with a discounted part re-prices from normal cost, its part too");
+}

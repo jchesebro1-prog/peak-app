@@ -13,6 +13,7 @@ import {
   isLegacyLaborBonusItem,
   isPackageBonusItem,
 } from "./flags";
+import { normalCostOf } from "@/lib/project-discounts/rules";
 
 export type BonusAmount = { cost: number; sell: number };
 
@@ -45,7 +46,8 @@ export function bonusNotFigured(sec: SpecSection): boolean {
 export function packageBonus(sec: SpecSection, pct: number = DEFAULT_BONUS_RATES.packagePct): BonusAmount | null {
   if (!hasLaborLine(sec)) return null;
   const lines = baseLines(sec);
-  const cost = lines.reduce((a, it) => a + it.qty * it.cost, 0);
+  // #366: figured on NORMAL cost (before project discounts), so the bonus line — cost and sell — never moves.
+  const cost = lines.reduce((a, it) => a + it.qty * normalCostOf(it), 0);
   const sell = lines.reduce((a, it) => a + lineExtSellOf(it), 0);
   if (!Number.isFinite(cost) || !Number.isFinite(sell) || cost <= 0) return null;
   const bCost = round2(cost * pct);

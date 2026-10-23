@@ -2,6 +2,7 @@ import { curtainCost, curtainPrice, fabricAreaRateOf, type CurtainSewing } from 
 import { ceilToStep, PRICE_OVERRIDE_MAX, typedPriceWarning, type PriceWarning } from "@/lib/service-pricing";
 import { creditLineAmount, isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { isEstimatorBonusItem, isPackageBonusItem } from "@/lib/estimate-bonus/flags";
+import { normalCostOf } from "@/lib/project-discounts/rules";
 import {
   DISC_LABEL,
   FIXTURES,
@@ -170,9 +171,12 @@ export function systemItemsCost(sec: SpecSection): number {
  * vendor quote added with "Quote includes freight"). Deliberately NOT
  * systemItemsCost, which still counts every line for the margin readout and
  * the cost column.
+ *
+ * #366: on each line's NORMAL cost (`normalCostOf` — its cost before any
+ * project discount), so a project discount never moves the customer's price.
  */
 export function systemFreightBase(sec: SpecSection): number {
-  return sec.items.filter((x) => isSystemLine(x) && !x.noFreight).reduce((a, x) => a + x.qty * x.cost, 0);
+  return sec.items.filter((x) => isSystemLine(x) && !x.noFreight).reduce((a, x) => a + x.qty * normalCostOf(x), 0);
 }
 
 /** Freight is a % of the section's freight-bearing item COST. */

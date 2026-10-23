@@ -2,6 +2,7 @@ import { syncLaborDraftMargins } from "./labor-group";
 import { round2 } from "./pricing";
 import type { SpecItem, SpecSection } from "./types";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { normalCostOf } from "@/lib/project-discounts/rules";
 
 /**
  * #254 (D87 amended) — a customer/contact change that moves the quote's
@@ -92,7 +93,8 @@ export function reseedTrackComponents(
   comps: NonNullable<SpecItem["components"]>,
   m: number | null | undefined
 ): NonNullable<SpecItem["components"]> {
-  return comps.map((c) => (c.cost > 0 ? { ...c, price: catalogAddPrice(c.cost, c.price, m) } : c));
+  // #366: a part's seed is on its NORMAL cost (a project discount never moves sell).
+  return comps.map((c) => (normalCostOf(c) > 0 ? { ...c, price: catalogAddPrice(normalCostOf(c), c.price, m) } : c));
 }
 
 /** #266 — the margin a line kind seeds at under stamp `m` (labor through its
@@ -102,9 +104,11 @@ export function tierSeedMarginFor(it: Pick<SpecItem, "labor">, m: number | null 
 }
 
 /** #266 — the sell a line seeds at on its cost under stamp `m`: the exact
- *  price `repriceForTier` writes. */
-export function tierSeedPrice(it: Pick<SpecItem, "cost" | "labor">, m: number | null | undefined): number {
-  return sellAt(it.cost, tierSeedMarginFor(it, m));
+ *  price `repriceForTier` writes. #366: on its NORMAL cost — a project
+ *  discount lowers our cost, never the seed, so a discounted line still counts
+ *  as at the seed and re-prices exactly as it would undiscounted. */
+export function tierSeedPrice(it: Pick<SpecItem, "cost" | "labor" | "catalogCost">, m: number | null | undefined): number {
+  return sellAt(normalCostOf(it), tierSeedMarginFor(it, m));
 }
 
 /** #266 — a line the tier prices at all (not a fixture, ext-sell override,
@@ -120,7 +124,7 @@ export function isTierPriceable(it: Pick<SpecItem, "fixture" | "extSellOverride"
 
 /** #266 — the line still sits at stamp `m`'s seed (within the line kind's
  *  tolerance). Callers check `isTierPriceable` first. */
-export function isAtTierSeed(it: Pick<SpecItem, "cost" | "price" | "labor">, m: number | null | undefined): boolean {
+export function isAtTierSeed(it: Pick<SpecItem, "cost" | "price" | "labor" | "catalogCost">, m: number | null | undefined): boolean {
   const tol = it.labor ? LABOR_REPRICE_TOLERANCE : TIER_REPRICE_TOLERANCE;
   return Math.abs(it.price - tierSeedPrice(it, m)) <= tol + 1e-9;
 }
