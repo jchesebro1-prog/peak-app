@@ -45,7 +45,7 @@ export function OnlineEstimateView({
   bomHref: string;
   pdfHref: string | null;
   backHref: string | null;
-  /** #365 — the BOM view's line models (loadBomModelPartsFor; the pages load them only for ?view=bom). */
+  /** #365 — the BOM view's line models (loadBomModelPartsFor; the pages load them only for ?view=bom, or for a box sale, whose document is already the BOM view). */
   bomModelParts?: BomModelParts;
 }) {
   const offers = offersBomView(docProps.sections, docProps.detail, docProps.document);

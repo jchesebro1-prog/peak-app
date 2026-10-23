@@ -70697,7 +70697,7 @@ import type { SpecItem as B365Item } from "@/app/(app)/estimator/types";
     "#365: the document, Cover, package and bidder loaders never read models (the estimate PDF, Cover PDF, bidder PDFs and package page stay as they are)");
   const print = rd("src/app/print/quote/[id]/page.tsx");
   ok(print.includes("const bomModelParts = await loadBomModelPartsFor(doc.sections);") && print.includes("<QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout=\"web\"") &&
-     print.indexOf("loadBomModelPartsFor(") > print.indexOf("if (bom) {") && (print.match(/bomModelParts=/g) || []).length === 1,
+     print.indexOf("if (bomLayout) {") > -1 && print.indexOf("loadBomModelPartsFor(") > print.indexOf("if (bomLayout) {") && (print.match(/bomModelParts=/g) || []).length === 1,
     "#365 BOM PDF: the print route's ?view=bom branch alone loads and passes the models");
   const prev = rd("src/app/estimator-preview/[id]/page.tsx");
   ok(prev.includes("const bomModelParts = await loadBomModelPartsFor(doc.sections);") && prev.includes("<QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout=\"web\" />") && (prev.match(/bomModelParts=/g) || []).length === 1,
