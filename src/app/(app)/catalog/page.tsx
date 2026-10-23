@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getSettings } from "@/lib/settings";
-import { list, get, type CatalogPart } from "@/lib/stores/catalog";
+import { list, get, withoutDemoPrice, type CatalogPart } from "@/lib/stores/catalog";
 import { dateYear, money } from "@/lib/format";
 import { partSearchHaystack, staffPartLabel } from "@/lib/catalog-rename/sku";
 import { effectivePriceDate, isoDateOf, mfrKey, priceBooks } from "@/lib/catalog-books";
@@ -1213,7 +1213,7 @@ function PartFormModal({
                     key SpecPanel's local editor state would carry over from
                     the previously-edited part into this one — a latent
                     cross-part write. Force a fresh instance per part. */}
-                <SpecPanel key={part.sku} part={part} articles={specArticles} templates={specTemplates} defaultArticleId={defaultArticleId} />
+                <SpecPanel key={part.sku} part={withoutDemoPrice(part) /* #368: the demo price stays server-side */} articles={specArticles} templates={specTemplates} defaultArticleId={defaultArticleId} />
               </div>
             )}
 

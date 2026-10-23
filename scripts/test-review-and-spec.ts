@@ -11779,6 +11779,7 @@ seeded()
   .then(() => reviewSheet363Checks(ok))
   .then(() => bomModels365DbChecks(ok))
   .then(() => etc368ClientChecks(ok)) // #368 catalog
+  .then(() => etc368ApplyDbChecks(ok)) // #368 catalog
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -71161,4 +71162,220 @@ async function etc368ClientChecks(check: typeof ok): Promise<void> {
   await C.clearEtcKey();
   const gone = await C.etcStatus({ authSecret, env });
   check(!gone.connected && gone.last4 === null && gone.accountId === null && (await C.etcSecret({ authSecret, env })) === null, "#368 catalog key: Remove clears the key and the account");
+}
+
+/* --- #368 catalog: the ETC plan (pure) --- */
+import { mergeEtcRows as etc368Merge, planEtcItem as etc368PlanItem, planEtc as etc368Plan, previewOf as etc368Preview, newPartCategory as etc368Cat, encodeItem as etc368Enc, decodeItem as etc368Dec, countAction as etc368Count, ZERO_ETC_COUNTS as ETC368_ZERO } from "@/lib/dealer-api/etc/plan";
+import type { EtcRow as Etc368Row } from "@/lib/dealer-api/etc/parse";
+{
+  const row = (o: Partial<Etc368Row>): Etc368Row => ({ list: "finished-goods", partNumber: "P1", modelNumber: "M1", desc: "Part one", categoryPath: "Fixtures > A > B", listPrice: 100, netPrice: 70, ...o });
+  const items = etc368Merge([
+    row({ list: "spare-parts", partNumber: "P1", listPrice: 999, netPrice: 888 }),
+    row({ partNumber: "P1" }),
+    row({ list: "flat-rate-repair", partNumber: "P1", listPrice: 5, netPrice: 4 }),
+    row({ list: "demo-prices", partNumber: "P1", netPrice: 55 }),
+    row({ list: "demo-prices", partNumber: "D9", modelNumber: "DM", desc: "Demo only", netPrice: 12 }),
+    row({ list: "spare-parts", partNumber: "S1", categoryPath: "", listPrice: 10, netPrice: 6 }),
+  ]);
+  const p1 = items.find((i) => i.pn === "P1")!;
+  ok(items.length === 3 && p1.src === "finished-goods" && p1.lp === 100 && p1.np === 70 && p1.demo === 55,
+    "#368 catalog plan: one item per part number — finished goods beats spare parts and flat-rate repair whatever the order; the demo netPrice rides along");
+  const d9 = items.find((i) => i.pn === "D9")!;
+  ok(d9.src === null && d9.demo === 12 && d9.lp === null, "#368 catalog plan: a demo-only part number is an item with no priced list");
+  ok(JSON.stringify(etc368Dec(etc368Enc(p1))) === JSON.stringify(p1) && JSON.stringify(etc368Dec(etc368Enc(d9))) === JSON.stringify(d9) && etc368Dec(["", "x"]) === null && etc368Dec("junk") === null,
+    "#368 catalog plan: the snapshot tuple round-trips; junk decodes to null");
+  ok(etc368Cat({ path: "Fixtures > ArcSystem Pro > Accessories", src: "finished-goods" }) === "Fixtures" && etc368Cat({ path: "", src: "spare-parts" }) === "ETC spare parts" &&
+     etc368Cat({ path: "Fixtures > X", src: "flat-rate-repair" }) === "ETC repair" && etc368Cat({ path: "", src: "finished-goods" }) === "Uncategorized",
+    "#368 catalog plan: new-part category — ETC's first path segment; spare parts with none → ETC spare parts; flat-rate repair → ETC repair");
+  const ctx = { now: 1000, todayStart: 500, deletedSkus: new Set(["GONE"]) };
+  const ex = { sku: "ETC:CS40", mfr: "ETC", manufacturerPartNumber: "", manufacturerModelNumber: "", list: 90, cost: 70, priceDate: 100, demoPrice: null };
+  const up = etc368PlanItem(p1, "ETC:CS40", ex, ctx);
+  ok(up.kind === "update" && up.patch.list === 100 && !("cost" in up.patch) && up.patch.manufacturerPartNumber === "P1" && up.patch.manufacturerModelNumber === "M1" &&
+     up.patch.demoPrice === 55 && up.patch.demoPricedAt === 1000 && up.priceChanged && up.demoChanged && up.priced && !("desc" in up.patch) && !("category" in up.patch),
+    "#368 catalog plan: an existing part gets the moved list only (cost unchanged), blank P/N + model filled, the demo price — never desc or category");
+  const keep = etc368PlanItem({ ...p1, lp: null, np: null, demo: null }, "ETC:CS40", { ...ex, manufacturerPartNumber: "OURS", manufacturerModelNumber: "OURS-M" }, ctx);
+  ok(keep.kind === "unchanged" && keep.redate, "#368 catalog plan: a missing/zero ETC price leaves ours alone (and our P/N / model stay); an old priceDate is re-dated");
+  const same = etc368PlanItem(p1, "ETC:CS40", { ...ex, list: 100, cost: 70, manufacturerPartNumber: "P1", manufacturerModelNumber: "M1", demoPrice: 55, priceDate: 600 }, ctx);
+  ok(same.kind === "unchanged" && !same.redate, "#368 catalog plan: nothing moved and already dated today → no write at all");
+  const demoOnly = etc368PlanItem(d9, "ETC:D9", { ...ex, list: 1, cost: 1 }, ctx);
+  ok(demoOnly.kind === "update" && Object.keys(demoOnly.patch).sort().join() === "demoPrice,demoPricedAt" && !demoOnly.priced && !demoOnly.priceChanged,
+    "#368 catalog plan: a demo row never touches list or cost (and confirms no price date)");
+  ok(etc368PlanItem(d9, null, null, ctx).kind === "demo-unmatched", "#368 catalog plan: a demo-only part number that matches nothing is reported, not created");
+  const cr = etc368PlanItem(p1, null, null, ctx);
+  ok(cr.kind === "create" && cr.part.sku === "P1" && cr.part.mfr === "ETC" && cr.part.category === "Fixtures" && cr.part.unit === "ea" && cr.part.list === 100 && cr.part.cost === 70 &&
+     cr.part.manufacturerPartNumber === "P1" && cr.part.manufacturerModelNumber === "M1" && cr.part.demoPrice === 55 && cr.part.desc === "Part one",
+    "#368 catalog plan: a new part — SKU = part number, mfr ETC, ETC's description, category, list, cost, P/N, model, demo price");
+  ok(etc368PlanItem({ ...p1, pn: "GONE" }, null, null, ctx).kind === "deleted", "#368 catalog plan: a part a person deleted is never brought back");
+  // Matching: the importer's resolver first, then the one ETC part with that P/N, then the one ETC part with that model (when no other row shares it).
+  const live = [
+    { sku: "ETC:CS40", mfr: "ETC", manufacturerPartNumber: "7060A1010", list: 1, cost: 1 },
+    { sku: "SR3-48X", mfr: "ETC", list: 1, cost: 1 },
+    { sku: "OTHER:SR3-48X", mfr: "Other", list: 1, cost: 1 },
+    { sku: "DUP", mfr: "ETC", manufacturerModelNumber: "TWIN", list: 1, cost: 1 },
+  ];
+  const its = etc368Merge([row({ partNumber: "7060A1010", modelNumber: "CS40" }), row({ partNumber: "7151A1005", modelNumber: "SR3-48X" }), row({ partNumber: "T1", modelNumber: "TWIN" }), row({ partNumber: "T2", modelNumber: "TWIN" }), row({ partNumber: "EXACT", modelNumber: "" })]);
+  const plan = etc368Plan(its, live, (r) => (r.sku === "EXACT" ? "SR3-48X" : null), ctx);
+  const skuOf = (pn: string) => { const a = plan[its.findIndex((i) => i.pn === pn)]; return a.kind === "demo-unmatched" ? null : a.sku; };
+  ok(skuOf("7060A1010") === "ETC:CS40" && skuOf("7151A1005") === "SR3-48X" && skuOf("EXACT") === "SR3-48X",
+    "#368 catalog plan: resolver hit, then the ETC part with that P/N, then the ETC part keyed by that model number (another brand's same model ignored)");
+  ok(plan[its.findIndex((i) => i.pn === "T1")].kind === "create" && plan[its.findIndex((i) => i.pn === "T2")].kind === "create",
+    "#368 catalog plan: a model number two ETC rows share matches neither by model (no two rows landing on one part)");
+  const pv = etc368Preview(plan, { "finished-goods": 5 }, [{ list: "spare-parts", partNumber: "Z", reason: "No price" }]);
+  const fg = pv.lists.find((l) => l.list === "finished-goods")!;
+  ok(fg.rows === 5 && fg.created === 2 && fg.changed === 3 && pv.lists.find((l) => l.list === "spare-parts")!.skipped === 1 && pv.skipped.count === 1 && pv.changes.length > 0 && pv.changes.every((c) => c.field !== "demo"),
+    "#368 catalog plan: preview counts per list (new / changed / skipped) and the first price changes, old → new");
+  let n = { ...ETC368_ZERO };
+  for (const a of plan) n = etc368Count(n, a);
+  ok(n.created === 2 && n.updated === 3, "#368 catalog plan: run counts add up");
+}
+
+/** #368 catalog — pull → preview → resumable import, and the daily sync, against the test DB with a fake ETC. */
+async function etc368ApplyDbChecks(check: typeof ok): Promise<void> {
+  const { registerFixture } = await import("./test-fixtures");
+  const DS = await import("@/db/doc-store");
+  const Cat = await import("@/lib/stores/catalog");
+  const C = await import("@/lib/dealer-api/connections");
+  const A = await import("@/lib/dealer-api/etc/apply");
+  const { chicagoDayKey, chicagoDayStart } = await import("@/lib/drive-plan/day");
+  const env = {} as Record<string, string | undefined>;
+  const apiKey = "etc-apply-secret-368";
+  const today = chicagoDayKey(Date.now());
+  const noon = chicagoDayStart(today) + 12 * 3600_000;
+  const T = (s: string) => `TEST368:${s}`;
+  for (const s of ["CS40", "SR3-48X-T368", "SAME", "NEW1", "SP1", "RP1", "GONE", "NEW2", "NEW3", "DEMOONLY"]) registerFixture("catalog_parts", T(s));
+  const base = { category: "Lighting", unit: "ea", mfr: "ETC" };
+  await DS.upsertDoc("catalog_parts", { ...base, id: T("CS40"), sku: T("CS40"), desc: "Our CS40 text", list: 900, cost: 600, manufacturerPartNumber: "T368PN-1" } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: T("SR3-48X-T368"), sku: T("SR3-48X-T368"), desc: "Our SR3", list: 50, cost: 40 } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: T("SAME"), sku: T("SAME"), desc: "Same", list: 100, cost: 70, priceDate: noon, manufacturerPartNumber: T("SAME"), manufacturerModelNumber: "SAME-M", updatedAt: 7 } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: T("GONE"), sku: T("GONE"), desc: "Deleted by a person", list: 1, cost: 1 } as never);
+  await DS.softDeleteDoc("catalog_parts", T("GONE"));
+
+  const P = (pn: string, o: Record<string, unknown> = {}) => ({ partNumber: pn, modelNumber: "", description: `ETC ${pn}`, categoryPaths: ["Fixtures > Test"], listPrice: "10.00", netPrice: "7.00", currency: "USD", ...o });
+  const lists: Record<string, unknown[]> = {
+    "finished-goods": [P("T368PN-1", { listPrice: "1040.00", netPrice: "728.00" }), P("T368PN-2", { modelNumber: "SR3-48X-T368", listPrice: "60.00", netPrice: "" }), P(T("SAME"), { modelNumber: "SAME-M", listPrice: "100.00", netPrice: "70.00" }), P(T("NEW1")), P(T("GONE"))],
+    "spare-parts": [P("T368PN-1", { listPrice: "1.00", netPrice: "1.00" }), P(T("SP1"), { categoryPaths: [] }), P("BAD", { currency: "EUR" })],
+    "flat-rate-repair": [P(T("RP1"))],
+    "demo-prices": [P("T368PN-1", { netPrice: "500.00" }), P(T("DEMOONLY"), { netPrice: "5.00" })],
+  };
+  const urls: string[] = [];
+  let mode: "full" | "updates" | "fail" = "full";
+  let updates: Record<string, unknown[]> = {};
+  const fetchImpl = (async (u: string | URL | Request) => {
+    const url = String(u);
+    urls.push(url);
+    if (mode === "fail") return new Response(JSON.stringify({ traceId: "t", message: "ETC is down", code: "x" }), { status: 503 });
+    const list = url.split("/").pop()!;
+    if (mode === "updates") return new Response(JSON.stringify(updates[list] ?? []), { status: 200 });
+    return new Response(JSON.stringify({ parts: lists[list] ?? [], categoryTree: [], repPricingCategories: [] }), { status: 200 });
+  }) as typeof fetch;
+  const deps = { fetchImpl, apiKey, env };
+
+  await C.clearEtcKey();
+  check(!(await A.pullAll(deps)).ok, "#368 catalog import: Pull refuses with no key saved");
+  await C.saveEtcKey(apiKey, "Jeff", { authSecret: "test368-auth" });
+  const noAcct = await A.pullAll(deps);
+  check(!noAcct.ok && noAcct.error === A.ETC_COPY.noAccount, "#368 catalog import: Pull refuses before an account is picked");
+  check(!(await A.pullAll({ ...deps, env: { VERCEL_ENV: "preview" } })).ok && (await A.pullAll({ ...deps, env: { ETC_SYNC_DISABLED: "true" } })).ok === false,
+    "#368 catalog import: Pull is off on a preview deploy and with ETC_SYNC_DISABLED");
+  await C.setEtcAccount("ba-368", "Peak Systems");
+
+  const before = await Cat.get(T("CS40"));
+  const pulled = await A.pullAll(deps);
+  check(pulled.ok && urls.filter((u) => u.includes("/price-list/")).length === 4 && urls.every((u) => u.startsWith("https://my.etcconnect.com/api/v0/pricing/business-account/ba-368/")),
+    "#368 catalog import: Pull fetches the four full lists for the picked account");
+  const after = await Cat.get(T("CS40"));
+  check(JSON.stringify(before) === JSON.stringify(after), "#368 catalog import: Pull writes no part (preview only)");
+  if (!pulled.ok) return;
+  const fg = pulled.preview.lists.find((l) => l.list === "finished-goods")!;
+  check(fg.rows === 5 && fg.created === 1 && fg.changed === 2 && fg.unchanged === 1 && fg.skipped === 1, "#368 catalog import: preview — finished goods: 1 new, 2 price changes, 1 unchanged, the deleted part skipped");
+  check(pulled.preview.lists.find((l) => l.list === "spare-parts")!.skipped === 1 && pulled.preview.demoUnmatched.count === 1 && pulled.preview.demoUnmatched.sample[0] === T("DEMOONLY"),
+    "#368 catalog import: preview — the EUR row skipped; the demo-only part number reported unmatched");
+  check(pulled.preview.changes.some((c) => c.sku === T("CS40") && c.field === "list" && c.from === 900 && c.to === 1040), "#368 catalog import: preview lists a change old → new (900 → 1040)");
+
+  // Resumable: a 0 ms budget applies one row per call.
+  const steps: number[] = [];
+  let r = await A.applyBatch({ ...deps, budgetMs: 0 });
+  while (r.ok && !r.finished && steps.length < 50) { steps.push(r.done); r = await A.applyBatch({ ...deps, budgetMs: 0 }); }
+  check(r.ok && r.finished && steps.join() === "1,2,3,4,5,6,7" && r.done === 8 && r.total === 8, "#368 catalog import: Import resumes from the stored cursor, one batch after another, to the end");
+  const cs = await Cat.get(T("CS40"));
+  check(!!cs && cs.list === 1040 && cs.cost === 728 && cs.desc === "Our CS40 text" && cs.category === "Lighting" && cs.demoPrice === 500 && typeof cs.demoPricedAt === "number" && cs.priceDate === noon && cs.pricedAt === noon,
+    "#368 catalog import: an existing ETC part matched by P/N gets list/cost (finished goods, not spare parts) + the demo price; desc and category untouched; priced today");
+  const sr = await Cat.get(T("SR3-48X-T368"));
+  check(!!sr && sr.list === 60 && sr.cost === 40 && sr.manufacturerPartNumber === "T368PN-2" && sr.manufacturerModelNumber === "SR3-48X-T368",
+    "#368 catalog import: a model-keyed part matched by model number; a blank ETC net price leaves our cost; blank P/N + model filled");
+  const same = await Cat.get(T("SAME"));
+  check(!!same && same.updatedAt === 7, "#368 catalog import: an unchanged row already dated today writes nothing");
+  const n1 = await Cat.get(T("NEW1"));
+  const sp = await Cat.get(T("SP1"));
+  const rp = await Cat.get(T("RP1"));
+  check(!!n1 && n1.mfr === "ETC" && n1.category === "Fixtures" && n1.list === 10 && n1.cost === 7 && n1.manufacturerPartNumber === T("NEW1") && n1.priceDate === noon && !!sp && sp.category === "ETC spare parts" && !!rp && rp.category === "ETC repair",
+    "#368 catalog import: new parts are created (category from ETC's path; spare parts → ETC spare parts; flat-rate repair → ETC repair)");
+  check((await Cat.get(T("GONE"))) === null && (await Cat.get(T("DEMOONLY"))) === null, "#368 catalog import: a deleted part stays deleted; a demo-only part number is not created");
+  const conn = await C.readEtcConnection();
+  check(conn.baseline?.date === today && conn.cursor === null && conn.lastRun?.kind === "import" && conn.lastRun.ok && conn.lastRun.created === 3 && conn.lastRun.updated === 2 && conn.lastRun.demoUnmatched === 1 && conn.lastRun.skipped === 2 && conn.applyingUntil === 0,
+    "#368 catalog import: finishing sets the baseline (today) and lastRun counts, clears the cursor and the lease");
+  const again = await A.applyBatch({ ...deps, budgetMs: 0 });
+  check(!again.ok && again.error === A.ETC_COPY.nothing, "#368 catalog import: a finished snapshot can't be imported twice");
+
+  // A pulled snapshot older than 24 h, or for another account, must be pulled again.
+  const old = await A.pullAll({ ...deps, now: Date.now() - 25 * 3600_000 });
+  const stale = await A.applyBatch({ ...deps, budgetMs: 0 });
+  check(old.ok && !stale.ok && stale.error === A.ETC_COPY.stale, "#368 catalog import: a snapshot older than 24 h is refused");
+  await A.pullAll(deps);
+  await C.updateEtcConnection(() => ({ accountId: "ba-other" }));
+  const other = await A.applyBatch({ ...deps, budgetMs: 0 });
+  check(!other.ok && other.error === A.ETC_COPY.otherAccount, "#368 catalog import: a snapshot for another account is refused");
+  await C.updateEtcConnection(() => ({ accountId: "ba-368" }));
+  const daily0 = await A.runDailySync({ ...deps, budgetMs: 20_000 });
+  check(!daily0.ran && /manual pull/.test(daily0.reason), "#368 catalog daily: a fresh manual pull waiting to be imported is never applied by the cron");
+  await A.applyBatch({ ...deps, budgetMs: 20_000 }); // finish it (idempotent: same prices)
+
+  // Daily sync: price-updates since the baseline, new parts added, baseline moves only when fully applied.
+  await C.updateEtcConnection(() => ({ baseline: { date: "2026-10-20", at: 1 } }));
+  mode = "updates";
+  updates = { "finished-goods": [P("T368PN-1", { listPrice: "1100.00", netPrice: "770.00" }), P(T("NEW2"))], "demo-prices": [P(T("NEW3"), { netPrice: "9.00" })] };
+  urls.length = 0;
+  const partial = await A.runDailySync({ ...deps, budgetMs: 0 });
+  const mid = await C.readEtcConnection();
+  check(partial.ran && partial.ok && !partial.finished && partial.rows === 1 && mid.baseline?.date === "2026-10-20" && mid.lastRun?.kind === "daily" && mid.lastRun.pending && mid.cursor?.next === 1,
+    "#368 catalog daily: out of budget → the cursor is kept, lastRun says pending, the baseline does not move");
+  check(urls.length === 4 && urls.every((u) => u.includes("/price-updates/2026-10-20/")), "#368 catalog daily: asks for price-updates since the baseline date, all four lists");
+  urls.length = 0;
+  const rest = await A.runDailySync({ ...deps, budgetMs: 20_000 });
+  const done = await C.readEtcConnection();
+  check(rest.ran && rest.ok && rest.finished && urls.length === 0 && done.baseline?.date === today && done.lastRun?.ok === true && !done.lastRun.pending && done.lastRun.demoUnmatched === 1,
+    "#368 catalog daily: the next run finishes the same snapshot (no new fetch), then the baseline moves to today");
+  const cs2 = await Cat.get(T("CS40"));
+  const n2 = await Cat.get(T("NEW2"));
+  check(!!cs2 && cs2.list === 1100 && cs2.cost === 770 && !!n2 && n2.mfr === "ETC" && (await Cat.get(T("NEW3"))) === null,
+    "#368 catalog daily: changed prices land and a new ETC part is added automatically (a demo-only number still isn't)");
+  mode = "fail";
+  await C.updateEtcConnection(() => ({ baseline: { date: "2026-10-21", at: 1 } }));
+  const failed = await A.runDailySync({ ...deps, budgetMs: 20_000 });
+  const f = await C.readEtcConnection();
+  check(failed.ran && !failed.ok && f.baseline?.date === "2026-10-21" && f.lastRun?.ok === false && /ETC returned 503: ETC is down/.test(f.lastRun?.error || "") && !(f.lastRun?.error || "").includes(apiKey),
+    "#368 catalog daily: a failure stores ETC's message in lastRun and leaves the baseline alone");
+  await C.updateEtcConnection(() => ({ baseline: null }));
+  check(!(await A.runDailySync({ ...deps, budgetMs: 20_000 })).ran, "#368 catalog daily: no baseline → the rider does nothing");
+  await C.updateEtcConnection(() => ({ baseline: { date: today, at: 1 } }));
+  const pv = await A.runDailySync({ ...deps, budgetMs: 20_000, env: { VERCEL_ENV: "preview" } });
+  const off = await A.runDailySync({ ...deps, budgetMs: 20_000, env: { ETC_SYNC_DISABLED: "true" } });
+  check(!pv.ran && !off.ran, "#368 catalog daily: skipped on a preview deploy and with ETC_SYNC_DISABLED");
+  await C.clearEtcKey();
+  await DS.setBlob(A.ETC_PULL_BLOB, { complete: true, items: [] });
+}
+
+/* --- #368 catalog: demoPrice stays internal (static) --- */
+import { readdirSync as etc368Readdir } from "node:fs";
+import { withoutDemoPrice as etc368Without } from "@/lib/stores/catalog";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const portal = etc368Readdir(join(process.cwd(), "src/lib")).filter((f) => /^portal-.*\.ts$/.test(f)).map((f) => `src/lib/${f}`);
+  const surfaces = [...portal, "src/lib/displays-api.ts", "src/lib/client-package.ts", "src/lib/client-package-server.ts", "src/app/(app)/import/registry.ts", "src/lib/assist/ask-tools-server.ts"];
+  ok(portal.length > 10 && surfaces.every((f) => !rd(f).includes("demoPrice")), "#368 catalog: demoPrice appears in no portal module, Displays API, client package, CSV export registry or Assist tool");
+  ok(rd("src/app/(app)/catalog/page.tsx").includes("part={withoutDemoPrice(part)") && rd("src/app/(app)/design/lineset/page.tsx").includes("fabrics={fabricParts.map(withoutDemoPrice)") &&
+     (rd("src/app/(app)/design/engagements/spec/actions.ts").match(/\(await listCatalog\(\)\)\.map\(withoutDemoPrice\)/g) || []).length === 2,
+    "#368 catalog: the three staff screens that hand whole parts to the client strip the demo price");
+  const stripped = etc368Without({ sku: "A", list: 1, demoPrice: 5, demoPricedAt: 9 });
+  ok(!("demoPrice" in stripped) && !("demoPricedAt" in stripped) && (stripped as { list?: number }).list === 1, "#368 catalog: withoutDemoPrice drops both fields and keeps the rest");
 }
