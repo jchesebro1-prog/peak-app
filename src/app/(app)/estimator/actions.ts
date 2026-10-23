@@ -45,6 +45,8 @@ import {
   type InspectionRecord,
 } from "@/lib/stores/inspections";
 import { get as catalogGet, list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
+import { loadBomModelParts } from "@/lib/estimate-output/bom-models-server";
+import type { BomModelParts } from "@/lib/estimate-output/bom-models";
 import { copySectionForTarget } from "./copy-system";
 import { normalizeSystemOrder, sanitizeGroups, sanitizeSectionGroupMeta, withoutGroupMeta, type SystemGroup } from "@/lib/estimate-groups/groups";
 import { packageDocForSave } from "@/lib/package-doc/save";
@@ -1727,6 +1729,18 @@ export async function resolveCatalogSkusAction(
     if (hit) out[requested] = hit;
   }
   return out;
+}
+
+/**
+ * #365 — the Build package → BOM quote tab's line models: the catalog's model
+ * fields for the live BOM's plain catalog SKUs, through the SAME read the BOM
+ * PDF, saved preview and online BOM use (loadBomModelParts — getManyBySku,
+ * renamed SKUs followed), so the live tab and the saved views agree. Unknown
+ * SKUs are absent; capped at BOM_MODEL_SKUS_MAX.
+ */
+export async function bomModelPartsAction(skus: string[]): Promise<BomModelParts> {
+  await requireUser();
+  return loadBomModelParts(Array.isArray(skus) ? skus : []);
 }
 
 /* ---------------- travel, on demand (punch #89) ----------------

@@ -11775,6 +11775,7 @@ seeded()
   .then(() => settingsRaceFollowupChecks(ok))
   .then(() => lineMoveChecks(ok))
   .then(() => reviewSheet363Checks(ok))
+  .then(() => bomModels365DbChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -57548,7 +57549,8 @@ function p4PreviewChecks(): void {
   ok(!/OpenBeacon|ScopeSelection|QuestionForm|package-slots|\/share\/|sharePath|zipHref/.test(page) && page.includes("PREVIEW_COPY.actionsNote") &&
      p4pCopy.actionsNote === "Client scope choices and questions appear here on the client's page.",
     "#P4 preview: no open beacon, no client action forms, no token links — an inert note where the client acts");
-  ok(page.includes("loadLivePackagePreview(q,") && page.includes("<QuoteDocument {...bomViewProps(doc)} layout=\"web\" />") && page.includes("<style>{QUOTE_WEB_CSS}</style>") &&
+  // #365: the BOM tab also passes its line models.
+  ok(page.includes("loadLivePackagePreview(q,") && page.includes("<QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout=\"web\" />") && page.includes("<style>{QUOTE_WEB_CSS}</style>") &&
      page.includes('loadCutSheets(q.id, { images: "url" })') && page.includes('style="client"') && !page.includes("CLIENT_PRINT_CSS") && page.includes("PREVIEW_COPY.noCurtains") &&
      p4pCopy.noCurtains === "This estimate has no curtains.",
     "#P4 preview: package from the live loader, BOM = the online BOM view, cut sheets in the Client style (no print CSS injected)");
@@ -70452,7 +70454,7 @@ import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate
   ok(bq1File("EST-1234") === "EST-1234 BOM.pdf" && bq1File("") === "Estimate BOM.pdf" && bq1File("A/B") === "A_B BOM.pdf", "BOM PDF: \"<number> BOM.pdf\", Estimate when blank, unsafe characters → _");
   ok(bq1Path("Q-1", true) === "/api/quotes/Q-1/bom-pdf?download=1" && bq1Path("Q 1", false) === "/api/quotes/Q%201/bom-pdf", "BOM PDF: bomPdfPath encodes the id; download adds ?download=1");
   const page = rd("src/app/print/quote/[id]/page.tsx");
-  ok(page.includes('import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";') && /const bom = \(Array\.isArray\(sp\.view\) \? sp\.view\[0\] : sp\.view\) === "bom";/.test(page) && page.includes('<QuoteDocument {...bomViewProps(doc)} layout="web" rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />'),
+  ok(page.includes('import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";') && /const bom = \(Array\.isArray\(sp\.view\) \? sp\.view\[0\] : sp\.view\) === "bom";/.test(page) && page.includes('<QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout="web" rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />'), // #365: + the line models
     "BOM PDF print: ?view=bom renders bomViewProps(doc) — the saved BOM preview's own transform");
   ok(page.includes("!bom && part !== \"tail\" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets") && page.includes("!bom && !bidder && part !== \"main\" ? loadDatasheetLinkRows(q, origin) : []") &&
      page.indexOf("if (bom) {") > -1 && page.indexOf("if (bom) {") < page.indexOf("keyProductPhotoDataUris("),
@@ -70590,4 +70592,150 @@ import { qd364BomCases as s364Cases } from "./qd364-cases";
     "#364 hook: each switch loads from the saved pdfOptions, toggles through togglePdf and rides pdfOpts (so Save sends it and the PDF goes dirty)");
   const act = rd("src/app/(app)/estimator/actions.ts");
   ok((act.match(/pdfOptions: normalizePdfOptions\(payload\.pdfOptions\)/g) || []).length === 2, "#364 save: both save paths sanitize pdfOptions through normalizePdfOptions (the new keys included)");
+}
+
+/* --- #365: the model number on BOM quote lines ("Model — Description", BOM view only) --- */
+import * as b365 from "@/lib/estimate-output/bom-models";
+import { bomViewProps as b365Bom } from "@/app/(app)/estimator/quote-document-view";
+import { qd293Props as b365Props, qd293Sections as b365Sections, qdP5NoDocCases as b365P5Cases, renderQuoteDocument293 as b365Render } from "./qd293-cases";
+import { qd364BomCases as b365Cases } from "./qd364-cases";
+import type { SpecItem as B365Item } from "@/app/(app)/estimator/types";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const L = (extra: Partial<B365Item> = {}): B365Item => ({ id: 1, sku: "SKU-1", desc: "ETC LED ellipsoidal, 19° lens", qty: 12, unit: "ea", cost: 1, price: 1200, ...extra } as B365Item);
+  const parts: b365.BomModelParts = {
+    "SKU-1": { sku: "SKU-1", manufacturerModelNumber: "ColorSource Spot V" },
+    "SKU-PN": { sku: "SKU-PN", manufacturerPartNumber: "7060A1010" },
+    "Symetrix:Jupiter 4": { sku: "Symetrix:Jupiter 4" },
+    CUSTOM: { sku: "CUSTOM", manufacturerModelNumber: "NOPE" },
+    "SA-1": { sku: "SA-1", manufacturerModelNumber: "NOPE" },
+  };
+  const M = (it: Partial<B365Item>) => b365.bomLineModel(L(it), parts);
+
+  // ---- pure: which lines get a model, and which model ----
+  ok(M({}) === "ColorSource Spot V" && b365.bomLineText(L().desc, M({})) === "ColorSource Spot V — ETC LED ellipsoidal, 19° lens",
+    "#365 pure: a catalog line prints \"Model — Description\" (the catalog part's Model #, em dash with spaces)");
+  ok(M({ sku: "SKU-PN" }) === "7060A1010" && M({ sku: "Symetrix:Jupiter 4" }) === "Jupiter 4" && M({ sku: " SKU-1 " }) === "ColorSource Spot V",
+    "#365 pure: lineModel's ladder — no Model # → MFR P/N → the SKU's text after Brand:; the SKU is matched trimmed");
+  ok(M({ manufacturerModelNumber: "Spot V (frozen)" }) === "Spot V (frozen)" && M({ manufacturerPartNumber: "OWN-PN" }) === "ColorSource Spot V",
+    "#365 pure: the line's own frozen Model # wins over the catalog's; the catalog's Model # wins over the line's MFR P/N");
+  ok(M({ sku: "ORD-99" }) === "" && M({ sku: "ORD-99", manufacturerPartNumber: "PN-7" }) === "PN-7" && M({ sku: "ORD-99", manufacturerModelNumber: " Own  Model " }) === "Own Model",
+    "#365 pure: no catalog hit → only the line's own Model # / MFR P/N, never its SKU or order number");
+  ok(["CUSTOM", "AI", "CURTAIN", "CRT-4", "", "  "].every((sku) => M({ sku, manufacturerModelNumber: "X", custom: true }) === ""),
+    "#365 pure: a placeholder SKU (CUSTOM / AI / CURTAIN / CRT-n / blank) never prints a model, even with its own Model #");
+  ok(M({ custom: true }) === "ColorSource Spot V", "#365 pure: a custom line saved with a real catalog SKU prints its model");
+  const excluded: Array<[string, Partial<B365Item>]> = [
+    ["vendor quote", { vendorQuoteId: "VQ-1" }], ["allowance", { allowance: true }], ["curtain", { curtain: true }],
+    ["labor", { labor: true }], ["overhead", { laborOverhead: "shop" }], ["travel", { laborTravel: "hotel" } as Partial<B365Item>],
+    ["assembly (fixture)", { sku: "SA-1", fixture: true }], ["assembly (components)", { components: [{ sku: "SKU-PN", label: "x", role: "fixture", qty: 1, unit: "ea", cost: 1, price: 1 }] } as Partial<B365Item>],
+    ["portal fixture", { fixtureId: "fa-1" } as Partial<B365Item>], ["rack", { rackId: "RK-1" } as Partial<B365Item>], ["track (config)", { track: {} } as Partial<B365Item>],
+    ["track (TRK-)", { sku: "TRK-ADC-1" }], ["Grid assembly", { sku: "asm:fa-1" }], ["bonus", { bonus: "package" } as Partial<B365Item>],
+  ];
+  const leaked = excluded.filter(([, x]) => M({ ...x, manufacturerModelNumber: "OWN" }) !== "").map(([n]) => n);
+  ok(leaked.length === 0, "#365 pure: vendor-quote / allowance / curtain / labor / overhead / travel / assembly / rack / track / bonus lines print their description only" + (leaked.length ? " — leaked: " + leaked.join(", ") : ""));
+  ok(b365.bomLineText("ColorSource Spot V — ETC LED", "ColorSource Spot V") === "ColorSource Spot V — ETC LED" && b365.bomLineText("  colorsource spot v LED", "ColorSource Spot V") === "  colorsource spot v LED",
+    "#365 pure: no doubling — a description that already starts with the model (case-insensitive, trimmed) prints as is");
+  ok(b365.bomLineText("Desc", "") === "Desc" && b365.bomLineText("", "M1") === "M1" && b365.bomLineText(" Desc ", " M1 ") === "M1 — Desc",
+    "#365 pure: no model = the description untouched; no description = the model alone; both trimmed when joined");
+  ok(b365.bomLineModel(L({ sku: "__proto__" }), parts) === "" && b365.bomLineModel(L({ sku: "toString" }), parts) === "" && b365.bomLineModel(null, parts) === "" &&
+     b365.bomModelSkus([{ id: "p", name: "P", kind: "materials", items: [L({ sku: "__proto__" }), L({ sku: "SKU-1" })] }] as never).join() === "SKU-1",
+    "#365 pure: prototype keys never resolve as parts and are never asked for");
+  ok(JSON.stringify(b365.bomModelSkus(b365Sections())) === JSON.stringify(["SKU-1", "SKU-3", "SKU-5", "SKU-6", "SKU-8"]),
+    "#365 pure: bomModelSkus lists each plain catalog SKU once, options included — not the allowance, vendor or labor lines");
+  ok(JSON.stringify(b365.bomModelPartOf({ sku: "A", manufacturerModelNumber: " M ", manufacturerPartNumber: "" })) === JSON.stringify({ sku: "A", manufacturerModelNumber: "M" }),
+    "#365 pure: bomModelPartOf carries only the model fields, trimmed, blanks dropped");
+
+  // ---- render: the BOM view with models ----
+  const docParts: b365.BomModelParts = {
+    "SKU-1": { sku: "SKU-1", manufacturerModelNumber: "ColorSource Spot V" },
+    "SKU-2": { sku: "SKU-2", manufacturerModelNumber: "M2" },
+    "SKU-3": { sku: "SKU-3", manufacturerModelNumber: "M3" },
+    "SKU-4": { sku: "SKU-4", manufacturerModelNumber: "M4" },
+    "SKU-5": { sku: "SKU-5", manufacturerPartNumber: "PN-5" },
+    "SKU-6": { sku: "SKU-6", manufacturerModelNumber: "line 6" },
+    "LAB-INSTALL": { sku: "LAB-INSTALL", manufacturerModelNumber: "M7" },
+    "SKU-11": { sku: "SKU-11", manufacturerModelNumber: "M11" },
+    "SKU-12": { sku: "SKU-12", manufacturerModelNumber: "M12" },
+  };
+  const cases = b365Cases();
+  const withM = (k: string) => b365Render({ ...cases[k], bomModelParts: docParts });
+  const bom = withM("bom");
+  ok(bom.includes("<span>ColorSource Spot V — Line 1<span") && bom.includes("M3 — Line 3") && bom.includes("PN-5 — Line 5") && bom.includes("<span>Line 8</span>"),
+    "#365 render: the BOM view prints \"Model — Description\" on catalog lines and option rows; a line with no model keeps its description");
+  ok(bom.includes("Line 6") && !bom.includes("line 6 — Line 6") && bom.includes("Budget allowance — Line 2") && !bom.includes("M2 —") && bom.includes("Acme · Q9 — Motors") && !bom.includes("M4 —") &&
+     bom.includes("Installation, commissioning &amp; project management") && !bom.includes("M7"),
+    "#365 render: no doubling; allowance, vendor-quote and labor rows print exactly as before");
+  const alt = withM("bomAlternates");
+  ok(alt.includes("M11 — Line 11") && alt.includes("M12 — Line 12"), "#365 render: an alternate system's lines and its option rows carry models too");
+  ok(withM("bomSectioned").includes("ColorSource Spot V — Line 1") && withM("bomLean").includes("ColorSource Spot V — Line 1"),
+    "#365 render: the BOM view of a sectioned / lean quote (always itemized with descriptions) carries models");
+
+  // ---- render: byte-for-byte where nothing should change ----
+  const base364 = JSON.parse(rd("docs/superpowers/fixtures/364-bom-view-baseline.json")) as Record<string, string>;
+  ok(Object.keys(base364).length === 5 && Object.keys(base364).every((k) => b365Render(cases[k]) === base364[k] && b365Render({ ...cases[k], bomModelParts: {} }) === base364[k]),
+    "#365 render: the BOM view with no model read (absent — a failed read — or empty) is the #364 baseline byte for byte (5 cases)");
+  const p5 = JSON.parse(rd("docs/superpowers/fixtures/p5-quote-document-no-document.json")) as Record<string, string>;
+  const p5c = b365P5Cases();
+  ok(Object.keys(p5).length === 15 && Object.keys(p5).every((k) => b365Render({ ...p5c[k], bomModelParts: docParts }) === p5[k]),
+    "#365 render: the estimate document (PDF, web, appendix, alternates, key products — 15 fixtures) ignores bomModelParts byte for byte");
+  ok(b365Render({ ...b365Props(), bomModelParts: docParts, showModels: false }) === p5["p293-itemized"], "#365 render: showModels other than exactly true prints no model");
+  ok(b365Bom(b365Props()).showModels === true && b365Props().showModels === undefined, "#365 bomViewProps: sets showModels; a non-BOM document never has it");
+
+  // ---- source pins: the four BOM callers pass models; nothing else does ----
+  const qd = rd("src/app/(app)/estimator/quote-document.tsx");
+  ok(qd.includes("return p.showModels === true && p.bomModelParts ? bomLineModel(it, p.bomModelParts) : \"\";") && qd.includes("desc: model ? bomLineText(desc, model) : desc,") &&
+     (qd.match(/model=\{bomModelOf\(it, p\)\}/g) || []).length === 2,
+    "#365 QuoteDocument: one gate (showModels === true + bomModelParts) for itemized lines and both option-row call sites");
+  const view = rd("src/app/(app)/estimator/quote-document-view.ts");
+  const setters = ["src/app/(app)/estimator/quote-document-view.ts", "src/lib/quote-pdf/document-loader.ts", "src/lib/estimate-output/cover-loader.ts", "src/lib/estimate-output/package-live-loader.ts", "src/lib/estimate-output/package-loader.ts", "src/app/print/quote/[id]/page.tsx", "src/components/online-estimate/online-estimate.tsx"]
+    .map((f) => [f, (rd(f).match(/\bshowModels:/g) || []).length] as const);
+  ok(view.includes("showModels: true,") && setters.every(([f, n]) => (f.endsWith("quote-document-view.ts") ? n === 1 : n === 0)), "#365: only bomViewProps sets showModels");
+  ok(["src/lib/quote-pdf/document-loader.ts", "src/lib/estimate-output/cover-loader.ts", "src/lib/estimate-output/package-live-loader.ts", "src/lib/estimate-output/package-loader.ts"].every((f) => !rd(f).includes("bomModelParts")),
+    "#365: the document, Cover, package and bidder loaders never read models (the estimate PDF, Cover PDF, bidder PDFs and package page stay as they are)");
+  const print = rd("src/app/print/quote/[id]/page.tsx");
+  ok(print.includes("const bomModelParts = await loadBomModelPartsFor(doc.sections);") && print.includes("<QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout=\"web\"") &&
+     print.indexOf("loadBomModelPartsFor(") > print.indexOf("if (bom) {") && (print.match(/bomModelParts=/g) || []).length === 1,
+    "#365 BOM PDF: the print route's ?view=bom branch alone loads and passes the models");
+  const prev = rd("src/app/estimator-preview/[id]/page.tsx");
+  ok(prev.includes("const bomModelParts = await loadBomModelPartsFor(doc.sections);") && prev.includes("<QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout=\"web\" />") && (prev.match(/bomModelParts=/g) || []).length === 1,
+    "#365 saved preview: the BOM tab loads and passes the models");
+  const online = rd("src/components/online-estimate/online-estimate.tsx");
+  const portal = rd("src/app/portal/quotes/[id]/page.tsx");
+  const share = rd("src/app/share/quote/[id]/[token]/page.tsx");
+  ok(online.includes("const shown = showBom ? { ...bomViewProps(docProps), bomModelParts } : docProps;") &&
+     [portal, share].every((pg) => pg.includes('const bomModelParts = view === "bom" ? await loadBomModelPartsFor(docProps.sections) : undefined;') && pg.includes("bomModelParts={bomModelParts}") && pg.includes("view={view}")),
+    "#365 online BOM: the portal and share pages read models only for ?view=bom and the view hands them to the BOM view alone (the revision's own lines)");
+  const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
+  ok(tab.includes("bomModelSkus(shown?.sections)") && tab.includes("bomModelPartsAction(want)") && tab.includes("<BomDocument props={docProps} />") && !/from "@\/lib\/stores\//.test(tab) &&
+     /useMemo\(\(\) => \(shown \? liveBomDocumentProps\(shown\) : null\), \[shown\]\)/.test(tab),
+    "#365 BOM tab: models for the SHOWN BOM only (review K), through bomModelPartsAction, no store import");
+  const lib = rd("src/lib/estimate-output/bom-models.ts");
+  const srv = rd("src/lib/estimate-output/bom-models-server.ts");
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  ok(!/from "@\/lib\/stores\/|from "@\/db/.test(lib) && srv.includes("await getManyBySku(want)") && srv.includes("return undefined;") &&
+     /export async function bomModelPartsAction\(skus: string\[\]\): Promise<BomModelParts> \{\n  await requireUser\(\);\n  return loadBomModelParts\(/.test(act),
+    "#365: the rules are pure (no store), the server read is one getManyBySku that never throws, and the live tab's action needs a signed-in user");
+}
+
+/** #365 — loadBomModelParts against the test DB: requested-SKU keys, renames followed, misses absent, model fields only. */
+async function bomModels365DbChecks(check: typeof ok): Promise<void> {
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const DS = await import("@/db/doc-store");
+  const Cat = await import("@/lib/stores/catalog");
+  const { loadBomModelParts, loadBomModelPartsFor } = await import("@/lib/estimate-output/bom-models-server");
+  const a = fixtureId(365, "a"), b = fixtureId(365, "b"), old = fixtureId(365, "old"), to = "ETC:" + fixtureId(365, "spot");
+  for (const id of [a, b, old, to]) registerFixture("catalog_parts", id);
+  const base = { desc: "Fixture 365", category: "Other", unit: "ea", list: 10, cost: 5, mfr: "ETC" };
+  await DS.upsertDoc("catalog_parts", { ...base, id: a, sku: a, manufacturerModelNumber: "ColorSource Spot V", manufacturerPartNumber: "CSSPOT-V", narrativeText: "secret" } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: b, sku: b, manufacturerPartNumber: "7060A1010" } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: old, sku: old } as never);
+  await Cat.renamePartDocs(old, to, "Spot 365");
+  const got = await loadBomModelParts([a, ` ${b} `, old, fixtureId(365, "gone"), "__proto__", ""]);
+  check(JSON.stringify(Object.keys(got).sort()) === JSON.stringify([a, b, old].sort()), "#365 loader: keyed by the requested (trimmed) SKU; unknown SKUs absent");
+  check(JSON.stringify(got[a]) === JSON.stringify({ sku: a, manufacturerModelNumber: "ColorSource Spot V", manufacturerPartNumber: "CSSPOT-V" }) && got[b]?.manufacturerPartNumber === "7060A1010",
+    "#365 loader: model fields only — nothing else of the part crosses");
+  check(got[old]?.sku === to && got[old]?.manufacturerModelNumber === "Spot 365", "#365 loader: a renamed SKU (a sent revision's line) reads the part it now means");
+  const sections = [{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: a, desc: "x", qty: 1, unit: "ea", cost: 1, price: 2 }, { id: 2, sku: b, desc: "y", qty: 1, unit: "ea", cost: 1, price: 2, allowance: true }] }];
+  const forSecs = await loadBomModelPartsFor(sections as never);
+  check(!!forSecs && Object.keys(forSecs).join() === a, "#365 loader: loadBomModelPartsFor reads only the plain catalog lines' SKUs");
 }

@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import QuoteDocument, { QUOTE_WEB_CSS, type QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import { bomViewProps, offersBomView } from "@/app/(app)/estimator/quote-document-view";
 import { ONLINE_COPY, ONLINE_VIEW_LABELS } from "@/lib/quote-share/view";
+import type { BomModelParts } from "@/lib/estimate-output/bom-models";
 
 /**
  * #293 slice 3 — the online estimate, shared by the portal page and the share
@@ -34,6 +35,7 @@ export function OnlineEstimateView({
   bomHref,
   pdfHref,
   backHref,
+  bomModelParts,
 }: {
   docProps: QuoteDocumentProps;
   view: "narrative" | "bom";
@@ -43,10 +45,13 @@ export function OnlineEstimateView({
   bomHref: string;
   pdfHref: string | null;
   backHref: string | null;
+  /** #365 — the BOM view's line models (loadBomModelPartsFor; the pages load them only for ?view=bom). */
+  bomModelParts?: BomModelParts;
 }) {
   const offers = offersBomView(docProps.sections, docProps.detail, docProps.document);
   const showBom = offers && view === "bom";
-  const shown = showBom ? bomViewProps(docProps) : docProps;
+  // #365: the models reach the BOM view only — the Narrative document never sees them.
+  const shown = showBom ? { ...bomViewProps(docProps), bomModelParts } : docProps;
   return (
     <div>
       <style>{QUOTE_WEB_CSS}</style>

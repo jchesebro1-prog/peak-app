@@ -127,7 +127,8 @@ export function alternatingPhotoSides(keys: readonly string[]): Map<string, "rig
  *  the props; absent = on) apply here and nowhere else — Line prices ANDs with
  *  the quote-wide Prices, and Materials / Labor / Freight become the
  *  document's show* flags. System prices, tax, credit and the Total always
- *  print. Pure. */
+ *  print. #365: `showModels` turns on "Model — Description" for the lines
+ *  `bomModelParts` (passed by the caller) can resolve. Pure. */
 export function bomViewProps(p: QuoteDocumentProps): QuoteDocumentProps {
   return {
     ...p,
@@ -141,6 +142,9 @@ export function bomViewProps(p: QuoteDocumentProps): QuoteDocumentProps {
     showMaterials: p.bomMaterials !== false,
     showLabor: p.bomLabor !== false,
     showFreight: p.bomFreight !== false,
+    // #365: plain catalog lines print "Model — Description" — rendered only
+    // when the caller also passes `bomModelParts` (the four BOM callers do).
+    showModels: true,
     sections: p.sections.map((s) => ({ ...s, presentation: "itemized" as const })),
   };
 }

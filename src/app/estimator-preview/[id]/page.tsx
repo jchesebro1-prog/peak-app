@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import letterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
 import QuoteDocument, { QUOTE_WEB_CSS } from "@/app/(app)/estimator/quote-document";
 import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";
+import { loadBomModelPartsFor } from "@/lib/estimate-output/bom-models-server";
 import { CutSheetPages } from "@/components/cutsheets/cut-sheet-pages";
 import { DatasheetLink, PackagePlans, PKG_LINK } from "@/components/estimate-output/package-extras";
 import PackageView, { type PackageSlots } from "@/components/estimate-output/package-view";
@@ -69,10 +70,12 @@ export default async function EstimatorPreviewPage({
 
   if (tab === "bom") {
     const doc = await liveQuoteDocumentProps(q);
+    // #365: "Model — Description" on each plain catalog line (never throws).
+    const bomModelParts = await loadBomModelPartsFor(doc.sections);
     return (
       <div style={COLUMN}>
         <style>{QUOTE_WEB_CSS}</style>
-        <QuoteDocument {...bomViewProps(doc)} layout="web" />
+        <QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout="web" />
       </div>
     );
   }

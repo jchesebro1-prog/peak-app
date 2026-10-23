@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { clientIpFromHeaders, rateLimit } from "@/lib/rate-limit";
 import { resolveSharedQuote, SHARE_VIEW_PER_MIN } from "@/lib/quote-share/links";
 import { loadQuoteDocumentProps } from "@/lib/quote-pdf/document-loader";
+import { loadBomModelPartsFor } from "@/lib/estimate-output/bom-models-server";
 import { ONLINE_COPY, onlineHeaderLine, onlineView, sharePath } from "@/lib/quote-share/view";
 import { OnlineEstimateCard, OnlineEstimateView } from "@/components/online-estimate/online-estimate";
 import { isPackageToken } from "@/lib/quote-share/token";
@@ -53,11 +54,15 @@ export default async function SharedQuotePage({
   if (!ok || !docProps) return <OnlineEstimateCard title={ONLINE_COPY.shareInactive} />;
   // Jeff 2026-10-15 #22: the cut sheets the sent PDF carries.
   const cutSheets = await onlineCutSheets(ok.q, ok.rev);
+  const view = onlineView(sp.view);
+  // #365: the BOM view's "Model — Description" lines — read only when the BOM is asked for (never throws).
+  const bomModelParts = view === "bom" ? await loadBomModelPartsFor(docProps.sections) : undefined;
   return (
     <>
       <OnlineEstimateView
         docProps={docProps}
-        view={onlineView(sp.view)}
+        view={view}
+        bomModelParts={bomModelParts}
         headerLine={onlineHeaderLine(ok.q, ok.rev)}
         closed={ok.closed}
         narrativeHref={base}

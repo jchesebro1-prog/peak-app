@@ -8,6 +8,7 @@ import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { portalOnlineEstimateState, portalQuotePdfSource } from "@/lib/quote-pdf/portal-access";
 import { portalBidRowsFor, portalOwnerBom, portalOwnerHasBidders } from "@/lib/parties/portal-bid-server";
 import { loadQuoteDocumentProps } from "@/lib/quote-pdf/document-loader";
+import { loadBomModelPartsFor } from "@/lib/estimate-output/bom-models-server";
 import { ONLINE_COPY, onlineHeaderLine, onlineView } from "@/lib/quote-share/view";
 import { OnlineEstimateCard, OnlineEstimateView } from "@/components/online-estimate/online-estimate";
 import { PortalShell } from "../../shell";
@@ -115,11 +116,15 @@ export default async function PortalQuotePage({
   if (!docProps) return shell(<OnlineEstimateCard title={ONLINE_COPY.portalUnavailable} backHref={backHref} />);
   // Jeff 2026-10-15 #22: the cut sheets the sent PDF carries.
   const cutSheets = await onlineCutSheets(q, state.rev);
+  const view = onlineView(sp.view);
+  // #365: the BOM view's "Model — Description" lines — read only when the BOM is asked for (never throws).
+  const bomModelParts = view === "bom" ? await loadBomModelPartsFor(docProps.sections) : undefined;
   return shell(
     <>
       <OnlineEstimateView
         docProps={docProps}
-        view={onlineView(sp.view)}
+        view={view}
+        bomModelParts={bomModelParts}
         headerLine={onlineHeaderLine(q, state.rev)}
         closed={state.closed}
         narrativeHref={withQs(base)}
