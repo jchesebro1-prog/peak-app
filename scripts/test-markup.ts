@@ -6,7 +6,8 @@ import {
   DEFAULT_MARKUP, MARKUP_MAX, PRICING_BASIS, costFromSell, fmtMarkupPct, legacyTwinOf, marginToMarkup,
   markupOf, markupPctString, markupToMargin, roundMarkupPct, sameWholeMarkup, sellAt,
 } from "../src/lib/markup";
-import { catalogAddPrice, customPartSell, isAtTierSeed } from "../src/app/(app)/estimator/tier-reprice";
+import { catalogAddPrice, customPartSell, isAtTierSeed, repriceForTier } from "../src/app/(app)/estimator/tier-reprice";
+import { copySectionForTarget } from "../src/app/(app)/estimator/copy-system";
 
 const near = (a: number | null | undefined, b: number, eps = 1e-9) => a != null && Math.abs(a - b) <= eps;
 
@@ -41,6 +42,24 @@ export async function markupPureChecks(ok: Ok) {
     "markup: a line priced at the old 30 % margin is still 'at the seed' for a 43 % stamp (legacy twin)");
   ok(customPartSell(100) === 154 && catalogAddPrice(100, 0, null) === 143 && catalogAddPrice(0, 75, 0.25) === 75,
     "markup: custom part 54 %, no-stamp fallback 43 %, list-only part keeps its list");
+  // Fix round 1 — a converted stamp meeting its own rounded tier is the same tier (whole-percent compare).
+  const oldSecs = [{ id: "s1", name: "Sys", items: [
+    { id: 1, sku: "A", desc: "Material", qty: 1, cost: 100, price: 142.86 },
+    { id: 2, desc: "Labor", labor: true, qty: 1, cost: 100, price: 143 },
+  ] }] as never as Parameters<typeof repriceForTier>[0];
+  const noop = repriceForTier(oldSecs, 0.3 / 0.7, 0.43);
+  ok(noop.sections === oldSecs && noop.repriced === 0, "markup: a converted stamp (0.428571) meeting its rounded tier (0.43) is a no-op, same array");
+  const moved = repriceForTier(oldSecs, 0.3 / 0.7, 0.25);
+  ok(moved.sections !== oldSecs && moved.sections[0].items.find((i) => i.id === 1)?.price === 125 && moved.repriced >= 1,
+    "markup: a real tier change from a converted stamp still re-prices via the legacy twin (142.86 → 125)");
+  ok(isAtTierSeed({ cost: 100, price: 125, labor: false } as never, 0.25) && !isAtTierSeed({ cost: 100, price: 125.02, labor: false } as never, 0.25),
+    "markup: isAtTierSeed at an exact conversion (0.25) holds at 125, fails at 125.02");
+  ok(legacyTwinOf(0.25) === null, "markup: an exact conversion has no twin");
+  const copied = copySectionForTarget((oldSecs as never as Array<{ items: unknown[] }>)[0] as never, {
+    newSectionId: "s2", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.3 / 0.7, targetTierMargin: 0.43,
+  });
+  const cm = copied.section.items.find((i) => i.id === 1);
+  ok(copied.tierRepriced === 0 && copied.handPriced === 0 && cm?.price === 142.86, "markup: copying from a converted stamp to its rounded tier moves no tier and keeps every price");
 }
 
 export async function markupDbChecks(_ok: Ok) {

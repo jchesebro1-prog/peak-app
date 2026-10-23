@@ -14,7 +14,7 @@ import {
   tierSeedPrice,
   usableTierMarkup,
 } from "./tier-reprice";
-import { sellAt } from "@/lib/markup";
+import { sameWholeMarkup, sellAt } from "@/lib/markup";
 import type { SpecItem, SpecSection } from "./types";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { applyProjectDiscounts } from "@/lib/project-discounts/rules";
@@ -110,7 +110,7 @@ export function copySectionForTarget(
   const src = usableTierMarkup(opts.sourceTierMargin);
   // An unusable target means no tier move: every line stays on the source's seed.
   const tgt = usableTierMarkup(opts.targetTierMargin) ?? src;
-  const tierMoves = seedMarkupOf(src) !== seedMarkupOf(tgt);
+  const tierMoves = !sameWholeMarkup(seedMarkupOf(src), seedMarkupOf(tgt));
   let costsUpdated = 0;
   let tierRepriced = 0;
   let handPriced = 0;
@@ -196,7 +196,7 @@ export function copySectionForTarget(
     const withParts = (line: SpecItem): SpecItem => (parts ? { ...line, components: parts } : line);
 
     if (atSeed) {
-      const seedMoved = tierSeedMarkupFor(it, src) !== tierSeedMarkupFor(it, tgt);
+      const seedMoved = !sameWholeMarkup(tierSeedMarkupFor(it, src), tierSeedMarkupFor(it, tgt));
       if (seedMoved) tierRepriced++;
       // Unchanged cost and seed: keep the sell verbatim (labor's drift nudge,
       // a cent of rounding) rather than round-trip it through the formula.

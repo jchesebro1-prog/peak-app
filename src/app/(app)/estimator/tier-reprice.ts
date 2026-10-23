@@ -3,7 +3,7 @@ import { round2 } from "./pricing";
 import type { SpecItem, SpecSection } from "./types";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { normalCostOf } from "@/lib/project-discounts/rules";
-import { DEFAULT_MARKUP, MARKUP_MAX, legacyTwinOf, sellAt } from "@/lib/markup";
+import { DEFAULT_MARKUP, MARKUP_MAX, legacyTwinOf, sameWholeMarkup, sellAt } from "@/lib/markup";
 
 /**
  * #254 (D87 amended) — a customer/contact change that moves the quote's
@@ -173,7 +173,7 @@ export function repriceForTier(
   const nextK = usableTierMarkup(next);
   if (nextK == null) return nothing;
   const prevM = usableTierMarkup(prev);
-  if (seedMarkupOf(prevM) === nextK) return nothing;
+  if (sameWholeMarkup(seedMarkupOf(prevM), nextK)) return nothing;
   let repriced = 0;
   let handPriced = 0;
   let untouched = 0;

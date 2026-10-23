@@ -57,6 +57,7 @@ import { docIdFloor } from "@/lib/package-doc/ids";
 import { reIdIncomingSection } from "@/lib/estimate-line-move/reid";
 import { copyPricingFor } from "./copy-pricing";
 import { seedMarkupOf, usableTierMarkup } from "./tier-reprice";
+import { sameWholeMarkup } from "@/lib/markup";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
@@ -1231,7 +1232,7 @@ export async function copySystemToEstimateAction(
       targetTierKey = r.tier;
     }
   }
-  const tierMoved = usableTierMarkup(targetTier) != null && seedMarkupOf(sourceTier) !== seedMarkupOf(targetTier);
+  const tierMoved = usableTierMarkup(targetTier) != null && !sameWholeMarkup(seedMarkupOf(sourceTier), seedMarkupOf(targetTier));
   const tierLabel =
     tierMoved && targetTierKey
       ? (PRICING_TIER_LABEL as Record<string, string>)[targetTierKey] || targetTierKey
