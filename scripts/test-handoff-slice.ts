@@ -662,12 +662,21 @@ async function revisionAllowListChecks(ok: Ok, exp: ExportV2) {
   qrow.doc.review = { state: "approved", reviewer: "Jeff", submittedBy: null, submittedAt: null, decidedBy: "Jeff", decidedAt: 1, note: "", method: "self", smuggled: "REVIEW-EXTRA" };
   qrow.doc.pdfOptions = { detail: "itemized", pdfQty: true, bomLinePrices: false, bomMaterials: true, bomLabor: false, bomFreight: false, smuggled: "PDFOPT-EXTRA" };
   qrow.doc.boxSale = true;
+  // #366: project discounts ride in spec (the priced payload ships whole), live and frozen in a revision
+  const discSpec = {
+    sections: [{ id: "s1", name: "Gear", kind: "lighting", mfr: "", freightPct: 0, items: [
+      { id: 1, sku: "ETC:CS15", desc: "CS15", qty: 2, unit: "ea", cost: 810, price: 1250, catalogCost: 900, projectDiscountPct: 10 },
+      { id: 2, sku: "ASM-1", desc: "Kit", qty: 1, unit: "ea", cost: 1620, price: 3000, catalogCost: 1800, components: [{ sku: "ETC:CS15", desc: "CS15", qty: 2, cost: 810, list: 1250, catalogCost: 900, projectDiscountPct: 10 }] },
+    ] }],
+    mobs: [], projectDiscounts: { "ETC:CS15": { pct: 10, note: "ETC reg pricing", by: "u1", at: 5 } },
+  };
+  qrow.doc.spec = discSpec;
   qrow.doc.packageSelection = { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [], smuggled: "PKGSEL-EXTRA" };
   qrow.doc.history = [{ at: 1, to: "draft", by: "HISTORY-EXTRA" }];
   qrow.doc.pdf = { status: "ready", blobPath: "quote-pdfs/Q-G001/live.pdf" };
   qrow.doc.revisions = [{
     rev: 1, at: 1, by: "Jeff", reason: "sent", note: "", name: "Rev", customerId: "c-alpha", value: 100, margin: 0.3,
-    pricingTier: "standard", tierMargin: 0.3, status: "sent", quoteType: "system", spec: { sections: [] },
+    pricingTier: "standard", tierMargin: 0.3, status: "sent", quoteType: "system", spec: JSON.parse(JSON.stringify(discSpec)),
     flameTest: { secret: "FLAME-PAYLOAD" }, repair: null, inspection: null, consulting: null, rental: null,
     pdfBlobPath: BLOB, pdfSavedAt: 9, smuggled: "REV-EXTRA",
     vendorQuotes: [vq()],
@@ -719,6 +728,15 @@ async function revisionAllowListChecks(ok: Ok, exp: ExportV2) {
     const spec = { sections: [{ id: "s1", items: [{ id: 1, sku: "X", desc: "d", manufacturerModelNumber: "MODEL-1", manufacturerPartNumber: "MPN-1" }] }] };
     const withSpec = sanitizeQuote({ ...qrow.doc, spec } as never) as Record<string, unknown>;
     ok(JSON.stringify(withSpec.spec) === JSON.stringify(spec), "handoff:slice #365: a line's frozen manufacturerModelNumber / manufacturerPartNumber ride in spec untouched");
+  }
+  {
+    // #366: the map, the stamped lines (also an assembly's components) survive live and in the frozen revision, untouched
+    const spec = q.spec as typeof discSpec;
+    const rspec = rev.spec as typeof discSpec;
+    ok(JSON.stringify(spec) === JSON.stringify(discSpec) && JSON.stringify(rspec) === JSON.stringify(discSpec),
+      "handoff:slice #366: spec.projectDiscounts, line catalogCost / projectDiscountPct and components' ride whole, live and in a revision");
+    ok(spec.sections[0].items[0].catalogCost === 900 && spec.sections[0].items[1].components![0].projectDiscountPct === 10 && spec.projectDiscounts["ETC:CS15"].by === "u1",
+      "handoff:slice #366: the normal cost, the % and the stamp (by / at) are all still there");
   }
   ok(!("smuggled" in (q.review as object)) && (q.review as Record<string, unknown>).method === "self", "handoff:slice A1: review is allow-listed (REVIEW_FIELDS)");
   ok(!("smuggled" in (q.pdfOptions as object)) && !("smuggled" in (q.packageSelection as object)), "handoff:slice A1: top-level pdfOptions / packageSelection allow-listed");

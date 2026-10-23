@@ -74,6 +74,24 @@ portal-catalog quote. The customer gets the itemized BOM, so:
   on (the app's `?box=1`); an existing estimate has the switch in Quote details. Move / Copy a system
   into a *new* estimate copies the stored source's flag; into an existing one leaves the target's alone.
 
+### Project discounts — `spec.projectDiscounts`
+
+A vendor's project pricing for one job, recorded on the estimate as an extra **percent off our cost** for a
+catalog SKU. `spec.projectDiscounts` maps the trimmed real SKU to `{ pct, note, by, at }` (0 < pct < 100,
+two decimals; note up to 200 characters; at most 200 entries; `by` and `at` are stamped by the save, never
+trusted from the client). It exists only when the estimate has any. Every matching line, and every part
+inside an assembly line, carries a stamped copy: `catalogCost` (its normal cost), `projectDiscountPct`, and
+`cost` = normal × (1 − pct/100), rounded to the cent. An assembly line gets `catalogCost` and a lower `cost`
+by its discounted parts, never a pct of its own. Custom lines, vendor-quote lines, allowances, curtains, labor,
+bonus lines and the Rewards credit are never discounted. The server re-applies the map on every save, move and
+copy, so a stale payload cannot store a cost that disagrees with it, and renaming a catalog SKU moves the key.
+Revisions freeze the stamped lines and the map with the rest of `spec`.
+
+`catalogCost`, `projectDiscountPct`, the map and its notes are **internal**, like `cost`. The customer document,
+online page and package page never print them; they print `price` only. They ship in the bundle because the
+estimate's `spec` ships whole. The won project's *Project pricing to request* list is Quartzite's project
+side and is not in the prototype.
+
 ### What the BOM view prints — Show on BOM and model numbers
 
 `pdfOptions` also carries the four **Show on BOM** switches (`bomLinePrices`, `bomMaterials`, `bomLabor`,

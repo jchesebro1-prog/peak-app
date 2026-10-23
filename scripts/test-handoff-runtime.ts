@@ -21,7 +21,7 @@ import type { Ok } from "./test-inbox-org";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import type { SavePayload } from "@/app/(app)/estimator/actions";
 import type { SpecSection } from "@/lib/estimating-core/types";
-import { totals } from "@/lib/estimating-core/pricing";
+import { customerLines, totals } from "@/lib/estimating-core/pricing";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { DEFAULT_BONUS_RATES } from "@/lib/estimate-bonus/flags";
 import {
@@ -625,6 +625,7 @@ export async function handoffRuntimeChecks(ok: Ok) {
   await handoffReviewChecks(ok);
   await handoffSendChecks(ok);
   await handoffBoxSaleChecks(ok);
+  await handoffDiscountChecks(ok);
   await handoffShellChecks(ok);
   await handoffAssemblyChecks(ok);
   await handoffRulesChecks(ok);
@@ -1664,6 +1665,91 @@ export async function handoffBoxSaleChecks(ok: Ok) {
   // the live BOM tab's model read (bomModelPartsAction)
   const live = await A.bomModelPartsAction(["ETC:CS15", " ETC:CS15 ", "NOPE", "__proto__", ""]);
   ok(Object.keys(live).join() === "ETC:CS15" && live["ETC:CS15"].manufacturerModelNumber === "CS15", `${T}: bomModelPartsAction — the live BOM tab reads the same facts (unknown / blank / __proto__ absent)`);
+}
+
+/* ------------------------------------------------------------------ the merge of #366: project discounts */
+
+export async function handoffDiscountChecks(ok: Ok) {
+  const T = "handoff discounts";
+  const rewrite = <T,>(x: T) => x;
+  const tier = { tier: "base", margin: 0.3 };
+  const mk = () => [sec("sysA", [
+    { sku: "ETC:CS15", desc: "CS15 fixture", qty: 4, cost: 900, price: 1250 },
+    { sku: "CUSTOM", desc: "Hand cost", qty: 1, cost: 700, price: 1000, custom: true },
+  ])];
+  const deps = { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite, userId: "u1", now: 1234 };
+  const none = planSave(null, payloadFor(mk()), deps);
+  const disc = planSave(null, payloadFor(mk(), { projectDiscounts: { "ETC:CS15": { pct: 10, note: "ETC reg pricing", by: "FORGED", at: 1 }, CUSTOM: { pct: 50, note: "" }, "": { pct: 5 } } }), deps);
+  const lines = disc.ok ? (disc.patch.spec!.sections[0].items as Array<Record<string, unknown>>) : [];
+  const l0 = lines.find((i) => i.sku === "ETC:CS15");
+  const lc = lines.find((i) => i.sku === "CUSTOM");
+  ok(none.ok && disc.ok && l0?.cost === 810 && l0.catalogCost === 900 && l0.projectDiscountPct === 10 && lc?.cost === 700 && !("catalogCost" in (lc ?? {})),
+    `${T}: planSave — the map is applied server-side (cost 900 → 810, catalogCost kept); a custom line is never discounted`);
+  const map = disc.ok ? (disc.patch.spec as { projectDiscounts?: Record<string, { by: string; at: number; pct: number; note: string }> }).projectDiscounts : undefined;
+  ok(!!map && Object.keys(map).join() === "ETC:CS15" && map["ETC:CS15"].by === "u1" && map["ETC:CS15"].at === 1234 && map["ETC:CS15"].note === "ETC reg pricing",
+    `${T}: planSave — sanitized (bad entries dropped) and re-stamped by the saver; a posted by / at is never trusted`);
+  ok(none.ok && !("projectDiscounts" in none.patch.spec!) && disc.ok && none.patch.value === disc.patch.value,
+    `${T}: planSave — no map stores no key; the customer's total is identical with and without the discount (${none.ok ? none.patch.value : ""})`);
+  const costOf = (p: typeof disc) => (p.ok ? p.patch.spec!.sections.flatMap((s) => s.items).filter((i) => !isBonusItem(i)).reduce((a, i) => a + i.qty * i.cost, 0) : 0);
+  const marginOf = (p: typeof disc) => (p.ok ? totals(p.patch.spec!.sections, 0).margin : 0);
+  ok(costOf(disc) === costOf(none) - 4 * 90 && marginOf(disc) > marginOf(none), `${T}: planSave — cost drops by exactly the discounted dollars and the margin rises (${marginOf(none).toFixed(4)} → ${marginOf(disc).toFixed(4)})`);
+  const prior = { quoteType: "system", status: "draft", source: "estimator", spec: { sections: [], mobs: [], projectDiscounts: map } } as unknown as Quote;
+  const keep = planSave(prior, payloadFor(mk()), { ...deps, userId: "u9", now: 9999 });
+  const kmap = keep.ok ? (keep.patch.spec as { projectDiscounts?: Record<string, { by: string; at: number }> }).projectDiscounts : undefined;
+  ok(keep.ok && kmap?.["ETC:CS15"]?.by === "u1" && kmap["ETC:CS15"].at === 1234 && (keep.patch.spec!.sections[0].items as Array<Record<string, unknown>>)[0].cost === 810,
+    `${T}: planSave — an older caller (no map) keeps the stored one, with its original by / at, and re-applies it`);
+  const cleared = planSave(prior, payloadFor(mk(), { projectDiscounts: {} }), deps);
+  ok(cleared.ok && !("projectDiscounts" in cleared.patch.spec!) && (cleared.patch.spec!.sections[0].items as Array<Record<string, unknown>>)[0].cost === 900 && !("catalogCost" in (cleared.patch.spec!.sections[0].items[0] as object)),
+    `${T}: planSave — an empty map removes the discount (normal cost back, no catalogCost)`);
+
+  // --- store-backed: props read it back, a sent revision freezes the stamped lines, Move / Copy carry it, the document never shows it ---
+  const cust: SeedCustomers = { companies: [{ id: "c1", name: "Acme Theatre" }], sites: [], contacts: [], contactEmails: [], contactPhones: [], geoCache: [] };
+  const team: SeedTeamUser[] = [{ id: "u1", name: "Ann Admin", roles: ["Admin"], status: "active" }];
+  const catalog = docs([{ id: "ETC:CS15", sku: "ETC:CS15", desc: "ColorSource 15 fixture", category: "Lighting", unit: "ea", cost: 900, list: 1250, mfr: "ETC", manufacturerModelNumber: "CS15" }]);
+  const store = await openStore({ quotes: [], catalog, fixtures: [], blobs: [], settings: [{ id: "main", data: { companyName: "Peak Systems Group" } } as { id: string }] }, { idb: null });
+  configurePorts({ store, customers: cust, rules: { settings: { companyName: "Peak Systems Group" }, blobs: {} }, team });
+  users.setCurrent("u1");
+  const repo = quoteRepo(store);
+  const A = estimatorActions(store);
+  const saved = await A.saveQuoteAction(null, payloadFor(mk(), { name: "Discounted", customerId: "c1", customer: "Acme Theatre", projectDiscounts: { "ETC:CS15": { pct: 10, note: "ETC reg pricing" } } as never }));
+  const id = saved.id!;
+  const q1 = (await repo.get(id))!;
+  const props = await buildEstimatorProps(store, id, new URLSearchParams());
+  const newProps = await buildEstimatorProps(store, null, new URLSearchParams("new=1"));
+  ok(saved.ok && (q1.spec as { projectDiscounts?: object }).projectDiscounts !== undefined && props.initial.projectDiscounts?.["ETC:CS15"]?.pct === 10 && props.initial.projectDiscounts["ETC:CS15"].by === "u1" && !newProps.initial.projectDiscounts,
+    `${T}: saveQuoteAction + props — stored in spec.projectDiscounts, passed to the Estimator re-validated; a new estimate has none`);
+  const sent = await repo.setStatus(id, "sent", "Ann Admin");
+  const frozen = (sent?.revisions?.at(-1)?.spec as { sections: SpecSection[]; projectDiscounts?: object } | null);
+  ok(frozen?.sections[0].items.find((i) => i.sku === "ETC:CS15")?.catalogCost === 900 && !!frozen.projectDiscounts, `${T}: a sent revision freezes the stamped lines and the map`);
+  // The customer document renders from customerLines (QuoteDocument itself imports a .jpg, so it can't load in Node): the rows are
+  // the same with and without the discount, and carry neither the stamp nor a cost.
+  const doc = await loadQuoteDocumentPropsLocal(store, id);
+  // (a row's `item` is the whole stored line, as for `cost`; the document prints desc, qty, unit and ext only.)
+  const shown = (sec: SpecSection) => JSON.stringify(customerLines(sec).map((r) => ({ desc: r.item?.desc, qty: r.item?.qty, unit: r.item?.unit, ext: r.ext })));
+  const rowsDisc = shown(doc!.sections[0]);
+  const rowsNone = shown(none.ok ? none.patch.spec!.sections[0] : doc!.sections[0]);
+  ok(!!doc && rowsDisc === rowsNone && !/catalogCost|projectDiscount|\b810\b|\b900\b/.test(rowsDisc) && doc.sections[0].items.some((i) => i.catalogCost === 900),
+    `${T}: the customer rows (desc / qty / unit / ext — all the document prints) are identical with and without the discount`);
+  const ctx = { customerId: "c1", locationId: null, customer: "Acme Theatre", contactName: "", tierMargin: 0.3 };
+  const sys = (n: string) => ({ id: n, name: n, kind: "lighting", mfr: "", freightPct: 0, items: [{ id: 1, sku: "ETC:CS15", desc: "CS15", qty: 2, unit: "ea", cost: 900, price: 1250 }] }) as never;
+  const mvNew = await A.moveSystemToEstimateAction(sys("m1"), { kind: "new" }, ctx, [], id, undefined);
+  const mvNewPosted = await A.moveSystemToEstimateAction(sys("m2"), { kind: "new" }, ctx, [], id, { "ETC:CS15": { pct: 20, note: "better" } });
+  const cpNew = await A.copySystemToEstimateAction(sys("c1x"), { kind: "new" }, ctx, [], id, undefined);
+  const cost = async (qid: string) => ((await repo.get(qid))!.spec as { sections: SpecSection[] }).sections[0].items[0].cost;
+  ok(mvNew.ok && (await cost(mvNew.targetId)) === 810 && !!((await repo.get(mvNew.targetId))!.spec as { projectDiscounts?: object }).projectDiscounts,
+    `${T}: Move → New estimate carries the stored source's entry for the system's SKUs (cost 810)`);
+  ok(mvNewPosted.ok && (await cost(mvNewPosted.targetId)) === 720 && ((await repo.get(mvNewPosted.targetId))!.spec as { projectDiscounts: Record<string, { by: string }> }).projectDiscounts["ETC:CS15"].by === "u1",
+    `${T}: Move → New with the builder's posted map re-stamps it like a save (cost 720)`);
+  ok(cpNew.ok && cpNew.kind === "new" && (await cost(cpNew.targetId)) === 810, `${T}: Copy → New estimate carries it too`);
+  const plain = await A.saveQuoteAction(null, payloadFor(mk(), { name: "Plain" }));
+  const mvExisting = await A.moveSystemToEstimateAction(sys("m3"), { kind: "existing", quoteId: plain.id! }, ctx, [], id, { "ETC:CS15": { pct: 30, note: "ignored" } });
+  const existingItems = ((await repo.get(plain.id!))!.spec as { sections: SpecSection[]; projectDiscounts?: object });
+  ok(mvExisting.ok && existingItems.sections.flatMap((s) => s.items).filter((i) => i.sku === "ETC:CS15").every((i) => i.cost === 900 && !("catalogCost" in i)) && !existingItems.projectDiscounts,
+    `${T}: Move into an existing estimate — the target's own map decides (it has none: normal cost, no key)`);
+  const mvDiscTarget = await A.moveSystemToEstimateAction(sys("m4"), { kind: "existing", quoteId: id }, ctx, [], null);
+  const tgt = (await repo.get(id))!.spec as { sections: SpecSection[]; projectDiscounts?: object };
+  ok(mvDiscTarget.ok && tgt.sections.flatMap((s) => s.items).filter((i) => i.sku === "ETC:CS15").every((i) => i.cost === 810) && !!tgt.projectDiscounts,
+    `${T}: Move into a discounted estimate — it applies and keeps its own map (spec rebuild carries projectDiscounts)`);
 }
 
 export async function handoffShellChecks(ok: Ok) {

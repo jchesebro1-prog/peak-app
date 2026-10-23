@@ -12814,6 +12814,8 @@ Spec `docs/superpowers/specs/2026-10-20-estimator-handoff-package-design.md`; pl
 
 **Update (Oct 22, D1273): re-ported after merging main through #365.** `origin/feat/estimating-core` brought Box goods sale (#362), the Review spreadsheet (#363), Show on BOM (#364) and model numbers (#365); 18 pinned originals changed, each port was re-read against its diff (box-sale flag in the quote model / save plan / props / send / package / loaders / Customer review, a real `bomModelPartsAction`, the slicer's `boxSale` and `bom*` fields, `--all-steps` walking a box sale through its own tabs) and re-stamped; `ui/live-views.tsx` is now pinned too. The Review spreadsheet runs in the browser (exceljs is bundled). `--drift` 40 ports / 96 originals clean.
 
+**Update (Oct 22, D1286): re-ported after merging main through #366 (project discounts).** Five ports re-read and re-stamped (`save-core`, `quote-model`, `estimator-actions`, `place-system`, `props/estimator`): the server-side re-apply on save / move / copy, the map carried to a new estimate, `initial.projectDiscounts`. No new server action; the won project's "Project pricing to request" is Projects-side and out of scope. `spec.projectDiscounts`, `catalogCost` and `projectDiscountPct` ride in the whole-`spec` slice (tests added); discounts lower cost and margin only, never sell. Open: whether the vendor project-pricing notes should be stripped from the founder's bundle.
+
 **Production run checklist** (repository root; `handoff/estimator/RUNBOOK.md` repeats it, with the time and Artifact notes — it is never shipped):
 
 ```bash

@@ -103,7 +103,7 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
     const prior = loadedId ? await repo.get(loadedId) : null;
     const tier = resolveTierFor(payload.customerId || null, payload.contactName || "");
     const { rewriteSpec } = await renameHelpers(store);
-    const plan = planSave(prior, payload, { bonusRates: bonusRatesNow(), tier: { tier: tier.tier, margin: tier.margin }, rewriteSpec });
+    const plan = planSave(prior, payload, { bonusRates: bonusRatesNow(), tier: { tier: tier.tier, margin: tier.margin }, rewriteSpec, userId: user.id, now: clock.now() });
     if (!plan.ok) {
       // A document or box-sale refusal writes nothing and returns no id (the client must not adopt it as saved);
       // a credit refusal keeps the loaded id, as the original does.
@@ -503,15 +503,15 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
     }));
   };
 
-  const moveSystemToEstimateAction: Impl<"moveSystemToEstimateAction"> = async (section, target, sourceContext, vendorQuotes = [], sourceQuoteId = null) => {
+  const moveSystemToEstimateAction: Impl<"moveSystemToEstimateAction"> = async (section, target, sourceContext, vendorQuotes = [], sourceQuoteId = null, projectDiscounts) => {
     await ready();
     const user = users.current();
     const [movedRaw] = withoutRewardCredit([withSanitizedKeyProducts({ ...sanitizeSystemSell(section), id: "sys" + clock.now() })]);
     const moved = withoutGroupMeta(withSanitizedOutputFields(movedRaw));
-    return placeSystemInEstimate(store, repo, moved, target, { newName: moved.name + " (moved)", sourceContext, vendorQuotes, owner: user.name, sourceQuoteId });
+    return placeSystemInEstimate(store, repo, moved, target, { newName: moved.name + " (moved)", sourceContext, vendorQuotes, owner: user.name, by: user.id, sourceQuoteId, projectDiscounts });
   };
 
-  const copySystemToEstimateAction: Impl<"copySystemToEstimateAction"> = async (sectionIn, target, sourceContext, vendorQuotes = [], sourceQuoteId = null) => {
+  const copySystemToEstimateAction: Impl<"copySystemToEstimateAction"> = async (sectionIn, target, sourceContext, vendorQuotes = [], sourceQuoteId = null, projectDiscounts) => {
     await ready();
     const user = users.current();
     const section = withSanitizedOutputFields(withSanitizedKeyProducts(sectionIn));
@@ -550,7 +550,7 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
       renames,
     });
     if (target.kind === "same") return { ok: true, kind: "same", section: copied.section, costsUpdated: copied.costsUpdated, tierRepriced: copied.tierRepriced };
-    const placed = await placeSystemInEstimate(store, repo, copied.section, target, { newName: section.name + " (copy)", sourceContext, vendorQuotes, owner: user.name, tier: stamp, sourceQuoteId });
+    const placed = await placeSystemInEstimate(store, repo, copied.section, target, { newName: section.name + " (copy)", sourceContext, vendorQuotes, owner: user.name, by: user.id, tier: stamp, sourceQuoteId, projectDiscounts });
     if (!placed.ok) return placed;
     return {
       ok: true,

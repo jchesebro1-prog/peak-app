@@ -26,6 +26,7 @@ import { quoteSentOnce } from "@/lib/quote-people-lock";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { sourceForSave } from "@/lib/portal-quote-mode";
 import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
+import { sanitizeProjectDiscounts } from "@/lib/project-discounts/rules";
 import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import { quoteNextStep, type QuoteNextStepView } from "@/lib/quote-next-step";
@@ -58,7 +59,7 @@ type QuoteDoc = Omit<Partial<Quote>, "spec"> & {
   quoteNote?: string;
   assumptions?: string;
   paymentTerms?: PaymentTerms;
-  spec?: { sections?: unknown; mobs?: unknown; groups?: unknown; document?: unknown } | null;
+  spec?: { sections?: unknown; mobs?: unknown; groups?: unknown; document?: unknown; projectDiscounts?: unknown } | null;
 };
 
 const rvNone = (): QuoteReview => ({ state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "" });
@@ -134,6 +135,8 @@ function initialFrom(q: QuoteDoc | null, customers: CustomerLite[], userName: st
     sections,
     groups,
     document: sanitizePackageDoc(spec?.document),
+    // #366: the project discounts, re-validated on read ({} when none).
+    projectDiscounts: sanitizeProjectDiscounts(spec?.projectDiscounts),
     vendorQuotes: vendorQuotesOf(q),
     replaces: "",
     pdfOptions: normalizePdfOptions(q.pdfOptions),

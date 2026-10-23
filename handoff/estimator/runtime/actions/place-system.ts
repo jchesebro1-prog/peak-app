@@ -20,6 +20,7 @@ import { normalizePackageSelection, type PackageSelection } from "@/lib/estimate
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { allAssembliesFrom, fixtureSkus, type FixtureRecord } from "@/lib/fixture-assemblies";
 import { rewriteQuoteSpec } from "@/lib/catalog-rename/rewrite";
+import { applyProjectDiscounts, discountsForSections, mergeDiscountsForSave, sanitizeProjectDiscounts, type ProjectDiscounts } from "@/lib/project-discounts/rules";
 import { boxSaleOf, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
 import { refresh } from "../router";
 import type { HandoffStore } from "../store";
@@ -103,7 +104,7 @@ export async function placeSystemInEstimate(
   repo: QuoteRepo,
   placed: SpecSection,
   target: Original.MoveSystemTarget,
-  opts: { newName: string; sourceContext: SourceContext; vendorQuotes: VendorQuote[]; owner: string; tier?: { pricingTier: string; tierMargin: number }; sourceQuoteId?: string | null },
+  opts: { newName: string; sourceContext: SourceContext; vendorQuotes: VendorQuote[]; owner: string; tier?: { pricingTier: string; tierMargin: number }; sourceQuoteId?: string | null; /** the acting user's id (#366 stamps `by`) */ by?: string; /** #366 — the source's project discounts as posted (undefined = the stored source's); only a NEW target reads them */ projectDiscounts?: unknown },
 ): Promise<{ ok: true; targetId: string; targetName: string; targetNumber: string } | { ok: false; error: string }> {
   const placedIds = vendorIdsInSections([placed]);
   const rates = bonusRatesNow();
@@ -120,16 +121,18 @@ export async function placeSystemInEstimate(
       if (problem) return { ok: false, error: problem };
     }
     const placedVq = carry(existing.vendorQuotes);
-    const existingSpec = existing.spec as { sections?: SpecSection[]; mobs?: SpecMob[]; groups?: SystemGroup[]; document?: unknown } | null | undefined;
+    const existingSpec = existing.spec as { sections?: SpecSection[]; mobs?: SpecMob[]; groups?: SystemGroup[]; document?: unknown; projectDiscounts?: unknown } | null | undefined;
+    // #366: the TARGET's own project discounts decide — a part it has no discount for goes back to its normal cost.
+    const targetDiscounts = sanitizeProjectDiscounts(existingSpec?.projectDiscounts);
     const existingDoc = sanitizePackageDoc(existingSpec?.document);
     const existingGroups = sanitizeGroups(existingSpec?.groups);
     const incoming = reIdIncomingSection(stripBonusLines(withoutGroupMeta(placed)), existingSpec?.sections || [], docIdFloor(existingDoc));
     const appendedRaw = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([incoming])], existingGroups);
-    const appended = canonicalBonusSections({ source: existing.source, quoteType: existing.quoteType, status: existing.status }, appendedRaw, rates);
+    const appended = canonicalBonusSections({ source: existing.source, quoteType: existing.quoteType, status: existing.status }, applyProjectDiscounts(appendedRaw, targetDiscounts), rates);
     const mergedSections = withRewardCredit(appended, rewardCreditOf(appended), maxItemId(appended) + 1);
     const t = totals(mergedSections, 0);
     const updated = await repo.update(target.quoteId, {
-      spec: { sections: normalizeSystemOrder(mergedSections, existingGroups), mobs: existingSpec?.mobs || [], groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}) },
+      spec: { sections: normalizeSystemOrder(mergedSections, existingGroups), mobs: existingSpec?.mobs || [], groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}), ...(Object.keys(targetDiscounts).length ? { projectDiscounts: targetDiscounts } : {}) },
       value: t.grand,
       margin: t.margin,
       ...(placedVq.length ? { vendorQuotes: [...vendorQuoteRows(existing.vendorQuotes).filter((vq) => !placedIds.has(vq.id)), ...placedVq] } : {}),
@@ -143,7 +146,13 @@ export async function placeSystemInEstimate(
   const sourceId = typeof opts.sourceQuoteId === "string" && opts.sourceQuoteId ? opts.sourceQuoteId : null;
   const sourceQuote = sourceId ? await repo.get(sourceId) : null;
   const newSections = canonicalBonusSections({ source: "estimator", status: "draft" }, withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))]), rates);
-  const t = totals(newSections, 0);
+  // #366: a NEW estimate carries the source's discount entries for the SKUs this system contains (the builder's map, re-stamped
+  // like a save against the stored source's; the stored map alone when none was posted), applied after the bonus lines.
+  const storedSourceDiscounts = sanitizeProjectDiscounts((sourceQuote?.spec as { projectDiscounts?: unknown } | null | undefined)?.projectDiscounts);
+  const sourceDiscounts: ProjectDiscounts = opts.projectDiscounts !== undefined ? mergeDiscountsForSave(storedSourceDiscounts, opts.projectDiscounts, opts.by ?? "", clock.now()) : storedSourceDiscounts;
+  const carriedDiscounts = discountsForSections(newSections, sourceDiscounts);
+  const newSpecSections = applyProjectDiscounts(newSections, carriedDiscounts);
+  const t = totals(newSpecSections, 0);
   let created: Quote;
   try {
     created = await repo.create({
@@ -153,7 +162,7 @@ export async function placeSystemInEstimate(
       locationId: opts.sourceContext.locationId,
       source: "estimator",
       status: "draft",
-      spec: { sections: newSections, mobs: [] },
+      spec: { sections: newSpecSections, mobs: [], ...(Object.keys(carriedDiscounts).length ? { projectDiscounts: carriedDiscounts } : {}) },
       value: t.grand,
       margin: t.margin,
       owner: opts.owner,

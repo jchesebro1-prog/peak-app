@@ -21,6 +21,7 @@ import { quoteRewardCredit, rewardCreditOf, sanitizeRewardCredit, withRewardCred
 import { normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { keepLiveVendorCompanies, stampVendorQuotes, vendorCompanyIdsOf } from "@/lib/vendor-quotes/rules";
 import { ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
+import { applyProjectDiscounts, mergeDiscountsForSave, sanitizeProjectDiscounts, type ProjectDiscounts } from "@/lib/project-discounts/rules";
 import { boxSaleForSave, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
 import { maxItemId } from "./util";
 
@@ -30,7 +31,7 @@ export type QuotePatch = Partial<Quote> & {
   quoteNote?: string;
   assumptions?: string;
   paymentTerms?: SavePayload["paymentTerms"];
-  spec?: { sections: SpecSection[]; mobs: SpecMob[]; groups?: SystemGroup[]; document?: PackageDoc };
+  spec?: { sections: SpecSection[]; mobs: SpecMob[]; groups?: SystemGroup[]; document?: PackageDoc; projectDiscounts?: ProjectDiscounts };
   vendorQuotes?: VendorQuote[];
 };
 
@@ -196,7 +197,7 @@ export type SavePlan =
 export function planSave(
   prior: Quote | null,
   payload: SavePayload,
-  deps: { bonusRates: BonusRates; tier: { tier: string; margin: number }; rewriteSpec: <T>(spec: T) => T },
+  deps: { bonusRates: BonusRates; tier: { tier: string; margin: number }; rewriteSpec: <T>(spec: T) => T; /** the saver's user id and the clock (#366 stamps `by` / `at`) */ userId?: string; now?: number },
 ): SavePlan {
   const savedSource = sourceForSave(prior?.source, "estimator");
   const docSave = packageDocForSave(payload.document, (prior?.spec as { document?: unknown } | null | undefined)?.document);
@@ -209,7 +210,12 @@ export function planSave(
   const isPortalCatalog = savedSource === "portal-catalog";
   const raw = Array.isArray(payload.sections) ? payload.sections.map(sanitizeSystemSell).map(withSanitizedKeyProducts).map(withSanitizedOutputFields) : payload.sections;
   const groups = sanitizeGroups(payload.groups ?? (prior?.spec as { groups?: unknown } | null | undefined)?.groups);
-  const normalized = Array.isArray(raw) ? normalizeSystemOrder(raw.map(sanitizeSectionGroupMeta), groups) : raw;
+  const normalizedRaw = Array.isArray(raw) ? normalizeSystemOrder(raw.map(sanitizeSectionGroupMeta), groups) : raw;
+  // #366: the project discounts are sanitized and stamped here (an unchanged entry keeps who set it and when; a posted by / at
+  // is never trusted), then RE-APPLIED to every line and assembly part before the bonus lines (which read normal cost).
+  const priorDiscounts = sanitizeProjectDiscounts((prior?.spec as { projectDiscounts?: unknown } | null | undefined)?.projectDiscounts);
+  const discounts = mergeDiscountsForSave(priorDiscounts, payload.projectDiscounts !== undefined ? payload.projectDiscounts : priorDiscounts, deps.userId ?? "", deps.now ?? Date.now());
+  const normalized = Array.isArray(normalizedRaw) ? applyProjectDiscounts(normalizedRaw, discounts) : normalizedRaw;
   const withBonus = Array.isArray(normalized)
     ? canonicalBonusSections({ source: savedSource, quoteType: prior?.quoteType, status: prior ? prior.status : "draft" }, normalized, deps.bonusRates)
     : normalized;
@@ -234,7 +240,7 @@ export function planSave(
     pricingTier: deps.tier.tier,
     tierMargin: deps.tier.margin,
     source: savedSource,
-    spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}) },
+    spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}), ...(Object.keys(discounts).length ? { projectDiscounts: discounts } : {}) },
     pdfOptions: normalizePdfOptions(payload.pdfOptions),
     // Box goods sale: create keeps it via buildQuote, update() stores only true.
     boxSale,

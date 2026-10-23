@@ -105,6 +105,16 @@ A new system starts at the freight rule's base percent until a venue is picked. 
 Systems still on the automatic freight (`freightAuto`) follow a venue change. A freight percent typed
 by hand is never rewritten (`PeakEstimatingCore.applyAutoFreight`).
 
+### Project discounts lower cost, never sell
+
+A line's `cost` can carry a vendor's project discount (`data-model.md` → *Project discounts*). The line keeps
+its normal cost as `catalogCost` (`normalCostOf(line)` is `catalogCost`, else `cost`), and the customer's price is
+figured on **that**: the freight base (`PeakEstimatingCore.systemFreightBase`), the 5 % package bonus's cost
+basis, and the tier seed (so a discounted line still counts as at its tier price and re-prices on a tier change
+exactly as an undiscounted one) all read the normal cost. `price`, an edited sell, a typed system sell and the $25
+rounding are never touched. So a discount changes cost and margin only: sell, freight, both bonus lines and the
+grand total are identical with and without it, and the saving shows as margin. The customer rows are identical.
+
 ## 4. The estimate — `totals()`
 
 `PeakEstimatingCore.totals(sections, taxRatePct)` returns `mat`, `lab`, `fr`, `opt`, `rev`, `cost`, `tax`,
