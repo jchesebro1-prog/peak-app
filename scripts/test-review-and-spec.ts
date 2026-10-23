@@ -11371,7 +11371,7 @@ import { partyChecks, partyDbChecks } from "./test-parties";
 import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, portalBidPureChecks, portalBidDbChecks, bidReportPureChecks, bidReportWidgetChecks, bidReportDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
 import { lineMoveChecks } from "./test-estimate-line-move";
 import { boxSaleDbChecks, boxSalePureChecks } from "./test-box-sale";
-import { markupPureChecks, markupDbChecks } from "./test-markup";
+import { markupPureChecks, markupDbChecks, markupParityChecks } from "./test-markup";
 import { vendorChecks, vendorDbChecks, vendorPdfDbChecks, vendorPdfPureChecks, vendorPdfFillChecks } from "./test-vendors";
 import { oct15PureChecks, oct15DbChecks, discardConfirmChecks } from "./test-oct15-estimating";
 import { photoWrapPureChecks, photoWrapDbChecks } from "./test-photo-wrap";
@@ -11794,7 +11794,7 @@ seeded()
   .then(() => settingsRaceFollowupChecks(ok))
   .then(() => lineMoveChecks(ok))
   .then(() => boxSalePureChecks(ok)).then(() => boxSaleDbChecks(ok))
-  .then(() => markupPureChecks(ok)).then(() => markupDbChecks(ok))
+  .then(() => markupPureChecks(ok)).then(() => markupDbChecks(ok)).then(() => markupParityChecks(ok))
   .then(() => reviewSheet363Checks(ok))
   .then(() => bomModels365DbChecks(ok))
   .finally(() => teardownFixtures())

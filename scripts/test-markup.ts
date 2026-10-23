@@ -15,6 +15,10 @@ import { curtainPrice } from "../src/lib/design/curtain-pricing";
 import { unitPriceFor } from "../src/lib/portal-price-rules";
 import { convertProjectDoc, convertQuoteDoc, hydrateDoc } from "../src/lib/markup/doc-basis";
 import { markupSettingsPatch, withoutBasisKeys } from "../src/lib/markup/settings";
+import baseline from "../docs/markup/parity-baseline.json";
+import {
+  CASE_COSTS, CASE_MARGINS, CURTAIN_CASES, FLAME_CASES, INSPECTION_CASES, LABOR_DRAFT, LABOR_DRAFT_22, REPAIR_CASES, SECTIONS, laborRate,
+} from "./markup-parity-cases";
 
 const near = (a: number | null | undefined, b: number, eps = 1e-9) => a != null && Math.abs(a - b) <= eps;
 
@@ -161,8 +165,154 @@ export async function markupDbChecks(ok: Ok) {
   await db.delete(t).where(inArray(t.id, [id, flameId, fresh.id]));
 }
 
+/* ---- Price parity (#367 Task 8): every margin-era output in docs/markup/parity-baseline.json, reproduced by the
+   markup engines with each margin input converted by marginToMarkup. Same dollars to the cent, with ONE exception
+   (see tieOk): a 1-unit drift where the margin-era unrounded value sat on an exact half. ---- */
+type Path = Array<string | number>;
+type Raw = { raw: number; unit: number } | null;
+type Diff = { group: string; path: Path; got: unknown; want: unknown };
+
+/** Leaf-wise comparison of what the engine returned against the baseline (only the baseline's keys are checked). */
+function walkDiffs(group: string, got: unknown, want: unknown, path: Path, out: Diff[]) {
+  if (want && typeof want === "object") {
+    const g = (got && typeof got === "object" ? got : {}) as Record<string, unknown>;
+    for (const k of Object.keys(want as object)) walkDiffs(group, g[k], (want as Record<string, unknown>)[k], [...path, Array.isArray(want) ? Number(k) : k], out);
+    return;
+  }
+  if (typeof want === "number" && typeof got === "number") { if (Math.abs(got - want) > 1e-6) out.push({ group, path, got, want }); return; }
+  if (got !== want) out.push({ group, path, got, want });
+}
+
+/** A drift is a tie only if it is exactly one `unit` and the margin-era unrounded value sat within 1e-6 of a half unit. */
+function tieOk(d: Diff, r: Raw): boolean {
+  if (!r || typeof d.got !== "number" || typeof d.want !== "number") return false;
+  if (Math.abs(Math.abs(d.got - d.want) - r.unit) > 1e-9) return false;
+  const half = (Math.floor(r.raw / r.unit) + 0.5) * r.unit;
+  return Math.abs(r.raw - half) <= 1e-6;
+}
+
+export async function markupParityChecks(ok: Ok) {
+  const B = baseline.cases as unknown as Record<string, unknown>;
+  const { catalogAddPrice, customPartSell, repriceForTier } = await import("../src/app/(app)/estimator/tier-reprice");
+  const { repriceAtMarkup, computeLabor, buildLaborItems, totals, systemMarkup } = await import("../src/app/(app)/estimator/pricing");
+  const { compute: flame } = await import("../src/lib/flametest-engine");
+  const { computeEstimate: repair } = await import("../src/lib/repair-engine");
+  const { computeEstimate: inspection } = await import("../src/lib/inspection-engine");
+  const { curtainCost, fabricSellPerSqft } = await import("../src/lib/curtain-pricing");
+  const { travelLineAmount } = await import("../src/lib/travel-plan");
+  const { printedLift, travelLineShare } = await import("../src/lib/service-pricing");
+  const mk = marginToMarkup;
+  ok(tieOk({ group: "t", path: [], got: 133.71, want: 133.7 }, { raw: 133.705, unit: 0.01 }) && !tieOk({ group: "t", path: [], got: 133.71, want: 133.7 }, { raw: 133.7123, unit: 0.01 })
+    && !tieOk({ group: "t", path: [], got: 133.72, want: 133.7 }, { raw: 133.705, unit: 0.01 }), "markup parity: the tie rule allows only an exact one-cent drift at an exact half");
+  const diffs: Diff[] = [];
+  const ties: string[] = [];
+  const drift: string[] = [];
+  const nAllowed = { n: 0 };
+  /** Compare a group; `rawFor` names the margin-era unrounded value behind a drifting leaf (tie rule). */
+  const same = (group: string, got: unknown, want: unknown, rawFor?: (path: Path) => { raw: Raw; why: string } | null) => {
+    const out: Diff[] = [];
+    walkDiffs(group, got, want, [], out);
+    for (const d of out) {
+      const r = rawFor ? rawFor(d.path) : null;
+      const name = `${group}${d.path.map((p) => `[${p}]`).join("")}`;
+      if (r && tieOk(d, r.raw)) { ties.push(`${name}: ${r.why} → ${d.want} became ${d.got} (unrounded ${r.raw!.raw})`); nAllowed.n++; continue; }
+      diffs.push(d);
+      drift.push(`${name}: got ${JSON.stringify(d.got)} want ${JSON.stringify(d.want)}`);
+    }
+  };
+  const near1 = (name: string, got: number, want: number) => { if (Math.abs(got - want) > 1e-9) drift.push(`${name}: ${got} vs ${want}`); };
+
+  // ---- the cost × margin grid (7 costs × 8 margins) ----
+  const grid = (f: (c: number, k: number) => unknown) => CASE_COSTS.map((c) => CASE_MARGINS.map((m) => f(c, mk(m))));
+  const gridRaw = (scale: number, unit: number) => (p: Path) => {
+    const c = CASE_COSTS[Number(p[0])], m = CASE_MARGINS[Number(p[1])];
+    return c == null || m == null ? null : { raw: { raw: (c * scale) / (1 - m), unit }, why: `cost ${c}${scale === 1 ? "" : ` ×${scale}`} at margin ${m}` };
+  };
+  same("catalogAddPrice", grid((c, k) => catalogAddPrice(c, 0, k)), B.catalogAddPrice, gridRaw(1, 0.01));
+  // customPartSell is not asserted: it now prices at the fixed 43 % default (153.85 → 154 at $100), listed below as an expected move.
+  same("repriceAt", grid((c, k) => repriceAtMarkup(c, k).price), B.repriceAt, gridRaw(1, 0.01));
+  same("sellFromCost", grid((c, k) => sellFromCost(c, k)), B.sellFromCost, gridRaw(1, 0.01));
+  same("portalUnit", grid((c, k) => unitPriceFor({ cost: c, list: 0 }, { markup: k, staleCostMonths: 0, now: 0 }).unitPrice), B.portalUnit, gridRaw(1, 0.01));
+  same("curtainPrice", grid((c, k) => curtainPrice(c, k)), B.curtainPrice, gridRaw(1, 0.01));
+  same("travelLine", grid((c, k) => travelLineAmount(c * 10, k)), B.travelLine, gridRaw(10, 1));
+  same("travelShareLegacy", grid((c, k) => travelLineShare({ flightTotal: c * 10, total: c * 30, margin: k })), B.travelShareLegacy, gridRaw(10, 1));
+  same("printedLift", CASE_MARGINS.map((m) => printedLift({ lift: { count: 2, rate: 450 } }, mk(m))), B.printedLift, (p) => {
+    const m = CASE_MARGINS[Number(p[0])]; return m == null ? null : { raw: { raw: 900 / (1 - m), unit: 1 }, why: `lift 2 × 450 at margin ${m}` };
+  });
+  const curtainGot = CURTAIN_CASES.map((k) => ({ id: k.id, cost: curtainCost(k.spec as never, k.rates, mk(k.margin)), perSqft: fabricSellPerSqft(k.rates, mk(k.margin)) }));
+  same("curtains", curtainGot, B.curtains, (p) => {
+    const i = Number(p[0]); const k = CURTAIN_CASES[i]; const want = (B.curtains as Array<{ cost: { costEach: number } }>)[i];
+    return p[1] === "cost" && p[2] === "priceEach" && k && want ? { raw: { raw: want.cost.costEach / (1 - k.margin), unit: 0.01 }, why: `${k.id}, cost each ${want.cost.costEach} at margin ${k.margin}` } : null;
+  });
+
+  // ---- the three service engines ----
+  const svcRates = (r: Record<string, number>) => ({ ...r, margin: mk(r.margin), ...(r.partsMargin != null ? { partsMargin: mk(r.partsMargin) } : {}) });
+  const pick = (r: Record<string, unknown>) => ({
+    totalRaw: r.totalRaw, autoTotal: r.autoTotal, total: r.total, cost: r.cost, marginAmount: r.marginAmount, partsSell: r.partsSell, liftSell: r.liftSell, liftLine: r.liftLine,
+    baseApplied: r.baseApplied, minApplied: r.minApplied, calloutApplied: r.calloutApplied,
+  });
+  type Case = { id: string; opts: unknown; rates: Record<string, number> };
+  const engines: Array<[string, Case[], (o: never, r: never) => unknown, string]> = [
+    ["flame", FLAME_CASES as Case[], flame as never, "flame"],
+    ["repair", REPAIR_CASES as Case[], repair as never, "repair"],
+    ["inspection", INSPECTION_CASES as Case[], inspection as never, "inspection"],
+  ];
+  for (const [grp, cases, run] of engines) {
+    const want = B[grp] as Array<Record<string, unknown> & { id: string; effectiveMargin: number; serviceMargin?: number; totalRaw: number }>;
+    ok(want.length === cases.length, `markup parity: ${grp} baseline has one row per case`);
+    const results = cases.map((k) => run(k.opts as never, svcRates(k.rates) as never) as Record<string, unknown>);
+    same(grp, results.map((r, i) => ({ id: cases[i].id, ...pick(r) })), want.map(({ effectiveMargin: _e, serviceMargin: _s, ...rest }) => rest), (p) => {
+      // The only unrounded dollar value behind a drifting cent is the baseline's own totalRaw; the engine cases' cents are
+      // derived from it. A tie needs a raw that sits on a half cent — none of the baseline rows do, so this stays strict.
+      const w = want[Number(p[0])]; return w ? { raw: { raw: w.totalRaw, unit: 0.01 }, why: `${w.id} ${String(p[1])}` } : null;
+    });
+    want.forEach((b, i) => {
+      near1(`${grp}[${b.id}] effectiveMarkup`, (results[i].effectiveMarkup as number), mk(b.effectiveMargin));
+      if (b.serviceMargin != null) near1(`${grp}[${b.id}] serviceMarkup`, (results[i].serviceMarkup as number), mk(b.serviceMargin));
+    });
+  }
+
+  // ---- Estimator labor, totals, system markup, tier re-price ----
+  const laborGot = (draft: Record<string, unknown>, pct: number) => {
+    const l = computeLabor({ ...draft, margin: String(mk(pct) * 100) } as never, laborRate);
+    let n = 100;
+    return { totalPrice: l.totalPrice, items: buildLaborItems(l, "Rigging", () => n++).map((it) => ({ cost: it.cost, price: it.price })) };
+  };
+  const laborRaw = (pct: number, want: unknown) => (p: Path) => {
+    const it = p[0] === "items" ? (want as { items: Array<{ cost: number }> }).items[Number(p[1])] : null;
+    return it && p[2] === "price" ? { raw: { raw: it.cost / (1 - pct), unit: 0.01 }, why: `labor item cost ${it.cost} at margin ${pct}` } : null;
+  };
+  same("labor", laborGot(LABOR_DRAFT, 0.3), B.labor, laborRaw(0.3, B.labor));
+  same("labor22", laborGot(LABOR_DRAFT_22, 0.22), B.labor22, laborRaw(0.22, B.labor22));
+  const secs = SECTIONS as never;
+  const t = totals(secs, 0) as unknown as Record<string, number>;
+  const bt = B.totals as Record<string, number>;
+  same("totals$", { mat: t.mat, lab: t.lab, fr: t.fr, rev: t.rev, cost: t.cost, grand: t.grand }, { mat: bt.mat, lab: bt.lab, fr: bt.fr, rev: bt.rev, cost: bt.cost, grand: bt.grand });
+  near1("totals markup", t.markup, mk(bt.margin));
+  (B.systemMargin as number[]).forEach((m, i) => near1(`systemMarkup[${i}]`, systemMarkup((SECTIONS as never[])[i]), mk(m)));
+  same("tierReprice", repriceForTier(secs, mk(0.3), mk(0.2)).sections.map((s: { items: Array<{ price: number }> }) => s.items.map((it) => it.price)), B.tierReprice, (p) => {
+    const it = SECTIONS[Number(p[0])]?.items[Number(p[1])]; return it ? { raw: { raw: it.cost / (1 - 0.2), unit: 0.01 }, why: `tier re-price of cost ${it.cost} to margin 0.2` } : null;
+  });
+
+  ok(drift.length === 0, `markup parity: every margin-era price reproduces to the cent under markup${drift.length ? " — " + drift.slice(0, 8).join(" | ") : ""}`);
+  if (drift.length > 8) console.log("markup parity — ALL drifts:\n  " + drift.join("\n  "));
+
+  // The knob shows the markup as a whole-percent string; reading it back must give the exact same float.
+  const knobBad = [0.43, 0.37, 0.28, 0.25, 0.18, 0.11, 0.05, 0.3 / 0.7, 0.27 / 0.73, 0.22 / 0.78].filter((k) => Number(String(knobPctFrom(k))) / 100 !== k);
+  ok(knobBad.length === 0, `markup parity: knobPctFrom round-trips through its string${knobBad.length ? " — fails for " + knobBad.join(", ") : ""}`);
+
+  // Expected, listed (never asserted equal): what new pricing does at the ROUNDED settings, and each allowed half-cent tie.
+  const listed = [
+    `Base $1,000 cost: ${Math.round((1000 / 0.7) * 100) / 100} → ${catalogAddPrice(1000, 0, 0.43)}`,
+    `Custom part $100: 153.85 → ${customPartSell(100)}`,
+    ...ties.map((x) => `float tie (exactly one cent/dollar off, margin-era value on an exact half): ${x}`),
+  ];
+  console.log("markup parity — expected rounding moves:\n  " + listed.join("\n  "));
+  console.log(`markup parity — ${diffs.length} drift(s), ${nAllowed.n} allowed tie(s)`);
+}
+
 if (require.main === module) {
   let fails = 0;
   const ok: Ok = (c, m) => { if (!c) { fails++; console.log("FAIL", m); } };
-  markupPureChecks(ok).then(() => { console.log(fails ? `${fails} FAIL` : "markup pure: ALL PASSED"); process.exit(fails ? 1 : 0); });
+  markupPureChecks(ok).then(() => markupParityChecks(ok)).then(() => { console.log(fails ? `${fails} FAIL` : "markup pure: ALL PASSED"); process.exit(fails ? 1 : 0); });
 }
