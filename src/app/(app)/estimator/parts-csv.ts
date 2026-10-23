@@ -1,8 +1,8 @@
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { lineModel, partModel } from "@/lib/catalog-rename/sku";
-import { lineExtSellOf, systemItemsRev, systemSellTotal } from "./pricing";
+import { hasSellOverride, isSystemLine, lineExtSellOf, systemFreight, systemItemsRev, systemSellAdjustment, systemSellTotal } from "./pricing";
 import type { SpecItem, SpecSection, VendorQuote } from "./types";
-import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { isBonusItem, isEstimatorBonusItem, isPackageBonusItem } from "@/lib/estimate-bonus/flags";
 import { isPlaceholderSku } from "@/lib/specs/record-keys";
 
 /** The Estimator's "Parts list (CSV)" export for the project manager (#262) —
@@ -15,6 +15,10 @@ import { isPlaceholderSku } from "@/lib/specs/record-keys";
  *  no row of its own but is carried in the parts' sell.
  *  v2 (2026-10-20 spec): every row also says where its price came from and
  *  carries its line margin (before freight) beside the effective margin.
+ *  #363: the menu now downloads the Review spreadsheet (review-sheet-xlsx.ts)
+ *  built from `reviewSheetModel` below — the same rows, plus each row's Link
+ *  and its section id, grouped per system with that system's fees. The CSV
+ *  helpers (`partsListCsvRows`, `PARTS_CSV_HEADER`) stay for the row tests.
  *  Pure: no React, no server imports. */
 
 /** Catalog facts for one SKU, keyed by the trimmed SKU (#262). */
@@ -24,7 +28,8 @@ export type PartInfo = { mfr?: string; manufacturerPartNumber?: string; manufact
  *  `lineSell` stay unrounded; `sku` and `unit` are kept for merging + the
  *  unit note, never printed as their own columns. `lineSell` is the unit
  *  sell before the system's freight / rounding / typed-sell factor; `source`
- *  is the Price source label (v2). */
+ *  is the Price source label (v2). `link` is the line's own product page
+ *  (http/https only, else "") and `sectionId` the system it came from (#363). */
 export type PartsListRow = {
   manufacturer: string;
   modelNumber: string;
@@ -40,6 +45,8 @@ export type PartsListRow = {
   source: string;
   partOf: string[];
   notes: string[];
+  link: string;
+  sectionId: string;
 };
 
 export const PARTS_CSV_HEADER: string[] = [
@@ -61,6 +68,25 @@ export const PARTS_CSV_HEADER: string[] = [
 const ADJUSTMENT = "Adjustment";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Longest link the Review spreadsheet writes (#363) — Excel refuses a file
+ *  whose hyperlink runs past 2,079 characters, so a longer one is dropped. */
+const LINK_MAX = 2000;
+
+/** A line's link as the Review spreadsheet may print it (#363): trimmed, an
+ *  absolute http(s) URL only — anything else (javascript:, mailto:, a bare
+ *  path, junk) is "". */
+export function reviewLink(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const s = raw.trim();
+  if (!s || s.length > LINK_MAX || !/^https?:\/\//i.test(s)) return "";
+  try {
+    const u = new URL(s);
+    return u.protocol === "http:" || u.protocol === "https:" ? s : "";
+  } catch {
+    return "";
+  }
+}
 
 function infoOf(info: Record<string, PartInfo>, sku: string): PartInfo | undefined {
   return sku && Object.prototype.hasOwnProperty.call(info, sku) ? info[sku] : undefined;
@@ -115,6 +141,7 @@ function expand(
     if (section.alternate) continue;
     const room = section.room?.trim() || defaultRoom.trim();
     const system = section.name;
+    const sectionId = section.id;
     // #279: every part's sell scales by the system's price (freight included) ÷ its lines' sell.
     // The bonus lines are internal and never listed; leaving their sell out of
     // `rev` makes k spread it pro rata over the other lines, the same way k
@@ -136,6 +163,8 @@ function expand(
       const vqLabel = vq ? `${vq.vendor}${vq.quoteNumber ? " #" + vq.quoteNumber : ""}` : "";
       const vqName = `Vendor quote ${vqLabel}`;
       const vqSource = `Vendor quote — ${vqLabel}`;
+      // #363: a row links the line's own page — for a vendor quote, else the vendor quote's.
+      const link = reviewLink(item.link) || (vq ? reviewLink(vq.link) : "");
       if (vq && vq.lines.length > 0) {
         let linesTotal = 0;
         for (const line of vq.lines) if (line.qty > 0) linesTotal += line.amount;
@@ -157,6 +186,8 @@ function expand(
             source: vqSource,
             partOf: [vqName],
             notes: [...notes],
+            link,
+            sectionId,
           });
         }
         // A typed vendor total (totalSource "manual") can differ from its
@@ -178,6 +209,8 @@ function expand(
             source: ADJUSTMENT,
             partOf: [vqName],
             notes: [],
+            link,
+            sectionId,
           });
         }
         continue;
@@ -213,6 +246,9 @@ function expand(
             source: "Catalog",
             partOf: [assemblyName],
             notes: [...notes],
+            // #363: components are catalog parts — the assembly line's link isn't theirs.
+            link: "",
+            sectionId,
           });
         }
         if (Math.abs(item.cost - partsCost) > 0.005) {
@@ -231,6 +267,8 @@ function expand(
             source: ADJUSTMENT,
             partOf: [assemblyName],
             notes: [],
+            link: "",
+            sectionId,
           });
         }
         continue;
@@ -253,6 +291,8 @@ function expand(
         source: vq ? vqSource : plainSource(item, !!p),
         partOf: [],
         notes,
+        link,
+        sectionId,
       });
     }
     // k scales the exported Unit Sell only; lineSell keeps the line as priced.
@@ -275,7 +315,9 @@ export function partsListSkus(sections: SpecSection[]): string[] {
  *  system merged, first-appearance order. v2: the price source is part of
  *  the key, so a catalog part and the same part typed in as custom stay
  *  apart. Merged rows share system, unit cost and unit sell, so their
- *  lineSell agrees; the first row's is kept. */
+ *  lineSell agrees; the first row's is kept. #363: the section id and the
+ *  link are in the key too — two systems that share a name never merge, nor
+ *  do two lines that link different pages. */
 export function partsListRows(
   sections: SpecSection[],
   vendorQuotes: VendorQuote[],
@@ -285,8 +327,8 @@ export function partsListRows(
   const rows = new Map<string, PartsListRow>();
   for (const e of expand(sections, vendorQuotes, info, defaultRoom)) {
     const key = e.sku || e.modelNumber
-      ? `p|${e.room}|${e.system}|${e.manufacturer}|${e.modelNumber}|${e.sku}|${e.unit}|${round2(e.unitCost)}|${round2(e.unitSell)}|${e.source}`
-      : `d|${e.room}|${e.system}|${e.desc}|${e.unit}|${round2(e.unitCost)}|${round2(e.unitSell)}|${e.source}`;
+      ? `p|${e.sectionId}|${e.room}|${e.system}|${e.manufacturer}|${e.modelNumber}|${e.sku}|${e.unit}|${round2(e.unitCost)}|${round2(e.unitSell)}|${e.source}|${e.link}`
+      : `d|${e.sectionId}|${e.room}|${e.system}|${e.desc}|${e.unit}|${round2(e.unitCost)}|${round2(e.unitSell)}|${e.source}|${e.link}`;
     const row = rows.get(key);
     if (row) {
       row.qty += e.qty;
@@ -313,14 +355,10 @@ function marginPct(sell: number, cost: number): string {
  *  rows print no margins. */
 export function partsListCsvRows(rows: PartsListRow[]): (string | number)[][] {
   return rows.map((r) => {
-    const notes: string[] = [];
-    if (r.partOf.length > 0) notes.push("Part of: " + r.partOf.join(", "));
-    if (r.unit !== "ea") notes.push("per " + r.unit);
-    notes.push(...r.notes);
-    const adjustment = r.source === ADJUSTMENT;
+    const adjustment = isAdjustmentRow(r);
     return [
       r.manufacturer,
-      r.modelNumber || r.sku,
+      partsRowItemName(r),
       r.desc,
       r.room,
       r.system,
@@ -330,7 +368,106 @@ export function partsListCsvRows(rows: PartsListRow[]): (string | number)[][] {
       adjustment ? "" : marginPct(r.lineSell, r.unitCost),
       adjustment ? "" : marginPct(r.unitSell, r.unitCost),
       r.source,
-      notes.join("; "),
+      partsRowNotes(r),
     ];
   });
+}
+
+/** A row's Item name (#262 v2, #363): the model number, else the SKU, else "". */
+export function partsRowItemName(r: PartsListRow): string {
+  return r.modelNumber || r.sku;
+}
+
+/** A row's Notes cell (#262 v2, #363): "Part of: …", a "per <unit>" for
+ *  anything not sold each, then internal notes, joined by "; ". */
+export function partsRowNotes(r: PartsListRow): string {
+  const notes: string[] = [];
+  if (r.partOf.length > 0) notes.push("Part of: " + r.partOf.join(", "));
+  if (r.unit !== "ea") notes.push("per " + r.unit);
+  notes.push(...r.notes);
+  return notes.join("; ");
+}
+
+/** A cost-adjustment row — it carries cost only, so it prints no margins (v2, #363). */
+export function isAdjustmentRow(r: PartsListRow): boolean {
+  return r.source === ADJUSTMENT;
+}
+
+/* ---------------- #363 Review spreadsheet ---------------- */
+
+/** The money a system's price carries beyond its listed parts' own sell (#363). */
+export type SystemFees = {
+  freight: number;
+  packageBonus: number;
+  estimatorBonus: number;
+  /** The $25 round-up, or what a typed system price adds (negative when it is below the computed price). */
+  adjustment: number;
+  /** True when `adjustment` comes from a typed system price, not the round-up. */
+  typedPrice: boolean;
+  /** All four, to the cent. */
+  total: number;
+};
+
+/** System fees (#363, Jeff 2026-10-22): freight + the 5% package bonus + the
+ *  2% estimator bonus + the round-up / typed-price adjustment. With the
+ *  listed parts' own sell (lineSell) they make the system's price — to the
+ *  cent for a system with no labor lines, which are never listed. */
+export function systemFees(section: SpecSection): SystemFees {
+  const bonus = (pick: (x: SpecItem) => boolean) =>
+    round2(section.items.filter((x) => pick(x) && isSystemLine(x)).reduce((a, x) => a + lineExtSellOf(x), 0));
+  const freight = systemFreight(section);
+  const packageBonus = bonus(isPackageBonusItem);
+  const estimatorBonus = bonus(isEstimatorBonusItem);
+  const adjustment = systemSellAdjustment(section);
+  return {
+    freight,
+    packageBonus,
+    estimatorBonus,
+    adjustment,
+    typedPrice: hasSellOverride(section),
+    total: round2(freight + packageBonus + estimatorBonus + adjustment),
+  };
+}
+
+/** One system's block of the Review spreadsheet (#363): its listed rows, then
+ *  its three subtotal rows (cost, markup, fees). */
+export type ReviewSheetBlock = {
+  sectionId: string;
+  system: string;
+  room: string;
+  rows: PartsListRow[];
+  fees: SystemFees;
+};
+
+/** The Review spreadsheet's model (#363): one block per system that lists at
+ *  least one row, in the estimate's order — the parts list's own rows and
+ *  exclusions (labor systems, alternates, option / labor / bonus / Rewards
+ *  lines), grouped by section id so two same-named systems stay apart. */
+export function reviewSheetModel(
+  sections: SpecSection[],
+  vendorQuotes: VendorQuote[],
+  info: Record<string, PartInfo>,
+  defaultRoom = ""
+): ReviewSheetBlock[] {
+  const bySection = new Map<string, PartsListRow[]>();
+  for (const r of partsListRows(sections, vendorQuotes, info, defaultRoom)) {
+    const list = bySection.get(r.sectionId);
+    if (list) list.push(r);
+    else bySection.set(r.sectionId, [r]);
+  }
+  const out: ReviewSheetBlock[] = [];
+  for (const section of sections) {
+    const rows = bySection.get(section.id);
+    if (!rows || rows.length === 0) continue;
+    // Section ids are unique per estimate; a repeat would only list the rows twice.
+    bySection.delete(section.id);
+    out.push({
+      sectionId: section.id,
+      system: section.name,
+      room: section.room?.trim() || defaultRoom.trim(),
+      rows,
+      fees: systemFees(section),
+    });
+  }
+  return out;
 }

@@ -25,6 +25,8 @@ export type Handoff = {
   /** The `ES-…` suggestion the Estimator opens beside the estimate; "" when
    *  absent or malformed. */
   suggestionId: string;
+  /** Box goods sale (spec 2026-10-21) — `?box=1` from the + New quote card; a new estimate only. */
+  boxSale: boolean;
 };
 
 /** A lead id as the URL may carry one (`L-1050`, imported `L-dl-…`): 1–80 of [A-Za-z0-9._:-]. */
@@ -49,6 +51,7 @@ export function readHandoff(sp: SP): Handoff {
     threadId: first(sp.thread),
     leadId: matchOrBlank(first(sp.lead), HANDOFF_LEAD_RE),
     suggestionId: matchOrBlank(first(sp.suggestion), HANDOFF_SUGGESTION_RE),
+    boxSale: first(sp.box) === "1",
   };
 }
 
@@ -117,13 +120,15 @@ export function intakeInitial(
 }
 
 /** Which intake card a stored quote corresponds to. */
-export function quoteServiceType(q: { quoteType?: string; category?: string }): ServiceType {
+export function quoteServiceType(q: { quoteType?: string; category?: string; boxSale?: boolean }): ServiceType {
   const t = q.quoteType || "";
   if (t && t !== "system" && t !== "custom" && isServiceType(t)) return t;
+  // Box goods sale (spec 2026-10-21): a system estimate with the flag is the Box goods sale card.
+  if (q.boxSale === true) return "box_sale";
   return (q.category || "").trim() ? "custom" : "system";
 }
 
-export function quoteEditPath(q: { id: string; quoteType?: string; category?: string }): string {
+export function quoteEditPath(q: { id: string; quoteType?: string; category?: string; boxSale?: boolean }): string {
   return BUILDER_BASE[quoteServiceType(q)] + "?id=" + encodeURIComponent(q.id);
 }
 
@@ -162,6 +167,13 @@ export function quoteLineCount(q: {
  *  header), so moving between them is not a replace. */
 export function sameBuilder(a: ServiceType, b: ServiceType): boolean {
   return BUILDER_BASE[a] === BUILDER_BASE[b];
+}
+
+/** Change type between System and Box goods sale reopens the same estimate (sameBuilder) and never sets the flag —
+ *  the switch lives in the Estimator's Quote details. The hint to show then, else null. */
+export function boxSwitchHint(picked: ServiceType, current: ServiceType): string | null {
+  const pair = (picked === "box_sale" && current === "system") || (picked === "system" && current === "box_sale");
+  return pair ? "Use the Box goods sale switch in the Estimator's Quote details." : null;
 }
 
 export const CHANGE_TYPE_DISABLED_HINT = "Already sent — start a new quote instead.";

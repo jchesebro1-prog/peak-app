@@ -47,3 +47,16 @@ export function packageTabId(tab: PackageTab): string {
 export function packageTabPanelId(tab: PackageTab): string {
   return `pkg-panel-${tab}`;
 }
+
+/** Box goods sale (spec 2026-10-21): the client gets the BOM only, so Build package is the BOM quote tab alone. */
+export const BOX_SALE_PACKAGE_TABS: readonly PackageTab[] = ["bom"];
+
+/** The tabs Build package shows. */
+export function packageTabsFor(boxSale: boolean): readonly PackageTab[] {
+  return boxSale ? BOX_SALE_PACKAGE_TABS : PACKAGE_TABS;
+}
+
+/** A box sale lands on BOM quote whatever `?ptab=` says (narrative / client / none); otherwise `tab`. */
+export function boxSalePackageTab(tab: PackageTab, boxSale: boolean): PackageTab {
+  return boxSale ? "bom" : tab;
+}

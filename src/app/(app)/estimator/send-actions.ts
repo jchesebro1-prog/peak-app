@@ -26,6 +26,7 @@ import { sendDefaultsContact } from "@/lib/parties/addressee";
 import { signatureFor } from "@/lib/stores/signatures";
 import { get as getQuote, type QuoteStatus } from "@/lib/stores/quotes";
 import { can } from "@/lib/team";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 import { activeUsers, getUser } from "@/lib/users";
 
 /**
@@ -134,6 +135,8 @@ export async function estimateEmailDefaultsAction(quoteId: string): Promise<Esti
       // The sender is never Cc'd on their own email, whatever address Gmail sends from.
       leadEmail: lead && lead.id !== user.id ? (lead.email || "").trim() : "",
       signature,
+      // Box goods sale: the saved estimate's flag (Send saves first).
+      boxSale: boxSaleOf(q),
     }),
     gmailConnected,
     fromAddress,

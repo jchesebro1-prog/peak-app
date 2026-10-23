@@ -136,10 +136,12 @@ export async function createQuoteIntakeAction(input: IntakeSubmit): Promise<Inta
         contactName: contact,
         contactRole: contactRecord?.role || "",
         contactEmail: contactRecord?.email || "",
-        quoteType: input.type === "custom" ? "system" : input.type,
+        quoteType: input.type === "custom" || input.type === "box_sale" ? "system" : input.type,
         category: input.type === "custom" ? category : "",
         owner: me.name,
         name: input.name,
+        // Box goods sale (spec 2026-10-21): a system quote with the flag, never a "box_sale" quoteType.
+        ...(input.type === "box_sale" ? { boxSale: true } : {}),
       },
       { confirmReplace: !!input.confirmReplaceLink }
     );

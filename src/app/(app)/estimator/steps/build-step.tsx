@@ -31,6 +31,7 @@ import { AssistDraftBanner } from "../assist-draft-banner";
 import { SuggestedBomPanel } from "../suggested-bom-panel";
 import { bonusNotFigured, bonusRulesApply } from "@/lib/estimate-bonus/rules";
 import type { SuggestionParts } from "@/lib/assist/features/suggestion-panel";
+import { boxSaleLaborBanner } from "@/lib/estimate-box-sale/rules";
 
 /**
  * #305 — Build: the systems sidebar (margin, cost breakdown, Rewards credit),
@@ -475,6 +476,16 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           }}
         >
           <AssistDraftBanner view={assistDraft} />
+          {/* Box goods sale (spec 2026-10-21): turning it on with labor is allowed — Save stays refused until it's gone. */}
+          {s.boxSaleLabor.length > 0 && (
+            <div
+              role="alert"
+              data-testid="box-sale-labor"
+              style={{ margin: "0 0 12px", padding: "10px 14px", fontSize: 12.5, lineHeight: 1.45, color: "#9b3a2a", background: "#fdf0ee", border: "1px solid #f3cfc7", borderRadius: 10 }}
+            >
+              {boxSaleLaborBanner(s.boxSaleLabor)}
+            </div>
+          )}
           {initial.portal && <PortalPanel data={initial.portal} statusError={portalStatusError} />}
           {pinned.whole.length > 0 && (
             <div style={{ margin: "0 0 12px" }}>
@@ -635,6 +646,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     }}
                     built={isBuilt(sec.id)}
                     onMarkBuilt={() => markBuilt(sec.id)}
+                    boxSale={s.boxSale}
                   />
                 ))}
               </div>

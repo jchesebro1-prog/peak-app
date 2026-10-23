@@ -1613,7 +1613,20 @@ See `.env.example`.
     `QUOTE_PDF_ORIGIN` in production, a real estimate with drawings and datasheets on
     production, and a long cover note. Punch item #358.
 
-66. ✅ **Estimating-core extraction** (#359, D1228–D1230) — handoff PR 1. The Estimator's persisted
+66. ✅ **Box goods sale** (#362, D1247–D1248) — an Estimator system estimate can be a box goods
+    sale (equipment + freight only): `Quote.boxSale` (absent = false; true on system estimates only),
+    set from + New quote → Box goods sale (`?box=1`) or the Quote details switch, shown as a header
+    chip. Pure rules in `src/lib/estimate-box-sale/rules.ts`. Content and frozen in revision
+    docFields; `quoteDocumentDataFor` returns `bomViewProps` for it (one seam), the print route prints
+    #360's BOM layout with no cut sheets / links / drawings, the Cover PDF 404s and is never attached,
+    and the client package page is the itemized list only (zip / datasheet book 404). Build hides the
+    narrative and labor controls and adds systems Itemized; Build package is BOM quote only; Customer
+    review is Document + BOM; readiness is quiet; the email says "Attached is our quote … You can also
+    view it online here: {link}" (subject "quote" too). A save with any labor line is refused (server
+    and browser). Nothing narrative is deleted — switching off restores it. No migration. Remaining is
+    Jeff-gated: one real box-sale estimate sent to himself on production. On a box sale, the BOM quote tab carries Show prices / Show quantities, Payment terms, Terms, Options and Cover note (the Client package tab is hidden; the cover note's text stays in the header's Quote details) and hides #364's Labor switch (Jeff 2026-10-22). Punch item #362.
+
+67. ✅ **Estimating-core extraction** (#359, D1228–D1230) — handoff PR 1. The Estimator's persisted
     domain types and twelve pure helpers live in `src/lib/estimating-core/` (entry `index.ts`:
     flat domain exports plus namespaced pure `src/lib` modules); the twelve old helper paths are
     `export *` shims and the route `types.ts` re-exports the core types. `npm run core:check`
@@ -1622,7 +1635,7 @@ See `.env.example`.
     `docs/estimating-core/`). Quick Design types now live in `src/lib/design/quick-types.ts`.
     No behaviour change. Next: handoff PR 2 (phase 67 below, the HTML prototype package).
 
-67. 🚧 **Estimator handoff prototype** (#361, D1233–D1245) — handoff PR 2, stacked on PR 1. A confidential,
+68. 🚧 **Estimator handoff prototype** (#361, D1233–D1246) — handoff PR 2, stacked on PR 1. A confidential,
     offline package (`output/peak-estimator-handoff/`, zipped, git-ignored) that runs Quartzite's REAL Estimator,
     Catalog, Assembly Builder and Estimating Rules in the browser over a sliced production export, for a founder
     evaluating Peak's estimating. Source in `handoff/estimator/`: `build.ts` + `esbuild-plugins.ts` bundle the

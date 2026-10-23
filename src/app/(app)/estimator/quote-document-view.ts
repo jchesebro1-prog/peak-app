@@ -117,7 +117,12 @@ export function alternatingPhotoSides(keys: readonly string[]): Map<string, "rig
  *  descriptions on, the appendix off. Prices keep the quote's own choice (an
  *  estimator who hid prices still hides them), and so do quantities (Jeff
  *  2026-10-15 #14: one switch — the PDF's Qty — for the PDF and every online
- *  BOM). Pure. */
+ *  BOM). #364: the quote's Show on BOM switches (pdfOptions.bom*, carried on
+ *  the props; absent = on) apply here and nowhere else — Line prices ANDs with
+ *  the quote-wide Prices, and Materials / Labor / Freight become the
+ *  document's show* flags. System prices, tax, credit and the Total always
+ *  print. #365: `showModels` turns on "Model — Description" for the lines
+ *  `bomModelParts` (passed by the caller) can resolve. Pure. */
 export function bomViewProps(p: QuoteDocumentProps): QuoteDocumentProps {
   return {
     ...p,
@@ -126,7 +131,14 @@ export function bomViewProps(p: QuoteDocumentProps): QuoteDocumentProps {
     detail: "itemized",
     pdfQty: p.pdfQty,
     pdfNotes: true,
+    pdfPrices: p.pdfPrices && p.bomLinePrices !== false,
     pdfItemizedAppendix: false,
+    showMaterials: p.bomMaterials !== false,
+    showLabor: p.bomLabor !== false,
+    showFreight: p.bomFreight !== false,
+    // #365: plain catalog lines print "Model — Description" — rendered only
+    // when the caller also passes `bomModelParts` (the four BOM callers do).
+    showModels: true,
     sections: p.sections.map((s) => ({ ...s, presentation: "itemized" as const })),
   };
 }

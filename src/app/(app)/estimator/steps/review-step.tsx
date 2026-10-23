@@ -124,17 +124,19 @@ export function ReviewStep({ s, onActed }: { s: EstimatorState; onActed: (a: Nex
       </div>
       {phone && (
         <div style={{ padding: "10px 14px", borderTop: "1px solid #e4e7ec", background: "#fff", overflowY: "auto", flexShrink: 0, maxHeight: "45%" }}>
-          <CoverPackagePanel
-            savedQuoteId={loadedId}
-            canEdit={false}
-            dirty={pdfDirty}
-            coverSummary={coverSummary}
-            onCoverSummary={onCoverSummary}
-            notIncluded={notIncluded}
-            onNotIncluded={onNotIncluded}
-            notIncludedDefault={notIncludedDefault}
-          />
-          {loadedId && <ClientLinkPanel quoteId={loadedId} />}
+          {!s.boxSale && (
+            <CoverPackagePanel
+              savedQuoteId={loadedId}
+              canEdit={false}
+              dirty={pdfDirty}
+              coverSummary={coverSummary}
+              onCoverSummary={onCoverSummary}
+              notIncluded={notIncluded}
+              onNotIncluded={onNotIncluded}
+              notIncludedDefault={notIncludedDefault}
+            />
+          )}
+          {loadedId && <ClientLinkPanel quoteId={loadedId} withPackage={!s.boxSale} />}
         </div>
       )}
     </div>

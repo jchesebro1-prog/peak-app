@@ -9,6 +9,8 @@ import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/grou
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import { addressedHeader, type DocAddressee } from "@/lib/parties/addressee";
+import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 
 /**
  * A saved quote → the props of the customer QuoteDocument (#222). Mirrors what
@@ -112,7 +114,7 @@ export function quoteDocumentDataFor(
     },
     addressee
   );
-  return {
+  const props: QuoteDocumentProps = {
     // #223 — the document prints the estimate number (the id when unnumbered).
     quoteId: displayQuoteNumber(q),
     revNum: stamp.revNum,
@@ -147,4 +149,7 @@ export function quoteDocumentDataFor(
     isPortalCatalog: q.source === "portal-catalog",
     ...portalDocumentExtras(q, sections),
   };
+  // Box goods sale (spec 2026-10-21): the customer document IS the BOM view — the one transform (bomViewProps), so
+  // the print route, portal, share pages and staff preview all follow. `q` is the frozen revision when one is passed.
+  return boxSaleOf(q) ? bomViewProps(props) : props;
 }

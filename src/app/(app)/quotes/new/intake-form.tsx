@@ -10,7 +10,7 @@ import CustomerVenueContactPicker, {
 } from "@/components/customer-venue-contact-picker";
 import type { VenueType } from "@/lib/venue-types";
 import { createQuoteIntakeAction } from "./actions";
-import { replaceConfirmMessage, sameBuilder, type IntakeInitial, type IntakeReplacing } from "./handoff";
+import { boxSwitchHint, replaceConfirmMessage, sameBuilder, type IntakeInitial, type IntakeReplacing } from "./handoff";
 import { SERVICE_TYPES, type IntakeCustomer, type IntakeSubmit, type ServiceType } from "./types";
 
 export default function QuoteIntakeForm({
@@ -332,6 +332,9 @@ export default function QuoteIntakeForm({
         </div>
       )}
 
+      {replacing && boxSwitchHint(type, replacing.type) && (
+        <div style={{ marginTop: 14, fontSize: 12, color: "#5b616e", lineHeight: 1.45 }}>{boxSwitchHint(type, replacing.type)}</div>
+      )}
       <button
         type="button"
         onClick={submit}

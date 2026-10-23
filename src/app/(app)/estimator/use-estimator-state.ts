@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { NEW_SYSTEM_PRESENTATION, presentationForNewSystem } from "@/lib/estimate-output/fields";
+import { boxSaleLaborSystems, boxSaleSaveProblem, isBoxSaleQuoteType, isBoxSaleSource, newSystemPresentation } from "@/lib/estimate-box-sale/rules";
 import { SIDE_OPEN_KEY } from "./estimator-styles";
 import { surveyGoalsAction } from "./output-actions";
 import { listReviewCommentsAction } from "./review-actions";
@@ -52,8 +52,9 @@ import { fillEmptyKeyProductText, isKeyProductEligible, isLineToken, keyProductS
 import { loadNotice, placeLoadedSection, type LoadedLibrarySystem } from "@/lib/narrative/system-library";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
-import { PARTS_CSV_HEADER, partsListCsvRows, partsListRows, partsListSkus, type PartInfo } from "./parts-csv";
-import { downloadCsv, fileStem } from "../design/export";
+import { partsListSkus, reviewSheetModel, type PartInfo } from "./parts-csv";
+import { downloadReviewSheet } from "./review-sheet-xlsx";
+import { fileStem } from "../design/export";
 import { curtainTrackDraft, curtainTrackPrefill, followCurtainPrefill, freshTrackDraft, replaceTrackLine, trackConfigFromDraft, trackDraftFromConfig, trackLine, type CurtainTrackPrefill } from "./track-bom";
 import { customDraftFromLine, isCustomLineEditable, costUntouched, saveCustomEdit, sellUntouched } from "./custom-part-edit";
 import { applyCurtainEdit, curtainDraftFromLine, curtainDraftValid, curtainItem } from "./curtain-line";
@@ -81,9 +82,9 @@ export const TAX_RATE_PCT = 0;
 /** #245: freightPct comes from the caller — this runs at module scope (used by
  *  a lazy useState initializer before props are in scope), so it can't read
  *  the freight rule itself. */
-const freshSections = (freightPct: number): SpecSection[] => [
-  // #267: a new system's auto price rounds up to the next $25.
-  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: NEW_SYSTEM_PRESENTATION, items: [] },
+const freshSections = (freightPct: number, boxSale = false): SpecSection[] => [
+  // #267: a new system's auto price rounds up to the next $25. Box goods sale: Itemized.
+  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: newSystemPresentation([], boxSale), items: [] },
 ];
 
 /** Phase 2a — unmarkEdited, blind to the Rewards credit line. The credit
@@ -264,7 +265,7 @@ export function useEstimatorState(props: EstimatorProps) {
       ? stampPriceRoundOnLoad
         ? withPriceRound(initial.sections)
         : initial.sections
-      : freshSections(initialFreightDefault.pct)
+      : freshSections(initialFreightDefault.pct, initial.boxSale)
   );
   /** #254 — the tier re-price banner: what the stamp just changed, and the
    *  exact sections to put back on Undo. Internal only (D87). */
@@ -506,6 +507,12 @@ export function useEstimatorState(props: EstimatorProps) {
   // #110: user-named quote category — persisted on blur, not per keystroke.
   const [category, setCategory] = useState(initial.category);
   const categorySaved = useRef(initial.category);
+  /** Box goods sale (spec 2026-10-21) — content: rides Save (never the header autosave) and is part of the
+   *  document key, so a toggle reads "Unsaved changes" like any document edit. System estimates only. */
+  const [boxSale, setBoxSale] = useState(initial.boxSale);
+  const canBoxSale = isBoxSaleQuoteType(initial.quoteType) && isBoxSaleSource(initial.bonusSource);
+  /** The systems whose labor blocks a box-sale Save — the Build banner names them. */
+  const boxSaleLabor = useMemo(() => (boxSale ? boxSaleLaborSystems(sections) : []), [boxSale, sections]);
   const [revNum, setRevNum] = useState(initial.revNum);
   // #333: read by the live BOM quote (Build package → BOM quote), which prints the saved Rev date.
   const [revDateMs, setRevDateMs] = useState(initial.revDateMs);
@@ -518,6 +525,11 @@ export function useEstimatorState(props: EstimatorProps) {
   const [pdfItemizedAppendix, setPdfItemizedAppendix] = useState(initial.pdfOptions.pdfItemizedAppendix);
   const [pdfCutSheets, setPdfCutSheets] = useState(initial.pdfOptions.pdfCutSheets);
   const [detail, setDetail] = useState<"itemized" | "sectioned">(initial.pdfOptions.detail);
+  // #364 — Build package → BOM quote → Show on BOM (the BOM view only).
+  const [bomLinePrices, setBomLinePrices] = useState(initial.pdfOptions.bomLinePrices);
+  const [bomMaterials, setBomMaterials] = useState(initial.pdfOptions.bomMaterials);
+  const [bomLabor, setBomLabor] = useState(initial.pdfOptions.bomLabor);
+  const [bomFreight, setBomFreight] = useState(initial.pdfOptions.bomFreight);
   /** #305 — one Show-on-PDF toggle (#333: Build package → Client package). */
   const togglePdf = (flag: PdfToggle) => {
     if (flag === "pdfQty") setPdfQty((v) => !v);
@@ -527,12 +539,16 @@ export function useEstimatorState(props: EstimatorProps) {
     else if (flag === "pdfOptions") setPdfOptions((v) => !v);
     else if (flag === "pdfItemizedAppendix") setPdfItemizedAppendix((v) => !v);
     else if (flag === "pdfCutSheets") setPdfCutSheets((v) => !v);
+    else if (flag === "bomLinePrices") setBomLinePrices((v) => !v);
+    else if (flag === "bomMaterials") setBomMaterials((v) => !v);
+    else if (flag === "bomLabor") setBomLabor((v) => !v);
+    else if (flag === "bomFreight") setBomFreight((v) => !v);
     else setPdfTerms((v) => !v);
   };
   /** #222 — the Show-on-PDF choices, saved with the quote (Quote.pdfOptions). */
   const pdfOpts = useMemo<QuotePdfOptions>(
-    () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets }),
-    [detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets]
+    () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets, bomLinePrices, bomMaterials, bomLabor, bomFreight }),
+    [detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions, pdfItemizedAppendix, pdfCutSheets, bomLinePrices, bomMaterials, bomLabor, bomFreight]
   );
   /** #292 — how many cut sheets the saved PDF would append (client-safe count; never collect.ts). */
   const cutSheetCount = useMemo(() => countCutSheetTypes({ sections }, fabrics.map((f) => ({ sku: f.sku, desc: f.name })), trackSeries), [sections, fabrics, trackSeries]);
@@ -1039,9 +1055,10 @@ export function useEstimatorState(props: EstimatorProps) {
       groups,
       vendorQuotes,
       pdfOptions: pdfOpts,
+      boxSale,
       document: packageDoc,
     }),
-    [quoteId, projectName, docCustName, customerId, locationId, contactName, quoteNote, assumptions, paymentTerms, packageDoc, sections, groups, vendorQuotes, pdfOpts]
+    [quoteId, projectName, docCustName, customerId, locationId, contactName, quoteNote, assumptions, paymentTerms, packageDoc, boxSale, sections, groups, vendorQuotes, pdfOpts]
   );
   const docKey = useMemo(() => pdfDocKey(docInput), [docInput]);
   // #267: when the load-time $25 stamp moved a system's price, the saved PDF
@@ -1399,6 +1416,14 @@ export function useEstimatorState(props: EstimatorProps) {
       setActionError(PACKAGE_DOC_TOO_LARGE);
       return false;
     }
+    // Box goods sale (spec 2026-10-21): any labor line refuses the save — the server's own sentence, nothing sent.
+    const boxProblem = boxSaleSaveProblem(boxSale, sections);
+    if (boxProblem) {
+      setActionNotice(null);
+      setGateRefused(false);
+      setActionError(boxProblem);
+      return false;
+    }
     const docAtSave = { ...docInput, document: docNow };
     // What the server had before this save (estimator bonuses: syncBonusAfterStatus).
     const statusBeforeSave = baseStatus;
@@ -1441,6 +1466,8 @@ export function useEstimatorState(props: EstimatorProps) {
           groups,
           vendorQuotes,
           pdfOptions: pdfOpts,
+          // Box goods sale: rides every Save (content; the server refuses it with labor).
+          boxSale,
           // #301 (R14): the cover fields ride every Save.
           coverSummary,
           notIncluded,
@@ -2082,7 +2109,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const groupId = sections.find((s) => s.id === activeId)?.groupId;
     setSections((ss) => normalizeSystemOrder([
       ...ss,
-      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: presentationForNewSystem(ss), items: [], ...(groupId ? { groupId } : {}) },
+      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: newSystemPresentation(ss, boxSale), items: [], ...(groupId ? { groupId } : {}) },
     ], groups));
     setActiveId(id);
     openInputMethod("catalog", id);
@@ -2102,7 +2129,7 @@ export function useEstimatorState(props: EstimatorProps) {
       groupId,
       freightPct: freightDefault.pct,
       priceRound: SYSTEM_PRICE_STEP,
-      presentation: presentationForNewSystem(sections),
+      presentation: newSystemPresentation(sections, boxSale),
     });
     setSections((ss) => normalizeSystemOrder([...ss, sec], groups));
     setActiveId(sec.id);
@@ -2129,7 +2156,7 @@ export function useEstimatorState(props: EstimatorProps) {
       groupId,
       freightPct: freightDefault.pct,
       priceRound: SYSTEM_PRICE_STEP,
-      presentation: presentationForNewSystem(sections),
+      presentation: newSystemPresentation(sections, boxSale),
     });
     setSections((ss) => normalizeSystemOrder([...ss, sec], groups));
     setSuggestionTargets((m) => ({ ...m, [systemKey]: sec.id }));
@@ -2316,10 +2343,13 @@ export function useEstimatorState(props: EstimatorProps) {
     return { fromCatalog, custom: next.length - fromCatalog };
   };
 
-  const [partsBusy, setPartsBusy] = useState(false);
-  const exportPartsList = async () => {
-    if (partsBusy) return;
-    setPartsBusy(true);
+  /* #363: More ▾ → Review spreadsheet (was Parts list (CSV), #262) — the
+     parts list as an .xlsx with links, markup formulas and per-system cost /
+     markup / fees subtotals; exceljs loads on demand inside downloadReviewSheet. */
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const exportReviewSheet = async () => {
+    if (reviewBusy) return;
+    setReviewBusy(true);
     try {
       const skus = partsListSkus(sections);
       const resolved = skus.length ? await resolveCatalogSkusAction(skus) : {};
@@ -2332,20 +2362,20 @@ export function useEstimatorState(props: EstimatorProps) {
           manufacturerModelNumber: r.manufacturerModelNumber,
         };
       }
-      const rows = partsListRows(sections, vendorQuotes, info, venueRoomName);
-      if (!rows.length) {
+      const blocks = reviewSheetModel(sections, vendorQuotes, info, venueRoomName);
+      if (!blocks.length) {
         setActionError(null);
         setGateRefused(false);
         setActionNotice("No parts to export yet.");
         return;
       }
       const name = loadedId ? quoteId : projectName || quoteId;
-      downloadCsv(`${fileStem(name, "estimate")}-parts-list`, PARTS_CSV_HEADER, partsListCsvRows(rows));
+      await downloadReviewSheet(fileStem(name, "estimate"), blocks);
     } catch {
-      setActionError("Couldn't build the parts list — try again.");
+      setActionError("Couldn't build the review spreadsheet — try again.");
       setGateRefused(false);
     } finally {
-      setPartsBusy(false);
+      setReviewBusy(false);
     }
   };
 
@@ -3484,6 +3514,10 @@ export function useEstimatorState(props: EstimatorProps) {
     canApplyCredit,
     canWriteNarrativeLibrary,
     cardRefs,
+    boxSale,
+    boxSaleLabor,
+    canBoxSale,
+    setBoxSale,
     category,
     commitCategory,
     changePeople,
@@ -3524,7 +3558,7 @@ export function useEstimatorState(props: EstimatorProps) {
     deleteSystem,
     detail,
     doSave,
-    exportPartsList,
+    exportReviewSheet,
     fabrics,
     fixtureAssemblies,
     fixtureDraft,
@@ -3581,7 +3615,7 @@ export function useEstimatorState(props: EstimatorProps) {
     vendorPdf,
     readVendorPdf,
     ownerValue,
-    partsBusy,
+    reviewBusy,
     paymentTerms,
     pdf,
     pdfCover,

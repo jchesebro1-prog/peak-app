@@ -36,6 +36,8 @@ export type SignedPrintRenderOptions = {
   failed: string;
   /** Console prefix for an unexpected failure. */
   logTag: string;
+  /** A quote this render refuses (404, like a non-system quote) — the Cover PDF refuses a box goods sale. */
+  refuse?: (q: Quote) => boolean;
 };
 
 export async function renderSignedQuotePrintPdf(opts: SignedPrintRenderOptions): Promise<SignedPrintRender> {
@@ -43,7 +45,7 @@ export async function renderSignedQuotePrintPdf(opts: SignedPrintRenderOptions):
     const { quoteId } = opts;
     if (!quoteId || quoteId.length > 64) return { ok: false, status: 404, error: "Not found" };
     const q = await getQuote(quoteId);
-    if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") return { ok: false, status: 404, error: "Not found" };
+    if (!q || pdfKindForQuoteType(q.quoteType) !== "quote" || opts.refuse?.(q)) return { ok: false, status: 404, error: "Not found" };
     const secret = process.env.AUTH_SECRET || "";
     if (!secret) return { ok: false, status: 503, error: opts.noSecret };
     const where = printOriginFor(process.env, opts.host, opts.proto);

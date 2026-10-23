@@ -8,6 +8,7 @@ import { useState } from "react";
 // bundler still walks the edge and errors on node builtins. So the revision
 // row is described by a local view-model the server maps into, matching the
 // VM pattern the Leads screen uses (leads/types.ts).
+import { BOX_SALE_COPY } from "@/lib/estimate-box-sale/rules";
 import { money, timeAgo } from "@/lib/format";
 import { firstName } from "@/lib/team";
 import { saveQuoteRevisionAction, restoreQuoteRevisionAction } from "./actions";
@@ -84,6 +85,24 @@ export function NewQuoteMenu() {
               </div>
               <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>
                 Full line-item estimator
+              </div>
+            </Link>
+            <Link
+              href="/quotes/new?type=box_sale"
+              className="qt-menuitem"
+              style={{
+                display: "block",
+                textDecoration: "none",
+                color: "#16181d",
+                borderRadius: 8,
+                padding: "10px 12px",
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                {BOX_SALE_COPY.label}
+              </div>
+              <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>
+                {BOX_SALE_COPY.cardSub}
               </div>
             </Link>
             <Link

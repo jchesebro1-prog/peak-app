@@ -56,6 +56,13 @@ export const REVIEW_UI_COPY = {
 
 export const REVIEW_TABS = ["document", "package", "bom", "cutsheets", "datasheets", "drawings"] as const;
 export type ReviewTab = (typeof REVIEW_TABS)[number];
+/** Box goods sale (spec 2026-10-21): the client gets the BOM only — Document (the BOM PDF) and BOM. */
+export const BOX_SALE_REVIEW_TABS: readonly ReviewTab[] = ["document", "bom"];
+
+/** The tabs Customer review shows. */
+export function reviewTabsFor(boxSale: boolean): readonly ReviewTab[] {
+  return boxSale ? BOX_SALE_REVIEW_TABS : REVIEW_TABS;
+}
 export const REVIEW_TAB_LABEL: Record<ReviewTab, string> = {
   document: "Document",
   package: "Package page",
@@ -191,13 +198,13 @@ export const reviewTabId = (tab: ReviewTab) => `review-tab-${tab}`;
 export const reviewPanelId = (tab: ReviewTab) => `review-panel-${tab}`;
 
 /** Arrow-key navigation across the tabs: Left/Right wrap, Home/End jump; any other key → null. */
-export function nextReviewTab(current: ReviewTab, key: string): ReviewTab | null {
-  const i = REVIEW_TABS.indexOf(current);
-  const n = REVIEW_TABS.length;
-  if (key === "ArrowRight") return REVIEW_TABS[(i + 1) % n];
-  if (key === "ArrowLeft") return REVIEW_TABS[(i - 1 + n) % n];
-  if (key === "Home") return REVIEW_TABS[0];
-  if (key === "End") return REVIEW_TABS[n - 1];
+export function nextReviewTab(current: ReviewTab, key: string, tabs: readonly ReviewTab[] = REVIEW_TABS): ReviewTab | null {
+  const i = tabs.indexOf(current);
+  const n = tabs.length;
+  if (key === "ArrowRight") return tabs[(i + 1) % n];
+  if (key === "ArrowLeft") return tabs[(i - 1 + n) % n];
+  if (key === "Home") return tabs[0];
+  if (key === "End") return tabs[n - 1];
   return null;
 }
 

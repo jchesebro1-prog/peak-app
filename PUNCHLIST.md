@@ -12840,3 +12840,57 @@ npm run handoff:verify -- --serve
 
 **Follow-ups:** a Blob read of a photo is the only network step and has not run against production; a cross-window overlay merge (last write wins today); the Datasheets and Drawings review tabs and the Won install project are intentionally not in the prototype.
 
+## 362. Box goods sale — BOM-only estimates — DONE 2026-10-21 on `feat/box-goods-sale` (D1247–D1248)
+
+Jeff: some estimates are box goods sales (equipment + freight, no install); the customer gets the itemized BOM. Spec `docs/superpowers/specs/2026-10-21-box-goods-sale-design.md`; plan `docs/superpowers/plans/2026-10-21-box-goods-sale.md`.
+
+**Built:** + New quote → Box goods sale card and a Quote details switch (system estimates only) with a header chip. A box sale's estimate PDF is the BOM quote PDF's layout (no title page, cut sheets, datasheet links or drawings), there is no Cover PDF, the email (body and subject) says "quote" with "Attached is our quote … You can also view it online here: {link}", and the client link opens the itemized list only (no toggle, summary, goals, Not included, plans, downloads or datasheet links; options, alternates, questions and Accept still work). The Estimator hides the narrative/labor controls, adds systems Itemized, shows Build package → BOM quote only and Customer review → Document + BOM (no Cover PDF panel or package controls). A save with any labor line is refused with "A box goods sale can't include labor — remove the labor lines or turn off Box goods sale." Turning it off brings everything back; nothing is deleted.
+
+**Box-sale BOM tab (2026-10-22):** On a box sale the BOM quote tab carries Show prices / Show quantities, Payment terms, Terms, Options and Cover note (the Client package tab is hidden; the cover note's text stays in the header's Quote details) and hides #364's Labor switch (Jeff 2026-10-22).
+
+**Gates:** tsc 0 errors (`.next` deleted first); test:specs 25,146 PASS / 0 FAIL (includes the `box sale` harness block; final-review round); test:smoke 268 PASS / 0 FAIL (`.next` deleted, run alone); eslint 0 problems on the changed src files (`scripts/test-review-and-spec.ts` excluded, #357); next build passes (exit 0, `.next` deleted). Chrome (2026-10-21, scratch DB): a box sale with 3 lines and a Narrative system prints the saved-PDF page itemized with the investment band and no title page; BOM PDF 1 page; Build package shows only BOM quote (even `?ptab=narrative`) with the people fields; Cover PDF 404 for the box sale, 200 for a normal estimate.
+
+**Rollback:** safe. One optional JSON key (`boxSale`) on quotes and on new revisions' docFields. A build without this feature ignores it and prints those estimates as normal estimates — their narrative fields were never deleted.
+
+**Remaining (Jeff-gated):**
+- On production after merge: make one real box goods sale estimate (+ New quote → Box goods sale), add equipment and freight, send it to yourself, and check the PDF (one BOM page, no cover), the email wording and the client link (itemized list only).
+
+## 363. Estimator review spreadsheet — DONE 2026-10-22 on `feat/363-review-spreadsheet` (D1250–D1251)
+
+Jeff, 2026-10-22: the parts list should include the link when a part is custom so it can be clicked to review; rename it Review Spreadsheet; swap the effective margin column for the markup equation of the line's margin; and add three subtotals for system cost, system markup and system fees (the estimator bonus and freight combined into one item). His answers: real .xlsx; Markup is a live formula on the line's own sell before freight / rounding / bonuses; subtotals under each system; fees = freight + 2% estimator bonus + 5% package bonus + the $25 round-up / typed-price adjustment, so cost + markup + fees reconciles to the system's price.
+
+**Built:** Estimator → More ▾ → **Review spreadsheet** (replaces Parts list (CSV)) downloads `<stem>-review-spreadsheet.xlsx`: one sheet "Review" (header bold, frozen, filtered) with Manufacturer · Item name · Description · Room · System · Qty · Unit Cost · Unit Sell · Ext Cost · Ext Sell · Line margin · Markup · Price source · Link · Notes. Unit Sell is the line's own sell; Ext Cost, Ext Sell, Line margin and Markup are formulas with cached results; Link is a clickable hyperlink (a line's own http/https link, a vendor-quote row's own link else the vendor quote's; never on assembly components). Under each system: **System cost**, **System markup** (SUM formulas) and **System fees** (a number, with "Freight · Estimator bonus · Package bonus · Price rounding" in Notes), then a blank row. Two same-named systems stay separate blocks. exceljs loads on demand (its own chunk). Pure model `reviewSheetModel` / `systemFees` / `reviewLink` in `src/app/(app)/estimator/parts-csv.ts`; workbook `src/app/(app)/estimator/review-sheet-xlsx.ts`; harness `#363`.
+
+**Gates:** tsc 0 errors; test:specs 25,049 PASS / 0 FAIL (33 new `#363` checks, including the workbook read back with exceljs; the `#305 header` menu pin now names Review spreadsheet); test:smoke 268 PASS / 0 FAIL (authenticated); eslint 0 problems on the 6 changed src files (`scripts/test-review-and-spec.ts` overflows eslint's react-hooks rule, as before, so it is excluded); `next build` passes, with exceljs in a separate lazily loaded chunk.
+
+**Rollback:** safe. No migration, no stored fields.
+
+**Remaining (Jeff-gated):**
+- Download one real estimate's Review spreadsheet and open it in Excel: click a custom part's link, check Markup on a few lines, and check that System cost + System markup + System fees matches the system's price on Build (a system with labor lines reads short by the labor's sell, since labor isn't listed).
+
+## 364. Show on BOM switches — DONE 2026-10-22 on `feat/364-bom-show-switches` (D1260–D1262)
+
+Jeff, 2026-10-22: on the Estimator's BOM export, it should be possible to choose whether freight, materials and labor costs show, or just a system total price, and each piece is chosen while building the estimate. It applies to the BOM tab, the BOM PDF, the saved preview's BOM tab and the client's online BOM view.
+
+**Built:** Build package → BOM quote gains a **Show on BOM** row with four switches: Line prices · Materials · Labor · Freight. All four are on by default, which prints today's BOM byte-for-byte. They are saved in the quote's `pdfOptions` (`bomLinePrices` / `bomMaterials` / `bomLabor` / `bomFreight`) and applied only by `bomViewProps`, so the live tab, the BOM PDF, `/estimator-preview/[id]?tab=bom` and the portal / share online BOM all follow them. System prices, group / alternate subtotals, tax, the Rewards credit and the Total always show. Line prices yields to Client package → Line detail → Prices: it is disabled while Prices is off. The estimate PDF, the Cover PDF, bidder PDFs and the package page are unchanged.
+
+**Gates:** tsc 0 errors; test:specs 25,038 PASS / 0 FAIL (22 new `#364` checks, plus the `#251` source pins widened for the new flags); test:smoke 268 PASS / 0 FAIL; eslint 0 problems on the 6 changed src files + the 2 new scripts (`scripts/test-review-and-spec.ts` excluded as before); `next build` compiled, 144/144 static pages.
+
+**Rollback:** safe. No migration. The keys are additive inside `pdfOptions`, and an older build ignores them, so the BOM then shows everything.
+
+**Remaining (Jeff-gated):**
+- Flip each switch on a real estimate, Save, and check the BOM PDF and the client link's BOM view on production.
+
+
+## 365. Model number on BOM quote lines — DONE 2026-10-22 on `feat/365-bom-model-numbers` (D1270–D1272)
+
+Jeff, 2026-10-22: "I want the model number and the description to show up on the BOM quotes." Inline "Model — Description" on the line's text, in the BOM view only.
+
+**Built:** every plain catalog line in the BOM view prints `ColorSource Spot V — ETC LED ellipsoidal, 19° lens` (option rows too). Applies to Build package → BOM quote (live), the BOM PDF, the saved preview's BOM tab and the client's online BOM (portal / share). The model is `lineModel` (the line's frozen Model # → the catalog's Model # → MFR P/N → the SKU's model tail); a SKU the catalog doesn't know prints only the line's own Model # / MFR P/N, never its SKU. Vendor-quote, allowance, curtain, labor, bonus/credit, assembly / rack / track and placeholder-SKU (CUSTOM / AI / CURTAIN / CRT-n) lines print their description only; a description that already starts with the model isn't doubled. Wired like #364: `bomViewProps` sets `showModels`, and the four callers pass `bomModelParts` — the server pages through `loadBomModelPartsFor` (one `getManyBySku`, never throws), the live tab through a new `bomModelPartsAction` (same read), only while the tab shows. The estimate PDF, appendix, Cover PDF, bidder PDFs and the package page are byte-for-byte unchanged.
+
+**Gates:** tsc 0 errors; test:specs 25,103 PASS / 0 FAIL (32 new `#365` checks: pure rules, BOM render, byte-for-byte against the 15 `p5` and 5 `#364` fixtures, source pins, and the loader against the test DB; two existing BOM-caller source pins widened for `bomModelParts`); test:smoke 268 PASS / 0 FAIL; eslint 0 problems on the 11 changed / new src files (`scripts/test-review-and-spec.ts` excluded as before); `next build` compiled, 144/144 static pages.
+
+**Rollback:** safe. No migration, no stored field.
+
+**Remaining (Jeff-gated):**
+- Open a real estimate's BOM quote tab, BOM PDF and client-link BOM view on production and check the models read right (parts with no Model # fall back to the MFR P/N).

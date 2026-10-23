@@ -296,6 +296,9 @@ export type InitialQuote = {
    *  the stored one on a saved quote (never changed by a save), else the
    *  hand-off's / suggestion's; sent with the CREATE save only. */
   leadId: string | null;
+  /** Box goods sale (spec 2026-10-21) — the stored flag (boxSaleOf); false for a new estimate unless the
+   *  + New quote card opened it (?box=1). Rides every Save. */
+  boxSale: boolean;
 };
 
 /**
