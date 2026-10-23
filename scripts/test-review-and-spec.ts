@@ -70705,9 +70705,11 @@ import type { SpecItem as B365Item } from "@/app/(app)/estimator/types";
   const online = rd("src/components/online-estimate/online-estimate.tsx");
   const portal = rd("src/app/portal/quotes/[id]/page.tsx");
   const share = rd("src/app/share/quote/[id]/[token]/page.tsx");
-  ok(online.includes("const shown = showBom ? { ...bomViewProps(docProps), bomModelParts } : docProps;") &&
-     [portal, share].every((pg) => pg.includes('const bomModelParts = view === "bom" ? await loadBomModelPartsFor(docProps.sections) : undefined;') && pg.includes("bomModelParts={bomModelParts}") && pg.includes("view={view}")),
-    "#365 online BOM: the portal and share pages read models only for ?view=bom and the view hands them to the BOM view alone (the revision's own lines)");
+  // Box goods sale merge (2026-10-22): a box sale's docProps ARE the BOM view (quoteDocumentDataFor sets showModels), so they take the
+  // models on the default view too; a normal estimate's narrative document has no showModels and still never reads or gets them.
+  ok(online.includes("const shown = showBom ? { ...bomViewProps(docProps), bomModelParts } : docProps.showModels === true ? { ...docProps, bomModelParts } : docProps;") &&
+     [portal, share].every((pg) => pg.includes('const bomModelParts = view === "bom" || docProps.showModels === true ? await loadBomModelPartsFor(docProps.sections) : undefined;') && pg.includes("bomModelParts={bomModelParts}") && pg.includes("view={view}")),
+    "#365 online BOM: the portal and share pages read models only for ?view=bom (or a document that is already the BOM view — a box sale) and the view hands them to the BOM view alone (the revision's own lines)");
   const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
   ok(tab.includes("bomModelSkus(shown?.sections)") && tab.includes("bomModelPartsAction(want)") && tab.includes("<BomDocument props={docProps} />") && !/from "@\/lib\/stores\//.test(tab) &&
      /useMemo\(\(\) => \(shown \? liveBomDocumentProps\(shown\) : null\), \[shown\]\)/.test(tab),
