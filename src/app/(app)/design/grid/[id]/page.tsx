@@ -291,7 +291,7 @@ export default async function GridEditorPage({
     .map((p) => ({
       sku: p.id,
       name: p.desc,
-      pricePerSqft: fabricSellPerSqft({ fabricRate: fabricAreaRateOf(p), sewingPct }, tier.margin),
+      pricePerSqft: fabricSellPerSqft({ fabricRate: fabricAreaRateOf(p), sewingPct }, tier.markup),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
   // #212: the active option's custom items, sell-priced at this customer's
@@ -299,7 +299,7 @@ export default async function GridEditorPage({
   // the margin stays on the server (the curtain rule above).
   const customLines = customItemBomLines(
     customItemsOf(project.options?.find((o) => o.id === activeOptionId)?.customItems),
-    tier.margin
+    tier.markup
   );
   // #232: the active option's labor lines, computed by the quote builder
   // itself over this request's reads — grouped by the same `parts` rows the

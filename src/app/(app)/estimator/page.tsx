@@ -531,7 +531,7 @@ export default async function EstimatorPage({
   if (!q) {
     const t = await resolveTier(initial.customerId, initial.contactName);
     initial.pricingTier = t.tier;
-    initial.tierMargin = t.margin;
+    initial.tierMargin = t.markup;
   }
 
   /* ---- travel estimate for the LOADED quote only (E3/E4, punch #89) ----

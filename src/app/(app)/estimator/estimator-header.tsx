@@ -245,7 +245,7 @@ export function EstimatorHeader({
                 color: "#5fd29a",
               }}
             >
-              {(t.margin * 100).toFixed(1)}%
+              {(t.markup * 100).toFixed(1)}%
             </div>
           </div>
           <div style={{ textAlign: "right" }}>

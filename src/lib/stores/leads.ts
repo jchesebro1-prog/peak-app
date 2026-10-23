@@ -791,7 +791,7 @@ export async function convert(
     value: Math.round(l.value || 0),
     margin: 0,
     pricingTier: tier.tier,
-    tierMargin: tier.margin,
+    tierMargin: tier.markup,
     status: "draft",
     source: "lead",
     // #223: the opportunity link — the quote carries this lead's number.

@@ -467,7 +467,7 @@ export async function designToQuotePartial(
     source: "sandbox",
     requote: true,
     pricingTier: resolvedTier.tier,
-    tierMargin: resolvedTier.margin,
+    tierMargin: resolvedTier.markup,
     spec: {
       venue: d.venue,
       size: d.size,

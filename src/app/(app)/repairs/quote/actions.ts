@@ -26,7 +26,7 @@ import {
   type RepairPartInput,
   type TripVenueInput,
 } from "@/lib/repair-engine";
-import { resolveTier, serviceMarginFor } from "@/lib/pricing-tiers";
+import { resolveTier, serviceMarkupFor } from "@/lib/pricing-tiers";
 import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { coordsOf, quoteOrigin, driveMiles, driveMinutes } from "@/lib/geo";
@@ -111,8 +111,8 @@ async function persist(formData: FormData, out?: { creditNote?: string; findingN
   const tier = await resolveTier(customerId, contactName);
   // #254 follow-up: an untiered customer prices/stamps at THIS service's own
   // default margin (baseRates.margin — same seed the builder knob uses), not
-  // tier Base's registry margin (src/lib/pricing-tiers.ts serviceMarginFor).
-  const serviceMargin = serviceMarginFor(tier, baseRates.margin);
+  // tier Base's registry margin (src/lib/pricing-tiers.ts serviceMarkupFor).
+  const serviceMargin = serviceMarkupFor(tier, baseRates.margin);
   const quoteMargin = Number.isFinite(marginPts)
     ? Math.max(5, Math.min(50, marginPts)) / 100
     : serviceMargin;

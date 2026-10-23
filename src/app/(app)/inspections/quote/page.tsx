@@ -120,7 +120,7 @@ export default async function InspectionQuotePage({
         tier: tierInfo[c.id]?.byContactTier[ct.name] ?? null,
       })),
       // #254: only the company's OWN tier seeds the knob; none → the builder's default margin.
-      tierMargin: tierInfo[c.id]?.tier ? tierInfo[c.id].margin : null,
+      tierMargin: tierInfo[c.id]?.tier ? tierInfo[c.id].markup : null,
       tier: tierInfo[c.id]?.tier ?? null,
   }));
 

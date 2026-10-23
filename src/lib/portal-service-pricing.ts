@@ -1,6 +1,6 @@
 import { get as getCustomer, type CustomerDoc } from "@/lib/stores/customers";
 import { coordsOf } from "@/lib/geo";
-import { resolveTier, serviceMarginFor } from "@/lib/pricing-tiers";
+import { resolveTier, serviceMarkupFor } from "@/lib/pricing-tiers";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { compute as computeFlame, getRates as getFlameRates } from "@/lib/flametest-engine";
 import { computeEstimate as computeInspection, getRates as getInspectionRates } from "@/lib/inspection-engine";
@@ -215,7 +215,7 @@ export async function priceServiceRequest(
     const baseRates = await getFlameRates();
     // #254 follow-up: an untiered customer prices/stamps at flame testing's
     // own default margin, not tier Base's registry margin.
-    const serviceMargin = serviceMarginFor(tier, baseRates.margin);
+    const serviceMargin = serviceMarkupFor(tier, baseRates.margin);
     const rates = { ...baseRates, margin: serviceMargin };
     const venueInputs = flameVenueInputsFrom(
       req.venues.map((v) => ({ id: v.venueId, curtains: v.count })),
@@ -275,7 +275,7 @@ export async function priceServiceRequest(
   const baseRates = await getInspectionRates();
   // #254 follow-up: an untiered customer prices/stamps at inspections' own
   // default margin, not tier Base's registry margin.
-  const serviceMargin = serviceMarginFor(tier, baseRates.margin);
+  const serviceMargin = serviceMarkupFor(tier, baseRates.margin);
   const rates = { ...baseRates, margin: serviceMargin };
   const venueInputs = inspectionVenueInputsFrom(
     req.venues.map((v) => ({ id: v.venueId, lineSets: v.count })),

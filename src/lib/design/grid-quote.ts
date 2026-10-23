@@ -222,10 +222,10 @@ export async function buildGridQuote(
   const gridCatalog = [...symbolRows, ...virtualRows];
   const tierCatalog = gridCatalog.map((p) => ({
     ...p,
-    list: isTierPriced(p.cost, tier.margin) ? Math.round((p.cost / (1 - tier.margin)) * 100) / 100 : p.list,
+    list: isTierPriced(p.cost, tier.markup) ? Math.round((p.cost / (1 - tier.markup)) * 100) / 100 : p.list,
   }));
   const fallbackKeys = new Set(
-    gridCatalog.filter((p) => !isTierPriced(p.cost, tier.margin)).flatMap((p) => [p.id, p.sku])
+    gridCatalog.filter((p) => !isTierPriced(p.cost, tier.markup)).flatMap((p) => [p.id, p.sku])
   );
   const isFallbackLine = (l: Pick<BomLine, "partId" | "kind">) => l.kind !== "curtain" && fallbackKeys.has(l.partId);
 
@@ -249,8 +249,8 @@ export async function buildGridQuote(
   for (const s of conduitSizes) {
     const p = s.partId ? catalogById.get(s.partId) : undefined;
     if (!p || conduitParts.has(p.id)) continue;
-    const tiered = isTierPriced(p.cost, tier.margin);
-    conduitParts.set(p.id, { desc: p.desc, unit: p.unit, cost: p.cost, list: tiered ? Math.round((p.cost / (1 - tier.margin)) * 100) / 100 : p.list });
+    const tiered = isTierPriced(p.cost, tier.markup);
+    conduitParts.set(p.id, { desc: p.desc, unit: p.unit, cost: p.cost, list: tiered ? Math.round((p.cost / (1 - tier.markup)) * 100) / 100 : p.list });
     if (!tiered) fallbackKeys.add(p.id);
   }
   const descById = new Map(tierCatalog.map((p) => [p.id, p.desc]));
@@ -287,7 +287,7 @@ export async function buildGridQuote(
 
   // #227 late: curtains carry the sewing adder on top of the fabric rate.
   const sewingPct = inputs ? inputs.sewingPct : await loadCurtainSewingPct();
-  const curtainPrices = priceGridCurtains(placements, catalog, { sewingPct }, tier.margin);
+  const curtainPrices = priceGridCurtains(placements, catalog, { sewingPct }, tier.markup);
   const fabricNames = new Map(catalog.filter(isFabricRow).map((p) => [p.id, p.desc] as const));
   const curtains = curtainLines(placements, new Map([...curtainPrices].map(([id, v]) => [id, v.priceEach])), fabricNames);
   const curtainValue = curtains.reduce((a, l) => a + l.ext, 0);
@@ -296,7 +296,7 @@ export async function buildGridQuote(
   // Custom items (#212) price exactly like an Equipment-map allowance: sell =
   // unit cost ÷ (1 − the customer's tier margin). Always priced, so they never
   // make a design "Incomplete" or refuse the quote.
-  const custom = customItemBomLines(customItems, tier.margin);
+  const custom = customItemBomLines(customItems, tier.markup);
   const customValue = custom.reduce((a, l) => a + l.ext, 0);
   const customCost = customItemsCost(customItems);
 
@@ -339,7 +339,7 @@ export async function buildGridQuote(
   const overrides: LaborOverrides = {};
   for (const [k, v] of Object.entries(sanitizeLaborOverrides(option.laborOverrides))) if (isEditableBomGroupKey(k)) overrides[k] = v;
   const laborLines = gridLaborLines(material, laborTier, wireLabor, overrides);
-  const laborCostFrac = tier.margin >= 0 && tier.margin < 0.95 ? 1 - tier.margin : LABOR_COST_FRAC_FALLBACK;
+  const laborCostFrac = tier.markup >= 0 && tier.markup < 0.95 ? 1 - tier.markup : LABOR_COST_FRAC_FALLBACK;
   const labor = laborLines
     .filter((l) => l.amount > 0)
     .map((l) => ({ sku: l.sku, desc: l.desc, qty: 1, unit: "lot", price: l.amount, ext: l.amount, cost: Math.round(l.amount * laborCostFrac * 100) / 100 }));
@@ -379,5 +379,5 @@ export async function buildGridQuote(
   const manyOptions = ensureOptions(project).options.length > 1;
   const quoteName = `${project.name}${manyOptions ? ` · ${option.name}` : ""} — The Grid design`;
 
-  return { ok: true, build: { lines, value, margin, fallbackLines, spec, tier: { tier: tier.tier, margin: tier.margin }, locationId, quoteName, labor: laborLines } };
+  return { ok: true, build: { lines, value, margin, fallbackLines, spec, tier: { tier: tier.tier, margin: tier.markup }, locationId, quoteName, labor: laborLines } };
 }

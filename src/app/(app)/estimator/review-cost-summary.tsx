@@ -2,7 +2,7 @@
 
 import type { SpecSection } from "./types";
 import { isEstimatorBonusItem, isPackageBonusItem } from "@/lib/estimate-bonus/flags";
-import { fmt, lineExtSellOf, systemFreight, systemItemsCost, systemMargin, systemSellTotal, type QuoteTotals } from "./pricing";
+import { fmt, lineExtSellOf, systemFreight, systemItemsCost, systemMarkup, systemSellTotal, type QuoteTotals } from "./pricing";
 
 /**
  * #305 — Customer review's internal numbers (never on a customer document): cost, sell and margin per system.
@@ -26,7 +26,7 @@ export function ReviewCostSummary({ sections, totals }: { sections: SpecSection[
       <td style={cell}>{sec.name || "Untitled"}</td>
       <td style={num}>{fmt(systemItemsCost(sec) + systemFreight(sec))}</td>
       <td style={num}>{fmt(systemSellTotal(sec))}</td>
-      <td style={num}>{(systemMargin(sec) * 100).toFixed(1)}%</td>
+      <td style={num}>{(systemMarkup(sec) * 100).toFixed(1)}%</td>
     </tr>
   );
   return (
@@ -47,7 +47,7 @@ export function ReviewCostSummary({ sections, totals }: { sections: SpecSection[
             <td style={cell}>Total</td>
             <td style={num}>{fmt(totals.cost + totals.fr)}</td>
             <td style={num}>{fmt(totals.rev + totals.fr)}</td>
-            <td style={num}>{(totals.margin * 100).toFixed(1)}%</td>
+            <td style={num}>{(totals.markup * 100).toFixed(1)}%</td>
           </tr>
           {(totals.credit || 0) > 0 && (
             <>

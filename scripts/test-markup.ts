@@ -6,6 +6,7 @@ import {
   DEFAULT_MARKUP, MARKUP_MAX, PRICING_BASIS, costFromSell, fmtMarkupPct, legacyTwinOf, marginToMarkup,
   markupOf, markupPctString, markupToMargin, roundMarkupPct, sameWholeMarkup, sellAt,
 } from "../src/lib/markup";
+import { catalogAddPrice, customPartSell, isAtTierSeed } from "../src/app/(app)/estimator/tier-reprice";
 
 const near = (a: number | null | undefined, b: number, eps = 1e-9) => a != null && Math.abs(a - b) <= eps;
 
@@ -33,6 +34,13 @@ export async function markupPureChecks(ok: Ok) {
   ok(legacyTwinOf(0.25) === null && legacyTwinOf(0) === null && legacyTwinOf(Number.NaN) === null, "markup: an exact conversion (Gold 25 %) has no twin; 0 / junk → null");
   ok(fmtMarkupPct(0.428571) === "42.9%" && fmtMarkupPct(0.43) === "43%", "markup: one-decimal percent display");
   ok(markupPctString(0.3 / 0.7) === "42.8571" && markupPctString(0.43) === "43", "markup: labor-draft percent string (4 dp)");
+
+  // Task 3 — legacy twin keeps old lines at the seed after the 43 % rounding.
+  const old = { cost: 100, price: 142.86, labor: false } as never;
+  ok(isAtTierSeed(old, 0.43) && isAtTierSeed(old, 0.3 / 0.7) && !isAtTierSeed({ cost: 100, price: 150, labor: false } as never, 0.43),
+    "markup: a line priced at the old 30 % margin is still 'at the seed' for a 43 % stamp (legacy twin)");
+  ok(customPartSell(100) === 154 && catalogAddPrice(100, 0, null) === 143 && catalogAddPrice(0, 75, 0.25) === 75,
+    "markup: custom part 54 %, no-stamp fallback 43 %, list-only part keeps its list");
 }
 
 export async function markupDbChecks(_ok: Ok) {

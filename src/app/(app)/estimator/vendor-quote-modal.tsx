@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fmt, round2 } from "./pricing";
+import { sellAt } from "@/lib/markup";
 import { VENDOR_ATTACHMENT_BUDGET, type VendorDraft, type VendorLineDraft } from "./types";
 import { parseMaterialCsv, parseMoney, readCsvFile, summarizeCsvErrors, VENDOR_CSV_TEMPLATE } from "./material-csv";
 import { VENDOR_UPLOAD_MAX_LABEL } from "@/lib/vendor-quote-file";
@@ -90,7 +91,7 @@ export default function VendorQuoteModal({
   secName,
   draft,
   vendors,
-  margin,
+  markup,
   onSet,
   onSetLine,
   onAddLine,
@@ -119,11 +120,11 @@ export default function VendorQuoteModal({
   draft: VendorDraft;
   /** Distinct catalog manufacturers, for the vendor-name datalist. */
   vendors: string[];
-  /** The fraction the Sell stat prices at: cost/(1−margin). Tier-seeded on an
-   *  add; on an edit the margin the LINE already carries, which is what the
+  /** The markup the Sell stat prices at: cost × (1 + markup) (#367). Tier-seeded on an
+   *  add; on an edit the markup the LINE already carries, which is what the
    *  save preserves (#144) — the form must never quote a price the save then
    *  does not write. */
-  margin: number;
+  markup: number;
   onSet: <K extends keyof VendorDraft>(field: K, value: VendorDraft[K]) => void;
   onSetLine: (id: number, field: keyof Omit<VendorLineDraft, "id">, value: string) => void;
   onAddLine: () => void;
@@ -191,11 +192,11 @@ export default function VendorQuoteModal({
   const total = vendorDraftTotal(draft);
   const typedTotal = (draft.total || "").trim() !== "";
   const disagrees = typedTotal && keptLines.length > 0 && round2(linesTotal) !== total;
-  /* `margin < 1` alone, not `> 0 && < 1` (#144): on an edit the margin handed
-     in is the line's own, and a line hand-priced below its cost carries a
-     negative one that the save rescales just the same — the stat has to show
-     what will land, not fall back to the bare cost. */
-  const sell = total > 0 && margin < 1 ? round2(total / (1 - margin)) : total;
+  /* No `> 0` guard (#144): on an edit the markup handed in is the line's own,
+     and a line hand-priced below its cost carries a negative one that the
+     save rescales just the same — the stat has to show what will land, not
+     fall back to the bare cost. */
+  const sell = total > 0 ? round2(sellAt(total, markup)) : total;
   /** #348 slice 4: the email hand-off is still copying the PDF in. */
   const copying = handoff?.status === "loading";
   const busy = uploading || copying || reading;
@@ -388,10 +389,10 @@ export default function VendorQuoteModal({
           />
           <Stat label="Vendor total" value={total > 0 ? fmt(total) : "—"} color="#8c919c" />
           {/* #144: named on an edit, because the rate is the LINE's preserved
-              margin rather than the tier seed — a number the user may have set
-              with the margin slider and would otherwise have to infer. */}
+              markup rather than the tier seed — a number the user may have set
+              with the markup slider and would otherwise have to infer. */}
           <Stat
-            label={editing ? "Sell at " + Math.round(margin * 100) + "%" : "Sell"}
+            label={editing ? "Sell at " + Math.round(markup * 100) + "%" : "Sell"}
             value={total > 0 ? fmt(sell) : "—"}
             size={14}
             weight={700}

@@ -1,4 +1,5 @@
 import { round2 } from "./pricing";
+import { MARKUP_MAX, sellAt } from "@/lib/markup";
 import type { LaborDraft, LaborGroupRecord, SpecItem, SpecSection } from "./types";
 
 /**
@@ -78,9 +79,9 @@ export function pruneLaborGroups(sec: SpecSection): SpecSection {
   return out;
 }
 
-/** The labor draft's margin fraction, read exactly as computeLabor reads it. */
-function draftMargin(d: LaborDraft): number {
-  return Math.min(0.95, Math.max(0, (parseFloat(d.margin) || 0) / 100));
+/** The labor draft's markup fraction, read exactly as computeLabor reads it. */
+function draftMarkup(d: LaborDraft): number {
+  return Math.min(MARKUP_MAX, Math.max(0, (parseFloat(d.margin) || 0) / 100));
 }
 
 /** Seeded-sell tolerance: the mobilization line carries its travel lines'
@@ -110,7 +111,7 @@ function draftNotesFor(it: SpecItem, group: string, draft: LaborDraft): { commen
 /**
  * What an "Update labor" would overwrite (#269): lines of the group with
  * hand edits — a qty or sell that no longer matches what the configurator
- * produced (a typed price or ext sell, a qty change, a margin slider), or a
+ * produced (a typed price or ext sell, a qty change, a markup slider), or a
  * comment / internal note that differs from what the draft writes — and how
  * many of its lines were removed since (an update brings them back). A line
  * counts once however many of those it has.
@@ -119,12 +120,12 @@ export function laborGroupEdits(sec: SpecSection, group: string): { handEdited: 
   const rec = laborGroupRecord(sec, group);
   const lines = sec.items.filter((it) => it.laborGroup === group);
   if (!rec) return { handEdited: 0, removed: 0 };
-  const m = draftMargin(rec.draft);
+  const m = draftMarkup(rec.draft);
   const handEdited = lines.filter((it) => {
     if (it.qty !== 1) return true;
     if (it.sellOverride) return true;
     if (it.extSellOverride != null && Number.isFinite(it.extSellOverride)) return true;
-    const seed = m < 1 ? round2(it.cost / (1 - m)) : it.cost;
+    const seed = round2(sellAt(it.cost, m));
     if (Math.abs(it.price - seed) > SEED_TOLERANCE + 1e-9) return true;
     const want = draftNotesFor(it, group, rec.draft);
     if (trimmed(it.comment) !== want.comment) return true;
@@ -134,24 +135,24 @@ export function laborGroupEdits(sec: SpecSection, group: string): { handEdited: 
 }
 
 /**
- * #254/#266: when the labor seed margin moves (a tier change in place, or a
+ * #254/#266: when the labor seed markup moves (a tier change in place, or a
  * system copied to another tier), every stored draft still at the PREVIOUS
  * seed (whole percent) follows to the next one — whether or not any of its
  * lines were re-priced (all hand-priced lines stay, but a later "Update
- * labor" must rebuild at the tier's margin, not revert to the old one). A
- * draft margin typed by hand (≠ the previous seed) is the user's and stays.
+ * labor" must rebuild at the tier's markup, not revert to the old one). A
+ * draft markup typed by hand (≠ the previous seed) is the user's and stays.
  * Equal seeds, or no drafts, return the section unchanged (same object).
  */
-export function syncLaborDraftMargins(sec: SpecSection, prevMargin: number, nextMargin: number): SpecSection {
+export function syncLaborDraftMarkups(sec: SpecSection, prevMarkup: number, nextMarkup: number): SpecSection {
   const map = sec.laborGroups;
-  const prevPct = Math.round(prevMargin * 100);
-  const nextPctN = Math.round(nextMargin * 100);
+  const prevPct = Math.round(prevMarkup * 100);
+  const nextPctN = Math.round(nextMarkup * 100);
   if (!map || prevPct === nextPctN) return sec;
   const nextPct = String(nextPctN);
   let changed = false;
   const out: Record<string, LaborGroupRecord> = {};
   for (const [k, rec] of Object.entries(map)) {
-    if (rec && rec.draft && Math.round(draftMargin(rec.draft) * 100) === prevPct && rec.draft.margin !== nextPct) {
+    if (rec && rec.draft && Math.round(draftMarkup(rec.draft) * 100) === prevPct && rec.draft.margin !== nextPct) {
       out[k] = { ...rec, draft: { ...rec.draft, margin: nextPct } };
       changed = true;
     } else out[k] = rec;

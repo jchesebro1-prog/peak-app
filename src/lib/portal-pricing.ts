@@ -47,9 +47,9 @@ export async function pricingContextFor(session: { customerId: string; name: str
   const [t, rules, curtainSewingPct] = await Promise.all([resolveTier(session.customerId, session.name), loadPortalRules(), loadCurtainSewingPct()]);
   return {
     customerId: session.customerId,
-    margin: t.margin,
+    margin: t.markup,
     tier: t.tier,
-    tierMargin: t.margin,
+    tierMargin: t.markup,
     staleCostMonths: rules.staleCostMonths,
     now: Date.now(),
     curtainSewingPct,

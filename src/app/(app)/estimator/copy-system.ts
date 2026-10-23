@@ -2,17 +2,19 @@ import { rewriteQuoteSpec, type RenameMap } from "@/lib/catalog-rename/rewrite";
 import { withoutGroupMeta } from "@/lib/estimate-groups/groups";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { remapCurtainTrackKeys } from "@/lib/curtain-cut-sheets/track-link";
-import { syncLaborDraftMargins } from "./labor-group";
-import { lineMarginOf, round2 } from "./pricing";
+import { syncLaborDraftMarkups } from "./labor-group";
+import { lineMarkupOf, round2 } from "./pricing";
 import {
   catalogAddPrice,
   isAtTierSeed,
   isTierPriceable,
-  laborSeedMarginOf,
-  seedMarginOf,
-  tierSeedMarginFor,
+  laborSeedMarkupOf,
+  seedMarkupOf,
+  tierSeedMarkupFor,
   tierSeedPrice,
+  usableTierMarkup,
 } from "./tier-reprice";
+import { sellAt } from "@/lib/markup";
 import type { SpecItem, SpecSection } from "./types";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { applyProjectDiscounts } from "@/lib/project-discounts/rules";
@@ -30,7 +32,7 @@ import { applyProjectDiscounts } from "@/lib/project-discounts/rules";
  *    vendor-quote, labor, POR and portal-confirm lines keep their cost.
  * 2. Tier — a line still at the SOURCE tier's seed (judged on its ORIGINAL
  *    cost and sell, #254's rule) lands at exactly the TARGET tier's seed on
- *    its (possibly new) cost. A hand-priced line keeps its own margin on the
+ *    its (possibly new) cost. A hand-priced line keeps its own markup on the
  *    new cost. Fixtures are never tier-priced (as in #254).
  */
 
@@ -51,9 +53,6 @@ export type CopySectionResult = {
 /** A cost difference below half a cent is no change. */
 const COST_EPSILON = 0.005;
 
-const validMargin = (m: number | null | undefined): number | null =>
-  m != null && Number.isFinite(m) && m > 0 && m < 1 ? m : null;
-
 /** Lines whose cost is not a catalog part's (kept as-is on a copy). */
 function keepsOwnCost(it: SpecItem): boolean {
   return !!(
@@ -71,21 +70,21 @@ function keepsOwnCost(it: SpecItem): boolean {
 }
 
 /**
- * The line's sell carried onto `newCost` at the margin it already holds: an
- * ext-sell override scales at the line's extended margin, otherwise the unit
- * sell at lineMarginOf. A line with no usable margin keeps its sell.
+ * The line's sell carried onto `newCost` at the markup it already holds: an
+ * ext-sell override scales at the line's extended markup, otherwise the unit
+ * sell at lineMarkupOf. A line with no usable markup keeps its sell.
  */
-function keepMarginOnNewCost(it: SpecItem, oldCost: number, newCost: number): Pick<SpecItem, "price" | "extSellOverride"> {
+function keepMarkupOnNewCost(it: SpecItem, oldCost: number, newCost: number): Pick<SpecItem, "price" | "extSellOverride"> {
   const ext = it.extSellOverride;
   if (ext != null && Number.isFinite(ext) && ext > 0) {
     const qty = it.qty;
-    if (!(qty > 0)) return { price: it.price, extSellOverride: ext };
-    const m = 1 - (oldCost * qty) / ext;
-    if (!Number.isFinite(m) || !(m < 1)) return { price: it.price, extSellOverride: ext };
-    return { price: it.price, extSellOverride: round2((newCost * qty) / (1 - m)) };
+    if (!(qty > 0) || !(oldCost > 0)) return { price: it.price, extSellOverride: ext };
+    const k = (ext - oldCost * qty) / (oldCost * qty);
+    if (!Number.isFinite(k)) return { price: it.price, extSellOverride: ext };
+    return { price: it.price, extSellOverride: round2(sellAt(newCost * qty, k)) };
   }
-  const m = lineMarginOf(oldCost, it.price);
-  return m != null ? { price: round2(newCost / (1 - m)), extSellOverride: ext } : { price: it.price, extSellOverride: ext };
+  const k = lineMarkupOf(oldCost, it.price);
+  return k != null ? { price: round2(sellAt(newCost, k)), extSellOverride: ext } : { price: it.price, extSellOverride: ext };
 }
 
 function withSell(it: SpecItem, sell: Pick<SpecItem, "price" | "extSellOverride">): SpecItem {
@@ -108,10 +107,10 @@ export function copySectionForTarget(
     renames?: { m: RenameMap; models: RenameMap };
   }
 ): CopySectionResult {
-  const src = validMargin(opts.sourceTierMargin);
+  const src = usableTierMarkup(opts.sourceTierMargin);
   // An unusable target means no tier move: every line stays on the source's seed.
-  const tgt = validMargin(opts.targetTierMargin) ?? src;
-  const tierMoves = seedMarginOf(src) !== seedMarginOf(tgt);
+  const tgt = usableTierMarkup(opts.targetTierMargin) ?? src;
+  const tierMoves = seedMarkupOf(src) !== seedMarkupOf(tgt);
   let costsUpdated = 0;
   let tierRepriced = 0;
   let handPriced = 0;
@@ -154,7 +153,7 @@ export function copySectionForTarget(
       const atDefaultSell = !hasExt && Math.abs(it.price - oldList) < 0.01;
       let sell: Pick<SpecItem, "price" | "extSellOverride">;
       if (atDefaultSell) sell = { price: round2(newListSum), extSellOverride: it.extSellOverride };
-      else if (costChanged) sell = keepMarginOnNewCost(it, it.cost, newCost);
+      else if (costChanged) sell = keepMarkupOnNewCost(it, it.cost, newCost);
       else sell = { price: it.price, extSellOverride: it.extSellOverride };
       return { ...withSell(it, sell), cost: costChanged ? newCost : it.cost, components };
     }
@@ -162,7 +161,7 @@ export function copySectionForTarget(
     /* ---- tier verdict on the ORIGINAL line against the source tier ---- */
     const priceable = isTierPriceable(it);
     const atSeed = priceable && isAtTierSeed(it, src);
-    const laborSkip = !!it.labor && laborSeedMarginOf(src) === laborSeedMarginOf(tgt);
+    const laborSkip = !!it.labor && laborSeedMarkupOf(src) === laborSeedMarkupOf(tgt);
     if (tierMoves) {
       const hand = (it.extSellOverride != null && Number.isFinite(it.extSellOverride) && !it.fixture) || (priceable && !atSeed && !laborSkip);
       if (hand) handPriced++;
@@ -197,7 +196,7 @@ export function copySectionForTarget(
     const withParts = (line: SpecItem): SpecItem => (parts ? { ...line, components: parts } : line);
 
     if (atSeed) {
-      const seedMoved = tierSeedMarginFor(it, src) !== tierSeedMarginFor(it, tgt);
+      const seedMoved = tierSeedMarkupFor(it, src) !== tierSeedMarkupFor(it, tgt);
       if (seedMoved) tierRepriced++;
       // Unchanged cost and seed: keep the sell verbatim (labor's drift nudge,
       // a cent of rounding) rather than round-trip it through the formula.
@@ -205,7 +204,7 @@ export function copySectionForTarget(
       return withParts({ ...it, cost, price: tierSeedPrice({ cost, labor: it.labor }, tgt) });
     }
     if (!costChanged) return withParts({ ...it });
-    return withParts({ ...withSell(it, keepMarginOnNewCost(it, it.cost, cost)), cost });
+    return withParts({ ...withSell(it, keepMarkupOnNewCost(it, it.cost, cost)), cost });
   });
 
   // #267: a typed system sell was the source's price for the source's costs —
@@ -215,10 +214,10 @@ export function copySectionForTarget(
   // hand-priced lines or not.
   // #292: the copy's curtain/track pairs get fresh shared keys, so a copy in
   // the same estimate never shares a key with its source.
-  const copied: SpecSection = syncLaborDraftMargins(
+  const copied: SpecSection = syncLaborDraftMarkups(
     { ...section, id: opts.newSectionId, items: remapCurtainTrackKeys(items) },
-    laborSeedMarginOf(src),
-    laborSeedMarginOf(tgt)
+    laborSeedMarkupOf(src),
+    laborSeedMarkupOf(tgt)
   );
   delete copied.sellOverride;
   // Phase 2a: a copy lands ungrouped and unbuilt; copying within one estimate sets its group in the hook.

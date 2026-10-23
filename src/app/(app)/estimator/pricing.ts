@@ -3,6 +3,7 @@ import { ceilToStep, PRICE_OVERRIDE_MAX, typedPriceWarning, type PriceWarning } 
 import { creditLineAmount, isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { isEstimatorBonusItem, isPackageBonusItem } from "@/lib/estimate-bonus/flags";
 import { normalCostOf } from "@/lib/project-discounts/rules";
+import { MARKUP_MAX, DEFAULT_MARKUP, markupToMargin, sellAt } from "@/lib/markup";
 import {
   DISC_LABEL,
   FIXTURES,
@@ -26,7 +27,7 @@ import type {
 /**
  * Estimator pricing math — EXACT port of the prototype logic class
  * (Estimator.dc.html). Every equation, rounding step and threshold matches;
- * margins price as sell = cost / (1 − margin).
+ * markups price as sell = cost × (1 + markup) (#367; margin-on-price before).
  */
 
 export const round2 = (n: number): number => Math.round(n * 100) / 100;
@@ -47,23 +48,22 @@ export function short(n: number): string {
   return n >= 1000 ? "$" + (n / 1000).toFixed(1) + "k" : "$" + Math.round(n);
 }
 
-/** Margin readout color: ≥30% green, ≥18% amber, else red-brown. */
-export function marginColor(m: number): string {
-  return m >= 0.3 ? "#1f8a5b" : m >= 0.18 ? "#9a7d1f" : "#c0683a";
+/** Markup readout color: ≥43% green, ≥22% amber, else red-brown (#367: the old 30/18 margin bands). */
+export function markupColor(k: number): string {
+  return k >= 0.43 ? "#1f8a5b" : k >= 0.22 ? "#9a7d1f" : "#c0683a";
 }
 
 /**
- * The margin fraction a priced line is ALREADY carrying, or null when it has
- * none that can be rescaled (#144, D163). A sell price of 0 has no margin to
- * read, and a margin of exactly 1 (a real price against a $0 cost) rescales
- * through a division by zero. A negative margin — a line hand-priced below its
- * cost — is a real margin and is kept: the caller's job is to preserve what the
- * user set, not to quietly correct it.
+ * The markup a priced line is ALREADY carrying, or null when it has none
+ * that can be rescaled (#144, D163; #367 markup). A sell of 0 has nothing to
+ * read and a $0 cost has no markup. A negative markup — a line hand-priced
+ * below its cost — is real and is kept: the caller's job is to preserve what
+ * the user set, not to quietly correct it.
  */
-export function lineMarginOf(cost: number, price: number): number | null {
-  if (!(price > 0)) return null;
-  const m = (price - cost) / price;
-  return Number.isFinite(m) && m < 1 ? m : null;
+export function lineMarkupOf(cost: number, price: number): number | null {
+  if (!(price > 0) || !(cost > 0)) return null;
+  const k = (price - cost) / cost;
+  return Number.isFinite(k) ? k : null;
 }
 
 /** The customer-facing extended sell for a line, including a manual override. */
@@ -75,7 +75,7 @@ export function lineExtSellOf(it: Pick<SpecItem, "qty" | "price" | "extSellOverr
 
 /**
  * Back-solve for a manually typed UNIT sell price — the other numbers (ext
- * sell, margin) follow from qty × price once this lands, so any standing
+ * sell, markup) follow from qty × price once this lands, so any standing
  * extended-sell override is cleared.
  */
 export function priceFromUnitSellEdit(value: number): Pick<SpecItem, "price" | "sellOverride" | "extSellOverride"> {
@@ -97,40 +97,40 @@ export function backSolveExtSell(ext: number, qty: number): Pick<SpecItem, "pric
 }
 
 /**
- * A line repriced by the system margin slider / Sell field (setMarginAll /
- * setSystemMargin, estimator-client.tsx) — same price math as before, plus
+ * A line repriced by the system markup slider / Sell field (setMarkupAll /
+ * setSystemMarkup, estimator-client.tsx) — same price math as before, plus
  * clearing any per-line extended-sell override so a line that was back-solved
- * from a typed ext sell still follows the new margin instead of staying
+ * from a typed ext sell still follows the new markup instead of staying
  * stuck at its old ext.
  */
-export function repriceAtMargin(cost: number, marginFraction: number): Pick<SpecItem, "price" | "extSellOverride"> {
-  return { price: round2(cost / (1 - marginFraction)), extSellOverride: undefined };
+export function repriceAtMarkup(cost: number, markup: number): Pick<SpecItem, "price" | "extSellOverride"> {
+  return { price: round2(sellAt(cost, markup)), extSellOverride: undefined };
 }
 
 /**
- * A line repriced to a new cost at the margin it is already carrying (#144,
+ * A line repriced to a new cost at the markup it is already carrying (#144,
  * D163) — the rule behind editing a stored vendor quote's total.
  *
- * The margin is PRESERVED rather than re-seeded from the customer tier: the
- * user may have dragged the system margin slider or typed a sell price since
+ * The markup is PRESERVED rather than re-seeded from the customer tier: the
+ * user may have dragged the system markup slider or typed a sell price since
  * the line was created, and re-seeding would silently undo that. Changing the
  * vendor's cost should move the sell price the way the slider would.
  *
  * An unchanged cost returns the existing price verbatim rather than
- * round-tripping it through the margin, which could land a cent away. With no
- * usable margin on the line, `seedMargin` applies — itself guarded, so this can
- * never emit NaN or Infinity.
+ * round-tripping it through the markup, which could land a cent away. With no
+ * usable markup on the line, `seedMarkup` applies — itself guarded (0 < k ≤
+ * MARKUP_MAX, else DEFAULT_MARKUP), so this can never emit NaN or Infinity.
  */
-export function repricedAtLineMargin(
+export function repricedAtLineMarkup(
   cost: number,
   price: number,
   newCost: number,
-  seedMargin: number
+  seedMarkup: number
 ): number {
   if (newCost === cost) return price;
-  const m = lineMarginOf(cost, price);
-  const use = m != null ? m : seedMargin > 0 && seedMargin < 1 ? seedMargin : 0.3;
-  return round2(newCost / (1 - use));
+  const k = lineMarkupOf(cost, price);
+  const use = k != null ? k : seedMarkup > 0 && seedMarkup <= MARKUP_MAX ? seedMarkup : DEFAULT_MARKUP;
+  return round2(sellAt(newCost, use));
 }
 
 /**
@@ -169,7 +169,7 @@ export function systemItemsCost(sec: SpecSection): number {
  * The cost freight is charged on (#143, D162 — Jeff's exemption): every
  * non-option line EXCEPT one whose own price already includes freight (a
  * vendor quote added with "Quote includes freight"). Deliberately NOT
- * systemItemsCost, which still counts every line for the margin readout and
+ * systemItemsCost, which still counts every line for the markup readout and
  * the cost column.
  *
  * #366: on each line's NORMAL cost (`normalCostOf` — its cost before any
@@ -250,7 +250,7 @@ export function systemSellAdjustment(sec: SpecSection): number {
   return round2(systemSellTotal(sec) - systemComputedSell(sec));
 }
 
-/** #267: the section without a typed sell (the Margin sliders and Reset to auto). */
+/** #267: the section without a typed sell (the Markup sliders and Reset to auto). */
 export function clearSellOverride<T extends SpecSection>(sec: T): T {
   if (!("sellOverride" in sec)) return sec;
   const out = { ...sec };
@@ -273,18 +273,19 @@ export function hasSellOverride(sec: SpecSection): boolean {
   return validSellOverride(sec.sellOverride) != null;
 }
 
-/** #267: the system's margin at its actual price — (items sell + adjustment
- *  − items cost) ÷ (items sell + adjustment), freight left out as before. */
-export function systemMargin(sec: SpecSection): number {
+/** #267: the system's markup at its actual price — (items sell + adjustment
+ *  − items cost) ÷ items cost, freight left out as before (#367). */
+export function systemMarkup(sec: SpecSection): number {
   const rev = systemItemsRev(sec) + systemSellAdjustment(sec);
-  return rev > 0 ? (rev - systemItemsCost(sec)) / rev : 0;
+  const cost = systemItemsCost(sec);
+  return cost > 0 ? (rev - cost) / cost : 0;
 }
 
 /** #267: the warning (never a block) under a typed system sell — below the
- *  system's cost (items + freight) or under a 10% margin; null when auto. */
+ *  system's cost (items + freight) or under the low-markup line; null when auto. */
 export function systemSellWarning(sec: SpecSection): PriceWarning {
   if (!hasSellOverride(sec)) return null;
-  return typedPriceWarning(systemSellTotal(sec), systemItemsCost(sec) + systemFreight(sec), systemMargin(sec));
+  return typedPriceWarning(systemSellTotal(sec), systemItemsCost(sec) + systemFreight(sec), systemMarkup(sec));
 }
 
 export type QuoteTotals = {
@@ -296,7 +297,8 @@ export type QuoteTotals = {
   cost: number;
   tax: number;
   grand: number;
-  margin: number;
+  /** (rev − cost) ÷ cost — markup on cost (#367). */
+  markup: number;
   /** #267: the systems' price adjustments (typed sells + $25 rounding), already inside rev/mat/lab. */
   adj?: number;
   /** #282 phase 2: the Rewards credit taken off `grand` (after tax; never
@@ -392,7 +394,7 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
     cost,
     tax,
     grand: pre - credit,
-    margin: rev > 0 ? (rev - cost) / rev : 0,
+    markup: cost > 0 ? (rev - cost) / cost : 0,
     adj: round2(adjSum),
     credit,
     ...(anyAlt ? { alt: round2(altSum) } : {}),
@@ -431,12 +433,12 @@ export function inclusionsLine(t: Pick<QuoteTotals, "mat" | "lab" | "fr">): stri
  * the stored value. Recomputes totals() (tax 0, as the builder does) over a
  * numerically coerced copy of the posted sections; a posted value within a
  * cent of it is kept as posted (rounding), anything else is replaced by the
- * recomputed value and margin. Pure — the save action calls it.
+ * recomputed value and markup. Pure — the save action calls it.
  */
 export function reconcileEstimatorValue(
   sections: unknown,
-  posted: { value: unknown; margin: unknown }
-): { value: number; margin: number; adjusted: boolean } {
+  posted: { value: unknown; markup: unknown }
+): { value: number; markup: number; adjusted: boolean } {
   const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
   const safe: SpecSection[] = (Array.isArray(sections) ? sections : [])
     .filter((sec): sec is SpecSection => !!sec && typeof sec === "object")
@@ -464,10 +466,10 @@ export function reconcileEstimatorValue(
   const grand = n(t.grand);
   const pv = posted.value;
   if (typeof pv === "number" && Number.isFinite(pv) && Math.abs(pv - grand) <= 0.01) {
-    const pm = posted.margin;
-    return { value: pv, margin: typeof pm === "number" && Number.isFinite(pm) ? pm : n(t.margin), adjusted: false };
+    const pm = posted.markup;
+    return { value: pv, markup: typeof pm === "number" && Number.isFinite(pm) ? pm : n(t.markup), adjusted: false };
   }
-  return { value: grand, margin: n(t.margin), adjusted: true };
+  return { value: grand, markup: n(t.markup), adjusted: true };
 }
 
 /* ---------------- curtain configurator ---------------- */
@@ -494,9 +496,8 @@ export function computeCurtain(
   fabrics: FabricOpt[],
   /** #227 late: the sewing rule (loadCurtainSewingPct, on the server). */
   sewing: CurtainSewing,
-  /** Margin-on-price fraction; the customer tier stamp seeds this (item 11,
-   *  D87) — 0.30 is Peak's flat curtain margin, the no-tier default. */
-  margin: number = 0.3
+  /** Markup fraction; the customer tier stamp seeds this (item 11, D87; #367) — DEFAULT_MARKUP is the no-tier default. */
+  markup: number = DEFAULT_MARKUP
 ): CurtainCalc {
   const fab =
     fabrics.find((f) => f.sku === d.fabric) ||
@@ -516,7 +517,9 @@ export function computeCurtain(
     faceArea: h * w,
     fabricArea: cc.sewnAreaSqft,
     costEach: cc.costEach,
-    priceEach: curtainPrice(cc.costEach, margin),
+    // #367 bridge: curtainPrice still takes a margin until Task 5 switches
+    // the curtain module to markup — then this becomes curtainPrice(cc.costEach, markup).
+    priceEach: curtainPrice(cc.costEach, markupToMargin(markup)),
   };
 }
 
@@ -710,7 +713,8 @@ export type LaborCalc = {
   misc: number;
   baseCost: number;
   totalCost: number;
-  margin: number;
+  /** Markup fraction read from draft.margin (percent), clamped 0…MARKUP_MAX (#367). */
+  markup: number;
   totalPrice: number;
 };
 
@@ -731,8 +735,8 @@ export function computeLabor(draft: LaborDraft, rate: RateFn): LaborCalc {
   const misc = Math.max(0, parseFloat(draft.misc) || 0);
   const baseCost = mobCost + shopCost + misc;
   const totalCost = baseCost;
-  const margin = Math.min(0.95, Math.max(0, (parseFloat(draft.margin) || 0) / 100));
-  const totalPrice = margin < 1 ? totalCost / (1 - margin) : totalCost;
+  const markup = Math.min(MARKUP_MAX, Math.max(0, (parseFloat(draft.margin) || 0) / 100));
+  const totalPrice = sellAt(totalCost, markup);
   return {
     disc,
     discLabel: DISC_LABEL[disc] || disc,
@@ -751,7 +755,7 @@ export function computeLabor(draft: LaborDraft, rate: RateFn): LaborCalc {
     misc,
     baseCost,
     totalCost,
-    margin,
+    markup,
     totalPrice,
   };
 }
@@ -844,7 +848,7 @@ const TRAVEL_SKU: Record<LaborTravelKind, string> = { mileage: "MIL", hotel: "HT
  * mobilization's lines `<group>:<index>`; without one the key is `mob<id>`.
  */
 export function buildLaborItems(r: LaborCalc, discLabel: string, nextId: () => number, group?: string): SpecItem[] {
-  const price = (c: number) => (r.margin < 1 ? round2(c / (1 - r.margin)) : c);
+  const price = (c: number) => round2(sellAt(c, r.markup));
   const items: SpecItem[] = [];
   const tag: Pick<SpecItem, "laborGroup"> = group ? { laborGroup: group } : {};
   r.mobs.forEach((m, i) => {

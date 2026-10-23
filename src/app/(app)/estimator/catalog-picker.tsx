@@ -5,7 +5,7 @@ import type { CSSProperties } from "react";
 import { searchCatalog } from "./actions";
 import type { CatalogHit } from "./types";
 import type { SuggestPart } from "./estimator-data";
-import { fmt, marginColor, parseAddQty } from "./pricing";
+import { fmt, markupColor, parseAddQty } from "./pricing";
 import { staffPartLabel } from "@/lib/catalog-rename/sku";
 
 /**
@@ -154,7 +154,7 @@ export default function CatalogPicker({
       )}
 
       {shownHits.map((h) => {
-        const margin = h.list > 0 ? (h.list - h.cost) / h.list : 0;
+        const markup = h.cost > 0 && h.list > 0 ? (h.list - h.cost) / h.cost : 0;
         return (
           <div
             key={h.sku}
@@ -200,8 +200,8 @@ export default function CatalogPicker({
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, color: "#16181d", display: "block" }}>
                   {fmt(h.list)}
                 </span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: marginColor(margin) }}>
-                  {Math.round(margin * 100)}% · cost {fmt(h.cost)}
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: markupColor(markup) }}>
+                  {Math.round(markup * 100)}% · cost {fmt(h.cost)}
                 </span>
               </span>
               <input

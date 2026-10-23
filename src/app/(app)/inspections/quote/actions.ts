@@ -21,7 +21,7 @@ import {
   computeEstimate,
   type InspectionVenueInput,
 } from "@/lib/inspection-engine";
-import { resolveTier, serviceMarginFor } from "@/lib/pricing-tiers";
+import { resolveTier, serviceMarkupFor } from "@/lib/pricing-tiers";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { driveMiles, driveMinutes } from "@/lib/geo";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
@@ -88,8 +88,8 @@ async function persist(formData: FormData, out?: { creditNote?: string }): Promi
   const tier = await resolveTier(customerId, contactName);
   // #254 follow-up: an untiered customer prices/stamps at THIS service's own
   // default margin (baseRates.margin — same seed the builder knob uses), not
-  // tier Base's registry margin (src/lib/pricing-tiers.ts serviceMarginFor).
-  const serviceMargin = serviceMarginFor(tier, baseRates.margin);
+  // tier Base's registry margin (src/lib/pricing-tiers.ts serviceMarkupFor).
+  const serviceMargin = serviceMarkupFor(tier, baseRates.margin);
   const quoteMargin = Number.isFinite(marginPts)
     ? Math.max(5, Math.min(50, marginPts)) / 100
     : serviceMargin;

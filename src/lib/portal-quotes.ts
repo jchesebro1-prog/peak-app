@@ -135,7 +135,7 @@ export async function generatePortalQuote(
       locationId: venue.id,
       contactName: session.name,
       value: p.total,
-      margin: t.margin,
+      margin: t.markup,
       pricingTier: ctx.tier,
       tierMargin: ctx.tierMargin,
       source: "portal-catalog",
@@ -428,7 +428,7 @@ export async function refreshPortalQuote(
       await updateQuote(q.id, {
         spec: { sections: p.sections, mobs: [] },
         value: Math.round(t.grand),
-        margin: t.margin,
+        margin: t.markup,
         pricingTier: ctx.tier,
         tierMargin: ctx.tierMargin,
         portalFirm: { generatedAt: now, validUntil: firmValidUntil(now, rules.validityDays) },
@@ -443,7 +443,7 @@ export async function refreshPortalQuote(
     await updateQuote(q.id, {
       spec: { sections: p.sections, mobs: [] },
       value: Math.round(t.grand),
-      margin: t.margin,
+      margin: t.markup,
       pricingTier: ctx.tier,
       tierMargin: ctx.tierMargin,
       portalFirm: null,
