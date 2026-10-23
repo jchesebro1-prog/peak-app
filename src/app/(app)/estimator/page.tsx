@@ -50,6 +50,7 @@ import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults
 import ActionError from "@/components/action-error";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import { assistDraftViewOf } from "@/lib/assist/features/estimate-draft";
+import { repricedOnReviseOf } from "@/lib/estimate-reprice/rules";
 import { vendorPdfGateFor } from "@/lib/assist/gate-server";
 import { assistSettingsOf } from "@/lib/assist/config";
 import { getSuggestion, suggestionForQuote } from "@/lib/stores/estimate-suggestions";
@@ -601,6 +602,8 @@ export default async function EstimatorPage({
       portalStatusError={portalStatusError}
       // #334 (D877): the Assist-draft banner — null unless an undismissed Assist draft.
       assistDraft={assistDraftViewOf(q)}
+      // #368: what the last Revise re-priced (the Build banner shows it while the estimate is a draft).
+      repricedOnRevise={repricedOnReviseOf(q?.repricedOnRevise)}
       // Spec records design §6: the Spec select's options, as plain strings.
       specKeys={systemMatchKeys(specRecords)}
       canApplyCredit={can("create", user.roles)}

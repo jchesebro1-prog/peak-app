@@ -22,6 +22,7 @@ import type { EstimateSuggestionView, SuggestionParts } from "@/lib/assist/featu
 import type { VendorPdfExtraction } from "@/lib/vendor-pdf/extraction";
 import type { VendorPdfReadUi } from "@/lib/vendor-pdf/fill";
 import type { ProjectDiscounts } from "@/lib/project-discounts/rules";
+import type { RepricedOnRevise } from "@/lib/estimate-reprice/rules";
 
 export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
 export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
@@ -744,6 +745,8 @@ export type EstimatorProps = {
   /** #334 (D877) — the Build banner for an estimate Assist drafted from an
    *  email (null when not an Assist draft, or once dismissed). */
   assistDraft: AssistDraftView | null;
+  /** #368 — what the last Revise re-priced to today's catalog (null when nothing / never). Absent = null. */
+  repricedOnRevise?: RepricedOnRevise | null;
   /** Spec records design §6 — the Spec select's options: every non-archived
    *  system record's match key (`systemMatchKeys`), read on the server so the
    *  client never imports the records store. */

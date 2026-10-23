@@ -241,7 +241,7 @@ export function useEstimatorState(props: EstimatorProps) {
     fixtureAssemblies, vendors, blobUploads, customers, travel, next: initialNext, aiSource, people,
     quoteTasks, templateSets, assumptionLibrary, freightRule, portalStatusError, assistDraft, specKeys, canApplyCredit,
     viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault, peopleSentOnce = false, bonusRates,
-    suggestion = null, suggestionParts,
+    suggestion = null, suggestionParts, repricedOnRevise = null,
   } = props;
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   /** #245: the freight default for THIS load — computed once from the props
@@ -1569,6 +1569,11 @@ export function useEstimatorState(props: EstimatorProps) {
             window.location.reload();
             return false;
           }
+          // #368: …or was a revise that re-priced lines to today's catalog.
+          if (res.repriced) {
+            window.location.reload();
+            return false;
+          }
         }
         if (res.ok) {
           setActionError(null);
@@ -1623,6 +1628,11 @@ export function useEstimatorState(props: EstimatorProps) {
             setStatus(prevStatus);
             return;
           }
+          // #368: a revise of a sent / lost estimate saves them first too — it may re-price the stored lines and reload.
+          if (prevStatus !== "won" && v === "draft" && repriceLocked(prevStatus) && pdfDirty && (await saveNow()) === false) {
+            setStatus(prevStatus);
+            return;
+          }
           const r = await setStatusAction(id, v, v === "won" && alternatesTouched ? { alternatesTaken } : undefined);
           if (!r.ok) {
             // Punch #60: server rejected the transition (e.g. "won" without an
@@ -1640,6 +1650,11 @@ export function useEstimatorState(props: EstimatorProps) {
           // Batch 5 #59: the server put the won version back (the post-win edits are a
           // revision now) — this document holds the edits, so load the quote afresh.
           if (r.reopenedAtWon) {
+            window.location.reload();
+            return;
+          }
+          // #368: same when the revise re-priced lines to today's catalog (the Build banner lists them).
+          if (r.repriced) {
             window.location.reload();
             return;
           }
@@ -1673,6 +1688,14 @@ export function useEstimatorState(props: EstimatorProps) {
     startTransition(async () => {
       try {
         // #355 review I3: same as changeStatus — a stage move can leave Won.
+        // #368: …or revise a sent / lost estimate (a stage whose tag is Draft) — saved first, as above.
+        const pl = pipelines.quote.find((p) => p.id === pipelineId) || pipelines.quote.find((p) => p.id === pipelines.defaultQuotePipelineId) || pipelines.quote[0];
+        const revising = prevStatus !== "won" && repriceLocked(prevStatus) && !!pl && stageById(pl, stageId)?.tag === "draft";
+        if (revising && pdfDirty && (await saveNow()) === false) {
+          setStage(prevStage);
+          setStatus(prevStatus);
+          return;
+        }
         if (prevStatus === "won" && pdfDirty && (await saveNow()) === false) {
           setStage(prevStage);
           setStatus(prevStatus);
@@ -1690,6 +1713,10 @@ export function useEstimatorState(props: EstimatorProps) {
         setGateRefused(false);
         applyStageSync(r);
         postChanged("quote", id);
+        if (r.repriced) {
+          window.location.reload(); // #368: as changeStatus
+          return;
+        }
         if (r.reopenedAtWon) {
           window.location.reload();
           return;
@@ -3686,6 +3713,7 @@ export function useEstimatorState(props: EstimatorProps) {
     placeLibrarySystem,
     portalStatusError,
     assistDraft,
+    repricedOnRevise,
     preparedValue,
     projectName,
     qdChipLabel,

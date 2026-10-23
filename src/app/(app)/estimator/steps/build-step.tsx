@@ -29,6 +29,7 @@ import { vendorPdfLineHints } from "@/lib/vendor-pdf/fill";
 import { isPdfAttachment } from "@/lib/vendor-quotes/rules";
 import { PortalPanel } from "../portal-panel";
 import { AssistDraftBanner } from "../assist-draft-banner";
+import { RepriceBanner } from "../reprice-banner";
 import { SuggestedBomPanel } from "../suggested-bom-panel";
 import { bonusNotFigured, bonusRulesApply } from "@/lib/estimate-bonus/rules";
 import type { SuggestionParts } from "@/lib/assist/features/suggestion-panel";
@@ -143,6 +144,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     placeLibrarySystem,
     portalStatusError,
     assistDraft,
+    repricedOnRevise,
     projectDiscounts,
     rate,
     removeCredit,
@@ -489,6 +491,8 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           }}
         >
           <AssistDraftBanner view={assistDraft} />
+          {/* #368: a Revise re-priced lines to today's catalog — shown while the estimate is that revise's draft. */}
+          <RepriceBanner view={repricedOnRevise} quoteId={loadedId} show={status === "draft"} />
           {/* Box goods sale (spec 2026-10-21): turning it on with labor is allowed — Save stays refused until it's gone. */}
           {s.boxSaleLabor.length > 0 && (
             <div
