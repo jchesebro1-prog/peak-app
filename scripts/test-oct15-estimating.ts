@@ -342,7 +342,8 @@ function oct15BonusRateChecks(ok: Ok) {
   ok(sentRe === def, "oct15 #19: re-saving a sent quote at new rates leaves its bonus lines (and price) untouched");
   ok(canonicalBonusSections({ source: "estimator", status: "won" }, def as never, r) === def && lineBonusPct({ bonus: "estimator" }) === 0.02, "oct15 #19: won / lost never re-derive; a line without bonusPct reads its default");
   const acts = rd("src/app/(app)/estimator/actions.ts");
-  ok((acts.match(/canonicalBonusSections\([^\n]*await loadBonusRates\(\)\)/g) || []).length === 3 && rd("src/lib/assessments/quote-from-findings.ts").includes("[section], await loadBonusRates())"),
+  // #368: the save's call is the shared deriveEstimatorSections (derive.ts → canonicalBonusSections); Move / Copy keep theirs.
+  ok((acts.match(/canonicalBonusSections\([^\n]*await loadBonusRates\(\)\)/g) || []).length === 2 && /deriveEstimatorSections\([^\n]*await loadBonusRates\(\)\)/.test(acts) && rd("src/lib/assessments/quote-from-findings.ts").includes("[section], await loadBonusRates())"),
     "oct15 #19: every server write of an Estimator quote's sections passes the current rates");
 }
 

@@ -6,6 +6,7 @@ import { TIER_FALLBACK_MARGIN, usableTierMargin } from "@/app/(app)/estimator/ti
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { flagOldVendorLine, LIBRARY_GONE, librarySectionForLoad, parseLibraryKey, type LoadLibrarySystemResult } from "./system-library";
 import { invalidateSystemLibrary } from "./system-library-index";
+import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 
 /**
  * #293 slice 2 — Load system's core (the action is a requireUser wrapper).
@@ -14,8 +15,13 @@ import { invalidateSystemLibrary } from "./system-library-index";
  * exactly as Copy system does (#266): today's catalog,
  * the snapshot's tier → this estimate's. Persists nothing; the client places
  * the section and the normal Save writes it. Server-only.
+ *
+ * #368: `targetQuoteId` is the saved estimate the system will land in — a sent
+ * / won / lost one keeps its prices and is refused (REVISE_FIRST) before
+ * anything is read; an unsaved estimate (null) or a missing id loads as before.
  */
-export async function loadLibrarySystem(key: string, targetTierMargin: number | null): Promise<LoadLibrarySystemResult> {
+export async function loadLibrarySystem(key: string, targetTierMargin: number | null, targetQuoteId: string | null = null): Promise<LoadLibrarySystemResult> {
+  if (targetQuoteId && repriceLocked((await getQuote(targetQuoteId))?.status)) return { ok: false, error: REVISE_FIRST };
   const k = parseLibraryKey(key);
   // A malformed key was never an index entry — refuse it without touching the cache.
   if (!k) return { ok: false, error: LIBRARY_GONE };

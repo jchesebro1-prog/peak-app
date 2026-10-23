@@ -29,10 +29,12 @@ import { vendorPdfLineHints } from "@/lib/vendor-pdf/fill";
 import { isPdfAttachment } from "@/lib/vendor-quotes/rules";
 import { PortalPanel } from "../portal-panel";
 import { AssistDraftBanner } from "../assist-draft-banner";
+import { RepriceBanner } from "../reprice-banner";
 import { SuggestedBomPanel } from "../suggested-bom-panel";
 import { bonusNotFigured, bonusRulesApply } from "@/lib/estimate-bonus/rules";
 import type { SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 import { boxSaleLaborBanner } from "@/lib/estimate-box-sale/rules";
+import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 
 /**
  * #305 — Build: the systems sidebar (margin, cost breakdown, Rewards credit),
@@ -142,6 +144,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     placeLibrarySystem,
     portalStatusError,
     assistDraft,
+    repricedOnRevise,
     projectDiscounts,
     rate,
     removeCredit,
@@ -222,6 +225,9 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
   } = s;
   // Estimator bonuses: "Bonus not figured — check line costs" only where the rules apply.
   const bonusOn = bonusRulesApply({ source: initial.bonusSource, quoteType: initial.bonusQuoteType, status }, sections);
+  // #368: a sent / won / lost estimate keeps its prices — Load system and the track / curtain / labor configurators
+  // re-open only once it is revised (the server refuses too).
+  const repriceLock = repriceLocked(status) ? REVISE_FIRST : undefined;
   /* Phase 4 — open review comments pinned to the systems (the shared list is loaded by the hook). */
   const pinned = useMemo(
     () => commentsBySection(numberComments(s.reviewComments, sections), sections.map((x) => x.id)),
@@ -485,6 +491,8 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           }}
         >
           <AssistDraftBanner view={assistDraft} />
+          {/* #368: a Revise re-priced lines to today's catalog — shown while the estimate is that revise's draft. */}
+          <RepriceBanner view={repricedOnRevise} quoteId={loadedId} show={status === "draft"} />
           {/* Box goods sale (spec 2026-10-21): turning it on with labor is allowed — Save stays refused until it's gone. */}
           {s.boxSaleLabor.length > 0 && (
             <div
@@ -628,6 +636,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     onEditTrack={(lineId) => openTrackEdit(sec.id, lineId)}
                     onEditCurtain={(lineId) => openCurtainEdit(sec.id, lineId)}
                     onEditCustom={(lineId) => openCustomEdit(sec.id, lineId)}
+                    repriceLock={repriceLock}
                     customEditing={!!customEdit}
                     onSetCustomDraft={setCustomField}
                     onAddCustomPart={() => addCustomPart(sec.id)}
@@ -693,7 +702,8 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
             type="button"
             className="est-addsys est-addlib"
             onClick={() => setLibraryOpen(true)}
-            title="Load a system from a sent or won estimate — re-priced for this one"
+            disabled={!!repriceLock}
+            title={repriceLock || "Load a system from a sent or won estimate — re-priced for this one"}
             style={{
               width: "100%",
               marginTop: 8,
@@ -705,7 +715,8 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
               fontSize: 12.5,
               fontWeight: 600,
               fontFamily: "var(--font-ui)",
-              cursor: "pointer",
+              cursor: repriceLock ? "not-allowed" : "pointer",
+              opacity: repriceLock ? 0.55 : 1,
             }}
           >
             + From library…
@@ -744,7 +755,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
             />
           )}
           {libraryOpen && (
-            <SystemLibraryModal mode="load" tierMargin={tierMargin} onLoaded={placeLibrarySystem} onClose={() => setLibraryOpen(false)} />
+            <SystemLibraryModal mode="load" tierMargin={tierMargin} quoteId={loadedId} onLoaded={placeLibrarySystem} onClose={() => setLibraryOpen(false)} />
           )}
         </div>
 

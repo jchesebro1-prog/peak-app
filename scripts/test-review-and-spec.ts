@@ -11781,6 +11781,7 @@ seeded()
   .then(() => etc368ClientChecks(ok)) // #368 catalog
   .then(() => etc368ApplyDbChecks(ok)) // #368 catalog
   .then(() => etc368RiderChecks(ok)) // #368 catalog
+  .then(() => etc368LoadSystemDbChecks(ok)).then(() => etc368RepriceDbChecks(ok)) // #368 estimator
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -68322,7 +68323,7 @@ import { canonicalBonusSections as bnCanon } from "@/lib/estimate-bonus/canonica
   const bnActs = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
   const bnSaveStart = bnActs.indexOf("export async function saveQuoteAction(");
   const bnSaveBody = bnActs.slice(bnSaveStart, bnActs.indexOf("\n}\n", bnSaveStart));
-  const bnCanonAt = bnSaveBody.indexOf("canonicalBonusSections(");
+  const bnCanonAt = bnSaveBody.indexOf("deriveEstimatorSections("); // #368: the save canonicalizes through the shared helper (derive.ts)
   ok(bnSaveStart >= 0 && bnCanonAt >= 0 && bnCanonAt < bnSaveBody.indexOf("settleRewardCredit("), "#bonus source pin: saveQuoteAction canonicalizes bonus lines before settleRewardCredit");
   const bnPlaceStart = bnActs.indexOf("async function placeSystemInEstimate(");
   const bnPlaceBody = bnActs.slice(bnPlaceStart, bnActs.indexOf("\n}\n", bnPlaceStart));
@@ -70908,9 +70909,10 @@ import { rewriteQuoteSpec as pd366Rename } from "@/lib/catalog-rename/rewrite";
 
   const act = rd("src/app/(app)/estimator/actions.ts");
   const save = act.slice(act.indexOf("export async function saveQuoteAction("), act.indexOf("export async function searchQuotesAction("));
+  // #368: both steps now run through the shared deriveEstimatorSections (discounts first, then the bonus lines).
   ok(/mergeDiscountsForSave\(\s*priorDiscounts,\s*payload\.projectDiscounts !== undefined \? payload\.projectDiscounts : priorDiscounts,\s*user\.id,/.test(save) &&
-     save.indexOf("applyProjectDiscounts(sellNormalizedRaw, discounts)") > 0 && save.indexOf("applyProjectDiscounts(sellNormalizedRaw, discounts)") < save.indexOf("canonicalBonusSections(") &&
-     /canonicalBonusSections\([^)]*sellNormalized,/.test(save),
+     /deriveEstimatorSections\([^)]*\}, sellNormalizedRaw, discounts, await loadBonusRates\(\)\)/.test(save) &&
+     rd("src/lib/estimate-reprice/derive.ts").includes("return canonicalBonusSections(q, applyProjectDiscounts(sections, discounts), bonusRates);"),
     "#366 save: the action sanitizes + stamps the map (an older caller keeps the stored one) and re-applies it BEFORE the bonus lines are derived");
   ok(save.includes("...(Object.keys(discounts).length ? { projectDiscounts: discounts } : {}) },"), "#366 save: spec.projectDiscounts is written only when the estimate has any");
   const place = act.slice(act.indexOf("async function placeSystemInEstimate("), act.indexOf("export type CopySystemTarget"));
@@ -71453,4 +71455,303 @@ async function etc368RiderChecks(check: typeof ok): Promise<void> {
     "#368 rider: the route runs it after the drive sync, in its own try/catch, and reports it in the body (even when the drive sync failed)");
   check(A.ETC_RIDER_MAX_MS === 20_000 && A.ETC_ROUTE_BUDGET_MS === 55_000, "#368 rider: budget = min(20 s, what's left of 55 s)");
   await C.clearEtcKey();
+}
+
+/* --- #368 estimator: sent estimates keep their prices — the re-pricing actions are locked until Revise (spec §9) --- */
+import { REVISE_FIRST as e368ReviseFirst, repriceLocked as e368Locked } from "@/lib/estimate-reprice/lock";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  ok(e368ReviseFirst === "Revise the estimate first", "#368 estimator lock: the refusal text is \"Revise the estimate first\"");
+  ok(e368Locked("sent") && e368Locked("won") && e368Locked("lost") && !e368Locked("draft") && !e368Locked(undefined) && !e368Locked(null) && !e368Locked(""),
+    "#368 estimator lock: sent / won / lost are locked; draft and an unsaved estimate (no status) are open");
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  const place = act.slice(act.indexOf("async function placeSystemInEstimate("), act.indexOf("export type CopySystemTarget"));
+  const existingAt = place.indexOf('if (target.kind === "existing") {');
+  const refuseAt = place.indexOf("if (repriceLocked(existing.status)) return { ok: false, error: REVISE_FIRST };");
+  ok(existingAt > 0 && refuseAt > existingAt && refuseAt > place.indexOf('return { ok: false, error: "That estimate could not be found." };') &&
+     refuseAt < place.indexOf("await update(target.quoteId") && refuseAt < place.indexOf("storeVendorQuotes(") && refuseAt < place.indexOf("// Estimator bonuses: the new draft estimate gets its bonus lines at birth."),
+    "#368 estimator lock: Move / Copy into an EXISTING estimate refuses a sent / won / lost target before anything is written; the NEW-estimate branch has no such check");
+  ok((place.match(/repriceLocked\(/g) || []).length === 1, "#368 estimator lock: a Move / Copy into a NEW estimate is never refused (one check, in the existing branch only)");
+  const copy = act.slice(act.indexOf("export async function copySystemToEstimateAction("), act.indexOf("export async function updateQuoteMetaAction("));
+  ok(copy.indexOf("if (repriceLocked(existing.status)) return { ok: false, error: REVISE_FIRST };") > copy.indexOf('} else if (target.kind === "existing") {') &&
+     copy.indexOf("if (repriceLocked(existing.status)) return { ok: false, error: REVISE_FIRST };") < copy.indexOf("copySectionForTarget("),
+    "#368 estimator lock: Copy into an existing sent estimate is refused before the copy is re-priced");
+  const lib = rd("src/app/(app)/estimator/library-actions.ts");
+  ok(/loadLibrarySystemAction\(key: string, ctx: \{ tierMargin: number \| null; quoteId\?: string \| null \}\)/.test(lib) && lib.includes("return loadLibrarySystem(String(key ?? \"\"), tm, target);"),
+    "#368 estimator lock: Load system's action passes the estimate it lands in to the core");
+  const modal = rd("src/app/(app)/estimator/system-library-modal.tsx");
+  ok(modal.includes("await loadLibrarySystemAction(key, { tierMargin, quoteId });"), "#368 estimator lock: the Load system modal sends this estimate's id");
+  const bs = rd("src/app/(app)/estimator/steps/build-step.tsx");
+  ok(bs.includes("const repriceLock = repriceLocked(status) ? REVISE_FIRST : undefined;") && bs.includes("repriceLock={repriceLock}") &&
+     bs.includes("disabled={!!repriceLock}") && bs.includes('title={repriceLock || "Load a system from a sent or won estimate — re-priced for this one"}') &&
+     bs.includes('<SystemLibraryModal mode="load" tierMargin={tierMargin} quoteId={loadedId} onLoaded'),
+    "#368 estimator lock: Build disables + From library… with the same text, passes the lock to every system card, and the modal gets the estimate id");
+  const sc = rd("src/app/(app)/estimator/section-card.tsx");
+  ok(sc.includes("const laborEditable = isInternal && !p.repriceLock &&") && sc.includes("const trackEditable = isInternal && !p.repriceLock &&") && sc.includes("const curtainEditable = isInternal && !p.repriceLock &&") &&
+     sc.includes("{configLocked && (") && sc.includes("disabled title={p.repriceLock}") && !sc.includes("const customEditable = isInternal && !p.repriceLock"),
+    "#368 estimator lock: the labor / track / curtain configurators don't re-open on a locked estimate (a disabled ✎ says why); the Custom part form is unaffected");
+  ok(sc.includes("const hitLocked = repriceLocked(hit.status);") && sc.includes("disabled={hitLocked}") && sc.includes("title={hitLocked ? REVISE_FIRST : undefined}"),
+    "#368 estimator lock: the system's Move / Copy target picker greys out sent / won / lost estimates with the same title");
+  const mlb = rd("src/app/(app)/estimator/move-lines-bar.tsx");
+  ok(mlb.includes("disabled={repriceLocked(hit.status)}") && mlb.includes("title={repriceLocked(hit.status) ? REVISE_FIRST : undefined}"),
+    "#368 estimator lock: Move lines → Another estimate… greys out sent / won / lost targets the same way");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  ok((hook.match(/if \(repriceLocked\(status\)\) return;/g) || []).length === 3, "#368 estimator lock: openLaborEdit / openTrackEdit / openCurtainEdit refuse on a locked estimate too");
+}
+
+/** #368 estimator — Load system's core refuses a sent / won / lost target estimate (and only that) against the test DB. */
+async function etc368LoadSystemDbChecks(check: typeof ok): Promise<void> {
+  const { fixtureId, registerFixture, dropFixtures } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const DS = await import("@/db/doc-store");
+  const { loadLibrarySystem } = await import("@/lib/narrative/load-system");
+  const { LIBRARY_GONE } = await import("@/lib/narrative/system-library");
+  const base = { customer: "Spec fixture 368", owner: "spec", source: "estimator", quoteType: "system", spec: { sections: [], mobs: [] } };
+  try {
+    for (const st of ["draft", "sent", "won", "lost"] as const) {
+      const id = fixtureId(368, "lock-" + st);
+      await Q.create({ ...base, id, name: "Lock " + st } as never);
+      registerFixture("quotes", id);
+      // create() always starts a draft; the stored status is set directly (no send / win side effects needed here).
+      if (st !== "draft") await DS.patchDoc<{ id: string; status: string }>("quotes", id, (d) => { d.status = st; });
+      const r = await loadLibrarySystem("not-a-key", null, id);
+      if (st === "draft") check(!r.ok && r.error === LIBRARY_GONE, "#368 estimator lock (DB): Load system into a DRAFT estimate passes the lock (a bad key then answers as before)");
+      else check(!r.ok && r.error === e368ReviseFirst, `#368 estimator lock (DB): Load system into a ${st.toUpperCase()} estimate is refused with "Revise the estimate first"`);
+    }
+    const unsaved = await loadLibrarySystem("not-a-key", null, null);
+    check(!unsaved.ok && unsaved.error === LIBRARY_GONE, "#368 estimator lock (DB): an unsaved estimate (no id) is never locked");
+  } finally {
+    await dropFixtures(368);
+  }
+}
+
+/* --- #368 estimator: Re-price on Revise (spec §9.1) — pure rules, the banner, and the wiring --- */
+import {
+  repriceSections as e368Reprice, repriceForRevise as e368ForRevise, repriceSkus as e368Skus, repriceHeadline as e368Headline,
+  repricedNow as e368Now, repricedOnReviseOf as e368Of, repriceAppliesTo as e368Applies, REPRICE_LINES_MAX as E368_MAX,
+  type RepriceCatalogPart as E368Part,
+} from "@/lib/estimate-reprice/rules";
+import { deriveEstimatorSections as e368Derive } from "@/lib/estimate-reprice/derive";
+import { RepriceBanner as E368Banner } from "@/app/(app)/estimator/reprice-banner";
+import { reconcileEstimatorValue as e368Value, systemSellTotal as e368Sell } from "@/app/(app)/estimator/pricing";
+import { DEFAULT_BONUS_RATES as E368_RATES } from "@/lib/estimate-bonus/flags";
+import { applyProjectDiscounts as e368ApplyPd } from "@/lib/project-discounts/rules";
+import type { SpecItem as E368Item, SpecSection as E368Section } from "@/app/(app)/estimator/types";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const line = (o: Partial<E368Item>): E368Item => ({ id: 1, sku: "ETC:CS40", desc: "ColorSource 40", qty: 2, unit: "ea", cost: 100, price: 150, ...o } as E368Item);
+  const sec = (items: E368Item[], extra: Partial<E368Section> = {}): E368Section => ({ id: "s1", name: "Lighting", items, ...extra } as E368Section);
+  const cat = (entries: [string, number, string?][]) => new Map<string, E368Part>(entries.map(([sku, cost, category]) => [sku, { sku, cost, category: category ?? "Lighting" }]));
+  const c = cat([["ETC:CS40", 120], ["ETC:CBL", 3.33], ["LAB:INST", 70, "Labor"], ["ETC:ZERO", 0]]);
+
+  // Ratio math.
+  const r1 = e368Reprice([sec([line({}), line({ id: 2, sku: "ETC:CBL", qty: 10, cost: 3, price: 7 }), line({ id: 3, extSellOverride: 400 })])], c);
+  const [a, b, x] = r1.sections[0].items;
+  ok(a.cost === 120 && a.price === 180 && b.cost === 3.33 && b.price === 7.77 && x.price === 180 && x.extSellOverride === 480 && r1.count === 3,
+    "#368 estimator reprice: new cost = catalog cost; new price = old price × new ÷ old cost, to cents (a typed extended sell scales the same way)");
+  ok(r1.lines[0].oldCost === 100 && r1.lines[0].newCost === 120 && r1.lines[0].oldPrice === 150 && r1.lines[0].newPrice === 180 && r1.lines[0].sectionId === "s1" && r1.lines[0].lineId === 1 && r1.lines[0].sku === "ETC:CS40" && r1.lines[0].desc === "ColorSource 40",
+    "#368 estimator reprice: each change lists sectionId, lineId, sku, desc, old → new cost and price");
+  const src = rd("src/lib/estimate-reprice/rules.ts");
+  ok(!/catalogAddPrice|tierMargin|marginOf|markup\(/.test(src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")) && !/from "@\/lib\/stores\/|from "@\/db/.test(src),
+    "#368 estimator reprice: pure ratio math — no catalogAddPrice / margin / markup formula, no store or DB import");
+
+  // Exclusions.
+  const excluded: [string, Partial<E368Item>][] = [
+    ["bonus line", { bonus: "estimator" }], ["vendor-quote line", { vendorQuoteId: "vq1" }], ["custom line", { custom: true }], ["allowance", { allowance: true }],
+    ["placeholder SKU", { sku: "CUSTOM" }], ["blank SKU", { sku: "" }], ["assembly", { components: [{ sku: "ETC:CS40", label: "x", role: "fixture", qty: 1, unit: "ea", cost: 100, price: 150 }] } as Partial<E368Item>],
+    ["fixture", { fixture: true }], ["rack", { rackId: "rk1" }], ["track", { track: {} as never }], ["curtain", { curtain: true }], ["curtain's track", { curtainTrackKey: "ct-1" }],
+    ["labor", { labor: true }], ["labor overhead", { laborOverhead: "shop" }], ["labor travel", { laborTravel: "mileage" }], ["price on request", { por: true }],
+    ["cost 0", { cost: 0 }], ["Labor-category part", { sku: "LAB:INST" }], ["unknown SKU", { sku: "NOPE:1" }], ["catalog cost 0", { sku: "ETC:ZERO" }], ["Rewards credit", { rewardCredit: true, cost: 0, price: -50 }],
+  ];
+  for (const [label, o] of excluded) {
+    const s0 = [sec([line(o)])];
+    ok(e368Reprice(s0, c).sections === s0 && e368Reprice(s0, c).count === 0, `#368 estimator reprice: never re-priced — ${label}`);
+  }
+  const same = [sec([line({ cost: 120, price: 160 })])];
+  ok(e368Reprice(same, c).sections === same && e368ForRevise({ source: "estimator", quoteType: "system" }, { sections: same }, c, E368_RATES) === null,
+    "#368 estimator reprice: nothing changed → the same array back, and repriceForRevise answers null (nothing stored)");
+  ok(e368Skus([sec([line({}), line({ id: 2, custom: true, sku: "ETC:CBL" }), line({ id: 3, sku: "ETC:CBL" }), line({ id: 4, sku: "ETC:CBL" })])]).join() === "ETC:CS40,ETC:CBL",
+    "#368 estimator reprice: repriceSkus lists each eligible SKU once (excluded lines' SKUs aren't read)");
+
+  // Typed system price kept; alternate systems like any other.
+  const typed = [sec([line({})], { sellOverride: 5000 } as Partial<E368Section>), sec([line({ id: 7 })], { id: "s2", name: "Alt", alternate: true } as Partial<E368Section>)];
+  const rt = e368ForRevise({ source: "estimator", quoteType: "system" }, { sections: typed }, c, E368_RATES)!;
+  const tSec = rt.sections.find((s) => s.id === "s1")!;
+  ok(e368Sell(tSec) === 5000 && tSec.items.find((i) => i.id === 1)!.cost === 120 && rt.typedSystems.length === 1 && rt.typedSystems[0].sectionId === "s1" && rt.typedSystems[0].name === "Lighting",
+    "#368 estimator reprice: a system with a typed price keeps it (its lines' cost moves) and is named in the summary");
+  ok(rt.sections.find((s) => s.id === "s2")!.items.find((i) => i.id === 7)!.cost === 120 && rt.count === 2, "#368 estimator reprice: an alternate system re-prices like any other");
+
+  // Project discount: compared and stored at NORMAL cost; the derivation re-applies the map.
+  const d = { "ETC:CS40": { pct: 12, note: "Reg", by: "u1", at: 1 } };
+  const disc = e368ApplyPd([sec([line({ cost: 100 })])], d);
+  const rd1 = e368ForRevise({ source: "estimator", quoteType: "system" }, { sections: disc, projectDiscounts: d }, c, E368_RATES)!;
+  const dl = rd1.sections[0].items.find((i) => i.id === 1)!;
+  ok(dl.catalogCost === 120 && dl.cost === 105.6 && dl.projectDiscountPct === 12 && dl.price === 180 && rd1.lines[0].oldCost === 100 && rd1.lines[0].newCost === 120,
+    "#368 estimator reprice: a discounted line re-prices from its normal cost (100 → 120, sell 150 → 180) and the project discount is re-applied (105.60)");
+
+  // The same derivations a save runs: bonus lines, value / margin.
+  const plain = [sec([line({}), line({ id: 2, sku: "LAB:INST", labor: true, cost: 60, price: 90 })], { priceRound: 25 } as Partial<E368Section>)];
+  const rv = e368ForRevise({ source: "estimator", quoteType: "system" }, { sections: plain }, c, E368_RATES)!;
+  const expectSecs = e368Derive({ source: "estimator", quoteType: "system", status: "draft" }, e368Reprice(plain, c).sections, {}, E368_RATES);
+  ok(JSON.stringify(rv.sections) === JSON.stringify(expectSecs) && rv.sections[0].items.some((i) => i.bonus === "estimator") && rv.sections[0].items.some((i) => i.bonus === "package"),
+    "#368 estimator reprice: the result goes through deriveEstimatorSections as a draft — bonus lines re-derived");
+  ok(rv.value === e368Value(rv.sections, { value: null, margin: null }).value && rv.value % 25 === 0 && rv.margin === e368Value(rv.sections, { value: null, margin: null }).margin,
+    "#368 estimator reprice: value / margin re-derived from the re-priced sections ($25 rounding included)");
+  const before = e368Value(e368Derive({ source: "estimator", quoteType: "system", status: "draft" }, plain, {}, E368_RATES), { value: null, margin: null }).value;
+  ok(rv.delta === Math.round((rv.value - before) * 100) / 100 && rv.delta > 0, "#368 estimator reprice: delta = after − before, both derived the same way");
+  ok(e368ForRevise({ source: "grid", quoteType: "system" }, { sections: plain }, c, E368_RATES) === null && e368ForRevise({ source: "estimator", quoteType: "flame_test" }, { sections: plain }, c, E368_RATES) === null &&
+     e368ForRevise({ source: "portal-catalog", quoteType: "system" }, { sections: plain }, c, E368_RATES) === null && e368Applies({ source: "estimator" }) && e368Applies({ source: "estimator", quoteType: "" }),
+    "#368 estimator reprice: only Estimator system quotes re-price (Grid, portal and service quotes never)");
+
+  // Cap.
+  const many = [sec(Array.from({ length: 620 }, (_, i) => line({ id: i + 1 })))];
+  const rm = e368Reprice(many, c);
+  ok(rm.count === 620 && rm.lines.length === E368_MAX && E368_MAX === 500 && rm.sections[0].items.every((i) => i.cost === 120), "#368 estimator reprice: every line re-prices; at most 500 change entries are listed (count stays exact)");
+
+  // Headline, the reload signal, the stored-stamp reader.
+  ok(e368Headline({ count: 12, delta: 1240 }) === "Revise re-priced 12 lines to today's catalog (+$1,240)" && e368Headline({ count: 1, delta: -30.5 }) === "Revise re-priced 1 line to today's catalog (−$30.5)",
+    "#368 estimator banner: \"Revise re-priced N lines to today's catalog (±$X)\"");
+  ok(e368Now(null, { repricedOnRevise: { at: 5 } }) && !e368Now({ repricedOnRevise: { at: 5 } }, { repricedOnRevise: { at: 5 } }) && !e368Now({}, {}) && !e368Now({ repricedOnRevise: { at: 5 } }, { repricedOnRevise: null }),
+    "#368 estimator reload: only a NEW stamp from this move asks the open Estimator to reload");
+  ok(e368Of(null) === null && e368Of({ at: 1 }) === null && e368Of({ at: 1, by: "J", count: 2, delta: 3, lines: [{ sectionId: "s", lineId: 1, sku: "A", desc: "x", oldCost: 1, newCost: 2, oldPrice: 3, newPrice: 6 }, null], typedSystems: [{ sectionId: "s", name: "S" }] })!.lines.length === 1,
+    "#368 estimator banner: the page reads the stored stamp shape-cleaned (malformed → no banner)");
+
+  // The banner.
+  const view = { at: 9, by: "Jeff", count: 3, delta: 60, lines: rt.lines.concat(r1.lines.slice(0, 1)), typedSystems: rt.typedSystems };
+  const html = pd366Render(pd366El(E368Banner, { view, quoteId: "Q-1", show: true }));
+  ok(html.includes("Revise re-priced 3 lines to today&#x27;s catalog (+$60)") && html.includes("Dismiss") && html.includes("Show the lines (3)") && html.includes("$100.00 → $120.00") && html.includes("Typed system price kept: Lighting"),
+    "#368 estimator banner: headline, Dismiss, an expandable old → new list and the kept typed system prices");
+  ok(pd366Render(pd366El(E368Banner, { view, quoteId: "Q-1", show: false })) === "" && pd366Render(pd366El(E368Banner, { view: null, quoteId: "Q-1", show: true })) === "",
+    "#368 estimator banner: nothing outside a draft, nothing without a stamp");
+  const bannerSrc = rd("src/app/(app)/estimator/reprice-banner.tsx");
+  ok(bannerSrc.startsWith('"use client";') && (bannerSrc.match(/try \{/g) || []).length === 2 && bannerSrc.includes("window.localStorage.getItem(key)") && bannerSrc.includes("window.localStorage.setItem(key, String(view.at))") && !/from "@\/lib\/stores\/|from "@\/db/.test(bannerSrc),
+    "#368 estimator banner: dismissal is per viewer in localStorage (keyed by quote + revise time), every access in try/catch; a client component with no store import");
+
+  // Wiring pins.
+  const st = rd("src/lib/stores/quotes.ts");
+  const ss = st.slice(st.indexOf("export async function setStatus("), st.indexOf("// #222: Blob I/O stays out of the status transaction."));
+  const loadAt = ss.indexOf('await (await import("@/lib/estimate-reprice/server")).loadRepriceInputs([q.spec, gateQ.spec])');
+  ok(loadAt > ss.indexOf("const gateQ = asReopened(q, reopen);") && loadAt < ss.indexOf("const result = await patchQuote(id, (doc) => {") &&
+     ss.includes('status === "draft" && q.status !== "draft" && repriceAppliesTo(q) && opts.bypassApprovalGate !== "historical-import"'),
+    "#368 estimator wiring: setStatus loads the re-price inputs (live spec + the reopened version) before its synchronous write, only for a revise of an Estimator system quote");
+  const mut = ss.slice(ss.indexOf("const result = await patchQuote(id, (doc) => {"));
+  ok(mut.indexOf("if (repriceIn && revised.value) {") > mut.indexOf("applyReopen(doc, reopen);") && mut.indexOf("if (repriceIn && revised.value) {") > mut.indexOf("doc.status = status;") &&
+     mut.includes("const rp = repriceForRevise(doc, followed, repriceIn.catalog, repriceIn.bonusRates);") && mut.includes("doc.value = Math.round(rp.value);") &&
+     mut.includes("doc.repricedOnRevise = { at: t, by: by || DEFAULT_ACTOR, count: rp.count, delta: rp.delta, lines: rp.lines, typedSystems: rp.typedSystems };") &&
+     mut.includes("} else if (doc.repricedOnRevise) {\n        delete doc.repricedOnRevise;") && !/doc\.revisions[^\n]*repric/.test(mut),
+    "#368 estimator wiring: the re-price runs in the same write as the move to Draft (after a reopen), stores the summary only when something changed, clears a stale one, never touches revisions");
+  ok(st.includes("delete clean.repricedOnRevise;") && !st.slice(st.indexOf("function snapshotOf("), st.indexOf("function pushRevision(")).includes("repriced"),
+    "#368 estimator wiring: update() can't write the summary, and a revision snapshot never carries it");
+  const srv = rd("src/lib/estimate-reprice/server.ts");
+  ok(srv.includes("rewriteQuoteSpec(spec, renames.m, renames.models)") && srv.includes("getManyBySku([...skus])") && srv.includes("loadBonusRates()"),
+    "#368 estimator wiring: the loader follows renames the save's way (rewriteQuoteSpec on the live rename log) and reads parts through getManyBySku (retired SKUs → live part)");
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  ok(act.includes("repriced = repricedNow(beforeMove, q);") && act.includes("...(repriced ? { repriced: true } : {}),") &&
+     (act.match(/\.\.\.\(repricedNow\(before, after\) \? \{ repriced: true \} : \{\}\)/g) || []).length === 2,
+    "#368 estimator wiring: Save, the status menu and the stage bar tell the client when their revise re-priced");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  ok((hook.match(/if \(r\.repriced\) \{\s*window\.location\.reload\(\);/g) || []).length === 2 && /if \(res\.repriced\) \{\s*window\.location\.reload\(\);/.test(hook) &&
+     hook.includes('if (prevStatus !== "won" && v === "draft" && repriceLocked(prevStatus) && pdfDirty && (await saveNow()) === false) {') && hook.includes("if (revising && pdfDirty && (await saveNow()) === false) {"),
+    "#368 estimator wiring: the Estimator saves unsaved edits before a revise, and reloads after one that re-priced");
+  ok(rd("src/app/(app)/estimator/bid-actions.ts").includes("const repriced = (q?.repricedOnRevise?.at ?? 0) >= startedAt;") && rd("src/app/(app)/estimator/estimator-header.tsx").includes("if (x.repriced) window.location.reload();"),
+    "#368 estimator wiring: a bid addendum's revise that re-priced reloads the Estimator too");
+  const bs = rd("src/app/(app)/estimator/steps/build-step.tsx");
+  ok(bs.includes('<RepriceBanner view={repricedOnRevise} quoteId={loadedId} show={status === "draft"} />') && rd("src/app/(app)/estimator/page.tsx").includes("repricedOnRevise={repricedOnReviseOf(q?.repricedOnRevise)}"),
+    "#368 estimator banner: the page hands the stored stamp to Build, which shows it while the estimate is a draft");
+}
+
+/** #368 estimator — Revise re-prices a sent Estimator quote against the test DB; revisions stay frozen. */
+async function etc368RepriceDbChecks(check: typeof ok): Promise<void> {
+  const { fixtureId, registerFixture, dropFixtures } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const DS = await import("@/db/doc-store");
+  const Cat = await import("@/lib/stores/catalog");
+  const { reconcileEstimatorValue } = await import("@/app/(app)/estimator/pricing");
+  const A = fixtureId(368, "a"), D = fixtureId(368, "d"), LAB = fixtureId(368, "lab"), OLD = fixtureId(368, "old"), NEW = "ETC:" + fixtureId(368, "new");
+  for (const id of [A, D, LAB, OLD, NEW]) registerFixture("catalog_parts", id);
+  const part = (id: string, cost: number, category = "Lighting") => DS.upsertDoc("catalog_parts", { id, sku: id, desc: "Part " + id, category, unit: "ea", list: cost * 2, cost, mfr: "ETC" } as never);
+  try {
+    await part(A, 120);
+    await part(D, 30);
+    await part(LAB, 70, "Labor");
+    await part(OLD, 50);
+    await Cat.renamePartDocs(OLD, NEW, "New 368");
+    const it = (o: Record<string, unknown>) => ({ desc: "x", qty: 1, unit: "ea", ...o });
+    const sections = [
+      { id: "s1", name: "Rig", freightPct: 0, priceRound: 25, items: [
+        it({ id: 1, sku: A, qty: 2, cost: 100, price: 150 }),
+        it({ id: 2, sku: OLD, cost: 40, price: 60 }),
+        it({ id: 3, sku: LAB, cost: 50, price: 90 }),
+        it({ id: 4, sku: D, cost: 30, price: 45 }),
+        it({ id: 5, sku: A, cost: 10, price: 20, custom: true }),
+      ] },
+      { id: "s2", name: "Typed", freightPct: 0, sellOverride: 5000, items: [it({ id: 1, sku: A, cost: 100, price: 150 })] },
+    ];
+    const ID = fixtureId(368, "quote");
+    await Q.create({ id: ID, name: "Reprice 368", customer: "Spec fixture 368", owner: "spec", source: "estimator", quoteType: "system", spec: { sections, mobs: [] } } as never);
+    registerFixture("quotes", ID);
+    await Q.setStatus(ID, "sent", "Spec", { bypassApprovalGate: "engine-owned-flow" });
+    const sent = (await Q.get(ID))!;
+    const sentRevJson = JSON.stringify(sent.revisions);
+    check(sent.status === "sent" && !sent.repricedOnRevise, "#368 estimator reprice (DB): a send re-prices nothing");
+
+    const rev = (await Q.setStatus(ID, "draft", "Spec Reviser"))!;
+    const secs = (rev.spec as { sections: { id: string; sellOverride?: number; items: { id: number; sku: string; cost: number; price: number; bonus?: string }[] }[] }).sections;
+    const s1 = secs.find((s) => s.id === "s1")!, s2 = secs.find((s) => s.id === "s2")!;
+    const byId = (n: number) => s1.items.find((i) => i.id === n)!;
+    check(rev.status === "draft" && byId(1).cost === 120 && byId(1).price === 180, "#368 estimator reprice (DB): a revise moves a plain catalog line to today's cost, keeping its ratio");
+    check(byId(2).cost === 50 && byId(2).price === 75, "#368 estimator reprice (DB): a renamed SKU re-prices from the part it now means");
+    check(byId(3).cost === 50 && byId(4).cost === 30 && byId(4).price === 45 && byId(5).cost === 10, "#368 estimator reprice (DB): Labor-category, unchanged and custom lines keep their numbers");
+    check(s2.sellOverride === 5000 && s2.items.find((i) => i.id === 1)!.cost === 120, "#368 estimator reprice (DB): a typed system price is kept while its lines' cost moves");
+    check(s1.items.some((i) => i.bonus === "estimator"), "#368 estimator reprice (DB): the draft's bonus lines are re-derived (as a save would)");
+    check(rev.value === Math.round(reconcileEstimatorValue(secs, { value: null, margin: null }).value), "#368 estimator reprice (DB): value is re-derived from the re-priced sections");
+    const stamp = rev.repricedOnRevise!;
+    check(!!stamp && stamp.count === 3 && stamp.by === "Spec Reviser" && stamp.lines.length === 3 && stamp.typedSystems.length === 1 && stamp.typedSystems[0].name === "Typed" && typeof stamp.delta === "number",
+      "#368 estimator reprice (DB): repricedOnRevise records who, how many, the delta, the lines and the kept typed systems");
+    check(JSON.stringify(rev.revisions) === sentRevJson, "#368 estimator reprice (DB): the sent revision is untouched (frozen at send)");
+
+    // Send the re-priced draft, then revise again with no catalog change: nothing re-prices and the stale stamp clears.
+    await Q.setStatus(ID, "sent", "Spec", { bypassApprovalGate: "engine-owned-flow" });
+    const sent2 = (await Q.get(ID))!;
+    const again = (await Q.setStatus(ID, "draft", "Spec"))!;
+    check(!again.repricedOnRevise && JSON.stringify((again.spec as { sections: unknown }).sections) === JSON.stringify((sent2.spec as { sections: unknown }).sections),
+      "#368 estimator reprice (DB): a revise with no changed costs stores nothing (an older summary is cleared) and leaves the lines alone");
+
+    // A Grid quote is out of scope.
+    const G = fixtureId(368, "grid");
+    await Q.create({ id: G, name: "Grid 368", customer: "Spec fixture 368", owner: "spec", source: "grid", quoteType: "system", spec: { sections: [{ ...sections[0] }], mobs: [] } } as never);
+    registerFixture("quotes", G);
+    await Q.setStatus(G, "sent", "Spec", { bypassApprovalGate: "engine-owned-flow" });
+    const gSent = (await Q.get(G))!;
+    const gRev = (await Q.setStatus(G, "draft", "Spec"))!;
+    check(!gRev.repricedOnRevise && JSON.stringify(gRev.spec) === JSON.stringify(gSent.spec), "#368 estimator reprice (DB): a Grid quote's revise re-prices nothing");
+  } finally {
+    await dropFixtures(368);
+  }
+}
+
+/* --- #368 estimator follow-ups: Copy within a sent estimate is locked; a bid addendum's revise saves edits first --- */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  const copy = act.slice(act.indexOf("export async function copySystemToEstimateAction("), act.indexOf("export async function updateQuoteMetaAction("));
+  const sameAt = copy.indexOf('if (target.kind === "same" && typeof sourceQuoteId === "string" && sourceQuoteId && repriceLocked((await get(sourceQuoteId))?.status)) {\n    return { ok: false, error: REVISE_FIRST };');
+  ok(sameAt > copy.indexOf("const user = await requireUser();") && sameAt < copy.indexOf("await copyPricingFor(items)") && sameAt < copy.indexOf('if (target.kind === "same") {\n    return {'),
+    "#368 estimator lock: Copy within this estimate is refused on a stored sent / won / lost estimate (\"Revise the estimate first\") before any re-pricing; an unsaved estimate (no id) copies as before");
+  const sc = rd("src/app/(app)/estimator/section-card.tsx");
+  const hereAt = sc.indexOf("onClick={handleCopyHere}");
+  ok(hereAt > 0 && sc.slice(hereAt, hereAt + 400).includes("disabled={!!p.repriceLock}") && sc.slice(hereAt, hereAt + 400).includes("title={p.repriceLock}"),
+    "#368 estimator lock: the Copy within this estimate control is disabled on a locked estimate, titled \"Revise the estimate first\"");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  const cs = hook.slice(hook.indexOf("const copySystem = (secId: string, target: CopySystemTarget) => {"));
+  ok(cs.indexOf('if (target.kind === "same" && repriceLocked(status)) {\n      setMoveNotice({ ok: false, error: REVISE_FIRST });') > 0 &&
+     cs.indexOf('if (target.kind === "same" && repriceLocked(status))') < cs.indexOf("await copySystemToEstimateAction("),
+    "#368 estimator lock: the hook refuses Copy within a locked estimate before calling the server");
+  const chip = rd("src/app/(app)/estimator/bid-chip.tsx");
+  const saveFn = chip.slice(chip.indexOf("const save = async () => {"));
+  const beforeAt = saveFn.indexOf("if (wasSent && !panel.awardedPartyId && added.length > 0 && beforeRevise && !(await beforeRevise())) {");
+  ok(beforeAt > saveFn.indexOf("!window.confirm(addendumReviseConfirm(added))") && beforeAt < saveFn.indexOf("await setBidDetailsAction(quoteId,") && chip.includes("beforeRevise?: () => Promise<boolean>;"),
+    "#368 estimator wiring: an addendum that revises the estimate first runs beforeRevise (after the confirm, before the bid write); a failed save stops it");
+  ok(rd("src/app/(app)/estimator/estimator-header.tsx").includes("beforeRevise={async () => !pdfDirty || (await saveNow()) !== false}"),
+    "#368 estimator wiring: the Estimator header saves unsaved edits before the addendum's revise (so a re-price reload never loses them)");
 }
