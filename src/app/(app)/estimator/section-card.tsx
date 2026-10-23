@@ -917,6 +917,9 @@ export default function SectionCard(p: SectionCardProps) {
                 <button
                   type="button"
                   onClick={handleCopyHere}
+                  // #368: copying a system into a sent / won / lost estimate (this one included) waits for Revise.
+                  disabled={!!p.repriceLock}
+                  title={p.repriceLock}
                   style={{
                     width: "100%",
                     textAlign: "left",
@@ -928,7 +931,8 @@ export default function SectionCard(p: SectionCardProps) {
                     border: "1px solid transparent",
                     borderRadius: 8,
                     padding: "9px 11px",
-                    cursor: "pointer",
+                    cursor: p.repriceLock ? "not-allowed" : "pointer",
+                    opacity: p.repriceLock ? 0.5 : 1,
                     marginBottom: 10,
                   }}
                 >

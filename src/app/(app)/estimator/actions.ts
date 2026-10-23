@@ -1214,6 +1214,11 @@ export async function copySystemToEstimateAction(
   projectDiscounts?: unknown
 ): Promise<CopySystemResult> {
   const user = await requireUser();
+  // #368: Copy within this estimate adds lines at today's prices — refused on a stored sent / won / lost estimate
+  // until it is revised (an unsaved estimate has no stored status).
+  if (target.kind === "same" && typeof sourceQuoteId === "string" && sourceQuoteId && repriceLocked((await get(sourceQuoteId))?.status)) {
+    return { ok: false, error: REVISE_FIRST };
+  }
   // #293: blocks ride copySectionForTarget's section spread — sanitized first.
   section = withSanitizedKeyProducts(section);
   section = withSanitizedOutputFields(section);

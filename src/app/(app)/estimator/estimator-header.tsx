@@ -208,7 +208,7 @@ export function EstimatorHeader({
               </button>
               {/* #348 — canApplyCredit is can("create") */}
               <PartiesChip quoteId={s.loadedId} canEdit={s.canApplyCredit} />
-              <BidChip quoteId={s.loadedId} canEdit={s.canApplyCredit} onSync={(x) => {
+              <BidChip quoteId={s.loadedId} canEdit={s.canApplyCredit} beforeRevise={async () => !pdfDirty || (await saveNow()) !== false} onSync={(x) => {
                 applySync({ ok: true, review: null, status: x.status, next: x.next });
                 // #368: the addendum's revise re-priced lines to today's catalog — load the estimate afresh.
                 if (x.repriced) window.location.reload();

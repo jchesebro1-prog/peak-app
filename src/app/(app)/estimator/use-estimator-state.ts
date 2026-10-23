@@ -72,7 +72,7 @@ import { postChanged } from "@/lib/popout/channel";
 import { applyLineMove, extractLinesAsSection, lineRefKey, planLineMove, removeLinesFromSources, type LineRef } from "@/lib/estimate-line-move/move";
 import { setUnsavedHold } from "@/lib/popout/hold";
 import { discardConfirmText, inputIsDirty, isModalInputKind, MODAL_INPUT_KINDS, rebaseDraft, stableDraftJson, type ModalInputKind } from "@/lib/estimate-steps/discard-confirm";
-import { repriceLocked } from "@/lib/estimate-reprice/lock";
+import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 
 /** #333 review (F): how long Send waits for an in-flight Client package write. */
 const SELECTION_SETTLE_TIMEOUT_MS = 10_000;
@@ -2021,6 +2021,11 @@ export function useEstimatorState(props: EstimatorProps) {
   const copySystem = (secId: string, target: CopySystemTarget) => {
     const sec = sections.find((s) => s.id === secId);
     if (!sec) return;
+    // #368: Copy within a sent / won / lost estimate waits for Revise (the server refuses too).
+    if (target.kind === "same" && repriceLocked(status)) {
+      setMoveNotice({ ok: false, error: REVISE_FIRST });
+      return;
+    }
     const cname = customerId
       ? customers.find((c) => c.id === customerId)?.name || custName
       : custName;

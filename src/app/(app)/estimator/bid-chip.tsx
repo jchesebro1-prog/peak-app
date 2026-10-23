@@ -57,10 +57,14 @@ export default function BidChip({
   quoteId,
   canEdit,
   onSync,
+  beforeRevise,
 }: {
   quoteId: string | null;
   canEdit: boolean;
   onSync?: (sync: NonNullable<BidDetailsResult["sync"]>) => void;
+  /** #368 — runs before an addendum that will revise the estimate (it may re-price and reload): saves the
+   *  Estimator's unsaved edits; false = the save didn't go through, so nothing is sent. */
+  beforeRevise?: () => Promise<boolean>;
 }) {
   const [stored, setPanel] = useState<BidPanelVM | null>(null);
   // A panel for another estimate is never shown (the VM carries its quote id).
@@ -167,6 +171,11 @@ export default function BidChip({
       // #352 review M2: a new addendum on a sent, not-awarded bid reverts it to Draft — ask first.
       const added = addedAddendumNos(panel.addenda, addenda);
       if (wasSent && !panel.awardedPartyId && added.length > 0 && !window.confirm(addendumReviseConfirm(added))) return;
+      // #368: the revise may re-price lines and reload the Estimator — its unsaved edits are saved first.
+      if (wasSent && !panel.awardedPartyId && added.length > 0 && beforeRevise && !(await beforeRevise())) {
+        setError("Save your changes first — the save didn't go through.");
+        return;
+      }
       const r = await setBidDetailsAction(quoteId, { dueAt: due, addenda });
       if (r.ok) {
         seq.current++; // an older in-flight load must not overwrite this fresher panel

@@ -71329,3 +71329,29 @@ async function etc368RepriceDbChecks(check: typeof ok): Promise<void> {
     await dropFixtures(368);
   }
 }
+
+/* --- #368 estimator follow-ups: Copy within a sent estimate is locked; a bid addendum's revise saves edits first --- */
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  const copy = act.slice(act.indexOf("export async function copySystemToEstimateAction("), act.indexOf("export async function updateQuoteMetaAction("));
+  const sameAt = copy.indexOf('if (target.kind === "same" && typeof sourceQuoteId === "string" && sourceQuoteId && repriceLocked((await get(sourceQuoteId))?.status)) {\n    return { ok: false, error: REVISE_FIRST };');
+  ok(sameAt > copy.indexOf("const user = await requireUser();") && sameAt < copy.indexOf("await copyPricingFor(items)") && sameAt < copy.indexOf('if (target.kind === "same") {\n    return {'),
+    "#368 estimator lock: Copy within this estimate is refused on a stored sent / won / lost estimate (\"Revise the estimate first\") before any re-pricing; an unsaved estimate (no id) copies as before");
+  const sc = rd("src/app/(app)/estimator/section-card.tsx");
+  const hereAt = sc.indexOf("onClick={handleCopyHere}");
+  ok(hereAt > 0 && sc.slice(hereAt, hereAt + 400).includes("disabled={!!p.repriceLock}") && sc.slice(hereAt, hereAt + 400).includes("title={p.repriceLock}"),
+    "#368 estimator lock: the Copy within this estimate control is disabled on a locked estimate, titled \"Revise the estimate first\"");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  const cs = hook.slice(hook.indexOf("const copySystem = (secId: string, target: CopySystemTarget) => {"));
+  ok(cs.indexOf('if (target.kind === "same" && repriceLocked(status)) {\n      setMoveNotice({ ok: false, error: REVISE_FIRST });') > 0 &&
+     cs.indexOf('if (target.kind === "same" && repriceLocked(status))') < cs.indexOf("await copySystemToEstimateAction("),
+    "#368 estimator lock: the hook refuses Copy within a locked estimate before calling the server");
+  const chip = rd("src/app/(app)/estimator/bid-chip.tsx");
+  const saveFn = chip.slice(chip.indexOf("const save = async () => {"));
+  const beforeAt = saveFn.indexOf("if (wasSent && !panel.awardedPartyId && added.length > 0 && beforeRevise && !(await beforeRevise())) {");
+  ok(beforeAt > saveFn.indexOf("!window.confirm(addendumReviseConfirm(added))") && beforeAt < saveFn.indexOf("await setBidDetailsAction(quoteId,") && chip.includes("beforeRevise?: () => Promise<boolean>;"),
+    "#368 estimator wiring: an addendum that revises the estimate first runs beforeRevise (after the confirm, before the bid write); a failed save stops it");
+  ok(rd("src/app/(app)/estimator/estimator-header.tsx").includes("beforeRevise={async () => !pdfDirty || (await saveNow()) !== false}"),
+    "#368 estimator wiring: the Estimator header saves unsaved edits before the addendum's revise (so a re-price reload never loses them)");
+}
