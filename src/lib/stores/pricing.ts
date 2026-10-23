@@ -536,7 +536,7 @@ export const GROUPS: PricingGroup[] = [
       rate("fixture.lamp575", "Lamp — 575W HPL", 22, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "lamp575" }),
       rate("fixture.lamp750", "Lamp — 750W HPL", 26, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "lamp750" }),
       rate("fixture.lamp1000", "Lamp — 1000W", 34, "$", { min: 0, max: 300, step: 1, store: "fixture", key: "lamp1000" }),
-      rate("fixture.customCostFactor", "Manual entry — cost basis", 0.66, "×", { min: 0.3, max: 1, step: 0.01, store: "fixture", key: "customCostFactor", help: "When a fixture is entered manually, cost = unit price × this." }),
+      rate("fixture.customCostFactor", "Manual entry — cost basis", 0.66, "×", { min: 0.3, max: 1, step: 0.01, store: "fixture", key: "customCostFactor", help: "When a fixture is entered manually, cost = unit price × this (0.66 ≈ 52 % markup)." }),
       formula("fixture.unit", "Fixture unit price", "unit = fixtureList (or manual) + mounting + Σ accessories + Σ power/data + lamp"),
       formula("fixture.line", "Fixture line (one combined line)", "ext = unit × qty   ·   cost/ea = fixtureCost + add-on costs   ·   hang/focus labor left to Configure labor"),
     ],
@@ -589,7 +589,7 @@ export const GROUPS: PricingGroup[] = [
     sub: "The automatic package and estimator bonus lines on every Estimator system (#330)",
     note: "Live for DRAFT estimates only — a draft re-figures its bonus lines at these rates on its next save. A sent, won or lost estimate keeps the rates its lines were figured at, so its price never moves. 0–20 %.",
     items: [
-      rate(BONUS_PACKAGE_RATE_ID, "Package bonus", BONUS_PACKAGE_PCT * 100, "% of system cost", { min: 0, max: BONUS_RATE_MAX_PCT, step: 0.5, help: "on a system with labor: cost × this, marked up at the system's blended margin" }),
+      rate(BONUS_PACKAGE_RATE_ID, "Package bonus", BONUS_PACKAGE_PCT * 100, "% of system cost", { min: 0, max: BONUS_RATE_MAX_PCT, step: 0.5, help: "on a system with labor: cost × this, marked up at the system's blended markup" }),
       rate(BONUS_ESTIMATOR_RATE_ID, "Estimator bonus", BONUS_ESTIMATOR_PCT * 100, "% of system price", { min: 0, max: BONUS_RATE_MAX_PCT, step: 0.5, help: "the system's price × this, at cost; split between Lead estimator and Prepared by at Won" }),
     ],
   },

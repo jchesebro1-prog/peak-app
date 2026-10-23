@@ -110,7 +110,8 @@ export const INSTALLS_RENDERERS = {
 
   "margin-donut": async (ctx) => {
     const f = await forecast(ctx);
-    const mDeg = Math.round(f.blended * 360);
+    // The ring shows profit's share of the book's value; f.blended is a markup, so derive the share from dollars (#367).
+    const mDeg = f.totalValue > 0 ? Math.round(((f.totalValue - f.cost) / f.totalValue) * 360) : 0;
     return (
       <div className="pk-card" style={{ padding: "18px 20px" }}>
         <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 4 }}>Margin at completion</div>

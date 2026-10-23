@@ -2303,7 +2303,7 @@ ok(isOpenStage("quote", "won") === false && isOpenStage("quote", "sent") === tru
 
 /* --- dashboard metrics (#43, task 4a) — openProjects/backlogProjects read the
  *  pipeline tag (isActive/isBacklog), not a hardcoded stage-literal list. --- */
-import { openProjects as metricsOpenProjects, backlogProjects as metricsBacklogProjects, projectedProfit, installsForecast } from "@/lib/dashboard/metrics";
+import { openProjects as metricsOpenProjects, backlogProjects as metricsBacklogProjects, projectedProfit, installsForecast, salesMetrics } from "@/lib/dashboard/metrics";
 const metricsProjects = [
   { kind: "project", stage: "scheduled" },
   { kind: "project", stage: "deposit" },
@@ -2329,12 +2329,12 @@ ok(unknownCount([{ valueUnknown: true }, { valueUnknown: false }, { value: 1 }])
 // unknown one must contribute nothing to value or profit; the book totals
 // exactly the known project.
 const uknProjects = [
-  { kind: "project", stage: "scheduled", value: 500, margin: 0.5 },
-  { kind: "project", stage: "scheduled", value: 900, valueUnknown: true, margin: 0.5 },
+  { kind: "project", stage: "scheduled", value: 500, margin: mk(0.5) },
+  { kind: "project", stage: "scheduled", value: 900, valueUnknown: true, margin: mk(0.5) },
 ] as any;
 const uknProfit = projectedProfit(uknProjects);
 ok(uknProfit.value === 500, `#UKN: projectedProfit's open-book value ignores the unknown project's stray $900 (got ${uknProfit.value})`);
-ok(uknProfit.profit === 250, `#UKN: projectedProfit's profit is margin × the known value only (got ${uknProfit.profit})`);
+ok(uknProfit.profit === 250, `#UKN: projectedProfit's profit is value × k ÷ (1 + k) on the known value only (got ${uknProfit.profit})`);
 ok(uknProfit.unknownCount === 1, "#UKN: projectedProfit reports the one unknown-value project in its book");
 
 // installsForecast's toBill/collected sums (#189) — "To be billed" and
@@ -2344,8 +2344,8 @@ ok(uknProfit.unknownCount === 1, "#UKN: projectedProfit reports the one unknown-
 const nowT189 = Date.now();
 const f189 = installsForecast(
   [
-    { kind: "project", stage: "deposit", value: 1000, margin: 0.3, targetDate: nowT189 + 10 * DAY },
-    { kind: "project", stage: "deposit", value: 500, valueUnknown: true, margin: 0.3, targetDate: nowT189 + 20 * DAY },
+    { kind: "project", stage: "deposit", value: 1000, margin: mk(0.3), targetDate: nowT189 + 10 * DAY },
+    { kind: "project", stage: "deposit", value: 500, valueUnknown: true, margin: mk(0.3), targetDate: nowT189 + 20 * DAY },
   ] as unknown as Parameters<typeof installsForecast>[0],
   [],
   nowT189,
@@ -2355,8 +2355,8 @@ ok(f189.toBill === 1000, `#189: toBill sums only the known-value project landing
 ok(f189.toBillUnknownCount === 1, "#189: toBillUnknownCount counts the UKN project the to-be-billed sum is silently excluding");
 const f189collected = installsForecast(
   [
-    { kind: "project", stage: "deposit", value: 800, margin: 0.3, targetDate: nowT189 - 30 * DAY },
-    { kind: "project", stage: "deposit", value: 200, valueUnknown: true, margin: 0.3, targetDate: nowT189 - 30 * DAY },
+    { kind: "project", stage: "deposit", value: 800, margin: mk(0.3), targetDate: nowT189 - 30 * DAY },
+    { kind: "project", stage: "deposit", value: 200, valueUnknown: true, margin: mk(0.3), targetDate: nowT189 - 30 * DAY },
   ] as unknown as Parameters<typeof installsForecast>[0],
   [],
   nowT189,
@@ -2364,6 +2364,19 @@ const f189collected = installsForecast(
 );
 ok(f189collected.collected === 800, `#189: collected sums only the known-value project (got ${f189collected.collected})`);
 ok(f189collected.collectedUnknownCount === 1, "#189: collectedUnknownCount counts the UKN project the expected-collected sum is silently excluding");
+
+// #367 Task 6 — dashboard math on markup (project.margin / quote.margin hold a markup k).
+ok(Math.abs(projectedProfit([{ value: 1000, margin: 0.25, kind: "project", stage: "scheduled" } as never]).profit - 200) < 1e-9,
+  "markup: projected profit = value × k ÷ (1 + k)");
+const mkPP = projectedProfit([{ value: 1000, margin: mk(0.3), kind: "project", stage: "scheduled" } as never]);
+ok(Math.abs(mkPP.profit - 300) < 1e-9 && Math.abs(mkPP.markup - mk(0.3)) < 1e-9, "markup: value 1000 at the old 30 % margin still projects $300 profit; the book markup is profit ÷ cost");
+const mkSales = salesMetrics([
+  { value: 1000, margin: mk(0.3), createdAt: 10, status: "draft" },
+  { value: 2000, margin: 0.25, createdAt: 10, status: "draft" },
+] as never, 0, 100);
+ok(Math.abs(mkSales.avgMarkup - 700 / 2300) < 1e-9, `markup: avgMarkup is Σ profit ÷ Σ cost over created quotes (got ${mkSales.avgMarkup})`);
+const mkFc = installsForecast([{ kind: "project", stage: "scheduled", value: 1430, margin: 0.43, targetDate: nowT189 + 10 * DAY }] as never, [], nowT189, 12);
+ok(mkFc.cost === 1000 && Math.abs(mkFc.blended - 0.43) < 1e-9, `markup: forecast cost = value ÷ (1 + k), blended = markup (got ${mkFc.cost} / ${mkFc.blended})`);
 
 /* --- venue dimensions (lineset PRO dims, task 1) --- */
 const vdEst = venueDimsFromEstimator({ width: 36, ph: 18, depth: 26, grid: 24, wing: 12, proscenium: true });

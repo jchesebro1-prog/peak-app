@@ -100,7 +100,7 @@ export type SpecItem = {
   /**
    * Estimator bonuses (2026-10-12 spec): an automatic, internal-only line.
    * "package" = 5% of the system's cost (only when it has labor), marked up at
-   * the system's blended margin; "estimator" = 2% of the system's price, at
+   * the system's blended markup; "estimator" = 2% of the system's price, at
    * cost. Written only by `withBonusLines` (src/lib/estimate-bonus/rules.ts);
    * folded into other rows on every customer surface by `customerLines`.
    */
