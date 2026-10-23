@@ -71038,3 +71038,19 @@ import { projectPricingFrom as pd366Pricing } from "@/lib/project-discounts/rule
   ok(view.includes("Project pricing to request") && /\{p\.projectPricing && p\.projectPricing\.length > 0 && <ProjectPricingCard rows=\{p\.projectPricing\} \/>\}/.test(view) && view.includes("Ask the vendor for this project pricing when ordering."),
     "#366 project: the project page shows the card only when there is project pricing");
 }
+
+/* --- #366: customer surfaces read sell only — a discount changes no customer row --- */
+import { customerLines as pd366CustomerLines } from "@/app/(app)/estimator/pricing";
+{
+  const mk = (): PD366Section => pd366Sec([
+    pd366Line({ id: 1, price: 2857.14 }),
+    pd366Line({ id: 2, sku: "LAB-INST", desc: "Install", qty: 8, unit: "hr", cost: 60, price: 95, labor: true, mob: { type: "Install", days: 2, crew: 2, discipline: "RIG" } }),
+    pd366Line({ id: 4, sku: "LAB-SHOP-1", desc: "Shop & engineering", qty: 1, unit: "lot", cost: 300, price: 450, labor: true, laborOverhead: "shop" }),
+    { ...pd366Asm(), id: 3 },
+  ], { freightPct: 3, priceRound: 25 });
+  const bon = (s: PD366Section[]) => pd366Bonus(s, pd366Ids(s));
+  const rows = (s: PD366Section) => JSON.stringify(pd366CustomerLines(s).map((r) => [r.item ? r.item.id : r.desc, r.item ? r.item.desc : "", Math.round(r.ext * 100) / 100]));
+  const base = bon([mk()]);
+  const disc = bon(pd366Apply([mk()], pd366D));
+  ok(rows(base[0]) === rows(disc[0]) && pd366CustomerLines(disc[0]).length > 0, "#366 customer: the customer rows (what the PDF, online estimate, package page and portal print) are identical with a discount");
+}

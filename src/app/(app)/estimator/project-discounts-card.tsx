@@ -125,6 +125,7 @@ export function ProjectDiscountEditor(p: {
             <input
               style={INPUT}
               inputMode="decimal"
+              aria-label={`${PROJECT_DISCOUNT_COPY.pct} — ${p.sku}`}
               autoFocus
               value={pct}
               aria-invalid={!!err}
@@ -149,6 +150,7 @@ export function ProjectDiscountEditor(p: {
             <input
               style={INPUT}
               value={note}
+              aria-label={`${PROJECT_DISCOUNT_COPY.note} — ${p.sku}`}
               maxLength={PROJECT_DISCOUNT_NOTE_MAX}
               placeholder={PROJECT_DISCOUNT_COPY.notePlaceholder}
               onChange={(e) => setNote(e.target.value)}
