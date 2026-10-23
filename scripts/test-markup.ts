@@ -8,7 +8,7 @@ import {
 } from "../src/lib/markup";
 import { catalogAddPrice, customPartSell, isAtTierSeed, repriceForTier } from "../src/app/(app)/estimator/tier-reprice";
 import { copySectionForTarget } from "../src/app/(app)/estimator/copy-system";
-import { sliderPct, typedPriceWarning } from "../src/lib/service-pricing";
+import { finishPrice, sellAtMarkup, sliderPct, typedPriceWarning } from "../src/lib/service-pricing";
 import { knobPctFrom } from "../src/lib/tier-seed";
 import { sellFromCost } from "../src/lib/design/equipment-map";
 import { curtainPrice } from "../src/lib/design/curtain-pricing";
@@ -297,9 +297,20 @@ export async function markupParityChecks(ok: Ok) {
   ok(drift.length === 0, `markup parity: every margin-era price reproduces to the cent under markup${drift.length ? " — " + drift.slice(0, 8).join(" | ") : ""}`);
   if (drift.length > 8) console.log("markup parity — ALL drifts:\n  " + drift.join("\n  "));
 
-  // The knob shows the markup as a whole-percent string; reading it back must give the exact same float.
-  const knobBad = [0.43, 0.37, 0.28, 0.25, 0.18, 0.11, 0.05, 0.3 / 0.7, 0.27 / 0.73, 0.22 / 0.78].filter((k) => Number(String(knobPctFrom(k))) / 100 !== k);
-  ok(knobBad.length === 0, `markup parity: knobPctFrom round-trips through its string${knobBad.length ? " — fails for " + knobBad.join(", ") : ""}`);
+  // The knob shows the markup as a whole-percent string. A saved quote re-saved without touching the knob must not change
+  // its price: the round trip may differ by a float ulp, but never by a cent. So check closeness plus price parity.
+  const knobKs = [0.43, 0.37, 0.28, 0.25, 0.18, 0.11, 0.05, 0.3 / 0.7, 0.27 / 0.73, 0.22 / 0.78];
+  const knobCosts = [99.99, 575, 2515, 10000, 123456.78];
+  const knobBad = knobKs.filter((k) => {
+    const k2 = Number(String(knobPctFrom(k))) / 100;
+    if (!(Math.abs(k2 - k) < 1e-12)) return true;
+    return knobCosts.some((cost) => {
+      const a = finishPrice(sellAtMarkup(cost, k), cost);
+      const b = finishPrice(sellAtMarkup(cost, k2), cost);
+      return a.total !== b.total || a.autoTotal !== b.autoTotal;
+    });
+  });
+  ok(knobBad.length === 0, `markup parity: knobPctFrom round-trips through its string within 1e-12 with identical prices${knobBad.length ? " — fails for " + knobBad.join(", ") : ""}`);
 
   // Expected, listed (never asserted equal): what new pricing does at the ROUNDED settings, and each allowed half-cent tie.
   const listed = [
