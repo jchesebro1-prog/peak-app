@@ -15,8 +15,13 @@
  */
 import { getBlob, updateBlob } from "@/db/doc-store";
 import { decryptWith, encryptWith } from "@/lib/gmail/crypto";
+import { ETC_COPY } from "@/lib/dealer-api/etc/copy";
+import type { EtcPreview } from "@/lib/dealer-api/etc/plan";
 
 export const DEALER_CONNECTIONS_BLOB = "dealer_connections";
+/** The pulled snapshot's meta row; its rows live in `${ETC_PULL_BLOB}:<id>:<n>` chunks (apply.ts). */
+export const ETC_PULL_BLOB = "etc_price_pull";
+export const ETC_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
 
 type Env = Record<string, string | undefined>;
 
@@ -33,8 +38,9 @@ export type EtcRunSummary = EtcRunCounts & {
   at: number;
   kind: "import" | "daily";
   ok: boolean;
-  /** Rows the run applied. */
+  /** Rows the run applied (of `total`). */
   rows: number;
+  total?: number;
   /** The run stopped on its time budget; the next run finishes it. */
   pending: boolean;
   error: string | null;
@@ -43,8 +49,8 @@ export type EtcRunSummary = EtcRunCounts & {
 export type EtcBaseline = { date: string; at: number };
 
 export type EtcCursor = {
-  /** `pulledAt` of the snapshot this cursor walks — a new pull resets it. */
-  snapshotAt: number;
+  /** Id of the snapshot this cursor walks — a new pull resets it. */
+  snapshotId: string;
   next: number;
   counts: EtcRunCounts;
 };
@@ -61,6 +67,8 @@ export type EtcConnection = {
   cursor: EtcCursor | null;
   /** Lease: an apply batch is running until this epoch ms. */
   applyingUntil: number;
+  /** The last Test connection: a failed one keeps the drawer from saying "Connected". */
+  lastTest: { at: number; ok: boolean; message: string } | null;
 };
 
 export const EMPTY_ETC: EtcConnection = {
@@ -74,6 +82,7 @@ export const EMPTY_ETC: EtcConnection = {
   lastRun: null,
   cursor: null,
   applyingUntil: 0,
+  lastTest: null,
 };
 
 export type ConnDeps = {
@@ -95,9 +104,16 @@ export function etcPreviewBlocked(env: Env = process.env): boolean {
   return (env.VERCEL_ENV || "").trim() === "preview";
 }
 
-/** Kill switch for Pull and the daily rider. */
+/** Kill switch for every ETC action and the daily rider. */
 export function etcSyncDisabled(env: Env = process.env): boolean {
   return (env.ETC_SYNC_DISABLED || "").trim() === "true";
+}
+
+/** The refusal every mutating ETC action gives on a preview deploy or with the kill switch on; null = allowed. */
+export function etcBlockedReason(env: Env = process.env): string | null {
+  if (etcPreviewBlocked(env)) return ETC_COPY.preview;
+  if (etcSyncDisabled(env)) return ETC_COPY.disabled;
+  return null;
 }
 
 /** Trimmed key, or null when it can't be one (empty, too long, whitespace inside). */
@@ -123,8 +139,9 @@ function clean(raw: unknown): EtcConnection {
     accountName: s(r.accountName),
     baseline: b && typeof b === "object" && typeof b.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.date) ? { date: b.date, at: n(b.at) ?? 0 } : null,
     lastRun: r.lastRun && typeof r.lastRun === "object" ? (r.lastRun as EtcRunSummary) : null,
-    cursor: c && typeof c === "object" && typeof c.snapshotAt === "number" && typeof c.next === "number" ? (c as EtcCursor) : null,
+    cursor: c && typeof c === "object" && typeof c.snapshotId === "string" && typeof c.next === "number" ? (c as EtcCursor) : null,
     applyingUntil: n(r.applyingUntil) ?? 0,
+    lastTest: r.lastTest && typeof r.lastTest === "object" && typeof r.lastTest.at === "number" ? { at: r.lastTest.at, ok: r.lastTest.ok === true, message: String(r.lastTest.message ?? "").slice(0, 300) } : null,
   };
 }
 
@@ -163,14 +180,19 @@ export async function saveEtcKey(plain: string, by: string, deps: ConnDeps = {})
   const last4 = key.slice(-4);
   const keyEnc = encryptWith(key, secret);
   const now = deps.now ?? Date.now();
-  // The picked account stays until Test connection shows the new key can't see it.
-  await updateEtcConnection(() => ({ keyEnc, last4, savedAt: now, savedBy: (by || "").slice(0, 120) || null }));
+  // The picked account stays until Test connection shows the new key can't see it; a new key is untested.
+  await updateEtcConnection(() => ({ keyEnc, last4, savedAt: now, savedBy: (by || "").slice(0, 120) || null, lastTest: null }));
   return { last4 };
 }
 
 /** Remove the key and everything tied to it (account, baseline, cursor). The last run stays for the record. */
 export async function clearEtcKey(): Promise<void> {
-  await updateEtcConnection(() => ({ keyEnc: null, last4: null, savedAt: null, savedBy: null, accountId: null, accountName: null, baseline: null, cursor: null }));
+  await updateEtcConnection(() => ({ keyEnc: null, last4: null, savedAt: null, savedBy: null, accountId: null, accountName: null, baseline: null, cursor: null, lastTest: null }));
+}
+
+/** Record a Test connection result (ETC's message only — never the key). */
+export async function recordEtcTest(ok: boolean, message: string, now: number = Date.now()): Promise<void> {
+  await updateEtcConnection(() => ({ lastTest: { at: now, ok, message: message.slice(0, 300) } }));
 }
 
 /** Pick the business account. A different account clears the baseline and cursor: its prices need a full pull. */
@@ -213,8 +235,9 @@ export type EtcStatus = {
   accountName: string | null;
   baseline: EtcBaseline | null;
   lastRun: EtcRunSummary | null;
-  /** An import is part-way through (rows applied of total). */
-  importing: { done: number; snapshotAt: number } | null;
+  lastTest: { at: number; ok: boolean; message: string } | null;
+  /** A stored snapshot that isn't fully imported yet (its preview for a pull). */
+  pending: EtcPendingSnapshot | null;
   preview: boolean;
   disabled: boolean;
 };
@@ -222,7 +245,8 @@ export type EtcStatus = {
 /** The safe view: never the key or its ciphertext. */
 export async function etcStatus(deps: ConnDeps = {}): Promise<EtcStatus> {
   const env = deps.env ?? process.env;
-  const c = await readEtcConnection();
+  const now = deps.now ?? Date.now();
+  const [c, meta] = await Promise.all([readEtcConnection(), getBlob<Partial<SnapshotMetaView>>(ETC_PULL_BLOB, {})]);
   let unreadable = false;
   if (c.keyEnc) {
     const secret = authSecretOf(deps);
@@ -242,8 +266,39 @@ export async function etcStatus(deps: ConnDeps = {}): Promise<EtcStatus> {
     accountName: c.accountName,
     baseline: c.baseline,
     lastRun: c.lastRun,
-    importing: c.cursor ? { done: c.cursor.next, snapshotAt: c.cursor.snapshotAt } : null,
+    lastTest: c.keyEnc ? c.lastTest : null,
+    pending: pendingOf(meta, c, now),
     preview: etcPreviewBlocked(env),
     disabled: etcSyncDisabled(env),
   };
+}
+
+/** The snapshot meta fields the status line reads (apply.ts owns the full shape). */
+export type SnapshotMetaView = {
+  id: string;
+  kind: "pull" | "daily";
+  pulledAt: number;
+  accountId: string;
+  total: number;
+  complete: boolean;
+  preview: EtcPreview | null;
+};
+
+export type EtcPendingSnapshot = {
+  kind: "pull" | "daily";
+  pulledAt: number;
+  total: number;
+  done: number;
+  /** A pull older than 24 h, or for another account: it must be pulled again. */
+  stale: boolean;
+  preview: EtcPreview | null;
+};
+
+function pendingOf(meta: Partial<SnapshotMetaView>, c: EtcConnection, now: number): EtcPendingSnapshot | null {
+  if (meta.complete !== false || typeof meta.id !== "string" || !meta.id || typeof meta.total !== "number" || meta.total <= 0) return null;
+  const kind = meta.kind === "daily" ? "daily" : "pull";
+  const pulledAt = typeof meta.pulledAt === "number" ? meta.pulledAt : 0;
+  const done = c.cursor && c.cursor.snapshotId === meta.id ? c.cursor.next : 0;
+  const stale = meta.accountId !== c.accountId || (kind === "pull" && now - pulledAt > ETC_SNAPSHOT_TTL_MS);
+  return { kind, pulledAt, total: meta.total, done, stale, preview: meta.preview ?? null };
 }

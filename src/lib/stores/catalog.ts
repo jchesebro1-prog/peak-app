@@ -180,6 +180,11 @@ export type CatalogPart = {
    *  screen hands a whole part to a client component. */
   demoPrice?: number | null;
   demoPricedAt?: number | null;
+  /** #368 — INTERNAL ONLY, like demoPrice: which ETC priced list last set this
+   *  part's list/cost. A daily delta from a lower-precedence list (finished
+   *  goods → spare parts → flat-rate repair) never overwrites it. Written only
+   *  by the ETC price sync; stripped with demoPrice. */
+  etcPriceList?: "finished-goods" | "spare-parts" | "flat-rate-repair";
 
   /* --- Specs module (#205). All additive JSONB, no migration. ---
    * These are the ONE canonical set (D258). productMetadata.specSection /
@@ -264,13 +269,15 @@ export async function list(): Promise<CatalogPart[]> {
   return listDocs<CatalogPart>("catalog_parts");
 }
 
-/** #368 — a copy of `part` without the internal ETC demo price. Every staff
- *  screen that hands a WHOLE part to a client component goes through this. */
+/** #368 — a copy of `part` without the internal ETC fields (demo price and
+ *  date, the ETC source list). Every staff screen that hands a WHOLE part to a
+ *  client component goes through this. */
 export function withoutDemoPrice<T extends object>(part: T): T {
-  if (!("demoPrice" in part) && !("demoPricedAt" in part)) return part;
-  const rest = { ...part } as T & { demoPrice?: unknown; demoPricedAt?: unknown };
+  if (!("demoPrice" in part) && !("demoPricedAt" in part) && !("etcPriceList" in part)) return part;
+  const rest = { ...part } as T & { demoPrice?: unknown; demoPricedAt?: unknown; etcPriceList?: unknown };
   delete rest.demoPrice;
   delete rest.demoPricedAt;
+  delete rest.etcPriceList;
   return rest;
 }
 

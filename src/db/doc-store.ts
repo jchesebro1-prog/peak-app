@@ -1013,6 +1013,13 @@ export async function listBlobIds(prefix: string): Promise<string[]> {
   return rows.map((r) => r.id).sort();
 }
 
+/** #368 — hard-delete blob rows by exact id (the ETC snapshot's spent chunks). */
+export async function deleteBlobs(ids: readonly string[]): Promise<void> {
+  if (!ids.length) return;
+  const db = await getDb();
+  await db.delete(blobs).where(inArray(blobs.id, [...ids]));
+}
+
 /**
  * #226: merge `patch` into blob `id` WITHOUT replacing any key already
  * there — the mirror image of setBlob's `||` (here the EXISTING row is the

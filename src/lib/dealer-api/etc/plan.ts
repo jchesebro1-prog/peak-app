@@ -3,16 +3,26 @@
  * live catalog, the import resolver and the deleted SKUs; nothing here reads
  * or writes.
  *
- * Rules (spec §6):
+ * Rules (spec §6, plus the #368 review fixes):
  * - Rows merge by part number. A part in two priced lists takes the first in
  *   the order finished goods → spare parts → flat-rate repair; a demo row adds
  *   its netPrice as `demoPrice` to the same item.
  * - Matching: the catalog importer's own resolver (`importResolverFor`, #304)
- *   with mfr "ETC" and the part number as SKU and MFR P/N; then (#368) the one
- *   live ETC part whose MFR P/N is that part number; then the one live ETC part
- *   whose SKU or model # is the row's model number, when no other ETC row
- *   shares that model. Production keys ETC parts by model number, so without
- *   the last two steps every existing part would come back as "new".
+ *   with mfr "ETC" and the part number as SKU and MFR P/N — a hit on another
+ *   brand's part is no match; then the one live ETC part whose MFR P/N is that
+ *   part number; then the one live ETC part whose SKU or model # is the row's
+ *   model number, when no other ETC row shares that model AND the part's own
+ *   MFR P/N is blank or this part number. Production keys ETC parts by model
+ *   number, so without the last two steps every existing part would come back
+ *   as "new". Only parts whose mfr normalizes to ETC are ever matched.
+ * - Two rows of one pull never land on one part: the first wins, the second is
+ *   skipped as a conflict.
+ * - A part a person deleted — same SKU, or a deleted ETC part with that MFR
+ *   P/N or (P/N-compatible) model — is never re-created. A part number that is
+ *   another brand's SKU is skipped, never created on top of it.
+ * - A daily delta never lets a lower-precedence list overwrite a price an
+ *   earlier list set (`etcPriceList`, finished goods → spare parts → flat-rate
+ *   repair); a full pull is authoritative and may.
  * - Existing part, priced list: `list` ← listPrice and `cost` ← netPrice, each
  *   only when it moved (a missing/zero ETC price leaves ours alone); MFR P/N
  *   and model # only when ours is blank. Description and category never change.
@@ -28,6 +38,7 @@ import type { EtcRunCounts } from "@/lib/dealer-api/connections";
 import { mfrKey } from "@/lib/catalog-books";
 import { normalizeSku } from "@/lib/davinci/sku";
 import { ETC_LISTS, ETC_PRICED_LISTS, type EtcListKey, type EtcRow, type EtcSkip } from "./parse";
+import { ETC_SKIP_REASON } from "./copy";
 
 export const ETC_MFR = "ETC";
 const ETC_MFR_KEYS = new Set(["etc", "electronictheatrecontrols", "electronictheatrecontrolsinc", "etcinc"]);
@@ -66,26 +77,21 @@ export function mergeEtcRows(rows: readonly EtcRow[]): EtcItem[] {
   return [...byPn.values()];
 }
 
-/* ---------- snapshot encoding (compact tuples, ~150 bytes a row) ---------- */
-
-export type EtcItemTuple = [string, string, string, string, number, number | null, number | null, number | null];
-
-export function encodeItem(i: EtcItem): EtcItemTuple {
-  return [i.pn, i.model, i.desc, i.path, i.src == null ? -1 : ETC_LISTS.indexOf(i.src), i.lp, i.np, i.demo];
-}
-
-export function decodeItem(t: unknown): EtcItem | null {
-  if (!Array.isArray(t) || typeof t[0] !== "string" || !t[0]) return null;
-  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
-  const src = typeof t[4] === "number" && t[4] >= 0 && t[4] < 3 ? ETC_LISTS[t[4]] : null;
-  return { pn: t[0], model: String(t[1] ?? ""), desc: String(t[2] ?? "") || t[0], path: String(t[3] ?? ""), src, lp: num(t[5]), np: num(t[6]), demo: num(t[7]) };
-}
-
 /* ---------- matching ---------- */
 
-export type EtcLivePart = Pick<CatalogPart, "sku" | "mfr" | "manufacturerPartNumber" | "manufacturerModelNumber" | "list" | "cost" | "priceDate" | "demoPrice"> & {
+export type EtcLivePart = Pick<CatalogPart, "sku" | "mfr" | "manufacturerPartNumber" | "manufacturerModelNumber" | "list" | "cost" | "priceDate" | "demoPrice" | "etcPriceList"> & {
   formerSkus?: string[];
 };
+
+export function isEtcMfr(mfr: string | null | undefined): boolean {
+  return ETC_MFR_KEYS.has(mfrKey(mfr));
+}
+
+/** 0 = write it; otherwise the skip reason (copy.ts ETC_SKIP_REASON). */
+export type EtcMatchCode = 0 | 1 | 2 | 3 | 4;
+export const ETC_CODE = { ok: 0, conflict: 1, deleted: 2, foreign: 3, unmatched: 4 } as const;
+/** `sku` "" with code 0 = create a new part at the part number. */
+export type EtcMatch = { sku: string; code: EtcMatchCode };
 
 function claim(m: Map<string, string | null>, k: string, sku: string): void {
   if (!k) return;
@@ -94,54 +100,115 @@ function claim(m: Map<string, string | null>, k: string, sku: string): void {
   else if (prev !== sku) m.set(k, null);
 }
 
-/** item → the live SKU it means, or null (a new part). */
-export function buildEtcMatcher(live: readonly EtcLivePart[], resolve: ImportResolver, items: readonly EtcItem[]): (item: EtcItem) => string | null {
-  const byPn = new Map<string, string | null>();
-  const byModel = new Map<string, string | null>();
-  for (const p of live) {
-    if (!p?.sku || !ETC_MFR_KEYS.has(mfrKey(p.mfr))) continue;
-    claim(byPn, mfrKey(p.manufacturerPartNumber), p.sku);
-    const keys = new Set([normalizeSku(p.sku), normalizeSku(p.manufacturerModelNumber ?? "")]);
-    for (const k of keys) claim(byModel, k, p.sku);
-  }
+/** The part's own MFR P/N doesn't contradict this part number (blank or the same). */
+function pnCompatible(p: EtcLivePart, pn: string): boolean {
+  const own = mfrKey(p.manufacturerPartNumber);
+  return !own || own === mfrKey(pn);
+}
+
+/**
+ * Match every item of one pull/delta against the live catalog (and the parts
+ * people deleted), then apply the one-part-per-row guard. Pure.
+ */
+export function matchEtcItems(items: readonly EtcItem[], live: readonly EtcLivePart[], deleted: readonly EtcLivePart[], resolve: ImportResolver): EtcMatch[] {
+  const bySku = new Map(live.map((p) => [p.sku, p]));
+  const index = (parts: readonly EtcLivePart[]) => {
+    const byPn = new Map<string, string | null>();
+    const byModel = new Map<string, string | null>();
+    const etc = new Map<string, EtcLivePart>();
+    for (const p of parts) {
+      if (!p?.sku || !isEtcMfr(p.mfr)) continue;
+      etc.set(p.sku, p);
+      claim(byPn, mfrKey(p.manufacturerPartNumber), p.sku);
+      for (const k of new Set([normalizeSku(p.sku), normalizeSku(p.manufacturerModelNumber ?? "")])) claim(byModel, k, p.sku);
+    }
+    return { byPn, byModel, etc };
+  };
+  const L = index(live);
+  const D = index(deleted);
+  const deletedSkus = new Set(deleted.map((p) => p.sku));
   const modelUses = new Map<string, number>();
   for (const i of items) {
     const k = normalizeSku(i.model);
     if (k) modelUses.set(k, (modelUses.get(k) ?? 0) + 1);
   }
-  return (item) => {
-    const hit = resolve({ sku: item.pn, mfr: ETC_MFR, manufacturerPartNumber: item.pn });
-    if (hit) return hit;
-    const pn = byPn.get(mfrKey(item.pn));
-    if (pn) return pn;
+  const byModelFor = (ix: typeof L, item: EtcItem, needUnique: boolean): string | null => {
     const mk = normalizeSku(item.model);
-    if (mk && modelUses.get(mk) === 1) return byModel.get(mk) ?? null;
-    return null;
+    if (!mk || (needUnique && modelUses.get(mk) !== 1)) return null;
+    const sku = ix.byModel.get(mk);
+    const p = sku ? ix.etc.get(sku) : undefined;
+    return p && pnCompatible(p, item.pn) ? p.sku : null;
   };
+
+  const out: EtcMatch[] = items.map((item) => {
+    const hit = resolve({ sku: item.pn, mfr: ETC_MFR, manufacturerPartNumber: item.pn });
+    const hitPart = hit ? bySku.get(hit) : undefined;
+    if (hit && hitPart && isEtcMfr(hitPart.mfr)) return { sku: hit, code: 0 };
+    const pn = L.byPn.get(mfrKey(item.pn));
+    if (pn) return { sku: pn, code: 0 };
+    const model = byModelFor(L, item, true);
+    if (model) return { sku: model, code: 0 };
+    if (!item.src) return { sku: "", code: 4 };
+    const gone = deletedSkus.has(item.pn) ? item.pn : D.byPn.get(mfrKey(item.pn)) || byModelFor(D, item, false);
+    if (gone) return { sku: gone, code: 2 };
+    // Another brand's part answers to this part number (its SKU, a former SKU, a rename): never create on top of it.
+    if (hit || bySku.has(item.pn)) return { sku: hit || item.pn, code: 3 };
+    return { sku: "", code: 0 };
+  });
+
+  // One part per row: the first row to claim a SKU keeps it.
+  const claimed = new Set<string>();
+  items.forEach((item, i) => {
+    const m = out[i];
+    if (m.code !== 0) return;
+    const key = m.sku || item.pn;
+    if (claimed.has(key)) out[i] = { sku: m.sku || item.pn, code: 1 };
+    else claimed.add(key);
+  });
+  return out;
+}
+
+/* ---------- snapshot encoding (compact tuples, ~160 bytes a row) ---------- */
+
+export type EtcItemTuple = [string, string, string, string, number, number | null, number | null, number | null, string, number];
+/** -1 in the code slot: fetched, not matched yet (a daily delta stored before its catalog read). */
+export const ETC_UNMATCHED = -1;
+
+export function encodeItem(i: EtcItem, m: EtcMatch | null): EtcItemTuple {
+  return [i.pn, i.model, i.desc, i.path, i.src == null ? -1 : ETC_LISTS.indexOf(i.src), i.lp, i.np, i.demo, m?.sku ?? "", m ? m.code : ETC_UNMATCHED];
+}
+
+export function decodeItem(t: unknown): { item: EtcItem; match: EtcMatch | null } | null {
+  if (!Array.isArray(t) || typeof t[0] !== "string" || !t[0]) return null;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
+  const src = typeof t[4] === "number" && t[4] >= 0 && t[4] < 3 ? ETC_LISTS[t[4]] : null;
+  const item: EtcItem = { pn: t[0], model: String(t[1] ?? ""), desc: String(t[2] ?? "") || t[0], path: String(t[3] ?? ""), src, lp: num(t[5]), np: num(t[6]), demo: num(t[7]) };
+  const code = typeof t[9] === "number" && t[9] >= 0 && t[9] <= 4 ? (t[9] as EtcMatchCode) : null;
+  return { item, match: code == null ? null : { sku: typeof t[8] === "string" ? t[8] : "", code } };
 }
 
 /* ---------- planning ---------- */
 
-export type EtcPartPatch = Partial<Pick<CatalogPart, "list" | "cost" | "manufacturerPartNumber" | "manufacturerModelNumber" | "demoPrice" | "demoPricedAt">>;
+export type EtcPartPatch = Partial<Pick<CatalogPart, "list" | "cost" | "manufacturerPartNumber" | "manufacturerModelNumber" | "demoPrice" | "demoPricedAt" | "etcPriceList">>;
 export type EtcNewPart = Omit<CatalogPart, "id">;
 export type EtcChange = { pn: string; sku: string; desc: string; field: "list" | "cost" | "demo"; from: number | null; to: number };
+export type EtcPricedList = "finished-goods" | "spare-parts" | "flat-rate-repair";
 
 export type EtcAction =
-  | { kind: "create"; pn: string; sku: string; src: EtcListKey; part: EtcNewPart; demo: boolean }
+  | { kind: "create"; pn: string; sku: string; src: EtcPricedList; part: EtcNewPart; demo: boolean }
   /** `priced`: the write confirms a list/cost (stamp pricedAt/priceDate). */
   | { kind: "update"; pn: string; sku: string; src: EtcListKey | null; patch: EtcPartPatch; priced: boolean; priceChanged: boolean; demoChanged: boolean; changes: EtcChange[] }
   /** Nothing moved; `redate` = a priced row whose priceDate isn't today yet (one priceDate-only write). */
   | { kind: "unchanged"; pn: string; sku: string; src: EtcListKey | null; redate: boolean }
-  | { kind: "demo-unmatched"; pn: string }
-  | { kind: "deleted"; pn: string; sku: string; src: EtcListKey };
+  | { kind: "skip"; pn: string; sku: string; src: EtcListKey | null; code: Exclude<EtcMatchCode, 0> };
 
 export type EtcPlanCtx = {
   /** Epoch ms written as demoPricedAt. */
   now: number;
   /** Start of today (Chicago) — a priceDate at or after it is already today. */
   todayStart: number;
-  /** SKUs a person deleted (soft-deleted, not renamed) — never revived. */
-  deletedSkus: ReadonlySet<string>;
+  /** A full pull is authoritative over `etcPriceList`; a daily delta is not. */
+  full: boolean;
 };
 
 export function newPartCategory(item: Pick<EtcItem, "path" | "src">): string {
@@ -151,10 +218,17 @@ export function newPartCategory(item: Pick<EtcItem, "path" | "src">): string {
   return item.src === "spare-parts" ? "ETC spare parts" : "Uncategorized";
 }
 
-export function planEtcItem(item: EtcItem, sku: string | null, existing: EtcLivePart | null, ctx: EtcPlanCtx): EtcAction {
-  if (!sku || !existing) {
-    if (!item.src) return { kind: "demo-unmatched", pn: item.pn };
-    if (ctx.deletedSkus.has(item.pn)) return { kind: "deleted", pn: item.pn, sku: item.pn, src: item.src };
+const rankOf = (l: string | null | undefined): number => {
+  const i = (ETC_PRICED_LISTS as readonly string[]).indexOf(l ?? "");
+  return i < 0 ? 99 : i;
+};
+
+/** Plan one matched item. `existing` is the live part the match names (null = create). */
+export function planEtcItem(item: EtcItem, match: EtcMatch, existing: EtcLivePart | null, ctx: EtcPlanCtx): EtcAction {
+  const src = item.src as EtcPricedList | null;
+  if (match.code !== 0) return { kind: "skip", pn: item.pn, sku: match.sku, src: item.src, code: match.code };
+  if (!existing) {
+    if (!src) return { kind: "skip", pn: item.pn, sku: "", src: null, code: 4 };
     const part: EtcNewPart = {
       sku: item.pn,
       desc: item.desc || item.pn,
@@ -166,13 +240,18 @@ export function planEtcItem(item: EtcItem, sku: string | null, existing: EtcLive
       manufacturerPartNumber: item.pn,
       ...(item.model ? { manufacturerModelNumber: item.model } : {}),
       ...(item.demo != null ? { demoPrice: item.demo, demoPricedAt: ctx.now } : {}),
+      etcPriceList: src,
     };
-    return { kind: "create", pn: item.pn, sku: item.pn, src: item.src, part, demo: item.demo != null };
+    return { kind: "create", pn: item.pn, sku: item.pn, src, part, demo: item.demo != null };
   }
+  const sku = existing.sku;
   const patch: EtcPartPatch = {};
   const changes: EtcChange[] = [];
   const label = item.desc || item.pn;
-  if (item.src) {
+  // A delta row from a lower-precedence list never overwrites an earlier list's price.
+  const outranked = !!src && !ctx.full && rankOf(existing.etcPriceList) < rankOf(src);
+  const pricing = !!src && !outranked;
+  if (pricing) {
     if (item.lp != null && item.lp !== existing.list) {
       patch.list = item.lp;
       changes.push({ pn: item.pn, sku, desc: label, field: "list", from: existing.list ?? null, to: item.lp });
@@ -181,6 +260,9 @@ export function planEtcItem(item: EtcItem, sku: string | null, existing: EtcLive
       patch.cost = item.np;
       changes.push({ pn: item.pn, sku, desc: label, field: "cost", from: existing.cost ?? null, to: item.np });
     }
+    if (existing.etcPriceList !== src) patch.etcPriceList = src!;
+  }
+  if (src) {
     if (!existing.manufacturerPartNumber?.trim()) patch.manufacturerPartNumber = item.pn;
     if (!existing.manufacturerModelNumber?.trim() && item.model) patch.manufacturerModelNumber = item.model;
   }
@@ -192,19 +274,36 @@ export function planEtcItem(item: EtcItem, sku: string | null, existing: EtcLive
     changes.push({ pn: item.pn, sku, desc: label, field: "demo", from: existing.demoPrice ?? null, to: item.demo });
   }
   if (!Object.keys(patch).length) {
-    const redate = !!item.src && !(typeof existing.priceDate === "number" && existing.priceDate >= ctx.todayStart);
+    const redate = pricing && !(typeof existing.priceDate === "number" && existing.priceDate >= ctx.todayStart);
     return { kind: "unchanged", pn: item.pn, sku, src: item.src, redate };
   }
-  return { kind: "update", pn: item.pn, sku, src: item.src, patch, priced: !!item.src, priceChanged: "list" in patch || "cost" in patch, demoChanged, changes };
+  return { kind: "update", pn: item.pn, sku, src: item.src, patch, priced: pricing, priceChanged: "list" in patch || "cost" in patch, demoChanged, changes };
 }
 
-/** Plan every item against one catalog view. */
-export function planEtc(items: readonly EtcItem[], live: readonly EtcLivePart[], resolve: ImportResolver, ctx: EtcPlanCtx): EtcAction[] {
+/**
+ * At import time the stored match is re-checked against the part as it is
+ * now: a matched part that is gone (deleted since the pull) is skipped; a
+ * planned create whose SKU now exists becomes an update when it's an ETC part
+ * (a retried batch) and is skipped when it's another brand's.
+ */
+export function targetNow(item: EtcItem, match: EtcMatch, liveNow: ReadonlyMap<string, EtcLivePart>): { match: EtcMatch; existing: EtcLivePart | null } {
+  if (match.code !== 0) return { match, existing: null };
+  const sku = match.sku || item.pn;
+  const p = liveNow.get(sku);
+  if (!match.sku) {
+    if (!p) return { match, existing: null };
+    return isEtcMfr(p.mfr) ? { match: { sku: p.sku, code: 0 }, existing: p } : { match: { sku, code: 3 }, existing: null };
+  }
+  if (!p) return { match: { sku, code: 2 }, existing: null };
+  return isEtcMfr(p.mfr) ? { match: { sku: p.sku, code: 0 }, existing: p } : { match: { sku, code: 3 }, existing: null };
+}
+
+/** Plan every item against one catalog view (the preview). */
+export function planEtc(items: readonly EtcItem[], matches: readonly EtcMatch[], live: readonly EtcLivePart[], ctx: EtcPlanCtx): EtcAction[] {
   const bySku = new Map(live.map((p) => [p.sku, p]));
-  const match = buildEtcMatcher(live, resolve, items);
-  return items.map((i) => {
-    const sku = match(i);
-    return planEtcItem(i, sku, sku ? bySku.get(sku) ?? null : null, ctx);
+  return items.map((i, k) => {
+    const m = matches[k];
+    return planEtcItem(i, m, m.code === 0 && m.sku ? bySku.get(m.sku) ?? null : null, ctx);
   });
 }
 
@@ -228,7 +327,9 @@ export function previewOf(actions: readonly EtcAction[], rowCounts: Partial<Reco
   for (const s of skipped) lists.get(s.list)!.skipped++;
   const changes: EtcChange[] = [];
   const unmatched: string[] = [];
+  const sample: EtcSkip[] = skipped.slice(0, SAMPLE);
   let unmatchedCount = 0;
+  let planSkips = 0;
   const demo = lists.get("demo-prices")!;
   for (const a of actions) {
     if (a.kind === "create") {
@@ -243,19 +344,21 @@ export function previewOf(actions: readonly EtcAction[], rowCounts: Partial<Reco
       for (const c of a.changes) if (changes.length < ETC_PREVIEW_CHANGES && c.field !== "demo") changes.push(c);
     } else if (a.kind === "unchanged") {
       if (a.src) lists.get(a.src)!.unchanged++;
-    } else if (a.kind === "deleted") {
-      lists.get(a.src)!.skipped++;
-    } else {
+    } else if (a.code === 4) {
       unmatchedCount++;
       demo.unmatched++;
       if (unmatched.length < SAMPLE) unmatched.push(a.pn);
+    } else {
+      planSkips++;
+      lists.get(a.src ?? "demo-prices")!.skipped++;
+      if (sample.length < SAMPLE) sample.push({ list: a.src ?? "demo-prices", partNumber: a.pn, reason: ETC_SKIP_REASON[a.code] + (a.sku && a.code !== 2 ? ` (${a.sku})` : "") });
     }
   }
   return {
     lists: [...lists.values()],
     items: actions.length,
     changes,
-    skipped: { count: skipped.length + actions.filter((a) => a.kind === "deleted").length, sample: skipped.slice(0, SAMPLE) },
+    skipped: { count: skipped.length + planSkips, sample },
     demoUnmatched: { count: unmatchedCount, sample: unmatched },
   };
 }
@@ -274,7 +377,7 @@ export function countAction(c: EtcCounts, a: EtcAction): EtcCounts {
     else if (a.src) n.unchanged++;
     if (a.demoChanged) n.demo++;
   } else if (a.kind === "unchanged") n.unchanged++;
-  else if (a.kind === "deleted") n.skipped++;
-  else n.demoUnmatched++;
+  else if (a.code === 4) n.demoUnmatched++;
+  else n.skipped++;
   return n;
 }
