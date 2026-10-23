@@ -8,6 +8,8 @@ import { bomPdfPath } from "@/lib/estimate-output/bom-pdf";
 import type { EstimatorState } from "../use-estimator-state";
 import { VendorsCard } from "./vendors-card";
 import { QuotePeopleFields } from "../quote-people-fields";
+import { PaymentTermsSelect } from "../preview-doc";
+import { PAYMENT_TERMS } from "../types";
 import { bomPricesHiddenNote, bomSwitchShown } from "@/lib/estimate-box-sale/rules";
 
 /** Copy for the BOM quote tab (spec 2026-10-12 §4.3). */
@@ -164,6 +166,7 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
             {/* Box goods sale (2026-10-22): the Client package tab is hidden, so the estimate-wide Show prices / Show quantities
                 (the same pdfPrices / pdfQty through the same togglePdf as Client package → Line detail) live here. */}
             {s.boxSale && (
+              <>
               <span data-testid="box-sale-show-toggles" role="group" aria-label="Show prices and quantities" style={SEG_WRAP}>
                 <button type="button" onClick={() => togglePdf("pdfPrices")} aria-pressed={pdfOpts.pdfPrices} style={pdfOpts.pdfPrices ? SEG_ON : SEG_OFF}>
                   {(pdfOpts.pdfPrices ? "✓ " : "") + "Show prices"}
@@ -172,6 +175,30 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
                   {(pdfOpts.pdfQty ? "✓ " : "") + "Show quantities"}
                 </button>
               </span>
+              {/* Everything else a box sale's BOM prints is only on the hidden Client package tab, so it is settable here too
+                  (2026-10-22): Payment terms (same options + setter), Terms, Options and the Cover note toggle. The cover note's
+                  text is the header's Quote details → Quote note, on every step. */}
+              <span data-testid="box-sale-document-controls" role="group" aria-label="Payment terms, terms, options and cover note" style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: "4px 8px" }}>
+                <PaymentTermsSelect value={paymentTerms} options={PAYMENT_TERMS} onChange={s.setPaymentTerms} />
+                <span style={SEG_WRAP}>
+                  <button type="button" onClick={() => togglePdf("pdfTerms")} aria-pressed={pdfOpts.pdfTerms} style={pdfOpts.pdfTerms ? SEG_ON : SEG_OFF}>
+                    {(pdfOpts.pdfTerms ? "✓ " : "") + "Terms"}
+                  </button>
+                  <button type="button" onClick={() => togglePdf("pdfOptions")} aria-pressed={pdfOpts.pdfOptions} style={pdfOpts.pdfOptions ? SEG_ON : SEG_OFF}>
+                    {(pdfOpts.pdfOptions ? "✓ " : "") + "Options"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => togglePdf("pdfCover")}
+                    aria-pressed={pdfOpts.pdfCover}
+                    title="The cover note at the top of the estimate (edit its text under Quote details → Quote note)"
+                    style={pdfOpts.pdfCover ? SEG_ON : SEG_OFF}
+                  >
+                    {(pdfOpts.pdfCover ? "✓ " : "") + "Cover note"}
+                  </button>
+                </span>
+              </span>
+              </>
             )}
             <span style={SEG_WRAP}>
               {BOM_SHOW_SWITCHES.filter(({ flag }) => bomSwitchShown(flag, s.boxSale)).map(({ flag, label }) => {

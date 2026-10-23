@@ -510,10 +510,17 @@ function bomToggleChecks(ok: Ok) {
   ok(bomPricesHiddenNote(false) === normal, "box sale BOM toggles: a normal estimate's locked note is unchanged");
   const box = bomPricesHiddenNote(true);
   ok(box !== normal && !box.includes("Client package") && box.includes("Show prices"), "box sale BOM toggles: the box-sale note points at the Show prices toggle on this tab, not Client package");
+  ok(box === "Prices are hidden on client documents. Turn on Show prices (Show on BOM)." && !box.includes("above"), "box sale BOM toggles: the box-sale note says where the toggle is (Show on BOM), not 'above'");
 
   const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
-  ok(tab.includes("{s.boxSale && (") && /togglePdf\("pdfPrices"\)[\s\S]{0,200}Show prices/.test(tab) && /togglePdf\("pdfQty"\)[\s\S]{0,200}Show quantities/.test(tab),
+  ok(/togglePdf\("pdfPrices"\)[\s\S]{0,200}Show prices/.test(tab) && /togglePdf\("pdfQty"\)[\s\S]{0,200}Show quantities/.test(tab),
     "box sale BOM toggles (source): the BOM tab renders Prices / Quantities toggles through the shared togglePdf");
+  // The box-sale-only region: from its `{s.boxSale && (` guard to the guard's own close. Both control blocks must sit inside it.
+  const guard = tab.lastIndexOf("{s.boxSale && (", tab.indexOf('data-testid="box-sale-show-toggles"'));
+  const guardEnd = tab.indexOf("\n            )}\n", guard);
+  const region = guard >= 0 && guardEnd > guard ? tab.slice(guard, guardEnd) : "";
+  ok(region.includes('data-testid="box-sale-show-toggles"') && region.includes('data-testid="box-sale-document-controls"'),
+    "box sale BOM toggles (source): the Show prices / quantities block and the document-controls block both sit inside one s.boxSale guard");
   ok(tab.includes('data-testid="box-sale-show-toggles"') && tab.indexOf('data-testid="box-sale-show-toggles"') > tab.indexOf("aria-label={BOM_TAB_COPY.showOnBom}") && tab.indexOf('data-testid="box-sale-show-toggles"') < tab.indexOf("{BOM_TAB_COPY.showOnBomHint}"),
     "box sale BOM toggles (source): the Show prices / quantities row sits inside the Show on BOM group, before its hint");
   ok(tab.includes("BOM_SHOW_SWITCHES.filter(({ flag }) => bomSwitchShown(flag, s.boxSale))") && tab.includes("title={locked ? bomPricesHiddenNote(s.boxSale) : undefined}") && tab.includes("{bomPricesHiddenNote(s.boxSale)}"),
@@ -522,6 +529,23 @@ function bomToggleChecks(ok: Ok) {
     "box sale BOM toggles (source): no second state path — the existing togglePdf and the unchanged lock rule");
   ok(!rd("src/app/(app)/estimator/steps/client-package-tab.tsx").includes("bomSwitchShown") && rd("src/app/(app)/estimator/preview-doc.tsx").includes("p.togglePdf(\"pdfPrices\")"),
     "box sale BOM toggles (source): the Client package tab and PdfLineDetailGroup are untouched");
+
+  // Final controls (2026-10-22): anything a box sale's BOM prints is settable from the BOM tab — Payment terms, Terms, Options, Cover note.
+  const pd = rd("src/app/(app)/estimator/preview-doc.tsx");
+  ok(/export function PaymentTermsSelect\(/.test(pd) && pd.includes("<PaymentTermsSelect") && !/<select[\s\S]*aria-label="Payment terms"/.test(pd.slice(pd.indexOf("export function PdfLineDetailGroup"), pd.indexOf("export function PdfPreviewPane"))),
+    "box sale BOM controls (source): Payment terms is one shared PaymentTermsSelect, used by the Client package group");
+  ok(tab.includes("PaymentTermsSelect") && tab.includes("PAYMENT_TERMS") && tab.includes("s.setPaymentTerms") && tab.includes("value={paymentTerms}"),
+    "box sale BOM controls (source): the BOM tab reuses the shared select, the same options list and the same setPaymentTerms");
+  ok(/togglePdf\("pdfTerms"\)[\s\S]{0,200}Terms/.test(tab) && /togglePdf\("pdfOptions"\)[\s\S]{0,200}Options/.test(tab) && /togglePdf\("pdfCover"\)[\s\S]{0,400}Cover note/.test(tab),
+    "box sale BOM controls (source): Terms / Options / Cover note toggle through the same togglePdf");
+  const dc = tab.indexOf('data-testid="box-sale-document-controls"');
+  const dcRegion = dc > 0 ? tab.slice(dc, tab.indexOf("\n            )}\n", dc)) : "";
+  ok(["PaymentTermsSelect", 'togglePdf("pdfTerms")', 'togglePdf("pdfOptions")', 'togglePdf("pdfCover")'].every((x) => dcRegion.includes(x)),
+    "box sale BOM controls (source): all four controls sit inside the box-sale-only document-controls block");
+  const hdr = rd("src/app/(app)/estimator/estimator-header.tsx");
+  const qn = hdr.indexOf("onChange={(e) => onQuoteNote(e.target.value)}");
+  ok(qn > hdr.indexOf("{qdOpen && (") && !hdr.slice(hdr.lastIndexOf("<div className=\"est-qd-col\">", qn), qn).includes("boxSale"),
+    "box sale BOM controls (source): the Cover note text (Quote note) is edited in the header's Quote details on every step, not gated on a box sale");
 }
 
 // (later tasks: check functions above this line)

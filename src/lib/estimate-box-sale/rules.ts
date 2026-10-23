@@ -91,7 +91,7 @@ export function bomSwitchShown(flag: string, boxSale: boolean): boolean {
  *  package tab, so it points at the Show prices toggle on the same BOM quote tab instead. */
 export function bomPricesHiddenNote(boxSale: boolean): string {
   return boxSale
-    ? "Prices are hidden on client documents. Turn Show prices back on, above."
+    ? "Prices are hidden on client documents. Turn on Show prices (Show on BOM)."
     : "Prices are hidden on client documents (Client package → Line detail).";
 }
 

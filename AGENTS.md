@@ -1624,7 +1624,7 @@ See `.env.example`.
     review is Document + BOM; readiness is quiet; the email says "Attached is our quote … You can also
     view it online here: {link}" (subject "quote" too). A save with any labor line is refused (server
     and browser). Nothing narrative is deleted — switching off restores it. No migration. Remaining is
-    Jeff-gated: one real box-sale estimate sent to himself on production. Punch item #362.
+    Jeff-gated: one real box-sale estimate sent to himself on production. On a box sale, the BOM quote tab carries Show prices / Show quantities, Payment terms, Terms, Options and Cover note (the Client package tab is hidden; the cover note's text stays in the header's Quote details) and hides #364's Labor switch (Jeff 2026-10-22). Punch item #362.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
