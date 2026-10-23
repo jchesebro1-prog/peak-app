@@ -30,12 +30,14 @@ import { initialTierSeed, reseedKnob, seedFor, type TierPrompt } from "@/lib/tie
 import type { PricingTier } from "@/lib/identity/config";
 import {
   finishRepair,
-  fmtPts,
+  fmtPct,
+  MARKUP_SLIDER_MAX,
+  MARKUP_SLIDER_MIN,
   liftCostOf,
   liftDraftFrom,
   normalizeLift,
   normalizePriceOverride,
-  sliderPts,
+  sliderPct,
   type LiftDraft,
   type LiftRental,
   type RepairFinish,
@@ -132,9 +134,9 @@ export type BuilderInitial = {
   /** #282 phase 3: the Rewards credit on the saved quote (whole dollars; 0/absent = none). */
   rewardCredit?: number;
   /** #254: the saved quote's own knob in points (absent for a new quote) — never re-seeded on load. */
-  marginPts?: number | null;
+  savedMarkupPts?: number | null;
   /** #254: the saved quote's stamped tier margin fraction (seeds `prevSeedPts`). */
-  stampedTierMargin?: number | null;
+  stampedTierMarkup?: number | null;
   /** #340: the assessment findings this new quote is built from (posted as `findingKeys`; linked on first save). */
   findingKeys?: string[];
 };
@@ -400,11 +402,11 @@ export function QuoteBuilder({
       customer: customers.find((c) => c.id === initial.customerId) || null,
       contactName: initial.contactSel === "__other__" ? "" : initial.contactSel,
       serviceDefault: baseRates.margin,
-      savedMarginPts: initial.marginPts,
-      stampedTierMargin: initial.stampedTierMargin,
+      savedMarkupPts: initial.savedMarkupPts,
+      stampedTierMarkup: initial.stampedTierMarkup,
     })
   );
-  const [marginPts, setMarginPts] = useState(seed0.knobPts);
+  const [markupPts, setMarkupPts] = useState(seed0.knobPts);
   const prevSeedPts = useRef(seed0.prevSeedPts);
   const [tierPrompt, setTierPrompt] = useState<TierPrompt | null>(null);
   const [mileageRate, setMileageRate] = useState(baseRates.mileageRate.toFixed(2));
@@ -471,14 +473,14 @@ export function QuoteBuilder({
    *  kept and the new seed is offered as a one-click prompt. */
   function reseedTier(c: BuilderCustomer | null, contactName: string) {
     const next = seedFor(c, contactName === "__other__" ? "" : contactName, baseRates.margin);
-    const res = reseedKnob(marginPts, prevSeedPts.current, next);
+    const res = reseedKnob(markupPts, prevSeedPts.current, next);
     prevSeedPts.current = res.prevSeedPts;
-    setMarginPts(res.knobPts);
+    setMarkupPts(res.knobPts);
     setTierPrompt(res.prompt);
   }
   function applyTierSeed() {
     if (!tierPrompt) return;
-    setMarginPts(tierPrompt.seed.pts);
+    setMarkupPts(tierPrompt.seed.pts);
     setPriceText("");
     setTierPrompt(null);
     dirty();
@@ -542,7 +544,7 @@ export function QuoteBuilder({
     ...baseRates,
     mileageRate: parseFloat(mileageRate) || baseRates.mileageRate,
     laborRate: parseFloat(laborRate) || baseRates.laborRate,
-    margin: marginPts / 100,
+    margin: markupPts / 100,
   };
   const selectedVenues: VenueIn[] = locations
     .filter((l) => venueSel[l.id]?.on)
@@ -570,7 +572,7 @@ export function QuoteBuilder({
 
   /** #217 — back to the auto total; the slider stays where the typed total put it. */
   function resetToAuto() {
-    if (r?.overridden) setMarginPts(sliderPts(r.serviceMargin));
+    if (r?.overridden) setMarkupPts(sliderPct(r.serviceMarkup));
     setPriceText("");
     dirty();
   }
@@ -608,7 +610,7 @@ export function QuoteBuilder({
     fd.set("notes", notes);
     fd.set("laborHours", laborHours);
     fd.set("crewSize", String(crew));
-    fd.set("margin", String(marginPts));
+    fd.set("markup", String(markupPts));
     fd.set("mileageRate", mileageRate);
     fd.set("laborRate", laborRate);
     fd.set("travel", JSON.stringify(overrideFromDraft(travelDraft) ?? {}));
@@ -1313,7 +1315,7 @@ export function QuoteBuilder({
                   }}
                 >
                   <span style={{ color: "#5b616e" }}>
-                    Margin · {r?.overridden ? fmtPts(r.serviceMargin) : marginPts} pts
+                    Margin · {r?.overridden ? fmtPct(r.serviceMarkup) : markupPts} pts
                   </span>
                   <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "#1f7a52" }}>
                     +{money((r?.serviceSell || 0) - (r?.serviceCost || 0))}
@@ -1321,12 +1323,12 @@ export function QuoteBuilder({
                 </div>
                 <input
                   type="range"
-                  min={10}
-                  max={50}
+                  min={MARKUP_SLIDER_MIN}
+                  max={MARKUP_SLIDER_MAX}
                   step={1}
-                  value={r?.overridden ? sliderPts(r.serviceMargin) : marginPts}
+                  value={r?.overridden ? sliderPct(r.serviceMarkup) : markupPts}
                   onChange={(e) => {
-                    setMarginPts(Math.round(+e.target.value));
+                    setMarkupPts(Math.round(+e.target.value));
                     setPriceText("");
                     setTierPrompt(null);
                     dirty();
@@ -1342,8 +1344,8 @@ export function QuoteBuilder({
                     margin: "-2px 0 9px",
                   }}
                 >
-                  <span>10 pts</span>
-                  <span>50 pts</span>
+                  <span>{MARKUP_SLIDER_MIN} pts</span>
+                  <span>{MARKUP_SLIDER_MAX} pts</span>
                 </div>
                 <TierSeedPrompt prompt={tierPrompt} onUse={applyTierSeed} accent={accent} />
                 <BreakRow label="Service sell" value={money(r?.serviceSell || 0)} last />
@@ -1387,7 +1389,7 @@ export function QuoteBuilder({
                 total={total}
                 autoTotal={r?.autoTotal ?? 0}
                 cost={r?.cost ?? 0}
-                margin={r?.serviceMargin ?? 0}
+                markup={r?.serviceMarkup ?? 0}
                 partsSell={r?.partsSell ?? 0}
                 overridden={!!r?.overridden}
                 text={priceText}

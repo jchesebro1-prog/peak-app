@@ -159,7 +159,7 @@ function splitProportional(rest: number, weights: number[]): number[] {
 
 /**
  * Builder-identical pricing for a portal service request: resolves the
- * customer's tier margin exactly like the builders' `persist()` (no
+ * customer's tier markup exactly like the builders' `persist()` (no
  * overrides of any kind — #248 controller decision), builds engine inputs
  * through the shared service-quote-inputs helpers, prices with the live
  * engine + rates, and returns a sell-only customer view alongside the
@@ -214,9 +214,9 @@ export async function priceServiceRequest(
   if (req.service.kind === "flame") {
     const baseRates = await getFlameRates();
     // #254 follow-up: an untiered customer prices/stamps at flame testing's
-    // own default margin, not tier Base's registry margin.
-    const serviceMargin = serviceMarkupFor(tier, baseRates.margin);
-    const rates = { ...baseRates, margin: serviceMargin };
+    // own default markup, not tier Base's registry markup.
+    const serviceMarkup = serviceMarkupFor(tier, baseRates.margin);
+    const rates = { ...baseRates, margin: serviceMarkup };
     const venueInputs = flameVenueInputsFrom(
       req.venues.map((v) => ({ id: v.venueId, curtains: v.count })),
       cust
@@ -227,7 +227,7 @@ export async function priceServiceRequest(
       flightTotal: r.travel.total,
       total: r.total,
       cost: r.cost,
-      margin: r.effectiveMargin,
+      margin: r.effectiveMarkup,
     });
     const liftAmt = Math.min(rest, r.lift ? r.liftLine : 0);
     const shares = splitProportional(rest - liftAmt, r.perVenue.map((v) => v.laborCost));
@@ -265,18 +265,18 @@ export async function priceServiceRequest(
       view: { lines, travel, total: Math.round(r.total) },
       subdoc,
       total: Math.round(r.total),
-      margin: r.effectiveMargin,
+      margin: r.effectiveMarkup,
       tier: tier.tier,
-      tierMargin: serviceMargin,
+      tierMargin: serviceMarkup,
     };
   }
 
   const level = req.service.level;
   const baseRates = await getInspectionRates();
   // #254 follow-up: an untiered customer prices/stamps at inspections' own
-  // default margin, not tier Base's registry margin.
-  const serviceMargin = serviceMarkupFor(tier, baseRates.margin);
-  const rates = { ...baseRates, margin: serviceMargin };
+  // default markup, not tier Base's registry markup.
+  const serviceMarkup = serviceMarkupFor(tier, baseRates.margin);
+  const rates = { ...baseRates, margin: serviceMarkup };
   const venueInputs = inspectionVenueInputsFrom(
     req.venues.map((v) => ({ id: v.venueId, lineSets: v.count })),
     cust
@@ -291,7 +291,7 @@ export async function priceServiceRequest(
     flightTotal: r.travel.total,
     total: r.total,
     cost: r.cost,
-    margin: r.effectiveMargin,
+    margin: r.effectiveMarkup,
   });
   const liftAmt = Math.min(rest, r.lift ? r.liftLine : 0);
   const levelWord = level === 2 ? "Five-year" : "Annual";
@@ -331,8 +331,8 @@ export async function priceServiceRequest(
     view: { lines, travel, total: Math.round(r.total) },
     subdoc,
     total: Math.round(r.total),
-    margin: r.effectiveMargin,
+    margin: r.effectiveMarkup,
     tier: tier.tier,
-    tierMargin: serviceMargin,
+    tierMargin: serviceMarkup,
   };
 }

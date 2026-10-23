@@ -10366,8 +10366,8 @@ import {
   ok(sd.mode === "drive" && !("flight" in sd), "#208: a drive-mode saved trip carries mode 'drive' and no flight");
   ok(flightOf(st)?.total === 1765 && flightOf({ miles: 10 }) === null && flightOf({ mode: "drive", flight: f }) === null && flightOf(null) === null,
     "#208: flightOf returns a flight only for a fly-mode saved trip");
-  ok(travelLineAmount(1765, 0.3) === Math.round(1765 / (1 - 0.3)) && travelLineAmount(1765, 0) === 1765,
-    "#208: the customer line is travel's share of the sell price (÷ (1 − margin)), rounded");
+  ok(travelLineAmount(1765, mk(0.3)) === Math.round(1765 / (1 - 0.3)) && travelLineAmount(1765, 0) === 1765,
+    "#208: the customer line is travel's share of the sell price (× (1 + markup)), rounded");
   ok(autoSwitchNote(2200, 1000) === "Drive would be $2,200 — over the $1,000 threshold, priced as flights.",
     "#208: the builder note reads exactly as spec §5");
   ok(
@@ -10402,7 +10402,9 @@ import {
   );
 
   const trvSrc = readFileSync(join(process.cwd(), "src/lib/travel-plan.ts"), "utf8");
-  ok(!/^\s*import\s/m.test(trvSrc), "#208: travel-plan.ts imports nothing — safe for the 'use client' builder previews");
+  const trvImports = trvSrc.match(/^\s*import\s.*$/gm) || [];
+  ok(trvImports.length === 1 && /from "@\/lib\/markup"/.test(trvImports[0]),
+    "#208/#367: travel-plan.ts imports only the pure markup module — safe for the 'use client' builder previews");
 }
 
 /* --- #208 engines: drive mode unchanged vs before (hard-coded pre-change
@@ -10414,7 +10416,7 @@ import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engin
   const near = (a: number | undefined, b: number): boolean => a != null && Math.abs(a - b) < 1e-6;
 
   // ---- flame (1 person) ----
-  const flameRates = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const flameRates = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: mk(0.3), travelRoundMin: 15 };
   const flameNear: FTVenue = { id: "trv-near", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
   const flameFar: FTVenue = { id: "trv-far", label: "Far", curtains: 120, oneWayMiles: 500, oneWayMin: 480 };
   const fd = computeFlameQuote({ venues: [flameNear] }, flameRates);
@@ -10435,7 +10437,7 @@ import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engin
   ok(ffCrew2.travel?.total === 2810, "#208 flame: flame_rates.flyCrew 2 flies two people (1 night) = 2,810");
 
   // ---- repair (default crew 2) ----
-  const repairRates = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  const repairRates = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: mk(0.3), margin: mk(0.3), emergencyMult: 1.5, travelRoundMin: 15 };
   const rd = trvRepairEstimate({ venues: [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }], laborHours: 4 }, repairRates);
   ok(rd.trip.total === 307.5 && rd.serviceCost === 607.5 && near(rd.totalRaw, 607.5 / (1 - 0.3)) && rd.total === 875 && rd.trip.mode === "drive",
     "#208 repair: a $307.50 drive prices exactly as before (607.50 service cost)");
@@ -10450,7 +10452,7 @@ import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engin
   ok(rfOverride.trip.mode === "drive" && rfOverride.serviceCost === 1800 + 2200, "#208 repair: forced Drive keeps the drive");
 
   // ---- inspection (1 person) ----
-  const inspRates = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const inspRates = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
   const idr = trvInspectionEstimate({ venues: [{ id: "trv-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }] }, inspRates);
   ok(idr.trip.total === 307.5 && idr.cost === 832.5 && near(idr.totalRaw, 832.5 / (1 - 0.3)) && idr.total === 1200 && idr.trip.mode === "drive",
     "#208 inspection: a $307.50 drive prices exactly as before (832.50 cost)");
@@ -10578,7 +10580,7 @@ import {
 {
   // M1 — mileage-rate / travel-distance reasons are dropped when both years
   // priced this trip as flights; a mode flip still explains itself.
-  const flameRatesM1 = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const flameRatesM1 = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: mk(0.3), travelRoundMin: 15 };
   const farFlameVenue: FTVenue = { id: "trv-m1-flame-far", label: "Far", curtains: 120, oneWayMiles: 500, oneWayMin: 480 };
   const fr = computeFlameQuote({ venues: [farFlameVenue] }, flameRatesM1);
   ok(fr.trip.mode === "fly", "#208 M1 flame setup: the fixture actually flies this year");
@@ -10601,7 +10603,7 @@ import {
     "#208 M1 flame: a mode flip (drive → fly) still cites the mileage-rate/distance diff and calls out the flip"
   );
 
-  const inspRatesM1 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const inspRatesM1 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
   const farInspVenue = { id: "trv-m1-insp-far", label: "Far", lineSets: 40, oneWayMiles: 500, oneWayMin: 480 };
   const ir = trvInspectionEstimate({ venues: [farInspVenue] }, inspRatesM1);
   ok(ir.trip.mode === "fly", "#208 M1 inspection setup: the fixture actually flies this year");
@@ -10628,7 +10630,7 @@ import {
 {
   // M2 — repair-engine.ts clamps a manual crew override up to crewSize
   // (D282 "never fewer"); an override already at or above it is untouched.
-  const repairRatesM2 = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  const repairRatesM2 = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: mk(0.3), margin: mk(0.3), emergencyMult: 1.5, travelRoundMin: 15 };
   const rClamped = trvRepairEstimate(
     { venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, crewSize: 3, travel: { mode: "fly", crew: 1 } },
     repairRatesM2
@@ -22354,8 +22356,8 @@ import {
   finishRepair as finishRepair217,
   finishInspection as finishInspection217,
   typedPriceWarning as typedPriceWarning217,
-  sliderPts as sliderPts217,
-  fmtPts as fmtPts217,
+  sliderPct as sliderPts217,
+  fmtPct as fmtPts217,
   travelLineShare as travelLineShare217,
   seedPriceOverride as seedPriceOverride217,
 } from "@/lib/service-pricing";
@@ -22381,23 +22383,23 @@ import {
     "#217 fix wave 2: a raw negative number like -0.4 is refused (not silently rounded to -0 and passed as >= 0), and -0 itself never comes back as -0");
   ok(finishPrice217(1000, 500, "$900").total === 900 && finishPrice217(1000, 500, 0).total === 1000 && finishPrice217(1000, 500, -5).total === 1000 && finishPrice217(1000, 500, 20_000_000).total === 1000,
     "#217 fix wave: finishPrice normalizes priceOverride itself — a typed string works there directly, and zero/negative/over-cap fall back to auto");
-  ok(typedPriceWarning217(500, 575, 1 - 575 / 500)?.kind === "below-cost" && typedPriceWarning217(600, 575, 1 - 575 / 600)?.kind === "low-margin" && typedPriceWarning217(800, 575, 1 - 575 / 800) === null,
-    "#217 warning: below cost first, then under a 10% margin, otherwise none");
-  ok(typedPriceWarning217(1200, 1100, 1 - 1100 / 1200, 1428.57)?.kind === "below parts price",
+  ok(typedPriceWarning217(500, 575, (500 - 575) / 575)?.kind === "below-cost" && typedPriceWarning217(600, 575, (600 - 575) / 575)?.kind === "low-markup" && typedPriceWarning217(800, 575, (800 - 575) / 575) === null,
+    "#217 warning: below cost first, then under an 11% markup, otherwise none");
+  ok(typedPriceWarning217(1200, 1100, (1200 - 1100) / 1100, 1428.57)?.kind === "below parts price",
     "#217 fix wave warning: a typed total under the parts' own sell price warns distinctly, even though it still clears the whole job's raw cost");
-  ok(typedPriceWarning217(1500, 1100, 1 - 1100 / 1500, 1428.57) === null,
-    "#217 fix wave warning: once the typed total clears the parts sell, the cost and the 10% floor, there's no warning");
-  ok(typedPriceWarning217(500, 575, 1 - 575 / 500, 100)?.kind === "below-cost",
+  ok(typedPriceWarning217(1500, 1100, (1500 - 1100) / 1100, 1428.57) === null,
+    "#217 fix wave warning: once the typed total clears the parts sell, the cost and the 11% markup floor, there's no warning");
+  ok(typedPriceWarning217(500, 575, (500 - 575) / 575, 100)?.kind === "below-cost",
     "#217 fix wave warning: below-cost still wins when parts sell isn't the binding constraint");
-  ok(sliderPts217(0.05) === 10 && sliderPts217(0.62) === 50 && sliderPts217(0.3) === 30 && sliderPts217(0.28125) === 28,
-    "#217 slider: the back-solved margin moves the slider, clamped to 10–50");
-  ok(fmtPts217(0.28125) === "28.1" && fmtPts217(0.3) === "30", "#217: the margin label shows the true value to one decimal");
-  const s1 = travelLineShare217({ flightTotal: 1765, total: 3600, cost: 2515, margin: 0.3 });
+  ok(sliderPts217(0.05) === 10 && sliderPts217(2) === 100 && sliderPts217(0.3) === 30 && sliderPts217(0.28125) === 28,
+    "#217 slider: the back-solved markup moves the slider, clamped to 10–100");
+  ok(fmtPts217(0.28125) === "28.1" && fmtPts217(0.3) === "30", "#217: the markup label shows the true value to one decimal");
+  const s1 = travelLineShare217({ flightTotal: 1765, total: 3600, cost: 2515, margin: mk(0.3) });
   ok(s1.travel === 2526 && s1.rest === 1074 && s1.travel + s1.rest === 3600,
     "#217 printed lines: the travel line is travel's share of the rounded total; the service part takes the rest");
-  const s2 = travelLineShare217({ flightTotal: 1765, total: 1000, cost: 2515, margin: 0.3 });
+  const s2 = travelLineShare217({ flightTotal: 1765, total: 1000, cost: 2515, margin: mk(0.3) });
   ok(s2.travel === 702 && s2.travel + s2.rest === 1000, "#217 printed lines: a typed total below cost scales the travel line with it");
-  const s3 = travelLineShare217({ flightTotal: 1765, total: 3593, cost: null, margin: 0.3 });
+  const s3 = travelLineShare217({ flightTotal: 1765, total: 3593, cost: null, margin: mk(0.3) });
   ok(s3.travel === 2521 && s3.rest === 3593 - 2521, "#217 printed lines: a legacy quote with no stored cost keeps the D283 figure");
   const s4 = travelLineShare217({ flightTotal: 1765, total: 1000, cost: null, margin: 0 });
   ok(s4.travel === 1000 && s4.rest === 0, "#217 printed lines: the travel line never exceeds the total");
@@ -22409,16 +22411,16 @@ import {
     "#217: a saved typed total always reopens as typed");
 
   // ---- flame engine ----
-  const fRates217 = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const fRates217 = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: mk(0.3), travelRoundMin: 15 };
   const fNear217: FTVenue = { id: "r217-near", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
   const fa = computeFlameQuote({ venues: [fNear217] }, fRates217);
   ok(near217(fa.totalRaw, 575 / 0.7) && fa.autoTotal === 825 && fa.total === 825 && !fa.overridden && fa.priceOverride === null,
     "#217 flame: the auto total rounds 821.43 → 825");
-  ok(fa.marginAmount === 250 && near217(fa.effectiveMargin, 1 - 575 / 825) && fa.margin === 0.3,
-    "#217 flame: margin amount = total − cost, the effective margin back-solves, the rate margin is unchanged");
+  ok(fa.marginAmount === 250 && near217(fa.effectiveMarkup, (825 - 575) / 575) && fa.margin === mk(0.3),
+    "#217 flame: markup amount = total − cost, the effective markup back-solves, the rate markup is unchanged");
   const fo = computeFlameQuote({ venues: [fNear217], priceOverride: 800 }, fRates217);
-  ok(fo.total === 800 && fo.overridden && fo.priceOverride === 800 && fo.autoTotal === 825 && near217(fo.effectiveMargin, 1 - 575 / 800) && fo.marginAmount === 225,
-    "#217 flame: a typed total is used exactly and the margin back-solves");
+  ok(fo.total === 800 && fo.overridden && fo.priceOverride === 800 && fo.autoTotal === 825 && near217(fo.effectiveMarkup, (800 - 575) / 575) && fo.marginAmount === 225,
+    "#217 flame: a typed total is used exactly and the markup back-solves");
   ok(computeFlameQuote({ venues: [fNear217], priceOverride: 812 }, fRates217).total === 812,
     "#217 flame: a typed total off the $25 grid is not re-rounded");
   const fBad = computeFlameQuote({ venues: [fNear217], priceOverride: "abc" }, fRates217);
@@ -22436,52 +22438,52 @@ import {
     "#217 fix wave floors: a $360 base fee floors the total, which rounds UP to $375, never down to $350");
 
   // ---- repair engine ----
-  const rRates217 = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  const rRates217 = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: mk(0.3), margin: mk(0.3), emergencyMult: 1.5, travelRoundMin: 15 };
   const rNear217 = [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }];
   const ra = trvRepairEstimate({ venues: rNear217, laborHours: 4 }, rRates217);
-  ok(near217(ra.totalRaw, 607.5 / 0.7) && ra.total === 875 && ra.serviceSell === 875 && near217(ra.serviceMargin, 1 - 607.5 / 875),
+  ok(near217(ra.totalRaw, 607.5 / 0.7) && ra.total === 875 && ra.serviceSell === 875 && near217(ra.serviceMarkup, (875 - 607.5) / 607.5),
     "#217 repair: the auto total rounds 867.86 → 875 and the service sell absorbs the difference");
   const rp = trvRepairEstimate({ venues: rNear217, laborHours: 4, parts: [{ name: "Cable", qty: 2, cost: 100 }] }, rRates217);
   ok(rp.total === 1150 && near217(rp.partsSell, 200 / 0.7) && near217(rp.serviceSell, 1150 - 200 / 0.7) && near217(rp.serviceSell + rp.partsSell, rp.total),
     "#217 repair: with parts the total rounds 1,153.57 → 1,150 and service + parts sell still sum to it");
   const ro = trvRepairEstimate({ venues: rNear217, laborHours: 4, parts: [{ name: "Cable", qty: 2, cost: 100 }], priceOverride: 1000 }, rRates217);
-  ok(ro.total === 1000 && ro.overridden && near217(ro.partsSell, 200 / 0.7) && near217(ro.marginAmount, 1000 - 807.5) && near217(ro.serviceMargin, ro.effectiveMargin) && near217(ro.effectiveMargin, 1 - 807.5 / 1000),
-    "#217 fix wave repair: a typed total reports the whole-job EFFECTIVE margin (never the service-only ratio) — parts still sell at their own markup");
+  ok(ro.total === 1000 && ro.overridden && near217(ro.partsSell, 200 / 0.7) && near217(ro.marginAmount, 1000 - 807.5) && near217(ro.serviceMarkup, ro.effectiveMarkup) && near217(ro.effectiveMarkup, (1000 - 807.5) / 807.5),
+    "#217 fix wave repair: a typed total reports the whole-job EFFECTIVE markup (never the service-only ratio) — parts still sell at their own markup");
   const rc = trvRepairEstimate({ venues: [{ label: "Here", oneWayMiles: 0, oneWayMin: 0 }], laborHours: 1 }, rRates217);
   ok(rc.calloutApplied && rc.total === 350, "#217 repair: the minimum call-out floors the service sell before rounding");
-  const rf360 = finishRepair217({ serviceCost: 50, minCallout: 360, margin: 0, partsCost: 0, partsMargin: 0.3, priceOverride: null });
+  const rf360 = finishRepair217({ serviceCost: 50, minCallout: 360, margin: 0, partsCost: 0, partsMargin: mk(0.3), priceOverride: null });
   ok(rf360.calloutApplied && rf360.totalRaw === 360 && rf360.total === 375,
     "#217 fix wave floors: a $360 minimum call-out floors the total, which rounds UP to $375, never down to $350");
-  ok(finishRepair217({ serviceCost: 812, minCallout: 0, margin: 0, partsCost: 0, partsMargin: 0.3, priceOverride: null }).total === 800 &&
+  ok(finishRepair217({ serviceCost: 812, minCallout: 0, margin: 0, partsCost: 0, partsMargin: mk(0.3), priceOverride: null }).total === 800 &&
       finishPrice217(812, 500, null, true).total === 825,
     "#217 fix wave floors: the same raw total rounds to the NEAREST $25 with no floor applied, but rounds UP when a floor set the price");
-  const rTyped1 = finishRepair217({ serviceCost: 100, minCallout: 0, margin: 0.3, partsCost: 1000, partsMargin: 0.3, priceOverride: 1200 });
-  ok(rTyped1.total === 1200 && rTyped1.overridden && near217(rTyped1.serviceMargin, rTyped1.effectiveMargin) && near217(rTyped1.effectiveMargin, 1 - 1100 / 1200),
-    "#217 fix wave repair margin: a $1,200 typed total (service $100 cost, $1,000 parts cost) reports the effective margin");
-  const rTyped2 = finishRepair217({ serviceCost: 100, minCallout: 0, margin: 0.3, partsCost: 1000, partsMargin: 0.3, priceOverride: 1430 });
-  ok(rTyped2.total === 1430 && rTyped2.serviceSell > 0 && near217(rTyped2.serviceMargin, rTyped2.effectiveMargin) && near217(rTyped2.effectiveMargin, 1 - 1100 / 1430),
-    "#217 fix wave repair margin: even once the typed total lifts the service sell back to a thin positive sliver, it still reports the effective margin — no discontinuity near zero");
-  const rAutoZero = finishRepair217({ serviceCost: 0, minCallout: 0, margin: 0.3, partsCost: 1000, partsMargin: 0.3, priceOverride: null });
-  ok(!rAutoZero.overridden && rAutoZero.serviceSellAuto === 0 && near217(rAutoZero.serviceMargin, rAutoZero.effectiveMargin) && rAutoZero.serviceMargin > 0,
-    "#217 fix wave repair margin: a parts-only auto job with no call-out floor (service sell $0) reports the effective margin instead of a flat 0");
-  const rCliff = finishRepair217({ serviceCost: 1, minCallout: 0, margin: 0.3, partsCost: 1000, partsMargin: 0.3, priceOverride: null });
+  const rTyped1 = finishRepair217({ serviceCost: 100, minCallout: 0, margin: mk(0.3), partsCost: 1000, partsMargin: mk(0.3), priceOverride: 1200 });
+  ok(rTyped1.total === 1200 && rTyped1.overridden && near217(rTyped1.serviceMarkup, rTyped1.effectiveMarkup) && near217(rTyped1.effectiveMarkup, (1200 - 1100) / 1100),
+    "#217 fix wave repair markup: a $1,200 typed total (service $100 cost, $1,000 parts cost) reports the effective markup");
+  const rTyped2 = finishRepair217({ serviceCost: 100, minCallout: 0, margin: mk(0.3), partsCost: 1000, partsMargin: mk(0.3), priceOverride: 1430 });
+  ok(rTyped2.total === 1430 && rTyped2.serviceSell > 0 && near217(rTyped2.serviceMarkup, rTyped2.effectiveMarkup) && near217(rTyped2.effectiveMarkup, (1430 - 1100) / 1100),
+    "#217 fix wave repair markup: even once the typed total lifts the service sell back to a thin positive sliver, it still reports the effective markup — no discontinuity near zero");
+  const rAutoZero = finishRepair217({ serviceCost: 0, minCallout: 0, margin: mk(0.3), partsCost: 1000, partsMargin: mk(0.3), priceOverride: null });
+  ok(!rAutoZero.overridden && rAutoZero.serviceSellAuto === 0 && near217(rAutoZero.serviceMarkup, rAutoZero.effectiveMarkup) && rAutoZero.serviceMarkup > 0,
+    "#217 fix wave repair markup: a parts-only auto job with no call-out floor (service sell $0) reports the effective markup instead of a flat 0");
+  const rCliff = finishRepair217({ serviceCost: 1, minCallout: 0, margin: mk(0.3), partsCost: 1000, partsMargin: mk(0.3), priceOverride: null });
   ok(!rCliff.overridden && rCliff.serviceSellAuto > 0 && rCliff.serviceSell < 0 && near217(rCliff.serviceSell, -3.5714285714287) &&
-      near217(rCliff.serviceMargin, rCliff.effectiveMargin) && rCliff.serviceMargin > 0.25,
-    "#217 fix wave 2: serviceMargin gates on the FINAL serviceSell (post-rounding, total − partsSell), not the pre-rounding " +
+      near217(rCliff.serviceMarkup, rCliff.effectiveMarkup) && rCliff.serviceMarkup > 0.25,
+    "#217 fix wave 2: serviceMarkup gates on the FINAL serviceSell (post-rounding, total − partsSell), not the pre-rounding " +
       "serviceSellAuto — a positive serviceSellAuto (1.43) whose rounded serviceSell goes negative (-3.57) no longer cliffs " +
-      "the margin to 0; it reports the whole-job effectiveMargin instead");
-  ok(Math.abs(rCliff.serviceMargin - rAutoZero.serviceMargin) < 0.01,
-    "#217 fix wave 2: serviceCost 0 vs 1 (same rounded $1,425 total) give close margins — no discontinuity right where " +
+      "the markup to 0; it reports the whole-job effectiveMarkup instead");
+  ok(Math.abs(rCliff.serviceMarkup - rAutoZero.serviceMarkup) < 0.01,
+    "#217 fix wave 2: serviceCost 0 vs 1 (same rounded $1,425 total) give close markups — no discontinuity right where " +
       "serviceSell crosses zero");
 
   // ---- inspection engine ----
-  const iRates217 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const iRates217 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
   const iNear217 = [{ id: "r217-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }];
   const ia = trvInspectionEstimate({ venues: iNear217 }, iRates217);
-  ok(near217(ia.totalRaw, 832.5 / 0.7) && ia.total === 1200 && near217(ia.effectiveMargin, 1 - 832.5 / 1200),
+  ok(near217(ia.totalRaw, 832.5 / 0.7) && ia.total === 1200 && near217(ia.effectiveMarkup, (1200 - 832.5) / 832.5),
     "#217 inspection: the auto total rounds 1,189.29 → 1,200");
   const io = trvInspectionEstimate({ venues: iNear217, priceOverride: 1100 }, iRates217);
-  ok(io.total === 1100 && io.overridden && io.autoTotal === 1200 && near217(io.effectiveMargin, 1 - 832.5 / 1100),
+  ok(io.total === 1100 && io.overridden && io.autoTotal === 1200 && near217(io.effectiveMarkup, (1100 - 832.5) / 832.5),
     "#217 inspection: a typed total is used exactly");
   const im = trvInspectionEstimate({ venues: [{ id: "r217-i2", label: "Here", lineSets: 0, oneWayMiles: 0, oneWayMin: 0 }] }, iRates217);
   ok(im.minApplied && im.total === 650, "#217 inspection: the minimum fee floors before rounding");
@@ -22490,12 +22492,12 @@ import {
     "#217 fix wave floors: a $660 minimum fee floors the total, which rounds UP to $675, never down to $650");
 
   // ---- parity: each engine's finish IS the shared finish the builders will call ----
-  const pf = finishFlame217({ rawCost: fa.rawCost, baseFee: 150, margin: 0.3, priceOverride: null });
-  ok(pf.total === fa.total && pf.cost === fa.cost && pf.effectiveMargin === fa.effectiveMargin, "#217 parity: the flame engine finishes exactly like finishFlame()");
-  const pr = finishRepair217({ serviceCost: rp.serviceCost, minCallout: 350, margin: 0.3, partsCost: rp.partsCost, partsMargin: 0.3, priceOverride: null });
-  ok(pr.total === rp.total && pr.serviceSell === rp.serviceSell && pr.serviceMargin === rp.serviceMargin, "#217 parity: the repair engine finishes exactly like finishRepair()");
-  const pi = finishInspection217({ cost: ia.cost, minFee: 650, margin: 0.3, priceOverride: null });
-  ok(pi.total === ia.total && pi.effectiveMargin === ia.effectiveMargin, "#217 parity: the inspection engine finishes exactly like finishInspection()");
+  const pf = finishFlame217({ rawCost: fa.rawCost, baseFee: 150, margin: mk(0.3), priceOverride: null });
+  ok(pf.total === fa.total && pf.cost === fa.cost && pf.effectiveMarkup === fa.effectiveMarkup, "#217 parity: the flame engine finishes exactly like finishFlame()");
+  const pr = finishRepair217({ serviceCost: rp.serviceCost, minCallout: 350, margin: mk(0.3), partsCost: rp.partsCost, partsMargin: mk(0.3), priceOverride: null });
+  ok(pr.total === rp.total && pr.serviceSell === rp.serviceSell && pr.serviceMarkup === rp.serviceMarkup, "#217 parity: the repair engine finishes exactly like finishRepair()");
+  const pi = finishInspection217({ cost: ia.cost, minFee: 650, margin: mk(0.3), priceOverride: null });
+  ok(pi.total === ia.total && pi.effectiveMarkup === ia.effectiveMarkup, "#217 parity: the inspection engine finishes exactly like finishInspection()");
   for (const [f, fn] of [
     ["src/lib/flametest-engine.ts", "finishFlame"],
     ["src/lib/repair-engine.ts", "finishRepair"],
@@ -22503,11 +22505,13 @@ import {
   ] as const) {
     const s = readFileSync(join(process.cwd(), f), "utf8");
     const code = s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, ""); // doc comments still quote the formula
-    ok(code.includes(`${fn}(`) && /from "@\/lib\/service-pricing"/.test(code) && !/\/ \(1 - margin\)/.test(code),
-      `#217: ${f} finishes its price through ${fn}() with no margin math of its own`);
+    ok(code.includes(`${fn}(`) && /from "@\/lib\/service-pricing"/.test(code) && !/\/ \(1 - margin\)/.test(code) && !/\* \(1 \+ /.test(code),
+      `#217: ${f} finishes its price through ${fn}() with no markup math of its own`);
   }
   const sp217 = readFileSync(join(process.cwd(), "src/lib/service-pricing.ts"), "utf8");
-  ok(!/^\s*import\s/m.test(sp217), "#217: service-pricing.ts imports nothing — safe for the 'use client' builders");
+  const imports217 = sp217.match(/^\s*import\s.*$/gm) || [];
+  ok(imports217.length === 1 && /from "@\/lib\/markup"/.test(imports217[0]) && /sellAt\(/.test(sp217),
+    "#217/#367: service-pricing.ts imports only the pure markup module (sellAt) — safe for the 'use client' builders");
   const formula217 = (key: string, id: string): string =>
     (PRICING_GROUPS.find((g) => g.key === key)!.items.find((it) => it.id === id) as { expr: string }).expr;
   ok(formula217("flame", "flame.total").includes("rounded to the nearest $25") &&
@@ -22546,16 +22550,16 @@ import {
       /testingOverride: normalizeTestingOverride\(v\.testingOverride\),/.test(sqi217) &&
       /\.\.\.\(v\.testingOverride != null \? \{ testingOverride: v\.testingOverride \} : \{\}\)/.test(fa),
     "#217 flame save: builds venue inputs through the shared service-quote-inputs.ts helper (which validates + prices each venue's typed testing cost), and still saves it on the venue");
-  ok(/margin: r\.effectiveMargin,/.test(fa) && storedTyped.test(fa) && storedAuto.test(fa),
-    "#217 flame save: stores the back-solved margin, the typed total (when set) and the auto figure");
+  ok(/margin: r\.effectiveMarkup,/.test(fa) && storedTyped.test(fa) && storedAuto.test(fa),
+    "#217 flame save: stores the back-solved markup, the typed total (when set) and the auto figure");
 
   const ra = src217("src/app/(app)/repairs/quote/actions.ts");
-  ok(typedIn.test(ra) && /travel: travelOverride,\n\s*priceOverride,\n/.test(ra) && /margin: r\.serviceMargin,/.test(ra) && storedTyped.test(ra) && storedAuto.test(ra),
-    "#217 repair save: typed total in; service margin, typed total and auto figure out");
+  ok(typedIn.test(ra) && /travel: travelOverride,\n\s*priceOverride,\n/.test(ra) && /margin: r\.serviceMarkup,/.test(ra) && storedTyped.test(ra) && storedAuto.test(ra),
+    "#217 repair save: typed total in; service markup, typed total and auto figure out");
 
   const ia = src217("src/app/(app)/inspections/quote/actions.ts");
-  ok(typedIn.test(ia) && /travel: travelOverride,\n\s*priceOverride,\n/.test(ia) && /margin: r\.effectiveMargin,/.test(ia) && storedTyped.test(ia) && storedAuto.test(ia),
-    "#217 inspection save: typed total in; back-solved margin, typed total and auto figure out");
+  ok(typedIn.test(ia) && /travel: travelOverride,\n\s*priceOverride,\n/.test(ia) && /margin: r\.effectiveMarkup,/.test(ia) && storedTyped.test(ia) && storedAuto.test(ia),
+    "#217 inspection save: typed total in; back-solved markup, typed total and auto figure out");
 
   const rn = src217("src/lib/renewal-outreach.ts");
   const fnBody = (name: string): string => {
@@ -22566,8 +22570,8 @@ import {
     const b = fnBody(fn);
     ok(b.length > 0 && !/priceOverride:/.test(b) && !/testingOverride/.test(b),
       `#217 renewal: ${fn} re-prices without last year's typed total or testing cost`);
-    ok(/lastHandSet: priorHandSetPrice\(/.test(b) && /margin: r\.effectiveMargin,/.test(b) && storedAuto.test(b),
-      `#217 renewal: ${fn} notes a hand-set prior price and stores the rounded price's margin`);
+    ok(/lastHandSet: priorHandSetPrice\(/.test(b) && /margin: r\.effectiveMarkup,/.test(b) && storedAuto.test(b),
+      `#217 renewal: ${fn} notes a hand-set prior price and stores the rounded price's markup`);
   }
   ok(priorHandSetPrice217({ priceOverride: 850 }) === 850 && priorHandSetPrice217({}) === null && priorHandSetPrice217(null) === null,
     "#217 renewal: last year's hand-set price is read from its priceOverride");
@@ -23580,8 +23584,8 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
     "#217 flame builder: posts the typed total and each venue's typed testing cost");
   ok(/<ServiceTotalField/.test(fc) && /aria-label=\{"Testing cost for " \+ l\.label/.test(fc),
     "#217 flame builder: the Total and each venue's Testing cell are inputs");
-  ok(/value=\{r\?\.overridden \? sliderPts\(r\.effectiveMargin\) : marginPts\}/.test(fc) &&
-      /setMarginPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(fc) &&
+  ok(/value=\{r\?\.overridden \? sliderPct\(r\.effectiveMarkup\) : markupPts\}/.test(fc) &&
+      /setMarkupPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(fc) &&
       /function resetToAuto\(\)/.test(fc),
     "#217 flame builder: the slider follows a typed total; moving it or Reset to auto clears the override");
   ok(!/^import (?!type )[^;]*from "@\/lib\/(flametest-engine|repair-engine|inspection-engine)"/m.test(fc),
@@ -23601,7 +23605,7 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
   ok(!/fd\.set\("priceOverrideSeeded"/.test(fc),
     "#217 fix wave: the flame builder no longer posts priceOverrideSeeded — the save action derives it server-side");
   ok(/onReset=\{resetToAuto\}/.test(fc) &&
-      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.effectiveMargin\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(fc),
+      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarkupPts\(sliderPct\(r\.effectiveMarkup\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(fc),
     "#217 flame builder: Reset to auto clears the typed total");
   ok(!fp.includes("seedPriceOverrideIsLegacy") && !fp.includes("priceOverrideSeeded"),
     "#217 final: the flame page no longer passes a seeded flag to the builder");
@@ -23641,17 +23645,17 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
     "#217 repair builder: the preview finishes through finishRepair(), no inlined margin math");
   ok(/fd\.set\("priceOverride", priceOverride != null \? String\(priceOverride\) : ""\);/.test(rc) && /<ServiceTotalField/.test(rc),
     "#217 repair builder: the Total is an input and the typed total is posted");
-  ok(/value=\{r\?\.overridden \? sliderPts\(r\.serviceMargin\) : marginPts\}/.test(rc) &&
-      /setMarginPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(rc) &&
+  ok(/value=\{r\?\.overridden \? sliderPct\(r\.serviceMarkup\) : markupPts\}/.test(rc) &&
+      /setMarkupPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(rc) &&
       /function resetToAuto\(\)/.test(rc),
-    "#217 repair builder: the slider follows the back-solved SERVICE margin; moving it or Reset clears the override");
+    "#217 repair builder: the slider follows the back-solved SERVICE markup; moving it or Reset clears the override");
   const ic = readFileSync(join(process.cwd(), "src/app/(app)/inspections/quote/controls.tsx"), "utf8");
   ok(/from "@\/lib\/service-pricing"/.test(ic) && /finishInspection\(\{/.test(strip217(ic)) && !/\/ \(1 - margin\)/.test(strip217(ic)),
     "#217 inspection builder: the preview finishes through finishInspection(), no inlined margin math");
   ok(/fd\.set\("priceOverride", priceOverride != null \? String\(priceOverride\) : ""\);/.test(ic) && /<ServiceTotalField/.test(ic),
     "#217 inspection builder: the Total is an input and the typed total is posted");
-  ok(/value=\{r\?\.overridden \? sliderPts\(r\.effectiveMargin\) : marginPts\}/.test(ic) &&
-      /setMarginPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(ic) &&
+  ok(/value=\{r\?\.overridden \? sliderPct\(r\.effectiveMarkup\) : markupPts\}/.test(ic) &&
+      /setMarkupPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(ic) &&
       /function resetToAuto\(\)/.test(ic),
     "#217 inspection builder: the slider follows a typed total; moving it or Reset clears the override");
   for (const [svc, sub] of [["repairs", "rp"], ["inspections", "insp"]] as const) {
@@ -23672,7 +23676,7 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
   ok(!/fd\.set\("priceOverrideSeeded"/.test(rc),
     "#217 fix wave: the repair builder no longer posts priceOverrideSeeded — the save action derives it server-side");
   ok(/onReset=\{resetToAuto\}/.test(rc) &&
-      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.serviceMargin\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(rc),
+      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarkupPts\(sliderPct\(r\.serviceMarkup\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(rc),
     "#217 repair builder: Reset to auto clears the typed total");
 
   ok(!ic.includes("priceOverrideSeeded, setPriceOverrideSeeded") && !ic.includes("priceOverrideSeeded?: boolean"),
@@ -23680,7 +23684,7 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
   ok(!/fd\.set\("priceOverrideSeeded"/.test(ic),
     "#217 fix wave: the inspection builder no longer posts priceOverrideSeeded — the save action derives it server-side");
   ok(/onReset=\{resetToAuto\}/.test(ic) &&
-      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.effectiveMargin\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(ic),
+      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarkupPts\(sliderPct\(r\.effectiveMarkup\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(ic),
     "#217 inspection builder: Reset to auto clears the typed total");
 
   for (const [svc, sub] of [["repairs", "rp"], ["inspections", "insp"]] as const) {
@@ -23697,7 +23701,7 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
   // ---- the repairs-only "below parts price" warning: a typed total under
   // what the parts alone are selling for warns sharper than below-cost.
   const stf217 = readFileSync(join(process.cwd(), "src/components/service-total-field.tsx"), "utf8");
-  ok(/partsSell/.test(stf217) && /typedPriceWarning\(total, cost, margin, partsSell\)/.test(stf217),
+  ok(/partsSell/.test(stf217) && /typedPriceWarning\(total, cost, markup, partsSell\)/.test(stf217),
     "#217: the shared Total field threads an optional partsSell into typedPriceWarning() for repairs");
   ok(/partsSell=\{r\?\.partsSell/.test(rc),
     "#217 repair builder: the Total field is given the service's partsSell for the below-parts-price warning");
@@ -32345,8 +32349,8 @@ async function portal248PricingAsyncChecks(): Promise<void> {
     ok(priced.ok && priced.total === Math.round(builderR246.total),
       "#248 parity: priceServiceRequest's total equals compute() run over the builder's own input path, same tier margin");
     if (priced.ok) {
-      ok(priced.margin === builderR246.effectiveMargin && priced.tier === tier246.tier && priced.tierMargin === tier246.markup,
-        "#248 parity: margin/tier/tierMargin match the builder's own resolveTier() + the engine's effectiveMargin");
+      ok(priced.margin === builderR246.effectiveMarkup && priced.tier === tier246.tier && priced.tierMargin === tier246.markup,
+        "#248 parity: margin/tier/tierMargin match the builder's own resolveTier() + the engine's effectiveMarkup");
       const lineSum = priced.view.lines.reduce((a, l) => a + l.amount, 0);
       ok(priced.view.total === priced.total && lineSum + priced.view.travel === priced.total,
         "#248 view: the per-venue lines plus the travel line sum to exactly the total");
@@ -35155,9 +35159,9 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
 }
 
 
-/* ---- #254 — service builders re-seed their margin knob from the customer's tier ----
+/* ---- #254 — service builders re-seed their markup knob from the customer's tier ----
  * src/lib/tier-seed.ts is pure: seed = contact's own tier → company tier →
- * the service's own default margin; an untouched knob (still at the previous
+ * the service's own default markup (#367: every fraction here is a markup); an untouched knob (still at the previous
  * seed) follows a customer OR contact change, a hand-set one is kept with a
  * "Use <Tier>" prompt. Flame test, repair and inspection builders share it;
  * a saved quote reopens at its own knob, never re-seeded on load (D457). */
@@ -35166,7 +35170,7 @@ import {
   reseedKnob as s254Reseed,
   initialTierSeed as s254Init,
   tierPromptText as s254Text,
-  knobPtsFrom as s254Pts,
+  knobPctFrom as s254Pts,
 } from "@/lib/tier-seed";
 {
   const acme = {
@@ -35183,7 +35187,7 @@ import {
   ok(d.pts === 20 && d.label === "Gold", "#254 seedFor: a contact with no tier of their own falls back to the company tier");
   ok(s254Seed(acme, "", 0.35).pts === 20 && s254Seed(acme, "Someone Typed", 0.35).pts === 20, "#254 seedFor: no contact / an unknown name → the company tier");
   const n = s254Seed(plain, "Sam Ortiz", 0.35);
-  ok(n.pts === 35 && n.label === null, "#254 seedFor: no tier anywhere → the service's own default margin, not tier Base's 30%");
+  ok(n.pts === 35 && n.label === null, "#254 seedFor: no tier anywhere → the service's own default markup, not tier Base's");
   ok(s254Seed(plain, "Pat Lee", 0.35).pts === 10 && s254Seed(null, "", 0.4).pts === 40, "#254 seedFor: a tiered contact at an untiered company still seeds; no customer → the default");
 
   // An untouched knob moves; a hand-set one is kept with the prompt.
@@ -35193,9 +35197,9 @@ import {
   ok(kept.knobPts === 25 && kept.prevSeedPts === 20 && kept.prompt?.keptPts === 25 && kept.prompt.seed.pts === 20,
     "#254 reseedKnob: a hand-set knob is kept, the new seed becomes the reference and is offered");
   const t = s254Text(kept.prompt!);
-  ok(t.text === "Kept your 25% margin — Gold is 20%" && t.action === "Use Gold", "#254 prompt: the spec's wording (Kept your 25% margin — Gold is 20% · Use Gold)");
+  ok(t.text === "Kept your 25% markup — Gold is 20%" && t.action === "Use Gold", "#254 prompt: the spec's wording (Kept your 25% markup — Gold is 20% · Use Gold)");
   const td = s254Text({ keptPts: 25, seed: { pts: 35, label: null } });
-  ok(td.text === "Kept your 25% margin — the default is 35%" && td.action === "Use 35%", "#254 prompt: an untiered customer offers the service default by its percent");
+  ok(td.text === "Kept your 25% markup — the default is 35%" && td.action === "Use 35%", "#254 prompt: an untiered customer offers the service default by its percent");
   ok(s254Reseed(20, 30, { pts: 20, label: "Gold" }).prompt === null, "#254 reseedKnob: a hand-set knob already on the new seed needs no prompt");
 
   // A contact change re-seeds: customer (Gold 20) → contact Eric (Platinum 15) → back to Dana (Gold 20).
@@ -35210,13 +35214,18 @@ import {
   const fresh = s254Init({ customer: acme, contactName: "Eric Vance", serviceDefault: 0.35 });
   ok(fresh.knobPts === 15 && fresh.prevSeedPts === 15, "#254 initialTierSeed: a new quote opens at the seed for its preselected customer/contact");
   ok(s254Init({ customer: null, contactName: "", serviceDefault: 0.35 }).knobPts === 35, "#254 initialTierSeed: no customer → the service default");
-  const reopenStamp = s254Init({ customer: acme, contactName: "Dana Cole", serviceDefault: 0.35, savedMarginPts: 30, stampedTierMargin: 0.3 });
-  ok(reopenStamp.knobPts === 30 && reopenStamp.prevSeedPts === 30, "#254 initialTierSeed: a saved knob at its stamped tier margin reopens untouched (follows the next change)");
-  const reopenHand = s254Init({ customer: acme, contactName: "Dana Cole", serviceDefault: 0.35, savedMarginPts: 42, stampedTierMargin: 0.27 });
+  const reopenStamp = s254Init({ customer: acme, contactName: "Dana Cole", serviceDefault: 0.35, savedMarkupPts: 30, stampedTierMarkup: 0.3 });
+  ok(reopenStamp.knobPts === 30 && reopenStamp.prevSeedPts === 30, "#254 initialTierSeed: a saved knob at its stamped tier markup reopens untouched (follows the next change)");
+  const reopenHand = s254Init({ customer: acme, contactName: "Dana Cole", serviceDefault: 0.35, savedMarkupPts: 42, stampedTierMarkup: 0.27 });
   ok(reopenHand.knobPts === 42 && reopenHand.prevSeedPts === 27, "#254 initialTierSeed: a hand-set saved knob reopens as saved, the stamp is its previous seed");
-  const reopenNoStamp = s254Init({ customer: plain, contactName: "", serviceDefault: 0.35, savedMarginPts: 28, stampedTierMargin: null });
+  const reopenNoStamp = s254Init({ customer: plain, contactName: "", serviceDefault: 0.35, savedMarkupPts: 28, stampedTierMarkup: null });
   ok(reopenNoStamp.knobPts === 28 && reopenNoStamp.prevSeedPts === 35, "#254 initialTierSeed: no stamp → today's seed is the previous seed");
-  ok(s254Pts(0.2) === 20 && s254Pts(null) === null && s254Pts(0) === null && s254Pts(1) === null, "#254 knobPtsFrom: fraction → whole points, invalid → null");
+  ok(s254Pts(0.2) === 20 && s254Pts(1) === 100 && s254Pts(null) === null && s254Pts(0) === null && s254Pts(20) === null,
+    "#254 knobPctFrom: a markup fraction → knob points (up to MARKUP_MAX), invalid → null");
+  // #367: exact points carry float noise (0.28 × 100 = 28.000000000000004); a whole-point knob still counts as on that seed.
+  ok(s254Reseed(28, 0.28 * 100, { pts: 0.2 * 100, label: "Gold" }).prompt === null &&
+      s254Init({ customer: null, contactName: "", serviceDefault: 0.28, savedMarkupPts: 28, stampedTierMarkup: 0.28 }).prevSeedPts === 28,
+    "#367 tier-seed: a knob a float hair off its seed (exact points) is still untouched");
 
   // Structural wiring in each builder.
   const s254Read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -35226,27 +35235,28 @@ import {
     const pick = c.slice(c.indexOf("function pickCustomer("), c.indexOf("function toggleVenue("));
     ok(/from "@\/lib\/tier-seed"/.test(c) && !/import (?!type)[^;]*from "@\/(lib\/stores|db)/.test(c),
       `#254 ${svc}: the builder uses the shared tier-seed helper and imports no store/db value`);
-    ok(/useState\(seed0\.knobPts\)/.test(c) && /savedMarginPts: initial\.marginPts/.test(c) && /stampedTierMargin: initial\.stampedTierMargin/.test(c)
+    ok(/useState\(seed0\.knobPts\)/.test(c) && /savedMarkupPts: initial\.savedMarkupPts/.test(c) && /stampedTierMarkup: initial\.stampedTierMarkup/.test(c)
       && !/useState\(Math\.round\(baseRates\.margin \* 100\)\)/.test(c),
-      `#254 ${svc}: the knob opens at the saved margin / the loaded seed, tracking the previous seed`);
+      `#254 ${svc}: the knob opens at the saved markup / the loaded seed, tracking the previous seed`);
     ok(/reseedTier\(c, primary \? primary\.name : ""\)/.test(pick) && /setPriceText\(""\)/.test(pick),
       `#254 ${svc}: a customer change re-seeds through the helper and still clears a typed total`);
     ok(/setContactSel\(val\);\s*reseedTier\(customer, val\);[^\n]*\n\s*dirty\(\);\s*\};/.test(c),
       `#254 ${svc}: a contact change re-seeds too and leaves a typed total alone`);
-    ok(/seedFor\(c, contactName === "__other__" \? "" : contactName, baseRates\.margin\)/.test(c) && /reseedKnob\(marginPts, prevSeedPts\.current, next\)/.test(c),
-      `#254 ${svc}: the seed falls back to this service's own default margin`);
-    ok(/<TierSeedPrompt prompt=\{tierPrompt\} onUse=\{applyTierSeed\}/.test(c) && /setMarginPts\(Math\.round\(\+e\.target\.value\)\);\s*setPriceText\(""\);\s*setTierPrompt\(null\);/.test(c)
-      && /setMarginPts\(tierPrompt\.seed\.pts\);[\s\S]{0,60}setTierPrompt\(null\);/.test(c),
+    ok(/seedFor\(c, contactName === "__other__" \? "" : contactName, baseRates\.margin\)/.test(c) && /reseedKnob\(markupPts, prevSeedPts\.current, next\)/.test(c),
+      `#254 ${svc}: the seed falls back to this service's own default markup`);
+    ok(/<TierSeedPrompt prompt=\{tierPrompt\} onUse=\{applyTierSeed\}/.test(c) && /setMarkupPts\(Math\.round\(\+e\.target\.value\)\);\s*setPriceText\(""\);\s*setTierPrompt\(null\);/.test(c)
+      && /setMarkupPts\(tierPrompt\.seed\.pts\);[\s\S]{0,60}setTierPrompt\(null\);/.test(c),
       `#254 ${svc}: the Use <Tier> prompt renders under the knob, applies the seed and clears; moving the knob clears it`);
-    ok(/marginPts: knobPtsFrom\(\w+\?\.rates\?\.margin\)/.test(pg) && /stampedTierMargin: editQuote\.tierMargin \?\? null/.test(pg)
+    ok(/savedMarkupPts: knobPctFrom\(\w+\?\.rates\?\.margin\)/.test(pg) && /stampedTierMarkup: editQuote\.tierMargin \?\? null/.test(pg)
       && /tierMargin: tierInfo\[c\.id\]\?\.tier \? tierInfo\[c\.id\]\.markup : null/.test(pg) && /tier: tierInfo\[c\.id\]\?\.byContactTier\[ct\.name\]/.test(pg),
       `#254 ${svc}: the page reopens the saved knob and passes only real tiers (company + contact) with their keys`);
   }
   const s254Tiers = s254Read("src/lib/pricing-tiers.ts");
   ok(/tier: companyTier,\s*byContactTier,/.test(s254Tiers), "#254 builderTiers hands the company's own tier and each contact's tier key to the builders");
   const s254Helper = s254Read("src/lib/tier-seed.ts");
-  ok(!/from "@\/(lib\/stores|db)/.test(s254Helper) && /^import \{ PRICING_TIER_LABEL, type PricingTier \} from "@\/lib\/identity\/config";/m.test(s254Helper),
-    "#254 client safety: tier-seed.ts imports only the import-free identity config");
+  ok(!/from "@\/(lib\/stores|db)/.test(s254Helper) && /^import \{ PRICING_TIER_LABEL, type PricingTier \} from "@\/lib\/identity\/config";/m.test(s254Helper) &&
+      /^import \{ MARKUP_MAX, fmtMarkupPct \} from "@\/lib\/markup";/m.test(s254Helper) && (s254Helper.match(/^import /gm) || []).length === 2,
+    "#254 client safety: tier-seed.ts imports only the import-free identity config and markup modules");
 }
 
 
@@ -35460,8 +35470,8 @@ import { serviceMarkupFor as s254mMarginFor, type ResolvedTier as S254mResolvedT
   const r254 = computeFlameQuote({ venues: [{ id: "v1", label: "Venue", curtains: 3 }] }, rates254);
   ok(r254.rates.margin === 0.31,
     "#254 rates.margin: compute()'s returned rates object carries the exact knob margin posted, unchanged by $25 rounding");
-  ok(Math.abs(r254.effectiveMargin - r254.rates.margin) > 0.001,
-    `#254 rates.margin: $25 rounding moves the back-solved effectiveMargin (${r254.effectiveMargin}) away from the knob (${r254.rates.margin}) — a reopen must read rates.margin, never effectiveMargin`);
+  ok(Math.abs(r254.effectiveMarkup - r254.rates.margin) > 0.001,
+    `#254 rates.margin: $25 rounding moves the back-solved effectiveMarkup (${r254.effectiveMarkup}) away from the knob (${r254.rates.margin}) — a reopen must read rates.margin, never effectiveMarkup`);
 }
 
 // ---- structural: the three service save actions + portal-service pricing
@@ -35476,21 +35486,21 @@ import { serviceMarkupFor as s254mMarginFor, type ResolvedTier as S254mResolvedT
     ["inspections", "inspection"],
   ] as const) {
     const src = s254mRead(`src/app/(app)/${dir}/quote/actions.ts`);
-    ok(/const serviceMargin = serviceMarkupFor\(tier, baseRates\.margin\);/.test(src),
-      `#254 ${dir}/quote/actions.ts: the fallback margin (no posted knob) resolves through serviceMarginFor, not the raw tier margin`);
-    ok(/\? Math\.max\(5, Math\.min\(50, marginPts\)\) \/ 100\s*: serviceMargin;/.test(src),
-      `#254 ${dir}/quote/actions.ts: an unposted margin falls back to serviceMargin (never tier.margin)`);
-    ok(/pricingTier: tier\.tier,\s*tierMargin: serviceMargin,/.test(src) && !/tierMargin: tier\.margin,/.test(src),
-      `#254 ${dir}/quote/actions.ts: the saved tierMargin stamp is the service margin everywhere — no stamp still reads the raw tier margin`);
+    ok(/const serviceMarkup = serviceMarkupFor\(tier, baseRates\.margin\);/.test(src),
+      `#254 ${dir}/quote/actions.ts: the fallback markup (no posted knob) resolves through serviceMarkupFor, not the raw tier markup`);
+    ok(/const markupPts = Number\(formData\.get\("markup"\)\);/.test(src) && /\? Math\.max\(5, Math\.min\(100, markupPts\)\) \/ 100\s*: serviceMarkup;/.test(src),
+      `#254 ${dir}/quote/actions.ts: the posted markup is clamped 5–100; an unposted one falls back to serviceMarkup (never tier.markup)`);
+    ok(/pricingTier: tier\.tier,\s*tierMargin: serviceMarkup,/.test(src) && !/tierMargin: tier\.(margin|markup),/.test(src),
+      `#254 ${dir}/quote/actions.ts: the saved tierMargin stamp is the service markup everywhere — no stamp still reads the raw tier markup`);
     ok(new RegExp(`${subdocKey}: \\{\\s*rates: r\\.rates,`).test(src),
       `#254 ${dir}/quote/actions.ts: the saved <subdoc>.rates is the engine's own rates echo (the KNOB), not a hand-built object`);
   }
 
   const portalSrc = s254mRead("src/lib/portal-service-pricing.ts");
-  ok((portalSrc.match(/const serviceMargin = serviceMarkupFor\(tier, baseRates\.margin\);/g) || []).length === 2,
-    "#254 portal-service-pricing.ts: both the flame and inspection branches resolve their margin through serviceMarginFor");
-  ok((portalSrc.match(/tierMargin: serviceMargin,/g) || []).length === 2 && !/tierMargin: tier\.margin,/.test(portalSrc),
-    "#254 portal-service-pricing.ts: both returned results stamp tierMargin from the service margin, never the raw tier margin");
+  ok((portalSrc.match(/const serviceMarkup = serviceMarkupFor\(tier, baseRates\.margin\);/g) || []).length === 2,
+    "#254 portal-service-pricing.ts: both the flame and inspection branches resolve their markup through serviceMarkupFor");
+  ok((portalSrc.match(/tierMargin: serviceMarkup,/g) || []).length === 2 && !/tierMargin: tier\.(margin|markup),/.test(portalSrc),
+    "#254 portal-service-pricing.ts: both returned results stamp tierMargin from the service markup, never the raw tier markup");
   ok((portalSrc.match(/rates: r\.rates,/g) || []).length === 2,
     "#254 portal-service-pricing.ts: both subdocs echo the engine's own rates (the knob), matching the staff builders");
 }
@@ -38129,7 +38139,7 @@ import type { SpecItem as S267Item, SpecSection as S267Section } from "@/app/(ap
 
   // Warnings — typed only.
   ok(s267Warn(sec([li(1, 1000, 800)], { sellOverride: 700 }))?.kind === "below-cost", "#267 system sell: a typed price under cost warns below-cost");
-  ok(s267Warn(sec([li(1, 1000, 800)], { sellOverride: 850 }))?.kind === "low-margin", "#267 system sell: a typed price under the low line (6.25% markup) warns low-margin");
+  ok(s267Warn(sec([li(1, 1000, 800)], { sellOverride: 850 }))?.kind === "low-markup", "#267 system sell: a typed price under the low line (6.25% markup, under 11%) warns low-markup");
   ok(s267Warn(sec([li(1, 1000, 800)], { sellOverride: 1000 })) === null && s267Warn(sec([li(1, 10, 800)], R)) === null, "#267 system sell: a healthy typed price, or any auto price, has no warning");
 
   // Server sanitizer.
@@ -38501,7 +38511,7 @@ import {
     "#275: draft → normalizeLift round-trips the saved lift");
 
   // ---- inspection engine: lift on top of the minimum fee, rounded, typed ----
-  const iR = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const iR = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
   const iV = [{ id: "l275-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }];
   const i0 = trvInspectionEstimate({ venues: iV }, iR);
   const i0b = trvInspectionEstimate({ venues: iV, lift: null }, iR);
@@ -38510,20 +38520,20 @@ import {
   const i1 = trvInspectionEstimate({ venues: iV, lift: L1 }, iR);
   ok(near(i1.totalRaw, 832.5 / 0.7 + 750 / 0.7) && i1.total === 2250 && i1.cost === 1582.5 && i1.liftCost === 750 && i1.liftLine === 1071,
     "#275 inspection: + 1 lift at $750 → 1,189.29 + 1,071.43 = 2,260.71 rounds to 2,250; the lift line prints $1,071");
-  ok(near(i1.effectiveMargin, 1 - 1582.5 / 2250) && i1.marginAmount === 2250 - 1582.5, "#275 inspection: the margin back-solves over labor + travel + lift");
+  ok(near(i1.effectiveMarkup, (2250 - 1582.5) / 1582.5) && i1.marginAmount === 2250 - 1582.5, "#275 inspection: the markup back-solves over labor + travel + lift");
   const iHere = [{ id: "l275-i2", label: "Here", lineSets: 0, oneWayMiles: 0, oneWayMin: 0 }];
   const iMin = trvInspectionEstimate({ venues: iHere, lift: L1 }, iR);
   ok(iMin.minApplied && near(iMin.totalRaw, 650 + 750 / 0.7) && iMin.total === 1725,
     "#275 inspection: the minimum fee floors the inspection and the lift adds ON TOP (650 + 1,071.43 → rounds UP to 1,725), never absorbed by the floor");
   const iTyped = trvInspectionEstimate({ venues: iV, lift: L1, priceOverride: 2000 }, iR);
-  ok(iTyped.total === 2000 && iTyped.overridden && iTyped.autoTotal === 2250 && iTyped.liftLine === 1071 && near(iTyped.effectiveMargin, 1 - 1582.5 / 2000),
-    "#275 inspection: a typed total is used exactly; the lift line keeps its own price and the margin back-solves");
-  const iPrev = l275FinishInsp({ cost: i0.cost, minFee: 650, margin: 0.3, priceOverride: null, liftCost: 750 });
+  ok(iTyped.total === 2000 && iTyped.overridden && iTyped.autoTotal === 2250 && iTyped.liftLine === 1071 && near(iTyped.effectiveMarkup, (2000 - 1582.5) / 1582.5),
+    "#275 inspection: a typed total is used exactly; the lift line keeps its own price and the markup back-solves");
+  const iPrev = l275FinishInsp({ cost: i0.cost, minFee: 650, margin: mk(0.3), priceOverride: null, liftCost: 750 });
   ok(iPrev.total === i1.total && iPrev.cost === i1.cost && iPrev.liftLine === i1.liftLine,
     "#275 parity: the builder preview's finishInspection() prices the lift exactly like the engine");
 
   // ---- flame engine: lift after the base-fee floor ----
-  const fR = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const fR = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: mk(0.3), travelRoundMin: 15 };
   const fV: FTVenue = { id: "l275-f1", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
   const f0 = computeFlameQuote({ venues: [fV] }, fR);
   ok(f0.total === 825 && f0.lift === null && f0.liftLine === 0, "#275 flame: no lift prices exactly as before (825)");
@@ -38532,15 +38542,15 @@ import {
     "#275 flame: + 2 lifts at $750 → cost 2,075, 2,964.29 rounds to 2,975; the lift line prints $2,143");
   const fHere = computeFlameQuote({ venues: [{ id: "l275-f2", label: "Here", curtains: 1, oneWayMiles: 0, oneWayMin: 0 }], lift: L1 }, fR);
   ok(fHere.baseApplied && fHere.cost === 900 && fHere.total === 1300,
-    "#275 flame: the $150 base fee floors the testing, the lift adds on top (900 ÷ 0.7 = 1,285.71 rounds UP to 1,300)");
+    "#275 flame: the $150 base fee floors the testing, the lift adds on top (900 × 1.428571 = 1,285.71 rounds UP to 1,300)");
   const fTyped = computeFlameQuote({ venues: [fV], lift: L2, priceOverride: 3000 }, fR);
-  ok(fTyped.total === 3000 && fTyped.overridden && fTyped.autoTotal === 2975 && near(fTyped.effectiveMargin, 1 - 2075 / 3000),
+  ok(fTyped.total === 3000 && fTyped.overridden && fTyped.autoTotal === 2975 && near(fTyped.effectiveMarkup, (3000 - 2075) / 2075),
     "#275 flame: a typed total with a lift is used exactly");
-  const fPrev = l275FinishFlame({ rawCost: f0.rawCost, baseFee: 150, margin: 0.3, priceOverride: null, liftCost: 1500 });
+  const fPrev = l275FinishFlame({ rawCost: f0.rawCost, baseFee: 150, margin: mk(0.3), priceOverride: null, liftCost: 1500 });
   ok(fPrev.total === f2.total && fPrev.cost === f2.cost && fPrev.liftLine === f2.liftLine, "#275 parity: finishFlame() prices the lift exactly like the engine");
 
-  // ---- repair engine: lift at the SERVICE margin, on top of the call-out ----
-  const rR = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  // ---- repair engine: lift at the SERVICE markup, on top of the call-out ----
+  const rR = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: mk(0.3), margin: mk(0.3), emergencyMult: 1.5, travelRoundMin: 15 };
   const rV = [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }];
   const r0 = trvRepairEstimate({ venues: rV, laborHours: 4 }, rR);
   ok(r0.total === 875 && r0.lift === null && r0.liftLine === 0, "#275 repair: no lift prices exactly as before (875)");
@@ -38553,20 +38563,20 @@ import {
   const rC = trvRepairEstimate({ venues: [{ label: "Here", oneWayMiles: 0, oneWayMin: 0 }], laborHours: 1, lift: L1 }, rR);
   ok(rC.calloutApplied && rC.total === 1425, "#275 repair: the minimum call-out floors the service, the lift adds on top (350 + 1,071.43 → rounds UP to 1,425)");
   const rT = trvRepairEstimate({ venues: rV, laborHours: 4, lift: L1, priceOverride: 1500 }, rR);
-  ok(rT.total === 1500 && rT.overridden && near(rT.serviceMargin, rT.effectiveMargin) && near(rT.effectiveMargin, 1 - 1357.5 / 1500),
-    "#275 repair: a typed total with a lift reports the whole-job effective margin");
-  const rPrev = l275FinishRepair({ serviceCost: r0.serviceCost, minCallout: 350, margin: 0.3, partsCost: 0, partsMargin: 0.3, priceOverride: null, liftCost: 750 });
+  ok(rT.total === 1500 && rT.overridden && near(rT.serviceMarkup, rT.effectiveMarkup) && near(rT.effectiveMarkup, (1500 - 1357.5) / 1357.5),
+    "#275 repair: a typed total with a lift reports the whole-job effective markup");
+  const rPrev = l275FinishRepair({ serviceCost: r0.serviceCost, minCallout: 350, margin: mk(0.3), partsCost: 0, partsMargin: mk(0.3), priceOverride: null, liftCost: 750 });
   ok(rPrev.total === r1.total && rPrev.liftLine === r1.liftLine, "#275 parity: finishRepair() prices the lift exactly like the engine");
 
   // ---- the saved lift + the printed line (count > 0 only) ----
   const saved = l275Saved(L2, f2);
   ok(JSON.stringify(saved) === JSON.stringify({ count: 2, rate: 750, cost: 1500, line: 2143 }), "#275 savedLift: count, rate, cost and the printed line");
   ok(l275Saved(null, f0) === undefined && l275Saved({ count: 0, rate: 750 }, f0) === undefined, "#275 savedLift: no lift writes nothing");
-  const pl = l275Printed({ lift: saved }, 0.3);
+  const pl = l275Printed({ lift: saved }, mk(0.3));
   ok(!!pl && pl.line === 2143 && pl.count === 2 && pl.label === "Lift rental ×2", "#275 printedLift: a saved lift prints its stored line");
-  ok(l275Printed({}, 0.3) === null && l275Printed(null, 0.3) === null && l275Printed({ lift: { count: 0, rate: 750 } }, 0.3) === null,
+  ok(l275Printed({}, mk(0.3)) === null && l275Printed(null, mk(0.3)) === null && l275Printed({ lift: { count: 0, rate: 750 } }, mk(0.3)) === null,
     "#275 printedLift: a quote with no lift (every pre-#275 quote) prints no lift line");
-  ok(l275Printed({ lift: { count: 1, rate: 700 } }, 0.3)?.line === 1000, "#275 printedLift: a lift saved without a line prints count × rate ÷ (1 − margin)");
+  ok(l275Printed({ lift: { count: 1, rate: 700 } }, mk(0.3))?.line === 1000, "#275 printedLift: a lift saved without a line prints count × rate × (1 + markup)");
   ok(l275Label(1) === l275Line && l275Line === "Lift rental" && l275Label(3) === "Lift rental ×3", "#275: the customer-facing label is 'Lift rental' (×n for more than one)");
 
   // ---- renewals carry the count at today's rate ----
@@ -38606,11 +38616,11 @@ import {
   }
   for (const dir of ["flame-tests", "inspections"]) {
     const v = r275(`src/app/(app)/${dir}/letter/letter-view.tsx`);
-    ok(/const lift = printedLift\([a-z]+, travelMargin\);\s*if \(lift\) \{\s*scopeRows\.push\(\{\s*item: pad2\(sr\+\+\),\s*desc: lift\.label,\s*qty: money\(lift\.line\),/.test(v),
+    ok(/const lift = printedLift\([a-z]+, travelMarkup\);\s*if \(lift\) \{\s*scopeRows\.push\(\{\s*item: pad2\(sr\+\+\),\s*desc: lift\.label,\s*qty: money\(lift\.line\),/.test(v),
       `#275 ${dir} letter: a 'Lift rental' row prints with its own price only when the quote has a lift`);
   }
   const rpl = r275("src/app/(app)/repairs/letter/letter-view.tsx");
-  ok(rpl.includes("const lift = printedLift(rp, travelMargin);") && /\{lift\s*\? ", including "/.test(rpl),
+  ok(rpl.includes("const lift = printedLift(rp, travelMarkup);") && /\{lift\s*\? ", including "/.test(rpl),
     "#275 repair letter: the cost sentence names the lift and its price only when the quote has one");
   const ren = r275("src/lib/renewal-outreach.ts");
   ok(ren.includes("const lift = priorFt?.lift ? carryLift(priorFt.lift, await getLiftRate()) : undefined;") &&
@@ -38637,7 +38647,7 @@ async function lift275AsyncChecks(): Promise<void> {
   ok(liveRate === (row ? Math.round(row.cost) : 750), `#275 getLiftRate: the default is the live EQP-LIFT catalog cost ($${liveRate}), else $750`);
 
   // ---- persistence round-trip: what the inspection save writes reopens and re-prices identically ----
-  const iR = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const iR = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
   const iV = [{ id: "l275-rt", label: "Hall", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }];
   const lift = l275Norm({ count: "2", rate: "" }, liveRate)!;
   const r = trvInspectionEstimate({ venues: iV, lift }, iR);
@@ -40254,19 +40264,19 @@ import { readFileSync as r282cRead } from "node:fs";
 
 {
   // ---- the credit comes off AFTER the engine's final total, all three types ----
-  const fl = r282cFinishFlame({ rawCost: 1003, baseFee: 150, margin: 0.3, liftCost: 750 });
+  const fl = r282cFinishFlame({ rawCost: 1003, baseFee: 150, margin: mk(0.3), liftCost: 750 });
   ok(fl.total === 2500 && fl.liftCost === 750 && r282cNet(fl.total, 137) === 2363,
     `#282 P3 flame: $25 rounding (2,504.29 → 2,500, lift included) happens first, the credit after — net 2,363, never re-rounded (got ${fl.total} → ${r282cNet(fl.total, 137)})`);
-  const flT = r282cFinishFlame({ rawCost: 1003, baseFee: 150, margin: 0.3, liftCost: 750, priceOverride: 3000 });
+  const flT = r282cFinishFlame({ rawCost: 1003, baseFee: 150, margin: mk(0.3), liftCost: 750, priceOverride: 3000 });
   ok(flT.total === 3000 && r282cNet(flT.total, 137) === 2863, "#282 P3 flame: a typed total is the price the credit comes off (3,000 − 137 = 2,863)");
-  const ins = r282cFinishInspection({ cost: 800, minFee: 500, margin: 0.3, liftCost: 750 });
+  const ins = r282cFinishInspection({ cost: 800, minFee: 500, margin: mk(0.3), liftCost: 750 });
   ok(ins.total === 2225 && r282cNet(ins.total, 225) === 2000,
     `#282 P3 inspection: rounded total with a lift (2,225), then the credit (→ 2,000) (got ${ins.total})`);
-  const insT = r282cFinishInspection({ cost: 800, minFee: 500, margin: 0.3, liftCost: 750, priceOverride: 1234 });
+  const insT = r282cFinishInspection({ cost: 800, minFee: 500, margin: mk(0.3), liftCost: 750, priceOverride: 1234 });
   ok(insT.total === 1234 && r282cNet(insT.total, 234) === 1000, "#282 P3 inspection: a typed total, then the credit");
-  const rp = r282cFinishRepair({ serviceCost: 400, minCallout: 300, margin: 0.3, partsCost: 100, partsMargin: 0.25, liftCost: 750 });
+  const rp = r282cFinishRepair({ serviceCost: 400, minCallout: 300, margin: mk(0.3), partsCost: 100, partsMargin: mk(0.25), liftCost: 750 });
   ok(rp.total % 25 === 0 && r282cNet(rp.total, 40) === rp.total - 40, `#282 P3 repair: rounded total (${rp.total}, lift + parts included), then the credit`);
-  const rpT = r282cFinishRepair({ serviceCost: 400, minCallout: 300, margin: 0.3, partsCost: 100, partsMargin: 0.25, liftCost: 750, priceOverride: 1999 });
+  const rpT = r282cFinishRepair({ serviceCost: 400, minCallout: 300, margin: mk(0.3), partsCost: 100, partsMargin: mk(0.25), liftCost: 750, priceOverride: 1999 });
   ok(rpT.total === 1999 && r282cNet(rpT.total, 5000) === 0, "#282 P3 repair: a typed total, and a credit above it nets $0 — never below");
 
   // ---- whole dollars ----

@@ -8,6 +8,8 @@ import {
 } from "../src/lib/markup";
 import { catalogAddPrice, customPartSell, isAtTierSeed, repriceForTier } from "../src/app/(app)/estimator/tier-reprice";
 import { copySectionForTarget } from "../src/app/(app)/estimator/copy-system";
+import { sliderPct, typedPriceWarning } from "../src/lib/service-pricing";
+import { knobPctFrom } from "../src/lib/tier-seed";
 
 const near = (a: number | null | undefined, b: number, eps = 1e-9) => a != null && Math.abs(a - b) <= eps;
 
@@ -60,6 +62,10 @@ export async function markupPureChecks(ok: Ok) {
   });
   const cm = copied.section.items.find((i) => i.id === 1);
   ok(copied.tierRepriced === 0 && copied.handPriced === 0 && cm?.price === 142.86, "markup: copying from a converted stamp to its rounded tier moves no tier and keeps every price");
+  ok(typedPriceWarning(1090, 1000, 0.09)?.kind === "low-markup" && typedPriceWarning(1200, 1000, 0.2) === null,
+    "markup: a typed service total under 11 % markup warns");
+  ok(sliderPct(0.428571) === 43 && sliderPct(2) === 100 && sliderPct(0.01) === 10, "markup: service slider clamps 10–100");
+  ok(knobPctFrom(0.3 / 0.7) === (0.3 / 0.7) * 100 && knobPctFrom(0) === null, "markup: the knob keeps a saved quote's exact points");
 }
 
 export async function markupDbChecks(_ok: Ok) {

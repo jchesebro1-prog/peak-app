@@ -30,14 +30,14 @@ export { REPAIR_RATE_DEFAULTS };
  *      to the venue(s) and back, SHARED across venues visited on one trip
  *      (counted once for the whole route). Mileage at the mileage rate;
  *      travel time at the labor rate, rounded up to the nearest N minutes.
- *   3. Service sell — (labor + travel) marked up to the service margin:
- *      serviceSell = serviceCost ÷ (1 − margin). A minimum call-out is a
+ *   3. Service sell — (labor + travel) marked up at the service markup:
+ *      serviceSell = serviceCost × (1 + markup). A minimum call-out is a
  *      FLOOR on the service sell (showing up costs at least the call-out,
  *      before parts).
- *   4. Parts — Σ(qty × cost), marked up to the parts margin:
- *      partsSell = partsCost ÷ (1 − partsMargin).
+ *   4. Parts — Σ(qty × cost), marked up at the parts markup:
+ *      partsSell = partsCost × (1 + partsMargin).
  *   5. Total = serviceSell + partsSell (+ an optional lift rental, #275:
- *      count × rate at the service margin, on top of the call-out floor),
+ *      count × rate at the service markup, on top of the call-out floor),
  *      rounded to the nearest $25 (or a typed total, #217).
  *   6. Flights over drive (spec 2026-09-25, src/lib/travel-plan.ts) — a trip
  *      whose drive cost reaches the threshold prices as flights for at least
@@ -53,8 +53,8 @@ export type RepairRates = {
   laborRate: number; // $/hour — skilled rigging / repair labor
   mileageRate: number; // $/mile — federal standard mileage rate
   minCallout: number; // $ minimum service call (floor on the service sell, before parts)
-  partsMargin: number; // points on parts (sell = cost / (1 - partsMargin))
-  margin: number; // points on labor + travel
+  partsMargin: number; // markup on cost for parts (0.43 = 43 %; sell = cost × (1 + partsMargin))
+  margin: number; // markup on cost for labor + travel (0.43 = 43 %)
   emergencyMult: number; // labor-rate multiplier for emergency / after-hours work
   travelRoundMin: number; // round total travel time up to the nearest N minutes
   flyCrew?: number; // default crew when the trip flies (FLY_CREW_DEFAULTS.repair when absent)
@@ -260,11 +260,11 @@ export type RepairEstimate = {
   priceOverride: number | null;
   overridden: boolean;
   marginAmount: number;
-  /** 1 − cost ÷ total over the whole job. */
-  effectiveMargin: number;
-  /** 1 − serviceCost ÷ serviceSell — the slider's margin, back-solved. */
-  serviceMargin: number;
-  /** #275: the lift priced (null = none), its cost, margined sell and printed line. */
+  /** (total − cost) ÷ cost over the whole job. */
+  effectiveMarkup: number;
+  /** (serviceSell − serviceCost) ÷ serviceCost — the slider's markup, back-solved. */
+  serviceMarkup: number;
+  /** #275: the lift priced (null = none), its cost, marked-up sell and printed line. */
   lift: LiftRental | null;
   liftCost: number;
   liftSell: number;
@@ -312,7 +312,7 @@ export function computeEstimate(
   const partsCost = parts.reduce((a, p) => a + p.extCost, 0);
   const lift = opts.lift && opts.lift.count > 0 ? opts.lift : null;
 
-  // #217: the call-out floor, both margins, the $25 rounding and a typed total
+  // #217: the call-out floor, both markups, the $25 rounding and a typed total
   // all come from finishRepair() — the same code the builder preview runs.
   const fin = finishRepair({
     serviceCost,
@@ -350,8 +350,8 @@ export function computeEstimate(
     priceOverride: fin.priceOverride,
     overridden: fin.overridden,
     marginAmount: fin.marginAmount,
-    effectiveMargin: fin.effectiveMargin,
-    serviceMargin: fin.serviceMargin,
+    effectiveMarkup: fin.effectiveMarkup,
+    serviceMarkup: fin.serviceMarkup,
     lift,
     liftCost: fin.liftCost,
     liftSell: fin.liftSell,

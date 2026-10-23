@@ -41,15 +41,15 @@ import {
  *      AFTER mileage + travel time + testing are summed:
  *        cost = max(baseFee, trip.total + testingSubtotal)
  *      It is not a per-venue or per-curtain charge.
- *   4. Margin — flat 30-point margin of the sell price on top:
- *        total = cost / (1 - margin)   (when 0 < margin < 1)
+ *   4. Markup — a flat markup on cost on top (#367):
+ *        total = cost × (1 + markup)   (when markup > 0)
  *   5. Flights over drive (spec 2026-09-25, src/lib/travel-plan.ts) — when
  *      the trip's drive cost reaches the travel_rates threshold (or the quote
- *      forces Fly) travel prices as flights; the base fee and margin then
+ *      forces Fly) travel prices as flights; the base fee and markup then
  *      apply to that figure exactly as they do to the drive. Drive mode is
  *      unchanged.
  *   6. Lift rental (#275) — an optional count × rate added to the cost AFTER
- *      the base-fee floor, margined with the rest:
+ *      the base-fee floor, marked up with the rest:
  *        cost = max(baseFee, trip.total + testingSubtotal) + liftCost
  *
  * Everything prices from an explicit rates object (pure functions);
@@ -78,7 +78,7 @@ export type FlameTestRates = {
   curtainMinutes: number;
   /** $ minimum for the whole job (after mileage + travel + testing). */
   baseFee: number;
-  /** Margin of the sell price (0.30 = 30 points). */
+  /** Markup on cost (0.43 = 43 %). */
   margin: number;
   /** Round total travel time up to the nearest N minutes. */
   travelRoundMin: number;
@@ -330,7 +330,7 @@ export function tripTravel(
  *
  *   rawCost = trip.total + testingSubtotal
  *   cost    = max(baseFee, rawCost)          — base fee floors the whole job
- *   total   = cost / (1 - margin)            — when 0 < margin < 1, else cost,
+ *   total   = cost × (1 + markup)            — when markup > 0, else cost,
  *             rounded to the nearest $25, or a typed priceOverride (#217)
  */
 export function compute(
@@ -357,7 +357,7 @@ export function compute(
   });
   const trip = withMode(drive, plan);
   // Base $150 is a floor on the WHOLE job cost (mileage + travel + testing),
-  // not a per-venue charge. Margin is applied on top of the floored cost, then
+  // not a per-venue charge. Markup is applied on top of the floored cost, then
   // (#217) the total rounds to the nearest $25 unless a typed total replaces
   // it — finishFlame() is the same code the builder preview runs.
   const rawCost = plan.total + testingSubtotal;

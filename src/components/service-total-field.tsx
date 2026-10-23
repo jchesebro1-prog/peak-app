@@ -6,15 +6,15 @@ import { typedPriceWarning } from "@/lib/service-pricing";
 /**
  * #217 — the service quote builders' Total row as an input. It shows the auto
  * total (rounded to the nearest $25) until someone types a figure. A typed
- * figure is the quote's price exactly, the margin back-solves, and "Reset to
- * auto" clears it. A typed total below cost or under a 10% margin warns but
+ * figure is the quote's price exactly, the markup back-solves, and "Reset to
+ * auto" clears it. A typed total below cost or under an 11% markup warns but
  * never blocks. Imports only the pure pricing module — safe in a client bundle.
  */
 export function ServiceTotalField({
   total,
   autoTotal,
   cost,
-  margin,
+  markup,
   partsSell,
   overridden,
   text,
@@ -27,8 +27,8 @@ export function ServiceTotalField({
   total: number;
   autoTotal: number;
   cost: number;
-  /** The margin the builder's slider shows (the service margin on repairs). */
-  margin: number;
+  /** The markup the builder's slider shows (the service markup on repairs). */
+  markup: number;
   /** Repairs only — a typed total under this warns sharper than below-cost. */
   partsSell?: number | null;
   overridden: boolean;
@@ -47,7 +47,7 @@ export function ServiceTotalField({
   // bare 0 that looks like a real free quote.
   const shown = draft ?? (text !== "" ? text : disabled ? "—" : String(Math.round(autoTotal)));
   const invalid = text.trim() !== "" && !overridden;
-  const warning = overridden ? typedPriceWarning(total, cost, margin, partsSell) : null;
+  const warning = overridden ? typedPriceWarning(total, cost, markup, partsSell) : null;
   return (
     <div style={{ marginTop: 4, paddingTop: 9, borderTop: "1px solid #f0f1f4", ...style }}>
       <div
@@ -110,7 +110,7 @@ export function ServiceTotalField({
         <span>
           {overridden
             ? // #217 fix wave (b): Reset parks the slider at the back-solved
-              // margin, not the margin autoTotal was computed at above — so
+              // markup, not the markup autoTotal was computed at above — so
               // "auto is $X" here would promise a figure Reset doesn't
               // actually produce. State what Reset does instead.
               "Typed total · Reset keeps this margin"

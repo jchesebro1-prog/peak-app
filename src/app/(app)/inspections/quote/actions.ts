@@ -77,7 +77,7 @@ async function persist(formData: FormData, out?: { creditNote?: string }): Promi
   // Mileage/labor knobs stay global rates. MARGIN went per-quote with
   // customer tiers (item 11, D87/D88): the tier seeds it, the knob
   // overrides it for THIS quote only.
-  const marginPts = Number(formData.get("margin"));
+  const markupPts = Number(formData.get("markup"));
   const mileageRate = Number(formData.get("mileageRate"));
   const laborRate = Number(formData.get("laborRate"));
   const patch: Record<string, number> = {};
@@ -87,13 +87,13 @@ async function persist(formData: FormData, out?: { creditNote?: string }): Promi
   const baseRates = await getRates();
   const tier = await resolveTier(customerId, contactName);
   // #254 follow-up: an untiered customer prices/stamps at THIS service's own
-  // default margin (baseRates.margin — same seed the builder knob uses), not
-  // tier Base's registry margin (src/lib/pricing-tiers.ts serviceMarkupFor).
-  const serviceMargin = serviceMarkupFor(tier, baseRates.margin);
-  const quoteMargin = Number.isFinite(marginPts)
-    ? Math.max(5, Math.min(50, marginPts)) / 100
-    : serviceMargin;
-  const rates = { ...baseRates, margin: quoteMargin };
+  // default markup (baseRates.margin — same seed the builder knob uses), not
+  // tier Base's registry markup (src/lib/pricing-tiers.ts serviceMarkupFor).
+  const serviceMarkup = serviceMarkupFor(tier, baseRates.margin);
+  const quoteMarkup = Number.isFinite(markupPts)
+    ? Math.max(5, Math.min(100, markupPts)) / 100
+    : serviceMarkup;
+  const rates = { ...baseRates, margin: quoteMarkup };
 
   // resolve venue coords from the customer directory + nearest office
   const cust = await getCustomer(customerId);
@@ -111,7 +111,7 @@ async function persist(formData: FormData, out?: { creditNote?: string }): Promi
   // Fly choice + crew/nights/airfare overrides as JSON; absent = auto.
   const travelOverride = parseTravelOverride(formData.get("travel"));
   // #217: a typed total (whole dollars, $1–$10,000,000) replaces the rounded
-  // auto total exactly; the 5–50 clamp above bounds only the slider's margin.
+  // auto total exactly; the 5–100 clamp above bounds only the slider's markup.
   const priceOverride = normalizePriceOverride(formData.get("priceOverride"));
   // #275: an optional lift rental — count × rate (blank rate = the live
   // EQP-LIFT default); count 0 / absent = no lift.
@@ -184,9 +184,9 @@ async function persist(formData: FormData, out?: { creditNote?: string }): Promi
     locationId: venueInputs[0].id ?? null,
     // #282 phase 3: net of any Rewards credit (what the customer pays).
     value: netServiceTotal(r.total, credit.credit),
-    margin: r.effectiveMargin,
+    margin: r.effectiveMarkup,
     pricingTier: tier.tier,
-    tierMargin: serviceMargin,
+    tierMargin: serviceMarkup,
     // #248 Task 4 (spec §5): a portal-generated quote (source
     // "portal-service") keeps that source across a staff save — the same
     // rule the Estimator applies to portal-catalog (D416).

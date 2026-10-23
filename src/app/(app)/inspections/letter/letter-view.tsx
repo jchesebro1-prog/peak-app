@@ -203,7 +203,7 @@ export async function InspectionLetterView({ id }: { id: string }) {
   const inspectHours = insp.inspectHours || 0;
   // Flights over drive (spec 2026-09-25 §5): one customer-facing travel line.
   const flight = flightOf(insp.trip);
-  const travelMargin = typeof insp.rates?.margin === "number" ? insp.rates.margin : quote.margin || 0;
+  const travelMarkup = typeof insp.rates?.margin === "number" ? insp.rates.margin : quote.margin || 0;
   const travelHours = flight ? flight.travelHours : 2 * oneWayHours;
   const totalHours = travelHours + inspectHours;
   const originCity = insp.office || "our office";
@@ -275,7 +275,7 @@ export async function InspectionLetterView({ id }: { id: string }) {
           flightTotal: flight.total,
           total: price.gross,
           cost: insp.cost,
-          margin: travelMargin,
+          margin: travelMarkup,
         }).travel
       ),
       hours: num1(flight.travelHours) + " hrs",
@@ -289,7 +289,7 @@ export async function InspectionLetterView({ id }: { id: string }) {
     });
   }
   // #275: an optional lift rental prints as its own priced line (count > 0 only).
-  const lift = printedLift(insp, travelMargin);
+  const lift = printedLift(insp, travelMarkup);
   if (lift) {
     scopeRows.push({
       item: pad2(sr++),

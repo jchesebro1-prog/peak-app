@@ -32,13 +32,15 @@ import { initialTierSeed, reseedKnob, seedFor, type TierPrompt } from "@/lib/tie
 import type { PricingTier } from "@/lib/identity/config";
 import {
   finishFlame,
-  fmtPts,
+  fmtPct,
+  MARKUP_SLIDER_MAX,
+  MARKUP_SLIDER_MIN,
   liftCostOf,
   liftDraftFrom,
   normalizeLift,
   normalizePriceOverride,
   normalizeTestingOverride,
-  sliderPts,
+  sliderPct,
   venueTesting,
   type FlameFinish,
   type LiftDraft,
@@ -124,9 +126,9 @@ export type BuilderInitial = {
   /** #282 phase 3: the Rewards credit on the saved quote (whole dollars; 0/absent = none). */
   rewardCredit?: number;
   /** #254: the saved quote's own knob in points (absent for a new quote) — never re-seeded on load. */
-  marginPts?: number | null;
+  savedMarkupPts?: number | null;
   /** #254: the saved quote's stamped tier margin fraction (seeds `prevSeedPts`). */
-  stampedTierMargin?: number | null;
+  stampedTierMarkup?: number | null;
   /** #248 Task 4 — set only for a loaded `source === "portal-service"` quote. */
   portal?: PortalPanelData | null;
 };
@@ -364,11 +366,11 @@ export function QuoteBuilder({
       customer: customers.find((c) => c.id === initial.customerId) || null,
       contactName: initial.contactSel === "__other__" ? "" : initial.contactSel,
       serviceDefault: baseRates.margin,
-      savedMarginPts: initial.marginPts,
-      stampedTierMargin: initial.stampedTierMargin,
+      savedMarkupPts: initial.savedMarkupPts,
+      stampedTierMarkup: initial.stampedTierMarkup,
     })
   );
-  const [marginPts, setMarginPts] = useState(seed0.knobPts);
+  const [markupPts, setMarkupPts] = useState(seed0.knobPts);
   const prevSeedPts = useRef(seed0.prevSeedPts);
   const [tierPrompt, setTierPrompt] = useState<TierPrompt | null>(null);
   const [mileageRate, setMileageRate] = useState(baseRates.mileageRate.toFixed(2));
@@ -433,14 +435,14 @@ export function QuoteBuilder({
    *  kept and the new seed is offered as a one-click prompt. */
   function reseedTier(c: BuilderCustomer | null, contactName: string) {
     const next = seedFor(c, contactName === "__other__" ? "" : contactName, baseRates.margin);
-    const res = reseedKnob(marginPts, prevSeedPts.current, next);
+    const res = reseedKnob(markupPts, prevSeedPts.current, next);
     prevSeedPts.current = res.prevSeedPts;
-    setMarginPts(res.knobPts);
+    setMarkupPts(res.knobPts);
     setTierPrompt(res.prompt);
   }
   function applyTierSeed() {
     if (!tierPrompt) return;
-    setMarginPts(tierPrompt.seed.pts);
+    setMarkupPts(tierPrompt.seed.pts);
     setPriceText("");
     setTierPrompt(null);
     dirty();
@@ -532,7 +534,7 @@ export function QuoteBuilder({
     laborRate: parseFloat(laborRate) || baseRates.laborRate,
     curtainMinutes: baseRates.curtainMinutes,
     baseFee: baseRates.baseFee,
-    margin: marginPts / 100,
+    margin: markupPts / 100,
     travelRoundMin: baseRates.travelRoundMin,
     flyCrew: baseRates.flyCrew,
   };
@@ -559,7 +561,7 @@ export function QuoteBuilder({
 
   /** #217 — back to the auto total; the slider stays where the typed total put it. */
   function resetToAuto() {
-    if (r?.overridden) setMarginPts(sliderPts(r.effectiveMargin));
+    if (r?.overridden) setMarkupPts(sliderPct(r.effectiveMarkup));
     setPriceText("");
     dirty();
   }
@@ -592,7 +594,7 @@ export function QuoteBuilder({
     fd.set("contactName", c?.name || "");
     fd.set("contactRole", c?.role || "");
     fd.set("contactEmail", c?.email || "");
-    fd.set("margin", String(marginPts));
+    fd.set("markup", String(markupPts));
     fd.set("mileageRate", mileageRate);
     fd.set("laborRate", laborRate);
     fd.set("travel", JSON.stringify(overrideFromDraft(travelDraft) ?? {}));
@@ -1099,7 +1101,7 @@ export function QuoteBuilder({
                   }}
                 >
                   <span style={{ color: "#5b616e" }}>
-                    Margin · {r?.overridden ? fmtPts(r.effectiveMargin) : marginPts} pts
+                    Margin · {r?.overridden ? fmtPct(r.effectiveMarkup) : markupPts} pts
                   </span>
                   <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "#1f7a52" }}>
                     +{money(r?.marginAmount || 0)}
@@ -1107,12 +1109,12 @@ export function QuoteBuilder({
                 </div>
                 <input
                   type="range"
-                  min={10}
-                  max={50}
+                  min={MARKUP_SLIDER_MIN}
+                  max={MARKUP_SLIDER_MAX}
                   step={1}
-                  value={r?.overridden ? sliderPts(r.effectiveMargin) : marginPts}
+                  value={r?.overridden ? sliderPct(r.effectiveMarkup) : markupPts}
                   onChange={(e) => {
-                    setMarginPts(Math.round(+e.target.value));
+                    setMarkupPts(Math.round(+e.target.value));
                     setPriceText("");
                     setTierPrompt(null);
                     dirty();
@@ -1128,15 +1130,15 @@ export function QuoteBuilder({
                     margin: "-2px 0 9px",
                   }}
                 >
-                  <span>10 pts</span>
-                  <span>50 pts</span>
+                  <span>{MARKUP_SLIDER_MIN} pts</span>
+                  <span>{MARKUP_SLIDER_MAX} pts</span>
                 </div>
                 <TierSeedPrompt prompt={tierPrompt} onUse={applyTierSeed} accent={accent} />
                 <ServiceTotalField
                   total={total}
                   autoTotal={r?.autoTotal ?? 0}
                   cost={r?.cost ?? 0}
-                  margin={r?.effectiveMargin ?? 0}
+                  markup={r?.effectiveMarkup ?? 0}
                   overridden={!!r?.overridden}
                   text={priceText}
                   onText={(t) => {
@@ -1243,7 +1245,7 @@ export function QuoteBuilder({
                   <div style={{ fontSize: 10.5, color: "#9aa0ab", lineHeight: 1.5 }}>
                     {baseRates.curtainMinutes} min/curtain · travel time rounded up to{" "}
                     {baseRates.travelRoundMin} min · {money(baseRates.baseFee)} job minimum ·{" "}
-                    {marginPts}-pt margin on top. Multiple venues on one quote share a single round
+                    {markupPts}-pt margin on top. Multiple venues on one quote share a single round
                     trip.
                   </div>
                 </div>
