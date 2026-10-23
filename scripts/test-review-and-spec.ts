@@ -71013,3 +71013,28 @@ import { partsListRows as pd366Rows, reviewSheetModel as pd366Model, partsRowNot
   const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
   ok(hook.includes("reviewSheetModel(sections, vendorQuotes, info, venueRoomName, projectDiscounts)"), "#366 sheet: More ▾ → Review spreadsheet hands the estimate's discounts to the model");
 }
+
+/* --- #366: the won project keeps "Project pricing to request" --- */
+import { projectPricingFrom as pd366Pricing } from "@/lib/project-discounts/rules";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const secs = pd366Apply([
+    pd366Sec([pd366Line({ manufacturerModelNumber: "CS40" }), pd366Line({ id: 2, qty: 3 }), { ...pd366Asm(), id: 3, qty: 2 }, pd366Line({ id: 4, qty: 5, option: true })]),
+    pd366Sec([pd366Line({ id: 5, qty: 7 })], { id: "s2", alternate: true }),
+  ], pd366D);
+  const rows = pd366Pricing(secs, pd366D);
+  ok(rows.length === 1 && rows[0].sku === "ETC:CS40" && rows[0].qty === 2 + 3 + 2 * 1 && rows[0].pct === 12 && rows[0].normalCost === 2000 && rows[0].expectedCost === 1760 &&
+     rows[0].note === "Reg #4471" && rows[0].desc === "ColorSource 40" && rows[0].model === "CS40",
+    "#366 project: one row per discounted SKU — qty summed over lines and assembly parts (line qty × part qty), per-unit normal / expected cost, note, model");
+  ok(pd366Pricing(secs, {}).length === 0 && pd366Pricing([pd366Sec([pd366Line({ sku: "X:OTHER" })])], pd366D).length === 0,
+    "#366 project: nothing when the estimate has no discounts, or no line hits one (option lines and alternate systems aren't bought)");
+  const two = pd366Pricing(pd366Apply([pd366Sec([pd366Asm()])], { ...pd366D, "ETC:CBL": { pct: 5, note: "", by: "u", at: 1 } }), { ...pd366D, "ETC:CBL": { pct: 5, note: "", by: "u", at: 1 } });
+  ok(two.length === 2 && two.find((r) => r.sku === "ETC:CBL")?.qty === 4 && two.find((r) => r.sku === "ETC:CBL")?.model === "CBL", "#366 project: assembly parts each get their own row (2 assemblies × 2 cables = 4; model from the Brand:Model SKU)");
+  const proj = rd("src/lib/stores/projects.ts");
+  const fq = proj.slice(proj.indexOf("function fromQuote("), proj.indexOf("\n}\n", proj.indexOf("function fromQuote(")));
+  ok(fq.includes("const pricing = projectPricingFrom(") && fq.includes("sanitizeProjectDiscounts(") && fq.includes("...(pricing.length ? { projectPricing: pricing } : {}),") && proj.includes("projectPricing?: ProjectPricingRow[];"),
+    "#366 project: fromQuote freezes projectPricing at Won, only when non-empty");
+  const view = rd("src/app/(app)/projects/view.tsx");
+  ok(view.includes("Project pricing to request") && /\{p\.projectPricing && p\.projectPricing\.length > 0 && <ProjectPricingCard rows=\{p\.projectPricing\} \/>\}/.test(view) && view.includes("Ask the vendor for this project pricing when ordering."),
+    "#366 project: the project page shows the card only when there is project pricing");
+}

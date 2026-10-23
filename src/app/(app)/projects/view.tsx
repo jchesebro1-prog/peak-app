@@ -1239,6 +1239,8 @@ function ProjectDetail({
         {curTab === "overview" && meetingsSlot}
         {curTab === "procurement" && (
           <>
+            {/* #366: the won estimate's vendor project pricing, frozen at Won — hidden when there is none. */}
+            {p.projectPricing && p.projectPricing.length > 0 && <ProjectPricingCard rows={p.projectPricing} />}
             <ProcurementTab p={p} />
             {procurementSlot}
           </>
@@ -1482,6 +1484,50 @@ function OverviewTab({
 }
 
 /* ---------------- Procurement ---------------- */
+
+/** #366 — "Project pricing to request": the project discounts the won estimate was priced with (part, qty summed,
+ *  %, normal → expected unit cost, the reference note). Read-only and internal; purchasing quotes it to the vendor. */
+function ProjectPricingCard({ rows }: { rows: NonNullable<ProjectRecord["projectPricing"]> }) {
+  const cents = (n: number) => "$" + (n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const th: CSSProperties = { textAlign: "left", fontSize: 10.5, fontWeight: 700, color: "#8c919c", textTransform: "uppercase", letterSpacing: ".05em", padding: "6px 8px", borderBottom: "1px solid #eef0f3" };
+  const td: CSSProperties = { fontSize: 12.5, color: "#30343c", padding: "7px 8px", borderBottom: "1px solid #f4f5f8", verticalAlign: "top" };
+  const num: CSSProperties = { ...td, textAlign: "right", fontFamily: "var(--font-mono)", whiteSpace: "nowrap" };
+  return (
+    <section data-testid="project-pricing" style={{ border: "1px solid #cfe9dc", background: "#f6fbf8", borderRadius: 12, padding: "13px 15px", marginBottom: 16 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#1f7a52", textTransform: "uppercase", letterSpacing: ".06em" }}>Project pricing to request</div>
+      <div style={{ fontSize: 12, color: "#5b616e", margin: "3px 0 9px" }}>Ask the vendor for this project pricing when ordering.</div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", borderRadius: 8 }}>
+          <thead>
+            <tr>
+              <th style={th}>Part</th>
+              <th style={{ ...th, textAlign: "right" }}>Qty</th>
+              <th style={{ ...th, textAlign: "right" }}>Discount</th>
+              <th style={{ ...th, textAlign: "right" }}>Normal</th>
+              <th style={{ ...th, textAlign: "right" }}>Expected</th>
+              <th style={th}>Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.sku}>
+                <td style={td}>
+                  <div>{r.model && r.model !== r.sku ? `${r.model} — ${r.desc}` : r.desc}</div>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb" }}>{r.sku}</div>
+                </td>
+                <td style={num}>{r.qty}</td>
+                <td style={num}>{r.pct}%</td>
+                <td style={num}>{cents(r.normalCost)}</td>
+                <td style={{ ...num, color: "#1f7a52", fontWeight: 600 }}>{cents(r.expectedCost)}</td>
+                <td style={td}>{r.note || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
 
 function ProcurementTab({ p }: { p: ProjectRecord }) {
   const critId = criticalLineId(p);

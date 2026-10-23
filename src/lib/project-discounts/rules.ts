@@ -2,6 +2,7 @@ import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 import { isPlaceholderSku } from "@/lib/specs/record-keys";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { partModel } from "@/lib/catalog-rename/sku";
 
 /**
  * #366 — project discounts: a vendor's project pricing (e.g. ETC registered-
@@ -266,6 +267,8 @@ export function discountsForSections(sections: SpecSection[], d: ProjectDiscount
 
 export type ProjectPricingRow = {
   sku: string;
+  /** The model purchasing asks for (the line's Model # / MFR P/N, else the Brand:Model SKU's model). */
+  model: string;
   desc: string;
   qty: number;
   pct: number;
@@ -285,7 +288,7 @@ export type ProjectPricingRow = {
  */
 export function projectPricingFrom(sections: SpecSection[], d: ProjectDiscounts): ProjectPricingRow[] {
   const rows = new Map<string, ProjectPricingRow>();
-  const add = (sku: string, desc: string, qty: number, normal: number) => {
+  const add = (sku: string, desc: string, qty: number, normal: number, model: string) => {
     if (!sku || !own(d, sku) || !(qty > 0) || !(normal > 0)) return;
     const e = d[sku];
     const r = rows.get(sku);
@@ -293,7 +296,7 @@ export function projectPricingFrom(sections: SpecSection[], d: ProjectDiscounts)
       r.qty = round2(r.qty + qty);
       return;
     }
-    rows.set(sku, { sku, desc, qty: round2(qty), pct: e.pct, normalCost: round2(normal), expectedCost: round2(normal * (1 - e.pct / 100)), note: e.note || "" });
+    rows.set(sku, { sku, model, desc, qty: round2(qty), pct: e.pct, normalCost: round2(normal), expectedCost: round2(normal * (1 - e.pct / 100)), note: e.note || "" });
   };
   for (const sec of Array.isArray(sections) ? sections : []) {
     if (!sec || sec.alternate === true) continue;
@@ -301,8 +304,11 @@ export function projectPricingFrom(sections: SpecSection[], d: ProjectDiscounts)
       if (!it || it.option) continue;
       const lq = typeof it.qty === "number" && it.qty > 0 ? it.qty : 0;
       if (isAssemblyLine(it)) {
-        for (const c of it.components || []) if (c && c.qty > 0) add(realSku(c.sku), c.label || c.sku, lq * c.qty, normalCostOf(c));
-      } else add(discountSkuOf(it), it.desc || it.sku, lq, normalCostOf(it));
+        for (const c of it.components || []) if (c && c.qty > 0) add(realSku(c.sku), c.label || c.sku, lq * c.qty, normalCostOf(c), partModel({ sku: realSku(c.sku) }));
+      } else {
+        const sku = discountSkuOf(it);
+        add(sku, it.desc || it.sku, lq, normalCostOf(it), partModel({ sku, manufacturerModelNumber: it.manufacturerModelNumber, manufacturerPartNumber: it.manufacturerPartNumber }));
+      }
     }
   }
   return [...rows.values()];
