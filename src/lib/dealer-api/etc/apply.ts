@@ -257,3 +257,26 @@ function toDaily(r: EtcBatchResult, total: number): EtcDailyResult {
   if (!r.ok) return { ran: true, ok: false, finished: false, rows: 0, total, error: r.error };
   return { ran: true, ok: true, finished: r.finished, rows: r.done, total: r.total, error: null };
 }
+
+/** The cron route's whole budget (maxDuration 60) and the rider's cap (spec §8). */
+export const ETC_ROUTE_BUDGET_MS = 55_000;
+export const ETC_RIDER_MAX_MS = 20_000;
+const ETC_RIDER_MIN_MS = 5_000;
+
+export type EtcRiderResult = EtcDailyResult | { ran: false; error: string };
+
+/**
+ * The `/api/drive/sync` rider: min(20 s, what's left of the route's 55 s),
+ * skipped under 5 s. Never throws — the drive sync's answer never depends on it.
+ */
+export async function runEtcDailyRider(routeStarted: number, deps: EtcApplyDeps = {}): Promise<EtcRiderResult> {
+  const budgetMs = Math.min(ETC_RIDER_MAX_MS, Math.max(0, ETC_ROUTE_BUDGET_MS - (Date.now() - routeStarted)));
+  if (budgetMs < ETC_RIDER_MIN_MS) return { ran: false, reason: "no time left in the cron run" };
+  try {
+    return await runDailySync({ ...deps, budgetMs });
+  } catch (err) {
+    // e.name only: a driver error message can embed query params.
+    console.error("[etc] daily price sync failed", err instanceof Error ? err.name : "error");
+    return { ran: false, error: "ETC daily price sync failed" };
+  }
+}

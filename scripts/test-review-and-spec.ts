@@ -11780,6 +11780,7 @@ seeded()
   .then(() => bomModels365DbChecks(ok))
   .then(() => etc368ClientChecks(ok)) // #368 catalog
   .then(() => etc368ApplyDbChecks(ok)) // #368 catalog
+  .then(() => etc368RiderChecks(ok)) // #368 catalog
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -71424,4 +71425,32 @@ import type { EtcStatus as Etc368Status } from "@/lib/dealer-api/connections";
      (bodies.find((b) => name(b) === "etcStatusAction") || "").split("\n")[1] === "  await requireUser();",
     "#368 actions: every ETC action is admin-only (requirePerm manage_users first); the status read needs a signed-in user");
   ok(!/etcSecret|keyEnc|decryptWith/.test(acts) && !/etcSecret|keyEnc/.test(panel), "#368 actions: no action or the panel touches the secret or its ciphertext");
+}
+
+/** #368 catalog — the daily cron rider on /api/drive/sync. */
+async function etc368RiderChecks(check: typeof ok): Promise<void> {
+  const A = await import("@/lib/dealer-api/etc/apply");
+  const C = await import("@/lib/dealer-api/connections");
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  let calls = 0;
+  const fetchImpl = (async () => { calls++; return new Response("[]", { status: 200 }); }) as typeof fetch;
+  await C.clearEtcKey();
+  const none = await A.runEtcDailyRider(Date.now(), { fetchImpl, apiKey: "k", env: {} });
+  check(!none.ran && "reason" in none && none.reason === "not connected" && calls === 0, "#368 rider: not connected → does nothing, calls nobody");
+  await C.saveEtcKey("etc-rider-key-368", "Jeff", { authSecret: "test368-auth" });
+  await C.setEtcAccount("ba-368", "Peak");
+  const noBase = await A.runEtcDailyRider(Date.now(), { fetchImpl, apiKey: "k", env: {} });
+  check(!noBase.ran && "reason" in noBase && /no baseline/.test(noBase.reason) && calls === 0, "#368 rider: no baseline (never imported) → skipped");
+  await C.updateEtcConnection(() => ({ baseline: { date: "2026-10-22", at: 1 } }));
+  const late = await A.runEtcDailyRider(Date.now() - 52_000, { fetchImpl, apiKey: "k", env: {} });
+  check(!late.ran && calls === 0, "#368 rider: under 5 s left of the route's 55 s → skipped");
+  const ran = await A.runEtcDailyRider(Date.now(), { fetchImpl, apiKey: "k", env: {} });
+  check(ran.ran && "ok" in ran && ran.ok && ran.finished && calls === 4, "#368 rider: with a baseline it asks ETC for the four lists' updates (nothing changed → done)");
+  const route = rd("src/app/api/drive/sync/route.ts");
+  check(/try \{\n\s*return await runEtcDailyRider\(started\);\n\s*\} catch \{\n\s*return \{ error: "ETC daily price sync failed" \};/.test(route) &&
+     route.includes("...driveTime, etcPrices: await etcPrices() });") && route.includes("{ error: (err as Error).message, etcPrices: await etcPrices() }, { status: 500 }") &&
+     route.indexOf("etcPrices: await etcPrices()") > route.indexOf("const driveTime = await syncAllDrivers("),
+    "#368 rider: the route runs it after the drive sync, in its own try/catch, and reports it in the body (even when the drive sync failed)");
+  check(A.ETC_RIDER_MAX_MS === 20_000 && A.ETC_ROUTE_BUDGET_MS === 55_000, "#368 rider: budget = min(20 s, what's left of 55 s)");
+  await C.clearEtcKey();
 }
