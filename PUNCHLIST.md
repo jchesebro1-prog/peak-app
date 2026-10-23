@@ -12802,3 +12802,17 @@ Jeff, 2026-10-22: on the Estimator's BOM export, it should be possible to choose
 
 **Remaining (Jeff-gated):**
 - Flip each switch on a real estimate, Save, and check the BOM PDF and the client link's BOM view on production.
+
+
+## 365. Model number on BOM quote lines — DONE 2026-10-22 on `feat/365-bom-model-numbers` (D1270–D1272)
+
+Jeff, 2026-10-22: "I want the model number and the description to show up on the BOM quotes." Inline "Model — Description" on the line's text, in the BOM view only.
+
+**Built:** every plain catalog line in the BOM view prints `ColorSource Spot V — ETC LED ellipsoidal, 19° lens` (option rows too). Applies to Build package → BOM quote (live), the BOM PDF, the saved preview's BOM tab and the client's online BOM (portal / share). The model is `lineModel` (the line's frozen Model # → the catalog's Model # → MFR P/N → the SKU's model tail); a SKU the catalog doesn't know prints only the line's own Model # / MFR P/N, never its SKU. Vendor-quote, allowance, curtain, labor, bonus/credit, assembly / rack / track and placeholder-SKU (CUSTOM / AI / CURTAIN / CRT-n) lines print their description only; a description that already starts with the model isn't doubled. Wired like #364: `bomViewProps` sets `showModels`, and the four callers pass `bomModelParts` — the server pages through `loadBomModelPartsFor` (one `getManyBySku`, never throws), the live tab through a new `bomModelPartsAction` (same read), only while the tab shows. The estimate PDF, appendix, Cover PDF, bidder PDFs and the package page are byte-for-byte unchanged.
+
+**Gates:** tsc 0 errors; test:specs 25,103 PASS / 0 FAIL (32 new `#365` checks: pure rules, BOM render, byte-for-byte against the 15 `p5` and 5 `#364` fixtures, source pins, and the loader against the test DB; two existing BOM-caller source pins widened for `bomModelParts`); test:smoke 268 PASS / 0 FAIL; eslint 0 problems on the 11 changed / new src files (`scripts/test-review-and-spec.ts` excluded as before); `next build` compiled, 144/144 static pages.
+
+**Rollback:** safe. No migration, no stored field.
+
+**Remaining (Jeff-gated):**
+- Open a real estimate's BOM quote tab, BOM PDF and client-link BOM view on production and check the models read right (parts with no Model # fall back to the MFR P/N).
