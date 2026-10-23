@@ -32,6 +32,8 @@ export type PdfDocKeyInput = {
   document?: PackageDoc | null;
   vendorQuotes: VendorQuote[];
   pdfOptions: QuotePdfOptions;
+  /** Box goods sale (spec 2026-10-21) — the whole document switches to the BOM view. */
+  boxSale?: boolean;
 };
 
 function printedVendorQuotes(sections: SpecSection[], vendorQuotes: VendorQuote[]): VendorQuote[] {
@@ -56,6 +58,8 @@ export function pdfDocKey(i: PdfDocKeyInput): string {
     printedVendorQuotes(i.sections, i.vendorQuotes).map((v) => [v.id, v.vendor, v.quoteNumber, v.description, v.display, v.lines]),
     i.pdfOptions,
     i.document ?? null,
+    // Box goods sale: only when on, so every other estimate's key is unchanged.
+    ...(i.boxSale === true ? ["boxSale"] : []),
   ]);
 }
 

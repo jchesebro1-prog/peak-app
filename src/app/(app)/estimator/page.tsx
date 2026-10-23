@@ -42,6 +42,7 @@ import { quoteSentOnce } from "@/lib/quote-people-lock";
 import EstimatorClient from "./estimator-client";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { sourceForSave } from "@/lib/portal-quote-mode";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
@@ -171,6 +172,7 @@ async function initialFrom(
       bonusRecord: null,
       estimatorBonusSplit: null,
       leadId: null,
+      boxSale: false,
     };
   }
   const cid = q.customerId || (await resolveId(q.customer)) || null;
@@ -258,6 +260,8 @@ async function initialFrom(
     estimatorBonusSplit: q.estimatorBonusSplit ?? null,
     // Estimate suggestion: the stored lead, display-only — a save never changes it.
     leadId: q.leadId || null,
+    // Box goods sale (spec 2026-10-21): the stored flag (a non-system quote reads false).
+    boxSale: boxSaleOf(q),
     portal:
       q.source === "portal-catalog"
         ? {
@@ -506,6 +510,8 @@ export default async function EstimatorPage({
     }
   }
   if (!q) initial.leadId = handoff?.leadId || (suggSameCustomer ? sugg?.leadId : null) || null;
+  // Box goods sale (spec 2026-10-21): the + New quote card (?box=1) opens a new estimate with the switch on.
+  if (!q && handoff?.boxSale) initial.boxSale = true;
   if (preCategory && preCategory.trim()) initial.category = preCategory.trim();
   if (handoff) {
     // #160: the intake's optional name, else "<Customer> — System" (or

@@ -11375,6 +11375,7 @@ import { coreCheckChecks } from "./core-check";
 import { partyChecks, partyDbChecks } from "./test-parties";
 import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, portalBidPureChecks, portalBidDbChecks, bidReportPureChecks, bidReportWidgetChecks, bidReportDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
 import { lineMoveChecks } from "./test-estimate-line-move";
+import { boxSaleDbChecks, boxSalePureChecks } from "./test-box-sale";
 import { vendorChecks, vendorDbChecks, vendorPdfDbChecks, vendorPdfPureChecks, vendorPdfFillChecks } from "./test-vendors";
 import { oct15PureChecks, oct15DbChecks, discardConfirmChecks } from "./test-oct15-estimating";
 import { photoWrapPureChecks, photoWrapDbChecks } from "./test-photo-wrap";
@@ -11797,6 +11798,9 @@ seeded()
   .then(() => settingsRaceBlobChecks(ok))
   .then(() => settingsRaceFollowupChecks(ok))
   .then(() => lineMoveChecks(ok))
+  .then(() => boxSalePureChecks(ok)).then(() => boxSaleDbChecks(ok))
+  .then(() => reviewSheet363Checks(ok))
+  .then(() => bomModels365DbChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -33485,11 +33489,14 @@ import { inclusionsLine as d251Inclusions, round2 as d251Round2, totals as d251T
   ok(qdSrc251.includes('import { customerLines, fmt, inclusionsLine, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";'),
     "#251: QuoteDocument imports inclusionsLine from ./pricing");
   ok(!qdSrc251.includes("<div>Materials, installation &amp; freight included</div>"), "#251: the old unconditional header sentence is gone from the source");
-  ok(qdSrc251.includes("const inclusions = inclusionsLine(p.t);") && qdSrc251.includes("{inclusions && <div>{inclusions}</div>}"),
+  // #364: the BOM view's show flags filter inclusionsLine's inputs and gate the Labor / freight rows (absent = p.t as before).
+  ok((qdSrc251.includes("const inclusions = inclusionsLine(p.t);") ||
+      /const inclusions = inclusionsLine\(\{\s*mat: p\.showMaterials === false \? 0 : p\.t\.mat,\s*lab: p\.showLabor === false \? 0 : p\.t\.lab,\s*fr: p\.showFreight === false \? 0 : p\.t\.fr,\s*\}\);/.test(qdSrc251)) &&
+     qdSrc251.includes("{inclusions && <div>{inclusions}</div>}"),
     "#251: the header line is built from inclusionsLine(p.t) and only prints when non-empty");
-  ok(/\{p\.t\.lab > 0 && \(\s*<div/.test(qdSrc251) && qdSrc251.includes("<span>Labor — installation &amp; commissioning</span>"),
+  ok(/\{p\.t\.lab > 0 && (p\.showLabor !== false && )?\(\s*<div/.test(qdSrc251) && qdSrc251.includes("<span>Labor — installation &amp; commissioning</span>"),
     "#251: the Labor — installation & commissioning totals row only renders when p.t.lab > 0");
-  ok(/\{p\.t\.fr > 0 && \(\s*<div/.test(qdSrc251), "#251: the freight totals row only renders when p.t.fr > 0");
+  ok(/\{p\.t\.fr > 0 && (p\.showFreight !== false && )?\(\s*<div/.test(qdSrc251), "#251: the freight totals row only renders when p.t.fr > 0");
   // The already-conditional per-system narrative freight note (#245) stays
   // untouched by this fix.
   ok(qdSrc251.includes('{ps.hasFreight ? " · includes freight & delivery" : ""}'),
@@ -37524,6 +37531,146 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   ok(p262Skus([phSec]).length === 0, "#262 final B: partsListSkus never asks the catalog about placeholders");
   const phComp = p262Rows([{ id: "s10", name: "Comp", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "SA-9", "Kit — thing", 1, 10, { components: [comp("CUSTOM", "Loose item", 1, 10)] })] }], [], srcInfo);
   ok(phComp[0]?.sku === "" && p262Csv(phComp)[0][1] === "", "#262 final B: an assembly component with a placeholder SKU is also treated as no SKU");
+}
+
+/* --- #363: the Estimator's "Review spreadsheet" — links, one block per system, System fees (pure) --- */
+import {
+  partsListRows as r363Rows, reviewSheetModel as r363Model, systemFees as r363Fees, reviewLink as r363Link,
+} from "@/app/(app)/estimator/parts-csv";
+import { systemSellTotal as r363SellTotal } from "@/app/(app)/estimator/pricing";
+import {
+  buildReviewWorkbook as r363Build, feesBreakdown as r363Breakdown, REVIEW_SHEET_HEADER as r363Header,
+} from "@/app/(app)/estimator/review-sheet-xlsx";
+import type { SpecItem as R363Item, SpecSection as R363Section, VendorQuote as R363Vq } from "@/app/(app)/estimator/types";
+function r363Fixture() {
+  const it = (id: number, sku: string, desc: string, qty: number, cost: number, extra: Partial<R363Item> = {}): R363Item =>
+    ({ id, sku, desc, qty, unit: "ea", cost, price: cost * 2, ...extra });
+  const comp = (sku: string, label: string, qty: number, cost: number) =>
+    ({ sku, label, role: "other" as const, qty, unit: "ea", cost, price: cost * 2 });
+  const vqs: R363Vq[] = [{
+    id: "VQ-363", vendor: "Acme", quoteNumber: "77", description: "", terms: "", notes: "", total: 100, includesFreight: false, display: "single",
+    link: "https://vendor.example/q/77",
+    lines: [{ id: 1, description: "Truss", qty: 2, unit: "ea", amount: 100 }],
+  }];
+  const lighting: R363Section = {
+    id: "s-a", name: "Lighting", room: "Stage", kind: "materials", mfr: "", freightPct: 10, priceRound: 25,
+    items: [
+      it(1, "CUSTOM", "Bracket", 2, 30, { custom: true, link: " https://example.com/bracket " }),
+      it(2, "CUSTOM", "Bracket", 1, 30, { custom: true, link: "https://example.com/bracket-b" }),
+      it(3, "CUSTOM", "Sketchy", 1, 10, { custom: true, link: "javascript:alert(1)" }),
+      it(4, "SA-K", "Kit — Lamp; Clamp", 1, 60, { link: "https://example.com/kit", components: [comp("LAMP", "Lamp", 1, 50), comp("CLAMP", "Clamp", 1, 10)] }),
+      it(5, "", "Truss package", 1, 100, { vendorQuoteId: "VQ-363" }),
+      it(6, "", "Truss package (own page)", 1, 100, { vendorQuoteId: "VQ-363", link: "https://own.example/truss" }),
+      it(7, "PLAIN", "=HYPERLINK(\"http://evil.example\",\"x\")", 3, 7.5, { link: "ftp://example.com/x" }),
+      it(8, "", "Package bonus", 1, 12.34, { bonus: "package", price: 13.57 }),
+      it(9, "", "Estimator bonus", 1, 9.99, { bonus: "estimator", price: 9.99 }),
+      it(10, "OPT", "Optional", 1, 500, { option: true }),
+    ],
+  };
+  const lighting2: R363Section = { id: "s-b", name: "Lighting", room: "Stage", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "PLAIN", "Plain", 1, 7.5)] };
+  const labor: R363Section = { id: "s-l", name: "Labor", kind: "labor", mfr: "", freightPct: 0, items: [it(1, "LAB", "Install", 10, 80)] };
+  const alt: R363Section = { id: "s-x", name: "Alt", kind: "materials", mfr: "", freightPct: 0, alternate: true, items: [it(1, "ALT", "Alt part", 1, 10)] } as R363Section;
+  return { sections: [lighting, labor, lighting2, alt], vqs, lighting, lighting2 };
+}
+{
+  const { sections, vqs, lighting, lighting2 } = r363Fixture();
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.005;
+  ok(r363Link(" https://example.com/a ") === "https://example.com/a" && r363Link("HTTP://Example.com") === "HTTP://Example.com"
+    && ["javascript:alert(1)", "ftp://example.com/x", "mailto:a@b.c", "/relative/path", "www.example.com", "https://", "", "x".repeat(10)].every((s) => r363Link(s) === "")
+    && r363Link(42) === "" && r363Link(undefined) === "" && r363Link("https://example.com/" + "a".repeat(2100)) === "",
+    "#363 review sheet: a link is kept only as an absolute http(s) URL (trimmed); javascript:, ftp:, mailto:, relative, bare, junk and over-long links are blank");
+  const rows = r363Rows(sections, vqs, {});
+  const a = rows.filter((r) => r.sectionId === "s-a");
+  const brackets = a.filter((r) => r.desc === "Bracket");
+  ok(brackets.length === 2 && brackets[0].link === "https://example.com/bracket" && brackets[0].qty === 2 && brackets[1].link === "https://example.com/bracket-b" && brackets[1].qty === 1,
+    "#363 review sheet: a custom line's http link is kept (trimmed), and two same-named custom lines with different links stay two rows");
+  ok(a.find((r) => r.desc === "Sketchy")?.link === "", "#363 review sheet: a javascript: link is dropped");
+  ok(["LAMP", "CLAMP"].every((s) => a.find((r) => r.sku === s)?.link === ""), "#363 review sheet: an assembly's components carry no link (they are catalog parts; the kit line's link isn't theirs)");
+  const truss = a.filter((r) => r.desc === "Truss");
+  ok(truss.length === 2 && truss[0].link === "https://vendor.example/q/77" && truss[1].link === "https://own.example/truss" && truss.every((r) => r.qty === 2),
+    "#363 review sheet: a vendor-quote row falls back to the vendor quote's link; the line's own link wins — and the two stay apart");
+  ok(a.find((r) => r.sku === "PLAIN")?.link === "", "#363 review sheet: an ftp: link is dropped");
+  ok(rows.every((r) => r.sectionId === "s-a" || r.sectionId === "s-b") && rows.filter((r) => r.sku === "PLAIN").map((r) => `${r.sectionId}:${r.qty}`).join("|") === "s-a:3|s-b:1",
+    "#363 review sheet: rows carry their section id; the same part in two same-named, same-room systems never merges");
+  ok(brackets[0].lineSell === 60 && Math.abs(brackets[0].unitSell - 60) > 0.01, "#363 review sheet: lineSell stays the line's own unit sell while unitSell carries the system factor");
+
+  const fees = r363Fees(lighting);
+  ok(fees.freight === 40.48 && fees.packageBonus === 13.57 && fees.estimatorBonus === 9.99 && fees.adjustment === 20.96 && fees.total === 85 && fees.typedPrice === false,
+    "#363 systemFees: freight (10% of 404.83 → 40.48) + package bonus 13.57 + estimator bonus 9.99 + the $25 round-up (829.04 → 850: 20.96) = 85.00");
+  ok(r363Breakdown(fees) === "Freight $40.48 · Estimator bonus $9.99 · Package bonus $13.57 · Price rounding $20.96", "#363 systemFees: the Notes breakdown names each part");
+  const fees2 = r363Fees(lighting2);
+  ok(fees2.total === 0 && r363Breakdown(fees2) === "", "#363 systemFees: a system with no freight, bonus or rounding has no fees and an empty breakdown");
+
+  const model = r363Model(sections, vqs, {});
+  ok(model.map((b) => `${b.sectionId}:${b.system}:${b.room}`).join("|") === "s-a:Lighting:Stage|s-b:Lighting:Stage",
+    "#363 review sheet: one block per system with listed rows, in order — two same-named systems stay separate; labor and alternate systems get none");
+  ok(model[0].rows.length === 8 && !model[0].rows.some((r) => /bonus|Optional/i.test(r.desc)), "#363 review sheet: bonus and option lines are never listed");
+  const reconcile = (b: (typeof model)[number], sec: R363Section) => {
+    const cost = b.rows.reduce((s, r) => s + r.qty * r.unitCost, 0);
+    const sell = b.rows.reduce((s, r) => s + r.qty * r.lineSell, 0);
+    return Math.round((cost + (sell - cost) + b.fees.total) * 100) / 100 === Math.round(r363SellTotal(sec) * 100) / 100;
+  };
+  ok(reconcile(model[0], lighting) && near(r363SellTotal(lighting), 850) && reconcile(model[1], lighting2),
+    "#363 review sheet: System cost + System markup + System fees = the system's price, to the cent (850.00)");
+  const typed: R363Section = { ...lighting, id: "s-t", sellOverride: 700 };
+  const tModel = r363Model([typed], vqs, {});
+  const tFees = r363Fees(typed);
+  ok(tFees.typedPrice && tFees.adjustment === -129.04 && reconcile(tModel[0], typed) && r363Breakdown(tFees).endsWith("Typed price adjustment -$129.04"),
+    "#363 systemFees: a typed system price below the computed one is a negative adjustment, named as such, and still reconciles");
+  ok(r363Header.join(",") === "Manufacturer,Item name,Description,Room,System,Qty,Unit Cost,Unit Sell,Ext Cost,Ext Sell,Line margin,Markup,Price source,Link,Notes",
+    "#363 review sheet: the fifteen columns, in order (Markup replaces Effective margin; Ext Cost / Ext Sell / Link added)");
+  const xlsxSrc = readFileSync(join(process.cwd(), EST_DIR, "review-sheet-xlsx.ts"), "utf8");
+  ok(!/^import\s+(?!type\b)[^;]*from\s+"exceljs"/m.test(xlsxSrc) && xlsxSrc.includes('await import("exceljs")') && !/^"use client"|^import [^;]*from "@\/(lib\/stores|db)\//m.test(xlsxSrc),
+    "#363 review sheet: exceljs loads on demand (type-only static import), so it stays out of the Estimator's main bundle");
+  const hookSrc = readFileSync(join(process.cwd(), EST_DIR, "use-estimator-state.ts"), "utf8");
+  const menuSrc = readFileSync(join(process.cwd(), EST_DIR, "header-more-menu.tsx"), "utf8");
+  ok(hookSrc.includes("reviewSheetModel(sections, vendorQuotes, info, venueRoomName)") && hookSrc.includes("await downloadReviewSheet(fileStem(name, \"estimate\"), blocks)")
+    && hookSrc.includes("Couldn't build the review spreadsheet — try again.") && hookSrc.includes('"No parts to export yet."') && !hookSrc.includes("downloadCsv(")
+    && menuSrc.includes("s.exportReviewSheet()") && menuSrc.includes("disabled={s.reviewBusy}"),
+    "#363 review sheet: More ▾ → Review spreadsheet builds the model and downloads the .xlsx; the CSV download is gone");
+}
+
+/** #363: the workbook itself — built, read back with exceljs. */
+async function reviewSheet363Checks(check: typeof ok): Promise<void> {
+  const { sections, vqs } = r363Fixture();
+  const blocks = r363Model(sections, vqs, {});
+  const bytes = await r363Build(blocks);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(bytes) as never);
+  const ws = wb.getWorksheet("Review");
+  check(!!ws && wb.worksheets.length === 1, "#363 workbook: one sheet, Review");
+  if (!ws) return;
+  const text = (r: number, c: number) => {
+    const v = ws.getRow(r).getCell(c).value;
+    return typeof v === "string" ? v : "";
+  };
+  const header = r363Header.map((_, i) => text(1, i + 1));
+  check(header.join(",") === r363Header.join(",") && ws.getRow(1).getCell(1).font?.bold === true, "#363 workbook: the header row is the fifteen columns, bold");
+  check(ws.views?.[0]?.state === "frozen" && (ws.views[0] as { ySplit?: number }).ySplit === 1 && !!ws.autoFilter, "#363 workbook: the header is frozen and filters");
+  const linkCell = ws.getRow(2).getCell(14).value as { text?: string; hyperlink?: string } | null;
+  check(text(2, 3) === "Bracket" && linkCell?.hyperlink === "https://example.com/bracket" && linkCell?.text === "https://example.com/bracket",
+    "#363 workbook: the Link column is a real hyperlink cell");
+  check(ws.getRow(4).getCell(14).value == null, "#363 workbook: a row with no safe link leaves Link blank");
+  const f = (r: number, c: number) => ws.getRow(r).getCell(c).value as { formula?: string; result?: unknown } | null;
+  check(f(2, 9)?.formula === "F2*G2" && f(2, 10)?.formula === "F2*H2" && f(2, 9)?.result === 60 && f(2, 10)?.result === 120,
+    "#363 workbook: Ext Cost = Qty × Unit Cost and Ext Sell = Qty × Unit Sell are formulas with cached results");
+  check(f(2, 12)?.formula === 'IF(G2=0,"",(H2-G2)/G2)' && f(2, 12)?.result === 1 && f(2, 11)?.formula === 'IF(H2=0,"",(H2-G2)/H2)' && f(2, 11)?.result === 0.5,
+    "#363 workbook: Markup = (Unit Sell − Unit Cost) ÷ Unit Cost and Line margin are live formulas (cached 100% / 50%)");
+  check(ws.getRow(2).getCell(8).value === 60, "#363 workbook: Unit Sell is the line's own sell (before freight, rounding and bonuses)");
+  const evil = ws.getRow(9);
+  check(evil.getCell(3).value === '=HYPERLINK("http://evil.example","x")' && evil.getCell(3).type === ExcelJS.ValueType.String,
+    "#363 workbook: a description that looks like a formula is written as text");
+  check(text(10, 3) === "System cost — Lighting" && text(11, 3) === "System markup — Lighting" && text(12, 3) === "System fees — Lighting",
+    "#363 workbook: three subtotal rows close each system — System cost, System markup, System fees");
+  check(f(10, 10)?.formula === "SUM(I2:I9)" && f(10, 10)?.result === 382.5 && f(11, 10)?.formula === "SUM(J2:J9)-SUM(I2:I9)" && f(11, 10)?.result === 382.5,
+    "#363 workbook: System cost / System markup are SUM formulas over the system's rows, cached (382.50 / 382.50)");
+  check(ws.getRow(12).getCell(10).value === 85 && text(12, 15) === "Freight $40.48 · Estimator bonus $9.99 · Package bonus $13.57 · Price rounding $20.96",
+    "#363 workbook: System fees is a number (85.00) with its breakdown in Notes");
+  check(ws.getRow(10).getCell(3).font?.bold === true && ws.getRow(12).getCell(10).font?.bold === true && ws.getRow(10).getCell(1).border?.top?.style === "thin",
+    "#363 workbook: the subtotal rows are bold, the first with a thin top border");
+  check(ws.getRow(13).getCell(3).value == null && text(14, 3) === "Plain" && text(15, 3) === "System cost — Lighting" && f(15, 10)?.formula === "SUM(I14:I14)",
+    "#363 workbook: one blank spacer row, then the next system (same name, its own block and ranges)");
+  check(ws.getRow(2).getCell(7).numFmt === "$#,##0.00" && ws.getRow(2).getCell(12).numFmt === "0.0%", "#363 workbook: money and percent formats");
 }
 
 /* --- #261: Quick Design plan text stays a fixed on-screen size however wide the plan draws; dimensions smaller still (D468) --- */
@@ -54598,8 +54745,9 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   ok(/stepAfterAction\(action\)/.test(shell304), "#305 shell: a successful next-step action moves to its step");
   ok(!/setMode\(|mode === "build"|"Customer preview →"/.test(estimatorSource()), "#305 shell: the old build/preview mode and its button are gone");
   ok(/flexWrap: "wrap"/.test(header304), "#305 header: wraps instead of overflowing at 1024 px");
-  ok(["ChangeTypeControl", "Parts list (CSV)", "Draft from survey/inspection", "Cut sheets", "DeleteQuoteButton"].every((x) => more304.includes(x)) && !/Parts list \(CSV\)|DeleteQuoteButton/.test(header304),
-    "#305 header: Change type, Parts list, Draft from survey, Cut sheets and Delete live in the ⋯ menu");
+  // #363: Parts list (CSV) became Review spreadsheet.
+  ok(["ChangeTypeControl", "Review spreadsheet", "Draft from survey/inspection", "Cut sheets", "DeleteQuoteButton"].every((x) => more304.includes(x)) && !/Review spreadsheet|Parts list \(CSV\)|DeleteQuoteButton/.test(header304) && !more304.includes("Parts list (CSV)"),
+    "#305 header: Change type, Review spreadsheet, Draft from survey, Cut sheets and Delete live in the ⋯ menu");
   ok(/aria-current=\{active \? "page" : undefined\}/.test(tabs304) && /STEP_LABEL\[/.test(tabs304), "#305 tabs: labelled from STEP_LABEL, current tab marked");
 }
 
@@ -54634,7 +54782,7 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   ok(modalMounts.length === 1 && modalMounts[0] === "steps/build-step.tsx", "#305 header: AiScopeModal is mounted only in steps/build-step.tsx");
   const rv = readFileSync(join(process.cwd(), EST_DIR, "steps/review-step.tsx"), "utf8");
   const phoneBranch = rv.slice(rv.lastIndexOf("{phone && ("));
-  ok(phoneBranch.includes("<ClientLinkPanel quoteId={loadedId} />") && phoneBranch.includes("<CoverPackagePanel"), "#305 review: the phone's bottom block mounts the cover panel and the Client link panel");
+  ok(phoneBranch.includes("<ClientLinkPanel quoteId={loadedId} withPackage={!s.boxSale} />") && phoneBranch.includes("<CoverPackagePanel"), "#305 review: the phone's bottom block mounts the cover panel and the Client link panel");
   ok(ESTIMATOR_FILES.every((f) => existsSync(join(process.cwd(), EST_DIR, f))) && PREVIEW_FILES.every((f) => existsSync(join(process.cwd(), EST_DIR, f))),
     "#305 harness: every joined Estimator file exists (a rename can't turn the joined-source pins vacuous)");
 }
@@ -56761,7 +56909,7 @@ import { estimateReadiness as p3Ready } from "@/lib/estimate-steps/readiness";
   const sent = p3Ready({ ...base, status: "sent", track: { opens: 1, newReplies: 1 } }).send;
   ok(sent.state === "ok", "#P3 badge: state stays ok");
   const cl = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
-  ok(cl.includes("track: s.trackSummary ?? undefined") && cl.includes("s.revNum, s.trackSummary]"), "#P3 badge: the client passes the hook's trackSummary into the readiness");
+  ok(cl.includes("track: s.trackSummary ?? undefined") && cl.includes("s.revNum, s.trackSummary, s.boxSale]"), "#P3 badge: the client passes the hook's trackSummary into the readiness");
 }
 
 // ---- #P3 final review: no silent re-send, truthful Activity, drafts tied to the sent revision, cover by reference, lead estimator ----
@@ -57427,7 +57575,8 @@ function p4PreviewChecks(): void {
   ok(!/OpenBeacon|ScopeSelection|QuestionForm|package-slots|\/share\/|sharePath|zipHref/.test(page) && page.includes("PREVIEW_COPY.actionsNote") &&
      p4pCopy.actionsNote === "Client scope choices and questions appear here on the client's page.",
     "#P4 preview: no open beacon, no client action forms, no token links — an inert note where the client acts");
-  ok(page.includes("loadLivePackagePreview(q,") && page.includes("<QuoteDocument {...bomViewProps(doc)} layout=\"web\" />") && page.includes("<style>{QUOTE_WEB_CSS}</style>") &&
+  // #365: the BOM tab also passes its line models.
+  ok(page.includes("loadLivePackagePreview(q,") && page.includes("<QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout=\"web\" />") && page.includes("<style>{QUOTE_WEB_CSS}</style>") &&
      page.includes('loadCutSheets(q.id, { images: "url" })') && page.includes('style="client"') && !page.includes("CLIENT_PRINT_CSS") && page.includes("PREVIEW_COPY.noCurtains") &&
      p4pCopy.noCurtains === "This estimate has no curtains.",
     "#P4 preview: package from the live loader, BOM = the online BOM view, cut sheets in the Client style (no print CSS injected)");
@@ -57632,7 +57781,7 @@ import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/esti
     "#P4 review UI fix: the review comments refresh when the step opens and (debounced) on focus");
   ok(tabsSrc.includes('role="tablist"') && tabsSrc.includes('role="tab"') && tabsSrc.includes("aria-selected={tab === t}") && tabsSrc.includes("aria-controls={reviewPanelId(t)}") &&
      tabsSrc.includes("id={reviewTabId(t)}") && tabsSrc.includes('role="tabpanel"') && tabsSrc.includes("aria-labelledby={reviewTabId(tab)}") && tabsSrc.includes("id={reviewPanelId(tab)}") &&
-     tabsSrc.includes("onKeyDown={onTabKey}") && tabsSrc.includes("nextReviewTab(tab, e.key)") && tabsSrc.includes("tabIndex={tab === t ? 0 : -1}"),
+     tabsSrc.includes("onKeyDown={onTabKey}") && tabsSrc.includes("nextReviewTab(tab, e.key, tabs)") && tabsSrc.includes("tabIndex={tab === t ? 0 : -1}"),
     "#P4 review UI fix: the tabs are a tablist/tab/tabpanel with aria-selected, aria-controls, aria-labelledby, roving tabindex and arrow keys");
   ok(sideSrc.includes('aria-label={commentActionLabel("resolve", n)}') && sideSrc.includes('aria-label={commentActionLabel("delete", n)}') && sideSrc.includes("actions(comment, n)") && sideSrc.includes("actions(c, null)"),
     "#P4 review UI fix: Resolve / Delete carry per-comment aria-labels");
@@ -58112,7 +58261,7 @@ import { renderToStaticMarkup as p5rMarkup } from "react-dom/server";
   const acts = rd("src/app/(app)/estimator/actions.ts");
   const fn = acts.slice(acts.indexOf("export async function saveQuoteAction"), acts.indexOf("export async function searchQuotesAction"));
   ok(fn.indexOf("const docSave = packageDocForSave(payload.document, (prior?.spec as { document?: unknown } | null | undefined)?.document);") > 0 &&
-     fn.indexOf("if (!docSave.ok) {") < fn.indexOf("await settleRewardCredit(") && fn.indexOf("error: docSave.error,") > 0 && fn.indexOf("error: docSave.error,") < fn.indexOf("await settleRewardCredit(") &&
+     fn.indexOf("if (!docSave.ok) return refusedSave(prior, docSave.error);") > 0 && fn.indexOf("if (!docSave.ok) return refusedSave(prior, docSave.error);") < fn.indexOf("await settleRewardCredit(") &&
      fn.includes("groups, ...(docSave.document ? { document: docSave.document } : {}) }") && /document\?: PackageDoc \| null;/.test(acts.slice(acts.indexOf("export type SavePayload"))) &&
      acts.includes("spec?: { sections: SpecSection[]; mobs: SpecMob[]; groups?: SystemGroup[]; document?: PackageDoc };"),
     "#P5 save: saveQuoteAction decides the document first (a refusal writes nothing, before the credit or the patch) and writes spec.document");
@@ -58251,8 +58400,9 @@ import { renderToStaticMarkup as p5fMarkup } from "react-dom/server";
   // (2) the refused save stays unsaved
   const acts = rd("src/app/(app)/estimator/actions.ts");
   const fn = acts.slice(acts.indexOf("export async function saveQuoteAction"), acts.indexOf("await settleRewardCredit(", acts.indexOf("export async function saveQuoteAction")));
-  const refusal = fn.slice(fn.indexOf("if (!docSave.ok) {"), fn.indexOf("error: docSave.error,"));
-  ok(/ok: false,\n\s+id: null,\n\s+number: null,/.test(refusal) && !refusal.includes("id: loadedId"),
+  // Box goods sale final review: the refusal shape is one helper, shared with the labor refusal.
+  const refusal = acts.slice(acts.indexOf("function refusedSave("), acts.indexOf("export async function saveQuoteAction"));
+  ok(fn.includes("if (!docSave.ok) return refusedSave(prior, docSave.error);") && /ok: false,\n\s+id: null,\n\s+number: null,/.test(refusal) && !refusal.includes("id: loadedId"),
     "#P5 render fix: a document-too-large refusal returns id null / number null (nothing was written)");
   const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
   const save = hook.slice(hook.indexOf("const res = await saveQuoteAction(loadedId, {"), hook.indexOf("const doSave = () => {"));
@@ -70337,11 +70487,11 @@ import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate
   ok(bq1File("EST-1234") === "EST-1234 BOM.pdf" && bq1File("") === "Estimate BOM.pdf" && bq1File("A/B") === "A_B BOM.pdf", "BOM PDF: \"<number> BOM.pdf\", Estimate when blank, unsafe characters → _");
   ok(bq1Path("Q-1", true) === "/api/quotes/Q-1/bom-pdf?download=1" && bq1Path("Q 1", false) === "/api/quotes/Q%201/bom-pdf", "BOM PDF: bomPdfPath encodes the id; download adds ?download=1");
   const page = rd("src/app/print/quote/[id]/page.tsx");
-  ok(page.includes('import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";') && /const bom = \(Array\.isArray\(sp\.view\) \? sp\.view\[0\] : sp\.view\) === "bom";/.test(page) && page.includes('<QuoteDocument {...bomViewProps(doc)} layout="web" rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />'),
+  ok(page.includes('import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";') && /const bom = \(Array\.isArray\(sp\.view\) \? sp\.view\[0\] : sp\.view\) === "bom";/.test(page) && page.includes('<QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout="web" rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />'), // #365: + the line models
     "BOM PDF print: ?view=bom renders bomViewProps(doc) — the saved BOM preview's own transform");
-  ok(page.includes("!bom && part !== \"tail\" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets") && page.includes("!bom && !bidder && part !== \"main\" ? loadDatasheetLinkRows(q, origin) : []") &&
-     page.indexOf("if (bom) {") > -1 && page.indexOf("if (bom) {") < page.indexOf("keyProductPhotoDataUris("),
-    "BOM PDF print: the BOM view appends no cut sheets, no datasheet links and reads no key-product photos");
+  ok(page.includes("!bomLayout && part !== \"tail\" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets") && page.includes("!bomLayout && !bidder && part !== \"main\" ? loadDatasheetLinkRows(q, origin) : []") &&
+     page.indexOf("if (bomLayout) {") > -1 && page.indexOf("if (bomLayout) {") < page.indexOf("keyProductPhotoDataUris("),
+    "BOM PDF print: the BOM view (?view=bom, or a box goods sale) appends no cut sheets, no datasheet links and reads no key-product photos");
   {
     const gate = "if (bom && (rawBidder !== undefined || rawRev !== undefined || rawPart !== undefined)) notFound();";
     ok(page.indexOf(gate) > -1 && page.indexOf(gate) < page.indexOf('tokenOk(t, "quote", '),
@@ -70350,13 +70500,13 @@ import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate
   ok(page.indexOf('if (!tokenOk(t, "quote", ') > -1 && page.indexOf('if (!tokenOk(t, "quote", ') < page.indexOf("getQuote("), "BOM PDF print: the quote token is still checked before any read");
   {
     // Final review C — the BOM PDF prints the BOM tab's own layout (web), not the customer PDF's title-page layout
-    const bomBranch = page.slice(page.indexOf("if (bom) {"), page.indexOf("// #293: key-product photos"));
+    const bomBranch = page.slice(page.indexOf("if (bomLayout) {"), page.indexOf("// #293: key-product photos"));
     ok(bomBranch.includes('layout="web"') && bomBranch.includes("<style>{QUOTE_WEB_EMBED_CSS}</style>") && bomBranch.includes("<style>{QUOTE_PRINT_CSS}</style>") && /import QuoteDocument, \{[^}]*QUOTE_WEB_EMBED_CSS[^}]*\} from "@\/app\/\(app\)\/estimator\/quote-document";/.test(page),
       "BOM PDF print: the BOM branch renders layout=\"web\" with QUOTE_WEB_EMBED_CSS — the BOM tab's own layout (no title page)");
     const customerRender = page.slice(page.indexOf("<QuoteDocument {...doc} keyProductPhotos"));
     ok(!customerRender.slice(0, customerRender.indexOf("/>")).includes("layout="), "BOM PDF print: the customer render is unchanged — no layout= prop");
     // Final review D — a BOM render reads no headers()/print origin
-    ok(/if \(!bom\) \{\s*const h = await headers\(\);/.test(page), "BOM PDF print: the print origin / headers() read happens only for the customer render");
+    ok(/if \(!bomLayout\) \{\s*const h = await headers\(\);/.test(page), "BOM PDF print: the print origin / headers() read happens only for the customer render");
   }
   const route = has("src/app/api/quotes/[id]/bom-pdf/route.ts") && has("src/lib/estimate-output/bom-pdf-server.ts") && has("src/lib/quote-pdf/signed-print-pdf.ts")
     ? rd("src/app/api/quotes/[id]/bom-pdf/route.ts") + rd("src/lib/estimate-output/bom-pdf-server.ts") + rd("src/lib/quote-pdf/signed-print-pdf.ts") : "";
@@ -70384,4 +70534,243 @@ import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate
     "BOM PDF tab: Download / Open use bomPdfPath, the save-first note follows pdfDirty, and the tab still imports no store");
   const smoke = rd("scripts/smoke-routes.ts");
   ok(smoke.includes('{ route: "/api/quotes/Q-0/bom-pdf", expectNotFound: true }') && smoke.includes('{ route: "/print/quote/Q-2041?view=bom", expectNotFound: true }') && smoke.includes('{ route: "/print/quote/Q-2041?view=bom&part=main", expectNotFound: true }'), "BOM PDF: smoke covers the 404 paths");
+}
+
+/* --- #364: Build package → BOM quote → Show on BOM (line prices · materials · labor · freight) --- */
+import { DEFAULT_PDF_OPTIONS as s364Defaults, normalizePdfOptions as s364Norm, PDF_TOGGLE_KEYS as s364Keys } from "@/lib/quote-pdf/pdf-options";
+import { bomViewProps as s364Bom } from "@/app/(app)/estimator/quote-document-view";
+import { qd293Props as s364Props, renderQuoteDocument293 as s364Render } from "./qd293-cases";
+import { qd364BomCases as s364Cases } from "./qd364-cases";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const SW = ["bomLinePrices", "bomMaterials", "bomLabor", "bomFreight"] as const;
+  // ---- storage: pdfOptions keys, defaults, round-trip ----
+  const empty = s364Norm({});
+  ok(SW.every((k) => (s364Keys as readonly string[]).includes(k) && s364Defaults[k] === true && empty[k] === true),
+    "#364 pdfOptions: the four Show on BOM keys are toggle keys, on by default, and an older quote (no keys) reads them on");
+  ok(SW.every((k) => s364Norm({ [k]: false })[k] === false && s364Norm({ [k]: false }).pdfPrices === true && s364Norm({ [k]: "no" })[k] === true && s364Norm(null)[k] === true),
+    "#364 pdfOptions: each key round-trips false on its own; a non-boolean is ignored (→ on)");
+  const saved = s364Norm(JSON.parse(JSON.stringify(s364Norm({ bomLinePrices: false, bomFreight: false, pdfQty: false }))));
+  ok(saved.bomLinePrices === false && saved.bomFreight === false && saved.bomMaterials === true && saved.bomLabor === true && saved.pdfQty === false, "#364 pdfOptions: a saved mix survives JSON + normalize (the save path)");
+
+  // ---- bomViewProps: the switches map to the document's flags; Line prices ANDs with Prices ----
+  const mk = (o: Record<string, unknown>) => s364Bom(s364Props({ pdfOptions: o }));
+  const on = mk({});
+  ok(on.pdfPrices === true && on.showMaterials === true && on.showLabor === true && on.showFreight === true, "#364 bomViewProps: an untouched quote → every flag on");
+  ok(mk({ bomLinePrices: false }).pdfPrices === false && mk({ pdfPrices: false }).pdfPrices === false && mk({ pdfPrices: false, bomLinePrices: true }).pdfPrices === false,
+    "#364 bomViewProps: line prices = pdfPrices && bomLinePrices (the quote-wide Prices still wins)");
+  ok(mk({ bomMaterials: false }).showMaterials === false && mk({ bomMaterials: false }).showLabor === true && mk({ bomLabor: false }).showLabor === false && mk({ bomFreight: false }).showFreight === false && mk({ bomFreight: false }).pdfPrices === true,
+    "#364 bomViewProps: Materials / Labor / Freight each map to their own show flag only");
+  const raw = s364Props({ pdfOptions: { bomLinePrices: false, bomMaterials: false, bomLabor: false, bomFreight: false } });
+  ok(raw.pdfPrices === true && raw.showMaterials === undefined && raw.showLabor === undefined && raw.showFreight === undefined,
+    "#364 non-BOM document props: the saved switches ride along but never touch pdfPrices or the show flags (only bomViewProps sets them)");
+
+  // ---- render: all on (or untouched) = the pre-change BOM view, byte for byte ----
+  const base = JSON.parse(rd("docs/superpowers/fixtures/364-bom-view-baseline.json")) as Record<string, string>;
+  const untouched = s364Cases();
+  const allOn = s364Cases({ bomLinePrices: true, bomMaterials: true, bomLabor: true, bomFreight: true });
+  ok(Object.keys(base).length === 5 && Object.keys(base).every((k) => s364Render(untouched[k]) === base[k] && s364Render(allOn[k]) === base[k]),
+    "#364 render: an untouched quote and all four switches on print the BOM view byte-for-byte as before (5 cases)");
+  // Non-BOM: the estimate document with every switch off is the pre-change document.
+  const p5 = JSON.parse(rd("docs/superpowers/fixtures/p5-quote-document-no-document.json")) as Record<string, string>;
+  ok(s364Render(raw) === p5["p293-itemized"] && s364Render({ ...raw, layout: "web" }) === p5["p2b-ungroupedWeb"],
+    "#364 render: the estimate PDF / online Narrative document ignores the switches (all off = the pre-change print and web render)");
+
+  // ---- render: each switch off removes its label / amount; the rest stays ----
+  const r = (o: Record<string, unknown>, k = "bomRewards") => s364Render(s364Cases(o)[k]);
+  const b = base.bomRewards;
+  const lineCol = "grid-template-columns:1fr 70px 104px";
+  const linePrice = '<span style="font-family:var(--font-mono);text-align:right;font-weight:600">';
+  const totalsRow = (label: string, amt: string) => "<span>" + label + '</span><span style="font-family:var(--font-mono)">' + amt + "</span>";
+  const always = (h: string) => h.includes(totalsRow("Sales tax (5%)", "$12.50")) && h.includes("Rewards points applied (25 pts)") && h.includes(">Total</span>") && h.includes("$340.50") && h.includes("Your Gold rewards: Free freight") &&
+    h.includes(">$153.00</span>") && h.includes(">$100.00</span>");
+  ok(b.includes(lineCol) && b.includes(linePrice) && b.includes(totalsRow("Materials", "$300.00")) && b.includes(totalsRow("Labor — installation &amp; commissioning", "$50.00")) &&
+     b.includes(totalsRow("Freight &amp; delivery", "$3.00")) && b.includes("<span>Freight &amp; delivery</span><span></span>") && b.includes("Materials, installation &amp; freight included") && always(b),
+    "#364 render (fixture sanity): the baseline carries line prices, Materials / Labor / Freight rows, a system freight row, the inclusions line, tax, credit, perks and Total");
+  const lp = r({ bomLinePrices: false });
+  ok(!lp.includes(lineCol) && !lp.includes(linePrice) && lp.includes("grid-template-columns:1fr 70px") && lp.includes(totalsRow("Materials", "$300.00")) && always(lp),
+    "#364 render: Line prices off drops every line's (and option row's) price column — system prices, totals and the Total stay");
+  const lpPrices = r({ pdfPrices: false, bomLinePrices: true });
+  ok(!lpPrices.includes(linePrice), "#364 render: Prices off on the quote hides BOM line prices even with Line prices on");
+  const mat = r({ bomMaterials: false });
+  ok(!mat.includes("<span>Materials</span>") && mat.includes(totalsRow("Labor — installation &amp; commissioning", "$50.00")) && mat.includes("Installation &amp; freight included") && mat.includes(linePrice) && always(mat),
+    "#364 render: Materials off drops the Materials row and the word from the inclusions line");
+  const lab = r({ bomLabor: false });
+  ok(!lab.includes("Labor — installation") && lab.includes(totalsRow("Materials", "$300.00")) && lab.includes("Materials &amp; freight included") && lab.includes("Installation, commissioning &amp; project management") && always(lab),
+    "#364 render: Labor off drops the Labor row and \"installation\" from the inclusions line — the labor system's own line stays");
+  const fr = r({ bomFreight: false });
+  ok(!fr.includes("Freight &amp; delivery") && !fr.includes(">$3.00<") && fr.includes("Materials &amp; installation included") && fr.includes(totalsRow("Materials", "$300.00")) && always(fr),
+    "#364 render: Freight off drops each system's freight row, the totals' freight row and \"freight\" from the inclusions line");
+  const altFr = r({ bomFreight: false }, "bomAlternates");
+  ok(base.bomAlternates.includes(">$0.80<") && !altFr.includes(">$0.80<") && !altFr.includes("Freight &amp; delivery") && altFr.includes(">$50.80</span>"),
+    "#364 render: Freight off drops an alternate system's freight row too; its subtotal still prints");
+  const none = r({ bomLinePrices: false, bomMaterials: false, bomLabor: false, bomFreight: false });
+  ok(!none.includes(linePrice) && !none.includes("<span>Materials</span>") && !none.includes("Labor — installation") && !none.includes("Freight &amp; delivery") && !none.includes(" included</div>") &&
+     none.includes("Line 1") && always(none),
+    "#364 render: everything off — parts with system prices, tax, credit and the Total only");
+
+  // ---- source pins ----
+  const qd = rd("src/app/(app)/estimator/quote-document.tsx");
+  ok(!/\bp\.bom(LinePrices|Materials|Labor|Freight)\b/.test(qd) && (qd.match(/p\.showFreight !== false/g) || []).length === 2 && qd.includes("{p.showMaterials !== false && (") && qd.includes("{p.t.lab > 0 && p.showLabor !== false && (") && qd.includes("{p.t.fr > 0 && p.showFreight !== false && ("),
+    "#364 QuoteDocument: reads only the show* flags (never the saved bom* keys) and hides only on an explicit false");
+  const assigners = ["src/app/(app)/estimator/quote-document-view.ts", "src/lib/quote-pdf/document-loader.ts", "src/lib/estimate-output/cover-loader.ts", "src/lib/estimate-output/package-live-loader.ts", "src/app/print/quote/[id]/page.tsx", "src/components/online-estimate/online-estimate.tsx"]
+    .map((f) => [f, (rd(f).match(/\bshow(Materials|Labor|Freight):/g) || []).length] as const);
+  ok(assigners.every(([f, n]) => (f.endsWith("quote-document-view.ts") ? n === 3 : n === 0)), "#364: only bomViewProps sets the show flags — the print, cover, package and online loaders don't");
+  const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
+  ok(tab.includes('showOnBom: "Show on BOM"') && tab.includes("onClick={() => togglePdf(flag)}") && tab.includes('const locked = flag === "bomLinePrices" && !pdfOpts.pdfPrices;') && tab.includes("disabled={locked}") && tab.includes("aria-pressed={on}") &&
+     ["Line prices", "Materials", "Labor", "Freight"].every((l) => tab.includes('label: "' + l + '"')),
+    "#364 BOM tab: four Show on BOM switches through togglePdf; Line prices is disabled while the quote hides prices");
+  const st = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  ok(SW.every((k) => st.includes(`useState(initial.pdfOptions.${k})`) && st.includes(`flag === "${k}"`)) && /pdfCutSheets, bomLinePrices, bomMaterials, bomLabor, bomFreight \}\),/.test(st),
+    "#364 hook: each switch loads from the saved pdfOptions, toggles through togglePdf and rides pdfOpts (so Save sends it and the PDF goes dirty)");
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  ok((act.match(/pdfOptions: normalizePdfOptions\(payload\.pdfOptions\)/g) || []).length === 2, "#364 save: both save paths sanitize pdfOptions through normalizePdfOptions (the new keys included)");
+}
+
+/* --- #365: the model number on BOM quote lines ("Model — Description", BOM view only) --- */
+import * as b365 from "@/lib/estimate-output/bom-models";
+import { bomViewProps as b365Bom } from "@/app/(app)/estimator/quote-document-view";
+import { qd293Props as b365Props, qd293Sections as b365Sections, qdP5NoDocCases as b365P5Cases, renderQuoteDocument293 as b365Render } from "./qd293-cases";
+import { qd364BomCases as b365Cases } from "./qd364-cases";
+import type { SpecItem as B365Item } from "@/app/(app)/estimator/types";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const L = (extra: Partial<B365Item> = {}): B365Item => ({ id: 1, sku: "SKU-1", desc: "ETC LED ellipsoidal, 19° lens", qty: 12, unit: "ea", cost: 1, price: 1200, ...extra } as B365Item);
+  const parts: b365.BomModelParts = {
+    "SKU-1": { sku: "SKU-1", manufacturerModelNumber: "ColorSource Spot V" },
+    "SKU-PN": { sku: "SKU-PN", manufacturerPartNumber: "7060A1010" },
+    "Symetrix:Jupiter 4": { sku: "Symetrix:Jupiter 4" },
+    CUSTOM: { sku: "CUSTOM", manufacturerModelNumber: "NOPE" },
+    "SA-1": { sku: "SA-1", manufacturerModelNumber: "NOPE" },
+  };
+  const M = (it: Partial<B365Item>) => b365.bomLineModel(L(it), parts);
+
+  // ---- pure: which lines get a model, and which model ----
+  ok(M({}) === "ColorSource Spot V" && b365.bomLineText(L().desc, M({})) === "ColorSource Spot V — ETC LED ellipsoidal, 19° lens",
+    "#365 pure: a catalog line prints \"Model — Description\" (the catalog part's Model #, em dash with spaces)");
+  ok(M({ sku: "SKU-PN" }) === "7060A1010" && M({ sku: "Symetrix:Jupiter 4" }) === "Jupiter 4" && M({ sku: " SKU-1 " }) === "ColorSource Spot V",
+    "#365 pure: lineModel's ladder — no Model # → MFR P/N → the SKU's text after Brand:; the SKU is matched trimmed");
+  ok(M({ manufacturerModelNumber: "Spot V (frozen)" }) === "Spot V (frozen)" && M({ manufacturerPartNumber: "OWN-PN" }) === "ColorSource Spot V",
+    "#365 pure: the line's own frozen Model # wins over the catalog's; the catalog's Model # wins over the line's MFR P/N");
+  ok(M({ sku: "ORD-99" }) === "" && M({ sku: "ORD-99", manufacturerPartNumber: "PN-7" }) === "PN-7" && M({ sku: "ORD-99", manufacturerModelNumber: " Own  Model " }) === "Own Model",
+    "#365 pure: no catalog hit → only the line's own Model # / MFR P/N, never its SKU or order number");
+  ok(["CUSTOM", "AI", "CURTAIN", "CRT-4", "", "  "].every((sku) => M({ sku, manufacturerModelNumber: "X", custom: true }) === ""),
+    "#365 pure: a placeholder SKU (CUSTOM / AI / CURTAIN / CRT-n / blank) never prints a model, even with its own Model #");
+  ok(M({ custom: true }) === "ColorSource Spot V", "#365 pure: a custom line saved with a real catalog SKU prints its model");
+  const excluded: Array<[string, Partial<B365Item>]> = [
+    ["vendor quote", { vendorQuoteId: "VQ-1" }], ["allowance", { allowance: true }], ["curtain", { curtain: true }],
+    ["labor", { labor: true }], ["overhead", { laborOverhead: "shop" }], ["travel", { laborTravel: "hotel" } as Partial<B365Item>],
+    ["assembly (fixture)", { sku: "SA-1", fixture: true }], ["assembly (components)", { components: [{ sku: "SKU-PN", label: "x", role: "fixture", qty: 1, unit: "ea", cost: 1, price: 1 }] } as Partial<B365Item>],
+    ["portal fixture", { fixtureId: "fa-1" } as Partial<B365Item>], ["rack", { rackId: "RK-1" } as Partial<B365Item>], ["track (config)", { track: {} } as Partial<B365Item>],
+    ["track (TRK-)", { sku: "TRK-ADC-1" }], ["Grid assembly", { sku: "asm:fa-1" }], ["bonus", { bonus: "package" } as Partial<B365Item>],
+  ];
+  const leaked = excluded.filter(([, x]) => M({ ...x, manufacturerModelNumber: "OWN" }) !== "").map(([n]) => n);
+  ok(leaked.length === 0, "#365 pure: vendor-quote / allowance / curtain / labor / overhead / travel / assembly / rack / track / bonus lines print their description only" + (leaked.length ? " — leaked: " + leaked.join(", ") : ""));
+  ok(b365.bomLineText("ColorSource Spot V — ETC LED", "ColorSource Spot V") === "ColorSource Spot V — ETC LED" && b365.bomLineText("  colorsource spot v LED", "ColorSource Spot V") === "  colorsource spot v LED",
+    "#365 pure: no doubling — a description that already starts with the model (case-insensitive, trimmed) prints as is");
+  ok(b365.bomLineText("Desc", "") === "Desc" && b365.bomLineText("", "M1") === "M1" && b365.bomLineText(" Desc ", " M1 ") === "M1 — Desc",
+    "#365 pure: no model = the description untouched; no description = the model alone; both trimmed when joined");
+  ok(b365.bomLineModel(L({ sku: "__proto__" }), parts) === "" && b365.bomLineModel(L({ sku: "toString" }), parts) === "" && b365.bomLineModel(null, parts) === "" &&
+     b365.bomModelSkus([{ id: "p", name: "P", kind: "materials", items: [L({ sku: "__proto__" }), L({ sku: "SKU-1" })] }] as never).join() === "SKU-1",
+    "#365 pure: prototype keys never resolve as parts and are never asked for");
+  ok(JSON.stringify(b365.bomModelSkus(b365Sections())) === JSON.stringify(["SKU-1", "SKU-3", "SKU-5", "SKU-6", "SKU-8"]),
+    "#365 pure: bomModelSkus lists each plain catalog SKU once, options included — not the allowance, vendor or labor lines");
+  ok(JSON.stringify(b365.bomModelPartOf({ sku: "A", manufacturerModelNumber: " M ", manufacturerPartNumber: "" })) === JSON.stringify({ sku: "A", manufacturerModelNumber: "M" }),
+    "#365 pure: bomModelPartOf carries only the model fields, trimmed, blanks dropped");
+
+  // ---- render: the BOM view with models ----
+  const docParts: b365.BomModelParts = {
+    "SKU-1": { sku: "SKU-1", manufacturerModelNumber: "ColorSource Spot V" },
+    "SKU-2": { sku: "SKU-2", manufacturerModelNumber: "M2" },
+    "SKU-3": { sku: "SKU-3", manufacturerModelNumber: "M3" },
+    "SKU-4": { sku: "SKU-4", manufacturerModelNumber: "M4" },
+    "SKU-5": { sku: "SKU-5", manufacturerPartNumber: "PN-5" },
+    "SKU-6": { sku: "SKU-6", manufacturerModelNumber: "line 6" },
+    "LAB-INSTALL": { sku: "LAB-INSTALL", manufacturerModelNumber: "M7" },
+    "SKU-11": { sku: "SKU-11", manufacturerModelNumber: "M11" },
+    "SKU-12": { sku: "SKU-12", manufacturerModelNumber: "M12" },
+  };
+  const cases = b365Cases();
+  const withM = (k: string) => b365Render({ ...cases[k], bomModelParts: docParts });
+  const bom = withM("bom");
+  ok(bom.includes("<span>ColorSource Spot V — Line 1<span") && bom.includes("M3 — Line 3") && bom.includes("PN-5 — Line 5") && bom.includes("<span>Line 8</span>"),
+    "#365 render: the BOM view prints \"Model — Description\" on catalog lines and option rows; a line with no model keeps its description");
+  ok(bom.includes("Line 6") && !bom.includes("line 6 — Line 6") && bom.includes("Budget allowance — Line 2") && !bom.includes("M2 —") && bom.includes("Acme · Q9 — Motors") && !bom.includes("M4 —") &&
+     bom.includes("Installation, commissioning &amp; project management") && !bom.includes("M7"),
+    "#365 render: no doubling; allowance, vendor-quote and labor rows print exactly as before");
+  const alt = withM("bomAlternates");
+  ok(alt.includes("M11 — Line 11") && alt.includes("M12 — Line 12"), "#365 render: an alternate system's lines and its option rows carry models too");
+  ok(withM("bomSectioned").includes("ColorSource Spot V — Line 1") && withM("bomLean").includes("ColorSource Spot V — Line 1"),
+    "#365 render: the BOM view of a sectioned / lean quote (always itemized with descriptions) carries models");
+
+  // ---- render: byte-for-byte where nothing should change ----
+  const base364 = JSON.parse(rd("docs/superpowers/fixtures/364-bom-view-baseline.json")) as Record<string, string>;
+  ok(Object.keys(base364).length === 5 && Object.keys(base364).every((k) => b365Render(cases[k]) === base364[k] && b365Render({ ...cases[k], bomModelParts: {} }) === base364[k]),
+    "#365 render: the BOM view with no model read (absent — a failed read — or empty) is the #364 baseline byte for byte (5 cases)");
+  const p5 = JSON.parse(rd("docs/superpowers/fixtures/p5-quote-document-no-document.json")) as Record<string, string>;
+  const p5c = b365P5Cases();
+  ok(Object.keys(p5).length === 15 && Object.keys(p5).every((k) => b365Render({ ...p5c[k], bomModelParts: docParts }) === p5[k]),
+    "#365 render: the estimate document (PDF, web, appendix, alternates, key products — 15 fixtures) ignores bomModelParts byte for byte");
+  ok(b365Render({ ...b365Props(), bomModelParts: docParts, showModels: false }) === p5["p293-itemized"], "#365 render: showModels other than exactly true prints no model");
+  ok(b365Bom(b365Props()).showModels === true && b365Props().showModels === undefined, "#365 bomViewProps: sets showModels; a non-BOM document never has it");
+
+  // ---- source pins: the four BOM callers pass models; nothing else does ----
+  const qd = rd("src/app/(app)/estimator/quote-document.tsx");
+  ok(qd.includes("return p.showModels === true && p.bomModelParts ? bomLineModel(it, p.bomModelParts) : \"\";") && qd.includes("desc: model ? bomLineText(desc, model) : desc,") &&
+     (qd.match(/model=\{bomModelOf\(it, p\)\}/g) || []).length === 2,
+    "#365 QuoteDocument: one gate (showModels === true + bomModelParts) for itemized lines and both option-row call sites");
+  const view = rd("src/app/(app)/estimator/quote-document-view.ts");
+  const setters = ["src/app/(app)/estimator/quote-document-view.ts", "src/lib/quote-pdf/document-loader.ts", "src/lib/estimate-output/cover-loader.ts", "src/lib/estimate-output/package-live-loader.ts", "src/lib/estimate-output/package-loader.ts", "src/app/print/quote/[id]/page.tsx", "src/components/online-estimate/online-estimate.tsx"]
+    .map((f) => [f, (rd(f).match(/\bshowModels:/g) || []).length] as const);
+  ok(view.includes("showModels: true,") && setters.every(([f, n]) => (f.endsWith("quote-document-view.ts") ? n === 1 : n === 0)), "#365: only bomViewProps sets showModels");
+  ok(["src/lib/quote-pdf/document-loader.ts", "src/lib/estimate-output/cover-loader.ts", "src/lib/estimate-output/package-live-loader.ts", "src/lib/estimate-output/package-loader.ts"].every((f) => !rd(f).includes("bomModelParts")),
+    "#365: the document, Cover, package and bidder loaders never read models (the estimate PDF, Cover PDF, bidder PDFs and package page stay as they are)");
+  const print = rd("src/app/print/quote/[id]/page.tsx");
+  ok(print.includes("const bomModelParts = await loadBomModelPartsFor(doc.sections);") && print.includes("<QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout=\"web\"") &&
+     print.indexOf("if (bomLayout) {") > -1 && print.indexOf("loadBomModelPartsFor(") > print.indexOf("if (bomLayout) {") && (print.match(/bomModelParts=/g) || []).length === 1,
+    "#365 BOM PDF: the print route's ?view=bom branch alone loads and passes the models");
+  const prev = rd("src/app/estimator-preview/[id]/page.tsx");
+  ok(prev.includes("const bomModelParts = await loadBomModelPartsFor(doc.sections);") && prev.includes("<QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout=\"web\" />") && (prev.match(/bomModelParts=/g) || []).length === 1,
+    "#365 saved preview: the BOM tab loads and passes the models");
+  const online = rd("src/components/online-estimate/online-estimate.tsx");
+  const portal = rd("src/app/portal/quotes/[id]/page.tsx");
+  const share = rd("src/app/share/quote/[id]/[token]/page.tsx");
+  // Box goods sale merge (2026-10-22): a box sale's docProps ARE the BOM view (quoteDocumentDataFor sets showModels), so they take the
+  // models on the default view too; a normal estimate's narrative document has no showModels and still never reads or gets them.
+  ok(online.includes("const shown = showBom ? { ...bomViewProps(docProps), bomModelParts } : docProps.showModels === true ? { ...docProps, bomModelParts } : docProps;") &&
+     [portal, share].every((pg) => pg.includes('const bomModelParts = view === "bom" || docProps.showModels === true ? await loadBomModelPartsFor(docProps.sections) : undefined;') && pg.includes("bomModelParts={bomModelParts}") && pg.includes("view={view}")),
+    "#365 online BOM: the portal and share pages read models only for ?view=bom (or a document that is already the BOM view — a box sale) and the view hands them to the BOM view alone (the revision's own lines)");
+  const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
+  ok(tab.includes("bomModelSkus(shown?.sections)") && tab.includes("bomModelPartsAction(want)") && tab.includes("<BomDocument props={docProps} />") && !/from "@\/lib\/stores\//.test(tab) &&
+     /useMemo\(\(\) => \(shown \? liveBomDocumentProps\(shown\) : null\), \[shown\]\)/.test(tab),
+    "#365 BOM tab: models for the SHOWN BOM only (review K), through bomModelPartsAction, no store import");
+  const lib = rd("src/lib/estimate-output/bom-models.ts");
+  const srv = rd("src/lib/estimate-output/bom-models-server.ts");
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  ok(!/from "@\/lib\/stores\/|from "@\/db/.test(lib) && srv.includes("await getManyBySku(want)") && srv.includes("return undefined;") &&
+     /export async function bomModelPartsAction\(skus: string\[\]\): Promise<BomModelParts> \{\n  await requireUser\(\);\n  return loadBomModelParts\(/.test(act),
+    "#365: the rules are pure (no store), the server read is one getManyBySku that never throws, and the live tab's action needs a signed-in user");
+}
+
+/** #365 — loadBomModelParts against the test DB: requested-SKU keys, renames followed, misses absent, model fields only. */
+async function bomModels365DbChecks(check: typeof ok): Promise<void> {
+  const { fixtureId, registerFixture } = await import("./test-fixtures");
+  const DS = await import("@/db/doc-store");
+  const Cat = await import("@/lib/stores/catalog");
+  const { loadBomModelParts, loadBomModelPartsFor } = await import("@/lib/estimate-output/bom-models-server");
+  const a = fixtureId(365, "a"), b = fixtureId(365, "b"), old = fixtureId(365, "old"), to = "ETC:" + fixtureId(365, "spot");
+  for (const id of [a, b, old, to]) registerFixture("catalog_parts", id);
+  const base = { desc: "Fixture 365", category: "Other", unit: "ea", list: 10, cost: 5, mfr: "ETC" };
+  await DS.upsertDoc("catalog_parts", { ...base, id: a, sku: a, manufacturerModelNumber: "ColorSource Spot V", manufacturerPartNumber: "CSSPOT-V", narrativeText: "secret" } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: b, sku: b, manufacturerPartNumber: "7060A1010" } as never);
+  await DS.upsertDoc("catalog_parts", { ...base, id: old, sku: old } as never);
+  await Cat.renamePartDocs(old, to, "Spot 365");
+  const got = await loadBomModelParts([a, ` ${b} `, old, fixtureId(365, "gone"), "__proto__", ""]);
+  check(JSON.stringify(Object.keys(got).sort()) === JSON.stringify([a, b, old].sort()), "#365 loader: keyed by the requested (trimmed) SKU; unknown SKUs absent");
+  check(JSON.stringify(got[a]) === JSON.stringify({ sku: a, manufacturerModelNumber: "ColorSource Spot V", manufacturerPartNumber: "CSSPOT-V" }) && got[b]?.manufacturerPartNumber === "7060A1010",
+    "#365 loader: model fields only — nothing else of the part crosses");
+  check(got[old]?.sku === to && got[old]?.manufacturerModelNumber === "Spot 365", "#365 loader: a renamed SKU (a sent revision's line) reads the part it now means");
+  const sections = [{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: a, desc: "x", qty: 1, unit: "ea", cost: 1, price: 2 }, { id: 2, sku: b, desc: "y", qty: 1, unit: "ea", cost: 1, price: 2, allowance: true }] }];
+  const forSecs = await loadBomModelPartsFor(sections as never);
+  check(!!forSecs && Object.keys(forSecs).join() === a, "#365 loader: loadBomModelPartsFor reads only the plain catalog lines' SKUs");
 }

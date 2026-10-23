@@ -33,6 +33,9 @@ export type ReadinessInput = {
    *  key-product paragraphs) don't count — its own broken pieces do (chips
    *  whose system/line is gone, product blocks no longer in the BOM). */
   document?: PackageDoc | null;
+  /** Box goods sale (spec 2026-10-21): the client gets the BOM only — no narrative / intro / goals / key-product /
+   *  document gaps. */
+  boxSale?: boolean;
 };
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -66,8 +69,9 @@ export function narrativeWithoutIntro(sections: SpecSection[], document?: Packag
   return sections.filter((s) => systemPrintsInBody(s) && s.presentation === "narrative" && !(s.narrative || "").trim()).length;
 }
 
-function packageBadge(saved: boolean, sections: SpecSection[], document?: PackageDoc | null): StepBadge {
+function packageBadge(saved: boolean, sections: SpecSection[], document?: PackageDoc | null, boxSale = false): StepBadge {
   if (!saved) return { state: "idle", label: "Save first" };
+  if (boxSale) return { state: "ok", label: "✓ Ready" };
   if (documentApplies(document)) {
     const g = docGaps(document, sections);
     const count = scopesWithoutGoals(sections) + g.removedChips.length + g.productsNotInBom.length;
@@ -94,7 +98,7 @@ function sendBadge(i: ReadinessInput): StepBadge {
   // #352 review M3: a draft about to go out warns about lines still at an old vendor price — never blocks Send.
   const requote = i.status === "draft" ? requoteCount(i.sections) : 0;
   // #355 review M6: so is a narrative system with no intro text (new estimates start Narrative).
-  const noIntro = i.status === "draft" ? narrativeWithoutIntro(i.sections, i.document) : 0;
+  const noIntro = i.status === "draft" && !i.boxSale ? narrativeWithoutIntro(i.sections, i.document) : 0;
   if (requote > 0 || noIntro > 0) {
     const base = i.review?.tone === "approved" ? "Ready to send" : "";
     const warn = [
@@ -119,7 +123,7 @@ function sendBadge(i: ReadinessInput): StepBadge {
 export function estimateReadiness(i: ReadinessInput): Record<EstimateStep, StepBadge> {
   return {
     build: buildBadge(i.sections),
-    package: packageBadge(i.saved, i.sections, i.document),
+    package: packageBadge(i.saved, i.sections, i.document, i.boxSale === true),
     review: reviewBadge(i.review),
     send: sendBadge(i),
   };

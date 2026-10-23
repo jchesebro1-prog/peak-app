@@ -11,6 +11,8 @@ import { OpenBeacon } from "./open-beacon";
 import { buildPackageSlots } from "./package-slots";
 import { onlineCutSheets } from "@/lib/curtain-cut-sheets/online";
 import { OnlineCutSheets } from "@/components/cutsheets/online-cut-sheets";
+import { revisionBoxSale } from "@/lib/estimate-box-sale/rules";
+import { boxSaleExtras } from "@/lib/estimate-output/package-extras-model";
 
 /**
  * #301 slice B — the v2/v3 (rev-pinned) share link's page: the estimate package
@@ -28,9 +30,13 @@ export async function SharedPackagePage({ id, token, view }: { id: string; token
   const base = hit ? sharePath(hit.q.id, token) : "";
   const model = hit ? await loadPackageViewProps(hit, { base, view, letterheadSrc: letterhead.src }) : null;
   if (!hit || !model) return <OnlineEstimateCard title={ONLINE_COPY.shareInactive} />;
+  // Box goods sale (spec 2026-10-21): the itemized list only — no cut sheets (onlineCutSheets returns null for the
+  // revision's frozen flag), datasheet links, downloads or plans; the client actions stay.
+  const box = revisionBoxSale(hit.rev);
   // Jeff 2026-10-15 #22: the cut sheets the sent PDF carries (owner-addressed, like the PDF's own).
   const cut = await onlineCutSheets(hit.q, hit.rev);
-  const built = buildPackageSlots(await loadPackageExtras(hit, base), {
+  const extras = await loadPackageExtras(hit, base);
+  const built = buildPackageSlots(box ? boxSaleExtras(extras) : extras, {
     id: hit.q.id,
     token,
     // #348 2b-ii: a v3 link may act only while its bid is pending or awarded; a missing result counts as closed.

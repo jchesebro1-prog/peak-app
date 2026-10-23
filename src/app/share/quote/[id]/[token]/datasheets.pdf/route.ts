@@ -2,6 +2,7 @@ import { serveSharedBook } from "@/lib/part-docs/datasheet-book-download";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { resolveSharedPackage, SHARE_ZIP_PER_WINDOW, SHARE_ZIP_WINDOW_MS } from "@/lib/quote-share/links";
 import { isPackageToken } from "@/lib/quote-share/token";
+import { revisionBoxSale } from "@/lib/estimate-box-sale/rules";
 
 export const dynamic = "force-dynamic";
 /** From route entry: reads by 45 s, the merge by 90 s (BOOK_DOWNLOAD_*_MS), the rest to stream. */
@@ -29,7 +30,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string; tok
     console.error("[datasheets] share link resolve failed", e);
     return notFound();
   }
-  if (!pkg) return notFound();
+  // Box goods sale (spec 2026-10-21): no downloads — the page offers none.
+  if (!pkg || revisionBoxSale(pkg.rev)) return notFound();
   try {
     return await serveSharedBook(pkg, {}, startedAt);
   } catch (e) {

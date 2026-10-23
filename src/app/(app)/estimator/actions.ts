@@ -45,6 +45,8 @@ import {
   type InspectionRecord,
 } from "@/lib/stores/inspections";
 import { get as catalogGet, list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
+import { loadBomModelParts } from "@/lib/estimate-output/bom-models-server";
+import type { BomModelParts } from "@/lib/estimate-output/bom-models";
 import { copySectionForTarget } from "./copy-system";
 import { normalizeSystemOrder, sanitizeGroups, sanitizeSectionGroupMeta, withoutGroupMeta, type SystemGroup } from "@/lib/estimate-groups/groups";
 import { packageDocForSave } from "@/lib/package-doc/save";
@@ -82,6 +84,7 @@ import { addVendorPartiesForSave, prepareVendorQuotesForSave } from "@/lib/store
 import { recordVendorPdfOutcomes, verifyVendorPdfExtractions } from "@/lib/vendor-pdf/save-server";
 import { quoteSpecFollowingRenames, selectionFollowingRenames } from "@/lib/stores/catalog-renames";
 import { leadIdForCreate, linkSavedQuoteToSuggestion } from "@/lib/assist/suggestion-save";
+import { boxSaleForSave, boxSaleOf, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -208,6 +211,9 @@ export type SavePayload = {
   /** The `ES-…` suggestion the estimate was opened from: every successful
    *  save links the saved quote to it (idempotent; unknown ids ignored). */
   suggestionId?: string;
+  /** Box goods sale (spec 2026-10-21) — absent (an older caller) keeps the stored flag; dropped on any
+   *  non-system quote (boxSaleForSave). A box sale with any labor line refuses the whole save. */
+  boxSale?: boolean;
 };
 
 export type SaveResult = {
@@ -410,6 +416,23 @@ function vendorQuoteRows(raw: unknown): VendorQuote[] {
     : [];
 }
 
+/** A refused save (nothing written): no id and no number, so the client keeps the edit visibly unsaved instead of
+ *  adopting a returned id as "saved" (clearing the PDF-dirty / tier-reprice flags, taking the rev/date). */
+function refusedSave(prior: Quote | null, error: string): SaveResult {
+  return {
+    ok: false,
+    id: null,
+    number: null,
+    revNum: documentRevStamp(prior ?? {}).revNum,
+    updatedAt: prior?.updatedAt ?? Date.now(),
+    review: prior?.review ?? null,
+    status: prior?.status ?? null,
+    pipelineId: prior?.pipelineId ?? null,
+    stage: prior?.stage ?? null,
+    error,
+  };
+}
+
 /**
  * Save — port of the prototype's doSave(): update when a quote is loaded,
  * create otherwise. spec = { sections, mobs } (sections round-trip the
@@ -436,23 +459,12 @@ export async function saveQuoteAction(
   // over the caps refuses the WHOLE save (nothing written), so a too-large
   // edit can never wipe the stored document.
   const docSave = packageDocForSave(payload.document, (prior?.spec as { document?: unknown } | null | undefined)?.document);
-  if (!docSave.ok) {
-    // id/number null: nothing was written, and the client adopts a returned
-    // id as "saved" (clears the PDF-dirty / tier-reprice flags, takes the
-    // rev/date) — a refusal must leave the edit visibly unsaved.
-    return {
-      ok: false,
-      id: null,
-      number: null,
-      revNum: documentRevStamp(prior ?? {}).revNum,
-      updatedAt: prior?.updatedAt ?? Date.now(),
-      review: prior?.review ?? null,
-      status: prior?.status ?? null,
-      pipelineId: prior?.pipelineId ?? null,
-      stage: prior?.stage ?? null,
-      error: docSave.error,
-    };
-  }
+  if (!docSave.ok) return refusedSave(prior, docSave.error);
+  // Box goods sale (spec 2026-10-21): equipment + freight only — any labor line refuses the WHOLE save before
+  // anything is written (the document refusal's shape: no id, so the edit stays visibly unsaved).
+  const boxSale = boxSaleForSave(prior, payload.boxSale);
+  const boxProblem = boxSaleSaveProblem(boxSale, Array.isArray(payload.sections) ? payload.sections : []);
+  if (boxProblem) return refusedSave(prior, boxProblem);
   // #245 Task 13 (spec §4.3, controller decision 6): `por` clears on any
   // item staff have now priced; `portalReview` clears once none remain —
   // scoped to a portal-catalog quote so no other save's behavior changes.
@@ -541,6 +553,8 @@ export async function saveQuoteAction(
     source: savedSource,
     spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}) },
     pdfOptions: normalizePdfOptions(payload.pdfOptions),
+    // Box goods sale: content (QUOTE_CONTENT_FIELDS); create keeps it via buildQuote, update() stores only true.
+    boxSale,
     // #301 (R14): not content fields — they never re-render the estimate PDF.
     ...(typeof payload.coverSummary === "string" ? { coverSummary: cleanPlainText(payload.coverSummary, COVER_SUMMARY_MAX) } : {}),
     ...(typeof payload.notIncluded === "string" ? { notIncluded: cleanPlainText(payload.notIncluded, NOT_INCLUDED_MAX) } : {}),
@@ -948,6 +962,12 @@ async function placeSystemInEstimate(
     if (!existing) {
       return { ok: false, error: "That estimate could not be found." };
     }
+    // Box goods sale (spec 2026-10-21): a system with labor can't join an existing box sale — refused before anything
+    // is written. Move/Copy into a NEW estimate is unchanged (the new estimate starts as a normal one).
+    if (boxSaleOf(existing)) {
+      const problem = boxSaleSaveProblem(true, [placed]);
+      if (problem) return { ok: false, error: problem };
+    }
     const existingSpec = existing.spec as
       | { sections?: SpecSection[]; mobs?: SpecMob[]; groups?: SystemGroup[]; document?: unknown }
       | null
@@ -1042,6 +1062,9 @@ async function placeSystemInEstimate(
       margin: t.margin,
       owner: opts.owner,
       ...(opts.tier ? { pricingTier: opts.tier.pricingTier, tierMargin: opts.tier.tierMargin } : {}),
+      // Box goods sale (spec 2026-10-21): Move / Copy → New estimate copies the STORED source's flag (an unsaved
+      // source has none). The labor rule applies at the new estimate's next save.
+      ...(boxSaleOf(sourceQuote) ? { boxSale: true } : {}),
     }, { bidScopeOnly: scopeOnly.stamp });
   } catch (e) {
     return {
@@ -1727,6 +1750,18 @@ export async function resolveCatalogSkusAction(
     if (hit) out[requested] = hit;
   }
   return out;
+}
+
+/**
+ * #365 — the Build package → BOM quote tab's line models: the catalog's model
+ * fields for the live BOM's plain catalog SKUs, through the SAME read the BOM
+ * PDF, saved preview and online BOM use (loadBomModelParts — getManyBySku,
+ * renamed SKUs followed), so the live tab and the saved views agree. Unknown
+ * SKUs are absent; capped at BOM_MODEL_SKUS_MAX.
+ */
+export async function bomModelPartsAction(skus: string[]): Promise<BomModelParts> {
+  await requireUser();
+  return loadBomModelParts(Array.isArray(skus) ? skus : []);
 }
 
 /* ---------------- travel, on demand (punch #89) ----------------

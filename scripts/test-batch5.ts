@@ -162,9 +162,9 @@ function presentationChecks(ok: Ok) {
   ok(systemFromSuggestion({ key: "k", name: "Rigging", categoryId: "c", lines: [] }, new Map(), { ...ctx, presentation: "itemized" }).presentation === "itemized",
     "#355 review M6: a suggested system takes the presentation it is given");
   const us = src("src/app/(app)/estimator/use-estimator-state.ts");
-  ok(/const freshSections = [\s\S]{0,400}presentation: NEW_SYSTEM_PRESENTATION/.test(us) && (us.match(/presentation: NEW_SYSTEM_PRESENTATION/g) || []).length === 1 &&
-     us.includes("presentation: presentationForNewSystem(ss)") && (us.match(/presentation: presentationForNewSystem\(sections\),/g) || []).length === 2,
-    "#355 review M6: only a NEW estimate starts Narrative; + Add system (blank, category, suggestion) follows the estimate");
+  ok(/const freshSections = [\s\S]{0,400}presentation: newSystemPresentation\(\[\], boxSale\)/.test(us) && !us.includes("presentation: NEW_SYSTEM_PRESENTATION") &&
+     us.includes("presentation: newSystemPresentation(ss, boxSale)") && (us.match(/presentation: newSystemPresentation\(sections, boxSale\),/g) || []).length === 2,
+    "#355 review M6 (+ box goods sale): only a NEW estimate starts Narrative; + Add system (blank, category, suggestion) follows the estimate — Itemized throughout on a box sale");
   const narr = { id: "n", name: "N", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", items: [{ id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 2 }] };
   const base = { saved: true, review: null, status: "draft" as const, revNum: 1 };
   const send1 = estimateReadiness({ ...base, sections: [narr, { ...narr, id: "n2", narrative: "Intro." }, narr] as never[] }).send;

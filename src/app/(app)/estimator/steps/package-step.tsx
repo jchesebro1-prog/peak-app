@@ -4,9 +4,10 @@ import { useRef, useState, type CSSProperties, type KeyboardEvent } from "react"
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
+  boxSalePackageTab,
   nextPackageTab,
   PACKAGE_TAB_LABEL,
-  PACKAGE_TABS,
+  packageTabsFor,
   packageTabId,
   packageTabPanelId,
   packageTabSearch,
@@ -48,7 +49,9 @@ const PANEL: CSSProperties = { flex: 1, minHeight: 0, minWidth: 0, flexDirection
  */
 export function PackageStep({ s }: { s: EstimatorState }) {
   const params = useSearchParams();
-  const tab = parsePackageTab(params.get("ptab"));
+  // Box goods sale (spec 2026-10-21): BOM quote only — ?ptab=narrative / client land on it.
+  const tab = boxSalePackageTab(parsePackageTab(params.get("ptab")), s.boxSale);
+  const tabs = packageTabsFor(s.boxSale);
   // Mounted once visited; the URL (reload, back/forward) can land on any tab.
   const [visited, setVisited] = useState<Record<PackageTab, boolean>>(() => ({ narrative: true, bom: tab === "bom", client: tab === "client" }));
   if (!visited[tab]) setVisited({ ...visited, [tab]: true });
@@ -63,7 +66,7 @@ export function PackageStep({ s }: { s: EstimatorState }) {
   const mounted = (t: PackageTab) => t === "narrative" || visited[t];
   const onTabKey = (e: KeyboardEvent<HTMLButtonElement>) => {
     const to = nextPackageTab(tab, e.key);
-    if (!to) return;
+    if (!to || !tabs.includes(to)) return;
     e.preventDefault();
     goTab(to, undefined, true);
     tabRefs.current[to]?.focus();
@@ -74,7 +77,7 @@ export function PackageStep({ s }: { s: EstimatorState }) {
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "8px 14px", borderBottom: "1px solid #e4e7ec", background: "#f7f8fa" }}>
         <div role="tablist" aria-label="Build package" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-          {PACKAGE_TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t}
               ref={(el) => {

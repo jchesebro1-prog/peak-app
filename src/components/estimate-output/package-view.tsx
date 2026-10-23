@@ -252,6 +252,8 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
           </p>
         </section>
       )}
+      {/* Box goods sale (spec 2026-10-21): the itemized list only — no Overview / Itemized toggle. */}
+      {!m.boxSale && (
       <nav aria-label="Estimate view" className="pkg-toggle pk-no-print">
         <a href={m.narrativeHref} aria-current={!bom ? "page" : undefined}>
           {PACKAGE_COPY.narrative}
@@ -260,6 +262,7 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
           {PACKAGE_COPY.bom}
         </a>
       </nav>
+      )}
       {/* Estimator Phase 5: the Narrative view draws the package document,
           when the quote has one, in place of the scope cards (each key
           product's slot extras follow its product block); the BOM view keeps

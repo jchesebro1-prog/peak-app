@@ -108,7 +108,8 @@ export function ReviewSidebar({
       <ReviewCostSummary sections={sections} totals={t} />
       <LaborTable s={s} />
       <SpecsCard s={s} />
-      <PackageChecklist saved={!!loadedId} docs={docs} packageBadge={packageBadge} />
+      {/* Box goods sale: no package to check. */}
+      {!s.boxSale && <PackageChecklist saved={!!loadedId} docs={docs} packageBadge={packageBadge} />}
       <ReviewComments s={s} />
     </aside>
   );

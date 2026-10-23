@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import QuoteDocument, { QUOTE_PRINT_CSS, QUOTE_WEB_EMBED_CSS } from "@/app/(app)/estimator/quote-document";
 import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";
+import { loadBomModelPartsFor } from "@/lib/estimate-output/bom-models-server";
 import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
 import { pdfKindForQuoteType, type PdfKind } from "@/lib/quote-pdf/state";
 import { verifyPrintToken } from "@/lib/quote-pdf/token";
@@ -22,6 +23,7 @@ import { CutSheetPages, CLIENT_PRINT_CSS } from "@/components/cutsheets/cut-shee
 import { printOriginFor } from "@/lib/quote-pdf/origin";
 import { loadDatasheetLinkRows } from "@/lib/estimate-output/datasheet-links-server";
 import DatasheetLinksPage from "@/components/estimate-output/datasheet-links-page";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Quote", robots: { index: false, follow: false } };
@@ -39,6 +41,7 @@ function tokenOk(t: string | undefined, kind: PdfKind, id: string): boolean {
  * (middleware exempts /print/); the token is the only key, checked before any
  * read. Renders from saved data only — the same QuoteDocument the team sees.
  * `?view=bom` (2026-10-20) prints the BOM view instead — bomViewProps, no cut sheets, no photos — for the Build package BOM PDF.
+ * A box goods sale (2026-10-21) prints that same BOM branch for its customer PDF and bidder copies.
  */
 export default async function PrintQuotePage({
   params,
@@ -74,12 +77,15 @@ export default async function PrintQuotePage({
   const revision = rev ? (Array.isArray(q.revisions) ? q.revisions : []).find((r) => r.rev === rev && r.reason === "sent") : null;
   if (rev && !revision) notFound();
   const src = revision ? quoteAsOfRevision(q, revision) : q;
+  // Box goods sale (spec 2026-10-21): the whole customer PDF is the BOM quote PDF's layout (#360) — no title page,
+  // no cut sheets, no datasheet links, no photos. Read from the quote as printed (a revision's frozen flag).
+  const bomLayout = bom || boxSaleOf(src);
   // A revision render shows what was sent: live edits since that revision (content changed after it was cut) would make the live-built cut sheets disagree, so they are skipped.
   const cutSheetsOk = !revision || !(typeof q.contentChangedAt === "number" && q.contentChangedAt > revision.at);
   // The links' absolute origin — the print origin, the Cover PDF's way (spec §5). Unresolvable → no links page.
   // A BOM render has no links page, so it needs no origin.
   let origin = "";
-  if (!bom) {
+  if (!bomLayout) {
     const h = await headers();
     const where = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
     origin = "origin" in where ? where.origin : "";
@@ -93,21 +99,24 @@ export default async function PrintQuotePage({
     // #282 perks+points — the customer's purchase perks line (program on only).
     purchasePerksForCompany(src.customerId),
     // #292 — Client-style cut sheets after the estimate, only when the quote asks for them. A failure or a slow load (8 s) drops them, never the PDF — and says so in the server log.
-    !bom && part !== "tail" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
+    !bomLayout && part !== "tail" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
     // Spec 2026-10-16 §5 — the datasheet links: the customer PDF only (never a bidder's), never in the "main" part.
-    !bom && !bidder && part !== "main" ? loadDatasheetLinkRows(q, origin) : [],
+    !bomLayout && !bidder && part !== "main" ? loadDatasheetLinkRows(q, origin) : [],
   ]);
   if (bidder && !addressee) notFound();
   // An empty links part would print a blank page — refuse it, so the generator's tail render fails and says the links are missing.
   if (part === "tail" && !links.length) notFound();
   const doc = quoteDocumentDataFor(src, cust, settings, addressee);
-  if (bom) {
+  if (bomLayout) {
+    // #365: each plain catalog line prints "Model — Description" (never throws: a failed read prints descriptions only).
+    // A box sale's whole PDF takes this branch too, so it gets the models like any BOM view.
+    const bomModelParts = await loadBomModelPartsFor(doc.sections);
     return (
       <main>
         <style>{QUOTE_PRINT_CSS}</style>
         {/* The BOM tab's own layout (web: no title page, the investment band kept) — Jeff, 2026-10-20. */}
         <style>{QUOTE_WEB_EMBED_CSS}</style>
-        <QuoteDocument {...bomViewProps(doc)} layout="web" rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
+        <QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout="web" rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
       </main>
     );
   }

@@ -339,7 +339,7 @@ export default function TrackModal({
         editing ? (
           <>Updates this track in {secName} · the line is rebuilt in place at today&rsquo;s catalog prices</>
         ) : (
-          <>Adds one track line to {secName} · its parts come from the catalog and appear on the parts list</>
+          <>Adds one track line to {secName} · its parts come from the catalog and appear on the Review spreadsheet</>
         )
       }
       onClose={onClose}

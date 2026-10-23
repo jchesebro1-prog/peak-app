@@ -6,6 +6,7 @@
 
 export type ServiceType =
   | "system"
+  | "box_sale"
   | "flame_test"
   | "repair"
   | "inspection"
@@ -31,6 +32,17 @@ export const SERVICE_TYPES: Array<{
     key: "system",
     label: "System / equipment quote",
     sub: "Full line-item estimator",
+    badge: null,
+    badgeInk: "",
+    badgeSoft: "",
+    badgeBd: "",
+  },
+  {
+    // Box goods sale (spec 2026-10-21): an Estimator system estimate with the switch on (BOX_SALE_COPY —
+    // copied, this file stays import-free; the harness pins the two equal).
+    key: "box_sale",
+    label: "Box goods sale",
+    sub: "Equipment + freight only — the customer gets the itemized BOM",
     badge: null,
     badgeInk: "",
     badgeSoft: "",
@@ -100,6 +112,7 @@ export function isServiceType(v: string | null | undefined): v is ServiceType {
  *  ("custom" is a system quote with a user-named category, #110). */
 export const BUILDER_BASE: Record<ServiceType, string> = {
   system: "/estimator",
+  box_sale: "/estimator",
   custom: "/estimator",
   flame_test: "/flame-tests/quote",
   repair: "/repairs/quote",
@@ -131,6 +144,8 @@ export function builderPath(type: ServiceType, customerId: string, opts: Builder
     if (t) p.set(k, t);
   };
   put("customer", customerId);
+  // Box goods sale: the Estimator opens a new estimate with the switch on.
+  if (type === "box_sale") p.set("box", "1");
   if (type === "custom") put("category", opts.category);
   put("name", opts.name);
   if (type !== "rental") put("venue", opts.venue);

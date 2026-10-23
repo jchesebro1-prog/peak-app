@@ -17,9 +17,18 @@ export type QuotePdfOptions = {
   pdfItemizedAppendix: boolean;
   /** #292 — append Client-style curtain cut sheets after the estimate. Off by default. */
   pdfCutSheets: boolean;
+  /** #364 — Build package → BOM quote → Show on BOM. The BOM view only (the
+   *  BOM tab, BOM PDF, saved preview's BOM and the client's online BOM), never
+   *  the estimate PDF, Cover PDF, bidder PDFs or package page. All on by
+   *  default; absent on older quotes → on. Line prices still yield to
+   *  `pdfPrices` (effective = pdfPrices && bomLinePrices — bomViewProps). */
+  bomLinePrices: boolean;
+  bomMaterials: boolean;
+  bomLabor: boolean;
+  bomFreight: boolean;
 };
 
-export const PDF_TOGGLE_KEYS = ["pdfQty", "pdfNotes", "pdfPrices", "pdfCover", "pdfTerms", "pdfOptions", "pdfItemizedAppendix", "pdfCutSheets"] as const;
+export const PDF_TOGGLE_KEYS = ["pdfQty", "pdfNotes", "pdfPrices", "pdfCover", "pdfTerms", "pdfOptions", "pdfItemizedAppendix", "pdfCutSheets", "bomLinePrices", "bomMaterials", "bomLabor", "bomFreight"] as const;
 
 export const DEFAULT_PDF_OPTIONS: QuotePdfOptions = {
   detail: "itemized",
@@ -31,6 +40,10 @@ export const DEFAULT_PDF_OPTIONS: QuotePdfOptions = {
   pdfOptions: true,
   pdfItemizedAppendix: false,
   pdfCutSheets: false,
+  bomLinePrices: true,
+  bomMaterials: true,
+  bomLabor: true,
+  bomFreight: true,
 };
 
 export function normalizePdfOptions(raw: unknown): QuotePdfOptions {

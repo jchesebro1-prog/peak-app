@@ -1,6 +1,7 @@
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { renderSignedQuotePrintPdf, SIGNED_PRINT_RENDER_DEADLINE_MS, SIGNED_PRINT_RENDER_TIMEOUT_MS, type SignedPrintRender } from "@/lib/quote-pdf/signed-print-pdf";
 import { coverPdfFileName } from "./cover";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 
 /**
  * #301 slice A (R7) — one headless-Chrome render of a system estimate's 1–2
@@ -32,5 +33,7 @@ export function renderCoverPdf(quoteId: string, host: string | null, proto: stri
     noSecret: COVER_NO_SECRET,
     failed: COVER_RENDER_FAILED,
     logTag: "cover",
+    // Box goods sale (spec 2026-10-21): no Cover PDF — a 404, as for a non-system quote.
+    refuse: boxSaleOf,
   });
 }

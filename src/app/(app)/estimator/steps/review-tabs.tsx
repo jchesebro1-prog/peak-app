@@ -2,7 +2,7 @@
 
 import { useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import {
-  datasheetCell, frameKey, frameSrc, frameWidth, framedTab, nextReviewTab, reviewPanelId, reviewTabId, REVIEW_DEVICE_LABEL, REVIEW_DEVICES, REVIEW_TAB_LABEL, REVIEW_TABS,
+  datasheetCell, frameKey, frameSrc, frameWidth, framedTab, nextReviewTab, reviewPanelId, reviewTabId, REVIEW_DEVICE_LABEL, REVIEW_DEVICES, REVIEW_TAB_LABEL, reviewTabsFor,
   REVIEW_UI_COPY as COPY, tabNeedsSave, type ReviewDevice, type ReviewTab,
 } from "@/lib/estimate-review/review-ui";
 import type { DocLinkView, ReviewDatasheetRow, ReviewDrawingRow } from "@/lib/estimate-output/package-preview";
@@ -49,13 +49,16 @@ const MONO: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: 11, colo
  */
 export function ReviewTabs({ s, docs }: { s: EstimatorState; docs: ReviewDocsResult | null }) {
   const { doSave, loadedId, next, pdf, pdfDirty, phone, setPdf, statusChanging, tierResolving } = s;
-  const [tab, setTab] = useState<ReviewTab>("document");
+  // Box goods sale (spec 2026-10-21): Document + BOM only; a tab it doesn't offer reads as Document.
+  const tabs = reviewTabsFor(s.boxSale);
+  const [picked, setTab] = useState<ReviewTab>("document");
+  const tab: ReviewTab = tabs.includes(picked) ? picked : "document";
   const [device, setDevice] = useState<ReviewDevice>("desktop");
   const framed = framedTab(tab);
   const src = frameSrc(loadedId, tab);
   const tabRefs = useRef<Partial<Record<ReviewTab, HTMLButtonElement | null>>>({});
   const onTabKey = (e: KeyboardEvent<HTMLButtonElement>) => {
-    const to = nextReviewTab(tab, e.key);
+    const to = nextReviewTab(tab, e.key, tabs);
     if (!to) return;
     e.preventDefault();
     setTab(to);
@@ -123,7 +126,7 @@ export function ReviewTabs({ s, docs }: { s: EstimatorState; docs: ReviewDocsRes
         style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "8px 14px", borderBottom: "1px solid #e4e7ec", background: "#f7f8fa" }}
       >
         <div role="tablist" aria-label="What the client sees" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-          {REVIEW_TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t}
               ref={(el) => {

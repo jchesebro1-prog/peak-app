@@ -52,7 +52,20 @@ const actionLink: CSSProperties = {
   border: "none",
 };
 
-export type PdfToggle = "pdfQty" | "pdfNotes" | "pdfPrices" | "pdfCover" | "pdfTerms" | "pdfOptions" | "pdfItemizedAppendix" | "pdfCutSheets";
+export type PdfToggle =
+  | "pdfQty"
+  | "pdfNotes"
+  | "pdfPrices"
+  | "pdfCover"
+  | "pdfTerms"
+  | "pdfOptions"
+  | "pdfItemizedAppendix"
+  | "pdfCutSheets"
+  // #364 — Build package → BOM quote → Show on BOM (the BOM view only).
+  | "bomLinePrices"
+  | "bomMaterials"
+  | "bomLabor"
+  | "bomFreight";
 
 /** #333 — the Client package tab's "Estimate PDF — line detail" group (the old
  *  Show-on-PDF block minus the per-system presentation list, the Itemized
@@ -87,6 +100,24 @@ export type PdfPreviewProps = {
   actionsInline?: boolean;
 };
 
+/** The Payment terms select — shared by the Client package tab's line-detail group and a box sale's BOM quote tab. */
+export function PaymentTermsSelect(p: { value: PaymentTerms; options: readonly PaymentTerms[]; onChange: (terms: PaymentTerms) => void }) {
+  return (
+    <select
+      value={p.value}
+      onChange={(event) => p.onChange(event.target.value as PaymentTerms)}
+      aria-label="Payment terms"
+      style={{ border: "1px solid #dfe2e8", borderRadius: 7, background: "#fff", color: "#5b616e", padding: "6px 8px", fontSize: 11.5 }}
+    >
+      {p.options.map((terms) => (
+        <option key={terms} value={terms}>
+          {terms}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export function PdfLineDetailGroup(p: PdfLineDetailProps) {
   const isItemized = p.detail === "itemized";
   return (
@@ -115,18 +146,7 @@ export function PdfLineDetailGroup(p: PdfLineDetailProps) {
       <button type="button" onClick={() => p.togglePdf("pdfTerms")} style={p.pdfTerms ? segOn : segOff} aria-pressed={p.pdfTerms}>
         {(p.pdfTerms ? "✓ " : "") + "Terms"}
       </button>
-      <select
-        value={p.paymentTerms}
-        onChange={(event) => p.setPaymentTerms(event.target.value as PaymentTerms)}
-        aria-label="Payment terms"
-        style={{ border: "1px solid #dfe2e8", borderRadius: 7, background: "#fff", color: "#5b616e", padding: "6px 8px", fontSize: 11.5 }}
-      >
-        {p.paymentTermsOptions.map((terms) => (
-          <option key={terms} value={terms}>
-            {terms}
-          </option>
-        ))}
-      </select>
+      <PaymentTermsSelect value={p.paymentTerms} options={p.paymentTermsOptions} onChange={p.setPaymentTerms} />
     </div>
   );
 }

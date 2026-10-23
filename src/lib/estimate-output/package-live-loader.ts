@@ -20,6 +20,7 @@ import { catalogFor } from "./package-loader";
 import { packageFrozenFields, packagePhotoSections, packageViewModel, type PackageViewProps } from "./package-model";
 import { specReadyFor } from "./package-spec-ready";
 import { previewHeaderLine, previewPath, staffPackageExtras, staffPartDocHref, type StaffPackageExtras } from "./package-preview";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 
 /**
  * Estimator Phase 4 (spec §11.1) — the staff preview's data, from the SAVED
@@ -66,7 +67,8 @@ export async function loadLivePackagePreview(
     loadKeyProductModels(packagePhotoSections(doc.sections), doc.document),
     catalogFor(packageBomSkus(doc.sections)),
     getEstimateOutputDefaults(),
-    liveExtras(q),
+    // Box goods sale (spec 2026-10-21): no datasheets, downloads or plans to read.
+    boxSaleOf(q) ? staffPackageExtras(null, false, [], q.id) : liveExtras(q),
   ]);
   const model = packageViewModel({
     doc,
@@ -81,6 +83,7 @@ export async function loadLivePackagePreview(
     view: opts.view,
     base: previewPath(q.id, "package"),
     letterheadSrc: opts.letterheadSrc,
+    boxSale: boxSaleOf(q),
   });
   // The page's Narrative / BOM toggle stays on the package tab.
   return { model: { ...model, narrativeHref: previewPath(q.id, "package"), bomHref: previewPath(q.id, "package", "bom") }, extras };
