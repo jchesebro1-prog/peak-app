@@ -15,7 +15,7 @@ import { normalCostOf, type ProjectDiscounts } from "@/lib/project-discounts/rul
  *  a legacy system) less any labor lines' share (#276, #279) — freight has
  *  no row of its own but is carried in the parts' sell.
  *  v2 (2026-10-20 spec): every row also says where its price came from and
- *  carries its line margin (before freight) beside the effective margin.
+ *  carries its line markup (before freight) beside the effective markup.
  *  #363: the menu now downloads the Review spreadsheet (review-sheet-xlsx.ts)
  *  built from `reviewSheetModel` below — the same rows, plus each row's Link
  *  and its section id, grouped per system with that system's fees. The CSV
@@ -59,13 +59,13 @@ export const PARTS_CSV_HEADER: string[] = [
   "Qty",
   "Unit Cost",
   "Unit Sell",
-  "Line margin",
-  "Effective margin",
+  "Line markup",
+  "Effective markup",
   "Price source",
   "Notes",
 ];
 
-/** Price source of a cost-adjustment row (v2) — it carries no margins. */
+/** Price source of a cost-adjustment row (v2) — it carries no markups. */
 const ADJUSTMENT = "Adjustment";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -240,7 +240,7 @@ function expand(
         const partsList = included.reduce((a, comp) => a + comp.price * comp.qty, 0);
         // #366: sell is shared out by NORMAL cost — a project discount lowers a part's cost, never its share of sell.
         const partsNormal = included.reduce((a, comp) => a + normalCostOf(comp) * comp.qty, 0);
-        // Sell is allocated so the parts carry the line's margin and sum to
+        // Sell is allocated so the parts carry the line's markup and sum to
         // the line: by cost share, else by list-price share, else nothing.
         const sellOf = (comp: { cost: number; price: number; catalogCost?: number }) =>
           partsNormal > 0 ? normalCostOf(comp) * lineSell / partsNormal
@@ -362,18 +362,17 @@ export function partsListRows(
   return [...rows.values()];
 }
 
-/** A margin as a one-decimal percent (v2) — "" when the sell is zero or not
- *  finite; negative when below cost; never "-0.0%". */
-function marginPct(sell: number, cost: number): string {
-  if (!Number.isFinite(sell) || !Number.isFinite(cost) || Math.abs(sell) < 1e-9) return "";
-  const v = Math.round(((sell - cost) / sell) * 1000) / 10;
+/** A markup as a one-decimal percent — "" when the cost is zero or not finite; negative when below cost; never "-0.0%". */
+function markupPct(sell: number, cost: number): string {
+  if (!Number.isFinite(sell) || !Number.isFinite(cost) || Math.abs(cost) < 1e-9) return "";
+  const v = Math.round(((sell - cost) / cost) * 1000) / 10;
   return (v === 0 ? 0 : v).toFixed(1) + "%";
 }
 
 /** CSV body rows under PARTS_CSV_HEADER (#262, v2); [] when empty. Item name
  *  is the model number, else the SKU. Notes carries "Part of: …", a "per
  *  <unit>" for anything not sold each, then internal notes. Cost-adjustment
- *  rows print no margins. */
+ *  rows print no markups. */
 export function partsListCsvRows(rows: PartsListRow[]): (string | number)[][] {
   return rows.map((r) => {
     const adjustment = isAdjustmentRow(r);
@@ -386,8 +385,8 @@ export function partsListCsvRows(rows: PartsListRow[]): (string | number)[][] {
       r.qty,
       r.unitCost.toFixed(2),
       r.unitSell.toFixed(2),
-      adjustment ? "" : marginPct(r.lineSell, r.unitCost),
-      adjustment ? "" : marginPct(r.unitSell, r.unitCost),
+      adjustment ? "" : markupPct(r.lineSell, r.unitCost),
+      adjustment ? "" : markupPct(r.unitSell, r.unitCost),
       r.source,
       partsRowNotes(r),
     ];
@@ -409,7 +408,7 @@ export function partsRowNotes(r: PartsListRow): string {
   return notes.join("; ");
 }
 
-/** A cost-adjustment row — it carries cost only, so it prints no margins (v2, #363). */
+/** A cost-adjustment row — it carries cost only, so it prints no markups (v2, #363). */
 export function isAdjustmentRow(r: PartsListRow): boolean {
   return r.source === ADJUSTMENT;
 }

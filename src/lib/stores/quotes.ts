@@ -223,6 +223,7 @@ export type Quote = {
   assumptions?: string;
   termsText?: string;
   value: number;
+  /** The blended MARKUP fraction (0.43 = 43 %) — field name kept (#367). */
   margin: number;
   /** #367 — present once this doc's percentages are markup (doc-basis.ts). */
   pricingBasis?: "markup";
@@ -230,8 +231,9 @@ export type Quote = {
    *  contact → company → base, re-stamped when the customer/contact changes
    *  and when a revision is cut. Never shown to the customer. */
   pricingTier?: string | null;
-  /** The tier's margin fraction as it stood at stamp time (0.30 = 30%) —
-   *  the SEED for pricing tools; `margin` above stays the blended actual. */
+  /** The tier's markup fraction as it stood at stamp time (0.43 = 43 %; the
+   *  field keeps its name, #367) — the SEED for pricing tools; `margin` above
+   *  stays the blended actual markup. */
   tierMargin?: number | null;
   status: QuoteStatus;
   /** 'estimator' | 'quick' */

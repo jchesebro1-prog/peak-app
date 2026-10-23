@@ -117,6 +117,32 @@ export async function markupPureChecks(ok: Ok) {
   const p3 = markupSettingsPatch({}, ["margin"], false);
   ok(!!p3 && Object.keys(p3).join() === "_pricingBasis", "markup: an empty blob still gets the stamp (so a later admin edit is never re-converted)");
   ok(JSON.stringify(withoutBasisKeys({ margin: 0.43, _pricingBasis: "markup", _marginBackup: { margin: 0.3 } })) === JSON.stringify({ margin: 0.43 }), "markup: getters strip the stamp + backup");
+  // Task 9 — screens and words: source pins on the copy.
+  {
+    const { readFileSync } = await import("node:fs");
+    const rd = (p: string) => readFileSync(p, "utf8");
+    const E = "src/app/(app)/estimator/";
+    const sc = rd(E + "section-card.tsx"), bs = rd(E + "steps/build-step.tsx");
+    ok(sc.includes('sysMarkup + "% markup"') && sc.includes("max={125}") && !sc.includes("max={55}") && sc.includes('title="Line markup"') && sc.includes("and the markup follows"),
+      "markup copy: the system slider runs 0–125 and the line/system labels say markup");
+    ok(bs.includes("Markup · all systems") && bs.includes("max={125}") && !bs.includes("max={55}"), "markup copy: Build's all-systems slider runs 0–125");
+    ok(sc.includes('"—"') && /it\.qty \* it\.cost > 0 \? Math\.round\(lineMarkup \* 100\) \+ "%" : "—"/.test(sc) && /h\.cost > 0 && h\.list > 0 \? Math\.round\(markup \* 100\) \+ "%" : "—"/.test(rd(E + "catalog-picker.tsx")),
+      "markup copy: a $0-cost line, custom part or catalog hit shows — instead of a 0 %");
+    const lm = rd(E + "labor-modal.tsx");
+    ok(lm.includes("Markup (%)") && lm.includes('placeholder="43"') && !/Margin \(%\)/.test(lm), "markup copy: the labor modal asks for Markup (%), placeholder 43");
+    ok(["flame-tests", "repairs", "inspections"].every((d) => {
+      const c = rd(`src/app/(app)/${d}/quote/controls.tsx`);
+      return /Markup · \{r\?\.overridden \? fmtPct\(r\.\w+\) : fmtPct\(markupPts \/ 100\)\}%/.test(c) && !/\} pts/.test(c) && !/Margin ·/.test(c);
+    }), "markup copy: the three service builders read \"Markup · 42.9%\" (formatted), never raw points");
+    const reg = rd("src/lib/stores/pricing.ts");
+    ok(!/÷ \(1 − \w*[mM]argin\)|÷  \(1 − margin\)/.test(reg) && reg.includes('"Base markup"') && reg.includes('"Flame-test markup"') && reg.includes('"Default part markup"') && reg.includes("per-section markup 0–125%"),
+      "markup copy: Estimating Rules formulas and labels are on markup (no ÷ (1 − margin) left)");
+    const csvSrc = rd(E + "parts-csv.ts"), xl = rd(E + "review-sheet-xlsx.ts");
+    ok(csvSrc.includes('"Line markup"') && csvSrc.includes('"Effective markup"') && !/Line margin|Effective margin/.test(csvSrc + xl),
+      "markup copy: the parts CSV and the review sheet carry markup columns only");
+    const dash = rd("src/app/(app)/_dashboard/widgets/backward.tsx") + rd("src/app/(app)/_dashboard/widgets/installs.tsx");
+    ok(dash.includes('"Avg. markup"') && dash.includes('centerSub="markup"') && !/Avg\. margin|Projected margin/.test(dash), "markup copy: the dashboard tiles say Avg. markup / Projected profit");
+  }
 }
 
 export async function markupDbChecks(ok: Ok) {

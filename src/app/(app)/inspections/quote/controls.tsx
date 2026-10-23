@@ -49,7 +49,7 @@ import {
  * QuoteBuilder — the auto-priced rigging-inspection quote estimator
  * (inspection twin of the flame-test QuoteBuilder). Holds the ephemeral
  * builder state (customer, venue toggles, line-set counts, level,
- * margin/rate knobs) and previews pricing live with the inspection-engine
+ * markup/rate knobs) and previews pricing live with the inspection-engine
  * math inlined below (the engine module itself pulls in the server
  * doc-store, so it can't be imported into a client bundle — Save/Approve
  * re-price server-side in actions.ts).
@@ -67,7 +67,7 @@ export type BuilderLocation = {
   oneWayMiles: number | null;
   oneWayMin: number | null;
 };
-export type BuilderContact = { name: string; role: string; email: string; primary: boolean   /** Personal tier margin when the contact has their own tier (item 11). */
+export type BuilderContact = { name: string; role: string; email: string; primary: boolean   /** Personal tier markup when the contact has their own tier (item 11). */
   tierMargin?: number | null;
   /** The contact's own tier — labels the #254 "Use <Tier>" prompt. */
   tier?: PricingTier | null;
@@ -77,9 +77,9 @@ export type BuilderCustomer = {
   name: string;
   locations: BuilderLocation[];
   contacts: BuilderContact[];
-  /** Company-level tier margin fraction (item 11, D88); null → Base/global. */
+  /** Company-level tier markup fraction (item 11, D88); null → Base/global. */
   tierMargin?: number | null;
-  /** The company's own tier (null = none → the builder's default margin, #254). */
+  /** The company's own tier (null = none → the builder's default markup, #254). */
   tier?: PricingTier | null;
 };
 export type BuilderOffice = { name: string; lat: number | null; lng: number | null; quoteDefault?: boolean };
@@ -126,7 +126,7 @@ export type BuilderInitial = {
   rewardCredit?: number;
   /** #254: the saved quote's own knob in points (absent for a new quote) — never re-seeded on load. */
   savedMarkupPts?: number | null;
-  /** #254: the saved quote's stamped tier margin fraction (seeds `prevSeedPts`). */
+  /** #254: the saved quote's stamped tier markup fraction (seeds `prevSeedPts`). */
   stampedTierMarkup?: number | null;
   /** #248 Task 4 — set only for a loaded `source === "portal-service"` quote. */
   portal?: PortalPanelData | null;
@@ -261,7 +261,7 @@ function computePricing(
     rates: tr,
     override,
   });
-  // #217: the engine's finish — min fee floor, margin, $25 rounding, typed total.
+  // #217: the engine's finish — min fee floor, markup, $25 rounding, typed total.
   const fin = finishInspection({
     cost: laborCost + travel.total,
     minFee: rates.minFee,
@@ -359,7 +359,7 @@ export function QuoteBuilder({
   const [level, setLevel] = useState(initial.level === 2 ? 2 : 1);
   const [notes, setNotes] = useState(initial.notes);
   const [ratesOpen, setRatesOpen] = useState(false);
-  /* #254: the knob opens at a saved quote's own margin, else the tier seed for
+  /* #254: the knob opens at a saved quote's own markup, else the tier seed for
      the opened customer/contact; `prevSeedPts` is the seed it last followed —
      a knob still there is untouched and follows the next customer/contact. */
   const [seed0] = useState(() =>
@@ -463,7 +463,7 @@ export function QuoteBuilder({
     if (locs.length && !locs.some((l) => sel[l.id].on)) sel[locs[0].id].on = true;
     const primary = c?.contacts.find((x) => x.primary) || c?.contacts[0] || null;
     setCustomerId(id);
-    // Re-seed the margin knob from the new customer's tier (contact's own
+    // Re-seed the markup knob from the new customer's tier (contact's own
     // tier wins; item 11, D88) — a hand-set knob is kept with a prompt (#254).
     reseedTier(c, primary ? primary.name : "");
     setVenueSel(sel);
@@ -1091,7 +1091,7 @@ export function QuoteBuilder({
                 {r?.minApplied && (
                   <div style={{ fontSize: 10.5, color: "#b4543a", margin: "-2px 0 8px", lineHeight: 1.45 }}>
                     Raised to the {money(baseRates.minFee)} minimum — labor + travel came to{" "}
-                    {money(r.sellRaw)} with margin.
+                    {money(r.sellRaw)} with markup.
                   </div>
                 )}
                 <div
@@ -1104,7 +1104,7 @@ export function QuoteBuilder({
                   }}
                 >
                   <span style={{ color: "#5b616e" }}>
-                    Margin · {r?.overridden ? fmtPct(r.effectiveMarkup) : markupPts} pts
+                    Markup · {r?.overridden ? fmtPct(r.effectiveMarkup) : fmtPct(markupPts / 100)}%
                   </span>
                   <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "#1f7a52" }}>
                     +{money(r?.marginAmount || 0)}
@@ -1133,8 +1133,8 @@ export function QuoteBuilder({
                     margin: "-2px 0 9px",
                   }}
                 >
-                  <span>{MARKUP_SLIDER_MIN} pts</span>
-                  <span>{MARKUP_SLIDER_MAX} pts</span>
+                  <span>{MARKUP_SLIDER_MIN}%</span>
+                  <span>{MARKUP_SLIDER_MAX}%</span>
                 </div>
                 <TierSeedPrompt prompt={tierPrompt} onUse={applyTierSeed} accent={accent} />
                 <ServiceTotalField
@@ -1249,7 +1249,7 @@ export function QuoteBuilder({
                     {baseRates.lineSetMinutes} min/line set · {baseRates.baseHours} base hrs per
                     visit · Level 2 ×{baseRates.level2Mult} · travel time rounded up to{" "}
                     {baseRates.travelRoundMin} min · {money(baseRates.minFee)} job minimum ·{" "}
-                    {markupPts}-pt margin on top. Multiple venues on one quote share a single round
+                    {fmtPct(markupPts / 100)}% markup on top. Multiple venues on one quote share a single round
                     trip.
                   </div>
                 </div>

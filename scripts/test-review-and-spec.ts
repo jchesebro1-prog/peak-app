@@ -4169,12 +4169,9 @@ import {
   const catalogG = groupOf("catalog");
   const fixtureG = groupOf("fixture");
   ok(travelG.live === true, "#60-67: travel group flips to live: true");
-  /* catalog stays NOT live on purpose: the value is persisted, but nothing in the
-     codebase consumes it — a part with no list price is skipped, never defaulted
-     through this margin. Tagging it "live" would claim an edit reprices something
-     when it cannot (the punch #70 / #14 failure mode). Flip this the same day a
-     real consumer lands. */
-  ok(catalogG.live === false, "#60-67: catalog group stays NOT live — the rate persists but no pricing path reads it yet, so claiming 'live' would be false");
+  /* #367: the catalog default markup IS consumed now (Equipment map, Grid swap search, virtual
+     parts, Quick Design / Grid price table), so the group is live and the row is not reference. */
+  ok(catalogG.live === true, "#60-67 (#367): catalog group is live — the Equipment map, Grid swap search, virtual parts and the Quick Design / Grid price table read the default markup");
   ok(fixtureG.live === true, "#60-67: fixture group flips to live: true");
 
   const rateRows = (g: PricingGroup): RateEntry[] =>
@@ -4184,8 +4181,8 @@ import {
     "#60-67: every travel rate row carries store:'travel' and ref:false"
   );
   ok(
-    rateRows(catalogG).every((it) => it.store === "catalog" && it.ref === true),
-    "#60-67: the catalog rate is wired to store:'catalog' (so it persists) but stays ref:true (so the UI still calls it reference, honestly)"
+    rateRows(catalogG).every((it) => it.store === "catalog" && it.ref === false),
+    "#60-67 (#367): the catalog rate is wired to store:'catalog' and is no longer reference (ref:false) — a real pricing path reads it"
   );
   ok(
     rateRows(fixtureG).every((it) => it.ref === false && it.store === "fixture"),
@@ -23777,8 +23774,8 @@ import { deriveSeededMarker as deriveSeededMarker217 } from "@/lib/service-prici
   // ---- minors (b)/(c), in the shared ServiceTotalField so all three
   // builders get them ----
   const stf217fix = readFileSync(join(process.cwd(), "src/components/service-total-field.tsx"), "utf8");
-  ok(!/Typed total · auto is/.test(stf217fix) && /Typed total · Reset keeps this margin/.test(stf217fix),
-    "#217 fix wave (b): the typed-total note states what Reset actually does (it parks the slider at the back-solved margin) instead of naming a figure Reset won't reproduce");
+  ok(!/Typed total · auto is/.test(stf217fix) && /Typed total · Reset keeps this markup/.test(stf217fix),
+    "#217 fix wave (b): the typed-total note states what Reset actually does (it parks the slider at the back-solved markup) instead of naming a figure Reset won't reproduce");
   ok(/disabled \? "—" : String\(Math\.round\(autoTotal\)\)/.test(stf217fix),
     "#217 fix wave (c): a disabled Total field shows \"—\", never a bare 0 that reads as a real free quote");
 }
@@ -37432,7 +37429,7 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   const near = (a: number, b: number) => Math.abs(a - b) < 0.01;
   const costSum = (rs: typeof rows) => rs.reduce((a, r) => a + r.qty * r.unitCost, 0);
   const sellSum = (rs: typeof rows) => rs.reduce((a, r) => a + r.qty * r.unitSell, 0);
-  ok(p262Header.join(",") === "Manufacturer,Item name,Description,Room,System,Qty,Unit Cost,Unit Sell,Line margin,Effective margin,Price source,Notes", "#262 v2 parts list: the CSV header is the twelve columns, in order");
+  ok(p262Header.join(",") === "Manufacturer,Item name,Description,Room,System,Qty,Unit Cost,Unit Sell,Line markup,Effective markup,Price source,Notes", "#262 v2 parts list: the CSV header is the twelve columns, in order");
   ok(!["LAB-1", "LAB-X", "OPT-1", "ZERO", "SA-F1", "SA-F2", "SAFETY", "VQ"].some((s) => rows.some((r) => r.sku === s)), "#262 parts list: labor sections, labor items, options, zero-qty items, the assembly line itself, qty-0 components and an expanded vendor-quote line never appear");
   ok(rows.map((r) => r.sku || r.modelNumber || r.desc).join("|") === "LAMP-A|CLAMP|Cost adjustment — Wash (line cost differs from its parts)|PLAIN-1|PLAIN-2|UNKNOWN-9|CAT-ONLY|TR-10|Base plate|VQ2|CABLE-FT|CLAMP", "#262 parts list: rows come out in first-appearance order");
   ok(rows.filter((r) => r.system === "Lighting").every((r) => r.room === "Stage") && by("CLAMP", "Rigging")!.room === "Main Hall", "#262 parts list: room is the section's own room, else the defaultRoom fallback");
@@ -37468,19 +37465,19 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   ok(near(sellSum(rows), expectedSell), "#262 parts list: Σ qty × Unit Sell equals the estimate's material sell");
   const csv = p262Csv(rows);
   ok(csv.length === rows.length && !csv.some((r) => r.includes("Total")), "#262 parts list: the CSV has one line per row and no Total row");
-  ok(csv[1].join("|") === "Altman|C-CLAMP-PN|Clamp|Stage|Lighting|8|10.00|20.00|50.0%|50.0%|Catalog|Part of: Cyc light, Wash", "#262 v2 parts list: a CSV row prints the twelve columns, cents, margins, source and \"Part of:\" in Notes");
+  ok(csv[1].join("|") === "Altman|C-CLAMP-PN|Clamp|Stage|Lighting|8|10.00|20.00|100.0%|100.0%|Catalog|Part of: Cyc light, Wash", "#262 v2 parts list: a CSV row prints the twelve columns, cents, markups (20 sell / 10 cost → 100.0%), source and \"Part of:\" in Notes");
   ok(csv.find((r) => r[2] === "Plain one")?.[11] === "Hang on 1st elec" && csv.find((r) => r[2] === "Cable")?.[11] === "per ft", "#262 parts list: the internal note (trimmed) and a non-ea unit (\"per ft\") land in Notes");
   ok(p262Csv([]).length === 0, "#262 parts list: an empty list has no rows");
   const manualVq = p262Rows([{ id: "s3", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "", "Acme truss package", 1, 350, { vendorQuoteId: "VQ-1" })] }], vqs, {});
   const vAdj = manualVq.find((r) => r.desc.startsWith("Cost adjustment"));
   ok(vAdj?.unitCost === 50 && vAdj.unitSell === 0 && vAdj.partOf.join(";") === "Vendor quote Acme #Q-77" && vAdj.desc === "Cost adjustment — Vendor quote Acme #Q-77 (quote total differs from its lines)" && near(costSum(manualVq), 350) && near(sellSum(manualVq), 700), "#262 parts list: a typed vendor total that differs from its lines adds an adjustment row, so the file still totals to the line cost and sell");
   ok(p262Skus(sections).join(",") === "LAMP-A,CLAMP,PLAIN-1,PLAIN-2,UNKNOWN-9,CAT-ONLY,VQ,VQ2,CABLE-FT", "#262 parts list: partsListSkus lists component SKUs, never the assembly line's own SKU (a vendor-quote line's SKU is kept — it can't see the vendor quotes)");
-  // --- v2 (2026-10-20 spec): Item name, Line / Effective margin, Price source ---
+  // --- v2 (2026-10-20 spec): Item name, Line / Effective markup, Price source ---
   ok(rows.map((r) => r.source).join("|") === "Catalog|Catalog|Adjustment|Catalog|Not in catalog|Not in catalog|Catalog|Vendor quote — Acme #Q-77|Vendor quote — Acme #Q-77|Not in catalog|Not in catalog|Catalog", "#262 v2 parts list: components and catalog SKUs say Catalog, vendor lines name the vendor + quote #, cost-adjustment rows say Adjustment, unresolved SKUs (and a missing vendor quote) say Not in catalog");
   ok(lamp.lineSell === 200 && clamp.lineSell === 20 && truss.lineSell === 100, "#262 v2 parts list: lineSell is the allocated unit sell before the system factor (LAMP 200, CLAMP 20, truss 100)");
   ok(csv.find((r) => r[2] === "Mystery part")?.[1] === "UNKNOWN-9" && csv.find((r) => r[2] === "Source Four 750W")?.[1] === "S4-750" && csv.find((r) => r[2] === "Base plate")?.[1] === "", "#262 v2 parts list: Item name is the model number, else the SKU, else blank");
   const adjCsv = csv.find((r) => String(r[2]).startsWith("Cost adjustment — Wash"));
-  ok(adjCsv?.[8] === "" && adjCsv?.[9] === "" && adjCsv?.[10] === "Adjustment", "#262 v2 parts list: a cost-adjustment row prints no margins");
+  ok(adjCsv?.[8] === "" && adjCsv?.[9] === "" && adjCsv?.[10] === "Adjustment", "#262 v2 parts list: a cost-adjustment row prints no markups");
 
   const srcInfo: Record<string, P262Info> = { CAT: { mfr: "ETC" }, CAT2: { mfr: "ETC" }, CAT3: { mfr: "ETC" }, DUP: { mfr: "ETC" } };
   const srcSec: P262Section = { id: "s5", name: "Sources", kind: "materials", mfr: "", freightPct: 0, items: [
@@ -37502,15 +37499,15 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   ok(srcRows.map((r) => r.source).join("|") === "Price on request|Allowance|Curtain calculator|Custom|Catalog|Catalog — sell edited|Catalog — sell edited|Catalog|Custom|Vendor quote — Bolt", "#262 v2 parts list: POR, allowance, curtain, custom, catalog, a typed unit sell, a typed extended sell, and a vendor quote with no number each get their label");
   ok(srcRows.filter((r) => r.sku === "DUP").map((r) => `${r.source}:${r.qty}`).join("|") === "Catalog:1|Custom:1", "#262 v2 parts list: the same part as a catalog line and as a custom line stays two rows (source is in the merge key)");
   const sc = (desc: string) => srcCsv.find((r) => r[2] === desc);
-  ok(sc("Catalog plain")?.[8] === "50.0%" && sc("Catalog plain")?.[9] === "50.0%", "#262 v2 parts list: with no freight or rounding, Line margin = Effective margin (80 sell / 40 cost → 50.0%)");
-  ok(sc("Catalog typed unit sell")?.[8] === "60.0%" && sc("Catalog typed ext sell")?.[8] === "46.7%", "#262 v2 parts list: margins follow a typed unit sell (100 → 60.0%) and a typed extended sell (150 / 2 = 75 → 46.7%)");
-  ok(sc("Customer asked")?.[8] === "" && sc("Customer asked")?.[9] === "", "#262 v2 parts list: a zero-sell row prints blank margins");
+  ok(sc("Catalog plain")?.[8] === "100.0%" && sc("Catalog plain")?.[9] === "100.0%", "#262 v2 parts list: with no freight or rounding, Line markup = Effective markup (80 sell / 40 cost → 100.0%)");
+  ok(sc("Catalog typed unit sell")?.[8] === "150.0%" && sc("Catalog typed ext sell")?.[8] === "87.5%", "#262 v2 parts list: markups follow a typed unit sell (100 / 40 → 150.0%) and a typed extended sell (150 / 2 = 75 → 87.5%)");
+  ok(sc("Customer asked")?.[8] === "" && sc("Customer asked")?.[9] === "", "#262 v2 parts list: a zero-cost row prints blank markups (markup is undefined at $0 cost)");
 
   const typed = p262Rows([{ id: "s6", name: "Typed", kind: "materials", mfr: "", freightPct: 0, sellOverride: 125, items: [it(1, "CAT", "Catalog plain", 1, 50, { price: 100 })] }], [], srcInfo);
   const typedCsv = p262Csv(typed);
-  ok(typed[0]?.lineSell === 100 && typedCsv[0][7] === "125.00" && typedCsv[0][8] === "50.0%" && typedCsv[0][9] === "60.0%", "#262 v2 parts list: a typed system sell lifts Unit Sell and the Effective margin (60.0%) but not the Line margin (50.0%)");
+  ok(typed[0]?.lineSell === 100 && typedCsv[0][7] === "125.00" && typedCsv[0][8] === "100.0%" && typedCsv[0][9] === "150.0%", "#262 v2 parts list: a typed system sell lifts Unit Sell and the Effective markup (125 / 50 → 150.0%) but not the Line markup (100 / 50 → 100.0%)");
   const below = p262Csv(p262Rows([{ id: "s7", name: "Below", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "CAT", "Below cost", 1, 50, { price: 40 })] }], [], srcInfo));
-  ok(below[0][8] === "-25.0%" && below[0][9] === "-25.0%", "#262 v2 parts list: a below-cost line prints a negative margin");
+  ok(below[0][8] === "-20.0%" && below[0][9] === "-20.0%", "#262 v2 parts list: a below-cost line prints a negative markup (40 / 50 → -20.0%)");
   ok(srcCsv.every((r) => r.length === 12) && csv.every((r) => r.length === 12), "#262 v2 parts list: every CSV row has twelve cells");
 
   // Final review A — a saved vendor quote with no lines (typed total) still reads "Vendor quote — …"
@@ -37626,8 +37623,8 @@ function r363Fixture() {
   const tFees = r363Fees(typed);
   ok(tFees.typedPrice && tFees.adjustment === -129.04 && reconcile(tModel[0], typed) && r363Breakdown(tFees).endsWith("Typed price adjustment -$129.04"),
     "#363 systemFees: a typed system price below the computed one is a negative adjustment, named as such, and still reconciles");
-  ok(r363Header.join(",") === "Manufacturer,Item name,Description,Room,System,Qty,Unit Cost,Unit Sell,Ext Cost,Ext Sell,Line margin,Markup,Price source,Link,Notes",
-    "#363 review sheet: the fifteen columns, in order (Markup replaces Effective margin; Ext Cost / Ext Sell / Link added)");
+  ok(r363Header.join(",") === "Manufacturer,Item name,Description,Room,System,Qty,Unit Cost,Unit Sell,Ext Cost,Ext Sell,Markup,Price source,Link,Notes" && !r363Header.some((h) => /margin/i.test(h)),
+    "#363 review sheet: the fourteen columns, in order (#367: Markup is the only % column — Line margin is gone; Ext Cost / Ext Sell / Link added)");
   const xlsxSrc = readFileSync(join(process.cwd(), EST_DIR, "review-sheet-xlsx.ts"), "utf8");
   ok(!/^import\s+(?!type\b)[^;]*from\s+"exceljs"/m.test(xlsxSrc) && xlsxSrc.includes('await import("exceljs")') && !/^"use client"|^import [^;]*from "@\/(lib\/stores|db)\//m.test(xlsxSrc),
     "#363 review sheet: exceljs loads on demand (type-only static import), so it stays out of the Estimator's main bundle");
@@ -37654,17 +37651,17 @@ async function reviewSheet363Checks(check: typeof ok): Promise<void> {
     return typeof v === "string" ? v : "";
   };
   const header = r363Header.map((_, i) => text(1, i + 1));
-  check(header.join(",") === r363Header.join(",") && ws.getRow(1).getCell(1).font?.bold === true, "#363 workbook: the header row is the fifteen columns, bold");
+  check(header.join(",") === r363Header.join(",") && ws.getRow(1).getCell(1).font?.bold === true, "#363 workbook: the header row is the fourteen columns, bold");
   check(ws.views?.[0]?.state === "frozen" && (ws.views[0] as { ySplit?: number }).ySplit === 1 && !!ws.autoFilter, "#363 workbook: the header is frozen and filters");
-  const linkCell = ws.getRow(2).getCell(14).value as { text?: string; hyperlink?: string } | null;
+  const linkCell = ws.getRow(2).getCell(13).value as { text?: string; hyperlink?: string } | null;
   check(text(2, 3) === "Bracket" && linkCell?.hyperlink === "https://example.com/bracket" && linkCell?.text === "https://example.com/bracket",
     "#363 workbook: the Link column is a real hyperlink cell");
-  check(ws.getRow(4).getCell(14).value == null, "#363 workbook: a row with no safe link leaves Link blank");
+  check(ws.getRow(4).getCell(13).value == null, "#363 workbook: a row with no safe link leaves Link blank");
   const f = (r: number, c: number) => ws.getRow(r).getCell(c).value as { formula?: string; result?: unknown } | null;
   check(f(2, 9)?.formula === "F2*G2" && f(2, 10)?.formula === "F2*H2" && f(2, 9)?.result === 60 && f(2, 10)?.result === 120,
     "#363 workbook: Ext Cost = Qty × Unit Cost and Ext Sell = Qty × Unit Sell are formulas with cached results");
-  check(f(2, 12)?.formula === 'IF(G2=0,"",(H2-G2)/G2)' && f(2, 12)?.result === 1 && f(2, 11)?.formula === 'IF(H2=0,"",(H2-G2)/H2)' && f(2, 11)?.result === 0.5,
-    "#363 workbook: Markup = (Unit Sell − Unit Cost) ÷ Unit Cost and Line margin are live formulas (cached 100% / 50%)");
+  check(f(2, 11)?.formula === 'IF(G2=0,"",(H2-G2)/G2)' && f(2, 11)?.result === 1 && f(2, 12)?.formula === undefined,
+    "#363 workbook: Markup = (Unit Sell − Unit Cost) ÷ Unit Cost is a live formula (cached 100%) and the next column is Price source text, not a margin formula");
   check(ws.getRow(2).getCell(8).value === 60, "#363 workbook: Unit Sell is the line's own sell (before freight, rounding and bonuses)");
   const evil = ws.getRow(9);
   check(evil.getCell(3).value === '=HYPERLINK("http://evil.example","x")' && evil.getCell(3).type === ExcelJS.ValueType.String,
@@ -37673,13 +37670,13 @@ async function reviewSheet363Checks(check: typeof ok): Promise<void> {
     "#363 workbook: three subtotal rows close each system — System cost, System markup, System fees");
   check(f(10, 10)?.formula === "SUM(I2:I9)" && f(10, 10)?.result === 382.5 && f(11, 10)?.formula === "SUM(J2:J9)-SUM(I2:I9)" && f(11, 10)?.result === 382.5,
     "#363 workbook: System cost / System markup are SUM formulas over the system's rows, cached (382.50 / 382.50)");
-  check(ws.getRow(12).getCell(10).value === 85 && text(12, 15) === "Freight $40.48 · Estimator bonus $9.99 · Package bonus $13.57 · Price rounding $20.96",
+  check(ws.getRow(12).getCell(10).value === 85 && text(12, 14) === "Freight $40.48 · Estimator bonus $9.99 · Package bonus $13.57 · Price rounding $20.96",
     "#363 workbook: System fees is a number (85.00) with its breakdown in Notes");
   check(ws.getRow(10).getCell(3).font?.bold === true && ws.getRow(12).getCell(10).font?.bold === true && ws.getRow(10).getCell(1).border?.top?.style === "thin",
     "#363 workbook: the subtotal rows are bold, the first with a thin top border");
   check(ws.getRow(13).getCell(3).value == null && text(14, 3) === "Plain" && text(15, 3) === "System cost — Lighting" && f(15, 10)?.formula === "SUM(I14:I14)",
     "#363 workbook: one blank spacer row, then the next system (same name, its own block and ranges)");
-  check(ws.getRow(2).getCell(7).numFmt === "$#,##0.00" && ws.getRow(2).getCell(12).numFmt === "0.0%", "#363 workbook: money and percent formats");
+  check(ws.getRow(2).getCell(7).numFmt === "$#,##0.00" && ws.getRow(2).getCell(11).numFmt === "0.0%", "#363 workbook: money and percent formats");
 }
 
 /* --- #261: Quick Design plan text stays a fixed on-screen size however wide the plan draws; dimensions smaller still (D468) --- */

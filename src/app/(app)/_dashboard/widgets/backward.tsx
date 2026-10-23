@@ -42,7 +42,7 @@ export const BACKWARD_RENDERERS = {
     const cur = salesMetrics(quotes, start, end);
     const prior = salesMetrics(quotes, priorStart, start);
     const pt = Math.round((cur.avgMarkup - prior.avgMarkup) * 100);
-    return tile("Avg. margin", `${Math.round(cur.avgMarkup * 100)}%`, `${pt >= 0 ? "+" : ""}${pt}pt vs. prior · quotes created`);
+    return tile("Avg. markup", `${Math.round(cur.avgMarkup * 100)}%`, `${pt >= 0 ? "+" : ""}${pt}pt vs. prior · quotes created`);
   },
 
   "projected-profit": async (ctx) => {

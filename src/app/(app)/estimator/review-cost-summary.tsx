@@ -5,7 +5,7 @@ import { isEstimatorBonusItem, isPackageBonusItem } from "@/lib/estimate-bonus/f
 import { fmt, lineExtSellOf, systemFreight, systemItemsCost, systemMarkup, systemSellTotal, type QuoteTotals } from "./pricing";
 
 /**
- * #305 — Customer review's internal numbers (never on a customer document): cost, sell and margin per system.
+ * #305 — Customer review's internal numbers (never on a customer document): cost, sell and markup per system.
  * Phase 2b: In-total systems sit above the Total (their rows add up to it); alternate systems are listed
  * below it under "Alternates (not in total)".
  */
@@ -38,7 +38,7 @@ export function ReviewCostSummary({ sections, totals }: { sections: SpecSection[
             <th style={{ ...cell, textAlign: "left", fontWeight: 500 }}>System</th>
             <th style={{ ...num, fontWeight: 500 }}>Cost</th>
             <th style={{ ...num, fontWeight: 500 }}>Sell</th>
-            <th style={{ ...num, fontWeight: 500 }}>Margin (excl. freight)</th>
+            <th style={{ ...num, fontWeight: 500 }}>Markup (excl. freight)</th>
           </tr>
         </thead>
         <tbody>

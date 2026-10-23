@@ -18,7 +18,7 @@ import { DISCARD_COPY } from "@/lib/estimate-steps/discard-confirm";
  * "+ Add part from catalog".
  *
  * One vendor quote produces exactly ONE priced line on the estimate: the
- * vendor's rolled-up total, marked up by the section margin like any other
+ * vendor's rolled-up total, marked up by the line's markup like any other
  * cost line. The material lines captured here are descriptive and live on the
  * VendorQuote record, so flipping Single/Itemized is a render decision and
  * never leaks $0 rows onto the customer document.

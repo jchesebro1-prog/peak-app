@@ -343,7 +343,7 @@ export default function SectionCard(p: SectionCardProps) {
   const itemsCost = systemItemsCost(sec);
   const secFreight = systemFreight(sec);
   // #267: the system's actual price — a typed sell, or the auto price rounded
-  // up to the next $25 — and the margin it carries.
+  // up to the next $25 — and the markup it carries.
   const subtotal = systemSellTotal(sec);
   const sellAdj = systemSellAdjustment(sec);
   const sellSet = hasSellOverride(sec);
@@ -353,7 +353,7 @@ export default function SectionCard(p: SectionCardProps) {
   const visible = sec.items.filter(isSystemLine);
   const metaParts: string[] = [];
   metaParts.push(visible.length + " item" + (visible.length === 1 ? "" : "s"));
-  if (sysMarkup > 0 && isInternal) metaParts.push(sysMarkup + "% margin");
+  if (sysMarkup > 0 && isInternal) metaParts.push(sysMarkup + "% markup");
 
   const cd = p.customDraft;
   const cdQty = Math.max(1, parseInt(cd.qty, 10) || 0);
@@ -640,12 +640,12 @@ export default function SectionCard(p: SectionCardProps) {
                     textTransform: "uppercase",
                   }}
                 >
-                  Margin
+                  Markup
                 </span>
                 <input
                   type="range"
                   min={0}
-                  max={55}
+                  max={125}
                   value={sysMarkup}
                   onChange={(e) => p.onSetMarkup(e.target.value)}
                   style={{ width: 120, accentColor: "var(--accent)", cursor: "pointer" }}
@@ -682,7 +682,7 @@ export default function SectionCard(p: SectionCardProps) {
                         if (e.target.value.trim() === fmt(subtotal)) return;
                         p.onSetSell(e.target.value);
                       }}
-                      title="Type this system's sell price (freight included) — used exactly; the line prices stay as they are and the margin follows"
+                      title="Type this system's sell price (freight included) — used exactly; the line prices stay as they are and the markup follows"
                       aria-label="System sell price"
                       style={{
                         width: 108,
@@ -1553,8 +1553,8 @@ export default function SectionCard(p: SectionCardProps) {
                       aria-label={`Unit sell for ${it.desc}`}
                       style={{ width: "100%", maxWidth: 92, height: 24, textAlign: "right", border: "1px solid #e4e7ec", borderRadius: 6, fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", fontSize: 11.5, color: "#5b616e" }}
                     />
-                    <span title="Line margin" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", fontSize: 10, color: markupColor(lineMarkup), flexShrink: 0 }}>
-                      {ext > 0 ? Math.round(lineMarkup * 100) : 0}%
+                    <span title="Line markup" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", fontSize: 10, color: it.qty * it.cost > 0 ? markupColor(lineMarkup) : "#aab0bb", flexShrink: 0 }}>
+                      {it.qty * it.cost > 0 ? Math.round(lineMarkup * 100) + "%" : "—"}
                     </span>
                   </div>
                   <input
@@ -1984,17 +1984,17 @@ export default function SectionCard(p: SectionCardProps) {
                           letterSpacing: ".04em",
                         }}
                       >
-                        Margin
+                        Markup
                       </span>
                       <div
                         style={{
                           fontFamily: "var(--font-mono)",
                           fontSize: 14,
                           fontWeight: 600,
-                          color: markupColor(cdMarkup),
+                          color: cdCost > 0 ? markupColor(cdMarkup) : "#aab0bb",
                         }}
                       >
-                        {cdPrice > 0 ? Math.round(cdMarkup * 100) + "%" : "—"}
+                        {cdPrice > 0 && cdCost > 0 ? Math.round(cdMarkup * 100) + "%" : "—"}
                       </div>
                     </div>
                   </div>

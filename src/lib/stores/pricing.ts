@@ -443,11 +443,11 @@ export const GROUPS: PricingGroup[] = [
   {
     key: "system", label: "System design", live: true,
     sub: "Quick Design budgetary roll-up + Estimator defaults",
-    note: "Freight / contingency below drive the Quick Design estimate live; labor is per system (see System labor). Tier multipliers, base margin and the fabric rate are the documented reference the estimators are built on.",
+    note: "Freight / contingency below drive the Quick Design estimate live; labor is per system (see System labor). Tier multipliers, base markup and the fabric rate are the documented reference the estimators are built on.",
     items: [
       rate("system.freightPct", "Freight & delivery", 5, "%", { min: 0, max: 20, step: 0.5, help: "freight = materials × this" }),
       rate("system.contingencyPct", "Default contingency", 10, "%", { min: 0, max: 25, step: 1, help: "Applied to materials + labor + freight. New designs start at this value." }),
-      rate("system.baseMargin", "Base margin", 43, "%", { min: 0, max: 150, step: 1, ref: true, help: "Baseline margin baked into catalog list vs cost.  sell = cost ÷ (1 − margin)" }),
+      rate("system.baseMargin", "Base markup", 43, "%", { min: 0, max: 150, step: 1, ref: true, help: "Baseline markup baked into catalog list vs cost.  sell = cost × (1 + markup)" }),
       rate("system.tierGoodCost", "Good tier — cost ×", 0.80, "×", { min: 0.3, max: 1.5, step: 0.01, ref: true, help: "Good multiplies each line’s cost by this." }),
       rate("system.tierGoodPrice", "Good tier — price ×", 0.84, "×", { min: 0.3, max: 1.5, step: 0.01, ref: true }),
       rate("system.tierBetterCost", "Better tier — cost ×", 1.00, "×", { min: 0.3, max: 2, step: 0.01, ref: true }),
@@ -456,24 +456,24 @@ export const GROUPS: PricingGroup[] = [
       rate("system.tierBestPrice", "Best tier — price ×", 1.42, "×", { min: 0.5, max: 2.5, step: 0.01, ref: true }),
       rate("system.curtainFabric", "Curtain fabric fallback", 3.00, "$/ft²", { min: 0, max: 20, step: 0.25, ref: true, help: "Used when a fabric SKU has no catalog rate." }),
       formula("system.rollup", "Budgetary total", "materials + Σ system labor + freight, then + contingency  →  materials + Σ(system material × labor % × tier ×) + (materials × freight%), × (1 + contingency%)"),
-      formula("system.sell", "Sell price from cost", "sell = cost ÷ (1 − margin)"),
+      formula("system.sell", "Sell price from cost", "sell = cost × (1 + markup)"),
       formula("system.tier", "Good / Better / Best", "each line: cost × (tier cost ×), price × (tier price ×)"),
-      formula("system.margin", "Blended margin", "margin = (materialsRevenue − materialsCost) ÷ materialsRevenue"),
-      formula("system.estline", "Estimator line (detailed quotes)", "ext price = qty × unit price   ·   ext cost = qty × unit cost   ·   per-section margin 0–55%, freight 0–15% of materials"),
+      formula("system.margin", "Blended markup", "markup = (materialsRevenue − materialsCost) ÷ materialsCost"),
+      formula("system.estline", "Estimator line (detailed quotes)", "ext price = qty × unit price   ·   ext cost = qty × unit cost   ·   per-section markup 0–125%, freight 0–15% of materials"),
     ],
   },
   {
     key: "tiers", label: "Customer tiers", live: true,
-    sub: "Per-customer margin — punch item 11 (D87). Tier lives on the PERSON, company is fallback.",
-    note: "The resolved tier's margin SEEDS pricing everywhere (estimator labor & curtains, flame/repair/inspection quotes, Quick Design promotion, the portal) and is stamped onto each quote at creation — estimators can still override per quote. Not visible to customers. Resolution: quote's attn contact → their company → Base.",
+    sub: "Per-customer markup — punch item 11 (D87; markup since #367). Tier lives on the PERSON, company is fallback.",
+    note: "The resolved tier's markup SEEDS pricing everywhere (estimator labor & curtains, flame/repair/inspection quotes, Quick Design promotion, the portal) and is stamped onto each quote at creation — estimators can still override per quote. Not visible to customers. Resolution: quote's attn contact → their company → Base.",
     items: [
-      rate("tiers.base", "Base margin", 43, "%", { min: 0, max: 150, step: 1, help: "The default tier — every customer without an assigned tier prices here.  sell = cost ÷ (1 − margin)" }),
-      rate("tiers.copper", "Copper margin", 37, "%", { min: 0, max: 150, step: 1 }),
-      rate("tiers.silver", "Silver margin", 28, "%", { min: 0, max: 150, step: 1 }),
-      rate("tiers.gold", "Gold margin", 25, "%", { min: 0, max: 150, step: 1 }),
-      rate("tiers.platinum", "Platinum margin", 18, "%", { min: 0, max: 150, step: 1 }),
-      rate("tiers.reseller", "Reseller margin", 11, "%", { min: 0, max: 150, step: 1 }),
-      rate("tiers.employee", "Employee margin", 5, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.base", "Base markup", 43, "%", { min: 0, max: 150, step: 1, help: "The default tier — every customer without an assigned tier prices here.  sell = cost × (1 + markup)" }),
+      rate("tiers.copper", "Copper markup", 37, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.silver", "Silver markup", 28, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.gold", "Gold markup", 25, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.platinum", "Platinum markup", 18, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.reseller", "Reseller markup", 11, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.employee", "Employee markup", 5, "%", { min: 0, max: 150, step: 1 }),
       formula("tiers.resolution", "Tier resolution (design §4.7)", "quote's designated contact's tier  →  else their company's tier  →  else Base   ·   stamped on the quote at creation; each revision re-stamps at cut time"),
     ],
   },
@@ -504,10 +504,10 @@ export const GROUPS: PricingGroup[] = [
       rate("laborRate", "Labor rate (testing & travel)", 75, "$/hr", { min: 0, max: 200, step: 1, store: "flame" }),
       rate("curtainMinutes", "Minutes to test one curtain", 5, "min", { min: 1, max: 30, step: 1, store: "flame" }),
       rate("baseFee", "Base minimum (whole job)", 150, "$", { min: 0, max: 1000, step: 5, store: "flame", help: "Floor on the whole job after mileage + travel + testing." }),
-      rate("margin", "Flame-test margin", 43, "%", { min: 0, max: 150, step: 1, store: "flame", pctStored: true }),
+      rate("margin", "Flame-test markup", 43, "%", { min: 0, max: 150, step: 1, store: "flame", pctStored: true }),
       rate("travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "flame" }),
       rate("flame.flyCrew", "Crew when the trip flies", 1, "people", { min: 1, max: 10, step: 1, store: "flame", key: "flyCrew", help: "Default crew for a flame test priced as flights (Travel & mileage → fly threshold). Overridable on each quote." }),
-      formula("flame.total", "Flame-test total", "max( $base ,  miles × mileageRate  +  travelHrs × laborRate  +  curtains × curtainMin × (laborRate ÷ 60) )  ÷  (1 − margin)  ·  travel = flights when one trip's drive cost ≥ threshold  ·  rounded to the nearest $25"),
+      formula("flame.total", "Flame-test total", "max( $base ,  miles × mileageRate  +  travelHrs × laborRate  +  curtains × curtainMin × (laborRate ÷ 60) )  ×  (1 + markup)  ·  travel = flights when one trip's drive cost ≥ threshold  ·  rounded to the nearest $25"),
     ],
   },
   {
@@ -518,12 +518,12 @@ export const GROUPS: PricingGroup[] = [
       rate("repair.laborRate", "Labor rate (repair & service)", 75, "$/hr", { min: 0, max: 300, step: 1, store: "repair", key: "laborRate" }),
       rate("repair.mileageRate", "Mileage rate", 1, "$/mi", { min: 0, max: 2, step: 0.01, store: "repair", key: "mileageRate", help: "Round-trip miles from the default quote origin, shared across venues on one trip." }),
       rate("repair.minCallout", "Minimum service call", 350, "$", { min: 0, max: 2000, step: 5, store: "repair", key: "minCallout", help: "Floor on the service sell (labor + travel), before parts." }),
-      rate("repair.partsMargin", "Parts margin", 43, "%", { min: 0, max: 150, step: 1, store: "repair", key: "partsMargin", pctStored: true, help: "Markup on parts.  partsSell = partsCost ÷ (1 − partsMargin)" }),
-      rate("repair.margin", "Repair margin (labor + travel)", 43, "%", { min: 0, max: 150, step: 1, store: "repair", key: "margin", pctStored: true }),
+      rate("repair.partsMargin", "Parts markup", 43, "%", { min: 0, max: 150, step: 1, store: "repair", key: "partsMargin", pctStored: true, help: "Markup on parts.  partsSell = partsCost × (1 + partsMarkup)" }),
+      rate("repair.margin", "Repair markup (labor + travel)", 43, "%", { min: 0, max: 150, step: 1, store: "repair", key: "margin", pctStored: true }),
       rate("repair.emergencyMult", "Emergency / after-hours ×", 1.5, "×", { min: 1, max: 3, step: 0.05, store: "repair", key: "emergencyMult", help: "Multiplies the labor rate for emergency or after-hours work." }),
       rate("repair.travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "repair", key: "travelRoundMin" }),
       rate("repair.flyCrew", "Crew when the trip flies", 2, "people", { min: 1, max: 10, step: 1, store: "repair", key: "flyCrew", help: "Default crew for a repair priced as flights — never fewer than the quote's own crew size. Overridable on each quote." }),
-      formula("repair.total", "Repair total", "max( $callout ,  (laborHrs × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ÷  (1 − margin) )  +  parts ÷ (1 − partsMargin)  ·  travel = flights when one trip's drive cost ≥ threshold  ·  rounded to the nearest $25"),
+      formula("repair.total", "Repair total", "max( $callout ,  (laborHrs × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ×  (1 + markup) )  +  parts × (1 + parts markup)  ·  travel = flights when one trip's drive cost ≥ threshold  ·  rounded to the nearest $25"),
     ],
   },
   {
@@ -537,11 +537,11 @@ export const GROUPS: PricingGroup[] = [
       rate("inspection.baseHours", "Base on-site hours (per visit)", 2, "hr", { min: 0, max: 16, step: 0.5, store: "inspection", key: "baseHours", help: "Setup, venue walkthrough, and findings write-up — charged once per visit." }),
       rate("inspection.level2Mult", "Level 2 (5-year) ×", 1.75, "×", { min: 1, max: 4, step: 0.05, store: "inspection", key: "level2Mult", help: "Multiplies inspection time for the in-depth 5-year inspection." }),
       rate("inspection.minFee", "Minimum inspection fee", 650, "$", { min: 0, max: 5000, step: 25, store: "inspection", key: "minFee", help: "Floor on the whole job after labor + travel." }),
-      rate("inspection.margin", "Inspection margin", 43, "%", { min: 0, max: 150, step: 1, store: "inspection", key: "margin", pctStored: true }),
+      rate("inspection.margin", "Inspection markup", 43, "%", { min: 0, max: 150, step: 1, store: "inspection", key: "margin", pctStored: true }),
       rate("inspection.travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "inspection", key: "travelRoundMin" }),
       rate("inspection.flyCrew", "Crew when the trip flies", 1, "people", { min: 1, max: 10, step: 1, store: "inspection", key: "flyCrew", help: "Default crew for an inspection priced as flights. Overridable on each quote." }),
       formula("inspection.hours", "Inspection hours", "hours = ( baseHours + lineSets × lineSetMin ÷ 60 ) × (level 2 ? level2× : 1)"),
-      formula("inspection.total", "Inspection total", "max( $minimum ,  (hours × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ÷  (1 − margin) )  ·  travel = flights when one trip's drive cost ≥ threshold  ·  rounded to the nearest $25"),
+      formula("inspection.total", "Inspection total", "max( $minimum ,  (hours × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ×  (1 + markup) )  ·  travel = flights when one trip's drive cost ≥ threshold  ·  rounded to the nearest $25"),
     ],
   },
   {
@@ -564,25 +564,20 @@ export const GROUPS: PricingGroup[] = [
     ],
   },
   {
-    key: "catalog", label: "Catalog margin", live: false,
+    key: "catalog", label: "Catalog markup", live: true,
     sub: "Parts & price books",
-    // NOT marked live on purpose (Claude, 2026-08-01). The value IS persisted to
-    // blob `catalog_rates` — the wiring is done, so this becomes live in one word
-    // — but NOTHING in the codebase reads it yet: a part with no list price is
-    // filtered out, never defaulted through this margin. Tagging the row "live"
-    // would tell the user that editing it reprices something, which is false: the
-    // same UI-claims-what-isn't-true problem as punch #70 and #14. Flip `live` and
-    // drop `ref` in the same breath as adding the first real consumer.
-    note: "Reference — the value is saved, but no pricing path consumes it yet: a part with no list price is skipped rather than defaulted through this margin. Per-part list vs. cost is maintained in the Catalog.",
+    // Live (#367): the Equipment map, Grid swap search, virtual parts and the Quick Design / Grid price table
+    // read this as the markup for a part with no list price (cost × (1 + markup)).
+    note: "Live — the default markup for a part with no list price. The Equipment map, Grid swap search, virtual parts and the Quick Design / Grid price table price it as cost × (1 + markup). Per-part list vs. cost is maintained in the Catalog.",
     items: [
-      rate("catalog.defaultMargin", "Default part margin", 43, "%", { min: 0, max: 150, step: 1, store: "catalog", key: "defaultMargin", pctStored: true, ref: true }),
-      formula("catalog.list", "List price from cost", "list = cost ÷ (1 − margin)"),
+      rate("catalog.defaultMargin", "Default part markup", 43, "%", { min: 0, max: 150, step: 1, store: "catalog", key: "defaultMargin", pctStored: true }),
+      formula("catalog.list", "List price from cost", "list = cost × (1 + markup)"),
     ],
   },
   {
     key: "fixture", label: "Lighting fixtures", live: true,
     sub: "Estimator → Configure fixture pop-out",
-    note: "Live — editing a rate here reprices the Estimator's fixture configurator immediately (shared with estimator-data.ts's fixMounts()/fixAcc()/fixPwr()/fixLamps(), which source PRICE from this store). Each fixture adds one combined priced line; hang/focus labor is left to Configure labor. Cost (for margin) isn't editable here — it stays in the estimator's fixture tables. Placeholder add-on rates — swap for real numbers as pricing firms up.",
+    note: "Live — editing a rate here reprices the Estimator's fixture configurator immediately (shared with estimator-data.ts's fixMounts()/fixAcc()/fixPwr()/fixLamps(), which source PRICE from this store). Each fixture adds one combined priced line; hang/focus labor is left to Configure labor. Cost (for markup) isn't editable here — it stays in the estimator's fixture tables. Placeholder add-on rates — swap for real numbers as pricing firms up.",
     items: [
       rate("fixture.mountCclamp", "Mount — C-clamp", 18, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "mountCclamp" }),
       rate("fixture.mountHalfCoupler", "Mount — half-coupler", 24, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "mountHalfCoupler" }),
@@ -647,7 +642,7 @@ export const GROUPS: PricingGroup[] = [
     note: "Live — a fabric's catalog $/sq ft is fabric cost only; every curtain estimate (Estimator, Quick Design, Grid, the portal) adds this sewing labor on top. A typed Rose Brand / vendor cost is the full cost and gets no adder.",
     items: [
       rate(SEWING_PCT_ID, "Sewing labor adder", DEFAULT_SEWING_PCT, "%", { min: 0, max: SEWING_PCT_MAX, step: 0.5, help: "cost = sewn area × fabric $/sq ft × (1 + this %)" }),
-      formula("curtains.cost", "Curtain cost", "cost = sewn area × fabric $/sq ft × (1 + sewing %)   ·   sewn area = finished width × (1 + fullness) × height   ·   sell = cost ÷ (1 − margin)"),
+      formula("curtains.cost", "Curtain cost", "cost = sewn area × fabric $/sq ft × (1 + sewing %)   ·   sewn area = finished width × (1 + fullness) × height   ·   sell = cost × (1 + markup)"),
     ],
   },
   {

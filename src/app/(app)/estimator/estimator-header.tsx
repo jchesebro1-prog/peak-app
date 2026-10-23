@@ -18,7 +18,7 @@ import { BOX_SALE_COPY } from "@/lib/estimate-box-sale/rules";
 
 /**
  * #305 (spec 2026-10-07 §4) — the Estimator's one header, shown on every
- * step: inline rename, number · Rev, the Quote details panel, blended margin,
+ * step: inline rename, number · Rev, the Quote details panel, blended markup,
  * quoted total, status (read-only — set on Send & track), Save, the next-step control and the ⋯ menu. Wraps
  * onto a second row instead of overflowing on a narrow window.
  */
@@ -235,7 +235,7 @@ export function EstimatorHeader({
                 letterSpacing: ".05em",
               }}
             >
-              Blended margin
+              Blended markup
             </div>
             <div
               style={{

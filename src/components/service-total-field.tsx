@@ -113,7 +113,7 @@ export function ServiceTotalField({
               // markup, not the markup autoTotal was computed at above — so
               // "auto is $X" here would promise a figure Reset doesn't
               // actually produce. State what Reset does instead.
-              "Typed total · Reset keeps this margin"
+              "Typed total · Reset keeps this markup"
             : invalid
               ? "Not a dollar amount — using the auto total."
               : "Auto · rounded to the nearest $25"}

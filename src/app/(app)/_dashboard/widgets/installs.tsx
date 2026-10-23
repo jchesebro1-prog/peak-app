@@ -79,7 +79,7 @@ export const INSTALLS_RENDERERS = {
   },
   "book-margin": async (ctx) => {
     const f = await forecast(ctx);
-    return tile("Avg. margin", `${Math.round(f.blended * 100)}%`, "at completion");
+    return tile("Avg. markup", `${Math.round(f.blended * 100)}%`, "at completion");
   },
 
   "billing-forecast": async (ctx) => {
@@ -114,13 +114,13 @@ export const INSTALLS_RENDERERS = {
     const mDeg = f.totalValue > 0 ? Math.round(((f.totalValue - f.cost) / f.totalValue) * 360) : 0;
     return (
       <div className="pk-card" style={{ padding: "18px 20px" }}>
-        <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 4 }}>Margin at completion</div>
+        <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 4 }}>Markup at completion</div>
         <div style={{ fontSize: 12, color: "#8c919c", marginBottom: 16 }}>Blended across the open book</div>
         <Donut
           gradient={`conic-gradient(${ACCENT} 0deg ${mDeg}deg, #e9ebef ${mDeg}deg 360deg)`}
           center={`${Math.round(f.blended * 100)}%`}
-          centerSub="margin"
-          legend={[{ color: ACCENT, label: "Projected margin", value: money(f.totalValue - f.cost) }, { color: "#c9ccd3", label: "Est. cost", value: money(f.cost) }]}
+          centerSub="markup"
+          legend={[{ color: ACCENT, label: "Projected profit", value: money(f.totalValue - f.cost) }, { color: "#c9ccd3", label: "Est. cost", value: money(f.cost) }]}
         />
       </div>
     );

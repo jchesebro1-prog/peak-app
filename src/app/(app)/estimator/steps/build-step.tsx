@@ -35,7 +35,7 @@ import type { SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 import { boxSaleLaborBanner } from "@/lib/estimate-box-sale/rules";
 
 /**
- * #305 — Build: the systems sidebar (margin, cost breakdown, Rewards credit),
+ * #305 — Build: the systems sidebar (markup, cost breakdown, Rewards credit),
  * the system cards and every configurator modal. A card's narrative snippet
  * opens the Build package step (onOpenNarrative), where the narrative lives.
  */
@@ -328,7 +328,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     textTransform: "uppercase",
                   }}
                 >
-                  Margin · all systems
+                  Markup · all systems
                 </span>
                 <span
                   style={{
@@ -344,7 +344,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
               <input
                 type="range"
                 min={0}
-                max={55}
+                max={125}
                 value={Math.round(t.markup * 100)}
                 onChange={(e) => setMarkupAll(e.target.value)}
                 style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }}

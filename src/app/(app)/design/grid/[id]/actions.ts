@@ -1809,7 +1809,7 @@ export async function deleteProjectAction(
 
 /**
  * Whether a part can be tier-priced at all — the same condition tierCatalog
- * (below) uses to decide between the cost ÷ (1 − margin) re-derivation and
+ * (below) uses to decide between the cost × (1 + markup) re-derivation and
  * the part's plain list price. Pulled out as its own predicate (punch #76)
  * so the fallback-tracking set and the pure unit tests share one definition
  * instead of two copies of the same condition drifting apart. `cost` is a
