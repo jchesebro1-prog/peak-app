@@ -11778,6 +11778,7 @@ seeded()
   .then(() => boxSalePureChecks(ok)).then(() => boxSaleDbChecks(ok))
   .then(() => reviewSheet363Checks(ok))
   .then(() => bomModels365DbChecks(ok))
+  .then(() => etc368ClientChecks(ok)) // #368 catalog
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -71053,4 +71054,111 @@ import { customerLines as pd366CustomerLines } from "@/app/(app)/estimator/prici
   const base = bon([mk()]);
   const disc = bon(pd366Apply([mk()], pd366D));
   ok(rows(base[0]) === rows(disc[0]) && pd366CustomerLines(disc[0]).length > 0, "#366 customer: the customer rows (what the PDF, online estimate, package page and portal print) are identical with a discount");
+}
+
+/* ======================================================================
+   #368 catalog — ETC price sync (Tasks 1–4). Self-contained blocks: pure
+   checks run at top level; the client (fake fetch), key store and the
+   DB-backed apply engine run in etc368*Checks, chained into the async chain.
+   ====================================================================== */
+import { parsePriceList as etc368Parse, etcPrice as etc368Price, ETC_LISTS as ETC368_LISTS } from "@/lib/dealer-api/etc/parse";
+const ETC368_EXAMPLE = {"partNumber":"7151A1005","modelNumber":"SR3-48X","description":"MPE MULTI-PROTOCOL ELEC 24","shortDescription":"MPE MULTI-PROTOCOL ELEC 24","hsCode":"8538.90.8160","grossWeight":"1.000","isRepPrice":true,"weightUnit":"LB","countryOfOrigin":"US","categoryIds":["4895ccd2-af50-44b1-8797-5795439cb370"],"categoryPaths":["Fixtures > ArcSystem Pro > Accessories"],"listPrice":"1040.00","netPrice":"728.00","distributorNetPrice":"728.00","currency":"USD"};
+{
+  const full = etc368Parse({ parts: [ETC368_EXAMPLE], categoryTree: [], repPricingCategories: [] }, "finished-goods");
+  const r = full.rows[0];
+  ok(full.error === null && full.rows.length === 1 && r.partNumber === "7151A1005" && r.modelNumber === "SR3-48X" && r.listPrice === 1040 && r.netPrice === 728 &&
+     r.desc === "MPE MULTI-PROTOCOL ELEC 24" && r.categoryPath === "Fixtures > ArcSystem Pro > Accessories" && r.list === "finished-goods",
+    "#368 catalog parse: ETC's documented example → 7151A1005 / SR3-48X, \"1040.00\"/\"728.00\" → 1040/728, the first category path");
+  const bare = etc368Parse([ETC368_EXAMPLE], "spare-parts");
+  ok(bare.error === null && bare.rows.length === 1 && bare.rows[0].list === "spare-parts", "#368 catalog parse: a bare array (price-updates) parses the same");
+  const mixed = etc368Parse([
+    { ...ETC368_EXAMPLE, partNumber: "A1", currency: "CAD" },
+    { ...ETC368_EXAMPLE, partNumber: "" },
+    { ...ETC368_EXAMPLE, partNumber: undefined },
+    { ...ETC368_EXAMPLE, partNumber: "A2", listPrice: "abc" },
+    { ...ETC368_EXAMPLE, partNumber: "A3", listPrice: "", netPrice: "0.00" },
+    { ...ETC368_EXAMPLE, partNumber: "A4", listPrice: "0", netPrice: "12.345" },
+    "junk",
+  ], "finished-goods");
+  const why = (pn: string) => mixed.skipped.find((s) => s.partNumber === pn)?.reason;
+  ok(mixed.rows.length === 1 && mixed.rows[0].partNumber === "A4" && mixed.rows[0].listPrice === null && mixed.rows[0].netPrice === 12.35,
+    "#368 catalog parse: only the good row survives; a zero list price is null (leave ours alone), 12.345 rounds to cents");
+  ok(/CAD/.test(why("A1") || "") && why("A2") === "Price isn't a number" && why("A3") === "No price" && mixed.skipped.filter((s) => s.reason === "No part number").length === 2 && mixed.skipped.length === 6,
+    "#368 catalog parse: non-USD, no part number (blank or missing), an \"abc\" price and no price at all are skipped with reasons");
+  ok(etc368Parse({ nope: 1 }, "demo-prices").error !== null && etc368Parse(null, "demo-prices").error !== null, "#368 catalog parse: a reply that isn't a list or { parts } is an error");
+  ok(etc368Price("1,040.00") === 1040 && etc368Price(" 0.10 ") === 0.1 && etc368Price(null) === null && Number.isNaN(etc368Price("-5") as number) && Number.isNaN(etc368Price(-1) as number) && etc368Price(728) === 728,
+    "#368 catalog parse: etcPrice handles commas, spaces, null, negatives and numbers");
+  ok(ETC368_LISTS.join() === "finished-goods,spare-parts,flat-rate-repair,demo-prices", "#368 catalog parse: the four ETC lists");
+}
+
+/** #368 catalog — the ETC client against a fake fetch, and the key store (test DB). */
+async function etc368ClientChecks(check: typeof ok): Promise<void> {
+  const { etcFetch, listAccounts, fetchPriceList, fetchPriceUpdates } = await import("@/lib/dealer-api/etc/client");
+  const SECRET = "etc-test-secret-368-ABCD";
+  type Call = { url: string; auth: string; cache: string | undefined };
+  const calls: Call[] = [];
+  const fake = (status: number, body: unknown): typeof fetch => (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), auth: String((init?.headers as Record<string, string>)?.Authorization), cache: init?.cache });
+    return new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
+  }) as typeof fetch;
+  const acc = await listAccounts({ apiKey: SECRET, fetchImpl: fake(200, { data: [{ id: "ba-1", name: "Peak Systems", roleId: "r", roleName: "Admin" }] }) });
+  check(acc.ok && acc.data.length === 1 && acc.data[0].id === "ba-1" && acc.data[0].name === "Peak Systems", "#368 catalog client: /me/business-accounts → the accounts");
+  check(calls[0].url === "https://my.etcconnect.com/api/v1/me/business-accounts" && calls[0].auth === `Bearer ${SECRET}` && calls[0].cache === "no-store",
+    "#368 catalog client: v1 on the fixed host, Authorization: Bearer <secret>, no-store");
+  const pl = await fetchPriceList("ba/1", "finished-goods", { apiKey: SECRET, fetchImpl: fake(200, { parts: [] }) });
+  check(pl.ok && calls[1].url === "https://my.etcconnect.com/api/v0/pricing/business-account/ba%2F1/price-list/finished-goods", "#368 catalog client: v0 price-list path, the account id encoded");
+  await fetchPriceUpdates("ba-1", "demo-prices", "2026-10-23", { apiKey: SECRET, fetchImpl: fake(200, []) });
+  check(calls[2].url === "https://my.etcconnect.com/api/v0/pricing/business-account/ba-1/price-updates/2026-10-23/demo-prices", "#368 catalog client: v0 price-updates path with the date");
+  const badDate = await fetchPriceUpdates("ba-1", "demo-prices", "../x", { apiKey: SECRET, fetchImpl: fake(200, []) });
+  check(!badDate.ok && calls.length === 3, "#368 catalog client: a malformed date is refused before any request");
+  const r401 = await etcFetch("v1", "/me/business-accounts", { apiKey: SECRET, fetchImpl: fake(401, { error: { code: "unauthorized", message: `bad token ${SECRET}` } }) });
+  const r403 = await fetchPriceList("ba-1", "spare-parts", { apiKey: SECRET, fetchImpl: fake(403, { traceId: "t", message: "Must be have access to feature", code: "forbidden", details: null }) });
+  const r500 = await etcFetch("v0", "/x", { apiKey: SECRET, fetchImpl: fake(500, { traceId: "t", message: `boom ${SECRET}`, code: "x" }) });
+  const rText = await etcFetch("v0", "/x", { apiKey: SECRET, fetchImpl: fake(200, "<html>") });
+  const hang = (async (_u: unknown, init?: RequestInit) => new Promise<Response>((_res, rej) => init?.signal?.addEventListener("abort", () => rej(Object.assign(new Error("aborted"), { name: "AbortError" }))))) as typeof fetch;
+  const rTime = await etcFetch("v0", "/x", { apiKey: SECRET, fetchImpl: hang, timeoutMs: 20 });
+  const rNet = await etcFetch("v0", "/x", { apiKey: SECRET, fetchImpl: (async () => { throw new TypeError(`fetch failed ${SECRET}`); }) as typeof fetch });
+  check(!r401.ok && r401.message === "ETC rejected the API key", "#368 catalog client: 401 → \"ETC rejected the API key\"");
+  check(!r403.ok && r403.message === "Spare parts: This key's account can't see ETC pricing (ETC: Must be have access to feature)", "#368 catalog client: 403 → can't see pricing, with ETC's own message (and the list named)");
+  check(!r500.ok && r500.message.startsWith("ETC returned 500: boom") && !rText.ok && rText.message === "ETC sent a reply that isn't JSON", "#368 catalog client: other statuses carry ETC's message; a non-JSON 200 is an error");
+  check(!rTime.ok && /^ETC didn't answer in \d+ s$/.test(rTime.message), "#368 catalog client: a hung request times out");
+  check(!rNet.ok && rNet.message === "Couldn't reach ETC (TypeError)", "#368 catalog client: a network error names its type only");
+  check([r401, r403, r500, rText, rTime, rNet, badDate].every((r) => !r.ok && !r.message.includes(SECRET)), "#368 catalog client: the secret is in no returned message (even when ETC echoes it)");
+  const noKey = await etcFetch("v1", "/me/business-accounts", { apiKey: null, fetchImpl: fake(200, {}) });
+  check(!noKey.ok && noKey.message === "No ETC API key is saved" && calls.length === 7, "#368 catalog client: no key → no request");
+
+  // Key store (test DB): save → status → the one decrypt; preview blocks it.
+  const C = await import("@/lib/dealer-api/connections");
+  const authSecret = "test368-auth-secret";
+  const env = {} as Record<string, string | undefined>;
+  await C.clearEtcKey();
+  let threw = "";
+  try { await C.saveEtcKey("has space inside", "Jeff", { authSecret }); } catch (e) { threw = (e as Error).message; }
+  let threw2 = "";
+  try { await C.saveEtcKey("   ", "Jeff", { authSecret }); } catch (e) { threw2 = (e as Error).message; }
+  let threw3 = "";
+  try { await C.saveEtcKey("x".repeat(513), "Jeff", { authSecret }); } catch (e) { threw3 = (e as Error).message; }
+  check(threw === "That doesn't look like an ETC API key." && threw2 === threw && threw3 === threw, "#368 catalog key: whitespace inside, empty and > 512 chars are refused (the key never in the message)");
+  const saved = await C.saveEtcKey(`  ${SECRET}  `, "Jeff", { authSecret, now: 5 });
+  const st = await C.etcStatus({ authSecret, env });
+  check(saved.last4 === "ABCD" && st.connected && st.last4 === "ABCD" && st.savedBy === "Jeff" && st.savedAt === 5 && !st.unreadable && !st.preview && !st.disabled,
+    "#368 catalog key: save trims and stores; status shows connected ••••ABCD, who and when");
+  check(!JSON.stringify(st).includes(SECRET) && !JSON.stringify(st).includes("keyEnc"), "#368 catalog key: etcStatus() carries neither the secret nor its ciphertext");
+  const raw = await (await import("@/db/doc-store")).getBlob<Record<string, unknown>>(C.DEALER_CONNECTIONS_BLOB, {});
+  check(!JSON.stringify(raw).includes(SECRET) && typeof (raw.etc as { keyEnc?: unknown })?.keyEnc === "string", "#368 catalog key: the blob holds ciphertext only");
+  check((await C.etcSecret({ authSecret, env })) === SECRET, "#368 catalog key: etcSecret() decrypts the saved key");
+  check((await C.etcSecret({ authSecret, env: { VERCEL_ENV: "preview" } })) === null && (await C.etcStatus({ authSecret, env: { VERCEL_ENV: "preview" } })).preview,
+    "#368 catalog key: a Vercel preview never gets the stored key");
+  check((await C.etcSecret({ authSecret: "another-secret", env })) === null && (await C.etcStatus({ authSecret: "another-secret", env })).unreadable,
+    "#368 catalog key: a changed AUTH_SECRET reads as unreadable, never throws");
+  check((await C.etcStatus({ authSecret, env: { ETC_SYNC_DISABLED: "true" } })).disabled, "#368 catalog key: ETC_SYNC_DISABLED=true shows as disabled");
+  await C.setEtcAccount("ba-1", "Peak Systems");
+  await C.updateEtcConnection(() => ({ baseline: { date: "2026-10-20", at: 1 } }));
+  await C.setEtcAccount("ba-1", "Peak Systems (renamed)");
+  check((await C.readEtcConnection()).baseline?.date === "2026-10-20", "#368 catalog key: re-picking the same account keeps the baseline");
+  await C.setEtcAccount("ba-2", "Other");
+  check((await C.readEtcConnection()).baseline === null, "#368 catalog key: a different account clears the baseline (it needs a full pull)");
+  await C.clearEtcKey();
+  const gone = await C.etcStatus({ authSecret, env });
+  check(!gone.connected && gone.last4 === null && gone.accountId === null && (await C.etcSecret({ authSecret, env })) === null, "#368 catalog key: Remove clears the key and the account");
 }
