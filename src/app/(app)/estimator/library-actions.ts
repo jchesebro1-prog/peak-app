@@ -38,9 +38,11 @@ export async function getSystemLibraryEntryAction(key: string): Promise<SystemLi
 }
 
 /** Load system: re-read, vendor lines left out, re-priced at today's catalog
- *  and this estimate's tier. */
-export async function loadLibrarySystemAction(key: string, ctx: { tierMargin: number | null }): Promise<LoadLibrarySystemResult> {
+ *  and this estimate's tier. #368: `quoteId` is the saved estimate it lands in
+ *  (null for an unsaved one) — a sent / won / lost one is refused until revised. */
+export async function loadLibrarySystemAction(key: string, ctx: { tierMargin: number | null; quoteId?: string | null }): Promise<LoadLibrarySystemResult> {
   await requireUser();
   const tm = ctx && typeof ctx.tierMargin === "number" ? ctx.tierMargin : null;
-  return loadLibrarySystem(String(key ?? ""), tm);
+  const target = ctx && typeof ctx.quoteId === "string" && ctx.quoteId ? ctx.quoteId : null;
+  return loadLibrarySystem(String(key ?? ""), tm, target);
 }

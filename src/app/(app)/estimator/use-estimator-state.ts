@@ -72,6 +72,7 @@ import { postChanged } from "@/lib/popout/channel";
 import { applyLineMove, extractLinesAsSection, lineRefKey, planLineMove, removeLinesFromSources, type LineRef } from "@/lib/estimate-line-move/move";
 import { setUnsavedHold } from "@/lib/popout/hold";
 import { discardConfirmText, inputIsDirty, isModalInputKind, MODAL_INPUT_KINDS, rebaseDraft, stableDraftJson, type ModalInputKind } from "@/lib/estimate-steps/discard-confirm";
+import { repriceLocked } from "@/lib/estimate-reprice/lock";
 
 /** #333 review (F): how long Send waits for an in-flight Client package write. */
 const SELECTION_SETTLE_TIMEOUT_MS = 10_000;
@@ -2809,6 +2810,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const sec = sections.find((s) => s.id === secId);
     const rec = sec ? laborGroupRecord(sec, group) : null;
     if (!sec || !rec) return;
+    if (repriceLocked(status)) return; // #368: a sent estimate keeps its prices until revised (the ✎ is disabled)
     if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
     laborEditRef.current = { group, draft: rec.draft, ...laborGroupEdits(sec, group) };
@@ -2821,6 +2823,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const openTrackEdit = (secId: string, lineId: number) => {
     const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
     if (!it?.track) return;
+    if (repriceLocked(status)) return; // #368: as openLaborEdit
     const gone = !trackSeries.some((s) => s.id === it.track!.seriesId);
     if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
@@ -2847,6 +2850,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const openCurtainEdit = (secId: string, lineId: number) => {
     const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
     if (!it?.curtain) return;
+    if (repriceLocked(status)) return; // #368: as openLaborEdit
     const linked = linkCurtainTracks(sections).links.get(it);
     if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();

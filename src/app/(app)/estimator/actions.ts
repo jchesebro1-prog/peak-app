@@ -86,6 +86,7 @@ import { recordVendorPdfOutcomes, verifyVendorPdfExtractions } from "@/lib/vendo
 import { quoteSpecFollowingRenames, selectionFollowingRenames } from "@/lib/stores/catalog-renames";
 import { leadIdForCreate, linkSavedQuoteToSuggestion } from "@/lib/assist/suggestion-save";
 import { boxSaleForSave, boxSaleOf, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
+import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -985,6 +986,8 @@ async function placeSystemInEstimate(
     if (!existing) {
       return { ok: false, error: "That estimate could not be found." };
     }
+    // #368: a sent / won / lost estimate keeps its prices — nothing is placed into it until it is revised.
+    if (repriceLocked(existing.status)) return { ok: false, error: REVISE_FIRST };
     // Box goods sale (spec 2026-10-21): a system with labor can't join an existing box sale — refused before anything
     // is written. Move/Copy into a NEW estimate is unchanged (the new estimate starts as a normal one).
     if (boxSaleOf(existing)) {
@@ -1220,6 +1223,8 @@ export async function copySystemToEstimateAction(
   } else if (target.kind === "existing") {
     const existing = await get(target.quoteId);
     if (!existing) return { ok: false, error: "That estimate could not be found." };
+    // #368: refused before any re-pricing work (placeSystemInEstimate refuses it again under its own read).
+    if (repriceLocked(existing.status)) return { ok: false, error: REVISE_FIRST };
     const stored = usableTierMargin(existing.tierMargin);
     if (stored != null) {
       targetTier = stored;

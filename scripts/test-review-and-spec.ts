@@ -11778,6 +11778,7 @@ seeded()
   .then(() => boxSalePureChecks(ok)).then(() => boxSaleDbChecks(ok))
   .then(() => reviewSheet363Checks(ok))
   .then(() => bomModels365DbChecks(ok))
+  .then(() => etc368LoadSystemDbChecks(ok))
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -71053,4 +71054,72 @@ import { customerLines as pd366CustomerLines } from "@/app/(app)/estimator/prici
   const base = bon([mk()]);
   const disc = bon(pd366Apply([mk()], pd366D));
   ok(rows(base[0]) === rows(disc[0]) && pd366CustomerLines(disc[0]).length > 0, "#366 customer: the customer rows (what the PDF, online estimate, package page and portal print) are identical with a discount");
+}
+
+/* --- #368 estimator: sent estimates keep their prices — the re-pricing actions are locked until Revise (spec §9) --- */
+import { REVISE_FIRST as e368ReviseFirst, repriceLocked as e368Locked } from "@/lib/estimate-reprice/lock";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  ok(e368ReviseFirst === "Revise the estimate first", "#368 estimator lock: the refusal text is \"Revise the estimate first\"");
+  ok(e368Locked("sent") && e368Locked("won") && e368Locked("lost") && !e368Locked("draft") && !e368Locked(undefined) && !e368Locked(null) && !e368Locked(""),
+    "#368 estimator lock: sent / won / lost are locked; draft and an unsaved estimate (no status) are open");
+  const act = rd("src/app/(app)/estimator/actions.ts");
+  const place = act.slice(act.indexOf("async function placeSystemInEstimate("), act.indexOf("export type CopySystemTarget"));
+  const existingAt = place.indexOf('if (target.kind === "existing") {');
+  const refuseAt = place.indexOf("if (repriceLocked(existing.status)) return { ok: false, error: REVISE_FIRST };");
+  ok(existingAt > 0 && refuseAt > existingAt && refuseAt > place.indexOf('return { ok: false, error: "That estimate could not be found." };') &&
+     refuseAt < place.indexOf("await update(target.quoteId") && refuseAt < place.indexOf("storeVendorQuotes(") && refuseAt < place.indexOf("// Estimator bonuses: the new draft estimate gets its bonus lines at birth."),
+    "#368 estimator lock: Move / Copy into an EXISTING estimate refuses a sent / won / lost target before anything is written; the NEW-estimate branch has no such check");
+  ok((place.match(/repriceLocked\(/g) || []).length === 1, "#368 estimator lock: a Move / Copy into a NEW estimate is never refused (one check, in the existing branch only)");
+  const copy = act.slice(act.indexOf("export async function copySystemToEstimateAction("), act.indexOf("export async function updateQuoteMetaAction("));
+  ok(copy.indexOf("if (repriceLocked(existing.status)) return { ok: false, error: REVISE_FIRST };") > copy.indexOf('} else if (target.kind === "existing") {') &&
+     copy.indexOf("if (repriceLocked(existing.status)) return { ok: false, error: REVISE_FIRST };") < copy.indexOf("copySectionForTarget("),
+    "#368 estimator lock: Copy into an existing sent estimate is refused before the copy is re-priced");
+  const lib = rd("src/app/(app)/estimator/library-actions.ts");
+  ok(/loadLibrarySystemAction\(key: string, ctx: \{ tierMargin: number \| null; quoteId\?: string \| null \}\)/.test(lib) && lib.includes("return loadLibrarySystem(String(key ?? \"\"), tm, target);"),
+    "#368 estimator lock: Load system's action passes the estimate it lands in to the core");
+  const modal = rd("src/app/(app)/estimator/system-library-modal.tsx");
+  ok(modal.includes("await loadLibrarySystemAction(key, { tierMargin, quoteId });"), "#368 estimator lock: the Load system modal sends this estimate's id");
+  const bs = rd("src/app/(app)/estimator/steps/build-step.tsx");
+  ok(bs.includes("const repriceLock = repriceLocked(status) ? REVISE_FIRST : undefined;") && bs.includes("repriceLock={repriceLock}") &&
+     bs.includes("disabled={!!repriceLock}") && bs.includes('title={repriceLock || "Load a system from a sent or won estimate — re-priced for this one"}') &&
+     bs.includes('<SystemLibraryModal mode="load" tierMargin={tierMargin} quoteId={loadedId} onLoaded'),
+    "#368 estimator lock: Build disables + From library… with the same text, passes the lock to every system card, and the modal gets the estimate id");
+  const sc = rd("src/app/(app)/estimator/section-card.tsx");
+  ok(sc.includes("const laborEditable = isInternal && !p.repriceLock &&") && sc.includes("const trackEditable = isInternal && !p.repriceLock &&") && sc.includes("const curtainEditable = isInternal && !p.repriceLock &&") &&
+     sc.includes("{configLocked && (") && sc.includes("disabled title={p.repriceLock}") && !sc.includes("const customEditable = isInternal && !p.repriceLock"),
+    "#368 estimator lock: the labor / track / curtain configurators don't re-open on a locked estimate (a disabled ✎ says why); the Custom part form is unaffected");
+  ok(sc.includes("const hitLocked = repriceLocked(hit.status);") && sc.includes("disabled={hitLocked}") && sc.includes("title={hitLocked ? REVISE_FIRST : undefined}"),
+    "#368 estimator lock: the system's Move / Copy target picker greys out sent / won / lost estimates with the same title");
+  const mlb = rd("src/app/(app)/estimator/move-lines-bar.tsx");
+  ok(mlb.includes("disabled={repriceLocked(hit.status)}") && mlb.includes("title={repriceLocked(hit.status) ? REVISE_FIRST : undefined}"),
+    "#368 estimator lock: Move lines → Another estimate… greys out sent / won / lost targets the same way");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  ok((hook.match(/if \(repriceLocked\(status\)\) return;/g) || []).length === 3, "#368 estimator lock: openLaborEdit / openTrackEdit / openCurtainEdit refuse on a locked estimate too");
+}
+
+/** #368 estimator — Load system's core refuses a sent / won / lost target estimate (and only that) against the test DB. */
+async function etc368LoadSystemDbChecks(check: typeof ok): Promise<void> {
+  const { fixtureId, registerFixture, dropFixtures } = await import("./test-fixtures");
+  const Q = await import("@/lib/stores/quotes");
+  const DS = await import("@/db/doc-store");
+  const { loadLibrarySystem } = await import("@/lib/narrative/load-system");
+  const { LIBRARY_GONE } = await import("@/lib/narrative/system-library");
+  const base = { customer: "Spec fixture 368", owner: "spec", source: "estimator", quoteType: "system", spec: { sections: [], mobs: [] } };
+  try {
+    for (const st of ["draft", "sent", "won", "lost"] as const) {
+      const id = fixtureId(368, "lock-" + st);
+      await Q.create({ ...base, id, name: "Lock " + st } as never);
+      registerFixture("quotes", id);
+      // create() always starts a draft; the stored status is set directly (no send / win side effects needed here).
+      if (st !== "draft") await DS.patchDoc<{ id: string; status: string }>("quotes", id, (d) => { d.status = st; });
+      const r = await loadLibrarySystem("not-a-key", null, id);
+      if (st === "draft") check(!r.ok && r.error === LIBRARY_GONE, "#368 estimator lock (DB): Load system into a DRAFT estimate passes the lock (a bad key then answers as before)");
+      else check(!r.ok && r.error === e368ReviseFirst, `#368 estimator lock (DB): Load system into a ${st.toUpperCase()} estimate is refused with "Revise the estimate first"`);
+    }
+    const unsaved = await loadLibrarySystem("not-a-key", null, null);
+    check(!unsaved.ok && unsaved.error === LIBRARY_GONE, "#368 estimator lock (DB): an unsaved estimate (no id) is never locked");
+  } finally {
+    await dropFixtures(368);
+  }
 }

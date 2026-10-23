@@ -33,6 +33,7 @@ import type { NumberedComment } from "@/lib/estimate-review/comments";
 import { GROUPS_MAX, type SystemGroup } from "@/lib/estimate-groups/groups";
 import { discountSkuOf, normalCostOf, type ProjectDiscounts } from "@/lib/project-discounts/rules";
 import { PROJECT_DISCOUNT_COPY, ProjectDiscountEditor } from "./project-discounts-card";
+import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 
 /** Phase 2a: the Group select's "+ New group" option value (never a group id — those are g-…). */
 const NEW_GROUP = "__new";
@@ -217,6 +218,9 @@ export type SectionCardProps = {
   onEditCurtain?: (lineId: number) => void;
   /** #312: reopen the Custom part form on a custom line, pre-filled (by line id). */
   onEditCustom?: (lineId: number) => void;
+  /** #368: set (to REVISE_FIRST) on a sent / won / lost estimate — the labor / track / curtain configurators don't
+   *  re-open (they re-price the line); their ✎ shows disabled with this text. */
+  repriceLock?: string;
   /** #312: the open Custom part form is editing a line (Save changes) rather than adding one. */
   customEditing?: boolean;
   /** Moves this system into a brand-new estimate (sibling of onDelete). */
@@ -947,10 +951,15 @@ export default function SectionCard(p: SectionCardProps) {
                   : `${moveHits.length} estimate${moveHits.length === 1 ? "" : "s"}`}
               </div>
 
-              {moveHits.map((hit) => (
+              {moveHits.map((hit) => {
+                /* #368: a sent / won / lost estimate keeps its prices — greyed, refused server-side too. */
+                const hitLocked = repriceLocked(hit.status);
+                return (
                 <button
                   key={hit.id}
                   type="button"
+                  disabled={hitLocked}
+                  title={hitLocked ? REVISE_FIRST : undefined}
                   onClick={() => (isCopy ? handleCopyToExisting(hit.id) : handleMoveToExisting(hit.id))}
                   style={{
                     width: "100%",
@@ -963,7 +972,8 @@ export default function SectionCard(p: SectionCardProps) {
                     background: "#fff",
                     border: "1px solid #eef0f3",
                     borderRadius: 8,
-                    cursor: "pointer",
+                    cursor: hitLocked ? "not-allowed" : "pointer",
+                    opacity: hitLocked ? 0.5 : 1,
                     textAlign: "left",
                   }}
                 >
@@ -987,7 +997,8 @@ export default function SectionCard(p: SectionCardProps) {
                     </span>
                   </span>
                 </button>
-              ))}
+                );
+              })}
             </div>
           )}
 
@@ -1095,7 +1106,7 @@ export default function SectionCard(p: SectionCardProps) {
                  configurator — its description and an Edit link, like a
                  vendor line. A labor line added before #269 has no draft to
                  reopen, so it only says so. */
-              const laborEditable = isInternal && !!p.onEditLabor && isLaborLineEditable(sec, it);
+              const laborEditable = isInternal && !p.repriceLock && !!p.onEditLabor && isLaborLineEditable(sec, it);
               const openLabor = (e: { detail: number }) => {
                 // Opens on the FIRST click only — a double-click's second
                 // click must not reopen or land on the modal (labor-modal.tsx
@@ -1105,11 +1116,15 @@ export default function SectionCard(p: SectionCardProps) {
               };
               /* #274: a track line reopens the track configurator the same
                  way — its description or ✎, first click only. */
-              const trackEditable = isInternal && !!p.onEditTrack && !!it.track;
+              const trackEditable = isInternal && !p.repriceLock && !!p.onEditTrack && !!it.track;
               /* #292: a curtain line reopens the curtain configurator through
                  the same description click (openLine) and its own ✎ — a line
                  is never both a track and a curtain. */
-              const curtainEditable = isInternal && !!p.onEditCurtain && !!it.curtain;
+              const curtainEditable = isInternal && !p.repriceLock && !!p.onEditCurtain && !!it.curtain;
+              /* #368: on a sent estimate those three configurators stay shut until it is revised — a disabled ✎
+                 says why. */
+              const configLocked =
+                isInternal && !!p.repriceLock && ((!!p.onEditLabor && isLaborLineEditable(sec, it)) || (!!p.onEditTrack && !!it.track) || (!!p.onEditCurtain && !!it.curtain));
               /* #312: a hand-entered custom part reopens the Custom part form,
                  pre-filled, through the same description click and its own ✎. */
               const customEditable = isInternal && !!p.onEditCustom && isCustomLineEditable(it);
@@ -1582,6 +1597,9 @@ export default function SectionCard(p: SectionCardProps) {
                     )}
                     {customEditable && (
                       <button type="button" className="est-action-btn" onClick={openLine} title="Edit custom part — reopens the Custom part form" aria-label={`Edit custom part ${it.desc}`} style={ACTION_BTN}>✎</button>
+                    )}
+                    {configLocked && (
+                      <button type="button" className="est-action-btn" disabled title={p.repriceLock} aria-label={`Edit ${it.desc} — ${p.repriceLock}`} style={{ ...ACTION_BTN, cursor: "not-allowed", opacity: 0.45 }}>✎</button>
                     )}
                     {kpStar !== "none" && !p.boxSale && (
                       <button

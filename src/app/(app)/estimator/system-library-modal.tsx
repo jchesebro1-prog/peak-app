@@ -20,7 +20,7 @@ import { getSystemLibraryEntryAction, loadLibrarySystemAction, searchSystemLibra
  * the target system. Only copies text that already exists (D89).
  */
 export type SystemLibraryModalProps =
-  | { mode: "load"; tierMargin: number | null; onLoaded: (res: LoadedLibrarySystem) => void; onClose: () => void }
+  | { mode: "load"; tierMargin: number | null; /** #368: the saved estimate it lands in (null = unsaved) — the server refuses a sent one. */ quoteId?: string | null; onLoaded: (res: LoadedLibrarySystem) => void; onClose: () => void }
   | { mode: "merge"; target: SpecSection; onMerge: (sources: SystemLibraryEntry[], opts: MergeOpts) => void; onClose: () => void };
 
 const BTN: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12, fontWeight: 600, color: "#3a3f4a", background: "#f1f2f5", border: "none", borderRadius: 6, padding: "6px 12px", cursor: "pointer" };
@@ -105,11 +105,12 @@ export default function SystemLibraryModal(p: SystemLibraryModalProps) {
     if (p.mode !== "load" || !focusKey) return;
     const key = focusKey;
     const tierMargin = p.tierMargin;
+    const quoteId = p.quoteId ?? null;
     const onLoaded = p.onLoaded;
     start(async () => {
       setErr("");
       try {
-        const res = await loadLibrarySystemAction(key, { tierMargin });
+        const res = await loadLibrarySystemAction(key, { tierMargin, quoteId });
         if (res.ok) onLoaded(res);
         else setErr(res.error);
       } catch {
