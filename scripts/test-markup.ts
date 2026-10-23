@@ -10,6 +10,9 @@ import { catalogAddPrice, customPartSell, isAtTierSeed, repriceForTier } from ".
 import { copySectionForTarget } from "../src/app/(app)/estimator/copy-system";
 import { sliderPct, typedPriceWarning } from "../src/lib/service-pricing";
 import { knobPctFrom } from "../src/lib/tier-seed";
+import { sellFromCost } from "../src/lib/design/equipment-map";
+import { curtainPrice } from "../src/lib/design/curtain-pricing";
+import { unitPriceFor } from "../src/lib/portal-price-rules";
 
 const near = (a: number | null | undefined, b: number, eps = 1e-9) => a != null && Math.abs(a - b) <= eps;
 
@@ -66,6 +69,10 @@ export async function markupPureChecks(ok: Ok) {
     "markup: a typed service total under 11 % markup warns");
   ok(sliderPct(0.428571) === 43 && sliderPct(2) === 100 && sliderPct(0.01) === 10, "markup: service slider clamps 10–100");
   ok(knobPctFrom(0.3 / 0.7) === (0.3 / 0.7) * 100 && knobPctFrom(0) === null, "markup: the knob keeps a saved quote's exact points");
+  // Task 5 — curtains, the Grid / Equipment map and the portal.
+  ok(sellFromCost(100, 0.43) === 143 && sellFromCost(100, 25) === 143 && curtainPrice(100, 0.25) === 125,
+    "markup: sellFromCost guard falls back to 43 %; curtains price at their markup");
+  ok(unitPriceFor({ cost: 100, list: 0 }, { markup: 0.25, staleCostMonths: 0, now: 0 }).unitPrice === 125, "markup: portal unit price");
 }
 
 export async function markupDbChecks(_ok: Ok) {

@@ -5,7 +5,7 @@
  *
  * A custom item is "a product that just doesn't have a catalog item": a
  * described line on ONE Grid option, priced exactly like an Equipment-map
- * allowance — sell = unit cost ÷ (1 − the customer's tier margin). It is
+ * allowance — sell = unit cost × (1 + the customer's tier markup). It is
  * always priced (never "Incomplete"), flagged `allowance` on the quote, and
  * left out of the bid spec (gridSpecBomRows drops allowance lines). It is
  * never placed on the plan sheet and never enters the catalog.
@@ -128,10 +128,10 @@ export function customItemDesc(it: Pick<GridCustomItem, "desc" | "mfr" | "model"
   return [it.desc, it.mfr, it.model].filter(Boolean).join(" — ");
 }
 
-/** BOM lines in the order the person added them; sell = cost ÷ (1 − margin). */
-export function customItemBomLines(items: readonly GridCustomItem[], margin: number): BomLine[] {
+/** BOM lines in the order the person added them; sell = cost × (1 + markup). */
+export function customItemBomLines(items: readonly GridCustomItem[], markup: number): BomLine[] {
   return items.map((it) => {
-    const list = sellFromCost(it.unitCost, margin);
+    const list = sellFromCost(it.unitCost, markup);
     return {
       partId: customItemPartId(it.id),
       desc: customItemDesc(it),
@@ -145,7 +145,7 @@ export function customItemBomLines(items: readonly GridCustomItem[], margin: num
   });
 }
 
-/** The cost basis the quote's margin is computed from. */
+/** The cost basis the quote's markup is computed from. */
 export function customItemsCost(items: readonly GridCustomItem[]): number {
   return round2(items.reduce((a, it) => a + it.qty * it.unitCost, 0));
 }

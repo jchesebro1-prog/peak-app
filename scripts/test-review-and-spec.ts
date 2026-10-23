@@ -2650,11 +2650,11 @@ ok(gLines[0].partId === "S4LED" && gLines[0].qty === 3, "biggest line first: 3×
 ok(gLines[0].ext === 3600, `extended price = qty × list (${gLines[0].ext})`);
 const gTot = bomTotals([place("S4LED"), place("CYC1")], gridParts);
 ok(gTot.value === 2100 && gTot.cost === 1400, `totals sum value/cost (${gTot.value}/${gTot.cost})`);
-ok(Math.abs(gTot.margin - (2100 - 1400) / 2100) < 1e-9, "margin = (value-cost)/value");
+ok(Math.abs(gTot.markup - (2100 - 1400) / 1400) < 1e-9, "markup = (value-cost)/cost (#367)");
 const gGhost = bomLines([place("GONE")], gridParts);
 ok(gGhost.length === 1 && gGhost[0].ext === 0 && /removed/i.test(gGhost[0].desc),
   "a placement whose part left the catalog stays visible at $0, flagged removed");
-ok(bomTotals([], gridParts).margin === 0, "empty project has margin 0, not NaN");
+ok(bomTotals([], gridParts).markup === 0, "empty project has markup 0, not NaN");
 
 /* --- The Grid geometry (D109) --- */
 import { pointInPolygon, polygonArea, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
@@ -2828,7 +2828,7 @@ ok(cyc.sewnAreaSqft === 800 && cyc.sewnWidthFt === 40, "cyc at 0% fullness: sewn
 ok(cyc.costEach === 720, `#227 flat: flat goods price at the same one rate — 800 × 0.9 = 720, no cyc making charge (got ${cyc.costEach})`);
 
 // margin
-ok(Math.abs(curtainPrice(700) - 1000) < 1e-6, "price = cost / (1 − 0.30)");
+ok(curtainPrice(700) === 1001 && curtainPrice(700, mk(0.3)) === 1000, "price = cost × (1 + markup); #367: the default curtain markup is 43 %, so $700 → $1,001 (was $1,000 at the 30 % margin; mk(0.3) still gives $1,000)");
 
 // SEED_FABRIC_RATES: all five SKUs pinned to their dollar values, plus the
 // key count pinned too so an added-but-unused fabric rate is caught as well.
@@ -2922,7 +2922,7 @@ import { curtainPriceEach as portalPriceEach } from "@/lib/curtain-geom";
 {
   const spec = (fab: string, w: string, h: string, full: string) => ({ name: "d", hang: "Pipe", fabric: fab, qty: "1", width: w, height: h, fullness: full, bottom: "Chain" });
   const AREA_RATE = 3.64; // Charisma
-  const margin = 0.30;
+  const margin = mk(0.30); // #367: the curtain functions take a markup
   // server flat cost: sewnW = 20×1.5=30, sewnA=30×19=570, cost=570×3.64=2074.8
   const sv = portalCurtainCost(spec("RB-CHAR-25", "20", "19", "50"), { fabricRate: AREA_RATE, sewingPct: 0 }, margin);
   ok(Math.abs(sv.costEach - 2074.8) < 0.01, `portal server cost = flat $/sq ft cost (got ${sv.costEach})`);
@@ -4362,12 +4362,12 @@ import {
 // illegal non-async export from a "use server" module.
 {
 
-  ok(isTierPriced(500, 0.3) === true, "#76: cost > 0 and margin in (0,1) -> tier-priced");
-  ok(isTierPriced(0, 0.3) === false, "#76: cost = 0 -> fallback to list, not tier-priced");
-  ok(isTierPriced(500, 0) === false, "#76: margin = 0 (outside open interval) -> fallback");
-  ok(isTierPriced(500, 1) === false, "#76: margin = 1 (outside open interval) -> fallback");
-  ok(isTierPriced(500, 1.2) === false, "#76: margin > 1 -> fallback");
-  ok(isTierPriced(500, -0.1) === false, "#76: negative margin -> fallback");
+  ok(isTierPriced(500, mk(0.3)) === true, "#76: cost > 0 and a markup above 0 -> tier-priced");
+  ok(isTierPriced(0, mk(0.3)) === false, "#76: cost = 0 -> fallback to list, not tier-priced");
+  ok(isTierPriced(500, 0) === false, "#76: markup = 0 -> fallback");
+  ok(isTierPriced(500, 1) === true && isTierPriced(500, 1.2) === true, "#76 (#367): a markup of 100 % or more is still tier-priced (no (0, 1) interval on markup)");
+  ok(isTierPriced(500, Number.NaN) === false && isTierPriced(500, Number.POSITIVE_INFINITY) === false, "#76 (#367): a non-finite markup -> fallback");
+  ok(isTierPriced(500, -0.1) === false, "#76: negative markup -> fallback");
 }
 
 /* ---- punch #79: demo seed reaches the dynamic routes ---- */
@@ -19052,12 +19052,12 @@ import { EQUIPMENT_ROW_BY_KEY as gemRowByKey2 } from "@/lib/design/equipment-voc
     parts: [{ sku: "GEM-MIX", qty: 1 }, { sku: "GEM-DSP", qty: 2 }],
     createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
   };
-  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), margin: 0.3 };
+  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), markup: mk(0.3) };
   const p = (cell: Parameters<typeof gemPriceCell2>[0], key = "lighting:par") => gemPriceCell2(cell, def(key), ctx);
   const par = p({ kind: "part", sku: "GEM-PAR" });
   ok(par.status === "part" && par.unitCost === 600 && par.unitSell === 900, "#211 T2: a part prices at live catalog cost / list");
   const hb = p({ kind: "part", sku: "GEM-HB" }, "rigging:headblock");
-  ok(hb.status === "part" && hb.unitSell === gemSell2(500, 0.3) && hb.unitSell === 714.29, "#211 T2: a part with no list sells at cost ÷ (1 − catalog margin)");
+  ok(hb.status === "part" && hb.unitSell === gemSell2(500, mk(0.3)) && hb.unitSell === 714.29, "#211 T2: a part with no list sells at cost × (1 + catalog markup)");
   const gone = p({ kind: "part", sku: "GEM-GONE" });
   ok(gone.status === "needs-part" && /no longer in the catalog/.test(gone.reason), "#211 T2: a deleted part is needs-a-part, not $0");
   ok(p({ kind: "part", sku: "GEM-NIL" }).status === "needs-part", "#211 T2: an unpriced part is needs-a-part");
@@ -19065,7 +19065,7 @@ import { EQUIPMENT_ROW_BY_KEY as gemRowByKey2 } from "@/lib/design/equipment-voc
   ok(asm.status === "assembly" && asm.unitCost === 8000 && asm.unitSell === 11200 && asm.desc === "Mixer + DSP rack", "#211 T2: a System assembly prices at its included totals (resolveFixture)");
   ok(p({ kind: "assembly", id: "SA-DELETED" }, "audio:mixerDsp").status === "needs-part", "#211 T2: a deleted assembly is needs-a-part");
   const allow = p({ kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 5 }, "audio:subwoofer");
-  ok(allow.status === "allowance" && allow.unitCost === 1200 && allow.unitSell === gemSell2(1200, 0.3), "#211 T2: a confirmed allowance is a unit cost, sold through the catalog margin");
+  ok(allow.status === "allowance" && allow.unitCost === 1200 && allow.unitSell === gemSell2(1200, mk(0.3)), "#211 T2: a confirmed allowance is a unit cost, sold through the catalog markup");
   ok(p({ kind: "allowance", amount: 1200, confirmedBy: "", confirmedAt: 5 }, "audio:subwoofer").status === "needs-part", "#211 T2: an unconfirmed allowance never prices");
   const empty = p(null);
   ok(empty.status === "needs-part" && empty.reason === "Not mapped yet", "#211 T2: an empty cell is needs-a-part with no $");
@@ -19096,7 +19096,7 @@ import { EQUIPMENT_ROW_BY_KEY as gemRowByKey2 } from "@/lib/design/equipment-voc
   const map: GemMap2 = { "lighting:par": same, "audio:mixerDsp": { tiers: { better: { kind: "assembly", id: "SA-GEM2" } }, updatedBy: "t", updatedAt: 1 } };
   const table = gemTable2(map, ctx);
   const allKeys = [...gemRowByKey2.keys()];
-  ok((["good", "better", "best"] as const).every((t) => allKeys.every((k) => !!table.byTier[t][k])) && table.margin === 0.3, "#211 T2: the table has a price (or needs-a-part) for every row × tier");
+  ok((["good", "better", "best"] as const).every((t) => allKeys.every((k) => !!table.byTier[t][k])) && table.markup === mk(0.3), "#211 T2: the table has a price (or needs-a-part) for every row × tier");
   ok(table.byTier.good["audio:mixerDsp"].status === "needs-part" && table.byTier.better["audio:mixerDsp"].status === "assembly", "#211 T2: tiers resolve independently");
   ok(allKeys.filter((k) => !map[k]).every((k) => table.byTier.better[k].status === "needs-part"), "#211 T2: every unmapped row is needs-a-part — nothing is pre-mapped");
   ok(gemMapSkus2(map, ctx.fixtures).sort().join(",") === "GEM-DSP,GEM-MIX,GEM-PAR", "#211 T2: mapSkus names every part the map needs, assembly parts included");
@@ -19118,7 +19118,7 @@ const gemValueImports = (src: string): string[] =>
     lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] },
     parts: [{ sku: "GEM-MIX", qty: 1 }], createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
   };
-  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), margin: 0.3 };
+  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), markup: mk(0.3) };
   const hints = { "lighting:par": { text: "was $500 / $750 / $1,150", skus: [] as string[] } };
   const empty = gemView3({}, ctx, hints);
   ok(empty.length === 51 && empty.every((r) => r.status === "needs-part" && r.cells.every((c) => c.kind === "empty" && c.input === null)), "#211 T3: an empty map shows every row as Needs a part");
@@ -19232,7 +19232,7 @@ import { readdirSync as gemReaddir5 } from "node:fs";
     "rigging:headblock": { tiers: { better: { kind: "part", sku: "GEM5-HB" } }, updatedBy: "t", updatedAt: 1 },
     "curtains:draw": { tiers: { good: { kind: "part", sku: "GEM5-VEL" } }, sameAll: true, updatedBy: "t", updatedAt: 1 },
     "audio:subwoofer": { tiers: { good: { kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 5 } }, sameAll: true, updatedBy: "t", updatedAt: 1 },
-  }, { parts, fixtures: new Map(), margin: 0.3 });
+  }, { parts, fixtures: new Map(), markup: mk(0.3) });
   const better = gemTierSystems5(C, s, "better", gemTierDefs5(), table);
   const item = (sys: string, key: string, list = better) => list.find((x) => x.key === sys)!.items.find((i) => i.key === key)!;
   const par = item("lighting", "lighting:par");
@@ -19259,7 +19259,7 @@ import { readdirSync as gemReaddir5 } from "node:fs";
         updatedAt: 1,
       },
     },
-    { parts, fixtures: new Map(), margin: 0.3 }
+    { parts, fixtures: new Map(), markup: mk(0.3) }
   );
   const allowBetter = gemTierSystems5(C, s, "better", gemTierDefs5(), allowTable);
   const drawAllow = allowBetter.find((x) => x.key === "curtains")!.items.find((i) => i.key === "curtains:draw")!;
@@ -19423,7 +19423,7 @@ import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
       ["GEM6-PAR", { sku: "GEM6-PAR", desc: "Par", unit: "ea", cost: 600, list: 900 }],
     ]),
     fixtures: new Map<string, typeof rack | typeof fx>([[rack.id, rack], [fx.id, fx]]),
-    margin: 0.3,
+    markup: mk(0.3),
   };
   const map = { "audio:subwoofer": { tiers: { good: { kind: "allowance" as const, amount: 1200, confirmedBy: "Chris", confirmedAt: 5 } }, sameAll: true, updatedBy: "t", updatedAt: 1 } };
   const v = gemVirtual6(["asm:SA-GEM6", "asm:fa-gem6", "allow:audio:subwoofer:better", "allow:video:screen:good", "PLAIN", "asm:SA-GEM6"], map, ctx);
@@ -19501,7 +19501,7 @@ import {
   const ctx7 = {
     parts: new Map([["MIX-7", { sku: "MIX-7", desc: "Mixer", unit: "ea", cost: 500, list: 800 }]]),
     fixtures: new Map([[rackDead.id, rackDead], [rackLive.id, rackLive]]),
-    margin: 0.3,
+    markup: mk(0.3),
   };
   const map7 = { "audio:subwoofer": { tiers: { good: { kind: "allowance" as const, amount: 1200, confirmedBy: "Chris", confirmedAt: 5 } }, sameAll: true, updatedBy: "t", updatedAt: 1 } };
   const v7 = gemVirtual7(["asm:SA-DEAD7", "asm:SA-GONE7", "asm:SA-LIVE7", "allow:audio:subwoofer:good", "allow:video:screen:good"], map7, ctx7);
@@ -19569,7 +19569,7 @@ import { manualScopeInputs as gemManualInputs7 } from "@/lib/design/grid-intake"
     lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] },
     parts: [{ sku: "GEM7-MIX", qty: 1 }], createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
   };
-  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), margin: 0.3 };
+  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), markup: mk(0.3) };
   const every = (c: GemCell7) => ({ tiers: { good: c }, sameAll: true, updatedBy: "t", updatedAt: 1 });
   const table = gemTable7({
     "lighting:par": every({ kind: "part", sku: "GEM7-PAR" }),
@@ -19681,17 +19681,17 @@ import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model
   const fabricHits9 = gemCurtainHits9([
     { sku: "GEM9-VEL", desc: "GEM9 velour", curtainAreaRate: 3.5 },
     { sku: "GEM9-RATELESS", desc: "GEM9 unrated fabric" },
-  ], 0.3);
+  ], mk(0.3));
   ok(
     fabricHits9.length === 1 &&
       fabricHits9[0].kind === "part" &&
       fabricHits9[0].ref === "GEM9-VEL" &&
       fabricHits9[0].unit === "sq ft fabric" &&
       fabricHits9[0].unitSell === 5,
-    "#211 T8 fix wave 1 (I2): a curtain row's swap candidates are Fabric parts with a positive area rate, shown as a per-sq-ft SELL through the catalog margin (3.5 ÷ 0.7 = 5), never the raw cost rate — a list-less, cost-less fabric is still findable"
+    "#211 T8 fix wave 1 (I2): a curtain row's swap candidates are Fabric parts with a positive area rate, shown as a per-sq-ft SELL through the catalog markup (3.5 × (1 + mk(0.3)) = 5), never the raw cost rate — a list-less, cost-less fabric is still findable"
   );
   ok(
-    gemCurtainHits9([{ sku: "GEM9-RATELESS", desc: "x" }], 0.3).length === 0,
+    gemCurtainHits9([{ sku: "GEM9-RATELESS", desc: "x" }], mk(0.3)).length === 0,
     "#211 T8 fix wave 1 (I2): a Fabric part with no area rate at all is never a curtain-row candidate"
   );
 
@@ -19702,7 +19702,7 @@ import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model
       { sku: "GEM9-LIST", desc: "priced by list", unit: "ea", cost: 0, list: 250 },
       { sku: "GEM9-FREE", desc: "unpriced", unit: "ea", cost: 0, list: 0 },
     ],
-    0.3
+    mk(0.3)
   );
   ok(
     partHits9.length === 2 && partHits9.every((h) => h.ref !== "GEM9-FREE") && partHits9.find((h) => h.ref === "GEM9-LIST")!.unitSell === 250,
@@ -19842,10 +19842,10 @@ import { defaultAState as gemFrDefault } from "@/app/(app)/design/quick/engine";
   ok(qp.includes("loadDesignPricing(") && !qp.includes("assemblyUnitTotals") && qc.includes("fixtureOverridesFor(a.fixtureAssemblies, fixturePrices)") && !qc.includes("hit.sell"), "#211 final review I3: Quick Design prices fixture picks on the server (priceCell), never the list-only sum");
   // I4 — the server's own count; the client's `incomplete` is never read.
   const allAllow = {
-    margin: 0.3,
+    markup: mk(0.3),
     byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(gemFrRows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
   };
-  const emptyTable = { margin: 0.3, byTier: { good: {}, better: {}, best: {} } };
+  const emptyTable = { markup: mk(0.3), byTier: { good: {}, better: {}, best: {} } };
   const cfgFr = { ...gemFrDefault(10) } as unknown as Record<string, unknown>;
   const recFr = { tier: "better", config: cfgFr };
   ok(gemFrQuickNeeds(recFr, emptyTable, {}) > 0 && gemFrQuickNeeds(recFr, allAllow, {}) === 0, "#211 final review I4: quickDesignNeedsPart — empty map counts lines, a fully mapped map counts none");
@@ -19962,7 +19962,7 @@ import { compute as gemW2Compute, hydrateAState as gemW2Hydrate, tierTotals as g
 {
   const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const table = {
-    margin: 0.3,
+    markup: mk(0.3),
     byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(gemFrRows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
   };
   const rates = { installPct: 18, freightPct: 5, contingencyPct: 10 };
@@ -19975,7 +19975,7 @@ import { compute as gemW2Compute, hydrateAState as gemW2Hydrate, tierTotals as g
   ok(p0.needsPart === 0 && p0.budget > 0 && p0.budget === Math.round(screen), `#211 wave 2 I1: quickDesignPrice totals exactly as Quick Design's screen does (${p0.budget} vs ${screen})`);
   const pSets = gemW2Price({ tier: "better", config: { ...cfg, tierSets: { better: 23 } } }, table, {}, rates);
   ok(pSets.budget !== p0.budget && gemW2TierDefs({ tierSets: { better: 2, good: -1, best: Number.NaN } as never }).better.sets === 2 && gemW2TierDefs({ tierSets: { good: -1 } as never }).good.sets === null, "#211 wave 2 I1: the design's own line-set dial (config.tierSets) reaches the server price; junk is ignored");
-  ok(gemW2Price(rec, { margin: 0.3, byTier: { good: {}, better: {}, best: {} } }, {}, rates).needsPart > 0, "#211 wave 2 I1: an empty map still prices needs-a-part");
+  ok(gemW2Price(rec, { markup: mk(0.3), byTier: { good: {}, better: {}, best: {} } }, {}, rates).needsPart > 0, "#211 wave 2 I1: an empty map still prices needs-a-part");
   const hostile = Object.defineProperty({}, "sys", { enumerable: true, get() { throw new Error("bad config"); } }) as Record<string, unknown>;
   const ph = gemW2Price({ tier: "better", config: hostile }, table, {}, rates);
   ok(ph.needsPart === 1 && ph.budget === 0, "#211 wave 2 I1: a config that won't compute is incomplete at $0, never throws");
@@ -20018,7 +20018,7 @@ import {
 {
   const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const table = {
-    margin: 0.3,
+    markup: mk(0.3),
     byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(gemFrRows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
   };
   const rates = { installPct: 18, freightPct: 5, contingencyPct: 10 };
@@ -20312,7 +20312,7 @@ import { EQUIPMENT_ROW_BY_KEY as ci212RowByKey } from "@/lib/design/equipment-vo
   const plain: Ci212Map = {
     "audio:subwoofer": { tiers: { good: { kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 7 } }, sameAll: true, updatedBy: "Chris", updatedAt: 7 },
   };
-  const ctx = { parts: new Map(), fixtures: new Map(), margin: 0.3 };
+  const ctx = { parts: new Map(), fixtures: new Map(), markup: mk(0.3) };
   const [withDesc] = ci212Virtual([ci212AllowId("audio:subwoofer", "good")], map, ctx);
   ok(withDesc?.desc === "Acme SUB-18 subwoofer" && withDesc.allowance === true && !withDesc.virtualDead,
     "#212: an allowance virtual part prints its description");
@@ -20360,15 +20360,15 @@ import { sellFromCost as ci212Sell } from "@/lib/design/equipment-map";
 
   const first: Ci212Item = good.ok ? good.item : { id: ID, desc: "?", qty: 1, unitCost: 1 };
   const items: Ci212Item[] = [first, { id: "ci-bbbbbbbbbbbb", desc: "Stage lift", qty: 1, unitCost: 25000 }];
-  const lines = ci212Lines(items, 0.3);
+  const lines = ci212Lines(items, mk(0.3));
   ok(lines.length === 2 && lines.every((l) => l.allowance === true && l.custom === true && l.unit === "ea"),
     "#212 custom: every custom BOM line is flagged allowance + custom");
   ok(lines[0].partId === ci212PartId(ID) && lines[0].partId === `custom:${ID}` && lines[0].desc === "Custom motor controller — Acme — MC-9" && lines[0].qty === 2,
     "#212 custom: sku custom:<id>, desc carries maker and model");
-  ok(lines[0].list === ci212Sell(1000, 0.3) && lines[0].list === 1428.57 && lines[0].ext === 2857.14 && lines[1].list === 35714.29 && lines[1].ext === 35714.29,
-    "#212 custom: sell = unit cost ÷ (1 − margin), ext = qty × sell");
+  ok(lines[0].list === ci212Sell(1000, mk(0.3)) && lines[0].list === 1428.57 && lines[0].ext === 2857.14 && lines[1].list === 35714.29 && lines[1].ext === 35714.29,
+    "#212 custom: sell = unit cost × (1 + markup), ext = qty × sell");
   ok(ci212Cost(items) === 27000, "#212 custom: the cost basis is qty × unit cost");
-  ok(ci212Lines(items, 0.3).every((l) => l.list > 0 && l.ext > 0), "#212 custom: a custom line is always priced — it can never read Incomplete");
+  ok(ci212Lines(items, mk(0.3)).every((l) => l.list > 0 && l.ext > 0), "#212 custom: a custom line is always priced — it can never read Incomplete");
 
   ok(ci212Of(undefined).length === 0 && ci212Of("junk").length === 0, "#212 custom: a missing or junk list reads as none");
   const read = ci212Of([first, { id: "bad-id", desc: "x", qty: 1, unitCost: 1 }, { id: "ci-cccccccccccc", desc: "", qty: 1, unitCost: 1 }, { ...first }, 7]);
@@ -23786,7 +23786,7 @@ import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
   ok(pleated.sewnAreaSqft === 570 && pleated.costEach === 2074.8, `#227: pleated cost = sewn area 570 × 3.64 = 2074.8, no width term (got ${pleated.costEach})`);
   const flat = fab227Cost({ finishedWidthFt: 40, finishedHeightFt: 20, fullnessPct: 0, qty: 1 }, { fabricRate: 0.9, sewingPct: 0 });
   ok(flat.sewnAreaSqft === 800 && flat.costEach === 720, `#227: flat goods cost = 800 × 0.9 = 720 (got ${flat.costEach})`);
-  ok(fab227Price(pleated.costEach, 0.3) === Math.round((2074.8 / 0.7) * 100) / 100, "#227: sell = cost ÷ (1 − margin), unchanged");
+  ok(fab227Price(pleated.costEach, mk(0.3)) === Math.round((2074.8 / 0.7) * 100) / 100, "#227: sell = cost × (1 + markup), unchanged");
 
   // The one fallback chain.
   ok(fab227RateOf({ sku: "RB-EN-16", curtainAreaRate: 5, costPerSqft: 1 }) === 5, "#227 chain: the catalog's curtainAreaRate wins");
@@ -23807,16 +23807,16 @@ import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
     const tag = `${c.w}×${c.h.toFixed(2)} @${c.full}% $${c.rate}`;
     const shared = fab227Cost({ finishedWidthFt: c.w, finishedHeightFt: c.h, fullnessPct: c.full, qty: 1 }, { fabricRate: c.rate, sewingPct: 10 }).costEach;
     const spec = { name: "d", hang: "", fabric: "FAB227", qty: "1", width: String(c.w), height: String(c.h), fullness: String(c.full), bottom: "" };
-    const portal = fab227PortalCost(spec, { fabricRate: c.rate, sewingPct: 10 }, 0.3);
+    const portal = fab227PortalCost(spec, { fabricRate: c.rate, sewingPct: 10 }, mk(0.3));
     const est = fab227Compute({ ...spec, vendorCostOverride: "" }, [{ sku: "FAB227", name: "x", costPerSqft: 0, curtainAreaRate: c.rate }], { sewingPct: 10 }, mk(0.3));
     const grid = fab227Grid(
       [{ id: "pl1", curtain: { type: "Draw", name: "d", widthFt: c.w, heightFt: c.h, fullnessPct: c.full, fabricSku: "FAB227" } }],
       [{ id: "FAB227", sku: "FAB227", desc: "x", category: "Fabric", curtainAreaRate: c.rate }],
       { sewingPct: 10 },
-      0.3
+      mk(0.3)
     ).get("pl1")!;
     const drape = fab227Drape({ w: c.w, h: c.h, fullness: c.full, qty: 1 }, c.rate, 10);
-    const client = fab227PriceEach(spec, fab227Sell({ fabricRate: c.rate, sewingPct: 10 }, 0.3));
+    const client = fab227PriceEach(spec, fab227Sell({ fabricRate: c.rate, sewingPct: 10 }, mk(0.3)));
     ok(portal.costEach === shared && est.costEach === shared && grid.costEach === shared, `#227 parity ${tag}: portal, estimator and Grid cost = shared model ${shared} (got ${portal.costEach} / ${est.costEach} / ${grid.costEach})`);
     ok(drape === Math.round(shared), `#227 parity ${tag}: the Equipment map drape cost is the shared cost, dollar-rounded (got ${drape})`);
     ok(grid.priceEach === portal.priceEach && Math.abs(client - portal.priceEach) < 0.011, `#227 parity ${tag}: Grid + client preview sell = portal sell (client ${client}, server ${portal.priceEach})`);
@@ -23825,13 +23825,13 @@ import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
 
   // The Equipment map and the swap search read the same helper.
   const drawDef = fab227Rows.get("curtains:draw")!;
-  const ctxOf = (p: Fab227Part) => ({ parts: new Map<string, Fab227Part>([[p.sku, p]]), fixtures: new Map(), margin: 0.3 });
+  const ctxOf = (p: Fab227Part) => ({ parts: new Map<string, Fab227Part>([[p.sku, p]]), fixtures: new Map(), markup: mk(0.3) });
   const seeded = fab227PriceCell({ kind: "part", sku: "RB-EN-16" }, drawDef, ctxOf({ sku: "RB-EN-16", desc: "Encore 16", unit: "sq ft", cost: 0, list: 0, category: "Fabric" }));
   ok(seeded.status === "part" && seeded.areaRate === 2.1, "#227: the Equipment map resolves a fabric through fabricAreaRateOf — seed rates included (spec §2)");
   const cps = fab227PriceCell({ kind: "part", sku: "FAB227-CPS" }, drawDef, ctxOf({ sku: "FAB227-CPS", desc: "Muslin", unit: "sq ft", cost: 0, list: 0, category: "Fabric", costPerSqft: 1.4 }));
   ok(cps.status === "part" && cps.areaRate === 1.4, "#227: …and falls back to the fabric's cost per sq ft");
-  const hits = fab227SwapHits([{ sku: "FAB227-CPS", desc: "cost/sq ft only", costPerSqft: 1.4 }, { sku: "FAB227-NONE", desc: "no rate" }], 0.3);
-  ok(hits.length === 1 && hits[0].ref === "FAB227-CPS" && hits[0].unitSell === 2, "#227: the swap search finds a fabric priced only by cost per sq ft (the one helper), sold through the margin");
+  const hits = fab227SwapHits([{ sku: "FAB227-CPS", desc: "cost/sq ft only", costPerSqft: 1.4 }, { sku: "FAB227-NONE", desc: "no rate" }], mk(0.3));
+  ok(hits.length === 1 && hits[0].ref === "FAB227-CPS" && hits[0].unitSell === 2, "#227: the swap search finds a fabric priced only by cost per sq ft (the one helper), sold through the markup");
 
   // No making term and no private rate chain survives in any mirror.
   const mirrors227 = [
@@ -23921,11 +23921,11 @@ import { curtainSwapHits as fab227Swap3 } from "@/lib/design/auto-estimate";
   ok(fab227Label(3.64) === "$3.64/sq ft fabric", `#227 labels: a rate reads $X/sq ft fabric (#227 late) (got ${fab227Label(3.64)})`);
   ok(fab227Label(0) === fab227NoRate && fab227Label(undefined) === fab227NoRate && fab227Label(null) === fab227NoRate && fab227Label(Number.NaN) === fab227NoRate, "#227 labels: no rate reads No $/sq ft set");
 
-  const hits = fab227Swap3([{ sku: "FAB227-S", desc: "velour", curtainAreaRate: 3.5 }], 0.3);
+  const hits = fab227Swap3([{ sku: "FAB227-S", desc: "velour", curtainAreaRate: 3.5 }], mk(0.3));
   ok(hits.length === 1 && hits[0].unit === fab227Unit, "#227 labels: the swap search shows a fabric per sq ft fabric (#227 late)");
 
   const drawDef = fab227Rows3.get("curtains:draw")!;
-  const ctxOf = (p: Fab227Part3) => ({ parts: new Map<string, Fab227Part3>([[p.sku, p]]), fixtures: new Map(), margin: 0.3 });
+  const ctxOf = (p: Fab227Part3) => ({ parts: new Map<string, Fab227Part3>([[p.sku, p]]), fixtures: new Map(), markup: mk(0.3) });
   const bare = fab227PriceCell3({ kind: "part", sku: "FAB227-BARE" }, drawDef, ctxOf({ sku: "FAB227-BARE", desc: "Bare", unit: "sq ft", cost: 0, list: 0, category: "Fabric" }));
   ok(bare.status === "needs-part" && bare.reason === "FAB227-BARE: No $/sq ft set", "#227 labels: a rateless fabric on a curtain row is needs-a-part with No $/sq ft set");
   const notFabric = fab227PriceCell3({ kind: "part", sku: "FAB227-HB" }, drawDef, ctxOf({ sku: "FAB227-HB", desc: "Headblock", unit: "ea", cost: 500, list: 700, category: "Rigging Hardware" }));
@@ -24059,7 +24059,7 @@ import { compute as n229Compute, defaultAState as n229Default } from "@/app/(app
   const stored = n229Map({ "rigging:varSpeedHoist": { tiers: { good: { kind: "none" } }, sameAll: true, updatedBy: "J", updatedAt: 1 } });
   ok(n229Status(stored["rigging:varSpeedHoist"]) === "mapped", "#229: a Not included row reads Mapped (resolved), never Needs a part");
 
-  const ctx = { parts: new Map([["P1", { sku: "P1", desc: "Hoist", unit: "ea", cost: 100, list: 150 }]]), fixtures: new Map(), margin: 0.3 };
+  const ctx = { parts: new Map([["P1", { sku: "P1", desc: "Hoist", unit: "ea", cost: 100, list: 150 }]]), fixtures: new Map(), markup: mk(0.3) };
   const p = n229Price({ kind: "none" }, n229ByKey.get("rigging:varSpeedHoist")!, ctx);
   ok(p.status === "none" && p.unitCost === 0 && p.unitSell === 0 && p.desc === "Not included", "#229: Not included prices $0 with status none");
   ok(n229Price({ kind: "none" }, n229ByKey.get("curtains:border")!, ctx).status === "none", "#229: a curtain row can be Not included too");
@@ -24131,7 +24131,7 @@ import { assemblySwapCandidates as h228Cand, scopeLabelOf as h228ScopeLabel } fr
   // #246/#247 reversed #228's "never in the pickers": both pickers list hardware now, as its own group.
   ok(h228From([rec], catalog).map((a) => `${a.kind}:${a.id}`).join(",") === "hardware:SA-HW1", "#228/#247: hardware is listed in the Estimator / Quick Design pickers, as hardware");
 
-  const ctx = { parts: catalog, fixtures: new Map([[rec.id, rec]]), margin: 0.3 };
+  const ctx = { parts: catalog, fixtures: new Map([[rec.id, rec]]), markup: mk(0.3) };
   const opt = h228Opts([rec], ctx)[0];
   ok(opt?.kind === "hardware" && opt.unitSell === 36 && opt.unitCost === 20, "#228: the Equipment-map picker lists hardware assemblies with live totals");
   const pc = h228Price({ kind: "assembly", id: rec.id }, h228ByKey.get("rigging:chainWrap")!, ctx);
@@ -24244,7 +24244,7 @@ import { defaultAState as q247Default } from "@/app/(app)/design/quick/engine";
     "#247: a system option names its scope, the Estimator's format; fixtures and hardware show the bare name");
 
   // Pricing: a system / hardware pick prices through priceCell's assembly branch — no kind filter anywhere.
-  const ctx = { parts, fixtures: new Map(recs.map((r) => [r.id, r])), margin: 0.3 };
+  const ctx = { parts, fixtures: new Map(recs.map((r) => [r.id, r])), markup: mk(0.3) };
   const cfg = { ...q247Default(10), tier: "better", fixtureAssemblies: { par: "SA-Q47S", front: "SA-Q47H", cyc: "SA-Q47F" } } as unknown as Record<string, unknown>;
   const rec = { tier: "better", config: cfg };
   const ids = q247Picked(rec);
@@ -24257,7 +24257,7 @@ import { defaultAState as q247Default } from "@/app/(app)/design/quick/engine";
   ok(ov["lighting:par"]?.status === "assembly" && ov["lighting:par"].desc === "Stage wash package" && ov["lighting:front"]?.status === "assembly" && ov["lighting:front"].desc === "Pipe clamp kit",
     "#247: fixtureOverridesFor turns a system / hardware pick into its lighting row's price");
   const table = {
-    margin: 0.3,
+    markup: mk(0.3),
     byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(q247Rows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
   };
   const rates = { freightPct: 5, contingencyPct: 10 };
@@ -24397,7 +24397,7 @@ import { manualScopeInputs as wp231Inputs } from "@/lib/design/grid-intake";
   ok(WL.withWirePull(stepped, WL.wireDimsOf(s), "good", rules).find((x) => x.key === "lighting")!.items.filter((i) => i.key === "lighting:wirePull").map((i) => i.qty).join() === "140",
     "#231: re-running the step replaces the line (Good: 140 ft)");
   const parts = new Map([["WP-DMX", { sku: "WP-DMX", desc: "DMX cable", unit: "ft", cost: 1, list: 1.5, category: "Wire & Cable" }]]);
-  const ctx = { parts, fixtures: new Map(), margin: 0.3 };
+  const ctx = { parts, fixtures: new Map(), markup: mk(0.3) };
   const mapped = wp231Table({ "lighting:wirePull": { tiers: { good: { kind: "part", sku: "WP-DMX" } }, sameAll: true, updatedBy: "t", updatedAt: 1 } }, ctx);
   const priced = wp231TierSystems(C, s, "better", wp231TierDefs(), mapped, {}, rules);
   const pl = priced.find((x) => x.key === "lighting")!.items.find((i) => i.key === "lighting:wirePull")!;
@@ -24411,7 +24411,7 @@ import { manualScopeInputs as wp231Inputs } from "@/lib/design/grid-intake";
   ok(wp231TierSystems(wp231Compute(ovS), ovS, "better", wp231TierDefs(), mapped, {}, rules).find((x) => x.key === "lighting")!.items.find((i) => i.key === "lighting:wirePull")!.qty === 200,
     "#231: Quick Design's per-tier qty override edits the Wire pull footage");
   const allAllow = {
-    margin: 0.3,
+    markup: mk(0.3),
     byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(wp231Rows.filter((r) => !r.derived).map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
   };
   const qr0 = { installPct: 18, freightPct: 5, contingencyPct: 10 };
@@ -24818,7 +24818,7 @@ async function gridAccessoriesAsyncChecks230(): Promise<void> {
   ok(a.ok && /^ba-[0-9a-f]{12}$/.test(id), "#230 store: a new accessory gets a ba- id");
 
   const tier = await resolveTier(null);
-  const unit = isTierPriced(90, tier.markup) ? Math.round((90 / (1 - tier.markup)) * 100) / 100 : 150;
+  const unit = isTierPriced(90, tier.markup) ? Math.round(90 * (1 + tier.markup) * 100) / 100 : 150;
   const only = await buildGridQuote((await GP.getProject(gp.id))!, base);
   const onlyLine = only.ok ? only.build.spec.lines.find((l) => l.sku === PART) : undefined;
   const onlyLabor = only.ok ? only.build.labor : [];
@@ -24840,11 +24840,11 @@ async function gridAccessoriesAsyncChecks230(): Promise<void> {
     "#230 quote: an accessory prices exactly like a placed part of the same partId (two lines, one price)");
   const bothLabor = both.ok ? both.build.labor : [];
   const bothLaborSell = bothLabor.reduce((a, l) => a + l.amount, 0);
-  const bothLaborCost = bothLabor.reduce((a, l) => a + r2_230(l.amount * (1 - tier.markup)), 0);
+  const bothLaborCost = bothLabor.reduce((a, l) => a + r2_230(l.amount / (1 + tier.markup)), 0);
   ok(both.ok && Math.abs(bothLabor.reduce((a, l) => a + l.material, 0) - 3 * unit) < 0.02 &&
     Math.abs(both.build.value - 3 * unit - bothLaborSell) < 0.005 &&
-    Math.abs(both.build.margin - (3 * unit + bothLaborSell - 3 * 90 - bothLaborCost) / (3 * unit + bothLaborSell)) < 1e-6,
-    "#230 quote: the accessory counts in the value and its cost in the margin (+ #232 labor at the tier margin)");
+    Math.abs(both.build.markup - (3 * unit + bothLaborSell - 3 * 90 - bothLaborCost) / (3 * 90 + bothLaborCost)) < 1e-6,
+    "#230 quote: the accessory counts in the value and its cost in the markup (+ #232 labor at the tier markup, #367)");
 
   const e = await GP.saveAccessory(gp.id, base, { id, qty: 4 });
   const afterEdit = await accOf(base);
@@ -25046,7 +25046,7 @@ import { EQUIPMENT_ROWS as lb232Rows } from "@/lib/design/equipment-vocab";
 {
   const d = wl231.defaultWireLaborRules();
   const table = {
-    margin: 0.3,
+    markup: mk(0.3),
     byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(lb232Rows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
   };
   const a: Lb232AState = { ...lb232Default(10), tier: "better" };
@@ -27362,7 +27362,7 @@ import type { EquipmentMap as FwaMap } from "@/lib/design/equipment-map";
   ok(emv.includes("title: NOT_INCLUDED") && !emv.includes('title: "Not included"'), "#229 final: the map view reuses the NOT_INCLUDED constant");
   const label = fwaRowByKey.get("audio:subwoofer")!.label;
   const noneMap: FwaMap = { "audio:subwoofer": { tiers: { good: { kind: "none" } }, sameAll: true, updatedBy: "J", updatedAt: 1 } };
-  const ctx = { parts: new Map(), fixtures: new Map(), margin: 0.3 };
+  const ctx = { parts: new Map(), fixtures: new Map(), markup: mk(0.3) };
   const [dn] = fwaVirtual([fwaAllowId("audio:subwoofer", "good")], noneMap, ctx);
   ok(dn?.desc === `${label} (row is now Not included — re-fill this scope)` && dn.virtualDead === true,
     "#229 final: an allowance line whose row is now Not included says to re-fill the scope");
@@ -27769,7 +27769,7 @@ import { GROUPS as cp233lGroups } from "@/lib/stores/pricing";
   ok(!off.find((x) => x.key === "lighting")!.items.some((i) => i.key === "lighting:cablePackage"), "#233 late: Lighting out of scope → no Cable Package");
 
   // Quick Design (tierSystems) and Grid Auto (autoEstimateCards) both run it.
-  const allNone = { margin: 0.3, byTier: { good: {}, better: {}, best: {} } } as never;
+  const allNone = { markup: mk(0.3), byTier: { good: {}, better: {}, best: {} } } as never;
   const qd = (t: "good" | "better" | "best") => cp233lTierSystems(C, s, t, cp233lTierDefs(), allNone, {}, rules).find((x) => x.key === "lighting")!.items.find((i) => i.key === "lighting:cablePackage")!;
   ok(qd("good").qty === 78 && qd("better").qty === 90 && qd("best").qty === 102, `#233 late: Quick Design prices each tier's Cable Package at that tier (78 / 90 / 102 at 2 per fixture)`);
   const inputs = { ...cp233lInputs(s), sys: s.sys };
@@ -27866,7 +27866,7 @@ import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
   ok(S.sewnAreaRate(3.64, 10) === 3.64 * 1.1 && S.sewnAreaRate(0, 10) === 0 && S.sewnAreaRate(-1, 10) === 0, "#227 late: the sewn area rate is fabric rate × (1 + sewing %)");
   const vo = S.curtainCost({ finishedWidthFt: 23, finishedHeightFt: 15, fullnessPct: 50, qty: 2, vendorCostOverride: 2080 }, { fabricRate: 3.64, sewingPct: 10 });
   ok(vo.costEach === 2080 && vo.costTotal === 4160 && vo.overridden, "#227 late: a typed vendor cost is the full cost — no sewing on top");
-  ok(S.curtainPrice(at(20, 19, 50, 3.64, 10).costEach, 0.3) === Math.round((2282.28 / 0.7) * 100) / 100, "#227 late: sell = cost ÷ (1 − margin), as before");
+  ok(S.curtainPrice(at(20, 19, 50, 3.64, 10).costEach, mk(0.3)) === Math.round((2282.28 / 0.7) * 100) / 100, "#227 late: sell = cost × (1 + markup), as before");
 
   // Parity: every mirror carries the adder, at the default and a non-default rule.
   for (const sewingPct of [10, 25]) {
@@ -27874,16 +27874,16 @@ import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
       const tag = `${c.w}×${c.h.toFixed(2)} @${c.full}% $${c.rate} +${sewingPct}%`;
       const shared = at(c.w, c.h, c.full, c.rate, sewingPct).costEach;
       const spec = { name: "d", hang: "", fabric: "SEW227", qty: "1", width: String(c.w), height: String(c.h), fullness: String(c.full), bottom: "" };
-      const portal = sew227PortalCost(spec, { fabricRate: c.rate, sewingPct }, 0.3);
+      const portal = sew227PortalCost(spec, { fabricRate: c.rate, sewingPct }, mk(0.3));
       const est = sew227Compute({ ...spec, vendorCostOverride: "" }, [{ sku: "SEW227", name: "x", costPerSqft: 0, curtainAreaRate: c.rate }], { sewingPct }, mk(0.3));
       const grid = sew227Grid(
         [{ id: "pl1", curtain: { type: "Draw", name: "d", widthFt: c.w, heightFt: c.h, fullnessPct: c.full, fabricSku: "SEW227" } }],
         [{ id: "SEW227", sku: "SEW227", desc: "x", category: "Fabric", curtainAreaRate: c.rate }],
         { sewingPct },
-        0.3
+        mk(0.3)
       ).get("pl1")!;
       const drape = sew227Drape({ w: c.w, h: c.h, fullness: c.full, qty: 1 }, c.rate, sewingPct);
-      const client = sew227PriceEach(spec, sew227Sell({ fabricRate: c.rate, sewingPct }, 0.3));
+      const client = sew227PriceEach(spec, sew227Sell({ fabricRate: c.rate, sewingPct }, mk(0.3)));
       ok(shared > at(c.w, c.h, c.full, c.rate, 0).costEach, `#227 late ${tag}: the adder raises the cost`);
       ok(portal.costEach === shared && est.costEach === shared && grid.costEach === shared && drape === Math.round(shared),
         `#227 late parity ${tag}: portal, estimator, Grid and the Equipment-map drape all = shared ${shared} (got ${portal.costEach} / ${est.costEach} / ${grid.costEach} / ${drape})`);
@@ -27897,7 +27897,7 @@ import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
   // Quick Design / Grid Equipment map: a fabric row carries the rule the server priced it with.
   const drawDef = sew227Rows.get("curtains:draw")!;
   const fab: Sew227Part = { sku: "SEW227-VEL", desc: "Velour", unit: "sq ft", cost: 0, list: 0, category: "Fabric", curtainAreaRate: 3.64 };
-  const ctx = { parts: new Map<string, Sew227Part>([[fab.sku, fab]]), fixtures: new Map(), margin: 0.3, sewingPct: 25 };
+  const ctx = { parts: new Map<string, Sew227Part>([[fab.sku, fab]]), fixtures: new Map(), markup: mk(0.3), sewingPct: 25 };
   const cell = sew227PriceCell({ kind: "part", sku: fab.sku }, drawDef, ctx);
   ok(cell.status === "part" && cell.areaRate === 3.64 && cell.sewingPct === 25, "#227 late: a mapped fabric keeps its fabric-only area rate and carries the sewing %");
   const noRule = sew227PriceCell({ kind: "part", sku: fab.sku }, drawDef, { ...ctx, sewingPct: undefined });
@@ -29373,8 +29373,8 @@ import { quoteMode as d245Mode, canAcceptPortal as d245CanAccept, firmValidUntil
 import { searchCatalog as d245Search, buildHaystack as d245Hay, type SearchEntry as D242Entry } from "@/lib/portal-search";
 {
   const now = Date.UTC(2026, 8, 27);
-  const o = { margin: 0.3, staleCostMonths: 0, now };
-  ok(d245Unit({ cost: 70, list: 200 }, o).unitPrice === 100, "#245 price: cost ÷ (1 − margin)");
+  const o = { markup: mk(0.3), staleCostMonths: 0, now };
+  ok(d245Unit({ cost: 70, list: 200 }, o).unitPrice === 100, "#245 price: cost × (1 + markup)");
   ok(d245Unit({ cost: 0, list: 80 }, o).unitPrice === 80 && d245Unit({ cost: null, list: 80 }, o).unitPrice === 80, "#245 price: no cost → list");
   const np = d245Unit({ cost: 0, list: 0 }, o);
   ok(np.por && np.porReason === "no-price" && np.unitPrice === null, "#245 price: no cost and no list → price on request");
@@ -29422,7 +29422,7 @@ import { searchCatalog as d245Search, buildHaystack as d245Hay, type SearchEntry
 
 /* Fix round 1: fixture cost accumulation for POR components; group-based card detection */
 {
-  ok(d245FixPrice([{ sku: "A", cost: 700, list: 0, qty: 1, quotable: true, required: true }, { sku: "B", cost: 50, list: 0, qty: 2, quotable: true, required: true, note: "verify price" }], { margin: 0.3, staleCostMonths: 0, now: 0 }).cost === 800, "#245 fixture: a POR component's known cost still counts toward the fixture's internal cost");
+  ok(d245FixPrice([{ sku: "A", cost: 700, list: 0, qty: 1, quotable: true, required: true }, { sku: "B", cost: 50, list: 0, qty: 2, quotable: true, required: true, note: "verify price" }], { markup: mk(0.3), staleCostMonths: 0, now: 0 }).cost === 800, "#245 fixture: a POR component's known cost still counts toward the fixture's internal cost");
   ok(d245Card("PO 12345 4111 1111 1111 1111"), "#245 card guard: a card typed after a PO number is still caught");
   ok(d245Card("PO-12345-4111-1111-1111-1111"), "#245 card guard: dash-separated run with a leading PO group");
   ok(!d245Card("tracking 94111111111111111222"), "#245 card guard: a long unbroken digit string is not scanned window by window");
@@ -29510,10 +29510,10 @@ async function portal245IndexAsyncChecks(): Promise<void> {
     ok((await d245Facts(HIDE)).reason === "Hidden from customers", "#245 facts: a hidden part reads Hidden from customers");
 
     const ctx = await d245Ctx({ customerId: CO, name: "" });
-    ok(ctx.tier === "silver" && Math.abs(ctx.margin - 0.22) < 1e-9 && ctx.staleCostMonths === 0, "#245 pricing: context resolves the company tier + margin");
+    ok(ctx.tier === "silver" && Math.abs(ctx.markup - 0.22) < 1e-9 && ctx.staleCostMonths === 0, "#245 pricing: context resolves the company tier + markup");
     ok((await d245PriceSku(HIDE, ctx)) === null, "#245 pricing: a Hide part is not quotable (priceSku → null)");
     const ps = await d245PriceSku(IMG, ctx);
-    ok(!!ps && ps.unitPrice === Math.round((70 / (1 - 0.22)) * 100) / 100 && !ps.por, "#245 pricing: priceSku = cost ÷ (1 − tier margin)");
+    ok(!!ps && ps.unitPrice === Math.round(70 * (1 + ctx.markup) * 100) / 100 && !ps.por, "#245 pricing: priceSku = cost × (1 + tier markup) (#367)");
     const fr = await d245FreightFor(CO, null);
     ok(fr.unknown && fr.pct === 10 && fr.miles === null, "#245 freight: no venue → unknown distance at the cap");
 
@@ -29572,7 +29572,7 @@ async function portal245IndexAsyncChecks(): Promise<void> {
       lines: [{ lineId: "f", kind: "fixture", fixtureId: FX, qty: 3, fixtureOptions: { [`mounting:${OPT}`]: 1 } }] };
     const pf = await d245PriceCart(fxCart, ctx);
     const fl = pf.lines[0];
-    const tp = (c: number) => Math.round((c / (1 - 0.22)) * 100) / 100;
+    const tp = (c: number) => Math.round(c * (1 + ctx.markup) * 100) / 100; // #367: the stored silver tier, as markup
     const unit = Math.round((tp(70) + 2 * tp(5) + tp(7.8)) * 100) / 100;
     ok(fl.kind === "fixture" && !fl.por && fl.unitPrice === unit && fl.extPrice === Math.round(unit * 3 * 100) / 100 && pf.mode === "firm",
       "#245 cart: fixture unit = Σ chosen components' tier prices × qty; all priced → firm");
@@ -29935,7 +29935,7 @@ async function portal245CatalogBrowseAsyncChecks(): Promise<void> {
       const byKey = new Map(rA.result.entries.map((e) => [e.key, e]));
       const ctxA = await d245Ctx({ customerId: CO_A, name: "" });
       const w = byKey.get(P1);
-      ok(!!w && w.kind === "part" && w.unit === "ft" && w.unitPrice === (await d245PriceSku(P1, ctxA))?.unitPrice && w.unitPrice === Math.round((10 / (1 - 0.22)) * 100) / 100,
+      ok(!!w && w.kind === "part" && w.unit === "ft" && w.unitPrice === (await d245PriceSku(P1, ctxA))?.unitPrice && w.unitPrice === Math.round(10 * (1 + ctxA.markup) * 100) / 100,
         "#245 search action: a part tile is priced at the session customer's tier");
       ok(!byKey.has(PH), "#245 search action: a Hide part never appears");
       ok(byKey.get(PV)?.por === true && byKey.get(PV)?.unitPrice === null, "#245 search action: a verify-price part reads Price on request");
@@ -30190,11 +30190,11 @@ async function portal245SidebarAsyncChecks(): Promise<void> {
     ok(pv.ok && pv.unitPrice === base, "#245 fixture price: works for a team preview viewer");
     ok(ix.fixtures.has(FXL), "#245 fix 1: a fixture with a required labor line stays available");
     ok(!ix.fixtures.has(FXH) && (await d245Detail(ctx, "fixture:" + FXH)) === null, "#245 fix 1: a fixture with a required HIDDEN part is still excluded");
-    const labUnit = Math.round((60 / (1 - 0.22)) * 100) / 100;
+    const labUnit = Math.round(60 * (1 + ctx.markup) * 100) / 100;
     const pUnit = (await d245PriceSku(P, ctx))?.unitPrice ?? NaN;
     const fxl = await d245PriceFixture(FXL, {}, ctx);
     ok(!!fxl && fxl.unitPrice != null && Math.abs(fxl.unitPrice - (pUnit + 2 * labUnit)) < 0.011,
-      "#245 fix 1: the labor line is priced inside the fixture (labor cost ÷ (1 − margin) × qty)");
+      "#245 fix 1: the labor line is priced inside the fixture (labor cost × (1 + markup) × qty)");
     ok((await d245PriceSku(LAB, ctx)) === null && (await d245Detail(ctx, LAB)) === null, "#245 fix 1: the labor SKU alone is still not quotable (priceSku null, no sidebar)");
     const fxlD = await d245Detail(ctx, "fixture:" + FXL);
     ok(!!fxlD && fxlD.kind === "fixture" && fxlD.fixed.some((f) => f.sku === LAB && f.qty === 2 && f.label === "Test242 Travel day") && !JSON.stringify(fxlD).includes("\"cost\""),
@@ -33244,7 +33244,7 @@ async function portal250AsyncChecks(): Promise<void> {
       { name: "x", hang: "", fabric: FAB250, qty: "1", width: "30", height: "18", fullness: "50", bottom: "" } as any,
       [{ sku: FAB250, name: "Test250 Velour", costPerSqft: 0, curtainAreaRate: 3.5 }] as any,
       { sewingPct: 12 },
-      ctx250.margin
+      ctx250.markup
     ).priceEach;
 
     const curtainCart250: D242Cart = {
@@ -36982,7 +36982,7 @@ import { movableOptions as c255Rv12Options, numberedRegionLabels as c255Rv12Numb
   // Every equipment row priced as a part, so the fill places everything the equations call for.
   const byTier = { good: {}, better: {}, best: {} } as C255Rv12Table["byTier"];
   for (const d of c255Rv12Rows) for (const t of ["good", "better", "best"] as const) byTier[t][d.key] = { status: "part", ref: "C255R12-" + d.key, desc: d.label, unit: d.unit, unitCost: 1, unitSell: 1, ...(d.curtain ? { areaRate: 1, sewingPct: 0 } : {}) };
-  const table: C255Rv12Table = { margin: 0.3, byTier };
+  const table: C255Rv12Table = { markup: mk(0.3), byTier };
   const BOOTH = new Set(["audio:mixerDsp", "video:processor", "video:projector"]);
   for (const venue of ["blackbox", "concenter"])
     for (const [w, dp] of [[49, 49], [26, 24], [80, 52], [20, 52], [80, 14]])
@@ -37796,7 +37796,7 @@ import type { PartLite as C264Lite } from "@/lib/design/grid-bom";
   ok(c264Rate({ sku: "SG-NEG", unit: "sq ft", cost: -1 }) === 0 && c264Rate({ sku: "SG-NAN", unit: "sq ft", cost: Number.NaN }) === 0, "#264 fabricAreaRateOf: a non-positive or non-finite cost is 0");
 
   const drawDef = c264Rows.get("curtains:draw")!;
-  const ctxOf = (p: C264Part) => ({ parts: new Map<string, C264Part>([[p.sku, p]]), fixtures: new Map(), margin: 0.3 });
+  const ctxOf = (p: C264Part) => ({ parts: new Map<string, C264Part>([[p.sku, p]]), fixtures: new Map(), markup: mk(0.3) });
   const rb = c264PriceCell({ kind: "part", sku: "RB-FAB-ENCORE-64-22-BLK" }, drawDef, ctxOf({ sku: "RB-FAB-ENCORE-64-22-BLK", desc: "Encore 22oz velour, black", unit: "sq ft", cost: 2.84, list: 0, category: "Theatrical/Soft Goods" }));
   ok(rb.status === "part" && "areaRate" in rb && rb.areaRate === 2.84 && rb.ref === "RB-FAB-ENCORE-64-22-BLK", "#264 Equipment map: a curtain row mapped to a Soft Goods sq-ft part prices at its cost per sq ft (areaRate 2.84)");
   const sgEa = c264PriceCell({ kind: "part", sku: "SG-PIPE-POCKET" }, drawDef, ctxOf({ sku: "SG-PIPE-POCKET", desc: "Pipe pocket", unit: "ea", cost: 40, list: 60, category: "Theatrical/Soft Goods" }));
@@ -37813,8 +37813,8 @@ import type { PartLite as C264Lite } from "@/lib/design/grid-bom";
   ok(full.join() === "RB-FAB-TRAV", "#264 suggestParts: a curtain row suggests the Soft Goods sq-ft fabric, not the Soft Goods each part");
   ok(track.join() === "SG-TRACK", "#264 suggestParts: a non-curtain row never suggests the Soft Goods sq-ft fabric");
 
-  const hits = c264Swap([{ sku: "RB-FAB-TRAV", desc: "Traveler velour 22oz", unit: "sq ft", cost: 2.8 }, { sku: "SG-TRACK", desc: "Traveler track kit", unit: "ea", cost: 90 }], 0.3);
-  ok(hits.length === 1 && hits[0].ref === "RB-FAB-TRAV" && hits[0].unitSell === 4, "#264 curtain swap: a Soft Goods sq-ft fabric with only a cost is a candidate (2.80 ÷ 0.7 = 4.00 sell); an each part is not");
+  const hits = c264Swap([{ sku: "RB-FAB-TRAV", desc: "Traveler velour 22oz", unit: "sq ft", cost: 2.8 }, { sku: "SG-TRACK", desc: "Traveler track kit", unit: "ea", cost: 90 }], mk(0.3));
+  ok(hits.length === 1 && hits[0].ref === "RB-FAB-TRAV" && hits[0].unitSell === 4, "#264 curtain swap: a Soft Goods sq-ft fabric with only a cost is a candidate (2.80 × (1 + mk(0.3)) = 4.00 sell); an each part is not");
 
   const lite = (id: string, category: string, unit: string): C264Lite => ({ id, sku: id, desc: id, category, unit, list: 1, cost: 1 });
   const pal = c264Palette([lite("RB-FAB-TRAV", "Theatrical/Soft Goods", "sq ft"), lite("SG-TRACK", "Theatrical/Soft Goods", "ea")], { tab: "favorites", search: "", scope: "", typeKey: "", mfr: "" }, [], ["RB-FAB-TRAV", "SG-TRACK"], []);
@@ -45856,7 +45856,7 @@ import { readFileSync as c296cRead } from "node:fs";
   const emptyRack = c296kRec({ id: "SA-RACK-E", label: "Unpriced rack", scope: "Audio", parts: [{ sku: "NOPE", qty: 1 }], rack: c296kL(c296kP({ id: "Z", sku: "NOPE2" })) });
   const fixtureRec = c296kRec({ id: "SA-FX", kind: "fixture", label: "Wash", scope: undefined, rack: undefined, parts: [{ sku: "AMP", qty: 1 }], lightEngineSku: "AMP" });
   const fixtures = new Map<string, C296cRecord>([audioRack, controlsRack, emptyRack].map((r) => [r.id, r]));
-  const ctx = { parts: c296kCat, fixtures, margin: 0.3 };
+  const ctx = { parts: c296kCat, fixtures, markup: mk(0.3) };
 
   // ---- Grid virtual parts ----
   const vps = c296cVirtual([c296cAsmId("SA-RACK-A"), c296cAsmId("SA-RACK-C"), c296cAsmId("SA-RACK-E")], {}, ctx);
@@ -64005,7 +64005,7 @@ async function conduitRiser321B8Checks(): Promise<void> {
     const pr = await live();
     const len = Math.max(...pr.routes!.filter((r) => r.id === w1 || r.id === w2).map((r) => GB.routeLengthFt(r, pr.calibrations || [])!));
     const tier = await resolveTier(null);
-    const emtList = isTierPriced(2, tier.markup) ? Math.round((2 / (1 - tier.markup)) * 100) / 100 : 4;
+    const emtList = isTierPriced(2, tier.markup) ? Math.round(2 * (1 + tier.markup) * 100) / 100 : 4;
     const emtLine = lineOf(b4, EMT);
     ok(b4.ok && !!emtLine && emtLine.qty === Math.ceil(len) && emtLine.unit === "ft" && Math.abs(emtLine.ext - Math.ceil(len) * emtList) < 0.005,
       `#321 B8 quote: priceConduit with a mapped 3/4" EMT part adds a Conduit line = ceil(longest member ft) at the tier price (${emtLine?.qty} ft)`);

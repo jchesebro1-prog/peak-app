@@ -48,7 +48,7 @@ export async function partDetailFor(ctx: PortalPricingContext, key: string): Pro
     const fx = ix.fixtures.get(key.slice("fixture:".length));
     if (!fx) return null;
     const engine = ix.parts.get(fx.lightEngineSku);
-    const o = { margin: ctx.margin, staleCostMonths: ctx.staleCostMonths, now: ctx.now };
+    const o = { markup: ctx.markup, staleCostMonths: ctx.staleCostMonths, now: ctx.now };
     const docIds = [...new Set(fx.lines.filter((l) => l.required).flatMap((l) => ix.parts.get(l.sku)?.datasheetIds ?? []))];
     const fixturePrice = await priceFixture(fx.id, {}, ctx);
     return toFixtureDetailVM(

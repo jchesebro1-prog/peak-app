@@ -4182,7 +4182,7 @@ async function main() {
     assert.equal((await Designs.getDesign(savedRes.record.id))?.incomplete?.needsPart, n0, "#211 D319: …and it round-trips on the record");
     const legacy = await Designs.createDesign({ name: "GEMFR legacy", venue: "Auditorium", size: "medium", tier: "better", width: 40, depth: 30, grid: 24, systems: ["Rigging", "Audio"], budget: 99000, owner: "Jeff Chesebro" });
     assert.ok(legacy.incomplete === undefined && (await DP.quickPromoteGuard(legacy)) !== null, "#211 D319: a pre-#211 design (no incomplete, no config) is refused until its rows are mapped");
-    // I3 — fixture picks price through priceCell (catalog margin), a dead pick stays needs-a-part.
+    // I3 — fixture picks price through priceCell (catalog markup), a dead pick stays needs-a-part.
     await Cat.upsert({ sku: "GEMFR-ENG", desc: "GEMFR engine", category: "Lighting Fixtures", unit: "ea", list: 0, cost: 500 });
     const live = sanitizeFixtureInput({ kind: "fixture", label: "GEMFR live", description: "", lightEngineSku: "GEMFR-ENG", lensSku: null });
     const dead = sanitizeFixtureInput({ kind: "fixture", label: "GEMFR dead", description: "", lightEngineSku: "GEMFR-NOPE", lensSku: null });
@@ -4195,7 +4195,8 @@ async function main() {
     assert.equal(await DP.quickPromoteGuard(legacy), null, "#211 D319: …and the pre-#211 design can now become a quote");
     const { table, fixturePrices } = await DP.loadDesignPricing([fxLive.id, fxDead.id]);
     const pl = fixturePrices[fxLive.id];
-    assert.ok(pl.status === "assembly" && pl.unitCost === 500 && pl.unitSell > 500, `#211 final review I3: a list-less fixture pick sells at cost ÷ (1 − margin), not a $0 list sum (${JSON.stringify(pl)})`);
+    assert.ok(pl.status === "assembly" && pl.unitCost === 500 && pl.unitSell > 500 && pl.unitSell === Math.round(500 * (1 + table.markup) * 100) / 100,
+      `#211 final review I3: a list-less fixture pick sells at cost × (1 + markup) (#367), not a $0 list sum (${JSON.stringify(pl)})`);
     assert.equal(fixturePrices[fxDead.id].status, "needs-part", "#211 final review I3: a pick with no priced parts prices needs-a-part");
     const withPick = (id: string) => ({ ...rec, config: { ...cfg, fixtureAssemblies: { par: id } } as unknown as Record<string, unknown> });
     assert.equal(quickDesignNeedsPart(withPick(fxLive.id), table, fixturePrices), 0, "#211 final review I3: a priced pick overrides the par row");

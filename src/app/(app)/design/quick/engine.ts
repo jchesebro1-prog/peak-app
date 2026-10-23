@@ -100,7 +100,8 @@ export type TierTotals = {
   freight: number;
   contingency: number;
   grand: number;
-  margin: number;
+  /** Material markup on cost, (matRev − matCost) ÷ matCost (#367). */
+  markup: number;
 };
 
 export type TierDef = {
@@ -737,7 +738,7 @@ export function tierTotals(
     freight,
     contingency,
     grand: subtotal + contingency,
-    margin: matRev > 0 ? (matRev - matCost) / matRev : 0,
+    markup: matCost > 0 ? (matRev - matCost) / matCost : 0,
   };
 }
 

@@ -47,7 +47,7 @@ export function drapeUnitCost(drape: DrapeGeom, areaRate: number, sewingPct: num
 
 type Priced = { cost: number; price: number; status: NonNullable<BomItem["status"]>; ref?: string; refDesc?: string };
 
-function priceItem(it: BomItem, p: UnitPrice | undefined, margin: number): Priced {
+function priceItem(it: BomItem, p: UnitPrice | undefined, markup: number): Priced {
   if (!p || p.status === "needs-part") return { cost: 0, price: 0, status: "needs-part" };
   // #229: Not included — $0 and no product (no ref), before any drape math.
   if (p.status === "none") return { cost: 0, price: 0, status: "none" };
@@ -56,7 +56,7 @@ function priceItem(it: BomItem, p: UnitPrice | undefined, margin: number): Price
   if (it.drape && p.status !== "allowance") {
     if (!(p.areaRate && p.areaRate > 0)) return { cost: 0, price: 0, status: "needs-part" };
     const cost = drapeUnitCost(it.drape, p.areaRate, sewingPctFrom(p.sewingPct));
-    return { cost, price: sellFromCost(cost, margin), status: p.status, ref: p.ref, refDesc: p.desc };
+    return { cost, price: sellFromCost(cost, markup), status: p.status, ref: p.ref, refDesc: p.desc };
   }
   return { cost: p.unitCost, price: p.unitSell, status: p.status, ref: p.ref, refDesc: p.desc };
 }
@@ -73,7 +73,7 @@ export function applyEquipment(
     let rev = 0;
     let cost = 0;
     const items = sys.items.map((it) => {
-      const r = priceItem(it, overrides[it.key] ?? prices[it.key], table.margin);
+      const r = priceItem(it, overrides[it.key] ?? prices[it.key], table.markup);
       rev += it.qty * r.price;
       cost += it.qty * r.cost;
       const next: BomItem = { ...it, cost: r.cost, price: r.price, status: r.status };
@@ -133,7 +133,7 @@ export function tierSystems(
  * overrides (#211 final review I3). `fixturePrices` is built on the SERVER
  * with priceCell({ kind: "assembly", id }) — the same resolver the Equipment
  * map prices an assembly cell with — so a pick sells at its included sell
- * (or cost ÷ (1 − margin) when list-less), and a pick that prices
+ * (or cost × (1 + markup) when list-less), and a pick that prices
  * needs-a-part STAYS needs-a-part. A pick with no entry at all (the assembly
  * was deleted) leaves the row on its map price.
  */

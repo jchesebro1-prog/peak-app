@@ -3,7 +3,7 @@ import { ceilToStep, PRICE_OVERRIDE_MAX, typedPriceWarning, type PriceWarning } 
 import { creditLineAmount, isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { isEstimatorBonusItem, isPackageBonusItem } from "@/lib/estimate-bonus/flags";
 import { normalCostOf } from "@/lib/project-discounts/rules";
-import { MARKUP_MAX, DEFAULT_MARKUP, markupToMargin, sellAt } from "@/lib/markup";
+import { MARKUP_MAX, DEFAULT_MARKUP, sellAt } from "@/lib/markup";
 import {
   DISC_LABEL,
   FIXTURES,
@@ -517,9 +517,7 @@ export function computeCurtain(
     faceArea: h * w,
     fabricArea: cc.sewnAreaSqft,
     costEach: cc.costEach,
-    // #367 bridge: curtainPrice still takes a margin until Task 5 switches
-    // the curtain module to markup — then this becomes curtainPrice(cc.costEach, markup).
-    priceEach: curtainPrice(cc.costEach, markupToMargin(markup)),
+    priceEach: curtainPrice(cc.costEach, markup),
   };
 }
 

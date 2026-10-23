@@ -1,5 +1,5 @@
 /**
- * Can a catalog part be re-priced through the customer's tier margin, or must
+ * Can a catalog part be re-priced through the customer's tier markup, or must
  * it keep its plain list price? (punch #63 / #76)
  *
  * **Why this lives here and not in the Grid's actions.ts.** Two reasons, both
@@ -19,10 +19,11 @@
  * remedy as `@/lib/fixture-rates` and `@/lib/review-line`.
  *
  * The rule itself: a part needs a real positive cost to derive a sell price
- * from, and a margin strictly inside (0, 1) — at 0 the division is a no-op, at
- * 1 it divides by zero. Anything else keeps `list`, and #76 requires that
- * fallback be MARKED on the quote rather than applied silently.
+ * from, and a markup that is a finite number above 0 (#367; was a margin
+ * inside (0, 1)) — at 0 the part would sell at cost. Anything else keeps
+ * `list`, and #76 requires that fallback be MARKED on the quote rather than
+ * applied silently.
  */
-export function isTierPriced(cost: number, margin: number): boolean {
-  return typeof cost === "number" && cost > 0 && margin > 0 && margin < 1;
+export function isTierPriced(cost: number, markup: number): boolean {
+  return typeof cost === "number" && cost > 0 && Number.isFinite(markup) && markup > 0;
 }

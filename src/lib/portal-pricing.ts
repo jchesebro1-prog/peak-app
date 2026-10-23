@@ -1,5 +1,5 @@
 // SERVER ONLY — prices portal carts from the cached catalog index, whose parts
-// carry cost; resolves the customer's tier + margin. Never import into a client
+// carry cost; resolves the customer's tier + markup. Never import into a client
 // component. No "server-only" package in this repo (same comment-only
 // convention as src/lib/curtain-pricing.ts).
 import { totals } from "@/app/(app)/estimator/pricing";
@@ -33,8 +33,10 @@ import { isBonusItem } from "@/lib/estimate-bonus/flags";
 /** Internal — never serialized to a customer. */
 export type PortalPricingContext = {
   customerId: string;
-  margin: number;
+  /** The customer's tier markup on cost (#367). */
+  markup: number;
   tier: string;
+  /** Persisted-field mirror (quote.tierMargin); holds the same markup. */
   tierMargin: number;
   staleCostMonths: number;
   now: number;
@@ -47,7 +49,7 @@ export async function pricingContextFor(session: { customerId: string; name: str
   const [t, rules, curtainSewingPct] = await Promise.all([resolveTier(session.customerId, session.name), loadPortalRules(), loadCurtainSewingPct()]);
   return {
     customerId: session.customerId,
-    margin: t.markup,
+    markup: t.markup,
     tier: t.tier,
     tierMargin: t.markup,
     staleCostMonths: rules.staleCostMonths,
@@ -91,7 +93,7 @@ export type PricedCart = {
 const cents = (n: number) => Math.round(n * 100) / 100;
 
 function ruleOpts(ctx: PortalPricingContext): PriceRuleOpts {
-  return { margin: ctx.margin, staleCostMonths: ctx.staleCostMonths, now: ctx.now };
+  return { markup: ctx.markup, staleCostMonths: ctx.staleCostMonths, now: ctx.now };
 }
 
 /** A positive, finite line quantity; anything else prices as 1. */
@@ -276,7 +278,7 @@ export async function priceFixture(
 /**
  * #250: a curtain line now prices live — the Estimator's own curtain math
  * (curtainCost + curtainPrice, src/lib/design/curtain-pricing.ts) at the
- * customer's tier margin and the live sewing % — whenever the customer named
+ * customer's tier markup and the live sewing % — whenever the customer named
  * a real fabric with a catalog area rate. "Not sure — recommend one" (no
  * fabric, or one whose rate somehow isn't in the index) keeps today's
  * price-on-request line untouched. Either way the line is `review`-gated:
@@ -331,7 +333,7 @@ function priceCurtain(l: CartLine, qty: number, ix: PortalIndex, ctx: PortalPric
     { finishedWidthFt: Number(c.width) || 0, finishedHeightFt: Number(c.height) || 0, fullnessPct: Number(c.fullness) || 0, qty: 1 },
     { fabricRate, sewingPct: ctx.curtainSewingPct }
   );
-  const unitPrice = curtainPrice(cc.costEach, ctx.margin);
+  const unitPrice = curtainPrice(cc.costEach, ctx.markup);
   const extPrice = cents(unitPrice * qty);
   const sell: SellLine = {
     lineId: l.lineId,
