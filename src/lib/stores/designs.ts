@@ -132,7 +132,7 @@ export type DesignQuotePartial = {
   source: "sandbox";
   requote: true;
   /** Customer's resolved pricing tier (punch #65) — always stamped so the
-   *  Estimator seeds labor/curtain margins from the real tier, not a
+   *  Estimator seeds labor/curtain markups from the real tier, not a
    *  hardcoded default. */
   pricingTier: string;
   tierMargin: number;

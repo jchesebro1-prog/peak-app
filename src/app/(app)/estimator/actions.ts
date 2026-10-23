@@ -1168,7 +1168,7 @@ export type CopySystemResult =
  * estimate ("same"). The source is never touched. The copy is RE-PRICED for
  * where it lands (copy-system.ts): catalog parts and fixture components take
  * today's catalog cost, then lines still at the source tier's seed move to
- * the DESTINATION customer's tier; hand-priced lines keep their own margin
+ * the DESTINATION customer's tier; hand-priced lines keep their own markup
  * on the new cost; custom, curtain, allowance, vendor-quote, labor and POR
  * lines keep their cost.
  *

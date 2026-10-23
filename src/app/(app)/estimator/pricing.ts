@@ -285,7 +285,10 @@ export function systemMarkup(sec: SpecSection): number {
  *  system's cost (items + freight) or under the low-markup line; null when auto. */
 export function systemSellWarning(sec: SpecSection): PriceWarning {
   if (!hasSellOverride(sec)) return null;
-  return typedPriceWarning(systemSellTotal(sec), systemItemsCost(sec) + systemFreight(sec), systemMarkup(sec));
+  const w = typedPriceWarning(systemSellTotal(sec), systemItemsCost(sec) + systemFreight(sec), systemMarkup(sec));
+  // #367: systemMarkup reads 0 with no positive items cost (freight-only / $0 lines) — that is no markup to judge,
+  // so never "Low markup — 0%"; the below-cost check above still applies.
+  return w?.kind === "low-markup" && !(systemItemsCost(sec) > 0) ? null : w;
 }
 
 export type QuoteTotals = {

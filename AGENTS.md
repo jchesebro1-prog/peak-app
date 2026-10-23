@@ -1643,9 +1643,11 @@ See `.env.example`.
     0–125 %, service knob 10–100 %, rate cap 150 %, low warning under 11 %, one % column on the
     review spreadsheet). Price-parity harness (`scripts/test-markup.ts` against
     `docs/markup/parity-baseline.json`): 0 drift; only rounded defaults move (Base on $1,000
-    $1,428.57 → $1,430, custom part $100 → $154). `npm run test:markup-settings` runs
-    separately from `test:specs`. No migration. **No rollback past the merge; never preview-
-    deploy the branch.** Remaining is Jeff-gated: `db:export`, a quiet-time deploy, check the
+    $1,428.57 → $1,430, custom part $100 → $154, default curtain on $700 $1,000 → $1,001,
+    Silver portal part on $70 $89.74 → $89.60). `test:specs` also runs `npm run
+    test:markup-settings`. No migration. **No rollback past the merge; never preview-
+    deploy the branch — and after the merge never preview a branch not rebased onto #367**
+    (it would run margin code against the production DB, D1291). Remaining is Jeff-gated: `db:export`, a quiet-time deploy, check the
     tiers and one quote of each type, whether to set cleaner tier values. Punch item #367.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults

@@ -8,11 +8,11 @@ import { LIFT_COUNT_MAX, fmtDollars, normalizeLift, type LiftDraft } from "@/lib
  * service quote builders (flame tests, inspections, repairs).
  *
  * Presentation only: the builder owns the draft and prices it through its
- * engine finish (the lift is margined with the job, on top of any floor,
+ * engine finish (the lift is marked up with the job, on top of any floor,
  * inside the $25 rounding and a typed total). One rental = one lift for up to
  * a week — Estimator Labor's `ceil(days / 5)` unit. A blank rate prices at the
  * default (the live `EQP-LIFT` catalog cost), shown as the placeholder. The
- * customer sees one "Lift rental" line at the margined price.
+ * customer sees one "Lift rental" line at the marked-up price.
  */
 
 const LABEL: CSSProperties = {
@@ -49,7 +49,7 @@ export function LiftRentalPanel({
   defaultRate: number;
   /** count × rate as priced (0 = no lift). */
   liftCost: number;
-  /** The customer-facing line, margined. */
+  /** The customer-facing line, marked up. */
   liftLine: number;
 }) {
   const set = (patch: Partial<LiftDraft>) => onDraft({ ...draft, ...patch });
@@ -114,7 +114,7 @@ export function LiftRentalPanel({
         </div>
       ) : (
         <div style={{ fontSize: 10.5, color: "#aab0bb", marginTop: 6, lineHeight: 1.45 }}>
-          One rental = one lift for up to a week. Margined with the job; prints as its own “Lift rental” line.
+          One rental = one lift for up to a week. Marked up with the job; prints as its own “Lift rental” line.
         </div>
       )}
     </div>

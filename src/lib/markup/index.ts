@@ -59,6 +59,15 @@ export function sameWholeMarkup(a: number, b: number): boolean {
 }
 
 /**
+ * A saved quote's exact stored markup when today's global setting is the same whole percent
+ * (0.428571 vs the rounded 0.43 — an untouched re-save keeps its sell), else today's setting
+ * (a real rate change re-prices at today's rate, as before #367). No saved value → today's.
+ */
+export function keepSavedMarkup(saved: unknown, current: number): number {
+  return fin(saved) && sameWholeMarkup(saved, current) ? saved : current;
+}
+
+/**
  * The exact legacy markup a rounded markup came from, else null. Every
  * pre-switch tier/default was a whole-percent MARGIN, so a converted setting
  * rounded to whole-% markup has one twin: 0.43 ← 0.428571 (30 %), 0.37 ←
@@ -78,7 +87,14 @@ export function fmtMarkupPct(k: number): string {
   return v.toLocaleString("en-US", { maximumFractionDigits: 1 }) + "%";
 }
 
-/** A labor draft's stored percent string: 0.428571… → "42.8571", 0.43 → "43". */
+/**
+ * A labor draft's stored percent string, 8 dp of a percent: 0.428571… → "42.85714286", 0.43 → "43".
+ * Precise enough that Update labor on a converted draft rebuilds every line at its margin-era cent:
+ * swept every cent to $99,999.99 at whole- and half-percent margins 1–60 %, and whole percents to
+ * $1M, against round2(cost ÷ (1 − m)) — only exact half-cent ties differ (as they do at the exact
+ * markup). 4 dp ("42.8571") was a cent off (misc 4,321.17 → 6,173.09); 7 dp fails half-percent
+ * margins near $500k. Do not shorten.
+ */
 export function markupPctString(k: number): string {
-  return String(Math.round((fin(k) ? k : 0) * 1e6) / 1e4);
+  return String(Math.round((fin(k) ? k : 0) * 1e10) / 1e8);
 }

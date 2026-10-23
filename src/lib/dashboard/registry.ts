@@ -73,7 +73,7 @@ export const WIDGETS = [
   { id: "completion-timeline", title: "Completion timeline", desc: "Where each open project lands.", size: "full", timeframe: "forward", surfaces: BOTH },
   { id: "project-locations", title: "Project locations", desc: "Open projects on the map, sized by value.", size: "full", timeframe: "forward", surfaces: BOTH },
   /* ---- Spec task 4: backward widgets ---- */
-  { id: "avg-margin", title: "Avg. markup", desc: "Value-weighted quote markup for quotes created in the period.", size: "tile", timeframe: "history", perm: "approve", surfaces: BOTH },
+  { id: "avg-margin", title: "Avg. markup", desc: "Cost-weighted quote markup (total profit ÷ total cost) for quotes created in the period.", size: "tile", timeframe: "history", perm: "approve", surfaces: BOTH },
   { id: "projected-profit", title: "Projected profit", desc: "Value times markup ÷ (1 + markup) across the open book.", size: "tile", timeframe: "forward", perm: "approve", surfaces: BOTH },
   { id: "open-projects", title: "Open projects", desc: "Projects with crews scheduled or on site.", size: "half", timeframe: "none", surfaces: BOTH },
   { id: "backlog", title: "Backlog", desc: "Sold projects still in procurement or delivery.", size: "half", timeframe: "none", surfaces: BOTH },

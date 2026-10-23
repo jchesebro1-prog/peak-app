@@ -496,9 +496,13 @@ export async function updateProject(
   id: string,
   patch: Partial<ProjectRecord>
 ): Promise<ProjectRecord | null> {
+  // #367: the basis stamp is the doc store's and the creators' alone — a patch can never clear or change it
+  // (an unstamped project would be re-converted on the next read, moving its margin twice).
+  const clean = { ...patch };
+  delete clean.pricingBasis;
   return patchDoc<ProjectRecord>("projects", id, (p) => ({
     ...p,
-    ...patch,
+    ...clean,
     id,
     updatedAt: now(),
   }));

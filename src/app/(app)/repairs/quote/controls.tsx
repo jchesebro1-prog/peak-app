@@ -27,6 +27,7 @@ import {
 import { ServiceTotalField } from "@/components/service-total-field";
 import { TierSeedPrompt } from "@/components/tier-seed-prompt";
 import { initialTierSeed, reseedKnob, seedFor, type TierPrompt } from "@/lib/tier-seed";
+import { keepSavedMarkup } from "@/lib/markup";
 import type { PricingTier } from "@/lib/identity/config";
 import {
   finishRepair,
@@ -137,6 +138,8 @@ export type BuilderInitial = {
   savedMarkupPts?: number | null;
   /** #254: the saved quote's stamped tier markup fraction (seeds `prevSeedPts`). */
   stampedTierMarkup?: number | null;
+  /** #367: the saved quote's exact parts markup (absent for a new quote) — see `keepSavedMarkup`. */
+  savedPartsMarkup?: number | null;
   /** #340: the assessment findings this new quote is built from (posted as `findingKeys`; linked on first save). */
   findingKeys?: string[];
 };
@@ -540,11 +543,15 @@ export function QuoteBuilder({
   }
 
   /* ---- live pricing ---- */
+  const partsMarkup = keepSavedMarkup(initial.savedPartsMarkup, baseRates.partsMargin);
   const liveRates: BuilderRates = {
     ...baseRates,
     mileageRate: parseFloat(mileageRate) || baseRates.mileageRate,
     laborRate: parseFloat(laborRate) || baseRates.laborRate,
     margin: markupPts / 100,
+    // #367: the same rule the save applies — a saved quote keeps its exact parts markup while today's
+    // global is the same whole percent, so the preview never shows a moved parts sell on an untouched quote.
+    partsMargin: partsMarkup,
   };
   const selectedVenues: VenueIn[] = locations
     .filter((l) => venueSel[l.id]?.on)
@@ -676,7 +683,7 @@ export function QuoteBuilder({
       " part" +
       (pricedParts.length === 1 ? "" : "s")
     : "No venues selected";
-  const partsPts = Math.round(baseRates.partsMargin * 100);
+  const partsPts = Math.round(partsMarkup * 100);
 
   return (
     <div className="pk-content" style={{ fontFamily: "var(--font-ui)", color: "#16181d" }}>

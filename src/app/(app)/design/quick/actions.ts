@@ -151,7 +151,7 @@ export async function addToQuotesAction(
     return { ok: false, error: "Couldn’t save that design for quoting — please try again." };
   }
   // Tier stamp at promotion (item 11, D88): Quick Design stays a sandbox at
-  // its own engine margins; the customer's tier takes over when the design
+  // its own engine markups; the customer's tier takes over when the design
   // becomes a quote (it's flagged requote and re-priced in the Estimator).
   // promoteDesignToQuote() → designToQuotePartial() already resolves and
   // stamps pricingTier/tierMargin (punch #65) — no need to re-resolve here.

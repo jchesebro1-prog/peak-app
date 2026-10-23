@@ -79,8 +79,9 @@ export function seedFor(
  * The knob and the "previous seed" a builder opens with. A new quote opens at
  * the seed for its preselected customer/contact. A saved quote reopens at its
  * own saved knob (never re-seeded on load); its previous seed is the knob
- * itself when the knob still equals the quote's stamped tier markup or
- * today's seed (it was never hand-set), else the stamp, else today's seed.
+ * itself when the knob still equals (or is the same whole percent as, #367)
+ * the quote's stamped tier markup or today's seed (it was never hand-set),
+ * else the stamp, else today's seed.
  */
 export function initialTierSeed(opts: {
   customer: TierSeedCustomer | null | undefined;
@@ -95,7 +96,12 @@ export function initialTierSeed(opts: {
   const saved = opts.savedMarkupPts;
   if (saved == null || !Number.isFinite(saved)) return { knobPts: loaded, prevSeedPts: loaded };
   const stamp = knobPctFrom(opts.stampedTierMarkup);
-  const untouched = samePts(saved, stamp) || samePts(saved, loaded);
+  // #367: also the same WHOLE percent — a converted quote re-saved once is stamped with today's rounded
+  // tier (43) while its knob kept the exact 42.857; that knob was never hand-set, so a later customer
+  // change still moves it to the new seed (no "Kept your 42.9%" prompt).
+  // (Same rule as markup's sameWholeMarkup, on points; inline so this file keeps its two imports — #254 client pin.)
+  const sameWhole = (b: number | null | undefined) => b != null && Number.isFinite(b) && Math.round(saved) === Math.round(b);
+  const untouched = samePts(saved, stamp) || samePts(saved, loaded) || sameWhole(stamp) || sameWhole(loaded);
   return { knobPts: saved, prevSeedPts: untouched ? saved : stamp ?? loaded };
 }
 

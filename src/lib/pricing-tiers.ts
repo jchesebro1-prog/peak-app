@@ -105,9 +105,9 @@ export async function tierMarkupByCompany(
  * The markup a service quote actually prices/stamps at: an untiered customer
  * (`resolveTier`'s `source === "default"`) uses the SERVICE'S OWN default
  * markup (`serviceDefault` — the service's Estimating Rules `baseRates.margin`,
- * the same value the builder's margin knob seeds from, src/lib/tier-seed.ts
- * `seedFor`), never tier Base's registry margin — the two agree today only
- * because every service default happens to be 0.30 (#254 follow-up; D457).
+ * the same value the builder's markup knob seeds from, src/lib/tier-seed.ts
+ * `seedFor`), never tier Base's registry markup — the two agree today only
+ * because every service default happens to be 43 % (0.30 margin before #367; #254 follow-up; D457).
  * A resolved contact/company tier is unchanged.
  */
 export function serviceMarkupFor(tier: ResolvedTier, serviceDefault: number): number {

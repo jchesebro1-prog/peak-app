@@ -36,6 +36,7 @@ import { settleServiceCreditFor } from "@/lib/stores/reward-ledger";
 import { grossQuoteValue } from "@/lib/rewards/credit-line";
 import { netServiceTotal } from "@/lib/rewards/service-credit";
 import { getLiftRate } from "@/lib/service-quote-inputs";
+import { keepSavedMarkup } from "@/lib/markup";
 import { findingKeysForSave, linkOnCreateSafe } from "@/lib/assessments/quote-from-findings";
 
 function quoteFailure(formData: FormData, message: string): never {
@@ -119,7 +120,13 @@ async function persist(formData: FormData, out?: { creditNote?: string; findingN
   const quoteMarkup = Number.isFinite(markupPts)
     ? Math.max(5, Math.min(100, markupPts)) / 100
     : serviceMarkup;
-  const rates = { ...baseRates, margin: quoteMarkup };
+  // #367: an edited quote keeps its own exact parts markup while today's global is the same whole
+  // percent (a converted 0.428571 vs the rounded 0.43), so an untouched re-save never moves its parts
+  // sell; a real global change (≠ whole %) re-prices at today's rate, as before. The builder's preview
+  // applies the same rule (controls.tsx, `savedPartsMarkup`).
+  const existingForMarker = editingId ? await getQuote(editingId) : null;
+  const savedPartsMarkup = (existingForMarker?.repair as { rates?: { partsMargin?: unknown } } | null | undefined)?.rates?.partsMargin;
+  const rates = { ...baseRates, margin: quoteMarkup, partsMargin: keepSavedMarkup(savedPartsMarkup, baseRates.partsMargin) };
 
   // resolve venue coords from the customer directory + nearest office
   const cust = await getCustomer(customerId);
@@ -169,7 +176,6 @@ async function persist(formData: FormData, out?: { creditNote?: string; findingN
   // fake or drop it, and it agrees with itself across every reopen). Repairs
   // have no renewal-draft consumer today, but the marker is still stored for
   // #217 D286 parity across all three services.
-  const existingForMarker = editingId ? await getQuote(editingId) : null;
   const existingRp = (existingForMarker?.repair ?? null) as
     | { priceOverride?: number | null; priceOverrideSeeded?: boolean }
     | null;

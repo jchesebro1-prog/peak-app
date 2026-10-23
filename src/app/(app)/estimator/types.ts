@@ -74,7 +74,7 @@ export type SpecItem = {
   fixture?: boolean;
   labor?: boolean;
   /** #250: a portal curtain line priced live (Estimator curtain math, tier
-   *  margin) that still needs Peak to confirm measurements + fabric — stays
+   *  markup) that still needs Peak to confirm measurements + fabric — stays
    *  set through Save; only sending the quote (or staff replacing the line)
    *  resolves it (clearPricedPor's `anyConfirm`, portal-quote-mode.ts). */
   portalConfirm?: boolean;
@@ -280,9 +280,9 @@ export type SpecSection = {
   /** #245: one-way drive miles the freight rule priced from (null = venue not located). */
   freightMiles?: number | null;
   /** #267: a typed system sell (items + freight), used exactly — never
-   *  re-rounded, never pushed into the line prices; the margin follows it and
+   *  re-rounded, never pushed into the line prices; the markup follows it and
    *  the customer document spreads the difference across the visible lines
-   *  (`customerLines`). Cleared by this system's Margin slider, the global
+   *  (`customerLines`). Cleared by this system's Markup slider, the global
    *  "Reprice every line" slider, or Reset to auto. Valid only when finite,
    *  > 0 and ≤ PRICE_OVERRIDE_MAX; anything else is ignored (and dropped by
    *  the server on save). Not carried by Copy (the copy's costs differ). */
@@ -339,7 +339,7 @@ export type CustomDraft = {
   allowance: string;
   /** Add this non-allowance custom part to the shared catalog after saving. */
   addToCatalog: string;
-  /** #302 — "1" = Unit sell follows Unit cost at the flat custom-part margin
+  /** #302 — "1" = Unit sell follows Unit cost at the flat custom-part markup
    *  (`customPartSell`); typing a sell turns it off, clearing it turns it on. */
   priceAuto: string;
 };
@@ -616,7 +616,7 @@ export type InitialQuote = {
   revNum: number;
   revDateMs: number;
   /** Customer pricing-tier stamp (item 11, D87) — seeds labor/curtain
-   *  margins; re-stamped server-side when the customer/contact changes. */
+   *  markups (stored as `tierMargin`, a markup since #367); re-stamped server-side when the customer/contact changes. */
   pricingTier: string | null;
   tierMargin: number | null;
   /** Saved builder state (spec.sections) — null starts a clean estimate. */

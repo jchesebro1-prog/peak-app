@@ -784,7 +784,7 @@ export function useEstimatorState(props: EstimatorProps) {
       pdfRead: null,
     };
   };
-  // Customer tier margin stamp (item 11, D87) — SEEDS the labor draft and
+  // Customer tier markup stamp (item 11, D87; field `tierMargin`) — SEEDS the labor draft and
   // curtain configurator; refreshed when the meta action re-stamps.
   const [tierMargin, setTierMargin] = useState<number | null>(initial.tierMargin);
   /** The stamp in effect, read synchronously when the next one lands (#254) —
@@ -1111,7 +1111,7 @@ export function useEstimatorState(props: EstimatorProps) {
   }, [unsavedHold]);
 
   /* ---------------- persistence ---------------- */
-  /** #254 (D87 amended) — re-price the lines still at `prev`'s margin to
+  /** #254 (D87 amended) — re-price the lines still at `prev`'s markup to
    *  `next`, keep hand-priced ones, and say so with Undo. The normal Save
    *  persists it; no re-priced line → no new banner (the silent stamp), and
    *  a banner already showing (with its Undo) stays. */
@@ -1144,7 +1144,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const tierResolveSeqRef = useRef(0);
   /** #254 fix wave 2: a tier lookup is in flight — Save waits for it, so a
    *  pick-then-Save can't stamp the new tier over lines still at the old
-   *  margin (the server resolves the stamp from the posted customer/contact).
+   *  markup (the server resolves the stamp from the posted customer/contact).
    *  The ref guards a click that lands before the disabled button renders. */
   const [tierResolving, setTierResolving] = useState(false);
   const tierResolvingRef = useRef(false);
@@ -2884,7 +2884,7 @@ export function useEstimatorState(props: EstimatorProps) {
   };
 
   /** #302 — one field of the Custom part form. Unit sell follows Unit cost at
-   *  the flat custom-part margin until a sell is typed; clearing the sell
+   *  the flat custom-part markup until a sell is typed; clearing the sell
    *  hands it back to the cost. Any edit clears a stale error. */
   const setCustomField = (field: keyof CustomDraft, v: string) => {
     setCustomError("");

@@ -34,7 +34,7 @@ import { DEFAULT_FREIGHT_RULE, FREIGHT_RATE_IDS, PORTAL_RATE_IDS } from "@/lib/f
  * every estimating equation & rate in the app (General → Estimating Rules).
  *
  * Two kinds of entry:
- *   • rate    — an editable number (labor $/hr, margin %, freight %,
+ *   • rate    — an editable number (labor $/hr, markup %, freight %,
  *               tier multiplier, mileage rate…).
  *   • formula — a documented calculation (read-only reference), so the list
  *               shows HOW numbers combine, not just the knobs.
@@ -43,7 +43,7 @@ import { DEFAULT_FREIGHT_RULE, FREIGHT_RATE_IDS, PORTAL_RATE_IDS } from "@/lib/f
  *   • Flame-test rates proxy to blob `flametest_rates` (rss_flametest_rates_v1),
  *     repair rates to blob `repair_rates` (rss_repair_rates_v1), inspection
  *     rates to blob `inspection_rates`, travel/mileage fallback rates to blob
- *     `travel_rates`, catalog margin to blob `catalog_rates`, and Estimator
+ *     `travel_rates`, catalog markup to blob `catalog_rates`, and Estimator
  *     fixture add-on rates to blob `fixture_rates` — editing any of these here
  *     is LIVE: the engines/screens read the same blobs, so quotes reprice
  *     immediately.
@@ -183,7 +183,7 @@ export type CatalogRates = {
   defaultMargin: number;
 };
 
-/** Catalog margin DEFAULTS — seed/fallback for blob `catalog_rates`. */
+/** Catalog markup DEFAULTS — seed/fallback for blob `catalog_rates`. */
 export const CATALOG_RATE_DEFAULTS: CatalogRates = {
   defaultMargin: 0.43,
 };

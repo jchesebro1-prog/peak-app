@@ -488,7 +488,7 @@ function useGridEditorImpl(props: GridEditorProps) {
    *  survives the bottom pane unmounting its body when collapsed. */
   const [favorites, setFavorites] = useState<string[]>(props.favorites);
   /** Punch #76 — lines the last successful draft/update quoted at plain list
-   *  price because the part had no usable cost (or the resolved tier margin
+   *  price because the part had no usable cost (or the resolved tier markup
    *  itself was out of range), even though this quote's pricingTier/tierMargin
    *  stamp implies every line got the tier treatment. Non-blocking, mirrors
    *  the Lineset Builder's fabric-unresolved banner (#64): names the lines,

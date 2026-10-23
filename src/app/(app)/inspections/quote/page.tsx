@@ -87,7 +87,7 @@ export default async function InspectionQuotePage({
   const approved = one(sp.approved) === "1";
 
   /* ---- serializable customer directory with per-venue coords + travel ---- */
-  // Customer tier margins seed the builder's margin knob (item 11, D88).
+  // Customer tier markups seed the builder's markup knob (item 11, D88).
   const tierInfo = await builderTiers(customerDocs.map((c: CustomerDoc) => c.id));
   /* Travel is NO LONGER resolved here per venue (punch #90). This built an
      estimate for every venue of every customer while rendering — thousands of
@@ -119,7 +119,7 @@ export default async function InspectionQuotePage({
         tierMargin: tierInfo[c.id]?.byContact[ct.name] ?? null,
         tier: tierInfo[c.id]?.byContactTier[ct.name] ?? null,
       })),
-      // #254: only the company's OWN tier seeds the knob; none → the builder's default margin.
+      // #254: only the company's OWN tier seeds the knob; none → the builder's default markup.
       tierMargin: tierInfo[c.id]?.tier ? tierInfo[c.id].markup : null,
       tier: tierInfo[c.id]?.tier ?? null,
   }));

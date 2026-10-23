@@ -256,7 +256,7 @@ export async function approveFlameQuote(formData: FormData): Promise<void> {
     // #248 final review (controller decision 1): an accepted portal-service
     // quote approves at the price the customer already accepted — persist()
     // would re-price it at today's rates/tier first, which a mileage-rate
-    // or margin edit between Accept and Approve could quietly change out
+    // or markup edit between Accept and Approve could quietly change out
     // from under the accepted number. Same permission check persist() would
     // have made (requireUser()), just made directly since persist() is
     // skipped.

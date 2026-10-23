@@ -3,13 +3,16 @@
    Pure half alone: `npx tsx scripts/test-markup.ts`. */
 import type { Ok } from "./test-inbox-org";
 import {
-  DEFAULT_MARKUP, MARKUP_MAX, PRICING_BASIS, costFromSell, fmtMarkupPct, legacyTwinOf, marginToMarkup,
+  DEFAULT_MARKUP, MARKUP_MAX, PRICING_BASIS, costFromSell, fmtMarkupPct, keepSavedMarkup, legacyTwinOf, marginToMarkup,
   markupOf, markupPctString, markupToMargin, roundMarkupPct, sameWholeMarkup, sellAt,
 } from "../src/lib/markup";
 import { catalogAddPrice, customPartSell, isAtTierSeed, repriceForTier } from "../src/app/(app)/estimator/tier-reprice";
 import { copySectionForTarget } from "../src/app/(app)/estimator/copy-system";
-import { finishPrice, sellAtMarkup, sliderPct, typedPriceWarning } from "../src/lib/service-pricing";
-import { knobPctFrom } from "../src/lib/tier-seed";
+import { finishPrice, finishRepair, sellAtMarkup, sliderPct, typedPriceWarning } from "../src/lib/service-pricing";
+import { initialTierSeed, knobPctFrom, reseedKnob } from "../src/lib/tier-seed";
+import { installsForecast, projectedProfit, salesMetrics } from "../src/lib/dashboard/metrics";
+import { sameWonContent } from "../src/lib/quote-won-version";
+import { systemSellWarning } from "../src/app/(app)/estimator/pricing";
 import { sellFromCost } from "../src/lib/design/equipment-map";
 import { curtainPrice } from "../src/lib/design/curtain-pricing";
 import { unitPriceFor } from "../src/lib/portal-price-rules";
@@ -45,7 +48,48 @@ export async function markupPureChecks(ok: Ok) {
   ok(near(legacyTwinOf(0.43), 0.3 / 0.7) && near(legacyTwinOf(0.37), 0.27 / 0.73) && near(legacyTwinOf(0.11), 0.1 / 0.9), "markup: a rounded tier's legacy twin is the exact markup it rounded from");
   ok(legacyTwinOf(0.25) === null && legacyTwinOf(0) === null && legacyTwinOf(Number.NaN) === null, "markup: an exact conversion (Gold 25 %) has no twin; 0 / junk → null");
   ok(fmtMarkupPct(0.428571) === "42.9%" && fmtMarkupPct(0.43) === "43%", "markup: one-decimal percent display");
-  ok(markupPctString(0.3 / 0.7) === "42.8571" && markupPctString(0.43) === "43", "markup: labor-draft percent string (4 dp)");
+  ok(markupPctString(0.3 / 0.7) === "42.85714286" && markupPctString(0.43) === "43" && markupPctString(0.22 / 0.78) === "28.20512821" && markupPctString(Number.NaN) === "0",
+    "markup: labor-draft percent string (8 dp of a percent)");
+  // Final review item 1 — the stored string is precise enough that a rebuild reproduces the margin-era cent:
+  // round2(cost × (1 + parseFloat(s) / 100)) === round2(cost ÷ (1 − m)) for every cost (sampled every 7¢ to
+  // $99,999.99) at whole-percent margins 5–42 %, except an exact half-cent tie (the rational price sits on .5¢ —
+  // the same ties the exact markup has; integer test, no float).
+  {
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    let n = 0, bad = 0, ties = 0, first = "";
+    for (let p = 5; p <= 42; p++) {
+      const m = p / 100, kk = parseFloat(markupPctString(marginToMarkup(m))) / 100;
+      for (let C = 1; C <= 9999999; C += 7) {
+        n++;
+        const cost = C / 100;
+        if (r2(cost * (1 + kk)) === r2(cost / (1 - m))) continue;
+        const num = 2 * C * 100, den = 100 - p;
+        if (num % den === 0 && (num / den) % 2 === 1) { ties++; continue; }
+        bad++; if (!first) first = `cost ${cost} margin ${p} %`;
+      }
+    }
+    ok(bad === 0 && n > 50_000_000, `markup: a converted labor-draft string rebuilds the margin-era cent across ${n} cost × margin cases (${ties} exact half-cent ties)${bad ? ` — ${bad} off, first ${first}` : ""}`);
+  }
+  // Final review item 2 — a saved quote's exact stored markup wins while the global is the same whole percent.
+  ok(keepSavedMarkup(0.3 / 0.7, 0.43) === 0.3 / 0.7 && keepSavedMarkup(0.3 / 0.7, 0.45) === 0.45 && keepSavedMarkup(undefined, 0.43) === 0.43
+    && keepSavedMarkup(Number.NaN, 0.43) === 0.43 && keepSavedMarkup("0.4", 0.43) === 0.43 && keepSavedMarkup(1 / 3, 0.33) === 1 / 3,
+    "markup: keepSavedMarkup keeps the saved exact markup at the same whole %, else today's");
+  {
+    const fr = (pm: number) => finishRepair({ serviceCost: 1000, minCallout: 350, margin: 0.3 / 0.7, partsCost: 1234.56, partsMargin: pm });
+    const kept = fr(keepSavedMarkup(0.3 / 0.7, 0.43)), marginEra = 1234.56 / 0.7;
+    ok(Math.abs(kept.partsSell - marginEra) < 1e-9 && Math.abs(fr(0.43).partsSell - marginEra) > 1,
+      "markup: a converted repair quote's parts sell stays at its margin-era $1,763.66 on re-save (the rounded 43 % would move it)");
+    const { readFileSync } = await import("node:fs");
+    const R = "src/app/(app)/repairs/quote/";
+    const act = readFileSync(R + "actions.ts", "utf8"), ctl = readFileSync(R + "controls.tsx", "utf8"), pg = readFileSync(R + "page.tsx", "utf8");
+    const iExisting = act.indexOf("const existingForMarker = editingId ? await getQuote(editingId) : null;");
+    const iRates = act.indexOf("partsMargin: keepSavedMarkup(savedPartsMarkup, baseRates.partsMargin) };");
+    ok(iExisting > 0 && iRates > iExisting && act.split("const existingForMarker").length === 2 && /savedPartsMarkup = \(existingForMarker\?\.repair[^;]*\?\.rates\?\.partsMargin;/.test(act),
+      "markup: the repair save prices parts at keepSavedMarkup(the saved quote's rates.partsMargin, today's global)");
+    ok(ctl.includes("const partsMarkup = keepSavedMarkup(initial.savedPartsMarkup, baseRates.partsMargin);") && /margin: markupPts \/ 100,[\s\S]{0,300}partsMargin: partsMarkup,/.test(ctl)
+      && ctl.includes("Math.round(partsMarkup * 100)") && !ctl.includes("baseRates.partsMargin * 100") && pg.includes("savedPartsMarkup: rp?.rates?.partsMargin ?? null,"),
+      "markup: the repair builder preview uses the same rule (and shows the kept parts markup)");
+  }
 
   // Task 3 — legacy twin keeps old lines at the seed after the 43 % rounding.
   const old = { cost: 100, price: 142.86, labor: false } as never;
@@ -96,7 +140,7 @@ export async function markupPureChecks(ok: Ok) {
   };
   const q = convertQuoteDoc(legacy) as typeof legacy & { pricingBasis: string };
   ok(q.pricingBasis === "markup" && near(q.margin, 0.3 / 0.7) && near(q.tierMargin, 0.25), "markup: a legacy quote converts margin + tierMargin exactly and is stamped");
-  ok(q.spec.sections[0].laborGroups.g1.draft.margin === "42.8571" && near(q.flameTest.rates.margin, 0.3 / 0.7) && near(q.repair.rates.partsMargin, 1 / 3) && near(q.repair.partsMargin, 1 / 3),
+  ok(q.spec.sections[0].laborGroups.g1.draft.margin === "42.85714286" && near(q.flameTest.rates.margin, 0.3 / 0.7) && near(q.repair.rates.partsMargin, 1 / 3) && near(q.repair.partsMargin, 1 / 3),
     "markup: labor drafts, service rates and repair parts markup convert");
   ok(near(q.revisions[0].margin, 0.3 / 0.7) && near(q.revisions[0].flameTest.rates.margin, 0.3 / 0.7), "markup: frozen revisions convert too");
   ok(q.value === 1000 && q.spec.sections[0].items[0].price === 100 && q.flameTest.total === 825 && q.revisions[0].value === 900, "markup: no sell amount moves");
@@ -142,6 +186,78 @@ export async function markupPureChecks(ok: Ok) {
       "markup copy: the parts CSV and the review sheet carry markup columns only");
     const dash = rd("src/app/(app)/_dashboard/widgets/backward.tsx") + rd("src/app/(app)/_dashboard/widgets/installs.tsx");
     ok(dash.includes('"Avg. markup"') && dash.includes('centerSub="markup"') && !/Avg\. margin|Projected margin/.test(dash), "markup copy: the dashboard tiles say Avg. markup / Projected profit");
+    // Final review items 3, 4, 8, 12.
+    const lift = rd("src/components/lift-rental-panel.tsx");
+    ok(sc.includes("% markup`}</span>") && !sc.includes("% margin`") && lift.includes("Marked up with the job") && !/[Mm]argined/.test(lift),
+      "markup copy: \"Auto · 54% markup\" on the custom part and \"Marked up with the job\" on the lift panel");
+    const reg2 = rd("src/lib/dashboard/registry.ts");
+    ok(reg2.includes("Cost-weighted quote markup") && !reg2.includes("Value-weighted"), "markup copy: the Avg. markup widget says cost-weighted (Σ profit ÷ Σ cost)");
+    const ty = rd(E + "types.ts");
+    ok(!/tier\n\s*\*\s*margin\)|the margin follows it|Margin slider|custom-part margin|labor\/curtain\n\s*\*\s*margins;/.test(ty), "markup comments: estimator/types.ts describes markups");
+    {
+      const { readdirSync, statSync } = await import("node:fs");
+      const stale: string[] = [];
+      const walk = (d: string) => {
+        for (const f of readdirSync(d)) {
+          const p = d + "/" + f;
+          if (statSync(p).isDirectory()) walk(p);
+          else if (/\.(ts|tsx)$/.test(f)) rd(p).split("\n").forEach((l, i) => {
+            if (/÷ \(1 − margin\)|margin of the sell|margin-on-price/.test(l) && !/#367|replacing the margin-on-price/.test(l)) stale.push(`${p}:${i + 1}`);
+          });
+        }
+      };
+      walk("src");
+      ok(stale.length === 0, `markup comments: no comment in src/ describes current pricing as margin-on-price${stale.length ? " — " + stale.join(", ") : ""}`);
+    }
+    const pkg = JSON.parse(rd("package.json")) as { scripts: Record<string, string> };
+    ok(/tsx scripts\/test-review-and-spec\.ts && npm run test:markup-settings$/.test(pkg.scripts["test:specs"]), "markup gate: test:specs runs test:markup-settings after the main harness (a main-harness failure still fails it)");
+  }
+  // Final review item 4 — the dashboard stays finite for a stored markup of −1 (sell 0, cost > 0) or junk.
+  {
+    const qs = [
+      { value: 0, margin: -1, createdAt: 10, status: "draft" },
+      { value: 500, margin: -1, createdAt: 10, status: "draft" },
+      { value: 1000, margin: Number.NaN, createdAt: 10, status: "draft" },
+      { value: 1430, margin: 0.43, createdAt: 10, status: "draft" },
+    ] as never;
+    const sm = salesMetrics(qs, 0, 100);
+    ok(Number.isFinite(sm.avgMarkup) && Math.abs(sm.avgMarkup - 430 / 2500) < 1e-12, "markup dashboard: Avg. markup is finite with k = −1 and k = NaN quotes (they count at cost)");
+    const zero = salesMetrics([{ value: 1000, margin: 0, createdAt: 10, status: "draft" }] as never, 0, 100);
+    ok(zero.avgMarkup === 0, "markup dashboard: a zero-markup quote still reads 0 %");
+    const pj = (value: number, margin: number) => ({ id: "P", value, margin, stageMeta: { tag: "backlog" }, targetDate: null });
+    const book = [pj(500, -1), pj(1000, Number.NaN), pj(1430, 0.43), pj(0, -1)] as never;
+    const pp = projectedProfit(book);
+    ok(Number.isFinite(pp.profit) && Number.isFinite(pp.markup) && Math.abs(pp.profit - 430) < 1e-9 && Math.abs(pp.markup - 430 / 2500) < 1e-12,
+      "markup dashboard: projected profit and markup are finite with k = −1 and k = NaN projects");
+    const fc = installsForecast(book, [], 0, 6);
+    ok(Number.isFinite(fc.cost) && Number.isFinite(fc.blended) && fc.cost === 2500 && Math.abs(fc.blended - 430 / 2500) < 1e-12,
+      "markup dashboard: the installs forecast's cost and blended markup are finite with k = −1 and k = NaN");
+  }
+  // Final review item 9 — no "Low markup — 0%" on a $0-cost total; below-cost / parts checks unchanged.
+  ok(typedPriceWarning(100, 0, 0) === null && typedPriceWarning(100, -5, 0) === null && typedPriceWarning(50, 100, -0.5)?.kind === "below-cost"
+    && typedPriceWarning(100, 0, 0, 150)?.kind === "below parts price" && typedPriceWarning(105, 100, 0.05)?.kind === "low-markup",
+    "markup: a typed total on a $0 cost never warns low markup; below cost / below parts still warn");
+  {
+    const sec = (cost: number, price: number, sellOverride: number) => ({ id: "s", name: "S", items: [{ id: 1, sku: "A", desc: "A", qty: 1, cost, price }], sellOverride }) as never;
+    ok(systemSellWarning(sec(0, 100, 100)) === null && systemSellWarning(sec(100, 143, 105))?.kind === "low-markup" && systemSellWarning(sec(100, 143, 90))?.kind === "below-cost",
+      "markup: the Estimator's typed system sell never warns low markup on a $0-cost system; low markup / below cost still warn");
+  }
+  // Final review item 10 — a converted quote re-saved once (stamp 43, knob 42.857) still reads as untouched.
+  {
+    const s0 = initialTierSeed({ customer: null, contactName: "", serviceDefault: 0.43, savedMarkupPts: (0.3 / 0.7) * 100, stampedTierMarkup: 0.43 });
+    const moved = reseedKnob(s0.knobPts, s0.prevSeedPts, { pts: 25, label: "Gold" });
+    ok(s0.knobPts === (0.3 / 0.7) * 100 && s0.prevSeedPts === s0.knobPts && moved.knobPts === 25 && moved.prompt === null,
+      "markup: a converted service quote's 42.857 knob against a rounded 43 stamp is untouched — a customer change moves it, no prompt");
+    const h = initialTierSeed({ customer: null, contactName: "", serviceDefault: 0.43, savedMarkupPts: 50, stampedTierMarkup: 0.43 });
+    ok(h.prevSeedPts === 43 && reseedKnob(h.knobPts, h.prevSeedPts, { pts: 25, label: "Gold" }).prompt?.keptPts === 50, "markup: a hand-set knob (50) is still kept with a prompt");
+  }
+  // Final review item 11 — won-version content compares markups within 1e-9.
+  {
+    const k = 0.3 / 0.7;
+    ok(sameWonContent({ margin: k, tierMargin: 0.43, flameTest: { rates: { margin: k } } as never }, { margin: k + 1e-15, tierMargin: 0.43, flameTest: { rates: { margin: k - 1e-15 } } as never })
+      && !sameWonContent({ margin: k }, { margin: 0.43 }) && !sameWonContent({ spec: { sections: [{ cost: 1 }] } as never }, { spec: { sections: [{ cost: 1 + 1e-15 }] } as never })
+      && sameWonContent({ margin: undefined }, {}) && !sameWonContent({ repair: { partsMargin: 0.25 } as never }, { repair: {} as never }),
+      "markup: won content tolerates a 1-ulp markup recompute (margin / tierMargin / rates) but not a real change or a non-markup number");
   }
 }
 
@@ -189,6 +305,18 @@ export async function markupDbChecks(ok: Ok) {
   ok(fr.margin === 0.43 && !("_pricingBasis" in fr), "markup db: flame default is 43 % markup and the getter strips the stamp");
   ok((await value("tiers.gold")) === 25 && (await resolveTier(null)).markup === 0.43, "markup db: tier defaults are markup");
   await db.delete(t).where(inArray(t.id, [id, flameId, fresh.id]));
+  // Final review item 6 — updateProject strips pricingBasis like quotes.update (an undefined key would drop the stamp
+  // from the stored JSON and the next read would convert the project's markup a second time).
+  const projects = await import("../src/lib/stores/projects");
+  const pt = DOC_TABLES.projects;
+  const pr = await projects.createProject({ name: "markup project", margin: 0.43 });
+  await projects.updateProject(pr.id, { name: "markup project (patched)", pricingBasis: undefined } as never);
+  await projects.updateProject(pr.id, { pricingBasis: "margin" } as never);
+  const praw = (await db.select().from(pt).where(eq(pt.id, pr.id)))[0].doc as Record<string, unknown>;
+  const pread = await getDoc<Record<string, unknown> & { id: string }>("projects", pr.id);
+  ok(praw.pricingBasis === "markup" && praw.name === "markup project (patched)" && praw.margin === 0.43 && pread?.margin === 0.43,
+    "markup db: updateProject can't clear or change a project's pricingBasis (its markup is never converted twice)");
+  await db.delete(pt).where(eq(pt.id, pr.id));
 }
 
 /* ---- Price parity (#367 Task 8): every margin-era output in docs/markup/parity-baseline.json, reproduced by the
@@ -221,7 +349,7 @@ export function numNear(got: unknown, want: number, eps: number): boolean {
 
 /** Used by the grid / curtain / labor / tier groups only (never the service engines). A drift is a tie only if it is exactly one `unit` and the margin-era unrounded value sat within 1e-6 of a half unit. */
 function tieOk(d: Diff, r: Raw): boolean {
-  if (!r || typeof d.got !== "number" || typeof d.want !== "number") return false;
+  if (!r || typeof d.got !== "number" || typeof d.want !== "number" || !Number.isFinite(d.got) || !Number.isFinite(d.want)) return false;
   if (Math.abs(Math.abs(d.got - d.want) - r.unit) > 1e-9) return false;
   const half = (Math.floor(r.raw / r.unit) + 0.5) * r.unit;
   return Math.abs(r.raw - half) <= 1e-6;
@@ -239,6 +367,8 @@ export async function markupParityChecks(ok: Ok) {
   const mk = marginToMarkup;
   ok(tieOk({ group: "t", path: [], got: 133.71, want: 133.7 }, { raw: 133.705, unit: 0.01 }) && !tieOk({ group: "t", path: [], got: 133.71, want: 133.7 }, { raw: 133.7123, unit: 0.01 })
     && !tieOk({ group: "t", path: [], got: 133.72, want: 133.7 }, { raw: 133.705, unit: 0.01 }), "markup parity: the tie rule allows only an exact one-cent drift at an exact half");
+  ok(!tieOk({ group: "t", path: [], got: Number.NaN, want: 133.7 }, { raw: 133.705, unit: 0.01 }) && !tieOk({ group: "t", path: [], got: Infinity, want: 133.7 }, { raw: 133.705, unit: Infinity })
+    && !tieOk({ group: "t", path: [], got: -Infinity, want: 133.7 }, { raw: 133.705, unit: 0.01 }), "markup parity: the tie rule never accepts a non-finite value");
   // Comparator self-check: NaN, a missing key and an extra array element are all drifts, never passes.
   {
     const probe = (got: unknown, want: unknown) => { const o: Diff[] = []; walkDiffs("p", got, want, [], o); return o.length; };
@@ -313,17 +443,45 @@ export async function markupParityChecks(ok: Ok) {
   }
 
   // ---- Estimator labor, totals, system markup, tier re-price ----
-  const laborGot = (draft: Record<string, unknown>, pct: number) => {
-    const l = computeLabor({ ...draft, margin: String(mk(pct) * 100) } as never, laborRate);
+  // Final review item 1: labor goes through the REAL stored path — a margin-era quote doc holding the draft in
+  // spec.sections[].laborGroups, converted by convertQuoteDoc, and the converted draft.margin string fed to the engine.
+  const convertedDraft = (draft: Record<string, unknown>) => {
+    const doc = { id: "Q-labor", margin: 0.3, spec: { sections: [{ id: "s", items: [], laborGroups: { g1: { lines: 1, draft } } }] } };
+    const c = convertQuoteDoc(doc) as unknown as { pricingBasis: string; spec: { sections: Array<{ laborGroups: { g1: { draft: Record<string, unknown> & { margin: string } } } }> } };
+    return c.pricingBasis === "markup" ? c.spec.sections[0].laborGroups.g1.draft : null;
+  };
+  const laborGot = (draft: Record<string, unknown>) => {
+    const d = convertedDraft(draft);
+    if (!d) return null;
+    const l = computeLabor(d as never, laborRate);
     let n = 100;
     return { totalPrice: l.totalPrice, items: buildLaborItems(l, "Rigging", () => n++).map((it) => ({ cost: it.cost, price: it.price })) };
   };
+  ok(convertedDraft(LABOR_DRAFT)?.margin === "42.85714286" && convertedDraft(LABOR_DRAFT_22)?.margin === "28.20512821", "markup parity: the labor cases' drafts convert to their stored 8-dp strings");
   const laborRaw = (pct: number, want: unknown) => (p: Path) => {
     const it = p[0] === "items" ? (want as { items: Array<{ cost: number }> }).items[Number(p[1])] : null;
     return it && p[2] === "price" ? { raw: { raw: it.cost / (1 - pct), unit: 0.01 }, why: `labor item cost ${it.cost} at margin ${pct}` } : null;
   };
-  same("labor", laborGot(LABOR_DRAFT, 0.3), B.labor, laborRaw(0.3, B.labor));
-  same("labor22", laborGot(LABOR_DRAFT_22, 0.22), B.labor22, laborRaw(0.22, B.labor22));
+  same("labor", laborGot(LABOR_DRAFT), B.labor, laborRaw(0.3, B.labor));
+  same("labor22", laborGot(LABOR_DRAFT_22), B.labor22, laborRaw(0.22, B.labor22));
+  // The reviewer's cases: misc-only drafts at a stored "30" — Update labor on the converted draft rebuilds every line and
+  // the total at exactly the margin-era price (the old 4-dp string gave 6,173.09 for 4,321.17; margin era 6,173.10).
+  {
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    const off: string[] = [];
+    for (const misc of ["4321.17", "12500", "27777.77", "55555.55"]) {
+      const draft = { ...LABOR_DRAFT, shopHrs: "", misc, margin: "30" };
+      const d = convertedDraft(draft);
+      const l = computeLabor(d as never, laborRate);
+      const marginEra = computeLabor({ ...draft, margin: "0" } as never, laborRate);
+      let n = 1;
+      const items = buildLaborItems(l, "Rigging", () => n++);
+      const want = r2(marginEra.totalCost / 0.7);
+      const linesOk = items.length > 0 && items.every((it) => it.price === r2(it.cost / 0.7));
+      if (!d || r2(l.totalPrice) !== want || !linesOk) off.push(`${misc}: ${r2(l.totalPrice)} vs ${want}${linesOk ? "" : " (a line moved)"}`);
+    }
+    ok(off.length === 0, `markup parity: a converted "30" labor draft rebuilds misc 4,321.17 / 12,500 / 27,777.77 / 55,555.55 at the margin-era prices${off.length ? " — " + off.join(" | ") : ""}`);
+  }
   const secs = SECTIONS as never;
   const t = totals(secs, 0) as unknown as Record<string, number>;
   const bt = B.totals as Record<string, number>;

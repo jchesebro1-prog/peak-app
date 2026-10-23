@@ -38,7 +38,7 @@ import { PROJECT_DISCOUNT_COPY, ProjectDiscountEditor } from "./project-discount
 const NEW_GROUP = "__new";
 
 /**
- * One system card — header (badge / rename / cost / price), per-system margin
+ * One system card — header (badge / rename / cost / price), per-system markup
  * + freight sliders, line-item grid, freight line, and the add-part row with
  * the catalog + custom-part portals. Pixel port of Estimator.dc.html.
  *
@@ -1909,7 +1909,7 @@ export default function SectionCard(p: SectionCardProps) {
                     <label style={LBL}>
                       Unit sell
                       {cd.priceAuto && cdPrice > 0 && (
-                        <span style={{ marginLeft: 6, fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "#9aa0ab" }}>{`Auto · ${Math.round(CUSTOM_PART_MARKUP * 100)}% margin`}</span>
+                        <span style={{ marginLeft: 6, fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "#9aa0ab" }}>{`Auto · ${Math.round(CUSTOM_PART_MARKUP * 100)}% markup`}</span>
                       )}
                     </label>
                     <div style={{ position: "relative" }}>

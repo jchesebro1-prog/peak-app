@@ -64,7 +64,7 @@ type RpContact = { name?: string; role?: string; email?: string } | null;
 type RpSource = { kind: string; refId?: string; logId?: number; label: string };
 type RepairDoc = {
   /** The engine rates this quote was priced with — `margin` is its knob (#254 reopen). */
-  rates?: { margin?: number } | null;
+  rates?: { margin?: number; partsMargin?: number } | null;
   category?: string;
   priority?: string;
   scope?: string;
@@ -109,7 +109,7 @@ export default async function RepairQuotePage({
   const findingsParam = !editId && !inspId && preCustomer ? one(sp.findings) : "";
 
   /* ---- serializable customer directory with per-venue coords + travel ---- */
-  // Customer tier margins seed the builder's margin knob (item 11, D88).
+  // Customer tier markups seed the builder's markup knob (item 11, D88).
   const tierInfo = await builderTiers(customerDocs.map((c: CustomerDoc) => c.id));
   /* Travel is NO LONGER resolved here per venue (punch #90). This built an
      estimate for every venue of every customer while rendering — thousands of
@@ -141,7 +141,7 @@ export default async function RepairQuotePage({
         tierMargin: tierInfo[c.id]?.byContact[ct.name] ?? null,
         tier: tierInfo[c.id]?.byContactTier[ct.name] ?? null,
       })),
-      // #254: only the company's OWN tier seeds the knob; none → the builder's default margin.
+      // #254: only the company's OWN tier seeds the knob; none → the builder's default markup.
       tierMargin: tierInfo[c.id]?.tier ? tierInfo[c.id].markup : null,
       tier: tierInfo[c.id]?.tier ?? null,
   }));
@@ -247,6 +247,8 @@ export default async function RepairQuotePage({
       // #254: reopen at the quote's own saved knob — never re-seeded on load.
       savedMarkupPts: knobPctFrom(rp?.rates?.margin),
       stampedTierMarkup: editQuote.tierMargin ?? null,
+      // #367: the saved exact parts markup — kept while today's global is the same whole percent.
+      savedPartsMarkup: rp?.rates?.partsMargin ?? null,
       travel: normalizeTravelOverride(rp && rp.travel) ?? (legacyDrive ? { mode: "drive" } : null),
       // #217: reopen with the typed total; an old sent price off the $25 grid
       // reopens typed in too, so re-saving never silently changes it (D286).

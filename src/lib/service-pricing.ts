@@ -454,7 +454,7 @@ export type PriceWarning = {
 
 /**
  * Warning (never a block) for a typed total below cost or under an 11%
- * markup. `partsSell` (repairs only) checks first: a typed total under what
+ * markup (the markup check needs a positive cost — a $0-cost job never reads "Low markup — 0%"). `partsSell` (repairs only) checks first: a typed total under what
  * the parts alone are selling for is a sharper signal than the whole-job
  * below-cost check — it can fire even when the total still clears the raw
  * job cost, since parts sell at a markup above their raw cost.
@@ -475,7 +475,8 @@ export function typedPriceWarning(
       kind: "below-cost",
       text: `Below cost — ${fmtDollars(total)} is ${fmtDollars(cost - total)} under the ${fmtDollars(cost)} cost.`,
     };
-  if (markup < LOW_MARKUP_WARN)
+  // #367: with no positive cost there is no markup to judge (it reads 0) — only the checks above apply.
+  if (cost > 0 && markup < LOW_MARKUP_WARN)
     return {
       kind: "low-markup",
       text: `Low markup — ${fmtPct(markup)}% at this total, under ${Math.round(LOW_MARKUP_WARN * 100)}%.`,
