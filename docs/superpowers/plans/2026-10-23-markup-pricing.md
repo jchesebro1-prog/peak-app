@@ -35,6 +35,7 @@
 2. **No temporary entry-point adapters.** Tasks 3–6 switch the engines; Task 7 switches the data and defaults. During Tasks 3–6, pure engine checks stay green. DB-backed checks that price from *stored or default* rates may be red, and each task lists them. `test:specs` must be fully green from Task 7 on.
 3. **The "legacy twin" rule (new).** A line priced at an old exact markup (Base 42.857 %) still counts as "at the tier seed" against the rounded 43 % stamp. Without it, the first tier change after the switch would call every old line hand-priced. Renewal re-pricing uses the same rule, so it doesn't call every renewal's rate "changed".
 4. **The service knob keeps exact points for saved quotes.** A saved service quote reopens at 42.857 (shown "42.9"), so re-saving it without touching the knob can't move its $25-rounded total.
+5. **"Same tier" compares whole percents** (found in the Task 3 review). Tier reprice's early return, Copy system's `tierMoves` / `seedMoved`, and the save action's `tierMoved` use `sameWholeMarkup` instead of `===`. An old quote's exact stamp (0.428571) meeting today's rounded tier (0.43) is then a no-op instead of a +0.1 % reprice. A real tier change still reprices, and the legacy twin rule covers the lines.
 
 ## Test state policy (Tasks 3–6)
 
@@ -997,6 +998,8 @@ export function curtainPrice(costEach: number, markup: number = CURTAIN_MARKUP):
 
 In `grid-curtains.ts`, rename `margin` to `markup` in `priceGridCurtains` and `curtainSell`. Fix every `CURTAIN_MARGIN` importer tsc flags.
 
+**Remove the Task 3 bridge in the same step (required).** `src/app/(app)/estimator/pricing.ts` `computeCurtain` currently calls `curtainPrice(cc.costEach, markupToMargin(markup))`, because `curtainPrice` still took a margin. Once `curtainPrice` takes a markup, change it to `curtainPrice(cc.costEach, markup)` and drop the `markupToMargin` import if it's unused. tsc can't catch a missed bridge (both are `number`); left in place, it would price Estimator curtains at about 30 % instead of 43 %. The #250 / #254 curtain checks must be green afterwards. Those #250 checks are the 7 that Task 3 left red.
+
 - [ ] **Step 3: `src/lib/tier-pricing.ts`**
 
 ```ts
@@ -1604,6 +1607,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 | `labor-modal.tsx:821` | `Margin (%)`, placeholder `30` | `Markup (%)`, placeholder `43` |
 | `vendor-quote-modal.tsx:20` comment | `marked up by the section margin` | `marked up by the line's markup` |
 | `header-more-menu.tsx:49` title | `…cost, sell, margin, markup and links…` | `…cost, sell, markup and links…` |
+
+- [ ] **Step 1b: $0-cost lines.** Markup is undefined on a $0-cost line: a list-only catalog hit, a zero-cost custom or allowance line. Show "—" there instead of a red "0%". This applies to the `section-card.tsx` line readout and custom-part readout, and the `catalog-picker.tsx` hit readout.
 
 - [ ] **Step 2: Exports** (markup only, spec §3):
   - `parts-csv.ts:62-63`: the headers become `"Line markup"`, `"Effective markup"`.
