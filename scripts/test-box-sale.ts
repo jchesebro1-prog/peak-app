@@ -26,6 +26,7 @@ import { loadAppendixSources } from "../src/lib/quote-pdf/generate";
 import { renderCoverPdf } from "../src/lib/estimate-output/cover-pdf-server";
 import { renderBomPdf } from "../src/lib/estimate-output/bom-pdf-server";
 import { BOX_SALE_COPY, boxSaleLaborBanner, newSystemPresentation } from "../src/lib/estimate-box-sale/rules";
+import { bomPricesHiddenNote, bomSwitchShown } from "../src/lib/estimate-box-sale/rules";
 import { pdfDocKey } from "../src/app/(app)/estimator/pdf-doc-key";
 import { normalizePdfOptions } from "../src/lib/quote-pdf/pdf-options";
 import { BOX_SALE_PACKAGE_TABS, boxSalePackageTab, PACKAGE_TABS, packageTabsFor, parsePackageTab } from "../src/lib/estimate-steps/package-tabs";
@@ -500,6 +501,29 @@ async function finalReviewChecks(ok: Ok) {
   ok(/const canBoxSale = isBoxSaleQuoteType\(initial\.quoteType\) && isBoxSaleSource\(initial\.bonusSource\);/.test(rd("src/app/(app)/estimator/use-estimator-state.ts")), "box sale final minor (source): the switch is offered on Estimator-source quotes only");
 }
 
+/** 2026-10-22 (Jeff): a box sale hides the Client package tab, so the BOM quote tab carries Show prices / Show quantities,
+ *  points the locked Line prices tooltip at them, and drops the Labor switch. A normal estimate is unchanged. */
+function bomToggleChecks(ok: Ok) {
+  ok(!bomSwitchShown("bomLabor", true) && bomSwitchShown("bomLabor", false), "box sale BOM toggles: the Labor switch is hidden on a box sale, shown on a normal estimate");
+  ok(["bomLinePrices", "bomMaterials", "bomFreight"].every((f) => bomSwitchShown(f, true) && bomSwitchShown(f, false)), "box sale BOM toggles: Line prices / Materials / Freight show either way");
+  const normal = "Prices are hidden on client documents (Client package → Line detail).";
+  ok(bomPricesHiddenNote(false) === normal, "box sale BOM toggles: a normal estimate's locked note is unchanged");
+  const box = bomPricesHiddenNote(true);
+  ok(box !== normal && !box.includes("Client package") && box.includes("Show prices"), "box sale BOM toggles: the box-sale note points at the Show prices toggle on this tab, not Client package");
+
+  const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
+  ok(tab.includes("{s.boxSale && (") && /togglePdf\("pdfPrices"\)[\s\S]{0,200}Show prices/.test(tab) && /togglePdf\("pdfQty"\)[\s\S]{0,200}Show quantities/.test(tab),
+    "box sale BOM toggles (source): the BOM tab renders Prices / Quantities toggles through the shared togglePdf");
+  ok(tab.includes('data-testid="box-sale-show-toggles"') && tab.indexOf('data-testid="box-sale-show-toggles"') > tab.indexOf("aria-label={BOM_TAB_COPY.showOnBom}") && tab.indexOf('data-testid="box-sale-show-toggles"') < tab.indexOf("{BOM_TAB_COPY.showOnBomHint}"),
+    "box sale BOM toggles (source): the Show prices / quantities row sits inside the Show on BOM group, before its hint");
+  ok(tab.includes("BOM_SHOW_SWITCHES.filter(({ flag }) => bomSwitchShown(flag, s.boxSale))") && tab.includes("title={locked ? bomPricesHiddenNote(s.boxSale) : undefined}") && tab.includes("{bomPricesHiddenNote(s.boxSale)}"),
+    "box sale BOM toggles (source): Labor filtered and the locked tooltip / strip note follow the box-sale wording");
+  ok(tab.includes("togglePdf(flag)") && tab.includes("const locked = flag === \"bomLinePrices\" && !pdfOpts.pdfPrices;") && !/pdfQty\b[\s\S]{0,40}useState/.test(tab),
+    "box sale BOM toggles (source): no second state path — the existing togglePdf and the unchanged lock rule");
+  ok(!rd("src/app/(app)/estimator/steps/client-package-tab.tsx").includes("bomSwitchShown") && rd("src/app/(app)/estimator/preview-doc.tsx").includes("p.togglePdf(\"pdfPrices\")"),
+    "box sale BOM toggles (source): the Client package tab and PdfLineDetailGroup are untouched");
+}
+
 // (later tasks: check functions above this line)
 
 export async function boxSalePureChecks(ok: Ok) {
@@ -512,6 +536,7 @@ export async function boxSalePureChecks(ok: Ok) {
   sendPackageChecks(ok);
   intakeChecks(ok);
   await finalReviewChecks(ok);
+  bomToggleChecks(ok);
   // (later tasks: pure checks above this line)
 }
 

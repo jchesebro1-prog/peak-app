@@ -82,6 +82,19 @@ export const BOX_SALE_COPY = {
   laborSystems: "Systems with labor:",
 } as const;
 
+/** BOM quote tab, Show on BOM: a box sale can't have labor, so its Labor switch is not shown (2026-10-22). */
+export function bomSwitchShown(flag: string, boxSale: boolean): boolean {
+  return !(boxSale && flag === "bomLabor");
+}
+
+/** The note (and the locked Line prices tooltip) when the estimate-wide Prices toggle is off. A box sale hides the Client
+ *  package tab, so it points at the Show prices toggle on the same BOM quote tab instead. */
+export function bomPricesHiddenNote(boxSale: boolean): string {
+  return boxSale
+    ? "Prices are hidden on client documents. Turn Show prices back on, above."
+    : "Prices are hidden on client documents (Client package → Line detail).";
+}
+
 /** The Build banner: the refusal sentence, then the systems that carry labor. */
 export function boxSaleLaborBanner(names: readonly string[]): string {
   return `${BOX_SALE_LABOR_MESSAGE} ${BOX_SALE_COPY.laborSystems} ${names.join(", ")}.`;

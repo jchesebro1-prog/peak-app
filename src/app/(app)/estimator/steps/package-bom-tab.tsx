@@ -8,6 +8,7 @@ import { bomPdfPath } from "@/lib/estimate-output/bom-pdf";
 import type { EstimatorState } from "../use-estimator-state";
 import { VendorsCard } from "./vendors-card";
 import { QuotePeopleFields } from "../quote-people-fields";
+import { bomPricesHiddenNote, bomSwitchShown } from "@/lib/estimate-box-sale/rules";
 
 /** Copy for the BOM quote tab (spec 2026-10-12 §4.3). */
 export const BOM_TAB_COPY = {
@@ -18,7 +19,6 @@ export const BOM_TAB_COPY = {
   openPdf: "Open PDF ↗",
   saveFirst: "Save first — the PDF prints the saved estimate.",
   saveToCreate: "Save to create the PDF.",
-  pricesHidden: "Prices are hidden on client documents (Client package → Line detail).",
   empty: "Add a system on Build to see the BOM.",
   // #364 — Show on BOM.
   showOnBom: "Show on BOM",
@@ -156,13 +156,25 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
               {BOM_TAB_COPY.downloadPdf} — {BOM_TAB_COPY.saveToCreate}
             </span>
           )}
-          {!pdfOpts.pdfPrices && <span style={{ flexBasis: "100%", color: "#8a6d1f" }}>{BOM_TAB_COPY.pricesHidden}</span>}
+          {!pdfOpts.pdfPrices && <span style={{ flexBasis: "100%", color: "#8a6d1f" }}>{bomPricesHiddenNote(s.boxSale)}</span>}
           {/* #364 — Show on BOM: saved with the quote (pdfOptions), applied by bomViewProps to this tab, the BOM PDF,
               the saved preview's BOM and the client's online BOM. Line prices yields to the quote-wide Prices. */}
           <span role="group" aria-label={BOM_TAB_COPY.showOnBom} style={{ flexBasis: "100%", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 10px" }}>
             <strong style={{ color: "#16181d" }}>{BOM_TAB_COPY.showOnBom}</strong>
+            {/* Box goods sale (2026-10-22): the Client package tab is hidden, so the estimate-wide Show prices / Show quantities
+                (the same pdfPrices / pdfQty through the same togglePdf as Client package → Line detail) live here. */}
+            {s.boxSale && (
+              <span data-testid="box-sale-show-toggles" role="group" aria-label="Show prices and quantities" style={SEG_WRAP}>
+                <button type="button" onClick={() => togglePdf("pdfPrices")} aria-pressed={pdfOpts.pdfPrices} style={pdfOpts.pdfPrices ? SEG_ON : SEG_OFF}>
+                  {(pdfOpts.pdfPrices ? "✓ " : "") + "Show prices"}
+                </button>
+                <button type="button" onClick={() => togglePdf("pdfQty")} aria-pressed={pdfOpts.pdfQty} style={pdfOpts.pdfQty ? SEG_ON : SEG_OFF}>
+                  {(pdfOpts.pdfQty ? "✓ " : "") + "Show quantities"}
+                </button>
+              </span>
+            )}
             <span style={SEG_WRAP}>
-              {BOM_SHOW_SWITCHES.map(({ flag, label }) => {
+              {BOM_SHOW_SWITCHES.filter(({ flag }) => bomSwitchShown(flag, s.boxSale)).map(({ flag, label }) => {
                 const locked = flag === "bomLinePrices" && !pdfOpts.pdfPrices;
                 const on = pdfOpts[flag] && !locked;
                 return (
@@ -171,7 +183,7 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
                     type="button"
                     onClick={() => togglePdf(flag)}
                     disabled={locked}
-                    title={locked ? BOM_TAB_COPY.pricesHidden : undefined}
+                    title={locked ? bomPricesHiddenNote(s.boxSale) : undefined}
                     aria-pressed={on}
                     style={{ ...(on ? SEG_ON : SEG_OFF), ...(locked ? { cursor: "not-allowed", opacity: 0.6 } : {}) }}
                   >
