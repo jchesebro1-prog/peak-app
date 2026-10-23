@@ -37601,7 +37601,7 @@ function r363Fixture() {
     "#363 review sheet: exceljs loads on demand (type-only static import), so it stays out of the Estimator's main bundle");
   const hookSrc = readFileSync(join(process.cwd(), EST_DIR, "use-estimator-state.ts"), "utf8");
   const menuSrc = readFileSync(join(process.cwd(), EST_DIR, "header-more-menu.tsx"), "utf8");
-  ok(hookSrc.includes("reviewSheetModel(sections, vendorQuotes, info, venueRoomName)") && hookSrc.includes("await downloadReviewSheet(fileStem(name, \"estimate\"), blocks)")
+  ok(hookSrc.includes("reviewSheetModel(sections, vendorQuotes, info, venueRoomName, projectDiscounts)") /* #366: + the discounts */ && hookSrc.includes("await downloadReviewSheet(fileStem(name, \"estimate\"), blocks)")
     && hookSrc.includes("Couldn't build the review spreadsheet — try again.") && hookSrc.includes('"No parts to export yet."') && !hookSrc.includes("downloadCsv(")
     && menuSrc.includes("s.exportReviewSheet()") && menuSrc.includes("disabled={s.reviewBusy}"),
     "#363 review sheet: More ▾ → Review spreadsheet builds the model and downloads the .xlsx; the CSV download is gone");
@@ -70980,3 +70980,36 @@ import { projectDiscountsKey as pd366Key } from "@/lib/project-discounts/rules";
   ok(/\n    projectDiscounts,\n    setProjectDiscount,\n    removeProjectDiscount,\n/.test(hook), "#366 hook: returns the map and its set / remove actions");
 }
   ok(pd366Apply([pd366Sec([pd366Line({ custom: true })])], pd366D)[0].items[0].cost === 2000, "#366 core: a custom line is never discounted, even one saved with a real catalog SKU (its cost is typed by hand)");
+
+/* --- #366: the Review spreadsheet names project pricing (price source + note) --- */
+import { partsListRows as pd366Rows, reviewSheetModel as pd366Model, partsRowNotes as pd366Notes } from "@/app/(app)/estimator/parts-csv";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const info = { "ETC:CS40": { mfr: "ETC", desc: "ColorSource 40" }, "ETC:CBL": { mfr: "ETC", desc: "Cable" } };
+  const base = [pd366Sec([pd366Line({}), pd366Line({ id: 2, sku: "ETC:CS40", sellOverride: true, price: 3100 }), { ...pd366Asm(), id: 3 }], { kind: "materials" } as Partial<PD366Section>)];
+  const secs = pd366Apply(base, pd366D);
+  const rows = pd366Rows(secs, [], info, "", pd366D);
+  const plain = rows.find((r) => r.sku === "ETC:CS40" && r.partOf.length === 0 && r.lineSell === 3000);
+  ok(!!plain && plain.source === "Catalog — project discount 12%" && plain.unitCost === 1760 && pd366Notes(plain).includes("Project pricing: Reg #4471"),
+    "#366 sheet: a discounted line reads \"Catalog — project discount 12%\", Unit Cost is the discounted cost, Notes carry \"Project pricing: <note>\"");
+  const edited = rows.find((r) => r.sku === "ETC:CS40" && r.partOf.length === 0 && r.lineSell === 3100);
+  ok(!!edited && edited.source === "Catalog — project discount 12% · sell edited", "#366 sheet: a discounted line whose sell was edited keeps saying so");
+  const part = rows.find((r) => r.sku === "ETC:CS40" && r.partOf.length > 0);
+  const cable = rows.find((r) => r.sku === "ETC:CBL");
+  ok(!!part && part.source === "Catalog — project discount 12%" && part.unitCost === 1760 && pd366Notes(part).includes("Project pricing: Reg #4471") && !!cable && cable.source === "Catalog",
+    "#366 sheet: a discounted part inside an assembly gets the same label and note; its undiscounted sibling stays \"Catalog\"");
+  ok(!rows.some((r) => /Cost adjustment/.test(r.desc)), "#366 sheet: a discounted assembly needs no cost-adjustment row (line cost = Σ its parts' discounted costs)");
+  const undiscRows = pd366Rows(base, [], info, "", {});
+  const sellOf = (rs: typeof rows, sku: string) => rs.filter((r) => r.sku === sku && r.partOf.length > 0).map((r) => Math.round(r.lineSell * 100) / 100).join();
+  ok(sellOf(rows, "ETC:CS40") === sellOf(undiscRows, "ETC:CS40") && sellOf(rows, "ETC:CBL") === sellOf(undiscRows, "ETC:CBL"),
+    "#366 sheet: an assembly's sell is shared out by its parts' NORMAL costs — each part's sell is the same with or without the discount");
+  // An undiscounted copy of the same part (here: another estimate's line, mixed in) stays its own row.
+  const mixed = [pd366Sec([...secs[0].items.slice(0, 1), pd366Line({ id: 9 })], { kind: "materials" } as Partial<PD366Section>)];
+  const mixedRows = pd366Rows(mixed, [], info, "", pd366D).filter((r) => r.sku === "ETC:CS40");
+  ok(mixedRows.length === 2 && mixedRows.some((r) => r.source === "Catalog") && mixedRows.some((r) => r.source.startsWith("Catalog — project discount")),
+    "#366 sheet: a discounted and an undiscounted copy of one part never merge (the source is in the key)");
+  ok(pd366Rows(secs, [], info).every((r) => !r.notes.some((n) => n.startsWith("Project pricing"))), "#366 sheet: without the map (older callers) no note is added");
+  ok(pd366Model(secs, [], info, "", pd366D)[0].rows.some((r) => r.source === "Catalog — project discount 12%"), "#366 sheet: reviewSheetModel passes the map through");
+  const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
+  ok(hook.includes("reviewSheetModel(sections, vendorQuotes, info, venueRoomName, projectDiscounts)"), "#366 sheet: More ▾ → Review spreadsheet hands the estimate's discounts to the model");
+}

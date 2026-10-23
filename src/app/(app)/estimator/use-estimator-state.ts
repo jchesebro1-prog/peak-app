@@ -2402,7 +2402,7 @@ export function useEstimatorState(props: EstimatorProps) {
           manufacturerModelNumber: r.manufacturerModelNumber,
         };
       }
-      const blocks = reviewSheetModel(sections, vendorQuotes, info, venueRoomName);
+      const blocks = reviewSheetModel(sections, vendorQuotes, info, venueRoomName, projectDiscounts); // #366: + the project-pricing notes
       if (!blocks.length) {
         setActionError(null);
         setGateRefused(false);
