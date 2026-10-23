@@ -12,6 +12,9 @@
  *   parties documentAddressee(q)         → null: no parties in the prototype (owner-addressed, as a quote with no award)
  *   narrative/photos keyProductPhoto*    → keyProductPhotosLocal: the packaged photo (Task 11), else none
  *   narrative/photos loadKeyProductModels → keyProductModelsFor over the store's catalog
+ *   bom-models-server loadBomModelPartsFor → bomModelPartsLocal over the store's catalog (#365: "Model — Description")
+ *   print route's box-sale branch         → quoteDocumentDataFor already returns the BOM view for a box sale; this adds
+ *                                           the web layout, the model parts and no cut-sheet appendix (cut-sheets.ts)
  *
  * Plan: PR 2 Task 5.
  */
@@ -24,6 +27,8 @@ import { docPhotoSkus } from "@/lib/package-doc/text";
 import type { PackageDoc } from "@/lib/package-doc/types";
 import { memberAliases } from "@/lib/quote-line-members";
 import { keyProductModelsFor } from "@/lib/estimate-output/photo-models";
+import { bomModelPartOf, bomModelSkus, type BomModelParts } from "@/lib/estimate-output/bom-models";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 import type { Quote } from "@/lib/stores/quotes";
 import type { HandoffStore } from "../store";
 import { customers, refreshPortsFromStore, settingsView } from "../ports";
@@ -84,6 +89,24 @@ export function keyProductModelsLocal(sections: SpecSection[], document: Package
   }
 }
 
+/**
+ * loadBomModelPartsFor over the store's catalog (#365): the catalog facts the BOM view's models read, keyed by the SKU as
+ * the line names it (renames followed, live parts only). Never throws — undefined prints descriptions only.
+ */
+export function bomModelPartsLocal(sections: SpecSection[], partOf: (sku: string) => LivePart | undefined): BomModelParts | undefined {
+  try {
+    const out: BomModelParts = {};
+    for (const sku of bomModelSkus(sections)) {
+      const p = partOf(sku);
+      if (p) out[sku] = bomModelPartOf(p);
+    }
+    return out;
+  } catch (e) {
+    console.warn("[handoff] BOM line models unavailable", e);
+    return undefined;
+  }
+}
+
 /** The store's catalog as a sku resolver (renames followed), read once per document. */
 export async function catalogResolver(store: HandoffStore): Promise<(sku: string) => LivePart | undefined> {
   return bySkuResolver(await liveCatalog(store), store.catalogRenames);
@@ -96,6 +119,11 @@ export function quoteDocumentPropsFor(q: Quote, partOf: (sku: string) => LivePar
     ...doc,
     keyProductPhotos: keyProductPhotosLocal(doc.sections, doc.document, partOf),
     keyProductModels: keyProductModelsLocal(doc.sections, doc.document, partOf),
+    // #365: only a BOM view (bomViewProps' showModels) reads these; every other document ignores them.
+    bomModelParts: bomModelPartsLocal(doc.sections, partOf),
+    // Box goods sale (spec 2026-10-21): the whole customer document is the BOM quote PDF's layout (#360) — the print
+    // route's `layout="web"` branch (no title page, the investment band kept).
+    ...(boxSaleOf(q) ? { layout: "web" as const } : {}),
     rewardsLine: "",
   };
 }

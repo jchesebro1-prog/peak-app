@@ -10,6 +10,7 @@ import type { EstimateEmailEntry, Quote, QuoteHistoryEntry, QuoteReview, QuoteRe
 import type { SpecSection } from "@/lib/estimating-core/types";
 import { normalizePackageSelection } from "@/lib/estimate-output/package-selection";
 import { withoutEstimateFields } from "@/lib/estimate-number";
+import { isBoxSaleQuoteType, isBoxSaleSource } from "@/lib/estimate-box-sale/rules";
 import { grossQuoteValue, quoteRewardCredit, withRewardCredit, withoutRewardCredit } from "@/lib/rewards/credit-line";
 import { serviceCreditSubdocKey } from "@/lib/rewards/service-credit";
 import { cleanPackageFiles } from "@/lib/estimate-output/package-files";
@@ -126,6 +127,8 @@ export function buildQuote(id: string, partial: Partial<Quote>, quoteType: strin
     ...(typeof partial.notIncluded === "string" ? { notIncluded: partial.notIncluded } : {}),
     ...(partial.packageSelection ? { packageSelection: normalizePackageSelection(partial.packageSelection) } : {}),
     ...(Array.isArray(partial.findingKeys) && partial.findingKeys.length ? { findingKeys: partial.findingKeys } : {}),
+    // Box goods sale: only a true on a system quote — every other creator writes the doc it wrote before.
+    ...(partial.boxSale === true && isBoxSaleQuoteType(quoteType) && isBoxSaleSource(partial.source) ? { boxSale: true } : {}),
   };
 }
 
@@ -139,6 +142,14 @@ export const UPDATE_OWNED_FIELDS = [
 export function applyUpdate(doc: Quote, patch: Partial<Quote>, now: number): Quote {
   const clean = withoutEstimateFields(patch) as Partial<Quote> & Record<string, unknown>;
   for (const k of UPDATE_OWNED_FIELDS) delete clean[k];
+  // Box goods sale: stored only as true on a system quote; false (or any other type) removes the key, so turning
+  // it off leaves exactly a normal estimate's doc. A patch without the key leaves it alone.
+  if ("boxSale" in clean) {
+    const on = clean.boxSale === true && isBoxSaleQuoteType(clean.quoteType ?? doc.quoteType) && isBoxSaleSource(clean.source ?? doc.source);
+    delete clean.boxSale;
+    if (on) doc.boxSale = true;
+    else delete doc.boxSale;
+  }
   Object.assign(doc, clean, { updatedAt: now });
   if (typeof doc.value === "number") doc.value = Math.round(doc.value);
   return doc;
@@ -169,6 +180,8 @@ export function revisionDocFields(doc: Quote): QuoteRevisionDocFields {
     ...(d.packageSelection ? { packageSelection: normalizePackageSelection(d.packageSelection) } : {}),
     awardedPartyId: d.bid?.awardedPartyId ?? null,
     ...(d.bid ? { bid: { ...d.bid, addenda: [...(d.bid.addenda || [])] } } : {}),
+    // Box goods sale: only when on — a normal estimate's revision is byte-identical.
+    ...(d.boxSale === true ? { boxSale: true } : {}),
   };
 }
 

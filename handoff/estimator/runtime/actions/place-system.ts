@@ -20,6 +20,7 @@ import { normalizePackageSelection, type PackageSelection } from "@/lib/estimate
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { allAssembliesFrom, fixtureSkus, type FixtureRecord } from "@/lib/fixture-assemblies";
 import { rewriteQuoteSpec } from "@/lib/catalog-rename/rewrite";
+import { boxSaleOf, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
 import { refresh } from "../router";
 import type { HandoffStore } from "../store";
 import { customers } from "../ports";
@@ -94,7 +95,7 @@ export type SourceContext = { customerId: string | null; locationId: string | nu
 /**
  * actions.ts placeSystemInEstimate — the shared tail of Move and Copy: an existing target gains the
  * section (re-id'd, bonus lines re-derived, its own credit re-pinned); a new target is a draft for the
- * source's customer. Only the vendor quotes this section's own lines name travel. Left out: vendor
+ * source's customer. Only the vendor quotes this section's own lines name travel. Box goods sale: a labor system is refused into an existing box sale, and a NEW target copies the stored source's flag. Left out: vendor
  * parties, the lead/companies split and Scope-only inheritance (#348 — no parties in the prototype), PDFs.
  */
 export async function placeSystemInEstimate(
@@ -102,7 +103,7 @@ export async function placeSystemInEstimate(
   repo: QuoteRepo,
   placed: SpecSection,
   target: Original.MoveSystemTarget,
-  opts: { newName: string; sourceContext: SourceContext; vendorQuotes: VendorQuote[]; owner: string; tier?: { pricingTier: string; tierMargin: number } },
+  opts: { newName: string; sourceContext: SourceContext; vendorQuotes: VendorQuote[]; owner: string; tier?: { pricingTier: string; tierMargin: number }; sourceQuoteId?: string | null },
 ): Promise<{ ok: true; targetId: string; targetName: string; targetNumber: string } | { ok: false; error: string }> {
   const placedIds = vendorIdsInSections([placed]);
   const rates = bonusRatesNow();
@@ -112,6 +113,12 @@ export async function placeSystemInEstimate(
   if (target.kind === "existing") {
     const existing = await repo.get(target.quoteId);
     if (!existing) return { ok: false, error: "That estimate could not be found." };
+    // Box goods sale (spec 2026-10-21): a system with labor can't join an existing box sale — refused before anything
+    // is written. Move/Copy into a NEW estimate is unchanged (the new estimate starts as a normal one).
+    if (boxSaleOf(existing)) {
+      const problem = boxSaleSaveProblem(true, [placed]);
+      if (problem) return { ok: false, error: problem };
+    }
     const placedVq = carry(existing.vendorQuotes);
     const existingSpec = existing.spec as { sections?: SpecSection[]; mobs?: SpecMob[]; groups?: SystemGroup[]; document?: unknown } | null | undefined;
     const existingDoc = sanitizePackageDoc(existingSpec?.document);
@@ -132,6 +139,9 @@ export async function placeSystemInEstimate(
     return { ok: true, targetId: updated.id, targetName: updated.name, targetNumber: displayQuoteNumber(updated) };
   }
   const placedVq = carry([]);
+  // Box goods sale: Move / Copy → New estimate copies the STORED source's flag (an unsaved or unknown source has none).
+  const sourceId = typeof opts.sourceQuoteId === "string" && opts.sourceQuoteId ? opts.sourceQuoteId : null;
+  const sourceQuote = sourceId ? await repo.get(sourceId) : null;
   const newSections = canonicalBonusSections({ source: "estimator", status: "draft" }, withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))]), rates);
   const t = totals(newSections, 0);
   let created: Quote;
@@ -148,6 +158,7 @@ export async function placeSystemInEstimate(
       margin: t.margin,
       owner: opts.owner,
       ...(opts.tier ? { pricingTier: opts.tier.pricingTier, tierMargin: opts.tier.tierMargin } : {}),
+      ...(boxSaleOf(sourceQuote) ? { boxSale: true } : {}),
     });
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not create the new estimate — please try again." };

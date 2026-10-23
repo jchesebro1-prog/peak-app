@@ -20,6 +20,7 @@ import { responseRows } from "@/lib/estimate-output/responses";
 import { peakHeaderDefault, resolvePeakHeader } from "@/lib/letterhead";
 import { sentDocumentStamp, ONLINE_COPY } from "@/lib/quote-share/view";
 import type { Quote } from "@/lib/stores/quotes";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 import type { ActionImpl } from "../actions-registry";
 import { refusals, type RefusableKey } from "./misc-refusals";
 import type { HandoffStore } from "../store";
@@ -51,7 +52,8 @@ export function packagePanelFor(q: Quote, settings: Record<string, unknown> = se
     uploads: false,
     files: [],
     responses: responseRows(q.clientResponses, revNoOf, () => ""),
-    gaps: packageGapChips({
+    // Box goods sale (spec 2026-10-21): the client gets the BOM only — no datasheet / drawing / narrative gaps.
+    gaps: boxSaleOf(q) ? [] : packageGapChips({
       noDatasheet: 0,
       drawings: 0,
       drawingsOff: !normalizePackageSelection(q.packageSelection).drawings,

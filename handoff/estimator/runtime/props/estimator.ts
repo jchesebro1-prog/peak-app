@@ -25,6 +25,7 @@ import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { quoteSentOnce } from "@/lib/quote-people-lock";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { sourceForSave } from "@/lib/portal-quote-mode";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
 import { quoteNextStep, type QuoteNextStepView } from "@/lib/quote-next-step";
@@ -82,7 +83,7 @@ function initialFrom(q: QuoteDoc | null, customers: CustomerLite[], userName: st
       owner: userName, preparedBy: userName, revNum: 1, revDateMs: now, pricingTier: null, tierMargin: null, sections: null, groups: [],
       document: null, vendorQuotes: [], replaces: "", pdfOptions: { ...DEFAULT_PDF_OPTIONS }, pdf: null, coverSummary: "", notIncluded: null,
       packageSelection: { ...DEFAULT_PACKAGE_SELECTION, excludedDatasheets: [] }, portal: null, bonusSource: "estimator", bonusQuoteType: "system",
-      clientResponses: null, bonusRecord: null, estimatorBonusSplit: null, leadId: null,
+      clientResponses: null, bonusRecord: null, estimatorBonusSplit: null, leadId: null, boxSale: false,
     };
   }
   const cid = q.customerId || customerPort.resolve(q.customer)?.id || null;
@@ -146,6 +147,8 @@ function initialFrom(q: QuoteDoc | null, customers: CustomerLite[], userName: st
     bonusRecord: q.bonusRecord ?? null,
     estimatorBonusSplit: q.estimatorBonusSplit ?? null,
     leadId: q.leadId || null,
+    // Box goods sale (spec 2026-10-21): the stored flag (a non-system quote reads false).
+    boxSale: boxSaleOf(q),
     portal:
       q.source === "portal-catalog"
         ? {
@@ -299,6 +302,8 @@ export async function buildEstimatorProps(store: HandoffStore, quoteId: string |
     }
   }
   if (!q) initial.leadId = handoff?.leadId || null;
+  // Box goods sale (spec 2026-10-21): the + New quote card (?box=1) opens a new estimate with the switch on.
+  if (!q && handoff?.boxSale) initial.boxSale = true;
   if (preCategory && preCategory.trim()) initial.category = preCategory.trim();
   if (handoff) {
     initial.projectName = handoff.name || (initial.customerId ? systemQuoteName(initial.custName, initial.category) : initial.projectName);

@@ -47,6 +47,8 @@ export const QUOTE_FIELDS = [
   // wonRev: the revision number of the version that won (its revisions ship, so a reopened Won estimate can restore
   // it); packagePeakHeader: the Build package "Peak header" switch the package actions read.
   "wonRev", "packagePeakHeader",
+  // boxSale (#362): the Box goods sale flag — the Estimator's switch, its BOM-only document and Build package.
+  "boxSale",
 ] as const;
 
 /** One revision (src/lib/stores/quotes.ts QuoteRevision) — the priced snapshot and its frozen header. Dropped:
@@ -64,6 +66,8 @@ export const DOC_FIELDS = [
   "customer", "locationId", "contactName", "quoteNote", "assumptions", "installTimeframe", "preparedBy", "owner",
   "termsText", "paymentTerms", "pdfOptions", "source", "coverSummary", "notIncluded", "packageSelection",
   "revNo", "issuedAt",
+  // boxSale (#362): a sent revision's frozen flag (absent on a normal estimate and on revisions cut before the field).
+  "boxSale",
 ] as const;
 
 /** QuoteReview (the approval gate's record). */
@@ -71,9 +75,10 @@ export const REVIEW_FIELDS = [
   "state", "reviewer", "submittedBy", "submittedAt", "decidedBy", "decidedAt", "note", "method", "auto", "approvedAgainst",
 ] as const;
 
-/** QuotePdfOptions (src/lib/quote-pdf/pdf-options.ts). */
+/** QuotePdfOptions (src/lib/quote-pdf/pdf-options.ts). The four bom* switches are #364's Show on BOM. */
 export const PDF_OPTIONS_FIELDS = [
   "detail", "pdfQty", "pdfNotes", "pdfPrices", "pdfCover", "pdfTerms", "pdfOptions", "pdfItemizedAppendix", "pdfCutSheets",
+  "bomLinePrices", "bomMaterials", "bomLabor", "bomFreight",
 ] as const;
 
 /** PackageSelection (src/lib/estimate-output/package-selection.ts). */

@@ -27,6 +27,7 @@ import { curtainFabricLookups } from "@/lib/curtain-cut-sheets/estimator-curtain
 import { CUT_SHEETS_NO_QUOTE, CUT_SHEETS_WRONG_TYPE, cutSheetModel, isCutSheetQuoteType, type CutSheetModel, type CutSheetStyle } from "@/lib/curtain-cut-sheets/model";
 import type { CatalogPart } from "@/lib/stores/catalog";
 import type { Quote } from "@/lib/stores/quotes";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 import type { HandoffStore } from "../store";
 import { blobData, customers, refreshPortsFromStore, settingsView } from "../ports";
 import { quoteRepo } from "../quote-repo";
@@ -107,11 +108,12 @@ export async function loadCutSheetsLocal(store: HandoffStore, quoteId: string | 
 
 /**
  * The print route's cut-sheet appendix (src/app/print/quote/[id]/page.tsx): the Client-style sheets printed
- * after the estimate — only when the saved quote's PDF options ask for them
+ * after the estimate — only when the saved quote's PDF options ask for them (and never on a box goods sale, whose
+ * whole PDF is the BOM layout — `bomLayout`)
  * (`normalizePdfOptions(q.pdfOptions).pdfCutSheets`) and they loaded; none on a failed load, an estimate
  * with no curtains, or the option off. Pure.
  */
 export function cutSheetAppendixModels(loaded: LocalCutSheets | { ok: false; error: string } | null | undefined): CutSheetModel[] {
-  if (!loaded || !loaded.ok || !normalizePdfOptions(loaded.quote.pdfOptions).pdfCutSheets) return [];
+  if (!loaded || !loaded.ok || boxSaleOf(loaded.quote) || !normalizePdfOptions(loaded.quote.pdfOptions).pdfCutSheets) return [];
   return loaded.models.client;
 }

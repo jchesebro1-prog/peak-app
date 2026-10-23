@@ -2,7 +2,7 @@
  * Estimator handoff — the Estimates list: a slim rebuild of the Quotes hub (src/app/(app)/quotes/page.tsx) for system
  * estimates only. Columns: estimate # (displayQuoteNumber), name, customer, status, owner, updated, grand total (the
  * figure the Estimator's header shows — runtime/estimate-totals.ts). Search, status filter, newest first, and a
- * "New estimate" button for anyone holding `create`. Plan: PR 2 Task 7.
+ * "New estimate" (and "New box goods sale", #362 — `?box=1`) buttons for anyone holding `create`. Plan: PR 2 Task 7.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
@@ -15,6 +15,8 @@ import { filterRows, listRows, STATUS_FILTER_LABEL, STATUS_FILTERS, STATUS_LABEL
 export const LIST_COPY = {
   title: "Estimates",
   newEstimate: "New estimate",
+  newBoxSale: "New box goods sale",
+  newBoxSaleTitle: "Equipment + freight only — the customer gets the itemized BOM (opens a new estimate with Box goods sale on)",
   searchPlaceholder: "Search # · name · customer · owner",
   empty: "No estimates match.",
   none: "There are no estimates in this snapshot yet.",
@@ -70,9 +72,15 @@ export function EstimatesList({ store, onReady }: { store: HandoffStore; onReady
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 5 }}>{rows ? `${rows.length} system ${rows.length === 1 ? "estimate" : "estimates"}` : "Loading…"}</div>
         </div>
         {canCreate && (
-          <button type="button" className="pk-btn-accent" data-handoff-new-estimate="" onClick={() => appRouter.push("/estimator?new=1")}>
-            {LIST_COPY.newEstimate}
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {/* #362: the + New quote menu's Box goods sale card — a new estimate with the switch on (?box=1). */}
+            <button type="button" className="pk-btn-outline" data-handoff-new-box-sale="" title={LIST_COPY.newBoxSaleTitle} onClick={() => appRouter.push("/estimator?new=1&box=1")}>
+              {LIST_COPY.newBoxSale}
+            </button>
+            <button type="button" className="pk-btn-accent" data-handoff-new-estimate="" onClick={() => appRouter.push("/estimator?new=1")}>
+              {LIST_COPY.newEstimate}
+            </button>
+          </div>
         )}
       </div>
 

@@ -280,6 +280,23 @@ export const ALL_STEP_VIEWS: ReadonlyArray<{ query: string; tabs?: readonly stri
   { query: "step=send" },
 ];
 
+/**
+ * The views --smoke --all-steps opens on a Box goods sale (#362): the client gets the BOM only, so Build package is the BOM
+ * quote tab alone (any other `?ptab=` lands there) and Customer review offers Document + BOM. Walking the full list on one
+ * would fail on a tab the app deliberately hides.
+ */
+export const BOX_SALE_STEP_VIEWS: ReadonlyArray<{ query: string; tabs?: readonly string[] }> = [
+  { query: "step=build" },
+  { query: "step=package&ptab=bom" },
+  { query: "step=review", tabs: ["Document", "BOM"] },
+  { query: "step=send" },
+];
+
+/** The views to walk for an estimate: a box sale's own list, else every step and tab. */
+export function stepViewsFor(boxSale: boolean): ReadonlyArray<{ query: string; tabs?: readonly string[] }> {
+  return boxSale ? BOX_SALE_STEP_VIEWS : ALL_STEP_VIEWS;
+}
+
 /** The shell screens --smoke --all-steps also opens (hash → the element that says it rendered): the Catalog, the Assembly Builder, a rack's sheets (an unknown id → its not-found screen). */
 export const SHELL_SCREENS: ReadonlyArray<readonly [string, string]> = [
   ["#/catalog", "[data-catalog-painted]"],
@@ -365,9 +382,11 @@ export async function smoke(pkgDir: string, allSteps = false, onlyIds?: readonly
     let notRegistered: string[] = [];
     if (allSteps) {
       // Every slice estimate × every step (and every tab that mounts its own components).
-      const ids = onlyIds ? [...onlyIds] : loadSliceData(pkgDir).estimates.map((q) => q.id);
+      const sliceEstimates = loadSliceData(pkgDir).estimates;
+      const ids = onlyIds ? [...onlyIds] : sliceEstimates.map((q) => q.id);
+      const boxIds = new Set(sliceEstimates.filter((q) => q.boxSale === true).map((q) => q.id));
       for (const id of ids) {
-        for (const v of ALL_STEP_VIEWS) {
+        for (const v of stepViewsFor(boxIds.has(id))) {
           await openUrl(page, estimateUrl(url, id, v.query));
           try {
             await page.waitForSelector("[data-handoff-ready]", { timeout: 15_000 });
@@ -448,7 +467,7 @@ export function printSmoke(r: SmokeResult): void {
 
 /* ------------------------------------------------------------------ --estimator */
 
-export type SliceQuote = { id: string; status?: string | null; source?: string | null; quoteType?: string | null; estNo?: number | null; estSuffix?: number | null; spec?: { sections?: unknown; groups?: unknown }; updatedAt?: number | null; createdAt?: number | null };
+export type SliceQuote = { id: string; boxSale?: boolean | null; status?: string | null; source?: string | null; quoteType?: string | null; estNo?: number | null; estSuffix?: number | null; spec?: { sections?: unknown; groups?: unknown }; updatedAt?: number | null; createdAt?: number | null };
 type SliceData = { estimates: SliceQuote[]; rules: { settings?: Record<string, unknown>; blobs?: Record<string, unknown> } };
 
 /** The slice's estimates.js + rules.js, run in a sandbox (the page loads them the same way). */

@@ -38,6 +38,8 @@ import { sendDefaultsContact } from "@/lib/parties/addressee";
 import { latestSentRevision, pdfFileName, pdfKindForQuoteType } from "@/lib/quote-pdf/state";
 import { coverPdfFileName } from "@/lib/estimate-output/cover";
 import { can } from "@/lib/team";
+import { boxSaleOf, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
+import type { SpecSection } from "@/app/(app)/estimator/types";
 import type { Quote, QuoteStatus } from "@/lib/stores/quotes";
 import type { ActionImpl } from "../actions-registry";
 import type { HandoffStore } from "../store";
@@ -124,6 +126,10 @@ export function preflightSend(actor: { roles?: string[] }, q: Quote | null, inpu
   if (!q) return { ok: false, error: SEND_COPY.gone };
   if (pdfKindForQuoteType(q.quoteType) !== "quote") return { ok: false, error: SEND_COPY.notEstimate };
   if (q.status !== "draft" && q.status !== "sent") return { ok: false, error: SEND_COPY.closed };
+  // Box goods sale (spec 2026-10-21): equipment + freight only. Labor can still sit on one (a restored revision, a
+  // move into it from before the rule) — it is never sent, by any path.
+  const boxProblem = boxSaleSaveProblem(boxSaleOf(q), (q.spec as { sections?: SpecSection[] } | null | undefined)?.sections);
+  if (boxProblem) return { ok: false, error: boxProblem };
   const asOf = input?.asOf;
   if (typeof asOf === "number" && asOf > 0 && q.updatedAt !== asOf) return { ok: false, error: SEND_COPY.changedSince };
   const rawTo = String(input?.to ?? "");
@@ -149,7 +155,9 @@ export function preflightSend(actor: { roles?: string[] }, q: Quote | null, inpu
 /** The PDFs the email would carry (send-server attach's file names) — listed on the activity row only. */
 function attachmentNames(q: Quote, input: EstimateEmailInput): string[] {
   const n = displayQuoteNumber(q);
-  return [...(input.attachEstimate ? [pdfFileName(n, null)] : []), ...(input.attachCover ? [coverPdfFileName(n)] : [])];
+  // Box goods sale: the quote PDF always goes with the email (wantsEstimatePdf), and never a cover (a stale composer's tick is ignored).
+  const box = boxSaleOf(q);
+  return [...(input.attachEstimate || box ? [pdfFileName(n, null)] : []), ...(input.attachCover && !box ? [coverPdfFileName(n)] : [])];
 }
 
 /** track-server.ts recordedThreadIds — newest recorded first, de-duplicated. */
@@ -248,6 +256,8 @@ export function sendActions(store: HandoffStore): { [K in ImplementedSendAction]
         leadName: lead?.name || "",
         leadEmail: lead && lead.id !== user.id ? emailOf(lead) : "",
         signature: "",
+        // Box goods sale: the saved estimate's flag (Send saves first).
+        boxSale: boxSaleOf(q),
       }),
       gmailConnected: false,
       fromAddress: senderEmail,

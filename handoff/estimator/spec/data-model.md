@@ -52,6 +52,42 @@ declare is marked as such.
 prototype recomputes them on every save with `PeakEstimatingCore.reconcileEstimatorValue`, exactly as
 Quartzite's server does, so a client can never post its own total.
 
+### Box goods sale — `boxSale`
+
+An estimate that sells equipment and freight only, with no install. It is one flag on an ordinary system
+estimate, not a separate quote type: `boxSale` is stored only as `true` (absent means a normal
+estimate; turning it off removes the key), and only on an Estimator system estimate, never on a
+portal-catalog quote. The customer gets the itemized BOM, so:
+
+- **Save refuses labor.** Any line with `labor`, `laborOverhead` or `laborTravel` set (mobilization and
+  travel count), or any `kind: "labor"` system, refuses the whole save with *A box goods sale can't
+  include labor — remove the labor lines or turn off Box goods sale.* The error carries no id, so
+  nothing is partly saved. Send refuses the same way (labor can still arrive through a restored
+  revision), and Move / Copy of a system with labor into an existing box sale is refused. The 2 %
+  estimator bonus stays; the 5 % package bonus needs labor, so a box sale has none.
+- **The document is the BOM view.** The Document tab, the print and the package page show the itemized
+  list in the BOM layout: no title page, narrative, cover, cut sheets or datasheet links. Build package
+  is the BOM quote tab alone, and Customer review offers Document and BOM only.
+- **Frozen in a sent revision.** `docFields.boxSale` is present (`true`) only when the estimate was one
+  when it was sent; a revision cut before the field, or of a normal estimate, has no key.
+- **Where it starts.** *New box goods sale* on the Estimates list opens a new estimate with the switch
+  on (the app's `?box=1`); an existing estimate has the switch in Quote details. Move / Copy a system
+  into a *new* estimate copies the stored source's flag; into an existing one leaves the target's alone.
+
+### What the BOM view prints — Show on BOM and model numbers
+
+`pdfOptions` also carries the four **Show on BOM** switches (`bomLinePrices`, `bomMaterials`, `bomLabor`,
+`bomFreight`; all on by default and for an older estimate that lacks them). They apply to the BOM view
+only: the BOM tab, the BOM print and the package page's BOM toggle. The estimate document itself never
+reads them. Line prices still yield to the estimate-wide *Prices* switch. System prices, tax, the
+Rewards credit and the Total always print.
+
+In the BOM view a plain catalog line prints as **Model — Description**. The model is the line's own
+frozen `manufacturerModelNumber`, else the catalog part's, else the line's MFR P/N; custom, allowance,
+curtain, labor, bonus, vendor-quote and assembly / rack / track lines print their description alone.
+The catalog fields it reads (`manufacturerModelNumber`, `manufacturerPartNumber`, `formerSkus`) are
+bundled for the parts on the bundled estimates.
+
 ## System — `SpecSection`
 
 One card in Build, and one block on the customer document. `kind` is `"materials"` or `"labor"`.
@@ -119,7 +155,7 @@ Blob pathname (`pdfBlobPath`, `pdfSavedAt`) and the service quotes' payloads (`f
 ### Revision header — `QuoteRevisionDocFields`
 
 `docFields` freezes what the customer document's header printed when the revision was cut, so an old
-revision prints as it was sent. Shipped fields (`DOC_FIELDS`; `pdfOptions` and `packageSelection` are
+revision prints as it was sent. Shipped fields (`DOC_FIELDS`, including `boxSale`; `pdfOptions` and `packageSelection` are
 allow-listed again one level down). Not shipped: the drawings attached to the package page
 (`packageFiles`, private Blob pathnames), the bid and its awarded bidder (`bid`, `awardedPartyId` —
 bidders are not in the prototype) and the portal's firm-quote stamp (`portalFirm`).

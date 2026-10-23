@@ -304,6 +304,14 @@ its rows, together with the system's freight row, always add up to the system pr
   system's freight can leave the rows short of the total.
 - A system prints in the body only when it carries some revenue (`PeakEstimatingCore.systemPrintsInBody`).
 - Amounts print as `$1,234.56` (`PeakEstimatingCore.fmt`).
+- **A box goods sale** (`Quote.boxSale`, `data-model.md`) changes no pricing: it has no labor, so the
+  5 % package bonus never exists, and the 2 % estimator bonus and freight price as usual. Only the
+  document differs: it is the BOM view below.
+- **The BOM view** (the BOM tab, print and package-page BOM toggle) is the same rows and totals with
+  display switches from `pdfOptions`: *Line prices* hides the per-line amounts (and each system's freight
+  amount), *Materials* and *Labor* hide those totals rows, *Freight* hides every freight row. They only
+  hide figures; system prices, tax, the Rewards credit and the Total always print and still add up.
+  Plain catalog lines print as *Model — Description*.
 
 ## 12. What the Estimator shows vs. the golden files
 

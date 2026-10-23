@@ -21,6 +21,7 @@ import { quoteRewardCredit, rewardCreditOf, sanitizeRewardCredit, withRewardCred
 import { normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { keepLiveVendorCompanies, stampVendorQuotes, vendorCompanyIdsOf } from "@/lib/vendor-quotes/rules";
 import { ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
+import { boxSaleForSave, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
 import { maxItemId } from "./util";
 
 /** The Estimator's quote doc fields beyond the promoted Quote columns (actions.ts QuoteExtras). */
@@ -175,7 +176,7 @@ export function vendorQuotesForSave(
 }
 
 export type SavePlan =
-  | { ok: false; error: string; refusedBeforeWrite: "document" | "credit" }
+  | { ok: false; error: string; refusedBeforeWrite: "document" | "boxsale" | "credit" }
   | {
       ok: true;
       patch: QuotePatch;
@@ -200,6 +201,11 @@ export function planSave(
   const savedSource = sourceForSave(prior?.source, "estimator");
   const docSave = packageDocForSave(payload.document, (prior?.spec as { document?: unknown } | null | undefined)?.document);
   if (!docSave.ok) return { ok: false, error: docSave.error, refusedBeforeWrite: "document" };
+  // Box goods sale (spec 2026-10-21): equipment + freight only — any labor line refuses the WHOLE save before anything is
+  // written (the document refusal's shape: no id, so the edit stays visibly unsaved). An older caller (no flag) keeps the stored one.
+  const boxSale = boxSaleForSave(prior, payload.boxSale);
+  const boxProblem = boxSaleSaveProblem(boxSale, Array.isArray(payload.sections) ? payload.sections : []);
+  if (boxProblem) return { ok: false, error: boxProblem, refusedBeforeWrite: "boxsale" };
   const isPortalCatalog = savedSource === "portal-catalog";
   const raw = Array.isArray(payload.sections) ? payload.sections.map(sanitizeSystemSell).map(withSanitizedKeyProducts).map(withSanitizedOutputFields) : payload.sections;
   const groups = sanitizeGroups(payload.groups ?? (prior?.spec as { groups?: unknown } | null | undefined)?.groups);
@@ -230,6 +236,8 @@ export function planSave(
     source: savedSource,
     spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}) },
     pdfOptions: normalizePdfOptions(payload.pdfOptions),
+    // Box goods sale: create keeps it via buildQuote, update() stores only true.
+    boxSale,
     ...(typeof payload.coverSummary === "string" ? { coverSummary: cleanPlainText(payload.coverSummary, COVER_SUMMARY_MAX) } : {}),
     ...(typeof payload.notIncluded === "string" ? { notIncluded: cleanPlainText(payload.notIncluded, NOT_INCLUDED_MAX) } : {}),
     ...(isPortalCatalog && !anyPor && !anyConfirm ? { portalReview: null } : {}),

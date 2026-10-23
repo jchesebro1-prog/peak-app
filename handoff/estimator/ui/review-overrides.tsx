@@ -17,10 +17,10 @@
  */
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import QuoteDocument, { QUOTE_PRINT_CSS, type QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
+import QuoteDocument, { QUOTE_PRINT_CSS, QUOTE_WEB_EMBED_CSS, type QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import {
-  frameWidth, framedTab, nextReviewTab, reviewPanelId, reviewTabId, REVIEW_DEVICE_LABEL, REVIEW_DEVICES, REVIEW_TAB_LABEL, REVIEW_TABS,
+  frameWidth, framedTab, nextReviewTab, reviewPanelId, reviewTabId, REVIEW_DEVICE_LABEL, REVIEW_DEVICES, REVIEW_TAB_LABEL, reviewTabsFor,
   REVIEW_UI_COPY as COPY, tabNeedsSave, type ReviewDevice, type ReviewTab,
 } from "@/lib/estimate-review/review-ui";
 import type { ReviewDocsResult } from "@/app/(app)/estimator/review-actions";
@@ -29,8 +29,8 @@ import type { PdfPreviewProps } from "@/app/(app)/estimator/preview-doc";
 import { PRINT_FOOTER_TEXT } from "./preview-routes";
 import { LIVE_COPY, LiveBom, LiveCutSheets, LiveDocument, LivePackagePage, PrintCutSheets } from "./live-views";
 
-// The Build package's Show-on-PDF controls are unchanged — the original module's own export.
-export { PdfLineDetailGroup } from "@/app/(app)/estimator/preview-doc";
+// The Build package's Show-on-PDF controls (and the shared Payment terms select, #362) are unchanged — the original module's own export.
+export { PaymentTermsSelect, PdfLineDetailGroup } from "@/app/(app)/estimator/preview-doc";
 export type { PdfToggle, PdfLineDetailProps, PdfPreviewProps } from "@/app/(app)/estimator/preview-doc";
 
 export const PRINT_COPY = {
@@ -196,6 +196,8 @@ function PrintRoot({ quoteId, doc }: { quoteId: string; doc: QuoteDocumentProps 
   return createPortal(
     <div id={PRINT_ROOT_ID}>
       <style>{PRINT_ROOT_CSS}</style>
+      {/* Box goods sale: the print route's BOM layout (web: no title page, the investment band kept). */}
+      {doc.layout === "web" && <style>{QUOTE_WEB_EMBED_CSS}</style>}
       <QuoteDocument {...doc} />
       <PrintCutSheets quoteId={quoteId} />
       <div className="handoff-print-footer" data-handoff-print-footer="">
@@ -229,6 +231,7 @@ export function QuotePdfViewer({ quoteId, dirty }: { quoteId: string | null; pdf
           render={(doc) => (
             <>
               <div style={{ display: "flex", justifyContent: "center" }}>
+                {doc.layout === "web" && <style>{QUOTE_WEB_EMBED_CSS}</style>}
                 <QuoteDocument {...doc} />
               </div>
               <PrintRoot quoteId={quoteId} doc={doc} />
@@ -278,12 +281,15 @@ const NOTE: CSSProperties = { margin: "40px auto", maxWidth: 420, textAlign: "ce
  */
 export function ReviewTabs({ s }: { s: EstimatorState; docs: ReviewDocsResult | null }) {
   const { doSave, loadedId, pdf, pdfDirty, phone, setPdf, statusChanging, tierResolving } = s;
-  const [tab, setTab] = useState<ReviewTab>("document");
+  // Box goods sale (spec 2026-10-21): Document + BOM only; a tab it doesn't offer reads as Document.
+  const tabs = reviewTabsFor(s.boxSale);
+  const [picked, setTab] = useState<ReviewTab>("document");
+  const tab: ReviewTab = tabs.includes(picked) ? picked : "document";
   const [device, setDevice] = useState<ReviewDevice>("desktop");
   const framed = framedTab(tab);
   const tabRefs = useRef<Partial<Record<ReviewTab, HTMLButtonElement | null>>>({});
   const onTabKey = (e: KeyboardEvent<HTMLButtonElement>) => {
-    const to = nextReviewTab(tab, e.key);
+    const to = nextReviewTab(tab, e.key, tabs);
     if (!to) return;
     e.preventDefault();
     setTab(to);
@@ -340,7 +346,7 @@ export function ReviewTabs({ s }: { s: EstimatorState; docs: ReviewDocsResult | 
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "8px 14px", borderBottom: "1px solid #e4e7ec", background: "#f7f8fa" }}>
         <div role="tablist" aria-label="What the client sees" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-          {REVIEW_TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t}
               ref={(el) => {

@@ -75,16 +75,21 @@ The top bar has **Estimates · Catalog · Assemblies · Estimating Rules**, an *
 roster and roles) and **Reset to production snapshot**.
 
 - **Estimates** *(built for the prototype)*: every bundled system estimate (number, customer, status,
-  total), filters, and **New estimate**. A slim stand-in for Quartzite's Quotes hub.
+  total), filters, **New estimate** and **New box goods sale** (an estimate for equipment and freight
+  only, whose customer document is the itemized BOM). A slim stand-in for Quartzite's Quotes hub.
 - **Estimator** *(the real components)*: one estimate in four steps on one page.
   - **Build**: systems and lines, catalog search, the groups rail, alternate groups, mark built, moving
     lines, assemblies, the curtain, track and labor configurators, the hidden bonus lines, and
     tiers/margins.
-  - **Build package**: Narrative, BOM quote and Client package.
+  - **Build package**: Narrative, BOM quote and Client package. The BOM quote tab has the *Show on BOM*
+    switches (line prices, materials, labor, freight). A box goods sale has the BOM quote tab alone.
   - **Customer review**: the Document, Package page, BOM and Cut sheets tabs (Desktop / Phone), with
     numbered review comments. The tab strip and the document pane are **prototype copies**: in Quartzite
     they frame a server-rendered PDF and a preview route; here they draw the same real document,
-    package page, BOM and cut-sheet components live from the browser store.
+    package page, BOM and cut-sheet components live from the browser store. A box goods sale shows
+    Document and BOM only.
+  - **More ▾ → Review spreadsheet** downloads the parts as a real `.xlsx` (cost, sell, margin, markup
+    formulas, links, and cost / markup / fees subtotals per system), built in your browser.
   - **Send & track**: the approval control (Submit for approval, Approve, Send to customer, Withdraw),
     status and pipeline, the email composer, and the Activity card (the real card; the prototype adds
     its own *Would create install project for …* note under it).

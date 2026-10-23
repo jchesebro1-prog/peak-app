@@ -21,6 +21,7 @@ import { previewHeaderLine, previewPath, staffPackageExtras, type StaffPackageEx
 import { latestSentRevision } from "@/lib/quote-pdf/state";
 import type { VisiblePackageState } from "@/lib/quote-share/package-view";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
+import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 import type { HandoffStore } from "../store";
 import { blobData, refreshPortsFromStore } from "../ports";
 import { quoteRepo } from "../quote-repo";
@@ -52,7 +53,8 @@ export function packagePreviewFor(q: Quote, partOf: (sku: string) => LivePart | 
   const photoSections = packagePhotoSections(doc.sections);
   const defaults = sanitizeEstimateOutputDefaults(blobData(ESTIMATE_OUTPUT_BLOB));
   const files = shownPackageFiles(cleanPackageFiles(q.packageFiles), q.packageSelection);
-  const extras = staffPackageExtras(null, false, files, q.id);
+  // Box goods sale (spec 2026-10-21): no drawings to list (the client gets the BOM only).
+  const extras = staffPackageExtras(null, false, boxSaleOf(q) ? [] : files, q.id);
   const model = packageViewModel({
     doc,
     photos: keyProductPhotosLocal(photoSections, doc.document, partOf),
@@ -65,6 +67,7 @@ export function packagePreviewFor(q: Quote, partOf: (sku: string) => LivePart | 
     view,
     base: previewPath(q.id, "package"),
     letterheadSrc,
+    boxSale: boxSaleOf(q),
   });
   // The page's Narrative / BOM toggle stays on the package tab (the review tab intercepts these links).
   return { model: { ...model, narrativeHref: previewPath(q.id, "package"), bomHref: previewPath(q.id, "package", "bom") }, extras };

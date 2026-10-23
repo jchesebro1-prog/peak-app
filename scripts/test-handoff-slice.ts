@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process";
 import ts from "typescript";
 import {
   CATALOG_FIELDS, FIXTURE_FIELDS, QUOTE_FIELDS, BLOB_IDS, SETTINGS_FIELDS, COMPANY_COLS, SITE_COLS, CONTACT_COLS,
-  REVISION_FIELDS, DOC_FIELDS, VENDOR_QUOTE_FIELDS, EXCLUDED_SOURCES, DEFAULT_RECENT_DAYS, ESTIMATOR_SOURCES, SelectionError,
+  REVISION_FIELDS, DOC_FIELDS, PDF_OPTIONS_FIELDS, VENDOR_QUOTE_FIELDS, EXCLUDED_SOURCES, DEFAULT_RECENT_DAYS, ESTIMATOR_SOURCES, SelectionError,
   pickFields, scanForSecrets, selectEstimates, catalogChunks, sanitizeQuote, parseRecentDays, recentWindow, selectBundledEstimates,
   selectCatalogScope, quoteStamp, noEstimatesMessage, describeEstimateSelection,
 } from "../handoff/estimator/slice-rules";
@@ -660,7 +660,8 @@ async function revisionAllowListChecks(ok: Ok, exp: ExportV2) {
   });
   qrow.doc.vendorQuotes = [vq()];
   qrow.doc.review = { state: "approved", reviewer: "Jeff", submittedBy: null, submittedAt: null, decidedBy: "Jeff", decidedAt: 1, note: "", method: "self", smuggled: "REVIEW-EXTRA" };
-  qrow.doc.pdfOptions = { detail: "itemized", pdfQty: true, smuggled: "PDFOPT-EXTRA" };
+  qrow.doc.pdfOptions = { detail: "itemized", pdfQty: true, bomLinePrices: false, bomMaterials: true, bomLabor: false, bomFreight: false, smuggled: "PDFOPT-EXTRA" };
+  qrow.doc.boxSale = true;
   qrow.doc.packageSelection = { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [], smuggled: "PKGSEL-EXTRA" };
   qrow.doc.history = [{ at: 1, to: "draft", by: "HISTORY-EXTRA" }];
   qrow.doc.pdf = { status: "ready", blobPath: "quote-pdfs/Q-G001/live.pdf" };
@@ -673,7 +674,8 @@ async function revisionAllowListChecks(ok: Ok, exp: ExportV2) {
     docFields: {
       customer: "Alpha", locationId: null, contactName: null, quoteNote: "", assumptions: "", installTimeframe: "", preparedBy: "",
       owner: "", termsText: "", paymentTerms: null, source: "estimator", coverSummary: "", notIncluded: null, revNo: 1, issuedAt: 2,
-      pdfOptions: { detail: "itemized", smuggled: "DOC-PDFOPT-EXTRA" },
+      pdfOptions: { detail: "itemized", bomLinePrices: false, bomFreight: true, smuggled: "DOC-PDFOPT-EXTRA" },
+      boxSale: true,
       packageSelection: { estimatePdf: true, coverPdf: true, drawings: true, excludedDatasheets: [], smuggled: "DOC-PKGSEL-EXTRA" },
       packageFiles: [{ id: "pf1", name: "plan.pdf", blobPath: "estimate-files/Q-G001/plan.pdf" }],
       bid: { dueAt: 1, addenda: ["ADDENDUM-PRIVATE"] }, awardedPartyId: "pty_PRIVATE", portalFirm: { validUntil: 1 },
@@ -696,6 +698,28 @@ async function revisionAllowListChecks(ok: Ok, exp: ExportV2) {
     "handoff:slice A1: docFields keeps only the header/print fields (DOC_FIELDS)");
   ok(!("smuggled" in (df.pdfOptions as object)) && !("smuggled" in (df.packageSelection as object)),
     "handoff:slice A1: docFields.pdfOptions / packageSelection are allow-listed again");
+  // #362 / #364 / #365: the box-sale flag (live and frozen) and the four Show on BOM switches ship; nothing else about them is invented
+  ok(q.boxSale === true && df.boxSale === true && (QUOTE_FIELDS as readonly string[]).includes("boxSale") && (DOC_FIELDS as readonly string[]).includes("boxSale"),
+    "handoff:slice #362: boxSale ships on the quote and in a revision's docFields");
+  {
+    const po = q.pdfOptions as Record<string, unknown>;
+    const dpo = df.pdfOptions as Record<string, unknown>;
+    ok(po.bomLinePrices === false && po.bomMaterials === true && po.bomLabor === false && po.bomFreight === false && !("smuggled" in po),
+      "handoff:slice #364: the four Show on BOM switches survive on the quote's pdfOptions");
+    ok(dpo.bomLinePrices === false && dpo.bomFreight === true && !("smuggled" in dpo), "handoff:slice #364: …and on a revision's frozen pdfOptions");
+    ok(["bomLinePrices", "bomMaterials", "bomLabor", "bomFreight"].every((k) => (PDF_OPTIONS_FIELDS as readonly string[]).includes(k)), "handoff:slice #364: PDF_OPTIONS_FIELDS names the Show on BOM switches");
+  }
+  {
+    // an estimate with no box sale / no switches ships byte-identical (nothing invented); a false/absent flag is not added
+    const plain = sanitizeQuote({ ...qrow.doc, boxSale: undefined, pdfOptions: { detail: "itemized" }, revisions: [] } as never) as Record<string, unknown>;
+    ok(!("boxSale" in plain) && JSON.stringify(plain.pdfOptions) === '{"detail":"itemized"}', "handoff:slice #362/#364: a normal estimate carries neither boxSale nor bom* switches");
+    // #365: a frozen line's model fields live inside spec (shipped whole), the catalog part's in CATALOG_FIELDS
+    ok((CATALOG_FIELDS as readonly string[]).includes("manufacturerModelNumber") && (CATALOG_FIELDS as readonly string[]).includes("manufacturerPartNumber") && (CATALOG_FIELDS as readonly string[]).includes("formerSkus"),
+      "handoff:slice #365: CATALOG_FIELDS carries the model / MFR P/N / former SKU fields the BOM's Model — Description reads");
+    const spec = { sections: [{ id: "s1", items: [{ id: 1, sku: "X", desc: "d", manufacturerModelNumber: "MODEL-1", manufacturerPartNumber: "MPN-1" }] }] };
+    const withSpec = sanitizeQuote({ ...qrow.doc, spec } as never) as Record<string, unknown>;
+    ok(JSON.stringify(withSpec.spec) === JSON.stringify(spec), "handoff:slice #365: a line's frozen manufacturerModelNumber / manufacturerPartNumber ride in spec untouched");
+  }
   ok(!("smuggled" in (q.review as object)) && (q.review as Record<string, unknown>).method === "self", "handoff:slice A1: review is allow-listed (REVIEW_FIELDS)");
   ok(!("smuggled" in (q.pdfOptions as object)) && !("smuggled" in (q.packageSelection as object)), "handoff:slice A1: top-level pdfOptions / packageSelection allow-listed");
   ok(!("by" in (q.history as Array<Record<string, unknown>>)[0]), "handoff:slice A1: history entries keep { at, from, to } only");

@@ -18,6 +18,7 @@ import type { CatalogSearch, QuoteLite, TravelLite } from "@/app/(app)/estimator
 import { copySectionForTarget } from "@/lib/estimating-core/copy-system";
 import { rankCatalogParts } from "@/lib/estimating-core/catalog-rank";
 import { withSanitizedKeyProducts } from "@/lib/estimating-core/narrative";
+import { BOM_MODEL_SKUS_MAX, bomModelPartOf, type BomModelParts } from "@/lib/estimate-output/bom-models";
 import { seedMarginOf, usableTierMargin } from "@/lib/estimating-core/tier-reprice";
 import { sanitizeSystemSell } from "@/lib/estimating-core/pricing";
 import { COVER_SUMMARY_MAX, NOT_INCLUDED_MAX, cleanPlainText, withSanitizedOutputFields } from "@/lib/estimate-output/fields";
@@ -57,6 +58,7 @@ export type ImplementedEstimatorAction =
   | "saveEstimatorCustomPartAction"
   | "searchCatalog"
   | "resolveCatalogSkusAction"
+  | "bomModelPartsAction"
   | "resolveTierAction"
   | "travelForSelectionAction"
   | "updateQuoteMetaAction"
@@ -103,9 +105,9 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
     const { rewriteSpec } = await renameHelpers(store);
     const plan = planSave(prior, payload, { bonusRates: bonusRatesNow(), tier: { tier: tier.tier, margin: tier.margin }, rewriteSpec });
     if (!plan.ok) {
-      // A document refusal writes nothing and returns no id (the client must not adopt it as saved);
+      // A document or box-sale refusal writes nothing and returns no id (the client must not adopt it as saved);
       // a credit refusal keeps the loaded id, as the original does.
-      const doc = plan.refusedBeforeWrite === "document";
+      const doc = plan.refusedBeforeWrite === "document" || plan.refusedBeforeWrite === "boxsale";
       return {
         ok: false,
         id: doc ? null : loadedId,
@@ -244,6 +246,21 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
       rack: rackFactsOrUndefined(p),
     }));
     return { hits, total: scored.length };
+  };
+
+  /** actions.ts bomModelPartsAction → bom-models-server loadBomModelParts: the model fields of the live BOM tab's plain
+   *  catalog SKUs, over the store's catalog (renames followed, live parts only, keyed by the SKU as asked; unknown absent). */
+  const bomModelPartsAction: Impl<"bomModelPartsAction"> = async (skus): Promise<BomModelParts> => {
+    await ready();
+    const want = [...new Set((Array.isArray(skus) ? skus : []).filter((s): s is string => typeof s === "string" && !!s.trim() && s !== "__proto__").map((s) => s.trim()))].slice(0, BOM_MODEL_SKUS_MAX);
+    const out: BomModelParts = {};
+    if (!want.length) return out;
+    const partOf = bySkuResolver(await liveCatalog(store), store.catalogRenames);
+    for (const sku of want) {
+      const p = partOf(sku);
+      if (p) out[sku] = bomModelPartOf(p);
+    }
+    return out;
   };
 
   const resolveCatalogSkusAction: Impl<"resolveCatalogSkusAction"> = async (skus) => {
@@ -486,15 +503,15 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
     }));
   };
 
-  const moveSystemToEstimateAction: Impl<"moveSystemToEstimateAction"> = async (section, target, sourceContext, vendorQuotes = []) => {
+  const moveSystemToEstimateAction: Impl<"moveSystemToEstimateAction"> = async (section, target, sourceContext, vendorQuotes = [], sourceQuoteId = null) => {
     await ready();
     const user = users.current();
     const [movedRaw] = withoutRewardCredit([withSanitizedKeyProducts({ ...sanitizeSystemSell(section), id: "sys" + clock.now() })]);
     const moved = withoutGroupMeta(withSanitizedOutputFields(movedRaw));
-    return placeSystemInEstimate(store, repo, moved, target, { newName: moved.name + " (moved)", sourceContext, vendorQuotes, owner: user.name });
+    return placeSystemInEstimate(store, repo, moved, target, { newName: moved.name + " (moved)", sourceContext, vendorQuotes, owner: user.name, sourceQuoteId });
   };
 
-  const copySystemToEstimateAction: Impl<"copySystemToEstimateAction"> = async (sectionIn, target, sourceContext, vendorQuotes = []) => {
+  const copySystemToEstimateAction: Impl<"copySystemToEstimateAction"> = async (sectionIn, target, sourceContext, vendorQuotes = [], sourceQuoteId = null) => {
     await ready();
     const user = users.current();
     const section = withSanitizedOutputFields(withSanitizedKeyProducts(sectionIn));
@@ -533,7 +550,7 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
       renames,
     });
     if (target.kind === "same") return { ok: true, kind: "same", section: copied.section, costsUpdated: copied.costsUpdated, tierRepriced: copied.tierRepriced };
-    const placed = await placeSystemInEstimate(store, repo, copied.section, target, { newName: section.name + " (copy)", sourceContext, vendorQuotes, owner: user.name, tier: stamp });
+    const placed = await placeSystemInEstimate(store, repo, copied.section, target, { newName: section.name + " (copy)", sourceContext, vendorQuotes, owner: user.name, tier: stamp, sourceQuoteId });
     if (!placed.ok) return placed;
     return {
       ok: true,
@@ -552,6 +569,7 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
     saveEstimatorCustomPartAction,
     searchCatalog,
     resolveCatalogSkusAction,
+    bomModelPartsAction,
     resolveTierAction,
     travelForSelectionAction,
     updateQuoteMetaAction,

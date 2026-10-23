@@ -25,7 +25,7 @@
       "originals": [
         {
           "path": "src/lib/stores/quotes.ts",
-          "sha256": "fc9b9d5d3b98e3ef571a376289e796afb3bcaf4aedb744324b07859ca3f55866"
+          "sha256": "85a18a2c0f5bb98cb270ab6dcbf50b3e0e62d78018eba843a7069d99f2f18eed"
         },
         {
           "path": "src/app/(app)/estimator/review-actions.ts",
@@ -35,7 +35,7 @@
     },
     {
       "port": "handoff/estimator/runtime/loaders/document.ts",
-      "what": "loadQuoteDocumentProps (photos inline) + the print route's document",
+      "what": "loadQuoteDocumentProps (photos inline) + the print route's document + bomModelPartsLocal (#365 loadBomModelPartsFor)",
       "originals": [
         {
           "path": "src/lib/quote-pdf/document-loader.ts",
@@ -43,11 +43,15 @@
         },
         {
           "path": "src/app/print/quote/[id]/page.tsx",
-          "sha256": "e96a3ca32f91608e543d3bccf1f210b7d98b3d3bc8935f5f41df956d0cfa67d7"
+          "sha256": "76e14f1a62ede21ede33d768cb5d0f2c5b842155d8ab9d6360ef9816a6ffb710"
         },
         {
           "path": "src/lib/narrative/photos.ts",
           "sha256": "f7945462a49ed49a5cd048796a9a20c3e9c7d7e6219a0041dc33bbdc16308b19"
+        },
+        {
+          "path": "src/lib/estimate-output/bom-models-server.ts",
+          "sha256": "3c6d519f5afa98a10d14373da561f2d42c07f292f8d9436f0e08ada8a3b8a750"
         }
       ]
     },
@@ -57,7 +61,7 @@
       "originals": [
         {
           "path": "src/lib/estimate-output/package-live-loader.ts",
-          "sha256": "3cba8c4150924b992b34d480bb13cced6ee57191792cb9ae7a3f42ab61e374e6"
+          "sha256": "f6df534da61ef4bf2fb6ec22724d58597d9e88adfc822099ae4a68ca7aa30009"
         }
       ]
     },
@@ -71,7 +75,7 @@
         },
         {
           "path": "src/app/print/quote/[id]/page.tsx",
-          "sha256": "e96a3ca32f91608e543d3bccf1f210b7d98b3d3bc8935f5f41df956d0cfa67d7"
+          "sha256": "76e14f1a62ede21ede33d768cb5d0f2c5b842155d8ab9d6360ef9816a6ffb710"
         }
       ]
     },
@@ -99,7 +103,7 @@
       "originals": [
         {
           "path": "src/lib/estimate-output/package-panel-server.ts",
-          "sha256": "99e68a7454d03fb88ef0c9d0288b95961454d865f00a555edde91d60bed85152"
+          "sha256": "3c28a9a508705d3125ecfba5c73ff9c444d839f6e2877c71d28f36bae2775490"
         },
         {
           "path": "src/app/(app)/estimator/package-actions.ts",
@@ -113,11 +117,11 @@
       "originals": [
         {
           "path": "src/app/(app)/estimator/actions.ts",
-          "sha256": "f73415c046f4d7859f06b77cda4c37d3de12c2be159ac4710a23f7fd011b574e"
+          "sha256": "b5e0d59353220a139491105ee45afbf713efb995e375b0b842b380f735d31f1e"
         },
         {
           "path": "src/lib/stores/quotes.ts",
-          "sha256": "fc9b9d5d3b98e3ef571a376289e796afb3bcaf4aedb744324b07859ca3f55866"
+          "sha256": "85a18a2c0f5bb98cb270ab6dcbf50b3e0e62d78018eba843a7069d99f2f18eed"
         }
       ]
     },
@@ -127,11 +131,11 @@
       "originals": [
         {
           "path": "src/app/(app)/estimator/actions.ts",
-          "sha256": "f73415c046f4d7859f06b77cda4c37d3de12c2be159ac4710a23f7fd011b574e"
+          "sha256": "b5e0d59353220a139491105ee45afbf713efb995e375b0b842b380f735d31f1e"
         },
         {
           "path": "src/lib/stores/quotes.ts",
-          "sha256": "fc9b9d5d3b98e3ef571a376289e796afb3bcaf4aedb744324b07859ca3f55866"
+          "sha256": "85a18a2c0f5bb98cb270ab6dcbf50b3e0e62d78018eba843a7069d99f2f18eed"
         }
       ]
     },
@@ -141,7 +145,7 @@
       "originals": [
         {
           "path": "src/lib/stores/quotes.ts",
-          "sha256": "fc9b9d5d3b98e3ef571a376289e796afb3bcaf4aedb744324b07859ca3f55866"
+          "sha256": "85a18a2c0f5bb98cb270ab6dcbf50b3e0e62d78018eba843a7069d99f2f18eed"
         }
       ]
     },
@@ -169,7 +173,7 @@
       "originals": [
         {
           "path": "src/app/(app)/estimator/page.tsx",
-          "sha256": "6ec3756a5f7bab93ce007229d713c36f70b65710437ef39f086ea1d9d0033f4a"
+          "sha256": "1a1cbc78d58e0932e445ee416d9d6a4e9406d0be22dd6c5f37161c18f2b6e138"
         }
       ]
     },
@@ -179,7 +183,7 @@
       "originals": [
         {
           "path": "src/app/(app)/estimator/preview-doc.tsx",
-          "sha256": "c10e6279d81c5fd650e5fa60f589bf21e6bb7621589bda18af812761618b3ebc"
+          "sha256": "d4ef3bfb71e9e3688af28980f1c0f91832a91d2d3ca3f389ef5907cdafed4637"
         },
         {
           "path": "src/components/quote-pdf/quote-pdf-viewer.tsx",
@@ -187,7 +191,17 @@
         },
         {
           "path": "src/app/(app)/estimator/steps/review-tabs.tsx",
-          "sha256": "a46c38b6025a249e34b29e02db6ef6d64f45c598cdfeb3be0e3307fbfe141ae8"
+          "sha256": "cec8f406890983374241d4db51b058c8774ce38ef526aec8cfc9e08b3f0503e3"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/ui/live-views.tsx",
+      "what": "the staff preview route's tabs (package page, BOM with #365 models, cut sheets) drawn live from the store",
+      "originals": [
+        {
+          "path": "src/app/estimator-preview/[id]/page.tsx",
+          "sha256": "95e12dbba951ff4951227c0a17631f87b318c31570c5fa0cf7899b2277f1de4c"
         }
       ]
     },
@@ -201,7 +215,7 @@
         },
         {
           "path": "src/lib/stores/quotes.ts",
-          "sha256": "fc9b9d5d3b98e3ef571a376289e796afb3bcaf4aedb744324b07859ca3f55866"
+          "sha256": "85a18a2c0f5bb98cb270ab6dcbf50b3e0e62d78018eba843a7069d99f2f18eed"
         }
       ]
     },
@@ -225,11 +239,11 @@
       "originals": [
         {
           "path": "src/app/(app)/estimator/send-actions.ts",
-          "sha256": "a72b7460d8d67ca6a4cf0ceeec91b46d0f1572dba7062b69ce5d88c340d52340"
+          "sha256": "49fca7bbcfa6b231e4084627ae3cba52c1c40e76d564798ac2e67478dd41f75f"
         },
         {
           "path": "src/lib/estimate-email/send-server.ts",
-          "sha256": "d20042f84c3bbc44feb6f7f8df1cdb7ec21ddf60458d949d24a248ebaaf9a1c5"
+          "sha256": "aecf300b85027c1692f5c46628b06ad3b50661fb95a88eef4cd62406f66063fe"
         },
         {
           "path": "src/lib/estimate-email/track-server.ts",
@@ -545,7 +559,11 @@
       "originals": [
         {
           "path": "src/app/(app)/estimator/actions.ts",
-          "sha256": "f73415c046f4d7859f06b77cda4c37d3de12c2be159ac4710a23f7fd011b574e"
+          "sha256": "b5e0d59353220a139491105ee45afbf713efb995e375b0b842b380f735d31f1e"
+        },
+        {
+          "path": "src/lib/estimate-output/bom-models-server.ts",
+          "sha256": "3c6d519f5afa98a10d14373da561f2d42c07f292f8d9436f0e08ada8a3b8a750"
         }
       ]
     },
@@ -555,7 +573,7 @@
       "originals": [
         {
           "path": "src/app/(app)/estimator/actions.ts",
-          "sha256": "f73415c046f4d7859f06b77cda4c37d3de12c2be159ac4710a23f7fd011b574e"
+          "sha256": "b5e0d59353220a139491105ee45afbf713efb995e375b0b842b380f735d31f1e"
         },
         {
           "path": "src/app/(app)/estimator/copy-pricing.ts",

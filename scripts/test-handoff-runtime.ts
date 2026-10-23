@@ -48,6 +48,12 @@ import { rankCatalogParts } from "@/lib/estimating-core/catalog-rank";
 import type { LivePart } from "../handoff/estimator/runtime/readers";
 import { POPOUT_NOTICE, PRINT_FOOTER_TEXT, previewTargetOf, windowOpenRoute } from "../handoff/estimator/ui/preview-routes";
 import { cutSheetAppendixModels } from "../handoff/estimator/runtime/loaders/cut-sheets";
+import { bomModelPartsLocal } from "../handoff/estimator/runtime/loaders/document";
+import { preflightSend } from "../handoff/estimator/runtime/actions/send-actions";
+import { BOX_SALE_LABOR_MESSAGE } from "@/lib/estimate-box-sale/rules";
+import { reviewTabsFor } from "@/lib/estimate-review/review-ui";
+import { stepViewsFor } from "../handoff/estimator/verify";
+import { revisionDocFields } from "../handoff/estimator/runtime/quote-model";
 import { packagePanelFor } from "../handoff/estimator/runtime/actions/package-actions";
 import { claimsPort, driftClean, driftMessages, driftOf, parsePortSources, PORT_SCAN_DIR, PORT_SOURCES_FILE, sha256Of, unknownPorts, unlistedPorts, updatedPortSources } from "../handoff/estimator/port-drift";
 import { APP_OVERRIDES, BAKED_MODULES, bakedSource, exportNames } from "../handoff/estimator/esbuild-plugins";
@@ -618,6 +624,7 @@ export async function handoffRuntimeChecks(ok: Ok) {
   await handoffActionChecks(ok);
   await handoffReviewChecks(ok);
   await handoffSendChecks(ok);
+  await handoffBoxSaleChecks(ok);
   await handoffShellChecks(ok);
   await handoffAssemblyChecks(ok);
   await handoffRulesChecks(ok);
@@ -1496,6 +1503,169 @@ export async function handoffSendChecks(ok: Ok) {
 
 
 /** Task 7 — the shell's pure parts: hash routes, app-path mapping, history rewriting, the Estimates list's rows, Reset. */
+/* ------------------------------------------------------------------ the merge of #362–#365: Box goods sale, Show on BOM, model numbers */
+
+export async function handoffBoxSaleChecks(ok: Ok) {
+  const T = "handoff box sale";
+  // --- quote-model: the flag is stored only as true on a system estimate (buildQuote / applyUpdate / revisionDocFields) ---
+  const pl = null;
+  const on = buildQuote("Q-1", { name: "Box", source: "estimator", boxSale: true }, "system", pl, 5);
+  ok(on.boxSale === true, `${T}: buildQuote — boxSale true on a system estimate is stored`);
+  ok(!("boxSale" in buildQuote("Q-2", { name: "Box", source: "estimator", boxSale: false }, "system", pl, 5)) && !("boxSale" in buildQuote("Q-3", { name: "x", source: "estimator" }, "system", pl, 5)),
+    `${T}: buildQuote — false / absent leaves a normal estimate's doc (no key)`);
+  ok(!("boxSale" in buildQuote("Q-4", { name: "x", source: "estimator", boxSale: true }, "flame_test", pl, 5)) && !("boxSale" in buildQuote("Q-5", { name: "x", source: "portal-catalog", boxSale: true }, "system", pl, 5)),
+    `${T}: buildQuote — a service quote and a portal-catalog quote never carry the flag`);
+  const off = applyUpdate({ ...on }, { boxSale: false } as Partial<Quote>, 9);
+  const keep = applyUpdate({ ...on }, { name: "Renamed" } as Partial<Quote>, 9);
+  const setOn = applyUpdate({ ...buildQuote("Q-6", { name: "n", source: "estimator" }, "system", pl, 5) }, { boxSale: true } as Partial<Quote>, 9);
+  const portalOn = applyUpdate({ ...buildQuote("Q-7", { name: "n", source: "portal-catalog" }, "system", pl, 5) }, { boxSale: true } as Partial<Quote>, 9);
+  ok(!("boxSale" in off) && keep.boxSale === true && setOn.boxSale === true && !("boxSale" in portalOn),
+    `${T}: applyUpdate — false removes the key, a patch without it leaves it, true sets it, a portal quote can't take it`);
+  ok(revisionDocFields(on).boxSale === true && !("boxSale" in revisionDocFields(off)), `${T}: revisionDocFields — the sent revision freezes the flag only when it is on`);
+
+  // --- planSave: the labor refusal, an older caller, the patch ---
+  const rewrite = <T,>(x: T) => x;
+  const tier = { tier: "base", margin: 0.3 };
+  const plain = [sec("sysA", [{ qty: 2, cost: 50, price: 100 }])];
+  const withLabor = [sec("sysA", [{ qty: 2, cost: 50, price: 100 }]), sec("sysB", [{ sku: "LAB", qty: 4, cost: 20, price: 40, labor: true }], { name: "Install" })];
+  const okPlan = planSave(null, payloadFor(plain, { boxSale: true }), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
+  ok(okPlan.ok && okPlan.patch.boxSale === true, `${T}: planSave — a labor-free box sale saves with boxSale true`);
+  const laborPlan = planSave(null, payloadFor(withLabor, { boxSale: true }), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
+  ok(!laborPlan.ok && laborPlan.refusedBeforeWrite === "boxsale" && laborPlan.error === BOX_SALE_LABOR_MESSAGE,
+    `${T}: planSave — any labor line refuses the whole save with the app's message`);
+  const overheadPlan = planSave(null, payloadFor([sec("o", [{ qty: 1, cost: 5, price: 9, laborOverhead: "mobilization" } as never])], { boxSale: true }), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
+  ok(!overheadPlan.ok && overheadPlan.refusedBeforeWrite === "boxsale", `${T}: planSave — a mobilization / travel (laborOverhead) line counts as labor`);
+  const normalWithLabor = planSave(null, payloadFor(withLabor), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
+  ok(normalWithLabor.ok && normalWithLabor.patch.boxSale === false, `${T}: planSave — a normal estimate keeps its labor (boxSale false)`);
+  const stored = { ...on, id: "Q-1" } as Quote;
+  const oldCaller = planSave(stored, payloadFor(plain, { boxSale: undefined }), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
+  ok(oldCaller.ok && oldCaller.patch.boxSale === true, `${T}: planSave — an older caller (no flag) keeps the stored one`);
+  const offPlan = planSave(stored, payloadFor(withLabor, { boxSale: false }), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
+  ok(offPlan.ok && offPlan.patch.boxSale === false, `${T}: planSave — turning the switch off lets the labor save again`);
+  const svc = planSave({ ...stored, quoteType: "flame_test" } as Quote, payloadFor(plain, { boxSale: true }), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
+  ok(svc.ok && svc.patch.boxSale === false, `${T}: planSave — a non-system quote never becomes a box sale`);
+
+  // --- the store-backed actions ---
+  const cust: SeedCustomers = {
+    companies: [{ id: "c1", name: "Acme Theatre" }],
+    sites: [{ id: "s1", companyId: "c1", name: "Main Hall", city: "Madison", isPrimary: true }],
+    contacts: [{ id: "k1", firstName: "Pat", lastName: "Lee", homeCompanyId: "c1", title: "TD", isPrimary: true }],
+    contactEmails: [{ id: "e1", contactId: "k1", email: "pat@acme.test", isPrimary: true }], contactPhones: [], geoCache: [],
+  };
+  const team: SeedTeamUser[] = [{ id: "u1", name: "Ann Admin", roles: ["Admin"], status: "active" }];
+  const lines = [
+    { id: 1, sku: "ETC:CS15", desc: "ColorSource 15 fixture", qty: 4, unit: "ea", cost: 900, price: 1250 },
+    { id: 2, sku: "ETC:CS15", desc: "CS15 spot", qty: 1, unit: "ea", cost: 900, price: 1250, manufacturerModelNumber: "FROZEN-1" },
+    { id: 3, sku: "CUSTOM", desc: "Custom bracket", qty: 1, unit: "ea", cost: 10, price: 30 },
+    { id: 4, sku: "NOT-IN-CATALOG", desc: "Mystery part", qty: 1, unit: "ea", cost: 10, price: 30 },
+  ];
+  const boxSecs = [{ id: "s1", name: "Stage lighting", kind: "lighting", freightPct: 0, items: lines }];
+  const base = { quoteType: "system", source: "estimator", customerId: "c1", customer: "Acme Theatre", contactName: "Pat Lee", owner: "Ann Admin", createdAt: 1, history: [], revisions: [] };
+  const qBox = { ...base, id: "Q-5001", estNo: 5001, name: "Box order", status: "draft", updatedAt: 1_790_000_000_000, boxSale: true, spec: { sections: boxSecs, mobs: [] } };
+  const qPlain = { ...base, id: "Q-5002", estNo: 5002, name: "Normal", status: "draft", updatedAt: 1_790_000_000_000, spec: { sections: boxSecs, mobs: [] } };
+  const laborSec = { id: "sL", name: "Install", kind: "labor", freightPct: 0, items: [{ id: 1, sku: "LAB", desc: "Install", qty: 4, unit: "ea", cost: 20, price: 40, labor: true }] };
+  const qBoxLabor = { ...base, id: "Q-5003", estNo: 5003, name: "Box with labor", status: "draft", updatedAt: 1_790_000_000_000, boxSale: true, spec: { sections: [...boxSecs, laborSec], mobs: [] } };
+  const catalog = docs([
+    { id: "ETC:CS15", sku: "ETC:CS15", desc: "ColorSource 15 fixture", category: "Lighting", unit: "ea", cost: 900, list: 1250, mfr: "ETC", manufacturerPartNumber: "7410A1015", manufacturerModelNumber: "CS15" },
+  ]);
+  const store = await openStore({ quotes: docs([qBox, qPlain, qBoxLabor]), catalog, fixtures: [], blobs: [], settings: [{ id: "main", data: { companyName: "Peak Systems Group" } } as { id: string }] }, { idb: null });
+  configurePorts({ store, customers: cust, rules: { settings: { companyName: "Peak Systems Group" }, blobs: {} }, team });
+  users.setCurrent("u1");
+  const repo = quoteRepo(store);
+  const A = estimatorActions(store);
+
+  // props: the stored flag, false for a new estimate unless ?box=1
+  const pBox = await buildEstimatorProps(store, "Q-5001", new URLSearchParams());
+  const pPlain = await buildEstimatorProps(store, "Q-5002", new URLSearchParams());
+  const pNew = await buildEstimatorProps(store, null, new URLSearchParams("new=1"));
+  const pNewBox = await buildEstimatorProps(store, null, new URLSearchParams("new=1&box=1"));
+  const pOpenIgnoresBox = await buildEstimatorProps(store, "Q-5002", new URLSearchParams("box=1"));
+  ok(pBox.initial.boxSale === true && pPlain.initial.boxSale === false && pNew.initial.boxSale === false && pNewBox.initial.boxSale === true && pOpenIgnoresBox.initial.boxSale === false,
+    `${T}: props — initial.boxSale is the stored flag; a new estimate is false unless ?box=1; ?box=1 never flips a saved one`);
+
+  // save: refused with labor (nothing written, no id), accepted without
+  const before = (await store.all("quotes")).length;
+  const refusedSave = await A.saveQuoteAction("Q-5002", payloadFor([...(boxSecs as never as SpecSection[]), laborSec as never as SpecSection], { boxSale: true, name: "Normal" }));
+  ok(!refusedSave.ok && refusedSave.id === null && refusedSave.number === null && refusedSave.error === BOX_SALE_LABOR_MESSAGE && (await repo.get("Q-5002"))!.boxSale !== true && (await store.all("quotes")).length === before,
+    `${T}: saveQuoteAction — a box sale with labor is refused with no id and nothing written`);
+  const created = await A.saveQuoteAction(null, payloadFor([sec("n1", [{ qty: 1, cost: 10, price: 30 }])], { boxSale: true, name: "Fresh box" }));
+  const createdQ = created.id ? await repo.get(created.id) : null;
+  ok(created.ok && createdQ?.boxSale === true, `${T}: saveQuoteAction — a new box sale is created with the flag stored`);
+  const toggledOff = await A.saveQuoteAction(created.id, payloadFor([sec("n1", [{ qty: 1, cost: 10, price: 30 }])], { boxSale: false, name: "Fresh box" }));
+  ok(toggledOff.ok && !("boxSale" in ((await repo.get(created.id!)) ?? {})), `${T}: saveQuoteAction — switching it off removes the key (a normal estimate's doc)`);
+  const stillOld = await A.saveQuoteAction("Q-5001", payloadFor(boxSecs as never, { boxSale: undefined, name: "Box order" }));
+  ok(stillOld.ok && (await repo.get("Q-5001"))!.boxSale === true, `${T}: saveQuoteAction — an older caller (no flag) keeps the stored one`);
+
+  // a sent revision freezes the flag (the approver is the owner)
+  const sentBox = await repo.setStatus("Q-5001", "sent", "Ann Admin");
+  ok(sentBox?.revisions?.at(-1)?.docFields?.boxSale === true, `${T}: a sent revision's docFields freezes boxSale`);
+  const sentPlain = await repo.setStatus("Q-5002", "sent", "Ann Admin");
+  ok(!!sentPlain?.revisions?.at(-1) && !("boxSale" in (sentPlain.revisions!.at(-1)!.docFields ?? {})), `${T}: …and a normal estimate's revision carries no key`);
+
+  // Move / Copy: a labor system into an existing box sale is refused; a new estimate copies the stored source's flag
+  const ctx = { customerId: "c1", locationId: null, customer: "Acme Theatre", contactName: "Pat Lee", tierMargin: 0.3 };
+  const laborSection = { ...laborSec, id: "sysLab" } as never;
+  const intoBox = await A.moveSystemToEstimateAction(laborSection, { kind: "existing", quoteId: "Q-5001" }, ctx, [], "Q-5002");
+  ok(!intoBox.ok && (intoBox as { error: string }).error === BOX_SALE_LABOR_MESSAGE && !JSON.stringify((await repo.get("Q-5001"))!.spec).includes("sysLab"), `${T}: Move into an existing box sale — a system with labor is refused before anything is written`);
+  const copyIntoBox = await A.copySystemToEstimateAction({ ...laborSec, id: "sysLab2" } as never, { kind: "existing", quoteId: "Q-5001" }, ctx, [], "Q-5002");
+  ok(!copyIntoBox.ok, `${T}: Copy into an existing box sale — refused the same way`);
+  const okInto = await A.moveSystemToEstimateAction({ id: "sysOk", name: "Gear", kind: "lighting", freightPct: 0, items: [{ id: 1, sku: "X", desc: "x", qty: 1, unit: "ea", cost: 5, price: 9 }] } as never, { kind: "existing", quoteId: "Q-5001" }, ctx, [], null);
+  ok(okInto.ok, `${T}: Move a labor-free system into a box sale is fine`);
+  const moveNewBox = await A.moveSystemToEstimateAction({ id: "sysM", name: "Rig", kind: "lighting", freightPct: 0, items: [{ id: 1, sku: "X", desc: "x", qty: 1, unit: "ea", cost: 5, price: 9 }] } as never, { kind: "new" }, ctx, [], "Q-5001");
+  const moveNewPlain = await A.moveSystemToEstimateAction({ id: "sysN", name: "Rig2", kind: "lighting", freightPct: 0, items: [{ id: 1, sku: "X", desc: "x", qty: 1, unit: "ea", cost: 5, price: 9 }] } as never, { kind: "new" }, ctx, [], "Q-5002");
+  const moveNewUnsaved = await A.moveSystemToEstimateAction({ id: "sysU", name: "Rig3", kind: "lighting", freightPct: 0, items: [{ id: 1, sku: "X", desc: "x", qty: 1, unit: "ea", cost: 5, price: 9 }] } as never, { kind: "new" }, ctx, [], null);
+  ok(moveNewBox.ok && (await repo.get(moveNewBox.targetId))!.boxSale === true && moveNewPlain.ok && (await repo.get(moveNewPlain.targetId))!.boxSale !== true && moveNewUnsaved.ok && (await repo.get(moveNewUnsaved.targetId))!.boxSale !== true,
+    `${T}: Move → New estimate copies the STORED source's flag (a normal or unsaved source gives a normal estimate)`);
+  const copyNewBox = await A.copySystemToEstimateAction({ id: "sysC", name: "Rig4", kind: "lighting", freightPct: 0, items: [{ id: 1, sku: "X", desc: "x", qty: 1, unit: "ea", cost: 5, price: 9 }] } as never, { kind: "new" }, ctx, [], "Q-5001");
+  ok(copyNewBox.ok && copyNewBox.kind === "new" && (await repo.get(copyNewBox.targetId))!.boxSale === true, `${T}: Copy → New estimate copies the stored source's flag too`);
+
+  // send: labor still on a box sale (a restored revision) is never sent; the estimate PDF always rides, a cover never does
+  const pre = preflightSend({ roles: ["Admin"] }, (await repo.get("Q-5003"))!, { to: "pat@acme.test", cc: "", subject: "s", body: "b", attachEstimate: false, attachCover: false, followUpDays: 0 });
+  ok("ok" in pre && pre.ok === false && pre.error === BOX_SALE_LABOR_MESSAGE, `${T}: preflightSend — a box sale that still carries labor is refused`);
+  const SA = sendActions(store);
+  const sendIn = { to: "pat@acme.test", cc: "", subject: "Box order — quote EST-5001", body: "See {link}", attachEstimate: false, attachCover: true, followUpDays: 0 };
+  const boxSend = await SA.sendEstimateEmailAction("Q-5001", sendIn);
+  const boxRow = (await store.all<{ quoteId: string; attachments?: string[] }>("activity")).find((a) => a.quoteId === "Q-5001");
+  ok(boxSend.ok && boxRow?.attachments?.join() === "EST-5001.pdf", `${T}: send — a box sale's email always carries the estimate PDF and never a cover (got ${boxRow?.attachments?.join()})`);
+  const plainSend = await SA.sendEstimateEmailAction("Q-5002", { ...sendIn, subject: "Normal — estimate EST-5002" });
+  const plainRow = (await store.all<{ quoteId: string; attachments?: string[] }>("activity")).find((a) => a.quoteId === "Q-5002");
+  ok(plainSend.ok && plainRow?.attachments?.join() === "EST-5002 Cover.pdf", `${T}: send — a normal estimate follows the composer's ticks (got ${plainRow?.attachments?.join()})`);
+  const defs = await SA.estimateEmailDefaultsAction("Q-5001");
+  const defsPlain = await SA.estimateEmailDefaultsAction("Q-5002");
+  ok(defs.ok && /quote EST-5001/.test(defs.subject) && defsPlain.ok && /estimate EST-5002/.test(defsPlain.subject), `${T}: defaults — the subject says "quote" for a box sale and "estimate" otherwise (${defs.ok ? defs.subject : ""})`);
+
+  // package panel: no gap chips on a box sale
+  const panelBox = packagePanelFor((await repo.get("Q-5001"))!, {});
+  const panelPlain = packagePanelFor({ ...(await repo.get("Q-5002"))!, spec: { sections: [{ ...boxSecs[0], narrative: "" , presentation: "narrative", keyProducts: [{ lineId: 1, sku: "ETC:CS15" }] }], mobs: [] } } as never, {});
+  ok(panelBox.gaps.length === 0 && panelPlain.gaps.length > 0, `${T}: package panel — a box sale has no gap chips (a normal estimate with a missing goal / paragraph has ${panelPlain.gaps.length})`);
+
+  // loaders: the document is the BOM view in the web layout with models; the package page is the itemized list; no cut-sheet appendix
+  const docBox = await loadQuoteDocumentPropsLocal(store, "Q-5001");
+  const docPlain = await loadQuoteDocumentPropsLocal(store, "Q-5002");
+  ok(!!docBox && docBox.layout === "web" && docBox.showModels === true && docBox.detail === "itemized" && docBox.pdfItemizedAppendix === false && !!docPlain && docPlain.layout !== "web" && docPlain.showModels !== true,
+    `${T}: loader — a box sale's document is the BOM view in the web layout; a normal one is untouched`);
+  const mp = docBox?.bomModelParts ?? {};
+  ok(mp["ETC:CS15"]?.manufacturerModelNumber === "CS15" && mp["ETC:CS15"].manufacturerPartNumber === "7410A1015" && !("CUSTOM" in mp) && !("NOT-IN-CATALOG" in mp),
+    `${T}: BOM models — the catalog's model fields for plain catalog SKUs only (no CUSTOM, no unknown part): ${Object.keys(mp).join()}`);
+  const direct = bomModelPartsLocal(boxSecs as never, (sku) => (sku === "ETC:CS15" ? (catalog[0] as never) : undefined));
+  ok(Object.keys(direct ?? {}).join() === "ETC:CS15" && JSON.stringify(direct!["ETC:CS15"]) === JSON.stringify({ sku: "ETC:CS15", manufacturerModelNumber: "CS15", manufacturerPartNumber: "7410A1015" }), `${T}: bomModelPartsLocal — only the model fields cross (sku, model, MFR P/N)`);
+  const pkgBox = await loadPackagePreviewLocal(store, "Q-5001", "narrative", "/letterhead.jpg");
+  const pkgPlain = await loadPackagePreviewLocal(store, "Q-5002", "narrative", "/letterhead.jpg");
+  ok(pkgBox?.model.boxSale === true && pkgBox.model.view === "bom" && pkgBox.model.summary === "" && pkgBox.model.document === undefined && pkgPlain?.model.boxSale !== true && pkgPlain?.model.view === "narrative",
+    `${T}: loader — a box sale's package page is the itemized list (BOM view, no summary / document); a normal one is the narrative`);
+  const csOn = await loadCutSheetsLocal(store, "Q-5001");
+  ok(cutSheetAppendixModels(csOn).length === 0, `${T}: cut-sheet appendix — never on a box sale's PDF`);
+
+  // the review / walk lists
+  ok(reviewTabsFor(true).join() === "document,bom" && reviewTabsFor(false).length === 6, `${T}: Customer review offers Document + BOM only on a box sale`);
+  ok(stepViewsFor(true).every((v) => !/ptab=(narrative|client)/.test(v.query)) && stepViewsFor(true).find((v) => v.query === "step=review")?.tabs?.join() === "Document,BOM" && stepViewsFor(false).length === 6,
+    `${T}: verify --all-steps — a box sale is walked through its own tabs, a normal estimate through all of them`);
+
+  // the live BOM tab's model read (bomModelPartsAction)
+  const live = await A.bomModelPartsAction(["ETC:CS15", " ETC:CS15 ", "NOPE", "__proto__", ""]);
+  ok(Object.keys(live).join() === "ETC:CS15" && live["ETC:CS15"].manufacturerModelNumber === "CS15", `${T}: bomModelPartsAction — the live BOM tab reads the same facts (unknown / blank / __proto__ absent)`);
+}
+
 export async function handoffShellChecks(ok: Ok) {
   const FILE = "file:///Users/x/prototype/index.html";
   const estimate = (id: string): Route => ({ name: "estimate", id });
