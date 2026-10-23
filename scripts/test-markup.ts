@@ -13,6 +13,8 @@ import { knobPctFrom } from "../src/lib/tier-seed";
 import { sellFromCost } from "../src/lib/design/equipment-map";
 import { curtainPrice } from "../src/lib/design/curtain-pricing";
 import { unitPriceFor } from "../src/lib/portal-price-rules";
+import { convertProjectDoc, convertQuoteDoc, hydrateDoc } from "../src/lib/markup/doc-basis";
+import { markupSettingsPatch, withoutBasisKeys } from "../src/lib/markup/settings";
 
 const near = (a: number | null | undefined, b: number, eps = 1e-9) => a != null && Math.abs(a - b) <= eps;
 
@@ -73,10 +75,90 @@ export async function markupPureChecks(ok: Ok) {
   ok(sellFromCost(100, 0.43) === 143 && sellFromCost(100, 25) === 143 && curtainPrice(100, 0.25) === 125,
     "markup: sellFromCost guard falls back to 43 %; curtains price at their markup");
   ok(unitPriceFor({ cost: 100, list: 0 }, { markup: 0.25, staleCostMonths: 0, now: 0 }).unitPrice === 125, "markup: portal unit price");
+  // Task 7 — review carry-over: a service save with no `markup` field falls back to the service markup, never the 5 % clamp.
+  {
+    const { readFileSync } = await import("node:fs");
+    const files = ["flame-tests", "repairs", "inspections"].map((d) => readFileSync(`src/app/(app)/${d}/quote/actions.ts`, "utf8"));
+    ok(files.every((f) => /const rawMarkup = formData\.get\("markup"\);\s*const markupPts = rawMarkup == null \|\| rawMarkup === "" \? NaN : Number\(rawMarkup\);/.test(f)
+      && !f.includes('Number(formData.get("markup"))')), "markup: a missing markup field on a service save is NaN (falls back), not 0 (5 %)");
+  }
+  // Task 7 — doc conversion
+  const legacy = {
+    id: "Q-1", margin: 0.3, tierMargin: 0.2, value: 1000,
+    spec: { sections: [{ id: "s", items: [{ id: 1, cost: 70, price: 100 }], laborGroups: { g1: { lines: 1, draft: { margin: "30" } } } }] },
+    flameTest: { rates: { margin: 0.3 }, total: 825 },
+    repair: { rates: { margin: 0.3, partsMargin: 0.25 }, partsMargin: 0.25, total: 875 },
+    revisions: [{ rev: 1, margin: 0.3, tierMargin: 0.3, value: 900, flameTest: { rates: { margin: 0.3 } } }],
+  };
+  const q = convertQuoteDoc(legacy) as typeof legacy & { pricingBasis: string };
+  ok(q.pricingBasis === "markup" && near(q.margin, 0.3 / 0.7) && near(q.tierMargin, 0.25), "markup: a legacy quote converts margin + tierMargin exactly and is stamped");
+  ok(q.spec.sections[0].laborGroups.g1.draft.margin === "42.8571" && near(q.flameTest.rates.margin, 0.3 / 0.7) && near(q.repair.rates.partsMargin, 1 / 3) && near(q.repair.partsMargin, 1 / 3),
+    "markup: labor drafts, service rates and repair parts markup convert");
+  ok(near(q.revisions[0].margin, 0.3 / 0.7) && near(q.revisions[0].flameTest.rates.margin, 0.3 / 0.7), "markup: frozen revisions convert too");
+  ok(q.value === 1000 && q.spec.sections[0].items[0].price === 100 && q.flameTest.total === 825 && q.revisions[0].value === 900, "markup: no sell amount moves");
+  ok(legacy.margin === 0.3, "markup: conversion never mutates its input");
+  ok(convertQuoteDoc(q) === q, "markup: a stamped doc is returned as-is (never converted twice)");
+  ok(near((convertProjectDoc({ id: "P-1", margin: 0.36 }) as { margin: number }).margin, 0.36 / 0.64), "markup: a legacy project converts its margin");
+  ok(hydrateDoc("leads", { id: "L-1", margin: 0.3 }).margin === 0.3, "markup: other collections are untouched");
+  const inPlace = { id: "Q-2", margin: 0.2 };
+  ok(hydrateDoc("quotes", inPlace) === inPlace && near(inPlace.margin, 0.25), "markup: the doc-store hook converts in place (no per-read clone)");
+  // Task 7 — settings conversion
+  const p1 = markupSettingsPatch({ "tiers.base": 30, "tiers.gold": 20, "system.freightPct": 5 }, ["tiers.base", "tiers.gold", "tiers.copper"], true);
+  ok(!!p1 && p1["tiers.base"] === 43 && p1["tiers.gold"] === 25 && !("tiers.copper" in p1) && !("system.freightPct" in p1) && p1._pricingBasis === "markup",
+    "markup: a whole-percent rules blob converts and rounds only the stored margin keys");
+  ok(JSON.stringify((p1 as Record<string, unknown>)._marginBackup) === JSON.stringify({ "tiers.base": 30, "tiers.gold": 20 }), "markup: the old values are kept as a backup");
+  const p2 = markupSettingsPatch({ margin: 0.3, partsMargin: 0.27, laborRate: 75 }, ["margin", "partsMargin"], false);
+  ok(!!p2 && p2.margin === 0.43 && p2.partsMargin === 0.37 && !("laborRate" in p2), "markup: a fraction blob converts and rounds");
+  ok(markupSettingsPatch({ _pricingBasis: "markup", margin: 0.43 }, ["margin"], false) === null, "markup: a stamped blob is left alone");
+  const p3 = markupSettingsPatch({}, ["margin"], false);
+  ok(!!p3 && Object.keys(p3).join() === "_pricingBasis", "markup: an empty blob still gets the stamp (so a later admin edit is never re-converted)");
+  ok(JSON.stringify(withoutBasisKeys({ margin: 0.43, _pricingBasis: "markup", _marginBackup: { margin: 0.3 } })) === JSON.stringify({ margin: 0.43 }), "markup: getters strip the stamp + backup");
 }
 
-export async function markupDbChecks(_ok: Ok) {
-  /* Task 7 fills this in. */
+export async function markupDbChecks(ok: Ok) {
+  const { getDb } = await import("../src/db");
+  const { DOC_TABLES } = await import("../src/db/doc-tables");
+  const { getDoc, patchDoc, listDocsFiltered } = await import("../src/db/doc-store");
+  const { eq, inArray } = await import("drizzle-orm");
+  const quotes = await import("../src/lib/stores/quotes");
+  const { getFlametestRates, value } = await import("../src/lib/stores/pricing");
+  const { resolveTier } = await import("../src/lib/pricing-tiers");
+  const db = await getDb();
+  const t = DOC_TABLES.quotes;
+  const id = "Q-TESTmarkup-1";
+  const flameId = "Q-TESTmarkup-2";
+  const now = Date.now();
+  const rawDoc = async (qid: string) => (await db.select().from(t).where(eq(t.id, qid)))[0].doc as Record<string, unknown>;
+  // A margin-era row written raw (bypassing every store), exactly as production holds it.
+  await db.insert(t).values({ id, doc: { id, name: "markup legacy", status: "sent", value: 1000, margin: 0.3, tierMargin: 0.2,
+    spec: { sections: [{ id: "s", items: [{ id: 1, cost: 70, price: 100, qty: 10 }] }] } }, rev: 1, updatedAt: now, receivedAt: now, review: { state: "new" }, deleted: false })
+    .onConflictDoNothing();
+  const read = await quotes.get(id);
+  ok(!!read && read.pricingBasis === "markup" && Math.abs(read.margin - 0.3 / 0.7) < 1e-12 && read.value === 1000, "markup db: a raw margin-era quote reads as markup, sell unchanged");
+  const raw1 = await rawDoc(id);
+  ok(raw1.margin === 0.3 && !("pricingBasis" in raw1), "markup db: a read alone writes nothing");
+  await patchDoc("quotes", id, (d: Record<string, unknown>) => { d.name = "markup legacy (touched)"; });
+  const raw2 = await rawDoc(id);
+  ok(raw2.pricingBasis === "markup" && Math.abs((raw2.margin as number) - 0.3 / 0.7) < 1e-12 && raw2.value === 1000, "markup db: the next write stores it stamped, converted once");
+  const again = await getDoc<Record<string, unknown> & { id: string }>("quotes", id);
+  ok(Math.abs((again!.margin as number) - 0.3 / 0.7) < 1e-12, "markup db: a stamped doc is never converted twice");
+  const proj = await listDocsFiltered<Record<string, unknown> & { id: string }>("quotes", { fields: ["margin"] });
+  ok(proj.some((r) => r.id === id && Math.abs((r.margin as number) - 0.3 / 0.7) < 1e-12), "markup db: a field projection carries the stamp (no double conversion)");
+  // Review carry-over: the service builders spot an untouched knob with samePts(saved, stamp) — the quote's
+  // tierMargin and its frozen rates.margin must convert to the SAME float.
+  await db.insert(t).values({ id: flameId, doc: { id: flameId, name: "markup legacy flame", status: "draft", quoteType: "flame_test", value: 825, margin: 0.3,
+    tierMargin: 0.3, flameTest: { rates: { margin: 0.3, laborRate: 75 }, total: 825 } }, rev: 1, updatedAt: now, receivedAt: now, review: { state: "new" }, deleted: false })
+    .onConflictDoNothing();
+  const fl = (await quotes.get(flameId)) as unknown as { tierMargin: number; flameTest: { rates: { margin: number }; total: number } } | null;
+  ok(!!fl && fl.tierMargin === marginToMarkup(0.3) && fl.flameTest.rates.margin === fl.tierMargin && Math.abs(fl.tierMargin - 0.3 / 0.7) < 1e-15 && fl.flameTest.total === 825,
+    "markup db: a legacy flame quote's tierMargin and rates.margin convert to the same float (samePts stays untouched)");
+  const fresh = await quotes.create({ name: "markup new", margin: 0.43 });
+  ok(fresh.pricingBasis === "markup" && (await quotes.get(fresh.id))!.margin === 0.43, "markup db: a new quote is born stamped");
+  ok((await rawDoc(fresh.id)).pricingBasis === "markup", "markup db: the stamp is stored with a new quote");
+  const fr = await getFlametestRates();
+  ok(fr.margin === 0.43 && !("_pricingBasis" in fr), "markup db: flame default is 43 % markup and the getter strips the stamp");
+  ok((await value("tiers.gold")) === 25 && (await resolveTier(null)).markup === 0.43, "markup db: tier defaults are markup");
+  await db.delete(t).where(inArray(t.id, [id, flameId, fresh.id]));
 }
 
 if (require.main === module) {

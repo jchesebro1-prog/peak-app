@@ -4206,8 +4206,8 @@ import {
   );
   ok(byId(travelG, "travel.mph").def === TRAVEL_RATE_DEFAULTS.mph, "#60-67: travel.mph default is still 50");
   ok(
-    byId(catalogG, "catalog.defaultMargin").def === 30 && CATALOG_RATE_DEFAULTS.defaultMargin === 0.3,
-    "#60-67: catalog.defaultMargin default is still 30% (stored as the 0.30 fraction, pctStored)"
+    byId(catalogG, "catalog.defaultMargin").def === 43 && CATALOG_RATE_DEFAULTS.defaultMargin === 0.43,
+    "#60-67: catalog.defaultMargin default is 43 % markup (#367; stored as the 0.43 fraction, pctStored)"
   );
   ok(
     byId(fixtureG, "fixture.mountCclamp").def === FIXTURE_RATE_DEFAULTS.mountCclamp &&
@@ -29523,7 +29523,7 @@ async function portal245IndexAsyncChecks(): Promise<void> {
     ok((await d245Facts(HIDE)).reason === "Hidden from customers", "#245 facts: a hidden part reads Hidden from customers");
 
     const ctx = await d245Ctx({ customerId: CO, name: "" });
-    ok(ctx.tier === "silver" && Math.abs(ctx.markup - 0.22) < 1e-9 && ctx.staleCostMonths === 0, "#245 pricing: context resolves the company tier + markup");
+    ok(ctx.tier === "silver" && Math.abs(ctx.markup - 0.28) < 1e-9 && ctx.staleCostMonths === 0, "#245 pricing: context resolves the company tier + markup (#367: Silver 28 %)");
     ok((await d245PriceSku(HIDE, ctx)) === null, "#245 pricing: a Hide part is not quotable (priceSku → null)");
     const ps = await d245PriceSku(IMG, ctx);
     ok(!!ps && ps.unitPrice === Math.round(70 * (1 + ctx.markup) * 100) / 100 && !ps.por, "#245 pricing: priceSku = cost × (1 + tier markup) (#367)");
@@ -32629,7 +32629,9 @@ async function portal248RefreshAsyncChecks(): Promise<void> {
       contacts: [],
     });
 
-    const gen = await d248Generate(sess, { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 10 }] }, { now: NOW, schedulePdf: false });
+    // #367: 200 curtains (the portal's flame cap), not 10 — Silver 28 % vs Gold 25 % markup is a 3-point gap, which on a
+    // small job lands on the same $25 step ($375 both). At 200 curtains the gap is well over one step.
+    const gen = await d248Generate(sess, { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 200 }] }, { now: NOW, schedulePdf: false });
     if (!gen.ok) throw new Error("#248 Task 2 refresh setup failed — " + gen.error);
     registerFixture("quotes", gen.quoteId);
     const q0 = await QuoteStore.get(gen.quoteId);
@@ -32645,7 +32647,7 @@ async function portal248RefreshAsyncChecks(): Promise<void> {
     const early = await d245RefreshPortalQuote(sess, gen.quoteId, NOW);
     ok(!early.ok, "#248 refresh: refusing before validUntil has passed");
 
-    // Change the rate — gold margin instead of silver — so the refresh
+    // Change the rate — gold markup instead of silver — so the refresh
     // lands on a genuinely different value, not a replay of the same price.
     await upsertCustomer({
       id: CO,
@@ -35501,7 +35503,8 @@ import { serviceMarkupFor as s254mMarginFor, type ResolvedTier as S254mResolvedT
     const src = s254mRead(`src/app/(app)/${dir}/quote/actions.ts`);
     ok(/const serviceMarkup = serviceMarkupFor\(tier, baseRates\.margin\);/.test(src),
       `#254 ${dir}/quote/actions.ts: the fallback markup (no posted knob) resolves through serviceMarkupFor, not the raw tier markup`);
-    ok(/const markupPts = Number\(formData\.get\("markup"\)\);/.test(src) && /\? Math\.max\(5, Math\.min\(100, markupPts\)\) \/ 100\s*: serviceMarkup;/.test(src),
+    // #367: a missing field is NaN (falls back), never Number(null) = 0 → the 5 % clamp.
+    ok(/const markupPts = rawMarkup == null \|\| rawMarkup === "" \? NaN : Number\(rawMarkup\);/.test(src) && /\? Math\.max\(5, Math\.min\(100, markupPts\)\) \/ 100\s*: serviceMarkup;/.test(src),
       `#254 ${dir}/quote/actions.ts: the posted markup is clamped 5–100; an unposted one falls back to serviceMarkup (never tier.markup)`);
     ok(/pricingTier: tier\.tier,\s*tierMargin: serviceMarkup,/.test(src) && !/tierMargin: tier\.(margin|markup),/.test(src),
       `#254 ${dir}/quote/actions.ts: the saved tierMargin stamp is the service markup everywhere — no stamp still reads the raw tier markup`);

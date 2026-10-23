@@ -26,17 +26,15 @@ import {
  * Markups are admin-editable in /estimating-rules → "Customer tiers";
  * defaults: base 43 · copper 37 · silver 28 · gold 25 · platinum 18 ·
  * reseller 11 · employee 5 (percent, markup on cost: sell = cost × (1 + k)).
- * (#367: TIER_DEFAULTS below still hold the margin-era values until the data
- * conversion task switches them.)
  */
 
 const TIER_DEFAULTS: Record<PricingTier, number> = {
-  base: 0.3,
-  copper: 0.27,
-  silver: 0.22,
-  gold: 0.2,
-  platinum: 0.15,
-  reseller: 0.1,
+  base: 0.43,
+  copper: 0.37,
+  silver: 0.28,
+  gold: 0.25,
+  platinum: 0.18,
+  reseller: 0.11,
   employee: 0.05,
 };
 

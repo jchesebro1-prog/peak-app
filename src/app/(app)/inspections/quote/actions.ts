@@ -77,7 +77,10 @@ async function persist(formData: FormData, out?: { creditNote?: string }): Promi
   // Mileage/labor knobs stay global rates. MARGIN went per-quote with
   // customer tiers (item 11, D87/D88): the tier seeds it, the knob
   // overrides it for THIS quote only.
-  const markupPts = Number(formData.get("markup"));
+  // #367: a missing field (a builder tab opened before the switch posts the old `margin` key) is NaN, not
+  // Number(null) = 0 → the 5 % clamp — so it falls back to the service markup below.
+  const rawMarkup = formData.get("markup");
+  const markupPts = rawMarkup == null || rawMarkup === "" ? NaN : Number(rawMarkup);
   const mileageRate = Number(formData.get("mileageRate"));
   const laborRate = Number(formData.get("laborRate"));
   const patch: Record<string, number> = {};

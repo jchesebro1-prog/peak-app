@@ -14,6 +14,7 @@ import { pushAssessment } from "@/lib/stores/assessments";
 import { pushFinding } from "@/lib/stores/findings";
 import { pushSurvey } from "@/lib/stores/surveys";
 import { sanitizePushedDoc } from "@/lib/sync/server-owned";
+import { hydrateDoc } from "@/lib/markup/doc-basis";
 import { mayPullFieldData } from "@/lib/sync/pull-collections";
 import { taskPushDecision, TASK_PUSH_REFUSED } from "@/lib/sync/task-push";
 import { getProject } from "@/lib/stores/projects";
@@ -142,6 +143,8 @@ export async function POST(req: Request) {
           // a tick (re-review): the stored copy with only status / doneAt / updatedAt from the device
           if (decision.doc) pushDoc = decision.doc;
         }
+        // #367: a device's pre-switch cached project stores margins — it lands converted and stamped.
+        if (coll === "projects") pushDoc = hydrateDoc(coll, { ...pushDoc, id: rec.id });
         // #351 review — server-owned fields (a task's share stamp and thread link) never come from a push
         let doc: Record<string, unknown> = sanitizePushedDoc(coll, { ...pushDoc, id: rec.id }, existing.length ? { doc: existing[0].doc, deleted: !!existing[0].deleted } : null);
         if (coll === "projects") {
@@ -167,7 +170,8 @@ export async function POST(req: Request) {
             id: rec.id,
             status: "conflict",
             rev: existing[0].rev,
-            server: { ...(existing[0].doc as object), id: rec.id },
+            // #367: the server copy goes back converted, like every other read.
+            server: hydrateDoc(coll, { ...(existing[0].doc as Record<string, unknown>), id: rec.id }),
           });
         } else {
           await db

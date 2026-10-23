@@ -1,7 +1,11 @@
-import { getBlob, updateBlob } from "@/db/doc-store";
+import { updateBlob } from "@/db/doc-store";
+import { withoutBasisKeys } from "@/lib/markup/settings";
 import {
+  FLAMETEST_RATES_BLOB,
   FLAMETEST_RATE_DEFAULTS,
   TRAVEL_RATE_DEFAULTS,
+  ensureMarkupSettings,
+  getFlametestRates,
   getTravelRates,
   type TravelRates,
 } from "@/lib/stores/pricing";
@@ -86,13 +90,12 @@ export type FlameTestRates = {
   flyCrew?: number;
 };
 
-const RATES_BLOB_ID = "flametest_rates";
+const RATES_BLOB_ID = FLAMETEST_RATES_BLOB;
 
-/** Live rates: stored patch merged over FLAMETEST_RATE_DEFAULTS (port of getRates). */
+/** Live rates: stored patch merged over FLAMETEST_RATE_DEFAULTS (port of getRates). #367: through the store's
+ *  getter, so the blob is converted to markup first and the basis stamp never reaches the engine. */
 export async function getRates(): Promise<FlameTestRates> {
-  const defaults: FlameTestRates = { ...FLAMETEST_RATE_DEFAULTS };
-  const saved = await getBlob<FlameTestRates>(RATES_BLOB_ID, defaults);
-  return saved;
+  return (await getFlametestRates()) as FlameTestRates;
 }
 
 /** Merge a patch into the persisted rates; returns the merged rates (port of setRates). */
@@ -103,12 +106,15 @@ export async function setRates(
   // read-then-write-everything put back a stale copy of every other rate,
   // undoing one saved by a concurrent quote. Same stored result otherwise
   // (defaults, then stored, then the patch, written whole).
+  // #367: the blob is converted (and stamped) before a whole-object write could bake a markup patch into an
+  // unconverted margin blob; the stamp keys ride along in `raw` and are stripped from what callers get back.
+  await ensureMarkupSettings();
   let next = { ...FLAMETEST_RATE_DEFAULTS } as FlameTestRates;
   await updateBlob(RATES_BLOB_ID, (raw) => {
     next = { ...FLAMETEST_RATE_DEFAULTS, ...(raw as Partial<FlameTestRates>), ...patch } as FlameTestRates;
     return next as unknown as Record<string, unknown>;
   });
-  return next;
+  return withoutBasisKeys(next as unknown as Record<string, unknown>) as unknown as FlameTestRates;
 }
 
 /** Round minutes UP to the nearest step (default 15); 0 for null/NaN. */

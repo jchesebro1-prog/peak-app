@@ -224,6 +224,8 @@ export type Quote = {
   termsText?: string;
   value: number;
   margin: number;
+  /** #367 — present once this doc's percentages are markup (doc-basis.ts). */
+  pricingBasis?: "markup";
   /** Customer pricing tier stamped at creation (item 11, D87) — resolved
    *  contact → company → base, re-stamped when the customer/contact changes
    *  and when a revision is cut. Never shown to the customer. */
@@ -915,6 +917,7 @@ export function buildQuote(
     termsText: partial.termsText || "",
     value: Math.round(partial.value || 0),
     margin: partial.margin || 0,
+    pricingBasis: "markup",
     pricingTier: partial.pricingTier ?? null,
     tierMargin: partial.tierMargin ?? null,
     status: "draft",
@@ -1021,6 +1024,8 @@ export async function update(
     // AI daily brief: the nudge is setAssistNudge's alone.
     delete clean.assistNudge;
     delete clean.assistNudgeLeaseUntil;
+    // #367: the basis stamp is the doc store's and the builders' alone — a patch can never clear it.
+    delete clean.pricingBasis;
     // Box goods sale: stored only as true on a system quote; false (or any other type) removes the key, so turning
     // it off leaves exactly a normal estimate's doc. A patch without the key leaves it alone.
     if ("boxSale" in clean) {

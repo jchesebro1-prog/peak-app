@@ -1,5 +1,4 @@
-import { getBlob, setBlob } from "@/db/doc-store";
-import { INSPECTION_RATE_DEFAULTS, getTravelRates } from "@/lib/stores/pricing";
+import { INSPECTION_RATE_DEFAULTS, getInspectionRates, getTravelRates, setInspectionRates } from "@/lib/stores/pricing";
 import {
   tripTravel,
   type GeoAdapter,
@@ -61,8 +60,6 @@ export type InspectionRates = {
   flyCrew?: number; // default crew when the trip flies (FLY_CREW_DEFAULTS.inspection when absent)
 };
 
-const RATES_BLOB_ID = "inspection_rates"; // rss_inspection_rates_v1
-
 /** Typed copy of the shared defaults (single source: stores/pricing). */
 export function rateDefaults(): InspectionRates {
   return { ...INSPECTION_RATE_DEFAULTS } as InspectionRates;
@@ -70,15 +67,15 @@ export function rateDefaults(): InspectionRates {
 
 /** Effective rates = defaults overlaid with the saved blob. */
 export async function getRates(): Promise<InspectionRates> {
-  const saved = await getBlob<InspectionRates>(RATES_BLOB_ID, rateDefaults());
-  return saved;
+  // #367: through the store's getter — the blob converts to markup first and the stamp is stripped.
+  return (await getInspectionRates()) as InspectionRates;
 }
 
 /** Merge a patch into the saved rates and return the effective result. */
 export async function setRates(
   patch: Partial<InspectionRates>
 ): Promise<InspectionRates> {
-  await setBlob(RATES_BLOB_ID, patch);
+  await setInspectionRates(patch);
   return getRates();
 }
 

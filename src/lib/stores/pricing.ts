@@ -1,4 +1,9 @@
-import { getBlob, setBlob } from "@/db/doc-store";
+import { inArray, sql } from "drizzle-orm";
+import { getDb, inTransaction } from "@/db";
+import { getBlob, setBlob, updateBlob } from "@/db/doc-store";
+import { blobs } from "@/db/doc-tables";
+import { PRICING_BASIS } from "@/lib/markup";
+import { BASIS_STAMP, markupSettingsPatch, withoutBasisKeys } from "@/lib/markup/settings";
 import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/fixture-rates";
 import { FLY_CREW_DEFAULTS, FLY_RATE_DEFAULTS, type FlyRates } from "@/lib/travel-plan";
 import {
@@ -64,7 +69,7 @@ export type FlametestRates = {
   curtainMinutes: number;
   /** $ minimum for the whole job (after mileage + travel + testing) */
   baseFee: number;
-  /** 30 points, margin of the sell price */
+  /** markup on cost (0.43 = 43 %) */
   margin: number;
   /** round total travel time up to the nearest N minutes */
   travelRoundMin: number;
@@ -78,7 +83,7 @@ export const FLAMETEST_RATE_DEFAULTS: FlametestRates = {
   laborRate: 75,
   curtainMinutes: 5,
   baseFee: 150,
-  margin: 0.30,
+  margin: 0.43,
   travelRoundMin: 15,
   flyCrew: FLY_CREW_DEFAULTS.flame,
 };
@@ -90,9 +95,9 @@ export type RepairRates = {
   mileageRate: number;
   /** $ minimum service call (floor on the service sell, before parts) */
   minCallout: number;
-  /** 30 points on parts (sell = cost / (1 - partsMargin)) */
+  /** markup on cost (0.43 = 43 %) — on parts (sell = cost × (1 + partsMargin)) */
   partsMargin: number;
-  /** 30 points on labor + travel */
+  /** markup on cost (0.43 = 43 %) — on labor + travel */
   margin: number;
   /** labor-rate multiplier for emergency / after-hours work */
   emergencyMult: number;
@@ -107,8 +112,8 @@ export const REPAIR_RATE_DEFAULTS: RepairRates = {
   laborRate: 75,
   mileageRate: 1,
   minCallout: 350,
-  partsMargin: 0.30,
-  margin: 0.30,
+  partsMargin: 0.43,
+  margin: 0.43,
   emergencyMult: 1.5,
   travelRoundMin: 15,
   flyCrew: FLY_CREW_DEFAULTS.repair,
@@ -127,7 +132,7 @@ export type InspectionRates = {
   level2Mult: number;
   /** $ minimum for the whole job */
   minFee: number;
-  /** 30 points, margin of the sell price */
+  /** markup on cost (0.43 = 43 %) */
   margin: number;
   /** round total travel time up to the nearest N minutes */
   travelRoundMin: number;
@@ -145,7 +150,7 @@ export const INSPECTION_RATE_DEFAULTS: InspectionRates = {
   baseHours: 2,
   level2Mult: 1.75,
   minFee: 650,
-  margin: 0.30,
+  margin: 0.43,
   travelRoundMin: 15,
   flyCrew: FLY_CREW_DEFAULTS.inspection,
 };
@@ -174,13 +179,13 @@ export const TRAVEL_RATE_DEFAULTS: ResolvedTravelRates = {
 };
 
 export type CatalogRates = {
-  /** Default markup for a catalog part with no list price (fraction, 0.30 = 30%). */
+  /** Default markup on cost for a catalog part with no list price (0.43 = 43 %). */
   defaultMargin: number;
 };
 
 /** Catalog margin DEFAULTS — seed/fallback for blob `catalog_rates`. */
 export const CATALOG_RATE_DEFAULTS: CatalogRates = {
-  defaultMargin: 0.30,
+  defaultMargin: 0.43,
 };
 
 /**
@@ -206,65 +211,126 @@ export const FIXTURE_RATES_BLOB = "fixture_rates";
 /** General editable rates — replaces rss_pricing_rules_v1. */
 const PRICING_RULES_BLOB = "pricing_rules";
 
+/* ---------- #367: the one-time margin → markup conversion of every rate blob ---------- */
+
+/** #367: the margin keys each rate blob held before the markup switch. */
+const MARGIN_KEYS: ReadonlyArray<[blob: string, keys: readonly string[], pct: boolean]> = [
+  [PRICING_RULES_BLOB, ["tiers.base", "tiers.copper", "tiers.silver", "tiers.gold", "tiers.platinum", "tiers.reseller", "tiers.employee", "system.baseMargin"], true],
+  [FLAMETEST_RATES_BLOB, ["margin"], false],
+  [REPAIR_RATES_BLOB, ["margin", "partsMargin"], false],
+  [INSPECTION_RATES_BLOB, ["margin"], false],
+  [CATALOG_RATES_BLOB, ["defaultMargin"], false],
+];
+
+/** Convert every rate blob not yet stamped. One unlocked read finds them; each conversion runs under updateBlob's
+ *  row lock and re-checks the stamp there, so concurrent instances converge (the loser's patch is null). */
+async function convertRateBlobs(): Promise<void> {
+  const db = await getDb();
+  const ids = MARGIN_KEYS.map(([blob]) => blob);
+  const rows = await db
+    .select({ id: blobs.id, basis: sql<string | null>`${blobs.data}->>${BASIS_STAMP}` })
+    .from(blobs)
+    .where(inArray(blobs.id, ids));
+  const stamped = new Set(rows.filter((r) => r.basis === PRICING_BASIS).map((r) => r.id));
+  for (const [blob, keys, pct] of MARGIN_KEYS)
+    if (!stamped.has(blob)) await updateBlob(blob, (cur) => markupSettingsPatch(cur, keys, pct));
+}
+
+let markupDone = false;
+let markupReady: Promise<void> | null = null;
+/**
+ * #367: convert every rate blob from margin to rounded markup ONCE (stamped, under updateBlob's row lock, so
+ * concurrent instances converge); memoized per process, retried after a failure. Every rate read awaits it.
+ * Inside a caller's transaction it joins that transaction and is NOT memoized — the transaction may still roll
+ * back, and a memo over a rolled-back conversion would read margins as markup until the process restarts.
+ */
+export function ensureMarkupSettings(): Promise<void> {
+  if (markupDone) return Promise.resolve();
+  if (inTransaction()) return convertRateBlobs();
+  if (!markupReady)
+    markupReady = convertRateBlobs().then(
+      () => {
+        markupDone = true;
+      },
+      (e) => {
+        markupReady = null;
+        throw e;
+      }
+    );
+  return markupReady;
+}
+
 /* ---------- engine rate accessors (getRates/setRates of the prototype engines) ---------- */
 
 export async function getFlametestRates(): Promise<FlametestRates> {
-  return getBlob(FLAMETEST_RATES_BLOB, { ...FLAMETEST_RATE_DEFAULTS });
+  await ensureMarkupSettings();
+  return withoutBasisKeys(await getBlob(FLAMETEST_RATES_BLOB, { ...FLAMETEST_RATE_DEFAULTS }));
 }
 
 export async function setFlametestRates(
   patch: Partial<FlametestRates>
 ): Promise<void> {
+  await ensureMarkupSettings();
   await setBlob(FLAMETEST_RATES_BLOB, patch);
 }
 
 export async function getRepairRates(): Promise<RepairRates> {
-  return getBlob(REPAIR_RATES_BLOB, { ...REPAIR_RATE_DEFAULTS });
+  await ensureMarkupSettings();
+  return withoutBasisKeys(await getBlob(REPAIR_RATES_BLOB, { ...REPAIR_RATE_DEFAULTS }));
 }
 
 export async function setRepairRates(
   patch: Partial<RepairRates>
 ): Promise<void> {
+  await ensureMarkupSettings();
   await setBlob(REPAIR_RATES_BLOB, patch);
 }
 
 export async function getInspectionRates(): Promise<InspectionRates> {
-  return getBlob(INSPECTION_RATES_BLOB, { ...INSPECTION_RATE_DEFAULTS });
+  await ensureMarkupSettings();
+  return withoutBasisKeys(await getBlob(INSPECTION_RATES_BLOB, { ...INSPECTION_RATE_DEFAULTS }));
 }
 
 export async function setInspectionRates(
   patch: Partial<InspectionRates>
 ): Promise<void> {
+  await ensureMarkupSettings();
   await setBlob(INSPECTION_RATES_BLOB, patch);
 }
 
 export async function getTravelRates(): Promise<ResolvedTravelRates> {
-  return getBlob(TRAVEL_RATES_BLOB, { ...TRAVEL_RATE_DEFAULTS });
+  await ensureMarkupSettings();
+  return withoutBasisKeys(await getBlob(TRAVEL_RATES_BLOB, { ...TRAVEL_RATE_DEFAULTS }));
 }
 
 export async function setTravelRates(
   patch: Partial<TravelRates>
 ): Promise<void> {
+  await ensureMarkupSettings();
   await setBlob(TRAVEL_RATES_BLOB, patch);
 }
 
 export async function getCatalogRates(): Promise<CatalogRates> {
-  return getBlob(CATALOG_RATES_BLOB, { ...CATALOG_RATE_DEFAULTS });
+  await ensureMarkupSettings();
+  return withoutBasisKeys(await getBlob(CATALOG_RATES_BLOB, { ...CATALOG_RATE_DEFAULTS }));
 }
 
 export async function setCatalogRates(
   patch: Partial<CatalogRates>
 ): Promise<void> {
+  await ensureMarkupSettings();
   await setBlob(CATALOG_RATES_BLOB, patch);
 }
 
 export async function getFixtureRates(): Promise<FixtureRates> {
-  return getBlob(FIXTURE_RATES_BLOB, { ...FIXTURE_RATE_DEFAULTS });
+  await ensureMarkupSettings();
+  return withoutBasisKeys(await getBlob(FIXTURE_RATES_BLOB, { ...FIXTURE_RATE_DEFAULTS }));
 }
 
 export async function setFixtureRates(
   patch: Partial<FixtureRates>
 ): Promise<void> {
+  await ensureMarkupSettings();
   await setBlob(FIXTURE_RATES_BLOB, patch);
 }
 
@@ -381,7 +447,7 @@ export const GROUPS: PricingGroup[] = [
     items: [
       rate("system.freightPct", "Freight & delivery", 5, "%", { min: 0, max: 20, step: 0.5, help: "freight = materials × this" }),
       rate("system.contingencyPct", "Default contingency", 10, "%", { min: 0, max: 25, step: 1, help: "Applied to materials + labor + freight. New designs start at this value." }),
-      rate("system.baseMargin", "Base margin", 30, "%", { min: 0, max: 60, step: 1, ref: true, help: "Baseline margin baked into catalog list vs cost.  sell = cost ÷ (1 − margin)" }),
+      rate("system.baseMargin", "Base margin", 43, "%", { min: 0, max: 150, step: 1, ref: true, help: "Baseline margin baked into catalog list vs cost.  sell = cost ÷ (1 − margin)" }),
       rate("system.tierGoodCost", "Good tier — cost ×", 0.80, "×", { min: 0.3, max: 1.5, step: 0.01, ref: true, help: "Good multiplies each line’s cost by this." }),
       rate("system.tierGoodPrice", "Good tier — price ×", 0.84, "×", { min: 0.3, max: 1.5, step: 0.01, ref: true }),
       rate("system.tierBetterCost", "Better tier — cost ×", 1.00, "×", { min: 0.3, max: 2, step: 0.01, ref: true }),
@@ -401,13 +467,13 @@ export const GROUPS: PricingGroup[] = [
     sub: "Per-customer margin — punch item 11 (D87). Tier lives on the PERSON, company is fallback.",
     note: "The resolved tier's margin SEEDS pricing everywhere (estimator labor & curtains, flame/repair/inspection quotes, Quick Design promotion, the portal) and is stamped onto each quote at creation — estimators can still override per quote. Not visible to customers. Resolution: quote's attn contact → their company → Base.",
     items: [
-      rate("tiers.base", "Base margin", 30, "%", { min: 0, max: 60, step: 1, help: "The default tier — every customer without an assigned tier prices here.  sell = cost ÷ (1 − margin)" }),
-      rate("tiers.copper", "Copper margin", 27, "%", { min: 0, max: 60, step: 1 }),
-      rate("tiers.silver", "Silver margin", 22, "%", { min: 0, max: 60, step: 1 }),
-      rate("tiers.gold", "Gold margin", 20, "%", { min: 0, max: 60, step: 1 }),
-      rate("tiers.platinum", "Platinum margin", 15, "%", { min: 0, max: 60, step: 1 }),
-      rate("tiers.reseller", "Reseller margin", 10, "%", { min: 0, max: 60, step: 1 }),
-      rate("tiers.employee", "Employee margin", 5, "%", { min: 0, max: 60, step: 1 }),
+      rate("tiers.base", "Base margin", 43, "%", { min: 0, max: 150, step: 1, help: "The default tier — every customer without an assigned tier prices here.  sell = cost ÷ (1 − margin)" }),
+      rate("tiers.copper", "Copper margin", 37, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.silver", "Silver margin", 28, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.gold", "Gold margin", 25, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.platinum", "Platinum margin", 18, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.reseller", "Reseller margin", 11, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.employee", "Employee margin", 5, "%", { min: 0, max: 150, step: 1 }),
       formula("tiers.resolution", "Tier resolution (design §4.7)", "quote's designated contact's tier  →  else their company's tier  →  else Base   ·   stamped on the quote at creation; each revision re-stamps at cut time"),
     ],
   },
@@ -438,7 +504,7 @@ export const GROUPS: PricingGroup[] = [
       rate("laborRate", "Labor rate (testing & travel)", 75, "$/hr", { min: 0, max: 200, step: 1, store: "flame" }),
       rate("curtainMinutes", "Minutes to test one curtain", 5, "min", { min: 1, max: 30, step: 1, store: "flame" }),
       rate("baseFee", "Base minimum (whole job)", 150, "$", { min: 0, max: 1000, step: 5, store: "flame", help: "Floor on the whole job after mileage + travel + testing." }),
-      rate("margin", "Flame-test margin", 30, "%", { min: 0, max: 60, step: 1, store: "flame", pctStored: true }),
+      rate("margin", "Flame-test margin", 43, "%", { min: 0, max: 150, step: 1, store: "flame", pctStored: true }),
       rate("travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "flame" }),
       rate("flame.flyCrew", "Crew when the trip flies", 1, "people", { min: 1, max: 10, step: 1, store: "flame", key: "flyCrew", help: "Default crew for a flame test priced as flights (Travel & mileage → fly threshold). Overridable on each quote." }),
       formula("flame.total", "Flame-test total", "max( $base ,  miles × mileageRate  +  travelHrs × laborRate  +  curtains × curtainMin × (laborRate ÷ 60) )  ÷  (1 − margin)  ·  travel = flights when one trip's drive cost ≥ threshold  ·  rounded to the nearest $25"),
@@ -452,8 +518,8 @@ export const GROUPS: PricingGroup[] = [
       rate("repair.laborRate", "Labor rate (repair & service)", 75, "$/hr", { min: 0, max: 300, step: 1, store: "repair", key: "laborRate" }),
       rate("repair.mileageRate", "Mileage rate", 1, "$/mi", { min: 0, max: 2, step: 0.01, store: "repair", key: "mileageRate", help: "Round-trip miles from the default quote origin, shared across venues on one trip." }),
       rate("repair.minCallout", "Minimum service call", 350, "$", { min: 0, max: 2000, step: 5, store: "repair", key: "minCallout", help: "Floor on the service sell (labor + travel), before parts." }),
-      rate("repair.partsMargin", "Parts margin", 30, "%", { min: 0, max: 60, step: 1, store: "repair", key: "partsMargin", pctStored: true, help: "Markup on parts.  partsSell = partsCost ÷ (1 − partsMargin)" }),
-      rate("repair.margin", "Repair margin (labor + travel)", 30, "%", { min: 0, max: 60, step: 1, store: "repair", key: "margin", pctStored: true }),
+      rate("repair.partsMargin", "Parts margin", 43, "%", { min: 0, max: 150, step: 1, store: "repair", key: "partsMargin", pctStored: true, help: "Markup on parts.  partsSell = partsCost ÷ (1 − partsMargin)" }),
+      rate("repair.margin", "Repair margin (labor + travel)", 43, "%", { min: 0, max: 150, step: 1, store: "repair", key: "margin", pctStored: true }),
       rate("repair.emergencyMult", "Emergency / after-hours ×", 1.5, "×", { min: 1, max: 3, step: 0.05, store: "repair", key: "emergencyMult", help: "Multiplies the labor rate for emergency or after-hours work." }),
       rate("repair.travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "repair", key: "travelRoundMin" }),
       rate("repair.flyCrew", "Crew when the trip flies", 2, "people", { min: 1, max: 10, step: 1, store: "repair", key: "flyCrew", help: "Default crew for a repair priced as flights — never fewer than the quote's own crew size. Overridable on each quote." }),
@@ -471,7 +537,7 @@ export const GROUPS: PricingGroup[] = [
       rate("inspection.baseHours", "Base on-site hours (per visit)", 2, "hr", { min: 0, max: 16, step: 0.5, store: "inspection", key: "baseHours", help: "Setup, venue walkthrough, and findings write-up — charged once per visit." }),
       rate("inspection.level2Mult", "Level 2 (5-year) ×", 1.75, "×", { min: 1, max: 4, step: 0.05, store: "inspection", key: "level2Mult", help: "Multiplies inspection time for the in-depth 5-year inspection." }),
       rate("inspection.minFee", "Minimum inspection fee", 650, "$", { min: 0, max: 5000, step: 25, store: "inspection", key: "minFee", help: "Floor on the whole job after labor + travel." }),
-      rate("inspection.margin", "Inspection margin", 30, "%", { min: 0, max: 60, step: 1, store: "inspection", key: "margin", pctStored: true }),
+      rate("inspection.margin", "Inspection margin", 43, "%", { min: 0, max: 150, step: 1, store: "inspection", key: "margin", pctStored: true }),
       rate("inspection.travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "inspection", key: "travelRoundMin" }),
       rate("inspection.flyCrew", "Crew when the trip flies", 1, "people", { min: 1, max: 10, step: 1, store: "inspection", key: "flyCrew", help: "Default crew for an inspection priced as flights. Overridable on each quote." }),
       formula("inspection.hours", "Inspection hours", "hours = ( baseHours + lineSets × lineSetMin ÷ 60 ) × (level 2 ? level2× : 1)"),
@@ -509,7 +575,7 @@ export const GROUPS: PricingGroup[] = [
     // drop `ref` in the same breath as adding the first real consumer.
     note: "Reference — the value is saved, but no pricing path consumes it yet: a part with no list price is skipped rather than defaulted through this margin. Per-part list vs. cost is maintained in the Catalog.",
     items: [
-      rate("catalog.defaultMargin", "Default part margin", 30, "%", { min: 0, max: 60, step: 1, store: "catalog", key: "defaultMargin", pctStored: true, ref: true }),
+      rate("catalog.defaultMargin", "Default part margin", 43, "%", { min: 0, max: 150, step: 1, store: "catalog", key: "defaultMargin", pctStored: true, ref: true }),
       formula("catalog.list", "List price from cost", "list = cost ÷ (1 − margin)"),
     ],
   },
@@ -636,14 +702,16 @@ const ENGINE_BLOBS: Record<EngineStore, [string, Record<string, number>]> = {
 };
 
 async function engineGet(store: EngineStore): Promise<Record<string, number>> {
+  await ensureMarkupSettings();
   const [blob, defaults] = ENGINE_BLOBS[store];
-  return getBlob(blob, { ...defaults });
+  return withoutBasisKeys(await getBlob(blob, { ...defaults }));
 }
 
 async function engineSet(
   store: EngineStore,
   patch: Record<string, number>
 ): Promise<void> {
+  await ensureMarkupSettings();
   await setBlob(ENGINE_BLOBS[store][0], patch);
 }
 
@@ -652,6 +720,7 @@ async function engineSet(
 export async function value(
   item: PricingEntry | string
 ): Promise<number | null> {
+  await ensureMarkupSettings();
   const it = typeof item === "string" ? BY_ID[item] : item;
   if (!it || it.kind !== "rate") return null;
   if (it.store !== "general") {
@@ -690,6 +759,7 @@ export async function defaultOf(item: PricingEntry | string): Promise<number | n
  * every other rate is written back to its registry def (prototype: setValue(id, def)).
  */
 export async function resetValue(item: PricingEntry | string): Promise<void> {
+  await ensureMarkupSettings();
   const it = typeof item === "string" ? BY_ID[item] : item;
   if (!it || it.kind !== "rate") return;
   if (it.store === "general" && LABOR_PCT_IDS.has(it.id)) {
@@ -703,6 +773,7 @@ export async function setValue(
   item: PricingEntry | string,
   val: number | string
 ): Promise<void> {
+  await ensureMarkupSettings();
   const it = typeof item === "string" ? BY_ID[item] : item;
   if (!it || it.kind !== "rate") return;
   let v = typeof val === "number" ? val : parseFloat(val);
@@ -724,6 +795,7 @@ export async function isDefault(item: PricingEntry | string): Promise<boolean> {
 }
 
 export async function resetAll(): Promise<void> {
+  await ensureMarkupSettings();
   // writeGeneral({}) in the prototype replaced the blob; setBlob merges, so
   // overrides are cleared by nulling every general rate key (value() treats
   // null as "no override" and falls back to def).
@@ -755,18 +827,21 @@ export async function frac(id: string, fb?: number): Promise<number> {
 
 /** #231/#232/#233 late: the wire-pull, Cable Package and system-labor rules, in ONE read of the general blob. */
 export async function loadWireLaborRules(): Promise<WireLaborRules> {
+  await ensureMarkupSettings();
   const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
   return wireLaborRulesFrom((id) => g[id]);
 }
 
 /** #227 late: the curtain sewing % (a percent number, 10 = 10 %) — one read of the general blob. */
 export async function loadCurtainSewingPct(): Promise<number> {
+  await ensureMarkupSettings();
   const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
   return sewingPctFrom(g[SEWING_PCT_ID]);
 }
 
 /** Jeff 2026-10-15 #19: the Estimator bonus rates (fractions) — one read of the general blob. */
 export async function loadBonusRates(): Promise<BonusRates> {
+  await ensureMarkupSettings();
   const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
   return bonusRatesFrom(g[BONUS_PACKAGE_RATE_ID], g[BONUS_ESTIMATOR_RATE_ID]);
 }
