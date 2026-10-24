@@ -1681,7 +1681,7 @@ See `.env.example`.
     `docs/estimating-core/`). Quick Design types now live in `src/lib/design/quick-types.ts`.
     No behaviour change. Next: handoff PR 2 (phase 67 below, the HTML prototype package).
 
-70. 🚧 **Estimator handoff prototype** (#361, D1233–D1246, D1273, D1304, D1305) — handoff PR 2, stacked on PR 1. A confidential,
+70. 🚧 **Estimator handoff prototype** (#361, D1233–D1246, D1273, D1304–D1306) — handoff PR 2, stacked on PR 1. A confidential,
     offline package (`output/peak-estimator-handoff/`, zipped, git-ignored) that runs Quartzite's REAL Estimator,
     Catalog, Assembly Builder and Estimating Rules in the browser over a sliced production export, for a founder
     evaluating Peak's estimating. Source in `handoff/estimator/`: `build.ts` + `esbuild-plugins.ts` bundle the

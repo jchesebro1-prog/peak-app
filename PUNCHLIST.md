@@ -12818,6 +12818,8 @@ Spec `docs/superpowers/specs/2026-10-20-estimator-handoff-package-design.md`; pl
 
 **Update (Oct 23, D1305): re-ported after merging main through #367 (markup pricing).** 16 pinned originals changed and were re-read; the prototype now prices on markup (tiers 43/37/28/25/18/11/5, sliders to 125 %, `totals().markup`, `payload.markup`). Stored data: the app converts margin → markup on read (quotes) and once (rate blobs); the prototype applies the same converters (imported from `src/lib/markup/`) in the slicer AND at the browser store's read, so a margin-era or mixed export shows the same prices and tiers as the app, never double-converted (`handoff/estimator/markup-basis.ts`; tests in `handoffMarkupChecks`). `pricing.md` rewritten on markup, `data-model.md` gains the pricing basis. `--drift` 42 ports / 102 originals.
 
+**Update (Oct 23, D1306): re-ported after merging main through #368 (ETC price sync).** 18 pinned originals re-read. In the prototype: the sent-estimate locks (Copy / Move into, Copy within, Load system with its new target argument, the saved tier stamp) and **Re-price on Revise** (`repricedOnRevise`, the Build banner, a reload after the move). Out of scope, said in `ports.md`: the ETC connection, key, API pull and price-book import (nothing ships: tests pin that no key, snapshot or internal ETC part field is bundled). `--drift` 42 ports / 102 originals.
+
 **Production run checklist** (repository root; `handoff/estimator/RUNBOOK.md` repeats it, with the time and Artifact notes — it is never shipped):
 
 ```bash

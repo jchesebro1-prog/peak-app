@@ -23,7 +23,8 @@ import { tracksWonVersion } from "@/lib/quote-won-version";
 import { rewriteQuoteSpec } from "@/lib/catalog-rename/rewrite";
 import type { HandoffStore } from "./store";
 import { clock, numbering, onWon, users } from "./ports";
-import { pipelinesNow, renameRefs, reviewLimitContextNow } from "./readers";
+import { bonusRatesNow, bySkuResolver, liveCatalog, pipelinesNow, renameRefs, reviewLimitContextNow } from "./readers";
+import { repriceAppliesTo, repriceSkus, type RepriceCatalogPart } from "@/lib/estimate-reprice/rules";
 import {
   ApprovalGateRefused,
   applyApprove,
@@ -44,6 +45,7 @@ import {
   requireApprovalToAdvance,
   resolveStatusGate,
   type ApprovalGateResult,
+  type StatusMoveInput,
   type SetStatusOpts,
 } from "./quote-model";
 
@@ -74,6 +76,30 @@ export function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 async function renameRewriter(store: HandoffStore): Promise<(s: unknown) => unknown> {
   const r = await renameRefs(store);
   return (s) => (s && r.m.size ? rewriteQuoteSpec(s, r.m, r.models) ?? s : s);
+}
+
+/**
+ * #368 estimate-reprice/server.ts loadRepriceInputs over the browser store, for setStatus's revise (a sent / won / lost Estimator
+ * system estimate going back to Draft; never a historical import): today's catalog for every plain line's SKU once renames are
+ * followed (live parts only, a missing one absent), Estimating Rules' bonus rates, and the spec-moving-onto-renamed-parts function.
+ * `specs` are every version the move might re-price — the live spec and the won version a reopen puts back.
+ */
+async function repriceInputsFor(store: HandoffStore, q: Quote, status: QuoteStatus, specs: unknown[], opts: SetStatusOpts): Promise<StatusMoveInput["reprice"]> {
+  if (!(status === "draft" && q.status !== "draft" && repriceAppliesTo(q) && opts.bypassApprovalGate !== "historical-import")) return null;
+  const r = await renameRefs(store);
+  const followRenames = (spec: unknown): unknown => (spec && r.m.size ? rewriteQuoteSpec(spec, r.m, r.models) ?? spec : spec);
+  const skus = new Set<string>();
+  for (const spec of specs) {
+    const secs = (followRenames(spec) as { sections?: unknown } | null | undefined)?.sections;
+    if (Array.isArray(secs)) repriceSkus(secs as SpecSection[]).forEach((s) => skus.add(s));
+  }
+  const resolve = bySkuResolver(await liveCatalog(store), store.catalogRenames);
+  const catalog = new Map<string, RepriceCatalogPart>();
+  for (const sku of skus) {
+    const p = resolve(sku);
+    if (p && typeof p.sku === "string") catalog.set(sku, { sku: p.sku, cost: Number(p.cost), category: typeof p.category === "string" ? p.category : null });
+  }
+  return { catalog, bonusRates: bonusRatesNow(), followRenames };
 }
 
 /** The bonus record names its people from the FULL roster, inactive included (users.ts allUsers()). */
@@ -199,6 +225,7 @@ export function quoteRepo(store: HandoffStore) {
           wonRewrite: recordsWon ? rewrite : null,
           alternatesTaken: opts.alternatesTaken,
           users: status === "won" ? bonusUsers() : [],
+          reprice: await repriceInputsFor(store, q, status, [q.spec, gateQ.spec], opts),
         });
         await store.put("quotes", q);
         moved = true;

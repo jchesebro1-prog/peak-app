@@ -111,6 +111,21 @@ A new system starts at the freight rule's base percent until a venue is picked. 
 Systems still on the automatic freight (`freightAuto`) follow a venue change. A freight percent typed
 by hand is never rewritten (`PeakEstimatingCore.applyAutoFreight`).
 
+### Sent estimates keep their prices; Revise re-prices
+
+A sent, won or lost estimate does not re-price: Copy / Move a system into it, Copy within it, Load system into
+it and a tier change are all refused or ignored until it is revised (the server checks the stored status; the
+track / curtain / labor configurators and the tier re-price offer are greyed in the browser). Copy or Move into
+a **new** estimate is never locked. **Revise** (the move back to Draft) re-prices the draft's *plain catalog
+lines* to today's catalog cost in the same write: a line keeps its own cost-to-sell ratio, so
+new cost = catalog cost, new price = old price × new cost ÷ old cost (a typed extended sell scales the same
+way), rounded to the cent (a ratio, not a markup formula). Not re-priced:
+custom, vendor-quote, allowance, curtain, labor (including catalog parts in the Labor category), assembly /
+fixture / rack / track, price-on-request and bonus lines, a line whose SKU is not a live catalog part with a
+cost, and the saved revisions. A system with a typed price keeps it (its lines' cost moves) and is named in
+the summary the Build banner shows. After re-pricing, the same derivations a save runs apply (project
+discounts, the bonus lines, the stored value and markup).
+
 ### Project discounts lower cost, never sell
 
 A line's `cost` can carry a vendor's project discount (`data-model.md` → *Project discounts*). The line keeps

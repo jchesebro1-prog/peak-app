@@ -31,6 +31,8 @@ import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
 import { PRICING_TIER_LABEL } from "@/lib/identity/config";
 import { rackFactsOrUndefined } from "@/lib/rack/part-facts";
 import { reopenedAtWonVersion } from "@/lib/quote-won-version";
+import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
+import { repricedNow } from "@/lib/estimate-reprice/rules";
 import { quoteOwnerName } from "@/lib/review-limits";
 import { sameName } from "@/lib/quote-approval-rules";
 import { canChangeQuotePeople, PEOPLE_LOCKED_AFTER_SEND } from "@/lib/quote-people-lock";
@@ -127,6 +129,7 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
     let q: Quote | null = null;
     let statusError: string | undefined;
     let reopenedAtWon = false;
+    let repriced = false; // #368: this save's status move was a revise that re-priced lines to today's catalog
     let statusNotice: string | undefined = plan.notice;
     if (loadedId) {
       q = await repo.update(loadedId, { ...plan.patch, vendorQuotes: storedVendorQuotes } as QuotePatch);
@@ -137,6 +140,7 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
             const beforeMove = q;
             q = (await repo.setStatus(loadedId, payload.status, user.name)) ?? q;
             reopenedAtWon = reopenedAtWonVersion(beforeMove, q);
+            repriced = repricedNow(beforeMove, q);
           } catch (e) {
             statusError = statusFailureMessage(e, "estimator/actions saveQuoteAction: setStatus on an existing quote threw");
           }
@@ -190,6 +194,7 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
       ...(statusError ? { error: statusError } : {}),
       ...(statusNotice ? { notice: statusNotice } : {}),
       ...(reopenedAtWon ? { reopenedAtWon: true } : {}),
+      ...(repriced ? { repriced: true } : {}),
     };
   };
 
@@ -408,7 +413,9 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
     }
     refresh();
     const sync = await syncOf(id, user);
-    return reopenedAtWonVersion(before, await repo.get(id)) ? { ...sync, reopenedAtWon: true } : sync;
+    const after = await repo.get(id);
+    // #368: a revise that re-priced lines changed the document under the open Estimator — it reloads.
+    return { ...sync, ...(reopenedAtWonVersion(before, after) ? { reopenedAtWon: true } : {}), ...(repricedNow(before, after) ? { repriced: true } : {}) };
   };
 
   const saveBonusSplitAction: Impl<"saveBonusSplitAction"> = async (id, leadPct) => {
@@ -467,7 +474,9 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
     }
     refresh();
     const sync = await stageSyncOf(id, user);
-    return reopenedAtWonVersion(before, await repo.get(id)) ? { ...sync, reopenedAtWon: true } : sync;
+    const after = await repo.get(id);
+    // #368: a revise that re-priced lines changed the document under the open Estimator — it reloads.
+    return { ...sync, ...(reopenedAtWonVersion(before, after) ? { reopenedAtWon: true } : {}), ...(repricedNow(before, after) ? { repriced: true } : {}) };
   };
 
   const setQuotePipelineAction: Impl<"setQuotePipelineAction"> = async (id, pipelineId) => {
@@ -515,6 +524,9 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
   const copySystemToEstimateAction: Impl<"copySystemToEstimateAction"> = async (sectionIn, target, sourceContext, vendorQuotes = [], sourceQuoteId = null, projectDiscounts) => {
     await ready();
     const user = users.current();
+    // #368: Copy within this estimate adds lines at today's prices — refused on a stored sent / won / lost estimate until it is revised
+    // (an unsaved estimate has no stored status).
+    if (target.kind === "same" && typeof sourceQuoteId === "string" && sourceQuoteId && repriceLocked((await repo.get(sourceQuoteId))?.status)) return { ok: false, error: REVISE_FIRST };
     const section = withSanitizedOutputFields(withSanitizedKeyProducts(sectionIn));
     const items = Array.isArray(section?.items) ? section.items : [];
     const { catalog, fixtures, renames } = await copyPricingFor(store, items);
@@ -530,6 +542,8 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
     } else if (target.kind === "existing") {
       const existing = await repo.get(target.quoteId);
       if (!existing) return { ok: false, error: "That estimate could not be found." };
+      // #368: refused before any re-pricing work (placeSystemInEstimate refuses it again under its own read).
+      if (repriceLocked(existing.status)) return { ok: false, error: REVISE_FIRST };
       const stored = usableTierMarkup(existing.tierMargin);
       if (stored != null) {
         targetTier = stored;

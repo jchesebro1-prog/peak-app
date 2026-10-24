@@ -21,6 +21,7 @@ import { displayQuoteNumber } from "@/lib/estimate-number";
 import { allAssembliesFrom, fixtureSkus, type FixtureRecord } from "@/lib/fixture-assemblies";
 import { rewriteQuoteSpec } from "@/lib/catalog-rename/rewrite";
 import { applyProjectDiscounts, discountsForSections, mergeDiscountsForSave, sanitizeProjectDiscounts, type ProjectDiscounts } from "@/lib/project-discounts/rules";
+import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 import { boxSaleOf, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
 import { refresh } from "../router";
 import type { HandoffStore } from "../store";
@@ -114,6 +115,8 @@ export async function placeSystemInEstimate(
   if (target.kind === "existing") {
     const existing = await repo.get(target.quoteId);
     if (!existing) return { ok: false, error: "That estimate could not be found." };
+    // #368: a sent / won / lost estimate keeps its prices — nothing is placed into it until it is revised.
+    if (repriceLocked(existing.status)) return { ok: false, error: REVISE_FIRST };
     // Box goods sale (spec 2026-10-21): a system with labor can't join an existing box sale — refused before anything
     // is written. Move/Copy into a NEW estimate is unchanged (the new estimate starts as a normal one).
     if (boxSaleOf(existing)) {

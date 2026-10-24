@@ -631,6 +631,7 @@ export async function handoffRuntimeChecks(ok: Ok) {
   await handoffBoxSaleChecks(ok);
   await handoffDiscountChecks(ok);
   await handoffMarkupChecks(ok);
+  await handoffRepriceChecks(ok);
   await handoffShellChecks(ok);
   await handoffAssemblyChecks(ok);
   await handoffRulesChecks(ok);
@@ -1163,11 +1164,11 @@ export async function handoffReviewChecks(ok: Ok) {
   ok((await la.searchSystemLibraryAction("stage lighting")).length === 0, "handoff review: searchSystemLibraryAction — drafts never join the library");
   const entry = await la.getSystemLibraryEntryAction(hits[0]?.key ?? "");
   ok(!!entry && entry.quoteId === "Q-3002" && (await la.getSystemLibraryEntryAction("nope")) === null, "handoff review: getSystemLibraryEntryAction — the entry by key; an unknown key is null");
-  const loaded = await la.loadLibrarySystemAction(hits[0]?.key ?? "", { tierMargin: 0.3 });
+  const loaded = await la.loadLibrarySystemAction(hits[0]?.key ?? "", null, { tierMargin: 0.43 });
   ok(loaded.ok && loaded.systemName === "Dimming rack" && loaded.estNumber === "EST-3002" && loaded.section.items.length === 1 && loaded.section.items[0].cost === 900 && loaded.costsUpdated > 0,
     `handoff review: loadLibrarySystemAction — re-priced at today's catalog cost (got ${loaded.ok ? `${loaded.section.items[0].cost}, ${loaded.costsUpdated} updated` : loaded.error})`);
-  const gone = await la.loadLibrarySystemAction("Q-3002:live:missing", { tierMargin: null });
-  ok(!gone.ok && !(await la.loadLibrarySystemAction("garbage", { tierMargin: null })).ok, "handoff review: loadLibrarySystemAction — a missing system / a malformed key refuse");
+  const gone = await la.loadLibrarySystemAction("Q-3002:live:missing", null, { tierMargin: null });
+  ok(!gone.ok && !(await la.loadLibrarySystemAction("garbage", null, { tierMargin: null })).ok, "handoff review: loadLibrarySystemAction — a missing system / a malformed key refuse");
 
   // --- package panel, client package, output, PDF status ---
   const pa = packageActions(store);
@@ -1568,13 +1569,14 @@ export async function handoffBoxSaleChecks(ok: Ok) {
   const boxSecs = [{ id: "s1", name: "Stage lighting", kind: "lighting", freightPct: 0, items: lines }];
   const base = { quoteType: "system", source: "estimator", customerId: "c1", customer: "Acme Theatre", contactName: "Pat Lee", owner: "Ann Admin", createdAt: 1, history: [], revisions: [] };
   const qBox = { ...base, id: "Q-5001", estNo: 5001, name: "Box order", status: "draft", updatedAt: 1_790_000_000_000, boxSale: true, spec: { sections: boxSecs, mobs: [] } };
+  const qBoxDraft = { ...base, id: "Q-5004", estNo: 5004, name: "Box draft", status: "draft", updatedAt: 1_790_000_000_000, boxSale: true, spec: { sections: boxSecs, mobs: [] } };
   const qPlain = { ...base, id: "Q-5002", estNo: 5002, name: "Normal", status: "draft", updatedAt: 1_790_000_000_000, spec: { sections: boxSecs, mobs: [] } };
   const laborSec = { id: "sL", name: "Install", kind: "labor", freightPct: 0, items: [{ id: 1, sku: "LAB", desc: "Install", qty: 4, unit: "ea", cost: 20, price: 40, labor: true }] };
   const qBoxLabor = { ...base, id: "Q-5003", estNo: 5003, name: "Box with labor", status: "draft", updatedAt: 1_790_000_000_000, boxSale: true, spec: { sections: [...boxSecs, laborSec], mobs: [] } };
   const catalog = docs([
     { id: "ETC:CS15", sku: "ETC:CS15", desc: "ColorSource 15 fixture", category: "Lighting", unit: "ea", cost: 900, list: 1250, mfr: "ETC", manufacturerPartNumber: "7410A1015", manufacturerModelNumber: "CS15" },
   ]);
-  const store = await openStore({ quotes: docs([qBox, qPlain, qBoxLabor]), catalog, fixtures: [], blobs: [], settings: [{ id: "main", data: { companyName: "Peak Systems Group" } } as { id: string }] }, { idb: null });
+  const store = await openStore({ quotes: docs([qBox, qBoxDraft, qPlain, qBoxLabor]), catalog, fixtures: [], blobs: [], settings: [{ id: "main", data: { companyName: "Peak Systems Group" } } as { id: string }] }, { idb: null });
   configurePorts({ store, customers: cust, rules: { settings: { companyName: "Peak Systems Group" }, blobs: {} }, team });
   users.setCurrent("u1");
   const repo = quoteRepo(store);
@@ -1611,11 +1613,11 @@ export async function handoffBoxSaleChecks(ok: Ok) {
   // Move / Copy: a labor system into an existing box sale is refused; a new estimate copies the stored source's flag
   const ctx = { customerId: "c1", locationId: null, customer: "Acme Theatre", contactName: "Pat Lee", tierMargin: 0.3 };
   const laborSection = { ...laborSec, id: "sysLab" } as never;
-  const intoBox = await A.moveSystemToEstimateAction(laborSection, { kind: "existing", quoteId: "Q-5001" }, ctx, [], "Q-5002");
-  ok(!intoBox.ok && (intoBox as { error: string }).error === BOX_SALE_LABOR_MESSAGE && !JSON.stringify((await repo.get("Q-5001"))!.spec).includes("sysLab"), `${T}: Move into an existing box sale — a system with labor is refused before anything is written`);
-  const copyIntoBox = await A.copySystemToEstimateAction({ ...laborSec, id: "sysLab2" } as never, { kind: "existing", quoteId: "Q-5001" }, ctx, [], "Q-5002");
+  const intoBox = await A.moveSystemToEstimateAction(laborSection, { kind: "existing", quoteId: "Q-5004" }, ctx, [], "Q-5002");
+  ok(!intoBox.ok && (intoBox as { error: string }).error === BOX_SALE_LABOR_MESSAGE && !JSON.stringify((await repo.get("Q-5004"))!.spec).includes("sysLab"), `${T}: Move into an existing box sale — a system with labor is refused before anything is written`);
+  const copyIntoBox = await A.copySystemToEstimateAction({ ...laborSec, id: "sysLab2" } as never, { kind: "existing", quoteId: "Q-5004" }, ctx, [], "Q-5002");
   ok(!copyIntoBox.ok, `${T}: Copy into an existing box sale — refused the same way`);
-  const okInto = await A.moveSystemToEstimateAction({ id: "sysOk", name: "Gear", kind: "lighting", freightPct: 0, items: [{ id: 1, sku: "X", desc: "x", qty: 1, unit: "ea", cost: 5, price: 9 }] } as never, { kind: "existing", quoteId: "Q-5001" }, ctx, [], null);
+  const okInto = await A.moveSystemToEstimateAction({ id: "sysOk", name: "Gear", kind: "lighting", freightPct: 0, items: [{ id: 1, sku: "X", desc: "x", qty: 1, unit: "ea", cost: 5, price: 9 }] } as never, { kind: "existing", quoteId: "Q-5004" }, ctx, [], null);
   ok(okInto.ok, `${T}: Move a labor-free system into a box sale is fine`);
   const moveNewBox = await A.moveSystemToEstimateAction({ id: "sysM", name: "Rig", kind: "lighting", freightPct: 0, items: [{ id: 1, sku: "X", desc: "x", qty: 1, unit: "ea", cost: 5, price: 9 }] } as never, { kind: "new" }, ctx, [], "Q-5001");
   const moveNewPlain = await A.moveSystemToEstimateAction({ id: "sysN", name: "Rig2", kind: "lighting", freightPct: 0, items: [{ id: 1, sku: "X", desc: "x", qty: 1, unit: "ea", cost: 5, price: 9 }] } as never, { kind: "new" }, ctx, [], "Q-5002");
@@ -1751,8 +1753,9 @@ export async function handoffDiscountChecks(ok: Ok) {
   const existingItems = ((await repo.get(plain.id!))!.spec as { sections: SpecSection[]; projectDiscounts?: object });
   ok(mvExisting.ok && existingItems.sections.flatMap((s) => s.items).filter((i) => i.sku === "ETC:CS15").every((i) => i.cost === 900 && !("catalogCost" in i)) && !existingItems.projectDiscounts,
     `${T}: Move into an existing estimate — the target's own map decides (it has none: normal cost, no key)`);
-  const mvDiscTarget = await A.moveSystemToEstimateAction(sys("m4"), { kind: "existing", quoteId: id }, ctx, [], null);
-  const tgt = (await repo.get(id))!.spec as { sections: SpecSection[]; projectDiscounts?: object };
+  const discDraft = await A.saveQuoteAction(null, payloadFor(mk(), { name: "Disc draft", customerId: "c1", customer: "Acme Theatre", projectDiscounts: { "ETC:CS15": { pct: 10, note: "ETC reg pricing" } } as never }));
+  const mvDiscTarget = await A.moveSystemToEstimateAction(sys("m4"), { kind: "existing", quoteId: discDraft.id! }, ctx, [], null);
+  const tgt = (await repo.get(discDraft.id!))!.spec as { sections: SpecSection[]; projectDiscounts?: object };
   ok(mvDiscTarget.ok && tgt.sections.flatMap((s) => s.items).filter((i) => i.sku === "ETC:CS15").every((i) => i.cost === 810) && !!tgt.projectDiscounts,
     `${T}: Move into a discounted estimate — it applies and keeps its own map (spec rebuild carries projectDiscounts)`);
 }
@@ -1875,6 +1878,96 @@ export async function handoffMarkupChecks(ok: Ok) {
   const ssq = (sg.PEAK_ESTIMATES as Array<Record<string, unknown>>).find((x) => x.id === "Q-G001")!;
   ok(ssq.tierMargin === 0.37 && ssq.pricingBasis === "markup", `${T}: a stamped quote in the export is shipped as stored (the stamp is honoured at slice time too)`);
   void convertQuoteDoc;
+}
+
+/* ------------------------------------------------------------------ the merge of #368: sent-estimate locks, re-price on Revise */
+
+export async function handoffRepriceChecks(ok: Ok) {
+  const T = "handoff reprice";
+  const { REVISE_FIRST, repriceLocked } = await import("@/lib/estimate-reprice/lock");
+  const { LOAD_TARGET_GONE } = await import("../handoff/estimator/runtime/actions/library-actions");
+  const cust: SeedCustomers = { companies: [{ id: "c1", name: "Acme Theatre" }], sites: [], contacts: [], contactEmails: [], contactPhones: [], geoCache: [] };
+  const team: SeedTeamUser[] = [{ id: "u1", name: "Ann Admin", roles: ["Admin"], status: "active" }];
+  const catalog = docs([
+    { id: "ETC:CS15", sku: "ETC:CS15", desc: "ColorSource 15", category: "Lighting", unit: "ea", cost: 1000, list: 1500 },
+    { id: "ETC:GONE-NEW", sku: "ETC:GONE-NEW", desc: "Renamed target", category: "Lighting", unit: "ea", cost: 500, list: 700 },
+    { id: "LAB-1", sku: "LAB-1", desc: "Labor part", category: "Labor", unit: "hr", cost: 80, list: 120 },
+  ]);
+  const line = (id: number, o: Record<string, unknown>) => ({ id, qty: 1, unit: "ea", desc: "d", sku: "X", cost: 100, price: 150, ...o });
+  const sections = [
+    { id: "s1", name: "Gear", kind: "lighting", mfr: "", freightPct: 0, items: [
+      line(1, { sku: "ETC:CS15", desc: "CS15", qty: 4, cost: 900, price: 1285.71 }),
+      line(2, { sku: "CUSTOM", desc: "Custom", custom: true, cost: 100, price: 200 }),
+      line(3, { sku: "LAB-1", desc: "Labor part", cost: 70, price: 100 }),
+      line(4, { sku: "ETC:CS15", desc: "CS15 typed ext", qty: 2, cost: 900, price: 1285.71, extSellOverride: 2500 }),
+      line(5, { sku: "NOT-IN-CATALOG", desc: "Mystery", cost: 10, price: 15 }),
+    ] },
+    { id: "s2", name: "Typed", kind: "lighting", mfr: "", freightPct: 0, sellOverride: 9999, items: [line(1, { sku: "ETC:CS15", desc: "CS15 in a typed system", cost: 900, price: 1285.71 })] },
+  ];
+  const base = { quoteType: "system", source: "estimator", customerId: "c1", customer: "Acme", owner: "Ann Admin", createdAt: 1, updatedAt: 1_790_000_000_000, history: [], pricingBasis: "markup", pricingTier: "gold", tierMargin: 0.25, margin: 0.43 };
+  const mk = (id: string, status: string, o: Record<string, unknown> = {}) => ({ ...base, id, estNo: Number(id.slice(2)), name: id, status, value: 9000, revisions: [], spec: { sections: JSON.parse(JSON.stringify(sections)), mobs: [] }, ...o });
+  const sentQ = mk("Q-8001", "sent", { value: undefined, revisions: [{ rev: 1, at: 2, by: "x", reason: "sent", note: "", name: "x", value: 9000, margin: 0.43, tierMargin: 0.25, spec: { sections: JSON.parse(JSON.stringify(sections)) } }] });
+  const gridQ = mk("Q-8002", "sent", { source: "grid" });
+  const draftQ = mk("Q-8003", "draft");
+  const store = await openStore({ quotes: docs([sentQ, gridQ, draftQ, mk("Q-8004", "sent")]), catalog, fixtures: [], blobs: [], settings: [{ id: "main", data: { companyName: "Peak Systems Group" } } as { id: string }] }, { idb: null });
+  configurePorts({ store, customers: cust, rules: { settings: {}, blobs: {} }, team });
+  users.setCurrent("u1");
+  const repo = quoteRepo(store);
+  const A = estimatorActions(store);
+  const priceOf = (q: Quote, sec: number, id: number) => (q.spec as { sections: SpecSection[] }).sections[sec].items.find((i) => i.id === id)!;
+  const before = (await repo.get("Q-8001"))!;
+
+  // --- Re-price on Revise: sent → draft moves plain catalog lines to today's cost at their own cost-to-sell ratio ---
+  const revised = (await repo.setStatus("Q-8001", "draft", "Ann Admin"))!;
+  const l1 = priceOf(revised, 0, 1);
+  ok(revised.status === "draft" && l1.cost === 1000 && l1.price === Math.round(1285.71 * (1000 / 900) * 100) / 100, `${T}: Revise — a plain catalog line moves to today's cost (900 → 1000) and keeps its ratio (price ${l1.price})`);
+  const typedExt = priceOf(revised, 0, 4);
+  ok(typedExt.cost === 1000 && typedExt.extSellOverride === Math.round(2500 * (1000 / 900) * 100) / 100, `${T}: …a typed extended sell scales the same way (${typedExt.extSellOverride})`);
+  ok(priceOf(revised, 0, 2).cost === 100 && priceOf(revised, 0, 3).cost === 70 && priceOf(revised, 0, 5).cost === 10, `${T}: …a custom line, a Labor-category part and a SKU not in the catalog keep their cost`);
+  const rr = revised.repricedOnRevise as { count: number; delta: number; by: string; lines: unknown[]; typedSystems: Array<{ name: string }> } | undefined;
+  ok(!!rr && rr.count === 3 && rr.lines.length === 3 && rr.by === "Ann Admin" && rr.typedSystems.map((t) => t.name).join() === "Typed" && rr.delta === revised.value - Math.round(totals((before.spec as { sections: SpecSection[] }).sections, 0).grand) && rr.delta > 0 && rr.delta < revised.value / 2,
+    `${T}: …the quote carries the summary: ${rr?.count} lines, delta ${rr?.delta} = new value − the value before (a sliced quote has no stored value: totals() of its sections), the typed-price system named`);
+  ok(priceOf(revised, 1, 1).cost === 1000 && ((revised.spec as { sections: SpecSection[] }).sections[1].sellOverride === 9999), `${T}: …a system with a typed price keeps it while its lines' cost moves`);
+  ok(JSON.stringify(revised.revisions![0]) === JSON.stringify(before.revisions![0]), `${T}: …revisions are never touched`);
+  const props = await buildEstimatorProps(store, "Q-8001", new URLSearchParams());
+  ok(props.repricedOnRevise?.count === 3 && (await buildEstimatorProps(store, "Q-8003", new URLSearchParams())).repricedOnRevise === null, `${T}: props — the Build banner's data is passed (null when never re-priced)`);
+  // a second revise that changes nothing clears the stamp
+  await repo.setStatus("Q-8001", "sent", "Ann Admin");
+  const again = (await repo.setStatus("Q-8001", "draft", "Ann Admin"))!;
+  ok(!("repricedOnRevise" in again) && priceOf(again, 0, 1).cost === 1000, `${T}: a revise that changes nothing clears the older stamp`);
+  // not an Estimator system estimate / not a revise
+  const gridRevised = (await repo.setStatus("Q-8002", "draft", "Ann Admin"))!;
+  ok(priceOf(gridRevised, 0, 1).cost === 900 && !gridRevised.repricedOnRevise, `${T}: a Grid-sourced quote is never re-priced`);
+  const st = await A.setStatusAction("Q-8004", "draft");
+  ok(st.ok && (st as { repriced?: boolean }).repriced === true, `${T}: setStatusAction reports repriced so the open Estimator reloads`);
+
+  // --- the locks ---
+  ok(repriceLocked("sent") && repriceLocked("won") && repriceLocked("lost") && !repriceLocked("draft") && !repriceLocked(undefined), `${T}: repriceLocked — every status but draft (an unsaved estimate is open)`);
+  const ctx = { customerId: "c1", locationId: null, customer: "Acme", contactName: "", tierMargin: 0.25 };
+  const sec = { id: "sx", name: "S", kind: "lighting", mfr: "", freightPct: 0, items: [line(1, { sku: "ETC:CS15", cost: 900, price: 1285.71 })] } as never;
+  await repo.setStatus("Q-8003", "sent", "Ann Admin");
+  const mvLocked = await A.moveSystemToEstimateAction(sec, { kind: "existing", quoteId: "Q-8003" }, ctx, [], null);
+  const cpLocked = await A.copySystemToEstimateAction(sec, { kind: "existing", quoteId: "Q-8003" }, ctx, [], null);
+  const cpSame = await A.copySystemToEstimateAction(sec, { kind: "same" }, ctx, [], "Q-8003");
+  ok(!mvLocked.ok && (mvLocked as { error: string }).error === REVISE_FIRST && !cpLocked.ok && (cpLocked as { error: string }).error === REVISE_FIRST && !cpSame.ok && (cpSame as { error: string }).error === REVISE_FIRST,
+    `${T}: Move / Copy into a sent estimate and Copy within it are refused with "${REVISE_FIRST}"`);
+  ok((await A.copySystemToEstimateAction(sec, { kind: "new" }, ctx, [], "Q-8003")).ok && (await A.copySystemToEstimateAction(sec, { kind: "same" }, ctx, [], null)).ok, `${T}: …Copy into a NEW estimate and within an unsaved one are never locked`);
+  const la = libraryActions(store);
+  const lib = await la.searchSystemLibraryAction("Gear");
+  const key = lib[0]?.key ?? "Q-8003:live:s1";
+  const loadSent = await la.loadLibrarySystemAction(key, "Q-8003", { tierMargin: 0.25 });
+  const loadGone = await la.loadLibrarySystemAction(key, "Q-NOPE", { tierMargin: 0.25 });
+  const loadBad = await la.loadLibrarySystemAction(key, undefined as never, { tierMargin: 0.25 });
+  ok(!loadSent.ok && (loadSent as { error: string }).error === REVISE_FIRST && !loadGone.ok && (loadGone as { error: string }).error === LOAD_TARGET_GONE && !loadBad.ok && (loadBad as { error: string }).error === LOAD_TARGET_GONE,
+    `${T}: Load system — a sent target, a missing target and a missing argument are all refused server-side`);
+  await repo.setStatus("Q-8003", "draft", "Ann Admin");
+  const loadDraft = await la.loadLibrarySystemAction(key, "Q-8003", { tierMargin: 0.25 });
+  ok(loadDraft.ok || (loadDraft as { error: string }).error !== REVISE_FIRST, `${T}: …a draft target (or an unsaved one, null) is allowed through the lock`);
+  // a save on a sent estimate keeps the stored tier stamp
+  await repo.setStatus("Q-8003", "sent", "Ann Admin");
+  const keepTier = await A.saveQuoteAction("Q-8003", payloadFor(((await repo.get("Q-8003"))!.spec as { sections: SpecSection[] }).sections, { name: "Q-8003", customerId: "c1", customer: "Acme" }));
+  const kq = (await repo.get("Q-8003"))!;
+  ok(keepTier.ok && kq.pricingTier === "gold" && kq.tierMargin === 0.25, `${T}: a save on a sent estimate keeps its tier stamp (stored status decides, server-side)`);
 }
 
 export async function handoffShellChecks(ok: Ok) {

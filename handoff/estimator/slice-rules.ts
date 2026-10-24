@@ -51,6 +51,8 @@ export const QUOTE_FIELDS = [
   // pricingBasis (#367): the stamp saying the stored percentages (margin, tierMargin, revisions') are markup. sanitizeQuote
   // converts a margin-era quote first (the app's own hydrateDoc arithmetic), so every shipped estimate carries it.
   "pricingBasis",
+  // repricedOnRevise (#368): what the last Revise re-priced to today's catalog — the Build banner reads it (never customer-facing).
+  "repricedOnRevise",
   // boxSale (#362): the Box goods sale flag — the Estimator's switch, its BOM-only document and Build package.
   "boxSale",
 ] as const;

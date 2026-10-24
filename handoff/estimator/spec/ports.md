@@ -33,6 +33,15 @@ system does* and "Prototype:" as *what the fake does instead*.
 
 <!-- @api handoff/estimator/runtime/ports.ts users customers numbering email onWon clock -->
 
+### What is not in the prototype: the catalog price sync
+
+Quartzite can pull Peak's dealer prices from the manufacturer's API into the catalog (a connection with a stored
+API key, a daily pull, a price-book import). That is server and integration work with a secret, so it is **not**
+in the prototype: the key is never in the data files, the catalog screen has no sync, and the internal part
+fields it writes (a demo price and the price list that last set a part) are not bundled. The catalog here is the
+snapshot's prices. What the sync changes inside an estimate (a sent estimate keeping its prices, Revise
+re-pricing to today's catalog) is in the prototype and described in `pricing.md`.
+
 ## Types the ports use
 
 ### `TeamUser` (a roster member, `data/team.js`)

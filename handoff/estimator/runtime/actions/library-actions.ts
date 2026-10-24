@@ -16,6 +16,7 @@ import type * as Original from "@/app/(app)/estimator/library-actions";
 import { copySectionForTarget } from "@/app/(app)/estimator/copy-system";
 import { sanitizeSystemSell } from "@/app/(app)/estimator/pricing";
 import { TIER_FALLBACK_MARKUP, usableTierMarkup } from "@/app/(app)/estimator/tier-reprice";
+import { REVISE_FIRST } from "@/lib/estimate-reprice/lock";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import {
   flagOldVendorLine, LIBRARY_GONE, LIBRARY_QUERY_MAX, LIBRARY_SEARCH_LIMIT, librarySectionForLoad, parseLibraryKey, searchSystemLibrary,
@@ -39,8 +40,18 @@ export async function systemLibraryIndexLocal(store: HandoffStore): Promise<Syst
   return systemLibraryEntries(quotes, names);
 }
 
+/** load-system.ts LOAD_TARGET_GONE (that module reaches the database, so the text is copied; the drift pin watches it). */
+export const LOAD_TARGET_GONE = "That estimate could not be found — reload it and try again.";
+
 /** load-system.ts loadLibrarySystem over the store. */
-export async function loadLibrarySystemLocal(store: HandoffStore, key: string, targetTierMargin: number | null): Promise<LoadLibrarySystemResult> {
+export async function loadLibrarySystemLocal(store: HandoffStore, key: string, targetTierMargin: number | null, targetQuoteId: string | null): Promise<LoadLibrarySystemResult> {
+  // #368: `targetQuoteId` is the saved estimate the system lands in (null only for one never saved): a missing estimate is refused,
+  // and one whose STORED status isn't draft keeps its prices (REVISE_FIRST), before the library is read.
+  if (targetQuoteId !== null) {
+    const target = typeof targetQuoteId === "string" && targetQuoteId ? await quoteRepo(store).get(targetQuoteId) : null;
+    if (!target) return { ok: false, error: LOAD_TARGET_GONE };
+    if (target.status !== "draft") return { ok: false, error: REVISE_FIRST };
+  }
   const k = parseLibraryKey(key);
   if (!k) return { ok: false, error: LIBRARY_GONE };
   const q = await quoteRepo(store).get(k.quoteId);
@@ -84,9 +95,11 @@ export function libraryActions(store: HandoffStore): { [K in keyof A]: Impl<K> }
     return (await systemLibraryIndexLocal(store)).find((e) => e.key === k) ?? null;
   };
 
-  const loadLibrarySystemAction: Impl<"loadLibrarySystemAction"> = async (key, ctx) => {
+  const loadLibrarySystemAction: Impl<"loadLibrarySystemAction"> = async (key, quoteId, ctx) => {
+    // #368: the target is required — a missing / non-string argument is refused outright, so a caller that forgets it can't slip past the lock.
+    if (quoteId !== null && (typeof quoteId !== "string" || !quoteId)) return { ok: false, error: LOAD_TARGET_GONE };
     const tm = ctx && typeof ctx.tierMargin === "number" ? ctx.tierMargin : null;
-    return loadLibrarySystemLocal(store, String(key ?? ""), tm);
+    return loadLibrarySystemLocal(store, String(key ?? ""), tm, quoteId);
   };
 
   return { searchSystemLibraryAction, getSystemLibraryEntryAction, loadLibrarySystemAction };

@@ -19,6 +19,9 @@ import { REOPEN_AUTOSAVE_NOTE, reopenTarget, sameWonContent, tracksWonVersion, W
 import { carriesPipeline, firstStage, quotePipelineFor, quoteStageForStatus, type Pipelines, type QuotePipeline } from "@/lib/pipelines";
 import { approvalHolds, approverOnTransition, autoSnapshotStale, canAutoApprove, NO_REVIEW_LIMITS, quoteOwnerName, type AutoApprovalEval, type ReviewLimitContext } from "@/lib/review-limits";
 import { approvalFingerprint } from "@/lib/approval-snapshot";
+import { totals } from "@/lib/estimating-core/pricing";
+import { repriceForRevise, type RepriceCatalogPart } from "@/lib/estimate-reprice/rules";
+import type { BonusRates } from "@/lib/estimate-bonus/flags";
 import { isBonusEligibleQuote } from "@/lib/estimate-bonus/rules";
 import { buildBonusRecord, defaultAlternatesTaken, quoteHasBonusLines } from "@/lib/estimate-bonus/record";
 
@@ -136,7 +139,7 @@ export function buildQuote(id: string, partial: Partial<Quote>, quoteType: strin
 /** The fields quotes.ts update() never lets a patch write — each has its own writer. */
 export const UPDATE_OWNED_FIELDS = [
   "shareLink", "shareOpens", "wonRev", "packageFiles", "clientResponses", "bonusRecord", "estimatorBonusSplit", "packagePeakHeader",
-  "pricingBasis", "bid", "bidScopeOnly", "estimateEmails", "packageSelection", "reviewComments", "emailSending", "findingKeys", "assistNudge", "assistNudgeLeaseUntil",
+  "pricingBasis", "repricedOnRevise", "bid", "bidScopeOnly", "estimateEmails", "packageSelection", "reviewComments", "emailSending", "findingKeys", "assistNudge", "assistNudgeLeaseUntil",
 ] as const;
 
 /** quotes.ts update()'s mutator: the patch shallow-merged (numbers and owned fields stripped), updatedAt bumped, value rounded. Mutates `doc`. */
@@ -447,6 +450,9 @@ export type StatusMoveInput = {
   alternatesTaken?: string[];
   /** The roster for the bonus record's user ids. */
   users: { id: string; name: string }[];
+  /** #368 — Re-price on Revise's inputs (loadRepriceInputs, over the browser store); null = this move never re-prices
+   *  (not a revise of an Estimator system estimate, or a historical import). */
+  reprice?: { followRenames: (spec: unknown) => unknown; catalog: ReadonlyMap<string, RepriceCatalogPart>; bonusRates: BonusRates } | null;
 };
 
 /**
@@ -461,6 +467,13 @@ export function applyStatusMove(doc: Quote, m: StatusMoveInput): { revised: bool
   let reopened = false;
   let revised = false;
   let sentCut = false;
+  // #368: the quote's own stored value before this move — the re-price banner's delta is measured from it.
+  // A sliced quote carries no stored `value` (slice-rules.ts never ships it), so the prototype reads the value a save would have
+  // stored: totals() of the stored sections, rounded — never 0, which would show the whole total as the re-price's delta.
+  const valueBeforeMove =
+    typeof doc.value === "number" && Number.isFinite(doc.value)
+      ? doc.value
+      : Math.round(totals(((doc.spec as { sections?: SpecSection[] } | null | undefined)?.sections ?? []) as never, 0).grand);
   if (m.autoStamp) doc.review = m.autoStamp;
   if (m.reopen) {
     pushRevision(doc, actor, "manual", REOPEN_AUTOSAVE_NOTE, t);
@@ -471,6 +484,21 @@ export function applyStatusMove(doc: Quote, m: StatusMoveInput): { revised: bool
   doc.history.push({ at: t, from: doc.status, to: m.status } satisfies QuoteHistoryEntry);
   if (m.status === "draft" && doc.status !== "draft") revised = true;
   doc.status = m.status;
+  // #368 (spec §9.1): Re-price on Revise — the draft's plain catalog lines move to today's catalog cost (each keeps its cost-to-sell
+  // ratio), renames followed, then the save's own derivations (discounts, bonus lines, value / markup). After a reopen, so the won
+  // version is what re-prices; revisions are never touched. Stored only when a line changed — a revise that changed nothing clears an older one.
+  if (m.reprice && revised) {
+    const followed = m.reprice.followRenames(doc.spec ?? null) as { sections?: unknown; projectDiscounts?: unknown } | null;
+    const rp = repriceForRevise(doc, followed, m.reprice.catalog, m.reprice.bonusRates);
+    if (rp) {
+      doc.spec = { ...(followed || {}), sections: rp.sections };
+      doc.value = Math.round(rp.value);
+      doc.margin = rp.margin;
+      doc.repricedOnRevise = { at: t, by: m.by || DEFAULT_ACTOR, count: rp.count, delta: doc.value - valueBeforeMove, lines: rp.lines, typedSystems: rp.typedSystems };
+    } else if (doc.repricedOnRevise) {
+      delete doc.repricedOnRevise;
+    }
+  }
   if (m.status === "won" && m.wonRewrite) {
     const sent = latestSentRevision(doc.revisions);
     const sentLive = sent ? { ...sent, spec: m.wonRewrite(sent.spec ?? null) } : null;

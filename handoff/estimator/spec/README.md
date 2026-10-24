@@ -150,6 +150,9 @@ own system through those same seams.
   page. Quartzite's own PDF has no such footer. The print is the document (and, when the estimate asks
   for them, the Client cut sheets); Quartzite's PDF also appends the client's drawings and a page of
   datasheet links, which the prototype can't, since neither is bundled.
+- **Sent estimates keep their prices.** On a sent, won or lost estimate, Copy / Move into it, Load system and
+  the tier re-price are locked ("Revise the estimate first"). **Revise** re-prices the plain catalog lines to
+  the snapshot's catalog and shows what moved in a banner on Build (`pricing.md`).
 - **Pop-out windows** (the ⧉ buttons) aren't available. Pressing one shows a notice.
 - **Datasheets and Drawings**: those Customer review tabs show *Not included in the prototype*, and the
   client package lists no datasheets. No datasheets, manuals or drawing files are bundled.

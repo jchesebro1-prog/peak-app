@@ -10,7 +10,8 @@ import type { SavePayload } from "@/app/(app)/estimator/actions";
 import type { SpecMob, SpecSection, VendorQuote, VendorQuoteExtracted, VendorQuoteLine } from "@/app/(app)/estimator/types";
 import type { PackageDoc } from "@/lib/package-doc/types";
 import type { BonusRates } from "@/lib/estimate-bonus/flags";
-import { canonicalBonusSections } from "@/lib/estimate-bonus/canonical";
+import { deriveEstimatorSections } from "@/lib/estimate-reprice/derive";
+import { repriceLocked } from "@/lib/estimate-reprice/lock";
 import { withSanitizedKeyProducts } from "@/lib/estimating-core/narrative";
 import { COVER_SUMMARY_MAX, NOT_INCLUDED_MAX, cleanPlainText, withSanitizedOutputFields } from "@/lib/estimate-output/fields";
 import { normalizeSystemOrder, sanitizeGroups, sanitizeSectionGroupMeta, type SystemGroup } from "@/lib/estimate-groups/groups";
@@ -21,7 +22,7 @@ import { quoteRewardCredit, rewardCreditOf, sanitizeRewardCredit, withRewardCred
 import { normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { keepLiveVendorCompanies, stampVendorQuotes, vendorCompanyIdsOf } from "@/lib/vendor-quotes/rules";
 import { ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
-import { applyProjectDiscounts, mergeDiscountsForSave, sanitizeProjectDiscounts, type ProjectDiscounts } from "@/lib/project-discounts/rules";
+import { mergeDiscountsForSave, sanitizeProjectDiscounts, type ProjectDiscounts } from "@/lib/project-discounts/rules";
 import { boxSaleForSave, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
 import { maxItemId } from "./util";
 
@@ -215,10 +216,10 @@ export function planSave(
   // is never trusted), then RE-APPLIED to every line and assembly part before the bonus lines (which read normal cost).
   const priorDiscounts = sanitizeProjectDiscounts((prior?.spec as { projectDiscounts?: unknown } | null | undefined)?.projectDiscounts);
   const discounts = mergeDiscountsForSave(priorDiscounts, payload.projectDiscounts !== undefined ? payload.projectDiscounts : priorDiscounts, deps.userId ?? "", deps.now ?? Date.now());
-  const normalized = Array.isArray(normalizedRaw) ? applyProjectDiscounts(normalizedRaw, discounts) : normalizedRaw;
-  const withBonus = Array.isArray(normalized)
-    ? canonicalBonusSections({ source: savedSource, quoteType: prior?.quoteType, status: prior ? prior.status : "draft" }, normalized, deps.bonusRates)
-    : normalized;
+  // #368: both steps (discounts re-applied, then the bonus lines) are deriveEstimatorSections — the one function Revise's re-price runs too.
+  const withBonus = Array.isArray(normalizedRaw)
+    ? deriveEstimatorSections({ source: savedSource, quoteType: prior?.quoteType, status: prior ? prior.status : "draft" }, normalizedRaw, discounts, deps.bonusRates)
+    : normalizedRaw;
   const credit = settleRewardCreditOffline(withBonus, prior);
   if (!credit.ok) return { ok: false, error: credit.error, refusedBeforeWrite: "credit" };
   const posted = credit.sections;
@@ -248,6 +249,12 @@ export function planSave(
     ...(typeof payload.notIncluded === "string" ? { notIncluded: cleanPlainText(payload.notIncluded, NOT_INCLUDED_MAX) } : {}),
     ...(isPortalCatalog && !anyPor && !anyConfirm ? { portalReview: null } : {}),
   };
+  // #368: a sent / won / lost estimate keeps the tier stamp its lines were priced at — a customer / contact change saved on it never
+  // moves the stamp under the stored lines. Server-enforced on the STORED status.
+  if (prior && repriceLocked(prior.status)) {
+    patch.pricingTier = prior.pricingTier ?? null;
+    patch.tierMargin = prior.tierMargin ?? null;
+  }
   patch.spec = deps.rewriteSpec(patch.spec);
   return { ok: true, patch, savedSource, savedSections, credit: credit.credit, ...(credit.notice ? { notice: credit.notice } : {}), valueAdjusted: priced.adjusted };
 }

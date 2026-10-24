@@ -662,6 +662,15 @@ async function revisionAllowListChecks(ok: Ok, exp: ExportV2) {
   qrow.doc.review = { state: "approved", reviewer: "Jeff", submittedBy: null, submittedAt: null, decidedBy: "Jeff", decidedAt: 1, note: "", method: "self", smuggled: "REVIEW-EXTRA" };
   qrow.doc.pdfOptions = { detail: "itemized", pdfQty: true, bomLinePrices: false, bomMaterials: true, bomLabor: false, bomFreight: false, smuggled: "PDFOPT-EXTRA" };
   qrow.doc.boxSale = true;
+  // #368: the Revise re-price stamp ships (the Build banner reads it); every ETC-sync secret and internal ETC field never does
+  qrow.doc.repricedOnRevise = { at: 5, by: "Ann", count: 1, delta: 120, lines: [{ sectionId: "s1", lineId: 1, sku: "ETC:CS15", desc: "CS15", oldCost: 900, newCost: 950, oldPrice: 1250, newPrice: 1319.44 }], typedSystems: [] };
+  planted.collections!.catalog_parts = [...((planted.collections!.catalog_parts as Array<{ id: string; doc: Record<string, unknown> }>) ?? [])];
+  const cp = (planted.collections!.catalog_parts as Array<{ id: string; doc: Record<string, unknown> }>)[0];
+  if (cp) Object.assign(cp.doc, { demoPrice: 1111.11, demoPricedAt: 99, etcPriceList: "finished-goods" });
+  planted.blobs = [...(planted.blobs ?? []), { id: "dealer_connections", data: { etc: { keyEnc: "ETC-KEY-ENC-PRIVATE", last4: "9f3a", accountId: "acct-PRIVATE" } } } as never, { id: "etc_snapshot:1", data: { rows: "ETC-SNAPSHOT-PRIVATE" } } as never];
+  const mainRow = (planted.settings ?? []) as Array<{ id: string; data?: Record<string, unknown> }>;
+  const mainSettings = mainRow.find((r) => r.id === "main");
+  if (mainSettings) Object.assign(mainSettings.data ?? (mainSettings.data = {}), { etcKey: "ETC-SETTINGS-KEY-PRIVATE", dealerApi: { key: "ETC-DEALER-PRIVATE" } });
   // #366: project discounts ride in spec (the priced payload ships whole), live and frozen in a revision
   const discSpec = {
     sections: [{ id: "s1", name: "Gear", kind: "lighting", mfr: "", freightPct: 0, items: [
@@ -737,6 +746,15 @@ async function revisionAllowListChecks(ok: Ok, exp: ExportV2) {
       "handoff:slice #366: spec.projectDiscounts, line catalogCost / projectDiscountPct and components' ride whole, live and in a revision");
     ok(spec.sections[0].items[0].catalogCost === 900 && spec.sections[0].items[1].components![0].projectDiscountPct === 10 && spec.projectDiscounts["ETC:CS15"].by === "u1",
       "handoff:slice #366: the normal cost, the % and the stamp (by / at) are all still there");
+  }
+  {
+    const rr = q.repricedOnRevise as { count: number; delta: number; lines: unknown[] } | undefined;
+    ok(!!rr && rr.count === 1 && rr.delta === 120 && rr.lines.length === 1 && (QUOTE_FIELDS as readonly string[]).includes("repricedOnRevise"), "handoff:slice #368: repricedOnRevise ships (the Build banner reads it)");
+    const allBodies = Object.values(res.files).join("\n");
+    for (const needle of ["ETC-KEY-ENC-PRIVATE", "ETC-SNAPSHOT-PRIVATE", "ETC-SETTINGS-KEY-PRIVATE", "ETC-DEALER-PRIVATE", "acct-PRIVATE", "dealer_connections", "demoPrice", "etcPriceList", "1111.11"])
+      ok(!allBodies.includes(needle), `handoff:slice #368: no data file carries ${needle} (the ETC key blob, snapshot, settings keys and internal ETC part fields never ship)`);
+    ok(!(BLOB_IDS as readonly string[]).some((b) => /dealer|etc/i.test(b)) && !(SETTINGS_FIELDS as readonly string[]).some((f) => /etc|dealer|apikey/i.test(f)) && !(CATALOG_FIELDS as readonly string[]).some((f) => /demoPrice|demoPricedAt|etcPriceList/.test(f)),
+      "handoff:slice #368: BLOB_IDS / SETTINGS_FIELDS / CATALOG_FIELDS name nothing of the ETC connection or the internal ETC part fields");
   }
   ok(!("smuggled" in (q.review as object)) && (q.review as Record<string, unknown>).method === "self", "handoff:slice A1: review is allow-listed (REVIEW_FIELDS)");
   ok(!("smuggled" in (q.pdfOptions as object)) && !("smuggled" in (q.packageSelection as object)), "handoff:slice A1: top-level pdfOptions / packageSelection allow-listed");

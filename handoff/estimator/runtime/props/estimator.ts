@@ -26,6 +26,7 @@ import { quoteSentOnce } from "@/lib/quote-people-lock";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { sourceForSave } from "@/lib/portal-quote-mode";
 import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
+import { repricedOnReviseOf } from "@/lib/estimate-reprice/rules";
 import { sanitizeProjectDiscounts } from "@/lib/project-discounts/rules";
 import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
@@ -358,6 +359,8 @@ export async function buildEstimatorProps(store: HandoffStore, quoteId: string |
     canWriteNarrativeLibrary: can("create"),
     narrativeIntros,
     notIncludedDefault: estimateOutputDefaults.notIncluded,
+    // #368: what the last Revise re-priced (the Build banner shows it while the estimate is a draft).
+    repricedOnRevise: repricedOnReviseOf(q?.repricedOnRevise),
     ...FIXED,
   };
 }
