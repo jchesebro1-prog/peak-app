@@ -56,10 +56,12 @@ async function quoteOfBidder(partyId: unknown): Promise<string | null> {
 
 /** #348 (Jeff 2026-10-15): when the save added an addendum to a sent estimate, the store moved it back to Draft —
  *  the result then carries the note and `sync` (the fresh status + next step) so the Estimator's header follows. */
-export type BidDetailsResult = BidPanelResult & { sync?: { status: QuoteStatus; next: QuoteNextStepView | null } };
+export type BidDetailsResult = BidPanelResult & { sync?: { status: QuoteStatus; next: QuoteNextStepView | null; /** #368: the revise re-priced lines — reload. */ repriced?: boolean } };
 
 export async function setBidDetailsAction(quoteId: string, raw: unknown): Promise<BidDetailsResult> {
   let moved: number[] | undefined;
+  // #368: a re-price stamped at or after this moment was made by this call's revise.
+  const startedAt = Date.now();
   const res = await mutate(
     quoteId,
     async (_uid, name) => {
@@ -76,7 +78,8 @@ export async function setBidDetailsAction(quoteId: string, raw: unknown): Promis
   try {
     const user = await requireUser();
     const q = await getQuote(quoteId);
-    return q ? { ...res, sync: { status: q.status, next: await quoteNextStepFor(q, user) } } : res;
+    const repriced = (q?.repricedOnRevise?.at ?? 0) >= startedAt;
+    return q ? { ...res, sync: { status: q.status, next: await quoteNextStepFor(q, user), ...(repriced ? { repriced: true } : {}) } } : res;
   } catch (e) {
     console.error("[bid-details] next-step refresh failed", e);
     return res;

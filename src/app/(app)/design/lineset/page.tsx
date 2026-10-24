@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { all as allCustomers } from "@/lib/stores/customers";
-import { fabricParts as listFabricParts } from "@/lib/stores/catalog";
+import { fabricParts as listFabricParts, withoutDemoPrice } from "@/lib/stores/catalog";
 import { listDesigns, getDesign } from "@/lib/stores/studio-designs";
 import { DEFAULT_LINESET_INPUTS, type LinesetInputs } from "@/lib/design/lineset";
 import type { WeightDefaults, WeightLine } from "@/lib/design/steel";
@@ -144,7 +144,7 @@ export default async function LinesetBuilderPage({
           weight, hoist checks, counterweight and beam loads calculate live on the same screen.
         </p>
       </div>
-      <LinesetBuilder initial={initial} customers={customers} saved={saved} loaded={loaded} fabrics={fabricParts} />
+      <LinesetBuilder initial={initial} customers={customers} saved={saved} loaded={loaded} fabrics={fabricParts.map(withoutDemoPrice) /* #368 */} />
     </div>
   );
 }

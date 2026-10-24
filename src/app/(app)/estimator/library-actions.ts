@@ -2,7 +2,7 @@
 
 import { requireUser } from "@/lib/session";
 import { systemLibraryIndex } from "@/lib/narrative/system-library-index";
-import { loadLibrarySystem } from "@/lib/narrative/load-system";
+import { LOAD_TARGET_GONE, loadLibrarySystem } from "@/lib/narrative/load-system";
 import {
   LIBRARY_QUERY_MAX,
   LIBRARY_SEARCH_LIMIT,
@@ -38,9 +38,14 @@ export async function getSystemLibraryEntryAction(key: string): Promise<SystemLi
 }
 
 /** Load system: re-read, vendor lines left out, re-priced at today's catalog
- *  and this estimate's tier. */
-export async function loadLibrarySystemAction(key: string, ctx: { tierMargin: number | null }): Promise<LoadLibrarySystemResult> {
+ *  and this estimate's tier. #368 (review): `quoteId` is required — the saved
+ *  estimate the system lands in, or null only for one never saved. The core
+ *  reads that estimate's stored status and refuses anything but a draft
+ *  (server-enforced). A missing / non-string argument is refused outright, so a
+ *  caller that forgets the target can't slip past the lock. */
+export async function loadLibrarySystemAction(key: string, quoteId: string | null, ctx: { tierMargin: number | null }): Promise<LoadLibrarySystemResult> {
   await requireUser();
+  if (quoteId !== null && (typeof quoteId !== "string" || !quoteId)) return { ok: false, error: LOAD_TARGET_GONE };
   const tm = ctx && typeof ctx.tierMargin === "number" ? ctx.tierMargin : null;
-  return loadLibrarySystem(String(key ?? ""), tm);
+  return loadLibrarySystem(String(key ?? ""), tm, quoteId);
 }

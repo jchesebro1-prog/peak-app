@@ -87,6 +87,9 @@ import { recordVendorPdfOutcomes, verifyVendorPdfExtractions } from "@/lib/vendo
 import { quoteSpecFollowingRenames, selectionFollowingRenames } from "@/lib/stores/catalog-renames";
 import { leadIdForCreate, linkSavedQuoteToSuggestion } from "@/lib/assist/suggestion-save";
 import { boxSaleForSave, boxSaleOf, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
+import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
+import { deriveEstimatorSections } from "@/lib/estimate-reprice/derive";
+import { repricedNow } from "@/lib/estimate-reprice/rules";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -261,6 +264,8 @@ export type SaveResult = {
   /** #355 review M2 — this save's status move reopened a won estimate at the
    *  version that won; the open document holds the edits, so reload. */
   reopenedAtWon?: boolean;
+  /** #368 — this save's status move was a revise that re-priced lines to today's catalog; reload. */
+  repriced?: boolean;
 };
 
 export type ReviewSync = {
@@ -278,6 +283,8 @@ export type ReviewSync = {
   /** Batch 5 #59 — the move reopened a won estimate at the version that won
    *  (edits saved after the win became a revision); the open document is stale, reload it. */
   reopenedAtWon?: boolean;
+  /** #368 — the move was a revise that re-priced lines to today's catalog; the open document is stale, reload it. */
+  repriced?: boolean;
 };
 
 function refresh() {
@@ -308,6 +315,8 @@ export type StageSync = {
   gateRefused?: boolean;
   /** Batch 5 #59 — see ReviewSync.reopenedAtWon. */
   reopenedAtWon?: boolean;
+  /** #368 — see ReviewSync.repriced. */
+  repriced?: boolean;
 };
 
 async function stageSyncOf(id: string, user: { name: string; roles: string[] }): Promise<StageSync> {
@@ -500,7 +509,6 @@ export async function saveQuoteAction(
     user.id,
     Date.now()
   );
-  const sellNormalized = Array.isArray(sellNormalizedRaw) ? applyProjectDiscounts(sellNormalizedRaw, discounts) : sellNormalizedRaw;
   // Estimator bonuses: the server re-derives the 5% package / 2% estimator
   // lines from the sanitized sections, so a stale or hand-crafted client can
   // never save a wrong bonus. Runs BEFORE the Rewards credit is settled and
@@ -508,9 +516,11 @@ export async function saveQuoteAction(
   // the stored value must include the bonus). source = the source this save
   // persists; status = the prior status (status changes only travel through
   // setStatus, never this write), "draft" for a brand-new quote.
-  const sellSanitized = Array.isArray(sellNormalized)
-    ? canonicalBonusSections({ source: savedSource, quoteType: prior?.quoteType, status: prior ? prior.status : "draft" }, sellNormalized, await loadBonusRates())
-    : sellNormalized;
+  // #368: both steps (discounts re-applied, then the bonus lines) are deriveEstimatorSections — the one function
+  // Revise's re-price runs too (src/lib/estimate-reprice/derive.ts).
+  const sellSanitized = Array.isArray(sellNormalizedRaw)
+    ? deriveEstimatorSections({ source: savedSource, quoteType: prior?.quoteType, status: prior ? prior.status : "draft" }, sellNormalizedRaw, discounts, await loadBonusRates())
+    : sellNormalizedRaw;
   // #282 phase 2: a negative price only on the Rewards credit line, and that
   // line clamped to what the customer can spend here — refused, not stored,
   // when any other line carries one.
@@ -578,6 +588,13 @@ export async function saveQuoteAction(
     ...(typeof payload.notIncluded === "string" ? { notIncluded: cleanPlainText(payload.notIncluded, NOT_INCLUDED_MAX) } : {}),
     ...(isPortalCatalog && !anyPor && !anyConfirm ? { portalReview: null } : {}),
   };
+  // #368: a sent / won / lost estimate keeps its prices until revised — and the tier stamp they were priced at, so a
+  // customer / contact change saved on it never moves the stamp under the stored lines (the client offers no tier
+  // re-price there either; that half is a UI lock — lock.ts). Server-enforced on the STORED status.
+  if (prior && repriceLocked(prior.status)) {
+    patch.pricingTier = prior.pricingTier ?? null;
+    patch.tierMargin = prior.tierMargin ?? null;
+  }
   // #304: an Estimator tab opened before a model-number rename still holds the
   // old SKUs — move the live spec onto the renamed parts (sku + model) before
   // it is written, so a save never re-introduces a retired SKU. Revisions are
@@ -587,6 +604,8 @@ export async function saveQuoteAction(
   let statusError: string | undefined;
   // #355 review M2: set when this save's status move put the won version back.
   let reopenedAtWon = false;
+  // #368: set when this save's status move was a revise that re-priced lines.
+  let repriced = false;
   let statusNotice: string | undefined = credit.notice;
   let pdfState: QuotePdfView | null = null;
   /* #143: keep only the vendor quotes something still references. Deleting a
@@ -657,6 +676,7 @@ export async function saveQuoteAction(
           const beforeMove = q;
           q = (await setStatus(loadedId, payload.status, user.name)) ?? q;
           reopenedAtWon = reopenedAtWonVersion(beforeMove, q);
+          repriced = repricedNow(beforeMove, q);
         } catch (e) {
           // Same split as the create branch below: the gate's refusal is
           // the user's to read (#174); the field edits above are still saved.
@@ -781,6 +801,7 @@ export async function saveQuoteAction(
     ...(statusNotice ? { notice: statusNotice } : {}),
     ...(suggestionLinked ? { suggestionLinked: true } : {}),
     ...(reopenedAtWon ? { reopenedAtWon: true } : {}),
+    ...(repriced ? { repriced: true } : {}),
   };
 }
 
@@ -987,6 +1008,8 @@ async function placeSystemInEstimate(
     if (!existing) {
       return { ok: false, error: "That estimate could not be found." };
     }
+    // #368: a sent / won / lost estimate keeps its prices — nothing is placed into it until it is revised.
+    if (repriceLocked(existing.status)) return { ok: false, error: REVISE_FIRST };
     // Box goods sale (spec 2026-10-21): a system with labor can't join an existing box sale — refused before anything
     // is written. Move/Copy into a NEW estimate is unchanged (the new estimate starts as a normal one).
     if (boxSaleOf(existing)) {
@@ -1200,6 +1223,11 @@ export async function copySystemToEstimateAction(
   projectDiscounts?: unknown
 ): Promise<CopySystemResult> {
   const user = await requireUser();
+  // #368: Copy within this estimate adds lines at today's prices — refused on a stored sent / won / lost estimate
+  // until it is revised (an unsaved estimate has no stored status).
+  if (target.kind === "same" && typeof sourceQuoteId === "string" && sourceQuoteId && repriceLocked((await get(sourceQuoteId))?.status)) {
+    return { ok: false, error: REVISE_FIRST };
+  }
   // #293: blocks ride copySectionForTarget's section spread — sanitized first.
   section = withSanitizedKeyProducts(section);
   section = withSanitizedOutputFields(section);
@@ -1222,6 +1250,8 @@ export async function copySystemToEstimateAction(
   } else if (target.kind === "existing") {
     const existing = await get(target.quoteId);
     if (!existing) return { ok: false, error: "That estimate could not be found." };
+    // #368: refused before any re-pricing work (placeSystemInEstimate refuses it again under its own read).
+    if (repriceLocked(existing.status)) return { ok: false, error: REVISE_FIRST };
     const stored = usableTierMarkup(existing.tierMargin);
     if (stored != null) {
       targetTier = stored;
@@ -1477,7 +1507,9 @@ export async function setStatusAction(
   }
   refresh();
   const sync = await syncOf(id, user);
-  return reopenedAtWonVersion(before, await get(id)) ? { ...sync, reopenedAtWon: true } : sync;
+  const after = await get(id);
+  // #368: a revise that re-priced lines changed the document under the open Estimator — it reloads.
+  return { ...sync, ...(reopenedAtWonVersion(before, after) ? { reopenedAtWon: true } : {}), ...(repricedNow(before, after) ? { repriced: true } : {}) };
 }
 
 /** Estimator bonuses — save the Lead / Prepared-by split of the 2% (approvers only). */
@@ -1579,7 +1611,9 @@ export async function setQuoteStageAction(id: string, stageId: string, alternate
   }
   refresh();
   const sync = await stageSyncOf(id, user);
-  return reopenedAtWonVersion(before, await get(id)) ? { ...sync, reopenedAtWon: true } : sync;
+  const after = await get(id);
+  // #368: as setStatusAction.
+  return { ...sync, ...(reopenedAtWonVersion(before, after) ? { reopenedAtWon: true } : {}), ...(repricedNow(before, after) ? { repriced: true } : {}) };
 }
 
 /**

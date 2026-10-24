@@ -10,7 +10,7 @@ import {
   type SpecCatalogPart,
   withStoredParts,
 } from "@/lib/bid-spec";
-import { list as listCatalog, mergeUpsert } from "@/lib/stores/catalog";
+import { list as listCatalog, mergeUpsert, withoutDemoPrice } from "@/lib/stores/catalog";
 import { getEngagement } from "@/lib/stores/engagements";
 import { allSections, createSection, seedStarterSections, updateSection } from "@/lib/stores/spec-sections";
 import { allArticles } from "@/lib/stores/spec-articles";
@@ -42,7 +42,8 @@ export async function matchBomAction(bom: BomRow[]): Promise<Result<{ rows: Matc
   if (!Array.isArray(bom) || !bom.length) {
     return { ok: false, error: "The equipment list is empty." };
   }
-  const catalog = (await listCatalog()) as SpecCatalogPart[];
+  // #368: matched parts go back to the client whole — never with the internal demo price.
+  const catalog = (await listCatalog()).map(withoutDemoPrice) as SpecCatalogPart[];
   const rep = matchBom(bom, catalog);
   return { ok: true, rows: rep.rows };
 }
@@ -54,7 +55,7 @@ export async function remapRowAction(
   sku: string
 ): Promise<Result<{ rows: MatchedRow[] }>> {
   await requireUser();
-  const catalog = (await listCatalog()) as SpecCatalogPart[];
+  const catalog = (await listCatalog()).map(withoutDemoPrice) as SpecCatalogPart[]; // #368
   const part = catalog.find((p) => p.sku.toLowerCase() === sku.trim().toLowerCase());
   if (!part) return { ok: false, error: `No catalog part with SKU ${sku}.` };
   const next = rows.map((r, i) =>

@@ -73,6 +73,7 @@ import { postChanged } from "@/lib/popout/channel";
 import { applyLineMove, extractLinesAsSection, lineRefKey, planLineMove, removeLinesFromSources, type LineRef } from "@/lib/estimate-line-move/move";
 import { setUnsavedHold } from "@/lib/popout/hold";
 import { discardConfirmText, inputIsDirty, isModalInputKind, MODAL_INPUT_KINDS, rebaseDraft, stableDraftJson, type ModalInputKind } from "@/lib/estimate-steps/discard-confirm";
+import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 
 /** #333 review (F): how long Send waits for an in-flight Client package write. */
 const SELECTION_SETTLE_TIMEOUT_MS = 10_000;
@@ -238,7 +239,7 @@ export function useEstimatorState(props: EstimatorProps) {
     fixtureAssemblies, vendors, blobUploads, customers, travel, next: initialNext, aiSource, people,
     quoteTasks, templateSets, assumptionLibrary, freightRule, portalStatusError, assistDraft, specKeys, canApplyCredit,
     viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault, peopleSentOnce = false, bonusRates,
-    suggestion = null, suggestionParts,
+    suggestion = null, suggestionParts, repricedOnRevise = null,
   } = props;
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   /** #245: the freight default for THIS load — computed once from the props
@@ -283,6 +284,10 @@ export function useEstimatorState(props: EstimatorProps) {
   /** Bumped on every re-price, so a Save only clears the "Save to keep" of
    *  a re-price it actually carried. */
   const tierRepriceSeqRef = useRef(0);
+  /** #368 — a customer / contact pick on a sent / won / lost estimate resolved a different tier: the lines keep
+   *  their stored prices (and the stamp stays, as the server keeps it on save) — the banner says "Revise the
+   *  estimate first" where the re-price offer would be. A UI lock (lock.ts). */
+  const [tierLocked, setTierLocked] = useState<{ label: string } | null>(null);
   /** Every user edit to the sections goes through here, so the next edit
    *  clears the #254 banner (its Undo would otherwise restore over it). The
    *  tier re-price itself, Undo, and the automatic freight re-apply write
@@ -1162,6 +1167,12 @@ export function useEstimatorState(props: EstimatorProps) {
           return;
         }
         if (seq !== tierResolveSeqRef.current || !r.ok) return;
+        // #368: a non-draft estimate keeps its prices and its tier stamp until revised — no re-price, just say so.
+        if (repriceLocked(status)) {
+          setTierLocked(r.tierMargin !== tierMarginRef.current ? { label: (r.pricingTier && PRICING_TIER_LABEL[r.pricingTier as PricingTier]) || r.pricingTier || "Base" } : null);
+          return;
+        }
+        setTierLocked(null);
         const prev = tierMarginRef.current;
         tierMarginRef.current = r.tierMargin;
         setTierMargin(r.tierMargin);
@@ -1566,6 +1577,11 @@ export function useEstimatorState(props: EstimatorProps) {
             window.location.reload();
             return false;
           }
+          // #368: …or was a revise that re-priced lines to today's catalog.
+          if (res.repriced) {
+            window.location.reload();
+            return false;
+          }
         }
         if (res.ok) {
           setActionError(null);
@@ -1620,6 +1636,11 @@ export function useEstimatorState(props: EstimatorProps) {
             setStatus(prevStatus);
             return;
           }
+          // #368: a revise of a sent / lost estimate saves them first too — it may re-price the stored lines and reload.
+          if (prevStatus !== "won" && v === "draft" && repriceLocked(prevStatus) && pdfDirty && (await saveNow()) === false) {
+            setStatus(prevStatus);
+            return;
+          }
           const r = await setStatusAction(id, v, v === "won" && alternatesTouched ? { alternatesTaken } : undefined);
           if (!r.ok) {
             // Punch #60: server rejected the transition (e.g. "won" without an
@@ -1637,6 +1658,11 @@ export function useEstimatorState(props: EstimatorProps) {
           // Batch 5 #59: the server put the won version back (the post-win edits are a
           // revision now) — this document holds the edits, so load the quote afresh.
           if (r.reopenedAtWon) {
+            window.location.reload();
+            return;
+          }
+          // #368: same when the revise re-priced lines to today's catalog (the Build banner lists them).
+          if (r.repriced) {
             window.location.reload();
             return;
           }
@@ -1670,6 +1696,14 @@ export function useEstimatorState(props: EstimatorProps) {
     startTransition(async () => {
       try {
         // #355 review I3: same as changeStatus — a stage move can leave Won.
+        // #368: …or revise a sent / lost estimate (a stage whose tag is Draft) — saved first, as above.
+        const pl = pipelines.quote.find((p) => p.id === pipelineId) || pipelines.quote.find((p) => p.id === pipelines.defaultQuotePipelineId) || pipelines.quote[0];
+        const revising = prevStatus !== "won" && repriceLocked(prevStatus) && !!pl && stageById(pl, stageId)?.tag === "draft";
+        if (revising && pdfDirty && (await saveNow()) === false) {
+          setStage(prevStage);
+          setStatus(prevStatus);
+          return;
+        }
         if (prevStatus === "won" && pdfDirty && (await saveNow()) === false) {
           setStage(prevStage);
           setStatus(prevStatus);
@@ -1687,6 +1721,10 @@ export function useEstimatorState(props: EstimatorProps) {
         setGateRefused(false);
         applyStageSync(r);
         postChanged("quote", id);
+        if (r.repriced) {
+          window.location.reload(); // #368: as changeStatus
+          return;
+        }
         if (r.reopenedAtWon) {
           window.location.reload();
           return;
@@ -1991,6 +2029,11 @@ export function useEstimatorState(props: EstimatorProps) {
   const copySystem = (secId: string, target: CopySystemTarget) => {
     const sec = sections.find((s) => s.id === secId);
     if (!sec) return;
+    // #368: Copy within a sent / won / lost estimate waits for Revise (the server refuses too).
+    if (target.kind === "same" && repriceLocked(status)) {
+      setMoveNotice({ ok: false, error: REVISE_FIRST });
+      return;
+    }
     const cname = customerId
       ? customers.find((c) => c.id === customerId)?.name || custName
       : custName;
@@ -2807,6 +2850,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const sec = sections.find((s) => s.id === secId);
     const rec = sec ? laborGroupRecord(sec, group) : null;
     if (!sec || !rec) return;
+    if (repriceLocked(status)) return; // #368: UI lock only (the ✎ is disabled) — a save doesn't check lines; see lock.ts
     if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
     laborEditRef.current = { group, draft: rec.draft, ...laborGroupEdits(sec, group) };
@@ -2819,6 +2863,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const openTrackEdit = (secId: string, lineId: number) => {
     const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
     if (!it?.track) return;
+    if (repriceLocked(status)) return; // #368: as openLaborEdit
     const gone = !trackSeries.some((s) => s.id === it.track!.seriesId);
     if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
@@ -2845,6 +2890,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const openCurtainEdit = (secId: string, lineId: number) => {
     const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
     if (!it?.curtain) return;
+    if (repriceLocked(status)) return; // #368: as openLaborEdit
     const linked = linkCurtainTracks(sections).links.get(it);
     if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
     closeInput();
@@ -3680,6 +3726,7 @@ export function useEstimatorState(props: EstimatorProps) {
     placeLibrarySystem,
     portalStatusError,
     assistDraft,
+    repricedOnRevise,
     preparedValue,
     projectName,
     qdChipLabel,
@@ -3754,6 +3801,8 @@ export function useEstimatorState(props: EstimatorProps) {
     setSystemRoom,
     setSystemSell,
     setTierReprice,
+    tierLocked,
+    setTierLocked,
     setTitleDraft,
     setTrackDraft,
     setTripLocal,

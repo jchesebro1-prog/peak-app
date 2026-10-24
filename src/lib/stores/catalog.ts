@@ -172,6 +172,19 @@ export type CatalogPart = {
    *  never mentions keeps its old date. Absent on parts no priced file has
    *  listed since #32 — `settings.priceListEffective` dates those. */
   priceDate?: number;
+  /** #368 — INTERNAL ONLY, never customer-facing: ETC's demo-equipment price
+   *  (the demo list's netPrice) and when it was last set. Written only by the
+   *  ETC price sync (src/lib/dealer-api/etc/). Shown only on the catalog part
+   *  editor; never on a portal, share page, Displays API, PDF, client package,
+   *  CSV export or Assist — and stripped (withoutDemoPrice) wherever a staff
+   *  screen hands a whole part to a client component. */
+  demoPrice?: number | null;
+  demoPricedAt?: number | null;
+  /** #368 — INTERNAL ONLY, like demoPrice: which ETC priced list last set this
+   *  part's list/cost. A daily delta from a lower-precedence list (finished
+   *  goods → spare parts → flat-rate repair) never overwrites it. Written only
+   *  by the ETC price sync; stripped with demoPrice. */
+  etcPriceList?: "finished-goods" | "spare-parts" | "flat-rate-repair";
 
   /* --- Specs module (#205). All additive JSONB, no migration. ---
    * These are the ONE canonical set (D258). productMetadata.specSection /
@@ -254,6 +267,18 @@ export type CatalogPart = {
 /** All parts (port of window.MASTER_CATALOG reads). */
 export async function list(): Promise<CatalogPart[]> {
   return listDocs<CatalogPart>("catalog_parts");
+}
+
+/** #368 — a copy of `part` without the internal ETC fields (demo price and
+ *  date, the ETC source list). Every staff screen that hands a WHOLE part to a
+ *  client component goes through this. */
+export function withoutDemoPrice<T extends object>(part: T): T {
+  if (!("demoPrice" in part) && !("demoPricedAt" in part) && !("etcPriceList" in part)) return part;
+  const rest = { ...part } as T & { demoPrice?: unknown; demoPricedAt?: unknown; etcPriceList?: unknown };
+  delete rest.demoPrice;
+  delete rest.demoPricedAt;
+  delete rest.etcPriceList;
+  return rest;
 }
 
 /** #304 — how many renamedTo links a read follows (a→b→c is two). */
