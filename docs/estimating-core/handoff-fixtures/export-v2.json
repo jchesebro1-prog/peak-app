@@ -1,0 +1,1184 @@
+{
+ "meta": {
+  "app": "Peak Backend",
+  "exportedAt": "2026-10-20T00:00:00.000Z",
+  "source": "handoff-fixture (estimator handoff PR 2 Task 1)",
+  "format": 2
+ },
+ "users": [
+  {
+   "id": "u1",
+   "name": "Jeff Chesebro",
+   "email": "jeff@example.com",
+   "googleEmail": "jeff@gmail.example",
+   "roles": [
+    "admin",
+    "estimator"
+   ],
+   "color": "#c33",
+   "initials": "JC",
+   "status": "active",
+   "title": "Owner",
+   "phone": "555-0100",
+   "mobile": "555-0101",
+   "officeId": "o1",
+   "certifications": null,
+   "lastLoginAt": 1760000000000,
+   "previousLoginAt": 1760000000000,
+   "createdAt": 1760000000000,
+   "photoUrl": null
+  },
+  {
+   "id": "u2",
+   "name": "Ana Ruiz",
+   "email": "ana@example.com",
+   "googleEmail": null,
+   "roles": [
+    "estimator"
+   ],
+   "color": "#36c",
+   "initials": "AR",
+   "status": "active",
+   "title": "Estimator",
+   "phone": null,
+   "mobile": null,
+   "officeId": "o1",
+   "certifications": null,
+   "lastLoginAt": null,
+   "previousLoginAt": null,
+   "createdAt": 1760000000000,
+   "photoUrl": null
+  },
+  {
+   "id": "u3",
+   "name": "Old Timer",
+   "email": "old@example.com",
+   "googleEmail": null,
+   "roles": [],
+   "color": "#999",
+   "initials": "OT",
+   "status": "archived",
+   "title": null,
+   "phone": null,
+   "mobile": null,
+   "officeId": null,
+   "certifications": null,
+   "lastLoginAt": null,
+   "previousLoginAt": null,
+   "createdAt": 1760000000000,
+   "photoUrl": null
+  }
+ ],
+ "appSettings": [
+  {
+   "id": "main",
+   "updatedAt": 1760000000000,
+   "data": {
+    "companyName": "Peak Systems Group",
+    "offices": [
+     {
+      "id": "o1",
+      "name": "Wisconsin",
+      "lat": 43.0,
+      "lng": -89.0
+     }
+    ],
+    "accent": "#1f6feb",
+    "reviewLimits": {
+     "estimator": 50000
+    },
+    "assistUsers": [
+     "u1"
+    ],
+    "mailboxes": [
+     {
+      "id": "sales"
+     }
+    ]
+   }
+  }
+ ],
+ "blobs": [
+  {
+   "id": "pricing_rules",
+   "updatedAt": 1760000000000,
+   "data": {
+    "tiers": {
+     "A": 0.3
+    }
+   }
+  },
+  {
+   "id": "assist_secrets",
+   "updatedAt": 1760000000000,
+   "data": {
+    "apiKey": "@@SECRET_ANT@@"
+   }
+  },
+  {
+   "id": "portal_departments",
+   "updatedAt": 1760000000000,
+   "data": {
+    "x": 1
+   }
+  }
+ ],
+ "notifPrefs": [],
+ "gmailConnections": [
+  {
+   "id": "personal:u1",
+   "refreshToken": "@@SECRET_GOOGLE_REFRESH@@",
+   "accessToken": "@@SECRET_GOOGLE_ACCESS@@",
+   "email": "jeff@example.com"
+  }
+ ],
+ "geoCache": [
+  {
+   "key": "43.0000,-89.0000|43.0731,-89.4012",
+   "data": {
+    "miles": 12,
+    "minutes": 20,
+    "ts": 1
+   },
+   "updatedAt": 1760000000000
+  },
+  {
+   "key": "43.1000,-89.5000|43.2000,-89.3000",
+   "data": {
+    "miles": 12,
+    "minutes": 20,
+    "ts": 1
+   },
+   "updatedAt": 1760000000000
+  },
+  {
+   "key": "43.0731,-89.4012|44.0000,-88.0000",
+   "data": {
+    "miles": 12,
+    "minutes": 20,
+    "ts": 1
+   },
+   "updatedAt": 1760000000000
+  },
+  {
+   "key": "43.0000,-89.0000|44.0000,-88.0000",
+   "data": {
+    "miles": 12,
+    "minutes": 20,
+    "ts": 1
+   },
+   "updatedAt": 1760000000000
+  },
+  {
+   "key": "43.0731,-89.4012|10.0000,10.0000",
+   "data": {
+    "miles": 12,
+    "minutes": 20,
+    "ts": 1
+   },
+   "updatedAt": 1760000000000
+  }
+ ],
+ "companies": [
+  {
+   "id": "c-alpha",
+   "name": "Alpha Schools",
+   "type": "school",
+   "lifecycle": "customer",
+   "keywords": [],
+   "website": null,
+   "mainPhone": "555-0200",
+   "address": "1 Main",
+   "city": "Madison",
+   "state": "WI",
+   "zip": "53703",
+   "pricingTier": "A",
+   "ownerUserId": "u1",
+   "referredByContactId": null,
+   "custom": {
+    "f": 1
+   },
+   "shortCode": null,
+   "deleted": false,
+   "createdAt": 1760000000000,
+   "updatedAt": 1760000000000
+  },
+  {
+   "id": "c-beta",
+   "name": "Beta Church",
+   "type": "church",
+   "lifecycle": "customer",
+   "keywords": [],
+   "website": null,
+   "mainPhone": "555-0200",
+   "address": "1 Main",
+   "city": "Madison",
+   "state": "WI",
+   "zip": "53703",
+   "pricingTier": "A",
+   "ownerUserId": "u1",
+   "referredByContactId": null,
+   "custom": {
+    "f": 1
+   },
+   "shortCode": null,
+   "deleted": false,
+   "createdAt": 1760000000000,
+   "updatedAt": 1760000000000
+  },
+  {
+   "id": "c-gamma",
+   "name": "Gamma Theatre",
+   "type": "school",
+   "lifecycle": "customer",
+   "keywords": [],
+   "website": null,
+   "mainPhone": "555-0200",
+   "address": "1 Main",
+   "city": "Madison",
+   "state": "WI",
+   "zip": "53703",
+   "pricingTier": "A",
+   "ownerUserId": "u1",
+   "referredByContactId": null,
+   "custom": {
+    "f": 1
+   },
+   "shortCode": null,
+   "deleted": false,
+   "createdAt": 1760000000000,
+   "updatedAt": 1760000000000
+  },
+  {
+   "id": "c-del",
+   "name": "Deleted Co",
+   "type": "school",
+   "lifecycle": "customer",
+   "keywords": [],
+   "website": null,
+   "mainPhone": "555-0200",
+   "address": "1 Main",
+   "city": "Madison",
+   "state": "WI",
+   "zip": "53703",
+   "pricingTier": "A",
+   "ownerUserId": "u1",
+   "referredByContactId": null,
+   "custom": {
+    "f": 1
+   },
+   "shortCode": null,
+   "deleted": true,
+   "createdAt": 1760000000000,
+   "updatedAt": 1760000000000
+  }
+ ],
+ "contacts": [
+  {
+   "id": "ct-1",
+   "firstName": "Pat",
+   "lastName": "Lee",
+   "homeCompanyId": "c-alpha",
+   "title": "Director",
+   "pricingTier": "A",
+   "status": "active",
+   "userId": null,
+   "ownerUserId": "u1",
+   "isPrimary": true,
+   "deleted": false,
+   "createdAt": 1760000000000,
+   "updatedAt": 1760000000000
+  },
+  {
+   "id": "ct-2",
+   "firstName": "Sam",
+   "lastName": "Ortiz",
+   "homeCompanyId": "c-beta",
+   "title": "Director",
+   "pricingTier": "A",
+   "status": "active",
+   "userId": null,
+   "ownerUserId": "u1",
+   "isPrimary": true,
+   "deleted": false,
+   "createdAt": 1760000000000,
+   "updatedAt": 1760000000000
+  },
+  {
+   "id": "ct-3",
+   "firstName": "Gail",
+   "lastName": "Moss",
+   "homeCompanyId": "c-gamma",
+   "title": "Director",
+   "pricingTier": "A",
+   "status": "active",
+   "userId": null,
+   "ownerUserId": "u1",
+   "isPrimary": true,
+   "deleted": false,
+   "createdAt": 1760000000000,
+   "updatedAt": 1760000000000
+  },
+  {
+   "id": "ct-4",
+   "firstName": "Gone",
+   "lastName": "Away",
+   "homeCompanyId": "c-alpha",
+   "title": "Director",
+   "pricingTier": "A",
+   "status": "active",
+   "userId": null,
+   "ownerUserId": "u1",
+   "isPrimary": true,
+   "deleted": true,
+   "createdAt": 1760000000000,
+   "updatedAt": 1760000000000
+  }
+ ],
+ "contactEmails": [
+  {
+   "id": "ce-1",
+   "contactId": "ct-1",
+   "email": "pat@alpha.example",
+   "label": "work",
+   "isPrimary": true
+  },
+  {
+   "id": "ce-2",
+   "contactId": "ct-2",
+   "email": "sam@beta.example",
+   "label": "work",
+   "isPrimary": true
+  },
+  {
+   "id": "ce-3",
+   "contactId": "ct-3",
+   "email": "gail@gamma.example",
+   "label": "work",
+   "isPrimary": true
+  }
+ ],
+ "contactPhones": [
+  {
+   "id": "cp-1",
+   "contactId": "ct-1",
+   "phone": "555-0301",
+   "label": "work",
+   "isPrimary": true
+  },
+  {
+   "id": "cp-3",
+   "contactId": "ct-3",
+   "phone": "555-0303",
+   "label": "work",
+   "isPrimary": true
+  }
+ ],
+ "sites": [
+  {
+   "id": "st-c-alpha-1",
+   "companyId": "c-alpha",
+   "name": "Auditorium",
+   "locationName": "Auditorium",
+   "legacyLocId": "loc1",
+   "isPrimary": false,
+   "address": "2 Main",
+   "city": "Madison",
+   "state": "WI",
+   "zip": "53703",
+   "kind": "theatre",
+   "lat": "43.0731",
+   "lng": "-89.4012",
+   "venueKind": "proscenium",
+   "nameAuto": false,
+   "travelMiles": "12",
+   "travelMin": "20",
+   "geoStatus": "verified",
+   "geoSource": "geocode",
+   "geoVerifiedBy": "u1",
+   "geoVerifiedAt": 1760000000000,
+   "driveFolderId": "drv123",
+   "shortCode": null,
+   "deleted": false,
+   "createdAt": 1760000000000,
+   "updatedAt": 1760000000000
+  },
+  {
+   "id": "st-c-alpha-2",
+   "companyId": "c-alpha",
+   "name": "Gym",
+   "locationName": "Gym",
+   "legacyLocId": "loc2",
+   "isPrimary": false,
+   "address": "2 Main",
+   "city": "Madison",
+   "state": "WI",
+   "zip": "53703",
+   "kind": "theatre",
+   "lat": "43.1",
+   "lng": "-89.5",
+   "venueKind": "proscenium",
+   "nameAuto": false,
+   "travelMiles": "12",
+   "travelMin": "20",
+   "geoStatus": "verified",
+   "geoSource": "geocode",
+   "geoVerifiedBy": "u1",
+   "geoVerifiedAt": 1760000000000,
+   "driveFolderId": "drv123",
+   "shortCode": null,
+   "deleted": false,
+   "createdAt": 1760000000000,
+   "updatedAt": 1760000000000
+  },
+  {
+   "id": "st-c-beta-1",
+   "companyId": "c-beta",
+   "name": "Sanctuary",
+   "locationName": "Sanctuary",
+   "legacyLocId": "loc1",
+   "isPrimary": false,
+   "address": "2 Main",
+   "city": "Madison",
+   "state": "WI",
+   "zip": "53703",
+   "kind": "theatre",
+   "lat": "43.2",
+   "lng": "-89.3",
+   "venueKind": "proscenium",
+   "nameAuto": false,
+   "travelMiles": "12",
+   "travelMin": "20",
+   "geoStatus": "verified",
+   "geoSource": "geocode",
+   "geoVerifiedBy": "u1",
+   "geoVerifiedAt": 1760000000000,
+   "driveFolderId": "drv123",
+   "shortCode": null,
+   "deleted": false,
+   "createdAt": 1760000000000,
+   "updatedAt": 1760000000000
+  },
+  {
+   "id": "st-c-gamma-1",
+   "companyId": "c-gamma",
+   "name": "Main Stage",
+   "locationName": "Main Stage",
+   "legacyLocId": "loc1",
+   "isPrimary": false,
+   "address": "2 Main",
+   "city": "Madison",
+   "state": "WI",
+   "zip": "53703",
+   "kind": "theatre",
+   "lat": "44.0",
+   "lng": "-88.0",
+   "venueKind": "proscenium",
+   "nameAuto": false,
+   "travelMiles": "12",
+   "travelMin": "20",
+   "geoStatus": "verified",
+   "geoSource": "geocode",
+   "geoVerifiedBy": "u1",
+   "geoVerifiedAt": 1760000000000,
+   "driveFolderId": "drv123",
+   "shortCode": null,
+   "deleted": false,
+   "createdAt": 1760000000000,
+   "updatedAt": 1760000000000
+  },
+  {
+   "id": "st-c-alpha-9",
+   "companyId": "c-alpha",
+   "name": "Old",
+   "locationName": "Old",
+   "legacyLocId": "loc9",
+   "isPrimary": false,
+   "address": "2 Main",
+   "city": "Madison",
+   "state": "WI",
+   "zip": "53703",
+   "kind": "theatre",
+   "lat": "43.0",
+   "lng": "-89.0",
+   "venueKind": "proscenium",
+   "nameAuto": false,
+   "travelMiles": "12",
+   "travelMin": "20",
+   "geoStatus": "verified",
+   "geoSource": "geocode",
+   "geoVerifiedBy": "u1",
+   "geoVerifiedAt": 1760000000000,
+   "driveFolderId": "drv123",
+   "shortCode": null,
+   "deleted": true,
+   "createdAt": 1760000000000,
+   "updatedAt": 1760000000000
+  }
+ ],
+ "collections": {
+  "quotes": [
+   {
+    "id": "Q-G001",
+    "deleted": false,
+    "doc": {
+     "quoteType": "system",
+     "estNo": 9001,
+     "spec": {
+      "sections": [
+       {
+        "id": "s1",
+        "name": "Stage lighting",
+        "kind": "lighting",
+        "mfr": "ETC",
+        "freightPct": 5,
+        "items": [
+         {
+          "id": 1,
+          "sku": "ETC:CS15",
+          "desc": "ColorSource 15 fixture",
+          "qty": 4,
+          "unit": "ea",
+          "cost": 900,
+          "price": 1250
+         },
+         {
+          "id": 2,
+          "sku": "LABOR",
+          "desc": "Install labor",
+          "qty": 16,
+          "unit": "hr",
+          "cost": 55,
+          "price": 95,
+          "labor": true
+         },
+         {
+          "id": 3,
+          "sku": "ETC:IONXE",
+          "desc": "Ion Xe console",
+          "qty": 1,
+          "unit": "ea",
+          "cost": 9000,
+          "price": 12500,
+          "option": true
+         }
+        ]
+       }
+      ]
+     },
+     "customerId": "c-alpha",
+     "locationId": "loc1",
+     "customer": "Alpha Schools",
+     "name": "Alpha Auditorium Lighting",
+     "status": "draft",
+     "quoteNote": "Call Pat. Key: @@SECRET_ANT@@-do-not-share",
+     "shareLink": {
+      "token": "x"
+     },
+     "leadId": "L-1",
+     "updatedAt": 1792108800000,
+     "clientResponses": [
+      {
+       "id": "r1",
+       "email": "respondent@example.org",
+       "note": "Please call"
+      }
+     ],
+     "bonusRecord": {
+      "pool": 123,
+      "split": [
+       {
+        "userId": "u1",
+        "amount": 60
+       }
+      ]
+     },
+     "estimatorBonusSplit": {
+      "u1": 0.5
+     }
+    }
+   },
+   {
+    "id": "Q-G002",
+    "deleted": false,
+    "doc": {
+     "quoteType": "system",
+     "estNo": 9002,
+     "spec": {
+      "sections": [
+       {
+        "id": "s1",
+        "name": "Main curtain",
+        "kind": "curtains",
+        "mfr": "",
+        "freightPct": 0,
+        "items": [
+         {
+          "id": 1,
+          "sku": "CUSTOM",
+          "desc": "Main drape, IFR velour",
+          "qty": 1,
+          "unit": "ea",
+          "cost": 6400,
+          "price": 9100,
+          "custom": true
+         }
+        ]
+       },
+       {
+        "id": "s2",
+        "name": "Motorized main (alternate)",
+        "kind": "rigging",
+        "mfr": "",
+        "freightPct": 3,
+        "alternate": true,
+        "items": [
+         {
+          "id": 1,
+          "sku": "CUSTOM",
+          "desc": "Motorized traveler",
+          "qty": 1,
+          "unit": "ea",
+          "cost": 7200,
+          "price": 10400,
+          "custom": true
+         }
+        ]
+       }
+      ]
+     },
+     "customerId": "c-alpha",
+     "locationId": "loc2",
+     "customer": "Alpha Schools",
+     "status": "sent",
+     "assumptions": "Union labor. token @@SECRET_GOOGLE_REFRESH@@ end",
+     "packageFiles": [
+      {
+       "id": "f1"
+      }
+     ],
+     "shareOpens": [
+      1,
+      2
+     ],
+     "portalCartId": "pc-1",
+     "createdAt": 1791763200000
+    }
+   },
+   {
+    "id": "Q-G003",
+    "deleted": false,
+    "doc": {
+     "quoteType": "system",
+     "estNo": 9003,
+     "spec": {
+      "sections": [
+       {
+        "id": "s1",
+        "name": "Audio",
+        "kind": "av",
+        "mfr": "",
+        "freightPct": 4,
+        "priceRound": 25,
+        "items": [
+         {
+          "id": 1,
+          "sku": "Symetrix:Jupiter 4",
+          "desc": "DSP",
+          "qty": 2,
+          "unit": "ea",
+          "cost": 1100,
+          "price": 1540
+         },
+         {
+          "id": 2,
+          "sku": "CUSTOM",
+          "desc": "Cable package",
+          "qty": 1,
+          "unit": "ea",
+          "cost": 800,
+          "price": 1150,
+          "custom": true,
+          "extSellOverride": 1200
+         },
+         {
+          "id": 3,
+          "sku": "LABOR",
+          "desc": "Install labor",
+          "qty": 24,
+          "unit": "hr",
+          "cost": 55,
+          "price": 95,
+          "labor": true
+         },
+         {
+          "id": 4,
+          "sku": "BONUS-PKG",
+          "desc": "Package bonus",
+          "qty": 1,
+          "unit": "ea",
+          "cost": 260,
+          "price": 364,
+          "bonus": "package",
+          "bonusPct": 5
+         },
+         {
+          "id": 5,
+          "sku": "BONUS-EST",
+          "desc": "Estimator bonus",
+          "qty": 1,
+          "unit": "ea",
+          "cost": 128,
+          "price": 128,
+          "bonus": "estimator",
+          "bonusPct": 2
+         }
+        ]
+       }
+      ]
+     },
+     "customerId": "c-beta",
+     "customer": "Beta Church",
+     "status": "draft",
+     "bid": {
+      "x": 1
+     },
+     "estimateEmails": [
+      {
+       "to": "a@b.c"
+      }
+     ],
+     "updatedAt": 1792281600000
+    }
+   },
+   {
+    "id": "Q-G004",
+    "deleted": true,
+    "doc": {
+     "quoteType": "system",
+     "estNo": 9004,
+     "spec": {
+      "sections": [
+       {
+        "id": "s1",
+        "name": "Deleted",
+        "kind": "lighting",
+        "mfr": "",
+        "freightPct": 0,
+        "items": [
+         {
+          "id": 1,
+          "sku": "X",
+          "desc": "x",
+          "qty": 1,
+          "unit": "ea",
+          "cost": 1,
+          "price": 2
+         }
+        ]
+       }
+      ]
+     }
+    }
+   },
+   {
+    "id": "Q-G005",
+    "deleted": false,
+    "doc": {
+     "quoteType": "flame_test",
+     "estNo": 9005,
+     "spec": {
+      "sections": [
+       {
+        "id": "s1",
+        "name": "Not a system quote",
+        "kind": "lighting",
+        "mfr": "",
+        "freightPct": 0,
+        "items": [
+         {
+          "id": 1,
+          "sku": "X",
+          "desc": "x",
+          "qty": 1,
+          "unit": "ea",
+          "cost": 1,
+          "price": 2
+         }
+        ]
+       }
+      ]
+     }
+    }
+   },
+   {
+    "id": "Q-G006",
+    "deleted": false,
+    "doc": {
+     "quoteType": "system",
+     "estNo": 9006,
+     "spec": {
+      "sections": [
+       {
+        "id": "s1",
+        "name": "Empty",
+        "kind": "lighting",
+        "mfr": "",
+        "freightPct": 0,
+        "items": []
+       }
+      ]
+     }
+    }
+   },
+   {
+    "id": "Q-D001",
+    "deleted": false,
+    "doc": {
+     "quoteType": "system",
+     "estNo": 7001,
+     "spec": {
+      "sections": [
+       {
+        "id": "s1",
+        "name": "Stage lighting",
+        "kind": "lighting",
+        "mfr": "ETC",
+        "freightPct": 5,
+        "items": [
+         {
+          "id": 1,
+          "sku": "ETC:CS15",
+          "desc": "ColorSource 15 fixture",
+          "qty": 4,
+          "unit": "ea",
+          "cost": 900,
+          "price": 1250
+         },
+         {
+          "id": 2,
+          "sku": "LABOR",
+          "desc": "Install labor",
+          "qty": 16,
+          "unit": "hr",
+          "cost": 55,
+          "price": 95,
+          "labor": true
+         },
+         {
+          "id": 3,
+          "sku": "ETC:IONXE",
+          "desc": "Ion Xe console",
+          "qty": 1,
+          "unit": "ea",
+          "cost": 9000,
+          "price": 12500,
+          "option": true
+         }
+        ]
+       }
+      ]
+     },
+     "customerId": "c-gamma",
+     "locationId": "loc1",
+     "customer": "Alpha Schools",
+     "name": "Alpha Auditorium Lighting",
+     "status": "draft",
+     "quoteNote": "Call Pat. Key: @@SECRET_ANT@@-do-not-share",
+     "shareLink": {
+      "token": "x"
+     },
+     "leadId": "L-1",
+     "updatedAt": 1760000000000,
+     "source": "daylite"
+    }
+   }
+  ],
+  "catalog_parts": [
+   {
+    "id": "SKU-A",
+    "doc": {
+     "sku": "SKU-A",
+     "desc": "Loudspeaker 8in",
+     "category": "Audio",
+     "unit": "ea",
+     "cost": 100,
+     "list": 180,
+     "mfr": "Acme",
+     "note": "vendor portal pw @@SECRET_GITHUB@@",
+     "portalHidden": true,
+     "updatedAt": 1760000000000
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   },
+   {
+    "id": "SKU-B",
+    "doc": {
+     "sku": "SKU-B",
+     "desc": "Fixture 750W",
+     "category": "Lighting",
+     "unit": "ea",
+     "cost": 200,
+     "list": 300,
+     "mfr": "Beta",
+     "narrativeText": "A workhorse fixture.",
+     "portalHidden": true,
+     "secretField": "internal"
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   },
+   {
+    "id": "SKU-C",
+    "doc": {
+     "sku": "SKU-C",
+     "desc": "Deleted part",
+     "cost": 1
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": true
+   }
+  ],
+  "subassemblies": [
+   {
+    "id": "fa-1",
+    "doc": {
+     "id": "fa-1",
+     "name": "Spot package",
+     "kind": "fixture",
+     "lines": [
+      {
+       "sku": "SKU-B",
+       "qty": 1
+      },
+      {
+       "sku": "SKU-A",
+       "qty": 2
+      }
+     ],
+     "internalNote": "staff-only scratch",
+     "createdBy": "u1"
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   },
+   {
+    "id": "fa-2",
+    "doc": {
+     "id": "fa-2",
+     "name": "Gone"
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": true
+   }
+  ],
+  "part_documents": [
+   {
+    "id": "PD-4",
+    "doc": {
+     "id": "PD-4",
+     "kind": "image",
+     "blobKey": "part-docs/PD-4/a-alt.webp",
+     "sourceUrl": null,
+     "source": "upload",
+     "uploadedAt": 1760000000000
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   },
+   {
+    "id": "PD-1",
+    "doc": {
+     "id": "PD-1",
+     "kind": "image",
+     "blobKey": "part-docs/PD-1/a.webp",
+     "sourceUrl": "https://example.com/a.webp?token=abc123&X-Amz-Signature=deadbeef#frag",
+     "source": "fetch"
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   },
+   {
+    "id": "PD-2",
+    "doc": {
+     "id": "PD-2",
+     "kind": "image",
+     "blobKey": "part-docs/PD-2/b.webp",
+     "sourceUrl": null,
+     "source": "upload"
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   },
+   {
+    "id": "PD-3",
+    "doc": {
+     "id": "PD-3",
+     "kind": "datasheet",
+     "blobKey": "part-docs/PD-3/c.pdf",
+     "sourceUrl": null,
+     "source": "upload"
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   },
+   {
+    "id": "PD-5",
+    "doc": {
+     "id": "PD-5",
+     "kind": "image",
+     "blobKey": "part-docs/PD-5/beta.webp",
+     "sourceUrl": null,
+     "source": "manufacturer",
+     "uploadedAt": 1760000000000
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   }
+  ],
+  "part_document_links": [
+   {
+    "id": "L4",
+    "doc": {
+     "id": "L4",
+     "partSku": "SKU-A",
+     "documentId": "PD-4",
+     "kind": "image",
+     "sort": 1
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   },
+   {
+    "id": "L1",
+    "doc": {
+     "id": "L1",
+     "partSku": "SKU-A",
+     "documentId": "PD-1",
+     "kind": "image",
+     "sort": 0
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   },
+   {
+    "id": "L2",
+    "doc": {
+     "id": "L2",
+     "partSku": "SKU-A",
+     "documentId": "PD-2",
+     "kind": "image",
+     "hidden": true
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   },
+   {
+    "id": "L3",
+    "doc": {
+     "id": "L3",
+     "partSku": "SKU-B",
+     "documentId": "PD-3",
+     "kind": "datasheet"
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   }
+  ],
+  "manufacturers": [
+   {
+    "id": "MF-acme",
+    "doc": {
+     "id": "MF-acme",
+     "key": "acme",
+     "name": "Acme",
+     "imageDocumentId": null,
+     "imageHistory": [],
+     "aliasKeys": [],
+     "mergedInto": null
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   },
+   {
+    "id": "MF-beta",
+    "doc": {
+     "id": "MF-beta",
+     "key": "beta",
+     "name": "Beta",
+     "imageDocumentId": "PD-5",
+     "imageHistory": [],
+     "aliasKeys": [],
+     "mergedInto": null
+    },
+    "rev": 1,
+    "seq": 1,
+    "updatedAt": 1760000000000,
+    "receivedAt": 1760000000000,
+    "review": null,
+    "deleted": false
+   }
+  ]
+ }
+}

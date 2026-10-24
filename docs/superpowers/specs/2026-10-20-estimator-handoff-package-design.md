@@ -74,7 +74,7 @@ Edits persist in **IndexedDB**, since the catalog is too large for localStorage.
 production snapshot** control wipes the edits. If IndexedDB is unavailable (some private windows),
 the prototype still runs and shows a "changes won't be saved" banner.
 
-The README and the zip's top-level `CONFIDENTIAL.txt` mark the package
+The README and the package folder's `CONFIDENTIAL.txt` mark the package
 **Confidential — Peak Systems Group**, because it carries real costs, margins and customer names.
 
 ## 3. Engine extraction in Quartzite (its own PR, merged first)
@@ -181,7 +181,11 @@ added to Quartzite later never flows in by accident. It copies:
 - **Rules:** the named pricing/rule blobs: rates, tiers, fabrics, track series, curtain mounts, system
   categories, estimate-output defaults, review limits, freight rule.
 - **Estimates:** quotes with `quoteType: "system"` that are app-era Estimator estimates with at least
-  one line and are not deleted. Each carries its notes, review comments, bonus record and revisions.
+  one line and are not deleted — not Daylite history, and not quotes the customer portal built for itself
+  (`source` `portal-catalog`: portal data never ships). Each carries its notes and revisions. *(As built,
+  D1238: revisions, their frozen header and vendor quotes are allow-listed one level down — no PDF or
+  drawing Blob paths, no bid / award, vendor quotes render-only — and the bonus record, client responses
+  and review comments are not bundled.)*
 - **Customers:** only the companies, venues and contacts those estimates reference.
 - **Team:** each staff member's name and role. No emails beyond what the quotes already print.
 
@@ -190,7 +194,7 @@ added to Quartzite later never flows in by accident. It copies:
 - `assist_secrets` or any secret blob
 - comms / inbox mail
 - service jobs, portal grants and carts, tasks, meetings, assessments
-- notification prefs, geo cache
+- notification prefs; the geo cache except the route rows between bundled venues and Peak's offices
 
 **Safety net.** The slicer fails if its output contains anything shaped like a token, secret, API key
 or OAuth credential. The patterns are checked in `slice.ts` and covered by a unit test.

@@ -62,3 +62,6 @@ next-env.d.ts
 
 # DaVinci ETC library export (116MB, licensed source data — never committed)
 /data/davinci/
+
+# Estimator handoff build output (zip + unpacked prototype)
+/output/

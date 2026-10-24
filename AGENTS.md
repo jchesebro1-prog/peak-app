@@ -1679,8 +1679,33 @@ See `.env.example`.
     (TypeScript-API closure walk, in test:specs) keeps the core browser-pure;
     `npm run core:golden` prices export files into golden totals (fixtures in
     `docs/estimating-core/`). Quick Design types now live in `src/lib/design/quick-types.ts`.
-    No behaviour change. Next: handoff PR 2, the HTML prototype package (needs Jeff's production
-    export).
+    No behaviour change. Next: handoff PR 2 (phase 67 below, the HTML prototype package).
+
+70. 🚧 **Estimator handoff prototype** (#361, D1233–D1246, D1273, D1304–D1306) — handoff PR 2, stacked on PR 1. A confidential,
+    offline package (`output/peak-estimator-handoff/`, zipped, git-ignored) that runs Quartzite's REAL Estimator,
+    Catalog, Assembly Builder and Estimating Rules in the browser over a sliced production export, for a founder
+    evaluating Peak's estimating. Source in `handoff/estimator/`: `build.ts` + `esbuild-plugins.ts` bundle the
+    real client components with every `"use server"` module swapped for an in-browser registry (default = a
+    refusal; the actions the Estimator, Catalog, Assembly Builder and Estimating Rules call are registered,
+    `runtime/actions/*`); `runtime/store.ts` is an IndexedDB overlay over the read-only seed, one database per
+    snapshot (Reset deletes it); the shell routes by hash and the Estimator keeps
+    `?id`/`?step`; `slice.ts` + `slice-rules.ts` cut a `db:export` **format 2** (customer tables added to
+    `scripts/export.ts`, the one `src/` change) through allow-lists down to revisions and vendor quotes, with a
+    secret scrub and backstop (client responses, bonus records and splits, share links, PDF and drawing Blob
+    paths, portal-built quotes are not shipped); `fetch-photos.ts` pulls part photos from private Blob, run by
+    Jeff; `handoff/estimator/spec/` holds the founder docs (README, data-model, pricing, ports; generated blocks
+    expanded from the source by `spec-gen.ts`), and only the built package's `spec/` adds the golden totals per
+    estimate and the screenshots; `RUNBOOK.md` (never shipped) is the production run; `package.ts`'s audit fails
+    a stray file, a private Blob path or a secret; `port-drift.ts` fails when an original a port mirrors changes
+    or a port has no entry (`handoff:verify -- --drift`, re-stamp one entry with `--drift --update <port>`);
+    `--serve` checks the Artifact path over http. `npm run handoff:slice | handoff:photos | handoff:build | handoff:verify`;
+    `handoff:verify -- --full` is strict (an alternate, a rack, a curtain + track and bonus lines must all be in
+    the slice; `--allow-missing-features` is dev-only) and writes the zip only on a pass. Nothing is published
+    or sent by this work. Remaining is Jeff-gated: run the production checklist in PUNCHLIST #361 (export,
+    photos, slice, build, strict verify, --serve), confirm the controller defaults (the dropped quote fields,
+    render-only vendor quotes, allow-listed revisions, no portal-built quotes, the hidden service-quote rules,
+    the print footer), then the zip goes to Jeff and the Artifact is published only on his go-ahead. Punch
+    item #361.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
