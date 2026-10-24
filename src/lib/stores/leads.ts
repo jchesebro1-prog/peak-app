@@ -790,8 +790,10 @@ export async function convert(
     locationId: customerId ? "loc1" : null,
     value: Math.round(l.value || 0),
     margin: 0,
+    // #367: tierMargin is markup — stamp it, or the doc store would convert it a second time.
+    pricingBasis: "markup",
     pricingTier: tier.tier,
-    tierMargin: tier.margin,
+    tierMargin: tier.markup,
     status: "draft",
     source: "lead",
     // #223: the opportunity link — the quote carries this lead's number.

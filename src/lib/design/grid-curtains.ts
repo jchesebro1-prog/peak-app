@@ -8,7 +8,7 @@
  * estimator - so it reuses the pricing already in use rather than growing a
  * fourth one.
  *
- * This module imports @/lib/curtain-pricing, which holds the margin, so it
+ * This module imports @/lib/curtain-pricing, which holds the markup, so it
  * must never reach a client component. The editor's live preview instead runs
  * @/lib/curtain-geom over the sell price/sq ft this file's caller precomputes
  * (fabricSellPerSqft), which matches this module's priceEach to the cent by
@@ -55,14 +55,14 @@ export function priceGridCurtains(
   placements: Array<{ id: string; curtain?: GridCurtain | null }>,
   catalog: FabricRow[],
   sewing: CurtainSewing,
-  margin?: number
+  markup?: number
 ): Map<string, CurtainPrice> {
   const fabricById = new Map(catalog.filter(isFabricRow).map((p) => [p.id, p]));
   const out = new Map<string, CurtainPrice>();
   for (const pl of placements) {
     if (!pl.curtain) continue;
     const rate = fabricAreaRateOf(fabricById.get(pl.curtain.fabricSku));
-    out.set(pl.id, curtainSell(curtainSpecOf(pl.curtain), { fabricRate: rate, sewingPct: sewing.sewingPct }, margin));
+    out.set(pl.id, curtainSell(curtainSpecOf(pl.curtain), { fabricRate: rate, sewingPct: sewing.sewingPct }, markup));
   }
   return out;
 }

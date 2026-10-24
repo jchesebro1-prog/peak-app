@@ -211,7 +211,7 @@ export type CategoryOptionItem = {
 };
 export type CategoryOption = { id: string; name: string; discipline?: ScopeDiscipline; items: CategoryOptionItem[] };
 
-/** What the new system needs from the Estimator: the id source, the tier margin
+/** What the new system needs from the Estimator: the id source, the tier markup
  *  and sell rule (catalogAddPrice), and the defaults `addSystem` stamps. */
 export type SystemFromCategoryCtx = {
   nextId: () => number;

@@ -12,7 +12,7 @@ import type { Port } from "@/lib/catalog-connect";
 // Type-only (#292) — vocab.ts imports GridCurtainType back, also type-only.
 import type { CurtainBottomFinish, CurtainMountTypeId, CurtainTopFinish } from "@/lib/curtain-cut-sheets/vocab";
 // Type-only, and curtain-geom is the CUSTOMER-SAFE mirror (no cost basis, no
-// margin) - importing it here keeps this module client-safe.
+// markup) - importing it here keeps this module client-safe.
 import type { CurtainSpec } from "@/lib/curtain-geom";
 import type { GridShape } from "./grid-symbols";
 import type { TagFields } from "./conduit-riser/tags";
@@ -543,11 +543,11 @@ export function routeLines(
   return { lines, value, cost, unmeasured };
 }
 
-/** Sell value, internal cost, and blended margin for a set of placements. */
+/** Sell value, internal cost, and blended markup ((value − cost) ÷ cost, #367) for a set of placements. */
 export function bomTotals(
   placements: Array<{ partId: string; curtain?: GridCurtain | null; qty?: number }>,
   parts: PartLite[]
-): { value: number; cost: number; margin: number } {
+): { value: number; cost: number; markup: number } {
   const byId = new Map(parts.map((p) => [p.id, p]));
   let value = 0;
   let cost = 0;
@@ -559,7 +559,7 @@ export function bomTotals(
     value += part.list * q;
     cost += part.cost * q;
   }
-  return { value, cost, margin: value > 0 ? (value - cost) / value : 0 };
+  return { value, cost, markup: cost > 0 ? (value - cost) / cost : 0 };
 }
 
 /** #304: the one text a Grid part search matches — description, the Grid

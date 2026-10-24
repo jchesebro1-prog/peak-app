@@ -12,6 +12,7 @@ import { knownValue, unknownCount } from "@/lib/job-value";
 import { lineExtSellOf } from "@/app/(app)/estimator/pricing";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { costFromSell } from "@/lib/markup";
 
 export const DAY = 86_400_000;
 
@@ -66,8 +67,8 @@ export type SalesMetrics = {
   won: number;
   lost: number;
   winRate: number;
-  /** value-weighted quote.margin over quotes created in [a, b) */
-  avgMargin: number;
+  /** cost-weighted quote markup over quotes created in [a, b): Σ profit ÷ Σ cost (#367). */
+  avgMarkup: number;
 };
 
 export function salesMetrics(quotes: Quote[], a: number, b: number): SalesMetrics {
@@ -76,7 +77,11 @@ export function salesMetrics(quotes: Quote[], a: number, b: number): SalesMetric
   const wonList = quotes.filter((q) => q.status === "won" && wonAt(q) >= a && wonAt(q) < b);
   const lostList = quotes.filter((q) => q.status === "lost" && decidedAt(q) >= a && decidedAt(q) < b);
   const decided = wonList.length + lostList.length;
-  const marginDollars = created.reduce((s, q) => s + (q.value || 0) * (q.margin || 0), 0);
+  // #367: quote.margin holds a markup k; a quote's cost is value ÷ (1 + k) and its profit value − cost.
+  // costFromSell is guarded: a junk k or 1 + k ≤ 0 (a stored −1) counts the quote at cost (profit 0),
+  // never ±Infinity / NaN; a zero-cost quote's k = 0 also prices at cost (markup 0).
+  const costSum = created.reduce((s, q) => s + costFromSell(q.value || 0, q.margin || 0), 0);
+  const profit = quotedValue - costSum;
   return {
     quotedValue,
     avg: created.length ? quotedValue / created.length : 0,
@@ -84,7 +89,7 @@ export function salesMetrics(quotes: Quote[], a: number, b: number): SalesMetric
     won: wonList.length,
     lost: lostList.length,
     winRate: decided ? (wonList.length / decided) * 100 : 0,
-    avgMargin: quotedValue ? marginDollars / quotedValue : 0,
+    avgMarkup: costSum > 0 && Number.isFinite(profit / costSum) ? profit / costSum : 0,
   };
 }
 
@@ -101,15 +106,18 @@ export function backlogProjects(projects: ProjectRecord[]): ProjectRecord[] {
   return projects.filter((p) => isBacklog(p)).sort(byTarget);
 }
 
-/** "Project profit" v1 (decision 9): projected, value × margin over the open
- *  book. A Daylite-imported project with an unknown value (Task 9)
+/** "Project profit" v1 (decision 9): projected, value × k ÷ (1 + k) over the
+ *  open book (`project.margin` holds a markup k, #367). A Daylite-imported project with an unknown value (Task 9)
  *  contributes 0 to both value and profit — it never appears in this book's
  *  dollar totals, only in `unknownCount` so a widget can flag it. */
-export function projectedProfit(projects: ProjectRecord[]): { value: number; profit: number; margin: number; unknownCount: number } {
+export function projectedProfit(projects: ProjectRecord[]): { value: number; profit: number; markup: number; unknownCount: number } {
   const book = projects.filter((p) => !isDone(p));
   const value = book.reduce((s, p) => s + knownValue(p), 0);
-  const profit = book.reduce((s, p) => s + knownValue(p) * (p.margin || 0), 0);
-  return { value, profit, margin: value ? profit / value : 0, unknownCount: unknownCount(book) };
+  // costFromSell is guarded (a stored k ≤ −1 or junk counts at cost), so profit and markup stay finite.
+  const cost = book.reduce((s, p) => s + costFromSell(knownValue(p), p.margin || 0), 0);
+  const profit = value - cost;
+  const markup = cost > 0 && Number.isFinite(profit / cost) ? profit / cost : 0;
+  return { value, profit, markup, unknownCount: unknownCount(book) };
 }
 
 /* ---- equipment sold ---- */
@@ -210,8 +218,9 @@ export function installsForecast(
   const horizonEnd = now + windowMs;
   const book = projects.filter((p) => !isDone(p) && (p.targetDate == null || p.targetDate <= horizonEnd));
   const totalValue = book.reduce((s, p) => s + knownValue(p), 0);
-  const blended = totalValue ? book.reduce((a, p) => a + knownValue(p) * (p.margin || 0), 0) / totalValue : 0;
-  const cost = Math.round(totalValue * (1 - blended));
+  // #367: `blended` is now the book's markup, (value − cost) ÷ cost; p.margin holds a markup.
+  const cost = Math.round(book.reduce((a, p) => a + costFromSell(knownValue(p), p.margin || 0), 0));
+  const blended = cost > 0 && Number.isFinite((totalValue - cost) / cost) ? (totalValue - cost) / cost : 0;
 
   // Full value billed at landing (targetDate), collected net-30 after.
   // Consulting milestone fees (D90) land the same way — forecast-only.

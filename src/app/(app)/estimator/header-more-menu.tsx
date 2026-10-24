@@ -46,7 +46,7 @@ export function HeaderMoreMenu({ s, onStep }: { s: EstimatorState; onStep: (to: 
             </button>
           )}
           <button type="button" role="menuitem" style={{ ...item, ...(s.reviewBusy ? { opacity: 0.6, cursor: "not-allowed" } : {}) }} disabled={s.reviewBusy} onClick={() => { setOpen(false); void s.exportReviewSheet(); }}
-            title="Every part with cost, sell, margin, markup and links — assemblies broken into their parts, with cost / markup / fees subtotals per system.">
+            title="Every part with cost, sell, markup and links — assemblies broken into their parts, with cost / markup / fees subtotals per system.">
             Review spreadsheet
           </button>
           {s.loadedId && (

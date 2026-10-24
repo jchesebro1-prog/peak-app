@@ -3,7 +3,7 @@ import { defaultDashboardLayout, resolveDashboardLayout } from "../src/lib/dashb
 import { parseCatalog } from "../src/app/(app)/catalog/parse";
 import { findMeetingLink } from "../src/lib/google/meeting-link";
 import { parseMaterialCsv } from "../src/app/(app)/estimator/material-csv";
-import { lineExtSellOf, lineMarginOf } from "../src/app/(app)/estimator/pricing";
+import { lineExtSellOf, lineMarkupOf } from "../src/app/(app)/estimator/pricing";
 
 function testDashboardInheritance() {
   const company = defaultDashboardLayout();
@@ -48,7 +48,7 @@ assert.equal(findMeetingLink("https://example.com/not-a-meeting", "https://zoom.
 assert.equal(findMeetingLink("In person", "No link here"), "");
 const vendorCsv = parseMaterialCsv("description,MFR P/N,quantity,unit,amount\nCable,ETC-123,2,ea,100", { costOnly: true });
 assert.equal(vendorCsv.items[0]?.manufacturerPartNumber, "ETC-123");
-assert.equal(lineMarginOf(60, 100), 0.4);
+assert.ok(Math.abs((lineMarkupOf(60, 100) ?? 0) - 40 / 60) < 1e-12, "lineMarkupOf: (100 − 60) ÷ 60 (#367 markup on cost)");
 assert.equal(lineExtSellOf({ qty: 2, price: 100 }), 200);
 assert.equal(lineExtSellOf({ qty: 2, price: 100, extSellOverride: 175 }), 175);
 console.log("punch foundations: 11 passed");

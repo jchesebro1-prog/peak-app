@@ -61,7 +61,7 @@ export type SpecItem = {
   fixture?: boolean;
   labor?: boolean;
   /** #250: a portal curtain line priced live (Estimator curtain math, tier
-   *  margin) that still needs Peak to confirm measurements + fabric — stays
+   *  markup) that still needs Peak to confirm measurements + fabric — stays
    *  set through Save; only sending the quote (or staff replacing the line)
    *  resolves it (clearPricedPor's `anyConfirm`, portal-quote-mode.ts). */
   portalConfirm?: boolean;
@@ -87,7 +87,7 @@ export type SpecItem = {
   /**
    * Estimator bonuses (2026-10-12 spec): an automatic, internal-only line.
    * "package" = 5% of the system's cost (only when it has labor), marked up at
-   * the system's blended margin; "estimator" = 2% of the system's price, at
+   * the system's blended markup; "estimator" = 2% of the system's price, at
    * cost. Written only by `withBonusLines` (src/lib/estimate-bonus/rules.ts);
    * folded into other rows on every customer surface by `customerLines`.
    */
@@ -190,9 +190,9 @@ export type SpecSection = {
   /** #245: one-way drive miles the freight rule priced from (null = venue not located). */
   freightMiles?: number | null;
   /** #267: a typed system sell (items + freight), used exactly — never
-   *  re-rounded, never pushed into the line prices; the margin follows it and
+   *  re-rounded, never pushed into the line prices; the markup follows it and
    *  the customer document spreads the difference across the visible lines
-   *  (`customerLines`). Cleared by this system's Margin slider, the global
+   *  (`customerLines`). Cleared by this system's Markup slider, the global
    *  "Reprice every line" slider, or Reset to auto. Valid only when finite,
    *  > 0 and ≤ PRICE_OVERRIDE_MAX; anything else is ignored (and dropped by
    *  the server on save). Not carried by Copy (the copy's costs differ). */
@@ -249,7 +249,7 @@ export type CustomDraft = {
   allowance: string;
   /** Add this non-allowance custom part to the shared catalog after saving. */
   addToCatalog: string;
-  /** #302 — "1" = Unit sell follows Unit cost at the flat custom-part margin
+  /** #302 — "1" = Unit sell follows Unit cost at the flat custom-part markup
    *  (`customPartSell`); typing a sell turns it off, clearing it turns it on. */
   priceAuto: string;
 };

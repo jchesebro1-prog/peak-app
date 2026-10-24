@@ -281,8 +281,8 @@ export async function searchAutoEquipmentAction(query: string, rowKey: string): 
     };
   }
   const [{ hits }, fixtures, rates] = await Promise.all([searchCatalog(q, "", 15), listFixtures(), getCatalogRates()]);
-  const m = rates.defaultMargin;
-  const partHits = partSwapHits(hits, m);
+  const k = rates.defaultMargin;
+  const partHits = partSwapHits(hits, k);
   const ql = q.toLowerCase();
   const scopeLabel = def ? scopeLabelOf(def.system) : "";
   const matched = assemblySwapCandidates(
@@ -292,7 +292,7 @@ export async function searchAutoEquipmentAction(query: string, rowKey: string): 
   const fxParts = matched.length ? await getCatalogParts([...new Set(matched.flatMap((f) => fixtureSkus(f)))]) : [];
   const asmHits: AutoEquipHit[] = matched.map((f) => {
     const r = resolveFixture(f, fxParts);
-    return { kind: "assembly", ref: f.id, desc: `${f.label} (${f.kind})`, unit: "ea", unitSell: r.sell > 0 ? r.sell : sellFromCost(r.cost, m) };
+    return { kind: "assembly", ref: f.id, desc: `${f.label} (${f.kind})`, unit: "ea", unitSell: r.sell > 0 ? r.sell : sellFromCost(r.cost, k) };
   });
   return { hits: [...asmHits, ...partHits] };
 }
@@ -1809,7 +1809,7 @@ export async function deleteProjectAction(
 
 /**
  * Whether a part can be tier-priced at all — the same condition tierCatalog
- * (below) uses to decide between the cost ÷ (1 − margin) re-derivation and
+ * (below) uses to decide between the cost × (1 + markup) re-derivation and
  * the part's plain list price. Pulled out as its own predicate (punch #76)
  * so the fallback-tracking set and the pure unit tests share one definition
  * instead of two copies of the same condition drifting apart. `cost` is a
@@ -1872,10 +1872,10 @@ export async function createDraftQuoteAction(
     await updateQuote(existing.id, {
       name: build.quoteName,
       value: build.value,
-      margin: build.margin,
+      margin: build.markup,
       locationId: build.locationId,
       pricingTier: build.tier.tier,
-      tierMargin: build.tier.margin,
+      tierMargin: build.tier.markup,
       spec: build.spec,
     });
     // #222 fix wave 1: a re-promote rewrites what the quote document shows.
@@ -1897,9 +1897,9 @@ export async function createDraftQuoteAction(
       contactName: project.contactName || "",
       locationId: build.locationId,
       value: build.value,
-      margin: build.margin,
+      margin: build.markup,
       pricingTier: build.tier.tier,
-      tierMargin: build.tier.margin,
+      tierMargin: build.tier.markup,
       source: "grid",
       quoteType: "system",
       owner: user.name,

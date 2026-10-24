@@ -46,7 +46,7 @@ export default async function EquipmentMapPage() {
   const skus = new Set(mapSkus(map, fixtures));
   for (const f of fixtureList) for (const sku of fixtureSkus(f)) skus.add(sku);
   const parts = new Map((skus.size ? await getMany([...skus]) : []).map((p) => [p.sku, p]));
-  const ctx = { parts, fixtures, margin: rates.defaultMargin };
+  const ctx = { parts, fixtures, markup: rates.defaultMargin };
   const hints = Object.fromEntries(
     EQUIPMENT_ROWS.map((r) => [r.key, { text: legacyHintText(LEGACY_HINTS[r.key]), skus: legacyHintSkus(LEGACY_HINTS[r.key]) }])
   );

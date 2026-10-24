@@ -258,7 +258,7 @@ export type InitialQuote = {
   revNum: number;
   revDateMs: number;
   /** Customer pricing-tier stamp (item 11, D87) — seeds labor/curtain
-   *  margins; re-stamped server-side when the customer/contact changes. */
+   *  markups (stored as `tierMargin`, a markup since #367); re-stamped server-side when the customer/contact changes. */
   pricingTier: string | null;
   tierMargin: number | null;
   /** Saved builder state (spec.sections) — null starts a clean estimate. */

@@ -10,6 +10,7 @@
 import { getSite, docLocId } from "@/lib/identity/sites";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { isTierPriced } from "@/lib/tier-pricing";
+import { DEFAULT_MARKUP, MARKUP_MAX, costFromSell, sellAt } from "@/lib/markup";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { loadEquipPriceCtx, loadVirtualParts } from "@/lib/stores/equipment-map";
@@ -42,8 +43,8 @@ import { loadCurtainSewingPct, loadWireLaborRules } from "@/lib/stores/pricing";
 import { gridLaborLines, sanitizeLaborOverrides, type GridLaborLine, type LaborOverrides, type WireLaborRules } from "@/lib/design/wire-labor";
 import type { TierKey } from "@/app/(app)/design/quick/engine";
 
-/** Labor's cost share when the tier margin is unusable (negative or ≥ 95 %) — a 30 % margin. */
-const LABOR_COST_FRAC_FALLBACK = 0.7;
+/** Labor's markup when the tier markup is unusable (negative or ≥ MARKUP_MAX) — #367: the old 30 % margin, rounded. */
+const LABOR_FALLBACK_MARKUP = DEFAULT_MARKUP;
 
 export type GridQuoteSpecLine = {
   sku: string; desc: string; qty: number; unit: string; price: number; ext: number; tierFallback?: true; allowance?: true; specKey?: string;
@@ -52,10 +53,11 @@ export type GridQuoteSpecLine = {
 export type GridQuoteBuild = {
   lines: BomLine[];
   value: number;
-  margin: number;
+  /** (value − cost) ÷ cost (#367). Promote writes it to the quote's persisted `margin` field. */
+  markup: number;
   fallbackLines: string[];
   spec: { kind: "grid"; gridProjectId: string; gridOptionId: string; lines: GridQuoteSpecLine[] };
-  tier: { tier: string; margin: number };
+  tier: { tier: string; markup: number };
   locationId: string | null;
   quoteName: string;
   /** #232: this option's labor lines (sell), one per BOM heading with
@@ -184,7 +186,7 @@ export async function buildGridQuote(
   const symbols = inputs ? inputs.symbols : await listGridSymbols();
   // #211: Auto's assemblies and allowances (asm:/allow:) price live, with their real cost.
   // They are then tier-priced like every other Grid part (D314): a quoted
-  // assembly's own sell is replaced by cost ÷ (1 − the customer's tier margin).
+  // assembly's own sell is replaced by cost × (1 + the customer's tier markup).
   // Only THIS option's virtual parts (a shared ctx must not let another
   // design's dead part refuse this one).
   const virtual = inputs?.equip
@@ -222,10 +224,10 @@ export async function buildGridQuote(
   const gridCatalog = [...symbolRows, ...virtualRows];
   const tierCatalog = gridCatalog.map((p) => ({
     ...p,
-    list: isTierPriced(p.cost, tier.margin) ? Math.round((p.cost / (1 - tier.margin)) * 100) / 100 : p.list,
+    list: isTierPriced(p.cost, tier.markup) ? Math.round(sellAt(p.cost, tier.markup) * 100) / 100 : p.list,
   }));
   const fallbackKeys = new Set(
-    gridCatalog.filter((p) => !isTierPriced(p.cost, tier.margin)).flatMap((p) => [p.id, p.sku])
+    gridCatalog.filter((p) => !isTierPriced(p.cost, tier.markup)).flatMap((p) => [p.id, p.sku])
   );
   const isFallbackLine = (l: Pick<BomLine, "partId" | "kind">) => l.kind !== "curtain" && fallbackKeys.has(l.partId);
 
@@ -249,8 +251,8 @@ export async function buildGridQuote(
   for (const s of conduitSizes) {
     const p = s.partId ? catalogById.get(s.partId) : undefined;
     if (!p || conduitParts.has(p.id)) continue;
-    const tiered = isTierPriced(p.cost, tier.margin);
-    conduitParts.set(p.id, { desc: p.desc, unit: p.unit, cost: p.cost, list: tiered ? Math.round((p.cost / (1 - tier.margin)) * 100) / 100 : p.list });
+    const tiered = isTierPriced(p.cost, tier.markup);
+    conduitParts.set(p.id, { desc: p.desc, unit: p.unit, cost: p.cost, list: tiered ? Math.round(sellAt(p.cost, tier.markup) * 100) / 100 : p.list });
     if (!tiered) fallbackKeys.add(p.id);
   }
   const descById = new Map(tierCatalog.map((p) => [p.id, p.desc]));
@@ -287,16 +289,16 @@ export async function buildGridQuote(
 
   // #227 late: curtains carry the sewing adder on top of the fabric rate.
   const sewingPct = inputs ? inputs.sewingPct : await loadCurtainSewingPct();
-  const curtainPrices = priceGridCurtains(placements, catalog, { sewingPct }, tier.margin);
+  const curtainPrices = priceGridCurtains(placements, catalog, { sewingPct }, tier.markup);
   const fabricNames = new Map(catalog.filter(isFabricRow).map((p) => [p.id, p.desc] as const));
   const curtains = curtainLines(placements, new Map([...curtainPrices].map(([id, v]) => [id, v.priceEach])), fabricNames);
   const curtainValue = curtains.reduce((a, l) => a + l.ext, 0);
   const curtainCostTotal = [...curtainPrices.values()].reduce((a, v) => a + v.costEach, 0);
 
   // Custom items (#212) price exactly like an Equipment-map allowance: sell =
-  // unit cost ÷ (1 − the customer's tier margin). Always priced, so they never
+  // unit cost × (1 + the customer's tier markup). Always priced, so they never
   // make a design "Incomplete" or refuse the quote.
-  const custom = customItemBomLines(customItems, tier.margin);
+  const custom = customItemBomLines(customItems, tier.markup);
   const customValue = custom.reduce((a, l) => a + l.ext, 0);
   const customCost = customItemsCost(customItems);
 
@@ -315,7 +317,7 @@ export async function buildGridQuote(
   // uses, so the two can never disagree about which line counts where. The
   // tier is the option's Auto choice for that scope, else the option's own
   // tier, else none (×1.0); General always takes the option's tier. Labor
-  // carries the customer's tier margin like every Grid line.
+  // carries the customer's tier markup like every Grid line.
   const wireLabor = inputs ? inputs.wireLabor : await loadWireLaborRules();
   const groupParts = inputs ? inputs.groupParts : await loadGridGroupParts(symbols, catalog);
   const grouped = groupedBomLines({
@@ -339,10 +341,10 @@ export async function buildGridQuote(
   const overrides: LaborOverrides = {};
   for (const [k, v] of Object.entries(sanitizeLaborOverrides(option.laborOverrides))) if (isEditableBomGroupKey(k)) overrides[k] = v;
   const laborLines = gridLaborLines(material, laborTier, wireLabor, overrides);
-  const laborCostFrac = tier.margin >= 0 && tier.margin < 0.95 ? 1 - tier.margin : LABOR_COST_FRAC_FALLBACK;
+  const laborMarkup = tier.markup >= 0 && tier.markup < MARKUP_MAX ? tier.markup : LABOR_FALLBACK_MARKUP;
   const labor = laborLines
     .filter((l) => l.amount > 0)
-    .map((l) => ({ sku: l.sku, desc: l.desc, qty: 1, unit: "lot", price: l.amount, ext: l.amount, cost: Math.round(l.amount * laborCostFrac * 100) / 100 }));
+    .map((l) => ({ sku: l.sku, desc: l.desc, qty: 1, unit: "lot", price: l.amount, ext: l.amount, cost: Math.round(costFromSell(l.amount, laborMarkup) * 100) / 100 }));
 
   const lines: BomLine[] = [
     ...devLines,
@@ -355,7 +357,7 @@ export async function buildGridQuote(
   ];
   const value = devTotals.value + accValue + wires.value + riser.conduitValue + curtainValue + customValue + labor.reduce((a, l) => a + l.ext, 0);
   const cost = devTotals.cost + accCost + wires.cost + riser.conduitCost + curtainCostTotal + customCost + labor.reduce((a, l) => a + l.cost, 0);
-  const margin = value > 0 ? (value - cost) / value : 0;
+  const markup = cost > 0 ? (value - cost) / cost : 0;
   const fallbackLines = lines.filter(isFallbackLine).map((l) => l.desc);
 
   const site = project.siteId && (inputs?.location ?? true) ? await getSite(project.siteId) : null;
@@ -379,5 +381,5 @@ export async function buildGridQuote(
   const manyOptions = ensureOptions(project).options.length > 1;
   const quoteName = `${project.name}${manyOptions ? ` · ${option.name}` : ""} — The Grid design`;
 
-  return { ok: true, build: { lines, value, margin, fallbackLines, spec, tier: { tier: tier.tier, margin: tier.margin }, locationId, quoteName, labor: laborLines } };
+  return { ok: true, build: { lines, value, markup, fallbackLines, spec, tier: { tier: tier.tier, markup: tier.markup }, locationId, quoteName, labor: laborLines } };
 }

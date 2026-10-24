@@ -126,7 +126,7 @@ export default async function HomePage({
   const sheetQuote: SheetQuote | null = sheetQ
     ? {
         id: sheetQ.id, name: sheetQ.name, meta: `${displayQuoteNumber(sheetQ)} · ${sheetQ.customer || "—"}`, value: money(sheetQ.value),
-        marginLabel: sheetQ.margin ? `${Math.round(sheetQ.margin * 100)}% margin` : "", status: sheetQ.status,
+        marginLabel: sheetQ.margin ? `${Math.round(sheetQ.margin * 100)}% markup` : "", status: sheetQ.status,
         quoteType: sheetQ.quoteType,
       }
     : null;

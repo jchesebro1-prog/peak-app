@@ -902,7 +902,7 @@ Anything you want changed, just say so — none of these are hard to reverse.
   - **Stragglers:** the leads "Nothing scheduled" chip **stays display-only**
     (D83 shape is final); the four AI features **stay reachable for now** —
     Jeff wants a session to design rules-based ways around them (D75/D86
-    mold), queued with the Consulting talk for the next brainstorm.
+    mold), queued with the Consulting talk for the next brainstorm. **Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — Tier percentages are now markup on cost (43/37/28/25/18/11/5), not margin on price.
 - **D88. Customer pricing tiers shipped** (punch item 11 — decisions in D87 +
   Jeff's follow-ups; built 2026-07-19). The tier lives on the PERSON
   (`contacts.pricingTier`, D85 schema), company is fallback, Base is default;
@@ -931,7 +931,7 @@ Anything you want changed, just say so — none of these are hard to reverse.
   customer-buyable set (the reseeded 27-part seed catalog has none — the
   real price-book import repopulates it); service-builder knob seeding uses
   the picked customer's primary contact, and switching the attn contact
-  after picking does not re-seed the knob (cheap follow-up if wanted).
+  after picking does not re-seed the knob (cheap follow-up if wanted). **Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — Tier percentages are now markup on cost (43/37/28/25/18/11/5), not margin on price.
 - **D89. Full AI layer removal** (spec
   `docs/superpowers/specs/2026-07-19-ai-removal-design.md`; closes punch item 4,
   built 2026-07-19). The four inert model-backed features — thread summary,
@@ -2520,6 +2520,8 @@ back to invented fixture data.
 
 ## D135. New estimates are clean, margin-seeded material documents (2026-09-20)
 
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — the seed margin is now a markup (`sellAt`).
+
 Opening `/estimator` without an id now creates a clean unsaved estimate; it no
 longer opens Q-2041 or sample systems. New systems begin at 2% freight, and
 catalog selections seed unit sell from the customer's pricing tier or the 30%
@@ -3951,6 +3953,8 @@ cost, section margin dragged to 40% → both lines read **$1,666.67**.
 or abandoned file does not exist for any prefix in this repo.
 
 ## D163. A vendor quote is editable in place; editing preserves the line's current margin (#144, 2026-09-22)
+
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — the preserved line figure is now a markup.
 
 Jeff, 2026-09-22: a stored vendor quote could only have its Single/Itemized display flipped or be
 deleted. Changing the vendor, quote number, description, total, materials, terms, notes, link,
@@ -5806,6 +5810,8 @@ on-site labor takes the emergency multiplier.
 
 ## D283. Customers see one travel line, at travel's share of the sell price (#208, 2026-09-25)
 
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — travel's share of the sell price is unchanged, but the service math beneath it is markup.
+
 In fly mode the letters, quote documents and renewal PDFs print one line, "Travel (air, lodging & per diem)", with
 the flight cost marked up by the quote's margin (`flight.total ÷ (1 − margin)`, rounded) — never a bare cost figure
 next to an all-in price. It replaces the round-trip mobilization row (flame, inspection) and the distance sentence
@@ -6025,6 +6031,8 @@ with "I confirm this allowance" ticked; `confirmedBy/At` are re-stamped only whe
 
 ## D303. Pricing from the map, and nothing else (#211, 2026-09-25)
 
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — the part price is `cost × (1 + markup)`, not `cost ÷ (1 − margin)`.
+
 Part: live cost; sell = list, or cost ÷ (1 − `catalog_rates.defaultMargin`) when the part has no list. Assembly:
 `resolveFixture` included cost / sell. Allowance: the confirmed amount is a unit cost, sold like a list-less part.
 Fabric rows: the FABRIC half comes from the mapped Fabric part's `curtainAreaRate ?? costPerSqft` (no
@@ -6123,6 +6131,8 @@ seed-placeholder refusal. The editor flags them "Needs a part", never "priced at
 
 ## D314. Virtual lines are tier-priced like every Grid part (#211, 2026-09-25)
 
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — virtual lines are tier-priced at the tier markup.
+
 On a quote, an assembly or allowance line's sell is re-derived as cost ÷ (1 − the customer's tier margin), replacing
 the assembly's own included sell / the catalog-margin sell `virtualPartsFor` computes; a line with sell but no cost
 falls back to that sell and is flagged `tierFallback` as usual.
@@ -6157,6 +6167,8 @@ row's swap search is unchanged (`cost>0||list>0`, sell derived the existing way)
 
 
 ## D319. Add to Quotes re-prices on the server; the client's `incomplete` is never trusted (#211, 2026-09-26)
+
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — the server re-prices at the tier markup.
 
 Jeff's call. Every Quick-design promote path — Quick Design's Add to Quotes, the Designs dashboard, and Home (which now
 delegates to the dashboard's action) — re-prices the design on the SERVER from its `config` (or, for a pre-config seed
@@ -6359,6 +6371,8 @@ answer is stale too, instead of printing in the wrong blank. Answers saved befor
 position, as before.
 
 ## D333. Grid custom items are option-scoped allowance lines, never placed, kept out of bid specs (#212, 2026-09-26)
+
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — custom items price at the markup path.
 
 A per-design "custom item" (a product with no catalog row) lives on `GridOption.customItems`, not as a placement —
 it has no location on the plan sheet and isn't offered a symbol. It prices exactly like an Equipment-map allowance
@@ -6617,6 +6631,8 @@ and renews. The builders call the same pure `finish*` functions as the engines, 
 saved price. Not applied to the Estimator, Grid, Quick Design or rentals.
 
 ## D364. A typed total is used exactly; the margin follows it (#217, 2026-09-27)
+
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — the typed total back-solves a markup, not a margin.
 
 Each service builder's Total is an input. A typed figure saves as `priceOverride` on the service subdoc and is the
 price, not re-rounded; the slider moves to the back-solved margin (clamped visually, the number shows the truth).
@@ -7135,6 +7151,8 @@ document id as ETag with an exact If-None-Match match. This one route also gets 
 in-page PDF/image viewer needs to embed it), granted nowhere else.
 
 ## D413. Unit price = cost ÷ (1 − tier margin), list as fallback; three POR reasons, one of them off by default (#245, 2026-09-27)
+
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — unit price = cost × (1 + tier markup).
 
 `src/lib/portal-pricing.ts` (server-only; cost, margin and tier name never reach the browser). No cost → `list`.
 **Price on request** when: there's no cost and no list (or both ≤ 0); the part carries a non-empty "verify price"
@@ -7664,6 +7682,8 @@ curtain name. The builder never writes a key back onto a quote line (out of scop
 
 ## D457. A tier change re-prices the Estimator lines still at the previous tier margin — amends D87 (#254, 2026-09-28)
 
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — the tier a line is compared to is the markup, with whole-percent same-tier compares and the legacy twin (D1296, D1297).
+
 D87/D88 said the pricing-tier stamp only SEEDS pricing and never rewrites existing lines. Jeff (2026-09-28): the
 tiers should apply to the customer while quoting. Amended: when a customer or contact change re-stamps an
 Estimator quote with a different margin, every line still at the previous tier's margin moves to the new one;
@@ -7997,6 +8017,8 @@ need a new collection and would stop one spec from ever differing.
 
 ## D476. A copied system is re-priced at today's catalog cost, then the destination tier (#266, 2026-09-29)
 
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — the destination tier is a markup.
+
 Jeff picked "both" for "make sure it pulls the reprice". Order matters: the tier verdict is taken on the line's
 ORIGINAL cost and sell against the SOURCE tier (#254's own rule), then the cost moves to today's catalog, then a line
 that was at the source seed is priced at exactly the target seed on the new cost — so a later customer change can
@@ -8059,6 +8081,8 @@ unit matches the Estimator's `ceil(days/5)`: one rental is one lift for up to a 
 
 ## D482. A lift is margined with the job and sits on top of any floor (#275, 2026-09-29)
 
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — a lift is marked up with the job.
+
 The lift prices inside the shared finish functions (`service-pricing.ts`) at the job's margin — repairs at the service
 margin, not the parts margin — and is added after the base fee / minimum fee / minimum call-out, so a floor never
 absorbs it. The existing $25 rounding (up when a floor set the price) and a typed total apply to the whole; the printed
@@ -8074,6 +8098,8 @@ Refresh pricing keeps a lift staff added, at today's rate. The letter boilerplat
 separately" became "lift rentals not listed above", so it no longer reads as an extra charge beside a listed lift.
 
 ## D484. Labor travel lines sell at the margin on their own cost (#270, 2026-09-29)
+
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — labor travel lines sell at the markup on their own cost.
 
 Splitting a mobilization into labor + mileage/hotel/per diem/lift lines keeps its cost to the cent, but each line's
 sell is its own cost at the labor margin, so a mobilization's total sell can differ from the old single line by a few
@@ -8228,6 +8254,8 @@ references. Removing a perk sets `removed: true` and makes it inactive instead o
 its name and a new perk can't inherit its history.
 
 ## D501. The portal shows reward level names, never margins; amends D87 for names only (#282, 2026-09-30)
+
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — the reward levels are still names only; the tiers beneath them are markups.
 
 The portal Rewards card shows the **earned** level (from lifetime spend, not the pricing tier), progress to the next
 level, the credit balance (a negative balance shows as $0.00), and available perks, with "Credit is applied by your
@@ -9532,6 +9560,8 @@ No PDFs: there is no Word or LibreOffice on this Mac. The Rigging sheet has no p
 repo changed for this.
 
 ## D635. A custom part's Unit sell seeds at a flat 35% margin (#302, 2026-10-07)
+
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — the custom-part seed is a flat 54% markup (was 35% margin).
 
 The Estimator's Custom part form fills Unit sell from Unit cost at a **flat 35% margin**, by Jeff's instruction. It is **not**
 the customer's pricing tier that the catalog picker seeds at (`seedMarginOf`, stamp else 0.30), so a tier change never moves
@@ -13694,6 +13724,8 @@ One extra step during execution: the test harness's source-text pins that read t
 
 ## D1231. Parts list CSV v2: Item name, two margins, Price source (#360, 2026-10-20)
 
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — the CSV's two percentage columns are now one: Line markup and Effective markup.
+
 Jeff asked that the Estimator's Parts list (CSV) cover item name, description, cost, sell margin and where the pricing came from, "Catalog" for catalog items. The #262 header becomes twelve columns: Manufacturer, Item name, Description, Room, System, Qty, Unit Cost, Unit Sell, Line margin, Effective margin, Price source, Notes. **Item name** renames Model number (same rule, now falling back to the SKU), and Description moves up beside it. **Line margin** is the line as priced, before the system's freight / $25 rounding / typed sell. **Effective margin** is from the file's own Unit Cost and Unit Sell. Both are blank at zero sell and on cost-adjustment rows. **Price source** is derived from the line's existing flags, first match wins: vendor quote (`Vendor quote — <vendor> #<n>`), `Adjustment`, exploded components `Catalog`, `Price on request`, `Allowance`, `Curtain calculator`, `Custom`, a resolved SKU `Catalog` (or `Catalog — sell edited` when `sellOverride` / `extSellOverride` is set), else `Not in catalog`. Source joins the consolidation key. Rows, totals and invariants are unchanged; no stored field. Final review: a vendor quote with no lines (a typed total) still reads `Vendor quote — …`, and placeholder SKUs (`CUSTOM`, `AI`, `CURTAIN`, `CRT-n`) count as no SKU (Jeff), so Item name is blank and distinct custom lines no longer merge (this fixes a pre-existing merge of different custom lines at the same cost and sell). `src/app/(app)/estimator/parts-csv.ts`; spec `docs/superpowers/specs/2026-10-20-parts-list-csv-price-source-design.md`; harness `#262 v2`.
 
 ## D1232. BOM quote PDF from Build package (#360, 2026-10-20)
@@ -13709,6 +13741,8 @@ Jeff: some estimates are box goods sales — equipment and freight only, no inst
 Labor is any line with `labor`, `laborOverhead` or `laborTravel` set (mobilization and travel included), or any `kind: "labor"` system; the automatic bonus lines never count (the 2% estimator bonus stays, and the server re-derives the 5% package bonus, which needs labor). `saveQuoteAction` refuses a box sale with labor before the Rewards credit or any write, with "A box goods sale can't include labor — remove the labor lines or turn off Box goods sale." and no id, so nothing is partially written; the Estimator refuses the same way without sending. Turning the switch on while labor exists is allowed: a Build banner repeats the sentence and names the systems with labor, and Save stays refused until it's resolved. Nothing is removed automatically. The real ways labor can sit on a box sale are a Move / Copy into an EXISTING box-sale estimate, which is now refused before anything is written, and a restored revision (`restoreQuoteRevision`), which is left alone: Send refuses a box sale with labor on every path (send, Open in Inbox, bidder send), and the Estimator's banner and Save refusal surface it. Final review also made the Estimate PDF always attach on a box sale on the server (not just in the composer), made the online cut sheets (portal, share page, package page) follow the revision's frozen flag, added a Box goods sale entry to the Quotes hub's + New quote menu, and stopped a portal-catalog / portal-service quote from being switched to a box sale (`isBoxSaleSource`; client switch, `buildQuote`, `update()` and Save all drop it). Not covered: **Mark sent**, the status select and the Quotes hub's status change don't run the send preflight, so a restored revision with labor could still be marked sent by hand; the Build banner and Save refusal still show it.
 
 ## D1250. Estimator Review spreadsheet replaces Parts list (CSV) (#363, 2026-10-22)
+
+**Superseded by D1286 (#367, 2026-10-23):** every pricing percentage is now markup on cost (`sell = cost × (1 + markup)`) — the review spreadsheet's "Line margin" column is dropped; the markup column is the only % column.
 
 Jeff asked that the parts list carry each custom part's link so it can be clicked to review, be renamed Review Spreadsheet, swap the Effective margin column for the markup equation on the line's margin, and end with system cost, system markup and system fees subtotals. His answers: a real Excel **.xlsx**, not CSV; Markup is a **live formula**, (Unit Sell − Unit Cost) ÷ Unit Cost, on the line's own sell before freight, rounding and bonuses (`PartsListRow.lineSell`); the three subtotals sit **under each system**. Estimator → More ▾ → **Review spreadsheet** downloads `<stem>-review-spreadsheet.xlsx` (same stem rule as the CSV). One sheet, "Review", header bold, frozen and filtered: Manufacturer · Item name · Description · Room · System · Qty · Unit Cost · Unit Sell · Ext Cost · Ext Sell · Line margin · Markup · Price source · Link · Notes. Unit Sell is `lineSell`; Ext Cost / Ext Sell / Line margin / Markup are formulas, each with a cached result so a viewer that doesn't recalculate (Quick Look, a preview) still shows the numbers; cost-adjustment rows leave both margins blank. Link is a real hyperlink cell. The rows, exclusions, Item name rule, Price source and Notes are #262 / D1231's, unchanged. Each system's rows end with three bold rows (label in Description, amount in Ext Sell, a thin top border on the first): **System cost — <system>** `=SUM(Ext Cost)`, **System markup — <system>** `=SUM(Ext Sell)−SUM(Ext Cost)`, **System fees — <system>** as a number with its breakdown in Notes; then one blank row. Text is always written as a string, never a formula, and an empty text cell stays blank. exceljs is `await import`ed inside the export (`src/app/(app)/estimator/review-sheet-xlsx.ts`, type-only static import), so `next build` puts it in its own lazily loaded chunk, out of the Estimator's page bundle. The CSV download is gone from the menu; `partsListCsvRows` / `PARTS_CSV_HEADER` stay in `parts-csv.ts` only because the #262 / D1231 row tests read through them (the per-row Item name / Notes / adjustment rules are now shared helpers both use). Two tooltips that named the parts list now say Review spreadsheet (the system Room box, the track modal). Harness `#363` (pure rows + the workbook read back with exceljs).
 
@@ -13764,3 +13798,53 @@ Three readers use `normalCostOf` instead of `cost`: `systemFreightBase` (`pricin
 ## D1285. Review spreadsheet and the won project (#366, 2026-10-22)
 
 **Review spreadsheet:** a discounted line or assembly part reads Price source `Catalog — project discount 12%` (with ` · sell edited` appended when the line's sell was edited, so that fact isn't lost); Unit Cost is the discounted cost; Notes gain `Project pricing: <note>` when the entry has one (`partsListRows` / `reviewSheetModel` take an optional `discounts` map, default `{}`; More ▾ → Review spreadsheet passes the estimate's). The source is already in the merge key, so a discounted and an undiscounted copy of a part stay apart. Deviation: an assembly's sell is now shared out among its parts by their **normal** cost, so each part's listed sell is the same with or without a discount (by the discounted cost, the discounted part would lose sell share). **Won project:** `fromQuote` freezes `projectPricing: [{ sku, model, desc, qty, pct, normalCost, expectedCost, note }]` (`projectPricingFrom`: one row per discounted SKU hitting at least one bought line or part; qty summed as line qty, or line qty × part qty; per-unit costs; option lines and alternate systems skipped; `model` from `partModel` — the line's Model # / MFR P/N, else the `Brand:Model` SKU's model), only when non-empty. The project page shows a read-only **Project pricing to request** card (Part · Qty · Discount · Normal · Expected · Note, "Ask the vendor for this project pricing when ordering.") at the top of the **Procurement** tab, where purchasing works — the spec said "near the Bill-to block" (deviation). Revisions and sent snapshots keep the stamped costs, so margin history stays truthful. No customer document, portal, share page, BOM or package page reads any of this.
+
+## D1286. Pricing percentages are markup on cost; the math is rewritten, not relabelled (#367, 2026-10-23)
+
+Jeff, 2026-10-23: every pricing percentage becomes **markup on cost** — `sell = cost × (1 + markup)`, `markup = (sell − cost) ÷ cost` — instead of margin on price (`sell = cost ÷ (1 − margin)`). He first asked for a relabel (approach A) and switched to **B: the engines' math changes**, so a number typed into a markup field is a markup everywhere it is read. Spec `docs/superpowers/specs/2026-10-23-markup-pricing-design.md`; plan `docs/superpowers/plans/2026-10-23-markup-pricing.md`. The conversion lives only in `src/lib/markup/` (pure, no store imports): `sellAt`, `markupOf` (null on cost ≤ 0), `costFromSell`, `marginToMarkup` / `markupToMargin` (guarded — never `Infinity` or `NaN`), `roundMarkupPct`, `legacyTwinOf`, `PRICING_BASIS = "markup"`. About 85 formula sites switch to `sellAt` and about 25 back-solves to `markupOf`: the Estimator (`pricing.ts`, tier re-price, labor, curtains, Copy system, vendor quotes), the three service engines and their builders, travel, renewals, portal service and catalog pricing, curtains, the Grid and Quick Design, the dashboard (average markup cost-weighted — Σ profit ÷ Σ cost; projected profit = value − value ÷ (1 + k), through the guarded `costFromSell`). Unchanged on purpose: bonus percents (`bonusPct`, the 5 % and 2 % lines — percents of price or of cost, never margins), freight % of cost, rentals, consulting fees, fixture add-ons, Quick Design Good/Better/Best `priceMul`, and dollar-based review limits. Persisted field names (`margin`, `tierMargin`, `rates.margin`, `partsMargin`) keep their names and hold markup once stamped — renaming them would force a second migration; the stamp and a header comment on each type say what the field holds. Constants are renamed (`CURTAIN_MARKUP`, …). **Supersedes** the margin-on-price convention in D87, D88, D135, D163, D283, D303, D314, D319, D333, D364, D413, D457, D476, D482, D484, D501, D635, D1231 and D1250 (each carries a pointer here). Also fixes two mislabelled spots: the repair "Parts markup" and `catalog.defaultMargin` ("Default markup") were already called markup but ran margin math. **No rollback past the merge; never deploy a Vercel preview of the branch** (previews share the production Neon DB and would stamp live quotes and settings while production still runs the margin code).
+
+## D1287. Keep the prices, convert the numbers (#367, 2026-10-23)
+
+Jeff, 2026-10-23: no saved quote changes its sell amount. Each stored margin is rewritten as its exact equivalent markup (`markup = margin ÷ (1 − margin)`: 30 % → 42.857 %, 20 % → 25 %, 35 % → 53.846 %); line prices (`price`, `extSellOverride`, typed sells) are never touched. Only **new** pricing that reads a rounded setting or constant moves — the cases found while building, all from rounding the default tier/constants to whole percents: Base on $1,000 cost $1,428.57 → $1,430; a custom part on $100 cost $153.85 → $154 (35 % margin → 54 % markup); the default curtain on $700 cost $1,000 → $1,001 (30 % → 43 %); a Silver-tier portal part in the #245 fixture on $70 cost $89.74 → $89.60 ($70 ÷ 0.78 → $70 × 1.28; 22 % → 28 %). Gold (20 % → 25 %) is exact and stays $1,250. Verified by the price-parity harness (`scripts/test-markup.ts` `markupParityChecks` against `docs/markup/parity-baseline.json`, captured on the untouched margin-era engines at a07dfea2): every Estimator, vendor, curtain, track, custom, typed-sell, Grid, service (drive and fly), renewal, portal and Quick Design case — **0 drift, 0 allowed ties**.
+
+## D1288. Reports and exports show markup only (#367, 2026-10-23)
+
+Jeff, 2026-10-23: "One word": every pricing % is **Markup** — never "margin" or "pts". No margin column anywhere. This covers Estimating Rules (tiers, service defaults, repair parts, catalog default, the `formula(...)` rows, which now read `cost × (1 + markup)`), the Estimator (Markup · all systems, per system, per line, the labor modal, the vendor "Sell at N %", the custom-part form), the three service builders' knob and typed-total field, the tier prompt and re-price banner, and every report and export: the Estimator header's blended figure, the Review cost summary, the Quotes hub, the Home stage sheet, the project page, the dashboard tiles (widget titles renamed, ids unchanged), the parts CSV ("Line markup", "Effective markup") and the review spreadsheet (the existing true-markup column is the only % column; "Line margin" is dropped — a #363 pin now asserts no header matches /margin/). Dollar figures (projected profit, system markup $) don't change. A line whose sell is $0 but cost > 0 now shows its real negative markup; a $0-cost line shows "—". Left as-is on purpose: the dashboard "+Npt vs. prior" delta (percentage points, not a margin label), drawing margins and SVG `pts`, Rewards "N pts".
+
+## D1289. Settings convert once, then round to a whole % (#367, 2026-10-23)
+
+Jeff, 2026-10-23: converted settings values round to a whole %. Tiers Base/Copper/Silver/Gold/Platinum/Reseller/Employee 30/27/22/20/15/10/5 → **43/37/28/25/18/11/5**; `system.baseMargin` 30 → 43; flame/inspection/repair `rates.margin` and `repair_rates.partsMargin` 0.30 → 0.43; `catalog_rates.defaultMargin` 0.30 → 0.43. Whatever an admin had stored converts and then rounds. `fixture_rates.customCostFactor` (cost = sell × 0.66) is a cost factor, not a margin: it stays, its help text says "≈ 52 % markup". Code constants round the same way: `CURTAIN_MARKUP` 0.30 → 0.43, `TIER_FALLBACK_MARKUP` 0.43, `CUSTOM_PART_MARKUP` 0.35 → 0.54, the labor cost fallback is sell ÷ 1.43, `LOW_MARKUP_WARN` 0.10 → 0.11, seed data exact + stamped. The conversion runs once, lazily, on the first read of each blob under `updateBlob`'s row lock (`src/lib/markup/settings.ts`, `src/lib/stores/pricing.ts`); the stamp key is `_pricingBasis`, the old values stay beside it in `_marginBackup` (the way `settings.fixtureAssemblies` was kept), a stamped blob is skipped, and concurrent first reads agree (`npm run test:markup-settings`, 13 checks). **Open for Jeff:** keep the rounded 43/37/28/25/18/11/5 or set cleaner values (e.g. 45/35/30/25/20/10/5) in Estimating Rules — rounding is the default and every value is editable.
+
+## D1290. Saved quotes and projects convert exactly (#367, 2026-10-23)
+
+Jeff, 2026-10-23: values stored on saved documents convert **exactly** (no rounding) — only settings and code constants round. A saved Base-tier quote reads 0.428571…, not 0.43, so its lines, typed sells, revisions, sent and won versions and projects keep their sell to the cent. Fields converted on a quote: `margin` (blended), `tierMargin` (stamped seed), `spec.sections[*].laborGroups[*].draft.margin` (a percent string), the service sub-docs' (`flameTest` / `repair` / `inspection`) `rates.margin` and `rates.partsMargin` plus the sub-doc-level `partsMargin`, and the same fields on every frozen revision (the won version is a revision, `wonRev`); on a project: `margin`. `marginAmount` is dollars and stays. Portal carts and Grid projects store none. A labor draft's percent string is stored to 8 dp of a percent (`markupPctString`: 30 % → "42.85714286"), so Update labor on a converted draft rebuilds every line at its margin-era cent — swept every cent to $99,999.99 at whole- and half-percent margins 1–60 % (only exact half-cent ties differ, as they do at the exact markup); the earlier 4 dp ("42.8571") was a cent off (misc $4,321.17 → $6,173.09 instead of $6,173.10).
+
+## D1291. Stamp + convert on read; no bulk job (#367, 2026-10-23)
+
+Jeff, 2026-10-23. Every doc that stores a pricing fraction carries `pricingBasis: "markup"`; **a doc without the stamp is margin**. `hydrateDoc` in `src/db/doc-store.ts` runs the pure converters (`src/lib/markup/doc-basis.ts`) on `quotes` and `projects` at read, stamps, and the next save writes it back stamped; a stamped doc is never converted again. The builders (`buildQuote` and the project builders) stamp new docs, as do the seeds (`db/seeds/quotes.ts`, `projects.ts`). **A future writer that creates a quote or project doc without `buildQuote` / the project builders must add the stamp, or the doc is converted twice** (a 0.43 markup read as a margin becomes 0.754). Deploy window: do the merge deploy at a quiet time — instances of the old code still serving during the switch read converted settings as margins, and a builder or Estimator tab opened before the deploy can post stale values (the three service actions fall back to the service markup if the posted `markup` field is missing, never to a 5 % clamp; a stale Estimator tab could save a margin-era labor-draft percent string into a stamped doc — line prices are unaffected). `npm run db:export` first. No migration, no env var.
+
+**Preview hazard after the merge (bigger than this branch):** once #367 is on production, a Vercel preview of **any** branch not rebased onto #367 runs margin code against the production Neon DB — its saves write margin-era values into stamped quote / project docs (a stamped doc is never converted again, so they would be read as markups), and its Estimating Rules edits write margins into stamped settings blobs. So: **no preview of a pre-#367 branch after the merge — every open branch rebases onto #367 before it is previewed.**
+
+## D1292. Slider, knob, cap and threshold ranges converted and rounded (#367, 2026-10-23)
+
+Jeff, 2026-10-23 ("keep the prices" applied to the controls): Estimator sliders (all systems, per system) 0–55 % → **0–125 %**; service knob 10–50 (server clamp 5–50) → **10–100 % (clamp 5–100)**; Estimating Rules cap on a % rate 60 % → **150 %**; the low warning (service totals, typed system sell) "under 10 pts" → **under 11 %**; line colours green / amber (`marginColor`) 30 % / 18 % → **43 % / 22 %**; labor clamp 0.95 margin → **19 (1,900 %) markup**; the guard `0 < m < 1` becomes `k > 0`. A typed system sell or service total back-solves the markup, and "Reset keeps this markup." **Open for Jeff:** the new slider and knob ranges.
+
+## D1293. Deviation: only `quotes` and `projects` are converted; designs are not (#367, 2026-10-23)
+
+The spec listed designs, Grid projects, Quick Design, portal carts, leads and narrative libraries among the stamped docs. Building showed only two collections store a margin: saved Quick Designs compute theirs fresh at promotion, and Grid projects and portal carts store none. So the converter covers `quotes` and `projects` only (`hydrateDoc`); nothing else is stamped.
+
+## D1294. Deviation: no temporary entry-point adapters (#367, 2026-10-23)
+
+The spec said that between slices 1 and 2 the engines would call `markupToMargin(k)` at their entry point. No entry-point adapters were built except a short-lived curtain bridge, removed in Task 5. Otherwise: Tasks 3–6 switched the engines directly and Task 7 switched the data and defaults. In between, pure engine checks stayed green and DB-backed checks that price from stored or default rates were allowed to be red (each task listed them); `test:specs` was fully green from Task 7 on. Nothing deployed between tasks — the branch merges whole.
+
+## D1295. The legacy twin: an old exact markup still counts as "at the tier seed" (#367, 2026-10-23)
+
+The "still at the seed price" checks (the 5¢ comparisons in `tier-reprice.ts`, `labor-group.ts`, the $0.01 match from D457) had to be rewritten, not relabelled. A line priced at an old **exact** markup (Base 42.857 %) still counts as at the tier seed against the rounded 43 % stamp (`legacyTwinOf`, `isAtTierSeed`); otherwise the first tier change after the switch would call every old line hand-priced and leave it. Renewal re-pricing uses the same rule, so it doesn't call every renewal's rate "changed". Hand-priced lines are still kept.
+
+## D1296. Same tier means the same whole percent (#367, 2026-10-23)
+
+Found in the Task 3 review. Tier re-price's early return, Copy system's `tierMoves` / `seedMoved` and the save action's `tierMoved` compare with `sameWholeMarkup` instead of `===`. An old quote's exact stamp (0.428571) meeting today's rounded tier (0.43) is then a no-op instead of a +0.1 % reprice of everything; a real tier change still reprices, and D1295 covers the lines.
+
+## D1297. The service knob keeps exact points for saved quotes (#367, 2026-10-23)
+
+A saved service quote reopens at 42.857 (shown "42.9") rather than 43, so re-saving it without touching the knob can't move its $25-rounded total (the knob is the exact converted value, not the rounded setting). A new quote seeds from the rounded service rate (43). The knob's round-trip (`Number(String(knobPctFrom(k)))/100 === k` over the tier values) is pinned, and the three actions treat a missing `markup` field as the service markup, not NaN. Two more pieces of the same rule (final review): a saved repair quote prices its **parts** at its own stored exact `rates.partsMargin` (0.428571) while today's global parts markup is the same whole percent (`keepSavedMarkup` in `src/lib/markup/`, used by the save action and the builder preview); a real change of the global (a different whole percent) still re-prices at today's rate, as before. And `initialTierSeed` treats a saved knob as untouched when it is the same whole percent as the quote's stamp or today's seed — after one re-save the stamp is the rounded 43 while the knob stays 42.857, and a later customer change must still move it to the new seed without a "Kept your 42.9%" prompt. Open: after the deploy, re-save one draft service quote untouched and confirm its total holds.

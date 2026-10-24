@@ -16,7 +16,7 @@ import { getLiftRate } from "@/lib/service-quote-inputs";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
-import { knobPtsFrom } from "@/lib/tier-seed";
+import { knobPctFrom } from "@/lib/tier-seed";
 import { pickContactName, readHandoff, seedVenueOn } from "@/app/(app)/quotes/new/handoff";
 import ActionError from "@/components/action-error";
 import { RewardCreditNotice } from "@/components/rewards/credit-notice";
@@ -81,7 +81,7 @@ export default async function FlameTestQuotePage({
   const approved = one(sp.approved) === "1";
 
   /* ---- serializable customer directory with per-venue coords + travel ---- */
-  // Customer tier margins seed the builder's margin knob (item 11, D88).
+  // Customer tier markups seed the builder's markup knob (item 11, D88).
   const tierInfo = await builderTiers(customerDocs.map((c: CustomerDoc) => c.id));
   /* Travel is NO LONGER resolved here per venue (punch #90). This built an
      estimate for every venue of every customer while rendering — thousands of
@@ -113,8 +113,8 @@ export default async function FlameTestQuotePage({
         tierMargin: tierInfo[c.id]?.byContact[ct.name] ?? null,
         tier: tierInfo[c.id]?.byContactTier[ct.name] ?? null,
       })),
-      // #254: only the company's OWN tier seeds the knob; none → the builder's default margin.
-      tierMargin: tierInfo[c.id]?.tier ? tierInfo[c.id].margin : null,
+      // #254: only the company's OWN tier seeds the knob; none → the builder's default markup.
+      tierMargin: tierInfo[c.id]?.tier ? tierInfo[c.id].markup : null,
       tier: tierInfo[c.id]?.tier ?? null,
   }));
 
@@ -195,8 +195,8 @@ export default async function FlameTestQuotePage({
       replaces: "",
       nameLocked: false,
       // #254: reopen at the quote's own saved knob — never re-seeded on load.
-      marginPts: knobPtsFrom(ft?.rates?.margin),
-      stampedTierMargin: editQuote.tierMargin ?? null,
+      savedMarkupPts: knobPctFrom(ft?.rates?.margin),
+      stampedTierMarkup: editQuote.tierMargin ?? null,
       travel: normalizeTravelOverride(ft && ft.travel) ?? (legacyDrive ? { mode: "drive" } : null),
       // #217: reopen with the typed total; an old sent price off the $25 grid
       // reopens typed in too, so re-saving never silently changes it (D286).

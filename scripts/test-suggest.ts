@@ -31,6 +31,8 @@ import { SUGGEST_SOURCE_KINDS } from "@/lib/assist/features/suggest-sources";
 import type { ProviderRequest } from "@/lib/assist/types";
 import { surveyFindings } from "@/lib/survey-findings";
 import { catalogAddPrice } from "@/app/(app)/estimator/tier-reprice";
+// #367: margin-era inputs feed the markup engine through mk(); expected dollars stay.
+import { marginToMarkup as mk } from "@/lib/markup";
 import { readHandoff } from "@/app/(app)/quotes/new/handoff";
 import type { z } from "zod";
 import type { Ok } from "./test-inbox-org";
@@ -197,17 +199,17 @@ function pricingChecks(ok: Ok): void {
     CANDS, CATS
   );
   let n = 100;
-  const ctx = { nextId: () => ++n, tierMargin: 0.4, price: catalogAddPrice, groupId: "g1", freightPct: 8, priceRound: 25 };
+  const ctx = { nextId: () => ++n, tierMargin: mk(0.4), price: catalogAddPrice, groupId: "g1", freightPct: 8, priceRound: 25 };
   const sec = systemFromSuggestion(s.systems[0], PARTS, ctx);
   ok(sec.id === "sys101" && sec.name === "Main curtain" && sec.kind === "materials" && sec.freightPct === 8 && sec.freightAuto === true && sec.priceRound === 25 && sec.groupId === "g1" && sec.discipline === "lighting", "suggest add system: a section like systemFromCategory — id, name, freight, rounding, group, discipline");
   const [vel, trk, gone, labor] = sec.items;
-  ok(vel.sku === "VEL-1" && vel.qty === 4 && vel.unit === "yd" && vel.cost === 60 && vel.price === catalogAddPrice(60, 0, 0.4) && vel.price === 100, `suggest add system: a catalog line is priced through catalogAddPrice at the tier (60 at 40% → 100, got ${vel.price})`);
+  ok(vel.sku === "VEL-1" && vel.qty === 4 && vel.unit === "yd" && vel.cost === 60 && vel.price === catalogAddPrice(60, 0, mk(0.4)) && vel.price === 100, `suggest add system: a catalog line is priced through catalogAddPrice at the tier (60 at 66.7% markup → 100, got ${vel.price})`);
   ok(trk.sku === "Brand:TRK" && trk.desc === "Curtain track (renamed)" && trk.price === 18 && trk.cost === 0, "suggest add system: the live part's sku/desc; a no-cost part sells at its list");
   ok(gone.custom === true && gone.sku === "" && gone.desc === "Retired part" && gone.price === 0 && gone.cost === 0 && gone.internalNote === SUGGESTED_NOTE, "suggest add system: a part missing from the live lookup lands as an unpriced custom line flagged for a part and price");
   ok(labor.custom === true && labor.desc === "Install labor" && labor.price === 0 && labor.internalNote === "Suggested: needs a part and price", "suggest add system: a custom suggestion line lands unpriced with the internal note");
   ok(new Set(sec.items.map((i) => i.id)).size === 4 && sec.items.every((i) => i.id > 101), "suggest add system: line ids come from ctx.nextId");
   const at30 = systemFromSuggestion(s.systems[0], PARTS, { ...ctx, tierMargin: null, groupId: undefined });
-  ok(at30.items[0].price === catalogAddPrice(60, 0, null) && !("groupId" in at30), "suggest add system: no tier → catalogAddPrice's fallback margin; no group when none active");
+  ok(at30.items[0].price === catalogAddPrice(60, 0, null) && !("groupId" in at30), "suggest add system: no tier → catalogAddPrice's fallback markup; no group when none active");
   ok(!("discipline" in systemFromSuggestion({ ...s.systems[0], discipline: undefined }, PARTS, ctx)), "suggest add system: no discipline when the suggestion has none");
   const valueImport = /^import (?!type )[^\n]*from "@\/(lib\/stores|db)/m;
   ok(["src/lib/assist/features/suggestion.ts", "src/lib/assist/features/suggest-sources.ts", "src/lib/survey-findings.ts"].every((f) => !valueImport.test(readFileSync(f, "utf8"))), "suggest pure: suggestion.ts, suggest-sources.ts and survey-findings.ts import no store or db values (types only; client-safe)");

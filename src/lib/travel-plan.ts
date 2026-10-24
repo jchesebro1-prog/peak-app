@@ -3,7 +3,7 @@
  * quotes (flame tests, repairs, inspections).
  * Spec: docs/superpowers/specs/2026-09-25-travel-flights-design.md.
  *
- * This module has NO imports and touches no DB or server code: the quote
+ * This module imports only the pure markup module and touches no DB or server code: the quote
  * builders' "use client" previews use it directly (a client import of any
  * value under @/lib/stores or @/db breaks `next build`). The engines, the
  * save actions, renewal re-pricing and the letters use it too, so every path
@@ -15,6 +15,8 @@
  * never flies. Drive mode hands back the drive total untouched, so
  * drive-mode quotes price bit-for-bit as before.
  */
+
+import { sellAt } from "@/lib/markup";
 
 export type TravelMode = "drive" | "fly";
 export type TravelModeChoice = "auto" | TravelMode;
@@ -285,9 +287,9 @@ export function flightOf(trip: unknown): FlightPlan | null {
   };
 }
 
-/** Travel's share of the sell price: the flight cost marked up by the quote's margin. */
-export function travelLineAmount(flightTotal: number, margin: number): number {
-  return margin > 0 && margin < 1 ? Math.round(flightTotal / (1 - margin)) : Math.round(flightTotal);
+/** The printed travel line at the quote's markup — flight × (1 + markup), whole dollars. */
+export function travelLineAmount(flightTotal: number, markup: number): number {
+  return Number.isFinite(markup) && markup > 0 ? Math.round(sellAt(flightTotal, markup)) : Math.round(flightTotal);
 }
 
 export function fmtUsd(n: number): string {

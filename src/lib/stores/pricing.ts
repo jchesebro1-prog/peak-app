@@ -1,4 +1,9 @@
-import { getBlob, setBlob } from "@/db/doc-store";
+import { inArray, sql } from "drizzle-orm";
+import { getDb, inTransaction } from "@/db";
+import { getBlob, setBlob, updateBlob } from "@/db/doc-store";
+import { blobs } from "@/db/doc-tables";
+import { PRICING_BASIS } from "@/lib/markup";
+import { BASIS_STAMP, markupSettingsPatch, withoutBasisKeys } from "@/lib/markup/settings";
 import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/fixture-rates";
 import { FLY_CREW_DEFAULTS, FLY_RATE_DEFAULTS, type FlyRates } from "@/lib/travel-plan";
 import {
@@ -29,7 +34,7 @@ import { DEFAULT_FREIGHT_RULE, FREIGHT_RATE_IDS, PORTAL_RATE_IDS } from "@/lib/f
  * every estimating equation & rate in the app (General → Estimating Rules).
  *
  * Two kinds of entry:
- *   • rate    — an editable number (labor $/hr, margin %, freight %,
+ *   • rate    — an editable number (labor $/hr, markup %, freight %,
  *               tier multiplier, mileage rate…).
  *   • formula — a documented calculation (read-only reference), so the list
  *               shows HOW numbers combine, not just the knobs.
@@ -38,7 +43,7 @@ import { DEFAULT_FREIGHT_RULE, FREIGHT_RATE_IDS, PORTAL_RATE_IDS } from "@/lib/f
  *   • Flame-test rates proxy to blob `flametest_rates` (rss_flametest_rates_v1),
  *     repair rates to blob `repair_rates` (rss_repair_rates_v1), inspection
  *     rates to blob `inspection_rates`, travel/mileage fallback rates to blob
- *     `travel_rates`, catalog margin to blob `catalog_rates`, and Estimator
+ *     `travel_rates`, catalog markup to blob `catalog_rates`, and Estimator
  *     fixture add-on rates to blob `fixture_rates` — editing any of these here
  *     is LIVE: the engines/screens read the same blobs, so quotes reprice
  *     immediately.
@@ -64,7 +69,7 @@ export type FlametestRates = {
   curtainMinutes: number;
   /** $ minimum for the whole job (after mileage + travel + testing) */
   baseFee: number;
-  /** 30 points, margin of the sell price */
+  /** markup on cost (0.43 = 43 %) */
   margin: number;
   /** round total travel time up to the nearest N minutes */
   travelRoundMin: number;
@@ -78,7 +83,7 @@ export const FLAMETEST_RATE_DEFAULTS: FlametestRates = {
   laborRate: 75,
   curtainMinutes: 5,
   baseFee: 150,
-  margin: 0.30,
+  margin: 0.43,
   travelRoundMin: 15,
   flyCrew: FLY_CREW_DEFAULTS.flame,
 };
@@ -90,9 +95,9 @@ export type RepairRates = {
   mileageRate: number;
   /** $ minimum service call (floor on the service sell, before parts) */
   minCallout: number;
-  /** 30 points on parts (sell = cost / (1 - partsMargin)) */
+  /** markup on cost (0.43 = 43 %) — on parts (sell = cost × (1 + partsMargin)) */
   partsMargin: number;
-  /** 30 points on labor + travel */
+  /** markup on cost (0.43 = 43 %) — on labor + travel */
   margin: number;
   /** labor-rate multiplier for emergency / after-hours work */
   emergencyMult: number;
@@ -107,8 +112,8 @@ export const REPAIR_RATE_DEFAULTS: RepairRates = {
   laborRate: 75,
   mileageRate: 1,
   minCallout: 350,
-  partsMargin: 0.30,
-  margin: 0.30,
+  partsMargin: 0.43,
+  margin: 0.43,
   emergencyMult: 1.5,
   travelRoundMin: 15,
   flyCrew: FLY_CREW_DEFAULTS.repair,
@@ -127,7 +132,7 @@ export type InspectionRates = {
   level2Mult: number;
   /** $ minimum for the whole job */
   minFee: number;
-  /** 30 points, margin of the sell price */
+  /** markup on cost (0.43 = 43 %) */
   margin: number;
   /** round total travel time up to the nearest N minutes */
   travelRoundMin: number;
@@ -145,7 +150,7 @@ export const INSPECTION_RATE_DEFAULTS: InspectionRates = {
   baseHours: 2,
   level2Mult: 1.75,
   minFee: 650,
-  margin: 0.30,
+  margin: 0.43,
   travelRoundMin: 15,
   flyCrew: FLY_CREW_DEFAULTS.inspection,
 };
@@ -174,13 +179,13 @@ export const TRAVEL_RATE_DEFAULTS: ResolvedTravelRates = {
 };
 
 export type CatalogRates = {
-  /** Default markup for a catalog part with no list price (fraction, 0.30 = 30%). */
+  /** Default markup on cost for a catalog part with no list price (0.43 = 43 %). */
   defaultMargin: number;
 };
 
-/** Catalog margin DEFAULTS — seed/fallback for blob `catalog_rates`. */
+/** Catalog markup DEFAULTS — seed/fallback for blob `catalog_rates`. */
 export const CATALOG_RATE_DEFAULTS: CatalogRates = {
-  defaultMargin: 0.30,
+  defaultMargin: 0.43,
 };
 
 /**
@@ -206,65 +211,126 @@ export const FIXTURE_RATES_BLOB = "fixture_rates";
 /** General editable rates — replaces rss_pricing_rules_v1. */
 const PRICING_RULES_BLOB = "pricing_rules";
 
+/* ---------- #367: the one-time margin → markup conversion of every rate blob ---------- */
+
+/** #367: the margin keys each rate blob held before the markup switch. */
+const MARGIN_KEYS: ReadonlyArray<[blob: string, keys: readonly string[], pct: boolean]> = [
+  [PRICING_RULES_BLOB, ["tiers.base", "tiers.copper", "tiers.silver", "tiers.gold", "tiers.platinum", "tiers.reseller", "tiers.employee", "system.baseMargin"], true],
+  [FLAMETEST_RATES_BLOB, ["margin"], false],
+  [REPAIR_RATES_BLOB, ["margin", "partsMargin"], false],
+  [INSPECTION_RATES_BLOB, ["margin"], false],
+  [CATALOG_RATES_BLOB, ["defaultMargin"], false],
+];
+
+/** Convert every rate blob not yet stamped. One unlocked read finds them; each conversion runs under updateBlob's
+ *  row lock and re-checks the stamp there, so concurrent instances converge (the loser's patch is null). */
+async function convertRateBlobs(): Promise<void> {
+  const db = await getDb();
+  const ids = MARGIN_KEYS.map(([blob]) => blob);
+  const rows = await db
+    .select({ id: blobs.id, basis: sql<string | null>`${blobs.data}->>${BASIS_STAMP}` })
+    .from(blobs)
+    .where(inArray(blobs.id, ids));
+  const stamped = new Set(rows.filter((r) => r.basis === PRICING_BASIS).map((r) => r.id));
+  for (const [blob, keys, pct] of MARGIN_KEYS)
+    if (!stamped.has(blob)) await updateBlob(blob, (cur) => markupSettingsPatch(cur, keys, pct));
+}
+
+let markupDone = false;
+let markupReady: Promise<void> | null = null;
+/**
+ * #367: convert every rate blob from margin to rounded markup ONCE (stamped, under updateBlob's row lock, so
+ * concurrent instances converge); memoized per process, retried after a failure. Every rate read awaits it.
+ * Inside a caller's transaction it joins that transaction and is NOT memoized — the transaction may still roll
+ * back, and a memo over a rolled-back conversion would read margins as markup until the process restarts.
+ */
+export function ensureMarkupSettings(): Promise<void> {
+  if (markupDone) return Promise.resolve();
+  if (inTransaction()) return convertRateBlobs();
+  if (!markupReady)
+    markupReady = convertRateBlobs().then(
+      () => {
+        markupDone = true;
+      },
+      (e) => {
+        markupReady = null;
+        throw e;
+      }
+    );
+  return markupReady;
+}
+
 /* ---------- engine rate accessors (getRates/setRates of the prototype engines) ---------- */
 
 export async function getFlametestRates(): Promise<FlametestRates> {
-  return getBlob(FLAMETEST_RATES_BLOB, { ...FLAMETEST_RATE_DEFAULTS });
+  await ensureMarkupSettings();
+  return withoutBasisKeys(await getBlob(FLAMETEST_RATES_BLOB, { ...FLAMETEST_RATE_DEFAULTS }));
 }
 
 export async function setFlametestRates(
   patch: Partial<FlametestRates>
 ): Promise<void> {
+  await ensureMarkupSettings();
   await setBlob(FLAMETEST_RATES_BLOB, patch);
 }
 
 export async function getRepairRates(): Promise<RepairRates> {
-  return getBlob(REPAIR_RATES_BLOB, { ...REPAIR_RATE_DEFAULTS });
+  await ensureMarkupSettings();
+  return withoutBasisKeys(await getBlob(REPAIR_RATES_BLOB, { ...REPAIR_RATE_DEFAULTS }));
 }
 
 export async function setRepairRates(
   patch: Partial<RepairRates>
 ): Promise<void> {
+  await ensureMarkupSettings();
   await setBlob(REPAIR_RATES_BLOB, patch);
 }
 
 export async function getInspectionRates(): Promise<InspectionRates> {
-  return getBlob(INSPECTION_RATES_BLOB, { ...INSPECTION_RATE_DEFAULTS });
+  await ensureMarkupSettings();
+  return withoutBasisKeys(await getBlob(INSPECTION_RATES_BLOB, { ...INSPECTION_RATE_DEFAULTS }));
 }
 
 export async function setInspectionRates(
   patch: Partial<InspectionRates>
 ): Promise<void> {
+  await ensureMarkupSettings();
   await setBlob(INSPECTION_RATES_BLOB, patch);
 }
 
 export async function getTravelRates(): Promise<ResolvedTravelRates> {
-  return getBlob(TRAVEL_RATES_BLOB, { ...TRAVEL_RATE_DEFAULTS });
+  await ensureMarkupSettings();
+  return withoutBasisKeys(await getBlob(TRAVEL_RATES_BLOB, { ...TRAVEL_RATE_DEFAULTS }));
 }
 
 export async function setTravelRates(
   patch: Partial<TravelRates>
 ): Promise<void> {
+  await ensureMarkupSettings();
   await setBlob(TRAVEL_RATES_BLOB, patch);
 }
 
 export async function getCatalogRates(): Promise<CatalogRates> {
-  return getBlob(CATALOG_RATES_BLOB, { ...CATALOG_RATE_DEFAULTS });
+  await ensureMarkupSettings();
+  return withoutBasisKeys(await getBlob(CATALOG_RATES_BLOB, { ...CATALOG_RATE_DEFAULTS }));
 }
 
 export async function setCatalogRates(
   patch: Partial<CatalogRates>
 ): Promise<void> {
+  await ensureMarkupSettings();
   await setBlob(CATALOG_RATES_BLOB, patch);
 }
 
 export async function getFixtureRates(): Promise<FixtureRates> {
-  return getBlob(FIXTURE_RATES_BLOB, { ...FIXTURE_RATE_DEFAULTS });
+  await ensureMarkupSettings();
+  return withoutBasisKeys(await getBlob(FIXTURE_RATES_BLOB, { ...FIXTURE_RATE_DEFAULTS }));
 }
 
 export async function setFixtureRates(
   patch: Partial<FixtureRates>
 ): Promise<void> {
+  await ensureMarkupSettings();
   await setBlob(FIXTURE_RATES_BLOB, patch);
 }
 
@@ -377,11 +443,11 @@ export const GROUPS: PricingGroup[] = [
   {
     key: "system", label: "System design", live: true,
     sub: "Quick Design budgetary roll-up + Estimator defaults",
-    note: "Freight / contingency below drive the Quick Design estimate live; labor is per system (see System labor). Tier multipliers, base margin and the fabric rate are the documented reference the estimators are built on.",
+    note: "Freight / contingency below drive the Quick Design estimate live; labor is per system (see System labor). Tier multipliers, base markup and the fabric rate are the documented reference the estimators are built on.",
     items: [
       rate("system.freightPct", "Freight & delivery", 5, "%", { min: 0, max: 20, step: 0.5, help: "freight = materials × this" }),
       rate("system.contingencyPct", "Default contingency", 10, "%", { min: 0, max: 25, step: 1, help: "Applied to materials + labor + freight. New designs start at this value." }),
-      rate("system.baseMargin", "Base margin", 30, "%", { min: 0, max: 60, step: 1, ref: true, help: "Baseline margin baked into catalog list vs cost.  sell = cost ÷ (1 − margin)" }),
+      rate("system.baseMargin", "Base markup", 43, "%", { min: 0, max: 150, step: 1, ref: true, help: "Baseline markup baked into catalog list vs cost.  sell = cost × (1 + markup)" }),
       rate("system.tierGoodCost", "Good tier — cost ×", 0.80, "×", { min: 0.3, max: 1.5, step: 0.01, ref: true, help: "Good multiplies each line’s cost by this." }),
       rate("system.tierGoodPrice", "Good tier — price ×", 0.84, "×", { min: 0.3, max: 1.5, step: 0.01, ref: true }),
       rate("system.tierBetterCost", "Better tier — cost ×", 1.00, "×", { min: 0.3, max: 2, step: 0.01, ref: true }),
@@ -390,24 +456,24 @@ export const GROUPS: PricingGroup[] = [
       rate("system.tierBestPrice", "Best tier — price ×", 1.42, "×", { min: 0.5, max: 2.5, step: 0.01, ref: true }),
       rate("system.curtainFabric", "Curtain fabric fallback", 3.00, "$/ft²", { min: 0, max: 20, step: 0.25, ref: true, help: "Used when a fabric SKU has no catalog rate." }),
       formula("system.rollup", "Budgetary total", "materials + Σ system labor + freight, then + contingency  →  materials + Σ(system material × labor % × tier ×) + (materials × freight%), × (1 + contingency%)"),
-      formula("system.sell", "Sell price from cost", "sell = cost ÷ (1 − margin)"),
+      formula("system.sell", "Sell price from cost", "sell = cost × (1 + markup)"),
       formula("system.tier", "Good / Better / Best", "each line: cost × (tier cost ×), price × (tier price ×)"),
-      formula("system.margin", "Blended margin", "margin = (materialsRevenue − materialsCost) ÷ materialsRevenue"),
-      formula("system.estline", "Estimator line (detailed quotes)", "ext price = qty × unit price   ·   ext cost = qty × unit cost   ·   per-section margin 0–55%, freight 0–15% of materials"),
+      formula("system.margin", "Blended markup", "markup = (materialsRevenue − materialsCost) ÷ materialsCost"),
+      formula("system.estline", "Estimator line (detailed quotes)", "ext price = qty × unit price   ·   ext cost = qty × unit cost   ·   per-section markup 0–125%, freight 0–15% of materials"),
     ],
   },
   {
     key: "tiers", label: "Customer tiers", live: true,
-    sub: "Per-customer margin — punch item 11 (D87). Tier lives on the PERSON, company is fallback.",
-    note: "The resolved tier's margin SEEDS pricing everywhere (estimator labor & curtains, flame/repair/inspection quotes, Quick Design promotion, the portal) and is stamped onto each quote at creation — estimators can still override per quote. Not visible to customers. Resolution: quote's attn contact → their company → Base.",
+    sub: "Per-customer markup — punch item 11 (D87; markup since #367). Tier lives on the PERSON, company is fallback.",
+    note: "The resolved tier's markup SEEDS pricing everywhere (estimator labor & curtains, flame/repair/inspection quotes, Quick Design promotion, the portal) and is stamped onto each quote at creation — estimators can still override per quote. Not visible to customers. Resolution: quote's attn contact → their company → Base.",
     items: [
-      rate("tiers.base", "Base margin", 30, "%", { min: 0, max: 60, step: 1, help: "The default tier — every customer without an assigned tier prices here.  sell = cost ÷ (1 − margin)" }),
-      rate("tiers.copper", "Copper margin", 27, "%", { min: 0, max: 60, step: 1 }),
-      rate("tiers.silver", "Silver margin", 22, "%", { min: 0, max: 60, step: 1 }),
-      rate("tiers.gold", "Gold margin", 20, "%", { min: 0, max: 60, step: 1 }),
-      rate("tiers.platinum", "Platinum margin", 15, "%", { min: 0, max: 60, step: 1 }),
-      rate("tiers.reseller", "Reseller margin", 10, "%", { min: 0, max: 60, step: 1 }),
-      rate("tiers.employee", "Employee margin", 5, "%", { min: 0, max: 60, step: 1 }),
+      rate("tiers.base", "Base markup", 43, "%", { min: 0, max: 150, step: 1, help: "The default tier — every customer without an assigned tier prices here.  sell = cost × (1 + markup)" }),
+      rate("tiers.copper", "Copper markup", 37, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.silver", "Silver markup", 28, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.gold", "Gold markup", 25, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.platinum", "Platinum markup", 18, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.reseller", "Reseller markup", 11, "%", { min: 0, max: 150, step: 1 }),
+      rate("tiers.employee", "Employee markup", 5, "%", { min: 0, max: 150, step: 1 }),
       formula("tiers.resolution", "Tier resolution (design §4.7)", "quote's designated contact's tier  →  else their company's tier  →  else Base   ·   stamped on the quote at creation; each revision re-stamps at cut time"),
     ],
   },
@@ -438,10 +504,10 @@ export const GROUPS: PricingGroup[] = [
       rate("laborRate", "Labor rate (testing & travel)", 75, "$/hr", { min: 0, max: 200, step: 1, store: "flame" }),
       rate("curtainMinutes", "Minutes to test one curtain", 5, "min", { min: 1, max: 30, step: 1, store: "flame" }),
       rate("baseFee", "Base minimum (whole job)", 150, "$", { min: 0, max: 1000, step: 5, store: "flame", help: "Floor on the whole job after mileage + travel + testing." }),
-      rate("margin", "Flame-test margin", 30, "%", { min: 0, max: 60, step: 1, store: "flame", pctStored: true }),
+      rate("margin", "Flame-test markup", 43, "%", { min: 0, max: 150, step: 1, store: "flame", pctStored: true }),
       rate("travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "flame" }),
       rate("flame.flyCrew", "Crew when the trip flies", 1, "people", { min: 1, max: 10, step: 1, store: "flame", key: "flyCrew", help: "Default crew for a flame test priced as flights (Travel & mileage → fly threshold). Overridable on each quote." }),
-      formula("flame.total", "Flame-test total", "max( $base ,  miles × mileageRate  +  travelHrs × laborRate  +  curtains × curtainMin × (laborRate ÷ 60) )  ÷  (1 − margin)  ·  travel = flights when one trip's drive cost ≥ threshold  ·  rounded to the nearest $25"),
+      formula("flame.total", "Flame-test total", "max( $base ,  miles × mileageRate  +  travelHrs × laborRate  +  curtains × curtainMin × (laborRate ÷ 60) )  ×  (1 + markup)  ·  travel = flights when one trip's drive cost ≥ threshold  ·  rounded to the nearest $25"),
     ],
   },
   {
@@ -452,12 +518,12 @@ export const GROUPS: PricingGroup[] = [
       rate("repair.laborRate", "Labor rate (repair & service)", 75, "$/hr", { min: 0, max: 300, step: 1, store: "repair", key: "laborRate" }),
       rate("repair.mileageRate", "Mileage rate", 1, "$/mi", { min: 0, max: 2, step: 0.01, store: "repair", key: "mileageRate", help: "Round-trip miles from the default quote origin, shared across venues on one trip." }),
       rate("repair.minCallout", "Minimum service call", 350, "$", { min: 0, max: 2000, step: 5, store: "repair", key: "minCallout", help: "Floor on the service sell (labor + travel), before parts." }),
-      rate("repair.partsMargin", "Parts margin", 30, "%", { min: 0, max: 60, step: 1, store: "repair", key: "partsMargin", pctStored: true, help: "Markup on parts.  partsSell = partsCost ÷ (1 − partsMargin)" }),
-      rate("repair.margin", "Repair margin (labor + travel)", 30, "%", { min: 0, max: 60, step: 1, store: "repair", key: "margin", pctStored: true }),
+      rate("repair.partsMargin", "Parts markup", 43, "%", { min: 0, max: 150, step: 1, store: "repair", key: "partsMargin", pctStored: true, help: "Markup on parts.  partsSell = partsCost × (1 + partsMarkup)" }),
+      rate("repair.margin", "Repair markup (labor + travel)", 43, "%", { min: 0, max: 150, step: 1, store: "repair", key: "margin", pctStored: true }),
       rate("repair.emergencyMult", "Emergency / after-hours ×", 1.5, "×", { min: 1, max: 3, step: 0.05, store: "repair", key: "emergencyMult", help: "Multiplies the labor rate for emergency or after-hours work." }),
       rate("repair.travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "repair", key: "travelRoundMin" }),
       rate("repair.flyCrew", "Crew when the trip flies", 2, "people", { min: 1, max: 10, step: 1, store: "repair", key: "flyCrew", help: "Default crew for a repair priced as flights — never fewer than the quote's own crew size. Overridable on each quote." }),
-      formula("repair.total", "Repair total", "max( $callout ,  (laborHrs × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ÷  (1 − margin) )  +  parts ÷ (1 − partsMargin)  ·  travel = flights when one trip's drive cost ≥ threshold  ·  rounded to the nearest $25"),
+      formula("repair.total", "Repair total", "max( $callout ,  (laborHrs × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ×  (1 + markup) )  +  parts × (1 + parts markup)  ·  travel = flights when one trip's drive cost ≥ threshold  ·  rounded to the nearest $25"),
     ],
   },
   {
@@ -471,11 +537,11 @@ export const GROUPS: PricingGroup[] = [
       rate("inspection.baseHours", "Base on-site hours (per visit)", 2, "hr", { min: 0, max: 16, step: 0.5, store: "inspection", key: "baseHours", help: "Setup, venue walkthrough, and findings write-up — charged once per visit." }),
       rate("inspection.level2Mult", "Level 2 (5-year) ×", 1.75, "×", { min: 1, max: 4, step: 0.05, store: "inspection", key: "level2Mult", help: "Multiplies inspection time for the in-depth 5-year inspection." }),
       rate("inspection.minFee", "Minimum inspection fee", 650, "$", { min: 0, max: 5000, step: 25, store: "inspection", key: "minFee", help: "Floor on the whole job after labor + travel." }),
-      rate("inspection.margin", "Inspection margin", 30, "%", { min: 0, max: 60, step: 1, store: "inspection", key: "margin", pctStored: true }),
+      rate("inspection.margin", "Inspection markup", 43, "%", { min: 0, max: 150, step: 1, store: "inspection", key: "margin", pctStored: true }),
       rate("inspection.travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "inspection", key: "travelRoundMin" }),
       rate("inspection.flyCrew", "Crew when the trip flies", 1, "people", { min: 1, max: 10, step: 1, store: "inspection", key: "flyCrew", help: "Default crew for an inspection priced as flights. Overridable on each quote." }),
       formula("inspection.hours", "Inspection hours", "hours = ( baseHours + lineSets × lineSetMin ÷ 60 ) × (level 2 ? level2× : 1)"),
-      formula("inspection.total", "Inspection total", "max( $minimum ,  (hours × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ÷  (1 − margin) )  ·  travel = flights when one trip's drive cost ≥ threshold  ·  rounded to the nearest $25"),
+      formula("inspection.total", "Inspection total", "max( $minimum ,  (hours × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ×  (1 + markup) )  ·  travel = flights when one trip's drive cost ≥ threshold  ·  rounded to the nearest $25"),
     ],
   },
   {
@@ -498,25 +564,20 @@ export const GROUPS: PricingGroup[] = [
     ],
   },
   {
-    key: "catalog", label: "Catalog margin", live: false,
+    key: "catalog", label: "Catalog markup", live: true,
     sub: "Parts & price books",
-    // NOT marked live on purpose (Claude, 2026-08-01). The value IS persisted to
-    // blob `catalog_rates` — the wiring is done, so this becomes live in one word
-    // — but NOTHING in the codebase reads it yet: a part with no list price is
-    // filtered out, never defaulted through this margin. Tagging the row "live"
-    // would tell the user that editing it reprices something, which is false: the
-    // same UI-claims-what-isn't-true problem as punch #70 and #14. Flip `live` and
-    // drop `ref` in the same breath as adding the first real consumer.
-    note: "Reference — the value is saved, but no pricing path consumes it yet: a part with no list price is skipped rather than defaulted through this margin. Per-part list vs. cost is maintained in the Catalog.",
+    // Live (#367): the Equipment map, Grid swap search, virtual parts and the Quick Design / Grid price table
+    // read this as the markup for a part with no list price (cost × (1 + markup)).
+    note: "Live — the default markup for a part with no list price. The Equipment map, Grid swap search, virtual parts and the Quick Design / Grid price table price it as cost × (1 + markup). Per-part list vs. cost is maintained in the Catalog.",
     items: [
-      rate("catalog.defaultMargin", "Default part margin", 30, "%", { min: 0, max: 60, step: 1, store: "catalog", key: "defaultMargin", pctStored: true, ref: true }),
-      formula("catalog.list", "List price from cost", "list = cost ÷ (1 − margin)"),
+      rate("catalog.defaultMargin", "Default part markup", 43, "%", { min: 0, max: 150, step: 1, store: "catalog", key: "defaultMargin", pctStored: true }),
+      formula("catalog.list", "List price from cost", "list = cost × (1 + markup)"),
     ],
   },
   {
     key: "fixture", label: "Lighting fixtures", live: true,
     sub: "Estimator → Configure fixture pop-out",
-    note: "Live — editing a rate here reprices the Estimator's fixture configurator immediately (shared with estimator-data.ts's fixMounts()/fixAcc()/fixPwr()/fixLamps(), which source PRICE from this store). Each fixture adds one combined priced line; hang/focus labor is left to Configure labor. Cost (for margin) isn't editable here — it stays in the estimator's fixture tables. Placeholder add-on rates — swap for real numbers as pricing firms up.",
+    note: "Live — editing a rate here reprices the Estimator's fixture configurator immediately (shared with estimator-data.ts's fixMounts()/fixAcc()/fixPwr()/fixLamps(), which source PRICE from this store). Each fixture adds one combined priced line; hang/focus labor is left to Configure labor. Cost (for markup) isn't editable here — it stays in the estimator's fixture tables. Placeholder add-on rates — swap for real numbers as pricing firms up.",
     items: [
       rate("fixture.mountCclamp", "Mount — C-clamp", 18, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "mountCclamp" }),
       rate("fixture.mountHalfCoupler", "Mount — half-coupler", 24, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "mountHalfCoupler" }),
@@ -536,7 +597,7 @@ export const GROUPS: PricingGroup[] = [
       rate("fixture.lamp575", "Lamp — 575W HPL", 22, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "lamp575" }),
       rate("fixture.lamp750", "Lamp — 750W HPL", 26, "$", { min: 0, max: 200, step: 1, store: "fixture", key: "lamp750" }),
       rate("fixture.lamp1000", "Lamp — 1000W", 34, "$", { min: 0, max: 300, step: 1, store: "fixture", key: "lamp1000" }),
-      rate("fixture.customCostFactor", "Manual entry — cost basis", 0.66, "×", { min: 0.3, max: 1, step: 0.01, store: "fixture", key: "customCostFactor", help: "When a fixture is entered manually, cost = unit price × this." }),
+      rate("fixture.customCostFactor", "Manual entry — cost basis", 0.66, "×", { min: 0.3, max: 1, step: 0.01, store: "fixture", key: "customCostFactor", help: "When a fixture is entered manually, cost = unit price × this (0.66 ≈ 52 % markup)." }),
       formula("fixture.unit", "Fixture unit price", "unit = fixtureList (or manual) + mounting + Σ accessories + Σ power/data + lamp"),
       formula("fixture.line", "Fixture line (one combined line)", "ext = unit × qty   ·   cost/ea = fixtureCost + add-on costs   ·   hang/focus labor left to Configure labor"),
     ],
@@ -581,7 +642,7 @@ export const GROUPS: PricingGroup[] = [
     note: "Live — a fabric's catalog $/sq ft is fabric cost only; every curtain estimate (Estimator, Quick Design, Grid, the portal) adds this sewing labor on top. A typed Rose Brand / vendor cost is the full cost and gets no adder.",
     items: [
       rate(SEWING_PCT_ID, "Sewing labor adder", DEFAULT_SEWING_PCT, "%", { min: 0, max: SEWING_PCT_MAX, step: 0.5, help: "cost = sewn area × fabric $/sq ft × (1 + this %)" }),
-      formula("curtains.cost", "Curtain cost", "cost = sewn area × fabric $/sq ft × (1 + sewing %)   ·   sewn area = finished width × (1 + fullness) × height   ·   sell = cost ÷ (1 − margin)"),
+      formula("curtains.cost", "Curtain cost", "cost = sewn area × fabric $/sq ft × (1 + sewing %)   ·   sewn area = finished width × (1 + fullness) × height   ·   sell = cost × (1 + markup)"),
     ],
   },
   {
@@ -589,7 +650,7 @@ export const GROUPS: PricingGroup[] = [
     sub: "The automatic package and estimator bonus lines on every Estimator system (#330)",
     note: "Live for DRAFT estimates only — a draft re-figures its bonus lines at these rates on its next save. A sent, won or lost estimate keeps the rates its lines were figured at, so its price never moves. 0–20 %.",
     items: [
-      rate(BONUS_PACKAGE_RATE_ID, "Package bonus", BONUS_PACKAGE_PCT * 100, "% of system cost", { min: 0, max: BONUS_RATE_MAX_PCT, step: 0.5, help: "on a system with labor: cost × this, marked up at the system's blended margin" }),
+      rate(BONUS_PACKAGE_RATE_ID, "Package bonus", BONUS_PACKAGE_PCT * 100, "% of system cost", { min: 0, max: BONUS_RATE_MAX_PCT, step: 0.5, help: "on a system with labor: cost × this, marked up at the system's blended markup" }),
       rate(BONUS_ESTIMATOR_RATE_ID, "Estimator bonus", BONUS_ESTIMATOR_PCT * 100, "% of system price", { min: 0, max: BONUS_RATE_MAX_PCT, step: 0.5, help: "the system's price × this, at cost; split between Lead estimator and Prepared by at Won" }),
     ],
   },
@@ -636,14 +697,16 @@ const ENGINE_BLOBS: Record<EngineStore, [string, Record<string, number>]> = {
 };
 
 async function engineGet(store: EngineStore): Promise<Record<string, number>> {
+  await ensureMarkupSettings();
   const [blob, defaults] = ENGINE_BLOBS[store];
-  return getBlob(blob, { ...defaults });
+  return withoutBasisKeys(await getBlob(blob, { ...defaults }));
 }
 
 async function engineSet(
   store: EngineStore,
   patch: Record<string, number>
 ): Promise<void> {
+  await ensureMarkupSettings();
   await setBlob(ENGINE_BLOBS[store][0], patch);
 }
 
@@ -652,6 +715,7 @@ async function engineSet(
 export async function value(
   item: PricingEntry | string
 ): Promise<number | null> {
+  await ensureMarkupSettings();
   const it = typeof item === "string" ? BY_ID[item] : item;
   if (!it || it.kind !== "rate") return null;
   if (it.store !== "general") {
@@ -690,6 +754,7 @@ export async function defaultOf(item: PricingEntry | string): Promise<number | n
  * every other rate is written back to its registry def (prototype: setValue(id, def)).
  */
 export async function resetValue(item: PricingEntry | string): Promise<void> {
+  await ensureMarkupSettings();
   const it = typeof item === "string" ? BY_ID[item] : item;
   if (!it || it.kind !== "rate") return;
   if (it.store === "general" && LABOR_PCT_IDS.has(it.id)) {
@@ -703,6 +768,7 @@ export async function setValue(
   item: PricingEntry | string,
   val: number | string
 ): Promise<void> {
+  await ensureMarkupSettings();
   const it = typeof item === "string" ? BY_ID[item] : item;
   if (!it || it.kind !== "rate") return;
   let v = typeof val === "number" ? val : parseFloat(val);
@@ -724,6 +790,7 @@ export async function isDefault(item: PricingEntry | string): Promise<boolean> {
 }
 
 export async function resetAll(): Promise<void> {
+  await ensureMarkupSettings();
   // writeGeneral({}) in the prototype replaced the blob; setBlob merges, so
   // overrides are cleared by nulling every general rate key (value() treats
   // null as "no override" and falls back to def).
@@ -755,18 +822,21 @@ export async function frac(id: string, fb?: number): Promise<number> {
 
 /** #231/#232/#233 late: the wire-pull, Cable Package and system-labor rules, in ONE read of the general blob. */
 export async function loadWireLaborRules(): Promise<WireLaborRules> {
+  await ensureMarkupSettings();
   const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
   return wireLaborRulesFrom((id) => g[id]);
 }
 
 /** #227 late: the curtain sewing % (a percent number, 10 = 10 %) — one read of the general blob. */
 export async function loadCurtainSewingPct(): Promise<number> {
+  await ensureMarkupSettings();
   const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
   return sewingPctFrom(g[SEWING_PCT_ID]);
 }
 
 /** Jeff 2026-10-15 #19: the Estimator bonus rates (fractions) — one read of the general blob. */
 export async function loadBonusRates(): Promise<BonusRates> {
+  await ensureMarkupSettings();
   const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
   return bonusRatesFrom(g[BONUS_PACKAGE_RATE_ID], g[BONUS_ESTIMATOR_RATE_ID]);
 }

@@ -16,12 +16,15 @@ Not listed: items absorbed by the Daylite parity program (7, 12, 17–19,
 - **11-D. Portal equipment prices.** Catalog `list` is a per-SKU absolute
   price with no percentage hook. Should a tier **discount off the list
   price**, or should list be **re-derived from cost + tier margin**?
-  > Answer: **Cost + margin** — customer price re-derived from cost at the tier margin
-  > (fall back to list when a part has no cost).
+  > Answer: **Cost + markup** — customer price re-derived from cost at the tier markup
+  > (fall back to list when a part has no cost). *(Margin on price until #367, D1286: now
+  > `cost × (1 + markup)`.)*
 - **11-margins. The percentage for each tier.**
   > Answer: **Seven tiers — Base 30 · Copper 27 · Silver 22 · Gold 20 · Platinum 15 ·
   > Reseller 10 · Employee 5** (percent margin; spelling confirmed "Copper").
-  > Admin-editable tier→margin table seeded with these.
+  > Admin-editable tier→margin table seeded with these. *(Converted to markup on cost by
+  > #367, D1286–D1289: now Base 43 · Copper 37 · Silver 28 · Gold 25 · Platinum 18 ·
+  > Reseller 11 · Employee 5, same prices.)*
 
 ## Item 9 — Team members
 

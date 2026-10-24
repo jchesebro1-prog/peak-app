@@ -558,7 +558,7 @@ export default function EditCustomerModal({
               value={pricingTier}
               onChange={(e) => setPricingTier(e.target.value)}
               style={selStyle}
-              title="Seeds margins for this company's quotes when the contact has no tier of their own. Internal only — customers never see it. Margins live in Estimating Rules."
+              title="Seeds markups for this company's quotes when the contact has no tier of their own. Internal only — customers never see it. Markups live in Estimating Rules."
             >
               <option value="">— Base (default) —</option>
               <option value="base">Base</option>

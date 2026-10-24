@@ -16,7 +16,7 @@ import {
 } from "@/lib/stores/quotes";
 import { getRates, setRates, compute, type FlameTestVenueInput } from "@/lib/flametest-engine";
 import { getTravelRates } from "@/lib/stores/pricing";
-import { resolveTier, serviceMarginFor } from "@/lib/pricing-tiers";
+import { resolveTier, serviceMarkupFor } from "@/lib/pricing-tiers";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
 import { deriveSeededMarker, normalizeLift, normalizePriceOverride, savedLift } from "@/lib/service-pricing";
 import { settleServiceCreditFor } from "@/lib/stores/reward-ledger";
@@ -69,10 +69,13 @@ async function persist(formData: FormData, out?: { creditNote?: string }): Promi
   if (!customerId || !venues.length) return null;
 
   // Mileage/labor knobs stay global rates (prototype FlameTest.setRates).
-  // MARGIN went per-quote with customer tiers (item 11, D87): the customer's
+  // MARKUP (stored as rates.margin) went per-quote with customer tiers (item 11, D87): the customer's
   // tier seeds it, the builder knob overrides it for THIS quote only — one
-  // quote's margin no longer reprices every future flame quote.
-  const marginPts = Number(formData.get("margin"));
+  // quote's markup no longer reprices every future flame quote.
+  // #367: a missing field (a builder tab opened before the switch posts the old `margin` key) is NaN, not
+  // Number(null) = 0 → the 5 % clamp — so it falls back to the service markup below.
+  const rawMarkup = formData.get("markup");
+  const markupPts = rawMarkup == null || rawMarkup === "" ? NaN : Number(rawMarkup);
   const mileageRate = Number(formData.get("mileageRate"));
   const laborRate = Number(formData.get("laborRate"));
   const patch: Record<string, number> = {};
@@ -82,13 +85,13 @@ async function persist(formData: FormData, out?: { creditNote?: string }): Promi
   const baseRates = await getRates();
   const tier = await resolveTier(customerId, contactName);
   // #254 follow-up: an untiered customer prices/stamps at THIS service's own
-  // default margin (baseRates.margin — same seed the builder knob uses), not
-  // tier Base's registry margin (src/lib/pricing-tiers.ts serviceMarginFor).
-  const serviceMargin = serviceMarginFor(tier, baseRates.margin);
-  const quoteMargin = Number.isFinite(marginPts)
-    ? Math.max(5, Math.min(50, marginPts)) / 100
-    : serviceMargin;
-  const rates = { ...baseRates, margin: quoteMargin };
+  // default markup (baseRates.margin — same seed the builder knob uses), not
+  // tier Base's registry markup (src/lib/pricing-tiers.ts serviceMarkupFor).
+  const serviceMarkup = serviceMarkupFor(tier, baseRates.margin);
+  const quoteMarkup = Number.isFinite(markupPts)
+    ? Math.max(5, Math.min(100, markupPts)) / 100
+    : serviceMarkup;
+  const rates = { ...baseRates, margin: quoteMarkup };
 
   // resolve venue coords from the customer directory + nearest office
   const cust = await getCustomer(customerId);
@@ -101,7 +104,7 @@ async function persist(formData: FormData, out?: { creditNote?: string }): Promi
   // Fly choice + crew/nights/airfare overrides as JSON; absent = auto.
   const travelOverride = parseTravelOverride(formData.get("travel"));
   // #217: a typed total (whole dollars, $1–$10,000,000) replaces the rounded
-  // auto total exactly; the 5–50 clamp above bounds only the slider's margin.
+  // auto total exactly; the 5–100 clamp above bounds only the slider's markup.
   const priceOverride = normalizePriceOverride(formData.get("priceOverride"));
   // #275: an optional lift rental — count × rate (blank rate = the live
   // EQP-LIFT default); count 0 / absent = no lift.
@@ -171,9 +174,9 @@ async function persist(formData: FormData, out?: { creditNote?: string }): Promi
     locationId: venueInputs[0].id ?? null,
     // #282 phase 3: net of any Rewards credit (what the customer pays).
     value: netServiceTotal(r.total, credit.credit),
-    margin: r.effectiveMargin,
+    margin: r.effectiveMarkup,
     pricingTier: tier.tier,
-    tierMargin: serviceMargin,
+    tierMargin: serviceMarkup,
     // #248 Task 4 (spec §5): a portal-generated quote (source
     // "portal-service") keeps that source across a staff save — the same
     // rule the Estimator applies to portal-catalog (D416).
@@ -253,7 +256,7 @@ export async function approveFlameQuote(formData: FormData): Promise<void> {
     // #248 final review (controller decision 1): an accepted portal-service
     // quote approves at the price the customer already accepted — persist()
     // would re-price it at today's rates/tier first, which a mileage-rate
-    // or margin edit between Accept and Approve could quietly change out
+    // or markup edit between Accept and Approve could quietly change out
     // from under the accepted number. Same permission check persist() would
     // have made (requireUser()), just made directly since persist() is
     // skipped.

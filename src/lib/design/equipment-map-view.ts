@@ -152,7 +152,7 @@ export function assemblyOptions(fixtures: Iterable<FixtureRecord>, ctx: EquipPri
     out.push({
       id: f.id, label: f.label, kind: f.kind,
       scope: f.kind === "system" || f.kind === "rack" ? f.scope ?? "Other" : f.kind === "hardware" ? "" : "Lighting",
-      unitCost: r.cost, unitSell: r.sell > 0 ? r.sell : sellFromCost(r.cost, ctx.margin),
+      unitCost: r.cost, unitSell: r.sell > 0 ? r.sell : sellFromCost(r.cost, ctx.markup),
     });
   }
   return out.sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));

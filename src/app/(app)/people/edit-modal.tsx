@@ -264,7 +264,7 @@ export default function EditPersonModal({
             </div>
             <div>
               <span style={label}>Pricing tier</span>
-              <select value={pricingTier} onChange={(e) => setPricingTier(e.target.value)} style={field} title="Follows the person everywhere (design §4.7); margins set in Estimating Rules">
+              <select value={pricingTier} onChange={(e) => setPricingTier(e.target.value)} style={field} title="Follows the person everywhere (design §4.7); markups set in Estimating Rules">
                 {TIERS.map((t) => (
                   <option key={t.value} value={t.value}>
                     {t.label}
