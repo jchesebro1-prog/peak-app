@@ -7,19 +7,19 @@ import {
   hasSellOverride,
   isSystemLine,
   lineExtSellOf,
-  marginColor,
+  markupColor,
   round2,
   SYSTEM_PRICE_STEP,
   systemFreight,
   systemItemsCost,
-  systemMargin,
+  systemMarkup,
   systemSellAdjustment,
   systemSellTotal,
   systemSellWarning,
 } from "./pricing";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { isMovableLine } from "@/lib/estimate-line-move/move";
-import { CUSTOM_PART_MARGIN } from "./tier-reprice";
+import { CUSTOM_PART_MARKUP } from "./tier-reprice";
 import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import { isCustomLineEditable } from "./custom-part-edit";
@@ -39,7 +39,7 @@ import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 const NEW_GROUP = "__new";
 
 /**
- * One system card — header (badge / rename / cost / price), per-system margin
+ * One system card — header (badge / rename / cost / price), per-system markup
  * + freight sliders, line-item grid, freight line, and the add-part row with
  * the catalog + custom-part portals. Pixel port of Estimator.dc.html.
  *
@@ -156,7 +156,7 @@ export type SectionCardProps = {
   /** Box goods sale (spec 2026-10-21): hide + Configure labor, the Customer chip, Discipline, Add narrative… and ★. */
   boxSale?: boolean;
   onDelete: () => void;
-  onSetMargin: (v: string) => void;
+  onSetMarkup: (v: string) => void;
   /** #267: a typed system sell (raw text; empty/0/junk clears it). */
   onSetSell: (v: string) => void;
   /** #267: drop the typed system sell — back to the auto price. */
@@ -349,23 +349,23 @@ export default function SectionCard(p: SectionCardProps) {
   const itemsCost = systemItemsCost(sec);
   const secFreight = systemFreight(sec);
   // #267: the system's actual price — a typed sell, or the auto price rounded
-  // up to the next $25 — and the margin it carries.
+  // up to the next $25 — and the markup it carries.
   const subtotal = systemSellTotal(sec);
   const sellAdj = systemSellAdjustment(sec);
   const sellSet = hasSellOverride(sec);
   const sellWarning = systemSellWarning(sec);
-  const sysMargin = Math.round(systemMargin(sec) * 100);
+  const sysMarkup = Math.round(systemMarkup(sec) * 100);
   // #282 phase 2: the Rewards credit line shows in the totals sidebar, not here.
   const visible = sec.items.filter(isSystemLine);
   const metaParts: string[] = [];
   metaParts.push(visible.length + " item" + (visible.length === 1 ? "" : "s"));
-  if (sysMargin > 0 && isInternal) metaParts.push(sysMargin + "% margin");
+  if (sysMarkup > 0 && isInternal) metaParts.push(sysMarkup + "% markup");
 
   const cd = p.customDraft;
   const cdQty = Math.max(1, parseInt(cd.qty, 10) || 0);
   const cdPrice = parseFloat(cd.price) || 0;
   const cdCost = parseFloat(cd.cost) || 0;
-  const cdMargin = cdPrice > 0 ? (cdPrice - cdCost) / cdPrice : 0;
+  const cdMarkup = cdCost > 0 ? (cdPrice - cdCost) / cdCost : 0;
   const cdValid = (cd.desc || "").trim().length > 0 && (cdPrice > 0 || (!!cd.allowance && cdCost > 0));
   const showLink = linkRevealed || !!cd.link;
   const openMethod = p.openMethod;
@@ -646,14 +646,14 @@ export default function SectionCard(p: SectionCardProps) {
                     textTransform: "uppercase",
                   }}
                 >
-                  Margin
+                  Markup
                 </span>
                 <input
                   type="range"
                   min={0}
-                  max={55}
-                  value={sysMargin}
-                  onChange={(e) => p.onSetMargin(e.target.value)}
+                  max={125}
+                  value={sysMarkup}
+                  onChange={(e) => p.onSetMarkup(e.target.value)}
                   style={{ width: 120, accentColor: "var(--accent)", cursor: "pointer" }}
                 />
                 <span
@@ -665,7 +665,7 @@ export default function SectionCard(p: SectionCardProps) {
                     minWidth: 34,
                   }}
                 >
-                  {sysMargin}%
+                  {sysMarkup}%
                 </span>
               </div>
             )}
@@ -688,7 +688,7 @@ export default function SectionCard(p: SectionCardProps) {
                         if (e.target.value.trim() === fmt(subtotal)) return;
                         p.onSetSell(e.target.value);
                       }}
-                      title="Type this system's sell price (freight included) — used exactly; the line prices stay as they are and the margin follows"
+                      title="Type this system's sell price (freight included) — used exactly; the line prices stay as they are and the markup follows"
                       aria-label="System sell price"
                       style={{
                         width: 108,
@@ -1107,7 +1107,7 @@ export default function SectionCard(p: SectionCardProps) {
                 : null;
               const ext = lineExtSellOf(it);
               const kpStar = keyProductStar(sec, it);
-              const lineMargin = ext > 0 ? (ext - it.qty * it.cost) / ext : 0;
+              const lineMarkup = it.qty * it.cost > 0 ? (ext - it.qty * it.cost) / (it.qty * it.cost) : 0;
               /* #269: a labor line from a stored group reopens the Labor
                  configurator — its description and an Edit link, like a
                  vendor line. A labor line added before #269 has no draft to
@@ -1574,8 +1574,8 @@ export default function SectionCard(p: SectionCardProps) {
                       aria-label={`Unit sell for ${it.desc}`}
                       style={{ width: "100%", maxWidth: 92, height: 24, textAlign: "right", border: "1px solid #e4e7ec", borderRadius: 6, fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", fontSize: 11.5, color: "#5b616e" }}
                     />
-                    <span title="Line margin" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", fontSize: 10, color: marginColor(lineMargin), flexShrink: 0 }}>
-                      {ext > 0 ? Math.round(lineMargin * 100) : 0}%
+                    <span title="Line markup" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", fontSize: 10, color: it.qty * it.cost > 0 ? markupColor(lineMarkup) : "#aab0bb", flexShrink: 0 }}>
+                      {it.qty * it.cost > 0 ? Math.round(lineMarkup * 100) + "%" : "—"}
                     </span>
                   </div>
                   <input
@@ -1933,7 +1933,7 @@ export default function SectionCard(p: SectionCardProps) {
                     <label style={LBL}>
                       Unit sell
                       {cd.priceAuto && cdPrice > 0 && (
-                        <span style={{ marginLeft: 6, fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "#9aa0ab" }}>{`Auto · ${Math.round(CUSTOM_PART_MARGIN * 100)}% margin`}</span>
+                        <span style={{ marginLeft: 6, fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "#9aa0ab" }}>{`Auto · ${Math.round(CUSTOM_PART_MARKUP * 100)}% markup`}</span>
                       )}
                     </label>
                     <div style={{ position: "relative" }}>
@@ -2008,17 +2008,17 @@ export default function SectionCard(p: SectionCardProps) {
                           letterSpacing: ".04em",
                         }}
                       >
-                        Margin
+                        Markup
                       </span>
                       <div
                         style={{
                           fontFamily: "var(--font-mono)",
                           fontSize: 14,
                           fontWeight: 600,
-                          color: marginColor(cdMargin),
+                          color: cdCost > 0 ? markupColor(cdMarkup) : "#aab0bb",
                         }}
                       >
-                        {cdPrice > 0 ? Math.round(cdMargin * 100) + "%" : "—"}
+                        {cdPrice > 0 && cdCost > 0 ? Math.round(cdMarkup * 100) + "%" : "—"}
                       </div>
                     </div>
                   </div>

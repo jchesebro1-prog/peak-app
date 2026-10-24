@@ -11,7 +11,7 @@ import { ACCENT_INK, ACCENT_SOFT, addBtnStyle, ConfigModal, LBL, LBL5, segBtn, S
  * Labor configurator — discipline scope (rate set from catalog category
  * 'Labor'), one line per mobilization (crew/days/OT, local vs travel with
  * mileage/lodging/per-diem, supervisor, lift), shop & engineering hours with
- * auto PM/drafting defaults, misc allowance and margin. addLabor
+ * auto PM/drafting defaults, misc allowance and markup. addLabor
  * (estimator-client.tsx) adds each mobilization's mileage / hotel / per diem
  * / lift (#270) and shop & engineering / the allowance
  * as their own separate lines too — internal-estimate only; the customer
@@ -805,7 +805,7 @@ export default function LaborModal({
         </div>
       </div>
 
-      {/* misc + margin */}
+      {/* misc + markup */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 11 }}>
         <div>
           <label style={LBL5}>Misc / allowance ($)</label>
@@ -818,12 +818,12 @@ export default function LaborModal({
           />
         </div>
         <div>
-          <label style={LBL5}>Margin (%)</label>
+          <label style={LBL5}>Markup (%)</label>
           <input
             className="est-input est-field"
             value={draft.margin}
             onChange={(e) => onSet("margin", e.target.value)}
-            placeholder="30"
+            placeholder="43"
             style={MOBFIELD}
           />
         </div>

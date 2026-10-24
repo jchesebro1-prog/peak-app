@@ -1,7 +1,11 @@
-import { getBlob, updateBlob } from "@/db/doc-store";
+import { updateBlob } from "@/db/doc-store";
+import { withoutBasisKeys } from "@/lib/markup/settings";
 import {
+  FLAMETEST_RATES_BLOB,
   FLAMETEST_RATE_DEFAULTS,
   TRAVEL_RATE_DEFAULTS,
+  ensureMarkupSettings,
+  getFlametestRates,
   getTravelRates,
   type TravelRates,
 } from "@/lib/stores/pricing";
@@ -41,15 +45,15 @@ import {
  *      AFTER mileage + travel time + testing are summed:
  *        cost = max(baseFee, trip.total + testingSubtotal)
  *      It is not a per-venue or per-curtain charge.
- *   4. Margin — flat 30-point margin of the sell price on top:
- *        total = cost / (1 - margin)   (when 0 < margin < 1)
+ *   4. Markup — a flat markup on cost on top (#367):
+ *        total = cost × (1 + markup)   (when markup > 0)
  *   5. Flights over drive (spec 2026-09-25, src/lib/travel-plan.ts) — when
  *      the trip's drive cost reaches the travel_rates threshold (or the quote
- *      forces Fly) travel prices as flights; the base fee and margin then
+ *      forces Fly) travel prices as flights; the base fee and markup then
  *      apply to that figure exactly as they do to the drive. Drive mode is
  *      unchanged.
  *   6. Lift rental (#275) — an optional count × rate added to the cost AFTER
- *      the base-fee floor, margined with the rest:
+ *      the base-fee floor, marked up with the rest:
  *        cost = max(baseFee, trip.total + testingSubtotal) + liftCost
  *
  * Everything prices from an explicit rates object (pure functions);
@@ -78,7 +82,7 @@ export type FlameTestRates = {
   curtainMinutes: number;
   /** $ minimum for the whole job (after mileage + travel + testing). */
   baseFee: number;
-  /** Margin of the sell price (0.30 = 30 points). */
+  /** Markup on cost (0.43 = 43 %). */
   margin: number;
   /** Round total travel time up to the nearest N minutes. */
   travelRoundMin: number;
@@ -86,13 +90,12 @@ export type FlameTestRates = {
   flyCrew?: number;
 };
 
-const RATES_BLOB_ID = "flametest_rates";
+const RATES_BLOB_ID = FLAMETEST_RATES_BLOB;
 
-/** Live rates: stored patch merged over FLAMETEST_RATE_DEFAULTS (port of getRates). */
+/** Live rates: stored patch merged over FLAMETEST_RATE_DEFAULTS (port of getRates). #367: through the store's
+ *  getter, so the blob is converted to markup first and the basis stamp never reaches the engine. */
 export async function getRates(): Promise<FlameTestRates> {
-  const defaults: FlameTestRates = { ...FLAMETEST_RATE_DEFAULTS };
-  const saved = await getBlob<FlameTestRates>(RATES_BLOB_ID, defaults);
-  return saved;
+  return (await getFlametestRates()) as FlameTestRates;
 }
 
 /** Merge a patch into the persisted rates; returns the merged rates (port of setRates). */
@@ -103,12 +106,15 @@ export async function setRates(
   // read-then-write-everything put back a stale copy of every other rate,
   // undoing one saved by a concurrent quote. Same stored result otherwise
   // (defaults, then stored, then the patch, written whole).
+  // #367: the blob is converted (and stamped) before a whole-object write could bake a markup patch into an
+  // unconverted margin blob; the stamp keys ride along in `raw` and are stripped from what callers get back.
+  await ensureMarkupSettings();
   let next = { ...FLAMETEST_RATE_DEFAULTS } as FlameTestRates;
   await updateBlob(RATES_BLOB_ID, (raw) => {
     next = { ...FLAMETEST_RATE_DEFAULTS, ...(raw as Partial<FlameTestRates>), ...patch } as FlameTestRates;
     return next as unknown as Record<string, unknown>;
   });
-  return next;
+  return withoutBasisKeys(next as unknown as Record<string, unknown>) as unknown as FlameTestRates;
 }
 
 /** Round minutes UP to the nearest step (default 15); 0 for null/NaN. */
@@ -330,7 +336,7 @@ export function tripTravel(
  *
  *   rawCost = trip.total + testingSubtotal
  *   cost    = max(baseFee, rawCost)          — base fee floors the whole job
- *   total   = cost / (1 - margin)            — when 0 < margin < 1, else cost,
+ *   total   = cost × (1 + markup)            — when markup > 0, else cost,
  *             rounded to the nearest $25, or a typed priceOverride (#217)
  */
 export function compute(
@@ -357,7 +363,7 @@ export function compute(
   });
   const trip = withMode(drive, plan);
   // Base $150 is a floor on the WHOLE job cost (mileage + travel + testing),
-  // not a per-venue charge. Margin is applied on top of the floored cost, then
+  // not a per-venue charge. Markup is applied on top of the floored cost, then
   // (#217) the total rounds to the nearest $25 unless a typed total replaces
   // it — finishFlame() is the same code the builder preview runs.
   const rawCost = plan.total + testingSubtotal;

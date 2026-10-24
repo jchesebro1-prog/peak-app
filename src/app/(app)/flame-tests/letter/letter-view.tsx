@@ -216,7 +216,7 @@ export async function FlameLetterView({ id }: { id: string }) {
   const inspectionHours = (curtainsTotal * curtainMin) / 60;
   // Flights over drive (spec 2026-09-25 §5): one customer-facing travel line.
   const flight = flightOf(ft.trip);
-  const travelMargin = typeof ft.rates?.margin === "number" ? ft.rates.margin : quote.margin || 0;
+  const travelMarkup = typeof ft.rates?.margin === "number" ? ft.rates.margin : quote.margin || 0;
   const travelHours = flight ? flight.travelHours : 2 * oneWayHours;
   const totalHours = travelHours + inspectionHours;
   const hasTrip = rtMiles > 0;
@@ -297,7 +297,7 @@ export async function FlameLetterView({ id }: { id: string }) {
           flightTotal: flight.total,
           total: price.gross,
           cost: ft.cost,
-          margin: travelMargin,
+          margin: travelMarkup,
         }).travel
       ),
       hours: num1(flight.travelHours) + " hrs",
@@ -311,7 +311,7 @@ export async function FlameLetterView({ id }: { id: string }) {
     });
   }
   // #275: an optional lift rental prints as its own priced line (count > 0 only).
-  const lift = printedLift(ft, travelMargin);
+  const lift = printedLift(ft, travelMarkup);
   if (lift) {
     scopeRows.push({
       item: pad2(sr++),

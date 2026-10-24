@@ -1,4 +1,5 @@
 import type { ProcurementLine, ProjectRecord } from "@/lib/stores/projects";
+import { marginToMarkup } from "@/lib/markup";
 
 /**
  * Projects & sales orders seed — exact port of app/project.js seedData():
@@ -66,7 +67,8 @@ export function projectsSeed(): ProjectRecord[] {
       locationId: "lc1",
       owner: pm,
       value: 41720,
-      margin: 0.36,
+      margin: marginToMarkup(0.36),
+      pricingBasis: "markup",
       createdAt: ago(20),
       updatedAt: ago(0),
       startedAt: ago(18),
@@ -122,7 +124,8 @@ export function projectsSeed(): ProjectRecord[] {
       locationId: "ns1",
       owner: "Jack Hamilton",
       value: 58200,
-      margin: 0.3,
+      margin: marginToMarkup(0.3),
+      pricingBasis: "markup",
       createdAt: ago(12),
       updatedAt: ago(1),
       startedAt: ago(11),
@@ -167,7 +170,8 @@ export function projectsSeed(): ProjectRecord[] {
       locationId: "nr1",
       owner: "Nic Trapani",
       value: 86400,
-      margin: 0.34,
+      margin: marginToMarkup(0.34),
+      pricingBasis: "markup",
       createdAt: ago(6),
       updatedAt: ago(0),
       startedAt: ago(5),
@@ -213,7 +217,8 @@ export function projectsSeed(): ProjectRecord[] {
       locationId: "ba1",
       owner: "Jena Tolksdorf",
       value: 18600,
-      margin: 0.33,
+      margin: marginToMarkup(0.33),
+      pricingBasis: "markup",
       createdAt: ago(8),
       updatedAt: ago(1),
       startedAt: ago(7),
@@ -251,7 +256,8 @@ export function projectsSeed(): ProjectRecord[] {
       locationId: null,
       owner: pm,
       value: 96000,
-      margin: 0.32,
+      margin: marginToMarkup(0.32),
+      pricingBasis: "markup",
       createdAt: ago(120),
       updatedAt: ago(14),
       startedAt: ago(110),

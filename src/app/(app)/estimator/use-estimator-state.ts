@@ -24,7 +24,7 @@ import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCred
 import type { WonEditField } from "@/app/(app)/quotes/new/handoff";
 import type { DraftedLine } from "./ai-scope-modal";
 import { DISC_LABEL, type SuggestPart } from "./estimator-data";
-import { backSolveExtSell, priceFromUnitSellEdit, repriceAtMargin, buildLaborItems, computeCurtain, computeLabor, lineMarginOf, makeLaborRate, repricedAtLineMargin, round2, clearSellOverride, parseSellOverride, SYSTEM_PRICE_STEP, systemSellTotal, totals, vendorTotalSeed, withPriceRound } from "./pricing";
+import { backSolveExtSell, priceFromUnitSellEdit, repriceAtMarkup, buildLaborItems, computeCurtain, computeLabor, lineMarkupOf, makeLaborRate, repricedAtLineMarkup, round2, clearSellOverride, parseSellOverride, SYSTEM_PRICE_STEP, systemSellTotal, totals, vendorTotalSeed, withPriceRound } from "./pricing";
 import type { PdfToggle } from "./preview-doc";
 import { vendorAttachmentLoad, type CurtainDraft, type CustomDraft, type EstimatorProps, type FixtureDraft, type LaborDraft, type MobDraft, type SpecItem, type SpecMob, type SpecSection, type TrackDraft, type TravelLite, type VendorDraft, type VendorLineDraft, type VendorPdfFormState, type VendorQuote } from "./types";
 import { vendorQuoteFromThreadAction } from "./vendor-actions";
@@ -66,7 +66,8 @@ import { vendorDraftTotal, vendorDraftTotalSource, vendorKeptLines, vendorLinesT
 import { systemFromCategory } from "@/lib/system-categories";
 import { addedState, itemFromSuggestionLine, systemFromSuggestion } from "@/lib/assist/features/suggestion";
 import { defaultSuggestionTarget, sendSuggestionId, suggestPanelFirstRead, suggestPanelKey, suggestPanelOpen, type SuggestionParts } from "@/lib/assist/features/suggestion-panel";
-import { catalogAddPrice, customPartSell, repriceForTier } from "./tier-reprice";
+import { catalogAddPrice, customPartSell, repriceForTier, seedMarkupOf } from "./tier-reprice";
+import { sellAt } from "@/lib/markup";
 import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 import { postChanged } from "@/lib/popout/channel";
 import { applyLineMove, extractLinesAsSection, lineRefKey, planLineMove, removeLinesFromSources, type LineRef } from "@/lib/estimate-line-move/move";
@@ -202,15 +203,12 @@ const attKey = (d: VendorDraft) => {
 
 const freshLabor = (
   t: TravelLite | null,
-  /** Tier-seeded margin fraction (item 11, D87); null → the legacy 30. */
+  /** Tier-seeded markup fraction (item 11, D87; #367); null → the 43 fallback. */
   tierMargin?: number | null,
   systemTitle = ""
 ): LaborDraft => ({
   discipline: disciplineForSystemTitle(systemTitle),
-  margin:
-    tierMargin != null && tierMargin > 0 && tierMargin < 1
-      ? String(Math.round(tierMargin * 100))
-      : "30",
+  margin: String(Math.round(seedMarkupOf(tierMargin) * 100)),
   mobs: defaultLaborMobs(t),
   pmHrs: "",
   pmAuto: true,
@@ -791,7 +789,7 @@ export function useEstimatorState(props: EstimatorProps) {
       pdfRead: null,
     };
   };
-  // Customer tier margin stamp (item 11, D87) — SEEDS the labor draft and
+  // Customer tier markup stamp (item 11, D87; field `tierMargin`) — SEEDS the labor draft and
   // curtain configurator; refreshed when the meta action re-stamps.
   const [tierMargin, setTierMargin] = useState<number | null>(initial.tierMargin);
   /** The stamp in effect, read synchronously when the next one lands (#254) —
@@ -1118,7 +1116,7 @@ export function useEstimatorState(props: EstimatorProps) {
   }, [unsavedHold]);
 
   /* ---------------- persistence ---------------- */
-  /** #254 (D87 amended) — re-price the lines still at `prev`'s margin to
+  /** #254 (D87 amended) — re-price the lines still at `prev`'s markup to
    *  `next`, keep hand-priced ones, and say so with Undo. The normal Save
    *  persists it; no re-priced line → no new banner (the silent stamp), and
    *  a banner already showing (with its Undo) stays. */
@@ -1151,7 +1149,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const tierResolveSeqRef = useRef(0);
   /** #254 fix wave 2: a tier lookup is in flight — Save waits for it, so a
    *  pick-then-Save can't stamp the new tier over lines still at the old
-   *  margin (the server resolves the stamp from the posted customer/contact).
+   *  markup (the server resolves the stamp from the posted customer/contact).
    *  The ref guards a click that lands before the disabled button renders. */
   const [tierResolving, setTierResolving] = useState(false);
   const tierResolvingRef = useRef(false);
@@ -1498,7 +1496,7 @@ export function useEstimatorState(props: EstimatorProps) {
           paymentTerms,
           category,
           value: t.grand,
-          margin: t.margin,
+          markup: t.markup,
           status,
           // #180 review 2 — what this tab last confirmed from the server,
           // so the action can tell a genuine change from a stale tab.
@@ -1915,23 +1913,23 @@ export function useEstimatorState(props: EstimatorProps) {
     setSections((ss) => ss.map((s) => pruneLaborGroups({ ...s, items: s.items.filter((x) => x.id !== id) })));
   };
 
-  // #267: both margin sliders re-price the lines AND drop a typed system sell.
-  const setMarginAll = (v: string) => {
-    const m = parseInt(v, 10) / 100;
+  // #267: both markup sliders re-price the lines AND drop a typed system sell.
+  const setMarkupAll = (v: string) => {
+    const k = parseInt(v, 10) / 100;
     setSections((ss) =>
       ss.map((s) => ({
         ...clearSellOverride(s),
         // #282 phase 2: the Rewards credit is not a priced line.
-        items: s.items.map((it) => (isRewardCreditItem(it) || isBonusItem(it) ? it : { ...it, ...repriceAtMargin(it.cost, m) })),
+        items: s.items.map((it) => (isRewardCreditItem(it) || isBonusItem(it) ? it : { ...it, ...repriceAtMarkup(it.cost, k) })),
       }))
     );
   };
-  const setSystemMargin = (secId: string, v: string) => {
-    const m = parseFloat(v) / 100;
+  const setSystemMarkup = (secId: string, v: string) => {
+    const k = parseFloat(v) / 100;
     setSections((ss) =>
       ss.map((s) =>
         s.id === secId
-          ? { ...clearSellOverride(s), items: s.items.map((it) => (isRewardCreditItem(it) || isBonusItem(it) ? it : { ...it, ...repriceAtMargin(it.cost, m) })) }
+          ? { ...clearSellOverride(s), items: s.items.map((it) => (isRewardCreditItem(it) || isBonusItem(it) ? it : { ...it, ...repriceAtMarkup(it.cost, k) })) }
           : s
       )
     );
@@ -2932,7 +2930,7 @@ export function useEstimatorState(props: EstimatorProps) {
   };
 
   /** #302 — one field of the Custom part form. Unit sell follows Unit cost at
-   *  the flat custom-part margin until a sell is typed; clearing the sell
+   *  the flat custom-part markup until a sell is typed; clearing the sell
    *  hands it back to the cost. Any edit clears a stale error. */
   const setCustomField = (field: keyof CustomDraft, v: string) => {
     setCustomError("");
@@ -2956,7 +2954,7 @@ export function useEstimatorState(props: EstimatorProps) {
     if (savingCustomRef.current) return;
     const d = customDraft;
     const desc = (d.desc || "").trim();
-    const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
+    const markup = seedMarkupOf(tierMargin);
     const editId = customEdit?.lineId;
     // #312: a typed 0 on an EDITED line stays 0 (a zero-quantity option); only an add defaults to 1.
     let qty = parseInt(d.qty, 10);
@@ -2968,7 +2966,7 @@ export function useEstimatorState(props: EstimatorProps) {
     if (isNaN(cost) || cost < 0) cost = 0;
     const typedPrice = parseFloat(d.price);
     const price = d.allowance && (!Number.isFinite(typedPrice) || typedPrice <= 0)
-      ? round2(cost / (1 - margin))
+      ? round2(sellAt(cost, markup))
       : typedPrice;
     if (!desc || !Number.isFinite(price) || price <= 0) return;
     if (lineGone()) {
@@ -3153,7 +3151,7 @@ export function useEstimatorState(props: EstimatorProps) {
     const description = (d.description || "").trim();
     const total = vendorDraftTotal(d);
     if (!vendor || !quoteNumber || !description || total <= 0) return;
-    const seedMargin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
+    const seedMarkup = seedMarkupOf(tierMargin);
     /* The id the form was opened with (mintVendorQuoteId, or the record's own
        on an edit) — NOT a second one. With Blob storage on the attachment was
        already uploaded under it, so a fresh id here would orphan the file
@@ -3223,12 +3221,12 @@ export function useEstimatorState(props: EstimatorProps) {
               sku: quoteNumber,
               desc: lineDesc,
               cost: total,
-              /* The line's CURRENT margin, rescaled to the new cost (#144,
+              /* The line's CURRENT markup, rescaled to the new cost (#144,
                  D163) — never re-seeded from the tier, which would undo a
-                 margin slider drag or a typed sell price. Shared with the
-                 form's own Sell stat (`vendorFormMargin`) so the number the
+                 markup slider drag or a typed sell price. Shared with the
+                 form's own Sell stat (`vendorFormMarkup`) so the number the
                  user reads before saving is the number that lands. */
-              price: repricedAtLineMargin(it.cost, it.price, total, seedMargin),
+              price: repricedAtLineMarkup(it.cost, it.price, total, seedMarkup),
             };
             /* Must be able to CLEAR the flag, not only set it: this spreads the
                existing item, so unticking "includes freight" has to delete the
@@ -3248,7 +3246,7 @@ export function useEstimatorState(props: EstimatorProps) {
           qty: 1,
           unit: "lot",
           cost: total,
-          price: round2(total / (1 - seedMargin)),
+          price: round2(sellAt(total, seedMarkup)),
           vendorQuoteId: vqId,
           // Jeff's exemption: a quote that already includes freight is excluded
           // from the section freight base (pricing.systemFreightBase).
@@ -3529,24 +3527,24 @@ export function useEstimatorState(props: EstimatorProps) {
   /** The stored quote the vendor form is editing, if it is editing one (#144). */
   const vendorEditingRec = vendorQuotes.find((v) => v.id === vendorDraft.id);
   /**
-   * The margin the vendor form prices its "Sell" stat at (#144 re-review).
+   * The markup the vendor form prices its "Sell" stat at (#144 re-review).
    *
    * On an ADD that is the tier seed, the same rule the spawned line is built
-   * with. On an EDIT it has to be the margin the LINE is carrying, because that
-   * is what commitVendorQuote preserves (repricedAtLineMargin): the tier seed
+   * with. On an EDIT it has to be the markup the LINE is carrying, because that
+   * is what commitVendorQuote preserves (repricedAtLineMarkup): the tier seed
    * would show a sell price the save then does not write, off by exactly
-   * however far the system margin slider has since been dragged — and the Sell
+   * however far the system markup slider has since been dragged — and the Sell
    * stat is the one number in the form Jeff reads to decide whether to accept
    * the vendor's new total.
    */
-  const vendorFormMargin = (() => {
-    const seed = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
+  const vendorFormMarkup = (() => {
+    const seed = seedMarkupOf(tierMargin);
     if (!vendorEditingRec) return seed;
     const line = sections
       .flatMap((s) => s.items)
       .find((it) => it.vendorQuoteId === vendorDraft.id);
-    const m = line ? lineMarginOf(line.cost, line.price) : null;
-    return m != null ? m : seed;
+    const k = line ? lineMarkupOf(line.cost, line.price) : null;
+    return k != null ? k : seed;
   })();
 
   return {
@@ -3780,7 +3778,7 @@ export function useEstimatorState(props: EstimatorProps) {
     setItemSpecKey,
     setLabor,
     setLibraryOpen,
-    setMarginAll,
+    setMarkupAll,
     setMob,
     setMobNameSelect,
     setMoveNotice,
@@ -3798,7 +3796,7 @@ export function useEstimatorState(props: EstimatorProps) {
     setQdOpen,
     setQty,
     setSystemGroup,
-    setSystemMargin,
+    setSystemMarkup,
     setSystemPresentation,
     setSystemRoom,
     setSystemSell,
@@ -3849,7 +3847,7 @@ export function useEstimatorState(props: EstimatorProps) {
     vendorDraft,
     vendorEditingRec,
     vendorFor,
-    vendorFormMargin,
+    vendorFormMarkup,
     vendorPreviews,
     vendorQuotes,
     vendorSec,

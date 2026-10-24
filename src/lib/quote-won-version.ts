@@ -36,8 +36,8 @@ function stable(v: unknown): string {
     .join(",")}}`;
 }
 
-export function wonContentKey(x: Partial<WonContent>): string {
-  return stable({
+function wonContent(x: Partial<WonContent>): Record<string, unknown> {
+  return {
     name: x.name ?? "",
     value: typeof x.value === "number" ? Math.round(x.value) : 0,
     margin: x.margin ?? null,
@@ -49,11 +49,42 @@ export function wonContentKey(x: Partial<WonContent>): string {
     inspection: x.inspection ?? null,
     consulting: x.consulting ?? null,
     rental: x.rental ?? null,
-  });
+  };
+}
+
+export function wonContentKey(x: Partial<WonContent>): string {
+  return stable(wonContent(x));
+}
+
+/** #367: a markup is recomputed (k = m ÷ (1 − m), engine back-solves), so a 1-ulp difference must not count. */
+const MARKUP_EPS = 1e-9;
+const isMarkupKey = (k: string | undefined) => !!k && /margin$/i.test(k);
+
+/** Deep equality with `stable`'s rules (key order ignored, undefined = absent / null), except that a number under
+ *  a `…margin` key (margin, tierMargin, partsMargin — markups since #367) compares within MARKUP_EPS. */
+function contentEq(a: unknown, b: unknown, key?: string): boolean {
+  const na = a === undefined ? null : a;
+  const nb = b === undefined ? null : b;
+  if (typeof na === "number" && typeof nb === "number" && isMarkupKey(key)) {
+    return Number.isFinite(na) && Number.isFinite(nb) ? Math.abs(na - nb) <= MARKUP_EPS : stable(na) === stable(nb);
+  }
+  if (na === null || nb === null || typeof na !== "object" || typeof nb !== "object") return stable(na) === stable(nb);
+  if (Array.isArray(na) !== Array.isArray(nb)) return false;
+  if (Array.isArray(na)) {
+    const bb = nb as unknown[];
+    return na.length === bb.length && na.every((v, i) => contentEq(v, bb[i]));
+  }
+  const oa = na as Record<string, unknown>, ob = nb as Record<string, unknown>;
+  const keys = new Set([...Object.keys(oa).filter((k) => oa[k] !== undefined), ...Object.keys(ob).filter((k) => ob[k] !== undefined)]);
+  for (const k of keys) {
+    if (!(k in oa) || oa[k] === undefined || !(k in ob) || ob[k] === undefined) return false;
+    if (!contentEq(oa[k], ob[k], k)) return false;
+  }
+  return true;
 }
 
 export function sameWonContent(a: Partial<WonContent>, b: Partial<WonContent>): boolean {
-  return wonContentKey(a) === wonContentKey(b);
+  return contentEq(wonContent(a), wonContent(b));
 }
 
 /** The revision `Quote.wonRev` names, or null (never won, or a pointer to nothing). */

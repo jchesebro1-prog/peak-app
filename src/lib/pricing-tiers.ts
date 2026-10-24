@@ -19,29 +19,29 @@ import {
  *   1. the quote's designated contact's tier (the "attn" contact),
  *   2. else that company's tier,
  *   3. else Base.
- * The resolved margin SEEDS pricing (estimators can override per quote) and
+ * The resolved markup SEEDS pricing (estimators can override per quote) and
  * is stamped onto the quote at creation so history is stable; each revision
  * re-stamps at cut time (item 24 / B). Never shown to customers (E).
  *
- * Margins are admin-editable in /estimating-rules → "Customer tiers";
- * defaults: base 30 · copper 27 · silver 22 · gold 20 · platinum 15 ·
- * reseller 10 · employee 5 (percent, margin-on-price: sell = cost ÷ (1−m)).
+ * Markups are admin-editable in /estimating-rules → "Customer tiers";
+ * defaults: base 43 · copper 37 · silver 28 · gold 25 · platinum 18 ·
+ * reseller 11 · employee 5 (percent, markup on cost: sell = cost × (1 + k)).
  */
 
 const TIER_DEFAULTS: Record<PricingTier, number> = {
-  base: 0.3,
-  copper: 0.27,
-  silver: 0.22,
-  gold: 0.2,
-  platinum: 0.15,
-  reseller: 0.1,
+  base: 0.43,
+  copper: 0.37,
+  silver: 0.28,
+  gold: 0.25,
+  platinum: 0.18,
+  reseller: 0.11,
   employee: 0.05,
 };
 
 export type ResolvedTier = {
   tier: PricingTier;
-  /** Margin-on-price fraction (0.30 = 30%). */
-  margin: number;
+  /** Markup fraction (0.43 = 43 %), #367. */
+  markup: number;
   /** Where the tier came from — for tooltips/audit, never customer-facing. */
   source: "contact" | "company" | "default";
 };
@@ -52,13 +52,13 @@ function asTier(v: string | null | undefined): PricingTier | null {
     : null;
 }
 
-/** The registry margin for a tier (admin-edited value, else the default). */
-export async function tierMargin(tier: PricingTier): Promise<number> {
+/** The registry markup for a tier (admin-edited value, else the default). */
+export async function tierMarkup(tier: PricingTier): Promise<number> {
   return frac(`tiers.${tier}`, TIER_DEFAULTS[tier]);
 }
 
 /**
- * Resolve the tier + margin for a quote context. `contactName` is the
+ * Resolve the tier + markup for a quote context. `contactName` is the
  * quote's attn contact (display name — the only contact key quote docs
  * carry); matched against the company's people.
  */
@@ -72,52 +72,52 @@ export async function resolveTier(
       const people = await contactsForCompany(companyId);
       const person = people.find((p) => displayName(p) === wanted);
       const t = asTier(person?.pricingTier);
-      if (t) return { tier: t, margin: await tierMargin(t), source: "contact" };
+      if (t) return { tier: t, markup: await tierMarkup(t), source: "contact" };
     }
     const co = await getCompany(companyId);
     const t = asTier(co?.pricingTier);
-    if (t) return { tier: t, margin: await tierMargin(t), source: "company" };
+    if (t) return { tier: t, markup: await tierMarkup(t), source: "company" };
   }
   return {
     tier: DEFAULT_PRICING_TIER,
-    margin: await tierMargin(DEFAULT_PRICING_TIER),
+    markup: await tierMarkup(DEFAULT_PRICING_TIER),
     source: "default",
   };
 }
 
 /**
- * Margin map for a set of companies (company-or-default resolution only —
- * used to seed builder margin knobs when a customer is picked client-side,
+ * Markup map for a set of companies (company-or-default resolution only —
+ * used to seed builder markup knobs when a customer is picked client-side,
  * before any contact is designated).
  */
-export async function tierMarginByCompany(
+export async function tierMarkupByCompany(
   companyIds: string[]
 ): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   for (const id of companyIds) {
     const r = await resolveTier(id);
-    out[id] = r.margin;
+    out[id] = r.markup;
   }
   return out;
 }
 
 /**
- * The margin a service quote actually prices/stamps at: an untiered customer
+ * The markup a service quote actually prices/stamps at: an untiered customer
  * (`resolveTier`'s `source === "default"`) uses the SERVICE'S OWN default
- * margin (`serviceDefault` — the service's Estimating Rules `baseRates.margin`,
- * the same value the builder's margin knob seeds from, src/lib/tier-seed.ts
- * `seedFor`), never tier Base's registry margin — the two agree today only
- * because every service default happens to be 0.30 (#254 follow-up; D457).
+ * markup (`serviceDefault` — the service's Estimating Rules `baseRates.margin`,
+ * the same value the builder's markup knob seeds from, src/lib/tier-seed.ts
+ * `seedFor`), never tier Base's registry markup — the two agree today only
+ * because every service default happens to be 43 % (0.30 margin before #367; #254 follow-up; D457).
  * A resolved contact/company tier is unchanged.
  */
-export function serviceMarginFor(tier: ResolvedTier, serviceDefault: number): number {
-  return tier.source === "default" ? serviceDefault : tier.margin;
+export function serviceMarkupFor(tier: ResolvedTier, serviceDefault: number): number {
+  return tier.source === "default" ? serviceDefault : tier.markup;
 }
 
 export type BuilderTier = {
-  /** Company-level margin (company tier, else Base). */
-  margin: number;
-  /** Personal margins for contacts that carry their OWN tier, by display name. */
+  /** Company-level markup (company tier, else Base). */
+  markup: number;
+  /** Personal markups for contacts that carry their OWN tier, by display name. */
   byContact: Record<string, number>;
   /** The company's OWN tier (null = none set → the builder's own default, #254). */
   tier: PricingTier | null;
@@ -127,7 +127,7 @@ export type BuilderTier = {
 
 /**
  * Tier info for the service-quote builders (flame/repair/inspection): the
- * customer picker seeds the margin knob from these when a customer is
+ * customer picker seeds the markup knob from these when a customer is
  * chosen — contact's own tier first, else the company's, else Base.
  */
 export async function builderTiers(
@@ -148,15 +148,15 @@ export async function builderTiers(
     contactsForCompanies(companyIds),
   ]);
 
-  const marginCache = new Map<PricingTier, number>();
-  const marginFor = async (tier: PricingTier): Promise<number> => {
-    const hit = marginCache.get(tier);
+  const markupCache = new Map<PricingTier, number>();
+  const markupFor = async (tier: PricingTier): Promise<number> => {
+    const hit = markupCache.get(tier);
     if (hit != null) return hit;
-    const m = await tierMargin(tier);
-    marginCache.set(tier, m);
-    return m;
+    const k = await tierMarkup(tier);
+    markupCache.set(tier, k);
+    return k;
   };
-  const defaultMargin = await marginFor(DEFAULT_PRICING_TIER);
+  const defaultMarkup = await markupFor(DEFAULT_PRICING_TIER);
 
   for (const id of companyIds) {
     const companyTier = asTier(companies.get(id)?.pricingTier);
@@ -165,12 +165,12 @@ export async function builderTiers(
     for (const p of contactsByCompany.get(id) || []) {
       const t = asTier(p.pricingTier);
       if (t) {
-        byContact[displayName(p)] = await marginFor(t);
+        byContact[displayName(p)] = await markupFor(t);
         byContactTier[displayName(p)] = t;
       }
     }
     out[id] = {
-      margin: companyTier ? await marginFor(companyTier) : defaultMargin,
+      markup: companyTier ? await markupFor(companyTier) : defaultMarkup,
       byContact,
       tier: companyTier,
       byContactTier,

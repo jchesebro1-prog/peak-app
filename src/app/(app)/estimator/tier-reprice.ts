@@ -1,13 +1,14 @@
-import { syncLaborDraftMargins } from "./labor-group";
+import { syncLaborDraftMarkups } from "./labor-group";
 import { round2 } from "./pricing";
 import type { SpecItem, SpecSection } from "./types";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { normalCostOf } from "@/lib/project-discounts/rules";
+import { DEFAULT_MARKUP, MARKUP_MAX, legacyTwinOf, sameWholeMarkup, sellAt } from "@/lib/markup";
 
 /**
  * #254 (D87 amended) — a customer/contact change that moves the quote's
  * pricing tier re-prices the lines that are STILL at the previous tier's
- * margin; everything hand-priced is kept.
+ * markup; everything hand-priced is kept (#367: markup on cost).
  *
  * Pure: the Estimator applies the result to its sections state and the
  * normal Save persists it (the server recomputes value, #242). Nothing here
@@ -18,13 +19,13 @@ import { normalCostOf } from "@/lib/project-discounts/rules";
  *   (importMaterials), vendor-quote line (commitVendorQuote), custom
  *   allowance with no typed sell (addCustomPart), curtain (computeCurtain →
  *   curtainPrice), and any of those flagged `option` — all stored as cost +
- *   sell with sell = round2(cost ÷ (1 − m)), m = the tier stamp or the 0.30
- *   fallback. One rule, `seedMarginOf`.
+ *   sell with sell = round2(cost × (1 + k)), k = the tier stamp or the 0.43
+ *   fallback. One rule, `seedMarkupOf`.
  * - labor (addLabor → buildLaborItems) — also stored as cost + sell, but the
- *   margin went through the labor draft's WHOLE-PERCENT field (freshLabor:
- *   String(Math.round(m × 100)); computeLabor clamps to ≤ 95 %), and the
+ *   markup went through the labor draft's WHOLE-PERCENT field (freshLabor:
+ *   String(Math.round(k × 100)); computeLabor clamps to ≤ MARKUP_MAX), and the
  *   modal's single rounded total nudges the LAST line by its rounding drift
- *   (≤ 5¢ per line). So labor is re-seeded at `laborSeedMarginOf` and matched
+ *   (≤ 5¢ per line). So labor is re-seeded at `laborSeedMarkupOf` and matched
  *   within LABOR_REPRICE_TOLERANCE.
  * - track (#274, track-bom.ts) — each part priced as addPart would price
  *   it, the line selling for their sum, which is the seed on the line's cost
@@ -39,76 +40,75 @@ import { normalCostOf } from "@/lib/project-discounts/rules";
  *   hand-priced (#254 review).
  */
 
-/** The client's fallback when no tier margin is stamped (addPart & co). */
-export const TIER_FALLBACK_MARGIN = 0.3;
+/** The client's fallback when no tier markup is stamped (addPart & co). #367: 30 % margin → 43 % markup. */
+export const TIER_FALLBACK_MARKUP = DEFAULT_MARKUP;
 /** A seeded sell matches its seed to the cent (rounding only). */
 export const TIER_REPRICE_TOLERANCE = 0.01;
 /** Labor's last line carries buildLaborItems' rounding-drift nudge (≤ 5¢). */
 export const LABOR_REPRICE_TOLERANCE = 0.05;
 
-/** A stamped tier margin, or null when it isn't one (0 < m < 1). Shared by
- *  Copy system (#266) and Load system (#293 slice 2). */
-export const usableTierMargin = (m: unknown): number | null =>
-  typeof m === "number" && Number.isFinite(m) && m > 0 && m < 1 ? m : null;
+/** A stamped tier markup, or null when it isn't one (0 < k ≤ MARKUP_MAX).
+ *  Shared by Copy system (#266) and Load system (#293 slice 2). */
+export const usableTierMarkup = (k: unknown): number | null =>
+  typeof k === "number" && Number.isFinite(k) && k > 0 && k <= MARKUP_MAX ? k : null;
 
-/** The margin a material line was seeded at — the stamp, else 0.30. */
-export function seedMarginOf(m: number | null | undefined): number {
-  return m != null && Number.isFinite(m) && m > 0 && m < 1 ? m : TIER_FALLBACK_MARGIN;
+/** The markup a material line was seeded at — the stamp, else 0.43. */
+export function seedMarkupOf(k: number | null | undefined): number {
+  return usableTierMarkup(k) ?? TIER_FALLBACK_MARKUP;
 }
 
-/** The margin a labor line was seeded at — freshLabor's whole percent,
- *  clamped the way computeLabor reads it. */
-export function laborSeedMarginOf(m: number | null | undefined): number {
-  return Math.min(0.95, Math.max(0, Math.round(seedMarginOf(m) * 100) / 100));
+/** The markup a labor line was seeded at — freshLabor's whole percent,
+ *  clamped as computeLabor reads it. */
+export function laborSeedMarkupOf(k: number | null | undefined): number {
+  return Math.min(MARKUP_MAX, Math.max(0, Math.round(seedMarkupOf(k) * 100) / 100));
 }
 
-const sellAt = (cost: number, margin: number) => round2(cost / (1 - margin));
+const sellAtR = (cost: number, markup: number) => round2(sellAt(cost, markup));
 
-/** #302 (D635) — the flat margin the Estimator's Custom part form seeds Unit
- *  sell at. Jeff's instruction: a fixed 35 %, NOT the customer's tier
- *  (`seedMarginOf`) that the catalog picker uses. */
-export const CUSTOM_PART_MARGIN = 0.35;
+/** #302 (D635) / #367 — the flat markup the Custom part form seeds Unit sell
+ *  at: 35 % margin → 54 % markup. Jeff's instruction: a fixed rate, NOT the
+ *  customer's tier (`seedMarkupOf`) that the catalog picker uses. */
+export const CUSTOM_PART_MARKUP = 0.54;
 
-/** #302 — a custom part's seeded Unit sell: margin, not markup, so
- *  `round2(cost ÷ 0.65)` ($100 → $153.85). 0 for a cost that isn't a finite
- *  number above zero. */
+/** #302 — a custom part's seeded Unit sell: round2(cost × 1.54) ($100 →
+ *  $154.00). 0 for a cost that isn't a finite number above zero. */
 export function customPartSell(cost: number): number {
-  return Number.isFinite(cost) && cost > 0 ? sellAt(cost, CUSTOM_PART_MARGIN) : 0;
+  return Number.isFinite(cost) && cost > 0 ? sellAtR(cost, CUSTOM_PART_MARKUP) : 0;
 }
 
 /** The unit sell a catalog part gets when it is added from the Estimator's
- *  catalog picker (addPart): its cost at the tier seed (`seedMarginOf` — the
- *  stamp, else 0.30), or its catalog list price when it has no cost. The one
+ *  catalog picker (addPart): its cost at the tier seed (`seedMarkupOf` — the
+ *  stamp, else 0.43), or its catalog list price when it has no cost. The one
  *  rule addPart, the CSV import's catalog hits and the #274 track configurator
  *  (track-bom.ts) all price by. */
-export function catalogAddPrice(cost: number, list: number, m: number | null | undefined): number {
-  return cost > 0 ? sellAt(cost, seedMarginOf(m)) : list;
+export function catalogAddPrice(cost: number, list: number, k: number | null | undefined): number {
+  return cost > 0 ? sellAtR(cost, seedMarkupOf(k)) : list;
 }
 
-/** #274: a track line's parts at stamp `m`'s seed — the line itself is
+/** #274: a track line's parts at stamp `k`'s seed — the line itself is
  *  re-priced like any tier-seeded line; its `components` follow so the parts
  *  table and parts list agree with it. A part with no cost keeps its sell
  *  (it was priced at its list, which isn't tier-dependent). */
 export function reseedTrackComponents(
   comps: NonNullable<SpecItem["components"]>,
-  m: number | null | undefined
+  k: number | null | undefined
 ): NonNullable<SpecItem["components"]> {
   // #366: a part's seed is on its NORMAL cost (a project discount never moves sell).
-  return comps.map((c) => (normalCostOf(c) > 0 ? { ...c, price: catalogAddPrice(normalCostOf(c), c.price, m) } : c));
+  return comps.map((c) => (normalCostOf(c) > 0 ? { ...c, price: catalogAddPrice(normalCostOf(c), c.price, k) } : c));
 }
 
-/** #266 — the margin a line kind seeds at under stamp `m` (labor through its
- *  whole-percent field, every other line through `seedMarginOf`). */
-export function tierSeedMarginFor(it: Pick<SpecItem, "labor">, m: number | null | undefined): number {
-  return it.labor ? laborSeedMarginOf(m) : seedMarginOf(m);
+/** #266 — the markup a line kind seeds at under stamp `k` (labor through its
+ *  whole-percent field, every other line through `seedMarkupOf`). */
+export function tierSeedMarkupFor(it: Pick<SpecItem, "labor">, k: number | null | undefined): number {
+  return it.labor ? laborSeedMarkupOf(k) : seedMarkupOf(k);
 }
 
-/** #266 — the sell a line seeds at on its cost under stamp `m`: the exact
+/** #266 — the sell a line seeds at on its cost under stamp `k`: the exact
  *  price `repriceForTier` writes. #366: on its NORMAL cost — a project
  *  discount lowers our cost, never the seed, so a discounted line still counts
  *  as at the seed and re-prices exactly as it would undiscounted. */
-export function tierSeedPrice(it: Pick<SpecItem, "cost" | "labor" | "catalogCost">, m: number | null | undefined): number {
-  return sellAt(normalCostOf(it), tierSeedMarginFor(it, m));
+export function tierSeedPrice(it: Pick<SpecItem, "cost" | "labor" | "catalogCost">, k: number | null | undefined): number {
+  return sellAtR(normalCostOf(it), tierSeedMarkupFor(it, k));
 }
 
 /** #266 — a line the tier prices at all (not a fixture, ext-sell override,
@@ -122,16 +122,21 @@ export function isTierPriceable(it: Pick<SpecItem, "fixture" | "extSellOverride"
   return it.cost > 0;
 }
 
-/** #266 — the line still sits at stamp `m`'s seed (within the line kind's
- *  tolerance). Callers check `isTierPriceable` first. */
-export function isAtTierSeed(it: Pick<SpecItem, "cost" | "price" | "labor" | "catalogCost">, m: number | null | undefined): boolean {
+/** #266 — the line still sits at stamp `k`'s seed (within the line kind's
+ *  tolerance), or at that seed's exact legacy twin (#367). Callers check
+ *  `isTierPriceable` first. */
+export function isAtTierSeed(it: Pick<SpecItem, "cost" | "price" | "labor" | "catalogCost">, k: number | null | undefined): boolean {
   const tol = it.labor ? LABOR_REPRICE_TOLERANCE : TIER_REPRICE_TOLERANCE;
-  return Math.abs(it.price - tierSeedPrice(it, m)) <= tol + 1e-9;
+  const at = (price: number) => Math.abs(it.price - price) <= tol + 1e-9;
+  if (at(tierSeedPrice(it, k))) return true;
+  // #367: a line priced before the switch sits at the exact legacy markup a rounded stamp came from.
+  const twin = legacyTwinOf(tierSeedMarkupFor(it, k));
+  return twin != null && at(sellAtR(normalCostOf(it), twin));
 }
 
 export type TierRepriceResult = {
   /** The same array (by reference) when nothing was re-priced and no stored
-   *  labor draft's margin moved (#269). */
+   *  labor draft's markup moved (#269). */
   sections: SpecSection[];
   repriced: number;
   /** Lines someone priced by hand (an ext-sell override, or a sell off the
@@ -150,14 +155,14 @@ function classify(it: SpecItem, prev: number | null, next: number): Verdict {
   if (it.extSellOverride != null && Number.isFinite(it.extSellOverride)) return { kind: "hand" };
   if (it.por) return { kind: "untouched" };
   if (!(it.cost > 0)) return { kind: "untouched" };
-  if (it.labor && laborSeedMarginOf(prev) === laborSeedMarginOf(next)) return { kind: "skip" };
+  if (it.labor && laborSeedMarkupOf(prev) === laborSeedMarkupOf(next)) return { kind: "skip" };
   return isAtTierSeed(it, prev) ? { kind: "reprice", price: tierSeedPrice(it, next) } : { kind: "hand" };
 }
 
 /**
  * Re-price every tier-seeded line from `prev` (the stamp in effect; null →
- * the 0.30 fallback) to `next` (the new stamp). Identical margins, or a
- * `next` that isn't a usable margin, change nothing.
+ * the 0.43 fallback) to `next` (the new stamp). Identical markups, or a
+ * `next` that isn't a usable markup, change nothing.
  */
 export function repriceForTier(
   sections: SpecSection[],
@@ -165,16 +170,17 @@ export function repriceForTier(
   next: number | null | undefined
 ): TierRepriceResult {
   const nothing = { sections, repriced: 0, handPriced: 0, untouched: 0 };
-  if (next == null || !Number.isFinite(next) || !(next > 0 && next < 1)) return nothing;
-  const prevM = prev != null && Number.isFinite(prev) && prev > 0 && prev < 1 ? prev : null;
-  if (seedMarginOf(prevM) === next) return nothing;
+  const nextK = usableTierMarkup(next);
+  if (nextK == null) return nothing;
+  const prevM = usableTierMarkup(prev);
+  if (sameWholeMarkup(seedMarkupOf(prevM), nextK)) return nothing;
   let repriced = 0;
   let handPriced = 0;
   let untouched = 0;
   const out = sections.map((sec) => {
     let changed = false;
     const items = sec.items.map((it) => {
-      const v = classify(it, prevM, next);
+      const v = classify(it, prevM, nextK);
       if (v.kind === "hand") handPriced++;
       if (v.kind === "untouched") untouched++;
       if (v.kind !== "reprice") return it;
@@ -182,13 +188,13 @@ export function repriceForTier(
       if (v.price === it.price) return it;
       changed = true;
       // #274: a track line's parts follow the line to the new seed.
-      if (it.track && Array.isArray(it.components)) return { ...it, price: v.price, components: reseedTrackComponents(it.components, next) };
+      if (it.track && Array.isArray(it.components)) return { ...it, price: v.price, components: reseedTrackComponents(it.components, nextK) };
       return { ...it, price: v.price };
     });
     const base = changed ? { ...sec, items } : sec;
     // #269: a stored labor draft still at the previous labor seed follows to
     // the new one even when every line of its group was kept hand-priced.
-    return syncLaborDraftMargins(base, laborSeedMarginOf(prevM), laborSeedMarginOf(next));
+    return syncLaborDraftMarkups(base, laborSeedMarkupOf(prevM), laborSeedMarkupOf(nextK));
   });
   // A draft-only change (nothing re-priced) must still land.
   const draftsMoved = out.some((sec, i) => sec !== sections[i]);
@@ -203,10 +209,10 @@ export function tierRepriceMessage(
   repriced: number,
   handPriced: number,
   tierLabel: string,
-  margin: number,
+  markup: number,
   unsaved = false
 ): string {
-  const pct = Math.round(margin * 1000) / 10;
+  const pct = Math.round(markup * 1000) / 10;
   const lines = (n: number) => n + (n === 1 ? " line" : " lines");
   let msg = "Re-priced " + lines(repriced) + " to " + tierLabel + " (" + pct + "%)";
   if (handPriced > 0) msg += " · kept " + handPriced + " hand-priced " + (handPriced === 1 ? "line" : "lines");

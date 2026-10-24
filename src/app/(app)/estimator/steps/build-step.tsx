@@ -37,7 +37,7 @@ import { boxSaleLaborBanner } from "@/lib/estimate-box-sale/rules";
 import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 
 /**
- * #305 — Build: the systems sidebar (margin, cost breakdown, Rewards credit),
+ * #305 — Build: the systems sidebar (markup, cost breakdown, Rewards credit),
  * the system cards and every configurator modal. A card's narrative snippet
  * opens the Build package step (onOpenNarrative), where the narrative lives.
  */
@@ -176,12 +176,12 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     setItemPrice,
     setLabor,
     setLibraryOpen,
-    setMarginAll,
+    setMarkupAll,
     setMob,
     setMobNameSelect,
     setNarrFocusReq,
     setQty,
-    setSystemMargin,
+    setSystemMarkup,
     setSystemRoom,
     setSystemSell,
     setTrackDraft,
@@ -210,7 +210,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     vendorDraft,
     vendorEditingRec,
     vendorFor,
-    vendorFormMargin,
+    vendorFormMarkup,
     vendorHandoff,
     vendorPdf,
     vendorPdfEnabled,
@@ -334,7 +334,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     textTransform: "uppercase",
                   }}
                 >
-                  Margin · all systems
+                  Markup · all systems
                 </span>
                 <span
                   style={{
@@ -344,15 +344,15 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     color: ACCENT_INK,
                   }}
                 >
-                  {Math.round(t.margin * 100)}%
+                  {Math.round(t.markup * 100)}%
                 </span>
               </div>
               <input
                 type="range"
                 min={0}
-                max={55}
-                value={Math.round(t.margin * 100)}
-                onChange={(e) => setMarginAll(e.target.value)}
+                max={125}
+                value={Math.round(t.markup * 100)}
+                onChange={(e) => setMarkupAll(e.target.value)}
                 style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }}
               />
               <div
@@ -601,7 +601,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     onOpenPresentation={onOpenPresentation}
                     onSetDiscipline={(value) => updateSection(sec.id, (s) => withDiscipline(s, value))}
                     onDelete={() => deleteSystem(sec.id)}
-                    onSetMargin={(v) => setSystemMargin(sec.id, v)}
+                    onSetMarkup={(v) => setSystemMarkup(sec.id, v)}
                     onSetSell={(v) => setSystemSell(sec.id, v)}
                     onResetSell={() => resetSystemSell(sec.id)}
                     onRoundPrice={() => roundSystemPrice(sec.id)}
@@ -860,7 +860,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           secName={vendorSec ? vendorSec.name : ""}
           draft={vendorDraft}
           vendors={vendors}
-          margin={vendorFormMargin}
+          markup={vendorFormMarkup}
           blobUploads={blobUploads}
           /* Lets the form reach the download proxy for a file that is
              already stored (#144 re-review): on an edit the object-URL that

@@ -238,27 +238,27 @@ export type AutoEquipHit = { kind: "part" | "assembly"; ref: string; desc: strin
  * still findable, and nothing here is ever an assembly (a curtain row maps to
  * a fabric part, never a System). The area
  * rate is a COST basis, so it is shown as a per-sq-ft SELL through the
- * catalog margin (the same list-less rule the Equipment map prices a fabric
+ * catalog markup (the same list-less rule the Equipment map prices a fabric
  * row with) — the client never sees the raw cost rate.
  */
 export function curtainSwapHits(
   parts: ReadonlyArray<{ sku: string; desc: string; curtainAreaRate?: number; costPerSqft?: number; unit?: string; cost?: number }>,
-  margin: number
+  markup: number
 ): AutoEquipHit[] {
   return parts.flatMap((p): AutoEquipHit[] => {
     const rate = fabricAreaRateOf(p);
-    return rate > 0 ? [{ kind: "part", ref: p.sku, desc: p.desc, unit: FABRIC_RATE_UNIT, unitSell: sellFromCost(rate, margin) }] : [];
+    return rate > 0 ? [{ kind: "part", ref: p.sku, desc: p.desc, unit: FABRIC_RATE_UNIT, unitSell: sellFromCost(rate, markup) }] : [];
   });
 }
 
 /** A non-curtain row's part candidates: priced (a cost or a list), sell-only. */
 export function partSwapHits(
   hits: ReadonlyArray<{ sku: string; desc: string; unit: string; cost: number; list: number }>,
-  margin: number
+  markup: number
 ): AutoEquipHit[] {
   return hits
     .filter((h) => h.cost > 0 || h.list > 0)
-    .map((h) => ({ kind: "part", ref: h.sku, desc: h.desc, unit: h.unit, unitSell: h.list > 0 ? h.list : sellFromCost(h.cost, margin) }));
+    .map((h) => ({ kind: "part", ref: h.sku, desc: h.desc, unit: h.unit, unitSell: h.list > 0 ? h.list : sellFromCost(h.cost, markup) }));
 }
 
 /**

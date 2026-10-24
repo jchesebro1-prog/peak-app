@@ -793,7 +793,7 @@ Echo). Audio/video wait for their turn (D113: ETC lighting + rigging
 first). A part is **Grid-ready** when `symbol` is set; **submittal-ready**
 when `datasheet_url` is too.
 
-## 11. ETC dealer prices (#368, D1286–D1291)
+## 11. ETC dealer prices (#368, D1298–D1303)
 
 1. In MyETC, a business-account admin creates an API key and copies its secret.
 2. In Quartzite: **Catalog → Import price book → Connect a manufacturer**. Paste the secret, **Save**. It tests itself; pick Peak's ETC account if asked.

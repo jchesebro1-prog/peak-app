@@ -278,10 +278,10 @@ export default async function GridEditorPage({
 
   /**
    * Curtain drop-in (punch #49): the fabric list with its sell price/sq ft for
-   * the editor's live price preview. These are SELL numbers only - the margin
+   * the editor's live price preview. These are SELL numbers only - the markup
    * and the cost basis stay on the server (lib/design/curtain-pricing is never
    * imported by the editor). The preview matches the quote to the cent because
-   * both run the same flat $/sq ft model (#227) at the same tier margin, with
+   * both run the same flat $/sq ft model (#227) at the same tier markup, with
    * the sewing adder (#227 late) folded into the sell rate.
    */
   // #254: company + the design's contact — the tier buildGridQuote stamps.
@@ -291,15 +291,15 @@ export default async function GridEditorPage({
     .map((p) => ({
       sku: p.id,
       name: p.desc,
-      pricePerSqft: fabricSellPerSqft({ fabricRate: fabricAreaRateOf(p), sewingPct }, tier.margin),
+      pricePerSqft: fabricSellPerSqft({ fabricRate: fabricAreaRateOf(p), sewingPct }, tier.markup),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
   // #212: the active option's custom items, sell-priced at this customer's
-  // tier margin exactly as buildGridQuote prices them. Sell numbers only —
-  // the margin stays on the server (the curtain rule above).
+  // tier markup exactly as buildGridQuote prices them. Sell numbers only —
+  // the markup stays on the server (the curtain rule above).
   const customLines = customItemBomLines(
     customItemsOf(project.options?.find((o) => o.id === activeOptionId)?.customItems),
-    tier.margin
+    tier.markup
   );
   // #232: the active option's labor lines, computed by the quote builder
   // itself over this request's reads — grouped by the same `parts` rows the

@@ -163,8 +163,9 @@ export function repriceForRevise(
   const ctx = { source: q.source, quoteType: q.quoteType, status: "draft" };
   const discounts = sanitizeProjectDiscounts(spec?.projectDiscounts);
   const after = deriveEstimatorSections(ctx, r.sections, discounts, bonusRates);
-  const priced = reconcileEstimatorValue(after, { value: null, margin: null });
-  return { sections: after, value: priced.value, margin: priced.margin, count: r.count, lines: r.lines, typedSystems: r.typedSystems };
+  const priced = reconcileEstimatorValue(after, { value: null, markup: null });
+  // #367: the stored `margin` field holds markup (as the save writes it).
+  return { sections: after, value: priced.value, margin: priced.markup, count: r.count, lines: r.lines, typedSystems: r.typedSystems };
 }
 
 /** True when `after` carries a re-price this transition made (a new stamp) — the open Estimator must reload. */

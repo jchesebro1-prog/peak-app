@@ -41,13 +41,13 @@ export const BACKWARD_RENDERERS = {
     const { start, end, priorStart } = periodBounds(ctx.range, ctx.now);
     const cur = salesMetrics(quotes, start, end);
     const prior = salesMetrics(quotes, priorStart, start);
-    const pt = Math.round((cur.avgMargin - prior.avgMargin) * 100);
-    return tile("Avg. margin", `${Math.round(cur.avgMargin * 100)}%`, `${pt >= 0 ? "+" : ""}${pt}pt vs. prior · quotes created`);
+    const pt = Math.round((cur.avgMarkup - prior.avgMarkup) * 100);
+    return tile("Avg. markup", `${Math.round(cur.avgMarkup * 100)}%`, `${pt >= 0 ? "+" : ""}${pt}pt vs. prior · quotes created`);
   },
 
   "projected-profit": async (ctx) => {
     const pp = projectedProfit(await ctx.data.projects());
-    const sub = `${Math.round(pp.margin * 100)}% of ${money(pp.value)} open book` + (pp.unknownCount ? ` · ${pp.unknownCount} with unknown value` : "");
+    const sub = `${Math.round(pp.markup * 100)}% of ${money(pp.value)} open book` + (pp.unknownCount ? ` · ${pp.unknownCount} with unknown value` : "");
     return tile("Projected profit", money(pp.profit), sub, "green");
   },
 

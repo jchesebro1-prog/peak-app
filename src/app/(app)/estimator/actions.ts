@@ -56,7 +56,8 @@ import type { PackageDoc } from "@/lib/package-doc/types";
 import { docIdFloor } from "@/lib/package-doc/ids";
 import { reIdIncomingSection } from "@/lib/estimate-line-move/reid";
 import { copyPricingFor } from "./copy-pricing";
-import { seedMarginOf, usableTierMargin } from "./tier-reprice";
+import { seedMarkupOf, usableTierMarkup } from "./tier-reprice";
+import { sameWholeMarkup } from "@/lib/markup";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
@@ -177,7 +178,8 @@ export type SavePayload = {
   /** User-named quote category (#110); "" clears it. */
   category: string;
   value: number;
-  margin: number;
+  /** totals().markup (#367) — stored on the quote as `margin`. */
+  markup: number;
   status: QuoteStatus;
   /** #180 review — the status this tab last received FROM THE SERVER (a
    *  page load, or a prior save/status-change response), never touched by
@@ -545,7 +547,7 @@ export async function saveQuoteAction(
   // is the server's own totals() over the posted sections — a posted value
   // that disagrees beyond rounding is replaced, never trusted. (#267: it
   // sanitizes each section's system sell itself, same rule as above.)
-  const priced = reconcileEstimatorValue(postedSections, { value: payload.value, margin: payload.margin });
+  const priced = reconcileEstimatorValue(postedSections, { value: payload.value, markup: payload.markup });
   if (priced.adjusted) {
     console.warn("[estimator] saveQuoteAction: posted value", payload.value, "≠ recomputed", priced.value, "— stored the recomputed value");
   }
@@ -572,9 +574,9 @@ export async function saveQuoteAction(
     paymentTerms: payload.paymentTerms,
     category: (payload.category || "").trim(),
     value: priced.value,
-    margin: priced.margin,
+    margin: priced.markup,
     pricingTier: tier.tier,
-    tierMargin: tier.margin,
+    tierMargin: tier.markup,
     source: savedSource,
     // #366: projectDiscounts only when the estimate has any — an estimate without one stores exactly as before.
     spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}), ...(Object.keys(discounts).length ? { projectDiscounts: discounts } : {}) },
@@ -1050,7 +1052,7 @@ async function placeSystemInEstimate(
       // #366: the target keeps its own project discounts.
       spec: { sections: normalizeSystemOrder(mergedSections, existingGroups), mobs: existingSpec?.mobs || [], groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}), ...(Object.keys(targetDiscounts).length ? { projectDiscounts: targetDiscounts } : {}) },
       value: t.grand,
-      margin: t.margin,
+      margin: t.markup,
       ...(carried.length
         ? {
             vendorQuotes: [
@@ -1117,7 +1119,7 @@ async function placeSystemInEstimate(
       status: "draft",
       spec: { sections: newSpecSections, mobs: [], ...(Object.keys(carriedDiscounts).length ? { projectDiscounts: carriedDiscounts } : {}) },
       value: t.grand,
-      margin: t.margin,
+      margin: t.markup,
       owner: opts.owner,
       ...(opts.tier ? { pricingTier: opts.tier.pricingTier, tierMargin: opts.tier.tierMargin } : {}),
       // Box goods sale (spec 2026-10-21): Move / Copy → New estimate copies the STORED source's flag (an unsaved
@@ -1189,7 +1191,7 @@ export type CopySystemResult =
  * estimate ("same"). The source is never touched. The copy is RE-PRICED for
  * where it lands (copy-system.ts): catalog parts and fixture components take
  * today's catalog cost, then lines still at the source tier's seed move to
- * the DESTINATION customer's tier; hand-priced lines keep their own margin
+ * the DESTINATION customer's tier; hand-priced lines keep their own markup
  * on the new cost; custom, curtain, allowance, vendor-quote, labor and POR
  * lines keep their cost.
  *
@@ -1236,31 +1238,31 @@ export async function copySystemToEstimateAction(
   const { catalog, fixtures, renames } = await copyPricingFor(items);
 
   /* The destination tier. */
-  const sourceTier = usableTierMargin(sourceContext?.tierMargin);
+  const sourceTier = usableTierMarkup(sourceContext?.tierMargin);
   let targetTier: number | null = sourceTier;
   let targetTierKey: string | null = null;
   let stamp: { pricingTier: string; tierMargin: number } | undefined;
   if (target.kind === "new") {
     const r = await resolveTier(sourceContext.customerId || null, sourceContext.contactName || "");
-    targetTier = r.margin;
+    targetTier = r.markup;
     targetTierKey = r.tier;
-    stamp = { pricingTier: r.tier, tierMargin: r.margin };
+    stamp = { pricingTier: r.tier, tierMargin: r.markup };
   } else if (target.kind === "existing") {
     const existing = await get(target.quoteId);
     if (!existing) return { ok: false, error: "That estimate could not be found." };
     // #368: refused before any re-pricing work (placeSystemInEstimate refuses it again under its own read).
     if (repriceLocked(existing.status)) return { ok: false, error: REVISE_FIRST };
-    const stored = usableTierMargin(existing.tierMargin);
+    const stored = usableTierMarkup(existing.tierMargin);
     if (stored != null) {
       targetTier = stored;
       targetTierKey = existing.pricingTier || null;
     } else {
       const r = await resolveTier(existing.customerId || null, existing.contactName || "");
-      targetTier = r.margin;
+      targetTier = r.markup;
       targetTierKey = r.tier;
     }
   }
-  const tierMoved = usableTierMargin(targetTier) != null && seedMarginOf(sourceTier) !== seedMarginOf(targetTier);
+  const tierMoved = usableTierMarkup(targetTier) != null && !sameWholeMarkup(seedMarkupOf(sourceTier), seedMarkupOf(targetTier));
   const tierLabel =
     tierMoved && targetTierKey
       ? (PRICING_TIER_LABEL as Record<string, string>)[targetTierKey] || targetTierKey
@@ -1448,7 +1450,7 @@ export async function resolveTierAction(
   try {
     const { resolveTier } = await import("@/lib/pricing-tiers");
     const r = await resolveTier(typeof customerId === "string" && customerId ? customerId : null, typeof contactName === "string" ? contactName : "");
-    return { ok: true, pricingTier: r.tier, tierMargin: r.margin, label: PRICING_TIER_LABEL[r.tier] || r.tier };
+    return { ok: true, pricingTier: r.tier, tierMargin: r.markup, label: PRICING_TIER_LABEL[r.tier] || r.tier };
   } catch (e) {
     console.error("[estimator] resolveTierAction failed:", e);
     return { ok: false };

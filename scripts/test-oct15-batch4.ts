@@ -9,6 +9,7 @@ import { effectivePriceDate, priceBooks } from "../src/lib/catalog-books";
 import { pricesAsOf } from "../src/lib/fixture-assemblies";
 import { catalogEffectiveAtFor } from "../src/lib/vendor-status";
 import { unitPriceFor } from "../src/lib/portal-price-rules";
+import { marginToMarkup as mk } from "../src/lib/markup";
 
 const ROOT = join(__dirname, "..");
 const src = (p: string) => readFileSync(join(ROOT, p), "utf8");
@@ -40,7 +41,7 @@ function priceDateChecks(ok: Ok) {
   ok(!imp.includes("setPriceListEffective"), "#32: the Catalog page importer no longer re-dates the manufacturer's book");
   ok(/priced && \(\(parsed\.hasList && r\.list > 0\) \|\| \(parsed\.hasCost && r\.cost > 0\)\) \? \{ priceDate: input\.effectiveAt \}/.test(imp), "#32: …it stamps priceDate on each row of a priced file that carries a price");
   // #354 review M6: the portal's stale-cost rule reads the part's own latest date, so a re-confirmed price un-stales.
-  const stale = { margin: 0.3, staleCostMonths: 12, now };
+  const stale = { markup: mk(0.3), staleCostMonths: 12, now };
   const oldPart = { mfr: "Acme", cost: 10, list: 20, pricedAt: now - 400 * DAY };
   ok(unitPriceFor({ ...oldPart, pricedAt: effectivePriceDate(oldPart) }, stale).porReason === "stale-cost" &&
      !unitPriceFor({ ...oldPart, pricedAt: effectivePriceDate({ ...oldPart, priceDate: fresh }) }, stale).por,

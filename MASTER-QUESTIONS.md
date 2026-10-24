@@ -55,8 +55,8 @@ Peak-review by line, with images/datasheets in a part sidebar.
 - **S7.** Is `Blank V.01.xlsx` the real template your data fits? (= **I2**)
 - **S8.** History depth — default: active + last 3 years compliance. (= **I3**)
 - **S9.** Real pricing numbers, or bless the defaults (Settings → Estimating
-  Rules is live-editable): flame mileage/labor/base/margin, repairs call-out/
-  parts margin/emergency multiplier, catalog price book. (= **E1–E5**)
+  Rules is live-editable): flame mileage/labor/base/markup, repairs call-out/
+  parts markup/emergency multiplier, catalog price book. (= **E1–E5**)
 - **S10.** Real roster (names, sign-in emails, roles) — and are the
   `@peaksystemsgroup.com` addresses Google Workspace accounts? (= **B4/B5**)
 - **S11.** Logo files → Settings → Branding uploads (light + dark). (= **G1**)
@@ -194,10 +194,10 @@ Estimating Rules — these just need real values before go-live)
 
 - **E1.** Flame test: mileage $/mi ✦ 0.70 ☐ ____ · labor $/hr ✦ 30 ☐ ____ ·
   minutes per curtain ✦ per prototype ☐ ____ · bundled-venue base fee
-  ✦ $150 ☐ ____ · margin ✦ 30% ☐ ____
+  ✦ $150 ☐ ____ · markup ✦ 43% ☐ ____ *(was 30% margin; #367)*
 - **E2.** Travel time billed at labor rate? ✦ yes, round-trip, rounded to
   15 min ☐ other: ______
-- **E3.** Repairs: min call-out ✦ prototype value ☐ ____ · parts margin
+- **E3.** Repairs: min call-out ✦ prototype value ☐ ____ · parts markup
   ✦ prototype ☐ ____ · emergency multiplier ✦ prototype ☐ ____
 - **E4.** Catalog prices/costs: demo numbers stand until you import real
   ones (Import → Catalog). ☐ real price book file exists: ______
@@ -291,7 +291,7 @@ Estimating Rules — these just need real values before go-live)
   ☐ 3b dossier ☐ 3c compact.
 - **F13.** *(Jul 12)* **Inspection pricing defaults are placeholders** —
   $95/hr labor, 15 min per line set, 2 base hrs per visit, ×1.75 for a
-  Level 2, $650 job minimum, 30-pt margin. All editable in Estimating
+  Level 2, $650 job minimum, 43 % markup (was 30-pt margin; #367). All editable in Estimating
   Rules → "Inspection pricing" (changes reprice live). ☐ real numbers:
   ______
 - ~~**F14.** *(Jul 12)* A multi-venue inspection quote spawns **one requested

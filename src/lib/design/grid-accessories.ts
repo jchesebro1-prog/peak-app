@@ -11,7 +11,7 @@
  *
  * Pricing is a placed part's, exactly: an accessory line reads the SAME part
  * row a placement of that partId reads — the editor's `parts` and the quote's
- * tier catalog (cost ÷ (1 − tier margin), the #63/#76 list fallback
+ * tier catalog (cost × (1 + tier markup), the #63/#76 list fallback
  * included). It is a real product line on the quote and the bid spec, never
  * an allowance. A part that has left the library prices $0 and says so
  * (the bomLines rule) — never dropped.
@@ -171,7 +171,7 @@ export function accessoryBomLines(
   });
 }
 
-/** The cost basis the quote's margin is computed from (bomTotals' rule). */
+/** The cost basis the quote's markup is computed from (bomTotals' rule). */
 export function accessoriesCost(
   items: readonly GridAccessory[],
   parts: ReadonlyArray<Pick<PartLite, "id" | "cost">>

@@ -3,7 +3,7 @@ import { isAdjustmentRow, partsRowItemName, partsRowNotes, type ReviewSheetBlock
 
 /** The Estimator's "Review spreadsheet" (#363, Jeff 2026-10-22) — the parts
  *  list as a real .xlsx for reviewing an estimate: every listed part with a
- *  clickable Link, live Ext Cost / Ext Sell / Line margin / Markup formulas
+ *  clickable Link, live Ext Cost / Ext Sell / Markup formulas
  *  on the line's own sell (before freight, rounding and bonuses), and under
  *  each system three bold rows — System cost, System markup and System fees
  *  (freight + both bonuses + the round-up / typed-price adjustment) — that
@@ -23,7 +23,6 @@ export const REVIEW_SHEET_HEADER: string[] = [
   "Unit Sell",
   "Ext Cost",
   "Ext Sell",
-  "Line margin",
   "Markup",
   "Price source",
   "Link",
@@ -41,7 +40,7 @@ const COL = {
 
 const MONEY_FMT = "$#,##0.00";
 const PCT_FMT = "0.0%";
-const WIDTHS = [18, 20, 40, 14, 18, 7, 12, 12, 13, 13, 11, 10, 22, 36, 40];
+const WIDTHS = [18, 20, 40, 14, 18, 7, 12, 12, 13, 13, 10, 22, 36, 40];
 
 /** "$1,234.50" / "-$12.00" — the fees breakdown's money (#363). */
 function money(n: number): string {
@@ -106,17 +105,16 @@ function writeBlocks(ws: Worksheet, blocks: ReviewSheetBlock[]): void {
       if (!isAdjustmentRow(r)) {
         const g = `${COL.unitCost}${n}`;
         const h = `${COL.unitSell}${n}`;
-        row.getCell(11).value = { formula: `IF(${h}=0,"",(${h}-${g})/${h})`, result: r.lineSell === 0 ? "" : (r.lineSell - r.unitCost) / r.lineSell };
-        row.getCell(12).value = { formula: `IF(${g}=0,"",(${h}-${g})/${g})`, result: r.unitCost === 0 ? "" : (r.lineSell - r.unitCost) / r.unitCost };
+        row.getCell(11).value = { formula: `IF(${g}=0,"",(${h}-${g})/${g})`, result: r.unitCost === 0 ? "" : (r.lineSell - r.unitCost) / r.unitCost };
       }
-      put(13, r.source);
+      put(12, r.source);
       if (r.link) {
-        row.getCell(14).value = { text: r.link, hyperlink: r.link };
-        row.getCell(14).font = { color: { argb: "FF0563C1" }, underline: true };
+        row.getCell(13).value = { text: r.link, hyperlink: r.link };
+        row.getCell(13).font = { color: { argb: "FF0563C1" }, underline: true };
       }
-      put(15, partsRowNotes(r));
+      put(14, partsRowNotes(r));
       for (const c of [7, 8, 9, 10]) row.getCell(c).numFmt = MONEY_FMT;
-      for (const c of [11, 12]) row.getCell(c).numFmt = PCT_FMT;
+      row.getCell(11).numFmt = PCT_FMT;
     }
     const last = n;
     const costRange = `SUM(${COL.extCost}${first}:${COL.extCost}${last})`;
@@ -128,7 +126,7 @@ function writeBlocks(ws: Worksheet, blocks: ReviewSheetBlock[]): void {
       row.getCell(3).value = label;
       row.getCell(10).value = value;
       row.getCell(10).numFmt = MONEY_FMT;
-      if (notes) row.getCell(15).value = notes;
+      if (notes) row.getCell(14).value = notes;
       row.font = { bold: true };
       if (topBorder) for (let c = 1; c <= REVIEW_SHEET_HEADER.length; c++) row.getCell(c).border = { top: { style: "thin" } };
     };

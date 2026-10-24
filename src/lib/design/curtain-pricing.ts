@@ -21,6 +21,7 @@
  */
 
 import { isSqftUnit } from "@/lib/fabric-part";
+import { DEFAULT_MARKUP, MARKUP_MAX, sellAt } from "@/lib/markup";
 
 /** #227 late — the Estimating Rules id of the sewing-labor adder (a percent number, 10 = 10 %). */
 export const SEWING_PCT_ID = "curtains.sewingPct";
@@ -74,8 +75,8 @@ export type CurtainCost = {
   overridden: boolean;
 };
 
-/** Peak's flat curtain margin on price. */
-export const CURTAIN_MARGIN = 0.3;
+/** Peak's flat curtain markup (#367: was 30 % margin). */
+export const CURTAIN_MARKUP = DEFAULT_MARKUP;
 
 /**
  * Seed area rates by fabric SKU — the fallback when a catalog fabric has no
@@ -138,8 +139,8 @@ export function curtainCost(input: CurtainCostInput, rates: CurtainRates): Curta
   };
 }
 
-/** price = cost / (1 − margin). */
-export function curtainPrice(costEach: number, margin: number = CURTAIN_MARGIN): number {
-  const m = margin > 0 && margin < 1 ? margin : CURTAIN_MARGIN;
-  return costEach > 0 ? round2(costEach / (1 - m)) : 0;
+/** price = cost × (1 + markup). */
+export function curtainPrice(costEach: number, markup: number = CURTAIN_MARKUP): number {
+  const k = Number.isFinite(markup) && markup > 0 && markup <= MARKUP_MAX ? markup : CURTAIN_MARKUP;
+  return costEach > 0 ? round2(sellAt(costEach, k)) : 0;
 }

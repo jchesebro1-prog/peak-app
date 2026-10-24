@@ -49,7 +49,7 @@ export type AddOn = { price: number; cost: number };
  *
  * COST has no row in Estimating Rules (the rules table only exposes price,
  * per the rate() shape — one editable number per row) and stays here as the
- * only copy; it still feeds cost/margin math, untouched by rules edits.
+ * only copy; it still feeds cost/markup math, untouched by rules edits.
  *
  * fixMounts()/fixAcc()/fixPwr()/fixLamps() take the live FixtureRates
  * (fetched server-side via getFixtureRates() and threaded down as a prop,

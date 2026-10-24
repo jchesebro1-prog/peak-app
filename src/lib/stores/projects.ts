@@ -226,6 +226,8 @@ export type ProjectRecord = {
   projectPricing?: ProjectPricingRow[];
   value: number;
   margin: number;
+  /** #367 — present once this doc's percentages are markup (doc-basis.ts). */
+  pricingBasis?: "markup";
   createdAt: number;
   updatedAt: number;
   startedAt: number;
@@ -456,6 +458,8 @@ export function buildProject(
     signoff: null,
     trainingAt: null,
     ...partial,
+    // #367: after the partial, so a new project is always born stamped (its margin is markup).
+    pricingBasis: "markup",
     pipelineId: pl.id,
     stage,
     id,
@@ -492,9 +496,13 @@ export async function updateProject(
   id: string,
   patch: Partial<ProjectRecord>
 ): Promise<ProjectRecord | null> {
+  // #367: the basis stamp is the doc store's and the creators' alone — a patch can never clear or change it
+  // (an unstamped project would be re-converted on the next read, moving its margin twice).
+  const clean = { ...patch };
+  delete clean.pricingBasis;
   return patchDoc<ProjectRecord>("projects", id, (p) => ({
     ...p,
-    ...patch,
+    ...clean,
     id,
     updatedAt: now(),
   }));
@@ -748,6 +756,7 @@ function fromQuote(q: QuoteLike, pipes: Pipelines): Omit<ProjectRecord, "id"> {
     ...(pricing.length ? { projectPricing: pricing } : {}),
     value: q.value || 0,
     margin: q.margin || 0,
+    pricingBasis: "markup",
     createdAt: t,
     updatedAt: t,
     startedAt: t,
@@ -888,6 +897,7 @@ export async function spawnServiceLinkedProject(
     owner: q.owner || DEFAULT_ACTOR,
     value: 0,
     margin: 0,
+    pricingBasis: "markup",
     stage: done.id,
   });
 }

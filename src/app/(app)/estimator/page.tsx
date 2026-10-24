@@ -234,7 +234,7 @@ async function initialFrom(
     // send's on a sent quote, the next send's on a draft — the PDF's own rule.
     revNum: documentRevStamp(q).revNum,
     revDateMs: q.updatedAt || Date.now(),
-    // Item 11 (D87): stamped tier seeds labor/curtain margins client-side.
+    // Item 11 (D87): stamped tier seeds labor/curtain markups client-side.
     pricingTier: q.pricingTier ?? null,
     tierMargin: q.tierMargin ?? null,
     sections,
@@ -526,13 +526,13 @@ export default async function EstimatorPage({
 
   // #254 fix wave 2: a NEW estimate opens at its customer's tier — the
   // intake's ?customer=/&contact= (quotes/new, Inbox newQuoteHref) or, with
-  // no customer, Base per Estimating Rules — so lines seed at the margin the
+  // no customer, Base per Estimating Rules — so lines seed at the markup the
   // first Save will stamp (saveQuoteAction resolves the same customer +
   // contact). A loaded quote keeps its own stored stamp.
   if (!q) {
     const t = await resolveTier(initial.customerId, initial.contactName);
     initial.pricingTier = t.tier;
-    initial.tierMargin = t.margin;
+    initial.tierMargin = t.markup;
   }
 
   /* ---- travel estimate for the LOADED quote only (E3/E4, punch #89) ----

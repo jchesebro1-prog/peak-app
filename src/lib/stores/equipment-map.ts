@@ -86,7 +86,7 @@ export async function loadEquipPriceCtx(
     }
     catalogParts = new Map((skus.size ? await getMany([...skus]) : []).map((p) => [p.sku, p]));
   }
-  return { map, ctx: { parts: catalogParts, fixtures, margin: rates.defaultMargin, sewingPct }, catalogParts };
+  return { map, ctx: { parts: catalogParts, fixtures, markup: rates.defaultMargin, sewingPct }, catalogParts };
 }
 
 export async function loadEquipmentPriceTable(opts?: Parameters<typeof loadEquipPriceCtx>[0]): Promise<EquipmentPriceTable> {

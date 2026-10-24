@@ -65,7 +65,7 @@ export default async function Page({
   // built from the catalog and fixtures this request already loaded (no
   // second load of either). A fixture pick prices through the SAME resolver
   // as an Equipment map assembly cell (priceCell, final review I3): its
-  // included sell, or cost ÷ (1 − margin) when list-less — never a list-only
+  // included sell, or cost × (1 + markup) when list-less — never a list-only
   // sum — and a pick that prices needs-a-part stays needs-a-part.
   //
   // Fix wave 3 (I2): the design's own picks are priced too, even one whose
