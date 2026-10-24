@@ -10,8 +10,8 @@
  * each other). A cleared row is written as null and dropped on read.
  *
  * Pricing (spec §3):
- *  - part      → live catalog cost; sell = list, or cost ÷ (1 − catalog
- *                margin) when the part has no list of its own;
+ *  - part      → live catalog cost; sell = list, or cost × (1 + catalog
+ *                markup) when the part has no list of its own;
  *  - assembly  → resolveFixture's included cost / sell;
  *  - allowance → the confirmed amount is a unit cost, sold like a list-less
  *                part;
@@ -28,6 +28,7 @@ import { EQUIPMENT_KEY_ALIASES, EQUIPMENT_ROWS, EQUIPMENT_ROW_BY_KEY, type Equip
 import { fixtureSkus, resolveFixture, type FixtureCatalogPart, type FixtureRecord } from "@/lib/fixture-assemblies";
 import { fabricAreaRateOf, sewingPctFrom } from "./curtain-pricing";
 import { NO_FABRIC_RATE } from "@/lib/curtain-geom";
+import { DEFAULT_MARKUP, MARKUP_MAX, sellAt } from "@/lib/markup";
 import { isFabricPart } from "@/lib/fabric-part";
 
 export const EQUIPMENT_MAP_BLOB = "grid_equipment_map";
@@ -193,8 +194,8 @@ export type EquipPriceCtx = {
   parts: ReadonlyMap<string, PricingPart>;
   /** Fixtures and systems by id (listFixtures). */
   fixtures: ReadonlyMap<string, FixtureRecord>;
-  /** catalog_rates.defaultMargin — the list-less part / allowance sell rule. */
-  margin: number;
+  /** catalog_rates.defaultMargin (the blob key keeps its name; #367: a markup) — the list-less part / allowance sell rule. */
+  markup: number;
   /** #227 late: the curtain sewing % (Estimating Rules curtains.sewingPct).
    *  loadEquipPriceCtx always sets it; absent reads as the 10 % default. */
   sewingPct?: number;
@@ -217,12 +218,12 @@ export type PricedUnit = {
   sewingPct?: number;
 };
 export type UnitPrice = PricedUnit | { status: "needs-part"; reason: string };
-export type EquipmentPriceTable = { margin: number; byTier: Record<TierKey, Record<string, UnitPrice>> };
+export type EquipmentPriceTable = { markup: number; byTier: Record<TierKey, Record<string, UnitPrice>> };
 
-/** cost ÷ (1 − margin), cents-rounded. The margin is a rate (catalog_rates), never a dollar. */
-export function sellFromCost(cost: number, margin: number): number {
-  const m = margin >= 0 && margin < 0.95 ? margin : 0.3;
-  return round2(cost / (1 - m));
+/** cost × (1 + markup), cents-rounded. The markup is a rate (catalog_rates), never a dollar. */
+export function sellFromCost(cost: number, markup: number): number {
+  const k = markup >= 0 && markup < MARKUP_MAX ? markup : DEFAULT_MARKUP;
+  return round2(sellAt(cost, k));
 }
 
 const needs = (reason: string): UnitPrice => ({ status: "needs-part", reason });
@@ -237,7 +238,7 @@ export function priceCell(cell: EquipCell | null, def: EquipRowDef, ctx: EquipPr
     // shows a mapped-part description alongside the row's own name (Quick
     // Design's BOM label) already appends "· Allowance" from `status`; a
     // suffix here would show it twice (#211 M3).
-    return { status: "allowance", ref: def.key, desc: def.label, unit: def.unit, unitCost: cell.amount, unitSell: sellFromCost(cell.amount, ctx.margin) };
+    return { status: "allowance", ref: def.key, desc: def.label, unit: def.unit, unitCost: cell.amount, unitSell: sellFromCost(cell.amount, ctx.markup) };
   }
   if (cell.kind === "part") {
     const p = ctx.parts.get(cell.sku);
@@ -251,14 +252,14 @@ export function priceCell(cell: EquipCell | null, def: EquipRowDef, ctx: EquipPr
     const cost = Number(p.cost) || 0;
     const list = Number(p.list) || 0;
     if (!(cost > 0) && !(list > 0)) return needs(`${p.sku} has no price in the catalog`);
-    return { status: "part", ref: p.sku, desc: p.desc, unit: p.unit || def.unit, unitCost: cost, unitSell: list > 0 ? list : sellFromCost(cost, ctx.margin) };
+    return { status: "part", ref: p.sku, desc: p.desc, unit: p.unit || def.unit, unitCost: cost, unitSell: list > 0 ? list : sellFromCost(cost, ctx.markup) };
   }
   if (def.curtain) return needs("A curtain row maps to a fabric part");
   const f = ctx.fixtures.get(cell.id);
   if (!f) return needs(`Assembly ${cell.id} was deleted`);
   const r = resolveFixture(f, ctx.parts);
   if (!(r.cost > 0) && !(r.sell > 0)) return needs(`${f.label} has no priced parts`);
-  return { status: "assembly", ref: f.id, desc: f.label, unit: "ea", unitCost: r.cost, unitSell: r.sell > 0 ? r.sell : sellFromCost(r.cost, ctx.margin) };
+  return { status: "assembly", ref: f.id, desc: f.label, unit: "ea", unitCost: r.cost, unitSell: r.sell > 0 ? r.sell : sellFromCost(r.cost, ctx.markup) };
 }
 
 export function buildEquipmentPriceTable(map: EquipmentMap, ctx: EquipPriceCtx): EquipmentPriceTable {
@@ -266,7 +267,7 @@ export function buildEquipmentPriceTable(map: EquipmentMap, ctx: EquipPriceCtx):
   for (const def of EQUIPMENT_ROWS) {
     for (const t of EQUIP_TIERS) byTier[t][def.key] = priceCell(cellFor(map[def.key], t), def, ctx);
   }
-  return { margin: ctx.margin, byTier };
+  return { markup: ctx.markup, byTier };
 }
 
 /** Every catalog SKU the map prices — mapped parts plus the parts of mapped assemblies (one getMany). */

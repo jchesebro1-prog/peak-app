@@ -1354,7 +1354,7 @@ function OverviewTab({
         action={setProjectValueAction}
       />
     ),
-    sub: p.valueUnknown ? "imported — value not on file" : p.margin ? Math.round(p.margin * 100) + "% margin" : "",
+    sub: p.valueUnknown ? "imported — value not on file" : p.margin ? Math.round(p.margin * 100) + "% markup" : "",
   });
 
   const projectTasks = taskRows.filter((t) => t.projectId === p.id);

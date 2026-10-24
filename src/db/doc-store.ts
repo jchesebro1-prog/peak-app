@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { getDb, withTransaction } from "@/db";
 import { DOC_TABLES, blobs, type CollectionName } from "./doc-tables";
+import { BASIS_COLLECTIONS, BASIS_KEY, hydrateDoc } from "@/lib/markup/doc-basis";
 
 /**
  * Generic document store — the server replacement for the prototype's
@@ -27,6 +28,11 @@ function table(coll: CollectionName) {
   const t = DOC_TABLES[coll];
   if (!t) throw new Error(`Unknown collection: ${coll}`);
   return t;
+}
+
+/** #367: every doc read leaves the store through here — an unstamped quote / project converts margin → markup. */
+function fromRow<T extends Doc>(coll: CollectionName, doc: unknown, id: string): T {
+  return hydrateDoc(coll, { ...(doc as T), id });
 }
 
 /**
@@ -61,7 +67,7 @@ export async function listDocs<T extends Doc = Doc>(
   const rows = opts.includeDeleted
     ? await db.select().from(t).orderBy(asc(t.id))
     : await db.select().from(t).where(eq(t.deleted, false)).orderBy(asc(t.id));
-  return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
+  return rows.map((r) => fromRow<T>(coll, r.doc, r.id));
 }
 
 /** Soft-deleted rows only, by id — what a writer that must never revive a
@@ -70,7 +76,7 @@ export async function listDeletedDocs<T extends Doc = Doc>(coll: CollectionName)
   const db = await getDb();
   const t = table(coll);
   const rows = await db.select().from(t).where(eq(t.deleted, true)).orderBy(asc(t.id));
-  return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
+  return rows.map((r) => fromRow<T>(coll, r.doc, r.id));
 }
 
 /**
@@ -186,7 +192,7 @@ export async function searchDocs<T extends Doc = Doc>(
     .where(and(eq(t.deleted, false), sql`${t.doc}::text ILIKE ${pattern}`, ...eqs, ...extra))
     .orderBy(asc(t.id))
     .limit(limit);
-  return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
+  return rows.map((r) => fromRow<T>(coll, r.doc, r.id));
 }
 
 /**
@@ -249,18 +255,22 @@ export async function listDocsFiltered<T extends Doc = Doc>(
   // large document again for every field; `jsonb_to_record` over one `doc` reference pulls every wanted field in
   // one call, each kept as jsonb (so a value's JSON type is untouched and JSON null still strips), giving the same
   // object the per-field build did.
-  const doc = opts.fields?.length
+  // #367: a projection of a quote / project always carries the basis stamp, so fromRow never converts twice.
+  const fields = opts.fields?.length && BASIS_COLLECTIONS.has(coll) && !opts.fields.includes(BASIS_KEY)
+    ? [...opts.fields, BASIS_KEY]
+    : opts.fields;
+  const doc = fields?.length
     ? sql`(SELECT jsonb_strip_nulls(jsonb_build_object(${sql.join(
-        opts.fields.map((f) => sql`${f}::text, x.${sql.identifier(f)}`),
+        fields.map((f) => sql`${f}::text, x.${sql.identifier(f)}`),
         sql`, `
       )})) FROM jsonb_to_record(${t.doc}) AS x(${sql.join(
-        opts.fields.map((f) => sql`${sql.identifier(f)} jsonb`),
+        fields.map((f) => sql`${sql.identifier(f)} jsonb`),
         sql`, `
       )}))`
     : t.doc;
   const q = db.select({ id: t.id, doc }).from(t).where(and(...where)).orderBy(order);
   const rows = opts.limit != null ? await q.limit(opts.limit) : await q;
-  return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
+  return rows.map((r) => fromRow<T>(coll, r.doc, r.id));
 }
 
 /**
@@ -280,7 +290,7 @@ export async function getDocRows<T extends Doc = Doc>(
   const out: Array<{ id: string; deleted: boolean; doc: T }> = [];
   for (let i = 0; i < unique.length; i += DOC_BATCH_CHUNK) {
     const rows = await db.select().from(t).where(inArray(t.id, unique.slice(i, i + DOC_BATCH_CHUNK)));
-    for (const r of rows) out.push({ id: r.id, deleted: r.deleted, doc: { ...(r.doc as T), id: r.id } });
+    for (const r of rows) out.push({ id: r.id, deleted: r.deleted, doc: fromRow<T>(coll, r.doc, r.id) });
   }
   return out;
 }
@@ -307,7 +317,7 @@ export async function getDocsByIdAnyCase<T extends Doc = Doc>(
       .from(t)
       .where(and(eq(t.deleted, false), inArray(sql<string>`lower(${t.id})`, unique.slice(i, i + DOC_BATCH_CHUNK))))
       .orderBy(asc(t.id));
-    for (const r of rows) out.push({ ...(r.doc as T), id: r.id });
+    for (const r of rows) out.push(fromRow<T>(coll, r.doc, r.id));
   }
   return out;
 }
@@ -345,7 +355,7 @@ export async function listDocsByField<T extends Doc = Doc>(
         )
       )
       .orderBy(asc(t.id));
-    for (const r of rows) out.push({ ...(r.doc as T), id: r.id });
+    for (const r of rows) out.push(fromRow<T>(coll, r.doc, r.id));
   }
   return out;
 }
@@ -360,7 +370,7 @@ export async function listDocsWhere<T extends Doc = Doc>(coll: CollectionName, w
   const t = table(coll);
   const q = db.select().from(t).where(and(eq(t.deleted, false), docCondSql(t.doc, where, t.id))).orderBy(asc(t.id));
   const rows = opts.limit != null ? await q.limit(opts.limit) : await q;
-  return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
+  return rows.map((r) => fromRow<T>(coll, r.doc, r.id));
 }
 
 /**
@@ -408,7 +418,7 @@ export async function listDocsWithFlag<T extends Doc = Doc>(
   const order = opts.orderByNumericAsc ? asc(sql`(${t.doc}->>${opts.orderByNumericAsc})::numeric`) : asc(t.id);
   const q = db.select().from(t).where(and(...where)).orderBy(order, asc(t.id));
   const rows = opts.limit != null ? await q.limit(opts.limit) : await q;
-  return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
+  return rows.map((r) => fromRow<T>(coll, r.doc, r.id));
 }
 
 /**
@@ -463,7 +473,7 @@ export async function getDoc<T extends Doc = Doc>(
   const t = table(coll);
   const rows = await db.select().from(t).where(eq(t.id, id)).limit(1);
   if (!rows.length || rows[0].deleted) return null;
-  return { ...(rows[0].doc as T), id: rows[0].id };
+  return fromRow<T>(coll, rows[0].doc, rows[0].id);
 }
 
 /** Insert or fully replace a document (review untouched on replace). */
@@ -845,7 +855,7 @@ export async function listSince(
     .limit(limit);
   const changes = rows.map((r) => ({
     id: r.id,
-    doc: { ...(r.doc as Doc), id: r.id },
+    doc: fromRow(coll, r.doc, r.id),
     rev: r.rev,
     seq: Number(r.seq),
     deleted: r.deleted,

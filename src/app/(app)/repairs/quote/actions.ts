@@ -26,7 +26,7 @@ import {
   type RepairPartInput,
   type TripVenueInput,
 } from "@/lib/repair-engine";
-import { resolveTier, serviceMarginFor } from "@/lib/pricing-tiers";
+import { resolveTier, serviceMarkupFor } from "@/lib/pricing-tiers";
 import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { coordsOf, quoteOrigin, driveMiles, driveMinutes } from "@/lib/geo";
@@ -36,6 +36,7 @@ import { settleServiceCreditFor } from "@/lib/stores/reward-ledger";
 import { grossQuoteValue } from "@/lib/rewards/credit-line";
 import { netServiceTotal } from "@/lib/rewards/service-credit";
 import { getLiftRate } from "@/lib/service-quote-inputs";
+import { keepSavedMarkup } from "@/lib/markup";
 import { findingKeysForSave, linkOnCreateSafe } from "@/lib/assessments/quote-from-findings";
 
 function quoteFailure(formData: FormData, message: string): never {
@@ -100,7 +101,10 @@ async function persist(formData: FormData, out?: { creditNote?: string; findingN
   // Mileage/labor knobs stay global rates. MARGIN went per-quote with
   // customer tiers (item 11, D87/D88): the tier seeds it, the knob
   // overrides it for THIS quote only.
-  const marginPts = Number(formData.get("margin"));
+  // #367: a missing field (a builder tab opened before the switch posts the old `margin` key) is NaN, not
+  // Number(null) = 0 → the 5 % clamp — so it falls back to the service markup below.
+  const rawMarkup = formData.get("markup");
+  const markupPts = rawMarkup == null || rawMarkup === "" ? NaN : Number(rawMarkup);
   const mileageRate = Number(formData.get("mileageRate"));
   const laborRate = Number(formData.get("laborRate"));
   const patch: Record<string, number> = {};
@@ -110,13 +114,19 @@ async function persist(formData: FormData, out?: { creditNote?: string; findingN
   const baseRates = await getRates();
   const tier = await resolveTier(customerId, contactName);
   // #254 follow-up: an untiered customer prices/stamps at THIS service's own
-  // default margin (baseRates.margin — same seed the builder knob uses), not
-  // tier Base's registry margin (src/lib/pricing-tiers.ts serviceMarginFor).
-  const serviceMargin = serviceMarginFor(tier, baseRates.margin);
-  const quoteMargin = Number.isFinite(marginPts)
-    ? Math.max(5, Math.min(50, marginPts)) / 100
-    : serviceMargin;
-  const rates = { ...baseRates, margin: quoteMargin };
+  // default markup (baseRates.margin — same seed the builder knob uses), not
+  // tier Base's registry markup (src/lib/pricing-tiers.ts serviceMarkupFor).
+  const serviceMarkup = serviceMarkupFor(tier, baseRates.margin);
+  const quoteMarkup = Number.isFinite(markupPts)
+    ? Math.max(5, Math.min(100, markupPts)) / 100
+    : serviceMarkup;
+  // #367: an edited quote keeps its own exact parts markup while today's global is the same whole
+  // percent (a converted 0.428571 vs the rounded 0.43), so an untouched re-save never moves its parts
+  // sell; a real global change (≠ whole %) re-prices at today's rate, as before. The builder's preview
+  // applies the same rule (controls.tsx, `savedPartsMarkup`).
+  const existingForMarker = editingId ? await getQuote(editingId) : null;
+  const savedPartsMarkup = (existingForMarker?.repair as { rates?: { partsMargin?: unknown } } | null | undefined)?.rates?.partsMargin;
+  const rates = { ...baseRates, margin: quoteMarkup, partsMargin: keepSavedMarkup(savedPartsMarkup, baseRates.partsMargin) };
 
   // resolve venue coords from the customer directory + nearest office
   const cust = await getCustomer(customerId);
@@ -155,7 +165,7 @@ async function persist(formData: FormData, out?: { creditNote?: string; findingN
   // Fly choice + crew/nights/airfare overrides as JSON; absent = auto.
   const travelOverride = parseTravelOverride(formData.get("travel"));
   // #217: a typed total (whole dollars, $1–$10,000,000) replaces the rounded
-  // auto total exactly; the 5–50 clamp above bounds only the slider's margin.
+  // auto total exactly; the 5–100 clamp above bounds only the slider's markup.
   const priceOverride = normalizePriceOverride(formData.get("priceOverride"));
   // #275: an optional lift rental — count × rate (blank rate = the live
   // EQP-LIFT default); count 0 / absent = no lift.
@@ -166,7 +176,6 @@ async function persist(formData: FormData, out?: { creditNote?: string; findingN
   // fake or drop it, and it agrees with itself across every reopen). Repairs
   // have no renewal-draft consumer today, but the marker is still stored for
   // #217 D286 parity across all three services.
-  const existingForMarker = editingId ? await getQuote(editingId) : null;
   const existingRp = (existingForMarker?.repair ?? null) as
     | { priceOverride?: number | null; priceOverrideSeeded?: boolean }
     | null;
@@ -245,9 +254,9 @@ async function persist(formData: FormData, out?: { creditNote?: string; findingN
     locationId: venueInputs[0].id ?? null,
     // #282 phase 3: net of any Rewards credit (what the customer pays).
     value: netServiceTotal(r.total, credit.credit),
-    margin: r.serviceMargin,
+    margin: r.serviceMarkup,
     pricingTier: tier.tier,
-    tierMargin: serviceMargin,
+    tierMargin: serviceMarkup,
     source: "repair",
     quoteType: "repair",
     // #242 final: the owner is set when the quote is CREATED (below) and kept

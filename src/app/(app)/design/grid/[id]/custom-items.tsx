@@ -215,7 +215,7 @@ export default function CustomItemsSection({
             <input value={draft.unitCost} onChange={field("unitCost")} inputMode="decimal" placeholder="Unit cost, $" style={INPUT} />
           </div>
           <div style={{ fontSize: 10.5, color: "#8c919c", lineHeight: 1.4 }}>
-            Priced like an allowance: unit cost ÷ (1 − this customer&apos;s tier margin). Not placed on the plan, never added to the catalog.
+            Priced like an allowance: unit cost × (1 + this customer&apos;s tier markup). Not placed on the plan, never added to the catalog.
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button

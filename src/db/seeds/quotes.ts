@@ -4,6 +4,7 @@ import type {
   QuoteStatus,
   ReviewState,
 } from "@/lib/stores/quotes";
+import { marginToMarkup } from "@/lib/markup";
 
 /**
  * Seed quotes — verbatim port of app/store.js seedData() (the original mock
@@ -119,20 +120,22 @@ type SeedBase = {
 
 export function quotesSeed(): Quote[] {
   const base: SeedBase[] = [
-    { id: "Q-2041", name: "Lakefront PAC — Stage Systems Package", customer: "Lakefront Performing Arts Center", value: 232160, margin: 0.31, status: "draft", source: "estimator", owner: "Jeff Chesebro", createdAt: ago(9), updatedAt: ago(2) },
-    { id: "Q-2038", name: "North Ridge HS — Auditorium Rigging Refit", customer: "North Ridge High School", value: 86400, margin: 0.34, status: "sent", source: "estimator", owner: "Nic Trapani", createdAt: ago(14), updatedAt: ago(8) },
-    { id: "Q-2033", name: "Badger Ballet — Hoist Automation", customer: "Badger Ballet Company", value: 174900, margin: 0.29, status: "sent", source: "estimator", owner: "Jena Tolksdorf", createdAt: ago(12), updatedAt: ago(5) },
-    { id: "Q-2035", name: "Lakeside Community Church — Drapery & Track", customer: "Lakeside Community Church", value: 41720, margin: 0.36, status: "won", source: "quick", owner: "Jeff Chesebro", createdAt: ago(20), updatedAt: ago(9) },
-    { id: "Q-2030", name: "Northshore Theater — Counterweight Upgrade", customer: "Northshore Theater", value: 58200, margin: 0.30, status: "draft", source: "quick", owner: "Jack Hamilton", createdAt: ago(8), updatedAt: ago(6) },
-    { id: "Q-2027", name: "Bayfront Arena — Scoreboard Hoist", customer: "Bayfront Arena", value: 312500, margin: 0.27, status: "lost", source: "estimator", owner: "Jason Keagy", createdAt: ago(30), updatedAt: ago(17) },
-    { id: "Q-2042", name: "Harbor Rep — Orchestra Shell", customer: "Harbor Repertory Theatre", value: 128400, margin: 0.32, status: "draft", source: "estimator", owner: "Nic Trapani", createdAt: ago(2), updatedAt: ago(0) },
-    { id: "Q-2045", name: "Lakefront PAC — Systems Consulting & Bid Support", customer: "Lakefront Performing Arts Center", value: 48500, margin: 0.42, status: "won", source: "estimator", owner: "Jack Hamilton", createdAt: ago(24), updatedAt: ago(11), quoteType: "consulting" },
+    { id: "Q-2041", name: "Lakefront PAC — Stage Systems Package", customer: "Lakefront Performing Arts Center", value: 232160, margin: marginToMarkup(0.31), status: "draft", source: "estimator", owner: "Jeff Chesebro", createdAt: ago(9), updatedAt: ago(2) },
+    { id: "Q-2038", name: "North Ridge HS — Auditorium Rigging Refit", customer: "North Ridge High School", value: 86400, margin: marginToMarkup(0.34), status: "sent", source: "estimator", owner: "Nic Trapani", createdAt: ago(14), updatedAt: ago(8) },
+    { id: "Q-2033", name: "Badger Ballet — Hoist Automation", customer: "Badger Ballet Company", value: 174900, margin: marginToMarkup(0.29), status: "sent", source: "estimator", owner: "Jena Tolksdorf", createdAt: ago(12), updatedAt: ago(5) },
+    { id: "Q-2035", name: "Lakeside Community Church — Drapery & Track", customer: "Lakeside Community Church", value: 41720, margin: marginToMarkup(0.36), status: "won", source: "quick", owner: "Jeff Chesebro", createdAt: ago(20), updatedAt: ago(9) },
+    { id: "Q-2030", name: "Northshore Theater — Counterweight Upgrade", customer: "Northshore Theater", value: 58200, margin: marginToMarkup(0.30), status: "draft", source: "quick", owner: "Jack Hamilton", createdAt: ago(8), updatedAt: ago(6) },
+    { id: "Q-2027", name: "Bayfront Arena — Scoreboard Hoist", customer: "Bayfront Arena", value: 312500, margin: marginToMarkup(0.27), status: "lost", source: "estimator", owner: "Jason Keagy", createdAt: ago(30), updatedAt: ago(17) },
+    { id: "Q-2042", name: "Harbor Rep — Orchestra Shell", customer: "Harbor Repertory Theatre", value: 128400, margin: marginToMarkup(0.32), status: "draft", source: "estimator", owner: "Nic Trapani", createdAt: ago(2), updatedAt: ago(0) },
+    { id: "Q-2045", name: "Lakefront PAC — Systems Consulting & Bid Support", customer: "Lakefront Performing Arts Center", value: 48500, margin: marginToMarkup(0.42), status: "won", source: "estimator", owner: "Jack Hamilton", createdAt: ago(24), updatedAt: ago(11), quoteType: "consulting" },
   ];
   return base.map((q): Quote => {
     const sc = SEED_CUST[q.id] || ([null, null] as const);
     const mkReview = SEED_REVIEWS[q.id];
     return {
       ...q,
+      // #367: seed margins are markup (marginToMarkup of the prototype's margins) — stamped so they never convert again.
+      pricingBasis: "markup",
       customerId: sc[0],
       locationId: sc[1],
       history: [{ at: q.createdAt, to: "draft" }],

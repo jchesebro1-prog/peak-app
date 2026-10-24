@@ -1,5 +1,4 @@
-import { getBlob, setBlob } from "@/db/doc-store";
-import { INSPECTION_RATE_DEFAULTS, getTravelRates } from "@/lib/stores/pricing";
+import { INSPECTION_RATE_DEFAULTS, getInspectionRates, getTravelRates, setInspectionRates } from "@/lib/stores/pricing";
 import {
   tripTravel,
   type GeoAdapter,
@@ -40,8 +39,8 @@ export type { GeoAdapter, TripTravel, TripVenueInput };
  *      SHARED across venues visited on one trip (identical math to the
  *      repair engine — tripTravel is imported from it so the two can never
  *      drift).
- *   4. Total = (labor + travel) ÷ (1 − margin), floored at the minimum fee,
- *      plus an optional lift rental (#275: count × rate, margined, on top of
+ *   4. Total = (labor + travel) × (1 + markup), floored at the minimum fee,
+ *      plus an optional lift rental (#275: count × rate, marked up, on top of
  *      the floor), then rounded to the nearest $25 (or a typed total, #217).
  *   5. Flights over drive (spec 2026-09-25, src/lib/travel-plan.ts) — a trip
  *      whose drive cost reaches the threshold prices as flights (default crew
@@ -56,12 +55,10 @@ export type InspectionRates = {
   baseHours: number; // fixed on-site hours per visit
   level2Mult: number; // inspection-time multiplier for a Level 2 inspection
   minFee: number; // $ minimum for the whole job
-  margin: number; // points, margin of the sell price
+  margin: number; // markup on cost (0.43 = 43 %)
   travelRoundMin: number; // round total travel time up to the nearest N minutes
   flyCrew?: number; // default crew when the trip flies (FLY_CREW_DEFAULTS.inspection when absent)
 };
-
-const RATES_BLOB_ID = "inspection_rates"; // rss_inspection_rates_v1
 
 /** Typed copy of the shared defaults (single source: stores/pricing). */
 export function rateDefaults(): InspectionRates {
@@ -70,15 +67,15 @@ export function rateDefaults(): InspectionRates {
 
 /** Effective rates = defaults overlaid with the saved blob. */
 export async function getRates(): Promise<InspectionRates> {
-  const saved = await getBlob<InspectionRates>(RATES_BLOB_ID, rateDefaults());
-  return saved;
+  // #367: through the store's getter — the blob converts to markup first and the stamp is stripped.
+  return (await getInspectionRates()) as InspectionRates;
 }
 
 /** Merge a patch into the saved rates and return the effective result. */
 export async function setRates(
   patch: Partial<InspectionRates>
 ): Promise<InspectionRates> {
-  await setBlob(RATES_BLOB_ID, patch);
+  await setInspectionRates(patch);
   return getRates();
 }
 
@@ -131,9 +128,9 @@ export type InspectionEstimate = {
   priceOverride: number | null;
   overridden: boolean;
   marginAmount: number;
-  /** 1 − cost ÷ total. */
-  effectiveMargin: number;
-  /** #275: the lift priced (null = none), its cost, margined sell and printed line. */
+  /** (total − cost) ÷ cost. */
+  effectiveMarkup: number;
+  /** #275: the lift priced (null = none), its cost, marked-up sell and printed line. */
   lift: LiftRental | null;
   liftCost: number;
   liftSell: number;

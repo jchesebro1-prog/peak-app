@@ -1,7 +1,7 @@
 import { tierPromptText, type TierPrompt } from "@/lib/tier-seed";
 
 /**
- * #254 — under a service builder's margin knob: a hand-set knob was kept on a
+ * #254 — under a service builder's markup knob: a hand-set knob was kept on a
  * customer/contact change; one click applies the new tier seed. Internal
  * builder chrome only — nothing about tiers reaches a customer document.
  */

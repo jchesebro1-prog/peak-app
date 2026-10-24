@@ -11,7 +11,8 @@ import {
 } from "@/lib/track-series";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { round2 } from "./pricing";
-import { catalogAddPrice, seedMarginOf } from "./tier-reprice";
+import { catalogAddPrice, seedMarkupOf } from "./tier-reprice";
+import { sellAt } from "@/lib/markup";
 import type { CurtainDraft, SpecItem, SpecSection, TrackDraft, TrackPart } from "./types";
 
 /**
@@ -89,7 +90,7 @@ export function trackBom(
   if (!series) return { rows: [], errors: [TRACK_SERIES_GONE], cost: 0, price: 0, trackLengthFt: 0 };
   const q = trackQuantities(config, series);
   if (q.errors.length) return { rows: [], errors: q.errors, cost: 0, price: 0, trackLengthFt: 0 };
-  const m = seedMarginOf(tierMargin);
+  const k = seedMarkupOf(tierMargin);
   const errors: string[] = [];
   let cost = 0;
   let costed = 0; // Σ cost × qty of parts that have a cost (sold at the seed)
@@ -112,7 +113,7 @@ export function trackBom(
     else listed += unitList * r.qty;
     return { role: r.role, label, sku: part.sku, desc: part.desc || label, qty: r.qty, unit: part.unit || "ea", cost: unitCost, price, ext: round2(price * r.qty), missing: false };
   });
-  const price = errors.length ? 0 : round2(costed / (1 - m) + listed);
+  const price = errors.length ? 0 : round2(sellAt(costed, k) + listed);
   if (!errors.length && !(price > 0)) errors.push(`${series.name}'s parts have no cost or price in the catalog.`);
   return { rows, errors, cost: errors.length ? 0 : cost, price, trackLengthFt: trackLengthFt(config, series) };
 }

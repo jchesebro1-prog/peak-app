@@ -52,6 +52,7 @@ export function packageBonus(sec: SpecSection, pct: number = DEFAULT_BONUS_RATES
   if (!Number.isFinite(cost) || !Number.isFinite(sell) || cost <= 0) return null;
   const bCost = round2(cost * pct);
   if (bCost <= 0) return null;
+  // sell ÷ cost = 1 + the system's blended markup (#367), so the bonus is marked up at that markup.
   return { cost: bCost, sell: round2(bCost * (sell / cost)) };
 }
 

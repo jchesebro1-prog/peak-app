@@ -78,11 +78,11 @@ export async function quoteFromFindings(rawKeys: unknown, kind: QuoteKind, user:
     quoteType: "system",
     spec: { sections, mobs: [] },
     value: t.grand,
-    margin: t.margin,
+    margin: t.markup,
     owner: user.name,
     preparedBy: user.name,
     pricingTier: tier.tier,
-    tierMargin: tier.margin,
+    tierMargin: tier.markup,
     findingKeys: keys,
   });
   // The quote now exists: a link failure must never read as "nothing was created" (a retry would duplicate it).

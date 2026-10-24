@@ -2,7 +2,7 @@ import { get as getQuote } from "@/lib/stores/quotes";
 import { copySectionForTarget } from "@/app/(app)/estimator/copy-system";
 import { copyPricingFor } from "@/app/(app)/estimator/copy-pricing";
 import { sanitizeSystemSell } from "@/app/(app)/estimator/pricing";
-import { TIER_FALLBACK_MARGIN, usableTierMargin } from "@/app/(app)/estimator/tier-reprice";
+import { TIER_FALLBACK_MARKUP, usableTierMarkup } from "@/app/(app)/estimator/tier-reprice";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { flagOldVendorLine, LIBRARY_GONE, librarySectionForLoad, parseLibraryKey, type LoadLibrarySystemResult } from "./system-library";
 import { invalidateSystemLibrary } from "./system-library-index";
@@ -34,7 +34,7 @@ export async function loadLibrarySystem(key: string, targetTierMargin: number | 
     sourceTierMargin: picked.source.tierMargin,
     // An estimate with no tier stamp prices at the Estimator's own fallback
     // seed (what addPart gives a new line), never at the source customer's tier.
-    targetTierMargin: usableTierMargin(targetTierMargin) ?? TIER_FALLBACK_MARGIN,
+    targetTierMargin: usableTierMarkup(targetTierMargin) ?? TIER_FALLBACK_MARKUP,
     // #304: a sent revision keeps a renamed part's old SKU — the loaded copy takes the live one.
     renames,
   });

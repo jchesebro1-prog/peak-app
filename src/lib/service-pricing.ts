@@ -1,10 +1,10 @@
 /**
  * Service-quote price finish (#217) — the last step of pricing a flame-test,
  * repair or inspection quote: floors, the $25 rounding, a typed total, the
- * back-solved margin, and the printed-line split.
+ * back-solved markup, and the printed-line split.
  * Spec: docs/superpowers/specs/2026-09-26-venues-and-service-rounding-design.md §#217.
  *
- * This module has NO imports and touches no DB or server code: the three
+ * This module imports only the pure markup module and touches no DB or server code: the three
  * quote builders' "use client" previews call the same finish functions as the
  * server engines (flametest-engine, repair-engine, inspection-engine), so the
  * preview and the saved price can never disagree (D285).
@@ -13,16 +13,18 @@
  *   - auto total = the engine's total exactly as before (floors applied), then
  *     rounded to the nearest $25 (half rounds up);
  *   - a typed total (priceOverride, whole dollars, $1–$10,000,000) replaces it
- *     exactly — never re-rounded, never margin-clamped;
- *   - margin amount = total − cost; the effective margin = 1 − cost ÷ total.
+ *     exactly — never re-rounded, never markup-clamped;
+ *   - markup amount = total − cost; the effective markup = (total − cost) ÷ cost.
  */
+
+import { sellAt } from "@/lib/markup";
 
 export const PRICE_STEP = 25;
 export const PRICE_OVERRIDE_MAX = 10_000_000;
-/** A typed total under this margin (or under cost) warns — it never blocks. */
-export const LOW_MARGIN_WARN = 0.1;
-export const MARGIN_SLIDER_MIN = 10;
-export const MARGIN_SLIDER_MAX = 50;
+/** A typed total under this markup (or under cost) warns — it never blocks. #367: 10 % margin → 11 % markup. */
+export const LOW_MARKUP_WARN = 0.11;
+export const MARKUP_SLIDER_MIN = 10;
+export const MARKUP_SLIDER_MAX = 100;
 
 /** Nearest multiple of `step` (default $25); half rounds up; NaN → 0. */
 export function roundToStep(x: number, step: number = PRICE_STEP): number {
@@ -78,9 +80,9 @@ export function normalizeTestingOverride(raw: unknown): number | undefined {
   return n != null && n >= 0 && n <= PRICE_OVERRIDE_MAX ? n : undefined;
 }
 
-/** cost ÷ (1 − margin) when 0 < margin < 1, else cost. */
-export function sellAtMargin(cost: number, margin: number): number {
-  return margin > 0 && margin < 1 ? cost / (1 - margin) : cost;
+/** cost × (1 + markup) when markup > 0, else cost. */
+export function sellAtMarkup(cost: number, markup: number): number {
+  return Number.isFinite(markup) && markup > 0 ? sellAt(cost, markup) : cost;
 }
 
 export type FinishedPrice = {
@@ -93,12 +95,12 @@ export type FinishedPrice = {
   priceOverride: number | null;
   overridden: boolean;
   marginAmount: number;
-  /** 1 − cost ÷ total (0 when total is 0). */
-  effectiveMargin: number;
+  /** (total − cost) ÷ cost (0 when cost is 0). */
+  effectiveMarkup: number;
 };
 
 /**
- * Round the auto total, apply a typed total, back-solve the margin.
+ * Round the auto total, apply a typed total, back-solve the markup.
  * `priceOverride` is normalized here (whole dollars, $1–$10,000,000, else
  * ignored) rather than trusted pre-normalized, so a builder or a save path
  * that hands this a raw typed value can never diverge from one that
@@ -122,7 +124,7 @@ export function finishPrice(
     priceOverride: o,
     overridden: o != null,
     marginAmount: total - cost,
-    effectiveMargin: total > 0 ? 1 - cost / total : 0,
+    effectiveMarkup: cost > 0 ? (total - cost) / cost : 0,
   };
 }
 
@@ -180,11 +182,11 @@ export function liftCostOf(lift: LiftRental | null | undefined): number {
   return lift ? lift.count * lift.rate : 0;
 }
 
-/** What a finish adds for a lift: its cost, its margined sell, and the whole-dollar line it prints as. */
+/** What a finish adds for a lift: its cost, its marked-up sell, and the whole-dollar line it prints as. */
 export type LiftFinish = {
   /** count × rate (0 = no lift). */
   liftCost: number;
-  /** liftCost ÷ (1 − margin) — margined like the rest of the job. */
+  /** liftCost × (1 + markup) — marked up like the rest of the job. */
   liftSell: number;
   /**
    * The printed "Lift rental" amount: liftSell in whole dollars, never above
@@ -194,9 +196,9 @@ export type LiftFinish = {
   liftLine: number;
 };
 
-function liftFinish(liftCost: number | undefined, margin: number, total: number): LiftFinish {
+function liftFinish(liftCost: number | undefined, markup: number, total: number): LiftFinish {
   const cost = Math.max(0, Number.isFinite(liftCost as number) ? (liftCost as number) : 0);
-  const sell = sellAtMargin(cost, margin);
+  const sell = sellAtMarkup(cost, markup);
   return { liftCost: cost, liftSell: sell, liftLine: Math.max(0, Math.min(Math.round(total), Math.round(sell))) };
 }
 
@@ -252,11 +254,11 @@ export function liftLabel(count: number): string {
 /**
  * The lift a saved quote prints, read from its subdoc: `{ count, line }` or
  * null when the quote has no lift (every quote saved before #275). A stored
- * line wins; a lift saved without one prints count × rate ÷ (1 − margin).
+ * line wins; a lift saved without one prints count × rate × (1 + markup).
  */
 export function printedLift(
   doc: { lift?: unknown } | null | undefined,
-  margin?: number | null
+  markup?: number | null
 ): { count: number; line: number; label: string } | null {
   const l = normalizeLift(doc?.lift, LIFT_RATE_FALLBACK);
   if (!l) return null;
@@ -264,7 +266,7 @@ export function printedLift(
   const line =
     typeof stored === "number" && Number.isFinite(stored) && stored >= 0
       ? Math.round(stored)
-      : Math.round(sellAtMargin(liftCostOf(l), margin ?? 0));
+      : Math.round(sellAtMarkup(liftCostOf(l), markup ?? 0));
   return { count: l.count, line, label: liftLabel(l.count) };
 }
 
@@ -273,12 +275,12 @@ export type FlameFinish = FinishedPrice & LiftFinish & {
   baseFee: number;
   baseApplied: boolean;
   cost: number;
-  /** The rate (slider) margin the auto total was priced at. */
+  /** The rate (slider) markup the auto total was priced at. */
   margin: number;
 };
 
 /**
- * Flame tests: cost = max(baseFee, rawCost) + liftCost; total = cost ÷ (1 − margin),
+ * Flame tests: cost = max(baseFee, rawCost) + liftCost; total = cost × (1 + markup),
  * rounded. #275: a lift adds on top of the base-fee floor — the floor is a
  * minimum for the testing visit and never absorbs a lift rental.
  */
@@ -293,22 +295,23 @@ export function finishFlame(i: {
   const baseApplied = i.rawCost < i.baseFee;
   const lift = Math.max(0, i.liftCost || 0);
   const cost = (baseApplied ? i.baseFee : i.rawCost) + lift;
-  const fin = finishPrice(sellAtMargin(cost, i.margin), cost, i.priceOverride, baseApplied);
+  const markup = i.margin;
+  const fin = finishPrice(sellAtMarkup(cost, markup), cost, i.priceOverride, baseApplied);
   return {
     rawCost: i.rawCost,
     baseFee: i.baseFee,
     baseApplied,
     cost,
-    margin: i.margin,
+    margin: markup,
     ...fin,
-    ...liftFinish(lift, i.margin, fin.total),
+    ...liftFinish(lift, markup, fin.total),
   };
 }
 
 export type InspectionFinish = FinishedPrice & LiftFinish & {
   /** Labor + travel + lift (the whole job's cost). */
   cost: number;
-  /** (labor + travel) ÷ (1 − margin) — the service sell before the minimum fee. */
+  /** (labor + travel) × (1 + markup) — the service sell before the minimum fee. */
   sellRaw: number;
   minFee: number;
   minApplied: boolean;
@@ -316,7 +319,7 @@ export type InspectionFinish = FinishedPrice & LiftFinish & {
 };
 
 /**
- * Inspections: total = max(minFee, cost ÷ (1 − margin)) + liftCost ÷ (1 − margin),
+ * Inspections: total = max(minFee, cost × (1 + markup)) + liftCost × (1 + markup),
  * rounded. #275: the minimum fee floors the inspection itself; a lift rental
  * adds on top of it rather than being absorbed by it.
  */
@@ -329,12 +332,13 @@ export function finishInspection(i: {
   /** #275: count × rate of an optional lift rental (0/absent = none). */
   liftCost?: number;
 }): InspectionFinish {
-  const sellRaw = sellAtMargin(i.cost, i.margin);
+  const markup = i.margin;
+  const sellRaw = sellAtMarkup(i.cost, markup);
   const minApplied = sellRaw < i.minFee;
   const lift = Math.max(0, i.liftCost || 0);
   const cost = i.cost + lift;
   const fin = finishPrice(
-    (minApplied ? i.minFee : sellRaw) + sellAtMargin(lift, i.margin),
+    (minApplied ? i.minFee : sellRaw) + sellAtMarkup(lift, markup),
     cost,
     i.priceOverride,
     minApplied
@@ -344,9 +348,9 @@ export function finishInspection(i: {
     sellRaw,
     minFee: i.minFee,
     minApplied,
-    margin: i.margin,
+    margin: markup,
     ...fin,
-    ...liftFinish(lift, i.margin, fin.total),
+    ...liftFinish(lift, markup, fin.total),
   };
 }
 
@@ -365,13 +369,13 @@ export type RepairFinish = FinishedPrice & LiftFinish & {
   cost: number;
   margin: number;
   partsMargin: number;
-  /** 1 − serviceCost ÷ serviceSell — the margin the builder's slider shows. */
-  serviceMargin: number;
+  /** (serviceSell − serviceCost) ÷ serviceCost — the markup the builder's slider shows. */
+  serviceMarkup: number;
 };
 
 /**
- * Repairs: serviceSell = max(minCallout, serviceCost ÷ (1 − margin)); parts sell
- * at their own margin; #275 a lift rental sells at the SERVICE margin, on top
+ * Repairs: serviceSell = max(minCallout, serviceCost × (1 + markup)); parts sell
+ * at their own markup; #275 a lift rental sells at the SERVICE markup, on top
  * of the call-out floor; total = serviceSell + partsSell + liftSell, rounded
  * (or typed).
  */
@@ -385,28 +389,20 @@ export function finishRepair(i: {
   /** #275: count × rate of an optional lift rental (0/absent = none). */
   liftCost?: number;
 }): RepairFinish {
-  const serviceSellRaw = sellAtMargin(i.serviceCost, i.margin);
+  const markup = i.margin;
+  const serviceSellRaw = sellAtMarkup(i.serviceCost, markup);
   const calloutApplied = serviceSellRaw < i.minCallout;
   const serviceSellAuto = calloutApplied ? i.minCallout : serviceSellRaw;
-  const partsSell = sellAtMargin(i.partsCost, i.partsMargin);
+  const partsSell = sellAtMarkup(i.partsCost, i.partsMargin);
   const lift = Math.max(0, i.liftCost || 0);
-  const liftSell = sellAtMargin(lift, i.margin);
+  const liftSell = sellAtMarkup(lift, markup);
   const cost = i.serviceCost + i.partsCost + lift;
   const fin = finishPrice(serviceSellAuto + partsSell + liftSell, cost, i.priceOverride, calloutApplied);
   const serviceSell = fin.total - partsSell - liftSell;
-  // #217 fix wave 2: the service-only ratio (1 − serviceCost ÷ serviceSell)
-  // blows up — or goes negative — whenever the FINAL serviceSell (total minus
-  // parts, after rounding/typing) is zero or negative: a typed total that
-  // lands below what the parts alone are selling for, or an auto price whose
-  // rounded/floored service sell nets to $0 or less (a parts-only job with no
-  // call-out floor). Gate on serviceSell, not the pre-rounding serviceSellAuto
-  // — that guard missed the case where serviceSellAuto is positive but
-  // rounding/typing still drives the final serviceSell to $0 or below. In
-  // both cases report the whole-job effectiveMargin (already 1 − cost ÷
-  // total) instead, so the slider/save-margin never shows a wild, negative,
-  // or falsely-zero number near this cliff.
-  const serviceMargin =
-    fin.overridden || serviceSell <= 0 ? fin.effectiveMargin : 1 - i.serviceCost / serviceSell;
+  // #217 fix wave 2 / #367: the service-only markup, (serviceSell − serviceCost) ÷ serviceCost; an overridden or
+  // zero service sell reports the whole-job effectiveMarkup instead.
+  const serviceMarkup =
+    fin.overridden || serviceSell <= 0 || !(i.serviceCost > 0) ? fin.effectiveMarkup : (serviceSell - i.serviceCost) / i.serviceCost;
   return {
     ...fin,
     serviceCost: i.serviceCost,
@@ -418,10 +414,10 @@ export function finishRepair(i: {
     partsSell,
     serviceSell,
     cost,
-    margin: i.margin,
+    margin: markup,
     partsMargin: i.partsMargin,
-    serviceMargin,
-    ...liftFinish(lift, i.margin, fin.total),
+    serviceMarkup,
+    ...liftFinish(lift, markup, fin.total),
   };
 }
 
@@ -438,35 +434,35 @@ export function fmtDollars(n: number): string {
   return "$" + Math.round(n || 0).toLocaleString("en-US");
 }
 
-/** A margin fraction as points with one decimal: 0.28125 → "28.1". */
-export function fmtPts(margin: number): string {
-  const v = Math.round((Number.isFinite(margin) ? margin : 0) * 1000) / 10;
+/** A markup fraction as a percent with one decimal: 0.428571 → "42.9". */
+export function fmtPct(markup: number): string {
+  const v = Math.round((Number.isFinite(markup) ? markup : 0) * 1000) / 10;
   return v.toLocaleString("en-US", { maximumFractionDigits: 1 });
 }
 
-/** The builder's 10–50 slider position for a (back-solved) margin. */
-export function sliderPts(margin: number): number {
-  const pts = Math.round(margin * 100);
-  if (!Number.isFinite(pts)) return MARGIN_SLIDER_MIN;
-  return Math.max(MARGIN_SLIDER_MIN, Math.min(MARGIN_SLIDER_MAX, pts));
+/** The builder's 10–100 slider position for a (back-solved) markup. */
+export function sliderPct(markup: number): number {
+  const pts = Math.round(markup * 100);
+  if (!Number.isFinite(pts)) return MARKUP_SLIDER_MIN;
+  return Math.max(MARKUP_SLIDER_MIN, Math.min(MARKUP_SLIDER_MAX, pts));
 }
 
 export type PriceWarning = {
-  kind: "below-cost" | "low-margin" | "below parts price";
+  kind: "below-cost" | "low-markup" | "below parts price";
   text: string;
 } | null;
 
 /**
- * Warning (never a block) for a typed total below cost or under a 10%
- * margin. `partsSell` (repairs only) checks first: a typed total under what
+ * Warning (never a block) for a typed total below cost or under an 11%
+ * markup (the markup check needs a positive cost — a $0-cost job never reads "Low markup — 0%"). `partsSell` (repairs only) checks first: a typed total under what
  * the parts alone are selling for is a sharper signal than the whole-job
  * below-cost check — it can fire even when the total still clears the raw
- * job cost, since parts sell at a margin above their raw cost.
+ * job cost, since parts sell at a markup above their raw cost.
  */
 export function typedPriceWarning(
   total: number,
   cost: number,
-  margin: number,
+  markup: number,
   partsSell?: number | null
 ): PriceWarning {
   if (partsSell != null && total < partsSell)
@@ -479,10 +475,11 @@ export function typedPriceWarning(
       kind: "below-cost",
       text: `Below cost — ${fmtDollars(total)} is ${fmtDollars(cost - total)} under the ${fmtDollars(cost)} cost.`,
     };
-  if (margin < LOW_MARGIN_WARN)
+  // #367: with no positive cost there is no markup to judge (it reads 0) — only the checks above apply.
+  if (cost > 0 && markup < LOW_MARKUP_WARN)
     return {
-      kind: "low-margin",
-      text: `Low margin — ${fmtPts(margin)} pts at this total, under ${Math.round(LOW_MARGIN_WARN * 100)} pts.`,
+      kind: "low-markup",
+      text: `Low markup — ${fmtPct(markup)}% at this total, under ${Math.round(LOW_MARKUP_WARN * 100)}%.`,
     };
   return null;
 }
@@ -492,7 +489,7 @@ export function typedPriceWarning(
  * the final total: travel's proportional share, flight × total ÷ cost, clamped
  * to [0, total]; the service part (`rest`) absorbs rounding and a typed total,
  * so the printed parts always sum to the total. With no stored cost (legacy
- * quotes) it falls back to D283's flight ÷ (1 − margin).
+ * quotes) it falls back to flight × (1 + markup) (D283, #367).
  */
 export function travelLineShare(i: {
   flightTotal: number;
@@ -502,11 +499,10 @@ export function travelLineShare(i: {
 }): { travel: number; rest: number } {
   const total = Math.max(0, Math.round(i.total || 0));
   const flight = Math.max(0, i.flightTotal || 0);
-  const m = i.margin ?? 0;
   const share =
     i.cost != null && i.cost > 0
       ? Math.round((flight * total) / i.cost)
-      : Math.round(m > 0 && m < 1 ? flight / (1 - m) : flight);
+      : Math.round(sellAtMarkup(flight, i.margin ?? 0));
   const travel = Math.max(0, Math.min(total, share));
   return { travel, rest: total - travel };
 }

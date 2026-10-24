@@ -54,7 +54,7 @@ export function curtainQty(d: CurtainSpec): number {
  * authoritative curtainCost().priceEach when `pricePerSqft` is passed at full
  * precision (it is — see the estimate page):
  *
- *   sewnArea × (rate ÷ (1 − m)) = (sewnArea × rate) ÷ (1 − m) = rawCost ÷ (1 − m)
+ *   sewnArea × (rate × (1 + k)) = (sewnArea × rate) × (1 + k) = rawCost × (1 + k)
  *
  * rounded once. That is the cent-match.
  */

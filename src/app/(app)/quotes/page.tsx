@@ -956,7 +956,7 @@ function SelectedPanel({
   /** #284 — the one next-step view (pill, primary action, ⋯ menu) for this quote and viewer. */
   next: QuoteNextStepView | null;
 }) {
-  const marginPct = Math.round((q.margin || 0) * 100);
+  const markupPct = Math.round((q.margin || 0) * 100);
 
   return (
     <div
@@ -1024,7 +1024,7 @@ function SelectedPanel({
         }}
       >
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>
-          {money(q.value || 0)} quoted{marginPct > 0 ? ` · ${marginPct}% margin` : ""}
+          {money(q.value || 0)} quoted{markupPct > 0 ? ` · ${markupPct}% markup` : ""}
         </span>
         <form action={createQuoteClientPackageAction}>
           <input type="hidden" name="id" value={q.id} />

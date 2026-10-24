@@ -212,7 +212,7 @@ export async function RepairLetterView({ id }: { id: string }) {
   const price = serviceLetterPrice(quote, rp);
   // Flights over drive (spec 2026-09-25 §5): one customer-facing travel line.
   const flight = flightOf(rp.trip);
-  const travelMargin = typeof rp.rates?.margin === "number" ? rp.rates.margin : quote.margin || 0;
+  const travelMarkup = typeof rp.rates?.margin === "number" ? rp.rates.margin : quote.margin || 0;
   const travelParagraph = flight
     ? flyTravelSentence(
         companyName + " (" + originCity + ")",
@@ -226,7 +226,7 @@ export async function RepairLetterView({ id }: { id: string }) {
               ? rp.serviceSell
               : Math.max(0, price.gross - (rp.partsSell || 0)),
           cost: rp.serviceCost,
-          margin: travelMargin,
+          margin: travelMarkup,
         }).travel
       ) + crewSentence
     : "The distance from " +
@@ -246,7 +246,7 @@ export async function RepairLetterView({ id }: { id: string }) {
     rp.warrantyMonths != null ? rp.warrantyMonths : DEFAULT_WARRANTY_MONTHS;
   const totalLabel = money(price.net);
   // #275: an optional lift rental is named, with its own price, in the cost line.
-  const lift = printedLift(rp, travelMargin);
+  const lift = printedLift(rp, travelMarkup);
 
   const contact = (quote.contact as RpContact) || rp.contact || null;
   const greetingName = contact && contact.name ? contact.name : "Sir or Madam";

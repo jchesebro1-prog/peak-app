@@ -27,15 +27,18 @@ import {
 import { ServiceTotalField } from "@/components/service-total-field";
 import { TierSeedPrompt } from "@/components/tier-seed-prompt";
 import { initialTierSeed, reseedKnob, seedFor, type TierPrompt } from "@/lib/tier-seed";
+import { keepSavedMarkup } from "@/lib/markup";
 import type { PricingTier } from "@/lib/identity/config";
 import {
   finishRepair,
-  fmtPts,
+  fmtPct,
+  MARKUP_SLIDER_MAX,
+  MARKUP_SLIDER_MIN,
   liftCostOf,
   liftDraftFrom,
   normalizeLift,
   normalizePriceOverride,
-  sliderPts,
+  sliderPct,
   type LiftDraft,
   type LiftRental,
   type RepairFinish,
@@ -44,7 +47,7 @@ import {
 /**
  * QuoteBuilder — the auto-priced repair estimator (repair twin of the
  * flame-test QuoteBuilder). Holds the ephemeral builder state (customer,
- * venue toggles, scope/parts/labor rows, margin/rate knobs) and previews
+ * venue toggles, scope/parts/labor rows, markup/rate knobs) and previews
  * pricing live with the repair-engine math inlined below (the engine module
  * itself pulls in the server doc-store, so it can't be imported into a
  * client bundle — Save/Approve re-price server-side in actions.ts).
@@ -62,7 +65,7 @@ export type BuilderLocation = {
   oneWayMiles: number | null;
   oneWayMin: number | null;
 };
-export type BuilderContact = { name: string; role: string; email: string; primary: boolean   /** Personal tier margin when the contact has their own tier (item 11). */
+export type BuilderContact = { name: string; role: string; email: string; primary: boolean   /** Personal tier markup when the contact has their own tier (item 11). */
   tierMargin?: number | null;
   /** The contact's own tier — labels the #254 "Use <Tier>" prompt. */
   tier?: PricingTier | null;
@@ -72,9 +75,9 @@ export type BuilderCustomer = {
   name: string;
   locations: BuilderLocation[];
   contacts: BuilderContact[];
-  /** Company-level tier margin fraction (item 11, D88); null → Base/global. */
+  /** Company-level tier markup fraction (item 11, D88); null → Base/global. */
   tierMargin?: number | null;
-  /** The company's own tier (null = none → the builder's default margin, #254). */
+  /** The company's own tier (null = none → the builder's default markup, #254). */
   tier?: PricingTier | null;
 };
 export type BuilderOffice = { name: string; lat: number | null; lng: number | null; quoteDefault?: boolean };
@@ -132,9 +135,11 @@ export type BuilderInitial = {
   /** #282 phase 3: the Rewards credit on the saved quote (whole dollars; 0/absent = none). */
   rewardCredit?: number;
   /** #254: the saved quote's own knob in points (absent for a new quote) — never re-seeded on load. */
-  marginPts?: number | null;
-  /** #254: the saved quote's stamped tier margin fraction (seeds `prevSeedPts`). */
-  stampedTierMargin?: number | null;
+  savedMarkupPts?: number | null;
+  /** #254: the saved quote's stamped tier markup fraction (seeds `prevSeedPts`). */
+  stampedTierMarkup?: number | null;
+  /** #367: the saved quote's exact parts markup (absent for a new quote) — see `keepSavedMarkup`. */
+  savedPartsMarkup?: number | null;
   /** #340: the assessment findings this new quote is built from (posted as `findingKeys`; linked on first save). */
   findingKeys?: string[];
 };
@@ -268,7 +273,7 @@ function computePricing(
     return { name: p.name || "Part", qty, cost, extCost: qty * cost };
   });
   const partsCost = priced.reduce((a, p) => a + p.extCost, 0);
-  // #217: the engine's finish — call-out floor, both margins, $25 rounding, typed total.
+  // #217: the engine's finish — call-out floor, both markups, $25 rounding, typed total.
   const fin = finishRepair({
     serviceCost,
     minCallout: rates.minCallout,
@@ -392,7 +397,7 @@ export function QuoteBuilder({
   const [laborHours, setLaborHours] = useState(initial.laborHours);
   const [crewSize, setCrewSize] = useState(initial.crewSize);
   const [ratesOpen, setRatesOpen] = useState(false);
-  /* #254: the knob opens at a saved quote's own margin, else the tier seed for
+  /* #254: the knob opens at a saved quote's own markup, else the tier seed for
      the opened customer/contact; `prevSeedPts` is the seed it last followed —
      a knob still there is untouched and follows the next customer/contact. */
   const [seed0] = useState(() =>
@@ -400,11 +405,11 @@ export function QuoteBuilder({
       customer: customers.find((c) => c.id === initial.customerId) || null,
       contactName: initial.contactSel === "__other__" ? "" : initial.contactSel,
       serviceDefault: baseRates.margin,
-      savedMarginPts: initial.marginPts,
-      stampedTierMargin: initial.stampedTierMargin,
+      savedMarkupPts: initial.savedMarkupPts,
+      stampedTierMarkup: initial.stampedTierMarkup,
     })
   );
-  const [marginPts, setMarginPts] = useState(seed0.knobPts);
+  const [markupPts, setMarkupPts] = useState(seed0.knobPts);
   const prevSeedPts = useRef(seed0.prevSeedPts);
   const [tierPrompt, setTierPrompt] = useState<TierPrompt | null>(null);
   const [mileageRate, setMileageRate] = useState(baseRates.mileageRate.toFixed(2));
@@ -471,14 +476,14 @@ export function QuoteBuilder({
    *  kept and the new seed is offered as a one-click prompt. */
   function reseedTier(c: BuilderCustomer | null, contactName: string) {
     const next = seedFor(c, contactName === "__other__" ? "" : contactName, baseRates.margin);
-    const res = reseedKnob(marginPts, prevSeedPts.current, next);
+    const res = reseedKnob(markupPts, prevSeedPts.current, next);
     prevSeedPts.current = res.prevSeedPts;
-    setMarginPts(res.knobPts);
+    setMarkupPts(res.knobPts);
     setTierPrompt(res.prompt);
   }
   function applyTierSeed() {
     if (!tierPrompt) return;
-    setMarginPts(tierPrompt.seed.pts);
+    setMarkupPts(tierPrompt.seed.pts);
     setPriceText("");
     setTierPrompt(null);
     dirty();
@@ -497,7 +502,7 @@ export function QuoteBuilder({
     if (locs.length && !locs.some((l) => sel[l.id].on)) sel[locs[0].id].on = true;
     const primary = c?.contacts.find((x) => x.primary) || c?.contacts[0] || null;
     setCustomerId(id);
-    // Re-seed the margin knob from the new customer's tier (contact's own
+    // Re-seed the markup knob from the new customer's tier (contact's own
     // tier wins; item 11, D88) — a hand-set knob is kept with a prompt (#254).
     reseedTier(c, primary ? primary.name : "");
     setVenueSel(sel);
@@ -538,11 +543,15 @@ export function QuoteBuilder({
   }
 
   /* ---- live pricing ---- */
+  const partsMarkup = keepSavedMarkup(initial.savedPartsMarkup, baseRates.partsMargin);
   const liveRates: BuilderRates = {
     ...baseRates,
     mileageRate: parseFloat(mileageRate) || baseRates.mileageRate,
     laborRate: parseFloat(laborRate) || baseRates.laborRate,
-    margin: marginPts / 100,
+    margin: markupPts / 100,
+    // #367: the same rule the save applies — a saved quote keeps its exact parts markup while today's
+    // global is the same whole percent, so the preview never shows a moved parts sell on an untouched quote.
+    partsMargin: partsMarkup,
   };
   const selectedVenues: VenueIn[] = locations
     .filter((l) => venueSel[l.id]?.on)
@@ -570,7 +579,7 @@ export function QuoteBuilder({
 
   /** #217 — back to the auto total; the slider stays where the typed total put it. */
   function resetToAuto() {
-    if (r?.overridden) setMarginPts(sliderPts(r.serviceMargin));
+    if (r?.overridden) setMarkupPts(sliderPct(r.serviceMarkup));
     setPriceText("");
     dirty();
   }
@@ -608,7 +617,7 @@ export function QuoteBuilder({
     fd.set("notes", notes);
     fd.set("laborHours", laborHours);
     fd.set("crewSize", String(crew));
-    fd.set("margin", String(marginPts));
+    fd.set("markup", String(markupPts));
     fd.set("mileageRate", mileageRate);
     fd.set("laborRate", laborRate);
     fd.set("travel", JSON.stringify(overrideFromDraft(travelDraft) ?? {}));
@@ -674,7 +683,7 @@ export function QuoteBuilder({
       " part" +
       (pricedParts.length === 1 ? "" : "s")
     : "No venues selected";
-  const partsPts = Math.round(baseRates.partsMargin * 100);
+  const partsPts = Math.round(partsMarkup * 100);
 
   return (
     <div className="pk-content" style={{ fontFamily: "var(--font-ui)", color: "#16181d" }}>
@@ -1216,8 +1225,8 @@ export function QuoteBuilder({
                   + Add part
                 </button>
                 <div style={{ fontSize: 11.5, color: "#9aa0ab", lineHeight: 1.55 }}>
-                  Parts are marked up {partsPts} pts on cost; labor and travel carry the service
-                  margin, floored at the {money(baseRates.minCallout)} minimum call-out.
+                  Parts are marked up {partsPts}% on cost; labor and travel carry the service
+                  markup, floored at the {money(baseRates.minCallout)} minimum call-out.
                 </div>
               </div>
             </>
@@ -1313,7 +1322,7 @@ export function QuoteBuilder({
                   }}
                 >
                   <span style={{ color: "#5b616e" }}>
-                    Margin · {r?.overridden ? fmtPts(r.serviceMargin) : marginPts} pts
+                    Markup · {r?.overridden ? fmtPct(r.serviceMarkup) : fmtPct(markupPts / 100)}%
                   </span>
                   <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "#1f7a52" }}>
                     +{money((r?.serviceSell || 0) - (r?.serviceCost || 0))}
@@ -1321,12 +1330,12 @@ export function QuoteBuilder({
                 </div>
                 <input
                   type="range"
-                  min={10}
-                  max={50}
+                  min={MARKUP_SLIDER_MIN}
+                  max={MARKUP_SLIDER_MAX}
                   step={1}
-                  value={r?.overridden ? sliderPts(r.serviceMargin) : marginPts}
+                  value={r?.overridden ? sliderPct(r.serviceMarkup) : markupPts}
                   onChange={(e) => {
-                    setMarginPts(Math.round(+e.target.value));
+                    setMarkupPts(Math.round(+e.target.value));
                     setPriceText("");
                     setTierPrompt(null);
                     dirty();
@@ -1342,8 +1351,8 @@ export function QuoteBuilder({
                     margin: "-2px 0 9px",
                   }}
                 >
-                  <span>10 pts</span>
-                  <span>50 pts</span>
+                  <span>{MARKUP_SLIDER_MIN}%</span>
+                  <span>{MARKUP_SLIDER_MAX}%</span>
                 </div>
                 <TierSeedPrompt prompt={tierPrompt} onUse={applyTierSeed} accent={accent} />
                 <BreakRow label="Service sell" value={money(r?.serviceSell || 0)} last />
@@ -1367,7 +1376,7 @@ export function QuoteBuilder({
                 />
               ))}
               <BreakRow
-                label={"Parts markup · " + partsPts + " pts"}
+                label={"Parts markup · " + partsPts + "%"}
                 value={"+" + money((r?.partsSell || 0) - (r?.partsCost || 0))}
                 last
               />
@@ -1387,7 +1396,7 @@ export function QuoteBuilder({
                 total={total}
                 autoTotal={r?.autoTotal ?? 0}
                 cost={r?.cost ?? 0}
-                margin={r?.serviceMargin ?? 0}
+                markup={r?.serviceMarkup ?? 0}
                 partsSell={r?.partsSell ?? 0}
                 overridden={!!r?.overridden}
                 text={priceText}
@@ -1493,7 +1502,7 @@ export function QuoteBuilder({
                     />
                   </div>
                   <div style={{ fontSize: 10.5, color: "#9aa0ab", lineHeight: 1.5 }}>
-                    {money(baseRates.minCallout)} minimum call-out · parts marked up {partsPts} pts
+                    {money(baseRates.minCallout)} minimum call-out · parts marked up {partsPts}%
                     · travel time rounded up to {baseRates.travelRoundMin} min · emergency labor ×
                     {baseRates.emergencyMult}. Multiple venues on one quote share a single round
                     trip.

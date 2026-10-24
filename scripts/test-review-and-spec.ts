@@ -5,6 +5,8 @@ import {
 } from "@/lib/consulting-schedule";
 import { barRect, dateFromX, dayColumns, ganttWindow, localNoon, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { normalizeSku } from "@/lib/davinci/sku";
+// #367: margin-era inputs feed the markup engine through mk(); expected dollars stay.
+import { marginToMarkup as mk } from "@/lib/markup";
 import { modelSku as cr304ModelSku, partModel as cr304PartModel, partMatchesQuery as cr304Match, partSearchHaystack as cr304Hay, staffPartLabel as cr304Label, cleanModel as cr304Clean, orderNumberOf as cr304OrderNo } from "@/lib/catalog-rename/sku";
 import { planRenames as cr304Plan, crosswalkRowsFromGrid as cr304Rows } from "@/lib/catalog-rename/plan";
 import * as cr304Rw from "@/lib/catalog-rename/rewrite";
@@ -244,11 +246,11 @@ import {
   foldLaborMobLines,
   isLaborOverheadItem,
   lineExtSellOf,
-  lineMarginOf,
+  lineMarkupOf,
   parseAddQty,
   priceFromUnitSellEdit,
-  repriceAtMargin,
-  repricedAtLineMargin,
+  repriceAtMarkup,
+  repricedAtLineMarkup,
   round2,
   systemFreight,
   systemFreightBase,
@@ -800,12 +802,12 @@ ok(
   "lineExtSellOf: a manual extended-sell override still wins over qty × price (metrics.ts equipmentSold relies on this)"
 );
 
-// Margin slider / system Sell field reprice — must clear a standing ext-sell
-// override so a previously back-solved line follows the new margin too.
-const marginReprice = repriceAtMargin(70, 0.3);
-ok(marginReprice.price === round2(70 / 0.7) && marginReprice.extSellOverride === undefined, "margin reprice: clears a line's ext-sell override so it follows the new margin");
-const marginRepriceZero = repriceAtMargin(0, 0);
-ok(marginRepriceZero.price === 0 && marginRepriceZero.extSellOverride === undefined, "margin reprice: a $0 cost at 0% margin reprices to $0, still clearing the override");
+// Markup slider / system Sell field reprice — must clear a standing ext-sell
+// override so a previously back-solved line follows the new markup too.
+const marginReprice = repriceAtMarkup(70, mk(0.3));
+ok(marginReprice.price === round2(70 / 0.7) && marginReprice.extSellOverride === undefined, "markup reprice: clears a line's ext-sell override so it follows the new markup");
+const marginRepriceZero = repriceAtMarkup(0, 0);
+ok(marginRepriceZero.price === 0 && marginRepriceZero.extSellOverride === undefined, "markup reprice: a $0 cost at 0% markup reprices to $0, still clearing the override");
 
 /* --- Estimator material/vendor quote CSV --- */
 const materialCsv = parseMaterialCsv(`sku,description,quantity,unit,unit_cost,unit_sell,link
@@ -961,66 +963,66 @@ ok(
    Two pure rules carry the whole feature's money, and both are easy to regress
    into something that looks right in the form and writes something else.
 
-   1. repricedAtLineMargin — an edited quote's new total reprices the line at
-      the margin it is ALREADY carrying, not the tier seed. The user may have
+   1. repricedAtLineMarkup — an edited quote's new total reprices the line at
+      the markup it is ALREADY carrying, not the tier seed. The user may have
       dragged the system margin slider or typed a sell price since the quote was
       added; re-seeding would silently undo that. The vendor form's "Sell" stat
-      is handed the same margin (vendorFormMargin, estimator-client.tsx), so
+      is handed the same markup (vendorFormMarkup, estimator-client.tsx), so
       these cases also pin the stat against the number the save commits.
    2. vendorTotalSeed — a quote whose total came from its material lines must
       still come from them after an edit, or the line a vendor's revision adds
       rides in the itemized breakdown without being in the price. */
 ok(
-  repricedAtLineMargin(10000, 16666.67, 10000, 0.3) === 16666.67,
+  repricedAtLineMarkup(10000, 16666.67, 10000, mk(0.3)) === 16666.67,
   "#144 an unchanged cost leaves the line's price untouched, to the cent"
 );
-// A 40% line (the slider's doing) stays 40% when the vendor's total moves.
+// A 40%-margin line (66.67% markup, the slider's doing) keeps it when the vendor's total moves.
 ok(
-  repricedAtLineMargin(10000, 16666.67, 12000, 0.3) === 20000 &&
-    Math.abs((lineMarginOf(10000, 16666.67) ?? 0) - 0.4) < 1e-6,
-  "#144 a line dragged to 40% is repriced at 40%, not re-seeded from the tier"
+  repricedAtLineMarkup(10000, 16666.67, 12000, mk(0.3)) === 20000 &&
+    Math.abs((lineMarkupOf(10000, 16666.67) ?? 0) - 40 / 60) < 1e-6,
+  "#144 a line dragged to 66.7% markup is repriced at that markup, not re-seeded from the tier"
 );
 /* The regression this exists to catch: the tier seed would write 12000/0.7 =
    $17,142.86 over a line the user had set to 40% — $2,857 of margin gone with
    no control touched. */
 ok(
-  repricedAtLineMargin(10000, 16666.67, 12000, 0.3) !== round2(12000 / 0.7),
+  repricedAtLineMarkup(10000, 16666.67, 12000, mk(0.3)) !== round2(12000 / 0.7),
   "#144 the tier seed is NOT what an edited line reprices at"
 );
 ok(
-  repricedAtLineMargin(10000, 18181.82, 12000, 0.3) === 21818.18,
-  "#144 a 45% line reprices at 45% (the all-systems slider's margin survives an edit)"
+  repricedAtLineMarkup(10000, 18181.82, 12000, mk(0.3)) === 21818.18,
+  "#144 an 81.8% markup line reprices at 81.8% (the all-systems slider's markup survives an edit)"
 );
 /* The Sell stat and the commit read the same margin, so the form can never
    quote a price the save does not write (#144 re-review). */
-const statMargin = lineMarginOf(10000, 18181.82) ?? 0.3;
+const statMargin = lineMarkupOf(10000, 18181.82) ?? mk(0.3);
 ok(
-  round2(12000 / (1 - statMargin)) === repricedAtLineMargin(10000, 18181.82, 12000, 0.3),
-  "#144 the form's Sell stat and the saved price come out of one margin"
+  round2(12000 * (1 + statMargin)) === repricedAtLineMarkup(10000, 18181.82, 12000, mk(0.3)),
+  "#144 the form's Sell stat and the saved price come out of one markup"
 );
-// No usable margin on the line — a $0 sell, or a $0 cost whose margin is
-// exactly 1 and would divide by zero — falls back to the seed rule.
-ok(lineMarginOf(1000, 0) === null && lineMarginOf(0, 500) === null, "#144 a $0 price and a $0 cost carry no rescalable margin");
+// No usable markup on the line — a $0 sell, or a $0 cost with no markup to
+// read — falls back to the seed rule.
+ok(lineMarkupOf(1000, 0) === null && lineMarkupOf(0, 500) === null, "#144 a $0 price and a $0 cost carry no rescalable markup");
 ok(
-  repricedAtLineMargin(1000, 0, 2000, 0.3) === 2857.14 &&
-    repricedAtLineMargin(0, 500, 2000, 0.3) === 2857.14,
-  "#144 a line with no usable margin reprices at the tier-else-30% seed"
+  repricedAtLineMarkup(1000, 0, 2000, mk(0.3)) === 2857.14 &&
+    repricedAtLineMarkup(0, 500, 2000, mk(0.3)) === 2857.14,
+  "#144 a line with no usable markup reprices at the tier seed"
 );
 // A line hand-priced BELOW its cost is carrying a real, if unhappy, margin:
 // preserved (100/50 is half cost, so $200 of cost stays $100 of sell), never
 // quietly corrected up to the seed.
-ok(repricedAtLineMargin(100, 50, 200, 0.3) === 100, "#144 a line priced below its cost keeps that ratio");
-// A nonsense seed cannot reach the division either.
+ok(repricedAtLineMarkup(100, 50, 200, mk(0.3)) === 100, "#144 a line priced below its cost keeps that ratio");
+// A nonsense seed cannot reach the price either.
 ok(
-  repricedAtLineMargin(1000, 0, 2000, 1) === 2857.14 && repricedAtLineMargin(1000, 0, 2000, 0) === 2857.14,
-  "#144 an out-of-range seed margin falls back to 30% rather than dividing by zero"
+  repricedAtLineMarkup(1000, 0, 2000, 20) === 2860 && repricedAtLineMarkup(1000, 0, 2000, 0) === 2860,
+  "#144 an out-of-range seed markup falls back to the 43% default (#367: was 30% margin, $2,857.14 → $2,860)"
 );
 const repriceGrid: [number, number, number, number][] = [
   [0, 0, 0, 0.3], [0, 0, 1000, 0.3], [-100, -50, 500, 0.3], [1000, 1000, 2000, 0.3],
   [1000, 1e9, 2000, 0.3], [1000, 500, 0, 0.3], [1000, 2000, -500, 0.3], [0.01, 0.02, 0.03, 0.3],
 ];
 ok(
-  repriceGrid.every(([c, p, nc, s]) => Number.isFinite(repricedAtLineMargin(c, p, nc, s))),
+  repriceGrid.every(([c, p, nc, s]) => Number.isFinite(repricedAtLineMarkup(c, p, nc, s))),
   "#144 repricing never emits NaN or Infinity, whatever the line carries"
 );
 ok(
@@ -2321,7 +2323,7 @@ ok(isOpenStage("quote", "won") === false && isOpenStage("quote", "sent") === tru
 
 /* --- dashboard metrics (#43, task 4a) — openProjects/backlogProjects read the
  *  pipeline tag (isActive/isBacklog), not a hardcoded stage-literal list. --- */
-import { openProjects as metricsOpenProjects, backlogProjects as metricsBacklogProjects, projectedProfit, installsForecast } from "@/lib/dashboard/metrics";
+import { openProjects as metricsOpenProjects, backlogProjects as metricsBacklogProjects, projectedProfit, installsForecast, salesMetrics } from "@/lib/dashboard/metrics";
 const metricsProjects = [
   { kind: "project", stage: "scheduled" },
   { kind: "project", stage: "deposit" },
@@ -2347,12 +2349,12 @@ ok(unknownCount([{ valueUnknown: true }, { valueUnknown: false }, { value: 1 }])
 // unknown one must contribute nothing to value or profit; the book totals
 // exactly the known project.
 const uknProjects = [
-  { kind: "project", stage: "scheduled", value: 500, margin: 0.5 },
-  { kind: "project", stage: "scheduled", value: 900, valueUnknown: true, margin: 0.5 },
+  { kind: "project", stage: "scheduled", value: 500, margin: mk(0.5) },
+  { kind: "project", stage: "scheduled", value: 900, valueUnknown: true, margin: mk(0.5) },
 ] as any;
 const uknProfit = projectedProfit(uknProjects);
 ok(uknProfit.value === 500, `#UKN: projectedProfit's open-book value ignores the unknown project's stray $900 (got ${uknProfit.value})`);
-ok(uknProfit.profit === 250, `#UKN: projectedProfit's profit is margin × the known value only (got ${uknProfit.profit})`);
+ok(uknProfit.profit === 250, `#UKN: projectedProfit's profit is value × k ÷ (1 + k) on the known value only (got ${uknProfit.profit})`);
 ok(uknProfit.unknownCount === 1, "#UKN: projectedProfit reports the one unknown-value project in its book");
 
 // installsForecast's toBill/collected sums (#189) — "To be billed" and
@@ -2362,8 +2364,8 @@ ok(uknProfit.unknownCount === 1, "#UKN: projectedProfit reports the one unknown-
 const nowT189 = Date.now();
 const f189 = installsForecast(
   [
-    { kind: "project", stage: "deposit", value: 1000, margin: 0.3, targetDate: nowT189 + 10 * DAY },
-    { kind: "project", stage: "deposit", value: 500, valueUnknown: true, margin: 0.3, targetDate: nowT189 + 20 * DAY },
+    { kind: "project", stage: "deposit", value: 1000, margin: mk(0.3), targetDate: nowT189 + 10 * DAY },
+    { kind: "project", stage: "deposit", value: 500, valueUnknown: true, margin: mk(0.3), targetDate: nowT189 + 20 * DAY },
   ] as unknown as Parameters<typeof installsForecast>[0],
   [],
   nowT189,
@@ -2373,8 +2375,8 @@ ok(f189.toBill === 1000, `#189: toBill sums only the known-value project landing
 ok(f189.toBillUnknownCount === 1, "#189: toBillUnknownCount counts the UKN project the to-be-billed sum is silently excluding");
 const f189collected = installsForecast(
   [
-    { kind: "project", stage: "deposit", value: 800, margin: 0.3, targetDate: nowT189 - 30 * DAY },
-    { kind: "project", stage: "deposit", value: 200, valueUnknown: true, margin: 0.3, targetDate: nowT189 - 30 * DAY },
+    { kind: "project", stage: "deposit", value: 800, margin: mk(0.3), targetDate: nowT189 - 30 * DAY },
+    { kind: "project", stage: "deposit", value: 200, valueUnknown: true, margin: mk(0.3), targetDate: nowT189 - 30 * DAY },
   ] as unknown as Parameters<typeof installsForecast>[0],
   [],
   nowT189,
@@ -2382,6 +2384,19 @@ const f189collected = installsForecast(
 );
 ok(f189collected.collected === 800, `#189: collected sums only the known-value project (got ${f189collected.collected})`);
 ok(f189collected.collectedUnknownCount === 1, "#189: collectedUnknownCount counts the UKN project the expected-collected sum is silently excluding");
+
+// #367 Task 6 — dashboard math on markup (project.margin / quote.margin hold a markup k).
+ok(Math.abs(projectedProfit([{ value: 1000, margin: 0.25, kind: "project", stage: "scheduled" } as never]).profit - 200) < 1e-9,
+  "markup: projected profit = value × k ÷ (1 + k)");
+const mkPP = projectedProfit([{ value: 1000, margin: mk(0.3), kind: "project", stage: "scheduled" } as never]);
+ok(Math.abs(mkPP.profit - 300) < 1e-9 && Math.abs(mkPP.markup - mk(0.3)) < 1e-9, "markup: value 1000 at the old 30 % margin still projects $300 profit; the book markup is profit ÷ cost");
+const mkSales = salesMetrics([
+  { value: 1000, margin: mk(0.3), createdAt: 10, status: "draft" },
+  { value: 2000, margin: 0.25, createdAt: 10, status: "draft" },
+] as never, 0, 100);
+ok(Math.abs(mkSales.avgMarkup - 700 / 2300) < 1e-9, `markup: avgMarkup is Σ profit ÷ Σ cost over created quotes (got ${mkSales.avgMarkup})`);
+const mkFc = installsForecast([{ kind: "project", stage: "scheduled", value: 1430, margin: 0.43, targetDate: nowT189 + 10 * DAY }] as never, [], nowT189, 12);
+ok(mkFc.cost === 1000 && Math.abs(mkFc.blended - 0.43) < 1e-9, `markup: forecast cost = value ÷ (1 + k), blended = markup (got ${mkFc.cost} / ${mkFc.blended})`);
 
 /* --- venue dimensions (lineset PRO dims, task 1) --- */
 const vdEst = venueDimsFromEstimator({ width: 36, ph: 18, depth: 26, grid: 24, wing: 12, proscenium: true });
@@ -2668,11 +2683,11 @@ ok(gLines[0].partId === "S4LED" && gLines[0].qty === 3, "biggest line first: 3×
 ok(gLines[0].ext === 3600, `extended price = qty × list (${gLines[0].ext})`);
 const gTot = bomTotals([place("S4LED"), place("CYC1")], gridParts);
 ok(gTot.value === 2100 && gTot.cost === 1400, `totals sum value/cost (${gTot.value}/${gTot.cost})`);
-ok(Math.abs(gTot.margin - (2100 - 1400) / 2100) < 1e-9, "margin = (value-cost)/value");
+ok(Math.abs(gTot.markup - (2100 - 1400) / 1400) < 1e-9, "markup = (value-cost)/cost (#367)");
 const gGhost = bomLines([place("GONE")], gridParts);
 ok(gGhost.length === 1 && gGhost[0].ext === 0 && /removed/i.test(gGhost[0].desc),
   "a placement whose part left the catalog stays visible at $0, flagged removed");
-ok(bomTotals([], gridParts).margin === 0, "empty project has margin 0, not NaN");
+ok(bomTotals([], gridParts).markup === 0, "empty project has markup 0, not NaN");
 
 /* --- The Grid geometry (D109) --- */
 import { pointInPolygon, polygonArea, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
@@ -2846,7 +2861,7 @@ ok(cyc.sewnAreaSqft === 800 && cyc.sewnWidthFt === 40, "cyc at 0% fullness: sewn
 ok(cyc.costEach === 720, `#227 flat: flat goods price at the same one rate — 800 × 0.9 = 720, no cyc making charge (got ${cyc.costEach})`);
 
 // margin
-ok(Math.abs(curtainPrice(700) - 1000) < 1e-6, "price = cost / (1 − 0.30)");
+ok(curtainPrice(700) === 1001 && curtainPrice(700, mk(0.3)) === 1000, "price = cost × (1 + markup); #367: the default curtain markup is 43 %, so $700 → $1,001 (was $1,000 at the 30 % margin; mk(0.3) still gives $1,000)");
 
 // SEED_FABRIC_RATES: all five SKUs pinned to their dollar values, plus the
 // key count pinned too so an added-but-unused fabric rate is caught as well.
@@ -2879,7 +2894,7 @@ import { computeCurtain as computeCurtainQuote } from "@/app/(app)/estimator/pri
     { name: "Main", hang: "", fabric: "RB-CHAR-25", qty: "2", height: "19", width: "20", fullness: "50", bottom: "" } as any,
     fabrics as any,
     { sewingPct: 0 },
-    0.3
+    mk(0.3)
   );
   // #227 flat: make cost = sewnArea(30×19=570) × 3.64 = 2074.8 (making is in the rate)
   ok(Math.abs(cc.costEach - 2074.8) < 0.01, `computeCurtain uses the flat $/sq ft cost (got ${cc.costEach})`);
@@ -2889,7 +2904,7 @@ import { computeCurtain as computeCurtainQuote } from "@/app/(app)/estimator/pri
     { name: "Main", hang: "", fabric: "RB-CHAR-25", qty: "2", height: "19", width: "20", fullness: "50", bottom: "", vendorCostOverride: "2080" } as any,
     fabrics as any,
     { sewingPct: 0 },
-    0.3
+    mk(0.3)
   );
   ok(ov.costEach === 2080, "a Rose Brand cost override replaces the make cost in the quote");
 }
@@ -2921,7 +2936,7 @@ import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q } from "@/lib
     { name: "d", hang: "", fabric: rule.fabricSku, qty: String(rule.qty), height: String(rule.h), width: String(rule.w), fullness: String(rule.fullness), bottom: "" } as any,
     fabrics as any,
     { sewingPct: 0 },
-    0.3
+    mk(0.3)
   ).costEach;
   ok(Math.abs(budget - quotePanel * rule.qty) < 1, "budget and quote agree on the same drape's make cost");
 }
@@ -2929,7 +2944,7 @@ import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q } from "@/lib
 /* --- an unrated curtain fabric falls back to costPerSqft, never $0 (final-review finding 1) --- */
 {
   const marvelFab = [{ sku: "RB-MARVEL", name: "21 oz Marvel Velour", costPerSqft: 3.45 }];
-  const cc = computeCurtainQuote({ name: "x", hang: "", fabric: "RB-MARVEL", qty: "1", height: "20", width: "40", fullness: "50", bottom: "" } as any, marvelFab as any, { sewingPct: 0 }, 0.3);
+  const cc = computeCurtainQuote({ name: "x", hang: "", fabric: "RB-MARVEL", qty: "1", height: "20", width: "40", fullness: "50", bottom: "" } as any, marvelFab as any, { sewingPct: 0 }, mk(0.3));
   // fabricRate falls back to costPerSqft 3.45 through fabricAreaRateOf (#227): sewnArea 40×1.5×20=1200 → 1200×3.45=4140
   ok(Math.abs(cc.costEach - 4140) < 0.01, `unrated fabric prices via costPerSqft, not $0 (got ${cc.costEach})`);
 }
@@ -2940,7 +2955,7 @@ import { curtainPriceEach as portalPriceEach } from "@/lib/curtain-geom";
 {
   const spec = (fab: string, w: string, h: string, full: string) => ({ name: "d", hang: "Pipe", fabric: fab, qty: "1", width: w, height: h, fullness: full, bottom: "Chain" });
   const AREA_RATE = 3.64; // Charisma
-  const margin = 0.30;
+  const margin = mk(0.30); // #367: the curtain functions take a markup
   // server flat cost: sewnW = 20×1.5=30, sewnA=30×19=570, cost=570×3.64=2074.8
   const sv = portalCurtainCost(spec("RB-CHAR-25", "20", "19", "50"), { fabricRate: AREA_RATE, sewingPct: 0 }, margin);
   ok(Math.abs(sv.costEach - 2074.8) < 0.01, `portal server cost = flat $/sq ft cost (got ${sv.costEach})`);
@@ -4174,12 +4189,9 @@ import {
   const catalogG = groupOf("catalog");
   const fixtureG = groupOf("fixture");
   ok(travelG.live === true, "#60-67: travel group flips to live: true");
-  /* catalog stays NOT live on purpose: the value is persisted, but nothing in the
-     codebase consumes it — a part with no list price is skipped, never defaulted
-     through this margin. Tagging it "live" would claim an edit reprices something
-     when it cannot (the punch #70 / #14 failure mode). Flip this the same day a
-     real consumer lands. */
-  ok(catalogG.live === false, "#60-67: catalog group stays NOT live — the rate persists but no pricing path reads it yet, so claiming 'live' would be false");
+  /* #367: the catalog default markup IS consumed now (Equipment map, Grid swap search, virtual
+     parts, Quick Design / Grid price table), so the group is live and the row is not reference. */
+  ok(catalogG.live === true, "#60-67 (#367): catalog group is live — the Equipment map, Grid swap search, virtual parts and the Quick Design / Grid price table read the default markup");
   ok(fixtureG.live === true, "#60-67: fixture group flips to live: true");
 
   const rateRows = (g: PricingGroup): RateEntry[] =>
@@ -4189,8 +4201,8 @@ import {
     "#60-67: every travel rate row carries store:'travel' and ref:false"
   );
   ok(
-    rateRows(catalogG).every((it) => it.store === "catalog" && it.ref === true),
-    "#60-67: the catalog rate is wired to store:'catalog' (so it persists) but stays ref:true (so the UI still calls it reference, honestly)"
+    rateRows(catalogG).every((it) => it.store === "catalog" && it.ref === false),
+    "#60-67 (#367): the catalog rate is wired to store:'catalog' and is no longer reference (ref:false) — a real pricing path reads it"
   );
   ok(
     rateRows(fixtureG).every((it) => it.ref === false && it.store === "fixture"),
@@ -4211,8 +4223,8 @@ import {
   );
   ok(byId(travelG, "travel.mph").def === TRAVEL_RATE_DEFAULTS.mph, "#60-67: travel.mph default is still 50");
   ok(
-    byId(catalogG, "catalog.defaultMargin").def === 30 && CATALOG_RATE_DEFAULTS.defaultMargin === 0.3,
-    "#60-67: catalog.defaultMargin default is still 30% (stored as the 0.30 fraction, pctStored)"
+    byId(catalogG, "catalog.defaultMargin").def === 43 && CATALOG_RATE_DEFAULTS.defaultMargin === 0.43,
+    "#60-67: catalog.defaultMargin default is 43 % markup (#367; stored as the 0.43 fraction, pctStored)"
   );
   ok(
     byId(fixtureG, "fixture.mountCclamp").def === FIXTURE_RATE_DEFAULTS.mountCclamp &&
@@ -4380,12 +4392,12 @@ import {
 // illegal non-async export from a "use server" module.
 {
 
-  ok(isTierPriced(500, 0.3) === true, "#76: cost > 0 and margin in (0,1) -> tier-priced");
-  ok(isTierPriced(0, 0.3) === false, "#76: cost = 0 -> fallback to list, not tier-priced");
-  ok(isTierPriced(500, 0) === false, "#76: margin = 0 (outside open interval) -> fallback");
-  ok(isTierPriced(500, 1) === false, "#76: margin = 1 (outside open interval) -> fallback");
-  ok(isTierPriced(500, 1.2) === false, "#76: margin > 1 -> fallback");
-  ok(isTierPriced(500, -0.1) === false, "#76: negative margin -> fallback");
+  ok(isTierPriced(500, mk(0.3)) === true, "#76: cost > 0 and a markup above 0 -> tier-priced");
+  ok(isTierPriced(0, mk(0.3)) === false, "#76: cost = 0 -> fallback to list, not tier-priced");
+  ok(isTierPriced(500, 0) === false, "#76: markup = 0 -> fallback");
+  ok(isTierPriced(500, 1) === true && isTierPriced(500, 1.2) === true, "#76 (#367): a markup of 100 % or more is still tier-priced (no (0, 1) interval on markup)");
+  ok(isTierPriced(500, Number.NaN) === false && isTierPriced(500, Number.POSITIVE_INFINITY) === false, "#76 (#367): a non-finite markup -> fallback");
+  ok(isTierPriced(500, -0.1) === false, "#76: negative markup -> fallback");
 }
 
 /* ---- punch #79: demo seed reaches the dynamic routes ---- */
@@ -10384,8 +10396,8 @@ import {
   ok(sd.mode === "drive" && !("flight" in sd), "#208: a drive-mode saved trip carries mode 'drive' and no flight");
   ok(flightOf(st)?.total === 1765 && flightOf({ miles: 10 }) === null && flightOf({ mode: "drive", flight: f }) === null && flightOf(null) === null,
     "#208: flightOf returns a flight only for a fly-mode saved trip");
-  ok(travelLineAmount(1765, 0.3) === Math.round(1765 / (1 - 0.3)) && travelLineAmount(1765, 0) === 1765,
-    "#208: the customer line is travel's share of the sell price (÷ (1 − margin)), rounded");
+  ok(travelLineAmount(1765, mk(0.3)) === Math.round(1765 / (1 - 0.3)) && travelLineAmount(1765, 0) === 1765,
+    "#208: the customer line is travel's share of the sell price (× (1 + markup)), rounded");
   ok(autoSwitchNote(2200, 1000) === "Drive would be $2,200 — over the $1,000 threshold, priced as flights.",
     "#208: the builder note reads exactly as spec §5");
   ok(
@@ -10420,7 +10432,9 @@ import {
   );
 
   const trvSrc = readFileSync(join(process.cwd(), "src/lib/travel-plan.ts"), "utf8");
-  ok(!/^\s*import\s/m.test(trvSrc), "#208: travel-plan.ts imports nothing — safe for the 'use client' builder previews");
+  const trvImports = trvSrc.match(/^\s*import\s.*$/gm) || [];
+  ok(trvImports.length === 1 && /from "@\/lib\/markup"/.test(trvImports[0]),
+    "#208/#367: travel-plan.ts imports only the pure markup module — safe for the 'use client' builder previews");
 }
 
 /* --- #208 engines: drive mode unchanged vs before (hard-coded pre-change
@@ -10432,7 +10446,7 @@ import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engin
   const near = (a: number | undefined, b: number): boolean => a != null && Math.abs(a - b) < 1e-6;
 
   // ---- flame (1 person) ----
-  const flameRates = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const flameRates = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: mk(0.3), travelRoundMin: 15 };
   const flameNear: FTVenue = { id: "trv-near", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
   const flameFar: FTVenue = { id: "trv-far", label: "Far", curtains: 120, oneWayMiles: 500, oneWayMin: 480 };
   const fd = computeFlameQuote({ venues: [flameNear] }, flameRates);
@@ -10453,7 +10467,7 @@ import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engin
   ok(ffCrew2.travel?.total === 2810, "#208 flame: flame_rates.flyCrew 2 flies two people (1 night) = 2,810");
 
   // ---- repair (default crew 2) ----
-  const repairRates = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  const repairRates = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: mk(0.3), margin: mk(0.3), emergencyMult: 1.5, travelRoundMin: 15 };
   const rd = trvRepairEstimate({ venues: [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }], laborHours: 4 }, repairRates);
   ok(rd.trip.total === 307.5 && rd.serviceCost === 607.5 && near(rd.totalRaw, 607.5 / (1 - 0.3)) && rd.total === 875 && rd.trip.mode === "drive",
     "#208 repair: a $307.50 drive prices exactly as before (607.50 service cost)");
@@ -10468,7 +10482,7 @@ import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engin
   ok(rfOverride.trip.mode === "drive" && rfOverride.serviceCost === 1800 + 2200, "#208 repair: forced Drive keeps the drive");
 
   // ---- inspection (1 person) ----
-  const inspRates = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const inspRates = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
   const idr = trvInspectionEstimate({ venues: [{ id: "trv-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }] }, inspRates);
   ok(idr.trip.total === 307.5 && idr.cost === 832.5 && near(idr.totalRaw, 832.5 / (1 - 0.3)) && idr.total === 1200 && idr.trip.mode === "drive",
     "#208 inspection: a $307.50 drive prices exactly as before (832.50 cost)");
@@ -10596,7 +10610,7 @@ import {
 {
   // M1 — mileage-rate / travel-distance reasons are dropped when both years
   // priced this trip as flights; a mode flip still explains itself.
-  const flameRatesM1 = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const flameRatesM1 = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: mk(0.3), travelRoundMin: 15 };
   const farFlameVenue: FTVenue = { id: "trv-m1-flame-far", label: "Far", curtains: 120, oneWayMiles: 500, oneWayMin: 480 };
   const fr = computeFlameQuote({ venues: [farFlameVenue] }, flameRatesM1);
   ok(fr.trip.mode === "fly", "#208 M1 flame setup: the fixture actually flies this year");
@@ -10619,7 +10633,7 @@ import {
     "#208 M1 flame: a mode flip (drive → fly) still cites the mileage-rate/distance diff and calls out the flip"
   );
 
-  const inspRatesM1 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const inspRatesM1 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
   const farInspVenue = { id: "trv-m1-insp-far", label: "Far", lineSets: 40, oneWayMiles: 500, oneWayMin: 480 };
   const ir = trvInspectionEstimate({ venues: [farInspVenue] }, inspRatesM1);
   ok(ir.trip.mode === "fly", "#208 M1 inspection setup: the fixture actually flies this year");
@@ -10646,7 +10660,7 @@ import {
 {
   // M2 — repair-engine.ts clamps a manual crew override up to crewSize
   // (D282 "never fewer"); an override already at or above it is untouched.
-  const repairRatesM2 = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  const repairRatesM2 = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: mk(0.3), margin: mk(0.3), emergencyMult: 1.5, travelRoundMin: 15 };
   const rClamped = trvRepairEstimate(
     { venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, crewSize: 3, travel: { mode: "fly", crew: 1 } },
     repairRatesM2
@@ -11380,6 +11394,7 @@ import { partyChecks, partyDbChecks } from "./test-parties";
 import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, portalBidPureChecks, portalBidDbChecks, bidReportPureChecks, bidReportWidgetChecks, bidReportDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
 import { lineMoveChecks } from "./test-estimate-line-move";
 import { boxSaleDbChecks, boxSalePureChecks } from "./test-box-sale";
+import { markupPureChecks, markupDbChecks, markupParityChecks } from "./test-markup";
 import { vendorChecks, vendorDbChecks, vendorPdfDbChecks, vendorPdfPureChecks, vendorPdfFillChecks } from "./test-vendors";
 import { oct15PureChecks, oct15DbChecks, discardConfirmChecks } from "./test-oct15-estimating";
 import { photoWrapPureChecks, photoWrapDbChecks } from "./test-photo-wrap";
@@ -11803,6 +11818,7 @@ seeded()
   .then(() => settingsRaceFollowupChecks(ok))
   .then(() => lineMoveChecks(ok))
   .then(() => boxSalePureChecks(ok)).then(() => boxSaleDbChecks(ok))
+  .then(() => markupPureChecks(ok)).then(() => markupDbChecks(ok)).then(() => markupParityChecks(ok))
   .then(() => reviewSheet363Checks(ok))
   .then(() => bomModels365DbChecks(ok))
   .finally(() => teardownFixtures())
@@ -19073,12 +19089,12 @@ import { EQUIPMENT_ROW_BY_KEY as gemRowByKey2 } from "@/lib/design/equipment-voc
     parts: [{ sku: "GEM-MIX", qty: 1 }, { sku: "GEM-DSP", qty: 2 }],
     createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
   };
-  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), margin: 0.3 };
+  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), markup: mk(0.3) };
   const p = (cell: Parameters<typeof gemPriceCell2>[0], key = "lighting:par") => gemPriceCell2(cell, def(key), ctx);
   const par = p({ kind: "part", sku: "GEM-PAR" });
   ok(par.status === "part" && par.unitCost === 600 && par.unitSell === 900, "#211 T2: a part prices at live catalog cost / list");
   const hb = p({ kind: "part", sku: "GEM-HB" }, "rigging:headblock");
-  ok(hb.status === "part" && hb.unitSell === gemSell2(500, 0.3) && hb.unitSell === 714.29, "#211 T2: a part with no list sells at cost ÷ (1 − catalog margin)");
+  ok(hb.status === "part" && hb.unitSell === gemSell2(500, mk(0.3)) && hb.unitSell === 714.29, "#211 T2: a part with no list sells at cost × (1 + catalog markup)");
   const gone = p({ kind: "part", sku: "GEM-GONE" });
   ok(gone.status === "needs-part" && /no longer in the catalog/.test(gone.reason), "#211 T2: a deleted part is needs-a-part, not $0");
   ok(p({ kind: "part", sku: "GEM-NIL" }).status === "needs-part", "#211 T2: an unpriced part is needs-a-part");
@@ -19086,7 +19102,7 @@ import { EQUIPMENT_ROW_BY_KEY as gemRowByKey2 } from "@/lib/design/equipment-voc
   ok(asm.status === "assembly" && asm.unitCost === 8000 && asm.unitSell === 11200 && asm.desc === "Mixer + DSP rack", "#211 T2: a System assembly prices at its included totals (resolveFixture)");
   ok(p({ kind: "assembly", id: "SA-DELETED" }, "audio:mixerDsp").status === "needs-part", "#211 T2: a deleted assembly is needs-a-part");
   const allow = p({ kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 5 }, "audio:subwoofer");
-  ok(allow.status === "allowance" && allow.unitCost === 1200 && allow.unitSell === gemSell2(1200, 0.3), "#211 T2: a confirmed allowance is a unit cost, sold through the catalog margin");
+  ok(allow.status === "allowance" && allow.unitCost === 1200 && allow.unitSell === gemSell2(1200, mk(0.3)), "#211 T2: a confirmed allowance is a unit cost, sold through the catalog markup");
   ok(p({ kind: "allowance", amount: 1200, confirmedBy: "", confirmedAt: 5 }, "audio:subwoofer").status === "needs-part", "#211 T2: an unconfirmed allowance never prices");
   const empty = p(null);
   ok(empty.status === "needs-part" && empty.reason === "Not mapped yet", "#211 T2: an empty cell is needs-a-part with no $");
@@ -19117,7 +19133,7 @@ import { EQUIPMENT_ROW_BY_KEY as gemRowByKey2 } from "@/lib/design/equipment-voc
   const map: GemMap2 = { "lighting:par": same, "audio:mixerDsp": { tiers: { better: { kind: "assembly", id: "SA-GEM2" } }, updatedBy: "t", updatedAt: 1 } };
   const table = gemTable2(map, ctx);
   const allKeys = [...gemRowByKey2.keys()];
-  ok((["good", "better", "best"] as const).every((t) => allKeys.every((k) => !!table.byTier[t][k])) && table.margin === 0.3, "#211 T2: the table has a price (or needs-a-part) for every row × tier");
+  ok((["good", "better", "best"] as const).every((t) => allKeys.every((k) => !!table.byTier[t][k])) && table.markup === mk(0.3), "#211 T2: the table has a price (or needs-a-part) for every row × tier");
   ok(table.byTier.good["audio:mixerDsp"].status === "needs-part" && table.byTier.better["audio:mixerDsp"].status === "assembly", "#211 T2: tiers resolve independently");
   ok(allKeys.filter((k) => !map[k]).every((k) => table.byTier.better[k].status === "needs-part"), "#211 T2: every unmapped row is needs-a-part — nothing is pre-mapped");
   ok(gemMapSkus2(map, ctx.fixtures).sort().join(",") === "GEM-DSP,GEM-MIX,GEM-PAR", "#211 T2: mapSkus names every part the map needs, assembly parts included");
@@ -19139,7 +19155,7 @@ const gemValueImports = (src: string): string[] =>
     lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] },
     parts: [{ sku: "GEM-MIX", qty: 1 }], createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
   };
-  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), margin: 0.3 };
+  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), markup: mk(0.3) };
   const hints = { "lighting:par": { text: "was $500 / $750 / $1,150", skus: [] as string[] } };
   const empty = gemView3({}, ctx, hints);
   ok(empty.length === 51 && empty.every((r) => r.status === "needs-part" && r.cells.every((c) => c.kind === "empty" && c.input === null)), "#211 T3: an empty map shows every row as Needs a part");
@@ -19253,7 +19269,7 @@ import { readdirSync as gemReaddir5 } from "node:fs";
     "rigging:headblock": { tiers: { better: { kind: "part", sku: "GEM5-HB" } }, updatedBy: "t", updatedAt: 1 },
     "curtains:draw": { tiers: { good: { kind: "part", sku: "GEM5-VEL" } }, sameAll: true, updatedBy: "t", updatedAt: 1 },
     "audio:subwoofer": { tiers: { good: { kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 5 } }, sameAll: true, updatedBy: "t", updatedAt: 1 },
-  }, { parts, fixtures: new Map(), margin: 0.3 });
+  }, { parts, fixtures: new Map(), markup: mk(0.3) });
   const better = gemTierSystems5(C, s, "better", gemTierDefs5(), table);
   const item = (sys: string, key: string, list = better) => list.find((x) => x.key === sys)!.items.find((i) => i.key === key)!;
   const par = item("lighting", "lighting:par");
@@ -19280,7 +19296,7 @@ import { readdirSync as gemReaddir5 } from "node:fs";
         updatedAt: 1,
       },
     },
-    { parts, fixtures: new Map(), margin: 0.3 }
+    { parts, fixtures: new Map(), markup: mk(0.3) }
   );
   const allowBetter = gemTierSystems5(C, s, "better", gemTierDefs5(), allowTable);
   const drawAllow = allowBetter.find((x) => x.key === "curtains")!.items.find((i) => i.key === "curtains:draw")!;
@@ -19444,7 +19460,7 @@ import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
       ["GEM6-PAR", { sku: "GEM6-PAR", desc: "Par", unit: "ea", cost: 600, list: 900 }],
     ]),
     fixtures: new Map<string, typeof rack | typeof fx>([[rack.id, rack], [fx.id, fx]]),
-    margin: 0.3,
+    markup: mk(0.3),
   };
   const map = { "audio:subwoofer": { tiers: { good: { kind: "allowance" as const, amount: 1200, confirmedBy: "Chris", confirmedAt: 5 } }, sameAll: true, updatedBy: "t", updatedAt: 1 } };
   const v = gemVirtual6(["asm:SA-GEM6", "asm:fa-gem6", "allow:audio:subwoofer:better", "allow:video:screen:good", "PLAIN", "asm:SA-GEM6"], map, ctx);
@@ -19522,7 +19538,7 @@ import {
   const ctx7 = {
     parts: new Map([["MIX-7", { sku: "MIX-7", desc: "Mixer", unit: "ea", cost: 500, list: 800 }]]),
     fixtures: new Map([[rackDead.id, rackDead], [rackLive.id, rackLive]]),
-    margin: 0.3,
+    markup: mk(0.3),
   };
   const map7 = { "audio:subwoofer": { tiers: { good: { kind: "allowance" as const, amount: 1200, confirmedBy: "Chris", confirmedAt: 5 } }, sameAll: true, updatedBy: "t", updatedAt: 1 } };
   const v7 = gemVirtual7(["asm:SA-DEAD7", "asm:SA-GONE7", "asm:SA-LIVE7", "allow:audio:subwoofer:good", "allow:video:screen:good"], map7, ctx7);
@@ -19590,7 +19606,7 @@ import { manualScopeInputs as gemManualInputs7 } from "@/lib/design/grid-intake"
     lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] },
     parts: [{ sku: "GEM7-MIX", qty: 1 }], createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
   };
-  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), margin: 0.3 };
+  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), markup: mk(0.3) };
   const every = (c: GemCell7) => ({ tiers: { good: c }, sameAll: true, updatedBy: "t", updatedAt: 1 });
   const table = gemTable7({
     "lighting:par": every({ kind: "part", sku: "GEM7-PAR" }),
@@ -19702,17 +19718,17 @@ import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model
   const fabricHits9 = gemCurtainHits9([
     { sku: "GEM9-VEL", desc: "GEM9 velour", curtainAreaRate: 3.5 },
     { sku: "GEM9-RATELESS", desc: "GEM9 unrated fabric" },
-  ], 0.3);
+  ], mk(0.3));
   ok(
     fabricHits9.length === 1 &&
       fabricHits9[0].kind === "part" &&
       fabricHits9[0].ref === "GEM9-VEL" &&
       fabricHits9[0].unit === "sq ft fabric" &&
       fabricHits9[0].unitSell === 5,
-    "#211 T8 fix wave 1 (I2): a curtain row's swap candidates are Fabric parts with a positive area rate, shown as a per-sq-ft SELL through the catalog margin (3.5 ÷ 0.7 = 5), never the raw cost rate — a list-less, cost-less fabric is still findable"
+    "#211 T8 fix wave 1 (I2): a curtain row's swap candidates are Fabric parts with a positive area rate, shown as a per-sq-ft SELL through the catalog markup (3.5 × (1 + mk(0.3)) = 5), never the raw cost rate — a list-less, cost-less fabric is still findable"
   );
   ok(
-    gemCurtainHits9([{ sku: "GEM9-RATELESS", desc: "x" }], 0.3).length === 0,
+    gemCurtainHits9([{ sku: "GEM9-RATELESS", desc: "x" }], mk(0.3)).length === 0,
     "#211 T8 fix wave 1 (I2): a Fabric part with no area rate at all is never a curtain-row candidate"
   );
 
@@ -19723,7 +19739,7 @@ import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model
       { sku: "GEM9-LIST", desc: "priced by list", unit: "ea", cost: 0, list: 250 },
       { sku: "GEM9-FREE", desc: "unpriced", unit: "ea", cost: 0, list: 0 },
     ],
-    0.3
+    mk(0.3)
   );
   ok(
     partHits9.length === 2 && partHits9.every((h) => h.ref !== "GEM9-FREE") && partHits9.find((h) => h.ref === "GEM9-LIST")!.unitSell === 250,
@@ -19863,10 +19879,10 @@ import { defaultAState as gemFrDefault } from "@/app/(app)/design/quick/engine";
   ok(qp.includes("loadDesignPricing(") && !qp.includes("assemblyUnitTotals") && qc.includes("fixtureOverridesFor(a.fixtureAssemblies, fixturePrices)") && !qc.includes("hit.sell"), "#211 final review I3: Quick Design prices fixture picks on the server (priceCell), never the list-only sum");
   // I4 — the server's own count; the client's `incomplete` is never read.
   const allAllow = {
-    margin: 0.3,
+    markup: mk(0.3),
     byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(gemFrRows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
   };
-  const emptyTable = { margin: 0.3, byTier: { good: {}, better: {}, best: {} } };
+  const emptyTable = { markup: mk(0.3), byTier: { good: {}, better: {}, best: {} } };
   const cfgFr = { ...gemFrDefault(10) } as unknown as Record<string, unknown>;
   const recFr = { tier: "better", config: cfgFr };
   ok(gemFrQuickNeeds(recFr, emptyTable, {}) > 0 && gemFrQuickNeeds(recFr, allAllow, {}) === 0, "#211 final review I4: quickDesignNeedsPart — empty map counts lines, a fully mapped map counts none");
@@ -19983,7 +19999,7 @@ import { compute as gemW2Compute, hydrateAState as gemW2Hydrate, tierTotals as g
 {
   const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const table = {
-    margin: 0.3,
+    markup: mk(0.3),
     byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(gemFrRows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
   };
   const rates = { installPct: 18, freightPct: 5, contingencyPct: 10 };
@@ -19996,7 +20012,7 @@ import { compute as gemW2Compute, hydrateAState as gemW2Hydrate, tierTotals as g
   ok(p0.needsPart === 0 && p0.budget > 0 && p0.budget === Math.round(screen), `#211 wave 2 I1: quickDesignPrice totals exactly as Quick Design's screen does (${p0.budget} vs ${screen})`);
   const pSets = gemW2Price({ tier: "better", config: { ...cfg, tierSets: { better: 23 } } }, table, {}, rates);
   ok(pSets.budget !== p0.budget && gemW2TierDefs({ tierSets: { better: 2, good: -1, best: Number.NaN } as never }).better.sets === 2 && gemW2TierDefs({ tierSets: { good: -1 } as never }).good.sets === null, "#211 wave 2 I1: the design's own line-set dial (config.tierSets) reaches the server price; junk is ignored");
-  ok(gemW2Price(rec, { margin: 0.3, byTier: { good: {}, better: {}, best: {} } }, {}, rates).needsPart > 0, "#211 wave 2 I1: an empty map still prices needs-a-part");
+  ok(gemW2Price(rec, { markup: mk(0.3), byTier: { good: {}, better: {}, best: {} } }, {}, rates).needsPart > 0, "#211 wave 2 I1: an empty map still prices needs-a-part");
   const hostile = Object.defineProperty({}, "sys", { enumerable: true, get() { throw new Error("bad config"); } }) as Record<string, unknown>;
   const ph = gemW2Price({ tier: "better", config: hostile }, table, {}, rates);
   ok(ph.needsPart === 1 && ph.budget === 0, "#211 wave 2 I1: a config that won't compute is incomplete at $0, never throws");
@@ -20039,7 +20055,7 @@ import {
 {
   const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const table = {
-    margin: 0.3,
+    markup: mk(0.3),
     byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(gemFrRows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
   };
   const rates = { installPct: 18, freightPct: 5, contingencyPct: 10 };
@@ -20333,7 +20349,7 @@ import { EQUIPMENT_ROW_BY_KEY as ci212RowByKey } from "@/lib/design/equipment-vo
   const plain: Ci212Map = {
     "audio:subwoofer": { tiers: { good: { kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 7 } }, sameAll: true, updatedBy: "Chris", updatedAt: 7 },
   };
-  const ctx = { parts: new Map(), fixtures: new Map(), margin: 0.3 };
+  const ctx = { parts: new Map(), fixtures: new Map(), markup: mk(0.3) };
   const [withDesc] = ci212Virtual([ci212AllowId("audio:subwoofer", "good")], map, ctx);
   ok(withDesc?.desc === "Acme SUB-18 subwoofer" && withDesc.allowance === true && !withDesc.virtualDead,
     "#212: an allowance virtual part prints its description");
@@ -20381,15 +20397,15 @@ import { sellFromCost as ci212Sell } from "@/lib/design/equipment-map";
 
   const first: Ci212Item = good.ok ? good.item : { id: ID, desc: "?", qty: 1, unitCost: 1 };
   const items: Ci212Item[] = [first, { id: "ci-bbbbbbbbbbbb", desc: "Stage lift", qty: 1, unitCost: 25000 }];
-  const lines = ci212Lines(items, 0.3);
+  const lines = ci212Lines(items, mk(0.3));
   ok(lines.length === 2 && lines.every((l) => l.allowance === true && l.custom === true && l.unit === "ea"),
     "#212 custom: every custom BOM line is flagged allowance + custom");
   ok(lines[0].partId === ci212PartId(ID) && lines[0].partId === `custom:${ID}` && lines[0].desc === "Custom motor controller — Acme — MC-9" && lines[0].qty === 2,
     "#212 custom: sku custom:<id>, desc carries maker and model");
-  ok(lines[0].list === ci212Sell(1000, 0.3) && lines[0].list === 1428.57 && lines[0].ext === 2857.14 && lines[1].list === 35714.29 && lines[1].ext === 35714.29,
-    "#212 custom: sell = unit cost ÷ (1 − margin), ext = qty × sell");
+  ok(lines[0].list === ci212Sell(1000, mk(0.3)) && lines[0].list === 1428.57 && lines[0].ext === 2857.14 && lines[1].list === 35714.29 && lines[1].ext === 35714.29,
+    "#212 custom: sell = unit cost × (1 + markup), ext = qty × sell");
   ok(ci212Cost(items) === 27000, "#212 custom: the cost basis is qty × unit cost");
-  ok(ci212Lines(items, 0.3).every((l) => l.list > 0 && l.ext > 0), "#212 custom: a custom line is always priced — it can never read Incomplete");
+  ok(ci212Lines(items, mk(0.3)).every((l) => l.list > 0 && l.ext > 0), "#212 custom: a custom line is always priced — it can never read Incomplete");
 
   ok(ci212Of(undefined).length === 0 && ci212Of("junk").length === 0, "#212 custom: a missing or junk list reads as none");
   const read = ci212Of([first, { id: "bad-id", desc: "x", qty: 1, unitCost: 1 }, { id: "ci-cccccccccccc", desc: "", qty: 1, unitCost: 1 }, { ...first }, 7]);
@@ -20425,7 +20441,7 @@ import { sellFromCost as ci212Sell } from "@/lib/design/equipment-map";
   ok(JSON.stringify(pureValueImports) === JSON.stringify(["./equipment-map", "./grid-scopes"]),
     "#212 custom: the helper module stays pure (value imports: equipment-map, grid-scopes only)");
   const gq = src("src/lib/design/grid-quote.ts");
-  ok(gq.includes("customItemBomLines(customItems, tier.margin)") && gq.includes("customItemsCost(customItems)") && gq.includes("allowanceIds.has(l.partId) || l.allowance"),
+  ok(gq.includes("customItemBomLines(customItems, tier.markup)") && gq.includes("customItemsCost(customItems)") && gq.includes("allowanceIds.has(l.partId) || l.allowance"),
     "#212 custom: buildGridQuote prices custom items at the tier margin and flags them allowance on the spec");
   ok(src("src/lib/design/grid-options.ts").includes("customItems?: GridCustomItem[]"), "#212 custom: the items live on the Grid option");
   const store = src("src/lib/stores/grid-projects.ts");
@@ -20468,7 +20484,7 @@ async function gridCustomItemsAsyncChecks(): Promise<void> {
   ok(a.ok && /^ci-[0-9a-f]{12}$/.test(id), "#212 store: a new custom item gets a ci- id");
 
   const tier = await resolveTier(null);
-  const unit = sellFromCost(1000, tier.margin);
+  const unit = sellFromCost(1000, tier.markup);
   const built = await buildGridQuote((await GP.getProject(gp.id))!, base);
   const line = built.ok ? built.build.spec.lines.find((l) => l.sku === `custom:${id}`) : undefined;
   const customExt = Math.round(2 * unit * 100) / 100;
@@ -22377,8 +22393,8 @@ import {
   finishRepair as finishRepair217,
   finishInspection as finishInspection217,
   typedPriceWarning as typedPriceWarning217,
-  sliderPts as sliderPts217,
-  fmtPts as fmtPts217,
+  sliderPct as sliderPts217,
+  fmtPct as fmtPts217,
   travelLineShare as travelLineShare217,
   seedPriceOverride as seedPriceOverride217,
 } from "@/lib/service-pricing";
@@ -22404,23 +22420,23 @@ import {
     "#217 fix wave 2: a raw negative number like -0.4 is refused (not silently rounded to -0 and passed as >= 0), and -0 itself never comes back as -0");
   ok(finishPrice217(1000, 500, "$900").total === 900 && finishPrice217(1000, 500, 0).total === 1000 && finishPrice217(1000, 500, -5).total === 1000 && finishPrice217(1000, 500, 20_000_000).total === 1000,
     "#217 fix wave: finishPrice normalizes priceOverride itself — a typed string works there directly, and zero/negative/over-cap fall back to auto");
-  ok(typedPriceWarning217(500, 575, 1 - 575 / 500)?.kind === "below-cost" && typedPriceWarning217(600, 575, 1 - 575 / 600)?.kind === "low-margin" && typedPriceWarning217(800, 575, 1 - 575 / 800) === null,
-    "#217 warning: below cost first, then under a 10% margin, otherwise none");
-  ok(typedPriceWarning217(1200, 1100, 1 - 1100 / 1200, 1428.57)?.kind === "below parts price",
+  ok(typedPriceWarning217(500, 575, (500 - 575) / 575)?.kind === "below-cost" && typedPriceWarning217(600, 575, (600 - 575) / 575)?.kind === "low-markup" && typedPriceWarning217(800, 575, (800 - 575) / 575) === null,
+    "#217 warning: below cost first, then under an 11% markup, otherwise none");
+  ok(typedPriceWarning217(1200, 1100, (1200 - 1100) / 1100, 1428.57)?.kind === "below parts price",
     "#217 fix wave warning: a typed total under the parts' own sell price warns distinctly, even though it still clears the whole job's raw cost");
-  ok(typedPriceWarning217(1500, 1100, 1 - 1100 / 1500, 1428.57) === null,
-    "#217 fix wave warning: once the typed total clears the parts sell, the cost and the 10% floor, there's no warning");
-  ok(typedPriceWarning217(500, 575, 1 - 575 / 500, 100)?.kind === "below-cost",
+  ok(typedPriceWarning217(1500, 1100, (1500 - 1100) / 1100, 1428.57) === null,
+    "#217 fix wave warning: once the typed total clears the parts sell, the cost and the 11% markup floor, there's no warning");
+  ok(typedPriceWarning217(500, 575, (500 - 575) / 575, 100)?.kind === "below-cost",
     "#217 fix wave warning: below-cost still wins when parts sell isn't the binding constraint");
-  ok(sliderPts217(0.05) === 10 && sliderPts217(0.62) === 50 && sliderPts217(0.3) === 30 && sliderPts217(0.28125) === 28,
-    "#217 slider: the back-solved margin moves the slider, clamped to 10–50");
-  ok(fmtPts217(0.28125) === "28.1" && fmtPts217(0.3) === "30", "#217: the margin label shows the true value to one decimal");
-  const s1 = travelLineShare217({ flightTotal: 1765, total: 3600, cost: 2515, margin: 0.3 });
+  ok(sliderPts217(0.05) === 10 && sliderPts217(2) === 100 && sliderPts217(0.3) === 30 && sliderPts217(0.28125) === 28,
+    "#217 slider: the back-solved markup moves the slider, clamped to 10–100");
+  ok(fmtPts217(0.28125) === "28.1" && fmtPts217(0.3) === "30", "#217: the markup label shows the true value to one decimal");
+  const s1 = travelLineShare217({ flightTotal: 1765, total: 3600, cost: 2515, margin: mk(0.3) });
   ok(s1.travel === 2526 && s1.rest === 1074 && s1.travel + s1.rest === 3600,
     "#217 printed lines: the travel line is travel's share of the rounded total; the service part takes the rest");
-  const s2 = travelLineShare217({ flightTotal: 1765, total: 1000, cost: 2515, margin: 0.3 });
+  const s2 = travelLineShare217({ flightTotal: 1765, total: 1000, cost: 2515, margin: mk(0.3) });
   ok(s2.travel === 702 && s2.travel + s2.rest === 1000, "#217 printed lines: a typed total below cost scales the travel line with it");
-  const s3 = travelLineShare217({ flightTotal: 1765, total: 3593, cost: null, margin: 0.3 });
+  const s3 = travelLineShare217({ flightTotal: 1765, total: 3593, cost: null, margin: mk(0.3) });
   ok(s3.travel === 2521 && s3.rest === 3593 - 2521, "#217 printed lines: a legacy quote with no stored cost keeps the D283 figure");
   const s4 = travelLineShare217({ flightTotal: 1765, total: 1000, cost: null, margin: 0 });
   ok(s4.travel === 1000 && s4.rest === 0, "#217 printed lines: the travel line never exceeds the total");
@@ -22432,16 +22448,16 @@ import {
     "#217: a saved typed total always reopens as typed");
 
   // ---- flame engine ----
-  const fRates217 = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const fRates217 = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: mk(0.3), travelRoundMin: 15 };
   const fNear217: FTVenue = { id: "r217-near", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
   const fa = computeFlameQuote({ venues: [fNear217] }, fRates217);
   ok(near217(fa.totalRaw, 575 / 0.7) && fa.autoTotal === 825 && fa.total === 825 && !fa.overridden && fa.priceOverride === null,
     "#217 flame: the auto total rounds 821.43 → 825");
-  ok(fa.marginAmount === 250 && near217(fa.effectiveMargin, 1 - 575 / 825) && fa.margin === 0.3,
-    "#217 flame: margin amount = total − cost, the effective margin back-solves, the rate margin is unchanged");
+  ok(fa.marginAmount === 250 && near217(fa.effectiveMarkup, (825 - 575) / 575) && fa.margin === mk(0.3),
+    "#217 flame: markup amount = total − cost, the effective markup back-solves, the rate markup is unchanged");
   const fo = computeFlameQuote({ venues: [fNear217], priceOverride: 800 }, fRates217);
-  ok(fo.total === 800 && fo.overridden && fo.priceOverride === 800 && fo.autoTotal === 825 && near217(fo.effectiveMargin, 1 - 575 / 800) && fo.marginAmount === 225,
-    "#217 flame: a typed total is used exactly and the margin back-solves");
+  ok(fo.total === 800 && fo.overridden && fo.priceOverride === 800 && fo.autoTotal === 825 && near217(fo.effectiveMarkup, (800 - 575) / 575) && fo.marginAmount === 225,
+    "#217 flame: a typed total is used exactly and the markup back-solves");
   ok(computeFlameQuote({ venues: [fNear217], priceOverride: 812 }, fRates217).total === 812,
     "#217 flame: a typed total off the $25 grid is not re-rounded");
   const fBad = computeFlameQuote({ venues: [fNear217], priceOverride: "abc" }, fRates217);
@@ -22459,52 +22475,52 @@ import {
     "#217 fix wave floors: a $360 base fee floors the total, which rounds UP to $375, never down to $350");
 
   // ---- repair engine ----
-  const rRates217 = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  const rRates217 = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: mk(0.3), margin: mk(0.3), emergencyMult: 1.5, travelRoundMin: 15 };
   const rNear217 = [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }];
   const ra = trvRepairEstimate({ venues: rNear217, laborHours: 4 }, rRates217);
-  ok(near217(ra.totalRaw, 607.5 / 0.7) && ra.total === 875 && ra.serviceSell === 875 && near217(ra.serviceMargin, 1 - 607.5 / 875),
+  ok(near217(ra.totalRaw, 607.5 / 0.7) && ra.total === 875 && ra.serviceSell === 875 && near217(ra.serviceMarkup, (875 - 607.5) / 607.5),
     "#217 repair: the auto total rounds 867.86 → 875 and the service sell absorbs the difference");
   const rp = trvRepairEstimate({ venues: rNear217, laborHours: 4, parts: [{ name: "Cable", qty: 2, cost: 100 }] }, rRates217);
   ok(rp.total === 1150 && near217(rp.partsSell, 200 / 0.7) && near217(rp.serviceSell, 1150 - 200 / 0.7) && near217(rp.serviceSell + rp.partsSell, rp.total),
     "#217 repair: with parts the total rounds 1,153.57 → 1,150 and service + parts sell still sum to it");
   const ro = trvRepairEstimate({ venues: rNear217, laborHours: 4, parts: [{ name: "Cable", qty: 2, cost: 100 }], priceOverride: 1000 }, rRates217);
-  ok(ro.total === 1000 && ro.overridden && near217(ro.partsSell, 200 / 0.7) && near217(ro.marginAmount, 1000 - 807.5) && near217(ro.serviceMargin, ro.effectiveMargin) && near217(ro.effectiveMargin, 1 - 807.5 / 1000),
-    "#217 fix wave repair: a typed total reports the whole-job EFFECTIVE margin (never the service-only ratio) — parts still sell at their own markup");
+  ok(ro.total === 1000 && ro.overridden && near217(ro.partsSell, 200 / 0.7) && near217(ro.marginAmount, 1000 - 807.5) && near217(ro.serviceMarkup, ro.effectiveMarkup) && near217(ro.effectiveMarkup, (1000 - 807.5) / 807.5),
+    "#217 fix wave repair: a typed total reports the whole-job EFFECTIVE markup (never the service-only ratio) — parts still sell at their own markup");
   const rc = trvRepairEstimate({ venues: [{ label: "Here", oneWayMiles: 0, oneWayMin: 0 }], laborHours: 1 }, rRates217);
   ok(rc.calloutApplied && rc.total === 350, "#217 repair: the minimum call-out floors the service sell before rounding");
-  const rf360 = finishRepair217({ serviceCost: 50, minCallout: 360, margin: 0, partsCost: 0, partsMargin: 0.3, priceOverride: null });
+  const rf360 = finishRepair217({ serviceCost: 50, minCallout: 360, margin: 0, partsCost: 0, partsMargin: mk(0.3), priceOverride: null });
   ok(rf360.calloutApplied && rf360.totalRaw === 360 && rf360.total === 375,
     "#217 fix wave floors: a $360 minimum call-out floors the total, which rounds UP to $375, never down to $350");
-  ok(finishRepair217({ serviceCost: 812, minCallout: 0, margin: 0, partsCost: 0, partsMargin: 0.3, priceOverride: null }).total === 800 &&
+  ok(finishRepair217({ serviceCost: 812, minCallout: 0, margin: 0, partsCost: 0, partsMargin: mk(0.3), priceOverride: null }).total === 800 &&
       finishPrice217(812, 500, null, true).total === 825,
     "#217 fix wave floors: the same raw total rounds to the NEAREST $25 with no floor applied, but rounds UP when a floor set the price");
-  const rTyped1 = finishRepair217({ serviceCost: 100, minCallout: 0, margin: 0.3, partsCost: 1000, partsMargin: 0.3, priceOverride: 1200 });
-  ok(rTyped1.total === 1200 && rTyped1.overridden && near217(rTyped1.serviceMargin, rTyped1.effectiveMargin) && near217(rTyped1.effectiveMargin, 1 - 1100 / 1200),
-    "#217 fix wave repair margin: a $1,200 typed total (service $100 cost, $1,000 parts cost) reports the effective margin");
-  const rTyped2 = finishRepair217({ serviceCost: 100, minCallout: 0, margin: 0.3, partsCost: 1000, partsMargin: 0.3, priceOverride: 1430 });
-  ok(rTyped2.total === 1430 && rTyped2.serviceSell > 0 && near217(rTyped2.serviceMargin, rTyped2.effectiveMargin) && near217(rTyped2.effectiveMargin, 1 - 1100 / 1430),
-    "#217 fix wave repair margin: even once the typed total lifts the service sell back to a thin positive sliver, it still reports the effective margin — no discontinuity near zero");
-  const rAutoZero = finishRepair217({ serviceCost: 0, minCallout: 0, margin: 0.3, partsCost: 1000, partsMargin: 0.3, priceOverride: null });
-  ok(!rAutoZero.overridden && rAutoZero.serviceSellAuto === 0 && near217(rAutoZero.serviceMargin, rAutoZero.effectiveMargin) && rAutoZero.serviceMargin > 0,
-    "#217 fix wave repair margin: a parts-only auto job with no call-out floor (service sell $0) reports the effective margin instead of a flat 0");
-  const rCliff = finishRepair217({ serviceCost: 1, minCallout: 0, margin: 0.3, partsCost: 1000, partsMargin: 0.3, priceOverride: null });
+  const rTyped1 = finishRepair217({ serviceCost: 100, minCallout: 0, margin: mk(0.3), partsCost: 1000, partsMargin: mk(0.3), priceOverride: 1200 });
+  ok(rTyped1.total === 1200 && rTyped1.overridden && near217(rTyped1.serviceMarkup, rTyped1.effectiveMarkup) && near217(rTyped1.effectiveMarkup, (1200 - 1100) / 1100),
+    "#217 fix wave repair markup: a $1,200 typed total (service $100 cost, $1,000 parts cost) reports the effective markup");
+  const rTyped2 = finishRepair217({ serviceCost: 100, minCallout: 0, margin: mk(0.3), partsCost: 1000, partsMargin: mk(0.3), priceOverride: 1430 });
+  ok(rTyped2.total === 1430 && rTyped2.serviceSell > 0 && near217(rTyped2.serviceMarkup, rTyped2.effectiveMarkup) && near217(rTyped2.effectiveMarkup, (1430 - 1100) / 1100),
+    "#217 fix wave repair markup: even once the typed total lifts the service sell back to a thin positive sliver, it still reports the effective markup — no discontinuity near zero");
+  const rAutoZero = finishRepair217({ serviceCost: 0, minCallout: 0, margin: mk(0.3), partsCost: 1000, partsMargin: mk(0.3), priceOverride: null });
+  ok(!rAutoZero.overridden && rAutoZero.serviceSellAuto === 0 && near217(rAutoZero.serviceMarkup, rAutoZero.effectiveMarkup) && rAutoZero.serviceMarkup > 0,
+    "#217 fix wave repair markup: a parts-only auto job with no call-out floor (service sell $0) reports the effective markup instead of a flat 0");
+  const rCliff = finishRepair217({ serviceCost: 1, minCallout: 0, margin: mk(0.3), partsCost: 1000, partsMargin: mk(0.3), priceOverride: null });
   ok(!rCliff.overridden && rCliff.serviceSellAuto > 0 && rCliff.serviceSell < 0 && near217(rCliff.serviceSell, -3.5714285714287) &&
-      near217(rCliff.serviceMargin, rCliff.effectiveMargin) && rCliff.serviceMargin > 0.25,
-    "#217 fix wave 2: serviceMargin gates on the FINAL serviceSell (post-rounding, total − partsSell), not the pre-rounding " +
+      near217(rCliff.serviceMarkup, rCliff.effectiveMarkup) && rCliff.serviceMarkup > 0.25,
+    "#217 fix wave 2: serviceMarkup gates on the FINAL serviceSell (post-rounding, total − partsSell), not the pre-rounding " +
       "serviceSellAuto — a positive serviceSellAuto (1.43) whose rounded serviceSell goes negative (-3.57) no longer cliffs " +
-      "the margin to 0; it reports the whole-job effectiveMargin instead");
-  ok(Math.abs(rCliff.serviceMargin - rAutoZero.serviceMargin) < 0.01,
-    "#217 fix wave 2: serviceCost 0 vs 1 (same rounded $1,425 total) give close margins — no discontinuity right where " +
+      "the markup to 0; it reports the whole-job effectiveMarkup instead");
+  ok(Math.abs(rCliff.serviceMarkup - rAutoZero.serviceMarkup) < 0.01,
+    "#217 fix wave 2: serviceCost 0 vs 1 (same rounded $1,425 total) give close markups — no discontinuity right where " +
       "serviceSell crosses zero");
 
   // ---- inspection engine ----
-  const iRates217 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const iRates217 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
   const iNear217 = [{ id: "r217-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }];
   const ia = trvInspectionEstimate({ venues: iNear217 }, iRates217);
-  ok(near217(ia.totalRaw, 832.5 / 0.7) && ia.total === 1200 && near217(ia.effectiveMargin, 1 - 832.5 / 1200),
+  ok(near217(ia.totalRaw, 832.5 / 0.7) && ia.total === 1200 && near217(ia.effectiveMarkup, (1200 - 832.5) / 832.5),
     "#217 inspection: the auto total rounds 1,189.29 → 1,200");
   const io = trvInspectionEstimate({ venues: iNear217, priceOverride: 1100 }, iRates217);
-  ok(io.total === 1100 && io.overridden && io.autoTotal === 1200 && near217(io.effectiveMargin, 1 - 832.5 / 1100),
+  ok(io.total === 1100 && io.overridden && io.autoTotal === 1200 && near217(io.effectiveMarkup, (1100 - 832.5) / 832.5),
     "#217 inspection: a typed total is used exactly");
   const im = trvInspectionEstimate({ venues: [{ id: "r217-i2", label: "Here", lineSets: 0, oneWayMiles: 0, oneWayMin: 0 }] }, iRates217);
   ok(im.minApplied && im.total === 650, "#217 inspection: the minimum fee floors before rounding");
@@ -22513,12 +22529,12 @@ import {
     "#217 fix wave floors: a $660 minimum fee floors the total, which rounds UP to $675, never down to $650");
 
   // ---- parity: each engine's finish IS the shared finish the builders will call ----
-  const pf = finishFlame217({ rawCost: fa.rawCost, baseFee: 150, margin: 0.3, priceOverride: null });
-  ok(pf.total === fa.total && pf.cost === fa.cost && pf.effectiveMargin === fa.effectiveMargin, "#217 parity: the flame engine finishes exactly like finishFlame()");
-  const pr = finishRepair217({ serviceCost: rp.serviceCost, minCallout: 350, margin: 0.3, partsCost: rp.partsCost, partsMargin: 0.3, priceOverride: null });
-  ok(pr.total === rp.total && pr.serviceSell === rp.serviceSell && pr.serviceMargin === rp.serviceMargin, "#217 parity: the repair engine finishes exactly like finishRepair()");
-  const pi = finishInspection217({ cost: ia.cost, minFee: 650, margin: 0.3, priceOverride: null });
-  ok(pi.total === ia.total && pi.effectiveMargin === ia.effectiveMargin, "#217 parity: the inspection engine finishes exactly like finishInspection()");
+  const pf = finishFlame217({ rawCost: fa.rawCost, baseFee: 150, margin: mk(0.3), priceOverride: null });
+  ok(pf.total === fa.total && pf.cost === fa.cost && pf.effectiveMarkup === fa.effectiveMarkup, "#217 parity: the flame engine finishes exactly like finishFlame()");
+  const pr = finishRepair217({ serviceCost: rp.serviceCost, minCallout: 350, margin: mk(0.3), partsCost: rp.partsCost, partsMargin: mk(0.3), priceOverride: null });
+  ok(pr.total === rp.total && pr.serviceSell === rp.serviceSell && pr.serviceMarkup === rp.serviceMarkup, "#217 parity: the repair engine finishes exactly like finishRepair()");
+  const pi = finishInspection217({ cost: ia.cost, minFee: 650, margin: mk(0.3), priceOverride: null });
+  ok(pi.total === ia.total && pi.effectiveMarkup === ia.effectiveMarkup, "#217 parity: the inspection engine finishes exactly like finishInspection()");
   for (const [f, fn] of [
     ["src/lib/flametest-engine.ts", "finishFlame"],
     ["src/lib/repair-engine.ts", "finishRepair"],
@@ -22526,11 +22542,13 @@ import {
   ] as const) {
     const s = readFileSync(join(process.cwd(), f), "utf8");
     const code = s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, ""); // doc comments still quote the formula
-    ok(code.includes(`${fn}(`) && /from "@\/lib\/service-pricing"/.test(code) && !/\/ \(1 - margin\)/.test(code),
-      `#217: ${f} finishes its price through ${fn}() with no margin math of its own`);
+    ok(code.includes(`${fn}(`) && /from "@\/lib\/service-pricing"/.test(code) && !/\/ \(1 - margin\)/.test(code) && !/\* \(1 \+ /.test(code),
+      `#217: ${f} finishes its price through ${fn}() with no markup math of its own`);
   }
   const sp217 = readFileSync(join(process.cwd(), "src/lib/service-pricing.ts"), "utf8");
-  ok(!/^\s*import\s/m.test(sp217), "#217: service-pricing.ts imports nothing — safe for the 'use client' builders");
+  const imports217 = sp217.match(/^\s*import\s.*$/gm) || [];
+  ok(imports217.length === 1 && /from "@\/lib\/markup"/.test(imports217[0]) && /sellAt\(/.test(sp217),
+    "#217/#367: service-pricing.ts imports only the pure markup module (sellAt) — safe for the 'use client' builders");
   const formula217 = (key: string, id: string): string =>
     (PRICING_GROUPS.find((g) => g.key === key)!.items.find((it) => it.id === id) as { expr: string }).expr;
   ok(formula217("flame", "flame.total").includes("rounded to the nearest $25") &&
@@ -22569,16 +22587,16 @@ import {
       /testingOverride: normalizeTestingOverride\(v\.testingOverride\),/.test(sqi217) &&
       /\.\.\.\(v\.testingOverride != null \? \{ testingOverride: v\.testingOverride \} : \{\}\)/.test(fa),
     "#217 flame save: builds venue inputs through the shared service-quote-inputs.ts helper (which validates + prices each venue's typed testing cost), and still saves it on the venue");
-  ok(/margin: r\.effectiveMargin,/.test(fa) && storedTyped.test(fa) && storedAuto.test(fa),
-    "#217 flame save: stores the back-solved margin, the typed total (when set) and the auto figure");
+  ok(/margin: r\.effectiveMarkup,/.test(fa) && storedTyped.test(fa) && storedAuto.test(fa),
+    "#217 flame save: stores the back-solved markup, the typed total (when set) and the auto figure");
 
   const ra = src217("src/app/(app)/repairs/quote/actions.ts");
-  ok(typedIn.test(ra) && /travel: travelOverride,\n\s*priceOverride,\n/.test(ra) && /margin: r\.serviceMargin,/.test(ra) && storedTyped.test(ra) && storedAuto.test(ra),
-    "#217 repair save: typed total in; service margin, typed total and auto figure out");
+  ok(typedIn.test(ra) && /travel: travelOverride,\n\s*priceOverride,\n/.test(ra) && /margin: r\.serviceMarkup,/.test(ra) && storedTyped.test(ra) && storedAuto.test(ra),
+    "#217 repair save: typed total in; service markup, typed total and auto figure out");
 
   const ia = src217("src/app/(app)/inspections/quote/actions.ts");
-  ok(typedIn.test(ia) && /travel: travelOverride,\n\s*priceOverride,\n/.test(ia) && /margin: r\.effectiveMargin,/.test(ia) && storedTyped.test(ia) && storedAuto.test(ia),
-    "#217 inspection save: typed total in; back-solved margin, typed total and auto figure out");
+  ok(typedIn.test(ia) && /travel: travelOverride,\n\s*priceOverride,\n/.test(ia) && /margin: r\.effectiveMarkup,/.test(ia) && storedTyped.test(ia) && storedAuto.test(ia),
+    "#217 inspection save: typed total in; back-solved markup, typed total and auto figure out");
 
   const rn = src217("src/lib/renewal-outreach.ts");
   const fnBody = (name: string): string => {
@@ -22589,8 +22607,8 @@ import {
     const b = fnBody(fn);
     ok(b.length > 0 && !/priceOverride:/.test(b) && !/testingOverride/.test(b),
       `#217 renewal: ${fn} re-prices without last year's typed total or testing cost`);
-    ok(/lastHandSet: priorHandSetPrice\(/.test(b) && /margin: r\.effectiveMargin,/.test(b) && storedAuto.test(b),
-      `#217 renewal: ${fn} notes a hand-set prior price and stores the rounded price's margin`);
+    ok(/lastHandSet: priorHandSetPrice\(/.test(b) && /margin: r\.effectiveMarkup,/.test(b) && storedAuto.test(b),
+      `#217 renewal: ${fn} notes a hand-set prior price and stores the rounded price's markup`);
   }
   ok(priorHandSetPrice217({ priceOverride: 850 }) === 850 && priorHandSetPrice217({}) === null && priorHandSetPrice217(null) === null,
     "#217 renewal: last year's hand-set price is read from its priceOverride");
@@ -23603,8 +23621,8 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
     "#217 flame builder: posts the typed total and each venue's typed testing cost");
   ok(/<ServiceTotalField/.test(fc) && /aria-label=\{"Testing cost for " \+ l\.label/.test(fc),
     "#217 flame builder: the Total and each venue's Testing cell are inputs");
-  ok(/value=\{r\?\.overridden \? sliderPts\(r\.effectiveMargin\) : marginPts\}/.test(fc) &&
-      /setMarginPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(fc) &&
+  ok(/value=\{r\?\.overridden \? sliderPct\(r\.effectiveMarkup\) : markupPts\}/.test(fc) &&
+      /setMarkupPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(fc) &&
       /function resetToAuto\(\)/.test(fc),
     "#217 flame builder: the slider follows a typed total; moving it or Reset to auto clears the override");
   ok(!/^import (?!type )[^;]*from "@\/lib\/(flametest-engine|repair-engine|inspection-engine)"/m.test(fc),
@@ -23624,7 +23642,7 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
   ok(!/fd\.set\("priceOverrideSeeded"/.test(fc),
     "#217 fix wave: the flame builder no longer posts priceOverrideSeeded — the save action derives it server-side");
   ok(/onReset=\{resetToAuto\}/.test(fc) &&
-      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.effectiveMargin\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(fc),
+      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarkupPts\(sliderPct\(r\.effectiveMarkup\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(fc),
     "#217 flame builder: Reset to auto clears the typed total");
   ok(!fp.includes("seedPriceOverrideIsLegacy") && !fp.includes("priceOverrideSeeded"),
     "#217 final: the flame page no longer passes a seeded flag to the builder");
@@ -23664,17 +23682,17 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
     "#217 repair builder: the preview finishes through finishRepair(), no inlined margin math");
   ok(/fd\.set\("priceOverride", priceOverride != null \? String\(priceOverride\) : ""\);/.test(rc) && /<ServiceTotalField/.test(rc),
     "#217 repair builder: the Total is an input and the typed total is posted");
-  ok(/value=\{r\?\.overridden \? sliderPts\(r\.serviceMargin\) : marginPts\}/.test(rc) &&
-      /setMarginPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(rc) &&
+  ok(/value=\{r\?\.overridden \? sliderPct\(r\.serviceMarkup\) : markupPts\}/.test(rc) &&
+      /setMarkupPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(rc) &&
       /function resetToAuto\(\)/.test(rc),
-    "#217 repair builder: the slider follows the back-solved SERVICE margin; moving it or Reset clears the override");
+    "#217 repair builder: the slider follows the back-solved SERVICE markup; moving it or Reset clears the override");
   const ic = readFileSync(join(process.cwd(), "src/app/(app)/inspections/quote/controls.tsx"), "utf8");
   ok(/from "@\/lib\/service-pricing"/.test(ic) && /finishInspection\(\{/.test(strip217(ic)) && !/\/ \(1 - margin\)/.test(strip217(ic)),
     "#217 inspection builder: the preview finishes through finishInspection(), no inlined margin math");
   ok(/fd\.set\("priceOverride", priceOverride != null \? String\(priceOverride\) : ""\);/.test(ic) && /<ServiceTotalField/.test(ic),
     "#217 inspection builder: the Total is an input and the typed total is posted");
-  ok(/value=\{r\?\.overridden \? sliderPts\(r\.effectiveMargin\) : marginPts\}/.test(ic) &&
-      /setMarginPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(ic) &&
+  ok(/value=\{r\?\.overridden \? sliderPct\(r\.effectiveMarkup\) : markupPts\}/.test(ic) &&
+      /setMarkupPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(ic) &&
       /function resetToAuto\(\)/.test(ic),
     "#217 inspection builder: the slider follows a typed total; moving it or Reset clears the override");
   for (const [svc, sub] of [["repairs", "rp"], ["inspections", "insp"]] as const) {
@@ -23695,7 +23713,7 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
   ok(!/fd\.set\("priceOverrideSeeded"/.test(rc),
     "#217 fix wave: the repair builder no longer posts priceOverrideSeeded — the save action derives it server-side");
   ok(/onReset=\{resetToAuto\}/.test(rc) &&
-      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.serviceMargin\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(rc),
+      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarkupPts\(sliderPct\(r\.serviceMarkup\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(rc),
     "#217 repair builder: Reset to auto clears the typed total");
 
   ok(!ic.includes("priceOverrideSeeded, setPriceOverrideSeeded") && !ic.includes("priceOverrideSeeded?: boolean"),
@@ -23703,7 +23721,7 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
   ok(!/fd\.set\("priceOverrideSeeded"/.test(ic),
     "#217 fix wave: the inspection builder no longer posts priceOverrideSeeded — the save action derives it server-side");
   ok(/onReset=\{resetToAuto\}/.test(ic) &&
-      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.effectiveMargin\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(ic),
+      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarkupPts\(sliderPct\(r\.effectiveMarkup\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(ic),
     "#217 inspection builder: Reset to auto clears the typed total");
 
   for (const [svc, sub] of [["repairs", "rp"], ["inspections", "insp"]] as const) {
@@ -23720,7 +23738,7 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
   // ---- the repairs-only "below parts price" warning: a typed total under
   // what the parts alone are selling for warns sharper than below-cost.
   const stf217 = readFileSync(join(process.cwd(), "src/components/service-total-field.tsx"), "utf8");
-  ok(/partsSell/.test(stf217) && /typedPriceWarning\(total, cost, margin, partsSell\)/.test(stf217),
+  ok(/partsSell/.test(stf217) && /typedPriceWarning\(total, cost, markup, partsSell\)/.test(stf217),
     "#217: the shared Total field threads an optional partsSell into typedPriceWarning() for repairs");
   ok(/partsSell=\{r\?\.partsSell/.test(rc),
     "#217 repair builder: the Total field is given the service's partsSell for the below-parts-price warning");
@@ -23783,8 +23801,8 @@ import { deriveSeededMarker as deriveSeededMarker217 } from "@/lib/service-prici
   // ---- minors (b)/(c), in the shared ServiceTotalField so all three
   // builders get them ----
   const stf217fix = readFileSync(join(process.cwd(), "src/components/service-total-field.tsx"), "utf8");
-  ok(!/Typed total · auto is/.test(stf217fix) && /Typed total · Reset keeps this margin/.test(stf217fix),
-    "#217 fix wave (b): the typed-total note states what Reset actually does (it parks the slider at the back-solved margin) instead of naming a figure Reset won't reproduce");
+  ok(!/Typed total · auto is/.test(stf217fix) && /Typed total · Reset keeps this markup/.test(stf217fix),
+    "#217 fix wave (b): the typed-total note states what Reset actually does (it parks the slider at the back-solved markup) instead of naming a figure Reset won't reproduce");
   ok(/disabled \? "—" : String\(Math\.round\(autoTotal\)\)/.test(stf217fix),
     "#217 fix wave (c): a disabled Total field shows \"—\", never a bare 0 that reads as a real free quote");
 }
@@ -23805,7 +23823,7 @@ import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
   ok(pleated.sewnAreaSqft === 570 && pleated.costEach === 2074.8, `#227: pleated cost = sewn area 570 × 3.64 = 2074.8, no width term (got ${pleated.costEach})`);
   const flat = fab227Cost({ finishedWidthFt: 40, finishedHeightFt: 20, fullnessPct: 0, qty: 1 }, { fabricRate: 0.9, sewingPct: 0 });
   ok(flat.sewnAreaSqft === 800 && flat.costEach === 720, `#227: flat goods cost = 800 × 0.9 = 720 (got ${flat.costEach})`);
-  ok(fab227Price(pleated.costEach, 0.3) === Math.round((2074.8 / 0.7) * 100) / 100, "#227: sell = cost ÷ (1 − margin), unchanged");
+  ok(fab227Price(pleated.costEach, mk(0.3)) === Math.round((2074.8 / 0.7) * 100) / 100, "#227: sell = cost × (1 + markup), unchanged");
 
   // The one fallback chain.
   ok(fab227RateOf({ sku: "RB-EN-16", curtainAreaRate: 5, costPerSqft: 1 }) === 5, "#227 chain: the catalog's curtainAreaRate wins");
@@ -23826,16 +23844,16 @@ import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
     const tag = `${c.w}×${c.h.toFixed(2)} @${c.full}% $${c.rate}`;
     const shared = fab227Cost({ finishedWidthFt: c.w, finishedHeightFt: c.h, fullnessPct: c.full, qty: 1 }, { fabricRate: c.rate, sewingPct: 10 }).costEach;
     const spec = { name: "d", hang: "", fabric: "FAB227", qty: "1", width: String(c.w), height: String(c.h), fullness: String(c.full), bottom: "" };
-    const portal = fab227PortalCost(spec, { fabricRate: c.rate, sewingPct: 10 }, 0.3);
-    const est = fab227Compute({ ...spec, vendorCostOverride: "" }, [{ sku: "FAB227", name: "x", costPerSqft: 0, curtainAreaRate: c.rate }], { sewingPct: 10 }, 0.3);
+    const portal = fab227PortalCost(spec, { fabricRate: c.rate, sewingPct: 10 }, mk(0.3));
+    const est = fab227Compute({ ...spec, vendorCostOverride: "" }, [{ sku: "FAB227", name: "x", costPerSqft: 0, curtainAreaRate: c.rate }], { sewingPct: 10 }, mk(0.3));
     const grid = fab227Grid(
       [{ id: "pl1", curtain: { type: "Draw", name: "d", widthFt: c.w, heightFt: c.h, fullnessPct: c.full, fabricSku: "FAB227" } }],
       [{ id: "FAB227", sku: "FAB227", desc: "x", category: "Fabric", curtainAreaRate: c.rate }],
       { sewingPct: 10 },
-      0.3
+      mk(0.3)
     ).get("pl1")!;
     const drape = fab227Drape({ w: c.w, h: c.h, fullness: c.full, qty: 1 }, c.rate, 10);
-    const client = fab227PriceEach(spec, fab227Sell({ fabricRate: c.rate, sewingPct: 10 }, 0.3));
+    const client = fab227PriceEach(spec, fab227Sell({ fabricRate: c.rate, sewingPct: 10 }, mk(0.3)));
     ok(portal.costEach === shared && est.costEach === shared && grid.costEach === shared, `#227 parity ${tag}: portal, estimator and Grid cost = shared model ${shared} (got ${portal.costEach} / ${est.costEach} / ${grid.costEach})`);
     ok(drape === Math.round(shared), `#227 parity ${tag}: the Equipment map drape cost is the shared cost, dollar-rounded (got ${drape})`);
     ok(grid.priceEach === portal.priceEach && Math.abs(client - portal.priceEach) < 0.011, `#227 parity ${tag}: Grid + client preview sell = portal sell (client ${client}, server ${portal.priceEach})`);
@@ -23844,13 +23862,13 @@ import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
 
   // The Equipment map and the swap search read the same helper.
   const drawDef = fab227Rows.get("curtains:draw")!;
-  const ctxOf = (p: Fab227Part) => ({ parts: new Map<string, Fab227Part>([[p.sku, p]]), fixtures: new Map(), margin: 0.3 });
+  const ctxOf = (p: Fab227Part) => ({ parts: new Map<string, Fab227Part>([[p.sku, p]]), fixtures: new Map(), markup: mk(0.3) });
   const seeded = fab227PriceCell({ kind: "part", sku: "RB-EN-16" }, drawDef, ctxOf({ sku: "RB-EN-16", desc: "Encore 16", unit: "sq ft", cost: 0, list: 0, category: "Fabric" }));
   ok(seeded.status === "part" && seeded.areaRate === 2.1, "#227: the Equipment map resolves a fabric through fabricAreaRateOf — seed rates included (spec §2)");
   const cps = fab227PriceCell({ kind: "part", sku: "FAB227-CPS" }, drawDef, ctxOf({ sku: "FAB227-CPS", desc: "Muslin", unit: "sq ft", cost: 0, list: 0, category: "Fabric", costPerSqft: 1.4 }));
   ok(cps.status === "part" && cps.areaRate === 1.4, "#227: …and falls back to the fabric's cost per sq ft");
-  const hits = fab227SwapHits([{ sku: "FAB227-CPS", desc: "cost/sq ft only", costPerSqft: 1.4 }, { sku: "FAB227-NONE", desc: "no rate" }], 0.3);
-  ok(hits.length === 1 && hits[0].ref === "FAB227-CPS" && hits[0].unitSell === 2, "#227: the swap search finds a fabric priced only by cost per sq ft (the one helper), sold through the margin");
+  const hits = fab227SwapHits([{ sku: "FAB227-CPS", desc: "cost/sq ft only", costPerSqft: 1.4 }, { sku: "FAB227-NONE", desc: "no rate" }], mk(0.3));
+  ok(hits.length === 1 && hits[0].ref === "FAB227-CPS" && hits[0].unitSell === 2, "#227: the swap search finds a fabric priced only by cost per sq ft (the one helper), sold through the markup");
 
   // No making term and no private rate chain survives in any mirror.
   const mirrors227 = [
@@ -23940,11 +23958,11 @@ import { curtainSwapHits as fab227Swap3 } from "@/lib/design/auto-estimate";
   ok(fab227Label(3.64) === "$3.64/sq ft fabric", `#227 labels: a rate reads $X/sq ft fabric (#227 late) (got ${fab227Label(3.64)})`);
   ok(fab227Label(0) === fab227NoRate && fab227Label(undefined) === fab227NoRate && fab227Label(null) === fab227NoRate && fab227Label(Number.NaN) === fab227NoRate, "#227 labels: no rate reads No $/sq ft set");
 
-  const hits = fab227Swap3([{ sku: "FAB227-S", desc: "velour", curtainAreaRate: 3.5 }], 0.3);
+  const hits = fab227Swap3([{ sku: "FAB227-S", desc: "velour", curtainAreaRate: 3.5 }], mk(0.3));
   ok(hits.length === 1 && hits[0].unit === fab227Unit, "#227 labels: the swap search shows a fabric per sq ft fabric (#227 late)");
 
   const drawDef = fab227Rows3.get("curtains:draw")!;
-  const ctxOf = (p: Fab227Part3) => ({ parts: new Map<string, Fab227Part3>([[p.sku, p]]), fixtures: new Map(), margin: 0.3 });
+  const ctxOf = (p: Fab227Part3) => ({ parts: new Map<string, Fab227Part3>([[p.sku, p]]), fixtures: new Map(), markup: mk(0.3) });
   const bare = fab227PriceCell3({ kind: "part", sku: "FAB227-BARE" }, drawDef, ctxOf({ sku: "FAB227-BARE", desc: "Bare", unit: "sq ft", cost: 0, list: 0, category: "Fabric" }));
   ok(bare.status === "needs-part" && bare.reason === "FAB227-BARE: No $/sq ft set", "#227 labels: a rateless fabric on a curtain row is needs-a-part with No $/sq ft set");
   const notFabric = fab227PriceCell3({ kind: "part", sku: "FAB227-HB" }, drawDef, ctxOf({ sku: "FAB227-HB", desc: "Headblock", unit: "ea", cost: 500, list: 700, category: "Rigging Hardware" }));
@@ -24078,7 +24096,7 @@ import { compute as n229Compute, defaultAState as n229Default } from "@/app/(app
   const stored = n229Map({ "rigging:varSpeedHoist": { tiers: { good: { kind: "none" } }, sameAll: true, updatedBy: "J", updatedAt: 1 } });
   ok(n229Status(stored["rigging:varSpeedHoist"]) === "mapped", "#229: a Not included row reads Mapped (resolved), never Needs a part");
 
-  const ctx = { parts: new Map([["P1", { sku: "P1", desc: "Hoist", unit: "ea", cost: 100, list: 150 }]]), fixtures: new Map(), margin: 0.3 };
+  const ctx = { parts: new Map([["P1", { sku: "P1", desc: "Hoist", unit: "ea", cost: 100, list: 150 }]]), fixtures: new Map(), markup: mk(0.3) };
   const p = n229Price({ kind: "none" }, n229ByKey.get("rigging:varSpeedHoist")!, ctx);
   ok(p.status === "none" && p.unitCost === 0 && p.unitSell === 0 && p.desc === "Not included", "#229: Not included prices $0 with status none");
   ok(n229Price({ kind: "none" }, n229ByKey.get("curtains:border")!, ctx).status === "none", "#229: a curtain row can be Not included too");
@@ -24150,7 +24168,7 @@ import { assemblySwapCandidates as h228Cand, scopeLabelOf as h228ScopeLabel } fr
   // #246/#247 reversed #228's "never in the pickers": both pickers list hardware now, as its own group.
   ok(h228From([rec], catalog).map((a) => `${a.kind}:${a.id}`).join(",") === "hardware:SA-HW1", "#228/#247: hardware is listed in the Estimator / Quick Design pickers, as hardware");
 
-  const ctx = { parts: catalog, fixtures: new Map([[rec.id, rec]]), margin: 0.3 };
+  const ctx = { parts: catalog, fixtures: new Map([[rec.id, rec]]), markup: mk(0.3) };
   const opt = h228Opts([rec], ctx)[0];
   ok(opt?.kind === "hardware" && opt.unitSell === 36 && opt.unitCost === 20, "#228: the Equipment-map picker lists hardware assemblies with live totals");
   const pc = h228Price({ kind: "assembly", id: rec.id }, h228ByKey.get("rigging:chainWrap")!, ctx);
@@ -24263,7 +24281,7 @@ import { defaultAState as q247Default } from "@/app/(app)/design/quick/engine";
     "#247: a system option names its scope, the Estimator's format; fixtures and hardware show the bare name");
 
   // Pricing: a system / hardware pick prices through priceCell's assembly branch — no kind filter anywhere.
-  const ctx = { parts, fixtures: new Map(recs.map((r) => [r.id, r])), margin: 0.3 };
+  const ctx = { parts, fixtures: new Map(recs.map((r) => [r.id, r])), markup: mk(0.3) };
   const cfg = { ...q247Default(10), tier: "better", fixtureAssemblies: { par: "SA-Q47S", front: "SA-Q47H", cyc: "SA-Q47F" } } as unknown as Record<string, unknown>;
   const rec = { tier: "better", config: cfg };
   const ids = q247Picked(rec);
@@ -24276,7 +24294,7 @@ import { defaultAState as q247Default } from "@/app/(app)/design/quick/engine";
   ok(ov["lighting:par"]?.status === "assembly" && ov["lighting:par"].desc === "Stage wash package" && ov["lighting:front"]?.status === "assembly" && ov["lighting:front"].desc === "Pipe clamp kit",
     "#247: fixtureOverridesFor turns a system / hardware pick into its lighting row's price");
   const table = {
-    margin: 0.3,
+    markup: mk(0.3),
     byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(q247Rows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
   };
   const rates = { freightPct: 5, contingencyPct: 10 };
@@ -24416,7 +24434,7 @@ import { manualScopeInputs as wp231Inputs } from "@/lib/design/grid-intake";
   ok(WL.withWirePull(stepped, WL.wireDimsOf(s), "good", rules).find((x) => x.key === "lighting")!.items.filter((i) => i.key === "lighting:wirePull").map((i) => i.qty).join() === "140",
     "#231: re-running the step replaces the line (Good: 140 ft)");
   const parts = new Map([["WP-DMX", { sku: "WP-DMX", desc: "DMX cable", unit: "ft", cost: 1, list: 1.5, category: "Wire & Cable" }]]);
-  const ctx = { parts, fixtures: new Map(), margin: 0.3 };
+  const ctx = { parts, fixtures: new Map(), markup: mk(0.3) };
   const mapped = wp231Table({ "lighting:wirePull": { tiers: { good: { kind: "part", sku: "WP-DMX" } }, sameAll: true, updatedBy: "t", updatedAt: 1 } }, ctx);
   const priced = wp231TierSystems(C, s, "better", wp231TierDefs(), mapped, {}, rules);
   const pl = priced.find((x) => x.key === "lighting")!.items.find((i) => i.key === "lighting:wirePull")!;
@@ -24430,7 +24448,7 @@ import { manualScopeInputs as wp231Inputs } from "@/lib/design/grid-intake";
   ok(wp231TierSystems(wp231Compute(ovS), ovS, "better", wp231TierDefs(), mapped, {}, rules).find((x) => x.key === "lighting")!.items.find((i) => i.key === "lighting:wirePull")!.qty === 200,
     "#231: Quick Design's per-tier qty override edits the Wire pull footage");
   const allAllow = {
-    margin: 0.3,
+    markup: mk(0.3),
     byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(wp231Rows.filter((r) => !r.derived).map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
   };
   const qr0 = { installPct: 18, freightPct: 5, contingencyPct: 10 };
@@ -24837,7 +24855,7 @@ async function gridAccessoriesAsyncChecks230(): Promise<void> {
   ok(a.ok && /^ba-[0-9a-f]{12}$/.test(id), "#230 store: a new accessory gets a ba- id");
 
   const tier = await resolveTier(null);
-  const unit = isTierPriced(90, tier.margin) ? Math.round((90 / (1 - tier.margin)) * 100) / 100 : 150;
+  const unit = isTierPriced(90, tier.markup) ? Math.round(90 * (1 + tier.markup) * 100) / 100 : 150;
   const only = await buildGridQuote((await GP.getProject(gp.id))!, base);
   const onlyLine = only.ok ? only.build.spec.lines.find((l) => l.sku === PART) : undefined;
   const onlyLabor = only.ok ? only.build.labor : [];
@@ -24859,11 +24877,11 @@ async function gridAccessoriesAsyncChecks230(): Promise<void> {
     "#230 quote: an accessory prices exactly like a placed part of the same partId (two lines, one price)");
   const bothLabor = both.ok ? both.build.labor : [];
   const bothLaborSell = bothLabor.reduce((a, l) => a + l.amount, 0);
-  const bothLaborCost = bothLabor.reduce((a, l) => a + r2_230(l.amount * (1 - tier.margin)), 0);
+  const bothLaborCost = bothLabor.reduce((a, l) => a + r2_230(l.amount / (1 + tier.markup)), 0);
   ok(both.ok && Math.abs(bothLabor.reduce((a, l) => a + l.material, 0) - 3 * unit) < 0.02 &&
     Math.abs(both.build.value - 3 * unit - bothLaborSell) < 0.005 &&
-    Math.abs(both.build.margin - (3 * unit + bothLaborSell - 3 * 90 - bothLaborCost) / (3 * unit + bothLaborSell)) < 1e-6,
-    "#230 quote: the accessory counts in the value and its cost in the margin (+ #232 labor at the tier margin)");
+    Math.abs(both.build.markup - (3 * unit + bothLaborSell - 3 * 90 - bothLaborCost) / (3 * 90 + bothLaborCost)) < 1e-6,
+    "#230 quote: the accessory counts in the value and its cost in the markup (+ #232 labor at the tier markup, #367)");
 
   const e = await GP.saveAccessory(gp.id, base, { id, qty: 4 });
   const afterEdit = await accOf(base);
@@ -25065,7 +25083,7 @@ import { EQUIPMENT_ROWS as lb232Rows } from "@/lib/design/equipment-vocab";
 {
   const d = wl231.defaultWireLaborRules();
   const table = {
-    margin: 0.3,
+    markup: mk(0.3),
     byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(lb232Rows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
   };
   const a: Lb232AState = { ...lb232Default(10), tier: "better" };
@@ -25201,8 +25219,8 @@ async function gridLabor232AsyncChecks(): Promise<void> {
   await GP.saveCustomItem(gp.id, base, { desc: "Lighting rack", system: "Lighting", qty: 1, unitCost: 7000 });
   await GP.saveCustomItem(gp.id, base, { desc: "Misc hardware", qty: 2, unitCost: 100 });
   const tier = await resolveTier(null);
-  const lightExt = Math.round(sellFromCost(7000, tier.margin) * 100) / 100;
-  const genExt = Math.round(2 * sellFromCost(100, tier.margin) * 100) / 100;
+  const lightExt = Math.round(sellFromCost(7000, tier.markup) * 100) / 100;
+  const genExt = Math.round(2 * sellFromCost(100, tier.markup) * 100) / 100;
   const b1 = await buildGridQuote((await GP.getProject(gp.id))!, base);
   const lab = b1.ok ? b1.build.labor : [];
   const ll = lab.find((l) => l.system === "lighting");
@@ -27381,7 +27399,7 @@ import type { EquipmentMap as FwaMap } from "@/lib/design/equipment-map";
   ok(emv.includes("title: NOT_INCLUDED") && !emv.includes('title: "Not included"'), "#229 final: the map view reuses the NOT_INCLUDED constant");
   const label = fwaRowByKey.get("audio:subwoofer")!.label;
   const noneMap: FwaMap = { "audio:subwoofer": { tiers: { good: { kind: "none" } }, sameAll: true, updatedBy: "J", updatedAt: 1 } };
-  const ctx = { parts: new Map(), fixtures: new Map(), margin: 0.3 };
+  const ctx = { parts: new Map(), fixtures: new Map(), markup: mk(0.3) };
   const [dn] = fwaVirtual([fwaAllowId("audio:subwoofer", "good")], noneMap, ctx);
   ok(dn?.desc === `${label} (row is now Not included — re-fill this scope)` && dn.virtualDead === true,
     "#229 final: an allowance line whose row is now Not included says to re-fill the scope");
@@ -27788,7 +27806,7 @@ import { GROUPS as cp233lGroups } from "@/lib/stores/pricing";
   ok(!off.find((x) => x.key === "lighting")!.items.some((i) => i.key === "lighting:cablePackage"), "#233 late: Lighting out of scope → no Cable Package");
 
   // Quick Design (tierSystems) and Grid Auto (autoEstimateCards) both run it.
-  const allNone = { margin: 0.3, byTier: { good: {}, better: {}, best: {} } } as never;
+  const allNone = { markup: mk(0.3), byTier: { good: {}, better: {}, best: {} } } as never;
   const qd = (t: "good" | "better" | "best") => cp233lTierSystems(C, s, t, cp233lTierDefs(), allNone, {}, rules).find((x) => x.key === "lighting")!.items.find((i) => i.key === "lighting:cablePackage")!;
   ok(qd("good").qty === 78 && qd("better").qty === 90 && qd("best").qty === 102, `#233 late: Quick Design prices each tier's Cable Package at that tier (78 / 90 / 102 at 2 per fixture)`);
   const inputs = { ...cp233lInputs(s), sys: s.sys };
@@ -27885,7 +27903,7 @@ import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
   ok(S.sewnAreaRate(3.64, 10) === 3.64 * 1.1 && S.sewnAreaRate(0, 10) === 0 && S.sewnAreaRate(-1, 10) === 0, "#227 late: the sewn area rate is fabric rate × (1 + sewing %)");
   const vo = S.curtainCost({ finishedWidthFt: 23, finishedHeightFt: 15, fullnessPct: 50, qty: 2, vendorCostOverride: 2080 }, { fabricRate: 3.64, sewingPct: 10 });
   ok(vo.costEach === 2080 && vo.costTotal === 4160 && vo.overridden, "#227 late: a typed vendor cost is the full cost — no sewing on top");
-  ok(S.curtainPrice(at(20, 19, 50, 3.64, 10).costEach, 0.3) === Math.round((2282.28 / 0.7) * 100) / 100, "#227 late: sell = cost ÷ (1 − margin), as before");
+  ok(S.curtainPrice(at(20, 19, 50, 3.64, 10).costEach, mk(0.3)) === Math.round((2282.28 / 0.7) * 100) / 100, "#227 late: sell = cost × (1 + markup), as before");
 
   // Parity: every mirror carries the adder, at the default and a non-default rule.
   for (const sewingPct of [10, 25]) {
@@ -27893,16 +27911,16 @@ import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
       const tag = `${c.w}×${c.h.toFixed(2)} @${c.full}% $${c.rate} +${sewingPct}%`;
       const shared = at(c.w, c.h, c.full, c.rate, sewingPct).costEach;
       const spec = { name: "d", hang: "", fabric: "SEW227", qty: "1", width: String(c.w), height: String(c.h), fullness: String(c.full), bottom: "" };
-      const portal = sew227PortalCost(spec, { fabricRate: c.rate, sewingPct }, 0.3);
-      const est = sew227Compute({ ...spec, vendorCostOverride: "" }, [{ sku: "SEW227", name: "x", costPerSqft: 0, curtainAreaRate: c.rate }], { sewingPct }, 0.3);
+      const portal = sew227PortalCost(spec, { fabricRate: c.rate, sewingPct }, mk(0.3));
+      const est = sew227Compute({ ...spec, vendorCostOverride: "" }, [{ sku: "SEW227", name: "x", costPerSqft: 0, curtainAreaRate: c.rate }], { sewingPct }, mk(0.3));
       const grid = sew227Grid(
         [{ id: "pl1", curtain: { type: "Draw", name: "d", widthFt: c.w, heightFt: c.h, fullnessPct: c.full, fabricSku: "SEW227" } }],
         [{ id: "SEW227", sku: "SEW227", desc: "x", category: "Fabric", curtainAreaRate: c.rate }],
         { sewingPct },
-        0.3
+        mk(0.3)
       ).get("pl1")!;
       const drape = sew227Drape({ w: c.w, h: c.h, fullness: c.full, qty: 1 }, c.rate, sewingPct);
-      const client = sew227PriceEach(spec, sew227Sell({ fabricRate: c.rate, sewingPct }, 0.3));
+      const client = sew227PriceEach(spec, sew227Sell({ fabricRate: c.rate, sewingPct }, mk(0.3)));
       ok(shared > at(c.w, c.h, c.full, c.rate, 0).costEach, `#227 late ${tag}: the adder raises the cost`);
       ok(portal.costEach === shared && est.costEach === shared && grid.costEach === shared && drape === Math.round(shared),
         `#227 late parity ${tag}: portal, estimator, Grid and the Equipment-map drape all = shared ${shared} (got ${portal.costEach} / ${est.costEach} / ${grid.costEach} / ${drape})`);
@@ -27910,13 +27928,13 @@ import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
         `#227 late parity ${tag}: Grid, client preview and estimator sell = portal sell (${portal.priceEach})`);
     }
   }
-  const estOv = sew227Compute({ name: "d", hang: "", fabric: "SEW227", qty: "1", width: "20", height: "19", fullness: "50", bottom: "", vendorCostOverride: "2080" }, [{ sku: "SEW227", name: "x", costPerSqft: 0, curtainAreaRate: 3.64 }], { sewingPct: 10 }, 0.3);
+  const estOv = sew227Compute({ name: "d", hang: "", fabric: "SEW227", qty: "1", width: "20", height: "19", fullness: "50", bottom: "", vendorCostOverride: "2080" }, [{ sku: "SEW227", name: "x", costPerSqft: 0, curtainAreaRate: 3.64 }], { sewingPct: 10 }, mk(0.3));
   ok(estOv.costEach === 2080, "#227 late: the estimator's Rose Brand cost override carries no sewing adder");
 
   // Quick Design / Grid Equipment map: a fabric row carries the rule the server priced it with.
   const drawDef = sew227Rows.get("curtains:draw")!;
   const fab: Sew227Part = { sku: "SEW227-VEL", desc: "Velour", unit: "sq ft", cost: 0, list: 0, category: "Fabric", curtainAreaRate: 3.64 };
-  const ctx = { parts: new Map<string, Sew227Part>([[fab.sku, fab]]), fixtures: new Map(), margin: 0.3, sewingPct: 25 };
+  const ctx = { parts: new Map<string, Sew227Part>([[fab.sku, fab]]), fixtures: new Map(), markup: mk(0.3), sewingPct: 25 };
   const cell = sew227PriceCell({ kind: "part", sku: fab.sku }, drawDef, ctx);
   ok(cell.status === "part" && cell.areaRate === 3.64 && cell.sewingPct === 25, "#227 late: a mapped fabric keeps its fabric-only area rate and carries the sewing %");
   const noRule = sew227PriceCell({ kind: "part", sku: fab.sku }, drawDef, { ...ctx, sewingPct: undefined });
@@ -29392,8 +29410,8 @@ import { quoteMode as d245Mode, canAcceptPortal as d245CanAccept, firmValidUntil
 import { searchCatalog as d245Search, buildHaystack as d245Hay, type SearchEntry as D242Entry } from "@/lib/portal-search";
 {
   const now = Date.UTC(2026, 8, 27);
-  const o = { margin: 0.3, staleCostMonths: 0, now };
-  ok(d245Unit({ cost: 70, list: 200 }, o).unitPrice === 100, "#245 price: cost ÷ (1 − margin)");
+  const o = { markup: mk(0.3), staleCostMonths: 0, now };
+  ok(d245Unit({ cost: 70, list: 200 }, o).unitPrice === 100, "#245 price: cost × (1 + markup)");
   ok(d245Unit({ cost: 0, list: 80 }, o).unitPrice === 80 && d245Unit({ cost: null, list: 80 }, o).unitPrice === 80, "#245 price: no cost → list");
   const np = d245Unit({ cost: 0, list: 0 }, o);
   ok(np.por && np.porReason === "no-price" && np.unitPrice === null, "#245 price: no cost and no list → price on request");
@@ -29441,7 +29459,7 @@ import { searchCatalog as d245Search, buildHaystack as d245Hay, type SearchEntry
 
 /* Fix round 1: fixture cost accumulation for POR components; group-based card detection */
 {
-  ok(d245FixPrice([{ sku: "A", cost: 700, list: 0, qty: 1, quotable: true, required: true }, { sku: "B", cost: 50, list: 0, qty: 2, quotable: true, required: true, note: "verify price" }], { margin: 0.3, staleCostMonths: 0, now: 0 }).cost === 800, "#245 fixture: a POR component's known cost still counts toward the fixture's internal cost");
+  ok(d245FixPrice([{ sku: "A", cost: 700, list: 0, qty: 1, quotable: true, required: true }, { sku: "B", cost: 50, list: 0, qty: 2, quotable: true, required: true, note: "verify price" }], { markup: mk(0.3), staleCostMonths: 0, now: 0 }).cost === 800, "#245 fixture: a POR component's known cost still counts toward the fixture's internal cost");
   ok(d245Card("PO 12345 4111 1111 1111 1111"), "#245 card guard: a card typed after a PO number is still caught");
   ok(d245Card("PO-12345-4111-1111-1111-1111"), "#245 card guard: dash-separated run with a leading PO group");
   ok(!d245Card("tracking 94111111111111111222"), "#245 card guard: a long unbroken digit string is not scanned window by window");
@@ -29529,10 +29547,10 @@ async function portal245IndexAsyncChecks(): Promise<void> {
     ok((await d245Facts(HIDE)).reason === "Hidden from customers", "#245 facts: a hidden part reads Hidden from customers");
 
     const ctx = await d245Ctx({ customerId: CO, name: "" });
-    ok(ctx.tier === "silver" && Math.abs(ctx.margin - 0.22) < 1e-9 && ctx.staleCostMonths === 0, "#245 pricing: context resolves the company tier + margin");
+    ok(ctx.tier === "silver" && Math.abs(ctx.markup - 0.28) < 1e-9 && ctx.staleCostMonths === 0, "#245 pricing: context resolves the company tier + markup (#367: Silver 28 %)");
     ok((await d245PriceSku(HIDE, ctx)) === null, "#245 pricing: a Hide part is not quotable (priceSku → null)");
     const ps = await d245PriceSku(IMG, ctx);
-    ok(!!ps && ps.unitPrice === Math.round((70 / (1 - 0.22)) * 100) / 100 && !ps.por, "#245 pricing: priceSku = cost ÷ (1 − tier margin)");
+    ok(!!ps && ps.unitPrice === Math.round(70 * (1 + ctx.markup) * 100) / 100 && !ps.por, "#245 pricing: priceSku = cost × (1 + tier markup) (#367)");
     const fr = await d245FreightFor(CO, null);
     ok(fr.unknown && fr.pct === 10 && fr.miles === null, "#245 freight: no venue → unknown distance at the cap");
 
@@ -29591,7 +29609,7 @@ async function portal245IndexAsyncChecks(): Promise<void> {
       lines: [{ lineId: "f", kind: "fixture", fixtureId: FX, qty: 3, fixtureOptions: { [`mounting:${OPT}`]: 1 } }] };
     const pf = await d245PriceCart(fxCart, ctx);
     const fl = pf.lines[0];
-    const tp = (c: number) => Math.round((c / (1 - 0.22)) * 100) / 100;
+    const tp = (c: number) => Math.round(c * (1 + ctx.markup) * 100) / 100; // #367: the stored silver tier, as markup
     const unit = Math.round((tp(70) + 2 * tp(5) + tp(7.8)) * 100) / 100;
     ok(fl.kind === "fixture" && !fl.por && fl.unitPrice === unit && fl.extPrice === Math.round(unit * 3 * 100) / 100 && pf.mode === "firm",
       "#245 cart: fixture unit = Σ chosen components' tier prices × qty; all priced → firm");
@@ -29954,7 +29972,7 @@ async function portal245CatalogBrowseAsyncChecks(): Promise<void> {
       const byKey = new Map(rA.result.entries.map((e) => [e.key, e]));
       const ctxA = await d245Ctx({ customerId: CO_A, name: "" });
       const w = byKey.get(P1);
-      ok(!!w && w.kind === "part" && w.unit === "ft" && w.unitPrice === (await d245PriceSku(P1, ctxA))?.unitPrice && w.unitPrice === Math.round((10 / (1 - 0.22)) * 100) / 100,
+      ok(!!w && w.kind === "part" && w.unit === "ft" && w.unitPrice === (await d245PriceSku(P1, ctxA))?.unitPrice && w.unitPrice === Math.round(10 * (1 + ctxA.markup) * 100) / 100,
         "#245 search action: a part tile is priced at the session customer's tier");
       ok(!byKey.has(PH), "#245 search action: a Hide part never appears");
       ok(byKey.get(PV)?.por === true && byKey.get(PV)?.unitPrice === null, "#245 search action: a verify-price part reads Price on request");
@@ -30209,11 +30227,11 @@ async function portal245SidebarAsyncChecks(): Promise<void> {
     ok(pv.ok && pv.unitPrice === base, "#245 fixture price: works for a team preview viewer");
     ok(ix.fixtures.has(FXL), "#245 fix 1: a fixture with a required labor line stays available");
     ok(!ix.fixtures.has(FXH) && (await d245Detail(ctx, "fixture:" + FXH)) === null, "#245 fix 1: a fixture with a required HIDDEN part is still excluded");
-    const labUnit = Math.round((60 / (1 - 0.22)) * 100) / 100;
+    const labUnit = Math.round(60 * (1 + ctx.markup) * 100) / 100;
     const pUnit = (await d245PriceSku(P, ctx))?.unitPrice ?? NaN;
     const fxl = await d245PriceFixture(FXL, {}, ctx);
     ok(!!fxl && fxl.unitPrice != null && Math.abs(fxl.unitPrice - (pUnit + 2 * labUnit)) < 0.011,
-      "#245 fix 1: the labor line is priced inside the fixture (labor cost ÷ (1 − margin) × qty)");
+      "#245 fix 1: the labor line is priced inside the fixture (labor cost × (1 + markup) × qty)");
     ok((await d245PriceSku(LAB, ctx)) === null && (await d245Detail(ctx, LAB)) === null, "#245 fix 1: the labor SKU alone is still not quotable (priceSku null, no sidebar)");
     const fxlD = await d245Detail(ctx, "fixture:" + FXL);
     ok(!!fxlD && fxlD.kind === "fixture" && fxlD.fixed.some((f) => f.sku === LAB && f.qty === 2 && f.label === "Test242 Travel day") && !JSON.stringify(fxlD).includes("\"cost\""),
@@ -31684,19 +31702,19 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
     { id: "b", name: "B", kind: "labor", mfr: "", freightPct: 0, items: [{ id: 2, sku: "L", desc: "", qty: 10, unit: "hr", cost: 50, price: 95 }] },
   ];
   // rev 300 + 950 = 1250, freight 10% of 200 cost = 20 → grand 1270
-  const kept = r242Reconcile(secs, { value: 1270.004, margin: 0.4 });
-  ok(!kept.adjusted && kept.value === 1270.004 && kept.margin === 0.4, `#242 final: a posted value within rounding is kept (got ${JSON.stringify(kept)})`);
-  const forged = r242Reconcile(secs, { value: 1, margin: 0.9 });
-  ok(forged.adjusted && forged.value === 1270 && Math.abs(forged.margin - (1250 - 700) / 1250) < 1e-9, `#242 final: a forged posted value is replaced by the recomputed one (got ${JSON.stringify(forged)})`);
-  const junk = r242Reconcile([null, { items: [{ qty: "9", price: 1e6, cost: 0 }] }, "x"], { value: 5, margin: 0 });
-  ok(junk.adjusted && junk.value === 0 && Number.isFinite(junk.margin), "#242 final: junk sections coerce to a finite recomputed value, never NaN");
-  ok(r242Reconcile(undefined, { value: 0, margin: 0 }).value === 0, "#242 final: no sections → 0");
+  const kept = r242Reconcile(secs, { value: 1270.004, markup: 0.4 });
+  ok(!kept.adjusted && kept.value === 1270.004 && kept.markup === 0.4, `#242 final: a posted value within rounding is kept (got ${JSON.stringify(kept)})`);
+  const forged = r242Reconcile(secs, { value: 1, markup: 0.9 });
+  ok(forged.adjusted && forged.value === 1270 && Math.abs(forged.markup - (1250 - 700) / 700) < 1e-9, `#242 final: a forged posted value is replaced by the recomputed one, markup on cost (got ${JSON.stringify(forged)})`);
+  const junk = r242Reconcile([null, { items: [{ qty: "9", price: 1e6, cost: 0 }] }, "x"], { value: 5, markup: 0 });
+  ok(junk.adjusted && junk.value === 0 && Number.isFinite(junk.markup), "#242 final: junk sections coerce to a finite recomputed value, never NaN");
+  ok(r242Reconcile(undefined, { value: 0, markup: 0 }).value === 0, "#242 final: no sections → 0");
   const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
   const saveBody = ea.slice(ea.indexOf("export async function saveQuoteAction("), ea.indexOf("export async function searchQuotesAction("));
   ok(
     // #282 phase 2: priced over the posted sections after the system-sell sanitize + Rewards-credit clamp.
-    saveBody.includes("reconcileEstimatorValue(postedSections, { value: payload.value, margin: payload.margin })") &&
-      saveBody.includes("value: priced.value,") && saveBody.includes("margin: priced.margin,") && !/^\s+value: payload\.value,$/m.test(saveBody),
+    saveBody.includes("reconcileEstimatorValue(postedSections, { value: payload.value, markup: payload.markup })") &&
+      saveBody.includes("value: priced.value,") && saveBody.includes("margin: priced.markup,") && !/^\s+value: payload\.value,$/m.test(saveBody),
     "#242 final: saveQuoteAction stores the server-recomputed value, never the posted one"
   );
   // #284 task 3: sendToCustomerAction delegates to sendQuoteToCustomer in src/lib/quote-review-ops.ts.
@@ -31831,7 +31849,7 @@ async function reviewLimitsFinal242AsyncChecks(): Promise<void> {
 
     // 3 — the gate evaluates the stored (server-derived) value.
     const secs = [{ id: "a", name: "A", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "P", desc: "", qty: 1, unit: "ea", cost: 0, price: 30000 }] }];
-    const priced = r242Reconcile(secs, { value: 100, margin: 0 });
+    const priced = r242Reconcile(secs, { value: 100, markup: 0 });
     const f = await mk("forged", { value: priced.value, spec: { sections: secs, mobs: [] } });
     let refusedF = false;
     try {
@@ -32361,15 +32379,15 @@ async function portal248PricingAsyncChecks(): Promise<void> {
     ];
     const sharedFlameInputs246 = d248Fvi(rawVenues246, cust246);
     const baseRates246 = await d248FlameRates();
-    const rates246 = { ...baseRates246, margin: tier246.margin };
+    const rates246 = { ...baseRates246, margin: tier246.markup };
     const builderR246 = d248ComputeFlame({ office: office246 || undefined, venues: sharedFlameInputs246 }, rates246, travelRates246);
 
     const priced = await d248Price(session246, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 15 }, { venueId: "v2", count: 9 }] });
     ok(priced.ok && priced.total === Math.round(builderR246.total),
       "#248 parity: priceServiceRequest's total equals compute() run over the builder's own input path, same tier margin");
     if (priced.ok) {
-      ok(priced.margin === builderR246.effectiveMargin && priced.tier === tier246.tier && priced.tierMargin === tier246.margin,
-        "#248 parity: margin/tier/tierMargin match the builder's own resolveTier() + the engine's effectiveMargin");
+      ok(priced.margin === builderR246.effectiveMarkup && priced.tier === tier246.tier && priced.tierMargin === tier246.markup,
+        "#248 parity: margin/tier/tierMargin match the builder's own resolveTier() + the engine's effectiveMarkup");
       const lineSum = priced.view.lines.reduce((a, l) => a + l.amount, 0);
       ok(priced.view.total === priced.total && lineSum + priced.view.travel === priced.total,
         "#248 view: the per-venue lines plus the travel line sum to exactly the total");
@@ -32389,7 +32407,7 @@ async function portal248PricingAsyncChecks(): Promise<void> {
     const rawInspVenues246 = [{ id: "v1", lineSets: 20 }];
     const sharedInspInputs246 = d248Ivi(rawInspVenues246, cust246);
     const baseInspRates246 = await d248InspRates();
-    const inspRates246 = { ...baseInspRates246, margin: tier246.margin };
+    const inspRates246 = { ...baseInspRates246, margin: tier246.markup };
     const builderIns1_246 = d248ComputeInsp({ office: office246 || undefined, venues: sharedInspInputs246, level: 1 }, inspRates246, travelRates246);
 
     // ---- inspection: no per-venue breakdown in the engine → one summary
@@ -32635,7 +32653,9 @@ async function portal248RefreshAsyncChecks(): Promise<void> {
       contacts: [],
     });
 
-    const gen = await d248Generate(sess, { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 10 }] }, { now: NOW, schedulePdf: false });
+    // #367: 200 curtains (the portal's flame cap), not 10 — Silver 28 % vs Gold 25 % markup is a 3-point gap, which on a
+    // small job lands on the same $25 step ($375 both). At 200 curtains the gap is well over one step.
+    const gen = await d248Generate(sess, { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 200 }] }, { now: NOW, schedulePdf: false });
     if (!gen.ok) throw new Error("#248 Task 2 refresh setup failed — " + gen.error);
     registerFixture("quotes", gen.quoteId);
     const q0 = await QuoteStore.get(gen.quoteId);
@@ -32651,7 +32671,7 @@ async function portal248RefreshAsyncChecks(): Promise<void> {
     const early = await d245RefreshPortalQuote(sess, gen.quoteId, NOW);
     ok(!early.ok, "#248 refresh: refusing before validUntil has passed");
 
-    // Change the rate — gold margin instead of silver — so the refresh
+    // Change the rate — gold markup instead of silver — so the refresh
     // lands on a genuinely different value, not a replay of the same price.
     await upsertCustomer({
       id: CO,
@@ -33263,7 +33283,7 @@ async function portal250AsyncChecks(): Promise<void> {
       { name: "x", hang: "", fabric: FAB250, qty: "1", width: "30", height: "18", fullness: "50", bottom: "" } as any,
       [{ sku: FAB250, name: "Test250 Velour", costPerSqft: 0, curtainAreaRate: 3.5 }] as any,
       { sewingPct: 12 },
-      ctx250.margin
+      ctx250.markup
     ).priceEach;
 
     const curtainCart250: D242Cart = {
@@ -35033,17 +35053,17 @@ async function specRecordsFinalReviewAsyncChecks(): Promise<void> {
 }
 
 
-/* ---- #254 — a tier change re-prices lines still at the previous tier margin (Estimator) ----
+/* ---- #254 — a tier change re-prices lines still at the previous tier markup (Estimator; #367: margin inputs via mk()) ----
  * repriceForTier (src/app/(app)/estimator/tier-reprice.ts) is pure; the
  * Estimator applies it when updateQuoteMetaAction hands back a new stamp and
  * the normal Save persists it. Labor re-seeds through the labor draft's
- * whole-percent margin; curtains through curtainPrice; fixtures are never
+ * whole-percent markup; curtains through curtainPrice; fixtures are never
  * tier-priced. Nothing about tiers reaches the customer document (D87). */
 import {
   repriceForTier as t254Reprice,
   tierRepriceMessage as t254Msg,
-  seedMarginOf as t254Seed,
-  laborSeedMarginOf as t254LaborSeed,
+  seedMarkupOf as t254Seed,
+  laborSeedMarkupOf as t254LaborSeed,
   TIER_REPRICE_TOLERANCE as t254Tol,
 } from "@/app/(app)/estimator/tier-reprice";
 import {
@@ -35061,7 +35081,7 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
     ({ id, sku: "S" + id, desc: "Line " + id, qty: 2, unit: "ea", cost, price, ...extra });
   const at = (cost: number, m: number) => t254R2(cost / (1 - m));
 
-  // Seeded vs hand-priced vs override vs POR vs zero-cost, at the 0.30 fallback.
+  // Seeded vs hand-priced vs override vs POR vs zero-cost, at the old 30 % margin — the 0.43 fallback's legacy twin (#367).
   const secs = [
     sec("sys101", [
       line(1, 100, at(100, 0.3)), // catalog part, seeded at 30 → re-priced
@@ -35073,10 +35093,10 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
       line(7, 1234.5, at(1234.5, 0.3), { qty: 1, unit: "lot", vendorQuoteId: "VQ-1" }), // vendor-quote line
     ]),
   ];
-  const r = t254Reprice(secs, null, 0.2);
+  const r = t254Reprice(secs, null, mk(0.2));
   const it = (n: number) => r.sections[0].items.find((x) => x.id === n)!;
   ok(r.repriced === 3 && r.handPriced === 2 && r.untouched === 2, `#254 repriceForTier: 3 seeded lines re-priced, 2 hand-priced + 2 untouched kept (got ${r.repriced}/${r.handPriced}/${r.untouched})`);
-  ok(it(1).price === 125 && it(1).cost === 100, "#254 repriceForTier: a catalog line at the 30% seed moves to cost ÷ (1 − 0.20)");
+  ok(it(1).price === 125 && it(1).cost === 100, "#254 repriceForTier: a catalog line at the 30%-margin seed moves to cost × (1 + 0.25)");
   ok(it(2).price === 150, "#254 repriceForTier: a hand-priced sell is kept");
   ok(it(3).price === at(100, 0.3) && it(3).extSellOverride === 400, "#254 repriceForTier: a line with an ext-sell override is kept, override intact");
   ok(it(4).price === 0 && it(4).por === true, "#254 repriceForTier: a POR line is kept");
@@ -35085,50 +35105,50 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
   ok(it(7).price === at(1234.5, 0.2) && it(7).vendorQuoteId === "VQ-1", "#254 repriceForTier: a vendor-quote line re-prices from its cost");
   ok(secs[0].items[0].price === at(100, 0.3), "#254 repriceForTier: the input sections are not mutated");
 
-  // prev null means the 0.30 fallback — the same result as an explicit 0.30.
-  ok(JSON.stringify(t254Reprice(secs, 0.3, 0.2).sections) === JSON.stringify(r.sections) && t254Seed(null) === 0.3 && t254Seed(0) === 0.3 && t254Seed(1) === 0.3,
-    "#254 repriceForTier: prev = null (or an unusable stamp) is the client's 0.30 fallback");
-  // Identical margins → no change, same reference.
-  const same = t254Reprice(secs, 0.3, 0.3);
-  const sameNull = t254Reprice(secs, null, 0.3);
+  // prev null means the 0.43 fallback — the same result as the exact 30 %-margin stamp its lines sit at (legacy twin).
+  ok(JSON.stringify(t254Reprice(secs, mk(0.3), mk(0.2)).sections) === JSON.stringify(r.sections) && t254Seed(null) === 0.43 && t254Seed(0) === 0.43 && t254Seed(20) === 0.43,
+    "#254 repriceForTier: prev = null (or an unusable stamp) is the client's 0.43 fallback (#367: was 0.30 margin)");
+  // Identical markups → no change, same reference.
+  const same = t254Reprice(secs, mk(0.3), mk(0.3));
+  const sameNull = t254Reprice(secs, null, 0.43);
   ok(same.sections === secs && same.repriced === 0 && same.handPriced === 0 && same.untouched === 0 && sameNull.sections === secs && sameNull.repriced === 0,
-    "#254 repriceForTier: prev === next (incl. null vs 0.30) changes nothing and returns the same array");
-  ok(t254Reprice(secs, 0.3, null).sections === secs && t254Reprice(secs, 0.3, 1).repriced === 0,
-    "#254 repriceForTier: a missing or unusable next margin changes nothing");
+    "#254 repriceForTier: prev === next (incl. null vs 0.43) changes nothing and returns the same array");
+  ok(t254Reprice(secs, mk(0.3), null).sections === secs && t254Reprice(secs, mk(0.3), 20).repriced === 0,
+    "#254 repriceForTier: a missing or unusable next markup changes nothing");
 
   // Rounding tolerance: one cent off the seed still matches; two cents is hand-priced.
-  const tol = t254Reprice([sec("sys1", [line(1, 100, t254R2(at(100, 0.3) + 0.01)), line(2, 100, t254R2(at(100, 0.3) - 0.01)), line(3, 100, t254R2(at(100, 0.3) + 0.02))])], 0.3, 0.2);
+  const tol = t254Reprice([sec("sys1", [line(1, 100, t254R2(at(100, 0.3) + 0.01)), line(2, 100, t254R2(at(100, 0.3) - 0.01)), line(3, 100, t254R2(at(100, 0.3) + 0.02))])], mk(0.3), mk(0.2));
   ok(t254Tol === 0.01 && tol.repriced === 2 && tol.handPriced === 1 && tol.sections[0].items[2].price === t254R2(at(100, 0.3) + 0.02),
     "#254 repriceForTier: $0.01 tolerance — ±1¢ off the seed re-prices, 2¢ off is kept");
 
-  // Tier → tier: lines at Gold's 20% move to Silver's 22%; a line at 30% is now hand-priced.
-  const tt = t254Reprice([sec("sys1", [line(1, 80, at(80, 0.2)), line(2, 80, at(80, 0.3))])], 0.2, 0.22);
+  // Tier → tier: lines at Gold's 20% (margin) move to Silver's 22%; a line at 30% is now hand-priced.
+  const tt = t254Reprice([sec("sys1", [line(1, 80, at(80, 0.2)), line(2, 80, at(80, 0.3))])], mk(0.2), mk(0.22));
   ok(tt.repriced === 1 && tt.handPriced === 1 && tt.sections[0].items[0].price === at(80, 0.22) && tt.sections[0].items[1].price === at(80, 0.3),
-    "#254 repriceForTier: tier → tier re-prices only the lines at the previous tier's margin");
+    "#254 repriceForTier: tier → tier re-prices only the lines at the previous tier's markup");
 
   // Nothing seeded → the same array back; an untouched section keeps its reference.
-  const none = t254Reprice([sec("sys1", [line(1, 100, 150)])], 0.3, 0.2);
+  const none = t254Reprice([sec("sys1", [line(1, 100, 150)])], mk(0.3), mk(0.2));
   ok(none.repriced === 0 && none.handPriced === 1, "#254 repriceForTier: no seeded line → 0 re-priced (no banner)");
   const two = [sec("a", [line(1, 100, 150)]), sec("b", [line(2, 100, at(100, 0.3))])];
-  const twoR = t254Reprice(two, null, 0.2);
+  const twoR = t254Reprice(two, null, mk(0.2));
   ok(twoR.sections[0] === two[0] && twoR.sections[1] !== two[1], "#254 repriceForTier: a section with nothing re-priced keeps its reference");
 
   // Fixture lines are priced from their assembly, never the tier: untouched, not counted.
-  const fx = t254Reprice([sec("sys1", [line(1, 100, at(100, 0.3), { fixture: true }), line(2, 100, at(100, 0.3))])], null, 0.2);
+  const fx = t254Reprice([sec("sys1", [line(1, 100, at(100, 0.3), { fixture: true }), line(2, 100, at(100, 0.3))])], null, mk(0.2));
   ok(fx.repriced === 1 && fx.handPriced === 0 && fx.untouched === 1 && fx.sections[0].items[0].price === at(100, 0.3),
     "#254 repriceForTier: a fixture line (assembly-priced) is never re-priced and not counted as hand-priced");
 
-  // Curtain lines: cost + sell from computeCurtain at the tier margin → re-seed through the same math.
+  // Curtain lines: cost + sell from computeCurtain at the tier markup → re-seed through the same math.
   const fabrics = [{ sku: "RB-MV-MN", name: "Memphis Velour", costPerSqft: 1.37 }];
   const cd = { name: "Main drape", hang: "", fabric: "RB-MV-MN", qty: "2", height: "21.5", width: "17.25", fullness: "50", bottom: "" };
-  const c30 = t254Curtain(cd, fabrics, { sewingPct: 18 }, 0.3);
-  const c15 = t254Curtain(cd, fabrics, { sewingPct: 18 }, 0.15);
-  const curt = t254Reprice([sec("sys1", [line(1, c30.costEach, c30.priceEach, { curtain: true })])], null, 0.15);
+  const c30 = t254Curtain(cd, fabrics, { sewingPct: 18 }, mk(0.3));
+  const c15 = t254Curtain(cd, fabrics, { sewingPct: 18 }, mk(0.15));
+  const curt = t254Reprice([sec("sys1", [line(1, c30.costEach, c30.priceEach, { curtain: true })])], null, mk(0.15));
   ok(curt.repriced === 1 && curt.sections[0].items[0].price === c15.priceEach,
     `#254 repriceForTier: a curtain line re-seeds exactly as computeCurtain would at the new tier (${c30.priceEach} → ${c15.priceEach})`);
 
-  // Labor lines: seeded through the labor draft's WHOLE-percent margin, last line nudged by drift.
-  ok(t254LaborSeed(0.274) === 0.27 && t254LaborSeed(null) === 0.3 && t254LaborSeed(0.2) === 0.2, "#254 laborSeedMarginOf: the labor draft's whole-percent margin (27.4% → 27%)");
+  // Labor lines: seeded through the labor draft's WHOLE-percent markup, last line nudged by drift.
+  ok(t254LaborSeed(0.374) === 0.37 && t254LaborSeed(null) === 0.43 && t254LaborSeed(0.25) === 0.25, "#254 laborSeedMarkupOf: the labor draft's whole-percent markup (37.4% → 37%; no stamp → 43%, #367)");
   const rate = t254Rate({});
   const draft = (margin: string): T254LaborDraft => ({
     discipline: "RIG", margin,
@@ -35136,19 +35156,19 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
     pmHrs: "", pmAuto: true, shopHrs: "3", drfHrs: "", drfAuto: true, misc: "123.457",
   });
   let n254 = 1000;
-  const lab27 = t254BuildLabor(t254ComputeLabor(draft("27"), rate), "Rigging", () => ++n254).map((x) => ({ ...x }));
-  const lab20 = t254BuildLabor(t254ComputeLabor(draft("20"), rate), "Rigging", () => ++n254);
-  const labR = t254Reprice([{ ...sec("sys2", lab27), kind: "labor" }], 0.274, 0.2);
+  const lab27 = t254BuildLabor(t254ComputeLabor(draft("37"), rate), "Rigging", () => ++n254).map((x) => ({ ...x }));
+  const lab20 = t254BuildLabor(t254ComputeLabor(draft("25"), rate), "Rigging", () => ++n254);
+  const labR = t254Reprice([{ ...sec("sys2", lab27), kind: "labor" }], 0.374, mk(0.2));
   ok(lab27.length >= 3 && labR.repriced === lab27.length && labR.handPriced === 0,
-    `#254 repriceForTier: every labor line built at the tier's 27% (stamp 27.4%) is re-priced, incl. the drift-nudged last line (${labR.repriced}/${lab27.length})`);
+    `#254 repriceForTier: every labor line built at the tier's 37% (stamp 37.4%) is re-priced, incl. the drift-nudged last line (${labR.repriced}/${lab27.length})`);
   ok(labR.sections[0].items.every((x, i) => x.price === at(x.cost, 0.2) && Math.abs(x.price - lab20[i].price) <= 0.05),
-    "#254 repriceForTier: re-priced labor lands on cost ÷ (1 − 0.20), within the labor drift bound of a fresh 20% build");
-  const labHand = t254Reprice([sec("sys2", lab27.map((x, i) => (i === 0 ? { ...x, price: t254R2(x.price + 25) } : x)))], 0.274, 0.2);
+    "#254 repriceForTier: re-priced labor lands on cost × (1 + 0.25) = cost ÷ (1 − 0.20), within the labor drift bound of a fresh 25% build");
+  const labHand = t254Reprice([sec("sys2", lab27.map((x, i) => (i === 0 ? { ...x, price: t254R2(x.price + 25) } : x)))], 0.374, mk(0.2));
   ok(labHand.handPriced === 1 && labHand.sections[0].items[0].price === t254R2(lab27[0].price + 25),
     "#254 repriceForTier: a labor line re-priced by hand in the modal (or typed) is kept");
-  const lab30 = t254BuildLabor(t254ComputeLabor(draft("30"), rate), "Rigging", () => ++n254);
-  ok(t254Reprice([sec("sys2", lab30)], null, 0.304).repriced === 0,
-    "#254 repriceForTier: a stamp change inside the same whole percent leaves labor alone (30% → 30.4%)");
+  const lab30 = t254BuildLabor(t254ComputeLabor(draft("43"), rate), "Rigging", () => ++n254);
+  ok(t254Reprice([sec("sys2", lab30)], null, 0.434).repriced === 0,
+    "#254 repriceForTier: a stamp change inside the same whole percent leaves labor alone (43% → 43.4%)");
 
   // Banner text.
   ok(t254Msg(14, 2, "Gold", 0.2) === "Re-priced 14 lines to Gold (20%) · kept 2 hand-priced lines", "#254 banner: the spec's wording");
@@ -35178,9 +35198,9 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
 }
 
 
-/* ---- #254 — service builders re-seed their margin knob from the customer's tier ----
+/* ---- #254 — service builders re-seed their markup knob from the customer's tier ----
  * src/lib/tier-seed.ts is pure: seed = contact's own tier → company tier →
- * the service's own default margin; an untouched knob (still at the previous
+ * the service's own default markup (#367: every fraction here is a markup); an untouched knob (still at the previous
  * seed) follows a customer OR contact change, a hand-set one is kept with a
  * "Use <Tier>" prompt. Flame test, repair and inspection builders share it;
  * a saved quote reopens at its own knob, never re-seeded on load (D457). */
@@ -35189,7 +35209,7 @@ import {
   reseedKnob as s254Reseed,
   initialTierSeed as s254Init,
   tierPromptText as s254Text,
-  knobPtsFrom as s254Pts,
+  knobPctFrom as s254Pts,
 } from "@/lib/tier-seed";
 {
   const acme = {
@@ -35206,7 +35226,7 @@ import {
   ok(d.pts === 20 && d.label === "Gold", "#254 seedFor: a contact with no tier of their own falls back to the company tier");
   ok(s254Seed(acme, "", 0.35).pts === 20 && s254Seed(acme, "Someone Typed", 0.35).pts === 20, "#254 seedFor: no contact / an unknown name → the company tier");
   const n = s254Seed(plain, "Sam Ortiz", 0.35);
-  ok(n.pts === 35 && n.label === null, "#254 seedFor: no tier anywhere → the service's own default margin, not tier Base's 30%");
+  ok(n.pts === 35 && n.label === null, "#254 seedFor: no tier anywhere → the service's own default markup, not tier Base's");
   ok(s254Seed(plain, "Pat Lee", 0.35).pts === 10 && s254Seed(null, "", 0.4).pts === 40, "#254 seedFor: a tiered contact at an untiered company still seeds; no customer → the default");
 
   // An untouched knob moves; a hand-set one is kept with the prompt.
@@ -35216,9 +35236,9 @@ import {
   ok(kept.knobPts === 25 && kept.prevSeedPts === 20 && kept.prompt?.keptPts === 25 && kept.prompt.seed.pts === 20,
     "#254 reseedKnob: a hand-set knob is kept, the new seed becomes the reference and is offered");
   const t = s254Text(kept.prompt!);
-  ok(t.text === "Kept your 25% margin — Gold is 20%" && t.action === "Use Gold", "#254 prompt: the spec's wording (Kept your 25% margin — Gold is 20% · Use Gold)");
+  ok(t.text === "Kept your 25% markup — Gold is 20%" && t.action === "Use Gold", "#254 prompt: the spec's wording (Kept your 25% markup — Gold is 20% · Use Gold)");
   const td = s254Text({ keptPts: 25, seed: { pts: 35, label: null } });
-  ok(td.text === "Kept your 25% margin — the default is 35%" && td.action === "Use 35%", "#254 prompt: an untiered customer offers the service default by its percent");
+  ok(td.text === "Kept your 25% markup — the default is 35%" && td.action === "Use 35%", "#254 prompt: an untiered customer offers the service default by its percent");
   ok(s254Reseed(20, 30, { pts: 20, label: "Gold" }).prompt === null, "#254 reseedKnob: a hand-set knob already on the new seed needs no prompt");
 
   // A contact change re-seeds: customer (Gold 20) → contact Eric (Platinum 15) → back to Dana (Gold 20).
@@ -35233,13 +35253,18 @@ import {
   const fresh = s254Init({ customer: acme, contactName: "Eric Vance", serviceDefault: 0.35 });
   ok(fresh.knobPts === 15 && fresh.prevSeedPts === 15, "#254 initialTierSeed: a new quote opens at the seed for its preselected customer/contact");
   ok(s254Init({ customer: null, contactName: "", serviceDefault: 0.35 }).knobPts === 35, "#254 initialTierSeed: no customer → the service default");
-  const reopenStamp = s254Init({ customer: acme, contactName: "Dana Cole", serviceDefault: 0.35, savedMarginPts: 30, stampedTierMargin: 0.3 });
-  ok(reopenStamp.knobPts === 30 && reopenStamp.prevSeedPts === 30, "#254 initialTierSeed: a saved knob at its stamped tier margin reopens untouched (follows the next change)");
-  const reopenHand = s254Init({ customer: acme, contactName: "Dana Cole", serviceDefault: 0.35, savedMarginPts: 42, stampedTierMargin: 0.27 });
+  const reopenStamp = s254Init({ customer: acme, contactName: "Dana Cole", serviceDefault: 0.35, savedMarkupPts: 30, stampedTierMarkup: 0.3 });
+  ok(reopenStamp.knobPts === 30 && reopenStamp.prevSeedPts === 30, "#254 initialTierSeed: a saved knob at its stamped tier markup reopens untouched (follows the next change)");
+  const reopenHand = s254Init({ customer: acme, contactName: "Dana Cole", serviceDefault: 0.35, savedMarkupPts: 42, stampedTierMarkup: 0.27 });
   ok(reopenHand.knobPts === 42 && reopenHand.prevSeedPts === 27, "#254 initialTierSeed: a hand-set saved knob reopens as saved, the stamp is its previous seed");
-  const reopenNoStamp = s254Init({ customer: plain, contactName: "", serviceDefault: 0.35, savedMarginPts: 28, stampedTierMargin: null });
+  const reopenNoStamp = s254Init({ customer: plain, contactName: "", serviceDefault: 0.35, savedMarkupPts: 28, stampedTierMarkup: null });
   ok(reopenNoStamp.knobPts === 28 && reopenNoStamp.prevSeedPts === 35, "#254 initialTierSeed: no stamp → today's seed is the previous seed");
-  ok(s254Pts(0.2) === 20 && s254Pts(null) === null && s254Pts(0) === null && s254Pts(1) === null, "#254 knobPtsFrom: fraction → whole points, invalid → null");
+  ok(s254Pts(0.2) === 20 && s254Pts(1) === 100 && s254Pts(null) === null && s254Pts(0) === null && s254Pts(20) === null,
+    "#254 knobPctFrom: a markup fraction → knob points (up to MARKUP_MAX), invalid → null");
+  // #367: exact points carry float noise (0.28 × 100 = 28.000000000000004); a whole-point knob still counts as on that seed.
+  ok(s254Reseed(28, 0.28 * 100, { pts: 0.2 * 100, label: "Gold" }).prompt === null &&
+      s254Init({ customer: null, contactName: "", serviceDefault: 0.28, savedMarkupPts: 28, stampedTierMarkup: 0.28 }).prevSeedPts === 28,
+    "#367 tier-seed: a knob a float hair off its seed (exact points) is still untouched");
 
   // Structural wiring in each builder.
   const s254Read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -35249,27 +35274,28 @@ import {
     const pick = c.slice(c.indexOf("function pickCustomer("), c.indexOf("function toggleVenue("));
     ok(/from "@\/lib\/tier-seed"/.test(c) && !/import (?!type)[^;]*from "@\/(lib\/stores|db)/.test(c),
       `#254 ${svc}: the builder uses the shared tier-seed helper and imports no store/db value`);
-    ok(/useState\(seed0\.knobPts\)/.test(c) && /savedMarginPts: initial\.marginPts/.test(c) && /stampedTierMargin: initial\.stampedTierMargin/.test(c)
+    ok(/useState\(seed0\.knobPts\)/.test(c) && /savedMarkupPts: initial\.savedMarkupPts/.test(c) && /stampedTierMarkup: initial\.stampedTierMarkup/.test(c)
       && !/useState\(Math\.round\(baseRates\.margin \* 100\)\)/.test(c),
-      `#254 ${svc}: the knob opens at the saved margin / the loaded seed, tracking the previous seed`);
+      `#254 ${svc}: the knob opens at the saved markup / the loaded seed, tracking the previous seed`);
     ok(/reseedTier\(c, primary \? primary\.name : ""\)/.test(pick) && /setPriceText\(""\)/.test(pick),
       `#254 ${svc}: a customer change re-seeds through the helper and still clears a typed total`);
     ok(/setContactSel\(val\);\s*reseedTier\(customer, val\);[^\n]*\n\s*dirty\(\);\s*\};/.test(c),
       `#254 ${svc}: a contact change re-seeds too and leaves a typed total alone`);
-    ok(/seedFor\(c, contactName === "__other__" \? "" : contactName, baseRates\.margin\)/.test(c) && /reseedKnob\(marginPts, prevSeedPts\.current, next\)/.test(c),
-      `#254 ${svc}: the seed falls back to this service's own default margin`);
-    ok(/<TierSeedPrompt prompt=\{tierPrompt\} onUse=\{applyTierSeed\}/.test(c) && /setMarginPts\(Math\.round\(\+e\.target\.value\)\);\s*setPriceText\(""\);\s*setTierPrompt\(null\);/.test(c)
-      && /setMarginPts\(tierPrompt\.seed\.pts\);[\s\S]{0,60}setTierPrompt\(null\);/.test(c),
+    ok(/seedFor\(c, contactName === "__other__" \? "" : contactName, baseRates\.margin\)/.test(c) && /reseedKnob\(markupPts, prevSeedPts\.current, next\)/.test(c),
+      `#254 ${svc}: the seed falls back to this service's own default markup`);
+    ok(/<TierSeedPrompt prompt=\{tierPrompt\} onUse=\{applyTierSeed\}/.test(c) && /setMarkupPts\(Math\.round\(\+e\.target\.value\)\);\s*setPriceText\(""\);\s*setTierPrompt\(null\);/.test(c)
+      && /setMarkupPts\(tierPrompt\.seed\.pts\);[\s\S]{0,60}setTierPrompt\(null\);/.test(c),
       `#254 ${svc}: the Use <Tier> prompt renders under the knob, applies the seed and clears; moving the knob clears it`);
-    ok(/marginPts: knobPtsFrom\(\w+\?\.rates\?\.margin\)/.test(pg) && /stampedTierMargin: editQuote\.tierMargin \?\? null/.test(pg)
-      && /tierMargin: tierInfo\[c\.id\]\?\.tier \? tierInfo\[c\.id\]\.margin : null/.test(pg) && /tier: tierInfo\[c\.id\]\?\.byContactTier\[ct\.name\]/.test(pg),
+    ok(/savedMarkupPts: knobPctFrom\(\w+\?\.rates\?\.margin\)/.test(pg) && /stampedTierMarkup: editQuote\.tierMargin \?\? null/.test(pg)
+      && /tierMargin: tierInfo\[c\.id\]\?\.tier \? tierInfo\[c\.id\]\.markup : null/.test(pg) && /tier: tierInfo\[c\.id\]\?\.byContactTier\[ct\.name\]/.test(pg),
       `#254 ${svc}: the page reopens the saved knob and passes only real tiers (company + contact) with their keys`);
   }
   const s254Tiers = s254Read("src/lib/pricing-tiers.ts");
   ok(/tier: companyTier,\s*byContactTier,/.test(s254Tiers), "#254 builderTiers hands the company's own tier and each contact's tier key to the builders");
   const s254Helper = s254Read("src/lib/tier-seed.ts");
-  ok(!/from "@\/(lib\/stores|db)/.test(s254Helper) && /^import \{ PRICING_TIER_LABEL, type PricingTier \} from "@\/lib\/identity\/config";/m.test(s254Helper),
-    "#254 client safety: tier-seed.ts imports only the import-free identity config");
+  ok(!/from "@\/(lib\/stores|db)/.test(s254Helper) && /^import \{ PRICING_TIER_LABEL, type PricingTier \} from "@\/lib\/identity\/config";/m.test(s254Helper) &&
+      /^import \{ MARKUP_MAX, fmtMarkupPct \} from "@\/lib\/markup";/m.test(s254Helper) && (s254Helper.match(/^import /gm) || []).length === 2,
+    "#254 client safety: tier-seed.ts imports only the import-free identity config and markup modules");
 }
 
 
@@ -35296,7 +35322,7 @@ import {
   ])], null, 0.2);
   ok(split.repriced === 1 && split.handPriced === 2 && split.untouched === 3,
     `#254 review: kept splits into handPriced (sell ≠ seed, ext-sell override) and untouched (POR / no cost / fixture) (got ${split.repriced}/${split.handPriced}/${split.untouched})`);
-  const onlyUntouched = t254Reprice([sec([line(1, 100, at(100, 0.3)), line(2, 0, 0, { por: true }), line(3, 0, 9)])], null, 0.2);
+  const onlyUntouched = t254Reprice([sec([line(1, 100, at(100, 0.3)), line(2, 0, 0, { por: true }), line(3, 0, 9)])], null, mk(0.2));
   ok(onlyUntouched.handPriced === 0 && t254Msg(onlyUntouched.repriced, onlyUntouched.handPriced, "Gold", 0.2) === "Re-priced 1 line to Gold (20%)",
     "#254 review: POR / no-cost lines never read as hand-priced — the kept clause is omitted at 0");
 
@@ -35350,7 +35376,7 @@ import {
   // Estimate suggestion (#338): the intake seed is `seedCustomer` (the URL's customer, else the suggestion's).
   const pgNew = pg.slice(pg.indexOf("if (seedCustomer) {"), pg.indexOf("const lite = ("));
   ok(/^import \{ resolveTier \} from "@\/lib\/pricing-tiers";$/m.test(pg)
-    && /if \(!q\) \{\s*const t = await resolveTier\(initial\.customerId, initial\.contactName\);\s*initial\.pricingTier = t\.tier;\s*initial\.tierMargin = t\.margin;\s*\}/.test(pgNew)
+    && /if \(!q\) \{\s*const t = await resolveTier\(initial\.customerId, initial\.contactName\);\s*initial\.pricingTier = t\.tier;\s*initial\.tierMargin = t\.markup;\s*\}/.test(pgNew)
     && pgNew.indexOf("if (!q) {") > pgNew.indexOf("initial.contactName = pickContactName("),
     "#254 wave 2: a new estimate resolves its tier from the intake's customer + contact (or Base with none) after the intake seeds them");
   ok(/pricingTier: q\.pricingTier \?\? null,\s*tierMargin: q\.tierMargin \?\? null,/.test(pg),
@@ -35378,11 +35404,11 @@ import {
     "#254 review: the header autosave (updateQuoteMetaAction) no longer resolves or persists the tier stamp");
   const saveA = fn("saveQuoteAction");
   ok(/const tier = await resolveTier\(payload\.customerId \|\| null, payload\.contactName \|\| ""\);/.test(saveA)
-    && /pricingTier: tier\.tier,\s*tierMargin: tier\.margin,/.test(saveA)
+    && /pricingTier: tier\.tier,\s*tierMargin: tier\.markup,/.test(saveA)
     && /create\(\{ \.\.\.patch, owner: user\.name, \.\.\.\(leadId \? \{ leadId \} : \{\}\) \}\)/.test(saveA) && /update\(loadedId, \{ \.\.\.patch, vendorQuotes: storedVendorQuotes \}/.test(saveA),
     "#254 review: saveQuoteAction stamps the tier server-side into the one patch both create and update write");
   const rta = fn("resolveTierAction");
-  ok(/await requireUser\(\)/.test(rta) && /resolveTier\(/.test(rta) && /ok: true, pricingTier: r\.tier, tierMargin: r\.margin, label:/.test(rta)
+  ok(/await requireUser\(\)/.test(rta) && /resolveTier\(/.test(rta) && /ok: true, pricingTier: r\.tier, tierMargin: r\.markup, label:/.test(rta)
     && !/\b(update|create|upsert)\(/.test(rta),
     "#254 review: resolveTierAction is read-only — requireUser → resolveTier → { pricingTier, tierMargin, label }");
 }
@@ -35391,52 +35417,54 @@ async function tier254SaveStampAsyncChecks(): Promise<void> {
   const { resolveTier } = await import("@/lib/pricing-tiers");
   const CO = fixtureId(254, "save-stamp-co");
   const at = (cost: number, m: number) => t254R2(cost / (1 - m));
+  // #367: a stamp read from the tier registry is a markup — its seed is cost × (1 + k).
+  const atK = (cost: number, k: number) => t254R2(cost * (1 + k));
   try {
     await upsertCustomer({ id: CO, name: "Test254 Save Stamp Co", type: "Education", pricingTier: "gold", locations: [], contacts: [] });
     // A NEW estimate: lines seeded at the 0.30 fallback, then the customer
     // is picked — the client re-prices against the resolution…
     const gold = await resolveTier(CO, "");
-    ok(gold.tier === "gold" && gold.margin > 0 && gold.margin < 0.3, `#254 review: a gold company resolves to gold (${gold.margin})`);
+    ok(gold.tier === "gold" && gold.markup > 0 && gold.markup < 0.43, `#254 review: a gold company resolves to gold (${gold.markup})`);
     const seeded: T254Sec[] = [{ id: "s1", name: "s1", kind: "materials", mfr: "", freightPct: 5, items: [
       { id: 1, sku: "A", desc: "A", qty: 2, unit: "ea", cost: 100, price: at(100, 0.3) },
       { id: 2, sku: "B", desc: "B", qty: 1, unit: "ea", cost: 100, price: 175 },
     ] }];
-    const rp = t254Reprice(seeded, null, gold.margin);
+    const rp = t254Reprice(seeded, null, gold.markup);
     ok(rp.repriced === 1 && rp.handPriced === 1, "#254 review: the unsaved estimate's seeded line re-prices on the pick");
     // …and the first save writes the stamp in the same create as the lines.
     const created = await QuoteStore.create({ name: "Test254 save stamp", customerId: CO, source: "estimator",
-      pricingTier: gold.tier, tierMargin: gold.margin, spec: { sections: rp.sections, mobs: [] } } as Parameters<typeof QuoteStore.create>[0]);
+      pricingTier: gold.tier, tierMargin: gold.markup, spec: { sections: rp.sections, mobs: [] } } as Parameters<typeof QuoteStore.create>[0]);
     registerFixture("quotes", created.id);
     const q1 = await QuoteStore.get(created.id);
-    ok(q1?.pricingTier === "gold" && q1?.tierMargin === gold.margin, "#254 review: the quote store keeps a tier stamp written on create");
+    ok(q1?.pricingTier === "gold" && q1?.tierMargin === gold.markup, "#254 review: the quote store keeps a tier stamp written on create");
     const lines = ((q1?.spec as { sections?: T254Sec[] } | undefined)?.sections || [])[0]?.items || [];
-    ok(lines[0]?.price === at(100, gold.margin), "#254 review: the store keeps the re-priced lines alongside that stamp, at its margin");
-    // Reopen: the stamp in effect IS the lines' margin, so the next tier change moves them.
+    ok(lines[0]?.price === atK(100, gold.markup), "#254 review: the store keeps the re-priced lines alongside that stamp, at its markup");
+    // Reopen: the stamp in effect IS the lines' markup, so the next tier change moves them.
     const base = await resolveTier(null, "");
-    const again = t254Reprice(((q1?.spec as { sections: T254Sec[] }).sections), q1?.tierMargin ?? null, base.margin);
-    ok(again.repriced === 1 && again.sections[0].items[0].price === at(100, base.margin),
+    const again = t254Reprice(((q1?.spec as { sections: T254Sec[] }).sections), q1?.tierMargin ?? null, base.markup);
+    ok(again.repriced === 1 && again.sections[0].items[0].price === atK(100, base.markup),
       "#254 review: reopened, the saved stamp matches its lines — the next tier change re-prices them");
     // Fix wave 2: what a NEW estimate's page resolves (resolveTier over the
     // intake's customer + contact) is what its first Save stamps — a
-    // customerless estimate opens at Base per Estimating Rules, not 0.30.
-    const { tierMargin: t254TierMargin } = await import("@/lib/pricing-tiers");
+    // customerless estimate opens at Base per Estimating Rules, not the client fallback.
+    const { tierMarkup: t254TierMarkup } = await import("@/lib/pricing-tiers");
     const openBare = await resolveTier(null, "");
-    ok(openBare.tier === "base" && openBare.margin === (await t254TierMargin("base")),
-      `#254 wave 2: a customerless new estimate opens at Base's Estimating Rules margin (${openBare.margin})`);
+    ok(openBare.tier === "base" && openBare.markup === (await t254TierMarkup("base")),
+      `#254 wave 2: a customerless new estimate opens at Base's Estimating Rules markup (${openBare.markup})`);
     const openCo = await resolveTier(CO, "Nobody Here");
-    ok(openCo.tier === "gold" && openCo.margin === gold.margin,
+    ok(openCo.tier === "gold" && openCo.markup === gold.markup,
       "#254 wave 2: a new estimate opened with ?customer= (an untiered contact) opens at the company's tier");
     const oneLine = (m: number): T254Sec[] => [{ id: "s0", name: "s0", kind: "materials", mfr: "", freightPct: 5, items: [
-      { id: 9, sku: "Z", desc: "Z", qty: 1, unit: "ea", cost: 100, price: at(100, m) },
+      { id: 9, sku: "Z", desc: "Z", qty: 1, unit: "ea", cost: 100, price: atK(100, m) },
     ] }];
     // Saved with the stamp Save writes (gold), then the customer changes to Base:
-    const seededAtOpen = t254Reprice(oneLine(openCo.margin), openCo.margin, openBare.margin);
-    const seededAtFallback = t254Reprice(oneLine(0.3), openCo.margin, openBare.margin);
+    const seededAtOpen = t254Reprice(oneLine(openCo.markup), openCo.markup, openBare.markup);
+    const seededAtFallback = t254Reprice(oneLine(0.43), openCo.markup, openBare.markup);
     ok(seededAtOpen.repriced === 1 && seededAtOpen.handPriced === 0 && seededAtFallback.handPriced === 1,
-      "#254 wave 2: a line seeded at the opened tier matches the stamp Save writes and follows the next tier change (the old 0.30 seed read as hand-priced)");
+      "#254 wave 2: a line seeded at the opened tier matches the stamp Save writes and follows the next tier change (the old 0.43 fallback seed read as hand-priced)");
     // An update save re-stamps from the customer being saved.
-    const q2 = await QuoteStore.update(created.id, { customerId: null, pricingTier: base.tier, tierMargin: base.margin, spec: { sections: again.sections, mobs: [] } } as Parameters<typeof QuoteStore.update>[1]);
-    ok(q2?.pricingTier === base.tier && q2?.tierMargin === base.margin, "#254 review: the quote store keeps a replacement stamp written by update");
+    const q2 = await QuoteStore.update(created.id, { customerId: null, pricingTier: base.tier, tierMargin: base.markup, spec: { sections: again.sections, mobs: [] } } as Parameters<typeof QuoteStore.update>[1]);
+    ok(q2?.pricingTier === base.tier && q2?.tierMargin === base.markup, "#254 review: the quote store keeps a replacement stamp written by update");
   } finally {
     await removeCustomer(CO);
   }
@@ -35457,13 +35485,13 @@ async function tier254SaveStampAsyncChecks(): Promise<void> {
    top level; the DB-backed resolution check is registered on the promise
    chain as service254DefaultMarginAsyncChecks().
    ====================================================================== */
-import { serviceMarginFor as s254mMarginFor, type ResolvedTier as S254mResolvedTier } from "@/lib/pricing-tiers";
+import { serviceMarkupFor as s254mMarginFor, type ResolvedTier as S254mResolvedTier } from "@/lib/pricing-tiers";
 
 // ---- pure: serviceMarginFor ----
 {
-  const untiered: S254mResolvedTier = { tier: "base", margin: 0.3, source: "default" };
-  const company: S254mResolvedTier = { tier: "gold", margin: 0.2, source: "company" };
-  const contact: S254mResolvedTier = { tier: "platinum", margin: 0.15, source: "contact" };
+  const untiered: S254mResolvedTier = { tier: "base", markup: 0.3, source: "default" };
+  const company: S254mResolvedTier = { tier: "gold", markup: 0.2, source: "company" };
+  const contact: S254mResolvedTier = { tier: "platinum", markup: 0.15, source: "contact" };
   ok(s254mMarginFor(untiered, 0.25) === 0.25,
     "#254 serviceMarginFor: an untiered (default-source) resolution uses the service's own default margin, not tier Base's registry margin");
   ok(s254mMarginFor(untiered, 0.3) === 0.3,
@@ -35481,8 +35509,8 @@ import { serviceMarginFor as s254mMarginFor, type ResolvedTier as S254mResolvedT
   const r254 = computeFlameQuote({ venues: [{ id: "v1", label: "Venue", curtains: 3 }] }, rates254);
   ok(r254.rates.margin === 0.31,
     "#254 rates.margin: compute()'s returned rates object carries the exact knob margin posted, unchanged by $25 rounding");
-  ok(Math.abs(r254.effectiveMargin - r254.rates.margin) > 0.001,
-    `#254 rates.margin: $25 rounding moves the back-solved effectiveMargin (${r254.effectiveMargin}) away from the knob (${r254.rates.margin}) — a reopen must read rates.margin, never effectiveMargin`);
+  ok(Math.abs(r254.effectiveMarkup - r254.rates.margin) > 0.001,
+    `#254 rates.margin: $25 rounding moves the back-solved effectiveMarkup (${r254.effectiveMarkup}) away from the knob (${r254.rates.margin}) — a reopen must read rates.margin, never effectiveMarkup`);
 }
 
 // ---- structural: the three service save actions + portal-service pricing
@@ -35497,21 +35525,22 @@ import { serviceMarginFor as s254mMarginFor, type ResolvedTier as S254mResolvedT
     ["inspections", "inspection"],
   ] as const) {
     const src = s254mRead(`src/app/(app)/${dir}/quote/actions.ts`);
-    ok(/const serviceMargin = serviceMarginFor\(tier, baseRates\.margin\);/.test(src),
-      `#254 ${dir}/quote/actions.ts: the fallback margin (no posted knob) resolves through serviceMarginFor, not the raw tier margin`);
-    ok(/\? Math\.max\(5, Math\.min\(50, marginPts\)\) \/ 100\s*: serviceMargin;/.test(src),
-      `#254 ${dir}/quote/actions.ts: an unposted margin falls back to serviceMargin (never tier.margin)`);
-    ok(/pricingTier: tier\.tier,\s*tierMargin: serviceMargin,/.test(src) && !/tierMargin: tier\.margin,/.test(src),
-      `#254 ${dir}/quote/actions.ts: the saved tierMargin stamp is the service margin everywhere — no stamp still reads the raw tier margin`);
+    ok(/const serviceMarkup = serviceMarkupFor\(tier, baseRates\.margin\);/.test(src),
+      `#254 ${dir}/quote/actions.ts: the fallback markup (no posted knob) resolves through serviceMarkupFor, not the raw tier markup`);
+    // #367: a missing field is NaN (falls back), never Number(null) = 0 → the 5 % clamp.
+    ok(/const markupPts = rawMarkup == null \|\| rawMarkup === "" \? NaN : Number\(rawMarkup\);/.test(src) && /\? Math\.max\(5, Math\.min\(100, markupPts\)\) \/ 100\s*: serviceMarkup;/.test(src),
+      `#254 ${dir}/quote/actions.ts: the posted markup is clamped 5–100; an unposted one falls back to serviceMarkup (never tier.markup)`);
+    ok(/pricingTier: tier\.tier,\s*tierMargin: serviceMarkup,/.test(src) && !/tierMargin: tier\.(margin|markup),/.test(src),
+      `#254 ${dir}/quote/actions.ts: the saved tierMargin stamp is the service markup everywhere — no stamp still reads the raw tier markup`);
     ok(new RegExp(`${subdocKey}: \\{\\s*rates: r\\.rates,`).test(src),
       `#254 ${dir}/quote/actions.ts: the saved <subdoc>.rates is the engine's own rates echo (the KNOB), not a hand-built object`);
   }
 
   const portalSrc = s254mRead("src/lib/portal-service-pricing.ts");
-  ok((portalSrc.match(/const serviceMargin = serviceMarginFor\(tier, baseRates\.margin\);/g) || []).length === 2,
-    "#254 portal-service-pricing.ts: both the flame and inspection branches resolve their margin through serviceMarginFor");
-  ok((portalSrc.match(/tierMargin: serviceMargin,/g) || []).length === 2 && !/tierMargin: tier\.margin,/.test(portalSrc),
-    "#254 portal-service-pricing.ts: both returned results stamp tierMargin from the service margin, never the raw tier margin");
+  ok((portalSrc.match(/const serviceMarkup = serviceMarkupFor\(tier, baseRates\.margin\);/g) || []).length === 2,
+    "#254 portal-service-pricing.ts: both the flame and inspection branches resolve their markup through serviceMarkupFor");
+  ok((portalSrc.match(/tierMargin: serviceMarkup,/g) || []).length === 2 && !/tierMargin: tier\.(margin|markup),/.test(portalSrc),
+    "#254 portal-service-pricing.ts: both returned results stamp tierMargin from the service markup, never the raw tier markup");
   ok((portalSrc.match(/rates: r\.rates,/g) || []).length === 2,
     "#254 portal-service-pricing.ts: both subdocs echo the engine's own rates (the knob), matching the staff builders");
 }
@@ -35540,8 +35569,8 @@ async function service254DefaultMarginAsyncChecks(): Promise<void> {
     const tiered = await s254ResolveTier(CO254, "");
     ok(tiered.tier === "gold" && tiered.source === "company",
       "#254 service default: a gold-tier customer still resolves to its own company tier");
-    ok(s254mMarginFor(tiered, (await s254GetFlameRates()).margin) === tiered.margin,
-      `#254 service default: a tiered customer's margin (${tiered.margin}) is unaffected by the flame service default (0.25)`);
+    ok(s254mMarginFor(tiered, (await s254GetFlameRates()).margin) === tiered.markup,
+      `#254 service default: a tiered customer's markup (${tiered.markup}) is unaffected by the flame service default (0.25)`);
   } finally {
     await s254SetFlameRates(baseFlameRates254);
     await removeCustomer(CO254);
@@ -36993,7 +37022,7 @@ import { movableOptions as c255Rv12Options, numberedRegionLabels as c255Rv12Numb
   // Every equipment row priced as a part, so the fill places everything the equations call for.
   const byTier = { good: {}, better: {}, best: {} } as C255Rv12Table["byTier"];
   for (const d of c255Rv12Rows) for (const t of ["good", "better", "best"] as const) byTier[t][d.key] = { status: "part", ref: "C255R12-" + d.key, desc: d.label, unit: d.unit, unitCost: 1, unitSell: 1, ...(d.curtain ? { areaRate: 1, sewingPct: 0 } : {}) };
-  const table: C255Rv12Table = { margin: 0.3, byTier };
+  const table: C255Rv12Table = { markup: mk(0.3), byTier };
   const BOOTH = new Set(["audio:mixerDsp", "video:processor", "video:projector"]);
   for (const venue of ["blackbox", "concenter"])
     for (const [w, dp] of [[49, 49], [26, 24], [80, 52], [20, 52], [80, 14]])
@@ -37427,7 +37456,7 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   const near = (a: number, b: number) => Math.abs(a - b) < 0.01;
   const costSum = (rs: typeof rows) => rs.reduce((a, r) => a + r.qty * r.unitCost, 0);
   const sellSum = (rs: typeof rows) => rs.reduce((a, r) => a + r.qty * r.unitSell, 0);
-  ok(p262Header.join(",") === "Manufacturer,Item name,Description,Room,System,Qty,Unit Cost,Unit Sell,Line margin,Effective margin,Price source,Notes", "#262 v2 parts list: the CSV header is the twelve columns, in order");
+  ok(p262Header.join(",") === "Manufacturer,Item name,Description,Room,System,Qty,Unit Cost,Unit Sell,Line markup,Effective markup,Price source,Notes", "#262 v2 parts list: the CSV header is the twelve columns, in order");
   ok(!["LAB-1", "LAB-X", "OPT-1", "ZERO", "SA-F1", "SA-F2", "SAFETY", "VQ"].some((s) => rows.some((r) => r.sku === s)), "#262 parts list: labor sections, labor items, options, zero-qty items, the assembly line itself, qty-0 components and an expanded vendor-quote line never appear");
   ok(rows.map((r) => r.sku || r.modelNumber || r.desc).join("|") === "LAMP-A|CLAMP|Cost adjustment — Wash (line cost differs from its parts)|PLAIN-1|PLAIN-2|UNKNOWN-9|CAT-ONLY|TR-10|Base plate|VQ2|CABLE-FT|CLAMP", "#262 parts list: rows come out in first-appearance order");
   ok(rows.filter((r) => r.system === "Lighting").every((r) => r.room === "Stage") && by("CLAMP", "Rigging")!.room === "Main Hall", "#262 parts list: room is the section's own room, else the defaultRoom fallback");
@@ -37463,19 +37492,19 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   ok(near(sellSum(rows), expectedSell), "#262 parts list: Σ qty × Unit Sell equals the estimate's material sell");
   const csv = p262Csv(rows);
   ok(csv.length === rows.length && !csv.some((r) => r.includes("Total")), "#262 parts list: the CSV has one line per row and no Total row");
-  ok(csv[1].join("|") === "Altman|C-CLAMP-PN|Clamp|Stage|Lighting|8|10.00|20.00|50.0%|50.0%|Catalog|Part of: Cyc light, Wash", "#262 v2 parts list: a CSV row prints the twelve columns, cents, margins, source and \"Part of:\" in Notes");
+  ok(csv[1].join("|") === "Altman|C-CLAMP-PN|Clamp|Stage|Lighting|8|10.00|20.00|100.0%|100.0%|Catalog|Part of: Cyc light, Wash", "#262 v2 parts list: a CSV row prints the twelve columns, cents, markups (20 sell / 10 cost → 100.0%), source and \"Part of:\" in Notes");
   ok(csv.find((r) => r[2] === "Plain one")?.[11] === "Hang on 1st elec" && csv.find((r) => r[2] === "Cable")?.[11] === "per ft", "#262 parts list: the internal note (trimmed) and a non-ea unit (\"per ft\") land in Notes");
   ok(p262Csv([]).length === 0, "#262 parts list: an empty list has no rows");
   const manualVq = p262Rows([{ id: "s3", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "", "Acme truss package", 1, 350, { vendorQuoteId: "VQ-1" })] }], vqs, {});
   const vAdj = manualVq.find((r) => r.desc.startsWith("Cost adjustment"));
   ok(vAdj?.unitCost === 50 && vAdj.unitSell === 0 && vAdj.partOf.join(";") === "Vendor quote Acme #Q-77" && vAdj.desc === "Cost adjustment — Vendor quote Acme #Q-77 (quote total differs from its lines)" && near(costSum(manualVq), 350) && near(sellSum(manualVq), 700), "#262 parts list: a typed vendor total that differs from its lines adds an adjustment row, so the file still totals to the line cost and sell");
   ok(p262Skus(sections).join(",") === "LAMP-A,CLAMP,PLAIN-1,PLAIN-2,UNKNOWN-9,CAT-ONLY,VQ,VQ2,CABLE-FT", "#262 parts list: partsListSkus lists component SKUs, never the assembly line's own SKU (a vendor-quote line's SKU is kept — it can't see the vendor quotes)");
-  // --- v2 (2026-10-20 spec): Item name, Line / Effective margin, Price source ---
+  // --- v2 (2026-10-20 spec): Item name, Line / Effective markup, Price source ---
   ok(rows.map((r) => r.source).join("|") === "Catalog|Catalog|Adjustment|Catalog|Not in catalog|Not in catalog|Catalog|Vendor quote — Acme #Q-77|Vendor quote — Acme #Q-77|Not in catalog|Not in catalog|Catalog", "#262 v2 parts list: components and catalog SKUs say Catalog, vendor lines name the vendor + quote #, cost-adjustment rows say Adjustment, unresolved SKUs (and a missing vendor quote) say Not in catalog");
   ok(lamp.lineSell === 200 && clamp.lineSell === 20 && truss.lineSell === 100, "#262 v2 parts list: lineSell is the allocated unit sell before the system factor (LAMP 200, CLAMP 20, truss 100)");
   ok(csv.find((r) => r[2] === "Mystery part")?.[1] === "UNKNOWN-9" && csv.find((r) => r[2] === "Source Four 750W")?.[1] === "S4-750" && csv.find((r) => r[2] === "Base plate")?.[1] === "", "#262 v2 parts list: Item name is the model number, else the SKU, else blank");
   const adjCsv = csv.find((r) => String(r[2]).startsWith("Cost adjustment — Wash"));
-  ok(adjCsv?.[8] === "" && adjCsv?.[9] === "" && adjCsv?.[10] === "Adjustment", "#262 v2 parts list: a cost-adjustment row prints no margins");
+  ok(adjCsv?.[8] === "" && adjCsv?.[9] === "" && adjCsv?.[10] === "Adjustment", "#262 v2 parts list: a cost-adjustment row prints no markups");
 
   const srcInfo: Record<string, P262Info> = { CAT: { mfr: "ETC" }, CAT2: { mfr: "ETC" }, CAT3: { mfr: "ETC" }, DUP: { mfr: "ETC" } };
   const srcSec: P262Section = { id: "s5", name: "Sources", kind: "materials", mfr: "", freightPct: 0, items: [
@@ -37497,15 +37526,15 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   ok(srcRows.map((r) => r.source).join("|") === "Price on request|Allowance|Curtain calculator|Custom|Catalog|Catalog — sell edited|Catalog — sell edited|Catalog|Custom|Vendor quote — Bolt", "#262 v2 parts list: POR, allowance, curtain, custom, catalog, a typed unit sell, a typed extended sell, and a vendor quote with no number each get their label");
   ok(srcRows.filter((r) => r.sku === "DUP").map((r) => `${r.source}:${r.qty}`).join("|") === "Catalog:1|Custom:1", "#262 v2 parts list: the same part as a catalog line and as a custom line stays two rows (source is in the merge key)");
   const sc = (desc: string) => srcCsv.find((r) => r[2] === desc);
-  ok(sc("Catalog plain")?.[8] === "50.0%" && sc("Catalog plain")?.[9] === "50.0%", "#262 v2 parts list: with no freight or rounding, Line margin = Effective margin (80 sell / 40 cost → 50.0%)");
-  ok(sc("Catalog typed unit sell")?.[8] === "60.0%" && sc("Catalog typed ext sell")?.[8] === "46.7%", "#262 v2 parts list: margins follow a typed unit sell (100 → 60.0%) and a typed extended sell (150 / 2 = 75 → 46.7%)");
-  ok(sc("Customer asked")?.[8] === "" && sc("Customer asked")?.[9] === "", "#262 v2 parts list: a zero-sell row prints blank margins");
+  ok(sc("Catalog plain")?.[8] === "100.0%" && sc("Catalog plain")?.[9] === "100.0%", "#262 v2 parts list: with no freight or rounding, Line markup = Effective markup (80 sell / 40 cost → 100.0%)");
+  ok(sc("Catalog typed unit sell")?.[8] === "150.0%" && sc("Catalog typed ext sell")?.[8] === "87.5%", "#262 v2 parts list: markups follow a typed unit sell (100 / 40 → 150.0%) and a typed extended sell (150 / 2 = 75 → 87.5%)");
+  ok(sc("Customer asked")?.[8] === "" && sc("Customer asked")?.[9] === "", "#262 v2 parts list: a zero-cost row prints blank markups (markup is undefined at $0 cost)");
 
   const typed = p262Rows([{ id: "s6", name: "Typed", kind: "materials", mfr: "", freightPct: 0, sellOverride: 125, items: [it(1, "CAT", "Catalog plain", 1, 50, { price: 100 })] }], [], srcInfo);
   const typedCsv = p262Csv(typed);
-  ok(typed[0]?.lineSell === 100 && typedCsv[0][7] === "125.00" && typedCsv[0][8] === "50.0%" && typedCsv[0][9] === "60.0%", "#262 v2 parts list: a typed system sell lifts Unit Sell and the Effective margin (60.0%) but not the Line margin (50.0%)");
+  ok(typed[0]?.lineSell === 100 && typedCsv[0][7] === "125.00" && typedCsv[0][8] === "100.0%" && typedCsv[0][9] === "150.0%", "#262 v2 parts list: a typed system sell lifts Unit Sell and the Effective markup (125 / 50 → 150.0%) but not the Line markup (100 / 50 → 100.0%)");
   const below = p262Csv(p262Rows([{ id: "s7", name: "Below", kind: "materials", mfr: "", freightPct: 0, items: [it(1, "CAT", "Below cost", 1, 50, { price: 40 })] }], [], srcInfo));
-  ok(below[0][8] === "-25.0%" && below[0][9] === "-25.0%", "#262 v2 parts list: a below-cost line prints a negative margin");
+  ok(below[0][8] === "-20.0%" && below[0][9] === "-20.0%", "#262 v2 parts list: a below-cost line prints a negative markup (40 / 50 → -20.0%)");
   ok(srcCsv.every((r) => r.length === 12) && csv.every((r) => r.length === 12), "#262 v2 parts list: every CSV row has twelve cells");
 
   // Final review A — a saved vendor quote with no lines (typed total) still reads "Vendor quote — …"
@@ -37621,8 +37650,8 @@ function r363Fixture() {
   const tFees = r363Fees(typed);
   ok(tFees.typedPrice && tFees.adjustment === -129.04 && reconcile(tModel[0], typed) && r363Breakdown(tFees).endsWith("Typed price adjustment -$129.04"),
     "#363 systemFees: a typed system price below the computed one is a negative adjustment, named as such, and still reconciles");
-  ok(r363Header.join(",") === "Manufacturer,Item name,Description,Room,System,Qty,Unit Cost,Unit Sell,Ext Cost,Ext Sell,Line margin,Markup,Price source,Link,Notes",
-    "#363 review sheet: the fifteen columns, in order (Markup replaces Effective margin; Ext Cost / Ext Sell / Link added)");
+  ok(r363Header.join(",") === "Manufacturer,Item name,Description,Room,System,Qty,Unit Cost,Unit Sell,Ext Cost,Ext Sell,Markup,Price source,Link,Notes" && !r363Header.some((h) => /margin/i.test(h)),
+    "#363 review sheet: the fourteen columns, in order (#367: Markup is the only % column — Line margin is gone; Ext Cost / Ext Sell / Link added)");
   const xlsxSrc = readFileSync(join(process.cwd(), EST_DIR, "review-sheet-xlsx.ts"), "utf8");
   ok(!/^import\s+(?!type\b)[^;]*from\s+"exceljs"/m.test(xlsxSrc) && xlsxSrc.includes('await import("exceljs")') && !/^"use client"|^import [^;]*from "@\/(lib\/stores|db)\//m.test(xlsxSrc),
     "#363 review sheet: exceljs loads on demand (type-only static import), so it stays out of the Estimator's main bundle");
@@ -37649,17 +37678,17 @@ async function reviewSheet363Checks(check: typeof ok): Promise<void> {
     return typeof v === "string" ? v : "";
   };
   const header = r363Header.map((_, i) => text(1, i + 1));
-  check(header.join(",") === r363Header.join(",") && ws.getRow(1).getCell(1).font?.bold === true, "#363 workbook: the header row is the fifteen columns, bold");
+  check(header.join(",") === r363Header.join(",") && ws.getRow(1).getCell(1).font?.bold === true, "#363 workbook: the header row is the fourteen columns, bold");
   check(ws.views?.[0]?.state === "frozen" && (ws.views[0] as { ySplit?: number }).ySplit === 1 && !!ws.autoFilter, "#363 workbook: the header is frozen and filters");
-  const linkCell = ws.getRow(2).getCell(14).value as { text?: string; hyperlink?: string } | null;
+  const linkCell = ws.getRow(2).getCell(13).value as { text?: string; hyperlink?: string } | null;
   check(text(2, 3) === "Bracket" && linkCell?.hyperlink === "https://example.com/bracket" && linkCell?.text === "https://example.com/bracket",
     "#363 workbook: the Link column is a real hyperlink cell");
-  check(ws.getRow(4).getCell(14).value == null, "#363 workbook: a row with no safe link leaves Link blank");
+  check(ws.getRow(4).getCell(13).value == null, "#363 workbook: a row with no safe link leaves Link blank");
   const f = (r: number, c: number) => ws.getRow(r).getCell(c).value as { formula?: string; result?: unknown } | null;
   check(f(2, 9)?.formula === "F2*G2" && f(2, 10)?.formula === "F2*H2" && f(2, 9)?.result === 60 && f(2, 10)?.result === 120,
     "#363 workbook: Ext Cost = Qty × Unit Cost and Ext Sell = Qty × Unit Sell are formulas with cached results");
-  check(f(2, 12)?.formula === 'IF(G2=0,"",(H2-G2)/G2)' && f(2, 12)?.result === 1 && f(2, 11)?.formula === 'IF(H2=0,"",(H2-G2)/H2)' && f(2, 11)?.result === 0.5,
-    "#363 workbook: Markup = (Unit Sell − Unit Cost) ÷ Unit Cost and Line margin are live formulas (cached 100% / 50%)");
+  check(f(2, 11)?.formula === 'IF(G2=0,"",(H2-G2)/G2)' && f(2, 11)?.result === 1 && f(2, 12)?.formula === undefined,
+    "#363 workbook: Markup = (Unit Sell − Unit Cost) ÷ Unit Cost is a live formula (cached 100%) and the next column is Price source text, not a margin formula");
   check(ws.getRow(2).getCell(8).value === 60, "#363 workbook: Unit Sell is the line's own sell (before freight, rounding and bonuses)");
   const evil = ws.getRow(9);
   check(evil.getCell(3).value === '=HYPERLINK("http://evil.example","x")' && evil.getCell(3).type === ExcelJS.ValueType.String,
@@ -37668,13 +37697,13 @@ async function reviewSheet363Checks(check: typeof ok): Promise<void> {
     "#363 workbook: three subtotal rows close each system — System cost, System markup, System fees");
   check(f(10, 10)?.formula === "SUM(I2:I9)" && f(10, 10)?.result === 382.5 && f(11, 10)?.formula === "SUM(J2:J9)-SUM(I2:I9)" && f(11, 10)?.result === 382.5,
     "#363 workbook: System cost / System markup are SUM formulas over the system's rows, cached (382.50 / 382.50)");
-  check(ws.getRow(12).getCell(10).value === 85 && text(12, 15) === "Freight $40.48 · Estimator bonus $9.99 · Package bonus $13.57 · Price rounding $20.96",
+  check(ws.getRow(12).getCell(10).value === 85 && text(12, 14) === "Freight $40.48 · Estimator bonus $9.99 · Package bonus $13.57 · Price rounding $20.96",
     "#363 workbook: System fees is a number (85.00) with its breakdown in Notes");
   check(ws.getRow(10).getCell(3).font?.bold === true && ws.getRow(12).getCell(10).font?.bold === true && ws.getRow(10).getCell(1).border?.top?.style === "thin",
     "#363 workbook: the subtotal rows are bold, the first with a thin top border");
   check(ws.getRow(13).getCell(3).value == null && text(14, 3) === "Plain" && text(15, 3) === "System cost — Lighting" && f(15, 10)?.formula === "SUM(I14:I14)",
     "#363 workbook: one blank spacer row, then the next system (same name, its own block and ranges)");
-  check(ws.getRow(2).getCell(7).numFmt === "$#,##0.00" && ws.getRow(2).getCell(12).numFmt === "0.0%", "#363 workbook: money and percent formats");
+  check(ws.getRow(2).getCell(7).numFmt === "$#,##0.00" && ws.getRow(2).getCell(11).numFmt === "0.0%", "#363 workbook: money and percent formats");
 }
 
 /* --- #261: Quick Design plan text stays a fixed on-screen size however wide the plan draws; dimensions smaller still (D468) --- */
@@ -37807,7 +37836,7 @@ import type { PartLite as C264Lite } from "@/lib/design/grid-bom";
   ok(c264Rate({ sku: "SG-NEG", unit: "sq ft", cost: -1 }) === 0 && c264Rate({ sku: "SG-NAN", unit: "sq ft", cost: Number.NaN }) === 0, "#264 fabricAreaRateOf: a non-positive or non-finite cost is 0");
 
   const drawDef = c264Rows.get("curtains:draw")!;
-  const ctxOf = (p: C264Part) => ({ parts: new Map<string, C264Part>([[p.sku, p]]), fixtures: new Map(), margin: 0.3 });
+  const ctxOf = (p: C264Part) => ({ parts: new Map<string, C264Part>([[p.sku, p]]), fixtures: new Map(), markup: mk(0.3) });
   const rb = c264PriceCell({ kind: "part", sku: "RB-FAB-ENCORE-64-22-BLK" }, drawDef, ctxOf({ sku: "RB-FAB-ENCORE-64-22-BLK", desc: "Encore 22oz velour, black", unit: "sq ft", cost: 2.84, list: 0, category: "Theatrical/Soft Goods" }));
   ok(rb.status === "part" && "areaRate" in rb && rb.areaRate === 2.84 && rb.ref === "RB-FAB-ENCORE-64-22-BLK", "#264 Equipment map: a curtain row mapped to a Soft Goods sq-ft part prices at its cost per sq ft (areaRate 2.84)");
   const sgEa = c264PriceCell({ kind: "part", sku: "SG-PIPE-POCKET" }, drawDef, ctxOf({ sku: "SG-PIPE-POCKET", desc: "Pipe pocket", unit: "ea", cost: 40, list: 60, category: "Theatrical/Soft Goods" }));
@@ -37824,8 +37853,8 @@ import type { PartLite as C264Lite } from "@/lib/design/grid-bom";
   ok(full.join() === "RB-FAB-TRAV", "#264 suggestParts: a curtain row suggests the Soft Goods sq-ft fabric, not the Soft Goods each part");
   ok(track.join() === "SG-TRACK", "#264 suggestParts: a non-curtain row never suggests the Soft Goods sq-ft fabric");
 
-  const hits = c264Swap([{ sku: "RB-FAB-TRAV", desc: "Traveler velour 22oz", unit: "sq ft", cost: 2.8 }, { sku: "SG-TRACK", desc: "Traveler track kit", unit: "ea", cost: 90 }], 0.3);
-  ok(hits.length === 1 && hits[0].ref === "RB-FAB-TRAV" && hits[0].unitSell === 4, "#264 curtain swap: a Soft Goods sq-ft fabric with only a cost is a candidate (2.80 ÷ 0.7 = 4.00 sell); an each part is not");
+  const hits = c264Swap([{ sku: "RB-FAB-TRAV", desc: "Traveler velour 22oz", unit: "sq ft", cost: 2.8 }, { sku: "SG-TRACK", desc: "Traveler track kit", unit: "ea", cost: 90 }], mk(0.3));
+  ok(hits.length === 1 && hits[0].ref === "RB-FAB-TRAV" && hits[0].unitSell === 4, "#264 curtain swap: a Soft Goods sq-ft fabric with only a cost is a candidate (2.80 × (1 + mk(0.3)) = 4.00 sell); an each part is not");
 
   const lite = (id: string, category: string, unit: string): C264Lite => ({ id, sku: id, desc: id, category, unit, list: 1, cost: 1 });
   const pal = c264Palette([lite("RB-FAB-TRAV", "Theatrical/Soft Goods", "sq ft"), lite("SG-TRACK", "Theatrical/Soft Goods", "ea")], { tab: "favorites", search: "", scope: "", typeKey: "", mfr: "" }, [], ["RB-FAB-TRAV", "SG-TRACK"], []);
@@ -37920,36 +37949,36 @@ import type { SpecItem as C266Item, SpecSection as C266Section } from "@/app/(ap
     ["fa-1", { id: "fa-1", components: [{ sku: "LAMP", cost: 120, list: 180 }, { sku: "CABLE", cost: 0, list: 12 }, { sku: "OPT", cost: 25, list: 35 }] }],
   ]);
   const before = JSON.stringify(section);
-  const r = c266Copy(section, { newSectionId: "sysNEW", catalog, fixtures, sourceTierMargin: 0.3, targetTierMargin: 0.2 });
+  const r = c266Copy(section, { newSectionId: "sysNEW", catalog, fixtures, sourceTierMargin: mk(0.3), targetTierMargin: mk(0.2) });
   const by = (id: number) => r.section.items.find((x) => x.id === id)!;
   ok(JSON.stringify(section) === before, "#266 copy system: the source section is not mutated");
   ok(r.section.id === "sysNEW" && r.section.room === "Stage left" && r.section.narrative === "Front light" && r.section.freightPct === 5 && r.section.items.length === 13, "#266 copy system: the new section id is applied and room/narrative/freight carry");
-  ok(by(1).cost === 120 && by(1).price === 240, "#266 copy system: a hand-priced catalog line takes today's cost and keeps its 50 % margin (100/200 → 120/240)");
-  ok(by(2).cost === 110 && by(2).price === 137.5, "#266 copy system: a line at the source seed lands exactly at the target seed on the new cost (110 ÷ 0.8 = 137.50)");
+  ok(by(1).cost === 120 && by(1).price === 240, "#266 copy system: a hand-priced catalog line takes today's cost and keeps its 100 % markup (100/200 → 120/240)");
+  ok(by(2).cost === 110 && by(2).price === 137.5, "#266 copy system: a line at the source seed lands exactly at the target seed on the new cost (110 × 1.25 = 137.50)");
   ok(by(13).cost === 100 && by(13).price === 125, "#266 copy system: a sub-cent catalog difference keeps the cost; the tier step still moves it to the target seed (125.00)");
-  ok(by(3).cost === 500 && by(3).price === 625, "#266 copy system: a labor line keeps its cost and re-tiers (500 ÷ 0.8 = 625.00)");
+  ok(by(3).cost === 500 && by(3).price === 625, "#266 copy system: a labor line keeps its cost and re-tiers (500 × 1.25 = 625.00)");
   ok(by(4).cost === 40 && by(4).price === 80, "#266 copy system: a vendor-quote line keeps its cost and hand sell");
-  ok(by(5).cost === 40 && by(5).price === 50, "#266 copy system: a custom line keeps its cost; at seed it re-tiers (40 ÷ 0.8 = 50.00)");
+  ok(by(5).cost === 40 && by(5).price === 50, "#266 copy system: a custom line keeps its cost; at seed it re-tiers (40 × 1.25 = 50.00)");
   ok(by(6).cost === 40 && by(6).price === 90 && by(7).cost === 40 && by(7).price === 60, "#266 copy system: curtain and allowance lines keep their cost and sell");
   const f8 = by(8);
   ok(f8.cost === 120 && f8.price === 204 && f8.qty === 3, "#266 copy system: a default-sell fixture re-costs from the resolved fixture (costOverride 0 beats the catalog's 7) and sells at Σ new list × qty (180 + 2 × 12 = 204)");
   ok(f8.components!.map((c) => c.cost + "/" + c.price + "/" + c.qty).join() === "120/180/1,0/12/2,25/35/0", "#266 copy system: fixture components take the fixture's cost/list; quantities (including an optional 0) are unchanged");
-  ok(by(9).cost === 120 && by(9).price === 240, "#266 copy system: a hand-priced fixture (found by fixtureId) keeps its margin on the new cost (110/220 → 120/240)");
-  ok(by(10).cost === 120 && by(10).extSellOverride === 480 && by(10).price === 150, "#266 copy system: an ext-sell override keeps the line's extended margin (2 × 120 ÷ 0.5 = 480)");
+  ok(by(9).cost === 120 && by(9).price === 240, "#266 copy system: a hand-priced fixture (found by fixtureId) keeps its markup on the new cost (110/220 → 120/240)");
+  ok(by(10).cost === 120 && by(10).extSellOverride === 480 && by(10).price === 150, "#266 copy system: an ext-sell override keeps the line's extended markup (2 × 120 × 2 = 480)");
   ok(by(11).cost === 10 && by(11).price === 20, "#266 copy system: an unknown SKU is untouched");
   ok(by(12).cost === 120 && by(12).price === 240 && by(12).option === true, "#266 copy system: an option line is refreshed too");
   ok(r.costsUpdated === 6 && r.tierRepriced === 4 && r.handPriced === 7, "#266 copy system: counts — 6 costs updated, 4 re-tiered, 7 hand-priced kept (got " + [r.costsUpdated, r.tierRepriced, r.handPriced].join("/") + ")");
 
-  const same = c266Copy(section, { newSectionId: "sysS", catalog, fixtures, sourceTierMargin: 0.3, targetTierMargin: 0.3 });
+  const same = c266Copy(section, { newSectionId: "sysS", catalog, fixtures, sourceTierMargin: mk(0.3), targetTierMargin: mk(0.3) });
   const sb = (id: number) => same.section.items.find((x) => x.id === id)!;
   ok(same.tierRepriced === 0 && same.handPriced === 0 && sb(3).price === 714.29 && sb(5).price === 57.14, "#266 copy system: the same source and target tier re-tiers nothing");
-  ok(sb(2).cost === 110 && sb(2).price === 157.14, "#266 copy system: with no tier move a seeded line stays on the source seed at its new cost (110 ÷ 0.7 = 157.14)");
-  const nullTarget = c266Copy(section, { newSectionId: "sysN", catalog, fixtures, sourceTierMargin: 0.3, targetTierMargin: null });
+  ok(sb(2).cost === 110 && sb(2).price === 157.14, "#266 copy system: with no tier move a seeded line stays on the source seed at its new cost (110 × 1.4286 = 157.14)");
+  const nullTarget = c266Copy(section, { newSectionId: "sysN", catalog, fixtures, sourceTierMargin: mk(0.3), targetTierMargin: null });
   ok(nullTarget.tierRepriced === 0 && nullTarget.section.items.find((x) => x.id === 3)!.price === 714.29, "#266 copy system: a null target tier is no tier move");
   const drift: C266Section = { ...section, items: [it(1, "LAB-1", 500, 714.32, { labor: true })] };
-  const dr = c266Copy(drift, { newSectionId: "sysD", catalog, fixtures, sourceTierMargin: 0.3, targetTierMargin: 0.3 });
+  const dr = c266Copy(drift, { newSectionId: "sysD", catalog, fixtures, sourceTierMargin: mk(0.3), targetTierMargin: mk(0.3) });
   ok(dr.section.items[0].price === 714.32, "#266 copy system: an unmoved labor line keeps its rounding-drift sell verbatim");
-  const fb = c266Copy(section, { newSectionId: "sysF", catalog, fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.2 });
+  const fb = c266Copy(section, { newSectionId: "sysF", catalog, fixtures: new Map(), sourceTierMargin: mk(0.3), targetTierMargin: mk(0.2) });
   const f8b = fb.section.items.find((x) => x.id === 8)!;
   ok(f8b.cost === 1 + 14 && f8b.components![2].cost === 20, "#266 copy system: with no resolved fixture, components fall back to the catalog, then the line's own numbers");
 
@@ -38056,7 +38085,7 @@ import {
   sanitizeSystemSell as s267Sanitize,
   systemComputedSell as s267Computed,
   systemFreight as s267Freight,
-  systemMargin as s267Margin,
+  systemMarkup as s267Margin,
   systemSellAdjustment as s267Adj,
   systemSellTotal as s267Total,
   systemSellWarning as s267Warn,
@@ -38108,17 +38137,17 @@ import type { SpecItem as S267Item, SpecSection as S267Section } from "@/app/(ap
   const t = s267Totals([mat, lab], 0);
   ok(s267Round2(t.mat) === 1025 && s267Round2(t.lab) === 525, "#267 system sell: totals() puts a materials system's adjustment in mat and a labor system's in lab");
   ok(s267Round2(t.rev) === 1550 && s267Round2(t.grand) === 1550 && t.adj === 49.59, "#267 system sell: value (grand) is the sum of the rounded system prices");
-  ok(Math.abs(t.margin - (1550 - 1000) / 1550) < 1e-9, "#267 system sell: the margin follows the rounded prices");
+  ok(Math.abs(t.markup - (1550 - 1000) / 1000) < 1e-9, "#267 system sell: the markup follows the rounded prices");
   const mixed = sec([li(1, 600), li(2, 400.01, 0, { labor: true })], R);
   const tm = s267Totals([mixed], 0);
   ok(s267Round2(tm.lab) === 410.01 && s267Round2(tm.mat) === 614.99 && s267Round2(tm.rev) === 1025, "#267 system sell: a mixed system splits its adjustment by its lines' sell (lab 410.01 / mat 614.99)");
   const tFr = s267Totals([withFr], 0);
   ok(s267Round2(tFr.grand) === 200 && tFr.fr === 10 && s267Round2(tFr.rev) === 190, "#267 system sell: freight stays freight; the round-up lands in revenue");
   const tOv = s267Totals([sec([li(1, 1000, 800)], { ...R, sellOverride: 900 })], 0);
-  ok(s267Round2(tOv.grand) === 900 && Math.abs(tOv.margin - 100 / 900) < 1e-9, "#267 system sell: a typed sell sets the value and the margin follows it");
+  ok(s267Round2(tOv.grand) === 900 && Math.abs(tOv.markup - 100 / 800) < 1e-9, "#267 system sell: a typed sell sets the value and the markup follows it");
   const tLegacy = s267Totals([legacy], 0);
   ok(tLegacy.grand === 1012.49 + 0.33 && tLegacy.adj === 0, "#267 system sell: totals() over legacy sections is unchanged");
-  ok(Math.abs(s267Margin(sec([li(1, 1000, 800)], { ...R, sellOverride: 900 })) - 100 / 900) < 1e-9, "#267 system sell: systemMargin reads the typed price");
+  ok(Math.abs(s267Margin(sec([li(1, 1000, 800)], { ...R, sellOverride: 900 })) - 100 / 800) < 1e-9, "#267 system sell: systemMarkup reads the typed price");
 
   // customerLines always adds up to the system price (with freight).
   const sumRows = (rows: { ext: number }[]) => s267Round2(rows.reduce((a, r) => a + r.ext, 0));
@@ -38150,7 +38179,7 @@ import type { SpecItem as S267Item, SpecSection as S267Section } from "@/app/(ap
 
   // Warnings — typed only.
   ok(s267Warn(sec([li(1, 1000, 800)], { sellOverride: 700 }))?.kind === "below-cost", "#267 system sell: a typed price under cost warns below-cost");
-  ok(s267Warn(sec([li(1, 1000, 800)], { sellOverride: 850 }))?.kind === "low-margin", "#267 system sell: a typed price under a 10% margin warns low-margin");
+  ok(s267Warn(sec([li(1, 1000, 800)], { sellOverride: 850 }))?.kind === "low-markup", "#267 system sell: a typed price under the low line (6.25% markup, under 11%) warns low-markup");
   ok(s267Warn(sec([li(1, 1000, 800)], { sellOverride: 1000 })) === null && s267Warn(sec([li(1, 10, 800)], R)) === null, "#267 system sell: a healthy typed price, or any auto price, has no warning");
 
   // Server sanitizer.
@@ -38161,9 +38190,9 @@ import type { SpecItem as S267Item, SpecSection as S267Section } from "@/app/(ap
   ok(!("sellOverride" in s267Sanitize(sec([], { sellOverride: 2e7 }))) && !("sellOverride" in s267Sanitize(sec([], { sellOverride: NaN }))), "#267 system sell: > $10M and NaN are dropped");
   const sOk = s267Sanitize(sec([li(1, 10)], { sellOverride: 900.456, priceRound: 25 }));
   ok(sOk.sellOverride === 900.46 && sOk.priceRound === 25 && sOk.items.length === 1, "#267 system sell: a valid override (to the cent) and priceRound 25 are kept");
-  const rec = s267Reconcile([sec([li(1, 1000.01)], { ...R, sellOverride: -50 })], { value: -50, margin: 0 });
+  const rec = s267Reconcile([sec([li(1, 1000.01)], { ...R, sellOverride: -50 })], { value: -50, markup: 0 });
   ok(rec.adjusted && s267Round2(rec.value) === 1025, "#267 system sell: the saved value is recomputed from the sanitized sections (bad override ignored, rounding kept)");
-  const rec2 = s267Reconcile([sec([li(1, 1000.01)], { ...R, sellOverride: 900 })], { value: 900, margin: 0.1 });
+  const rec2 = s267Reconcile([sec([li(1, 1000.01)], { ...R, sellOverride: 900 })], { value: 900, markup: 0.1 });
   ok(!rec2.adjusted && rec2.value === 900, "#267 system sell: a posted value matching the typed system price is kept");
 
   // Load stamping + clear helpers.
@@ -38174,7 +38203,7 @@ import type { SpecItem as S267Item, SpecSection as S267Section } from "@/app/(ap
 
   // Copy drops the typed sell, keeps rounding.
   const cp = s267Copy(sec([li(1, 100, 70)], { ...R, sellOverride: 500 }), {
-    newSectionId: "sysC", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.3,
+    newSectionId: "sysC", catalog: new Map(), fixtures: new Map(), sourceTierMargin: mk(0.3), targetTierMargin: mk(0.3),
   });
   ok(!("sellOverride" in cp.section) && cp.section.priceRound === 25 && cp.section.id === "sysC", "#267 system sell: copySectionForTarget drops sellOverride and keeps priceRound");
 
@@ -38187,10 +38216,10 @@ import type { SpecItem as S267Item, SpecSection as S267Section } from "@/app/(ap
   const cli267 = estimatorSource();
   ok(cli267.includes("!initial.portal && (!initial.loadedId || initial.status === \"draft\")") && cli267.includes("withPriceRound(initial.sections)"), "#267: the Estimator stamps priceRound on load for drafts and unsaved estimates only");
   ok((cli267.match(/priceRound: SYSTEM_PRICE_STEP/g) || []).length >= 3, "#267: new systems (freshSections, addSystem) carry priceRound; Round to $25 sets it");
-  ok(/const setMarginAll[\s\S]{0,200}clearSellOverride\(s\)/.test(cli267) && /const setSystemMargin[\s\S]{0,300}clearSellOverride\(s\)/.test(cli267), "#267: both margin sliders clear the typed system sell");
+  ok(/const setMarkupAll[\s\S]{0,200}clearSellOverride\(s\)/.test(cli267) && /const setSystemMarkup[\s\S]{0,300}clearSellOverride\(s\)/.test(cli267), "#267: both markup sliders clear the typed system sell");
   ok(cli267.includes("const sub = systemSellTotal(sec);"), "#267: the systems sidebar lists each system's actual price");
   const card267 = read267("src/app/(app)/estimator/section-card.tsx");
-  ok(card267.includes("const subtotal = systemSellTotal(sec);") && card267.includes("p.onSetSell(e.target.value)") && !card267.includes("p.onSetMargin(String(m))"), "#267: the Sell box sets the system price, never the line margin");
+  ok(card267.includes("const subtotal = systemSellTotal(sec);") && card267.includes("p.onSetSell(e.target.value)") && !card267.includes("p.onSetMarkup(String(m))"), "#267: the Sell box sets the system price, never the line markup");
   ok(card267.includes("Reset to auto") && card267.includes("Round to ${SYSTEM_PRICE_STEP}") && card267.includes("Rounded to ${sec.priceRound}"), "#267: the card shows Reset to auto, Round to $25 and the rounding hint");
   const qd267 = read267("src/app/(app)/estimator/quote-document.tsx");
   ok(qd267.includes("const sub = systemSellTotal(sec);") && qd267.includes("rows.reduce((a, cl) => a + cl.ext, 0)"), "#267: the customer document's system subtotals and labor lines read the system price");
@@ -38234,7 +38263,7 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
     "SHP-PM": 65, "SHP-IN": 45, "DRF-SUB": 50,
   });
   const base = l270Mobs(null)[0];
-  const draft = (margin = "27", crew = "3"): L270Draft => ({
+  const draft = (margin = "37", crew = "3"): L270Draft => ({
     discipline: "RIG", margin,
     mobs: [
       { ...base, name: "Install", tripType: "travel", tripAuto: false, people: crew, days: "3", milesRT: "341.7", lift: true },
@@ -38246,8 +38275,8 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
   const nid = () => ++n;
   const r = l270Compute(draft(), rate);
   const items = l270Build(r, "Rigging", nid, "lgTEST");
-  const m = r.margin;
-  const priceOf = (c: number) => l270R2(c / (1 - m));
+  const m = r.markup;
+  const priceOf = (c: number) => l270R2(c * (1 + m));
 
   /* ---- #270 split: cost unchanged to the cent, sell per mobilization unchanged ---- */
   const mobLines = items.filter((x) => x.mob);
@@ -38284,7 +38313,7 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
   ok(travel1[0].internalNote === "1 vehicle × 37.3 mi RT × 2 days × $0.70/mi", `#270 basis: local mileage runs every day — ${travel1[0].internalNote}`);
   ok(byKind("mileage").cost === l270R2(2 * 341.7 * 0.7) && byKind("hotel").cost === 2 * 3 * 139 && byKind("perdiem").cost === 3 * 3 * 55 && byKind("lift").cost === 875.33,
     "#270 build: each travel line costs exactly computeMob's own figure");
-  ok(travel0.every((x) => x.price === priceOf(x.cost)), "#270 build: travel lines sell through the same labor margin");
+  ok(travel0.every((x) => x.price === priceOf(x.cost)), "#270 build: travel lines sell through the same labor markup");
   ok(byKind("mileage").sku.startsWith("LAB-MIL-") && byKind("hotel").sku.startsWith("LAB-HTL-") && byKind("perdiem").sku.startsWith("LAB-FOD-") && byKind("lift").sku.startsWith("LAB-LIFT-"),
     "#270 build: travel SKUs are LAB-MIL-/HTL-/FOD-/LIFT- (never the SHOP/MISC/BONUS overhead prefixes)");
   ok(items.every((x) => x.labor && x.laborGroup === "lgTEST"), "#269 build: every line of one Add labor is a labor line carrying the group id");
@@ -38381,40 +38410,40 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
   /* ---- #269 copy-system carries the group; tier moves keep the draft in step ---- */
   const src: L270Sec = { ...s1, items: s1.items.map((x) => ({ ...x })) };
   const before = JSON.stringify(src);
-  const same = l269Copy(src, { newSectionId: "sysCopy", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.27 });
+  const same = l269Copy(src, { newSectionId: "sysCopy", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.37, targetTierMargin: 0.37 });
   ok(JSON.stringify(src) === before, "#269 copy system: the source section is not mutated");
   ok(same.section.items.filter((x) => x.laborGroup === g).length === built1.length && same.section.items.filter((x) => x.laborTravel).length === built1.filter((x) => x.laborTravel).length
     && JSON.stringify(same.section.laborGroups) === JSON.stringify(src.laborGroups),
     "#269 copy system: the labor group's lines, travel tags and stored draft all carry to the copy");
   ok(same.section.items.filter((x) => x.laborGroup).every((x) => l269Editable(same.section, x)), "#269 copy system: every copied labor line is still click-to-edit");
-  const moved = l269Copy(src, { newSectionId: "sysCopy2", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.2 });
-  ok(l269Record(moved.section, g)!.draft.margin === "20" && l269Record(src, g)!.draft.margin === "27",
-    "#269 copy system: a tier move that re-prices the group's lines moves its stored margin too (27 → 20), source untouched");
-  ok(moved.section.items.filter((x) => x.laborGroup === g).every((x) => x.price === l270R2(x.cost / 0.8)), "#269 copy system: the group's lines (travel included) land on the target tier's labor seed");
+  const moved = l269Copy(src, { newSectionId: "sysCopy2", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.37, targetTierMargin: mk(0.2) });
+  ok(l269Record(moved.section, g)!.draft.margin === "25" && l269Record(src, g)!.draft.margin === "37",
+    "#269 copy system: a tier move that re-prices the group's lines moves its stored markup too (37 → 25), source untouched");
+  ok(moved.section.items.filter((x) => x.laborGroup === g).every((x) => x.price === l270R2(x.cost * 1.25)), "#269 copy system: the group's lines (travel included) land on the target tier's labor seed (cost × 1.25; #367: an exact half cent — 478.38 × 1.25 = 597.975 — rounds up where ÷ 0.8 rounded down)");
   const typed: L270Sec = { ...src, laborGroups: { [g]: { ...src.laborGroups![g], draft: { ...src.laborGroups![g].draft, margin: "33" } } } };
-  ok(l269Record(l269Copy(typed, { newSectionId: "x", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.2 }).section, g)!.draft.margin === "33",
+  ok(l269Record(l269Copy(typed, { newSectionId: "x", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.37, targetTierMargin: mk(0.2) }).section, g)!.draft.margin === "33",
     "#269 copy system: a draft margin that isn't the source tier's (typed by hand) is left alone");
-  const rep = l269Reprice([src], 0.27, 0.2);
-  ok(rep.repriced === built1.length && l269Record(rep.sections[0], g)!.draft.margin === "20", "#269 tier re-price (#254): re-priced labor lines move their group's stored margin to the new tier");
+  const rep = l269Reprice([src], 0.37, mk(0.2));
+  ok(rep.repriced === built1.length && l269Record(rep.sections[0], g)!.draft.margin === "25", "#269 tier re-price (#254): re-priced labor lines move their group's stored margin to the new tier");
 
   /* ---- #269 review fix: the draft follows the tier even when EVERY group line is hand-priced ---- */
   const allHand: L270Sec = { ...src, items: src.items.map((x) => (x.laborGroup === g ? { ...x, price: l270R2(x.price + 7), sellOverride: true } : x)) };
-  const allHandCopy = l269Copy(allHand, { newSectionId: "sysH", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.2 });
-  ok(l269Record(allHandCopy.section, g)!.draft.margin === "20" && allHandCopy.section.items.filter((x) => x.laborGroup === g).every((x, i) => x.price === allHand.items.filter((y) => y.laborGroup === g)[i].price),
-    "#269 copy system: an all-hand-priced group keeps its lines' prices but its stored draft still moves to the target tier's seed (27 → 20)");
-  const allHandRep = l269Reprice([allHand], 0.27, 0.2);
-  ok(allHandRep.repriced === 0 && allHandRep.sections[0] !== allHand && l269Record(allHandRep.sections[0], g)!.draft.margin === "20" && l269Record(allHand, g)!.draft.margin === "27",
+  const allHandCopy = l269Copy(allHand, { newSectionId: "sysH", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.37, targetTierMargin: mk(0.2) });
+  ok(l269Record(allHandCopy.section, g)!.draft.margin === "25" && allHandCopy.section.items.filter((x) => x.laborGroup === g).every((x, i) => x.price === allHand.items.filter((y) => y.laborGroup === g)[i].price),
+    "#269 copy system: an all-hand-priced group keeps its lines' prices but its stored draft still moves to the target tier's seed (37 → 25)");
+  const allHandRep = l269Reprice([allHand], 0.37, mk(0.2));
+  ok(allHandRep.repriced === 0 && allHandRep.sections[0] !== allHand && l269Record(allHandRep.sections[0], g)!.draft.margin === "25" && l269Record(allHand, g)!.draft.margin === "37",
     "#269 tier re-price: nothing re-priced, yet the new sections carry the draft moved to the new seed (a draft-only change still lands; input untouched)");
   const typedHand: L270Sec = { ...allHand, laborGroups: { [g]: { ...allHand.laborGroups![g], draft: { ...allHand.laborGroups![g].draft, margin: "33" } } } };
-  const typedRep = l269Reprice([typedHand], 0.27, 0.2);
+  const typedRep = l269Reprice([typedHand], 0.37, mk(0.2));
   ok(typedRep.repriced === 0 && typedRep.sections[0] === typedHand && l269Record(typedRep.sections[0], g)!.draft.margin === "33",
     "#269 tier re-price: a hand-typed draft margin (≠ the previous seed) never moves — and with nothing else changed the same sections come back");
-  ok(l269Record(l269Copy(typedHand, { newSectionId: "y", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.2 }).section, g)!.draft.margin === "33",
+  ok(l269Record(l269Copy(typedHand, { newSectionId: "y", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.37, targetTierMargin: mk(0.2) }).section, g)!.draft.margin === "33",
     "#269 copy system: a hand-typed draft margin never moves, hand-priced lines or not");
-  const sameSeed = l269Reprice([allHand], 0.274, 0.27);
-  ok(sameSeed.sections[0] === allHand && l269Record(sameSeed.sections[0], g)!.draft.margin === "27",
-    "#269 tier re-price: a stamp change inside the same labor whole percent (27.4% → 27%) leaves the draft and the section alone");
-  ok(JSON.stringify(l269Copy(allHand, { newSectionId: "z", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.27, targetTierMargin: 0.27 }).section.laborGroups) === JSON.stringify(allHand.laborGroups),
+  const sameSeed = l269Reprice([allHand], 0.374, 0.37);
+  ok(sameSeed.sections[0] === allHand && l269Record(sameSeed.sections[0], g)!.draft.margin === "37",
+    "#269 tier re-price: a stamp change inside the same labor whole percent (37.4% → 37%) leaves the draft and the section alone");
+  ok(JSON.stringify(l269Copy(allHand, { newSectionId: "z", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.37, targetTierMargin: 0.37 }).section.laborGroups) === JSON.stringify(allHand.laborGroups),
     "#269 copy system: equal tiers leave the stored draft exactly as it was");
   const cliFix = estimatorSource();
   ok(/if \(res\.sections !== before\) \{\s*sectionsRef\.current = res\.sections;\s*setSectionsState\(res\.sections\);\s*\}\s*if \(res\.repriced === 0\) return;\s*setTierReprice\(\{/.test(cliFix),
@@ -38522,7 +38551,7 @@ import {
     "#275: draft → normalizeLift round-trips the saved lift");
 
   // ---- inspection engine: lift on top of the minimum fee, rounded, typed ----
-  const iR = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const iR = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
   const iV = [{ id: "l275-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }];
   const i0 = trvInspectionEstimate({ venues: iV }, iR);
   const i0b = trvInspectionEstimate({ venues: iV, lift: null }, iR);
@@ -38531,20 +38560,20 @@ import {
   const i1 = trvInspectionEstimate({ venues: iV, lift: L1 }, iR);
   ok(near(i1.totalRaw, 832.5 / 0.7 + 750 / 0.7) && i1.total === 2250 && i1.cost === 1582.5 && i1.liftCost === 750 && i1.liftLine === 1071,
     "#275 inspection: + 1 lift at $750 → 1,189.29 + 1,071.43 = 2,260.71 rounds to 2,250; the lift line prints $1,071");
-  ok(near(i1.effectiveMargin, 1 - 1582.5 / 2250) && i1.marginAmount === 2250 - 1582.5, "#275 inspection: the margin back-solves over labor + travel + lift");
+  ok(near(i1.effectiveMarkup, (2250 - 1582.5) / 1582.5) && i1.marginAmount === 2250 - 1582.5, "#275 inspection: the markup back-solves over labor + travel + lift");
   const iHere = [{ id: "l275-i2", label: "Here", lineSets: 0, oneWayMiles: 0, oneWayMin: 0 }];
   const iMin = trvInspectionEstimate({ venues: iHere, lift: L1 }, iR);
   ok(iMin.minApplied && near(iMin.totalRaw, 650 + 750 / 0.7) && iMin.total === 1725,
     "#275 inspection: the minimum fee floors the inspection and the lift adds ON TOP (650 + 1,071.43 → rounds UP to 1,725), never absorbed by the floor");
   const iTyped = trvInspectionEstimate({ venues: iV, lift: L1, priceOverride: 2000 }, iR);
-  ok(iTyped.total === 2000 && iTyped.overridden && iTyped.autoTotal === 2250 && iTyped.liftLine === 1071 && near(iTyped.effectiveMargin, 1 - 1582.5 / 2000),
-    "#275 inspection: a typed total is used exactly; the lift line keeps its own price and the margin back-solves");
-  const iPrev = l275FinishInsp({ cost: i0.cost, minFee: 650, margin: 0.3, priceOverride: null, liftCost: 750 });
+  ok(iTyped.total === 2000 && iTyped.overridden && iTyped.autoTotal === 2250 && iTyped.liftLine === 1071 && near(iTyped.effectiveMarkup, (2000 - 1582.5) / 1582.5),
+    "#275 inspection: a typed total is used exactly; the lift line keeps its own price and the markup back-solves");
+  const iPrev = l275FinishInsp({ cost: i0.cost, minFee: 650, margin: mk(0.3), priceOverride: null, liftCost: 750 });
   ok(iPrev.total === i1.total && iPrev.cost === i1.cost && iPrev.liftLine === i1.liftLine,
     "#275 parity: the builder preview's finishInspection() prices the lift exactly like the engine");
 
   // ---- flame engine: lift after the base-fee floor ----
-  const fR = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const fR = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: mk(0.3), travelRoundMin: 15 };
   const fV: FTVenue = { id: "l275-f1", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
   const f0 = computeFlameQuote({ venues: [fV] }, fR);
   ok(f0.total === 825 && f0.lift === null && f0.liftLine === 0, "#275 flame: no lift prices exactly as before (825)");
@@ -38553,15 +38582,15 @@ import {
     "#275 flame: + 2 lifts at $750 → cost 2,075, 2,964.29 rounds to 2,975; the lift line prints $2,143");
   const fHere = computeFlameQuote({ venues: [{ id: "l275-f2", label: "Here", curtains: 1, oneWayMiles: 0, oneWayMin: 0 }], lift: L1 }, fR);
   ok(fHere.baseApplied && fHere.cost === 900 && fHere.total === 1300,
-    "#275 flame: the $150 base fee floors the testing, the lift adds on top (900 ÷ 0.7 = 1,285.71 rounds UP to 1,300)");
+    "#275 flame: the $150 base fee floors the testing, the lift adds on top (900 × 1.428571 = 1,285.71 rounds UP to 1,300)");
   const fTyped = computeFlameQuote({ venues: [fV], lift: L2, priceOverride: 3000 }, fR);
-  ok(fTyped.total === 3000 && fTyped.overridden && fTyped.autoTotal === 2975 && near(fTyped.effectiveMargin, 1 - 2075 / 3000),
+  ok(fTyped.total === 3000 && fTyped.overridden && fTyped.autoTotal === 2975 && near(fTyped.effectiveMarkup, (3000 - 2075) / 2075),
     "#275 flame: a typed total with a lift is used exactly");
-  const fPrev = l275FinishFlame({ rawCost: f0.rawCost, baseFee: 150, margin: 0.3, priceOverride: null, liftCost: 1500 });
+  const fPrev = l275FinishFlame({ rawCost: f0.rawCost, baseFee: 150, margin: mk(0.3), priceOverride: null, liftCost: 1500 });
   ok(fPrev.total === f2.total && fPrev.cost === f2.cost && fPrev.liftLine === f2.liftLine, "#275 parity: finishFlame() prices the lift exactly like the engine");
 
-  // ---- repair engine: lift at the SERVICE margin, on top of the call-out ----
-  const rR = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  // ---- repair engine: lift at the SERVICE markup, on top of the call-out ----
+  const rR = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: mk(0.3), margin: mk(0.3), emergencyMult: 1.5, travelRoundMin: 15 };
   const rV = [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }];
   const r0 = trvRepairEstimate({ venues: rV, laborHours: 4 }, rR);
   ok(r0.total === 875 && r0.lift === null && r0.liftLine === 0, "#275 repair: no lift prices exactly as before (875)");
@@ -38574,20 +38603,20 @@ import {
   const rC = trvRepairEstimate({ venues: [{ label: "Here", oneWayMiles: 0, oneWayMin: 0 }], laborHours: 1, lift: L1 }, rR);
   ok(rC.calloutApplied && rC.total === 1425, "#275 repair: the minimum call-out floors the service, the lift adds on top (350 + 1,071.43 → rounds UP to 1,425)");
   const rT = trvRepairEstimate({ venues: rV, laborHours: 4, lift: L1, priceOverride: 1500 }, rR);
-  ok(rT.total === 1500 && rT.overridden && near(rT.serviceMargin, rT.effectiveMargin) && near(rT.effectiveMargin, 1 - 1357.5 / 1500),
-    "#275 repair: a typed total with a lift reports the whole-job effective margin");
-  const rPrev = l275FinishRepair({ serviceCost: r0.serviceCost, minCallout: 350, margin: 0.3, partsCost: 0, partsMargin: 0.3, priceOverride: null, liftCost: 750 });
+  ok(rT.total === 1500 && rT.overridden && near(rT.serviceMarkup, rT.effectiveMarkup) && near(rT.effectiveMarkup, (1500 - 1357.5) / 1357.5),
+    "#275 repair: a typed total with a lift reports the whole-job effective markup");
+  const rPrev = l275FinishRepair({ serviceCost: r0.serviceCost, minCallout: 350, margin: mk(0.3), partsCost: 0, partsMargin: mk(0.3), priceOverride: null, liftCost: 750 });
   ok(rPrev.total === r1.total && rPrev.liftLine === r1.liftLine, "#275 parity: finishRepair() prices the lift exactly like the engine");
 
   // ---- the saved lift + the printed line (count > 0 only) ----
   const saved = l275Saved(L2, f2);
   ok(JSON.stringify(saved) === JSON.stringify({ count: 2, rate: 750, cost: 1500, line: 2143 }), "#275 savedLift: count, rate, cost and the printed line");
   ok(l275Saved(null, f0) === undefined && l275Saved({ count: 0, rate: 750 }, f0) === undefined, "#275 savedLift: no lift writes nothing");
-  const pl = l275Printed({ lift: saved }, 0.3);
+  const pl = l275Printed({ lift: saved }, mk(0.3));
   ok(!!pl && pl.line === 2143 && pl.count === 2 && pl.label === "Lift rental ×2", "#275 printedLift: a saved lift prints its stored line");
-  ok(l275Printed({}, 0.3) === null && l275Printed(null, 0.3) === null && l275Printed({ lift: { count: 0, rate: 750 } }, 0.3) === null,
+  ok(l275Printed({}, mk(0.3)) === null && l275Printed(null, mk(0.3)) === null && l275Printed({ lift: { count: 0, rate: 750 } }, mk(0.3)) === null,
     "#275 printedLift: a quote with no lift (every pre-#275 quote) prints no lift line");
-  ok(l275Printed({ lift: { count: 1, rate: 700 } }, 0.3)?.line === 1000, "#275 printedLift: a lift saved without a line prints count × rate ÷ (1 − margin)");
+  ok(l275Printed({ lift: { count: 1, rate: 700 } }, mk(0.3))?.line === 1000, "#275 printedLift: a lift saved without a line prints count × rate × (1 + markup)");
   ok(l275Label(1) === l275Line && l275Line === "Lift rental" && l275Label(3) === "Lift rental ×3", "#275: the customer-facing label is 'Lift rental' (×n for more than one)");
 
   // ---- renewals carry the count at today's rate ----
@@ -38627,11 +38656,11 @@ import {
   }
   for (const dir of ["flame-tests", "inspections"]) {
     const v = r275(`src/app/(app)/${dir}/letter/letter-view.tsx`);
-    ok(/const lift = printedLift\([a-z]+, travelMargin\);\s*if \(lift\) \{\s*scopeRows\.push\(\{\s*item: pad2\(sr\+\+\),\s*desc: lift\.label,\s*qty: money\(lift\.line\),/.test(v),
+    ok(/const lift = printedLift\([a-z]+, travelMarkup\);\s*if \(lift\) \{\s*scopeRows\.push\(\{\s*item: pad2\(sr\+\+\),\s*desc: lift\.label,\s*qty: money\(lift\.line\),/.test(v),
       `#275 ${dir} letter: a 'Lift rental' row prints with its own price only when the quote has a lift`);
   }
   const rpl = r275("src/app/(app)/repairs/letter/letter-view.tsx");
-  ok(rpl.includes("const lift = printedLift(rp, travelMargin);") && /\{lift\s*\? ", including "/.test(rpl),
+  ok(rpl.includes("const lift = printedLift(rp, travelMarkup);") && /\{lift\s*\? ", including "/.test(rpl),
     "#275 repair letter: the cost sentence names the lift and its price only when the quote has one");
   const ren = r275("src/lib/renewal-outreach.ts");
   ok(ren.includes("const lift = priorFt?.lift ? carryLift(priorFt.lift, await getLiftRate()) : undefined;") &&
@@ -38658,7 +38687,7 @@ async function lift275AsyncChecks(): Promise<void> {
   ok(liveRate === (row ? Math.round(row.cost) : 750), `#275 getLiftRate: the default is the live EQP-LIFT catalog cost ($${liveRate}), else $750`);
 
   // ---- persistence round-trip: what the inspection save writes reopens and re-prices identically ----
-  const iR = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const iR = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
   const iV = [{ id: "l275-rt", label: "Hall", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }];
   const lift = l275Norm({ count: "2", rate: "" }, liveRate)!;
   const r = trvInspectionEstimate({ venues: iV, lift }, iR);
@@ -39368,17 +39397,17 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
   // bi-parting 40' straight batten (#291: two lapped legs of 20.5'): 6 sticks, 4 splices, 38 carriers, 2 masters, 2 end stops, 12 clamps, 2 pulleys, floor block, 122' line.
   const cfg = t274Cfg({ operation: "biparting", label: "Main drape track" });
   const cost = 6 * 50 + 4 * 5 + 38 * 2 + 2 * 12 + 2 * 4 + 12 * 6 + 30 + 30 + 40 + 122 * 0.5; // 300+20+76+24+8+72+30+30+40+61 = 661
-  const bom = t274bBom(cfg, t274Series(), t274bParts(), 0.25);
+  const bom = t274bBom(cfg, t274Series(), t274bParts(), mk(0.25));
   ok(bom.errors.length === 0 && t274bNear(bom.cost, cost) && bom.cost === 661, "#274B pricing: a mapped bi-parting 40' batten track costs the catalog cost × qty of every part (6×50 + 4×5 + 38×2 + 2×12 + 2×4 + 12×6 + 30 + 30 + 40 + 122×0.5 = 661)");
   ok(bom.price === t274bR2(661 / 0.75), "#274B pricing: the line sells at the tier seed on its cost when every part has a cost (661 ÷ 0.75 = 881.33)");
   const carrier = bom.rows.find((r) => r.role === "carrier")!;
-  ok(carrier.qty === 38 && carrier.price === t274bAddPrice(2, 4, 0.25) && carrier.price === 2.67 && carrier.ext === t274bR2(2.67 * 38),
+  ok(carrier.qty === 38 && carrier.price === t274bAddPrice(2, 4, mk(0.25)) && carrier.price === 2.67 && carrier.ext === t274bR2(2.67 * 38),
     "#274B pricing: each part is priced exactly as a catalog-picker add (catalogAddPrice — cost at the tier seed: carrier $2 → $2.67)");
   ok(bom.trackLengthFt === 41 && bom.rows.length === 10, "#274B pricing: track length 41' (40' run + 1' overlap), 10 part rows");
   const noTier = t274bBom(cfg, t274Series(), t274bParts(), null);
-  ok(noTier.price === t274bR2(661 / 0.7), "#274B pricing: no tier stamp → the 0.30 fallback addPart uses (661 ÷ 0.7 = 944.29)");
+  ok(noTier.price === t274bR2(661 * 1.43), "#274B pricing: no tier stamp → the 0.43 fallback addPart uses (661 × 1.43 = 945.23; #367: was 0.30 margin → 944.29, the rounded 43 % default moves it)");
 
-  const res = t274bLine(cfg, t274Series(), t274bParts(), 0.25);
+  const res = t274bLine(cfg, t274Series(), t274bParts(), mk(0.25));
   ok(res.ok, "#274B line: a mapped series yields a line");
   if (res.ok) {
     const it = res.item;
@@ -39386,16 +39415,16 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
       "#274B line: qty 1, unit lot, cost/price = the parts' sums (661 / 661 ÷ 0.75 = 881.33), manufacturer from the series");
     ok(it.desc === "Main drape track — ADC 280 bi-parting track, 40' run", `#274B line: desc "<label> — <series> <operation> track, <run>' run" (got "${it.desc}")`);
     ok(t274Eq(it.track, t274bClean(cfg)) && it.track!.label === "Main drape track", "#274B line: the inputs ride on the line as `track` (a clean TrackConfig) so it reopens");
-    ok((it.components || []).length === 10 && it.components!.every((c) => c.sku.startsWith("P-") && c.cost === t274bParts()[c.sku].cost && c.price === t274bAddPrice(c.cost, t274bParts()[c.sku].list, 0.25)),
+    ok((it.components || []).length === 10 && it.components!.every((c) => c.sku.startsWith("P-") && c.cost === t274bParts()[c.sku].cost && c.price === t274bAddPrice(c.cost, t274bParts()[c.sku].list, mk(0.25))),
       "#274B line: the priced parts ride in `components` (the fixture BOM shape) at catalog cost + catalog-add sell");
     ok(it.components!.find((c) => c.sku === "P-battenClamp")!.role === "mount" && it.components!.find((c) => c.sku === "P-carrier")!.label === "Carrier",
       "#274B line: components are labelled by role (mounting parts role 'mount')");
     ok(!it.fixture && !it.curtain && !it.custom, "#274B line: not a fixture/curtain/custom line — an ordinary tier-seeded catalog-backed line");
   }
-  const curved = t274bLine(t274Cfg({ curved: true, radiusFt: 12, runFt: 20, qty: 2 }), t274Series(), t274bParts(), 0.25);
+  const curved = t274bLine(t274Cfg({ curved: true, radiusFt: 12, runFt: 20, qty: 2 }), t274Series(), t274bParts(), mk(0.25));
   ok(curved.ok && curved.item.desc === "Track — ADC 280 one-way track, 20' run, curved R12' (2 tracks)" && curved.item.components!.some((c) => c.sku === "P-curved") && !curved.item.components!.some((c) => c.sku === "P-track"),
     "#274B line: a curved run prices curved sections, says ', curved R12'' and names the track count; no label → 'Track'");
-  const walk = t274bLine(t274Cfg({ operation: "walkalong" }), t274Series(), t274bParts(), 0.25);
+  const walk = t274bLine(t274Cfg({ operation: "walkalong" }), t274Series(), t274bParts(), mk(0.25));
   ok(walk.ok && !walk.item.components!.some((c) => /Pulley|floorBlock|operatingLine/.test(c.sku)) && walk.item.track!.trimFt === undefined,
     "#274B line: walk-along carries no pulleys, floor block, line or trim");
 }
@@ -39403,19 +39432,19 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
 // ---- pricing: unmapped / deleted parts, gone series, list-priced parts ----
 {
   const noFloor = t274Series({ parts: { ...T274_ALL_PARTS, floorBlock: undefined } });
-  const r = t274bLine(t274Cfg({ operation: "biparting" }), noFloor, t274bParts(), 0.25);
+  const r = t274bLine(t274Cfg({ operation: "biparting" }), noFloor, t274bParts(), mk(0.25));
   ok(!r.ok && r.errors.includes("ADC 280 has no part for Floor block — map it in Estimating Rules → Track series."),
     "#274B pricing: an unmapped required role blocks the line and names it (spec's exact message)");
   ok(!r.ok && r.bom.rows.find((x) => x.role === "floorBlock")!.missing, "#274B pricing: the parts table still lists the unmapped role (flagged missing)");
-  ok(t274bLine(t274Cfg({ operation: "walkalong" }), noFloor, t274bParts(), 0.25).ok, "#274B pricing: a role the configuration doesn't use (floor block on walk-along) doesn't block");
-  const gone = t274bLine(t274Cfg(), t274Series(), t274bParts({ endStop: null }), 0.25);
+  ok(t274bLine(t274Cfg({ operation: "walkalong" }), noFloor, t274bParts(), mk(0.25)).ok, "#274B pricing: a role the configuration doesn't use (floor block on walk-along) doesn't block");
+  const gone = t274bLine(t274Cfg(), t274Series(), t274bParts({ endStop: null }), mk(0.25));
   ok(!gone.ok && gone.errors.some((e) => /no part for End stop — map it in Estimating Rules → Track series/.test(e)) && gone.bom.rows.find((x) => x.role === "endStop")!.desc === "P-endStop — no longer in the catalog",
     "#274B pricing: a mapped SKU deleted from the catalog counts as unmapped — blocks and names End stop");
-  const nilSeries = t274bBom(t274Cfg(), null, t274bParts(), 0.25);
+  const nilSeries = t274bBom(t274Cfg(), null, t274bParts(), mk(0.25));
   ok(t274Eq(nilSeries.errors, [t274bGone]) && t274bGone === "This series no longer exists.", "#274B pricing: a deleted series prices nothing — 'This series no longer exists.'");
-  const bad = t274bLine(t274Cfg({ runFt: 0 }), t274Series(), t274bParts(), 0.25);
+  const bad = t274bLine(t274Cfg({ runFt: 0 }), t274Series(), t274bParts(), mk(0.25));
   ok(!bad.ok && bad.errors.includes("Enter the run length."), "#274B pricing: engine input errors block the line too");
-  const listed = t274bBom(t274Cfg({ operation: "walkalong" }), t274Series(), t274bParts({ endStop: { cost: 0, list: 9 } }), 0.25);
+  const listed = t274bBom(t274Cfg({ operation: "walkalong" }), t274Series(), t274bParts({ endStop: { cost: 0, list: 9 } }), mk(0.25));
   const costed = 4 * 50 + 3 * 5 + 39 * 2 + 12 + 9 * 6;
   ok(listed.errors.length === 0 && listed.rows.find((x) => x.role === "endStop")!.price === 9 && listed.price === t274bR2(costed / 0.75 + 18),
     "#274B pricing: a part with no catalog cost sells at its list, like a catalog-picker add");
@@ -39439,8 +39468,8 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
 
 // ---- reopen → Update replaces the line in place ----
 {
-  const first = t274bLine(t274Cfg({ runFt: 30 }), t274Series(), t274bParts(), 0.25);
-  const second = t274bLine(t274Cfg({ runFt: 50, operation: "biparting" }), t274Series(), t274bParts(), 0.25);
+  const first = t274bLine(t274Cfg({ runFt: 30 }), t274Series(), t274bParts(), mk(0.25));
+  const second = t274bLine(t274Cfg({ runFt: 50, operation: "biparting" }), t274Series(), t274bParts(), mk(0.25));
   if (first.ok && second.ok) {
     const a: T274bItem = { id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 2, lineOrder: 0 };
     const b: T274bItem = { id: 3, sku: "B", desc: "B", qty: 1, unit: "ea", cost: 1, price: 2, lineOrder: 2 };
@@ -39474,38 +39503,38 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
   const followed = t274bFollow(touched, two, next);
   ok(followed.run === "50" && followed.label === "Typed label" && followed.operation === "biparting",
     "#274B curtain: untouched pre-fills follow the curtain (width 25 → run 50); a typed field is kept");
-  const priced = t274bLine(t274bFromDraft(d), t274Series(), t274bParts(), 0.25);
+  const priced = t274bLine(t274bFromDraft(d), t274Series(), t274bParts(), mk(0.25));
   ok(priced.ok && priced.item.desc === "Main Grand Drape track — ADC 280 bi-parting track, 40' run", "#274B curtain: the pre-filled track prices into its own line");
 }
 
 // ---- tier re-price (#254) ----
 {
-  const res = t274bLine(t274Cfg({ operation: "biparting" }), t274Series(), t274bParts(), 0.25);
+  const res = t274bLine(t274Cfg({ operation: "biparting" }), t274Series(), t274bParts(), mk(0.25));
   if (res.ok) {
     const seeded: T274bItem = { ...res.item, id: 1 };
     const hand: T274bItem = { ...res.item, id: 2, price: 1000 };
     const sec: T274bSection = { id: "s", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [seeded, hand] };
-    const out = t274bReprice([sec], 0.25, 0.2);
+    const out = t274bReprice([sec], mk(0.25), mk(0.2));
     const [s1, s2] = out.sections[0].items;
     ok(out.repriced === 1 && out.handPriced === 1 && s1.price === t274bR2(661 / 0.8) && s2.price === 1000,
       "#274B tier: a tier change re-prices a track line still at the seed (661 ÷ 0.8 = 826.25) and keeps a hand-priced one");
     ok(s1.components!.find((c) => c.sku === "P-carrier")!.price === 2.5 && t274Eq(s1.track, seeded.track) && s2.components === hand.components,
       "#274B tier: the re-priced line's parts re-seed with it (carrier $2 → $2.50); the kept line's parts untouched");
-    ok(t274Eq(t274bReseed([{ sku: "Z", label: "Z", role: "other", qty: 2, unit: "ea", cost: 0, price: 9 }], 0.2)[0], { sku: "Z", label: "Z", role: "other", qty: 2, unit: "ea", cost: 0, price: 9 }),
+    ok(t274Eq(t274bReseed([{ sku: "Z", label: "Z", role: "other", qty: 2, unit: "ea", cost: 0, price: 9 }], mk(0.2))[0], { sku: "Z", label: "Z", role: "other", qty: 2, unit: "ea", cost: 0, price: 9 }),
       "#274B tier: a no-cost (list-priced) part keeps its sell");
   } else ok(false, "#274B tier: fixture line priced");
 }
 
 // ---- Copy system (#266) ----
 {
-  const res = t274bLine(t274Cfg({ operation: "biparting" }), t274Series(), t274bParts(), 0.25);
+  const res = t274bLine(t274Cfg({ operation: "biparting" }), t274Series(), t274bParts(), mk(0.25));
   if (res.ok) {
     const seeded: T274bItem = { ...res.item, id: 1, comment: "c" };
     const hand: T274bItem = { ...res.item, id: 2, extSellOverride: 1322 }; // 50 % on 661 (661 × 2)
     const sec: T274bSection = { id: "s", name: "Rigging", kind: "materials", mfr: "", freightPct: 5, items: [seeded, hand] };
     // Today: carriers went from $2 to $3.
     const catalog = new Map<string, T274bCopyPart>(Object.values(t274bParts()).map((p) => [p.sku, { sku: p.sku, cost: p.sku === "P-carrier" ? 3 : p.cost, list: p.list }]));
-    const same = t274bCopy(sec, { newSectionId: "s2", catalog, fixtures: new Map(), sourceTierMargin: 0.25, targetTierMargin: 0.25 });
+    const same = t274bCopy(sec, { newSectionId: "s2", catalog, fixtures: new Map(), sourceTierMargin: mk(0.25), targetTierMargin: mk(0.25) });
     const [c1, c2] = same.section.items;
     ok(c1.cost === 661 + 38 && c1.price === t274bR2(699 / 0.75) && same.costsUpdated === 2,
       "#274B copy: a track line takes today's catalog cost for its parts (carrier $2 → $3 on 38 carriers: 661 + 38 = 699; 699 ÷ 0.75 = 932) and stays at the tier seed");
@@ -39513,10 +39542,10 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
       "#274B copy: its parts carry today's cost + catalog-add sell; `track` and notes carry over");
     ok(c2.cost === 699 && c2.extSellOverride === t274bR2(699 * 2) && c2.price === hand.price,
       "#274B copy: a hand-priced (typed ext sell) track line keeps its own margin on the new cost (50 %: 699 × 2 = 1398)");
-    const moved = t274bCopy(sec, { newSectionId: "s3", catalog, fixtures: new Map(), sourceTierMargin: 0.25, targetTierMargin: 0.2 });
+    const moved = t274bCopy(sec, { newSectionId: "s3", catalog, fixtures: new Map(), sourceTierMargin: mk(0.25), targetTierMargin: mk(0.2) });
     ok(moved.section.items[0].price === t274bR2(699 / 0.8) && moved.tierRepriced === 1 && moved.section.items[0].components!.find((c) => c.sku === "P-carrier")!.price === 3.75,
       "#274B copy: copied to another tier, a seeded track line lands at the target tier's seed (699 ÷ 0.8 = 873.75), parts too");
-    const noCat = t274bCopy(sec, { newSectionId: "s4", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.25, targetTierMargin: 0.25 });
+    const noCat = t274bCopy(sec, { newSectionId: "s4", catalog: new Map(), fixtures: new Map(), sourceTierMargin: mk(0.25), targetTierMargin: mk(0.25) });
     ok(noCat.section.items[0].cost === 661 && noCat.section.items[0].price === seeded.price && noCat.costsUpdated === 0,
       "#274B copy: parts missing from today's catalog keep their own cost — the line is unchanged (661)");
   } else ok(false, "#274B copy: fixture line priced");
@@ -39524,7 +39553,7 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
 
 // ---- PM parts list (#262) explodes the track; the customer sees one line ----
 {
-  const res = t274bLine(t274Cfg({ operation: "biparting", label: "Main drape track" }), t274Series(), t274bParts(), 0.25);
+  const res = t274bLine(t274Cfg({ operation: "biparting", label: "Main drape track" }), t274Series(), t274bParts(), mk(0.25));
   if (res.ok) {
     const curtain: T274bItem = { id: 1, sku: "CRT-1", desc: "Main Grand Drape — IFR Velour", qty: 2, unit: "ea", cost: 1000, price: 1428.57, curtain: true };
     const track: T274bItem = { ...res.item, id: 2 };
@@ -39580,7 +39609,7 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
 async function track274bAsyncChecks(): Promise<void> {
   const Q = fixtureId("274B", "track-line-roundtrip");
   registerFixture("quotes", Q);
-  const res = t274bLine(t274Cfg({ operation: "biparting", label: "Main drape track" }), t274Series(), t274bParts(), 0.25);
+  const res = t274bLine(t274Cfg({ operation: "biparting", label: "Main drape track" }), t274Series(), t274bParts(), mk(0.25));
   if (!res.ok) {
     ok(false, "#274B save: fixture line priced");
     return;
@@ -39592,7 +39621,7 @@ async function track274bAsyncChecks(): Promise<void> {
   // clearPricedPor → reconcileEstimatorValue, then the quotes store.
   const sanitized = [posted].map(t274bSanitizeSell);
   const { sections } = t274bClearPor(sanitized);
-  const priced = t274bReconcile(sanitized, { value: 0, margin: 0 });
+  const priced = t274bReconcile(sanitized, { value: 0, markup: 0 });
   ok(priced.value > 0, "#274B save: the server's own value recompute prices the track line like any line");
   await QuoteStore.create({ id: Q, name: "#274B track round-trip", quoteType: "system", status: "draft", customer: "Test Customer", source: "estimator", owner: "Test Harness", spec: { sections, mobs: [] } });
   const back = await QuoteStore.get(Q);
@@ -39603,13 +39632,13 @@ async function track274bAsyncChecks(): Promise<void> {
     newSectionId: "sysT2",
     catalog: new Map(Object.values(t274bParts()).map((p) => [p.sku, { sku: p.sku, cost: p.cost, list: p.list }])),
     fixtures: new Map(),
-    sourceTierMargin: 0.25,
-    targetTierMargin: 0.25,
+    sourceTierMargin: mk(0.25),
+    targetTierMargin: mk(0.25),
   });
   const c = copied.section.items[0];
   ok(t274bSame(c.track, track.track) && t274bSame(c.components, track.components) && c.price === track.price && copied.costsUpdated === 0,
     "#274B save: the saved line copies (Copy system) with `track` + `components` intact at an unchanged catalog");
-  const upd = t274bLine(t274Cfg({ runFt: 60 }), t274Series(), t274bParts(), 0.25);
+  const upd = t274bLine(t274Cfg({ runFt: 60 }), t274Series(), t274bParts(), mk(0.25));
   const savedSec = (back!.spec as { sections: T274bSection[] }).sections[0];
   if (upd.ok) await QuoteStore.update(Q, { spec: { sections: [t274bReplace(savedSec, 7, upd.item)], mobs: [] } });
   const again = ((await QuoteStore.get(Q))?.spec as { sections?: T274bSection[] } | null)?.sections?.[0]?.items || [];
@@ -40064,7 +40093,7 @@ import { SYNCABLE_COLLECTIONS as r282bSyncable } from "@/db/doc-tables";
   // totals: net grand, never below $0; margin + system price ignore it.
   const t0 = r282bTotals(two, 0);
   const t1 = r282bTotals(withC, 0);
-  ok(t1.grand === 800 && t1.credit === 200 && t1.rev === t0.rev && t1.margin === t0.margin && t1.mat === t0.mat,
+  ok(t1.grand === 800 && t1.credit === 200 && t1.rev === t0.rev && t1.markup === t0.markup && t1.mat === t0.mat,
     `#282 P2 totals: credit comes off the grand total only — rev, materials and margin are unchanged (grand ${t1.grand})`);
   const big = r282bTotals(r282bWith(two, 5000, 99), 0);
   ok(big.grand === 0 && big.credit === 1000, "#282 P2 totals: a credit above the quote's total never takes it below $0");
@@ -40095,17 +40124,17 @@ import { SYNCABLE_COLLECTIONS as r282bSyncable } from "@/db/doc-tables";
     "#282 P2 server: several credit lines collapse into one on the last system");
   ok(r282bMaxApply(500, 300) === 300 && r282bMaxApply(100, 300) === 100 && r282bMaxApply(-20, 300) === 0 && r282bMaxApply(500, -1) === 0,
     "#282 P2 server: max applicable = min(available, pre-credit total), never below $0");
-  const rec = r282bReconcile(withC, { value: 999, margin: 0.5 });
+  const rec = r282bReconcile(withC, { value: 999, markup: 0.5 });
   ok(rec.adjusted && rec.value === 800, "#282 P2 server: reconcileEstimatorValue stores the net total");
-  const recNeg = r282bReconcile([sec("n", [item(6, 500), item(7, -300)])], { value: 200, margin: 0 });
+  const recNeg = r282bReconcile([sec("n", [item(6, 500), item(7, -300)])], { value: 200, markup: 0 });
   ok(recNeg.value === 500, "#282 P2 server: reconcileEstimatorValue floors a stray negative price on a non-credit line at $0");
 
   // copy / parts list / tier re-price ignore it
-  const copied = r282bCopy(withC[1], { newSectionId: "c", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.3 });
+  const copied = r282bCopy(withC[1], { newSectionId: "c", catalog: new Map(), fixtures: new Map(), sourceTierMargin: mk(0.3), targetTierMargin: mk(0.3) });
   ok(!copied.section.items.some(r282bIsCredit) && copied.section.items.length === 1, "#282 P2 copy: Copy system drops the credit line");
   const parts = r282bPartsRows(withC, [], {});
   ok(parts.length === 2 && !parts.some((p) => /Rewards credit/.test(p.desc)), "#282 P2 parts list: the credit line never lands in the parts CSV");
-  const rp = r282bReprice(withC, 0.3, 0.2);
+  const rp = r282bReprice(withC, mk(0.3), mk(0.2));
   const rpCredit = rp.sections[1].items.find(r282bIsCredit)!;
   ok(rpCredit.price === -200, "#282 P2 tier re-price: the credit line is never re-priced");
 
@@ -40275,19 +40304,19 @@ import { readFileSync as r282cRead } from "node:fs";
 
 {
   // ---- the credit comes off AFTER the engine's final total, all three types ----
-  const fl = r282cFinishFlame({ rawCost: 1003, baseFee: 150, margin: 0.3, liftCost: 750 });
+  const fl = r282cFinishFlame({ rawCost: 1003, baseFee: 150, margin: mk(0.3), liftCost: 750 });
   ok(fl.total === 2500 && fl.liftCost === 750 && r282cNet(fl.total, 137) === 2363,
     `#282 P3 flame: $25 rounding (2,504.29 → 2,500, lift included) happens first, the credit after — net 2,363, never re-rounded (got ${fl.total} → ${r282cNet(fl.total, 137)})`);
-  const flT = r282cFinishFlame({ rawCost: 1003, baseFee: 150, margin: 0.3, liftCost: 750, priceOverride: 3000 });
+  const flT = r282cFinishFlame({ rawCost: 1003, baseFee: 150, margin: mk(0.3), liftCost: 750, priceOverride: 3000 });
   ok(flT.total === 3000 && r282cNet(flT.total, 137) === 2863, "#282 P3 flame: a typed total is the price the credit comes off (3,000 − 137 = 2,863)");
-  const ins = r282cFinishInspection({ cost: 800, minFee: 500, margin: 0.3, liftCost: 750 });
+  const ins = r282cFinishInspection({ cost: 800, minFee: 500, margin: mk(0.3), liftCost: 750 });
   ok(ins.total === 2225 && r282cNet(ins.total, 225) === 2000,
     `#282 P3 inspection: rounded total with a lift (2,225), then the credit (→ 2,000) (got ${ins.total})`);
-  const insT = r282cFinishInspection({ cost: 800, minFee: 500, margin: 0.3, liftCost: 750, priceOverride: 1234 });
+  const insT = r282cFinishInspection({ cost: 800, minFee: 500, margin: mk(0.3), liftCost: 750, priceOverride: 1234 });
   ok(insT.total === 1234 && r282cNet(insT.total, 234) === 1000, "#282 P3 inspection: a typed total, then the credit");
-  const rp = r282cFinishRepair({ serviceCost: 400, minCallout: 300, margin: 0.3, partsCost: 100, partsMargin: 0.25, liftCost: 750 });
+  const rp = r282cFinishRepair({ serviceCost: 400, minCallout: 300, margin: mk(0.3), partsCost: 100, partsMargin: mk(0.25), liftCost: 750 });
   ok(rp.total % 25 === 0 && r282cNet(rp.total, 40) === rp.total - 40, `#282 P3 repair: rounded total (${rp.total}, lift + parts included), then the credit`);
-  const rpT = r282cFinishRepair({ serviceCost: 400, minCallout: 300, margin: 0.3, partsCost: 100, partsMargin: 0.25, liftCost: 750, priceOverride: 1999 });
+  const rpT = r282cFinishRepair({ serviceCost: 400, minCallout: 300, margin: mk(0.3), partsCost: 100, partsMargin: mk(0.25), liftCost: 750, priceOverride: 1999 });
   ok(rpT.total === 1999 && r282cNet(rpT.total, 5000) === 0, "#282 P3 repair: a typed total, and a credit above it nets $0 — never below");
 
   // ---- whole dollars ----
@@ -43441,12 +43470,12 @@ function t291Map(cfg: T291Config, s: T291Series): Partial<Record<T291Role, numbe
   for (const sku of [...T291_STICKS.map((x) => x.sku), ...Object.values(T291_BASE_PARTS).map((p) => p!.sku), "PC", "LC"])
     parts[sku] = { sku, desc: `Test ${sku}`, cost: sku.startsWith("S-") ? Number(sku.slice(2)) * 10 : 1, list: 0, unit: "ea", mfr: "ADC" };
   const s = t291All({ pipeClamp: { sku: "PC" }, lapClamp: { sku: "LC" } });
-  const bom = t291Bom(t291Cfg({ operation: "biparting", runFt: 40 }), s, parts, 0.25);
+  const bom = t291Bom(t291Cfg({ operation: "biparting", runFt: 40 }), s, parts, mk(0.25));
   const trk = bom.rows.find((r) => r.role === "track")!;
   ok(bom.errors.length === 0 && trk.sku === "S-22" && trk.cost === 220 && trk.qty === 2 && trk.label === "Track (22' stick)",
     "#291 BOM: the track row is priced from the stick the engine chose (2 × S-22 at $220) and labelled with its length");
   ok(bom.rows.some((r) => r.role === "pipeClamp" && r.sku === "PC") && bom.rows.some((r) => r.role === "lapClamp" && r.qty === 2), "#291 BOM: pipe and lap clamps are priced rows");
-  const missing = t291Bom(t291Cfg({ runFt: 42 }), s, Object.fromEntries(Object.entries(parts).filter(([k]) => k !== "S-22")), 0.25);
+  const missing = t291Bom(t291Cfg({ runFt: 42 }), s, Object.fromEntries(Object.entries(parts).filter(([k]) => k !== "S-22")), mk(0.25));
   ok(missing.errors.some((e) => /has no part for Track \(22' stick\) — map it in /.test(e)) && missing.rows.find((r) => r.role === "track")!.label === "Track (22' stick)",
     "#291 BOM: a chosen stick deleted from the catalog blocks the line, naming the stick (Track (22' stick))");
   const line = t291Line(t291Cfg({ operation: "biparting", runFt: 40 }), s, parts, 0.25);
@@ -44980,26 +45009,26 @@ import { curtainSpecKey as c292SpecKey } from "@/lib/specs/record-keys";
   const SK_BORDER = c292SpecKey(undefined, "Border 1");
   const fabs = [{ sku: "T292-FAB", name: "Charisma Velour 25 oz", costPerSqft: 0, curtainAreaRate: 2 }];
   const sew = { sewingPct: 10 };
-  const mk = (d: Parameters<typeof c292Compute>[0]) => c292Compute(d, fabs, sew, 0.3).costEach;
+  const mk = (d: Parameters<typeof c292Compute>[0]) => c292Compute(d, fabs, sew, 0.3 / 0.7).costEach;
   const base = { name: "Main Drape", hang: "Pipe", fabric: "T292-FAB", qty: "2", height: "18", width: "21.5", fullness: "50", bottom: "Chain", topFinish: "grommets", bottomFinish: "chain", mountType: "tie-batten" };
 
   // 1. a Rose Brand vendor cost round-trips draft → line → Edit → Update with the same cost and price
   const vd = { ...base, vendorCostOverride: "412.5" };
-  const vc = c292Compute(vd, fabs, sew, 0.3);
+  const vc = c292Compute(vd, fabs, sew, 0.3 / 0.7);
   const vItem = c292Item(vd, vc, { id: 7, sku: "CRT-8" });
   const vBack = c292DraftFrom(vItem, "FAB-X", fabs, mk);
-  const vc2 = c292Compute(vBack, fabs, sew, 0.3);
+  const vc2 = c292Compute(vBack, fabs, sew, 0.3 / 0.7);
   const vItem2 = c292Item(vBack, vc2, { id: 7, sku: "CRT-8" });
   ok(vc.costEach === 412.5 && vItem.curtainInputs?.vendorCost === "412.5" && vBack.vendorCostOverride === "412.5" && vItem2.cost === vItem.cost && vItem2.price === vItem.price && vItem2.curtainInputs?.vendorCost === "412.5",
     "#292 fix: a vendor cost override round-trips draft → line → Update with identical cost and price");
-  ok(c292Item(base, c292Compute(base, fabs, sew, 0.3), { id: 7, sku: "CRT-8" }).curtainInputs?.vendorCost === undefined && c292Item({ ...base, vendorCostOverride: "  " }, c292Compute(base, fabs, sew, 0.3), { id: 7, sku: "CRT-8" }).curtainInputs?.vendorCost === undefined,
+  ok(c292Item(base, c292Compute(base, fabs, sew, 0.3 / 0.7), { id: 7, sku: "CRT-8" }).curtainInputs?.vendorCost === undefined && c292Item({ ...base, vendorCostOverride: "  " }, c292Compute(base, fabs, sew, 0.3 / 0.7), { id: 7, sku: "CRT-8" }).curtainInputs?.vendorCost === undefined,
     "#292 fix: a blank vendor cost stores nothing");
 
   // legacy lines (no curtainInputs): a stored cost that isn't today's make-it cost is kept as the override
   const legacyCost = 999.99;
   const legacyLine: C292Item = { id: 3, sku: "CRT-3", desc: C292_DESC, qty: 2, unit: "ea", cost: legacyCost, price: 1428.56, curtain: true };
   const lDraft = c292DraftFrom(legacyLine, "FAB-X", fabs, mk);
-  const lItem = c292Item(lDraft, c292Compute(lDraft, fabs, sew, 0.3), { id: 3, sku: "" });
+  const lItem = c292Item(lDraft, c292Compute(lDraft, fabs, sew, 0.3 / 0.7), { id: 3, sku: "" });
   ok(lDraft.vendorCostOverride === String(legacyCost) && lItem.cost === legacyCost,
     "#292 fix: a legacy line whose cost ≠ the computed make-it cost keeps its cost after Update");
   const sameCost = mk({ ...base, fabric: "T292-FAB" });
@@ -45033,7 +45062,7 @@ import { curtainSpecKey as c292SpecKey } from "@/lib/specs/record-keys";
     "#292 fix: cartLinesFromSpec strips vendorCost from a staff curtain line (source line untouched)");
 
   // 2. the add path builds its line through curtainItem — identical to the pre-#292 inline line
-  const ac = c292Compute(base, fabs, sew, 0.3);
+  const ac = c292Compute(base, fabs, sew, 0.3 / 0.7);
   const added = { ...c292Item(base, ac, { id: 11, sku: "CRT-12", trackKey: undefined }), curtain: true, specKey: c292SpecKey(undefined, "Main Drape") || undefined };
   const oldDesc = "Main Drape" + " — " + ac.fab.name + ", " + (parseFloat(base.width) || 0) + "'W × " + (parseFloat(base.height) || 0) + "'H, " + base.fullness + "% fullness";
   ok(added.desc === oldDesc && added.desc === C292_DESC && added.qty === 2 && added.unit === "ea" && added.cost === ac.costEach && added.price === ac.priceEach && added.id === 11 && added.sku === "CRT-12" && !!SK_MAIN && added.specKey === SK_MAIN && !("curtainTrackKey" in added),
@@ -45867,7 +45896,7 @@ import { readFileSync as c296cRead } from "node:fs";
   const emptyRack = c296kRec({ id: "SA-RACK-E", label: "Unpriced rack", scope: "Audio", parts: [{ sku: "NOPE", qty: 1 }], rack: c296kL(c296kP({ id: "Z", sku: "NOPE2" })) });
   const fixtureRec = c296kRec({ id: "SA-FX", kind: "fixture", label: "Wash", scope: undefined, rack: undefined, parts: [{ sku: "AMP", qty: 1 }], lightEngineSku: "AMP" });
   const fixtures = new Map<string, C296cRecord>([audioRack, controlsRack, emptyRack].map((r) => [r.id, r]));
-  const ctx = { parts: c296kCat, fixtures, margin: 0.3 };
+  const ctx = { parts: c296kCat, fixtures, markup: mk(0.3) };
 
   // ---- Grid virtual parts ----
   const vps = c296cVirtual([c296cAsmId("SA-RACK-A"), c296cAsmId("SA-RACK-C"), c296cAsmId("SA-RACK-E")], {}, ctx);
@@ -47741,7 +47770,7 @@ import type { KeyProduct as N293Kp, SpecItem as N293Item, SpecSection as N293Sec
   ok(eq(n293Copy(carried, { newSectionId: "s9", catalog: new Map(), fixtures: new Map(), sourceTierMargin: null, targetTierMargin: null }).section.keyProducts, carried.keyProducts),
     "#293 carry: Copy to another estimate (copySectionForTarget) keeps keyProducts and ids");
   ok(eq(n293WithCredit([carried], 50, 99)[0].keyProducts, carried.keyProducts), "#293 carry: withRewardCredit keeps keyProducts");
-  ok(eq(n293Reprice([carried], 0.25, 0.2).sections[0].keyProducts, carried.keyProducts), "#293 carry: tier re-price keeps keyProducts");
+  ok(eq(n293Reprice([carried], mk(0.25), mk(0.2)).sections[0].keyProducts, carried.keyProducts), "#293 carry: tier re-price keeps keyProducts");
 
   // Itemized appendix option.
   ok(n293DefPdf.pdfItemizedAppendix === false && (n293ToggleKeys as readonly string[]).includes("pdfItemizedAppendix"), "#293 pdf options: Itemized appendix defaults off and is a toggle key");
@@ -48713,7 +48742,7 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
   const QWON = fixtureId(293, "lib-won-gone");
   await n293sMergeUpsert(P, { desc: "Test293 Lib part", category: "Test293 Cat", unit: "ea", list: 200, cost: 120 });
   registerFixture("catalog_parts", P);
-  const seeded = n293sSeed({ cost: 100 }, 0.3);
+  const seeded = n293sSeed({ cost: 100 }, mk(0.3));
   const section = {
     id: "sysLib", name: "Test293 Library Lighting", kind: "materials", mfr: "", freightPct: 5, freightAuto: true,
     presentation: "narrative", narrative: "Library intro 293.", room: "Stage left",
@@ -48725,7 +48754,7 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
   } as unknown as N293sSec;
 
   // A sent quote, then a post-send edit that must never reach the library.
-  await n293sQCreate({ id: QID, name: "#293 lib", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", tierMargin: 0.3, spec: { sections: [section], mobs: [] } });
+  await n293sQCreate({ id: QID, name: "#293 lib", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", tierMargin: mk(0.3), spec: { sections: [section], mobs: [] } });
   registerFixture("quotes", QID);
   await n293sQUpdate(QID, { status: "sent" });
   await n293sQAddRev(QID, { by: "Test", reason: "sent", note: "Sent to customer" });
@@ -48750,9 +48779,9 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
   ok((await n293sIndex()).some((e) => e.key === `${QWON}:live:sysLib`), "#293s index (DB): after invalidation a won-without-send quote is indexed from its live spec");
 
   // Load: re-read, re-priced at today's catalog and the target tier, vendor line left out.
-  const r = await n293sLoad(`${QID}:1:sysLib`, 0.2);
+  const r = await n293sLoad(`${QID}:1:sysLib`, mk(0.2));
   const vq = r.ok ? r.section.items.find((x) => x.sku === "VQ-293") : undefined;
-  ok(r.ok && r.section.items.length === 2 && r.section.items[0].cost === 120 && r.section.items[0].price === n293sSeed({ cost: 120 }, 0.2) && r.costsUpdated === 1 && r.tierRepriced === 1 && r.vendorLinesFlagged === 1,
+  ok(r.ok && r.section.items.length === 2 && r.section.items[0].cost === 120 && r.section.items[0].price === n293sSeed({ cost: 120 }, mk(0.2)) && r.costsUpdated === 1 && r.tierRepriced === 1 && r.vendorLinesFlagged === 1,
     "#293s load (DB): today's cost (100 → 120), the target tier's seed, one vendor-quote line flagged (Jeff 2026-10-15 #21)");
   ok(!!vq && vq.cost === 50 && vq.price === 80 && !("vendorQuoteId" in vq) && vq.internalNote === "Old vendor price — re-quote",
     "#293s load (DB): the vendor line comes in at its last price, unlinked from the source's vendor quote, flagged \"Old vendor price — re-quote\" (Jeff 2026-10-15 #21)");
@@ -48760,14 +48789,14 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
      JSON.stringify(r.section.keyProducts) === JSON.stringify([{ lineKey: "1", sku: P, text: "Lib para", photo: true }, { lineKey: "2", sku: "VQ-293", text: "Vendor para", photo: true }]) && !("room" in r.section) && r.section.id !== "sysLib",
     "#293s load (DB): the SENT system's name, narrative, presentation and key products carry (the vendor line's too, #21); the room doesn't");
   ok(r.ok && (/^EST-\d+/.test(r.estNumber) || r.estNumber === QID), "#293s load (DB): the notice names the source estimate");
-  const draftLoad = await n293sLoad(`${QDRAFT}:live:sysLib`, 0.2);
+  const draftLoad = await n293sLoad(`${QDRAFT}:live:sysLib`, mk(0.2));
   ok(!draftLoad.ok && draftLoad.error === "That estimate is no longer available", "#293s load (DB): a draft's system can't be loaded");
-  ok(!(await n293sLoad("garbage", 0.2)).ok, "#293s load (DB): a malformed key is refused");
+  ok(!(await n293sLoad("garbage", mk(0.2))).ok, "#293s load (DB): a malformed key is refused");
   // Final review: warm the index right before remove(), so the drop below is remove()'s own invalidation.
   ok((await n293sIndex()).some((e) => e.quoteId === QWON), "#293s index (DB): the won quote is listed in a warm index right before remove()");
   await n293sQRemove(QWON);
   ok(!(await n293sIndex()).some((e) => e.quoteId === QWON), "#293s index (DB): deleting a quote drops it from the library (remove invalidates)");
-  const gone = await n293sLoad(`${QWON}:live:sysLib`, 0.2);
+  const gone = await n293sLoad(`${QWON}:live:sysLib`, mk(0.2));
   ok(!gone.ok && gone.error === "That estimate is no longer available", "#293s load (DB): a deleted quote's entry is refused with the spec's message");
 }
 
@@ -48844,14 +48873,14 @@ async function systemLibrary293sAsyncChecks(): Promise<void> {
    the Estimator's fallback seed, not the source customer's tier.
    ====================================================================== */
 import { setStatus as n293fSetStatus } from "@/lib/stores/quotes";
-import { TIER_FALLBACK_MARGIN as n293fFallback, usableTierMargin as n293fUsable } from "@/app/(app)/estimator/tier-reprice";
+import { TIER_FALLBACK_MARKUP as n293fFallback, usableTierMarkup as n293fUsable } from "@/app/(app)/estimator/tier-reprice";
 {
   const it = (id: number, sku: string, extra: Partial<N293sItem> = {}): N293sItem =>
     ({ id, sku, desc: "Desc " + sku, qty: 1, unit: "ea", cost: 10, price: 20, ...extra } as N293sItem);
   const sec = (id: string, name: string, items: N293sItem[], extra: Partial<N293sSec> = {}): N293sSec =>
     ({ id, name, kind: "materials", mfr: "", freightPct: 0, items, ...extra });
   const sentRev = (sections: N293sSec[]) =>
-    ({ rev: 1, at: 5000, by: "t", reason: "sent", note: "", name: "Rev 1", value: 0, margin: 0, status: "sent", tierMargin: 0.3, spec: { sections, mobs: [] } });
+    ({ rev: 1, at: 5000, by: "t", reason: "sent", note: "", name: "Rev 1", value: 0, margin: 0, status: "sent", tierMargin: mk(0.3), spec: { sections, mobs: [] } });
   const quote = (id: string, source: string, extra: Record<string, unknown> = {}): N293sQuote =>
     ({ id, name: "Quote " + id, customer: "C", customerId: null, locationId: null, value: 0, margin: 0, status: "sent",
        source, quoteType: "system", owner: "t", createdAt: 1, updatedAt: 1000, spec: null,
@@ -48876,14 +48905,14 @@ import { TIER_FALLBACK_MARGIN as n293fFallback, usableTierMargin as n293fUsable 
   const ln = n293sForLoad(noMiles, "s1");
   ok(!!ln && ln.section.freightAuto === false && ln.section.freightPct === 7, "#293s final: control — a section without freightMiles keeps its own freight settings");
 
-  ok(n293fUsable(0.2) === 0.2 && n293fUsable(null) === null && n293fUsable(0) === null && n293fUsable(1) === null && n293fUsable(NaN) === null && n293fUsable("0.2") === null,
-    "#293s final: the shared usableTierMargin keeps its rule (0 < m < 1, finite number)");
+  ok(n293fUsable(0.2) === 0.2 && n293fUsable(1) === 1 && n293fUsable(null) === null && n293fUsable(0) === null && n293fUsable(20) === null && n293fUsable(NaN) === null && n293fUsable("0.2") === null,
+    "#293s final: the shared usableTierMarkup keeps its rule (0 < k ≤ MARKUP_MAX, finite number; #367: was 0 < m < 1)");
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const ls = rd("src/lib/narrative/load-system.ts");
   const acts = rd("src/app/(app)/estimator/actions.ts");
-  ok(ls.includes("usableTierMargin(targetTierMargin) ?? TIER_FALLBACK_MARGIN") && !ls.includes("const usableTier") &&
-     !acts.includes("const usableTierMargin") && acts.includes("usableTierMargin } from \"./tier-reprice\""),
-    "#293s final: Load and Copy share one usableTierMargin; Load falls back to TIER_FALLBACK_MARGIN");
+  ok(ls.includes("usableTierMarkup(targetTierMargin) ?? TIER_FALLBACK_MARKUP") && !ls.includes("const usableTier") &&
+     !acts.includes("const usableTierMarkup") && acts.includes("usableTierMarkup } from \"./tier-reprice\""),
+    "#293s final: Load and Copy share one usableTierMarkup; Load falls back to TIER_FALLBACK_MARKUP");
   const malformed = ls.indexOf("if (!k) return { ok: false, error: LIBRARY_GONE };");
   ok(malformed > 0 && malformed < ls.indexOf("invalidateSystemLibrary();"), "#293s final: a malformed key returns before the gone-key invalidation");
 }
@@ -48897,11 +48926,11 @@ async function systemLibrary293sFinalFixAsyncChecks(): Promise<void> {
   registerFixture("catalog_parts", P);
   const section = {
     id: "sysFin", name: "Test293 Final Lighting", kind: "materials", mfr: "", freightPct: 5, freightAuto: true,
-    items: [{ id: 1, sku: P, desc: "Final part", qty: 2, unit: "ea", cost: 100, price: n293sSeed({ cost: 100 }, 0.2) }],
+    items: [{ id: 1, sku: P, desc: "Final part", qty: 2, unit: "ea", cost: 100, price: n293sSeed({ cost: 100 }, mk(0.2)) }],
   } as unknown as N293sSec;
 
   // ---- setStatus invalidates on its own: warm (absent) → real draft→won → listed, no explicit invalidate ----
-  await n293sQCreate({ id: QW, name: "#293 final won", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", tierMargin: 0.2, spec: { sections: [section], mobs: [] } });
+  await n293sQCreate({ id: QW, name: "#293 final won", customer: "Spec fixture", owner: "spec", quoteType: "system", source: "estimator", tierMargin: mk(0.2), spec: { sections: [section], mobs: [] } });
   registerFixture("quotes", QW);
   n293sInvalidate();
   const warm = await n293sIndex();
@@ -48913,17 +48942,17 @@ async function systemLibrary293sFinalFixAsyncChecks(): Promise<void> {
 
   // ---- a malformed key leaves a warm index warm; a parsed-but-gone key invalidates ----
   const warm2 = await n293sIndex();
-  const bad1 = await n293sLoad("garbage", 0.2);
-  const bad2 = await n293sLoad("a:b:c:d", 0.2);
+  const bad1 = await n293sLoad("garbage", mk(0.2));
+  const bad2 = await n293sLoad("a:b:c:d", mk(0.2));
   ok(!bad1.ok && !bad2.ok && (await n293sIndex()) === warm2, "#293s final (DB): a malformed key is refused and the warm index stays cached");
-  const goneKey = await n293sLoad(`${fixtureId(293, "lib-final-never")}:live:sysFin`, 0.2);
+  const goneKey = await n293sLoad(`${fixtureId(293, "lib-final-never")}:live:sysFin`, mk(0.2));
   ok(!goneKey.ok && goneKey.error === n293sGone && (await n293sIndex()) !== warm2, "#293s final (DB): control — a parsed key whose quote is gone does invalidate");
 
   // ---- a target with no tier prices at the Estimator's fallback seed, not the source's 0.2 ----
   const nt = await n293sLoad(`${QW}:live:sysFin`, null);
   ok(nt.ok && nt.section.items[0].cost === 120 && nt.section.items[0].price === n293sSeed({ cost: 120 }, n293fFallback) &&
-     nt.section.items[0].price !== n293sSeed({ cost: 120 }, 0.2) && nt.tierRepriced === 1,
-    `#293s final (DB): Load into a no-tier estimate prices at TIER_FALLBACK_MARGIN (${n293fFallback}), not the source customer's 0.2`);
+     nt.section.items[0].price !== n293sSeed({ cost: 120 }, mk(0.2)) && nt.tierRepriced === 1,
+    `#293s final (DB): Load into a no-tier estimate prices at TIER_FALLBACK_MARKUP (${n293fFallback}), not the source customer's 0.2`);
 
   // ---- remove() invalidates on its own: warm (listed) → remove → gone ----
   const warm3 = await n293sIndex();
@@ -48933,7 +48962,7 @@ async function systemLibrary293sFinalFixAsyncChecks(): Promise<void> {
 
   // ---- customer-built portal quotes, sent, are never indexed ----
   for (const [id, source] of [[QPC, "portal-catalog"], [QPS, "portal-service"]] as const) {
-    await n293sQCreate({ id, name: "#293 final " + source, customer: "Spec fixture", owner: "spec", quoteType: "system", source, tierMargin: 0.3, spec: { sections: [section], mobs: [] } });
+    await n293sQCreate({ id, name: "#293 final " + source, customer: "Spec fixture", owner: "spec", quoteType: "system", source, tierMargin: mk(0.3), spec: { sections: [section], mobs: [] } });
     registerFixture("quotes", id);
     await n293sQUpdate(id, { status: "sent" });
     await n293sQAddRev(id, { by: "Test", reason: "sent", note: "Sent to customer" });
@@ -48941,7 +48970,7 @@ async function systemLibrary293sFinalFixAsyncChecks(): Promise<void> {
   n293sInvalidate();
   const pidx = await n293sIndex();
   ok(!pidx.some((e) => e.quoteId === QPC) && !pidx.some((e) => e.quoteId === QPS), "#293s final (DB): sent portal-catalog and portal-service quotes are not in the library");
-  const pl = await n293sLoad(`${QPC}:1:sysFin`, 0.3);
+  const pl = await n293sLoad(`${QPC}:1:sysFin`, mk(0.3));
   ok(!pl.ok && pl.error === n293sGone, "#293s final (DB): a portal quote's system can't be loaded by key");
 }
 
@@ -48958,7 +48987,7 @@ async function systemLibrary293sFinalFixAsyncChecks(): Promise<void> {
     { id: 1, curtain: true, desc: C292_DESC, qty: 1, curtainTrackKey: "ct-1" },
     { id: 2, track: { ...C292_TRACK }, curtainTrackKey: "ct-1" },
   ]);
-  const loaded = f292Copy(src, { newSectionId: "sysL", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.3 }).section;
+  const loaded = f292Copy(src, { newSectionId: "sysL", catalog: new Map(), fixtures: new Map(), sourceTierMargin: mk(0.3), targetTierMargin: mk(0.3) }).section;
   let nid = 200;
   const placed = n293sPlace(loaded, { id: "sys999", nextId: () => ++nid, autoFreightPct: 0 });
   const links = f292Link([src, placed]);
@@ -54498,7 +54527,7 @@ async function modelSku304LiveWritersAsyncChecks(): Promise<void> {
   const cpLine = cp.section.items[0] as { sku: string; cost: number; manufacturerModelNumber?: string };
   ok(cpLine.sku === "Sym:LW" && cpLine.manufacturerModelNumber === "LW" && cpLine.cost === 12 && cp.section.keyProducts?.[0]?.sku === "Sym:LW" && srcSec.items[0].sku === "OLD-LW",
     "#304 live writers: copySectionForTarget re-costs under the old sku, then moves the copied line + key product to the live sku and model (source untouched)");
-  const noRen = copySectionForTarget(srcSec as never, { newSectionId: "sysY", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.3 });
+  const noRen = copySectionForTarget(srcSec as never, { newSectionId: "sysY", catalog: new Map(), fixtures: new Map(), sourceTierMargin: mk(0.3), targetTierMargin: mk(0.3) });
   ok(noRen.section.items[0].sku === "OLD-LW", "#304 live writers: without a rename log the copy keeps its skus");
 
   // Pure: the portal's former-SKU alias.
@@ -54594,13 +54623,13 @@ async function modelSku304PageAsyncChecks(): Promise<void> {
 }
 
 /* ======================================================================
-   #302 — Estimator custom part: Unit sell seeds at a flat 35 % margin, and
+   #302 — Estimator custom part: Unit sell seeds at a flat 54 % markup (#367: was 35 % margin), and
    Add to catalog never fails silently (D635). Pure math + source pins.
    ====================================================================== */
-import { CUSTOM_PART_MARGIN as t302Margin, customPartSell as t302Sell } from "@/app/(app)/estimator/tier-reprice";
+import { CUSTOM_PART_MARKUP as t302Margin, customPartSell as t302Sell } from "@/app/(app)/estimator/tier-reprice";
 {
-  ok(t302Margin === 0.35, "#302: the custom-part margin is a flat 35 %");
-  ok(t302Sell(100) === 153.85, "#302: customPartSell is margin, not markup — $100 cost → $153.85 sell");
+  ok(t302Margin === 0.54, "#302: the custom-part markup is a flat 54 % (#367: the old 35 % margin, rounded)");
+  ok(t302Sell(100) === 154, "#302: customPartSell is markup on cost — $100 cost → $154.00 sell (#367: was $153.85 at 35 % margin; the rounded 54 % constant moves it)");
   ok(t302Sell(0) === 0 && t302Sell(-5) === 0 && t302Sell(NaN) === 0 && t302Sell(Infinity) === 0, "#302: customPartSell is 0 for a zero, negative or non-finite cost");
   const est302 = (f: string) => readFileSync(join(process.cwd(), "src/app/(app)/estimator", f), "utf8");
   const act302 = est302("actions.ts");
@@ -55296,7 +55325,7 @@ import { approvalFingerprint as p2bFingerprint } from "@/lib/approval-snapshot";
   ok(t1.grand === 1000 && t1.alt === 500, "#P2b core: totals() — grand is the In-total system only; alt = the alternate's systemSellTotal");
   ok(t1.rev === 1000 && t1.cost === 600 && t1.mat === 1000 && t1.lab === 0 && t1.fr === 0 && t1.adj === 0 && t1.opt === 0 && t1.tax === 0,
     "#P2b core: totals() — rev/cost/mat/lab/fr/adj/opt exclude the alternate (its lines, labor, freight, sell adjustment and options)");
-  ok(Math.abs(t1.margin - 0.4) < 1e-12, "#P2b core: totals() — margin is the In-total systems' margin");
+  ok(Math.abs(t1.markup - 400 / 600) < 1e-12, "#P2b core: totals() — markup is the In-total systems' markup");
   const t1tax = p2bTotals([inTotal, alt] as never, 8);
   ok(t1tax.tax === 80 && t1tax.grand === 1080 && t1tax.alt === 500, "#P2b core: totals() — tax is on In-total systems only; alt stays the untaxed system sell");
   const altCredit = { ...alt, items: [...alt.items, it(9, 1, 0, -100, { rewardCredit: true })] };
@@ -55308,7 +55337,7 @@ import { approvalFingerprint as p2bFingerprint } from "@/lib/approval-snapshot";
   const fA = { id: "a", name: "A", kind: "materials", mfr: "", freightPct: 10, priceRound: 25, items: [it(1, 2, 100, 150), it(2, 1, 50, 80, { option: true }), it(3, 4, 40, 60, { labor: true })] };
   const fB = { id: "b", name: "B", kind: "labor", mfr: "", freightPct: 0, sellOverride: 900, items: [it(4, 10, 50, 70)] };
   const fC = { id: "c", name: "C", kind: "materials", mfr: "", freightPct: 5, items: [it(5, 3, 33.33, 51.17), it(6, 1, 0, -100, { rewardCredit: true })] };
-  const pre = { mat: 466.84, lab: 1150.67, fr: 41, opt: 80, rev: 1617.51, cost: 959.99, tax: 132.6808, grand: 1691.1908, margin: 0.40650135084172584, adj: 224, credit: 100 };
+  const pre = { mat: 466.84, lab: 1150.67, fr: 41, opt: 80, rev: 1617.51, cost: 959.99, tax: 132.6808, grand: 1691.1908, markup: 0.6849238012895967 /* #367: (rev − cost) ÷ cost; was margin 0.40650135084172584 */, adj: 224, credit: 100 };
   const t3 = p2bTotals([fA, fB, fC] as never, 8);
   ok(JSON.stringify(t3) === JSON.stringify(pre), "#P2b core: no alternates ⇒ totals() is identical to the pre-change result, field for field (and no alt key)");
   ok(!("alt" in t3), "#P2b core: no alternates ⇒ no alt key at all");
@@ -64021,7 +64050,7 @@ async function conduitRiser321B8Checks(): Promise<void> {
     const pr = await live();
     const len = Math.max(...pr.routes!.filter((r) => r.id === w1 || r.id === w2).map((r) => GB.routeLengthFt(r, pr.calibrations || [])!));
     const tier = await resolveTier(null);
-    const emtList = isTierPriced(2, tier.margin) ? Math.round((2 / (1 - tier.margin)) * 100) / 100 : 4;
+    const emtList = isTierPriced(2, tier.markup) ? Math.round(2 * (1 + tier.markup) * 100) / 100 : 4;
     const emtLine = lineOf(b4, EMT);
     ok(b4.ok && !!emtLine && emtLine.qty === Math.ceil(len) && emtLine.unit === "ft" && Math.abs(emtLine.ext - Math.ceil(len) * emtList) < 0.005,
       `#321 B8 quote: priceConduit with a mapped 3/4" EMT part adds a Conduit line = ceil(longest member ft) at the tier price (${emtLine?.qty} ft)`);
@@ -68372,8 +68401,8 @@ import { canonicalBonusSections as bnCanon } from "@/lib/estimate-bonus/canonica
   ok(/if \(isBonusId\(id\)\) return;/.test(bnPatch) && /isBonusItem\(x\)/.test(bnHook.slice(bnHook.indexOf("const isBonusId"), bnHook.indexOf("const patchItem ="))), "#bonus client pin: patchItem (price, ext, qty, inc/dec) refuses a bonus line");
   const bnMove = bnHook.slice(bnHook.indexOf("const moveItem ="), bnHook.indexOf("const inc ="));
   ok(/isBonusId\(id\)/.test(bnMove), "#bonus client pin: moveItem refuses a bonus line");
-  const bnMargins = bnHook.slice(bnHook.indexOf("const setMarginAll"), bnHook.indexOf("const setSystemSell"));
-  ok((bnMargins.match(/isBonusItem\(it\)/g) || []).length === 2, "#bonus client pin: both margin sliders skip bonus lines");
+  const bnMargins = bnHook.slice(bnHook.indexOf("const setMarkupAll"), bnHook.indexOf("const setSystemSell"));
+  ok((bnMargins.match(/isBonusItem\(it\)/g) || []).length === 2, "#bonus client pin: both markup sliders skip bonus lines");
   const bnCard = readFileSync(join(process.cwd(), "src/app/(app)/estimator/section-card.tsx"), "utf8");
   ok(/if \(isBonusItem\(it\)\) \{/.test(bnCard) && /never shown to the customer/.test(bnCard), "#bonus client pin: section-card renders a locked row for a bonus line");
   const bnSum = readFileSync(join(process.cwd(), "src/app/(app)/estimator/review-cost-summary.tsx"), "utf8");
@@ -68472,7 +68501,7 @@ import { repriceForTier as bnfReprice } from "@/app/(app)/estimator/tier-reprice
   ] } as unknown as EstimatorSpecSection;
   const withB = bnfWith([labSec], bnfIds([labSec]));
   const bonusOnly = [{ ...withB[0], items: withB[0].items.filter((x) => x.bonus) }];
-  const rp = bnfReprice(bonusOnly, 0.3, 0.4);
+  const rp = bnfReprice(bonusOnly, 0.3 / 0.7, 0.4 / 0.6 /* mk(0.3), mk(0.4); `mk` is shadowed here */);
   ok(rp.handPriced === 0 && rp.untouched === 0 && rp.repriced === 0 && rp.sections === bonusOnly, "#bonus M9: a tier re-price skips bonus lines (never counted as hand-priced)");
 
   const page = bnfRead("src/app/(app)/estimator/page.tsx");
@@ -70859,7 +70888,7 @@ const pd366Asm = (): PD366Item => pd366Line({ id: 9, sku: "fa-1", cost: 2600, pr
 }
 
 /* --- #366: the customer's price is identical with or without a project discount --- */
-import { systemSellTotal as pd366Sell, systemFreight as pd366Freight, totals as pd366Totals, systemMargin as pd366Margin } from "@/app/(app)/estimator/pricing";
+import { systemSellTotal as pd366Sell, systemFreight as pd366Freight, totals as pd366Totals, systemMarkup as pd366Margin } from "@/app/(app)/estimator/pricing";
 import { withBonusLines as pd366Bonus, idCounterFrom as pd366Ids } from "@/lib/estimate-bonus/rules";
 import { repriceForTier as pd366Reprice, isAtTierSeed as pd366AtSeed } from "@/app/(app)/estimator/tier-reprice";
 {
@@ -70888,14 +70917,14 @@ import { repriceForTier as pd366Reprice, isAtTierSeed as pd366AtSeed } from "@/a
   // Tier reprice: a discounted line still sits at the seed of its NORMAL cost and re-prices from it.
   const tierSec = () => pd366Sec([pd366Line({ id: 1, price: 2857.14 })]);
   const [dl] = pd366Apply([tierSec()], pd366D);
-  ok(pd366AtSeed(dl.items[0], null), "#366 tier: a discounted line priced at its normal cost's 30% seed still counts as at the seed");
-  const res = pd366Reprice([dl], null, 0.2);
+  ok(pd366AtSeed(dl.items[0], null), "#366 tier: a discounted line priced at its normal cost's old 30%-margin seed (the 0.43 fallback's legacy twin) still counts as at the seed");
+  const res = pd366Reprice([dl], null, 0.25 /* mk(0.2) — `mk` is shadowed in this block */);
   ok(res.repriced === 1 && res.handPriced === 0 && res.sections[0].items[0].price === 2500 && res.sections[0].items[0].cost === 1760,
-    "#366 tier: a tier change re-prices a discounted line from its normal cost (2000 ÷ 0.8 = 2500), keeping the discounted cost");
-  const plain = pd366Reprice([tierSec()], null, 0.2);
+    "#366 tier: a tier change re-prices a discounted line from its normal cost (2000 × 1.25 = 2500), keeping the discounted cost");
+  const plain = pd366Reprice([tierSec()], null, 0.25);
   ok(plain.sections[0].items[0].price === res.sections[0].items[0].price, "#366 tier: the same price as the undiscounted line gets");
   const trk = pd366Sec([pd366Line({ id: 4, sku: "TRK-1", track: {} as never, cost: 2000, price: 2857.14, components: [{ sku: "ETC:CS40", label: "Part", role: "fixture", qty: 1, unit: "ea", cost: 2000, price: 2857.14 }] } as Partial<PD366Item>)]);
-  const trkRes = pd366Reprice(pd366Apply([trk], pd366D), null, 0.2);
+  const trkRes = pd366Reprice(pd366Apply([trk], pd366D), null, 0.25);
   ok(trkRes.repriced === 1 && trkRes.sections[0].items[0].price === 2500 && trkRes.sections[0].items[0].components![0].price === 2500,
     "#366 tier: a track line with a discounted part re-prices from normal cost, its part too");
 }

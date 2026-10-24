@@ -1626,7 +1626,31 @@ See `.env.example`.
     and browser). Nothing narrative is deleted — switching off restores it. No migration. Remaining is
     Jeff-gated: one real box-sale estimate sent to himself on production. On a box sale, the BOM quote tab carries Show prices / Show quantities, Payment terms, Terms, Options and Cover note (the Client package tab is hidden; the cover note's text stays in the header's Quote details) and hides #364's Labor switch (Jeff 2026-10-22). Punch item #362.
 
-67. ✅ **Estimating-core extraction** (#359, D1228–D1230) — handoff PR 1. The Estimator's persisted
+67. ✅ **Markup pricing** (#367, D1286–D1297) — every pricing percentage is markup on
+    cost (`sell = cost × (1 + markup)`), not margin on price, with no saved sell amount
+    changing. The math is rewritten (approach B), not relabelled: `src/lib/markup/` is the
+    one pure converter (`sellAt`, `markupOf`, `costFromSell`, `marginToMarkup`,
+    `roundMarkupPct`, `legacyTwinOf`), and the Estimator, the flame / repair / inspection
+    engines, travel, renewals, portal pricing, curtains, the Grid, Quick Design and the
+    dashboard price through it. Persisted fields keep their names (`margin`, `tierMargin`,
+    `rates.margin`, `partsMargin`) and hold markup once stamped. `quotes` and `projects`
+    convert on read exactly in `hydrateDoc` (`pricingBasis: "markup"`; builders and seeds
+    stamp — a new writer that skips `buildQuote` must stamp too); settings blobs convert once
+    under `updateBlob`'s row lock and round to a whole % (`_pricingBasis`, old values in
+    `_marginBackup`): tiers 43/37/28/25/18/11/5, service / repair / catalog rates 43. The
+    "legacy twin" rule keeps an old exact 42.857 % counting as at-the-tier-seed; same-tier
+    compares use whole percents. Every screen, report and export says Markup (sliders
+    0–125 %, service knob 10–100 %, rate cap 150 %, low warning under 11 %, one % column on the
+    review spreadsheet). Price-parity harness (`scripts/test-markup.ts` against
+    `docs/markup/parity-baseline.json`): 0 drift; only rounded defaults move (Base on $1,000
+    $1,428.57 → $1,430, custom part $100 → $154, default curtain on $700 $1,000 → $1,001,
+    Silver portal part on $70 $89.74 → $89.60). `test:specs` also runs `npm run
+    test:markup-settings`. No migration. **No rollback past the merge; never preview-
+    deploy the branch — and after the merge never preview a branch not rebased onto #367**
+    (it would run margin code against the production DB, D1291). Remaining is Jeff-gated: `db:export`, a quiet-time deploy, check the
+    tiers and one quote of each type, whether to set cleaner tier values. Punch item #367.
+
+68. ✅ **Estimating-core extraction** (#359, D1228–D1230) — handoff PR 1. The Estimator's persisted
     domain types and twelve pure helpers live in `src/lib/estimating-core/` (entry `index.ts`:
     flat domain exports plus namespaced pure `src/lib` modules); the twelve old helper paths are
     `export *` shims and the route `types.ts` re-exports the core types. `npm run core:check`
@@ -1635,7 +1659,7 @@ See `.env.example`.
     `docs/estimating-core/`). Quick Design types now live in `src/lib/design/quick-types.ts`.
     No behaviour change. Next: handoff PR 2 (phase 67 below, the HTML prototype package).
 
-68. 🚧 **Estimator handoff prototype** (#361, D1233–D1246) — handoff PR 2, stacked on PR 1. A confidential,
+69. 🚧 **Estimator handoff prototype** (#361, D1233–D1246, D1273, D1298) — handoff PR 2, stacked on PR 1. A confidential,
     offline package (`output/peak-estimator-handoff/`, zipped, git-ignored) that runs Quartzite's REAL Estimator,
     Catalog, Assembly Builder and Estimating Rules in the browser over a sliced production export, for a founder
     evaluating Peak's estimating. Source in `handoff/estimator/`: `build.ts` + `esbuild-plugins.ts` bundle the

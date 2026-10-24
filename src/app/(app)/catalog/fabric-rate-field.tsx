@@ -120,7 +120,7 @@ export default function FabricRateField({
       <div style={HELP}>Weight and flame rating print on curtain cut sheets; blank prints nothing.</div>
       <div style={{ ...HELP, marginTop: 10 }}>
         Fabric cost only — estimates add sewing labor (Estimating Rules, default 10 %). Priced per sq ft of sewn
-        fabric area (finished width × (1 + fullness) × height); sell = cost ÷ (1 − margin).
+        fabric area (finished width × (1 + fullness) × height); sell = cost × (1 + markup).
       </div>
       {status && <div style={{ ...HELP, color: "#8a6d1f" }}>{status}</div>}
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, marginTop: 10, alignItems: "center" }}>

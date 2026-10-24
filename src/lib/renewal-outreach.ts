@@ -66,6 +66,7 @@ import { quoteRewardCredit } from "@/lib/rewards/credit-line";
 import { serviceLetterPrice } from "@/lib/rewards/service-credit";
 import { rewardPointsPhrase } from "@/lib/rewards/points";
 import { mailboxViewer } from "@/lib/mailbox-viewer";
+import { sameWholeMarkup } from "@/lib/markup";
 
 /**
  * IDEAS #36 — one-click renewal outreach. The ✉ on a renewal row runs this:
@@ -76,7 +77,7 @@ import { mailboxViewer } from "@/lib/mailbox-viewer";
  * renewal's job/record. The email body always cites LAST YEAR'S PRICE for
  * comparison, and when the number moved it says why — built by diffing the
  * rate snapshot stored on last year's quote against today's rates (plus
- * travel/scope changes). Internal knobs (margin) are never named to the
+ * travel/scope changes). Internal knobs (markup) are never named to the
  * customer; they fall back to generic "current rates" phrasing. The caller
  * redirects to the Inbox with the composer open; sending stamps the #37
  * renewalOutreach worklist state.
@@ -247,7 +248,8 @@ type FlameTestDoc = {
 
 /** Customer-safe reasons why this year's flame price differs from last
  *  year's — diff of the rate snapshot stored on the prior quote vs today's
- *  rates, plus travel/scope movement. Margin changes stay generic (D69). */
+ *  rates, plus travel/scope movement. Markup changes stay generic (D69); a
+ *  whole-percent match (#367 legacy exact vs rounded) is no change. */
 export function flameChangeReasons(
   priorFt: FlameTestDoc | null,
   r: FlameTestPricing
@@ -277,7 +279,7 @@ export function flameChangeReasons(
       out.push(
         `our minimum service fee ($${Math.round(cur.baseFee)}, was $${Math.round(old.baseFee)})`
       );
-    if (old.margin != null && old.margin !== cur.margin) generic = true;
+    if (old.margin != null && !sameWholeMarkup(old.margin, cur.margin)) generic = true;
   } else {
     generic = true;
   }
@@ -402,7 +404,7 @@ async function ensureFlameRenewalQuote(
     customerId: job.customerId || prior?.customerId || null,
     locationId: job.locationId || prior?.locationId || null,
     value: Math.round(r.total), // this year's price at current rates (D69)
-    margin: r.effectiveMargin,
+    margin: r.effectiveMarkup,
     source: "flametest",
     quoteType: "flame_test",
     owner: me,
@@ -521,7 +523,7 @@ async function flameLetterDoc(
   const flight = flightOf(ft.trip);
   if (flight) {
     const curtainMin = (ft.rates && ft.rates.curtainMinutes) || 5;
-    const margin = typeof ft.rates?.margin === "number" ? ft.rates.margin : quote.margin || 0;
+    const markup = typeof ft.rates?.margin === "number" ? ft.rates.margin : quote.margin || 0;
     blocks.push({
       kind: "p",
       text:
@@ -532,7 +534,7 @@ async function flameLetterDoc(
             flightTotal: flight.total,
             total: serviceLetterPrice(quote, ft).gross,
             cost: ft.cost,
-            margin,
+            margin: markup,
           }).travel
         ) +
         ` The on-site inspection should take approximately ${num1((curtainsTotal * curtainMin) / 60)} hours.`,
@@ -617,7 +619,7 @@ type InspectionDoc = {
 };
 
 /** Customer-safe reasons why this year's inspection price differs — rate
- *  snapshot diff + travel/scope movement; margin stays generic (D69). */
+ *  snapshot diff + travel/scope movement; markup stays generic (D69). */
 export function inspectionChangeReasons(
   priorIn: InspectionDoc | null,
   r: InspectionEstimate,
@@ -658,7 +660,7 @@ export function inspectionChangeReasons(
       out.push(
         `our minimum service fee ($${Math.round(cur.minFee)}, was $${Math.round(old.minFee)})`
       );
-    if (old.margin != null && old.margin !== cur.margin) generic = true;
+    if (old.margin != null && !sameWholeMarkup(old.margin, cur.margin)) generic = true;
   } else {
     generic = true;
   }
@@ -796,7 +798,7 @@ async function ensureInspectionRenewalQuote(
     customerId: rec.customerId || prior?.customerId || null,
     locationId: rec.locationId || null,
     value: Math.round(r.total), // this year's price at current rates (D69)
-    margin: r.effectiveMargin,
+    margin: r.effectiveMarkup,
     source: "inspection",
     quoteType: "inspection",
     owner: me,
@@ -913,7 +915,7 @@ async function inspectionLetterDoc(
   // Flights over drive (spec 2026-09-25 §5): one customer-facing travel line.
   const flight = flightOf(insp.trip);
   if (flight) {
-    const margin = typeof insp.rates?.margin === "number" ? insp.rates.margin : quote.margin || 0;
+    const markup = typeof insp.rates?.margin === "number" ? insp.rates.margin : quote.margin || 0;
     blocks.push({
       kind: "p",
       text:
@@ -924,7 +926,7 @@ async function inspectionLetterDoc(
             flightTotal: flight.total,
             total: serviceLetterPrice(quote, insp).gross,
             cost: insp.cost,
-            margin,
+            margin: markup,
           }).travel
         ) +
         ` The on-site inspection should take approximately ${num1(insp.inspectHours || 0)} hours.`,

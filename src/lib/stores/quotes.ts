@@ -223,13 +223,17 @@ export type Quote = {
   assumptions?: string;
   termsText?: string;
   value: number;
+  /** The blended MARKUP fraction (0.43 = 43 %) — field name kept (#367). */
   margin: number;
+  /** #367 — present once this doc's percentages are markup (doc-basis.ts). */
+  pricingBasis?: "markup";
   /** Customer pricing tier stamped at creation (item 11, D87) — resolved
    *  contact → company → base, re-stamped when the customer/contact changes
    *  and when a revision is cut. Never shown to the customer. */
   pricingTier?: string | null;
-  /** The tier's margin fraction as it stood at stamp time (0.30 = 30%) —
-   *  the SEED for pricing tools; `margin` above stays the blended actual. */
+  /** The tier's markup fraction as it stood at stamp time (0.43 = 43 %; the
+   *  field keeps its name, #367) — the SEED for pricing tools; `margin` above
+   *  stays the blended actual markup. */
   tierMargin?: number | null;
   status: QuoteStatus;
   /** 'estimator' | 'quick' */
@@ -915,6 +919,7 @@ export function buildQuote(
     termsText: partial.termsText || "",
     value: Math.round(partial.value || 0),
     margin: partial.margin || 0,
+    pricingBasis: "markup",
     pricingTier: partial.pricingTier ?? null,
     tierMargin: partial.tierMargin ?? null,
     status: "draft",
@@ -1021,6 +1026,8 @@ export async function update(
     // AI daily brief: the nudge is setAssistNudge's alone.
     delete clean.assistNudge;
     delete clean.assistNudgeLeaseUntil;
+    // #367: the basis stamp is the doc store's and the builders' alone — a patch can never clear it.
+    delete clean.pricingBasis;
     // Box goods sale: stored only as true on a system quote; false (or any other type) removes the key, so turning
     // it off leaves exactly a normal estimate's doc. A patch without the key leaves it alone.
     if ("boxSale" in clean) {
