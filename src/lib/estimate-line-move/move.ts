@@ -15,10 +15,10 @@
  * from another source): then it is re-minted (`opts.mintItemId`) and its
  * key-product star follows (remapKeyProducts).
  */
-import type { KeyProduct, LaborGroupRecord, SpecItem, SpecSection } from "@/app/(app)/estimator/types";
-import { clearSellOverride } from "@/app/(app)/estimator/pricing";
-import { MAX_KEY_PRODUCTS, isLineToken, remapKeyProducts, withKeyProducts } from "@/app/(app)/estimator/narrative";
-import { newLaborGroupId, pruneLaborGroups } from "@/app/(app)/estimator/labor-group";
+import type { KeyProduct, LaborGroupRecord, SpecItem, SpecSection } from "@/lib/estimating-core/types";
+import { clearSellOverride } from "@/lib/estimating-core/pricing";
+import { MAX_KEY_PRODUCTS, isLineToken, remapKeyProducts, withKeyProducts } from "@/lib/estimating-core/narrative";
+import { newLaborGroupId, pruneLaborGroups } from "@/lib/estimating-core/labor-group";
 import { linkCurtainTracks, newCurtainTrackKey } from "@/lib/curtain-cut-sheets/track-link";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";

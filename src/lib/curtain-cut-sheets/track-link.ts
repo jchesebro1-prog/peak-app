@@ -10,7 +10,7 @@
  * returned in `duplicates` (staff warning) and falls back to its own picked
  * mount.
  */
-import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
+import type { SpecItem, SpecSection } from "@/lib/estimating-core/types";
 
 /** Unique enough across estimates (the mintVendorQuoteId idiom): time + random, base 36. */
 const defaultNonce = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);

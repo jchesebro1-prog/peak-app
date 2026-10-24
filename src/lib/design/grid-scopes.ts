@@ -26,7 +26,7 @@ import {
   type CatalogGroup,
   type Trade,
 } from "@/lib/catalog-taxonomy";
-import type { SysKey } from "@/app/(app)/design/quick/engine";
+import type { SysKey } from "@/lib/design/quick-types";
 
 /** The Quick Design systems the Grid can actually track against placed
  *  catalog parts (Jeff's five scopes). Controls/Acoustical/Pit have no

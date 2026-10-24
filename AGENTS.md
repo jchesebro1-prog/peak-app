@@ -1672,5 +1672,15 @@ See `.env.example`.
     Jeff-gated: a MyETC API key, the first Pull on production (check the "new" count
     against duplicates) and Import, the next morning's sync line. Punch item #368.
 
+69. ✅ **Estimating-core extraction** (#359, D1228–D1230) — handoff PR 1. The Estimator's persisted
+    domain types and twelve pure helpers live in `src/lib/estimating-core/` (entry `index.ts`:
+    flat domain exports plus namespaced pure `src/lib` modules); the twelve old helper paths are
+    `export *` shims and the route `types.ts` re-exports the core types. `npm run core:check`
+    (TypeScript-API closure walk, in test:specs) keeps the core browser-pure;
+    `npm run core:golden` prices export files into golden totals (fixtures in
+    `docs/estimating-core/`). Quick Design types now live in `src/lib/design/quick-types.ts`.
+    No behaviour change. Next: handoff PR 2, the HTML prototype package (needs Jeff's production
+    export).
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

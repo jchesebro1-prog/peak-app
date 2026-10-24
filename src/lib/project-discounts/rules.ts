@@ -1,4 +1,4 @@
-import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
+import type { SpecItem, SpecSection } from "@/lib/estimating-core/types";
 import { isPlaceholderSku } from "@/lib/specs/record-keys";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
