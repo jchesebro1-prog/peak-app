@@ -16,6 +16,7 @@
  * are not catalog docs: `storeSeedFrom` splits them into `catalogRenames`, which only the sku resolver reads.
  * Plan: PR 2 Task 3.
  */
+import { quoteOnMarkupBasis, rateBlobOnMarkupBasis } from "../markup-basis";
 import { seedCatalog, seedEstimates, seedFixtures, seedMeta, seedRules, type SeedEstimate, type SeedFixture, type SeedMeta, type SeedPart, type SeedRules } from "./seed";
 
 // "fixtures" rows with `deleted: true` are soft-delete markers — readers must skip them (use readers.listFixtures).
@@ -163,6 +164,29 @@ export function storeSeedFrom(g: {
 /** The seed from the window.PEAK_* globals the data/*.js scripts set. */
 export function seedFromSlice(): StoreSeed {
   return storeSeedFrom({ estimates: seedEstimates(), catalog: seedCatalog(), fixtures: seedFixtures(), rules: seedRules(), meta: seedMeta() });
+}
+
+/**
+ * #367 — the store's one read hook, the twin of the app's doc-store `hydrateDoc`: a quote without `pricingBasis: "markup"`
+ * stores margins and reads converted (exactly, no sell moves); a rate blob not yet stamped reads converted once (whole-%
+ * markup). A stamped doc is handed back untouched, so what the prototype itself saved is never converted twice. The result
+ * is memoized per source object, so `all()` keeps returning the same objects between writes. See markup-basis.ts.
+ */
+const converted = new WeakMap<object, unknown>();
+function onMarkupBasis<T>(c: Coll, doc: T): T {
+  if (!doc || typeof doc !== "object" || (c !== "quotes" && c !== "blobs")) return doc;
+  const hit = converted.get(doc as object);
+  if (hit !== undefined) return hit as T;
+  const out =
+    c === "quotes"
+      ? (quoteOnMarkupBasis(doc as unknown as Record<string, unknown>) as unknown as T)
+      : (() => {
+          const b = doc as unknown as { id?: string; data?: unknown };
+          const data = rateBlobOnMarkupBasis(String(b.id), b.data);
+          return data === b.data ? doc : ({ ...b, data } as unknown as T);
+        })();
+  converted.set(doc as object, out);
+  return out;
 }
 
 const clone = <T>(v: T): T => (v === undefined ? v : structuredClone(v));
@@ -454,16 +478,16 @@ export async function openStore(seed: StoreSeed, opts: { idb?: IDBFactory | null
     },
     async get<T>(c: Coll, id: string) {
       const m = overlay.get(c)!;
-      if (m.has(id)) return clone((m.get(id) ?? undefined) as T | undefined);
-      return clone(indexOf(c).get(id) as T | undefined);
+      if (m.has(id)) return clone(onMarkupBasis(c, (m.get(id) ?? undefined) as T | undefined));
+      return clone(onMarkupBasis(c, indexOf(c).get(id) as T | undefined));
     },
     async all<T>(c: Coll) {
-      return overlayMerge(seedOf(c), overlay.get(c)!) as T[];
+      return overlayMerge(seedOf(c), overlay.get(c)!).map((d) => onMarkupBasis(c, d)) as T[];
     },
     async allIncludingDeleted<T>(c: Coll) {
       const live = new Map<string, { id: string } | null>();
       for (const [id, d] of overlay.get(c)!) if (d) live.set(id, d);
-      return overlayMerge(seedOf(c), live) as T[];
+      return overlayMerge(seedOf(c), live).map((d) => onMarkupBasis(c, d)) as T[];
     },
     async put<T extends { id: string }>(c: Coll, doc: T) {
       if (!doc || typeof doc.id !== "string" || doc.id === "") throw new Error(`put(${c}): a doc needs a string id`);

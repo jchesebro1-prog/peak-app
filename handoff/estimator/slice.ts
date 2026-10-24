@@ -19,6 +19,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { rateBlobOnMarkupBasis } from "./markup-basis";
 import {
   BLOB_IDS, COMPANY_COLS, CONTACT_COLS, CONTACT_EMAIL_COLS, CONTACT_PHONE_COLS, CATALOG_FIELDS, FIXTURE_FIELDS, SETTINGS_FIELDS, SITE_COLS, TEAM_FIELDS, INACTIVE_TEAM_FIELDS,
   pickAndScrub, pickFields, sanitizeQuote, scanForSecrets, scrubValue, selectEstimates, packCatalog, catalogBody,
@@ -117,7 +118,8 @@ export function sliceExport(exp: ExportV2, opts: { extraEstimates?: QuoteDoc[]; 
   const blobs: Record<string, unknown> = {};
   for (const id of BLOB_IDS) {
     const b = (exp.blobs ?? []).find((x) => x.id === id);
-    if (b) blobs[id] = b.data;
+    // #367: a rate blob still on margins converts once (stamp + whole-% markup), as the app does on first read (markup-basis.ts)
+    if (b) blobs[id] = rateBlobOnMarkupBasis(id, b.data);
   }
   files["data/rules.js"] = js("PEAK_RULES", { settings, blobs });
   counts.blobs = Object.keys(blobs).length;

@@ -18,6 +18,7 @@ import type { CustomerLite } from "@/app/(app)/estimator/types";
 import type { TravelLite } from "@/lib/estimating-core/types";
 import type { Office } from "@/lib/settings";
 import type { HandoffStore } from "./store";
+import { rateBlobOnMarkupBasis } from "../markup-basis";
 import { seedCustomers, seedRules, seedTeam, type SeedContact, type SeedCustomers, type SeedRules, type SeedSite, type SeedTeamUser } from "./seed";
 
 /* ------------------------------------------------------------------ context */
@@ -73,7 +74,8 @@ const needStore = (port: string): HandoffStore => {
 
 /** A settings blob's data (or {}). */
 export function blobData(id: string): Record<string, unknown> {
-  const b = rules().blobs[id];
+  // #367: a rate blob still on margins reads converted once, as the app's first rate read does (markup-basis.ts); a stamped one is untouched.
+  const b = rateBlobOnMarkupBasis(id, rules().blobs[id]);
   return b && typeof b === "object" ? (b as Record<string, unknown>) : {};
 }
 
@@ -332,29 +334,29 @@ function travelRates(): TravelRatesLite {
 
 /* tiers — a port of pricing-tiers.ts resolveTier */
 
-const TIER_DEFAULTS: Record<PricingTier, number> = { base: 0.3, copper: 0.27, silver: 0.22, gold: 0.2, platinum: 0.15, reseller: 0.1, employee: 0.05 };
+const TIER_DEFAULTS: Record<PricingTier, number> = { base: 0.43, copper: 0.37, silver: 0.28, gold: 0.25, platinum: 0.18, reseller: 0.11, employee: 0.05 };
 const asTier = (v: unknown): PricingTier | null => (typeof v === "string" && (PRICING_TIERS as readonly string[]).includes(v) ? (v as PricingTier) : null);
 
-/** A tier's margin: Estimating Rules `tiers.<tier>` (percent, blob pricing_rules), else the default. */
-export function tierMarginOf(tier: PricingTier): number {
+/** A tier's markup (pricing-tiers.ts tierMarkup): Estimating Rules `tiers.<tier>` (percent, blob pricing_rules — converted once from margins, #367), else the default. */
+export function tierMarkupOf(tier: PricingTier): number {
   const v = blobData("pricing_rules")[`tiers.${tier}`];
   return typeof v === "number" ? v / 100 : TIER_DEFAULTS[tier];
 }
 
-/** resolveTier(): the quote's attn contact's tier, else the company's, else base — with its margin. */
-export function resolveTierFor(customerId: string | null | undefined, contact?: string | null): { tier: PricingTier; margin: number; source: "contact" | "company" | "default" } {
+/** resolveTier(): the quote's attn contact's tier, else the company's, else base — with its markup (#367). */
+export function resolveTierFor(customerId: string | null | undefined, contact?: string | null): { tier: PricingTier; markup: number; source: "contact" | "company" | "default" } {
   if (customerId) {
     const d = dir();
     const wanted = (contact || "").trim();
     if (wanted) {
       const person = (d.contactsByCo.get(customerId) ?? []).find((p) => contactName(p) === wanted);
       const t = asTier(person?.pricingTier);
-      if (t) return { tier: t, margin: tierMarginOf(t), source: "contact" };
+      if (t) return { tier: t, markup: tierMarkupOf(t), source: "contact" };
     }
     const t = asTier(d.companies.find((c) => c.id === customerId)?.pricingTier);
-    if (t) return { tier: t, margin: tierMarginOf(t), source: "company" };
+    if (t) return { tier: t, markup: tierMarkupOf(t), source: "company" };
   }
-  return { tier: DEFAULT_PRICING_TIER, margin: tierMarginOf(DEFAULT_PRICING_TIER), source: "default" };
+  return { tier: DEFAULT_PRICING_TIER, markup: tierMarkupOf(DEFAULT_PRICING_TIER), source: "default" };
 }
 
 /**
@@ -393,7 +395,7 @@ export const customers = {
     const c = dir().companies.find((x) => x.id === id);
     return !!c && isVendorPickerType(typeof c.type === "string" ? c.type : null);
   },
-  /** The pricing tier key ("base", "gold"…): the attn contact's, else the company's, else "base". Margin: resolveTierFor. */
+  /** The pricing tier key ("base", "gold"…): the attn contact's, else the company's, else "base". Markup: resolveTierFor. */
   tierFor(customerId: string | null | undefined, contactName?: string | null): string {
     return resolveTierFor(customerId, contactName).tier;
   },

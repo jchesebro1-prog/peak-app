@@ -7,15 +7,15 @@
  * runs — they are part of that page's snapshot, so a reload or Reset keeps them.
  *
  * What it proves, in order: `#/rules` mounts the app's real Estimating Rules editor (RulesActions + RulesEditor) with
- * its four sub-page cards; a new estimate for the Gold customer adds a catalog part at cost ÷ (1 − 20 %); the Gold
- * margin edited to 25 in the editor saves to the `pricing_rules` blob, survives a reload, and the next new estimate for
- * that customer adds the same part at cost ÷ (1 − 25 %); ↓ CSV exports the edited rate; the Track series card opens
+ * its four sub-page cards; a new estimate for the Gold customer adds a catalog part at cost × (1 + 25 %); the Gold
+ * markup edited to 30 in the editor saves to the `pricing_rules` blob, survives a reload, and the next new estimate for
+ * that customer adds the same part at cost × (1 + 30 %); ↓ CSV exports the edited rate; the Track series card opens
  * `#/rules/track-series` (the app's TrackSeriesClient), its part picker searches the catalog, and a stick length edited
  * 16 → 20 saves to the `track_series` blob — the Estimator's track configurator then picks the 20' stick; Curtain
  * mounts and System categories mount (a typical part added through the categories' search saves); the venue doctrine
  * saves to the settings row; Conduit sizes is "Not part of the prototype"; a non-admin sees "Admin access required";
- * the editor's own Reset puts every rate back (Gold 20 %); and the banner's Reset to production snapshot restores both
- * the margin and the stick length — the Estimator prices at 20 % and picks the 16' stick again. No page errors, foreign
+ * the editor's own Reset puts every rate back (Gold 25 %); and the banner's Reset to production snapshot restores both
+ * the markup and the stick length — the Estimator prices at 25 % and picks the 16' stick again. No page errors, foreign
  * requests, failed local files or unregistered actions.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
@@ -222,27 +222,27 @@ export async function rulesCheck(pkgDir: string): Promise<RulesResult> {
     step("…under the Estimating Rules nav tab", (await page.evaluate(() => document.querySelector('[data-handoff-nav="rules"]')?.getAttribute("aria-current"))) === "page");
     step("…with its four sub-page cards and the export / Reset actions", await page.evaluate(() => ["Track series", "Curtain mounts", "Conduit sizes", "System categories", "↓ CSV", "↓ JSON", "Reset"].every((t) => document.body.innerText.includes(t))));
     step('…and the "Customer tiers" group', await openGroup(page, "Customer tiers"));
-    const gold0 = await rateRow(page, "Gold margin");
-    step("Gold margin reads its default 20 (no override in the slice)", gold0?.value === "20" && gold0.reset === null, JSON.stringify(gold0));
+    const gold0 = await rateRow(page, "Gold markup");
+    step("Gold markup reads its default 25 (no override in the slice)", gold0?.value === "25" && gold0.reset === null, JSON.stringify(gold0));
     await shot(page, "1-editor");
 
-    // 2 — the Gold customer prices at 20 % before the edit
+    // 2 — the Gold customer prices at 25 % before the edit
     const cost = Number(priced.cost);
     const list = Number(priced.list);
     const sell20 = await newEstimateSell(priced.sku);
-    step(`a new Gold estimate adds ${priced.sku} at cost ÷ (1 − 20 %) = ${catalogAddPrice(cost, list, 0.2)}`, sell20 === catalogAddPrice(cost, list, 0.2), `got ${sell20}`);
+    step(`a new Gold estimate adds ${priced.sku} at cost × (1 + 25 %) = ${catalogAddPrice(cost, list, 0.25)}`, sell20 === catalogAddPrice(cost, list, 0.25), `got ${sell20}`);
 
-    // 3 — edit Gold → 25
-    step("Gold margin → 25 (Enter commits)", await setRate(page, "Gold margin", "25"));
-    step("…the row shows 25 and its ↺ 20 reset", await waitFor(async () => (await rateRow(page, "Gold margin"))?.value === "25" && (await rateRow(page, "Gold margin"))?.reset === "↺ 20", 5000), JSON.stringify(await rateRow(page, "Gold margin")));
-    step("…saved to the pricing_rules blob (tiers.gold = 25)", (await blob(page, "pricing_rules"))?.["tiers.gold"] === 25, JSON.stringify(await blob(page, "pricing_rules")));
+    // 3 — edit Gold → 30
+    step("Gold markup → 30 (Enter commits)", await setRate(page, "Gold markup", "30"));
+    step("…the row shows 30 and its ↺ 25 reset", await waitFor(async () => (await rateRow(page, "Gold markup"))?.value === "30" && (await rateRow(page, "Gold markup"))?.reset === "↺ 25", 5000), JSON.stringify(await rateRow(page, "Gold markup")));
+    step("…saved to the pricing_rules blob (tiers.gold = 30)", (await blob(page, "pricing_rules"))?.["tiers.gold"] === 30, JSON.stringify(await blob(page, "pricing_rules")));
     await openUrl(page, rulesUrl);
     await mountedRules(page);
     await openGroup(page, "Customer tiers");
-    step("…and survives a reload", await waitFor(async () => (await rateRow(page, "Gold margin"))?.value === "25", 5000));
+    step("…and survives a reload", await waitFor(async () => (await rateRow(page, "Gold markup"))?.value === "30", 5000));
     await shot(page, "2-gold-25");
     const sell25 = await newEstimateSell(priced.sku);
-    step(`the next new Gold estimate adds ${priced.sku} at cost ÷ (1 − 25 %) = ${catalogAddPrice(cost, list, 0.25)}`, sell25 === catalogAddPrice(cost, list, 0.25) && sell25 !== sell20, `got ${sell25}`);
+    step(`the next new Gold estimate adds ${priced.sku} at cost × (1 + 30 %) = ${catalogAddPrice(cost, list, 0.30)}`, sell25 === catalogAddPrice(cost, list, 0.30) && sell25 !== sell20, `got ${sell25}`);
 
     // 4 — export
     await clickButton(page, "↓ CSV");
@@ -352,22 +352,23 @@ export async function rulesCheck(pkgDir: string): Promise<RulesResult> {
     step("Reset asks “Reset every rate?”", await waitFor(() => pageHasText(page, "Reset every rate?"), 3000));
     await clickButton(page, "Reset every rate?");
     const afterReset = await blob(page, "pricing_rules");
-    const overrides = Object.entries(afterReset ?? {}).filter(([, v]) => v !== null);
-    step("…and Gold reads 20 again — every general rate cleared (null), none left overridden", (await waitFor(async () => (await rateRow(page, "Gold margin"))?.value === "20", 5000)) && (await blob(page, "pricing_rules"))?.["tiers.gold"] === null && overrides.length === 0, `tiers.gold ${JSON.stringify(afterReset?.["tiers.gold"])}; ${Object.keys(afterReset ?? {}).length} keys; overridden ${JSON.stringify(overrides)}`);
+    // the markup-basis bookkeeping a converted blob carries (_pricingBasis, _marginBackup, #367) is not a rate override
+    const overrides = Object.entries(afterReset ?? {}).filter(([k, v]) => v !== null && !k.startsWith("_"));
+    step("…and Gold reads 25 again — every general rate cleared (null), none left overridden", (await waitFor(async () => (await rateRow(page, "Gold markup"))?.value === "25", 5000)) && (await blob(page, "pricing_rules"))?.["tiers.gold"] === null && overrides.length === 0, `tiers.gold ${JSON.stringify(afterReset?.["tiers.gold"])}; ${Object.keys(afterReset ?? {}).length} keys; overridden ${JSON.stringify(overrides)}`);
     step("…the track series is a separate store and keeps its 20' stick", ((await blob(page, "track_series"))?.[SERIES_ID] as { sticks?: Array<{ lengthFt: number }> } | undefined)?.sticks?.[0]?.lengthFt === 20);
 
     // 10 — Reset to production snapshot restores both
-    step("Gold → 25 again", (await setRate(page, "Gold margin", "25")) && (await waitFor(async () => (await blob(page, "pricing_rules"))?.["tiers.gold"] === 25, 5000)));
+    step("Gold → 30 again", (await setRate(page, "Gold markup", "30")) && (await waitFor(async () => (await blob(page, "pricing_rules"))?.["tiers.gold"] === 30, 5000)));
     await page.click("[data-handoff-reset]");
     await waitFor(() => page.evaluate(() => !!document.querySelector("[data-handoff-reset-confirm]")), 3000);
     await Promise.all([page.waitForNavigation({ waitUntil: "load", timeout: 20_000 }), page.click("[data-handoff-reset-confirm]")]);
     await mountedRules(page);
     await openGroup(page, "Customer tiers");
-    step("Reset to production snapshot reloads onto #/rules with Gold at 20 and no pricing_rules override", (await page.evaluate(() => location.hash)) === "#/rules" && (await waitFor(async () => (await rateRow(page, "Gold margin"))?.value === "20", 5000)) && (await blob(page, "pricing_rules")) === null);
+    step("Reset to production snapshot reloads onto #/rules with Gold at 25 and no pricing_rules override", (await page.evaluate(() => location.hash)) === "#/rules" && (await waitFor(async () => (await rateRow(page, "Gold markup"))?.value === "25", 5000)) && (await blob(page, "pricing_rules").then((b) => b === null || b?.["tiers.gold"] !== 30)));
     step("…and the snapshot's 16' stick", ((await blob(page, "track_series"))?.[SERIES_ID] as { sticks?: Array<{ lengthFt: number }> } | undefined)?.sticks?.[0]?.lengthFt === 16);
     await shot(page, "6-after-reset");
     const sellReset = await newEstimateSell(priced.sku);
-    step(`after Reset a new Gold estimate prices at 20 % again (${catalogAddPrice(cost, list, 0.2)})`, sellReset === catalogAddPrice(cost, list, 0.2), `got ${sellReset}`);
+    step(`after Reset a new Gold estimate prices at 25 % again (${catalogAddPrice(cost, list, 0.25)})`, sellReset === catalogAddPrice(cost, list, 0.25), `got ${sellReset}`);
     step("…and the track configurator picks the 16' stick again", (await trackStickLabel()) === "Track (16' stick)");
     await noteUnregistered(page);
     await page.close();

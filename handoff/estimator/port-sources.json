@@ -25,7 +25,7 @@
       "originals": [
         {
           "path": "src/lib/stores/quotes.ts",
-          "sha256": "85a18a2c0f5bb98cb270ab6dcbf50b3e0e62d78018eba843a7069d99f2f18eed"
+          "sha256": "2ba4f2f3f9e8a644693ef823db090d1923320269229f108281eba7711c387860"
         },
         {
           "path": "src/app/(app)/estimator/review-actions.ts",
@@ -85,7 +85,7 @@
       "originals": [
         {
           "path": "src/lib/narrative/load-system.ts",
-          "sha256": "2668b1705c90fc47d94222540819504c734dbcc3014e375de83e5c6b6a157dc0"
+          "sha256": "73cb5da8cf7673769f2707b16a4a3122da80dff515300e97a32379355a9ce825"
         },
         {
           "path": "src/lib/narrative/system-library-index.ts",
@@ -117,11 +117,11 @@
       "originals": [
         {
           "path": "src/app/(app)/estimator/actions.ts",
-          "sha256": "8adb6757a6348d1a67301ed9640aaaf382c1ebd51f19bf4848d0521c2c2082c1"
+          "sha256": "2cd14bc98fb9ed1122194c8ae31e93e6333a301c452b8c57d729ba5ef988db9e"
         },
         {
           "path": "src/lib/stores/quotes.ts",
-          "sha256": "85a18a2c0f5bb98cb270ab6dcbf50b3e0e62d78018eba843a7069d99f2f18eed"
+          "sha256": "2ba4f2f3f9e8a644693ef823db090d1923320269229f108281eba7711c387860"
         }
       ]
     },
@@ -131,11 +131,11 @@
       "originals": [
         {
           "path": "src/app/(app)/estimator/actions.ts",
-          "sha256": "8adb6757a6348d1a67301ed9640aaaf382c1ebd51f19bf4848d0521c2c2082c1"
+          "sha256": "2cd14bc98fb9ed1122194c8ae31e93e6333a301c452b8c57d729ba5ef988db9e"
         },
         {
           "path": "src/lib/stores/quotes.ts",
-          "sha256": "85a18a2c0f5bb98cb270ab6dcbf50b3e0e62d78018eba843a7069d99f2f18eed"
+          "sha256": "2ba4f2f3f9e8a644693ef823db090d1923320269229f108281eba7711c387860"
         }
       ]
     },
@@ -145,7 +145,7 @@
       "originals": [
         {
           "path": "src/lib/stores/quotes.ts",
-          "sha256": "85a18a2c0f5bb98cb270ab6dcbf50b3e0e62d78018eba843a7069d99f2f18eed"
+          "sha256": "2ba4f2f3f9e8a644693ef823db090d1923320269229f108281eba7711c387860"
         }
       ]
     },
@@ -163,7 +163,7 @@
         },
         {
           "path": "src/lib/pricing-tiers.ts",
-          "sha256": "11ad58e3d838fa3a1cfdced64e401c15967fb62aec27cbc27a210b8e89650b68"
+          "sha256": "5b1fa4afd9d7ac50cc7672874d04c96b7db365235092117ed612f0f8475aa527"
         }
       ]
     },
@@ -173,7 +173,7 @@
       "originals": [
         {
           "path": "src/app/(app)/estimator/page.tsx",
-          "sha256": "2a64554a3e7717b527b4f567629eca18cc2b9b5470d0a66162fcf6a06c38d06a"
+          "sha256": "73eb463b620617289b4dfb85b53bdb781e5c12a27559de2570ceaf7f2ece68d5"
         }
       ]
     },
@@ -215,7 +215,7 @@
         },
         {
           "path": "src/lib/stores/quotes.ts",
-          "sha256": "85a18a2c0f5bb98cb270ab6dcbf50b3e0e62d78018eba843a7069d99f2f18eed"
+          "sha256": "2ba4f2f3f9e8a644693ef823db090d1923320269229f108281eba7711c387860"
         }
       ]
     },
@@ -337,7 +337,7 @@
         },
         {
           "path": "src/lib/stores/pricing.ts",
-          "sha256": "3d9e2110fca84c94cec166a6e9875346fe52f2b65de2be9da33433b0c943eff3"
+          "sha256": "dbff9f688368980fd2f185551c25741a9e5eb1acb07c3c1cf0f5fe57318b7851"
         }
       ]
     },
@@ -407,11 +407,11 @@
       "originals": [
         {
           "path": "src/lib/stores/pricing.ts",
-          "sha256": "3d9e2110fca84c94cec166a6e9875346fe52f2b65de2be9da33433b0c943eff3"
+          "sha256": "dbff9f688368980fd2f185551c25741a9e5eb1acb07c3c1cf0f5fe57318b7851"
         },
         {
           "path": "src/db/doc-store.ts",
-          "sha256": "525d41a11df774f975cb5e1b379684be017e47f0e97fb177f8a7bb4809efb833"
+          "sha256": "747efdb9fbeb55d123e616307ba0ac93bce9e42920eece56f880cd0e11f76f94"
         }
       ]
     },
@@ -421,7 +421,7 @@
       "originals": [
         {
           "path": "src/lib/stores/pricing.ts",
-          "sha256": "3d9e2110fca84c94cec166a6e9875346fe52f2b65de2be9da33433b0c943eff3"
+          "sha256": "dbff9f688368980fd2f185551c25741a9e5eb1acb07c3c1cf0f5fe57318b7851"
         }
       ]
     },
@@ -559,7 +559,7 @@
       "originals": [
         {
           "path": "src/app/(app)/estimator/actions.ts",
-          "sha256": "8adb6757a6348d1a67301ed9640aaaf382c1ebd51f19bf4848d0521c2c2082c1"
+          "sha256": "2cd14bc98fb9ed1122194c8ae31e93e6333a301c452b8c57d729ba5ef988db9e"
         },
         {
           "path": "src/lib/estimate-output/bom-models-server.ts",
@@ -573,7 +573,7 @@
       "originals": [
         {
           "path": "src/app/(app)/estimator/actions.ts",
-          "sha256": "8adb6757a6348d1a67301ed9640aaaf382c1ebd51f19bf4848d0521c2c2082c1"
+          "sha256": "2cd14bc98fb9ed1122194c8ae31e93e6333a301c452b8c57d729ba5ef988db9e"
         },
         {
           "path": "src/app/(app)/estimator/copy-pricing.ts",
@@ -622,6 +622,42 @@
         {
           "path": "src/app/(app)/quotes/actions.ts",
           "sha256": "0d77a3eac34955614ce10ea9d746efc878168caddcd20776b3aa0b1def855d42"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/markup-basis.ts",
+      "what": "the margin → markup stored-basis rules (quotes convert on read, rate blobs once) — shared by the slicer and the browser store",
+      "originals": [
+        {
+          "path": "src/lib/stores/pricing.ts",
+          "sha256": "dbff9f688368980fd2f185551c25741a9e5eb1acb07c3c1cf0f5fe57318b7851"
+        },
+        {
+          "path": "src/lib/markup/doc-basis.ts",
+          "sha256": "bcb993271b3c0fe2c4d4edf2b394ce8c22e4f218198f72990c88c341acafaba9"
+        },
+        {
+          "path": "src/lib/markup/settings.ts",
+          "sha256": "70557351c3d9c98336f459feff80ef92afadb3265c385fca760b6ce6885ff320"
+        },
+        {
+          "path": "src/db/doc-store.ts",
+          "sha256": "747efdb9fbeb55d123e616307ba0ac93bce9e42920eece56f880cd0e11f76f94"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/store.ts",
+      "what": "the read hook: hydrateDoc for quotes, the one-time rate conversion for blobs",
+      "originals": [
+        {
+          "path": "src/db/doc-store.ts",
+          "sha256": "747efdb9fbeb55d123e616307ba0ac93bce9e42920eece56f880cd0e11f76f94"
+        },
+        {
+          "path": "src/lib/markup/doc-basis.ts",
+          "sha256": "bcb993271b3c0fe2c4d4edf2b394ce8c22e4f218198f72990c88c341acafaba9"
         }
       ]
     }

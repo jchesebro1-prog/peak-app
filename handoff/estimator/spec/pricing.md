@@ -18,47 +18,53 @@ const t = PeakEstimatingCore.totals(estimate.spec.sections, 0);   // the Estimat
 pricing matches Peak's.
 
 Conventions: money is plain dollars. `round2` rounds to the cent (`Math.round(n × 100) / 100`,
-`PeakEstimatingCore.round2`). A **margin** is always margin on *price*, never markup:
-**sell = cost ÷ (1 − margin)**, so a 30 % margin on a $70 cost sells at $100.
+`PeakEstimatingCore.round2`). **Every percentage Peak prices with is a markup on cost**:
+**sell = cost × (1 + markup)** (`sellAt` in the `markup` module), so a 43 % markup on a $70 cost sells at
+$100.10, and **markup = (sell − cost) ÷ cost**. This replaced margin-on-price (sell = cost ÷ (1 − margin))
+on Oct 23, 2026. Prices already saved did not move: each stored margin was converted to the exact
+equivalent markup (*Stored basis* below). A field still named `margin` or `tierMargin` on a stored quote holds
+a **markup** once the quote is stamped `pricingBasis: "markup"`; `totals()` reports `markup`.
 
 ## 1. A line
 
 - **Extended sell** = qty × unit sell (`price`), unless the line carries an extended-sell override
   (`extSellOverride`), which is used as typed (floored at $0). `PeakEstimatingCore.lineExtSellOf`
-- **Line cost** = qty × unit cost. A line's margin readout is (sell − cost) ÷ sell
-  (`PeakEstimatingCore.lineMarginOf`).
+- **Line cost** = qty × unit cost. A line's markup readout is (sell − cost) ÷ cost
+  (`PeakEstimatingCore.lineMarkupOf`; null without a positive cost).
 - **Typing a unit sell** stores it to the cent and clears any extended-sell override
   (`PeakEstimatingCore.priceFromUnitSellEdit`). **Typing an extended sell** back-solves the unit sell as
   ext ÷ qty, at full precision so qty × price gives back exactly the typed figure. A qty of 0 becomes 1
   (`PeakEstimatingCore.backSolveExtSell`).
-- **Margin slider** (per system, or "Reprice every line"): every line becomes round2(cost ÷ (1 − m)) and
-  loses its extended-sell override (`PeakEstimatingCore.repriceAtMargin`). A vendor-quote line whose cost
-  changes keeps the margin it already carries (`PeakEstimatingCore.repricedAtLineMargin`).
+- **Markup slider** (per system, or "Reprice every line", 0–125 %): every line becomes
+  round2(cost × (1 + k)) and loses its extended-sell override (`PeakEstimatingCore.repriceAtMarkup`). A
+  vendor-quote line whose cost changes keeps the markup it already carries
+  (`PeakEstimatingCore.repricedAtLineMarkup`).
 - **Option lines** (`option: true`) are optional scope. They are left out of the system's price and the
   grand total, and summed separately into `totals.opt`. **Allowance lines** (`allowance: true`) are
   ordinary priced lines with no committed part.
 - **POR lines** (`por: true`, price on request) carry no price until Peak sets one.
 
-## 2. Adding a part — tiers and margins
+## 2. Adding a part — tiers and markups
 
-Every customer has a **pricing tier**. The tier's margin seeds the sell of most lines added to the
+Every customer has a **pricing tier**. The tier's markup seeds the sell of most lines added to the
 estimate.
 
 - **Which tier**: the attention contact's tier, else the company's, else `base`. The quote stamps the
-  tier and its margin (`pricingTier`, `tierMargin`) when it is created, and re-stamps them when the
-  customer or contact changes. The tier margins are Estimating Rules (`tiers.<tier>`, in percent); the
-  defaults are base 30 %, copper 27 %, silver 22 %, gold 20 %, platinum 15 %, reseller 10 % and employee
-  5 %. Tier lookup belongs to your customer system: it is the `customers` port (`ports.md`), not the
-  engine.
-- **Seed margin** = the stamped tier margin when it is a real fraction (0 < m < 1), else **30 %**
-  (`PeakEstimatingCore.seedMarginOf`, `PeakEstimatingCore.TIER_FALLBACK_MARGIN`).
-- **A catalog part** added from the picker sells at round2(cost ÷ (1 − seed margin)). A part with no
+  tier and its markup (`pricingTier`, `tierMargin` — the field keeps its old name and holds a markup) when it
+  is created, and re-stamps them when the customer or contact changes. The tier markups are Estimating Rules
+  (`tiers.<tier>`, in percent, up to 150): **base 43 %, copper 37 %, silver 28 %, gold 25 %, platinum 18 %,
+  reseller 11 %, employee 5 %**. (Before the markup switch these were the margins 30 / 27 / 22 / 20 / 15 / 10 / 5, each
+  converted to the equivalent markup and rounded to a whole percent.) Tier lookup belongs to your customer
+  system: it is the `customers` port (`ports.md`), not the engine.
+- **Seed markup** = the stamped tier markup when it is a real fraction (0 < k ≤ 19), else **43 %**
+  (`PeakEstimatingCore.seedMarkupOf`, `PeakEstimatingCore.TIER_FALLBACK_MARKUP`).
+- **A catalog part** added from the picker sells at round2(cost × (1 + seed markup)). A part with no
   cost sells at its catalog **list** price (`PeakEstimatingCore.catalogAddPrice`). The CSV material
   import and the track configurator use the same rule.
-- **A custom part** sells at a flat **35 %** margin, not the tier: round2(cost ÷ 0.65)
-  (`PeakEstimatingCore.customPartSell`, `PeakEstimatingCore.CUSTOM_PART_MARGIN`).
-- **Labor** seeds at the tier margin rounded to a whole percent and capped at 95 %
-  (`PeakEstimatingCore.laborSeedMarginOf`).
+- **A custom part** sells at a flat **54 %** markup, not the tier: round2(cost × 1.54)
+  (`PeakEstimatingCore.customPartSell`, `PeakEstimatingCore.CUSTOM_PART_MARKUP`; it was a 35 % margin).
+- **Labor** seeds at the tier markup rounded to a whole percent and capped at 1,900 %
+  (`PeakEstimatingCore.laborSeedMarkupOf`).
 - **Changing the customer's tier** re-prices every line still at the *old* tier's seed, within a cent
   (5¢ for labor lines), to the new seed. Hand-priced lines (an extended-sell override, or a sell off the
   old seed) are kept and counted. Fixtures, POR lines, no-cost lines and bonus lines are never
@@ -87,9 +93,9 @@ A system's price is its lines plus freight, then rounded or overridden.
    - else (a system saved before rounding existed) the computed sell exactly.
 5. **The adjustment** = system price − computed sell, to the cent (`PeakEstimatingCore.systemSellAdjustment`).
    It is the $25 round-up or the typed difference.
-6. **System margin** = (items sell + adjustment − items cost) ÷ (items sell + adjustment). Freight is
-   left out (`PeakEstimatingCore.systemMargin`). A typed sell below cost, or under a 10 % margin, warns
-   but never blocks (`PeakEstimatingCore.systemSellWarning`).
+6. **System markup** = (items sell + adjustment − items cost) ÷ items cost. Freight is left out
+   (`PeakEstimatingCore.systemMarkup`). A typed sell below cost, or under an 11 % markup, warns but never
+   blocks (`PeakEstimatingCore.systemSellWarning`).
 
 **When rounding applies.** The Estimator turns the $25 round-up on for every new system, and on load
 for every system of a **draft** estimate (`PeakEstimatingCore.withPriceRound`). Sent, won and lost
@@ -112,13 +118,35 @@ its normal cost as `catalogCost` (`normalCostOf(line)` is `catalogCost`, else `c
 figured on **that**: the freight base (`PeakEstimatingCore.systemFreightBase`), the 5 % package bonus's cost
 basis, and the tier seed (so a discounted line still counts as at its tier price and re-prices on a tier change
 exactly as an undiscounted one) all read the normal cost. `price`, an edited sell, a typed system sell and the $25
-rounding are never touched. So a discount changes cost and margin only: sell, freight, both bonus lines and the
-grand total are identical with and without it, and the saving shows as margin. The customer rows are identical.
+rounding are never touched. So a discount changes cost and markup only: sell, freight, both bonus lines and the
+grand total are identical with and without it, and the saving shows as markup. The customer rows are identical.
+
+### Stored basis — margin to markup
+
+Peak's stored data predates the switch, so a doc can hold either basis, and the stamp says which.
+
+- **Quotes (and projects) convert on read.** A quote **without** `pricingBasis: "markup"` stores margins.
+  Reading it converts every stored pricing fraction exactly, markup = m ÷ (1 − m) (a margin of 0.95 or more
+  caps at 19): the blended `margin`, `tierMargin`, each revision's two, a service quote's rates, and a labor
+  draft's percent string. **No sell amount is touched**: `price`, extended-sell overrides, typed system sells
+  and `value` stay exactly as stored, which is why every saved quote still totals the same to the cent. The
+  converted doc is stamped, and a **stamped doc is never converted again**.
+  The arithmetic is the pure `marginToMarkup` and the doc rule `hydrateDoc`, both in `src/lib/markup/`. A new
+  doc is born stamped.
+- **Rate settings convert once.** Each stored rate (the seven tiers, the system base, flame-test, repair,
+  repair parts and inspection defaults, the catalog default) is converted **and rounded to a whole percent**
+  the first time it is read, then stamped `_pricingBasis: "markup"` with the old values kept in `_marginBackup`.
+  Examples: 30 → 43, 27 → 37, 22 → 28, 20 → 25, 15 → 18, 10 → 11, 5 → 5 (a margin of 5 % is 5.26 % markup).
+  An admin-edited rate converts the same way.
+- **The prototype applies the same two rules** with the app's own converters: the slicer converts every bundled
+  quote and rate blob before writing `data/*.js`, and the browser store converts anything still unstamped on
+  read (`ports.md`). So `data/estimates.js` is already on the markup basis; a quote's `margin` and `tierMargin`
+  there are markups, and `golden/` (computed from the stored sections' prices) is unaffected by the basis.
 
 ## 4. The estimate — `totals()`
 
 `PeakEstimatingCore.totals(sections, taxRatePct)` returns `mat`, `lab`, `fr`, `opt`, `rev`, `cost`, `tax`,
-`grand`, `margin`, `adj`, `credit` and, when there is one, `alt`. The Estimator always passes tax **0**.
+`grand`, `markup`, `adj`, `credit` and, when there is one, `alt`. The Estimator always passes tax **0**.
 For every system that is **not** an alternate:
 
 - each in-total line's extended sell adds to `rev`, and its qty × cost to `cost`;
@@ -138,7 +166,8 @@ Then:
   `PeakEstimatingCore.rewardCreditLine.creditLineAmount`) comes off **after** tax, capped so the total
   never goes below $0;
 - **grand** = rev + fr + tax − credit;
-- **margin** = (rev − cost) ÷ rev. Freight and the credit are not in it.
+- **markup** = (rev − cost) ÷ cost. Freight and the credit are not in it. (Before the markup switch this was the margin
+  (rev − cost) ÷ rev, reported as `margin`.)
 
 `PeakEstimatingCore.inclusionsLine` turns mat / lab / fr into the document's "Materials, installation &
 freight included" line, naming only what the estimate carries.
@@ -194,7 +223,7 @@ One line per curtain: qty = the number of identical curtains, unit cost and sell
   Rule, 10 % by default (`PeakEstimatingCore.curtainPricing.sewnAreaRate`,
   `PeakEstimatingCore.curtainPricing.curtainCost`).
 - A **vendor cost** (a real Rose Brand quote) replaces the make-it cost entirely, with no sewing on top.
-- **Sell each** = round2(cost each ÷ (1 − margin)). The margin is the tier margin, else 30 %
+- **Sell each** = round2(cost each × (1 + markup)). The markup is the tier markup, else 43 %
   (`PeakEstimatingCore.curtainPricing.curtainPrice`).
 - A curtain and the track that hangs it share a `curtainTrackKey` (`ct-<curtain line id>-…`). The key
   links them on the cut sheets. It does not change either price.
@@ -230,7 +259,7 @@ the series (Estimating Rules → Track series) and the configuration
 - Everything above is × the number of identical tracks.
 
 Pricing: each part is priced as a catalog add would be (`catalogAddPrice`). The line's cost is
-Σ part cost × qty. Its sell is round2(Σ costed parts' cost × qty ÷ (1 − seed margin) + Σ list × qty of
+Σ part cost × qty. Its sell is round2(Σ costed parts' cost × qty × (1 + seed markup) + Σ list × qty of
 parts with no cost). A role whose part isn't mapped, or is gone from the catalog, blocks the line and
 names the role.
 
@@ -285,14 +314,14 @@ RIG, LIG, AUD, VID or OTH.
 - drafting hours default to 2 %;
 - shop & engineering cost = PM hours × `SHP-PM` + shop hours × `SHP-IN` + drafting hours × `DRF-SUB`;
 - plus a misc allowance in dollars;
-- **sell** = cost ÷ (1 − margin), with the margin capped at 95 %.
+- **sell** = cost × (1 + markup), with the markup capped at 1,900 % (`MARKUP_MAX`).
 
 **The lines:**
 
 - one crew line per mobilization (with its `mob`), then a separate line for each travel cost (mileage,
   hotel, per diem, lift) that costs something. These share the mobilization's `laborMobKey`;
 - a shop & engineering line and a misc line (`laborOverhead`);
-- each line sells at round2(cost ÷ (1 − margin)). The rounding drift (≤ 5¢ a line) lands on the last
+- each line sells at round2(cost × (1 + markup)). The rounding drift (≤ 5¢ a line) lands on the last
   line, so the lines sum to the configurator's total.
 
 **On the customer document:** travel lines fold back into their mobilization line. Overhead lines (shop
@@ -302,7 +331,7 @@ other labor lines by sell, else into one neutral "Project management, engineerin
 
 ## 11. What the customer sees
 
-The customer document never shows cost, margin, overhead lines, travel lines or either bonus line, yet
+The customer document never shows cost, markup, overhead lines, travel lines or either bonus line, yet
 its rows, together with the system's freight row, always add up to the system price.
 
 - **Rows** = `PeakEstimatingCore.customerLines(system)`, plus a separate **Freight** row when the

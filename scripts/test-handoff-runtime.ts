@@ -10,7 +10,7 @@ import * as vm from "node:vm";
 import { ROLE_PERMS, type Perm, type Role } from "@/lib/team";
 import { DB_KEY_MAX, DB_NAME, dbNameFor, overlayFromRows, overlayMerge, openStore, RESET_BLOCKED_MESSAGE, storeSeedFrom, type HandoffStore } from "../handoff/estimator/runtime/store";
 import {
-  clock, configurePorts, customers, customersFrom, email, nextEstNoFrom, numbering, onWon, refreshPortsFromStore, resolveTierFor, travelFromParts, users,
+  blobData, clock, configurePorts, customers, customersFrom, email, nextEstNoFrom, numbering, onWon, refreshPortsFromStore, resolveTierFor, travelFromParts, users,
 } from "../handoff/estimator/runtime/ports";
 import { bySkuResolver, buildEstimatorProps } from "../handoff/estimator/runtime/props/estimator";
 import type { SeedCustomers, SeedRules, SeedTeamUser } from "../handoff/estimator/runtime/seed";
@@ -51,6 +51,7 @@ import { cutSheetAppendixModels } from "../handoff/estimator/runtime/loaders/cut
 import { bomModelPartsLocal } from "../handoff/estimator/runtime/loaders/document";
 import { preflightSend } from "../handoff/estimator/runtime/actions/send-actions";
 import { BOX_SALE_LABOR_MESSAGE } from "@/lib/estimate-box-sale/rules";
+import { withoutBasisKeys } from "@/lib/markup/settings";
 import { reviewTabsFor } from "@/lib/estimate-review/review-ui";
 import { stepViewsFor } from "../handoff/estimator/verify";
 import { revisionDocFields } from "../handoff/estimator/runtime/quote-model";
@@ -477,9 +478,12 @@ export async function handoffRuntimeChecks(ok: Ok) {
     companies: [{ id: "co", name: "Gold Co", pricingTier: "gold" }],
     contacts: [{ id: "k1", firstName: "Sil", lastName: "Ver", homeCompanyId: "co", pricingTier: "silver" }],
   };
-  configurePorts({ customers: tierCustomers, rules: { settings: {}, blobs: { pricing_rules: { "tiers.gold": 18 } } } });
+  // a stamped (already markup-basis) blob is read as stored; an UNSTAMPED one is a margin-era blob and converts once, whole-% (#367)
+  configurePorts({ customers: tierCustomers, rules: { settings: {}, blobs: { pricing_rules: { "tiers.gold": 18, _pricingBasis: "markup" } } } });
   ok(customers.tierFor("co", "Sil Ver") === "silver" && customers.tierFor("co") === "gold" && customers.tierFor("zz") === "base", "handoff runtime: customers.tierFor — contact, then company, then base");
-  ok(resolveTierFor("co").margin === 0.18 && resolveTierFor("co", "Sil Ver").margin === 0.22 && resolveTierFor(null).margin === 0.3, "handoff runtime: resolveTierFor — Estimating Rules margin, else the tier default");
+  ok(resolveTierFor("co").markup === 0.18 && resolveTierFor("co", "Sil Ver").markup === 0.28 && resolveTierFor(null).markup === 0.43, "handoff runtime: resolveTierFor — Estimating Rules markup (a stamped blob as stored), else the tier default (markup: Silver 28, Base 43)");
+  configurePorts({ rules: { settings: {}, blobs: { pricing_rules: { "tiers.gold": 18, "tiers.silver": 22 } } } });
+  ok(resolveTierFor("co").markup === 0.22 && resolveTierFor("co", "Sil Ver").markup === 0.28, "handoff runtime: resolveTierFor — a margin-era (unstamped) pricing_rules blob converts once: Gold 18 % margin → 22 % markup, Silver 22 → 28");
 
   // --- email / onWon / clock ---
   const actStore = await openStore({ quotes: docs([{ id: "Q-W", estNo: 1234, name: "Gym rigging" }]) }, { idb: null });
@@ -510,7 +514,7 @@ export async function handoffRuntimeChecks(ok: Ok) {
 
   const fresh = await buildEstimatorProps(store, null, new URLSearchParams("customer=c-beta"));
   ok(fresh.initial.loadedId === null && fresh.initial.customerId === "c-beta" && fresh.initial.projectName === "Beta Church — System", "handoff runtime: props — a new estimate seeded from ?customer=");
-  ok(fresh.initial.pricingTier === "base" && fresh.initial.tierMargin === 0.3 && fresh.next === null, "handoff runtime: props — a new estimate opens at its tier, no next step");
+  ok(fresh.initial.pricingTier === "base" && fresh.initial.tierMargin === 0.43 && fresh.next === null, "handoff runtime: props — a new estimate opens at its tier, no next step");
   const unknown = await buildEstimatorProps(store, "Q-NOPE", new URLSearchParams());
   ok(unknown.initial.loadedId === null && unknown.initial.projectName === "New estimate", "handoff runtime: props — an unknown id opens a clean estimate");
 
@@ -626,6 +630,7 @@ export async function handoffRuntimeChecks(ok: Ok) {
   await handoffSendChecks(ok);
   await handoffBoxSaleChecks(ok);
   await handoffDiscountChecks(ok);
+  await handoffMarkupChecks(ok);
   await handoffShellChecks(ok);
   await handoffAssemblyChecks(ok);
   await handoffRulesChecks(ok);
@@ -640,7 +645,7 @@ const payloadFor = (sections: SpecSection[], over: Partial<SavePayload> = {}): S
   const t = totals(sections, 0);
   return {
     name: "Test estimate", customer: "", customerId: null, locationId: null, contactName: "", quoteNote: "", assumptions: "", installTimeframe: "TBD",
-    paymentTerms: "Unknown", category: "", value: t.grand, margin: t.margin, status: "draft", baseStatus: "draft", sections, mobs: [], groups: [],
+    paymentTerms: "Unknown", category: "", value: t.grand, markup: t.markup, status: "draft", baseStatus: "draft", sections, mobs: [], groups: [],
     vendorQuotes: [], pdfOptions: { pdfQty: true, pdfNotes: true, pdfCover: true, pdfTerms: true, pdfOptions: true, pdfPrices: true, pdfItemizedAppendix: false, pdfCutSheets: false } as SavePayload["pdfOptions"],
     ...over,
   };
@@ -673,7 +678,7 @@ export async function handoffActionChecks(ok: Ok) {
 
   // --- save-core (the pure half of saveQuoteAction) ---
   const rewrite = <T,>(x: T) => x;
-  const tier = { tier: "base", margin: 0.3 };
+  const tier = { tier: "base", markup: 0.43 };
   const s1 = [sec("sysA", [{ qty: 2, cost: 50, price: 100 }, { sku: "LAB", qty: 4, cost: 20, price: 40, labor: true }])];
   const plan1 = planSave(null, payloadFor(s1), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
   ok(plan1.ok && plan1.patch.spec!.sections[0].items.some(isBonusItem), "handoff actions: planSave — a new draft gets its bonus lines server-side");
@@ -1526,7 +1531,7 @@ export async function handoffBoxSaleChecks(ok: Ok) {
 
   // --- planSave: the labor refusal, an older caller, the patch ---
   const rewrite = <T,>(x: T) => x;
-  const tier = { tier: "base", margin: 0.3 };
+  const tier = { tier: "base", markup: 0.43 };
   const plain = [sec("sysA", [{ qty: 2, cost: 50, price: 100 }])];
   const withLabor = [sec("sysA", [{ qty: 2, cost: 50, price: 100 }]), sec("sysB", [{ sku: "LAB", qty: 4, cost: 20, price: 40, labor: true }], { name: "Install" })];
   const okPlan = planSave(null, payloadFor(plain, { boxSale: true }), { bonusRates: DEFAULT_BONUS_RATES, tier, rewriteSpec: rewrite });
@@ -1672,7 +1677,7 @@ export async function handoffBoxSaleChecks(ok: Ok) {
 export async function handoffDiscountChecks(ok: Ok) {
   const T = "handoff discounts";
   const rewrite = <T,>(x: T) => x;
-  const tier = { tier: "base", margin: 0.3 };
+  const tier = { tier: "base", markup: 0.43 };
   const mk = () => [sec("sysA", [
     { sku: "ETC:CS15", desc: "CS15 fixture", qty: 4, cost: 900, price: 1250 },
     { sku: "CUSTOM", desc: "Hand cost", qty: 1, cost: 700, price: 1000, custom: true },
@@ -1691,7 +1696,7 @@ export async function handoffDiscountChecks(ok: Ok) {
   ok(none.ok && !("projectDiscounts" in none.patch.spec!) && disc.ok && none.patch.value === disc.patch.value,
     `${T}: planSave — no map stores no key; the customer's total is identical with and without the discount (${none.ok ? none.patch.value : ""})`);
   const costOf = (p: typeof disc) => (p.ok ? p.patch.spec!.sections.flatMap((s) => s.items).filter((i) => !isBonusItem(i)).reduce((a, i) => a + i.qty * i.cost, 0) : 0);
-  const marginOf = (p: typeof disc) => (p.ok ? totals(p.patch.spec!.sections, 0).margin : 0);
+  const marginOf = (p: typeof disc) => (p.ok ? totals(p.patch.spec!.sections, 0).markup : 0);
   ok(costOf(disc) === costOf(none) - 4 * 90 && marginOf(disc) > marginOf(none), `${T}: planSave — cost drops by exactly the discounted dollars and the margin rises (${marginOf(none).toFixed(4)} → ${marginOf(disc).toFixed(4)})`);
   const prior = { quoteType: "system", status: "draft", source: "estimator", spec: { sections: [], mobs: [], projectDiscounts: map } } as unknown as Quote;
   const keep = planSave(prior, payloadFor(mk()), { ...deps, userId: "u9", now: 9999 });
@@ -1750,6 +1755,126 @@ export async function handoffDiscountChecks(ok: Ok) {
   const tgt = (await repo.get(id))!.spec as { sections: SpecSection[]; projectDiscounts?: object };
   ok(mvDiscTarget.ok && tgt.sections.flatMap((s) => s.items).filter((i) => i.sku === "ETC:CS15").every((i) => i.cost === 810) && !!tgt.projectDiscounts,
     `${T}: Move into a discounted estimate — it applies and keeps its own map (spec rebuild carries projectDiscounts)`);
+}
+
+/* ------------------------------------------------------------------ the merge of #367: margin → markup */
+
+export async function handoffMarkupChecks(ok: Ok) {
+  const T = "handoff markup";
+  const { hydrateDoc, convertQuoteDoc } = await import("@/lib/markup/doc-basis");
+  const { marginToMarkup } = await import("@/lib/markup");
+  const { MARGIN_KEYS, rateBlobOnMarkupBasis } = await import("../handoff/estimator/markup-basis");
+  const Pricing = await import("@/lib/stores/pricing");
+
+  // MARGIN_KEYS is the one copied list (stores/pricing.ts keeps it private and reaches the database): pin it to the original's source
+  {
+    const src = fs.readFileSync("src/lib/stores/pricing.ts", "utf8");
+    const body = /const MARGIN_KEYS[^=]*=\s*\[([\s\S]*?)\n\];/.exec(src)?.[1] ?? "";
+    const names: Record<string, string> = { PRICING_RULES_BLOB: "pricing_rules", FLAMETEST_RATES_BLOB: Pricing.FLAMETEST_RATES_BLOB, REPAIR_RATES_BLOB: Pricing.REPAIR_RATES_BLOB, INSPECTION_RATES_BLOB: Pricing.INSPECTION_RATES_BLOB, CATALOG_RATES_BLOB: Pricing.CATALOG_RATES_BLOB };
+    const parsed = [...body.matchAll(/\[(\w+),\s*\[([^\]]*)\],\s*(true|false)\]/g)].map((m) => [names[m[1]], [...m[2].matchAll(/"([^"]+)"/g)].map((k) => k[1]), m[3] === "true"] as const);
+    ok(parsed.length === 5 && JSON.stringify(parsed) === JSON.stringify(MARGIN_KEYS), `${T}: MARGIN_KEYS equals stores/pricing.ts's own list (${parsed.length} blobs)`);
+  }
+
+  // --- a margin-era quote: converts on read exactly as the app's hydrateDoc, no sell moves ---
+  const sections = [{ id: "s1", name: "Gear", kind: "lighting", mfr: "", freightPct: 5, priceRound: 25, items: [
+    { id: 1, sku: "ETC:CS15", desc: "CS15", qty: 4, unit: "ea", cost: 900, price: 1285.71 },
+    { id: 2, sku: "X", desc: "Console", qty: 1, unit: "ea", cost: 2000, price: 2857.14 },
+  ], laborGroups: { g1: { draft: { margin: "30" } } } }];
+  const era = {
+    id: "Q-7001", estNo: 7001, name: "Margin era", status: "draft", quoteType: "system", source: "estimator", customerId: "c1", customer: "Acme",
+    owner: "Ann Admin", createdAt: 1, updatedAt: 1_700_000_000_000, history: [], value: 8000, margin: 0.3, pricingTier: "base", tierMargin: 0.3,
+    revisions: [{ rev: 1, at: 2, by: "x", reason: "sent", note: "", name: "Margin era", value: 7000, margin: 0.25, tierMargin: 0.27, spec: JSON.parse(JSON.stringify({ sections })) }],
+    spec: { sections, mobs: [] },
+  };
+  const stamped = { ...era, id: "Q-7002", estNo: 7002, pricingBasis: "markup", margin: 0.43, tierMargin: 0.43 };
+  const store = await openStore({ quotes: docs([era, stamped]), catalog: [], fixtures: [], blobs: [], settings: [{ id: "main", data: { companyName: "Peak Systems Group" } } as { id: string }] }, { idb: null });
+  configurePorts({ store, customers: EMPTY_CUSTOMERS, rules: { settings: {}, blobs: {} }, team: [{ id: "u1", name: "Ann Admin", roles: ["Admin"], status: "active" }] });
+  users.setCurrent("u1");
+  const repo = quoteRepo(store);
+  const q = (await repo.get("Q-7001"))! as Quote & { pricingBasis?: string };
+  const appRead = hydrateDoc("quotes", structuredClone(era) as unknown as Record<string, unknown>) as unknown as Quote;
+  ok(q.pricingBasis === "markup" && Math.abs(q.margin - marginToMarkup(0.3)) < 1e-12 && Math.abs((q.tierMargin ?? 0) - 3 / 7) < 1e-12 && q.margin !== 0.3,
+    `${T}: a margin-era quote reads as markup (margin 0.30 → ${q.margin.toFixed(6)}, tierMargin → ${q.tierMargin?.toFixed(6)}), stamped`);
+  ok(JSON.stringify({ ...q, id: 0 }) === JSON.stringify({ ...appRead, id: 0 }) || JSON.stringify(q.revisions) === JSON.stringify(appRead.revisions) && q.margin === appRead.margin && q.tierMargin === appRead.tierMargin,
+    `${T}: …identical to the app's own hydrateDoc over the same row (one converter, imported)`);
+  const rev = q.revisions![0] as unknown as { margin: number; tierMargin: number };
+  const draft = ((q.spec as { sections: Array<{ laborGroups: { g1: { draft: { margin: string } } } }> }).sections[0].laborGroups.g1.draft.margin);
+  ok(Math.abs(rev.margin - 1 / 3) < 1e-12 && Math.abs(rev.tierMargin - marginToMarkup(0.27)) < 1e-12 && Math.abs(parseFloat(draft) - 42.857142857) < 1e-6, `${T}: …its revisions and a labor draft's percent string convert too (0.25 → 0.3333, "30" → "${draft}")`);
+  const stamped2 = (await repo.get("Q-7002"))!;
+  ok(stamped2.margin === 0.43 && stamped2.tierMargin === 0.43, `${T}: a stamped doc is honoured exactly — never converted twice`);
+  // prices to the cent, totals().markup matches the app's
+  const spec = q.spec as { sections: SpecSection[] };
+  ok(JSON.stringify(spec.sections[0].items.map((i) => [i.price, i.cost])) === JSON.stringify((era.spec.sections[0].items as Array<{ price: number; cost: number }>).map((i) => [i.price, i.cost])) && q.value === 8000,
+    `${T}: …line prices, costs and the saved value are untouched to the cent`);
+  const tAfter = totals(spec.sections, 0);
+  const tApp = totals((appRead.spec as { sections: SpecSection[] }).sections, 0);
+  ok(tAfter.markup === tApp.markup && tAfter.grand === tApp.grand && tAfter.markup > 0.4 && tAfter.markup < 0.45, `${T}: totals().markup is the app's (${tAfter.markup.toFixed(4)}) and the grand total is the same`);
+  // the list model and props read the same converted doc
+  const props = await buildEstimatorProps(store, "Q-7001", new URLSearchParams());
+  ok(Math.abs((props.initial.tierMargin ?? 0) - 3 / 7) < 1e-12, `${T}: props — the Estimator opens it with the converted tier markup (${props.initial.tierMargin?.toFixed(4)})`);
+  // an overlay save is born stamped and never converts again
+  const saved = await estimatorActions(store).saveQuoteAction("Q-7001", payloadFor(spec.sections as SpecSection[], { name: "Margin era", customerId: "c1", customer: "Acme" }));
+  const raw = (await store.get<Record<string, unknown>>("quotes", "Q-7001"))!;
+  ok(saved.ok && raw.pricingBasis === "markup" && (await repo.get("Q-7001"))!.margin === raw.margin,
+    `${T}: a save writes the doc stamped and a re-read does not convert it again`);
+  const created = await repo.create({ name: "New", source: "estimator", margin: 0.43, tierMargin: 0.43 });
+  ok((created as Quote & { pricingBasis?: string }).pricingBasis === "markup" && (await repo.get(created.id))!.margin === 0.43, `${T}: a new quote is born stamped (buildQuote)`);
+  await repo.update(created.id, { pricingBasis: undefined, margin: 0.5 } as never);
+  ok(((await store.get<Record<string, unknown>>("quotes", created.id))!).pricingBasis === "markup" && (await repo.get(created.id))!.margin === 0.5, `${T}: a patch can never clear the stamp (update() owns it)`);
+
+  // --- rate blobs: converted once, whole-%, stamped; a stamped blob and a missing one are left alone ---
+  const blobs = {
+    pricing_rules: { "tiers.base": 30, "tiers.gold": 20, "tiers.employee": 5, "system.baseMargin": 30, "labor.audio.pct": 15 },
+    catalog_rates: { defaultMargin: 0.3 },
+    repair_rates: { margin: 0.3, partsMargin: 0.27, callout: 150 },
+    flametest_rates: { margin: 0.43, _pricingBasis: "markup" },
+  };
+  const bstore = await openStore({ quotes: [], catalog: [], fixtures: [], blobs: Object.entries(blobs).map(([id, data]) => ({ id, data }) as { id: string }), settings: [] }, { idb: null });
+  const pr = ((await bstore.get<{ data: Record<string, unknown> }>("blobs", "pricing_rules"))!).data;
+  const cr = ((await bstore.get<{ data: Record<string, unknown> }>("blobs", "catalog_rates"))!).data;
+  const rr = ((await bstore.get<{ data: Record<string, unknown> }>("blobs", "repair_rates"))!).data;
+  const ft = ((await bstore.get<{ data: Record<string, unknown> }>("blobs", "flametest_rates"))!).data;
+  ok(pr["tiers.base"] === 43 && pr["tiers.gold"] === 25 && pr["tiers.employee"] === 5 && pr["system.baseMargin"] === 43 && pr["labor.audio.pct"] === 15 && pr._pricingBasis === "markup" && (pr._marginBackup as Record<string, number>)["tiers.gold"] === 20,
+    `${T}: pricing_rules converts once — Base 30 → 43, Gold 20 → 25, Employee 5 → 5, other keys untouched, the old values kept in _marginBackup`);
+  ok(cr.defaultMargin === 0.43 && rr.margin === 0.43 && rr.partsMargin === 0.37 && rr.callout === 150 && ft.margin === 0.43, `${T}: the service / catalog fraction blobs convert (0.30 → 0.43, 0.27 → 0.37); a stamped blob is read as stored`);
+  ok(rateBlobOnMarkupBasis("pricing_rules", pr) === pr && rateBlobOnMarkupBasis("track_series", { a: 1 }) !== undefined && rateBlobOnMarkupBasis("catalog_rates", undefined) === undefined, `${T}: converting twice is a no-op (the stamp), an unlisted blob is untouched`);
+  configurePorts({ rules: { settings: {}, blobs: { pricing_rules: blobs.pricing_rules } } });
+  ok(resolveTierFor(null).markup === 0.43, `${T}: the ports read the converted blob too (blobData)`);
+  await refreshPortsFromStore(bstore);
+  ok(resolveTierFor(null).markup === 0.43 && blobData("pricing_rules")["tiers.gold"] === 25, `${T}: …and after a store refresh (tier markup ${resolveTierFor(null).markup})`);
+  const PR = await import("../handoff/estimator/runtime/pricing-rules");
+  ok((await PR.value(bstore, "tiers.gold")) === 25 && (await PR.value(bstore, "catalog.defaultMargin")) === 43 && (await PR.value(bstore, "repair.partsMargin")) === 37, `${T}: Estimating Rules shows the converted values (Gold 25, catalog 43, repair parts 37)`);
+  await PR.setValue(bstore, "tiers.gold", 31);
+  ok((await PR.value(bstore, "tiers.gold")) === 31 && (await PR.value(bstore, "tiers.base")) === 43, `${T}: an edit on a converted blob never converts again (Gold → 31, Base still 43)`);
+  const fresh = await openStore({ quotes: [], catalog: [], fixtures: [], blobs: [], settings: [] }, { idb: null });
+  await PR.setValue(fresh, "catalog.defaultMargin", 50);
+  ok((await PR.value(fresh, "catalog.defaultMargin")) === 50 && (((await fresh.get<{ data: Record<string, unknown> }>("blobs", "catalog_rates"))!).data._pricingBasis === "markup"), `${T}: a blob that was never stored is written stamped (an edit of 50 reads 50, not converted)`);
+
+  // --- the slicer converts at slice time with the same functions ---
+  const { sliceExport } = await import("../handoff/estimator/slice");
+  const exp = JSON.parse(fs.readFileSync(FIXTURE_V2, "utf8")) as ExportV2;
+  const marginExp = JSON.parse(JSON.stringify(exp)) as ExportV2;
+  const row = (marginExp.collections!.quotes as Array<{ id: string; doc: Record<string, unknown> }>).find((r) => r.id === "Q-G001")!;
+  Object.assign(row.doc, { margin: 0.3, tierMargin: 0.3, value: 6744 });
+  delete row.doc.pricingBasis;
+  marginExp.blobs = [...(marginExp.blobs ?? []).filter((b) => b.id !== "pricing_rules"), { id: "pricing_rules", data: { "tiers.base": 30, "tiers.gold": 20 } } as never];
+  const sl = sliceExport(marginExp);
+  const g = sliceGlobals(sl.files);
+  const sq = (g.PEAK_ESTIMATES as Array<Record<string, unknown>>).find((x) => x.id === "Q-G001")!;
+  const sr = (g.PEAK_RULES as { blobs: Record<string, Record<string, unknown>> }).blobs.pricing_rules;
+  ok(sq.pricingBasis === "markup" && !("margin" in sq) && Math.abs((sq.tierMargin as number) - 3 / 7) < 1e-12 && JSON.stringify(sq.spec) === JSON.stringify(row.doc.spec),
+    `${T}: the slicer ships a margin-era quote on the markup basis (stamped, tierMargin 0.30 → 0.4286; margin itself never ships), its spec (line prices) untouched`);
+  ok(sr["tiers.base"] === 43 && sr["tiers.gold"] === 25 && sr._pricingBasis === "markup", `${T}: …and a margin-era pricing_rules blob converted and stamped (Base 43, Gold 25)`);
+  const again = sliceExport(JSON.parse(JSON.stringify(marginExp)) as ExportV2);
+  ok(sl.files["data/estimates.js"] === again.files["data/estimates.js"] && JSON.stringify(sanitizeQuote(sanitizeQuote(row.doc as never))) === JSON.stringify(sanitizeQuote(row.doc as never)), `${T}: slicing is deterministic and sanitizeQuote is idempotent over the conversion`);
+  // a stamped quote and a stamped blob in the export pass through exactly
+  const stampedExp = JSON.parse(JSON.stringify(exp)) as ExportV2;
+  const srow = (stampedExp.collections!.quotes as Array<{ id: string; doc: Record<string, unknown> }>).find((r) => r.id === "Q-G001")!;
+  Object.assign(srow.doc, { pricingBasis: "markup", margin: 0.43, tierMargin: 0.37 });
+  const sg = sliceGlobals(sliceExport(stampedExp).files);
+  const ssq = (sg.PEAK_ESTIMATES as Array<Record<string, unknown>>).find((x) => x.id === "Q-G001")!;
+  ok(ssq.tierMargin === 0.37 && ssq.pricingBasis === "markup", `${T}: a stamped quote in the export is shipped as stored (the stamp is honoured at slice time too)`);
+  void convertQuoteDoc;
 }
 
 export async function handoffShellChecks(ok: Ok) {
@@ -1952,8 +2077,8 @@ export async function handoffShellChecks(ok: Ok) {
     }
     ok(partFingerprint({ a: 1, b: { y: 2, x: [3, { q: 1, p: 2 }] } }) === partFingerprint({ b: { x: [3, { p: 2, q: 1 }], y: 2 }, a: 1 }) && partFingerprint({ a: 1 }) !== partFingerprint({ a: 2 }), "handoff catalog: partFingerprint — key order never matters, a changed value does");
     // what a catalog price does to an estimate line: catalogAddPrice
-    ok(addLineSell({ cost: 0, list: 733 }, 0.3) === 733 && addLineSell({ cost: 294, list: 1200 }, 0.3) === 420 && addLineSell({ cost: 100, list: 5 }, null) === 142.86 && addLineSell({ cost: 0, list: 9 }, null) === 9,
-      "handoff catalog: addLineSell — no cost sells at list; a cost sells at cost ÷ (1 − margin), list ignored (margin defaults to 30%)");
+    ok(addLineSell({ cost: 0, list: 733 }, 0.43) === 733 && addLineSell({ cost: 294, list: 1200 }, 0.43) === 420.42 && addLineSell({ cost: 100, list: 5 }, null) === 143 && addLineSell({ cost: 0, list: 9 }, null) === 9,
+      "handoff catalog: addLineSell — no cost sells at list; a cost sells at cost × (1 + markup), list ignored (the markup defaults to 43%)");
     // edit → the picker and the resolver read the overlay at once; Reset puts it back
     const stCat = await openStore({ catalog: docs(cat as never), quotes: [] }, { idb: null });
     const edited = applyDraft(cat[1], { ...draftFromPart(cat[1]), list: "955.5" }, { now: 1, by: "A" });
@@ -2310,12 +2435,12 @@ export async function handoffRulesChecks(ok: Ok) {
   await refreshPortsFromStore(store);
 
   // --- pricing-rules: value / defaultOf / setValue / resetValue / resetAll / exports ---
-  ok((await PR.value(store, "tiers.gold")) === 20 && (await PR.defaultOf(store, "tiers.gold")) === 20 && (await PR.value(store, "nope")) === null && (await PR.value(store, "system.rollup")) === null,
+  ok((await PR.value(store, "tiers.gold")) === 25 && (await PR.defaultOf(store, "tiers.gold")) === 25 && (await PR.value(store, "nope")) === null && (await PR.value(store, "system.rollup")) === null,
     "handoff rules: a general rate reads its registry default; an unknown id or a formula → null");
   ok((await PR.value(store, "labor.audio.pct")) === 15 && (await PR.defaultOf(store, "labor.audio.pct")) === 15, "handoff rules: an unset labor % follows the stored install % (#232) — value and default 15");
-  ok((await PR.value(store, "catalog.defaultMargin")) === 30 && (await PR.value(store, "fixture.mountCclamp")) === 18, "handoff rules: engine rates read their engine defaults (a pctStored fraction shown as a percent)");
-  await PR.setValue(store, "tiers.gold", 99);
-  ok((await PR.value(store, "tiers.gold")) === 60, "handoff rules: setValue clamps to the rate's max (99 → 60)");
+  ok((await PR.value(store, "catalog.defaultMargin")) === 43 && (await PR.value(store, "fixture.mountCclamp")) === 18, "handoff rules: engine rates read their engine defaults (a pctStored fraction shown as a percent)");
+  await PR.setValue(store, "tiers.gold", 999);
+  ok((await PR.value(store, "tiers.gold")) === 150, "handoff rules: setValue clamps to the rate's max (999 → 150, the markup slider's top, #367)");
   await PR.setValue(store, "catalog.defaultMargin", "35");
   const catBlob = (await store.get<{ data: Record<string, number> }>("blobs", "catalog_rates"))?.data;
   ok(catBlob?.defaultMargin === 0.35 && (await PR.value(store, "catalog.defaultMargin")) === 35, "handoff rules: a pctStored engine rate stores a fraction in its own blob (35 → catalog_rates.defaultMargin 0.35)");
@@ -2323,13 +2448,13 @@ export async function handoffRulesChecks(ok: Ok) {
   await PR.resetValue(store, "labor.audio.pct");
   ok((await store.get<{ data: Record<string, unknown> }>("blobs", "pricing_rules"))?.data["labor.audio.pct"] === null && (await PR.value(store, "labor.audio.pct")) === 15, "handoff rules: resetValue on a labor % clears it to null — it follows the install % again");
   await PR.resetValue(store, "tiers.gold");
-  ok((await store.get<{ data: Record<string, unknown> }>("blobs", "pricing_rules"))?.data["tiers.gold"] === 20, "handoff rules: resetValue on any other rate writes its registry def");
+  ok((await store.get<{ data: Record<string, unknown> }>("blobs", "pricing_rules"))?.data["tiers.gold"] === 25, "handoff rules: resetValue on any other rate writes its registry def");
   await Promise.all([PR.setBlobLocal(store, "pricing_rules", { "tiers.silver": 21 }), PR.setBlobLocal(store, "pricing_rules", { "tiers.copper": 26 })]);
   const pr1 = (await store.get<{ data: Record<string, unknown> }>("blobs", "pricing_rules"))?.data ?? {};
   ok(pr1["tiers.silver"] === 21 && pr1["tiers.copper"] === 26 && pr1["system.installPct"] === 15, "handoff rules: two writes to one blob at once keep both keys (setBlob's per-key merge, serialized)");
   const csv = await PR.exportCSV(store);
   const rows = Pricing.GROUPS.reduce((n, g) => n + g.items.length, 0);
-  ok(csv.startsWith("Area,Item,Type,Value,Unit,Detail\n") && csv.trim().split("\n").length >= rows + 1 && csv.includes("Customer tiers,Silver margin,Rate,21,%,"),
+  ok(csv.startsWith("Area,Item,Type,Value,Unit,Detail\n") && csv.trim().split("\n").length >= rows + 1 && csv.includes("Customer tiers,Silver markup,Rate,21,%,"),
     `handoff rules: exportCSV — the header, one line per registry row (${rows}), the stored values`);
   const json = JSON.parse(await PR.exportJSON(store, new Date(Date.UTC(2026, 9, 20)))) as { exportedAt: string; version: number; rates: Record<string, number | null> };
   ok(json.version === 1 && json.exportedAt === "2026-10-20T00:00:00.000Z" && json.rates["tiers.silver"] === 21 && json.rates["catalog.defaultMargin"] === 35 && !("system.rollup" in json.rates), "handoff rules: exportJSON — every rate's value, no formulas");
@@ -2339,14 +2464,14 @@ export async function handoffRulesChecks(ok: Ok) {
   await PR.resetAll(store);
   const prAll = (await store.get<{ data: Record<string, unknown> }>("blobs", "pricing_rules"))?.data ?? {};
   const generalIds = Pricing.GROUPS.flatMap((g) => g.items).filter((it) => it.kind === "rate" && it.store === "general").map((it) => it.id);
-  ok(generalIds.every((id) => prAll[id] === null) && prAll["system.installPct"] === 15 && JSON.stringify((await store.get<{ data: unknown }>("blobs", "catalog_rates"))?.data) === JSON.stringify(Pricing.CATALOG_RATE_DEFAULTS)
-    && JSON.stringify((await store.get<{ data: unknown }>("blobs", "flametest_rates"))?.data) === JSON.stringify(Pricing.FLAMETEST_RATE_DEFAULTS),
+  ok(generalIds.every((id) => prAll[id] === null) && prAll["system.installPct"] === 15 && JSON.stringify(withoutBasisKeys(((await store.get<{ data: Record<string, unknown> }>("blobs", "catalog_rates"))?.data) ?? {})) === JSON.stringify(Pricing.CATALOG_RATE_DEFAULTS)
+    && JSON.stringify(withoutBasisKeys(((await store.get<{ data: Record<string, unknown> }>("blobs", "flametest_rates"))?.data) ?? {})) === JSON.stringify(Pricing.FLAMETEST_RATE_DEFAULTS),
     "handoff rules: resetAll nulls every general rate (the retired install % untouched) and writes each engine blob back to its defaults");
 
   // --- props ---
   const p1 = await RP.buildRulesProps(store);
   const goldVM = p1.groups.find((g) => g.key === "tiers")?.items.find((it) => it.id === "tiers.gold");
-  ok(p1.isAdmin && p1.groups.length === RP.prototypeRuleGroups(Pricing.GROUPS).length && goldVM?.kind === "rate" && goldVM.value === 20 && goldVM.def === 20 && isDeepStrictEqual(p1.venueDoctrine, resolveVenueDoctrine(undefined)),
+  ok(p1.isAdmin && p1.groups.length === RP.prototypeRuleGroups(Pricing.GROUPS).length && goldVM?.kind === "rate" && goldVM.value === 25 && goldVM.def === 25 && isDeepStrictEqual(p1.venueDoctrine, resolveVenueDoctrine(undefined)),
     "handoff rules: buildRulesProps — every shown group, each rate's value and effective default, the default venue doctrine");
   {
     // final review B18: the service-quote / portal rules are hidden (they never price a system estimate); the estimate's own stay
@@ -2385,10 +2510,10 @@ export async function handoffRulesChecks(ok: Ok) {
   ok(JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "resetItemAction", "system.rollup")) === '{"ok":false}' && JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "resetItemAction", "nope")) === '{"ok":false}', "handoff rules: resetItemAction refuses a formula or an unknown id");
   const csvR = (await call(RA.RULES_ACTIONS_KEY, "exportCsvAction")) as { csv: string; name: string };
   const jsonR = (await call(RA.RULES_ACTIONS_KEY, "exportJsonAction")) as { json: string; name: string };
-  ok(csvR.csv.includes("Gold margin,Rate,25,%") && csvR.name.endsWith(".csv") && (JSON.parse(jsonR.json) as { rates: Record<string, number> }).rates["tiers.gold"] === 25 && jsonR.name.endsWith(".json"), "handoff rules: the export actions carry the edited rate and their file names");
+  ok(csvR.csv.includes("Gold markup,Rate,25,%") && csvR.name.endsWith(".csv") && (JSON.parse(jsonR.json) as { rates: Record<string, number> }).rates["tiers.gold"] === 25 && jsonR.name.endsWith(".json"), "handoff rules: the export actions carry the edited rate and their file names");
 
   // --- the store is what pricing reads: tiers, fixture rates, bonus, freight, sewing ---
-  ok(resolveTierFor("co-g").margin === 0.25 && resolveTierFor("co-g").tier === "gold", "handoff rules: after the edit the Gold company resolves at 25 % (ports read the store, refreshed by the action)");
+  ok(resolveTierFor("co-g").markup === 0.25 && resolveTierFor("co-g").tier === "gold", "handoff rules: after the edit the Gold company resolves at 25 % (ports read the store, refreshed by the action)");
   const newGold = await buildEstimatorProps(store, null, new URLSearchParams("new=1&customer=co-g"));
   ok(newGold.initial.customerId === "co-g" && newGold.initial.pricingTier === "gold" && newGold.initial.tierMargin === 0.25, `handoff rules: a new estimate for the Gold company opens at the edited 25 % (${newGold.initial.tierMargin})`);
   await call(RA.RULES_ACTIONS_KEY, "setValueAction", "fixture.mountCclamp", 21);
@@ -2396,10 +2521,10 @@ export async function handoffRulesChecks(ok: Ok) {
   await call(RA.RULES_ACTIONS_KEY, "setValueAction", "freight.basePct", 6);
   await call(RA.RULES_ACTIONS_KEY, "setValueAction", "curtains.sewingPct", 12);
   const edited = await buildEstimatorProps(store, null, new URLSearchParams("new=1"));
-  ok(edited.fixtureRates.mountCclamp === 21 && edited.bonusRates?.packagePct === 0.04 && edited.freightRule.basePct === 6 && edited.curtainSewingPct === 12 && edited.initial.tierMargin === 0.3,
+  ok(edited.fixtureRates.mountCclamp === 21 && edited.bonusRates?.packagePct === 0.04 && edited.freightRule.basePct === 6 && edited.curtainSewingPct === 12 && edited.initial.tierMargin === 0.43,
     `handoff rules: the Estimator's props read the edited fixture rate, bonus, freight and sewing from the store (${JSON.stringify({ c: edited.fixtureRates.mountCclamp, b: edited.bonusRates, f: edited.freightRule.basePct, s: edited.curtainSewingPct })})`);
-  ok(JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "resetAllAction")) === '{"ok":true}' && resolveTierFor("co-g").margin === 0.2 && (await buildEstimatorProps(store, null, new URLSearchParams("new=1"))).fixtureRates.mountCclamp === 18,
-    "handoff rules: resetAllAction puts every rate back — Gold 20 %, the fixture rate 18");
+  ok(JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "resetAllAction")) === '{"ok":true}' && resolveTierFor("co-g").markup === 0.25 && (await buildEstimatorProps(store, null, new URLSearchParams("new=1"))).fixtureRates.mountCclamp === 18,
+    "handoff rules: resetAllAction puts every rate back — Gold 25 %, the fixture rate 18");
 
   // --- venue doctrine ---
   ok(JSON.stringify(await call(RA.RULES_ACTIONS_KEY, "saveVenueDoctrineAction", "arena", { curtains: "", lighting: "", confirmed: true })) === '{"ok":false}'

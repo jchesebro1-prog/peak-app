@@ -15,7 +15,7 @@
  * case-insensitively — the sku resolver lowercases, so two spellings would shadow each other.
  *
  * What a catalog price does to an estimate line is the Estimator's rule, not this screen's: a part added from the picker
- * sells at catalogAddPrice(cost, list, tierMargin) — cost ÷ (1 − margin) when the part has a cost, else its list price.
+ * sells at catalogAddPrice(cost, list, tierMargin) — cost × (1 + markup) when the part has a cost, else its list price.
  * `addLineSell` states it for the verify walk. Plan: PR 2 Task 8.
  */
 import { fabricFactsProblem, fabricRateProblem } from "@/app/(app)/catalog/part-form";
@@ -285,7 +285,7 @@ export function applyDraft(base: LivePart | null, draft: PartDraft, ctx: { now: 
 
 /**
  * The unit sell the Estimator's catalog picker gives this part on a quote stamped `tierMargin` (null = none stamped):
- * catalogAddPrice — a part WITH a cost sells at cost ÷ (1 − margin); a part with no cost sells at its LIST price.
+ * catalogAddPrice — a part WITH a cost sells at cost × (1 + markup); a part with no cost sells at its LIST price.
  */
 export function addLineSell(part: Pick<LivePart, "cost" | "list">, tierMargin: number | null | undefined): number {
   return catalogAddPrice(part.cost || 0, part.list || 0, tierMargin);

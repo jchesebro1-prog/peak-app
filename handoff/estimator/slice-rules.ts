@@ -7,6 +7,7 @@
 
 import { isFabricPart } from "@/lib/fabric-part";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
+import { quoteOnMarkupBasis } from "./markup-basis";
 
 /** Catalog part fields the Estimator reads (pricing, rack data, narrative, spec facts). */
 export const CATALOG_FIELDS = [
@@ -47,6 +48,9 @@ export const QUOTE_FIELDS = [
   // wonRev: the revision number of the version that won (its revisions ship, so a reopened Won estimate can restore
   // it); packagePeakHeader: the Build package "Peak header" switch the package actions read.
   "wonRev", "packagePeakHeader",
+  // pricingBasis (#367): the stamp saying the stored percentages (margin, tierMargin, revisions') are markup. sanitizeQuote
+  // converts a margin-era quote first (the app's own hydrateDoc arithmetic), so every shipped estimate carries it.
+  "pricingBasis",
   // boxSale (#362): the Box goods sale flag — the Estimator's switch, its BOM-only document and Build package.
   "boxSale",
 ] as const;
@@ -225,7 +229,8 @@ export function sanitizeRevision(r: unknown): unknown {
  *  (revisions, vendorQuotes, review, pdfOptions, packageSelection, history). `spec` is the priced payload itself and
  *  is deep-scrubbed by the slicer, not allow-listed. */
 export function sanitizeQuote(doc: Rec): Rec {
-  const o = pickFields(doc, QUOTE_FIELDS);
+  // #367: a quote without the markup stamp stores margins — convert it exactly as the app's doc store does on read (markup-basis.ts).
+  const o = pickFields(quoteOnMarkupBasis(doc), QUOTE_FIELDS);
   if ("revisions" in o) o.revisions = Array.isArray(o.revisions) ? o.revisions.map(sanitizeRevision) : o.revisions;
   if ("vendorQuotes" in o) o.vendorQuotes = sanitizeVendorQuotes(o.vendorQuotes);
   if ("review" in o) o.review = pickObj(o.review, REVIEW_FIELDS);

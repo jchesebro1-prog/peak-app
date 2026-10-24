@@ -1,6 +1,6 @@
 # Peak Estimator — handoff package
 
-**Confidential — Peak Systems Group.** This folder holds real Peak data: costs, margins, sell prices,
+**Confidential — Peak Systems Group.** This folder holds real Peak data: costs, markups, sell prices,
 customer names and staff names. It is shared with one named recipient for evaluation only. Do not
 forward, upload, publish or copy it, in whole or in part, without Peak Systems Group's written
 permission, and delete it when the evaluation ends. `CONFIDENTIAL.txt`, the first file in the package
@@ -80,7 +80,7 @@ roster and roles) and **Reset to production snapshot**.
 - **Estimator** *(the real components)*: one estimate in four steps on one page.
   - **Build**: systems and lines, catalog search, the groups rail, alternate groups, mark built, moving
     lines, assemblies, the curtain, track and labor configurators, the hidden bonus lines, and
-    tiers/margins.
+    tiers/markups.
   - **Build package**: Narrative, BOM quote and Client package. The BOM quote tab has the *Show on BOM*
     switches (line prices, materials, labor, freight). A box goods sale has the BOM quote tab alone.
   - **Customer review**: the Document, Package page, BOM and Cut sheets tabs (Desktop / Phone), with
@@ -88,7 +88,7 @@ roster and roles) and **Reset to production snapshot**.
     they frame a server-rendered PDF and a preview route; here they draw the same real document,
     package page, BOM and cut-sheet components live from the browser store. A box goods sale shows
     Document and BOM only.
-  - **More ▾ → Review spreadsheet** downloads the parts as a real `.xlsx` (cost, sell, margin, markup
+  - **More ▾ → Review spreadsheet** downloads the parts as a real `.xlsx` (cost, sell, markup
     formulas, links, and cost / markup / fees subtotals per system), built in your browser.
   - **Send & track**: the approval control (Submit for approval, Approve, Send to customer, Withdraw),
     status and pipeline, the email composer, and the Activity card (the real card; the prototype adds
@@ -98,7 +98,7 @@ roster and roles) and **Reset to production snapshot**.
   page; search ranks exactly like the Estimator's catalog picker.
 - **Assemblies** *(the real components)*: the Assembly Builder for fixtures, systems, hardware and racks,
   with the rack elevation and its submittal sheets.
-- **Estimating Rules** *(the real editors)*: tier margins, rates, freight, bonuses, sewing %, track
+- **Estimating Rules** *(the real editors)*: tier markups, rates, freight, bonuses, sewing %, track
   series, curtain mounts, system categories. The rules that price only Peak's service quotes or the
   customer portal (flame test, repair, inspection, the flights-over-drive travel allowances, the portal
   knobs) are hidden: they never touch a system estimate. Their stored values are kept, and Export still
@@ -216,7 +216,7 @@ field not on it can't slip in). Left out, on purpose:
   customer's PO arrived, the legacy owner and legacy contact fields, the "content changed" stamp, the
   estimate's terms text, scope narrative and quote basis, the service quotes' payloads (flame test,
   repair, inspection, consulting, rental — only system estimates are bundled), and the saved `value`
-  and `margin` (the prototype recomputes both on every save);
+  and `margin` (the saved blended markup; the prototype recomputes both on every save);
 - on each revision: where its sent PDF is stored, the service quotes' payloads, and, in its frozen
   header, the drawings, the bid and its awarded bidder, and the portal's firm-quote stamp;
 - on each vendor quote: the attached PDF, the vendor's link, the internal terms and notes, the email

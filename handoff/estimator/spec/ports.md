@@ -52,7 +52,7 @@ system does* and "Prototype:" as *what the fake does instead*.
 The customer port is more than a lookup. These pure functions carry Quartzite's rules for tiers, travel
 and numbering. Your implementation should give the same answers.
 
-<!-- @api handoff/estimator/runtime/ports.ts resolveTierFor tierMarginOf travelFromParts nextEstNoFrom -->
+<!-- @api handoff/estimator/runtime/ports.ts resolveTierFor tierMarkupOf travelFromParts nextEstNoFrom -->
 
 ## Permissions
 

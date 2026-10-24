@@ -81,7 +81,7 @@
  *          never holds more than 100 rows; the Category / Manufacturer facets count what they filter (crossed); the search
  *          lists the Estimator picker's own ranking; a known SKU is the first result; editing a part's list price saves to
  *          the overlay and survives a reload; the Estimator then adds the part at that price — a part with no cost sells at
- *          its LIST price, a part with a cost at cost ÷ (1 − margin) (catalogAddPrice) and its list does not move the line;
+ *          its LIST price, a part with a cost at cost × (1 + markup) (catalogAddPrice) and its list does not move the line;
  *          a new part's SKU must be unique; a Reviewer-only role can look but not edit; Reset restores the snapshot. The walk
  *          lives in verify/catalog.ts. Screenshots: output/verify/catalog-*.png; result: output/verify/catalog.json.
  *
@@ -96,11 +96,11 @@
  *
  *   npm run handoff:verify -- --rules [--out <package dir>]
  *
- * --rules  Estimating Rules (Task 10): #/rules runs the app's real editors; a Gold margin edit saves to the store and the
- *          next new Gold estimate adds a catalog part at the new margin; a track series' stick length edit shows in the
+ * --rules  Estimating Rules (Task 10): #/rules runs the app's real editors; a Gold markup edit saves to the store and the
+ *          next new Gold estimate adds a catalog part at the new markup; a track series' stick length edit shows in the
  *          Estimator's track configurator; Curtain mounts / System categories mount (a category save writes the store); the
  *          venue doctrine saves; Conduit sizes is the notice; a non-admin is locked out; the editor's Reset and Reset to
- *          production snapshot restore the margin and the stick. The walk lives in verify/rules.ts. Screenshots:
+ *          production snapshot restore the markup and the stick. The walk lives in verify/rules.ts. Screenshots:
  *          output/verify/rules-*.png; result: output/verify/rules.json.
  *
  *   npm run handoff:verify -- --photos [--out <package dir>]

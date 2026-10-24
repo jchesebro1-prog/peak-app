@@ -134,7 +134,7 @@ export async function placeSystemInEstimate(
     const updated = await repo.update(target.quoteId, {
       spec: { sections: normalizeSystemOrder(mergedSections, existingGroups), mobs: existingSpec?.mobs || [], groups: existingGroups, ...(existingDoc ? { document: existingDoc } : {}), ...(Object.keys(targetDiscounts).length ? { projectDiscounts: targetDiscounts } : {}) },
       value: t.grand,
-      margin: t.margin,
+      margin: t.markup,
       ...(placedVq.length ? { vendorQuotes: [...vendorQuoteRows(existing.vendorQuotes).filter((vq) => !placedIds.has(vq.id)), ...placedVq] } : {}),
     } as QuotePatch);
     if (!updated) return { ok: false, error: "That estimate could not be found." };
@@ -164,7 +164,7 @@ export async function placeSystemInEstimate(
       status: "draft",
       spec: { sections: newSpecSections, mobs: [], ...(Object.keys(carriedDiscounts).length ? { projectDiscounts: carriedDiscounts } : {}) },
       value: t.grand,
-      margin: t.margin,
+      margin: t.markup,
       owner: opts.owner,
       ...(opts.tier ? { pricingTier: opts.tier.pricingTier, tierMargin: opts.tier.tierMargin } : {}),
       ...(boxSaleOf(sourceQuote) ? { boxSale: true } : {}),

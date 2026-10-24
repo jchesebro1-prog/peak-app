@@ -20,6 +20,7 @@ import {
 } from "../runtime/catalog-model";
 import { RACK_FACT_KEYS, type RackFactKey } from "@/lib/rack/types";
 import { MAX_PARAGRAPH } from "@/lib/estimating-core/narrative";
+import { TIER_FALLBACK_MARKUP } from "@/lib/estimating-core/tier-reprice";
 
 export const CATALOG_COPY = {
   title: "Catalog",
@@ -29,7 +30,7 @@ export const CATALOG_COPY = {
   allCategories: "All categories",
   allManufacturers: "All manufacturers",
   readOnly: "Your role can't edit the catalog — pick an Estimator, Manager or Admin to change a part.",
-  pricingRule: "On an estimate, a part with a cost sells at cost ÷ (1 − margin); a part with no cost sells at its list price.",
+  pricingRule: "On an estimate, a part with a cost sells at cost × (1 + markup); a part with no cost sells at its list price.",
 } as const;
 
 const TH = { textAlign: "left", fontSize: 10.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "#8c919c", padding: "10px 12px", borderBottom: "1px solid #ececf0", whiteSpace: "nowrap" } as const;
@@ -541,7 +542,7 @@ function PartDrawer({ store, isNew, part: livePart, parts, canEdit, onClose, onS
             <div data-catalog-pricing-rule="" style={{ fontSize: 12, color: "#5b616e", lineHeight: 1.5, background: "#f7f8fa", borderRadius: 8, padding: "8px 10px" }}>
               {CATALOG_COPY.pricingRule}
               <div style={{ marginTop: 4 }}>
-                At the default 30% margin it sells at <b data-catalog-default-sell="">{money(defaultSell)}</b>
+                At the default {Math.round(TIER_FALLBACK_MARKUP * 100)}% markup it sells at <b data-catalog-default-sell="">{money(defaultSell)}</b>
                 {costN > 0 ? " (from the cost)" : " (from the list price)"}.
               </div>
             </div>

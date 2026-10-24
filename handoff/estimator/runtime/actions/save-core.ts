@@ -197,7 +197,7 @@ export type SavePlan =
 export function planSave(
   prior: Quote | null,
   payload: SavePayload,
-  deps: { bonusRates: BonusRates; tier: { tier: string; margin: number }; rewriteSpec: <T>(spec: T) => T; /** the saver's user id and the clock (#366 stamps `by` / `at`) */ userId?: string; now?: number },
+  deps: { bonusRates: BonusRates; tier: { tier: string; markup: number }; rewriteSpec: <T>(spec: T) => T; /** the saver's user id and the clock (#366 stamps `by` / `at`) */ userId?: string; now?: number },
 ): SavePlan {
   const savedSource = sourceForSave(prior?.source, "estimator");
   const docSave = packageDocForSave(payload.document, (prior?.spec as { document?: unknown } | null | undefined)?.document);
@@ -223,7 +223,7 @@ export function planSave(
   if (!credit.ok) return { ok: false, error: credit.error, refusedBeforeWrite: "credit" };
   const posted = credit.sections;
   const { sections: savedSections, anyPor, anyConfirm } = isPortalCatalog ? clearPricedPor(posted) : { sections: posted, anyPor: false, anyConfirm: false };
-  const priced = reconcileEstimatorValue(posted, { value: payload.value, margin: payload.margin });
+  const priced = reconcileEstimatorValue(posted, { value: payload.value, markup: payload.markup });
   const patch: QuotePatch = {
     name: payload.name,
     customer: payload.customer,
@@ -236,9 +236,9 @@ export function planSave(
     paymentTerms: payload.paymentTerms,
     category: (payload.category || "").trim(),
     value: priced.value,
-    margin: priced.margin,
+    margin: priced.markup, // stored under the old field name (#367)
     pricingTier: deps.tier.tier,
-    tierMargin: deps.tier.margin,
+    tierMargin: deps.tier.markup,
     source: savedSource,
     spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}), ...(Object.keys(discounts).length ? { projectDiscounts: discounts } : {}) },
     pdfOptions: normalizePdfOptions(payload.pdfOptions),

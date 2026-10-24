@@ -315,7 +315,7 @@ export async function buildEstimatorProps(store: HandoffStore, quoteId: string |
   if (!q) {
     const t = resolveTierFor(initial.customerId, initial.contactName);
     initial.pricingTier = t.tier;
-    initial.tierMargin = t.margin;
+    initial.tierMargin = t.markup;
   }
 
   // Travel seed for the loaded selection only (page.tsx E3/E4).

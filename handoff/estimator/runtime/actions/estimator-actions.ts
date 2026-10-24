@@ -19,7 +19,8 @@ import { copySectionForTarget } from "@/lib/estimating-core/copy-system";
 import { rankCatalogParts } from "@/lib/estimating-core/catalog-rank";
 import { withSanitizedKeyProducts } from "@/lib/estimating-core/narrative";
 import { BOM_MODEL_SKUS_MAX, bomModelPartOf, type BomModelParts } from "@/lib/estimate-output/bom-models";
-import { seedMarginOf, usableTierMargin } from "@/lib/estimating-core/tier-reprice";
+import { seedMarkupOf, usableTierMarkup } from "@/lib/estimating-core/tier-reprice";
+import { sameWholeMarkup } from "@/lib/markup";
 import { sanitizeSystemSell } from "@/lib/estimating-core/pricing";
 import { COVER_SUMMARY_MAX, NOT_INCLUDED_MAX, cleanPlainText, withSanitizedOutputFields } from "@/lib/estimate-output/fields";
 import { withoutGroupMeta } from "@/lib/estimate-groups/groups";
@@ -103,7 +104,7 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
     const prior = loadedId ? await repo.get(loadedId) : null;
     const tier = resolveTierFor(payload.customerId || null, payload.contactName || "");
     const { rewriteSpec } = await renameHelpers(store);
-    const plan = planSave(prior, payload, { bonusRates: bonusRatesNow(), tier: { tier: tier.tier, margin: tier.margin }, rewriteSpec, userId: user.id, now: clock.now() });
+    const plan = planSave(prior, payload, { bonusRates: bonusRatesNow(), tier: { tier: tier.tier, markup: tier.markup }, rewriteSpec, userId: user.id, now: clock.now() });
     if (!plan.ok) {
       // A document or box-sale refusal writes nothing and returns no id (the client must not adopt it as saved);
       // a credit refusal keeps the loaded id, as the original does.
@@ -296,7 +297,7 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
     try {
       await ready();
       const r = resolveTierFor(typeof customerId === "string" && customerId ? customerId : null, typeof contactName === "string" ? contactName : "");
-      return { ok: true, pricingTier: r.tier, tierMargin: r.margin, label: PRICING_TIER_LABEL[r.tier] || r.tier };
+      return { ok: true, pricingTier: r.tier, tierMargin: r.markup, label: PRICING_TIER_LABEL[r.tier] || r.tier };
     } catch (e) {
       console.error("[estimator] resolveTierAction failed:", e);
       return { ok: false };
@@ -517,29 +518,29 @@ export function estimatorActions(store: HandoffStore): { [K in ImplementedEstima
     const section = withSanitizedOutputFields(withSanitizedKeyProducts(sectionIn));
     const items = Array.isArray(section?.items) ? section.items : [];
     const { catalog, fixtures, renames } = await copyPricingFor(store, items);
-    const sourceTier = usableTierMargin(sourceContext?.tierMargin);
+    const sourceTier = usableTierMarkup(sourceContext?.tierMargin);
     let targetTier: number | null = sourceTier;
     let targetTierKey: string | null = null;
     let stamp: { pricingTier: string; tierMargin: number } | undefined;
     if (target.kind === "new") {
       const r = resolveTierFor(sourceContext.customerId || null, sourceContext.contactName || "");
-      targetTier = r.margin;
+      targetTier = r.markup;
       targetTierKey = r.tier;
-      stamp = { pricingTier: r.tier, tierMargin: r.margin };
+      stamp = { pricingTier: r.tier, tierMargin: r.markup };
     } else if (target.kind === "existing") {
       const existing = await repo.get(target.quoteId);
       if (!existing) return { ok: false, error: "That estimate could not be found." };
-      const stored = usableTierMargin(existing.tierMargin);
+      const stored = usableTierMarkup(existing.tierMargin);
       if (stored != null) {
         targetTier = stored;
         targetTierKey = existing.pricingTier || null;
       } else {
         const r = resolveTierFor(existing.customerId || null, existing.contactName || "");
-        targetTier = r.margin;
+        targetTier = r.markup;
         targetTierKey = r.tier;
       }
     }
-    const tierMoved = usableTierMargin(targetTier) != null && seedMarginOf(sourceTier) !== seedMarginOf(targetTier);
+    const tierMoved = usableTierMarkup(targetTier) != null && !sameWholeMarkup(seedMarkupOf(sourceTier), seedMarkupOf(targetTier));
     const tierLabel = tierMoved && targetTierKey ? (PRICING_TIER_LABEL as Record<string, string>)[targetTierKey] || targetTierKey : null;
     const copied = copySectionForTarget(sanitizeSystemSell(section), {
       newSectionId: "sys" + clock.now(),

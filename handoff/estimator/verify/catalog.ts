@@ -6,7 +6,7 @@
  * 100 rows; the facets (category, manufacturer) count what they filter; the search ranks exactly like the Estimator's
  * picker (the first page against rankCatalogParts run here over the slice); a known SKU is the first result; editing a
  * part's list price saves to the overlay, survives a reload, and the Estimator then adds the part at the edited price —
- * a part with NO cost sells at its list price, a part WITH a cost sells at cost ÷ (1 − margin) and its list does not
+ * a part with NO cost sells at its list price, a part WITH a cost sells at cost × (1 + markup) and its list does not
  * move the line (catalogAddPrice); a new part's SKU is unique (case-insensitively); a Reviewer can look but not edit;
  * Reset to production snapshot puts the edits back.
  */
@@ -18,7 +18,7 @@ import type { Page } from "puppeteer-core";
 import { chromeLaunch } from "@/lib/quote-pdf/render";
 import { isFabricPart } from "@/lib/fabric-part";
 import { rankCatalogParts } from "@/lib/estimating-core/catalog-rank";
-import { catalogAddPrice, seedMarginOf } from "@/lib/estimating-core/tier-reprice";
+import { catalogAddPrice, seedMarkupOf } from "@/lib/estimating-core/tier-reprice";
 import { CURRENT_USER_KEY } from "../runtime/ports";
 import { money } from "../runtime/catalog-model";
 import { clickButton, estimateUrl, newPage, newSink, openUrl, pageHasText, ROOT, SMOKE_ALLOWED_UNREGISTERED, unregisteredOn, VERIFY_DIR, waitFor, waitMounted, type EditH, type PageSink } from "../verify";
@@ -343,9 +343,9 @@ export async function catalogCheck(pkgDir: string): Promise<CatalogResult> {
     const margin = quote.tierMargin ?? null;
     const wantA = catalogAddPrice(0, newListA, margin);
     const wantB = catalogAddPrice(newCostB, newListB, margin);
-    console.log(`  estimate ${quoteId}: tierMargin ${margin} → seed margin ${seedMarginOf(margin)}; ${sku(partA)} cost 0 list ${newListA} → line ${lineA?.price}; ${sku(partB)} cost ${newCostB} list ${newListB} → line ${lineB?.price}`);
+    console.log(`  estimate ${quoteId}: tierMargin (a markup) ${margin} → seed markup ${seedMarkupOf(margin)}; ${sku(partA)} cost 0 list ${newListA} → line ${lineA?.price}; ${sku(partB)} cost ${newCostB} list ${newListB} → line ${lineB?.price}`);
     step(`a part with NO cost sells at its edited LIST price: ${sku(partA)} line = ${money(newListA)}`, !!lineA && lineA.cost === 0 && lineA.price === newListA && wantA === newListA, JSON.stringify(lineA));
-    step(`a part WITH a cost sells at cost ÷ (1 − ${seedMarginOf(margin)}) = ${money(wantB)}, and its list ${money(newListB)} does not drive the line`, !!lineB && lineB.cost === newCostB && lineB.price === wantB && wantB !== newListB, JSON.stringify(lineB));
+    step(`a part WITH a cost sells at cost × (1 + ${seedMarkupOf(margin)}) = ${money(wantB)}, and its list ${money(newListB)} does not drive the line`, !!lineB && lineB.cost === newCostB && lineB.price === wantB && wantB !== newListB, JSON.stringify(lineB));
     await noteUnregistered(ep);
     await ep.close();
 

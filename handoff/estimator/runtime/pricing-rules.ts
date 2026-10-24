@@ -32,6 +32,7 @@ import {
   TRAVEL_RATE_DEFAULTS,
   TRAVEL_RATES_BLOB,
 } from "./baked/pricing-registry";
+import { rateBlobOnMarkupBasis } from "../markup-basis";
 import type { HandoffStore } from "./store";
 
 export { GROUPS };
@@ -55,7 +56,9 @@ const blobQueues = new Map<string, Promise<unknown>>();
 export function setBlobLocal(store: HandoffStore, id: string, patch: Record<string, unknown>): Promise<void> {
   const prev = blobQueues.get(id) ?? Promise.resolve();
   const run = prev.then(async () => {
-    const prior = asRecord((await store.get<BlobDoc>("blobs", id))?.data);
+    // #367: a rate blob is written on the markup basis — the stored data (already converted by the store's read hook), or, for a
+    // blob that was never stored, the bare stamp the app's convertRateBlobs gives {}; so a read never converts what we wrote.
+    const prior = asRecord(rateBlobOnMarkupBasis(id, asRecord((await store.get<BlobDoc>("blobs", id))?.data)));
     await store.put("blobs", { id, data: { ...prior, ...patch } });
   });
   const tail = run.catch(() => undefined);

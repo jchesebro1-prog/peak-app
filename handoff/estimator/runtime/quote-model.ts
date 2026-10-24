@@ -101,6 +101,7 @@ export function buildQuote(id: string, partial: Partial<Quote>, quoteType: strin
     termsText: partial.termsText || "",
     value: Math.round(partial.value || 0),
     margin: partial.margin || 0,
+    pricingBasis: "markup", // #367: a doc the prototype builds is markup-basis (doc-basis.ts honours the stamp)
     pricingTier: partial.pricingTier ?? null,
     tierMargin: partial.tierMargin ?? null,
     status: "draft",
@@ -135,7 +136,7 @@ export function buildQuote(id: string, partial: Partial<Quote>, quoteType: strin
 /** The fields quotes.ts update() never lets a patch write — each has its own writer. */
 export const UPDATE_OWNED_FIELDS = [
   "shareLink", "shareOpens", "wonRev", "packageFiles", "clientResponses", "bonusRecord", "estimatorBonusSplit", "packagePeakHeader",
-  "bid", "bidScopeOnly", "estimateEmails", "packageSelection", "reviewComments", "emailSending", "findingKeys", "assistNudge", "assistNudgeLeaseUntil",
+  "pricingBasis", "bid", "bidScopeOnly", "estimateEmails", "packageSelection", "reviewComments", "emailSending", "findingKeys", "assistNudge", "assistNudgeLeaseUntil",
 ] as const;
 
 /** quotes.ts update()'s mutator: the patch shallow-merged (numbers and owned fields stripped), updatedAt bumped, value rounded. Mutates `doc`. */

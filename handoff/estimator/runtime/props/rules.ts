@@ -34,7 +34,7 @@ export type RulesProps = { isAdmin: boolean; groups: GroupVM[]; venueDoctrine: V
  * Estimating Rules the prototype leaves off the screen: they price Peak's service quotes (flame test, repair,
  * inspection — not in the package), the flights-over-drive travel those quotes use, and the customer portal — never a
  * system estimate. Hidden, not deleted: their stored values and defaults are untouched, and Export / Import still carry
- * every rate. What stays prices estimates: System design, tiers, sizing, catalog margin, fixtures, wire, cable, labor,
+ * every rate. What stays prices estimates: System design, tiers, sizing, catalog markup, fixtures, wire, cable, labor,
  * curtains, bonuses, the drive-distance knobs (travel.roadFactor / travel.mph → the venue's travel) and freight.
  */
 export const PROTOTYPE_HIDDEN_RULE_GROUPS: readonly string[] = ["flame", "repair", "inspection"];

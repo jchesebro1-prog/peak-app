@@ -15,7 +15,7 @@
 import type * as Original from "@/app/(app)/estimator/library-actions";
 import { copySectionForTarget } from "@/app/(app)/estimator/copy-system";
 import { sanitizeSystemSell } from "@/app/(app)/estimator/pricing";
-import { TIER_FALLBACK_MARGIN, usableTierMargin } from "@/app/(app)/estimator/tier-reprice";
+import { TIER_FALLBACK_MARKUP, usableTierMarkup } from "@/app/(app)/estimator/tier-reprice";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import {
   flagOldVendorLine, LIBRARY_GONE, LIBRARY_QUERY_MAX, LIBRARY_SEARCH_LIMIT, librarySectionForLoad, parseLibraryKey, searchSystemLibrary,
@@ -53,7 +53,7 @@ export async function loadLibrarySystemLocal(store: HandoffStore, key: string, t
     fixtures,
     sourceTierMargin: picked.source.tierMargin,
     // An estimate with no tier stamp prices at the Estimator's own fallback seed, never the source customer's tier.
-    targetTierMargin: usableTierMargin(targetTierMargin) ?? TIER_FALLBACK_MARGIN,
+    targetTierMargin: usableTierMarkup(targetTierMargin) ?? TIER_FALLBACK_MARKUP,
     renames,
   });
   // Jeff 2026-10-15 #21: a vendor-quoted line comes in at its last price, flagged "Old vendor price — re-quote".

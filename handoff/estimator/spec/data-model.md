@@ -48,9 +48,24 @@ declare is marked as such.
 
 <!-- @fields src/lib/stores/quotes.ts Quote only=QUOTE_FIELDS -->
 
-`value` and `margin` (the saved grand total and blended margin) are deliberately **not** shipped. The
+`value` and `margin` (the saved grand total and blended markup) are deliberately **not** shipped. The
 prototype recomputes them on every save with `PeakEstimatingCore.reconcileEstimatorValue`, exactly as
 Quartzite's server does, so a client can never post its own total.
+
+### The pricing basis — `pricingBasis`
+
+Every pricing percentage Peak stores is a **markup on cost** (sell = cost × (1 + markup), `pricing.md`). Quote
+fields named `margin` (the blended figure) and `tierMargin` (the tier stamp the lines seeded at) kept their
+names and now hold a markup, as do a revision's two and a labor draft's percent string. A quote carries
+`pricingBasis: "markup"` once its stored percentages are markup. **A quote without the stamp stores the older
+margins**: read it by converting each exactly, markup = m ÷ (1 − m), then stamp it; no `price` or `value` changes.
+A stamped quote is never converted again. The package ships every estimate already converted and stamped, and
+the prototype applies the same rule to anything unstamped it reads (an older edit in this browser).
+
+Rate settings follow the same idea once, at the moment they are first read: each tier, service default and
+catalog default is converted and rounded to a whole percent (30 → 43, 20 → 25), `_pricingBasis: "markup"` is
+stamped on the blob and the previous values are kept under `_marginBackup`. `data/rules.js` ships them
+converted. Both rules are the app's own (`src/lib/markup/`), not a copy.
 
 ### Box goods sale — `boxSale`
 
@@ -245,7 +260,7 @@ The status select offers all four statuses, so any status can move to any other;
   1. the live quote, post-win edits included, is snapshotted first — a `reason: "manual"` revision
      noted *"Auto-saved before reopening at the version that won"* (`REOPEN_AUTOSAVE_NOTE`) — so the
      edits are never lost;
-  2. then the `wonRev` revision's priced fields — name, margin, tier, spec, the service blocks and the
+  2. then the `wonRev` revision's priced fields — name, markup, tier, spec, the service blocks and the
      **vendor quotes** (merged by id, the revision's rows winning) — are **restored** onto the live
      quote, and `value` is the restored gross less any Rewards credit, with the credit line put back;
      the header (customer, contact, owner, …) stays.
