@@ -61,6 +61,7 @@ import { approvalFingerprint, approvalSnapshotMatches, type ApprovalSnapshot } f
 import { rewriteQuoteSpec } from "@/lib/catalog-rename/rewrite";
 import { liveRenameRefs } from "@/lib/stores/catalog-renames";
 import { isBonusEligibleQuote } from "@/lib/estimate-bonus/rules";
+import { repriceAppliesTo, repriceForRevise, type RepricedOnRevise } from "@/lib/estimate-reprice/rules";
 import {
   buildBonusRecord, defaultAlternatesTaken, normalizeSplit, quoteHasBonusLines,
   type BonusRecord, type BonusSplit,
@@ -448,6 +449,10 @@ export type Quote = {
   /** AI daily brief — the draft queue's per-quote lease (epoch-ms), taken and
    *  released by compare-and-set (`casAssistNudgeKey`); update() drops it. */
   assistNudgeLeaseUntil?: number | null;
+  /** #368 — what the last Revise re-priced to today's catalog (estimate-reprice/rules.ts). Written only by
+   *  setStatus's revise, in the same write as the move to Draft; a revise that changed nothing clears it.
+   *  update() drops it; never content, never snapshotted, never copied by buildQuote. Staff-only (the Build banner). */
+  repricedOnRevise?: RepricedOnRevise | null;
 };
 
 /** #334 (D877) — where an Assist-drafted estimate came from. `reasons` is
@@ -1013,6 +1018,8 @@ export async function update(
     delete clean.bid;
     // #348 slice 6: the Scope-only stamp is markBidScopeOnly's alone — a save can never set or clear it.
     delete clean.bidScopeOnly;
+    // #368: the Revise re-price summary is setStatus's alone.
+    delete clean.repricedOnRevise;
     // Phase 3: the emailed-thread list is recordEstimateEmail's alone.
     delete clean.estimateEmails;
     // #333 review (B): the package selection is setPackageSelection's alone — a
@@ -2285,8 +2292,17 @@ export async function setStatus(
   // latest send at today's SKUs, so a rename since the send adds no snapshot.
   const recordsWon = status === "won" && tracksWonVersion(q) && opts.bypassApprovalGate !== "historical-import";
   const wonRewrite = recordsWon ? renameRewriter(await liveRenameRefs()) : null;
+  // #368: a revise (sent / won / lost → draft) of an Estimator system quote re-prices its plain catalog lines in
+  // this same write. Read here — the patch mutator is synchronous — for the live spec and the won version a reopen
+  // puts back. Never for a historical import (not a revise anyone made).
+  const repriceIn =
+    status === "draft" && q.status !== "draft" && repriceAppliesTo(q) && opts.bypassApprovalGate !== "historical-import"
+      ? await (await import("@/lib/estimate-reprice/server")).loadRepriceInputs([q.spec, gateQ.spec])
+      : null;
   const result = await patchQuote(id, (doc) => {
     const t = Date.now();
+    // #368: the quote's own stored value before this move — the re-price banner's delta is measured from it.
+    const valueBeforeMove = typeof doc.value === "number" && Number.isFinite(doc.value) ? doc.value : 0;
     if (autoStamp) doc.review = autoStamp;
     if (reopen) {
       // Non-destructive, like restoreQuoteRevision: the post-win edits become a revision first.
@@ -2300,6 +2316,22 @@ export async function setStatus(
     if (status === "draft" && doc.status !== "draft") revised.value = true;
     doc.status = status;
     moved.value = true;
+    // #368 (spec §9.1): Re-price on Revise — the draft's plain catalog lines move to today's catalog cost (each keeps
+    // its cost-to-sell ratio), renames followed and then the save's own derivations (discounts, bonus lines,
+    // value / margin). After a reopen, so the won version is what re-prices; revisions are never touched. The
+    // summary is stored only when a line changed — a revise that changed nothing clears an older one.
+    if (repriceIn && revised.value) {
+      const followed = repriceIn.followRenames(doc.spec ?? null) as { sections?: unknown; projectDiscounts?: unknown } | null;
+      const rp = repriceForRevise(doc, followed, repriceIn.catalog, repriceIn.bonusRates);
+      if (rp) {
+        doc.spec = { ...(followed || {}), sections: rp.sections };
+        doc.value = Math.round(rp.value);
+        doc.margin = rp.margin;
+        doc.repricedOnRevise = { at: t, by: by || DEFAULT_ACTOR, count: rp.count, delta: doc.value - valueBeforeMove, lines: rp.lines, typedSystems: rp.typedSystems };
+      } else if (doc.repricedOnRevise) {
+        delete doc.repricedOnRevise;
+      }
+    }
     // Batch 5 #59: record which version won — the latest send when the live
     // quote still matches it, else a snapshot of what was marked Won.
     if (status === "won" && wonRewrite) {

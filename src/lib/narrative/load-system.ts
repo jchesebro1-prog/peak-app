@@ -6,6 +6,10 @@ import { TIER_FALLBACK_MARKUP, usableTierMarkup } from "@/app/(app)/estimator/ti
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { flagOldVendorLine, LIBRARY_GONE, librarySectionForLoad, parseLibraryKey, type LoadLibrarySystemResult } from "./system-library";
 import { invalidateSystemLibrary } from "./system-library-index";
+import { REVISE_FIRST } from "@/lib/estimate-reprice/lock";
+
+/** #368 — the estimate a system was being loaded into is gone (or the id was junk). */
+export const LOAD_TARGET_GONE = "That estimate could not be found — reload it and try again.";
 
 /**
  * #293 slice 2 — Load system's core (the action is a requireUser wrapper).
@@ -14,8 +18,20 @@ import { invalidateSystemLibrary } from "./system-library-index";
  * exactly as Copy system does (#266): today's catalog,
  * the snapshot's tier → this estimate's. Persists nothing; the client places
  * the section and the normal Save writes it. Server-only.
+ *
+ * #368 (review): `targetQuoteId` is REQUIRED — the saved estimate the system
+ * will land in, or null only for an estimate that has never been saved. A
+ * non-null id is looked up here: a missing estimate is refused, and one whose
+ * stored status isn't draft keeps its prices and is refused (REVISE_FIRST),
+ * before the library is read. Server-enforced: the client's id is the only
+ * input, never its idea of the status.
  */
-export async function loadLibrarySystem(key: string, targetTierMargin: number | null): Promise<LoadLibrarySystemResult> {
+export async function loadLibrarySystem(key: string, targetTierMargin: number | null, targetQuoteId: string | null): Promise<LoadLibrarySystemResult> {
+  if (targetQuoteId !== null) {
+    const target = typeof targetQuoteId === "string" && targetQuoteId ? await getQuote(targetQuoteId) : null;
+    if (!target) return { ok: false, error: LOAD_TARGET_GONE };
+    if (target.status !== "draft") return { ok: false, error: REVISE_FIRST };
+  }
   const k = parseLibraryKey(key);
   // A malformed key was never an index entry — refuse it without touching the cache.
   if (!k) return { ok: false, error: LIBRARY_GONE };

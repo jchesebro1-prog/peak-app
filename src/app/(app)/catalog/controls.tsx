@@ -6,6 +6,8 @@ import { checkSize } from "@/lib/catalog-import-guard";
 import { useClientToday } from "@/lib/use-client-today";
 import { parseCatalog } from "./parse";
 import { importCatalog } from "./actions";
+import { EtcConnectPanel } from "./etc-connect-panel";
+import type { EtcStatus } from "@/lib/dealer-api/connections";
 
 const fieldLabel: React.CSSProperties = {
   fontSize: 10.5,
@@ -147,9 +149,12 @@ export function CatalogImportPanel({
   manufacturers,
   accent,
   today,
+  etc,
 }: {
   manufacturers: string[];
   accent: string;
+  /** #368 — the ETC connection's safe status (never the key) and whether the viewer is an admin. */
+  etc: { isAdmin: boolean; status: EtcStatus };
   /** Local YYYY-MM-DD from the server — the effective-date default's SSR
    *  value, so the server render and hydration agree; after mount the input
    *  shows the BROWSER's day instead (useClientToday — a UTC server's
@@ -179,7 +184,7 @@ export function CatalogImportPanel({
 
   const methods = [
     { id: "upload" as const, icon: "↑", title: "Import CSV / TSV", desc: "Upload a manufacturer or design-program export." },
-    { id: "api" as const, icon: "⇄", title: "Connect a manufacturer", desc: "Live pricing via a dealer account." },
+    { id: "api" as const, icon: "⇄", title: "Connect a manufacturer", desc: "Live ETC dealer pricing with an API key." },
     { id: "paste" as const, icon: "☰", title: "Paste a list", desc: "Rows straight from a spreadsheet." },
   ];
 
@@ -489,23 +494,8 @@ export function CatalogImportPanel({
             </form>
           )}
 
-          {/* API — stubbed */}
-          {method === "api" && (
-            <div
-              style={{
-                border: "1px solid #f0f1f4",
-                borderRadius: 11,
-                padding: "14px 13px",
-                fontSize: 12,
-                color: "#7a5f18",
-                background: "#fbf3dd",
-                lineHeight: 1.5,
-              }}
-            >
-              Live dealer-account pricing is on the roadmap. Export a price book from your dealer
-              portal and use <b style={{ color: "#5b4a12" }}>Paste a list</b> — it imports right away.
-            </div>
-          )}
+          {/* API — #368: the ETC connection */}
+          {method === "api" && <EtcConnectPanel isAdmin={etc.isAdmin} initial={etc.status} />}
 
           {/* PASTE — wired */}
           {method === "paste" && (

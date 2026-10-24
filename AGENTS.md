@@ -1650,7 +1650,29 @@ See `.env.example`.
     (it would run margin code against the production DB, D1291). Remaining is Jeff-gated: `db:export`, a quiet-time deploy, check the
     tiers and one quote of each type, whether to set cleaner tier values. Punch item #367.
 
-68. ✅ **Estimating-core extraction** (#359, D1228–D1230) — handoff PR 1. The Estimator's persisted
+68. ✅ **ETC price sync** (#368, D1298–D1303) — Catalog → Import price book →
+    **Connect a manufacturer** is a MyETC connection: an admin-only API key stored
+    encrypted in the `dealer_connections` blob (`src/lib/dealer-api/connections.ts`;
+    `etcSecret()` is the only decrypt), Test connection on v1 `/me/business-accounts`,
+    and **Pull prices** of ETC's four v0 dealer lists (finished goods, spare parts,
+    flat-rate repair, demo) into a chunked snapshot (`etc_price_pull`) with a per-list
+    preview, then a resumable **Import** (`src/lib/dealer-api/etc/`: `client`, pure
+    `parse` / `plan`, `apply`). Cost = netPrice, List = listPrice; new parts added;
+    description / category never overwritten; ETC-only matching by P/N then a guarded
+    model fallback; deleted parts never return. `CatalogPart.demoPrice` /
+    `demoPricedAt` / `etcPriceList` are internal (part editor only). A daily rider on
+    `/api/drive/sync` applies `price-updates/{baseline}` (new parts too) within a
+    bounded budget and continues a large delta next run. Sent estimates keep their
+    prices: re-pricing actions are locked until Revise (`src/lib/estimate-reprice/lock.ts`;
+    server-enforced for copy / move / Load system / the tier stamp, UI-only for the
+    configurators), and Revise re-prices plain catalog lines by ratio inside
+    `setStatus` (`estimate-reprice/rules.ts`, the save's own `deriveEstimatorSections`),
+    storing `Quote.repricedOnRevise` for a Build banner. Preview deploys and
+    `ETC_SYNC_DISABLED=true` refuse every ETC action. No migration. Remaining is
+    Jeff-gated: a MyETC API key, the first Pull on production (check the "new" count
+    against duplicates) and Import, the next morning's sync line. Punch item #368.
+
+69. ✅ **Estimating-core extraction** (#359, D1228–D1230) — handoff PR 1. The Estimator's persisted
     domain types and twelve pure helpers live in `src/lib/estimating-core/` (entry `index.ts`:
     flat domain exports plus namespaced pure `src/lib` modules); the twelve old helper paths are
     `export *` shims and the route `types.ts` re-exports the core types. `npm run core:check`
@@ -1659,7 +1681,7 @@ See `.env.example`.
     `docs/estimating-core/`). Quick Design types now live in `src/lib/design/quick-types.ts`.
     No behaviour change. Next: handoff PR 2 (phase 67 below, the HTML prototype package).
 
-69. 🚧 **Estimator handoff prototype** (#361, D1233–D1246, D1273, D1304, D1305) — handoff PR 2, stacked on PR 1. A confidential,
+70. 🚧 **Estimator handoff prototype** (#361, D1233–D1246, D1273, D1304, D1305) — handoff PR 2, stacked on PR 1. A confidential,
     offline package (`output/peak-estimator-handoff/`, zipped, git-ignored) that runs Quartzite's REAL Estimator,
     Catalog, Assembly Builder and Estimating Rules in the browser over a sliced production export, for a founder
     evaluating Peak's estimating. Source in `handoff/estimator/`: `build.ts` + `esbuild-plugins.ts` bundle the

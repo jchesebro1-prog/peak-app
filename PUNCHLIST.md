@@ -12942,3 +12942,24 @@ Jeff, 2026-10-23: switch every pricing percentage from margin on price to markup
 - Tell everyone with an open branch: rebase onto #367 before any Vercel preview.
 
 **Final review fixes (2026-10-23):** labor-draft percent strings stored to 8 dp so Update labor on a converted draft rebuilds the margin-era cents (the parity harness now runs its labor cases through `convertQuoteDoc`); a saved repair quote keeps its exact parts markup on an untouched re-save (`keepSavedMarkup`, save + preview); the dashboard's profit / markup tiles are finite for a stored markup of −1 or junk (`costFromSell`); no "Low markup — 0%" on a $0-cost total; a re-saved converted service quote's knob still reads as untouched (whole-percent compare); won-version content compares markups within 1e-9; `updateProject` strips `pricingBasis`; the parity tie check rejects a non-finite value; "Auto · 54% markup", "Marked up with the job" and the stale margin comments; `test:specs` now runs `test:markup-settings` after the main harness. Gates after the fixes: `tsc --noEmit` 0 errors; `test:specs` 25,441 PASS / 0 FAIL (ALL PASSED) then `test:markup-settings` 13 PASS / 0 FAIL; `test:smoke` 268 PASS / 0 FAIL; eslint on the 33 changed `src` files 0 errors, 3 pre-existing `react-hooks/purity` warnings (`Date.now` in the three service quote pages); `next build` compiled.
+
+## 368. ETC price sync — DONE 2026-10-23 on `feat/etc-price-sync` (D1298–D1303)
+
+Jeff, 2026-10-23: "We need to be able to add an API key to price list import page." ETC's MyETC API (read-only look at its docs): the key's v1 API has no prices; the v0 Pricing routes return the dealer price lists. Spec `docs/superpowers/specs/2026-10-23-etc-price-sync-design.md`; plan `docs/superpowers/plans/2026-10-23-etc-price-sync.md`.
+
+**Built:** Catalog → Import price book → **Connect a manufacturer** is an ETC panel: admin-only encrypted API key (last four shown, Replace / Remove, Test connection, account pick), **Pull prices** (four lists → chunked snapshot → per-list preview) and resumable **Import**. Cost = netPrice, List = listPrice; new parts added; description / category never overwritten; internal `demoPrice` (part editor only). A daily rider on `/api/drive/sync` applies ETC's price updates, new parts included, within a bounded budget. Sent estimates keep their prices: re-pricing actions are locked until Revise, and a Revise re-prices plain catalog lines by ratio with a Build banner listing the changes.
+
+**Gates:** tsc 0 errors; test:specs 25,558 PASS / 0 FAIL on the branch, 25,668 PASS / 0 FAIL after merging main with #367 markup pricing (214 `#368` checks: parser, client with a fake fetch, key store, plan / matching / precedence / deleted / cross-brand, chunked snapshot + resumable import, daily rider budget with a fake clock and a hung fetch, drawer renders, admin + preview refusals, demoPrice exposure pins, locks, ratio re-price, derivation, banner); test:smoke ALL PASSED (authenticated); eslint 0 errors on the changed src files (`scripts/test-review-and-spec.ts` excluded as before); `next build` passes. Browser-checked on a scratch PGlite dev server: the panel, Save (shows ••••zz99), the automatic Test against ETC with a fake key (one read-only GET, answered 401 → "ETC rejected the API key"), Remove.
+
+**Existing pins updated:** `#bonus source pin`, `#366 save` (the derivation moved into `deriveEstimatorSections`), `oct15 #19` count, ten `#293` Load system calls (now pass `null`).
+
+**Merge note:** main had #367 markup pricing (D1286–D1297), so this item's decisions are D1298–D1303. Conflicts kept both sides: the copy-system lock now sits beside `usableTierMarkup`; the `#293` Load system tests pass both `mk(0.2)` and the new `null` estimate id; re-price on Revise reads `reconcileEstimatorValue`'s renamed `markup` result into the stored `margin` field (which holds markup since #367).
+
+**Rollback:** safe — no migration. New stored fields (`dealer_connections`, `etc_price_pull*` blobs, `CatalogPart.demoPrice / demoPricedAt / etcPriceList`, `Quote.repricedOnRevise`) are ignored by an older build.
+
+**Remaining (Jeff-gated):**
+- Create a MyETC API key (a business-account admin), paste it in Catalog → Import price book → Connect a manufacturer, check Test connection picks Peak's account.
+- **Pull prices** on production, then check the preview before importing: the "new" count (should be ETC parts we don't stock, not duplicates of ones we do) and a few price changes against the MyETC Price List page. Then Import.
+- The next morning, read the daily-sync line in the drawer.
+- Revise one sent estimate with ETC lines and check the banner's changes.
+- Confirm or change: new finished goods with no ETC category go to "Uncategorized".

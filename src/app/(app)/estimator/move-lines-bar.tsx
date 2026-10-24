@@ -6,6 +6,7 @@ import { groupBlocks, type SystemGroup } from "@/lib/estimate-groups/groups";
 import type { MoveSystemTarget } from "./actions";
 import type { QuoteLite, SpecSection } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
+import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 
 /**
  * #357 — the Build step's Move bar: "N selected · Move to ▾ · Clear", the Move
@@ -391,8 +392,11 @@ export default function MoveLinesBar(p: MoveLinesBarProps) {
               <button
                 key={hit.id}
                 type="button"
+                // #368: a sent / won / lost estimate keeps its prices — greyed, refused server-side too.
+                disabled={repriceLocked(hit.status)}
+                title={repriceLocked(hit.status) ? REVISE_FIRST : undefined}
                 onClick={() => confirm({ kind: "estimate", dest: { kind: "existing", quoteId: hit.id }, label: `${hit.number} · ${hit.name || hit.customer}` })}
-                style={{ ...ITEM, whiteSpace: "normal", display: "flex", flexDirection: "column", gap: 2 }}
+                style={{ ...ITEM, whiteSpace: "normal", display: "flex", flexDirection: "column", gap: 2, ...(repriceLocked(hit.status) ? { cursor: "not-allowed", opacity: 0.5 } : {}) }}
               >
                 <span style={{ display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{hit.name}</span>
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontWeight: 400, color: "#aab0bb", overflowWrap: "anywhere" }}>
