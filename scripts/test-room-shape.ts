@@ -13,6 +13,9 @@ import { SegIndex, splitByWalls, walledShare, wallAt, type Seg } from "../src/li
 import { freezeFromTemplate, roomIdFor } from "../src/lib/design/room-shape/freeze";
 import { sanitizeRoomShape, SHAPE_SAMPLE_BUDGET } from "../src/lib/design/room-shape/sanitize";
 import { SHAPE_STALE, SHAPE_NEEDS_STAGE_HOUSE, SHAPE_UNREADABLE } from "../src/lib/design/room-shape/copy";
+import { applyEdit } from "../src/lib/design/room-shape/edit";
+import { snapCorner } from "../src/lib/design/room-shape/snap";
+import type { RoomShape } from "../src/lib/design/room-shape/types";
 import { gridIntakeDefaults } from "../src/lib/design/grid-intake";
 import { VENUES, sizedDims, type AState } from "../src/app/(app)/design/quick/engine";
 
@@ -292,6 +295,60 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
     ok(rName.ok && rName.shape.rooms.some((r) => r.name === "Safety Room"), "#370 sanitize hostile: control characters are stripped from names");
     const rDupFirst = with1((b) => { b.rooms.push({ ...b.rooms[0], pts: "junk" }); });
     ok(rDupFirst.ok && rDupFirst.notes.length === 1 && /repeats another room/.test(rDupFirst.notes[0]), "#370 sanitize: a repeated id is caught before its geometry is read");
+  }
+  {
+    const S = (rooms: ShapeRoom[]): RoomShape => ({ v: 1, fromTemplate: "proscenium@1", rooms, frozenAt: 0, by: "" });
+    const house = rect(0, 0, 20, 10, { id: "rm_00000001", roles: ["house", "stage"], type: "house", name: "House" });
+    const booth = rect(20, 0, 5, 5, { id: "rm_00000002", name: "Booth", type: "booth" }); // shares the corner (20, 0)
+    const base = S([house, booth]);
+    const get = (r: { ok: boolean }) => (r as unknown as { shape: RoomShape }).shape;
+    const mv = applyEdit(base, { op: "move", room: house.id, i: 1, to: { x: 22, y: 0 }, glue: true });
+    ok(mv.ok && get(mv).rooms[1].pts[0].x === 22 && get(mv).rooms[0].pts[1].x === 22 && base.rooms[0].pts[1].x === 20, "#370 edit: a moved corner drags a glued corner of another room; the input is untouched");
+    const mv2 = applyEdit(base, { op: "move", room: house.id, i: 1, to: { x: 22, y: 0 }, glue: false });
+    ok(mv2.ok && get(mv2).rooms[1].pts[0].x === 20, "#370 edit: without glue only the one corner moves");
+    const cross = applyEdit(base, { op: "move", room: house.id, i: 0, to: { x: 30, y: 5 }, glue: false }); // (0,10)→(30,5) crosses x = 20
+    ok(!cross.ok && /cross itself/.test((cross as { reason: string }).reason), "#370 edit: a move that makes the outline cross itself is refused");
+    const ap = applyEdit(base, { op: "addPoint", room: house.id, edge: 0 });
+    ok(ap.ok && get(ap).rooms[0].pts.length === 5 && nearPt(get(ap).rooms[0].pts[1], { x: 10, y: 0 }), "#370 edit: Add point splits the wall at its middle");
+    const cv = applyEdit(base, { op: "setBulge", room: house.id, edge: 0, bulge: -0.3 });
+    ok(cv.ok && get(cv).rooms[0].edges[0].kind === "arc", "#370 edit: Curve makes the wall an arc");
+    ok(get(applyEdit(get(cv), { op: "setBulge", room: house.id, edge: 0, bulge: 0 })).rooms[0].edges[0].kind === "line", "#370 edit: a zero bow is a straight wall again");
+    const rr = applyEdit(get(cv), { op: "setRadius", room: house.id, edge: 0, ft: 30 });
+    ok(rr.ok && near(arcInfo({ x: 0, y: 0 }, { x: 20, y: 0 }, (get(rr).rooms[0].edges[0] as { bulge: number }).bulge)!.r, 30, 1e-6), "#370 edit: typing a radius sets it");
+    ok(!applyEdit(get(cv), { op: "setRadius", room: house.id, edge: 0, ft: 5 }).ok, "#370 edit: a radius under half the chord is refused");
+    const al = applyEdit(get(cv), { op: "setArcLength", room: house.id, edge: 0, ft: 22 });
+    ok(al.ok && near(arcInfo({ x: 0, y: 0 }, { x: 20, y: 0 }, (get(al).rooms[0].edges[0] as { bulge: number }).bulge)!.length, 22, 1e-4), "#370 edit: typing an arc length sets it");
+    const ff = applyEdit(base, { op: "toFreeform", room: house.id, edge: 0 });
+    ok(ff.ok && get(ff).rooms[0].edges[0].kind === "curve", "#370 edit: Free-form makes a Bezier");
+    ok(get(applyEdit(get(ff), { op: "straighten", room: house.id, edge: 0 })).rooms[0].edges[0].kind === "line", "#370 edit: Straighten");
+    const op = applyEdit(base, { op: "setOpen", room: house.id, edge: 2, open: true });
+    ok(op.ok && get(op).rooms[0].edges[2].open === true && get(applyEdit(get(op), { op: "setOpen", room: house.id, edge: 2, open: false })).rooms[0].edges[2].open === undefined, "#370 edit: Wall / Open toggles");
+    // 23', not 25': at 25 the glued Booth corner would land on the Booth's own (25, 0) corner and be refused
+    const ln = applyEdit(base, { op: "setLength", room: house.id, edge: 0, ft: 23, from: "far" });
+    ok(ln.ok && get(ln).rooms[0].pts[1].x === 23 && get(ln).rooms[1].pts[0].x === 23, "#370 edit: typing a length moves the far corner (glued corners follow)");
+    const lnN = applyEdit(base, { op: "setLength", room: house.id, edge: 0, ft: 25, from: "near" });
+    ok(lnN.ok && get(lnN).rooms[0].pts[0].x === -5, "#370 edit: Alt moves the near corner");
+    const dp = applyEdit(get(ap), { op: "deletePoint", room: house.id, i: 1 });
+    ok(dp.ok && get(dp).rooms[0].pts.length === 4 && !applyEdit(S([rect(0, 0, 3, 3, { pts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 0, y: 3 }], edges: [{ kind: "line" }, { kind: "line" }, { kind: "line" }] })]), { op: "deletePoint", room: "rm_00000001", i: 0 }).ok,
+      "#370 edit: Delete point, refused below 3 corners");
+    const rn = applyEdit(base, { op: "rename", room: booth.id, name: "  Control  " });
+    ok(rn.ok && get(rn).rooms[1].name === "Control" && get(applyEdit(base, { op: "rename", room: booth.id, name: "" })).rooms[1].name === "Booth", "#370 edit: rename trims; blank = the type's label");
+    ok(!applyEdit(base, { op: "deleteRoom", room: house.id }).ok && get(applyEdit(base, { op: "deleteRoom", room: booth.id })).rooms.length === 1, "#370 edit: the Stage / House room can't be deleted; others can");
+    ok(get(applyEdit(base, { op: "retype", room: booth.id, type: "green" })).rooms[1].type === "green", "#370 edit: retype");
+    ok(!applyEdit(base, { op: "move", room: "rm_ffffffff", i: 0, to: { x: 0, y: 0 }, glue: true }).ok, "#370 edit: an unknown room is refused, not thrown");
+    // a curve's handles travel with a moved corner
+    const ffMoved = applyEdit(get(ff), { op: "move", room: house.id, i: 0, to: { x: -2, y: 0 }, glue: false });
+    const c0 = get(ff).rooms[0].edges[0] as { c1: ShapePt }, c1m = get(ffMoved).rooms[0].edges[0] as { c1: ShapePt };
+    ok(ffMoved.ok && near(c1m.c1.x, c0.c1.x - 2), "#370 edit: a Bezier handle moves with its corner");
+    // snapping
+    const sn = snapCorner({ x: 10.1, y: 0.3 }, [{ at: { x: 0, y: 0 }, wallDir: null }], { gridFt: 0.5, angles: true });
+    ok(near(sn.pt.y, 0) && near(sn.pt.x, 10) && !!sn.guide, "#370 snap: near-horizontal from a neighbour snaps onto the line, length to the 6\" grid");
+    const s45 = snapCorner({ x: 7.2, y: 6.9 }, [{ at: { x: 0, y: 0 }, wallDir: null }], { gridFt: 0.5, angles: true });
+    ok(near(s45.pt.x, s45.pt.y, 1e-9), "#370 snap: 45° snaps");
+    const sg = snapCorner({ x: 3.3, y: 7.8 }, [{ at: { x: 0, y: 0 }, wallDir: null }], { gridFt: 1, angles: true });
+    ok(sg.pt.x === 3 && sg.pt.y === 8 && sg.guide === null, "#370 snap: off every direction, the point rounds to the grid (1' with Shift)");
+    const rel = snapCorner({ x: 10, y: 10.4 }, [{ at: { x: 10, y: 0 }, wallDir: { x: Math.cos(0.3), y: Math.sin(0.3) } }], { gridFt: 0.5, angles: true });
+    ok(rel.guide !== null, "#370 snap: 90° relative to the neighbour's own wall counts");
   }
 }
 
