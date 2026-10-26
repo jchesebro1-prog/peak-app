@@ -16,9 +16,9 @@ import {
   resolvePath, samplePath, segmentBounds, trackLegs, type TrackSegment,
 } from "../src/lib/track-path";
 
-import { CLIENT_LAYOUT_BOX, layoutView, SUBMITTAL_LAYOUT_BOX, trackLayoutSource } from "../src/lib/curtain-cut-sheets/layout";
+import { CLIENT_LAYOUT_BOX, layoutView, MODAL_LAYOUT_BOX, SUBMITTAL_LAYOUT_BOX, trackLayoutSource } from "../src/lib/curtain-cut-sheets/layout";
 import { ARCH_SCALES } from "../src/lib/curtain-cut-sheets/geometry";
-import type { Shape } from "../src/lib/curtain-cut-sheets/shapes";
+import { textExtent, type Shape } from "../src/lib/curtain-cut-sheets/shapes";
 
 const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const line = (id: number, extra: Partial<SpecItem> = {}): SpecItem =>
@@ -281,6 +281,19 @@ function coords(shapes: readonly Shape[]): Array<[number, number]> {
   }
   return out;
 }
+/** Every shape lands inside the box: lines and paths by coordinate, text by its estimated extent (rotated text swaps the axes). */
+function fits(shapes: readonly Shape[], box: { wIn: number; hIn: number }): boolean {
+  const inBox = (x: number, y: number) => x >= 0 && y >= 0 && x <= box.wIn && y <= box.hIn;
+  return shapes.every((s) => {
+    if (s.kind !== "text") return coords([s]).every(([x, y]) => inBox(x, y));
+    if (s.rotate) {
+      const w = textExtent({ x: 0, text: s.text, size: s.size, anchor: "middle" }).x1;
+      return s.y - w / 2 >= 0 && s.y + w / 2 <= box.hIn && s.x - s.size / 2 >= 0 && s.x + s.size / 2 <= box.wIn;
+    }
+    const e = textExtent({ x: s.x, text: s.text, size: s.size, anchor: s.anchor });
+    return e.x0 >= 0 && e.x1 <= box.wIn && s.y - s.size * 0.75 >= 0 && s.y <= box.hIn;
+  });
+}
 const texts = (shapes: readonly Shape[]) => shapes.flatMap((s) => (s.kind === "text" ? [s.text] : []));
 
 export function layoutViewChecks(ok: Ok) {
@@ -301,7 +314,7 @@ export function layoutViewChecks(ok: Ok) {
   ok(sub.hangingCount * 2 === engineClamps, "#369 layout: the drawn hanging points × tracks equal the engine's clamp count");
   ok(texts(sub.shapes).includes(`Batten clamps (${sub.hangingCount} per track)`), "#369 layout: the caption counts per track when the line has several");
   ok(ARCH_SCALES.some((a) => a.label === sub.scale), "#369 layout: an architectural scale");
-  ok(coords(sub.shapes).every(([x, y]) => x >= 0 && y >= 0 && x <= SUBMITTAL_LAYOUT_BOX.wIn && y <= SUBMITTAL_LAYOUT_BOX.hIn), "#369 layout: every Submittal shape lands on the sheet");
+  ok(fits(sub.shapes, SUBMITTAL_LAYOUT_BOX), "#369 layout: every Submittal shape lands on the sheet");
   ok(texts(sub.shapes).some((t) => t.startsWith(`R8'-0" · 180° · `)) && texts(sub.shapes).includes(`10'-0"`), "#369 layout: arcs print radius · angle · arc length; straights their length");
   ok(texts(sub.shapes).includes("AUDIENCE") && texts(sub.shapes).includes(`2'-0" lap`), "#369 layout: the audience and the bi-part lap are labelled");
   ok(sub.shapes.some((x) => x.tag === "mark"), "#369 layout: the Submittal draws hanging-point and split marks");
@@ -314,10 +327,22 @@ export function layoutViewChecks(ok: Ok) {
   ok(!cli.shapes.some((x) => x.tag === "mark") && !texts(cli.shapes).some((t) => t.includes("clamps")) && !texts(cli.shapes).some((t) => t.includes("°")),
     "#369 layout: the Client view has no hanging points, no angles");
   ok(texts(cli.shapes).includes("AUDIENCE") && texts(cli.shapes).includes(`R8'-0"`), "#369 layout: the Client view keeps the radius and the audience");
-  ok(coords(cli.shapes).every(([x, y]) => x >= 0 && y >= 0 && x <= CLIENT_LAYOUT_BOX.wIn && y <= CLIENT_LAYOUT_BOX.hIn), "#369 layout: every Client shape lands in its box");
+  ok(fits(cli.shapes, CLIENT_LAYOUT_BOX), "#369 layout: every Client shape lands in its box");
   const u = trackLayoutSource(cfg({ curved: true, path: segmentsToPath(presetSegments("u", 40, 2)), runFt: 40 }), series({ minRadiusFt: 2 }))!;
-  ok(coords(layoutView(u, { box: SUBMITTAL_LAYOUT_BOX, detail: "submittal" }).shapes).every(([x, y]) => x >= 0 && y >= 0 && x <= SUBMITTAL_LAYOUT_BOX.wIn && y <= SUBMITTAL_LAYOUT_BOX.hIn),
-    "#369 layout: a U wrap fits the sheet");
+  ok(fits(layoutView(u, { box: SUBMITTAL_LAYOUT_BOX, detail: "submittal" }).shapes, SUBMITTAL_LAYOUT_BOX), "#369 layout: a U wrap fits the sheet");
+
+  // oversized tracks shrink to fit their box and read NTS; labels stay on the sheet
+  const boxes = [["Submittal", SUBMITTAL_LAYOUT_BOX, "submittal"], ["Client", CLIENT_LAYOUT_BOX, "client"], ["Modal", MODAL_LAYOUT_BOX, "client"]] as const;
+  const semi50 = trackLayoutSource(cfg({ curved: true, path: [A(25, 180)], runFt: 25 * Math.PI, operation: "biparting" }), s)!;
+  const wideU = segmentsToPath(presetSegments("u", 120, 2));
+  const u70 = trackLayoutSource(cfg({ curved: true, path: wideU, runFt: pathLengthFt(wideU), operation: "biparting" }), series({ minRadiusFt: 2 }))!;
+  for (const [name, box, detail] of boxes) {
+    ok(fits(layoutView(semi50, { box, detail }).shapes, box), `#369 layout: a 50' semicircle fits the ${name} box`);
+    ok(fits(layoutView(u70, { box, detail }).shapes, box), `#369 layout: a 70'+ wide U fits the ${name} box`);
+  }
+  ok(layoutView(semi50, { box: CLIENT_LAYOUT_BOX, detail: "client" }).scale === "NTS", "#369 layout: a 50' semicircle in the Client box reads NTS");
+  ok(ARCH_SCALES.some((a) => a.label === layoutView(src, { box: SUBMITTAL_LAYOUT_BOX, detail: "submittal" }).scale), "#369 layout: a small Submittal track keeps an architectural scale");
+  ok(fits(layoutView(src, { box: MODAL_LAYOUT_BOX, detail: "client" }).shapes, MODAL_LAYOUT_BOX), "#369 layout: the mixed bi-part path fits the modal box");
 }
 
 export async function curvedTrackChecks(ok: Ok) {

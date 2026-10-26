@@ -4,7 +4,8 @@
  * mini plan draws the same shapes. Hanging points come from the track path's
  * legHangingPoints — the function the track engine counts with — so the
  * caption always equals the hardware table. The open (concave) side of the
- * curve faces the audience, drawn at the bottom.
+ * curve faces the audience, drawn at the bottom. A track too big for any
+ * architectural scale shrinks to fit its box and reads "NTS" (not to scale).
  */
 import { partsAtCenter, type TrackConfig } from "@/lib/track-engine";
 import { hangerSpacingFor, type TrackSeries } from "@/lib/track-series";
@@ -68,7 +69,8 @@ export function layoutView(
   const path = src.path;
   const L = pathLengthFt(path);
   const frame = audienceFrame(path);
-  const framed = samplePath(path, L / 600).map(frame);
+  const samples = samplePath(path, L / 600);
+  const framed = samples.map(frame);
   const minX = Math.min(...framed.map((p) => p.x));
   const maxX = Math.max(...framed.map((p) => p.x));
   const minY = Math.min(...framed.map((p) => p.y));
@@ -77,8 +79,12 @@ export function layoutView(
   const depthFt = maxY - minY;
   const availW = box.wIn - 2 * M;
   const availH = box.hIn - 2 * M;
-  const scale = ARCH_SCALES.find((a) => widthFt * a.inPerFt <= availW + 1e-9 && depthFt * a.inPerFt <= availH + 1e-9) ?? ARCH_SCALES[ARCH_SCALES.length - 1];
-  const s = scale.inPerFt;
+  const fitted = ARCH_SCALES.find((a) => widthFt * a.inPerFt <= availW + 1e-9 && depthFt * a.inPerFt <= availH + 1e-9);
+  // nothing architectural fits: shrink to the box (a zero dimension never divides)
+  const s = fitted
+    ? fitted.inPerFt
+    : Math.min(...[widthFt > 0 ? availW / widthFt : Infinity, depthFt > 0 ? availH / depthFt : Infinity].filter(Number.isFinite), ARCH_SCALES[ARCH_SCALES.length - 1].inPerFt);
+  const scaleLabel = fitted ? fitted.label : "NTS";
   const ox = M + (availW - widthFt * s) / 2;
   const oy = M + (availH - depthFt * s) / 2;
   /** World feet → paper inches (y down; upstage at the top). */
@@ -87,7 +93,7 @@ export function layoutView(
     return { x: ox + (f.x - minX) * s, y: oy + (maxY - f.y) * s };
   };
   const at = (d: number) => P(pointAt(path, d));
-  const paper = samplePath(path, L / 600).map(P);
+  const paper = samples.map(P);
   const cx = paper.reduce((a, p) => a + p.x, 0) / paper.length;
   const cy = paper.reduce((a, p) => a + p.y, 0) / paper.length;
   /** The unit normal at `d`, pointing away from the drawing's center (labels go outside the curve). */
@@ -148,12 +154,13 @@ export function layoutView(
     { kind: "text", x: (left + right) / 2, y: wy - 0.05, text: `${ftIn(widthFt)} overall`, size: ELEV_TEXT_IN, anchor: "middle" }
   );
   if (depthFt * s > 0.05) {
-    const dx = right + 0.28;
+    // kept inside the box so the rotated label never runs off the right edge
+    const dx = Math.min(right + 0.28, box.wIn - 0.2);
     shapes.push(
       { kind: "line", tag: "dim", x1: dx, y1: top, x2: dx, y2: bottom, stroke: "thin" },
       { kind: "line", tag: "dim", x1: dx - 0.08, y1: top, x2: dx + 0.04, y2: top, stroke: "thin" },
       { kind: "line", tag: "dim", x1: dx - 0.08, y1: bottom, x2: dx + 0.04, y2: bottom, stroke: "thin" },
-      { kind: "text", x: dx + 0.12, y: (top + bottom) / 2, text: `${ftIn(depthFt)} deep`, size: ELEV_TEXT_IN, anchor: "middle", rotate: -90 }
+      { kind: "text", x: Math.min(dx + 0.12, box.wIn - ELEV_TEXT_IN / 2 - 0.01), y: (top + bottom) / 2, text: `${ftIn(depthFt)} deep`, size: ELEV_TEXT_IN, anchor: "middle", rotate: -90 }
     );
   }
 
@@ -216,5 +223,5 @@ export function layoutView(
     { kind: "path", tag: "dim", d: pathD([{ x: ax - 0.04, y: ay + 0.08 }, { x: ax, y: ay + 0.12 }, { x: ax + 0.04, y: ay + 0.08 }]), stroke: "thin" },
     { kind: "text", x: ax, y: ay + 0.24, text: "AUDIENCE", size: ELEV_TEXT_IN, anchor: "middle", bold: true }
   );
-  return { scale: scale.label, shapes, hangingCount: points.length };
+  return { scale: scaleLabel, shapes, hangingCount: points.length };
 }
