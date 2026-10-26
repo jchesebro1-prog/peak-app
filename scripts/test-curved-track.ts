@@ -9,6 +9,8 @@ import { trackQuantities, type TrackConfig } from "../src/lib/track-engine";
 import { collectCurtainTypes } from "../src/lib/curtain-cut-sheets/collect";
 import { CUT_SHEET_STAMP, cutSheetModel, type CutSheetContext } from "../src/lib/curtain-cut-sheets/model";
 import { titleBlockData } from "../src/lib/design/grid-drawing-set";
+import { cleanTrackConfig, freshTrackDraft, trackConfigFromDraft, trackDraftFromConfig, trackLineDesc } from "../src/app/(app)/estimator/track-bom";
+import { angleFromArcLength, arcLengthText, pathToSegments, presetSegments, segmentsToPath, totalRunText, TRACK_PRESETS } from "../src/app/(app)/estimator/track-segment-draft";
 import {
   audienceFrame, cleanPath, footprint, legHangingPoints, legPieces, legacyArc, pathErrors, pathLengthFt, pathSignature, pointAt,
   resolvePath, samplePath, segmentBounds, trackLegs, type TrackSegment,
@@ -188,10 +190,53 @@ export function curvedEngineChecks(ok: Ok) {
   ok((qtys(cfg({ curved: true, path: mixed, runFt: 0 }), series({ curvedSectionFt: undefined })).errors || "").includes("ADC 280 has no curved track."), "#369 engine: no curved section, no curve");
 }
 
+export function segmentDraftChecks(ok: Ok) {
+  const mixed = [S(12), A(6, 90), S(12)];
+  ok(JSON.stringify(segmentsToPath(pathToSegments(mixed))) === JSON.stringify(mixed), "#369 draft: path → segments → path round-trips");
+  ok(arcLengthText({ kind: "arc", length: "", radius: "6", angle: "90", turn: "left" }) === "9.42", "#369 draft: an arc row shows its arc length");
+  ok(angleFromArcLength("10", "6") === "95.493", "#369 draft: typing an arc length back-solves the angle");
+  ok(arcLengthText({ kind: "arc", length: "", radius: "", angle: "90", turn: "left" }) === "" && angleFromArcLength("10", "") === "", "#369 draft: no radius, no arc math");
+  ok(totalRunText(pathToSegments(mixed)) === "33.42" && totalRunText([]) === "", "#369 draft: the total run reads the segments");
+
+  const fresh = freshTrackDraft([series()]);
+  ok(Array.isArray(fresh.segments) && fresh.segments.length === 0, "#369 draft: a new track starts with no segments");
+  // fresh drafts default to bi-parting; the description checks below expect one-way
+  const d = { ...fresh, operation: "oneway" as const, curved: true, segments: pathToSegments(mixed) };
+  const c = trackConfigFromDraft(d);
+  ok(JSON.stringify(c.path) === JSON.stringify(mixed) && Math.abs(c.runFt - 33.4248) < 1e-3 && c.radiusFt === 6, "#369 draft: a curved draft saves its path, the run = its length, radiusFt = its tightest arc");
+  ok(JSON.stringify(trackConfigFromDraft({ ...fresh, curved: true }).path) === "[]", "#369 draft: curved with no rows saves an empty path (the engine asks for a segment)");
+  ok(trackConfigFromDraft({ ...d, curved: false }).path === undefined, "#369 draft: a straight draft saves no path");
+
+  // a legacy curve reopens as one arc and re-saves to the same BOM
+  const legacy = cfg({ curved: true, radiusFt: 30 });
+  const reopened = trackDraftFromConfig(legacy);
+  ok(reopened.segments?.length === 1 && reopened.segments[0].radius === "30" && reopened.segments[0].angle === "76.3944", "#369 draft: a legacy curve reopens as one arc row");
+  ok(JSON.stringify(trackQuantities(trackConfigFromDraft(reopened), series()).rows) === JSON.stringify(trackQuantities(legacy, series()).rows), "#369 draft: re-saving a reopened legacy curve keeps its parts");
+  ok(trackDraftFromConfig(cfg()).segments?.length === 0, "#369 draft: a straight track reopens with no rows");
+
+  const cleaned = cleanTrackConfig({ ...c, path: [...mixed, { kind: "arc", radiusFt: 9, sweepDeg: 45, turn: "right", junk: 1 } as unknown as TrackSegment] });
+  ok(cleaned.path?.length === 4 && !JSON.stringify(cleaned).includes("junk"), "#369 draft: cleanTrackConfig keeps a curved track's path, segment fields only");
+  ok(cleanTrackConfig({ ...c, curved: false }).path === undefined, "#369 draft: cleanTrackConfig drops a path off a straight track");
+
+  const s = { name: "ADC 280" };
+  ok(trackLineDesc(c, s) === "Track — ADC 280 one-way track, 33.42' run, curved: 3 segments (R6')", "#369 draft: a multi-segment curve says how many segments and its radii");
+  ok(trackLineDesc({ ...c, path: [S(10), A(12, 30), S(4), A(2, 90, "right")] }, s).endsWith("curved: 4 segments (R12', R2')"), "#369 draft: distinct radii in path order");
+  ok(trackLineDesc(legacy, s) === "Track — ADC 280 one-way track, 40' run, curved R30'", "#369 draft: a single arc keeps today's wording");
+
+  ok(TRACK_PRESETS.map((p) => p.id).join() === "single,legs,u,serpentine", "#369 presets: four shapes");
+  for (const p of TRACK_PRESETS) {
+    const path = segmentsToPath(presetSegments(p.id, 40, 2));
+    ok(pathErrors(path, { ...FACTS, minRadiusFt: 2 }, 1000).length === 0 && Math.abs(pathLengthFt(path) - 40) < 0.6, `#369 presets: ${p.label} is a valid ~40' path`);
+  }
+  ok(segmentsToPath(presetSegments("single", NaN)).length === 1, "#369 presets: a blank run still makes a preset (40')");
+  ok(segmentsToPath(presetSegments("u", 40, 2)).filter((x) => x.kind === "arc").every((x) => x.kind === "arc" && x.sweepDeg === 90 && x.radiusFt === 2), "#369 presets: U wrap has two 90° corners at the series minimum");
+}
+
 export async function curvedTrackChecks(ok: Ok) {
   stampChecks(ok);
   trackPathChecks(ok);
   curvedEngineChecks(ok);
+  segmentDraftChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-curved-track.ts")) {

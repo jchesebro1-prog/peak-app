@@ -10,8 +10,10 @@ import {
   type TrackSeries,
 } from "@/lib/track-series";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
+import { cleanPath, pathLengthFt, resolvePath } from "@/lib/track-path";
 import { round2 } from "./pricing";
 import { catalogAddPrice, seedMarkupOf } from "./tier-reprice";
+import { pathToSegments, segmentsToPath } from "./track-segment-draft";
 import { sellAt } from "@/lib/markup";
 import type { CurtainDraft, SpecItem, SpecSection, TrackDraft, TrackPart } from "./types";
 
@@ -123,7 +125,14 @@ export function trackLineDesc(config: TrackConfig, series: Pick<TrackSeries, "na
   const label = (config.label || "").trim() || "Track";
   const op = config.operation === "walkalong" && config.walkAlongBipart ? "walk-along bi-parting" : TRACK_OPERATION_LABELS[config.operation].toLowerCase();
   let desc = `${label} — ${series.name} ${op} track, ${fmtFt(config.runFt)} run`;
-  if (config.curved && config.radiusFt) desc += `, curved R${fmtFt(config.radiusFt)}`;
+  if (config.curved) {
+    const path = resolvePath(config) ?? [];
+    // #369: a multi-segment curve says how many segments and its radii; a single arc keeps "curved R12'"
+    if (path.length > 1) {
+      const radii = [...new Set(path.flatMap((s) => (s.kind === "arc" ? [`R${fmtFt(s.radiusFt)}`] : [])))];
+      desc += `, curved: ${path.length} segments${radii.length ? ` (${radii.join(", ")})` : ""}`;
+    } else if (config.radiusFt) desc += `, curved R${fmtFt(config.radiusFt)}`;
+  }
   if (config.qty > 1) desc += ` (${config.qty} tracks)`;
   return desc;
 }
@@ -132,6 +141,7 @@ export function trackLineDesc(config: TrackConfig, series: Pick<TrackSeries, "na
 export function cleanTrackConfig(c: TrackConfig): TrackConfig {
   const out: TrackConfig = { seriesId: c.seriesId, operation: c.operation, runFt: c.runFt, curved: !!c.curved, mounting: c.mounting, qty: c.qty };
   if (out.curved && c.radiusFt != null) out.radiusFt = c.radiusFt;
+  if (out.curved && Array.isArray(c.path)) out.path = cleanPath(c.path);
   if (isCordOperated(c.operation) && c.trimFt != null) out.trimFt = c.trimFt;
   if (c.carrierSpacingIn != null) out.carrierSpacingIn = c.carrierSpacingIn;
   if (c.hangerSpacingFt != null) out.hangerSpacingFt = c.hangerSpacingFt;
@@ -259,7 +269,14 @@ export function trackConfigFromDraft(d: TrackDraft): TrackConfig {
     mounting: d.mounting,
     qty: qtyText === "" ? 1 : Number(qtyText),
   };
-  if (d.curved) c.radiusFt = numOf(d.radius);
+  if (d.curved && Array.isArray(d.segments)) {
+    // #369: the segments are the track — the run is their length; radiusFt (the tightest arc) keeps an older build reading it as one arc
+    const path = segmentsToPath(d.segments);
+    c.path = path;
+    c.runFt = pathLengthFt(path);
+    const radii = path.flatMap((s) => (s.kind === "arc" && Number.isFinite(s.radiusFt) ? [s.radiusFt] : []));
+    if (radii.length) c.radiusFt = Math.min(...radii);
+  } else if (d.curved) c.radiusFt = numOf(d.radius);
   if (isCordOperated(d.operation)) {
     const trim = optionalNum(d.trim);
     if (trim !== undefined) c.trimFt = trim;
@@ -291,6 +308,7 @@ export function trackDraftFromConfig(c: TrackConfig): TrackDraft {
     carrierSpacing: str(c.carrierSpacingIn),
     hangerSpacing: str(c.hangerSpacingFt),
     walkAlongBipart: c.operation === "walkalong" && c.walkAlongBipart === true,
+    segments: c.curved ? pathToSegments(resolvePath(c) ?? []) : [],
   };
 }
 
@@ -316,6 +334,7 @@ export function freshTrackDraft(all: readonly TrackSeries[]): TrackDraft {
     carrierSpacing: "",
     hangerSpacing: "",
     walkAlongBipart: false,
+    segments: [],
   };
 }
 

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { fmt } from "./pricing";
-import type { SpecItem, TrackDraft, TrackPart } from "./types";
+import type { SpecItem, TrackDraft, TrackPart, TrackSegmentDraft } from "./types";
 import { TRACK_OPERATION_LABELS, isCordOperated, type TrackOperation, type TrackSeries } from "@/lib/track-series";
 import {
   TRACK_SERIES_GONE,
@@ -29,7 +29,7 @@ import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat, useSwallo
  * was deleted opens read-only (`readOnly`), showing its saved parts.
  */
 
-export type TrackSetter = (field: keyof TrackDraft, val: string | boolean) => void;
+export type TrackSetter = (field: keyof TrackDraft, val: string | boolean | TrackSegmentDraft[]) => void;
 
 const OPERATIONS: TrackOperation[] = ["biparting", "oneway", "walkalong"];
 const SUBTLE: CSSProperties = { color: "#c4c9d2", textTransform: "none", letterSpacing: 0, fontWeight: 500 };
@@ -257,7 +257,7 @@ export function TrackFields({
 /** Parts table rows: the live BOM, or — read-only on a deleted series — the line's saved parts. */
 function PartsTable({ bom, stored }: { bom: TrackBom; stored?: SpecItem["components"] }) {
   const rows = bom.rows.length
-    ? bom.rows.map((r) => ({ key: r.role + (r.sku ? ":" + r.sku : ""), label: r.label, part: r.missing ? r.desc : `${r.sku} · ${r.desc}`, qty: r.qty, unit: r.unit, ext: r.ext, missing: r.missing }))
+    ? bom.rows.map((r, i) => ({ key: r.role + (r.sku ? ":" + r.sku : "") + ":" + i, label: r.label, part: r.missing ? r.desc : `${r.sku} · ${r.desc}`, qty: r.qty, unit: r.unit, ext: r.ext, missing: r.missing }))
     : (stored || []).map((c, i) => ({ key: c.sku + i, label: c.label, part: c.sku, qty: c.qty, unit: c.unit, ext: c.price * c.qty, missing: false }));
   if (!rows.length) return null;
   return (

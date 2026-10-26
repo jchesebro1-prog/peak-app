@@ -39433,7 +39433,12 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
 // ---- the form: draft ↔ config, fresh draft, series list ----
 {
   const cfg = t274Cfg({ operation: "biparting", curved: true, radiusFt: 15, trimFt: 25, carrierSpacingIn: 10, hangerSpacingFt: 4, label: "Mid", qty: 3 });
-  ok(t274Eq(t274bFromDraft(t274bToDraft(cfg)), t274bClean(cfg)), "#274B form: a stored config → the form → back is the same config (reopen round-trip)");
+  // #369: a reopened legacy curve is one arc row, so it re-saves with a path (and a run read off the path's 4-decimal sweep) — same fields, same parts
+  const rt274 = t274bFromDraft(t274bToDraft(cfg));
+  const want274 = t274bClean(cfg);
+  ok(t274Eq({ ...rt274, path: undefined, runFt: undefined }, { ...want274, runFt: undefined }) && Math.abs(rt274.runFt - want274.runFt) < 1e-3 && rt274.path?.length === 1
+    && t274Eq(t274Qty(rt274, t274Series()), t274Qty(want274, t274Series())) && t274Eq(t274bFromDraft(t274bToDraft(t274Cfg({ operation: "walkalong" }))), t274bClean(t274Cfg({ operation: "walkalong" }))),
+    "#274B form: a stored config → the form → back is the same config (reopen round-trip)");
   const d = { ...t274bToDraft(t274Cfg({ operation: "walkalong" })), qty: "", carrierSpacing: "", hangerSpacing: "", trim: "30" };
   const back = t274bFromDraft(d);
   ok(back.qty === 1 && back.carrierSpacingIn === undefined && back.hangerSpacingFt === undefined && back.trimFt === undefined,
