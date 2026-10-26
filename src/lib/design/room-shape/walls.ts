@@ -51,15 +51,23 @@ export function wallAt(idx: SegIndex, p: ShapePt, n: ShapePt, rule: WallRule): b
   return OUT_STEPS_FT.some((d) => idx.nearest({ x: p.x + n.x * d, y: p.y + n.y * d }, FACE_FT) !== Infinity);
 }
 
-/** Runs shorter than MIN_RUN_SAMPLES take their neighbour's value (the first run its successor's). */
+/**
+ * Runs shorter than MIN_RUN_SAMPLES take their neighbour's value (the first run its successor's). An edge too short
+ * to hold one full-length run (MIN_RUN_SAMPLES samples or fewer) is never split: every sample takes the majority
+ * value, ties going to walled.
+ */
 function smooth(flags: boolean[]): boolean[] {
+  if (flags.length <= MIN_RUN_SAMPLES) {
+    const walled = flags.filter(Boolean).length;
+    return flags.map(() => walled * 2 >= flags.length);
+  }
   const f = flags.slice();
   for (let pass = 0; pass < 3; pass++) {
     let k = 0;
     while (k < f.length) {
       let j = k;
       while (j < f.length && f[j] === f[k]) j++;
-      if (j - k < MIN_RUN_SAMPLES && f.length > MIN_RUN_SAMPLES) {
+      if (j - k < MIN_RUN_SAMPLES) {
         const v = k > 0 ? f[k - 1] : j < f.length ? f[j] : f[k];
         for (let q = k; q < j; q++) f[q] = v;
       }
@@ -73,7 +81,7 @@ const r12 = (p: ShapePt): ShapePt => ({ x: Math.round(p.x * 12) / 12, y: Math.ro
 
 /**
  * #370 (Amendment A): an outline's edges split wherever the drawing changes between wall and no wall along them
- * (samples every 3", runs under 18" follow their neighbours); edges with no wall carry `open: true`. Split points
+ * (samples every 3", runs under 18" follow their neighbours; an edge of 18" or less is never split, it takes its majority); edges with no wall carry `open: true`. Split points
  * round to the inch.
  */
 export function splitByWalls(pts: readonly ShapePt[], edges: readonly ShapeEdge[], idx: SegIndex, rule: WallRule): { pts: ShapePt[]; edges: ShapeEdge[] } {

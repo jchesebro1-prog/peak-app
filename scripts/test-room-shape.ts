@@ -96,6 +96,12 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
   ok(sp.pts.length === 5 && topOpen.length === 2 && topOpen.some((x) => x.e.open && Math.min(x.p.x, x.q.x) >= 7.9 && Math.min(x.p.x, x.q.x) <= 8.1) && topOpen.some((x) => !x.e.open),
     "#370 walls: an edge walled for 8' of 20' splits at the change, the rest open");
   ok(near(walledShare({ ...sp, kind: "room" }), 48 / 60, 0.02), "#370 walls: walledShare = walled length ÷ perimeter");
+  // a 1' edge with a double line along only 4" of it is not split: one flag for the whole edge
+  const sq: ShapePt[] = [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 5 }, { x: 0, y: 5 }];
+  const sqEdges: ShapeEdge[] = sq.map(() => ({ kind: "line" }));
+  const shortSegs: Seg[] = [[{ x: 0, y: 0 }, { x: 1, y: 0 }], [{ x: 0, y: -0.5 }, { x: 1 / 3, y: -0.5 }]];
+  const ss = splitByWalls(sq, sqEdges, new SegIndex(shortSegs), "double");
+  ok(ss.pts.length === sq.length && ss.edges.length === sq.length, "#370 walls: a 1' edge walled for 4\" of it is not split (same corner count)");
 }
 
 export async function roomShapeDbChecks(ok: Ok): Promise<void> {
