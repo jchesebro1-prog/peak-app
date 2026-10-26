@@ -148,7 +148,7 @@ scale that fits the box, smallest when none does). `detail: "submittal" | "clien
   `CS-n.1`, titled `Layout — <title>`, with the full drawing area given to the layout view and the
   title block's scale `Plan <scale>`. The title block's index/total count layout sheets
   (`total` = sheets actually printed). Sheet numbers of later types do not shift (`.1` suffix).
-- **Client:** a curved type adds a `Track layout` block (client shapes) under "How it hangs"; still one
+- **Client:** a curved type adds a `Track layout` block (client shapes) beside "How it hangs"; still one
   page per type.
 - Every consumer already renders these components — `/estimator/cut-sheets`, the signed
   `/print/cutsheets/[quoteId]` route (client-package `cutsheets/` folder), the estimate PDF's Cut sheets

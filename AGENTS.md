@@ -1672,5 +1672,17 @@ See `.env.example`.
     Jeff-gated: a MyETC API key, the first Pull on production (check the "new" count
     against duplicates) and Import, the next morning's sync line. Punch item #368.
 
+69. ✅ **Curved track layout + Preliminary cut sheets** (#369, D1304–D1310) — a curved
+    track is a 1–12 segment path of straight and arc segments (`src/lib/track-path/`;
+    `runFt` = path length, `radiusFt` = tightest arc, legacy curves read as one left arc
+    at the same price) priced per segment with a hanging point at every joint. The Track
+    configurator edits it as a segment list with presets and a live plan
+    (`estimator/track-segments.tsx`). A curved type gets a layout view
+    (`src/lib/curtain-cut-sheets/layout.ts`; concave side to the AUDIENCE) — CS-n.1 in
+    Submittal, beside "How it hangs" in Client; oversize shrinks to fit, reads NTS. Every
+    cut sheet carries the always-on PRELIMINARY — NOT FOR CONSTRUCTION stamp. No migration;
+    roll forward. Remaining is Jeff-gated: `curvedSectionFt` / `minRadiusFt` per series,
+    then a real curved track printed on production. Punch item #369.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

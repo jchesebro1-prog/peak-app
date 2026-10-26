@@ -13855,3 +13855,31 @@ Jeff: a sent estimate keeps its pricing unless a revision is sent. Lines already
 ## D1303. Re-price on Revise (#368, 2026-10-23)
 
 Jeff: revising a sent estimate re-prices it. When a sent / won / lost Estimator system quote moves to Draft (`setStatus`'s revise, every path), plain catalog lines whose live cost differs are re-priced inside the same locked write: cost = catalog cost, price = old price × new cost ÷ old cost (cents) — the line keeps its own cost-to-sell ratio, so it is right under margin and under #367's markup. Not re-priced: cost 0 (stored or catalog), bonus, vendor, custom / allowance / placeholder, curtain and its track, assembly / rack / track / fixture lines, labor, `por` lines and unresolved SKUs; project-discounted lines compare at normal cost and are re-discounted. A typed system price is kept. Then the save's own derivation (`deriveEstimatorSections`: project discounts + bonus lines, extracted from `saveQuoteAction` unchanged) and `reconcileEstimatorValue` run. `Quote.repricedOnRevise = { at, by, count, delta, lines (≤ 500), typedSystems }` is stored only when something changed (`delta` = stored value after − before); revisions are never touched. Build shows a dismissible banner while the quote is a draft. The status menu, stage bar and bid addendum save unsaved edits before revising. No undo (lines stay editable). The Rewards credit re-clamps on the next save.
+
+## D1304. Curved tracks are a segment path (#369, 2026-10-25)
+
+Jeff, brainstorm 2026-10-25. A curved track is a list of 1–12 segments, each a straight run or an arc (radius, sweep angle, direction), instead of one arc. `runFt` is the path length: rounded to 4 decimal places when stored (angle drift would otherwise leak into straight pricing on untick) and kept as the straight fallback. `radiusFt` holds the tightest arc so older builds still read a radius. A legacy curve (one `radiusFt`, no path) reads as one left arc and keeps its price. Pure geometry lives in `src/lib/track-path/`.
+
+## D1305. Pricing is per segment, with a hanging point at every joint (#369, 2026-10-25)
+
+Jeff, 2026-10-25. Sections, sticks, carriers, center supports, operating line and hanging points are counted per segment; every joint between segments is a hanging point and gets a splice and a pipe clamp where the series maps them. Curved tracks, legacy ones included, forgive up to 0.001 ft of length overshoot (`PATH_LEN_EPS_FT`, `ceilAlong` in `src/lib/track-path`) in every path-derived count, because 4-decimal angles drift a few hundred-thousandths of a foot. Consequence: a legacy curve whose run is within 0.012" above an exact multiple counts one fewer piece. Straight tracks are unchanged. Accepted degenerate deviation: a legacy curved bi-part whose run is shorter than the series overlap (under about 2') counts fewer hanging points than before, because the lap is clamped to the path length.
+
+## D1306. The layout sheet CS-n.1 (#369, 2026-10-25)
+
+A curved curtain's track gets a layout view. Submittal style: a title-blocked sheet numbered after its type's sheet (CS-2 → CS-2.1), and the set's sheet count includes it. Client style: a Track layout drawing placed beside "How it hangs", still one page (this refines the spec's "under"). Curtains on different paths, openings or hanger spacings are separate types (separate cut sheets). The hanging-point caption counts per track and says "per track" when a type has several tracks, so n × tracks equals the hardware table's clamp row.
+
+## D1307. The concave side faces the audience (#369, 2026-10-25)
+
+Jeff, 2026-10-25. The layout draws the path with its concave side toward the audience and an AUDIENCE arrow and label. There is no toggle.
+
+## D1308. An oversized track layout shrinks to fit and reads NTS (#369, 2026-10-25)
+
+Jeff, during the build. The plan had said a layout too big for its box falls back to 1/16" scale, which drew off the 2.6" Client box. Instead the layout shrinks to fit the box and its scale note reads NTS (not to scale).
+
+## D1309. "PRELIMINARY — NOT FOR CONSTRUCTION" on every cut sheet (#369, 2026-10-25)
+
+Jeff, 2026-10-25. Every cut sheet, both styles, prints a "PRELIMINARY — NOT FOR CONSTRUCTION" banner, and the Submittal title block carries the same stamp. Always on, no setting. The Grid drawing set is unchanged.
+
+## D1310. Rollback past #369 (#369, 2026-10-25)
+
+No migration; the path is stored on the track configuration. An older build ignores the path and prices a path track as one arc of `runFt` at its tightest radius. That is acceptable: roll forward rather than back.
