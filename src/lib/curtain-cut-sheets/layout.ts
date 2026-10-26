@@ -43,6 +43,8 @@ export function trackLayoutSource(
 ): TrackLayoutSource | null {
   const path = resolvePath(config);
   if (!path || !path.length || !(pathLengthFt(path) > 0)) return null;
+  // a legacy curve with run > 2πR would draw a coil; the configurator blocks it (angle error), so the sheet draws nothing
+  if (path.some((s) => s.kind === "arc" && !(Number.isFinite(s.sweepDeg) && s.sweepDeg <= 360))) return null;
   const bipart = partsAtCenter(config);
   return {
     path,
@@ -52,6 +54,28 @@ export function trackLayoutSource(
     hangerSpacingFt: positive(config.hangerSpacingFt) ? config.hangerSpacingFt : hangerSpacingFor(series, config.mounting),
     trackQty: Number.isInteger(config.qty) && config.qty > 0 ? config.qty : 1,
   };
+}
+
+/**
+ * A type's layout from its first member (members share a type key, so a path and hanger spacing), with `trackQty`
+ * = the TOTAL track count: the sum of `track.qty` over the DISTINCT track lines among the members (the way collect.ts
+ * trackHardware dedupes), each defaulting to 1. So the caption's n × total tracks = the hardware table's mount qty.
+ */
+export function layoutOfCurtains(
+  curtains: ReadonlyArray<{ mount: { track?: { layout?: TrackLayoutSource; line?: { track?: { qty?: unknown } } } } }>
+): TrackLayoutSource | null {
+  const layout = curtains[0]?.mount.track?.layout;
+  if (!layout) return null;
+  const lines = new Set<object>();
+  let trackQty = 0;
+  for (const c of curtains) {
+    const line = c.mount.track?.line;
+    if (!line || lines.has(line)) continue;
+    lines.add(line);
+    const q = line.track?.qty;
+    trackQty += typeof q === "number" && Number.isInteger(q) && q > 0 ? q : 1;
+  }
+  return { ...layout, trackQty: Math.max(1, trackQty) };
 }
 
 /** Every hanging point on ONE track, as path distances (both legs of a lapped bi-part). */

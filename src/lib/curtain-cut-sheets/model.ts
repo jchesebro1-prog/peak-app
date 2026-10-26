@@ -11,7 +11,7 @@ import { revLetter, titleBlockData, type RevisionRow, type TitleBlockData, type 
 import type { QuoteRevision } from "@/lib/stores/quotes";
 import type { CurtainType } from "./collect";
 import { elevation, ftIn, inchLabel } from "./geometry";
-import { CLIENT_LAYOUT_BOX, layoutView, SUBMITTAL_LAYOUT_BOX, type TrackLayoutSource } from "./layout";
+import { CLIENT_LAYOUT_BOX, layoutOfCurtains, layoutView, SUBMITTAL_LAYOUT_BOX, type TrackLayoutSource } from "./layout";
 import { mountDetail, type MountDetail } from "./mount-details";
 import type { Shape } from "./shapes";
 import { BOTTOM_FINISH_LABELS, MOUNT_KEY_LABELS, TOP_FINISH_LABELS, type CurtainMountKey } from "./vocab";
@@ -86,18 +86,7 @@ export function cutSheetCssVars(): Record<string, string> {
  * So the caption's n × total tracks = the hardware table's mount qty.
  */
 export function layoutSourceOf(type: CurtainType): TrackLayoutSource | null {
-  const layout = type.curtains[0]?.mount.track?.layout;
-  if (!layout) return null;
-  const lines = new Set<object>();
-  let trackQty = 0;
-  for (const c of type.curtains) {
-    const line = c.mount.track?.line;
-    if (!line || lines.has(line)) continue;
-    lines.add(line);
-    const q = line.track?.qty;
-    trackQty += typeof q === "number" && Number.isInteger(q) && q > 0 ? q : 1;
-  }
-  return { ...layout, trackQty: Math.max(1, trackQty) };
+  return layoutOfCurtains(type.curtains);
 }
 
 /** Submittal pages one type prints: its sheet, plus a layout sheet when its track is curved. */

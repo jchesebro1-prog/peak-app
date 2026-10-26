@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
-import { sanitizeTrackSeries, type TrackSeries } from "../src/lib/track-series";
+import { sanitizeTrackSeries, TRACK_ROLE_NAMES, type TrackSeries } from "../src/lib/track-series";
 import { trackQuantities, type TrackConfig } from "../src/lib/track-engine";
 import { collectCurtainTypes } from "../src/lib/curtain-cut-sheets/collect";
 import { CLIENT_ELEV_BOX, CUT_SHEET_STAMP, cutSheetModel, cutSheetPageCount, SUBMITTAL_ELEV_BOX, submittalSheetIndexes, type CutSheetContext } from "../src/lib/curtain-cut-sheets/model";
@@ -371,7 +371,7 @@ function trackItem(id: number, c: TrackConfig, s: TrackSeries, key: string): Spe
   const rows = trackQuantities(c, s).rows;
   return line(id, {
     sku: "TRK-ADC-280", desc: "Main track", unit: "lot", track: c, curtainTrackKey: key,
-    components: rows.map((r) => ({ sku: r.sku || s.parts[r.role]?.sku || r.role, label: r.role, role: ["battenClamp", "ceilingHanger"].includes(r.role) ? "mount" : "other", qty: r.qty, unit: "ea", cost: 1, price: 2 })),
+    components: rows.map((r) => ({ sku: r.sku || s.parts[r.role]?.sku || r.role, label: TRACK_ROLE_NAMES[r.role], role: ["battenClamp", "ceilingHanger"].includes(r.role) ? "mount" : "other", qty: r.qty, unit: "ea", cost: 1, price: 2 })),
   } as Partial<SpecItem>);
 }
 
@@ -430,6 +430,32 @@ export function curvedCutSheetChecks(ok: Ok) {
   ok(src("src/lib/curtain-cut-sheets/load.ts").includes("submittalSheetIndexes(result.types)"), "#369 sheets: load numbers the Submittal sheets with submittalSheetIndexes");
 }
 
+export function finalReviewChecks(ok: Ok) {
+  // 1. sweep guard
+  ok(trackLayoutSource(cfg({ curved: true, radiusFt: 3, runFt: 40 }), series({ minRadiusFt: undefined })) === null, "#369 final: a legacy curve over 360 degrees draws no layout");
+  ok(trackLayoutSource(cfg({ curved: true, radiusFt: 30, runFt: 40 }), series()) !== null, "#369 final: a normal legacy curve still draws");
+  // 2. cleanPath null-safety
+  const cleaned = cleanPath([null, { kind: "straight", lengthFt: 5 }, { kind: "zig" }] as unknown as TrackSegment[]);
+  ok(cleaned.length === 1 && cleaned[0].kind === "straight", "#369 final: cleanPath drops non-objects and unknown kinds");
+  ok(JSON.stringify(resolvePath({ curved: true, runFt: 5, path: [null] as unknown as TrackSegment[] })) === "[]", "#369 final: a null path entry resolves to an empty path");
+  ok(collect([curtain(1, { curtainTrackKey: "ct-1-n" }), line(2, { sku: "TRK", track: cfg({ curved: true, path: [null] as unknown as TrackSegment[], runFt: 5 }), curtainTrackKey: "ct-1-n" } as Partial<SpecItem>)], [series()]).types.length === 1, "#369 final: a stored null path entry does not crash the collector");
+  // 3. import purity
+  ok(!/^\s*import\b/m.test(src("src/lib/track-path/index.ts")), "#369 final: track-path has no imports at all");
+  const layoutImports = src("src/lib/curtain-cut-sheets/layout.ts").split("\n").filter((l) => /^\s*import\b/.test(l));
+  ok(layoutImports.length > 0 && !layoutImports.some((l) => /@\/lib\/stores\/|@\/db|from "react"|@anthropic-ai|@\/lib\/ai\b/.test(l)), "#369 final: layout.ts imports no store, db, react or AI");
+  // 4. quoted-vs-live hanging points
+  const s = series();
+  const bi = [S(10), A(8, 180), S(10)];
+  const c = cfg({ curved: true, path: bi, runFt: pathLengthFt(bi), operation: "biparting" });
+  const items = [curtain(1, { curtainTrackKey: "ct-1-a" }), trackItem(2, c, s, "ct-1-a")];
+  ok(!collect(items, [s]).types[0].warnings.some((w) => w.startsWith("Track layout shows")), "#369 final: no drift warning when the series is unchanged");
+  const drifted = collect(items, [series({ hangerSpacingFt: 5 })]).types[0].warnings.find((w) => w.startsWith("Track layout shows"));
+  ok(!!drifted && drifted.includes("hanging points but the quoted track has") && drifted.includes("Update to re-price"), "#369 final: a changed series spacing warns that the quote and layout disagree");
+  // 5. minimum segment
+  ok(pathErrors([S(1 / 24), A(8, 90)], { name: "ADC 280", curvedSectionFt: 10, minRadiusFt: 5, hasSticks: true }, 100).includes('Segment 1: at least 1" long.'), "#369 final: a straight under an inch is refused");
+  ok(!pathErrors([S(1 / 12), A(8, 90)], { name: "ADC 280", curvedSectionFt: 10, minRadiusFt: 5, hasSticks: true }, 100).some((e) => e.includes("at least 1")), "#369 final: exactly an inch is fine");
+}
+
 export async function curvedTrackChecks(ok: Ok) {
   stampChecks(ok);
   trackPathChecks(ok);
@@ -438,6 +464,7 @@ export async function curvedTrackChecks(ok: Ok) {
   layoutViewChecks(ok);
   configuratorChecks(ok);
   curvedCutSheetChecks(ok);
+  finalReviewChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-curved-track.ts")) {

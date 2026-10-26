@@ -13,6 +13,8 @@ export type TrackSegment =
   | { kind: "arc"; radiusFt: number; sweepDeg: number; turn: "left" | "right" };
 
 export const MAX_TRACK_SEGMENTS = 12;
+/** A straight shorter than this adds a hanging point but no piece. */
+const MIN_STRAIGHT_FT = 1 / 12;
 const RAD = Math.PI / 180;
 
 /** Length overshoot (ft) forgiven when counting pieces, carriers and hanging points along a path — covers an angle shown to 4 decimals (≤ ~1e-3 ft at any sane radius). */
@@ -139,6 +141,7 @@ export function pathErrors(path: readonly TrackSegment[], series: PathSeriesFact
     const at = `Segment ${i + 1}`;
     if (s.kind === "straight") {
       if (!positive(s.lengthFt)) errors.push(`${at}: enter the length.`);
+      else if (s.lengthFt < MIN_STRAIGHT_FT) errors.push(`${at}: at least 1" long.`);
       return;
     }
     if (!positive(s.radiusFt)) errors.push(`${at}: enter the radius.`);
@@ -223,9 +226,15 @@ export function legHangingPoints(path: readonly TrackSegment[], leg: LegSpan, sp
 
 /** Only the segment fields, so a stored config never carries stray keys. */
 export function cleanPath(path: readonly TrackSegment[]): TrackSegment[] {
-  return path.map((s) =>
-    s.kind === "straight" ? { kind: "straight", lengthFt: s.lengthFt } : { kind: "arc", radiusFt: s.radiusFt, sweepDeg: s.sweepDeg, turn: s.turn === "right" ? "right" : "left" }
-  );
+  // stored configs aren't server-sanitized: an entry that isn't an object, or has an unknown kind, is dropped rather than thrown on
+  const out: TrackSegment[] = [];
+  for (const s of path as readonly unknown[]) {
+    if (!s || typeof s !== "object") continue;
+    const seg = s as TrackSegment;
+    if (seg.kind === "straight") out.push({ kind: "straight", lengthFt: seg.lengthFt });
+    else if (seg.kind === "arc") out.push({ kind: "arc", radiusFt: seg.radiusFt, sweepDeg: seg.sweepDeg, turn: seg.turn === "right" ? "right" : "left" });
+  }
+  return out;
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
