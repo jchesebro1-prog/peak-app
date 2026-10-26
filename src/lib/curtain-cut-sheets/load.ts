@@ -111,7 +111,7 @@ export async function loadCutSheets(quoteId: string, opts: { images: "url" | "da
     company: { name: settings.companyName, logoDark: settings.logoDark ?? null, offices: settings.offices },
     preparedBy: doc.preparedByName,
     index,
-    total,
+    total, // the Submittal set's total; the Client style has no title block, so it never prints it
     now,
   });
   const models: Record<CutSheetStyle, CutSheetModel[]> = {

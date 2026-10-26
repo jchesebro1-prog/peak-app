@@ -380,10 +380,11 @@ export function curtainTypeKey(c: CutSheetCurtain): string {
     c.bottomFinish,
     c.mount.key,
     // #354 review: a two-half walk-along never merges with another hang (the sheet states it).
-    // #369: a curved track's layout is part of its type — different paths print different layout sheets.
+    // #369: a curved track's layout is part of its type — different paths print different layout sheets, and
+    // a different hanger spacing draws different hanging points, so it splits types too (`:path:<sig>:<opening>:hs<ft>`).
     c.mount.track
       ? `track:${c.mount.track.seriesId}:${c.mount.track.carrierSpacingIn}${c.mount.track.twoHalfWalkAlong ? ":2w" : ""}${
-          c.mount.track.layout ? `:path:${pathSignature(c.mount.track.layout.path)}:${c.mount.track.layout.opening}` : ""
+          c.mount.track.layout ? `:path:${pathSignature(c.mount.track.layout.path)}:${c.mount.track.layout.opening}:hs${c.mount.track.layout.hangerSpacingFt}` : ""
         }`
       : "",
   ].join("|");

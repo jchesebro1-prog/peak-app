@@ -405,6 +405,21 @@ export function curvedCutSheetChecks(ok: Ok) {
   const idx = submittalSheetIndexes([t, straight, t]);
   ok(idx.starts.join() === "1,3,4" && idx.total === 5, "#369 sheets: Submittal sheet numbers count layout sheets");
 
+  // two identical curtains on their own track lines merge; the caption counts both tracks
+  const lineCfg = (hs?: number) => cfg({ curved: true, path: bi, runFt: pathLengthFt(bi), operation: "biparting", ...(hs ? { hangerSpacingFt: hs } : {}) });
+  const pair = (hs2?: number) => collect([
+    curtain(1, { curtainTrackKey: "ct-1-a" }), trackItem(2, lineCfg(), s, "ct-1-a"),
+    curtain(3, { curtainTrackKey: "ct-3-b" }), trackItem(4, lineCfg(hs2), s, "ct-3-b"),
+  ], [s]);
+  const merged = pair();
+  ok(merged.types.length === 1, "#369 sheets: two identical curved curtains on two track lines are one type");
+  const mt = merged.types[0];
+  const msub = cutSheetModel(mt, { ...CTX, index: 1, total: 2, style: "submittal" });
+  const mClamps = mt.hardware.find((h) => h.sku === "P-battenClamp")!.qty;
+  ok(msub.layout!.hangingCount * 2 === mClamps, "#369 sheets: a merged type's hanging points x its tracks equal the hardware table");
+  ok(texts(msub.layout!.shapes).includes(`Batten clamps (${msub.layout!.hangingCount} per track)`), "#369 sheets: a merged type's caption reads per track");
+  ok(pair(5).types.length === 2, "#369 sheets: different hanger spacings are separate types");
+
   const pages = src("src/components/cutsheets/cut-sheet-pages.tsx");
   ok(pages.includes("function LayoutSheet") && /\{m\.layout && <LayoutSheet m=\{m\} \/>\}/.test(pages) && pages.includes("Track layout"), "#369 sheets: the Submittal set prints the layout sheet; the Client sheet the Track layout");
   ok((pages.match(/<Stamp \/>/g) || []).length >= 3, "#369 sheets: the layout sheet is stamped too");
