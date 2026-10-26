@@ -38,6 +38,9 @@ function check(next: RoomShape, touched: readonly string[]): EditResult {
   for (const id of touched) {
     const r = next.rooms.find((x) => x.id === id);
     if (!r) continue;
+    const lim = SHAPE_LIMITS.coordFt;
+    const inPlan = (p: ShapePt) => Number.isFinite(p.x) && Number.isFinite(p.y) && Math.abs(p.x) <= lim && Math.abs(p.y) <= lim;
+    if (!r.pts.every(inPlan) || !r.edges.every((e) => (e.kind === "curve" ? inPlan(e.c1) && inPlan(e.c2) : e.kind === "arc" ? Number.isFinite(e.bulge) : true))) return bad("That's off the plan.");
     if (r.pts.length < SHAPE_LIMITS.minPts) return bad("A room needs at least 3 corners.");
     if (r.pts.some((p, i) => dist(p, r.pts[(i + 1) % r.pts.length]) < 0.01)) return bad("Two corners can't sit in the same place.");
     if (selfCrosses(r)) return bad(`That would make the ${r.name} cross itself.`);
@@ -55,7 +58,7 @@ export function applyEdit(shape: RoomShape, op: EditOp): EditResult {
   if (!r) return bad("That room is gone — try again.");
   const n = r.pts.length;
   const edgeIdx = "edge" in op ? op.edge : -1;
-  if ("edge" in op && !(edgeIdx >= 0 && edgeIdx < n)) return bad("That wall is gone — try again.");
+  if ("edge" in op && !(Number.isInteger(edgeIdx) && edgeIdx >= 0 && edgeIdx < n)) return bad("That wall is gone — try again.");
   const a = edgeIdx >= 0 ? r.pts[edgeIdx] : null, b = edgeIdx >= 0 ? r.pts[(edgeIdx + 1) % n] : null;
   const e: ShapeEdge | null = edgeIdx >= 0 ? r.edges[edgeIdx] : null;
 
@@ -75,7 +78,7 @@ export function applyEdit(shape: RoomShape, op: EditOp): EditResult {
 
   switch (op.op) {
     case "move": {
-      if (!(op.i >= 0 && op.i < n)) return bad("That corner is gone — try again.");
+      if (!(Number.isInteger(op.i) && op.i >= 0 && op.i < n)) return bad("That corner is gone — try again.");
       if (![op.to.x, op.to.y].every((v) => Number.isFinite(v) && Math.abs(v) <= SHAPE_LIMITS.coordFt)) return bad("That's off the plan.");
       return check(next, moveGlued(op.i, op.to, op.glue));
     }
@@ -98,7 +101,9 @@ export function applyEdit(shape: RoomShape, op: EditOp): EditResult {
     }
     case "setHandles": {
       if (e!.kind !== "curve") return bad("That wall isn't free-form.");
-      r.edges[edgeIdx] = { ...e!, c1: op.c1, c2: op.c2 };
+      const okH = (p: ShapePt) => !!p && Number.isFinite(p.x) && Number.isFinite(p.y) && Math.abs(p.x) <= SHAPE_LIMITS.coordFt && Math.abs(p.y) <= SHAPE_LIMITS.coordFt;
+      if (!okH(op.c1) || !okH(op.c2)) return bad("That's off the plan.");
+      r.edges[edgeIdx] = { ...e!, c1: { x: op.c1.x, y: op.c1.y }, c2: { x: op.c2.x, y: op.c2.y } };
       return check(next, [r.id]);
     }
     case "straighten":
@@ -109,6 +114,7 @@ export function applyEdit(shape: RoomShape, op: EditOp): EditResult {
       return { ok: true, shape: next };
     case "setLength": {
       if (e!.kind !== "line") return bad("Only a straight wall takes a length — use Radius or Arc length for a curve.");
+      if (!Number.isFinite(op.ft)) return bad("That's off the plan.");
       if (!(op.ft > 0)) return bad("The length must be more than 0.");
       const L = dist(a!, b!);
       if (L < 1e-9) return bad("That wall has no direction to grow along.");
@@ -118,22 +124,24 @@ export function applyEdit(shape: RoomShape, op: EditOp): EditResult {
     }
     case "setRadius": {
       if (e!.kind !== "arc") return bad("Only a curved wall has a radius.");
+      if (!Number.isFinite(op.ft)) return bad("That's off the plan.");
       const L = dist(a!, b!);
       const bl = bulgeForRadius(L, op.ft, e!.bulge);
       if (bl === null) return bad(`The radius must be at least ${fmtFeet(L / 2)} — half the wall's straight length.`);
-      r.edges[edgeIdx] = withOpen({ kind: "arc", bulge: bl }, !!e!.open);
+      r.edges[edgeIdx] = withOpen(Math.abs(bl) < 1e-3 ? { kind: "line" } : { kind: "arc", bulge: bl }, !!e!.open);
       return check(next, [r.id]);
     }
     case "setArcLength": {
       if (e!.kind !== "arc") return bad("Only a curved wall has an arc length.");
+      if (!Number.isFinite(op.ft)) return bad("That's off the plan.");
       const L = dist(a!, b!);
       const bl = bulgeForArcLength(L, op.ft, e!.bulge);
       if (bl === null) return bad(`The arc must be longer than the straight distance (${fmtFeet(L)}).`);
-      r.edges[edgeIdx] = withOpen({ kind: "arc", bulge: bl }, !!e!.open);
+      r.edges[edgeIdx] = withOpen(Math.abs(bl) < 1e-3 ? { kind: "line" } : { kind: "arc", bulge: bl }, !!e!.open);
       return check(next, [r.id]);
     }
     case "deletePoint": {
-      if (!(op.i >= 0 && op.i < n)) return bad("That corner is gone — try again.");
+      if (!(Number.isInteger(op.i) && op.i >= 0 && op.i < n)) return bad("That corner is gone — try again.");
       if (n <= SHAPE_LIMITS.minPts) return bad("A room needs at least 3 corners.");
       const prev = (op.i - 1 + n) % n;
       const open = !!r.edges[prev].open && !!r.edges[op.i].open;
@@ -143,10 +151,10 @@ export function applyEdit(shape: RoomShape, op: EditOp): EditResult {
       return check(next, [r.id]);
     }
     case "rename":
-      r.name = op.name.trim().slice(0, SHAPE_LIMITS.name) || ROOM_TYPES[r.type].label;
+      r.name = (typeof op.name === "string" ? op.name : "").trim().slice(0, SHAPE_LIMITS.name) || ROOM_TYPES[r.type].label;
       return { ok: true, shape: next };
     case "retype":
-      if (!ROOM_TYPES[op.type]) return bad("That isn't a room type.");
+      if (typeof op.type !== "string" || !Object.hasOwn(ROOM_TYPES, op.type)) return bad("That isn't a room type.");
       r.type = op.type;
       return { ok: true, shape: next };
     case "deleteRoom":

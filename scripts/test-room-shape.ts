@@ -347,8 +347,40 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
     ok(near(s45.pt.x, s45.pt.y, 1e-9), "#370 snap: 45° snaps");
     const sg = snapCorner({ x: 3.3, y: 7.8 }, [{ at: { x: 0, y: 0 }, wallDir: null }], { gridFt: 1, angles: true });
     ok(sg.pt.x === 3 && sg.pt.y === 8 && sg.guide === null, "#370 snap: off every direction, the point rounds to the grid (1' with Shift)");
-    const rel = snapCorner({ x: 10, y: 10.4 }, [{ at: { x: 10, y: 0 }, wallDir: { x: Math.cos(0.3), y: Math.sin(0.3) } }], { gridFt: 0.5, angles: true });
-    ok(rel.guide !== null, "#370 snap: 90° relative to the neighbour's own wall counts");
+    // relative candidates: a neighbour wall at 0.3 rad from a corner at the origin; the point sits ~10' out along 0.3 + π/2 (≥ 4° from every multiple of 45°)
+    const wAng = 0.3, rAng = wAng + Math.PI / 2 + 0.01;
+    const rel = snapCorner({ x: 10 * Math.cos(rAng), y: 10 * Math.sin(rAng) }, [{ at: { x: 0, y: 0 }, wallDir: { x: Math.cos(wAng), y: Math.sin(wAng) } }], { gridFt: 0.5, angles: true });
+    const relOff = snapCorner({ x: 10 * Math.cos(rAng), y: 10 * Math.sin(rAng) }, [{ at: { x: 0, y: 0 }, wallDir: null }], { gridFt: 0.5, angles: true });
+    const relLen = Math.hypot(rel.pt.x, rel.pt.y), relCross = rel.pt.x * Math.cos(wAng + Math.PI / 2) + rel.pt.y * Math.sin(wAng + Math.PI / 2);
+    ok(relOff.guide === null && rel.guide !== null && near(rel.pt.x * Math.sin(wAng + Math.PI / 2) - rel.pt.y * Math.cos(wAng + Math.PI / 2), 0, 1e-9) && near(relCross, relLen, 1e-9),
+      "#370 snap: 90° relative to the neighbour's own wall counts (and only with its wall direction)");
+    // hostile input
+    const snNaN = snapCorner({ x: NaN, y: 1 }, [{ at: { x: 0, y: 0 }, wallDir: null }], { gridFt: 0.5, angles: true });
+    ok(snNaN.guide === null && Number.isNaN(snNaN.pt.x), "#370 snap: a non-finite point comes back unchanged with no guide");
+    const nofin = (r: { ok: boolean }) => !r.ok;
+    const bez = get(applyEdit(base, { op: "toFreeform", room: house.id, edge: 0 }));
+    const arcShape = get(applyEdit(base, { op: "setBulge", room: house.id, edge: 0, bulge: 0.5 }));
+    ok(nofin(applyEdit(base, { op: "setLength", room: house.id, edge: 0, ft: Infinity, from: "far" })), "#370 edit: an infinite length is refused");
+    ok(nofin(applyEdit(base, { op: "setLength", room: house.id, edge: 0, ft: NaN, from: "far" })), "#370 edit: a NaN length is refused");
+    ok(nofin(applyEdit(bez, { op: "setHandles", room: house.id, edge: 0, c1: { x: NaN, y: 0 }, c2: { x: 1, y: 1 } })), "#370 edit: a NaN handle is refused");
+    ok(nofin(applyEdit(bez, { op: "setHandles", room: house.id, edge: 0, c1: { x: 5000, y: 0 }, c2: { x: 1, y: 1 } })), "#370 edit: a handle off the plan is refused");
+    ok(nofin(applyEdit(arcShape, { op: "setRadius", room: house.id, edge: 0, ft: Infinity })), "#370 edit: an infinite radius is refused");
+    ok(nofin(applyEdit(arcShape, { op: "setArcLength", room: house.id, edge: 0, ft: Infinity })), "#370 edit: an infinite arc length is refused");
+    const bigR = applyEdit(arcShape, { op: "setRadius", room: house.id, edge: 0, ft: 1e6 });
+    ok(bigR.ok && get(bigR).rooms[0].edges[0].kind === "line", "#370 edit: a radius so large the bow vanishes gives a straight wall");
+    let threw = false, r15: unknown[] = [];
+    try {
+      r15 = [
+        applyEdit(base, { op: "move", room: house.id, i: 1.5, to: { x: 1, y: 1 }, glue: true }),
+        applyEdit(base, { op: "addPoint", room: house.id, edge: 0.5 }),
+        applyEdit(base, { op: "deletePoint", room: house.id, i: 0.5 }),
+        applyEdit(base, { op: "retype", room: booth.id, type: "toString" as never }),
+        applyEdit(base, { op: "rename", room: booth.id, name: 5 as never }),
+      ];
+    } catch { threw = true; }
+    ok(!threw && [0, 1, 2, 3].every((k) => !(r15[k] as { ok: boolean }).ok), "#370 edit: fractional indexes and an inherited room type are refused, never thrown");
+    const rn5 = r15[4] as { ok: boolean };
+    ok(!threw && (!rn5.ok || get(rn5 as { ok: boolean }).rooms[1].name === "Booth"), "#370 edit: a non-string name refuses or falls back to the type's label");
   }
 }
 

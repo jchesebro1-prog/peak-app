@@ -9,6 +9,7 @@ const TOL = (4 * Math.PI) / 180;
  * or relative to that neighbour's other wall), its distance there rounded to the grid; otherwise to the grid.
  */
 export function snapCorner(raw: ShapePt, neighbours: ReadonlyArray<{ at: ShapePt; wallDir: ShapePt | null }>, o: { gridFt: number; angles: boolean }): Snapped {
+  if (!Number.isFinite(raw.x) || !Number.isFinite(raw.y)) return { pt: raw, guide: null };
   const g = o.gridFt > 0 ? o.gridFt : 0.5;
   let best: { pt: ShapePt; d: number; from: ShapePt } | null = null;
   if (o.angles) {
