@@ -18,6 +18,10 @@ import { snapCorner } from "../src/lib/design/room-shape/snap";
 import type { RoomShape } from "../src/lib/design/room-shape/types";
 import { gridIntakeDefaults } from "../src/lib/design/grid-intake";
 import { VENUES, sizedDims, type AState } from "../src/app/(app)/design/quick/engine";
+import { roomShapeSvg, labelPoint } from "../src/lib/design/room-shape/svg";
+import { shapeSpaces, toSheet, fromSheet, frameScale } from "../src/lib/design/room-shape/spaces";
+import { calibrationScale } from "../src/lib/annotations";
+import { inPoly } from "../src/lib/design/venue-templates/canvas";
 
 const near = (a: number, b: number, tol = 1e-6) => Math.abs(a - b) <= tol;
 const nearPt = (p: ShapePt, q: ShapePt, tol = 1e-6) => dist(p, q) <= tol;
@@ -381,6 +385,47 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
     ok(!threw && [0, 1, 2, 3].every((k) => !(r15[k] as { ok: boolean }).ok), "#370 edit: fractional indexes and an inherited room type are refused, never thrown");
     const rn5 = r15[4] as { ok: boolean };
     ok(!threw && (!rn5.ok || get(rn5 as { ok: boolean }).rooms[1].name === "Booth"), "#370 edit: a non-string name refuses or falls back to the type's label");
+  }
+  {
+    const shape = freezeFromTemplate(stateFor("school"), "proscenium@1", { by: "T", at: 1 });
+    const sheet = roomShapeSvg(shape);
+    const f = sheet.frame;
+    ok(sheet.markup.startsWith("<svg") && sheet.markup.includes(`viewBox="${f.minX} ${f.minY} ${f.wFt} ${f.hFt}"`) && sheet.widthPx === 1200 && sheet.heightPx === Math.round((1200 * f.hFt) / f.wFt),
+      "#370 svg: an SVG in feet, 1200 px wide at the frame's aspect");
+    const walls = (sheet.markup.match(/data-k="wall"/g) || []).length;
+    const expected = shape.rooms.filter((r) => r.kind === "room").reduce((s, r) => s + r.edges.filter((e) => !e.open).length, 0);
+    ok(walls === expected, `#370 svg: one wall band per walled edge (${walls})`);
+    ok((sheet.markup.match(/data-k="zone"/g) || []).length === shape.rooms.filter((r) => r.kind === "zone").length, "#370 svg: one dashed outline per zone");
+    ok(shape.rooms.every((r) => sheet.markup.includes(`>${r.name.replace(/&/g, "&amp;")}</text>`)), "#370 svg: every room is named");
+    ok(sheet.markup === roomShapeSvg(shape).markup, "#370 svg: deterministic");
+    const all = shape.rooms.flatMap((r) => outlinePoints(r));
+    ok(all.every((p) => p.x > f.minX && p.y > f.minY && p.x < f.minX + f.wFt && p.y < f.minY + f.hFt), "#370 svg: every outline sits inside the frame");
+    const ex = roomShapeSvg(shape, { extraPts: [{ x: 500, y: 500 }] }).frame;
+    ok(ex.minX + ex.wFt > 500 && ex.minY + ex.hFt > 500, "#370 svg: extra points (placed devices) grow the frame");
+    const p = { x: 12.25, y: -7.5 };
+    ok(nearPt(fromSheet(toSheet(p, f), f), p, 1e-9), "#370 spaces: feet → sheet → feet round-trips");
+    ok(near(frameScale(f), calibrationScale({ x: 0, y: 0 }, { x: 1, y: 0 }, f.hFt / f.wFt, f.wFt)!), "#370 spaces: the calibration is the frame's width in feet");
+    const sp = shapeSpaces(shape, f, "sh1");
+    ok(sp.length === shape.rooms.length && sp.every((s, i) => s.name === shape.rooms[i].name && s.fromRoom === shape.rooms[i].id && s.sheetId === "sh1" && s.page === 1 && s.points.length >= 3 && s.points.every((q) => q.x >= 0 && q.x <= 1 && q.y >= 0 && q.y <= 1)),
+      "#370 spaces: one Space per room, same names, tagged fromRoom, normalized");
+    const lp = labelPoint(shape.rooms.find((r) => r.name === "House")!);
+    ok(lp.y > 0, "#370 svg: the House's name sits inside the house (below the plaster line)");
+  }
+  // names never sit on top of each other (the arena's bowl, floor and court share one centre)
+  for (const [key, tpl] of CASES) {
+    const shape = freezeFromTemplate(stateFor(key), tpl, { by: "T", at: 1 });
+    const names = [...roomShapeSvg(shape).markup.matchAll(/data-k="name" x="([-\d.]+)" y="([-\d.]+)"[^>]*>([^<]*)</g)]
+      .map((m) => ({ x: +m[1], y: +m[2], w: m[3].length * 0.68 + 0.4 }));
+    let clash = 0;
+    for (let a = 0; a < names.length; a++) for (let b = a + 1; b < names.length; b++) {
+      if (Math.abs(names[a].x - names[b].x) < (names[a].w + names[b].w) / 2 && Math.abs(names[a].y - names[b].y) < 1.5) clash++;
+    }
+    ok(names.length === shape.rooms.length && clash === 0, `#370 svg ${key}/${tpl}: no two names overlap (${clash})`);
+    const inside = shape.rooms.every((r) => {
+      const m = roomShapeSvg(shape).markup.match(new RegExp(`data-k="name" x="([-\\d.]+)" y="([-\\d.]+)"[^>]*>${r.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}<`));
+      return !!m && inPoly(outlinePoints(r, 1, 16), { x: +m[1], y: +m[2] });
+    });
+    ok(inside, `#370 svg ${key}/${tpl}: every name sits inside its own room`);
   }
 }
 
