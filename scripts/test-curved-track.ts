@@ -8,6 +8,10 @@ import type { TrackSeries } from "../src/lib/track-series";
 import { collectCurtainTypes } from "../src/lib/curtain-cut-sheets/collect";
 import { CUT_SHEET_STAMP, cutSheetModel, type CutSheetContext } from "../src/lib/curtain-cut-sheets/model";
 import { titleBlockData } from "../src/lib/design/grid-drawing-set";
+import {
+  audienceFrame, cleanPath, footprint, legHangingPoints, legPieces, legacyArc, pathErrors, pathLengthFt, pathSignature, pointAt,
+  resolvePath, samplePath, segmentBounds, trackLegs, type TrackSegment,
+} from "../src/lib/track-path";
 
 const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const line = (id: number, extra: Partial<SpecItem> = {}): SpecItem =>
@@ -61,8 +65,76 @@ export function stampChecks(ok: Ok) {
   ok(css.includes(".pk-cs-stamp {") && css.includes(".pk-cs-area {") && css.includes(".pk-tb-stamp {"), "#369 stamp: the banner, area and title-block styles exist");
 }
 
+
+const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) <= eps;
+const S = (lengthFt: number): TrackSegment => ({ kind: "straight", lengthFt });
+const A = (radiusFt: number, sweepDeg: number, turn: "left" | "right" = "left"): TrackSegment => ({ kind: "arc", radiusFt, sweepDeg, turn });
+const FACTS = { name: "ADC 280", curvedSectionFt: 10, minRadiusFt: 5, hasSticks: true };
+
+export function trackPathChecks(ok: Ok) {
+  const quarter = [A(10, 90)];
+  ok(near(pathLengthFt(quarter), 5 * Math.PI), "#369 path: a 90° R10 arc is 5π ft long");
+  const e = pointAt(quarter, pathLengthFt(quarter));
+  ok(near(e.x, 10) && near(e.y, 10) && near(e.headingDeg, 90), "#369 path: a left quarter arc from heading +x ends at (R, R) heading 90°");
+  const r = pointAt([A(10, 90, "right")], 5 * Math.PI);
+  ok(near(r.x, 10) && near(r.y, -10) && near(r.headingDeg, -90), "#369 path: a right quarter arc ends at (R, −R) heading −90°");
+  const full = pointAt([A(7, 360)], 14 * Math.PI);
+  ok(near(full.x, 0) && near(full.y, 0), "#369 path: a 360° arc closes on its start");
+  const legs = [S(12), A(6, 90), S(12)];
+  ok(segmentBounds(legs).map((n) => Math.round(n * 1000) / 1000).join() === "0,12,21.425,33.425", "#369 path: segment bounds are cumulative lengths");
+  const sl = pointAt(legs, 33.4247779);
+  ok(near(sl.x, 18, 1e-4) && near(sl.y, 18, 1e-4), "#369 path: straight · 90° · straight ends where the geometry says");
+  ok(samplePath(legs, 1).length >= 34 && samplePath([], 1).length === 0, "#369 path: sampling covers the path; an empty path samples nothing");
+
+  // orientation: the bulge goes to +y (upstage) so the concave side faces the audience (−y)
+  for (const [name, p] of [["semicircle", [A(10, 180)]], ["U wrap", [S(10), A(2, 90), S(10), A(2, 90), S(10)]], ["right arc", [A(10, 120, "right")]]] as const) {
+    const f = audienceFrame(p as readonly TrackSegment[]);
+    const pts = samplePath(p as readonly TrackSegment[], 0.5).map(f);
+    const s0 = pts[0], s1 = pts[pts.length - 1];
+    const mean = pts.reduce((a, q) => a + q.y, 0) / pts.length;
+    ok(near(s0.y, s1.y, 1e-6) && s1.x > s0.x && mean > 0, `#369 path: ${name} — start→end runs left to right and the bulge is upstage`);
+  }
+  const fp = footprint([A(10, 180)]);
+  ok(near(fp.widthFt, 20, 1e-3) && near(fp.depthFt, 10, 1e-2), "#369 path: a semicircle R10 is 20' wide and 10' deep");
+
+  // validation
+  ok(pathErrors([], FACTS, 1000).join() === "Add a segment to the curve.", "#369 path: an empty path asks for a segment");
+  ok(pathErrors([S(10), A(3, 90)], FACTS, 1000).includes("Segment 2: 3' is tighter than the ADC 280's 5' minimum."), "#369 path: a too-tight arc names its segment and the series minimum");
+  ok(pathErrors([S(10), S(5)], FACTS, 1000).includes("A curved track needs at least one arc — make it Straight instead."), "#369 path: all straights is refused");
+  ok(pathErrors([A(10, 90)], { ...FACTS, curvedSectionFt: undefined }, 1000).includes("ADC 280 has no curved track."), "#369 path: a series with no curved section refuses any arc");
+  ok(pathErrors([A(10, 400)], FACTS, 1000).includes("Segment 1: the angle is more than 0° and at most 360°."), "#369 path: angle over 360° is refused");
+  ok(pathErrors([S(NaN), A(NaN, 90)], FACTS, 1000).join("|") === "Segment 1: enter the length.|Segment 2: enter the radius.", "#369 path: blank numbers name their segment");
+  ok(pathErrors(Array.from({ length: 13 }, () => A(10, 10)), FACTS, 1000).includes("A curved track has at most 12 segments."), "#369 path: at most 12 segments");
+  ok(pathErrors([S(10), A(6, 90)], { ...FACTS, hasSticks: false }, 1000).includes("ADC 280 has no stick length — set it in Estimating Rules → Track series."), "#369 path: a straight segment needs sticks");
+  ok(pathErrors([S(990), A(10, 180)], FACTS, 1000).includes("A run is at most 1000'."), "#369 path: the total run is capped");
+  ok(pathErrors(legs, FACTS, 1000).length === 0, "#369 path: a good path has no errors");
+
+  // legacy + resolve
+  const legacy = legacyArc(40, 30);
+  ok(legacy.length === 1 && legacy[0].kind === "arc" && near(pathLengthFt(legacy), 40, 1e-9), "#369 path: a legacy curved track is one arc of its run");
+  ok(resolvePath({ curved: false, runFt: 40 }) === null, "#369 path: a straight track has no path");
+  ok(resolvePath({ curved: true, runFt: 40, radiusFt: 30 })!.length === 1 && resolvePath({ curved: true, runFt: 40, path: [] })!.length === 0, "#369 path: legacy arcs resolve; an explicit (even empty) path wins");
+  ok(legacyArc(40, undefined).length === 0, "#369 path: a legacy curve with no radius resolves to nothing");
+
+  // legs, pieces, hanging points
+  ok(JSON.stringify(trackLegs(40, 0)) === JSON.stringify([{ startFt: 0, endFt: 40 }]), "#369 path: no lap = one leg");
+  const lap = trackLegs(40, 2);
+  ok(near(lap[0].endFt - lap[0].startFt, 21) && near(lap[1].endFt - lap[1].startFt, 21) && near(lap[1].startFt, 19), "#369 path: a lapped bi-part is two legs of (run + overlap) / 2 meeting at center");
+  const pcs = legPieces(legs, { startFt: 0, endFt: pathLengthFt(legs) });
+  ok(pcs.map((p) => `${p.kind}:${Math.round(p.lengthFt * 100) / 100}`).join() === "straight:12,arc:9.42,straight:12", "#369 path: a leg's pieces follow its segments");
+  const half = legPieces(legs, { startFt: 0, endFt: 16 });
+  ok(half.length === 2 && near(half[1].lengthFt, 4), "#369 path: a leg ending mid-segment keeps only its share");
+  ok(legHangingPoints([A(30, 76.39437268)], { startFt: 0, endFt: 40 }, 7).length === 7, "#369 path: one segment = ceil(L / spacing) + 1 points (today's rule)");
+  const hp = legHangingPoints(legs, { startFt: 0, endFt: pathLengthFt(legs) }, 7);
+  ok(hp.length === 7 && hp.some((d) => near(d, 12)) && hp.some((d) => near(d, 21.4247779, 1e-6)), "#369 path: every segment joint gets a hanging point");
+
+  ok(pathSignature(legs) === "s12|a6:90:L|s12", "#369 path: a stable signature");
+  ok(JSON.stringify(cleanPath([{ kind: "arc", radiusFt: 6, sweepDeg: 90, turn: "left", junk: 1 } as unknown as TrackSegment])) === JSON.stringify([A(6, 90)]), "#369 path: cleanPath keeps only segment fields");
+}
+
 export async function curvedTrackChecks(ok: Ok) {
   stampChecks(ok);
+  trackPathChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-curved-track.ts")) {
