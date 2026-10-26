@@ -180,6 +180,13 @@ export function trackLegs(totalFt: number, lapOverlapFt: number): LegSpan[] {
 
 export type LegPiece = { kind: "straight" | "arc"; lengthFt: number; segmentIndex: number };
 
+/**
+ * Shared tolerance (ft) for legPieces and legHangingPoints: a piece or joint
+ * closer than this to a leg end is the end itself (sweeps typed to a few
+ * decimals leave ~1e-9 ft of slack).
+ */
+const JOINT_EPS_FT = 1e-6;
+
 /** The part of each segment a leg covers, in path order. */
 export function legPieces(path: readonly TrackSegment[], leg: LegSpan): LegPiece[] {
   const b = segmentBounds(path);
@@ -187,13 +194,10 @@ export function legPieces(path: readonly TrackSegment[], leg: LegSpan): LegPiece
   path.forEach((s, i) => {
     const a = Math.max(b[i], leg.startFt);
     const z = Math.min(b[i + 1], leg.endFt);
-    if (z - a > 1e-9) out.push({ kind: s.kind, lengthFt: z - a, segmentIndex: i });
+    if (z - a > JOINT_EPS_FT) out.push({ kind: s.kind, lengthFt: z - a, segmentIndex: i });
   });
   return out;
 }
-
-/** A joint closer than this to a leg end is the end itself (sweeps typed to a few decimals leave ~1e-9 ft of slack). */
-const JOINT_EPS_FT = 1e-6;
 
 /**
  * Hanging points on one leg, as path distances: both ends, every segment

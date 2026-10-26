@@ -65,7 +65,6 @@ export function stampChecks(ok: Ok) {
   ok(css.includes(".pk-cs-stamp {") && css.includes(".pk-cs-area {") && css.includes(".pk-tb-stamp {"), "#369 stamp: the banner, area and title-block styles exist");
 }
 
-
 const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) <= eps;
 const S = (lengthFt: number): TrackSegment => ({ kind: "straight", lengthFt });
 const A = (radiusFt: number, sweepDeg: number, turn: "left" | "right" = "left"): TrackSegment => ({ kind: "arc", radiusFt, sweepDeg, turn });
@@ -107,6 +106,7 @@ export function trackPathChecks(ok: Ok) {
   ok(pathErrors(Array.from({ length: 13 }, () => A(10, 10)), FACTS, 1000).includes("A curved track has at most 12 segments."), "#369 path: at most 12 segments");
   ok(pathErrors([S(10), A(6, 90)], { ...FACTS, hasSticks: false }, 1000).includes("ADC 280 has no stick length — set it in Estimating Rules → Track series."), "#369 path: a straight segment needs sticks");
   ok(pathErrors([S(990), A(10, 180)], FACTS, 1000).includes("A run is at most 1000'."), "#369 path: the total run is capped");
+  ok(pathErrors([{ ...A(10, 90), turn: "up" } as unknown as TrackSegment], FACTS, 1000).includes("Segment 1: pick Left or Right."), "#369 path: a bad turn names its segment");
   ok(pathErrors(legs, FACTS, 1000).length === 0, "#369 path: a good path has no errors");
 
   // legacy + resolve
