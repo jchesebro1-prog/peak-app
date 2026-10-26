@@ -5,7 +5,8 @@ import type { RoomShape, SheetFrame, ShapePt, ShapeRoom } from "./types";
 import { fmtFeet } from "./units";
 
 const n3 = (v: number) => String(Math.round(v * 1000) / 1000);
-const esc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+/** XML-safe text that `encodeURIComponent` can never throw on: lone surrogates and U+FFFE / U+FFFF are dropped. */
+const esc = (s: string) => String(s).replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uFFFE\uFFFF]/g, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** A closed path through sampled points. */
 export function pathD(pts: readonly ShapePt[]): string {
@@ -69,6 +70,8 @@ function placeNames(rooms: readonly ShapeRoom[]): ShapePt[] {
 export type ShapeSheet = { markup: string; frame: SheetFrame; widthPx: number; heightPx: number };
 
 const MARGIN_FT = 8;
+/** The frame is never more than this many times longer than it is wide (or the reverse), so the PNG/SVG stays a sane size. */
+const MAX_ASPECT = 4;
 const W_PX = 1200;
 const WALL = "#3a3f4a", ROOM_FILL = "#f4f5f7", ZONE = "#6b7280", OPEN = "#9aa0ab", DIM = "#737985";
 const FONT = "IBM Plex Mono, monospace";
@@ -82,8 +85,16 @@ export function roomShapeSvg(shape: RoomShape, opts: { extraPts?: readonly Shape
   const rooms = [...shape.rooms].sort((a, b) => Math.abs(signedArea(outlinePoints(b, 2, 8))) - Math.abs(signedArea(outlinePoints(a, 2, 8))));
   const bands = rooms.flatMap((r) => wallBands(r));
   const b = bounds([...rooms.flatMap((r) => outlinePoints(r, 1, 32)), ...bands.flat(), ...(opts.extraPts ?? [])]);
-  const minX = Math.floor(b.minX - MARGIN_FT), minY = Math.floor(b.minY - MARGIN_FT);
-  const wFt = Math.ceil(b.maxX + MARGIN_FT) - minX, hFt = Math.ceil(b.maxY + MARGIN_FT) - minY;
+  let minX = Math.floor(b.minX - MARGIN_FT), minY = Math.floor(b.minY - MARGIN_FT);
+  let wFt = Math.ceil(b.maxX + MARGIN_FT) - minX, hFt = Math.ceil(b.maxY + MARGIN_FT) - minY;
+  // Grow the short side symmetrically (whole feet, so the frame stays integer and still contains everything).
+  if (hFt * MAX_ASPECT < wFt) {
+    const grow = Math.ceil((wFt / MAX_ASPECT - hFt) / 2);
+    minY -= grow; hFt += 2 * grow;
+  } else if (wFt * MAX_ASPECT < hFt) {
+    const grow = Math.ceil((hFt / MAX_ASPECT - wFt) / 2);
+    minX -= grow; wFt += 2 * grow;
+  }
   const frame: SheetFrame = { minX, minY, wFt, hFt };
   const heightPx = Math.round((W_PX * hFt) / wFt);
   const parts: string[] = [`<rect x="${minX}" y="${minY}" width="${wFt}" height="${hFt}" fill="#fff"/>`];
@@ -124,6 +135,6 @@ export function roomShapeSvg(shape: RoomShape, opts: { extraPts?: readonly Shape
     const p = names[k];
     parts.push(`<text data-k="name" x="${n3(p.x)}" y="${n3(p.y)}" text-anchor="middle" dominant-baseline="middle" font-size="1.1" font-weight="600" fill="${WALL}" font-family="${FONT}">${esc(r.name)}</text>`);
   }
-  const markup = `<svg xmlns="http://www.w3.org/2000/svg" width="${W_PX}" height="${heightPx}" viewBox="${minX} ${minY} ${wFt} ${hFt}" preserveAspectRatio="xMidYMid meet">${parts.join("")}</svg>`;
+  const markup = `<svg xmlns="http://www.w3.org/2000/svg" width="${W_PX}" height="${heightPx}" viewBox="${minX} ${minY} ${wFt} ${hFt}" preserveAspectRatio="none">${parts.join("")}</svg>`;
   return { markup, frame, widthPx: W_PX, heightPx };
 }

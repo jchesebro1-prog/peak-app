@@ -77,6 +77,13 @@ function smooth(flags: boolean[]): boolean[] {
   return f;
 }
 
+/**
+ * An open stretch shorter than this, with a wall on both sides, is a jog in the drawing (the inner face steps onto a
+ * tilted segment while the outer wall line stays put, so the "wall 4"–9" out" test misses), not an opening: real
+ * openings (doors, a stage opening) are 3' or more.
+ */
+export const MAX_FALSE_OPEN_FT = 2.5;
+
 const r12 = (p: ShapePt): ShapePt => ({ x: Math.round(p.x * 12) / 12, y: Math.round(p.y * 12) / 12 });
 
 /**
@@ -108,6 +115,18 @@ export function splitByWalls(pts: readonly ShapePt[], edges: readonly ShapeEdge[
     }
     outPts.push(curA);
     outEdges.push(withOpen(curE, !flags[ns - 1]));
+  }
+  // Close drawing jogs: a short open edge between two walled edges becomes walled (repeat until stable; an open
+  // neighbour, or an open edge of MAX_FALSE_OPEN_FT or more, is never touched).
+  const m = outPts.length;
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let i = 0; i < m; i++) {
+      if (!outEdges[i].open || outEdges[(i + m - 1) % m].open || outEdges[(i + 1) % m].open) continue;
+      if (edgeLength(outPts[i], outPts[(i + 1) % m], outEdges[i]) >= MAX_FALSE_OPEN_FT) continue;
+      outEdges[i] = withOpen(outEdges[i], false);
+      changed = true;
+    }
   }
   return { pts: outPts, edges: outEdges };
 }

@@ -9,7 +9,7 @@ import {
 } from "../src/lib/design/room-shape/geometry";
 import type { ShapeEdge, ShapePt, ShapeRoom } from "../src/lib/design/room-shape/types";
 import { fitOutline } from "../src/lib/design/room-shape/fit";
-import { SegIndex, splitByWalls, walledShare, wallAt, type Seg } from "../src/lib/design/room-shape/walls";
+import { SegIndex, splitByWalls, walledShare, wallAt, MAX_FALSE_OPEN_FT, type Seg } from "../src/lib/design/room-shape/walls";
 import { freezeFromTemplate, roomIdFor } from "../src/lib/design/room-shape/freeze";
 import { sanitizeRoomShape, SHAPE_SAMPLE_BUDGET } from "../src/lib/design/room-shape/sanitize";
 import { SHAPE_STALE, SHAPE_NEEDS_STAGE_HOUSE, SHAPE_UNREADABLE } from "../src/lib/design/room-shape/copy";
@@ -410,6 +410,64 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
       "#370 spaces: one Space per room, same names, tagged fromRoom, normalized");
     const lp = labelPoint(shape.rooms.find((r) => r.name === "House")!);
     ok(lp.y > 0, "#370 svg: the House's name sits inside the house (below the plaster line)");
+  }
+  // short false openings between walls (a drawing jog) close; real openings stay
+  {
+    const school = freezeFromTemplate(stateFor("school"), "proscenium@1", { by: "T", at: 1 });
+    const shortGaps = (r: ShapeRoom) => r.pts.flatMap((p, i) => {
+      const n = r.pts.length, e = r.edges[i];
+      return e.open && !r.edges[(i + n - 1) % n].open && !r.edges[(i + 1) % n].open && edgeLength(p, r.pts[(i + 1) % n], e) < MAX_FALSE_OPEN_FT ? [i] : [];
+    });
+    ok(shortGaps(school.rooms.find((r) => r.name === "House")!).length === 0 && school.rooms.every((r) => shortGaps(r).length === 0),
+      "#370 walls: the frozen school has no open edge under 2'-6\" between two walled edges");
+    const house = school.rooms.find((r) => r.name === "House")!, hn = house.pts.length;
+    const lip = house.pts.findIndex((_, i) => house.edges[i].kind === "arc" && house.edges[i].open);
+    ok(lip >= 0 && house.edges[lip].open === true, "#370 walls: the House's stage lip arc stays open");
+    const openLen = house.pts.reduce((sum, p, i) => sum + (house.edges[i].open ? edgeLength(p, house.pts[(i + 1) % hn], house.edges[i]) : 0), 0);
+    ok(openLen > 10, `#370 walls: the House's stage lip stays open (${openLen.toFixed(1)}' open)`);
+    const jog = (gap: number) => {
+      const sqj: ShapePt[] = [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 10 }, { x: 0, y: 10 }];
+      const ej: ShapeEdge[] = sqj.map(() => ({ kind: "line" }));
+      const segsJ: Seg[] = [];
+      const wallLine = (a: ShapePt, b: ShapePt, o: ShapePt) => { segsJ.push([a, b], [{ x: a.x + o.x * 0.5, y: a.y + o.y * 0.5 }, { x: b.x + o.x * 0.5, y: b.y + o.y * 0.5 }]); };
+      wallLine({ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 0, y: -1 });
+      wallLine({ x: 20, y: 0 }, { x: 20, y: 10 }, { x: 1, y: 0 });
+      wallLine({ x: 20, y: 10 }, { x: 0, y: 10 }, { x: 0, y: 1 });
+      // the left wall is drawn at both ends of the edge and open for `gap` feet in the middle
+      const mid = 5, h0 = mid - gap / 2, h1 = mid + gap / 2;
+      wallLine({ x: 0, y: 10 }, { x: 0, y: h1 }, { x: -1, y: 0 });
+      wallLine({ x: 0, y: h0 }, { x: 0, y: 0 }, { x: -1, y: 0 });
+      return splitByWalls(sqj, ej, new SegIndex(segsJ), "double");
+    };
+    const leftOpen = (r: { pts: ShapePt[]; edges: ShapeEdge[] }) => r.pts.map((p, i) => ({ p, q: r.pts[(i + 1) % r.pts.length], e: r.edges[i] })).filter((x) => x.p.x === 0 && x.q.x === 0 && x.e.open);
+    const j15 = jog(1.5), j3 = jog(3);
+    ok(leftOpen(j15).length === 0 && j15.edges.length >= 5, "#370 walls: a 1.5' open edge between two walls becomes walled");
+    ok(leftOpen(j3).length === 1 && Math.abs(edgeLength(leftOpen(j3)[0].p, leftOpen(j3)[0].q, leftOpen(j3)[0].e) - 3) < 0.3, "#370 walls: a 3' open edge between two walls stays open");
+    ok(MAX_FALSE_OPEN_FT === 2.5, "#370 walls: the false-opening limit is 2'-6\"");
+  }
+  // svg: data-URL-safe text, exact aspect, bounded frames
+  {
+    const base = freezeFromTemplate(stateFor("school"), "proscenium@1", { by: "T", at: 1 });
+    const named: RoomShape = { ...base, rooms: base.rooms.map((r, i) => (i === 0 ? { ...r, name: "A\uD83D B" } : r)) };
+    const mk = roomShapeSvg(named).markup;
+    let threw = false;
+    try { encodeURIComponent(mk); } catch { threw = true; }
+    ok(!threw && mk.includes(">A B</text>"), "#370 svg: a lone surrogate in a room name is dropped, the rest survives, encodeURIComponent doesn't throw");
+    const pair = roomShapeSvg({ ...base, rooms: base.rooms.map((r, i) => (i === 0 ? { ...r, name: "A\uD83D\uDE00\uFFFF" } : r)) }).markup;
+    let threw2 = false;
+    try { encodeURIComponent(pair); } catch { threw2 = true; }
+    ok(!threw2 && pair.includes(">A\uD83D\uDE00</text>"), "#370 svg: a whole emoji pair is kept, U+FFFF dropped");
+    ok(mk.includes('preserveAspectRatio="none"'), "#370 svg: preserveAspectRatio none (exact feet ↔ sheet mapping)");
+    const slab = (w: number, h: number): RoomShape => ({ v: 1, fromTemplate: "x", frozenAt: 0, by: "T", rooms: [{ id: "rm_00000001", type: "other", name: "Slab", kind: "room", roles: [], pts: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }], edges: [{ kind: "line" }, { kind: "line" }, { kind: "line" }, { kind: "line" }] }] });
+    for (const [w, h] of [[1000, 20], [20, 1000]] as const) {
+      const sh = slab(w, h), sheet = roomShapeSvg(sh), f = sheet.frame;
+      const aspect = Math.max(f.wFt / f.hFt, f.hFt / f.wFt);
+      ok(aspect <= 4 && sheet.heightPx >= 300 && sheet.heightPx <= 4800 && Number.isInteger(f.minX) && Number.isInteger(f.minY) && Number.isInteger(f.wFt) && Number.isInteger(f.hFt)
+        && sh.rooms[0].pts.every((p) => p.x > f.minX && p.y > f.minY && p.x < f.minX + f.wFt && p.y < f.minY + f.hFt),
+        `#370 svg: a ${w}'×${h}' shape gets an integer frame of aspect ≤ 4 containing it (${f.wFt}×${f.hFt})`);
+    }
+    const huge = roomShapeSvg(slab(1800, 20)).frame;
+    ok(Math.max(huge.wFt / huge.hFt, huge.hFt / huge.wFt) <= 4, "#370 svg: a 1800'×20' shape stays within 4:1");
   }
   // names never sit on top of each other (the arena's bowl, floor and court share one centre)
   for (const [key, tpl] of CASES) {
