@@ -16,6 +16,10 @@ import {
   resolvePath, samplePath, segmentBounds, trackLegs, type TrackSegment,
 } from "../src/lib/track-path";
 
+import { CLIENT_LAYOUT_BOX, layoutView, SUBMITTAL_LAYOUT_BOX, trackLayoutSource } from "../src/lib/curtain-cut-sheets/layout";
+import { ARCH_SCALES } from "../src/lib/curtain-cut-sheets/geometry";
+import type { Shape } from "../src/lib/curtain-cut-sheets/shapes";
+
 const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const line = (id: number, extra: Partial<SpecItem> = {}): SpecItem =>
   ({ id, sku: "X", desc: "x", qty: 1, unit: "ea", cost: 0, price: 0, ...extra }) as SpecItem;
@@ -264,11 +268,64 @@ export function segmentDraftChecks(ok: Ok) {
   ok(segmentsToPath(presetSegments("u", 40, 2)).filter((x) => x.kind === "arc").every((x) => x.kind === "arc" && x.sweepDeg === 90 && x.radiusFt === 2), "#369 presets: U wrap has two 90° corners at the series minimum");
 }
 
+/** Every coordinate a shape draws at (path data parsed for its numbers). */
+function coords(shapes: readonly Shape[]): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  for (const s of shapes) {
+    if (s.kind === "line") out.push([s.x1, s.y1], [s.x2, s.y2]);
+    else if (s.kind === "text") out.push([s.x, s.y]);
+    else if (s.kind === "path") {
+      const n = (s.d.match(/-?\d+(\.\d+)?/g) || []).map(Number);
+      for (let i = 0; i + 1 < n.length; i += 2) out.push([n[i], n[i + 1]]);
+    }
+  }
+  return out;
+}
+const texts = (shapes: readonly Shape[]) => shapes.flatMap((s) => (s.kind === "text" ? [s.text] : []));
+
+export function layoutViewChecks(ok: Ok) {
+  const s = series();
+  ok(trackLayoutSource(cfg(), s) === null, "#369 layout: a straight track has no layout");
+  const bi = [S(10), A(8, 180), S(10)];
+  const biCfg = cfg({ curved: true, path: bi, runFt: pathLengthFt(bi), operation: "biparting", qty: 2 });
+  const src = trackLayoutSource(biCfg, s)!;
+  ok(src.opening === "bipart" && src.lapOverlapFt === 2 && src.mountLabel === "Batten clamps" && src.hangerSpacingFt === 7 && src.trackQty === 2, "#369 layout: the source reads the track and series");
+  ok(trackLayoutSource({ ...biCfg, mounting: "ceiling", operation: "oneway" }, s)!.mountLabel === "Ceiling hangers" && trackLayoutSource({ ...biCfg, operation: "oneway" }, s)!.opening === "oneway",
+    "#369 layout: ceiling mounting → hangers; one-way opens one way");
+  ok(trackLayoutSource({ ...biCfg, operation: "walkalong" }, s)!.opening === "none" && trackLayoutSource({ ...biCfg, operation: "walkalong", walkAlongBipart: true }, s)!.opening === "bipart",
+    "#369 layout: a walk-along has no travel arrow unless it is a two-half bi-part");
+  ok(trackLayoutSource(cfg({ curved: true, path: [A(NaN, 90)], runFt: NaN }), s) === null, "#369 layout: an unfinished path has no layout");
+
+  const sub = layoutView(src, { box: SUBMITTAL_LAYOUT_BOX, detail: "submittal" });
+  const engineClamps = trackQuantities(biCfg, s).rows.find((r) => r.role === "battenClamp")!.qty;
+  ok(sub.hangingCount * 2 === engineClamps, "#369 layout: the drawn hanging points × tracks equal the engine's clamp count");
+  ok(texts(sub.shapes).includes(`Batten clamps (${sub.hangingCount} per track)`), "#369 layout: the caption counts per track when the line has several");
+  ok(ARCH_SCALES.some((a) => a.label === sub.scale), "#369 layout: an architectural scale");
+  ok(coords(sub.shapes).every(([x, y]) => x >= 0 && y >= 0 && x <= SUBMITTAL_LAYOUT_BOX.wIn && y <= SUBMITTAL_LAYOUT_BOX.hIn), "#369 layout: every Submittal shape lands on the sheet");
+  ok(texts(sub.shapes).some((t) => t.startsWith(`R8'-0" · 180° · `)) && texts(sub.shapes).includes(`10'-0"`), "#369 layout: arcs print radius · angle · arc length; straights their length");
+  ok(texts(sub.shapes).includes("AUDIENCE") && texts(sub.shapes).includes(`2'-0" lap`), "#369 layout: the audience and the bi-part lap are labelled");
+  ok(sub.shapes.some((x) => x.tag === "mark"), "#369 layout: the Submittal draws hanging-point and split marks");
+
+  const semi = trackLayoutSource(cfg({ curved: true, path: [A(10, 180)], runFt: 10 * Math.PI }), s)!;
+  const semiView = layoutView(semi, { box: SUBMITTAL_LAYOUT_BOX, detail: "submittal" });
+  ok(texts(semiView.shapes).includes(`20'-0" overall`) && texts(semiView.shapes).includes(`10'-0" deep`), "#369 layout: the footprint prints overall width and depth");
+
+  const cli = layoutView(src, { box: CLIENT_LAYOUT_BOX, detail: "client" });
+  ok(!cli.shapes.some((x) => x.tag === "mark") && !texts(cli.shapes).some((t) => t.includes("clamps")) && !texts(cli.shapes).some((t) => t.includes("°")),
+    "#369 layout: the Client view has no hanging points, no angles");
+  ok(texts(cli.shapes).includes("AUDIENCE") && texts(cli.shapes).includes(`R8'-0"`), "#369 layout: the Client view keeps the radius and the audience");
+  ok(coords(cli.shapes).every(([x, y]) => x >= 0 && y >= 0 && x <= CLIENT_LAYOUT_BOX.wIn && y <= CLIENT_LAYOUT_BOX.hIn), "#369 layout: every Client shape lands in its box");
+  const u = trackLayoutSource(cfg({ curved: true, path: segmentsToPath(presetSegments("u", 40, 2)), runFt: 40 }), series({ minRadiusFt: 2 }))!;
+  ok(coords(layoutView(u, { box: SUBMITTAL_LAYOUT_BOX, detail: "submittal" }).shapes).every(([x, y]) => x >= 0 && y >= 0 && x <= SUBMITTAL_LAYOUT_BOX.wIn && y <= SUBMITTAL_LAYOUT_BOX.hIn),
+    "#369 layout: a U wrap fits the sheet");
+}
+
 export async function curvedTrackChecks(ok: Ok) {
   stampChecks(ok);
   trackPathChecks(ok);
   curvedEngineChecks(ok);
   segmentDraftChecks(ok);
+  layoutViewChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-curved-track.ts")) {
