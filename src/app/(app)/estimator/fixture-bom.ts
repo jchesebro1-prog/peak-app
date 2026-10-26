@@ -1,5 +1,5 @@
 import { assemblyDescription, type ResolvedFixtureAssembly } from "@/lib/fixture-assemblies";
-import type { FixtureDraft, SpecItem } from "./types";
+import type { FixtureDraft, SpecItem, SpecSection } from "./types";
 
 /** The assembly configurator's BOM line (#210) — moved out of
  *  estimator-client.tsx unchanged so it is testable: included components at
@@ -72,4 +72,66 @@ export function fixtureBomLine(
   });
   if (pc.length) desc += " (" + pc.join(" / ") + ")";
   return { desc, cost, price, components, ...(assembly.kind === "rack" ? { rackId: assembly.id } : {}) };
+}
+
+/** Edit assembly — a line added through "+ Add assembly" (a fixture, system,
+ *  hardware or rack assembly) reopens that configurator, as track / curtain /
+ *  labor lines reopen theirs. A portal fixture line (`fixtureId`: its sku is
+ *  the light engine's, not an assembly id) and a price request (`por`) don't. */
+export function isAssemblyLineEditable(it: Pick<SpecItem, "fixture" | "fixtureId" | "por">): boolean {
+  return !!it.fixture && !it.fixtureId && !it.por;
+}
+
+/** The "(Pos … / Ckt …)" suffix fixtureBomLine writes, read back off a stored
+ *  description — the line keeps no other copy of the hang position / circuit.
+ *  Blank when the description has no such suffix. Pure. */
+export function hangFromDesc(desc: string): { position: string; circuit: string } {
+  const out = { position: "", circuit: "" };
+  const m = /\s\(([^()]*)\)$/.exec(desc || "");
+  if (!m) return out;
+  const parts = m[1].split(" / ");
+  if (!parts.every((part) => part.startsWith("Pos ") || part.startsWith("Ckt "))) return out;
+  for (const part of parts) {
+    if (part.startsWith("Pos ")) out.position = part.slice(4);
+    else out.circuit = part.slice(4);
+  }
+  return out;
+}
+
+/** The configurator's draft, filled from a stored assembly line: its quantity,
+ *  each component at the quantity quoted (a part added to the assembly since
+ *  the line was built starts at 0 — Update never adds a part silently) and
+ *  its hang position / circuit. Pure. */
+export function fixtureDraftFromLine(
+  it: Pick<SpecItem, "qty" | "desc" | "components">,
+  assembly: ResolvedFixtureAssembly
+): FixtureDraft {
+  const quoted = new Map((it.components || []).map((part) => [part.sku, part.qty]));
+  const hang = hasHangPosition(assembly) ? hangFromDesc(it.desc) : { position: "", circuit: "" };
+  return {
+    assemblyId: assembly.id,
+    qty: String(Math.max(1, it.qty || 1)),
+    componentQty: Object.fromEntries(assembly.components.map((part) => [part.sku, String(quoted.get(part.sku) ?? 0)])),
+    position: hang.position,
+    circuit: hang.circuit,
+  };
+}
+
+/** Update assembly: the line `lineId` replaced IN PLACE by `item` (re-priced
+ *  from today's catalog, like Update track). Kept from the old line: id,
+ *  lineOrder, customer comment, internal note, optional flag, spec key. A line
+ *  no longer there is appended instead. Pure. */
+export function replaceAssemblyLine(sec: SpecSection, lineId: number, item: Omit<SpecItem, "id">): SpecSection {
+  const at = sec.items.findIndex((it) => it.id === lineId);
+  if (at < 0) return { ...sec, items: [...sec.items, { ...item, id: lineId }] };
+  const old = sec.items[at];
+  const next: SpecItem = { ...item, id: old.id };
+  if (typeof old.lineOrder === "number") next.lineOrder = old.lineOrder;
+  if (old.comment) next.comment = old.comment;
+  if (old.internalNote) next.internalNote = old.internalNote;
+  if (old.option) next.option = old.option;
+  if (old.specKey) next.specKey = old.specKey;
+  const items = sec.items.slice();
+  items[at] = next;
+  return { ...sec, items };
 }

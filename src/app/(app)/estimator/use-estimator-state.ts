@@ -33,7 +33,7 @@ import { readVendorPdfAction } from "./vendor-pdf-actions";
 import { VENDOR_PDF_COPY } from "@/lib/vendor-pdf/extraction";
 import { applyVendorPdfRead, dropVendorPdfRead, readLinesEdited, undoVendorPdfRead } from "@/lib/vendor-pdf/fill";
 import { sectionFreightDefault, applyAutoFreight } from "./freight-default";
-import { fixtureBomLine } from "./fixture-bom";
+import { fixtureBomLine, fixtureDraftFromLine, isAssemblyLineEditable, replaceAssemblyLine } from "./fixture-bom";
 import { applyAutoTrips as applyAutoTripsToMobs, applyLocalTrip, applyMobType, applyTravelTripTo, defaultLaborMobs, disciplineForSystemTitle, laborMob, roundTripMiles, typeMobMiles, setRouteMiles } from "./labor-defaults";
 import { laborGroupEdits, laborGroupRecord, newLaborGroupId, pruneLaborGroups, snapshotLaborDraft, withLaborGroup } from "./labor-group";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
@@ -731,6 +731,9 @@ export function useEstimatorState(props: EstimatorProps) {
      defaults, so switching the assembly can tell "still what we prefilled"
      apart from "the user typed something" and never clobber the latter. */
   const fixturePrefillRef = useRef<{ position: string; circuit: string }>({ position: "", circuit: "" });
+  /* Edit assembly: the same close-then-seed dance as the track edit (#274). */
+  const fixtureEditRef = useRef<{ lineId: number; draft: FixtureDraft } | null>(null);
+  const [fixtureEdit, setFixtureEdit] = useState<{ lineId: number } | null>(null);
   /** A stored vendor quote, back into the form's draft shape (#144). */
   const vendorDraftFromRecord = (v: VendorQuote): VendorDraft => {
     /* Line ids are persisted on the record and so outlive the page that minted
@@ -2601,7 +2604,12 @@ export function useEstimatorState(props: EstimatorProps) {
       trackEditRef.current = null;
       setTrackEdit(null);
       setTrackDraft(freshTrackDraft(trackSeries));
-    } else if (kind === "fixture") setFixtureDraft(freshFixture());
+    } else if (kind === "fixture") {
+      // An abandoned assembly edit must not seed the next "+ Add assembly".
+      fixtureEditRef.current = null;
+      setFixtureEdit(null);
+      setFixtureDraft(freshFixture());
+    }
     else if (kind === "vendor") {
       // #144: an abandoned edit must not seed the next "+ Vendor quote".
       vendorEditRef.current = null;
@@ -2654,6 +2662,17 @@ export function useEstimatorState(props: EstimatorProps) {
       setVendorDraft(handoffSeed || (rec ? vendorDraftFromRecord(rec) : freshVendor()));
       resetVendorPdf();
     } else if (kind === "fixture") {
+      /* Reopened from an assembly line — its stored parts, consumed and CLEARED
+         here so it applies to exactly one open (as track, #274). */
+      const edit = fixtureEditRef.current;
+      fixtureEditRef.current = null;
+      setFixtureEdit(edit ? { lineId: edit.lineId } : null);
+      if (edit) {
+        const assembly = fixtureAssemblies.find((item) => item.id === edit.draft.assemblyId);
+        fixturePrefillRef.current = { position: assembly?.position || "", circuit: assembly?.circuit || "" };
+        setFixtureDraft(edit.draft);
+        return;
+      }
       // #246: the list now holds every kind (fixtures first); preselect the
       // first FIXTURE — today's pick — and nothing when there is none.
       const first = fixtureAssemblies.find((item) => (item.kind ?? "fixture") === "fixture");
@@ -2884,6 +2903,25 @@ export function useEstimatorState(props: EstimatorProps) {
     closeInput();
     customEditRef.current = { lineId, draft: customDraftFromLine(it) };
     openInputMethod("custom", secId);
+  };
+
+  /** Whether an assembly line can reopen the configurator — an Estimator
+   *  assembly line whose assembly still exists in the Assembly Builder. */
+  const assemblyLineEditable = (it: SpecItem) =>
+    isAssemblyLineEditable(it) && fixtureAssemblies.some((item) => item.id === it.sku);
+
+  /** Edit assembly: reopen the "+ Add assembly" configurator on an assembly
+   *  line — the same close-then-seed dance as openTrackEdit. */
+  const openAssemblyEdit = (secId: string, lineId: number) => {
+    const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
+    if (!it || !isAssemblyLineEditable(it)) return;
+    const assembly = fixtureAssemblies.find((item) => item.id === it.sku);
+    if (!assembly) return;
+    if (repriceLocked(status)) return; // #368: as openLaborEdit
+    if (!confirmDiscardInput()) return; // #348 follow-up: switching away from unsaved work asks first
+    closeInput();
+    fixtureEditRef.current = { lineId, draft: fixtureDraftFromLine(it, assembly) };
+    openInputMethod("fixture", secId);
   };
 
   /** #292: reopen the curtain configurator on a curtain line. */
@@ -3332,9 +3370,10 @@ export function useEstimatorState(props: EstimatorProps) {
     const line = fixtureBomLine(assembly, d);
     if (!line) return;
     const qty = Math.max(1, Number.parseInt(d.qty, 10) || 1);
-    pushItems(secId, [
-      { id: nextId(), sku: assembly.id, desc: line.desc, qty, unit: "ea", cost: line.cost, price: line.price, fixture: true, components: line.components, ...(line.rackId ? { rackId: line.rackId } : {}) },
-    ]);
+    const item = { sku: assembly.id, desc: line.desc, qty, unit: "ea", cost: line.cost, price: line.price, fixture: true, components: line.components, ...(line.rackId ? { rackId: line.rackId } : {}) };
+    const lineId = fixtureEdit?.lineId;
+    if (lineId != null) setSections((ss) => ss.map((s) => (s.id === secId ? replaceAssemblyLine(s, lineId, item) : s)));
+    else pushItems(secId, [{ ...item, id: nextId() }]);
     closeInput();
   };
 
@@ -3558,6 +3597,9 @@ export function useEstimatorState(props: EstimatorProps) {
     customEdit,
     openCustomEdit,
     addFixture,
+    fixtureEdit,
+    openAssemblyEdit,
+    assemblyLineEditable,
     addGroupAction,
     addGroupForSystem,
     addLabor,

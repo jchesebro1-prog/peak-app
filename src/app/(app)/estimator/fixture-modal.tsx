@@ -4,7 +4,7 @@ import Link from "next/link";
 import { assemblyOptionLabel, groupAssemblies, type ResolvedFixtureAssembly } from "@/lib/fixture-assemblies";
 import type { FixtureDraft } from "./types";
 import { assemblyComponentTotals, hasHangPosition, optionalToggleQty } from "./fixture-bom";
-import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, Stat } from "./est-ui";
+import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, Stat, useSwallowOpeningDoubleClick } from "./est-ui";
 
 /** Header totals — delegates to fixture-bom.ts's shared qty/cost/sell math
  *  (#210) rather than keeping a second copy of it here. */
@@ -17,13 +17,18 @@ function totals(assembly: ResolvedFixtureAssembly | undefined, quantities: Recor
 /** #246 — the "+ Add assembly" modal: every Assembly Builder kind, grouped
  *  Fixtures / Systems / Hardware. Only a fixture has a hang position and
  *  circuit. (Component, draft and handler names keep their #210 "fixture"
- *  spelling — internal only.) */
+ *  spelling — internal only.)
+ *
+ *  Reopened from an assembly line (`editing`) it is **Update assembly**, which
+ *  replaces the line in place at today's catalog prices (as Update track). */
 export default function FixtureModal({
-  secName, draft, assemblies, onAssembly, onSet, onComponentQty, onAdd, onClose, confirmClose,
+  secName, draft, assemblies, editing = false, onAssembly, onSet, onComponentQty, onAdd, onClose, confirmClose,
 }: {
   secName: string;
   draft: FixtureDraft;
   assemblies: ResolvedFixtureAssembly[];
+  /** Reopened from an assembly line — Update assembly instead of Add. */
+  editing?: boolean;
   onAssembly: (id: string) => void;
   onSet: (field: "qty" | "position" | "circuit", value: string) => void;
   onComponentQty: (sku: string, value: string) => void;
@@ -39,11 +44,18 @@ export default function FixtureModal({
   const showHang = !!assembly && hasHangPosition(assembly);
   // An assembly with no kind (a legacy row) groups as a fixture.
   const groups = groupAssemblies(assemblies);
+  const swallowOpeningDoubleClick = useSwallowOpeningDoubleClick();
 
   return (
-    <ConfigModal width={700} icon="◉" iconSize={15} title="Add assembly" sub={<>Adds to {secName}</>} onClose={onClose} confirmClose={confirmClose}
+    <ConfigModal width={700} icon="◉" iconSize={15} title={editing ? "Edit assembly" : "Add assembly"} sub={editing ? <>Updates this assembly in {secName} · the line is rebuilt in place at today&rsquo;s catalog prices</> : <>Adds to {secName}</>} onClose={onClose} confirmClose={confirmClose}
       footerLeft={<><Stat label="Cost / ea" value={`$${unit.cost.toFixed(2)}`} color="#8c919c" /><Stat label="Sell / ea" value={`$${unit.sell.toFixed(2)}`} /><Stat label="Ext sell" value={`$${Math.round(unit.sell * count).toLocaleString()}`} size={14} weight={700} /></>}
-      footerRight={<button type="button" onClick={onAdd} disabled={!valid} style={addBtnStyle(valid)}>Add assembly</button>}>
+      footerRight={<button type="button" onClick={onAdd} disabled={!valid} style={addBtnStyle(valid)}>{editing ? "Update assembly" : "Add assembly"}</button>}>
+      <div onClickCapture={swallowOpeningDoubleClick}>
+      {editing && (
+        <div role="note" style={{ marginBottom: 16, padding: "9px 12px", borderRadius: 8, border: "1px solid #efe4c4", background: "#fffdf6", color: "#8a6d1f", fontSize: 11.5, lineHeight: 1.45 }}>
+          Update assembly replaces this line in the same place, priced from today&rsquo;s catalog — a price typed on the line is replaced; its notes stay.
+        </div>
+      )}
       {!assemblies.length ? (
         <div style={{ padding: 18, border: "1px solid #e4e7ec", borderRadius: 10, background: "#fbfbfc" }}>
           <div style={{ fontWeight: 650 }}>No assemblies yet — build one in the Assembly Builder</div>
@@ -81,6 +93,7 @@ export default function FixtureModal({
         </div>}
         <div style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr", gap: 12 }}><div><label style={LBL}>Qty</label><input value={draft.qty} onChange={(event) => onSet("qty", event.target.value)} style={NUMFIELD} /></div>{showHang && <><div><label style={LBL}>Hang position</label><input value={draft.position} onChange={(event) => onSet("position", event.target.value)} style={FIELD} /></div><div><label style={LBL}>Circuit #</label><input value={draft.circuit} onChange={(event) => onSet("circuit", event.target.value)} style={FIELD} /></div></>}</div>
       </>}
+      </div>
     </ConfigModal>
   );
 }
