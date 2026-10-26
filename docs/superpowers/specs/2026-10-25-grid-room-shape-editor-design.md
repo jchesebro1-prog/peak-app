@@ -33,6 +33,38 @@ music rooms, green rooms, dressing rooms. The result must export to CAD for team
    radius on an arc) — **and a DXF export** for CAD.
 10. **Approach A** (a room-shape document the plan is drawn from), built in **three slices** (§9).
 
+## Amendment A (plan time, Oct 25) — what the template data forced
+
+Writing the slice 1 plan against the real templates turned up three things the sections below did not allow
+for. These rules **override** §1–§4 wherever they disagree; Jeff to confirm.
+
+1. **Open edges.** A room edge can be **open** — no wall drawn (`open: true` on the edge). The proscenium
+   opening and the stage lip are room edges with no wall; drawing a wall on every edge would close the stage
+   off. Freeze decides walled vs. open per stretch of edge from the drawing itself: an edge is walled where the
+   template's linework shows a **double line** (one line on the room's face and a parallel one 4"–9" outward);
+   an edge is split at every change between walled and open. The editor's wall toolbar gains **Wall / Open**.
+   An open edge still bounds the room's Space.
+2. **Overlapping rooms become zones.** The proscenium Catwalk and Center Aisle lie inside the House. A frozen
+   room with **no walled edge** becomes a **zone** (dashed, no walls). `kind` is therefore a per-room field (the
+   type only supplies the default for a new room) — §1's "kind taken from the type" is dropped; sanitize only
+   checks `kind ∈ { room, zone }`. The `catwalk` type defaults to zone.
+3. **Roles live on the room, and one room can hold several.** The Blackbox room is both stage and house.
+   `ShapeRoom` gains `roles: RoomRole[]` (slice 1: `stage | house | booth | catwalk`; slice 2 adds `mix |
+   electrical`). Each role sits on at most one room; some room must hold `stage` and some room `house` (they may
+   be the same room). Freeze copies the template's `roles`; a Conference (Blackbox drawing, flat kind) adds a
+   **Platform** zone holding `stage` (the code-drawn platform: 62 % of the room's width, depth
+   `min(max(depth × 0.16, 6'), 0.3 × room depth)`, at the stage end) and names its main room "Conference Room".
+
+Also settled at plan time:
+
+- **The editor shows the redrawn plan from the start.** Before the first edit it shows the shape the freeze
+  would make (rooms + walls), with the note "Changing the plan redraws it from its rooms — stairs, seats and
+  other drawing details are left off." A design that is never edited still gets today's full template sheet.
+- **Typed lengths take feet and inches** (`42'-6"`, `42' 6"`, `42.5`, `6"`), rounded to the inch.
+- **Arc offsets are sampled** on the base sheet (exact arcs are a DXF concern — slice 3).
+- **The shape sheet draws rooms, walls, zones, names and dimensions only** — no line-set or electric symbols
+  (the template sheet's are part of its detail linework).
+
 ## Non-goals
 
 - CAD **import** / round trip (export only).
