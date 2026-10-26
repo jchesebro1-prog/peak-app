@@ -8,6 +8,8 @@ import {
   bulgeForArcLength, bulgeThrough, splitEdge, wallBands, dist,
 } from "../src/lib/design/room-shape/geometry";
 import type { ShapeEdge, ShapePt, ShapeRoom } from "../src/lib/design/room-shape/types";
+import { fitOutline } from "../src/lib/design/room-shape/fit";
+import { SegIndex, splitByWalls, walledShare, wallAt, type Seg } from "../src/lib/design/room-shape/walls";
 
 const near = (a: number, b: number, tol = 1e-6) => Math.abs(a - b) <= tol;
 const nearPt = (p: ShapePt, q: ShapePt, tol = 1e-6) => dist(p, q) <= tol;
@@ -62,6 +64,38 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
     "#370 geometry: an open edge has no wall, a zone has none");
   ok(bands[0].every((p) => p.y <= 1e-9) || bands[0].every((p) => p.y >= -1e-9), "#370 geometry: the top wall sits on one side of its face");
   ok(bands[0].some((p) => p.y < -0.49), "#370 geometry: the top wall of a box is outside it (y < 0)");
+
+  // fitOutline: a densified rectangle comes back as 4 lines at its corners
+  const dense: ShapePt[] = [];
+  for (let x = 0; x < 20; x += 0.25) dense.push({ x, y: 0 });
+  for (let y = 0; y < 10; y += 0.25) dense.push({ x: 20, y });
+  for (let x = 20; x > 0; x -= 0.25) dense.push({ x, y: 10 });
+  for (let y = 10; y > 0; y -= 0.25) dense.push({ x: 0, y });
+  const fr = fitOutline(dense);
+  ok(fr.pts.length === 4 && fr.edges.every((e) => e.kind === "line") && fr.pts.some((p) => nearPt(p, { x: 0, y: 0 }, 1e-9)) && fr.pts.some((p) => nearPt(p, { x: 20, y: 10 }, 1e-9)),
+    "#370 fit: a densified 20 × 10 rectangle fits as 4 lines on its corners");
+  // a D shape: a line plus a sampled semicircle → one line and one arc of radius 5
+  const d: ShapePt[] = [];
+  for (let k = 0; k <= 90; k++) { const t = Math.PI - (k / 90) * Math.PI; d.push({ x: 5 + 5 * Math.cos(t), y: -5 * Math.sin(t) }); }
+  for (let x = 9.75; x > 0.1; x -= 0.25) d.push({ x, y: 0 });
+  const fd = fitOutline(d);
+  const arcE = fd.edges.findIndex((e) => e.kind === "arc");
+  ok(fd.edges.length === 2 && arcE >= 0 && near(arcInfo(fd.pts[arcE], fd.pts[(arcE + 1) % 2], (fd.edges[arcE] as { bulge: number }).bulge)!.r, 5, 0.05),
+    "#370 fit: a sampled semicircle + chord fits as one arc (r ≈ 5) and one line");
+  // walls: a double line (face + 6" out) reads as a wall; a single line doesn't under the double rule
+  const segs: Seg[] = [[{ x: 0, y: 0 }, { x: 20, y: 0 }], [{ x: 0, y: -0.5 }, { x: 20, y: -0.5 }], [{ x: 0, y: 10 }, { x: 20, y: 10 }]];
+  const idx = new SegIndex(segs);
+  ok(wallAt(idx, { x: 5, y: 0 }, { x: 0, y: -1 }, "double") && !wallAt(idx, { x: 5, y: 10 }, { x: 0, y: 1 }, "double") && wallAt(idx, { x: 5, y: 10 }, { x: 0, y: 1 }, "single"),
+    "#370 walls: a face line with a parallel line 6\" outward is a wall; a lone face line is one only under the single rule");
+  // splitByWalls: the top edge is walled only from x 0 → 8 → split into a walled and an open piece
+  const segs2: Seg[] = [[{ x: 0, y: 0 }, { x: 20, y: 0 }], [{ x: 0, y: -0.5 }, { x: 8, y: -0.5 }],
+    [{ x: 20, y: 0 }, { x: 20, y: 10 }], [{ x: 20.5, y: 0 }, { x: 20.5, y: 10 }], [{ x: 20, y: 10 }, { x: 0, y: 10 }], [{ x: 20, y: 10.5 }, { x: 0, y: 10.5 }],
+    [{ x: 0, y: 10 }, { x: 0, y: 0 }], [{ x: -0.5, y: 10 }, { x: -0.5, y: 0 }]];
+  const sp = splitByWalls(fr.pts, fr.edges, new SegIndex(segs2), "double");
+  const topOpen = sp.pts.map((p, i) => ({ p, q: sp.pts[(i + 1) % sp.pts.length], e: sp.edges[i] })).filter((x) => x.p.y === 0 && x.q.y === 0);
+  ok(sp.pts.length === 5 && topOpen.length === 2 && topOpen.some((x) => x.e.open && Math.min(x.p.x, x.q.x) >= 7.9 && Math.min(x.p.x, x.q.x) <= 8.1) && topOpen.some((x) => !x.e.open),
+    "#370 walls: an edge walled for 8' of 20' splits at the change, the rest open");
+  ok(near(walledShare({ ...sp, kind: "room" }), 48 / 60, 0.02), "#370 walls: walledShare = walled length ÷ perimeter");
 }
 
 export async function roomShapeDbChecks(ok: Ok): Promise<void> {
