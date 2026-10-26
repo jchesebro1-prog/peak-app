@@ -345,12 +345,24 @@ export function layoutViewChecks(ok: Ok) {
   ok(fits(layoutView(src, { box: MODAL_LAYOUT_BOX, detail: "client" }).shapes, MODAL_LAYOUT_BOX), "#369 layout: the mixed bi-part path fits the modal box");
 }
 
+export function configuratorChecks(ok: Ok) {
+  const modal = src("src/app/(app)/estimator/track-modal.tsx");
+  const editor = src("src/app/(app)/estimator/track-segments.tsx");
+  ok(modal.includes('import { TrackSegmentsEditor } from "./track-segments";') && /\{draft\.curved && <TrackSegmentsEditor /.test(modal), "#369 UI: the track fields show the segment editor on a curved track");
+  ok(/draft\.curved \? !\(draft\.segments \|\| \[\]\)\.length : !draft\.run\.trim\(\)/.test(modal), "#369 UI: an untouched curved form (no rows) shows no errors; a straight one keys off the run");
+  ok(editor.includes("TRACK_PRESETS.map") && editor.includes("+ Add segment") && editor.includes("Total run"), "#369 UI: presets, + Add segment and the total run");
+  ok(editor.includes("layoutView(") && editor.includes("MODAL_LAYOUT_BOX") && editor.includes("<ShapeSvg"), "#369 UI: the live mini plan uses the cut sheet's layout shapes");
+  ok(editor.includes("MAX_TRACK_SEGMENTS") && editor.includes("angleFromArcLength("), "#369 UI: the 12-segment cap and the arc-length back-solve");
+  ok(!/@\/lib\/stores\/|@\/db/.test(editor), "#369 UI: the segment editor imports no store or db");
+}
+
 export async function curvedTrackChecks(ok: Ok) {
   stampChecks(ok);
   trackPathChecks(ok);
   curvedEngineChecks(ok);
   segmentDraftChecks(ok);
   layoutViewChecks(ok);
+  configuratorChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-curved-track.ts")) {

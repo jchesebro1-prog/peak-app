@@ -14,6 +14,8 @@ import {
   trackConfigFromDraft,
   type TrackBom,
 } from "./track-bom";
+import { TrackSegmentsEditor } from "./track-segments";
+import { totalRunText } from "./track-segment-draft";
 import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat, useSwallowOpeningDoubleClick } from "./est-ui";
 
 /**
@@ -183,22 +185,25 @@ export function TrackFields({
 
       {/* run / radius / trim / qty */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginBottom: gap }}>
-        <div>
-          <label style={LBL}>{draft.curved ? "Run · arc (ft)" : "Run (ft)"}</label>
-          <input className="est-input est-field" value={draft.run} onChange={(e) => onSet("run", e.target.value)} placeholder="0" aria-label="Run length (ft)" style={NUMFIELD} />
-        </div>
-        <div>
-          <label style={LBL}>Radius (ft)</label>
-          <input
-            className="est-input est-field"
-            value={draft.curved ? draft.radius : ""}
-            onChange={(e) => onSet("radius", e.target.value)}
-            disabled={!draft.curved}
-            placeholder={draft.curved ? (current?.minRadiusFt ? "min " + current.minRadiusFt : "0") : "—"}
-            aria-label="Curve radius (ft)"
-            style={{ ...NUMFIELD, background: draft.curved ? "#fff" : "#f7f8fa" }}
-          />
-        </div>
+        {draft.curved ? (
+          <div style={{ gridColumn: "span 2" }}>
+            <label style={LBL}>Run · along the track (ft)</label>
+            <div style={{ ...NUMFIELD, display: "flex", alignItems: "center", background: "#f7f8fa", color: "#5b616e" }} aria-label="Total run (ft)">
+              {totalRunText(draft.segments || []) || "—"}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div>
+              <label style={LBL}>Run (ft)</label>
+              <input className="est-input est-field" value={draft.run} onChange={(e) => onSet("run", e.target.value)} placeholder="0" aria-label="Run length (ft)" style={NUMFIELD} />
+            </div>
+            <div>
+              <label style={LBL}>Radius (ft)</label>
+              <input className="est-input est-field" value="" disabled placeholder="—" aria-label="Curve radius (ft)" style={{ ...NUMFIELD, background: "#f7f8fa" }} />
+            </div>
+          </>
+        )}
         <div>
           <label style={LBL}>Trim (ft)</label>
           <input
@@ -217,6 +222,7 @@ export function TrackFields({
           <input className="est-input est-field" value={draft.qty} onChange={(e) => onSet("qty", e.target.value)} placeholder="1" aria-label="Number of identical tracks" style={NUMFIELD} />
         </div>
       </div>
+      {draft.curved && <TrackSegmentsEditor draft={draft} current={current} onSet={onSet} />}
 
       {/* spacing — collapsed, pre-filled from the series */}
       <details style={{ marginBottom: compact ? 0 : 4 }}>
@@ -325,9 +331,9 @@ export default function TrackModal({
   const cost = readOnly ? readOnly.cost : bom.cost;
   const price = readOnly ? readOnly.price : bom.price;
   const partsCount = readOnly ? (readOnly.components || []).length : bom.rows.length;
-  // A blank run is the untouched form, not a mistake — Add stays disabled
-  // without shouting "Enter the run length." before anything is typed.
-  const errors = readOnly ? [TRACK_SERIES_GONE] : noSeries || !draft.run.trim() ? [] : bom.errors;
+  // An untouched form (no run, or a curve with no rows) is not a mistake — Add stays disabled without shouting.
+  const blank = draft.curved ? !(draft.segments || []).length : !draft.run.trim();
+  const errors = readOnly ? [TRACK_SERIES_GONE] : noSeries || blank ? [] : bom.errors;
 
   return (
     <ConfigModal
