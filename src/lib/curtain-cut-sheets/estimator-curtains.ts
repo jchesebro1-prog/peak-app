@@ -11,9 +11,11 @@ import type { GridCurtain, GridCurtainType } from "@/lib/design/grid-bom";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import type { TrackOperation, TrackSeries } from "@/lib/track-series";
+import { pathSignature } from "@/lib/track-path";
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 import { parseEstimatorCurtainDesc, parseGridCurtainDesc } from "./parse";
 import { linkCurtainTracks } from "./track-link";
+import { trackLayoutSource, type TrackLayoutSource } from "./layout";
 import {
   ASSUMED_MOUNT, DEFAULT_BOTTOM_FINISH, DEFAULT_MARK_SPACING_IN, DEFAULT_TOP_FINISH, GRID_CURTAIN_DEFAULTS,
   isBottomFinish, isMountTypeId, isTopFinish, mountTypeForTrackMounting,
@@ -40,6 +42,8 @@ export type CutSheetMount = {
     carrierSpacingIn: number;
     /** #354 review (Oct 15 #45): a walk-along track in two halves — the sheets say "two-half walk-along". */
     twoHalfWalkAlong?: boolean;
+    /** #369 — a curved track's plan (series known); drives the CS-n.1 layout sheet. */
+    layout?: TrackLayoutSource;
   };
 };
 /** Where a line sits — staff warnings and "Edit the curtain →" only. */
@@ -158,6 +162,8 @@ export function estimatorCurtains(sections: readonly SpecSection[], fabrics: rea
         const cfg = trackLine.track;
         const series = trackSeries.find((s) => s.id === cfg.seriesId);
         if (!series) warnings.push(TRACK_SERIES_GONE_WARNING);
+        // #369: a curved track's plan — needs the series for its lap and hanger spacing
+        const layout = series ? trackLayoutSource(cfg, series) : null;
         mount = {
           key: mountTypeForTrackMounting(String(cfg.mounting)),
           source: "track",
@@ -169,6 +175,7 @@ export function estimatorCurtains(sections: readonly SpecSection[], fabrics: rea
             operation: cfg.operation,
             ...(cfg.operation === "walkalong" && cfg.walkAlongBipart === true ? { twoHalfWalkAlong: true } : {}),
             carrierSpacingIn: positiveOr(cfg.carrierSpacingIn, positiveOr(series?.carrierSpacingIn, DEFAULT_MARK_SPACING_IN)),
+            ...(layout ? { layout } : {}),
           },
         };
       } else if (ci && isMountTypeId(ci.mountType)) mount = { key: ci.mountType, source: "picked" };
@@ -361,7 +368,8 @@ export function curtainFabricLookups(spec: unknown, project: GridProjectLite | n
  * lower(trim(name)) | fabric sku-or-text | fullness | top | bottom | mountKey | hardware source.
  * The last element is `track:<seriesId>:<carrierSpacingIn>` for a track-backed mount and "" for the
  * mount-rules path, so every type has exactly one hardware source and one spacing (an empty-seriesId
- * track never collides with a picked mount). Size is NOT part of the type.
+ * track never collides with a picked mount). A curved track appends :path:<signature>:<opening> (#369).
+ * Size is NOT part of the type.
  */
 export function curtainTypeKey(c: CutSheetCurtain): string {
   return [
@@ -372,7 +380,12 @@ export function curtainTypeKey(c: CutSheetCurtain): string {
     c.bottomFinish,
     c.mount.key,
     // #354 review: a two-half walk-along never merges with another hang (the sheet states it).
-    c.mount.track ? `track:${c.mount.track.seriesId}:${c.mount.track.carrierSpacingIn}${c.mount.track.twoHalfWalkAlong ? ":2w" : ""}` : "",
+    // #369: a curved track's layout is part of its type — different paths print different layout sheets.
+    c.mount.track
+      ? `track:${c.mount.track.seriesId}:${c.mount.track.carrierSpacingIn}${c.mount.track.twoHalfWalkAlong ? ":2w" : ""}${
+          c.mount.track.layout ? `:path:${pathSignature(c.mount.track.layout.path)}:${c.mount.track.layout.opening}` : ""
+        }`
+      : "",
   ].join("|");
 }
 

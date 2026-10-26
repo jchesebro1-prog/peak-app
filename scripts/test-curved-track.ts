@@ -7,7 +7,7 @@ import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
 import { sanitizeTrackSeries, type TrackSeries } from "../src/lib/track-series";
 import { trackQuantities, type TrackConfig } from "../src/lib/track-engine";
 import { collectCurtainTypes } from "../src/lib/curtain-cut-sheets/collect";
-import { CUT_SHEET_STAMP, cutSheetModel, type CutSheetContext } from "../src/lib/curtain-cut-sheets/model";
+import { CUT_SHEET_STAMP, cutSheetModel, cutSheetPageCount, submittalSheetIndexes, type CutSheetContext } from "../src/lib/curtain-cut-sheets/model";
 import { titleBlockData } from "../src/lib/design/grid-drawing-set";
 import { cleanTrackConfig, freshTrackDraft, trackConfigFromDraft, trackDraftFromConfig, trackLineDesc } from "../src/app/(app)/estimator/track-bom";
 import { angleAfterArcLengthEdit, angleFromArcLength, arcLengthText, blankSegment, pathToSegments, presetSegments, segmentsToPath, totalRunText, TRACK_PRESETS } from "../src/app/(app)/estimator/track-segment-draft";
@@ -362,6 +362,55 @@ export function configuratorChecks(ok: Ok) {
   ok(editor.includes("useState<string | null>(null)") && editor.includes("angleAfterArcLengthEdit("), "#369 UI: the Arc ft box keeps what is typed while focused");
 }
 
+/** A track line built the way the Estimator builds one: components from the engine's rows. */
+function trackItem(id: number, c: TrackConfig, s: TrackSeries, key: string): SpecItem {
+  const rows = trackQuantities(c, s).rows;
+  return line(id, {
+    sku: "TRK-ADC-280", desc: "Main track", unit: "lot", track: c, curtainTrackKey: key,
+    components: rows.map((r) => ({ sku: r.sku || s.parts[r.role]?.sku || r.role, label: r.role, role: ["battenClamp", "ceilingHanger"].includes(r.role) ? "mount" : "other", qty: r.qty, unit: "ea", cost: 1, price: 2 })),
+  } as Partial<SpecItem>);
+}
+
+export function curvedCutSheetChecks(ok: Ok) {
+  const s = series();
+  const bi = [S(10), A(8, 180), S(10)];
+  const curvedCfg = cfg({ curved: true, path: bi, runFt: pathLengthFt(bi), operation: "biparting" });
+  const r = collect([curtain(1, { curtainTrackKey: "ct-1-a" }), trackItem(2, curvedCfg, s, "ct-1-a")], [s]);
+  const t = r.types[0];
+  ok(r.types.length === 1 && !!t.curtains[0].mount.track?.layout, "#369 sheets: a curtain on a curved track carries its layout");
+  ok(cutSheetPageCount(t) === 2, "#369 sheets: a curved type prints two Submittal pages");
+  const sub = cutSheetModel(t, { ...CTX, index: 1, total: 2, style: "submittal" });
+  ok(sub.layout?.sheetNo === "CS-1.1" && sub.layout.titleBlock?.sheet.number === "CS-1.1" && sub.layout.titleBlock.sheet.title === "Layout — Main Drape",
+    "#369 sheets: the layout sheet is CS-n.1, titled Layout — <title>");
+  ok(sub.layout?.titleBlock?.sheet.index === 2 && sub.layout.titleBlock.sheet.total === 2 && sub.layout.titleBlock.stamp === CUT_SHEET_STAMP && sub.layout.titleBlock.scale === `Plan ${sub.layout.scale}`,
+    "#369 sheets: the layout sheet is the next sheet in the set, stamped, at its plan scale");
+  const clamps = t.hardware.find((h) => h.sku === "P-battenClamp")!.qty;
+  ok(sub.layout!.hangingCount === clamps, "#369 sheets: the layout's hanging points equal the hardware table");
+  ok(sub.elevation.shapes.some((x) => x.kind === "text" && x.text === `20'-0" along track`), "#369 sheets: a curved curtain's elevation width reads along the track");
+  const cli = cutSheetModel(t, { ...CTX, style: "client" });
+  ok(cli.layout !== null && cli.layout.titleBlock === null && !cli.layout.shapes.some((x) => x.tag === "mark"), "#369 sheets: the Client layout is the simple drawing, no title block");
+  ok(!/"sku"/.test(JSON.stringify(cli)), "#369 sheets: the Client model still carries no SKU");
+
+  // types split by layout; straight work is unchanged
+  const other = [S(6), A(8, 180), S(6)];
+  const two = collect([
+    curtain(1, { curtainTrackKey: "ct-1-a" }), trackItem(2, curvedCfg, s, "ct-1-a"),
+    curtain(3, { curtainTrackKey: "ct-3-b" }), trackItem(4, cfg({ curved: true, path: other, runFt: pathLengthFt(other), operation: "biparting" }), s, "ct-3-b"),
+  ], [s]);
+  ok(two.types.length === 2, "#369 sheets: curtains on different layouts are separate types");
+  const straight = collect([curtain(1, { curtainTrackKey: "ct-1-a" }), trackItem(2, cfg({ operation: "biparting" }), s, "ct-1-a")], [s]).types[0];
+  ok(cutSheetPageCount(straight) === 1 && cutSheetModel(straight, { ...CTX, style: "submittal" }).layout === null && !straight.curtains[0].mount.track?.layout,
+    "#369 sheets: a straight track prints one sheet and no layout");
+  ok(!straight.key.includes(":path:"), "#369 sheets: a straight track's type key is unchanged");
+  const idx = submittalSheetIndexes([t, straight, t]);
+  ok(idx.starts.join() === "1,3,4" && idx.total === 5, "#369 sheets: Submittal sheet numbers count layout sheets");
+
+  const pages = src("src/components/cutsheets/cut-sheet-pages.tsx");
+  ok(pages.includes("function LayoutSheet") && /\{m\.layout && <LayoutSheet m=\{m\} \/>\}/.test(pages) && pages.includes("Track layout"), "#369 sheets: the Submittal set prints the layout sheet; the Client sheet the Track layout");
+  ok((pages.match(/<Stamp \/>/g) || []).length >= 3, "#369 sheets: the layout sheet is stamped too");
+  ok(src("src/lib/curtain-cut-sheets/load.ts").includes("submittalSheetIndexes(result.types)"), "#369 sheets: load numbers the Submittal sheets with submittalSheetIndexes");
+}
+
 export async function curvedTrackChecks(ok: Ok) {
   stampChecks(ok);
   trackPathChecks(ok);
@@ -369,6 +418,7 @@ export async function curvedTrackChecks(ok: Ok) {
   segmentDraftChecks(ok);
   layoutViewChecks(ok);
   configuratorChecks(ok);
+  curvedCutSheetChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-curved-track.ts")) {

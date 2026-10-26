@@ -96,6 +96,8 @@ export function elevation(input: {
   markSpacingIn: number;
   markLabel: "Grommets" | "Carriers";
   box: { wIn: number; hIn: number };
+  /** #369 — appended to each panel's width ("along track" on a curved track: the panel is drawn flat). */
+  widthNote?: string;
 }): { scale: string; shapes: Shape[] } {
   const { panels, typical, count: drawnCount } = drawnPanels(input.sizes);
   const scale = pickScale(input.sizes, input.box);
@@ -172,7 +174,7 @@ export function elevation(input: {
       { kind: "line", tag: "dim", x1: x, y1: wy, x2: x + w, y2: wy, stroke: "thin" },
       { kind: "line", tag: "dim", x1: x, y1: y + h + 0.03, x2: x, y2: wy + 0.04, stroke: "thin" },
       { kind: "line", tag: "dim", x1: x + w, y1: y + h + 0.03, x2: x + w, y2: wy + 0.04, stroke: "thin" },
-      { kind: "text", x: x + w / 2, y: wy + 0.13, text: ftIn(p.widthFt), size: ELEV_TEXT_IN, anchor: "middle" },
+      { kind: "text", x: x + w / 2, y: wy + 0.13, text: input.widthNote ? `${ftIn(p.widthFt)} ${input.widthNote}` : ftIn(p.widthFt), size: ELEV_TEXT_IN, anchor: "middle" },
       { kind: "text", x: x + w / 2, y: wy + 0.26, text: `Qty ${p.qty ?? 1}`, size: ELEV_TEXT_IN, anchor: "middle", bold: true }
     );
     // overall height, left of the panel

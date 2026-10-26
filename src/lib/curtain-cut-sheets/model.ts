@@ -11,6 +11,7 @@ import { revLetter, titleBlockData, type RevisionRow, type TitleBlockData, type 
 import type { QuoteRevision } from "@/lib/stores/quotes";
 import type { CurtainType } from "./collect";
 import { elevation, ftIn, inchLabel } from "./geometry";
+import { CLIENT_LAYOUT_BOX, layoutView, SUBMITTAL_LAYOUT_BOX, type TrackLayoutSource } from "./layout";
 import { mountDetail, type MountDetail } from "./mount-details";
 import type { Shape } from "./shapes";
 import { BOTTOM_FINISH_LABELS, MOUNT_KEY_LABELS, TOP_FINISH_LABELS, type CurtainMountKey } from "./vocab";
@@ -37,6 +38,8 @@ export type CutSheetModel = {
   titleBlock: TitleBlockData | null;
   header: { companyName: string; logoDark: string | null; estimateNo: string };
   elevation: { scale: string; shapes: Shape[]; box: { wIn: number; hIn: number } };
+  /** #369 — a curved track's plan: Submittal prints it as sheet `${sheetNo}.1`; Client beside "How it hangs". null when straight. */
+  layout: { sheetNo: string; scale: string; shapes: Shape[]; box: { wIn: number; hIn: number }; hangingCount: number; titleBlock: TitleBlockData | null } | null;
   mount: { label: string; detail: MountDetail };
   /** Submittal only ([] for Client). */
   materials: Array<{ label: string; value: string }>;
@@ -72,6 +75,27 @@ export function quoteRevisionRows(revs: CutSheetContext["quote"]["revisions"] | 
 /** `.pk-drawing-sheet` variables for Letter landscape (SheetSizeKey is NOT widened — the drawing set switches on it). */
 export function cutSheetCssVars(): Record<string, string> {
   return { "--dw-w": "11in", "--dw-h": "8.5in", "--dw-k": "0.85", "--dw-m": "0.3in", "--dw-strip": "2.1in", "--dw-pad": "0.15in" };
+}
+
+/** #369 — the type's curved-track plan, from its first member (members share a type key, so they share a path). */
+export function layoutSourceOf(type: CurtainType): TrackLayoutSource | null {
+  return type.curtains[0]?.mount.track?.layout ?? null;
+}
+
+/** Submittal pages one type prints: its sheet, plus a layout sheet when its track is curved. */
+export function cutSheetPageCount(type: CurtainType): number {
+  return layoutSourceOf(type) ? 2 : 1;
+}
+
+/** Each type's first Submittal sheet number (1-based) and the set's total, layout sheets included. */
+export function submittalSheetIndexes(types: readonly CurtainType[]): { starts: number[]; total: number } {
+  let at = 1;
+  const starts = types.map((t) => {
+    const s = at;
+    at += cutSheetPageCount(t);
+    return s;
+  });
+  return { starts, total: at - 1 };
 }
 
 const COUNT_WORDS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
@@ -178,6 +202,7 @@ export function cutSheetModel(type: CurtainType, ctx: CutSheetContext): CutSheet
   const c = type.curtains[0];
   const submittal = ctx.style === "submittal";
   const box = submittal ? SUBMITTAL_ELEV_BOX : CLIENT_ELEV_BOX;
+  const layoutSrc = layoutSourceOf(type);
   const elev = elevation({
     sizes: type.sizes,
     fullnessPct: c.fullnessPct,
@@ -186,16 +211,14 @@ export function cutSheetModel(type: CurtainType, ctx: CutSheetContext): CutSheet
     markSpacingIn: type.markSpacingIn,
     markLabel: c.mount.source === "track" ? "Carriers" : "Grommets",
     box,
+    ...(layoutSrc ? { widthNote: "along track" } : {}),
   });
   const t = c.mount.track;
   const twoHalf = t?.twoHalfWalkAlong ? "two-half walk-along" : "";
   const mountNote = [t?.seriesName || "", twoHalf].filter(Boolean).join(", ");
   const mountLabel = mountNote ? `${MOUNT_KEY_LABELS[c.mount.key]} (${mountNote})` : MOUNT_KEY_LABELS[c.mount.key];
-  return {
-    style: ctx.style,
-    sheetNo: type.sheetNo,
-    title: type.title,
-    titleBlock: submittal
+  const block = (sheet: { number: string; title: string; scale: string }, index: number): TitleBlockData | null =>
+    submittal
       ? {
           ...titleBlockData({
             company: ctx.company,
@@ -204,16 +227,34 @@ export function cutSheetModel(type: CurtainType, ctx: CutSheetContext): CutSheet
             optionCount: 1,
             revisions: quoteRevisionRows(ctx.quote.revisions),
             set: { drawnBy: ctx.preparedBy, checkedBy: "" },
-            sheet: { number: type.sheetNo, title: type.title, scale: `Elev ${elev.scale} · Detail NTS` },
-            index: ctx.index,
+            sheet,
+            index,
             total: ctx.total,
             now: ctx.now,
           }),
           stamp: CUT_SHEET_STAMP,
         }
-      : null,
+      : null;
+  const lbox = submittal ? SUBMITTAL_LAYOUT_BOX : CLIENT_LAYOUT_BOX;
+  const lv = layoutSrc ? layoutView(layoutSrc, { box: lbox, detail: ctx.style }) : null;
+  const layoutSheetNo = `${type.sheetNo}.1`;
+  return {
+    style: ctx.style,
+    sheetNo: type.sheetNo,
+    title: type.title,
+    titleBlock: block({ number: type.sheetNo, title: type.title, scale: `Elev ${elev.scale} · Detail NTS` }, ctx.index),
     header: { companyName: ctx.company.name || "", logoDark: ctx.company.logoDark || null, estimateNo: ctx.quote.number },
     elevation: { scale: elev.scale, shapes: elev.shapes, box: { wIn: box.wIn, hIn: box.hIn } },
+    layout: lv
+      ? {
+          sheetNo: layoutSheetNo,
+          scale: lv.scale,
+          shapes: lv.shapes,
+          box: { wIn: lbox.wIn, hIn: lbox.hIn },
+          hangingCount: lv.hangingCount,
+          titleBlock: block({ number: layoutSheetNo, title: `Layout — ${type.title}`, scale: `Plan ${lv.scale}` }, ctx.index + 1),
+        }
+      : null,
     mount: { label: mountLabel, detail: mountDetail(c.mount.key) },
     materials: submittal ? materialRows(type) : [],
     sizes: type.sizes.map((s) => ({ size: `${ftIn(s.widthFt)} W × ${ftIn(s.heightFt)} H`, qty: s.qty })),
