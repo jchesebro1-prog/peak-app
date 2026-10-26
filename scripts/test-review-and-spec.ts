@@ -39227,7 +39227,8 @@ const t274Eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(
   const rd274 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const importsOf = (src: string) => [...src.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
   const pure = [...importsOf(rd274("src/lib/track-series.ts")), ...importsOf(rd274("src/lib/track-engine.ts"))];
-  ok(pure.every((m) => m === "@/lib/track-series"), "#274 purity: track-series.ts and track-engine.ts import nothing but each other (no DB, store, or catalog)");
+  // #369: the engine also reads the pure track-path module (itself import-checked by test-curved-track).
+  ok(pure.every((m) => m === "@/lib/track-series" || m === "@/lib/track-path"), "#274 purity: track-series.ts and track-engine.ts import nothing but each other (and the pure track-path module) — no DB, store, or catalog");
   const acts = rd274("src/app/(app)/estimating-rules/track-series/actions.ts");
   ok(acts.startsWith('"use server"') && (acts.match(/await requirePerm\("manage_users"\)/g) || []).length === 2, "#274 actions: both server actions gate on manage_users, like every Estimating Rules action");
   ok(acts.includes("saveTrackSeries(input, user.name)"), "#274 actions: save hands the raw input to the store, which re-sanitizes it");

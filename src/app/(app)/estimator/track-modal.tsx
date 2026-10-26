@@ -257,7 +257,7 @@ export function TrackFields({
 /** Parts table rows: the live BOM, or — read-only on a deleted series — the line's saved parts. */
 function PartsTable({ bom, stored }: { bom: TrackBom; stored?: SpecItem["components"] }) {
   const rows = bom.rows.length
-    ? bom.rows.map((r) => ({ key: r.role, label: r.label, part: r.missing ? r.desc : `${r.sku} · ${r.desc}`, qty: r.qty, unit: r.unit, ext: r.ext, missing: r.missing }))
+    ? bom.rows.map((r) => ({ key: r.role + (r.sku ? ":" + r.sku : ""), label: r.label, part: r.missing ? r.desc : `${r.sku} · ${r.desc}`, qty: r.qty, unit: r.unit, ext: r.ext, missing: r.missing }))
     : (stored || []).map((c, i) => ({ key: c.sku + i, label: c.label, part: c.sku, qty: c.qty, unit: c.unit, ext: c.price * c.qty, missing: false }));
   if (!rows.length) return null;
   return (

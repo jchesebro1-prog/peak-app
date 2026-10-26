@@ -4,7 +4,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
-import type { TrackSeries } from "../src/lib/track-series";
+import { sanitizeTrackSeries, type TrackSeries } from "../src/lib/track-series";
+import { trackQuantities, type TrackConfig } from "../src/lib/track-engine";
 import { collectCurtainTypes } from "../src/lib/curtain-cut-sheets/collect";
 import { CUT_SHEET_STAMP, cutSheetModel, type CutSheetContext } from "../src/lib/curtain-cut-sheets/model";
 import { titleBlockData } from "../src/lib/design/grid-drawing-set";
@@ -132,9 +133,65 @@ export function trackPathChecks(ok: Ok) {
   ok(JSON.stringify(cleanPath([{ kind: "arc", radiusFt: 6, sweepDeg: 90, turn: "left", junk: 1 } as unknown as TrackSegment])) === JSON.stringify([A(6, 90)]), "#369 path: cleanPath keeps only segment fields");
 }
 
+const STICKS = [12, 14, 16, 18, 20, 22, 24].map((l) => ({ lengthFt: l, sku: `S-${l}` }));
+const ROLES = ["splice", "carrier", "masterCarrier", "endStop", "battenClamp", "ceilingHanger", "livePulley", "deadPulley", "floorBlock", "operatingLine", "curved"];
+export function series(over: Partial<TrackSeries> = {}): TrackSeries {
+  return sanitizeTrackSeries({
+    id: "adc-280", name: "ADC 280", manufacturer: "ADC", sticks: STICKS, carrierSpacingIn: 12, hangerSpacingFt: 7, overlapFt: 2,
+    curvedSectionFt: 10, minRadiusFt: 5, parts: Object.fromEntries(ROLES.map((r) => [r, { sku: `P-${r}` }])), active: true, ...over,
+  })!;
+}
+export const cfg = (over: Partial<TrackConfig> = {}): TrackConfig => ({ seriesId: "adc-280", operation: "oneway", runFt: 40, curved: false, mounting: "batten", qty: 1, ...over });
+/** role → qty, sticks as "track:S-12" → qty. */
+function qtys(c: TrackConfig, s = series()): Record<string, number> & { errors?: string } {
+  const r = trackQuantities(c, s);
+  const out: Record<string, number> & { errors?: string } = {};
+  if (r.errors.length) out.errors = r.errors.join("|");
+  for (const row of r.rows) out[row.role === "track" ? `track:${row.sku}` : row.role] = (out[row.role === "track" ? `track:${row.sku}` : row.role] ?? 0) + row.qty;
+  return out;
+}
+
+export function curvedEngineChecks(ok: Ok) {
+  // straight tracks are untouched
+  const st = qtys(cfg());
+  ok(st["track:S-20"] === 2 && st.splice === 1 && st.battenClamp === 7 && st.carrier === 39, "#369 engine: a straight 40' track prices as before");
+
+  // legacy curved (no path) — today's numbers
+  const lg = qtys(cfg({ curved: true, radiusFt: 30 }));
+  ok(lg.curved === 4 && lg.splice === 3 && lg.battenClamp === 7 && !lg.errors, "#369 engine: a legacy curved 40' run is 4 sections, 3 splices, 7 clamps");
+  const lgBi = qtys(cfg({ curved: true, radiusFt: 30, operation: "biparting" }));
+  ok(lgBi.curved === 6 && lgBi.splice === 4 && lgBi.battenClamp === 8 && lgBi.masterCarrier === 2, "#369 engine: a legacy curved lapped bi-part is two legs of 21'");
+  const sameAsPath = (c: TrackConfig) => JSON.stringify(trackQuantities(c, series())) === JSON.stringify(trackQuantities({ ...c, path: resolvePath(c)! }, series()));
+  ok(sameAsPath(cfg({ curved: true, radiusFt: 30 })) && sameAsPath(cfg({ curved: true, radiusFt: 30, operation: "biparting" })) && sameAsPath(cfg({ curved: true, radiusFt: 25, runFt: 63.5, mounting: "ceiling", qty: 3 })),
+    "#369 engine: a legacy curve and the same curve as an explicit one-arc path price identically");
+  ok(qtys(cfg({ curved: true })).errors === "Enter the curve radius.", "#369 engine: a legacy curve with no radius keeps today's error");
+
+  // mixed one-way: straight 12 · R6 90° · straight 12 (run 33.42')
+  const mixed = [S(12), A(6, 90), S(12)];
+  const mx = qtys(cfg({ curved: true, path: mixed, runFt: pathLengthFt(mixed) }));
+  ok(mx["track:S-12"] === 2 && mx.curved === 1 && mx.splice === 2 && mx.battenClamp === 7 && mx.carrier === 33 && mx.endStop === 2 && !mx.errors,
+    "#369 engine: straights buy sticks, the arc buys a section, a splice per joint, a clamp at every joint");
+  // the engine reads the run from the path, not the stored runFt
+  ok(JSON.stringify(qtys(cfg({ curved: true, path: mixed, runFt: 999 }))) === JSON.stringify(mx), "#369 engine: a segmented track's run is its path length");
+
+  // mixed lapped bi-part: straight 10 · R8 180° · straight 10, overlap 2
+  const bi = [S(10), A(8, 180), S(10)];
+  const bx = qtys(cfg({ curved: true, path: bi, runFt: pathLengthFt(bi), operation: "biparting" }));
+  ok(bx["track:S-12"] === 2 && bx.curved === 4 && bx.splice === 4 && bx.battenClamp === 10 && bx.masterCarrier === 2,
+    "#369 engine: a lapped bi-part splits at center — each leg buys its own straight, arc share, splices and clamps");
+  const two = qtys(cfg({ curved: true, path: bi, runFt: pathLengthFt(bi), operation: "biparting", qty: 2 }));
+  ok(two.curved === 8 && two.battenClamp === 20 && two["track:S-12"] === 4, "#369 engine: qty multiplies every row");
+
+  // errors
+  ok(qtys(cfg({ curved: true, path: [S(10), A(3, 90)], runFt: 0 })).errors === "Segment 2: 3' is tighter than the ADC 280's 5' minimum.", "#369 engine: a too-tight arc refuses the track by segment");
+  ok(qtys(cfg({ curved: true, path: [], runFt: 0 })).errors === "Add a segment to the curve.", "#369 engine: an empty path asks for a segment (no run-length error)");
+  ok((qtys(cfg({ curved: true, path: mixed, runFt: 0 }), series({ curvedSectionFt: undefined })).errors || "").includes("ADC 280 has no curved track."), "#369 engine: no curved section, no curve");
+}
+
 export async function curvedTrackChecks(ok: Ok) {
   stampChecks(ok);
   trackPathChecks(ok);
+  curvedEngineChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-curved-track.ts")) {
