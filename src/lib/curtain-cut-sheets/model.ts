@@ -22,9 +22,11 @@ export const CUT_SHEETS_WRONG_TYPE = "Cut sheets are for system quotes.";
 export const CUT_SHEETS_NONE = "This quote has no curtains.";
 /** #369 — printed on every cut sheet, both styles, always. */
 export const CUT_SHEET_STAMP = "PRELIMINARY — NOT FOR CONSTRUCTION";
-/** Elevation boxes in paper inches: Letter landscape drawing area (60 % × 55 %) and Letter portrait at 0.6in margins. */
-export const SUBMITTAL_ELEV_BOX = { wIn: 4.6, hIn: 3.9 } as const;
-export const CLIENT_ELEV_BOX = { wIn: 7.3, hIn: 3.6 } as const;
+/** Elevation boxes in paper inches: Letter landscape drawing area (60 % × 55 %) and Letter portrait at 0.6in margins.
+ *  The heights leave room for the #369 stamp banner (about 0.35in), so a Submittal cell does not clip and a Client sheet stays one page.
+ *  Keep each equal to the matching `maxHeight` on the `Elevation` in cut-sheet-pages.tsx. */
+export const SUBMITTAL_ELEV_BOX = { wIn: 4.6, hIn: 3.5 } as const;
+export const CLIENT_ELEV_BOX = { wIn: 7.3, hIn: 3.2 } as const;
 
 export function isCutSheetQuoteType(t: string | null | undefined): boolean {
   return !t || t === "system";

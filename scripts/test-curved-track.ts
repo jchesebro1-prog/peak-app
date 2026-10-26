@@ -7,7 +7,7 @@ import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
 import { sanitizeTrackSeries, type TrackSeries } from "../src/lib/track-series";
 import { trackQuantities, type TrackConfig } from "../src/lib/track-engine";
 import { collectCurtainTypes } from "../src/lib/curtain-cut-sheets/collect";
-import { CUT_SHEET_STAMP, cutSheetModel, cutSheetPageCount, submittalSheetIndexes, type CutSheetContext } from "../src/lib/curtain-cut-sheets/model";
+import { CLIENT_ELEV_BOX, CUT_SHEET_STAMP, cutSheetModel, cutSheetPageCount, SUBMITTAL_ELEV_BOX, submittalSheetIndexes, type CutSheetContext } from "../src/lib/curtain-cut-sheets/model";
 import { titleBlockData } from "../src/lib/design/grid-drawing-set";
 import { cleanTrackConfig, freshTrackDraft, trackConfigFromDraft, trackDraftFromConfig, trackLineDesc } from "../src/app/(app)/estimator/track-bom";
 import { angleAfterArcLengthEdit, angleFromArcLength, arcLengthText, blankSegment, pathToSegments, presetSegments, segmentsToPath, totalRunText, TRACK_PRESETS } from "../src/app/(app)/estimator/track-segment-draft";
@@ -68,6 +68,10 @@ export function stampChecks(ok: Ok) {
   const pages = src("src/components/cutsheets/cut-sheet-pages.tsx");
   ok((pages.match(/<Stamp \/>/g) || []).length >= 2, "#369 stamp: the Submittal and Client sheets both render <Stamp />");
   ok(src("src/components/drawing/title-block.tsx").includes("{data.stamp && <div className=\"pk-tb-stamp\">{data.stamp}</div>}"), "#369 stamp: the title block prints data.stamp only when set");
+  ok(
+    SUBMITTAL_ELEV_BOX.hIn === 3.5 && CLIENT_ELEV_BOX.hIn === 3.2 && pages.includes('maxHeight="3.5in"') && pages.includes('maxHeight="3.2in"'),
+    "#369 stamp: the elevations give the stamp's height back (sheets stay one page)",
+  );
   const css = src("src/app/globals.css");
   ok(css.includes(".pk-cs-stamp {") && css.includes(".pk-cs-area {") && css.includes(".pk-tb-stamp {"), "#369 stamp: the banner, area and title-block styles exist");
 }

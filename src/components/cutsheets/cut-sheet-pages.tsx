@@ -70,7 +70,7 @@ function SubmittalSheet({ m }: { m: CutSheetModel }) {
           <div className="pk-cs-grid">
             <div className="pk-cs-cell">
               <h2 className="pk-dw-h">{`Elevation — ${m.title}`}</h2>
-              <Elevation m={m} maxHeight="3.9in" />
+              <Elevation m={m} maxHeight="3.5in" />
               <div className="pk-dw-mono">{`Elevation ${m.elevation.scale}`}</div>
             </div>
             <div className="pk-cs-cell">
@@ -163,7 +163,7 @@ function ClientSheet({ m, photos, letterheadSrc }: { m: CutSheetModel; photos: s
       )}
       <Stamp />
       <h1 className="pk-cs-title">{m.title}</h1>
-      <Elevation m={m} maxHeight="3.6in" />
+      <Elevation m={m} maxHeight="3.2in" />
       <p className="pk-cs-desc">{m.description}</p>
       <div className="pk-cs-row">
         <div>
