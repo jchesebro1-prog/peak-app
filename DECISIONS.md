@@ -13862,7 +13862,7 @@ Jeff, brainstorm 2026-10-25. A curved track is a list of 1–12 segments, each a
 
 ## D1305. Pricing is per segment, with a hanging point at every joint (#369, 2026-10-25)
 
-Jeff, 2026-10-25. Sections, sticks, carriers, center supports, operating line and hanging points are counted per segment; every joint between segments is a hanging point and gets a splice and a pipe clamp where the series maps them. Curved tracks, legacy ones included, forgive up to 0.001 ft of length overshoot (`PATH_LEN_EPS_FT`, `ceilAlong` in `src/lib/track-path`) in every path-derived count, because 4-decimal angles drift a few hundred-thousandths of a foot. Consequence: a legacy curve whose run is within 0.012" above an exact multiple counts one fewer piece. Straight tracks are unchanged. Accepted degenerate deviation: a legacy curved bi-part whose run is shorter than the series overlap (under about 2') counts fewer hanging points than before, because the lap is clamped to the path length.
+Jeff, 2026-10-25. Sections, sticks, carriers, center supports, operating line and hanging points are counted per segment; every joint between segments is a hanging point and gets a splice and a pipe clamp where the series maps them. Curved tracks, legacy ones included, forgive up to 0.001 ft of length overshoot (`PATH_LEN_EPS_FT`, `ceilAlong` in `src/lib/track-path`) in every path-derived count, because 4-decimal angles drift a few hundred-thousandths of a foot. Consequence: reopening a legacy curve whose sweep exceeds 360° (run over 2πR) shows the angle error and blocks Update; its stored price is unchanged, and its cut sheet draws no layout. Consequence: a legacy curve whose run is within 0.012" above an exact multiple counts one fewer piece. Straight tracks are unchanged. Accepted degenerate deviation: a legacy curved bi-part whose run is shorter than the series overlap (under about 2') counts fewer hanging points than before, because the lap is clamped to the path length.
 
 ## D1306. The layout sheet CS-n.1 (#369, 2026-10-25)
 
@@ -13878,8 +13878,8 @@ Jeff, during the build. The plan had said a layout too big for its box falls bac
 
 ## D1309. "PRELIMINARY — NOT FOR CONSTRUCTION" on every cut sheet (#369, 2026-10-25)
 
-Jeff, 2026-10-25. Every cut sheet, both styles, prints a "PRELIMINARY — NOT FOR CONSTRUCTION" banner, and the Submittal title block carries the same stamp. Always on, no setting. The Grid drawing set is unchanged.
+Jeff, 2026-10-25. Every cut sheet, both styles, prints a "PRELIMINARY — NOT FOR CONSTRUCTION" banner, and the Submittal title block carries the same stamp. Always on, no setting. The Grid drawing set is unchanged. Sizing, as built: the title-block stamp sits in the Sheet title cell (the spec said the Revisions cell), and the stamp's height is given back by shrinking the elevation boxes for ALL cut sheets, straight curtains included — Submittal 3.9 to 3.5 in, Client 3.6 to 3.2 in. Measured in headless Chrome: Submittal cells stopped clipping, and a Client sheet with the letterhead is 9.71 in of 9.8 in, one page.
 
 ## D1310. Rollback past #369 (#369, 2026-10-25)
 
-No migration; the path is stored on the track configuration. An older build ignores the path and prices a path track as one arc of `runFt` at its tightest radius. That is acceptable: roll forward rather than back.
+No migration; the path is stored on the track configuration. An older build ignores the path and prices a path track as one arc of `runFt` at its tightest radius. Worse, if that build re-saves the line, its `cleanTrackConfig` drops `path` — the track becomes a one-arc curve permanently, not just ignored. That is acceptable only because we roll forward rather than back.

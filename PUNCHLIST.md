@@ -12905,4 +12905,11 @@ Jeff, 2026-10-25 (brainstorm): a curved track is more than one arc (U wraps, cor
 
 **Remaining (Jeff-gated):**
 - Set `curvedSectionFt` / `minRadiusFt` on each track series that curves in Estimating Rules → Track series (corner wraps need a series that bends that tight).
-- Configure a real curved track on production and print its cut sheets (Submittal and Client); check the caption count against the hardware table's clamp row.
+- Configure a real curved track on production and print its cut sheets (Submittal and Client); check the caption count against the hardware table's clamp row. Reopen a legacy curved line too (one saved before #369) and confirm its price and parts are unchanged.
+
+**Follow-ups:**
+- Ticking Curved starts with an empty segment list; seed a Single arc from the straight run.
+- Curtain-modal curved segments don't follow curtain-width changes.
+- Segment rows are keyed by index.
+- The compact curtain-modal segment row still needs a real browser look.
+- Jeff's prod check should reopen a legacy curved line (see above).
