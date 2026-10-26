@@ -15,9 +15,11 @@ export type TrackSegment =
 export const MAX_TRACK_SEGMENTS = 12;
 const RAD = Math.PI / 180;
 
-/** ceil that forgives float noise at exact multiples (the track engine's rule). */
-function ceilSafe(x: number): number {
-  return Math.ceil(x - 1e-9);
+/** Length overshoot (ft) forgiven when counting pieces, carriers and hanging points along a path — covers an angle shown to 4 decimals (≤ ~1e-3 ft at any sane radius). */
+export const PATH_LEN_EPS_FT = 1e-3;
+/** How many `unitFt` lengths cover `lengthFt`, forgiving PATH_LEN_EPS_FT of overshoot (never below 0). */
+export function ceilAlong(lengthFt: number, unitFt: number): number {
+  return Math.max(0, Math.ceil((lengthFt - PATH_LEN_EPS_FT) / unitFt));
 }
 const fmtFt = (n: number) => (Math.round(n * 100) / 100).toString() + "'";
 const positive = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n > 0;
@@ -212,7 +214,7 @@ export function legHangingPoints(path: readonly TrackSegment[], leg: LegSpan, sp
   for (let i = 1; i < stops.length; i++) {
     const a = stops[i - 1];
     const z = stops[i];
-    const n = Math.min(2000, Math.max(1, ceilSafe((z - a) / spacingFt)));
+    const n = Math.min(2000, Math.max(1, ceilAlong(z - a, spacingFt)));
     for (let k = 1; k <= n; k++) pts.push(a + ((z - a) * k) / n);
   }
   return pts;

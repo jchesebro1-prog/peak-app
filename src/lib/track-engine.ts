@@ -10,7 +10,7 @@ import {
   type TrackSeries,
   type TrackStick,
 } from "@/lib/track-series";
-import { legHangingPoints, legPieces, pathErrors, pathLengthFt, resolvePath, trackLegs, type TrackSegment } from "@/lib/track-path";
+import { ceilAlong, legHangingPoints, legPieces, pathErrors, pathLengthFt, resolvePath, trackLegs, type TrackSegment } from "@/lib/track-path";
 
 /**
  * Track quantity engine (#274 §2). Pure — no prices, no catalog access: a
@@ -101,12 +101,6 @@ function ceilSafe(x: number): number {
   return Math.ceil(x - 1e-9);
 }
 
-/** #369 — piece counts along a path forgive 1e-4 ft (0.001"): a sweep typed to 4 decimals (76.3944°
- *  for a 40' arc at R30') overshoots its multiple by ~1e-5 ft and must not buy one more section. */
-function ceilPiece(x: number): number {
-  return Math.ceil(x - 1e-4);
-}
-
 const OPERATIONS: ReadonlySet<string> = new Set(Object.keys(TRACK_OPERATION_LABELS));
 
 /** Oct 15 #45 — a track whose two halves part at center: bi-parting, or a walk-along bi-part. */
@@ -135,13 +129,13 @@ function curvedPieces(path: TrackSegment[], runFt: number, lapOverlapFt: number,
     let n = 0;
     for (const p of legPieces(path, leg)) {
       if (p.kind === "arc") {
-        const k = ceilPiece(p.lengthFt / series.curvedSectionFt!);
+        const k = ceilAlong(p.lengthFt, series.curvedSectionFt!);
         curved += k;
         n += k;
         continue;
       }
       const longest = sticks[sticks.length - 1];
-      const k = ceilPiece(p.lengthFt / longest.lengthFt);
+      const k = ceilAlong(p.lengthFt, longest.lengthFt);
       const stick = sticks.find((s) => s.lengthFt >= p.lengthFt / k - 1e-9) ?? longest;
       const row = bySku.get(stick.sku);
       if (row) row.qty += k;
@@ -214,9 +208,9 @@ export function trackQuantities(config: TrackConfig, series: TrackSeries): Track
     splices = legs * Math.max(0, nLeg - 1);
     mounts = legs * (ceilSafe(leg / hangerSpacing) + 1);
   }
-  // #369: a path's length carries the 4-decimal sweep slack; a straight/legacy track keeps the strict rule
-  const ceilN = path && path.length ? ceilPiece : ceilSafe;
-  const allCarriers = ceilN((run * 12) / carrierSpacing);
+  // #369: a path's length carries the 4-decimal sweep slack (PATH_LEN_EPS_FT); a straight track keeps the strict rule
+  const onPath = !!(path && path.length);
+  const allCarriers = onPath ? ceilAlong(run, carrierSpacing / 12) : ceilSafe((run * 12) / carrierSpacing);
   const masters = bipart ? 2 : 1;
   const carriers = Math.max(0, allCarriers - masters);
   const batten = config.mounting === "batten";
@@ -235,13 +229,13 @@ export function trackQuantities(config: TrackConfig, series: TrackSeries): Track
   per.push({ role: mountingRole(config.mounting), qty: mounts });
   if (batten && mapped("pipeClamp")) per.push({ role: "pipeClamp", qty: mounts });
   const every = series.centerSupportEveryFt;
-  if (batten && mapped("centerPipeSupport") && typeof every === "number" && every > 0) per.push({ role: "centerPipeSupport", qty: Math.max(0, ceilN(L / every) - 1) });
+  if (batten && mapped("centerPipeSupport") && typeof every === "number" && every > 0) per.push({ role: "centerPipeSupport", qty: Math.max(0, (onPath ? ceilAlong(L, every) : ceilSafe(L / every)) - 1) });
   if (cord) {
     per.push(
       { role: "livePulley", qty: 1 },
       { role: config.operation === "oneway" && mapped("deadPulleyOneWay") ? "deadPulleyOneWay" : "deadPulley", qty: 1 },
       { role: "floorBlock", qty: 1 },
-      { role: "operatingLine", qty: ceilN(2 * L + 2 * trim + (series.lineAllowanceFt || 0)) }
+      { role: "operatingLine", qty: onPath ? ceilAlong(2 * L + 2 * trim + (series.lineAllowanceFt || 0), 1) : ceilSafe(2 * L + 2 * trim + (series.lineAllowanceFt || 0)) }
     );
   }
   return { rows: per.filter((r) => r.qty > 0).map((r) => ({ ...r, qty: r.qty * qty })), errors: [] };

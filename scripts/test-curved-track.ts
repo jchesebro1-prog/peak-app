@@ -214,6 +214,28 @@ export function segmentDraftChecks(ok: Ok) {
   ok(JSON.stringify(trackQuantities(trackConfigFromDraft(reopened), series()).rows) === JSON.stringify(trackQuantities(legacy, series()).rows), "#369 draft: re-saving a reopened legacy curve keeps its parts");
   ok(trackDraftFromConfig(cfg()).segments?.length === 0, "#369 draft: a straight track reopens with no rows");
 
+  // reopen parity at exact hanger multiples: the saved 4-decimal sweep overshoots by ~1e-5 ft and must not buy a clamp
+  const reopenCases: [string, TrackConfig][] = [
+    ["R30 40' @5' hangers", cfg({ curved: true, radiusFt: 30, hangerSpacingFt: 5 })],
+    ["R30 40' @4' hangers", cfg({ curved: true, radiusFt: 30, hangerSpacingFt: 4 })],
+    ["R30 40' @8' hangers", cfg({ curved: true, radiusFt: 30, hangerSpacingFt: 8 })],
+    ["R30 40' @10' hangers", cfg({ curved: true, radiusFt: 30, hangerSpacingFt: 10 })],
+    ["R20 30' @5' hangers", cfg({ curved: true, radiusFt: 20, runFt: 30, hangerSpacingFt: 5 })],
+    ["R30 38' bi-part @5' hangers", cfg({ curved: true, radiusFt: 30, runFt: 38, operation: "biparting", hangerSpacingFt: 5 })],
+    ["R25 50' @5' hangers", cfg({ curved: true, radiusFt: 25, runFt: 50, hangerSpacingFt: 5 })],
+  ];
+  for (const [name, legacyCfg] of reopenCases) {
+    ok(
+      JSON.stringify(trackQuantities(trackConfigFromDraft(trackDraftFromConfig(legacyCfg)), series()).rows) === JSON.stringify(trackQuantities(legacyCfg, series()).rows),
+      `#369 draft: re-saving a reopened legacy curve keeps its parts — ${name}`
+    );
+  }
+  const typed = { ...freshTrackDraft([series()]), operation: "oneway" as const, curved: true, hangerSpacing: "5", segments: [{ kind: "arc" as const, length: "40", radius: "30", angle: angleFromArcLength("40", "30"), turn: "left" as const }] };
+  const typedQ = trackQuantities(trackConfigFromDraft(typed), series()).rows;
+  const legacyQ = trackQuantities(cfg({ curved: true, radiusFt: 30, hangerSpacingFt: 5 }), series()).rows;
+  const pick = (rows: typeof typedQ) => JSON.stringify(rows.filter((r) => r.role === "curved" || r.role === "carrier" || r.role === "battenClamp"));
+  ok(pick(typedQ) === pick(legacyQ) && pick(typedQ).includes("battenClamp"), "#369 draft: a new arc typed as 40' length at R30 prices the same curved, carrier and clamp counts as the legacy curve");
+
   const cleaned = cleanTrackConfig({ ...c, path: [...mixed, { kind: "arc", radiusFt: 9, sweepDeg: 45, turn: "right", junk: 1 } as unknown as TrackSegment] });
   ok(cleaned.path?.length === 4 && !JSON.stringify(cleaned).includes("junk"), "#369 draft: cleanTrackConfig keeps a curved track's path, segment fields only");
   ok(cleanTrackConfig({ ...c, curved: false }).path === undefined, "#369 draft: cleanTrackConfig drops a path off a straight track");
