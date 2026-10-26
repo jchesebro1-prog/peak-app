@@ -50,6 +50,12 @@ export function angleFromArcLength(lengthText: string, radiusText: string): stri
   return l > 0 && r > 0 ? txt(l / r / RAD) : "";
 }
 
+/** The angle text after the user types `lengthText` into an arc row's length box: the back-solved angle when length and radius are both positive numbers, else the row's current angle unchanged (a half-typed "9." or "0." never clears it). */
+export function angleAfterArcLengthEdit(lengthText: string, seg: TrackSegmentDraft): string {
+  const next = angleFromArcLength(lengthText, seg.radius);
+  return next === "" ? seg.angle : next;
+}
+
 /** "33.42" — the rows' total, "" when any row is incomplete or there are none. */
 export function totalRunText(segs: readonly TrackSegmentDraft[]): string {
   if (!segs.length) return "";

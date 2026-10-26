@@ -10,7 +10,7 @@ import { collectCurtainTypes } from "../src/lib/curtain-cut-sheets/collect";
 import { CUT_SHEET_STAMP, cutSheetModel, type CutSheetContext } from "../src/lib/curtain-cut-sheets/model";
 import { titleBlockData } from "../src/lib/design/grid-drawing-set";
 import { cleanTrackConfig, freshTrackDraft, trackConfigFromDraft, trackDraftFromConfig, trackLineDesc } from "../src/app/(app)/estimator/track-bom";
-import { angleFromArcLength, arcLengthText, pathToSegments, presetSegments, segmentsToPath, totalRunText, TRACK_PRESETS } from "../src/app/(app)/estimator/track-segment-draft";
+import { angleAfterArcLengthEdit, angleFromArcLength, arcLengthText, blankSegment, pathToSegments, presetSegments, segmentsToPath, totalRunText, TRACK_PRESETS } from "../src/app/(app)/estimator/track-segment-draft";
 import {
   audienceFrame, cleanPath, footprint, legHangingPoints, legPieces, legacyArc, pathErrors, pathLengthFt, pathSignature, pointAt,
   resolvePath, samplePath, segmentBounds, trackLegs, type TrackSegment,
@@ -352,8 +352,14 @@ export function configuratorChecks(ok: Ok) {
   ok(/draft\.curved \? !\(draft\.segments \|\| \[\]\)\.length : !draft\.run\.trim\(\)/.test(modal), "#369 UI: an untouched curved form (no rows) shows no errors; a straight one keys off the run");
   ok(editor.includes("TRACK_PRESETS.map") && editor.includes("+ Add segment") && editor.includes("Total run"), "#369 UI: presets, + Add segment and the total run");
   ok(editor.includes("layoutView(") && editor.includes("MODAL_LAYOUT_BOX") && editor.includes("<ShapeSvg"), "#369 UI: the live mini plan uses the cut sheet's layout shapes");
-  ok(editor.includes("MAX_TRACK_SEGMENTS") && editor.includes("angleFromArcLength("), "#369 UI: the 12-segment cap and the arc-length back-solve");
+  ok(editor.includes("MAX_TRACK_SEGMENTS") && editor.includes("angleAfterArcLengthEdit("), "#369 UI: the 12-segment cap and the arc-length back-solve");
   ok(!/@\/lib\/stores\/|@\/db/.test(editor), "#369 UI: the segment editor imports no store or db");
+  const arcSeg = { ...blankSegment("arc"), radius: "6", angle: "90" };
+  ok(angleAfterArcLengthEdit("9.", arcSeg) === angleFromArcLength("9", "6"), "#369 UI: a half-typed \"9.\" back-solves the angle for 9");
+  ok(angleAfterArcLengthEdit("9.5", arcSeg) === angleFromArcLength("9.5", "6"), "#369 UI: \"9.5\" back-solves the angle for 9.5");
+  ok(["0", "0.", ""].every((t) => angleAfterArcLengthEdit(t, arcSeg) === "90"), "#369 UI: \"0\", \"0.\" and an empty box leave the angle unchanged");
+  ok(angleAfterArcLengthEdit("10", { ...blankSegment("arc"), radius: "", angle: "45" }) === "45", "#369 UI: with no radius a typed length leaves the angle unchanged");
+  ok(editor.includes("useState<string | null>(null)") && editor.includes("angleAfterArcLengthEdit("), "#369 UI: the Arc ft box keeps what is typed while focused");
 }
 
 export async function curvedTrackChecks(ok: Ok) {

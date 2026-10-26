@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { ShapeSvg } from "@/components/cutsheets/shape-svg";
 import { layoutView, MODAL_LAYOUT_BOX, trackLayoutSource } from "@/lib/curtain-cut-sheets/layout";
 import { MAX_RUN_FT } from "@/lib/track-engine";
@@ -9,7 +9,7 @@ import { seriesSticks, type TrackSeries } from "@/lib/track-series";
 import { FIELD, LBL, NUMFIELD, segBtn } from "./est-ui";
 import { trackConfigFromDraft } from "./track-bom";
 import type { TrackSetter } from "./track-modal";
-import { angleFromArcLength, arcLengthText, blankSegment, presetSegments, totalRunText, TRACK_PRESETS } from "./track-segment-draft";
+import { angleAfterArcLengthEdit, arcLengthText, blankSegment, presetSegments, totalRunText, TRACK_PRESETS } from "./track-segment-draft";
 import type { TrackDraft, TrackSegmentDraft } from "./types";
 
 /**
@@ -19,6 +19,27 @@ import type { TrackDraft, TrackSegmentDraft } from "./types";
  */
 const ROW: CSSProperties = { display: "grid", gridTemplateColumns: "20px 1.3fr 1fr 1fr 1fr 1.2fr auto", gap: 8, alignItems: "center", marginBottom: 6 };
 const ICON: CSSProperties = { border: "1px solid #e4e7ec", background: "#fff", borderRadius: 6, width: 24, height: 24, fontSize: 11, color: "#5b616e", cursor: "pointer", padding: 0 };
+
+/** The Arc ft box: shows what is being typed while focused (the derived length would eat a half-typed "9."), and back-solves the angle only from a full number. */
+function ArcLengthInput({ seg, index, onAngle }: { seg: TrackSegmentDraft; index: number; onAngle: (angle: string) => void }) {
+  const [typing, setTyping] = useState<string | null>(null);
+  return (
+    <input
+      className="est-input est-field"
+      value={typing ?? arcLengthText(seg)}
+      onFocus={() => setTyping(arcLengthText(seg))}
+      onChange={(e) => {
+        setTyping(e.target.value);
+        onAngle(angleAfterArcLengthEdit(e.target.value, seg));
+      }}
+      onBlur={() => setTyping(null)}
+      placeholder="Arc ft"
+      title="Type an arc length to set the angle"
+      aria-label={`Segment ${index + 1} arc length (ft)`}
+      style={NUMFIELD}
+    />
+  );
+}
 
 export function TrackSegmentsEditor({ draft, current, onSet }: { draft: TrackDraft; current: TrackSeries | null; onSet: TrackSetter }) {
   const segs = draft.segments || [];
@@ -74,15 +95,7 @@ export function TrackSegmentsEditor({ draft, current, onSet }: { draft: TrackDra
             <>
               <input className="est-input est-field" value={s.radius} onChange={(e) => patch(i, { radius: e.target.value })} placeholder={current?.minRadiusFt ? `R min ${current.minRadiusFt}` : "Radius ft"} aria-label={`Segment ${i + 1} radius (ft)`} style={NUMFIELD} />
               <input className="est-input est-field" value={s.angle} onChange={(e) => patch(i, { angle: e.target.value })} placeholder="Angle °" aria-label={`Segment ${i + 1} angle (degrees)`} style={NUMFIELD} />
-              <input
-                className="est-input est-field"
-                value={arcLengthText(s)}
-                onChange={(e) => patch(i, { angle: angleFromArcLength(e.target.value, s.radius) })}
-                placeholder="Arc ft"
-                title="Type an arc length to set the angle"
-                aria-label={`Segment ${i + 1} arc length (ft)`}
-                style={NUMFIELD}
-              />
+              <ArcLengthInput seg={s} index={i} onAngle={(angle) => patch(i, { angle })} />
               <div style={{ display: "flex", gap: 4 }}>
                 <button type="button" style={segBtn(s.turn === "left")} onClick={() => patch(i, { turn: "left" })}>
                   Left
