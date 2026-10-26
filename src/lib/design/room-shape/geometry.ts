@@ -133,16 +133,43 @@ function segsCross(p1: ShapePt, p2: ShapePt, p3: ShapePt, p4: ShapePt): boolean 
   return ((d1 > EPS && d2 < -EPS) || (d1 < -EPS && d2 > EPS)) && ((d3 > EPS && d4 < -EPS) || (d3 < -EPS && d4 > EPS));
 }
 
-/** Whether a room's outline crosses itself (sampled; neighbouring segments never count). */
+/**
+ * Whether a room's outline crosses itself (sampled; neighbouring segments never count). A uniform grid (about √n cells a
+ * side) keeps this near-linear: only segments that share a cell are tested, and the answer is the all-pairs one.
+ */
 export function selfCrosses(room: Pick<ShapeRoom, "pts" | "edges">): boolean {
   const p = outlinePoints(room, 0.5, 32);
   const n = p.length;
   if (n < 4) return false;
+  const b = bounds(p);
+  const G = Math.max(1, Math.ceil(Math.sqrt(n)));
+  const pad = 1e-7;
+  const x0 = b.minX - pad, y0 = b.minY - pad;
+  const cw = Math.max((b.maxX - b.minX + 2 * pad) / G, 1e-9), ch = Math.max((b.maxY - b.minY + 2 * pad) / G, 1e-9);
+  const cell = (v: number, o: number, size: number) => Math.min(G - 1, Math.max(0, Math.floor((v - o) / size)));
+  const range = (i: number) => {
+    const a = p[i], c = p[(i + 1) % n];
+    return [cell(Math.min(a.x, c.x) - pad, x0, cw), cell(Math.max(a.x, c.x) + pad, x0, cw), cell(Math.min(a.y, c.y) - pad, y0, ch), cell(Math.max(a.y, c.y) + pad, y0, ch)];
+  };
+  const grid: number[][] = new Array(G * G);
   for (let i = 0; i < n; i++) {
-    for (let j = i + 2; j < n; j++) {
-      if (i === 0 && j === n - 1) continue;
-      if (segsCross(p[i], p[(i + 1) % n], p[j], p[(j + 1) % n])) return true;
-    }
+    const [cx0, cx1, cy0, cy1] = range(i);
+    for (let cy = cy0; cy <= cy1; cy++)
+      for (let cx = cx0; cx <= cx1; cx++) (grid[cy * G + cx] ??= []).push(i);
+  }
+  const seen = new Int32Array(n).fill(-1);
+  for (let i = 0; i < n; i++) {
+    const [cx0, cx1, cy0, cy1] = range(i);
+    for (let cy = cy0; cy <= cy1; cy++)
+      for (let cx = cx0; cx <= cx1; cx++) {
+        const list = grid[cy * G + cx];
+        if (!list) continue;
+        for (const j of list) {
+          if (j < i + 2 || seen[j] === i || (i === 0 && j === n - 1)) continue;
+          seen[j] = i;
+          if (segsCross(p[i], p[(i + 1) % n], p[j], p[(j + 1) % n])) return true;
+        }
+      }
   }
   return false;
 }

@@ -11,7 +11,7 @@ import type { ShapeEdge, ShapePt, ShapeRoom } from "../src/lib/design/room-shape
 import { fitOutline } from "../src/lib/design/room-shape/fit";
 import { SegIndex, splitByWalls, walledShare, wallAt, type Seg } from "../src/lib/design/room-shape/walls";
 import { freezeFromTemplate, roomIdFor } from "../src/lib/design/room-shape/freeze";
-import { sanitizeRoomShape } from "../src/lib/design/room-shape/sanitize";
+import { sanitizeRoomShape, SHAPE_SAMPLE_BUDGET } from "../src/lib/design/room-shape/sanitize";
 import { SHAPE_STALE, SHAPE_NEEDS_STAGE_HOUSE, SHAPE_UNREADABLE } from "../src/lib/design/room-shape/copy";
 import { gridIntakeDefaults } from "../src/lib/design/grid-intake";
 import { VENUES, sizedDims, type AState } from "../src/app/(app)/design/quick/engine";
@@ -34,6 +34,32 @@ export const stateFor = (key: string): AState => {
   const v = VENUES.find((x) => x.key === key)!;
   return { ...gridIntakeDefaults(), venue: v.key, sys: { ...v.sys }, ...sizedDims(v, "large") };
 };
+
+/** The pre-fix brute-force pair scan, kept here only to prove the broad phase gives identical answers. */
+function bruteSelfCrosses(room: Pick<ShapeRoom, "pts" | "edges">): boolean {
+  const EPS = 1e-9;
+  const o = (a: ShapePt, b: ShapePt, c: ShapePt) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const cross = (p1: ShapePt, p2: ShapePt, p3: ShapePt, p4: ShapePt) => {
+    const d1 = o(p3, p4, p1), d2 = o(p3, p4, p2), d3 = o(p1, p2, p3), d4 = o(p1, p2, p4);
+    return ((d1 > EPS && d2 < -EPS) || (d1 < -EPS && d2 > EPS)) && ((d3 > EPS && d4 < -EPS) || (d3 < -EPS && d4 > EPS));
+  };
+  const p = outlinePoints(room, 0.5, 32);
+  const n = p.length;
+  if (n < 4) return false;
+  for (let i = 0; i < n; i++)
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;
+      if (cross(p[i], p[(i + 1) % n], p[j], p[(j + 1) % n])) return true;
+    }
+  return false;
+}
+
+/** n corners on a circle of radius R, every edge an arc with the given bulge (alternating sign when `alt`). */
+function arcRing(n: number, R: number, bulge: number, alt: boolean, id = "rm_00000001", over: Partial<ShapeRoom> = {}): ShapeRoom {
+  const pts = Array.from({ length: n }, (_, k) => ({ x: R * Math.cos((2 * Math.PI * k) / n), y: R * Math.sin((2 * Math.PI * k) / n) }));
+  const edges: ShapeEdge[] = pts.map((_, k) => ({ kind: "arc", bulge: alt && k % 2 ? -bulge : bulge }));
+  return { id, type: "other", name: "Ring", kind: "room", roles: [], pts, edges, ...over };
+}
 
 export async function roomShapePureChecks(ok: Ok): Promise<void> {
   // units
@@ -195,6 +221,77 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
     const rl = sanitizeRoomShape(longName, "proscenium@1", "S", 1)!;
     ok(rl.ok && rl.shape.rooms[0].name.length === 60 && rl.shape.rooms[0].kind === "room" && rl.shape.rooms[0].edges[0].kind === "line" && !rl.shape.rooms[0].edges[0].open,
       "#370 sanitize: names cap at 60, a bad kind takes the type's, a zero bulge is a line, open only when exactly true");
+    ok(rm.ok && rm.notes.length === 1 && rm.notes[0] === `Left out ${many.rooms.length - 40} more rooms: a plan holds at most 40.`, "#370 sanitize: rooms past the 40 cap are counted in one note");
+  }
+  // broad-phase self-crossing = the old brute-force scan
+  {
+    const bow = rect(0, 0, 4, 4, { pts: [{ x: 0, y: 0 }, { x: 4, y: 4 }, { x: 4, y: 0 }, { x: 0, y: 4 }] });
+    const L = rect(0, 0, 10, 10, { pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 4 }, { x: 4, y: 4 }, { x: 4, y: 10 }, { x: 0, y: 10 }], edges: Array.from({ length: 6 }, () => ({ kind: "line" as const })) });
+    const house = freezeFromTemplate(stateFor("school"), "proscenium@1", { by: "T", at: 1 }).rooms.find((r) => r.name === "House")!;
+    const set: Array<[string, ShapeRoom]> = [
+      ["box", rect(0, 0, 10, 6)], ["bow-tie", bow], ["concave L", L], ["64-arc scallop", arcRing(64, 30, -0.4, false)],
+      ["64-arc star", arcRing(64, 30, 0.4, true)], ["64-arc big bulge", arcRing(64, 30, 3, false)], ["proscenium House", house],
+    ];
+    let seed = 12345;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+    for (let k = 0; k < 150; k++) {
+      const n = 3 + Math.floor(rnd() * 10);
+      const pts = Array.from({ length: n }, () => ({ x: Math.round(rnd() * 400) / 10, y: Math.round(rnd() * 400) / 10 }));
+      const edges: ShapeEdge[] = pts.map(() => (rnd() < 0.5 ? { kind: "line" as const } : { kind: "arc" as const, bulge: (rnd() - 0.5) * 2 }));
+      set.push([`random ${k}`, rect(0, 0, 1, 1, { pts, edges })]);
+    }
+    const bad = set.filter(([, r]) => selfCrosses(r) !== bruteSelfCrosses(r)).map(([nm]) => nm);
+    ok(bad.length === 0, `#370 geometry: the grid broad phase gives the brute-force answer on ${set.length} rooms${bad.length ? " (differs: " + bad.slice(0, 5).join(", ") + ")" : ""}`);
+    ok(selfCrosses(bow) && selfCrosses(arcRing(64, 30, 3, false)) === bruteSelfCrosses(arcRing(64, 30, 3, false)) && !selfCrosses(L) && !selfCrosses(arcRing(64, 30, -0.4, false)) && !selfCrosses(house),
+      "#370 geometry: bow-tie crosses; concave L, the 64-arc scallop and the House don't");
+    ok(set.slice(7).some(([, r]) => selfCrosses(r)) && set.slice(7).some(([, r]) => !selfCrosses(r)), "#370 geometry: the random rooms cover both crossing and non-crossing outlines");
+  }
+  // hostile payloads and cost
+  {
+    const mk = (n: number, extra = 0) => {
+      const rooms: ShapeRoom[] = [];
+      for (let k = 0; k < 40; k++) rooms.push(arcRing(64, 20 + k, -0.4, false, `rm_${(0x2000 + k).toString(16).padStart(8, "0")}`, { name: "R" + k, ...(k === 0 ? { roles: ["stage" as const] } : k === 1 ? { roles: ["house" as const] } : {}) }));
+      for (let k = 0; k < extra; k++) rooms.push(arcRing(64, 20, 0.4, true, `rm_${(0x3000 + k).toString(16).padStart(8, "0")}`));
+      return { v: 1, fromTemplate: "proscenium@1", rooms: rooms.slice(0, n + extra) };
+    };
+    ok(!selfCrosses(arcRing(64, 20, -0.4, false)), "#370 sanitize cost: the worst-case ring is a valid, non-crossing outline");
+    const worst = mk(40, 200);
+    const t0 = performance.now();
+    const rw = sanitizeRoomShape(JSON.parse(JSON.stringify(worst)), "proscenium@1", "S", 1)!;
+    const ms = performance.now() - t0;
+    console.log(`     worst-case sanitize: ${ms.toFixed(0)} ms (${rw.ok ? rw.shape.rooms.length : 0} rooms kept, ${rw.ok ? rw.notes.length : 0} notes)`);
+    ok(ms < 1500 && rw.ok && rw.shape.rooms.length <= 40 && rw.shape.rooms.length >= 2, `#370 sanitize cost: 40 rooms x 64 arcs + 200 junk rooms returns in ${ms.toFixed(0)} ms (< 1,500)`);
+    ok(rw.ok && rw.notes.some((n) => /^Left out "R\d+": the plan is too detailed\.$/.test(n)) && rw.notes.some((n) => /^Left out \d+ more rooms: the plan is too detailed\.$/.test(n)) && SHAPE_SAMPLE_BUDGET === 8192,
+      "#370 sanitize cost: past the detail budget a room is left out by name and the rest are counted");
+
+    const base = freezeFromTemplate(stateFor("school"), "proscenium@1", { by: "T", at: 1 });
+    const clone = () => JSON.parse(JSON.stringify(base));
+    const polluted = JSON.parse(`{"v":1,"fromTemplate":"proscenium@1","__proto__":{"polluted":1},"rooms":[]}`);
+    const rooms = clone().rooms.map((r: ShapeRoom) => ({ ...r }));
+    const protoRoom = JSON.parse(JSON.stringify(rooms[0]).replace(/^\{/, '{"__proto__":{"polluted":2},"extra":1,'));
+    polluted.rooms = [protoRoom, ...rooms.slice(1)];
+    const rp = sanitizeRoomShape(polluted, "proscenium@1", "S", 1)!;
+    const known = new Set(["id", "type", "name", "kind", "roles", "pts", "edges"]);
+    ok(({} as Record<string, unknown>).polluted === undefined && rp.ok && Object.keys(rp.shape).sort().join() === "by,fromTemplate,frozenAt,rooms,v" && rp.shape.rooms.every((r) => Object.keys(r).every((k) => known.has(k))),
+      "#370 sanitize hostile: __proto__ keys pollute nothing and unknown fields never reach the output");
+    const with1 = (f: (b: { rooms: Array<Record<string, unknown>> }) => void) => { const b = clone(); f(b); return sanitizeRoomShape(b, "proscenium@1", "S", 1)!; };
+    const victimIdx = base.rooms.findIndex((x) => !x.roles.length);
+    const r65 = with1((b) => { const v = b.rooms[victimIdx] as unknown as ShapeRoom; for (let k = 0; k < 62; k++) { v.pts.push({ x: 1000 + k, y: 1000 }); v.edges.push({ kind: "line" }); } });
+    ok(r65.ok && r65.shape.rooms.length === base.rooms.length - 1 && r65.notes.length === 1 && /needs 3–64 corners/.test(r65.notes[0]), "#370 sanitize hostile: a 65-corner room is left out");
+    const rArr = with1((b) => { b.rooms[victimIdx].pts = "nope"; });
+    ok(rArr.ok && rArr.shape.rooms.length === base.rooms.length - 1 && rArr.notes.length === 1, "#370 sanitize hostile: pts that isn't an array is left out");
+    const rCoord = with1((b) => { ((b.rooms[victimIdx].pts as ShapePt[])[0]).x = 2001; });
+    ok(rCoord.ok && rCoord.shape.rooms.length === base.rooms.length - 1, "#370 sanitize hostile: a coordinate past 2,000 ft is left out");
+    const rBulge = with1((b) => { (b.rooms[victimIdx].edges as ShapeEdge[])[0] = { kind: "arc", bulge: 11 }; });
+    ok(rBulge.ok && rBulge.shape.rooms.length === base.rooms.length - 1, "#370 sanitize hostile: a bulge past 10 is left out");
+    const rNull = sanitizeRoomShape(clone(), null, "S", 1)!;
+    ok(!rNull.ok && rNull.error === SHAPE_STALE, "#370 sanitize hostile: no template (tpl null) → the stale refusal");
+    const rNotes = with1((b) => { for (let k = 0; k < 30; k++) b.rooms.push({ id: "bad", type: "nope", name: "J" + k }); });
+    ok(rNotes.ok && rNotes.notes.length === 10 && rNotes.notes[9] === "…and 21 more.", `#370 sanitize hostile: notes cap at 10, the last reading "…and N more." (${rNotes.ok ? rNotes.notes[9] : ""})`);
+    const rName = with1((b) => { b.rooms[victimIdx].name = "  Sa\nfe\u0007ty\u007f Room\t "; });
+    ok(rName.ok && rName.shape.rooms.some((r) => r.name === "Safety Room"), "#370 sanitize hostile: control characters are stripped from names");
+    const rDupFirst = with1((b) => { b.rooms.push({ ...b.rooms[0], pts: "junk" }); });
+    ok(rDupFirst.ok && rDupFirst.notes.length === 1 && /repeats another room/.test(rDupFirst.notes[0]), "#370 sanitize: a repeated id is caught before its geometry is read");
   }
 }
 
