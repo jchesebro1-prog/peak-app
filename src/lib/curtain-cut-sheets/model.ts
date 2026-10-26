@@ -19,6 +19,8 @@ export type CutSheetStyle = "submittal" | "client";
 export const CUT_SHEETS_NO_QUOTE = "Quote not found.";
 export const CUT_SHEETS_WRONG_TYPE = "Cut sheets are for system quotes.";
 export const CUT_SHEETS_NONE = "This quote has no curtains.";
+/** #369 — printed on every cut sheet, both styles, always. */
+export const CUT_SHEET_STAMP = "PRELIMINARY — NOT FOR CONSTRUCTION";
 /** Elevation boxes in paper inches: Letter landscape drawing area (60 % × 55 %) and Letter portrait at 0.6in margins. */
 export const SUBMITTAL_ELEV_BOX = { wIn: 4.6, hIn: 3.9 } as const;
 export const CLIENT_ELEV_BOX = { wIn: 7.3, hIn: 3.6 } as const;
@@ -194,18 +196,21 @@ export function cutSheetModel(type: CurtainType, ctx: CutSheetContext): CutSheet
     sheetNo: type.sheetNo,
     title: type.title,
     titleBlock: submittal
-      ? titleBlockData({
-          company: ctx.company,
-          project: { id: ctx.quote.number, name: ctx.quote.name, customer: ctx.quote.customer, siteName: ctx.quote.venue, intake: null, createdBy: ctx.preparedBy },
-          option: { name: "", quoteId: ctx.quote.number },
-          optionCount: 1,
-          revisions: quoteRevisionRows(ctx.quote.revisions),
-          set: { drawnBy: ctx.preparedBy, checkedBy: "" },
-          sheet: { number: type.sheetNo, title: type.title, scale: `Elev ${elev.scale} · Detail NTS` },
-          index: ctx.index,
-          total: ctx.total,
-          now: ctx.now,
-        })
+      ? {
+          ...titleBlockData({
+            company: ctx.company,
+            project: { id: ctx.quote.number, name: ctx.quote.name, customer: ctx.quote.customer, siteName: ctx.quote.venue, intake: null, createdBy: ctx.preparedBy },
+            option: { name: "", quoteId: ctx.quote.number },
+            optionCount: 1,
+            revisions: quoteRevisionRows(ctx.quote.revisions),
+            set: { drawnBy: ctx.preparedBy, checkedBy: "" },
+            sheet: { number: type.sheetNo, title: type.title, scale: `Elev ${elev.scale} · Detail NTS` },
+            index: ctx.index,
+            total: ctx.total,
+            now: ctx.now,
+          }),
+          stamp: CUT_SHEET_STAMP,
+        }
       : null,
     header: { companyName: ctx.company.name || "", logoDark: ctx.company.logoDark || null, estimateNo: ctx.quote.number },
     elevation: { scale: elev.scale, shapes: elev.shapes, box: { wIn: box.wIn, hIn: box.hIn } },

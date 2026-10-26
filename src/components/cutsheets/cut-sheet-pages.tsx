@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { TitleBlock } from "@/components/drawing/title-block";
-import { cutSheetCssVars, type CutSheetModel, type CutSheetStyle } from "@/lib/curtain-cut-sheets/model";
+import { CUT_SHEET_STAMP, cutSheetCssVars, type CutSheetModel, type CutSheetStyle } from "@/lib/curtain-cut-sheets/model";
 import { MOUNT_DETAIL_VIEWBOX } from "@/lib/curtain-cut-sheets/mount-details";
 import { ShapeSvg } from "./shape-svg";
 
@@ -33,6 +33,11 @@ export function CutSheetPages({
   );
 }
 
+/** #369 — every cut sheet, both styles. */
+function Stamp() {
+  return <div className="pk-cs-stamp">{CUT_SHEET_STAMP}</div>;
+}
+
 function Elevation({ m, maxHeight }: { m: CutSheetModel; maxHeight: string }) {
   const { box } = m.elevation;
   return (
@@ -59,7 +64,8 @@ function SubmittalSheet({ m }: { m: CutSheetModel }) {
   return (
     <section className="pk-drawing-sheet" data-sheet={m.sheetNo} style={cutSheetCssVars() as CSSProperties}>
       <div className="pk-drawing-frame">
-        <div className="pk-drawing-area">
+        <div className="pk-drawing-area pk-cs-area">
+          <Stamp />
           <div className="pk-cs-grid">
             <div className="pk-cs-cell">
               <h2 className="pk-dw-h">{`Elevation — ${m.title}`}</h2>
@@ -134,6 +140,7 @@ function ClientSheet({ m, photos, letterheadSrc }: { m: CutSheetModel; photos: s
           <span>{`Curtain cut sheet · ${m.header.estimateNo}`}</span>
         </header>
       )}
+      <Stamp />
       <h1 className="pk-cs-title">{m.title}</h1>
       <Elevation m={m} maxHeight="3.6in" />
       <p className="pk-cs-desc">{m.description}</p>
