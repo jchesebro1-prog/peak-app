@@ -10,6 +10,9 @@ import {
 import type { ShapeEdge, ShapePt, ShapeRoom } from "../src/lib/design/room-shape/types";
 import { fitOutline } from "../src/lib/design/room-shape/fit";
 import { SegIndex, splitByWalls, walledShare, wallAt, type Seg } from "../src/lib/design/room-shape/walls";
+import { freezeFromTemplate, roomIdFor } from "../src/lib/design/room-shape/freeze";
+import { gridIntakeDefaults } from "../src/lib/design/grid-intake";
+import { VENUES, sizedDims, type AState } from "../src/app/(app)/design/quick/engine";
 
 const near = (a: number, b: number, tol = 1e-6) => Math.abs(a - b) <= tol;
 const nearPt = (p: ShapePt, q: ShapePt, tol = 1e-6) => dist(p, q) <= tol;
@@ -19,6 +22,16 @@ export const rect = (x0: number, y0: number, w: number, h: number, over: Partial
   edges: [{ kind: "line" }, { kind: "line" }, { kind: "line" }, { kind: "line" }],
   ...over,
 });
+
+/** Every template, with a venue whose kind draws it. */
+export const CASES: Array<[string, string]> = [
+  ["school", "proscenium@1"], ["gym", "gym-stage@1"], ["church", "church-traditional@1"], ["church", "church-contemporary@2"],
+  ["blackbox", "blackbox@1"], ["concenter", "blackbox@1"], ["arena", "arena@1"],
+];
+export const stateFor = (key: string): AState => {
+  const v = VENUES.find((x) => x.key === key)!;
+  return { ...gridIntakeDefaults(), venue: v.key, sys: { ...v.sys }, ...sizedDims(v, "large") };
+};
 
 export async function roomShapePureChecks(ok: Ok): Promise<void> {
   // units
@@ -102,10 +115,60 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
   const shortSegs: Seg[] = [[{ x: 0, y: 0 }, { x: 1, y: 0 }], [{ x: 0, y: -0.5 }, { x: 1 / 3, y: -0.5 }]];
   const ss = splitByWalls(sq, sqEdges, new SegIndex(shortSegs), "double");
   ok(ss.pts.length === sq.length && ss.edges.length === sq.length, "#370 walls: a 1' edge walled for 4\" of it is not split (same corner count)");
+  // freeze: every template
+  for (const [key, tpl] of CASES) {
+    const a = stateFor(key);
+    const shape = freezeFromTemplate(a, tpl, { by: "T", at: 1 });
+    ok(shape.rooms.some((r) => r.roles.includes("stage")) && shape.rooms.some((r) => r.roles.includes("house")), `#370 freeze ${key}/${tpl}: a room holds the stage and a room the house`);
+    ok(shape.rooms.every((r) => r.pts.length >= 3 && r.pts.length === r.edges.length && !selfCrosses(r)), `#370 freeze ${key}/${tpl}: every room is a valid, non-crossing outline`);
+    ok(new Set(shape.rooms.map((r) => r.id)).size === shape.rooms.length && shape.rooms.every((r) => /^rm_[0-9a-f]{8}$/.test(r.id)), `#370 freeze ${key}/${tpl}: room ids are unique rm_ + 8 hex`);
+    ok(JSON.stringify(freezeFromTemplate(a, tpl, { by: "T", at: 1 })) === JSON.stringify(shape), `#370 freeze ${key}/${tpl}: deterministic`);
+    ok(shape.rooms.every((r) => r.pts.length >= 3), `#370 freeze ${key}/${tpl}: every room has at least 3 corners`);
+    ok(shape.rooms.every((r) => r.pts.length <= 64), `#370 freeze ${key}/${tpl}: no room over 64 corners`);
+  }
+  // proscenium specifics (defaults: pro 50, wing 10, depth 30)
+  {
+    const a = stateFor("school");
+    const s = freezeFromTemplate({ ...a, width: 50, wing: 10, depth: 30 }, "proscenium@1", { by: "T", at: 1 });
+    const room = (nm: string) => s.rooms.find((r) => r.name === nm)!;
+    const stage = room("Stage"), house = room("House");
+    const bx = (r: ShapeRoom) => { const p = outlinePoints(r); return { minX: Math.min(...p.map((q) => q.x)), maxX: Math.max(...p.map((q) => q.x)), minY: Math.min(...p.map((q) => q.y)), maxY: Math.max(...p.map((q) => q.y)) }; };
+    ok(near(bx(stage).maxX - bx(stage).minX, 70, 0.1) && near(bx(stage).maxY, 0, 0.1) && near(bx(stage).minY, -30, 0.1), "#370 freeze proscenium: the Stage is pro + 2 wings (70') wide, plaster line at y 0, 30' deep");
+    const openAt = (r: ShapeRoom, q: ShapePt) => r.pts.some((p, i) => r.edges[i].open && Array.from({ length: 101 }, (_, k) => edgeAt(p, r.pts[(i + 1) % r.pts.length], r.edges[i], k / 100)).some((x) => dist(x, q) < 0.6));
+    ok(openAt(stage, { x: 0, y: 0 }) && !openAt(stage, { x: -35, y: -15 }), "#370 freeze proscenium: the opening is open, the side wall isn't");
+    ok(house.edges.some((e) => e.kind === "arc" && e.open) && near(bx(house).minY, (9 + 81) / 12, 0.1), "#370 freeze proscenium: the stage lip arc is an open edge of the House, which starts 7'-6\" below the plaster line");
+    ok(room("Catwalk").kind === "zone" && room("Center Aisle").kind === "zone" && room("Booth").kind === "room" && stage.kind === "room", "#370 freeze proscenium: Catwalk and Center Aisle are zones, Booth and Stage rooms");
+    ok(stage.type === "stage" && house.type === "house" && room("Booth").type === "booth" && room("Electrical Room").type === "electrical" && room("Catwalk").type === "catwalk", "#370 freeze proscenium: types follow roles, then labels");
+    ok(stage.id === roomIdFor("proscenium@1", "Stage"), "#370 freeze: a room's id comes from its template and region");
+  }
+  // blackbox: one room is both stage and house; conference adds a Platform zone with the stage
+  {
+    const bb = freezeFromTemplate(stateFor("blackbox"), "blackbox@1", { by: "T", at: 1 });
+    const main = bb.rooms.find((r) => r.roles.includes("house"))!;
+    ok(main.roles.includes("stage") && main.name === "Blackbox", "#370 freeze blackbox: the Blackbox room holds both stage and house");
+    const cf = freezeFromTemplate(stateFor("concenter"), "blackbox@1", { by: "T", at: 1 });
+    const cmain = cf.rooms.find((r) => r.roles.includes("house"))!, plat = cf.rooms.find((r) => r.name === "Platform")!;
+    ok(cmain.name === "Conference Room" && !cmain.roles.includes("stage") && plat.kind === "zone" && plat.roles.join() === "stage", "#370 freeze conference: Conference Room is the house, a Platform zone holds the stage");
+  }
+  // arena: single-line walls; the floor and court are zones
+  {
+    const ar = freezeFromTemplate(stateFor("arena"), "arena@1", { by: "T", at: 1 });
+    const r = (nm: string) => ar.rooms.find((x) => x.name === nm)!;
+    ok(r("Arena Floor").kind === "zone" && r("Court").kind === "zone" && r("Booth").kind === "room", "#370 freeze arena: floor and court are zones, the booth a room");
+  }
 }
 
 export async function roomShapeDbChecks(ok: Ok): Promise<void> {
-  void ok;
+  const GP = await import("../src/lib/stores/grid-projects");
+  // freeze: every template gives the same rooms (names, order) as today's starter Spaces
+  for (const [key, tpl] of CASES) {
+    const a = stateFor(key);
+    const shape = freezeFromTemplate(a, tpl, { by: "T", at: 1 });
+    const kind = VENUES.find((x) => x.key === key)!.kind;
+    const starter = GP.starterSpaces(a, kind, "sh", tpl).map((s) => s.name);
+    const names = shape.rooms.map((r) => r.name).filter((nm) => !(kind === "flat" && nm === "Platform"));
+    ok(names.join("|") === starter.join("|"), `#370 freeze ${key}/${tpl}: the rooms are today's starter Spaces, in order (${names.join(", ")})`);
+  }
 }
 
 if (process.argv[1] && /test-room-shape\.ts$/.test(process.argv[1])) {
