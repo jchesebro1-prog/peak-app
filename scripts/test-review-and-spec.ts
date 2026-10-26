@@ -24212,7 +24212,7 @@ import { fixtureBomLine as e246Bom, hasHangPosition as e246Hang } from "@/app/(a
   const card = readFileSync(join(process.cwd(), "src/app/(app)/estimator/section-card.tsx"), "utf8");
   ok(card.includes('addBtn("+ Add assembly", p.onToggleFixture') && !card.includes("Configure fixture"), "#246: the section card's button reads \"+ Add assembly\"");
   const modal = readFileSync(join(process.cwd(), "src/app/(app)/estimator/fixture-modal.tsx"), "utf8");
-  ok(modal.includes('title="Add assembly"') && modal.includes(">Add assembly</button>") && modal.includes("<optgroup key={g.kind} label={g.label}>")
+  ok(modal.includes('title={editing ? "Edit assembly" : "Add assembly"}') && modal.includes('{editing ? "Update assembly" : "Add assembly"}</button>') && modal.includes("<optgroup key={g.kind} label={g.label}>")
     && modal.includes("No assemblies yet — build one in the Assembly Builder") && modal.includes(">Qty</label>") && !/[Ff]ixture qty|Add fixture|No fixture assemblies/.test(modal),
     "#246: the modal says Add assembly, groups its options, and reads Qty");
   ok(/\{showHang && <>/.test(modal) && modal.includes("hasHangPosition(assembly)"), "#246: Hang position / Circuit # show only for a fixture");
@@ -71684,7 +71684,7 @@ import { REVISE_FIRST as e368ReviseFirst, repriceLocked as e368Locked } from "@/
   ok(mlb.includes("disabled={repriceLocked(hit.status)}") && mlb.includes("title={repriceLocked(hit.status) ? REVISE_FIRST : undefined}"),
     "#368 estimator lock: Move lines → Another estimate… greys out sent / won / lost targets the same way");
   const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
-  ok((hook.match(/if \(repriceLocked\(status\)\) return;/g) || []).length === 3, "#368 estimator lock: openLaborEdit / openTrackEdit / openCurtainEdit refuse on a locked estimate too");
+  ok((hook.match(/if \(repriceLocked\(status\)\) return;/g) || []).length === 4, "#368 estimator lock: openLaborEdit / openTrackEdit / openCurtainEdit / openAssemblyEdit refuse on a locked estimate too");
 }
 
 /** #368 estimator — Load system's core refuses a sent / won / lost target estimate (and only that) against the test DB. */
@@ -71984,4 +71984,47 @@ import { tierLockedMessage as e368TierLockedMsg } from "@/lib/estimate-reprice/l
   ok(keepAt > save.indexOf("pricingTier: tier.tier,") && keepAt < save.indexOf("patch.spec = await quoteSpecFollowingRenames(patch.spec);") && keepAt < save.indexOf("await update(loadedId,"),
 
     "#368 estimator tier (review): a save of a stored sent / won / lost estimate keeps its tier stamp (server-side, on the STORED status) — only a draft or new estimate re-resolves it");
+}
+
+/* --- Edit assembly: an assembly line reopens "+ Add assembly" pre-filled and Update rebuilds it in place. Pure. --- */
+import { fixtureBomLine as eaBom, fixtureDraftFromLine as eaDraft, hangFromDesc as eaHang, isAssemblyLineEditable as eaEditable, replaceAssemblyLine as eaReplace } from "@/app/(app)/estimator/fixture-bom";
+{
+  const asm = resolveFixtureAssemblies([{ id: "fa-ea", name: "Wash", components: [
+    { sku: "EA-ENG", label: "Engine", role: "fixture" as const, defaultQty: 1 },
+    { sku: "EA-CBL", label: "Cable", role: "power" as const, defaultQty: 2 },
+    { sku: "EA-BARN", label: "Barn door", role: "accessory" as const, defaultQty: 0 },
+  ] }], [
+    { sku: "EA-ENG", desc: "Wash engine", unit: "ea", cost: 800, list: 1200 },
+    { sku: "EA-CBL", desc: "Cable", unit: "ea", cost: 10, list: 15 },
+    { sku: "EA-BARN", desc: "Barn door", unit: "ea", cost: 60, list: 90 },
+  ])[0];
+  const built = eaBom(asm, { componentQty: { "EA-CBL": "3", "EA-BARN": "1" }, position: "1st Elec", circuit: "12" })!;
+  const line = { id: 7, sku: asm.id, desc: built.desc, qty: 4, unit: "ea", cost: built.cost, price: built.price, fixture: true, components: built.components };
+
+  ok(eaEditable(line) && !eaEditable({ fixture: true, fixtureId: "fx-1" }) && !eaEditable({ fixture: true, por: true }) && !eaEditable({}),
+    "Edit assembly: an Estimator assembly line is editable; a portal fixture line, a price request and a plain line are not");
+  const d = eaDraft(line, asm);
+  ok(d.assemblyId === "fa-ea" && d.qty === "4" && d.componentQty["EA-CBL"] === "3" && d.componentQty["EA-BARN"] === "1" && d.componentQty["EA-ENG"] === "1" && d.position === "1st Elec" && d.circuit === "12",
+    "Edit assembly: the draft comes back with the line's qty, each component's quoted qty and its hang position / circuit");
+  const again = eaBom(asm, d)!;
+  ok(again.desc === line.desc && again.cost === line.cost && again.price === line.price, "Edit assembly: rebuilding from the reopened draft gives the same line");
+  ok(eaDraft({ ...line, components: line.components.filter((c) => c.sku !== "EA-BARN") }, asm).componentQty["EA-BARN"] === "0",
+    "Edit assembly: a part added to the assembly after the line was built starts at 0 (Update never adds it silently)");
+  ok(eaHang("Wash — Engine (Pos FOH)").position === "FOH" && eaHang("Wash — Engine (Ckt 4)").circuit === "4" && eaHang("Rack (2RU blank)").position === "" && eaHang("Wash").circuit === "",
+    "Edit assembly: the hang suffix is read only when it is a Pos / Ckt suffix");
+
+  const sec = { id: "s", name: "S", kind: "", mfr: "", freightPct: 0, items: [{ id: 1, sku: "X", desc: "x", qty: 1, unit: "ea", cost: 1, price: 2 }, { ...line, lineOrder: 3, comment: "cust", internalNote: "int", option: true, sellOverride: true, extSellOverride: 99 }] };
+  const upd = eaBom(asm, { ...d, componentQty: { ...d.componentQty, "EA-BARN": "0" } })!;
+  const next = eaReplace(sec, 7, { sku: asm.id, desc: upd.desc, qty: 4, unit: "ea", cost: upd.cost, price: upd.price, fixture: true, components: upd.components });
+  const n = next.items[1];
+  ok(next.items.length === 2 && n.id === 7 && n.lineOrder === 3 && n.comment === "cust" && n.internalNote === "int" && n.option === true && n.price === upd.price && n.sellOverride === undefined && n.extSellOverride === undefined,
+    "Edit assembly: Update replaces the line in place — same id, order and notes; today's price replaces a typed one");
+
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const sc = rd("src/app/(app)/estimator/section-card.tsx");
+  ok(sc.includes("else if (assemblyEditable) p.onEditAssembly?.(it.id);") && sc.includes("|| customEditable || assemblyEditable;") && sc.includes("(assemblyLine && !assemblyGone));"),
+    "Edit assembly wiring: the description click and ✎ reopen it; a sent estimate shows the locked ✎ like the other configurators");
+  const bs = rd("src/app/(app)/estimator/steps/build-step.tsx");
+  ok(bs.includes("onEditAssembly={(lineId) => openAssemblyEdit(sec.id, lineId)}") && bs.includes("editing={!!fixtureEdit}"),
+    "Edit assembly wiring: Build passes the edit handler and the modal's Update mode");
 }

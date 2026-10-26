@@ -136,6 +136,9 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     moveSystem,
     openCurtainEdit,
     openCustomEdit,
+    openAssemblyEdit,
+    assemblyLineEditable,
+    fixtureEdit,
     openInput,
     openInputMethod,
     openLaborEdit,
@@ -636,6 +639,8 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     onEditTrack={(lineId) => openTrackEdit(sec.id, lineId)}
                     onEditCurtain={(lineId) => openCurtainEdit(sec.id, lineId)}
                     onEditCustom={(lineId) => openCustomEdit(sec.id, lineId)}
+                    onEditAssembly={(lineId) => openAssemblyEdit(sec.id, lineId)}
+                    canEditAssembly={assemblyLineEditable}
                     uiRepriceLock={uiRepriceLock}
                     customEditing={!!customEdit}
                     onSetCustomDraft={setCustomField}
@@ -816,6 +821,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           secName={fixtureSec ? fixtureSec.name : ""}
           draft={fixtureDraft}
           assemblies={fixtureAssemblies}
+          editing={!!fixtureEdit}
           onSet={setFixture}
           onAssembly={setFixtureAssembly}
           onComponentQty={setFixtureComponentQty}

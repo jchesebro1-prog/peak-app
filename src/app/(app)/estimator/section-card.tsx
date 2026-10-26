@@ -20,10 +20,11 @@ import {
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { isMovableLine } from "@/lib/estimate-line-move/move";
 import { CUSTOM_PART_MARKUP } from "./tier-reprice";
-import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
+import type { CustomDraft, QuoteLite, SpecItem, SpecSection, VendorQuote } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import { isCustomLineEditable } from "./custom-part-edit";
 import { isLaborLineEditable } from "./labor-group";
+import { isAssemblyLineEditable } from "./fixture-bom";
 import CatalogPicker from "./catalog-picker";
 import { MATERIAL_CSV_TEMPLATE, parseMaterialCsv, readCsvFile, summarizeCsvErrors, type ImportedMaterial } from "./material-csv";
 import { MAX_KEY_PRODUCTS, keyProductStar } from "./narrative";
@@ -87,6 +88,9 @@ const PORTAL_FIELD: CSSProperties = {
 const LINE_CHECK_SIZE = 13;
 const LINE_CHECK_GAP = 8;
 const LINE_CHECK_PAD = LINE_CHECK_SIZE + LINE_CHECK_GAP;
+
+/** Edit assembly: why an assembly line's ✎ is disabled when its assembly was deleted. */
+const ASSEMBLY_GONE = "This assembly was deleted from the Assembly Builder — the line keeps its saved parts and price; to change it, add a new assembly and remove this line.";
 
 /** One icon button inside a line item's actions cell (↑ / ↓ / ×). */
 const ACTION_BTN: CSSProperties = {
@@ -218,6 +222,10 @@ export type SectionCardProps = {
   onEditCurtain?: (lineId: number) => void;
   /** #312: reopen the Custom part form on a custom line, pre-filled (by line id). */
   onEditCustom?: (lineId: number) => void;
+  /** Edit assembly: reopen the "+ Add assembly" configurator on an assembly line (by line id). */
+  onEditAssembly?: (lineId: number) => void;
+  /** Whether that assembly still exists (false = deleted from the Assembly Builder — its ✎ shows disabled). */
+  canEditAssembly?: (it: SpecItem) => boolean;
   /** #368: set (to REVISE_FIRST) on a sent / won / lost estimate — the labor / track / curtain configurators don't
    *  re-open (they re-price the line); their ✎ shows disabled with this text. A UI LOCK ONLY: saveQuoteAction
    *  accepts any posted line on a sent estimate (lock.ts lists what is server-enforced). It also greys
@@ -1129,8 +1137,12 @@ export default function SectionCard(p: SectionCardProps) {
               const curtainEditable = isInternal && !p.uiRepriceLock && !!p.onEditCurtain && !!it.curtain;
               /* #368: on a sent estimate those three configurators stay shut until it is revised — a disabled ✎
                  says why. */
+              /* Edit assembly: a fixture / system / hardware / rack line reopens "+ Add assembly" the same way. */
+              const assemblyLine = isInternal && !!p.onEditAssembly && isAssemblyLineEditable(it);
+              const assemblyGone = assemblyLine && !!p.canEditAssembly && !p.canEditAssembly(it);
+              const assemblyEditable = assemblyLine && !assemblyGone && !p.uiRepriceLock;
               const configLocked =
-                isInternal && !!p.uiRepriceLock && ((!!p.onEditLabor && isLaborLineEditable(sec, it)) || (!!p.onEditTrack && !!it.track) || (!!p.onEditCurtain && !!it.curtain));
+                isInternal && !!p.uiRepriceLock && ((!!p.onEditLabor && isLaborLineEditable(sec, it)) || (!!p.onEditTrack && !!it.track) || (!!p.onEditCurtain && !!it.curtain) || (assemblyLine && !assemblyGone));
               /* #312: a hand-entered custom part reopens the Custom part form,
                  pre-filled, through the same description click and its own ✎. */
               const customEditable = isInternal && !!p.onEditCustom && isCustomLineEditable(it);
@@ -1139,8 +1151,9 @@ export default function SectionCard(p: SectionCardProps) {
                 if (trackEditable) p.onEditTrack?.(it.id);
                 else if (curtainEditable) p.onEditCurtain?.(it.id);
                 else if (customEditable) p.onEditCustom?.(it.id);
+                else if (assemblyEditable) p.onEditAssembly?.(it.id);
               };
-              const lineEditable = laborEditable || trackEditable || curtainEditable || customEditable;
+              const lineEditable = laborEditable || trackEditable || curtainEditable || customEditable || assemblyEditable;
               const openLine = laborEditable ? openLabor : openTrack;
               /* #366: this line's Project discount editor, opened from its chip / "% project" — an inline row under the
                  line (the card clips overflow, so never a floating popover). */
@@ -1603,6 +1616,12 @@ export default function SectionCard(p: SectionCardProps) {
                     )}
                     {customEditable && (
                       <button type="button" className="est-action-btn" onClick={openLine} title="Edit custom part — reopens the Custom part form" aria-label={`Edit custom part ${it.desc}`} style={ACTION_BTN}>✎</button>
+                    )}
+                    {assemblyEditable && (
+                      <button type="button" className="est-action-btn" onClick={openLine} title="Edit assembly — reopens the assembly configurator" aria-label={`Edit assembly ${it.desc}`} style={ACTION_BTN}>✎</button>
+                    )}
+                    {assemblyGone && (
+                      <button type="button" className="est-action-btn" disabled title={ASSEMBLY_GONE} aria-label={`Edit ${it.desc} — ${ASSEMBLY_GONE}`} style={{ ...ACTION_BTN, cursor: "not-allowed", opacity: 0.45 }}>✎</button>
                     )}
                     {configLocked && (
                       <button type="button" className="est-action-btn" disabled title={p.uiRepriceLock} aria-label={`Edit ${it.desc} — ${p.uiRepriceLock}`} style={{ ...ACTION_BTN, cursor: "not-allowed", opacity: 0.45 }}>✎</button>
