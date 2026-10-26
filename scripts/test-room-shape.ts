@@ -11,6 +11,8 @@ import type { ShapeEdge, ShapePt, ShapeRoom } from "../src/lib/design/room-shape
 import { fitOutline } from "../src/lib/design/room-shape/fit";
 import { SegIndex, splitByWalls, walledShare, wallAt, type Seg } from "../src/lib/design/room-shape/walls";
 import { freezeFromTemplate, roomIdFor } from "../src/lib/design/room-shape/freeze";
+import { sanitizeRoomShape } from "../src/lib/design/room-shape/sanitize";
+import { SHAPE_STALE, SHAPE_NEEDS_STAGE_HOUSE, SHAPE_UNREADABLE } from "../src/lib/design/room-shape/copy";
 import { gridIntakeDefaults } from "../src/lib/design/grid-intake";
 import { VENUES, sizedDims, type AState } from "../src/app/(app)/design/quick/engine";
 
@@ -155,6 +157,44 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
     const ar = freezeFromTemplate(stateFor("arena"), "arena@1", { by: "T", at: 1 });
     const r = (nm: string) => ar.rooms.find((x) => x.name === nm)!;
     ok(r("Arena Floor").kind === "zone" && r("Court").kind === "zone" && r("Booth").kind === "room", "#370 freeze arena: floor and court are zones, the booth a room");
+  }
+  // sanitize
+  {
+    const good = freezeFromTemplate(stateFor("school"), "proscenium@1", { by: "client", at: 5 });
+    const r = sanitizeRoomShape(JSON.parse(JSON.stringify(good)), "proscenium@1", "Server", 99)!;
+    ok(r.ok && r.shape.rooms.length === good.rooms.length && r.shape.by === "Server" && r.shape.frozenAt === 99 && r.notes.length === 0,
+      "#370 sanitize: a good shape passes whole, by / frozenAt stamped by the server");
+    ok(sanitizeRoomShape(null, "proscenium@1", "S", 1) === null && sanitizeRoomShape(undefined, "proscenium@1", "S", 1) === null, "#370 sanitize: no shape → null");
+    const stale = sanitizeRoomShape(good, "blackbox@1", "S", 1)!;
+    ok(!stale.ok && stale.error === SHAPE_STALE, "#370 sanitize: a shape frozen from another template is refused");
+    ok(!sanitizeRoomShape({ v: 2 }, "proscenium@1", "S", 1)!.ok && (sanitizeRoomShape("x", "proscenium@1", "S", 1) as { error: string }).error === SHAPE_UNREADABLE, "#370 sanitize: junk is refused as unreadable");
+    const bad = JSON.parse(JSON.stringify(good));
+    const victim = good.rooms.findIndex((x) => !x.roles.length);
+    bad.rooms[victim].pts[0].x = Number.NaN;
+    bad.rooms.push({ ...bad.rooms[0] }); // a duplicate id (room 0 is the Stage, never the victim)
+    bad.rooms.push({ ...rect(0, 0, 4, 4), id: "rm_0000abcd", type: "nope" });
+    bad.rooms.push({ ...rect(0, 0, 4, 4), id: "rm_0000abce", pts: [{ x: 0, y: 0 }, { x: 4, y: 4 }, { x: 4, y: 0 }, { x: 0, y: 4 }] });
+    const rb = sanitizeRoomShape(bad, "proscenium@1", "S", 1)!;
+    ok(rb.ok && rb.notes.length === 4 && rb.shape.rooms.length === good.rooms.length - 1 + 0, "#370 sanitize: a NaN, a duplicate id, an unknown type and a crossing room are each dropped with a note");
+    const noStage = JSON.parse(JSON.stringify(good));
+    noStage.rooms = noStage.rooms.filter((x: ShapeRoom) => !x.roles.includes("stage"));
+    const rs = sanitizeRoomShape(noStage, "proscenium@1", "S", 1)!;
+    ok(!rs.ok && rs.error === SHAPE_NEEDS_STAGE_HOUSE, "#370 sanitize: no Stage → refused");
+    const twoBooths = JSON.parse(JSON.stringify(good));
+    twoBooths.rooms.push({ ...rect(100, 100, 10, 10), id: "rm_0000abcf", roles: ["booth"], type: "booth" });
+    const rt = sanitizeRoomShape(twoBooths, "proscenium@1", "S", 1)!;
+    ok(rt.ok && rt.shape.rooms.filter((x) => x.roles.includes("booth")).length === 1 && rt.notes.length === 1, "#370 sanitize: a second Booth role is dropped with a note");
+    const many = JSON.parse(JSON.stringify(good));
+    for (let k = 0; k < 50; k++) many.rooms.push({ ...rect(200 + k * 20, 0, 10, 10), id: `rm_${(0x1000 + k).toString(16).padStart(8, "0")}` });
+    const rm = sanitizeRoomShape(many, "proscenium@1", "S", 1)!;
+    ok(rm.ok && rm.shape.rooms.length === 40, "#370 sanitize: at most 40 rooms");
+    const longName = JSON.parse(JSON.stringify(good));
+    longName.rooms[0].name = "x".repeat(200);
+    longName.rooms[0].kind = "weird";
+    longName.rooms[0].edges[0] = { kind: "arc", bulge: 0, open: "yes" };
+    const rl = sanitizeRoomShape(longName, "proscenium@1", "S", 1)!;
+    ok(rl.ok && rl.shape.rooms[0].name.length === 60 && rl.shape.rooms[0].kind === "room" && rl.shape.rooms[0].edges[0].kind === "line" && !rl.shape.rooms[0].edges[0].open,
+      "#370 sanitize: names cap at 60, a bad kind takes the type's, a zero bulge is a line, open only when exactly true");
   }
 }
 
