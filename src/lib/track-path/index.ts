@@ -187,6 +187,7 @@ export type LegPiece = { kind: "straight" | "arc"; lengthFt: number; segmentInde
  * closer than this to a leg end is the end itself (sweeps typed to a few
  * decimals leave ~1e-9 ft of slack).
  */
+// Smaller than PATH_LEN_EPS_FT: joints compare position to position on one path (float slack only); lengths absorb 4-decimal angle drift.
 const JOINT_EPS_FT = 1e-6;
 
 /** The part of each segment a leg covers, in path order. */

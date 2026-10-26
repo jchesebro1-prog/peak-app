@@ -10,7 +10,7 @@ import {
   type TrackSeries,
   type TrackStick,
 } from "@/lib/track-series";
-import { ceilAlong, legHangingPoints, legPieces, pathErrors, pathLengthFt, resolvePath, trackLegs, type TrackSegment } from "@/lib/track-path";
+import { PATH_LEN_EPS_FT, ceilAlong, legHangingPoints, legPieces, pathErrors, pathLengthFt, resolvePath, trackLegs, type TrackSegment } from "@/lib/track-path";
 
 /**
  * Track quantity engine (#274 §2). Pure — no prices, no catalog access: a
@@ -136,7 +136,7 @@ function curvedPieces(path: TrackSegment[], runFt: number, lapOverlapFt: number,
       }
       const longest = sticks[sticks.length - 1];
       const k = ceilAlong(p.lengthFt, longest.lengthFt);
-      const stick = sticks.find((s) => s.lengthFt >= p.lengthFt / k - 1e-9) ?? longest;
+      const stick = sticks.find((s) => s.lengthFt >= (p.lengthFt - PATH_LEN_EPS_FT) / k) ?? longest;
       const row = bySku.get(stick.sku);
       if (row) row.qty += k;
       else bySku.set(stick.sku, { role: "track", qty: k, sku: stick.sku, lengthFt: stick.lengthFt });

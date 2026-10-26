@@ -270,10 +270,10 @@ export function trackConfigFromDraft(d: TrackDraft): TrackConfig {
     qty: qtyText === "" ? 1 : Number(qtyText),
   };
   if (d.curved && Array.isArray(d.segments)) {
-    // #369: the segments are the track — the run is their length; radiusFt (the tightest arc) keeps an older build reading it as one arc
+    // #369: the segments are the track — the engine prices a path from them. runFt is rounded (4-decimal arc angles drift ~1e-5 ft) for display and the straight fallback; radiusFt (the tightest arc) keeps an older build reading it as one arc
     const path = segmentsToPath(d.segments);
     c.path = path;
-    c.runFt = pathLengthFt(path);
+    c.runFt = Math.round(pathLengthFt(path) * 1e4) / 1e4;
     const radii = path.flatMap((s) => (s.kind === "arc" && Number.isFinite(s.radiusFt) ? [s.radiusFt] : []));
     if (radii.length) c.radiusFt = Math.min(...radii);
   } else if (d.curved) c.radiusFt = numOf(d.radius);

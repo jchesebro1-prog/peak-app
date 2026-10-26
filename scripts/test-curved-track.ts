@@ -230,6 +230,16 @@ export function segmentDraftChecks(ok: Ok) {
       `#369 draft: re-saving a reopened legacy curve keeps its parts — ${name}`
     );
   }
+  // unticking Curved on a reopened curve prices as a strict straight 40', not a drifted 40.0000143'
+  {
+    const reopenedCurve = trackDraftFromConfig(trackConfigFromDraft(trackDraftFromConfig(cfg({ curved: true, radiusFt: 30, hangerSpacingFt: 5 }))));
+    const unticked = trackConfigFromDraft({ ...reopenedCurve, curved: false });
+    ok(
+      JSON.stringify(trackQuantities(unticked, series()).rows) === JSON.stringify(trackQuantities(cfg({ hangerSpacingFt: 5 }), series()).rows),
+      "#369 draft: unticking Curved on a reopened 40' R30' curve prices as a straight 40'"
+    );
+    ok(trackConfigFromDraft(trackDraftFromConfig(cfg({ curved: true, radiusFt: 30 }))).runFt === 40, "#369 draft: a re-saved legacy 40' R30' curve stores a run of exactly 40");
+  }
   const typed = { ...freshTrackDraft([series()]), operation: "oneway" as const, curved: true, hangerSpacing: "5", segments: [{ kind: "arc" as const, length: "40", radius: "30", angle: angleFromArcLength("40", "30"), turn: "left" as const }] };
   const typedQ = trackQuantities(trackConfigFromDraft(typed), series()).rows;
   const legacyQ = trackQuantities(cfg({ curved: true, radiusFt: 30, hangerSpacingFt: 5 }), series()).rows;
