@@ -11373,6 +11373,7 @@ import { vendorChecks, vendorDbChecks, vendorPdfDbChecks, vendorPdfPureChecks, v
 import { oct15PureChecks, oct15DbChecks, discardConfirmChecks } from "./test-oct15-estimating";
 import { photoWrapPureChecks, photoWrapDbChecks } from "./test-photo-wrap";
 import { vaNotesChecks, vaNotesDbChecks } from "./test-va-notes";
+import { roomShapePureChecks, roomShapeDbChecks } from "./test-room-shape";
 import { batch3PureChecks, batch3DbChecks } from "./test-oct15-batch3";
 import { batch4PureChecks, batch4DbChecks } from "./test-oct15-batch4";
 import { batch5PureChecks, batch5DbChecks } from "./test-batch5";
@@ -11798,6 +11799,7 @@ seeded()
   .then(() => etc368ApplyDbChecks(ok)) // #368 catalog
   .then(() => etc368RiderChecks(ok)) // #368 catalog
   .then(() => etc368LoadSystemDbChecks(ok)).then(() => etc368RepriceDbChecks(ok)) // #368 estimator
+  .then(() => roomShapePureChecks(ok)).then(() => roomShapeDbChecks(ok)) // #370 room shape
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
