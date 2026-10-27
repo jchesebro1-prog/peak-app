@@ -12,7 +12,7 @@ import { fitOutline } from "../src/lib/design/room-shape/fit";
 import { SegIndex, splitByWalls, walledShare, wallAt, MAX_FALSE_OPEN_FT, type Seg } from "../src/lib/design/room-shape/walls";
 import { freezeFromTemplate, roomIdFor } from "../src/lib/design/room-shape/freeze";
 import { sanitizeRoomShape, SHAPE_SAMPLE_BUDGET } from "../src/lib/design/room-shape/sanitize";
-import { SHAPE_STALE, SHAPE_NEEDS_STAGE_HOUSE, SHAPE_UNREADABLE } from "../src/lib/design/room-shape/copy";
+import { SHAPE_STALE, SHAPE_NEEDS_STAGE_HOUSE, SHAPE_UNREADABLE, SHAPE_HINT } from "../src/lib/design/room-shape/copy";
 import { applyEdit } from "../src/lib/design/room-shape/edit";
 import { snapCorner } from "../src/lib/design/room-shape/snap";
 import type { RoomShape } from "../src/lib/design/room-shape/types";
@@ -632,6 +632,16 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
       const d = Math.abs((((sf.stageAngle ?? 0) - (tf.stageAngle ?? 0)) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
       ok(sf.stageAngle !== undefined && tf.stageAngle !== undefined && d < 1e-2, `#370 frame arena/${wall}: the stage turn matches the template branch (${sf.stageAngle?.toFixed(3)} vs ${tf.stageAngle?.toFixed(3)})`);
     }
+  }
+
+  {
+    const React = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const Editor = (await import("../src/components/room-shape/room-shape-editor")).default;
+    const shape = freezeFromTemplate(stateFor("school"), "proscenium@1", { by: "T", at: 1 });
+    const html = renderToStaticMarkup(React.createElement(Editor, { shape, onChange: () => {} }));
+    ok(html.includes('data-testid="room-shape-editor"') && (html.match(/data-k="wall"/g) || []).length > 0 && html.includes("Undo") && html.includes(SHAPE_HINT.replace(/'/g, "&#x27;")),
+      "#370 editor: renders the plan with walls, the toolbar and the hint");
   }
 }
 
