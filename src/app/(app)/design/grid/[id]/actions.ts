@@ -77,9 +77,10 @@ import { landed, type SheetsLanded } from "@/lib/design/grid-sheet-split";
 import { adjustRefusalText } from "@/lib/design/sheet-adjust";
 import { estimateTrayParts } from "@/lib/design/estimate-tray-server";
 import { sanitizeRoomShape } from "@/lib/design/room-shape/sanitize";
+import { SHAPE_STALE } from "@/lib/design/room-shape/copy";
 import { cleanNoticeText, newNoticeId, publicPlanCandidates, type GridIntakeNotice, type PlanCandidate } from "@/lib/design/grid-plan-intake";
 import { coverFromVenue, designPatchFromIntake, intakeScopeInputs, pickedVenueMissing, siteForLocId } from "@/lib/design/grid-intake";
-import { resolveIntakeCustomer, validateIntakeCustomer } from "@/lib/intake-customer";
+import { newVenueKindFor, resolveIntakeCustomer, validateIntakeCustomer } from "@/lib/intake-customer";
 import type { IntakeCustomerChoice } from "@/app/(app)/quotes/new/types";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { buildGridQuote } from "@/lib/design/grid-quote";
@@ -364,6 +365,24 @@ export async function saveGridIntakeAction(input: {
           };
         })()
       : null;
+  // #370: the room shape is sanitized BEFORE resolveIntakeCustomer, which may create a customer / venue / contact —
+  // a refused shape must leave nothing behind (a retry would duplicate them). The effective template depends on the
+  // venue's type, so it is derived here without writing: a picked venue's is on the customer's sites already loaded,
+  // a new venue gets the type resolveIntakeCustomer will save it with (newVenueKindFor), a skipped venue has none.
+  const kind = venueOf(input.autoConfig).kind;
+  const templateId = sanitizeTemplateId(kind, input.autoConfig.templateId);
+  const intakeVenueTypes = venueTypesFrom((await getSettings()).venueTypes);
+  const templateForVenueType = (venueType: string | null) => effectiveTemplateFor(kind, { venueType, templateId }, intakeVenueTypes);
+  const preVenueType =
+    input.customer.locationMode === "pick"
+      ? (siteForLocId(customerSites, input.customer.locationId || "")?.venueKind ?? null)
+      : input.customer.locationMode === "new"
+        ? newVenueKindFor(input.customer, intakeVenueTypes)
+        : null;
+  const preTpl = templateForVenueType(preVenueType);
+  const shaped = sanitizeRoomShape(input.roomShape ?? null, preTpl, user.name, Date.now());
+  if (shaped && !shaped.ok) return { ok: false, error: shaped.error };
+
   const project = await getProject(input.projectId);
   if (!project) return { ok: false, error: "That design could not be found." };
   const optionId = resolveOptionId(project, null);
@@ -378,18 +397,17 @@ export async function saveGridIntakeAction(input: {
   // a per-design Background override survives only when the plan kind can draw it.
   // #255: the design's effective Background, resolved once — it draws the sheet, and it decides which movable rooms
   // (and walls) a client may place (sanitizeMovables).
-  const kind = venueOf(input.autoConfig).kind;
   const venueType = site?.venueKind ?? null;
-  const templateId = sanitizeTemplateId(kind, input.autoConfig.templateId);
-  const tpl = effectiveTemplateFor(kind, { venueType, templateId }, venueTypesFrom((await getSettings()).venueTypes));
+  const tpl = templateForVenueType(venueType);
+  // #370: the venue's type moved between the check above and the write (a race) — the shape was sanitized against
+  // another Background, so refuse rather than stamp a mismatched shape.
+  if (shaped?.ok && tpl !== preTpl) return { ok: false, error: SHAPE_STALE };
   // #255 hardening: width/depth/grid/wing/ph clamped to LIM and the house fields to `tpl`'s own limits before
   // anything (scope inputs, the base sheet, the linked designs' config) is derived from this intake — a forged
   // `autoConfig` (this is a client payload, `AState`-typed but never trusted) can otherwise carry a 1e6/-1e6/
   // NaN/Infinity dimension straight into the plan geometry's loops.
   const autoConfig: AState = cleanMovables(clampHouseFieldsFor(clampConfigDims({ ...input.autoConfig, venueType, templateId }), tpl), tpl);
-  // #370: the room shape, sanitized against the effective template before any write.
-  const shaped = sanitizeRoomShape(input.roomShape ?? null, tpl, user.name, Date.now());
-  if (shaped && !shaped.ok) return { ok: false, error: shaped.error };
+  // #370: the room shape was sanitized above (before the customer write) against preTpl === tpl.
   const roomShape = shaped?.ok ? shaped.shape : undefined;
   const shapeNote = shaped?.ok && shaped.notes.length ? `Some of the room shape was left out: ${shaped.notes.join(" ")}` : undefined;
   // A cover page left blank takes the chosen venue's names and address.

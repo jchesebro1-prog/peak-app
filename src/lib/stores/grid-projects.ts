@@ -605,6 +605,7 @@ async function generateShapeSheet(projectId: string, shape: RoomShape, by: strin
  * first time intake completes with "Generate from measurements as I work"
  * checked.
  */
+// #370: when `shape` is passed, `a` and `tpl` are ignored — the sheet is drawn from the shape alone.
 export async function generateBaseSheet(
   projectId: string,
   a: AState,
@@ -690,6 +691,9 @@ export async function generateBaseSheet(
     if (!p.intake) return;
     // #314: remember WHICH sheet is the base — an intake plan view goes first.
     p.intake.baseSheetId = sheet.id;
+    // #370: a template-drawn sheet never carries a room-shape stamp left by an earlier sheet.
+    delete p.intake.baseSheetShape;
+    delete p.intake.baseSheetFrame;
     if (id && family) {
       p.intake.baseSheetTemplate = id;
       if (Object.keys(movables).length) p.intake.baseSheetMovables = movables;

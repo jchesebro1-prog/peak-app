@@ -489,8 +489,11 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync("src/app/(app)/design/grid/[id]/actions.ts", "utf8");
     const body = src.slice(src.indexOf("export async function saveGridIntakeAction"));
-    ok(body.indexOf("sanitizeRoomShape(") > 0 && body.indexOf("sanitizeRoomShape(") < body.indexOf("saveGridIntake(input.projectId") && body.includes("generateBaseSheet(input.projectId, autoConfig, \"#3a3f4a\", user.name, tpl, roomShape ?? null)"),
-      "#370 pin: the intake save sanitizes the shape before any write and draws the base sheet from it");
+    const iSan = body.indexOf("sanitizeRoomShape(");
+    const iResolve = body.indexOf("resolveIntakeCustomer(");
+    const iSave = body.indexOf("saveGridIntake(input.projectId");
+    ok(iSan > 0 && iResolve > 0 && iSan < iResolve && iResolve < iSave && /shaped\s*&&\s*!shaped\.ok\)\s*return\s*\{\s*ok:\s*false/.test(body.slice(iSan, iResolve)) && body.includes("tpl !== preTpl") && body.includes("generateBaseSheet(input.projectId, autoConfig, \"#3a3f4a\", user.name, tpl, roomShape ?? null)"),
+      "#370 pin: the intake save refuses a bad shape before resolveIntakeCustomer writes a customer/venue, re-checks the template after, and draws the base sheet from it");
   }
 }
 
@@ -537,6 +540,14 @@ export async function roomShapeDbChecks(ok: Ok): Promise<void> {
   await GP.generateBaseSheet(q0.id, a, "#3a3f4a", by, "proscenium@1");
   const q = (await GP.getProject(q0.id))!;
   ok(!q.intake!.baseSheetShape && !q.intake!.baseSheetFrame && (q.spaces || []).every((s) => !s.fromRoom), "#370 db: without a shape nothing new is stamped");
+  // a template-drawn sheet drops stamps an earlier shaped sheet left on the intake
+  const r0 = await GP.createProject({ name: "RS370 stale stamps", customer: "", customerId: null, by });
+  await GP.saveGridIntake(r0.id, { complete: true, measurementBased: true, mode: "auto", venueName: "Main", locationName: "HS", address: "", notes: "", autoConfig: a, baseSheetShape: shape, baseSheetFrame: it.baseSheetFrame });
+  const r1 = (await GP.getProject(r0.id))!;
+  ok(!!r1.intake!.baseSheetShape && !!r1.intake!.baseSheetFrame, "#370 db: (setup) the intake holds shape stamps");
+  await GP.generateBaseSheet(r0.id, a, "#3a3f4a", by, "proscenium@1");
+  const r2 = (await GP.getProject(r0.id))!;
+  ok(!("baseSheetShape" in r2.intake!) && !("baseSheetFrame" in r2.intake!) && r2.intake!.baseSheetTemplate === "proscenium@1", "#370 db: a template-drawn sheet drops the shape and frame stamps");
   // Auto fill on a shaped sheet runs and keeps every placement on the sheet (Task 8 makes it use the shape's frame)
   const opt = resolveOptionId(p, null);
   await setScopeInputs(p0.id, intakeScopeInputs(a));

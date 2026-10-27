@@ -63,6 +63,17 @@ export function validateIntakeCustomer(input: IntakeCustomerChoice): IntakeCusto
   return { ok: true, creatingCustomer, newCustomerName, pickedCustomerId };
 }
 
+/**
+ * The venue type a NEW venue is saved with (#216 fallback: an unknown/archived
+ * type falls back to the first live one). Pure — resolveIntakeCustomer writes
+ * with it, and the Grid intake (#370) reads it BEFORE that write to know which
+ * Background the venue will draw.
+ */
+export function newVenueKindFor(input: Pick<IntakeCustomerChoice, "newLocationKind">, types: ReturnType<typeof venueTypesFrom>): string {
+  const kind = (input.newLocationKind || "").trim();
+  return venueTypeOptions(types).some((t) => t.key === kind) ? kind : (venueTypeOptions(types)[0]?.key ?? "proscenium");
+}
+
 export type ResolvedIntakeCustomer = {
   ok: true;
   customerId: string;
@@ -97,7 +108,6 @@ export async function resolveIntakeCustomer(
 
   if (input.locationMode === "new") {
     const types = venueTypesFrom((await getSettings()).venueTypes);
-    const kind = (input.newLocationKind || "").trim();
     locations.push({
       // A minted id so the new venue is findable after the save (it becomes
       // the site's legacyLocId → its docLocId).
@@ -114,9 +124,7 @@ export async function resolveIntakeCustomer(
       lat: null,
       lng: null,
       // #216 — an unknown/archived type falls back to the first live one.
-      venueKind: venueTypeOptions(types).some((t) => t.key === kind)
-        ? kind
-        : (venueTypeOptions(types)[0]?.key ?? "proscenium"),
+      venueKind: newVenueKindFor(input, types),
       travelMiles: null,
       travelMin: null,
     });
