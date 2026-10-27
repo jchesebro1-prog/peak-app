@@ -36,6 +36,10 @@ import type { PlanCandidate } from "@/lib/design/grid-plan-intake";
 import { estimateIntakeNote, GRID_LINK_COPY } from "@/lib/design/estimate-grid-link";
 import ScopePicker from "./scope-picker";
 import { EquipmentCards, useAutoPreview } from "./equipment-card";
+import RoomShapeEditor from "@/components/room-shape/room-shape-editor";
+import { freezeFromTemplate } from "@/lib/design/room-shape/freeze";
+import type { RoomShape } from "@/lib/design/room-shape/types";
+import { SHAPE_FROZEN_NOTE, SHAPE_RESET_CONFIRM, SHAPE_STALE, SHAPE_STEP_NOTE, SHAPE_STEP_TITLE } from "@/lib/design/room-shape/copy";
 
 /**
  * The one Grid intake (#211; one page since #244):
@@ -58,6 +62,7 @@ function initialState(value?: AState): AState {
 }
 
 const input = { width: "100%", boxSizing: "border-box" as const, border: "1px solid #e4e7ec", borderRadius: 8, padding: "10px 11px", fontFamily: "var(--font-ui)", fontSize: 13, color: "#16181d", background: "#fff" };
+const fieldset = (locked: boolean) => ({ border: 0, padding: 0, margin: 0, minWidth: 0, opacity: locked ? 0.55 : 1 }) as const;
 const section = { borderTop: "1px solid #ececf0", paddingTop: 18, marginTop: 20 };
 const label = { display: "block", fontSize: 10, fontWeight: 700, color: "#737985", textTransform: "uppercase" as const, marginBottom: 7, letterSpacing: ".06em" };
 const card = (on: boolean): React.CSSProperties => ({
@@ -99,7 +104,7 @@ export default function GridIntake({
 }) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
-  const [step, setStep] = useState<"setup" | "equipment">("setup");
+  const [step, setStep] = useState<"setup" | "shape" | "equipment">("setup");
   // No preselection (#244): the venue section drops down once one is chosen.
   // #314: an estimate-linked design has one start — Blank (Auto is refused server-side too).
   const [start, setStart] = useState<Start | null>(linkedEstimate ? "blank" : null);
@@ -138,6 +143,17 @@ export default function GridIntake({
         ? customers.find((c) => c.id === pick.customerId)?.locations.find((l) => l.id === pick.locationId)?.venueKind || null
         : null;
   const tplId = effectiveTemplateFor(venue.kind, { ...a, venueType: pickedVenueType }, venueTypes);
+  // #370: a templated plan can be shaped by hand before equipment; the shape freezes the dimensions.
+  const canShape = !!tplId && !!templateEntry(tplId)?.family;
+  const [shape, setShape] = useState<RoomShape | null>(null);
+  const [shapeKey, setShapeKey] = useState(0);
+  const shapeStale = !!shape && shape.fromTemplate !== tplId;
+  const shapePreview = step === "shape" && canShape && tplId && !shape ? freezeFromTemplate(a, tplId, { by: "", at: 0 }) : null;
+  const resetShape = () => {
+    if (!window.confirm(SHAPE_RESET_CONFIRM)) return;
+    setShape(null);
+    setShapeKey((k) => k + 1);
+  };
 
   const update = (patch: Partial<AState>) => setA((current) => ({ ...current, ...patch }));
   const setVenue = (key: string) => {
@@ -219,6 +235,7 @@ export default function GridIntake({
         autoConfig: { ...a, venueType: pickedVenueType },
         ...(start === "auto" ? { estimate } : {}),
         planCandidateId: candidateId,
+        ...(shape ? { roomShape: shape } : {}),
       });
       if (!saved.ok) return setError(saved.error);
       // #314 review: the intake is saved from here on, and the save's own
@@ -239,12 +256,9 @@ export default function GridIntake({
       else router.refresh();
     });
   };
-  const next = () => {
+  const afterShape = () => {
     setError("");
-    if (!customerReadyOf(pick))
-      return setError(pick.customerMode === "new" ? "Enter a name for the new customer." : "Pick a customer, or add a new one.");
-    if (!start) return setError("Choose Auto or Blank.");
-    if (!cover.venueName.trim() && !cover.locationName.trim() && !venueChosen) return setError("Add a venue or location to continue.");
+    if (shapeStale) return setError(SHAPE_STALE);
     if (start === "blank") return save();
     if (!chosen.length) return setError("Pick at least one scope for Auto to fill.");
     const est: AutoEstimate = {
@@ -255,17 +269,33 @@ export default function GridIntake({
     preview.run(scopeInputs, est);
     setStep("equipment");
   };
+  const next = () => {
+    setError("");
+    if (!customerReadyOf(pick))
+      return setError(pick.customerMode === "new" ? "Enter a name for the new customer." : "Pick a customer, or add a new one.");
+    if (!start) return setError("Choose Auto or Blank.");
+    if (!cover.venueName.trim() && !cover.locationName.trim() && !venueChosen) return setError("Add a venue or location to continue.");
+    if (start === "auto" && !chosen.length) return setError("Pick at least one scope for Auto to fill.");
+    if (canShape) return setStep("shape");
+    afterShape();
+  };
 
   const subtitle =
     step === "setup"
       ? "Who it's for, then start from the equations (Auto) or a blank plan — the venue drops down once you choose. Either way you end up on the canvas, free to move, edit and delete anything."
-      : "Pick Good / Better / Best per scope. Swap any part for a catalog part or an assembly, and adjust quantities.";
+      : step === "shape"
+        ? SHAPE_STEP_NOTE
+        : "Pick Good / Better / Best per scope. Swap any part for a catalog part or an assembly, and adjust quantities.";
 
   return (
     <div style={{ minHeight: "100%", background: "#f7f8fa", padding: "42px 22px" }}>
       <div style={{ maxWidth: 1040, margin: "0 auto" }}>
         <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--accent)" }}>
-          Design · New system design{linkedEstimate ? ` · from estimate ${linkedEstimate.quoteNumber}` : ""}{start === "auto" ? ` · Step ${step === "setup" ? 1 : 2} of 2` : ""}
+          Design · New system design{linkedEstimate ? ` · from estimate ${linkedEstimate.quoteNumber}` : ""}{(() => {
+            const total = 1 + (canShape ? 1 : 0) + (start === "auto" ? 1 : 0);
+            const at = step === "setup" ? 1 : step === "shape" ? 2 : total;
+            return start && total > 1 ? ` · Step ${at} of ${total}` : "";
+          })()}
         </div>
         <h1 style={{ margin: "10px 0 8px", fontSize: 30, letterSpacing: "-.025em" }}>{title.trim() || autoName || projectName}</h1>
         <p style={{ margin: 0, color: "#737985", fontSize: 14, lineHeight: 1.55, maxWidth: 720 }}>{subtitle}</p>
@@ -432,8 +462,15 @@ export default function GridIntake({
 
               {start && (
                 <div style={section}>
+                  {shape && (
+                    <div data-testid="shape-frozen-banner" style={{ display: "flex", gap: 10, alignItems: "center", padding: "9px 12px", borderRadius: 9, background: "#f4f5f7", fontSize: 12.5, marginBottom: 14 }}>
+                      <span style={{ flex: 1 }}>{shapeStale ? SHAPE_STALE : SHAPE_FROZEN_NOTE}</span>
+                      <button type="button" onClick={resetShape} style={ghost}>Reset to template</button>
+                    </div>
+                  )}
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 22 }}>
                     <div>
+                      <fieldset disabled={!!shape} style={fieldset(!!shape)}>
                       <div style={label}>Venue type</div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                         {VENUES.map((item) => (
@@ -453,12 +490,14 @@ export default function GridIntake({
                           ))}
                         </div>
                       </div>
+                      </fieldset>
                       <div style={section}>
                         <div style={label}>Scopes</div>
                         <ScopePicker value={a} onChange={update} />
                       </div>
                     </div>
                     <div>
+                      <fieldset disabled={!!shape} style={fieldset(!!shape)}>
                       <div style={label}>Stage dimensions</div>
                       <div style={{ display: "grid", gap: 13 }}>
                         {(DIMSCHEMA[venue.kind] || DIMSCHEMA.proscenium).map((d) => (
@@ -517,6 +556,7 @@ export default function GridIntake({
                           );
                         })()}
                       </div>
+                      </fieldset>
                       <div style={section}>
                         <div style={{ ...label, marginBottom: 12 }}>Venue cover page</div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -538,10 +578,26 @@ export default function GridIntake({
               {start && (
                 <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
                   <button type="button" onClick={next} disabled={busy} style={{ ...primary(busy), flex: 1 }}>
-                    {start === "auto" ? "Next: equipment →" : busy ? "Setting up your plan…" : "Continue to The Grid →"}
+                    {canShape ? "Next: shape the room →" : start === "auto" ? "Next: equipment →" : busy ? "Setting up your plan…" : "Continue to The Grid →"}
                   </button>
                 </div>
               )}
+            </>
+          )}
+
+          {step === "shape" && (
+            <>
+              <div style={{ ...label, marginBottom: 10 }}>{SHAPE_STEP_TITLE}</div>
+              {shapeStale && <div style={{ color: "#b4543a", fontSize: 12, marginBottom: 10 }}>{SHAPE_STALE}</div>}
+              {(shape ?? shapePreview) && <RoomShapeEditor key={`${shapeKey}:${tplId}`} shape={(shape ?? shapePreview) as RoomShape} onChange={setShape} />}
+              {error && <div style={{ marginTop: 12, color: "#b4543a", fontSize: 12 }}>{error}</div>}
+              <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
+                <button type="button" onClick={() => { setError(""); setStep("setup"); }} disabled={busy} style={ghost}>← Back</button>
+                {shape && <button type="button" onClick={resetShape} disabled={busy} style={ghost}>Reset to template</button>}
+                <button type="button" onClick={afterShape} disabled={busy || shapeStale} style={{ ...primary(busy), flex: 1 }}>
+                  {start === "auto" ? "Next: equipment →" : busy ? "Setting up your plan…" : "Continue to The Grid →"}
+                </button>
+              </div>
             </>
           )}
 
@@ -557,7 +613,7 @@ export default function GridIntake({
               )}
               {error && <div style={{ marginTop: 12, color: "#b4543a", fontSize: 12 }}>{error}</div>}
               <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
-                <button type="button" onClick={() => { setError(""); setStep("setup"); }} disabled={busy} style={ghost}>← Back</button>
+                <button type="button" onClick={() => { setError(""); setStep(canShape ? "shape" : "setup"); }} disabled={busy} style={ghost}>← Back</button>
                 <button type="button" onClick={save} disabled={busy || !preview.cards} style={{ ...primary(busy), flex: 1 }}>
                   {busy ? "Building your plan…" : "Build the plan →"}
                 </button>

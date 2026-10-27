@@ -1684,7 +1684,9 @@ See `.env.example`.
     roll forward. Remaining is Jeff-gated: `curvedSectionFt` / `minRadiusFt` per series,
     then a real curved track printed on production. Punch item #369.
 
-70. ✅ **Estimating-core extraction** (#359, D1228–D1230) — handoff PR 1. The Estimator's persisted
+70. 🚧 **Grid room shape editor — slice 1** (#370, D1311–D1316) — the Grid intake gains a Shape the room step: the stretched template freezes into a `RoomShape` (`src/lib/design/room-shape/`: rooms and zones in feet, line / arc / Bezier edges, walls vs. openings read from the drawing's double lines, roles on rooms) edited in `src/components/room-shape/room-shape-editor.tsx` (corner drag + snap + glue, Add point, Curve, Free-form, Wall ↔ Opening, typed lengths / radius / arc length, undo / redo); a shaped intake locks its dimensions until Reset to template. `saveGridIntakeAction` sanitizes it (`sanitizeRoomShape`) before it writes any customer or venue (`newVenueKindFor`, shared with the quote intake), `generateBaseSheet` draws the base sheet, Spaces (`fromRoom`) and calibration from it and stamps `baseSheetShape` / `baseSheetFrame`, and Auto fill lays out on the stamp (`venueFrame` shape branch; a proscenium or Gym Stage hangs side lights and line arrays at the opening, not the wings). No migration. Remaining: slices 2 (rooms + zones, roles) and 3 (reopen after Create, DXF); Jeff reviews `docs/room-shape/renders/`. Punch item #370.
+
+71. ✅ **Estimating-core extraction** (#359, D1228–D1230) — handoff PR 1. The Estimator's persisted
     domain types and twelve pure helpers live in `src/lib/estimating-core/` (entry `index.ts`:
     flat domain exports plus namespaced pure `src/lib` modules); the twelve old helper paths are
     `export *` shims and the route `types.ts` re-exports the core types. `npm run core:check`

@@ -13,7 +13,7 @@ import { SYSCOLOR, VENUES, type AState, type SysKey, type VenueKind } from "./en
 import { arenaDims, blackboxDims, churchDims, houseDims, houseSpecFor, houseWidthLim, prosceniumDims } from "@/lib/design/venue-templates/house-dims";
 import { planKindAllows, resolveBackground, templateEntry } from "@/lib/design/venue-templates";
 import { keysById, stretchById } from "@/lib/design/venue-templates/templates";
-import { boxOf, canvasOf, distToPoly, inPoly, movablesPx, rowSpans, type Box } from "@/lib/design/venue-templates/canvas";
+import { boxOf, canvasOf, CHURCH_CANVAS, distToPoly, inPoly, movablesPx, rowSpans, type Box } from "@/lib/design/venue-templates/canvas";
 import { movablePatch, numberedRegionLabels } from "@/lib/design/venue-templates/movable-options";
 import { snapMovable } from "@/lib/design/venue-templates/stretch";
 
@@ -329,8 +329,8 @@ export function churchGeom(s: AState, tpl?: string | null) {
   const keys = keysById(id);
   const dims = churchDims(s, id);
   const plan = stretchById(id, dims);
-  const ML = 62, MT = 54;
-  const C = canvasOf(plan, { W: 640, ML, MR: 40, MT, MB: 44 });
+  const { ML, MT } = CHURCH_CANVAS;
+  const C = canvasOf(plan, CHURCH_CANVAS);
   const { W, H, ppi, ppf, px, regions } = C;
   // #255 review fix (D465): a label two or more regions share is numbered, exactly as blackboxGeom's rooms —
   // Church Contemporary's four Storage rooms read "Storage 1".."Storage 4" in the dimension fields, the plan
