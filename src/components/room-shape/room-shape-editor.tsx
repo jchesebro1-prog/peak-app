@@ -8,6 +8,7 @@ import { applyEdit, type EditOp } from "@/lib/design/room-shape/edit";
 import { snapCorner } from "@/lib/design/room-shape/snap";
 import { labelPoint, pathD } from "@/lib/design/room-shape/svg";
 import { SHAPE_HINT } from "@/lib/design/room-shape/copy";
+import { isTypingTarget } from "@/lib/design/room-shape/field-edit";
 import LengthInput from "./length-input";
 
 type View = { x: number; y: number; w: number; h: number };
@@ -95,10 +96,14 @@ export default function RoomShapeEditor({ shape, onChange }: { shape: RoomShape;
     setRedo([]);
     onChange(next);
   };
-  const run = (op: EditOp) => {
+  const run = (op: EditOp): boolean => {
     const r = applyEdit(shape, op);
-    if (!r.ok) return flash(r.reason);
+    if (!r.ok) {
+      flash(r.reason);
+      return false;
+    }
     commit(r.shape);
+    return true;
   };
   const doUndo = () => {
     const prev = undo[undo.length - 1];
@@ -194,14 +199,31 @@ export default function RoomShapeEditor({ shape, onChange }: { shape: RoomShape;
     setLive(null);
   };
 
+  /** Drops the gesture in progress without committing: the shape goes back to where the drag started. */
+  const abortDrag = () => {
+    drag.current = null;
+    liveRef.current = null;
+    setLive(null);
+    setGuide(null);
+  };
+  const onCancel = (e: React.PointerEvent) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
+    abortDrag();
+  };
+
   const onKey = (e: React.KeyboardEvent) => {
+    if (isTypingTarget(e.target as Element)) return; // the box has its own undo, Escape and Delete
     const meta = e.metaKey || e.ctrlKey;
     if (meta && e.key.toLowerCase() === "z") {
       e.preventDefault();
       return e.shiftKey ? doRedo() : doUndo();
     }
-    if (e.key === "Escape") return setSel(null);
-    if ((e.key === "Delete" || e.key === "Backspace") && sel?.corner !== undefined && !(e.target instanceof HTMLInputElement)) {
+    if (e.key === "Escape") {
+      if (drag.current && drag.current.kind !== "pan") return abortDrag();
+      return setSel(null);
+    }
+    if ((e.key === "Delete" || e.key === "Backspace") && sel?.corner !== undefined) {
       e.preventDefault();
       run({ op: "deletePoint", room: sel.room, i: sel.corner });
       setSel({ room: sel.room });
@@ -272,7 +294,7 @@ export default function RoomShapeEditor({ shape, onChange }: { shape: RoomShape;
         onPointerDown={onBgDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
-        onPointerCancel={onUp}
+        onPointerCancel={onCancel}
         style={{ display: "block", background: "#fafbfc", border: "1px solid #ececf0", borderRadius: 10, touchAction: "none", userSelect: "none" }}
       >
         {ordered.map((r) => (

@@ -3,6 +3,7 @@
    Run alone with `npx tsx scripts/test-room-shape.ts` (pure checks only). */
 import type { Ok } from "./test-inbox-org";
 import { parseFeet, fmtFeet } from "../src/lib/design/room-shape/units";
+import { decideLengthCommit, isTypingTarget } from "../src/lib/design/room-shape/field-edit";
 import {
   arcInfo, edgeAt, edgeLength, edgeMid, sampleEdge, outlinePoints, signedArea, selfCrosses, bulgeForRadius,
   bulgeForArcLength, bulgeThrough, splitEdge, wallBands, dist,
@@ -632,6 +633,24 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
       const d = Math.abs((((sf.stageAngle ?? 0) - (tf.stageAngle ?? 0)) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
       ok(sf.stageAngle !== undefined && tf.stageAngle !== undefined && d < 1e-2, `#370 frame arena/${wall}: the stage turn matches the template branch (${sf.stageAngle?.toFixed(3)} vs ${tf.stageAngle?.toFixed(3)})`);
     }
+  }
+
+  // length box: only an edit commits (#370 task 9 review I1 / I2)
+  {
+    const shownOf = (v: number) => fmtFeet(v);
+    ok(decideLengthCommit(shownOf(31.2345), 31.2345).kind === "none", "#370 length box: a bare blur / Enter on an inch-rounded display commits nothing (31.2345)");
+    ok(decideLengthCommit(shownOf(14.1421356), 14.1421356).kind === "none" && decideLengthCommit(shownOf(20.04), 20.04).kind === "none", "#370 length box: untouched 14.1421356 and 20.04 stay put");
+    const edit = decideLengthCommit("40'-0\"", 31.2345);
+    ok(edit.kind === "commit" && edit.ft === 40, "#370 length box: an edited draft commits the parsed length");
+    ok(decideLengthCommit("40'-0\"", 40).kind === "none", "#370 length box: typing the text it already shows is not an edit");
+    const settle = decideLengthCommit("31.25", 31.25 + 1e-9);
+    ok(settle.kind === "settle", "#370 length box: an edit that lands on the current length only reformats the box");
+    ok(decideLengthCommit("abc", 31.2345).kind === "bad" && decideLengthCommit("", 12).kind === "bad", "#370 length box: unparseable text flags bad, never commits");
+    // Escape sets the draft to fmtFeet(value): whatever was typed, the revert reads as no edit
+    ok(decideLengthCommit(fmtFeet(31.2345), 31.2345).kind === "none", "#370 length box: an Escape revert never commits");
+    ok(isTypingTarget({ tagName: "INPUT" }) && isTypingTarget({ tagName: "textarea" }) && isTypingTarget({ tagName: "SELECT" }) && isTypingTarget({ tagName: "DIV", isContentEditable: true }),
+      "#370 editor keys: input, textarea, select and contenteditable targets are left alone");
+    ok(!isTypingTarget({ tagName: "DIV" }) && !isTypingTarget({ tagName: "svg" }) && !isTypingTarget(null) && !isTypingTarget(undefined), "#370 editor keys: the plan itself still takes shortcuts");
   }
 
   {
