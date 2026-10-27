@@ -485,6 +485,13 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
     });
     ok(inside, `#370 svg ${key}/${tpl}: every name sits inside its own room`);
   }
+  {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("src/app/(app)/design/grid/[id]/actions.ts", "utf8");
+    const body = src.slice(src.indexOf("export async function saveGridIntakeAction"));
+    ok(body.indexOf("sanitizeRoomShape(") > 0 && body.indexOf("sanitizeRoomShape(") < body.indexOf("saveGridIntake(input.projectId") && body.includes("generateBaseSheet(input.projectId, autoConfig, \"#3a3f4a\", user.name, tpl, roomShape ?? null)"),
+      "#370 pin: the intake save sanitizes the shape before any write and draws the base sheet from it");
+  }
 }
 
 export async function roomShapeDbChecks(ok: Ok): Promise<void> {
@@ -498,6 +505,45 @@ export async function roomShapeDbChecks(ok: Ok): Promise<void> {
     const names = shape.rooms.map((r) => r.name).filter((nm) => !(kind === "flat" && nm === "Platform"));
     ok(names.join("|") === starter.join("|"), `#370 freeze ${key}/${tpl}: the rooms are today's starter Spaces, in order (${names.join(", ")})`);
   }
+  const { setScopeInputs, setAutoEstimate } = GP;
+  const { resolveOptionId } = await import("../src/lib/design/grid-options");
+  const { intakeScopeInputs } = await import("../src/lib/design/grid-intake");
+  const { fillAutoScopes } = await import("../src/lib/design/grid-auto-fill");
+  const by = "Test Harness";
+  // jsonb stores object keys in its own order, so shapes compare by sorted-key JSON, not by raw JSON.stringify
+  const canon = (x: unknown): string => JSON.stringify(x, (_k, val) => (val && typeof val === "object" && !Array.isArray(val) ? Object.fromEntries(Object.entries(val).sort(([m], [n]) => (m < n ? -1 : m > n ? 1 : 0))) : val));
+  const v = VENUES.find((x) => x.key === "school")!;
+  const a: AState = { ...gridIntakeDefaults(), venue: v.key, sys: { ...v.sys }, ...sizedDims(v, "large") };
+  const shape = freezeFromTemplate(a, "proscenium@1", { by, at: 1 });
+  const p0 = await GP.createProject({ name: "RS370 shape", customer: "", customerId: null, by });
+  await GP.saveGridIntake(p0.id, { complete: true, measurementBased: true, mode: "auto", venueName: "Main", locationName: "HS", address: "", notes: "", autoConfig: a, roomShape: shape });
+  await GP.generateBaseSheet(p0.id, a, "#3a3f4a", by, "proscenium@1", shape);
+  const p = (await GP.getProject(p0.id))!;
+  const it = p.intake!;
+  ok(canon(it.roomShape) === canon(shape) && canon(it.baseSheetShape) === canon(shape) && it.baseSheetTemplate === "proscenium@1" && !!it.baseSheetFrame && it.baseSheetId === p.sheetIds[0],
+    "#370 db: the intake keeps the shape, and the base sheet stamps its shape, frame and template");
+  const cal = p.calibrations.find((c) => c.docId === it.baseSheetId);
+  ok(!!cal && Math.abs(cal.scale - it.baseSheetFrame!.wFt) < 1e-9 && cal.unit === "ft", "#370 db: the base sheet is calibrated from the frame");
+  ok((p.spaces || []).length === shape.rooms.length && (p.spaces || []).every((s, i) => s.fromRoom === shape.rooms[i].id && s.name === shape.rooms[i].name), "#370 db: one Space per room, tagged fromRoom");
+  const sheets = await GP.listSheets(p0.id);
+  ok(sheets[0]?.mime === "image/svg+xml", "#370 db: the base sheet is an SVG");
+  // a re-save keeps the stamps
+  await GP.saveGridIntake(p0.id, { complete: true, measurementBased: true, mode: "auto", venueName: "Main 2", locationName: "HS", address: "", notes: "", autoConfig: a, roomShape: shape });
+  const p2 = (await GP.getProject(p0.id))!;
+  ok(canon(p2.intake!.baseSheetShape) === canon(shape) && !!p2.intake!.baseSheetFrame, "#370 db: a re-save keeps the base sheet's shape stamp");
+  // no shape = today's sheet, unchanged path
+  const q0 = await GP.createProject({ name: "RS370 plain", customer: "", customerId: null, by });
+  await GP.saveGridIntake(q0.id, { complete: true, measurementBased: true, mode: "auto", venueName: "Main", locationName: "HS", address: "", notes: "", autoConfig: a });
+  await GP.generateBaseSheet(q0.id, a, "#3a3f4a", by, "proscenium@1");
+  const q = (await GP.getProject(q0.id))!;
+  ok(!q.intake!.baseSheetShape && !q.intake!.baseSheetFrame && (q.spaces || []).every((s) => !s.fromRoom), "#370 db: without a shape nothing new is stamped");
+  // Auto fill on a shaped sheet runs and keeps every placement on the sheet (Task 8 makes it use the shape's frame)
+  const opt = resolveOptionId(p, null);
+  await setScopeInputs(p0.id, intakeScopeInputs(a));
+  await setAutoEstimate(p0.id, opt, { tierByScope: { lighting: "better", audio: "better" }, overrides: {} });
+  const res = await fillAutoScopes(p0.id, opt, ["lighting", "audio"], by);
+  const filled = (await GP.getProject(p0.id))!;
+  ok(res.ok && filled.placements.every((pl) => pl.x >= 0 && pl.x <= 1 && pl.y >= 0 && pl.y <= 1), `#370 db: Auto fill runs on a shaped sheet (${res.ok ? "ok" : res.error})`);
 }
 
 if (process.argv[1] && /test-room-shape\.ts$/.test(process.argv[1])) {

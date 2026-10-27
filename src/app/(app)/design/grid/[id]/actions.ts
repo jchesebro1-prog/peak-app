@@ -76,6 +76,7 @@ import { commitSheetUpload } from "@/lib/design/grid-sheet-upload-server";
 import { landed, type SheetsLanded } from "@/lib/design/grid-sheet-split";
 import { adjustRefusalText } from "@/lib/design/sheet-adjust";
 import { estimateTrayParts } from "@/lib/design/estimate-tray-server";
+import { sanitizeRoomShape } from "@/lib/design/room-shape/sanitize";
 import { cleanNoticeText, newNoticeId, publicPlanCandidates, type GridIntakeNotice, type PlanCandidate } from "@/lib/design/grid-plan-intake";
 import { coverFromVenue, designPatchFromIntake, intakeScopeInputs, pickedVenueMissing, siteForLocId } from "@/lib/design/grid-intake";
 import { resolveIntakeCustomer, validateIntakeCustomer } from "@/lib/intake-customer";
@@ -328,6 +329,8 @@ export async function saveGridIntakeAction(input: {
   estimate?: AutoEstimate;
   /** #314: an on-file plan to copy in as the FIRST sheet ("Use plan from …") — a candidate id, never a path. */
   planCandidateId?: string | null;
+  /** #370: the shaped room (the intake's editor) — never trusted, sanitized against the effective template. */
+  roomShape?: unknown;
 }): Promise<{ ok: true; warning?: string; planRetry?: string; planSheetIds?: string[] } | { ok: false; error: string }> {
   const user = await requireUser();
   if (input.mode !== "manual" && input.mode !== "auto") return { ok: false, error: "Choose Auto or Blank." };
@@ -384,6 +387,11 @@ export async function saveGridIntakeAction(input: {
   // `autoConfig` (this is a client payload, `AState`-typed but never trusted) can otherwise carry a 1e6/-1e6/
   // NaN/Infinity dimension straight into the plan geometry's loops.
   const autoConfig: AState = cleanMovables(clampHouseFieldsFor(clampConfigDims({ ...input.autoConfig, venueType, templateId }), tpl), tpl);
+  // #370: the room shape, sanitized against the effective template before any write.
+  const shaped = sanitizeRoomShape(input.roomShape ?? null, tpl, user.name, Date.now());
+  if (shaped && !shaped.ok) return { ok: false, error: shaped.error };
+  const roomShape = shaped?.ok ? shaped.shape : undefined;
+  const shapeNote = shaped?.ok && shaped.notes.length ? `Some of the room shape was left out: ${shaped.notes.join(" ")}` : undefined;
   // A cover page left blank takes the chosen venue's names and address.
   const fromVenue = site
     ? coverFromVenue({ label: site.name, locationName: site.locationName, address: site.address, city: site.city, state: site.state }, linked.customerName)
@@ -410,6 +418,7 @@ export async function saveGridIntakeAction(input: {
     address: address.trim(),
     notes: input.notes.trim(),
     autoConfig,
+    ...(roomShape ? { roomShape } : {}),
   });
   if (!saved) return { ok: false, error: "That design could not be found." };
   // First-save gate (D145) — see the pre-#211 comment: idempotent re-applies
@@ -445,7 +454,7 @@ export async function saveGridIntakeAction(input: {
     for (const d of designs) await updateDesign(d.id, patch);
     if (patch.name) await renameProject(input.projectId, patch.name);
     // #255: the sheet draws the design's effective template (its override ?? its venue type's Background ?? the kind default).
-    await generateBaseSheet(input.projectId, autoConfig, "#3a3f4a", user.name, tpl);
+    await generateBaseSheet(input.projectId, autoConfig, "#3a3f4a", user.name, tpl, roomShape ?? null);
     if (est && estimateSaved) {
       // #211 fix wave 1 (I1): a thrown error here (not just a returned
       // {ok:false}) must not fail the whole save — the base sheet, scope
@@ -492,12 +501,13 @@ export async function saveGridIntakeAction(input: {
   // shows them as a banner until Retry succeeds or they are dismissed.
   const notices: GridIntakeNotice[] = [];
   const at = Date.now();
+  if (shapeNote) notices.push({ id: newNoticeId(), message: shapeNote, at });
   if (warning) notices.push({ id: newNoticeId(), message: warning, at });
   if (planWarning) notices.push({ id: newNoticeId(), message: planWarning, ...(planRetry ? { retry: { kind: "copy" as const, candidateId: planRetry } } : {}), at });
   if (notices.length) await addIntakeNotices(input.projectId, notices);
   revalidatePath(editorPath(input.projectId));
   revalidatePath("/design/designs");
-  const allWarnings = [warning, planWarning].filter(Boolean).join(" ");
+  const allWarnings = [shapeNote, warning, planWarning].filter(Boolean).join(" ");
   return { ok: true, ...(allWarnings ? { warning: allWarnings } : {}), ...(planRetry ? { planRetry } : {}), ...(planSheetIds ? { planSheetIds } : {}) };
 }
 

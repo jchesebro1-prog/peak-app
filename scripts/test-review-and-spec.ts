@@ -35948,7 +35948,7 @@ async function c255T6GridAsyncChecks(): Promise<void> {
   const fill = readFileSync(join(process.cwd(), "src/lib/design/grid-auto-fill.ts"), "utf8");
   ok(/legacy:\s*!stamp/.test(fill) && /template:\s*stamp \?\? null/.test(fill), "#255 T6: Auto fill uses the frame of the drawing the sheet was stamped with");
   const act = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
-  ok(act.includes("const venueType = site?.venueKind ?? null") && act.includes("effectiveTemplateFor(") && /generateBaseSheet\([^)]*,\s*tpl\)/.test(act), "#255 T6: the intake saves the venue's type and draws its effective template");
+  ok(act.includes("const venueType = site?.venueKind ?? null") && act.includes("effectiveTemplateFor(") && /generateBaseSheet\([^)]*,\s*tpl(?:,\s*roomShape \?\? null)?\)/.test(act), "#255 T6: the intake saves the venue's type and draws its effective template");
   // Task 5 review: a client's per-design Background is kept only when the plan kind can draw it.
   ok(c255T6SanTpl("church", "church-traditional@1") === "church-traditional@1" && c255T6SanTpl("church", "proscenium@1") === null && c255T6SanTpl("gym", "proscenium@1") === null && c255T6SanTpl("church", "church-bogus@9") === null && c255T6SanTpl("church", 42) === null && c255T6SanTpl("proscenium", null) === null, "#255 T6: a design's Background override survives only when it is a template its plan kind can draw");
   ok(act.includes("const templateId = sanitizeTemplateId(kind, input.autoConfig.templateId)") && act.indexOf("const templateId = sanitizeTemplateId(") < act.indexOf("saveGridIntake(input.projectId"), "#255 T6: the intake drops a Background override the venue kind can't draw before saving");
