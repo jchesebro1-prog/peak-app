@@ -28,7 +28,7 @@ import { arenaGeom, blackboxGeom, churchGeom, planTemplate, prosGeom } from "@/a
 import { templateEntry } from "@/lib/design/venue-templates";
 import { ARENA_CORNER_R } from "@/lib/design/venue-templates/arena.keys";
 import type { RoomShape, SheetFrame } from "@/lib/design/room-shape/types";
-import { shapeRoleBoxes, type FtBox } from "@/lib/design/room-shape/frame";
+import { churchRoleBoxes, shapeRoleBoxes, type FtBox } from "@/lib/design/room-shape/frame";
 import { toSheet } from "@/lib/design/room-shape/spaces";
 import { legacyChurchGeom } from "./legacy-church-geom";
 import { legacyProsGeom } from "./legacy-pros-geom";
@@ -86,7 +86,16 @@ function shapeFrame(shape: RoomShape, fr: SheetFrame): VenueFrame | null {
     if (maxX - minX > 0.1) base.stage = n({ ...R.stage, minX, maxX });
     if (R.stageEdge) base.stageEdge = R.stageEdge.map((p) => toSheet(p, fr));
   }
-  if (family === "church") base.sideInside = true;
+  if (family === "church") {
+    // As the template branch: the Platform's core is the stage frame (never the Platform's whole bounding box, whose front
+    // step, splays and pointed front reach past the rooms beside it), and with no Booth room the FOH mix stands in the Nave.
+    base.sideInside = true;
+    const C = churchRoleBoxes(shape);
+    if (C) {
+      base.stage = n(C.stage);
+      if (C.mix) base.booth = n(C.mix);
+    }
+  }
   if (family === "blackbox") {
     base.room = audience;
     if (R.sameStageHouse) base.stage = blackboxStage(audience);

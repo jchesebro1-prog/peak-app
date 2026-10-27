@@ -1,4 +1,5 @@
 // src/lib/design/room-shape/frame.ts
+import { rowSpans } from "../venue-templates/canvas";
 import { bounds, centroid, edgeLength, outlinePoints, sampleEdge } from "./geometry";
 import type { RoomShape, ShapePt, ShapeRoom } from "./types";
 
@@ -80,4 +81,35 @@ export function shapeRoleBoxes(shape: RoomShape): ShapeRoles | null {
     stageDepthFt: depth,
     facing,
   };
+}
+
+/**
+ * #370: a church's Auto-fill frame on a shape (the template branch's churchGeom, in feet). `stage` is the Platform's CORE,
+ * never its whole bounding box: the box under the platform's back wall (its top-most run), as wide as that wall, running
+ * down while the Platform still covers it — Traditional's chancel (its front step is wider), Contemporary's core above the
+ * pointed front. `mix` is the FOH mix box when no Booth room holds it: centred on the House, 62% of its depth down, as
+ * wide as churchGeom's (30% of the House, at most 86 plan pixels) and 18 pixels tall, a pixel being 1 ÷ the plan's
+ * 538-pixel scale across the rooms. null without a Stage or House room, or when one room is both.
+ */
+export function churchRoleBoxes(shape: RoomShape): { stage: FtBox; mix: FtBox | null } | null {
+  const R = shapeRoleBoxes(shape);
+  const stageRoom = shape.rooms.find((r) => (r.roles as string[]).includes("stage"));
+  if (!R || !stageRoom || R.sameStageHouse) return null;
+  const poly = outlinePoints(stageRoom, 0.5, 32);
+  const sb = bounds(poly);
+  const back = poly.filter((p) => p.y <= sb.minY + 0.05);
+  const left = Math.min(...back.map((p) => p.x)), right = Math.max(...back.map((p) => p.x));
+  const covers = (y: number) => rowSpans(poly, y).some(([l, r]) => l <= left + 0.15 && r >= right - 0.15);
+  let yStage = sb.minY;
+  for (let y = sb.minY + 0.1; y <= sb.maxY - 0.1 && covers(y); y += 0.1) yStage = y;
+  if (yStage >= sb.maxY - 0.2) yStage = sb.maxY;
+  let mix: FtBox | null = null;
+  if (!shape.rooms.some((r) => (r.roles as string[]).includes("booth"))) {
+    const all = bounds(shape.rooms.flatMap((r) => outlinePoints(r, 0.5, 32)));
+    const px = Math.max(all.maxX - all.minX, 1) / 538;
+    const w = Math.min((R.house.maxX - R.house.minX) * 0.3, 86 * px), h = 18 * px;
+    const cx = (R.house.minX + R.house.maxX) / 2, cy = R.house.minY + 0.62 * (R.house.maxY - R.house.minY);
+    mix = { minX: cx - w / 2, maxX: cx + w / 2, minY: cy - h / 2, maxY: cy + h / 2 };
+  }
+  return { stage: { minX: left, maxX: right, minY: sb.minY, maxY: yStage }, mix };
 }

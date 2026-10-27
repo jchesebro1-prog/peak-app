@@ -18,7 +18,7 @@ import { applyEdit } from "../src/lib/design/room-shape/edit";
 import { snapCorner } from "../src/lib/design/room-shape/snap";
 import type { RoomShape } from "../src/lib/design/room-shape/types";
 import { gridIntakeDefaults } from "../src/lib/design/grid-intake";
-import { prosGeom } from "../src/app/(app)/design/quick/plan-svg";
+import { prosGeom, churchGeom } from "../src/app/(app)/design/quick/plan-svg";
 import { VENUES, sizedDims, type AState } from "../src/app/(app)/design/quick/engine";
 import { roomShapeSvg, labelPoint } from "../src/lib/design/room-shape/svg";
 import { shapeSpaces, toSheet, fromSheet, frameScale } from "../src/lib/design/room-shape/spaces";
@@ -621,6 +621,47 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
       ok(edgeBad === 0, `#370 sweep: the shape's stage edge spans the opening like the template's within 1' at all ${rows.length} sizes (${edgeBad} differ)`);
       ok(besideBad === 0, `#370 sweep: side lights and line arrays span the same left-to-right extent as the template's within 2' at all ${rows.length} sizes (${besideBad} differ)`);
       ok(outBad === 0 && placed === rows.length * 16, `#370 sweep: 8 side lights + 8 line arrays at every size, none outside the building (${outBad} sizes with strays; ${placed} placed)`);
+    }
+    {
+      // Church family (Traditional, Contemporary and the retired earlier drawing): on an unedited freeze the shape branch fills
+      // where the template branch does — stage gear and the mix position within 2', and no cyc light outside every room.
+      const rows: Array<[string, string, AState]> = [];
+      for (const tpl of ["church-traditional@1", "church-contemporary@2", "church-contemporary@1"]) {
+        for (const sz of ["small", "medium", "large"] as const) rows.push([tpl, `${sz}`, { ...stateFor("church"), ...sizedDims(VENUES.find((x) => x.key === "church")!, sz) }]);
+        for (const width of [20, 34, 60]) for (const depth of [12, 22, 40]) rows.push([tpl, `${width}'/${depth}'`, { ...stateFor("church"), width, depth }]);
+      }
+      const fams: Array<[string, string[]]> = [
+        ["stage gear", ["lighting:side", "audio:lineArray", "lighting:par", "audio:subwoofer", "rigging:electricHoist", "lighting:cyc"]],
+        ["mix position", ["audio:mixerDsp", "video:projector", "video:processor"]],
+      ];
+      const full = card([["lighting", "lighting:side", 8], ["lighting", "lighting:par", 8], ["lighting", "lighting:cyc", 4], ["audio", "audio:lineArray", 8], ["audio", "audio:subwoofer", 4], ["audio", "audio:mixerDsp", 3],
+        ["rigging", "rigging:electricHoist", 6], ["video", "video:projector", 2], ["video", "video:processor", 2]]);
+      const worst = new Map<string, { d: number; at: string }>(fams.map(([f]) => [f, { d: 0, at: "" }]));
+      let cycOut = 0, cycN = 0, short = 0;
+      for (const [tpl, label, st] of rows) {
+        const sh = freezeFromTemplate(st, tpl, { by: "T", at: 1 });
+        const fr = roomShapeSvg(sh).frame;
+        const G = churchGeom(st, tpl);
+        const tf = venueFrame(st, { template: tpl }), sf = venueFrame(st, { template: tpl, shape: { shape: sh, frame: fr } });
+        const T = generateAutoLayout(st, full, { electrics: 4, sets: 6, template: tpl });
+        const S = generateAutoLayout(st, full, { electrics: 4, sets: 6, template: tpl, shape: { shape: sh, frame: fr } });
+        // feet, x from the House's centre line, y from its front edge
+        const tFt = (p: { x: number; y: number }) => ({ x: (p.x - tf.audience.x - tf.audience.w / 2) * G.W / G.ppf, y: (p.y - tf.audience.y) * G.H / G.ppf });
+        const sFt = (p: { x: number; y: number }) => ({ x: (p.x - sf.audience.x - sf.audience.w / 2) * fr.wFt, y: (p.y - sf.audience.y) * fr.hFt });
+        for (const [fam, keys] of fams)
+          for (const k of keys) {
+            const t = T.filter((p) => p.auto.rowKey === k), s2 = S.filter((p) => p.auto.rowKey === k);
+            if (t.length !== s2.length || !t.length) { short++; continue; }
+            t.forEach((p, i) => {
+              const a1 = tFt(p), b1 = sFt(s2[i]), d = Math.hypot(a1.x - b1.x, a1.y - b1.y);
+              if (d > worst.get(fam)!.d) worst.set(fam, { d, at: `${tpl} ${label} ${k}` });
+            });
+          }
+        const polys = sh.rooms.map((r) => outlinePoints(r, 0.5, 32));
+        for (const p of S.filter((q) => q.auto.rowKey === "lighting:cyc")) { cycN++; const q = fromSheet(p, fr); if (!polys.some((poly) => inPoly(poly, q))) cycOut++; }
+      }
+      for (const [fam] of fams) ok(worst.get(fam)!.d <= 2, `#370 sweep: church ${fam} on the shape lands within 2' of the template's at all ${rows.length} sizes (worst ${worst.get(fam)!.d.toFixed(1)}' at ${worst.get(fam)!.at})`);
+      ok(short === 0 && cycN === rows.length * 4 && cycOut === 0, `#370 sweep: no church cyc light lands outside every room (${cycOut} of ${cycN}; ${short} rows with unequal counts)`);
     }
     // Arena: the default end stage needs no turn; a stage on a side wall turns exactly as the template branch's turn().
     const arDef = venueFrame(stateFor("arena"), { template: "arena@1", shape: { shape: ar, frame: roomShapeSvg(ar).frame } });
