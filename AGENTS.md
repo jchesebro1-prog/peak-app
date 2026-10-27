@@ -1672,5 +1672,7 @@ See `.env.example`.
     Jeff-gated: a MyETC API key, the first Pull on production (check the "new" count
     against duplicates) and Import, the next morning's sync line. Punch item #368.
 
+69. 🚧 **Grid room shape editor — slice 1** (#370, D1304–D1309) — the Grid intake gains a Shape the room step: the stretched template freezes into a `RoomShape` (`src/lib/design/room-shape/`: rooms and zones in feet, line / arc / Bezier edges, walls vs. openings read from the drawing's double lines, roles on rooms) edited in `src/components/room-shape/room-shape-editor.tsx` (corner drag + snap + glue, Add point, Curve, Free-form, Wall ↔ Opening, typed lengths / radius / arc length, undo / redo); a shaped intake locks its dimensions until Reset to template. `saveGridIntakeAction` sanitizes it (`sanitizeRoomShape`) before it writes any customer or venue (`newVenueKindFor`, shared with the quote intake), `generateBaseSheet` draws the base sheet, Spaces (`fromRoom`) and calibration from it and stamps `baseSheetShape` / `baseSheetFrame`, and Auto fill lays out on the stamp (`venueFrame` shape branch; a proscenium or Gym Stage hangs side lights and line arrays at the opening, not the wings). No migration. Remaining: slices 2 (rooms + zones, roles) and 3 (reopen after Create, DXF); Jeff reviews `docs/room-shape/renders/`. Punch item #370.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

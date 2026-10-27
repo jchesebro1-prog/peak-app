@@ -12894,3 +12894,26 @@ Jeff, 2026-10-23: "We need to be able to add an API key to price list import pag
 - The next morning, read the daily-sync line in the drawer.
 - Revise one sent estimate with ETC lines and check the banner's changes.
 - Confirm or change: new finished goods with no ETC category go to "Uncategorized".
+
+## 370. Grid room shape editor — slice 1 DONE 2026-10-27 on `feat/370-room-shape` (D1304–D1309)
+
+Jeff, Oct 25: reshape the Grid plan in the intake — points on every corner and halfway along every wall, curve a wall or add points, then add rooms. Spec `docs/superpowers/specs/2026-10-25-grid-room-shape-editor-design.md` (Amendment A); plan `docs/superpowers/plans/2026-10-25-grid-room-shape-slice1.md`.
+
+**Built (slice 1):** the Shape the room step; freeze from all seven templates with walls / openings read from the drawing (short false openings between walls walled); corner drag with 6" / 1' and 45° snapping and glue; Add point, Curve (radius / arc length), Free-form, Straighten, Wall ↔ Opening, typed lengths; rename / retype / delete; undo / redo; locked dimensions + Reset; base sheet, Spaces, calibration and Auto fill drawn from the shape (a proscenium or Gym Stage hangs side lights and line arrays at the opening, Jeff Oct 27). The intake refuses a bad shape before it writes any customer or venue. Renders for review: `docs/room-shape/renders/`.
+
+**Gates:** tsc 0 errors; test:specs 25,901 PASS / 0 FAIL (ALL PASSED, plus the markup-settings run; 234 `#370` checks); test:smoke ALL PASSED, 268 PASS / 0 FAIL (authenticated); eslint 0 errors on the changed src and scripts files (`scripts/test-review-and-spec.ts` excluded as before); `next build` passes. Browser-checked on a scratch PGlite dev server at 1024×768: the shape step, corner drag with snap and glue, Curve and Radius, Escape revert, Free-form, Wall → Opening, a refused crossing edit, undo / redo, zoom and pan, locked dimensions and Reset, Continue → the base sheet and its 7 Spaces; no console or server errors.
+
+**Open for Jeff:**
+- Review the renders (`docs/room-shape/renders/`): openings, zones.
+- The shape sheet drops the template's line-set / electric symbols — OK?
+- The room sizes in spec §3.
+- Whether other equipment should follow the Electrical room / mix (slice 2).
+- Corner glue is 0.5" only, so a room behind a wall does not follow a dragged corner (D1309).
+- Room labels render very small in the editor at the default fit.
+- Not exercised in a browser: pinch zoom, pointercancel, a drag started while a length box holds an unconfirmed edit (Undo recovers it).
+
+**Known minors (for the final review):** test gaps in `geometry` / `walls` / `fit` (clockwise, arc, concave, successive splits, negative fits); `selfCrosses` misses a vertex-touching figure-8; sanitize worst-case timing test doesn't discriminate; `applyEdit` throws on a missing `to` / unknown op; `snapCorner` NaN inputs; arena `stageAlong` = longest stage edge; Gym Stage gains a straight stage edge the template lacked; contemporary church side lights can fall outside every room polygon; opening not clipped when the Stage has several open edges or none (clip is x-only); `saveGridIntake` trusts the caller on `roomShape` / `baseSheet*`; no transaction on the shape path (as the template path); the stale-type race check doesn't re-read a changed Background; editor: a second finger on the background kills a handle drag, SVG handles have no keyboard access, wheel always `preventDefault`s, undo history lost on Back, undoing to the template state leaves the dimensions locked (Reset recovers).
+
+**Next:** slice 2 (+ Add room, drop + snap flush, mix / electrical roles), slice 3 (reopen after Create, DXF). Renumber D1304–D1309 and #370 at merge if #369 (curved track) lands first.
+
+**Rollback:** safe — no migration; the new intake fields are ignored by an older build (a shaped design's sheet is an ordinary SVG sheet).
