@@ -278,6 +278,18 @@ export type CurtainDraft = {
   seededVendorCost?: string;
 };
 
+/** #369 — one row of a curved track's segment list (form strings; blank = not entered). */
+export type TrackSegmentDraft = {
+  kind: "straight" | "arc";
+  /** Straight only, ft. */
+  length: string;
+  /** Arc only, ft. */
+  radius: string;
+  /** Arc only, degrees. */
+  angle: string;
+  turn: "left" | "right";
+};
+
 /** #274: the track configurator's form (strings while editing, like every
  *  other draft); `trackConfigFromDraft` (track-bom.ts) turns it into the
  *  TrackConfig the engine prices and the line stores. Blank spacing = the
@@ -296,6 +308,8 @@ export type TrackDraft = {
   hangerSpacing: string;
   /** Oct 15 #45 — walk-along only: two curtain halves (a walk-along bi-part). */
   walkAlongBipart?: boolean;
+  /** #369 — curved only: the segment list (replaces run + radius on a curved track). */
+  segments?: TrackSegmentDraft[];
 };
 
 /** #274: one catalog part a track series maps a role to, as the Estimator
