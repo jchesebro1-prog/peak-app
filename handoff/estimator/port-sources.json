@@ -71,7 +71,7 @@
       "originals": [
         {
           "path": "src/lib/curtain-cut-sheets/load.ts",
-          "sha256": "93f20871cb46aa480020261f2300a407287c0e082d4d02991ca7e0c9e1aa144e"
+          "sha256": "67541e5caf13a94e796cdb4edb9657e64b9c58fd60b85f2b29a01353b8d8798a"
         },
         {
           "path": "src/app/print/quote/[id]/page.tsx",
