@@ -17,13 +17,16 @@ import { applyEdit } from "../src/lib/design/room-shape/edit";
 import { snapCorner } from "../src/lib/design/room-shape/snap";
 import type { RoomShape } from "../src/lib/design/room-shape/types";
 import { gridIntakeDefaults } from "../src/lib/design/grid-intake";
+import { prosGeom } from "../src/app/(app)/design/quick/plan-svg";
 import { VENUES, sizedDims, type AState } from "../src/app/(app)/design/quick/engine";
 import { roomShapeSvg, labelPoint } from "../src/lib/design/room-shape/svg";
 import { shapeSpaces, toSheet, fromSheet, frameScale } from "../src/lib/design/room-shape/spaces";
 import { calibrationScale } from "../src/lib/annotations";
 import { inPoly } from "../src/lib/design/venue-templates/canvas";
 import { shapeRoleBoxes } from "../src/lib/design/room-shape/frame";
-import { venueFrame, fillGeometry } from "../src/lib/design/grid-auto-layout";
+import { venueFrame, fillGeometry, generateAutoLayout } from "../src/lib/design/grid-auto-layout";
+import type { AutoCard, AutoLine } from "../src/lib/design/auto-estimate";
+import type { SysKey } from "../src/app/(app)/design/quick/engine";
 
 const near = (a: number, b: number, tol = 1e-6) => Math.abs(a - b) <= tol;
 const nearPt = (p: ShapePt, q: ShapePt, tol = 1e-6) => dist(p, q) <= tol;
@@ -507,7 +510,7 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
     const f = venueFrame(a, { template: "proscenium@1", shape: { shape, frame } });
     const inUnit = (r: { x: number; y: number; w: number; h: number }) => r.x >= 0 && r.y >= 0 && r.x + r.w <= 1 && r.y + r.h <= 1 && r.w > 0 && r.h > 0;
     ok(inUnit(f.stage) && inUnit(f.audience) && inUnit(f.booth) && !!f.catwalk && (f.stageEdge?.length ?? 0) > 1, "#370 frame: venueFrame's shape branch gives normalized stage / audience / booth / catwalk / stage edge");
-    ok(near(f.stage.w * frame.wFt, 70, 0.1), "#370 frame: normalized against the shape sheet's frame");
+    ok(near(f.stage.w * frame.wFt, 50, 0.1) && near(f.stage.h * frame.hFt, 30, 0.1), "#370 frame: the proscenium stage frame is the opening (50' of the 70' room), against the shape sheet's frame");
     const bb = freezeFromTemplate(stateFor("blackbox"), "blackbox@1", { by: "T", at: 1 });
     const fb = venueFrame(stateFor("blackbox"), { template: "blackbox@1", shape: { shape: bb, frame: roomShapeSvg(bb).frame } });
     ok(!!fb.room && fb.stage.w < fb.room.w, "#370 frame: a blackbox (stage = house) insets its stage inside the room, as today");
@@ -522,6 +525,63 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
     const g = fillGeometry({ autoConfig: a, baseSheetTemplate: "proscenium@1", baseSheetShape: shape, baseSheetFrame: frame });
     ok(g.shape?.shape === shape && g.stamp === "proscenium@1", "#370 frame: fillGeometry hands Auto fill the stamped shape");
     ok(!fillGeometry({ autoConfig: a, baseSheetTemplate: "proscenium@1" }).shape, "#370 frame: no stamped shape, none handed on");
+    // Proscenium family (Auditorium and Gym Stage): the shape branch's stage frame matches the template branch's for the same unedited state.
+    for (const [key, tpl] of CASES.filter(([, t]) => t === "proscenium@1" || t === "gym-stage@1")) {
+      const st = key === "school" ? a : stateFor(key);
+      const sh = freezeFromTemplate(st, tpl, { by: "T", at: 1 });
+      const fr = roomShapeSvg(sh).frame;
+      const tf = venueFrame(st, { template: tpl });
+      const sf = venueFrame(st, { template: tpl, shape: { shape: sh, frame: fr } });
+      // the two sheets have different frames, so compare in feet and relative to the House's centre line
+      const tplG = prosGeom(st, tpl);
+      const tFt = { w: tf.stage.w * tplG.W / tplG.ppf, h: tf.stage.h * tplG.H / tplG.ppf, cx: (tf.stage.x + tf.stage.w / 2 - tf.audience.x - tf.audience.w / 2) * tplG.W / tplG.ppf };
+      const sFt = { w: sf.stage.w * fr.wFt, h: sf.stage.h * fr.hFt, cx: (sf.stage.x + sf.stage.w / 2 - sf.audience.x - sf.audience.w / 2) * fr.wFt };
+      ok(near(tFt.w, sFt.w, 1) && near(tFt.h, sFt.h, 1) && near(tFt.cx, sFt.cx, 1), `#370 frame ${key}/${tpl}: the shape branch's stage frame matches the template's (${sFt.w.toFixed(1)}' × ${sFt.h.toFixed(1)}' vs ${tFt.w.toFixed(1)}' × ${tFt.h.toFixed(1)}')`);
+    }
+    {
+      // No opening (the House moved away from the Stage): the stage room clamped to the House's width.
+      const moved = { ...shape, rooms: shape.rooms.map((r) => (r.roles.includes("house") ? { ...r, pts: r.pts.map((p) => ({ x: p.x * 0.6, y: p.y + 40 })), edges: r.edges.map((e) => ({ ...e, open: undefined } as typeof e)) } : r)) } as RoomShape;
+      const fm = venueFrame(a, { template: "proscenium@1", shape: { shape: moved, frame: roomShapeSvg(moved).frame } });
+      const mr = shapeRoleBoxes(moved)!;
+      const fr2 = roomShapeSvg(moved).frame;
+      ok(!mr.stageEdge && near(fm.stage.w * fr2.wFt, Math.min(mr.stage.maxX, mr.house.maxX) - Math.max(mr.stage.minX, mr.house.minX), 0.1), "#370 frame: with no opening, the stage frame is the stage room clamped to the House's width");
+    }
+    // Synthetic Auto cards: one line per row, status "part", so every rule runs without a priced catalog.
+    const card = (rows: Array<[SysKey, string, number]>): AutoCard[] => {
+      const byScope = new Map<SysKey, AutoLine[]>();
+      for (const [scope, rowKey, qty] of rows)
+        byScope.set(scope, [...(byScope.get(scope) ?? []), { rowKey, scope, label: rowKey, unit: "ea", place: "each", eqQty: qty, qty, status: "part", ref: "SYN", unitCost: 1, unitSell: 1, total: qty, swapped: false } as AutoLine]);
+      return [...byScope].map(([scope, lines]) => ({ scope, tier: "better", lines, total: 0, needsPart: 0, allowances: 0, labor: 0, laborRule: { pct: 0, mult: 1 } }));
+    };
+    const cards = card([["lighting", "lighting:side", 8], ["audio", "audio:lineArray", 8], ["audio", "audio:mixerDsp", 3]]);
+    const spec = (pred: (k: string) => boolean, st: AState, tpl: string, sh: RoomShape, fr: ReturnType<typeof roomShapeSvg>["frame"]) =>
+      generateAutoLayout(st, cards, { electrics: 4, sets: 6, template: tpl, shape: { shape: sh, frame: fr } }).filter((p) => pred(p.auto.rowKey));
+    for (const [key, tpl] of CASES) {
+      const st = key === "school" ? a : stateFor(key);
+      const sh = freezeFromTemplate(st, tpl, { by: "T", at: 1 });
+      const fr = roomShapeSvg(sh).frame;
+      const all = sh.rooms.flatMap((r) => outlinePoints(r, 0.5, 32));
+      const bb = { minX: Math.min(...all.map((p) => p.x)), maxX: Math.max(...all.map((p) => p.x)), minY: Math.min(...all.map((p) => p.y)), maxY: Math.max(...all.map((p) => p.y)) };
+      const booth = venueFrame(st, { template: tpl, shape: { shape: sh, frame: fr } }).booth;
+      const mixers = spec((k) => k === "audio:mixerDsp", st, tpl, sh, fr);
+      ok(mixers.length === 3 && mixers.every((p) => p.x >= booth.x - 0.01 && p.x <= booth.x + booth.w + 0.01 && p.y >= booth.y - 0.01 && p.y <= booth.y + booth.h + 0.01), `#370 auto ${key}/${tpl}: a mixer lands in the shape's Booth (${mixers.length} placed)`);
+      if (tpl === "proscenium@1" || tpl === "gym-stage@1") {
+        const sl = spec((k) => k === "lighting:side" || k === "audio:lineArray", st, tpl, sh, fr);
+        const out = sl.filter((p) => { const q = fromSheet(p, fr); return q.x < bb.minX - 1e-6 || q.x > bb.maxX + 1e-6 || q.y < bb.minY - 1e-6 || q.y > bb.maxY + 1e-6; });
+        ok(sl.length === 16 && out.length === 0, `#370 auto ${key}/${tpl}: no side light or line array lands outside the building (${out.length} of ${sl.length})`);
+      }
+    }
+    // Arena: the default end stage needs no turn; a stage on a side wall turns exactly as the template branch's turn().
+    const arDef = venueFrame(stateFor("arena"), { template: "arena@1", shape: { shape: ar, frame: roomShapeSvg(ar).frame } });
+    ok(arDef.stageAngle === undefined && arDef.aspect === undefined, "#370 frame: the default arena stage has no turn (centroid noise is below the guard)");
+    for (const wall of ["floorLeft", "floorRight", "floorBottom"]) {
+      const st = { ...stateFor("arena"), movables: { stage: { wall, t: 0.5 } } };
+      const sh = freezeFromTemplate(st, "arena@1", { by: "T", at: 1 });
+      const sf = venueFrame(st, { template: "arena@1", shape: { shape: sh, frame: roomShapeSvg(sh).frame } });
+      const tf = venueFrame(st, { template: "arena@1" });
+      const d = Math.abs((((sf.stageAngle ?? 0) - (tf.stageAngle ?? 0)) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
+      ok(sf.stageAngle !== undefined && tf.stageAngle !== undefined && d < 1e-2, `#370 frame arena/${wall}: the stage turn matches the template branch (${sf.stageAngle?.toFixed(3)} vs ${tf.stageAngle?.toFixed(3)})`);
+    }
   }
 }
 

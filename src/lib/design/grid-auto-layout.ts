@@ -76,7 +76,16 @@ function shapeFrame(shape: RoomShape, fr: SheetFrame): VenueFrame | null {
   const family = templateEntry(shape.fromTemplate)?.family;
   const audience = n(R.house);
   const base: VenueFrame = { stage: n(R.stage), audience, booth: n(R.booth), ...(R.catwalk ? { catwalk: n(R.catwalk) } : {}) };
-  if (family === "proscenium" && R.stageEdge) base.stageEdge = R.stageEdge.map((p) => toSheet(p, fr));
+  if (family === "proscenium") {
+    // Side lights and line arrays hang beside the proscenium OPENING (as the template branch's stage frame), not
+    // beside the whole stage room, whose wings reach the building walls. The opening is the House's open lip run;
+    // with none (the rooms were moved apart), the stage room clamped to the House's width.
+    const xs = R.stageEdge?.map((p) => p.x);
+    const minX = xs ? Math.min(...xs) : Math.max(R.stage.minX, R.house.minX);
+    const maxX = xs ? Math.max(...xs) : Math.min(R.stage.maxX, R.house.maxX);
+    if (maxX - minX > 0.1) base.stage = n({ ...R.stage, minX, maxX });
+    if (R.stageEdge) base.stageEdge = R.stageEdge.map((p) => toSheet(p, fr));
+  }
   if (family === "church") base.sideInside = true;
   if (family === "blackbox") {
     base.room = audience;
@@ -92,7 +101,7 @@ function shapeFrame(shape: RoomShape, fr: SheetFrame): VenueFrame | null {
     const c = toSheet(R.stageCentre, fr);
     base.stage = { x: c.x - R.stageAlongFt / fr.wFt / 2, y: c.y - R.stageDepthFt / fr.hFt / 2, w: R.stageAlongFt / fr.wFt, h: R.stageDepthFt / fr.hFt };
     const angle = Math.atan2(-R.facing.x, R.facing.y);
-    if (Math.abs(angle) > 1e-9) { base.stageAngle = angle; base.aspect = fr.hFt / fr.wFt; }
+    if (Math.abs(angle) > 1e-4) { base.stageAngle = angle; base.aspect = fr.hFt / fr.wFt; }
     const cut = Math.min((0.3 * ARENA_CORNER_R) / 12, (R.house.maxX - R.house.minX) / 2, (R.house.maxY - R.house.minY) / 2);
     base.lotBox = n({ minX: R.house.minX + cut, minY: R.house.minY + cut, maxX: R.house.maxX - cut, maxY: R.house.maxY - cut });
   }
