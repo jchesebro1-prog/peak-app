@@ -59914,7 +59914,7 @@ import {
     "#314 pin: an intake plan view goes first, so Auto fill finds the generated base sheet by its stamped id");
   ok(rd("src/app/api/grid-sheets/upload/route.ts").includes('String(form.get("position") || "") === "first"'), "#314 pin: the sheet upload route takes position=first (same route, same checks)");
   const gi = rd("src/app/(app)/design/grid/[id]/grid-intake.tsx");
-  const saveBody = gi.slice(gi.indexOf("  const save = () => {"), gi.indexOf("  const next = () => {"));
+  const saveBody = gi.slice(gi.indexOf("  const save = () => {"), gi.indexOf("  const afterShape = () => {"));
   ok(saveBody.indexOf("await saveGridIntakeAction(") < saveBody.indexOf("uploadGridSheet(projectId, planFile, { blobUploads, planUploadId })") && saveBody.includes("if (!saved.ok) return setError(saved.error);") &&
      rd("src/lib/design/grid-plan-upload.ts").includes('body.append("position", "first");') && gi.includes("{linkedEstimate ? (") && gi.includes("estimateIntakeNote(linkedEstimate.quoteNumber)") && gi.includes('useState<Start | null>(linkedEstimate ? "blank" : null)'),
     "#314 pin: the intake uploads a dropped plan only after the intake saved; an estimate-linked intake hides Auto and starts Blank");

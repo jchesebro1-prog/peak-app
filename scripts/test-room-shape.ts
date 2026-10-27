@@ -662,6 +662,13 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
     ok(html.includes('data-testid="room-shape-editor"') && (html.match(/data-k="wall"/g) || []).length > 0 && html.includes("Undo") && html.includes(SHAPE_HINT.replace(/'/g, "&#x27;")),
       "#370 editor: renders the plan with walls, the toolbar and the hint");
   }
+
+  {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("src/app/(app)/design/grid/[id]/grid-intake.tsx", "utf8");
+    ok(src.includes('useState<"setup" | "shape" | "equipment">') && src.includes("<RoomShapeEditor") && src.includes("roomShape: shape"), "#370 pin: the intake has a shape step that sends the shape");
+    ok(src.includes("disabled={!!shape}") && src.includes("SHAPE_FROZEN_NOTE") && src.includes("SHAPE_RESET_CONFIRM") && src.includes("SHAPE_STALE"), "#370 pin: a shaped intake locks its dimensions, offers Reset and blocks a stale shape");
+  }
 }
 
 export async function roomShapeDbChecks(ok: Ok): Promise<void> {
