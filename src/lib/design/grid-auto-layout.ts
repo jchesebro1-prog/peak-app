@@ -27,6 +27,9 @@ import { venueOf, type AState, type SysKey, type TierKey } from "@/app/(app)/des
 import { arenaGeom, blackboxGeom, churchGeom, planTemplate, prosGeom } from "@/app/(app)/design/quick/plan-svg";
 import { templateEntry } from "@/lib/design/venue-templates";
 import { ARENA_CORNER_R } from "@/lib/design/venue-templates/arena.keys";
+import type { RoomShape, SheetFrame } from "@/lib/design/room-shape/types";
+import { shapeRoleBoxes, type FtBox } from "@/lib/design/room-shape/frame";
+import { toSheet } from "@/lib/design/room-shape/spaces";
 import { legacyChurchGeom } from "./legacy-church-geom";
 import { legacyProsGeom } from "./legacy-pros-geom";
 import type { GridCurtain } from "./grid-bom";
@@ -62,7 +65,45 @@ export type VenueFrame = {
 };
 export const EACH_CAP = 120;
 
-export function venueFrame(a: AState, opts: { legacy?: boolean; template?: string | null } = {}): VenueFrame {
+/** #370: the frame of a shape-drawn base sheet — the role rooms' boxes, normalized by the sheet's own frame. */
+function shapeFrame(shape: RoomShape, fr: SheetFrame): VenueFrame | null {
+  const R = shapeRoleBoxes(shape);
+  if (!R) return null;
+  const n = (b: FtBox): Rect => {
+    const p = toSheet({ x: b.minX, y: b.minY }, fr), q = toSheet({ x: b.maxX, y: b.maxY }, fr);
+    return { x: p.x, y: p.y, w: q.x - p.x, h: q.y - p.y };
+  };
+  const family = templateEntry(shape.fromTemplate)?.family;
+  const audience = n(R.house);
+  const base: VenueFrame = { stage: n(R.stage), audience, booth: n(R.booth), ...(R.catwalk ? { catwalk: n(R.catwalk) } : {}) };
+  if (family === "proscenium" && R.stageEdge) base.stageEdge = R.stageEdge.map((p) => toSheet(p, fr));
+  if (family === "church") base.sideInside = true;
+  if (family === "blackbox") {
+    base.room = audience;
+    if (R.sameStageHouse) base.stage = blackboxStage(audience);
+    else {
+      // Conference: the platform inside the room is the stage and the room behind it the audience (as the template branch).
+      const top = Math.max(audience.y, base.stage.y + base.stage.h);
+      if (top < audience.y + audience.h) base.audience = { ...audience, y: top, h: audience.y + audience.h - top };
+    }
+  }
+  if (family === "arena") {
+    // As the template branch: the stage laid out as if at the top end about its centre, turned into place.
+    const c = toSheet(R.stageCentre, fr);
+    base.stage = { x: c.x - R.stageAlongFt / fr.wFt / 2, y: c.y - R.stageDepthFt / fr.hFt / 2, w: R.stageAlongFt / fr.wFt, h: R.stageDepthFt / fr.hFt };
+    const angle = Math.atan2(-R.facing.x, R.facing.y);
+    if (Math.abs(angle) > 1e-9) { base.stageAngle = angle; base.aspect = fr.hFt / fr.wFt; }
+    const cut = Math.min((0.3 * ARENA_CORNER_R) / 12, (R.house.maxX - R.house.minX) / 2, (R.house.maxY - R.house.minY) / 2);
+    base.lotBox = n({ minX: R.house.minX + cut, minY: R.house.minY + cut, maxX: R.house.maxX - cut, maxY: R.house.maxY - cut });
+  }
+  return base;
+}
+
+export function venueFrame(a: AState, opts: { legacy?: boolean; template?: string | null; shape?: { shape: RoomShape; frame: SheetFrame } } = {}): VenueFrame {
+  if (opts.shape) {
+    const f = shapeFrame(opts.shape.shape, opts.shape.frame);
+    if (f) return f;
+  }
   const kind = venueOf(a).kind || "proscenium";
   if (!opts.legacy) {
     // #249/#255: the frame of the drawing the sheet was drawn from — resolved exactly as buildPlan
@@ -175,10 +216,14 @@ const BOOTH_ROWS = new Set(["audio:mixerDsp", "video:processor", "video:projecto
  * them (never where the intake says now), or home when the sheet was stamped before rooms moved (a stamp with no
  * `baseSheetMovables`). An unstamped (pre-template) sheet keeps the intake as it is; `stamp` = the sheet's template.
  */
-export function fillGeometry(intake: { autoConfig?: AState; baseSheetTemplate?: string; baseSheetMovables?: Record<string, { wall: string; t: number }> } | undefined): { a: AState | undefined; stamp: string | undefined } {
+export function fillGeometry(
+  intake: { autoConfig?: AState; baseSheetTemplate?: string; baseSheetMovables?: Record<string, { wall: string; t: number }>; baseSheetShape?: RoomShape; baseSheetFrame?: SheetFrame } | undefined
+): { a: AState | undefined; stamp: string | undefined; shape?: { shape: RoomShape; frame: SheetFrame } } {
   const a0 = intake?.autoConfig;
   const stamp = intake?.baseSheetTemplate;
-  return { a: a0 && stamp ? { ...a0, movables: intake?.baseSheetMovables ?? null } : a0, stamp };
+  // #370: a shape-drawn sheet hands on its frozen shape and frame (both stamped together, or neither).
+  const shape = intake?.baseSheetShape && intake.baseSheetFrame ? { shape: intake.baseSheetShape, frame: intake.baseSheetFrame } : undefined;
+  return { a: a0 && stamp ? { ...a0, movables: intake?.baseSheetMovables ?? null } : a0, stamp, ...(shape ? { shape } : {}) };
 }
 
 /** The placement partId for a line: a catalog SKU, `asm:<id>`, `allow:<row>:<tier>` — null when it must not be placed. */
@@ -343,9 +388,9 @@ function eachPoints(line: AutoLine, n: number, f: VenueFrame, opts: { electrics:
 export function generateAutoLayout(
   a: AState,
   cards: AutoCard[],
-  opts: { electrics: number; sets: number; kept?: Readonly<Record<string, number>>; legacy?: boolean; template?: string | null }
+  opts: { electrics: number; sets: number; kept?: Readonly<Record<string, number>>; legacy?: boolean; template?: string | null; shape?: { shape: RoomShape; frame: SheetFrame } }
 ): AutoPlacementSpec[] {
-  const f = venueFrame(a, { legacy: opts.legacy, template: opts.template });
+  const f = venueFrame(a, { legacy: opts.legacy, template: opts.template, shape: opts.shape });
   // #255 review: on a blackbox-family plan nothing but the Booth's rows lands outside the room — a backstop for
   // quantities past what the rules lay out inside it (an edited count, a long run of lot markers).
   const room = f.room;

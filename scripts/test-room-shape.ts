@@ -22,6 +22,8 @@ import { roomShapeSvg, labelPoint } from "../src/lib/design/room-shape/svg";
 import { shapeSpaces, toSheet, fromSheet, frameScale } from "../src/lib/design/room-shape/spaces";
 import { calibrationScale } from "../src/lib/annotations";
 import { inPoly } from "../src/lib/design/venue-templates/canvas";
+import { shapeRoleBoxes } from "../src/lib/design/room-shape/frame";
+import { venueFrame, fillGeometry } from "../src/lib/design/grid-auto-layout";
 
 const near = (a: number, b: number, tol = 1e-6) => Math.abs(a - b) <= tol;
 const nearPt = (p: ShapePt, q: ShapePt, tol = 1e-6) => dist(p, q) <= tol;
@@ -495,6 +497,32 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
     ok(iSan > 0 && iResolve > 0 && iSan < iResolve && iResolve < iSave && /shaped\s*&&\s*!shaped\.ok\)\s*return\s*\{\s*ok:\s*false/.test(body.slice(iSan, iResolve)) && body.includes("tpl !== preTpl") && body.includes("generateBaseSheet(input.projectId, autoConfig, \"#3a3f4a\", user.name, tpl, roomShape ?? null)"),
       "#370 pin: the intake save refuses a bad shape before resolveIntakeCustomer writes a customer/venue, re-checks the template after, and draws the base sheet from it");
   }
+  {
+    const a = { ...stateFor("school"), width: 50, wing: 10, depth: 30 };
+    const shape = freezeFromTemplate(a, "proscenium@1", { by: "T", at: 1 });
+    const R = shapeRoleBoxes(shape)!;
+    ok(near(R.stage.maxX - R.stage.minX, 70, 0.1) && near(R.booth.maxX - R.booth.minX, 20, 0.1) && !!R.catwalk && !R.sameStageHouse, "#370 frame: stage 70' wide, booth 20', a catwalk, separate stage and house");
+    ok(!!R.stageEdge && near(Math.max(...R.stageEdge.map((p) => p.y)), (9 + 171.833) / 12, 0.2), "#370 frame: the stage edge is the House's open lip arc, lowest ≈ 15'");
+    const frame = roomShapeSvg(shape).frame;
+    const f = venueFrame(a, { template: "proscenium@1", shape: { shape, frame } });
+    const inUnit = (r: { x: number; y: number; w: number; h: number }) => r.x >= 0 && r.y >= 0 && r.x + r.w <= 1 && r.y + r.h <= 1 && r.w > 0 && r.h > 0;
+    ok(inUnit(f.stage) && inUnit(f.audience) && inUnit(f.booth) && !!f.catwalk && (f.stageEdge?.length ?? 0) > 1, "#370 frame: venueFrame's shape branch gives normalized stage / audience / booth / catwalk / stage edge");
+    ok(near(f.stage.w * frame.wFt, 70, 0.1), "#370 frame: normalized against the shape sheet's frame");
+    const bb = freezeFromTemplate(stateFor("blackbox"), "blackbox@1", { by: "T", at: 1 });
+    const fb = venueFrame(stateFor("blackbox"), { template: "blackbox@1", shape: { shape: bb, frame: roomShapeSvg(bb).frame } });
+    ok(!!fb.room && fb.stage.w < fb.room.w, "#370 frame: a blackbox (stage = house) insets its stage inside the room, as today");
+    const cn = freezeFromTemplate(stateFor("concenter"), "blackbox@1", { by: "T", at: 1 });
+    const fc = venueFrame(stateFor("concenter"), { template: "blackbox@1", shape: { shape: cn, frame: roomShapeSvg(cn).frame } });
+    ok(!!fc.room && fc.audience.y >= fc.stage.y + fc.stage.h - 1e-9 && near(fc.audience.y + fc.audience.h, fc.room.y + fc.room.h), "#370 frame: a conference room's audience is the room behind its platform, not under it");
+    const ch = freezeFromTemplate(stateFor("church"), "church-traditional@1", { by: "T", at: 1 });
+    ok(venueFrame(stateFor("church"), { template: "church-traditional@1", shape: { shape: ch, frame: roomShapeSvg(ch).frame } }).sideInside === true, "#370 frame: a church keeps side lights inside its platform walls");
+    const ar = freezeFromTemplate(stateFor("arena"), "arena@1", { by: "T", at: 1 });
+    const fa = venueFrame(stateFor("arena"), { template: "arena@1", shape: { shape: ar, frame: roomShapeSvg(ar).frame } });
+    ok(!!fa.lotBox && inUnit(fa.lotBox), "#370 frame: an arena gets a lot box inside its floor");
+    const g = fillGeometry({ autoConfig: a, baseSheetTemplate: "proscenium@1", baseSheetShape: shape, baseSheetFrame: frame });
+    ok(g.shape?.shape === shape && g.stamp === "proscenium@1", "#370 frame: fillGeometry hands Auto fill the stamped shape");
+    ok(!fillGeometry({ autoConfig: a, baseSheetTemplate: "proscenium@1" }).shape, "#370 frame: no stamped shape, none handed on");
+  }
 }
 
 export async function roomShapeDbChecks(ok: Ok): Promise<void> {
@@ -555,6 +583,11 @@ export async function roomShapeDbChecks(ok: Ok): Promise<void> {
   const res = await fillAutoScopes(p0.id, opt, ["lighting", "audio"], by);
   const filled = (await GP.getProject(p0.id))!;
   ok(res.ok && filled.placements.every((pl) => pl.x >= 0 && pl.x <= 1 && pl.y >= 0 && pl.y <= 1), `#370 db: Auto fill runs on a shaped sheet (${res.ok ? "ok" : res.error})`);
+  const { venueFrame } = await import("../src/lib/design/grid-auto-layout");
+  const booth = venueFrame(a, { template: "proscenium@1", shape: { shape, frame: filled.intake!.baseSheetFrame! } }).booth;
+  const mixers = filled.placements.filter((pl) => pl.auto?.rowKey === "audio:mixerDsp");
+  console.log(`  (#370 db: ${mixers.length} audio:mixerDsp auto placement(s))`);
+  ok(mixers.every((pl) => pl.x >= booth.x - 0.01 && pl.x <= booth.x + booth.w + 0.01 && pl.y >= booth.y - 0.01 && pl.y <= booth.y + booth.h + 0.01), `#370 db: Auto fill puts the mixer in the shape's Booth (${mixers.length} placed)`);
 }
 
 if (process.argv[1] && /test-room-shape\.ts$/.test(process.argv[1])) {
