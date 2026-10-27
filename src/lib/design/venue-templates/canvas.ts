@@ -6,6 +6,10 @@ export type Margins = { W: number; ML: number; MR: number; MT: number; MB: numbe
 
 const R = (n: number) => Math.round(n * 10) / 10;
 
+/** The church plan's canvas margins (churchGeom's); a pixel of its plan is `bounds width ÷ CHURCH_PLAN_W_PX` inches. */
+export const CHURCH_CANVAS: Margins = { W: 640, ML: 62, MR: 40, MT: 54, MB: 44 };
+export const CHURCH_PLAN_W_PX = CHURCH_CANVAS.W - CHURCH_CANVAS.ML - CHURCH_CANVAS.MR;
+
 export const boxOf = (pts: Pt[]): Box => {
   const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
   const x = Math.min(...xs), y = Math.min(...ys);

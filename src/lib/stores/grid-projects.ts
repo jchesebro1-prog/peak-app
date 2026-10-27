@@ -30,6 +30,9 @@ import {
   type RiserDoc,
   type RiserRemoved,
 } from "@/lib/design/grid-riser-doc";
+import type { RoomShape, SheetFrame } from "@/lib/design/room-shape/types";
+import { roomShapeSvg } from "@/lib/design/room-shape/svg";
+import { frameScale, shapeSpaces } from "@/lib/design/room-shape/spaces";
 import { cleanDrawingSet, type DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 import { cleanSymbolDisplay, type SymbolDisplay } from "@/lib/design/grid-symbol-display";
 import { cleanIntakeNotices, MAX_INTAKE_NOTICES, type GridIntakeNotice } from "@/lib/design/grid-plan-intake";
@@ -266,6 +269,8 @@ export type GridSpace = {
   points: Point[];
   /** #321: the riser level this room sits on (an id on `GridProject.levels`). */
   levelId?: string;
+  /** #370: the room-shape room this Space was drawn from (a shape-drawn base sheet); absent = drawn by hand or from a template. */
+  fromRoom?: string;
   by: string;
   at: number;
 };
@@ -367,6 +372,11 @@ export type GridProject = {
     baseSheetTemplate?: string;
     /** #255: where the sheet's movable rooms were drawn (wall + 0..1); the sheet never moves them afterwards. */
     baseSheetMovables?: Record<string, { wall: string; t: number }>;
+    /** #370: the room shape being edited in the intake (Amendment A); absent = the template as stretched. */
+    roomShape?: RoomShape;
+    /** #370: the shape the base sheet was drawn from, and where it sits in feet — Auto fill and later edits read these, never the live `roomShape`. */
+    baseSheetShape?: RoomShape;
+    baseSheetFrame?: SheetFrame;
     /** #314: the generated base sheet's id. An intake plan view is put FIRST in
      *  sheetIds, so Auto (re-)fill reads this, never sheetIds[0]. Absent on
      *  designs drawn before #314 — their base sheet is still sheetIds[0]. */
@@ -563,19 +573,48 @@ export function starterSpaces(
 }
 
 /**
+ * #370: a base sheet drawn from a room shape — the SVG, an exact calibration from its frame, one Space per room
+ * (tagged fromRoom), and the shape + frame stamped beside the template id, so Auto fill and later edits read the
+ * shape the sheet was drawn from.
+ */
+async function generateShapeSheet(projectId: string, shape: RoomShape, by: string): Promise<GridSheet | null> {
+  const drawn = roomShapeSvg(shape);
+  const sheet = await addSheet(projectId, {
+    name: "Generated base plan",
+    mime: "image/svg+xml",
+    dataUrl: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(drawn.markup)}`,
+    by,
+  });
+  if (!sheet) return null;
+  await setSheetCalibration(projectId, { docId: sheet.id, page: 1, scale: frameScale(drawn.frame), unit: "ft", refLength: drawn.frame.wFt, by, at: Date.now() });
+  for (const sp of shapeSpaces(shape, drawn.frame, sheet.id)) await addSpace(projectId, { ...sp, by });
+  await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!p.intake) return;
+    p.intake.baseSheetId = sheet.id;
+    p.intake.baseSheetTemplate = shape.fromTemplate;
+    p.intake.baseSheetShape = shape;
+    p.intake.baseSheetFrame = drawn.frame;
+  });
+  return sheet;
+}
+
+/**
  * Render a Grid base sheet directly from `VenueDims`/`AState` (Task 1, #38)
  * — the estimator's own plan-view geometry (`buildPlan`), correctly scaled,
  * with zero calibration step. Called once, from saveGridIntakeAction, the
  * first time intake completes with "Generate from measurements as I work"
  * checked.
  */
+// #370: when `shape` is passed, `a` and `tpl` are ignored — the sheet is drawn from the shape alone.
 export async function generateBaseSheet(
   projectId: string,
   a: AState,
   accent: string,
   by: string,
-  tpl?: string | null
+  tpl?: string | null,
+  shape?: RoomShape | null
 ): Promise<GridSheet | null> {
+  if (shape) return generateShapeSheet(projectId, shape, by);
   const venue = VENUES.find((v) => v.key === a.venue) || VENUES[0];
   const kind = venue.kind || "proscenium";
   // #255: the template the caller resolved (the design's effective Background). Resolved exactly as
@@ -652,6 +691,9 @@ export async function generateBaseSheet(
     if (!p.intake) return;
     // #314: remember WHICH sheet is the base — an intake plan view goes first.
     p.intake.baseSheetId = sheet.id;
+    // #370: a template-drawn sheet never carries a room-shape stamp left by an earlier sheet.
+    delete p.intake.baseSheetShape;
+    delete p.intake.baseSheetFrame;
     if (id && family) {
       p.intake.baseSheetTemplate = id;
       if (Object.keys(movables).length) p.intake.baseSheetMovables = movables;
@@ -669,6 +711,8 @@ export async function saveGridIntake(
       ...input,
       baseSheetTemplate: input.baseSheetTemplate ?? p.intake?.baseSheetTemplate,
       baseSheetMovables: input.baseSheetMovables ?? p.intake?.baseSheetMovables,
+      ...(input.baseSheetShape ?? p.intake?.baseSheetShape ? { baseSheetShape: input.baseSheetShape ?? p.intake?.baseSheetShape } : {}),
+      ...(input.baseSheetFrame ?? p.intake?.baseSheetFrame ? { baseSheetFrame: input.baseSheetFrame ?? p.intake?.baseSheetFrame } : {}),
       // #314: a re-save never forgets which sheet is the generated base, the
       // intake's plan view, or a notice still waiting for the editor.
       ...(input.baseSheetId ?? p.intake?.baseSheetId ? { baseSheetId: input.baseSheetId ?? p.intake?.baseSheetId } : {}),
@@ -2489,7 +2533,7 @@ export const SPACE_COLORS = ["#8a6d3b", "#3b7a8a", "#7a3b8a", "#5f8a3b", "#8a3b5
 
 export async function addSpace(
   projectId: string,
-  input: { sheetId: string; page: number; name: string; points: Point[]; by: string }
+  input: { sheetId: string; page: number; name: string; points: Point[]; by: string; fromRoom?: string }
 ): Promise<GridProject | null> {
   let refused = false;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
@@ -2505,6 +2549,7 @@ export async function addSpace(
         name: input.name.trim() || "Unnamed space",
         color: SPACE_COLORS[spaces.length % SPACE_COLORS.length],
         points: input.points,
+        ...(input.fromRoom ? { fromRoom: input.fromRoom } : {}),
         by: input.by,
         at: Date.now(),
       },

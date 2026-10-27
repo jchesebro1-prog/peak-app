@@ -36,7 +36,7 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
   if (!project) return { ok: false, error: "That design could not be found." };
   const inputs = project.scopeInputs;
   // #255: lay out on the rooms where the stamped sheet drew them, never where the intake says now.
-  const { a, stamp } = fillGeometry(project.intake);
+  const { a, stamp, shape } = fillGeometry(project.intake);
   const est = autoEstimateFor(project.autoEstimate, optionId, defaultOptionId(project));
   if (!inputs || !a || !est) return { ok: false, error: "This design has no Auto choices to fill from." };
   // #314: the generated base sheet by id — an intake plan view sits in front of it.
@@ -69,7 +69,7 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
   // project snapshot the fill priced; the replace below never removes them.
   const kept = keptUnitsByRow(project.placements || [], scopes, optionId);
   // #249/#255: the frame of the drawing the base sheet was stamped with; an unstamped (pre-template) sheet keeps its old frame.
-  const items = generateAutoLayout(a, cards, { electrics: C.electrics, sets: C.rigSets, kept, legacy: !stamp, template: stamp ?? null });
+  const items = generateAutoLayout(a, cards, { electrics: C.electrics, sets: C.rigSets, kept, legacy: !stamp, template: stamp ?? null, shape });
   const res = await replaceAutoPlacements(projectId, { optionId, scopes, sheetId, page: 1, items, by });
   if (!res) {
     // #318: the store also refuses a sheet the design no longer lists (a racing Adjust sheet).

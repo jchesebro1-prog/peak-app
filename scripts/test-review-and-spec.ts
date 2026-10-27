@@ -11400,6 +11400,7 @@ import { vendorChecks, vendorDbChecks, vendorPdfDbChecks, vendorPdfPureChecks, v
 import { oct15PureChecks, oct15DbChecks, discardConfirmChecks } from "./test-oct15-estimating";
 import { photoWrapPureChecks, photoWrapDbChecks } from "./test-photo-wrap";
 import { vaNotesChecks, vaNotesDbChecks } from "./test-va-notes";
+import { roomShapePureChecks, roomShapeDbChecks } from "./test-room-shape";
 import { batch3PureChecks, batch3DbChecks } from "./test-oct15-batch3";
 import { batch4PureChecks, batch4DbChecks } from "./test-oct15-batch4";
 import { batch5PureChecks, batch5DbChecks } from "./test-batch5";
@@ -11827,6 +11828,7 @@ seeded()
   .then(() => etc368ApplyDbChecks(ok)) // #368 catalog
   .then(() => etc368RiderChecks(ok)) // #368 catalog
   .then(() => etc368LoadSystemDbChecks(ok)).then(() => etc368RepriceDbChecks(ok)) // #368 estimator
+  .then(() => roomShapePureChecks(ok)).then(() => roomShapeDbChecks(ok)) // #370 room shape
   .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -35975,7 +35977,7 @@ async function c255T6GridAsyncChecks(): Promise<void> {
   const fill = readFileSync(join(process.cwd(), "src/lib/design/grid-auto-fill.ts"), "utf8");
   ok(/legacy:\s*!stamp/.test(fill) && /template:\s*stamp \?\? null/.test(fill), "#255 T6: Auto fill uses the frame of the drawing the sheet was stamped with");
   const act = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
-  ok(act.includes("const venueType = site?.venueKind ?? null") && act.includes("effectiveTemplateFor(") && /generateBaseSheet\([^)]*,\s*tpl\)/.test(act), "#255 T6: the intake saves the venue's type and draws its effective template");
+  ok(act.includes("const venueType = site?.venueKind ?? null") && act.includes("effectiveTemplateFor(") && /generateBaseSheet\([^)]*,\s*tpl(?:,\s*roomShape \?\? null)?\)/.test(act), "#255 T6: the intake saves the venue's type and draws its effective template");
   // Task 5 review: a client's per-design Background is kept only when the plan kind can draw it.
   ok(c255T6SanTpl("church", "church-traditional@1") === "church-traditional@1" && c255T6SanTpl("church", "proscenium@1") === null && c255T6SanTpl("gym", "proscenium@1") === null && c255T6SanTpl("church", "church-bogus@9") === null && c255T6SanTpl("church", 42) === null && c255T6SanTpl("proscenium", null) === null, "#255 T6: a design's Background override survives only when it is a template its plan kind can draw");
   ok(act.includes("const templateId = sanitizeTemplateId(kind, input.autoConfig.templateId)") && act.indexOf("const templateId = sanitizeTemplateId(") < act.indexOf("saveGridIntake(input.projectId"), "#255 T6: the intake drops a Background override the venue kind can't draw before saving");
@@ -59948,7 +59950,7 @@ import {
     "#314 pin: an intake plan view goes first, so Auto fill finds the generated base sheet by its stamped id");
   ok(rd("src/app/api/grid-sheets/upload/route.ts").includes('String(form.get("position") || "") === "first"'), "#314 pin: the sheet upload route takes position=first (same route, same checks)");
   const gi = rd("src/app/(app)/design/grid/[id]/grid-intake.tsx");
-  const saveBody = gi.slice(gi.indexOf("  const save = () => {"), gi.indexOf("  const next = () => {"));
+  const saveBody = gi.slice(gi.indexOf("  const save = () => {"), gi.indexOf("  const afterShape = () => {"));
   ok(saveBody.indexOf("await saveGridIntakeAction(") < saveBody.indexOf("uploadGridSheet(projectId, planFile, { blobUploads, planUploadId })") && saveBody.includes("if (!saved.ok) return setError(saved.error);") &&
      rd("src/lib/design/grid-plan-upload.ts").includes('body.append("position", "first");') && gi.includes("{linkedEstimate ? (") && gi.includes("estimateIntakeNote(linkedEstimate.quoteNumber)") && gi.includes('useState<Start | null>(linkedEstimate ? "blank" : null)'),
     "#314 pin: the intake uploads a dropped plan only after the intake saved; an estimate-linked intake hides Auto and starts Blank");
