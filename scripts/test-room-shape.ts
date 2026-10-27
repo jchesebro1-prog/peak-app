@@ -571,6 +571,56 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
         ok(sl.length === 16 && out.length === 0, `#370 auto ${key}/${tpl}: no side light or line array lands outside the building (${out.length} of ${sl.length})`);
       }
     }
+    {
+      // Sweep: Auditorium / PAC / Gym Stage presets at every size, then a grid of widths × wings × depths (the lip is
+      // split across several edges and runs past the jambs when the wings are narrow, so the default size can't see it).
+      const rows: Array<[string, string, AState]> = [];
+      for (const k of ["school", "pac", "gym"])
+        for (const sz of ["small", "medium", "large"] as const) {
+          const v = VENUES.find((x) => x.key === k)!;
+          rows.push([k === "gym" ? "gym-stage@1" : "proscenium@1", `${k}/${sz}`, { ...stateFor(k), ...sizedDims(v, sz) }]);
+        }
+      for (const [k, tpl] of [["school", "proscenium@1"], ["gym", "gym-stage@1"]])
+        for (const width of [20, 30, 50, 70, 80]) for (const wing of [4, 6, 10, 25, 40]) for (const depth of [14, 30, 52])
+          rows.push([tpl, `${k} ${width}'/${wing}'/${depth}'`, { ...stateFor(k), width, wing, depth }]);
+      let frameBad = 0, edgeBad = 0, outBad = 0, besideBad = 0, placed = 0;
+      const first: string[] = [];
+      for (const [tpl, label, st] of rows) {
+        const sh = freezeFromTemplate(st, tpl, { by: "T", at: 1 });
+        const fr = roomShapeSvg(sh).frame;
+        const tf = venueFrame(st, { template: tpl }), sf = venueFrame(st, { template: tpl, shape: { shape: sh, frame: fr } });
+        const G = prosGeom(st, tpl);
+        // feet, relative to the House's centre line
+        const ftT = (r: { x: number; y: number; w: number; h: number }) => ({ w: r.w * G.W / G.ppf, h: r.h * G.H / G.ppf, c: (r.x + r.w / 2 - tf.audience.x - tf.audience.w / 2) * G.W / G.ppf });
+        const ftS = (r: { x: number; y: number; w: number; h: number }) => ({ w: r.w * fr.wFt, h: r.h * fr.hFt, c: (r.x + r.w / 2 - sf.audience.x - sf.audience.w / 2) * fr.wFt });
+        const t = ftT(tf.stage), s2 = ftS(sf.stage);
+        const frameOk = near(t.w, s2.w, 1) && near(t.h, s2.h, 1) && near(t.c, s2.c, 1);
+        // the lip spans the opening, like the template's
+        const xT = (tf.stageEdge ?? []).map((p) => (p.x - tf.audience.x - tf.audience.w / 2) * G.W / G.ppf);
+        const xS = (sf.stageEdge ?? []).map((p) => (p.x - sf.audience.x - sf.audience.w / 2) * fr.wFt);
+        // (the Gym Stage template draws no lip curve: its opening is its stage frame)
+        const refLo = xT.length > 1 ? Math.min(...xT) : t.c - t.w / 2, refHi = xT.length > 1 ? Math.max(...xT) : t.c + t.w / 2;
+        const edgeOk = xS.length > 1 && near(refLo, Math.min(...xS), 1) && near(refHi, Math.max(...xS), 1);
+        const all = sh.rooms.flatMap((r) => outlinePoints(r, 0.5, 32));
+        const sl = generateAutoLayout(st, cards, { electrics: 4, sets: 6, template: tpl, shape: { shape: sh, frame: fr } }).filter((p) => p.auto.rowKey === "lighting:side" || p.auto.rowKey === "audio:lineArray");
+        const outside = sl.filter((p) => { const q = fromSheet(p, fr); return q.x < Math.min(...all.map((m) => m.x)) - 1e-6 || q.x > Math.max(...all.map((m) => m.x)) + 1e-6 || q.y < Math.min(...all.map((m) => m.y)) - 1e-6 || q.y > Math.max(...all.map((m) => m.y)) + 1e-6; });
+        // they hang beside the opening as the template's do: same left-most and right-most x, within 2' (the rules' normalized offsets shift ~1' with the sheet's scale)
+        const tl = generateAutoLayout(st, cards, { electrics: 4, sets: 6, template: tpl }).filter((p) => p.auto.rowKey === "lighting:side" || p.auto.rowKey === "audio:lineArray");
+        const hx = (ps: Array<{ x: number }>, sc: number, aud: { x: number; w: number }) => ps.map((p) => (p.x - aud.x - aud.w / 2) * sc);
+        const lx = hx(tl, G.W / G.ppf, tf.audience), rx = hx(sl, fr.wFt, sf.audience);
+        const besideOk = lx.length > 0 && rx.length > 0 && near(Math.min(...lx), Math.min(...rx), 2) && near(Math.max(...lx), Math.max(...rx), 2);
+        if (!besideOk) besideBad++;
+        if (!frameOk) frameBad++;
+        if (!edgeOk) edgeBad++;
+        if (outside.length || sl.length !== 16) outBad++;
+        placed += sl.length;
+        if ((!frameOk || !edgeOk || outside.length || sl.length !== 16) && first.length < 3) first.push(`${label}: stage ${s2.w.toFixed(1)}' vs ${t.w.toFixed(1)}', lip ${xS.length ? Math.min(...xS).toFixed(1) + ".." + Math.max(...xS).toFixed(1) : "-"} vs ${refLo.toFixed(1)}..${refHi.toFixed(1)}, ${outside.length} outside`);
+      }
+      ok(frameBad === 0, `#370 sweep: the shape branch's stage frame matches the template's within 1' at all ${rows.length} proscenium / Gym Stage sizes (${frameBad} differ; ${first.join("; ")})`);
+      ok(edgeBad === 0, `#370 sweep: the shape's stage edge spans the opening like the template's within 1' at all ${rows.length} sizes (${edgeBad} differ)`);
+      ok(besideBad === 0, `#370 sweep: side lights and line arrays span the same left-to-right extent as the template's within 2' at all ${rows.length} sizes (${besideBad} differ)`);
+      ok(outBad === 0 && placed === rows.length * 16, `#370 sweep: 8 side lights + 8 line arrays at every size, none outside the building (${outBad} sizes with strays; ${placed} placed)`);
+    }
     // Arena: the default end stage needs no turn; a stage on a side wall turns exactly as the template branch's turn().
     const arDef = venueFrame(stateFor("arena"), { template: "arena@1", shape: { shape: ar, frame: roomShapeSvg(ar).frame } });
     ok(arDef.stageAngle === undefined && arDef.aspect === undefined, "#370 frame: the default arena stage has no turn (centroid noise is below the guard)");

@@ -8,7 +8,7 @@ export type ShapeRoles = {
   house: FtBox;
   booth: FtBox;
   catwalk: FtBox | null;
-  /** The House's open curved run facing the stage (proscenium lip), feet; null when none. */
+  /** The House's open lip run facing the stage, clipped to the stage's opening (proscenium lip), feet; null when none. */
   stageEdge: ShapePt[] | null;
   sameStageHouse: boolean;
   /** Arena: the stage room's centre, its along / depth (feet) and the unit direction it faces (stage → house centroid). */
@@ -20,21 +20,33 @@ export type ShapeRoles = {
 
 const boxOf = (r: ShapeRoom): FtBox => bounds(outlinePoints(r, 0.5, 32));
 
-/** The House's open edges in a row, as sampled points; only its arcs / curves when it has any (the proscenium lip). */
-function openRunFacing(house: ShapeRoom, toward: ShapePt): ShapePt[] | null {
+/**
+ * The House's open lip facing the stage, as sampled points: the whole run of consecutive open edges nearest the
+ * stage centroid (a lip is often split across several arcs and lines, and the outer pieces are far from the
+ * centroid). The stage's own open edges say where the opening ends, so the run is clipped to their x-span; the
+ * House's open side walls beside the wings fall outside it. With no open stage edge the run is returned whole.
+ */
+function openRunFacing(house: ShapeRoom, stage: ShapeRoom, toward: ShapePt): ShapePt[] | null {
   const n = house.pts.length;
-  const open = house.edges.map((e, i) => (e.open ? i : -1)).filter((i) => i >= 0);
-  if (!open.length) return null;
-  const curved = open.filter((i) => house.edges[i].kind !== "line");
-  const pick = curved.length ? curved : open;
-  const d = (i: number) => {
-    const m = sampleEdge(house.pts[i], house.pts[(i + 1) % n], house.edges[i], 0.5, 64);
-    return Math.min(...m.map((p) => Math.hypot(p.x - toward.x, p.y - toward.y)));
-  };
-  const nearest = Math.min(...pick.map(d));
-  const run = pick.filter((i) => d(i) <= nearest + 3).sort((x, y) => x - y);
-  const pts = run.flatMap((i) => [...sampleEdge(house.pts[i], house.pts[(i + 1) % n], house.edges[i], 0.5, 64), house.pts[(i + 1) % n]]);
-  return pts.length > 1 ? pts : null;
+  const open = new Set(house.edges.map((e, i) => (e.open ? i : -1)).filter((i) => i >= 0));
+  if (!open.size) return null;
+  const samples = (i: number) => sampleEdge(house.pts[i], house.pts[(i + 1) % n], house.edges[i], 0.5, 64);
+  const d = (i: number) => Math.min(...samples(i).map((p) => Math.hypot(p.x - toward.x, p.y - toward.y)));
+  // runs of consecutive open edges (cyclic), each started at an edge whose predecessor isn't open
+  const starts = [...open].filter((i) => !open.has((i + n - 1) % n));
+  const runs = (starts.length ? starts : [Math.min(...open)]).map((s) => {
+    const run = [s];
+    for (let i = (s + 1) % n; open.has(i) && i !== s; i = (i + 1) % n) run.push(i);
+    return run;
+  });
+  const near = (r: number[]) => Math.min(...r.map(d));
+  const run = runs.reduce((best, r) => (near(r) < near(best) ? r : best));
+  const pts = run.flatMap((i) => [...samples(i), house.pts[(i + 1) % n]]);
+  const m = stage.pts.length;
+  const span = stage.edges.flatMap((e, i) => (e.open ? sampleEdge(stage.pts[i], stage.pts[(i + 1) % m], e, 0.5, 64).concat(stage.pts[(i + 1) % m]) : [])).map((q) => q.x);
+  const lo = Math.min(...span) - 0.05, hi = Math.max(...span) + 0.05;
+  const clipped = span.length ? pts.filter((p) => p.x >= lo && p.x <= hi) : pts;
+  return clipped.length > 1 ? clipped : null;
 }
 
 /** #370: the role rooms Auto fill lays out on, in feet. null when the shape has no Stage or House (sanitize refuses those). */
@@ -61,7 +73,7 @@ export function shapeRoleBoxes(shape: RoomShape): ShapeRoles | null {
     house: hb,
     booth,
     catwalk: catwalkRoom ? boxOf(catwalkRoom) : null,
-    stageEdge: stage === house ? null : openRunFacing(house, sc),
+    stageEdge: stage === house ? null : openRunFacing(house, stage, sc),
     sameStageHouse: stage === house,
     stageCentre: sc,
     stageAlongFt: along,
