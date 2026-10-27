@@ -1,5 +1,5 @@
 // src/lib/design/room-shape/frame.ts
-import { rowSpans } from "../venue-templates/canvas";
+import { CHURCH_PLAN_W_PX, rowSpans } from "../venue-templates/canvas";
 import { bounds, centroid, edgeLength, outlinePoints, sampleEdge } from "./geometry";
 import type { RoomShape, ShapePt, ShapeRoom } from "./types";
 
@@ -84,12 +84,62 @@ export function shapeRoleBoxes(shape: RoomShape): ShapeRoles | null {
 }
 
 /**
- * #370: a church's Auto-fill frame on a shape (the template branch's churchGeom, in feet). `stage` is the Platform's CORE,
- * never its whole bounding box: the box under the platform's back wall (its top-most run), as wide as that wall, running
- * down while the Platform still covers it — Traditional's chancel (its front step is wider), Contemporary's core above the
- * pointed front. `mix` is the FOH mix box when no Booth room holds it: centred on the House, 62% of its depth down, as
- * wide as churchGeom's (30% of the House, at most 86 plan pixels) and 18 pixels tall, a pixel being 1 ÷ the plan's
- * 538-pixel scale across the rooms. null without a Stage or House room, or when one room is both.
+ * #370: a church core narrower or shallower than this share of the Platform's bounding box is degenerate; the whole box
+ * stands in. The unedited templates' cores are at least 0.42 wide and 0.55 deep across the 36-size sweep (Contemporary's
+ * pointed front is the narrowest); an edit that broke the old flat-back scan gave 0.0 to 0.03.
+ */
+export const CHURCH_CORE_MIN_FRAC = 0.3;
+/** The core scan's row budget: at most this many `rowSpans` calls per scan, however tall the Platform. */
+const CORE_ROWS = 400;
+
+/**
+ * The Platform's core, in feet: the box under its back wall, as wide as that wall, running down while the Platform still
+ * covers it, and always inside the Platform. A flat back wall (the templates') is its topmost run: the box starts there,
+ * exact. A slanted, arced or free-form one, or one with extra points, has no such run, so the wall's width is read at the
+ * widest row in a band just under the top (the rows' outer ends, so an arc dipping into the Platform still counts) and the
+ * box starts at the first row that one run covers, so a lowered or dipping corner moves the box's top down with it.
+ * null when neither is a sensible core (under CHURCH_CORE_MIN_FRAC of the bounding box either way).
+ */
+function churchCore(poly: ShapePt[], sb: FtBox): FtBox | null {
+  const W = sb.maxX - sb.minX, H = sb.maxY - sb.minY;
+  const step = Math.max(0.1, H / CORE_ROWS);
+  const sensible = (b: FtBox) => b.maxX - b.minX >= CHURCH_CORE_MIN_FRAC * W && b.maxY - b.minY >= CHURCH_CORE_MIN_FRAC * H;
+  // The rows from the first that one run covers [left, right] to the last of that unbroken stretch.
+  const run = (left: number, right: number): FtBox => {
+    const covers = (y: number) => rowSpans(poly, y).some(([l, r]) => l <= left + 0.15 && r >= right - 0.15);
+    let first: number | null = null, last = sb.minY;
+    for (let y = sb.minY + step; y <= sb.maxY - step; y += step) {
+      if (covers(y)) { first ??= y; last = y; } else if (first !== null) break;
+    }
+    const top = first === null || first <= sb.minY + 1.5 * step ? sb.minY : first;
+    return { minX: left, maxX: right, minY: top, maxY: first === null ? top : last >= sb.maxY - Math.max(0.2, 2 * step) ? sb.maxY : last };
+  };
+  // Flat back wall: every sample on the topmost row.
+  const back = poly.filter((p) => p.y <= sb.minY + 0.05);
+  const flat = run(Math.min(...back.map((p) => p.x)), Math.max(...back.map((p) => p.x)));
+  if (sensible(flat)) return flat;
+  // Otherwise: the widest row in the band just under the top.
+  const band = Math.min(Math.max(0.12 * H, 0.5), 8);
+  let widest: [number, number] | null = null;
+  for (let y = sb.minY + step; y <= Math.min(sb.minY + band, sb.maxY - step); y += step) {
+    const sp = rowSpans(poly, y);
+    if (!sp.length) continue;
+    const l = Math.min(...sp.map((q) => q[0])), r = Math.max(...sp.map((q) => q[1]));
+    if (!widest || r - l > widest[1] - widest[0]) widest = [l, r];
+  }
+  const core = widest ? run(widest[0], widest[1]) : null;
+  return core && sensible(core) ? core : null;
+}
+
+/**
+ * #370: a church's Auto-fill frame on a shape (the template branch's churchGeom, in feet). `stage` is the Platform's CORE
+ * (churchCore), never its whole bounding box on an unedited shape: Traditional's chancel (its front step is wider),
+ * Contemporary's core above the pointed front. An edit that leaves no sensible core (a back wall slanted or arced so far
+ * that it is under CHURCH_CORE_MIN_FRAC of the box) falls back to the Platform's bounding box, as before the core existed.
+ * `mix` is the FOH mix box when no Booth room holds it: centred on the House, 62% of its depth down, as wide as
+ * churchGeom's (30% of the House, at most 86 plan pixels) and 18 pixels tall (at most a quarter of the House), a pixel being the
+ * plan's width ÷ CHURCH_PLAN_W_PX across the rooms; approximate once the shape is edited (the plan's width is then
+ * whatever the rooms span). null without a Stage or House room, with one room both, or a Platform with no area.
  */
 export function churchRoleBoxes(shape: RoomShape): { stage: FtBox; mix: FtBox | null } | null {
   const R = shapeRoleBoxes(shape);
@@ -97,19 +147,15 @@ export function churchRoleBoxes(shape: RoomShape): { stage: FtBox; mix: FtBox | 
   if (!R || !stageRoom || R.sameStageHouse) return null;
   const poly = outlinePoints(stageRoom, 0.5, 32);
   const sb = bounds(poly);
-  const back = poly.filter((p) => p.y <= sb.minY + 0.05);
-  const left = Math.min(...back.map((p) => p.x)), right = Math.max(...back.map((p) => p.x));
-  const covers = (y: number) => rowSpans(poly, y).some(([l, r]) => l <= left + 0.15 && r >= right - 0.15);
-  let yStage = sb.minY;
-  for (let y = sb.minY + 0.1; y <= sb.maxY - 0.1 && covers(y); y += 0.1) yStage = y;
-  if (yStage >= sb.maxY - 0.2) yStage = sb.maxY;
+  if (![sb.minX, sb.minY, sb.maxX, sb.maxY].every(Number.isFinite) || sb.maxX - sb.minX <= 0 || sb.maxY - sb.minY <= 0) return null;
   let mix: FtBox | null = null;
   if (!shape.rooms.some((r) => (r.roles as string[]).includes("booth"))) {
     const all = bounds(shape.rooms.flatMap((r) => outlinePoints(r, 0.5, 32)));
-    const px = Math.max(all.maxX - all.minX, 1) / 538;
-    const w = Math.min((R.house.maxX - R.house.minX) * 0.3, 86 * px), h = 18 * px;
-    const cx = (R.house.minX + R.house.maxX) / 2, cy = R.house.minY + 0.62 * (R.house.maxY - R.house.minY);
+    const px = Math.max(all.maxX - all.minX, 1) / CHURCH_PLAN_W_PX;
+    const hh = R.house.maxY - R.house.minY;
+    const w = Math.min((R.house.maxX - R.house.minX) * 0.3, 86 * px), h = Math.min(18 * px, 0.25 * hh);
+    const cx = (R.house.minX + R.house.maxX) / 2, cy = R.house.minY + 0.62 * hh;
     mix = { minX: cx - w / 2, maxX: cx + w / 2, minY: cy - h / 2, maxY: cy + h / 2 };
   }
-  return { stage: { minX: left, maxX: right, minY: sb.minY, maxY: yStage }, mix };
+  return { stage: churchCore(poly, sb) ?? sb, mix };
 }

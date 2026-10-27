@@ -5,7 +5,7 @@ import type { Ok } from "./test-inbox-org";
 import { parseFeet, fmtFeet } from "../src/lib/design/room-shape/units";
 import { decideLengthCommit, isTypingTarget } from "../src/lib/design/room-shape/field-edit";
 import {
-  arcInfo, edgeAt, edgeLength, edgeMid, sampleEdge, outlinePoints, signedArea, selfCrosses, bulgeForRadius,
+  bounds, arcInfo, edgeAt, edgeLength, edgeMid, sampleEdge, outlinePoints, signedArea, selfCrosses, bulgeForRadius,
   bulgeForArcLength, bulgeThrough, splitEdge, wallBands, dist,
 } from "../src/lib/design/room-shape/geometry";
 import type { ShapeEdge, ShapePt, ShapeRoom } from "../src/lib/design/room-shape/types";
@@ -14,7 +14,7 @@ import { SegIndex, splitByWalls, walledShare, wallAt, MAX_FALSE_OPEN_FT, type Se
 import { freezeFromTemplate, roomIdFor } from "../src/lib/design/room-shape/freeze";
 import { sanitizeRoomShape, SHAPE_SAMPLE_BUDGET } from "../src/lib/design/room-shape/sanitize";
 import { SHAPE_STALE, SHAPE_NEEDS_STAGE_HOUSE, SHAPE_UNREADABLE, SHAPE_HINT } from "../src/lib/design/room-shape/copy";
-import { applyEdit } from "../src/lib/design/room-shape/edit";
+import { applyEdit, type EditOp } from "../src/lib/design/room-shape/edit";
 import { snapCorner } from "../src/lib/design/room-shape/snap";
 import type { RoomShape } from "../src/lib/design/room-shape/types";
 import { gridIntakeDefaults } from "../src/lib/design/grid-intake";
@@ -24,7 +24,7 @@ import { roomShapeSvg, labelPoint } from "../src/lib/design/room-shape/svg";
 import { shapeSpaces, toSheet, fromSheet, frameScale } from "../src/lib/design/room-shape/spaces";
 import { calibrationScale } from "../src/lib/annotations";
 import { inPoly } from "../src/lib/design/venue-templates/canvas";
-import { shapeRoleBoxes } from "../src/lib/design/room-shape/frame";
+import { shapeRoleBoxes, churchRoleBoxes, CHURCH_CORE_MIN_FRAC } from "../src/lib/design/room-shape/frame";
 import { venueFrame, fillGeometry, generateAutoLayout } from "../src/lib/design/grid-auto-layout";
 import type { AutoCard, AutoLine } from "../src/lib/design/auto-estimate";
 import type { SysKey } from "../src/app/(app)/design/quick/engine";
@@ -662,6 +662,81 @@ export async function roomShapePureChecks(ok: Ok): Promise<void> {
       }
       for (const [fam] of fams) ok(worst.get(fam)!.d <= 2, `#370 sweep: church ${fam} on the shape lands within 2' of the template's at all ${rows.length} sizes (worst ${worst.get(fam)!.d.toFixed(1)}' at ${worst.get(fam)!.at})`);
       ok(short === 0 && cycN === rows.length * 4 && cycOut === 0, `#370 sweep: no church cyc light lands outside every room (${cycOut} of ${cycN}; ${short} rows with unequal counts)`);
+    }
+    {
+      // Church family, EDITED Platform back walls: the core stays a sensible box that tracks the edit (finite, positive, at least
+      // CHURCH_CORE_MIN_FRAC of the Platform's box each way), stage gear does not clump, and nothing lands outside every room.
+      const full = card([["lighting", "lighting:side", 8], ["lighting", "lighting:par", 8], ["lighting", "lighting:cyc", 4], ["audio", "audio:lineArray", 8], ["audio", "audio:subwoofer", 4],
+        ["audio", "audio:mixerDsp", 3], ["rigging", "rigging:electricHoist", 6]]);
+      const spread = ["lighting:side", "audio:lineArray"];
+      type Back = { trad: boolean; id: string; backEdge: number; corner: number; at: ShapePt; mid: ShapePt };
+      type Edit = [string, (b: Back) => EditOp[]];
+      // Traditional's back wall is three edges (the middle one the Apse's mouth): the "whole wall" edits drop the two mouth corners first.
+      const whole = (b: Back): EditOp[] => (b.trad ? [{ op: "deletePoint", room: b.id, i: 7 }, { op: "deletePoint", room: b.id, i: 6 }] : []);
+      const edits: Edit[] = [
+        ["unedited", () => []],
+        ["one back corner up 3'", (b) => [{ op: "move", room: b.id, i: b.corner, to: { x: b.at.x, y: b.at.y - 3 }, glue: false }]],
+        ["one back corner down 3'", (b) => [{ op: "move", room: b.id, i: b.corner, to: { x: b.at.x, y: b.at.y + 3 }, glue: false }]],
+        ["the back wall arced up", (b) => [...whole(b), { op: "setBulge", room: b.id, edge: b.backEdge, bulge: 0.3 }]],
+        ["the back wall arced down", (b) => [...whole(b), { op: "setBulge", room: b.id, edge: b.backEdge, bulge: -0.3 }]],
+        ["a free-form back wall bowed up", (b) => [...whole(b), { op: "toFreeform", room: b.id, edge: b.backEdge }]],
+        ["a point added on the back wall", (b) => [{ op: "addPoint", room: b.id, edge: b.backEdge }]],
+        ["a point added on the back wall and pulled up 2'", (b) => [{ op: "addPoint", room: b.id, edge: b.backEdge }, { op: "move", room: b.id, i: b.backEdge + 1, to: { x: b.mid.x, y: b.at.y - 2 }, glue: false }]],
+        ["the back wall an opening", (b) => (b.trad ? [5, 6, 7] : [3]).map((edge) => ({ op: "setOpen" as const, room: b.id, edge, open: true }))],
+        ["the Platform renamed and retyped", (b) => [{ op: "rename", room: b.id, name: "Altar" }, { op: "retype", room: b.id, type: "other" }]],
+      ];
+      const results: string[] = [];
+      let bad = 0, cases = 0;
+      for (const tpl of ["church-traditional@1", "church-contemporary@2"]) {
+        const st = stateFor("church");
+        const base = freezeFromTemplate(st, tpl, { by: "T", at: 1 });
+        const plat = base.rooms.find((r) => r.roles.includes("stage"))!;
+        const trad = tpl.startsWith("church-traditional");
+        for (const [label, mk] of edits) {
+          cases++;
+          const back: Back = { trad, id: plat.id, backEdge: trad ? 5 : 3, corner: trad ? 8 : 3, at: trad ? plat.pts[8] : plat.pts[3], mid: trad ? { x: (plat.pts[5].x + plat.pts[6].x) / 2, y: plat.pts[5].y } : { x: 0, y: plat.pts[3].y } };
+          let sh: RoomShape = base;
+          let applied = true;
+          const ops = mk(back);
+          for (const op of ops) { const r = applyEdit(sh, op); if (r.ok) sh = r.shape; else { applied = false; results.push(`${tpl} ${label}: edit refused (${r.reason})`); break; } }
+          if (label.includes("free-form") && applied) {
+            const r = applyEdit(sh, { op: "setHandles", room: plat.id, edge: back.backEdge, c1: { x: -10, y: plat.pts[back.corner].y - 8 }, c2: { x: 10, y: plat.pts[back.corner].y - 8 } });
+            if (r.ok) sh = r.shape; else { applied = false; results.push(`${tpl} ${label}: handles refused (${r.reason})`); }
+          }
+          if (!applied) { bad++; continue; }
+          const fr = roomShapeSvg(sh).frame;
+          let vf: ReturnType<typeof venueFrame>, L: ReturnType<typeof generateAutoLayout>;
+          try {
+            vf = venueFrame(st, { template: tpl, shape: { shape: sh, frame: fr } });
+            L = generateAutoLayout(st, full, { electrics: 4, sets: 6, template: tpl, shape: { shape: sh, frame: fr } });
+          } catch (e) { bad++; results.push(`${tpl} ${label}: threw ${(e as Error).message}`); continue; }
+          const stageRoom = sh.rooms.find((r) => r.roles.includes("stage"));
+          const finite = [vf.stage.x, vf.stage.y, vf.stage.w, vf.stage.h].every(Number.isFinite) && L.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+          const probs: string[] = [];
+          if (!finite) probs.push("non-finite");
+          if (stageRoom) {
+            const pb = bounds(outlinePoints(stageRoom, 0.5, 32));
+            const w = vf.stage.w * fr.wFt, h = vf.stage.h * fr.hFt;
+            if (!(w > 0 && h > 0)) probs.push(`stage ${w.toFixed(1)}' x ${h.toFixed(1)}'`);
+            if (w < CHURCH_CORE_MIN_FRAC * (pb.maxX - pb.minX) - 0.2 || h < CHURCH_CORE_MIN_FRAC * (pb.maxY - pb.minY) - 0.2) probs.push(`core ${w.toFixed(1)}' x ${h.toFixed(1)}' under ${CHURCH_CORE_MIN_FRAC} of the platform ${(pb.maxX - pb.minX).toFixed(1)}' x ${(pb.maxY - pb.minY).toFixed(1)}'`);
+            const xs = L.filter((p) => spread.includes(p.auto.rowKey)).map((p) => fromSheet(p, fr).x);
+            if (!xs.length || Math.max(...xs) - Math.min(...xs) < CHURCH_CORE_MIN_FRAC * (pb.maxX - pb.minX) - 0.2) probs.push(`side lights / line arrays span ${xs.length ? (Math.max(...xs) - Math.min(...xs)).toFixed(1) : "-"}'`);
+            const polys = sh.rooms.map((r) => outlinePoints(r, 0.5, 32));
+            const lost = L.filter((p) => !polys.some((poly) => inPoly(poly, fromSheet(p, fr)))).map((p) => p.auto.rowKey);
+            if (lost.length) probs.push(`outside every room: ${[...new Set(lost)].join(", ")}`);
+          }
+          if (probs.length) { bad++; results.push(`${tpl} ${label}: ${probs.join("; ")}`); }
+        }
+      }
+      // The editor refuses to delete the Stage room, but a shape without a Platform (hand-built) must still frame, with the generic frame.
+      {
+        const st = stateFor("church");
+        const base = freezeFromTemplate(st, "church-traditional@1", { by: "T", at: 1 });
+        const sh: RoomShape = { ...base, rooms: base.rooms.filter((r) => !r.roles.includes("stage")) };
+        const vf = venueFrame(st, { template: "church-traditional@1", shape: { shape: sh, frame: roomShapeSvg(sh).frame } });
+        ok(churchRoleBoxes(sh) === null && [vf.stage.x, vf.stage.y, vf.stage.w, vf.stage.h].every(Number.isFinite) && vf.stage.w > 0 && vf.stage.h > 0, "#370 church edits: a shape with no Platform room frames finitely (no core)");
+      }
+      ok(bad === 0, `#370 church edits: ${cases} edited back walls (both kinds; slanted, arced, free-form, extra point, opening, renamed) keep a finite sensible stage core, unclumped gear, none outside every room (${bad} bad: ${results.join(" | ")})`);
     }
     // Arena: the default end stage needs no turn; a stage on a side wall turns exactly as the template branch's turn().
     const arDef = venueFrame(stateFor("arena"), { template: "arena@1", shape: { shape: ar, frame: roomShapeSvg(ar).frame } });
