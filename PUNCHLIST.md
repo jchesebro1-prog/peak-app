@@ -12907,3 +12907,22 @@ Jeff, 2026-10-23: "We need to be able to add an API key to price list import pag
 - The next morning, read the daily-sync line in the drawer.
 - Revise one sent estimate with ETC lines and check the banner's changes.
 - Confirm or change: new finished goods with no ETC category go to "Uncategorized".
+
+## 369. Curved track layout + Preliminary cut sheets — DONE 2026-10-25 on `feat/369-curved-track-layout` (D1304–D1310)
+
+Jeff, 2026-10-25 (brainstorm): a curved track is more than one arc (U wraps, corners, S-curves), and the cut sheets for it must show how it hangs. Spec `docs/superpowers/specs/2026-10-25-curved-track-layout-cut-sheets-design.md`.
+
+**Built:** a curved track is a 1–12 segment path of straight and arc segments (`src/lib/track-path/`: geometry, legs, hanging points, audience frame, joint and length tolerances). The Track configurator edits it as a segment list with presets (U wrap and others) and a live mini plan (`src/app/(app)/estimator/track-segments.tsx`), with segment-named errors for a radius under the series minimum. The engine prices per segment (sticks, sections, a splice and clamp at every joint, a hanging point at every joint); legacy curves read as one left arc at the same price. Cut sheets: a curved type gets a layout view (segments, radii, footprint, lap, hanging ticks, AUDIENCE) from `src/lib/curtain-cut-sheets/layout.ts` — a CS-n.1 sheet in Submittal style, a Track layout beside "How it hangs" in Client style (one page); an oversized layout shrinks to fit and reads NTS. Every cut sheet, both styles, carries a PRELIMINARY — NOT FOR CONSTRUCTION banner (plus the Submittal title block). Decisions D1304 segment path · D1305 per-segment pricing and the length tolerance · D1306 CS-n.1 and the Client layout · D1307 concave side to the audience · D1308 NTS · D1309 the stamp · D1310 rollback.
+
+**Rollback:** no migration. An older build prices a path track as one arc of `runFt` at its tightest radius; roll forward.
+
+**Remaining (Jeff-gated):**
+- Set `curvedSectionFt` / `minRadiusFt` on each track series that curves in Estimating Rules → Track series (corner wraps need a series that bends that tight).
+- Configure a real curved track on production and print its cut sheets (Submittal and Client); check the caption count against the hardware table's clamp row. Reopen a legacy curved line too (one saved before #369) and confirm its price and parts are unchanged.
+
+**Follow-ups:**
+- Ticking Curved starts with an empty segment list; seed a Single arc from the straight run.
+- Curtain-modal curved segments don't follow curtain-width changes.
+- Segment rows are keyed by index.
+- The compact curtain-modal segment row still needs a real browser look.
+- Jeff's prod check should reopen a legacy curved line (see above).

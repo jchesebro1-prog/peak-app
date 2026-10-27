@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { TitleBlock } from "@/components/drawing/title-block";
-import { cutSheetCssVars, type CutSheetModel, type CutSheetStyle } from "@/lib/curtain-cut-sheets/model";
+import { CUT_SHEET_STAMP, cutSheetCssVars, type CutSheetModel, type CutSheetStyle } from "@/lib/curtain-cut-sheets/model";
 import { MOUNT_DETAIL_VIEWBOX } from "@/lib/curtain-cut-sheets/mount-details";
 import { ShapeSvg } from "./shape-svg";
 
@@ -33,6 +33,11 @@ export function CutSheetPages({
   );
 }
 
+/** #369 — every cut sheet, both styles. */
+function Stamp() {
+  return <div className="pk-cs-stamp">{CUT_SHEET_STAMP}</div>;
+}
+
 function Elevation({ m, maxHeight }: { m: CutSheetModel; maxHeight: string }) {
   const { box } = m.elevation;
   return (
@@ -57,13 +62,15 @@ function SizeTable({ m }: { m: CutSheetModel }) {
 
 function SubmittalSheet({ m }: { m: CutSheetModel }) {
   return (
+    <>
     <section className="pk-drawing-sheet" data-sheet={m.sheetNo} style={cutSheetCssVars() as CSSProperties}>
       <div className="pk-drawing-frame">
-        <div className="pk-drawing-area">
+        <div className="pk-drawing-area pk-cs-area">
+          <Stamp />
           <div className="pk-cs-grid">
             <div className="pk-cs-cell">
               <h2 className="pk-dw-h">{`Elevation — ${m.title}`}</h2>
-              <Elevation m={m} maxHeight="3.9in" />
+              <Elevation m={m} maxHeight="3.5in" />
               <div className="pk-dw-mono">{`Elevation ${m.elevation.scale}`}</div>
             </div>
             <div className="pk-cs-cell">
@@ -111,6 +118,26 @@ function SubmittalSheet({ m }: { m: CutSheetModel }) {
         {m.titleBlock && <TitleBlock data={m.titleBlock} />}
       </div>
     </section>
+    {m.layout && <LayoutSheet m={m} />}
+    </>
+  );
+}
+
+/** #369 — CS-n.1: a curved track's plan on its own title-blocked sheet. */
+function LayoutSheet({ m }: { m: CutSheetModel }) {
+  const l = m.layout!;
+  return (
+    <section className="pk-drawing-sheet" data-sheet={l.sheetNo} style={cutSheetCssVars() as CSSProperties}>
+      <div className="pk-drawing-frame">
+        <div className="pk-drawing-area pk-cs-area">
+          <Stamp />
+          <h2 className="pk-dw-h">{`Layout — ${m.title}`}</h2>
+          <ShapeSvg idPrefix={`${l.sheetNo}-layout`} shapes={l.shapes} viewBox={`0 0 ${l.box.wIn} ${l.box.hIn}`} hatch={0.05} style={{ width: "100%", height: "auto", flex: 1, minHeight: 0 }} title={`Layout — ${m.title}`} />
+          <div className="pk-dw-mono">{`Plan ${l.scale}`}</div>
+        </div>
+        {l.titleBlock && <TitleBlock data={l.titleBlock} />}
+      </div>
+    </section>
   );
 }
 
@@ -134,14 +161,21 @@ function ClientSheet({ m, photos, letterheadSrc }: { m: CutSheetModel; photos: s
           <span>{`Curtain cut sheet · ${m.header.estimateNo}`}</span>
         </header>
       )}
+      <Stamp />
       <h1 className="pk-cs-title">{m.title}</h1>
-      <Elevation m={m} maxHeight="3.6in" />
+      <Elevation m={m} maxHeight="3.2in" />
       <p className="pk-cs-desc">{m.description}</p>
       <div className="pk-cs-row">
         <div>
           <h2 className="pk-dw-h">How it hangs</h2>
           <ShapeSvg idPrefix={`${m.sheetNo}-client-detail`} shapes={m.mount.detail.shapes} labels={m.mount.detail.labels} viewBox={detailBox} hatch={6} style={{ width: "2.4in", height: "3in" }} title={m.mount.detail.title} />
         </div>
+        {m.layout && (
+          <div>
+            <h2 className="pk-dw-h">Track layout</h2>
+            <ShapeSvg idPrefix={`${m.sheetNo}-client-layout`} shapes={m.layout.shapes} viewBox={`0 0 ${m.layout.box.wIn} ${m.layout.box.hIn}`} hatch={0.05} style={{ width: "2.6in", height: "2.6in" }} title={`Track layout — ${m.title}`} />
+          </div>
+        )}
         <div style={{ flex: 1 }}>
           {/* "Size schedule" whenever there are several sizes — the elevation's "Typical — N sizes, see schedule" points here. */}
           <h2 className="pk-dw-h">{m.sizes.length > 1 ? "Size schedule" : "Sizes"}</h2>

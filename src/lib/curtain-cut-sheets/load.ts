@@ -20,7 +20,7 @@ import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
 import type { PartDocument } from "@/lib/part-docs/types";
 import { collectCurtainTypes, type CollectInput, type CollectResult } from "./collect";
 import { curtainFabricLookups } from "./estimator-curtains";
-import { CUT_SHEETS_NO_QUOTE, CUT_SHEETS_WRONG_TYPE, cutSheetModel, isCutSheetQuoteType, type CutSheetModel, type CutSheetStyle } from "./model";
+import { CUT_SHEETS_NO_QUOTE, CUT_SHEETS_WRONG_TYPE, cutSheetModel, isCutSheetQuoteType, submittalSheetIndexes, type CutSheetModel, type CutSheetStyle } from "./model";
 
 export const CUT_SHEET_PHOTOS_MAX = 6;
 /** The photo tile prints 1.1 in wide: a ~400 px WebP is plenty, and keeps an inlined (data URI) page small. */
@@ -103,18 +103,19 @@ export async function loadCutSheets(quoteId: string, opts: { images: "url" | "da
 
   const doc = quoteDocumentDataFor(quote, customer, settings);
   const now = Date.now();
-  const total = result.types.length;
+  // #369: a curved type's layout sheet takes the next number, so the set's total counts it
+  const { starts, total } = submittalSheetIndexes(result.types);
   const ctx = (style: CutSheetStyle, index: number) => ({
     style,
     quote: { id: quote.id, number: doc.quoteId, name: quote.name || "", customer: doc.custName, venue: doc.venueLabel, revisions: quote.revisions },
     company: { name: settings.companyName, logoDark: settings.logoDark ?? null, offices: settings.offices },
     preparedBy: doc.preparedByName,
     index,
-    total,
+    total, // the Submittal set's total; the Client style has no title block, so it never prints it
     now,
   });
   const models: Record<CutSheetStyle, CutSheetModel[]> = {
-    submittal: result.types.map((t, i) => cutSheetModel(t, ctx("submittal", i + 1))),
+    submittal: result.types.map((t, i) => cutSheetModel(t, ctx("submittal", starts[i]))),
     client: result.types.map((t, i) => cutSheetModel(t, ctx("client", i + 1))),
   };
   const photos = opts.images === "none" ? new Map<string, string[]>() : await cutSheetPhotos(result, opts.images, opts.sheet);

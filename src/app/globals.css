@@ -1323,6 +1323,12 @@ button.pk-searchbar-glass {
 @media screen { .pk-cs-set[data-style="submittal"] { zoom: 0.85; } }
 .pk-cs-grid { display: grid; grid-template-columns: 60fr 40fr; grid-template-rows: 55% 45%; gap: 0.12in; height: 100%; }
 .pk-cs-cell { min-width: 0; min-height: 0; overflow: hidden; }
+/* #369 — the Submittal drawing area stacks the stamp over the grid. */
+.pk-cs-area { display: flex; flex-direction: column; }
+.pk-cs-area > .pk-cs-grid { flex: 1; height: auto; min-height: 0; }
+.pk-cs-stamp { flex: none; border: 1.5pt solid #16181d; background: #fff; color: #16181d; text-align: center; font-weight: 800; letter-spacing: 0.08em; font-size: 11pt; padding: 3pt 6pt; margin-bottom: 8pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.pk-drawing-sheet .pk-cs-stamp { font-size: calc(11pt * var(--dw-k)); margin-bottom: 0.08in; }
+.pk-tb-stamp { font-weight: 800; letter-spacing: 0.04em; margin-bottom: 2pt; }
 .pk-cs-client { width: 8.5in; box-sizing: border-box; padding: 0.6in; background: #fff; color: #16181d; font-family: var(--font-ui), system-ui, sans-serif; font-size: 10pt; line-height: 1.45; box-shadow: 0 2px 14px rgba(0, 0, 0, 0.1); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .pk-cs-head { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--accent); padding-bottom: 6pt; margin-bottom: 10pt; font-size: 9pt; color: #5b616e; }
 .pk-cs-title { font-size: 16pt; font-weight: 700; margin: 0 0 8pt; }
