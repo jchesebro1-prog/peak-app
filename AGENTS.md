@@ -1672,7 +1672,19 @@ See `.env.example`.
     Jeff-gated: a MyETC API key, the first Pull on production (check the "new" count
     against duplicates) and Import, the next morning's sync line. Punch item #368.
 
-69. 🚧 **Grid room shape editor — slice 1** (#370, D1304–D1309) — the Grid intake gains a Shape the room step: the stretched template freezes into a `RoomShape` (`src/lib/design/room-shape/`: rooms and zones in feet, line / arc / Bezier edges, walls vs. openings read from the drawing's double lines, roles on rooms) edited in `src/components/room-shape/room-shape-editor.tsx` (corner drag + snap + glue, Add point, Curve, Free-form, Wall ↔ Opening, typed lengths / radius / arc length, undo / redo); a shaped intake locks its dimensions until Reset to template. `saveGridIntakeAction` sanitizes it (`sanitizeRoomShape`) before it writes any customer or venue (`newVenueKindFor`, shared with the quote intake), `generateBaseSheet` draws the base sheet, Spaces (`fromRoom`) and calibration from it and stamps `baseSheetShape` / `baseSheetFrame`, and Auto fill lays out on the stamp (`venueFrame` shape branch; a proscenium or Gym Stage hangs side lights and line arrays at the opening, not the wings). No migration. Remaining: slices 2 (rooms + zones, roles) and 3 (reopen after Create, DXF); Jeff reviews `docs/room-shape/renders/`. Punch item #370.
+69. ✅ **Curved track layout + Preliminary cut sheets** (#369, D1304–D1310) — a curved
+    track is a 1–12 segment path of straight and arc segments (`src/lib/track-path/`;
+    `runFt` = path length, `radiusFt` = tightest arc, legacy curves read as one left arc
+    at the same price) priced per segment with a hanging point at every joint. The Track
+    configurator edits it as a segment list with presets and a live plan
+    (`estimator/track-segments.tsx`). A curved type gets a layout view
+    (`src/lib/curtain-cut-sheets/layout.ts`; concave side to the AUDIENCE) — CS-n.1 in
+    Submittal, beside "How it hangs" in Client; oversize shrinks to fit, reads NTS. Every
+    cut sheet carries the always-on PRELIMINARY — NOT FOR CONSTRUCTION stamp. No migration;
+    roll forward. Remaining is Jeff-gated: `curvedSectionFt` / `minRadiusFt` per series,
+    then a real curved track printed on production. Punch item #369.
+
+70. 🚧 **Grid room shape editor — slice 1** (#370, D1311–D1316) — the Grid intake gains a Shape the room step: the stretched template freezes into a `RoomShape` (`src/lib/design/room-shape/`: rooms and zones in feet, line / arc / Bezier edges, walls vs. openings read from the drawing's double lines, roles on rooms) edited in `src/components/room-shape/room-shape-editor.tsx` (corner drag + snap + glue, Add point, Curve, Free-form, Wall ↔ Opening, typed lengths / radius / arc length, undo / redo); a shaped intake locks its dimensions until Reset to template. `saveGridIntakeAction` sanitizes it (`sanitizeRoomShape`) before it writes any customer or venue (`newVenueKindFor`, shared with the quote intake), `generateBaseSheet` draws the base sheet, Spaces (`fromRoom`) and calibration from it and stamps `baseSheetShape` / `baseSheetFrame`, and Auto fill lays out on the stamp (`venueFrame` shape branch; a proscenium or Gym Stage hangs side lights and line arrays at the opening, not the wings). No migration. Remaining: slices 2 (rooms + zones, roles) and 3 (reopen after Create, DXF); Jeff reviews `docs/room-shape/renders/`. Punch item #370.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

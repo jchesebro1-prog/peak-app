@@ -100,6 +100,7 @@ export function TitleBlock({ data }: { data: TitleBlockData }) {
       </div>
       <div className="pk-tb-cell">
         <div className="pk-tb-label">Sheet title</div>
+        {data.stamp && <div className="pk-tb-stamp">{data.stamp}</div>}
         <div className="pk-tb-sheettitle">{sheet.title}</div>
         <div className="pk-tb-sheetno">{sheet.number}</div>
         <div className="pk-tb-mono">{`${sheet.index} of ${sheet.total} · ${data.status}`}</div>

@@ -10,6 +10,7 @@ import {
   type TrackSeries,
   type TrackStick,
 } from "@/lib/track-series";
+import { PATH_LEN_EPS_FT, ceilAlong, legHangingPoints, legPieces, pathErrors, pathLengthFt, resolvePath, trackLegs, type TrackSegment } from "@/lib/track-path";
 
 /**
  * Track quantity engine (#274 §2). Pure — no prices, no catalog access: a
@@ -24,7 +25,12 @@ import {
  *             spliced to each other), else 1; leg = L / legs
  *   straight  per leg n = ceil(leg / longest stick); each piece the shortest
  *             stick ≥ leg / n; sticks = legs × n; splices = legs × (n − 1)
- *   curved    per leg n = ceil(leg / curvedSectionFt); sections = legs × n,
+ *   curved    (#369) a path: each leg is cut into its segments — straight
+ *             pieces buy sticks (the shortest that covers), arcs buy
+ *             ceil(arc / curvedSectionFt) sections; splices = pieces − 1 per
+ *             leg; hanging points per leg = legHangingPoints (every joint
+ *             supported). A pre-#369 curve is one arc and prices as before:
+ *             per leg n = ceil(leg / curvedSectionFt); sections = legs × n,
  *             splices = legs × (n − 1); refused without curvedSectionFt, or
  *             radius < minRadiusFt
  *   carriers  ceil(runFt × 12 / carrierSpacingIn); masters 2 (bi-parting) or
@@ -59,6 +65,13 @@ export type TrackConfig = {
   curved: boolean;
   /** Curved only, ft. */
   radiusFt?: number;
+  /**
+   * #369 — curved only: the track's shape, 1–12 segments in order. When set it
+   * IS the track: its length is the run (runFt is written to match) and it is
+   * priced per segment. Absent on a curved track = a pre-#369 single arc of
+   * runFt at radiusFt (resolvePath).
+   */
+  path?: TrackSegment[];
   mounting: TrackMounting;
   /** Pulley-to-floor drop, cord-operated only (default 20), ft. */
   trimFt?: number;
@@ -105,22 +118,62 @@ function spacing(override: number | undefined, fallback: number): number {
   return typeof override === "number" && Number.isFinite(override) && override > 0 ? override : fallback;
 }
 
+/** #369 — a curved track's pieces, splices and hanging points, leg by leg along its path. */
+function curvedPieces(path: TrackSegment[], runFt: number, lapOverlapFt: number, series: TrackSeries, hangerSpacingFt: number): { pieces: TrackRow[]; splices: number; mounts: number } {
+  const sticks = seriesSticks(series);
+  const bySku = new Map<string, TrackRow>();
+  let curved = 0;
+  let splices = 0;
+  let mounts = 0;
+  for (const leg of trackLegs(runFt, lapOverlapFt)) {
+    let n = 0;
+    for (const p of legPieces(path, leg)) {
+      if (p.kind === "arc") {
+        const k = ceilAlong(p.lengthFt, series.curvedSectionFt!);
+        curved += k;
+        n += k;
+        continue;
+      }
+      const longest = sticks[sticks.length - 1];
+      const k = ceilAlong(p.lengthFt, longest.lengthFt);
+      const stick = sticks.find((s) => s.lengthFt >= (p.lengthFt - PATH_LEN_EPS_FT) / k) ?? longest;
+      const row = bySku.get(stick.sku);
+      if (row) row.qty += k;
+      else bySku.set(stick.sku, { role: "track", qty: k, sku: stick.sku, lengthFt: stick.lengthFt });
+      n += k;
+    }
+    splices += Math.max(0, n - 1);
+    mounts += legHangingPoints(path, leg, hangerSpacingFt).length;
+  }
+  const pieces = [...bySku.values()];
+  if (curved > 0) pieces.push({ role: "curved", qty: curved });
+  return { pieces, splices, mounts };
+}
+
 export function trackQuantities(config: TrackConfig, series: TrackSeries): TrackResult {
   const errors: string[] = [];
-  const run = config.runFt;
+  // #369: a curved track with a path is its segments, and its run is their length.
+  const segmented = config.curved && Array.isArray(config.path);
+  const run = segmented ? pathLengthFt(config.path!) : config.runFt;
   const qty = config.qty;
 
   if (!OPERATIONS.has(config.operation)) errors.push("Pick how the track operates.");
   if (config.mounting !== "batten" && config.mounting !== "ceiling") errors.push("Pick a mounting.");
-  if (!(typeof run === "number" && Number.isFinite(run) && run > 0)) errors.push("Enter the run length.");
-  else if (run > MAX_RUN_FT) errors.push(`A run is at most ${MAX_RUN_FT}'.`);
+  if (!segmented) {
+    if (!(typeof run === "number" && Number.isFinite(run) && run > 0)) errors.push("Enter the run length.");
+    else if (run > MAX_RUN_FT) errors.push(`A run is at most ${MAX_RUN_FT}'.`);
+  }
   if (!(Number.isInteger(qty) && qty >= 1 && qty <= MAX_TRACK_QTY)) errors.push(`Quantity is a whole number from 1 to ${MAX_TRACK_QTY}.`);
 
   const cord = isCordOperated(config.operation);
   const trim = config.trimFt ?? DEFAULT_TRIM_FT;
   if (cord && !(Number.isFinite(trim) && trim >= 0 && trim <= MAX_TRIM_FT)) errors.push(`Trim is 0 to ${MAX_TRIM_FT}'.`);
 
-  if (config.curved) {
+  if (segmented) {
+    errors.push(
+      ...pathErrors(config.path!, { name: series.name, curvedSectionFt: series.curvedSectionFt, minRadiusFt: series.minRadiusFt, hasSticks: seriesSticks(series).length > 0 }, MAX_RUN_FT)
+    );
+  } else if (config.curved) {
     if (!(series.curvedSectionFt && series.curvedSectionFt > 0)) errors.push(`${series.name || "This series"} has no curved track.`);
     const radius = config.radiusFt;
     if (!(typeof radius === "number" && Number.isFinite(radius) && radius > 0)) errors.push("Enter the curve radius.");
@@ -132,34 +185,38 @@ export function trackQuantities(config: TrackConfig, series: TrackSeries): Track
 
   if (errors.length) return { rows: [], errors };
 
-  const L = trackLengthFt(config, series);
   const bipart = partsAtCenter(config);
+  const L = run + (bipart ? series.overlapFt || 0 : 0);
   // #291: a lapped bi-part is two legs that meet at center; neither a stick nor a splice crosses it.
-  const legs = bipart && series.overlapFt > 0 ? 2 : 1;
+  const lap = bipart && series.overlapFt > 0;
+  const legs = lap ? 2 : 1;
   const leg = L / legs;
   const mapped = (role: TrackRole) => !!series.parts[role]?.sku;
-  let piece: TrackRow;
-  let nLeg: number;
-  if (config.curved) {
-    nLeg = ceilSafe(leg / series.curvedSectionFt!);
-    piece = { role: "curved", qty: legs * nLeg };
-  } else {
-    const sticks = seriesSticks(series);
-    nLeg = ceilSafe(leg / sticks[sticks.length - 1].lengthFt);
-    const stick: TrackStick = sticks.find((s) => s.lengthFt >= leg / nLeg - 1e-9) ?? sticks[sticks.length - 1];
-    piece = { role: "track", qty: legs * nLeg, sku: stick.sku, lengthFt: stick.lengthFt };
-  }
-  const splices = legs * Math.max(0, nLeg - 1);
   const carrierSpacing = spacing(config.carrierSpacingIn, series.carrierSpacingIn);
   const hangerSpacing = spacing(config.hangerSpacingFt, hangerSpacingFor(series, config.mounting));
-  const allCarriers = ceilSafe((run * 12) / carrierSpacing);
+  let pieces: TrackRow[];
+  let splices: number;
+  let mounts: number;
+  const path = resolvePath(config);
+  if (path && path.length) {
+    ({ pieces, splices, mounts } = curvedPieces(path, run, lap ? series.overlapFt : 0, series, hangerSpacing));
+  } else {
+    const sticks = seriesSticks(series);
+    const nLeg = ceilSafe(leg / sticks[sticks.length - 1].lengthFt);
+    const stick: TrackStick = sticks.find((s) => s.lengthFt >= leg / nLeg - 1e-9) ?? sticks[sticks.length - 1];
+    pieces = [{ role: "track", qty: legs * nLeg, sku: stick.sku, lengthFt: stick.lengthFt }];
+    splices = legs * Math.max(0, nLeg - 1);
+    mounts = legs * (ceilSafe(leg / hangerSpacing) + 1);
+  }
+  // #369: a path's length carries the 4-decimal sweep slack (PATH_LEN_EPS_FT); a straight track keeps the strict rule
+  const onPath = !!(path && path.length);
+  const allCarriers = onPath ? ceilAlong(run, carrierSpacing / 12) : ceilSafe((run * 12) / carrierSpacing);
   const masters = bipart ? 2 : 1;
   const carriers = Math.max(0, allCarriers - masters);
-  const mounts = legs * (ceilSafe(leg / hangerSpacing) + 1);
   const batten = config.mounting === "batten";
 
   const per: TrackRow[] = [
-    piece,
+    ...pieces,
     { role: !batten && mapped("ceilingSplice") ? "ceilingSplice" : "splice", qty: splices },
     { role: "carrier", qty: carriers },
     { role: "masterCarrier", qty: masters },
@@ -172,13 +229,13 @@ export function trackQuantities(config: TrackConfig, series: TrackSeries): Track
   per.push({ role: mountingRole(config.mounting), qty: mounts });
   if (batten && mapped("pipeClamp")) per.push({ role: "pipeClamp", qty: mounts });
   const every = series.centerSupportEveryFt;
-  if (batten && mapped("centerPipeSupport") && typeof every === "number" && every > 0) per.push({ role: "centerPipeSupport", qty: Math.max(0, ceilSafe(L / every) - 1) });
+  if (batten && mapped("centerPipeSupport") && typeof every === "number" && every > 0) per.push({ role: "centerPipeSupport", qty: Math.max(0, (onPath ? ceilAlong(L, every) : ceilSafe(L / every)) - 1) });
   if (cord) {
     per.push(
       { role: "livePulley", qty: 1 },
       { role: config.operation === "oneway" && mapped("deadPulleyOneWay") ? "deadPulleyOneWay" : "deadPulley", qty: 1 },
       { role: "floorBlock", qty: 1 },
-      { role: "operatingLine", qty: ceilSafe(2 * L + 2 * trim + (series.lineAllowanceFt || 0)) }
+      { role: "operatingLine", qty: onPath ? ceilAlong(2 * L + 2 * trim + (series.lineAllowanceFt || 0), 1) : ceilSafe(2 * L + 2 * trim + (series.lineAllowanceFt || 0)) }
     );
   }
   return { rows: per.filter((r) => r.qty > 0).map((r) => ({ ...r, qty: r.qty * qty })), errors: [] };

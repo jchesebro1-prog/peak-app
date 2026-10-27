@@ -13856,26 +13856,54 @@ Jeff: a sent estimate keeps its pricing unless a revision is sent. Lines already
 
 Jeff: revising a sent estimate re-prices it. When a sent / won / lost Estimator system quote moves to Draft (`setStatus`'s revise, every path), plain catalog lines whose live cost differs are re-priced inside the same locked write: cost = catalog cost, price = old price × new cost ÷ old cost (cents) — the line keeps its own cost-to-sell ratio, so it is right under margin and under #367's markup. Not re-priced: cost 0 (stored or catalog), bonus, vendor, custom / allowance / placeholder, curtain and its track, assembly / rack / track / fixture lines, labor, `por` lines and unresolved SKUs; project-discounted lines compare at normal cost and are re-discounted. A typed system price is kept. Then the save's own derivation (`deriveEstimatorSections`: project discounts + bonus lines, extracted from `saveQuoteAction` unchanged) and `reconcileEstimatorValue` run. `Quote.repricedOnRevise = { at, by, count, delta, lines (≤ 500), typedSystems }` is stored only when something changed (`delta` = stored value after − before); revisions are never touched. Build shows a dismissible banner while the quote is a draft. The status menu, stage bar and bid addendum save unsaved edits before revising. No undo (lines stay editable). The Rewards credit re-clamps on the next save.
 
-## D1304. The room shape is an intake document frozen from the template (#370, 2026-10-25)
+## D1304. Curved tracks are a segment path (#369, 2026-10-25)
+
+Jeff, brainstorm 2026-10-25. A curved track is a list of 1–12 segments, each a straight run or an arc (radius, sweep angle, direction), instead of one arc. `runFt` is the path length: rounded to 4 decimal places when stored (angle drift would otherwise leak into straight pricing on untick) and kept as the straight fallback. `radiusFt` holds the tightest arc so older builds still read a radius. A legacy curve (one `radiusFt`, no path) reads as one left arc and keeps its price. Pure geometry lives in `src/lib/track-path/`.
+
+## D1305. Pricing is per segment, with a hanging point at every joint (#369, 2026-10-25)
+
+Jeff, 2026-10-25. Sections, sticks, carriers, center supports, operating line and hanging points are counted per segment; every joint between segments is a hanging point and gets a splice and a pipe clamp where the series maps them. Curved tracks, legacy ones included, forgive up to 0.001 ft of length overshoot (`PATH_LEN_EPS_FT`, `ceilAlong` in `src/lib/track-path`) in every path-derived count, because 4-decimal angles drift a few hundred-thousandths of a foot. Consequence: reopening a legacy curve whose sweep exceeds 360° (run over 2πR) shows the angle error and blocks Update; its stored price is unchanged, and its cut sheet draws no layout. Consequence: a legacy curve whose run is within 0.012" above an exact multiple counts one fewer piece. Straight tracks are unchanged. Accepted degenerate deviation: a legacy curved bi-part whose run is shorter than the series overlap (under about 2') counts fewer hanging points than before, because the lap is clamped to the path length.
+
+## D1306. The layout sheet CS-n.1 (#369, 2026-10-25)
+
+A curved curtain's track gets a layout view. Submittal style: a title-blocked sheet numbered after its type's sheet (CS-2 → CS-2.1), and the set's sheet count includes it. Client style: a Track layout drawing placed beside "How it hangs", still one page (this refines the spec's "under"). Curtains on different paths, openings or hanger spacings are separate types (separate cut sheets). The hanging-point caption counts per track and says "per track" when a type has several tracks, so n × tracks equals the hardware table's clamp row.
+
+## D1307. The concave side faces the audience (#369, 2026-10-25)
+
+Jeff, 2026-10-25. The layout draws the path with its concave side toward the audience and an AUDIENCE arrow and label. There is no toggle.
+
+## D1308. An oversized track layout shrinks to fit and reads NTS (#369, 2026-10-25)
+
+Jeff, during the build. The plan had said a layout too big for its box falls back to 1/16" scale, which drew off the 2.6" Client box. Instead the layout shrinks to fit the box and its scale note reads NTS (not to scale).
+
+## D1309. "PRELIMINARY — NOT FOR CONSTRUCTION" on every cut sheet (#369, 2026-10-25)
+
+Jeff, 2026-10-25. Every cut sheet, both styles, prints a "PRELIMINARY — NOT FOR CONSTRUCTION" banner, and the Submittal title block carries the same stamp. Always on, no setting. The Grid drawing set is unchanged. Sizing, as built: the title-block stamp sits in the Sheet title cell (the spec said the Revisions cell), and the stamp's height is given back by shrinking the elevation boxes for ALL cut sheets, straight curtains included — Submittal 3.9 to 3.5 in, Client 3.6 to 3.2 in. Measured in headless Chrome: Submittal cells stopped clipping, and a Client sheet with the letterhead is 9.71 in of 9.8 in, one page.
+
+## D1310. Rollback past #369 (#369, 2026-10-25)
+
+No migration; the path is stored on the track configuration. An older build ignores the path and prices a path track as one arc of `runFt` at its tightest radius. Worse, if that build re-saves the line, its `cleanTrackConfig` drops `path` — the track becomes a one-arc curve permanently, not just ignored. That is acceptable only because we roll forward rather than back.
+
+## D1311. The room shape is an intake document frozen from the template (#370, 2026-10-25)
 
 Jeff (brainstorm Oct 25): hand edits freeze the layout. `GridProject.intake.roomShape` holds rooms and zones in feet (origin = the template's centreline at its origin line, y down), each edge a line, a true arc (bulge) or a Bezier. The first edit in the intake's Shape the room step freezes the stretched template (`freezeFromTemplate`); the dimension fields then lock; Reset to template deletes the shape. The base sheet stamps the shape it was drawn from (`baseSheetShape`) and its frame (`baseSheetFrame`); Auto fill reads the stamps, never the live shape. `saveGridIntakeAction` sanitizes the shape (`sanitizeRoomShape`) **before** it creates any customer, venue or contact, so a refused shape leaves no records behind. It works out the venue type up front with `newVenueKindFor` (a pure helper pulled out of `resolveIntakeCustomer` in `src/lib/intake-customer.ts`, shared with the quote intake, #244) and refuses with `SHAPE_STALE` if the type has changed by the time the template is resolved. A base sheet drawn from the template (no shape) drops any shape stamps. Spec `docs/superpowers/specs/2026-10-25-grid-room-shape-editor-design.md`; slice 1 plan `docs/superpowers/plans/2026-10-25-grid-room-shape-slice1.md`.
 
-## D1305. Walls and openings come from the drawing's own lines (#370, 2026-10-25)
+## D1312. Walls and openings come from the drawing's own lines (#370, 2026-10-25)
 
 Plan-time finding (spec Amendment A): drawing a wall on every room edge closes the proscenium opening and the stage lip. An edge is walled where the template shows a double line (a line on the room's face and a parallel one 4"–9" out), sampled every 3", runs under 18" smoothed away, and split at every change; the rest carry `open: true`. An open edge shorter than 2'-6" (`MAX_FALSE_OPEN_FT = 2.5`, `walls.ts`) between two walled edges is a false opening and is walled (a door swing or a gap in the linework, not a real opening). The arena drawing is single lines, so `FREEZE_HINTS` gives it the single-line rule and makes its floor, court and stage zones. The editor's Wall → Opening toggles it.
 
-## D1306. Zones and roles (#370, 2026-10-25)
+## D1313. Zones and roles (#370, 2026-10-25)
 
 A frozen room with under 25 % of its perimeter walled is a zone (the Catwalk and Center Aisle lie inside the House). `kind` is per room (the type gives a new room's default). Roles sit on the room (`roles: RoomRole[]`), one room may hold several (the Blackbox is stage and house), each role on at most one room, and a shape without a Stage and a House is refused. A Conference adds a Platform zone holding the stage.
 
-## D1307. The shape sheet (#370, 2026-10-25)
+## D1314. The shape sheet (#370, 2026-10-25)
 
 `roomShapeSvg` draws rooms, 6" walls on walled edges, a fine dashed line on openings, dashed zones, names and a dimension on each walled edge of 4' or more — no line-set or electric symbols (those were part of the template's detail linework). Calibration = the frame's width in feet. One Space per room, tagged `fromRoom`.
 
-## D1308. Auto fill on a shape (#370, 2026-10-25)
+## D1315. Auto fill on a shape (#370, 2026-10-25)
 
 `venueFrame` gains a shape branch: house / booth / catwalk = the boxes of the rooms holding those roles (no Booth: an 8' × 6' box 6' inside the house's far end; a church's mix box differs, below). **Proscenium family (Auditorium / PAC and Gym Stage; Jeff, Oct 27):** the stage rect that side lights and line arrays hang beside is the proscenium **opening**, as the template layout has it, not the whole Stage room with its wings. The opening is the House's open lip run (consecutive open edges, grouped into runs, the run nearest the stage), clipped to the Stage room's own open edge (`stageEdge`); with no opening (the rooms were moved apart) it falls back to the Stage room box clamped to the House's x-range. `shapeRoleBoxes(...).stage` stays the full Stage room. Blackbox, church and arena keep their family rules: **church (Jeff, Oct 27: fills like today)** side lights hang inside the stage frame, and the stage frame is the Platform's **core**, as the template branch has it (the box under the platform's back wall, as wide as that wall, down while the Platform still covers it) rather than its whole bounding box, with the FOH mix standing 62% down the Nave when there is no Booth room (its height capped at a quarter of the House) (`churchRoleBoxes`; the mix box's size is approximate once the shape is edited, since a pixel of the template plan is read off the rooms' bounding width; an edited back wall (slanted, arced, free-form, extra points, partly an opening) reads the wall's width at the widest row just under the top and keeps the core inside the Platform, and a core under 30% of the Platform's bounding box either way, or none, falls back to that whole box); a Blackbox plays in the whole room, and a Conference's audience starts below the Platform; the arena stage is laid out at the top end about its centre and turned to face the house, with the turn ignored below 1e-4 rad, and its lot box inset from the floor.
 
-## D1309. Corner glue is 0.5" in slice 1 (#370, 2026-10-25)
+## D1316. Corner glue is 0.5" in slice 1 (#370, 2026-10-25)
 
 Dragging a corner moves other rooms' corners within 0.5" of it. Frozen rooms sit a wall's thickness apart, so a room behind a wall does not follow it yet; slice 2 (drop + snap flush) revisits this.

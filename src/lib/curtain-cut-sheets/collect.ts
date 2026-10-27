@@ -10,9 +10,10 @@ import { curtainCost } from "@/lib/design/curtain-pricing";
 import { CHAIN_JACK, CHAIN_NONE } from "@/lib/design/goods";
 import { computeSetWeight, DEFAULT_WEIGHTS, fabricFromPart } from "@/lib/design/steel";
 import { mountRowQty, type CurtainMountHardware } from "@/lib/curtain-mounts";
-import type { TrackSeries } from "@/lib/track-series";
+import { TRACK_ROLE_NAMES, roleSku, type TrackSeries } from "@/lib/track-series";
 import type { SpecItem } from "@/app/(app)/estimator/types";
 import { topMarks } from "./geometry";
+import { hangingPointsAlong, layoutOfCurtains } from "./layout";
 import { curtainTypeKey, readCurtains, type CurtainFabricRow, type CurtainLineRef, type CutSheetCurtain, type GridProjectLite } from "./estimator-curtains";
 import { DEFAULT_MARK_SPACING_IN, MOUNT_KEY_LABELS, isMountTypeId, type CurtainMountTypeId } from "./vocab";
 
@@ -117,6 +118,39 @@ function ruleHardware(curtains: CutSheetCurtain[], spacingIn: number, input: Col
   return [...out.values()];
 }
 
+const MOUNT_ROLES = ["battenClamp", "ceilingHanger"] as const;
+
+/**
+ * The hardware table reads the track line's STORED components; the layout recomputes hanging points from the LIVE
+ * series' spacing and overlap. When they disagree (the series changed after the quote) say so rather than print two numbers.
+ * Mount rows are found by the series' role SKU or by the role name the line stored (TRACK_ROLE_NAMES) — either one, so a
+ * remapped part or a renamed SKU still matches; no stored mount row means nothing to compare.
+ */
+function layoutDriftWarning(curtains: CutSheetCurtain[], trackSeries: readonly TrackSeries[]): string | null {
+  const layout = layoutOfCurtains(curtains);
+  if (!layout) return null;
+  const series = trackSeries.find((s) => s.id === curtains[0].mount.track?.seriesId);
+  const names = new Set<string>(MOUNT_ROLES.map((r) => TRACK_ROLE_NAMES[r]));
+  const skus = new Set<string>(series ? MOUNT_ROLES.map((r) => roleSku(series, r)).filter(Boolean) : []);
+  const seen = new Set<SpecItem>();
+  let stored = 0;
+  let found = false;
+  for (const c of curtains) {
+    const line = c.mount.track?.line;
+    if (!line || seen.has(line)) continue;
+    seen.add(line);
+    for (const comp of line.components || []) {
+      if (!(comp.qty > 0) || !(names.has(comp.label) || (comp.sku && skus.has(comp.sku)))) continue;
+      stored += comp.qty;
+      found = true;
+    }
+  }
+  if (!found) return null;
+  const expected = hangingPointsAlong(layout).length * layout.trackQty;
+  if (expected === stored) return null;
+  return `Track layout shows ${expected} hanging points but the quoted track has ${stored} — the series spacing changed since this was quoted; reopen the track and Update to re-price.`;
+}
+
 export function collectCurtainTypes(input: CollectInput): CollectResult {
   const read = readCurtains(input.quote.spec, input.fabrics, input.trackSeries, input.grid?.project ?? null, input.quote.id);
   const groups = new Map<string, CutSheetCurtain[]>();
@@ -156,6 +190,8 @@ export function collectCurtainTypes(input: CollectInput): CollectResult {
       if (weightLbTotal == null) warnings.push(`Weight not set for ${first.fabric.name} — Catalog`);
       if (!first.fabric.flameRating) warnings.push(`Flame rating not set for ${first.fabric.name} — Catalog`);
     }
+    const drift = layoutDriftWarning(curtains, input.trackSeries);
+    if (drift) warnings.push(drift);
     if (curtains.some((c) => c.mount.source === "assumed")) warnings.push(`Mount assumed: ${MOUNT_KEY_LABELS[first.mount.key]} — pick one on the curtain`);
     // a pipe-pocket bottom weighs as no chain (the bottom pipe is not in computeSetWeight) — flag it, never invent a number
     const weightNote = first.bottomFinish === "pipe-pocket" ? PIPE_POCKET_WEIGHT_NOTE : undefined;

@@ -11367,6 +11367,7 @@ import { assessmentChecks, assessmentDbChecks } from "./test-assessments";
 import { partyChecks, partyDbChecks } from "./test-parties";
 import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, portalBidPureChecks, portalBidDbChecks, bidReportPureChecks, bidReportWidgetChecks, bidReportDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
 import { lineMoveChecks } from "./test-estimate-line-move";
+import { curvedTrackChecks } from "./test-curved-track";
 import { boxSaleDbChecks, boxSalePureChecks } from "./test-box-sale";
 import { markupPureChecks, markupDbChecks, markupParityChecks } from "./test-markup";
 import { vendorChecks, vendorDbChecks, vendorPdfDbChecks, vendorPdfPureChecks, vendorPdfFillChecks } from "./test-vendors";
@@ -11791,6 +11792,7 @@ seeded()
   .then(() => settingsRaceBlobChecks(ok))
   .then(() => settingsRaceFollowupChecks(ok))
   .then(() => lineMoveChecks(ok))
+  .then(() => curvedTrackChecks(ok))
   .then(() => boxSalePureChecks(ok)).then(() => boxSaleDbChecks(ok))
   .then(() => markupPureChecks(ok)).then(() => markupDbChecks(ok)).then(() => markupParityChecks(ok))
   .then(() => reviewSheet363Checks(ok))
@@ -39227,7 +39229,8 @@ const t274Eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(
   const rd274 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const importsOf = (src: string) => [...src.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
   const pure = [...importsOf(rd274("src/lib/track-series.ts")), ...importsOf(rd274("src/lib/track-engine.ts"))];
-  ok(pure.every((m) => m === "@/lib/track-series"), "#274 purity: track-series.ts and track-engine.ts import nothing but each other (no DB, store, or catalog)");
+  // #369: the engine also reads the pure track-path module (itself import-checked by test-curved-track).
+  ok(pure.every((m) => m === "@/lib/track-series" || m === "@/lib/track-path"), "#274 purity: track-series.ts and track-engine.ts import nothing but each other (and the pure track-path module) — no DB, store, or catalog");
   const acts = rd274("src/app/(app)/estimating-rules/track-series/actions.ts");
   ok(acts.startsWith('"use server"') && (acts.match(/await requirePerm\("manage_users"\)/g) || []).length === 2, "#274 actions: both server actions gate on manage_users, like every Estimating Rules action");
   ok(acts.includes("saveTrackSeries(input, user.name)"), "#274 actions: save hands the raw input to the store, which re-sanitizes it");
@@ -39432,7 +39435,12 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
 // ---- the form: draft ↔ config, fresh draft, series list ----
 {
   const cfg = t274Cfg({ operation: "biparting", curved: true, radiusFt: 15, trimFt: 25, carrierSpacingIn: 10, hangerSpacingFt: 4, label: "Mid", qty: 3 });
-  ok(t274Eq(t274bFromDraft(t274bToDraft(cfg)), t274bClean(cfg)), "#274B form: a stored config → the form → back is the same config (reopen round-trip)");
+  // #369: a reopened legacy curve is one arc row, so it re-saves with a path (and a run read off the path's 4-decimal sweep) — same fields, same parts
+  const rt274 = t274bFromDraft(t274bToDraft(cfg));
+  const want274 = t274bClean(cfg);
+  ok(t274Eq({ ...rt274, path: undefined, runFt: undefined }, { ...want274, runFt: undefined }) && Math.abs(rt274.runFt - want274.runFt) < 1e-3 && rt274.path?.length === 1
+    && t274Eq(t274Qty(rt274, t274Series()), t274Qty(want274, t274Series())) && t274Eq(t274bFromDraft(t274bToDraft(t274Cfg({ operation: "walkalong" }))), t274bClean(t274Cfg({ operation: "walkalong" }))),
+    "#274B form: a stored config → the form → back is the same config (reopen round-trip)");
   const d = { ...t274bToDraft(t274Cfg({ operation: "walkalong" })), qty: "", carrierSpacing: "", hangerSpacing: "", trim: "30" };
   const back = t274bFromDraft(d);
   ok(back.qty === 1 && back.carrierSpacingIn === undefined && back.hangerSpacingFt === undefined && back.trimFt === undefined,

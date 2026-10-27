@@ -12895,7 +12895,26 @@ Jeff, 2026-10-23: "We need to be able to add an API key to price list import pag
 - Revise one sent estimate with ETC lines and check the banner's changes.
 - Confirm or change: new finished goods with no ETC category go to "Uncategorized".
 
-## 370. Grid room shape editor — slice 1 DONE 2026-10-27 on `feat/370-room-shape` (D1304–D1309)
+## 369. Curved track layout + Preliminary cut sheets — DONE 2026-10-25 on `feat/369-curved-track-layout` (D1304–D1310)
+
+Jeff, 2026-10-25 (brainstorm): a curved track is more than one arc (U wraps, corners, S-curves), and the cut sheets for it must show how it hangs. Spec `docs/superpowers/specs/2026-10-25-curved-track-layout-cut-sheets-design.md`.
+
+**Built:** a curved track is a 1–12 segment path of straight and arc segments (`src/lib/track-path/`: geometry, legs, hanging points, audience frame, joint and length tolerances). The Track configurator edits it as a segment list with presets (U wrap and others) and a live mini plan (`src/app/(app)/estimator/track-segments.tsx`), with segment-named errors for a radius under the series minimum. The engine prices per segment (sticks, sections, a splice and clamp at every joint, a hanging point at every joint); legacy curves read as one left arc at the same price. Cut sheets: a curved type gets a layout view (segments, radii, footprint, lap, hanging ticks, AUDIENCE) from `src/lib/curtain-cut-sheets/layout.ts` — a CS-n.1 sheet in Submittal style, a Track layout beside "How it hangs" in Client style (one page); an oversized layout shrinks to fit and reads NTS. Every cut sheet, both styles, carries a PRELIMINARY — NOT FOR CONSTRUCTION banner (plus the Submittal title block). Decisions D1304 segment path · D1305 per-segment pricing and the length tolerance · D1306 CS-n.1 and the Client layout · D1307 concave side to the audience · D1308 NTS · D1309 the stamp · D1310 rollback.
+
+**Rollback:** no migration. An older build prices a path track as one arc of `runFt` at its tightest radius; roll forward.
+
+**Remaining (Jeff-gated):**
+- Set `curvedSectionFt` / `minRadiusFt` on each track series that curves in Estimating Rules → Track series (corner wraps need a series that bends that tight).
+- Configure a real curved track on production and print its cut sheets (Submittal and Client); check the caption count against the hardware table's clamp row. Reopen a legacy curved line too (one saved before #369) and confirm its price and parts are unchanged.
+
+**Follow-ups:**
+- Ticking Curved starts with an empty segment list; seed a Single arc from the straight run.
+- Curtain-modal curved segments don't follow curtain-width changes.
+- Segment rows are keyed by index.
+- The compact curtain-modal segment row still needs a real browser look.
+- Jeff's prod check should reopen a legacy curved line (see above).
+
+## 370. Grid room shape editor — slice 1 DONE 2026-10-27 on `feat/370-room-shape` (D1311–D1316)
 
 Jeff, Oct 25: reshape the Grid plan in the intake — points on every corner and halfway along every wall, curve a wall or add points, then add rooms. Spec `docs/superpowers/specs/2026-10-25-grid-room-shape-editor-design.md` (Amendment A); plan `docs/superpowers/plans/2026-10-25-grid-room-shape-slice1.md`.
 
@@ -12908,12 +12927,12 @@ Jeff, Oct 25: reshape the Grid plan in the intake — points on every corner and
 - The shape sheet drops the template's line-set / electric symbols — OK?
 - The room sizes in spec §3.
 - Whether other equipment should follow the Electrical room / mix (slice 2).
-- Corner glue is 0.5" only, so a room behind a wall does not follow a dragged corner (D1309).
+- Corner glue is 0.5" only, so a room behind a wall does not follow a dragged corner (D1316).
 - Room labels render very small in the editor at the default fit.
 - Not exercised in a browser: pinch zoom, pointercancel, a drag started while a length box holds an unconfirmed edit (Undo recovers it).
 
 **Known minors (for the final review):** test gaps in `geometry` / `walls` / `fit` (clockwise, arc, concave, successive splits, negative fits); `selfCrosses` misses a vertex-touching figure-8; sanitize worst-case timing test doesn't discriminate; `applyEdit` throws on a missing `to` / unknown op; `snapCorner` NaN inputs; arena `stageAlong` = longest stage edge; Gym Stage gains a straight stage edge the template lacked; opening not clipped when the Stage has several open edges or none (clip is x-only); `saveGridIntake` trusts the caller on `roomShape` / `baseSheet*`; no transaction on the shape path (as the template path); the stale-type race check doesn't re-read a changed Background; the editor never checks the server's 8,192-sample budget (`SHAPE_SAMPLE_BUDGET`), so a very heavily curved plan could save with later rooms dropped, or be refused for missing a Stage / House — follow-up: run the same budget in the editor's `check()`; editor: a second finger on the background kills a handle drag, SVG handles have no keyboard access, wheel always `preventDefault`s, undo history lost on Back, undoing to the template state leaves the dimensions locked (Reset recovers).
 
-**Next:** slice 2 (+ Add room, drop + snap flush, mix / electrical roles), slice 3 (reopen after Create, DXF). Renumber D1304–D1309 and #370 at merge if #369 (curved track) lands first.
+**Next:** slice 2 (+ Add room, drop + snap flush, mix / electrical roles), slice 3 (reopen after Create, DXF).
 
 **Rollback:** safe — no migration; the new intake fields are ignored by an older build (a shaped design's sheet is an ordinary SVG sheet). One catch: a shaped design also carries `baseSheetTemplate`, so an older build's "Change equipment…" re-fill lays devices out against the template frame and they land off the shape sheet; re-fill after rolling forward.

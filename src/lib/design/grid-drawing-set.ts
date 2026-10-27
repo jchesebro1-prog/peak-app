@@ -219,6 +219,8 @@ export type TitleBlockData = {
   earlierRevisions: number;
   /** "Rev C" | "— Preliminary". */
   status: string;
+  /** #369 — "PRELIMINARY — NOT FOR CONSTRUCTION" on curtain cut sheets; absent everywhere else. */
+  stamp?: string;
   drawnBy: string;
   checkedBy: string;
   scale: string;

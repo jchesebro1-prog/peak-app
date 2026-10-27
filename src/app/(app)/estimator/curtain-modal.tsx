@@ -302,7 +302,7 @@ export default function CurtainModal({
                 </div>
               )}
               {/* No series at all: TrackFields already says to set one up. */}
-              {tb && trackSeriesRow && track.run.trim() !== "" && <TrackErrors errors={tb.errors} />}
+              {tb && trackSeriesRow && (track.curved ? (track.segments || []).length > 0 : track.run.trim() !== "") && <TrackErrors errors={tb.errors} />}
             </div>
           )}
         </div>
