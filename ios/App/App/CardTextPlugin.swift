@@ -20,9 +20,16 @@ public class CardTextPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("Couldn't read that photo.")
             return
         }
+        // Resolve/reject exactly once: perform() can throw after the completion handler already rejected.
+        var done = false
+        let finish: (() -> Void) -> Void = { body in
+            if done { return }
+            done = true
+            body()
+        }
         let request = VNRecognizeTextRequest { req, err in
             if let err = err {
-                call.reject("Text recognition failed: \(err.localizedDescription)")
+                finish { call.reject("Text recognition failed: \(err.localizedDescription)") }
                 return
             }
             let obs = (req.results as? [VNRecognizedTextObservation]) ?? []
@@ -33,7 +40,7 @@ public class CardTextPlugin: CAPPlugin, CAPBridgedPlugin {
                     : $0.boundingBox.minX < $1.boundingBox.minX
             }
             let lines = sorted.compactMap { $0.topCandidates(1).first?.string }
-            call.resolve(["lines": lines])
+            finish { call.resolve(["lines": lines]) }
         }
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = false
@@ -42,7 +49,7 @@ public class CardTextPlugin: CAPPlugin, CAPBridgedPlugin {
             do {
                 try VNImageRequestHandler(cgImage: cg, orientation: orientation, options: [:]).perform([request])
             } catch {
-                call.reject("Text recognition failed: \(error.localizedDescription)")
+                finish { call.reject("Text recognition failed: \(error.localizedDescription)") }
             }
         }
     }

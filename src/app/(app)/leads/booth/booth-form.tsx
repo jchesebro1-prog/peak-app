@@ -32,6 +32,8 @@ type Fields = typeof EMPTY;
 const TAP: CSSProperties = { minHeight: 44 };
 const FIELD: CSSProperties = { display: "grid", gap: 0 };
 
+const noSubscribe = () => () => {};
+
 function randHex16(): string {
   const a = new Uint8Array(8);
   crypto.getRandomValues(a);
@@ -60,11 +62,13 @@ export default function BoothForm(props: {
   const firstRef = useRef<HTMLInputElement>(null);
   // Scan card (native shells only — detected on the client, so the web build never shows it).
   const scanAvailable = useSyncExternalStore(
-    () => () => {},
+    noSubscribe,
     cardTextAvailable,
     () => false,
   );
   const [scanning, setScanning] = useState(false);
+  // Bumped on every save: a scan that resolves after a save belongs to the previous visitor and is dropped.
+  const scanGen = useRef(0);
   const [filled, setFilled] = useState<Set<string>>(new Set());
   const fRef = useRef(f);
   useEffect(() => {
@@ -163,6 +167,7 @@ export default function BoothForm(props: {
     if (!file) return;
     setScanning(true);
     setError("");
+    const gen = scanGen.current;
     try {
       const { blob } = await resizePhoto(file);
       const small = await shrinkForInline(blob, 250_000);
@@ -172,8 +177,10 @@ export default function BoothForm(props: {
         r.onerror = () => rej(new Error("Couldn't read that photo."));
         r.readAsDataURL(small);
       });
+      if (gen !== scanGen.current) return;
       setCardImage(b64);
       const lines = await recognizeCardLines(b64.slice(b64.indexOf(",") + 1));
+      if (gen !== scanGen.current) return;
       const p = parseCardText(lines);
       const sp = p.name.lastIndexOf(" ");
       const found: Partial<Fields> = {
@@ -195,7 +202,7 @@ export default function BoothForm(props: {
       });
       if (!lines.length) setError("No text found on that photo — type it in, the photo is still attached.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't scan that card.");
+      if (gen === scanGen.current) setError(err instanceof Error ? err.message : "Couldn't scan that card.");
     } finally {
       setScanning(false);
     }
@@ -203,7 +210,7 @@ export default function BoothForm(props: {
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    if (saving) return;
+    if (saving || scanning) return;
     const id = newCaptureId(randHex16);
     const capturedAt = Date.now();
     const doc: Record<string, unknown> = {
@@ -258,6 +265,7 @@ export default function BoothForm(props: {
         },
         ...l,
       ]);
+      scanGen.current++;
       setF(EMPTY);
       setFilled(new Set());
       setInterests([]);
@@ -397,7 +405,7 @@ export default function BoothForm(props: {
             {error}
           </div>
         ) : null}
-        <button type="submit" className="pk-btn-accent" style={{ ...TAP, fontSize: 15 }} disabled={saving}>
+        <button type="submit" className="pk-btn-accent" style={{ ...TAP, fontSize: 15 }} disabled={saving || scanning}>
           {saving ? "Saving…" : "Save & next"}
         </button>
       </form>
