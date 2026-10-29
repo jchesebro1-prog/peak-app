@@ -102,6 +102,7 @@ const ROUTES = [
   "/vendors?status=no-list&q=rose",
   "/leads",
   "/leads/shows", // booth capture: trade shows + contact cards
+  "/leads/booth", // booth capture: staff Booth mode
   "/opportunities",
   "/schedule",
   "/schedule?view=timeline", // #145 D172 — consulting rows grouped above installs
@@ -396,7 +397,7 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/estimator-preview/Q-2041?tab=cutsheets" },
   // Booth capture Task 7 — the public NFC contact card + its vCard. The scratch DB has no card set, so both
   // answer their 404 (never a /login bounce: middleware exempts /c/). The pages /leads/booth + /leads/shows
-  // arrive with Tasks 8-9, which add them to ROUTES.
+  // are in ROUTES above.
   { route: "/c/jeff", expectNotFound: true },
   { route: "/c/jeff/vcard", expectNotFound: true },
   { route: "/estimator-preview/Q-0000", expectNotFound: true },
