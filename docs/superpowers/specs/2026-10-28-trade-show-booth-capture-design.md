@@ -162,6 +162,6 @@ cost/ROI reports, a per-show CSV export, and offline for the visitor's own form
 
 ## Remaining (Jeff-gated after build)
 
-Buy and write the NFC cards, set Jeff's card slug + photo/title/phone in
-Settings → Team, create the first show and set it active, `npx cap sync` and
+Buy and write the NFC cards, set Jeff's photo/title/phone in Settings →
+Team and his card slug on `/leads/shows`, create the first show and set it active, `npx cap sync` and
 rebuild the native apps for card scanning.
