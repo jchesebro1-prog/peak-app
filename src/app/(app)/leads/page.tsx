@@ -24,6 +24,9 @@ import {
 } from "@/lib/stores/leads";
 import { ACCENT_INK, avatarFor, buildDrawerVM, fuChip, srcChip, stageChip, type Ident } from "./lib";
 import { OwnerSelect } from "@/components/owner-select";
+import { listShows, getCapture } from "@/lib/stores/booth";
+import { filterByShow } from "@/lib/booth/lead-filter";
+import { INTEREST_LABEL, type Interest } from "@/lib/booth/capture";
 import { displayLeadNumber } from "@/lib/estimate-number";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { SEG_KEYS, type SegKey } from "./segs";
@@ -69,11 +72,12 @@ const VIEW_OPTIONS: Array<{ key: ViewKey; label: string }> = [
 const COLS = "minmax(0,1.7fr) minmax(0,1.6fr) 82px 90px minmax(0,0.95fr) 74px 100px 66px";
 const COLS_DEL = COLS + " 70px";
 
-function hrefFor(view: ViewKey, seg: SegKey, lead?: string, who?: string): string {
+function hrefFor(view: ViewKey, seg: SegKey, lead?: string, who?: string, show?: string): string {
   const p = new URLSearchParams();
   if (view !== "table") p.set("view", view);
   if (view === "table" && seg !== "all") p.set("seg", seg);
   if (who) p.set("who", who);
+  if (show) p.set("show", show);
   if (lead) p.set("lead", lead);
   const s = p.toString();
   return "/leads" + (s ? `?${s}` : "");
@@ -155,6 +159,9 @@ type ScopeVM = {
   allHref: string;
   ownerValue: string;
   ownerOptions: Array<{ value: string; label: string; href: string }>;
+  /** Booth capture — "" = all shows. */
+  showValue: string;
+  showOptions: Array<{ value: string; label: string; href: string }>;
 };
 
 function Heading({
@@ -199,7 +206,14 @@ function Heading({
           </Link>
         </div>
         <OwnerSelect value={scope.ownerValue} options={scope.ownerOptions} />
-        <SegmentedToggle options={VIEW_OPTIONS} active={view} hrefFor={(k) => hrefFor(k, "all", undefined, scope.who)} />
+        <OwnerSelect label="Show" value={scope.showValue} options={scope.showOptions} />
+        <SegmentedToggle options={VIEW_OPTIONS} active={view} hrefFor={(k) => hrefFor(k, "all", undefined, scope.who, scope.showValue)} />
+        <Link href="/leads/shows" style={formLink}>
+          Shows
+        </Link>
+        <Link href="/leads/booth" style={formLink}>
+          Booth mode →
+        </Link>
         <a href="/lead-intake" target="_blank" style={formLink}>
           Public form ↗
         </a>
@@ -250,13 +264,15 @@ export default async function LeadsPage({
   const whoRaw = one(sp.who);
   const who = !whoRaw || whoRaw === "all" ? "" : whoRaw === "mine" || whoRaw === me.name ? "mine" : whoRaw;
   const scopeName = who === "mine" ? me.name : who; // "" = unscoped
+  const showParam = one(sp.show); // booth capture — "" = all shows
 
-  const [allLeads, users, fuList, unassignedAll, settings] = await Promise.all([
+  const [allLeads, users, fuList, unassignedAll, settings, shows] = await Promise.all([
     getAll(),
     activeUsers(),
     followUps(scopeName ? { owner: scopeName } : {}),
     unassigned(),
     getSettings(),
+    listShows(),
   ]);
   const roster: Ident[] = users.map((u) => ({ name: u.name, initials: u.initials, color: u.color }));
 
@@ -265,8 +281,8 @@ export default async function LeadsPage({
   // Deliberately l.owner === name, NOT unownedOrMine: unassigned leads keep
   // their own segment + the claim flow instead of leaking into "My work" —
   // which also means the Unassigned segment reads 0 under any owner scope.
-  const all = scopeName ? allLeads.filter((l) => l.owner === scopeName) : allLeads;
-  const unassignedList = scopeName ? [] : unassignedAll;
+  const all = filterByShow(scopeName ? allLeads.filter((l) => l.owner === scopeName) : allLeads, showParam || null);
+  const unassignedList = scopeName ? [] : filterByShow(unassignedAll, showParam || null);
 
   // #22 — metrics() is unscoped (no owner opt); recompute the same numbers
   // over the scoped set so tiles, standfirst and segment counts agree with
@@ -295,21 +311,29 @@ export default async function LeadsPage({
   const byUrg = (a: LeadRecord, b: LeadRecord) =>
     (urgOf.get(b.id) || 0) - (urgOf.get(a.id) || 0) || (b.updatedAt || 0) - (a.updatedAt || 0);
 
-  const closeHref = hrefFor(view, seg, undefined, who);
-  const newHref = hrefFor(view, seg, "new", who);
+  const closeHref = hrefFor(view, seg, undefined, who, showParam);
+  const newHref = hrefFor(view, seg, "new", who, showParam);
 
   const scopeVM: ScopeVM = {
     who,
-    mineHref: hrefFor(view, seg, undefined, "mine"),
-    allHref: hrefFor(view, seg, undefined, ""),
+    mineHref: hrefFor(view, seg, undefined, "mine", showParam),
+    allHref: hrefFor(view, seg, undefined, "", showParam),
     ownerValue: who === "" ? "all" : who,
     ownerOptions: [
-      { value: "all", label: "All teammates", href: hrefFor(view, seg, undefined, "") },
+      { value: "all", label: "All teammates", href: hrefFor(view, seg, undefined, "", showParam) },
       ...roster.map((r) => ({
         value: r.name === me.name ? "mine" : r.name,
         label: r.name === me.name ? r.name + " (me)" : r.name,
-        href: hrefFor(view, seg, undefined, r.name === me.name ? "mine" : r.name),
+        href: hrefFor(view, seg, undefined, r.name === me.name ? "mine" : r.name, showParam),
       })),
+    ],
+    showValue: showParam,
+    showOptions: [
+      { value: "", label: "All shows", href: hrefFor(view, seg, undefined, who, "") },
+      ...shows
+        .filter((s) => !s.archived || s.id === showParam)
+        .sort((a, b) => (b.startAt ?? b.createdAt) - (a.startAt ?? a.createdAt))
+        .map((s) => ({ value: s.id, label: s.name, href: hrefFor(view, seg, undefined, who, s.id) })),
     ],
   };
 
@@ -318,6 +342,19 @@ export default async function LeadsPage({
     leadParam && leadParam !== "new" ? allLeads.find((l) => l.id === leadParam) || null : null;
   // #223 — the converted quote, so the drawer can name it by its number.
   const convertedQuote = leadRec?.convertedQuoteId ? await getQuote(leadRec.convertedQuoteId) : null;
+  // Booth capture — show / interests / temperature / card photos, for the OPEN lead only.
+  const boothShow = leadRec?.eventId ? shows.find((s) => s.id === leadRec.eventId) : undefined;
+  const boothCaps = leadRec?.boothCaptureIds?.length
+    ? await Promise.all(leadRec.boothCaptureIds.map((id) => getCapture(id)))
+    : [];
+  const boothDrawer = leadRec
+    ? {
+        show: boothShow ? { id: boothShow.id, name: boothShow.name } : null,
+        interests: (leadRec.interests || []).map((k) => INTEREST_LABEL[k as Interest] ?? k),
+        temperature: leadRec.temperature ?? null,
+        cardImageIds: boothCaps.filter((c) => c?.cardImagePath).map((c) => c!.id),
+      }
+    : {};
   const drawerMode: "new" | "detail" | null = leadParam
     ? leadParam === "new" || !leadRec
       ? "new"
@@ -427,7 +464,7 @@ export default async function LeadsPage({
         strip: fu.tone === "bad" ? "#c85a3c" : fu.tone === "warn" ? "#c8a53c" : "transparent",
         owner: avatarFor(roster, l.owner),
         ownerTitle: l.owner || "Unassigned",
-        href: hrefFor("board", "all", l.id, who),
+        href: hrefFor("board", "all", l.id, who, showParam),
         canMoveTo: (STAGES as readonly string[]).filter((k) => k !== l.stage),
       };
     });
@@ -475,7 +512,7 @@ export default async function LeadsPage({
       reason: { label: fu.full, ink: fu.ink, soft: fu.soft, bd: fu.bd },
       canClaim: !l.owner,
       canDelete,
-      href: hrefFor("worklist", "all", l.id, who),
+      href: hrefFor("worklist", "all", l.id, who, showParam),
     };
   };
   const workGroups = [
@@ -509,7 +546,7 @@ export default async function LeadsPage({
     const fu = fuChip(l);
     return {
       id: l.id,
-      href: hrefFor("table", seg, l.id, who),
+      href: hrefFor("table", seg, l.id, who, showParam),
       org: l.org,
       idContact: displayLeadNumber(l) + (l.contact ? " · " + l.contact : ""),
       scope: l.interest || "—",
@@ -540,7 +577,7 @@ export default async function LeadsPage({
               return (
                 <Link
                   key={s.key}
-                  href={hrefFor("table", s.key, undefined, who)}
+                  href={hrefFor("table", s.key, undefined, who, showParam)}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -857,7 +894,7 @@ export default async function LeadsPage({
         <LeadDrawer
           key={leadParam}
           mode={drawerMode}
-          vm={drawerMode === "detail" && leadRec ? buildDrawerVM(leadRec, convertedQuote) : null}
+          vm={drawerMode === "detail" && leadRec ? { ...buildDrawerVM(leadRec, convertedQuote), ...boothDrawer } : null}
           closeHref={closeHref}
           meName={me.name}
           rosterNames={roster.map((r) => r.name)}

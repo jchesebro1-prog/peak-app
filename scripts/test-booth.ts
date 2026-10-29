@@ -14,12 +14,18 @@ import { pulledChanges } from "../src/lib/sync/pull-collections";
 import { sanitizePushedDoc } from "../src/lib/sync/server-owned";
 import { SYNCABLE_COLLECTIONS, DOC_TABLES } from "../src/db/doc-tables";
 import { FIELD_COLLECTIONS } from "../src/lib/sync/engine";
+import { filterByShow } from "../src/lib/booth/lead-filter";
 import { alreadyRecorded, dedupeDecision, followUpCopy, leadMessage, newCaptureId, sanitizeCapture, type BoothCapture } from "../src/lib/booth/capture";
 
 const S = (over: Partial<Show>): Show => ({ id: "sh_00000001", name: "LDI 2026", startAt: null, endAt: null, active: false, archived: false, createdAt: 1, ...over });
 const mint = (() => { let n = 0; return () => "sh_" + String(++n).padStart(8, "0"); })();
 
 export async function boothChecks(ok: Ok) {
+  // Leads board ?show= filter
+  const LL = [{ id: "1", eventId: "sh_00000001" }, { id: "2" }, { id: "3", eventId: "sh_00000002" }];
+  ok(filterByShow(LL, null).length === 3, "booth: no show filter → all leads");
+  ok(filterByShow(LL, "sh_00000001").map((l) => l.id).join() === "1", "booth: show filter keeps that show's leads");
+
   // shows
   ok(sanitizeShows(null).length === 0, "booth: no shows blob → empty list");
   ok(sanitizeShows([{ id: "sh_0000000a", name: "  USITT  " }])[0].name === "USITT", "booth: show name trimmed");
