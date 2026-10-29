@@ -12936,3 +12936,35 @@ Jeff, Oct 25: reshape the Grid plan in the intake — points on every corner and
 **Next:** slice 2 (+ Add room, drop + snap flush, mix / electrical roles), slice 3 (reopen after Create, DXF).
 
 **Rollback:** safe — no migration; the new intake fields are ignored by an older build (a shaped design's sheet is an ordinary SVG sheet). One catch: a shaped design also carries `baseSheetTemplate`, so an older build's "Change equipment…" re-fill lays devices out against the template frame and they land off the shape sheet; re-fill after rolling forward.
+
+## 371. Trade show booth capture + NFC contact card — DONE 2026-10-29 on `feat/booth-capture` (D1320–D1329)
+
+Jeff, Oct 28: track and collect contact information for people who come to the trade show booth, and put his contact card on NFC to tap to them. Spec `docs/superpowers/specs/2026-10-28-trade-show-booth-capture-design.md`; plan `docs/superpowers/plans/2026-10-28-trade-show-booth-capture.md`.
+
+**Built:**
+- **Leads → Shows** (`/leads/shows`): add / edit / set active / archive shows (at most one active), contact cards by slug (admin-only, one per user) each with a QR code, Copy link and SVG / PNG download.
+- **Public card** `/c/<slug>`: photo, name, title, phone, email, Save contact (`/c/<slug>/vcard`, vCard 3.0 with photo) and Send me your info (share-back), which creates a lead (source `event`, the active show, owner = the card's user) and leaves a follow-up draft in the owner's Inbox. Nothing sends.
+- **Booth mode** (`/leads/booth`): staff capture with Hot / Warm / Cold and interest chips, **offline through the outbox** (the Work offline toggle holds captures until it is turned off), and a Today at this show list with Synced / Waiting to sync / Merged into existing lead. **Scan card** (native apps only) reads a business card on the device (Vision on iOS, ML Kit on Android) and fills empty fields; the photo is kept on the lead.
+- One capture path (`recordBoothCapture`): claim-first and idempotent per capture id, an email match to an open lead merges instead of duplicating, phone-only never merges. Leads gain a **Show** filter (`?show=`), the drawer shows show, temperature, interests and the card photo.
+- Migration `0042_booth_captures`; camera and photo-library permission strings added to both native apps (they were missing, so the existing photo buttons were affected too).
+
+**Rollback:** the new table and Lead fields are ignored by an older build; the app's native Scan card needs the new native build. Roll forward.
+
+**Not on a preview:** never preview-deploy this branch. Previews share the production Neon DB and skip migrations, so `booth_captures` does not exist there and every sync push, `/leads` drawer card read and share-back would fail.
+
+**Remaining (Jeff-gated):**
+- Buy NTAG215 / NTAG216 cards and write `https://<prod host>/c/jeff` to one with NFC Tools (MASTER-HOWTO, Trade show booth).
+- Set Jeff's photo, title, phone and mobile in Settings → Team (the card shows what is there).
+- Add the `jeff` card on Leads → Shows; create the first show and set it active.
+- `npx cap sync`, then rebuild the iOS and Android apps. **Android was not built on this Mac** (no Java or SDK): the first build must confirm the ML Kit `text-recognition:16.0.1` dependency resolves. iOS built on a simulator target; Vision on a real card is untried.
+- A real NFC tap on an iPhone and on an Android phone; Scan card on a real business card (airplane mode, then sync).
+- A production check after the merge deploy applies 0042 (never a preview): open `/c/jeff` signed out, send your info from a phone, confirm the lead and the Inbox draft, then delete the test lead and draft.
+- Set `QUOTE_PDF_ORIGIN` in production so the QR codes and copied links use the production host and not whatever alias an admin was browsing.
+
+**Open questions for Jeff:**
+- Keep booth captures through the go-live "Clear demo data" wipe? Today they go with the leads (D1329).
+- Per-staff cards later (the URL shape allows it; no UI was built)?
+
+**Known minors (for the final review):** a Show filter on an unknown id shows an empty board; the Today list is the show's latest 50, not day-filtered; a parked failed row has no retry / discard button; seeding the Today list from the outbox is not scoped per user on a shared tablet; two different captures merging into one lead at once can lose one; a throw after the claim keeps it for 60 s (retries read "Still saving"); the share-back route's rate limiter is per server instance; the vCard photo fetch is not cached; QR codes use the request host when `QUOTE_PDF_ORIGIN` is unset.
+
+**Gates:** tsc 0 errors; test:specs 26,256 PASS / 0 FAIL (ALL PASSED, plus the markup-settings run); test:smoke ALL PASSED, 272 PASS / 0 FAIL (authenticated; one earlier run lost its dev server partway and was rerun clean); eslint 0 errors on the branch's changed TS files (1 pre-existing `Date.now` warning in `leads/page.tsx`; `scripts/test-review-and-spec.ts` excluded, its parser overflows the stack on origin/main too); `next build` passes. Not run: a real device (NFC, Vision, ML Kit), the Android build.

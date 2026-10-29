@@ -42,6 +42,11 @@ free-text tag on the lead, or a full events module with cost/ROI reports.
   lead has `source: "event"` + `eventId`.
 - The Leads board/worklist/table gains a **Show** filter (`?show=<id>`). The lead
   drawer shows the show name next to the source chip.
+- `booth_captures` is a new doc table (migration 0042_booth_captures), added to
+  the offline-synced field collections. Shows and contact cards stay settings
+  blobs (`trade_shows`, `contact_cards`), written one op at a time under the
+  blob row lock; a card slug is admin-only (`manage_users`), one slug per user,
+  and a slug held by another user is refused.
 
 ## 2. Public card page (what the NFC tap opens)
 
@@ -59,6 +64,11 @@ free-text tag on the lead, or a full events module with cost/ROI reports.
   (JPEG ≤ 200 KB, fetched server-side and omitted on failure). A pure builder,
   `src/lib/booth/vcard.ts`, handles escaping (`\,` `\;` `\n`) and line folding
   at 75 octets.
+- **Attribution (card-origin captures):** the follow-up and the lead owner are
+  the card's user, but the visitor is a stranger and cannot speak as the owner.
+  A card-origin capture that merges into an existing open lead is attributed to
+  "Contact card" (never to the owner), its note is prefixed "Sent from the
+  contact card (not verified): ", and it never changes the lead's temperature.
 - **Send me your info**: name (required), email or phone (at least one), company,
   interest chips (Rigging · Curtains · Lighting · AV · Flame testing ·
   Inspections) and a note. Same guards as `/api/leads/intake`: a honeypot, the
@@ -102,14 +112,23 @@ free-text tag on the lead, or a full events module with cost/ROI reports.
     matching the email/website domain or carrying a corporate suffix, and the
     title matches a keyword list. It never invents values: an unknown field stays
     blank.
-  - The parsed fields fill the form (highlighted until edited) and staff confirm.
-    The card image (shrunk ≤ 1600 px JPEG) is attached to the lead as a document
-    once synced.
+  - The parsed fields fill **only fields that are still empty** (a rescan never
+    overwrites what staff typed or an earlier scan filled) and are highlighted
+    until edited; staff confirm. An ambiguous name stays blank rather than guessed.
+  - The card photo is shrunk on the device to a ≤ 250 KB JPEG and rides inside
+    the `booth_captures` doc. On receipt the server verifies the JPEG magic bytes,
+    moves it to private Blob at `booth/<capture id>.jpg` (kept inline only in
+    local dev without Blob) and the lead drawer shows it via
+    `GET /api/booth/card-image/<id>` (signed-in only).
+  - Recognition is a local `CardText` Capacitor plugin (Apple Vision on iOS, a
+    bundled ML Kit model on Android), not a third-party plugin: the iOS project
+    uses SPM and the ML Kit Capacitor plugin is CocoaPods-only.
 - **Offline:** a capture is a `booth_captures` doc, a new collection added to
   `SYNCABLE_COLLECTIONS`. Its id is generated on the device as `bc_<16 hex>`, and
-  the doc holds the form, show id, card image ref and `capturedAt`. It goes
-  through the outbox like the field-capture editors. The card image queues in the
-  existing device photo queue (`photo-queue.ts` pattern) to private Blob.
+  the doc holds the form, show id, the card image (see above) and `capturedAt`.
+  It goes through the outbox like the field-capture editors. Pulled copies strip
+  `cardImage` and `claimUntil`; `leadId`, `outcome`, `cardImagePath` and
+  `claimUntil` are server-owned.
 - **Today at this show:** the device's captures for the current show, each
   marked *Synced* or *Waiting to sync*, with the count.
 
@@ -118,8 +137,20 @@ free-text tag on the lead, or a full events module with cost/ROI reports.
 `src/lib/booth/capture-server.ts` → `recordBoothCapture(capture, actor)` is used
 by both the share-back API and the `booth_captures` push handler:
 
-- **Idempotent:** keyed by capture id (share-back mints its own `bc_` id). A
-  repeat push returns the same lead and never creates a second one.
+- **Claim first, then idempotent:** each capture id is claimed with
+  `insertDocIfAbsent` and a 60 s `claimUntil` lease (a second caller while the
+  lease is live gets "busy": the push replies `retry`, share-back answers 409;
+  a stale claim is taken over by compare-and-set). It is a claim, not an
+  advisory lock, because creating a lead inside a transaction returns an
+  unnumbered lead. Share-back mints its own `bc_` id. A repeat push returns the
+  same lead and never creates a second one (`Lead.boothCaptureIds`).
+- **One-write lead create:** `eventId`, `interests`, `temperature` and
+  `boothCaptureIds` go through `Leads.create()` in a single write.
+- **Merge:** an open-lead match is applied by `addBoothCapture` in one
+  `patchDoc` callback, idempotent per capture id.
+- **Attribution:** `capturedById` / `capturedByName` are always the signed-in actor (the payload field
+  is ignored); the lead owner is the card owner (share-back) or the capturing
+  staff member (Booth mode).
 - **Dedupe** (pure rule `src/lib/booth/dedupe.ts`): an exact, case-insensitive
   email match to an existing contact attaches the lead to that contact/company.
   An email matching an **open** lead adds a note "Met again at <show>" + the
