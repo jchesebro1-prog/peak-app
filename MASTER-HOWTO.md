@@ -803,7 +803,7 @@ when `datasheet_url` is too.
 6. Sent estimates keep their prices. **Revise** re-prices their catalog lines to today's catalog and lists the changes on Build.
 7. Kill switch: `ETC_SYNC_DISABLED=true` in Vercel. Remove the key in the drawer to stop for good.
 
-## 12. Trade show booth (#371, D1320–D1329)
+## 12. Trade show booth (#371, D1320–D1330)
 
 **Before the show (once per show)**
 
@@ -826,7 +826,7 @@ On the Shows page, each card has a QR code. **Download SVG** (best for print and
 1. Open **Leads → Booth mode** (`/leads/booth`) on the phone or iPad. The header shows the active show.
 2. Fill in name and an email or a phone number (one of the two is required), company, interests, **Hot / Warm / Cold** and notes. **Save & next** clears the form for the next person.
 3. **It works offline.** A capture saves on the device, then syncs when there is signal. Turn **Work offline** on in the left nav's sync chip if the venue Wi-Fi is bad; captures wait and the list shows *Waiting to sync* until you turn syncing back on. Closing and reopening the app keeps them.
-4. **Today at this show** lists this device's captures with their state: *Waiting to sync*, *Synced* or *Merged into existing lead* (the email already matched an open lead, so it added a note there instead of a duplicate). An error message means it could not save; fix the field and save again.
+4. **Today at this show** lists the show's latest 50 captures from everyone on the team, plus this device's captures still waiting, with their state: *Waiting to sync*, *Synced* or *Merged into existing lead* (the email already matched an open lead, so it added a note there instead of a duplicate). An error message means the server refused that capture: it stays on this device and is not sent again, and Booth mode has no Retry for it yet, so enter that person again (without the card photo if it says the item is too large) and tell an admin if it keeps happening.
 5. **Scan card** (the phone and iPad apps only, not a browser): tap it, photograph the business card, and the name, email, phone, company and title it can read fill the empty fields (highlighted until you edit them). It never overwrites what you typed and leaves a name blank when it is not sure. Check the fields, then Save. The card photo is kept on the lead.
 
 **What a visitor sees**
@@ -841,7 +841,8 @@ Tapping the card (or scanning the QR) opens your page with **Save contact** and 
 
 **Good to know**
 
-- Re-sending from the same phone, or two staff capturing the same person, does not create two leads: the second becomes a note on the first.
-- A note that came from the public card page is labelled "Sent from the contact card (not verified)" and never changes a lead's Hot / Warm / Cold.
+- Re-sending from the same phone never creates a second lead. Two staff capturing the same person become one lead only when an email was entered (the second becomes a note on the first); a phone-only capture always makes its own lead.
+- A note that came from the public card page is labelled "Sent from the contact card (not verified)", never changes a lead's Hot / Warm / Cold and never counts as your first response on the SLA clock.
+- A lead met again at a second show stays under its first show in the Show filter (the show is set only when the lead has none).
 - Go-live "Clear demo data" also deletes booth captures along with leads (D1329).
 - After updating the native apps (`npx cap sync`, rebuild), iOS asks for camera access the first time you scan.

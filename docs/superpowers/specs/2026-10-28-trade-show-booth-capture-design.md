@@ -151,7 +151,7 @@ by both the share-back API and the `booth_captures` push handler:
 - **Attribution:** `capturedById` / `capturedByName` are always the signed-in actor (the payload field
   is ignored); the lead owner is the card owner (share-back) or the capturing
   staff member (Booth mode).
-- **Dedupe** (pure rule `src/lib/booth/dedupe.ts`): an exact, case-insensitive
+- **Dedupe** (pure rule `dedupeDecision` in `src/lib/booth/capture.ts`): an exact, case-insensitive
   email match to an existing contact attaches the lead to that contact/company.
   An email matching an **open** lead adds a note "Met again at <show>" + the
   capture's notes and interests to that lead instead of a new one. A phone-only
@@ -160,7 +160,8 @@ by both the share-back API and the `booth_captures` push handler:
   user; Booth mode: the capturing staff member), SLA from `slaForSource`, and
   interests and temperature stored on the lead.
 - The `booth_captures` doc is stamped `{ leadId, outcome: "created" | "merged" }`
-  so the device shows the result after pull.
+  so the device shows the result: from the online save's result, or from the
+  server-rendered Today list after a reload (pulled copies are the mirror only).
 
 ## 6. Follow-up draft (share-back only)
 

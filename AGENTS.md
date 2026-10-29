@@ -1686,7 +1686,7 @@ See `.env.example`.
 
 70. 🚧 **Grid room shape editor — slice 1** (#370, D1311–D1316) — the Grid intake gains a Shape the room step: the stretched template freezes into a `RoomShape` (`src/lib/design/room-shape/`: rooms and zones in feet, line / arc / Bezier edges, walls vs. openings read from the drawing's double lines, roles on rooms) edited in `src/components/room-shape/room-shape-editor.tsx` (corner drag + snap + glue, Add point, Curve, Free-form, Wall ↔ Opening, typed lengths / radius / arc length, undo / redo); a shaped intake locks its dimensions until Reset to template. `saveGridIntakeAction` sanitizes it (`sanitizeRoomShape`) before it writes any customer or venue (`newVenueKindFor`, shared with the quote intake), `generateBaseSheet` draws the base sheet, Spaces (`fromRoom`) and calibration from it and stamps `baseSheetShape` / `baseSheetFrame`, and Auto fill lays out on the stamp (`venueFrame` shape branch; a proscenium or Gym Stage hangs side lights and line arrays at the opening, not the wings). No migration. Remaining: slices 2 (rooms + zones, roles) and 3 (reopen after Create, DXF); Jeff reviews `docs/room-shape/renders/`. Punch item #370.
 
-71. ✅ **Trade show booth capture + NFC contact card** (#371, D1320–D1329) — people at
+71. ✅ **Trade show booth capture + NFC contact card** (#371, D1320–D1330) — people at
     Jeff's booth become Leads (source `event`, `Lead.eventId`). **Leads → Shows**
     (`/leads/shows`): a light shows list (settings blob `trade_shows`, at most one active) and
     contact cards (blob `contact_cards`, slug to user; admin-only, one slug per user) with QR
@@ -1709,7 +1709,10 @@ See `.env.example`.
     lead. The card photo is a ≤ 250 KB JPEG inside the capture doc, magic-byte checked, moved
     to private Blob `booth/<id>.jpg` and served signed-in at `/api/booth/card-image/<id>`.
     Leads gain a Show filter (`?show=`) and drawer chips; camera permission strings added to
-    both native apps. Pure core in `src/lib/booth/`, stores in `src/lib/stores/booth.ts`;
+    both native apps. The SyncEngine now flushes the outbox in request-sized batches
+    (`src/lib/sync/batch.ts`, ≤ 3 MB / 200 records per POST; a failed batch no longer holds
+    back the rest; a lone 413 parks as too large, D1330), card activity never stops a lead's
+    SLA clock, and a throw after the claim releases it. Pure core in `src/lib/booth/`, stores in `src/lib/stores/booth.ts`;
     checks in `scripts/test-booth.ts`. **Never preview-deploy this branch** (previews skip
     migrations and share the production DB, so `booth_captures` would not exist). Remaining
     is Jeff-gated: write the NFC tag, Settings → Team contact fields, the `jeff` card and the

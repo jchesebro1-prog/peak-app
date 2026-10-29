@@ -12937,7 +12937,7 @@ Jeff, Oct 25: reshape the Grid plan in the intake — points on every corner and
 
 **Rollback:** safe — no migration; the new intake fields are ignored by an older build (a shaped design's sheet is an ordinary SVG sheet). One catch: a shaped design also carries `baseSheetTemplate`, so an older build's "Change equipment…" re-fill lays devices out against the template frame and they land off the shape sheet; re-fill after rolling forward.
 
-## 371. Trade show booth capture + NFC contact card — DONE 2026-10-29 on `feat/booth-capture` (D1320–D1329)
+## 371. Trade show booth capture + NFC contact card — DONE 2026-10-29 on `feat/booth-capture` (D1320–D1330)
 
 Jeff, Oct 28: track and collect contact information for people who come to the trade show booth, and put his contact card on NFC to tap to them. Spec `docs/superpowers/specs/2026-10-28-trade-show-booth-capture-design.md`; plan `docs/superpowers/plans/2026-10-28-trade-show-booth-capture.md`.
 
@@ -12947,6 +12947,7 @@ Jeff, Oct 28: track and collect contact information for people who come to the t
 - **Booth mode** (`/leads/booth`): staff capture with Hot / Warm / Cold and interest chips, **offline through the outbox** (the Work offline toggle holds captures until it is turned off), and a Today at this show list with Synced / Waiting to sync / Merged into existing lead. **Scan card** (native apps only) reads a business card on the device (Vision on iOS, ML Kit on Android) and fills empty fields; the photo is kept on the lead.
 - One capture path (`recordBoothCapture`): claim-first and idempotent per capture id, an email match to an open lead merges instead of duplicating, phone-only never merges. Leads gain a **Show** filter (`?show=`), the drawer shows show, temperature, interests and the card photo.
 - Migration `0042_booth_captures`; camera and photo-library permission strings added to both native apps (they were missing, so the existing photo buttons were affected too).
+- **Final review fixes:** the iOS app now roots in `BridgeViewController` (it booted `CAPBridgeViewController`, so Scan card's plugin never registered); the SyncEngine flushes the outbox in request-sized batches (≤ 3 MB / 200 records, D1330), so a dozen queued card scans can't exceed the host's request limit and jam all field sync, a failed batch doesn't block the rest, and a lone 413 parks as "too large"; a contact-card merge or card-created lead never stops the SLA clock and the card-created lead's first note is by "Contact card"; a throw after the claim releases it; QR codes have a 4-module quiet zone at 1024 px and the PNG download reports a failure.
 
 **Rollback:** the new table and Lead fields are ignored by an older build; the app's native Scan card needs the new native build. Roll forward.
 
@@ -12965,6 +12966,6 @@ Jeff, Oct 28: track and collect contact information for people who come to the t
 - Keep booth captures through the go-live "Clear demo data" wipe? Today they go with the leads (D1329).
 - Per-staff cards later (the URL shape allows it; no UI was built)?
 
-**Known minors (for the final review):** a Show filter on an unknown id shows an empty board; the Today list is the show's latest 50, not day-filtered; a parked failed row has no retry / discard button; seeding the Today list from the outbox is not scoped per user on a shared tablet; two different captures merging into one lead at once can lose one; a throw after the claim keeps it for 60 s (retries read "Still saving"); the share-back route's rate limiter is per server instance; the vCard photo fetch is not cached; QR codes use the request host when `QUOTE_PDF_ORIGIN` is unset.
+**Known minors (for the final review):** a Show filter on an unknown id shows an empty board; the Today list is the show's latest 50, not day-filtered; a parked failed row has no retry / discard button; seeding the Today list from the outbox is not scoped per user on a shared tablet; two different captures merging into one lead at once can lose one; the share-back route's rate limiter is per server instance; the vCard photo fetch is not cached; QR codes use the request host when `QUOTE_PDF_ORIGIN` is unset.
 
 **Gates:** tsc 0 errors; test:specs 26,256 PASS / 0 FAIL (ALL PASSED, plus the markup-settings run); test:smoke ALL PASSED, 272 PASS / 0 FAIL (authenticated; one earlier run lost its dev server partway and was rerun clean); eslint 0 errors on the branch's changed TS files (1 pre-existing `Date.now` warning in `leads/page.tsx`; `scripts/test-review-and-spec.ts` excluded, its parser overflows the stack on origin/main too); `next build` passes. Not run: a real device (NFC, Vision, ML Kit), the Android build.
