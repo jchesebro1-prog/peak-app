@@ -245,6 +245,11 @@ export interface LeadSeedSpec {
   convertedQuoteId?: string | null;
   convertedAt?: number | null;
   activities?: LeadActivity[];
+  /** Trade show booth capture fields (set only when given — other leads' docs are unchanged). */
+  eventId?: string;
+  interests?: string[];
+  temperature?: "hot" | "warm" | "cold" | null;
+  boothCaptureIds?: string[];
   createdAt?: number;
   updatedAt?: number;
   lastActivityAt?: number;
@@ -293,6 +298,10 @@ export function mkLead(o: LeadSeedSpec): LeadRecord {
     convertedQuoteId: o.convertedQuoteId || null,
     convertedAt: o.convertedAt || null,
     activities,
+    ...(o.eventId ? { eventId: o.eventId } : {}),
+    ...(o.interests ? { interests: o.interests } : {}),
+    ...(o.temperature !== undefined ? { temperature: o.temperature } : {}),
+    ...(o.boothCaptureIds ? { boothCaptureIds: o.boothCaptureIds } : {}),
     createdAt: created,
     updatedAt: o.updatedAt != null ? o.updatedAt : lastAt,
     lastActivityAt: o.lastActivityAt != null ? o.lastActivityAt : lastAt,
@@ -496,6 +505,11 @@ export interface LeadCreateInput {
   value?: number;
   message?: string;
   customerId?: string | null;
+  /** Trade show booth capture (recordBoothCapture): written in the lead's one create write. */
+  eventId?: string;
+  interests?: string[];
+  temperature?: "hot" | "warm" | "cold" | null;
+  boothCaptureIds?: string[];
   /** #223 — an existing estimate number to carry instead of allocating one:
    *  only for a lead made FOR a quote that already has one (the consulting
    *  auto-lead). Everything else leaves it unset. */
@@ -544,6 +558,10 @@ export async function create(
       value: partial.value || 0,
       message: partial.message || "",
       customerId: partial.customerId || null,
+      eventId: partial.eventId,
+      interests: partial.interests,
+      temperature: partial.temperature,
+      boothCaptureIds: partial.boothCaptureIds,
       createdAt: t,
       activities: [firstAct],
     });
@@ -579,6 +597,35 @@ export interface LogActivityInput {
   at?: number;
   note?: string;
   clearNextAction?: boolean;
+}
+
+/**
+ * Record one booth capture on an existing (open) lead, all inside ONE patch on
+ * the current row: a capture id already on the lead changes nothing (`added:
+ * false`), so a retry or a racing writer can't double the "Met again" note or
+ * lose another capture's ids. Unions the capture ids and interests, takes the
+ * temperature when given, sets the show only when the lead has none.
+ */
+export async function addBoothCapture(
+  leadId: string,
+  capture: { id: string; interests: string[]; temperature: "hot" | "warm" | "cold" | null; showId: string | null },
+  note: { by: string; text: string }
+): Promise<{ added: boolean; lead: LeadRecord | null }> {
+  let added = false;
+  const lead = await patchDoc<LeadRecord>("leads", leadId, (l) => {
+    if ((l.boothCaptureIds || []).includes(capture.id)) return;
+    added = true;
+    const at = now();
+    l.boothCaptureIds = [...(l.boothCaptureIds || []), capture.id];
+    l.interests = Array.from(new Set([...(l.interests || []), ...capture.interests]));
+    if (capture.temperature) l.temperature = capture.temperature;
+    if (!l.eventId && capture.showId) l.eventId = capture.showId;
+    l.activities = (l.activities || []).concat([act(at, "note", note.by, note.text)]);
+    touch(l, at);
+    if (!l.firstContactAt && note.by) l.firstContactAt = at;
+    dirty(l);
+  });
+  return { added, lead };
 }
 
 export async function logActivity(

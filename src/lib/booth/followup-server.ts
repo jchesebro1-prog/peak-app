@@ -3,6 +3,7 @@ import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { getUser } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
 import { listShows } from "@/lib/stores/booth";
+import { get as getLead } from "@/lib/stores/leads";
 import { buildVCard, vcardFileName } from "./vcard";
 import { followUpCopy, type BoothCapture } from "./capture";
 
@@ -17,7 +18,7 @@ export async function createShareBackDraft(input: { leadId: string; capture: Boo
   if (!capture.email) return null;
   const existing = await findDraftByLink("lead", input.leadId, { owner: await mailboxViewer(owner) });
   if (existing) return existing.id;
-  const [user, settings, shows] = await Promise.all([getUser(owner.id), getSettings(), listShows()]);
+  const [user, settings, shows, lead] = await Promise.all([getUser(owner.id), getSettings(), listShows(), getLead(input.leadId)]);
   const showName = shows.find((s) => s.id === capture.showId)?.name ?? null;
   const copy = followUpCopy({ firstName: capture.firstName, showName, interests: capture.interests, senderName: owner.name });
   const vcf = buildVCard({
@@ -31,7 +32,7 @@ export async function createShareBackDraft(input: { leadId: string; capture: Boo
   const thread = await saveDraft({
     mailbox: "personal",
     owner,
-    customerId: null,
+    customerId: lead?.customerId ?? null,
     customer: capture.company,
     contactName: [capture.firstName, capture.lastName].filter(Boolean).join(" "),
     to: capture.email,

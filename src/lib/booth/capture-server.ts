@@ -1,8 +1,8 @@
-import { getDoc, upsertDoc } from "@/db/doc-store";
+import { casDocKey, getDoc, insertDocIfAbsent, upsertDoc } from "@/db/doc-store";
 import { blobEnabled, dataUrlToBytes, putBlob } from "@/lib/blob";
 import { contactByEmail } from "@/lib/identity/lookup";
 import { can } from "@/lib/team";
-import { create as createLead, getAll as allLeads, logActivity, update as updateLead } from "@/lib/stores/leads";
+import { addBoothCapture, create as createLead, get as getLead, getAll as allLeads } from "@/lib/stores/leads";
 import { listShows } from "@/lib/stores/booth";
 import { alreadyRecorded, dedupeDecision, leadMessage, sanitizeCapture, type BoothCapture } from "./capture";
 
@@ -17,7 +17,11 @@ import { alreadyRecorded, dedupeDecision, leadMessage, sanitizeCapture, type Boo
 type Actor = { id: string; name: string };
 export type RecordResult =
   | { ok: true; leadId: string; outcome: "created" | "merged"; capture: BoothCapture }
-  | { ok: false; error: string };
+  | { ok: false; error: string; busy?: true };
+
+/** A claim on a capture id lives this long; a crashed writer's claim can be taken over after it. */
+const CLAIM_MS = 60_000;
+const BUSY: RecordResult = { ok: false, busy: true, error: "Still saving this visitor — try again in a moment." };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -58,44 +62,59 @@ async function storeCardImage(c: BoothCapture): Promise<BoothCapture> {
 export async function recordBoothCapture(raw: unknown, actor: Actor, opts: { ownerName?: string } = {}): Promise<RecordResult> {
   const s = sanitizeCapture(raw);
   if (!s.ok) return s;
-  let capture = s.capture;
+  const now = Date.now();
+  // Who captured it is the signed-in actor, never a payload claim; a replay or takeover keeps the first stamp.
+  const incoming: BoothCapture = { ...s.capture, capturedById: actor.id, capturedByName: actor.name, capturedAt: clampCapturedAt(s.capture.capturedAt, now) };
+  delete incoming.cardImage;
+  delete incoming.cardImagePath;
 
-  const prior = await getDoc<BoothCapture & { id: string }>("booth_captures", capture.id);
-  // Never let a later push swap an image already stored, and keep who first captured it.
-  if (prior?.cardImagePath) {
-    capture = { ...capture, cardImagePath: prior.cardImagePath };
-    delete capture.cardImage;
-  } else {
-    capture = await storeCardImage(capture);
+  // Claim first: the capture doc is the per-id lock. The loser of the insert either replays
+  // (the lead is already stamped), backs off (a live claim), or takes a stale claim over.
+  const claimUntil = now + CLAIM_MS;
+  let prior: (BoothCapture & { id: string; claimUntil?: number }) | null = null;
+  const won = await insertDocIfAbsent("booth_captures", { ...incoming, claimUntil });
+  if (!won) {
+    prior = await getDoc<BoothCapture & { id: string; claimUntil?: number }>("booth_captures", incoming.id);
+    if (!prior) return BUSY;
+    if (prior.leadId) {
+      const lead = await getLead(prior.leadId);
+      const outcome: "created" | "merged" = lead ? ((lead.boothCaptureIds || [])[0] === prior.id ? "created" : "merged") : prior.outcome ?? "created";
+      const replay = { ...prior, outcome };
+      delete replay.claimUntil;
+      return { ok: true, leadId: prior.leadId, outcome, capture: replay };
+    }
+    if (typeof prior.claimUntil === "number" && prior.claimUntil > now) return BUSY;
+    if (!(await casDocKey("booth_captures", prior.id, "claimUntil", prior.claimUntil, claimUntil))) return BUSY;
   }
-  if (prior) capture = { ...capture, capturedById: prior.capturedById || capture.capturedById, capturedByName: prior.capturedByName || capture.capturedByName };
-  if (!capture.capturedById) capture = { ...capture, capturedById: actor.id, capturedByName: actor.name };
-  capture = { ...capture, capturedAt: clampCapturedAt(capture.capturedAt, Date.now()) };
+
+  // We hold the claim. Keep the first capturer's stamp and any image already stored.
+  let capture: BoothCapture = incoming;
+  if (prior) capture = { ...capture, capturedById: prior.capturedById || capture.capturedById, capturedByName: prior.capturedByName || capture.capturedByName, capturedAt: prior.capturedAt || capture.capturedAt };
+  const withImage = s.capture.cardImage ? { ...capture, cardImage: s.capture.cardImage } : capture;
+  capture = prior?.cardImagePath ? { ...capture, cardImagePath: prior.cardImagePath } : await storeCardImage(withImage);
 
   const shows = await listShows();
   const showName = shows.find((x) => x.id === capture.showId)?.name ?? null;
   const leads = await allLeads();
   const lite = leads.map((l) => ({ id: l.id, email: l.email, stage: l.stage, boothCaptureIds: l.boothCaptureIds }));
 
+  // A crash after the lead write but before the final capture write lands here on the retry.
   let leadId = alreadyRecorded(capture.id, lite);
-  let outcome: "created" | "merged" = prior?.outcome ?? "created";
-
-  if (!leadId) {
+  let outcome: "created" | "merged" = "created";
+  if (leadId) {
+    const l = leads.find((x) => x.id === leadId);
+    outcome = l && (l.boothCaptureIds || [])[0] === capture.id ? "created" : "merged";
+  } else {
     const d = dedupeDecision(capture, lite);
     if (d.kind === "merge") {
-      outcome = "merged";
-      leadId = d.leadId;
-      const target = leads.find((l) => l.id === d.leadId)!;
-      await updateLead(d.leadId, {
-        boothCaptureIds: [...(target.boothCaptureIds || []), capture.id],
-        interests: Array.from(new Set([...(target.interests || []), ...capture.interests])),
-        ...(capture.temperature ? { temperature: capture.temperature } : {}),
-        ...(!target.eventId && capture.showId ? { eventId: capture.showId } : {}),
-      });
       const note = `Met again at ${showName || "a trade show"}` + (capture.notes ? `\n${capture.notes}` : "");
-      await logActivity(d.leadId, { type: "note", by: actor.name, note }, actor.name);
-    } else {
-      outcome = "created";
+      const r = await addBoothCapture(d.leadId, { id: capture.id, interests: capture.interests, temperature: capture.temperature, showId: capture.showId }, { by: actor.name, text: note });
+      if (r.lead) {
+        leadId = d.leadId;
+        outcome = "merged";
+      }
+    }
+    if (!leadId) {
       const hit = capture.email ? await contactByEmail(capture.email) : null;
       const customerId = hit && "customerId" in hit ? hit.customerId : null;
       const lead = await createLead(
@@ -106,24 +125,23 @@ export async function recordBoothCapture(raw: unknown, actor: Actor, opts: { own
           email: capture.email,
           phone: capture.phone,
           source: "event",
-          owner: opts.ownerName ?? capture.capturedByName ?? actor.name,
+          owner: opts.ownerName || actor.name,
           interest: capture.interests.join(", "),
           message: leadMessage(capture, showName),
           customerId,
+          eventId: capture.showId ?? undefined,
+          interests: capture.interests,
+          temperature: capture.temperature,
+          boothCaptureIds: [capture.id],
         },
         actor.name
       );
-      await updateLead(lead.id, {
-        eventId: capture.showId ?? undefined,
-        interests: capture.interests,
-        temperature: capture.temperature,
-        boothCaptureIds: [capture.id],
-      });
       leadId = lead.id;
+      outcome = "created";
     }
   }
 
-  // An inline image (dev without Blob) rides on the stored doc; a prior inline image survives a later push.
+  // The final doc replaces the claim (claimUntil gone). An inline image (dev without Blob) rides on the doc.
   const stored: BoothCapture & { id: string } = { ...capture, leadId, outcome, rev: (prior?.rev ?? 0) + 1 };
   if (stored.cardImagePath === "inline" && !stored.cardImage && prior?.cardImage) stored.cardImage = prior.cardImage;
   await upsertDoc("booth_captures", stored);
@@ -138,7 +156,9 @@ export async function pushBoothCapture(
   if (!can("create", user.roles)) return { id: rec.id, status: "error", error: "You don't have permission to save booth captures" };
   try {
     const r = await recordBoothCapture({ ...rec.doc, id: rec.id }, { id: user.id, name: user.name });
-    return r.ok ? { id: rec.id, status: "ok", rev: r.capture.rev } : { id: rec.id, status: "error", error: r.error };
+    if (r.ok) return { id: rec.id, status: "ok", rev: r.capture.rev };
+    // A live claim means another request is saving this same capture: the device tries again.
+    return { id: rec.id, status: r.busy ? "retry" : "error", error: r.error };
   } catch (e) {
     console.error("[booth] push failed; the device will retry", rec.id, e);
     return { id: rec.id, status: "retry", error: "The server couldn't save it just now; it will try again" };

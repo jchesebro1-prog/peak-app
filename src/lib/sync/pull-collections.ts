@@ -32,11 +32,12 @@ export function pullCollections(param: string | null | undefined): CollectionNam
  *  (pushes ignore them anyway); every other collection passes through unchanged. */
 export function pulledChanges<C extends { doc: Record<string, unknown> }>(coll: string, changes: C[]): C[] {
   if (coll === "booth_captures") {
-    // An inline card image (local dev without Blob) is never sent to a device; a Blob path is a reference and stays.
+    // An inline card image (local dev without Blob) and the server's claim stamp are never sent to a device; a Blob path is a reference and stays.
     return changes.map((c) => {
-      if (!("cardImage" in c.doc)) return c;
+      if (!("cardImage" in c.doc) && !("claimUntil" in c.doc)) return c;
       const doc = { ...c.doc };
       delete doc.cardImage;
+      delete doc.claimUntil;
       return { ...c, doc };
     });
   }

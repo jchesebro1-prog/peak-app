@@ -15,7 +15,7 @@
 export const SERVER_OWNED_FIELDS: Readonly<Record<string, readonly string[]>> = {
   tasks: ["threadShare", "threadId"],
   // booth_captures never take the generic push path (pushBoothCapture records them); this is defence in depth.
-  booth_captures: ["leadId", "outcome", "cardImagePath"],
+  booth_captures: ["leadId", "outcome", "cardImagePath", "claimUntil"],
 };
 
 /** Fields not carried back onto a document the push revives from Deleted. */

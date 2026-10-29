@@ -7,8 +7,9 @@ import { activeShow, applyShowOp, normalizeSlug, sanitizeCards, sanitizeShows, s
 import { buildVCard, vcardFileName } from "../src/lib/booth/vcard";
 import { parseCardText, type ParsedCard } from "../src/lib/booth/card-parse";
 import { listShows, getActiveShow, writeShow, listCards, cardUserId, setCard, getCapture, listCapturesForShow } from "../src/lib/stores/booth";
-import { recordBoothCapture } from "../src/lib/booth/capture-server";
-import { get as getLead } from "../src/lib/stores/leads";
+import { pushBoothCapture, recordBoothCapture } from "../src/lib/booth/capture-server";
+import { get as getLead, getAll as allLeadsT, addBoothCapture } from "../src/lib/stores/leads";
+import { insertDocIfAbsent } from "../src/db/doc-store";
 import { pulledChanges } from "../src/lib/sync/pull-collections";
 import { sanitizePushedDoc } from "../src/lib/sync/server-owned";
 import { SYNCABLE_COLLECTIONS, DOC_TABLES } from "../src/db/doc-tables";
@@ -140,8 +141,13 @@ export async function boothDbChecks(ok: Ok) {
   ok(r1.ok && r1.outcome === "created", "booth: first capture creates a lead");
   const lead1 = r1.ok ? await getLead(r1.leadId) : null;
   ok(!!lead1 && lead1.source === "event" && lead1.eventId === showId && lead1.owner === actor.name && (lead1.boothCaptureIds || []).includes(cap1.id) && lead1.contact === "Pat Visitor" && lead1.org === "Visitor Hall", "booth: lead fields");
+  const leadsBefore = (await allLeadsT()).length;
+  const actsBefore = lead1?.activities.length ?? -1;
   const r1b = await recordBoothCapture(cap1, actor);
-  ok(r1b.ok && r1.ok && r1b.leadId === r1.leadId, "booth: replaying the same capture returns the same lead");
+  ok(r1b.ok && r1.ok && r1b.leadId === r1.leadId && r1b.outcome === "created", "booth: replaying the same capture returns the same lead (outcome from the lead)");
+  const leadAfter = r1.ok ? await getLead(r1.leadId) : null;
+  ok((await allLeadsT()).length === leadsBefore && leadAfter?.activities.length === actsBefore && (leadAfter?.boothCaptureIds || []).length === 1, "booth: a replay writes no second lead and no new activity");
+  ok(!("claimUntil" in ((await getCapture(cap1.id)) as object)), "booth: the finished capture doc carries no claim");
   ok((await getCapture(cap1.id))?.leadId === (r1.ok ? r1.leadId : ""), "booth: capture doc stamped with its lead");
   const cap2 = { ...cap1, id: "bc_00000000000000a2", email: "PAT.VISITOR@example.org", notes: "came back day 2", capturedAt: Date.now() + 5 };
   const r2 = await recordBoothCapture(cap2, actor);
@@ -150,6 +156,52 @@ export async function boothDbChecks(ok: Ok) {
   ok(!!merged && (merged.boothCaptureIds || []).length === 2 && merged.activities.some((a) => a.note.includes("Met again at Booth DB Show") && a.note.includes("came back day 2")), "booth: merge logs Met again with notes");
   const bad = await recordBoothCapture({ ...cap1, id: "bc_00000000000000a3", firstName: "", lastName: "" }, actor);
   ok(!bad.ok, "booth: an invalid capture is refused");
+
+  // atomic add: the same capture id adds once
+  if (r1.ok) {
+    const before = (await getLead(r1.leadId))!.activities.length;
+    const x1 = await addBoothCapture(r1.leadId, { id: "bc_00000000000000d1", interests: ["av"], temperature: "warm", showId }, { by: "T", text: "Met again at X" });
+    const x2 = await addBoothCapture(r1.leadId, { id: "bc_00000000000000d1", interests: ["av"], temperature: "warm", showId }, { by: "T", text: "Met again at X" });
+    const after = (await getLead(r1.leadId))!;
+    ok(x1.added && !x2.added && after.activities.length === before + 1 && after.boothCaptureIds!.filter((i) => i === "bc_00000000000000d1").length === 1 && after.interests!.includes("av") && after.temperature === "warm", "booth: addBoothCapture twice with one id adds once");
+    ok(!(await addBoothCapture("L-nope", { id: "bc_00000000000000d2", interests: [], temperature: null, showId: null }, { by: "T", text: "x" })).lead, "booth: addBoothCapture on a missing lead returns no lead");
+  }
+
+  // claims: a live claim backs off (retry), a stale one is taken over, attribution comes from the actor
+  const claimBase = { via: "booth" as const, showId, firstName: "Claim", lastName: "Test", email: "claim.test@example.org", phone: "", company: "", title: "", interests: [], temperature: null, notes: "", capturedAt: Date.now(), capturedById: "u-prior", capturedByName: "Prior Person" };
+  const liveId = "bc_00000000000000e1";
+  await insertDocIfAbsent("booth_captures", { id: liveId, ...claimBase, claimUntil: Date.now() + 60_000 } as never);
+  const busy = await recordBoothCapture({ ...claimBase, id: liveId }, actor);
+  ok(!busy.ok && busy.busy === true && /try again/.test(busy.error), "booth: a live claim by another writer returns busy");
+  const pushBusy = await pushBoothCapture({ id: liveId, doc: { ...claimBase } }, { ...actor, roles: ["Estimator"] });
+  ok(pushBusy.status === "retry", "booth: a busy push replies retry");
+  const pushDenied = await pushBoothCapture({ id: liveId, doc: { ...claimBase } }, { ...actor, roles: ["Reviewer"] });
+  ok(pushDenied.status === "error", "booth: a push without create permission is an error");
+  const staleId = "bc_00000000000000e2";
+  await insertDocIfAbsent("booth_captures", { id: staleId, ...claimBase, email: "stale.claim@example.org", claimUntil: Date.now() - 1000 } as never);
+  const stale = await recordBoothCapture({ ...claimBase, id: staleId, email: "stale.claim@example.org", capturedById: "u-evil", capturedByName: "Evil" }, actor);
+  const staleDoc = await getCapture(staleId);
+  ok(stale.ok && stale.outcome === "created" && staleDoc?.leadId === (stale.ok ? stale.leadId : "") && !("claimUntil" in (staleDoc as object)), "booth: a stale claim is taken over and recorded");
+  ok(staleDoc?.capturedById === "u-prior" && staleDoc.capturedByName === "Prior Person", "booth: a takeover keeps the first capturer");
+  const attrId = "bc_00000000000000e3";
+  await recordBoothCapture({ ...claimBase, id: attrId, email: "attr@example.org", capturedById: "u-evil", capturedByName: "Evil" }, actor);
+  const attrDoc = await getCapture(attrId);
+  ok(attrDoc?.capturedById === actor.id && attrDoc.capturedByName === actor.name, "booth: captured-by comes from the actor, not the payload");
+  const ownerLead = attrDoc?.leadId ? await getLead(attrDoc.leadId) : null;
+  ok(ownerLead?.owner === actor.name, "booth: lead owner is the actor");
+  const ownerOverride = await recordBoothCapture({ ...claimBase, id: "bc_00000000000000e4", email: "owner.override@example.org" }, actor, { ownerName: "Card Owner" });
+  ok(ownerOverride.ok && (await getLead(ownerOverride.leadId))?.owner === "Card Owner", "booth: ownerName option sets the lead owner");
+  const blankOwner = await recordBoothCapture({ ...claimBase, id: "bc_00000000000000e5", email: "blank.owner@example.org" }, actor, { ownerName: "" });
+  ok(blankOwner.ok && (await getLead(blankOwner.leadId))?.owner === actor.name, "booth: a blank ownerName falls back to the actor");
+
+  // two simultaneous records of the same new capture: one lead, one winner, the other replays or backs off
+  const raceCap = { ...claimBase, id: "bc_00000000000000f1", email: "race.cap@example.org", capturedById: "", capturedByName: "" };
+  const race = await Promise.all([recordBoothCapture(raceCap, actor), recordBoothCapture(raceCap, actor)]);
+  const raceOk = race.filter((r) => r.ok);
+  const raceLeads = (await allLeadsT()).filter((l) => (l.boothCaptureIds || []).includes(raceCap.id));
+  ok(raceLeads.length === 1 && raceOk.length >= 1 && raceOk.every((r) => r.ok && r.leadId === raceLeads[0].id) && race.every((r) => r.ok || r.busy), "booth: a concurrent double record makes exactly one lead");
+  const raceAgain = await recordBoothCapture(raceCap, actor);
+  ok(raceAgain.ok && raceAgain.leadId === raceLeads[0].id, "booth: the retry after the race finds the same lead");
 
   // card image safety: only real JPEG bytes are kept (no Blob in the harness → "inline")
   const jpegUrl = "data:image/jpeg;base64," + Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46]).toString("base64");
@@ -178,11 +230,12 @@ export async function boothDbChecks(ok: Ok) {
   ok(forShow.some((c) => c.id === cap1.id) && forShow.some((c) => c.id === cap2.id), "booth: listCapturesForShow returns the recorded captures");
 
   // sync: devices never pull an inline card image; pushes never carry server-owned fields
-  const pulled = pulledChanges("booth_captures", [{ doc: { id: "bc_x", cardImage: jpegUrl, cardImagePath: "inline", leadId: "L1" } as Record<string, unknown> }]);
-  ok(!("cardImage" in pulled[0].doc) && pulled[0].doc.cardImagePath === "inline" && pulled[0].doc.leadId === "L1", "booth: pull strips the inline card image only");
+  const pulled = pulledChanges("booth_captures", [{ doc: { id: "bc_x", cardImage: jpegUrl, cardImagePath: "inline", leadId: "L1", claimUntil: 5 } as Record<string, unknown> }]);
+  ok(!("cardImage" in pulled[0].doc) && !("claimUntil" in pulled[0].doc) && pulled[0].doc.cardImagePath === "inline" && pulled[0].doc.leadId === "L1", "booth: pull strips the inline card image only");
   const other = pulledChanges("tasks", [{ doc: { id: "t1", cardImage: "x" } as Record<string, unknown> }]);
   ok(other[0].doc.cardImage === "x", "booth: pull leaves other collections alone");
   const san = sanitizePushedDoc("booth_captures", { id: "bc_x", leadId: "evil", outcome: "merged", cardImagePath: "evil" }, { doc: { leadId: "L1", outcome: "created", cardImagePath: "p" }, deleted: false });
+  ok(!("claimUntil" in san), "booth: a pushed claimUntil is never kept");
   ok(san.leadId === "L1" && san.outcome === "created" && san.cardImagePath === "p", "booth: server-owned capture fields come from the stored copy");
 
   // share-back draft — one per lead, in the owner's mailbox, nothing without an email
