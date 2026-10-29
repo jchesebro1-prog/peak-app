@@ -6,6 +6,7 @@ import type { Ok } from "./test-inbox-org";
 import { activeShow, applyShowOp, normalizeSlug, sanitizeCards, sanitizeShows, slugProblem, type Show } from "../src/lib/booth/shows";
 import { buildVCard, vcardFileName } from "../src/lib/booth/vcard";
 import { parseCardText, type ParsedCard } from "../src/lib/booth/card-parse";
+import { alreadyRecorded, dedupeDecision, followUpCopy, leadMessage, newCaptureId, sanitizeCapture, type BoothCapture } from "../src/lib/booth/capture";
 
 const S = (over: Partial<Show>): Show => ({ id: "sh_00000001", name: "LDI 2026", startAt: null, endAt: null, active: false, archived: false, createdAt: 1, ...over });
 const mint = (() => { let n = 0; return () => "sh_" + String(++n).padStart(8, "0"); })();
@@ -70,6 +71,39 @@ export async function boothChecks(ok: Ok) {
     }
   });
   ok(JSON.stringify(parseCardText([])) === JSON.stringify({ name: "", email: "", phones: [], website: "", company: "", title: "" }), "booth: empty card → blank fields");
+
+  // capture model
+  const C = (over: Record<string, unknown> = {}) => ({ id: "bc_0123456789abcdef", via: "booth", showId: "sh_00000001", firstName: "Sarah", lastName: "Lind", email: "Sarah@Riverside.org", phone: "", company: "Riverside PAC", title: "TD", interests: ["rigging", "bogus"], temperature: "hot", notes: "wants a quote", capturedAt: 100, capturedById: "u1", capturedByName: "Jeff Chesebro", ...over });
+  const good = sanitizeCapture(C());
+  ok(good.ok && good.capture.email === "sarah@riverside.org" && good.capture.interests.join() === "rigging", "booth: capture sanitized (email lowered, unknown interest dropped)");
+  ok(!sanitizeCapture(C({ id: "bc_x" })).ok, "booth: bad capture id refused");
+  ok(!sanitizeCapture(C({ firstName: "", lastName: "" })).ok, "booth: name required");
+  ok(!sanitizeCapture(C({ email: "", phone: "" })).ok, "booth: email or phone required");
+  ok(sanitizeCapture(C({ email: "", phone: "414-555-0100" })).ok, "booth: phone alone is enough");
+  ok(!sanitizeCapture(C({ email: "not-an-email" })).ok, "booth: malformed email refused");
+  const img = sanitizeCapture(C({ cardImage: "data:image/png;base64,AAAA" }));
+  ok(img.ok && img.capture.cardImage === undefined, "booth: non-JPEG card image dropped");
+  const big = sanitizeCapture(C({ cardImage: "data:image/jpeg;base64," + "A".repeat(400_000) }));
+  ok(big.ok && big.capture.cardImage === undefined, "booth: oversized card image dropped");
+  ok(sanitizeCapture(C({ temperature: "lukewarm" })).ok && (sanitizeCapture(C({ temperature: "lukewarm" })) as { capture: BoothCapture }).capture.temperature === null, "booth: unknown temperature → null");
+  ok(newCaptureId(() => "0123456789abcdef") === "bc_0123456789abcdef", "booth: capture id shape");
+
+  const cap = (good as { capture: BoothCapture }).capture;
+  const leads = [
+    { id: "L-1100", email: "SARAH@riverside.org", stage: "lost" },
+    { id: "L-1101", email: "sarah@riverside.org", stage: "contacted" },
+  ];
+  const dd = dedupeDecision(cap, leads);
+  ok(dd.kind === "merge" && dd.leadId === "L-1101", "booth: an open lead with the same email is merged into");
+  ok(dedupeDecision(cap, [{ id: "L-1", email: "sarah@riverside.org", stage: "won" }]).kind === "new", "booth: won/lost leads are not merged into");
+  ok(dedupeDecision({ ...cap, email: "" }, [{ id: "L-1", email: "", stage: "new" }]).kind === "new", "booth: phone-only never merges");
+  ok(alreadyRecorded(cap.id, [{ id: "L-7", email: "", stage: "new", boothCaptureIds: [cap.id] }]) === "L-7" && alreadyRecorded(cap.id, leads) === null, "booth: alreadyRecorded finds the lead holding the capture");
+  const msg = leadMessage(cap, "LDI 2026");
+  ok(msg.includes("Met at LDI 2026") && msg.includes("Interests: Rigging") && msg.includes("wants a quote") && msg.includes("Temperature: Hot"), "booth: lead message");
+  ok(leadMessage({ ...cap, interests: [], notes: "", temperature: null }, null) === "Met at a trade show", "booth: lead message with nothing extra");
+  const fu = followUpCopy({ firstName: "Sarah", showName: "LDI 2026", interests: ["rigging", "lighting"], senderName: "Jeff Chesebro" });
+  ok(fu.subject === "Great meeting you at LDI 2026" && fu.body.startsWith("Hi Sarah,") && fu.body.includes("rigging and lighting") && fu.body.trimEnd().endsWith("Jeff Chesebro"), "booth: follow-up copy");
+  ok(followUpCopy({ firstName: "", showName: null, interests: [], senderName: "Jeff" }).subject === "Great meeting you", "booth: follow-up copy without a show");
 }
 
 export async function boothDbChecks(ok: Ok) {
