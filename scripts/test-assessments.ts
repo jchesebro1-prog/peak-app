@@ -677,7 +677,8 @@ export async function dropAssessIdentityFixtures() {
 export async function assessmentDbChecks(ok: Ok) {
   // registration + pins
   for (const c of ["assessments", "findings", "venue_profiles"]) ok(c in DOC_TABLES, `assess db: ${c} is a registered doc collection`);
-  ok(SYNCABLE_COLLECTIONS.slice(-2).join() === "assessments,findings" && FIELD_COLLECTIONS.slice(-2).join() === "assessments,findings", "assess db: assessments + findings appended to SYNCABLE and FIELD collections in the same order");
+  const pair = (l: readonly string[]) => l.slice(l.indexOf("assessments"), l.indexOf("assessments") + 2).join(); // later features append after findings
+  ok(pair(SYNCABLE_COLLECTIONS) === "assessments,findings" && pair(FIELD_COLLECTIONS) === "assessments,findings", "assess db: assessments + findings appended to SYNCABLE and FIELD collections in the same order");
   ok(!(SYNCABLE_COLLECTIONS as string[]).includes("venue_profiles") && CONFIG_COLLECTIONS.includes("venue_profiles" as never), "assess db: venue_profiles is config (kept through the go-live wipe), not syncable");
   const db = await getDb();
   try {

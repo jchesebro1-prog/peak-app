@@ -6,6 +6,9 @@ import type { Ok } from "./test-inbox-org";
 import { activeShow, applyShowOp, normalizeSlug, sanitizeCards, sanitizeShows, slugProblem, type Show } from "../src/lib/booth/shows";
 import { buildVCard, vcardFileName } from "../src/lib/booth/vcard";
 import { parseCardText, type ParsedCard } from "../src/lib/booth/card-parse";
+import { listShows, getActiveShow, writeShow, listCards, cardUserId, setCard } from "../src/lib/stores/booth";
+import { SYNCABLE_COLLECTIONS, DOC_TABLES } from "../src/db/doc-tables";
+import { FIELD_COLLECTIONS } from "../src/lib/sync/engine";
 import { alreadyRecorded, dedupeDecision, followUpCopy, leadMessage, newCaptureId, sanitizeCapture, type BoothCapture } from "../src/lib/booth/capture";
 
 const S = (over: Partial<Show>): Show => ({ id: "sh_00000001", name: "LDI 2026", startAt: null, endAt: null, active: false, archived: false, createdAt: 1, ...over });
@@ -107,7 +110,21 @@ export async function boothChecks(ok: Ok) {
 }
 
 export async function boothDbChecks(ok: Ok) {
-  void ok; // filled in by Task 5 and Task 6
+  ok("booth_captures" in DOC_TABLES && SYNCABLE_COLLECTIONS.includes("booth_captures"), "booth: booth_captures is a syncable doc table");
+  ok((FIELD_COLLECTIONS as readonly string[]).includes("booth_captures"), "booth: device mirrors booth_captures");
+
+  const a = await writeShow({ kind: "upsert", show: { name: "Test Show A" } });
+  const b = await writeShow({ kind: "upsert", show: { name: "Test Show B" } });
+  ok(a.ok && b.ok && (await listShows()).length >= 2, "booth: shows persist");
+  await writeShow({ kind: "activate", id: (a as { id: string }).id });
+  await writeShow({ kind: "activate", id: (b as { id: string }).id });
+  ok((await getActiveShow())?.id === (b as { id: string }).id && (await listShows()).filter((s) => s.active).length === 1, "booth: one active show in storage");
+
+  ok((await setCard("Jeff", "u1")).ok && (await cardUserId("jeff")) === "u1", "booth: card slug stored normalized");
+  ok(!(await setCard("bad slug", "u1")).ok, "booth: bad slug refused");
+  await setCard("jeff", null);
+  ok((await cardUserId("jeff")) === null && !("jeff" in (await listCards())), "booth: card removed");
+  await writeShow({ kind: "deactivate" });
 }
 
 if (process.argv[1]?.endsWith("test-booth.ts")) {

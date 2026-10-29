@@ -187,6 +187,13 @@ export interface LeadRecord {
   /** Estimate number (#223) — shown as OPP-1005; its quotes carry it. Written
    *  only by assign_estimate_numbers() (or create()'s explicit carry). */
   estNo?: number;
+  /** Trade show booth capture — the show (`sh_…`, settings blob trade_shows) this lead was met at. */
+  eventId?: string;
+  /** Booth capture interest keys (src/lib/booth/capture.ts INTERESTS). */
+  interests?: string[];
+  temperature?: "hot" | "warm" | "cold" | null;
+  /** Every booth capture recorded into this lead — recordBoothCapture's idempotency key. */
+  boothCaptureIds?: string[];
   createdAt: number;
   updatedAt: number;
   lastActivityAt: number;
