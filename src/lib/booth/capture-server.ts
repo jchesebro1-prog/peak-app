@@ -107,8 +107,15 @@ export async function recordBoothCapture(raw: unknown, actor: Actor, opts: { own
   } else {
     const d = dedupeDecision(capture, lite);
     if (d.kind === "merge") {
-      const note = `Met again at ${showName || "a trade show"}` + (capture.notes ? `\n${capture.notes}` : "");
-      const r = await addBoothCapture(d.leadId, { id: capture.id, interests: capture.interests, temperature: capture.temperature, showId: capture.showId }, { by: actor.name, text: note });
+      // A public card submission is unverified: never attributed to the card owner, and it can't re-rate the lead.
+      const fromCard = capture.via === "card";
+      const met = `Met again at ${showName || "a trade show"}` + (capture.notes ? `\n${capture.notes}` : "");
+      const note = fromCard ? `Sent from the contact card (not verified): ${met}` : met;
+      const r = await addBoothCapture(
+        d.leadId,
+        { id: capture.id, interests: capture.interests, temperature: fromCard ? null : capture.temperature, showId: capture.showId },
+        { by: fromCard ? "Contact card" : actor.name, text: note }
+      );
       if (r.lead) {
         leadId = d.leadId;
         outcome = "merged";

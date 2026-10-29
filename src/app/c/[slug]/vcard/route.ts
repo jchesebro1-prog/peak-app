@@ -1,7 +1,7 @@
 import { cardUserId } from "@/lib/stores/booth";
 import { getUser } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
-import { buildVCard, vcardFileName } from "@/lib/booth/vcard";
+import { buildVCard, contentDispositionFor } from "@/lib/booth/vcard";
 import { guardedFetchBytes } from "@/lib/venue-calendar-fetch";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +43,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
   return new Response(vcf, {
     headers: {
       "Content-Type": "text/vcard; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${vcardFileName(user.name)}"`,
+      "Content-Disposition": contentDispositionFor(user.name),
       "Cache-Control": "no-store",
     },
   });

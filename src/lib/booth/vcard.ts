@@ -55,3 +55,18 @@ export function vcardFileName(name: string): string {
   const clean = String(name || "").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
   return (clean || "contact") + ".vcf";
 }
+
+/**
+ * Content-Disposition for the vCard download. Header values must be Latin-1,
+ * so the plain `filename` is an ASCII fallback and `filename*` carries the
+ * real UTF-8 name (RFC 6266 / 8187).
+ */
+export function contentDispositionFor(name: string): string {
+  const full = vcardFileName(name).replace(/["\\]/g, "");
+  const ascii = full
+    .replace(/[ŁłØøĐđßÆæ]/g, (c) => ({ Ł: "L", ł: "l", Ø: "O", ø: "o", Đ: "D", đ: "d", ß: "ss", Æ: "AE", æ: "ae" })[c] ?? "")
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7e]/g, "").replace(/\s+/g, " ").trim();
+  const fallback = /[A-Za-z0-9]/.test(ascii.replace(/\.vcf$/, "")) ? ascii : "contact.vcf";
+  const star = encodeURIComponent(full).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${star}`;
+}

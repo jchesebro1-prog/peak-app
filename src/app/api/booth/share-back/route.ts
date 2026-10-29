@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { rateLimit, rateLimitRefund, clientIp } from "@/lib/rate-limit";
 import { cardUserId, getActiveShow } from "@/lib/stores/booth";
+import { normalizeSlug } from "@/lib/booth/shows";
 import { getUser } from "@/lib/users";
 import { INTERESTS, newCaptureId } from "@/lib/booth/capture";
 import { recordBoothCapture } from "@/lib/booth/capture-server";
@@ -17,7 +18,9 @@ import { createShareBackDraft } from "@/lib/booth/followup-server";
 
 export const dynamic = "force-dynamic";
 
-const IP_LIMIT = 5;
+// Per-IP cap is generous on purpose: attendees at a show share the venue's Wi-Fi (one public IP). The per-person
+// guard is the email/phone + slug dedup window below.
+const IP_LIMIT = 30;
 const IP_WINDOW_MS = 10 * 60 * 1000;
 const DEDUP_WINDOW_MS = 5 * 60 * 1000;
 
@@ -51,7 +54,7 @@ export async function POST(req: Request) {
   const owner = userId ? await getUser(userId) : null;
   if (!owner || owner.status !== "active") return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const dedupKey = `booth:dup:${f.email.toLowerCase() || f.phone}:${f.slug}`;
+  const dedupKey = `booth:dup:${f.email.toLowerCase() || f.phone}:${normalizeSlug(f.slug)}`;
   if (!rateLimit(dedupKey, 1, DEDUP_WINDOW_MS).ok) return NextResponse.json({ ok: true, duplicate: true }, { status: 200 });
 
   const show = await getActiveShow();

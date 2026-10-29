@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import { activeShow, applyShowOp, normalizeSlug, sanitizeCards, sanitizeShows, slugProblem, type Show } from "../src/lib/booth/shows";
-import { buildVCard, vcardFileName } from "../src/lib/booth/vcard";
+import { buildVCard, contentDispositionFor, vcardFileName } from "../src/lib/booth/vcard";
 import { parseCardText, type ParsedCard } from "../src/lib/booth/card-parse";
 import { listShows, getActiveShow, writeShow, listCards, cardUserId, setCard, getCapture, listCapturesForShow } from "../src/lib/stores/booth";
 import { pushBoothCapture, recordBoothCapture } from "../src/lib/booth/capture-server";
@@ -67,6 +67,13 @@ export async function boothChecks(ok: Ok) {
   const photo = buildVCard({ name: "A B", photoJpegBase64: "x".repeat(300) }).split("\r\n");
   ok(photo.every((l) => Buffer.byteLength(l) <= 75) && photo.some((l) => l.startsWith("PHOTO;ENCODING=b;TYPE=JPEG:")) && photo.some((l) => l.startsWith(" ")), "booth: vCard folds long lines at 75 octets");
   ok(vcardFileName("Jeff Chesebro") === "Jeff Chesebro.vcf" && vcardFileName(' a/"b ') === "a b.vcf" && vcardFileName("") === "contact.vcf", "booth: vCard file name");
+  const cdAscii = contentDispositionFor("Jeff Chesebro");
+  ok(cdAscii === `attachment; filename="Jeff Chesebro.vcf"; filename*=UTF-8''Jeff%20Chesebro.vcf`, "booth: Content-Disposition for an ASCII name");
+  const cdPl = contentDispositionFor("Łukasz Nowak");
+  ok(/^[\x20-\x7e]*$/.test(cdPl) && cdPl.includes('filename="Lukasz Nowak.vcf"') && cdPl.includes("filename*=UTF-8''%C5%81ukasz%20Nowak.vcf"), "booth: Content-Disposition is Latin-1 safe for Łukasz Nowak");
+  const cdQ = contentDispositionFor('A "Q" B\\C');
+  ok((cdQ.match(/"/g) || []).length === 2 && !cdQ.includes("\\") && /^[\x20-\x7e]*$/.test(cdQ), "booth: quotes and backslashes stripped from Content-Disposition");
+  ok(contentDispositionFor("日本語").startsWith('attachment; filename="contact.vcf"'), "booth: an all-non-Latin name falls back to contact.vcf");
 
   // card parser — every committed sample
   const samples = JSON.parse(readFileSync(join(process.cwd(), "docs", "booth", "card-samples.json"), "utf8")) as Array<{ lines: string[]; expect: Partial<ParsedCard> }>;
@@ -154,6 +161,17 @@ export async function boothDbChecks(ok: Ok) {
   ok(r2.ok && r1.ok && r2.outcome === "merged" && r2.leadId === r1.leadId, "booth: same email → merged into the open lead");
   const merged = r1.ok ? await getLead(r1.leadId) : null;
   ok(!!merged && (merged.boothCaptureIds || []).length === 2 && merged.activities.some((a) => a.note.includes("Met again at Booth DB Show") && a.note.includes("came back day 2")), "booth: merge logs Met again with notes");
+  // A public card submission merging into an existing lead is unverified: not attributed to the owner, no re-rating.
+  const cardCap = { ...cap1, id: "bc_00000000000000a4", via: "card", email: "pat.visitor@example.org", temperature: "cold", notes: "tapped my card", capturedAt: Date.now() + 9 };
+  const tempBefore = (await getLead(r1.ok ? r1.leadId : ""))?.temperature;
+  const rc = await recordBoothCapture(cardCap, { id: "u-owner", name: "Card Owner" }, { ownerName: "Card Owner" });
+  const afterCard = r1.ok ? await getLead(r1.leadId) : null;
+  const cardAct = afterCard?.activities.find((x) => x.note.includes("tapped my card"));
+  ok(rc.ok && rc.outcome === "merged", "booth: a card submission with a known email merges");
+  ok(!!cardAct && cardAct.by === "Contact card" && cardAct.note.startsWith("Sent from the contact card (not verified): Met again at Booth DB Show"), "booth: card merge is logged by Contact card with the unverified prefix");
+  ok(afterCard?.temperature === tempBefore && tempBefore === "hot", "booth: a card merge leaves the lead's temperature alone");
+  const boothAct = merged?.activities.find((x) => x.note.includes("came back day 2"));
+  ok(!!boothAct && boothAct.by === actor.name && boothAct.note.startsWith("Met again at"), "booth: a staff (booth) merge is still attributed to the actor, no prefix");
   const bad = await recordBoothCapture({ ...cap1, id: "bc_00000000000000a3", firstName: "", lastName: "" }, actor);
   ok(!bad.ok, "booth: an invalid capture is refused");
 
