@@ -1,8 +1,11 @@
 /* Trade show booth capture — harness checks. `boothChecks` is pure; `boothDbChecks` needs the test DB.
    Run the pure half alone with `npx tsx scripts/test-booth.ts`. */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import { activeShow, applyShowOp, normalizeSlug, sanitizeCards, sanitizeShows, slugProblem, type Show } from "../src/lib/booth/shows";
 import { buildVCard, vcardFileName } from "../src/lib/booth/vcard";
+import { parseCardText, type ParsedCard } from "../src/lib/booth/card-parse";
 
 const S = (over: Partial<Show>): Show => ({ id: "sh_00000001", name: "LDI 2026", startAt: null, endAt: null, active: false, archived: false, createdAt: 1, ...over });
 const mint = (() => { let n = 0; return () => "sh_" + String(++n).padStart(8, "0"); })();
@@ -55,6 +58,18 @@ export async function boothChecks(ok: Ok) {
   const photo = buildVCard({ name: "A B", photoJpegBase64: "x".repeat(300) }).split("\r\n");
   ok(photo.every((l) => Buffer.byteLength(l) <= 75) && photo.some((l) => l.startsWith("PHOTO;ENCODING=b;TYPE=JPEG:")) && photo.some((l) => l.startsWith(" ")), "booth: vCard folds long lines at 75 octets");
   ok(vcardFileName("Jeff Chesebro") === "Jeff Chesebro.vcf" && vcardFileName(' a/"b ') === "a b.vcf" && vcardFileName("") === "contact.vcf", "booth: vCard file name");
+
+  // card parser — every committed sample
+  const samples = JSON.parse(readFileSync(join(process.cwd(), "docs", "booth", "card-samples.json"), "utf8")) as Array<{ lines: string[]; expect: Partial<ParsedCard> }>;
+  ok(samples.length >= 15, "booth: ≥ 15 card samples");
+  samples.forEach((s, i) => {
+    const got = parseCardText(s.lines);
+    for (const [k, want] of Object.entries(s.expect)) {
+      const have = (got as Record<string, unknown>)[k];
+      ok(JSON.stringify(have) === JSON.stringify(want), `booth: card sample ${i + 1} ${k} = ${JSON.stringify(have)} (want ${JSON.stringify(want)})`);
+    }
+  });
+  ok(JSON.stringify(parseCardText([])) === JSON.stringify({ name: "", email: "", phones: [], website: "", company: "", title: "" }), "booth: empty card → blank fields");
 }
 
 export async function boothDbChecks(ok: Ok) {
