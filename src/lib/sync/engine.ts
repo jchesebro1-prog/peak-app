@@ -368,6 +368,15 @@ class SyncEngine {
     return { ...(row.doc as T), id: row.id };
   }
 
+  /** Every outbox entry this device holds for one collection (pending or refused), oldest first. */
+  async outboxEntries(collection: string): Promise<Array<{ id: string; state: "pending" | "error"; doc: Record<string, unknown>; error?: string }>> {
+    const rows = await idb.getAll<OutboxEntry>("outbox");
+    return rows
+      .filter((r) => r.collection === collection)
+      .sort((a, b) => a.queuedAt - b.queuedAt)
+      .map((r) => ({ id: r.id, state: r.state, doc: r.doc, ...(r.error ? { error: r.error } : {}) }));
+  }
+
   /** Outbox entries the server refused (state "error"), with the reason it gave when it gave one. */
   async erroredEntries(): Promise<Array<{ collection: string; id: string; doc: Record<string, unknown>; error?: string }>> {
     const rows = await idb.getAll<OutboxEntry>("outbox");

@@ -9,11 +9,11 @@ import { recordBoothCapture } from "@/lib/booth/capture-server";
  * who captured it is taken from the signed-in user inside `recordBoothCapture`, never from the payload. A refusal
  * (including the "still saving this visitor" busy answer) comes back as `{ ok:false, error }`.
  */
-export async function saveBoothCaptureAction(doc: Record<string, unknown>): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function saveBoothCaptureAction(doc: Record<string, unknown>): Promise<{ ok: true; leadId: string; outcome: "created" | "merged" } | { ok: false; error: string }> {
   const me = await requirePerm("create");
   const r = await recordBoothCapture(doc, { id: me.id, name: me.name });
   if (!r.ok) return { ok: false, error: r.error };
   revalidatePath("/leads/booth");
   revalidatePath("/leads");
-  return { ok: true };
+  return { ok: true, leadId: r.leadId, outcome: r.outcome };
 }

@@ -21,7 +21,7 @@ import { saveBoothCaptureAction } from "./actions";
  * timestamps); the server takes "captured by" from the signed-in user and ignores the payload's. */
 
 type Recent = Pick<BoothCapture, "id" | "firstName" | "lastName" | "company" | "temperature" | "capturedAt" | "leadId" | "outcome" | "showId">;
-type Row = Recent & { status: "synced" | "waiting" | "error"; error?: string };
+type Row = Recent & { status: "synced" | "waiting" | "error"; error?: string; /** went through the outbox on this device */ queued?: boolean };
 
 const EMPTY = { firstName: "", lastName: "", email: "", phone: "", company: "", title: "", notes: "" };
 type Fields = typeof EMPTY;
@@ -57,27 +57,68 @@ export default function BoothForm(props: {
   const [local, setLocal] = useState<Row[]>([]);
   const firstRef = useRef<HTMLInputElement>(null);
 
-  // Rows saved on this device that are still waiting: re-check the outbox on every engine change. An entry that is
-  // gone has synced; one in "error" shows its message. Functional updates, so a save that lands mid-check isn't lost.
-  const waitingKey = local.filter((r) => r.status === "waiting").map((r) => r.id).join(",");
+  // Seed with this device's queued captures (a reload or PWA relaunch while offline must not lose the "Waiting to
+  // sync" rows). Rows that already exist (saved before the read finished) win.
   useEffect(() => {
-    if (!waitingKey) return;
-    const waitingIds = waitingKey.split(",");
+    let alive = true;
+    void getEngine()
+      .outboxEntries("booth_captures")
+      .then((entries) => {
+        if (!alive || entries.length === 0) return;
+        setLocal((cur) => {
+          const have = new Set(cur.map((r) => r.id));
+          const seeded: Row[] = entries
+            .filter((e) => !have.has(e.id))
+            .map((e) => {
+              const d = e.doc;
+              const s = (v: unknown) => (typeof v === "string" ? v : "");
+              return {
+                id: e.id,
+                firstName: s(d.firstName),
+                lastName: s(d.lastName),
+                company: s(d.company),
+                temperature: (TEMPERATURES as readonly unknown[]).includes(d.temperature) ? (d.temperature as Temperature) : null,
+                capturedAt: typeof d.capturedAt === "number" ? d.capturedAt : 0,
+                showId: typeof d.showId === "string" ? d.showId : null,
+                status: e.state === "error" ? ("error" as const) : ("waiting" as const),
+                ...(e.state === "error" ? { error: e.error || "Couldn't sync" } : {}),
+                queued: true,
+              };
+            });
+          return seeded.length ? [...cur, ...seeded] : cur;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Rows queued on this device that haven't synced (waiting or parked in error): re-check the outbox on every engine
+  // change. An entry that is gone has synced; one in "error" shows its message; a pending one is waiting again.
+  // Functional updates, so a save that lands mid-check isn't lost.
+  const watchKey = local.filter((r) => r.queued && r.status !== "synced").map((r) => r.id).join(",");
+  useEffect(() => {
+    if (!watchKey) return;
+    const watchIds = watchKey.split(",");
     const engine = getEngine();
     let alive = true;
     const check = async () => {
-      const found = new Map<string, "synced" | { error: string }>();
-      for (const id of waitingIds) {
+      const found = new Map<string, "synced" | "waiting" | { error: string }>();
+      for (const id of watchIds) {
         const e = await engine.outboxEntry("booth_captures", id);
         if (!e) found.set(id, "synced");
-        else if (e.state === "error") found.set(id, { error: e.error || "Couldn't sync" });
+        else if (e.state === "pending") found.set(id, "waiting");
+        else found.set(id, { error: e.error || "Couldn't sync" });
       }
-      if (!alive || found.size === 0) return;
+      if (!alive) return;
       setLocal((cur) =>
         cur.map((r) => {
           const v = found.get(r.id);
-          if (!v || r.status !== "waiting") return r;
-          return v === "synced" ? { ...r, status: "synced" as const } : { ...r, status: "error" as const, error: v.error };
+          if (!v || r.status === "synced") return r;
+          if (v === "synced") return { ...r, status: "synced" as const, error: undefined };
+          if (v === "waiting") return r.status === "waiting" ? r : { ...r, status: "waiting" as const, error: undefined };
+          return r.status === "error" && r.error === v.error ? r : { ...r, status: "error" as const, error: v.error };
         }),
       );
     };
@@ -86,7 +127,7 @@ export default function BoothForm(props: {
       alive = false;
       off();
     };
-  }, [waitingKey]);
+  }, [watchKey]);
 
   const set = (k: keyof Fields) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF((cur) => ({ ...cur, [k]: e.target.value }));
 
@@ -113,16 +154,38 @@ export default function BoothForm(props: {
     if (!check.ok) return setError(check.error);
     setSaving(true);
     setError("");
+    // The action's lead link / outcome, captured through the closure (saveThroughOutbox only needs ok/error).
+    const landed: { leadId?: string; outcome?: "created" | "merged"; refusal?: string } = {};
     try {
       const { queued } = await saveThroughOutbox({
         collection: "booth_captures",
         id,
         doc,
-        action: () => saveBoothCaptureAction(doc),
+        action: async () => {
+          const r = await saveBoothCaptureAction(doc);
+          if (r.ok) {
+            landed.leadId = r.leadId;
+            landed.outcome = r.outcome;
+            return { ok: true };
+          }
+          landed.refusal = r.error;
+          return r;
+        },
         timeoutMs: 8000,
       });
       setLocal((l) => [
-        { id, firstName: f.firstName, lastName: f.lastName, company: f.company, temperature, capturedAt, showId, status: queued ? "waiting" : "synced" },
+        {
+          id,
+          firstName: f.firstName,
+          lastName: f.lastName,
+          company: f.company,
+          temperature,
+          capturedAt,
+          showId,
+          status: queued ? "waiting" : "synced",
+          queued,
+          ...(!queued && landed.leadId ? { leadId: landed.leadId, outcome: landed.outcome } : {}),
+        },
         ...l,
       ]);
       setF(EMPTY);
@@ -130,17 +193,24 @@ export default function BoothForm(props: {
       setTemperature(null);
       setCardImage(undefined);
       firstRef.current?.focus();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save that.");
+    } catch {
+      // A refusal the server worded ({ok:false}) keeps its text; anything else thrown is the connection or a crash.
+      setError(landed.refusal ?? "Couldn't save — check your connection and try again.");
     } finally {
       setSaving(false);
     }
   }
 
+  // A server row for a local id (after a refresh) carries the lead link and outcome; it wins over a synced local row.
+  const serverById = new Map(props.recent.map((r) => [r.id, r]));
+  const localRows: Row[] = local.map((r) => {
+    const sv = serverById.get(r.id);
+    return sv && r.status === "synced" ? { ...r, leadId: sv.leadId ?? r.leadId, outcome: sv.outcome ?? r.outcome } : r;
+  });
   const server: Row[] = props.recent
     .filter((r) => r.showId === showId && !local.some((l) => l.id === r.id))
     .map((r) => ({ ...r, status: "synced" as const }));
-  const rows = [...local.filter((r) => r.showId === showId), ...server].sort((a, b) => b.capturedAt - a.capturedAt);
+  const rows = [...localRows.filter((r) => r.showId === showId), ...server].sort((a, b) => b.capturedAt - a.capturedAt);
   const showName = props.shows.find((s) => s.id === showId)?.name;
   const fid = (k: string) => `${uid}-${k}`;
 
