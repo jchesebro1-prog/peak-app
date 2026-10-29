@@ -1,0 +1,669 @@
+{
+  "$comment": "Ported server logic → the original(s) it copies, with each original's sha256 at port time. `npm run handoff:verify -- --drift` fails when an original changes; re-check the port, then `--drift --update <port>` (that entry only; a bare `--update` re-stamps every entry). Not in test:specs (handoff/estimator/port-drift.ts).",
+  "ports": [
+    {
+      "port": "handoff/estimator/runtime/actions/narrative-actions.ts",
+      "what": "keyProductLibrary, saveProductParagraph, the system intros",
+      "originals": [
+        {
+          "path": "src/lib/narrative/library.ts",
+          "sha256": "fba2efb2db12e105961aa0b631d3ee7b66866340879156102ca9178a724880db"
+        },
+        {
+          "path": "src/lib/stores/catalog.ts",
+          "sha256": "de86868a7bdfc212dc1a15be938089ae7643053a10752dea06515671c081e4c4"
+        },
+        {
+          "path": "src/app/(app)/estimator/narrative-actions.ts",
+          "sha256": "527f1c217f5031e4d2114877bc55a22a95ebe155c228b391d9c82d0f9a133ce7"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/review-actions.ts",
+      "what": "the review-comment writers (addReviewComment / resolve / delete) and their actions",
+      "originals": [
+        {
+          "path": "src/lib/stores/quotes.ts",
+          "sha256": "8b204eb3d8a6dfb3d3872fcc37c5e88a55526929fcd8199349f32612a5c1e2c8"
+        },
+        {
+          "path": "src/app/(app)/estimator/review-actions.ts",
+          "sha256": "a0664cdb61160486f45c28aea1de7c94d027b14015965021b250d735901dda85"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/loaders/document.ts",
+      "what": "loadQuoteDocumentProps (photos inline) + the print route's document + bomModelPartsLocal (#365 loadBomModelPartsFor)",
+      "originals": [
+        {
+          "path": "src/lib/quote-pdf/document-loader.ts",
+          "sha256": "4ff62b04d6511bd9706adc214a8f817c6e098fa29df1ab4b6acf531dbff116cf"
+        },
+        {
+          "path": "src/app/print/quote/[id]/page.tsx",
+          "sha256": "76e14f1a62ede21ede33d768cb5d0f2c5b842155d8ab9d6360ef9816a6ffb710"
+        },
+        {
+          "path": "src/lib/narrative/photos.ts",
+          "sha256": "f7945462a49ed49a5cd048796a9a20c3e9c7d7e6219a0041dc33bbdc16308b19"
+        },
+        {
+          "path": "src/lib/estimate-output/bom-models-server.ts",
+          "sha256": "3c6d519f5afa98a10d14373da561f2d42c07f292f8d9436f0e08ada8a3b8a750"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/loaders/package.ts",
+      "what": "loadLivePackagePreview",
+      "originals": [
+        {
+          "path": "src/lib/estimate-output/package-live-loader.ts",
+          "sha256": "f6df534da61ef4bf2fb6ec22724d58597d9e88adfc822099ae4a68ca7aa30009"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/loaders/cut-sheets.ts",
+      "what": "loadCutSheets + the print route's cut-sheet appendix",
+      "originals": [
+        {
+          "path": "src/lib/curtain-cut-sheets/load.ts",
+          "sha256": "67541e5caf13a94e796cdb4edb9657e64b9c58fd60b85f2b29a01353b8d8798a"
+        },
+        {
+          "path": "src/app/print/quote/[id]/page.tsx",
+          "sha256": "76e14f1a62ede21ede33d768cb5d0f2c5b842155d8ab9d6360ef9816a6ffb710"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/library-actions.ts",
+      "what": "the system library index, search and Load system",
+      "originals": [
+        {
+          "path": "src/lib/narrative/load-system.ts",
+          "sha256": "9cb5d0fd522d76cff02547d7f55fce15a1db0b4bd920d979c6df2d9af7075437"
+        },
+        {
+          "path": "src/lib/narrative/system-library-index.ts",
+          "sha256": "b5089203867d49785e86e6f0cdde5378be2350f0b9c1bf966d1dc029b0a5fd18"
+        },
+        {
+          "path": "src/app/(app)/estimator/library-actions.ts",
+          "sha256": "e5c5abfb44e67f58de7219874db1688eca1c620db2c9cc2df5bc1a3f77e60c01"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/package-actions.ts",
+      "what": "loadPackagePanel's pure parts",
+      "originals": [
+        {
+          "path": "src/lib/estimate-output/package-panel-server.ts",
+          "sha256": "3c28a9a508705d3125ecfba5c73ff9c444d839f6e2877c71d28f36bae2775490"
+        },
+        {
+          "path": "src/app/(app)/estimator/package-actions.ts",
+          "sha256": "e72ab75be482ebd2b218c1de055f1530a0b44876085dbdbf108d28bd8b89b3f0"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/save-core.ts",
+      "what": "saveQuoteAction's decisions before it writes",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/actions.ts",
+          "sha256": "ae561719c2c467f976ef6cce7db3e268ddbd1f610f5177a585589aaef00fd408"
+        },
+        {
+          "path": "src/lib/stores/quotes.ts",
+          "sha256": "8b204eb3d8a6dfb3d3872fcc37c5e88a55526929fcd8199349f32612a5c1e2c8"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/quote-model.ts",
+      "what": "the quote lifecycle rules (build / update / setStatus / revisions)",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/actions.ts",
+          "sha256": "ae561719c2c467f976ef6cce7db3e268ddbd1f610f5177a585589aaef00fd408"
+        },
+        {
+          "path": "src/lib/stores/quotes.ts",
+          "sha256": "8b204eb3d8a6dfb3d3872fcc37c5e88a55526929fcd8199349f32612a5c1e2c8"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/quote-repo.ts",
+      "what": "the quotes store's writers over the browser store",
+      "originals": [
+        {
+          "path": "src/lib/stores/quotes.ts",
+          "sha256": "8b204eb3d8a6dfb3d3872fcc37c5e88a55526929fcd8199349f32612a5c1e2c8"
+        },
+        {
+          "path": "src/lib/estimate-reprice/server.ts",
+          "sha256": "9473a5ebcbb4a5c293d07d42a061a4b8125f3cc2243daa6a2453ba7b29c6f561"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/ports.ts",
+      "what": "travel (geo.ts estimate) and the customer directory; the tier margins (pricing-tiers.ts tierMargin / resolveTier)",
+      "originals": [
+        {
+          "path": "src/lib/geo.ts",
+          "sha256": "904fd42ff4ded4a829f9fa5f98aa9e4c835cd1d952c5483083d67e88923e3237"
+        },
+        {
+          "path": "src/lib/stores/customers.ts",
+          "sha256": "d8fa7f94aea30a66c07055d7bdc880d0b8c40fe5914a9d5da5853f1fd382b85c"
+        },
+        {
+          "path": "src/lib/pricing-tiers.ts",
+          "sha256": "5b1fa4afd9d7ac50cc7672874d04c96b7db365235092117ed612f0f8475aa527"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/props/estimator.ts",
+      "what": "EstimatorPage's props",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/page.tsx",
+          "sha256": "4f1d0e8427145178e2be6514f57c0f6d0ac8a766aed2c45baa9f4aa4214f0f24"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/ui/review-overrides.tsx",
+      "what": "PdfPreviewPane, QuotePdfViewer and ReviewTabs (re-implemented markup)",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/preview-doc.tsx",
+          "sha256": "d4ef3bfb71e9e3688af28980f1c0f91832a91d2d3ca3f389ef5907cdafed4637"
+        },
+        {
+          "path": "src/components/quote-pdf/quote-pdf-viewer.tsx",
+          "sha256": "8e03fdf56b67ed10f9fae6a0cca37812028c4074719a7a9183c3ad55156af091"
+        },
+        {
+          "path": "src/app/(app)/estimator/steps/review-tabs.tsx",
+          "sha256": "cec8f406890983374241d4db51b058c8774ce38ef526aec8cfc9e08b3f0503e3"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/ui/live-views.tsx",
+      "what": "the staff preview route's tabs (package page, BOM with #365 models, cut sheets) drawn live from the store",
+      "originals": [
+        {
+          "path": "src/app/estimator-preview/[id]/page.tsx",
+          "sha256": "95e12dbba951ff4951227c0a17631f87b318c31570c5fa0cf7899b2277f1de4c"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/review-ops.ts",
+      "what": "quote-review-ops (submit / withdraw / approve / approve-only / send back / attest / send to customer) over the quote-repo review writers",
+      "originals": [
+        {
+          "path": "src/lib/quote-review-ops.ts",
+          "sha256": "425ec5fcddc7183c490d264166cda508f4ddb643b99ce38eeaa01cb06d6a4649"
+        },
+        {
+          "path": "src/lib/stores/quotes.ts",
+          "sha256": "8b204eb3d8a6dfb3d3872fcc37c5e88a55526929fcd8199349f32612a5c1e2c8"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/next-step-actions.ts",
+      "what": "the next-step control's actions (nsSubmit … nsSend) and their NextStepSync",
+      "originals": [
+        {
+          "path": "src/app/(app)/quotes/review-actions.ts",
+          "sha256": "acbd53378f51fd4564306cd6a21f23552169fcfbda05d3b16ac1359b24f140ba"
+        },
+        {
+          "path": "src/lib/quote-next-step-server.ts",
+          "sha256": "94f8c9d0fa8b247f806a17fc3a15c2f1f2fa45fa6db5719f55b0424ae7e60608"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/send-actions.ts",
+      "what": "Send & track: composer defaults, the ordered send (simulated), the Activity read",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/send-actions.ts",
+          "sha256": "49fca7bbcfa6b231e4084627ae3cba52c1c40e76d564798ac2e67478dd41f75f"
+        },
+        {
+          "path": "src/lib/estimate-email/send-server.ts",
+          "sha256": "aecf300b85027c1692f5c46628b06ad3b50661fb95a88eef4cd62406f66063fe"
+        },
+        {
+          "path": "src/lib/estimate-email/track-server.ts",
+          "sha256": "9a0e4ae61d03dc7768c7c800af6382e67cbf70360c83531594956c9b375a9f21"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/misc-refusals.ts",
+      "what": "shape-valid empties: loadBidPanel, shareLinkStatus, loadVendorsPanel, rewardCreditInfoAction (program off)",
+      "originals": [
+        {
+          "path": "src/lib/parties/bid-panel-server.ts",
+          "sha256": "478adaeef2d70adc1b991f732cca8751f2a0e310fe3daba8596ec3307e22875d"
+        },
+        {
+          "path": "src/lib/quote-share/links.ts",
+          "sha256": "b5eb54f208877995be092eab416e0cacc22eb1bd972e9d48e77d8624a9dbff0e"
+        },
+        {
+          "path": "src/lib/vendor-quotes/threads-server.ts",
+          "sha256": "191227d8ddc3589707fb1f11686fdd5708993d1fcfe6514a884f73cfb3514798"
+        },
+        {
+          "path": "src/app/(app)/rewards/actions.ts",
+          "sha256": "657773b7742e23f1bd74ebf7da4ff31d56bce7e62b1cece49d20729aa74434b4"
+        },
+        {
+          "path": "src/app/(app)/estimator/share-actions.ts",
+          "sha256": "33a29a1862cb1b40c35893b963423b1ad905ac85e1eb3b06c9d56d3e7e2e3d74"
+        },
+        {
+          "path": "src/app/(app)/estimator/vendor-actions.ts",
+          "sha256": "a81d2debad93f25f7b559555e756e0d9597797844d007893e087a07916d23d6b"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/ui/send-overrides.tsx",
+      "what": "SendActivity (wrapped, plus the prototype log)",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/steps/send-activity.tsx",
+          "sha256": "f334a6538c23508cfac5f2fe0b4a2d5482fa1b2f34a5ba4f7d2f5a547df243c9"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/catalog-model.ts",
+      "what": "PARTIAL port of the Catalog part editor. Ported: the save semantics (upsertPart → mergeUpsert → writePart: updatedAt, pricedAt via nextPricedAt, rack data via cleanRackFacts, optionalPartFields' only-submitted-keys/blank-clears rule), the narrative stamp (saveProductParagraph) and the fabric guards (part-form.ts fabricRateProblem / fabricFactsProblem, imported). New prototype logic with no app counterpart: browse/facets/paging, new-part SKU uniqueness (upsertPart has no SKU uniqueness check), parsePrice and the price-cell rules, the open-drawer fingerprint compare",
+      "originals": [
+        {
+          "path": "src/app/(app)/catalog/actions.ts",
+          "sha256": "95f0f5135f0af7a5bdcea49055fa797a363ac448130152b1f3e0206e8590c9ef"
+        },
+        {
+          "path": "src/lib/stores/catalog.ts",
+          "sha256": "de86868a7bdfc212dc1a15be938089ae7643053a10752dea06515671c081e4c4"
+        },
+        {
+          "path": "src/app/(app)/catalog/part-form.ts",
+          "sha256": "f6e725c43d166865bf7e53ca707a711b319daf7f4d0b8d97ba39526bc48bb4fa"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/fixtures-repo.ts",
+      "what": "the fixtures store's getFixture / createFixture / updateFixture / removeFixture (soft delete as a marker row), and fixtures-migrate fixturesConverted",
+      "originals": [
+        {
+          "path": "src/lib/stores/fixtures.ts",
+          "sha256": "90c7b33fcce8c63a815a7229ef8811a03943c9008d2c0ae9461cd73c4f6f855a"
+        },
+        {
+          "path": "src/lib/fixtures-migrate.ts",
+          "sha256": "e7cfbd8d5a9afcbfda7df7bc1803ffac48d4297745ee3abd2e1fc54ebe79be99"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/readers.ts",
+      "what": "listFixtures (stores/fixtures, soft-delete markers skipped) and getManyLocal (catalog getMany, renames followed) — the readers Task 9 changed; generalRate / bonusRatesNow (pricing.ts value / loadBonusRates)",
+      "originals": [
+        {
+          "path": "src/lib/stores/fixtures.ts",
+          "sha256": "90c7b33fcce8c63a815a7229ef8811a03943c9008d2c0ae9461cd73c4f6f855a"
+        },
+        {
+          "path": "src/lib/stores/catalog.ts",
+          "sha256": "de86868a7bdfc212dc1a15be938089ae7643053a10752dea06515671c081e4c4"
+        },
+        {
+          "path": "src/lib/stores/pricing.ts",
+          "sha256": "dbff9f688368980fd2f185551c25741a9e5eb1acb07c3c1cf0f5fe57318b7851"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/props/assemblies.ts",
+      "what": "AssemblyBuilderPage's props (coverage from the implied accessory links; rack defaults blob)",
+      "originals": [
+        {
+          "path": "src/app/(app)/design/assemblies/page.tsx",
+          "sha256": "af53140f514a121725f6945620432cfc38d2ebfd6818d7dc519531b51cb0bfd1"
+        },
+        {
+          "path": "src/lib/stores/rack-defaults.ts",
+          "sha256": "c81dee0f1ca7c7c1c4679c00b15993adf2bb0e30af9c06f1854bc60ceb55a6cc"
+        },
+        {
+          "path": "src/lib/part-docs/load.ts",
+          "sha256": "a39bc42cc30b0aaedbe6234d0eee8da349d3237ac7ed6d7a793f17eb1d456d33"
+        },
+        {
+          "path": "src/lib/stores/part-accessory-links.ts",
+          "sha256": "2d77270e5d07721dc31219a5e260da8889cc7377356895931ac884b7ecbabf87"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/assemblies-actions.ts",
+      "what": "the Assembly Builder's actions (search, save, delete, rack defaults; setOwnDatasheet refused)",
+      "originals": [
+        {
+          "path": "src/app/(app)/design/assemblies/actions.ts",
+          "sha256": "6d56005c5dbc6744bdaf68229d5a6431d1613da7adce8a11b0f1c8a170acb006"
+        },
+        {
+          "path": "src/lib/stores/rack-defaults.ts",
+          "sha256": "c81dee0f1ca7c7c1c4679c00b15993adf2bb0e30af9c06f1854bc60ceb55a6cc"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/loaders/rack.ts",
+      "what": "loadRackForSheets",
+      "originals": [
+        {
+          "path": "src/lib/rack/load.ts",
+          "sha256": "b7dbf21ead765d79e3be2a2fc744d7a337a7dd782d5660e49be7cb27881bc934"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/ui/assemblies.tsx",
+      "what": "the Assembly Builder page and the rack submittal page (markup around FixtureBuilder / RackSheets)",
+      "originals": [
+        {
+          "path": "src/app/(app)/design/assemblies/page.tsx",
+          "sha256": "af53140f514a121725f6945620432cfc38d2ebfd6818d7dc519531b51cb0bfd1"
+        },
+        {
+          "path": "src/app/(app)/design/assemblies/rack/[id]/page.tsx",
+          "sha256": "eab560e74c633efd74dde4246171a303bd6fbb0fbc0db54e3d2352d28c959f5f"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/pricing-rules.ts",
+      "what": "pricing.ts value / defaultOf / setValue / resetValue / resetAll / exportCSV / exportJSON / exportFileName over the store's blobs (setBlob → setBlobLocal)",
+      "originals": [
+        {
+          "path": "src/lib/stores/pricing.ts",
+          "sha256": "dbff9f688368980fd2f185551c25741a9e5eb1acb07c3c1cf0f5fe57318b7851"
+        },
+        {
+          "path": "src/db/doc-store.ts",
+          "sha256": "645a58dfaa11ab5f1cd2918d2643ffce0f500005071debb4145bd0f814f02d54"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/baked/pricing-registry.ts",
+      "what": "the export list baked from pricing.ts (GROUPS, the engine-rate defaults and blob names) — re-check the names when the original's exports change",
+      "originals": [
+        {
+          "path": "src/lib/stores/pricing.ts",
+          "sha256": "dbff9f688368980fd2f185551c25741a9e5eb1acb07c3c1cf0f5fe57318b7851"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/baked/venue-classes.ts",
+      "what": "the venue-classes export the bundle imports (VENUE_CLASSES), baked — re-check the names a bundled importer needs",
+      "originals": [
+        {
+          "path": "src/lib/stores/venue-classes.ts",
+          "sha256": "d421603f3a8d278d9ed21dbb0ccc856b938b9e7a1c55d0ea5408a3b3ec983de5"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/props/rules.ts",
+      "what": "the four Estimating Rules pages' props (rates + effective defaults, venue doctrine, track series, curtain mounts, system categories)",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimating-rules/page.tsx",
+          "sha256": "428f80ffc76826ec56ac5d326bf0d513802f7b74ee2baabdd010d8f87e2c47a5"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/track-series/page.tsx",
+          "sha256": "84883a118a547b1219d7284665e166ba6f1e5e2b64a267b38bfc08e5a96aa9aa"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/curtain-mounts/page.tsx",
+          "sha256": "0a3d365a2b37af39d823cfd9268b097518ebaf75d529ddc345141bd8ebd9ac64"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/system-categories/page.tsx",
+          "sha256": "2bb443403f0a2336444b86760aa27443d4b038a0f53d21d0f3b898c3ac371b37"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/rules-actions.ts",
+      "what": "the Estimating Rules actions and their stores (track series, curtain mounts, system categories, the venue doctrine entry), the PartPicker's searchEquipmentPartsAction",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimating-rules/actions.ts",
+          "sha256": "26153fd7c35f9da138344319f2762d885dcf04d61914662656f0d6d75b3bbbcf"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/track-series/actions.ts",
+          "sha256": "5d82054701b80fd9bc9e3bbdc1b68c19c7a7d05c6c2fef98f6ea82eadd5e18a1"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/curtain-mounts/actions.ts",
+          "sha256": "280d290626855a60c5690ad408b63494df4aeabb8138df36568d217ce3518f8d"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/system-categories/actions.ts",
+          "sha256": "c6c4141d5b663f63825e04ba95dd08822ff0901f06a2d39491dca6c24414f499"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/conduit-sizes/actions.ts",
+          "sha256": "e0e007d9a9c68b4c17fea67b0e6fd8378df91eadb8c1a1a5367378837f784711"
+        },
+        {
+          "path": "src/app/(app)/design/grid/settings/actions.ts",
+          "sha256": "78815aa2036129861397eccfa61e5d23e9a6fd7d4e02688b5ec4eea15df9e601"
+        },
+        {
+          "path": "src/lib/stores/track-series.ts",
+          "sha256": "e5a584e2602dc3bbff2912d287b36b92105a6ff77c6869fbc19fb203c8e41801"
+        },
+        {
+          "path": "src/lib/stores/curtain-mounts.ts",
+          "sha256": "6b04301661ac25ea6ebd878da64ac86990fd96a8b893045a66dd784575233bed"
+        },
+        {
+          "path": "src/lib/stores/system-categories.ts",
+          "sha256": "36483d27e8b9585fd868f343d85e51d0a0880c45c80e5be92fe28543ad98fbbb"
+        },
+        {
+          "path": "src/lib/settings.ts",
+          "sha256": "f7413ba153ed3bd609f4ff469fd523b0613727dc854fce434bc483603b2d488d"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/ui/rules.tsx",
+      "what": "the four Estimating Rules pages' markup (header, cards, admin lock, sub-page headings)",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimating-rules/page.tsx",
+          "sha256": "428f80ffc76826ec56ac5d326bf0d513802f7b74ee2baabdd010d8f87e2c47a5"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/track-series/page.tsx",
+          "sha256": "84883a118a547b1219d7284665e166ba6f1e5e2b64a267b38bfc08e5a96aa9aa"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/curtain-mounts/page.tsx",
+          "sha256": "0a3d365a2b37af39d823cfd9268b097518ebaf75d529ddc345141bd8ebd9ac64"
+        },
+        {
+          "path": "src/app/(app)/estimating-rules/system-categories/page.tsx",
+          "sha256": "2bb443403f0a2336444b86760aa27443d4b038a0f53d21d0f3b898c3ac371b37"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/photo-select.ts",
+      "what": "a part's primary photo (visibleImagesForParts + compareImages order) and its manufacturer-image fallback (manufacturerImageLookup, keyProductPhotoDocs), over the export's collections",
+      "originals": [
+        {
+          "path": "src/lib/stores/part-documents.ts",
+          "sha256": "707ee15d49f96ce7b938e8d3bdd150904fb543b2a7ba837f930aea603248e3fb"
+        },
+        {
+          "path": "src/lib/stores/manufacturers.ts",
+          "sha256": "dd91f64b1354b25f45c7ed33078faefa0d7c5c34ad957aca6a4b8499465124c7"
+        },
+        {
+          "path": "src/lib/narrative/photos.ts",
+          "sha256": "f7945462a49ed49a5cd048796a9a20c3e9c7d7e6219a0041dc33bbdc16308b19"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/fetch-photos.ts",
+      "what": "blobKeyBelongsTo — the blob-path guard (part-docs/<docId>/<one safe segment>) applied to every export-supplied key before a Blob read",
+      "originals": [
+        {
+          "path": "src/lib/part-docs/types.ts",
+          "sha256": "323603005a26859e095efbe8bc00a0e182ab9b49ca136706c36ba70cf2bfe5a0"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/estimator-actions.ts",
+      "what": "the Estimator's own server actions (saveQuoteAction, Move / Copy system, header meta, new estimate …) — type-enforced against the original",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/actions.ts",
+          "sha256": "ae561719c2c467f976ef6cce7db3e268ddbd1f610f5177a585589aaef00fd408"
+        },
+        {
+          "path": "src/lib/estimate-output/bom-models-server.ts",
+          "sha256": "3c6d519f5afa98a10d14373da561f2d42c07f292f8d9436f0e08ada8a3b8a750"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/place-system.ts",
+      "what": "Move / Copy system → an estimate (placeSystemInEstimate), copyPricingFor, the follow-the-renames helpers",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/actions.ts",
+          "sha256": "ae561719c2c467f976ef6cce7db3e268ddbd1f610f5177a585589aaef00fd408"
+        },
+        {
+          "path": "src/app/(app)/estimator/copy-pricing.ts",
+          "sha256": "7e58c56985f860569920ef06efe871e7d1965056a0b7d0a2494898a045a9a0f8"
+        },
+        {
+          "path": "src/lib/stores/catalog-renames.ts",
+          "sha256": "ce3e34ce479510d680c2cdced79f02d911124a8a95e201cf9aafdb24d8806941"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/client-package-actions.ts",
+      "what": "clientPackageDocsAction (the Client package tab's datasheet rows — empty: no part documents in the slice)",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/client-package-actions.ts",
+          "sha256": "a0361fead6d5158ae384e05595caf6f9b37ed3da2c8bca4efc523e387d49e945"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/output-actions.ts",
+      "what": "surveyGoalsAction / siteVisitGoalsAction (no site visits in the slice)",
+      "originals": [
+        {
+          "path": "src/app/(app)/estimator/output-actions.ts",
+          "sha256": "d3216a05370aa26a94ebf08fe7ed014763c6a41ddf8275e694abdb141850d070"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/pdf-actions.ts",
+      "what": "quotePdfStatusAction / retryQuotePdfAction (the saved PDF's view; no renderer)",
+      "originals": [
+        {
+          "path": "src/app/(app)/quotes/pdf-actions.ts",
+          "sha256": "450e872a469fd3308c56b26303961f65e5ded2c972a66eff2239628b78cb5119"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/actions/quotes-actions.ts",
+      "what": "setQuoteStatus (the Portal panel's Approve) and deleteQuoteAction",
+      "originals": [
+        {
+          "path": "src/app/(app)/quotes/actions.ts",
+          "sha256": "0d77a3eac34955614ce10ea9d746efc878168caddcd20776b3aa0b1def855d42"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/markup-basis.ts",
+      "what": "the margin → markup stored-basis rules (quotes convert on read, rate blobs once) — shared by the slicer and the browser store",
+      "originals": [
+        {
+          "path": "src/lib/stores/pricing.ts",
+          "sha256": "dbff9f688368980fd2f185551c25741a9e5eb1acb07c3c1cf0f5fe57318b7851"
+        },
+        {
+          "path": "src/lib/markup/doc-basis.ts",
+          "sha256": "bcb993271b3c0fe2c4d4edf2b394ce8c22e4f218198f72990c88c341acafaba9"
+        },
+        {
+          "path": "src/lib/markup/settings.ts",
+          "sha256": "70557351c3d9c98336f459feff80ef92afadb3265c385fca760b6ce6885ff320"
+        },
+        {
+          "path": "src/db/doc-store.ts",
+          "sha256": "645a58dfaa11ab5f1cd2918d2643ffce0f500005071debb4145bd0f814f02d54"
+        }
+      ]
+    },
+    {
+      "port": "handoff/estimator/runtime/store.ts",
+      "what": "the read hook: hydrateDoc for quotes, the one-time rate conversion for blobs",
+      "originals": [
+        {
+          "path": "src/db/doc-store.ts",
+          "sha256": "645a58dfaa11ab5f1cd2918d2643ffce0f500005071debb4145bd0f814f02d54"
+        },
+        {
+          "path": "src/lib/markup/doc-basis.ts",
+          "sha256": "bcb993271b3c0fe2c4d4edf2b394ce8c22e4f218198f72990c88c341acafaba9"
+        }
+      ]
+    }
+  ]
+}

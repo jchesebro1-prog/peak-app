@@ -4,7 +4,7 @@
     "quotes": [
       {
         "id": "Q-G001", "deleted": false,
-        "doc": { "quoteType": "system", "estNo": 9001, "spec": { "sections": [
+        "doc": { "quoteType": "system", "status": "draft", "estNo": 9001, "spec": { "sections": [
           { "id": "s1", "name": "Stage lighting", "kind": "lighting", "mfr": "ETC", "freightPct": 5, "items": [
             { "id": 1, "sku": "ETC:CS15", "desc": "ColorSource 15 fixture", "qty": 4, "unit": "ea", "cost": 900, "price": 1250 },
             { "id": 2, "sku": "LABOR", "desc": "Install labor", "qty": 16, "unit": "hr", "cost": 55, "price": 95, "labor": true },
@@ -14,18 +14,18 @@
       },
       {
         "id": "Q-G002", "deleted": false,
-        "doc": { "quoteType": "system", "estNo": 9002, "spec": { "sections": [
+        "doc": { "quoteType": "system", "status": "draft", "estNo": 9002, "spec": { "groups": [ { "id": "g-alt1", "name": "Alternates", "alternate": true } ], "sections": [
           { "id": "s1", "name": "Main curtain", "kind": "curtains", "mfr": "", "freightPct": 0, "items": [
             { "id": 1, "sku": "CUSTOM", "desc": "Main drape, IFR velour", "qty": 1, "unit": "ea", "cost": 6400, "price": 9100, "custom": true }
           ] },
-          { "id": "s2", "name": "Motorized main (alternate)", "kind": "rigging", "mfr": "", "freightPct": 3, "alternate": true, "items": [
+          { "id": "s2", "name": "Motorized main (alternate)", "kind": "rigging", "mfr": "", "freightPct": 3, "groupId": "g-alt1", "alternate": true, "items": [
             { "id": 1, "sku": "CUSTOM", "desc": "Motorized traveler", "qty": 1, "unit": "ea", "cost": 7200, "price": 10400, "custom": true }
           ] }
         ] } }
       },
       {
         "id": "Q-G003", "deleted": false,
-        "doc": { "quoteType": "system", "estNo": 9003, "spec": { "sections": [
+        "doc": { "quoteType": "system", "status": "draft", "estNo": 9003, "spec": { "sections": [
           { "id": "s1", "name": "Audio", "kind": "av", "mfr": "", "freightPct": 4, "priceRound": 25, "items": [
             { "id": 1, "sku": "Symetrix:Jupiter 4", "desc": "DSP", "qty": 2, "unit": "ea", "cost": 1100, "price": 1540 },
             { "id": 2, "sku": "CUSTOM", "desc": "Cable package", "qty": 1, "unit": "ea", "cost": 800, "price": 1150, "custom": true, "extSellOverride": 1200 },

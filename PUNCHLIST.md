@@ -12776,6 +12776,8 @@ Spec `docs/superpowers/specs/2026-10-20-estimator-handoff-package-design.md`; pl
 
 **Next:** PR 2 (slicer, prototype UI, spec docs, verification, zip), planned after this merges. It needs Jeff's production export (`DATABASE_URL=<prod> OUT=~/peak-prod-export.json npm run db:export`).
 
+**PR 2 is built:** see #361 (the prototype, D1233–D1245, and Jeff's production run checklist).
+
 ## 360. Parts list CSV v2 + BOM quote PDF — DONE 2026-10-20 on `feat/parts-csv-bom-pdf` (D1231–D1232)
 
 Jeff: the Parts list (CSV) should show item name, description, cost, sell margin and where the pricing came from ("Catalog" for catalog items), and Build package → BOM quote should export to PDF. Specs `docs/superpowers/specs/2026-10-20-parts-list-csv-price-source-design.md` and `docs/superpowers/specs/2026-10-20-bom-quote-pdf-design.md`; plan `docs/superpowers/plans/`.
@@ -12789,6 +12791,62 @@ Jeff: the Parts list (CSV) should show item name, description, cost, sell margin
 **Remaining (Jeff-gated):**
 - Open one real estimate's CSV in Excel and check the labels and margins.
 - Download one BOM PDF on production (needs `QUOTE_PDF_ORIGIN`, like every estimate PDF).
+
+## 361. Estimator handoff, PR 2: the confidential offline prototype package — BUILT 2026-10-20 on `feat/estimator-handoff-prototype` (D1233–D1245)
+
+**Area:** `handoff/estimator/` (slicer, bundler, runtime, shell, verification, founder spec docs), `scripts/export.ts` (format 2), `package.json` (`handoff:*` scripts)
+**Reported:** 2026-10-20 (Jeff: share the estimator as HTML with the founder for their software). Stacks on #359 (PR 1, `feat/estimating-core`, which has merged main incl. #360).
+
+Spec `docs/superpowers/specs/2026-10-20-estimator-handoff-package-design.md`; plan `docs/superpowers/plans/2026-10-20-estimator-handoff-prototype.md`.
+
+**Built:** a package (`output/peak-estimator-handoff/`, zipped, git-ignored, ≤ 150 MB, every file ≤ 15,000,000 bytes) that runs Peak's real Estimator (four steps), Catalog, Assembly Builder (with rack submittals) and Estimating Rules in a browser from `file://` or an Artifact, over a sliced production export, with the real pricing engine. Browser-side stand-ins replace the server: an in-browser action registry (default refusal), an IndexedDB overlay with Reset to production snapshot, hash routes, Acting-as roles, simulated Send and Won, and browser Print with a "Confidential — Peak Systems Group · prototype" footer. The founder folder `spec/` has README, data-model, pricing and ports docs (generated blocks expanded from the source), golden totals per estimate, and eight screenshots. Commands: `handoff:slice`, `handoff:photos`, `handoff:build`, `handoff:verify` (`--drift`, `--parity`, `--full`, `--smoke`, `--serve`, `--shell`, `--catalog`, `--assemblies`, `--rules`, `--estimator`, `--estimator-edit`, `--review`, `--send`, `--photos`). No migration. The only `src/`-side change is `scripts/export.ts` (format 2 adds companies, contacts, contact emails, contact phones, sites).
+
+**Verification (final whole-branch review fixes, D1245):** tsc 0 errors; `core:check` 82 files, 0 violations; test:specs 25,970 PASS / 0 FAIL; test:smoke 268 PASS / 0 FAIL; `npx next build` exit 0; eslint 0 problems on changed files. On the dev slice (4 estimates: one live plus the three golden fixtures, 14,725 catalog parts): `handoff:verify --drift` 39 ports / 93 originals, 45 runtime modules scanned, 0 unlisted, PASS; `--parity` PASS; `--full --allow-missing-features` PASS (package 33 files, 7.17 MB, 0 stray files / private Blob paths / secret hits; the other-snapshot copy opens clean; zip 2.53 MB, 33 entries; features covered: alternate, bonus — rack and curtain+track are not in the thin dev slice); `--smoke --all-steps` PASS (55 views, 0 page or console errors, fonts ok); `--serve` PASS (33 files over http, index.html?v=1, 55 views, fonts ok, one benign favicon 404); `--shell`, `--catalog` (first paint 138 ms), `--assemblies`, `--rules` (36 steps), `--estimator all`, `--estimator-edit`, `--review`, `--send`, `--photos` PASS. Earlier (PR 2 as first built): test:specs 25,817, drift 33 ports / 85 originals. Not yet run: the production slice (thin dev data), photo download (needs the production token), the founder's own machine.
+
+**Rollback:** nothing in the app depends on it. Delete `handoff/`, the `handoff:*` scripts and `output/`; revert `scripts/export.ts` (format 1 readers are unaffected either way).
+
+**Remaining (Jeff-gated):**
+- Run the production checklist below, in order, on Jeff's machine. The export and everything cut from it are confidential and stay there (never commit `~/peak-prod-export.json` or `output/`).
+- Confirm or reverse the controller defaults: the slicer does not ship `clientResponses`, `bonusRecord`, `estimatorBonusSplit`, `shareLink` or `shareOpens` (D1238); **vendor quotes ship render-only** (no attached PDF, link, internal terms / notes, thread, Read the PDF result or vendor company — D1238); **revisions ship through an allow-list** (no PDF or drawing Blob paths, bid / award, portal stamp or service payloads — D1238); **quotes the customer portal built (`portal-catalog`) are left out** (D1238); Estimating Rules hides the service-quote and portal rules (README); and printing adds the "Confidential" footer (D1240).
+- Read the verify report and the eight screenshots with Claude. Only then does the zip go to Jeff, and the Artifact is published only on his explicit go-ahead.
+
+**Update (Oct 20, D1246): a recent sample, not the whole book.** Jeff narrowed what ships. Estimates: only **Estimator** quotes (`source` `estimator` or empty — not Grid, Quick Design, inbox-made, Daylite or portal) whose `updatedAt` (else `createdAt`) is within **28 days** of the export's `meta.exportedAt`; `--recent-days <n>` on both `handoff:slice` and `handoff:photos` (one shared function, `selectBundledEstimates`; no `exportedAt` or no qualifying estimate is a refusal naming the window). Catalog: not the ~37,000-part book but `selectCatalogScope` — the parts on the bundled estimates (incl. revisions), **all assemblies** and their members, the parts the shipped rules blobs name (track series, curtain mounts, system categories, rack defaults), every curtain fabric with an area rate, every Labor part, and rename stubs where the old SKU is named or the target ships. The slice prints the window, each estimate (id, number, name, customer, updated date) and the catalog count by reason; `data/meta.js` records the window. Consequences to know: the prototype's Add-part search, Catalog screen and vendor suggestions cover only those parts; `--full` stays strict, so a four-week sample may lack a rack / alternate / curtain + track / bonus example — widen `--recent-days` or accept `--allow-missing-features` (your call at the production run). Dev rehearsal: `--recent-days 3650 --extra-estimates docs/estimating-core/golden-fixtures/export.json` on a scratch copy of the dev DB (RUNBOOK.md).
+
+**Update (Oct 22, D1273): re-ported after merging main through #365.** `origin/feat/estimating-core` brought Box goods sale (#362), the Review spreadsheet (#363), Show on BOM (#364) and model numbers (#365); 18 pinned originals changed, each port was re-read against its diff (box-sale flag in the quote model / save plan / props / send / package / loaders / Customer review, a real `bomModelPartsAction`, the slicer's `boxSale` and `bom*` fields, `--all-steps` walking a box sale through its own tabs) and re-stamped; `ui/live-views.tsx` is now pinned too. The Review spreadsheet runs in the browser (exceljs is bundled). `--drift` 40 ports / 96 originals clean.
+
+**Update (Oct 22, D1317): re-ported after merging main through #366 (project discounts).** Five ports re-read and re-stamped (`save-core`, `quote-model`, `estimator-actions`, `place-system`, `props/estimator`): the server-side re-apply on save / move / copy, the map carried to a new estimate, `initial.projectDiscounts`. No new server action; the won project's "Project pricing to request" is Projects-side and out of scope. `spec.projectDiscounts`, `catalogCost` and `projectDiscountPct` ride in the whole-`spec` slice (tests added); discounts lower cost and margin only, never sell. Open: whether the vendor project-pricing notes should be stripped from the founder's bundle.
+
+**Update (Oct 23, D1318): re-ported after merging main through #367 (markup pricing).** 16 pinned originals changed and were re-read; the prototype now prices on markup (tiers 43/37/28/25/18/11/5, sliders to 125 %, `totals().markup`, `payload.markup`). Stored data: the app converts margin → markup on read (quotes) and once (rate blobs); the prototype applies the same converters (imported from `src/lib/markup/`) in the slicer AND at the browser store's read, so a margin-era or mixed export shows the same prices and tiers as the app, never double-converted (`handoff/estimator/markup-basis.ts`; tests in `handoffMarkupChecks`). `pricing.md` rewritten on markup, `data-model.md` gains the pricing basis. `--drift` 42 ports / 102 originals.
+
+**Update (Oct 23, D1319): re-ported after merging main through #368 (ETC price sync).** 18 pinned originals re-read. In the prototype: the sent-estimate locks (Copy / Move into, Copy within, Load system with its new target argument, the saved tier stamp) and **Re-price on Revise** (`repricedOnRevise`, the Build banner, a reload after the move). Out of scope, said in `ports.md`: the ETC connection, key, API pull and price-book import (nothing ships: tests pin that no key, snapshot or internal ETC part field is bundled). `--drift` 42 ports / 102 originals.
+
+**Production run checklist** (repository root; `handoff/estimator/RUNBOOK.md` repeats it, with the time and Artifact notes — it is never shipped):
+
+```bash
+# 1. production export (format 2 — includes the customer tables)
+DATABASE_URL=<prod> OUT=~/peak-prod-export.json npm run db:export
+# 2. photos from private Blob; --dry-run first (no token, no network), then with the production token in this shell only
+#    (--out must be inside output/ and empty, missing or an earlier handoff:photos folder).
+#    Only the parts the recent Estimator estimates and the assemblies use: --recent-days (default 28) — pass the same value to step 3
+npm run handoff:photos -- --in ~/peak-prod-export.json --out output/peak-estimator-handoff/images --dry-run
+BLOB_READ_WRITE_TOKEN=<prod token> npm run handoff:photos -- --in ~/peak-prod-export.json --out output/peak-estimator-handoff/images
+# 3. slice (never pass --extra-estimates here; same --recent-days as step 2)
+npm run handoff:slice -- --in ~/peak-prod-export.json --out output/peak-estimator-handoff/data
+# 4. bundle (the audit fails on a private Blob path, a secret, a stray file or a file over 15,000,000 bytes)
+npm run handoff:build
+# 5. strict verify: no --allow-missing-features; the slice must hold an alternate, a rack line,
+#    a curtain + track pair and bonus lines, or --full fails. The zip is written only on a pass.
+npm run handoff:verify -- --drift --parity --export ~/peak-prod-export.json --full
+# 6. every estimate through every step, from file:// and over http (the Artifact path) — slow on a large book
+npm run handoff:verify -- --smoke --all-steps
+npm run handoff:verify -- --serve
+```
+
+`--smoke --all-steps` and `--serve` walk every bundled estimate (about a dozen views each): expect an hour or more on hundreds of estimates; if that is impractical, rely on `--full`'s 20-estimate sample and say so. The build and `--full` warn past 255 files (one Artifact publish) and loudly past 511 (one Artifact version).
+
+7. Claude reviews `output/verify/full.json`, the verify report, `spec/screenshots/` and the golden files; then `output/peak-estimator-handoff.zip` goes to Jeff. The Artifact is published only on Jeff's go-ahead.
+
+**Follow-ups:** a Blob read of a photo is the only network step and has not run against production; a cross-window overlay merge (last write wins today); the Datasheets and Drawings review tabs and the Won install project are intentionally not in the prototype.
 
 ## 362. Box goods sale — BOM-only estimates — DONE 2026-10-21 on `feat/box-goods-sale` (D1247–D1248)
 
