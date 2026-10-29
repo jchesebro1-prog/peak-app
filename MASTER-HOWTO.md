@@ -802,3 +802,47 @@ when `datasheet_url` is too.
 5. From the next morning the daily sync (on the drive-time cron, 11:00 UTC) keeps ETC prices current and adds new parts. The drawer's last-sync line shows what it did or why it failed.
 6. Sent estimates keep their prices. **Revise** re-prices their catalog lines to today's catalog and lists the changes on Build.
 7. Kill switch: `ETC_SYNC_DISABLED=true` in Vercel. Remove the key in the drawer to stop for good.
+
+## 12. Trade show booth (#371, D1320–D1330)
+
+**Before the show (once per show)**
+
+1. **Leads → Shows** (`/leads/shows`). **Add show**: name, start and end dates, **Save**. **Set active** on the one running now. Only one show is active at a time; the contact card and Booth mode both use it. After the show, **Archive** it (a show a lead names is never deleted).
+2. Set up your card (once): your photo, title, phone and mobile come from **Settings → Team** (the card shows whatever is there). On the Shows page, under **Contact cards**, an admin picks the person and a link name (for example `jeff`), then **Add card**. One link name per person, lower case, and a name someone else already holds is refused. The card is then live at `https://<your app address>/c/jeff`. Set `QUOTE_PDF_ORIGIN` in Vercel to the production address first, so the QR and the Copy link button show it and not a preview address.
+
+**Writing the NFC tag**
+
+1. Buy blank **NTAG215 or NTAG216** cards (or a printed NFC business card). They are a few dollars each.
+2. On an iPhone, install the free **NFC Tools** app. **Write → Add a record → URL/URI**, type the full address (`https://<your app address>/c/jeff`), **OK**, then **Write** and hold the top of the phone to the card until it says written. Do not add other records.
+3. Test it with a different phone: an iPhone XS or newer, or any recent Android, reads a URL tag by touching the top of the phone to it with no app. It should open your card. If it opens a blank page, check the address on the Shows page.
+4. The tag never names a show. It is written once and works at every show.
+
+**Printing the QR**
+
+On the Shows page, each card has a QR code. **Download SVG** (best for print and signs) or **Download PNG**. Put it on the back of the card and on a sign at the booth for people without NFC. Leave a clear white border around it.
+
+**At the show: Booth mode (staff)**
+
+1. Open **Leads → Booth mode** (`/leads/booth`) on the phone or iPad. The header shows the active show.
+2. Fill in name and an email or a phone number (one of the two is required), company, interests, **Hot / Warm / Cold** and notes. **Save & next** clears the form for the next person.
+3. **It works offline.** A capture saves on the device, then syncs when there is signal. Turn **Work offline** on in the left nav's sync chip if the venue Wi-Fi is bad; captures wait and the list shows *Waiting to sync* until you turn syncing back on. Closing and reopening the app keeps them.
+4. **Today at this show** lists the show's latest 50 captures from everyone on the team, plus this device's captures still waiting, with their state: *Waiting to sync*, *Synced* or *Merged into existing lead* (the email already matched an open lead, so it added a note there instead of a duplicate). An error message means the server refused that capture, or kept failing to save it (for example a few minutes of server trouble): it stays on this device with the visitor's email and phone shown under the name, so nothing is lost. Tap **Retry** to send it again. If it says the item is too large, enter the person again without the card photo; if Retry keeps failing, tell an admin.
+5. **Scan card** (the phone and iPad apps only, not a browser): tap it, photograph the business card, and the name, email, phone, company and title it can read fill the empty fields (highlighted until you edit them). It never overwrites what you typed and leaves a name blank when it is not sure. Check the fields, then Save. The card photo is kept on the lead.
+
+**What a visitor sees**
+
+Tapping the card (or scanning the QR) opens your page with **Save contact** and **Send me your info**. When they send it, a lead appears for you (source Trade show / event, the active show) and a follow-up **draft** waits in your Inbox, titled "Great meeting you at <show>", with your contact card attached. **Nothing is sent for you** — read it and press Send.
+
+**After the show**
+
+1. **Leads**, then the **Show** menu: pick the show to see only its leads on the board, worklist and table. Open a lead to see the show, temperature, interests and the card photo.
+2. Go through the Inbox drafts and send the ones you want. Work the SLA queue (48 h for events) as usual.
+3. **Archive** the show on the Shows page.
+
+**Good to know**
+
+- Re-sending from the same phone never creates a second lead. Two staff capturing the same person become one lead only when an email was entered (the second becomes a note on the first); a phone-only capture always makes its own lead.
+- A note that came from the public card page is labelled "Sent from the contact card (not verified)", never changes a lead's Hot / Warm / Cold and never counts as your first response on the SLA clock.
+- A lead met again at a second show stays under its first show in the Show filter (the show is set only when the lead has none).
+- Go-live "Clear demo data" also deletes booth captures along with leads (D1329).
+- After updating the native apps (`npx cap sync`, rebuild), iOS asks for camera access the first time you scan.
