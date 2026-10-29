@@ -29,31 +29,41 @@ const th: CSSProperties = { textAlign: "left", fontSize: 10, fontWeight: 600, le
 const td: CSSProperties = { padding: "10px 12px", borderBottom: "1px solid #eef0f3", fontSize: 13, verticalAlign: "middle" };
 const link: CSSProperties = { textDecoration: "none", display: "inline-block" };
 
-function downloadPng(svg: string, name: string) {
+const PNG_FAILED = "Couldn't make the PNG — use Download SVG.";
+
+/** The QR SVG carries its own 1024 × 1024 size and a 4-module quiet zone, so it draws edge to edge. */
+function downloadPng(svg: string, name: string, onError: (msg: string) => void) {
   const img = new Image();
   img.onload = () => {
-    const c = document.createElement("canvas");
-    c.width = c.height = 1024;
-    const ctx = c.getContext("2d");
-    if (!ctx) return;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, 1024, 1024);
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, 0, 0, 1024, 1024);
-    const a = document.createElement("a");
-    a.href = c.toDataURL("image/png");
-    a.download = name + ".png";
-    a.click();
+    try {
+      const c = document.createElement("canvas");
+      c.width = c.height = 1024;
+      const ctx = c.getContext("2d");
+      if (!ctx) return onError(PNG_FAILED);
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, 1024, 1024);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, 1024, 1024);
+      const a = document.createElement("a");
+      a.href = c.toDataURL("image/png");
+      a.download = name + ".png";
+      a.click();
+    } catch {
+      onError(PNG_FAILED);
+    }
   };
+  img.onerror = () => onError(PNG_FAILED);
   img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
 }
 
 function downloadSvg(svg: string, name: string) {
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  const href = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  a.href = href;
   a.download = name + ".svg";
   a.click();
-  URL.revokeObjectURL(a.href);
+  // Revoking in the same tick can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
 }
 
 export default function ShowsEditor({ shows, cards, users, isAdmin }: { shows: Show[]; cards: CardRow[]; users: { id: string; name: string }[]; isAdmin: boolean }) {
@@ -209,7 +219,7 @@ export default function ShowsEditor({ shows, cards, users, isAdmin }: { shows: S
         {!cards.length ? <div style={{ fontSize: 13, color: "#5b616e" }}>No contact cards yet.{isAdmin ? " Add one below." : " An admin can add one."}</div> : null}
         {cards.map((c) => (
           <div key={c.slug} className="pk-card" style={{ padding: 14, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ width: 120, height: 120, flex: "none" }} aria-label={`QR code for ${c.url}`} dangerouslySetInnerHTML={{ __html: c.qrSvg }} />
+            <div className="[&>svg]:block [&>svg]:h-full [&>svg]:w-full" style={{ width: 120, height: 120, flex: "none" }} aria-label={`QR code for ${c.url}`} dangerouslySetInnerHTML={{ __html: c.qrSvg }} />
             <div style={{ display: "grid", gap: 8, minWidth: 0, flex: 1 }}>
               <strong>{userName(c.userId)}</strong>
               <code className="pk-mono" style={{ fontSize: 12.5, overflowWrap: "anywhere" }}>
@@ -222,7 +232,7 @@ export default function ShowsEditor({ shows, cards, users, isAdmin }: { shows: S
                 <button type="button" className="pk-btn-outline" onClick={() => downloadSvg(c.qrSvg, `card-${c.slug}`)}>
                   Download SVG
                 </button>
-                <button type="button" className="pk-btn-outline" onClick={() => downloadPng(c.qrSvg, `card-${c.slug}`)}>
+                <button type="button" className="pk-btn-outline" onClick={() => downloadPng(c.qrSvg, `card-${c.slug}`, setError)}>
                   Download PNG
                 </button>
                 {isAdmin ? (

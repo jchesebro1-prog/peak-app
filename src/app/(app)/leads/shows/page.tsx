@@ -19,7 +19,7 @@ export default async function ShowsPage() {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(async ([slug, userId]) => {
         const url = `${origin}/c/${slug}`;
-        return { slug, userId, url, qrSvg: await QRCode.toString(url, { type: "svg", margin: 1, errorCorrectionLevel: "M" }) };
+        return { slug, userId, url, qrSvg: await QRCode.toString(url, { type: "svg", margin: 4, width: 1024, errorCorrectionLevel: "M" }) };
       })
   );
   return (

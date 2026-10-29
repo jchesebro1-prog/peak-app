@@ -140,6 +140,11 @@ export async function boothChecks(ok: Ok) {
   ok(tiny.length === 3 && tiny[0].length === 200 && tiny[1].length === 200 && tiny[2].length === 50, "sync batch: many tiny entries split by the record cap");
   ok(batchOutbox([], B).length === 0, "sync batch: empty outbox → no batches");
   ok(pushRecordSize({ id: "x", rev: 1, doc: { n: "é" } }) === Buffer.byteLength(JSON.stringify({ id: "x", rev: 1, doc: { n: "é" } })), "sync batch: size is the UTF-8 byte length of the push shape");
+  // QR printing (final review Q1–Q3): quiet zone + sized SVG, PNG failure is named, downloads revoke later
+  const showsPage = readFileSync(join(process.cwd(), "src/app/(app)/leads/shows/page.tsx"), "utf8");
+  const showsEd = readFileSync(join(process.cwd(), "src/app/(app)/leads/shows/shows-editor.tsx"), "utf8");
+  ok(showsPage.includes('margin: 4, width: 1024'), "booth QR: 4-module quiet zone and a sized (1024) SVG");
+  ok(showsEd.includes("img.onerror = () => onError(PNG_FAILED)") && showsEd.includes("Couldn't make the PNG — use Download SVG.") && showsEd.includes("setTimeout(() => URL.revokeObjectURL(href), 1000)") && !/a\.click\(\);\s*URL\.revokeObjectURL/.test(showsEd), "booth QR: PNG errors surface; object URLs are revoked after the click");
   const engSrc = readFileSync(join(process.cwd(), "src/lib/sync/engine.ts"), "utf8");
   ok(engSrc.includes("batchOutbox(") && engSrc.includes("private async pushBatch(outbox: OutboxEntry[])") && engSrc.includes("res.status === 413") && engSrc.includes("PUSH_TOO_LARGE_MESSAGE") && !engSrc.includes("Network dropped mid-flush"), "sync batch: the engine pushes batch by batch, parks a lone 413, and no longer swallows the whole flush");
 }
