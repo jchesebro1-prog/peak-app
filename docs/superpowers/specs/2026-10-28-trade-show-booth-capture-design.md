@@ -129,8 +129,12 @@ free-text tag on the lead, or a full events module with cost/ROI reports.
   It goes through the outbox like the field-capture editors. Pulled copies strip
   `cardImage` and `claimUntil`; `leadId`, `outcome`, `cardImagePath` and
   `claimUntil` are server-owned.
-- **Today at this show:** the device's captures for the current show, each
-  marked *Synced* or *Waiting to sync*, with the count.
+- **Today at this show:** the show's latest 50 recorded captures from everyone,
+  plus this device's queued ones, each marked *Synced*, *Waiting to sync*,
+  *Merged into existing lead* or an error, with the count. An error row (the
+  server refused it, or it kept failing and parked after 10 retries) shows this
+  device's copy of the email and phone and a **Retry** button that puts it back
+  in the queue (`SyncEngine.requeue`).
 
 ## 5. Booth core (server, one path)
 

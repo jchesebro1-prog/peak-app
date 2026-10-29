@@ -146,6 +146,15 @@ export async function boothChecks(ok: Ok) {
   ok(showsPage.includes('margin: 4, width: 1024'), "booth QR: 4-module quiet zone and a sized (1024) SVG");
   ok(showsEd.includes("img.onerror = () => onError(PNG_FAILED)") && showsEd.includes("Couldn't make the PNG — use Download SVG.") && showsEd.includes("setTimeout(() => URL.revokeObjectURL(href), 1000)") && !/a\.click\(\);\s*URL\.revokeObjectURL/.test(showsEd), "booth QR: PNG errors surface; object URLs are revoked after the click");
   const engSrc = readFileSync(join(process.cwd(), "src/lib/sync/engine.ts"), "utf8");
+  // Fix pass 2 — a parked booth row can be retried; the flush never rejects; a read-only 413 re-send parks the rest
+  const rq = engSrc.slice(engSrc.indexOf("async requeue(collection: string, id: string): Promise<boolean>"), engSrc.indexOf("async outboxEntry("));
+  ok(rq.length > 0 && rq.includes("if (!entry) return false;") && rq.includes('state: "pending", retries: 0') && rq.includes("delete next.error;") && rq.includes("await this.refreshCounts();") && rq.includes("void this.syncNow();"), "booth retry: engine.requeue resets a parked entry to pending (no error, retries 0), refreshes counts and flushes");
+  const sn = engSrc.slice(engSrc.indexOf("async syncNow(): Promise<void>"), engSrc.indexOf("private async pushBatch("));
+  ok(/await this\.refreshCounts\(\);\s*if \(reached\) await this\.pull\(\);\s*\} catch \(err\) \{\s*\/\/[^\n]*\n\s*console\.warn\(/.test(sn), "sync batch: the flush tail (counts + pull) is caught and logged, never an unhandled rejection");
+  ok(/if \(r === "read-only"\) \{[^}]*outbox\.slice\(i \+ 1\)[^}]*PUSH_READ_ONLY_MESSAGE/.test(engSrc), "sync batch: a read-only 403 during the one-at-a-time 413 re-send parks the rest of the batch");
+  const bf = readFileSync(join(process.cwd(), "src/app/(app)/leads/booth/booth-form.tsx"), "utf8");
+  ok(bf.includes('getEngine()\n      .requeue("booth_captures", id)') && bf.includes("aria-label={`Retry ${fullName(r)}`}") && bf.includes('className="pk-btn-outline" style={TAP}') && bf.includes("email: s(d.email)") && bf.includes("phone: s(d.phone)") && bf.includes('r.status === "error" ? (') && bf.includes("[r.email, r.phone].filter(Boolean)"), "booth retry: an error row shows the queued email/phone and a 44 px Retry <name> button that requeues it");
+  ok(bf.includes('status: back ? ("waiting" as const) : ("synced" as const)'), "booth retry: a requeued row waits again; a gone entry reads as synced");
   ok(engSrc.includes("batchOutbox(") && engSrc.includes("private async pushBatch(outbox: OutboxEntry[])") && engSrc.includes("res.status === 413") && engSrc.includes("PUSH_TOO_LARGE_MESSAGE") && !engSrc.includes("Network dropped mid-flush"), "sync batch: the engine pushes batch by batch, parks a lone 413, and no longer swallows the whole flush");
 }
 

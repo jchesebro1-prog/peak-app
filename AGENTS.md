@@ -1712,7 +1712,8 @@ See `.env.example`.
     both native apps. The SyncEngine now flushes the outbox in request-sized batches
     (`src/lib/sync/batch.ts`, ≤ 3 MB / 200 records per POST; a failed batch no longer holds
     back the rest; a lone 413 parks as too large, D1330), card activity never stops a lead's
-    SLA clock, and a throw after the claim releases it. Pure core in `src/lib/booth/`, stores in `src/lib/stores/booth.ts`;
+    SLA clock, a throw after the claim releases it, and a parked Booth-mode row shows its
+    queued email/phone with a Retry (`SyncEngine.requeue`). Pure core in `src/lib/booth/`, stores in `src/lib/stores/booth.ts`;
     checks in `scripts/test-booth.ts`. **Never preview-deploy this branch** (previews skip
     migrations and share the production DB, so `booth_captures` would not exist). Remaining
     is Jeff-gated: write the NFC tag, Settings → Team contact fields, the `jeff` card and the

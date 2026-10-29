@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import Link from "next/link";
 import { saveThroughOutbox } from "@/lib/sync/save";
-import { getEngine } from "@/lib/sync/engine";
+import { getEngine, RETRY_PARKED_MESSAGE } from "@/lib/sync/engine";
 import {
   INTERESTS,
   INTEREST_LABEL,
@@ -24,7 +24,15 @@ import { saveBoothCaptureAction } from "./actions";
  * timestamps); the server takes "captured by" from the signed-in user and ignores the payload's. */
 
 type Recent = Pick<BoothCapture, "id" | "firstName" | "lastName" | "company" | "temperature" | "capturedAt" | "leadId" | "outcome" | "showId">;
-type Row = Recent & { status: "synced" | "waiting" | "error"; error?: string; /** went through the outbox on this device */ queued?: boolean };
+type Row = Recent & {
+  status: "synced" | "waiting" | "error";
+  error?: string;
+  /** went through the outbox on this device */
+  queued?: boolean;
+  /** this device's copy of the contact details, shown on a parked row so nothing is lost while it waits */
+  email?: string;
+  phone?: string;
+};
 
 const EMPTY = { firstName: "", lastName: "", email: "", phone: "", company: "", title: "", notes: "" };
 type Fields = typeof EMPTY;
@@ -95,6 +103,8 @@ export default function BoothForm(props: {
                 firstName: s(d.firstName),
                 lastName: s(d.lastName),
                 company: s(d.company),
+                email: s(d.email),
+                phone: s(d.phone),
                 temperature: (TEMPERATURES as readonly unknown[]).includes(d.temperature) ? (d.temperature as Temperature) : null,
                 capturedAt: typeof d.capturedAt === "number" ? d.capturedAt : 0,
                 showId: typeof d.showId === "string" ? d.showId : null,
@@ -256,6 +266,8 @@ export default function BoothForm(props: {
           firstName: f.firstName,
           lastName: f.lastName,
           company: f.company,
+          email: f.email,
+          phone: f.phone,
           temperature,
           capturedAt,
           showId,
@@ -278,6 +290,16 @@ export default function BoothForm(props: {
     } finally {
       setSaving(false);
     }
+  }
+
+  // A parked row (refused, or the server kept failing) goes back in the queue; the watcher above follows it from there.
+  // A gone entry already synced.
+  async function retry(id: string) {
+    const back = await getEngine()
+      .requeue("booth_captures", id)
+      .catch(() => null);
+    if (back === null) return;
+    setLocal((cur) => cur.map((x) => (x.id !== id ? x : { ...x, status: back ? ("waiting" as const) : ("synced" as const), error: undefined })));
   }
 
   // A server row for a local id (after a refresh) carries the lead link and outcome; it wins over a synced local row.
@@ -416,15 +438,35 @@ export default function BoothForm(props: {
         </h2>
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 6 }}>
           {rows.map((r) => (
-            <li key={r.id} className="pk-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "10px 12px", minHeight: 44 }}>
-              <span style={{ fontSize: 13.5, minWidth: 0 }}>
-                {r.leadId ? <Link href={`/leads?lead=${r.leadId}`}>{fullName(r)}</Link> : fullName(r)}
-                {r.company ? ` · ${r.company}` : ""}
-                {r.temperature ? ` · ${r.temperature}` : ""}
-              </span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, textAlign: "right", flexShrink: 0 }}>
-                {r.status === "waiting" ? "Waiting to sync" : r.status === "error" ? r.error || "Couldn't sync" : r.outcome === "merged" ? "Merged into existing lead" : "Synced"}
-              </span>
+            <li key={r.id} className="pk-card" style={{ display: "grid", gap: 6, padding: "10px 12px", minHeight: 44 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 13.5, minWidth: 0 }}>
+                  {r.leadId ? <Link href={`/leads?lead=${r.leadId}`}>{fullName(r)}</Link> : fullName(r)}
+                  {r.company ? ` · ${r.company}` : ""}
+                  {r.temperature ? ` · ${r.temperature}` : ""}
+                </span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, textAlign: "right", flexShrink: 0 }}>
+                  {r.status === "waiting"
+                    ? "Waiting to sync"
+                    : r.status === "error"
+                      ? r.error === RETRY_PARKED_MESSAGE
+                        ? "The server kept failing to save this — tap Retry"
+                        : r.error || "Couldn't sync"
+                      : r.outcome === "merged"
+                        ? "Merged into existing lead"
+                        : "Synced"}
+                </span>
+              </div>
+              {r.status === "error" ? (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span className="pk-mono" style={{ fontSize: 12.5, overflowWrap: "anywhere", minWidth: 0 }}>
+                    {[r.email, r.phone].filter(Boolean).join(" · ") || "No email or phone"}
+                  </span>
+                  <button type="button" className="pk-btn-outline" style={TAP} aria-label={`Retry ${fullName(r)}`} onClick={() => void retry(r.id)}>
+                    Retry
+                  </button>
+                </div>
+              ) : null}
             </li>
           ))}
         </ul>

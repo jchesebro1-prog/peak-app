@@ -314,6 +314,20 @@ class SyncEngine {
     await this.refreshCounts();
   }
 
+  /** Put a parked ("error") outbox entry back in the queue: pending, no error, retries reset, then flush. For records
+   *  that can't be edited and re-saved (a Booth-mode row). False when the entry is gone (it already synced). */
+  async requeue(collection: string, id: string): Promise<boolean> {
+    const key = outboxKey(collection, id);
+    const entry = await idb.get<OutboxEntry>("outbox", key);
+    if (!entry) return false;
+    const next: OutboxEntry = { ...entry, state: "pending", retries: 0 };
+    delete next.error;
+    await idb.put("outbox", next);
+    await this.refreshCounts();
+    void this.syncNow();
+    return true;
+  }
+
   /** This device's outbox entry for one record (pending, or refused with its reason), or null. */
   async outboxEntry(collection: string, id: string): Promise<{ state: "pending" | "error"; doc: Record<string, unknown>; rev: number; error?: string } | null> {
     const e = await idb.get<OutboxEntry>("outbox", outboxKey(collection, id));
@@ -423,6 +437,9 @@ class SyncEngine {
       if (reached) this.stampLast();
       await this.refreshCounts();
       if (reached) await this.pull();
+    } catch (err) {
+      // Callers fire-and-forget (`void this.syncNow()`): an IndexedDB or pull failure is logged, never thrown.
+      console.warn("[sync] flush failed; pending entries stay queued", err);
     } finally {
       this.syncing = false;
       this.emit();
@@ -459,9 +476,13 @@ class SyncEngine {
           return "parked";
         }
         let any: "ok" | "read-only" | "parked" | "failed" = "failed";
-        for (const e of outbox) {
-          const r = await this.pushBatch([e]);
-          if (r === "read-only") return r;
+        for (let i = 0; i < outbox.length; i++) {
+          const r = await this.pushBatch([outbox[i]]);
+          if (r === "read-only") {
+            // The rest of this batch would be refused the same way: park them too, as the main loop does.
+            for (const e of outbox.slice(i + 1)) await idb.put("outbox", { ...e, state: "error", error: PUSH_READ_ONLY_MESSAGE });
+            return r;
+          }
           if (r === "ok") any = "ok";
           else if (r === "parked" && any === "failed") any = "parked";
         }
