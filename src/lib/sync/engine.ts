@@ -24,6 +24,7 @@
  */
 
 import { idb, outboxKey, type OutboxEntry, type MirrorEntry } from "./idb";
+import { batchOutbox, pushRecordSize, PUSH_MAX_BYTES, PUSH_MAX_RECORDS, PUSH_TOO_LARGE_MESSAGE } from "./batch";
 
 /** Collections a field device mirrors locally for offline reads. */
 // Keep in sync with SYNCABLE_COLLECTIONS in src/db/doc-tables.ts — the server
@@ -39,6 +40,7 @@ export const FIELD_COLLECTIONS = [
   "recordings",
   "assessments",
   "findings",
+  "booth_captures",
 ] as const;
 
 const PAUSED_KEY = "rss_sync_paused_v1";
@@ -312,6 +314,20 @@ class SyncEngine {
     await this.refreshCounts();
   }
 
+  /** Put a parked ("error") outbox entry back in the queue: pending, no error, retries reset, then flush. For records
+   *  that can't be edited and re-saved (a Booth-mode row). False when the entry is gone (it already synced). */
+  async requeue(collection: string, id: string): Promise<boolean> {
+    const key = outboxKey(collection, id);
+    const entry = await idb.get<OutboxEntry>("outbox", key);
+    if (!entry) return false;
+    const next: OutboxEntry = { ...entry, state: "pending", retries: 0 };
+    delete next.error;
+    await idb.put("outbox", next);
+    await this.refreshCounts();
+    void this.syncNow();
+    return true;
+  }
+
   /** This device's outbox entry for one record (pending, or refused with its reason), or null. */
   async outboxEntry(collection: string, id: string): Promise<{ state: "pending" | "error"; doc: Record<string, unknown>; rev: number; error?: string } | null> {
     const e = await idb.get<OutboxEntry>("outbox", outboxKey(collection, id));
@@ -367,6 +383,15 @@ class SyncEngine {
     return { ...(row.doc as T), id: row.id };
   }
 
+  /** Every outbox entry this device holds for one collection (pending or refused), oldest first. */
+  async outboxEntries(collection: string): Promise<Array<{ id: string; state: "pending" | "error"; doc: Record<string, unknown>; error?: string }>> {
+    const rows = await idb.getAll<OutboxEntry>("outbox");
+    return rows
+      .filter((r) => r.collection === collection)
+      .sort((a, b) => a.queuedAt - b.queuedAt)
+      .map((r) => ({ id: r.id, state: r.state, doc: r.doc, ...(r.error ? { error: r.error } : {}) }));
+  }
+
   /** Outbox entries the server refused (state "error"), with the reason it gave when it gave one. */
   async erroredEntries(): Promise<Array<{ collection: string; id: string; doc: Record<string, unknown>; error?: string }>> {
     const rows = await idb.getAll<OutboxEntry>("outbox");
@@ -380,15 +405,50 @@ class SyncEngine {
   /** Flush the outbox to /api/sync/push, then pull to converge. */
   async syncNow(): Promise<void> {
     if (this.syncing || !this.connected()) return;
-    const outbox = (await idb.getAll<OutboxEntry>("outbox")).filter(
+    const queued = (await idb.getAll<OutboxEntry>("outbox")).filter(
       (e) => e.state === "pending"
     );
-    if (!outbox.length) {
+    if (!queued.length) {
       // Nothing to push; still refresh the timestamp opportunistically.
       return;
     }
     this.syncing = true;
     this.emit();
+    try {
+      // D1330 — one POST per request-sized batch, so a few large captures (scanned card images) can't push the body
+      // past the host's limit and hold back every other field record on the device.
+      const batches = batchOutbox(
+        queued.map((e) => ({ collection: e.collection, id: e.id, size: pushRecordSize(e), entry: e })),
+        { maxBytes: PUSH_MAX_BYTES, maxRecords: PUSH_MAX_RECORDS }
+      ).map((b) => b.map((x) => x.entry));
+      let reached = false;
+      let readOnly = false;
+      for (const batch of batches) {
+        if (readOnly) {
+          // The route refused this user's role: every later batch would be refused the same way.
+          for (const e of batch) await idb.put("outbox", { ...e, state: "error", error: PUSH_READ_ONLY_MESSAGE });
+          continue;
+        }
+        if (!this.isOnline()) break; // connection gone mid-flush — the rest stays pending for the next `online`
+        const r = await this.pushBatch(batch);
+        if (r === "read-only") readOnly = true;
+        if (r === "ok") reached = true;
+      }
+      if (reached) this.stampLast();
+      await this.refreshCounts();
+      if (reached) await this.pull();
+    } catch (err) {
+      // Callers fire-and-forget (`void this.syncNow()`): an IndexedDB or pull failure is logged, never thrown.
+      console.warn("[sync] flush failed; pending entries stay queued", err);
+    } finally {
+      this.syncing = false;
+      this.emit();
+    }
+  }
+
+  /** Push one batch and apply its replies. "failed" leaves the batch pending (a network drop or a server error — the
+   *  next flush retries it); a 413 on a single entry parks it as too large; a 413 on several re-sends them one by one. */
+  private async pushBatch(outbox: OutboxEntry[]): Promise<"ok" | "read-only" | "parked" | "failed"> {
     try {
       const collections: Record<
         string,
@@ -408,8 +468,25 @@ class SyncEngine {
       });
       if (res.status === 403 && pushParksOn(res.status, await res.clone().json().catch(() => null))) {
         for (const e of outbox) await idb.put("outbox", { ...e, state: "error", error: PUSH_READ_ONLY_MESSAGE });
-        await this.refreshCounts();
-        return;
+        return "read-only";
+      }
+      if (res.status === 413) {
+        if (outbox.length === 1) {
+          await idb.put("outbox", { ...outbox[0], state: "error", error: PUSH_TOO_LARGE_MESSAGE });
+          return "parked";
+        }
+        let any: "ok" | "read-only" | "parked" | "failed" = "failed";
+        for (let i = 0; i < outbox.length; i++) {
+          const r = await this.pushBatch([outbox[i]]);
+          if (r === "read-only") {
+            // The rest of this batch would be refused the same way: park them too, as the main loop does.
+            for (const e of outbox.slice(i + 1)) await idb.put("outbox", { ...e, state: "error", error: PUSH_READ_ONLY_MESSAGE });
+            return r;
+          }
+          if (r === "ok") any = "ok";
+          else if (r === "parked" && any === "failed") any = "parked";
+        }
+        return any;
       }
       if (!res.ok) throw new Error(`push ${res.status}`);
       const data = (await res.json()) as {
@@ -468,14 +545,12 @@ class SyncEngine {
       }
       this.conflicts += conflicts;
       if (retry) this.scheduleRetry();
-      this.stampLast();
-      await this.refreshCounts();
-      await this.pull();
-    } catch {
-      // Network dropped mid-flush — leave the rest pending; retry on reconnect.
-    } finally {
-      this.syncing = false;
-      this.emit();
+      return "ok";
+    } catch (err) {
+      // Network dropped or the server failed this batch — it stays pending; the next flush (reconnect, unpause, a
+      // new save) retries it. Later batches still go.
+      console.warn("[sync] push batch failed; its entries stay pending", err);
+      return "failed";
     }
   }
 

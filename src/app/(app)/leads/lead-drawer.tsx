@@ -183,6 +183,12 @@ const cvBadge: CSSProperties = {
   fontFamily: "var(--font-mono)",
 };
 
+const BOOTH_TEMP = {
+  hot: { label: "Hot", tone: { ink: "#b4543a", soft: "#f8ece7", bd: "#eccfc4" } },
+  warm: { label: "Warm", tone: { ink: "#9a6a12", soft: "#fbf3e0", bd: "#efdfb4" } },
+  cold: { label: "Cold", tone: { ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" } },
+} as const;
+
 const threadChip = (c: { ink: string; soft: string; bd: string }): CSSProperties => ({
   display: "inline-block",
   fontSize: 10.5,
@@ -822,6 +828,58 @@ export default function LeadDrawer({
                 <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 5 }}>
                   {[vm.address, vm.locLine].filter(Boolean).join(" · ")}
                 </div>
+                {/* ===== Trade show booth capture ===== */}
+                {(vm.show || vm.temperature || (vm.interests && vm.interests.length > 0)) && (
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 10 }}>
+                    {vm.show && (
+                      <Link
+                        href={`/leads?show=${encodeURIComponent(vm.show.id)}`}
+                        title="Show all leads from this show"
+                        style={{
+                          ...threadChip({ ink: ACCENT_INK, soft: ACCENT_SOFT, bd: "color-mix(in srgb, var(--accent) 26%, #fff)" }),
+                          fontFamily: "var(--font-mono)",
+                        }}
+                      >
+                        {vm.show.name}
+                      </Link>
+                    )}
+                    {vm.temperature && (
+                      <span
+                        style={{
+                          ...threadChip(BOOTH_TEMP[vm.temperature].tone),
+                          fontFamily: "var(--font-mono)",
+                        }}
+                      >
+                        {BOOTH_TEMP[vm.temperature].label}
+                      </span>
+                    )}
+                    {vm.interests && vm.interests.length > 0 && (
+                      <span style={{ fontSize: 12, color: "#5b616e" }}>Interests: {vm.interests.join(", ")}</span>
+                    )}
+                  </div>
+                )}
+                {vm.cardImageIds && vm.cardImageIds.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+                    {vm.cardImageIds.map((id, i) => (
+                      <a
+                        key={id}
+                        href={`/api/booth/card-image/${id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open the business card photo full size"
+                        style={{ display: "block", lineHeight: 0 }}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={`/api/booth/card-image/${id}`}
+                          alt={`Business card photo ${i + 1} for ${vm.org || vm.contact || "this lead"}`}
+                          loading="lazy"
+                          style={{ height: 64, maxWidth: 112, objectFit: "cover", borderRadius: 7, border: "1px solid #e4e7ec" }}
+                        />
+                      </a>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* ===== MAIN view ===== */}

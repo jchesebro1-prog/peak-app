@@ -11,7 +11,10 @@ import { useRouter } from "next/navigation";
 export function OwnerSelect({
   value,
   options,
+  label,
 }: {
+  /** Accessible name (the select has no visible label). */
+  label?: string;
   value: string;
   options: Array<{ value: string; label: string; href: string }>;
 }) {
@@ -19,6 +22,7 @@ export function OwnerSelect({
   return (
     <select
       className="qt-sel"
+      aria-label={label}
       value={value}
       onChange={(e) => {
         const opt = options.find((o) => o.value === e.target.value);

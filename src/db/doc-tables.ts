@@ -110,6 +110,7 @@ export const assessments = docTable("assessments"); // Assessments engine (#340)
 export const findings = docTable("findings"); // Assessments engine (#340) — one finding per row, id fd_<16 hex>; migration 0040_assessments
 export const venueProfiles = docTable("venue_profiles"); // Assessments engine (#340) — one rolling profile per venue, id = sites.id; migration 0040_assessments
 export const recordParties = docTable("record_parties"); // Estimate parties (#348) — one company in one role on a lead / quote / project, id pty_<16 hex> = sha1(recordType, recordId, companyId, role); migration 0041_record_parties
+export const boothCaptures = docTable("booth_captures"); // Trade show booth capture — one visitor captured at a booth (Booth mode or the card page's share-back), id bc_<16 hex> minted on the device; recordBoothCapture turns it into a lead (docs/superpowers/specs/2026-10-28-trade-show-booth-capture-design.md); migration 0042_booth_captures
 
 export const DOC_TABLES = {
   quotes,
@@ -162,6 +163,7 @@ export const DOC_TABLES = {
   findings,
   venue_profiles: venueProfiles,
   record_parties: recordParties,
+  booth_captures: boothCaptures,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;
@@ -198,6 +200,7 @@ export const SYNCABLE_COLLECTIONS: CollectionName[] = [
   "recordings",
   "assessments",
   "findings",
+  "booth_captures",
 ];
 export const SYNCABLE_SET: ReadonlySet<string> = new Set(SYNCABLE_COLLECTIONS);
 

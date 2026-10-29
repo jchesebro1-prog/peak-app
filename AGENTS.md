@@ -1686,7 +1686,42 @@ See `.env.example`.
 
 70. 🚧 **Grid room shape editor — slice 1** (#370, D1311–D1316) — the Grid intake gains a Shape the room step: the stretched template freezes into a `RoomShape` (`src/lib/design/room-shape/`: rooms and zones in feet, line / arc / Bezier edges, walls vs. openings read from the drawing's double lines, roles on rooms) edited in `src/components/room-shape/room-shape-editor.tsx` (corner drag + snap + glue, Add point, Curve, Free-form, Wall ↔ Opening, typed lengths / radius / arc length, undo / redo); a shaped intake locks its dimensions until Reset to template. `saveGridIntakeAction` sanitizes it (`sanitizeRoomShape`) before it writes any customer or venue (`newVenueKindFor`, shared with the quote intake), `generateBaseSheet` draws the base sheet, Spaces (`fromRoom`) and calibration from it and stamps `baseSheetShape` / `baseSheetFrame`, and Auto fill lays out on the stamp (`venueFrame` shape branch; a proscenium or Gym Stage hangs side lights and line arrays at the opening, not the wings). No migration. Remaining: slices 2 (rooms + zones, roles) and 3 (reopen after Create, DXF); Jeff reviews `docs/room-shape/renders/`. Punch item #370.
 
-71. ✅ **Estimating-core extraction** (#359, D1228–D1230) — handoff PR 1. The Estimator's persisted
+71. ✅ **Trade show booth capture + NFC contact card** (#371, D1320–D1330) — people at
+    Jeff's booth become Leads (source `event`, `Lead.eventId`). **Leads → Shows**
+    (`/leads/shows`): a light shows list (settings blob `trade_shows`, at most one active) and
+    contact cards (blob `contact_cards`, slug to user; admin-only, one slug per user) with QR
+    codes. The NFC tag or QR opens the public `/c/[slug]` card page (photo, name, title,
+    Save contact vCard 3.0 at `/c/[slug]/vcard`, and **Send me your info**, which POSTs to
+    `/api/booth/share-back` and lands a lead plus a follow-up **draft** in the owner's Inbox,
+    one per lead, never sent; all three are middleware-exempt, guarded by a honeypot, zod
+    caps, 30 per 10 min per IP and a per-email dedup). **Booth mode** (`/leads/booth`): staff
+    capture (interests, Hot / Warm / Cold, notes) through the offline outbox into the new
+    `booth_captures` doc table (migration 0042; device-minted `bc_<16 hex>` ids; synced
+    field collection; pulled copies strip `cardImage` and `claimUntil`), with a Today at this
+    show list; **Scan card** (native apps only) reads a card on the device through our own
+    `CardText` Capacitor plugin (Vision on iOS, bundled ML Kit on Android; no network, no AI,
+    D89) into `card-parse.ts`, filling only empty fields. One server path,
+    `recordBoothCapture` (`src/lib/booth/capture-server.ts`): claim-first per capture id
+    (`insertDocIfAbsent` + a 60 s `claimUntil` lease; busy replies `retry`), a one-write lead
+    create, idempotent by `Lead.boothCaptureIds`; an exact email match to an open lead merges
+    (`addBoothCapture`), phone-only never; attribution is always the signed-in actor, and a
+    merge from the public card is labelled "Contact card", unverified, and never re-rates the
+    lead. The card photo is a ≤ 250 KB JPEG inside the capture doc, magic-byte checked, moved
+    to private Blob `booth/<id>.jpg` and served signed-in at `/api/booth/card-image/<id>`.
+    Leads gain a Show filter (`?show=`) and drawer chips; camera permission strings added to
+    both native apps. The SyncEngine now flushes the outbox in request-sized batches
+    (`src/lib/sync/batch.ts`, ≤ 3 MB / 200 records per POST; a failed batch no longer holds
+    back the rest; a lone 413 parks as too large, D1330), card activity never stops a lead's
+    SLA clock, a throw after the claim releases it, and a parked Booth-mode row shows its
+    queued email/phone with a Retry (`SyncEngine.requeue`). Pure core in `src/lib/booth/`, stores in `src/lib/stores/booth.ts`;
+    checks in `scripts/test-booth.ts`. **Never preview-deploy this branch** (previews skip
+    migrations and share the production DB, so `booth_captures` would not exist). Remaining
+    is Jeff-gated: write the NFC tag, Settings → Team contact fields, the `jeff` card and the
+    first show, `npx cap sync` and rebuild both apps (Android unbuilt: confirm ML Kit
+    resolves), real taps and a real card scan, a production check after 0042, and
+    `QUOTE_PDF_ORIGIN`. Open: keep captures through the go-live wipe (D1329)? Punch item #371.
+
+72. ✅ **Estimating-core extraction** (#359, D1228–D1230) — handoff PR 1. The Estimator's persisted
     domain types and twelve pure helpers live in `src/lib/estimating-core/` (entry `index.ts`:
     flat domain exports plus namespaced pure `src/lib` modules); the twelve old helper paths are
     `export *` shims and the route `types.ts` re-exports the core types. `npm run core:check`
@@ -1695,7 +1730,7 @@ See `.env.example`.
     `docs/estimating-core/`). Quick Design types now live in `src/lib/design/quick-types.ts`.
     No behaviour change. Next: handoff PR 2 (phase 67 below, the HTML prototype package).
 
-72. 🚧 **Estimator handoff prototype** (#361, D1233–D1246, D1273, D1317–D1319) — handoff PR 2, stacked on PR 1. A confidential,
+73. 🚧 **Estimator handoff prototype** (#361, D1233–D1246, D1273, D1317–D1319) — handoff PR 2, stacked on PR 1. A confidential,
     offline package (`output/peak-estimator-handoff/`, zipped, git-ignored) that runs Quartzite's REAL Estimator,
     Catalog, Assembly Builder and Estimating Rules in the browser over a sliced production export, for a founder
     evaluating Peak's estimating. Source in `handoff/estimator/`: `build.ts` + `esbuild-plugins.ts` bundle the

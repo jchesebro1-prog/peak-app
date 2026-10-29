@@ -86,6 +86,12 @@ export type DrawerDetailVM = {
   /** #301 slice B — "Client link — Rev 2 · opened 3× · …" for the converted
    *  quote once its package link was opened ("" otherwise). */
   quoteOpensLine: string;
+  /** Trade show booth capture */
+  show?: { id: string; name: string } | null;
+  interests?: string[];
+  temperature?: "hot" | "warm" | "cold" | null;
+  /** booth_captures ids that carry a card photo (GET /api/booth/card-image/<id>) */
+  cardImageIds?: string[];
 };
 
 export type SourceOptionVM = { value: string; label: string };
