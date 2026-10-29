@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import Link from "next/link";
 import { saveThroughOutbox } from "@/lib/sync/save";
 import { getEngine } from "@/lib/sync/engine";
@@ -14,6 +14,9 @@ import {
   type Interest,
   type Temperature,
 } from "@/lib/booth/capture";
+import { cardTextAvailable, recognizeCardLines } from "@/lib/booth/card-text";
+import { parseCardText } from "@/lib/booth/card-parse";
+import { resizePhoto, shrinkForInline } from "@/lib/assessments/photo-resize";
 import { saveBoothCaptureAction } from "./actions";
 
 /* Booth mode: type a visitor in, Save & next. Saves go through the offline outbox (saveThroughOutbox), so with no
@@ -44,7 +47,6 @@ export default function BoothForm(props: {
   activeShowId: string | null;
   me: { id: string; name: string };
   recent: Recent[];
-  scanAvailableHint: boolean;
 }) {
   const uid = useId();
   const [showId, setShowId] = useState<string | null>(props.activeShowId);
@@ -56,6 +58,18 @@ export default function BoothForm(props: {
   const [saving, setSaving] = useState(false);
   const [local, setLocal] = useState<Row[]>([]);
   const firstRef = useRef<HTMLInputElement>(null);
+  // Scan card (native shells only — detected on the client, so the web build never shows it).
+  const scanAvailable = useSyncExternalStore(
+    () => () => {},
+    cardTextAvailable,
+    () => false,
+  );
+  const [scanning, setScanning] = useState(false);
+  const [filled, setFilled] = useState<Set<string>>(new Set());
+  const fRef = useRef(f);
+  useEffect(() => {
+    fRef.current = f;
+  });
 
   // Seed with this device's queued captures (a reload or PWA relaunch while offline must not lose the "Waiting to
   // sync" rows). Rows that already exist (saved before the read finished) win.
@@ -129,7 +143,63 @@ export default function BoothForm(props: {
     };
   }, [watchKey]);
 
-  const set = (k: keyof Fields) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF((cur) => ({ ...cur, [k]: e.target.value }));
+  const set = (k: keyof Fields) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setF((cur) => ({ ...cur, [k]: e.target.value }));
+    setFilled((cur) => {
+      if (!cur.has(k)) return cur;
+      const next = new Set(cur);
+      next.delete(k);
+      return next;
+    });
+  };
+  // A field the scan filled gets a subtle accent outline until staff edit it.
+  const scanned = (k: keyof Fields): CSSProperties => ({ ...TAP, ...(filled.has(k) ? { outline: "2px solid var(--accent)", outlineOffset: -1 } : null) });
+
+  // Read the card photo on the device (Vision / ML Kit — no network), then fill only fields that are still empty, so a
+  // scan never overwrites what staff typed (checked against the latest state, including edits made while it ran).
+  async function onCardPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setScanning(true);
+    setError("");
+    try {
+      const { blob } = await resizePhoto(file);
+      const small = await shrinkForInline(blob, 250_000);
+      const b64 = await new Promise<string>((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result));
+        r.onerror = () => rej(new Error("Couldn't read that photo."));
+        r.readAsDataURL(small);
+      });
+      setCardImage(b64);
+      const lines = await recognizeCardLines(b64.slice(b64.indexOf(",") + 1));
+      const p = parseCardText(lines);
+      const sp = p.name.lastIndexOf(" ");
+      const found: Partial<Fields> = {
+        firstName: sp > 0 ? p.name.slice(0, sp) : p.name,
+        lastName: sp > 0 ? p.name.slice(sp + 1) : "",
+        email: p.email,
+        phone: p.phones[0] || "",
+        company: p.company,
+        title: p.title,
+      };
+      const did = new Set<string>();
+      for (const k of Object.keys(found) as (keyof Fields)[]) if (!fRef.current[k] && found[k]) did.add(k);
+      setFilled(did);
+      // Re-check inside the updater: only a still-empty field takes the scanned value.
+      setF((now) => {
+        const out = { ...now };
+        for (const k of did) if (!now[k as keyof Fields]) out[k as keyof Fields] = found[k as keyof Fields] as string;
+        return out;
+      });
+      if (!lines.length) setError("No text found on that photo — type it in, the photo is still attached.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't scan that card.");
+    } finally {
+      setScanning(false);
+    }
+  }
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -189,6 +259,7 @@ export default function BoothForm(props: {
         ...l,
       ]);
       setF(EMPTY);
+      setFilled(new Set());
       setInterests([]);
       setTemperature(null);
       setCardImage(undefined);
@@ -237,32 +308,37 @@ export default function BoothForm(props: {
       </header>
 
       <form onSubmit={save} className="pk-card" style={{ display: "grid", gap: 12, padding: 16 }}>
-        {/* Scan card: Task 10 */}
+        {scanAvailable ? (
+          <label className="pk-btn" style={{ ...TAP, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {scanning ? "Reading card…" : "Scan card"}
+            <input type="file" accept="image/jpeg,image/png" capture="environment" onChange={onCardPhoto} hidden disabled={scanning} />
+          </label>
+        ) : null}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <div style={FIELD}>
             <label className="pk-field-label" htmlFor={fid("first")}>First name</label>
-            <input id={fid("first")} ref={firstRef} className="pk-input" style={TAP} value={f.firstName} onChange={set("firstName")} autoComplete="off" />
+            <input id={fid("first")} ref={firstRef} className="pk-input" style={scanned("firstName")} value={f.firstName} onChange={set("firstName")} autoComplete="off" />
           </div>
           <div style={FIELD}>
             <label className="pk-field-label" htmlFor={fid("last")}>Last name</label>
-            <input id={fid("last")} className="pk-input" style={TAP} value={f.lastName} onChange={set("lastName")} autoComplete="off" />
+            <input id={fid("last")} className="pk-input" style={scanned("lastName")} value={f.lastName} onChange={set("lastName")} autoComplete="off" />
           </div>
         </div>
         <div style={FIELD}>
           <label className="pk-field-label" htmlFor={fid("email")}>Email</label>
-          <input id={fid("email")} type="email" className="pk-input" style={TAP} value={f.email} onChange={set("email")} autoComplete="off" inputMode="email" />
+          <input id={fid("email")} type="email" className="pk-input" style={scanned("email")} value={f.email} onChange={set("email")} autoComplete="off" inputMode="email" />
         </div>
         <div style={FIELD}>
           <label className="pk-field-label" htmlFor={fid("phone")}>Phone</label>
-          <input id={fid("phone")} type="tel" className="pk-input" style={TAP} value={f.phone} onChange={set("phone")} autoComplete="off" />
+          <input id={fid("phone")} type="tel" className="pk-input" style={scanned("phone")} value={f.phone} onChange={set("phone")} autoComplete="off" />
         </div>
         <div style={FIELD}>
           <label className="pk-field-label" htmlFor={fid("company")}>Organization / venue</label>
-          <input id={fid("company")} className="pk-input" style={TAP} value={f.company} onChange={set("company")} autoComplete="off" />
+          <input id={fid("company")} className="pk-input" style={scanned("company")} value={f.company} onChange={set("company")} autoComplete="off" />
         </div>
         <div style={FIELD}>
           <label className="pk-field-label" htmlFor={fid("title")}>Title</label>
-          <input id={fid("title")} className="pk-input" style={TAP} value={f.title} onChange={set("title")} autoComplete="off" />
+          <input id={fid("title")} className="pk-input" style={scanned("title")} value={f.title} onChange={set("title")} autoComplete="off" />
         </div>
         <div role="group" aria-labelledby={fid("interests")} style={FIELD}>
           <div className="pk-field-label" id={fid("interests")}>Interested in</div>

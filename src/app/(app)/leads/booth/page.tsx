@@ -24,7 +24,6 @@ export default async function BoothPage() {
         outcome: c.outcome,
         showId: c.showId,
       }))}
-      scanAvailableHint={false}
     />
   );
 }
