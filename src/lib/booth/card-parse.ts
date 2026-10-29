@@ -14,7 +14,11 @@ export type ParsedCard = { name: string; email: string; phones: string[]; websit
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 // host with a common TLD, optional scheme / www.
-const URL_RE = /\b((?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|edu|us|co|io|biz|info|gov))\b/i;
+// (group 1 = the host; an optional /path is removed from the line but not kept)
+const URL_RE = /\b((?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|edu|us|co|io|biz|info|gov))\b(?:\/\S*)?/gi;
+// profile pages are not the person's company website
+const SOCIAL_HOST = /^(?:https?:\/\/)?(?:www\.)?(?:linkedin|facebook|instagram|twitter|x|youtube|tiktok)\.com$/i;
+const MAX_LINE = 200; // OCR junk longer than this is cut before any regex runs
 // 10-digit North American number, optional +1, optional "ext. 12"; never part of a longer digit run
 const PHONE_BODY = String.raw`(?<!\d)(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?:\s*(?:ext\.?|x)\s*\d{1,5})?(?!\d)`;
 // an optional label word right before the number: group 1 = label, group 2 = the number
@@ -92,7 +96,7 @@ export function parseCardText(input: string[]): ParsedCard {
   const out: ParsedCard = { name: "", email: "", phones: [], website: "", company: "", title: "" };
   const rest: string[] = [];
   for (const raw of input) {
-    let line = String(raw || "").replace(/\s+/g, " ").trim();
+    let line = String(raw || "").replace(/\s+/g, " ").trim().slice(0, MAX_LINE);
     if (!line) continue;
     let pulled = false;
 
@@ -111,9 +115,8 @@ export function parseCardText(input: string[]): ParsedCard {
       pulled = true;
       return " ";
     });
-    const url = line.match(URL_RE);
-    if (url) {
-      if (!out.website) out.website = url[1];
+    for (const url of [...line.matchAll(URL_RE)]) {
+      if (!out.website && !SOCIAL_HOST.test(url[1])) out.website = url[1];
       line = line.replace(url[0], " ");
       pulled = true;
     }
@@ -131,17 +134,19 @@ export function parseCardText(input: string[]): ParsedCard {
   const local = squash((out.email.split("@")[0] || "").replace(/[^A-Za-z]/g, ""));
   const used = new Set<number>();
 
-  // name: name-like lines, ranked by the email's local part ("lbrandt" backs "Leah Brandt");
-  // a line that is really the company (matches the domain, not the local part) is not a name
-  let bestScore = -1;
-  let ni = -1;
+  // name: a name-like line backed by the email's local part ("lbrandt" backs Leah Brandt) wins.
+  // Without that backing, a lone name-like line is taken, but two or more are ambiguous
+  // ("Hill Brothers" vs "Tom Hill") and order is no evidence, so the name stays blank.
+  // A name-like line that matches the domain's company (and not the local part) is not a name.
+  const backed: number[] = [];
+  const unbacked: number[] = [];
   rest.forEach((l, i) => {
     if (!looksLikeName(l)) return;
     const w = nameWords(l).map((x) => squash(x)).filter((x) => x.length >= 3);
-    const local_ = !!local && w.length > 0 && (local.includes(w[w.length - 1]) || local.includes(w[0]));
-    const score = local_ ? 2 : matchesDomain(l, dom) ? -1 : 0;
-    if (score > bestScore) { bestScore = score; ni = i; }
+    if (local && w.length > 0 && (local.includes(w[w.length - 1]) || local.includes(w[0]))) backed.push(i);
+    else if (!matchesDomain(l, dom)) unbacked.push(i);
   });
+  const ni = backed.length ? backed[0] : unbacked.length === 1 ? unbacked[0] : -1;
   if (ni >= 0) {
     used.add(ni);
     out.name = titleCase(nameWords(rest[ni]).join(" "));
