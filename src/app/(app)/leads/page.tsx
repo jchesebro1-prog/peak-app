@@ -266,7 +266,7 @@ export default async function LeadsPage({
   const scopeName = who === "mine" ? me.name : who; // "" = unscoped
   const showParam = one(sp.show); // booth capture — "" = all shows
 
-  const [allLeads, users, fuList, unassignedAll, settings, shows] = await Promise.all([
+  const [allLeads, users, fuListAll, unassignedAll, settings, shows] = await Promise.all([
     getAll(),
     activeUsers(),
     followUps(scopeName ? { owner: scopeName } : {}),
@@ -283,10 +283,11 @@ export default async function LeadsPage({
   // which also means the Unassigned segment reads 0 under any owner scope.
   const all = filterByShow(scopeName ? allLeads.filter((l) => l.owner === scopeName) : allLeads, showParam || null);
   const unassignedList = scopeName ? [] : filterByShow(unassignedAll, showParam || null);
+  const fuList = filterByShow(fuListAll, showParam || null);
 
   // #22 — metrics() is unscoped (no owner opt); recompute the same numbers
   // over the scoped set so tiles, standfirst and segment counts agree with
-  // the view. fuList is already owner-scoped via followUps({ owner }).
+  // the view. fuListAll is owner-scoped via followUps({ owner }); fuList also honours ?show=.
   const DAY = 86_400_000;
   const openList = all.filter(isOpen);
   const wonList = all.filter((l) => l.stage === "won");
