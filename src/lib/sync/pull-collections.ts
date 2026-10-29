@@ -31,6 +31,15 @@ export function pullCollections(param: string | null | undefined): CollectionNam
  *  (`_saveSeqs`, random editor ids + seqs) and any stray save stamp are stripped before the device caches the doc
  *  (pushes ignore them anyway); every other collection passes through unchanged. */
 export function pulledChanges<C extends { doc: Record<string, unknown> }>(coll: string, changes: C[]): C[] {
+  if (coll === "booth_captures") {
+    // An inline card image (local dev without Blob) is never sent to a device; a Blob path is a reference and stays.
+    return changes.map((c) => {
+      if (!("cardImage" in c.doc)) return c;
+      const doc = { ...c.doc };
+      delete doc.cardImage;
+      return { ...c, doc };
+    });
+  }
   if (coll !== "surveys") return changes;
   return changes.map((c) => ({ ...c, doc: withoutSaveFields(c.doc) }));
 }

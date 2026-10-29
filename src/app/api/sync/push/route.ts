@@ -13,6 +13,7 @@ import type { Pipelines } from "@/lib/pipelines";
 import { pushAssessment } from "@/lib/stores/assessments";
 import { pushFinding } from "@/lib/stores/findings";
 import { pushSurvey } from "@/lib/stores/surveys";
+import { pushBoothCapture } from "@/lib/booth/capture-server";
 import { sanitizePushedDoc } from "@/lib/sync/server-owned";
 import { hydrateDoc } from "@/lib/markup/doc-basis";
 import { mayPullFieldData } from "@/lib/sync/pull-collections";
@@ -117,6 +118,12 @@ export async function POST(req: Request) {
       // after this copy was made). A throw replies retry.
       if (coll === "surveys") {
         results[coll].push(await pushSurvey({ id: rec.id, rev: rec.rev, doc: rec.doc }));
+        continue;
+      }
+      // Trade show booth captures: never the generic whole-document upsert. One idempotent
+      // server path creates or merges the lead and stamps the capture; a throw replies retry.
+      if (coll === "booth_captures") {
+        results[coll].push(await pushBoothCapture({ id: rec.id, rev: rec.rev, doc: rec.doc }, { ...pusher, roles: session.user.roles }));
         continue;
       }
       try {

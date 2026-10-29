@@ -6,7 +6,11 @@ import type { Ok } from "./test-inbox-org";
 import { activeShow, applyShowOp, normalizeSlug, sanitizeCards, sanitizeShows, slugProblem, type Show } from "../src/lib/booth/shows";
 import { buildVCard, vcardFileName } from "../src/lib/booth/vcard";
 import { parseCardText, type ParsedCard } from "../src/lib/booth/card-parse";
-import { listShows, getActiveShow, writeShow, listCards, cardUserId, setCard } from "../src/lib/stores/booth";
+import { listShows, getActiveShow, writeShow, listCards, cardUserId, setCard, getCapture, listCapturesForShow } from "../src/lib/stores/booth";
+import { recordBoothCapture } from "../src/lib/booth/capture-server";
+import { get as getLead } from "../src/lib/stores/leads";
+import { pulledChanges } from "../src/lib/sync/pull-collections";
+import { sanitizePushedDoc } from "../src/lib/sync/server-owned";
 import { SYNCABLE_COLLECTIONS, DOC_TABLES } from "../src/db/doc-tables";
 import { FIELD_COLLECTIONS } from "../src/lib/sync/engine";
 import { alreadyRecorded, dedupeDecision, followUpCopy, leadMessage, newCaptureId, sanitizeCapture, type BoothCapture } from "../src/lib/booth/capture";
@@ -124,6 +128,76 @@ export async function boothDbChecks(ok: Ok) {
   ok(!(await setCard("bad slug", "u1")).ok, "booth: bad slug refused");
   await setCard("jeff", null);
   ok((await cardUserId("jeff")) === null && !("jeff" in (await listCards())), "booth: card removed");
+  await writeShow({ kind: "deactivate" });
+
+  // recordBoothCapture — create, idempotent replay, merge into an open lead
+  const show = await writeShow({ kind: "upsert", show: { name: "Booth DB Show" } });
+  const showId = (show as { id: string }).id;
+  await writeShow({ kind: "activate", id: showId });
+  const actor = { id: "u-booth", name: "Booth Tester" };
+  const cap1 = { id: "bc_00000000000000a1", via: "booth", showId, firstName: "Pat", lastName: "Visitor", email: "pat.visitor@example.org", phone: "", company: "Visitor Hall", title: "TD", interests: ["rigging"], temperature: "hot", notes: "", capturedAt: Date.now(), capturedById: actor.id, capturedByName: actor.name };
+  const r1 = await recordBoothCapture(cap1, actor);
+  ok(r1.ok && r1.outcome === "created", "booth: first capture creates a lead");
+  const lead1 = r1.ok ? await getLead(r1.leadId) : null;
+  ok(!!lead1 && lead1.source === "event" && lead1.eventId === showId && lead1.owner === actor.name && (lead1.boothCaptureIds || []).includes(cap1.id) && lead1.contact === "Pat Visitor" && lead1.org === "Visitor Hall", "booth: lead fields");
+  const r1b = await recordBoothCapture(cap1, actor);
+  ok(r1b.ok && r1.ok && r1b.leadId === r1.leadId, "booth: replaying the same capture returns the same lead");
+  ok((await getCapture(cap1.id))?.leadId === (r1.ok ? r1.leadId : ""), "booth: capture doc stamped with its lead");
+  const cap2 = { ...cap1, id: "bc_00000000000000a2", email: "PAT.VISITOR@example.org", notes: "came back day 2", capturedAt: Date.now() + 5 };
+  const r2 = await recordBoothCapture(cap2, actor);
+  ok(r2.ok && r1.ok && r2.outcome === "merged" && r2.leadId === r1.leadId, "booth: same email → merged into the open lead");
+  const merged = r1.ok ? await getLead(r1.leadId) : null;
+  ok(!!merged && (merged.boothCaptureIds || []).length === 2 && merged.activities.some((a) => a.note.includes("Met again at Booth DB Show") && a.note.includes("came back day 2")), "booth: merge logs Met again with notes");
+  const bad = await recordBoothCapture({ ...cap1, id: "bc_00000000000000a3", firstName: "", lastName: "" }, actor);
+  ok(!bad.ok, "booth: an invalid capture is refused");
+
+  // card image safety: only real JPEG bytes are kept (no Blob in the harness → "inline")
+  const jpegUrl = "data:image/jpeg;base64," + Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46]).toString("base64");
+  const fakeUrl = "data:image/jpeg;base64," + Buffer.from("hello").toString("base64");
+  const rFake = await recordBoothCapture({ ...cap1, id: "bc_00000000000000b1", email: "fake.image@example.org", cardImage: fakeUrl }, actor);
+  const fakeDoc = await getCapture("bc_00000000000000b1");
+  ok(rFake.ok && !!fakeDoc && !fakeDoc.cardImagePath && !fakeDoc.cardImage, "booth: a non-JPEG card image is dropped, not stored");
+  const rJpg = await recordBoothCapture({ ...cap1, id: "bc_00000000000000b2", email: "real.image@example.org", cardImage: jpegUrl }, actor);
+  const jpgDoc = await getCapture("bc_00000000000000b2");
+  ok(rJpg.ok && jpgDoc?.cardImagePath === "inline" && jpgDoc.cardImage === jpegUrl, "booth: a real JPEG is kept (inline without Blob)");
+
+  // capturedAt clamp: 0 / negative / NaN / > 24 h ahead → now; a sane past value stays
+  const t0 = Date.now();
+  const clampIds = ["bc_00000000000000c1", "bc_00000000000000c2", "bc_00000000000000c3", "bc_00000000000000c4"];
+  const bads = [0, -5, t0 + 3 * 24 * 3600 * 1000, Number.NaN];
+  for (let i = 0; i < bads.length; i++) await recordBoothCapture({ ...cap1, id: clampIds[i], email: `clamp${i}@example.org`, capturedAt: bads[i] }, actor);
+  const clamped = await Promise.all(clampIds.map((id) => getCapture(id)));
+  ok(clamped.every((c) => !!c && c.capturedAt >= t0 && c.capturedAt <= Date.now() + 1000), "booth: bad capturedAt values are replaced with now");
+  const past = t0 - 3 * 3600 * 1000;
+  await recordBoothCapture({ ...cap1, id: "bc_00000000000000c5", email: "clamp5@example.org", capturedAt: past }, actor);
+  ok((await getCapture("bc_00000000000000c5"))?.capturedAt === past, "booth: a sane past capturedAt is kept");
+
+  // listCapturesForShow — newest first
+  const forShow = await listCapturesForShow(showId);
+  ok(forShow.length >= 2 && forShow.every((c, i) => i === 0 || forShow[i - 1].capturedAt >= c.capturedAt), "booth: listCapturesForShow is newest first");
+  ok(forShow.some((c) => c.id === cap1.id) && forShow.some((c) => c.id === cap2.id), "booth: listCapturesForShow returns the recorded captures");
+
+  // sync: devices never pull an inline card image; pushes never carry server-owned fields
+  const pulled = pulledChanges("booth_captures", [{ doc: { id: "bc_x", cardImage: jpegUrl, cardImagePath: "inline", leadId: "L1" } as Record<string, unknown> }]);
+  ok(!("cardImage" in pulled[0].doc) && pulled[0].doc.cardImagePath === "inline" && pulled[0].doc.leadId === "L1", "booth: pull strips the inline card image only");
+  const other = pulledChanges("tasks", [{ doc: { id: "t1", cardImage: "x" } as Record<string, unknown> }]);
+  ok(other[0].doc.cardImage === "x", "booth: pull leaves other collections alone");
+  const san = sanitizePushedDoc("booth_captures", { id: "bc_x", leadId: "evil", outcome: "merged", cardImagePath: "evil" }, { doc: { leadId: "L1", outcome: "created", cardImagePath: "p" }, deleted: false });
+  ok(san.leadId === "L1" && san.outcome === "created" && san.cardImagePath === "p", "booth: server-owned capture fields come from the stored copy");
+
+  // share-back draft — one per lead, in the owner's mailbox, nothing without an email
+  const { createShareBackDraft } = await import("../src/lib/booth/followup-server");
+  const { allUsers, addUser } = await import("../src/lib/users");
+  const u = (await allUsers())[0] ?? (await addUser({ name: "Booth Owner", email: "booth.owner@example.test" }));
+  if (r1.ok) {
+    const t1 = await createShareBackDraft({ leadId: r1.leadId, capture: { ...r1.capture, via: "card" }, owner: { id: u.id, name: u.name } });
+    const t2 = await createShareBackDraft({ leadId: r1.leadId, capture: { ...r1.capture, via: "card" }, owner: { id: u.id, name: u.name } });
+    ok(!!t1 && t1 === t2, "booth: share-back draft created once per lead");
+    ok((await createShareBackDraft({ leadId: r1.leadId, capture: { ...r1.capture, email: "" }, owner: { id: u.id, name: u.name } })) === null, "booth: no email → no draft");
+    const { getDoc } = await import("../src/db/doc-store");
+    const th = t1 ? await getDoc<{ id: string; status: string; link?: { type: string; id: string }; linkedBy?: string; draft?: { attachments?: { name: string }[]; subject?: string } }>("comms", t1) : null;
+    ok(!!th && th.status === "draft" && th.link?.type === "lead" && th.link.id === r1.leadId && th.linkedBy === "user" && (th.draft?.attachments || []).length === 1, "booth: draft is linked to the lead (deliberately) with the vCard attached");
+  } else ok(false, "booth: first capture recorded for the draft check");
   await writeShow({ kind: "deactivate" });
 }
 
