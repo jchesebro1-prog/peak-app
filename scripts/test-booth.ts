@@ -14,6 +14,7 @@ import { pulledChanges } from "../src/lib/sync/pull-collections";
 import { sanitizePushedDoc } from "../src/lib/sync/server-owned";
 import { SYNCABLE_COLLECTIONS, DOC_TABLES } from "../src/db/doc-tables";
 import { FIELD_COLLECTIONS } from "../src/lib/sync/engine";
+import { batchOutbox, pushRecordSize, PUSH_MAX_BYTES, PUSH_MAX_RECORDS } from "../src/lib/sync/batch";
 import { filterByShow } from "../src/lib/booth/lead-filter";
 import { alreadyRecorded, dedupeDecision, followUpCopy, leadMessage, newCaptureId, sanitizeCapture, type BoothCapture } from "../src/lib/booth/capture";
 
@@ -125,6 +126,22 @@ export async function boothChecks(ok: Ok) {
   const fu = followUpCopy({ firstName: "Sarah", showName: "LDI 2026", interests: ["rigging", "lighting"], senderName: "Jeff Chesebro" });
   ok(fu.subject === "Great meeting you at LDI 2026" && fu.body.startsWith("Hi Sarah,") && fu.body.includes("rigging and lighting") && fu.body.trimEnd().endsWith("Jeff Chesebro"), "booth: follow-up copy");
   ok(followUpCopy({ firstName: "", showName: null, interests: [], senderName: "Jeff" }).subject === "Great meeting you", "booth: follow-up copy without a show");
+
+  // D1330 — the outbox flush is split into request-sized pushes
+  const B = { maxBytes: PUSH_MAX_BYTES, maxRecords: PUSH_MAX_RECORDS };
+  ok(PUSH_MAX_BYTES === 3_000_000 && PUSH_MAX_RECORDS === 200, "sync batch: 3 MB / 200 records per push");
+  const scans = Array.from({ length: 20 }, (_, i) => ({ collection: "booth_captures", id: `bc_${i}`, size: 335_000 }));
+  const sb = batchOutbox(scans, B);
+  ok(sb.length >= 3 && sb.every((b) => b.reduce((n, e) => n + e.size, 0) <= PUSH_MAX_BYTES), "sync batch: 20 scans of ~335 KB → ≥ 3 batches, each ≤ 3 MB");
+  ok(sb.flat().map((e) => e.id).join() === scans.map((e) => e.id).join(), "sync batch: order preserved");
+  const bigB = batchOutbox([{ collection: "tasks", id: "a", size: 10 }, { collection: "surveys", id: "huge", size: 5_000_000 }, { collection: "tasks", id: "b", size: 10 }], B);
+  ok(bigB.length === 3 && bigB[1].length === 1 && bigB[1][0].id === "huge" && bigB[0][0].id === "a" && bigB[2][0].id === "b", "sync batch: a 5 MB entry goes alone");
+  const tiny = batchOutbox(Array.from({ length: 450 }, (_, i) => ({ collection: "tasks", id: `t${i}`, size: 100 })), B);
+  ok(tiny.length === 3 && tiny[0].length === 200 && tiny[1].length === 200 && tiny[2].length === 50, "sync batch: many tiny entries split by the record cap");
+  ok(batchOutbox([], B).length === 0, "sync batch: empty outbox → no batches");
+  ok(pushRecordSize({ id: "x", rev: 1, doc: { n: "é" } }) === Buffer.byteLength(JSON.stringify({ id: "x", rev: 1, doc: { n: "é" } })), "sync batch: size is the UTF-8 byte length of the push shape");
+  const engSrc = readFileSync(join(process.cwd(), "src/lib/sync/engine.ts"), "utf8");
+  ok(engSrc.includes("batchOutbox(") && engSrc.includes("private async pushBatch(outbox: OutboxEntry[])") && engSrc.includes("res.status === 413") && engSrc.includes("PUSH_TOO_LARGE_MESSAGE") && !engSrc.includes("Network dropped mid-flush"), "sync batch: the engine pushes batch by batch, parks a lone 413, and no longer swallows the whole flush");
 }
 
 export async function boothDbChecks(ok: Ok) {
