@@ -600,16 +600,21 @@ export interface LogActivityInput {
 }
 
 /**
- * Record one booth capture on an existing (open) lead, all inside ONE patch on
- * the current row: a capture id already on the lead changes nothing (`added:
- * false`), so a retry or a racing writer can't double the "Met again" note or
- * lose another capture's ids. Unions the capture ids and interests, takes the
- * temperature when given, sets the show only when the lead has none.
+ * Record one booth capture on an existing (open) lead in one `patchDoc`
+ * callback: a capture id already on the lead changes nothing (`added: false`),
+ * so a retry of the SAME capture can't double the "Met again" note. `patchDoc`
+ * is an unlocked read-modify-write, so two DIFFERENT captures merging into one
+ * lead at the same instant can still lose one's ids and note (D1322, open).
+ * Unions the capture ids and interests, takes the temperature when given, sets
+ * the show only when the lead has none (a lead met again at a second show
+ * stays under its first). `countsAsContact` stamps the SLA first-response
+ * clock: true only when staff met the person (Booth mode) — inbound visitor
+ * activity (a contact-card submission) never satisfies first response.
  */
 export async function addBoothCapture(
   leadId: string,
   capture: { id: string; interests: string[]; temperature: "hot" | "warm" | "cold" | null; showId: string | null },
-  note: { by: string; text: string }
+  note: { by: string; text: string; countsAsContact: boolean }
 ): Promise<{ added: boolean; lead: LeadRecord | null }> {
   let added = false;
   const lead = await patchDoc<LeadRecord>("leads", leadId, (l) => {
@@ -622,7 +627,7 @@ export async function addBoothCapture(
     if (!l.eventId && capture.showId) l.eventId = capture.showId;
     l.activities = (l.activities || []).concat([act(at, "note", note.by, note.text)]);
     touch(l, at);
-    if (!l.firstContactAt && note.by) l.firstContactAt = at;
+    if (!l.firstContactAt && note.countsAsContact) l.firstContactAt = at;
     dirty(l);
   });
   return { added, lead };

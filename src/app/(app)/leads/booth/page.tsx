@@ -7,7 +7,8 @@ export const dynamic = "force-dynamic";
 export default async function BoothPage() {
   const me = await requirePerm("create");
   const [shows, active] = await Promise.all([listShows(), getActiveShow()]);
-  const recent = active ? (await listCapturesForShow(active.id)).slice(0, 50) : [];
+  // Only recorded captures: a row still holding a claim (no lead yet) is not a result to show.
+  const recent = active ? (await listCapturesForShow(active.id)).filter((c) => !!c.leadId).slice(0, 50) : [];
   return (
     <BoothForm
       shows={shows.filter((s) => !s.archived).map((s) => ({ id: s.id, name: s.name }))}

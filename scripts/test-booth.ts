@@ -195,17 +195,43 @@ export async function boothDbChecks(ok: Ok) {
   ok(afterCard?.temperature === tempBefore && tempBefore === "hot", "booth: a card merge leaves the lead's temperature alone");
   const boothAct = merged?.activities.find((x) => x.note.includes("came back day 2"));
   ok(!!boothAct && boothAct.by === actor.name && boothAct.note.startsWith("Met again at"), "booth: a staff (booth) merge is still attributed to the actor, no prefix");
+  // SLA clock (final review I3/I4): visitor activity on the public card never counts as our first contact
+  const slaBase = { ...cap1, email: "sla.visitor@example.org", capturedAt: Date.now() + 11 };
+  const sla0 = await recordBoothCapture({ ...slaBase, id: "bc_00000000000000a5" }, actor);
+  ok(sla0.ok && (await getLead(sla0.leadId))?.firstContactAt == null, "booth SLA: a booth-created lead starts with the clock running");
+  const slaCard = await recordBoothCapture({ ...slaBase, id: "bc_00000000000000a6", via: "card", notes: "card again" }, { id: "u-owner", name: "Card Owner" }, { ownerName: "Card Owner" });
+  ok(slaCard.ok && slaCard.outcome === "merged" && (await getLead(slaCard.leadId))?.firstContactAt == null, "booth SLA: a card merge into a lead with no first contact leaves it unset");
+  const slaBooth = await recordBoothCapture({ ...slaBase, id: "bc_00000000000000a7", notes: "met in person" }, actor);
+  ok(slaBooth.ok && slaBooth.outcome === "merged" && typeof (await getLead(slaBooth.leadId))?.firstContactAt === "number", "booth SLA: a booth merge (staff met them) stamps first contact");
+  const cardNew = await recordBoothCapture({ ...cap1, id: "bc_00000000000000a8", via: "card", email: "card.new@example.org", notes: "please call me" }, { id: "u-owner", name: "Card Owner" }, { ownerName: "Card Owner" });
+  const cardLead = cardNew.ok ? await getLead(cardNew.leadId) : null;
+  ok(cardNew.ok && cardNew.outcome === "created" && cardLead?.owner === "Card Owner" && cardLead.activities[0]?.by === "Contact card" && cardLead.firstContactAt == null, "booth SLA: a card-created lead's first note is by Contact card, owner kept, clock running");
+
+  // a throw after the claim releases it (final review I5): the immediate retry records instead of reading busy
+  const throwCap = { ...cap1, id: "bc_00000000000000a9", email: "throw.after.claim@example.org" };
+  let threw = false;
+  try {
+    await recordBoothCapture(throwCap, actor, { testHooks: { afterClaim: () => { throw new Error("injected"); } } });
+  } catch {
+    threw = true;
+  }
+  const released = (await getCapture(throwCap.id)) as (BoothCapture & { claimUntil?: number }) | null;
+  ok(threw && !!released && !released.leadId && released.claimUntil === 0, "booth claim: a throw after the claim rethrows and releases the claim (claimUntil 0, no lead)");
+  const retried = await recordBoothCapture(throwCap, actor);
+  ok(retried.ok && retried.outcome === "created" && (await getCapture(throwCap.id))?.leadId === retried.leadId, "booth claim: the immediate retry records the capture");
+  const boothPage = readFileSync(join(process.cwd(), "src/app/(app)/leads/booth/page.tsx"), "utf8");
+  ok(boothPage.includes(".filter((c) => !!c.leadId)"), "booth claim: the Today list shows only captures that reached a lead");
   const bad = await recordBoothCapture({ ...cap1, id: "bc_00000000000000a3", firstName: "", lastName: "" }, actor);
   ok(!bad.ok, "booth: an invalid capture is refused");
 
   // atomic add: the same capture id adds once
   if (r1.ok) {
     const before = (await getLead(r1.leadId))!.activities.length;
-    const x1 = await addBoothCapture(r1.leadId, { id: "bc_00000000000000d1", interests: ["av"], temperature: "warm", showId }, { by: "T", text: "Met again at X" });
-    const x2 = await addBoothCapture(r1.leadId, { id: "bc_00000000000000d1", interests: ["av"], temperature: "warm", showId }, { by: "T", text: "Met again at X" });
+    const x1 = await addBoothCapture(r1.leadId, { id: "bc_00000000000000d1", interests: ["av"], temperature: "warm", showId }, { by: "T", text: "Met again at X", countsAsContact: true });
+    const x2 = await addBoothCapture(r1.leadId, { id: "bc_00000000000000d1", interests: ["av"], temperature: "warm", showId }, { by: "T", text: "Met again at X", countsAsContact: true });
     const after = (await getLead(r1.leadId))!;
     ok(x1.added && !x2.added && after.activities.length === before + 1 && after.boothCaptureIds!.filter((i) => i === "bc_00000000000000d1").length === 1 && after.interests!.includes("av") && after.temperature === "warm", "booth: addBoothCapture twice with one id adds once");
-    ok(!(await addBoothCapture("L-nope", { id: "bc_00000000000000d2", interests: [], temperature: null, showId: null }, { by: "T", text: "x" })).lead, "booth: addBoothCapture on a missing lead returns no lead");
+    ok(!(await addBoothCapture("L-nope", { id: "bc_00000000000000d2", interests: [], temperature: null, showId: null }, { by: "T", text: "x", countsAsContact: true })).lead, "booth: addBoothCapture on a missing lead returns no lead");
   }
 
   // claims: a live claim backs off (retry), a stale one is taken over, attribution comes from the actor
@@ -244,7 +270,9 @@ export async function boothDbChecks(ok: Ok) {
   const raceAgain = await recordBoothCapture(raceCap, actor);
   ok(raceAgain.ok && raceAgain.leadId === raceLeads[0].id, "booth: the retry after the race finds the same lead");
 
-  // card image safety: only real JPEG bytes are kept (no Blob in the harness → "inline")
+  // card image safety: only real JPEG bytes are kept (Blob token cleared for this block → "inline", never real Blob)
+  const prevBlobToken = process.env.BLOB_READ_WRITE_TOKEN;
+  delete process.env.BLOB_READ_WRITE_TOKEN;
   const jpegUrl = "data:image/jpeg;base64," + Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46]).toString("base64");
   const fakeUrl = "data:image/jpeg;base64," + Buffer.from("hello").toString("base64");
   const rFake = await recordBoothCapture({ ...cap1, id: "bc_00000000000000b1", email: "fake.image@example.org", cardImage: fakeUrl }, actor);
@@ -253,6 +281,7 @@ export async function boothDbChecks(ok: Ok) {
   const rJpg = await recordBoothCapture({ ...cap1, id: "bc_00000000000000b2", email: "real.image@example.org", cardImage: jpegUrl }, actor);
   const jpgDoc = await getCapture("bc_00000000000000b2");
   ok(rJpg.ok && jpgDoc?.cardImagePath === "inline" && jpgDoc.cardImage === jpegUrl, "booth: a real JPEG is kept (inline without Blob)");
+  if (prevBlobToken !== undefined) process.env.BLOB_READ_WRITE_TOKEN = prevBlobToken;
 
   // capturedAt clamp: 0 / negative / NaN / > 24 h ahead → now; a sane past value stays
   const t0 = Date.now();

@@ -59,7 +59,13 @@ async function storeCardImage(c: BoothCapture): Promise<BoothCapture> {
   return rest;
 }
 
-export async function recordBoothCapture(raw: unknown, actor: Actor, opts: { ownerName?: string } = {}): Promise<RecordResult> {
+/** `testHooks` is a test-only seam (scripts/test-booth.ts): `afterClaim` runs right after the claim is won, so a
+ *  check can make the post-claim work throw. No route passes it. */
+export async function recordBoothCapture(
+  raw: unknown,
+  actor: Actor,
+  opts: { ownerName?: string; testHooks?: { afterClaim?: () => void | Promise<void> } } = {}
+): Promise<RecordResult> {
   const s = sanitizeCapture(raw);
   if (!s.ok) return s;
   const now = Date.now();
@@ -87,10 +93,39 @@ export async function recordBoothCapture(raw: unknown, actor: Actor, opts: { own
     if (!(await casDocKey("booth_captures", prior.id, "claimUntil", prior.claimUntil, claimUntil))) return BUSY;
   }
 
-  // We hold the claim. Keep the first capturer's stamp and any image already stored.
+  // We hold the claim. A throw from here on releases it (so the device's retry records at once instead of reading
+  // "Still saving" for the rest of the lease), unless the capture already carries its lead.
+  try {
+    await opts.testHooks?.afterClaim?.();
+    return await recordClaimed(incoming, prior, s.capture.cardImage, actor, opts);
+  } catch (e) {
+    await releaseClaim(incoming.id, claimUntil);
+    throw e;
+  }
+}
+
+/** Give a claim back after a failed record: claimUntil → 0 (stale, so the next caller takes it over by CAS), only
+ *  while it is still our claim and the doc has no lead. Best effort — a failed release just waits out the lease. */
+async function releaseClaim(id: string, claimUntil: number): Promise<void> {
+  try {
+    const doc = await getDoc<BoothCapture & { id: string; claimUntil?: number }>("booth_captures", id);
+    if (doc && !doc.leadId && doc.claimUntil === claimUntil) await casDocKey("booth_captures", id, "claimUntil", claimUntil, 0);
+  } catch (err) {
+    console.error("[booth] couldn't release the claim; it expires with its lease", id, err);
+  }
+}
+
+async function recordClaimed(
+  incoming: BoothCapture,
+  prior: (BoothCapture & { id: string; claimUntil?: number }) | null,
+  cardImage: string | undefined,
+  actor: Actor,
+  opts: { ownerName?: string }
+): Promise<RecordResult> {
+  // Keep the first capturer's stamp and any image already stored.
   let capture: BoothCapture = incoming;
   if (prior) capture = { ...capture, capturedById: prior.capturedById || capture.capturedById, capturedByName: prior.capturedByName || capture.capturedByName, capturedAt: prior.capturedAt || capture.capturedAt };
-  const withImage = s.capture.cardImage ? { ...capture, cardImage: s.capture.cardImage } : capture;
+  const withImage = cardImage ? { ...capture, cardImage } : capture;
   capture = prior?.cardImagePath ? { ...capture, cardImagePath: prior.cardImagePath } : await storeCardImage(withImage);
 
   const shows = await listShows();
@@ -114,7 +149,8 @@ export async function recordBoothCapture(raw: unknown, actor: Actor, opts: { own
       const r = await addBoothCapture(
         d.leadId,
         { id: capture.id, interests: capture.interests, temperature: fromCard ? null : capture.temperature, showId: capture.showId },
-        { by: fromCard ? "Contact card" : actor.name, text: note }
+        // Staff met them (Booth mode) → first contact; a card submission is the visitor reaching out, not us.
+        { by: fromCard ? "Contact card" : actor.name, text: note, countsAsContact: !fromCard }
       );
       if (r.lead) {
         leadId = d.leadId;
@@ -141,7 +177,9 @@ export async function recordBoothCapture(raw: unknown, actor: Actor, opts: { own
           temperature: capture.temperature,
           boothCaptureIds: [capture.id],
         },
-        actor.name
+        // A card-created lead's first note is the visitor's own words: it speaks as "Contact card", never the owner
+        // (the owner is set explicitly above). create() never stamps firstContactAt, so the SLA clock keeps running.
+        capture.via === "card" ? "Contact card" : actor.name
       );
       leadId = lead.id;
       outcome = "created";
