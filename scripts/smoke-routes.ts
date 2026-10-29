@@ -101,6 +101,7 @@ const ROUTES = [
   "/vendors", // #122 Vendors module
   "/vendors?status=no-list&q=rose",
   "/leads",
+  "/leads/shows", // booth capture: trade shows + contact cards
   "/opportunities",
   "/schedule",
   "/schedule?view=timeline", // #145 D172 — consulting rows grouped above installs
