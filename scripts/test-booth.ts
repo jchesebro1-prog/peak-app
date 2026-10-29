@@ -2,6 +2,7 @@
    Run the pure half alone with `npx tsx scripts/test-booth.ts`. */
 import type { Ok } from "./test-inbox-org";
 import { activeShow, applyShowOp, normalizeSlug, sanitizeCards, sanitizeShows, slugProblem, type Show } from "../src/lib/booth/shows";
+import { buildVCard, vcardFileName } from "../src/lib/booth/vcard";
 
 const S = (over: Partial<Show>): Show => ({ id: "sh_00000001", name: "LDI 2026", startAt: null, endAt: null, active: false, archived: false, createdAt: 1, ...over });
 const mint = (() => { let n = 0; return () => "sh_" + String(++n).padStart(8, "0"); })();
@@ -40,6 +41,20 @@ export async function boothChecks(ok: Ok) {
   ok(slugProblem("") !== null && slugProblem("a b") !== null && slugProblem("-x") !== null && slugProblem("x".repeat(33)) !== null, "booth: bad slugs refused");
   const cards = sanitizeCards({ jeff: "u1", "Bad Slug": "u2", sam: "" });
   ok(Object.keys(cards).join() === "jeff" && cards.jeff === "u1", "booth: card map keeps only valid entries");
+
+  // vCard
+  const vc = buildVCard({ name: "Jeff Chesebro", org: "Peak Systems Group", title: "Owner, President", workPhone: "414-555-0100", cellPhone: "414-555-0199", email: "jeff@example.com", url: "https://peaksystemsgroup.com" });
+  const lines = vc.split("\r\n");
+  ok(lines[0] === "BEGIN:VCARD" && lines[1] === "VERSION:3.0" && lines[lines.length - 2] === "END:VCARD" && lines[lines.length - 1] === "", "booth: vCard frame + CRLF");
+  ok(lines.includes("FN:Jeff Chesebro") && lines.includes("N:Chesebro;Jeff;;;"), "booth: vCard FN + N split on last space");
+  ok(lines.includes("TITLE:Owner\\, President"), "booth: vCard escapes commas");
+  ok(lines.includes("TEL;TYPE=WORK,VOICE:414-555-0100") && lines.includes("TEL;TYPE=CELL:414-555-0199"), "booth: vCard phones");
+  ok(lines.includes("EMAIL;TYPE=INTERNET:jeff@example.com") && lines.includes("URL:https://peaksystemsgroup.com"), "booth: vCard email + url");
+  ok(!buildVCard({ name: "A B" }).includes("TEL"), "booth: vCard omits missing fields");
+  ok(buildVCard({ name: "A;B\nC" }).includes("FN:A\\;B\\nC"), "booth: vCard escapes ; and newline");
+  const photo = buildVCard({ name: "A B", photoJpegBase64: "x".repeat(300) }).split("\r\n");
+  ok(photo.every((l) => Buffer.byteLength(l) <= 75) && photo.some((l) => l.startsWith("PHOTO;ENCODING=b;TYPE=JPEG:")) && photo.some((l) => l.startsWith(" ")), "booth: vCard folds long lines at 75 octets");
+  ok(vcardFileName("Jeff Chesebro") === "Jeff Chesebro.vcf" && vcardFileName(' a/"b ') === "a b.vcf" && vcardFileName("") === "contact.vcf", "booth: vCard file name");
 }
 
 export async function boothDbChecks(ok: Ok) {
