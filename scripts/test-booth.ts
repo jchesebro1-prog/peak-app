@@ -1,0 +1,53 @@
+/* Trade show booth capture — harness checks. `boothChecks` is pure; `boothDbChecks` needs the test DB.
+   Run the pure half alone with `npx tsx scripts/test-booth.ts`. */
+import type { Ok } from "./test-inbox-org";
+import { activeShow, applyShowOp, normalizeSlug, sanitizeCards, sanitizeShows, slugProblem, type Show } from "../src/lib/booth/shows";
+
+const S = (over: Partial<Show>): Show => ({ id: "sh_00000001", name: "LDI 2026", startAt: null, endAt: null, active: false, archived: false, createdAt: 1, ...over });
+const mint = (() => { let n = 0; return () => "sh_" + String(++n).padStart(8, "0"); })();
+
+export async function boothChecks(ok: Ok) {
+  // shows
+  ok(sanitizeShows(null).length === 0, "booth: no shows blob → empty list");
+  ok(sanitizeShows([{ id: "sh_0000000a", name: "  USITT  " }])[0].name === "USITT", "booth: show name trimmed");
+  ok(sanitizeShows([{ id: "bad", name: "X" }, { id: "sh_0000000b", name: "" }]).length === 0, "booth: bad id / blank name dropped");
+  const two = sanitizeShows([S({ id: "sh_00000001", active: true }), S({ id: "sh_00000002", active: true })]);
+  ok(two.filter((s) => s.active).length === 1 && two[0].active, "booth: sanitize keeps only the first active show");
+  ok(activeShow([S({}), S({ id: "sh_00000002", active: true })])?.id === "sh_00000002", "booth: activeShow finds it");
+  ok(activeShow([S({ active: true, archived: true })]) === null, "booth: an archived show is never active");
+
+  const added = applyShowOp([], { kind: "upsert", show: { name: "LDI 2026", startAt: 10, endAt: 20 } }, 5, mint);
+  ok(added.ok && added.list.length === 1 && added.list[0].id === added.id && added.list[0].createdAt === 5, "booth: upsert adds with a minted id");
+  ok(!applyShowOp([], { kind: "upsert", show: { name: " " } }, 5, mint).ok, "booth: blank name refused");
+  ok(!applyShowOp([], { kind: "upsert", show: { name: "X", startAt: 20, endAt: 10 } }, 5, mint).ok, "booth: end before start refused");
+  const list = [S({ id: "sh_00000001", active: true }), S({ id: "sh_00000002" })];
+  const act = applyShowOp(list, { kind: "activate", id: "sh_00000002" }, 6, mint);
+  ok(act.ok && act.list.filter((s) => s.active).map((s) => s.id).join() === "sh_00000002", "booth: activate moves the one active flag");
+  ok(!applyShowOp(list, { kind: "activate", id: "sh_00000009" }, 6, mint).ok, "booth: activate unknown refused");
+  const off = applyShowOp(list, { kind: "deactivate" }, 6, mint);
+  ok(off.ok && off.list.every((s) => !s.active), "booth: deactivate clears the flag");
+  const arch = applyShowOp(list, { kind: "archive", id: "sh_00000001" }, 6, mint);
+  ok(arch.ok && arch.list[0].archived && !arch.list[0].active, "booth: archive also deactivates");
+  const un = applyShowOp([S({ archived: true })], { kind: "unarchive", id: "sh_00000001" }, 8, mint);
+  ok(un.ok && !un.list[0].archived && !un.list[0].active && un.list[0].name === "LDI 2026", "booth: unarchive keeps name, stays inactive");
+  ok(!applyShowOp([S({ archived: true })], { kind: "activate", id: "sh_00000001" }, 8, mint).ok, "booth: an archived show can't be set active");
+  const ren = applyShowOp(list, { kind: "upsert", show: { id: "sh_00000002", name: "Renamed" } }, 7, mint);
+  ok(ren.ok && ren.list[1].name === "Renamed" && ren.list[1].createdAt === 1, "booth: upsert by id edits in place, keeps createdAt");
+
+  // contact-card slugs
+  ok(normalizeSlug("  Jeff ") === "jeff", "booth: slug lowercased + trimmed");
+  ok(slugProblem("jeff") === null && slugProblem("jeff-c2") === null, "booth: plain slugs ok");
+  ok(slugProblem("") !== null && slugProblem("a b") !== null && slugProblem("-x") !== null && slugProblem("x".repeat(33)) !== null, "booth: bad slugs refused");
+  const cards = sanitizeCards({ jeff: "u1", "Bad Slug": "u2", sam: "" });
+  ok(Object.keys(cards).join() === "jeff" && cards.jeff === "u1", "booth: card map keeps only valid entries");
+}
+
+export async function boothDbChecks(ok: Ok) {
+  void ok; // filled in by Task 5 and Task 6
+}
+
+if (process.argv[1]?.endsWith("test-booth.ts")) {
+  let fails = 0;
+  const ok: Ok = (c, m) => { if (!c) { fails++; console.log("FAIL", m); } };
+  boothChecks(ok).then(() => { console.log(fails ? `${fails} FAILED` : "booth: ALL PASSED"); process.exit(fails ? 1 : 0); });
+}

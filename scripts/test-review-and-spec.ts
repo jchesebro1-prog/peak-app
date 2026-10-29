@@ -11365,6 +11365,7 @@ import { inboxOrgPureChecks, inboxOrgDbChecks, inboxOrgPipelineChecks, inboxOrgA
 import { popoutPureChecks } from "./test-popout";
 import { assessmentChecks, assessmentDbChecks } from "./test-assessments";
 import { partyChecks, partyDbChecks } from "./test-parties";
+import { boothChecks, boothDbChecks } from "./test-booth";
 import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, portalBidPureChecks, portalBidDbChecks, bidReportPureChecks, bidReportWidgetChecks, bidReportDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
 import { lineMoveChecks } from "./test-estimate-line-move";
 import { curvedTrackChecks } from "./test-curved-track";
@@ -11752,6 +11753,7 @@ seeded()
   .then(() => popoutPureChecks(ok))
   .then(() => assessmentChecks(ok)).then(() => assessmentDbChecks(ok))
   .then(() => partyChecks(ok)).then(() => partyDbChecks(ok))
+  .then(() => boothChecks(ok)).then(() => boothDbChecks(ok))
   .then(() => bidChecks(ok)).then(() => bidDbChecks(ok)).then(() => bidSendChecks(ok)).then(() => bidSendFakeChecks(ok)).then(() => bidSendDbChecks(ok)).then(() => bidFollowupChecks(ok)).then(() => bidFollowupDbChecks(ok)).then(() => vendorChecks(ok)).then(() => vendorDbChecks(ok)).then(() => vendorPdfDbChecks(ok)).then(() => vendorPdfPureChecks(ok)).then(() => vendorPdfFillChecks(ok)).then(() => portalBidPureChecks(ok)).then(() => portalBidDbChecks(ok)).then(() => bidReportPureChecks(ok)).then(() => bidReportWidgetChecks(ok)).then(() => bidReportDbChecks(ok))
   .then(() => oct15PureChecks(ok)).then(() => discardConfirmChecks(ok)).then(() => oct15DbChecks(ok))
   .then(() => photoWrapPureChecks(ok)).then(() => photoWrapDbChecks(ok))
