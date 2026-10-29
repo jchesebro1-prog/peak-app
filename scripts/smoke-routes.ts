@@ -393,6 +393,11 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/estimator-preview/Q-2041?tab=package" },
   { route: "/estimator-preview/Q-2041?tab=bom" },
   { route: "/estimator-preview/Q-2041?tab=cutsheets" },
+  // Booth capture Task 7 — the public NFC contact card + its vCard. The scratch DB has no card set, so both
+  // answer their 404 (never a /login bounce: middleware exempts /c/). The pages /leads/booth + /leads/shows
+  // arrive with Tasks 8-9, which add them to ROUTES.
+  { route: "/c/jeff", expectNotFound: true },
+  { route: "/c/jeff/vcard", expectNotFound: true },
   { route: "/estimator-preview/Q-0000", expectNotFound: true },
   { route: "/api/quotes/Q-2041/package-files/PF-000000000000", expectNotFound: true },
   // #296 — no rack is seeded, so the staff submittal preview is checked on its

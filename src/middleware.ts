@@ -34,6 +34,6 @@ export default NextAuth(authConfig).auth;
 
 export const config = {
   matcher: [
-    "/((?!api/auth|api/native/auth|api/leads/intake|api/gmail/sync|api/triage/build|api/drive/sync|api/recordings/upload|login|lead-intake|portal|print/|share/|d/ds/|pdf\\.worker\\.min\\.mjs|placeholders/|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
+    "/((?!api/auth|api/native/auth|api/leads/intake|api/booth/share-back|api/gmail/sync|api/triage/build|api/drive/sync|api/recordings/upload|login|lead-intake|c/|portal|print/|share/|d/ds/|pdf\\.worker\\.min\\.mjs|placeholders/|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
   ],
 };
