@@ -1,0 +1,52 @@
+{
+  "id": "Q-G003",
+  "estNo": 9003,
+  "systems": [
+    {
+      "id": "s1",
+      "name": "Audio",
+      "alternate": false,
+      "sell": 7250,
+      "lines": [
+        {
+          "id": 1,
+          "sku": "Symetrix:Jupiter 4",
+          "ext": 3080
+        },
+        {
+          "id": 2,
+          "sku": "CUSTOM",
+          "ext": 1200
+        },
+        {
+          "id": 3,
+          "sku": "LABOR",
+          "ext": 2280
+        },
+        {
+          "id": 4,
+          "sku": "BONUS-PKG",
+          "ext": 364
+        },
+        {
+          "id": 5,
+          "sku": "BONUS-EST",
+          "ext": 128
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "mat": 4736.34,
+    "lab": 2325.34,
+    "fr": 188.32,
+    "opt": 0,
+    "rev": 7061.68,
+    "cost": 4708,
+    "tax": 0,
+    "grand": 7250,
+    "markup": 0.49993203058623625,
+    "adj": 9.68,
+    "credit": 0
+  }
+}

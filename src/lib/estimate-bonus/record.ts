@@ -1,7 +1,7 @@
 /** Estimator bonuses — the store-owned record written at Won (pure). */
-import type { SpecSection } from "@/app/(app)/estimator/types";
-import { round2, systemSellTotal } from "@/app/(app)/estimator/pricing";
-import type { ClientResponse } from "@/lib/estimate-output/responses";
+import type { SpecSection } from "@/lib/estimating-core/types";
+import { round2, systemSellTotal } from "@/lib/estimating-core/pricing";
+import type { ClientResponse } from "@/lib/estimate-output/response-types";
 import { isBonusItem, isEstimatorBonusItem, isPackageBonusItem } from "./flags";
 
 export type BonusSplit = { leadPct: number };

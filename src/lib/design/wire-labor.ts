@@ -24,7 +24,7 @@
  * wireLaborRulesFrom() here is the one sanitizer. An unset labor % takes the
  * stored flat install % (LEGACY_INSTALL_PCT_ID), else 18.
  */
-import type { BomItem, SysKey, SystemBlock, TierKey } from "@/app/(app)/design/quick/engine";
+import type { BomItem, SysKey, SystemBlock, TierKey } from "@/lib/design/quick-types";
 
 /* -------------------------------- the rules -------------------------------- */
 

@@ -8,8 +8,8 @@
  * (remapKeyProducts, which also re-points a `line:<id>` token). Nothing else
  * changes: a section with no collision is returned as the same object. Pure.
  */
-import type { SpecSection } from "@/app/(app)/estimator/types";
-import { remapKeyProducts, withKeyProducts } from "@/app/(app)/estimator/narrative";
+import type { SpecSection } from "@/lib/estimating-core/types";
+import { remapKeyProducts, withKeyProducts } from "@/lib/estimating-core/narrative";
 
 export function reIdIncomingSection(incoming: SpecSection, targetSections: readonly SpecSection[], docFloor = 0): SpecSection {
   const taken = new Set<number>();

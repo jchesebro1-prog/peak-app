@@ -3854,6 +3854,8 @@ Postgres app.
 
 **Status:** OPEN: strategic. Do not start without an answer to the a/b/c question.
 
+**2026-10-20:** the Estimator handoff (#359) is a one-off package for the founder, not multi-tenancy. #57 stays NOT NOW.
+
 ---
 
 ## 58. Google Drive integration for venues + file access through the customer portal, OPEN
@@ -12762,6 +12764,17 @@ Spec `docs/superpowers/specs/2026-10-16-estimate-photo-wrap-title-page-design.md
 - Set `QUOTE_PDF_ORIGIN` to the production host before relying on the datasheet links (they print the print origin, and break if AUTH_SECRET ever rotates).
 - On production after merge: open one real estimate with drawings + datasheets and check the page order, an 11×17 drawing at full size, the 14 MB ceiling note when a drawing set is too big, and that a datasheet link opens without signing in.
 - Try a long cover note on the title page (it should stay on page 1 or flow cleanly).
+
+## 359. Estimator handoff, PR 1: estimating-core extraction, DONE
+
+**Area:** `src/lib/estimating-core/`, `scripts/core-check.ts`, `scripts/estimating-golden.ts`, the 12 helper shims and `types.ts` under `src/app/(app)/estimator/`
+**Reported:** 2026-10-20 (Jeff: share the estimator as HTML with the founder for their software)
+
+Spec `docs/superpowers/specs/2026-10-20-estimator-handoff-package-design.md`; plan `docs/superpowers/plans/2026-10-20-estimating-core-extraction.md`. D1228–D1230. No behaviour change: golden totals identical on the fixtures and on the one live local system quote; core:check 0 violations.
+
+**Verification:** test:specs 25,016 PASS / 0 FAIL (baseline 24,980); test:smoke 265 PASS / 0 FAIL; tsc exit 0; `next build` exit 0; core:check 82 files, 0 violations; eslint 0 problems on every changed file except `scripts/test-review-and-spec.ts`, which crashes eslint (react-hooks RangeError) identically on origin/main.
+
+**Next:** PR 2 (slicer, prototype UI, spec docs, verification, zip), planned after this merges. It needs Jeff's production export (`DATABASE_URL=<prod> OUT=~/peak-prod-export.json npm run db:export`).
 
 ## 360. Parts list CSV v2 + BOM quote PDF — DONE 2026-10-20 on `feat/parts-csv-bom-pdf` (D1231–D1232)
 

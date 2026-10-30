@@ -1,5 +1,5 @@
 import { sanitizeDiscipline, withDiscipline, type ScopeDiscipline } from "@/lib/estimate-output/fields";
-import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
+import type { SpecItem, SpecSection } from "@/lib/estimating-core/types";
 
 /**
  * Estimator Phase 6 — System categories (spec §13). Admin-editable categories
