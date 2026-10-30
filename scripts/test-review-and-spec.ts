@@ -68965,7 +68965,10 @@ async function gridNotes8Checks(): Promise<void> {
        rd8("src/app/(app)/companies/[id]/page.tsx").includes("<CompanyLogoCard companyId={cust.id}"),
       "Grid notes #8: logo actions are signed-in only (as editing a company), size-check before reading, and the company page shows the card");
     ok(rd8("src/app/(app)/design/grid/[id]/workspace/outputs-menu.tsx").includes("/api/grid/${id}/datasheets-pdf?option=${opt}") &&
-       rd8("src/app/(app)/estimator/package-staff-panel.tsx").includes("/api/quotes/${encodeURIComponent(quoteId)}/datasheets-pdf") &&
+       // 2026-10-30: Client package + BOM quote both link the estimate's book through quoteDatasheetsPdfPath.
+       rd8("src/lib/part-docs/datasheet-book-cover.ts").includes("`/api/quotes/${encodeURIComponent(quoteId)}/datasheets-pdf`") &&
+       rd8("src/app/(app)/estimator/package-staff-panel.tsx").includes("href={quoteDatasheetsPdfPath(quoteId)}") &&
+       rd8("src/app/(app)/estimator/steps/package-bom-tab.tsx").includes("href={quoteDatasheetsPdfPath(loadedId)}") &&
        rd8("src/components/estimate-output/package-extras.tsx").includes("view.datasheetsPdfHref") &&
        rd8("src/app/api/quotes/[id]/datasheets-pdf/route.ts").includes("await requireUser();") && rd8("src/app/api/grid/[id]/datasheets-pdf/route.ts").includes("await requireUser();") &&
        rd8("src/app/api/quotes/[id]/datasheets-pdf/route.ts").includes("quoteBookPdf(") && rd8("src/app/api/grid/[id]/datasheets-pdf/route.ts").includes("gridBookPdf("),

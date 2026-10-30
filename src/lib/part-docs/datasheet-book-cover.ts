@@ -37,11 +37,18 @@ export const BOOK_COVER_COPY = {
   preparedFor: "Prepared for",
   preparedBy: "Prepared by",
   button: "Download all datasheets (PDF)",
+  /** The Estimator's name for the same book (Client package + BOM quote). */
+  estimateButton: "Download datasheet package (PDF)",
   nothing: "There are no datasheets on this job yet.",
   tooBig: "These datasheets are too large to combine into one PDF — download them one at a time instead.",
   late: "The datasheet PDF took too long to build — try again.",
   failed: "The datasheet PDF couldn’t be built — try again.",
 } as const;
+
+/** The staff route for the SAVED estimate's book (api/quotes/[id]/datasheets-pdf). */
+export function quoteDatasheetsPdfPath(quoteId: string): string {
+  return `/api/quotes/${encodeURIComponent(quoteId)}/datasheets-pdf`;
+}
 
 const clean = (s: string | null | undefined) => String(s ?? "").replace(/\s+/g, " ").trim();
 

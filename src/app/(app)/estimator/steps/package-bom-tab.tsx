@@ -7,6 +7,7 @@ import { bomModelSkus, type BomModelPart, type BomModelParts } from "@/lib/estim
 import { bomModelPartsAction } from "../actions";
 import { previewPath } from "@/lib/estimate-output/package-preview";
 import { bomPdfPath } from "@/lib/estimate-output/bom-pdf";
+import { BOOK_COVER_COPY, quoteDatasheetsPdfPath } from "@/lib/part-docs/datasheet-book-cover";
 import type { EstimatorState } from "../use-estimator-state";
 import { VendorsCard } from "./vendors-card";
 import { QuotePeopleFields } from "../quote-people-fields";
@@ -52,7 +53,8 @@ const SEG_OFF: CSSProperties = { ...SEG, fontWeight: 500, background: "transpare
  * quoteDocumentDataFor — the saved preview's own path), so every edit on
  * Build shows on the next render with no network call. Read-only. Code-split
  * by the shell (next/dynamic), so QuoteDocument and the letterhead reach only
- * this chunk. Download PDF / Open PDF ↗ (2026-10-20) print the SAVED estimate's BOM view through /api/quotes/[id]/bom-pdf.
+ * this chunk. Download PDF / Open PDF ↗ (2026-10-20) print the SAVED estimate's BOM view through /api/quotes/[id]/bom-pdf;
+ * Download datasheet package (2026-10-30) is the saved estimate's datasheet book.
  */
 type LiveBomInput = Parameters<typeof liveBomDocumentProps>[0];
 
@@ -185,6 +187,16 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
               </a>
               <a href={bomPdfPath(loadedId, false)} target="_blank" rel="noopener noreferrer" style={LINK}>
                 {BOM_TAB_COPY.openPdf}
+              </a>
+              {/* The Client package tab's datasheet book (cover, index, datasheets), also here — a box sale has no Client package tab. */}
+              <a
+                href={quoteDatasheetsPdfPath(loadedId)}
+                download
+                data-testid="bom-datasheets-pdf"
+                style={LINK}
+                title="One PDF: a cover with our logo and the customer's job details, then every datasheet A→Z by manufacturer — from the saved estimate, honouring the Client package datasheet choices"
+              >
+                {BOOK_COVER_COPY.estimateButton}
               </a>
               {pdfDirty && <span style={{ color: "#8a6d1f" }}>{BOM_TAB_COPY.saveFirst}</span>}
             </>

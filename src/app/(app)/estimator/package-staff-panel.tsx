@@ -11,7 +11,7 @@ import { retryQuotePdfAction } from "@/app/(app)/quotes/pdf-actions";
 import { PACKAGE_FILE_ACCEPT, PACKAGE_FILE_KIND_LABEL, PACKAGE_FILE_KINDS, PACKAGE_FILES_COPY, type PackageFileKind } from "@/lib/estimate-output/package-files";
 import type { PackagePanel } from "@/lib/estimate-output/package-panel-server";
 import { GRID_SET_COPY } from "@/lib/design/grid-set-print";
-import { BOOK_COVER_COPY } from "@/lib/part-docs/datasheet-book-cover";
+import { BOOK_COVER_COPY, quoteDatasheetsPdfPath } from "@/lib/part-docs/datasheet-book-cover";
 import { postChanged } from "@/lib/popout/channel";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 
@@ -276,13 +276,13 @@ export function PackageStaffPanel({
           {/* Grid notes #8 — the SAVED estimate's datasheet book (#329) with the job cover, on its own. */}
           <span style={label}>Datasheets</span>
           <a
-            href={`/api/quotes/${encodeURIComponent(quoteId)}/datasheets-pdf`}
+            href={quoteDatasheetsPdfPath(quoteId)}
             download
             data-testid="package-datasheets-pdf"
             style={{ ...btn, textDecoration: "none", alignSelf: "flex-start" }}
             title="The datasheet book: a job cover (logos, job, venue, contacts), the index, then every datasheet A→Z by manufacturer — from the saved estimate"
           >
-            {BOOK_COVER_COPY.button}
+            {BOOK_COVER_COPY.estimateButton}
           </a>
 
           <span style={label}>Drawings</span>
