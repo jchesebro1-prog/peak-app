@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { cardUserId } from "@/lib/stores/booth";
 import { getUser } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
+import { cardAddressLines, contactCardFields, websiteLabel } from "@/lib/booth/card-fields";
 import ShareBackForm from "./share-back-form";
 
 /**
@@ -31,6 +32,8 @@ export default async function ContactCardPage({ params }: { params: Promise<{ sl
   if (!user) notFound();
   const s = await getSettings();
   const company = s.companyName || "Peak Systems Group";
+  const fields = contactCardFields(user, s);
+  const addressLines = fields.address ? cardAddressLines(fields.address) : [];
   return (
     <main style={{ minHeight: "100vh", background: "#edeef1", fontFamily: "var(--font-ui)", color: "#16181d", padding: "24px 16px" }}>
       <div style={{ maxWidth: 440, margin: "0 auto", display: "grid", gap: 16 }}>
@@ -44,10 +47,20 @@ export default async function ContactCardPage({ params }: { params: Promise<{ sl
           <h1 style={{ fontSize: 22, margin: 0 }}>{user.name}</h1>
           {user.title ? <div style={{ color: "#5b616e" }}>{user.title}</div> : null}
           <div style={{ fontWeight: 600 }}>{company}</div>
+          {addressLines.length ? (
+            <div style={{ color: "#5b616e", fontSize: 13 }}>
+              {addressLines.map((l) => (
+                <div key={l}>{l}</div>
+              ))}
+            </div>
+          ) : null}
           <div style={{ display: "grid", gap: 4, marginTop: 6, fontSize: 14 }}>
             {user.mobile ? <a href={`tel:${user.mobile}`}>{user.mobile} (mobile)</a> : null}
             {user.phone ? <a href={`tel:${user.phone}`}>{user.phone} (office)</a> : null}
             <a href={`mailto:${user.email}`}>{user.email}</a>
+            {fields.url ? (
+              <a href={fields.url} target="_blank" rel="noopener">{websiteLabel(fields.url)}</a>
+            ) : null}
           </div>
           <a className="pk-btn-accent" href={`/c/${encodeURIComponent(slug)}/vcard`} style={{ marginTop: 10, display: "block", textDecoration: "none", padding: "12px 14px", fontSize: 14 }}>Save contact</a>
         </section>

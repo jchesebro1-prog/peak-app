@@ -2,6 +2,7 @@ import { cardUserId } from "@/lib/stores/booth";
 import { getUser } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
 import { buildVCard, contentDispositionFor } from "@/lib/booth/vcard";
+import { contactCardFields } from "@/lib/booth/card-fields";
 import { guardedFetchBytes } from "@/lib/venue-calendar-fetch";
 
 export const dynamic = "force-dynamic";
@@ -30,16 +31,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
       photo = undefined;
     }
   }
-  // AppSettingsData has no website field, so the card carries no URL line.
-  const vcf = buildVCard({
-    name: user.name,
-    org: settings.companyName || "Peak Systems Group",
-    title: user.title || "",
-    workPhone: user.phone || "",
-    cellPhone: user.mobile || "",
-    email: user.email,
-    photoJpegBase64: photo,
-  });
+  const vcf = buildVCard({ ...contactCardFields(user, settings), photoJpegBase64: photo });
   return new Response(vcf, {
     headers: {
       "Content-Type": "text/vcard; charset=utf-8",

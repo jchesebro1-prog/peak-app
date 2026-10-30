@@ -47,6 +47,7 @@ import { rederiveVenueNamesForTypes } from "@/lib/identity/venue-save";
 import { withTransaction } from "@/db";
 import { foldTeamName, teamNameError } from "@/lib/team-names";
 import { handOverNameOnly, retireNameForNewcomer } from "@/lib/mailbox-names";
+import { normalizeWebsite } from "@/lib/booth/card-fields";
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
@@ -209,6 +210,7 @@ export async function setUserStatusAction(id: string, status: UserStatus) {
 
 export async function saveSettingsAction(patch: {
   companyName?: string;
+  website?: string;
   accent?: string;
   federalHolidays?: boolean;
   seedDemo?: boolean;
@@ -221,6 +223,11 @@ export async function saveSettingsAction(patch: {
   const clean: Record<string, unknown> = {};
   if (typeof patch.companyName === "string")
     clean.companyName = patch.companyName;
+  if (typeof patch.website === "string") {
+    const site = normalizeWebsite(patch.website);
+    if (site === null) return { ok: false as const, error: "That isn't a web address (like peaksystemsgroup.com)." };
+    clean.website = site;
+  }
   if (typeof patch.accent === "string" && /^#[0-9a-f]{6}$/i.test(patch.accent))
     clean.accent = patch.accent;
   if (typeof patch.federalHolidays === "boolean")

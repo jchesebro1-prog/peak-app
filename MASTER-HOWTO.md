@@ -803,12 +803,12 @@ when `datasheet_url` is too.
 6. Sent estimates keep their prices. **Revise** re-prices their catalog lines to today's catalog and lists the changes on Build.
 7. Kill switch: `ETC_SYNC_DISABLED=true` in Vercel. Remove the key in the drawer to stop for good.
 
-## 12. Trade show booth (#371, D1320–D1330)
+## 12. Trade show booth (#371, D1320–D1331)
 
 **Before the show (once per show)**
 
 1. **Leads → Shows** (`/leads/shows`). **Add show**: name, start and end dates, **Save**. **Set active** on the one running now. Only one show is active at a time; the contact card and Booth mode both use it. After the show, **Archive** it (a show a lead names is never deleted).
-2. Set up your card (once): your photo, title, phone and mobile come from **Settings → Team** (the card shows whatever is there). On the Shows page, under **Contact cards**, an admin picks the person and a link name (for example `jeff`), then **Add card**. One link name per person, lower case, and a name someone else already holds is refused. The card is then live at `https://<your app address>/c/jeff`. Set `QUOTE_PDF_ORIGIN` in Vercel to the production address first, so the QR and the Copy link button show it and not a preview address.
+2. Set up your card (once): your photo, title, phone and mobile come from **Settings → Team** (the card shows whatever is there). The card also shows your office address (your **Office** on your Team row; without one, the main office) and the company website (**Settings → Branding → Website**); both are in Save contact too, and either is left off if it is blank. On the Shows page, under **Contact cards**, an admin picks the person and a link name (for example `jeff`), then **Add card**. One link name per person, lower case, and a name someone else already holds is refused. The card is then live at `https://<your app address>/c/jeff`. Set `QUOTE_PDF_ORIGIN` in Vercel to the production address first, so the QR and the Copy link button show it and not a preview address.
 
 **Writing the NFC tag**
 

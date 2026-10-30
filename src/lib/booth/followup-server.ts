@@ -5,6 +5,7 @@ import { getSettings } from "@/lib/settings";
 import { listShows } from "@/lib/stores/booth";
 import { get as getLead } from "@/lib/stores/leads";
 import { buildVCard, vcardFileName } from "./vcard";
+import { contactCardFields } from "./card-fields";
 import { followUpCopy, type BoothCapture } from "./capture";
 
 /**
@@ -21,14 +22,9 @@ export async function createShareBackDraft(input: { leadId: string; capture: Boo
   const [user, settings, shows, lead] = await Promise.all([getUser(owner.id), getSettings(), listShows(), getLead(input.leadId)]);
   const showName = shows.find((s) => s.id === capture.showId)?.name ?? null;
   const copy = followUpCopy({ firstName: capture.firstName, showName, interests: capture.interests, senderName: owner.name });
-  const vcf = buildVCard({
-    name: owner.name,
-    org: settings.companyName || "Peak Systems Group",
-    title: user?.title || "",
-    workPhone: user?.phone || "",
-    cellPhone: user?.mobile || "",
-    email: user?.email || "",
-  });
+  const vcf = buildVCard(
+    contactCardFields({ name: owner.name, title: user?.title, phone: user?.phone, mobile: user?.mobile, email: user?.email, officeId: user?.officeId }, settings)
+  );
   const thread = await saveDraft({
     mailbox: "personal",
     owner,

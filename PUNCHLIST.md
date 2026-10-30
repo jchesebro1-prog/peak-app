@@ -12969,3 +12969,11 @@ Jeff, Oct 28: track and collect contact information for people who come to the t
 **Known minors (for the final review):** a Show filter on an unknown id shows an empty board; the Today list is the show's latest 50, not day-filtered; a parked failed row has a Retry button but no Discard; seeding the Today list from the outbox is not scoped per user on a shared tablet; two different captures merging into one lead at once can lose one; the share-back route's rate limiter is per server instance; the vCard photo fetch is not cached; QR codes use the request host when `QUOTE_PDF_ORIGIN` is unset.
 
 **Gates:** tsc 0 errors; test:specs 26,256 PASS / 0 FAIL (ALL PASSED, plus the markup-settings run); test:smoke ALL PASSED, 272 PASS / 0 FAIL (authenticated; one earlier run lost its dev server partway and was rerun clean); eslint 0 errors on the branch's changed TS files (1 pre-existing `Date.now` warning in `leads/page.tsx`; `scripts/test-review-and-spec.ts` excluded, its parser overflows the stack on origin/main too); `next build` passes. Not run: a real device (NFC, Vision, ML Kit), the Android build.
+
+## 372. Contact card: website + office address — DONE 2026-10-30 on `feat/372-card-website-address` (D1331)
+
+Jeff, Oct 30: the NFC contact card should carry the company website and an office address. A new **Website** field in Settings → Branding (normalized to `https://`, validated on the server) and the card owner's office (Settings → Team, else the main office) now show on `/c/<slug>` and in the Save contact vCard (`URL` and `ADR;TYPE=WORK`). One pure `contactCardFields` builds the card page, the vCard route and the share-back draft's vCard. No migration, no env var. Checks in `scripts/test-booth.ts`.
+
+**Remaining (Jeff):**
+- Fill Settings → Branding → Website.
+- Set Office on his Team row if he's not at the main office.

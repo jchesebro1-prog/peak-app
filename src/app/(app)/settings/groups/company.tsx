@@ -183,7 +183,7 @@ export function CompanyGroup({
           <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
         <div style={{ fontSize: 14.5, fontWeight: 600 }}>Branding</div>
         <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
-          Company name and accent color — applied across every screen.
+          Company name, website and accent color — applied across every screen.
         </div>
         <div
           style={{
@@ -208,6 +208,13 @@ export function CompanyGroup({
                   500
                 );
               }}
+            />
+            <label style={{ ...labelStyle, marginTop: 12 }}>Website</label>
+            <input
+              style={inputStyle}
+              defaultValue={settings.website}
+              placeholder="peaksystemsgroup.com"
+              onBlur={(e) => saveSetting({ website: e.target.value })}
             />
           </div>
           <div>

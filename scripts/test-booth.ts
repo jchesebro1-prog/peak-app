@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import { activeShow, applyShowOp, normalizeSlug, sanitizeCards, sanitizeShows, slugProblem, type Show } from "../src/lib/booth/shows";
 import { buildVCard, contentDispositionFor, vcardFileName } from "../src/lib/booth/vcard";
+import { cardAddressLines, contactCardFields, normalizeWebsite, websiteLabel, type CardOffice } from "../src/lib/booth/card-fields";
 import { parseCardText, type ParsedCard } from "../src/lib/booth/card-parse";
 import { listShows, getActiveShow, writeShow, listCards, cardUserId, setCard, getCapture, listCapturesForShow } from "../src/lib/stores/booth";
 import { pushBoothCapture, recordBoothCapture } from "../src/lib/booth/capture-server";
@@ -81,6 +82,32 @@ export async function boothChecks(ok: Ok) {
   const cdQ = contentDispositionFor('A "Q" B\\C');
   ok((cdQ.match(/"/g) || []).length === 2 && !cdQ.includes("\\") && /^[\x20-\x7e]*$/.test(cdQ), "booth: quotes and backslashes stripped from Content-Disposition");
   ok(contentDispositionFor("日本語").startsWith('attachment; filename="contact.vcf"'), "booth: an all-non-Latin name falls back to contact.vcf");
+
+  // vCard address (#372)
+  const adr = buildVCard({ name: "A B", address: { street: "123 Main St", city: "Milwaukee", state: "WI", zip: "53202" } }).split("\r\n");
+  ok(adr.includes("ADR;TYPE=WORK:;;123 Main St;Milwaukee;WI;53202;"), "booth: vCard ADR line");
+  const adrEsc = buildVCard({ name: "A B", address: { street: "Suite 4, Rear", city: "Milwaukee", state: "WI", zip: "53202" } }).split("\r\n");
+  ok(adrEsc.includes("ADR;TYPE=WORK:;;Suite 4\\, Rear;Milwaukee;WI;53202;"), "booth: vCard ADR escapes a comma in the street");
+  ok(!buildVCard({ name: "A B", address: { street: "", city: " ", state: "WI", zip: "53202" } }).includes("ADR") && !buildVCard({ name: "A B" }).includes("ADR"), "booth: vCard omits ADR when the address is empty or absent");
+
+  // website + card fields (#372)
+  ok(normalizeWebsite("peaksystemsgroup.com") === "https://peaksystemsgroup.com", "booth: website gets https://");
+  ok(normalizeWebsite("http://x.com/a") === "http://x.com/a", "booth: website keeps an explicit http scheme and path");
+  ok(normalizeWebsite("  ") === "", "booth: blank website clears");
+  ok(["notaurl", "javascript:alert(1)", "ftp://x.com", "https://user:pw@x.com", "https://" + "a".repeat(200) + ".com"].every((x) => normalizeWebsite(x) === null), "booth: bad websites refused");
+  ok(websiteLabel("https://www.peaksystemsgroup.com/") === "peaksystemsgroup.com", "booth: website label");
+  ok(JSON.stringify(cardAddressLines({ street: "123 Main St", city: "Milwaukee", state: "WI", zip: "53202" })) === JSON.stringify(["123 Main St", "Milwaukee, WI 53202"]), "booth: address lines, full");
+  ok(JSON.stringify(cardAddressLines({ street: "123 Main St", city: "", state: "WI", zip: "53202" })) === JSON.stringify(["123 Main St", "WI 53202"]), "booth: address lines, no city");
+  ok(cardAddressLines({ street: " ", city: "", state: "", zip: "" }).length === 0, "booth: address lines, all blank");
+  const O = (id: string, over: Partial<CardOffice> = {}): CardOffice => ({ id, name: id, lat: null, lng: null, street: "1 A St", city: "Waukesha", state: "WI", zip: "53186", ...over });
+  const offices = [O("o1"), O("o2", { street: "9 B Ave", city: "Chicago", state: "IL", zip: "60601", quoteDefault: true })];
+  const cu = { name: "Jeff C", title: "Owner", phone: "1", mobile: "2", email: "j@x.com" };
+  ok(contactCardFields(cu, { offices }).url === undefined && !("url" in contactCardFields(cu, { offices, website: "  " })), "booth: card fields omit url when the website is empty");
+  ok(contactCardFields(cu, { website: "https://p.com", offices }).url === "https://p.com", "booth: card fields carry the website");
+  ok(contactCardFields({ ...cu, officeId: "o1" }, { offices }).address?.city === "Waukesha", "booth: address from the user's office");
+  ok(contactCardFields(cu, { offices }).address?.city === "Chicago", "booth: no office falls back to the quote-default office");
+  ok(contactCardFields({ ...cu, officeId: "o1" }, { offices: [O("o1", { street: "", city: " " })] }).address === undefined, "booth: office with no street or city gives no address");
+  ok(contactCardFields(cu, {}).org === "Peak Systems Group", "booth: card fields default the org");
 
   // card parser — every committed sample
   const samples = JSON.parse(readFileSync(join(process.cwd(), "docs", "booth", "card-samples.json"), "utf8")) as Array<{ lines: string[]; expect: Partial<ParsedCard> }>;

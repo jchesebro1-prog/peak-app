@@ -4,6 +4,8 @@
  * 75 octets with CRLF + one space.
  */
 
+export type CardAddress = { street: string; city: string; state: string; zip: string };
+
 export type VCardInput = {
   name: string;
   org?: string;
@@ -12,6 +14,8 @@ export type VCardInput = {
   cellPhone?: string;
   email?: string;
   url?: string;
+  /** Work address; emitted only when street or city is non-empty. */
+  address?: CardAddress;
   /** Raw base64 of a JPEG (no data: prefix). */
   photoJpegBase64?: string;
 };
@@ -45,6 +49,10 @@ export function buildVCard(v: VCardInput): string {
   if (v.workPhone?.trim()) raw.push(`TEL;TYPE=WORK,VOICE:${esc(v.workPhone.trim())}`);
   if (v.cellPhone?.trim()) raw.push(`TEL;TYPE=CELL:${esc(v.cellPhone.trim())}`);
   if (v.email?.trim()) raw.push(`EMAIL;TYPE=INTERNET:${esc(v.email.trim())}`);
+  if (v.address && (v.address.street.trim() || v.address.city.trim())) {
+    const a = v.address;
+    raw.push(`ADR;TYPE=WORK:;;${esc(a.street.trim())};${esc(a.city.trim())};${esc(a.state.trim())};${esc(a.zip.trim())};`);
+  }
   if (v.url?.trim()) raw.push(`URL:${v.url.trim()}`);
   if (v.photoJpegBase64) raw.push(`PHOTO;ENCODING=b;TYPE=JPEG:${v.photoJpegBase64}`);
   raw.push("END:VCARD");

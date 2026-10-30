@@ -33,6 +33,8 @@ export type Office = {
 export type AppSettingsData = {
   accent: string;
   companyName: string;
+  /** #372 — company website for the contact card (Settings → Branding); absent/empty = none. */
+  website?: string;
   federalHolidays: boolean;
   seedDemo: boolean;
   feedbackEmail: string;

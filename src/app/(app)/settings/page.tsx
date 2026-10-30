@@ -215,6 +215,7 @@ export default async function SettingsPage({
           pipelineUsage={pipelineUsage}
           settings={{
             companyName: settings.companyName,
+            website: settings.website || "",
             accent: settings.accent,
             federalHolidays: settings.federalHolidays,
             seedDemo: settings.seedDemo,

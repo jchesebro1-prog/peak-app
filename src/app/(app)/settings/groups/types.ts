@@ -88,6 +88,7 @@ export type CatalogPhotosVM = {
 
 export type CompanySettingsVM = {
   companyName: string;
+  website: string;
   accent: string;
   federalHolidays: boolean;
   seedDemo: boolean;
