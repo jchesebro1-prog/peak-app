@@ -56,7 +56,8 @@ export function contactCardFields(
     office && ((office.street || "").trim() || (office.city || "").trim())
       ? { street: office.street || "", city: office.city || "", state: office.state || "", zip: office.zip || "" }
       : undefined;
-  const site = (settings.website || "").trim();
+  // Re-checked on read: only an http(s) address ever reaches the public page.
+  const site = normalizeWebsite(settings.website || "") || "";
   return {
     name: user.name,
     org: settings.companyName || "Peak Systems Group",
