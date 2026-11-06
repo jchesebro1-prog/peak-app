@@ -15,10 +15,10 @@ import type { NextStepSync } from "@/app/(app)/quotes/review-actions";
 import { carriesPipeline, firstStage, stageById } from "@/lib/pipelines";
 import { saveBonusAlternatesAction, saveBonusSplitAction, draftQuoteScopeAction, copySystemToEstimateAction, moveSystemToEstimateAction, resolveCatalogSkusAction, resolveTierAction, saveQuoteAction, searchQuotesAction, setQuotePipelineAction, setQuoteStageAction, setQuotePeopleAction, setStatusAction, travelForSelectionAction, updateQuoteMetaAction, type CopySystemTarget, type MoveSystemTarget, type ReviewSync, type StageSync } from "./actions";
 import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewards/actions";
-import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { isBonusItem, type BonusKind } from "@/lib/estimate-bonus/flags";
 import { defaultAlternatesTaken, normalizeSplit, type BonusRecord, type BonusSplit } from "@/lib/estimate-bonus/record";
 import { useRouter } from "next/navigation";
-import { bonusRatesFor, bonusRulesApply, isBonusEligibleQuote, withBonusLines } from "@/lib/estimate-bonus/rules";
+import { bonusRatesFor, bonusRulesApply, isBonusEligibleQuote, withBonusLines, withBonusRemoved } from "@/lib/estimate-bonus/rules";
 import { applyProjectDiscounts, parseDiscountPct, projectDiscountsKey, PROJECT_DISCOUNT_NOTE_MAX, type ProjectDiscounts } from "@/lib/project-discounts/rules";
 import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/rewards/credit-line";
 import type { WonEditField } from "@/app/(app)/quotes/new/handoff";
@@ -3497,6 +3497,10 @@ export function useEstimatorState(props: EstimatorProps) {
   const kpLib = useKeyProductLibrary(narrSkus, kpAliases);
   const updateSection = (secId: string, fn: (s: SpecSection) => SpecSection) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? fn(s) : s)));
+  /** #375: remove / add back one bonus on one system (drafts only). The bonus effect drops or re-adds the line. */
+  const setBonusRemoved = (secId: string, kind: BonusKind, removed: boolean) => {
+    if (!repriceLocked(status)) updateSection(secId, (s) => withBonusRemoved(s, kind, removed));
+  };
   /** #293 ★: marking copies the saved paragraph when the library row is
    *  loaded. When it isn't yet (a ★ in a system the prefetch hasn't reached —
    *  pointer-down activates it, the prefetch effect runs after), mark the
@@ -3842,6 +3846,7 @@ export function useEstimatorState(props: EstimatorProps) {
     trackSeries,
     travelEstNow,
     undoTierReprice,
+    setBonusRemoved,
     updateSection,
     useMobNameList,
     vendorDraft,

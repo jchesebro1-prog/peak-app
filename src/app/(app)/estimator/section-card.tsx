@@ -17,7 +17,8 @@ import {
   systemSellTotal,
   systemSellWarning,
 } from "./pricing";
-import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { isBonusItem, type BonusKind } from "@/lib/estimate-bonus/flags";
+import { removedBonusKinds } from "@/lib/estimate-bonus/rules";
 import { isMovableLine } from "@/lib/estimate-line-move/move";
 import { CUSTOM_PART_MARKUP } from "./tier-reprice";
 import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
@@ -172,6 +173,10 @@ export type SectionCardProps = {
   /** Estimator bonuses: the rules apply but a line's qty/cost/price isn't a
    *  number, so this system's bonus lines can't be figured. */
   bonusNotFigured?: boolean;
+  /** #375: null = no bonus controls (not bonus-eligible); "edit" = ✕ / Add back live; "locked" = shown disabled
+   *  (sent / won / lost — Revise first). */
+  bonusControls?: "edit" | "locked" | null;
+  onSetBonusRemoved?: (kind: BonusKind, removed: boolean) => void;
   onInc: (id: number) => void;
   onDec: (id: number) => void;
   onSetQty: (id: number, v: string) => void;
@@ -1073,7 +1078,23 @@ export default function SectionCard(p: SectionCardProps) {
                     {isInternal && <span style={mono}>{fmt(it.cost)}</span>}
                     <span style={mono}>{fmt(it.price)}</span>
                     <span style={{ ...mono, fontWeight: 600 }}>{fmt(bonusExt)}</span>
-                    <span></span>
+                    {p.bonusControls && p.onSetBonusRemoved && (it.bonus === "package" || it.bonus === "estimator") ? (
+                      <span className="est-actions" style={{ display: "inline-flex", justifyContent: "flex-end" }}>
+                        <button
+                          type="button"
+                          className="est-action-btn"
+                          disabled={p.bonusControls === "locked"}
+                          onClick={() => p.onSetBonusRemoved?.(it.bonus as BonusKind, true)}
+                          aria-label={it.bonus === "package" ? "Remove package bonus" : "Remove estimator bonus"}
+                          title={p.bonusControls === "locked" ? REVISE_FIRST : `Remove this bonus — the customer's price drops by ${fmt(bonusExt)}`}
+                          style={p.bonusControls === "locked" ? { ...ACTION_BTN, cursor: "not-allowed", opacity: 0.45 } : ACTION_BTN}
+                        >
+                          {"\u2715"}
+                        </button>
+                      </span>
+                    ) : (
+                      <span></span>
+                    )}
                   </div>
                 );
               }
@@ -1649,6 +1670,35 @@ export default function SectionCard(p: SectionCardProps) {
                 </Fragment>
               );
             })}
+
+            {p.bonusControls && p.onSetBonusRemoved && removedBonusKinds(sec).map((kind) => (
+              <div
+                key={"bonus-removed-" + kind}
+                className="est-row est-row-bonus"
+                data-bonus-removed={kind}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 20px", fontSize: 13, borderTop: "1px solid #f5f6f8", color: "#8c919c", background: "#f7f8fa" }}
+              >
+                <span style={{ flex: 1, minWidth: 0 }}>{kind === "package" ? "Package bonus removed" : "Estimator bonus removed"}</span>
+                <button
+                  type="button"
+                  className="est-action-btn"
+                  disabled={p.bonusControls === "locked"}
+                  onClick={() => p.onSetBonusRemoved?.(kind, false)}
+                  title={p.bonusControls === "locked" ? REVISE_FIRST : undefined}
+                  style={{
+                    ...ACTION_BTN,
+                    width: "auto",
+                    padding: "0 6px",
+                    whiteSpace: "nowrap",
+                    fontSize: 12,
+                    color: "#5b6170",
+                    ...(p.bonusControls === "locked" ? { cursor: "not-allowed", opacity: 0.45 } : null),
+                  }}
+                >
+                  Add back
+                </button>
+              </div>
+            ))}
 
             {p.bonusNotFigured && (
               <div

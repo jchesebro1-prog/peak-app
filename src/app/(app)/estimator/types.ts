@@ -320,6 +320,10 @@ export type SpecSection = {
   /** #301: the cover PDF's paragraph override (≤ 1,500). Absent = the intro's
    *  first paragraph (coverParagraphFor). Dropped by Load system (R5). */
   coverText?: string;
+  /** #375: the estimator removed this system's 5% package / 2% estimator bonus line (drafts only; internal,
+   *  never printed). Absent = the bonus applies (never false). Settled on save by settleBonusRemovals. */
+  noPackageBonus?: true;
+  noEstimatorBonus?: true;
 };
 
 /* ---------------- configurator drafts (prototype state shapes) ---------------- */

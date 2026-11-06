@@ -31,7 +31,7 @@ import { PortalPanel } from "../portal-panel";
 import { AssistDraftBanner } from "../assist-draft-banner";
 import { RepriceBanner } from "../reprice-banner";
 import { SuggestedBomPanel } from "../suggested-bom-panel";
-import { bonusNotFigured, bonusRulesApply } from "@/lib/estimate-bonus/rules";
+import { bonusNotFigured, bonusRulesApply, isBonusEligibleQuote } from "@/lib/estimate-bonus/rules";
 import type { SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 import { boxSaleLaborBanner } from "@/lib/estimate-box-sale/rules";
 import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
@@ -205,6 +205,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     trackSec,
     trackSeries,
     travelEstNow,
+    setBonusRemoved,
     updateSection,
     useMobNameList,
     vendorDraft,
@@ -608,6 +609,8 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     onSetFreight={(v) => setFreightPct(sec.id, v)}
                     freightUnknown={freightDefault.unknown}
                     bonusNotFigured={bonusOn && bonusNotFigured(sec)}
+                    bonusControls={!isBonusEligibleQuote({ source: initial.bonusSource, quoteType: initial.bonusQuoteType }) ? null : repriceLocked(status) ? "locked" : "edit"}
+                    onSetBonusRemoved={(kind, removed) => setBonusRemoved(sec.id, kind, removed)}
                     onInc={inc}
                     onDec={dec}
                     onSetQty={setQty}

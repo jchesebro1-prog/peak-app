@@ -12988,3 +12988,12 @@ Jeff, Nov 6: the estimator Review spreadsheet should show labor as one man-hours
 - Open a real estimate's sheet in Excel.
 - Freight % is charged on labor cost when labor sits in a materials system (existing rule, `systemFreightBase`). The sheet now makes it visible: the test estimate's freight went from $100.00 to $480.20. Decide whether labor should bear freight.
 
+## 375. Remove a bonus from a system — DONE 2026-11-06 on `feat/375-remove-bonus` (D1340)
+
+Jeff, Nov 6: an estimator can delete the estimator bonus from an estimate. Each bonus row on the Build step gets a ✕ (5% and 2% separately, per system); the price drops, and an "… removed · Add back" row takes its place. Drafts only: a sent, won or lost estimate shows both controls greyed with "Revise the estimate first", and the server keeps the stored flags and lines whatever is posted. Rules in `src/lib/estimate-bonus/rules.ts` (`withBonusRemoved`, `settleBonusRemovals`, `removedBonusKinds`); checks in `scripts/test-oct15-estimating.ts`.
+
+**Gates:** tsc 0 errors; test:specs 26,348 PASS / 0 FAIL (32 `#375` checks, plus the markup-settings run); eslint clean on the changed files. **test:smoke did not finish:** two runs died on ENOSPC, starting with 8–14 GB free (the known disk limit), about 110 routes passing before the crash. Browser-checked on a scratch database: remove and add back each bonus ($2,700 → $2,650 → $2,525 and back), save and reload, the Sent lock, Revise, and a stale tab saving a removal onto a sent estimate.
+
+**Remaining (Jeff):**
+- Try it on one real draft on production.
+- Removing the 5% also lowers the install project's bonus pool, and the ✕ has no confirmation because Add back undoes it. Say if either should change.

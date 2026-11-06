@@ -5,7 +5,7 @@ import { requirePerm, requireUser } from "@/lib/session";
 import { withSavepoint } from "@/db";
 import { canonicalBonusSections } from "@/lib/estimate-bonus/canonical";
 import { loadBonusRates } from "@/lib/stores/pricing";
-import { stripBonusLines } from "@/lib/estimate-bonus/rules";
+import { settleBonusRemovals, stripBonusLines } from "@/lib/estimate-bonus/rules";
 import { applyProjectDiscounts, discountsForSections, mergeDiscountsForSave, sanitizeProjectDiscounts, type ProjectDiscounts } from "@/lib/project-discounts/rules";
 import { readTierSize } from "@/lib/task-plan/fields";
 import { can } from "@/lib/team";
@@ -498,7 +498,10 @@ export async function saveQuoteAction(
   // settled, so the credit always lands on the true last system. built/groupId
   // are hardened (built only when exactly true, groupId only when a string).
   const groups = sanitizeGroups(payload.groups ?? (prior?.spec as { groups?: unknown } | null | undefined)?.groups);
-  const sellNormalizedRaw = Array.isArray(sellSanitizedRaw) ? normalizeSystemOrder(sellSanitizedRaw.map(sanitizeSectionGroupMeta), groups) : sellSanitizedRaw;
+  // #375: removal flags settle here — an open estimate takes the posted ones, a sent / won / lost one keeps its stored ones.
+  const sellNormalizedRaw = Array.isArray(sellSanitizedRaw)
+    ? settleBonusRemovals(normalizeSystemOrder(sellSanitizedRaw.map(sanitizeSectionGroupMeta), groups), (prior?.spec as { sections?: SpecSection[] } | null | undefined)?.sections, prior ? prior.status : "draft")
+    : sellSanitizedRaw;
   // #366: the project discounts are sanitized and stamped here (an unchanged entry keeps who set it and when; a
   // posted by / at is never trusted), then RE-APPLIED to every line and assembly part — so a stale or hand-edited
   // payload can never save a cost that disagrees with the map. Before the bonus lines, which read normal cost.

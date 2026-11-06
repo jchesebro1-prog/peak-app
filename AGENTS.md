@@ -1023,6 +1023,10 @@ See `.env.example`.
     Remaining is Jeff-gated: who holds `approve`, a real draft's new price on
     production, whether the rates become Settings, and a CSV formula-injection
     guard codebase-wide. Punch item #330.
+    ✅ Follow-up (#375, D1340): each bonus row gets a ✕ (5% and 2% separately, per
+    system; `SpecSection.noPackageBonus` / `noEstimatorBonus`), the price drops, Add back
+    undoes it. Drafts only, enforced on save by `settleBonusRemovals`. Move and Copy keep
+    it; Load system starts fresh. Punch item #375.
 
 52. ✅ **Build package tabs, assembly members, estimate letterhead** (#331–#333,
     D853–D868) — estimates (PDF, preview, online page), the client package page
