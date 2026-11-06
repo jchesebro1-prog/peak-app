@@ -72,7 +72,9 @@ Timing:
 
 - 1.5 s after the last edit.
 - At once when the user changes step or tab, and before a status change, stage change, approval action or Send. These paths already await `saveNow()`.
-- Leaving with work unsaved shows the browser's `beforeunload` warning. Today's `unsavedHold` keeps working for pop-outs.
+- Closing or reloading the page with work unsaved shows the browser's `beforeunload` warning.
+- Navigating elsewhere in the app with work unsaved saves it on the way out, without a warning. `beforeunload` doesn't fire for in-app navigation.
+- `unsavedHold` for pop-outs follows the live save status on a live-save estimate.
 
 ### One queue
 
@@ -80,9 +82,9 @@ All writes from this window run through one promise chain, one at a time: live s
 
 ### What a live save writes
 
-`saveQuoteAction` gains `live?: boolean` and `baseKey?: string`.
+`saveQuoteAction` gains `live?: boolean`, `renderPdf?: boolean` and `baseKey?: string`. `renderPdf` defaults to true without `live` and false with it.
 
-With `live` on an existing quote, the patch is limited to the fields only Save carries:
+With `live` on an existing quote, the patch is limited to the fields only Save carries. Every save on a live-save estimate uses this limited patch, including one that also renders the PDF:
 
 - `spec` (sections, mobs, groups, document, project discounts), `value`, `margin`
 - `vendorQuotes`, `pdfOptions`, `paymentTerms`, `boxSale`
@@ -102,7 +104,7 @@ The server refuses `live` (nothing written, typed result) when the stored quote 
 
 The response must never overwrite an edit made while it was running:
 
-- `savedDoc` is set from the state captured when the save started, so newer edits still read as unsaved.
+- Progress is tracked by an edit counter: a save records the counter's value when it started, so newer edits still read as unsaved.
 - `vendorQuotes` from the response merge by id (storage fields only), rather than replacing the list.
 - A live save returns no `pdf` render state and no `router.refresh()`.
 
@@ -112,7 +114,7 @@ The response must never overwrite an edit made while it was running:
 
 ### First save of a new estimate
 
-The first line starts a `live` create. On success the URL becomes `/estimator?id=<id>` with `history.replaceState`, keeping other params such as `step`. Today the URL doesn't change, so a reload would open a blank estimate and look like lost work.
+The first line starts a `live` create. The existing effect in `estimator-client.tsx` already puts the new id in the URL, so a reload reopens the estimate.
 
 ### Failures
 
@@ -128,7 +130,9 @@ A pure `liveKey(quote)` returns a hash of a stable, sorted-keys stringify of the
 
 Using a content hash rather than `updatedAt` means status moves, people changes, approvals and header autosaves never raise a false conflict, and any writer that changes the spec is caught without auditing it.
 
-The page's `initial` carries the key, and `saveQuoteAction` returns the new one. Any action this window runs that writes those fields without reloading must also return it (move system out, copy system in, Inbox vendor hand-off). The plan lists these writers from the source. A missed one causes a false banner, never lost data.
+The page's `initial` carries the key, and `saveQuoteAction` returns the new one, read back from the store. Audit of the Estimator's actions: the only others that can write these fields on the open quote are the status and stage moves (a Lost move clears the Rewards credit). The client re-reads the key after any server-confirmed status change. Move and Copy write the target quote only, not the open one. A missed writer causes a false banner, never lost data.
+
+The key is computed on the server only (`node:crypto`). The client just holds the string.
 
 ### The check
 
@@ -181,10 +185,11 @@ A vendor quote deleted and then restored by Undo gets its attachment back. The s
 ## PDF
 
 - A live save calls `markQuotePdfStale` rather than `scheduleQuotePdf`. `contentChangedAt` is stamped by the write as usual, so `pdfIsCurrent` is correct.
-- Stepping to Customer review or Send & track with a PDF that isn't current flushes the queue, then calls the existing `retryQuotePdfAction`, which renders at once. It also covers a quote with no PDF yet, which `markQuotePdfStale` leaves alone.
-- **Send:** `send-server.ts` already refuses a PDF that isn't current. Before sending, the composer and next-step control flush the queue and, if the PDF isn't current, call a manual `saveNow()`, which schedules the render and waits as it does today. They must not rely on `pdfDirty`, which reads false after a live save.
+- `pdfDirty` keeps a narrower meaning on a live-save estimate: the PDF is behind the screen. A live save doesn't clear it; only a save that renders does (`saveNow`). So every existing caller that runs `pdfDirty ? saveNow : …` before Send, Approve, Submit, cut sheets or the Grid keeps working unchanged, and gets a save and a render.
+- A new `contentUnsaved` means the edits aren't stored yet. The "Save first" hints on the BOM tab and the Cover panel read it, because those documents print the stored estimate, not the rendered PDF.
+- Stepping to Customer review or Send & track with `pdfDirty` true runs `saveNow()`. With it false but the stored PDF missing or out of date, as after a reload, it runs the existing `retryQuotePdfAction`, which renders at once and also covers a quote with no PDF yet.
+- `send-server.ts` already refuses a PDF that isn't current, so a stale file can't go out.
 - Draft PDFs aren't customer-visible, so an out-of-date one exposes nothing.
-- A manual Save still renders.
 
 ## Approval
 
@@ -196,7 +201,9 @@ No rule changes. Editing an approved draft makes the approval stale when the gro
 | --- | --- | --- |
 | `src/lib/estimate-live-save/undo.ts` | Push, coalesce, take, redo, map over snapshots, label diff | Types only |
 | `src/lib/estimate-live-save/scheduler.ts` | When to save: conditions, debounce, retry backoff, single flight, as a state machine with no timers of its own | Nothing |
-| `src/lib/estimate-live-save/live-key.ts` | `liveKey`, stable stringify; server and client safe | Nothing |
+| `src/lib/estimate-live-save/live-key.ts` | `liveKey`, stable stringify; server only | `node:crypto` |
+| `src/lib/estimate-live-save/rules.ts` | `liveSaveEligible`, `liveSaveRefusal`, `limitToLivePatch`; client safe | Nothing |
+| `updateCheckingLiveKey` in `src/lib/stores/quotes.ts` | The check and the write in one transaction | live-key |
 | `src/app/(app)/estimator/use-live-save.ts` | The hook's timers, queue and chip state, around `saveNow`; keeps `use-estimator-state.ts` from growing | scheduler |
 | `src/app/(app)/estimator/use-estimate-undo.ts` | Snapshot recording and apply | undo |
 | `src/app/(app)/estimator/live-save-chip.tsx` | Chip, Undo, Redo, conflict banner | Hook state |
@@ -217,7 +224,7 @@ No migration and no env var.
   - `live` is refused on sent and portal quotes
   - a live save leaves the PDF stale, and Send refuses until it renders
   - a vendor quote pruned by one live save comes back with its attachment on the next
-- Source pin: every action the Estimator calls that writes a key field returns the new key.
+- Source pins: `saveQuoteAction` uses the checked write, the limited patch and the skipped refresh, because a `"use server"` file can't run in the plain harness.
 - Browser check on a scratch dev server, screenshots as proof:
   - opening a draft writes nothing (`updatedAt` unchanged)
   - edit, wait, reload: the edit is there
