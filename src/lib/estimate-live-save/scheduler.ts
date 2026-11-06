@@ -19,8 +19,10 @@ export type LiveSaveState = {
 export const INITIAL_LIVE_STATE: LiveSaveState = { editSeq: 0, savedSeq: 0, inFlightSeq: null, failures: 0, waitingRetry: false, refusal: null, conflict: null };
 
 export type LiveEvent =
-  | { type: "edit" }
-  | { type: "start" }
+  /** `holdFailed`: a failed create stays failed through this edit. If its response was lost, another try mints a second quote. */
+  | { type: "edit"; holdFailed?: boolean }
+  /** `seq`: the newest edit this save can hold. Without it, the newest edit there is. */
+  | { type: "start"; seq?: number }
   | { type: "saved"; seq: number }
   | { type: "failed" }
   | { type: "retry" }
@@ -31,9 +33,9 @@ export type LiveEvent =
 export function reduceLive(s: LiveSaveState, e: LiveEvent): LiveSaveState {
   switch (e.type) {
     case "edit":
-      return { ...s, editSeq: s.editSeq + 1, refusal: null, waitingRetry: false };
+      return { ...s, editSeq: s.editSeq + 1, refusal: null, waitingRetry: e.holdFailed ? s.waitingRetry : false };
     case "start":
-      return { ...s, inFlightSeq: s.editSeq };
+      return { ...s, inFlightSeq: e.seq ?? s.editSeq };
     case "saved":
       return { ...s, inFlightSeq: null, savedSeq: Math.max(s.savedSeq, e.seq), failures: 0, waitingRetry: false, refusal: null };
     case "failed":
@@ -63,6 +65,17 @@ export function canAutoSave(s: LiveSaveState, g: LiveGate): boolean {
   if (!g.enabled || g.tierResolving || g.statusChanging) return false;
   if (!g.hasId && !g.hasLines) return false;
   return liveStatusOf(s) === "dirty";
+}
+
+/** What the page reports. A new estimate with no lines has nothing to create, so an edit there isn't unsaved work. */
+export function reportedLiveStatus(s: LiveSaveState, g: LiveGate): LiveStatus {
+  const raw = liveStatusOf(s);
+  return raw === "dirty" && !g.hasId && !g.hasLines ? "saved" : raw;
+}
+
+/** After a flush: every edit is stored and nothing stopped it. A status move only goes ahead on this. */
+export function flushLanded(s: LiveSaveState): boolean {
+  return !s.conflict && !s.refusal && s.savedSeq >= s.editSeq;
 }
 
 /** How long before an automatic retry; null = never by itself (a create could mint a second quote). */

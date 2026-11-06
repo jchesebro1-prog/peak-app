@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { canAutoSave, DEBOUNCE_MS, INITIAL_LIVE_STATE, liveStatusOf, reduceLive, retryDelayMs, type LiveConflict, type LiveEvent, type LiveGate, type LiveSaveState, type LiveStatus } from "@/lib/estimate-live-save/scheduler";
+import { canAutoSave, DEBOUNCE_MS, flushLanded, INITIAL_LIVE_STATE, liveStatusOf, reduceLive, reportedLiveStatus, retryDelayMs, type LiveConflict, type LiveEvent, type LiveGate, type LiveSaveState, type LiveStatus } from "@/lib/estimate-live-save/scheduler";
 import { revalidateAfterLiveSaveAction } from "./actions";
 
 export type SaveMode = "auto" | "manual" | "force";
@@ -20,8 +20,11 @@ export type LiveSaveApi = {
   conflict: LiveConflict | null;
   /** A user edit has happened in this page session. */
   edited: boolean;
+  /** A conflict is open, right now. Read inside the queue: `conflict` is only as new as the last commit. */
+  conflictNow: () => boolean;
   markEdit: () => void;
-  flush: () => Promise<void>;
+  /** Saves what's unsaved now, and says whether every edit is stored. A status move stops on false. */
+  flush: () => Promise<boolean>;
   saveManual: () => Promise<number | false>;
   enqueue: <T>(run: () => Promise<T>) => Promise<T>;
   keepMine: () => void;
@@ -33,7 +36,12 @@ export type LiveSaveApi = {
  * One queue for every write from this window (live saves, manual Saves, the header autosave), the debounce and the
  * retries. `perform` is read through a ref when its turn comes, so a queued save sends the newest committed state.
  */
-export function useLiveSave(opts: { gate: LiveGate; perform: (mode: SaveMode) => Promise<SaveOutcome> }): LiveSaveApi {
+export function useLiveSave(opts: {
+  gate: LiveGate;
+  perform: (mode: SaveMode) => Promise<SaveOutcome>;
+  /** On the way out: pick up edits nothing has marked yet (no commit follows an unmount). True if there were any. */
+  beforeLeave?: () => boolean;
+}): LiveSaveApi {
   const [state, setState] = useState<LiveSaveState>(INITIAL_LIVE_STATE);
   const stateRef = useRef(state);
   const apply = useCallback((e: LiveEvent) => {
@@ -42,9 +50,15 @@ export function useLiveSave(opts: { gate: LiveGate; perform: (mode: SaveMode) =>
   }, []);
   const gateRef = useRef(opts.gate);
   const performRef = useRef(opts.perform);
+  const beforeLeaveRef = useRef(opts.beforeLeave);
+  /** The newest edit `performRef`'s closure holds. markEdit moves stateRef before React commits, so a save starting in
+   *  that gap must not claim an edit it can't send. Set together with performRef, from the same render. */
+  const committedEditSeqRef = useRef(state.editSeq);
   useEffect(() => {
     gateRef.current = opts.gate;
     performRef.current = opts.perform;
+    beforeLeaveRef.current = opts.beforeLeave;
+    committedEditSeqRef.current = state.editSeq;
   });
   const chainRef = useRef<Promise<unknown>>(Promise.resolve());
   const enqueue = useCallback(<T,>(run: () => Promise<T>): Promise<T> => {
@@ -67,7 +81,7 @@ export function useLiveSave(opts: { gate: LiveGate; perform: (mode: SaveMode) =>
 
   /** One live save. Runs inside the queue; the caller has checked the gate. */
   const attemptAuto = useCallback(async () => {
-    apply({ type: "start" });
+    apply({ type: "start", seq: committedEditSeqRef.current });
     const seq = stateRef.current.inFlightSeq as number;
     let out: SaveOutcome;
     try {
@@ -89,7 +103,7 @@ export function useLiveSave(opts: { gate: LiveGate; perform: (mode: SaveMode) =>
   }, [attemptAuto, enqueue]);
 
   // The debounce, and the next save when an edit landed during the last one.
-  const status = liveStatusOf(state);
+  const status = reportedLiveStatus(state, opts.gate);
   const ready = canAutoSave(state, opts.gate);
   useEffect(() => {
     if (!ready) return;
@@ -128,18 +142,19 @@ export function useLiveSave(opts: { gate: LiveGate; perform: (mode: SaveMode) =>
   useEffect(
     () => () => {
       const leave = async () => {
-        if (canAutoSave(stateRef.current, gateRef.current)) {
+        if (beforeLeaveRef.current?.()) stateRef.current = reduceLive(stateRef.current, { type: "edit", holdFailed: !gateRef.current.hasId });
+        // Decided at its turn: an edit made during a save in flight is unsaved only once that save lands. Past
+        // `statusChanging` too: the move's own release can't commit now, and the server refuses a save it overtakes.
+        await enqueue(async () => {
+          if (liveStatusOf(stateRef.current) === "failed" && gateRef.current.hasId) stateRef.current = reduceLive(stateRef.current, { type: "retry" });
+          if (!canAutoSave(stateRef.current, { ...gateRef.current, statusChanging: false })) return;
           const seq = stateRef.current.editSeq;
-          await enqueue(async () => {
-            const out = await performRef.current("auto").catch((): SaveOutcome => ({ kind: "failed" }));
-            if (out.kind === "saved") {
-              didLiveSaveRef.current = true;
-              stateRef.current = reduceLive(stateRef.current, { type: "saved", seq });
-            }
-          });
-        } else {
-          await chainRef.current;
-        }
+          const out = await performRef.current("auto").catch((): SaveOutcome => ({ kind: "failed" }));
+          if (out.kind === "saved") {
+            didLiveSaveRef.current = true;
+            stateRef.current = reduceLive(stateRef.current, { type: "saved", seq });
+          }
+        });
         if (didLiveSaveRef.current) await revalidateAfterLiveSaveAction().catch(() => undefined);
       };
       void leave();
@@ -147,18 +162,24 @@ export function useLiveSave(opts: { gate: LiveGate; perform: (mode: SaveMode) =>
     [enqueue]
   );
 
-  const markEdit = useCallback(() => apply({ type: "edit" }), [apply]);
+  const conflictNow = useCallback(() => stateRef.current.conflict !== null, []);
+  // A failed create holds through new edits: if its response was lost, another try mints a second quote. Only a click retries it.
+  const markEdit = useCallback(() => apply({ type: "edit", holdFailed: !gateRef.current.hasId }), [apply]);
   // Past `statusChanging` on purpose: a status change sets it, then flushes, and its edits must land before the move.
-  // Checked at its turn, so it also waits out a save in flight.
-  const flush = useCallback(async () => {
-    await enqueue(async () => {
-      if (canAutoSave(stateRef.current, { ...gateRef.current, statusChanging: false })) await attemptAuto();
-    });
-  }, [attemptAuto, enqueue]);
+  // Checked at its turn, so it also waits out a save in flight. A failed save doesn't wait out its backoff.
+  const flush = useCallback(
+    () =>
+      enqueue(async (): Promise<boolean> => {
+        if (liveStatusOf(stateRef.current) === "failed" && gateRef.current.hasId) apply({ type: "retry" });
+        if (canAutoSave(stateRef.current, { ...gateRef.current, statusChanging: false })) await attemptAuto();
+        return flushLanded(stateRef.current);
+      }),
+    [apply, attemptAuto, enqueue]
+  );
   const saveManual = useCallback(
     () =>
       enqueue(async (): Promise<number | false> => {
-        const seq = stateRef.current.editSeq;
+        const seq = committedEditSeqRef.current;
         let out: SaveOutcome;
         try {
           out = await performRef.current("manual");
@@ -166,6 +187,8 @@ export function useLiveSave(opts: { gate: LiveGate; perform: (mode: SaveMode) =>
           return false;
         }
         if (out.kind === "saved") {
+          // A live-save estimate's Save skips the layout refresh too.
+          if (gateRef.current.enabled) didLiveSaveRef.current = true;
           apply({ type: "saved", seq });
           return out.version;
         }
@@ -177,9 +200,10 @@ export function useLiveSave(opts: { gate: LiveGate; perform: (mode: SaveMode) =>
   const keepMine = useCallback(() => {
     apply({ type: "keepMine" });
     void enqueue(async () => {
-      apply({ type: "start" });
+      apply({ type: "start", seq: committedEditSeqRef.current });
       const seq = stateRef.current.inFlightSeq as number;
       const out = await performRef.current("force").catch((): SaveOutcome => ({ kind: "failed" }));
+      if (out.kind === "saved" && gateRef.current.enabled) didLiveSaveRef.current = true;
       settle(out, seq);
     });
   }, [apply, enqueue, settle]);
@@ -193,7 +217,7 @@ export function useLiveSave(opts: { gate: LiveGate; perform: (mode: SaveMode) =>
   }, [apply, runAuto]);
 
   return useMemo(
-    () => ({ status, refusal: state.refusal, conflict: state.conflict, edited: state.editSeq > 0, markEdit, flush, saveManual, enqueue, keepMine, reload, retryNow }),
-    [status, state.refusal, state.conflict, state.editSeq, markEdit, flush, saveManual, enqueue, keepMine, reload, retryNow]
+    () => ({ status, refusal: state.refusal, conflict: state.conflict, edited: state.editSeq > 0, conflictNow, markEdit, flush, saveManual, enqueue, keepMine, reload, retryNow }),
+    [status, state.refusal, state.conflict, state.editSeq, conflictNow, markEdit, flush, saveManual, enqueue, keepMine, reload, retryNow]
   );
 }

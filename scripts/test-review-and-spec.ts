@@ -35352,6 +35352,7 @@ import {
     && /\} finally \{\s*(\/\/[^\n]*\n\s*)*if \(seq === tierResolveSeqRef\.current\) \{\s*tierResolvingRef\.current = false;\s*setTierResolving\(false\);/.test(resolveFor),
     "#254 wave 2: a tier lookup marks Save pending until the LATEST lookup settles (ok, refused or thrown)");
   ok(/\/\/[^\n]*\n\s*if \(tierResolvingRef\.current\) return \{ kind: "blocked" \};/.test(save)
+    && save.indexOf('if (tierResolvingRef.current) return { kind: "blocked" };') < save.indexOf("saveQuoteAction(")
     && /const doSave = \(\) => \{\s*if \(tierResolvingRef\.current\) return;/.test(save),
     "#254 wave 2: doSave refuses to run while a tier lookup is in flight (pick then immediate Save can't stamp ahead of its lines)");
   ok(/onClick=\{doSave\}\s*disabled=\{statusChanging \|\| tierResolving\}/.test(c) && /onSave=\{doSave\}\s*saveDisabled=\{statusChanging \|\| tierResolving\}/.test(c),
@@ -57846,7 +57847,7 @@ import { commentsBySection as p4pBy, numberComments as p4pNumber } from "@/lib/e
   ok(pkgSrc.includes("pinned.bySection[x.id]") && pkgSrc.includes("on the whole estimate</span>") && pkgSrc.includes("useCommentsFocusRefresh(s)"),
     "#P4 pins: the Build package nav shows each system's open-comment count and the whole-estimate count");
   ok(!/listReviewCommentsAction/.test(buildSrc + pkgSrc + cardSrc), "#P4 pins: Build / Build package read the shared list, they don't fetch their own");
-  ok((rf(`${EST_DIR}/use-estimator-state.ts`).match(/setSectionsState\(/g) || []).length === 7, "#P4 pins: setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect)");
+  ok((rf(`${EST_DIR}/use-estimator-state.ts`).match(/setSectionsState\(/g) || []).length === 7, "#P4 pins: setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect; the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
 }
 
 // ---- #P4 polish: pin popover lifecycle + clamp, Escape, no aria-label on plain spans ----
@@ -58658,7 +58659,7 @@ import type { PDProductBlock as P5ePB } from "@/lib/package-doc/types";
   const hook = rd(`${EST_DIR}/use-estimator-state.ts`);
   ok(hook.includes("...docProductSkus(packageDoc),") && hook.includes("[narrSec, packageDoc]") && hook.includes("const kpLib = useKeyProductLibrary(narrSkus, kpAliases);") &&
      /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 7,
-    "#P5 editor: the library prefetch covers the document's product skus; `next` stays last; setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect)");
+    "#P5 editor: the library prefetch covers the document's product skus; `next` stays last; setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect; the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
   ok(!["customerLines(", "window.print", "est-doc", "reviewBarOpen", ".components"].some((x) => pkgStep.includes(x)) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db)/m.test(pkgStep),
     "#P5 editor: package-step adds no forbidden Estimator strings or store/db value imports");
 }
@@ -58698,7 +58699,7 @@ import { MAX_DEPTH as P5F_MAX_DEPTH } from "@/lib/package-doc/schema";
   ok(pkgStep.includes("onOverChange={setPackageDocOver}") && /const startDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
      /const removeDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
      /\n {4}packageDocOver,\n {4}setPackageDocOver,\n/.test(hook) && /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 7,
-    "#P5 editor fix: Build package wires onOverChange to the hook; Start / Remove clear the flag; `next` stays last; setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect)");
+    "#P5 editor fix: Build package wires onOverChange to the hook; Start / Remove clear the flag; `next` stays last; setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect; the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
 
   // (2) Remove document: the unmount flush never brings the removed document back.
   ok(pkgStep.includes("const discardRef = useRef(false);") && /const removeDocument = \(\) => \{\s*discardRef\.current = true;/.test(pkgStep) &&
@@ -59212,7 +59213,7 @@ import { catalogAddPrice as p6eAddPrice } from "@/app/(app)/estimator/tier-repri
     "#P6 estimator: page.tsx loads the categories and resolves their parts server-side (live sku, null when gone)");
   ok(hook.includes("const addSystemFromCategory = (categoryId: string, picks: Array<{ sku: string; qty: number }>)") && hook.includes("systemFromCategory(category, picks, {") && hook.includes("price: catalogAddPrice,") && hook.includes("normalizeSystemOrder([...ss, sec], groups)") && hook.includes("setAddSystemOpen(false);") &&
      (hook.match(/setSectionsState\(/g) || []).length === 7 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    addSystemFromCategory,"),
-    "#P6 estimator: the hook adds through the pure builder and the same setSections/normalize path; setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect); `next` stays last");
+    "#P6 estimator: the hook adds through the pure builder and the same setSections/normalize path; setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect; the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here); `next` stays last");
   // Fix round 1
   ok(page.includes(".catch((e) => {") && page.includes("return []") && /estimateOutputDefaults, systemCategories\] =/.test(page) && page.includes("loadSystemCategoryOptions(),") && !page.includes("await loadSystemCategoryOptions()"),
     "#P6 estimator: the category load is fail-soft ([] + a server warning) and runs inside the page's Promise.all, not serially after it");
@@ -59462,7 +59463,7 @@ import { specLineRows as specLineRows312 } from "@/lib/estimate-review/review-ui
   ok(/if \(d\.addToCatalog && !d\.allowance\)/.test(hook) && !/customEditRef\.current = \{ lineId, draft: \{[^}]*addToCatalog: "1"/.test(hook),
     "#312 estimator: an edit only re-saves to the catalog when 'Add to catalog' is ticked (the draft opens unticked)");
   ok((hook.match(/setSectionsState\(/g) || []).length === 7 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    openCustomEdit,"),
-    "#312 estimator: setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect); `next` stays last in the hook's return");
+    "#312 estimator: setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect; the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here); `next` stays last in the hook's return");
 
   type R312 = { id: number; custom?: boolean; curtain?: boolean };
   const rows = specLineRows312<R312>([
@@ -68510,7 +68511,7 @@ import { repriceForTier as bnfReprice } from "@/app/(app)/estimator/tier-reprice
   const pick = hook.slice(hook.indexOf("const pickAlternatesTaken ="), hook.indexOf("const [peopleBusy"));
   ok(/setAlternatesTouched\(true\)/.test(pick) && /const \[alternatesTouched, setAlternatesTouched\] = useState\(false\)/.test(hook), "#bonus I3 source pin: ticking an alternate marks the list touched (untouched → the server decides)");
   const save = hook.slice(hook.indexOf("const performSave = async"), hook.indexOf("const doSave ="));
-  ok(/const statusBeforeSave = baseStatus;/.test(save) && /syncBonusAfterStatus\(statusBeforeSave, res\.status\);\s*setStatus\(res\.status\);/.test(save), "#bonus M5 source pin: a save that moves to/from Won refreshes the bonus card");
+  ok(/const statusBeforeSave = baseStatus;/.test(save) && /if \(res\.status && showsStatus\) \{\s*(\/\/[^\n]*\n\s*)*syncBonusAfterStatus\(statusBeforeSave, res\.status\);\s*setStatus\(res\.status\);/.test(save), "#bonus M5 source pin: a save that moves to/from Won refreshes the bonus card");
   const sum = bnfRead("src/app/(app)/estimator/review-cost-summary.tsx");
   ok(sum.includes("Package bonus (payout)") && sum.includes("bonusSum(isPackageBonusItem, (it) => it.qty * it.cost)"), "#bonus M8: the cost summary shows the 5% as its payout (package line cost)");
   const pr = bnfRead("src/app/(app)/estimator/pricing.ts");
@@ -70179,8 +70180,8 @@ import { datasheetExclusion as p3Exclusion } from "@/lib/part-docs/exclusions";
 // ---- Task 9: the state hook owns the selection (source pins) ----
 {
   const hook = readFileSync(join(process.cwd(), "src/app/(app)/estimator/use-estimator-state.ts"), "utf8");
-  const saveCall = hook.slice(hook.indexOf("await saveQuoteAction(loadedId, {"), hook.indexOf("document: docNow,", hook.indexOf("await saveQuoteAction(loadedId, {")));
-  ok(!/\n\s+packageSelection,\n/.test(saveCall), "#333 hook: the Save payload does not carry packageSelection (#333 review B)");
+  const saveCall = hook.slice(hook.indexOf("saveQuoteAction(idAtSave, {"), hook.indexOf("document: docNow,", hook.indexOf("saveQuoteAction(idAtSave, {")));
+  ok(saveCall.length > 0 && !/\n\s+packageSelection,\n/.test(saveCall), "#333 hook: the Save payload does not carry packageSelection (#333 review B)");
   const w0 = hook.indexOf("const enqueueSelectionWrite = ");
   const writer = hook.slice(w0, hook.indexOf("const selectionSettled", w0));
   ok(w0 > 0 && !writer.includes("setTimeout") && writer.includes("updateQuoteMetaAction(id, { packageSelection: latest })") && writer.includes("selectionChain.current = selectionChain.current"),
@@ -70389,8 +70390,8 @@ import { SEND_UI_COPY as p3rSendCopy } from "@/lib/estimate-email/send-ui";
 
   // A + E + F (source): the hook tracks the server-acked key; Save never writes it; first save flushes an edited selection.
   const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
-  const saveCall = hook.slice(hook.indexOf("await saveQuoteAction(loadedId, {"), hook.indexOf("document: docNow,", hook.indexOf("await saveQuoteAction(loadedId, {")));
-  ok(!/\n\s+packageSelection,\n/.test(saveCall), "#333 review B: the Save payload no longer carries packageSelection");
+  const saveCall = hook.slice(hook.indexOf("saveQuoteAction(idAtSave, {"), hook.indexOf("document: docNow,", hook.indexOf("saveQuoteAction(idAtSave, {")));
+  ok(saveCall.length > 0 && !/\n\s+packageSelection,\n/.test(saveCall), "#333 review B: the Save payload no longer carries packageSelection");
   const w0 = hook.indexOf("const enqueueSelectionWrite = ");
   const writer = hook.slice(w0, hook.indexOf("const selectionSettled", w0));
   ok(w0 > 0 && writer.includes("selectionAckedKey.current = key;") && writer.includes("if (key === selectionAckedKey.current) {") && !writer.includes("selectionSentKey"),

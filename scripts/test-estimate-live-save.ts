@@ -4,9 +4,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
-import { canAutoSave, DEBOUNCE_MS, INITIAL_LIVE_STATE, liveStatusOf, reduceLive, retryDelayMs, type LiveGate } from "../src/lib/estimate-live-save/scheduler";
+import { liveSaveHookChecks } from "./test-estimate-live-save-hook";
+import { canAutoSave, DEBOUNCE_MS, flushLanded, INITIAL_LIVE_STATE, liveStatusOf, reduceLive, reportedLiveStatus, retryDelayMs, type LiveGate } from "../src/lib/estimate-live-save/scheduler";
 import { liveKey } from "../src/lib/estimate-live-save/live-key";
-import { limitToLivePatch, liveSaveEligible, liveSaveRefusal } from "../src/lib/estimate-live-save/rules";
+import { limitToLivePatch, liveSaveEligible, liveSaveRefusal, saveAdoptsStatus, saveGoesLive } from "../src/lib/estimate-live-save/rules";
 import { COALESCE_MS, diffEdit, emptyUndoHistory, mapSnapshots, recordEdit, takeRedo, takeUndo, UNDO_CAP, type UndoSnap } from "../src/lib/estimate-live-save/undo";
 
 const line = (id: number, extra: Partial<SpecItem> = {}): SpecItem =>
@@ -198,11 +199,78 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(!/\bloadedId\b/.test(performSrc.slice(0, performSrc.indexOf("const live = useLiveSave")).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")), "hook: performSave never reads the loadedId state");
   ok(performSrc.includes('if (auto) return { kind: "refused", message: res.error'), "hook: a live save's refusal carries its reason, never a retried failure (a missing quote)");
   ok(/res\.conflict\)[\s\S]{0,120}res\.notLive\)/.test(performSrc), "hook: conflict and notLive are read before anything from the response is adopted");
-  ok(/const showsStatus = !auto \|\| !idAtSave \|\| res\.status !== statusBeforeSave/.test(performSrc), "hook: a live save leaves an optimistic status pick alone");
-  ok(/!idAtSave && status !== baseStatus/.test(performSrc), "hook: a first manual Save with a picked status still applies it");
-  ok(/live\s*\.enqueue\(\(\) => currentLiveKeyAction\(loadedId\)\)/.test(hookSrc), "hook: the key re-read waits its turn, so it can't overwrite a newer save's key");
+  ok(/const showsStatus = saveAdoptsStatus\(\{ mode, isLive, resStatus: res\.status, baseStatus: statusBeforeSave \}\)/.test(performSrc), "hook: a live save leaves an optimistic status pick alone");
+  ok(/const isLive = saveGoesLive\(\{ mode, liveMode, status, baseStatus, statusChanging \}\)/.test(performSrc), "hook: performSave decides a live write through the pure rule");
+  ok(/live\s*\.enqueue\(async \(\) => \(live\.conflictNow\(\) \? null : currentLiveKeyAction\(loadedId\)\)\)/.test(hookSrc), "hook: the key re-read waits its turn, so it can't overwrite a newer save's key");
   const liveHookSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/use-live-save.ts"), "utf8");
   ok(/const flush = [\s\S]{0,400}statusChanging: false/.test(liveHookSrc), "hook: flush saves past statusChanging — a status change sets it before flushing");
+
+  // --- Review fixes. The pure rules first, then the real hook under a stand-in, then what lives in the 4,000-line state hook (source pins). ---
+  // M3
+  const failedCreate = reduceLive({ ...INITIAL_LIVE_STATE, editSeq: 1 }, { type: "failed" });
+  ok(reduceLive(failedCreate, { type: "edit", holdFailed: true }).waitingRetry === true, "M3 rule: a held edit leaves the failed wait");
+  ok(reduceLive(failedCreate, { type: "edit", holdFailed: true }).editSeq === 2, "M3 rule: and still counts the edit");
+  ok(liveStatusOf(reduceLive(failedCreate, { type: "edit", holdFailed: true })) === "failed", "M3 rule: the status stays failed");
+  ok(reduceLive(failedCreate, { type: "edit" }).waitingRetry === false, "M3 rule: an edit with no flag behaves as before");
+  ok(reduceLive(failedCreate, { type: "edit", holdFailed: false }).waitingRetry === false, "M3 rule: an edit with the flag off behaves as before");
+  ok(reduceLive(INITIAL_LIVE_STATE, { type: "edit", holdFailed: true }).waitingRetry === false, "M3 rule: holding never starts a wait by itself");
+  // M6
+  ok(reduceLive({ ...INITIAL_LIVE_STATE, editSeq: 5 }, { type: "start", seq: 4 }).inFlightSeq === 4, "M6 rule: a start with a seq claims that seq");
+  ok(reduceLive({ ...INITIAL_LIVE_STATE, editSeq: 5 }, { type: "start" }).inFlightSeq === 5, "M6 rule: a start with no seq claims the newest edit");
+  ok(liveStatusOf(reduceLive(reduceLive({ ...INITIAL_LIVE_STATE, editSeq: 5 }, { type: "start", seq: 4 }), { type: "saved", seq: 4 })) === "dirty", "M6 rule: the newer edit stays unsaved");
+  // I2
+  const noIdNoLines: LiveGate = { enabled: true, hasId: false, hasLines: false, tierResolving: false, statusChanging: false };
+  const oneEdit = { ...INITIAL_LIVE_STATE, editSeq: 1 };
+  ok(reportedLiveStatus(oneEdit, noIdNoLines) === "saved", "I2 rule: nothing to create reads saved");
+  ok(reportedLiveStatus(oneEdit, { ...noIdNoLines, hasLines: true }) === "dirty", "I2 rule: a first line reads dirty");
+  ok(reportedLiveStatus(oneEdit, { ...noIdNoLines, hasId: true }) === "dirty", "I2 rule: an existing estimate reads dirty");
+  ok(reportedLiveStatus(failedCreate, noIdNoLines) === "failed", "I2 rule: only dirty is reported as saved");
+  // C2
+  ok(flushLanded(INITIAL_LIVE_STATE) === true, "C2 rule: nothing unsaved has landed");
+  ok(flushLanded({ ...INITIAL_LIVE_STATE, editSeq: 2, savedSeq: 2 }) === true, "C2 rule: saved up to the newest edit has landed");
+  ok(flushLanded({ ...INITIAL_LIVE_STATE, editSeq: 2, savedSeq: 1 }) === false, "C2 rule: an edit past the last save has not");
+  ok(flushLanded({ ...INITIAL_LIVE_STATE, conflict: { by: null, at: null } }) === false, "C2 rule: a conflict has not");
+  ok(flushLanded({ ...INITIAL_LIVE_STATE, refusal: "No." }) === false, "C2 rule: a refusal has not");
+  // M1
+  const pick = { liveMode: true, status: "sent", baseStatus: "draft", statusChanging: false };
+  ok(saveGoesLive({ ...pick, mode: "auto" }) === true, "M1 rule: a live save never carries a picked status");
+  ok(saveGoesLive({ ...pick, mode: "manual" }) === false, "M1 rule: a manual Save carries it, id or no id");
+  ok(saveGoesLive({ ...pick, mode: "force" }) === true, "M1 rule: Keep mine doesn't move status");
+  ok(saveGoesLive({ ...pick, mode: "manual", statusChanging: true }) === true, "M1 rule: a status move in flight isn't a pick to carry");
+  ok(saveGoesLive({ ...pick, mode: "manual", status: "draft" }) === true, "M1 rule: no pick, the manual Save stays limited");
+  ok(saveGoesLive({ ...pick, mode: "manual", liveMode: false }) === false, "M1 rule: off live save, never live");
+  ok(saveAdoptsStatus({ mode: "auto", isLive: true, resStatus: "draft", baseStatus: "draft" }) === false, "M1 rule: a live save reporting the known status leaves the pick on screen (a first save too)");
+  ok(saveAdoptsStatus({ mode: "auto", isLive: true, resStatus: "sent", baseStatus: "draft" }) === true, "M1 rule: a live save reporting a new status adopts it");
+  ok(saveAdoptsStatus({ mode: "force", isLive: true, resStatus: "draft", baseStatus: "draft" }) === false, "M1 rule: Keep mine leaves the pick too");
+  ok(saveAdoptsStatus({ mode: "force", isLive: false, resStatus: "sent", baseStatus: "sent" }) === true, "M1 rule: a non-live Keep mine resyncs");
+  ok(saveAdoptsStatus({ mode: "manual", isLive: true, resStatus: "draft", baseStatus: "draft" }) === true, "M1 rule: a manual Save always resyncs");
+
+  await liveSaveHookChecks(ok);
+
+  // C2: the two callers. The state hook can't load here (it imports every server action), so these are source pins.
+  const statusSrc = hookSrc.slice(hookSrc.indexOf("const changeStatus = "), hookSrc.indexOf("const changeStage = "));
+  const stageSrc = hookSrc.slice(hookSrc.indexOf("const changeStage = "), hookSrc.indexOf("const changePipeline = "));
+  ok(hookSrc.includes('"That status change did not go through — your latest edits are not saved yet."'), "C2: the exact sentence");
+  ok(/if \(liveMode && !\(await live\.flush\(\)\)\) \{\s*setStatus\(baseStatusRef\.current\);\s*setActionError\(STATUS_EDITS_UNSAVED\);\s*setGateRefused\(false\);\s*return;/.test(statusSrc), "C2: a status change stops and rolls back to the server-confirmed status");
+  ok(statusSrc.indexOf("await live.flush()") < statusSrc.indexOf("await setStatusAction("), "C2: the flush decides before setStatusAction writes");
+  ok(/if \(liveMode && !\(await live\.flush\(\)\)\) \{\s*setStage\(prevStage\);\s*setStatus\(baseStatusRef\.current\);\s*setActionError\(STATUS_EDITS_UNSAVED\);\s*setGateRefused\(false\);\s*return;/.test(stageSrc), "C2: a stage move stops the same way");
+  ok(stageSrc.indexOf("await live.flush()") < stageSrc.indexOf("await setQuoteStageAction("), "C2: the flush decides before setQuoteStageAction writes");
+  ok(/baseStatusRef\.current = res\.status;\s*setBaseStatus\(res\.status\);\s*\}\s*setActionNotice\(res\.error \?\? null\);\s*return \{ kind: "notLive" \}/.test(performSrc), "C2: the notLive sync reaches the rollback without waiting for a commit");
+  // C3 + I1
+  ok(/keyStatusRef\.current = res\.status;\s*(baseStatusRef\.current = res\.status;\s*)?setBaseStatus\(res\.status\);\s*\}\s*setActionNotice\(res\.error \?\? null\)/.test(performSrc), "I1: a notLive sync is not this window's move, so it doesn't re-read someone else's key");
+  ok(/live\.conflictNow\(\) \? null/.test(hookSrc), "C3: no key re-read while a conflict is open");
+  // M1
+  ok(/status: isLive \? baseStatus : status/.test(performSrc), "M1: the save that isn't live posts the pick");
+  ok(/if \(res\.status && showsStatus\) \{/.test(performSrc), "M1: the status sync is behind the rule");
+  // M4
+  const probeSrc = hookSrc.slice(hookSrc.indexOf("const editProbeRef = "), hookSrc.indexOf("// Header edits made while the first save ran"));
+  ok(/p\.packageDocOver !== packageDocOver/.test(probeSrc) && /\[groups, vendorQuotes, pdfOpts, paymentTerms, boxSale, projectDiscounts, packageDoc, packageDocOver\]/.test(probeSrc), "M4: a document going over its cap is an edit, so the refusal reaches the chip");
+  // M5
+  ok(hookSrc.indexOf("const editProbeRef = ") < hookSrc.indexOf("const live = useLiveSave("), "M5: the probe ref is declared before the hook that reads it");
+  const leaveSrc = hookSrc.slice(hookSrc.indexOf("const live = useLiveSave("), hookSrc.indexOf("const saveNow = live.saveManual"));
+  ok(/beforeLeave: \(\) => \{\s*(\/\/[^\n]*\n\s*)*packageDocFlushRef\.current\?\.\(\);/.test(leaveSrc) && /editProbeRef\.current\.packageDoc/.test(leaveSrc) && /packageDocRef\.current/.test(leaveSrc), "M5: leaving flushes the editor and compares what it held against the last edit seen");
+  // Pins weakened by Task 5
+  ok((hookSrc.match(/\? setSectionsState : setSections/g) || []).length === 1, "pin: exactly one raw-writer alias outside the setSectionsState( count (a live save's Rewards clamp)");
 }
 
 export async function liveSaveDbChecks(ok: Ok) {

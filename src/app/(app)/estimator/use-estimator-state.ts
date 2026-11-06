@@ -72,7 +72,7 @@ import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 import { postChanged } from "@/lib/popout/channel";
 import { applyLineMove, extractLinesAsSection, lineRefKey, planLineMove, removeLinesFromSources, type LineRef } from "@/lib/estimate-line-move/move";
 import { setUnsavedHold } from "@/lib/popout/hold";
-import { liveSaveEligible } from "@/lib/estimate-live-save/rules";
+import { liveSaveEligible, saveAdoptsStatus, saveGoesLive } from "@/lib/estimate-live-save/rules";
 import { useLiveSave, type LiveSaveApi, type SaveMode, type SaveOutcome } from "./use-live-save";
 import { discardConfirmText, inputIsDirty, isModalInputKind, MODAL_INPUT_KINDS, rebaseDraft, stableDraftJson, type ModalInputKind } from "@/lib/estimate-steps/discard-confirm";
 import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
@@ -80,6 +80,7 @@ import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 /** #333 review (F): how long Send waits for an in-flight Client package write. */
 const SELECTION_SETTLE_TIMEOUT_MS = 10_000;
 const SELECTION_NOT_SAVED = "Couldn't save package choices.";
+const STATUS_EDITS_UNSAVED = "That status change did not go through — your latest edits are not saved yet.";
 
 /** Prototype prop taxRatePct defaulted to 0 — kept as a constant. */
 export const TAX_RATE_PCT = 0;
@@ -261,6 +262,10 @@ export function useEstimatorState(props: EstimatorProps) {
   const liveRef = useRef<LiveSaveApi | null>(null);
   /** The change key this window last saw. A `useRef`, not read from `initial`: a LiveSync refresh must not adopt someone else's key. */
   const liveKeyRef = useRef<string | null>(initial.liveKey);
+  /** The status the change key was last read at. This window's own moves re-read the key; a sync of someone else's move doesn't. */
+  const keyStatusRef = useRef(initial.status);
+  /** What the server last confirmed, synchronously: a status move rolls back to it right after a flush, before any commit. */
+  const baseStatusRef = useRef(initial.status);
   /** The saved id, synchronously: a save queued behind the first one can run before the new id is committed, and a
    *  closure still holding null would mint a second quote. */
   const loadedIdRef = useRef(initial.loadedId);
@@ -1489,9 +1494,9 @@ export function useEstimatorState(props: EstimatorProps) {
     const docAtSave = { ...docInput, document: docNow };
     // The ref, not the state: a save queued behind the first one can run before React commits the new id.
     const idAtSave = loadedIdRef.current;
-    // A status picked before the first Save still moves through that Save, as it always has. Every other save on a
-    // live-save estimate uses the limited patch.
-    const isLive = liveMode && !(!auto && !idAtSave && status !== baseStatus);
+    // A status picked before the estimate had an id still moves through the next manual Save, as it always has. Every
+    // other save on a live-save estimate uses the limited patch.
+    const isLive = saveGoesLive({ mode, liveMode, status, baseStatus, statusChanging });
     const discountsAtSave = projectDiscounts; // #366
     // What the server had before this save (estimator bonuses: syncBonusAfterStatus).
     const statusBeforeSave = baseStatus;
@@ -1554,6 +1559,9 @@ export function useEstimatorState(props: EstimatorProps) {
           if (res.status) {
             syncBonusAfterStatus(statusBeforeSave, res.status);
             setStatus(res.status);
+            // Someone else's move, so the key effect must not adopt their key: this window's Save has to raise the conflict.
+            keyStatusRef.current = res.status;
+            baseStatusRef.current = res.status;
             setBaseStatus(res.status);
           }
           setActionNotice(res.error ?? null);
@@ -1618,13 +1626,15 @@ export function useEstimatorState(props: EstimatorProps) {
           // resync: whether the requested status applied, was refused, or
           // was left alone because this tab was stale, res.status is always
           // what the server actually has now (#180 review 2).
-          // A live save moves nothing, so when it reports the status this tab already knew it leaves `status` alone:
-          // a status change flushes through here with its optimistic pick on screen.
-          const showsStatus = !auto || !idAtSave || res.status !== statusBeforeSave;
+          // A live save moves nothing, so when it reports the status this tab already knew it leaves `status` alone: a
+          // status change flushes through here with its optimistic pick on screen, and a pick made before the estimate
+          // had an id waits on screen for the next manual Save.
+          const showsStatus = saveAdoptsStatus({ mode, isLive, resStatus: res.status, baseStatus: statusBeforeSave });
           if (res.status && showsStatus) {
             // Estimator bonuses: a save that moves to/from Won refreshes the card.
             syncBonusAfterStatus(statusBeforeSave, res.status);
             setStatus(res.status);
+            baseStatusRef.current = res.status;
             setBaseStatus(res.status);
           }
           // Daylite stage bar (Task 6) — a brand-new quote has no pipeline
@@ -1683,9 +1693,16 @@ export function useEstimatorState(props: EstimatorProps) {
       }
     }
   };
+  const editProbeRef = useRef({ groups, vendorQuotes, pdfOpts, paymentTerms, boxSale, projectDiscounts, packageDoc, packageDocOver });
   const live = useLiveSave({
     gate: { enabled: liveMode, hasId: !!loadedId, hasLines: sections.some((s) => s.items.length > 0), tierResolving, statusChanging },
     perform: performSave,
+    beforeLeave: () => {
+      // A Back gesture or ⌘K inside the editor's debounce has no blur, and the probe below won't run again after unmount.
+      packageDocFlushRef.current?.();
+      const seen = editProbeRef.current.packageDoc;
+      return seen !== packageDocRef.current && JSON.stringify(seen) !== JSON.stringify(packageDocRef.current);
+    },
   });
   useEffect(() => {
     liveRef.current = live;
@@ -1706,7 +1723,6 @@ export function useEstimatorState(props: EstimatorProps) {
   }, [unsavedHold]);
 
   // Everything else Save writes has no automatic writer: any change to it is a user edit.
-  const editProbeRef = useRef({ groups, vendorQuotes, pdfOpts, paymentTerms, boxSale, projectDiscounts, packageDoc });
   useEffect(() => {
     const p = editProbeRef.current;
     const changed =
@@ -1716,12 +1732,14 @@ export function useEstimatorState(props: EstimatorProps) {
       p.paymentTerms !== paymentTerms ||
       p.boxSale !== boxSale ||
       p.projectDiscounts !== projectDiscounts ||
+      // Over the cap the editor stops emitting, so this is the only sign of the edit: the save it starts is refused with the reason.
+      p.packageDocOver !== packageDocOver ||
       // The editor may emit on mount, so compare content: viewing the tab must not save.
       (p.packageDoc !== packageDoc && JSON.stringify(p.packageDoc) !== JSON.stringify(packageDoc));
-    editProbeRef.current = { groups, vendorQuotes, pdfOpts, paymentTerms, boxSale, projectDiscounts, packageDoc };
+    editProbeRef.current = { groups, vendorQuotes, pdfOpts, paymentTerms, boxSale, projectDiscounts, packageDoc, packageDocOver };
     if (changed) live.markEdit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groups, vendorQuotes, pdfOpts, paymentTerms, boxSale, projectDiscounts, packageDoc]);
+  }, [groups, vendorQuotes, pdfOpts, paymentTerms, boxSale, projectDiscounts, packageDoc, packageDocOver]);
 
   // Header edits made while the first save ran had no id to save against: send the difference now.
   useEffect(() => {
@@ -1734,15 +1752,19 @@ export function useEstimatorState(props: EstimatorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedId]);
 
+  // Keeps the rollback's ref up with every other baseStatus write (applySync, applyStageSync).
+  useEffect(() => {
+    baseStatusRef.current = baseStatus;
+  }, [baseStatus]);
   // A server-confirmed status move can rewrite the spec (a Lost move clears the Rewards credit): re-read the key.
-  // In the queue, so a read that started before a save can't land after it and put back the older key.
-  const keyStatusRef = useRef(baseStatus);
+  // In the queue, so a read that started before a save can't land after it and put back the older key. Never during a
+  // conflict: that key is the other person's, and adopting it would let the next Save overwrite them with no prompt.
   useEffect(() => {
     if (keyStatusRef.current === baseStatus) return;
     keyStatusRef.current = baseStatus;
     if (!loadedId) return;
     void live
-      .enqueue(() => currentLiveKeyAction(loadedId))
+      .enqueue(async () => (live.conflictNow() ? null : currentLiveKeyAction(loadedId)))
       .then((k) => {
         if (k) liveKeyRef.current = k;
       })
@@ -1763,7 +1785,13 @@ export function useEstimatorState(props: EstimatorProps) {
       setStatusChanging(true);
       startTransition(async () => {
         try {
-          if (liveMode) await live.flush();
+          // Nothing moves unless the edits landed: a Won or Sent move works from the stored spec, and a conflict is waiting on an answer.
+          if (liveMode && !(await live.flush())) {
+            setStatus(baseStatusRef.current);
+            setActionError(STATUS_EDITS_UNSAVED);
+            setGateRefused(false);
+            return;
+          }
           // #355 review I3: leaving Won with unsaved edits — save them first, so
           // the reopen's snapshot keeps them before the won version comes back.
           if (prevStatus === "won" && v !== "won" && pdfDirty && (await saveNow()) === false) {
@@ -1829,7 +1857,13 @@ export function useEstimatorState(props: EstimatorProps) {
     setStatusChanging(true);
     startTransition(async () => {
       try {
-        if (liveMode) await live.flush();
+        if (liveMode && !(await live.flush())) {
+          setStage(prevStage);
+          setStatus(baseStatusRef.current);
+          setActionError(STATUS_EDITS_UNSAVED);
+          setGateRefused(false);
+          return;
+        }
         // #355 review I3: same as changeStatus — a stage move can leave Won.
         // #368: …or revise a sent / lost estimate (a stage whose tag is Draft) — saved first, as above.
         const pl = pipelines.quote.find((p) => p.id === pipelineId) || pipelines.quote.find((p) => p.id === pipelines.defaultQuotePipelineId) || pipelines.quote[0];
