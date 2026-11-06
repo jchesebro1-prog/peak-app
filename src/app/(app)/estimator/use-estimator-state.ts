@@ -74,6 +74,7 @@ import { applyLineMove, extractLinesAsSection, lineRefKey, planLineMove, removeL
 import { setUnsavedHold } from "@/lib/popout/hold";
 import { liveSaveEligible, saveAdoptsStatus, saveGoesLive } from "@/lib/estimate-live-save/rules";
 import { useLiveSave, type LiveSaveApi, type SaveMode, type SaveOutcome } from "./use-live-save";
+import { useEstimateUndo, type EstimateUndoApi } from "./use-estimate-undo";
 import { discardConfirmText, inputIsDirty, isModalInputKind, MODAL_INPUT_KINDS, rebaseDraft, stableDraftJson, type ModalInputKind } from "@/lib/estimate-steps/discard-confirm";
 import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 
@@ -260,6 +261,8 @@ export function useEstimatorState(props: EstimatorProps) {
   });
   /** Live save: declared here so closures above the hook call can reach it. Set in an effect after useLiveSave. */
   const liveRef = useRef<LiveSaveApi | null>(null);
+  /** Undo: same shape as liveRef — closures above the hook reach it here. Set in an effect after useEstimateUndo. */
+  const undoRef = useRef<EstimateUndoApi | null>(null);
   /** The change key this window last saw. A `useRef`, not read from `initial`: a LiveSync refresh must not adopt someone else's key. */
   const liveKeyRef = useRef<string | null>(initial.liveKey);
   const moveKeyMatchedRef = useRef(true);
@@ -314,6 +317,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const setSections: Dispatch<SetStateAction<SpecSection[]>> = (v) => {
     setTierReprice(null);
     liveRef.current?.markEdit();
+    undoRef.current?.flagEdit();
     // Phase 2a: any edit to a built system other than `built` itself un-marks it.
     setSectionsState((prev) => unmarkUserEdits(prev, typeof v === "function" ? v(prev) : v));
   };
@@ -1082,6 +1086,7 @@ export function useEstimatorState(props: EstimatorProps) {
       // snapshot takes the same freight so Undo never reverts it.
       setSectionsState((ss) => applyAutoFreight(ss, { pct: fd.pct }));
       setTierReprice((n) => (n ? { ...n, before: applyAutoFreight(n.before, { pct: fd.pct }) } : n));
+      undoRef.current?.mapHistory((ss) => applyAutoFreight(ss, { pct: fd.pct }));
     });
   };
 
@@ -1143,6 +1148,7 @@ export function useEstimatorState(props: EstimatorProps) {
       sectionsRef.current = res.sections;
       setSectionsState(res.sections);
       liveRef.current?.markEdit();
+      undoRef.current?.flagEdit("re-priced");
     }
     if (res.repriced === 0) return;
     setTierReprice({
@@ -1208,6 +1214,7 @@ export function useEstimatorState(props: EstimatorProps) {
     setSectionsState(tierReprice.before);
     setTierReprice(null);
     liveRef.current?.markEdit();
+    undoRef.current?.flagEdit("re-priced");
   };
 
   const persistMeta = (meta: Parameters<typeof updateQuoteMetaAction>[1]) => {
@@ -1709,6 +1716,26 @@ export function useEstimatorState(props: EstimatorProps) {
     liveRef.current = live;
   }, [live]);
   const saveNow = live.saveManual;
+  const undoSnap = useMemo(() => ({ sections, groups, vendorQuotes }), [sections, groups, vendorQuotes]);
+  // Stable (setters and a ref only), so the undo functions and the keydown listener don't churn.
+  const applyUndoSnap = useCallback((s: { sections: SpecSection[]; groups: SystemGroup[]; vendorQuotes: VendorQuote[] }) => {
+    setTierReprice(null);
+    setSectionsState(s.sections);
+    setGroups(s.groups);
+    setVendorQuotes(s.vendorQuotes);
+    liveRef.current?.markEdit();
+  }, []);
+  const undo = useEstimateUndo({ snap: undoSnap, serverVendorQuotes: serverVendorQuotesRef, apply: applyUndoSnap });
+  useEffect(() => {
+    undoRef.current = undo;
+  }, [undo]);
+  // A status change or anything that changes the lock on prices: Undo must not restore prices #368 forbids.
+  const undoStatusRef = useRef(baseStatus);
+  useEffect(() => {
+    if (undoStatusRef.current === baseStatus) return;
+    undoStatusRef.current = baseStatus;
+    undoRef.current?.clearHistory();
+  }, [baseStatus]);
   /** The edits aren't stored yet. `pdfDirty` is narrower on a live-save estimate: the rendered PDF is behind the screen. */
   const contentUnsaved = liveMode ? live.status !== "saved" : pdfDirty;
   // Pop-outs (D912): while this estimate has unsaved work — edits since the
@@ -2206,6 +2233,9 @@ export function useEstimatorState(props: EstimatorProps) {
         if (movedVq.length) setVendorQuotes((vs) => vs.filter((v) => !movedVqIds.has(v.id)));
         setActiveId((a) => (a === secId ? (list[0] ? list[0].id : null) : a));
         setMoveNotice({ ok: true, targetId: res.targetId, targetName: res.targetName, targetNumber: res.targetNumber });
+        // It now lives on another estimate: undoing would leave it on both.
+        undoRef.current?.clearHistory({ pendingChange: true });
+        setActionNotice("Undo history was cleared, because that work now lives on another estimate.");
       } else {
         setMoveNotice({ ok: false, error: res.error || "Could not move that system." });
       }
@@ -2356,6 +2386,9 @@ export function useEstimatorState(props: EstimatorProps) {
         setSections((ss) => removeLinesFromSources(ss, plan.lines));
         if (usedVq.length) setVendorQuotes((vs) => vs.filter((v) => !usedVqIds.has(v.id) || stillUsed.has(v.id)));
         setMoveNotice({ ok: true, targetId: res.targetId, targetName: res.targetName, targetNumber: res.targetNumber });
+        // It now lives on another estimate: undoing would leave it on both.
+        undoRef.current?.clearHistory({ pendingChange: true });
+        setActionNotice("Undo history was cleared, because that work now lives on another estimate.");
       } catch {
         setMoveNotice({ ok: false, error: "Could not move those lines." });
       } finally {
@@ -4034,6 +4067,7 @@ export function useEstimatorState(props: EstimatorProps) {
     trackSec,
     trackSeries,
     travelEstNow,
+    undo,
     undoTierReprice,
     updateSection,
     useMobNameList,

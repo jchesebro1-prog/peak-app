@@ -193,6 +193,13 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(/markEdit/.test(applyStampSrc), "hook: a tier re-price is an edit");
   const freightSrc = hookSrc.slice(hookSrc.indexOf("const reapplyAutoFreight"), hookSrc.indexOf("const reapplyAutoFreight") + 700);
   ok(!/markEdit/.test(freightSrc), "hook: auto freight is not an edit — opening never writes");
+  // Keeping history honest.
+  const setSecAt = hookSrc.indexOf("const setSections:");
+  ok(setSecAt > 0 && /undoRef\.current\?\.flagEdit\(\)/.test(hookSrc.slice(setSecAt, setSecAt + 400)), "undo: a user edit to the sections is flagged");
+  ok(/undoRef\.current\?\.mapHistory\(/.test(hookSrc.slice(hookSrc.indexOf("const reapplyAutoFreight"), hookSrc.indexOf("const reapplyAutoFreight") + 900)), "undo: auto freight reaches stored snapshots");
+  ok((hookSrc.match(/undoRef\.current\?\.clearHistory\(/g) || []).length >= 3, "undo: moving a system out, moving lines out and a status change clear history");
+  ok(/flagEdit\("re-priced"\)/.test(hookSrc), "undo: a tier re-price is one labelled step");
+  ok(/\n    undo,\n/.test(hookSrc), "undo: the state hook returns undo");
   // Added while building: what a queued save, a status change and a missing quote have to do.
   const performSrc = hookSrc.slice(hookSrc.indexOf("const performSave = async"), hookSrc.indexOf("const saveNow = live.saveManual"));
   ok(/const idAtSave = loadedIdRef\.current/.test(performSrc) && /saveQuoteAction\(idAtSave,/.test(performSrc), "hook: a queued save reads the new id from a ref — a closure from before the create would mint a second quote");

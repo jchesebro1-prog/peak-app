@@ -19,7 +19,7 @@ const reactStandIn = {
   useState<T>(init: T): [T, (v: T) => void] {
     const h = host as Host;
     const k = h.i++;
-    if (!(k in h.slots)) h.slots[k] = init;
+    if (!(k in h.slots)) h.slots[k] = typeof init === "function" ? (init as () => T)() : init;
     return [
       h.slots[k] as T,
       (v: T) => {
@@ -195,8 +195,131 @@ function mount(runHook: UseLiveSave, script: Script = outcomes(), gate: Partial<
   return t;
 }
 
+type UndoSnapT = { sections: unknown[]; groups: unknown[]; vendorQuotes: unknown[] };
+type UndoApiT = {
+  canUndo: boolean;
+  canRedo: boolean;
+  undoLabel: string | null;
+  undo: () => void;
+  redo: () => void;
+  flagEdit: (l?: string) => void;
+  clearHistory: (o?: { pendingChange?: boolean }) => void;
+};
+type UseUndo = (o: { snap: UndoSnapT; serverVendorQuotes: { current: unknown[] | null }; apply: (s: UndoSnapT) => void }) => UndoApiT;
+function loadUndoHook(): UseUndo {
+  const M = Module as unknown as { _load: (request: string, parent: { filename?: string } | null, isMain: boolean) => unknown };
+  const realLoad = M._load;
+  const file = join(__dirname, "..", "src/app/(app)/estimator/use-estimate-undo.ts");
+  M._load = function (request, parent, isMain) {
+    if (request === "react") return reactStandIn;
+    return realLoad.call(this, request, parent, isMain);
+  };
+  const load = Module.createRequire(__filename);
+  try {
+    delete load.cache[file];
+    return (load(file) as { useEstimateUndo: UseUndo }).useEstimateUndo;
+  } finally {
+    M._load = realLoad;
+    delete load.cache[file];
+  }
+}
+
+/** The Undo hook under the same stand-in: `state` is what the page holds; `apply` writes it, as the state hook's does. */
+function mountUndo(runHook: UseUndo) {
+  const h: Host = { slots: [], i: 0, pending: [], dirty: true };
+  const keys: Array<(e: unknown) => void> = [];
+  (globalThis as { window?: unknown }).window = {
+    addEventListener: (_t: string, fn: (e: unknown) => void) => keys.push(fn),
+    removeEventListener: (_t: string, fn: (e: unknown) => void) => keys.splice(keys.indexOf(fn), 1),
+  };
+  (globalThis as { document?: unknown }).document = { querySelector: () => null };
+  (globalThis as { HTMLElement?: unknown }).HTMLElement ??= class {};
+  const server = { current: null as unknown[] | null };
+  const t = {
+    state: { sections: [] as unknown[], groups: [] as unknown[], vendorQuotes: [] as unknown[] } as UndoSnapT,
+    api: null as unknown as UndoApiT,
+    keys,
+    render() {
+      host = h;
+      h.i = 0;
+      h.pending = [];
+      h.dirty = false;
+      t.api = runHook({ snap: t.state, serverVendorQuotes: server, apply: (s) => (t.state = s) });
+      host = null;
+      const pending = h.pending;
+      for (const e of pending) if (e.stale && e.cleanup) e.cleanup();
+      for (const e of pending) if (e.stale) e.cleanup = e.fn();
+    },
+    settle() {
+      for (let i = 0; i < 6; i++) if (h.dirty) t.render();
+    },
+    /** A user edit: flagged, then the state changes. */
+    edit(sections: unknown[], label?: string) {
+      t.api.flagEdit(label);
+      t.state = { ...t.state, sections };
+      h.dirty = true;
+      t.settle();
+    },
+    /** An automatic change: no flag. */
+    auto(sections: unknown[]) {
+      t.state = { ...t.state, sections };
+      h.dirty = true;
+      t.settle();
+    },
+  };
+  t.render();
+  return t;
+}
+
 export async function liveSaveHookChecks(ok: Ok) {
   const hook = loadHook();
+  {
+    const useUndo = loadUndoHook();
+    const realWin = (globalThis as { window?: unknown }).window;
+    const hadDoc = "document" in globalThis;
+    try {
+      const A = [{ id: "a" }];
+      const B = [{ id: "a" }, { id: "b" }];
+      const C = [{ id: "a" }, { id: "b" }, { id: "c" }];
+      const t = mountUndo(useUndo);
+      t.state = { ...t.state, sections: A };
+      t.render();
+      t.edit(B);
+      ok(t.api.canUndo && t.api.undoLabel === "system added", "undo hook: a flagged edit is a step");
+      t.auto(C);
+      ok(t.api.canUndo && !t.api.canRedo, "undo hook: an unflagged change is not a step");
+      t.api.undo();
+      t.settle();
+      ok(t.state.sections === A && !t.api.canUndo && t.api.canRedo, "undo hook: Undo restores the snapshot and moves it to redo");
+      ok(t.api.canUndo === false, "undo hook: an Undo is not recorded as a new step");
+      t.api.redo();
+      t.settle();
+      ok(t.state.sections === C && t.api.canUndo && !t.api.canRedo, "undo hook: Redo puts back what Undo took off, with no new step");
+      t.edit(B, "re-priced");
+      ok(t.api.undoLabel === "re-priced", "undo hook: a label wins over the diff's own");
+      t.api.clearHistory();
+      t.settle();
+      ok(!t.api.canUndo && !t.api.canRedo, "undo hook: clearHistory empties both stacks");
+      t.api.flagEdit();
+      t.api.clearHistory({ pendingChange: true });
+      t.state = { ...t.state, sections: A };
+      t.settle();
+      ok(!t.api.canUndo, "undo hook: a change landing with a pending clear is not a step");
+      t.edit(B);
+      ok(t.api.canUndo, "undo hook: edits record again after a clear");
+      let prevented = 0;
+      const press = (target: unknown) => t.keys.forEach((k) => k({ metaKey: true, ctrlKey: false, shiftKey: false, key: "z", target, preventDefault: () => prevented++ }));
+      press({});
+      t.settle();
+      ok(prevented === 1 && t.state.sections === A, "undo hook: Cmd+Z outside a text field undoes");
+      t.api.redo();
+      t.settle();
+      ok(t.state.sections === B, "undo hook: redo restores for the keyboard check");
+    } finally {
+      if (!hadDoc) delete (globalThis as { document?: unknown }).document;
+      (globalThis as { window?: unknown }).window = realWin;
+    }
+  }
   const realSetTimeout = globalThis.setTimeout;
   const realClearTimeout = globalThis.clearTimeout;
   const hadWindow = "window" in globalThis;
