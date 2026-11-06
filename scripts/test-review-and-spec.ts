@@ -58434,7 +58434,7 @@ import { renderToStaticMarkup as p5fMarkup } from "react-dom/server";
   const save = hook.slice(hook.indexOf("const res = await saveQuoteAction(idAtSave, {"), hook.indexOf("const doSave = () => {"));
   const adopt = save.slice(save.indexOf("if (res.id) {"), save.indexOf("if (res.ok) {"));
   ok(adopt.includes("setTierReprice(") && adopt.includes("setSavedDoc(") && adopt.includes("setRevNum(res.revNum);") && adopt.includes("setRevDateMs(res.updatedAt);") &&
-     save.includes('setActionError(res.error || "That save did not go through — nothing was written.");'),
+     save.includes("setActionError(res.error || SAVE_NOT_WRITTEN);") && hook.includes('const SAVE_NOT_WRITTEN = "That save did not go through — nothing was written.";'),
     "#P5 render fix: the client marks a save done (PDF dirty, tier reprice, rev/date) only when an id comes back — the refusal shows its error instead");
 
   // (3) renames reach product blocks
