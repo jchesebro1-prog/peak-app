@@ -12977,3 +12977,27 @@ Jeff, Oct 30: the NFC contact card should carry the company website and an offic
 **Remaining (Jeff):**
 - Fill Settings → Branding → Website.
 - Set Office on his Team row if he's not at the main office.
+
+## 376. Estimator live save + Undo — DONE 2026-11-06 on `feat/estimator-live-save` (D1339–D1346)
+
+Jeff, Nov 6: "Can we make it so estimator lines live save when editing? And then there is an undo button if you need to?" Spec `docs/superpowers/specs/2026-11-06-estimator-live-save-design.md`.
+
+**Built:** a Draft Estimator system estimate (not a portal quote) saves itself 1.5 s after each edit, at once on a step change and before a status move or Send. The header's Save button becomes a chip (Saved ✓, Saving…, Not saved — Retry, or the server's reason), with Undo and Redo beside it on every step (⌘Z / ⇧⌘Z on Build and Build package). A live save writes a limited patch (spec, value, margin, vendor quotes, PDF options, payment terms, box sale, the tier stamp), leaves header fields to the header autosave and doesn't render the PDF; it renders on the way into Customer review or Send & track. A content key (`liveKey`) checked under the quote row lock raises a "changed somewhere else" banner with Reload or Keep mine instead of overwriting another window. Pure rules are in `src/lib/estimate-live-save/` (`rules`, `scheduler`, `live-key`, `undo`, `copy`); the hook is `use-live-save.ts`, with `use-estimate-undo.ts` and `live-save-chip.tsx`; the checked write is `updateCheckingLiveKey` in `src/lib/stores/quotes.ts`. No migration, no env var.
+
+**Verified 2026-11-06:** `tsc` 0 errors. `eslint` 0 errors, 90 warnings, with `scripts/test-review-and-spec.ts` excluded (the react-hooks plugin overflows the stack on it, as before). `test:specs` ALL PASSED, 26,574 PASS / 0 FAIL, plus the markup-settings run. `scripts/test-estimate-live-save.ts` with a scratch PGlite (DB half included): 279 PASS / 0 FAIL. One older source pin (`#P5 render fix`) failed because the save-failed text became a constant; it was updated in its own commit. Browser pass on a scratch database (22 checks, incl. no write on open, save-and-reload, new estimate gets an id, Undo of lines / systems / vendor lines, two-window banner with Reload and Keep mine, simulated outage and retry, box-sale refusal, Sent and portal quotes keep Save, PDF render on the way into review): all passed. One failed on the first run, a system moved to another estimate left its removal as an Undo step; fixed in `383bb006` with two harness checks.
+
+**Rollback:** safe; `lastSavedBy` is optional JSON older code ignores.
+
+**Could not be checked locally:**
+- Undo restoring a real vendor attachment. The dev server holds a real Blob token, so no upload was clicked. A pin says saving never deletes the file, but `storeVendorQuotes` has no runtime check. Try it on production with a throwaway estimate.
+- A real pop-out window with Open in main window and the unsaved-work hold. The pane can't open a popup; the first was emulated by setting the window name, and the hold wasn't exercised.
+- The native "unsaved changes" browser warning (checked by a dispatched `beforeunload`).
+- Server restart recovery (simulated with failed POSTs; dev HMR reloads the page when the server returns).
+- `updateCheckingLiveKey`'s row lock on real Postgres (only PGlite here).
+
+**Remaining (Jeff-gated):**
+- Tell the team before deploy: drafts save themselves, and a new estimate appears in Quotes as soon as it has a line.
+- On production, edit a real draft, Undo a deleted system, and open the same estimate in two windows.
+- Open: `persistMeta` and pipeline changes still write during an open conflict (they aren't contested fields). Should they pause too?
+- Open: the phone view has no chip or banner (it keeps the PDF pane's Save); a conflict there shows no banner.
+

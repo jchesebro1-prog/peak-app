@@ -1721,5 +1721,27 @@ See `.env.example`.
     resolves), real taps and a real card scan, a production check after 0042, and
     `QUOTE_PDF_ORIGIN`. Open: keep captures through the go-live wipe (D1329)? Punch item #371.
 
+73. ✅ **Estimator live save + Undo** (#376, D1339–D1346) — a Draft Estimator
+    system estimate saves itself 1.5 s after each user edit (and at once on a
+    step change, before a status move or Send); the header Save becomes a chip
+    (Saved ✓ / Saving… / Not saved — Retry) with Undo / Redo beside it (⌘Z /
+    ⇧⌘Z on Build and Build package). A live save writes a limited patch
+    (spec, value, margin, vendor quotes, PDF options, payment terms, box sale,
+    tier stamp) through `saveQuoteAction`'s new `live` / `renderPdf` /
+    `baseKey`, leaves header fields to the header autosave and doesn't render
+    the PDF — it renders on the way into Customer review / Send & track
+    (`pdfDirty` now means the PDF is behind the screen; `contentUnsaved` means
+    unstored). A content key (`liveKey`) checked under the quote row lock by
+    `updateCheckingLiveKey` raises a Reload / Keep mine banner rather than
+    overwrite another window (`Quote.lastSavedBy`, optional). Sent / Won / Lost
+    and portal quotes keep Save. Undo covers lines, systems and groups for the
+    page session. Pure rules in `src/lib/estimate-live-save/` (`rules`,
+    `scheduler`, `live-key`, `undo`, `copy`); `use-live-save.ts`,
+    `use-estimate-undo.ts` and `live-save-chip.tsx` under the Estimator. No
+    migration, no env var; rollback is safe. Remaining is Jeff-gated: tell the
+    team, a production pass (real draft, Undo a deleted system, two windows),
+    Undo of a real vendor attachment, and whether `persistMeta` / pipeline
+    writes should pause during a conflict. Punch item #376.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

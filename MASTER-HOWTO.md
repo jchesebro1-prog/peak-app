@@ -38,7 +38,13 @@ Signed in, you can already drive the whole **Sales** side against real data:
   customer + draft quote. Public request form at `/lead-intake`.
 - **Quotes / Estimator** — the full line-item builder (catalog parts,
   curtain / fixture / labor configurators, per-section margin + freight,
-  customer PDF preview). Marking a quote **Won** auto-creates its Installs
+  customer PDF preview). A **Draft** estimate saves itself about 1.5 seconds
+  after each edit (the chip beside the title reads Saved, Saving… or Not saved —
+  Retry), and **Undo** / **Redo** (or ⌘Z / ⇧⌘Z on Build and Build package) step
+  back through lines, systems and groups until you reload. Sent, Won and Lost
+  estimates, and portal quotes, still use the **Save** button. If someone else
+  saved the estimate meanwhile, a banner offers **Reload** or **Keep mine**.
+  Marking a quote **Won** auto-creates its Installs
   project and, for flame-test quotes, its service job.
 - **Reviews** — submit/claim/approve/request-changes for quotes & designs.
 - **Quick Design** — budgetary Good/Better/Best estimator with generated
@@ -438,8 +444,8 @@ creates or prices a quote. It replaced #334's Draft estimate.
    the catalog: it is added as a custom line with no price and the note "Suggested:
    needs a part and price", so pick the real part or price it. **✓ added** shows what
    is already in the estimate.
-4. Check every line, then **Save**. The first save links the estimate to the
-   suggestion. Reopen it later and the panel is there behind its "Suggested BOM" tab,
+4. Check every line. A draft saves itself (the first line you add creates the
+   estimate), and that first save links the estimate to the suggestion. Reopen it later and the panel is there behind its "Suggested BOM" tab,
    hidden until you open it.
 5. Back on the source, the button now reads **Suggestion ready → Open** (opens the
    same suggestion again on a new estimate) and **Suggest again** (asks Assist for a fresh one, which
