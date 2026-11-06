@@ -1,5 +1,7 @@
 /* Estimator live save + Undo. `liveSavePureChecks` needs no database; `liveSaveDbChecks` needs the test DB
    (test:specs runs both). Run the pure half alone with `npx tsx scripts/test-estimate-live-save.ts`. */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
 import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
 import { canAutoSave, DEBOUNCE_MS, INITIAL_LIVE_STATE, liveStatusOf, reduceLive, retryDelayMs, type LiveGate } from "../src/lib/estimate-live-save/scheduler";
@@ -158,6 +160,18 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(liveKey(kq) !== liveKey({ ...kq, boxSale: true }), "key: box sale moves it");
   ok(liveKey({ ...kq, boxSale: undefined }) === liveKey(kq), "key: no box sale key equals false (update() removes the key)");
   ok(liveKey({ ...kq, name: "Other", status: "sent", owner: "x", customerId: "c", quoteNote: "n", updatedAt: 9 } as never) === liveKey(kq), "key: header, status and people changes never move it");
+  // saveQuoteAction's live mode (a "use server" file can't run here — the store write is covered by the DB half; the browser check covers the rest).
+  const actionsSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/actions.ts"), "utf8");
+  const saveSrc = actionsSrc.slice(actionsSrc.indexOf("export async function saveQuoteAction"), actionsSrc.indexOf("export async function searchQuotesAction"));
+  ok(saveSrc.includes("liveSaveRefusal(prior)"), "action: the server re-checks a live save against the stored quote");
+  ok(saveSrc.includes("limitToLivePatch("), "action: a live save writes the limited patch");
+  ok(saveSrc.includes("updateCheckingLiveKey(loadedId, payload.baseKey,"), "action: the write goes through the checked update");
+  ok(saveSrc.includes("markQuotePdfStale(") && saveSrc.includes("scheduleQuotePdf("), "action: a live save marks the PDF stale, a rendering save schedules it");
+  ok(/if \(!live\) refresh\(\);/.test(saveSrc), "action: a live save skips the whole-layout refresh");
+  ok(/if \(q && !live\) \{\s*const decision = resolveSaveStatusChange/.test(saveSrc), "action: a live save never acts on status");
+  ok(saveSrc.includes("lastSavedBy"), "action: a save stamps who saved");
+  ok(!/\bdel\(/.test(actionsSrc), "action: saving never deletes a vendor quote's Blob file, so Undo can bring the attachment back");
+
 }
 
 export async function liveSaveDbChecks(ok: Ok) {

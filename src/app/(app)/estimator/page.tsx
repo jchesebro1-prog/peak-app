@@ -1,4 +1,5 @@
 import { DEFAULT_PACKAGE_SELECTION, normalizePackageSelection } from "@/lib/estimate-output/package-selection";
+import { liveKey } from "@/lib/estimate-live-save/live-key";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
@@ -162,6 +163,7 @@ async function initialFrom(
       document: null,
       vendorQuotes: [],
       replaces: "",
+      liveKey: null,
       pdfOptions: { ...DEFAULT_PDF_OPTIONS },
       pdf: null,
       coverSummary: "",
@@ -245,6 +247,7 @@ async function initialFrom(
     projectDiscounts: sanitizeProjectDiscounts(spec?.projectDiscounts),
     vendorQuotes: vendorQuotesOf(q),
     replaces: "",
+    liveKey: liveKey(q),
     pdfOptions: normalizePdfOptions(q.pdfOptions),
     pdf: pdfView(q.pdf, Date.now()),
     // #301: the cover fields as stored; null = never stored (the editor starts from the default list).

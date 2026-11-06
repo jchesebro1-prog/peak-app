@@ -647,6 +647,8 @@ export type InitialQuote = {
   /** #160 / D205 — the draft this new estimate replaces ("Change type"); "" otherwise.
    *  Sent with the FIRST save only, which retires that draft server-side. */
   replaces: string;
+  /** Estimator live save: the stored change key at load; null for a new estimate. */
+  liveKey: string | null;
   /** Saved Show-on-PDF choices (#222) — DEFAULT_PDF_OPTIONS for a new estimate. */
   /** #301 — the cover PDF's overall summary ("" = the scope-list sentence). */
   coverSummary: string;

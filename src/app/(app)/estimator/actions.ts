@@ -26,6 +26,7 @@ import {
   resolveSaveStatusChange,
   STAGES,
   update,
+  updateCheckingLiveKey,
   type Quote,
   type QuoteReview,
   type QuoteStatus,
@@ -72,7 +73,9 @@ import {
 } from "@/lib/rewards/credit-line";
 import { companyCredit } from "@/lib/stores/reward-ledger";
 import { normalizePdfOptions, type QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
-import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
+import { markQuotePdfStale, scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
+import { limitToLivePatch, liveSaveRefusal } from "@/lib/estimate-live-save/rules";
+import { liveKey } from "@/lib/estimate-live-save/live-key";
 import { pdfAppendixKey } from "@/lib/quote-pdf/appendix-key";
 import { documentRevStamp, type QuotePdfView } from "@/lib/quote-pdf/state";
 import { activeUsers } from "@/lib/users";
@@ -166,6 +169,12 @@ type QuoteExtras = {
 type QuotePatch = Partial<Quote> & QuoteExtras;
 
 export type SavePayload = {
+  /** Estimator live save: limit the patch to what only Save carries, never act on status, skip the layout refresh. Refused unless the stored quote is an eligible draft. */
+  live?: boolean;
+  /** With `live`: also render the PDF (saveNow); without, a live save only marks it out of date. */
+  renderPdf?: boolean;
+  /** The change key this window last saw; a stale one writes nothing. Absent = not checked. */
+  baseKey?: string;
   name: string;
   customer: string;
   customerId: string | null;
@@ -226,6 +235,12 @@ export type SavePayload = {
 };
 
 export type SaveResult = {
+  /** The estimate changed somewhere else — nothing was written. */
+  conflict?: { by: string | null; at: number | null };
+  /** `live` was refused because the stored quote isn't an eligible draft — nothing was written. */
+  notLive?: boolean;
+  /** The stored quote's change key after this save. */
+  liveKey?: string;
   ok: boolean;
   id: string | null;
   /** #223 — the saved quote's estimate number, for the header (null when nothing was saved). */
@@ -465,6 +480,12 @@ export async function saveQuoteAction(
   // the customer's "in review" copy and every portal-only rule for good.
   // Every other quote keeps the prior unconditional "estimator" stamp.
   const prior = loadedId ? await get(loadedId) : null;
+  const live = payload.live === true;
+  const renderPdf = !live || payload.renderPdf === true;
+  if (live && prior) {
+    const refusal = liveSaveRefusal(prior);
+    if (refusal) return { ...refusedSave(prior, refusal), notLive: true };
+  }
   // #248 Task 4: source stamping goes through the shared sourceForSave —
   // portal-catalog (the only portal source the Estimator ever loads; a
   // portal-service quote redirects to its own builder before reaching here)
@@ -557,7 +578,10 @@ export async function saveQuoteAction(
   // re-prices its lines against the same resolution (resolveTierAction), so
   // the stamp and the lines it seeded always land in the same write.
   const { resolveTier } = await import("@/lib/pricing-tiers");
-  const tier = await resolveTier(payload.customerId || null, payload.contactName || "");
+  // A live save leaves the header to the header autosave, so the stamp reads the STORED customer and contact (a stale window can't move it).
+  const tier = live && prior
+    ? await resolveTier(prior.customerId || null, prior.contactName || "")
+    : await resolveTier(payload.customerId || null, payload.contactName || "");
   // `status` is deliberately NOT one of these fields — see the loadedId
   // branch below (security review, 2026-09-25): quotes.update() is an
   // unguarded field merge with no approval gate, no history stamp, and no
@@ -600,6 +624,8 @@ export async function saveQuoteAction(
   // it is written, so a save never re-introduces a retired SKU. Revisions are
   // frozen and never touched here.
   patch.spec = await quoteSpecFollowingRenames(patch.spec);
+  const savedBy = { name: user.name, at: Date.now() };
+  const writePatch: QuotePatch = live && loadedId ? (limitToLivePatch(patch) as QuotePatch) : patch;
   let q: Quote | null = null;
   let statusError: string | undefined;
   // #355 review M2: set when this save's status move put the won version back.
@@ -640,7 +666,9 @@ export async function saveQuoteAction(
   storedVendorQuotes = vpdf.vendorQuotes;
   if (loadedId) {
     storedVendorQuotes = await storeVendorQuotes(loadedId, storedVendorQuotes);
-    q = await update(loadedId, { ...patch, vendorQuotes: storedVendorQuotes } as QuotePatch);
+    const written = await updateCheckingLiveKey(loadedId, payload.baseKey, { ...writePatch, vendorQuotes: storedVendorQuotes, lastSavedBy: savedBy } as QuotePatch);
+    if (written.conflict) return { ...refusedSave(prior, "This estimate changed somewhere else — nothing was written."), conflict: written.conflict };
+    q = written.quote;
     if (q && vpdf.fresh.length) await recordVendorPdfOutcomes(vpdf.fresh, storedVendorQuotes, loadedId);
     // #348 slice 4 — a vendor quote's company joins the estimate as a vendor party, once (D-next-2). Never fails the save.
     if (q) {
@@ -649,7 +677,7 @@ export async function saveQuoteAction(
     }
     // #222: pending BEFORE any status change below, so a send in this same
     // save waits for this save's render instead of copying the previous file.
-    if (q) pdfState = await scheduleQuotePdf(loadedId);
+    if (q) pdfState = renderPdf ? await scheduleQuotePdf(loadedId) : await markQuotePdfStale(loadedId, q.contentChangedAt ?? Date.now());
     // Security review (2026-09-25), D84/punch #60: a changed status can only
     // reach the DB through the gated setStatus() path — the approval gate,
     // status history and spawnFromQuote all live there, and `update()`
@@ -669,7 +697,7 @@ export async function saveQuoteAction(
     // taken before the vendor-quote pruning and the update() call, so using
     // it here would reopen a narrower version of the exact same staleness
     // gap `baseStatus` exists to close.
-    if (q) {
+    if (q && !live) {
       const decision = resolveSaveStatusChange(payload.status, payload.baseStatus, q.status);
       if (decision.kind === "apply") {
         try {
@@ -747,10 +775,11 @@ export async function saveQuoteAction(
       category: (payload.category || "").trim(),
       vendorQuotes: storedVendorQuotes,
       pdfOptions: normalizePdfOptions(payload.pdfOptions),
+      lastSavedBy: savedBy,
     } as QuotePatch);
     if (q && vpdf.fresh.length) await recordVendorPdfOutcomes(vpdf.fresh, storedVendorQuotes, created.id);
     // #222: same ordering as the update branch.
-    if (q) pdfState = await scheduleQuotePdf(created.id);
+    if (q && renderPdf) pdfState = await scheduleQuotePdf(created.id);
     if (payload.status !== "draft") {
       // Punch #60: setStatus's approval gate now applies here too. A brand
       // new quote can never already carry an approval record, so this can
@@ -779,7 +808,7 @@ export async function saveQuoteAction(
   // (first save indexes it; later saves are no-ops). Never fails the save.
   // An update links only when the page's unlinkedRetryAllowed rule holds (server-side guard).
   const suggestionLinked = q?.id && payload.suggestionId ? await linkSavedQuoteToSuggestion(payload.suggestionId, q, !loadedId) : false;
-  refresh();
+  if (!live) refresh();
   return {
     ok: !!q && !statusError,
     id: q?.id ?? null,
@@ -794,6 +823,8 @@ export async function saveQuoteAction(
     stage: q?.stage ?? null,
     vendorQuotes: storedVendorQuotes,
     pdf: pdfState,
+    // Read back from the store: the key must match what the next check will read.
+    liveKey: q?.id ? liveKey((await get(q.id)) ?? q) : undefined,
     next: q ? await quoteNextStepFor(q, user) : null,
     // #282 follow-up: a save that moved the quote to Lost cleared its credit.
     rewardCredit: q?.status === "lost" ? quoteRewardCredit(q) : credit.credit,
@@ -862,6 +893,19 @@ async function settleRewardCredit(
 
 function fmtMoney(n: number): string {
   return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** The stored change key, re-read after a status move (a Lost move can clear the Rewards credit from the spec). */
+export async function currentLiveKeyAction(id: string): Promise<string | null> {
+  await requireUser();
+  const q = id ? await get(id) : null;
+  return q ? liveKey(q) : null;
+}
+
+/** Live saves skip the layout refresh (it re-runs a page that loads the whole catalog); leaving the Estimator runs it once. */
+export async function revalidateAfterLiveSaveAction(): Promise<void> {
+  await requireUser();
+  refresh();
 }
 
 /**
