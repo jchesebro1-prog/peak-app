@@ -59,6 +59,7 @@ export const RIGGING_LIMITS = {
   stickLengthFt: 60,
   sticks: 12,
   hangerSpacingFt: 40,
+  minHangerSpacingFt: 1,
   allowanceFt: 200,
   name: 80,
   manufacturer: 60,
@@ -141,6 +142,38 @@ export function linesetTypeProblems(t: Pick<LinesetType, "parts">, live?: { skus
   const usable = (s: LinesetSource | undefined) => !!s && (!live || (s.kind === "part" ? live.skus.has(s.sku) : live.assemblyIds.has(s.id)));
   const missing = LINESET_ROLES.filter((r) => !usable(t.parts[r])).map((r) => LINESET_ROLE_NAMES[r]);
   return missing.length ? [`Map ${missing.join(", ")}.`] : [];
+}
+
+/**
+ * The Rules screens' SAVE check on the raw input. The sanitizers below stay
+ * tolerant for reading stored blobs; a save must not silently repair what the
+ * user typed. Null = fine.
+ */
+export function pipeTypeInputError(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const spacing = num(r.hangerSpacingFt);
+  if (!(Number.isFinite(spacing) && spacing > 0)) return "Enter a hanger spacing.";
+  if (spacing < RIGGING_LIMITS.minHangerSpacingFt) return `Hanger spacing is at least ${RIGGING_LIMITS.minHangerSpacingFt}'.`;
+  if (Array.isArray(r.sticks)) {
+    const seen = new Set<number>();
+    for (const e of r.sticks) {
+      if (!e || typeof e !== "object" || Array.isArray(e)) continue;
+      const n = num((e as Record<string, unknown>).lengthFt);
+      if (!(Number.isFinite(n) && n > 0)) continue;
+      if (n > RIGGING_LIMITS.stickLengthFt) return `A stick is at most ${RIGGING_LIMITS.stickLengthFt}'.`;
+      if (seen.has(n)) return "Each stick length can only appear once.";
+      seen.add(n);
+    }
+  }
+  return null;
+}
+
+export function linesetTypeInputError(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const allowance = num((raw as Record<string, unknown>).allowanceFt);
+  if (!(Number.isFinite(allowance) && allowance >= 0)) return "Enter a cable allowance of 0 or more.";
+  return null;
 }
 
 /** Shape-clean one pipe type. `active` survives only when the structural check passes. Null for a non-object. */

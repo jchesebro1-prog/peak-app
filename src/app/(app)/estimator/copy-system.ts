@@ -178,7 +178,8 @@ export function copySectionForTarget(
       let sum = 0;
       parts = comps.map((c) => {
         const cat = opts.catalog.get(c.sku);
-        const partCost = cat ? cat.cost : c.cost;
+        // #373: an assembly member priced on its own cost override keeps it.
+        const partCost = c.fixedCost ? c.cost : cat ? cat.cost : c.cost;
         if (c.qty > 0) sum += partCost * c.qty;
         return { ...c, cost: partCost, price: partCost > 0 ? catalogAddPrice(partCost, c.price, tgt) : c.price };
       });

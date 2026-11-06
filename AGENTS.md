@@ -1730,7 +1730,8 @@ See `.env.example`.
     catalog part or a Hardware assembly). Pure rules in `src/lib/rigging-config/`,
     pricing in `estimator/rigging-bom.ts`. Each adds one lot line (`PIP-`/`LNS-`
     SKU, parts in `components`, inputs in `SpecItem.rigging`), read through
-    `isConfiguredLine`; Track is untouched. The curtain configurator gains Add
+    `isConfiguredLine` at tier re-pricing and copy pricing (other readers check
+    `rigging` directly); Track is untouched. The curtain configurator gains Add
     pipe on new curtains, with no link kept. No migration, no env vars. Remaining
     is Jeff-gated: create the types with real parts, check the 10' allowance,
     decide on Quick Design's formula. Punch item #373.

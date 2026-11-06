@@ -2588,7 +2588,7 @@ export function useEstimatorState(props: EstimatorProps) {
   };
 
   /* ---------------- add-flows (portals + modals) ----------------
-     One coordinator for all six input methods, so "click a different input
+     One coordinator for every input method, so "click a different input
      method" is a single, uniform transition: discard the OUTGOING draft, seed
      the INCOMING one, write the descriptor. Every close path — the same button
      clicked again, a modal's × or scrim, a successful add — goes through

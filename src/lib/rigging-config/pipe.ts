@@ -1,5 +1,5 @@
 import { MAX_RUN_FT, MAX_TRACK_QTY } from "@/lib/track-engine";
-import { PIPE_TYPES_HOME, type PipeConfig, type PipeType } from "./types";
+import { PIPE_TYPES_HOME, RIGGING_LIMITS, type PipeConfig, type PipeType } from "./types";
 
 /** #373 — how many of each pipe role one configuration buys. Pure; pricing is estimator/rigging-bom.ts. */
 export type PipeRole = "stick" | "splice" | "clamp";
@@ -16,6 +16,7 @@ export function pipeQuantities(config: PipeConfig, type: PipeType): PipeResult {
   else if (run > MAX_RUN_FT) errors.push(`A run is at most ${MAX_RUN_FT}'.`);
   if (!(Number.isInteger(qty) && qty >= 1 && qty <= MAX_TRACK_QTY)) errors.push(`Quantity is a whole number from 1 to ${MAX_TRACK_QTY}.`);
   if (!(typeof spacing === "number" && Number.isFinite(spacing) && spacing > 0)) errors.push("Enter the hanger spacing.");
+  else if (spacing < RIGGING_LIMITS.minHangerSpacingFt) errors.push(`Hanger spacing is at least ${RIGGING_LIMITS.minHangerSpacingFt}'.`);
   const sticks = [...type.sticks].sort((a, b) => a.lengthFt - b.lengthFt);
   if (!sticks.length) errors.push(`${type.name} has no stick length — set it in ${PIPE_TYPES_HOME}.`);
   if (errors.length) return { rows: [], errors };

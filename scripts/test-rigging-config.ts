@@ -6,6 +6,8 @@ import {
   type LinesetType, type PipeType,
 } from "../src/lib/rigging-config/types";
 import { pipeQuantities } from "../src/lib/rigging-config/pipe";
+import { linesetTypeInputError, pipeTypeInputError } from "../src/lib/rigging-config/types";
+import { sellAt } from "../src/lib/markup";
 import { defaultLinesPerSet, linesetQuantities } from "../src/lib/rigging-config/lineset";
 import { isConfiguredLine } from "../src/lib/rigging-config/line";
 import { rewriteLinesetTypes, rewritePipeTypes } from "../src/lib/catalog-rename/rewrite";
@@ -111,18 +113,25 @@ export async function riggingDbChecks(ok: Ok) {
   ok(!made.ok && made.error.includes("no longer in the catalog"), "#373 store: Active re-checks the live catalog");
   const off = await savePipeType({ name: "Sch 40", sticks: [{ lengthFt: 21, sku: "NOT-IN-CATALOG" }], hangerSpacingFt: 10 }, "t");
   ok(off.ok && off.type.id === "sch-40" && off.type.active === false, "#373 store: saved inactive with a slug id");
-  const dup = await savePipeType({ name: "sch 40" }, "t");
+  const dup = await savePipeType({ name: "sch 40", hangerSpacingFt: 10 }, "t");
   ok(!dup.ok, "#373 store: duplicate name refused");
   if (off.ok) {
     ok(await deletePipeType(off.type.id), "#373 store: delete");
     ok(!(await listPipeTypes()).some((t) => t.id === off.type.id), "#373 store: deleted type is gone");
-    const again = await savePipeType({ name: "Sch 40" }, "t");
+    const again = await savePipeType({ name: "Sch 40", hangerSpacingFt: 10 }, "t");
     ok(again.ok && again.type.id === "sch-40-2", "#373 store: a deleted id is never reused");
   }
   const ls = await saveLinesetType({ name: "1/4 cable", parts: { cable: { kind: "part", sku: "X" } }, allowanceFt: 0 }, "t");
   ok(ls.ok && (await listLinesetTypes())[0].allowanceFt === 0, "#373 store: lineset saved");
-  const act = await saveLinesetType({ name: "Full", parts: { cable: { kind: "assembly", id: "NOPE" }, handLine: { kind: "part", sku: "X" }, termination: { kind: "part", sku: "X" }, chainWrap: { kind: "part", sku: "X" } }, active: true }, "t");
-  ok(!act.ok, "#373 store: Active refuses a dead assembly and dead parts");
+  const act = await saveLinesetType({ name: "Full", parts: { cable: { kind: "assembly", id: "NOPE" }, handLine: { kind: "part", sku: "X" }, termination: { kind: "part", sku: "X" }, chainWrap: { kind: "part", sku: "X" } }, allowanceFt: 10, active: true }, "t");
+  ok(!act.ok && act.error.includes("Can't mark it active"), "#373 store: Active refuses a dead assembly and dead parts");
+  // Review fix 4: a save refuses what it used to repair silently (changed: the cases above now carry the spacing/allowance they relied on being defaulted).
+  const noSp = await savePipeType({ name: "No spacing", sticks: [{ lengthFt: 21, sku: "X" }] }, "t");
+  ok(!noSp.ok && noSp.error === "Enter a hanger spacing.", "#373 store: a blank spacing is refused, not defaulted");
+  const longStick = await savePipeType({ name: "Long", sticks: [{ lengthFt: 80, sku: "X" }], hangerSpacingFt: 10 }, "t");
+  ok(!longStick.ok && longStick.error === "A stick is at most 60'.", "#373 store: an 80' stick is refused, not clamped");
+  const noAllow = await saveLinesetType({ name: "No allowance" }, "t");
+  ok(!noAllow.ok && noAllow.error === "Enter a cable allowance of 0 or more.", "#373 store: a blank allowance is refused, not defaulted");
 }
 
 const part = (sku: string, cost: number, list = 0, unit = "ea") => ({ sku, desc: sku + " desc", cost, list, unit, mfr: "" });
@@ -226,12 +235,76 @@ function readerChecks(ok: Ok) {
   ok(!isCustomLineEditable({ ...track, custom: true }), "#373 regression: a track line is never a custom line");
 }
 
+
+function reviewFixChecks(ok: Ok) {
+  const LS = { typeId: "q", sets: 1, widthFt: 40, gridHeightFt: 40 };
+  // 1. an assembly member's cost override survives Copy; a plain member still refreshes.
+  const hwO = ({ id: "SA-2", name: "SA-2", kind: "hardware", components: [
+    { sku: "THM", label: "THM label", role: "other", defaultQty: 1, desc: "", unit: "ea", cost: 5, costOverride: 5, list: 9, found: true },
+    { sku: "SWG", label: "SWG label", role: "other", defaultQty: 1, desc: "", unit: "ea", cost: 3, list: 9, found: true },
+  ] }) as unknown as ResolvedFixtureAssembly;
+  const cat1 = riggingCatalog(PARTS, [hwO]);
+  const t1: LinesetType = { ...LINESET, parts: { ...LINESET.parts, chainWrap: { kind: "assembly", id: "SA-2" } } };
+  const built = linesetLine({ typeId: "quarter", sets: 6, widthFt: 40, gridHeightFt: 40 }, t1, cat1, 0.43);
+  if (!built.ok) { ok(false, "#373 review 1: line builds"); } else {
+    const sec = { id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [{ ...built.item, id: 1 } as SpecItem] } as unknown as SpecSection;
+    const catalog = new Map([["THM", { sku: "THM", cost: 3, list: 0 }], ["SWG", { sku: "SWG", cost: 4, list: 0 }]]);
+    const cp = copySectionForTarget(sec, { newSectionId: "n", catalog, fixtures: new Map(), sourceTierMargin: 0.43, targetTierMargin: 0.43 }).section.items[0];
+    const thm = cp.components!.find((c) => c.sku === "THM")!;
+    const swg = cp.components!.find((c) => c.sku === "SWG")!;
+    ok(thm.cost === 5 && thm.fixedCost === true, "#373 review 1: an overridden member keeps its own cost on Copy");
+    ok(swg.cost === 4 && !swg.fixedCost, "#373 review 1: a plain member still takes today's catalog cost");
+    const cap = new Map(catalog); cap.set("SWG", { sku: "SWG", cost: 3, list: 0 });
+    const same = copySectionForTarget(sec, { newSectionId: "n", catalog: cap, fixtures: new Map(), sourceTierMargin: 0.43, targetTierMargin: 0.43 }).section.items[0];
+    ok(same.price === built.item.price, "#373 review 1: same tier, same catalog = same price after Copy");
+    const moved = repriceForTier([sec], 0.43, 0.25).sections[0].items[0];
+    ok(moved.components!.find((c) => c.sku === "THM")?.fixedCost === true, "#373 review 1: a tier re-price keeps the flag");
+  }
+  // 2. no cost and no list warns.
+  const free = riggingCatalog({ ...PARTS, CLP: part("CLP", 0, 0) }, []);
+  ok(pipeBom({ typeId: "sch40", runFt: 40, qty: 1 }, PIPE, free, 0.5).warnings.some((w) => w.includes("has no cost or price in the catalog, so it adds nothing to this line")), "#373 review 2: a part with no cost or list warns");
+  // 3. rows add up to the line price on a per-foot part.
+  const cheap = riggingCatalog({ ...PARTS, GAC: part("GAC", 0.12, 0, "ft") }, [HW("SA-1", [["SWG", 2], ["THB", 1]])]);
+  const lb = linesetBom({ typeId: "quarter", sets: 6, widthFt: 40, gridHeightFt: 40 }, LINESET, cheap, 0.43);
+  const sum = lb.rows.reduce((a, r) => a + r.ext, 0);
+  ok(Math.abs(sum - lb.price) <= 0.01 * lb.rows.length, "#373 review 3: rows sum to within a cent per row of the line price");
+  ok(lb.rows.find((r) => r.sku === "GAC")?.ext === Math.round(sellAt(0.12 * 1680, 0.43) * 100) / 100, "#373 review 3: the cable row is the true extended sell");
+  // 4. the rules save refuses bad input; reading stays tolerant.
+  ok(pipeTypeInputError({ name: "A", sticks: [], hangerSpacingFt: "" }) === "Enter a hanger spacing.", "#373 review 4: blank spacing refused");
+  ok(pipeTypeInputError({ name: "A", sticks: [], hangerSpacingFt: 0 }) === "Enter a hanger spacing.", "#373 review 4: 0 spacing refused");
+  ok(pipeTypeInputError({ name: "A", sticks: [{ lengthFt: 80, sku: "X" }], hangerSpacingFt: 10 }) === "A stick is at most 60'.", "#373 review 4: an 80' stick refused");
+  ok(pipeTypeInputError({ name: "A", sticks: [{ lengthFt: 21, sku: "X" }, { lengthFt: "21", sku: "Y" }], hangerSpacingFt: 10 }) === "Each stick length can only appear once.", "#373 review 4: duplicate stick length refused");
+  ok(pipeTypeInputError({ name: "A", sticks: [{ lengthFt: 21, sku: "X" }], hangerSpacingFt: 0.5 }) === "Hanger spacing is at least 1'.", "#373 review 5: spacing under 1' refused on save");
+  ok(pipeTypeInputError({ name: "A", sticks: [{ lengthFt: 21, sku: "X" }], hangerSpacingFt: "10" }) === null, "#373 review 4: a valid pipe type passes");
+  ok(linesetTypeInputError({ name: "L", allowanceFt: "" }) === "Enter a cable allowance of 0 or more.", "#373 review 4: blank allowance refused");
+  ok(linesetTypeInputError({ name: "L", allowanceFt: -1 }) === "Enter a cable allowance of 0 or more.", "#373 review 4: negative allowance refused");
+  ok(linesetTypeInputError({ name: "L", allowanceFt: 0 }) === null && linesetTypeInputError({ name: "L", allowanceFt: "0" }) === null, "#373 review 4: a 0' allowance passes");
+  ok(sanitizePipeType({ name: "A", hangerSpacingFt: "" })!.hangerSpacingFt === 10, "#373 review 4: reading a stored blob stays tolerant");
+  // 5. spacing floor.
+  ok(pipeQuantities({ typeId: "sch40", runFt: 40, qty: 1, hangerSpacingFt: 0.001 }, PIPE).errors[0] === "Hanger spacing is at least 1'.", "#373 review 5: per-line spacing under 1' is an error");
+  ok(pipeQuantities({ typeId: "sch40", runFt: 40, qty: 1 }, { ...PIPE, hangerSpacingFt: 0.5 }).errors[0] === "Hanger spacing is at least 1'.", "#373 review 5: a saved type under 1' errors, doesn't crash");
+  ok(!pipeQuantities({ typeId: "sch40", runFt: 40, qty: 1, hangerSpacingFt: 1 }, PIPE).errors.length, "#373 review 5: exactly 1' is fine");
+  // 6. unit warnings cover assembly members.
+  const cableAsm: LinesetType = { ...LINESET, parts: { ...LINESET.parts, cable: { kind: "assembly", id: "SA-1" } } };
+  const w6 = linesetBom(LS, cableAsm, CAT, 0.5).warnings;
+  ok(w6.some((w) => w.includes("SWG") && w.includes("Aircraft cable")) && w6.some((w) => w.includes("THB") && w.includes("Aircraft cable")), "#373 review 6: a non-foot cable assembly warns per member");
+  // 7. an assembly with only add-ons.
+  const addons = riggingCatalog(PARTS, [HW("ADD", [["OPT", 0]])]);
+  const t7: LinesetType = { ...LINESET, parts: { ...LINESET.parts, chainWrap: { kind: "assembly", id: "ADD" } } };
+  const e7 = linesetBom(LS, t7, addons, 0.5).errors;
+  ok(e7.length === 1 && e7[0].includes("ADD has no included parts") && !e7[0].includes("no longer in the catalog"), "#373 review 7: an all-add-ons assembly says so");
+  // 8. the default never exceeds the limit.
+  ok(defaultLinesPerSet(250) === 20 && defaultLinesPerSet(210) === 20, "#373 review 8: default lines clamp to 20");
+  ok(!linesetQuantities({ typeId: "quarter", sets: 1, widthFt: 250, gridHeightFt: 40 }, LINESET).errors.length, "#373 review 8: a wide stage with a blank field is not an error");
+}
+
 export async function riggingConfigChecks(ok: Ok) {
   engineChecks(ok);
   typeChecks(ok);
   renameChecks(ok);
   pricingChecks(ok);
   readerChecks(ok);
+  reviewFixChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-rigging-config.ts")) {

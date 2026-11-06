@@ -124,7 +124,9 @@ export type SpecItem = {
   laborGroup?: string;
   /** Orderable component detail for a catalog-backed fixture assembly.
    *  #366: a part with a project discount carries catalogCost / projectDiscountPct like a line (applyProjectDiscounts). */
-  components?: Array<{ sku: string; label: string; role: AssemblyRole; qty: number; unit: string; cost: number; price: number; catalogCost?: number; projectDiscountPct?: number }>;
+  components?: Array<{ sku: string; label: string; role: AssemblyRole; qty: number; unit: string; cost: number; price: number; catalogCost?: number; projectDiscountPct?: number;
+    /** #373 — an assembly member whose cost is its own override: Copy keeps it. */
+    fixedCost?: true }>;
   /** Links this line to its VendorQuote record (#143) — one priced line per
    *  vendor quote; the materials list lives on the record, not as siblings. */
   vendorQuoteId?: string;

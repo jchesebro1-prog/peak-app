@@ -4,7 +4,7 @@ import { listFixtures } from "@/lib/stores/fixtures";
 import { allocateTrackSeriesId } from "@/lib/track-series";
 import {
   LINESET_TYPES_BLOB, PIPE_TYPES_BLOB, linesetTypeProblems, linesetTypeSkus, pipeTypeProblems, pipeTypeSkus,
-  sanitizeLinesetType, sanitizeLinesetTypeBlob, sanitizePipeType, sanitizePipeTypeBlob,
+  linesetTypeInputError, pipeTypeInputError, sanitizeLinesetType, sanitizeLinesetTypeBlob, sanitizePipeType, sanitizePipeTypeBlob,
   type LinesetType, type PipeType,
 } from "@/lib/rigging-config/types";
 
@@ -40,10 +40,13 @@ async function save<T extends Named & { active: boolean; updatedBy?: string; upd
   clean: (v: unknown) => T | null,
   list: (raw: unknown) => T[],
   problems: (t: T) => Promise<string[]>,
+  inputError: (raw: unknown) => string | null,
 ): Promise<Saved<T>> {
   const t = clean(input);
   if (!t) return { ok: false, error: "Nothing to save." };
   if (!t.name) return { ok: false, error: "Give the type a name." };
+  const bad = inputError(input);
+  if (bad) return { ok: false, error: bad };
   const rec = input as Record<string, unknown>;
   const requestedActive = rec.active === true;
   const raw = await rawBlob(blob);
@@ -71,11 +74,12 @@ async function remove(blob: string, id: string): Promise<boolean> {
 }
 
 export const savePipeType = (input: unknown, by: string, now = Date.now()) =>
-  save<PipeType>(PIPE_TYPES_BLOB, input, by, now, sanitizePipeType, sanitizePipeTypeBlob, async (t) => pipeTypeProblems(t, await liveSkus(pipeTypeSkus(t))));
+  save<PipeType>(PIPE_TYPES_BLOB, input, by, now, sanitizePipeType, sanitizePipeTypeBlob, async (t) => pipeTypeProblems(t, await liveSkus(pipeTypeSkus(t))), pipeTypeInputError);
 
 export const saveLinesetType = (input: unknown, by: string, now = Date.now()) =>
   save<LinesetType>(LINESET_TYPES_BLOB, input, by, now, sanitizeLinesetType, sanitizeLinesetTypeBlob, async (t) =>
     linesetTypeProblems(t, { skus: await liveSkus(linesetTypeSkus(t)), assemblyIds: await liveHardwareIds() }),
+    linesetTypeInputError,
   );
 
 export const deletePipeType = (id: string) => remove(PIPE_TYPES_BLOB, id);

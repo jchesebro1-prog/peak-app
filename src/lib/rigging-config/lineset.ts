@@ -18,7 +18,7 @@ const ceilSafe = (x: number) => Math.ceil(x - 1e-9);
 const inRange = (n: unknown, max: number) => typeof n === "number" && Number.isFinite(n) && n > 0 && n <= max;
 
 export function defaultLinesPerSet(widthFt: number): number {
-  return Math.max(1, Math.floor(widthFt / 10));
+  return Math.min(MAX_LINES_PER_SET, Math.max(1, Math.floor(widthFt / 10)));
 }
 
 export function linesetQuantities(config: LinesetConfig, type: LinesetType): LinesetResult {

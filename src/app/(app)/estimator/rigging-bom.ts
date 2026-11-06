@@ -7,6 +7,7 @@ import {
   type LinesetConfig, type LinesetRole, type LinesetSource, type LinesetType, type PipeConfig, type PipeType,
 } from "@/lib/rigging-config/types";
 import { round2 } from "./pricing";
+import { fmtFt } from "./track-bom";
 import { catalogAddPrice, seedMarkupOf } from "./tier-reprice";
 import type { CurtainDraft, LinesetDraft, PipeDraft, SpecItem, TrackPart } from "./types";
 
@@ -19,8 +20,8 @@ import type { CurtainDraft, LinesetDraft, PipeDraft, SpecItem, TrackPart } from 
  * assembly's own sell, which keeps the whole line on one seed.
  */
 
-type Member = { sku: string; label: string; qty: number; unit: string; cost: number; list: number };
-export type RiggingAssembly = { name: string; members: Member[]; broken: boolean };
+type Member = { sku: string; label: string; qty: number; unit: string; cost: number; list: number; /** the cost is the assembly member's own override */ fixed?: boolean };
+export type RiggingAssembly = { name: string; members: Member[]; broken: boolean; /** no included members (all add-ons) */ empty?: boolean };
 export type RiggingCatalog = { parts: Record<string, TrackPart>; assemblies: Record<string, RiggingAssembly> };
 
 export type RiggingBomRow = {
@@ -35,6 +36,8 @@ export type RiggingBomRow = {
   ext: number;
   missing: boolean;
   mount: boolean;
+  /** #373 — cost is an assembly member's own override; Copy keeps it. */
+  fixed?: boolean;
 };
 export type RiggingBom = { rows: RiggingBomRow[]; errors: string[]; warnings: string[]; cost: number; price: number };
 
@@ -48,8 +51,9 @@ export function riggingCatalog(parts: Record<string, TrackPart>, assemblies: rea
     const included = a.components.filter((c) => c.defaultQty > 0);
     out[a.id] = {
       name: a.name,
-      members: included.map((c) => ({ sku: c.sku, label: c.label || c.sku, qty: c.defaultQty, unit: c.unit, cost: c.cost, list: c.list })),
-      broken: !included.length || included.some((c) => !c.found),
+      members: included.map((c) => ({ sku: c.sku, label: c.label || c.sku, qty: c.defaultQty, unit: c.unit, cost: c.cost, list: c.list, ...(Number.isFinite(c.costOverride) ? { fixed: true } : {}) })),
+      empty: !included.length,
+      broken: included.some((c) => !c.found),
     };
   }
   return { parts, assemblies: out };
@@ -69,15 +73,16 @@ function priceRows(typeName: string, home: string, wanted: readonly Wanted[], ca
   let cost = 0;
   let costed = 0;
   let listed = 0;
-  const add = (key: string, label: string, sku: string, desc: string, qty: number, unit: string, unitCost: number, unitList: number, mount: boolean) => {
+  const add = (key: string, label: string, sku: string, desc: string, qty: number, unit: string, unitCost: number, unitList: number, mount: boolean, fixed = false) => {
     const price = catalogAddPrice(unitCost, unitList, tierMargin);
+    if (!(unitCost > 0) && !(unitList > 0)) warnings.push(`${label} part ${sku} has no cost or price in the catalog, so it adds nothing to this line.`);
     cost += unitCost * qty;
     if (unitCost > 0) costed += unitCost * qty;
     else listed += unitList * qty;
-    rows.push({ key, label, sku, desc, qty, unit, cost: unitCost, price, ext: round2(price * qty), missing: false, mount });
+    rows.push({ key, label, sku, desc, qty, unit, cost: unitCost, price, ext: unitCost > 0 ? round2(sellAt(unitCost * qty, k)) : round2(price * qty), missing: false, mount, ...(fixed ? { fixed: true } : {}) });
   };
-  const miss = (w: Wanted, desc: string) => {
-    errors.push(`${typeName} has no part for ${w.label} — map it in ${home}.`);
+  const miss = (w: Wanted, desc: string, error?: string) => {
+    errors.push(error ?? `${typeName} has no part for ${w.label} — map it in ${home}.`);
     rows.push({ key: w.key, label: w.label, sku: "", desc, qty: w.qty, unit: "", cost: 0, price: 0, ext: 0, missing: true, mount: !!w.mount });
   };
   for (const w of wanted) {
@@ -94,11 +99,16 @@ function priceRows(typeName: string, home: string, wanted: readonly Wanted[], ca
       if (w.unit === "notFoot" && isFootUnit(p.unit)) warnings.push(`${w.label} part ${p.sku} sells by the foot, but this counts whole sticks. Check the price.`);
     } else {
       const a = own(catalog.assemblies, w.source.id);
-      if (!a || a.broken) {
-        miss(w, a ? `${a.name} — a part is no longer in the catalog` : "Assembly no longer exists");
+      if (!a || a.broken || a.empty) {
+        if (a?.empty && !a.broken) miss(w, `${a.name} has no included parts`, `${a.name} has no included parts, so ${w.label} can't be priced.`);
+        else miss(w, a ? `${a.name} — a part is no longer in the catalog` : "Assembly no longer exists");
         continue;
       }
-      a.members.forEach((m, i) => add(`${w.key}:${i}`, `${w.label}: ${m.label}`, m.sku, m.label, w.qty * m.qty, m.unit || "ea", Number(m.cost) || 0, Number(m.list) || 0, !!w.mount));
+      a.members.forEach((m, i) => {
+        add(`${w.key}:${i}`, `${w.label}: ${m.label}`, m.sku, m.label, w.qty * m.qty, m.unit || "ea", Number(m.cost) || 0, Number(m.list) || 0, !!w.mount, !!m.fixed);
+        if (w.unit === "foot" && !isFootUnit(m.unit)) warnings.push(`${w.label} part ${m.sku} sells by "${m.unit || "ea"}", but this counts feet. Check the price.`);
+        if (w.unit === "notFoot" && isFootUnit(m.unit)) warnings.push(`${w.label} part ${m.sku} sells by the foot, but this counts whole sticks. Check the price.`);
+      });
     }
   }
   const price = errors.length ? 0 : round2(sellAt(costed, k) + listed);
@@ -136,11 +146,6 @@ export function linesetBom(config: LinesetConfig, type: LinesetType | null | und
   return priceRows(type.name, LINESET_TYPES_HOME, wanted, catalog, tierMargin);
 }
 
-/** "40'", "12.5'". */
-export function fmtFt(n: number): string {
-  return (Math.round(n * 100) / 100).toString() + "'";
-}
-
 export function pipeLineDesc(c: PipeConfig, type: Pick<PipeType, "name">): string {
   const label = (c.label || "").trim() || "Pipe";
   return `${label} — ${type.name}, ${fmtFt(c.runFt)} run${c.qty > 1 ? ` (${c.qty} pipes)` : ""}`;
@@ -162,6 +167,7 @@ function buildLine(sku: string, desc: string, rigging: NonNullable<SpecItem["rig
     unit: r.unit,
     cost: r.cost,
     price: r.price,
+    ...(r.fixed ? { fixedCost: true as const } : {}),
   }));
   const item: Omit<SpecItem, "id"> = { sku, desc, qty: 1, unit: "lot", cost: bom.cost, price: bom.price, components, rigging };
   if (manufacturer) item.manufacturer = manufacturer;

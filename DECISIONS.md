@@ -13958,7 +13958,7 @@ The public card (`/c/<slug>`) and its Save contact vCard now show a company webs
 
 ## D1332. Pipe and lineset lines share one `rigging` field, and Track is left alone (#373, 2026-11-06)
 
-A configured pipe or lineset line carries its inputs in `SpecItem.rigging` and its parts in `components`, sold as one lot line with a `PIP-` or `LNS-` SKU. `isConfiguredLine` joins Track at the readers that mean "a tier-seeded line with its parts in components": tier re-pricing, copy pricing, assembly members, project discounts, the BOM model and the discard prompt. Track's own code and data are untouched, so saved quotes and cut sheets can't move.
+A configured pipe or lineset line carries its inputs in `SpecItem.rigging` and its parts in `components`, sold as one lot line with a `PIP-` or `LNS-` SKU. `isConfiguredLine` joins Track at the three readers that mean "a tier-seeded line with its parts in components": tier re-pricing and the two copy-pricing paths (`copy-system.ts`, `copy-pricing.ts`). The other readers (assembly members, project discounts, the BOM model, the custom-line edit guard and the line's edit click) check `rigging` directly. Track's own code and data are untouched, so saved quotes and cut sheets can't move.
 
 ## D1333. Lineset cable is actual routing; Quick Design keeps its formula (#373, 2026-11-05)
 
@@ -13966,11 +13966,11 @@ Jeff chose actual routing: lift lines × (grid height + width ÷ 2 + allowance).
 
 ## D1334. A Hardware assembly role sells at the tier on its resolved cost (#373, 2026-11-05)
 
-A lineset role can be a catalog part or a Hardware assembly. An assembly's included members use their resolved cost and sell at the tier, ignoring the assembly's own sell price, and its add-ons are left out. That keeps the whole line on one seed markup, so a tier change re-prices it like any other configured line.
+A lineset role can be a catalog part or a Hardware assembly. An assembly's included members use their resolved cost and sell at the tier, ignoring the assembly's own sell price, and its add-ons are left out. That keeps the whole line on one seed markup, so a tier change re-prices it like any other configured line. A member priced on its own cost override (set in Design → Assemblies) is flagged `fixedCost` on the line's part; Copy, Load and Move keep that cost and move only its sell to the landing tier, while a member at plain catalog cost still takes today's. An assembly with no included members (all add-ons) blocks with its own message.
 
 ## D1335. Unit mismatches warn and never block (#373, 2026-11-05)
 
-A cable or hand line part that doesn't sell by the foot, or a pipe stick that does, shows a warning on the rules screen and in the configurator. It never blocks saving, because catalog unit text varies too much to trust as a hard rule.
+A cable or hand line part that doesn't sell by the foot, or a pipe stick that does, shows a warning on the rules screen and in the configurator. It never blocks saving, because catalog unit text varies too much to trust as a hard rule. The same check covers an assembly's members, named by SKU. A part with no cost and no list price warns the same way ("adds nothing to this line") instead of quietly selling at $0.
 
 ## D1336. Add pipe is for new curtains only and keeps no link (#373, 2026-11-05)
 
