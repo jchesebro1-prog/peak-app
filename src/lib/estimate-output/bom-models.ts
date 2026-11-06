@@ -39,6 +39,7 @@ function isAssemblyish(it: SpecItem): boolean {
   return (
     !!oneLine(it.rackId) ||
     it.track != null ||
+    it.rigging != null ||
     sku.toUpperCase().startsWith("TRK-") ||
     sku.startsWith("asm:") ||
     it.fixture === true ||

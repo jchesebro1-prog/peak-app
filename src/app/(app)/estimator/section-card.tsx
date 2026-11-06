@@ -17,7 +17,8 @@ import {
   systemSellTotal,
   systemSellWarning,
 } from "./pricing";
-import { isBonusItem } from "@/lib/estimate-bonus/flags";
+import { isBonusItem, type BonusKind } from "@/lib/estimate-bonus/flags";
+import { removedBonusKinds } from "@/lib/estimate-bonus/rules";
 import { isMovableLine } from "@/lib/estimate-line-move/move";
 import { CUSTOM_PART_MARKUP } from "./tier-reprice";
 import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
@@ -54,7 +55,7 @@ const NEW_GROUP = "__new";
  *  #143 replaced "import" with "vendor": the CSV importer is no longer
  *  separately openable — it lives inside the catalog panel, where the parts it
  *  batch-adds come from — and "+ Vendor quote" became its own method. */
-export type InputKind = "catalog" | "custom" | "curtain" | "fixture" | "labor" | "vendor" | "track";
+export type InputKind = "catalog" | "custom" | "curtain" | "fixture" | "labor" | "vendor" | "track" | "pipe" | "lineset";
 
 const LBL: CSSProperties = {
   display: "block",
@@ -172,6 +173,10 @@ export type SectionCardProps = {
   /** Estimator bonuses: the rules apply but a line's qty/cost/price isn't a
    *  number, so this system's bonus lines can't be figured. */
   bonusNotFigured?: boolean;
+  /** #375: null = no bonus controls (not bonus-eligible); "edit" = ✕ / Add back live; "locked" = shown disabled
+   *  (sent / won / lost — Revise first). */
+  bonusControls?: "edit" | "locked" | null;
+  onSetBonusRemoved?: (kind: BonusKind, removed: boolean) => void;
   onInc: (id: number) => void;
   onDec: (id: number) => void;
   onSetQty: (id: number, v: string) => void;
@@ -195,6 +200,9 @@ export type SectionCardProps = {
   onToggleLabor: () => void;
   /** #274: "+ Configure track". */
   onToggleTrack: () => void;
+  /** #373: "+ Configure pipe" / "+ Configure lineset". */
+  onTogglePipe: () => void;
+  onToggleLineset: () => void;
   onToggleCustom: () => void;
   onToggleVendor: () => void;
   onAddPart: (cat: SuggestPart, qty: number) => void;
@@ -214,6 +222,8 @@ export type SectionCardProps = {
   onEditLabor?: (laborGroup: string) => void;
   /** #274: reopen the track configurator on a track line (by line id). */
   onEditTrack?: (lineId: number) => void;
+  /** #373: reopen a pipe or lineset line's configurator. */
+  onEditRigging?: (lineId: number) => void;
   /** #292: reopen the curtain configurator on a curtain line (by line id). */
   onEditCurtain?: (lineId: number) => void;
   /** #312: reopen the Custom part form on a custom line, pre-filled (by line id). */
@@ -1073,7 +1083,23 @@ export default function SectionCard(p: SectionCardProps) {
                     {isInternal && <span style={mono}>{fmt(it.cost)}</span>}
                     <span style={mono}>{fmt(it.price)}</span>
                     <span style={{ ...mono, fontWeight: 600 }}>{fmt(bonusExt)}</span>
-                    <span></span>
+                    {p.bonusControls && p.onSetBonusRemoved && (it.bonus === "package" || it.bonus === "estimator") ? (
+                      <span className="est-actions" style={{ display: "inline-flex", justifyContent: "flex-end" }}>
+                        <button
+                          type="button"
+                          className="est-action-btn"
+                          disabled={p.bonusControls === "locked"}
+                          onClick={() => p.onSetBonusRemoved?.(it.bonus as BonusKind, true)}
+                          aria-label={it.bonus === "package" ? "Remove package bonus" : "Remove estimator bonus"}
+                          title={p.bonusControls === "locked" ? REVISE_FIRST : `Remove this bonus — the customer's price drops by ${fmt(bonusExt)}`}
+                          style={p.bonusControls === "locked" ? { ...ACTION_BTN, cursor: "not-allowed", opacity: 0.45 } : ACTION_BTN}
+                        >
+                          {"\u2715"}
+                        </button>
+                      </span>
+                    ) : (
+                      <span></span>
+                    )}
                   </div>
                 );
               }
@@ -1123,6 +1149,8 @@ export default function SectionCard(p: SectionCardProps) {
               /* #274: a track line reopens the track configurator the same
                  way — its description or ✎, first click only. */
               const trackEditable = isInternal && !p.uiRepriceLock && !!p.onEditTrack && !!it.track;
+              /* #373: a pipe or lineset line reopens its configurator the same way. */
+              const riggingEditable = isInternal && !p.uiRepriceLock && !!p.onEditRigging && !!it.rigging;
               /* #292: a curtain line reopens the curtain configurator through
                  the same description click (openLine) and its own ✎ — a line
                  is never both a track and a curtain. */
@@ -1130,17 +1158,18 @@ export default function SectionCard(p: SectionCardProps) {
               /* #368: on a sent estimate those three configurators stay shut until it is revised — a disabled ✎
                  says why. */
               const configLocked =
-                isInternal && !!p.uiRepriceLock && ((!!p.onEditLabor && isLaborLineEditable(sec, it)) || (!!p.onEditTrack && !!it.track) || (!!p.onEditCurtain && !!it.curtain));
+                isInternal && !!p.uiRepriceLock && ((!!p.onEditLabor && isLaborLineEditable(sec, it)) || (!!p.onEditTrack && !!it.track) || (!!p.onEditRigging && !!it.rigging) || (!!p.onEditCurtain && !!it.curtain));
               /* #312: a hand-entered custom part reopens the Custom part form,
                  pre-filled, through the same description click and its own ✎. */
               const customEditable = isInternal && !!p.onEditCustom && isCustomLineEditable(it);
               const openTrack = (e: { detail: number }) => {
                 if (e.detail > 1) return;
                 if (trackEditable) p.onEditTrack?.(it.id);
+                else if (riggingEditable) p.onEditRigging?.(it.id);
                 else if (curtainEditable) p.onEditCurtain?.(it.id);
                 else if (customEditable) p.onEditCustom?.(it.id);
               };
-              const lineEditable = laborEditable || trackEditable || curtainEditable || customEditable;
+              const lineEditable = laborEditable || trackEditable || riggingEditable || curtainEditable || customEditable;
               const openLine = laborEditable ? openLabor : openTrack;
               /* #366: this line's Project discount editor, opened from its chip / "% project" — an inline row under the
                  line (the card clips overflow, so never a floating popover). */
@@ -1196,7 +1225,7 @@ export default function SectionCard(p: SectionCardProps) {
                     {p.onToggleLineSelected && !isMovableLine(it) && <span aria-hidden="true" data-line-check-pad="" style={{ width: LINE_CHECK_SIZE, flexShrink: 0 }} />}
                     <div style={{ minWidth: 0, flex: 1 }}>
                     <div
-                      title={laborEditable ? lineDesc + " — click to edit this labor" : trackEditable ? lineDesc + " — click to edit this track" : curtainEditable ? lineDesc + " — click to edit this curtain" : customEditable ? lineDesc + " — click to edit this custom part" : lineDesc}
+                      title={laborEditable ? lineDesc + " — click to edit this labor" : trackEditable ? lineDesc + " — click to edit this track" : riggingEditable ? lineDesc + " — click to edit this " + (it.rigging?.kind === "lineset" ? "lineset" : "pipe") : curtainEditable ? lineDesc + " — click to edit this curtain" : customEditable ? lineDesc + " — click to edit this custom part" : lineDesc}
                       onClick={lineEditable ? openLine : undefined}
                       style={{
                         lineHeight: 1.3,
@@ -1257,6 +1286,11 @@ export default function SectionCard(p: SectionCardProps) {
                           }}
                         >
                           TRACK
+                        </span>
+                      )}
+                      {!!it.rigging && (
+                        <span style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", background: "var(--accent)", padding: "1px 6px", borderRadius: 4, letterSpacing: ".04em", marginLeft: 6 }}>
+                          {it.rigging.kind === "lineset" ? "LINESET" : "PIPE"}
                         </span>
                       )}
                       {!!it.labor && (
@@ -1598,6 +1632,9 @@ export default function SectionCard(p: SectionCardProps) {
                     {trackEditable && (
                       <button type="button" className="est-action-btn" onClick={openTrack} title="Edit track — reopens the track configurator" aria-label={`Edit track for ${it.desc}`} style={ACTION_BTN}>✎</button>
                     )}
+                    {riggingEditable && (
+                      <button type="button" className="est-action-btn" onClick={openTrack} title="Edit — reopens the configurator" aria-label={`Edit ${it.desc}`} style={ACTION_BTN}>✎</button>
+                    )}
                     {curtainEditable && (
                       <button type="button" className="est-action-btn" onClick={openLine} title="Edit curtain — reopens the curtain configurator" aria-label={`Edit curtain ${it.desc}`} style={ACTION_BTN}>✎</button>
                     )}
@@ -1649,6 +1686,35 @@ export default function SectionCard(p: SectionCardProps) {
                 </Fragment>
               );
             })}
+
+            {p.bonusControls && p.onSetBonusRemoved && removedBonusKinds(sec).map((kind) => (
+              <div
+                key={"bonus-removed-" + kind}
+                className="est-row est-row-bonus"
+                data-bonus-removed={kind}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 20px", fontSize: 13, borderTop: "1px solid #f5f6f8", color: "#8c919c", background: "#f7f8fa" }}
+              >
+                <span style={{ flex: 1, minWidth: 0 }}>{kind === "package" ? "Package bonus removed" : "Estimator bonus removed"}</span>
+                <button
+                  type="button"
+                  className="est-action-btn"
+                  disabled={p.bonusControls === "locked"}
+                  onClick={() => p.onSetBonusRemoved?.(kind, false)}
+                  title={p.bonusControls === "locked" ? REVISE_FIRST : undefined}
+                  style={{
+                    ...ACTION_BTN,
+                    width: "auto",
+                    padding: "0 6px",
+                    whiteSpace: "nowrap",
+                    fontSize: 12,
+                    color: "#5b6170",
+                    ...(p.bonusControls === "locked" ? { cursor: "not-allowed", opacity: 0.45 } : null),
+                  }}
+                >
+                  Add back
+                </button>
+              </div>
+            ))}
 
             {p.bonusNotFigured && (
               <div
@@ -1702,6 +1768,8 @@ export default function SectionCard(p: SectionCardProps) {
               {addBtn("+ Add part from catalog", handleToggleCatalog, openMethod === "catalog" || openMethod === null)}
               {addBtn("+ Configure curtain", p.onToggleCurtain, openMethod === "curtain")}
               {addBtn("+ Configure track", p.onToggleTrack, openMethod === "track")}
+              {addBtn("+ Configure pipe", p.onTogglePipe, openMethod === "pipe")}
+              {addBtn("+ Configure lineset", p.onToggleLineset, openMethod === "lineset")}
               {addBtn("+ Add assembly", p.onToggleFixture, openMethod === "fixture")}
               {!p.boxSale && addBtn("+ Configure labor", p.onToggleLabor, openMethod === "labor")}
               {addBtn("+ Build custom part", handleToggleCustom, openMethod === "custom")}

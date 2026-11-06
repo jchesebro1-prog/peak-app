@@ -18,6 +18,7 @@ import { sameWholeMarkup, sellAt } from "@/lib/markup";
 import type { SpecItem, SpecSection } from "./types";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { applyProjectDiscounts } from "@/lib/project-discounts/rules";
+import { isConfiguredLine } from "@/lib/rigging-config/line";
 
 /**
  * #266 — Copy a system (SpecSection) to a new estimate, an existing one, or
@@ -124,7 +125,7 @@ export function copySectionForTarget(
 
     /* #274: a track line is a tier-seeded line whose "catalog cost" is its
        parts' — refreshed below with the plain lines, not here. */
-    const track = !!it.track && comps.length > 0;
+    const track = isConfiguredLine(it) && comps.length > 0;
 
     /* ---- fixture line: refresh components, never tier-priced ---- */
     if (comps.length && !track) {
@@ -177,7 +178,8 @@ export function copySectionForTarget(
       let sum = 0;
       parts = comps.map((c) => {
         const cat = opts.catalog.get(c.sku);
-        const partCost = cat ? cat.cost : c.cost;
+        // #373: an assembly member priced on its own cost override keeps it.
+        const partCost = c.fixedCost ? c.cost : cat ? cat.cost : c.cost;
         if (c.qty > 0) sum += partCost * c.qty;
         return { ...c, cost: partCost, price: partCost > 0 ? catalogAddPrice(partCost, c.price, tgt) : c.price };
       });

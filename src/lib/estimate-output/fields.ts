@@ -95,8 +95,11 @@ export function withDiscipline<T extends SpecSection>(sec: T, v: unknown): T {
  *  otherwise each is cleaned and a blank one is removed. */
 export function withSanitizedOutputFields<T extends SpecSection>(sec: T): T {
   if (!sec || typeof sec !== "object") return sec;
-  if (!("discipline" in sec) && !("clientGoals" in sec) && !("coverText" in sec)) return sec;
+  if (!("discipline" in sec) && !("clientGoals" in sec) && !("coverText" in sec) && !("noPackageBonus" in sec) && !("noEstimatorBonus" in sec)) return sec;
   const out = { ...sec };
+  // #375: a bonus-removal flag survives only as exactly `true` (Move / Copy keep it, a junk posted value goes).
+  if (out.noPackageBonus !== true) delete out.noPackageBonus;
+  if (out.noEstimatorBonus !== true) delete out.noEstimatorBonus;
   const d = sanitizeDiscipline(sec.discipline);
   if (d) out.discipline = d;
   else delete out.discipline;

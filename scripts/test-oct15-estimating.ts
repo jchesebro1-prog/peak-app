@@ -32,7 +32,10 @@ import { createSpecDocument, patchSpecDocument, stampSpecDocumentDownload } from
 import { canChangeQuotePeople, quoteSentOnce, PEOPLE_LOCKED_AFTER_SEND } from "../src/lib/quote-people-lock";
 import { setQuotePeopleAs } from "../src/lib/quote-people";
 import { bonusRatesFrom, lineBonusPct, DEFAULT_BONUS_RATES } from "../src/lib/estimate-bonus/flags";
-import { bonusRatesFor, withBonusLines, idCounterFrom } from "../src/lib/estimate-bonus/rules";
+import { bonusRatesFor, withBonusLines, idCounterFrom, sectionWithBonusLines, withBonusRemoved, bonusRemoved, sanitizeBonusRemovals, settleBonusRemovals, removedBonusKinds, bonusNotFigured } from "../src/lib/estimate-bonus/rules";
+import { buildBonusRecord } from "../src/lib/estimate-bonus/record";
+import { systemSellTotal } from "../src/app/(app)/estimator/pricing";
+import { withoutGroupMeta } from "../src/lib/estimate-groups/groups";
 import { canonicalBonusSections } from "../src/lib/estimate-bonus/canonical";
 import { GROUPS, setValue, loadBonusRates } from "../src/lib/stores/pricing";
 import { flagOldVendorLine, OLD_VENDOR_PRICE_NOTE } from "../src/lib/narrative/system-library";
@@ -66,6 +69,7 @@ export async function oct15PureChecks(ok: Ok) {
   oct15RevChecks(ok);
   await oct15LetterheadChecks(ok);
   oct15BonusRateChecks(ok);
+  removeBonusChecks(ok);
   /* ---- #15 — online Accept: signer name + title required, optional PO #, the Lead estimator is told ---- */
   {
     ok(cleanPoNumber("  PO-4481 ") === "PO-4481" && cleanPoNumber("") === "" && cleanPoNumber(undefined) === "" && cleanPoNumber("x".repeat(61)) === null && cleanPoNumber("4111 1111 1111 1111") === null && cleanPoNumber("4111-1111-1111-1111") === null,
@@ -347,6 +351,92 @@ function oct15BonusRateChecks(ok: Ok) {
     "oct15 #19: every server write of an Estimator quote's sections passes the current rates");
 }
 
+/* ---- #375 — remove a bonus from a system ---- */
+function removeBonusChecks(ok: Ok) {
+  type Sec = import("../src/app/(app)/estimator/types").SpecSection;
+  const mk = (id = "s1", extra: Partial<Sec> = {}): Sec => ({ id, name: id, kind: "materials", mfr: "", freightPct: 0, items: [
+    { id: 1, sku: "P", desc: "P", qty: 1, unit: "ea", cost: 100, price: 150 },
+    { id: 2, sku: "L", desc: "L", qty: 1, unit: "hr", cost: 100, price: 150, labor: true },
+  ], ...extra } as Sec);
+  const lines = (sec: Sec) => sec.items.filter((i) => i.bonus).map((i) => i.bonus);
+  const figure = (sec: Sec) => sectionWithBonusLines(sec, idCounterFrom([sec]));
+  const base = mk();
+  const full = figure(base);
+  ok(lines(full).join() === "package,estimator", "#375: no flag — both bonus lines, as today");
+  ok(sectionWithBonusLines(full, idCounterFrom([full])) === full, "#375: no flag — a settled system comes back as the same reference");
+  const noPkg = figure(mk("s1", { noPackageBonus: true }));
+  const noEst = figure(mk("s1", { noEstimatorBonus: true }));
+  const none = figure(mk("s1", { noPackageBonus: true, noEstimatorBonus: true }));
+  ok(lines(noPkg).join() === "estimator" && lines(noEst).join() === "package" && lines(none).length === 0, "#375: each flag removes only its own line; both remove both");
+  // 2 — the 2% is figured with no 5% in its base
+  const estOf = (sec: Sec) => sec.items.find((i) => i.bonus === "estimator")!;
+  ok(estOf(noPkg).price === 6 && estOf(full).price === 6.3, "#375: with the 5% removed the 2% is 2% of the price without it");
+  ok(systemSellTotal(noPkg) === 306 && systemSellTotal(none) === 300 && systemSellTotal(full) === 321.3, "#375: the system price drops by the removed bonus (and the 2% re-figures)");
+  // 3 — typed price
+  const typed = figure(mk("s1", { sellOverride: 500, noEstimatorBonus: true }));
+  ok(systemSellTotal(typed) === 500 && !typed.items.some((i) => i.bonus === "estimator") && typed.items.some((i) => i.bonus === "package"), "#375: a typed price stays when the 2% is removed; no 2% line");
+  // 4 — add back
+  const back = figure(withBonusRemoved(noPkg, "package", false));
+  // Line ids are minted in order (package first), so re-adding the 5% after the 2% keeps the 2% id; everything but ids is identical.
+  const noIds = (sec: Sec) => JSON.stringify(sec.items.map((it) => ({ ...it, id: 0 })).sort((a, b) => String(a.sku).localeCompare(String(b.sku))));
+  ok(noIds(back) === noIds(full) && !("noPackageBonus" in back) && back.items.find((i) => i.bonus === "estimator")!.id === noPkg.items.find((i) => i.bonus === "estimator")!.id, "#375: add back restores the lines (same content, the surviving line keeps its id) and deletes the key");
+  const settled = withBonusLines([noPkg, none], idCounterFrom([noPkg, none]));
+  ok(settled[0] === noPkg && settled[1] === none, "#375: a removed-bonus system settles in one pass");
+  ok(withBonusRemoved(base, "package", false) === base && withBonusRemoved(noPkg, "package", true) === noPkg && bonusRemoved(noPkg, "package") && !bonusRemoved(noPkg, "estimator"), "#375: withBonusRemoved returns the same reference when nothing changes");
+  // 5 — settle
+  const dirty = { ...base, noPackageBonus: "yes", noEstimatorBonus: 1 } as unknown as Sec;
+  const dirty2 = { ...base, noPackageBonus: false } as unknown as Sec;
+  const cleaned = settleBonusRemovals([dirty, dirty2, mk("s3", { noPackageBonus: true })], null, "draft");
+  ok(!("noPackageBonus" in cleaned[0]) && !("noEstimatorBonus" in cleaned[0]) && !("noPackageBonus" in cleaned[1]) && cleaned[2].noPackageBonus === true, "#375: a draft keeps exactly `true` and drops \"yes\" / 1 / false");
+  const clean = [base, mk("s3")];
+  ok(settleBonusRemovals(clean, null, "draft") === clean && sanitizeBonusRemovals(base) === base, "#375: clean sections keep their reference");
+  ok(settleBonusRemovals([mk("s1", { noEstimatorBonus: true })], undefined, undefined)[0].noEstimatorBonus === true, "#375: an unsaved quote (no prior) accepts the flags");
+  const prior = [mk("s1", { noPackageBonus: true }), mk("s2")];
+  for (const st of ["sent", "won", "lost"]) {
+    const posted = [mk("s1", { noEstimatorBonus: true }), mk("s2", { noPackageBonus: true }), mk("s9", { noPackageBonus: true })];
+    const r = settleBonusRemovals(posted, prior, st);
+    ok(r[0].noPackageBonus === true && !("noEstimatorBonus" in r[0]) && !("noPackageBonus" in r[1]) && !("noPackageBonus" in r[2]), `#375: a ${st} quote ignores posted changes both ways and restores the stored flags; a new system has none`);
+    ok(posted[0].noEstimatorBonus === true && !("noPackageBonus" in posted[0]), "#375: settle never mutates its input");
+  }
+  const untouched = [mk("s1", { noPackageBonus: true }), mk("s2")];
+  ok(settleBonusRemovals(untouched, prior, "sent") === untouched, "#375: a locked save that matches the stored flags keeps its reference");
+  // A stale tab posts a sent estimate with every bonus line already gone: the stored line and price come back.
+  const storedSent = figure(mk("s1", { noEstimatorBonus: true }));
+  const stalePost = mk("s1", { noPackageBonus: true, noEstimatorBonus: true });
+  const staleAfter = canonicalBonusSections({ source: "estimator", status: "sent" }, settleBonusRemovals([stalePost], [storedSent], "sent"))[0];
+  ok(lines(staleAfter).join() === "package" && staleAfter.noPackageBonus === undefined && staleAfter.noEstimatorBonus === true && systemSellTotal(staleAfter) === systemSellTotal(storedSent), "#375: a stale tab can't remove the last bonus line from a sent estimate");
+  const legacyPost = mk("s1");
+  ok(lines(settleBonusRemovals([legacyPost], [mk("s1")], "sent")[0]).length === 0, "#375: a sent estimate that never had bonus lines doesn't grow any");
+  // 6 — canonical on a sent quote
+  const sentSec = figure(mk("s1", { noEstimatorBonus: true }));
+  ok(canonicalBonusSections({ source: "estimator", status: "sent" }, [sentSec]).every((s) => s === sentSec) && !sentSec.items.some((i) => i.bonus === "estimator"), "#375: canonical on a sent quote honors a stored flag and doesn't re-add the line");
+  // 7 — removed kinds
+  const noLabor = mk("s1", { noPackageBonus: true, noEstimatorBonus: true, items: [{ id: 1, sku: "P", desc: "P", qty: 1, unit: "ea", cost: 100, price: 150 }] as never });
+  ok(removedBonusKinds(noLabor).join() === "estimator", "#375: no package kind without a labor line");
+  ok(removedBonusKinds(mk("s1", { noPackageBonus: true, noEstimatorBonus: true, items: [] })).length === 0, "#375: an empty system shows no removed row");
+  ok(removedBonusKinds(mk("s1", { noPackageBonus: true, noEstimatorBonus: true })).join() === "package,estimator" && removedBonusKinds(base).length === 0, "#375: package before estimator; unflagged shows none");
+  // 8 — library / group meta
+  ok(withoutGroupMeta(noPkg).noPackageBonus === true, "#375: withoutGroupMeta keeps the flags (Move / Copy keep the removal)");
+  const lib = rd("src/lib/narrative/system-library.ts");
+  ok(/delete base\.noPackageBonus;\s*delete base\.noEstimatorBonus;/.test(lib), "#375: Load system drops both flags");
+  // 9 — bonus record
+  const recIn = { owner: "a", alternatesTaken: [] as string[], users: [], wonAt: 1 };
+  const twoFull = [figure(mk("a")), figure(mk("b"))];
+  const twoOne = [figure(mk("a", { noEstimatorBonus: true })), figure(mk("b"))];
+  const rFull = buildBonusRecord({ ...recIn, sections: twoFull });
+  const rOne = buildBonusRecord({ ...recIn, sections: twoOne });
+  ok(rOne.estimatorBonus === 6.3 && rFull.estimatorBonus === 12.6, "#375: the record counts only the system that still has a 2% line");
+  const rPkg = buildBonusRecord({ ...recIn, sections: [figure(mk("a", { noPackageBonus: true })), figure(mk("b"))] });
+  ok(rPkg.packageBonusCost === 10 && rFull.packageBonusCost === 20, "#375: packageBonusCost falls with the 5% removed");
+  // 10 — not figured
+  const junk = mk("s1", { items: [{ id: 1, sku: "P", desc: "P", qty: 1, unit: "ea", cost: NaN, price: 150 }] as never });
+  ok(!bonusNotFigured({ ...junk, noPackageBonus: true, noEstimatorBonus: true }) && bonusNotFigured({ ...junk, noPackageBonus: true }) && bonusNotFigured(junk), "#375: not-figured is false only when both are removed");
+  // 11 — source
+  ok(rd("src/app/(app)/estimator/actions.ts").includes("settleBonusRemovals(") && rd("src/lib/estimate-output/fields.ts").includes("noPackageBonus"), "#375: the save settles removal flags; Move / Copy sanitize them");
+  const card = rd("src/app/(app)/estimator/section-card.tsx");
+  ok(/Remove package bonus/.test(card) && /bonusControls === "locked" \? REVISE_FIRST/.test(card), "#375: the bonus controls use REVISE_FIRST when locked");
+}
+
 /* ---- #13 — every send gets the next Rev; numbers never repeat ---- */
 export function oct15RevChecks(ok: Ok) {
   // #352 review I1 — the copy step's plan.
@@ -612,7 +702,7 @@ export function discardConfirmChecks(ok: Ok) {
   const rebased = rebaseDraft<typeof fresh>(base, fill);
   ok(!draftChanged(rebased, fill(fresh)) && draftChanged(rebased, { ...fill(fresh), total: "9" }), "discard: the hand-off fill re-bases the baseline — the filled form is clean, a later edit dirty");
   ok(rebaseDraft(null, fill) === null && rebaseDraft(undefined, fill) === undefined && rebaseDraft("{bad", fill) === "{bad", "discard: a pending or unreadable baseline is left as-is by rebaseDraft");
-  ok(MODAL_INPUT_KINDS.join() === "curtain,track,fixture,labor,vendor" && isModalInputKind("vendor") && !isModalInputKind("custom") && !isModalInputKind("catalog"), "discard: the five pop-ups (custom / catalog are not)");
+  ok(MODAL_INPUT_KINDS.join() === "curtain,track,pipe,lineset,fixture,labor,vendor" && isModalInputKind("vendor") && !isModalInputKind("custom") && !isModalInputKind("catalog"), "discard: the configurator pop-ups (custom / catalog are not)");
   ok(discardConfirmText("vendor", { read: true }) === "Discard this vendor quote? The PDF read and your changes will be lost." && DISCARD_COPY.vendorRead === discardConfirmText("vendor", { read: true }), "discard: vendor with a read — copy");
   ok(discardConfirmText("vendor") === "Discard this vendor quote? Your changes will be lost." && discardConfirmText("curtain") === "Discard this curtain? Your changes will be lost." &&
      discardConfirmText("track") === "Discard this track? Your changes will be lost." && discardConfirmText("fixture", { read: true }) === "Discard this assembly? Your changes will be lost." &&
@@ -626,7 +716,7 @@ export function discardConfirmChecks(ok: Ok) {
      !/onClick=\{onClose\}/.test(cm), "discard pins: ConfigModal's backdrop and × go through confirmClose (and, without it, onClose itself — unchanged)");
   const bs = code("src/app/(app)/estimator/steps/build-step.tsx");
   const closers = bs.match(/onClose=\{closeInput\}\s*confirmClose=\{confirmDiscardInput\}/g) || [];
-  ok(closers.length === 5 && (bs.match(/onClose=\{closeInput\}/g) || []).length === 5 && (bs.match(/confirmClose=/g) || []).length === 5, "discard pins: the five closeInput pop-ups pass confirmClose, nothing else does");
+  ok(closers.length === 7 && (bs.match(/onClose=\{closeInput\}/g) || []).length === 7 && (bs.match(/confirmClose=/g) || []).length === 7, "discard pins: the seven closeInput pop-ups pass confirmClose, nothing else does");
   for (const [tag, f] of [["CurtainModal", "curtain-modal"], ["TrackModal", "track-modal"], ["FixtureModal", "fixture-modal"], ["LaborModal", "labor-modal"], ["VendorQuoteModal", "vendor-quote-modal"]] as const) {
     const at = bs.indexOf(`<${tag}`), end = bs.indexOf("/>", bs.indexOf("onClose={closeInput}", at));
     ok(at > 0 && bs.slice(at, end).includes("confirmClose={confirmDiscardInput}"), `discard pins: build-step passes confirmClose to ${tag}`);

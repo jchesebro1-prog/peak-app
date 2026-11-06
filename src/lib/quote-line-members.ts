@@ -48,6 +48,7 @@ export type MemberLine = {
   rackId?: unknown;
   fixtureId?: unknown;
   track?: unknown;
+  rigging?: unknown;
 };
 export type MemberRow = { sku: string; desc: string; qty: number; primary?: true };
 export type FixtureLookup = (id: string) => FixtureResolvable | null | undefined;
@@ -138,7 +139,7 @@ export function expandLine(item: MemberLine | null | undefined, fixtureOf?: Fixt
 export function isAssemblyLine(item: MemberLine | null | undefined): boolean {
   if (!item || typeof item !== "object") return false;
   if (str(item.rackId)) return false;
-  if (item.track != null || str(item.sku).toUpperCase().startsWith("TRK-")) return false;
+  if (item.track != null || item.rigging != null || str(item.sku).toUpperCase().startsWith("TRK-")) return false;
   return item.fixture === true || !!str(item.fixtureId);
 }
 

@@ -12978,6 +12978,44 @@ Jeff, Oct 30: the NFC contact card should carry the company website and an offic
 - Fill Settings → Branding → Website.
 - Set Office on his Team row if he's not at the main office.
 
+## 373. Pipe and lineset configurators — DONE 2026-11-06 on `feat/373-pipe-lineset` (D1333–D1337)
+
+Jeff, 2026-11-05: add a simple pipe input to the Estimator, for curtains and in general, that works like Track, and a way to add the hardware for a typical counterweight lineset (aircraft cable, terminations and so on). Spec `docs/superpowers/specs/2026-11-05-pipe-lineset-configurators-design.md`.
+
+**Built:** Estimating Rules gains **Pipe types** (`/estimating-rules/pipe-types`: stick lengths, splice, clamp, hanger spacing) and **Lineset types** (`/estimating-rules/lineset-types`: cable, hand line, terminations and chain wraps, each a catalog part or a Hardware assembly, plus a cable allowance). Every system on Build gains **+ Configure pipe** and **+ Configure lineset**. Pure rules are in `src/lib/rigging-config/` (`types`, `pipe`, `lineset`, `line`), the store is `src/lib/stores/rigging-types.ts` and pricing is `src/app/(app)/estimator/rigging-bom.ts`. Each adds one lot line (`qty 1`, unit `lot`, parts in `components`, inputs in `SpecItem.rigging`); clicking the line reopens it and Update rebuilds it in place at today's catalog prices. A line whose type was deleted keeps its saved parts and price, and its Update button stays off. The curtain configurator gains **Add pipe** on new curtains. The customer sees one line each with no part numbers; the Review spreadsheet lists the parts. No migration, no env vars.
+
+**Verified 2026-11-06:** `tsc` 0 errors. `eslint` 0 errors, 90 warnings, with `scripts/test-review-and-spec.ts` excluded because the react-hooks plugin overflows the stack on it. `test:specs` 26,439 PASS, 0 FAIL. `next build` passed. `test:smoke` 274 PASS, 0 FAIL, run in twelve parts with a fresh server each (see below). All of these ran on the final code, merged with `#374`. `next build` failed once before that merge and two smoke parts hit the same error on a first try, `next/font/google queries have exactly one entry` from the Public Sans import in `src/app/layout.tsx`; it didn't come back in the final run, and its cause is unconfirmed. Browser pass, run before the last review fixes, on a scratch database with test parts: run 40 → 2 sticks, 1 splice, 5 clamps at $268.84; 6 sets at 40' × 40' → 24 lift lines, 1,680 ft of cable, 480 ft of hand line, $1,853.28; both lines update in place; Add pipe follows the width and both lines land; Silver re-prices all four lines and the parts agree; the discard prompt says "pipe"; a deleted type stays read-only at the same price; the estimate PDF prints one line each with no part numbers; the Review spreadsheet lists the parts.
+
+**Smoke on this Mac:** a full `test:smoke` run can't finish with less than about 35 GB free. Turbopack's memory use grew swap from 3 GB to 23 GB in under three minutes, disk fell to 327 MB free and the server died, which shows up as a long run of `fetch failed`. The routes themselves passed once run in smaller parts. The part-by-part run was a temporary local patch, not committed. Free up the disk, or add a smoke option that restarts the server part-way.
+
+**Rollback:** no migration. Roll back the code and both Rules blobs stay in settings unused. A saved pipe or lineset line reads as a plain lot line with its price intact, and it can't be reopened.
+
+**Remaining (Jeff-gated):**
+- Create at least one Pipe type and one Lineset type on production, with their parts mapped. The scratch check used test parts, so nothing has been tried on real catalog parts yet.
+- Check the cable allowance. 10' is a placeholder.
+- Decide later whether Quick Design should move to the same cable formula (2,880' against 1,680' on the same job).
+- Decide whether Add pipe on a bi-parting curtain should pre-fill 1 × the full width, as Track does, instead of copying the curtain's quantity and width (D1337).
+
+## 374. Review spreadsheet: labor rows — DONE 2026-11-06 on `feat/datasheet-package-download` (D1332)
+
+Jeff, Nov 6: the estimator Review spreadsheet should show labor as one man-hours row, travel and shop & engineering. `reviewLaborRows` (`src/app/(app)/estimator/parts-csv.ts`) adds, per system after its parts: Labor (man-hours, Qty = hours), Travel (miles + per diem + hotel, itemized in Notes), Shop & engineering, plus Lift rental and Project allowance when they have a cost. All carry Price source "Labor" and sit in the System cost / markup sums, so a system's rows + fees equal its price; labor-only systems get a block and export. No migration, no change to any price or customer document.
+
+**Gates:** tsc 0 errors; test:specs ALL PASSED, 26,317 PASS / 0 FAIL (23 `#374` checks, plus the markup-settings run); test:smoke ALL PASSED; eslint clean on the three source files. Browser: a test labor group on an unsaved dev estimate exported 200 hr, and cost + markup + fees = $37,275.00, the estimate's Quoted total; nothing was saved.
+
+**Remaining (Jeff):**
+- Open a real estimate's sheet in Excel.
+- Freight % is charged on labor cost when labor sits in a materials system (existing rule, `systemFreightBase`). The sheet now makes it visible: the test estimate's freight went from $100.00 to $480.20. Decide whether labor should bear freight.
+
+## 375. Remove a bonus from a system — DONE 2026-11-06 on `feat/375-remove-bonus` (D1338)
+
+Jeff, Nov 6: an estimator can delete the estimator bonus from an estimate. Each bonus row on the Build step gets a ✕ (5% and 2% separately, per system); the price drops, and an "… removed · Add back" row takes its place. Drafts only: a sent, won or lost estimate shows both controls greyed with "Revise the estimate first", and the server keeps the stored flags and lines whatever is posted. Rules in `src/lib/estimate-bonus/rules.ts` (`withBonusRemoved`, `settleBonusRemovals`, `removedBonusKinds`); checks in `scripts/test-oct15-estimating.ts`.
+
+**Gates:** tsc 0 errors; test:specs 26,348 PASS / 0 FAIL (32 `#375` checks, plus the markup-settings run); eslint clean on the changed files. **test:smoke did not finish:** two runs died on ENOSPC, starting with 8–14 GB free (the known disk limit), about 110 routes passing before the crash. Browser-checked on a scratch database: remove and add back each bonus ($2,700 → $2,650 → $2,525 and back), save and reload, the Sent lock, Revise, and a stale tab saving a removal onto a sent estimate.
+
+**Remaining (Jeff):**
+- Try it on one real draft on production.
+- Removing the 5% also lowers the install project's bonus pool, and the ✕ has no confirmation because Add back undoes it. Say if either should change.
+
 ## 376. Estimator live save + Undo — DONE 2026-11-06 on `feat/estimator-live-save` (D1339–D1346)
 
 Jeff, Nov 6: "Can we make it so estimator lines live save when editing? And then there is an undo button if you need to?" Spec `docs/superpowers/specs/2026-11-06-estimator-live-save-design.md`.

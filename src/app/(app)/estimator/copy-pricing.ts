@@ -4,6 +4,7 @@ import { liveRenameRefs } from "@/lib/stores/catalog-renames";
 import { allAssembliesFrom, fixtureSkus, type FixtureRecord } from "@/lib/fixture-assemblies";
 import type { CopyCatalogPart, CopyFixture } from "./copy-system";
 import type { SpecItem } from "./types";
+import { isConfiguredLine } from "@/lib/rigging-config/line";
 
 /**
  * #266 / #293 slice 2 — today's catalog and resolved fixtures for exactly the
@@ -29,8 +30,8 @@ export async function copyPricingFor(
     if (it?.sku) skus.add(it.sku);
     const comps = Array.isArray(it?.components) ? it.components : [];
     if (comps.length) {
-      // #274: a track line's parts are plain catalog parts — no fixture record.
-      if (!it.track) fixtureIds.add(it.fixtureId || it.sku);
+      // #274 / #373: a configured line's parts are plain catalog parts — no fixture record.
+      if (!isConfiguredLine(it)) fixtureIds.add(it.fixtureId || it.sku);
       comps.forEach((c) => c?.sku && skus.add(c.sku));
     }
   }

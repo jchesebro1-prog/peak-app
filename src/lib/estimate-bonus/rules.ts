@@ -8,12 +8,14 @@ import {
   DEFAULT_BONUS_RATES,
   isBonusItem,
   lineBonusPct,
+  type BonusKind,
   type BonusRates,
   isEstimatorBonusItem,
   isLegacyLaborBonusItem,
   isPackageBonusItem,
 } from "./flags";
 import { normalCostOf } from "@/lib/project-discounts/rules";
+import { repriceLocked } from "@/lib/estimate-reprice/lock";
 
 export type BonusAmount = { cost: number; sell: number };
 
@@ -38,6 +40,7 @@ export function hasLaborLine(sec: SpecSection): boolean {
 /** Spec "Bonus not figured — check line costs": an in-total line with a
  *  non-finite qty / cost / price, so the bonus lines can't be figured. */
 export function bonusNotFigured(sec: SpecSection): boolean {
+  if (sec.noPackageBonus === true && sec.noEstimatorBonus === true) return false;
   return baseLines(stripBonusLines(sec)).some(
     (it) => !Number.isFinite(it.qty) || !Number.isFinite(it.cost) || !Number.isFinite(it.price)
   );
@@ -109,8 +112,9 @@ function sameItems(a: SpecItem[], b: SpecItem[]): boolean {
 
 export function sectionWithBonusLines(sec: SpecSection, nextId: () => number, rates: BonusRates = DEFAULT_BONUS_RATES): SpecSection {
   const stripped = stripBonusLines(sec);
-  const pkg = packageBonus(stripped, rates.packagePct);
-  const est = estimatorBonus(stripped, pkg, rates.estimatorPct);
+  // #375: a removed bonus makes no line; with the 5% gone the 2% is figured with no 5% in its base.
+  const pkg = sec.noPackageBonus === true ? null : packageBonus(stripped, rates.packagePct);
+  const est = sec.noEstimatorBonus === true ? null : estimatorBonus(stripped, pkg, rates.estimatorPct);
   const prevPkg = sec.items.find(isPackageBonusItem);
   const prevEst = sec.items.find(isEstimatorBonusItem);
   const add: SpecItem[] = [];
@@ -118,6 +122,82 @@ export function sectionWithBonusLines(sec: SpecSection, nextId: () => number, ra
   if (est) add.push(estimatorLine(sec.id, est, prevEst ? prevEst.id : nextId(), rates.estimatorPct));
   const items = [...stripped.items, ...add];
   return sameItems(sec.items, items) ? sec : { ...sec, items };
+}
+
+const REMOVAL_KEY = { package: "noPackageBonus", estimator: "noEstimatorBonus" } as const;
+
+/** #375: has the estimator removed this system's `kind` bonus? */
+export function bonusRemoved(sec: SpecSection, kind: BonusKind): boolean {
+  return sec[REMOVAL_KEY[kind]] === true;
+}
+
+/** #375: set or clear a removal flag (the key is deleted, never false). Same reference when nothing changes. */
+export function withBonusRemoved(sec: SpecSection, kind: BonusKind, removed: boolean): SpecSection {
+  if (bonusRemoved(sec, kind) === removed) return sec;
+  const key = REMOVAL_KEY[kind];
+  if (removed) return { ...sec, [key]: true };
+  const next = { ...sec };
+  delete next[key];
+  return next;
+}
+
+/** #375: keep a removal flag only when it is exactly `true` (a posted payload is never trusted). */
+export function sanitizeBonusRemovals(sec: SpecSection): SpecSection {
+  let out = sec;
+  for (const key of ["noPackageBonus", "noEstimatorBonus"] as const) {
+    if (key in out && out[key] !== true) {
+      if (out === sec) out = { ...sec };
+      delete out[key];
+    }
+  }
+  return out;
+}
+
+/**
+ * #375: the removal flags a save may store. An open estimate takes the sanitized posted flags; a sent / won / lost
+ * one (repriceLocked) keeps exactly what the stored section with the same id had — a new system has none.
+ */
+export function settleBonusRemovals(
+  posted: SpecSection[],
+  prior: SpecSection[] | null | undefined,
+  priorStatus: unknown,
+): SpecSection[] {
+  if (!repriceLocked(priorStatus)) {
+    let changed = false;
+    const out = posted.map((s) => {
+      const n = sanitizeBonusRemovals(s);
+      if (n !== s) changed = true;
+      return n;
+    });
+    return changed ? out : posted;
+  }
+  const byId = new Map((prior || []).map((s) => [s.id, s]));
+  let changed = false;
+  const out = posted.map((s) => {
+    const stored = byId.get(s.id);
+    const pkg = stored?.noPackageBonus === true;
+    const est = stored?.noEstimatorBonus === true;
+    // A stale tab can post a locked estimate with its bonus lines already gone. Put the stored ones back, or
+    // bonusRulesApply would read a quote with no bonus lines as legacy and the removal would stick.
+    const missing = (stored?.items || []).filter((it) => isBonusItem(it) && !s.items.some((x) => x.bonus === it.bonus));
+    if (!missing.length && (s.noPackageBonus === true) === pkg && (s.noEstimatorBonus === true) === est && sanitizeBonusRemovals(s) === s) return s;
+    const n: SpecSection = missing.length ? { ...s, items: [...s.items, ...missing] } : { ...s };
+    delete n.noPackageBonus;
+    delete n.noEstimatorBonus;
+    if (pkg) n.noPackageBonus = true;
+    if (est) n.noEstimatorBonus = true;
+    changed = true;
+    return n;
+  });
+  return changed ? out : posted;
+}
+
+/** #375: the removed kinds that would otherwise produce a line (package first), for the "removed" rows. */
+export function removedBonusKinds(sec: SpecSection): BonusKind[] {
+  const out: BonusKind[] = [];
+  if (sec.noPackageBonus === true && hasLaborLine(sec)) out.push("package");
+  if (sec.noEstimatorBonus === true && baseLines(sec).length > 0) out.push("estimator");
+  return out;
 }
 
 export function withBonusLines(sections: SpecSection[], nextId: () => number, rates: BonusRates = DEFAULT_BONUS_RATES): SpecSection[] {

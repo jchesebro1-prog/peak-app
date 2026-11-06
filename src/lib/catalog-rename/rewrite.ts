@@ -356,6 +356,28 @@ export function rewriteTrackSeries(blob: Record<string, unknown>, m: RenameMap):
   });
 }
 
+/** #373 — the `pipe_types` blob: `sticks[].sku`, `spliceSku`, `clampSku`. */
+export function rewritePipeTypes(blob: Record<string, unknown>, m: RenameMap): Record<string, unknown> | null {
+  if (!isRec(blob)) return null;
+  return mapValues(blob, (t) => {
+    if (!isRec(t)) return null;
+    const patch: Rec = fieldPatch(t, ["spliceSku", "clampSku"], m);
+    const sticks = mapObjs(t.sticks, (s) => swapFields(s, ["sku"], m));
+    if (sticks) patch.sticks = sticks;
+    return overlay(t, patch);
+  });
+}
+
+/** #373 — the `lineset_types` blob: `parts[role].sku` (assembly sources name no SKU). */
+export function rewriteLinesetTypes(blob: Record<string, unknown>, m: RenameMap): Record<string, unknown> | null {
+  if (!isRec(blob)) return null;
+  return mapValues(blob, (t) => {
+    if (!isRec(t) || !isRec(t.parts)) return null;
+    const parts = mapValues(t.parts, (p) => (isRec(p) && p.kind === "part" ? swapFields(p, ["sku"], m) : null));
+    return parts ? { ...t, parts } : null;
+  });
+}
+
 /** The `curtain_mount_hardware` blob: `rows[].sku`. */
 export function rewriteCurtainMounts(blob: Record<string, unknown>, m: RenameMap): Record<string, unknown> | null {
   if (!isRec(blob)) return null;

@@ -11370,6 +11370,7 @@ import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, portalB
 import { lineMoveChecks } from "./test-estimate-line-move";
 import { liveSaveDbChecks, liveSavePureChecks } from "./test-estimate-live-save";
 import { curvedTrackChecks } from "./test-curved-track";
+import { riggingConfigChecks, riggingDbChecks } from "./test-rigging-config";
 import { boxSaleDbChecks, boxSalePureChecks } from "./test-box-sale";
 import { markupPureChecks, markupDbChecks, markupParityChecks } from "./test-markup";
 import { vendorChecks, vendorDbChecks, vendorPdfDbChecks, vendorPdfPureChecks, vendorPdfFillChecks } from "./test-vendors";
@@ -11798,9 +11799,11 @@ seeded()
   .then(() => liveSavePureChecks(ok))
   .then(() => liveSaveDbChecks(ok))
   .then(() => curvedTrackChecks(ok))
+  .then(() => riggingConfigChecks(ok)).then(() => riggingDbChecks(ok))
   .then(() => boxSalePureChecks(ok)).then(() => boxSaleDbChecks(ok))
   .then(() => markupPureChecks(ok)).then(() => markupDbChecks(ok)).then(() => markupParityChecks(ok))
   .then(() => reviewSheet363Checks(ok))
+  .then(() => reviewSheet374Checks(ok))
   .then(() => bomModels365DbChecks(ok))
   .then(() => etc368ClientChecks(ok)) // #368 catalog
   .then(() => etc368ApplyDbChecks(ok)) // #368 catalog
@@ -37622,15 +37625,15 @@ function r363Fixture() {
   ok(fees2.total === 0 && r363Breakdown(fees2) === "", "#363 systemFees: a system with no freight, bonus or rounding has no fees and an empty breakdown");
 
   const model = r363Model(sections, vqs, {});
-  ok(model.map((b) => `${b.sectionId}:${b.system}:${b.room}`).join("|") === "s-a:Lighting:Stage|s-b:Lighting:Stage",
-    "#363 review sheet: one block per system with listed rows, in order — two same-named systems stay separate; labor and alternate systems get none");
+  ok(model.map((b) => `${b.sectionId}:${b.system}:${b.room}`).join("|") === "s-a:Lighting:Stage|s-l:Labor:|s-b:Lighting:Stage",
+    "#363 review sheet: one block per system with listed rows, in order — two same-named systems stay separate; (#374) a labor system gets a block of its labor, an alternate none");
   ok(model[0].rows.length === 8 && !model[0].rows.some((r) => /bonus|Optional/i.test(r.desc)), "#363 review sheet: bonus and option lines are never listed");
   const reconcile = (b: (typeof model)[number], sec: R363Section) => {
     const cost = b.rows.reduce((s, r) => s + r.qty * r.unitCost, 0);
     const sell = b.rows.reduce((s, r) => s + r.qty * r.lineSell, 0);
     return Math.round((cost + (sell - cost) + b.fees.total) * 100) / 100 === Math.round(r363SellTotal(sec) * 100) / 100;
   };
-  ok(reconcile(model[0], lighting) && near(r363SellTotal(lighting), 850) && reconcile(model[1], lighting2),
+  ok(reconcile(model[0], lighting) && near(r363SellTotal(lighting), 850) && reconcile(model[2], lighting2),
     "#363 review sheet: System cost + System markup + System fees = the system's price, to the cent (850.00)");
   const typed: R363Section = { ...lighting, id: "s-t", sellOverride: 700 };
   const tModel = r363Model([typed], vqs, {});
@@ -37645,7 +37648,7 @@ function r363Fixture() {
   const hookSrc = readFileSync(join(process.cwd(), EST_DIR, "use-estimator-state.ts"), "utf8");
   const menuSrc = readFileSync(join(process.cwd(), EST_DIR, "header-more-menu.tsx"), "utf8");
   ok(hookSrc.includes("reviewSheetModel(sections, vendorQuotes, info, venueRoomName, projectDiscounts)") /* #366: + the discounts */ && hookSrc.includes("await downloadReviewSheet(fileStem(name, \"estimate\"), blocks)")
-    && hookSrc.includes("Couldn't build the review spreadsheet — try again.") && hookSrc.includes('"No parts to export yet."') && !hookSrc.includes("downloadCsv(")
+    && hookSrc.includes("Couldn't build the review spreadsheet — try again.") && hookSrc.includes('"No parts or labor to export yet."') && !hookSrc.includes("downloadCsv(")
     && menuSrc.includes("s.exportReviewSheet()") && menuSrc.includes("disabled={s.reviewBusy}"),
     "#363 review sheet: More ▾ → Review spreadsheet builds the model and downloads the .xlsx; the CSV download is gone");
 }
@@ -37688,9 +37691,146 @@ async function reviewSheet363Checks(check: typeof ok): Promise<void> {
     "#363 workbook: System fees is a number (85.00) with its breakdown in Notes");
   check(ws.getRow(10).getCell(3).font?.bold === true && ws.getRow(12).getCell(10).font?.bold === true && ws.getRow(10).getCell(1).border?.top?.style === "thin",
     "#363 workbook: the subtotal rows are bold, the first with a thin top border");
-  check(ws.getRow(13).getCell(3).value == null && text(14, 3) === "Plain" && text(15, 3) === "System cost — Lighting" && f(15, 10)?.formula === "SUM(I14:I14)",
-    "#363 workbook: one blank spacer row, then the next system (same name, its own block and ranges)");
+  check(ws.getRow(13).getCell(3).value == null && text(14, 3) === "Labor (man-hours)" && text(15, 3) === "System cost — Labor" && ws.getRow(18).getCell(3).value == null
+      && text(19, 3) === "Plain" && text(20, 3) === "System cost — Lighting" && f(20, 10)?.formula === "SUM(I19:I19)",
+    "#363 workbook: one blank spacer row between systems — the labor system's block (#374), then the next same-named system with its own block and ranges");
   check(ws.getRow(2).getCell(7).numFmt === "$#,##0.00" && ws.getRow(2).getCell(11).numFmt === "0.0%", "#363 workbook: money and percent formats");
+}
+
+
+/* --- #374: the Review spreadsheet lists each system's labor inside its block --- */
+import { reviewLaborRows as r374Rows, reviewSheetModel as r374Model, partsListRows as r374Parts, partsListCsvRows as r374Csv, partsListSkus as r374Skus, systemFees as r374Fees } from "@/app/(app)/estimator/parts-csv";
+import { buildLaborItems as r374Build, computeLabor as r374Calc, systemSellTotal as r374Total, lineExtSellOf as r374Ext } from "@/app/(app)/estimator/pricing";
+import { withLaborGroup as r374With } from "@/app/(app)/estimator/labor-group";
+import { buildReviewWorkbook as r374Xlsx } from "@/app/(app)/estimator/review-sheet-xlsx";
+import type { SpecItem as R374Item, SpecSection as R374Section, MobDraft as R374Mob, LaborDraft as R374Draft } from "@/app/(app)/estimator/types";
+const r374It = (id: number, sku: string, desc: string, qty: number, cost: number, extra: Partial<R374Item> = {}): R374Item =>
+  ({ id, sku, desc, qty, unit: "ea", cost, price: cost * 2, ...extra });
+const r374Sec = (items: R374Item[], extra: Partial<R374Section> = {}): R374Section =>
+  ({ id: "s-373", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items, ...extra }) as R374Section;
+const r374Mob = (people: string, days: string, hoursPerDay: string, extra: Partial<R374Mob> = {}): R374Mob =>
+  ({ name: "", nameCustom: false, tripType: "local", tripAuto: false, people, days, hoursPerDay, otHrs: "0", sup: false, milesRT: "0", lift: false, comments: "", internalNote: "", ...extra });
+const r374Rate = (sku: string) => ({ "RIG-LBR": 50, "RIG-OT": 75, "RIG-SUP": 60, "TVL-MIL": 0.7, "TVL-HTL": 150, "TVL-FOD": 50, "EQP-LIFT": 400 }[sku] || 0);
+const r374Draft = (mobs: R374Mob[]): R374Draft =>
+  ({ discipline: "RIG", margin: "30", mobs, pmHrs: "", pmAuto: false, shopHrs: "", drfHrs: "", drfAuto: false, misc: "" });
+{
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.005;
+  const byDesc = (rows: ReturnType<typeof r374Rows>, d: string) => rows.find((r) => r.desc === d);
+  // Grouped labor from the real builder: two mobilizations (one with overtime) roll into ONE man-hours row.
+  let nid = 1;
+  const draft = r374Draft([r374Mob("4", "5", "10"), r374Mob("2", "3", "8")]);
+  const calc = r374Calc(draft, r374Rate);
+  const built = r374Build(calc, "Rigging", () => nid++, "lgA");
+  const grouped = r374With(r374Sec([r374It(900, "PART", "Truss", 2, 100)]), "lgA", built, draft);
+  const rows = r374Rows(grouped);
+  const hours = byDesc(rows, "Labor (man-hours)");
+  const laborCost = built.reduce((a, x) => a + x.qty * x.cost, 0);
+  const laborSell = built.reduce((a, x) => a + r374Ext(x), 0);
+  ok(rows.length === 1 && !!hours && hours.qty === 4 * 5 * 10 + 2 * 3 * 8 && hours.unit === "hr" && hours.source === "Labor" && hours.system === "Rigging" && hours.sectionId === "s-373",
+    "#374 review sheet: two grouped mobilizations roll into ONE man-hours row — crew × days × hours/day incl. overtime (200 + 48 = 248 hr; reg already includes the supervisor)");
+  ok(!!hours && near(hours.qty * hours.unitCost, laborCost) && near(hours.qty * hours.lineSell, laborSell) && hours.unitSell === hours.lineSell && hours.notes.length === 0,
+    "#374 review sheet: the man-hours row's qty × unit cost / unit sell equal the labor lines' cost and sell, with no caveat note");
+
+  // Travel: mileage + hotel + per diem, itemized in Notes in the order Miles · Per diem · Hotel.
+  const travel = r374Sec([
+    r374It(1, "LAB-TVL-1", "Mileage", 1, 120, { labor: true, laborTravel: "mileage" }),
+    r374It(2, "LAB-TVL-2", "Hotel", 1, 400, { labor: true, laborTravel: "hotel" }),
+    r374It(3, "LAB-TVL-3", "Per diem", 1, 80, { labor: true, laborTravel: "perdiem" }),
+    r374It(4, "LAB-EQP-4", "Lift", 1, 300, { labor: true, laborTravel: "lift" }),
+    r374It(5, "LAB-SHOP-5", "Shop", 1, 90, { labor: true, laborOverhead: "shop" }),
+    r374It(6, "LAB-MISC-6", "Allowance", 1, 50, { labor: true, laborOverhead: "misc" }),
+  ]);
+  const tr = r374Rows(travel);
+  const trow = byDesc(tr, "Travel");
+  ok(!!trow && trow.qty === 1 && trow.unit === "ea" && near(trow.unitCost, 600) && near(trow.lineSell, 1200) && trow.unitSell === trow.lineSell
+    && trow.notes.join("|") === "Miles $120.00 · Per diem $80.00 · Hotel $400.00",
+    "#374 review sheet: Travel sums mileage + hotel + per diem as one lump row and itemizes them in Notes");
+  ok(near(byDesc(tr, "Lift rental")?.unitCost ?? -1, 300) && near(byDesc(tr, "Project allowance")?.unitCost ?? -1, 50) && near(byDesc(tr, "Shop & engineering")?.unitCost ?? -1, 90)
+    && tr.map((r) => r.desc).join("|") === "Travel|Shop & engineering|Lift rental|Project allowance",
+    "#374 review sheet: Lift rental, Project allowance and the shop line are their own rows, in order (man-hours, Travel, Shop, Lift, Allowance, Bonus)");
+  const legacy = r374Rows(r374Sec([
+    r374It(1, "LAB-SHOP-9", "Shop & engineering", 1, 70, { labor: true }),
+    r374It(2, "LAB-MISC-9", "Misc", 1, 30, { labor: true }),
+    r374It(3, "LAB-BONUS-9", "Performance bonus — 5%", 1, 20, { labor: true }),
+  ]));
+  ok(legacy.map((r) => `${r.desc}:${r.unitCost}`).join("|") === "Shop & engineering:70|Project allowance:30|Performance bonus:20",
+    "#374 review sheet: legacy LAB-SHOP- / LAB-MISC- / LAB-BONUS- SKUs land in their own rows");
+
+  // Hour units (the seed shape), the mob fallback, and the unknown-hours fallback.
+  const hrUnit = byDesc(r374Rows(r374Sec([r374It(1, "LAB", "Install", 320, 50, { labor: true, unit: "hr" })])), "Labor (man-hours)");
+  ok(!!hrUnit && hrUnit.qty === 320 && hrUnit.unit === "hr" && near(hrUnit.unitCost, 50) && near(hrUnit.lineSell, 100),
+    "#374 review sheet: an hour-unit line ({qty: 320, unit: \"hr\"}) is 320 hours at its own cost and sell");
+  const mobOnly = byDesc(r374Rows(r374Sec([r374It(1, "LAB-RIG-1", "Mob", 1, 800, { labor: true, unit: "lot", mob: { type: "Install", days: 2, crew: 3, discipline: "Rigging" } })])), "Labor (man-hours)");
+  ok(!!mobOnly && mobOnly.qty === 48 && mobOnly.unit === "hr" && near(mobOnly.unitCost * mobOnly.qty, 800) && mobOnly.notes.join("|") === "Some hours estimated at 8 hr/day",
+    "#374 review sheet: with no stored draft, a mob's crew × days × 8 gives the hours and the row says they are estimated");
+  const unknown = byDesc(r374Rows(r374Sec([r374It(1, "LAB", "Install", 10, 80, { labor: true })])), "Labor (man-hours)");
+  ok(!!unknown && unknown.qty === 1 && unknown.unit === "ea" && near(unknown.unitCost, 800) && near(unknown.lineSell, 1600) && unknown.notes.join("|") === "Hours not recorded",
+    "#374 review sheet: unknown hours fall back to one lump row (qty 1, ea) noted \"Hours not recorded\"");
+  const partial = byDesc(r374Rows(r374Sec([
+    r374It(1, "L1", "Known", 160, 50, { labor: true, unit: "hr" }),
+    r374It(2, "L2", "Unknown", 1, 500, { labor: true }),
+  ])), "Labor (man-hours)");
+  ok(!!partial && partial.qty === 1 && partial.unit === "ea" && near(partial.unitCost, 8500) && partial.notes.join("|") === "Hours not recorded on every line (160 hr known)",
+    "#374 review sheet: when only some lines have hours the row stays lump and names the known hours — never hours that don't cover the money");
+
+  // Exclusions + overrides.
+  const excl = r374Rows(r374Sec([
+    r374It(1, "L1", "Optional crew", 10, 50, { labor: true, unit: "hr", option: true }),
+    r374It(2, "L2", "Bonus", 1, 12, { labor: true, bonus: "package" }),
+    r374It(3, "L3", "Bad qty", 0, 50, { labor: true }),
+  ]));
+  ok(excl.length === 0, "#374 review sheet: option, bonus-flagged and zero-quantity labor lines are never listed");
+  ok(r374Rows(r374Sec([r374It(1, "L1", "Crew", 10, 50, { labor: true, unit: "hr" })], { alternate: true } as Partial<R374Section>)).length === 0,
+    "#374 review sheet: an alternate system lists no labor");
+  const typed = byDesc(r374Rows(r374Sec([r374It(1, "L1", "Crew", 10, 50, { labor: true, unit: "hr", extSellOverride: 1234 })])), "Labor (man-hours)");
+  ok(!!typed && near(typed.qty * typed.lineSell, 1234), "#374 review sheet: a typed extended sell on a labor line flows into the row's sell");
+  ok(r374Rows(r374Sec([r374It(1, "L1", "Zero", 1, 0, { labor: true, price: 0 })])).length === 0, "#374 review sheet: a labor bucket under half a cent is dropped");
+
+  // The parts list and CSV never gain labor rows.
+  const mixed: R374Section = r374Sec([
+    r374It(1, "PART", "Truss", 2, 100),
+    r374It(2, "LAB-TVL-1", "Mileage", 1, 120, { labor: true, laborTravel: "mileage" }),
+    r374It(3, "L1", "Crew", 100, 40, { labor: true, unit: "hr" }),
+    r374It(4, "", "Package bonus", 1, 12.34, { bonus: "package", price: 13.57 }),
+    r374It(5, "", "Estimator bonus", 1, 9.99, { bonus: "estimator", price: 9.99 }),
+    r374It(6, "OPT", "Optional", 1, 500, { option: true }),
+  ], { freightPct: 10, priceRound: 25 } as Partial<R374Section>);
+  ok(r374Parts([mixed], [], {}).length === 1 && r374Csv(r374Parts([mixed], [], {})).length === 1 && r374Skus([mixed]).join() === "PART",
+    "#374 review sheet: partsListRows / partsListCsvRows / partsListSkus are unchanged — labor rows come only from reviewSheetModel");
+
+  // A mixed materials + labor system reconciles to the cent: Σ qty × lineSell + fees = system price.
+  const model = r374Model([mixed], [], {});
+  const total = model[0].rows.reduce((a, r) => a + r.qty * r.lineSell, 0) + model[0].fees.total;
+  ok(model.length === 1 && model[0].rows.map((r) => r.desc).join("|") === "Truss|Labor (man-hours)|Travel" && Math.round(total * 100) === Math.round(r374Total(mixed) * 100) && near(r374Fees(mixed).total, model[0].fees.total),
+    "#374 review sheet: a mixed materials + labor system reconciles — Σ qty × lineSell + fees = the system's price, to the cent");
+  const dup = r374Model([mixed, mixed], [], {});
+  ok(dup.length === 1, "#374 review sheet: a repeated section id is listed once");
+  ok(r374Model([r374Sec([r374It(1, "L1", "Crew", 10, 50, { labor: true, unit: "hr" })], { kind: "labor" } as Partial<R374Section>), r374Sec([r374It(1, "P", "Part", 1, 5)], { id: "s-alt", alternate: true } as Partial<R374Section>)], [], {}).map((b) => b.sectionId).join() === "s-373",
+    "#374 review sheet: a labor-kind system gets a block; an alternate none");
+}
+
+async function reviewSheet374Checks(check: typeof ok): Promise<void> {
+  const mixed: R374Section = r374Sec([
+    r374It(1, "PART", "Truss", 2, 100),
+    r374It(2, "LAB-TVL-1", "Mileage", 1, 120, { labor: true, laborTravel: "mileage" }),
+    r374It(3, "L1", "Crew", 100, 40, { labor: true, unit: "hr" }),
+  ]);
+  const blocks = r374Model([mixed], [], {});
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(await r374Xlsx(blocks)) as never);
+  const ws = wb.getWorksheet("Review");
+  check(!!ws, "#374 workbook: sheet present");
+  if (!ws) return;
+  const text = (r: number, c: number) => {
+    const v = ws.getRow(r).getCell(c).value;
+    return typeof v === "string" ? v : "";
+  };
+  const f = (r: number, c: number) => ws.getRow(r).getCell(c).value as { formula?: string; result?: unknown } | null;
+  check(text(3, 3) === "Labor (man-hours)" && text(3, 12) === "Labor" && text(4, 3) === "Travel" && text(4, 12) === "Labor",
+    "#374 workbook: labor rows follow the parts with Labor as their Price source");
+  check(text(5, 3) === "System cost — Rigging" && f(5, 10)?.formula === "SUM(I2:I4)" && f(5, 10)?.result === 200 + 120 + 4000 && f(6, 10)?.formula === "SUM(J2:J4)-SUM(I2:I4)",
+    "#374 workbook: the labor rows sit inside the System cost / System markup SUM ranges (cost 4,320.00)");
+  check(ws.getRow(3).getCell(6).value === 100 && text(3, 14) === "per hr", "#374 workbook: man-hours print qty 100 with the unit in Notes");
 }
 
 /* --- #261: Quick Design plan text stays a fixed on-screen size however wide the plan draws; dimensions smaller still (D468) --- */
@@ -39577,7 +39717,7 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
   const acts = src("src/app/(app)/estimator/actions.ts");
   const page = src("src/app/(app)/estimator/page.tsx");
   const addCurtain = client.slice(client.indexOf("const addCurtain = "), client.indexOf("const setFixture = "));
-  ok(/curtain: true,[\s\S]*?\},\s*\.\.\.\(track \? \[track\] : \[\]\),\s*\]\);/.test(addCurtain) && addCurtain.includes("trackLine(config,") && addCurtain.includes("if (!res.ok) return;"),
+  ok(/curtain: true,[\s\S]*?\},\s*\.\.\.\(track \? \[track\] : \[\]\),\s*\.\.\.\(pipe \? \[pipe\] : \[\]\),\s*\]\);/.test(addCurtain) && addCurtain.includes("trackLine(config,") && addCurtain.includes("if (!res.ok) return;"),
     "#274B curtain: Add track pushes the curtain line THEN its track line, and a blocked track blocks the add");
   const addTrack = client.slice(client.indexOf("const addTrack = "), client.indexOf("const setCurtainField = "));
   ok(addTrack.includes("replaceTrackLine(s, lineId, res.item)") && addTrack.includes("pushItems(secId, [{ ...res.item, id: nextId() }])") && addTrack.includes("trackEdit?.readOnly"),
@@ -39595,7 +39735,7 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
   ok(modal.includes("useSwallowOpeningDoubleClick()") && modal.includes("onClickCapture={swallowOpeningDoubleClick}") && modal.includes('"Update track" : "Add track"') && modal.includes("No track series yet — set one up in"),
     "#274B modal: swallows the opening double-click, Update/Add track, and the empty-state link to Track series");
   ok(curtainModal.includes("Add track") && curtainModal.includes("<TrackFields draft={track}"), "#274B curtain modal: the Add track toggle shows the track fields");
-  ok(/if \(!it\.track\) fixtureIds\.add\(/.test(src("src/app/(app)/estimator/copy-pricing.ts")), "#274B copy action: a track line's parts are looked up as catalog parts, never as a fixture record");
+  ok(/if \(!isConfiguredLine\(it\)\) fixtureIds\.add\(/.test(src("src/app/(app)/estimator/copy-pricing.ts")), "#274B copy action: a track line's parts are looked up as catalog parts, never as a fixture record");
   ok(page.includes("listTrackSeries()") && page.includes("trackSeries={trackSeries}") && page.includes("trackParts={trackParts}"), "#274B page: the Estimator loads the series and their live catalog parts");
 }
 
@@ -71703,7 +71843,7 @@ import { REVISE_FIRST as e368ReviseFirst, repriceLocked as e368Locked } from "@/
   ok(mlb.includes("disabled={repriceLocked(hit.status)}") && mlb.includes("title={repriceLocked(hit.status) ? REVISE_FIRST : undefined}"),
     "#368 estimator lock: Move lines → Another estimate… greys out sent / won / lost targets the same way");
   const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
-  ok((hook.match(/if \(repriceLocked\(status\)\) return;/g) || []).length === 3, "#368 estimator lock: openLaborEdit / openTrackEdit / openCurtainEdit refuse on a locked estimate too");
+  ok((hook.match(/if \(repriceLocked\(status\)\) return;/g) || []).length === 4, "#368 estimator lock: openLaborEdit / openTrackEdit / openRiggingEdit / openCurtainEdit refuse on a locked estimate too");
 }
 
 /** #368 estimator — Load system's core refuses a sent / won / lost target estimate (and only that) against the test DB. */

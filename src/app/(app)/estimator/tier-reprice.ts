@@ -4,6 +4,7 @@ import type { SpecItem, SpecSection } from "./types";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { normalCostOf } from "@/lib/project-discounts/rules";
 import { DEFAULT_MARKUP, MARKUP_MAX, legacyTwinOf, sameWholeMarkup, sellAt } from "@/lib/markup";
+import { isConfiguredLine } from "@/lib/rigging-config/line";
 
 /**
  * #254 (D87 amended) — a customer/contact change that moves the quote's
@@ -187,8 +188,8 @@ export function repriceForTier(
       repriced++;
       if (v.price === it.price) return it;
       changed = true;
-      // #274: a track line's parts follow the line to the new seed.
-      if (it.track && Array.isArray(it.components)) return { ...it, price: v.price, components: reseedTrackComponents(it.components, nextK) };
+      // #274 / #373: a configured line's parts follow the line to the new seed.
+      if (isConfiguredLine(it) && Array.isArray(it.components)) return { ...it, price: v.price, components: reseedTrackComponents(it.components, nextK) };
       return { ...it, price: v.price };
     });
     const base = changed ? { ...sec, items } : sec;

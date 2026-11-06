@@ -244,6 +244,9 @@ export function librarySectionForLoad(
   // another customer — the discipline (what the system is) travels.
   delete base.clientGoals;
   delete base.coverText;
+  // #375: a loaded system starts fresh with both bonuses.
+  delete base.noPackageBonus;
+  delete base.noEstimatorBonus;
   // Freight priced from another venue's drive miles (only portal-built
   // sections carry freightMiles) never travels: auto freight re-applies here.
   if ("freightMiles" in base) {
