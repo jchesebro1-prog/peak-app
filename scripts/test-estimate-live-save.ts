@@ -3,6 +3,7 @@
 import type { Ok } from "./test-inbox-org";
 import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
 import { canAutoSave, DEBOUNCE_MS, INITIAL_LIVE_STATE, liveStatusOf, reduceLive, retryDelayMs, type LiveGate } from "../src/lib/estimate-live-save/scheduler";
+import { liveKey } from "../src/lib/estimate-live-save/live-key";
 import { limitToLivePatch, liveSaveEligible, liveSaveRefusal } from "../src/lib/estimate-live-save/rules";
 import { COALESCE_MS, diffEdit, emptyUndoHistory, mapSnapshots, recordEdit, takeRedo, takeUndo, UNDO_CAP, type UndoSnap } from "../src/lib/estimate-live-save/undo";
 
@@ -149,10 +150,44 @@ export async function liveSavePureChecks(ok: Ok) {
   const limited = limitToLivePatch({ name: "x", customer: "y", customerId: "c", spec: { sections: [] }, value: 1, margin: 2, pdfOptions: {}, paymentTerms: "p", boxSale: true, pricingTier: "t", tierMargin: 3, source: "estimator", quoteNote: "n", coverSummary: "s" } as never) as Record<string, unknown>;
   ok(!("name" in limited) && !("customer" in limited) && !("customerId" in limited) && !("quoteNote" in limited) && !("coverSummary" in limited), "rules: header fields stay with the header autosave");
   ok(["spec", "value", "margin", "pdfOptions", "paymentTerms", "boxSale", "pricingTier", "tierMargin", "source"].every((k) => k in limited), "rules: the fields only Save carries stay");
+  // the key
+  const kq = { spec: { sections: [{ id: "A", a: 1, b: 2 }] }, vendorQuotes: [], pdfOptions: { pdfQty: true }, paymentTerms: "net30", boxSale: false };
+  ok(liveKey(kq) === liveKey({ ...kq, spec: { sections: [{ b: 2, a: 1, id: "A" }] } }), "key: object key order does not move it (jsonb reorders keys)");
+  ok(liveKey(kq) !== liveKey({ ...kq, spec: { sections: [{ id: "A", a: 1, b: 3 }] } }), "key: a spec change moves it");
+  ok(liveKey(kq) !== liveKey({ ...kq, paymentTerms: "net60" }), "key: payment terms move it");
+  ok(liveKey(kq) !== liveKey({ ...kq, boxSale: true }), "key: box sale moves it");
+  ok(liveKey({ ...kq, boxSale: undefined }) === liveKey(kq), "key: no box sale key equals false (update() removes the key)");
+  ok(liveKey({ ...kq, name: "Other", status: "sent", owner: "x", customerId: "c", quoteNote: "n", updatedAt: 9 } as never) === liveKey(kq), "key: header, status and people changes never move it");
 }
 
-export async function liveSaveDbChecks(_ok: Ok) {
-  // Filled in by Task 3.
+export async function liveSaveDbChecks(ok: Ok) {
+  const { create, get, update, updateCheckingLiveKey } = await import("../src/lib/stores/quotes");
+  const id = (await create({ name: "Live save fixture", customer: "Fixture", source: "estimator", spec: { sections: [{ id: "A", name: "A", items: [] }] } } as never)).id;
+  try {
+    const base = liveKey((await get(id))!);
+    const one = await updateCheckingLiveKey(id, base, { value: 100 } as never);
+    ok(!one.conflict && one.quote?.value === 100, "checked write: a matching key writes");
+    ok(liveKey((await get(id))!) === base, "checked write: value alone does not move the key");
+
+    const moved = await update(id, { spec: { sections: [{ id: "A", name: "B", items: [] }] }, lastSavedBy: { name: "Isaac", at: 1234 } } as never);
+    const fresh = await get(id);
+    ok(!!moved && liveKey(fresh!) !== base, "checked write: a spec change moves the key");
+
+    const stale = await updateCheckingLiveKey(id, base, { value: 200 } as never);
+    ok(stale.conflict?.by === "Isaac" && stale.conflict?.at === 1234 && stale.quote === null, "checked write: a stale key writes nothing and names who saved");
+    ok((await get(id))!.value === 100, "checked write: the stale write did not land");
+
+    const unchecked = await updateCheckingLiveKey(id, undefined, { value: 300 } as never);
+    ok(!unchecked.conflict && unchecked.quote?.value === 300, "checked write: no key is not checked (a tab from before this deploy)");
+
+    const bumpedBefore = (await get(id))!.updatedAt;
+    await update(id, { quoteNote: "header" } as never);
+    ok(liveKey((await get(id))!) === liveKey(fresh!), "checked write: a header autosave does not move the key");
+    ok((await get(id))!.updatedAt >= bumpedBefore, "checked write: sanity — header writes still bump updatedAt");
+  } finally {
+    const { remove } = await import("../src/lib/stores/quotes");
+    await remove(id);
+  }
 }
 
 if (require.main === module) {

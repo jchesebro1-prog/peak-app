@@ -23,6 +23,7 @@ import { numberNewDoc } from "@/lib/stores/estimate-numbers";
 import { canSetPoReceived } from "@/lib/opportunities";
 import { createAssignment } from "@/lib/stores/assignments";
 import { getDb, withTransaction } from "@/db";
+import { liveKey } from "@/lib/estimate-live-save/live-key";
 import { DOC_TABLES } from "@/db/doc-tables";
 import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
@@ -316,6 +317,9 @@ export type Quote = {
   review: QuoteReview;
   createdAt: number;
   updatedAt: number;
+  /** Estimator live save: who last saved through the Estimator, for the "changed somewhere else" banner.
+   *  Stamped only by saveQuoteAction; other writers leave it alone, so it can name the wrong change — the banner handles a missing one. */
+  lastSavedBy?: { name: string; at: number };
   history: QuoteHistoryEntry[];
   /** Daylite quote pipeline (spec §3.4) — system quotes only; absent on service
    *  quotes. Settings-editable; normalize-on-read fills it for pre-pipeline docs. */
@@ -1045,6 +1049,22 @@ export async function update(
     }
     Object.assign(q, clean, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
+  });
+}
+
+export type CheckedUpdate = { quote: Quote | null; conflict: { by: string | null; at: number | null } | null };
+
+/**
+ * Estimator live save: the change check and the write, in one transaction under the quote row lock. A stale `baseKey`
+ * writes nothing and says who last saved. No `baseKey` (a tab from before this deploy, or Keep mine) is not checked.
+ */
+export async function updateCheckingLiveKey(id: string, baseKey: string | undefined, patch: Partial<Quote>): Promise<CheckedUpdate> {
+  if (baseKey === undefined) return { quote: await update(id, patch), conflict: null };
+  return withTransaction(async () => {
+    await lockQuoteRow(id);
+    const cur = await get(id);
+    if (cur && liveKey(cur) !== baseKey) return { quote: null, conflict: { by: cur.lastSavedBy?.name ?? null, at: cur.lastSavedBy?.at ?? null } };
+    return { quote: await update(id, patch), conflict: null };
   });
 }
 
