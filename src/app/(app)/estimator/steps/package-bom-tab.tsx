@@ -94,7 +94,7 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
     logoDark,
     purchasePerksDocLine,
     loadedId,
-    pdfDirty,
+    contentUnsaved,
     togglePdf,
   } = s;
   const portal = initial.portal;
@@ -198,7 +198,7 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
               >
                 {BOOK_COVER_COPY.estimateButton}
               </a>
-              {pdfDirty && <span style={{ color: "#8a6d1f" }}>{BOM_TAB_COPY.saveFirst}</span>}
+              {contentUnsaved && <span style={{ color: "#8a6d1f" }}>{BOM_TAB_COPY.saveFirst}</span>}
             </>
           ) : (
             <span aria-disabled="true" style={{ color: "#9aa0ab", fontWeight: 600 }}>

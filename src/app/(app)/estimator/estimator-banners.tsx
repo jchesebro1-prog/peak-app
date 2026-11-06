@@ -4,6 +4,7 @@ import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
 import { PurchasePerksBanner } from "@/components/rewards/purchase-perks-banner";
 import type { NextStepAction } from "@/lib/quote-next-step";
 import type { EstimatorState } from "./use-estimator-state";
+import { LiveConflictBanner } from "./live-save-chip";
 import { tierRepriceMessage } from "./tier-reprice";
 import { repriceLocked, tierLockedMessage } from "@/lib/estimate-reprice/lock";
 
@@ -20,6 +21,7 @@ export function EstimatorBanners({ s, onActed }: { s: EstimatorState; onActed: (
     creditInfo,
     customerId,
     gateRefused,
+    live,
     loadedId,
     moveNotice,
     next,
@@ -40,6 +42,7 @@ export function EstimatorBanners({ s, onActed }: { s: EstimatorState; onActed: (
   } = s;
   return (
     <>
+      <LiveConflictBanner live={live} />
       {/* #284 — the next step's note (a send-back note, the limit chip, an
           approval line), always visible; the actions live in the toolbar. */}
       {loadedId && next?.strip && (

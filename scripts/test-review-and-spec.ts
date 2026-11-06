@@ -70553,8 +70553,8 @@ import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate
   ok(tab.includes('href={bomPdfPath(loadedId, true)} target="_blank" rel="noopener noreferrer"') && tab.includes('href={bomPdfPath(loadedId, false)} target="_blank" rel="noopener noreferrer"') &&
      panelSrc.includes('cover-pdf?download=1`} target="_blank" rel="noopener noreferrer"'),
     "BOM PDF tab + Cover panel: the PDF download links open in a new tab (a failed render is plain text and must not replace the Estimator)");
-  ok(tab.includes("href={bomPdfPath(loadedId, true)}") && tab.includes("href={bomPdfPath(loadedId, false)}") && tab.includes("{pdfDirty && ") && !/from "@\/lib\/stores\//.test(tab),
-    "BOM PDF tab: Download / Open use bomPdfPath, the save-first note follows pdfDirty, and the tab still imports no store");
+  ok(tab.includes("href={bomPdfPath(loadedId, true)}") && tab.includes("href={bomPdfPath(loadedId, false)}") && tab.includes("{contentUnsaved && ") && !/from "@\/lib\/stores\//.test(tab),
+    "BOM PDF tab: Download / Open use bomPdfPath, the save-first note follows contentUnsaved (pdfDirty when not live), and the tab still imports no store");
   const smoke = rd("scripts/smoke-routes.ts");
   ok(smoke.includes('{ route: "/api/quotes/Q-0/bom-pdf", expectNotFound: true }') && smoke.includes('{ route: "/print/quote/Q-2041?view=bom", expectNotFound: true }') && smoke.includes('{ route: "/print/quote/Q-2041?view=bom&part=main", expectNotFound: true }'), "BOM PDF: smoke covers the 404 paths");
 }

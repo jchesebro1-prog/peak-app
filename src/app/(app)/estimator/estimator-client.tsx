@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import type { NextStepAction } from "@/lib/quote-next-step";
 import { parseStep, stepAfterAction, stepSearch, type EstimateStep } from "@/lib/estimate-steps/steps";
 import { packageTabSearch } from "@/lib/estimate-steps/package-tabs";
 import { estimateReadiness } from "@/lib/estimate-steps/readiness";
+import { retryQuotePdfAction } from "@/app/(app)/quotes/pdf-actions";
 import { CSS } from "./estimator-styles";
 import { useEstimatorState } from "./use-estimator-state";
 import type { EstimatorProps } from "./types";
@@ -28,6 +29,7 @@ export default function EstimatorClient(props: EstimatorProps) {
   const step: EstimateStep = s.phone ? "review" : parseStep(params.get("step"));
   const goStep = (to: EstimateStep) => {
     if (to === step) return;
+    void s.live.flush();
     window.history.pushState(null, "", window.location.pathname + stepSearch(window.location.search, to));
   };
   /** #333 (Q4): Build's presentation chip → Build package → Client package → Systems (the one presentation editor). */
@@ -43,6 +45,29 @@ export default function EstimatorClient(props: EstimatorProps) {
     if (!s.loadedId || params.get("id") === s.loadedId) return;
     window.history.replaceState(null, "", window.location.pathname + stepSearch(window.location.search, step, s.loadedId));
   }, [s.loadedId, params, step]);
+  // Customer review and Send & track show and send the rendered PDF. A live save only marks it out of date, so render it
+  // on the way in: a save that renders when the screen is ahead of it, a plain render when it's out of date from before a reload.
+  const renderAskedRef = useRef<string | null>(null);
+  const needsPdf = !!s.loadedId && (step === "review" || step === "send") && s.liveMode;
+  useEffect(() => {
+    if (!needsPdf) {
+      renderAskedRef.current = null;
+      return;
+    }
+    if (s.pdfDirty) {
+      // Only after a real edit: load-time derived changes can read as dirty too, and opening must never write (a phone opens straight on review).
+      if (s.live.edited) void s.saveNow();
+      return;
+    }
+    if (s.pdf && !s.pdf.outOfDate) return;
+    // Once per visit: a failed render shows its own Retry in the preview.
+    if (renderAskedRef.current === s.loadedId) return;
+    renderAskedRef.current = s.loadedId;
+    void retryQuotePdfAction(s.loadedId as string).then((view) => {
+      if (view) s.setPdf(view);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsPdf, s.pdfDirty, s.pdf, s.loadedId, s.live.edited]);
   const badges = useMemo(
     () =>
       estimateReadiness({

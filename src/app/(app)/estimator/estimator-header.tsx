@@ -1,5 +1,6 @@
 "use client";
 
+import { LiveSaveChip, UndoRedoButtons } from "./live-save-chip";
 import { CTX_LABEL, DARK_SELECT, META_HEAD, META_HINT, META_SECTION, META_SUB, META_TOGGLE, STATUS_DOT, STATUS_LABEL } from "./estimator-styles";
 import { INSTALL_TIMEFRAMES, type EstimatorState } from "./use-estimator-state";
 import type { NextStepAction } from "@/lib/quote-next-step";
@@ -47,6 +48,9 @@ export function EstimatorHeader({
     customerId,
     customerOptions,
     doSave,
+    liveMode,
+    live,
+    undo,
     installTimeframe,
     justSaved,
     loadedId,
@@ -282,33 +286,38 @@ export function EstimatorHeader({
               {STATUS_LABEL[status] || status}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={doSave}
-            disabled={statusChanging || tierResolving}
-            title={
-              statusChanging
-                ? "A status change is still saving — try again in a moment."
-                : tierResolving
-                  ? "Looking up the customer’s pricing tier — Save in a moment."
-                  : undefined
-            }
-            style={{
-              fontFamily: "var(--font-ui)",
-              fontSize: 13,
-              fontWeight: 600,
-              border: "none",
-              borderRadius: 8,
-              padding: "9px 15px",
-              cursor: statusChanging || tierResolving ? "not-allowed" : "pointer",
-              opacity: statusChanging || tierResolving ? 0.6 : 1,
-              ...(justSaved
-                ? { background: "#22361f", color: "#5fd29a" }
-                : { background: "#2b2e35", color: "#cfd3da" }),
-            }}
-          >
-            {justSaved ? "Saved ✓" : "Save"}
-          </button>
+          <UndoRedoButtons undo={undo} />
+          {liveMode ? (
+            <LiveSaveChip live={live} />
+          ) : (
+            <button
+              type="button"
+              onClick={doSave}
+              disabled={statusChanging || tierResolving}
+              title={
+                statusChanging
+                  ? "A status change is still saving — try again in a moment."
+                  : tierResolving
+                    ? "Looking up the customer’s pricing tier — Save in a moment."
+                    : undefined
+              }
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: 13,
+                fontWeight: 600,
+                border: "none",
+                borderRadius: 8,
+                padding: "9px 15px",
+                cursor: statusChanging || tierResolving ? "not-allowed" : "pointer",
+                opacity: statusChanging || tierResolving ? 0.6 : 1,
+                ...(justSaved
+                  ? { background: "#22361f", color: "#5fd29a" }
+                  : { background: "#2b2e35", color: "#cfd3da" }),
+              }}
+            >
+              {justSaved ? "Saved ✓" : "Save"}
+            </button>
+          )}
           {/* #284 — the one next-step control: pill · Submit / Approve / Send → · ⋯ */}
           {loadedId && next && (
             <QuoteNextStep

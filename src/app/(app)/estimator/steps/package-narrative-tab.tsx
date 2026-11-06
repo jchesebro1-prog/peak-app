@@ -74,6 +74,7 @@ export function PackageNarrativeTab({ s, active, presentationHref, onOpenPresent
     onCoverSummary,
     onNotIncluded,
     pdfDirty,
+    contentUnsaved,
     packageDoc,
     packageDocFlushRef,
     packageDocOverDraft,
@@ -332,7 +333,7 @@ export function PackageNarrativeTab({ s, active, presentationHref, onOpenPresent
         <CoverPackagePanel
           savedQuoteId={loadedId}
           canEdit
-          dirty={pdfDirty}
+          dirty={contentUnsaved}
           coverSummary={coverSummary}
           onCoverSummary={onCoverSummary}
           notIncluded={notIncluded}

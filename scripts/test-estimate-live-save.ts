@@ -6,6 +6,7 @@ import type { Ok } from "./test-inbox-org";
 import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
 import { liveSaveHookChecks } from "./test-estimate-live-save-hook";
 import { canAutoSave, DEBOUNCE_MS, flushLanded, INITIAL_LIVE_STATE, liveStatusOf, reduceLive, reportedLiveStatus, retryDelayMs, type LiveGate } from "../src/lib/estimate-live-save/scheduler";
+import { chipLabel, conflictMessage, LIVE_COPY } from "../src/lib/estimate-live-save/copy";
 import { liveKey } from "../src/lib/estimate-live-save/live-key";
 import { limitToLivePatch, liveSaveEligible, liveSaveRefusal, saveAdoptsStatus, saveGoesLive } from "../src/lib/estimate-live-save/rules";
 import { COALESCE_MS, diffEdit, emptyUndoHistory, mapSnapshots, recordEdit, takeRedo, takeUndo, UNDO_CAP, type UndoSnap } from "../src/lib/estimate-live-save/undo";
@@ -258,6 +259,19 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(saveAdoptsStatus({ mode: "force", isLive: true, resStatus: "draft", baseStatus: "draft" }) === false, "M1 rule: Keep mine leaves the pick too");
   ok(saveAdoptsStatus({ mode: "force", isLive: false, resStatus: "sent", baseStatus: "sent" }) === true, "M1 rule: a non-live Keep mine resyncs");
   ok(saveAdoptsStatus({ mode: "manual", isLive: true, resStatus: "draft", baseStatus: "draft" }) === true, "M1 rule: a manual Save always resyncs");
+
+  // copy
+  ok(chipLabel("saved") === "Saved ✓" && chipLabel("saving") === "Saving…" && chipLabel("dirty") === "Saving…", "chip: saved and saving");
+  ok(chipLabel("failed") === "Not saved — Retry" && chipLabel("refused") === "Not saved", "chip: failed and refused");
+  ok(conflictMessage({ by: "Isaac", at: null }).includes("saved by Isaac"), "banner: names who saved");
+  ok(conflictMessage({ by: null, at: null }) === LIVE_COPY.changedElsewhere, "banner: no name is the plain sentence");
+  // Wiring
+  const clientSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  ok(clientSrc.includes("s.live.flush()"), "steps: a step change flushes the live save");
+  ok(clientSrc.includes("retryQuotePdfAction("), "steps: an out-of-date stored PDF renders on Customer review and Send");
+  ok(clientSrc.includes("if (s.live.edited) void s.saveNow()"), "steps: stepping in only saves after a real edit — opening never writes");
+  const bomSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/steps/package-bom-tab.tsx"), "utf8");
+  ok(bomSrc.includes("contentUnsaved && <span"), "hints: the BOM tab's Save first reads contentUnsaved");
 
   await liveSaveHookChecks(ok);
 
