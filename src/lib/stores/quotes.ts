@@ -24,6 +24,7 @@ import { canSetPoReceived } from "@/lib/opportunities";
 import { createAssignment } from "@/lib/stores/assignments";
 import { getDb, withTransaction } from "@/db";
 import { liveKey } from "@/lib/estimate-live-save/live-key";
+import { liveSaveRefusal } from "@/lib/estimate-live-save/rules";
 import { DOC_TABLES } from "@/db/doc-tables";
 import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
@@ -1052,19 +1053,33 @@ export async function update(
   });
 }
 
-export type CheckedUpdate = { quote: Quote | null; conflict: { by: string | null; at: number | null } | null };
+export type CheckedUpdate = {
+  quote: Quote | null;
+  conflict: { by: string | null; at: number | null } | null;
+  /** A live write found the stored quote no longer eligible (e.g. moved to Sent) — nothing was written. */
+  refused?: string;
+  /** The change key of the row as this transaction left it (only when the write took the transaction). */
+  liveKey?: string;
+};
 
 /**
  * Estimator live save: the change check and the write, in one transaction under the quote row lock. A stale `baseKey`
- * writes nothing and says who last saved. No `baseKey` (a tab from before this deploy, or Keep mine) is not checked.
+ * writes nothing and says who last saved. No `baseKey` (a tab from before this deploy, or Keep mine) is not checked,
+ * but a `live` write always takes the lock and re-checks eligibility on the locked read; non-live writes never check status.
  */
-export async function updateCheckingLiveKey(id: string, baseKey: string | undefined, patch: Partial<Quote>): Promise<CheckedUpdate> {
-  if (baseKey === undefined) return { quote: await update(id, patch), conflict: null };
+export async function updateCheckingLiveKey(id: string, baseKey: string | undefined, patch: Partial<Quote>, opts: { live?: boolean } = {}): Promise<CheckedUpdate> {
+  if (baseKey === undefined && !opts.live) return { quote: await update(id, patch), conflict: null };
   return withTransaction(async () => {
     await lockQuoteRow(id);
     const cur = await get(id);
-    if (cur && liveKey(cur) !== baseKey) return { quote: null, conflict: { by: cur.lastSavedBy?.name ?? null, at: cur.lastSavedBy?.at ?? null } };
-    return { quote: await update(id, patch), conflict: null };
+    if (opts.live && cur) {
+      const refused = liveSaveRefusal(cur);
+      if (refused) return { quote: null, conflict: null, refused };
+    }
+    if (baseKey !== undefined && cur && liveKey(cur) !== baseKey) return { quote: null, conflict: { by: cur.lastSavedBy?.name ?? null, at: cur.lastSavedBy?.at ?? null } };
+    const quote = await update(id, patch);
+    const after = quote ? await get(id) : null;
+    return { quote, conflict: null, ...(after ? { liveKey: liveKey(after) } : {}) };
   });
 }
 

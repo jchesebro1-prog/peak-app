@@ -170,6 +170,14 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(/if \(!live\) refresh\(\);/.test(saveSrc), "action: a live save skips the whole-layout refresh");
   ok(/if \(q && !live\) \{\s*const decision = resolveSaveStatusChange/.test(saveSrc), "action: a live save never acts on status");
   ok(saveSrc.includes("lastSavedBy"), "action: a save stamps who saved");
+  ok(/live && prior \? prior\.customerId \|\| null : payload\.customerId \|\| null, loadedId/.test(saveSrc), "action: rewards credit reads the stored customer on a live save");
+  ok(/live && prior\s*\? await resolveTier\(prior\.customerId/.test(saveSrc), "action: a live save's tier reads the stored customer");
+  ok(/live && loadedId \? \(limitToLivePatch\(patch\)/.test(saveSrc), "action: the patch is limited on live && loadedId");
+  ok(/if \(live && loadedId && !prior\) return refusedSave\(null, LIVE_MISSING\)/.test(saveSrc), "action: a live save on a missing quote is refused with a reason");
+  ok(/if \(live && !written\.quote && !written\.conflict\) return refusedSave\(prior, LIVE_MISSING\)/.test(saveSrc), "action: a vanished row on a live save is refused with the same reason");
+  ok(/\{ live \}\);/.test(saveSrc) && saveSrc.includes("written.refused") && saveSrc.includes("notLive: true"), "action: the locked eligibility refusal maps to notLive");
+  ok(saveSrc.includes("written.liveKey"), "action: the returned key comes from inside the transaction");
+  ok(saveSrc.includes("if (!live && payload.status !== \"draft\")"), "action: a live create never acts on status");
   ok(!/\bdel\(/.test(actionsSrc), "action: saving never deletes a vendor quote's Blob file, so Undo can bring the attachment back");
 
 }
@@ -193,6 +201,20 @@ export async function liveSaveDbChecks(ok: Ok) {
 
     const unchecked = await updateCheckingLiveKey(id, undefined, { value: 300 } as never);
     ok(!unchecked.conflict && unchecked.quote?.value === 300, "checked write: no key is not checked (a tab from before this deploy)");
+
+    // The transaction's own key, and the locked eligibility re-check.
+    const own = await updateCheckingLiveKey(id, liveKey((await get(id))!), { value: 310 } as never, { live: true });
+    ok(!own.refused && own.liveKey === liveKey((await get(id))!), "checked write: the returned key is the stored quote's key");
+    const keepMine = await updateCheckingLiveKey(id, undefined, { value: 320 } as never, { live: true });
+    ok(!keepMine.refused && keepMine.quote?.value === 320 && keepMine.liveKey === liveKey((await get(id))!), "checked write: live with no key writes and returns its key");
+    await update(id, { status: "sent" } as never);
+    const sentKey = await updateCheckingLiveKey(id, liveKey((await get(id))!), { value: 999 } as never, { live: true });
+    ok(!!sentKey.refused && sentKey.quote === null && (await get(id))!.value === 320, "checked write: a live write on a sent quote writes nothing (with a key)");
+    const sentNoKey = await updateCheckingLiveKey(id, undefined, { value: 998 } as never, { live: true });
+    ok(!!sentNoKey.refused && sentNoKey.quote === null && (await get(id))!.value === 320, "checked write: a live write on a sent quote writes nothing (Keep mine)");
+    const manual = await updateCheckingLiveKey(id, undefined, { value: 330 } as never);
+    ok(!manual.refused && manual.quote?.value === 330, "checked write: a non-live write on a sent quote still writes");
+    await update(id, { status: "draft" } as never);
 
     const bumpedBefore = (await get(id))!.updatedAt;
     await update(id, { quoteNote: "header" } as never);

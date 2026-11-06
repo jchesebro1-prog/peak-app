@@ -446,6 +446,9 @@ function vendorQuoteRows(raw: unknown): VendorQuote[] {
     : [];
 }
 
+/** A live save on a quote that is gone. */
+const LIVE_MISSING = "This estimate no longer exists — nothing was saved.";
+
 /** A refused save (nothing written): no id and no number, so the client keeps the edit visibly unsaved instead of
  *  adopting a returned id as "saved" (clearing the PDF-dirty / tier-reprice flags, taking the rev/date). */
 function refusedSave(prior: Quote | null, error: string): SaveResult {
@@ -482,6 +485,7 @@ export async function saveQuoteAction(
   const prior = loadedId ? await get(loadedId) : null;
   const live = payload.live === true;
   const renderPdf = !live || payload.renderPdf === true;
+  if (live && loadedId && !prior) return refusedSave(null, LIVE_MISSING);
   if (live && prior) {
     const refusal = liveSaveRefusal(prior);
     if (refusal) return { ...refusedSave(prior, refusal), notLive: true };
@@ -545,7 +549,7 @@ export async function saveQuoteAction(
   // #282 phase 2: a negative price only on the Rewards credit line, and that
   // line clamped to what the customer can spend here — refused, not stored,
   // when any other line carries one.
-  const credit = await settleRewardCredit(sellSanitized, prior, payload.customerId || null, loadedId, can("create", user.roles));
+  const credit = await settleRewardCredit(sellSanitized, prior, live && prior ? prior.customerId || null : payload.customerId || null, loadedId, can("create", user.roles));
   if (!credit.ok) {
     return {
       ok: false,
@@ -627,6 +631,7 @@ export async function saveQuoteAction(
   const savedBy = { name: user.name, at: Date.now() };
   const writePatch: QuotePatch = live && loadedId ? (limitToLivePatch(patch) as QuotePatch) : patch;
   let q: Quote | null = null;
+  let liveKeyOut: string | undefined;
   let statusError: string | undefined;
   // #355 review M2: set when this save's status move put the won version back.
   let reopenedAtWon = false;
@@ -666,9 +671,12 @@ export async function saveQuoteAction(
   storedVendorQuotes = vpdf.vendorQuotes;
   if (loadedId) {
     storedVendorQuotes = await storeVendorQuotes(loadedId, storedVendorQuotes);
-    const written = await updateCheckingLiveKey(loadedId, payload.baseKey, { ...writePatch, vendorQuotes: storedVendorQuotes, lastSavedBy: savedBy } as QuotePatch);
+    const written = await updateCheckingLiveKey(loadedId, payload.baseKey, { ...writePatch, vendorQuotes: storedVendorQuotes, lastSavedBy: savedBy } as QuotePatch, { live });
+    if (written.refused) return { ...refusedSave(prior, written.refused), notLive: true };
+    if (live && !written.quote && !written.conflict) return refusedSave(prior, LIVE_MISSING);
     if (written.conflict) return { ...refusedSave(prior, "This estimate changed somewhere else — nothing was written."), conflict: written.conflict };
     q = written.quote;
+    liveKeyOut = written.liveKey;
     if (q && vpdf.fresh.length) await recordVendorPdfOutcomes(vpdf.fresh, storedVendorQuotes, loadedId);
     // #348 slice 4 — a vendor quote's company joins the estimate as a vendor party, once (D-next-2). Never fails the save.
     if (q) {
@@ -703,6 +711,7 @@ export async function saveQuoteAction(
         try {
           const beforeMove = q;
           q = (await setStatus(loadedId, payload.status, user.name)) ?? q;
+          liveKeyOut = undefined; // setStatus ran after the write: re-read below
           reopenedAtWon = reopenedAtWonVersion(beforeMove, q);
           repriced = repricedNow(beforeMove, q);
         } catch (e) {
@@ -780,7 +789,7 @@ export async function saveQuoteAction(
     if (q && vpdf.fresh.length) await recordVendorPdfOutcomes(vpdf.fresh, storedVendorQuotes, created.id);
     // #222: same ordering as the update branch.
     if (q && renderPdf) pdfState = await scheduleQuotePdf(created.id);
-    if (payload.status !== "draft") {
+    if (!live && payload.status !== "draft") {
       // Punch #60: setStatus's approval gate now applies here too. A brand
       // new quote can never already carry an approval record, so this can
       // only succeed for "lost" — and "won"/"sent" would always be refused.
@@ -824,7 +833,7 @@ export async function saveQuoteAction(
     vendorQuotes: storedVendorQuotes,
     pdf: pdfState,
     // Read back from the store: the key must match what the next check will read.
-    liveKey: q?.id ? liveKey((await get(q.id)) ?? q) : undefined,
+    liveKey: liveKeyOut ?? (q?.id ? liveKey((await get(q.id)) ?? q) : undefined),
     next: q ? await quoteNextStepFor(q, user) : null,
     // #282 follow-up: a save that moved the quote to Lost cleared its credit.
     rewardCredit: q?.status === "lost" ? quoteRewardCredit(q) : credit.credit,
