@@ -306,6 +306,16 @@ export async function liveSaveHookChecks(ok: Ok) {
       t.state = { ...t.state, sections: A };
       t.settle();
       ok(!t.api.canUndo, "undo hook: a change landing with a pending clear is not a step");
+      // The real order: the state hook's setSections flags from a lazy updater, which runs AFTER clearHistory (a move out).
+      t.api.clearHistory({ pendingChange: true });
+      t.api.flagEdit();
+      t.state = { ...t.state, sections: B };
+      t.settle();
+      ok(!t.api.canUndo, "undo hook: a flag arriving after a pending clear does not turn the swallowed change into a step");
+      t.edit(C);
+      ok(t.api.canUndo, "undo hook: the edit after that swallowed change records");
+      t.api.clearHistory();
+      t.auto(A);
       t.edit(B);
       ok(t.api.canUndo, "undo hook: edits record again after a clear");
       let prevented = 0;

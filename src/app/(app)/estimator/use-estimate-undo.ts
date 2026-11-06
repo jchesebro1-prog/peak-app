@@ -53,6 +53,9 @@ export function useEstimateUndo(opts: {
   const currentRef = useRef(snap);
   const flagRef = useRef<{ label?: string } | null>(null);
   const applyingRef = useRef(false);
+  /** A clear is waiting for its change to land. The state hook's setSections runs its flag inside a lazy updater, i.e. in the
+   *  render AFTER clearHistory, so a flag arriving while this is set belongs to the change the clear swallows. */
+  const clearingRef = useRef(false);
 
   useEffect(() => {
     const prev = currentRef.current;
@@ -60,6 +63,7 @@ export function useEstimateUndo(opts: {
     currentRef.current = snap;
     if (applyingRef.current) {
       applyingRef.current = false;
+      clearingRef.current = false;
       flagRef.current = null;
       return;
     }
@@ -99,6 +103,7 @@ export function useEstimateUndo(opts: {
   }, [undo, redo]);
 
   const flagEdit = useCallback((label?: string) => {
+    if (clearingRef.current) return;
     applyingRef.current = false;
     flagRef.current = { label: label ?? flagRef.current?.label };
   }, []);
@@ -106,6 +111,7 @@ export function useEstimateUndo(opts: {
     (opts?: { pendingChange?: boolean }) => {
       flagRef.current = null;
       applyingRef.current = !!opts?.pendingChange;
+      clearingRef.current = !!opts?.pendingChange;
       write(emptyUndoHistory());
     },
     [write]
