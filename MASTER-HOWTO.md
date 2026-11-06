@@ -847,7 +847,7 @@ Tapping the card (or scanning the QR) opens your page with **Save contact** and 
 - Go-live "Clear demo data" also deletes booth captures along with leads (D1329).
 - After updating the native apps (`npx cap sync`, rebuild), iOS asks for camera access the first time you scan.
 
-## 13. Pipe and lineset configurators (#373, D1332–D1336)
+## 13. Pipe and lineset configurators (#373, D1333–D1337)
 
 Both pop-ups work from types you set up once.
 

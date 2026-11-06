@@ -13956,22 +13956,26 @@ A scanned booth capture carries its card photo (up to about 335 KB of base64) in
 
 The public card (`/c/<slug>`) and its Save contact vCard now show a company website and the card owner's office address. The website is a new Settings → Branding field (`AppSettingsData.website`), normalized to `https://` when no scheme is typed and validated on the server (http/https only, a dotted host, no credentials, at most 200 characters); a bad value is refused before any write, and a blank clears it. The address is the person's office from Settings → Team, via `baseOffice` (so a person with no office gets the quote-default office, else the first), shown under the company name and written as `ADR;TYPE=WORK` only when the office has a street or city. One pure `contactCardFields` (`src/lib/booth/card-fields.ts`) builds the card page, Save contact and the vCard attached to the share-back draft, so the three can't drift.
 
-## D1332. Pipe and lineset lines share one `rigging` field, and Track is left alone (#373, 2026-11-06)
+## D1332. The Review spreadsheet lists labor inside each system (#374, 2026-11-06)
+
+Jeff asked for labor on the Review spreadsheet as one man-hours row, a Travel row (miles, per diem, hotel) and Shop & engineering, and chose those rows inside each system over one block at the end. They sit inside the System cost and System markup sums, so cost + markup + fees now equals the system's price, which used to read short by the labor sell; labor-only systems get a block. Lift rental and Project allowance were added as their own rows, only when they have a cost, because they would otherwise leave the sheet short; lift stays out of Travel because Jeff named only miles, per diem and hotel. Man-hours come from the saved labor draft (`reg + otHrs`), then crew × days × 8 (noted as estimated), then an hour-unit line's quantity. A row whose hours don't cover all its money prints as qty 1 with "Hours not recorded" rather than a misleading rate. The parts-list rows and CSV helpers stay parts-only.
+
+## D1333. Pipe and lineset lines share one `rigging` field, and Track is left alone (#373, 2026-11-06)
 
 A configured pipe or lineset line carries its inputs in `SpecItem.rigging` and its parts in `components`, sold as one lot line with a `PIP-` or `LNS-` SKU. `isConfiguredLine` joins Track at the three readers that mean "a tier-seeded line with its parts in components": tier re-pricing and the two copy-pricing paths (`copy-system.ts`, `copy-pricing.ts`). The other readers (assembly members, project discounts, the BOM model, the custom-line edit guard and the line's edit click) check `rigging` directly. Track's own code and data are untouched, so saved quotes and cut sheets can't move.
 
-## D1333. Lineset cable is actual routing; Quick Design keeps its formula (#373, 2026-11-05)
+## D1334. Lineset cable is actual routing; Quick Design keeps its formula (#373, 2026-11-05)
 
 Jeff chose actual routing: lift lines × (grid height + width ÷ 2 + allowance). The allowance is set per lineset type, defaults to 10' and can be changed per line. Quick Design stays at 2G + W, so the same job shows less cable in the Estimator: 1,680' against 2,880' on 6 sets at 40' × 40'. Whether Quick Design should move to the same formula is an open question for Jeff.
 
-## D1334. A Hardware assembly role sells at the tier on its resolved cost (#373, 2026-11-05)
+## D1335. A Hardware assembly role sells at the tier on its resolved cost (#373, 2026-11-05)
 
 A lineset role can be a catalog part or a Hardware assembly. An assembly's included members use their resolved cost and sell at the tier, ignoring the assembly's own sell price, and its add-ons are left out. That keeps the whole line on one seed markup, so a tier change re-prices it like any other configured line. A member priced on its own cost override (set in Design → Assemblies) is flagged `fixedCost` on the line's part; Copy, Load and Move keep that cost and move only its sell to the landing tier, while a member at plain catalog cost still takes today's. An assembly with no included members (all add-ons) blocks with its own message.
 
-## D1335. Unit mismatches warn and never block (#373, 2026-11-05)
+## D1336. Unit mismatches warn and never block (#373, 2026-11-05)
 
 A cable or hand line part that doesn't sell by the foot, or a pipe stick that does, shows a warning on the rules screen and in the configurator. It never blocks saving, because catalog unit text varies too much to trust as a hard rule. The same check covers an assembly's members, named by SKU. A part with no cost and no list price warns the same way ("adds nothing to this line") instead of quietly selling at $0.
 
-## D1336. Add pipe is for new curtains only and keeps no link (#373, 2026-11-05)
+## D1337. Add pipe is for new curtains only and keeps no link (#373, 2026-11-05)
 
 The curtain configurator's Add pipe toggle appears only when adding a curtain. It adds a separate pipe line whose run follows the curtain's width until the curtain is added, then keeps no link to the curtain, unlike Track's curtain-track key. Quantity pre-fills from the curtain's quantity. A bi-parting pair at quantity 2 and 20' wide therefore pre-fills 2 × 20', not 1 × 40'; the fields can be edited before adding.

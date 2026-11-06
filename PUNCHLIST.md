@@ -12978,7 +12978,7 @@ Jeff, Oct 30: the NFC contact card should carry the company website and an offic
 - Fill Settings → Branding → Website.
 - Set Office on his Team row if he's not at the main office.
 
-## 373. Pipe and lineset configurators — DONE 2026-11-06 on `feat/373-pipe-lineset` (D1332–D1336)
+## 373. Pipe and lineset configurators — DONE 2026-11-06 on `feat/373-pipe-lineset` (D1333–D1337)
 
 Jeff, 2026-11-05: add a simple pipe input to the Estimator, for curtains and in general, that works like Track, and a way to add the hardware for a typical counterweight lineset (aircraft cable, terminations and so on). Spec `docs/superpowers/specs/2026-11-05-pipe-lineset-configurators-design.md`.
 
@@ -12994,4 +12994,15 @@ Jeff, 2026-11-05: add a simple pipe input to the Estimator, for curtains and in 
 - Create at least one Pipe type and one Lineset type on production, with their parts mapped. The scratch check used test parts, so nothing has been tried on real catalog parts yet.
 - Check the cable allowance. 10' is a placeholder.
 - Decide later whether Quick Design should move to the same cable formula (2,880' against 1,680' on the same job).
-- Decide whether Add pipe on a bi-parting curtain should pre-fill 1 × the full width, as Track does, instead of copying the curtain's quantity and width (D1336).
+- Decide whether Add pipe on a bi-parting curtain should pre-fill 1 × the full width, as Track does, instead of copying the curtain's quantity and width (D1337).
+
+## 374. Review spreadsheet: labor rows — DONE 2026-11-06 on `feat/datasheet-package-download` (D1332)
+
+Jeff, Nov 6: the estimator Review spreadsheet should show labor as one man-hours row, travel and shop & engineering. `reviewLaborRows` (`src/app/(app)/estimator/parts-csv.ts`) adds, per system after its parts: Labor (man-hours, Qty = hours), Travel (miles + per diem + hotel, itemized in Notes), Shop & engineering, plus Lift rental and Project allowance when they have a cost. All carry Price source "Labor" and sit in the System cost / markup sums, so a system's rows + fees equal its price; labor-only systems get a block and export. No migration, no change to any price or customer document.
+
+**Gates:** tsc 0 errors; test:specs ALL PASSED, 26,317 PASS / 0 FAIL (23 `#374` checks, plus the markup-settings run); test:smoke ALL PASSED; eslint clean on the three source files. Browser: a test labor group on an unsaved dev estimate exported 200 hr, and cost + markup + fees = $37,275.00, the estimate's Quoted total; nothing was saved.
+
+**Remaining (Jeff):**
+- Open a real estimate's sheet in Excel.
+- Freight % is charged on labor cost when labor sits in a materials system (existing rule, `systemFreightBase`). The sheet now makes it visible: the test estimate's freight went from $100.00 to $480.20. Decide whether labor should bear freight.
+

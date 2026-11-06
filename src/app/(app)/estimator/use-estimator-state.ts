@@ -2461,7 +2461,7 @@ export function useEstimatorState(props: EstimatorProps) {
       if (!blocks.length) {
         setActionError(null);
         setGateRefused(false);
-        setActionNotice("No parts to export yet.");
+        setActionNotice("No parts or labor to export yet.");
         return;
       }
       const name = loadedId ? quoteId : projectName || quoteId;

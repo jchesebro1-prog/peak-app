@@ -1721,7 +1721,7 @@ See `.env.example`.
     resolves), real taps and a real card scan, a production check after 0042, and
     `QUOTE_PDF_ORIGIN`. Open: keep captures through the go-live wipe (D1329)? Punch item #371.
 
-72. ✅ **Pipe and lineset configurators** (#373, D1332–D1336) — two more Track-style
+72. ✅ **Pipe and lineset configurators** (#373, D1333–D1337) — two more Track-style
     pop-ups on every Estimator system. **+ Configure pipe** works out sticks,
     splices and clamps from a run; **+ Configure lineset** works out aircraft
     cable (lift lines × (grid + width ÷ 2 + allowance)), hand line, terminations

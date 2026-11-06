@@ -4,7 +4,7 @@ Jeff, 2026-11-05: add a simple pipe input to the Estimator, for curtains and in 
 track; then a way to add the hardware for a typical counterweight lineset (aircraft cable, terminations and so
 on), using the logic from Quick Design and the Grid.
 
-Punch #373. Decisions D1332 onward (provisional: recheck against `origin/main` before the docs step).
+Punch #373. Decisions D1333 onward (provisional: recheck against `origin/main` before the docs step).
 
 ## Decisions Jeff made
 

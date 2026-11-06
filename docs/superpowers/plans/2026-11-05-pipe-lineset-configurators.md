@@ -23,7 +23,7 @@
 - Prices: every part `catalogAddPrice(cost, list, tierMargin)`; line sell `round2(sellAt(Σ costed, seedMarkupOf(tierMargin)) + Σ listed)`, exactly as `trackBom`.
 - Use "Estimating Rules → Pipe types" and "Estimating Rules → Lineset types" in every setup message. UI copy says "lineset", one word.
 - Comments follow the code around them: terse, tagged `#373`.
-- Punch #373 and D1332 onward are provisional. Task 7 rechecks them against `origin/main`.
+- Punch #373 and D1333 onward are provisional. Task 7 rechecks them against `origin/main`.
 
 ---
 
@@ -2819,17 +2819,17 @@ git show "origin/main:DECISIONS.md" | grep -oE "^## D[0-9]+" | tail -1
 git show "origin/main:AGENTS.md" | grep -oE "^[0-9]+\. " | tail -1
 ```
 
-If main moved, merge it now and resolve `PUNCHLIST.md` / `DECISIONS.md` as a real 3-way merge. If #373 or D1332 is taken, renumber in this branch first, covering the spec, plan, code comments and check labels (`git grep -n "#373"`).
+If main moved, merge it now and resolve `PUNCHLIST.md` / `DECISIONS.md` as a real 3-way merge. If #373 or D1333 is taken, renumber in this branch first, covering the spec, plan, code comments and check labels (`git grep -n "#373"`).
 
 Append to `DECISIONS.md`, in that file's existing format, one entry each:
 
-- **D1332.** Pipe and lineset lines share one `SpecItem.rigging` field, and `isConfiguredLine` joins Track at the readers that mean "tier-seeded line with parts in components". Track is untouched, so saved quotes and cut sheets can't move.
-- **D1333.** Lineset cable is actual routing: lift lines × (grid + width ÷ 2 + allowance, default 10'). Quick Design keeps 2G + W, so the same job shows less cable in the Estimator. Jeff, 2026-11-05.
-- **D1334.** A Hardware assembly role sells at the tier on its resolved cost, ignoring the assembly's own sell and leaving add-ons out, so the whole line stays on one seed.
-- **D1335.** Unit mismatches (non-foot cable or hand line, foot-priced sticks) warn and never block, because catalog unit text varies.
-- **D1336.** Add pipe appears on new curtains only, with no curtain link, and pre-fills quantity from the curtain's quantity.
+- **D1333.** Pipe and lineset lines share one `SpecItem.rigging` field, and `isConfiguredLine` joins Track at the readers that mean "tier-seeded line with parts in components". Track is untouched, so saved quotes and cut sheets can't move.
+- **D1334.** Lineset cable is actual routing: lift lines × (grid + width ÷ 2 + allowance, default 10'). Quick Design keeps 2G + W, so the same job shows less cable in the Estimator. Jeff, 2026-11-05.
+- **D1335.** A Hardware assembly role sells at the tier on its resolved cost, ignoring the assembly's own sell and leaving add-ons out, so the whole line stays on one seed.
+- **D1336.** Unit mismatches (non-foot cable or hand line, foot-priced sticks) warn and never block, because catalog unit text varies.
+- **D1337.** Add pipe appears on new curtains only, with no curtain link, and pre-fills quantity from the curtain's quantity.
 
-Append `## 373. Pipe and lineset configurators — DONE <date> on feat/373-pipe-lineset (D1332–D1336)` to `PUNCHLIST.md`, following the last entry's shape, with the real gate numbers and the Jeff-gated setup from the spec. Add a phase entry to the end of the numbered list in `AGENTS.md`, following the entries above it. Add setup steps to `MASTER-HOWTO.md` beside the Track series instructions (`grep -n "Track series" MASTER-HOWTO.md`).
+Append `## 373. Pipe and lineset configurators — DONE <date> on feat/373-pipe-lineset (D1333–D1337)` to `PUNCHLIST.md`, following the last entry's shape, with the real gate numbers and the Jeff-gated setup from the spec. Add a phase entry to the end of the numbered list in `AGENTS.md`, following the entries above it. Add setup steps to `MASTER-HOWTO.md` beside the Track series instructions (`grep -n "Track series" MASTER-HOWTO.md`).
 
 - [ ] **Step 4: Commit**
 
