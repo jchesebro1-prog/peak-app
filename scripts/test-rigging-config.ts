@@ -8,6 +8,7 @@ import {
 import { pipeQuantities } from "../src/lib/rigging-config/pipe";
 import { defaultLinesPerSet, linesetQuantities } from "../src/lib/rigging-config/lineset";
 import { isConfiguredLine } from "../src/lib/rigging-config/line";
+import { rewriteLinesetTypes, rewritePipeTypes } from "../src/lib/catalog-rename/rewrite";
 
 const PIPE: PipeType = {
   id: "sch40", name: "1-1/2\" Sch 40", manufacturer: "", sticks: [{ lengthFt: 10, sku: "P10" }, { lengthFt: 21, sku: "P21" }],
@@ -80,9 +81,42 @@ function typeChecks(ok: Ok) {
   ok(isConfiguredLine({ track: {} }) && isConfiguredLine({ rigging: {} }) && !isConfiguredLine({}), "#373 isConfiguredLine");
 }
 
+function renameChecks(ok: Ok) {
+  const m = new Map([["P21", "Brand:P21"], ["CLP", "Brand:CLP"], ["GAC", "Brand:GAC"]]);
+  const pipe = rewritePipeTypes({ a: { ...PIPE }, gone: null }, m) as Record<string, PipeType>;
+  ok(pipe.a.sticks[1].sku === "Brand:P21" && pipe.a.clampSku === "Brand:CLP" && pipe.a.spliceSku === "SPL" && pipe.gone === null, "#373 rename: pipe sticks and clamp move; the rest stay");
+  const ls = rewriteLinesetTypes({ b: { ...LINESET } }, m) as Record<string, LinesetType>;
+  ok((ls.b.parts.cable as { sku: string }).sku === "Brand:GAC" && (ls.b.parts.chainWrap as { id: string }).id === "SA-1", "#373 rename: lineset part sources move; assembly ids don't");
+  ok(rewritePipeTypes({ a: { ...PIPE } }, new Map()) === null && rewriteLinesetTypes({ b: { ...LINESET } }, new Map()) === null, "#373 rename: nothing moved is null");
+}
+
+/** Inside test:specs only — opens the scratch PGlite. */
+export async function riggingDbChecks(ok: Ok) {
+  const { deletePipeType, listLinesetTypes, listPipeTypes, saveLinesetType, savePipeType } = await import("../src/lib/stores/rigging-types");
+  const blank = await savePipeType({ name: "" }, "t");
+  ok(!blank.ok, "#373 store: a blank name is refused");
+  const made = await savePipeType({ name: "Sch 40", sticks: [{ lengthFt: 21, sku: "NOT-IN-CATALOG" }], clampSku: "NOT-IN-CATALOG", hangerSpacingFt: 10, active: true }, "t");
+  ok(!made.ok && made.error.includes("no longer in the catalog"), "#373 store: Active re-checks the live catalog");
+  const off = await savePipeType({ name: "Sch 40", sticks: [{ lengthFt: 21, sku: "NOT-IN-CATALOG" }], hangerSpacingFt: 10 }, "t");
+  ok(off.ok && off.type.id === "sch-40" && off.type.active === false, "#373 store: saved inactive with a slug id");
+  const dup = await savePipeType({ name: "sch 40" }, "t");
+  ok(!dup.ok, "#373 store: duplicate name refused");
+  if (off.ok) {
+    ok(await deletePipeType(off.type.id), "#373 store: delete");
+    ok(!(await listPipeTypes()).some((t) => t.id === off.type.id), "#373 store: deleted type is gone");
+    const again = await savePipeType({ name: "Sch 40" }, "t");
+    ok(again.ok && again.type.id === "sch-40-2", "#373 store: a deleted id is never reused");
+  }
+  const ls = await saveLinesetType({ name: "1/4 cable", parts: { cable: { kind: "part", sku: "X" } }, allowanceFt: 0 }, "t");
+  ok(ls.ok && (await listLinesetTypes())[0].allowanceFt === 0, "#373 store: lineset saved");
+  const act = await saveLinesetType({ name: "Full", parts: { cable: { kind: "assembly", id: "NOPE" }, handLine: { kind: "part", sku: "X" }, termination: { kind: "part", sku: "X" }, chainWrap: { kind: "part", sku: "X" } }, active: true }, "t");
+  ok(!act.ok, "#373 store: Active refuses a dead assembly and dead parts");
+}
+
 export async function riggingConfigChecks(ok: Ok) {
   engineChecks(ok);
   typeChecks(ok);
+  renameChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-rigging-config.ts")) {
