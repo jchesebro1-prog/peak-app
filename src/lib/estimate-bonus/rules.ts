@@ -2,8 +2,8 @@
  * Estimator bonuses (spec docs/superpowers/specs/2026-10-12-estimator-bonuses-design.md).
  * Pure: no I/O. The only place the 5% package / 2% estimator math lives.
  */
-import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
-import { isSystemLine, lineExtSellOf, round2, systemFreight, validSellOverride } from "@/app/(app)/estimator/pricing";
+import type { SpecItem, SpecSection } from "@/lib/estimating-core/types";
+import { isSystemLine, lineExtSellOf, round2, systemFreight, validSellOverride } from "@/lib/estimating-core/pricing";
 import {
   DEFAULT_BONUS_RATES,
   isBonusItem,

@@ -1,4 +1,4 @@
-import type { SpecSection } from "@/app/(app)/estimator/types";
+import type { SpecSection } from "@/lib/estimating-core/types";
 
 /**
  * #301 slice A — the estimate-output fields on a system (SpecSection.discipline,

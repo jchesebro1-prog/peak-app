@@ -1,6 +1,6 @@
 /** Estimator bonuses — display logic for the Send & track card (pure). */
-import type { SpecSection } from "@/app/(app)/estimator/types";
-import { round2 } from "@/app/(app)/estimator/pricing";
+import type { SpecSection } from "@/lib/estimating-core/types";
+import { round2 } from "@/lib/estimating-core/pricing";
 import { isEstimatorBonusItem } from "./flags";
 
 /** The alternates a customer may take: systems marked Alternate, in order. */

@@ -23,7 +23,7 @@
  *                (#227 late). The per-drape cost (sewing included) is
  *                computed from the venue geometry in equipment-pricing.ts.
  */
-import type { TierKey } from "@/app/(app)/design/quick/engine";
+import type { TierKey } from "@/lib/design/quick-types";
 import { EQUIPMENT_KEY_ALIASES, EQUIPMENT_ROWS, EQUIPMENT_ROW_BY_KEY, type EquipRowDef } from "./equipment-vocab";
 import { fixtureSkus, resolveFixture, type FixtureCatalogPart, type FixtureRecord } from "@/lib/fixture-assemblies";
 import { fabricAreaRateOf, sewingPctFrom } from "./curtain-pricing";

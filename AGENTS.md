@@ -1721,5 +1721,15 @@ See `.env.example`.
     resolves), real taps and a real card scan, a production check after 0042, and
     `QUOTE_PDF_ORIGIN`. Open: keep captures through the go-live wipe (D1329)? Punch item #371.
 
+72. ✅ **Estimating-core extraction** (#359, D1228–D1230) — handoff PR 1. The Estimator's persisted
+    domain types and twelve pure helpers live in `src/lib/estimating-core/` (entry `index.ts`:
+    flat domain exports plus namespaced pure `src/lib` modules); the twelve old helper paths are
+    `export *` shims and the route `types.ts` re-exports the core types. `npm run core:check`
+    (TypeScript-API closure walk, in test:specs) keeps the core browser-pure;
+    `npm run core:golden` prices export files into golden totals (fixtures in
+    `docs/estimating-core/`). Quick Design types now live in `src/lib/design/quick-types.ts`.
+    No behaviour change. Next: handoff PR 2, the HTML prototype package (needs Jeff's production
+    export).
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

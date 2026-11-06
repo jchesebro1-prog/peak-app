@@ -19,8 +19,8 @@ import { isLaborSku } from "@/lib/design/wire-labor";
 import { firstName } from "@/lib/team";
 import { approvalSnapshotMatches } from "@/lib/approval-snapshot";
 import { money } from "@/lib/format";
-import { systemSellTotal } from "@/app/(app)/estimator/pricing";
-import type { SpecSection } from "@/app/(app)/estimator/types";
+import { systemSellTotal } from "@/lib/estimating-core/pricing";
+import type { SpecSection } from "@/lib/estimating-core/types";
 
 /* ---------------- kinds ---------------- */
 

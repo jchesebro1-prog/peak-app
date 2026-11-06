@@ -6,7 +6,7 @@
  * ONE source of an item's name: compute() reads it by key (#233), so Quick
  * Design, Auto cards and the Equipment map can never disagree. Pure and
  * dollar-free: client components may import it. It imports only TYPES from
- * the engine — the engine imports values from here.
+ * quick-types.ts — the engine imports values from here.
  *
  * `place` is how Auto lands a row on the plan: "each" = one marker per unit,
  * "lot" = one marker carrying the quantity (count/length hardware), "curtain"
@@ -14,7 +14,7 @@
  * (Controls / Acoustical / Pit are not Grid scopes; Quick Design still prices
  * them). `search` feeds the Equipment map's suggested catalog matches.
  */
-import type { SysKey } from "@/app/(app)/design/quick/engine";
+import type { SysKey } from "@/lib/design/quick-types";
 
 export type EquipPlace = "each" | "lot" | "curtain" | "none";
 export type CurtainRowType = { drape: "Draw" | "Legs" | "Border" | "Rear"; grid: "Draw" | "Leg" | "Border" | "Full" };

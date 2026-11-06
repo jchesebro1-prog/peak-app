@@ -17,7 +17,7 @@
  * refuses a save that carries one anywhere else (`sanitizeRewardCredit`).
  */
 
-import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
+import type { SpecItem, SpecSection } from "@/lib/estimating-core/types";
 import { serviceRewardCredit } from "./service-credit";
 import { roundDownDollars } from "./points";
 

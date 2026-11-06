@@ -1,4 +1,4 @@
-import type { SpecSection } from "@/app/(app)/estimator/types";
+import type { SpecSection } from "@/lib/estimating-core/types";
 import { DEFAULT_BONUS_RATES, type BonusRates } from "./flags";
 import { bonusRatesFor, bonusRulesApply, idCounterFrom, withBonusLines } from "./rules";
 
