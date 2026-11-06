@@ -1,0 +1,314 @@
+/* #373 — pipe and lineset configurators. Pure checks run alone with
+   `npx tsx scripts/test-rigging-config.ts`; riggingDbChecks runs only inside test:specs (scratch PGLITE_PATH). */
+import type { Ok } from "./test-inbox-org";
+import {
+  isFootUnit, linesetTypeProblems, pipeTypeProblems, sanitizeLinesetType, sanitizeLinesetTypeBlob, sanitizePipeType, sanitizePipeTypeBlob,
+  type LinesetType, type PipeType,
+} from "../src/lib/rigging-config/types";
+import { pipeQuantities } from "../src/lib/rigging-config/pipe";
+import { linesetTypeInputError, pipeTypeInputError } from "../src/lib/rigging-config/types";
+import { sellAt } from "../src/lib/markup";
+import { defaultLinesPerSet, linesetQuantities } from "../src/lib/rigging-config/lineset";
+import { isConfiguredLine } from "../src/lib/rigging-config/line";
+import { rewriteLinesetTypes, rewritePipeTypes } from "../src/lib/catalog-rename/rewrite";
+import type { ResolvedFixtureAssembly } from "../src/lib/fixture-assemblies";
+import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
+import { repriceForTier } from "../src/app/(app)/estimator/tier-reprice";
+import { copySectionForTarget } from "../src/app/(app)/estimator/copy-system";
+import { isCustomLineEditable } from "../src/app/(app)/estimator/custom-part-edit";
+import { expandLine, isAssemblyLine, primaryMemberSku } from "../src/lib/quote-line-members";
+import { applyProjectDiscounts, discountSkuOf } from "../src/lib/project-discounts/rules";
+import { bomModelEligible } from "../src/lib/estimate-output/bom-models";
+import {
+  curtainPipeDraft, curtainPipePrefill, followCurtainPipePrefill, freshLinesetDraft, freshPipeDraft, linesetBom, linesetConfigFromDraft, linesetDraftFromConfig, linesetLine,
+  pipeBom, pipeConfigFromDraft, pipeDraftFromConfig, pipeLine, riggingCatalog, selectableTypes,
+} from "../src/app/(app)/estimator/rigging-bom";
+
+const PIPE: PipeType = {
+  id: "sch40", name: "1-1/2\" Sch 40", manufacturer: "", sticks: [{ lengthFt: 10, sku: "P10" }, { lengthFt: 21, sku: "P21" }],
+  spliceSku: "SPL", clampSku: "CLP", hangerSpacingFt: 10, active: true,
+};
+const LINESET: LinesetType = {
+  id: "quarter", name: "1/4\" cable", manufacturer: "",
+  parts: { cable: { kind: "part", sku: "GAC" }, handLine: { kind: "part", sku: "HL" }, termination: { kind: "part", sku: "TRM" }, chainWrap: { kind: "assembly", id: "SA-1" } },
+  allowanceFt: 10, active: true,
+};
+const qtyOf = (rows: { role: string; qty: number }[], role: string) => rows.find((r) => r.role === role)?.qty ?? 0;
+
+function engineChecks(ok: Ok) {
+  // Spec test case: 40' run, 21' sticks, 10' spacing.
+  const p = pipeQuantities({ typeId: "sch40", runFt: 40, qty: 1 }, PIPE);
+  ok(!p.errors.length && qtyOf(p.rows, "stick") === 2 && qtyOf(p.rows, "splice") === 1 && qtyOf(p.rows, "clamp") === 5, "#373 pipe: 40' = 2 sticks, 1 splice, 5 clamps");
+  ok(p.rows.find((r) => r.role === "stick")?.sku === "P21", "#373 pipe: 40' uses 21' sticks");
+  const one = pipeQuantities({ typeId: "sch40", runFt: 15, qty: 1 }, PIPE);
+  ok(qtyOf(one.rows, "stick") === 1 && qtyOf(one.rows, "splice") === 0 && one.rows.every((r) => r.qty > 0), "#373 pipe: a run that fits one stick has no splice row");
+  ok(one.rows.find((r) => r.role === "stick")?.sku === "P21", "#373 pipe: 15' needs the 21' stick");
+  ok(pipeQuantities({ typeId: "sch40", runFt: 8, qty: 1 }, PIPE).rows.find((r) => r.role === "stick")?.sku === "P10", "#373 pipe: 8' takes the shortest covering stick");
+  const two = pipeQuantities({ typeId: "sch40", runFt: 40, qty: 2 }, PIPE);
+  ok(qtyOf(two.rows, "stick") === 4 && qtyOf(two.rows, "splice") === 2 && qtyOf(two.rows, "clamp") === 10, "#373 pipe: quantity multiplies every row");
+  ok(qtyOf(pipeQuantities({ typeId: "sch40", runFt: 40, qty: 1, hangerSpacingFt: 8 }, PIPE).rows, "clamp") === 6, "#373 pipe: a typed spacing overrides the type's");
+  ok(pipeQuantities({ typeId: "sch40", runFt: NaN, qty: 1 }, PIPE).errors.length === 1, "#373 pipe: blank run is an error");
+  ok(pipeQuantities({ typeId: "sch40", runFt: 2000, qty: 1 }, PIPE).errors.length === 1, "#373 pipe: run over the limit is an error");
+  ok(pipeQuantities({ typeId: "sch40", runFt: 40, qty: 1.5 }, PIPE).errors.length === 1, "#373 pipe: fractional quantity is an error");
+  ok(pipeQuantities({ typeId: "sch40", runFt: 40, qty: 1 }, { ...PIPE, sticks: [] }).errors[0].includes("Estimating Rules → Pipe types"), "#373 pipe: no sticks names the Rules screen");
+
+  // Spec test case: 6 sets, 40' wide, 40' grid, 10' allowance.
+  const l = linesetQuantities({ typeId: "quarter", sets: 6, widthFt: 40, gridHeightFt: 40 }, LINESET);
+  ok(!l.errors.length && l.liftLines === 24, "#373 lineset: 24 lift lines");
+  ok(qtyOf(l.rows, "cable") === 1680 && qtyOf(l.rows, "handLine") === 480 && qtyOf(l.rows, "termination") === 48 && qtyOf(l.rows, "chainWrap") === 24, "#373 lineset: 1,680' cable, 480' hand line, 48 terminations, 24 chain wraps");
+  ok(defaultLinesPerSet(8) === 1 && defaultLinesPerSet(40) === 4 && defaultLinesPerSet(49.9) === 4, "#373 lineset: 1 line per 10' of width, rounded down, at least 1");
+  const typed = linesetQuantities({ typeId: "quarter", sets: 1, widthFt: 40, gridHeightFt: 40, linesPerSet: 6, allowanceFt: 0 }, LINESET);
+  ok(typed.liftLines === 6 && qtyOf(typed.rows, "cable") === 360, "#373 lineset: typed lines and a 0' allowance win over the defaults");
+  ok(qtyOf(linesetQuantities({ typeId: "quarter", sets: 1, widthFt: 25, gridHeightFt: 30.5 }, LINESET).rows, "cable") === 106, "#373 lineset: fractional cable rounds up (2 × 53')");
+  ok(linesetQuantities({ typeId: "quarter", sets: 0, widthFt: 40, gridHeightFt: 40 }, LINESET).errors.length === 1, "#373 lineset: 0 sets is an error");
+  ok(linesetQuantities({ typeId: "quarter", sets: 301, widthFt: 40, gridHeightFt: 40 }, LINESET).errors.length === 1, "#373 lineset: 301 sets is an error");
+  ok(linesetQuantities({ typeId: "quarter", sets: 1, widthFt: 0, gridHeightFt: 40 }, LINESET).errors.length === 1, "#373 lineset: 0 width is an error");
+  ok(linesetQuantities({ typeId: "quarter", sets: 1, widthFt: 40, gridHeightFt: 501 }, LINESET).errors.length === 1, "#373 lineset: grid over 500' is an error");
+  ok(linesetQuantities({ typeId: "quarter", sets: 1, widthFt: 40, gridHeightFt: 40, linesPerSet: 21 }, LINESET).errors.length === 1, "#373 lineset: 21 lines per set is an error");
+  ok(linesetQuantities({ typeId: "quarter", sets: 1, widthFt: 40, gridHeightFt: 40, allowanceFt: 201 }, LINESET).errors.length === 1, "#373 lineset: allowance over 200' is an error");
+}
+
+function typeChecks(ok: Ok) {
+  const clean = sanitizePipeType({ id: "BAD ID", name: "  A  pipe ", sticks: [{ lengthFt: "21", sku: " P21 " }, { lengthFt: 21, sku: "DUP" }, { lengthFt: 0, sku: "X" }, { lengthFt: 10, sku: "P10" }], clampSku: "C", hangerSpacingFt: "", active: true })!;
+  ok(clean.id === "" && clean.name === "A pipe", "#373 sanitize: bad id dropped, name collapsed");
+  ok(clean.sticks.map((s) => s.lengthFt).join() === "10,21" && clean.sticks[1].sku === "P21", "#373 sanitize: sticks sorted, first duplicate kept, bad rows dropped");
+  ok(clean.hangerSpacingFt === 10 && clean.active === true, "#373 sanitize: blank spacing falls back to 10'; a complete type stays active");
+  ok(sanitizePipeType({ name: "X", active: true })!.active === false, "#373 sanitize: an incomplete type can never be active");
+  ok(pipeTypeProblems({ ...PIPE, spliceSku: undefined }).length === 0, "#373 activation: a splice isn't required");
+  ok(pipeTypeProblems({ ...PIPE, clampSku: undefined }).length === 1, "#373 activation: a clamp is required");
+  ok(pipeTypeProblems(PIPE, new Set(["P10", "CLP"])).length === 1, "#373 activation: a stick that left the catalog is a problem");
+  ok(pipeTypeProblems(PIPE, new Set(["P10", "P21", "CLP"])).length === 0, "#373 activation: a dead splice doesn't block");
+
+  const ls = sanitizeLinesetType({ name: "L", parts: { cable: { kind: "part", sku: " G " }, handLine: { kind: "assembly", id: "A" }, termination: { kind: "bogus" }, bogus: { kind: "part", sku: "X" } }, allowanceFt: "" })!;
+  ok(ls.parts.cable?.kind === "part" && ls.parts.handLine?.kind === "assembly" && !ls.parts.termination && !("bogus" in ls.parts), "#373 sanitize: lineset sources cleaned");
+  ok(ls.allowanceFt === 10, "#373 sanitize: blank allowance is 10'");
+  ok(sanitizeLinesetType({ name: "L", allowanceFt: 0 })!.allowanceFt === 0, "#373 sanitize: a 0' allowance is kept");
+  ok(linesetTypeProblems({ ...LINESET, parts: { cable: LINESET.parts.cable } }).length === 1, "#373 activation: all four lineset roles are required");
+  ok(linesetTypeProblems(LINESET, { skus: new Set(["GAC", "HL", "TRM"]), assemblyIds: new Set(["SA-1"]) }).length === 0, "#373 activation: live lineset passes");
+  ok(linesetTypeProblems(LINESET, { skus: new Set(["GAC", "HL", "TRM"]), assemblyIds: new Set() }).length === 1, "#373 activation: a non-hardware or deleted assembly is unmapped");
+
+  const blob = sanitizePipeTypeBlob({ a: { ...PIPE }, gone: null, "BAD KEY": { ...PIPE }, unnamed: { sticks: [] } });
+  ok(blob.length === 1 && blob[0].id === "a", "#373 blob: tombstones, bad keys and unnamed types are skipped; id = key");
+  ok(sanitizeLinesetTypeBlob({ b: { ...LINESET } })[0].id === "b", "#373 blob: lineset id = key");
+
+  ok(["ft", "FT", "foot", "Feet", " lf "].every(isFootUnit) && !isFootUnit("ea") && !isFootUnit("spool") && !isFootUnit(""), "#373 unit: foot spellings");
+  ok(isConfiguredLine({ track: {} }) && isConfiguredLine({ rigging: {} }) && !isConfiguredLine({}), "#373 isConfiguredLine");
+}
+
+function renameChecks(ok: Ok) {
+  const m = new Map([["P21", "Brand:P21"], ["CLP", "Brand:CLP"], ["GAC", "Brand:GAC"]]);
+  const pipe = rewritePipeTypes({ a: { ...PIPE }, gone: null }, m) as Record<string, PipeType>;
+  ok(pipe.a.sticks[1].sku === "Brand:P21" && pipe.a.clampSku === "Brand:CLP" && pipe.a.spliceSku === "SPL" && pipe.gone === null, "#373 rename: pipe sticks and clamp move; the rest stay");
+  const ls = rewriteLinesetTypes({ b: { ...LINESET } }, m) as Record<string, LinesetType>;
+  ok((ls.b.parts.cable as { sku: string }).sku === "Brand:GAC" && (ls.b.parts.chainWrap as { id: string }).id === "SA-1", "#373 rename: lineset part sources move; assembly ids don't");
+  ok(rewritePipeTypes({ a: { ...PIPE } }, new Map()) === null && rewriteLinesetTypes({ b: { ...LINESET } }, new Map()) === null, "#373 rename: nothing moved is null");
+}
+
+/** Inside test:specs only — opens the scratch PGlite. */
+export async function riggingDbChecks(ok: Ok) {
+  const { deletePipeType, listLinesetTypes, listPipeTypes, saveLinesetType, savePipeType } = await import("../src/lib/stores/rigging-types");
+  const blank = await savePipeType({ name: "" }, "t");
+  ok(!blank.ok, "#373 store: a blank name is refused");
+  const made = await savePipeType({ name: "Sch 40", sticks: [{ lengthFt: 21, sku: "NOT-IN-CATALOG" }], clampSku: "NOT-IN-CATALOG", hangerSpacingFt: 10, active: true }, "t");
+  ok(!made.ok && made.error.includes("no longer in the catalog"), "#373 store: Active re-checks the live catalog");
+  const off = await savePipeType({ name: "Sch 40", sticks: [{ lengthFt: 21, sku: "NOT-IN-CATALOG" }], hangerSpacingFt: 10 }, "t");
+  ok(off.ok && off.type.id === "sch-40" && off.type.active === false, "#373 store: saved inactive with a slug id");
+  const dup = await savePipeType({ name: "sch 40", hangerSpacingFt: 10 }, "t");
+  ok(!dup.ok, "#373 store: duplicate name refused");
+  if (off.ok) {
+    ok(await deletePipeType(off.type.id), "#373 store: delete");
+    ok(!(await listPipeTypes()).some((t) => t.id === off.type.id), "#373 store: deleted type is gone");
+    const again = await savePipeType({ name: "Sch 40", hangerSpacingFt: 10 }, "t");
+    ok(again.ok && again.type.id === "sch-40-2", "#373 store: a deleted id is never reused");
+  }
+  const ls = await saveLinesetType({ name: "1/4 cable", parts: { cable: { kind: "part", sku: "X" } }, allowanceFt: 0 }, "t");
+  ok(ls.ok && (await listLinesetTypes())[0].allowanceFt === 0, "#373 store: lineset saved");
+  const act = await saveLinesetType({ name: "Full", parts: { cable: { kind: "assembly", id: "NOPE" }, handLine: { kind: "part", sku: "X" }, termination: { kind: "part", sku: "X" }, chainWrap: { kind: "part", sku: "X" } }, allowanceFt: 10, active: true }, "t");
+  ok(!act.ok && act.error.includes("Can't mark it active"), "#373 store: Active refuses a dead assembly and dead parts");
+  // Review fix 4: a save refuses what it used to repair silently (changed: the cases above now carry the spacing/allowance they relied on being defaulted).
+  const noSp = await savePipeType({ name: "No spacing", sticks: [{ lengthFt: 21, sku: "X" }] }, "t");
+  ok(!noSp.ok && noSp.error === "Enter a hanger spacing.", "#373 store: a blank spacing is refused, not defaulted");
+  const longStick = await savePipeType({ name: "Long", sticks: [{ lengthFt: 80, sku: "X" }], hangerSpacingFt: 10 }, "t");
+  ok(!longStick.ok && longStick.error === "A stick is at most 60'.", "#373 store: an 80' stick is refused, not clamped");
+  const noAllow = await saveLinesetType({ name: "No allowance" }, "t");
+  ok(!noAllow.ok && noAllow.error === "Enter a cable allowance of 0 or more.", "#373 store: a blank allowance is refused, not defaulted");
+}
+
+const part = (sku: string, cost: number, list = 0, unit = "ea") => ({ sku, desc: sku + " desc", cost, list, unit, mfr: "" });
+const PARTS = { P10: part("P10", 50), P21: part("P21", 100), SPL: part("SPL", 20), CLP: part("CLP", 10), GAC: part("GAC", 1, 0, "ft"), HL: part("HL", 2, 0, "ft"), TRM: part("TRM", 5) };
+const HW = (id: string, comps: Array<[string, number, boolean?]>, kind: "hardware" | "fixture" = "hardware") =>
+  ({ id, name: id, kind, components: comps.map(([sku, defaultQty, found]) => ({ sku, label: sku + " label", role: "other", defaultQty, desc: sku, unit: "ea", cost: 3, list: 9, found: found ?? true })) }) as unknown as ResolvedFixtureAssembly;
+const CAT = riggingCatalog(PARTS, [HW("SA-1", [["SWG", 2], ["THB", 1], ["OPT", 0]]), HW("FX-1", [["F", 1]], "fixture"), HW("BROKEN", [["DEAD", 1, false]])]);
+
+function pricingChecks(ok: Ok) {
+  // 2 × $100 + 1 × $20 + 5 × $10 = $270 cost; at 50 % markup, $405.
+  const b = pipeBom({ typeId: "sch40", runFt: 40, qty: 1 }, PIPE, CAT, 0.5);
+  ok(!b.errors.length && b.cost === 270 && b.price === 405, "#373 pipe price: tier seed on the parts' cost");
+  ok(b.rows.map((r) => r.label).join() === "Pipe (21' stick),Splice sleeve,Hanging clamp", "#373 pipe rows named");
+  ok(b.rows[0].ext === 300 && b.rows[0].price === 150, "#373 pipe row: unit sell and extended");
+  ok(pipeBom({ typeId: "sch40", runFt: 40, qty: 1 }, { ...PIPE, spliceSku: undefined }, CAT, 0.5).errors[0].includes("Estimating Rules → Pipe types"), "#373 pipe: a needed unmapped splice blocks and names the screen");
+  ok(!pipeBom({ typeId: "sch40", runFt: 15, qty: 1 }, { ...PIPE, spliceSku: undefined }, CAT, 0.5).errors.length, "#373 pipe: an unneeded unmapped splice doesn't block");
+  const listed = riggingCatalog({ ...PARTS, CLP: part("CLP", 0, 25) }, []);
+  ok(pipeBom({ typeId: "sch40", runFt: 15, qty: 1 }, PIPE, listed, 0.5).price === 225, "#373 pipe: a part with no cost sells at list");
+  ok(pipeBom({ typeId: "x", runFt: 40, qty: 1 }, null, CAT, 0.5).errors[0].includes("no longer exists"), "#373 pipe: deleted type");
+  ok(pipeBom({ typeId: "sch40", runFt: 40, qty: 1 }, { ...PIPE, sticks: [{ lengthFt: 21, sku: "FOOT" }] }, riggingCatalog({ ...PARTS, FOOT: part("FOOT", 5, 0, "ft") }, []), 0.5).warnings.length === 1, "#373 pipe: a foot-priced stick warns and doesn't block");
+
+  const l = linesetBom({ typeId: "quarter", sets: 6, widthFt: 40, gridHeightFt: 40 }, LINESET, CAT, 0.5);
+  ok(!l.errors.length, "#373 lineset: prices");
+  // 24 chain wraps × (SWG 2, THB 1); OPT is an add-on and left out.
+  const swg = l.rows.find((r) => r.sku === "SWG");
+  const thb = l.rows.find((r) => r.sku === "THB");
+  ok(swg?.qty === 48 && thb?.qty === 24 && !l.rows.some((r) => r.sku === "OPT"), "#373 lineset: assembly members multiply; add-ons left out");
+  ok(swg?.label === "Chain wraps: SWG label", "#373 lineset: member row names the role and the member");
+  ok(swg?.price === 4.5, "#373 lineset: members price at the tier on the assembly's cost, not its sell");
+  // 1680×$1 + 480×$2 + 48×$5 + 72×$3 = $3,096.
+  ok(l.cost === 3096 && l.price === 4644, "#373 lineset: line total");
+  const asmType = (id: string): LinesetType => ({ ...LINESET, parts: { ...LINESET.parts, chainWrap: { kind: "assembly", id } } });
+  ok(linesetBom({ typeId: "q", sets: 1, widthFt: 40, gridHeightFt: 40 }, asmType("GONE"), CAT, 0.5).errors[0].includes("Chain wraps"), "#373 lineset: a deleted assembly blocks by role");
+  ok(linesetBom({ typeId: "q", sets: 1, widthFt: 40, gridHeightFt: 40 }, asmType("FX-1"), CAT, 0.5).errors.length === 1, "#373 lineset: a non-hardware assembly blocks");
+  ok(linesetBom({ typeId: "q", sets: 1, widthFt: 40, gridHeightFt: 40 }, asmType("BROKEN"), CAT, 0.5).errors.length === 1, "#373 lineset: an assembly with a part gone from the catalog blocks");
+  const spool = riggingCatalog({ ...PARTS, GAC: part("GAC", 300, 0, "spool") }, [HW("SA-1", [["SWG", 2]])]);
+  ok(linesetBom({ typeId: "q", sets: 1, widthFt: 40, gridHeightFt: 40 }, LINESET, spool, 0.5).warnings.some((w) => w.includes("Aircraft cable")), "#373 lineset: non-foot cable warns");
+
+  const line = pipeLine({ typeId: "sch40", runFt: 40, qty: 2, label: "Main drape pipe" }, PIPE, CAT, 0.5);
+  ok(line.ok && line.item.sku === "PIP-SCH40" && line.item.qty === 1 && line.item.unit === "lot", "#373 pipe line: one lot");
+  ok(line.ok && line.item.desc === "Main drape pipe — 1-1/2\" Sch 40, 40' run (2 pipes)", "#373 pipe line: description");
+  ok(line.ok && line.item.rigging?.kind === "pipe" && line.item.components!.length === 3, "#373 pipe line: config and parts");
+  ok(line.ok && line.item.components!.find((c) => c.sku === "CLP")?.role === "mount", "#373 pipe line: clamps are mounts");
+  const ll = linesetLine({ typeId: "quarter", sets: 6, widthFt: 40, gridHeightFt: 40 }, LINESET, CAT, 0.5);
+  ok(ll.ok && ll.item.sku === "LNS-QUARTER" && ll.item.desc === "Lineset hardware — 1/4\" cable: 6 sets, 24 lift lines", "#373 lineset line: description");
+
+  const pd = freshPipeDraft([{ ...PIPE, active: false }, { ...PIPE, id: "on", active: true }]);
+  ok(pd.typeId === "on" && pd.qty === "1", "#373 draft: fresh pipe takes the first active type");
+  ok(selectableTypes([{ ...PIPE, active: false }], "sch40").length === 1 && selectableTypes([{ ...PIPE, active: false }]).length === 0, "#373 selectable: inactive only when it's the draft's own");
+  const round = pipeConfigFromDraft(pipeDraftFromConfig({ typeId: "a", runFt: 12.5, qty: 3, hangerSpacingFt: 8, label: "L" }));
+  ok(round.runFt === 12.5 && round.qty === 3 && round.hangerSpacingFt === 8 && round.label === "L", "#373 draft: pipe round trip");
+  const blank = pipeConfigFromDraft({ typeId: "a", run: "", qty: "", hangerSpacing: "", label: " " });
+  ok(Number.isNaN(blank.runFt) && blank.qty === 1 && blank.hangerSpacingFt === undefined && blank.label === undefined, "#373 draft: blanks");
+  const lr = linesetConfigFromDraft(linesetDraftFromConfig({ typeId: "a", sets: 6, widthFt: 40, gridHeightFt: 30, linesPerSet: 5, allowanceFt: 0, label: "L" }));
+  ok(lr.sets === 6 && lr.linesPerSet === 5 && lr.allowanceFt === 0 && lr.label === "L", "#373 draft: lineset round trip keeps a 0' allowance");
+  const lb = linesetConfigFromDraft(freshLinesetDraft([]));
+  ok(lb.linesPerSet === undefined && lb.allowanceFt === undefined, "#373 draft: blank lineset fields are defaults");
+
+  const c = { name: "Main drape", qty: "2", width: "40" };
+  ok(curtainPipePrefill(c).label === "Main drape pipe" && curtainPipePrefill(c).run === "40" && curtainPipePrefill(c).qty === "2", "#373 curtain: pre-fill");
+  const prev = curtainPipePrefill(c);
+  const d = { ...curtainPipeDraft(c, [{ ...PIPE, active: true }]), label: "Typed" };
+  const next = followCurtainPipePrefill(d, prev, curtainPipePrefill({ ...c, width: "50" }));
+  ok(next.run === "50" && next.label === "Typed", "#373 curtain: untouched fields follow; typed ones stay");
+}
+
+function readerChecks(ok: Ok) {
+  const res = pipeLine({ typeId: "sch40", runFt: 40, qty: 1 }, PIPE, CAT, 0.5);
+  if (!res.ok) { ok(false, "#373 readers: fixture line"); return; }
+  const line = { ...res.item, id: 1 } as SpecItem;
+  const sec = { id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [line] } as unknown as SpecSection;
+
+  const moved = repriceForTier([sec], 0.5, 0.25);
+  const it = moved.sections[0].items[0];
+  ok(moved.repriced === 1 && it.price === 337.5, "#373 tier re-price: the line moves to the new seed");
+  ok(it.components!.find((c) => c.sku === "P21")?.price === 125, "#373 tier re-price: its parts follow");
+
+  const copied = copySectionForTarget(sec, { newSectionId: "n", catalog: new Map([["P21", { sku: "P21", cost: 110, list: 0 }]]), fixtures: new Map(), sourceTierMargin: 0.5, targetTierMargin: 0.5 });
+  const c = copied.section.items[0];
+  ok(c.cost === 290 && c.components!.find((x) => x.sku === "P21")?.cost === 110, "#373 Copy system: parts take today's cost, not a fixture refresh");
+  ok(c.price === 435 && c.rigging?.kind === "pipe", "#373 Copy system: sell follows the seed and the config travels");
+
+  ok(!isAssemblyLine(line) && primaryMemberSku(line) === null, "#373 members: not an assembly line (no photo or paragraph alias)");
+  ok(expandLine(line)?.length === 3, "#373 members: still expands for datasheets");
+  ok(discountSkuOf(line) === "", "#373 discounts: the line itself isn't discountable");
+  const disc = applyProjectDiscounts([sec], { P21: { pct: 10, note: "", by: "t", at: 1 } })[0].items[0];
+  ok(disc.price === line.price && disc.cost === 250 && disc.components!.find((x) => x.sku === "P21")?.projectDiscountPct === 10, "#373 discounts: its parts discount inside it; sell never moves");
+  ok(!bomModelEligible({ ...line, components: [] }), "#373 BOM models: never prints a model, even with no parts");
+  ok(!isCustomLineEditable({ ...line, custom: true }), "#373 custom: never a custom line");
+
+  // A track line takes the same paths as before: nothing here may move it.
+  const { rigging: _r, ...plain } = line;
+  void _r;
+  const track = { ...plain, sku: "TRK-A", track: { seriesId: "a" } } as unknown as SpecItem;
+  const trackSec = { ...sec, items: [track] };
+  const t2 = repriceForTier([trackSec], 0.5, 0.25).sections[0].items[0];
+  ok(t2.price === 337.5 && t2.components!.find((c) => c.sku === "P21")?.price === 125, "#373 regression: a track line re-prices as before");
+  const t3 = copySectionForTarget(trackSec, { newSectionId: "n", catalog: new Map([["P21", { sku: "P21", cost: 110, list: 0 }]]), fixtures: new Map(), sourceTierMargin: 0.5, targetTierMargin: 0.5 }).section.items[0];
+  ok(t3.cost === 290 && t3.price === 435, "#373 regression: a track line copies as before");
+  ok(!isAssemblyLine(track) && expandLine(track)?.length === 3 && discountSkuOf(track) === "" && !bomModelEligible({ ...track, components: [] }), "#373 regression: a track line reads as before");
+  ok(!isCustomLineEditable({ ...track, custom: true }), "#373 regression: a track line is never a custom line");
+}
+
+
+function reviewFixChecks(ok: Ok) {
+  const LS = { typeId: "q", sets: 1, widthFt: 40, gridHeightFt: 40 };
+  // 1. an assembly member's cost override survives Copy; a plain member still refreshes.
+  const hwO = ({ id: "SA-2", name: "SA-2", kind: "hardware", components: [
+    { sku: "THM", label: "THM label", role: "other", defaultQty: 1, desc: "", unit: "ea", cost: 5, costOverride: 5, list: 9, found: true },
+    { sku: "SWG", label: "SWG label", role: "other", defaultQty: 1, desc: "", unit: "ea", cost: 3, list: 9, found: true },
+  ] }) as unknown as ResolvedFixtureAssembly;
+  const cat1 = riggingCatalog(PARTS, [hwO]);
+  const t1: LinesetType = { ...LINESET, parts: { ...LINESET.parts, chainWrap: { kind: "assembly", id: "SA-2" } } };
+  const built = linesetLine({ typeId: "quarter", sets: 6, widthFt: 40, gridHeightFt: 40 }, t1, cat1, 0.43);
+  if (!built.ok) { ok(false, "#373 review 1: line builds"); } else {
+    const sec = { id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [{ ...built.item, id: 1 } as SpecItem] } as unknown as SpecSection;
+    const catalog = new Map([["THM", { sku: "THM", cost: 3, list: 0 }], ["SWG", { sku: "SWG", cost: 4, list: 0 }]]);
+    const cp = copySectionForTarget(sec, { newSectionId: "n", catalog, fixtures: new Map(), sourceTierMargin: 0.43, targetTierMargin: 0.43 }).section.items[0];
+    const thm = cp.components!.find((c) => c.sku === "THM")!;
+    const swg = cp.components!.find((c) => c.sku === "SWG")!;
+    ok(thm.cost === 5 && thm.fixedCost === true, "#373 review 1: an overridden member keeps its own cost on Copy");
+    ok(swg.cost === 4 && !swg.fixedCost, "#373 review 1: a plain member still takes today's catalog cost");
+    const cap = new Map(catalog); cap.set("SWG", { sku: "SWG", cost: 3, list: 0 });
+    const same = copySectionForTarget(sec, { newSectionId: "n", catalog: cap, fixtures: new Map(), sourceTierMargin: 0.43, targetTierMargin: 0.43 }).section.items[0];
+    ok(same.price === built.item.price, "#373 review 1: same tier, same catalog = same price after Copy");
+    const moved = repriceForTier([sec], 0.43, 0.25).sections[0].items[0];
+    ok(moved.components!.find((c) => c.sku === "THM")?.fixedCost === true, "#373 review 1: a tier re-price keeps the flag");
+  }
+  // 2. no cost and no list warns.
+  const free = riggingCatalog({ ...PARTS, CLP: part("CLP", 0, 0) }, []);
+  ok(pipeBom({ typeId: "sch40", runFt: 40, qty: 1 }, PIPE, free, 0.5).warnings.some((w) => w.includes("has no cost or price in the catalog, so it adds nothing to this line")), "#373 review 2: a part with no cost or list warns");
+  // 3. rows add up to the line price on a per-foot part.
+  const cheap = riggingCatalog({ ...PARTS, GAC: part("GAC", 0.12, 0, "ft") }, [HW("SA-1", [["SWG", 2], ["THB", 1]])]);
+  const lb = linesetBom({ typeId: "quarter", sets: 6, widthFt: 40, gridHeightFt: 40 }, LINESET, cheap, 0.43);
+  const sum = lb.rows.reduce((a, r) => a + r.ext, 0);
+  ok(Math.abs(sum - lb.price) <= 0.01 * lb.rows.length, "#373 review 3: rows sum to within a cent per row of the line price");
+  ok(lb.rows.find((r) => r.sku === "GAC")?.ext === Math.round(sellAt(0.12 * 1680, 0.43) * 100) / 100, "#373 review 3: the cable row is the true extended sell");
+  // 4. the rules save refuses bad input; reading stays tolerant.
+  ok(pipeTypeInputError({ name: "A", sticks: [], hangerSpacingFt: "" }) === "Enter a hanger spacing.", "#373 review 4: blank spacing refused");
+  ok(pipeTypeInputError({ name: "A", sticks: [], hangerSpacingFt: 0 }) === "Enter a hanger spacing.", "#373 review 4: 0 spacing refused");
+  ok(pipeTypeInputError({ name: "A", sticks: [{ lengthFt: 80, sku: "X" }], hangerSpacingFt: 10 }) === "A stick is at most 60'.", "#373 review 4: an 80' stick refused");
+  ok(pipeTypeInputError({ name: "A", sticks: [{ lengthFt: 21, sku: "X" }, { lengthFt: "21", sku: "Y" }], hangerSpacingFt: 10 }) === "Each stick length can only appear once.", "#373 review 4: duplicate stick length refused");
+  ok(pipeTypeInputError({ name: "A", sticks: [{ lengthFt: 21, sku: "X" }], hangerSpacingFt: 0.5 }) === "Hanger spacing is at least 1'.", "#373 review 5: spacing under 1' refused on save");
+  ok(pipeTypeInputError({ name: "A", sticks: [{ lengthFt: 21, sku: "X" }], hangerSpacingFt: "10" }) === null, "#373 review 4: a valid pipe type passes");
+  ok(linesetTypeInputError({ name: "L", allowanceFt: "" }) === "Enter a cable allowance of 0 or more.", "#373 review 4: blank allowance refused");
+  ok(linesetTypeInputError({ name: "L", allowanceFt: -1 }) === "Enter a cable allowance of 0 or more.", "#373 review 4: negative allowance refused");
+  ok(linesetTypeInputError({ name: "L", allowanceFt: 0 }) === null && linesetTypeInputError({ name: "L", allowanceFt: "0" }) === null, "#373 review 4: a 0' allowance passes");
+  ok(sanitizePipeType({ name: "A", hangerSpacingFt: "" })!.hangerSpacingFt === 10, "#373 review 4: reading a stored blob stays tolerant");
+  // 5. spacing floor.
+  ok(pipeQuantities({ typeId: "sch40", runFt: 40, qty: 1, hangerSpacingFt: 0.001 }, PIPE).errors[0] === "Hanger spacing is at least 1'.", "#373 review 5: per-line spacing under 1' is an error");
+  ok(pipeQuantities({ typeId: "sch40", runFt: 40, qty: 1 }, { ...PIPE, hangerSpacingFt: 0.5 }).errors[0] === "Hanger spacing is at least 1'.", "#373 review 5: a saved type under 1' errors, doesn't crash");
+  ok(!pipeQuantities({ typeId: "sch40", runFt: 40, qty: 1, hangerSpacingFt: 1 }, PIPE).errors.length, "#373 review 5: exactly 1' is fine");
+  // 6. unit warnings cover assembly members.
+  const cableAsm: LinesetType = { ...LINESET, parts: { ...LINESET.parts, cable: { kind: "assembly", id: "SA-1" } } };
+  const w6 = linesetBom(LS, cableAsm, CAT, 0.5).warnings;
+  ok(w6.some((w) => w.includes("SWG") && w.includes("Aircraft cable")) && w6.some((w) => w.includes("THB") && w.includes("Aircraft cable")), "#373 review 6: a non-foot cable assembly warns per member");
+  // 7. an assembly with only add-ons.
+  const addons = riggingCatalog(PARTS, [HW("ADD", [["OPT", 0]])]);
+  const t7: LinesetType = { ...LINESET, parts: { ...LINESET.parts, chainWrap: { kind: "assembly", id: "ADD" } } };
+  const e7 = linesetBom(LS, t7, addons, 0.5).errors;
+  ok(e7.length === 1 && e7[0].includes("ADD has no included parts") && !e7[0].includes("no longer in the catalog"), "#373 review 7: an all-add-ons assembly says so");
+  // 8. the default never exceeds the limit.
+  ok(defaultLinesPerSet(250) === 20 && defaultLinesPerSet(210) === 20, "#373 review 8: default lines clamp to 20");
+  ok(!linesetQuantities({ typeId: "quarter", sets: 1, widthFt: 250, gridHeightFt: 40 }, LINESET).errors.length, "#373 review 8: a wide stage with a blank field is not an error");
+}
+
+export async function riggingConfigChecks(ok: Ok) {
+  engineChecks(ok);
+  typeChecks(ok);
+  renameChecks(ok);
+  pricingChecks(ok);
+  readerChecks(ok);
+  reviewFixChecks(ok);
+}
+
+if (process.argv[1]?.endsWith("test-rigging-config.ts")) {
+  let pass = 0, fail = 0;
+  const okf: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
+  riggingConfigChecks(okf).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
+}

@@ -10,7 +10,7 @@
  * - SERVER-ENFORCED (the stored status is read on the server): Copy / Move
  *   system into an existing estimate, Copy within this estimate, Load system,
  *   and the tier stamp a save writes (a non-draft save keeps the stored one).
- * - UI LOCK ONLY: re-opening a track / curtain / labor configurator, and the
+ * - UI LOCK ONLY: re-opening a track / pipe / lineset / curtain / labor configurator, and the
  *   tier re-price a customer / contact pick offers. Those re-price lines in the
  *   browser, and saveQuoteAction accepts any posted line on a sent estimate
  *   (it never diffs lines) — the client prop is named `uiRepriceLock` so

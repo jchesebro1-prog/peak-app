@@ -2,12 +2,16 @@
 
 import { computeCurtain, fmt } from "./pricing";
 import { curtainCostKept, curtainDraftValid } from "./curtain-line";
-import type { CurtainDraft, FabricOpt, TrackDraft, TrackPart } from "./types";
+import type { CurtainDraft, FabricOpt, PipeDraft, TrackDraft, TrackPart } from "./types";
 import { fabricRateLabel } from "@/lib/curtain-geom";
 import type { TrackSeries } from "@/lib/track-series";
 import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat } from "./est-ui";
 import { trackBom, trackConfigFromDraft } from "./track-bom";
 import { TrackErrors, TrackFields, type TrackSetter } from "./track-modal";
+import type { PipeType } from "@/lib/rigging-config/types";
+import { pipeBom, pipeConfigFromDraft, type RiggingCatalog } from "./rigging-bom";
+import { PipeFields, type PipeSetter } from "./pipe-modal";
+import { RiggingWarnings } from "./rigging-modal-ui";
 import {
   ASSUMED_MOUNT,
   BOTTOM_FINISHES,
@@ -64,6 +68,11 @@ export default function CurtainModal({
   onToggleTrack,
   onSetTrack,
   linkedTrack = null,
+  pipe = null,
+  pipeTypes = [],
+  riggingCat,
+  onTogglePipe,
+  onSetPipe,
 }: {
   secName: string;
   editing?: boolean;
@@ -86,13 +95,22 @@ export default function CurtainModal({
   onSetTrack?: TrackSetter;
   /** #292: the linked track's mounting (e.g. "batten") when editing a curtain whose track line already exists. */
   linkedTrack?: string | null;
+  /** #373: the curtain's pipe form — null while Add pipe is off. New curtains only. */
+  pipe?: PipeDraft | null;
+  pipeTypes?: readonly PipeType[];
+  riggingCat?: RiggingCatalog;
+  onTogglePipe?: (on: boolean) => void;
+  onSetPipe?: PipeSetter;
 }) {
   const cc = computeCurtain(draft, fabrics, { sewingPct }, margin);
   const qty = Math.max(1, parseInt(draft.qty, 10) || 0);
   const trackSeriesRow = track ? trackSeries.find((s) => s.id === track.seriesId) || null : null;
   const tb = track ? trackBom(trackConfigFromDraft(track), trackSeriesRow, trackParts, margin) : null;
   const trackOk = !tb || (!tb.errors.length && tb.price > 0);
-  const valid = curtainDraftValid(draft, cc.priceEach) && trackOk;
+  const pipeTypeRow = pipe ? pipeTypes.find((t) => t.id === pipe.typeId) || null : null;
+  const pb = pipe && riggingCat ? pipeBom(pipeConfigFromDraft(pipe), pipeTypeRow, riggingCat, margin) : null;
+  const pipeOk = !pipe || (!!pb && !pb.errors.length && pb.price > 0);
+  const valid = curtainDraftValid(draft, cc.priceEach) && trackOk && pipeOk;
 
   return (
     <ConfigModal
@@ -120,11 +138,12 @@ export default function CurtainModal({
             weight={700}
           />
           {tb && <Stat label="Track" value={tb.price > 0 ? fmt(tb.price) : "—"} size={14} weight={700} />}
+          {pb && <Stat label="Pipe" value={pb.price > 0 ? fmt(pb.price) : "—"} size={14} weight={700} />}
         </>
       }
       footerRight={
         <button type="button" onClick={onAdd} disabled={!valid} style={addBtnStyle(valid)}>
-          {editing ? "Update curtain" : track ? "Add curtain + track" : "Add curtain"}
+          {editing ? "Update curtain" : ["Add curtain", track && "track", pipe && "pipe"].filter(Boolean).join(" + ")}
         </button>
       }
     >
@@ -303,6 +322,28 @@ export default function CurtainModal({
               )}
               {/* No series at all: TrackFields already says to set one up. */}
               {tb && trackSeriesRow && (track.curved ? (track.segments || []).length > 0 : track.run.trim() !== "") && <TrackErrors errors={tb.errors} />}
+            </div>
+          )}
+        </div>
+      )}
+      {/* #373: Add pipe — new curtains only, since no link records whether a saved curtain already has one. */}
+      {onTogglePipe && onSetPipe && !editing && (
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid #ececf0" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "#3a3f4a", cursor: "pointer" }}>
+            <input type="checkbox" checked={!!pipe} onChange={(e) => onTogglePipe(e.target.checked)} />
+            Add pipe
+            <span style={{ fontSize: 11.5, fontWeight: 500, color: "#aab0bb" }}>· adds a pipe line beside this curtain, priced from the catalog</span>
+          </label>
+          {pipe && (
+            <div style={{ marginTop: 12 }}>
+              <PipeFields draft={pipe} types={pipeTypes} onSet={onSetPipe} compact />
+              {pb && pb.rows.length > 0 && !pb.errors.length && (
+                <div style={{ marginTop: 10, fontSize: 11.5, color: "#8c919c" }}>
+                  {pb.rows.length} parts · cost {fmt(pb.cost)} · price {fmt(pb.price)}
+                </div>
+              )}
+              {pb && <RiggingWarnings warnings={pb.warnings} />}
+              {pb && pipeTypeRow && pipe.run.trim() !== "" && <TrackErrors errors={pb.errors} />}
             </div>
           )}
         </div>

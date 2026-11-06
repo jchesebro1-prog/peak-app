@@ -56,6 +56,7 @@ import { markQuotePdfStale } from "@/lib/quote-pdf/schedule";
 import { rewriteQuoteSpecRefs } from "@/lib/stores/quotes";
 import { SYSTEM_CATEGORIES_BLOB } from "@/lib/system-categories";
 import { TRACK_SERIES_BLOB } from "@/lib/track-series";
+import { LINESET_TYPES_BLOB, PIPE_TYPES_BLOB } from "@/lib/rigging-config/types";
 import { CROSSWALK_MAX_ROWS, planRenames, type CrosswalkRow, type PlanPart } from "./plan";
 import * as RW from "./rewrite";
 import { cleanCrosswalkRows, REF_STEPS, type RefStep, type RenameBatchInput, type RenameBatchResult } from "./steps";
@@ -259,6 +260,8 @@ async function blobsStep(ctx: Ctx): Promise<StepOut> {
   const jobs: Array<[string, (raw: Rec) => Rec | null]> = [
     [EQUIPMENT_MAP_BLOB, (raw) => RW.rewriteEquipmentMap(raw, m)],
     [TRACK_SERIES_BLOB, (raw) => RW.rewriteTrackSeries(raw, m)],
+    [PIPE_TYPES_BLOB, (raw) => RW.rewritePipeTypes(raw, m)],
+    [LINESET_TYPES_BLOB, (raw) => RW.rewriteLinesetTypes(raw, m)],
     // One top-level key per mount type id, each `{ rows }`.
     [
       CURTAIN_MOUNTS_BLOB,

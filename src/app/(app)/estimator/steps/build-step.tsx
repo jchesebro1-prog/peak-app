@@ -23,6 +23,8 @@ import FixtureModal from "../fixture-modal";
 import AddSystemModal from "../add-system-modal";
 import LaborModal from "../labor-modal";
 import TrackModal from "../track-modal";
+import PipeModal from "../pipe-modal";
+import LinesetModal from "../lineset-modal";
 import VendorQuoteModal from "../vendor-quote-modal";
 import { ReadPdfButton, VendorPdfPanel } from "../vendor-pdf-panel";
 import { vendorPdfLineHints } from "@/lib/vendor-pdf/fill";
@@ -74,6 +76,22 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     setAddSystemOpen,
     addSystem,
     addTrack,
+    addPipe,
+    openRiggingEdit,
+    pipeDraft,
+    setPipeDraft,
+    pipeEdit,
+    pipeFor,
+    pipeSec,
+    pipeTypes,
+    riggingCat,
+    addLineset,
+    linesetDraft,
+    setLinesetDraft,
+    linesetEdit,
+    linesetFor,
+    linesetSec,
+    linesetTypes,
     addVendorLine,
     aiAdded,
     aiBusy,
@@ -103,6 +121,9 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     curtainSec,
     curtainSewingPct,
     curtainTrack,
+    curtainPipe,
+    setCurtainPipe,
+    toggleCurtainPipe,
     customDraft,
     customEdit,
     customError,
@@ -629,6 +650,8 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     onToggleFixture={() => openInputMethod("fixture", sec.id)}
                     onToggleLabor={() => openInputMethod("labor", sec.id)}
                     onToggleTrack={() => openInputMethod("track", sec.id)}
+                    onTogglePipe={() => openInputMethod("pipe", sec.id)}
+                    onToggleLineset={() => openInputMethod("lineset", sec.id)}
                     onToggleCustom={() => openInputMethod("custom", sec.id)}
                     onToggleVendor={() => openInputMethod("vendor", sec.id)}
                     onAddPart={(cat, qty) => addPart(sec.id, cat, qty)}
@@ -637,6 +660,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     onEditVendor={(vqId) => openVendorEdit(sec.id, vqId)}
                     onEditLabor={(group) => openLaborEdit(sec.id, group)}
                     onEditTrack={(lineId) => openTrackEdit(sec.id, lineId)}
+                    onEditRigging={(lineId) => openRiggingEdit(sec.id, lineId)}
                     onEditCurtain={(lineId) => openCurtainEdit(sec.id, lineId)}
                     onEditCustom={(lineId) => openCustomEdit(sec.id, lineId)}
                     uiRepriceLock={uiRepriceLock}
@@ -797,6 +821,11 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           trackParts={trackParts}
           onToggleTrack={toggleCurtainTrack}
           onSetTrack={(field, val) => setCurtainTrack((t) => (t ? { ...t, [field]: val } : t))}
+          pipe={curtainPipe}
+          pipeTypes={pipeTypes}
+          riggingCat={riggingCat}
+          onTogglePipe={toggleCurtainPipe}
+          onSetPipe={(field, val) => setCurtainPipe((p) => (p ? { ...p, [field]: val } : p))}
         />
       )}
       {trackFor && (
@@ -810,6 +839,36 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           readOnly={trackEdit?.readOnly ?? null}
           onSet={(field, val) => setTrackDraft((d) => ({ ...d, [field]: val }))}
           onAdd={() => addTrack(trackFor)}
+          onClose={closeInput}
+          confirmClose={confirmDiscardInput}
+        />
+      )}
+      {pipeFor && (
+        <PipeModal
+          secName={pipeSec ? pipeSec.name : ""}
+          draft={pipeDraft}
+          types={pipeTypes}
+          catalog={riggingCat}
+          margin={tierMargin}
+          editing={!!pipeEdit}
+          readOnly={pipeEdit?.readOnly ?? null}
+          onSet={(field, val) => setPipeDraft((d) => ({ ...d, [field]: val }))}
+          onAdd={() => addPipe(pipeFor)}
+          onClose={closeInput}
+          confirmClose={confirmDiscardInput}
+        />
+      )}
+      {linesetFor && (
+        <LinesetModal
+          secName={linesetSec ? linesetSec.name : ""}
+          draft={linesetDraft}
+          types={linesetTypes}
+          catalog={riggingCat}
+          margin={tierMargin}
+          editing={!!linesetEdit}
+          readOnly={linesetEdit?.readOnly ?? null}
+          onSet={(field, val) => setLinesetDraft((d) => ({ ...d, [field]: val }))}
+          onAdd={() => addLineset(linesetFor)}
           onClose={closeInput}
           confirmClose={confirmDiscardInput}
         />

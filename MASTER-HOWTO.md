@@ -846,3 +846,26 @@ Tapping the card (or scanning the QR) opens your page with **Save contact** and 
 - A lead met again at a second show stays under its first show in the Show filter (the show is set only when the lead has none).
 - Go-live "Clear demo data" also deletes booth captures along with leads (D1329).
 - After updating the native apps (`npx cap sync`, rebuild), iOS asks for camera access the first time you scan.
+
+## 13. Pipe and lineset configurators (#373, D1333–D1337)
+
+Both pop-ups work from types you set up once.
+
+**Set up**
+
+1. Go to General → Estimating Rules → **Pipe types** → **+ New pipe type**. Name it, add each stick length and map its catalog part, map a splice and a hanging clamp, set the hanger spacing, tick **Active** and save.
+2. Go to **Lineset types** → **+ New lineset type**. Map aircraft cable, hand line, terminations and chain wraps. Each can be a catalog part or a Hardware assembly from Design → Assemblies. Check the cable allowance, then tick **Active** and save. 10' is a starting value, not a tested one.
+
+A yellow note means a part's unit looks wrong, such as cable that doesn't sell by the foot. It's only a warning, so check the price.
+
+**Use**
+
+- **+ Configure pipe** on any system: pick the type, enter the run and quantity. It works out sticks, splices and clamps.
+- **+ Configure lineset**: enter sets, width and grid height. Lift lines per set start at one per 10' of width (4 on a 40' set), and you can change them. Cable per line is grid + half the width + the allowance.
+- **Add pipe** on a new curtain: the run follows the curtain's width and the label fills in. Check the quantity and run on a bi-parting curtain, because it copies the curtain's quantity and width.
+- Click a line to reopen it. **Update** rebuilds it at today's catalog prices.
+
+The customer sees one line. The parts are on the Review spreadsheet. If you delete a type, its lines keep their saved parts and price but can't be updated, so add a new line from another type to change one.
+
+The same job shows less cable here than in Quick Design, which still uses 2 × grid + width.
+

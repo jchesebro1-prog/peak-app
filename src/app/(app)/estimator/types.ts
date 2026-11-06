@@ -23,6 +23,7 @@ import type { VendorPdfExtraction } from "@/lib/vendor-pdf/extraction";
 import type { VendorPdfReadUi } from "@/lib/vendor-pdf/fill";
 import type { ProjectDiscounts } from "@/lib/project-discounts/rules";
 import type { RepricedOnRevise } from "@/lib/estimate-reprice/rules";
+import type { LinesetType, PipeType, RiggingConfig } from "@/lib/rigging-config/types";
 
 export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
 export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
@@ -123,7 +124,9 @@ export type SpecItem = {
   laborGroup?: string;
   /** Orderable component detail for a catalog-backed fixture assembly.
    *  #366: a part with a project discount carries catalogCost / projectDiscountPct like a line (applyProjectDiscounts). */
-  components?: Array<{ sku: string; label: string; role: AssemblyRole; qty: number; unit: string; cost: number; price: number; catalogCost?: number; projectDiscountPct?: number }>;
+  components?: Array<{ sku: string; label: string; role: AssemblyRole; qty: number; unit: string; cost: number; price: number; catalogCost?: number; projectDiscountPct?: number;
+    /** #373 — an assembly member whose cost is its own override: Copy keeps it. */
+    fixedCost?: true }>;
   /** Links this line to its VendorQuote record (#143) — one priced line per
    *  vendor quote; the materials list lives on the record, not as siblings. */
   vendorQuoteId?: string;
@@ -158,6 +161,10 @@ export type SpecItem = {
    *  them) and the customer document shows only the one line. Built by
    *  track-bom.ts `trackLine`. */
   track?: TrackConfig;
+  /** #373: a configured pipe or lineset line — the inputs, kept so the
+   *  line reopens its modal. One lot; priced parts ride in `components`, as a track
+   *  line's do. Built by rigging-bom.ts. */
+  rigging?: RiggingConfig;
   /** #282 phase 2: the quote's Rewards credit — one line on the LAST system,
    *  qty 1, cost 0, negative `price` (the only line a negative price is
    *  allowed on). Every system-level rule skips it; `totals()` subtracts it
@@ -410,6 +417,11 @@ export type TrackDraft = {
 /** #274: one catalog part a track series maps a role to, as the Estimator
  *  page hands it to the client (read from the live catalog on load). */
 export type TrackPart = { sku: string; desc: string; cost: number; list: number; unit: string; mfr: string };
+
+/** #373: the pipe configurator's form (rigging-bom.ts turns it into a PipeConfig). Blank spacing = the type's. */
+export type PipeDraft = { typeId: string; run: string; qty: string; hangerSpacing: string; label: string };
+/** #373: the lineset configurator's form. Blank lines / allowance = the defaults. */
+export type LinesetDraft = { typeId: string; sets: string; width: string; gridHeight: string; linesPerSet: string; allowance: string; label: string };
 
 /** One typed materials row in the vendor-quote form (strings while editing). */
 export type VendorLineDraft = {
@@ -722,6 +734,11 @@ export type EstimatorProps = {
   /** #274: the live catalog part behind every SKU a series maps, keyed by
    *  SKU. A mapped SKU missing here was deleted from the catalog. */
   trackParts: Record<string, TrackPart>;
+  /** #373: every pipe and lineset type, active or not. A deleted one is simply absent. */
+  pipeTypes: PipeType[];
+  linesetTypes: LinesetType[];
+  /** #373: the live catalog part behind every SKU those types map directly. */
+  riggingParts: Record<string, TrackPart>;
   /** Live labor/travel rates from catalog category 'Labor' (sku → cost). */
   laborRates: Record<string, number>;
   /** Live fixture add-on rates (Estimating Rules → fixture group). */

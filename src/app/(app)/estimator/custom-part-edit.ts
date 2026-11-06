@@ -8,11 +8,11 @@ import type { CustomDraft, SpecItem, SpecSection } from "./types";
  * configurators). Pure: no React, no server imports.
  */
 
-/** A hand-entered custom part — not labor, track, curtain, fixture, rack, vendor quote or a portal price-request. */
+/** A hand-entered custom part — not labor, track, pipe, lineset, curtain, fixture, rack, vendor quote or a portal price-request. */
 export function isCustomLineEditable(
-  it: Pick<SpecItem, "custom" | "labor" | "track" | "curtain" | "fixture" | "rackId" | "vendorQuoteId" | "por" | "mob">,
+  it: Pick<SpecItem, "custom" | "labor" | "track" | "rigging" | "curtain" | "fixture" | "rackId" | "vendorQuoteId" | "por" | "mob">,
 ): boolean {
-  return !!it.custom && !it.labor && !it.track && !it.curtain && !it.fixture && !it.rackId && !it.vendorQuoteId && !it.por && !it.mob;
+  return !!it.custom && !it.labor && !it.track && !it.rigging && !it.curtain && !it.fixture && !it.rackId && !it.vendorQuoteId && !it.por && !it.mob;
 }
 
 const money = (n: number) => (Number.isFinite(n) ? String(Math.round(n * 100) / 100) : "");

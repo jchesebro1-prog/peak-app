@@ -90,6 +90,8 @@ const ROUTES = [
   "/catalog/model-numbers", // #304 — crosswalk upload → preview → apply (admin)
   "/estimating-rules",
   "/estimating-rules/track-series", // #274 — the track configurator's parts map (admin)
+  "/estimating-rules/pipe-types", // #373 — the pipe configurator's parts map (admin)
+  "/estimating-rules/lineset-types", // #373 — the lineset configurator's parts map (admin)
   "/estimating-rules/curtain-mounts", // #292 — curtain-mount hardware (admin)
   "/inspections",
   "/flame-tests",

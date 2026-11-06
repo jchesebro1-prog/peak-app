@@ -702,7 +702,7 @@ export function discardConfirmChecks(ok: Ok) {
   const rebased = rebaseDraft<typeof fresh>(base, fill);
   ok(!draftChanged(rebased, fill(fresh)) && draftChanged(rebased, { ...fill(fresh), total: "9" }), "discard: the hand-off fill re-bases the baseline — the filled form is clean, a later edit dirty");
   ok(rebaseDraft(null, fill) === null && rebaseDraft(undefined, fill) === undefined && rebaseDraft("{bad", fill) === "{bad", "discard: a pending or unreadable baseline is left as-is by rebaseDraft");
-  ok(MODAL_INPUT_KINDS.join() === "curtain,track,fixture,labor,vendor" && isModalInputKind("vendor") && !isModalInputKind("custom") && !isModalInputKind("catalog"), "discard: the five pop-ups (custom / catalog are not)");
+  ok(MODAL_INPUT_KINDS.join() === "curtain,track,pipe,lineset,fixture,labor,vendor" && isModalInputKind("vendor") && !isModalInputKind("custom") && !isModalInputKind("catalog"), "discard: the configurator pop-ups (custom / catalog are not)");
   ok(discardConfirmText("vendor", { read: true }) === "Discard this vendor quote? The PDF read and your changes will be lost." && DISCARD_COPY.vendorRead === discardConfirmText("vendor", { read: true }), "discard: vendor with a read — copy");
   ok(discardConfirmText("vendor") === "Discard this vendor quote? Your changes will be lost." && discardConfirmText("curtain") === "Discard this curtain? Your changes will be lost." &&
      discardConfirmText("track") === "Discard this track? Your changes will be lost." && discardConfirmText("fixture", { read: true }) === "Discard this assembly? Your changes will be lost." &&
@@ -716,7 +716,7 @@ export function discardConfirmChecks(ok: Ok) {
      !/onClick=\{onClose\}/.test(cm), "discard pins: ConfigModal's backdrop and × go through confirmClose (and, without it, onClose itself — unchanged)");
   const bs = code("src/app/(app)/estimator/steps/build-step.tsx");
   const closers = bs.match(/onClose=\{closeInput\}\s*confirmClose=\{confirmDiscardInput\}/g) || [];
-  ok(closers.length === 5 && (bs.match(/onClose=\{closeInput\}/g) || []).length === 5 && (bs.match(/confirmClose=/g) || []).length === 5, "discard pins: the five closeInput pop-ups pass confirmClose, nothing else does");
+  ok(closers.length === 7 && (bs.match(/onClose=\{closeInput\}/g) || []).length === 7 && (bs.match(/confirmClose=/g) || []).length === 7, "discard pins: the seven closeInput pop-ups pass confirmClose, nothing else does");
   for (const [tag, f] of [["CurtainModal", "curtain-modal"], ["TrackModal", "track-modal"], ["FixtureModal", "fixture-modal"], ["LaborModal", "labor-modal"], ["VendorQuoteModal", "vendor-quote-modal"]] as const) {
     const at = bs.indexOf(`<${tag}`), end = bs.indexOf("/>", bs.indexOf("onClose={closeInput}", at));
     ok(at > 0 && bs.slice(at, end).includes("confirmClose={confirmDiscardInput}"), `discard pins: build-step passes confirmClose to ${tag}`);
