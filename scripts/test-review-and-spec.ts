@@ -11368,6 +11368,7 @@ import { partyChecks, partyDbChecks } from "./test-parties";
 import { boothChecks, boothDbChecks } from "./test-booth";
 import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, portalBidPureChecks, portalBidDbChecks, bidReportPureChecks, bidReportWidgetChecks, bidReportDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
 import { lineMoveChecks } from "./test-estimate-line-move";
+import { liveSaveDbChecks, liveSavePureChecks } from "./test-estimate-live-save";
 import { curvedTrackChecks } from "./test-curved-track";
 import { boxSaleDbChecks, boxSalePureChecks } from "./test-box-sale";
 import { markupPureChecks, markupDbChecks, markupParityChecks } from "./test-markup";
@@ -11794,6 +11795,8 @@ seeded()
   .then(() => settingsRaceBlobChecks(ok))
   .then(() => settingsRaceFollowupChecks(ok))
   .then(() => lineMoveChecks(ok))
+  .then(() => liveSavePureChecks(ok))
+  .then(() => liveSaveDbChecks(ok))
   .then(() => curvedTrackChecks(ok))
   .then(() => boxSalePureChecks(ok)).then(() => boxSaleDbChecks(ok))
   .then(() => markupPureChecks(ok)).then(() => markupDbChecks(ok)).then(() => markupParityChecks(ok))
