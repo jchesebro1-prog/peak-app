@@ -1,13 +1,14 @@
 import type { Worksheet } from "exceljs";
-import { isAdjustmentRow, partsRowItemName, partsRowNotes, type ReviewSheetBlock, type SystemFees } from "./parts-csv";
+import { isAdjustmentRow, partsRowItemName, partsRowNotes, reviewMoney, type ReviewSheetBlock, type SystemFees } from "./parts-csv";
 
 /** The Estimator's "Review spreadsheet" (#363, Jeff 2026-10-22) — the parts
- *  list as a real .xlsx for reviewing an estimate: every listed part with a
+ *  list (and, since #374, each system's labor rows: man-hours, travel, shop,
+ *  lift, allowance — all ordinary rows inside the SUM ranges) as a real .xlsx for reviewing an estimate: every listed part with a
  *  clickable Link, live Ext Cost / Ext Sell / Markup formulas
  *  on the line's own sell (before freight, rounding and bonuses), and under
  *  each system three bold rows — System cost, System markup and System fees
  *  (freight + both bonuses + the round-up / typed-price adjustment) — that
- *  add up to the system's price for its listed parts.
+ *  add up to the system's price.
  *  exceljs is imported on demand, so it never lands in the Estimator's main
  *  bundle; the module touches the DOM only inside `downloadReviewSheet`.
  *  Every text cell is written as a string, never a formula. */
@@ -42,19 +43,12 @@ const MONEY_FMT = "$#,##0.00";
 const PCT_FMT = "0.0%";
 const WIDTHS = [18, 20, 40, 14, 18, 7, 12, 12, 13, 13, 10, 22, 36, 40];
 
-/** "$1,234.50" / "-$12.00" — the fees breakdown's money (#363). */
-function money(n: number): string {
-  const v = Math.round(n * 100) / 100;
-  const s = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return (v < 0 ? "-$" : "$") + s;
-}
-
 /** The System fees row's Notes (#363): each non-zero part, e.g. "Freight $X ·
  *  Estimator bonus $Y · Package bonus $Z · Price rounding $W". */
 export function feesBreakdown(fees: SystemFees): string {
   const parts: string[] = [];
   const add = (label: string, n: number) => {
-    if (Math.abs(n) >= 0.005) parts.push(`${label} ${money(n)}`);
+    if (Math.abs(n) >= 0.005) parts.push(`${label} ${reviewMoney(n)}`);
   };
   add("Freight", fees.freight);
   add("Estimator bonus", fees.estimatorBonus);

@@ -12977,3 +12977,14 @@ Jeff, Oct 30: the NFC contact card should carry the company website and an offic
 **Remaining (Jeff):**
 - Fill Settings → Branding → Website.
 - Set Office on his Team row if he's not at the main office.
+
+## 374. Review spreadsheet: labor rows — DONE 2026-11-06 on `feat/datasheet-package-download` (D1332)
+
+Jeff, Nov 6: the estimator Review spreadsheet should show labor as one man-hours row, travel and shop & engineering. `reviewLaborRows` (`src/app/(app)/estimator/parts-csv.ts`) adds, per system after its parts: Labor (man-hours, Qty = hours), Travel (miles + per diem + hotel, itemized in Notes), Shop & engineering, plus Lift rental and Project allowance when they have a cost. All carry Price source "Labor" and sit in the System cost / markup sums, so a system's rows + fees equal its price; labor-only systems get a block and export. No migration, no change to any price or customer document.
+
+**Gates:** tsc 0 errors; test:specs ALL PASSED, 26,317 PASS / 0 FAIL (23 `#374` checks, plus the markup-settings run); test:smoke ALL PASSED; eslint clean on the three source files. Browser: a test labor group on an unsaved dev estimate exported 200 hr, and cost + markup + fees = $37,275.00, the estimate's Quoted total; nothing was saved.
+
+**Remaining (Jeff):**
+- Open a real estimate's sheet in Excel.
+- Freight % is charged on labor cost when labor sits in a materials system (existing rule, `systemFreightBase`). The sheet now makes it visible: the test estimate's freight went from $100.00 to $480.20. Decide whether labor should bear freight.
+

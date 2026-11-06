@@ -1,6 +1,7 @@
 import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { lineModel, partModel } from "@/lib/catalog-rename/sku";
-import { hasSellOverride, isSystemLine, lineExtSellOf, systemFreight, systemItemsRev, systemSellAdjustment, systemSellTotal } from "./pricing";
+import { computeMob, hasSellOverride, isSystemLine, lineExtSellOf, systemFreight, systemItemsRev, systemSellAdjustment, systemSellTotal } from "./pricing";
+import { laborGroupRecord } from "./labor-group";
 import type { SpecItem, SpecSection, VendorQuote } from "./types";
 import { isBonusItem, isEstimatorBonusItem, isPackageBonusItem } from "@/lib/estimate-bonus/flags";
 import { isPlaceholderSku } from "@/lib/specs/record-keys";
@@ -20,6 +21,9 @@ import { normalCostOf, type ProjectDiscounts } from "@/lib/project-discounts/rul
  *  built from `reviewSheetModel` below — the same rows, plus each row's Link
  *  and its section id, grouped per system with that system's fees. The CSV
  *  helpers (`partsListCsvRows`, `PARTS_CSV_HEADER`) stay for the row tests.
+ *  #374: the Review spreadsheet also lists each system's labor (`reviewLaborRows`,
+ *  added only by `reviewSheetModel`) so a system's rows + fees tie out to its
+ *  price; the parts list and CSV above never carry labor.
  *  Pure: no React, no server imports. */
 
 /** Catalog facts for one SKU, keyed by the trimmed SKU (#262). */
@@ -430,8 +434,8 @@ export type SystemFees = {
 
 /** System fees (#363, Jeff 2026-10-22): freight + the 5% package bonus + the
  *  2% estimator bonus + the round-up / typed-price adjustment. With the
- *  listed parts' own sell (lineSell) they make the system's price — to the
- *  cent for a system with no labor lines, which are never listed. */
+ *  listed rows' own sell (lineSell — parts and, since #374, labor) they make
+ *  the system's price, to the cent. */
 export function systemFees(section: SpecSection): SystemFees {
   const bonus = (pick: (x: SpecItem) => boolean) =>
     round2(section.items.filter((x) => pick(x) && isSystemLine(x)).reduce((a, x) => a + lineExtSellOf(x), 0));
@@ -449,6 +453,127 @@ export function systemFees(section: SpecSection): SystemFees {
   };
 }
 
+/** "$1,234.50" / "-$12.00" — money as the Review spreadsheet prints it (#363, #374). */
+export function reviewMoney(n: number): string {
+  const v = Math.round(n * 100) / 100;
+  const s = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (v < 0 ? "-$" : "$") + s;
+}
+
+const HOUR_UNITS = new Set(["hr", "hrs", "hour", "hours", "mh", "manhour", "manhours", "man-hour", "man-hours"]);
+const LABOR_SOURCE = "Labor";
+
+/** A section's labor lines for the Review spreadsheet (#374): what `expand` skips as labor, minus
+ *  options, bonus lines, Rewards credits and bad quantities. */
+function reviewLaborItems(section: SpecSection): SpecItem[] {
+  if (section.alternate) return [];
+  return section.items.filter((item) => {
+    const isLabor = !!(item.labor || item.laborOverhead || item.laborTravel || section.kind === "labor");
+    if (!isLabor || item.option || isBonusItem(item) || isRewardCreditItem(item)) return false;
+    return Number.isFinite(item.qty) && item.qty > 0;
+  });
+}
+
+/** #374: a system's labor as Review-spreadsheet rows — man-hours, Travel, Shop & engineering, Lift rental,
+ *  Project allowance, Performance bonus (legacy), each only when it carries at least half a cent.
+ *  Together with the parts rows and `systemFees` they make the system's price. Pure. */
+export function reviewLaborRows(section: SpecSection, defaultRoom = ""): PartsListRow[] {
+  const items = reviewLaborItems(section);
+  if (items.length === 0) return [];
+  const room = section.room?.trim() || defaultRoom.trim();
+  const base = (desc: string): Omit<PartsListRow, "qty" | "unit" | "unitCost" | "unitSell" | "lineSell" | "notes"> => ({
+    manufacturer: "",
+    modelNumber: "",
+    room,
+    system: section.name,
+    sku: "",
+    desc,
+    source: LABOR_SOURCE,
+    partOf: [],
+    link: "",
+    sectionId: section.id,
+  });
+  const skuIs = (item: SpecItem, re: RegExp) => re.test(item.sku || "");
+  type Bucket = "hours" | "travel" | "shop" | "lift" | "misc" | "bonus";
+  const bucketOf = (item: SpecItem): Bucket => {
+    if (item.laborTravel === "lift") return "lift";
+    if (item.laborTravel) return "travel";
+    if (item.laborOverhead === "shop" || skuIs(item, /^LAB-SHOP-/)) return "shop";
+    if (item.laborOverhead === "misc" || skuIs(item, /^LAB-MISC-/)) return "misc";
+    if (item.laborOverhead === "bonus" || skuIs(item, /^LAB-BONUS-/)) return "bonus";
+    return "hours";
+  };
+  const groups: Record<Bucket, SpecItem[]> = { hours: [], travel: [], shop: [], lift: [], misc: [], bonus: [] };
+  for (const item of items) groups[bucketOf(item)].push(item);
+  const costOf = (list: SpecItem[]) => list.reduce((a, x) => a + x.qty * x.cost, 0);
+  const sellOf = (list: SpecItem[]) => list.reduce((a, x) => a + lineExtSellOf(x), 0);
+  const has = (cost: number, sell: number) => Math.abs(cost) >= 0.005 || Math.abs(sell) >= 0.005;
+  const out: PartsListRow[] = [];
+
+  const lump = (list: SpecItem[], desc: string, notes: string[] = []) => {
+    const cost = costOf(list);
+    const sell = sellOf(list);
+    if (!has(cost, sell)) return;
+    out.push({ ...base(desc), qty: 1, unit: "ea", unitCost: cost, unitSell: sell, lineSell: sell, notes });
+  };
+
+  // 1. Man-hours. Hours per line: the labor group's mobilization (reg already includes the supervisor's hours,
+  // plus overtime), else the line's own crew × days at 8 hr/day, else an hour unit, else unknown.
+  {
+    const list = groups.hours;
+    const cost = costOf(list);
+    const sell = sellOf(list);
+    if (has(cost, sell)) {
+      let hours = 0;
+      let unknown = false;
+      let estimated = false;
+      for (const item of list) {
+        const money = has(item.qty * item.cost, lineExtSellOf(item));
+        let h: number | null = null;
+        const key = item.laborMobKey || "";
+        const at = key.lastIndexOf(":");
+        const rec = at > 0 && /^\d+$/.test(key.slice(at + 1)) ? laborGroupRecord(section, key.slice(0, at)) : null;
+        const mob = rec ? rec.draft.mobs[Number(key.slice(at + 1))] : undefined;
+        if (rec && mob) {
+          const c = computeMob(mob, rec.draft.discipline || "RIG", () => 0);
+          h = (c.reg + c.otHrs) * item.qty;
+        } else if (item.mob && Number.isFinite(item.mob.crew) && item.mob.crew > 0 && Number.isFinite(item.mob.days) && item.mob.days > 0) {
+          h = item.mob.crew * item.mob.days * 8 * item.qty;
+          estimated = true;
+        } else if (HOUR_UNITS.has((item.unit || "").trim().toLowerCase())) {
+          h = item.qty;
+        }
+        // A line with money and no hours can't be covered by the row's hours.
+        if (h != null && Number.isFinite(h) && h > 0) hours += h;
+        else if (money) unknown = true;
+      }
+      const estimatedNote = estimated ? ["Some hours estimated at 8 hr/day"] : [];
+      if (!unknown && hours > 0) {
+        out.push({ ...base("Labor (man-hours)"), qty: hours, unit: "hr", unitCost: cost / hours, unitSell: sell / hours, lineSell: sell / hours, notes: estimatedNote });
+      } else {
+        const missing = hours > 0 ? `Hours not recorded on every line (${+hours.toFixed(2)} hr known)` : "Hours not recorded";
+        out.push({ ...base("Labor (man-hours)"), qty: 1, unit: "ea", unitCost: cost, unitSell: sell, lineSell: sell, notes: [missing, ...estimatedNote] });
+      }
+    }
+  }
+
+  // 2. Travel — mileage, hotel, per diem (the notes itemize each non-zero cost).
+  {
+    const list = groups.travel;
+    const parts: string[] = [];
+    for (const [kind, label] of [["mileage", "Miles"], ["perdiem", "Per diem"], ["hotel", "Hotel"]] as const) {
+      const c = costOf(list.filter((x) => x.laborTravel === kind));
+      if (Math.abs(c) >= 0.005) parts.push(`${label} ${reviewMoney(c)}`);
+    }
+    lump(list, "Travel", parts.length ? [parts.join(" · ")] : []);
+  }
+  lump(groups.shop, "Shop & engineering");
+  lump(groups.lift, "Lift rental");
+  lump(groups.misc, "Project allowance");
+  lump(groups.bonus, "Performance bonus");
+  return out;
+}
+
 /** One system's block of the Review spreadsheet (#363): its listed rows, then
  *  its three subtotal rows (cost, markup, fees). */
 export type ReviewSheetBlock = {
@@ -459,10 +584,10 @@ export type ReviewSheetBlock = {
   fees: SystemFees;
 };
 
-/** The Review spreadsheet's model (#363): one block per system that lists at
- *  least one row, in the estimate's order — the parts list's own rows and
- *  exclusions (labor systems, alternates, option / labor / bonus / Rewards
- *  lines), grouped by section id so two same-named systems stay apart. */
+/** The Review spreadsheet's model (#363, #374): one block per system that lists at least one row, in the
+ *  estimate's order — the parts list's own rows and exclusions (alternates, option / labor / bonus / Rewards
+ *  lines), grouped by section id so two same-named systems stay apart, then (#374) that system's labor rows
+ *  (`reviewLaborRows`; a labor-kind system gets a block of labor alone). */
 export function reviewSheetModel(
   sections: SpecSection[],
   vendorQuotes: VendorQuote[],
@@ -478,11 +603,14 @@ export function reviewSheetModel(
     else bySection.set(r.sectionId, [r]);
   }
   const out: ReviewSheetBlock[] = [];
+  const seen = new Set<string>();
   for (const section of sections) {
-    const rows = bySection.get(section.id);
-    if (!rows || rows.length === 0) continue;
+    if (section.alternate) continue;
     // Section ids are unique per estimate; a repeat would only list the rows twice.
-    bySection.delete(section.id);
+    if (seen.has(section.id)) continue;
+    seen.add(section.id);
+    const rows = [...(bySection.get(section.id) || []), ...reviewLaborRows(section, defaultRoom)];
+    if (rows.length === 0) continue;
     out.push({
       sectionId: section.id,
       system: section.name,
