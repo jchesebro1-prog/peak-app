@@ -116,6 +116,8 @@ export function SendComposer({ s, collapsible, onSent }: { s: EstimatorState; co
 
   /** Saves unsaved edits first — the saved version is what the action decides (asOf). */
   const versionToSend = async (): Promise<number | undefined | false> => {
+    // Live mode: land a pending autosave first so the version stamp isn't stale (a false flush keeps the old path).
+    if (s.liveMode) await s.live.flush();
     if (pdfDirty) return await saveNow();
     return next?.asOf;
   };

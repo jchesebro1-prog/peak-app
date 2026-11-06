@@ -288,7 +288,7 @@ export function EstimatorHeader({
           </div>
           <UndoRedoButtons undo={undo} />
           {liveMode ? (
-            <LiveSaveChip live={live} />
+            <LiveSaveChip live={live} hasId={!!s.loadedId} />
           ) : (
             <button
               type="button"

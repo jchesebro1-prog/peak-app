@@ -75,7 +75,11 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
   const [trackKey, setTrackKey] = useState(0);
   /** #348 2b-ii — a bidder send saves and settles exactly as the composer's send does, then refreshes Activity. */
   const sendCtx: BidSendCtx = {
-    versionToSend: async () => (pdfDirty ? await saveNow() : next?.asOf),
+    versionToSend: async () => {
+      // Live mode: land a pending autosave first so the version stamp isn't stale (a false flush keeps the old path).
+      if (s.liveMode) await s.live.flush();
+      return pdfDirty ? await saveNow() : next?.asOf;
+    },
     selectionSettled,
     applySync,
     onSent: () => setTrackKey((k) => k + 1),

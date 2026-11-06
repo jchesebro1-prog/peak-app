@@ -269,7 +269,18 @@ export async function liveSavePureChecks(ok: Ok) {
   const clientSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
   ok(clientSrc.includes("s.live.flush()"), "steps: a step change flushes the live save");
   ok(clientSrc.includes("retryQuotePdfAction("), "steps: an out-of-date stored PDF renders on Customer review and Send");
-  ok(clientSrc.includes("if (s.live.edited) void s.saveNow()"), "steps: stepping in only saves after a real edit — opening never writes");
+  ok(/s\.live\.edited && !saveAskedRef\.current/.test(clientSrc), "steps: stepping in only saves after a real edit — opening never writes");
+  ok(clientSrc.includes("saveAskedRef.current = true") && clientSrc.includes("saveAskedRef.current = false"), "steps: the manual save asks once per visit, again only after the screen was clean");
+  const stateSrc2 = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/use-estimator-state.ts"), "utf8");
+  ok(stateSrc2.includes("e === STATUS_EDITS_UNSAVED || e === SAVE_NOT_WRITTEN") && stateSrc2.includes("setActionError(res.error || SAVE_NOT_WRITTEN)"), "banner: a landed live save clears the failed manual save sentence");
+  const chipSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/live-save-chip.tsx"), "utf8");
+  ok(chipSrc.includes('role="status"') && chipSrc.includes("data-testid=\"live-save-refusal\"") && chipSrc.includes('aria-live="polite"'), "chip: a refusal shows as visible status text inside a polite live region");
+  ok(chipSrc.includes("LIVE_COPY.notSavedYet") && chipSrc.includes("!hasId && status === \"saved\""), "chip: a new empty estimate reads Not saved yet, disabled");
+  ok(LIVE_COPY.notSavedYet === "Not saved yet" && LIVE_COPY.notSavedYetHint === "A new estimate saves itself when you add its first line.", "copy: the new-estimate chip words");
+  ok((chipSrc.match(/className="pk-btn-outline"/g) ?? []).length === 2, "banner: Reload and Keep mine use pk-btn classes");
+  const sendStepSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/steps/send-step.tsx"), "utf8");
+  const composerSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/steps/send-composer.tsx"), "utf8");
+  ok(sendStepSrc.includes("if (s.liveMode) await s.live.flush();") && composerSrc.includes("if (s.liveMode) await s.live.flush();"), "send: live mode flushes a pending autosave before taking the version stamp");
   const bomSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/steps/package-bom-tab.tsx"), "utf8");
   ok(bomSrc.includes("contentUnsaved && <span"), "hints: the BOM tab's Save first reads contentUnsaved");
 
@@ -287,7 +298,7 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(statusSrc.indexOf("await noteStoredKey(id)") > statusSrc.indexOf("await live.flush()") && statusSrc.indexOf("await noteStoredKey(id)") < statusSrc.indexOf("await setStatusAction("), "fix2: status move reads the key after the flush, before setStatusAction");
   ok(stageSrc.indexOf("await noteStoredKey(id)") > stageSrc.indexOf("await live.flush()") && stageSrc.indexOf("await noteStoredKey(id)") < stageSrc.indexOf("await setQuoteStageAction("), "fix2: stage move reads the key the same way");
   ok(/if \(k && moveKeyMatchedRef\.current\) liveKeyRef\.current = k;\s*moveKeyMatchedRef\.current = true;/.test(hookSrc), "fix2: the re-read adopts the new key only when the key matched before the move");
-  ok(/live\.status === "saved"\) setActionError\(\(e\) => \(e === STATUS_EDITS_UNSAVED \? null : e\)\)/.test(hookSrc), "fix3: a live save clears only the stop sentence");
+  ok(/live\.status === "saved"\) setActionError\(\(e\) => \(e === STATUS_EDITS_UNSAVED \|\| e === SAVE_NOT_WRITTEN \? null : e\)\)/.test(hookSrc), "fix3: a live save clears only the two stop sentences");
   ok((hookSrc.match(/That status change did not go through/g) || []).length === 1, "fix3: the sentence lives in one constant");
   ok(/baseStatusRef\.current = res\.status;\s*setBaseStatus\(res\.status\);\s*\}\s*setActionNotice\(res\.error \?\? null\);\s*return \{ kind: "notLive" \}/.test(performSrc), "C2: the notLive sync reaches the rollback without waiting for a commit");
   // C3 + I1

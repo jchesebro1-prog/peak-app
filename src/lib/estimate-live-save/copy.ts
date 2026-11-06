@@ -9,6 +9,8 @@ export const LIVE_COPY = {
   keepMineHint: "Keep mine replaces what was saved elsewhere with this window's version.",
   historyEmpty: "Nothing to undo",
   redoEmpty: "Nothing to redo",
+  notSavedYet: "Not saved yet",
+  notSavedYetHint: "A new estimate saves itself when you add its first line.",
 };
 
 export function chipLabel(status: LiveStatus): string {

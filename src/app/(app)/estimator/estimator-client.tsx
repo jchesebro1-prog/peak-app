@@ -48,17 +48,24 @@ export default function EstimatorClient(props: EstimatorProps) {
   // Customer review and Send & track show and send the rendered PDF. A live save only marks it out of date, so render it
   // on the way in: a save that renders when the screen is ahead of it, a plain render when it's out of date from before a reload.
   const renderAskedRef = useRef<string | null>(null);
+  /** One manual save per visit: if the PDF still reads dirty after it, don't save (and render) again until the screen is clean once. */
+  const saveAskedRef = useRef(false);
   const needsPdf = !!s.loadedId && (step === "review" || step === "send") && s.liveMode;
   useEffect(() => {
     if (!needsPdf) {
       renderAskedRef.current = null;
+      saveAskedRef.current = false;
       return;
     }
     if (s.pdfDirty) {
       // Only after a real edit: load-time derived changes can read as dirty too, and opening must never write (a phone opens straight on review).
-      if (s.live.edited) void s.saveNow();
+      if (s.live.edited && !saveAskedRef.current) {
+        saveAskedRef.current = true;
+        void s.saveNow();
+      }
       return;
     }
+    saveAskedRef.current = false; // clean again: a later edit on this step may ask once more
     if (s.pdf && !s.pdf.outOfDate) return;
     // Once per visit: a failed render shows its own Retry in the preview.
     if (renderAskedRef.current === s.loadedId) return;

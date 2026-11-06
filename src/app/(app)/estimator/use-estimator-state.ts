@@ -82,6 +82,8 @@ import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 /** #333 review (F): how long Send waits for an in-flight Client package write. */
 const SELECTION_SETTLE_TIMEOUT_MS = 10_000;
 const SELECTION_NOT_SAVED = "Couldn't save package choices.";
+/** The manual save's failure sentence — a later live save landing clears it. */
+const SAVE_NOT_WRITTEN = "That save did not go through — nothing was written.";
 const STATUS_EDITS_UNSAVED = "That status change did not go through — your latest edits are not saved yet.";
 
 /** Prototype prop taxRatePct defaulted to 0 — kept as a constant. */
@@ -1688,7 +1690,7 @@ export function useEstimatorState(props: EstimatorProps) {
         // The gate's own message (statusFailureMessage, D230) — the quote
         // itself saved; only the requested status advance was refused.
         setActionNotice(null);
-        setActionError(res.error || "That save did not go through — nothing was written.");
+        setActionError(res.error || SAVE_NOT_WRITTEN);
         setGateRefused(false);
         return { kind: "refused", message: res.error || "That save did not go through." };
       } catch (e) {
@@ -1831,7 +1833,7 @@ export function useEstimatorState(props: EstimatorProps) {
   };
   // A live save landing clears the stop sentence its failed flush left behind (and only that sentence).
   useEffect(() => {
-    if (live.status === "saved") setActionError((e) => (e === STATUS_EDITS_UNSAVED ? null : e));
+    if (live.status === "saved") setActionError((e) => (e === STATUS_EDITS_UNSAVED || e === SAVE_NOT_WRITTEN ? null : e));
   }, [live.status]);
   const doSave = () => {
     if (tierResolvingRef.current) return;
