@@ -39575,7 +39575,7 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
   const acts = src("src/app/(app)/estimator/actions.ts");
   const page = src("src/app/(app)/estimator/page.tsx");
   const addCurtain = client.slice(client.indexOf("const addCurtain = "), client.indexOf("const setFixture = "));
-  ok(/curtain: true,[\s\S]*?\},\s*\.\.\.\(track \? \[track\] : \[\]\),\s*\]\);/.test(addCurtain) && addCurtain.includes("trackLine(config,") && addCurtain.includes("if (!res.ok) return;"),
+  ok(/curtain: true,[\s\S]*?\},\s*\.\.\.\(track \? \[track\] : \[\]\),\s*\.\.\.\(pipe \? \[pipe\] : \[\]\),\s*\]\);/.test(addCurtain) && addCurtain.includes("trackLine(config,") && addCurtain.includes("if (!res.ok) return;"),
     "#274B curtain: Add track pushes the curtain line THEN its track line, and a blocked track blocks the add");
   const addTrack = client.slice(client.indexOf("const addTrack = "), client.indexOf("const setCurtainField = "));
   ok(addTrack.includes("replaceTrackLine(s, lineId, res.item)") && addTrack.includes("pushItems(secId, [{ ...res.item, id: nextId() }])") && addTrack.includes("trackEdit?.readOnly"),
@@ -39593,7 +39593,7 @@ const t274bR2 = (n: number) => Math.round(n * 100) / 100;
   ok(modal.includes("useSwallowOpeningDoubleClick()") && modal.includes("onClickCapture={swallowOpeningDoubleClick}") && modal.includes('"Update track" : "Add track"') && modal.includes("No track series yet — set one up in"),
     "#274B modal: swallows the opening double-click, Update/Add track, and the empty-state link to Track series");
   ok(curtainModal.includes("Add track") && curtainModal.includes("<TrackFields draft={track}"), "#274B curtain modal: the Add track toggle shows the track fields");
-  ok(/if \(!it\.track\) fixtureIds\.add\(/.test(src("src/app/(app)/estimator/copy-pricing.ts")), "#274B copy action: a track line's parts are looked up as catalog parts, never as a fixture record");
+  ok(/if \(!isConfiguredLine\(it\)\) fixtureIds\.add\(/.test(src("src/app/(app)/estimator/copy-pricing.ts")), "#274B copy action: a track line's parts are looked up as catalog parts, never as a fixture record");
   ok(page.includes("listTrackSeries()") && page.includes("trackSeries={trackSeries}") && page.includes("trackParts={trackParts}"), "#274B page: the Estimator loads the series and their live catalog parts");
 }
 
@@ -71701,7 +71701,7 @@ import { REVISE_FIRST as e368ReviseFirst, repriceLocked as e368Locked } from "@/
   ok(mlb.includes("disabled={repriceLocked(hit.status)}") && mlb.includes("title={repriceLocked(hit.status) ? REVISE_FIRST : undefined}"),
     "#368 estimator lock: Move lines → Another estimate… greys out sent / won / lost targets the same way");
   const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
-  ok((hook.match(/if \(repriceLocked\(status\)\) return;/g) || []).length === 3, "#368 estimator lock: openLaborEdit / openTrackEdit / openCurtainEdit refuse on a locked estimate too");
+  ok((hook.match(/if \(repriceLocked\(status\)\) return;/g) || []).length === 4, "#368 estimator lock: openLaborEdit / openTrackEdit / openRiggingEdit / openCurtainEdit refuse on a locked estimate too");
 }
 
 /** #368 estimator — Load system's core refuses a sent / won / lost target estimate (and only that) against the test DB. */

@@ -626,7 +626,7 @@ export function discardConfirmChecks(ok: Ok) {
      !/onClick=\{onClose\}/.test(cm), "discard pins: ConfigModal's backdrop and × go through confirmClose (and, without it, onClose itself — unchanged)");
   const bs = code("src/app/(app)/estimator/steps/build-step.tsx");
   const closers = bs.match(/onClose=\{closeInput\}\s*confirmClose=\{confirmDiscardInput\}/g) || [];
-  ok(closers.length === 5 && (bs.match(/onClose=\{closeInput\}/g) || []).length === 5 && (bs.match(/confirmClose=/g) || []).length === 5, "discard pins: the five closeInput pop-ups pass confirmClose, nothing else does");
+  ok(closers.length === 7 && (bs.match(/onClose=\{closeInput\}/g) || []).length === 7 && (bs.match(/confirmClose=/g) || []).length === 7, "discard pins: the seven closeInput pop-ups pass confirmClose, nothing else does");
   for (const [tag, f] of [["CurtainModal", "curtain-modal"], ["TrackModal", "track-modal"], ["FixtureModal", "fixture-modal"], ["LaborModal", "labor-modal"], ["VendorQuoteModal", "vendor-quote-modal"]] as const) {
     const at = bs.indexOf(`<${tag}`), end = bs.indexOf("/>", bs.indexOf("onClose={closeInput}", at));
     ok(at > 0 && bs.slice(at, end).includes("confirmClose={confirmDiscardInput}"), `discard pins: build-step passes confirmClose to ${tag}`);
