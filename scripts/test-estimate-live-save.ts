@@ -2,6 +2,8 @@
    (test:specs runs both). Run the pure half alone with `npx tsx scripts/test-estimate-live-save.ts`. */
 import type { Ok } from "./test-inbox-org";
 import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
+import { canAutoSave, DEBOUNCE_MS, INITIAL_LIVE_STATE, liveStatusOf, reduceLive, retryDelayMs, type LiveGate } from "../src/lib/estimate-live-save/scheduler";
+import { limitToLivePatch, liveSaveEligible, liveSaveRefusal } from "../src/lib/estimate-live-save/rules";
 import { COALESCE_MS, diffEdit, emptyUndoHistory, mapSnapshots, recordEdit, takeRedo, takeUndo, UNDO_CAP, type UndoSnap } from "../src/lib/estimate-live-save/undo";
 
 const line = (id: number, extra: Partial<SpecItem> = {}): SpecItem =>
@@ -90,6 +92,63 @@ export async function liveSavePureChecks(ok: Ok) {
   const lu = takeUndo(labelled, b)!;
   const lr = takeRedo(lu.next, a)!;
   ok(lu.next.future[0].label === "line deleted" && lr.next.past[0].label === "line deleted", "undo: undo and redo keep the entry label");
+
+  // scheduler
+  const gate: LiveGate = { enabled: true, hasId: true, hasLines: true, tierResolving: false, statusChanging: false };
+  ok(DEBOUNCE_MS === 1_500, "live: the debounce is 1.5 s");
+  ok(liveStatusOf(INITIAL_LIVE_STATE) === "saved", "live: starts saved");
+  ok(!canAutoSave(INITIAL_LIVE_STATE, gate), "live: nothing to save with no edit — opening never writes");
+  let st = reduceLive(INITIAL_LIVE_STATE, { type: "edit" });
+  ok(liveStatusOf(st) === "dirty" && canAutoSave(st, gate), "live: an edit is dirty and can save");
+  ok(!canAutoSave(st, { ...gate, enabled: false }), "live: not on a non-draft");
+  ok(!canAutoSave(st, { ...gate, tierResolving: true }), "live: waits for a tier lookup");
+  ok(!canAutoSave(st, { ...gate, statusChanging: true }), "live: waits for a status change");
+  ok(!canAutoSave(st, { ...gate, hasId: false, hasLines: false }), "live: a new estimate waits for its first line");
+  ok(canAutoSave(st, { ...gate, hasId: false, hasLines: true }), "live: a new estimate saves on its first line");
+  st = reduceLive(st, { type: "start" });
+  ok(liveStatusOf(st) === "saving" && !canAutoSave(st, gate), "live: one save at a time");
+  const seq = st.inFlightSeq as number;
+  st = reduceLive(st, { type: "edit" });
+  st = reduceLive(st, { type: "saved", seq });
+  ok(liveStatusOf(st) === "dirty" && canAutoSave(st, gate), "live: an edit during a save stays dirty");
+  st = reduceLive(st, { type: "start" });
+  st = reduceLive(st, { type: "saved", seq: st.inFlightSeq as number });
+  ok(liveStatusOf(st) === "saved" && st.failures === 0, "live: the last save settles");
+
+  // failures
+  let f = reduceLive(reduceLive(INITIAL_LIVE_STATE, { type: "edit" }), { type: "start" });
+  f = reduceLive(f, { type: "failed" });
+  ok(liveStatusOf(f) === "failed" && f.failures === 1, "live: a failed save is failed");
+  ok(!canAutoSave(f, gate), "live: a failed save waits for its retry, not the debounce");
+  ok(canAutoSave(reduceLive(f, { type: "retry" }), gate), "live: a retry opens it again");
+  ok(retryDelayMs(1) === 5_000 && retryDelayMs(2) === 15_000 && retryDelayMs(3) === 30_000 && retryDelayMs(4) === 60_000 && retryDelayMs(9) === 60_000, "live: retry backoff");
+  ok(retryDelayMs(1, false) === null, "live: a failed create never retries by itself");
+
+  // refused and conflict
+  let rf = reduceLive(reduceLive(reduceLive(INITIAL_LIVE_STATE, { type: "edit" }), { type: "start" }), { type: "refused", message: "No labor" });
+  ok(liveStatusOf(rf) === "refused" && rf.refusal === "No labor" && !canAutoSave(rf, gate), "live: refused pauses with the reason");
+  rf = reduceLive(rf, { type: "edit" });
+  ok(rf.refusal === null && canAutoSave(rf, gate), "live: the next edit lifts a refusal");
+  let c = reduceLive(reduceLive(reduceLive(INITIAL_LIVE_STATE, { type: "edit" }), { type: "start" }), { type: "conflict", by: "Isaac", at: 5 });
+  ok(liveStatusOf(c) === "conflict" && c.conflict?.by === "Isaac" && !canAutoSave(c, gate), "live: a conflict pauses");
+  c = reduceLive(c, { type: "edit" });
+  ok(liveStatusOf(c) === "conflict" && !canAutoSave(c, gate), "live: another edit does not lift a conflict");
+  c = reduceLive(c, { type: "keepMine" });
+  ok(c.conflict === null && liveStatusOf(c) === "dirty", "live: Keep mine lifts it");
+
+  // eligibility
+  ok(liveSaveEligible({ status: "draft", source: "estimator", quoteType: "system" }), "rules: an Estimator draft is live");
+  ok(liveSaveEligible({ status: "draft", source: "estimator", quoteType: null }), "rules: a blank quote type is a system quote");
+  for (const status of ["sent", "won", "lost"] as const) ok(!liveSaveEligible({ status, source: "estimator", quoteType: "system" }), `rules: ${status} is not live`);
+  ok(!liveSaveEligible({ status: "draft", source: "portal-catalog", quoteType: "system" }), "rules: a portal quote is not live");
+  ok(!liveSaveEligible({ status: "draft", source: "estimator", quoteType: "flame" }), "rules: a service quote is not live");
+  ok(liveSaveRefusal({ status: "sent", source: "estimator", quoteType: "system" }) !== null, "rules: the server refuses live on a sent quote");
+  ok(liveSaveRefusal({ status: "draft", source: "estimator", quoteType: "system" }) === null, "rules: the server allows live on a draft");
+
+  // the limited patch
+  const limited = limitToLivePatch({ name: "x", customer: "y", customerId: "c", spec: { sections: [] }, value: 1, margin: 2, pdfOptions: {}, paymentTerms: "p", boxSale: true, pricingTier: "t", tierMargin: 3, source: "estimator", quoteNote: "n", coverSummary: "s" } as never) as Record<string, unknown>;
+  ok(!("name" in limited) && !("customer" in limited) && !("customerId" in limited) && !("quoteNote" in limited) && !("coverSummary" in limited), "rules: header fields stay with the header autosave");
+  ok(["spec", "value", "margin", "pdfOptions", "paymentTerms", "boxSale", "pricingTier", "tierMargin", "source"].every((k) => k in limited), "rules: the fields only Save carries stay");
 }
 
 export async function liveSaveDbChecks(_ok: Ok) {
