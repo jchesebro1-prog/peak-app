@@ -10,6 +10,13 @@ import { defaultLinesPerSet, linesetQuantities } from "../src/lib/rigging-config
 import { isConfiguredLine } from "../src/lib/rigging-config/line";
 import { rewriteLinesetTypes, rewritePipeTypes } from "../src/lib/catalog-rename/rewrite";
 import type { ResolvedFixtureAssembly } from "../src/lib/fixture-assemblies";
+import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
+import { repriceForTier } from "../src/app/(app)/estimator/tier-reprice";
+import { copySectionForTarget } from "../src/app/(app)/estimator/copy-system";
+import { isCustomLineEditable } from "../src/app/(app)/estimator/custom-part-edit";
+import { expandLine, isAssemblyLine, primaryMemberSku } from "../src/lib/quote-line-members";
+import { applyProjectDiscounts, discountSkuOf } from "../src/lib/project-discounts/rules";
+import { bomModelEligible } from "../src/lib/estimate-output/bom-models";
 import {
   curtainPipeDraft, curtainPipePrefill, followCurtainPipePrefill, freshLinesetDraft, freshPipeDraft, linesetBom, linesetConfigFromDraft, linesetDraftFromConfig, linesetLine,
   pipeBom, pipeConfigFromDraft, pipeDraftFromConfig, pipeLine, riggingCatalog, selectableTypes,
@@ -182,11 +189,49 @@ function pricingChecks(ok: Ok) {
   ok(next.run === "50" && next.label === "Typed", "#373 curtain: untouched fields follow; typed ones stay");
 }
 
+function readerChecks(ok: Ok) {
+  const res = pipeLine({ typeId: "sch40", runFt: 40, qty: 1 }, PIPE, CAT, 0.5);
+  if (!res.ok) { ok(false, "#373 readers: fixture line"); return; }
+  const line = { ...res.item, id: 1 } as SpecItem;
+  const sec = { id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [line] } as unknown as SpecSection;
+
+  const moved = repriceForTier([sec], 0.5, 0.25);
+  const it = moved.sections[0].items[0];
+  ok(moved.repriced === 1 && it.price === 337.5, "#373 tier re-price: the line moves to the new seed");
+  ok(it.components!.find((c) => c.sku === "P21")?.price === 125, "#373 tier re-price: its parts follow");
+
+  const copied = copySectionForTarget(sec, { newSectionId: "n", catalog: new Map([["P21", { sku: "P21", cost: 110, list: 0 }]]), fixtures: new Map(), sourceTierMargin: 0.5, targetTierMargin: 0.5 });
+  const c = copied.section.items[0];
+  ok(c.cost === 290 && c.components!.find((x) => x.sku === "P21")?.cost === 110, "#373 Copy system: parts take today's cost, not a fixture refresh");
+  ok(c.price === 435 && c.rigging?.kind === "pipe", "#373 Copy system: sell follows the seed and the config travels");
+
+  ok(!isAssemblyLine(line) && primaryMemberSku(line) === null, "#373 members: not an assembly line (no photo or paragraph alias)");
+  ok(expandLine(line)?.length === 3, "#373 members: still expands for datasheets");
+  ok(discountSkuOf(line) === "", "#373 discounts: the line itself isn't discountable");
+  const disc = applyProjectDiscounts([sec], { P21: { pct: 10, note: "", by: "t", at: 1 } })[0].items[0];
+  ok(disc.price === line.price && disc.cost === 250 && disc.components!.find((x) => x.sku === "P21")?.projectDiscountPct === 10, "#373 discounts: its parts discount inside it; sell never moves");
+  ok(!bomModelEligible({ ...line, components: [] }), "#373 BOM models: never prints a model, even with no parts");
+  ok(!isCustomLineEditable({ ...line, custom: true }), "#373 custom: never a custom line");
+
+  // A track line takes the same paths as before: nothing here may move it.
+  const { rigging: _r, ...plain } = line;
+  void _r;
+  const track = { ...plain, sku: "TRK-A", track: { seriesId: "a" } } as unknown as SpecItem;
+  const trackSec = { ...sec, items: [track] };
+  const t2 = repriceForTier([trackSec], 0.5, 0.25).sections[0].items[0];
+  ok(t2.price === 337.5 && t2.components!.find((c) => c.sku === "P21")?.price === 125, "#373 regression: a track line re-prices as before");
+  const t3 = copySectionForTarget(trackSec, { newSectionId: "n", catalog: new Map([["P21", { sku: "P21", cost: 110, list: 0 }]]), fixtures: new Map(), sourceTierMargin: 0.5, targetTierMargin: 0.5 }).section.items[0];
+  ok(t3.cost === 290 && t3.price === 435, "#373 regression: a track line copies as before");
+  ok(!isAssemblyLine(track) && expandLine(track)?.length === 3 && discountSkuOf(track) === "" && !bomModelEligible({ ...track, components: [] }), "#373 regression: a track line reads as before");
+  ok(!isCustomLineEditable({ ...track, custom: true }), "#373 regression: a track line is never a custom line");
+}
+
 export async function riggingConfigChecks(ok: Ok) {
   engineChecks(ok);
   typeChecks(ok);
   renameChecks(ok);
   pricingChecks(ok);
+  readerChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-rigging-config.ts")) {

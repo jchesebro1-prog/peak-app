@@ -127,7 +127,7 @@ export function discountSkuOf(it: SpecItem): string {
   if (!it || typeof it !== "object") return "";
   if (it.custom || it.vendorQuoteId || it.allowance || it.curtain || it.labor || it.laborOverhead || it.laborTravel) return "";
   if (isBonusItem(it) || isRewardCreditItem(it)) return "";
-  if ((Array.isArray(it.components) && it.components.length) || it.rackId || it.track || it.fixture) return "";
+  if ((Array.isArray(it.components) && it.components.length) || it.rackId || it.track || it.rigging || it.fixture) return "";
   return realSku(it.sku);
 }
 
