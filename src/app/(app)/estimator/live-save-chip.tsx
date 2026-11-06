@@ -19,7 +19,7 @@ export function LiveSaveChip({ live, hasId = true }: { live: LiveSaveApi; hasId?
         type="button"
         data-testid="live-save-chip"
         data-status={status}
-        title={fresh ? LIVE_COPY.notSavedYetHint : (refusal ?? undefined)}
+        title={fresh ? LIVE_COPY.notSavedYetHint : status === "failed" ? LIVE_COPY.saveFailedHint : (refusal ?? undefined)}
         disabled={!clickable}
         onClick={() => (status === "failed" ? live.retryNow() : void live.flush())}
         style={{

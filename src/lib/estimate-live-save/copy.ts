@@ -9,6 +9,7 @@ export const LIVE_COPY = {
   keepMineHint: "Keep mine replaces what was saved elsewhere with this window's version.",
   historyEmpty: "Nothing to undo",
   redoEmpty: "Nothing to redo",
+  saveFailedHint: "That save did not go through — nothing was written. Check your connection, or remove a large vendor-quote attachment, and it will try again.",
   notSavedYet: "Not saved yet",
   notSavedYetHint: "A new estimate saves itself when you add its first line.",
 };

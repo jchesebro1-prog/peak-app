@@ -26897,9 +26897,9 @@ async function quotePdfT4Fix222AsyncChecks(): Promise<void> {
       const sentQ = await q222Get(sid);
       const sentRev = latestSentRevision(sentQ?.revisions);
       ok(!!sentRev && !sentRev.pdfBlobPath, "#222 T4 fix: a send over a stale PDF copies nothing onto the sent revision");
-      ok(!!sentQ && portalPdfSource(sentQ) === null && portalPdfPreparing222t4(sentQ), "#222 T4 fix: the portal says 'being prepared' instead of serving the pre-edit file");
+      ok(!!sentQ && portalPdfSource(sentQ) === null && sentQ.pdf?.status === "pending" && sentQ.pdf.stale === true, "#222 T4 fix: the portal serves no pre-edit file, and the cut marked the PDF stale so a render is owed (live-save: setStatus schedules it)");
       const plan = pdfRetryPlan222t4(sentQ ?? {}, Date.now());
-      ok("savedAt" in plan && plan.savedAt === sentQ?.contentChangedAt, "#222 T4 fix: Retry renders as the content change's save");
+      ok("savedAt" in plan && plan.savedAt >= (sentQ?.contentChangedAt ?? 0), "#222 T4 fix: Retry renders as at least the content change's save");
       if ("savedAt" in plan) {
         await q222UpdatePdf(sid, (cur) => pendingPdf(cur, plan.savedAt, Date.now()));
         await generateQuotePdf({ quoteId: sid, savedAt: plan.savedAt, origin, secret, render: fake("after-edit") });

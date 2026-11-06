@@ -13038,4 +13038,8 @@ Jeff, Nov 6: "Can we make it so estimator lines live save when editing? And then
 - On production, edit a real draft, Undo a deleted system, and open the same estimate in two windows.
 - Open: `persistMeta` and pipeline changes still write during an open conflict (they aren't contested fields). Should they pause too?
 - Open: the phone view has no chip or banner (it keeps the PDF pane's Save); a conflict there shows no banner.
+- Known edge: if a customer pick's header save fails (the error is shown), the next live save can stamp the stored customer's tier on lines priced for the new pick.
+- Known edge: after load-time rounding or freight, the chip can read Saved ✓ while the preview offers Save, until the first edit.
+- Known edge: an old tab open across the deploy saves with no check and can overwrite a live-saved spec.
+- Send now schedules a render when the cut finds a stale PDF (see D1344); outside a request the file is only marked stale and Send & track or Customer review renders it.
 

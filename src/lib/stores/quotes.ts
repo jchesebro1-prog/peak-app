@@ -30,7 +30,7 @@ import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
-import { canHavePdf, latestSentRevision, nextSendRevNo, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
+import { canHavePdf, latestSentRevision, nextSendRevNo, pdfIsCurrent, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
 import { isReopen, reopenTarget, REOPEN_AUTOSAVE_NOTE, sameWonContent, tracksWonVersion, WON_SNAPSHOT_NOTE, wonRevision } from "@/lib/quote-won-version";
 import { SHARE_DEFAULT_TTL_MS, newShareNonce } from "@/lib/quote-share/token";
 import { nextOpens, type ShareOpens } from "@/lib/estimate-output/opens";
@@ -2465,6 +2465,14 @@ export async function setStatus(
   // the stamp, though swallowed here, leaves the outer Postgres transaction
   // aborted, so the caller's next statement fails instead of committing.
   if (out && sentCut.value) await copySentPdfSafely(id);
+  // A live save stamps contentChangedAt without rendering, so the cut can find a stale file that the copy above
+  // refuses. Nothing else would render it (the customer link would say "No PDF is available for this version"), so
+  // schedule it like a revise does; the generator's own settle then copies the render onto the sent revision
+  // (copySentRevisionPdf / revisionCopyPlan: a post-send file with nothing changed since the cut and the stamped Rev).
+  // scheduleQuotePdf returns at once for a quote type with no PDF.
+  // A render already in flight (pending and not marked stale) is left alone: rescheduling would supersede its savedAt.
+  const inFlight = out?.pdf?.status === "pending" && !out.pdf.stale;
+  if (out && sentCut.value && !inFlight && !pdfIsCurrent(out.pdf, out.contentChangedAt)) await scheduleRevisePdfSafely(id);
   // #352 review I1: every revise (the Estimator's status menu, the Quotes hub, a stage move, a bid addendum, a
   // portal refresh) re-renders the PDF, so Send waits for a file that prints the next Rev — a resend with no edits
   // can never carry the previous send's file. Outside a request it is only marked stale (Send still waits).

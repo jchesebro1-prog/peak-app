@@ -172,6 +172,7 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(/if \(!live\) refresh\(\);/.test(saveSrc), "action: a live save skips the whole-layout refresh");
   ok(/if \(q && !live\) \{\s*const decision = resolveSaveStatusChange/.test(saveSrc), "action: a live save never acts on status");
   ok(saveSrc.includes("lastSavedBy"), "action: a save stamps who saved");
+  ok(saveSrc.includes("{ ...writePatch, vendorQuotes: storedVendorQuotes, lastSavedBy"), "action: vendorQuotes and lastSavedBy are re-added after the live patch is limited");
   ok(/live && prior \? prior\.customerId \|\| null : payload\.customerId \|\| null, loadedId/.test(saveSrc), "action: rewards credit reads the stored customer on a live save");
   ok(/live && prior\s*\? await resolveTier\(prior\.customerId/.test(saveSrc), "action: a live save's tier reads the stored customer");
   ok(/live && loadedId \? \(limitToLivePatch\(patch\)/.test(saveSrc), "action: the patch is limited on live && loadedId");
@@ -275,6 +276,7 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(stateSrc2.includes("e === STATUS_EDITS_UNSAVED || e === SAVE_NOT_WRITTEN") && stateSrc2.includes("setActionError(res.error || SAVE_NOT_WRITTEN)"), "banner: a landed live save clears the failed manual save sentence");
   const chipSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/live-save-chip.tsx"), "utf8");
   ok(chipSrc.includes('role="status"') && chipSrc.includes("data-testid=\"live-save-refusal\"") && chipSrc.includes('aria-live="polite"'), "chip: a refusal shows as visible status text inside a polite live region");
+  ok(chipSrc.includes('status === "failed" ? LIVE_COPY.saveFailedHint') && LIVE_COPY.saveFailedHint.includes("remove a large vendor-quote attachment"), "chip: a failed auto save carries the reason in its title");
   ok(chipSrc.includes("LIVE_COPY.notSavedYet") && chipSrc.includes("!hasId && status === \"saved\""), "chip: a new empty estimate reads Not saved yet, disabled");
   ok(LIVE_COPY.notSavedYet === "Not saved yet" && LIVE_COPY.notSavedYetHint === "A new estimate saves itself when you add its first line.", "copy: the new-estimate chip words");
   ok((chipSrc.match(/className="pk-btn-outline"/g) ?? []).length === 2, "banner: Reload and Keep mine use pk-btn classes");
@@ -356,6 +358,17 @@ export async function liveSaveDbChecks(ok: Ok) {
     await update(id, { quoteNote: "header" } as never);
     ok(liveKey((await get(id))!) === liveKey(fresh!), "checked write: a header autosave does not move the key");
     ok((await get(id))!.updatedAt >= bumpedBefore, "checked write: sanity — header writes still bump updatedAt");
+    // Cutting a sent revision over a stale PDF (a live save moved contentChangedAt past pdf.savedAt) schedules a render.
+    // Outside a request the schedule only marks the file stale (pending for a newer save), which is what we observe.
+    const { updateQuotePdf, setStatus } = await import("../src/lib/stores/quotes");
+    await updateQuotePdf(id, () => ({ status: "ready", at: 1000, savedAt: 1000, blobPath: "x/old.pdf" }) as never);
+    await update(id, { spec: { sections: [{ id: "A", name: "C", items: [] }] } } as never);
+    const before = (await get(id))!;
+    ok((before.contentChangedAt ?? 0) > (before.pdf?.savedAt ?? 0), "send: fixture PDF is behind the content");
+    await setStatus(id, "sent", "Tester", { bypassApprovalGate: "engine-owned-flow" } as never);
+    const after = (await get(id))!;
+    ok(after.status === "sent" && after.pdf?.status === "pending" && (after.pdf?.savedAt ?? 0) > 1000, "send: a stale PDF at the cut is scheduled for a render");
+    await setStatus(id, "draft", "Tester", { bypassApprovalGate: "engine-owned-flow" } as never);
   } finally {
     const { remove } = await import("../src/lib/stores/quotes");
     await remove(id);
