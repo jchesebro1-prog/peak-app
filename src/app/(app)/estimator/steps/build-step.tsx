@@ -24,6 +24,7 @@ import AddSystemModal from "../add-system-modal";
 import LaborModal from "../labor-modal";
 import TrackModal from "../track-modal";
 import PipeModal from "../pipe-modal";
+import LinesetModal from "../lineset-modal";
 import VendorQuoteModal from "../vendor-quote-modal";
 import { ReadPdfButton, VendorPdfPanel } from "../vendor-pdf-panel";
 import { vendorPdfLineHints } from "@/lib/vendor-pdf/fill";
@@ -84,6 +85,13 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     pipeSec,
     pipeTypes,
     riggingCat,
+    addLineset,
+    linesetDraft,
+    setLinesetDraft,
+    linesetEdit,
+    linesetFor,
+    linesetSec,
+    linesetTypes,
     addVendorLine,
     aiAdded,
     aiBusy,
@@ -113,6 +121,9 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     curtainSec,
     curtainSewingPct,
     curtainTrack,
+    curtainPipe,
+    setCurtainPipe,
+    toggleCurtainPipe,
     customDraft,
     customEdit,
     customError,
@@ -807,6 +818,11 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           trackParts={trackParts}
           onToggleTrack={toggleCurtainTrack}
           onSetTrack={(field, val) => setCurtainTrack((t) => (t ? { ...t, [field]: val } : t))}
+          pipe={curtainPipe}
+          pipeTypes={pipeTypes}
+          riggingCat={riggingCat}
+          onTogglePipe={toggleCurtainPipe}
+          onSetPipe={(field, val) => setCurtainPipe((p) => (p ? { ...p, [field]: val } : p))}
         />
       )}
       {trackFor && (
@@ -835,6 +851,21 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           readOnly={pipeEdit?.readOnly ?? null}
           onSet={(field, val) => setPipeDraft((d) => ({ ...d, [field]: val }))}
           onAdd={() => addPipe(pipeFor)}
+          onClose={closeInput}
+          confirmClose={confirmDiscardInput}
+        />
+      )}
+      {linesetFor && (
+        <LinesetModal
+          secName={linesetSec ? linesetSec.name : ""}
+          draft={linesetDraft}
+          types={linesetTypes}
+          catalog={riggingCat}
+          margin={tierMargin}
+          editing={!!linesetEdit}
+          readOnly={linesetEdit?.readOnly ?? null}
+          onSet={(field, val) => setLinesetDraft((d) => ({ ...d, [field]: val }))}
+          onAdd={() => addLineset(linesetFor)}
           onClose={closeInput}
           confirmClose={confirmDiscardInput}
         />

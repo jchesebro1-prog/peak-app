@@ -56,7 +56,7 @@ import { parseMoney, type ImportedMaterial } from "./material-csv";
 import { partsListSkus, reviewSheetModel, type PartInfo } from "./parts-csv";
 import { downloadReviewSheet } from "./review-sheet-xlsx";
 import { fileStem } from "../design/export";
-import { freshLinesetDraft, freshPipeDraft, linesetConfigFromDraft, linesetDraftFromConfig, linesetLine, pipeConfigFromDraft, pipeDraftFromConfig, pipeLine, riggingCatalog } from "./rigging-bom";
+import { curtainPipeDraft, curtainPipePrefill, followCurtainPipePrefill, freshLinesetDraft, freshPipeDraft, linesetConfigFromDraft, linesetDraftFromConfig, linesetLine, pipeConfigFromDraft, pipeDraftFromConfig, pipeLine, riggingCatalog, type CurtainPipePrefill } from "./rigging-bom";
 import { curtainTrackDraft, curtainTrackPrefill, followCurtainPrefill, freshTrackDraft, replaceTrackLine, trackConfigFromDraft, trackDraftFromConfig, trackLine, type CurtainTrackPrefill } from "./track-bom";
 import { customDraftFromLine, isCustomLineEditable, costUntouched, saveCustomEdit, sellUntouched } from "./custom-part-edit";
 import { applyCurtainEdit, curtainDraftFromLine, curtainDraftValid, curtainItem } from "./curtain-line";
@@ -738,6 +738,9 @@ export function useEstimatorState(props: EstimatorProps) {
      it last took from the curtain, so untouched fields follow the curtain. */
   const [curtainTrack, setCurtainTrack] = useState<TrackDraft | null>(null);
   const curtainTrackPrefillRef = useRef<CurtainTrackPrefill>({ operation: "oneway", run: "", label: "" });
+  /* #373: the curtain modal's Add pipe form (null = off), new curtains only. */
+  const [curtainPipe, setCurtainPipe] = useState<PipeDraft | null>(null);
+  const curtainPipePrefillRef = useRef<CurtainPipePrefill>({ run: "", qty: "1", label: "" });
   /* #210: the position/circuit values last auto-filled from a fixture's
      defaults, so switching the assembly can tell "still what we prefilled"
      apart from "the user typed something" and never clobber the latter. */
@@ -809,14 +812,14 @@ export function useEstimatorState(props: EstimatorProps) {
   const [laborDraft, setLaborDraft] = useState<LaborDraft>(() =>
     freshLabor(null, initial.tierMargin, (initial.sections ?? freshSections(initialFreightDefault.pct))[0]?.name || "")
   );
-  /* #348 follow-up (Jeff 2026-10-15): the five configurator pop-ups ask before a stray click discards unsaved work.
+  /* #348 follow-up (Jeff 2026-10-15): the configurator pop-ups ask before a stray click discards unsaved work.
      ONE helper, markDraftBaseline, marks an open's baseline pending wherever its draft is (re)initialized — every open
      through openInputMethod (fresh, an edit's seed, the hand-off's blank seed), and the labor travel reseed; the effect
      below snapshots the COMMITTED draft (so a seed set in the same click is in it). The hand-off's fill re-bases the
      stored baseline instead (rebaseDraft). confirmDiscardInput compares at close; Add / Save never asks. */
   const modalDrafts = useMemo<Record<ModalInputKind, unknown>>(
-    () => ({ curtain: { draft: curtainDraft, track: curtainTrack }, track: trackDraft, pipe: pipeDraft, lineset: linesetDraft, fixture: fixtureDraft, labor: laborDraft, vendor: vendorDraft }),
-    [curtainDraft, curtainTrack, trackDraft, pipeDraft, linesetDraft, fixtureDraft, laborDraft, vendorDraft]
+    () => ({ curtain: { draft: curtainDraft, track: curtainTrack, pipe: curtainPipe }, track: trackDraft, pipe: pipeDraft, lineset: linesetDraft, fixture: fixtureDraft, labor: laborDraft, vendor: vendorDraft }),
+    [curtainDraft, curtainTrack, curtainPipe, trackDraft, pipeDraft, linesetDraft, fixtureDraft, laborDraft, vendorDraft]
   );
   /** Per pop-up: the clean draft's stableDraftJson, or null while pending (snapshotted after the next commit). */
   const draftBaselineRef = useRef<Partial<Record<ModalInputKind, string | null>>>({});
@@ -2605,6 +2608,7 @@ export function useEstimatorState(props: EstimatorProps) {
     } else if (kind === "curtain") {
       setCurtainDraft(freshCurtain(defaultFabric));
       setCurtainTrack(null);
+      setCurtainPipe(null);
       curtainEditRef.current = null;
       setCurtainEdit(null);
     } else if (kind === "track") {
@@ -2653,6 +2657,7 @@ export function useEstimatorState(props: EstimatorProps) {
       setCurtainEdit(edit ? { lineId: edit.lineId, linkedTrack: edit.linkedTrack } : null);
       setCurtainDraft(edit ? edit.draft : freshCurtain(defaultFabric));
       setCurtainTrack(null);
+      setCurtainPipe(null);
     } else if (kind === "track") {
       /* #274: reopened from a track line — its stored config, consumed and
          CLEARED here so it applies to exactly one open (as labor, #269). */
@@ -2985,6 +2990,12 @@ export function useEstimatorState(props: EstimatorProps) {
   const setCurtainField = (field: keyof CurtainDraft, val: string) => {
     const next = { ...curtainDraft, [field]: val };
     setCurtainDraft(next);
+    if (curtainPipe) {
+      const pre = curtainPipePrefill(next);
+      const prev = curtainPipePrefillRef.current;
+      setCurtainPipe((p) => (p ? followCurtainPipePrefill(p, prev, pre) : p));
+      curtainPipePrefillRef.current = pre;
+    }
     if (!curtainTrack) return;
     const pre = curtainTrackPrefill(next);
     // Captured now: the updater runs later, after the ref has moved on.
@@ -2996,6 +3007,11 @@ export function useEstimatorState(props: EstimatorProps) {
     if (!on) return setCurtainTrack(null);
     curtainTrackPrefillRef.current = curtainTrackPrefill(curtainDraft);
     setCurtainTrack(curtainTrackDraft(curtainDraft, trackSeries));
+  };
+  const toggleCurtainPipe = (on: boolean) => {
+    if (!on) return setCurtainPipe(null);
+    curtainPipePrefillRef.current = curtainPipePrefill(curtainDraft);
+    setCurtainPipe(curtainPipeDraft(curtainDraft, pipeTypes));
   };
 
   /** #302 — one field of the Custom part form. Unit sell follows Unit cost at
@@ -3347,6 +3363,14 @@ export function useEstimatorState(props: EstimatorProps) {
       if (!res.ok) return;
       track = { ...res.item, id: 0 };
     }
+    // #373: Add pipe — an ordinary line beside the curtain, no link. New curtains only; a bad pipe blocks the add.
+    let pipe: SpecItem | null = null;
+    if (curtainPipe && !curtainEdit) {
+      const config = pipeConfigFromDraft(curtainPipe);
+      const res = pipeLine(config, pipeTypes.find((t) => t.id === config.typeId), riggingCat, tierMargin);
+      if (!res.ok) return;
+      pipe = { ...res.item, id: 0 };
+    }
     if (curtainEdit) {
       if (track) track.id = nextId();
       const item = curtainItem(d, c, { id: curtainEdit.lineId, sku: "" });
@@ -3360,6 +3384,7 @@ export function useEstimatorState(props: EstimatorProps) {
     // #292: a curtain added with its track shares one key with it.
     const key = track ? newCurtainTrackKey(idN) : undefined;
     if (track) track.curtainTrackKey = key;
+    if (pipe) pipe.id = nextId();
     pushItems(secId, [
       {
         ...curtainItem(d, c, { id: idN, sku: "CRT-" + skuN, trackKey: key }),
@@ -3367,6 +3392,7 @@ export function useEstimatorState(props: EstimatorProps) {
         specKey: curtainSpecKey(undefined, name) || undefined,
       },
       ...(track ? [track] : []),
+      ...(pipe ? [pipe] : []),
     ]);
     closeInput();
   };
@@ -3903,6 +3929,9 @@ export function useEstimatorState(props: EstimatorProps) {
     titleEditing,
     toggleAssumption,
     toggleCurtainTrack,
+    toggleCurtainPipe,
+    curtainPipe,
+    setCurtainPipe,
     toggleExpand,
     toggleKeyProductLine,
     toggleMobFlag,
