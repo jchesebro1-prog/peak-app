@@ -8,6 +8,7 @@ import { liveSaveHookChecks } from "./test-estimate-live-save-hook";
 import { canAutoSave, DEBOUNCE_MS, flushLanded, INITIAL_LIVE_STATE, liveStatusOf, reduceLive, reportedLiveStatus, retryDelayMs, type LiveGate } from "../src/lib/estimate-live-save/scheduler";
 import { chipLabel, conflictMessage, LIVE_COPY } from "../src/lib/estimate-live-save/copy";
 import { liveKey } from "../src/lib/estimate-live-save/live-key";
+import { portalPdfPreparing, portalPdfUnavailable, type QuotePdfState } from "../src/lib/quote-pdf/state";
 import { limitToLivePatch, liveSaveEligible, liveSaveRefusal, saveAdoptsStatus, saveGoesLive } from "../src/lib/estimate-live-save/rules";
 import { COALESCE_MS, diffEdit, emptyUndoHistory, mapSnapshots, recordEdit, takeRedo, takeUndo, UNDO_CAP, type UndoSnap } from "../src/lib/estimate-live-save/undo";
 
@@ -18,6 +19,7 @@ const sec = (id: string, items: SpecItem[], extra: Partial<SpecSection> = {}): S
 const snap = (sections: SpecSection[]): UndoSnap => ({ sections, groups: [], vendorQuotes: [] });
 
 export async function liveSavePureChecks(ok: Ok) {
+  livePdfPreparingChecks(ok);
   // diffEdit labels
   const a = snap([sec("A", [line(1), line(2)])]);
   ok(diffEdit(a, a) === null, "undo: no change is no step");
@@ -318,6 +320,20 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(/beforeLeave: \(\) => \{\s*(\/\/[^\n]*\n\s*)*packageDocFlushRef\.current\?\.\(\);/.test(leaveSrc) && /editProbeRef\.current\.packageDoc/.test(leaveSrc) && /packageDocRef\.current/.test(leaveSrc), "M5: leaving flushes the editor and compares what it held against the last edit seen");
   // Pins weakened by Task 5
   ok((hookSrc.match(/\? setSectionsState : setSections/g) || []).length === 1, "pin: exactly one raw-writer alias outside the setSectionsState( count (a live save's Rewards clamp)");
+}
+
+/** #376: a customer opening the link while the render owed by a send over a stale file runs is told it's being prepared. */
+export function livePdfPreparingChecks(ok: Ok) {
+  const now = 1_000_000;
+  const rev = { rev: 1, at: now - 5_000, reason: "sent" as const };
+  const pending = { status: "pending", savedAt: now - 1_000, at: now - 1_000 } as unknown as QuotePdfState;
+  const live = { revisions: [rev], pdf: pending, contentChangedAt: now - 6_000 };
+  ok(portalPdfPreparing(live, now) && !portalPdfUnavailable(live, now), "send over a stale file: the render after the cut reads as being prepared");
+  ok(!portalPdfPreparing({ ...live, contentChangedAt: now - 1_000 }, now), "an edit after the send is not being prepared: that render never lands on this revision");
+  ok(!portalPdfPreparing({ revisions: [rev], pdf: pending }, now), "no content stamp is not being prepared");
+  const marked = { ...pending, stale: true } as QuotePdfState;
+  ok(!portalPdfPreparing({ ...live, pdf: marked }, now), "a stale mark with no render behind it is not being prepared");
+  ok(!portalPdfPreparing({ ...live, revisions: [{ ...rev, pdfBlobPath: "copy" }] }, now), "a revision holding its copy is simply available");
 }
 
 export async function liveSaveDbChecks(ok: Ok) {

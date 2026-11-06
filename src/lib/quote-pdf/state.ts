@@ -259,7 +259,7 @@ export function pdfIsCurrent(pdf: QuotePdfState | null | undefined, contentChang
   return !!pdf && pdf.status === "ready" && !!pdf.blobPath && pdf.savedAt >= (contentChangedAt ?? 0);
 }
 
-type PdfSourceFields = { pdf?: QuotePdfState | null; revisions?: RevisionPdfFields[] | null };
+type PdfSourceFields = { pdf?: QuotePdfState | null; revisions?: RevisionPdfFields[] | null; contentChangedAt?: number | null };
 
 /**
  * What a customer may open (#222 fix wave 1). Once a quote has been sent, only
@@ -290,8 +290,12 @@ export function portalPdfSource(q: PdfSourceFields): { path: string; rev: number
  */
 export function portalPdfPreparing(q: PdfSourceFields, now: number = Date.now()): boolean {
   const sent = latestSentRevision(q.revisions);
-  if (!sent || sent.pdfBlobPath || !q.pdf || !revisionAwaitingPdf(sent, q.pdf.savedAt)) return false;
-  return pdfView(q.pdf, now)?.status !== "failed";
+  if (!sent || sent.pdfBlobPath || !q.pdf) return false;
+  const status = pdfView(q.pdf, now)?.status;
+  if (revisionAwaitingPdf(sent, q.pdf.savedAt)) return status !== "failed";
+  // #376: a live-saved draft sent over a stale file renders right after the cut, so the file's save is past the send.
+  // Nothing printed changed since the cut, so that render lands as this revision's copy.
+  return status === "pending" && typeof q.contentChangedAt === "number" && q.contentChangedAt <= sent.at;
 }
 
 /** A sent quote whose sent copy is missing and never coming — "No PDF is available for this version". */
